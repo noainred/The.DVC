@@ -23,9 +23,46 @@ export const STORAGE_EXTRA_DISPLAY_KEYS = Object.freeze([
   'healthState', 'clusterHealth', 'alertsNote', 'capacityBasisNote', 'versionRaw', 'versionSource', 'modelSource',
   'collectMethod', 'dataReduction', 'storageEfficiency',
 ]);
+/**
+ * v2.680(감사 F-06): 소비 전력 결과(`extra.power`·`powerProbe`)를 아는 필드로 좁히고 시각을 수신 시각 이하로 자른다.
+ *   엣지 시계가 앞서 있으면 마지막 전력값이 6시간 신선도 경계를 지나서도 전체 소비 전력 합에 남았다. 객체가 아니면 지운다.
+ */
+export function narrowStoragePower(ex, now = Date.now()) {
+  let narrowed = 0;
+  const atOf = (v) => { const a = numOrNull(v); return a == null ? null : Math.min(a, now); };
+  if (Object.hasOwn(ex, 'power') && ex.power != null) {
+    const p = ex.power;
+    const w = isPlainObj(p) ? numOrNull(p.watts) : null;
+    if (w == null || w < 0) { ex.power = null; narrowed += 1; } else {
+      ex.power = {
+        watts: w, source: capStr(p.source, 200), basis: capStr(p.basis, 32), scope: capStr(p.scope, 32), at: atOf(p.at),
+        ...(numOrNull(p.parts) != null ? { parts: numOrNull(p.parts) } : {}),
+        ...(Array.isArray(p.keys) ? { keys: p.keys.slice(0, 8).map((k) => capStr(k, 80)) } : {}),
+      };
+    }
+  }
+  if (Object.hasOwn(ex, 'powerProbe') && ex.powerProbe != null) {
+    const q = ex.powerProbe;
+    if (!isPlainObj(q)) { ex.powerProbe = null; narrowed += 1; } else {
+      ex.powerProbe = {
+        tried: q.tried === true, reason: capStr(q.reason, 32), source: capStr(q.source, 200), at: atOf(q.at),
+        ...(q.detail != null ? { detail: capStr(q.detail, 200) } : {}),
+        ...(Array.isArray(q.seenKeys) ? { seenKeys: q.seenKeys.slice(0, 40).map((k) => capStr(k, 60)) } : {}),
+      };
+    }
+  }
+  return narrowed;
+}
+
 export function narrowStorageSnapshot(d) {
   if (!isPlainObj(d) || !Object.hasOwn(d, 'extra') || d.extra == null) return { snap: d, narrowed: 0 };
   if (!isPlainObj(d.extra)) return { snap: { ...d, extra: null }, narrowed: 1 };
+  if (d.extra.power != null || d.extra.powerProbe != null) {
+    const exP = { ...d.extra };
+    const np = narrowStoragePower(exP);
+    d = { ...d, extra: exP };
+    if (np) { const r = narrowStorageSnapshot(d); return { snap: r.snap, narrowed: r.narrowed + np }; }
+  }
   // v2.607(감사 CEN2607-02 — 재현): 화면이 글자로 그리는 extra 필드(헬스 배지·경보 문구·용량 기준 설명·버전 원문)가
   //   객체면 null 로. 예전에는 `extra.alertsNote:{a:1}` 가 그대로 저장돼 상세 모달이 React #31 로 죽었다.
   const ex0 = { ...d.extra };

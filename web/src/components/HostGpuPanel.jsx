@@ -6,7 +6,7 @@ import { UsageCell } from './primitives.jsx';
 import { STable } from './STable.jsx';
 import BoldText from './boldText.jsx';
 import {
-  activityOf, memText, gbText, tempText, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary,
+  activityOf, memText, gbText, tempText, tempSubText, memSubText, memMainText, memPctSuffix, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary,
 } from '../views/tools/gpuUsageText.js';
 
 const GpuHistModal = React.lazy(() => import('../views/tools/GpuHistModal.jsx'));
@@ -52,11 +52,11 @@ export default function HostGpuPanel({ hostId, hostName }) {
         <Stat label="GPU 사용률" sub={d.utilSource === 'esxi' ? 'ESXi 성능 카운터' : d.utilSource === 'guest' ? '게스트 nvidia-smi 평균' : '미수집'}>
           {d.utilPct == null ? <span className="muted">—</span> : <UsageCell pct={d.utilPct} />}
         </Stat>
-        <Stat label="GPU 온도(가장 높은 GPU)" sub={d.tempC == null ? '게스트 수집값 없음' : '게스트 nvidia-smi'}>
+        <Stat label="GPU 온도(가장 높은 GPU)" sub={tempSubText(d)}>
           {d.tempC == null ? <span className="muted">—</span> : tempText(d.tempC)}
         </Stat>
-        <Stat label="GPU 메모리 사용" sub={d.memUsedMB == null ? '게스트 수집값 없음' : `켜진 VM ${d.memVms}대 합`}>
-          {d.memUsedMB == null ? <span className="muted">—</span> : <span>{memText(d.memUsedMB, d.memTotalMB)} <span className="muted" style={{ fontWeight: 400 }}>({d.memUsedPct}%)</span></span>}
+        <Stat label="GPU 메모리 사용" sub={memSubText(d)}>
+          {(d.memUsedMB == null && d.memUsedPct == null) ? <span className="muted">—</span> : <span>{memMainText(d.memUsedMB, d.memTotalMB, d.memUsedPct)}{memPctSuffix(d.memUsedMB, d.memTotalMB, d.memUsedPct) && <span className="muted" style={{ fontWeight: 400 }}>{memPctSuffix(d.memUsedMB, d.memTotalMB, d.memUsedPct)}</span>}</span>}
         </Stat>
         <Stat label="GPU 메모리 할당" sub={d.capacityGB != null ? `설치 용량 ${gbText(d.capacityGB)}${d.capacityEstimated ? '(모델명 추정)' : ''}` : '설치 용량 모름'}>
           <span style={{ fontSize: 13 }} title={allocTitle(d)}>{allocText(d)}</span>

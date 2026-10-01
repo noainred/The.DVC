@@ -50,7 +50,7 @@ export const isBad = (s) => s === 'fault' || s === 'warn';
 /** C1 — 같은 키 중복 관측의 우선순위(큰 쪽이 이긴다). */
 const RANK = Object.freeze({ fault: 4, warn: 3, unknown: 2, ok: 1, absent: 0 });
 /** 수집이 '읽었다' 고 볼 telemetry 값 — 빈 값은 구버전 행(모름)이라 읽은 것으로 본다(없는 실패를 만들지 않는다). */
-const TELEMETRY_OK = new Set(['ok', 'budget-partial', '']);
+export const TELEMETRY_OK = new Set(['ok', 'budget-partial', '']);
 const DEFAULT_INTERVAL_MS = 5 * 60_000;
 const STALE_FACTOR = 3;
 
@@ -61,6 +61,28 @@ export const devIdOf = (x) => `${t(x?.agent)}|${t(x?.cvpId)}|${t(x?.deviceKey ??
 export function staleAfterMs(intervalMs) {
   const iv = numOrNull(intervalMs);
   return (iv != null && iv > 0 ? iv : DEFAULT_INTERVAL_MS) * STALE_FACTOR;
+}
+
+/** 부품 조회 기본 주기(poller.js CVP_PARTS_EVERY_MS 기본값과 같다). */
+export const PARTS_EVERY_DEFAULT_MS = 30 * 60_000;
+/** 실제로 쓰는 부품 조회 주기(env CVP_PARTS_EVERY_MS, 하한 5분 — 빈 값·0 은 기본값). poller 와 판정이 같은 값을 쓴다. */
+export const PARTS_EVERY_MS = (() => {
+  const v = numOrNull(process.env.CVP_PARTS_EVERY_MS);
+  return v != null && v > 0 ? Math.min(2_147_483_647, Math.max(5 * 60_000, v)) : PARTS_EVERY_DEFAULT_MS;
+})();
+/**
+ * v2.680(감사 B-02): 부품 목록의 신선도 경계 — 부품은 긴 주기로만 읽고, 조회가 실패한 주기에는 DB 가 직전 목록을 유지한다.
+ * 그 목록을 '이번 주기 관측' 으로 쓰면 며칠 전 PSU 상태가 지금 상태로 기록된다(v2.548 C2/H3 거짓 신선). 주기×3 + 장비 경계.
+ */
+export function partsStaleAfterMs(intervalMs, partsEveryMs = PARTS_EVERY_MS) {
+  const pe = numOrNull(partsEveryMs);
+  return (pe != null && pe > 0 ? pe : PARTS_EVERY_MS) * 3 + staleAfterMs(intervalMs);
+}
+/** 부품 목록이 지금 값으로 쓸 수 있는가 — partsAt 이 없으면(구버전 행) 판정하지 않는다(예전 동작). */
+export function partsFresh(dev, { intervalMs, partsEveryMs, now = Date.now() } = {}) {
+  const pa = numOrNull(dev?.partsAt);
+  if (pa == null) return true;
+  return now - pa <= partsStaleAfterMs(intervalMs, partsEveryMs);
 }
 
 function portObservation(p) {
@@ -111,7 +133,7 @@ function partObservation(p) {
  * @param {{intervalMs?:number, now?:number}} o
  * @returns {{deviceOk:boolean, deviceReason:string|null, kindsFailed:string[], observed:object[], duplicateObserved:number}}
  */
-export function observeDevice(dev, { intervalMs, now = Date.now() } = {}) {
+export function observeDevice(dev, { intervalMs, partsEveryMs, now = Date.now() } = {}) {
   const at = numOrNull(dev?.collectedAt);
   const telemetry = t(dev?.telemetry).toLowerCase();
   let deviceOk = true; let deviceReason = null;
@@ -120,7 +142,7 @@ export function observeDevice(dev, { intervalMs, now = Date.now() } = {}) {
   else if (!TELEMETRY_OK.has(telemetry)) { deviceOk = false; deviceReason = HOLD_REASON.deviceFailed; }
 
   const kindsFailed = [];
-  const partsList = Array.isArray(dev?.partsList) ? dev.partsList : null;
+  const partsList = Array.isArray(dev?.partsList) && partsFresh(dev, { intervalMs, partsEveryMs, now }) ? dev.partsList : null;
   if (!partsList) for (const k of PART_KINDS) kindsFailed.push(k);
   const ports = dev?.portsRead === true && Array.isArray(dev?.ports) ? dev.ports : null;
   if (!ports) kindsFailed.push('port');

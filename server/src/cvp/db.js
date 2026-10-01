@@ -444,7 +444,15 @@ const ADOPT_PK = {
   port_latest: ['cvp_id', 'device_key', 'port'],
   port_sample: ['cvp_id', 'device_key', 'port', 'ts'],
   port_daily: ['cvp_id', 'device_key', 'port', 'day'],
+  // v2.680(감사 F-01): v2.640/641 에 같은 agent 축으로 추가된 표도 옮긴다 — 빠지면 담당 엣지 표기가 대소문자만 바뀌었을 때
+  //   옛 이름의 열린 장애가 영구 보류되고(관측에 없다) 새 키로 다시 열려 알림이 한 번 더 나가며, 이벤트·CPU 추이가 두 벌이 된다.
+  device_sample: ['cvp_id', 'device_key', 'ts'],
+  cvp_event: ['cvp_id', 'ev_key', 'ts'],
+  cvp_fault_state: ['cvp_id', 'device_key', 'fault_key'],
+  cvp_fault_event: [], // PK 가 id 라 충돌이 없다 — agent 만 바꾼다
 };
+/** 최신 행 비교 열 — 변형 쪽이 더 새면 저장 키 행을 비우고 변형 행을 옮긴다. */
+const NEWER_COL = { device_latest: 'ts', port_latest: 'ts', cvp_fault_state: 'last_seen' };
 const IN_CHUNK = 'rowid IN (SELECT value FROM json_each(?))';
 function dailyMergeSql() {
   const mx = (c) => `${c}=NULLIF(MAX(IFNULL(port_daily.${c},-1e308), IFNULL(v.${c},-1e308)), -1e308)`;
@@ -458,8 +466,15 @@ function dailyMergeSql() {
 async function adoptTable(db, t, key, variant, chunkRows) {
   const pk = ADOPT_PK[t];
   const sel = db.conn.prepare(`SELECT rowid AS r FROM ${t} WHERE agent=? LIMIT ?`);
-  const newerVariant = t === 'device_latest' || t === 'port_latest'
-    ? db.conn.prepare(`DELETE FROM ${t} WHERE agent=? AND EXISTS (SELECT 1 FROM ${t} v WHERE v.${IN_CHUNK} AND v.agent=? AND ${pk.map((c) => `v.${c}=${t}.${c}`).join(' AND ')} AND v.ts > ${t}.ts)`)
+  const nc = NEWER_COL[t];
+  // 장애 상태는 어느 쪽이 남든 처음 본 시각은 더 이른 쪽이다(먼저 저장 키 행에 반영해 둔다).
+  const keepFirstSeen = t === 'cvp_fault_state'
+    ? db.conn.prepare(`UPDATE cvp_fault_state SET first_seen=MIN(cvp_fault_state.first_seen, v.first_seen)
+        FROM (SELECT * FROM cvp_fault_state WHERE ${IN_CHUNK}) AS v
+        WHERE cvp_fault_state.agent=? AND ${pk.map((c) => `cvp_fault_state.${c}=v.${c}`).join(' AND ')}`)
+    : null;
+  const newerVariant = nc
+    ? db.conn.prepare(`DELETE FROM ${t} WHERE agent=? AND EXISTS (SELECT 1 FROM ${t} v WHERE v.${IN_CHUNK} AND v.agent=? AND ${pk.map((c) => `v.${c}=${t}.${c}`).join(' AND ')} AND v.${nc} > ${t}.${nc})`)
     : null;
   const mergeDaily = t === 'port_daily' ? db.conn.prepare(dailyMergeSql()) : null;
   const move = db.conn.prepare(`UPDATE OR IGNORE ${t} SET agent=? WHERE agent=? AND ${IN_CHUNK}`);
@@ -471,6 +486,7 @@ async function adoptTable(db, t, key, variant, chunkRows) {
     const j = JSON.stringify(ids);
     db.conn.exec('BEGIN');
     try {
+      if (keepFirstSeen) keepFirstSeen.run(j, key);
       if (newerVariant) newerVariant.run(key, j, variant);          // 변형 쪽이 더 새 최신 행이면 저장 키 행을 비운다
       if (mergeDaily) merged += Number(mergeDaily.run(j, key).changes); // 같은 날 일 롤업은 합친다
       moved += Number(move.run(key, variant, j).changes);
@@ -504,7 +520,7 @@ export async function adoptAgentVariants(agentKey, { wait = false, chunkRows = A
     if (!job) {
       const lo = key.toLowerCase();
       const found = new Set();
-      for (const t of ['device_latest', 'port_latest']) {
+      for (const t of ['device_latest', 'port_latest', 'cvp_fault_state', 'cvp_event']) {
         for (const r of db.conn.prepare(`SELECT DISTINCT agent AS a FROM ${t} WHERE agent <> '' AND LOWER(TRIM(agent)) = ?`).all(lo)) if (r.a !== key) found.add(r.a);
       }
       if (!found.size) { _adopted.add(key); return { moved: 0, variants: [] }; }
@@ -545,9 +561,27 @@ export async function listDeviceRows({ agent = null, cvpId = null } = {}) {
   return { rows: rows.map((r) => rowToDevice(r, pmap.get(`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`))) };
 }
 
+/**
+ * v2.680(감사 E-04): parts_json·bgp_json 파싱 기억 — 장애 판정이 적재마다(디바운스 15초) 전 장비를 읽는데 부품 목록은
+ *   30분 주기로만 바뀐다(200대 × 부품 110개 = 호출당 68~101ms). 원문 문자열이 같을 때만 직전 파싱 결과를 재사용한다
+ *   (호출부는 목록을 제자리에서 바꾸지 않는다 — grep 확인). 상한을 넘으면 통째로 비운다(장비 수 규모라 드물다).
+ */
+const _parsedCache = new Map();
+const PARSED_CACHE_MAX = 4_000;
+function parseJsonCached(slot, raw) {
+  if (raw == null) return parseJson(raw);
+  const hit = _parsedCache.get(slot);
+  if (hit && hit.raw === raw) return hit.val;
+  const val = parseJson(raw);
+  if (_parsedCache.size >= PARSED_CACHE_MAX) _parsedCache.clear();
+  _parsedCache.set(slot, { raw, val });
+  return val;
+}
+
 function rowToDevice(r, portSum) {
-  const parts = parseJson(r.parts_json);
-  const bgp = parseJson(r.bgp_json);
+  const slot = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`;
+  const parts = parseJsonCached(`p\u0000${slot}`, r.parts_json);
+  const bgp = parseJsonCached(`b\u0000${slot}`, r.bgp_json);
   return {
     agent: r.agent, cvpId: r.cvp_id, key: r.device_key, collectedAt: Number(r.ts),
     hostname: r.hostname || '', model: r.model || '', serial: r.serial || '', mgmtIp: r.mgmt_ip || '', eosVersion: r.eos_version || '',
@@ -770,7 +804,7 @@ export async function markFaultNotified(items, { now = Date.now() } = {}) {
 }
 
 /** 최근 전이 이벤트(at DESC). limit 은 정수 [1, 5000](node:sqlite 는 소수를 REAL 로 바인딩한다 — v2.607 DB2607-04). */
-export async function recentFaultEvents({ sinceMs = 30 * 86_400_000, limit = 500, cvpId = null, agent = null } = {}) {
+export async function recentFaultEvents({ sinceMs = 30 * 86_400_000, limit = 500, cvpId = null, agent = null, deviceKey = null } = {}) {
   const db = await open();
   if (!db) return { rows: [], unavailable: true };
   const since = Math.trunc(Date.now() - Math.max(0, numOrNull(sinceMs) ?? 0));
@@ -778,6 +812,7 @@ export async function recentFaultEvents({ sinceMs = 30 * 86_400_000, limit = 500
   const where = ['at >= ?']; const args = [since];
   if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
   if (agent != null) { where.push('agent=?'); args.push(agent); }
+  if (deviceKey != null) { where.push('device_key=?'); args.push(deviceKey); }
   const rows = db.conn.prepare(`SELECT * FROM cvp_fault_event WHERE ${where.join(' AND ')} ORDER BY at DESC, id DESC LIMIT ?`).all(...args, lim);
   return { rows: rows.map(rowToFaultEvent), ...(rows.length >= lim ? { truncated: true, limit: lim } : {}) };
 }

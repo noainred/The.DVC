@@ -7,7 +7,15 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import { STable } from '../../components/STable.jsx';
-import { kwText, kwOrDash, wText, powerCatNote, POWER_FOOTNOTE, countText, storagePowerReasonText, reasonCountsText } from '../overviewCardsText.js';
+import { kwText, kwOrDash, wText, powerCatNote, powerCatKw, powerTotalKw, POWER_FOOTNOTE, countText, storagePowerReasonText, reasonCountsText } from '../overviewCardsText.js';
+import { errorBoxInput } from '../../components/accessDeniedText.js';
+
+/** v2.680 D-05: 갱신 실패 배너 문구 — 오류 객체를 그대로 그리지 않는다(React #31 — v2.621 WEB-01). */
+export function refreshErrText(e) {
+  const v = errorBoxInput(e);
+  if (v.perm) return `권한이 없습니다 — ${v.text}`;
+  return v.text || '알 수 없는 오류';
+}
 
 const CATS = [['servers', '🖥 서버', '#3b82f6'], ['network', '🔀 네트워크', '#22c55e'], ['storage', '🗄 스토리지', '#a855f7']];
 
@@ -29,7 +37,7 @@ export default function PowerTotal() {
       <div className="kpis" style={{ marginBottom: 12 }}>
         <div className="card kpi" style={{ '--kpi-accent': 'var(--amber)' }}>
           <div className="label">전체 소비 전력</div>
-          <div className="value" style={{ color: 'var(--amber)' }}>{kwText(d.totalWatts)}</div>
+          <div className="value" style={{ color: 'var(--amber)' }}>{powerTotalKw(d)}</div>
           <div className="meta">서버 + 네트워크 + 스토리지(읽은 장비만)</div>
         </div>
         {CATS.map(([k, label, color]) => {
@@ -39,7 +47,7 @@ export default function PowerTotal() {
             <div key={k} className="card kpi kpi-click" role="button" tabIndex={0} onClick={() => setTab(k)} onKeyDown={(e) => { if (e.key === 'Enter') setTab(k); }}
               style={{ '--kpi-accent': color, outline: tab === k ? `1px solid ${color}` : undefined }}>
               <div className="label">{label}</div>
-              <div className="value" style={{ color }}>{kwText(x.watts)}{share != null && <small> {share}%</small>}</div>
+              <div className="value" style={{ color }}>{powerCatKw(x)}{share != null && powerCatKw(x) !== '—' && <small> {share}%</small>}</div>
               <div className="meta">{powerCatNote(k, x)}</div>
             </div>
           );
@@ -50,6 +58,8 @@ export default function PowerTotal() {
           {CATS.map(([k, label, color]) => (d[k].watts > 0 ? <span key={k} title={`${label} ${kwText(d[k].watts)}`} style={{ width: `${(d[k].watts / total) * 100}%`, background: color }} /> : null))}
         </div>
       )}
+      {err && <div className="banner" style={{ marginBottom: 10 }}>갱신 실패(직전 데이터 표시 중): {refreshErrText(err)}</div>}
+      {d.addressHidden && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>주소로 등록된 서버의 이름·식별자는 관리자에게만 보입니다(가림 표시).</div>}
       {Object.keys(d.errors || {}).length > 0 && <div className="banner" style={{ marginBottom: 10 }}>일부를 읽지 못했습니다: {Object.entries(d.errors).map(([k, v]) => `${k} — ${v}`).join(' · ')}</div>}
 
       <div className="card" style={{ padding: '14px 16px', marginBottom: 12, minWidth: 0 }}>
@@ -89,7 +99,7 @@ export default function PowerTotal() {
                 {tab === 'network' && <td>{x.model || '—'}</td>}
                 {tab === 'storage' && <td title={x.source || ''}>{x.type}{x.scope === 'dpe' ? ' · DPE 만' : x.scope === 'node' ? ' · 노드 합' : x.scope === 'psu' ? ' · PSU 합' : ''}{x.basis === 'output' ? ' · 출력 기준' : ''}</td>}
                 <td className="right" data-sort={x.watts}>{wText(x.watts)}</td>
-                {tab === 'network' && <td>{x.basis === 'output' ? 'PSU 출력' : x.basis === 'mixed' ? '입력·출력 혼합' : 'PSU 입력'} · PSU {x.psus}</td>}
+                {tab === 'network' && <td>{x.basis === 'output' ? 'PSU 출력' : x.basis === 'mixed' ? '입력·출력 혼합' : 'PSU 입력'} · {x.partial ? `PSU ${x.read ?? '?'}/${x.psus} 만 읽음(일부)` : `PSU ${x.psus}`}</td>}
                 {tab === 'servers' && <td>{x.source === 'remote' ? '엣지' : x.source === 'ome' ? 'OME' : 'iDRAC'}</td>}
               </tr>
             ))}

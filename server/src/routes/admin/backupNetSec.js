@@ -19,7 +19,7 @@ import { addUsersToVms } from '../../guest/accountService.js';
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { denyScopedRun } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
-import { analyzeLoginFails } from '../../security/loginFails.js';
+import { analyzeLoginFails, clampLoginFailParams } from '../../security/loginFails.js';
 import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
 import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
@@ -268,7 +268,8 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 분석에는 포탈 전체 로그인 실패가 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
   try {
     const mon = loadLoginMonitor();
-    const p = { vcenterId: String(req.query.vcenterId || ''), days: Number(req.query.days) || mon.days, threshold: Number(req.query.threshold) || mon.threshold, windowMin: Number(req.query.windowMin) || mon.windowMin };
+    // v2.680 C-01: 쿼리값을 설정과 같은 범위로 자른다(?days=Infinity 가 끝나지 않는 조각 루프였다 — 키도 잘린 값이라 합류된다).
+    const p = { vcenterId: String(req.query.vcenterId || ''), ...clampLoginFailParams(req.query, mon) };
     // v2.675: 화면이 이 경로를 주기적으로 부른다 — 요청마다 7일치 전 범위 분석(v2.673 이후 조각으로 나눠 멈춤은 없지만 매번 같은
     //   일 — 이벤트 100만 행에 약 1.5초 CPU)을 하지 않게 같은 조건은 60초 기억하고 동시 요청은 한 계산에 합류시킨다.
     //   '지금 분석' 은 이 기억을 비운다(아래 /run). 응답의 generatedAt 이 분석 시각이다(화면이 밝힌다).

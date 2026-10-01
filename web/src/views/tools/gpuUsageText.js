@@ -81,3 +81,35 @@ export function activitySummary(a, { short = false } = {}) {
   if (!a) return '';
   return ['busy', 'held', 'idle', 'unknown'].filter((k) => numOrNull(a[k]) > 0).map((k) => `${short ? ACTIVITY_TEXT[k].short : ACTIVITY_TEXT[k].label} ${a[k]}`).join(' · ');
 }
+
+/**
+ * v2.680 D-02: 호스트 GPU 온도·메모리 칸의 출처 문구. v2.653 부터 게스트 값이 없으면 서버가 ESXi 카운터로 채우고
+ * tempSource·memSource 로 밝힌다 — 그것을 '게스트 nvidia-smi' 라 적으면 거짓이다(엣지·미수집 현장이 바로 그 경우다).
+ */
+export function tempSubText(h) {
+  if (!h || numOrNull(h.tempC) == null) return '게스트·ESXi 수집값 없음';
+  return h.tempSource === 'esxi' ? 'ESXi gpu.temperature(게스트 값 없음)' : '게스트 nvidia-smi';
+}
+export function memSubText(h) {
+  if (!h || (numOrNull(h.memUsedMB) == null && numOrNull(h.memUsedPct) == null)) return '게스트·ESXi 수집값 없음';
+  if (h.memSource === 'esxi') return 'ESXi 성능 카운터(게스트 값 없음)';
+  const n = numOrNull(h.memVms);
+  return n == null ? '게스트 nvidia-smi 합' : `켜진 VM ${n}대 합`;
+}
+
+/**
+ * 메모리 사용 칸 본문 — 'used / total GB' → 퍼센트만 → 사용량만 → '—' 순. 값이 없는 것에 단위·'%' 를 붙이지 않는다
+ * ('null%' · '— (%)' 금지 — v2.680 D-02).
+ */
+export function memMainText(usedMB, totalMB, pct) {
+  if (numOrNull(usedMB) != null && numOrNull(totalMB) != null && numOrNull(totalMB) > 0) return memText(usedMB, totalMB);
+  if (numOrNull(pct) != null) return `${numOrNull(pct)}%`;
+  if (numOrNull(usedMB) != null) return `${gb1(numOrNull(usedMB))} GB 사용(용량 모름)`;
+  return '—';
+}
+/** 본문이 'used / total' 일 때만 붙이는 퍼센트 꼬리 — 퍼센트가 없으면 ''. */
+export function memPctSuffix(usedMB, totalMB, pct) {
+  const p = numOrNull(pct);
+  if (p == null) return '';
+  return (numOrNull(usedMB) != null && numOrNull(totalMB) != null && numOrNull(totalMB) > 0) ? ` (${p}%)` : '';
+}

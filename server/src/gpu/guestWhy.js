@@ -59,3 +59,25 @@ export function guestWhyOf(s, ctx, { now = Date.now() } = {}) {
   if (failed) return out('collect-failed', failed.error || '');
   return out('unknown', stage);
 }
+
+/*
+ * v2.680 C-06: 'collect-failed' 의 detail 은 수집 예외 원문(SSH·게스트·vCenter e.message)이다 — 'connect ECONNREFUSED 10.x.x.x:22'
+ *   처럼 대상 관리 주소를 싣는다. /tools/gpu 는 tools 권한(operator 기본 보유)이라 비-admin 에게는 이 원문을 주지 않는다
+ *   (v2.598 AUTHZ-2598-03 '실패 원문은 admin 만'). 코드·대상 엣지·개수는 그대로 둔다 — 화면은 사유 문구로 말한다.
+ *   그 밖의 detail(엣지 버전·읽은 대수·경과 분·단계 이름)은 원문 오류가 아니므로 남긴다.
+ */
+export const WHY_RAW_DETAIL_CODES = Object.freeze(['collect-failed']);
+export function stripWhyDetail(why) {
+  if (!why || typeof why !== 'object' || !WHY_RAW_DETAIL_CODES.includes(why.code) || why.detail == null || why.detail === '') return why;
+  const { detail, ...rest } = why;
+  return { ...rest, detail: null, detailHidden: true };
+}
+/** v2.680 C-06: /tools/gpu 인벤토리 응답 — 비-admin 이면 호스트 행·배너의 오류 원문을 뺀다(원본을 바꾸지 않는다). */
+export function maskGpuInventoryForUser(data, admin) {
+  if (admin || !data) return data;
+  return {
+    ...data,
+    items: (data.items || []).map((r) => (r && r.guestWhy ? { ...r, guestWhy: stripWhyDetail(r.guestWhy) } : r)),
+    guestWhy: (data.guestWhy || []).map((e) => stripWhyDetail(e)),
+  };
+}

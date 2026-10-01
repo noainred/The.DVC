@@ -27,7 +27,7 @@ import { putStatus, getStatus, keepOnly } from './store.js';
 import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
-const PARTS_EVERY_MS = clampIntervalMs(Number(process.env.CVP_PARTS_EVERY_MS) || 30 * 60_000, 30 * 60_000, 5 * 60_000);
+import { PARTS_EVERY_MS } from './faults.js'; // v2.680: 장애 판정의 부품 신선도와 같은 값(한 벌)
 const warnLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 256 });
 
 /** 정지 판정용 자격증명 모양(평문은 지문 계산에만 — util/credFingerprint). 토큰 모드는 토큰이 '비밀번호' 다. */

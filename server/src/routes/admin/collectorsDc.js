@@ -237,7 +237,7 @@ adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettin
   if (req.body?.includeCentral === true) {
     // actor 전달: 관리자 세션 경로이므로 보호 계정(수퍼관리자·설정소유자) 대리 변경 경계를 적용한다
     // (auth.js credentialGuardDenied — 일괄 변경으로 그 경계를 우회하지 못하게).
-    const r = setLocalPassword(username, password, { actor: req.user?.username });
+    const r = setLocalPassword(username, password, { actor: req.user?.username, actorUser: req.user || null });
     central = { ok: r.ok, reason: r.reason || null };
   }
 

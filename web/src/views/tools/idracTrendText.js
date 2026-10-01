@@ -217,6 +217,18 @@ export function moveKey(order, k, dir) {
   [a[i], a[j]] = [a[j], a[i]];
   return a;
 }
+/**
+ * v2.680(D-08): 보이는 카드끼리만 한 칸 옮긴다 — 숨은 계열(매칭 안 된 ESXi CPU·GPU)과 자리를 바꾸면 화면에서 아무것도 안 움직인다.
+ * visible 은 화면에 보이는 키(order 순서). 보이는 이웃이 없으면(끝) 그대로.
+ */
+export function moveVisibleKey(order, visible, k, dir) {
+  const v = (visible || []).filter((x) => order.includes(x));
+  const i = v.indexOf(k); const j = i + dir;
+  if (i < 0 || j < 0 || j >= v.length) return [...order];
+  const a = [...order]; const ai = a.indexOf(k); const aj = a.indexOf(v[j]);
+  [a[ai], a[aj]] = [a[aj], a[ai]];
+  return a;
+}
 /** 끌어서 놓기 — from 을 to 자리로(to 뒤 카드들은 밀린다). */
 export function dropKey(order, from, to) {
   if (from === to || !order.includes(from) || !order.includes(to)) return [...order];

@@ -196,6 +196,7 @@
 | [AUDIT-2026-09-27e.md](AUDIT-2026-09-27e.md) | 감사 2026-09-27e — v2.631 "다시 3번더" 3회차 |
 | [AUDIT-2026-09-27f.md](AUDIT-2026-09-27f.md) | 감사 2026-09-27f — v2.632 "한번더" |
 | [AUDIT-2026-09-28-ipms.md](AUDIT-2026-09-28-ipms.md) | IPMS(IP 관리) 아키텍처 리뷰 — 2026-09-28 (v2.639) |
+| [AUDIT-2026-10-02.md](AUDIT-2026-10-02.md) | 2026-10-02 1회차 점검(v2.680) — 버그·튜닝·개선·보안 |
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 (Capacity Advisor) |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | 설정·데이터 파일 레퍼런스 (자동 생성) |
 | [CVP.md](CVP.md) | Arista CloudVision(CVP) 네트워크 스위치 수집 (v2.608) |
@@ -224,5 +225,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 84개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 85개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

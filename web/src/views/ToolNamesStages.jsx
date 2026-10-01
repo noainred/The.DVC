@@ -10,6 +10,16 @@ import { sendJson } from '../api.js';
 import { TOOLS } from './specialToolsList.js';
 import { stagesOf, stageIdOf, removeStage, stageCounts, nextStageId, changedToolCount } from './toolSections.js';
 
+/**
+ * v2.680 D-01: 서버에서 읽어 온 설정인가. 서버 정규화(toolcats/settings.js)는 overrides 키를 언제나 싣는다 —
+ * 그 키가 없으면 '못 읽은 채 열린' 편집기이고, 그 상태로 저장하면 overrides:{} · stages:null 이 PUT 되어
+ * 저장된 이름·설명·단계가 전부 지워진다(조회 실패 → 저장 = 소거). 그래서 저장을 거부한다.
+ */
+export function editorSettingsLoaded(settings) {
+  return !!(settings && typeof settings === 'object' && !Array.isArray(settings)
+    && Object.hasOwn(settings, 'overrides') && settings.overrides && typeof settings.overrides === 'object');
+}
+
 const PALETTE_FALLBACK = ['#22c55e', '#22d3ee', '#f59e0b', '#a855f7', '#3b82f6', '#ef4444', '#8b9bb4'];
 
 /** 편집 대상 — 상단 메뉴로 승격된 항목(topTab)은 카드가 없으므로 뺀다. */
@@ -97,7 +107,9 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
     setDraft((d) => ({ ...d, overrides: {}, stages: d.stages ? (defaultStages.length ? defaultStages.map((s) => ({ ...s })) : d.stages) : null }));
   };
 
+  const loaded = editorSettingsLoaded(settings);
   const save = async () => {
+    if (!loaded) { setErr('저장된 설정을 읽지 못한 채 열린 편집기라 저장하지 않습니다 — 화면을 새로 연 뒤 다시 시도하세요(저장하면 기존 이름·단계가 지워집니다).'); return; }
     setBusy(true); setErr(''); setNote('');
     try {
       const r = await sendJson('/admin/tool-categories', 'PUT', { overrides: draft.overrides, stages: draft.stages, stageDisplay: draft.stageDisplay });
@@ -237,7 +249,8 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
         <span style={{ flex: 1 }} />
         <button className="st-btn st-btn-danger" onClick={resetAll} disabled={busy}>기본값으로 되돌리기</button>
         {onClose && <button className="st-btn" onClick={onClose} disabled={busy}>취소</button>}
-        <button className="st-btn st-btn-primary" onClick={save} disabled={busy}>{busy ? '저장 중…' : embedded ? '저장' : '완료'}</button>
+        <button className="st-btn st-btn-primary" onClick={save} disabled={busy || !loaded}
+          title={loaded ? undefined : '저장된 설정을 읽지 못해 저장할 수 없습니다'}>{busy ? '저장 중…' : embedded ? '저장' : '완료'}</button>
       </div>
     </div>
   );

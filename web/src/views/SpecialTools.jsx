@@ -145,6 +145,10 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   // 카테고리·이름·단계 설정(v2.455 · v2.679) — 미설정/실패면 업무 분류·단계 없이 '전체' 격자 하나.
   const [cats, setCats] = useState(null);
   const [catMeta, setCatMeta] = useState({ limits: {}, defaultStages: [] });
+  // v2.680 D-01: 설정을 '읽었는가' 를 따로 든다 — 못 읽은 채(cats=null) 편집기를 열고 저장하면
+  // overrides:{} · stages:null 이 PUT 되어 저장된 이름·설명·단계가 전부 지워진다(조회 실패 → 저장 = 소거).
+  const [catsState, setCatsState] = useState('loading'); // 'loading' | 'ok' | 'error'
+  const [catsErr, setCatsErr] = useState('');
   // v2.679(핸드오프 '특수 기능 화면 재구성'): 탭 기준(업무 분류/개발 단계) · 탭 · 필터 · 정렬 · 설정 드로어.
   const [axis, setAxis] = useState(() => { try { return localStorage.getItem(AXIS_KEY) === 'stage' ? 'stage' : 'cat'; } catch { return 'cat'; } });
   const [tabId, setTabId] = useState('all');
@@ -182,10 +186,18 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     fetchJson('/admin/tool-categories')
       .then((r) => {
         if (!alive) return;
-        setCats(r?.settings || null);
+        const ok = !!(r && r.settings && typeof r.settings === 'object');
+        setCats(ok ? r.settings : null);
         setCatMeta({ limits: r?.limits || {}, defaultStages: r?.defaultStages || [] });
+        setCatsState(ok ? 'ok' : 'error');
+        setCatsErr(ok ? '' : (r?.reason || '설정 응답에 settings 가 없습니다'));
       })
-      .catch(() => { /* 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다 */ });
+      .catch((e) => {
+        // 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다. 단 편집기는 열지 않는다(D-01).
+        if (!alive) return;
+        setCatsState('error');
+        setCatsErr(e?.status === 403 ? '권한이 없습니다' : (e?.message || String(e)));
+      });
     return () => { alive = false; };
   }, []);
 
@@ -303,9 +315,15 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
           <div className="st-title-row">
             <h1 className="st-h1">특수 기능</h1>
             {isAdmin && (
-              <button className="st-set-btn" onClick={() => setDrawer(true)} title="기능별 표시 이름·설명·개발 단계를 바꿉니다(관리자)">
+              <button className="st-set-btn" onClick={() => setDrawer(true)} disabled={catsState !== 'ok'}
+                title={catsState === 'ok' ? '기능별 표시 이름·설명·개발 단계를 바꿉니다(관리자)'
+                  : catsState === 'loading' ? '저장된 이름·단계 설정을 불러오는 중입니다 — 불러온 뒤에 열 수 있습니다'
+                    : `저장된 이름·단계 설정을 읽지 못해 열 수 없습니다(열고 저장하면 기존 설정이 지워집니다): ${catsErr}`}>
                 ⚙ 이름·단계 설정<span className="st-admin-tag">관리자</span>
               </button>
+            )}
+            {isAdmin && catsState === 'error' && (
+              <span className="st-err" style={{ fontSize: 12 }}>이름·단계 설정을 읽지 못했습니다: {catsErr}</span>
             )}
           </div>
           {/* v2.555: 허용 목록 모드에서는 회색 카드가 하나도 없으므로 그 안내가 **거짓**이 된다.
@@ -449,8 +467,8 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
         </section>
       )}
 
-      {drawer && (
-        <ToolNamesDrawer settings={cats || {}} limits={catMeta.limits} defaultStages={catMeta.defaultStages}
+      {drawer && catsState === 'ok' && cats && (
+        <ToolNamesDrawer settings={cats} limits={catMeta.limits} defaultStages={catMeta.defaultStages}
           onSaved={(s) => setCats(s)} onClose={() => setDrawer(false)} />
       )}
     </div>

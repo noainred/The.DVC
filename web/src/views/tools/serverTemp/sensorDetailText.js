@@ -127,3 +127,16 @@ export function collectionNote(d) {
 export const ROLE_NOTE = '역할(흡기·CPU·GPU 등)은 센서 이름과 위치 정보로 추정한 것입니다. 전산실 온도는 흡기 센서의 최고값을 씁니다(전원공급장치 흡기는 빼고).';
 export const GPU_NOTE = 'GPU 온도는 사용률이 아닙니다 — GPU 가 동작 중인지 가늠하는 근거로만 보여줍니다(정상 범위가 모델·냉각마다 달라 임계로 판정하지 않습니다).';
 export const CPU_NOTE = 'CPU 사용률은 베어메탈 사용률 수집값을 먼저 쓰고, 없으면 iDRAC 텔레메트리·센서 값을 씁니다(출처를 칸에 적습니다).';
+
+/**
+ * v2.680 D-06: 표 정렬 값 — 칸이 보여 주는 것과 같은 값이어야 한다. 상세가 없거나 오래된 행(detailState !== 'ok')은
+ * 칸이 '—' 이므로 정렬 값도 null(DataTable 이 방향과 무관하게 뒤로 보낸다). -999·-1 같은 대체값을 쓰면 '—' 행이
+ * 오름차순 맨 앞에 온다(v2.631 규약). GPU 온도는 GPU 온도 센서가 있을 때만 칸에 값이 있다.
+ */
+export function detailSortValue(row, field) {
+  if (!row || row.detailState !== 'ok') return null;
+  if (field === 'gpuTempMaxC' && !numOrNull(row.summary?.gpuTempCount)) return null;
+  return numOrNull(row.summary?.[field]);
+}
+/** CPU 사용률 정렬 값 — 칸이 값을 보여 줄 때(오래된 값 포함, 흐리게 표시)만. 없으면 null. */
+export function cpuSortValue(row) { return numOrNull(row?.cpu?.pct); }

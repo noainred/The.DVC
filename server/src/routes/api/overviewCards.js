@@ -27,6 +27,7 @@ import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { allMeasuredPower } from '../../idrac/service.js';
 import { buildPowerTotal } from '../../power/total.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
 import { vmtrackSeries } from '../../vmtrack/service.js';
 import { capacityHistoryAll } from '../../storage/db.js';
 import { devicePollMsByAgent } from './storageMon.js';
@@ -77,8 +78,30 @@ async function powerTotal() {
   try { servers = await allMeasuredPower({ hosts: snap.hosts || [] }); } catch (e) { errors.servers = e?.message || String(e); }
   try { network = (await cvpItems()).rows; } catch (e) { errors.network = e?.message || String(e); }
   try { storage = storageItems(); } catch (e) { errors.storage = e?.message || String(e); }
-  const out = buildPowerTotal({ servers, network, storage, dcOfVc: (vc) => String(assign[vc] || ''), dcName });
-  return { ...out, errors };
+  // v2.680 A-06: 서버 분모 — 서버 분석 등록(활성 · OME 콘솔 제외 · 엣지 보고분 포함). 못 읽으면 null(분모를 모른다고 밝힌다).
+  let serversRegistered = null; let serverHosts = [];
+  try {
+    const reg = analysisServersWithRemote().filter((s) => s && s.enabled !== false);
+    serversRegistered = reg.length;
+    serverHosts = reg.flatMap((s) => [s.host, s.ip, ...(Array.isArray(s.hostNames) ? s.hostNames : [])]).filter((h) => typeof h === 'string' && h);
+  } catch (e) { errors.serversRegistry = e?.message || String(e); }
+  const out = buildPowerTotal({ servers, network, storage, dcOfVc: (vc) => String(assign[vc] || ''), dcName, serversRegistered });
+  return { ...out, errors, serverHosts };
+}
+
+/**
+ * v2.680 C-02: 비-admin(operator 는 tools 기본 보유)에게는 서버 목록의 주소형 id·이름을 가린다. 스캔 등록 iDRAC 은
+ *   id = name = 관리 IP 이고 엣지 서버는 remote:<수집기>:<IP> 다. 형제 /tools/esxi-temp/sensors 와 같은 규칙(같은 값 → 같은 토큰).
+ */
+export function maskPowerServers(out, hosts = []) {
+  const match = addressMatcher(hosts);
+  const items = (out?.servers?.items || []).map((x) => {
+    const o = { ...x };
+    if (match(o.id)) o.id = maskedIdToken(o.id);
+    if (match(o.name)) o.name = maskedAddressName(o.name);
+    return o;
+  });
+  return { ...out, servers: { ...out.servers, items } };
 }
 
 export function registerOverviewCards(api) {
@@ -111,8 +134,8 @@ export function registerOverviewCards(api) {
         try { const c = await cvpItems(); network = { count: c.unavailable ? null : c.rows.length, cvpServers: c.servers, unavailable: c.unavailable }; }
         catch (e) { network = { count: null, error: e?.message || String(e) }; }
         const p = await powerTotal();
-        power = { totalWatts: p.totalWatts, servers: { watts: p.servers.watts, measured: p.servers.measured },
-          network: { watts: p.network.watts, measured: p.network.measured, devices: p.network.devices },
+        power = { totalWatts: p.totalWatts, servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread },
+          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices },
           storage: { watts: p.storage.watts, measured: p.storage.measured, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread },
           errors: p.errors };
       }
@@ -161,12 +184,17 @@ export function registerOverviewCards(api) {
 
   api.get('/tools/power-total', toolsPerm, fullScopeOnly, async (req, res) => {
     // v2.667: 못 읽은 스토리지의 세부(오류 원문)는 관리 주소를 담을 수 있다 — admin 에게만(operator 는 tools 를 기본 보유).
-    const admin = req.user?.role === 'admin';
+    const admin = isAdminReq(req);
     await memoJson(req, res, 'powerTotal', async () => {
-      const out = await powerTotal();
-      if (!admin) out.storage = { ...out.storage, issues: out.storage.issues.map(({ detail, ...x }) => ({ ...x, detailHidden: !!detail })) };
+      const { serverHosts, ...raw } = await powerTotal();
+      let out = raw;
+      if (!admin) {
+        out = maskPowerServers(out, serverHosts);
+        out.storage = { ...out.storage, issues: out.storage.issues.map(({ detail, ...x }) => ({ ...x, detailHidden: !!detail })) };
+        out.addressHidden = true;
+      }
       return { ok: true, ...out };
-    }, { ttlMs: 20_000, extraKey: admin ? 'admin' : 'user' });
+    }, { ttlMs: 20_000, extraKey: `role:${admin ? 'admin' : 'user'}` });
   });
 }
 

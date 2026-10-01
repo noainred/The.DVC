@@ -30,12 +30,14 @@ function exportSensorDetailCapped(serverId) {
 function compactSensors(serverId) {
   const latest = getSensorSeries(serverId).latest;
   const temps = latest?.temps;
-  if (!temps || !Object.keys(temps).length) return null;
+  const cpuOk = typeof latest?.cpu === 'number' && Number.isFinite(latest.cpu);
+  // v2.680(감사 F-05): 온도가 0개여도 텔레메트리 CPU 를 읽었으면 싣는다 — 로컬 폴러도 그 경우를 temps 빈 값 + cpu 로 적재한다.
+  if ((!temps || !Object.keys(temps).length) && !cpuOk) return null;
   // v2.634: 엣지 폴러의 주기 소요·간격을 함께 싣는다 — 중앙이 그 엣지 표본의 신선도 경계를 맞출 수 있게
   //   (roomTemp.effectiveMaxAgeMs). 구버전 중앙은 모르는 필드라 무시한다.
   const cyc = sensorPollCycle();
   return {
-    t: latest.t, temps: Object.fromEntries(Object.entries(temps).slice(0, 64)),
+    t: latest.t, temps: Object.fromEntries(Object.entries(temps || {}).slice(0, 64)),
     // v2.660: CPU 사용률(텔레메트리 SystemUsage) — 중앙 iDRAC 통합 추이가 위임 서버도 그린다. 없으면 싣지 않는다.
     ...(typeof latest.cpu === 'number' && Number.isFinite(latest.cpu) ? { cpu: latest.cpu } : {}),
     ...(cyc?.durationMs != null ? { cycleMs: Math.round(cyc.durationMs) } : {}),

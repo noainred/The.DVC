@@ -430,23 +430,33 @@ export function getUser(username) {
  */
 export function actorIsSuperAdmin(actor) {
   if (!actor) return false;
+  // v2.680 C-03: 요청 사용자 객체(req.user)를 받으면 **토큰의 superAdmin 표지**로 판정한다 — 그 표지는 로컬 토큰(src 'local')에서만
+  //   선다(resolveTokenUser·authenticateLocal). 예전 이름 조회는 AD 로그인 계정이 로컬 super_admin 과 같은 이름이면 참이 되어
+  //   AD admin 이 super_admin 계정을 삭제·비밀번호/OTP 교체할 수 있었다. 표지가 있어도 저장 레코드가 여전히 super_admin 인지
+  //   함께 본다(강등 직후 남은 문맥을 믿지 않는다).
+  if (typeof actor === 'object') {
+    if (actor.superAdmin !== true) return false;
+    const a = getUser(String(actor.username || '').trim());
+    return !!a && a.role === SUPER_ADMIN;
+  }
+  // 이름 문자열(레거시 호출부 — 요청 사용자 객체를 넘기지 않는 경로). 이름 충돌을 막지 못하므로 새 호출부는 객체를 넘길 것.
   const a = getUser(String(actor).trim());
   return !!a && a.role === SUPER_ADMIN;
 }
-function superAdminGuardDenied(u, { nextRole, actor = null, trusted = false, what = '변경' } = {}) {
+function superAdminGuardDenied(u, { nextRole, actor = null, actorUser = null, trusted = false, what = '변경' } = {}) {
   if (trusted) return null;
   const touches = (u && u.role === SUPER_ADMIN) || nextRole === SUPER_ADMIN;
   if (!touches) return null;
-  if (actorIsSuperAdmin(actor)) return null;
+  if (actorIsSuperAdmin(actorUser && typeof actorUser === 'object' ? actorUser : actor)) return null;
   return { ok: false, reason: `super_admin 계정의 ${what}은(는) super_admin 만 할 수 있습니다.`, code: 'super-admin-only' };
 }
 
-export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, trusted = false } = {}) {
+export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, actorUser = null, trusted = false } = {}) {
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
-  const sa = superAdminGuardDenied(null, { nextRole: role, actor, trusted, what: '생성' });
+  const sa = superAdminGuardDenied(null, { nextRole: role, actor, actorUser, trusted, what: '생성' });
   if (sa) return sa;
   // 소유자 이름 선점 차단(identityGuardDenied 주석 참고) — 이름만 차지해도 소유자 지위가 승계된다.
   const denied = identityGuardDenied({ username, actor, trusted, what: '계정 생성' });
@@ -469,7 +479,7 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
  * 로컬 사용자 비밀번호 설정(관리자 리셋/중앙 일괄 변경용). OTP 등록 계정은 로그인에 OTP가
  * 우선되므로 해시 갱신은 무해하며, OTP 해제 시 폴백 비밀번호가 된다.
  */
-export function setLocalPassword(username, password, { actor = null, trusted = false } = {}) {
+export function setLocalPassword(username, password, { actor = null, actorUser = null, trusted = false } = {}) {
   // 문자열만 허용 — 객체가 String()으로 "[object Object]"가 되어 의도치 않은 비번이 설정되는 것 방지.
   // 특수문자·유니코드는 전부 그대로 허용(scrypt는 바이트 안전).
   if (password !== undefined && password !== null && typeof password !== 'string') {
@@ -483,7 +493,7 @@ export function setLocalPassword(username, password, { actor = null, trusted = f
   // 보호 계정(수퍼관리자·설정소유자)의 비밀번호를 다른 admin 이 아는 값으로 설정하면 그 계정으로
   // 로그인할 수 있다 — OTP 등록 경로와 같은 탈취 경로다(credentialGuardDenied).
   const denied = credentialGuardDenied(u, { actor, trusted, what: '비밀번호' })
-    || superAdminGuardDenied(u, { actor, trusted, what: '비밀번호 변경' });
+    || superAdminGuardDenied(u, { actor, actorUser, trusted, what: '비밀번호 변경' });
   if (denied) return denied;
   u.passwordHash = hashPassword(pw);
   bumpTokenVersion(u); // 비번 변경 → 기존 세션 토큰 즉시 폐기
@@ -496,14 +506,14 @@ export function setLocalPassword(username, password, { actor = null, trusted = f
  * (데모 계정 잠금용). 기존 세션 토큰도 tokenVersion 인상으로 즉시 폐기된다.
  * 다시 로그인하게 하려면 setLocalPassword 로 비밀번호를 설정하면 된다.
  */
-export function clearLoginCredentials(username, { actor = null, trusted = false } = {}) {
+export function clearLoginCredentials(username, { actor = null, actorUser = null, trusted = false } = {}) {
   const u = getUser(String(username || '').trim());
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 로그인은 차단할 수 없습니다.' };
   // 설정소유자도 보호 — OTP·비번을 모두 지운 뒤 setLocalPassword 로 비번을 심으면 부트스트랩
   // 로그인이 열려 계정 탈취로 이어진다(재감사에서 재현된 경로).
   const denied = credentialGuardDenied(u, { actor, trusted, what: '로그인 자격증명' })
-    || superAdminGuardDenied(u, { actor, trusted, what: '로그인 차단' });
+    || superAdminGuardDenied(u, { actor, actorUser, trusted, what: '로그인 차단' });
   if (denied) return denied;
   if (isAdminTier(u.role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
     return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
@@ -517,7 +527,7 @@ export function clearLoginCredentials(username, { actor = null, trusted = false 
   return { ok: true };
 }
 
-export function updateUser(username, { name, role, scope } = {}, { actor = null, trusted = false } = {}) {
+export function updateUser(username, { name, role, scope } = {}, { actor = null, actorUser = null, trusted = false } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   // 보호 계정(수퍼관리자·설정소유자)의 역할 강등·범위 축소는 소유자/본인만.
@@ -526,7 +536,7 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
   // 표시이름(name)은 이제 권한 축이 아니지만(requireSettingsOwner 가 username 만 본다),
   // 감사 추적에서 사람을 오인하게 만들 수 있어 보호 계정에 대해서는 함께 제한한다.
   if (role !== undefined || scope !== undefined || name !== undefined) {
-    const sa = superAdminGuardDenied(u, { nextRole: role, actor, trusted, what: '계정 정보 변경' });
+    const sa = superAdminGuardDenied(u, { nextRole: role, actor, actorUser, trusted, what: '계정 정보 변경' });
     if (sa) return sa;
     const denied = credentialGuardDenied(u, { actor, trusted, what: '계정 정보(역할·범위·표시이름)' });
     if (denied && !actorIsOwner(actor)) return denied;   // 소유자는 다른 소유자를 관리할 수 있다
@@ -559,7 +569,7 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
   return { ok: true };
 }
 
-export function deleteUser(username, { actor = null, trusted = false } = {}) {
+export function deleteUser(username, { actor = null, actorUser = null, trusted = false } = {}) {
   const list = loadUsers();
   const u = list.find((x) => x.username === username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
@@ -567,7 +577,7 @@ export function deleteUser(username, { actor = null, trusted = false } = {}) {
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정은 삭제할 수 없습니다.' };
   // 소유자 계정 삭제 차단 — 지운 뒤 같은 이름으로 다시 만들면 소유자 지위가 승계된다
   // (identityGuardDenied 주석 참고: 자격증명만 막으면 신원이 안 막혀 탈취가 성립했다).
-  const sa = superAdminGuardDenied(u, { actor, trusted, what: '삭제' });
+  const sa = superAdminGuardDenied(u, { actor, actorUser, trusted, what: '삭제' });
   if (sa) return sa;
   const denied = identityGuardDenied({ username: u.username, actor, trusted, what: '계정 삭제' });
   if (denied) return denied;
@@ -784,18 +794,18 @@ function identityGuardDenied({ username, actor, trusted, what }) {
 }
 
 /** OTP 등록(begin/confirm) 전용 래퍼 — 메시지만 다르고 경계는 동일하다. */
-function totpRebindDenied(u, actor, trusted = false) {
-  return credentialGuardDenied(u, { actor, trusted, what: 'OTP 등록' }) || superAdminGuardDenied(u, { actor, trusted, what: 'OTP 등록' });
+function totpRebindDenied(u, actor, trusted = false, actorUser = null) {
+  return credentialGuardDenied(u, { actor, trusted, what: 'OTP 등록' }) || superAdminGuardDenied(u, { actor, actorUser, trusted, what: 'OTP 등록' });
 }
 
 /** Start TOTP enrollment: generate a secret (pending until confirmed).
  *  host(접속한 포탈 IP:포트)를 주면 발급 라벨 issuer에 포함해 여러 포탈을 구분한다:
  *  'VMware Portal' → 'VMware(<host>) Portal'.
  *  actor/trusted: 대리 등록 권한 검사용 — credentialGuardDenied 참고. */
-export function beginTotpEnroll(username, host = '', { actor = null, trusted = false } = {}) {
+export function beginTotpEnroll(username, host = '', { actor = null, actorUser = null, trusted = false } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
-  const denied = totpRebindDenied(u, actor, trusted);
+  const denied = totpRebindDenied(u, actor, trusted, actorUser);
   if (denied) return denied;
   const secret = totp.generateSecret();
   // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
@@ -842,13 +852,13 @@ export function verifyUserOtp(username, code) {
 /** Confirm enrollment by verifying a code from the authenticator app.
  *  actor: 요청 수행 계정(대리 등록 권한 검사용). begin 과 **같은 경계를 반드시 다시 검사**한다 —
  *  begin 만 막으면 이전에 남은 pending 시크릿으로 confirm 만 호출해 우회할 수 있다. */
-export function confirmTotpEnroll(username, code, { actor = null, trusted = false } = {}) {
+export function confirmTotpEnroll(username, code, { actor = null, actorUser = null, trusted = false } = {}) {
   const u = getUser(username);
   // 신규 흐름은 pending 시크릿으로 확정, (하위호환) 구버전에서 begin만 하고 미확정이던
   // 계정(totpSecret 있고 enabled=false)은 기존 시크릿으로 확정을 이어간다.
   const pending = u?.totpPendingSecret || (u && !u.totpEnabled ? u.totpSecret : null);
   if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
-  const denied = totpRebindDenied(u, actor, trusted);
+  const denied = totpRebindDenied(u, actor, trusted, actorUser);
   if (denied) return denied;
   const enrollCtr = totp.verifyToken(code, pending);
   if (enrollCtr == null) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
@@ -880,7 +890,7 @@ export function confirmTotpEnroll(username, code, { actor = null, trusted = fals
 // force: 서버에서 직접 실행하는 신뢰된 콘솔 복구 도구(tools/otp-enroll.js) 전용 우회. 콘솔 도구는
 // '해제 → 곧바로 재등록'을 헤드리스로 수행하므로 중간에 로그인 수단이 0개여도 문제없고, 수퍼관리자가
 // 폰을 분실한 잠금도 이 도구로만 푼다. 웹 admin 경로(force 미지정)에는 아래 가드가 그대로 걸린다.
-export function disableTotp(username, { password, force = false, actor = null } = {}) {
+export function disableTotp(username, { password, force = false, actor = null, actorUser = null } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   // 수퍼관리자 보호 — clearLoginCredentials 와 같은 경계. OTP 전용(비번 없는) 수퍼관리자의
@@ -893,7 +903,7 @@ export function disableTotp(username, { password, force = false, actor = null } 
   // `{"force":true}` 주입으로 이 가드가 무력화되는 경로가 재감사에서 재현됐다.
   if (u.superuser && !force) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
   // 설정소유자도 같은 경계 — 해제 + 임시 비밀번호는 그 계정으로 로그인할 수 있게 만드는 작업이다.
-  const denied = credentialGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' }) || superAdminGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' });
+  const denied = credentialGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' }) || superAdminGuardDenied(u, { actor, actorUser, trusted: force, what: 'OTP 해제' });
   if (denied) return denied;
   // 임시 비밀번호 검증 — setLocalPassword 와 같은 규칙(문자열·8~128자). 검증 없이 hash 하면
   // "[object Object]" 같은 값이 비밀번호가 되는 사고를 만든다.
@@ -971,6 +981,8 @@ export function resolveTokenUser(token) {
     const role = u.role || 'viewer';
     return {
       // v2.643: super_admin 은 요청 문맥에서 'admin' + superAdmin:true(auth/roles.js 머리말 — 기존 admin 판정을 전부 그대로 통과).
+      // v2.680(감사 C-03): 로컬 계정 토큰 표지 — AD 세션이 같은 이름의 로컬 계정에 본인 작업(OTP 등록)을 하지 못하게 한다.
+      authSrc: 'local',
       username: payload.sub, role: authzRole(role), ...(role === SUPER_ADMIN ? { superAdmin: true } : {}), name: payload.name, scope: normalizedScope(u),
       mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
     };

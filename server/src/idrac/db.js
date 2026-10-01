@@ -196,9 +196,19 @@ function initSqlite() {
         return map;
       },
       history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit).reverse(),
-      bucketRange: (serverId, startTs, endTs, bucketMs) => {
+      bucketRange: (serverId, startTs, endTs, bucketMs, offsetMs = 0) => {
         if (bucketMs >= HOUR_MS && bucketMs % HOUR_MS === 0) {
           const per = bucketMs / HOUR_MS;
+          // v2.680(A-07): 1일 버킷을 포탈 날짜(한국 시각 0시)에 맞출 때 — 시간 행(per=1)을 받아 오프셋 경계로 다시 묶는다(합·개수라 정확하다).
+          const off = Number.isFinite(offsetMs) && offsetMs !== 0 && offsetMs % HOUR_MS === 0 ? offsetMs : 0;
+          if (off) {
+            const offH = off / HOUR_MS; const acc = new Map();
+            for (const r of rangeHourlyStmt.all(1, serverId, Math.floor(startTs / HOUR_MS), Math.ceil(endTs / HOUR_MS))) {
+              const ts = Math.floor((Number(r.bk) + offH) / per) * bucketMs - off;
+              const g = acc.get(ts) || { s: 0, n: 0 }; g.s += Number(r.s) || 0; g.n += Number(r.n) || 0; acc.set(ts, g);
+            }
+            return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, watts: g.n ? Math.round(g.s / g.n) : null }));
+          }
           return rangeHourlyStmt.all(per, serverId, Math.floor(startTs / HOUR_MS), Math.ceil(endTs / HOUR_MS))
             .map((r) => ({ ts: r.bk * bucketMs, watts: r.n ? Math.round(r.s / r.n) : null }));
         }
@@ -299,9 +309,10 @@ function initJsonFallback() {
     history: (serverId, sinceTs, limit) =>
       rows.filter((r) => r.s === serverId && r.t >= sinceTs).sort((a, b) => a.t - b.t).slice(-limit)
         .map((r) => ({ ts: r.t, watts: r.w })),
-    bucketRange: (serverId, startTs, endTs, bucketMs) => {
+    bucketRange: (serverId, startTs, endTs, bucketMs, offsetMs = 0) => {
+      const off = Number.isFinite(offsetMs) && offsetMs % 3_600_000 === 0 ? offsetMs : 0;
       const acc = new Map();
-      for (const r of rows) if (r.s === serverId && r.t >= startTs && r.t < endTs) { const b = Math.floor(r.t / bucketMs) * bucketMs; const g = acc.get(b) || { s: 0, n: 0 }; g.s += r.w; g.n++; acc.set(b, g); }
+      for (const r of rows) if (r.s === serverId && r.t >= startTs && r.t < endTs) { const b = Math.floor((r.t + off) / bucketMs) * bucketMs - off; const g = acc.get(b) || { s: 0, n: 0 }; g.s += r.w; g.n++; acc.set(b, g); }
       return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, watts: Math.round(g.s / g.n) }));
     },
     statsSince: (sinceTs) => {

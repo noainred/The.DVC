@@ -18,6 +18,7 @@
  *     결과(info.lifecycle)가 있는 장비만 '지원 종료 지남' 을 센다.
  */
 import { partsSummary, bgpSummary } from './parse.js';
+import { TELEMETRY_OK, partsFresh } from './faults.js';
 
 export const UNASSIGNED_CORP = '';
 export const TOP_DEVICES_PER_CORP = 5;
@@ -33,13 +34,17 @@ export function freshnessBounds(intervalMs) {
  * 장비 한 대의 판정.
  * @returns {{state:'ok'|'warn'|'bad'|'unknown', reasons:string[], partial:boolean}}
  */
-export function deviceHealth(d, { now = Date.now(), staleMs = 30 * 60_000, highPct = 80 } = {}) {
+export function deviceHealth(d, { now = Date.now(), staleMs = 30 * 60_000, highPct = 80, intervalMs, partsEveryMs } = {}) {
   const dev = d && typeof d === 'object' ? d : {};
   const at = Number(dev.collectedAt);
   if (!(at > 0)) return { state: 'unknown', reasons: ['never'], partial: false };
   if (now - at > staleMs) return { state: 'unknown', reasons: ['stale'], partial: false };
   if (dev.streaming === false) return { state: 'unknown', reasons: ['not-streaming'], partial: false };
-  const parts = partsSummary(dev.partsList);
+  // v2.680(감사 B-03): 장애 판정(faults.observeDevice)과 같은 기준 — 텔레메트리를 못 읽은 장비는 정상이 아니다.
+  const tel = String(dev.telemetry ?? '').trim().toLowerCase();
+  if (tel !== 'not-streaming' && !TELEMETRY_OK.has(tel)) return { state: 'unknown', reasons: ['telemetry-failed'], partial: false };
+  // v2.680(감사 B-02): 오래된 부품 목록(조회 실패로 남은 직전 값)은 지금 상태로 쓰지 않는다.
+  const parts = partsFresh(dev, { intervalMs, partsEveryMs, now }) ? partsSummary(dev.partsList) : null;
   const bgp = dev.bgpPeers ? bgpSummary(dev.bgpPeers) : null;
   const ports = dev.ports && typeof dev.ports === 'object' ? dev.ports : null;
   const cpu = dev.cpuPct == null ? null : Number(dev.cpuPct);
@@ -117,7 +122,7 @@ export function buildCvpOverview(i = {}) {
   const nameOf = new Map();
 
   const totals = {
-    devices: 0, health: { ok: 0, warn: 0, bad: 0, unknown: 0 }, unknownBy: { never: 0, stale: 0, 'not-streaming': 0, unread: 0 }, partial: 0,
+    devices: 0, health: { ok: 0, warn: 0, bad: 0, unknown: 0 }, unknownBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0, unread: 0 }, partial: 0,
     streaming: 0, notStreaming: 0, streamingUnknown: 0,
     portsDown: 0, portsUnreadDevices: 0,
     bgpPeers: 0, bgpEstablished: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnreadDevices: 0,
@@ -132,14 +137,16 @@ export function buildCvpOverview(i = {}) {
     if (!d || typeof d !== 'object') continue;
     const corp = corpFor(d.cvpId);
     nameOf.set(devKey(d.agent, d.cvpId, d.key), d.hostname || d.key || '');
-    const h = deviceHealth(d, { now, staleMs, highPct });
+    const h = deviceHealth(d, { now, staleMs, highPct, intervalMs: i.intervalMs, partsEveryMs: i.partsEveryMs });
+    const known = h.state !== 'unknown';
     totals.devices++; corp.devices++;
     totals.health[h.state]++; corp.health[h.state]++;
     if (h.state === 'unknown') totals.unknownBy[h.reasons[0]] = (totals.unknownBy[h.reasons[0]] || 0) + 1;
     if (h.partial && h.state !== 'unknown') { totals.partial++; corp.partial++; }
     if (d.streaming === true) { totals.streaming++; corp.streaming++; } else if (d.streaming === false) totals.notStreaming++; else totals.streamingUnknown++;
-    if (d.ports && typeof d.ports === 'object') { const dn = Number(d.ports.down) || 0; totals.portsDown += dn; corp.portsDown += dn; } else totals.portsUnreadDevices++;
-    if (Array.isArray(d.bgpPeers)) {
+    // v2.680(감사 B-01): 확인 불가 장비의 남은 포트·BGP 값은 지금 값이 아니다 — 합산하지 않고 못 읽은 장비로 센다.
+    if (known && d.ports && typeof d.ports === 'object') { const dn = Number(d.ports.down) || 0; totals.portsDown += dn; corp.portsDown += dn; } else totals.portsUnreadDevices++;
+    if (known && Array.isArray(d.bgpPeers)) {
       const b = bgpSummary(d.bgpPeers);
       totals.bgpPeers += b.peers; totals.bgpEstablished += b.established; totals.bgpDown += b.down; totals.bgpStateUnknown += b.stateUnknown || 0;
       corp.bgpDown += b.down;

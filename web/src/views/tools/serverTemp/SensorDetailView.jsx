@@ -13,7 +13,7 @@ import { STable } from '../../../components/STable.jsx';
 import { agoText } from '../relTime.js';
 import {
   STATE_TEXT, STATE_BADGE, ROLE_TEXT, FILTERS, filterRows, filterCounts, groupSensors, readingText, thresholdText,
-  tempText, cpuCell, detailStateText, collectionNote, ROLE_NOTE, GPU_NOTE, CPU_NOTE,
+  tempText, cpuCell, detailStateText, collectionNote, ROLE_NOTE, GPU_NOTE, CPU_NOTE, detailSortValue, cpuSortValue,
 } from './sensorDetailText.js';
 
 const int = (v) => Number(v || 0).toLocaleString();
@@ -107,15 +107,15 @@ export default function SensorDetailView({ scope }) {
   const columns = [
     { key: 'name', label: '서버', render: (r) => <button className="cell-link" onClick={() => setOpen(r.id)} title="전 센서 보기">{r.name}</button> },
     { key: 'dcLabel', label: '법인', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.dcLabel}</span> },
-    { key: 'inlet', label: '흡기 ℃', align: 'right', sortValue: (r) => (r.detailState === 'ok' ? r.summary?.inletC ?? -999 : -999), render: (r) => tempText(r.detailState === 'ok' ? r.summary?.inletC : null) },
-    { key: 'exhaust', label: '배기 ℃', align: 'right', sortValue: (r) => r.summary?.exhaustC ?? -999, render: (r) => tempText(r.detailState === 'ok' ? r.summary?.exhaustC : null) },
-    { key: 'cpuT', label: 'CPU 온도', align: 'right', sortValue: (r) => r.summary?.cpuTempMaxC ?? -999, render: (r) => tempText(r.detailState === 'ok' ? r.summary?.cpuTempMaxC : null) },
+    { key: 'inlet', label: '흡기 ℃', align: 'right', sortValue: (r) => detailSortValue(r, 'inletC'), render: (r) => tempText(r.detailState === 'ok' ? r.summary?.inletC : null) },
+    { key: 'exhaust', label: '배기 ℃', align: 'right', sortValue: (r) => detailSortValue(r, 'exhaustC'), render: (r) => tempText(r.detailState === 'ok' ? r.summary?.exhaustC : null) },
+    { key: 'cpuT', label: 'CPU 온도', align: 'right', sortValue: (r) => detailSortValue(r, 'cpuTempMaxC'), render: (r) => tempText(r.detailState === 'ok' ? r.summary?.cpuTempMaxC : null) },
     {
-      key: 'cpu', label: 'CPU 사용률', align: 'right', sortValue: (r) => r.cpu?.pct ?? -1,
+      key: 'cpu', label: 'CPU 사용률', align: 'right', sortValue: (r) => cpuSortValue(r),
       render: (r) => { const c = cpuCell(r.cpu); return <span title={c.title}><b style={c.stale ? { color: 'var(--text-dim)' } : undefined}>{c.text}</b>{c.sub && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{c.sub}</span>}</span>; },
     },
     {
-      key: 'gpu', label: 'GPU 온도', align: 'right', sortValue: (r) => r.summary?.gpuTempMaxC ?? -999,
+      key: 'gpu', label: 'GPU 온도', align: 'right', sortValue: (r) => detailSortValue(r, 'gpuTempMaxC'),
       render: (r) => (r.detailState === 'ok' && r.summary?.gpuTempCount
         ? <span title={`GPU 온도 센서 ${r.summary.gpuTempCount}개 · 평균 ${tempText(r.summary.gpuTempAvgC)}`}>{tempText(r.summary.gpuTempMaxC)}<span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>×{r.summary.gpuTempCount}</span></span>
         : <span className="muted">—</span>),

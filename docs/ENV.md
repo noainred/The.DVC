@@ -107,7 +107,7 @@
 | `CVP_FOLLOW_CONCURRENCY` | `4` |  | cvp/client.js |
 | `CVP_FOLLOW_MAX` | `160` |  | cvp/client.js |
 | `CVP_HTTP_TIMEOUT_MS` |  |  | cvp/client.js |
-| `CVP_PARTS_EVERY_MS` | `30` |  | cvp/poller.js |
+| `CVP_PARTS_EVERY_MS` |  |  | cvp/faults.js |
 | `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
 | `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
 | `CVP_PUSH_MAX_ROUNDS` | `10` |  | cvp/push.js |

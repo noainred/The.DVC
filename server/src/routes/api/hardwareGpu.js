@@ -8,7 +8,8 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { summarizeHostGpu } from '../../gpu/hostGpu.js';
-import { guestWhyOf } from '../../gpu/guestWhy.js';
+import { guestWhyOf, maskGpuInventoryForUser } from '../../gpu/guestWhy.js';
+import { isAdminReq } from '../../auth/addressMask.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { getGpuGuestDiag } from '../../gpu/poller.js';
 import { loadGpuGuestSettings } from '../../gpu/settings.js';
@@ -444,13 +445,13 @@ api.get('/tools/esxi', requirePerm('tools'), (req, res) => {
 
 api.get('/tools/gpu', requirePerm('tools'), (req, res) => {
   const snap = store.get();
-  res.json(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)));
+  res.json(maskGpuInventoryForUser(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)), isAdminReq(req)));
 });
 
 // GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
 api.get('/tools/gpu.json', requirePerm('tools'), (req, res) => {
   const snap = store.get();
-  const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
+  const data = maskGpuInventoryForUser(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)), isAdminReq(req));
   const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
   sendMaybeZip(res, `gpu-${todayStamp()}.json`, body, 'application/json; charset=utf-8');
 });

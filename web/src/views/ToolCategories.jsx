@@ -94,6 +94,8 @@ export default function ToolCategories() {
       const r = await sendJson('/admin/tool-categories', 'PUT', {
         enabled, showUncategorized: showUncat, collapseOthers, categories: cats,
       });
+      // v2.680 D-07: sendJson 은 400 을 던지지 않고 본문을 돌려준다 — 거부된 저장을 '저장되었습니다' 로 말하지 않는다.
+      if (!r || r.ok === false) { setMsg(`오류: ${r?.reason || '저장하지 못했습니다'}`); return; }
       setMsg('저장되었습니다. 특수 기능 화면을 새로 열면 반영됩니다.');
       if (r?.settings) setD((p) => ({ ...p, settings: r.settings }));
     } catch (e) { setMsg(`오류: ${e.message}`); }

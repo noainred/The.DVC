@@ -13,7 +13,7 @@ import { spanText, countText, bpsText } from './cvpText.js';
 export const HEALTH_KEYS = ['ok', 'warn', 'bad', 'unknown'];
 export const HEALTH_LABEL = { ok: '정상', warn: '주의', bad: '장애', unknown: '확인 불가' };
 export const HEALTH_COLOR = { ok: 'var(--green)', warn: 'var(--amber)', bad: 'var(--red)', unknown: 'var(--text-dim)' };
-export const UNKNOWN_REASON_LABEL = { never: '받은 적 없음', stale: '오래된 수집', 'not-streaming': '스트리밍 아님', unread: '읽은 항목 없음' };
+export const UNKNOWN_REASON_LABEL = { never: '받은 적 없음', stale: '오래된 수집', 'not-streaming': '스트리밍 아님', unread: '읽은 항목 없음', 'telemetry-failed': '텔레메트리 읽기 실패' };
 export const UNASSIGNED_LABEL = '법인 미지정';
 
 export const CORP_NOTE = '법인은 **그 장비를 수집하는 CVP 서버에 지정한 DataCenter** 입니다. 한 CVP 가 여러 법인의 장비를 관리하면 전부 그 법인으로 보입니다(장비 단위 법인 정보는 CVP 응답에 없습니다).';
