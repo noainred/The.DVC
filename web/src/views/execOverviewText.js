@@ -10,7 +10,7 @@
  */
 import { normMode, resolveMode } from '../version_4/mode.js';
 import { hashSegments } from '../hooks/hashTab.js';
-import { vcStatusCounts, WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
+import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { corpSiteStatus } from './corpSiteStatus.js';
 import { countText, kwText, capText } from './overviewCardsText.js';
 
@@ -37,37 +37,10 @@ export const TREND_DAYS = [7, 30, 90];
 export const DAYS_KEY = 'vmportal.execOverview.days';
 export const normDays = (v) => (TREND_DAYS.includes(Number(v)) ? Number(v) : 7);
 
-/* ── 헤드라인 ────────────────────────────────────────────────────────── */
+/* ── 머리 ────────────────────────────────────────────────────────── */
 
 const nf = new Intl.NumberFormat('ko-KR');
 const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-
-/**
- * 헤드라인. 반환 `{ tone:'ok'|'warn'|'bad', lead, emph, tail }` — 화면은 `lead <emph> tail` 로 그린다.
- *   연결 불가 > 첫 수집 중 > Critical 알람 > 정상 순. '정상 운영' 은 연결·수집이 다 됐고 Critical 알람이 없을 때만이다.
- *   법인 수는 비활성 vCenter 를 뺀 것(수집을 끈 법인을 '운영 중' 이라 세지 않는다).
- */
-export function headline(g) {
-  if (!g) return { tone: 'warn', lead: '인프라 상태를 ', emph: '불러오는 중', tail: '입니다' };
-  const c = vcStatusCounts(g) || { unreach: 0, pending: 0, maint: 0, disabled: 0 };
-  const total = Math.max(0, (n(g.vcenters) ?? 0) - (c.disabled || 0));
-  const corp = `${nf.format(total)}개 법인`;
-  if (c.unreach > 0) return { tone: 'bad', lead: `전 세계 ${corp} 중 `, emph: `${nf.format(c.unreach)}곳 연결 불가`, tail: '' };
-  if (c.pending > 0) return { tone: 'warn', lead: `전 세계 ${corp} 중 `, emph: `${nf.format(c.pending)}곳 첫 수집 중`, tail: ' — 기다리면 채워집니다' };
-  const crit = n(g.alarmsCritical) ?? 0;
-  if (crit > 0) return { tone: 'warn', lead: `전 세계 ${corp} 인프라에 `, emph: `Critical 알람 ${nf.format(crit)}건`, tail: '이 있습니다' };
-  return { tone: 'ok', lead: '전 세계 ', emph: corp, tail: ' 인프라가 정상 운영 중입니다' };
-}
-
-/** 헤드라인 아래 한 줄 — `vCenter 26/28 연결 · 호스트 658대 · 가상 서버 5,850대 · 1개 법인 점검 중`. */
-export function subline(g) {
-  if (!g) return '';
-  const c = vcStatusCounts(g) || {};
-  const parts = [`vCenter ${countText(g.vcentersConnected)}/${countText(g.vcenters)} 연결`, `호스트 ${countText(g.hosts)}대`, `가상 서버 ${countText(g.vms)}대`];
-  if (c.maint) parts.push(`${nf.format(c.maint)}개 법인 점검 중`);
-  if (c.disabled) parts.push(`비활성 ${nf.format(c.disabled)}`);
-  return parts.join(' · ');
-}
 
 /** eyebrow 시각 — 'YYYY.MM.DD HH:mm KST'(포탈 기준 +09:00). 모르면 ''. */
 export function briefingStamp(generatedAt, offsetMin = 540) {

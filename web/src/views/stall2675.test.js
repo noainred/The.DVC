@@ -63,7 +63,7 @@ describe('① 첫 수집 중 안내(firstCollectNotice)', () => {
     const ex = src('ExecOverview.jsx');
     expect(ex).toMatch(/const fc = firstCollectNotice\(ov\);/);
     expect(ex).toMatch(/if \(!g \|\| fc\) return/);
-    expect(ex.indexOf('if (!g || fc)')).toBeLessThan(ex.indexOf('headline(g)'));   // '0개 법인 정상 운영 중' 헤드라인보다 먼저
+    expect(ex.indexOf('if (!g || fc)')).toBeLessThan(ex.indexOf('const kpis'));   // 0 대 KPI 보다 먼저(v2.677: 헤드라인은 지웠다)
     expect(src('../version_6/pages/Overview.jsx')).toMatch(/if \(!ov\.global \|\| ov\.initial\)/);
   });
 });
