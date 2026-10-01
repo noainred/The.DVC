@@ -781,3 +781,6 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - `data.csv` 는 admin 전용 토글 키다: operator·viewer 행에 넣을 수 없고(`sanitizeRow`), admin 에게서 끄는 `adminDenied` 변경과
   비어 있지 않은 adminDenied 의 초기화는 super_admin 만(403 `super-admin-only`). 사용자별 도구 재정의는 super_admin 계정도 대상 밖이다.
 - CSV 라우트 게이트는 `requirePerm('data.csv')` 이고 `requirePerm` 은 `userHasPermission` 하나로 판정한다(superAdmin → 전부, admin → adminDenied 외 전부).
+- ⚠ **저장 레코드(`getUser`·`listUsers`)의 역할을 `'admin'` 문자열과 비교하지 말 것 — `isAdminTier`**(v2.674 에 찾은 누락 3곳): 긴급중단 승인자
+  판정이 super_admin 인 noainred 를 '관리자가 아닙니다' 로 거부했고(`security/emergencyStop.js approverRoleIssue` + 범위 판정은 `authzRole`),
+  보안 자가진단 OTP 범위와 OTP 콘솔 도구 `--list` 가 super_admin 을 고권한 계정에서 뺐다. 회귀 `test/emergencyStop.test.js`(라우트 소스도 검사).

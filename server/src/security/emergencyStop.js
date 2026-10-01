@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { isAdminTier } from '../auth/roles.js';
 
 const FILE = path.join(config.configDir, 'emergency-stop.json');
 
@@ -55,4 +56,14 @@ export function setEmergencyStop(active, approvers = []) {
   persist();
   console.warn(`[emergency-stop] ${active ? '긴급중단 ON' : '해제'} — 승인: ${approvers.join(' + ')}`);
   return getEmergencyStatus();
+}
+
+/**
+ * 긴급중단 승인자 역할 판정(v2.674) — 저장 레코드(getUser)의 역할을 본다. super_admin(v2.643, noainred)도 관리자 등급이다.
+ * 예전 라우트의 '!== admin' 비교는 super_admin 을 '관리자가 아닙니다' 로 거부했다(요청 문맥은 admin 으로 접히지만 저장값은 그대로다).
+ * @returns {null|'missing'|'not-admin'}
+ */
+export function approverRoleIssue(u) {
+  if (!u) return 'missing';
+  return isAdminTier(String(u.role || '')) ? null : 'not-admin';
 }

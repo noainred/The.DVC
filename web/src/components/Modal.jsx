@@ -13,8 +13,14 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
   // Header stays pinned while the body scrolls, so long detail content (many
   // rows + action buttons) is always fully reachable by scrolling.
   // resizable=true: 사용자가 모서리를 드래그해 창 크기를 조절할 수 있다.
+  // v2.674: CSS 는 min-width 가 max-width 를 이긴다 — minWidth(예: 560px)를 그대로 두면 400px 화면에서 창이 오른쪽 밖으로
+  //   잘렸다(가로 넘침 수치는 0 이라 스크린샷으로만 보였다). 최소 크기도 화면 크기를 넘지 않게 묶는다.
+  //   상한은 '화면 − 오버레이 안쪽 여백(.modal-overlay padding 20px × 2)' 이다 — 95vw 로 두면 400px 에서 380px 가 되어
+  //   여백 360px 를 넘고 창이 오른쪽 끝에 붙었다(왼쪽 20px · 오른쪽 0).
+  const FIT_W = 'calc(100vw - 40px)';
+  const FIT_H = 'calc(100vh - 40px)';
   const resizeStyle = resizable
-    ? { width, maxWidth: '95vw', height: 'min(70vh, 560px)', maxHeight: '95vh', minWidth, minHeight, resize: 'both' }
+    ? { width, maxWidth: FIT_W, height: 'min(70vh, 560px)', maxHeight: FIT_H, minWidth: `min(${Number(minWidth) || 0}px, ${FIT_W})`, minHeight: `min(${Number(minHeight) || 0}px, ${FIT_H})`, resize: 'both' }
     : { maxWidth: width, maxHeight: '88vh' };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>

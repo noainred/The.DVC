@@ -3,7 +3,7 @@
 포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **185개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-30)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-01)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -119,7 +119,7 @@
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
 | `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › Log › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
-| `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ |  | ✅ | security/loginStore.js |
+| `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ | ✅ | ✅ | security/loginStore.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `mail-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | mail/service.js |
@@ -218,7 +218,7 @@
 - **`collectors.json`** — 중앙이 이 목록을 pull 한다
 - **`agent-deploy-targets.json`** — 비밀 4종(centralToken·collectorToken 등) 포함 — 소유자만 CSV 내보내기
 - **`central-inventory.json`** — 재시작 시 콜드스타트용. 지워도 다음 push 로 복구
-- **`central-agent-tokens.json`** — ⚠ 지우면 엣지 push 가 전부 401
+- **`central-agent-tokens.json`** — ⚠ 지우면 개별 토큰을 쓰는 엣지의 push·pull 이 전부 403(공유 CENTRAL_TOKEN 만 쓰는 엣지는 영향 없음)
 - **`audit.ndjson`** — 보안 자산 — 보존 정책에 따라 관리. AUDIT_MAX 로 상한
 - **`alarm-mutes.json`** — v2.448 부터 원자적 쓰기 + 손상 보존
 - **`permissions.json`** — v2.448 부터 서버가 도구 거부를 집행

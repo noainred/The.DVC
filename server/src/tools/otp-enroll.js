@@ -19,6 +19,7 @@
 import process from 'node:process';
 import { config } from '../config.js';
 import { loadUsers, getUser, listUsers, beginTotpEnroll, confirmTotpEnroll, disableTotp } from '../auth/auth.js';
+import { isAdminTier } from '../auth/roles.js';
 
 const argv = process.argv.slice(2);
 const has = (flag) => argv.includes(flag);
@@ -26,6 +27,11 @@ const valueOf = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i
 const username = argv.find((a) => !a.startsWith('-') && argv[argv.indexOf(a) - 1] !== '--confirm');
 
 function die(msg, code = 1) { console.error(`\n✖ ${msg}\n`); process.exit(code); }
+// v2.674: 다음 단계를 안내할 때 '이 도구를 어떻게 불렀는가' 를 그대로 쓴다. 래퍼(otp-enroll.sh·vmware-portal-otp)가
+//   OTP_ENROLL_CMD 로 자기 호출 형태를 넘긴다. 예전에는 언제나 'node server/src/tools/otp-enroll.js' 를 안내해, 설치본에서
+//   그대로 따라 하면 CONFIG_DIR 이 /etc/vmware-portal 이 아니게 되거나(등록 대기 상태를 못 찾는다) root 로 users.json 을
+//   써 포탈이 그 파일을 쓸 수 없게 됐다(루트 CLAUDE.md '문서에서 node 를 직접 안내하지 말 것').
+const CMD = String(process.env.OTP_ENROLL_CMD || '').trim() || 'node server/src/tools/otp-enroll.js';
 
 console.log(`\nCONFIG_DIR = ${config.configDir}`);
 
@@ -39,8 +45,8 @@ OTP 콘솔 등록 도구 (admin/operator 는 OTP 전용 로그인)
   <username> --disable         OTP 해제(다시 등록하려면 처음부터)
 
 예)
-  node server/src/tools/otp-enroll.js admin
-  node server/src/tools/otp-enroll.js admin --confirm 482913
+  ${CMD} admin
+  ${CMD} admin --confirm 482913
 `);
   process.exit(0);
 }
@@ -51,12 +57,19 @@ if (has('--list')) {
   console.log('\n사용자 목록:\n');
   for (const u of listUsers()) {
     const otp = u.totpEnabled ? 'OTP 등록됨' : (u.hasPassword ? '비밀번호만' : '자격증명 없음');
-    const note = (u.role === 'admin' || u.role === 'operator') && !u.totpEnabled ? '  ← OTP 등록 필요(로그인 불가)' : '';
-    console.log(`  ${u.username.padEnd(20)} ${String(u.role).padEnd(9)} ${otp}${note}`);
+    // v2.674: 저장 역할 super_admin 도 관리자 등급이다(v2.643) — 예전 비교는 등록 필요 표시를 빠뜨렸다. 이름이 11자라 칸도 넓혔다.
+    const note = (isAdminTier(u.role) || u.role === 'operator') && !u.totpEnabled ? '  ← OTP 등록 필요(로그인 불가)' : '';
+    console.log(`  ${u.username.padEnd(20)} ${String(u.role).padEnd(11)} ${otp}${note}`);
   }
   console.log('');
   process.exit(0);
 }
+
+// v2.674: 실행 중인 포탈은 users.json 을 한 번 읽어 메모리에 두고 다시 읽지 않는다(auth.js loadUsers). 그래서 이 도구로 고친 내용은
+//   포탈을 다시 시작하기 전에는 반영되지 않고, 그 사이 포탈이 사용자 파일을 저장하면(로그인 기록 등) 이 변경이 덮어써진다.
+//   완료 메시지가 그 사실과 할 일을 말한다(복구 경로라 '했는데 안 된다' 가 가장 나쁜 결과다).
+const RESTART_NOTE = `   ⚠ 포탈이 실행 중이면 지금 재시작하세요: sudo systemctl restart ${process.env.SERVICE_NAME || 'vmware-portal'}\n` +
+  '     실행 중인 포탈은 사용자 목록을 메모리에 들고 있어 재시작 전에는 이 변경을 모르고, 그 사이 사용자 파일을 저장하면 이 변경이 덮어써집니다.\n';
 
 const user = getUser(username);
 if (!user) die(`사용자 '${username}' 를 찾을 수 없습니다. --list 로 확인하세요.`);
@@ -67,6 +80,7 @@ if (has('--disable')) {
   const r = disableTotp(username, { force: true });
   if (!r.ok) die(r.reason);
   console.log(`\n✔ '${username}' 의 OTP 를 해제했습니다. 다시 등록하려면 인자 없이 실행하세요.\n`);
+  console.log(RESTART_NOTE);
   process.exit(0);
 }
 
@@ -77,6 +91,7 @@ if (code) {
   const r = confirmTotpEnroll(username, String(code).trim(), { trusted: true });
   if (!r.ok) die(`${r.reason} (먼저 인자 없이 실행해 등록을 시작했는지, 코드가 유효한지 확인하세요)`);
   console.log(`\n✔ '${username}' OTP 등록 완료 — 이제 이 계정은 6자리 코드로만 로그인합니다.\n`);
+  console.log(RESTART_NOTE);
   process.exit(0);
 }
 
@@ -100,7 +115,7 @@ console.log(`
 
   2) 앱에 표시된 6자리 코드로 확정하세요:
 
-     node server/src/tools/otp-enroll.js ${username} --confirm <6자리>
+     ${CMD} ${username} --confirm <6자리>
 
   ※ 확정 전까지는 기존 로그인 수단이 바뀌지 않습니다.
 `);

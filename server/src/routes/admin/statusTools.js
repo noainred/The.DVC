@@ -1,13 +1,14 @@
 // codex 점검·비상정지·로그·상태·포탈DB — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { verifyUserOtp, getUser } from '../../auth/auth.js';
-import { getEmergencyStatus, setEmergencyStop } from '../../security/emergencyStop.js';
+import { getEmergencyStatus, setEmergencyStop, approverRoleIssue } from '../../security/emergencyStop.js';
 import { store } from '../../store.js';
 import { getLogs } from '../../logbuffer.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { portalDbReport, enumerateDbFiles } from '../../insights/portalDb.js';
+import { guideFor } from '../../insights/dbGuide.js';
 import { inspectMany } from '../../insights/dbHealth.js';
 import { dbDir, defaultDbDir, preflight, migrationInventory } from '../../insights/dbLocation.js';
 import { writeMigrationScript, listMigrationScripts, migrationsDir, DEFAULT_SERVICE, DEFAULT_USER, unitNameIssue } from '../../insights/migrateScript.js';
@@ -16,6 +17,7 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { authzRole } from '../../auth/roles.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
@@ -60,9 +62,11 @@ adminRouter.post('/emergency-stop', adminOnly, fleetOnly, (req, res) => {
     const name = String(a?.username || '').trim();
     const u = getUser(name);
     if (!u) return res.status(400).json({ ok: false, reason: `사용자 '${name}'를 찾을 수 없습니다.` });
-    if ((u.role || '') !== 'admin') return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
+    // v2.674: 저장 레코드의 역할이라 super_admin(v2.643 — noainred)도 관리자 등급이다. 예전 '!== admin' 비교는 super_admin 을
+    //   '관리자가 아닙니다' 로 거부했다(요청 문맥은 admin 으로 접히지만 getUser 는 저장값을 준다 — server/CLAUDE.md v2.643).
+    if (approverRoleIssue(u)) return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
     // v2.612 AUTHZ2612-08: 긴급중단은 전 수집을 멈춘다 — 승인자도 전체 범위 admin 이어야 한다(요청자는 fleetOnly 가 막는다).
-    if (scopedVcenterIds({ username: u.username, role: u.role, scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
+    if (scopedVcenterIds({ username: u.username, role: authzRole(u.role), scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
     const v = verifyUserOtp(name, a?.code);
     if (!v.ok) return res.status(403).json({ ok: false, reason: `'${name}' OTP 인증 실패 — ${v.reason}`, needEnroll: v.needEnroll });
   }
@@ -96,6 +100,14 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
 
 // 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이·용량 예측.
 adminRouter.get('/portal-db', adminOnly, fleetOnly, (_req, res) => res.json(portalDbReport()));
+
+// v2.674: '자세히' 팝업 — 파일 하나의 자세한 설명. 폴링 응답(위)에 싣지 않고 팝업을 열 때만 가져간다.
+//   파일명은 형식만 받는다(경로 문자 불가) — 설명 표에 없으면 guide:null 이고 화면은 한 줄 설명으로 대신한다.
+adminRouter.get('/portal-db/guide', adminOnly, fleetOnly, (req, res) => {
+  const file = typeof req.query.file === 'string' ? req.query.file : '';
+  if (!/^[\w.-]{1,120}$/.test(file)) return res.status(400).json({ ok: false, reason: '파일 이름 형식이 아닙니다.' });
+  res.json({ ok: true, file, guide: guideFor(file) });
+});
 
 /**
  * DB 정합성·일관성 점검(v2.378) — SQLite 파일을 **읽기 전용**으로 진단한다.

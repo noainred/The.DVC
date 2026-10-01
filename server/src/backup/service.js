@@ -46,6 +46,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   //   만드는 헬퍼(createDebouncedWriter · cvp/push.js saveCursor)가 이제 util/stateFiles.js 에 **스스로 등록**하지만, 확정된 이름은
   //   여기에도 적는다(이중 안전망 — 헬퍼 모듈이 아직 로드되지 않은 시점의 판정까지 같게).
   'central-agent-cvp.json', 'cvp-push.json',
+  'ipam-scan-agents.json', // v2.674: 에이전트별 마지막 스캔 보고 — 엣지 보고마다 갱신되는 상태(ipam/scanStore.js 도 스스로 등록한다)
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.

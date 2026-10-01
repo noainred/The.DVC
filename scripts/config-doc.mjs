@@ -35,7 +35,7 @@ const NOTES = {
   'collectors.json': ['원격 수집 서버(엣지) 목록과 토큰', '중앙이 이 목록을 pull 한다'],
   'agent-deploy-targets.json': ['Edge 노드 설치 대상(SSH 접속 정보)', '비밀 4종(centralToken·collectorToken 등) 포함 — 소유자만 CSV 내보내기'],
   'central-inventory.json': ['위임 사이트가 push 한 인벤토리 캐시', '재시작 시 콜드스타트용. 지워도 다음 push 로 복구'],
-  'central-agent-tokens.json': ['엣지 에이전트별 개별 토큰', '⚠ 지우면 엣지 push 가 전부 401'],
+  'central-agent-tokens.json': ['엣지 에이전트별 개별 토큰', '⚠ 지우면 개별 토큰을 쓰는 엣지의 push·pull 이 전부 403(공유 CENTRAL_TOKEN 만 쓰는 엣지는 영향 없음)'],
   'audit.ndjson': ['감사 로그(상태 변경 기록)', '보안 자산 — 보존 정책에 따라 관리. AUDIT_MAX 로 상한'],
   'alarm-mutes.json': ['알람 음소거 규칙', 'v2.448 부터 원자적 쓰기 + 손상 보존'],
   'permissions.json': ['역할별 권한 매트릭스 + 도구별 접근 거부', 'v2.448 부터 서버가 도구 거부를 집행'],
