@@ -6,6 +6,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 백엔드(Node/Express 집계 API) + 프론트엔드(React/Vite 대시보드). 자세한 내용은 `README.md`.
 
 - 개발 브랜치: `claude/vmware-global-monitoring-portal-nrnpnt`
+- **개발 방법론은 `docs/DEV-METHOD.md`**(v2.677 — 작업 등급·8단계 파이프라인·모델/에포트·토큰 다이어트·반복 결함 자동 검사). 새 교훈은 이 파일 본문에 단락으로 쌓지 말고 테스트 → 디렉터리 CLAUDE.md → docs 순으로 남긴다.
 - 빌드 검증: `npm run verify` (= `npm test` 단위테스트 + `npm run build` 웹빌드). 서버 실행은 `node server/src/index.js`
   - 단위 테스트는 `server/test/*.test.js`(node:test). 핵심 로직 변경 시 테스트를 추가/갱신하고 커밋 전 `npm test` 통과 확인.
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
