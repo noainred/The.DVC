@@ -23,6 +23,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { SECRET_FILES, loadSecretsPolicy } from './secretVault.js';
 import { effectiveLoginPolicy, fileUserLoginPolicies, loadSessionSecurity } from './securitySettings.js';
+import { isAdminTier } from '../auth/roles.js';
 
 /* ── 순수 판정 ───────────────────────────────────────────────────────────── */
 
@@ -177,9 +178,10 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
   /* 3. 고권한 계정 OTP 등록 --------------------------------------------- */
   if (Array.isArray(users)) {
     const local = users.filter((u) => !u.ad && !u.isAd);
-    const priv = local.filter((u) => u.role === 'admin' || u.role === 'operator');
+    // v2.674: 저장 역할 super_admin(v2.643)도 관리자 등급이다 — 예전 비교는 noainred 를 고권한 계정에서 빼고 셌다.
+    const priv = local.filter((u) => isAdminTier(u.role) || u.role === 'operator');
     const enrolled = priv.filter((u) => u.totpEnabled || u.hasTotp || u.otpEnrolled);
-    const admins = local.filter((u) => u.role === 'admin');
+    const admins = local.filter((u) => isAdminTier(u.role));
     const adminEnrolled = admins.filter((u) => u.totpEnabled || u.hasTotp || u.otpEnrolled);
     add({
       id: 'otp-coverage',

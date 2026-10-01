@@ -58,7 +58,7 @@ const PURPOSES = {
   'capture-history.json': '네트워크 트래픽 캡처 이력',
   'central-agent-tokens.json': '중앙↔에이전트 인증 토큰',
   'agent-assignments.json': 'iDRAC 위임 스캔 IP 배정',
-  'agent-config.json': '에이전트별 배포 구성',
+  'agent-config.json': '현재 코드에서 쓰지 않는 파일(예전 버전이 남긴 것으로 추정 — 중앙의 엣지 설정 사본은 central-agent-config.json)',
   // ── ndjson 추가형 로그 ──────────────────────────────────────────────
   'audit.ndjson': '감사 로그 — 관리 작업 이력(추가형)',
   'login-fails.ndjson': '로그인 실패 기록(추가형)',

@@ -1,7 +1,7 @@
 // codex 점검·비상정지·로그·상태·포탈DB — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { verifyUserOtp, getUser } from '../../auth/auth.js';
-import { getEmergencyStatus, setEmergencyStop } from '../../security/emergencyStop.js';
+import { getEmergencyStatus, setEmergencyStop, approverRoleIssue } from '../../security/emergencyStop.js';
 import { store } from '../../store.js';
 import { getLogs } from '../../logbuffer.js';
 import { logAudit } from '../../audit.js';
@@ -17,6 +17,7 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { authzRole } from '../../auth/roles.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
@@ -61,9 +62,11 @@ adminRouter.post('/emergency-stop', adminOnly, fleetOnly, (req, res) => {
     const name = String(a?.username || '').trim();
     const u = getUser(name);
     if (!u) return res.status(400).json({ ok: false, reason: `사용자 '${name}'를 찾을 수 없습니다.` });
-    if ((u.role || '') !== 'admin') return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
+    // v2.674: 저장 레코드의 역할이라 super_admin(v2.643 — noainred)도 관리자 등급이다. 예전 '!== admin' 비교는 super_admin 을
+    //   '관리자가 아닙니다' 로 거부했다(요청 문맥은 admin 으로 접히지만 getUser 는 저장값을 준다 — server/CLAUDE.md v2.643).
+    if (approverRoleIssue(u)) return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
     // v2.612 AUTHZ2612-08: 긴급중단은 전 수집을 멈춘다 — 승인자도 전체 범위 admin 이어야 한다(요청자는 fleetOnly 가 막는다).
-    if (scopedVcenterIds({ username: u.username, role: u.role, scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
+    if (scopedVcenterIds({ username: u.username, role: authzRole(u.role), scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
     const v = verifyUserOtp(name, a?.code);
     if (!v.ok) return res.status(403).json({ ok: false, reason: `'${name}' OTP 인증 실패 — ${v.reason}`, needEnroll: v.needEnroll });
   }
