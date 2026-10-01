@@ -26,19 +26,26 @@ export const ISSUE_MAX = 200;   // 못 읽은 장비 목록 상한 — 넘친 �
 
 const w0 = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n < 1_000_000 ? n : null; };
 
-/** CVP 장비 1대 → { watts, basis:'input'|'output'|null, psus, read } (순수). */
+/**
+ * CVP 장비 1대 → { watts, basis:'input'|'output'|null, psus, read, partial? } (순수 — partial 은 일부만 읽었을 때만 true 로 싣는다).
+ * v2.680 A-05: 빈 슬롯(state 'absent')은 PSU 로 세지 않는다. 장착된 PSU 중 일부만 읽었으면 `partial:true` 다 —
+ *   예전에는 psus 와 read 를 비교하지 않아 PSU 2개 중 1개만 읽은 스위치가 절반 전력으로 '측정' 에 들어갔다(부분 합을 합계라 말함).
+ */
 export function cvpDevicePower(d) {
   const parts = Array.isArray(d?.partsList) ? d.partsList : null;
   if (!parts) return { watts: null, basis: null, psus: 0, read: 0 };
   let inSum = 0; let inN = 0; let outSum = 0; let outN = 0; let psus = 0;
   for (const p of parts) {
     if (!p || p.kind !== 'psu') continue;
+    if (p.state === 'absent') continue;
     psus += 1;
     const i = w0(p.power?.inW); const o = w0(p.power?.outW);
     if (i != null) { inSum += i; inN += 1; } else if (o != null) { outSum += o; outN += 1; }
   }
-  if (inN) return { watts: Math.round(inSum + outSum), basis: outN ? 'mixed' : 'input', psus, read: inN + outN };
-  if (outN) return { watts: Math.round(outSum), basis: 'output', psus, read: outN };
+  const read = inN + outN;
+  const pf = read > 0 && read < psus ? { partial: true } : {};   // 온전하면 필드를 싣지 않는다(예전 응답 모양 그대로)
+  if (inN) return { watts: Math.round(inSum + outSum), basis: outN ? 'mixed' : 'input', psus, read, ...pf };
+  if (outN) return { watts: Math.round(outSum), basis: 'output', psus, read, ...pf };
   return { watts: null, basis: null, psus, read: 0 };
 }
 
@@ -51,8 +58,10 @@ export function cvpDevicePower(d) {
  * @param {Map<string,string>} [i.dcName]
  * @param {number} [i.now]
  * @param {number} [i.itemMax]  목록 상한(카테고리별)
+ * @param {number|null} [i.serversRegistered]  v2.680 A-06: 서버 분석 등록(활성 · OME 콘솔 제외 · 엣지 보고분 포함) 대수 — 분모.
+ *   주지 않으면(null) 분모를 모른다고 밝힌다(devices·unread 가 null — 예전 응답 모양 호환).
  */
-export function buildPowerTotal({ servers = [], network = [], storage = [], dcOfVc = () => '', dcName = new Map(), now = Date.now(), itemMax = 200 } = {}) {
+export function buildPowerTotal({ servers = [], network = [], storage = [], dcOfVc = () => '', dcName = new Map(), now = Date.now(), itemMax = 200, serversRegistered = null } = {}) {
   const corps = new Map();
   const corpOf = (id) => {
     const k = String(id || UNASSIGNED);
@@ -62,7 +71,7 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
   const add = (cat, corpId, watts) => { const c = corpOf(corpId); c[cat] += watts; c.total += watts; c.devices += 1; };
 
   // ① 서버 — iDRAC 실측(vCenter 추정 제외).
-  const srv = { watts: 0, measured: 0, excludedVcenter: 0, items: [] };
+  const srv = { watts: 0, measured: 0, excludedVcenter: 0, ome: 0, devices: null, unread: null, items: [] };
   for (const e of servers || []) {
     if (!e) continue;
     if (e.source === 'vcenter') { srv.excludedVcenter += 1; continue; }
@@ -70,11 +79,23 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     if (w == null) continue;
     const corp = String(e.datacenterId || dcOfVc(String(e.vcenterId || '')) || '');
     srv.watts += w; srv.measured += 1; add('servers', corp, w);
+    if (e.source === 'ome') srv.ome += 1;
     srv.items.push({ id: String(e.serverId), name: e.serverName || String(e.serverId), watts: Math.round(w), corpId: corp, source: e.source, ts: numOrNull(e.ts) });
   }
 
+  // v2.680 A-06: 서버도 분모를 밝힌다 — 예전에는 measured 만 있어 iDRAC 이 무더기로 멈추면(2시간 넘은 값은 빠진다) 합계가 조용히
+  //   줄어 '전력 감소' 처럼 보였다. 분모 = 서버 분석 등록(활성 · OME 콘솔 제외), 못 읽음 = 분모 − (iDRAC·엣지 실측 대수).
+  //   OME 로만 읽힌 장비는 등록부에 개별 서버로 없으므로 빼고 센다. ⚠ 같은 박스가 iDRAC·엣지 두 경로로 등록돼 있으면 분모가
+  //   그만큼 커서 못 읽음이 실제보다 클 수 있다(정직 기록 — 전력은 중복 제거로 한 번만 더한다).
+  const reg = numOrNull(serversRegistered);
+  if (reg != null && reg >= 0) {
+    srv.devices = Math.round(reg);
+    srv.unread = Math.max(0, srv.devices - (srv.measured - srv.ome));
+  }
+
   // ② 네트워크 — CVP PSU.
-  const net = { watts: 0, devices: 0, measured: 0, unread: 0, stale: 0, outputOnly: 0, items: [] };
+  // v2.680 A-05: partial = 장착 PSU 중 일부만 읽은 장비(전력은 더하되 '측정' 이 아니다 — 합계가 실제보다 작다는 뜻).
+  const net = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unread: 0, stale: 0, outputOnly: 0, items: [] };
   for (const d of network || []) {
     if (!d) continue;
     net.devices += 1;
@@ -83,8 +104,9 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     if (p.watts == null) { net.unread += 1; continue; }
     if (at == null || now - at > NET_STALE_MS) { net.stale += 1; continue; }
     if (p.basis === 'output') net.outputOnly += 1;
-    net.watts += p.watts; net.measured += 1; add('network', d.corp?.corpId || '', p.watts);
-    net.items.push({ id: `${d.cvpId}/${d.key}`, name: d.hostname || d.key, model: d.model || '', watts: p.watts, basis: p.basis, psus: p.psus, corpId: d.corp?.corpId || '', ts: at });
+    net.watts += p.watts; add('network', d.corp?.corpId || '', p.watts);
+    if (p.partial) { net.partial += 1; net.partialWatts += p.watts; } else net.measured += 1;
+    net.items.push({ id: `${d.cvpId}/${d.key}`, name: d.hostname || d.key, model: d.model || '', watts: p.watts, basis: p.basis, psus: p.psus, read: p.read, ...(p.partial ? { partial: true } : {}), corpId: d.corp?.corpId || '', ts: at });
   }
 
   // ③ 스토리지 — 수집기가 실은 extra.power(v2.667: 못 읽은 사유를 extra.powerProbe 로 받는다).
@@ -116,7 +138,12 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
       issue(d, t, 'unread', reason, pr ? { source: String(pr.source || '').slice(0, 200), detail: String(pr.detail || '').slice(0, 200), seenKeys: Array.isArray(pr.seenKeys) ? pr.seenKeys.slice(0, 20).map(String) : [] } : { source: path });
       continue;
     }
-    const at = numOrNull(pw.at) ?? numOrNull(d.snap?.collectedAt);
+    // v2.680 F-06: extra.power.at 은 엣지 시계 원본이라 중앙이 자르지 않는다 — 시계가 빠른 엣지가 push 를 멈추면 마지막 값이
+    //   6시간 경계 안에 영원히 남았다. 중앙 수신 때 잘린 snap.collectedAt 과 둘 다 있으면 **더 이른 쪽**을 쓰고,
+    //   미래 시각은 지금으로 본다(미래를 '더 신선하다' 로 읽지 않는다).
+    const pAt = numOrNull(pw.at); const cAt = numOrNull(d.snap?.collectedAt);
+    let at = pAt != null && cAt != null ? Math.min(pAt, cAt) : (pAt ?? cAt);
+    if (at != null && at > now) at = now;
     if (at == null || now - at > STORAGE_STALE_MS) { sto.stale += 1; issue(d, t, 'stale', 'stale', { ts: at }); continue; }
     sto.watts += w; sto.measured += 1; bt.measured += 1; add('storage', d.datacenterId || '', w);
     sto.items.push({ id: String(d.id), name: d.name || String(d.id), type: t, watts: Math.round(w), scope: pw.scope || '', basis: pw.basis || '', source: String(pw.source || '').slice(0, 200), corpId: String(d.datacenterId || ''), ts: at });

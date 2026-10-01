@@ -214,12 +214,15 @@ authRouter.post('/extend', authMiddleware, (req, res) => {
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.
 // actor = 대상과 동일(본인) → totpRebindDenied 통과. 수퍼관리자의 폰 교체 재등록 경로다.
+// v2.680(감사 C-03): 이름이 아니라 로컬 토큰인지(authSrc)로 판정 — AD 세션이 같은 이름의 로컬 계정(예: super_admin)에 OTP 를 묶지 못하게.
+const LOCAL_ONLY = { ok: false, reason: '로컬 계정만 OTP를 등록할 수 있습니다. (AD 계정 제외)' };
 authRouter.post('/totp/begin', authMiddleware, (req, res) => {
-  if (!getUser(req.user.username)) return res.status(400).json({ ok: false, reason: '로컬 계정만 OTP를 등록할 수 있습니다. (AD 계정 제외)' });
-  res.json(beginTotpEnroll(req.user.username, req.get('host') || '', { actor: req.user.username }));
+  if (req.user?.authSrc !== 'local' || !getUser(req.user.username)) return res.status(400).json(LOCAL_ONLY);
+  res.json(beginTotpEnroll(req.user.username, req.get('host') || '', { actor: req.user.username, actorUser: req.user }));
 });
 authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
-  const r = confirmTotpEnroll(req.user.username, (req.body || {}).code, { actor: req.user.username });
+  if (req.user?.authSrc !== 'local') return res.status(400).json(LOCAL_ONLY);
+  const r = confirmTotpEnroll(req.user.username, (req.body || {}).code, { actor: req.user.username, actorUser: req.user });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

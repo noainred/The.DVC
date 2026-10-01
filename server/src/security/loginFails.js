@@ -7,6 +7,7 @@ import { getLogsDb } from '../logs/db.js';
 import { isLoginFailRow } from '../logs/loginFailPattern.js';
 import { createYielder } from '../util/timeSlice.js';
 import { getStoredFails } from './loginStore.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const DAY = 86_400_000;
 const IPV4 = /(?:\d{1,3}\.){3}\d{1,3}/;
@@ -65,11 +66,31 @@ async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, sc
   return out;
 }
 
+/*
+ * v2.680 C-01: 분석 인자의 허용 범위 — security/loginMonitor.js RANGES 와 같은 값이다(설정 저장은 거기서 자른다).
+ * 예전 GET 라우트는 쿼리값을 그대로 넘겨 ?days=Infinity 면 since=-Infinity 라 조각 루프가 끝나지 않았다(재현: 3초에 조회 1,258만 회).
+ * 클램프는 헬퍼 안에도 둔다 — 새 호출부도 자동으로 보호된다(v2.574 rangeOf 규약). 못 읽은 값(빈 값·NaN·0 이하)은 기본값.
+ */
+export const LOGIN_FAIL_RANGES = Object.freeze({ days: [1, 90], threshold: [2, 1000], windowMin: [1, 1440] });
+export const LOGIN_FAIL_DEFAULTS = Object.freeze({ days: 7, threshold: 5, windowMin: 10 });
+export function clampLoginFailParams(p = {}, defaults = LOGIN_FAIL_DEFAULTS) {
+  const out = {};
+  for (const [k, [lo, hi]] of Object.entries(LOGIN_FAIL_RANGES)) {
+    const n = numOrNull(p?.[k]);
+    const d = numOrNull(defaults?.[k]);
+    const v = n == null || n <= 0 ? (d == null || d <= 0 ? LOGIN_FAIL_DEFAULTS[k] : d) : n;
+    out[k] = Math.max(lo, Math.min(hi, v));
+  }
+  return out;
+}
+
 /**
  * @param opts { vcenterId?, days=7, threshold=5, windowMin=10 }
  * threshold: 같은 사용자/IP가 이 횟수 이상이면 브루트포스 의심. windowMin: 활성 브루트포스 판정 창.
  */
-export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 5, windowMin = 10 } = {}, deps = {}) {
+export async function analyzeLoginFails(opts = {}, deps = {}) {
+  const vcenterId = opts?.vcenterId || '';
+  const { days, threshold, windowMin } = clampLoginFailParams(opts);
   const db = deps.db || await getLogsDb();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const since = now - Math.max(1, days) * DAY;

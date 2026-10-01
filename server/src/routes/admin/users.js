@@ -78,7 +78,7 @@ adminRouter.post('/users', adminOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
-  const r = createUser(req.body || {}, { actor: req.user?.username });
+  const r = createUser(req.body || {}, { actor: req.user?.username, actorUser: req.user });
   logAudit({ user: req.user?.username, action: r.ok ? '사용자 생성' : '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: r.ok ? `role=${(req.body || {}).role || 'viewer'}` : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -89,7 +89,7 @@ adminRouter.patch('/users/:username', adminOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '사용자 수정 거부', target: req.params.username, detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
-  const r = updateUser(req.params.username, req.body || {}, { actor: req.user?.username });
+  const r = updateUser(req.params.username, req.body || {}, { actor: req.user?.username, actorUser: req.user });
   logAudit({ user: req.user?.username, action: r.ok ? '사용자 수정' : '사용자 수정 거부', target: req.params.username, detail: r.ok ? `role=${(req.body || {}).role ?? '-'}·name=${(req.body || {}).name ?? '-'}` : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -97,7 +97,7 @@ adminRouter.patch('/users/:username', adminOnly, (req, res) => {
 adminRouter.delete('/users/:username', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
   if (req.params.username === req.user.username) return res.status(400).json({ ok: false, reason: '자기 자신은 삭제할 수 없습니다.' });
-  const r = deleteUser(req.params.username, { actor: req.user?.username });
+  const r = deleteUser(req.params.username, { actor: req.user?.username, actorUser: req.user });
   logAudit({ user: req.user?.username, action: r.ok ? '사용자 삭제' : '사용자 삭제 거부', target: req.params.username, detail: r.ok ? '' : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -111,7 +111,7 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
     matrix: { admin: rolePermissions('admin'), ...loadMatrix() },
     // v2.643: admin 행에서 끌 수 있는 키(CSV)와 그것을 바꿀 수 있는가(super_admin 만). super_admin 은 항상 전체.
     adminToggleKeys: ADMIN_TOGGLE_KEYS,
-    canEditAdminRow: actorIsSuperAdmin(_req.user?.username),
+    canEditAdminRow: actorIsSuperAdmin(_req.user || null),
     // v2.506(감사 미해결 #5): **서버가 실제로 막을 수 있는 도구인지** 함께 내려준다.
     // 도구 거부목록 게이트는 `api.use('/tools', …)` 에만 걸려 있어, 자기 API 가 `/api/tools/*`
     // 가 아닌 도구(예 /admin/*·/insights/*)는 이 목록으로 못 막는다. 그런데 화면은 그냥
@@ -170,7 +170,7 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
   if (next.adminDenied !== undefined) {
     const cur = [...(loadMatrix().adminDenied || [])].sort().join(',');
     const want = [...new Set((Array.isArray(next.adminDenied) ? next.adminDenied : []).filter((k) => ADMIN_TOGGLE_KEYS.includes(k)))].sort().join(',');
-    if (cur !== want && !actorIsSuperAdmin(req.user?.username)) {
+    if (cur !== want && !actorIsSuperAdmin(req.user || null)) {
       return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'admin 행(CSV 가져오기/내보내기)의 권한은 super_admin 만 바꿀 수 있습니다.' });
     }
     adminDenied = next.adminDenied;
@@ -182,7 +182,7 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
   // v2.643: 초기화는 admin 행(adminDenied)도 기본(허용)으로 되돌린다 — admin 이 super_admin 의 결정을 우회하지 못하게.
-  if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user?.username)) {
+  if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user || null)) {
     return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });
   }
   const matrix = resetMatrix();
@@ -197,7 +197,7 @@ adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
 // 계정 탈취가 된다(auth.js credentialGuardDenied). 한 곳만 빠져도 우회가 성립한다.
 adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
-  const r = setLocalPassword(req.params.username, (req.body || {}).password, { actor: req.user?.username });
+  const r = setLocalPassword(req.params.username, (req.body || {}).password, { actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -205,7 +205,7 @@ adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
 // 로그인 차단(관리자) — 비밀번호/OTP 를 모두 제거해 로그인 불가 상태로 되돌린다(데모 계정 잠금).
 adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
-  const r = clearLoginCredentials(req.params.username, { actor: req.user?.username });
+  const r = clearLoginCredentials(req.params.username, { actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 로그인 차단(자격증명 제거)', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 로그인 차단 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -218,13 +218,13 @@ adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
 // (auth.js credentialGuardDenied). 대리 등록은 감사로그에 남긴다 — 강력한 권한 작업이다.
 adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
-  const r = beginTotpEnroll(req.params.username, req.get('host') || '', { actor: req.user?.username });
+  const r = beginTotpEnroll(req.params.username, req.get('host') || '', { actor: req.user?.username, actorUser: req.user });
   if (!r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
-  const r = confirmTotpEnroll(req.params.username, (req.body || {}).code, { actor: req.user?.username });
+  const r = confirmTotpEnroll(req.params.username, (req.body || {}).code, { actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 확정', target: req.params.username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -234,7 +234,7 @@ adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   // 클라이언트가 `{"force":true}` 를 실어 수퍼관리자 OTP 해제 가드를 무력화할 수 있었다
   // (재감사에서 실행 재현: 해제 → 임시 비번 로그인 → 자력 OTP 등록 → 계정 탈취).
   // 허용 필드만 골라 넘기고, force 는 서버 내부에서만 설정한다.
-  const r = disableTotp(req.params.username, { password: (req.body || {}).password, actor: req.user?.username });
+  const r = disableTotp(req.params.username, { password: (req.body || {}).password, actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 해제(관리자)', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: 'OTP 해제 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);

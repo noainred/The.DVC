@@ -28,6 +28,8 @@ export function whyChip(why) {
   const bits = [t.fix];
   if (why.agent) bits.push(`담당 엣지: ${why.agent}`);
   if (why.detail && (why.code === 'collect-failed' || why.code === 'unknown')) bits.push(`근거: ${why.detail}`);
+  // v2.680(감사 C-06): 비관리자에게는 수집 오류 원문을 싣지 않는다 — 빠진 이유를 말한다.
+  else if (why.detailHidden) bits.push('근거: 오류 원문은 관리자에게만 보입니다');
   return { short, title: bits.join('\n') };
 }
 

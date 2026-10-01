@@ -61,15 +61,42 @@ export function cardMeta(k, c) {
     case 'storage': { const s = c.storage; if (s.totalBytes == null) return s.devices ? `용량을 읽은 장비 없음(${s.devices}대)` : '등록된 스토리지 없음';
       return `사용 ${s.usedPct == null ? '—' : `${s.usedPct}%`} · ${s.read}/${s.devices}대${s.unread ? ` · 못 읽음 ${s.unread}` : ''}`; }
     case 'network': { const n = c.network; if (n.unavailable) return 'CVP DB 를 열 수 없습니다'; if (n.error) return `읽기 실패: ${n.error}`; return `CVP 등록 장비 · CVP 서버 ${countText(n.cvpServers)}대`; }
-    case 'power': { const p = c.power; const k = (x) => (x?.measured ? kwText(x.watts) : '—'); return `서버 ${k(p.servers)} · 네트워크 ${k(p.network)} · 스토리지 ${k(p.storage)}`; }
+    case 'power': { const p = c.power; const k = (x) => powerCatKw(x); return `서버 ${k(p.servers)} · 네트워크 ${k(p.network)} · 스토리지 ${k(p.storage)}`; }
     default: return '';
   }
+}
+/**
+ * v2.680 D-04: 카테고리 kW — 읽은 장비(완전 측정 + 일부 PSU 만 읽은 장비)가 하나도 없으면 '—'(0.0 kW 는 '전력 0' 으로 읽힌다).
+ * 값이 있으면 0 W 도 그대로 보인다(측정한 0 은 값이다).
+ */
+export function powerCatKw(x) {
+  if (!x) return '—';
+  const n = (Number(x.measured) || 0) + (Number(x.partial) || 0);
+  return n > 0 ? kwText(x.watts) : '—';
+}
+/** 전체 합계 kW — 어느 카테고리도 읽은 장비가 없으면 '—'. */
+export function powerTotalKw(d) {
+  if (!d) return '—';
+  const any = ['servers', 'network', 'storage'].some((k) => (Number(d[k]?.measured) || 0) + (Number(d[k]?.partial) || 0) > 0);
+  return any ? kwText(d.totalWatts) : '—';
 }
 /** 전력 카테고리 문구 — 측정 대수와 뺀 대수를 함께. */
 export function powerCatNote(cat, x) {
   if (!x) return '';
-  if (cat === 'servers') return `iDRAC 실측 ${countText(x.measured)}대${x.excludedVcenter ? ` · vCenter 추정 ${countText(x.excludedVcenter)}대는 뺐습니다` : ''}`;
+  if (cat === 'servers') {
+    // v2.680 A-06: 분모(서버 분석 등록 · 활성 · OME 콘솔 제외)가 있으면 '측정 m/n대' 로 말한다. 없으면(구버전 응답) 예전 문구.
+    const parts = [];
+    if (x.devices != null) {
+      parts.push(`iDRAC 실측 ${countText(Math.max(0, (Number(x.measured) || 0) - (Number(x.ome) || 0)))}/${countText(x.devices)}대`);
+      if (x.unread) parts.push(`못 읽음·오래된 값 ${countText(x.unread)}`);
+      if (x.ome) parts.push(`OME 로 읽음 ${countText(x.ome)}`);
+    } else parts.push(`iDRAC 실측 ${countText(x.measured)}대`);
+    if (x.excludedVcenter) parts.push(`vCenter 추정 ${countText(x.excludedVcenter)}대는 뺐습니다`);
+    return parts.join(' · ');
+  }
   const miss = [];
+  // v2.680 A-05: 장착 PSU 중 일부만 읽은 스위치 — 합계에는 읽은 PSU 만 들어 있어 실제보다 작다.
+  if (cat === 'network' && x.partial) miss.push(`일부 PSU 만 읽음 ${x.partial}(합계가 실제보다 작음)`);
   if (x.unread) miss.push(`못 읽음 ${x.unread}`);
   if (x.stale) miss.push(`오래된 값 ${x.stale}`);
   if (cat === 'storage' && x.unsupported) miss.push(`수집 경로 없음 ${x.unsupported}`);

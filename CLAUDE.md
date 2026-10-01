@@ -4710,6 +4710,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 카테고리 저장(PUT 에 overrides·stages 없음)은 덮어쓰기를 건드리지 않는다 — `Object.hasOwn(body, …)` 일 때만 바꾼다(테스트 고정).
     · 바꾼 이름은 특수 기능 화면·도구 제목에만 쓴다. V4·V5·V6 내비·⌘K 팔레트는 원래 이름이다(드로어 안내가 말한다). 원래 이름은 `aka` 로 검색된다.
     · 분류 바 sticky top = 셸 머리 실제 높이 + 8px(ResizeObserver) · 720px 이하는 고정하지 않는다(탭이 여러 줄이라 400px 화면의 1/3 을 가렸다 — Chromium 판독).
+  - ⚠⚠ **v2.680 — 1회차 점검(버그·튜닝·개선·보안) 확정분**(사용자 요청 "버그 수정, 튜닝, 개선, 보안 취약점 점검 3회" 의 1회차. 6축 감사 → 4그룹 + 리드 수정 →
+    수정마다 변이 검증. 상세 `docs/AUDIT-2026-10-02.md`, 회귀 `server/test/audit2680{a,b,c,e,f}` + 웹 `audit2680{b,c,d}`):
+    · ⚠⚠ **두 출처가 같은 값을 줄 때는 '더 자주 읽는 쪽' 이 이긴다**(A-01 high): 센서 상세가 30분 주기 Sensors 컬렉션을 먼저 넣고 Thermal 은 빈 칸만 채워, Critical 흡기가
+      OK 로 보였다. 컬렉션은 임계값·추가 센서만 채우고, 75분(`SENSOR_COLLECTION_FRESH_MS` — 판정 한 벌)이 지난 컬렉션 전용 센서는 판정 불가로 요약에서 뺀다.
+    · **조회 실패 상태로 편집기를 열지 않는다**(D-01 high — v2.618 WEB-2 '조회 실패 → 저장' 의 재발): 특수 기능 이름·단계 편집기는 설정을 읽은 뒤에만 열리고 그 전엔 저장을 거부한다.
+    · **확인 불가 장비의 남은 값은 합산하지 않는다**(B-01) · 부품 목록은 `faults.partsFresh`(부품 주기×3 + 장비 경계)를 넘으면 관측이 아니다(B-02 — v2.548 C2 거짓 신선) ·
+      Overview 와 장애 판정은 같은 `TELEMETRY_OK` 를 쓴다(B-03). CVP 대소문자 병합(`ADOPT_PK`)은 agent 축을 가진 **모든** 표를 옮긴다(F-01 — 새 표를 더하면 여기도).
+    · **요청 경로에서 등록부를 행마다 읽지 말 것**(A-04 — `loadIdracRegistry` 는 statSync + structuredClone) · 지표 기간 통계는 키별 seek(E-02 — `GROUP BY k` 는 파티션 전체).
+    · **사용자 입력 일수는 함수 안에서도 자른다**(C-01 — Infinity 가 끝나지 않는 조각 루프) · super_admin 판정은 로컬 토큰 표지 `authSrc:'local'`(C-03 — 이름 조회는 같은 이름 AD 세션을 통과시켰다).
+    · 정직 기록: 실장비 미확인(합성 재현) · B-06(브레이크아웃 트랜시버)·F-03(CVP 이벤트 워터마크) 미처리 · 센서 상세 캐시 동기 저장은 빈도만 줄였다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
