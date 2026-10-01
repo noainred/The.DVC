@@ -281,7 +281,9 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
 
 api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
-  let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host'], req.user);
+  // v2.670: ?nameOnly=1 — VM 이름만 검색(Platform 화면 '전체 vCenter VM 이름 조회'). 범위(scope)는 applyFilters 가 먼저 강제한다.
+  const nameOnly = q.nameOnly === '1' || q.nameOnly === 'true';
+  let vms = applyFilters(snap.vms, q, snap, nameOnly ? ['name'] : ['name', 'guestOS', 'ipAddress', 'host'], req.user);
 
   // 필터 단일 패스(v2.343 #7): 종전엔 조건마다 .filter 로 최대 14회 전체 재순회+중간 배열을
   // 만들었다(5,000행 × 14패스/요청). 조건 판정과 GPU 집계를 한 루프에 합친다 — 의미는 동일

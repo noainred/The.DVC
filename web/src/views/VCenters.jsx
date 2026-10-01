@@ -1,13 +1,70 @@
 import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson, toolAllowed } from '../api.js';
+import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 import { growth, hasDsData, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
+// v2.671: VM 이름 검색 결과를 누르면 여는 상세 — 목록 화면이 그 청크를 받지 않게 열 때만 받는다.
+const EntityDetail = lazy(() => import('../components/EntityDetail.jsx').then((m) => ({ default: m.EntityDetail })));
 import { vcCardState, storageBarInfo } from './vcCardText.js';
 import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
+import STable from '../components/STable.jsx';
+import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
+
+/**
+ * 전체 vCenter VM 이름 조회(v2.671, 사용자 요청 "이 화면의 검색에서 전체 vcenter 를 검색해서 vm 이름으로 조회").
+ * 입력이 멈추고 300ms 뒤 서버 /vms?nameOnly=1 을 한 번 부른다(폴링 안 함). 늦게 온 이전 응답은 버린다.
+ * 범위(scope)는 서버가 강제하고, inv.vms 권한이 없으면 부르지 않고 그 사실을 말한다.
+ */
+function VmNameSearch({ term, sites }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [sel, setSel] = useState(null);
+  const allowed = can('inv.vms');
+  useEffect(() => {
+    setData(null); setErr('');
+    if (!term || !allowed) return undefined;
+    let active = true;
+    const t = setTimeout(() => {
+      fetchJson('/vms', { q: term, nameOnly: '1', sortBy: 'name', order: 'asc', limit: VM_SEARCH_LIMIT })
+        .then((r) => { if (active) setData(r); })
+        .catch((e) => { if (active) setErr(e?.status === 403 ? 'VM 목록 조회 권한이 없습니다(설정 › 사용자 관리 › 권한).' : `VM 조회 실패: ${e?.message || e}`); });
+    }, 300);
+    return () => { active = false; clearTimeout(t); };
+  }, [term, allowed]);
+  if (!term) return null;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="flex between" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        <b>VM 이름 검색 — 전체 vCenter</b>
+        <span className="muted" style={{ fontSize: 12 }}>{!allowed ? 'VM 목록 조회 권한이 없어 VM 은 찾지 않았습니다.' : err || vmSearchSummary(term, data)}</span>
+      </div>
+      {items.length > 0 && (
+        <STable className="v3-table" minWidth={760}>
+          <thead><tr><th>VM 이름</th><th>vCenter</th><th>호스트</th><th>전원</th><th>IP</th><th>vCPU</th><th>메모리</th><th>게스트 OS</th></tr></thead>
+          <tbody>
+            {items.map((v) => (
+              <tr key={v.id} style={{ cursor: 'pointer' }} title="클릭 — VM 상세" onClick={() => setSel(v)}>
+                <td><b>{v.name}</b></td>
+                <td>{vcNameOf(sites, v.vcenterId)}</td>
+                <td className="muted">{v.host || '—'}</td>
+                <td data-sort={v.powerState || ''}>{powerLabel(v.powerState)}</td>
+                <td className="muted">{v.ipAddress || '—'}</td>
+                <td data-sort={v.cpuCount ?? ''}>{v.cpuCount ?? '—'}</td>
+                <td data-sort={v.memMB ?? ''}>{memText(v.memMB)}</td>
+                <td className="muted">{v.guestOS || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      )}
+      {sel && <Suspense fallback={null}><EntityDetail type="vm" item={sel} onClose={() => setSel(null)} /></Suspense>}
+    </div>
+  );
+}
 
 /** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
 function Spark({ points, color }) {
@@ -173,13 +230,15 @@ export default function VCenters({ onSelectSite, resetSignal }) {
           })}
           {/* 빠른 찾기 — 바로가기 박스 우측에 배치. 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }}
-            value={query} onChange={setQuery} placeholder="vCenter 빠른 찾기" />
+            value={query} onChange={setQuery} placeholder="vCenter · VM 이름 찾기" />
         </div>
       )}
 
+      <VmNameSearch term={vmSearchTerm(query)} sites={sites} />
+
       {keywords.length > 0 && shown.length === 0 && (
         <div className="card" style={{ padding: '18px 16px', color: 'var(--text-dim)' }}>
-          "{query}" 와 일치하는 vCenter가 없습니다 — 이름·id·도시·국가·리전·버전에서 검색합니다.
+          "{query}" 와 일치하는 vCenter가 없습니다 — vCenter 는 이름·id·도시·국가·리전·버전에서, VM 은 위 표에서 이름으로 찾습니다.
         </div>
       )}
 
