@@ -18,14 +18,14 @@ test('C-03 — AD 토큰에는 로컬 표지가 없고 /totp/begin·confirm 은 
   A.createUser({ username: 'samename', name: 'S', role: 'admin', password: 'Xx!23456789abc' }, { trusted: true });
   const ad = A.signToken({ sub: 'samename', role: 'admin', name: 'AD', src: 'ad' });
   const lo = A.signToken({ sub: 'samename', role: 'admin', name: 'L', src: 'local', tv: 0 });
-  assert.equal(A.resolveTokenUser(ad)?.authSrc, undefined);
+  assert.equal(A.resolveTokenUser(ad), null, 'v2.681 R2B-01: 로컬 이름과 같은 AD 토큰은 무효');
   const app = express(); app.use(express.json()); app.use('/api/auth', authRouter);
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const base = `http://127.0.0.1:${srv.address().port}/api/auth`;
   try {
     const call = (tok, p) => fetch(base + p, { method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' }, body: '{"code":"123456"}' });
-    assert.equal((await call(ad, '/totp/begin')).status, 400);
-    assert.equal((await call(ad, '/totp/confirm')).status, 400);
+    assert.equal((await call(ad, '/totp/begin')).status, 401);
+    assert.equal((await call(ad, '/totp/confirm')).status, 401);
     if (A.resolveTokenUser(lo)) { // 로컬 토큰은 예전처럼 진행(단일 세션 설정에 따라 토큰이 무효일 수 있다)
       assert.equal(A.resolveTokenUser(lo).authSrc, 'local');
       assert.equal((await call(lo, '/totp/begin')).status, 200);

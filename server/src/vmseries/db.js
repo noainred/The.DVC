@@ -23,6 +23,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
 import { openSqlite } from '../util/sqliteOpen.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
@@ -43,13 +44,23 @@ async function loadSqlite() {
 }
 
 const INDEX_FILE = () => path.join(DIR, '_index.json');
-function readIndex() { try { return JSON.parse(fs.readFileSync(INDEX_FILE(), 'utf8')) || {}; } catch { return {}; } }
+// v2.681(R2B-03): 인덱스는 파일명이 비가역(sha1 접미)이라 DB 파일만으로 재구축할 수 없다 — 손상되면 다음 저장이
+//   빈 인덱스로 덮어써 역매핑을 영영 잃는다. 원자 쓰기 + 파싱 실패 시 손상본 보존(없음 ENOENT 는 빈 값).
+function readIndex() {
+  let txt;
+  try { txt = fs.readFileSync(INDEX_FILE(), 'utf8'); } catch { return {}; }
+  try {
+    const v = JSON.parse(txt);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    throw new Error('객체가 아님');
+  } catch (e) { preserveCorrupt(INDEX_FILE(), e.message); return {}; }
+}
 function rememberIndex(file, vcenterId) {
   try {
     const idx = readIndex();
     if (idx[file] === vcenterId) return;
     idx[file] = vcenterId;
-    fs.writeFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2));
   } catch { /* 표시용 인덱스 — 실패해도 수집은 계속 */ }
 }
 

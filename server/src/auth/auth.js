@@ -932,11 +932,29 @@ export function disableTotp(username, { password, force = false, actor = null, a
  * built-in admin keeps working alongside AD logins.
  */
 export async function authenticate(username, password) {
+  // v2.681(R2B-01): 로컬 계정과 이름이 같으면(대소문자 무시) AD 를 시도하지 않는다 — 로컬 인증만.
+  //   AD 는 입력한 username 을 그대로 돌려주므로(ad.js) 같은 이름의 AD 세션이 이름으로 판정하는 경계
+  //   (설정 소유자 requireSettingsOwner · credentialGuardDenied · actorIsOwner · identityGuardDenied ·
+  //   credentials.js reauth · isSettingsOwner · 단일 세션 키)를 전부 '본인' 으로 통과했다. 판정 다섯 곳을
+  //   각각 고치는 대신 여기(발급)와 resolveTokenUser(검사) 두 곳에서 '로컬 이름 = AD 세션 불가' 를 집행한다.
+  //   로컬 계정이 없는 이름의 AD 로그인은 예전 그대로다.
+  if (localNameTaken(username)) return authenticateLocal(username, password);
   try {
     const adUser = await authenticateAD(username, password);
     if (adUser) return adUser;
   } catch { /* fall back to local */ }
   return authenticateLocal(username, password);
+}
+
+/**
+ * v2.681(R2B-01): 이 이름(대소문자 무시)의 로컬 계정이 있는가. AD 세션을 막는 판정 하나 —
+ * 이름 기반 판정(owners.includes·actor===username)은 대소문자를 구분하지만 여기는 넓게 막는다
+ * ('KIM' AD 세션이 'kim' 로컬 계정 단일 세션 키·감사 기록과 혼동되지 않게).
+ */
+export function localNameTaken(username) {
+  const n = String(username ?? '').trim().toLowerCase();
+  if (!n) return false;
+  try { return loadUsers().some((u) => String(u?.username ?? '').toLowerCase() === n); } catch { return false; }
 }
 
 /* -------------------------------- middleware ------------------------------- */
@@ -987,6 +1005,10 @@ export function resolveTokenUser(token) {
       mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
     };
   }
+  // v2.681(R2B-01): 로컬 계정과 같은 이름(대소문자 무시)의 비-로컬(AD) 토큰은 무효다 — 업그레이드 전에 발급된
+  //   토큰도 여기서 죽는다. 로그인(authenticate)이 이미 그런 AD 세션을 만들지 않지만, 로컬 계정이 나중에 생긴
+  //   경우·구버전이 발급한 토큰을 함께 막는다(이름 기반 소유자·자격증명 가드의 우회 차단).
+  if (localNameTaken(payload.sub)) return null;
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
   // super_admin 은 로컬 계정 전용이다 — 토큰 클레임이 super_admin 이어도 admin 으로 접는다(v2.643).
   return { username: payload.sub, role: authzRole(payload.role), name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] } };

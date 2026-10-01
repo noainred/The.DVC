@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import { openSqlite } from '../util/sqliteOpen.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
 // VMPERF_DB_DIR env 가 있으면 그것이 최우선(명시 설정을 덮지 않는다).
@@ -70,15 +71,23 @@ function legacyDbFileName(vcenterId) {
 const INDEX_FILE = () => path.join(DIR, '_index.json');
 
 /** 파일명(base) → 원본 vcenterId 매핑. 파일명이 비가역이라 역산은 이 인덱스로만 한다. */
+// v2.681(R2B-03): 인덱스는 파일명이 비가역(sha1 접미)이라 DB 파일만으로 재구축할 수 없다 — 손상되면 다음 저장이
+//   빈 인덱스로 덮어써 역매핑을 영영 잃는다. 원자 쓰기 + 파싱 실패 시 손상본 보존(없음 ENOENT 는 빈 값).
 function readIndex() {
-  try { return JSON.parse(fs.readFileSync(INDEX_FILE(), 'utf8')) || {}; } catch { return {}; }
+  let txt;
+  try { txt = fs.readFileSync(INDEX_FILE(), 'utf8'); } catch { return {}; }
+  try {
+    const v = JSON.parse(txt);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    throw new Error('객체가 아님');
+  } catch (e) { preserveCorrupt(INDEX_FILE(), e.message); return {}; }
 }
 function rememberIndex(file, vcenterId) {
   try {
     const idx = readIndex();
     if (idx[file] === vcenterId) return;
     idx[file] = vcenterId;
-    fs.writeFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2));
   } catch { /* 인덱스는 표시·정리 편의용 — 실패해도 수집은 계속한다 */ }
 }
 
