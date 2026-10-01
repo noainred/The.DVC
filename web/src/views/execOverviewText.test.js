@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   modeFromHash, overviewMode, normDays, briefingStamp, gauges, chartGroup, regionCards,
-  siteRowsExec, sortSiteRows, sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, usageTone,
+  siteRowsExec, sortSiteRows, sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, usageTone, gpuKpi,
 } from './execOverviewText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -148,5 +148,30 @@ describe('인벤토리·소스 규약', () => {
     const css = fs.readFileSync(path.join(HERE, '..', 'styles.css'), 'utf8');
     const block = css.slice(css.indexOf('.xov {'));
     expect(block).not.toMatch(/text-transform:\s*uppercase/);
+  });
+});
+
+describe('v2.678 GPU 카드 KPI — iDRAC 인벤토리 기준', () => {
+  it('전부 읽었으면 개수 그대로', () => {
+    const k = gpuKpi({ gpus: { count: 12, inventoryRead: 70, servers: 70 } });
+    expect(k.value).toBe(12); expect(k.partial).toBe(false);
+    expect(k.sub).toBe('iDRAC 인벤토리 기준 · 수집 70/70대');
+  });
+  it('한 대도 못 읽었으면 0 이 아니라 모름(null)', () => {
+    const k = gpuKpi({ gpus: { count: 0, inventoryRead: 0, servers: 70 } });
+    expect(k.value).toBeNull(); expect(k.sub).toMatch(/아직 읽은 서버가 없습니다/);
+    expect(inventoryCells({ gpus: { count: 0, inventoryRead: 0, servers: 70 } }, {}).find((c) => c.key === 'gpu').value).toBe('—');
+  });
+  it('일부만 읽었으면 최소값임을 밝힌다', () => {
+    const k = gpuKpi({ gpus: { count: 5, inventoryRead: 40, servers: 70 } });
+    expect(k.value).toBe(5); expect(k.partial).toBe(true); expect(k.sub).toMatch(/최소값/);
+  });
+  it('등록 서버 0대면 0장(모름이 아니다) · 카드 자료가 없으면 null', () => {
+    expect(gpuKpi({ gpus: { count: 0, inventoryRead: 0, servers: 0 } }).value).toBe(0);
+    expect(gpuKpi(null).value).toBeNull();
+  });
+  it('경영 보기 KPI 에 GPU 카드 칸이 있다', () => {
+    const src = fs.readFileSync(path.join(HERE, 'ExecOverview.jsx'), 'utf8');
+    expect(src).toMatch(/key: 'gpus', label: 'GPU 카드'/);
   });
 });

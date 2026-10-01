@@ -286,9 +286,28 @@ export function inventoryCells(cards, g) {
   return [
     { key: 'dc', label: '데이터센터', value: countText(c.datacenters?.count) },
     { key: 'farm', label: '서버 Farm', value: countText(c.farms?.count), title: c.farms?.reason || undefined },
-    { key: 'gpu', label: 'GPU(장)', value: countText(c.gpus?.count), hash: '#/tools/serveranalysis/gpu' },
+    { key: 'gpu', label: 'GPU(장)', value: countText(gpuKpi(c).value), hash: '#/tools/serveranalysis/gpu' },
     { key: 'net', label: '네트워크 장비(대)', value: countText(c.network?.count), hash: c.network?.reason ? undefined : '#/tools/cvp', title: c.network?.reason || undefined },
     { key: 'hosts', label: '호스트(대)', value: countText(g?.hosts), tab: 'hosts' },
     { key: 'alarms', label: '활성 알람(건)', value: countText(g?.alarms), tab: 'alarms' },
   ];
+}
+
+/**
+ * v2.678 — 'GPU 카드' KPI(사용자 요청 "iDRAC 에서 수집한 데이터로 보여줘").
+ * 출처는 /overview/cards 의 gpus(서버 분석 iDRAC 인벤토리 — 모델·이름이 있는 GPU 항목 수)다.
+ * 인벤토리를 한 대도 못 읽었으면 0 이 아니라 '—'(모름), 일부만 읽었으면 '최소' 값임을 밝힌다
+ * (읽지 못한 서버의 GPU 는 세지 않았다 — 부분 합을 전체라 말하지 않는다).
+ */
+export function gpuKpi(cards) {
+  const g = cards?.gpus;
+  if (!g) return { value: null, sub: '', partial: false };
+  const read = Number(g.inventoryRead) || 0;
+  const servers = Number(g.servers) || 0;
+  const unknown = servers > 0 && read === 0;
+  const partial = !unknown && read < servers;
+  const value = unknown ? null : g.count;
+  const sub = `iDRAC 인벤토리 기준 · 수집 ${countText(g.inventoryRead)}/${countText(g.servers)}대`
+    + (unknown ? ' · 아직 읽은 서버가 없습니다' : partial ? ' · 미수집 서버 제외(최소값)' : '');
+  return { value, sub, partial };
 }
