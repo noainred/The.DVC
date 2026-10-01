@@ -1607,6 +1607,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .st-h1 { font-size: 24px; }
   /* 좁은 폭: 기준 세그먼트를 한 줄 차지하게 하고 탭은 그 아래에서 줄바꿈한다(세그먼트 옆에 탭이 세로로 쌓이지 않게). */
   .st-tabs { flex-basis: 100%; gap: 4px; }
+  /* 좁은 폭에서는 고정하지 않는다 — 탭이 여러 줄이라 고정하면 400px 화면의 약 1/3 을 계속 가린다(v2.679 Chromium 판독). */
+  .st-bar { position: static; }
   .st-tab { padding: 6px 10px; font-size: 12.5px; }
   .st-head-right { max-width: none; flex-basis: 100%; }
   .st-editor-head, .st-editor-body, .st-editor-foot { padding-left: 14px; padding-right: 14px; }

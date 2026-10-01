@@ -140,7 +140,7 @@ export function validate(cfg) {
   const ids = cats.map((c) => String(c?.id || '').trim().toLowerCase());
   if (new Set(ids).size !== ids.length) out.push('카테고리 id 가 중복되었습니다.');
   // v2.679: 개발 단계·이름 덮어쓰기 — 오류만 여기서 막는다(없는 단계 참조는 경고 — validateStages 참고).
-  out.push(...validateStages(cfg).errors);
+  for (const e of validateStages(cfg).errors) out.push(e);
   return out;
 }
 

@@ -4701,6 +4701,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       못 읽은 수치는 null. 게이트는 형제 status 와 같은 adminOnly + fleetOnly. **새 스캔 경로(엣지 보고·수동 실행)를 만들면 여기에도 기록할 것.**
     - ⚠ 정직 기록: 실제 엣지 에이전트의 스캔 보고 로그는 테스트 라우터로만 확인했다 · 브라우저 검증은 목 데이터(관리자·AUTH_DISABLED_ROLE=viewer)로
       했다 — viewer 서버에서도 웹 `hasRole` 은 admin 으로 보여 'CSV 가져오기는 운영자·관리자만' 안내는 화면으로 보지 못했다(서버 403 은 테스트로 고정).
+  - ⚠⚠ **특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다**(`server/src/toolcats/`{catalog,settings}.js +
+    웹 `views/toolSections.js applyOverrides·buildStageSections·introLine` + `views/ToolNamesStages.jsx`(드로어·설정 화면 공용) + `SpecialTools.jsx`,
+    사용자 제공 핸드오프 '특수 기능 화면 재구성'. 회귀 `server/test/toolNames2679.test.js` + 웹 `toolSections.test.js`):
+    · 설정 파일은 기존 `tool-categories.json` 에 `stages`(null = 단계 축 꺼짐 — **업그레이드로 자동으로 켜지지 않는다**) · `overrides`(키 → label/desc/stage,
+      빈 값은 키를 지운다) · `stageDisplay`(badge|suffix). 단계 색은 `STAGE_COLORS` 팔레트만(서버 400) — 임의 문자열이 style 로 들어가지 않게.
+    · 첫 단계가 기본값 — 없는 단계를 가리키면 화면은 기본 단계로 본다(서버는 저장 때 그 stage 를 지우고 경고). 단계 축을 끄면(null) 지정은 남긴다.
+    · 카테고리 저장(PUT 에 overrides·stages 없음)은 덮어쓰기를 건드리지 않는다 — `Object.hasOwn(body, …)` 일 때만 바꾼다(테스트 고정).
+    · 바꾼 이름은 특수 기능 화면·도구 제목에만 쓴다. V4·V5·V6 내비·⌘K 팔레트는 원래 이름이다(드로어 안내가 말한다). 원래 이름은 `aka` 로 검색된다.
+    · 분류 바 sticky top = 셸 머리 실제 높이 + 8px(ResizeObserver) · 720px 이하는 고정하지 않는다(탭이 여러 줄이라 400px 화면의 1/3 을 가렸다 — Chromium 판독).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
