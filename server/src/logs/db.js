@@ -14,7 +14,8 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
-import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
+import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
 function dbPath() {
@@ -119,6 +120,15 @@ function initSqlite() {
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
       /**
+       * v2.673(운영 장애): 로그인 실패 **후보**만 — 검색어(q)를 쓰지 않고 logs/loginFailPattern.js 의 좁은 조건 하나로 범위를 1회 훑는다.
+       * 예전 분석은 이 범위를 단어 4개로 4번 훑었다(드문 단어는 매번 전 범위). 최종 판정은 호출부가 정규식으로 다시 한다.
+       */
+      loginFailCandidates: (f = {}, limit = 5000) => {
+        const { where, params } = filterSql({ ...f, q: '' });
+        const w = where ? `${where} AND ${LOGIN_FAIL_SQL}` : `WHERE ${LOGIN_FAIL_SQL}`;
+        return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${w} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...params, clampPage(limit, 0)[0]);
+      },
+      /**
        * v2.632(A6-2632-02): 키셋 페이지 — 커서 (ts, rid) 보다 **오래된** 행만(ORDER BY ts DESC, rowid DESC). OFFSET 을 쓰지 않으므로
        * 청크 사이에 커서와 같은 ts 로 행이 들어와도 결과가 밀리지 않는다(예전 OFFSET 경로는 '중복 1 + 누락 1' 이었다).
        * 반환 행에 rid(rowid)가 실린다 — 다음 커서용이다. cursor 가 null 이면 처음부터.
@@ -213,6 +223,8 @@ function initJson() {
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
+    // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
+    loginFailCandidates: (f = {}, limit = 5000) => rows.filter((r) => match(r, { ...f, q: '' }) && isLoginFailRow(r)).sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0]),
     queryPage: (f = {}, limit = 200, cursor = null) => {
       const c = keysetCursor(cursor);
       const [lim] = clampPage(limit, 0);
