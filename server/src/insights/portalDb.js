@@ -31,7 +31,7 @@ const PURPOSES = {
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',
-  'auth.json': '포탈 사용자/권한/TOTP(2FA) 자격',
+  'auth.json': 'Active Directory(LDAP) 로그인 연동 설정(서버·도메인·그룹→역할 매핑) — 로컬 계정은 users.json',
   'idrac.json': 'iDRAC/OME 등록(서버·자격증명)',
   'gpu-guest.json': 'GPU 게스트(패스쓰루) 수집 설정/자격',
   'gpu-physical.json': '물리(베어메탈) 서버 GPU SSH 수집 등록',
@@ -39,7 +39,7 @@ const PURPOSES = {
   'remote-access.json': '원격 접속(HAProxy 중계) 매핑',
   'collectors.json': '분산 수집 에이전트(컬렉터) 등록',
   'central-inventory.json': '중앙이 수집한 사이트 인벤토리 캐시',
-  'nsx.json': 'NSX 등록/버전 정보',
+  'nsx.json': 'NSX Manager 등록부(주소·접속 계정 — 비밀 봉인, 0600)',
   'alerts.json': '알림(이메일/웹훅) 설정',
   'metrics.json': '지표 샘플링 설정',
   'emergency-stop.json': '긴급중단(수집 전체 정지) 상태 플래그',
@@ -86,6 +86,8 @@ const PURPOSES = {
   'bm-usage.db': '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA) 원시 90일 + 일 롤업(v2.550)',
   'link-check.db': '통신 점검 이력(중앙↔엣지·vCenter 링크 표본·이벤트·일 롤업, v2.552)',
   'cvp.db': 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)',
+  'log-analysis-stats.json': '로그 분석 누적 통계(로그 줄 종류별 개수 — 최근 7일, 시간 단위)',
+  'portal-db-size-history.json': '포탈 DB 크기 표본(이 화면의 증가량·용량 예측용 — 10분 표본 + 일 표본 400일, v2.674)',
   'bmstor-history.db': '베어메탈 스토리지 디스크 사용량 12시간 이력 — 서버·그룹·합계(v2.635)',
   // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
   'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',
@@ -115,7 +117,7 @@ const PURPOSES = {
   'central-agent-cvp.json': '엣지가 push 한 CVP 수집 상태 캐시(엣지별 마지막 push·장비 수·오류, v2.608)',
   'central-unsupported-servers.json': 'iDRAC 스캔이 찾은 비-Dell(미지원) 서버 보관소(위임 스캔 결과 포함, v2.495)',
   'agent-results.json': '에이전트(엣지) 위임 iDRAC 스캔 결과 보관소',
-  'active-sessions.json': '로그인 세션 저장소(재시작 뒤 세션 유지 — 손상이면 재로그인)',
+  'active-sessions.json': "'단일 세션 강제(ID 공유 금지)' 용 계정별 마지막 로그인 세션 ID(손상이면 재로그인)",
   'sanswitch-perf-push.json': '엣지 SAN 포트 사용량 push 커서(마지막으로 보낸 rowid)',
   'cvp-push.json': '엣지 CVP 포트 사용량 push 커서(마지막으로 보낸 rowid, v2.608)',
 };
@@ -191,7 +193,7 @@ const DETAILS = {
   'audit.ndjson': {
     keeps: '감사 로그 — 누가·언제·무엇을 변경했는지(추가형 append-only).',
     writer: 'logAudit() — 관리 작업 라우트 전반',
-    retention: '추가형(자동 삭제 없음)',
+    retention: '추가형 — 최신 AUDIT_MAX(기본 2만) 줄만 남기고 앞쪽은 지운다',
     note: '보안 사고 조사의 근거라 임의 삭제/편집 금지.',
   },
 };
