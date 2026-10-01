@@ -13,7 +13,9 @@ import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
  * '조치 필요' 는 개수를 세지 않는 바로가기다 — 각 도구 API 를 Overview 마다 부르면 그 자체가 부하다(정직: 개수는 도착 화면이 말한다).
  */
 const fmt = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toLocaleString('en-US'));
-const TONE_LABEL = { ok: '정상', warn: '주의', crit: '위험', none: '판정 대기' };
+const TONE_LABEL = { ok: '정상', warn: '주의', crit: '위험', none: '판정 대기', off: '비활성' };
+// v2.681(R2C-01): 비활성 vCenter 는 판정 대기와 따로 세지만 색은 같은 회색(tone-none)으로 그린다.
+const toneCls = (t) => (t === 'off' ? 'none' : t);
 // 법인 구분 선택은 이 브라우저의 편의 설정이다(localStorage — 프라이빗 창에서는 throw 하므로 try/catch, 못 읽으면 '전체').
 const GROUP_KEY = 'v6.siteGroup';
 function readGroup() { try { const v = globalThis.localStorage?.getItem(GROUP_KEY); return v === 'davinci' || v === 'irs' ? v : 'all'; } catch { return 'all'; } }
@@ -81,7 +83,7 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
       <div className="v6-panel">
         <div className="v6-panel-head">
           <b>법인별 상태</b>
-          <span>정상 {counts.ok} · 주의 {counts.warn} · 위험 {counts.crit}{counts.none ? ` · 판정 대기 ${counts.none}` : ''} — 이름순 · 상태 점은 CPU·메모리·스토리지 중 가장 높은 값(75% 주의 · 90% 위험)</span>
+          <span>정상 {counts.ok} · 주의 {counts.warn} · 위험 {counts.crit}{counts.none ? ` · 판정 대기 ${counts.none}` : ''}{counts.off ? ` · 비활성 ${counts.off}` : ''} — 이름순 · 상태 점은 CPU·메모리·스토리지 중 가장 높은 값(75% 주의 · 90% 위험)</span>
         </div>
         <div className="v6-segbar" role="group" aria-label="법인 구분">
           {SITE_GROUPS.map((x) => (
@@ -95,8 +97,8 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
         <div className="v6-sites">
           {cards.map((c) => (
             <button key={c.id} type="button" className="v6-site" onClick={() => onSelectSite?.(c.id)} title={`${c.name} 호스트 목록으로`}>
-              <div className="v6-site-top"><i className={`tone-${c.tone}`} title={TONE_LABEL[c.tone]} /><b>{c.name}</b><span>{c.region}</span></div>
-              <div className="v6-site-meta">알람 {c.alarms == null ? '—' : fmt(c.alarms)} · 호스트 {fmt(c.hosts)} · VM {fmt(c.vms)}</div>
+              <div className="v6-site-top"><i className={`tone-${toneCls(c.tone)}`} title={TONE_LABEL[c.tone]} /><b>{c.name}</b><span>{c.region}</span></div>
+              <div className="v6-site-meta">{c.mark ? <em className="tone-none" title={c.markTitle || ''}>{c.mark} · </em> : null}알람 {c.alarms == null ? '—' : fmt(c.alarms)} · 호스트 {c.hosts == null ? '—' : fmt(c.hosts)} · VM {c.vms == null ? '—' : fmt(c.vms)}</div>
               {c.bars.map((b) => (
                 <div key={b.k} className="v6-mini"><span>{b.k}</span><div><i className={`tone-${b.tone}`} style={{ width: `${Math.min(100, b.v ?? 0)}%` }} /></div><em className={b.v != null && b.v >= WARN_PCT ? `tone-${b.tone}` : ''}>{b.v == null ? '—' : `${Math.round(b.v)}%`}</em></div>
               ))}

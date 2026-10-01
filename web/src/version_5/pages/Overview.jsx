@@ -34,7 +34,8 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
 
   if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return <Loading label="Overview" />;
-  if (!ov.global) {
+  // v2.681(감사 R2C-02): 첫 병합 전 골격(ov.initial)의 global 은 호환용 0 이다 — '호스트 0 · VM 0' 을 그리지 않고 V6 과 같은 '수집 준비 중'.
+  if (!ov.global || ov.initial) {
     const phase = loadPhase({ health, healthError, poll: { data: null, error } });
     const t = loadText(phase, { health, pollError: error });
     return <div className="v5-card"><div className="v5-card-title">수집 준비 중</div><div className="v5-line">{t.long}</div></div>;
@@ -116,6 +117,7 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
             </button>
           </div>
           {/* v2.621(감사 WEB-03): 서버가 사용량 미상 DS 를 합계에서 뺐으면 그 개수를 함께 말한다(문구는 vcCardText 하나). */}
+          {infra?.statusMark && <div className="v5-note" title={infra.statusTitle || undefined}>{infra.statusMark} — {infra.statusTitle}</div>}
           <div className="v5-note">스토리지는 vCenter 데이터스토어 합계입니다(스토리지 어레이 원시 용량이 아닙니다).{infra?.storageNote ? ` ${infra.storageNote}.` : ''}</div>
         </section>
 

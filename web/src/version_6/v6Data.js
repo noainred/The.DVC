@@ -84,15 +84,34 @@ export function usageGauges(g) {
   ].map((x) => ({ ...x, tone: pctTone(x.pct) }));
 }
 
-/** 법인별 상태 카드 — worst(CPU·MEM·DS 최대)로 톤. 값이 하나도 없으면 'none'(판정 대기). */
+/**
+ * 법인별 상태 카드 — worst(CPU·MEM·DS 최대)로 톤. 값이 하나도 없으면 'none'(판정 대기).
+ * v2.681(감사 R2C-01): 첫 수집 중·연결 실패·비활성 vCenter 는 호스트·VM·알람을 0 이 아니라 null('—') + 표지(mark)다 —
+ * 판정은 corpSiteStatus 하나(serverCorpRows·ExecOverview siteRowsExec 와 같은 규칙). 비활성은 기다려도 판정되지 않으므로
+ * '판정 대기'(none) 가 아니라 'off' 로 따로 센다.
+ */
 export function siteCards(sites) {
-  return siteRows(sites || []).sort(bySiteName).map((r) => ({
-    group: siteGroupOf(r.name),
-    ...r,
-    tone: pctTone(r.worst),
-    alarms: r.alarmsUnknown ? null : (r.alarmsCritical || 0) + (r.alarmsWarning || 0),
-    bars: [['CPU', r.cpu], ['MEM', r.mem], ['DS', r.sto]].map(([k, v]) => ({ k, v, tone: pctTone(v) })),
-  }));
+  const byId = new Map((sites || []).filter((s) => s && typeof s === 'object').map((s) => [s.id, s]));
+  return siteRows(sites || []).sort(bySiteName).map((r) => {
+    const st = corpSiteStatus(byId.get(r.id) || { status: r.status });
+    const ok = st.countable;
+    const off = String(r.status || '') === 'disabled';
+    const bars = [['CPU', r.cpu], ['MEM', r.mem], ['DS', r.sto]].map(([k, v]) => {
+      const val = ok ? v : null;
+      return { k, v: val, tone: pctTone(val) };
+    });
+    return {
+      group: siteGroupOf(r.name),
+      ...r,
+      hosts: ok ? r.hosts : null,
+      vms: ok ? r.vms : null,
+      vmsOn: ok ? r.vmsOn : null,
+      countable: ok, mark: st.mark, markTitle: st.title,
+      tone: off ? 'off' : ok ? pctTone(r.worst) : 'none',
+      alarms: !ok || r.alarmsUnknown ? null : (r.alarmsCritical || 0) + (r.alarmsWarning || 0),
+      bars,
+    };
+  });
 }
 
 /**
@@ -135,7 +154,7 @@ export function emptyGroupText(group) {
   return '표시할 법인이 없습니다.';
 }
 
-/** 상태 카드 톤 개수(정상·주의·위험·판정 대기) — 판정 대기를 정상에 섞지 않는다. */
+/** 상태 카드 톤 개수(정상·주의·위험·판정 대기 · 비활성 off 는 있을 때만 키가 생긴다) — 판정 대기를 정상에 섞지 않는다. */
 export function siteToneCounts(cards) {
   const out = { ok: 0, warn: 0, crit: 0, none: 0 };
   for (const c of cards || []) out[c.tone] = (out[c.tone] || 0) + 1;
