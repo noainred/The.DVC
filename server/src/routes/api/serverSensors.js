@@ -23,6 +23,7 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { buildSensorRows, cpuIndexOf, cpuOf } from '../../tools/serverSensors.js';
 import { cpuLatestRows } from '../../bmusage/cpuLatest.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 
 const toolsPerm = requirePerm('tools');
 /** Sensors 컬렉션만 있는 상세의 신선도 — 인벤토리 주기(30분) × 2 + 여유(v2.680: 값의 소유는 sensorDetail.js 하나). */
@@ -119,7 +120,18 @@ function maskRow(row, match) {
   const o = { ...row };
   if (match(o.id)) o.id = maskedIdToken(o.id);
   if (match(o.name)) o.name = maskedAddressName(o.name);
+  if (o.collection) o.collection = maskCollection(o.collection);
   return o;
+}
+
+/**
+ * v2.681(R2B-02): 수집 오류 원문(collection.error)은 비-admin 에게 주지 않는다 — `fetch failed: connect ECONNREFUSED
+ * <iDRAC IP>:443` 처럼 관리 주소가 그대로 들어 있다(엣지 collError 도 같다). 목록·상세 둘 다 이 함수를 지난다.
+ * 오류가 있었다는 사실(ok:false · 빈 문자열이 아님)은 남기고 내용만 ADMIN_ONLY_TEXT 로 바꾼다.
+ */
+function maskCollection(c) {
+  if (!c || typeof c !== 'object') return c;
+  return c.error ? { ...c, error: ADMIN_ONLY_TEXT } : c;
 }
 
 export function registerServerSensors(api) {
@@ -179,7 +191,7 @@ export function registerServerSensors(api) {
     const head = maskRow({ id: String(s.id), name: s.name || s.host || String(s.id) }, match);
     return res.json({
       server: { ...head, serviceTag: s.serviceTag || '', model: s.model || '', vendor: s.vendor || '', remote: !!s.remote, datacenterId: s.datacenterId || s.vcenterId || '' },
-      at: d?.at ?? null, thermalAt: d?.thermalAt ?? null, collection: d?.collection || null, omitted: d?.omitted || 0,
+      at: d?.at ?? null, thermalAt: d?.thermalAt ?? null, collection: admin ? (d?.collection || null) : (maskCollection(d?.collection) || null), omitted: d?.omitted || 0,
       summary: list.length ? summarizeSensors(list) : null,
       sensors: list,
       ...(synthesized ? { synthesized: true } : {}),

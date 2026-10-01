@@ -12,6 +12,7 @@
  *    (POST 도 붙인다 — ping·capture·bmstor 결과처럼 본문에 agent 가 없는 요청이 있고, 큰 본문 게이트는 본문을
  *    읽기 전에 헤더·쿼리로 요청자를 가린다. 본문 agent 가 있는 요청에서도 같은 값이라 판정이 바뀌지 않는다.)
  */
+import os from 'node:os';
 import { agentNameHeader } from '../util/agentNameHeader.js';
 
 /** `{ 'X-Agent-Name': name }` 또는 `{}`(헤더로 안전하지 않은 이름·빈 이름). */
@@ -23,4 +24,26 @@ export function withAgentQuery(url, name) {
   if (agentNameHeader(name)['X-Agent-Name']) return url;
   if (/[?&]agent=/.test(url)) return url;
   return `${url}${url.includes('?') ? '&' : '?'}agent=${encodeURIComponent(name)}`;
+}
+
+/**
+ * v2.681(감사 R2F-01): `X-Agent-Hostname` 도 같은 ByteString 함정이다 — `os.hostname()` 에 U+00FF 초과 문자가 있으면
+ * (한글 이름 Windows 엣지 등) undici 가 요청을 보내기 **전에** 던져 인벤토리·스파이크·게스트 디스크·현재 사용자 push 가
+ * 매 주기 전량 실패했다. 중앙은 이 헤더를 **진단용으로만** 읽는다(이름 충돌 감지 · 큰 본문 게이트의 폴백 신원) —
+ * 그래서 인쇄 가능한 ASCII 면 원문 그대로, 아니면 `encodeURIComponent` 값(ASCII — 같은 호스트는 같은 값이라 충돌 감지가
+ * 계속 동작한다)을 싣고, 그래도 255자를 넘거나 비면 싣지 않는다(헤더가 없어도 중앙 수신 판정은 바뀌지 않는다).
+ */
+export function hostnameHeaderValue(raw) {
+  const h = typeof raw === 'string' ? raw.trim() : '';
+  if (!h) return '';
+  if (/^[\x20-\x7e]{1,255}$/.test(h)) return h;
+  let enc = '';
+  try { enc = encodeURIComponent(h); } catch { return ''; } // 짝 없는 서로게이트
+  return enc.length <= 255 ? enc : '';
+}
+
+/** `{ 'X-Agent-Hostname': … }` 또는 `{}`. 인자가 없으면 이 장비의 os.hostname(). */
+export function agentHostnameHeader(raw = os.hostname()) {
+  const v = hostnameHeaderValue(raw);
+  return v ? { 'X-Agent-Hostname': v } : {};
 }

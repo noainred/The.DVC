@@ -18,7 +18,7 @@
 
 | 파일 | 종류 | 용도 | 원자적 | 손상보존 | 0600 | 정의 모듈 |
 |---|---|---|:--:|:--:|:--:|---|
-| `_index.json` | 설정 | VM 성능 시계열 — **vCenter 별 독립 DB**(v2.376). |  |  | ✅ | metrics/vmperfDb.js, vmseries/db.js |
+| `_index.json` | 설정 | VM 성능 시계열 — **vCenter 별 독립 DB**(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfDb.js, vmseries/db.js |
 | `<이름>` | 디렉터리 | iDRAC 센서 상세 캐시(v2.659) — 서버별 ① Thermal 상세(매 폴 주기, 인메모리) ② Sensors 컬렉션(인벤토리 주기, 파일 보관). | ✅ |  | ✅ | idrac/sensorDetailCache.js |
 | `active-sessions.json` | 설정 | 활성 세션 레지스트리 (v2.280) — '단일 세션 강제'(ID 공유 금지)의 상태 저장소. | ✅ |  | ✅ | auth/sessions.js |
 | `agent-assignments.json` | 설정 | Central store for per-agent scan assignments and the results agents report | ✅ | ✅ | ✅ | central/assignments.js |
@@ -198,9 +198,9 @@
 | `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, ipam/scanDatacenterSource.js 외 2 |
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
-| `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) |  |  | ✅ | metrics/vmperfDb.js |
+| `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) | ✅ | ✅ | ✅ | metrics/vmperfDb.js |
 | `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfSettings.js |
-| `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 |  |  | ✅ | vmseries/db.js |
+| `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
 

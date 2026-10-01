@@ -19,12 +19,11 @@
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
-import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { agentHeaders, withAgentQuery, agentHostnameHeader } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -72,7 +71,7 @@ async function post(body) {
   const json = Buffer.from(JSON.stringify(body));
   const headers = {
     'Content-Type': 'application/json',
-    'X-Agent-Hostname': os.hostname(),
+    ...agentHostnameHeader(), // v2.681 R2F-01: 비-ASCII 호스트명 원문 헤더는 fetch 가 던진다
     ...agentHeaders(config.agent.name),
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
   };

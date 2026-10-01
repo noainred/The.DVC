@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { downloadFailText } from '../downloadFailText.js'; // v2.618 WEB-6
 import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
@@ -51,7 +51,13 @@ export default function PduTool() {
   //   예전 수제 setInterval 은 403 을 `.catch(() => {})` 로 삼키며 반복했다. 저장·삭제·수집 뒤의 `load()` 는 `_r` 카운터를 올려
   //   즉시 재조회한다(usePolling 은 파라미터가 바뀌면 바로 다시 부른다).
   const [rev, setRev] = useState(0);
-  const { data, error: pollErr } = usePolling('/tools/pdu', { _r: rev }, 30_000);
+  const { data: pollData, error: pollErr } = usePolling('/tools/pdu', { _r: rev }, 30_000);
+  // v2.681(감사 R2C-04): usePolling 은 파라미터(_r)가 바뀌면 data 를 비운다 — 저장·삭제·모달 닫기마다 화면 전체가 Loading 으로
+  //   바뀌고(열린 폼·차트 탭이 사라진다) 그 재조회가 일시 실패하면 전체 ErrorBox 가 됐다. 직전 데이터를 들고 있다가 그린다
+  //   (재조회 오류는 아래 '폴링 오류' 배너가 말한다).
+  const lastDataRef = useRef(null);
+  if (pollData) lastDataRef.current = pollData;
+  const data = pollData ?? lastDataRef.current;
   const [actErr, setActErr] = useState(null); // 삭제·저장 실패 사유(폴링 오류와 별개)
   const error = actErr || pollErr;
   const setError = setActErr;

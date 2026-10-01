@@ -13,6 +13,7 @@
  */
 import { siteRows, levelOf, tsMs } from '../console/consoleData.js';
 import { numOrNull } from '../numOrNull.js';
+import { corpSiteStatus } from '../views/corpSiteStatus.js'; // v2.681(감사 R2C-02): 범위 법인의 '0대' 판정은 한 곳이 소유
 import { storageUsageUnknownNote } from '../views/vcCardText.js'; // v2.621(감사 WEB-03): 사용량 미상 DS 제외 문구는 한 곳이 소유
 
 /** 사이트(vCenter) 1곳의 상태 등급 — ok | warn | crit | wait | maint | off(v2.617: 설정에서 꺼 둔 vCenter — 수집하지 않으므로 판정 대상이 아니다). */
@@ -116,6 +117,15 @@ export function infraTotals(ov, scopeId = '') {
     const phys = ov.physicalByCorp && !ov.physicalByCorp.error ? numOrNull(ov.physicalByCorp.byVcenter?.[scopeId]) : null;
     if (!r) return { vcenters: 0, physical: phys, hosts: null, vms: null, vmsOn: null, storageUsedTB: null, storageTotalTB: null, storagePct: null, storageNote: null };
     const rawSite = (Array.isArray(ov.sites) ? ov.sites : []).find((x) => x?.id === scopeId);
+    // v2.681(감사 R2C-02): 첫 수집 중·연결 실패·비활성 법인은 호스트·VM·스토리지를 0 이 아니라 null('—') + 표지.
+    const st = corpSiteStatus(rawSite || { status: r.status });
+    if (!st.countable) {
+      return {
+        vcenters: 1, physical: phys, physicalNote: phys != null ? null : '물리 서버 집계를 읽지 못했습니다',
+        hosts: null, vms: null, vmsOn: null, storageUsedTB: null, storageTotalTB: null, storagePct: null,
+        storageNote: null, statusMark: st.mark, statusTitle: st.title,
+      };
+    }
     return {
       vcenters: 1, physical: phys, // v2.620(WEB2620-05): 집계를 못 읽은 것(오류·필드 없음)과 '연결된 서버 없음' 을 같은 문구로 말하지 않는다.
       physicalNote: phys != null ? null

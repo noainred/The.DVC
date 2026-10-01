@@ -215,6 +215,7 @@ export function vmAllocRows(snap, settings) {
 }
 
 async function sampleOnceInner() {
+  let gpuMemPartialHosts = 0; // v2.681 R2D-06 — 게스트 GPU 메모리 합이 부분 합이라 게스트 값을 적재하지 않은 호스트 수
   let dsUsedUnknown = 0; // v2.598 RECENT2598-03 — vmAllocRows 가 센 '사용량 미상으로 뺀 DS' 수
   const snap = store.get();
   const db = await getMetricsDb();
@@ -265,8 +266,15 @@ async function sampleOnceInner() {
   // per host + per-cluster/per-vCenter averages.
   const gpuByCluster = new Map();
   const gpuByVc = new Map();
+  // v2.681(R2D-05): 게스트 값의 신선도 경계 — 아래 VM 계열과 **같은 값**(게스트 폴 주기 × 3, 최소 15분).
+  //   예전 호스트 계열은 게스트 항목의 at 을 보지 않아, 게스트 수집이 멈춘 패스쓰루 호스트의 마지막 사용률이
+  //   store GC(약 35분)까지 매 분 '지금 값' 으로 다시 쌓였다(v2.504 '마지막 값을 다시 쓰면 평탄선' 규약). MIG(utilNA)도 뺀다.
+  const gpuGuestPollMs = Number(loadGpuGuestSettings()?.pollIntervalMs) || 60_000;
+  const gpuGuestFreshMs = Math.max(15 * 60_000, gpuGuestPollMs * 3);
+  const gpuNow = Date.now();
   for (const h of freshHosts) {
-    const util = h.gpuUtilPct ?? (getGuestGpuHost(h.id)?.utilPct ?? null);
+    const gh = h.gpuUtilPct == null ? getGuestGpuHost(h.id) : null;
+    const util = h.gpuUtilPct ?? (gh && !gh.utilNA && gh.at > gpuNow - gpuGuestFreshMs ? (gh.utilPct ?? null) : null);
     if (util == null) continue;
     rows.push({ metric: 'gpu_util', k: h.id, v: util });
     const ck = `${h.vcenterId}|${h.cluster || 'standalone'}`;
@@ -282,12 +290,17 @@ async function sampleOnceInner() {
   //   (게스트 폴 주기 × 3, 최소 15분 — 마지막 값을 매 분 다시 쓰면 장기 차트가 평탄선이 된다, v2.504 규약).
   //   GPU_VM_SERIES=0 으로 끈다.
   if (process.env.GPU_VM_SERIES !== '0') {
-    const pollMs = Number(loadGpuGuestSettings()?.pollIntervalMs) || 60_000;
-    const freshMs = Math.max(15 * 60_000, pollMs * 3);
-    const nowG = Date.now();
+    const freshMs = gpuGuestFreshMs;
+    const nowG = gpuNow;
     const onGpuVm = new Map((snap.vms || []).filter((v) => v.gpu && v.powerState === 'POWERED_ON' && !staleIds.has(String(v.vcenterId))).map((v) => [v.id, v]));
     const hostIdOf = new Map((snap.hosts || []).map((h) => [`${h.vcenterId}\t${h.name}`, h.id]));
     const hostTemp = new Map(); const hostMem = new Map();
+    // v2.681(R2D-06): 호스트의 켜진 GPU VM 수 — 메모리 합에 든 VM 이 이보다 적으면 그 합은 부분 합이다.
+    const gpuVmsOfHost = new Map();
+    for (const vm of onGpuVm.values()) {
+      const hid = hostIdOf.get(`${vm.vcenterId}\t${vm.host}`);
+      if (hid) gpuVmsOfHost.set(hid, (gpuVmsOfHost.get(hid) || 0) + 1);
+    }
     for (const g of getGuestGpuVms()) {
       const vm = onGpuVm.get(g.vmId);
       if (!vm || !(g.at > nowG - freshMs)) continue;
@@ -299,7 +312,12 @@ async function sampleOnceInner() {
       const hid = hostIdOf.get(`${vm.vcenterId}\t${vm.host}`);
       if (!hid) continue;
       if (g.tempC != null) hostTemp.set(hid, Math.max(hostTemp.get(hid) ?? -Infinity, g.tempC));
-      if (g.memUsedMB != null && g.memTotalMB > 0) { const e = hostMem.get(hid) || [0, 0]; e[0] += g.memUsedMB; e[1] += g.memTotalMB; hostMem.set(hid, e); }
+      if (g.memUsedMB != null && g.memTotalMB > 0) { const e = hostMem.get(hid) || [0, 0, 0]; e[0] += g.memUsedMB; e[1] += g.memTotalMB; e[2] += 1; hostMem.set(hid, e); }
+    }
+    // v2.681(R2D-06): 켜진 GPU VM 중 일부만 신선한 게스트 메모리 값을 준 호스트는 합이 부분 합이다 — 게스트 합을 적재하지 않고
+    //   (거짓 하락) 아래 ESXi 카운터 경로로 넘긴다(그 값도 없으면 그 주기는 적재하지 않는다). 몇 호스트였는지는 gpuMemPartialHosts.
+    for (const [hid, e] of [...hostMem]) {
+      if (e[2] < (gpuVmsOfHost.get(hid) || 0)) { hostMem.delete(hid); gpuMemPartialHosts += 1; }
     }
     for (const [k, v] of hostTemp) rows.push({ metric: 'gpu_temp', k, v });
     for (const [k, [u, t]] of hostMem) { rows.push({ metric: 'gpu_mem', k, v: round1((u / t) * 100) }); rows.push({ metric: 'gpu_mem_mb', k, v: u }); }
@@ -415,7 +433,7 @@ async function sampleOnceInner() {
     }
   }
   lastRun = {
-    at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}),
+    at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}), ...(gpuMemPartialHosts ? { gpuMemPartialHosts } : {}),
     // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
     ...(staleSkipped.vcenters ? { staleSkipped } : {}),
     ...(vmperfStale ? { vmperfStale } : {}),

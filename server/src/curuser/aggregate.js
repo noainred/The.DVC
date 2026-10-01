@@ -41,6 +41,17 @@ export function splitAccount(name) {
 const n0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 /**
+ * v2.681(R2D-04): 수집하지 못한 VM 의 두 종류.
+ *   · **대상 아님**(발행기 미설치 `no-agent` · VM 없음 `not-found`) — 영구 상태라 그 VM 이 있는 법인의 추이를 영원히 비우지 않게
+ *     부분 합 판정에서 뺀다(개수만 밝힌다).
+ *   · **일시 실패**(stale · guest-error · incomplete · unparsed · clock-skew · 그 밖의 모르는 종류) — 지금 그 서버의 사용자를
+ *     모를 뿐이다. 하나라도 섞인 주기의 사용자·세션 수는 **부분 합**이므로 추이에 실제 값으로 적재하지 않는다
+ *     (v2.606 '부분은 하한' · v2.632 Horizon serversFailed 와 같은 규칙).
+ *   모르는 종류를 '대상 아님' 으로 보면 부분 합을 실제 값으로 적재하게 되므로 기본은 일시 실패다.
+ */
+export const NOT_TARGET_KINDS = Object.freeze(['no-agent', 'not-found']);
+
+/**
  * 한 VM 의 수집 결과(레코드) 형태:
  *   { vmId, vcenterId, name, folder, ts, ok, active, disc, other, sessions,
  *     users: [{name, kind}], error, reason }
@@ -61,9 +72,13 @@ export function aggregate(records) {
   // 계정 키 → 집계. Map 은 삽입 순서를 지키므로 '처음 만난 원문' 이 표시 이름이 된다.
   const byUser = new Map();
   let sessions = 0; let sa = 0; let sd = 0; let so = 0;
-  let vmsOk = 0; let vmsFailed = 0; let vmsSkipped = 0; let vmsTruncated = 0;
+  let vmsOk = 0; let vmsFailed = 0; let vmsSkipped = 0; let vmsTruncated = 0; let vmsTransient = 0; let vmsNotTarget = 0;
   for (const r of list) {
-    if (r.ok === false) { vmsFailed++; continue; }
+    if (r.ok === false) {
+      vmsFailed++;
+      if (NOT_TARGET_KINDS.includes(r.kind)) vmsNotTarget++; else vmsTransient++;
+      continue;
+    }
     if (r.skipped) { vmsSkipped++; continue; }
     vmsOk++;
     // v2.606 COL2606-01: 발행기가 원문을 잘랐으면 그 서버의 세션은 일부만 읽었다 — 합계는 하한이다.
@@ -99,6 +114,8 @@ export function aggregate(records) {
     sessionsDisc: known ? sd : null,
     sessionsOther: known ? so : null,
     vms: list.length, vmsOk, vmsFailed, vmsSkipped,
+    // v2.681(R2D-04): vmsFailed = vmsTransient(일시 실패 — 부분 합 원인) + vmsNotTarget(발행기 없음 등 — 대상 아님).
+    vmsTransient, vmsNotTarget,
     // 원문이 잘린 서버가 하나라도 있으면 사용자·세션 수는 **최소값**이다(화면이 '최소 N명').
     vmsTruncated, usersLowerBound: known && vmsTruncated > 0,
     names: names.sort((a, b) => b.sessions - a.sessions || String(a.name).localeCompare(String(b.name), 'ko')),
@@ -146,7 +163,10 @@ export function seriesRow(agg) {
   // v2.622(감사 DATA-03): 발행기가 원문을 자른 서버가 섞인 주기(usersLowerBound)의 사용자·세션 수는 **하한**이다 —
   //   부분 합을 추이에 실제 값으로 적재하면 거짓 하락이 된다(v2.606 COL2606-01 규약의 누락). 수치를 null 로 넘기고
   //   `partial` 로 표시한다 — vc_series 열이 NOT NULL 이라 db.js 가 이 표지로 '모름' 을 기록한다. 최신 화면은 '최소 N명'.
-  const partial = !!agg.usersLowerBound;
+  // v2.681(R2D-04): 일시 실패 VM(stale·guest-error 등)이 섞인 주기도 부분 합이다 — 같은 규칙으로 적재하지 않는다.
+  //   구버전 집계(vmsTransient 없음)는 예전 판정 그대로다.
+  //   확인한 서버가 0대(vmsOk=0)면 수치 자체가 '모름(null)' 이라 부분 합이 아니다 — 그 표지(vms_ok=0)를 그대로 쓴다.
+  const partial = !!agg.usersLowerBound || (n0(agg.vmsOk) > 0 && n0(agg.vmsTransient) > 0);
   const w = (v) => (partial ? null : nn(v));
   return {
     users: w(agg.users), usersActive: w(agg.usersActive),

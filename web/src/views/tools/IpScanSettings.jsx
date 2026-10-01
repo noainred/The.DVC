@@ -130,6 +130,8 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   const [busy, setBusy] = useState(false);
   const [sFor, setSFor] = useState(null); // v2.622(감사 WEB-08): 폼(s)을 채운 에이전트
   const agentRef = useRef(LOCAL_AGENT);   // 지금 고른 에이전트(늦게 온 이전 에이전트 응답을 버린다)
+  // v2.681(감사 R2C-03): 폼을 실제로 채운 에이전트(ref — 2초 폴링 클로저가 낡은 상태를 보지 않게). 첫 조회가 실패해도 이후 폴링이 채운다.
+  const formForRef = useRef(null);
   // v2.638: 데이터센터 귀속 판정(서버) + 고를 수 있는 DataCenter 목록 · /24 대역 제안 패널 · CSV 패널
   const [dcInfo, setDcInfo] = useState(undefined);  // undefined = 아직 모름(구버전 서버는 필드가 없다)
   const [dcList, setDcList] = useState(null);       // null = 목록을 못 받음
@@ -141,6 +143,9 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
       if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
       if (first) { d.load(r.settings); setSFor(ag); }
+      else if (formForRef.current !== ag) { d.load(r.settings); setSFor(ag); }
+      formForRef.current = ag;
+      setLoadErr(null);
       if ('datacenter' in r) setDcInfo(r.datacenter);
       if (Array.isArray(r.datacenters)) setDcList(r.datacenters);
       setDcListErr(r.datacentersError || null);

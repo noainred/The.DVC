@@ -92,6 +92,9 @@ describe('cvpOverviewText (v2.645)', () => {
     expect(deviceSummaryTiles({ device: {}, history: { unavailable: true } }).find((x) => x.key === 'faults').value).toBe('—');
     const n = historyNotes({ faultEventsOmitted: 5, eventsScanTruncated: true, eventDays: 7 });
     expect(n.join(' ')).toContain('5건 생략'); expect(n.join(' ')).toContain('2,000건');
+    // v2.681(R2A-03): 서버가 개수를 모르면(faultEventsMore) 숫자를 지어내지 않는다
+    const m = historyNotes({ faultEventsOmitted: null, faultEventsMore: true, eventDays: 7 }).join(' ');
+    expect(m).toContain('개수는 세지 않았습니다'); expect(m).not.toContain('1건 생략');
   });
   it('문구에 백틱이 없다(BoldText 는 굵게만 해석)', () => {
     for (const t of [CORP_NOTE, TRAFFIC_NOTE]) expect(t.includes('`')).toBe(false);

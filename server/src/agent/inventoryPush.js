@@ -10,7 +10,6 @@
 
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
@@ -20,6 +19,7 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 
 const gzipAsync = promisify(zlib.gzip);
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { agentHostnameHeader } from './agentNameCarry.js'; // v2.681 R2F-01
 // 인벤토리 push 본문 gzip 압축(기본 on). 인벤토리 JSON은 반복 필드가 많아 ~5~10× 줄어 WAN
 // 수신량을 크게 낮춘다. 중앙(express.json)은 Content-Encoding: gzip 본문을 자동 해제한다.
 // AGENT_PUSH_GZIP=false 로 끌 수 있다(구버전 중앙 호환 등).
@@ -33,7 +33,7 @@ let running = false; // 한 push 사이클이 (대용량/고RTT로) 주기보다
 
 function headers(extra = {}) {
   // X-Agent-Hostname(v2.428): 같은 AGENT_NAME 이 다른 장비에서 오는 충돌을 중앙이 잡을 수 있게.
-  return { 'Content-Type': 'application/json', 'X-Agent-Hostname': os.hostname(), ...agentNameHeader(config.agent.name), ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentHostnameHeader(), ...agentNameHeader(config.agent.name), ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 async function pushVcenter(snap, vc) {

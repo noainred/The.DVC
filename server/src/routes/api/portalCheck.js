@@ -317,7 +317,13 @@ function archRouters() {
     { name: 'collector', mount: '/api/collector', router: collectorRouter },
   ];
 }
-async function runArchScan() {
+// v2.681(감사 R2E-01): '즉시 재판정' 연타가 계산을 겹치지 않게 진행 중인 실행을 공유한다.
+let _archRun = null;
+function runArchScan() {
+  if (!_archRun) _archRun = runArchScanOnce().finally(() => { _archRun = null; });
+  return _archRun;
+}
+async function runArchScanOnce() {
   const t0 = Date.now();
   const inputs = await gatherArchInputs({ routers: archRouters(), flowRoutes: safe(() => flowDeclaredRoutes(), null) });
   const scan = scanArch(inputs);

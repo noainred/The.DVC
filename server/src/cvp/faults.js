@@ -78,11 +78,22 @@ export function partsStaleAfterMs(intervalMs, partsEveryMs = PARTS_EVERY_MS) {
   const pe = numOrNull(partsEveryMs);
   return (pe != null && pe > 0 ? pe : PARTS_EVERY_MS) * 3 + staleAfterMs(intervalMs);
 }
-/** 부품 목록이 지금 값으로 쓸 수 있는가 — partsAt 이 없으면(구버전 행) 판정하지 않는다(예전 동작). */
+/**
+ * 엣지 push 의 전량 갱신 주기(cvp/push.js 가 이 값을 쓴다 — 한 벌). 부품이 그대로면 엣지는 그동안 수집 시각만 보내고(touch)
+ *   중앙 DB 의 parts_at 은 전량 갱신 때만 바뀐다.
+ */
+export const EDGE_FULL_REFRESH_MS = 60 * 60_000;
+/**
+ * 부품 목록이 지금 값으로 쓸 수 있는가 — partsAt 이 없으면(구버전 행) 판정하지 않는다(예전 동작).
+ * v2.681(감사 R2A-01 — v2.680 이 만든 회귀): 엣지 위임 행(agent 가 비어 있지 않음)은 전량 갱신 주기만큼 경계를 넓힌다 —
+ *   넓히지 않으면 수집 소요가 주기의 1.5배를 넘는 엣지에서 전량 갱신 직전마다 부품이 '낡음' 이 되어 열린 장애가 보류됐다.
+ *   ⚠ 엣지의 CVP_PARTS_EVERY_MS 가 중앙보다 크면 그만큼 더 넓혀야 하는데 중앙은 그 값을 모른다(정직 기록).
+ */
 export function partsFresh(dev, { intervalMs, partsEveryMs, now = Date.now() } = {}) {
   const pa = numOrNull(dev?.partsAt);
   if (pa == null) return true;
-  return now - pa <= partsStaleAfterMs(intervalMs, partsEveryMs);
+  const edgeRow = typeof dev?.agent === 'string' && dev.agent !== '';
+  return now - pa <= partsStaleAfterMs(intervalMs, partsEveryMs) + (edgeRow ? EDGE_FULL_REFRESH_MS + staleAfterMs(intervalMs) : 0);
 }
 
 function portObservation(p) {

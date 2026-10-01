@@ -6,7 +6,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
-import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
@@ -635,7 +635,9 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
   // 측정 기준이 바뀌어 이력을 재시작한 장비(v2.534) — '관측 N일' 이 왜 짧은지 화면이 말해야 한다.
   // 이것이 없으면 사용자는 수집 장애로 오해한다(조용한 삭제 금지).
   const resets = await capacityResets();
-  const m = growthMatrix(rows, { periods, asOfDay, meta });
+  // v2.681(R2D-03): 지금 등록부에 있는 장비만 함대 합계에 든다 — 등록 해제된 장비의 옛 값이 '지금' 합계에 섞이지 않게
+  //   (그 장비 행은 retired:true 로 남고 totals.retiredDevices 가 센다). 장기 미관측 장비도 같은 방식(stale).
+  const m = growthMatrix(rows, { periods, asOfDay, meta, knownIds: registryLoadError() ? null : rawDevices.map((d) => d.id) });
   const keep = effectiveKeepDays();
   res.json({
     db: await dbAvailable(),
@@ -718,11 +720,17 @@ api.get('/tools/storage/history', toolsPerm, fullScopeOnly, async (req, res) => 
   const staleByDevice = new Map();
   for (const d of devs) staleByDevice.set(d.id, 2 * pollOf.get(d.agent || ''));
   const now = Date.now();
-  const points = await capacityHistoryAll(now - spanMs, b, { nowMs: now, staleMs: 2 * envPoll, staleByDevice });
+  // v2.681(R2D-01): 지금 등록돼 있고 켜진 장비만 '계속 기대' 한다 — 등록 해제·교체된 장비의 옛 행이 그 뒤 모든 점을
+  // 부분 합으로 만들지 않게. 꺼진(enabled:false) 장비는 수집하지 않으므로 기대 대상이 아니다.
+  // 등록부를 못 읽었으면(빈 목록) 시간 기준 판정으로 떨어진다 — 빈 목록을 '전부 퇴역' 으로 읽지 않는다.
+  const knownIds = registryLoadError() ? null : devs.filter((d) => d.enabled !== false).map((d) => d.id);
+  const points = await capacityHistoryAll(now - spanMs, b, { nowMs: now, staleMs: 2 * envPoll, staleByDevice, knownIds });
   res.json({
     db: await dbAvailable(), range, spanMs, bucketMs: b, points,
-    // 이 조회 구간에서 한 번이라도 관측된 장비 수 — 점의 devices 가 이보다 작으면 부분 합이다.
+    // 이 조회 구간에서 한 번이라도 관측된 장비 수. 점마다 기대 장비는 다르다 — 부분 합 판정은 점의 missing 을 볼 것.
     expectedDevices: points.expectedDevices ?? null,
+    // 조회 구간 끝에서 더는 기대하지 않는 장비 수(등록 해제·꺼짐 — 옛 이력만 남은 장비). 조용히 빼지 않고 밝힌다.
+    retiredDevices: points.retiredDevices ?? null,
     carryMaxMs: Math.max(2 * envPoll, ...staleByDevice.values()),
     truncated: points.truncated === true,
   });

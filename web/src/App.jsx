@@ -119,8 +119,11 @@ const fmtUptime = (s) => {
 };
 const LANDING_KEY = 'vmportal.landingTab';
 const getLandingTab = () => {
-  const saved = localStorage.getItem(LANDING_KEY);
-  return TABS.some((t) => t.id === saved) ? saved : 'overview';
+  // v2.681(감사 R2C-05): 저장소 접근이 throw 하는 환경(프라이빗 창·차단)에서도 첫 렌더가 죽지 않게.
+  try {
+    const saved = localStorage.getItem(LANDING_KEY);
+    return TABS.some((t) => t.id === saved) ? saved : 'overview';
+  } catch { return 'overview'; }
 };
 
 export default function App() {
@@ -323,7 +326,7 @@ function Portal({ user, onLogout }) {
   // V6 끄기 — 메뉴 페이지(#/m/…)는 기존 틀에 없는 주소라 Overview 로 옮기고, 나머지는 주소를 그대로 둔다.
   const exitV6 = () => { writeShellV6(false); setV6On(false); if (isMenuHash(window.location.hash)) setTab('overview'); };
 
-  const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
+  const saveLanding = (id) => { setLandingTab(id); try { localStorage.setItem(LANDING_KEY, id); } catch { /* 저장 불가 — 이번 세션에만 적용 */ } };
 
   const { data: health, error: healthError } = usePolling('/health', {}, 20_000);
   // 업그레이드 중 판정(v2.458): 새 버전이 가용(updateAvailable)인 상태에서 서버가 응답을 멈추면

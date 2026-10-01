@@ -244,11 +244,16 @@ export function growthPctText(pct) {
  *   규칙을 바꾸면 **양쪽을 같이** 바꿀 것 — 한쪽만 고치면 표와 합계가 다른 말을 한다.
  */
 export function aggregateGrowth(devices, periods) {
-  const list = devices || [];
+  // v2.681(감사 R2D-02·03 — 서버 growth.totalsOf 와 같은 규칙): 퇴역·오래 미수집 장비(stale·retired 표지)는 '지금 합계' 에서 빼고
+  //   개수를 밝힌다. 사용률·남은 용량의 분모는 사용량을 읽은 장비의 용량이다(미상 장비 용량을 넣으면 사용률 과소·남은 용량 과대).
+  const all = devices || [];
+  const list = all.filter((d) => !(d && (d.stale === true || d.retired === true)));
+  const excluded = all.length - list.length;
   const nums = (f) => list.map(f).filter((v) => v != null && Number.isFinite(v));
   const sumOrNull = (f) => { const n = nums(f); return n.length ? n.reduce((a, b) => a + b, 0) : null; };
   const usedBytes = sumOrNull((d) => d.usedBytes);
   const totalBytes = sumOrNull((d) => d.totalBytes);
+  const totalMeasured = sumOrNull((d) => (d.usedBytes != null && Number.isFinite(d.usedBytes) ? d.totalBytes : null));
   const growth = {};
   for (const p of periods || []) {
     let sum = 0; let measured = 0; let missing = 0;
@@ -264,8 +269,10 @@ export function aggregateGrowth(devices, periods) {
     totalBytes,
     // ⚠ `freeBytes` 를 빼먹지 말 것 — 화면의 '남은 용량' KPI 가 이 키를 읽는다. v2.532 초판이
     //   빠뜨려 필터를 거는 순간 '남은 용량 —' 이 됐다(Chromium 스크린샷 판독에서 발견).
-    freeBytes: totalBytes != null && usedBytes != null ? Math.max(0, totalBytes - usedBytes) : null,
-    pct: totalBytes && usedBytes != null ? Math.round((usedBytes / totalBytes) * 1000) / 10 : null,
+    freeBytes: totalMeasured != null && usedBytes != null ? Math.max(0, totalMeasured - usedBytes) : null,
+    pct: totalMeasured && usedBytes != null ? Math.round((usedBytes / totalMeasured) * 1000) / 10 : null,
+    totalBytesMeasured: totalMeasured,
+    excludedStale: excluded,
     unknownUsed: list.filter((d) => d.usedBytes == null).length,
     growth,
   };

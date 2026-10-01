@@ -86,7 +86,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
     'idrac/sensorDetailCache.js',                         // v2.659 iDRAC 센서 상세 캐시 — 인벤토리 주기에 재수집
     'inventory/osStore.js', 'inventory/osScanner.js',     // OS 스캔 캐시
     'central/fleet.js',                                   // 엣지 fleet push 캐시
-    'metrics/vmperfDb.js', 'vmseries/db.js',              // _index.json(표시용 인덱스)
+    // 'metrics/vmperfDb.js', 'vmseries/db.js' — v2.681 R2B-03 에 preserveCorrupt 를 받았다(_index.json 은 파일만으로 재구축 불가). 스윕 대상.
     'sanswitch/perfPush.js', 'sanswitch/store.js',        // push 커서·스냅샷 캐시
     'cvp/push.js',                                        // v2.608 CVP push 커서 — 잃으면 처음부터 다시 보내고 중앙이 UNIQUE 로 중복을 거른다
     'idrac/scanLog.js', 'net/captureHistory.js',          // 이력 링버퍼(캐시 성격 — v2.516 활동 로그와 같은 판단)

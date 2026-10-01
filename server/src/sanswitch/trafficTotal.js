@@ -15,8 +15,14 @@
  *     ④ 직전 값이 한계를 넘었으면 → 합계 null(본 적은 있는데 지금은 모른다)
  *     ⑤ 아직 한 번도 안 나온 시리즈: 첫 값이 한계 안에 곧 나오면 '아직 캡처 전' 이라 → 합계 null,
  *        한참 뒤에 나오면 그때는 없던 것이라 → 더하지 않는다(모르는 것을 0 으로 세지 않되, 없던 것을 모른다고 하지도 않는다)
+ *     ⑥ (v2.681 R2D-09) 직전 값 이후 한계 × (1 + SERIES_RETIRE_CARRIES) 를 넘게 값이 없는 시리즈는 **없어진 것**으로 본다
+ *        (포트 재배선·어레이 퇴역·포트 메타 변경) — ⑤의 대칭이다. 예전엔 ④가 끝없이 이어져 포트 하나를 정리하면 그 뒤 합계가
+ *        **전부** null('—')이 됐다. 그 사이(한계 ~ 한계 × 4)는 여전히 ④(모른다)이고, 없어진 시리즈 수는 retiredSeries 로 밝힌다.
  *   ⚠ 이월한 값은 표시만 하는 합계다 — 원 시계열에는 쓰지 않는다.
  */
+
+/** v2.681(R2D-09): 한계를 넘긴 뒤 몇 한계 동안 더 '모른다(null)' 로 둘지 — 그 뒤는 없어진 시리즈. storage sumCapacityBuckets 와 같은 값. */
+export const SERIES_RETIRE_CARRIES = 3;
 
 /**
  * @param {{buckets:number[], bucketMs:number, series:Array<{key:string, group?:string|null, sum:(number|null)[], partial?:number[]}>}} agg
@@ -33,8 +39,9 @@ export function sumArrayTraffic(agg, { isArray, carryMs } = {}) {
   const partialIdx = [];
   const state = arrays.map((s) => {
     const first = s.sum.findIndex((v) => v != null);
-    return { s, first, last: null, partial: new Set(Array.isArray(s.partial) ? s.partial : []) };
+    return { s, first, last: null, retired: false, partial: new Set(Array.isArray(s.partial) ? s.partial : []) };
   });
+  const retireAfter = lim > 0 ? lim * (1 + SERIES_RETIRE_CARRIES) : Infinity;
   for (let i = 0; i < n; i++) {
     let acc = 0; let any = false; let broken = false; let carried = 0;
     const byGroup = {};
@@ -43,10 +50,12 @@ export function sumArrayTraffic(agg, { isArray, carryMs } = {}) {
       let use = null;
       // ⚠ break 하지 않는다 — 한 시리즈가 판정을 깨도 나머지 시리즈의 직전 값(last)은 이 버킷에서 갱신돼야 한다
       //   (중간에 멈추면 뒤 시리즈의 last 가 낡아 다음 버킷들이 줄줄이 '한계 초과' 로 비었다 — 목 데이터 검증에서 발견).
-      if (v != null) { use = v; st.last = { v, ts: buckets[i] }; }
+      if (v != null) { use = v; st.last = { v, ts: buckets[i] }; st.retired = false; }   // 다시 나오면 없어진 것이 아니다
       else if (st.partial.has(i)) broken = true;
       else if (st.last) {
-        if (buckets[i] - st.last.ts <= lim) { use = st.last.v; carried += 1; }
+        const gap = buckets[i] - st.last.ts;
+        if (gap <= lim) { use = st.last.v; carried += 1; }
+        else if (gap > retireAfter) st.retired = true;   // ⑥ 없어진 시리즈 — 더하지도, 판정을 깨지도 않는다
         else broken = true;
       } else if (st.first >= 0 && buckets[st.first] - buckets[i] <= lim) broken = true;
       if (use != null) {
@@ -73,5 +82,6 @@ export function sumArrayTraffic(agg, { isArray, carryMs } = {}) {
     measuredBuckets: valid.length,
     partialBuckets: partialIdx.length,
     carriedCells,
+    retiredSeries: state.filter((st) => st.retired).length,
   };
 }

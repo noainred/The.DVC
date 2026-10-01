@@ -213,6 +213,17 @@ describe('집계 — 법인별·종류별 (서버 totalsOf 와 같은 규칙)', 
     expect(a.growth['30d'].partial).toBe(true);
   });
 
+  it('v2.681 — 사용률·남은 용량은 사용량을 읽은 장비 기준, 퇴역·오래 미수집 장비는 합계에서 뺀다', () => {
+    const a = aggregateGrowth([dev(50, 100, 1), dev(null, 100, 1)], per);
+    expect(a.pct).toBe(50);
+    expect(a.freeBytes).toBe(50);
+    expect(a.totalBytes).toBe(200);
+    const b = aggregateGrowth([dev(50, 100, 1), { ...dev(80, 100, 1), stale: true }, { ...dev(10, 100, 1), retired: true }], per);
+    expect(b.usedBytes).toBe(50);
+    expect(b.excludedStale).toBe(2);
+    expect(b.devices).toBe(1);
+  });
+
   it('전부 기준선이 없으면 0 이 아니라 null', () => {
     const a = aggregateGrowth([dev(10 * TB, 20 * TB, null)], per);
     expect(a.growth['30d'].bytes).toBeNull();

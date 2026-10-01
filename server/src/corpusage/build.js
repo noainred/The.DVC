@@ -185,15 +185,27 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
   for (const b of bareMetal || []) {
     if (!b || typeof b !== 'object') continue;
     const vc = t(b.vcenterId);
-    const { key } = idOf(b);
-    if (!key || seen.has(key)) continue;
-    seen.set(key, vc);
+    const { key, keyKind } = idOf(b);
+    if (!key) continue;
+    // v2.681(R2D-07): 가상화 루프와 같은 규칙 — 예전엔 같은 key 를 **조용히** 버려, 서비스태그 없는 강제 베어메탈 ESXi
+    //   (fleetId = 호스트 이름)가 다른 vCenter 에 같은 이름으로 있으면 그 법인 행이 통째로 사라졌다(재현: B 법인 행 없음).
+    //   같은 vCenter → 같은 박스(한 번만) · 서비스태그가 같으면 다른 vCenter 여도 같은 박스(dupSameBox 로 센다 — v2.629) ·
+    //   그 밖(이름·fleetId 키)은 다른 서버다 — 세되 사용률 행은 붙이지 않는다(어느 서버의 값인지 알 수 없다) · keyConflict.
+    let keyConflict = false;
+    if (seen.has(key)) {
+      if (seen.get(key) === vc) continue;
+      if (keyKind === 'serviceTag') {
+        if (vc && inScope(vc)) corpOf(vc).bm.dupSameBox += 1;
+        continue;
+      }
+      keyConflict = true;
+    } else seen.set(key, vc);
     const hostRow = t(b.serverId).startsWith('host:') ? hostByKey.get(`${vc}|${t(b.name).toLowerCase()}`) : null;
     const cap = hostRow
       ? { cores: posOrNull(hostRow.cpuCores), memGB: posOrNull(hostRow.memTotalMB) != null ? hostRow.memTotalMB / 1024 : null }
       : (capOf(b) || {});
-    const j = judgeServer({ role: 'bm', row: edgeRowOf(b, rowsByAgentKey) || rowsByKey.get(key), now, freshMs });
-    const x = { key, name: t(b.name), role: 'bm', cores: posOrNull(cap.cores), memGB: posOrNull(cap.memGB), ...j };
+    const j = judgeServer({ role: 'bm', row: keyConflict ? null : (edgeRowOf(b, rowsByAgentKey) || rowsByKey.get(key)), now, freshMs });
+    const x = { key, name: t(b.name), role: 'bm', cores: posOrNull(cap.cores), memGB: posOrNull(cap.memGB), ...j, ...(keyConflict ? { keyConflict: true } : {}) };
     if (!vc) { if (!allowed) addAgg(unassigned.bm, x); continue; }
     if (!inScope(vc)) continue;
     const c = corpOf(vc);

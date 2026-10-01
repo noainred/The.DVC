@@ -51,7 +51,10 @@ export async function pullVmSeriesConfigNow() {
     const s = body?.settings;
     if (!s || typeof s !== 'object') throw new Error('설정 본문 없음');
     const cur = loadVmSeriesSettings();
-    const next = { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, targets: s.targets || {} };
+    const next = { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope,
+      // v2.681(R2F-04): 중앙이 이 엣지의 vCenter 를 모르면 targets 를 빼고 보낸다 — 필드가 없으면 직전 값을 유지한다
+      //   (빈 객체로 읽으면 소유권 해제·캐시 손상 직후 한 주기 수집이 멈췄다). 객체가 아니면(구버전 형식 오염)도 유지.
+      targets: (s.targets && typeof s.targets === 'object' && !Array.isArray(s.targets)) ? s.targets : (cur.targets || {}) };
     const curCmp = { enabled: cur.enabled, intervalMin: cur.intervalMin, retentionDays: cur.retentionDays, thresholds: cur.thresholds, scope: cur.scope, targets: cur.targets };
     let applied = false;
     if (!same(curCmp, next)) { saveVmSeriesSettings(next); applied = true; console.log(`[vmseries-pull] 중앙 설정 적용 — enabled=${next.enabled} 주기 ${next.intervalMin}분 범위 ${next.scope}`); }

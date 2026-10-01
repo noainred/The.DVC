@@ -17,6 +17,7 @@ export const MAX_VCENTERS = 64;         // 엣지 하나가 담당하는 vCenter
 export const MAX_RESULTS = 200;         // 폴러가 vCenter 당 200건까지만 싣는다(gpu/poller.js)
 const AGENT_MAX_LEN = 64;
 
+let omittedUnverified = 0;
 let byAgent = new Map(); // agent명 → { at, receivedAt, mode, vcenters:[...], counts:{hosts,vms}, dropped? }
 
 const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
@@ -70,18 +71,41 @@ export function sanitizeGpuGuestDiag(diag) {
   };
 }
 
-export function setGpuGuestDiag(agent, diag, counts) {
+/**
+ * v2.681(감사 R2F-02): 상한 퇴출이 검증 여부를 보지 않아, 공유 토큰으로 본문 이름을 바꿔 가며 256번 보내면 **개별 토큰으로
+ *   검증된 엣지의 진단까지** 밀려났다(GPU 화면 guestWhy 가 그 법인을 '엣지 진단 보고 없음' 이라 말한다 — 거짓 원인).
+ *   형제 규약(pullStats·ingestStats·bmusage pull)과 같게 — 퇴출은 **미검증부터**, 검증된 것으로 꽉 찼으면 미검증 새 이름은
+ *   받지 않고 개수를 센다(`omittedUnverified`). 이미 검증된 기록을 미검증 요청이 덮어쓰지도 않는다.
+ *   `opts.verified` 를 주지 않으면 미검증으로 본다(거부 기본값).
+ * @returns {{stored:boolean, reason?:string}}
+ */
+export function setGpuGuestDiag(agent, diag, counts, opts = {}) {
   const key = capStr(agent || '?', AGENT_MAX_LEN) || '?';
+  const verified = opts?.verified === true;
   const c = isObj(counts) ? { hosts: numOrNull(counts.hosts), vms: numOrNull(counts.vms) } : {};
+  const prev = byAgent.get(key);
+  if (prev && prev.verified === true && !verified) { omittedUnverified += 1; return { stored: false, reason: 'verified-entry' }; }
   // 재삽입으로 순서를 최신으로 옮긴다(Map 은 삽입 순서) — 상한 퇴출이 '가장 오래 보고 안 한 것' 이 되게.
   byAgent.delete(key);
-  while (byAgent.size >= MAX_AGENTS) byAgent.delete(byAgent.keys().next().value);
-  byAgent.set(key, { ...sanitizeGpuGuestDiag(diag), receivedAt: Date.now(), counts: c });
+  while (byAgent.size >= MAX_AGENTS) {
+    let victim = null;
+    for (const [k, v] of byAgent) { if (v.verified !== true) { victim = k; break; } }
+    if (victim == null) {
+      if (!verified) { omittedUnverified += 1; return { stored: false, reason: 'full-of-verified' }; }
+      victim = byAgent.keys().next().value; // 전부 검증됨 — 새 검증 기록은 가장 오래된 것을 민다
+    }
+    byAgent.delete(victim);
+  }
+  byAgent.set(key, { ...sanitizeGpuGuestDiag(diag), receivedAt: Date.now(), counts: c, verified });
+  return { stored: true };
 }
+
+/** 미검증 요청이라 받지 않은 진단 수(기동 뒤 누적). */
+export function gpuGuestDiagOmitted() { return omittedUnverified; }
 
 export function getAllGpuGuestDiag() {
   return [...byAgent.entries()].map(([agent, d]) => ({ agent, ...d }));
 }
 
 /** 테스트 전용 초기화. */
-export function _resetGpuGuestDiagForTest() { byAgent = new Map(); }
+export function _resetGpuGuestDiagForTest() { byAgent = new Map(); omittedUnverified = 0; }

@@ -114,7 +114,7 @@ export default function SvcMonitor() {
   const [filter, setFilter] = useState('ALL');
   const [sort, setSort] = useState('none');            // none | name | status
   const [detail, setDetail] = useState(null);
-  const [leftW, setLeftW] = useState(() => Number(localStorage.getItem(LEFT_W_KEY)) || DEFAULT_LEFT_W);
+  const [leftW, setLeftW] = useState(() => { try { return Number(localStorage.getItem(LEFT_W_KEY)) || DEFAULT_LEFT_W; } catch { return DEFAULT_LEFT_W; } }); // v2.681(R2C-05)
   const [dragging, setDragging] = useState(false);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});

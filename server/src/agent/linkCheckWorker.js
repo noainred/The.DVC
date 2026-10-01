@@ -56,7 +56,10 @@ async function pushReport(base, agent, { results = [], note = '', disabled = fal
   if (!post.ok) {
     // ⚠ 무음 실패 금지 — 403 은 '개별 토큰이 아니다' 라는 가장 흔한 원인이다.
     console.warn(`[linkcheck-worker] 보고 실패: HTTP ${post.status}${post.status === 403 ? ' — 이 엣지의 개별 토큰(설정 > 엣지 토큰)이 필요합니다.' : ''}`);
-    return { ok: false, httpStatus: post.status };
+    // v2.681(R2F-03): 중앙 DB 불가(503 dbUnavailable)는 사유를 상태에 남긴다 — '저장됨' 으로 적지 않는다.
+    const body = post.status === 503 ? await post.json().catch(() => null) : null;
+    if (body?.dbUnavailable) console.warn('[linkcheck-worker] 중앙이 통신 점검 DB 를 쓸 수 없어 이번 측정이 저장되지 않았습니다(중앙 link-check.db 확인).');
+    return { ok: false, httpStatus: post.status, ...(body?.dbUnavailable ? { dbUnavailable: true, stored: 0 } : {}) };
   }
   return await post.json().catch(() => ({}));
 }
@@ -65,6 +68,7 @@ async function pushReport(base, agent, { results = [], note = '', disabled = fal
 const ackFields = (ack) => ({
   stored: ack?.stored ?? null, rejected: ack?.rejected ?? null, omitted: ack?.omitted ?? null,
   reportPosted: ack?.ok === true, reportHttpStatus: ack?.httpStatus ?? null,
+  ...(ack?.dbUnavailable ? { centralDbUnavailable: true } : {}),
 });
 
 export async function runLinkCheckWorkerOnce() {

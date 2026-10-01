@@ -448,14 +448,18 @@ export async function capacityHistory(deviceId, sinceMs, bucketMs = 0) {
 }
 /** 장비 한 개의 기본 신선도 한계 — 기본 수집 주기(1시간, storage/intervals.js)의 2배. */
 export const CAPACITY_CARRY_DEFAULT_MS = 2 * 3_600_000;
+/** v2.681(R2D-01): 등록부를 모르는 호출부에서 마지막 행 + 신선도 한계 뒤로 몇 한계 동안 더 '빠진 장비' 로 밝힐지. 그 뒤는 퇴역으로 본다. */
+export const RETIRE_GRACE_CARRIES = 3;
+/** 유예의 하한 — 하루가 안 된 수집 중단은 '퇴역' 이 아니라 '지금 수집이 멈춘 장비' 로 본다(일 단위 운영 주기 한 번). */
+export const RETIRE_GRACE_MIN_MS = 24 * 3_600_000;
 const CAP_ALL_POINT_MAX = 2000;
 
 /**
  * (순수) 장비별 버킷 평균 행 → 전체 합계 점. v2.600 DB2600-01.
  *
  * 각 버킷에서 장비마다 **그 시각까지의 마지막 관측**(신선도 한계 안)을 끌어와 더한다(carry-forward).
- * 한계를 넘긴 장비는 그 점에서 빠지고, 빠진 대수는 `missing`(= 이 조회에서 한 번이라도 관측된
- * 장비 수 − 그 점의 장비 수)으로 밝힌다 — 부분 합을 전체처럼 그리지 않게 화면이 경고한다.
+ * 한계를 넘긴 장비는 그 점에서 빠지고, 빠진 대수는 `missing`(= 그 점에서 기대하는 장비 수 − 그 점의 장비 수.
+ * 기대 장비는 v2.681 R2D-01 부터 버킷마다 판정한다 — 함수 본문 주석)으로 밝힌다 — 부분 합을 전체처럼 그리지 않게 화면이 경고한다.
  * 사용량 규칙은 v2.594 그대로: 합에 든 장비 중 하나라도 사용량을 못 읽었으면 그 점 사용량은 null.
  *
  * @param {Array<{ts:number, device_id:string, total_bytes:number, used_bytes:?number,
@@ -463,7 +467,7 @@ const CAP_ALL_POINT_MAX = 2000;
  * @param {{sinceMs:number, nowMs:number, bucketMs:number, staleMs?:number,
  *   staleByDevice?:Map<string,number>|object}} opts
  */
-export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = CAPACITY_CARRY_DEFAULT_MS, staleByDevice = null } = {}) {
+export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = CAPACITY_CARRY_DEFAULT_MS, staleByDevice = null, knownIds = null } = {}) {
   const b = Math.max(60_000, Number(bucketMs) || 3_600_000);
   const staleOf = (id) => {
     const v = staleByDevice instanceof Map ? staleByDevice.get(id) : staleByDevice?.[id];
@@ -471,6 +475,29 @@ export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = C
   };
   const list = Array.isArray(rows) ? rows.filter((r) => r && r.device_id != null && Number.isFinite(Number(r.ts))) : [];
   const expected = new Set(list.map((r) => String(r.device_id)));
+  // v2.681(R2D-01): '기대 장비' 는 버킷마다 다시 판정한다. 예전에는 조회 행에 한 번이라도 나온 장비 전부라
+  // 퇴역(등록 해제·교체)한 장비 하나가 마지막 행 이후 **모든 버킷**을 missing ≥ 1 로 만들었고, 경영 보기 스파크라인이
+  // 그 시점부터 통째로 사라졌다(재현: 90일 · 10일째 퇴역 → 60점 중 53점 partial). 신규 장비도 첫 행 이전 구간을 partial 로 만들었다.
+  //   · 첫 행 이전에는 기대하지 않는다(그때 없던 장비다).
+  //   · knownIds(현재 등록·사용 중 장비 id)가 주어지면: 그 안의 장비는 첫 행 이후 계속 기대한다(지금 수집이 멈춘 장비는 계속 missing).
+  //     그 밖의 장비(퇴역)는 마지막 행 + 신선도 한계까지만 — 그 뒤는 '없어진 장비' 다.
+  //   · knownIds 가 없으면: 마지막 행 + 신선도 한계 + max(한계 × RETIRE_GRACE_CARRIES, 24시간) 까지 기대한다 — 수집이 멈춘 직후 몇 주기는
+  //     missing 으로 밝히고, 그 뒤는 퇴역으로 본다(등록부를 모르는 호출부에서 영구 소멸과 일시 누락을 가르는 유일한 근거가 시간이다).
+  //   기대에서 빠진 장비 수는 retiredDevices 로 밝힌다(조용히 빼지 않는다).
+  const known = knownIds == null ? null : new Set([...(knownIds instanceof Set ? knownIds : Array.isArray(knownIds) ? knownIds : [])].map(String));
+  const span = new Map();   // device_id → {first, last}
+  for (const r of list) {
+    const id = String(r.device_id); const ts = Number(r.ts);
+    const s = span.get(id);
+    if (!s) span.set(id, { first: ts, last: ts });
+    else { if (ts < s.first) s.first = ts; if (ts > s.last) s.last = ts; }
+  }
+  const expectUntil = (id) => {
+    const s = span.get(id);
+    if (known) return known.has(id) ? Infinity : s.last + staleOf(id);
+    return s.last + staleOf(id) + Math.max(staleOf(id) * RETIRE_GRACE_CARRIES, RETIRE_GRACE_MIN_MS);
+  };
+  const untilOf = new Map([...span.keys()].map((id) => [id, expectUntil(id)]));
   const first = Math.floor(Number(sinceMs) / b) * b;
   const lastBucket = Math.floor(Number(nowMs) / b) * b;
   let grid = [];
@@ -497,16 +524,21 @@ export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = C
       if (r.ssd_used != null) { ssdU += Number(r.ssd_used); ssdAny = true; }
     }
     if (!devices) continue;
+    let expNow = 0;
+    for (const [id, sp] of span) if (t >= sp.first && t <= untilOf.get(id)) expNow += 1;
     out.push({
       ts: t, total_bytes: total,
       used_bytes: usedUnknown ? null : used,
       hdd_total: hddT, hdd_used: hddMiss || !hddAny ? null : hddU,
       ssd_total: ssdT, ssd_used: ssdMiss || !ssdAny ? null : ssdU,
       devices, carried, used_unknown: usedUnknown,
-      missing: Math.max(0, expected.size - devices),
+      missing: Math.max(0, expNow - devices),
     });
   }
-  return { points: out, expectedDevices: expected.size, truncated: false };
+  const endT = grid.length ? grid[grid.length - 1] : Number(nowMs);
+  let retired = 0;
+  for (const id of span.keys()) if (untilOf.get(id) < endT) retired += 1;
+  return { points: out, expectedDevices: expected.size, retiredDevices: retired, truncated: false };
 }
 
 /**
@@ -524,9 +556,10 @@ export async function capacityHistoryAll(sinceMs, bucketMs, opts = {}) {
   const since = Number(sinceMs) || 0;
   try {
     const rows = db.selCapDevBucket.all(b, b, since - maxStale, b);
-    const r = sumCapacityBuckets(rows, { sinceMs: since, nowMs: Number(opts.nowMs) || Date.now(), bucketMs: b, staleMs, staleByDevice: sb });
+    const r = sumCapacityBuckets(rows, { sinceMs: since, nowMs: Number(opts.nowMs) || Date.now(), bucketMs: b, staleMs, staleByDevice: sb, knownIds: opts.knownIds ?? null });
     const pts = r.points;
     pts.expectedDevices = r.expectedDevices;
+    pts.retiredDevices = r.retiredDevices;
     pts.truncated = rows.length >= 400000;
     return pts;
   } catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
