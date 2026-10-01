@@ -6,6 +6,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 백엔드(Node/Express 집계 API) + 프론트엔드(React/Vite 대시보드). 자세한 내용은 `README.md`.
 
 - 개발 브랜치: `claude/vmware-global-monitoring-portal-nrnpnt`
+- **개발 방법론은 `docs/DEV-METHOD.md`**(v2.677 — 작업 등급·8단계 파이프라인·모델/에포트·토큰 다이어트·반복 결함 자동 검사). 새 교훈은 이 파일 본문에 단락으로 쌓지 말고 테스트 → 디렉터리 CLAUDE.md → docs 순으로 남긴다.
 - 빌드 검증: `npm run verify` (= `npm test` 단위테스트 + `npm run build` 웹빌드). 서버 실행은 `node server/src/index.js`
   - 단위 테스트는 `server/test/*.test.js`(node:test). 핵심 로직 변경 시 테스트를 추가/갱신하고 커밋 전 `npm test` 통과 확인.
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
@@ -2274,6 +2275,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         도구 권한을 먼저 본다 — 403 은 '읽기 실패' 가 아니라 '권한 없음' 으로 말한다. ⚠ 인증을 끈 목 서버는 권한 배열이 없어 `can()` 이 참이다(실측 403 2건).
       · 리전 차트 묶음(유럽/북미/아시아(중국 포함)/대한민국)은 `execOverviewText.chartGroup` 하나 — 두 보기가 같이 쓴다. **데이터 리전 값은 바꾸지 않는다**.
       · 스파크라인은 변화가 값의 5% 미만이면 축을 넓힌다(잔물결을 급경사로 과장하지 않는다) · 증감이 표시 단위로 0 이면 '±0'('−0.0 kW' 금지).
+    - **v2.677 — 경영 보기 머리 문구('전 세계 …'·vCenter 줄)는 지웠고 KPI 넷째 칸은 '네트워크 스위치'(CVP 등록 수, `cardMeta('network')`)다**(사용자 요청). 연결 불가·첫 수집 중 상태는 헤더·상태바·주의 항목이 말한다 — 머리 문구를 되살리지 말 것. 서버 `/overview/trend` 의 전력 계열은 남아 있지만 이 화면은 더 그리지 않는다.
     - **v2.671 — Platform(vCenter 목록) 검색창이 전체 vCenter VM 이름도 찾는다**(`views/VCenters.jsx VmNameSearch` + `vcVmSearchText.js` +
       `GET /vms?nameOnly=1`): 두 글자 이상 · 입력 멈춘 뒤 300ms 1회(폴링 금지) · 앞 50대 + 전체 개수 · inv.vms 권한을 먼저 본다 · 범위는 서버
       applyFilters 가 강제. `nameOnly` 가 없으면 /vms 는 예전처럼 이름·게스트 OS·IP·호스트를 본다(다른 화면 영향 없음).

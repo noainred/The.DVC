@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  modeFromHash, overviewMode, normDays, headline, subline, briefingStamp, gauges, chartGroup, regionCards,
+  modeFromHash, overviewMode, normDays, briefingStamp, gauges, chartGroup, regionCards,
   siteRowsExec, sortSiteRows, sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, usageTone,
 } from './execOverviewText.js';
 
@@ -30,23 +30,8 @@ describe('보기 모드 — 해시(그 탭에만) → 저장값 → 역할 기�
   });
 });
 
-describe('헤드라인 — 연결 불가·첫 수집 중을 정상이라 말하지 않는다', () => {
-  const base = { vcenters: 28, vcentersConnected: 28, vcentersUnreachable: 0, vcentersPending: 0, vcentersMaintenance: 0, vcentersDisabled: 0, alarmsCritical: 0, hosts: 658, vms: 5850 };
-  it('정상', () => {
-    const h = headline(base);
-    expect(h.tone).toBe('ok'); expect(h.emph).toBe('28개 법인'); expect(h.tail).toContain('정상 운영');
-  });
-  it('연결 불가가 먼저, 그다음 첫 수집 중, 그다음 Critical', () => {
-    expect(headline({ ...base, vcentersUnreachable: 2, vcentersPending: 3 }).emph).toBe('2곳 연결 불가');
-    const p = headline({ ...base, vcentersPending: 3 });
-    expect(p.tone).toBe('warn'); expect(p.emph).toBe('3곳 첫 수집 중'); expect(p.tail).toContain('기다리면');
-    expect(headline({ ...base, alarmsCritical: 4 }).emph).toBe('Critical 알람 4건');
-  });
-  it('비활성 법인은 운영 중 법인 수에서 뺀다', () => {
-    expect(headline({ ...base, vcentersDisabled: 3 }).emph).toBe('25개 법인');
-  });
-  it('보조 줄과 시각', () => {
-    expect(subline({ ...base, vcentersMaintenance: 1 })).toBe('vCenter 28/28 연결 · 호스트 658대 · 가상 서버 5,850대 · 1개 법인 점검 중');
+describe('머리 시각', () => {
+  it('KST 표기 · 모르면 빈 문자열', () => {
     expect(briefingStamp('2026-09-30T00:05:00Z')).toBe('2026.09.30 09:05 KST');
     expect(briefingStamp(null)).toBe('');
   });

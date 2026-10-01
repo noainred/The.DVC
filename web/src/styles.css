@@ -1347,15 +1347,10 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 /* ── v2.670 Overview '경영 보기'(시안 design_handoff_exec_overview) — .xov 범위 안에만 둔다(.ov 규칙과 섞지 않는다).
       색은 :root 토큰만 쓴다. uppercase 금지(v2.575 — 라벨 대소문자는 문구가 정한다). ── */
 .xov { max-width: 1520px; margin: 0 auto; padding: 36px 32px 80px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.xov-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 24px; }
-.xov-eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); margin-bottom: 12px; }
+.xov-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 24px; }
+.xov-eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); margin: 0; }
 .xov-eyebrow i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint-dim); animation: ovPulse 2.4s ease-in-out infinite; margin-right: 10px; vertical-align: middle; }
-.xov-h1 { font-size: 40px; font-weight: 700; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 10px; text-wrap: pretty; overflow-wrap: anywhere; }
-.xov-h1 span { color: var(--mint); }
-.xov-h1.tone-bad span { color: #f87171; }
-.xov-h1.tone-warn span { color: #fbbf24; }
-.xov-sub { font-size: 15px; color: var(--text-dim); }
-.xov-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.xov-head-right { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .xov-pills { display: flex; gap: 8px; flex-wrap: wrap; }
 .xov-pill { border-radius: 20px; padding: 8px 16px; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; background: transparent; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; }
 .xov-pill.on { border-color: var(--mint); background: rgba(52,224,180,.12); color: var(--mint); }
@@ -1441,9 +1436,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .xov-mode button.on { background: rgba(52,224,180,.12); color: var(--mint); }
 @media (max-width: 720px) {
   .xov { padding: 20px 14px 60px; }
-  .xov-h1 { font-size: 28px; }
   .xov-kpi-v { font-size: 40px; }
-  .xov-head-right { align-items: flex-start; }
+  .xov-head-right { justify-content: flex-start; }
   .xov-rings { gap: 6px; }
   .xov-ring-mid b { font-size: 22px; }
 }

@@ -16,9 +16,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson, can, toolAllowed } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
-import { capText, kwText, countText, cardMeta, firstCollectNotice } from './overviewCardsText.js';
+import { capText, countText, cardMeta, firstCollectNotice } from './overviewCardsText.js';
 import {
-  headline, subline, briefingStamp, gauges, regionCards, siteRowsExec, sortSiteRows, usageTone, TONE_VAR,
+  briefingStamp, gauges, regionCards, siteRowsExec, sortSiteRows, usageTone, TONE_VAR,
   sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, TREND_DAYS, DAYS_KEY, normDays,
 } from './execOverviewText.js';
 
@@ -66,7 +66,6 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
     </div>
   );
 
-  const head = headline(g);
   const pbc = ov.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;
   const setD = (d) => { setDays(d); writeDays(d); };
   const t = trend && Number(trend.days) === days ? trend : null;
@@ -82,9 +81,10 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
     { key: 'storage', label: '스토리지 용량', accent: 'var(--accent-2)', value: capText(stor?.totalBytes), unit: '',
       sub: !stor ? '' : stor.reason ? stor.reason : stor.totalBytes == null ? cardMeta('storage', cards) : `사용 ${stor.usedPct == null ? '—' : `${stor.usedPct}%`} · ${capText(stor.usedBytes)} 사용 중`,
       t: t?.storage, onClick: stor?.reason ? undefined : () => go('#/tools/storage-mon') },
-    { key: 'power', label: '소비 전력', accent: 'var(--amber)', value: kwText(cards?.power?.totalWatts), unit: '', deltaTone: 'var(--amber)',
-      sub: cards?.power?.reason ? cards.power.reason : '서버 · 네트워크 · 스토리지 합',
-      t: t?.power, onClick: cards?.power?.reason ? undefined : () => go('#/tools/power-total') },
+    // v2.677: 소비 전력 카드 자리 — 네트워크 스위치 수량(CVP 등록 장비). 수량 추이는 기록하지 않는다.
+    { key: 'network', label: '네트워크 스위치', accent: 'var(--amber)', value: countText(cards?.network?.count), unit: cards?.network?.count != null ? '대' : '',
+      sub: cardMeta('network', cards),
+      t: cards?.network ? { reason: 'no-series' } : null, onClick: cards?.network?.reason ? undefined : () => go('#/tools/cvp') },
   ];
 
   return (
@@ -95,8 +95,6 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
       <div className="xov-head">
         <div style={{ minWidth: 0 }}>
           <div className="xov-eyebrow"><i />Executive Briefing{briefingStamp(ov.generatedAt) ? ` · ${briefingStamp(ov.generatedAt)}` : ''}</div>
-          <h1 className={`xov-h1 tone-${head.tone}`}>{head.lead}<span>{head.emph}</span>{head.tail}</h1>
-          <div className="xov-sub">{subline(g)}</div>
         </div>
         <div className="xov-head-right">
           {modeToggle}
@@ -222,8 +220,8 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
 
       {/* 6. 각주 */}
       <div className="xov-foot">
-        사용률 임계값(75% · 90%)은 엔지니어 보기와 같습니다. 가상 서버 추이는 매일 00시·12시 스냅샷, 스토리지 추이는 스토리지 모니터링 용량 이력,
-        전력 추이는 서버(iDRAC) 전력만 — 칸마다 대표 시간 몇 개의 평균이며, 일부 장비·법인만 집계된 구간은 그리지 않습니다. 소진 시점은 선형 추정치입니다. 금액 환산은 표시하지 않습니다.
+        사용률 임계값(75% · 90%)은 엔지니어 보기와 같습니다. 가상 서버 추이는 매일 00시·12시 스냅샷, 스토리지 추이는 스토리지 모니터링 용량 이력이며,
+        일부 장비·법인만 집계된 구간은 그리지 않습니다. 네트워크 스위치는 CVP 등록 장비 수입니다. 소진 시점은 선형 추정치입니다. 금액 환산은 표시하지 않습니다.
       </div>
     </div>
   );

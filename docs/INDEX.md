@@ -199,6 +199,7 @@
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 (Capacity Advisor) |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | 설정·데이터 파일 레퍼런스 (자동 생성) |
 | [CVP.md](CVP.md) | Arista CloudVision(CVP) 네트워크 스위치 수집 (v2.608) |
+| [DEV-METHOD.md](DEV-METHOD.md) | 개발 방법론 — The.DVC 포탈을 Claude Code 로 개발하는 방식(v2.677 기준) |
 | [DEVICE-BULK-IMPORT.md](DEVICE-BULK-IMPORT.md) | 장비 대량 등록(CSV · 자유텍스트) — SAN 스위치 / 스토리지 / Horizon |
 | [EDGE-COLLECTOR-MERGE.md](EDGE-COLLECTOR-MERGE.md) | 이전 절차서 — 별도 수집서버(원격)를 엣지 노드 포탈로 통합 |
 | [EDGE-SETUP.md](EDGE-SETUP.md) | 엣지(Edge) 설정 방법 |
@@ -223,5 +224,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 83개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 84개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->
