@@ -15,6 +15,7 @@ import { invForServer } from '../admin/shared.js';
 import { allPhysicalServers, corpAttribution } from '../../idrac/corpAttribution.js'; // v2.626
 import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
+import { numOrNull } from '../../util/numOrNull.js'; // v2.675: /health 의 사용률은 못 읽으면 null
 
 // v2.626: `allPhysicalServers`·`corpAttribution` 은 `idrac/corpAttribution.js` 로 옮겼다 — 법인별 서버 사용량·
 //   베어메탈 사용률이 **같은 귀속 입력**을 쓰게(개요만 DataCenter 규칙을 알던 것이 '물리 서버 없음' 의 원인이었다).
@@ -163,7 +164,11 @@ api.get('/health', (req, res) => {
     vmsPoweredOn: g.vmsPoweredOn || 0,
     alarms: g.alarms || 0,
     alarmsCritical: g.alarmsCritical || 0,
-    cpuUsagePct: g.cpuUsagePct || 0,
+    // v2.675: 읽은 호스트가 없으면(첫 수집 중 · 전부 연결 끊김) null — 예전 `|| 0` 은 '사용률 0%' 라는 거짓이었다(v2.595 R2595-04 와 같은 기준).
+    cpuUsagePct: numOrNull(g.cpuUsagePct),
+    // v2.675: 첫 병합 전 골격(store.publishSkeleton)이면 위 개수는 '아직 읽지 않음' 이다 — 하단 상태바가 0 대신 '—' 를 보이게 표지를 싣는다
+    // (/overview 와 같은 표지. 개수 필드는 구버전 화면 호환을 위해 그대로 둔다).
+    ...(snap.initial ? { initial: true } : {}),
     updateAvailable,
     latestVersion: upR || upW || null,
     features: { upgradeTab: config.ui.showUpgradeTab },
@@ -204,6 +209,8 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
     : (Array.isArray(sink.servers) ? { ...physicalCapacity(sink.servers), scoped: true } : null);
   return {
     generatedAt: snap.generatedAt, source: snap.source, ...rollups,
+    // v2.675: 첫 병합 전 골격(store.publishSkeleton) — 화면이 0 대신 '첫 수집 중' 을 말한다(인벤토리를 아직 읽지 않았다).
+    ...(snap.initial ? { initial: true } : {}),
     gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN,
     physical,
     physicalByCorp: pbc,

@@ -78,7 +78,8 @@ export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 
   const t0 = performance.now();
 
   // vCenter 이벤트에서 로그인 실패 후보를 좁은 조건 하나로, 최근 1시간 조각부터 거슬러 가져와 정규식으로 분류.
-  const scan = { chunks: 0, candidates: 0, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since };
+  // v2.675: rowsMax·days 를 싣는다 — 화면이 '최근 N건까지만 셌다' 를 숫자를 박지 않고 말한다.
+  const scan = { chunks: 0, candidates: 0, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since, rowsMax, days: Math.max(1, days) };
   const read = typeof db.loginFailCandidates === 'function' ? db.loginFailCandidates : null;
   if (!read) scan.source = 'unavailable';   // 구버전 db 객체 — 네 단어 전 범위 검색(정지 원인)으로 되돌리지 않는다
   const key = `${vcenterId || ''}|${Math.max(1, days)}`;
@@ -113,14 +114,27 @@ export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 
   const top = (m, n = 15) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([key, count]) => ({ key, count }));
 
   // 브루트포스 탐지: 사용자/IP 단위로 전체 윈도 누적 + 최근 windowMin 내 집중.
-  const winCut = Date.now() - windowMin * 60_000;
+  // v2.675: 대상마다 전체 실패 목록을 다시 훑지 않는다(예전 filter·find — 대상 수 × 실패 수. 계정명을 바꿔 가며 5번씩 실패하는
+  //   스프레이 공격이면 대상 수천 × 실패 2만 = 수억 번 비교로 수백 ms~초를 동기로 썼다). 한 번 훑어 최근 횟수·마지막 시각을 센다.
+  //   all 은 최신순이므로 처음 만난 시각이 마지막 시각이다(예전 find 와 같다).
+  // v2.675: 기준 시각은 분석 시각(now — deps 로 고정 가능)이다. 예전 Date.now() 는 분석 기간(since)과 다른 시계를 썼다.
+  const winCut = now - windowMin * 60_000;
+  const recentBy = { user: new Map(), ip: new Map() };
+  const lastBy = { user: new Map(), ip: new Map() };
+  for (const f of all) {
+    for (const label of ['user', 'ip']) {
+      const key = label === 'user' ? f.user : f.ip;
+      if (!key) continue;
+      if (!lastBy[label].has(key)) lastBy[label].set(key, f.ts);
+      if (f.ts >= winCut) recentBy[label].set(key, (recentBy[label].get(key) || 0) + 1);
+    }
+  }
   const offenders = [];
   const offByKey = (label, m) => {
     for (const [key, count] of m) {
       if (count < threshold) continue;
-      const recent = all.filter((f) => (label === 'user' ? f.user : f.ip) === key && f.ts >= winCut).length;
-      const last = all.find((f) => (label === 'user' ? f.user : f.ip) === key)?.ts;
-      offenders.push({ label, key, total: count, recent, active: recent >= threshold, lastTs: last });
+      const recent = recentBy[label].get(key) || 0;
+      offenders.push({ label, key, total: count, recent, active: recent >= threshold, lastTs: lastBy[label].get(key) });
     }
   };
   offByKey('user', byUser); offByKey('ip', byIp);

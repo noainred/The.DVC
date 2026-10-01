@@ -257,11 +257,14 @@ class Store {
       const dataSource = getDataSource();
       if (dataSource === 'mock') {
         this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(generateSnapshot())));
+        this._merged = true;
         this.syncLedger();
         return;
       }
 
       const { vcenters } = loadVcenterConfig();
+      // v2.675: 첫 병합 전에는 등록부만으로 '첫 수집 중' 골격을 먼저 게시한다(publishSkeleton 머리말).
+      if (!this._merged) this.publishSkeleton(vcenters, dataSource);
       const now = Date.now();
       const globalMs = config.pollIntervalMs;
 
@@ -432,6 +435,7 @@ class Store {
 
       merged.generatedAt = new Date().toISOString();
       this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(merged)));
+      this._merged = true;
       try { snapCacheSweep(this.snapshot.generatedAt); } catch { /* 캐시 정리 실패는 수집에 영향 없음 */ } // v2.617: 옛 세대 응답 캐시가 옛 스냅샷을 붙잡지 않게
       this.syncLedger();
       this.lastError = null;
@@ -494,6 +498,41 @@ class Store {
     if (ledgerWarnLog('ledger', `${err.stage}|${err.message}`, now)) {
       console.warn(`[store] IP 원장(ipam.db) 동기화 실패(${err.stage === 'build' ? '원장 계산' : '저장'} · 연속 ${streak}회): ${err.message.slice(0, 300)}`);
     }
+  }
+
+  /**
+   * v2.675(v2.672 남은 일 — '첫 수집 중 화면의 0 표시'): 첫 병합 전 스냅샷은 vCenter 가 하나도 없는 빈 스냅샷이라 화면이
+   * 'vCenter 0/0 연결 · 가상 서버 0대' 에 경영 보기 헤드라인은 '0개 법인 인프라가 정상 운영 중' 이라고 말했다(28곳 첫 수집은
+   * 동시 8 · vCenter 당 데드라인 90초+라 수 분이 걸린다). 등록부만으로 각 vCenter 를 '첫 수집 중(pending)' 으로 둔 골격을 먼저
+   * 게시한다 — 화면은 이미 pending 을 '기다리면 채워집니다' 로 말한다(v2.509 loadState).
+   * ⚠ 골격에는 **인벤토리를 싣지 않는다** — 위임(site) vCenter 의 디스크 캐시를 실으면 함대 합계가 그 일부만으로 계산된다
+   *   (지표 샘플러의 전체 합계·VM 수량 추이에 '거짓 하락'). 첫 병합부터 예전과 같다. 그래서 위임 vCenter 도 골격에서는 pending 이다.
+   * ⚠ IP 원장(syncLedger)·전력 적재·측정 전력 귀속은 하지 않는다 — 빈 골격으로 외부 공유 ipam.db 를 덮으면 안 된다.
+   * 자격증명 거부로 멈춘 vCenter 는 병합과 같이 unreachable + authStopped 다('기다리면 된다' 는 거짓 — v2.590).
+   * @returns {boolean} 게시했으면 true
+   */
+  publishSkeleton(vcenters, dataSource) {
+    if (this._merged) return false;
+    const skel = emptySnapshot();
+    skel.source = dataSource;
+    skel.initial = true;    // 첫 병합 전 골격(인벤토리 없음) — 소비처가 '수집 전' 을 구분할 수 있게
+    for (const vc of Array.isArray(vcenters) ? vcenters : []) {
+      if (!vc || !vc.id) continue;
+      const base = { id: vc.id, name: vc.name, location: vc.location };
+      if (vc.enabled === false) { skel.vcenters.push({ ...base, status: 'disabled' }); continue; }
+      if (vc.maintenance) { skel.vcenters.push({ ...base, status: 'maintenance', maintenance: true }); continue; }
+      if (vc.collectMode === 'site') { skel.vcenters.push({ ...base, status: 'pending', collectSource: 'site' }); continue; }
+      const authStop = authStopView(vcAuthGuard.authStopFor(vc));
+      if (authStop) {
+        skel.collectionErrors.push({ vcenterId: vc.id, name: vc.name, message: authStop.reason, at: authStop.at, fallback: false, authStopped: authStop });
+        skel.vcenters.push({ ...base, status: 'unreachable', error: authStop.reason, hint: '인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.', authStopped: authStop });
+        continue;
+      }
+      skel.vcenters.push({ ...base, status: 'pending' });
+    }
+    this.snapshot = withRollups(applyAlarmMutes(skel));
+    try { snapCacheSweep(this.snapshot.generatedAt); } catch { /* */ }
+    return true;
   }
 
   start() {

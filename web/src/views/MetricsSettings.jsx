@@ -1,6 +1,7 @@
 import { blankOr } from './blankOr.js';
 import { scopeSaveSuffix } from './scopeSaveText.js';
 import { samplerWithheldNote } from './samplerWithheldText.js'; // v2.628(LEFT2628-01)
+import { rollupBackfillNote } from './rollupBackfillText.js'; // v2.675 옛 원본 → 시간당 롤업 이전 상태
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { fmtAgo, fmtBytes } from '../util/fmt.js';
@@ -169,6 +170,12 @@ export default function MetricsSettings() {
         </div>
         {/* v2.628(감사 LEFT2628-01): 최근 샘플이 적재하지 않은 vCenter·전체 합계·VM 누적 — 예전엔 lastRun 에 있고 아무도 안 읽었다. */}
         {samplerWithheldNote(last) && <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6, color: 'var(--amber)' }}>{samplerWithheldNote(last)}</div>}
+        {/* v2.675: 롤업 도입 이전 원본을 시간당 롤업으로 옮기는 1회 작업 — 진행·완료·멈춤 사유(긴 기간 차트가 원본으로 떨어지지 않게). */}
+        {(() => {
+          const rb = rollupBackfillNote(status.rollupBackfill);
+          if (!rb.text && !rb.warn) return null;
+          return <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6, ...(rb.warn ? { color: 'var(--amber)' } : {}) }}>{rb.warn || rb.text}</div>;
+        })()}
       </div>
 
       {/* VM 성능 트래킹(Optimization 원본) — vCenter별 독립 DB · 보존기간·대상 선택(v2.376) */}

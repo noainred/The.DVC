@@ -7,6 +7,7 @@
  */
 
 import { getMetricsDb } from '../metrics/db.js';
+import { createYielder } from '../util/timeSlice.js';
 
 // 탐지 대상 시계열 패밀리 + 라벨(엔티티 키 → 사람이 읽을 이름은 호출부에서 매핑).
 // v2.632(감사 AX2-2632-04): minScale — 척도(σ 환산)의 **하한**. 거의 상수인 계열(VMFS 사용량·안정된 온도)은 MAD 가 0 이고
@@ -40,12 +41,19 @@ const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a,
  */
 async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10, minSamples = 12, allowedKeys = null }) {
   const since = Date.now() - windowHours * 3600_000;
-  const latest = db.latestAll(fam.metric); // Map<k,{v,ts}> (인메모리 캐시 — 풀스캔 아님)
-  // 키별 history() N+1(키 수천 × 쿼리 1회 = 요청당 동기 쿼리 수천 회로 이벤트 루프 블로킹)을
-  // 패밀리당 일괄 쿼리 1회로 대체. 결과는 키별 [{ts,avg,min,max}] 동일.
-  const histAll = db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
+  // v2.675: 첫 호출의 캐시 시드는 이제 인덱스를 건너뛰는 조회다(예전 GROUP BY MAX 는 지표 원본 전부를 훑어 합성 3,168만 행에서
+  //   14.7초 동안 포탈을 멈췄다 — 그때까지 이 주석은 '풀스캔 아님' 이라고 적고 있었다. 첫 호출에는 풀스캔이었다).
+  const latest = db.latestAll(fam.metric); // Map<k,{v,ts}>
+  const maybeYield = createYielder(15);
+  // 키별 history() N+1(키 수천 × 쿼리 1회 = 요청당 동기 쿼리 수천 회로 이벤트 루프 블로킹)을 패밀리 일괄 조회로 대체.
+  // v2.675: 일괄 조회도 한 문장이면 24시간 × 키 1,100 에 1.9초 동안 멈췄다(합성 실측) — 버킷 경계에 맞춘 1시간 조각으로 나눠
+  //   조각 사이에 양보한다(결과 동일 — 테스트가 historyAll 과 대조). 구버전 db 객체면 예전 한 문장으로.
+  const histAll = typeof db.historyAllSliced === 'function'
+    ? await db.historyAllSliced(fam.metric, since, bucketMin * 60_000, 5000, { maybeYield })
+    : db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
   const out = [];
   for (const [k, last] of latest) {
+    await maybeYield(); // 키 수천 개의 중앙값·MAD 계산 사이에도 양보한다(시간 기준 — v2.672 규약)
     // scope(v2.289 #2): 범위 제한 계정은 허용 엔티티 키(호스트 id·데이터스토어 id·vCenter id)만.
     // allowedKeys=null(무제한)이면 전체. 키 포맷은 sampler.js 와 동일(temp_host/gpu_util=host id,
     // ds_usedgb=datastore id, gpu_vc=vCenter id) — 범위 밖 vCenter 의 이상치가 새지 않게 한다.

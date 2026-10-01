@@ -50,7 +50,12 @@ metricsExportRouter.get('/', async (req, res) => {
 
   // vCenter 가용성
   H('vmware_vcenter_up', 'vCenter 수집 상태(1=connected)');
-  for (const v of snap.vcenters || []) out += line('vmware_vcenter_up', { vcenter: v.id, version: v.version }, v.status === 'connected' ? 1 : 0);
+  for (const v of snap.vcenters || []) {
+    // v2.675: 기동 직후 골격(snap.initial — 첫 병합 전)의 '첫 수집 중' vCenter 는 내보내지 않는다. 예전에는 이 구간에 목록이 비어
+    //   아무 줄도 없었다 — 0 으로 내보내면 외부 감시가 재시작마다 'vCenter 다운' 경보를 낸다(모르는 것을 0 으로 말하지 않는다).
+    if (snap.initial && v.status === 'pending') continue;
+    out += line('vmware_vcenter_up', { vcenter: v.id, version: v.version }, v.status === 'connected' ? 1 : 0);
+  }
 
   // 호스트 지표
   H('vmware_host_cpu_percent', 'ESXi 호스트 CPU 사용률(%)');

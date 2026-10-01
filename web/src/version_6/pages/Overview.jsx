@@ -28,7 +28,8 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
   const setGroup = (v) => { setGroupState(v); writeGroup(v); };
   if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return <Loading label="Overview" />;
-  if (!ov.global) {
+  // v2.675: 첫 병합 전 골격(ov.initial — 인벤토리를 아직 읽지 않았다)도 타일에 0 을 그리지 않고 같은 '수집 준비 중' 안내를 쓴다.
+  if (!ov.global || ov.initial) {
     const t = loadText(loadPhase({ health, healthError, poll: { data: null, error } }), { health, pollError: error });
     return <div className="v6-panel"><b>수집 준비 중</b><div className="v6-note">{t.long}</div></div>;
   }
