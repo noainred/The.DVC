@@ -327,6 +327,15 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fiel
   });
 }));
 
+/** v2.681(R2D-03): 등록 장비 id 목록 — 등록부를 못 읽으면 null(퇴역 판정을 하지 않는다). */
+async function storageKnownIds() {
+  const reg = await import('../storage/registry.js').catch(() => null);
+  try {
+    if (typeof reg?.listDevices !== 'function' || reg.registryLoadError?.()) return null;
+    return reg.listDevices().map((d) => d.id);
+  } catch { return null; }
+}
+
 v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ req, res, fields, apiPath }) => {
   const db = await import('../storage/db.js').catch(() => null);
   const g = await import('../storage/growth.js').catch(() => null);
@@ -348,9 +357,7 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
   }
   // v2.681(R2D-03): 내부 화면과 같은 기준 — 오늘 기준(asOfDay)으로 장기 미관측 장비를 가르고, 등록부를 읽을 수 있으면
   //   등록 해제 장비를 '퇴역' 으로 가른다(합계용 — 장비 행은 그대로 싣는다). 등록부를 못 읽으면 퇴역 판정은 하지 않는다.
-  const reg = await import('../storage/registry.js').catch(() => null);
-  let knownIds = null;
-  try { if (typeof reg?.listDevices === 'function' && !reg.registryLoadError?.()) knownIds = reg.listDevices().map((d) => d.id); } catch { knownIds = null; }
+  const knownIds = await storageKnownIds();
   const m = g.growthMatrix(rows, { periods, meta, asOfDay: db.dayIndex(Date.now()), knownIds });
   // v2.604 AUTHZ-2604-01: 같은 장비 이름이 이 경로에도 실린다(형제 경로가 우회로가 되지 않게 — v2.550.3 규약).
   const hide = !isAdminReq(req);

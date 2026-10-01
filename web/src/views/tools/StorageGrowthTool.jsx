@@ -158,6 +158,9 @@ export default function StorageGrowthTool() {
         <Note tone="warn" text={`**합계가 전 장비 기준이 아닙니다.** 기간별로 기준선(비교 시작일)이 없는 장비는 그 열의 합계에서 빠졌습니다 — 각 칸에 마우스를 올리면 몇 대를 더했는지 나옵니다. 관측이 그 기간만큼 쌓이면 자동으로 포함됩니다.`} />
       )}
       {addressHiddenNote(d) && <Note text={addressHiddenNote(d)} />}
+      {t.excludedStale > 0 && (
+        <Note tone="warn" text={`**등록 해제됐거나 ${d?.totals?.staleDaysLimit ?? 7}일 넘게 수집이 없는 장비 ${t.excludedStale}대**는 '지금 합계' 에서 뺐습니다 — 그 장비의 마지막 값은 지금 값이 아닙니다(표에는 남아 있습니다).`} />
+      )}
       {t.unknownUsed > 0 && (
         <Note tone="warn" text={`**사용량을 읽지 못한 장비 ${t.unknownUsed}대**가 합계에서 빠졌습니다 — 0 으로 채우지 않았습니다(‘용량 0’ 이라는 거짓을 만들지 않기 위해서입니다).`} />
       )}
