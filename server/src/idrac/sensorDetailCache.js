@@ -42,9 +42,15 @@ function writeNow() {
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(Object.fromEntries(collection)), { mode: 0o600 });
 }
+/**
+ * 저장 디바운스(v2.680 E-03). 파일은 서버 1,000대 × 센서 150개면 약 18MB 이고 저장은 동기 stringify + 동기 원자 쓰기
+ * (회당 150~350ms 실측)다. 인벤토리 재수집 구간 동안 10초마다 전량을 다시 쓰던 것을 60초로 늘렸다 — 이 파일은 캐시이고
+ * 종료 시에는 exit flush 가 즉시 동기 저장한다(마지막 창을 잃지 않는다). 더 짧게 되돌리지 말 것.
+ */
+export const PERSIST_DEBOUNCE_MS = 60_000;
 function persistSoon() {
   if (timer) return;
-  timer = setTimeout(() => { timer = null; try { writeNow(); } catch { /* best effort — 캐시 */ } }, 10_000);
+  timer = setTimeout(() => { timer = null; try { writeNow(); } catch { /* best effort — 캐시 */ } }, PERSIST_DEBOUNCE_MS);
   timer.unref?.();
 }
 registerExitFlush('idrac/sensorDetailCache', () => { if (!timer) return; clearTimeout(timer); timer = null; writeNow(); });
@@ -81,20 +87,38 @@ export function sensorCollectionStale(serverId, maxAgeMs) {
   return !c || (Date.now() - (c.at || 0)) > maxAgeMs;
 }
 
-/** 서버 한 대의 로컬 상세 — { list, omitted, thermalAt, collection:{…메타} } (둘 다 없으면 null). */
-export function localSensorDetail(serverId) {
+/**
+ * 서버 한 대의 로컬 상세 — { list, omitted, thermalAt, collection:{…메타} } (둘 다 없으면 null).
+ * v2.680 A-01: 컬렉션에만 있는 센서는 컬렉션 시각(sensorsAt)이 신선도 경계를 넘으면 `stale` 로 표시된다(mergeSensors).
+ */
+export function localSensorDetail(serverId, { now = Date.now() } = {}) {
   load();
   const id = String(serverId);
   const th = thermal.get(id) || null;
   const co = collection.get(id) || null;
   if (!th && !co) return null;
   const collList = (co?.sensors || []).map(expandCompact).filter(Boolean);
-  const { list, omitted } = mergeSensors(collList, th?.list || []);
+  const { list, omitted } = mergeSensors(collList, th?.list || [], { collAt: co?.sensorsAt ?? null, now });
   return {
     list, omitted,
     thermalAt: th?.at ?? null,
     collection: co ? { at: co.at, ok: co.ok, sensorsAt: co.sensorsAt ?? null, count: collList.length, chassis: co.chassis, absent: co.absent, failed: co.failed, expanded: co.expanded, notRead: co.notRead, error: co.error || '' } : null,
   };
+}
+
+/**
+ * v2.680 E-01: CPU 사용률 판정 전용 — 컬렉션의 **퍼센트 센서만** 펼친다. 통합 추이 샘플러가 1분마다 전 서버를 도는데
+ * CPU 사용률 센서는 컬렉션의 퍼센트 종류에서만 오므로(Thermal 에는 온도·팬뿐) 150개 전량을 펼칠 이유가 없다.
+ * @returns {{ list: object[], collAt: number|null } | null}
+ */
+export function localCpuSensorDetail(serverId) {
+  load();
+  const id = String(serverId);
+  const co = collection.get(id) || null;
+  if (!co) return thermal.has(id) ? { list: [], collAt: null } : null;
+  const list = [];
+  for (const o of co.sensors || []) if (o && o.k === 'percent') { const x = expandCompact(o); if (x) list.push(x); }
+  return { list, collAt: co.sensorsAt ?? null };
 }
 
 /** 엣지 export 용 콤팩트(중앙이 expandCompact 로 되돌린다). */

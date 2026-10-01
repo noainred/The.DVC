@@ -236,7 +236,7 @@ api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
     cdb.listOpenFaults().catch(() => ({ rows: [], unavailable: true })),
     cdb.trafficByDevice({ staleMs }).catch(() => ({ rows: [], unavailable: true })),
     cdb.listEvents({ sinceMs: 24 * 3600_000, limit: 2000 }).catch(() => ({ events: [], unavailable: true })),
-    cdb.recentFaultEvents({ sinceMs: 7 * 86_400_000, limit: RECENT_EVENTS_MAX }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.recentFaultEvents({ sinceMs: 7 * 86_400_000, limit: RECENT_EVENTS_MAX * 20 }).catch(() => ({ rows: [], unavailable: true })),
     cdb.portUsage({ limit: 1, staleMs, keep: own }).catch(() => ({ counts: null, unavailable: true })),
   ]);
   const ov = buildCvpOverview({
@@ -246,7 +246,7 @@ api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
   });
   const corpOf = corpResolver(servers, dcList());
   const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
-  const recent = (faultEvents.rows || []).filter(own).map((f) => {
+  const recent = (faultEvents.rows || []).filter(own).slice(0, RECENT_EVENTS_MAX).map((f) => {
     const c = corpOf(f.cvpId);
     const base = { at: f.at, event: f.event, state: f.state, prevState: f.prevState, kind: f.kind, label: f.label, detail: f.detail, closeReason: f.closeReason,
       cvpId: f.cvpId, deviceKey: f.deviceKey, deviceName: f.deviceName, cvpName: nameOf.get(String(f.cvpId)) || f.cvpId, corpId: c.corpId, corpName: c.corpName };
@@ -287,7 +287,7 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
   const HIST_MAX = 100;
   const [of, fe, ev] = await Promise.all([
     cdb.listOpenFaults({ agent, cvpId }).catch(() => ({ rows: [], unavailable: true })),
-    cdb.recentFaultEvents({ agent, cvpId, sinceMs: 30 * 86_400_000, limit: 5000 }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.recentFaultEvents({ agent, cvpId, deviceKey: key, sinceMs: 30 * 86_400_000, limit: HIST_MAX + 1 }).catch(() => ({ rows: [], unavailable: true })),
     cdb.listEvents({ agent, cvpId, sinceMs: 7 * 86_400_000, limit: 2000 }).catch(() => ({ events: [], unavailable: true })),
   ]);
   const ids = new Set([det.device.serial, det.device.key].filter(Boolean).map((x) => String(x).toLowerCase()));
@@ -300,7 +300,9 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     cvpName: srv.name || srv.id,
     history: {
       openFaults: devOpen,
+      // v2.680(감사 B-04): 장비 키로 SQL 에서 고른다 — CVP 단위 상한 뒤에 거르면 그 장비 이력이 조용히 잘렸다.
       faultEvents: devFaultEv.slice(0, HIST_MAX).map(maskF), faultEventsOmitted: Math.max(0, devFaultEv.length - HIST_MAX),
+      faultEventsMore: devFaultEv.length > HIST_MAX,
       events: devEv.slice(0, HIST_MAX).map((e) => (admin ? e : { ...e, title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) })),
       eventsOmitted: Math.max(0, devEv.length - HIST_MAX),
       // 이벤트는 CVP 단위 최근 2,000건 안에서 이 장비를 고른다 — 넘치면 7일 전부를 본 것이 아니다(화면이 밝힌다).

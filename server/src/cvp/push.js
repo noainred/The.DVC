@@ -51,6 +51,27 @@ const FULL_REFRESH_MS = 60 * 60_000;
 const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
 const _evSent = new Map(); // v2.641: cvpId → 보낸 이벤트의 최대 (updatedAt|ts) — 재기동하면 비어 최근 7일분을 다시 보낸다(중앙 upsert)
 export const EVENT_PUSH_MAX = 2000;
+/** v2.680(감사 F-04): push 한 번에 싣는 이벤트 원문 바이트 상한(CVP 전체 합) — 중앙 본문 한도(해제 후 16MB)보다 충분히 작게. */
+export const EVENT_PUSH_BYTES = 4 * 1024 * 1024;
+export const eventTimeOf = (e) => Math.max(e?.updatedAt || 0, e?.ts || 0);
+/**
+ * v2.680(감사 F-04): 워터마크 뒤 이벤트를 오래된 것부터 바이트 예산 안에서 고른다(순수). 이벤트는 청크 0 한 본문에 실리므로
+ *   상한이 없으면 재기동 직후 7일치가 중앙 한도(해제 후 16MB)를 넘어 매 주기 같은 413 으로 CVP push 전체가 멈춘다.
+ *   같은 시각 묶음은 쪼개지 않는다(워터마크가 시각이라 묶음 중간에서 자르면 나머지가 영영 가지 않는다). 첫 묶음은 예산을 넘어도 넣는다
+ *   (그것마저 미루면 영원히 못 간다). 남은 개수는 held — 다음 주기에 간다.
+ */
+export function pickEventsForPush(events, wm, budget) {
+  const list = (Array.isArray(events) ? events : []).filter((e) => e && eventTimeOf(e) > wm).sort((a, b) => eventTimeOf(a) - eventTimeOf(b));
+  const fresh = []; let bytes = 0; let held = 0;
+  for (let k = 0; k < list.length;) {
+    const tk = eventTimeOf(list[k]); let j = k; let sz = 0;
+    while (j < list.length && eventTimeOf(list[j]) === tk) { sz += Buffer.byteLength(JSON.stringify(list[j])); j += 1; }
+    if (fresh.length && bytes + sz > budget) { held = list.length - k; break; }
+    for (let x = k; x < j; x++) fresh.push(list[x]);
+    bytes += sz; k = j;
+  }
+  return { fresh, bytes, held };
+}
 const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr'];
 export function recordHash(d) {
   // v2.641: CPU·메모리 값은 매 주기 바뀐다 — 해시에 넣으면 전 장비 레코드가 매번 다시 간다. 값은 devSamples 가 싣고 해시에는 '있는가' 만.
@@ -131,6 +152,7 @@ async function pushInner() {
   const statuses = servers.map(statusFor);
   const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = []; const devSamples = []; const events = {}; const evMaxNow = new Map();
   const nowMs = Date.now();
+  let evBytes = 0; let evHeld = 0;
   let devicesUnavailable = !(await db.available());
   if (!devicesUnavailable) {
     for (const srv of servers) {
@@ -143,7 +165,9 @@ async function pushInner() {
       try {
         const ev = await db.listEvents({ agent: db.LOCAL_AGENT, cvpId: srv.id, sinceMs: 7 * 86_400_000, limit: EVENT_PUSH_MAX });
         const wm = _evSent.get(srv.id) || 0;
-        const fresh = (ev.events || []).filter((e) => Math.max(e.updatedAt || 0, e.ts || 0) > wm);
+        // v2.680(감사 F-04): 이벤트 바이트 상한 — pickEventsForPush 머리말.
+        const pk = pickEventsForPush(ev.events || [], wm, EVENT_PUSH_BYTES - evBytes);
+        const fresh = pk.fresh; evBytes += pk.bytes; evHeld += pk.held;
         if (fresh.length) {
           events[srv.id] = fresh.map(({ agent: _a, cvpId: _c, ...rest }) => rest);
           evMaxNow.set(srv.id, Math.max(...fresh.map((e) => Math.max(e.updatedAt || 0, e.ts || 0))));
@@ -225,7 +249,7 @@ async function pushInner() {
   const more = rows.length >= MAX_ROWS;
   const lost = db.lostUnsentStats();
   _last = { at: Date.now(), ok: true, servers: statuses.length, devices: deviceItems.length, touched: touch.length, samples: rows.length, chunks: chunks.length, bytes, gzBytes: gz,
-    backlogRows, more, ...(touchMissing ? { touchMissing } : {}), ...(lost.total ? { lostUnsent: lost.total, lostUnsentAt: lost.at } : {}),
+    backlogRows, more, ...(evHeld ? { eventsHeld: evHeld, eventsHeldNote: '이벤트 바이트 상한으로 다음 주기에 보냅니다' } : {}), ...(touchMissing ? { touchMissing } : {}), ...(lost.total ? { lostUnsent: lost.total, lostUnsentAt: lost.at } : {}),
     ...(devicesUnavailable ? { devicesUnavailable: true, note: '엣지 DB 를 쓸 수 없어 상태만 보냈습니다(중앙의 장비 목록은 그대로)' } : {}),
     ...(servers.length ? {} : { cleared: true, note: '위임 CVP 0대 — 중앙의 이 엣지 목록을 비웠습니다' }),
     ...(drop ? { rejected: drop.rejected, dropText: drop.text } : {}) };

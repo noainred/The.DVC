@@ -16,7 +16,7 @@ import { store } from '../../store.js';
 import { memoJson, scopeKey, hash } from './shared.js';
 import { analysisServersWithRemote } from '../admin/shared.js';
 import { localSensorDetail } from '../../idrac/sensorDetailCache.js';
-import { expandCompact, mergeSensors, summarizeSensors, parseThermalTemp, parseThermalFan, parseRedfishSensor } from '../../idrac/sensorDetail.js';
+import { expandCompact, mergeSensors, summarizeSensors, parseThermalTemp, parseThermalFan, parseRedfishSensor, markStaleCollection, SENSOR_COLLECTION_FRESH_MS } from '../../idrac/sensorDetail.js';
 import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
 import { DEFAULT_MAX_AGE_MS, sampleMaxAgeMs } from '../../idrac/roomTemp.js';
 import { listDatacenters } from '../../datacenter/store.js';
@@ -25,14 +25,18 @@ import { cpuLatestRows } from '../../bmusage/cpuLatest.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
 const toolsPerm = requirePerm('tools');
-/** Sensors 컬렉션만 있는 상세의 신선도 — 인벤토리 주기(30분) × 2 + 여유. */
-const COLL_ONLY_MAX_AGE_MS = 75 * 60_000;
+/** Sensors 컬렉션만 있는 상세의 신선도 — 인벤토리 주기(30분) × 2 + 여유(v2.680: 값의 소유는 sensorDetail.js 하나). */
+const COLL_ONLY_MAX_AGE_MS = SENSOR_COLLECTION_FRESH_MS;
 
 /** 원격(엣지) 서버의 상세 — export 콤팩트를 되돌린다. 상태는 여기서 다시 판정한다(expandCompact). */
 function remoteDetail(s) {
   const d = s?.sensorDetail;
   if (!d || !Array.isArray(d.list)) return null;
-  const list = d.list.map(expandCompact).filter(Boolean);
+  // v2.680 A-01: 컬렉션 전용 센서가 낡았으면 stale 로 표시한다(요약에서 빠진다). 엣지가 합친 목록이라도 같은 규칙.
+  const collAt = numOrNull(d.collAt);
+  const list = (d.collAt != null || d.collOk != null)
+    ? markStaleCollection(d.list.map(expandCompact).filter(Boolean), { collAt })
+    : d.list.map(expandCompact).filter(Boolean);
   return {
     list, omitted: numOrNull(d.omitted) || 0,
     at: numOrNull(d.at), thermalAt: numOrNull(d.thermalAt),
@@ -135,6 +139,8 @@ export function registerServerSensors(api) {
       detailOf: dOf,
       cpuFor: (s, sum) => cpuOf(s, {
         cpuIndex, bmEnabled: cpu.bmEnabled, sensorPct: sum?.sensorCpuUsagePct ?? null,
+        // v2.680 A-02: 컬렉션 CPU 센서는 컬렉션 시각으로 신선도를 본다(통합 추이와 같은 경계).
+        sensorAt: dOf(s)?.collection?.sensorsAt ?? null,
         telemetryOf: (x) => {
           if (x.remote) return null;
           const l = getSensorSeries(x.id).latest;

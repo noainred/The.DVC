@@ -40,13 +40,18 @@ export function missingText(x) {
   const hosts = numOrNull(x && x.hosts) ?? 0;
   if (!m || hosts <= 0) return null;
   const n = (k) => Math.max(0, numOrNull(m[k]) ?? 0);
+  // v2.680 D-03: 'partial'(일부 VM 만 게스트 수집)은 값이 **게스트** 에서 왔다 — 'ESXi 카운터로 채웠다' 는 거짓이다.
+  const partial = x.code === 'partial';
+  const filled = partial ? '나머지는 일부 VM 의 게스트 값으로 집계(미수집 VM 은 합계에서 빠짐)' : '나머지는 ESXi 카운터로 채움';
   let read;
   if (n('all') === hosts) read = '사용률·메모리 사용·온도 전부 못 읽음(이 호스트들의 GPU 동작 값을 하나도 모릅니다)';
   else {
     const parts = [['util', '사용률'], ['mem', '메모리 사용'], ['temp', '온도']].filter(([k]) => n(k) > 0).map(([k, l]) => `${l} ${n(k)}대`);
     read = parts.length
-      ? `못 읽은 값 — ${parts.join(' · ')}${n('all') > 0 ? ` (셋 다 못 읽은 호스트 ${n('all')}대)` : ''} · 나머지는 ESXi 카운터로 채움`
-      : '사용률·메모리 사용·온도는 ESXi 카운터로 채웠습니다(게스트 값만 없음)';
+      ? `못 읽은 값 — ${parts.join(' · ')}${n('all') > 0 ? ` (셋 다 못 읽은 호스트 ${n('all')}대)` : ''} · ${filled}`
+      : (partial
+        ? '사용률·메모리 사용·온도는 일부 VM 의 게스트 값으로 집계했습니다(미수집 VM 은 합계에서 빠짐)'
+        : '사용률·메모리 사용·온도는 ESXi 카운터로 채웠습니다(게스트 값만 없음)');
   }
   const alloc = n('alloc') > 0
     ? `메모리 할당: vGPU 프로파일을 해석하지 못한 호스트 ${n('alloc')}대`

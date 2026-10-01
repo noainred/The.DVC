@@ -61,7 +61,7 @@ test('④ Sensors 컬렉션 — Thresholds 객체·ReadingType 을 읽고, 병�
   const { list } = D.mergeSensors(coll, th);
   assert.equal(list.length, 2, '같은 센서(종류+이름, 대소문자 무시)는 한 번');
   const inlet = list.find((s) => s.role === 'inlet');
-  assert.equal(inlet.reading, 21, '컬렉션 값이 먼저');
+  assert.equal(inlet.reading, 20, 'v2.680 A-01: Thermal(매 주기) 값이 먼저 — 컬렉션은 빈 임계만 채운다');
   assert.equal(inlet.thresholds.critMax, 42, '빈 임계는 Thermal 로 채운다');
   assert.equal(inlet.state, 'ok');
   assert.equal(inlet.source, 'both');

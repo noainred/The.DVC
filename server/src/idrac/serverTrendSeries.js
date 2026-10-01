@@ -22,8 +22,8 @@
 import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { sampleStaleReason, serverTempKinds, TEMP_SERIES_DETAIL, idracTempMetric } from './serverTempSeries.js';
 import { DEFAULT_MAX_AGE_MS } from './roomTemp.js';
-import { roleOf, summarizeSensors, expandCompact } from './sensorDetail.js';
-import { localSensorDetail } from './sensorDetailCache.js';
+import { roleOf, summarizeSensors, expandCompact, SENSOR_COLLECTION_FRESH_MS, collectionCpuJudge } from './sensorDetail.js';
+import { localSensorDetail, localCpuSensorDetail } from './sensorDetailCache.js';
 import { analysisServersWithRemote, invForServer } from '../insights/analysisServers.js';
 import { cpuIndexOf } from '../tools/serverSensors.js';
 import { cpuLatestRows } from '../bmusage/cpuLatest.js';
@@ -54,8 +54,8 @@ export const TREND_AIRFLOW_ENABLED = process.env.IDRAC_TREND_AIRFLOW !== 'false'
 export const CPU_FALLBACK_METRICS = Object.freeze({ sensor: 'idracusage_cpu_rs', bmIdrac: 'idracusage_cpu_bm' });
 export const CPU_RETIRED_METRICS = Object.freeze({ os: 'idracusage_cpu_os', vcenter: 'idracusage_cpu_vc' });
 export const CPU_SOURCES = Object.freeze(['telemetry', 'sensor', 'bmIdrac']);
-/** Sensors 컬렉션은 인벤토리 주기(30분)로 읽는다 — 센서 상세 화면과 같은 75분을 '지금 값' 의 경계로 쓴다. */
-export const SENSOR_CPU_FRESH_MS = 75 * 60_000;
+/** Sensors 컬렉션은 인벤토리 주기(30분)로 읽는다 — 센서 상세 화면과 같은 75분을 '지금 값' 의 경계로 쓴다(v2.680: 값의 소유는 sensorDetail.js). */
+export const SENSOR_CPU_FRESH_MS = SENSOR_COLLECTION_FRESH_MS;
 
 const pct = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null);
 
@@ -79,7 +79,7 @@ export function buildServerTrendRows(servers, {
   latestOf = (s) => (s.remote ? s.sensors : getSensorSeries(s.id).latest),
   localCycle = sensorPollCycle(now),
   cpuIndex = null,          // bmusage 최신 행 색인(tools/serverSensors.js cpuIndexOf) — 없으면 그 경로를 쓰지 않는다
-  detailOf = sensorDetailOf, // (s) => { list, collAt } | null — iDRAC Sensors 컬렉션
+  detailOf = sensorCpuDetailOf, // (s) => { list, collAt } | null — iDRAC Sensors 컬렉션(v2.680 E-01: CPU 판정엔 퍼센트 센서만 펼친다)
   airflow = TREND_AIRFLOW_ENABLED,
 } = {}) {
   const rows = [];
@@ -160,16 +160,32 @@ export function sensorDetailOf(s) {
   return { list: d.list || [], collAt: numOrNull(d.collection?.sensorsAt) };
 }
 
+/**
+ * v2.680 E-01: CPU 사용률 판정 전용 상세 — `sensorDetailOf` 와 같은 모양이지만 **퍼센트 센서만** 펼친다
+ * (원격: 콤팩트 `k === 'percent'` 만 · 로컬: sensorDetailCache.localCpuSensorDetail). CPU 사용률 센서는 컬렉션의 퍼센트
+ * 종류뿐이라 판정 결과는 전량 경로와 같다(테스트가 대조). 샘플러가 1분마다 전 서버를 돌 때 쓴다.
+ */
+export function sensorCpuDetailOf(s) {
+  if (s?.remote) {
+    const d = s.sensorDetail;
+    if (!d || !Array.isArray(d.list)) return null;
+    const list = [];
+    for (const o of d.list) if (o && typeof o === 'object' && o.k === 'percent') { const x = expandCompact(o); if (x) list.push(x); }
+    return { list, collAt: numOrNull(d.collAt) };
+  }
+  return localCpuSensorDetail(String(s?.id || ''));
+}
+
 /** Sensors 컬렉션의 CPU 사용률 → { v, at, name, stale } (순수 판정 — detailOf 주입). 값이 없으면 v:null. */
-export function sensorCpuOf(s, { now = Date.now(), detailOf = sensorDetailOf, freshMs = SENSOR_CPU_FRESH_MS } = {}) {
+export function sensorCpuOf(s, { now = Date.now(), detailOf = sensorCpuDetailOf, freshMs = SENSOR_CPU_FRESH_MS } = {}) {
   let d = null; try { d = detailOf(s); } catch { d = null; }
   if (!d) return { v: null, at: null, name: '', stale: false, found: false };
   const sum = summarizeSensors(d.list || []);
   const raw = pct(numOrNull(sum.sensorCpuUsagePct));
   if (raw == null) return { v: null, at: d.collAt ?? null, name: '', stale: false, found: false };
-  const at = numOrNull(d.collAt);
-  const stale = at == null || now - at > freshMs;
-  return { v: stale ? null : Math.round(raw * 10) / 10, at, name: sum.sensorCpuUsageName || '', stale, found: true };
+  // 신선도 판정은 센서 상세 화면(tools/serverSensors.cpuOf)과 같은 함수 하나(v2.680 A-02).
+  const j = collectionCpuJudge(raw, d.collAt, { now, freshMs });
+  return { v: j.v, at: j.at, name: sum.sensorCpuUsageName || '', stale: j.stale, found: true };
 }
 
 /**
@@ -207,7 +223,7 @@ export function serverTrendRows() {
  *   code: ok | sensor-stale(센서는 있는데 컬렉션이 오래됨) | bm-os-only(베어메탈 사용률 값이 OS 경로라 쓰지 않음) |
  *         bm-stale(베어메탈 사용률 값이 오래됨) | no-idrac-cpu(iDRAC 의 어느 경로에도 CPU 사용률이 없음)
  */
-export function cpuFallbackDiag(s, { latest = null, cpuIndex = null, now = Date.now(), detailOf = sensorDetailOf } = {}) {
+export function cpuFallbackDiag(s, { latest = null, cpuIndex = null, now = Date.now(), detailOf = sensorCpuDetailOf } = {}) {
   const v = latest ? trendValuesOf(latest) : null;
   if (v && v.cpuPct != null) return { code: 'ok', source: 'telemetry' };
   const sc = sensorCpuOf(s, { now, detailOf });

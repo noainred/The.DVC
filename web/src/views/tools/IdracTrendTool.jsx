@@ -16,7 +16,7 @@ import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
-  loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
+  loadOrder, saveOrder, moveVisibleKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
   gpuCardsText, TREND_HANDOFF, parseTrendHandoff, linkBasisText,
   CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
@@ -119,6 +119,8 @@ export default function IdracTrendTool() {
   const span = data ? data.end - data.start : DAY;
   const st = Object.fromEntries(CHART_SERIES.map((s) => [s.k, statsOf(pts, s.k)]));
   const shownSeries = shownSeriesOf(data); // ESXi CPU·GPU 는 매칭된 가상화 서버에만(GPU 는 GPU 가 없다고 확인되면 숨김)
+  // v2.680(D-08): 보이는 카드 목록 — ◀ ▶ 의 끝 판정과 이동은 이 목록 기준이다(숨은 계열과 자리를 바꾸지 않는다).
+  const visibleCards = order.map((k) => shownSeries.find((x) => x.k === k)).filter(Boolean);
   const srv = servers.find((s) => s.id === serverId);
   const esxi = data?.kind === 'esxi';
   const toggle = (k) => { if (st[k]) setOn((o) => ({ ...o, [k]: !o[k] })); };
@@ -171,12 +173,12 @@ export default function IdracTrendTool() {
 
       {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
       <div className="idrac-trend-kpis">
-        {order.map((k) => shownSeries.find((x) => x.k === k)).filter(Boolean).map((s, idx) => {
+        {visibleCards.map((s, idx) => {
           const x = st[s.k];
           const arrowBtn = (dir, label) => (
-            <button type="button" className="tab" aria-label={`${s.label} ${dir < 0 ? '앞으로' : '뒤로'}`} disabled={dir < 0 ? idx === 0 : idx === order.length - 1}
+            <button type="button" className="tab" aria-label={`${s.label} ${dir < 0 ? '앞으로' : '뒤로'}`} disabled={dir < 0 ? idx === 0 : idx === visibleCards.length - 1}
               style={{ flex: 'none', padding: '1px 8px', marginTop: 0, fontSize: 12 }}
-              onClick={(e) => { e.stopPropagation(); applyOrder(moveKey(order, s.k, dir)); }}>{label}</button>
+              onClick={(e) => { e.stopPropagation(); applyOrder(moveVisibleKey(order, visibleCards.map((c) => c.k), s.k, dir)); }}>{label}</button>
           );
           return (
             <div key={s.k} className="card" role="button" tabIndex={x ? 0 : -1} aria-pressed={!!on[s.k]}

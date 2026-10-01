@@ -84,17 +84,21 @@ export function sanitizeRemoteInv(inv) {
 }
 /** 최신 센서 {t, temps:{이름:℃}} — 온도는 숫자만(못 읽은 값은 0 이 아니라 뺀다), 이름은 식별자 규칙. */
 export function sanitizeRemoteSensors(x) {
-  if (!isPlainObj(x) || !isPlainObj(x.temps)) return null;
+  if (!isPlainObj(x)) return null;
+  const cpu0 = numOrNull(x.cpu);
+  const cpuOk = cpu0 != null && cpu0 >= 0 && cpu0 <= 100;
+  // v2.680(감사 F-05): 온도 0개 + CPU 만 읽은 위임 서버도 CPU 를 받는다(예전엔 통째로 버려 통합 추이 CPU 가 비었다).
+  if (!isPlainObj(x.temps) && !(x.temps == null && cpuOk)) return null;
   const temps = {};
   let n = 0;
-  for (const [k, v] of Object.entries(x.temps)) {
+  for (const [k, v] of Object.entries(isPlainObj(x.temps) ? x.temps : {})) {
     if (n >= 64) break;
     const name = edgeId(k);
     const c = typeof v === 'number' || typeof v === 'string' ? numOrNull(v) : null;
     if (!name || c == null) continue;
     temps[name] = c; n += 1;
   }
-  if (!n) return null;
+  if (!n && !cpuOk) return null;
   // v2.634: 엣지 폴러 주기(신선도 경계용). 모르는 값·범위 밖은 싣지 않는다(판정은 기본 경계로 떨어진다).
   const cyc = numOrNull(x.cycleMs); const itv = numOrNull(x.intervalMs);
   return {

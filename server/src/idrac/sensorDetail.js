@@ -8,7 +8,7 @@
  * 입력은 두 경로다.
  *  ① Thermal(`Chassis/<id>/Thermal`) — 폴러가 **매 주기** 이미 읽는다. 여기서 버리던 임계값·상태를 살린다(왕복 0).
  *  ② Sensors 컬렉션(`Chassis/<id>/Sensors`) — 전압·전류·전력·퍼센트까지 담는다. 인벤토리 주기(30분)에만 읽는다.
- * 둘을 합칠 때는 같은 센서(종류 + 이름)가 두 번 나오지 않게 한다 — 컬렉션이 먼저, Thermal 은 빈 칸만 채운다.
+ * 둘을 합칠 때는 같은 센서(종류 + 이름)가 두 번 나오지 않게 한다 — Thermal(신선)이 값·상태를 갖고, 컬렉션은 빈 임계만 채운다(v2.680).
  *
  * ⚠ 규칙(이 저장소의 정직성 규약):
  *  · 값을 못 읽은 센서는 `reading:null` 이다 — 0 으로 두지 않는다(`Number(null) === 0` 함정 — util/numOrNull.js).
@@ -179,11 +179,48 @@ export function parseThermalFan(f, { chassis = '' } = {}) {
 const keyOf = (s) => `${s.kind}|${String(s.name).trim().toLowerCase()}`;
 
 /**
- * 두 출처를 합친다. 컬렉션 레코드가 먼저이고, 같은 센서의 Thermal 레코드는 **비어 있는 값만** 채운다
- * (예: 컬렉션에 임계가 없으면 Thermal 의 임계). Thermal 에만 있는 센서는 그대로 더한다.
+ * Sensors 컬렉션 값을 '지금 값' 으로 볼 수 있는 경계 — 인벤토리 주기(30분) × 2 + 여유(v2.680 A-01·A-02).
+ * 센서 상세 화면(컬렉션만 있는 서버의 신선도)·CPU 사용률 센서(통합 추이 `idracusage_cpu_rs` · 센서 상세의 CPU 칸)가
+ * **같은 이 값**을 쓴다(판정 한 벌).
+ */
+export const SENSOR_COLLECTION_FRESH_MS = 75 * 60_000;
+
+/**
+ * 컬렉션 CPU 사용률 센서 값의 신선도 판정(순수, v2.680 A-02 — 통합 추이와 센서 상세가 같은 함수를 쓴다).
+ * 시각을 모르면(at null) 낡은 것으로 본다(지금 값인지 알 수 없다).
+ * @returns {{ v:number|null, at:number|null, stale:boolean }}  v 는 신선할 때만 값(0~100 밖은 null).
+ */
+export function collectionCpuJudge(raw, at, { now = Date.now(), freshMs = SENSOR_COLLECTION_FRESH_MS } = {}) {
+  const x = numOrNull(raw);
+  const v = x != null && x >= 0 && x <= 100 ? x : null;
+  const t = numOrNull(at);
+  const stale = t == null || now - t > freshMs;
+  return { v: v == null || stale ? null : Math.round(v * 10) / 10, at: t, stale };
+}
+
+/**
+ * 컬렉션에서만 온 센서(source 'sensors')가 낡았으면 `stale:true` + state 'unknown' 으로 표시한다(v2.680 A-01).
+ * 컬렉션 실패 시 직전 목록이 그대로 남으므로(sensorDetailCache) 며칠 전 값이 '지금 값' 처럼 보이면 안 된다.
+ * 값(reading)은 지우지 않는다 — 화면이 '언제 값인지' 와 함께 보여 준다. 판정 원래 상태는 `staleState` 에 남긴다.
+ * 요약(summarizeSensors)은 stale 센서를 흡기·경고 개수에서 뺀다. Thermal 이 함께 보고한 센서(source thermal·both)는 대상이 아니다.
+ */
+export function markStaleCollection(list = [], { collAt = null, now = Date.now(), freshMs = SENSOR_COLLECTION_FRESH_MS } = {}) {
+  const t = numOrNull(collAt);
+  const old = t == null || now - t > freshMs;
+  if (!old) return list;
+  return (list || []).map((s) => (s && s.source === 'sensors' && !s.absent
+    ? { ...s, stale: true, staleState: s.state, state: 'unknown' }
+    : s));
+}
+
+/**
+ * 두 출처를 합친다(v2.680 A-01 — 순서를 뒤집었다). **Thermal 이 먼저**다: Thermal 은 매 폴 주기(1분) 읽고,
+ * 컬렉션은 인벤토리 주기(30분)에만 읽으며 실패하면 직전 목록이 무기한 남는다. 같은 센서(종류 + 이름)면 Thermal 의
+ * 값(reading)·상태(Health)가 이기고, 컬렉션은 **비어 있는 임계값만** 채운다(값·Health 를 채우지 않는다 — 낡은 값이 섞인다).
+ * 컬렉션에만 있는 센서(전압·전류·전력·퍼센트 등)는 그대로 더한다 — `collAt` 을 주면 낡은 것을 `markStaleCollection` 으로 표시한다.
  * @returns {{ list: object[], omitted: number }}
  */
-export function mergeSensors(collection = [], thermal = [], { max = SENSOR_LIST_MAX } = {}) {
+export function mergeSensors(collection = [], thermal = [], { max = SENSOR_LIST_MAX, collAt, now = Date.now(), freshMs = SENSOR_COLLECTION_FRESH_MS } = {}) {
   const byKey = new Map();
   const add = (s, fill) => {
     if (!s || typeof s !== 'object' || !s.name) return;
@@ -192,17 +229,16 @@ export function mergeSensors(collection = [], thermal = [], { max = SENSOR_LIST_
     if (!prev) { byKey.set(k, { ...s }); return; }
     if (!fill) return;
     const m = { ...prev };
-    if (m.reading == null && s.reading != null) m.reading = s.reading;
-    if (!m.health && s.health) m.health = s.health;
     const th = { ...(prev.thresholds || {}) };
     for (const [tk, tv] of Object.entries(s.thresholds || {})) if (th[tk] == null && tv != null) th[tk] = tv;
     m.thresholds = th;
     m.source = 'both';
     byKey.set(k, finish(m));
   };
-  for (const s of collection || []) add(s, false);
-  for (const s of thermal || []) add(s, true);
-  const all = [...byKey.values()];
+  for (const s of thermal || []) add(s, false);
+  for (const s of collection || []) add(s, true);
+  let all = [...byKey.values()];
+  if (collAt !== undefined) all = markStaleCollection(all, { collAt, now, freshMs });
   const list = all.slice(0, max);
   return { list, omitted: all.length - list.length };
 }
@@ -215,22 +251,26 @@ const avgOf = (arr) => { const xs = arr.filter((v) => v != null); return xs.leng
  * ⚠ 흡기가 여러 개면 **최대**(판정 규약 v2.381 — 흡기 최고값)와 개수를 함께 준다.
  */
 export function summarizeSensors(list = []) {
-  const temps = (list || []).filter((s) => s && s.kind === 'temperature' && !s.absent);
+  // v2.680 A-01: 낡은 컬렉션 전용 센서(stale)는 흡기·온도·상태 개수에 넣지 않고 `stale` 로 따로 센다.
+  const temps = (list || []).filter((s) => s && s.kind === 'temperature' && !s.absent && !s.stale);
   const pick = (role) => temps.filter((s) => s.role === role);
   const vals = (xs) => xs.map((s) => numOrNull(s.reading));
   const counts = Object.fromEntries(SENSOR_STATES.map((k) => [k, 0]));
   const byKind = {};
+  let stale = 0;
   for (const s of list || []) {
     if (!s || typeof s !== 'object') continue;
-    counts[SENSOR_STATES.includes(s.state) ? s.state : 'unknown'] += 1;
     byKind[s.kind] = (byKind[s.kind] || 0) + 1;
+    if (s.stale) { stale += 1; continue; }
+    counts[SENSOR_STATES.includes(s.state) ? s.state : 'unknown'] += 1;
   }
   const inlet = pick('inlet'); const cpu = pick('cpu'); const gpu = pick('gpu');
   // Sensors 컬렉션의 CPU 사용률 센서(Dell SystemBoardCPUUsage 등 — 퍼센트). 없으면 null(지어내지 않는다).
+  // ⚠ 여기서는 stale 표시와 무관하게 값을 준다 — 신선도는 호출자가 컬렉션 시각으로 `collectionCpuJudge` 로 판정한다.
   const cpuUse = (list || []).find((s) => s && s.kind === 'percent' && s.role === 'cpu' && /usage|util/i.test(s.name) && numOrNull(s.reading) != null);
   return {
     total: (list || []).length,
-    counts, byKind,
+    counts, byKind, stale,
     inletC: maxOf(vals(inlet)), inletCount: inlet.length,
     exhaustC: maxOf(vals(pick('exhaust'))),
     cpuTempMaxC: maxOf(vals(cpu)), cpuTempAvgC: avgOf(vals(cpu)), cpuTempCount: cpu.length,

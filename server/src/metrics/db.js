@@ -87,8 +87,11 @@ function initSqlite() {
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hourlyMin = db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?');
     // v2.663: 한 지표의 전 키 요약(시간당 롤업 — 생략분까지 정확). 서버 표·조건 검색이 한 번에 읽는다(서버마다 조회하지 않게).
-    const statsHourlyAll = db.prepare(`SELECT k, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max, SUM(n) AS n
-      FROM samples_hourly WHERE metric=? AND h>=? GROUP BY k`);
+    // v2.680(E-02): 예전 `WHERE metric=? AND h>=? GROUP BY k` 한 문장은 PK(metric,k,h) 에서 h 를 범위로 못 써 **그 지표의 전 기간
+    //   롤업**을 훑었다(키 1,000 × 2,190시간 = 219만 행에 24시간 창도 150ms — 롤업 보존 5년이면 요청당 수 초). 키를 인덱스로 건너뛰어
+    //   찾고(hourlyKeysStmt) 키마다 (metric,k,h>=?) 범위로 seek 한다. 같은 키 안에서 같은 행을 같은 순서로 더하므로 결과가 같다.
+    const statsHourlyOne = db.prepare(`SELECT SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max, SUM(n) AS n
+      FROM samples_hourly WHERE metric=? AND k=? AND h>=?`);
     // 키 하나의 첫/마지막 관측 시각(v2.504). **COUNT 를 넣지 않는다** — `meta(metric)` 의 COUNT(*) 는
     // 그 metric 파티션 전체를 훑는다(감사 P2 #11). MIN/MAX 만이면 PK/인덱스 양끝 seek 로 끝난다.
     // 용도: '수집 시작 이전' 을 화면이 소급 표시하지 않게 하는 기준선(v2.351 '+2만 TB' 오표시 교훈).
@@ -121,9 +124,10 @@ function initSqlite() {
     const rawOne = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? ORDER BY ts');
     // v2.660: 끝이 있는 기간 조회(iDRAC 통합 추이의 '기간 지정'). history() 는 '지금까지' 만 받아 과거 구간을 보려면
     //   지금까지 전부 읽어야 했다. 버킷 수는 호출부가 제한한다(≈400).
-    const bucketRange = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
+    const bucketRange = db.prepare(`SELECT CAST((ts+?)/? AS INTEGER)*?-? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
       WHERE metric=? AND k=? AND ts>=? AND ts<? GROUP BY b ORDER BY b`);
-    const bucketHourlyRange = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
+    // v2.680(A-07): 버킷 경계 오프셋(off) — 1일 버킷을 포탈 날짜(한국 시각 0시)에 맞춘다. off=0 이면 예전과 같은 값이다.
+    const bucketHourlyRange = db.prepare(`SELECT CAST((h+?)/? AS INTEGER)*?-? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? AND h<? GROUP BY b ORDER BY b`);
     const rawRange = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? AND ts<? ORDER BY ts');
     // v2.675(운영 멈춤 후보 — 합성 3,168만 행 실측): historyAllSliced 의 한 조각([lo, hi)). 한 문장으로 24시간 × 키 1,100 을
@@ -236,13 +240,15 @@ function initSqlite() {
        * 1시간 정배수 버킷은 롤업(롤업이 원본만큼 거슬러 올라갈 때), 짧은 버킷의 dead-band 계열은 step 채움.
        * 끝이 과거면 그 뒤의 실제 샘플로 선을 잇지 않는다(lastActualTs 는 창 안에서만 쓴다).
        */
-      historyRange: (metric, k, startTs, endTs, bucketMs) => {
+      historyRange: (metric, k, startTs, endTs, bucketMs, offsetMs = 0) => {
+        // v2.680(A-07): offsetMs = 버킷 경계 오프셋(1일 버킷을 포탈 날짜에 맞출 때 9시간). 1시간 정배수일 때만 받는다(롤업 버킷 경계).
+        const off = Number.isFinite(offsetMs) && offsetMs % HOUR === 0 ? offsetMs : 0;
         const mapRow = (r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) });
         if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
           const mn = hourlyMin.get(metric, k)?.mn;
           const rawFirst = mn != null && mn > startTs ? rawMin.get(metric, k)?.mn : null;
           if (mn != null && (mn <= startTs || rawFirst == null || mn <= rawFirst)) {
-            return bucketHourlyRange.all(bucketMs, bucketMs, metric, k, startTs, endTs).map(mapRow);
+            return bucketHourlyRange.all(off, bucketMs, bucketMs, off, metric, k, startTs, endTs).map(mapRow);
           }
         }
         const p = deadbandPolicyOf(metric);
@@ -254,7 +260,7 @@ function initSqlite() {
           const lastActualTs = last != null && last < endTs ? last : null;
           return stepBuckets({ carry, rows, start: startTs, nowTs: endTs - 1, bucketMs, maxGapMs: p.maxGapMs, lastActualTs }).points;
         }
-        return bucketRange.all(bucketMs, bucketMs, metric, k, startTs, endTs).map(mapRow);
+        return bucketRange.all(off, bucketMs, bucketMs, off, metric, k, startTs, endTs).map(mapRow);
       },
       /**
        * v2.620(SRV2620-02): dead-band 를 아는 짧은 버킷 조회. 온도 계열은 0.5℃ 미만 변화면 원본을 건너뛰므로
@@ -435,7 +441,23 @@ function initSqlite() {
       /** v2.663: sinceTs 가 속한 시간부터의 키별 {avg,min,max,n}(시간당 롤업 기준 — 창 앞쪽으로 최대 1시간 넓다). */
       statsSinceAll: (metric, sinceTs) => {
         const m = new Map();
-        for (const r of statsHourlyAll.all(metric, Math.floor(sinceTs / HOUR) * HOUR)) m.set(r.k, { avg: round1(r.avg), min: round1(r.min), max: round1(r.max), n: r.n });
+        const h = Math.floor(sinceTs / HOUR) * HOUR;
+        for (const { k } of hourlyKeysStmt.all(metric)) {
+          const r = statsHourlyOne.get(metric, k, h);
+          if (r && r.n != null) m.set(k, { avg: round1(r.avg), min: round1(r.min), max: round1(r.max), n: r.n });
+        }
+        return m;
+      },
+      /** v2.680(E-02): statsSinceAll 의 비동기판 — 키 사이에 시간 기준으로 양보한다(요청 경로용). 결과는 같다. */
+      statsSinceAllAsync: async (metric, sinceTs, opts = {}) => {
+        const maybeYield = typeof opts.maybeYield === 'function' ? opts.maybeYield : createYielder(15);
+        const m = new Map();
+        const h = Math.floor(sinceTs / HOUR) * HOUR;
+        for (const { k } of hourlyKeysStmt.all(metric)) {
+          const r = statsHourlyOne.get(metric, k, h);
+          if (r && r.n != null) m.set(k, { avg: round1(r.avg), min: round1(r.min), max: round1(r.max), n: r.n });
+          await maybeYield();
+        }
         return m;
       },
       keysOf: (metric) => {
@@ -528,10 +550,11 @@ function initJson() {
     async countAsync(metric) { return this.meta(metric).count; },
     // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
     // v2.620(SRV2620-02): NDJSON 폴백은 dead-band 를 쓰지 않아(전량 저장) step 조회가 곧 일반 조회다 — 같은 API 만 맞춘다.
-    historyRange(metric, k, startTs, endTs, bucketMs) {
+    historyRange(metric, k, startTs, endTs, bucketMs, offsetMs = 0) {
+      const off = Number.isFinite(offsetMs) && offsetMs % 3_600_000 === 0 ? offsetMs : 0;
       const acc = new Map();
       for (const r of rows) if (r.m === metric && r.k === k && r.t >= startTs && r.t < endTs) {
-        const b = Math.floor(r.t / bucketMs) * bucketMs;
+        const b = Math.floor((r.t + off) / bucketMs) * bucketMs - off;
         const g = acc.get(b) || { sum: 0, n: 0, min: Infinity, max: -Infinity };
         g.sum += r.v; g.n++; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); acc.set(b, g);
       }
@@ -542,6 +565,7 @@ function initJson() {
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     keysOf: (metric) => { const out = new Set(); for (const r of rows) if (r.m === metric) out.add(r.k); return out; },
+    async statsSinceAllAsync(metric, sinceTs) { return this.statsSinceAll(metric, sinceTs); },
     statsSinceAll: (metric, sinceTs) => {
       const since = Math.floor(sinceTs / 3_600_000) * 3_600_000; const agg = new Map();
       for (const r of rows) if (r.m === metric && r.t >= since) { const g = agg.get(r.k) || { sum: 0, n: 0, min: Infinity, max: -Infinity }; g.sum += r.v; g.n++; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); agg.set(r.k, g); }

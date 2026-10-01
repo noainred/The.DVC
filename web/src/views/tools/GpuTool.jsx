@@ -7,7 +7,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { activityOf, memText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
@@ -192,7 +192,7 @@ export function Gpu({ scope }) {
       : <span className="nowrap"><button className="cell-link gpu-mono" title={r.tempSource === 'esxi' ? 'ESXi gpu.temperature(가장 뜨거운 GPU)' : '가장 높은 GPU(게스트 nvidia-smi)'} onClick={() => openHist('host', r.key, 'temp')}>{tempText(r.tempC)}</button><SrcTag s={r.tempSource} /></span>) },
     { key: 'memUsedMB', label: '메모리 사용', sortValue: (r) => r.memUsedPct, render: (r) => ((r.memUsedMB == null && r.memUsedPct == null) ? <WhyChip why={r.guestWhy} /> : (
       <div className="gpu-mem">
-        <span className="nowrap"><button className="cell-link gpu-mono" onClick={() => openHist('host', r.key, 'mem')}>{r.memUsedMB != null && r.memTotalMB ? memText(r.memUsedMB, r.memTotalMB) : `${r.memUsedPct}%`}</button>{r.memUsedMB != null && r.memTotalMB && r.memUsedPct != null && <span className="muted" style={{ fontSize: 11 }}> {r.memUsedPct}%</span>}<SrcTag s={r.memSource} /></span>
+        <span className="nowrap"><button className="cell-link gpu-mono" onClick={() => openHist('host', r.key, 'mem')}>{memMainText(r.memUsedMB, r.memTotalMB, r.memUsedPct)}</button>{r.memUsedMB != null && r.memTotalMB && r.memUsedPct != null && <span className="muted" style={{ fontSize: 11 }}> {r.memUsedPct}%</span>}<SrcTag s={r.memSource} /></span>
         {r.memUsedPct != null && <span className="gpu-bar"><span style={{ width: `${Math.max(0, Math.min(100, r.memUsedPct))}%` }} /></span>}
       </div>
     )) },
@@ -295,7 +295,7 @@ export function Gpu({ scope }) {
         <Card label="GPU 호스트" value={data.hostsWithGpu} accent="var(--accent-2)" meta="GPU 설치 ESXi 호스트" />
         <Card label="GPU 사용 VM" value={data.gpuVmCount ?? 0} accent="var(--green)" meta="GPU 할당된 VM 수" />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
-        <Card label="GPU 메모리 사용" value={data.memUsedMB == null ? '—' : `${data.memUsedPct}%`} meta={data.memUsedMB == null ? '게스트 수집값 없음' : memText(data.memUsedMB, data.memTotalMB)} />
+        <Card label="GPU 메모리 사용" value={data.memUsedPct == null ? '—' : `${data.memUsedPct}%`} meta={data.memUsedMB == null ? '게스트 수집값 없음' : memText(data.memUsedMB, data.memTotalMB)} />
         <Card label="vGPU 메모리 할당" value={data.allocGB == null ? '—' : gbText(data.allocGB)} meta="켜진 VM 의 vGPU 프로파일 합" />
         <Card label="최고 GPU 온도" value={tempText(data.tempC)} meta={data.tempC == null ? '게스트 수집값 없음' : '가장 뜨거운 GPU'} />
         <Card label="VM 동작" value={data.activity ? data.activity.busy : '—'} accent="var(--green)" meta={activitySummary(data.activity) || '켜진 GPU VM 없음'} />

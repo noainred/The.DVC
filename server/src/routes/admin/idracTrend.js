@@ -17,7 +17,7 @@
  * ⚠ '/idrac/trend/*' 는 '/idrac/:id/…' 보다 **먼저** 등록한다(:id 가 'trend' 를 먹지 않게) — admin.js 가 registerIdracScan 앞에서 부른다.
  */
 import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
-import { findRemoteServer } from '../../collector/remoteInventory.js';
+import { findRemoteServer, allRemoteServers } from '../../collector/remoteInventory.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { buildHostMatchIndex, matchHostForServer } from '../../idrac/hostMatch.js';
 import { resolveServerForHost, gpuCardsOf } from '../../idrac/serverForHost.js';
@@ -39,7 +39,7 @@ import { adminOnly } from './shared.js';
 import { idracScopeOf, idracInScope, scopeIdracServers } from './idracCore.js';
 import { requirePerm } from '../../auth/auth.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { localStamp, fileStamp } from '../../util/dayKey.js';
+import { localStamp, fileStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { addLineCharts, sheetRef, colLetter } from '../../util/xlsxChart.js';
 
@@ -61,8 +61,17 @@ export function trendRetentionDays(metricsRetentionDays = loadMetricsSettings().
 }
 export const SERVER_EXPORT_MAX = 300; // 데이터센터 CSV 한 번에 담는 서버 상한(넘으면 개수를 밝힌다)
 
-/** 요청 → { start, end, bucketMs, custom } | { error } (순수). 끝은 버킷 경계로 올린 배타 경계. */
-export function parseWindow(q, { now = Date.now(), retentionDays = 365 } = {}) {
+/**
+ * v2.680(A-07): 1일 버킷의 경계 오프셋(ms) — 포탈 날짜(util/dayKey.js, 기본 한국 시각 0시)에 맞춘다. 예전에는 UTC 0시(한국 09시)라
+ * 'D 일' 점이 실제로는 D 09:00 ~ D+1 09:00 이었다. 시간당 롤업으로 묶으므로 1시간 정배수 오프셋만 쓴다(아니면 0 = 예전 UTC).
+ */
+export function dayBucketOffsetMs(offsetMin = DAY_OFFSET_MIN) {
+  const off = Number(offsetMin) * MIN;
+  return Number.isFinite(off) && off % HOUR === 0 ? off : 0;
+}
+
+/** 요청 → { start, end, bucketMs, offsetMs, custom } | { error } (순수). 끝은 버킷 경계로 올린 배타 경계. */
+export function parseWindow(q, { now = Date.now(), retentionDays = 365, offsetMin = DAY_OFFSET_MIN } = {}) {
   let start, end = now, custom = false;
   const has = (v) => v != null && v !== '';
   if (has(q?.start) || has(q?.end)) {
@@ -79,7 +88,8 @@ export function parseWindow(q, { now = Date.now(), retentionDays = 365 } = {}) {
   const floor = now - retentionDays * DAY;
   if (start < floor - MIN) return { error: `보관 기간(${retentionDays}일)을 넘었습니다 — ${localStamp(floor).slice(0, 10)} 이후만 조회할 수 있습니다.` };
   const bucketMs = bucketOf(end - start);
-  return { start: Math.floor(start / bucketMs) * bucketMs, end, bucketMs, custom };
+  const offsetMs = bucketMs === DAY ? dayBucketOffsetMs(offsetMin) : 0;
+  return { start: Math.floor((start + offsetMs) / bucketMs) * bucketMs - offsetMs, end, bucketMs, offsetMs, custom };
 }
 
 /** 계열별 버킷 점 → 한 시간축(순수). 결측은 null. */
@@ -211,7 +221,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   try {
     const db = await getMetricsDb();
     const read = (k, metric) => {
-      try { return db.historyRange(metric, id, win.start, win.end, win.bucketMs); }
+      try { return db.historyRange(metric, id, win.start, win.end, win.bucketMs, win.offsetMs || 0); }
       catch (e) { errors[k] = e?.message || String(e); return []; }
     };
     cpuParts.telemetry = read('cpuPct', TREND_METRICS.cpuPct);
@@ -222,11 +232,11 @@ async function seriesFor(s, win, { host = undefined } = {}) {
     out.inletTemp = read('inletTemp', TREND_METRICS.inletTemp);
     out.exhaustTemp = read('exhaustTemp', TREND_METRICS.exhaustTemp);
     if (matched?.id) {
-      try { out.hostCpuPct = db.historyRange(HOST_CPU_METRIC, String(matched.id), win.start, win.end, win.bucketMs); }
+      try { out.hostCpuPct = db.historyRange(HOST_CPU_METRIC, String(matched.id), win.start, win.end, win.bucketMs, win.offsetMs || 0); }
       catch (e) { errors.hostCpuPct = e?.message || String(e); }
       try { hostCpuFirstTs = db.metaKey?.(HOST_CPU_METRIC, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
       for (const [k, metric] of Object.entries(HOST_GPU_METRICS)) {
-        try { out[k] = db.historyRange(metric, String(matched.id), win.start, win.end, win.bucketMs); }
+        try { out[k] = db.historyRange(metric, String(matched.id), win.start, win.end, win.bucketMs, win.offsetMs || 0); }
         catch (e) { errors[k] = e?.message || String(e); }
         try { hostGpuFirstTs[k] = db.metaKey?.(metric, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
       }
@@ -239,8 +249,11 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   if (!s?.remote) {
     try {
       const { usageCpuRange } = await import('../../bmusage/db.js');
-      const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: win.bucketMs, idracOnly: true });
-      cpuParts.history = r.rows; cpuHistoryKey = r.key;
+      // v2.680(A-07): usageCpuRange 는 UTC 경계로 묶는다 — 오프셋 버킷이면 1분 단위로 받아 여기서 다시 묶는다(수집 주기 하한이 60초라
+      //   1분 칸에 표본은 많아야 하나 — 평균이 표본 평균과 같다).
+      const off = win.offsetMs || 0;
+      const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: off ? MIN : win.bucketMs, idracOnly: true });
+      cpuParts.history = off ? rebucketMean(r.rows, win) : r.rows; cpuHistoryKey = r.key;
       if (r.rows.length && (firstTs == null || r.rows[0].ts < firstTs)) firstTs = r.rows[0].ts;
     } catch (e) { errors.cpuHistory = e?.message || String(e); }
   }
@@ -250,14 +263,53 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   try {
     const pdb = await getPowerDb();
     power = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (k) => (typeof pdb.latest === 'function' ? pdb.latest(k) != null : false) });
-    out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs) : [];
+    out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs, win.offsetMs || 0) : [];
   } catch (e) { errors.powerW = e?.message || String(e); }
   return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
+}
+
+/** 점 [{ts,v}] → 오프셋 버킷 평균(순수 — A-07). */
+export function rebucketMean(rows, win) {
+  const off = win.offsetMs || 0; const B = win.bucketMs; const acc = new Map();
+  for (const p of rows || []) {
+    const t = Number(p?.ts); const v = p?.v;
+    if (!Number.isFinite(t) || typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const b = Math.floor((t + off) / B) * B - off;
+    const g = acc.get(b) || { s: 0, n: 0 }; g.s += v; g.n += 1; acc.set(b, g);
+  }
+  return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, v: g.s / g.n }));
 }
 
 /** id → 서버 객체(중앙 등록 → 엣지 보고 순). */
 function serverById(id) {
   return loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
+}
+/**
+ * v2.680(A-04): 요청 하나에서 여러 서버를 찾을 때 — 등록부를 **한 번만** 읽어 색인한다. serverById 를 행마다 부르면
+ * loadIdracRegistry 가 매번 statSync + 등록부 전체 structuredClone 을 해서 1,135대 표 한 번에 약 2.6초 동기 정지였다(O(N²)).
+ * 엣지 보고분도 한 번에 색인한다(같은 id 는 처음 것 — findRemoteServer 와 같은 순서).
+ */
+export function serverLookup({ registry = loadIdracRegistry(), remote = null } = {}) {
+  const reg = new Map();
+  for (const x of registry || []) if (x && !reg.has(String(x.id))) reg.set(String(x.id), x);
+  let rem = null;
+  const remoteMap = () => {
+    if (rem) return rem;
+    rem = new Map();
+    for (const x of (remote || allRemoteServers()) || []) if (x && !rem.has(String(x.id))) rem.set(String(x.id), x);
+    return rem;
+  };
+  return (id) => reg.get(String(id)) || remoteMap().get(String(id)) || null;
+}
+
+/**
+ * v2.680(C-05): 범위 계정이면 **범위 밖 vCenter 의 ESXi 호스트와의 매칭은 없는 것으로** 본다 — 그 호스트의 이름·CPU·GPU 계열이
+ * 범위 계정에 나가지 않게. 범위 밖 호스트가 있다는 사실도 말하지 않는다(kind 도 베어메탈로).
+ */
+export function scopeKind(k, sc) {
+  if (!sc || !k?.host) return k;
+  if (sc.allowed?.has?.(String(k.host.vcenterId || ''))) return k;
+  return { ...k, kind: 'baremetal', host: null, matchedBy: null, hostAmbiguous: false };
 }
 
 /**
@@ -328,8 +380,9 @@ function serverRows(req, { gpuKeys = null } = {}) {
   const all = analysisServersWithRemote().filter((s) => s.type !== 'ome');
   const r = scopeIdracServers(req, all);
   const dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id]));
+  const sc = idracScopeOf(req);
   const rows = r.servers.map((s) => {
-    const k = kindOf(s);
+    const k = scopeKind(kindOf(s), sc);
     const inv = invForServer(s);
     return {
       id: String(s.id), name: s.name || inv?.system?.hostName || s.id, corp: String(s.datacenterId || ''),
@@ -478,14 +531,16 @@ export function registerIdracTrend(adminRouter) {
     const stats = {}; const latest = {};
     try {
       const db = await getMetricsDb();
-      const read = (k, metrics) => {
+      // v2.680(E-02): 키마다 seek + 양보(statsSinceAllAsync) — 지표 파티션 전체를 동기로 훑지 않는다.
+      const statsOf = (m) => (typeof db.statsSinceAllAsync === 'function' ? db.statsSinceAllAsync(m, since) : db.statsSinceAll(m, since));
+      const read = async (k, metrics) => {
         stats[k] = []; latest[k] = [];
         for (const m of metrics) {
-          try { stats[k].push(db.statsSinceAll(m, since)); latest[k].push(db.latestAll(m)); } catch (e) { errors[k] = e?.message || String(e); }
+          try { stats[k].push(await statsOf(m)); latest[k].push(db.latestAll(m)); } catch (e) { errors[k] = e?.message || String(e); }
         }
       };
-      read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.sensor, CPU_FALLBACK_METRICS.bmIdrac]);
-      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) read(k, [TREND_METRICS[k]]);
+      await read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.sensor, CPU_FALLBACK_METRICS.bmIdrac]);
+      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) await read(k, [TREND_METRICS[k]]);
       for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) stats[k] = stats[k][0] || new Map();
     } catch (e) { errors.metrics = e?.message || String(e); }
     let power = new Map(); let powerKeyFor = () => null;
@@ -493,7 +548,8 @@ export function registerIdracTrend(adminRouter) {
       const pdb = await getPowerDb();
       power = pdb.statsSince(since);
       const entries = remotePowerEntries();
-      powerKeyFor = (r) => { const s = serverById(r.id); return s ? powerKeyOf(s, { entries, hasSeries: (k) => power.has(k) }).key : null; };
+      const find = serverLookup();
+      powerKeyFor = (r) => { const s = find(r.id); return s ? powerKeyOf(s, { entries, hasSeries: (k) => power.has(k) }).key : null; };
     } catch (e) { errors.powerW = e?.message || String(e); }
     const out = buildTableRows(targets, { stats, latest, power, powerKeyFor, since });
     res.json({ ok: true, hours, since, now, rows: out, total: out.length, errors,
@@ -506,7 +562,9 @@ export function registerIdracTrend(adminRouter) {
     const hostId = String(req.query.hostId || '').slice(0, 256);
     const hosts = store.get().hosts || [];
     const host = hostId ? hosts.find((h) => String(h.id) === hostId) : null;
-    if (!host) return res.status(404).json({ ok: false, reason: 'no-host', message: '스냅샷에 그 ESXi 호스트가 없습니다(첫 수집 중이거나 삭제됨).' });
+    // v2.680(C-04): 범위 밖 vCenter 의 호스트는 없는 것과 같은 404 — 이름·vCenter·존재를 범위 계정에 말하지 않는다.
+    const hsc = idracScopeOf(req);
+    if (!host || (hsc && !hsc.allowed.has(String(host.vcenterId || '')))) return res.status(404).json({ ok: false, reason: 'no-host', message: '스냅샷에 그 ESXi 호스트가 없습니다(첫 수집 중이거나 삭제됨).' });
     const all = analysisServersWithRemote(req).filter((s) => s.type !== 'ome');
     const r = scopeIdracServers(req, all);
     const out = resolveServerForHost(host, r.servers, {
@@ -517,7 +575,7 @@ export function registerIdracTrend(adminRouter) {
     let reverse = null;
     if (out.serverId) {
       const srv = r.servers.find((s) => String(s.id) === out.serverId);
-      try { const k = srv ? kindOf(srv) : null; reverse = k ? { hostId: k.host?.id || null, same: k.host?.id === host.id } : null; } catch { reverse = null; }
+      try { const k = srv ? scopeKind(kindOf(srv), hsc) : null; reverse = k ? { hostId: k.host?.id || null, same: k.host?.id === host.id } : null; } catch { reverse = null; }
     }
     res.json({ ok: true, hostId: host.id, hostName: host.name, vcenterId: host.vcenterId || '', ...out, reverse,
       ...(r.sc ? { scoped: true } : {}) });
@@ -530,11 +588,12 @@ export function registerIdracTrend(adminRouter) {
     const lock = acquireExport('idrac-trend-csv', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
+      const find = serverLookup(); const sc = idracScopeOf(req);
       const lines = [csvLine(['법인', '서비스', '서버', '서비스태그', '유형', '시각', ...cols.map((c) => EXPORT_COLS[c])])];
       for (const s of targets) {
-        const srv = serverById(s.id);
+        const srv = find(s.id);
         if (!srv) continue;
-        const { points } = await seriesFor(srv, win);
+        const { points } = await seriesFor(srv, win, { host: scopeKind(kindOf(srv), sc).host });
         for (const p of points) {
           lines.push(csvLine([s.corpName, s.site, s.name, s.serviceTag, s.kind === 'esxi' ? 'ESXi' : '베어메탈', localStamp(p.t), ...cols.map((c) => (p[c] == null ? '' : p[c]))]));
         }
@@ -554,6 +613,7 @@ export function registerIdracTrend(adminRouter) {
     const lock = acquireExport('idrac-trend-xlsx', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
+      const find = serverLookup(); const sc = idracScopeOf(req);
       const { default: ExcelJS } = await import('exceljs');
       const wb = new ExcelJS.Workbook();
       wb.creator = 'VMware Global Monitoring Portal';
@@ -572,9 +632,9 @@ export function registerIdracTrend(adminRouter) {
       const used = new Set(['요약']);
       let sheetNo = 1;
       for (const s of targets) {
-        const srv = serverById(s.id);
+        const srv = find(s.id);
         if (!srv) continue;
-        const { points, cpuSources } = await seriesFor(srv, win);
+        const { points, cpuSources } = await seriesFor(srv, win, { host: scopeKind(kindOf(srv), sc).host });
         const name = uniqueSheetName(s.name || s.id, used);
         const ws = wb.addWorksheet(name);
         sheetNo += 1;
@@ -616,7 +676,7 @@ export function registerIdracTrend(adminRouter) {
     const keep = trendRetentionDays();
     const win = parseWindow(req.query, { retentionDays: keep });
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
-    const k = kindOf(s);
+    const k = scopeKind(kindOf(s), idracScopeOf(req));
     const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs, hostGpuFirstTs } = await seriesFor(s, win, { host: k.host });
     // v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지 + iDRAC 표본이 지금 들어오는지(멈춤 진단).
     let cpuDiag = null; let idracState = null;

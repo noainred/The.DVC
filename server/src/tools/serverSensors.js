@@ -10,7 +10,7 @@
  *   보이지 않는다. 상세가 아예 없는 서버는 `none` 이다(수집 전·구버전 엣지·Redfish 미지원). 둘을 섞지 않는다.
  */
 
-import { summarizeSensors } from '../idrac/sensorDetail.js';
+import { summarizeSensors, collectionCpuJudge, SENSOR_COLLECTION_FRESH_MS } from '../idrac/sensorDetail.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
@@ -35,8 +35,13 @@ export function cpuIndexOf(rows = []) {
 /**
  * 서버 한 대의 CPU 사용률. 순서: 베어메탈 사용률(bmusage) → iDRAC 텔레메트리(센서 폴러가 이미 읽는 SystemUsage) →
  * Sensors 컬렉션의 CPU 사용률 센서. **어느 것을 썼는지 `src` 로 밝힌다.** 오래된 값은 `stale`(값은 싣되 판정에 쓰지 않는다).
+ * v2.680 A-03: 낡은 값은 **더 뒤 순서의 신선한 값이 하나도 없을 때만** 낸다(예전엔 낡은 bmusage 행이 신선한 텔레메트리를 가렸다).
+ * v2.680 A-02: 컬렉션 센서 값은 `sensorAt`(컬렉션 시각)으로 통합 추이와 같은 경계(`collectionCpuJudge`)를 적용한다 —
+ *   시각을 모르면 낡은 것으로 본다.
  */
-export function cpuOf(s, { cpuIndex, telemetryOf = () => null, sensorPct = null, freshMs = 30 * 60_000, now = Date.now(), bmEnabled = null } = {}) {
+export function cpuOf(s, { cpuIndex, telemetryOf = () => null, sensorPct = null, sensorAt = null, sensorFreshMs = SENSOR_COLLECTION_FRESH_MS, freshMs = 30 * 60_000, now = Date.now(), bmEnabled = null } = {}) {
+  let fallback = null;
+  const keep = (c) => { if (!fallback) fallback = c; };
   const keys = [s?.serviceTag, s?.id, s?.fleetId].map(low).filter(Boolean);
   for (const k of keys) {
     const row = cpuIndex?.get(k);
@@ -45,13 +50,24 @@ export function cpuOf(s, { cpuIndex, telemetryOf = () => null, sensorPct = null,
     if (pct == null) continue;
     const at = numOrNull(row.ts);
     const fm = numOrNull(row._freshMs) || freshMs;
-    return { pct: r1(pct), src: 'bmusage', via: row.src || '', at, state: at != null && now - at <= fm ? 'ok' : 'stale' };
+    const c = { pct: r1(pct), src: 'bmusage', via: row.src || '', at, state: at != null && now - at <= fm ? 'ok' : 'stale' };
+    if (c.state === 'ok') return c;
+    keep(c);
+    break; // 같은 서버의 다른 키는 같은 값의 별칭이다 — 첫 값 있는 키만 본다(예전과 같다)
   }
   const tel = telemetryOf(s);
   if (tel && numOrNull(tel.pct) != null) {
-    return { pct: r1(numOrNull(tel.pct)), src: 'telemetry', via: 'SystemUsage', at: numOrNull(tel.at), state: tel.fresh === false ? 'stale' : 'ok' };
+    const c = { pct: r1(numOrNull(tel.pct)), src: 'telemetry', via: 'SystemUsage', at: numOrNull(tel.at), state: tel.fresh === false ? 'stale' : 'ok' };
+    if (c.state === 'ok') return c;
+    keep(c);
   }
-  if (sensorPct != null) return { pct: r1(sensorPct), src: 'sensor', via: '', at: null, state: 'ok' };
+  if (numOrNull(sensorPct) != null) {
+    const j = collectionCpuJudge(sensorPct, sensorAt, { now, freshMs: sensorFreshMs });
+    const c = { pct: r1(numOrNull(sensorPct)), src: 'sensor', via: '', at: j.at, state: j.stale ? 'stale' : 'ok' };
+    if (c.state === 'ok') return c;
+    keep(c);
+  }
+  if (fallback) return fallback;
   return { pct: null, src: null, via: '', at: null, state: bmEnabled === false ? 'off' : 'none' };
 }
 
