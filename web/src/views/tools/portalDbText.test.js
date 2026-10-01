@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtBytes, fcText, perDayText, basisText } from './portalDbText.js';
+import { fmtBytes, fcText, perDayText, basisText, totalConfText, totalDailyMetaText } from './portalDbText.js';
 
 describe('portalDbText (v2.674)', () => {
   const GB = 1024 ** 3;
@@ -21,5 +21,24 @@ describe('portalDbText (v2.674)', () => {
     expect(basisText({ files: [f('daily'), f('daily')] })).toBe('일 표본 기울기(최근 30일)');
     expect(basisText({ files: [f('daily'), f('recent')] })).toBe('일 표본 1개 · 최근 표본 1개');
     expect(basisText({ files: [f('recent')] })).toBe('최근 표본 차이(관측 짧음)');
+  });
+  it('합계 신뢰도 문구는 낮음·보통이면 이유(짧은 관측에서 나온 증가 비율)를 함께 말한다', () => {
+    expect(totalConfText({ available: true, confidence: 'low', shortShare: { under1d: 0.92, under7d: 0.92 } })).toBe('신뢰도 낮음 · 증가의 92%가 1일 미만 관측');
+    expect(totalConfText({ available: true, confidence: 'medium', shortShare: { under1d: 0, under7d: 0.4 } })).toBe('신뢰도 보통 · 증가의 40%가 7일 미만 관측');
+    expect(totalConfText({ available: true, confidence: 'high', shortShare: { under1d: 0, under7d: 0 } })).toBe('신뢰도 높음(7일+ 관측)');
+    expect(totalConfText({ available: true, confidence: 'low' })).toBe('신뢰도 낮음');
+    expect(totalConfText({ available: true, confidence: 'low', shortShare: { under1d: 0.996 } })).toBe('신뢰도 낮음 · 증가의 99%가 1일 미만 관측');
+    expect(totalConfText({ available: true, confidence: 'low', shortShare: { under1d: 1 } })).toBe('신뢰도 낮음 · 증가의 100%가 1일 미만 관측');
+    expect(totalConfText({ available: false, confidence: 'high' })).toBe('');
+    expect(totalConfText(null)).toBe('');
+  });
+  it('합계 일 증가량 부가 문구 — 근거 · 미산정 · 감소 중 파일', () => {
+    const files = [{ trend: { basis: 'daily', perDayBytes: 1 } }];
+    expect(totalDailyMetaText({ files, perDayUnknown: 2, totalForecast: { available: true, shrinkingFiles: 1 } }))
+      .toBe('일 표본 기울기(최근 30일) · 미산정 2개 제외 · 감소 중 1개는 증가 0으로 셈');
+    expect(totalDailyMetaText({ files, perDayUnknown: 0, totalForecast: { available: true } })).toBe('일 표본 기울기(최근 30일)');
+    expect(totalDailyMetaText({ files: [], totalForecast: { available: false, reason: '관측 30분 — 1시간 이상 필요(약 30분 뒤 표시)' } }))
+      .toBe('관측 30분 — 1시간 이상 필요(약 30분 뒤 표시)');
+    expect(totalDailyMetaText(null)).toBe('표본 부족');
   });
 });

@@ -108,3 +108,38 @@ test('⑦ 정리·VACUUM 으로 크게 줄면 그 앞 표본은 쓰지 않고, �
   assert.equal(t2.forecast.shrinking, true);
   assert.equal(t2.forecast.in1y, rowOf(r2).sizeBytes, '감소 추세면 1년 후도 지금 크기');
 });
+
+test('⑧ 합계 = 파일별 예측의 합(감소 중 파일은 증가 0) · 신뢰도는 증가량이 나온 관측 길이로(가장 오래 본 파일로 정하지 않는다)', () => {
+  // v2.674 Chromium 검증에서 발견: 한 파일이 10일치 일 표본을 가지면 합계가 '높음' 이었는데, 증가량의 대부분은
+  // 막 생긴 파일의 1시간 관측을 하루로 늘린 값이었다. 그리고 감소 중 파일의 음수 기울기가 다른 파일의 증가를 지웠다.
+  const now = Date.now();
+  const DB2 = path.join(dir, 'idrac-power.db');
+  const DB3 = path.join(dir, 'vcenter-logs.db');
+  fs.truncateSync(DB, 50 * GB);
+  fs.writeFileSync(DB2, ''); fs.truncateSync(DB2, 2 * GB);
+  fs.writeFileSync(DB3, ''); fs.truncateSync(DB3, Math.round(15.5 * GB));
+  const grow = Array.from({ length: 10 }, (_, i) => [now - (10 - i) * DAY, (40 + i) * GB]);          // 하루 +1GB · 9일 관측
+  const shrink = Array.from({ length: 10 }, (_, i) => [now - (10 - i) * DAY, (20 - 0.5 * i) * GB]);  // 하루 -0.5GB
+  const recent2 = [[now - 2 * 3_600_000, 1 * GB], [now, 2 * GB]];                                     // 2시간에 +1GB = 하루 +12GB
+  fs.writeFileSync(HIST, JSON.stringify({ v: 1, recent: { [DB2]: recent2 }, daily: { [DB]: grow, [DB3]: shrink } }));
+  m._resetDbSizeHistoryForTest();
+  const r = m.portalDbReport(now);
+  const per = (name) => r.files.find((f) => f.file === name)?.trend?.perDayBytes;
+  assert.ok(per('vcenter-logs.db') < 0, '감소 중 파일');
+  const clampedSum = r.files.reduce((s, f) => s + (f.trend?.perDayBytes == null ? 0 : Math.max(0, f.trend.perDayBytes)), 0);
+  assert.equal(r.perDayTotalBytes, clampedSum, '합계 일 증가량 = 파일별(감소는 0) 합');
+  assert.ok(Math.abs(r.perDayTotalBytes - 13 * GB) < 0.3 * GB, `합계 일 증가 ${r.perDayTotalBytes}`);
+  assert.equal(r.totalForecast.in1y, Math.round(r.totalBytes + 365 * r.perDayTotalBytes));
+  assert.equal(r.totalForecast.shrinking, false);
+  assert.equal(r.totalForecast.shrinkingFiles, 1);
+  assert.equal(r.totalForecast.confidence, 'low', '증가의 92% 가 2시간 관측에서 나왔다');
+  assert.ok(r.totalForecast.shortShare.under1d > 0.85, JSON.stringify(r.totalForecast.shortShare));
+
+  // 짧은 관측 파일이 없으면 높음(증가량 전부가 9일 관측)
+  fs.writeFileSync(HIST, JSON.stringify({ v: 1, recent: {}, daily: { [DB]: grow, [DB3]: shrink } }));
+  m._resetDbSizeHistoryForTest();
+  const r2 = m.portalDbReport(now);
+  assert.equal(r2.totalForecast.confidence, 'high');
+  assert.equal(r2.totalForecast.shortShare.under1d, 0);
+  fs.rmSync(DB2, { force: true }); fs.rmSync(DB3, { force: true });
+});

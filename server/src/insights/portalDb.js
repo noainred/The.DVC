@@ -459,12 +459,30 @@ export function portalDbReport(now = Date.now()) {
     detail: detailFor(f.file),
   }));
   const totalBytes = files.reduce((s, f) => s + (f.sizeBytes || 0), 0);
-  // 전체 합계 예측 — 파일별 일 증가량을 합산해 같은 방식으로 연장한다.
-  const perDayTotal = files.reduce((s, f) => s + (f.trend?.perDayBytes || 0), 0);
+  // 전체 합계 예측 = 파일별 예측의 합(v2.674). 감소 중인 파일은 그 파일의 예측과 같이 '지금 크기'(증가 0)로 센다.
+  //   예전처럼 음수 기울기를 그대로 더하면 정리 중인 파일 하나가 다른 파일의 증가를 지워 합계가 '감소 추세' 가 되고,
+  //   파일별 '1년 후' 를 더한 값과 합계 '1년 후' 가 서로 다른 말을 했다.
+  const known = files.filter((f) => f.trend?.perDayBytes != null);
+  const perDayTotal = known.reduce((s, f) => s + Math.max(0, f.trend.perDayBytes), 0);
+  const shrinkingFiles = known.filter((f) => f.trend.perDayBytes < 0).length;
   const spanMax = files.reduce((m, f) => Math.max(m, f.trend?.spanMs || 0), 0);
   // v2.674: 일 증가량을 낼 수 없는 파일(관측 1시간 미만)은 합계에서 빠진다 — 몇 개인지 밝힌다.
   const perDayUnknown = files.filter((f) => f.exists && f.trend?.perDayBytes == null).length;
   const totalForecast = forecastFrom(totalBytes, perDayTotal, spanMax);
+  // 합계의 신뢰도는 '가장 오래 본 파일' 이 아니라 **증가량이 어디서 나왔는가** 로 정한다(v2.674 Chromium 검증에서 발견):
+  //   한 파일이 10일치 일 표본을 갖고 있으면 spanMax 는 10일이라 합계가 '높음' 이 되는데, 실제 증가량의 98% 가 막 생긴
+  //   파일 셋의 1시간 관측을 하루로 늘린 값이었다. 1일 미만 관측에서 나온 증가가 10% 이상이면 낮음, 7일 미만이 10% 이상이면 보통.
+  if (totalForecast.available) {
+    const growing = known.filter((f) => f.trend.perDayBytes > 0);
+    const shareBelow = (ms) => (perDayTotal > 0
+      ? growing.filter((f) => !(f.trend.spanMs >= ms)).reduce((s, f) => s + f.trend.perDayBytes, 0) / perDayTotal
+      : 0);
+    const lowShare = shareBelow(DAY_MS);
+    const midShare = shareBelow(7 * DAY_MS);
+    if (growing.length) totalForecast.confidence = lowShare >= 0.1 ? 'low' : midShare >= 0.1 ? 'medium' : 'high';
+    totalForecast.shortShare = { under1d: Math.round(lowShare * 1000) / 1000, under7d: Math.round(midShare * 1000) / 1000 };
+    totalForecast.shrinkingFiles = shrinkingFiles;
+  }
   const persistedAt = (() => { try { return fs.statSync(historyFile()).mtimeMs; } catch { return null; } })();
   const disk = diskFree();
   // 디스크 소진 예상 — 여유 공간 ÷ 일 증가량. 증가가 0 이하면 '해당 없음'.

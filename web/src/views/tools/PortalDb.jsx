@@ -4,7 +4,7 @@ import { fetchJson, postJson, usePolling } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtBytes, fcText, perDayText, basisText } from './portalDbText.js';
+import { fmtBytes, fcText, perDayText, totalConfText, totalDailyMetaText } from './portalDbText.js';
 
 const DB_TYPE_BADGE = { sqlite: 'blue', json: 'green', ndjson: 'amber', file: 'gray' };
 const DB_TYPE_LABEL = { sqlite: 'SQLite', json: 'JSON', ndjson: 'ndjson', file: '파일' };
@@ -448,8 +448,12 @@ export function PortalDb() {
     { key: 'growth', label: '증가/일(추정)', align: 'right', sortValue: (f) => f.trend?.perDayBytes ?? '', render: (f) => {
       const g = f.trend?.perDayBytes;
       if (!f.exists || g == null) return <span className="muted" title={f.trend?.forecast?.reason || '표본 부족'}>—</span>;
-      if (g === 0) return <span className="muted">변화 없음</span>;
-      return <span style={{ color: g > 0 ? 'var(--green)' : 'var(--red)' }}>{g > 0 ? '+' : ''}{fmtBytes(g)}/일</span>;
+      // v2.674: 몇 시간 관측을 하루로 늘린 값과 30일 일 표본 기울기를 같은 모양으로 보이지 않는다 — 근거는 툴팁, 짧으면 표지.
+      const conf = f.trend?.forecast?.confidence;
+      const tip = `관측 ${fmtSpan(f.trend?.spanMs)} · ${f.trend?.basis === 'daily' ? '일 표본 기울기' : '최근 표본 차이'} · 신뢰도 ${CONF_LABEL[conf] || '—'}`;
+      const short = conf === 'low' ? <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>관측 짧음</span> : null;
+      if (g === 0) return <span className="muted" title={tip}>변화 없음{short}</span>;
+      return <span title={tip} style={{ color: g > 0 ? 'var(--green)' : 'var(--red)' }}>{g > 0 ? '+' : ''}{fmtBytes(g)}/일{short}</span>;
     } },
     { key: 'trend', label: '추이', render: (f) => <Sparkline samples={f.trend?.samples} /> },
     { key: 'forecast', label: '1년 후(추정)', align: 'right', sortValue: (f) => (f.trend?.forecast?.available ? f.trend.forecast.in1y : -1), render: (f) => {
@@ -473,12 +477,12 @@ export function PortalDb() {
         <Card label="설정 디렉터리" value={<code style={{ fontSize: 12 }}>{data.configDir}</code>} meta={`추이 샘플 ${Math.round((data.sampleIntervalMs || 0) / 60000)}분 간격`} />
         {/* 용량 예측(v2.378 · v2.674) — 일 증가율을 선형 연장한 추정. 관측 1시간 미만이면 '—' 와 표시까지 남은 시간을 말한다. */}
         <Card label="1일 증가량(추정)" value={perDayText(data.perDayTotalBytes, data.totalForecast)}
-          meta={data.totalForecast?.available ? `${basisText(data)}${data.perDayUnknown ? ` · 미산정 ${data.perDayUnknown}개 제외` : ''}` : (data.totalForecast?.reason || '표본 부족')} />
+          meta={totalDailyMetaText(data)} />
         <Card label="1주일 후(추정)" value={fcText(data.totalForecast, 'in1w')} />
         <Card label="1개월 후(추정)" value={fcText(data.totalForecast, 'in1m')} />
         <Card label="6개월 후(추정)" value={fcText(data.totalForecast, 'in6m')} />
         <Card label="1년 후(추정)" value={fcText(data.totalForecast, 'in1y')}
-          meta={data.totalForecast?.available ? (data.totalForecast.shrinking ? '감소 추세 — 지금 크기로 표시' : `신뢰도 ${CONF_LABEL[data.totalForecast.confidence] || '—'}`) : ''}
+          meta={totalConfText(data.totalForecast)}
           accent={data.totalForecast?.available && data.disk && data.totalForecast.in1y > data.disk.freeBytes ? 'var(--red)' : undefined} />
         {data.disk && (
           <Card label="디스크 여유" value={fmtBytes(data.disk.freeBytes)}
