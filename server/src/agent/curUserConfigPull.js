@@ -47,7 +47,7 @@ export async function pullCurUserConfigNow() {
     const s = body?.settings;
     if (!s || typeof s !== 'object') throw new Error('설정 본문 없음');
     const applied = applyCentral(s);
-    if (applied) console.log(`[curuser-pull] 중앙 설정 적용 — enabled=${s.enabled} 주기 ${Math.round((s.intervalMs || 0) / 60_000)}분 · 법인 ${Object.keys(s.vcenters || {}).length}곳`);
+    if (applied) console.log(`[curuser-pull] 중앙 설정 적용 — enabled=${s.enabled} 주기 ${Math.round((s.intervalMs || 0) / 60_000)}분 · ${s.vcenters && typeof s.vcenters === 'object' ? `법인 ${Object.keys(s.vcenters).length}곳` : '법인 배정은 직전 값 유지(중앙이 이 엣지의 vCenter 를 모름 — v2.681 R2F-04)'}`);
     last = { at: Date.now(), ok: true, applied };
     return last;
   } catch (e) {

@@ -39,6 +39,20 @@ test('A6-01 — 엣지 워커 소스에 원문 X-Agent-Name 헤더가 0건이다
   assert.deepEqual(bad, [], `원문 헤더가 남은 파일: ${bad.join(', ')}`);
 });
 
+// v2.681(R2F-01): 같은 ByteString 함정 — 원문 os.hostname() 을 X-Agent-Hostname 에 그대로 싣지 않는다(agentHostnameHeader 한 벌).
+test('R2F-01 — 엣지 워커 소스에 원문 X-Agent-Hostname 헤더가 0건이다', () => {
+  const files = [
+    ...fs.readdirSync(path.join(SRC, 'agent')).filter((f) => f.endsWith('.js') && f !== 'agentNameCarry.js').map((f) => `agent/${f}`),
+    'sanswitch/push.js', 'sanswitch/perfPush.js', 'partfault/push.js',
+  ];
+  const bad = [];
+  for (const f of files) {
+    const s = stripComments(read(f));
+    if (/['"]X-Agent-Hostname['"]\s*:/.test(s)) bad.push(f);
+  }
+  assert.deepEqual(bad, [], `원문 X-Agent-Hostname 헤더가 남은 파일: ${bad.join(', ')}`);
+});
+
 test('A6-01 — withAgentQuery: 헤더로 못 싣는 이름만 쿼리로, 이미 agent 쿼리가 있으면 그대로', async () => {
   const { withAgentQuery, agentHeaders } = await import('../src/agent/agentNameCarry.js');
   assert.deepEqual(agentHeaders('edge-a'), { 'X-Agent-Name': 'edge-a' });

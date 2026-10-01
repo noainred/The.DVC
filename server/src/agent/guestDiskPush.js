@@ -19,7 +19,6 @@
 
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
@@ -29,7 +28,8 @@ import { collectVcenterGuestDisk } from '../guestdisk/service.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
 
 const gzipAsync = promisify(zlib.gzip);
-import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { agentNameHeader } from '../util/agentNameHeader.js';
+import { agentHostnameHeader } from './agentNameCarry.js'; // v2.681 R2F-01 // v2.620(RECENT2620-02)
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
 let timer = null;
@@ -39,7 +39,7 @@ let running = false;   // single-flight
 function headers(extra = {}) {
   return {
     'Content-Type': 'application/json',
-    'X-Agent-Hostname': os.hostname(),
+    ...agentHostnameHeader(), // v2.681 R2F-01: 비-ASCII 호스트명 원문 헤더는 fetch 가 던진다
     ...agentNameHeader(config.agent.name), // v2.620(RECENT2620-02): 중앙 큰 본문 게이트가 본문 전에 요청자를 가리게 — 이름을 헤더에도 싣는다.
     ...extra,
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),

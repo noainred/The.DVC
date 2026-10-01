@@ -961,21 +961,41 @@ centralRouter.post('/curuser', requireCentral(), async (req, res) => {
   res.json({ ok: true, records: kept.length, rejected: [...rejected], replaced: replaceVcenters.length });
 });
 
+/**
+ * v2.681(감사 R2F-04): 이 엣지가 수집하는 vCenter 집합 = 인벤토리 캐시 소유(TOFU) ∪ 등록부 위임(collectMode 'site' +
+ *   remoteAgent, 대소문자 무시). 예전에는 캐시 소유만 봐서 소유권 해제(v2.599 owner API)·손상 캐시로 빈 채 기동한 직후
+ *   엣지 pull 이 '대상 0' 을 200 으로 받아 그 주기 수집을 멈췄다. 등록부를 못 읽으면 캐시 소유만 쓴다.
+ */
+function edgeVcenterSet(agentLower) {
+  const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agentLower).map((e) => String(e.vcenterId)));
+  if (!agentLower) return mine;
+  try {
+    for (const v of loadVcenterConfig().vcenters || []) {
+      if (!v || v.id == null || (v.collectMode || 'direct') !== 'site') continue;
+      if (String(v.remoteAgent || '').trim().toLowerCase() === agentLower) mine.add(String(v.id));
+    }
+  } catch { /* 등록부를 못 읽으면 캐시 소유만 */ }
+  return mine;
+}
+
 // '현재 사용자' 설정 배포(v2.520) — 엣지가 주기적으로 GET. 이 엣지가 소유한 vCenter 항목만 내려준다.
 centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
   if (settingsUnreadable(res, curUserSettingsLoadError, '현재 사용자')) return; // v2.631 EDGE2631-01
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
-  const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
+  const mine = edgeVcenterSet(agent);
   const s = loadCurUserSettings();
   const vcenters = Object.fromEntries(Object.entries(s.vcenters || {}).filter(([id]) => mine.has(id)));
+  // v2.681(R2F-04): 이 엣지의 vCenter 를 하나도 알 수 없으면 settings.vcenters 를 **싣지 않는다** — 엣지 applyCentral 은
+  //   로컬 위에 병합하므로 키가 없으면 직전 배정이 유지된다(빈 객체를 보내면 '배정 해제' 로 적용된다).
+  const held = mine.size === 0;
   res.json({
     ok: true,
     settings: {
       enabled: s.enabled, intervalMs: s.intervalMs, retentionDays: s.retentionDays,
       concurrency: s.concurrency, vmTimeoutMs: s.vmTimeoutMs, maxVms: s.maxVms,
-      guestPublishMs: s.guestPublishMs, staleFactor: s.staleFactor, vcenters,
+      guestPublishMs: s.guestPublishMs, staleFactor: s.staleFactor, ...(held ? {} : { vcenters }),
     },
-    vcenters: [...mine],
+    vcenters: [...mine], ...(held ? { vcentersHeld: true } : {}),
   });
 });
 
@@ -984,10 +1004,13 @@ centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
 centralRouter.get('/vmseries-config', requireCentral(), (req, res) => {
   if (settingsUnreadable(res, vmSeriesSettingsLoadError, '실시간 스파이크')) return; // v2.631 EDGE2631-01
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
-  const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
+  const mine = edgeVcenterSet(agent);
   const s = loadVmSeriesSettings();
   const targets = Object.fromEntries(Object.entries(s.targets || {}).filter(([id]) => mine.has(id)));
-  res.json({ ok: true, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, targets }, vcenters: [...mine] });
+  // v2.681(R2F-04): 이 엣지의 vCenter 를 모르면 targets 를 싣지 않는다 — 새 엣지(vmSeriesConfigPull)는 '필드 없음 = 직전 유지'.
+  //   (구버전 엣지는 빈 객체로 읽는다 — 예전 중앙이 {} 를 보내던 것과 같아 퇴행은 없다.)
+  const held = mine.size === 0;
+  res.json({ ok: true, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, ...(held ? {} : { targets }) }, vcenters: [...mine], ...(held ? { targetsHeld: true } : {}) });
 });
 
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.
@@ -1191,13 +1214,15 @@ centralRouter.post('/gpu-guest-data', requireCentral(), (req, res) => {
   const put = withGpuTrust(verifiedGpu, () => setGuestGpu({ hosts, vms, agent })); // 미검증 이름은 작은 상한(gpu/store.js)
   const omitted = (put.omittedHosts || 0) + (put.omittedVms || 0);
   if (omitted) console.warn(`[central] gpu-guest-data: ${agent} 상한 초과로 ${omitted}개를 받지 않았습니다(호스트 ${put.omittedHosts} · VM ${put.omittedVms})`);
-  if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
+  // v2.681(R2F-02): 진단도 검증 여부를 싣는다 — 미검증 이름이 검증된 엣지의 진단을 상한 퇴출로 밀지 않게.
+  const diagPut = b.diag ? setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }, { verified: verifiedGpu }) : null; // 수집 진단 보관
   // v2.583: 엣지마다 인벤토리 주기로 찍혀 저널을 덮었다(28곳 × 60초 ≈ 하루 4만 줄) — 값이 바뀔 때와
   //   1시간마다만 찍는다(util/logThrottle.js). 문구 형식은 그대로다(로그 분석 규칙이 이 형식을 읽는다).
   if (gpuRecvLog(agent, `${hosts.length}/${vms.length}`)) console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent, hosts: put.hosts, vms: put.vms,
     ...(omitted ? { omitted: { hosts: put.omittedHosts, vms: put.omittedVms } } : {}),
-    ...(unregistered ? { unregistered } : {}), ...(verifiedGpu ? {} : { unverifiedAgent: true }) });
+    ...(unregistered ? { unregistered } : {}), ...(verifiedGpu ? {} : { unverifiedAgent: true }),
+    ...(diagPut && diagPut.stored === false ? { diagNotStored: diagPut.reason } : {}) });
 });
 
 // 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.
@@ -2172,6 +2197,8 @@ centralRouter.post('/link-check', requireCentral(), async (req, res) => {
   }
   try {
     const out = await putEdgeLinkReport(req.centralAuth.agent, req.body || {});
+    // v2.681(R2F-03): DB 를 못 쓰면 200 이 아니라 503(엣지가 '저장됨' 이라 적지 않게 — v2.611 규약).
+    if (out?.dbUnavailable) return res.status(503).json(out);
     res.json(out);
   } catch (e) {
     res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

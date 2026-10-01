@@ -151,6 +151,12 @@ export async function putEdgeLinkReport(agent, body = {}) {
     rejected, omitted, notAssigned,
     dbOk: saved.ok !== false, dbError: saved.error || '',
   });
+  // v2.681(감사 R2F-03): DB 를 못 썼으면 '저장됨' 이라 답하지 않는다 — 예전에는 insertResults 가 {ok:false} 를 돌려줘도
+  //   ok:true · stored:N 이라 엣지 상태가 매 주기 '저장 N건' 이었다(v2.611 'DB 불가는 200 이 아니라 503' 규약의 형제 누락).
+  //   보고 상태(_reports — dbOk:false)는 위에서 그대로 남긴다(화면이 원인을 말한다). 라우트가 이 표지로 503 을 낸다.
+  if (saved.ok === false) {
+    return { ok: false, dbUnavailable: true, stored: 0, reason: '중앙 통신 점검 DB 를 쓸 수 없습니다', ...(saved.error ? { dbError: capTrim(String(saved.error), 200) } : {}) };
+  }
   return {
     ok: true, stored: toSave.length, events: saved.events || 0,
     skipped, rejected, omitted, ...(notAssigned ? { notAssigned } : {}),

@@ -13,13 +13,12 @@
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
 import { createChangeLogger } from '../util/logThrottle.js';
-import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { agentHeaders, withAgentQuery, agentHostnameHeader } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -34,7 +33,7 @@ export function vmSeriesPushEnabled() {
 function headers(extra = {}) {
   return {
     'Content-Type': 'application/json',
-    'X-Agent-Hostname': os.hostname(),
+    ...agentHostnameHeader(), // v2.681 R2F-01: 비-ASCII 호스트명 원문 헤더는 fetch 가 던진다
     ...agentHeaders(config.agent.name),
     ...extra,
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
