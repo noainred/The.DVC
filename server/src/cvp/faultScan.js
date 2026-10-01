@@ -115,9 +115,24 @@ export async function runCvpFaultScan({ now = Date.now(), reason = 'manual', not
 /** 수집 적재 뒤 부른다 — 여러 번 불려도 디바운스 창 안에서는 한 번만 돈다. */
 export function scheduleCvpFaultScan(source = 'ingest') {
   _pending += 1;
-  if (_timer) return;
+  if (_timer || _trailing) return;
+  armCvpFaultTimer(source);
+}
+/*
+ * v2.682(감사 R3E-04): 타이머가 울렸을 때 판정이 이미 진행 중이면(수동 실행·알림 순차 발송으로 길어진 직전 판정) 그 프라미스를
+ *   공유하고 _pending 을 비우던 것은 틀렸다 — 진행 중 판정은 이번 적재 **이전** DB 를 읽었을 수 있어 이번 적재의 전이가
+ *   다음 적재(수집 주기)까지, 엣지가 모두 멈추면 영영 판정되지 않았다. 이제 _pending 을 남겨 두고 진행 중 판정이 끝나면 다시 예약한다(trailing).
+ */
+let _trailing = false;
+function armCvpFaultTimer(source) {
   _timer = setTimeout(() => {
-    const n = _pending; _pending = 0; _timer = null;
+    _timer = null;
+    if (_running) {
+      _trailing = true;
+      _running.finally(() => { _trailing = false; if (_pending > 0 && !_timer) armCvpFaultTimer(source); });
+      return;
+    }
+    const n = _pending; _pending = 0;
     runCvpFaultScan({ reason: `${source}:${n}` }).catch(() => { /* runCvpFaultScan 이 _last.error 와 콘솔에 남긴다 */ });
   }, DEBOUNCE_MS);
   _timer.unref?.();
@@ -141,5 +156,7 @@ export function cvpFaultScanStatus() {
 
 export function _resetForTest() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
-  _pending = 0; _last = null; _running = null;
+  _pending = 0; _last = null; _running = null; _trailing = false;
 }
+/** 테스트 전용 — 진행 중 판정을 흉내 낸다(R3E-04 trailing 재예약 고정). */
+export function _setRunningForTest(p) { _running = p ? Promise.resolve(p).finally(() => { _running = null; }) : null; return _running; }

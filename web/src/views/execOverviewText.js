@@ -12,7 +12,7 @@ import { normMode, resolveMode } from '../version_4/mode.js';
 import { hashSegments } from '../hooks/hashTab.js';
 import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { corpSiteStatus } from './corpSiteStatus.js';
-import { countText, kwText, capText } from './overviewCardsText.js';
+import { countText, kwText, capText, gpuCardValue } from './overviewCardsText.js';
 
 export { WARN_PCT, CRIT_PCT };
 
@@ -302,11 +302,8 @@ export function inventoryCells(cards, g) {
 export function gpuKpi(cards) {
   const g = cards?.gpus;
   if (!g) return { value: null, sub: '', partial: false };
-  const read = Number(g.inventoryRead) || 0;
-  const servers = Number(g.servers) || 0;
-  const unknown = servers > 0 && read === 0;
-  const partial = !unknown && read < servers;
-  const value = unknown ? null : g.count;
+  // v2.682 R3D-02: 판정은 overviewCardsText.gpuCardValue 하나(엔지니어 보기 카드와 같은 함수).
+  const { value, unknown, partial } = gpuCardValue(g);
   const sub = `iDRAC 인벤토리 기준 · 수집 ${countText(g.inventoryRead)}/${countText(g.servers)}대`
     + (unknown ? ' · 아직 읽은 서버가 없습니다' : partial ? ' · 미수집 서버 제외(최소값)' : '');
   return { value, sub, partial };

@@ -89,6 +89,11 @@ export function trafficSummary(d, { selected = 0 } = {}) {
   if (edgeMissing > 0) notes.push(`엣지 수집 스위치 ${edgeMissing}대는 아직 중앙에 표본이 오지 않아 합계에 없습니다.`);
   const partial = numOrNull(d?.partialBuckets) || 0;
   if (partial > 0) notes.push(`일부 스위치 표본이 빠진 구간 ${partial}칸은 부분 합을 그리지 않았습니다.`);
+  // v2.682(R3A-02): 서버 trafficTotal ⑥·⑦ — 조용히 빼지 않는다.
+  const retired = numOrNull(d?.retiredSeries) || 0;
+  if (retired > 0) notes.push(`보고 없는 시리즈 ${retired}개 제외 — 한동안 표본이 없어 합계에서 뺐습니다(포트 재배선·정리로 보입니다. 그 장비는 다른 포트로는 보고하고 있습니다).`);
+  const held = numOrNull(d?.heldSeries) || 0;
+  if (held > 0) notes.push(`보고가 멈춘 스위치의 시리즈 ${held}개는 빼지 않고 그 구간을 '—' 로 두었습니다(등록·사용 중인 스위치라 없어진 것이 아니라 모르는 것입니다).`);
   if (!d) return { state: 'empty', lead: '', now: '—', tail: '', sub: '', notes };
   if (d.enabled === false) {
     return { state: 'off', lead: '', now: '', tail: '',

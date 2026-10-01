@@ -31,7 +31,7 @@ import { resolveTargets } from './scope.js';
 import { collectVcenterCurUsers, mockRecords } from './collect.js';
 import { commitCurUser, latestRecords, pruneCurUser, curUserDbStatus } from './db.js';
 import { refreshKinds } from './report.js';
-import { aggregateAll, seriesRow } from './aggregate.js';
+import { aggregateAll, seriesRow, advanceFailState, persistentFailKeys, PERSISTENT_FAIL_CYCLES } from './aggregate.js';
 import { recordCurUserActivity } from './activityLog.js';
 import { pushCurUserRecords, curUserPushEnabled } from '../agent/curUserPush.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -66,16 +66,25 @@ async function pool(items, n, fn) {
   return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? { ok: true, value: r.value } : { ok: false, error: r.reason }));
 }
 
+// v2.682(R3A-03): VM 별 연속 실패 상태(같은 사유 N주기 → 영구 실패로 보고 추이 부분 합 판정에서 뺀다 — aggregate.js 머리말).
+//   인메모리다 — 재시작 직후 N주기는 예전처럼 부분 합으로 보류된다. 주 수집 주기(advance)에서만 한 칸 진행한다.
+let _failState = new Map();
+export function _resetFailStateForTest() { _failState = new Map(); }
+
 /** 이번 주기의 시계열 행을 **전체 latest** 로부터 다시 만든다(위 머리말 참조). */
-async function writeSeries(ts, s, vcNameOf) {
+export async function writeSeries(ts, s, vcNameOf, { advance = false } = {}) {
   const all = refreshKinds(await latestRecords(), { now: ts, staleAfterMs: staleAfterMs(s) });
-  const agg = aggregateAll(all, { vcNameOf });
+  if (advance) _failState = advanceFailState(all, _failState);
+  const persistent = persistentFailKeys(all, _failState);
+  const agg = aggregateAll(all, { vcNameOf, persistent });
   const series = [
     { vcenterId: '', ...seriesRow(agg.total) },
     ...agg.vcenters.map((v) => ({ vcenterId: v.vcenterId, ...seriesRow(v) })),
   ];
   await commitCurUser({ ts, records: [], series });
-  return { series: series.length, users: agg.total.users };
+  // 영구 실패로 추이 판정에서 뺀 VM 수 — 조용히 빼지 않는다(lastResult 로 밝힌다. 범위 계정에는 scopePollerStatus 가 걸러 준다).
+  const persistentByVc = agg.vcenters.filter((v) => v.vmsPersistent > 0).map((v) => ({ vcenterId: v.vcenterId, count: v.vmsPersistent }));
+  return { series: series.length, users: agg.total.users, persistentFailures: agg.total.vmsPersistent || 0, persistentByVc };
 }
 
 /**
@@ -224,7 +233,7 @@ export async function runCurUserNow(trigger = 'manual') {
     // 이번 주기에 **실제로 읽은** 법인만 교체한다 — 실패한 법인의 직전 값을 지우면 화면이
     // '발행기 없음' 으로 뒤바뀐다(수집 실패와 값 없음은 다르다).
     const commit = await commitCurUser({ ts, records, series: [], replaceVcenters: [...collectedVc, ...emptied] });
-    const ser = commit.ok ? await writeSeries(ts, s, vcNameOf) : { series: 0, users: null };
+    const ser = commit.ok ? await writeSeries(ts, s, vcNameOf, { advance: true }) : { series: 0, users: null };
     if (commit.ok && !mock && curUserPushEnabled()) for (const id of emptied) _pendingClear.add(id);
     for (const id of byVc.keys()) _pendingClear.delete(id);   // 대상이 돌아온 법인은 일반 교체가 맡는다
 
@@ -244,6 +253,8 @@ export async function runCurUserNow(trigger = 'manual') {
       at: ts, trigger, vcenters: jobs.length, targets: scope.targets.length, records: records.length,
       skipped: scope.skipped.length, skippedVcenters: skippedVc, overLimit: scope.overLimit,
       users: ser.users, errors, pushed, mock, ms: Date.now() - started, commit,
+      // v2.682(R3A-03): 같은 사유로 연속 실패해 추이 부분 합 판정에서 뺀 VM(개수만 — 그 서버의 사용자는 합계에 없다).
+      persistentFailures: ser.persistentFailures ?? null, persistentByVc: ser.persistentByVc || [], persistentCycles: PERSISTENT_FAIL_CYCLES,
       ...(emptied.length ? { clearedVcenters: emptied } : {}),
     };
     return { ok: errors.length === 0, ...lastResult };

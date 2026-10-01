@@ -95,7 +95,7 @@ export default function StorageGrowthTool() {
   }, [facets, cols]);
   // 필터가 걸리면 **합계도 그 부분집합으로 다시** 낸다 — 서버가 준 전체 합계를 그대로 두면
   // '표는 3대인데 합계는 59대' 가 되어 보고서가 거짓말을 한다.
-  const shownTotals = useMemo(() => aggregateGrowth(facets.shown, cols), [facets, cols]);
+  const shownTotals = useMemo(() => aggregateGrowth(facets.shown, cols, { asOfDay: d?.asOfDay }), [facets, cols, d?.asOfDay]);
   const groups = useMemo(() => {
     if (axis === 'dc') return groupBy(facets.shown, (r) => r.datacenterId || '', (k) => dcName(k));
     if (axis === 'type') return groupBy(facets.shown, (r) => r.type || '', (k) => typeLabel(k));
@@ -198,7 +198,7 @@ export default function StorageGrowthTool() {
           onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); }}
           query={query} onQuery={setQuery} typeLabel={typeLabel}
           dcMeta={(list) => {
-            const a = aggregateGrowth(list, cols);
+            const a = aggregateGrowth(list, cols, { asOfDay: d?.asOfDay });
             return {
               dot: a.pct >= 90 ? 'var(--red)' : a.pct >= 75 ? 'var(--amber)' : 'var(--green)',
               title: `${list.length}대 · 사용 ${bytesAuto(a.usedBytes) ?? '—'} / ${bytesAuto(a.totalBytes) ?? '—'}`
@@ -252,7 +252,7 @@ export default function StorageGrowthTool() {
                 <tbody>
                   {axis === 'device'
                     ? facets.shown.map((dev) => <DeviceRow key={dev.deviceId} dev={dev} cols={cols} unit={unit} maxAbs={maxAbs} onOpen={() => setDetail(dev)} />)
-                    : groups.map((g) => <GroupRow key={g.key || '(미지정)'} g={g} cols={cols} unit={unit} />)}
+                    : groups.map((g) => <GroupRow key={g.key || '(미지정)'} g={g} cols={cols} unit={unit} asOfDay={d?.asOfDay} />)}
                   <tr data-pin>
                     <td><b>합계</b></td>
                     <td className="right" data-sort={String(t.usedBytes ?? '')}>
@@ -385,8 +385,8 @@ function GrowthCell({ g, unit, heatRatio, latestUsed }) {
  * 법인별·종류별 한 줄(v2.532). 묶음 안에서 **기준선이 있는 장비만** 더하고, 일부만 더했으면
  * 「부분」으로 밝힌다 — 규칙의 원본은 서버 `storage/growth.js totalsOf` 다.
  */
-function GroupRow({ g, cols, unit }) {
-  const a = aggregateGrowth(g.list, cols);
+function GroupRow({ g, cols, unit, asOfDay }) {
+  const a = aggregateGrowth(g.list, cols, { asOfDay });
   return (
     <tr>
       <td>

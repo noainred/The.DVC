@@ -101,6 +101,26 @@ export function srcOfRow(row) {
   return 'idrac';
 }
 
+/** 행 시각이 지금보다 이만큼 넘게 앞서면 '지금 값' 이 아니다(시계 오차 허용 — v2.682 R3S-01). */
+export const FUTURE_SKEW_MS = 5 * 60_000;
+
+/**
+ * v2.682(R3S-01 — 재현): 사용률 행 고르기 — **엣지 행은 그 서버의 담당 엣지가 보고했을 때만** 쓴다(v2.548 F5 '엣지가 법인 귀속을
+ *   정하지 못하게'). 예전엔 중앙 DB 행과 엣지 보관분을 key 하나로 합쳐(ts 큰 쪽) 아무 엣지나 다른 법인 서버의 서비스태그로 값을
+ *   덮을 수 있었다. 중앙 행(`_agent` 없음)은 언제나 후보, 엣지 행은 owner(대소문자 무시)가 같을 때만 후보 · 둘이면 ts 큰 쪽. 순수.
+ */
+export function ownedRowOf(key, owner, rowsByKey, rowsByAgentKey) {
+  const o = t(owner).toLowerCase();
+  const sameOwner = (r) => !t(r?._agent) || (o && t(r._agent).toLowerCase() === o);
+  const cands = [];
+  const c = rowsByKey instanceof Map ? rowsByKey.get(key) : null;
+  if (c && sameOwner(c)) cands.push(c);
+  if (o && rowsByAgentKey instanceof Map) { const e = rowsByAgentKey.get(`${o}|${t(key).toLowerCase()}`); if (e) cands.push(e); }
+  let best = null;
+  for (const r of cands) if (!best || (numOrNull(r.ts) ?? -1) > (numOrNull(best.ts) ?? -1)) best = r;
+  return best;
+}
+
 /**
  * 서버 한 대의 판정(순수).
  * @returns {{state:'ok'|'unread'|'stale', cpuPct, memPct, src, at}}
@@ -113,7 +133,9 @@ export function judgeServer({ role, row = null, host = null, now, freshMs, vcUnr
   // v2.628(R2628-02 — 재현): 엣지 보관분 행은 **그 엣지의 수집 주기**로 신선도를 본다(라우트가 `_freshMs` 를 붙인다) — 중앙
   //   주기로 재면 주기가 긴 엣지의 정상 값이 '오래됨' 으로 빠진다.
   const lim = numOrNull(row?._freshMs) ?? freshMs;
-  const fresh = hasRow && rowAt != null && now - rowAt <= lim;
+  // v2.682(R3S-01 — 재현): 미래 시각(시계가 앞선·변조된 엣지)은 `now - rowAt` 이 음수라 영원히 '신선' 이었다. 허용 오차
+  //   (FUTURE_SKEW_MS) 밖의 미래 행은 지금 값으로 세지 않는다(라우트가 엣지 행을 수신 시각으로 clamp 하는 것과 이중 방어).
+  const fresh = hasRow && rowAt != null && rowAt <= now + FUTURE_SKEW_MS && now - rowAt <= lim;
   // 가상화 호스트는 vCenter 값으로 채운다(사용자 선택) — 연결이 끊긴 호스트의 값은 쓰지 않는다(store.usageReadable 과 같은 기준).
   // v2.628(C2628-04 — 재현): **그 vCenter 가 지금 읽히는가** 도 본다. 점검중·수집 실패 이월·위임 push 낡음(sampler
   //   unreadVcenterReasons)이면 스냅샷의 호스트 값은 몇 시간 전 것이다 — 그것을 '지금 값' 으로 세지 않는다.
@@ -166,8 +188,9 @@ export function edgeRowOf(b, rowsByAgentKey) {
  * @param {Map}   p.hostByKey      `vcenterId|이름소문자` → 스냅샷 ESXi 호스트(가상화 대체값·용량)
  * @param {function} p.capOf       (베어메탈 항목) → {cores, memGB} | null
  * @param {Set|null} p.allowed     범위 계정의 허용 vCenter(null = 전체)
+ * @param {Map|null} p.vcOwner     vcenterId → 담당 엣지 이름(site vCenter 만, v2.682 R3S-01)
  */
-export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), rowsByAgentKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null } = {}) {
+export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), rowsByAgentKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null, vcOwner = null } = {}) {
   const names = new Map((vcenters || []).filter((v) => v && t(v.id)).map((v) => [t(v.id), t(v.name) || t(v.id)]));
   const corps = new Map();
   const corpOf = (vc) => {
@@ -181,6 +204,8 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
   const inScope = (vc) => !allowed || allowed.has(vc);
   const seen = new Map();   // key → 처음 센 서버의 vCenter
   const vcUnreadOf = (vc) => (unreadVcenters instanceof Map ? unreadVcenters.get(vc) || null : null);
+  // v2.682(R3S-01): 위임(site) vCenter 의 담당 엣지 — 그 vCenter 가상화 호스트의 엣지 행은 이 엣지 것만 쓴다.
+  const vcOwnerOf = (vc) => (vcOwner instanceof Map ? vcOwner.get(vc) || '' : '');
 
   for (const b of bareMetal || []) {
     if (!b || typeof b !== 'object') continue;
@@ -204,7 +229,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
     const cap = hostRow
       ? { cores: posOrNull(hostRow.cpuCores), memGB: posOrNull(hostRow.memTotalMB) != null ? hostRow.memTotalMB / 1024 : null }
       : (capOf(b) || {});
-    const j = judgeServer({ role: 'bm', row: keyConflict ? null : (edgeRowOf(b, rowsByAgentKey) || rowsByKey.get(key)), now, freshMs });
+    const j = judgeServer({ role: 'bm', row: keyConflict ? null : (edgeRowOf(b, rowsByAgentKey) || ownedRowOf(key, b.remoteAgent, rowsByKey, rowsByAgentKey)), now, freshMs });
     const x = { key, name: t(b.name), role: 'bm', cores: posOrNull(cap.cores), memGB: posOrNull(cap.memGB), ...j, ...(keyConflict ? { keyConflict: true } : {}) };
     if (!vc) { if (!allowed) addAgg(unassigned.bm, x); continue; }
     if (!inScope(vc)) continue;
@@ -259,7 +284,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
       keyConflict = true;
     } else seen.set(key, vc);
     const host = hostByKey.get(`${vc}|${t(h.name).toLowerCase()}`) || null;
-    const j = judgeServer({ role: 'virt', row: keyConflict ? null : rowsByKey.get(key), host, now, freshMs, vcUnread: vcUnreadOf(vc) });
+    const j = judgeServer({ role: 'virt', row: keyConflict ? null : ownedRowOf(key, vcOwnerOf(vc), rowsByKey, rowsByAgentKey), host, now, freshMs, vcUnread: vcUnreadOf(vc) });
     const x = { key, name: t(h.name), role: 'virt', cores: posOrNull(h.cpuCores), memGB: posOrNull(h.memGB), ...j, ...(keyConflict ? { keyConflict: true } : {}) };
     const c = corpOf(vc);
     addAgg(c.virt, x); c.servers.push(x);

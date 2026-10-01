@@ -143,7 +143,13 @@ export function runRollupBackfill(opts = {}) {
       console.warn(`[metrics] 롤업 백필 실패(다음 기동에 이어서 한다 — 옮긴 부분은 남는다): ${status.lastError}`);
     }
     return rollupBackfillStatus();
-  })().finally(() => { running = null; });
+  })().catch((e) => {
+    // v2.682(감사 R3E-05): DB 열기·완료 표지 조회(getMetricsDb·metaValue)는 위 try 밖이라 잠금·I/O 오류로 던지면
+    //   상태가 'waiting'(곧 시작) 그대로 남고 예약 쪽 `.catch(() => {})` 가 삼켰다(무음 실패). 사유와 함께 'error' 로 남긴다.
+    Object.assign(status, { state: 'error', finishedAt: Date.now(), lastError: String(e?.message || e).slice(0, 300) });
+    console.warn(`[metrics] 롤업 백필을 시작하지 못했습니다(다음 기동에 다시 시도): ${status.lastError}`);
+    return rollupBackfillStatus();
+  }).finally(() => { running = null; });
   return running;
 }
 

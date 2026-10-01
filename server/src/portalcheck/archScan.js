@@ -32,6 +32,7 @@ import { SECRET_FILES } from '../security/secretVault.js';
 import { buildDataFlow } from '../dataflow/build.js';
 import { PRESET } from '../toolcats/catalog.js';
 import { load as loadToolCats } from '../toolcats/settings.js';
+import { createYielder } from '../util/timeSlice.js';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLE_MAX = 20;
@@ -192,35 +193,47 @@ const joinPath = (mount, p) => {
  */
 const BLANK = (s) => s.replace(/[^\n]/g, '');
 const REGEX_OK_BEFORE = /[([{;,:=!&|?+\-*%~^<>]$/;
+// v2.682(감사 R3P-01): 글자마다 `out += c` + `/\s/.test(c)` 를 돌던 것을 '특수 글자(/ " ' `)까지 한 번에 건너뛰고
+//   조각을 배열에 모아 join' 으로 바꿨다(774파일 187ms → 수십 ms). 규칙·출력은 그대로다 — test/_stripComments.js 와의
+//   출력 동일성은 archCheck2614 ⑤ 와 audit2682d 가 고정한다.
+const SPECIAL_RE = /[/"'`]/g;
+// JS `\s` 와 같은 판정(ASCII 는 9~13·32, 그 밖은 정규식 — 드물다).
+const isWs = (ch) => { const k = ch.charCodeAt(0); return k < 128 ? (k === 32 || (k >= 9 && k <= 13)) : /\s/.test(ch); };
+const lastNonWs = (s, from, to, prev) => { for (let j = to - 1; j >= from; j--) if (!isWs(s[j])) return s[j]; return prev; };
 export function stripComments(src) {
   const s = String(src ?? '');
-  let out = '';
+  const n = s.length;
+  const parts = [];
   let i = 0;
   let prev = '';
-  while (i < s.length) {
+  while (i < n) {
+    SPECIAL_RE.lastIndex = i;
+    const m = SPECIAL_RE.exec(s);
+    const k = m ? m.index : n;
+    if (k > i) { parts.push(s.slice(i, k)); prev = lastNonWs(s, i, k, prev); i = k; if (i >= n) break; }
     const c = s[i]; const d = s[i + 1];
     if (c === '/' && d === '*') {
-      const end = s.indexOf('*/', i + 2);
-      const stop = end === -1 ? s.length : end + 2;
-      out += BLANK(s.slice(i, stop)); i = stop; continue;
+      const e = s.indexOf('*/', i + 2);
+      const stop = e === -1 ? n : e + 2;
+      parts.push(BLANK(s.slice(i, stop))); i = stop; continue;
     }
     if (c === '/' && d === '/') {
-      let end = s.indexOf('\n', i);
-      if (end === -1) end = s.length;
-      out += BLANK(s.slice(i, end)); i = end; continue;
+      let e = s.indexOf('\n', i);
+      if (e === -1) e = n;
+      parts.push(BLANK(s.slice(i, e))); i = e; continue;
     }
     if (c === '"' || c === "'" || c === '`') {
       let j = i + 1;
-      while (j < s.length) {
+      while (j < n) {
         if (s[j] === '\\') { j += 2; continue; }
         if (s[j] === c) { j += 1; break; }
         j += 1;
       }
-      out += s.slice(i, j); prev = c; i = j; continue;
+      parts.push(s.slice(i, j)); prev = c; i = j; continue;
     }
     if (c === '/' && REGEX_OK_BEFORE.test(prev)) {
       let j = i + 1; let cls = false; let ok = false;
-      while (j < s.length) {
+      while (j < n) {
         const ch = s[j];
         if (ch === '\\') { j += 2; continue; }
         if (ch === '\n') break;
@@ -229,13 +242,11 @@ export function stripComments(src) {
         else if (ch === '/' && !cls) { j += 1; ok = true; break; }
         j += 1;
       }
-      if (ok) { out += s.slice(i, j); prev = '/'; i = j; continue; }
+      if (ok) { parts.push(s.slice(i, j)); prev = '/'; i = j; continue; }
     }
-    out += c;
-    if (!/\s/.test(c)) prev = c;
-    i += 1;
+    parts.push(c); prev = c; i += 1;   // 남는 경우는 '/' 하나(공백 아님)
   }
-  return out;
+  return parts.join('');
 }
 
 /* ── app 주입(마운트 게이트 · BIG_JSON) ────────────────────────────────────────── */
@@ -424,11 +435,28 @@ function listConfigFiles(dir) {
  *   만든다. 예전에는 점검마다 파일 778개를 동기로 읽고 주석을 벗겨 약 0.4초 동안 이벤트 루프가 멈췄다(실측 365~395ms).
  */
 let _graphMemo = null;
+let _graphPromise = null;
 export function buildImportGraph(root = SRC_ROOT) {
   if (root === SRC_ROOT) { if (!_graphMemo) _graphMemo = buildImportGraphUncached(root); return _graphMemo; }
   return buildImportGraphUncached(root);
 }
-export function _resetImportGraphMemo() { _graphMemo = null; }
+/**
+ * v2.682(감사 R3P-01): 요청 경로(아키텍처 점검 첫 실행)는 비동기판을 쓴다 — 예전에는 첫 호출이 파일 774개를 동기로
+ *   읽고 주석을 벗기며 이벤트 루프를 약 0.4초 막았다(그동안 /api/health 도 706ms 대기 실측). `fs.promises` + 시간 기준 양보
+ *   (createYielder — 개수 기준 금지, v2.672 규약)이고, 동시 첫 호출은 진행 중 프라미스 하나를 공유한다. 결과는 동기판과 같다.
+ */
+export function buildImportGraphAsync(root = SRC_ROOT) {
+  if (root !== SRC_ROOT) return buildImportGraphUncachedAsync(root);
+  if (_graphMemo) return Promise.resolve(_graphMemo);
+  if (!_graphPromise) {
+    _graphPromise = buildImportGraphUncachedAsync(root)
+      .then((g) => { _graphMemo = g; return g; })
+      .finally(() => { _graphPromise = null; });
+  }
+  return _graphPromise;
+}
+export function _resetImportGraphMemo() { _graphMemo = null; _graphPromise = null; }
+const IMPORT_RE = /(?:^|\n)\s*(?:import|export)[^'"]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
 /** server/src 정적 import 그래프 — arch2579.test.js 와 같은 규칙(vendor 제외 · export … from 포함 · 동적 import 포함). */
 function buildImportGraphUncached(root) {
   const files = [];
@@ -438,17 +466,41 @@ function buildImportGraphUncached(root) {
       if (e.isDirectory()) { if (e.name !== 'vendor') walk(p); } else if (p.endsWith('.js')) files.push(p);
     }
   })(root);
+  const exists = (p) => fs.existsSync(p);
+  const edges = new Map();
+  for (const f of files) edgesOfFile(root, f, fs.readFileSync(f, 'utf8'), exists, edges);
+  return edges;
+}
+function edgesOfFile(root, f, src, exists, edges) {
   const rel = (p) => path.relative(root, p).split(path.sep).join('/');
+  const out = [];
+  const code = stripComments(src);
+  for (const m of code.matchAll(IMPORT_RE)) {
+    let target = path.resolve(path.dirname(f), m[1] || m[2]);
+    if (!target.endsWith('.js')) target = exists(`${target}.js`) ? `${target}.js` : path.join(target, 'index.js');
+    if (exists(target)) out.push(rel(target));
+  }
+  edges.set(rel(f), uniq(out));
+}
+async function buildImportGraphUncachedAsync(root) {
+  const maybeYield = createYielder(10);
+  const files = [];
+  const walk = async (d) => {
+    const ents = await fs.promises.readdir(d, { withFileTypes: true });
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== 'vendor') await walk(p); } else if (p.endsWith('.js')) files.push(p);
+    }
+  };
+  await walk(root);
+  // 존재 확인은 파일 목록(이미 읽은 트리)으로 — 대상이 .js 파일이면 목록에 있다. 목록 밖(디렉터리 index.js 등)만 실제로 묻는다.
+  const known = new Set(files);
+  const exists = (p) => known.has(p) || fs.existsSync(p);
   const edges = new Map();
   for (const f of files) {
-    const out = [];
-    const code = stripComments(fs.readFileSync(f, 'utf8'));
-    for (const m of code.matchAll(/(?:^|\n)\s*(?:import|export)[^'"]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
-      let target = path.resolve(path.dirname(f), m[1] || m[2]);
-      if (!target.endsWith('.js')) target = fs.existsSync(`${target}.js`) ? `${target}.js` : path.join(target, 'index.js');
-      if (fs.existsSync(target)) out.push(rel(target));
-    }
-    edges.set(rel(f), uniq(out));
+    const src = await fs.promises.readFile(f, 'utf8');
+    edgesOfFile(root, f, src, exists, edges);
+    await maybeYield();
   }
   return edges;
 }
@@ -494,7 +546,7 @@ export async function gatherArchInputs({ routers = [], flowRoutes = null, app = 
     toolcats: (loadToolCats()?.categories || []).map((c) => ({ id: c.id, tools: c.tools || [] })),
     preset: PRESET.map((c) => ({ id: c.id, tools: c.tools || [] })),
   }));
-  const graph = safe(errors, 'import-graph', () => buildImportGraph());
+  const graph = await safeAsync(errors, 'import-graph', () => buildImportGraphAsync());
   const flow = flowRoutes ? safe(errors, 'dataflow', () => buildDataFlow({ routes: flowRoutes })) : null;
   if (!flowRoutes) errors.push({ code: 'dataflow', message: 'dataflow 선언 경로가 주입되지 않았습니다' });
   if (!app) errors.push({ code: 'app', message: 'app 이 주입되지 않았습니다(setApp) — 마운트 게이트·BIG_JSON 등록을 읽을 수 없습니다' });

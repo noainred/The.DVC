@@ -41,6 +41,8 @@ import { requirePerm } from '../../auth/auth.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { localStamp, fileStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';
+import { snapMemo, sendCached } from '../../util/snapCache.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 import { addLineCharts, sheetRef, colLetter } from '../../util/xlsxChart.js';
 
 const csvPerm = requirePerm('data.csv');
@@ -309,7 +311,7 @@ export function serverLookup({ registry = loadIdracRegistry(), remote = null } =
 export function scopeKind(k, sc) {
   if (!sc || !k?.host) return k;
   if (sc.allowed?.has?.(String(k.host.vcenterId || ''))) return k;
-  return { ...k, kind: 'baremetal', host: null, matchedBy: null, hostAmbiguous: false };
+  return { ...k, kind: 'baremetal', host: null, matchedBy: null, hostAmbiguous: false, hostTagMismatch: false };
 }
 
 /**
@@ -333,7 +335,7 @@ export function kindOf(s, { index = null, inv = undefined } = {}) {
   return {
     serviceTag: tag.toUpperCase(), kind: host ? 'esxi' : 'baremetal',
     host: host ? { id: host.id, name: host.name, vcenterId: host.vcenterId || '' } : null,
-    matchedBy: m.matchedBy, hostAmbiguous: m.ambiguous,
+    matchedBy: m.matchedBy, hostAmbiguous: m.ambiguous, hostTagMismatch: !!m.tagMismatch,
   };
 }
 
@@ -510,6 +512,7 @@ export function buildTableRows(rows, { stats = {}, latest = {}, power = new Map(
   });
 }
 
+export const TABLE_MEMO_MS = 30_000;
 export function registerIdracTrend(adminRouter) {
   adminRouter.get('/idrac/trend/servers', adminOnly, async (req, res) => {
     const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
@@ -521,6 +524,21 @@ export function registerIdracTrend(adminRouter) {
   adminRouter.get('/idrac/trend/table', adminOnly, async (req, res) => {
     const hours = tableHoursOf(req.query.hours);
     if (hours == null) return res.status(400).json({ ok: false, reason: `기간은 ${TABLE_HOURS.min}~${TABLE_HOURS.max}시간 정수입니다.` });
+    // v2.682(R3P-02): 같은 조건 요청은 계산 1회에 합류하고 30초 기억한다(동시 10건이 같은 계산을 직렬로 10번 하던 것).
+    //   키 = 스냅샷 세대(첫 조각 — 세대가 바뀌면 옛 항목을 버린다) + 조건 + 범위 + 역할. 범위·역할이 다르면 다른 판본이다.
+    const snap = store.get();
+    const allowed = scopedVcenterIds(req.user, snap);
+    const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), req.query.gpuOnly === '1' ? 'g' : ''].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
+    const role = `${req.user?.role || ''}${req.user?.superAdmin ? '+sa' : ''}`;
+    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${allowed ? [...allowed].sort().join(',') : 'all'}|${role}`;
+    try {
+      const payload = await snapMemo('idrac-trend-table', key, TABLE_MEMO_MS, () => trendTablePayload(req, hours));
+      sendCached(req, res, key, payload);
+    } catch (e) {
+      if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || 'internal error' });
+    }
+  });
+  async function trendTablePayload(req, hours) {
     const now = Date.now();
     const since = Math.floor((now - hours * HOUR) / HOUR) * HOUR;
     const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
@@ -552,9 +570,9 @@ export function registerIdracTrend(adminRouter) {
       powerKeyFor = (r) => { const s = find(r.id); return s ? powerKeyOf(s, { entries, hasSeries: (k) => power.has(k) }).key : null; };
     } catch (e) { errors.powerW = e?.message || String(e); }
     const out = buildTableRows(targets, { stats, latest, power, powerKeyFor, since });
-    res.json({ ok: true, hours, since, now, rows: out, total: out.length, errors,
-      ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
-  });
+    return { ok: true, hours, since, now, rows: out, total: out.length, errors,
+      ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) };
+  }
 
   // v2.676: ESXi 호스트 → iDRAC 서버(호스트 상세 '통합 성능 모니터링'). 서비스태그·호스트네임·IP·MAC 을 각각 판정해 근거를 싣는다
   //   (idrac/serverForHost.js). 범위 계정은 범위 안 서버만 후보다(범위 밖 서버의 존재를 말하지 않는다).

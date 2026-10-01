@@ -14,7 +14,7 @@ import { IdracTrendTable } from './IdracTrendTable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js';
 import {
-  PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
+  PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, staleCurText, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveVisibleKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
@@ -196,6 +196,10 @@ export default function IdracTrendTool() {
                   : <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{x ? (on[s.k] ? '표시' : '숨김') : ''}</span>}
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, marginTop: 5, color: s.color, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{x ? valueText(x.cur, s.unit) : '—'}</div>
+              {x && staleCurText(x, data?.end, data?.bucketMs) && (
+                <div style={{ fontSize: 11, marginTop: 2, color: 'var(--amber)', textAlign: 'center' }}
+                  title="이 계열은 조회 기간 끝까지 값이 이어지지 않았습니다 — 큰 숫자는 지금 값이 아니라 기간 안 마지막 값입니다">{staleCurText(x, data?.end, data?.bucketMs)}</div>
+              )}
               <div style={{ fontSize: 11, marginTop: 5, color: 'var(--text-faint)', textAlign: 'center', overflowWrap: 'anywhere' }}>
                 {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : s.k === 'hostCpuPct' ? 'vCenter 값 없음 — v2.666 부터 쌓임' : s.gpu ? hostGpuEmptyText(data) : '보고 없음'}
               </div>

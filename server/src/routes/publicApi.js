@@ -336,6 +336,27 @@ async function storageKnownIds() {
   } catch { return null; }
 }
 
+/**
+ * v2.682(R3A-07): 이 장비가 meta 의 합계 기준에서 빠졌는가 — 'retired'(등록 해제) | 'stale'(장기 미관측) | null(합계에 든다).
+ * 행은 그대로 싣는다(이력·증가량은 그 장비 기준으로 유효). meta.staleCount·retiredCount 가 어느 행인지 이 필드로 알 수 있다.
+ * (헬퍼로 뺀 이유: 라우트 본문이 길어지면 scripts/api-doc.mjs 가 인자 목록을 읽지 못한다.)
+ */
+function excludedFromTotalsOf(d) { return d.retired ? 'retired' : (d.stale ? 'stale' : null); }
+/**
+ * v2.682(R3A-07): unknownUsedCount 는 합계 기준(excludedFromTotals 가 null 인 행) 중 사용량을 못 읽은 수다 — 행의
+ * unknownUsed:true 개수와 다를 수 있다(제외 장비도 행에는 있다). 행 기준 개수는 unknownUsedRows 로 따로 싣는다.
+ * v2.681: staleCount·retiredCount = 합계 기준에서 빠진 장비 수(장기 미관측 / 등록 해제). 장비 행은 그대로 실린다.
+ */
+function storageGrowthCounts(out, m, knownIds) {
+  return {
+    unknownUsedCount: m.totals?.unknownUsed ?? null,
+    unknownUsedRows: out.filter((r) => r.unknownUsed).length,
+    countsBasis: 'totals',
+    staleCount: m.totals?.staleDevices ?? null,
+    retiredCount: knownIds ? (m.totals?.retiredDevices ?? null) : null,
+  };
+}
+
 v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ req, res, fields, apiPath }) => {
   const db = await import('../storage/db.js').catch(() => null);
   const g = await import('../storage/growth.js').catch(() => null);
@@ -373,16 +394,14 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     unknownUsed: d.usedBytes == null,
     // v2.604: 반올림 표기 용량이면 그 해상도(바이트) — 이보다 작은 증가는 0 이 아니라 '보이지 않는 것'. 정확하면 null.
     resolutionBytes: d.capacityApprox?.resolutionBytes ?? null,
+    excludedFromTotals: excludedFromTotalsOf(d),
   }));
   const c = capped(out);
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta, periods: periods.map((p) => p.key), periodsDropped: dropped,
     approxCount: m.totals?.approxDevices ?? 0,
     ...(hide ? { namesHidden } : {}),
-    unknownUsedCount: m.totals?.unknownUsed ?? null,
-    // v2.681: 합계 기준에서 빠진 장비 수(장기 미관측 / 등록 해제). 장비 행은 그대로 실린다.
-    staleCount: m.totals?.staleDevices ?? null,
-    retiredCount: knownIds ? (m.totals?.retiredDevices ?? null) : null,
+    ...storageGrowthCounts(out, m, knownIds),
     note: '기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다.',
   });
 }));

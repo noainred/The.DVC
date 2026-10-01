@@ -21,6 +21,7 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 import crypto from 'node:crypto';
 import { registerStateFile } from '../util/stateFiles.js';
+import { capStr } from '../util/capStr.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-settings.json');
 /*
@@ -190,7 +191,8 @@ function pickDistributed(src = {}) {
   return out;
 }
 const t = (v) => String(v ?? '').trim();
-const lowerAgent = (v) => t(v).toLowerCase().slice(0, 128);
+// v2.682(R3E-06): 인출 기록 Map 키 — 공유 토큰 ?agent= 원문 길이가 무제한이라 .slice 만 하면 SlicedString 이 원문을 붙잡는다(v2.606 capStr 규약).
+const lowerAgent = (v) => capStr(t(v).slice(0, 256).toLowerCase(), 128);
 
 let _copy; // undefined = 아직 안 읽음 · null = 없음
 function readCentralCopy() {
@@ -318,7 +320,7 @@ export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason
   }
   _pulls.delete(a);
   const lapsedVerifiedAt = !verified && prev?.verified ? prev.at : (!verified ? prev?.lapsedVerifiedAt || 0 : 0);
-  _pulls.set(a, { agent: t(agent).slice(0, 128), at: now, appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32), verified: verified === true, deliveredSig: t(deliveredSig).slice(0, 32), ...(lapsedVerifiedAt ? { lapsedVerifiedAt } : {}) });
+  _pulls.set(a, { agent: capStr(t(agent), 128), at: now, appliedSig: capStr(t(appliedSig), 32), version: capStr(t(version), 32), reason: capStr(t(reason), 32), verified: verified === true, deliveredSig: capStr(t(deliveredSig), 32), ...(lapsedVerifiedAt ? { lapsedVerifiedAt } : {}) });
 }
 /** 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다. */
 export function distributionStatus(knownNames = []) {

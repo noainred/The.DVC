@@ -22,6 +22,7 @@ import { routeKeyOf } from '../../perf/stats.js';
 import { clientIp } from '../../util/rateLimit.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
+import { capStr } from '../../util/capStr.js';
 
 const COOLDOWN_MS = Math.max(5_000, Math.min(600_000, Number(process.env.PERF_CLIENT_COOLDOWN_MS) || 60_000));
 // 사용자당 시간당 상한 — 쿨다운만 두면 **계정 수·IP 축으로 분산해 우회**할 수 있다(쿨다운 키가
@@ -55,8 +56,12 @@ function throttled(user, ip, now) {
  * 정규화가 브라우저에만 있으면 인증된 사용자가 curl 로 `?q=<검색어>&token=<값>` 이 붙은 문자열을
  * 보내 관리자 화면·NDJSON 에 영구 저장할 수 있다(적대적 리뷰 지적). 라우트 키와 같은 마스킹을 쓴다.
  */
-const normPath = (v) => routeKeyOf({ path: String(v || '').split('?')[0].split('#')[0] }).slice(0, 200);
-const normView = (v) => String(v || '').split('?')[0].slice(0, 120);
+// v2.682 R3S-03 — 먼저 입력 길이를 자르고(큰 본문을 split·정규식에 통째로 넣지 않는다) 결과를 capStr 로 평탄화한다.
+// `.slice` 만이면 SlicedString 이 원문 전체를 붙잡아 hang 링(500칸)에 상주한다.
+const IN_MAX = 2048;
+const strIn = (v) => (typeof v === 'string' ? v.slice(0, IN_MAX) : '');
+const normPath = (v) => capStr(routeKeyOf({ path: strIn(v).split('?')[0].split('#')[0] }), 200);
+const normView = (v) => capStr(strIn(v).split('?')[0], 120);
 
 export function registerPerfClient(api) {
   /**
@@ -79,7 +84,7 @@ export function registerPerfClient(api) {
         view: normView(b.view), path: normPath(b.path), ms: b.ms,
         inflight: (Array.isArray(b.inflight) ? b.inflight : []).slice(0, 10)
           .map((x) => ({ path: normPath(x?.path), ms: x?.ms, rid: x?.rid })),
-        userAgent: req.get('user-agent') || '',
+        userAgent: capStr(req.get('user-agent') || '', 160),
       });
     } catch { /* 보고 처리 실패는 조용히 — 화면에 영향 없음 */ }
     return res.status(204).end();

@@ -18,7 +18,7 @@
 
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
-import { config, loadVcenterConfig, currentVersion } from '../config.js';
+import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult, listAssignments as listScanAssignments } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
@@ -724,7 +724,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   const mockByFlag = b.source === 'mock' || b.mock === true;
   const mockByContent = isMockVcenter(b.vcenter) || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenter?.name });
   if (mockByFlag || mockByContent) {
-    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) });
+    noteAgentIdentity(agent, { hostname: agentHostnameOf(req), mock: true, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) });
     const why = mockByFlag
       ? `엣지가 스스로 mock 임을 알렸습니다(source=${b.source || 'mock'})`
       : `보낸 vCenter '${b.vcenterId}' 가 데모 생성기의 가짜 사이트와 id·이름이 같습니다(DATA_SOURCE=auto 로 접속 실패 시 목 데이터로 폴백했거나, 엣지가 구버전이라 mock 표시를 못 보냅니다)`;
@@ -743,8 +743,8 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     return res.status(403).json({ ok: false, reason: invDeny });
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
-  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) }); // v2.603 CEN2603-04: 미검증 이름은 작은 링
-  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  noteAgentIdentity(agent, { hostname: agentHostnameOf(req), mock: false, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) }); // v2.603 CEN2603-04: 미검증 이름은 작은 링
+  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: agentHostnameOf(req) });
   const vcId = String(b.vcenterId);
   const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
   const vcenter = { ...b.vcenter, id: vcId }; // v2.599(CEN-2599-02): vcenter.id 는 본문 vcenterId 로 고정
@@ -807,7 +807,7 @@ centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   const ts = Date.now();
   const commit = await commitGuestDisk(String(b.vcenterId), vcName, vms, { ts, changeThresholdGB: loadGuestDiskSettings().changeThresholdGB });
   if (!commit || !commit.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'guest-disk 커밋 실패(DB 사용 불가)' });
-  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: agentHostnameOf(req) });
   console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
   // v2.613(감사 CONTRACT2613-03): 적재하지 않고 **센** 행(v2.601 RECENT2601-01 — 숫자가 아닌 VM·파티션)을 응답에 싣는다. 예전에는 로그에만
   //   남아 엣지 상태·로그가 '보냈다(N대)' 인데 중앙에는 그만큼 없었다(v2.606 centralReply 규약의 누락). 뺀 것이 없으면 필드 자체가 없다(구버전 엣지 호환).
@@ -882,7 +882,7 @@ centralRouter.post('/vmseries', requireCentral(), async (req, res) => {
   if (!commit?.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'vmseries 커밋 실패(DB 사용 불가)' });
   if (rows.historicalInterval) await setVmSeriesMeta(vcId, 'historicalInterval', { at: Date.now(), intervals: rows.historicalInterval });
   if (Number(b.chunk) === 0 || b.chunk == null) await setVmSeriesMeta(vcId, 'vcenter', { id: vcId, name: String(b.vcenterName || vcId).slice(0, 256), lastPollAt: Date.now(), agent });
-  noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: agentHostnameOf(req) });
   console.log(`[central] vmseries 수신: agent=${agent} vc=${vcId} chunk=${b.chunk ?? 0}/${b.chunks ?? 1} spikes=${rows.spikes.length} cover=${rows.cover.length}${commit.coverDuplicate ? ' (재전송 — cover 가산 생략)' : ''}`);
   res.json({ ok: true, vcenterId: vcId, spikes: rows.spikes.length, cover: rows.cover.length, cursors: rows.cursors.length, ...(commit.coverDuplicate ? { coverDuplicate: true } : {}) });
 });
@@ -955,11 +955,48 @@ centralRouter.post('/curuser', requireCentral(), async (req, res) => {
       recordCurUserActivity({ at: gen, deviceId: vcId, name: vcId, source: agent, ok: true, durationMs: null, vms: rs.length, users: uniq.size });
     }
     if (_cuLastRec.size > 5000) _cuLastRec.clear();
-    for (const vcId of new Set(kept.map((r) => r.vcenterId))) noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+    for (const vcId of new Set(kept.map((r) => r.vcenterId))) noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: agentHostnameOf(req) });
   }
   console.log(`[central] curuser 수신: agent=${agent} chunk=${b.chunk ?? 0}/${b.chunks ?? 1} records=${kept.length}${rejected.size ? ` 거부=${[...rejected].join(',')}` : ''}`);
   res.json({ ok: true, records: kept.length, rejected: [...rejected], replaced: replaceVcenters.length });
 });
+
+/**
+ * v2.682(감사 R3A-08): 엣지는 ASCII 로 실을 수 없는 호스트명을 `encodeURIComponent` 로 보낸다(agent/agentNameCarry.js
+ *   hostnameHeaderValue — v2.681 R2F-01). 중앙이 그대로 저장하면 수집 서버 진단 화면에 `%ED%95%9C…` 가 보인다. 퍼센트 표기가
+ *   있을 때만 풀고(호스트명에 '%' 가 실제로 들어갈 일은 없다), 실패하면 원문을 쓴다. 상주 기록이므로 길이 상한 + 평탄화.
+ */
+export function agentHostnameOf(req) {
+  const raw = req?.get?.('X-Agent-Hostname');
+  if (typeof raw !== 'string' || !raw) return '';
+  const head = raw.length > 1024 ? raw.slice(0, 1024) : raw;
+  let v = head;
+  if (/%[0-9A-Fa-f]{2}/.test(head)) { try { v = decodeURIComponent(head); } catch { v = head; } }
+  return capStr(v, 255);
+}
+
+/*
+ * v2.682(감사 R3E-03): '배정 보류'(아래 held)에 시한을 둔다 — v2.601 '보류(withhold)에는 반드시 시한' 규약.
+ *   v2.681 R2F-04 는 엣지의 vCenter 를 하나도 모를 때 배정 필드를 빼 '직전 배정 유지' 로 만들었는데, 시한이 없어 그 엣지가
+ *   담당하던 vCenter 를 전부 옮기거나 지우면 엣지가 옛 스파이크·현재 사용자 배정을 **무기한** 들고 수집을 계속했다(중앙은 매번 거절).
+ *   보류 시작 시각을 엣지·종류별로 기억하고 LASTGOOD_HOLD_MS(기본 6시간 — 인벤토리 마지막 정상 목록 보존 창과 같은 값)를
+ *   넘기면 **빈 배정을 명시적으로** 내려보낸다(`…HeldExpired`). 인메모리라 중앙이 재시작하면 보류가 처음부터 다시 잰다
+ *   (더 오래 유지하는 쪽 — 보수적). 상한 512 키(공유 토큰은 이름을 주장할 수 있다).
+ */
+const EDGE_CONFIG_HOLD_MAX_MS = clampIntervalMs(numOrNull(process.env.LASTGOOD_HOLD_MS) ?? 6 * 3_600_000, 6 * 3_600_000, 60_000);
+const _heldSince = new Map();
+export function edgeConfigHoldExpired(kind, agentLower, held, now = Date.now()) {
+  const k = `${kind}|${capStr(agentLower, 128)}`;
+  if (!held) { _heldSince.delete(k); return false; }
+  let since = _heldSince.get(k);
+  if (since == null) {
+    if (_heldSince.size >= 512) { const first = _heldSince.keys().next().value; if (first !== undefined) _heldSince.delete(first); }
+    since = now; _heldSince.set(k, since);
+  }
+  return now - since >= EDGE_CONFIG_HOLD_MAX_MS;
+}
+export function _resetEdgeConfigHoldForTest() { _heldSince.clear(); }
+export const EDGE_CONFIG_HOLD_MS = EDGE_CONFIG_HOLD_MAX_MS;
 
 /**
  * v2.681(감사 R2F-04): 이 엣지가 수집하는 vCenter 집합 = 인벤토리 캐시 소유(TOFU) ∪ 등록부 위임(collectMode 'site' +
@@ -987,7 +1024,9 @@ centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
   const vcenters = Object.fromEntries(Object.entries(s.vcenters || {}).filter(([id]) => mine.has(id)));
   // v2.681(R2F-04): 이 엣지의 vCenter 를 하나도 알 수 없으면 settings.vcenters 를 **싣지 않는다** — 엣지 applyCentral 은
   //   로컬 위에 병합하므로 키가 없으면 직전 배정이 유지된다(빈 객체를 보내면 '배정 해제' 로 적용된다).
-  const held = mine.size === 0;
+  // v2.682(R3E-03): 보류가 시한을 넘기면 빈 배정을 명시적으로 보낸다(엣지 applyCentral 이 '배정 해제' 로 적용).
+  const expired = edgeConfigHoldExpired('curuser', agent, mine.size === 0);
+  const held = mine.size === 0 && !expired;
   res.json({
     ok: true,
     settings: {
@@ -995,7 +1034,7 @@ centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
       concurrency: s.concurrency, vmTimeoutMs: s.vmTimeoutMs, maxVms: s.maxVms,
       guestPublishMs: s.guestPublishMs, staleFactor: s.staleFactor, ...(held ? {} : { vcenters }),
     },
-    vcenters: [...mine], ...(held ? { vcentersHeld: true } : {}),
+    vcenters: [...mine], ...(held ? { vcentersHeld: true } : {}), ...(expired ? { vcentersHeldExpired: true } : {}),
   });
 });
 
@@ -1009,8 +1048,9 @@ centralRouter.get('/vmseries-config', requireCentral(), (req, res) => {
   const targets = Object.fromEntries(Object.entries(s.targets || {}).filter(([id]) => mine.has(id)));
   // v2.681(R2F-04): 이 엣지의 vCenter 를 모르면 targets 를 싣지 않는다 — 새 엣지(vmSeriesConfigPull)는 '필드 없음 = 직전 유지'.
   //   (구버전 엣지는 빈 객체로 읽는다 — 예전 중앙이 {} 를 보내던 것과 같아 퇴행은 없다.)
-  const held = mine.size === 0;
-  res.json({ ok: true, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, ...(held ? {} : { targets }) }, vcenters: [...mine], ...(held ? { targetsHeld: true } : {}) });
+  const expired = edgeConfigHoldExpired('vmseries', agent, mine.size === 0);   // v2.682(R3E-03)
+  const held = mine.size === 0 && !expired;
+  res.json({ ok: true, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, ...(held ? {} : { targets }) }, vcenters: [...mine], ...(held ? { targetsHeld: true } : {}), ...(expired ? { targetsHeldExpired: true } : {}) });
 });
 
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.

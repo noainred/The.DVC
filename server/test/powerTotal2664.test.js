@@ -62,7 +62,7 @@ test('③ 스토리지 용량 합 — 전체 용량을 읽은 장비만 · 사�
     { snap: null },
     { enabled: false, snap: { ok: true, capacity: { totalBytes: 999 } } },
   ]);
-  assert.deepEqual(r, { devices: 4, read: 2, unread: 2, totalBytes: 200, usedBytes: 40, usedPct: 40 });
+  assert.deepEqual(r, { devices: 4, read: 2, unread: 2, stale: 0, usedUnknown: 1, totalBytes: 200, usedBytes: 40, usedPct: 40 }); // v2.682 R3D-05: stale·usedUnknown
   assert.equal(storageCapacityTotals([]).totalBytes, null, '0 TB 가 아니라 모름');
 });
 

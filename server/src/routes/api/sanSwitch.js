@@ -746,18 +746,20 @@ api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (
   const groupOf = new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')]));
   const st = loadPerfSettings();
   const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
+  // v2.682(R3A-02): 장비별 마지막 표본 — 등록·사용 중인 스위치가 보고를 멈추면 그 시리즈를 '없어진 것' 으로 빼지 않는다(trafficTotal ⑦).
+  let lastTs = new Map();
+  try { lastTs = await latestSampleTs(ids); } catch { /* DB 불가 — unavailable 이 말한다 */ }
   const t = sumArrayTraffic(agg, {
     // matched(등록 스토리지 시리얼 일치)는 arraySerialOf 가 '::' 이름에서만 시리얼을 뽑으므로 결과가 같다 — storage-summary 와 같은 분류.
     isArray: (s) => endpointKind(s.key, { matched: false }) === 'array',
     carryMs: agg.carryMs,
+    activeDeviceIds: new Set(ids.map(String)), deviceLastTs: lastTs,
   });
   const dcNameOf = (() => {
     try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
     catch { return (id) => id || '(법인 미지정)'; }
   })();
   // 엣지 위임 스위치 중 표본이 한 번도 중앙에 오지 않은 것 — 합계에서 빠져 있다는 사실을 개수로 밝힌다.
-  let lastTs = new Map();
-  try { lastTs = await latestSampleTs(ids); } catch { /* DB 불가 — unavailable 이 말한다 */ }
   const edgeRaw = devices.filter((d) => String(d.agent || '').trim());
   const edgeMissing = edgeRaw.filter((d) => !lastTs.get(String(d.id))).length;
   let lastSampleAt = null;
@@ -773,6 +775,8 @@ api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (
     datacenters: new Set(devices.map((d) => String(d.datacenterId || ''))).size,
     switches: devices.length, arrays: t.arrays,
     measuredBuckets: t.measuredBuckets, partialBuckets: t.partialBuckets, carriedCells: t.carriedCells,
+    // v2.682(R3A-02): 조용히 빼지 않는다 — 보고가 끊겨 합계에서 뺀(재배선·정리) 시리즈와, 장비가 멈춰 '모른다' 로 둔 시리즈.
+    retiredSeries: t.retiredSeries ?? 0, heldSeries: t.heldSeries ?? 0,
     edgeSwitches: edgeRaw.length, edgeMissing, lastSampleAt,
     intervalMs: st.intervalMs, enabled: !!st.enabled,
     unavailable: !!agg.unavailable,

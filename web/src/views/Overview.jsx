@@ -12,7 +12,7 @@ import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
 import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.631(감사 WEB2631-02)
 import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
-import { countText, capText, kwText, cardMeta, firstCollectNotice } from './overviewCardsText.js'; // v2.664 카드 8장 · v2.675 첫 수집 안내
+import { countText, capText, cardMeta, firstCollectNotice, powerTotalKw, gpuCardValue } from './overviewCardsText.js'; // v2.664 카드 8장 · v2.675 첫 수집 안내
 
 import { chartGroup, REGION_ORDER } from './execOverviewText.js'; // v2.670 리전 차트 묶음(region-chart-change.md)
 
@@ -152,10 +152,10 @@ export default function Overview({ onSelectSite, onGotoTab, modeToggle = null })
         <Kpi label="서버 Farm" value={countText(cards?.farms?.count)} meta={cardMeta('farms', cards)} accent="var(--accent-2)" title="설정 › 수집 Agent 등록 수" />
         <Kpi label="물리 서버" value={countText(cards?.physical?.count)} meta={cardMeta('physical', cards)} accent="var(--accent)" onClick={() => { window.location.hash = '#/tools/serveranalysis/info'; }} />
         <Kpi label="가상 서버" value={countText(cards?.virtual?.count ?? g.vms)} meta={<>{cards ? cardMeta('virtual', cards) : `구동중 ${fmt(g.vmsPoweredOn)}`}{vcStatusMeta(g) && <><br />vCenter {g.vcentersConnected}/{g.vcenters} · {vcStatusMeta(g)}</>}</>} accent="var(--green)" onClick={() => onGotoTab?.('vcenters')} />
-        <Kpi label="GPU" value={countText(cards?.gpus?.count)} unit={cards?.gpus?.count != null ? '장' : undefined} meta={cardMeta('gpus', cards)} accent="var(--accent-2)" onClick={() => { window.location.hash = '#/tools/serveranalysis/gpu'; }} />
+        <Kpi label="GPU" value={countText(gpuCardValue(cards?.gpus).value)} unit={gpuCardValue(cards?.gpus).value != null ? '장' : undefined} meta={cardMeta('gpus', cards)} accent="var(--accent-2)" onClick={() => { window.location.hash = '#/tools/serveranalysis/gpu'; }} />
         <Kpi label="스토리지 용량" value={capText(cards?.storage?.totalBytes)} meta={cardMeta('storage', cards)} accent="var(--accent)" onClick={cards?.storage?.reason ? undefined : () => { window.location.hash = '#/tools/storage-mon'; }} />
         <Kpi label="네트워크 장비" value={countText(cards?.network?.count)} meta={cardMeta('network', cards)} accent="var(--green)" onClick={cards?.network?.reason ? undefined : () => { window.location.hash = '#/tools/cvp'; }} />
-        <Kpi label="소비 전력" value={kwText(cards?.power?.totalWatts)} meta={cardMeta('power', cards)} accent="var(--amber)" onClick={cards?.power?.reason ? undefined : () => { window.location.hash = '#/tools/power-total'; }} />
+        <Kpi label="소비 전력" value={cards?.power ? powerTotalKw(cards.power) : '—'} meta={cardMeta('power', cards)} accent="var(--amber)" onClick={cards?.power?.reason ? undefined : () => { window.location.hash = '#/tools/power-total'; }} />
       </div>
       {cardsErr && !cards && <div className="banner" style={{ marginBottom: 10 }}>카드 값을 불러오지 못했습니다: {String(cardsErr)}</div>}
 

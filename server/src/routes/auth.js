@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
+import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf } from '../auth/auth.js';
 import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
@@ -78,9 +78,12 @@ authRouter.post('/login', async (req, res) => {
   const user = await authenticate(username, password);
   if (!user) {
     const lk = recordLoginFailure(gateIp, username);
+    // v2.682 R3A-05: 같은 이름 로컬 계정 때문에 AD 를 시도하지 않은 실패면 감사 detail 에 그 사유를 남긴다(응답은 그대로 — 계정 열거 단서 금지).
+    let shadow = '';
+    try { const sb = adShadowBlockOf(username); if (sb && Date.now() - sb.at < 10_000) shadow = ` · ${sb.reason}`; } catch { /* */ }
     // 잠금을 **발동시킨** 줄은 항상 남긴다. 그 밖의 실패는 출처당 1분에 한 줄 + 합친 개수(감사 이력 밀어내기 방지).
-    if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', ip });
-    else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: foldedNote(sum.folded).replace(/^ · /, ''), ip }); }
+    if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', detail: shadow.replace(/^ · /, '') || undefined, ip });
+    else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: (foldedNote(sum.folded) + shadow).replace(/^ · /, ''), ip }); }
     try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
     if (lk.locked) {
       return res.status(429).set('Retry-After', String(lk.retryAfterSec))

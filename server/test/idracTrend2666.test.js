@@ -43,7 +43,10 @@ test('② 매칭 — 서비스태그 먼저, 없으면 호스트네임(HOST ↔ 
   const idx = buildHostMatchIndex(hosts);
   const t = matchHostForServer(idx, { serviceTag: 'abc1234', names: ['esx02'] });
   assert.equal(t.host.id, 'vc1:host-1'); assert.equal(t.matchedBy, 'serviceTag', '서비스태그가 이름보다 먼저');
-  const h1 = matchHostForServer(idx, { serviceTag: 'NOPE', names: ['ESX01'] });
+  // v2.682(R3D-04): 양쪽 태그가 다르면(NOPE ≠ ABC1234) 다른 장비다 — 이름이 같아도 잇지 않는다.
+  const h1x = matchHostForServer(idx, { serviceTag: 'NOPE', names: ['ESX01'] });
+  assert.equal(h1x.host, null); assert.equal(h1x.tagMismatch, true, '태그 불일치는 이름 매칭을 막는다');
+  const h1 = matchHostForServer(idx, { serviceTag: '', names: ['ESX01'] });
   assert.equal(h1.host.id, 'vc1:host-1'); assert.equal(h1.matchedBy, 'hostname', 'FQDN 호스트 ↔ 짧은 대문자 이름');
   const h2 = matchHostForServer(idx, { names: ['esx02.corp.example.com'] });
   assert.equal(h2.host.id, 'vc1:host-2', '짧은 호스트 ↔ FQDN 이름');

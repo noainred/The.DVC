@@ -103,7 +103,7 @@ export function powerKeyKind(key) {
  *   keys = 응답에 있던 키 이름(최대 40개) — 못 읽었을 때 '무엇이 있었나' 를 밝히는 진단값.
  */
 export function scanPower(obj, { maxDepth = 6, maxNodes = 5000 } = {}) {
-  const hits = []; const keys = new Set(); let nodes = 0;
+  const hits = []; const misses = []; const keys = new Set(); let nodes = 0;
   const walk = (o, path, depth) => {
     if (o == null || depth > maxDepth || nodes > maxNodes) return;
     nodes += 1;
@@ -112,16 +112,29 @@ export function scanPower(obj, { maxDepth = 6, maxNodes = 5000 } = {}) {
     for (const [k, v] of Object.entries(o)) {
       if (keys.size < 40) keys.add(k);
       const kind = powerKeyKind(k);
-      if (kind && (typeof v === 'number' || typeof v === 'string')) {
-        const w = wattsOf(v);
+      if (kind && (v === null || typeof v === 'number' || typeof v === 'string')) {
+        const w = v === null ? null : wattsOf(v);
         if (w != null) hits.push({ path: path ? `${path}.${k}` : k, key: k, kind, watts: w });
+        // v2.682 R3D-03: 전원 키는 있는데 값을 못 읽은 항목(null·'N/A'·빈 문자열)을 센다 — 같은 층에서 이것이 있으면
+        //   합계는 일부 부품만의 값이다. 빈 슬롯(상태가 absent·not present·empty·removed)은 부품이 아니라 세지 않는다.
+        else if (!slotAbsent(o)) misses.push({ path: path ? `${path}.${k}` : k, key: k, kind });
         continue;
       }
       if (v && typeof v === 'object') walk(v, path ? `${path}.${k}` : k, depth + 1);
     }
   };
   walk(obj, '', 0);
-  return { hits, keys: [...keys] };
+  return { hits, misses, keys: [...keys] };
+}
+
+/** 같은 객체의 상태 필드가 '빈 슬롯' 을 말하는가(순수). */
+const ABSENT_RE = /^(absent|not ?present|notpresent|empty|removed|missing|not ?installed)$/i;
+function slotAbsent(o) {
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v !== 'string') continue;
+    if (/^(state|status|presence|health_?state|lifecycle_?state)$/i.test(k) && ABSENT_RE.test(v.trim())) return true;
+  }
+  return false;
 }
 
 /**
@@ -129,27 +142,52 @@ export function scanPower(obj, { maxDepth = 6, maxNodes = 5000 } = {}) {
  * 그것도 없으면 부품 출력 합(basis 'output' — 효율 손실만큼 과소). 서로 다른 층을 더하지 않는다.
  * @returns {{watts:number, basis:'system'|'input'|'output', parts:number, keys:string[]} | null}
  */
-export function pickPower(hits) {
+export function pickPower(hits, misses = []) {
   const list = Array.isArray(hits) ? hits : [];
+  const miss = Array.isArray(misses) ? misses : [];
   for (const [kind, basis] of [['system', 'system'], ['part', 'input'], ['output', 'output']]) {
     const hs = list.filter((h) => h.kind === kind);
     if (!hs.length) continue;
     // 같은 층 안에서도 이름이 여럿이면 가장 흔한 이름 하나만 쓴다(inputPower 와 watts 가 같은 값을 두 번 줄 수 있다).
     const byKey = new Map();
     for (const h of hs) { const k = norm(h.key); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(h); }
-    const [, chosen] = [...byKey.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+    const [chosenKey, chosenAll] = [...byKey.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+    let chosen = chosenAll; let duplicates = 0;
+    // v2.682 R3D-08: 시스템 합계가 **한 응답 안의 서로 다른 자리**(배열 원소가 아닌 경로 — 예 summary.currentPower 와
+    //   system.currentPower)에 **같은 값**으로 두 번 나오면 같은 합계를 되풀이한 것이다 — 하나만 쓴다. 배열 원소(여러 어레이·
+    //   클러스터)나 같은 경로(수집기가 어레이마다 따로 훑은 값)는 합친다(예전 그대로). ⚠ 실장비 응답 모양은 확인하지 못했다 —
+    //   서로 다른 객체 키 아래의 두 어레이가 우연히 같은 값이면 하나로 줄어든다(드문 경우 — 정직 기록).
+    if (kind === 'system') {
+      const seen = new Map(); const keep = [];
+      for (const h of chosenAll) {
+        if (String(h.path || '').includes('[')) { keep.push(h); continue; }
+        const prev = seen.get(h.watts);
+        if (prev && prev !== h.path) { duplicates += 1; continue; }
+        if (!prev) seen.set(h.watts, h.path);
+        keep.push(h);
+      }
+      chosen = keep;
+    }
     const watts = chosen.reduce((a, h) => a + h.watts, 0);
-    return { watts: Math.round(watts), basis, parts: chosen.length, keys: [chosen[0].key] };
+    // v2.682 R3D-03: 같은 층·같은 이름에서 값을 못 읽은 부품 수 — 있으면 합계는 부분 합이다.
+    const missing = miss.filter((m) => m && m.kind === kind && norm(m.key) === chosenKey).length;
+    const out = { watts: Math.round(watts), basis, parts: chosen.length, keys: [chosen[0].key] };
+    if (missing > 0) out.missing = missing;
+    if (duplicates > 0) out.duplicates = duplicates;
+    return out;
   }
   return null;
 }
 
 /** 수집기가 싣는 읽음 결과. */
-export function powerResult({ watts, source, basis = 'system', scope = 'system', parts = null, keys = null, at = Date.now() }) {
+export function powerResult({ watts, source, basis = 'system', scope = 'system', parts = null, keys = null, missing = null, at = Date.now() }) {
   const w = numOrNull(watts);
   if (w == null || w < 0 || w >= W_MAX) return null;
   const out = { watts: Math.round(w), source: String(source || '').slice(0, 200), basis, scope, at };
   if (parts != null) out.parts = parts;
+  // v2.682 R3D-03: 일부 부품의 값을 못 읽었으면 부분 합이다 — power/total.js 가 '측정' 이 아니라 partial 로 센다.
+  const ms = numOrNull(missing);
+  if (ms != null && ms > 0) { out.partial = true; out.missing = Math.round(ms); }
   if (Array.isArray(keys) && keys.length) out.keys = keys.slice(0, 8).map((k) => String(k).slice(0, 80));
   return out;
 }
@@ -172,9 +210,9 @@ export function powerProbe(reason, { source = '', detail = '', seenKeys = null }
  * @param {{source:string, scope?:string}} opts
  */
 export function applyScannedPower(extra, data, { source, scope = 'system' }) {
-  const { hits, keys } = scanPower(data);
-  const p = pickPower(hits);
-  const r = p ? powerResult({ watts: p.watts, source, basis: p.basis, scope: p.basis === 'system' ? scope : (scope === 'system' ? 'psu' : scope), parts: p.parts, keys: p.keys }) : null;
+  const { hits, misses, keys } = scanPower(data);
+  const p = pickPower(hits, misses);
+  const r = p ? powerResult({ watts: p.watts, source, basis: p.basis, scope: p.basis === 'system' ? scope : (scope === 'system' ? 'psu' : scope), parts: p.parts, keys: p.keys, missing: p.missing }) : null;
   if (r) { extra.power = r; delete extra.powerProbe; return true; }
   extra.powerProbe = powerProbe('no-field', { source, seenKeys: keys });
   return false;

@@ -52,7 +52,10 @@ async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, sc
     scan.chunks++;
     const room = rowsMax - out.length;
     let rows = [];
-    try { rows = read({ vcenterId: vcenterId || '', since: lower, ...(hi != null ? { until: hi - 1 } : {}) }, room + 1); } catch { rows = []; }
+    // v2.682(감사 R3E-02): 조각 읽기 실패(DB 잠김·I/O 오류)를 '실패 0건' 으로 삼키지 않는다 — 세고, 사유를 남긴다.
+    //   결과는 incomplete 이고 증분 상태는 전진하지 않는다(analyzeLoginFails). 나머지 조각은 계속 읽는다(일시 잠금일 수 있다).
+    try { rows = read({ vcenterId: vcenterId || '', since: lower, ...(hi != null ? { until: hi - 1 } : {}) }, room + 1); }
+    catch (e) { rows = []; scan.failedChunks += 1; if (!scan.error) scan.error = String(e?.message || e).slice(0, 300); }
     scan.candidates += rows.length;
     for (const e of rows) {
       const id = `${e.vcenterId}|${e.ts}|${e.type}|${e.user}`;
@@ -100,7 +103,7 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
 
   // vCenter 이벤트에서 로그인 실패 후보를 좁은 조건 하나로, 최근 1시간 조각부터 거슬러 가져와 정규식으로 분류.
   // v2.675: rowsMax·days 를 싣는다 — 화면이 '최근 N건까지만 셌다' 를 숫자를 박지 않고 말한다.
-  const scan = { chunks: 0, candidates: 0, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since, rowsMax, days: Math.max(1, days) };
+  const scan = { chunks: 0, candidates: 0, failedChunks: 0, error: null, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since, rowsMax, days: Math.max(1, days) };
   const read = typeof db.loginFailCandidates === 'function' ? db.loginFailCandidates : null;
   if (!read) scan.source = 'unavailable';   // 구버전 db 객체 — 네 단어 전 범위 검색(정지 원인)으로 되돌리지 않는다
   const key = `${vcenterId || ''}|${Math.max(1, days)}`;
@@ -115,9 +118,12 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
     scan.mode = 'incremental'; scan.from = from;
   } else {
     vcFails = await scanVcFails({ read, vcenterId, from: since, now, rowsMax, maybeYield, scan });
-    if (deps.incremental) inc.fullAt = now;
+    if (deps.incremental && !scan.failedChunks) inc.fullAt = now;
   }
-  if (deps.incremental && read) { inc.key = key; inc.fails = vcFails; inc.upTo = now; }
+  // v2.682(감사 R3E-02): 일부 조각을 못 읽었으면 그 결과를 다음 증분의 기준으로 삼지 않는다(upTo 를 전진시키면 못 읽은 구간이
+  //   다음 주기에도 빠진다 — 겹침 2시간 밖이면 영영). 상태는 그대로 두고 다음 주기가 같은 범위를 다시 훑는다.
+  const incomplete = scan.failedChunks > 0;
+  if (deps.incremental && read && !incomplete) { inc.key = key; inc.fails = vcFails; inc.upTo = now; }
   scan.ms = Math.round(performance.now() - t0);
   // 저장된 실패(포탈 + 게스트 OS 조사). vCenter 범위 지정 시 게스트는 그 vCenter만.
   const stored = getStoredFails(since)
@@ -177,6 +183,8 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
     topUsers: top(byUser), topIps: top(byIp), bySource: top(bySource, 30),
     timeline,
     recent: all.slice(0, 100),
+    // v2.682(감사 R3E-02): vCenter 이벤트 일부를 못 읽었다 — 합계는 '실패 0건' 이 아니라 '확인 불가가 섞인 하한' 이다.
+    incomplete,
     scan,   // v2.673: 훑은 조각 수·후보 수·상한으로 잘렸는지·소요(정직 — 잘렸으면 화면이 '최근 N건까지' 라고 말할 수 있다)
     generatedAt: Date.now(),
   };

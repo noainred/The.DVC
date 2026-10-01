@@ -120,10 +120,22 @@ export function collectStateNote(d, now = Date.now()) {
     return {
       kind: 'partial', tone: 'amber', waiting: false,
       title: `확인한 ${n0(kinds.ok)}대는 정상 · ${unchecked}대는 확인하지 못했습니다`,
-      body: '확인하지 못한 서버의 사용자는 **세지 않았습니다** — 지금 값이 맞는지 알 수 없기 때문입니다. 아래 표의 상태 열에서 사유를 확인하세요.',
+      body: '확인하지 못한 서버의 사용자는 **세지 않았습니다** — 지금 값이 맞는지 알 수 없기 때문입니다. 아래 표의 상태 열에서 사유를 확인하세요.'
+        + persistentFailNote(poller.lastResult),
     };
   }
   return { kind: 'ok', tone: 'green', waiting: false, title: `대상 ${recs}대를 모두 확인했습니다`, body: '' };
+}
+
+/**
+ * v2.682(R3A-03): 같은 사유로 연속 N주기 실패한 서버는 추이(전체·법인) 부분 합 판정에서 뺐다 — 그 사실을 말한다.
+ *   서버 lastResult.persistentFailures(개수) · persistentCycles(N). 없거나 0 이면 빈 문자열(범위 계정에는 서버가 싣지 않는다).
+ */
+export function persistentFailNote(lastResult) {
+  const n = n0(lastResult?.persistentFailures);
+  if (!(n > 0)) return '';
+  const cyc = n0(lastResult?.persistentCycles);
+  return ` 이 중 **${n}대**는 같은 사유로 ${cyc > 0 ? `${cyc}주기 넘게` : '여러 주기 동안'} 계속 실패해 **추이 계산에서 제외**했습니다 — 추이는 나머지 서버의 값이고, 제외한 서버의 사용자는 들어 있지 않습니다.`;
 }
 
 /**

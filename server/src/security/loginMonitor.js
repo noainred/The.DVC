@@ -72,6 +72,7 @@ export function saveLoginMonitor(body = {}) {
 let timer = null;
 let lastRun = null;
 let lastSummary = null;
+let lastIncomplete = null;   // v2.682 R3E-02 — 마지막 주기가 일부 조각을 못 읽었으면 그 사실
 const alerted = new Map(); // key -> lastAlertTs (쿨다운)
 const COOLDOWN = 60 * 60_000;
 
@@ -98,7 +99,13 @@ async function runOnce() {
   try {
     // v2.673: 주기 감시는 증분이다(직전 2시간만 다시 · 6시간마다 전 범위) — 15분마다 7일치를 다시 훑지 않는다(security/loginFails.js).
     const r = await analyzeLoginFails({ days: s.days, threshold: s.threshold, windowMin: s.windowMin }, { incremental: true });
-    lastRun = Date.now(); lastSummary = r.summary;
+    lastRun = Date.now();
+    // v2.682(감사 R3E-02): vCenter 이벤트를 일부 못 읽은 주기는 요약을 덮지 않는다 — '실패 0건' 이라는 거짓 요약 대신
+    //   직전 요약을 두고 사유를 따로 남긴다. 찾은 활성 공격은 실재하므로 알림은 그대로 낸다.
+    if (r.incomplete) {
+      lastIncomplete = { at: lastRun, failedChunks: r.scan?.failedChunks ?? null, error: r.scan?.error || null };
+      console.warn(`[loginmon] vCenter 이벤트 일부를 읽지 못했습니다(조각 ${r.scan?.failedChunks}개) — 요약을 갱신하지 않습니다: ${r.scan?.error || ''}`);
+    } else { lastSummary = r.summary; lastIncomplete = null; }
     if (!s.alert) return;
     const now = Date.now();
     const active = r.offenders.filter((o) => o.active);
@@ -132,5 +139,5 @@ export function startLoginMonitor() {
   console.log('[loginmon] 로그인 실패 모니터 시작');
 }
 
-export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, alertedActive: alerted.size }; }
+export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, lastIncomplete, alertedActive: alerted.size }; }
 export { runOnce as runLoginAnalysisNow };

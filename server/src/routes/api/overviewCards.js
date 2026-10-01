@@ -20,12 +20,12 @@ import { analysisServersWithRemote, invForServer } from '../../insights/analysis
 import { scopeIdracServers } from '../admin/idracCore.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
 import { listCollectors } from '../../collector/registry.js';
-import { listDevices as listStorageDevices } from '../../storage/registry.js';
+import { listDevices as listStorageDevices, registryLoadError as storageRegistryLoadError } from '../../storage/registry.js';
 import { localSnapshots } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { allMeasuredPower } from '../../idrac/service.js';
-import { buildPowerTotal } from '../../power/total.js';
+import { buildPowerTotal, STORAGE_STALE_MS } from '../../power/total.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
 import { vmtrackSeries } from '../../vmtrack/service.js';
@@ -38,19 +38,78 @@ const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('전체 소비 전력은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 네트워크·스토리지는 vCenter 축이 없습니다.');
 const FLEET_ONLY = '전체 범위 계정만 — vCenter 축이 없는 값입니다';
 
-/** 스토리지 용량 합(순수) — 전체 용량을 읽은 장비만 더하고, 사용량은 읽은 장비끼리만(웹 storageUnits.capacityTotals 와 같은 규칙). */
-export function storageCapacityTotals(items) {
-  let total = 0; let used = 0; let usedTotal = 0; let read = 0; let unread = 0; let devices = 0;
+/**
+ * 스토리지 용량 합(순수) — 전체 용량을 읽은 장비만 더하고, 사용량은 읽은 장비끼리만(웹 storageUnits.capacityTotals 와 같은 규칙).
+ * v2.682 R3D-05: 사용량을 못 읽은 장비 수(`usedUnknown`)를 함께 준다 — usedBytes·usedPct 는 그 장비를 뺀 부분 합이다(예전에는
+ *   밝히지 않아 '1.40 PB 사용 중' 이 전체처럼 보였다). `staleMsOf` 를 주면 마지막 수집이 그보다 오래된 장비는 현재값이 아니라
+ *   `stale` 로 따로 센다(합계에서 뺀다 — 같은 화면의 추이(staleByDevice)와 같은 집합이 되게).
+ * @param {object[]} items  { enabled, agent, snap }
+ * @param {{now?:number, staleMsOf?:(d:object)=>number}} [o]
+ */
+export function storageCapacityTotals(items, { now = Date.now(), staleMsOf = null } = {}) {
+  let total = 0; let used = 0; let usedTotal = 0; let read = 0; let unread = 0; let devices = 0; let usedUnknown = 0; let stale = 0;
   for (const d of items || []) {
     if (!d || d.enabled === false) continue;
     devices += 1;
     const t = numOrNull(d.snap?.capacity?.totalBytes);
     if (!(t > 0) || d.snap?.ok === false) { unread += 1; continue; }
+    if (typeof staleMsOf === 'function') {
+      const at = numOrNull(d.snap?.collectedAt);
+      const lim = numOrNull(staleMsOf(d));
+      if (at != null && lim != null && lim > 0 && now - at > lim) { stale += 1; continue; }
+    }
     total += t; read += 1;
     const u = numOrNull(d.snap?.capacity?.usedBytes);
-    if (u != null && u >= 0) { used += u; usedTotal += t; }
+    if (u != null && u >= 0) { used += u; usedTotal += t; } else usedUnknown += 1;
   }
-  return { devices, read, unread, totalBytes: read ? total : null, usedBytes: usedTotal ? used : null, usedPct: usedTotal ? Math.round((used / usedTotal) * 1000) / 10 : null };
+  return { devices, read, unread, stale, usedUnknown, totalBytes: read ? total : null, usedBytes: usedTotal ? used : null, usedPct: usedTotal ? Math.round((used / usedTotal) * 1000) / 10 : null };
+}
+
+/** v2.682 R3D-05: 스토리지 카드의 낡음 경계 — 그 장비 담당 노드의 수집 주기 × 3, 최소 전력 카드와 같은 6시간. */
+function storageStaleMsOf(devs) {
+  const { pollOf, envPoll } = devicePollMsByAgent(devs);
+  return (d) => Math.max(STORAGE_STALE_MS, 3 * (pollOf.get(d?.agent || '') || envPoll));
+}
+
+/** v2.682 R3D-10: 인벤토리가 이보다 오래되면 '지금 수집된' 값이 아니다(인벤토리 주기 30분 — 넉넉히 하루). */
+export const INVENTORY_STALE_MS = 24 * 3_600_000;
+const tsMs = (v) => {
+  const n = numOrNull(v);
+  if (n != null) return n;
+  if (typeof v === 'string' && v.trim()) { const p = Date.parse(v); return Number.isFinite(p) ? p : null; }
+  return null;
+};
+
+/**
+ * 물리 서버·GPU 카드 집계(순수, v2.682 R3D-10). 비활성 서버는 세지 않고 `disabled` 로 따로 센다(전력 분모와 같은 기준).
+ * 인벤토리는 collectedAt 이 `INVENTORY_STALE_MS` 안일 때만 '읽음' 이다 — 오래된 인벤토리는 `inventoryStale` 로 따로 센다.
+ * @param {object[]} servers  서버 분석 등록(범위 적용 뒤)
+ * @param {(s:object)=>object|null} invOf
+ */
+export function physicalGpuCounts(servers, invOf, now = Date.now()) {
+  let gpus = 0; let invRead = 0; let invStale = 0; let disabled = 0; let count = 0;
+  for (const s of servers || []) {
+    if (!s) continue;
+    if (s.enabled === false) { disabled += 1; continue; }
+    count += 1;
+    const inv = invOf(s);
+    const at = tsMs(inv?.collectedAt);
+    if (at == null) continue;
+    if (now - at > INVENTORY_STALE_MS) { invStale += 1; continue; }
+    invRead += 1;
+    for (const g of inv.gpus || []) if (String(g?.model || g?.name || '').trim()) gpus += 1;
+  }
+  return { count, disabled, gpus, invRead, invStale };
+}
+
+/**
+ * v2.682 R3S-07: 카드의 원천 오류 문구는 관리 주소·경로를 담을 수 있다 — admin(전체 범위)에게만 원문, 그 밖에는 어느 원천이
+ *   실패했는지(키)와 개수만 준다. /tools/power-total 의 detail 가림과 같은 기준.
+ */
+export function cardErrorsFor(errors, admin) {
+  const keys = Object.keys(errors || {}).filter((k) => errors[k]);
+  if (admin) return { errors: errors || {} };
+  return { errors: Object.fromEntries(keys.map((k) => [k, true])), errorsHidden: keys.length };
 }
 
 function storageItems() {
@@ -109,6 +168,7 @@ export function registerOverviewCards(api) {
     const snap = store.get() || {};
     const allowed = scopedVcenterIds(req.user, snap); // null = 제한 없음
     const full = allowed == null;
+    const admin = full && isAdminReq(req);   // v2.682 R3S-07: 원천 오류 원문은 admin + 전체 범위에게만
     await memoJson(req, res, 'overviewCards', async () => {
       // 데이터센터 — 설정 DataCenter. 범위 계정은 허용 vCenter 가 배정된 것만.
       const dcs = listDatacenters();
@@ -116,13 +176,7 @@ export function registerOverviewCards(api) {
       const dcIn = full ? dcs : dcs.filter((d) => Object.entries(assign).some(([vc, id]) => String(id) === String(d.id) && allowed.has(vc)));
       // 물리 서버·GPU — 서버 분석 등록(OME 콘솔 제외). 범위 절단은 서버 분석과 같은 판정(scopeIdracServers).
       const phys = scopeIdracServers(req, analysisServersWithRemote().filter((s) => s.type !== 'ome')).servers;
-      let gpus = 0; let invRead = 0;
-      for (const s of phys) {
-        const inv = invForServer(s);
-        if (!inv?.collectedAt) continue;
-        invRead += 1;
-        for (const g of inv.gpus || []) if (String(g?.model || g?.name || '').trim()) gpus += 1;
-      }
+      const pc = physicalGpuCounts(phys, invForServer);
       // 가상 서버 — vCenter VM(범위 적용). 롤업(global.vms)과 같은 기준(템플릿 포함 — 개수는 따로 밝힌다).
       const vms = (snap.vms || []).filter((v) => full || allowed.has(v.vcenterId));
       const vcs = (snap.vcenters || []).filter((v) => full || allowed.has(v.id));
@@ -130,27 +184,30 @@ export function registerOverviewCards(api) {
       let storage = null; let network = null; let power = null; let farms = null;
       if (full) {
         farms = { count: listCollectors().length };
-        storage = storageCapacityTotals(storageItems());
+        const items = storageItems();
+        storage = storageCapacityTotals(items, { staleMsOf: storageStaleMsOf(items) });
         try { const c = await cvpItems(); network = { count: c.unavailable ? null : c.rows.length, cvpServers: c.servers, unavailable: c.unavailable }; }
-        catch (e) { network = { count: null, error: e?.message || String(e) }; }
+        catch (e) { network = { count: null, ...(admin ? { error: e?.message || String(e) } : { errorHidden: true }) }; }
         const p = await powerTotal();
-        power = { totalWatts: p.totalWatts, servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread },
-          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices },
-          storage: { watts: p.storage.watts, measured: p.storage.measured, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread },
-          errors: p.errors };
+        // v2.682 R3D-01: 카드도 못 읽음·오래됨·일부만 읽음을 싣는다 — 예전에는 measured 만 실어 부분 합을 전체처럼 보였다.
+        power = { totalWatts: p.totalWatts,
+          servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
+          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, outputOnly: p.network.outputOnly },
+          storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale },
+          ...cardErrorsFor(p.errors, admin) };
       }
       return {
         ok: true, scoped: !full,
         datacenters: { count: dcIn.length },
         farms: farms || { count: null, reason: FLEET_ONLY },
-        physical: { count: phys.length, inventoryRead: invRead },
+        physical: { count: pc.count, inventoryRead: pc.invRead, inventoryStale: pc.invStale, disabled: pc.disabled },
         virtual: { count: vms.length, poweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template).length, vcenters: vcs.length, vcentersPending: vcPending },
-        gpus: { count: gpus, inventoryRead: invRead, servers: phys.length },
+        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, servers: pc.count },
         storage: storage || { totalBytes: null, reason: FLEET_ONLY },
         network: network || { count: null, reason: FLEET_ONLY },
         power: power || { totalWatts: null, reason: FLEET_ONLY },
       };
-    }, { extraKey: scopeKey(req.user, snap), ttlMs: 20_000 });
+    }, { extraKey: `${scopeKey(req.user, snap)}|role:${admin ? 'admin' : 'user'}`, ttlMs: 20_000 });
   });
 
   /**
@@ -192,6 +249,7 @@ export function registerOverviewCards(api) {
         out = maskPowerServers(out, serverHosts);
         out.storage = { ...out.storage, issues: out.storage.issues.map(({ detail, ...x }) => ({ ...x, detailHidden: !!detail })) };
         out.addressHidden = true;
+        out = { ...out, ...cardErrorsFor(out.errors, false) };   // v2.682 R3S-07: 원천 오류 원문은 admin 에게만
       }
       return { ok: true, ...out };
     }, { ttlMs: 20_000, extraKey: `role:${admin ? 'admin' : 'user'}` });
@@ -200,6 +258,20 @@ export function registerOverviewCards(api) {
 
 const TREND_TTL_MS = 5 * 60_000;
 const TREND_CACHE = new Map();
+
+/**
+ * 경영 보기 스토리지 추이의 용량 이력 조회 옵션(순수, v2.682 R3A-01).
+ * 등록·사용 중 장비(비활성 제외)를 knownIds 로 넘긴다 — storageMon /tools/storage/history 와 같은 규칙. 없으면 수집이 멈춘 등록 장비가
+ *   약 하루 뒤 '퇴역' 으로 빠져 그 사용량만큼 거짓 하락이 온전한 점으로 그려졌다. 등록부를 못 읽으면 knownIds 는 null(시간 기준 유예 —
+ *   손상된 빈 등록부로 전 장비를 '등록 밖' 으로 만들지 않게).
+ */
+export function storageTrendHistoryOpts(devs, now, { registryError = null, poll } = {}) {
+  const list = Array.isArray(devs) ? devs : [];
+  const { envPoll, pollOf } = poll || { envPoll: 3_600_000, pollOf: new Map() };
+  const staleByDevice = new Map(list.filter(Boolean).map((d) => [d.id, 2 * (pollOf.get(d.agent || '') || envPoll)]));
+  const knownIds = registryError ? null : list.filter((d) => d && d.enabled !== false).map((d) => d.id);
+  return { nowMs: now, staleMs: 2 * envPoll, staleByDevice, knownIds };
+}
 
 /** 추이 계산 — 원천마다 실패해도 나머지는 준다(그 지표만 error). */
 async function computeTrend(days, allowed, now) {
@@ -223,9 +295,7 @@ async function computeTrend(days, allowed, now) {
   // 스토리지 사용량 — 스토리지 모니터링 용량 이력(카드와 같은 장비 집합). 빠진 장비가 있는 버킷은 null.
   try {
     const devs = listStorageDevices();
-    const { envPoll, pollOf } = devicePollMsByAgent(devs);
-    const staleByDevice = new Map(devs.map((d) => [d.id, 2 * pollOf.get(d.agent || '')]));
-    const pts = await capacityHistoryAll(since, spec.bucketMs, { nowMs: now, staleMs: 2 * envPoll, staleByDevice });
+    const pts = await capacityHistoryAll(since, spec.bucketMs, storageTrendHistoryOpts(devs, now, { registryError: storageRegistryLoadError(), poll: devicePollMsByAgent(devs) }));
     const series = storageTrend(pts, days, now);
     out.storage = { series, delta: deltaOf(series), partial: partialCount(series), unit: 'bytes', source: 'storage-history', devices: pts.expectedDevices ?? null };
   } catch (e) { out.storage = { series: null, error: e?.message || String(e) }; }

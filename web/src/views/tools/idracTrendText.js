@@ -8,6 +8,7 @@
  *  · 문구에 백틱·별표를 쓰지 않는다(BoldText 규약 — uiText.test.js 스윕).
  */
 import { csvCell } from '../../util/csv.js';
+import { agoText } from './relTime.js';
 
 export const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 export const PRESETS = [['1h', '1시간', HOUR], ['6h', '6시간', 6 * HOUR], ['24h', '24시간', DAY], ['7d', '7일', 7 * DAY], ['30d', '30일', 30 * DAY], ['90d', '90일', 90 * DAY], ['1y', '1년', 365 * DAY]];
@@ -84,10 +85,24 @@ export function periodText(start, end) {
 
 /** 요약(결측 제외). 값이 하나도 없으면 null — 화면은 '—' 를 쓴다. */
 export function statsOf(points, k) {
-  const v = (points || []).map((p) => p?.[k]).filter((x) => typeof x === 'number' && Number.isFinite(x));
-  if (!v.length) return null;
+  const ok = (points || []).filter((p) => typeof p?.[k] === 'number' && Number.isFinite(p[k]));
+  if (!ok.length) return null;
+  const v = ok.map((p) => p[k]);
   const r = (x) => Math.round(x * 10) / 10;
-  return { cur: v[v.length - 1], avg: r(v.reduce((a, b) => a + b, 0) / v.length), max: Math.max(...v) };
+  // v2.682(R3D-06): cur 은 창 안 '마지막 값' 이다 — 그 시각(curT)을 함께 돌려 화면이 현재값처럼 보이지 않게 한다.
+  const lt = Number(ok[ok.length - 1]?.t);
+  return { cur: v[v.length - 1], curT: Number.isFinite(lt) && lt > 0 ? lt : null, avg: r(v.reduce((a, b) => a + b, 0) / v.length), max: Math.max(...v) };
+}
+
+/**
+ * v2.682(R3D-06): 카드 큰 숫자가 창 끝에서 2버킷 이상 떨어진 '마지막 값' 이면 그 사실을 말한다(아니면 '').
+ * 계열 하나만 멈춘 경우(다른 계열은 정상)는 수집 멈춤 배너가 잡지 못한다. 시각을 모르면 단정하지 않는다('').
+ */
+export function staleCurText(stat, end, bucketMs, now = Date.now()) {
+  const t = Number(stat?.curT); const e = Number(end); const b = Number(bucketMs);
+  if (!stat || !Number.isFinite(t) || t <= 0 || !Number.isFinite(e) || !Number.isFinite(b) || b <= 0) return '';
+  if (e - t < 2 * b) return '';
+  return `마지막 값(${agoText(t, now)})`;
 }
 
 /** 값 + 단위(값이 없으면 단위 없는 '—'). */
@@ -169,7 +184,8 @@ export function kindBasisText(d) {
   const hn = d.host?.name || '';
   if (d.kind === 'esxi' && d.matchedBy === 'hostname') return `호스트네임 일치 → ESXi 호스트 ${hn}(도메인·대소문자 무시${d.serviceTag ? ` · 서비스태그 ${d.serviceTag} 는 일치 없음` : ' · 서비스태그 없음'})`;
   if (d.kind === 'esxi') return `서비스태그 ${d.serviceTag} → ESXi 호스트 ${hn || '일치'}`;
-  const amb = d.hostAmbiguous ? ' · 같은 호스트네임의 ESXi 호스트가 여럿이라 정하지 않았습니다' : '';
+  const amb = d.hostAmbiguous ? ' · 같은 호스트네임의 ESXi 호스트가 여럿이라 정하지 않았습니다'
+    : d.hostTagMismatch ? ' · 같은 호스트네임의 ESXi 호스트가 있지만 서비스태그가 달라(다른 장비) 연결하지 않았습니다' : '';
   if (!d.serviceTag) return `서비스태그 없음 — 서비스태그로 대조할 수 없어 호스트네임으로 찾았지만 일치하는 ESXi 호스트가 없어 베어메탈로 표시합니다${amb}`;
   return `서비스태그 ${d.serviceTag} · 호스트네임 — 일치하는 ESXi 호스트 없음${amb}`;
 }
@@ -518,11 +534,17 @@ export function linkBasisText(h) {
   return s;
 }
 
-const RULE_STATE_TEXT = { match: '일치', ambiguous: '여러 서버', none: '일치 없음', 'no-key': '값 없음' };
+const RULE_STATE_TEXT = { match: '일치', ambiguous: '여러 서버', none: '일치 없음', 'no-key': '값 없음', mismatch: '태그 다름' };
 /** 연결 실패 사유(순수) — 호스트 상세 버튼 아래. r = /admin/idrac/trend/resolve-host 응답. */
 export function resolveFailText(r) {
   if (!r) return '';
   const rules = Object.entries(r.rules || {}).map(([k, v]) => `${MATCH_RULE_LABEL[k] || k} ${RULE_STATE_TEXT[v?.state] || '—'}${v?.state === 'ambiguous' && v.count ? `(${v.count}대)` : ''}`).join(' · ');
+  // v2.682 R3D-04: 이름·IP·MAC 은 맞았지만 서비스태그가 다른 서버만 있으면 다른 박스다 — 후보로 고르게 하지 않고 그 사실을 말한다.
+  const tm = Array.isArray(r.tagMismatch) ? r.tagMismatch : [];
+  if (r.reason === 'conflict' && tm.length && !(r.candidates || []).length) {
+    const who = tm.slice(0, 3).map((m) => `${m.name}${m.serviceTag ? `(${m.serviceTag})` : ''}`).join(', ');
+    return `호스트네임·IP·MAC 이 맞는 iDRAC 서버(${who}${tm.length > 3 ? ` 외 ${tm.length - 3}대` : ''})의 서비스태그가 이 호스트(${r.rules?.serviceTag?.value || '—'})와 달라 연결하지 않았습니다 — 하드웨어 교체 뒤 이름을 재사용했는지 확인하세요. 판정: ${rules}.`;
+  }
   const head = r.reason === 'conflict' ? '규칙마다 다른 iDRAC 서버를 가리켜 연결하지 않았습니다 — 아래 후보에서 고르세요.'
     : r.reason === 'ambiguous' ? '같은 값을 가진 iDRAC 서버가 여럿이라 정하지 않았습니다 — 아래 후보에서 고르세요.'
       : `이 호스트에 대응하는 iDRAC 서버를 찾지 못했습니다${r.scoped ? '(볼 수 있는 범위 안에서)' : ''} — iDRAC 이 등록·스캔되지 않았거나 서비스태그·호스트네임·IP·MAC 이 모두 다릅니다.`;

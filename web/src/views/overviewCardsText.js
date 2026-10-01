@@ -44,6 +44,25 @@ export function firstCollectNotice(ov) {
   if (off > 0) parts.push(`비활성 ${nf.format(off)}곳은 제외했습니다.`);
   return { title, detail: parts.join(' ') };
 }
+/**
+ * v2.682 R3D-02: GPU 카드 값 — 인벤토리를 한 대도 못 읽었으면 0 이 아니라 null('—'), 일부만 읽었으면 최소값임을 밝힌다
+ *   (경영 보기 execOverviewText.gpuKpi 와 같은 규칙 — 그 모듈이 이 파일을 import 하므로 여기 두고 저쪽 판정과 대조 테스트한다).
+ */
+export function gpuCardValue(g) {
+  if (!g) return { value: null, partial: false, unknown: false };
+  const read = Number(g.inventoryRead) || 0;
+  const servers = Number(g.servers) || 0;
+  const unknown = servers > 0 && read === 0;
+  const partial = !unknown && read < servers;
+  return { value: unknown ? null : (g.count ?? null), partial, unknown };
+}
+export function gpuCardMeta(g) {
+  if (!g) return '';
+  const v = gpuCardValue(g);
+  return `서버 분석 인벤토리 기준 · 수집 ${countText(g.inventoryRead)}/${countText(g.servers)}대`
+    + (g.inventoryStale ? ` · 오래된 인벤토리 ${countText(g.inventoryStale)}` : '')
+    + (v.unknown ? ' · 아직 읽은 서버가 없습니다' : v.partial ? ' · 미수집 서버 제외(최소값)' : '');
+}
 /** 측정 장비가 없는 칸(0 W)은 '—' — 0 kW 는 '전력 0' 으로 읽힌다. */
 export const kwOrDash = (w) => (Number(w) > 0 ? kwText(w) : '—');
 export const wText = (w) => (w == null || !Number.isFinite(Number(w)) ? '—' : `${nf.format(Math.round(Number(w)))} W`);
@@ -55,13 +74,14 @@ export function cardMeta(k, c) {
   switch (k) {
     case 'datacenters': return '설정 › DataCenter 등록 수';
     case 'farms': return '설정 › 수집 Agent 등록 수';
-    case 'physical': { const p = c.physical; return `서버 분석 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대`; }
+    case 'physical': { const p = c.physical; return `서버 분석 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대${p.inventoryStale ? ` · 오래된 인벤토리 ${countText(p.inventoryStale)}` : ''}${p.disabled ? ` · 비활성 ${countText(p.disabled)}대 제외` : ''}`; }
     case 'virtual': { const v = c.virtual; return `구동 ${countText(v.poweredOn)}${v.templates ? ` · 템플릿 ${countText(v.templates)}` : ''} · vCenter ${countText(v.vcenters)}${v.vcentersPending ? ` (첫 수집 중 ${v.vcentersPending})` : ''}`; }
-    case 'gpus': return `서버 분석 인벤토리 기준 · 수집 ${countText(c.gpus.inventoryRead)}/${countText(c.gpus.servers)}대`;
-    case 'storage': { const s = c.storage; if (s.totalBytes == null) return s.devices ? `용량을 읽은 장비 없음(${s.devices}대)` : '등록된 스토리지 없음';
-      return `사용 ${s.usedPct == null ? '—' : `${s.usedPct}%`} · ${s.read}/${s.devices}대${s.unread ? ` · 못 읽음 ${s.unread}` : ''}`; }
-    case 'network': { const n = c.network; if (n.unavailable) return 'CVP DB 를 열 수 없습니다'; if (n.error) return `읽기 실패: ${n.error}`; return `CVP 등록 장비 · CVP 서버 ${countText(n.cvpServers)}대`; }
-    case 'power': { const p = c.power; const k = (x) => powerCatKw(x); return `서버 ${k(p.servers)} · 네트워크 ${k(p.network)} · 스토리지 ${k(p.storage)}`; }
+    case 'gpus': return gpuCardMeta(c.gpus);
+    case 'storage': { const s = c.storage; if (s.totalBytes == null) return s.devices ? `용량을 읽은 장비 없음(${s.devices}대${s.stale ? ` · 오래된 값 ${s.stale}` : ''})` : '등록된 스토리지 없음';
+      // v2.682 R3D-05: 사용량 모름·오래된 값을 밝힌다 — 사용률은 사용량을 읽은 장비끼리만이다.
+      return `사용 ${s.usedPct == null ? '—' : `${s.usedPct}%`} · ${s.read}/${s.devices}대${s.unread ? ` · 못 읽음 ${s.unread}` : ''}${s.stale ? ` · 오래된 값 ${s.stale}` : ''}${s.usedUnknown ? ` · 사용량 모름 ${s.usedUnknown}(사용률에서 뺌)` : ''}`; }
+    case 'network': { const n = c.network; if (n.unavailable) return 'CVP DB 를 열 수 없습니다'; if (n.error) return `읽기 실패: ${n.error}`; if (n.errorHidden) return '읽기 실패(사유는 관리자에게만 표시합니다)'; return `CVP 등록 장비 · CVP 서버 ${countText(n.cvpServers)}대`; }
+    case 'power': return powerCardMeta(c.power);
     default: return '';
   }
 }
@@ -80,6 +100,42 @@ export function powerTotalKw(d) {
   const any = ['servers', 'network', 'storage'].some((k) => (Number(d[k]?.measured) || 0) + (Number(d[k]?.partial) || 0) > 0);
   return any ? kwText(d.totalWatts) : '—';
 }
+/**
+ * v2.682 R3S-07: 원천 오류 문구 — 서버는 admin 이 아니면 원문 대신 true(실패 사실만)를 준다. 원문이 있으면 그대로,
+ *   없으면 '사유는 관리자에게만 표시' 로 말한다. 실패가 없으면 ''.
+ */
+const SOURCE_LABEL = { servers: '서버 전력', network: '네트워크(CVP)', storage: '스토리지', serversRegistry: '서버 분석 등록부' };
+export function sourceErrorsText(errors) {
+  const ent = Object.entries(errors || {}).filter(([, v]) => v);
+  if (!ent.length) return '';
+  return ent.map(([k, v]) => `${SOURCE_LABEL[k] || k} — ${typeof v === 'string' ? v : '사유는 관리자에게만 표시합니다'}`).join(' · ');
+}
+/**
+ * v2.682 R3D-01: Overview 소비 전력 카드 부제 — 카테고리 kW 와 함께 '측정 m/n대' 와 빠진 대수(못 읽음·오래됨·일부만 읽음)를 말한다.
+ *   예전 부제는 kW 만 있어, 등록 50대 중 1대만 읽은 합계가 전체처럼 보였다.
+ */
+export function powerCardMeta(p) {
+  if (!p) return '';
+  if (p.reason) return p.reason;
+  const k = (x) => powerCatKw(x);
+  const head = `서버 ${k(p.servers)} · 네트워크 ${k(p.network)} · 스토리지 ${k(p.storage)}`;
+  const n = (v) => Number(v) || 0;
+  let measured = 0; let devices = 0; let devicesKnown = true;
+  for (const c of ['servers', 'network', 'storage']) {
+    const x = p[c] || {};
+    measured += c === 'servers' ? Math.max(0, n(x.measured) - n(x.ome)) : n(x.measured);
+    if (x.devices == null) devicesKnown = false; else devices += c === 'storage' ? Math.max(0, n(x.devices) - n(x.unsupported)) : n(x.devices);
+  }
+  const unread = n(p.servers?.unread) + n(p.network?.unread) + n(p.storage?.unread);
+  const stale = n(p.network?.stale) + n(p.storage?.stale);
+  const partial = n(p.network?.partial) + n(p.storage?.partial);
+  const bits = [devicesKnown ? `측정 ${countText(measured)}/${countText(devices)}대` : `측정 ${countText(measured)}대`];
+  if (unread) bits.push(`못 읽음 ${countText(unread)}`);
+  if (stale) bits.push(`오래된 값 ${countText(stale)}`);
+  if (partial) bits.push(`일부만 읽음 ${countText(partial)}`);
+  if (unread || stale || partial) bits.push('읽은 장비만의 합');
+  return `${head} · ${bits.join(' · ')}`;
+}
 /** 전력 카테고리 문구 — 측정 대수와 뺀 대수를 함께. */
 export function powerCatNote(cat, x) {
   if (!x) return '';
@@ -97,6 +153,8 @@ export function powerCatNote(cat, x) {
   const miss = [];
   // v2.680 A-05: 장착 PSU 중 일부만 읽은 스위치 — 합계에는 읽은 PSU 만 들어 있어 실제보다 작다.
   if (cat === 'network' && x.partial) miss.push(`일부 PSU 만 읽음 ${x.partial}(합계가 실제보다 작음)`);
+  // v2.682 R3D-03: 스토리지도 일부 부품(PSU·노드)만 읽은 장비가 있다 — 측정 대수에서 빼고 따로 말한다.
+  if (cat === 'storage' && x.partial) miss.push(`일부 부품만 읽음 ${x.partial}(합계가 실제보다 작음)`);
   if (x.unread) miss.push(`못 읽음 ${x.unread}`);
   if (x.stale) miss.push(`오래된 값 ${x.stale}`);
   if (cat === 'storage' && x.unsupported) miss.push(`수집 경로 없음 ${x.unsupported}`);

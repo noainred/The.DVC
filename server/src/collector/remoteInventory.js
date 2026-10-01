@@ -48,7 +48,7 @@ const INV_SHAPE = {
   idrac: ['o', ['firmwareVersion']],
   bios: ['o', ['version']],
   firmware: ['a', ['type', 'version', 'name']],
-  nics: ['a', ['name', 'model'], { ports: ['id', 'link', 'speedMbps'] }],
+  nics: ['a', ['name', 'model'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
   cpus: ['a', ['socket', 'model', 'cores']],
   disks: ['a', ['model', 'capacityGB', 'media', 'protocol']],
   psus: ['a', ['model', 'manufacturer', 'capacityWatts']],
@@ -83,7 +83,16 @@ export function sanitizeRemoteInv(inv) {
   return out;
 }
 /** 최신 센서 {t, temps:{이름:℃}} — 온도는 숫자만(못 읽은 값은 0 이 아니라 뺀다), 이름은 식별자 규칙. */
-export function sanitizeRemoteSensors(x) {
+/**
+ * v2.682(R3S-02): 엣지가 보낸 시각이 받은 시각보다 미래면 받은 시각으로 자른다 — 미래 시각은 `now - t` 가 음수라 그 표본이
+ * **영원히 신선** 으로 세어져, 엣지 pull 이 끊긴 뒤에도 중앙 샘플러가 같은 값을 매 주기 '지금 값' 으로 적재한다(v2.504 평탄선).
+ * 원본은 호출부가 따로 싣는다(진단). now 가 없으면 자르지 않는다(순수 판정 호환).
+ */
+export function clampFuture(t, now) {
+  if (t == null || now == null || !Number.isFinite(now)) return t;
+  return t > now ? now : t;
+}
+export function sanitizeRemoteSensors(x, { now = null } = {}) {
   if (!isPlainObj(x)) return null;
   const cpu0 = numOrNull(x.cpu);
   const cpuOk = cpu0 != null && cpu0 >= 0 && cpu0 <= 100;
@@ -101,8 +110,12 @@ export function sanitizeRemoteSensors(x) {
   if (!n && !cpuOk) return null;
   // v2.634: 엣지 폴러 주기(신선도 경계용). 모르는 값·범위 밖은 싣지 않는다(판정은 기본 경계로 떨어진다).
   const cyc = numOrNull(x.cycleMs); const itv = numOrNull(x.intervalMs);
+  const t0 = numOrNull(x.t);
+  const t = clampFuture(t0, now);
   return {
-    t: numOrNull(x.t), temps,
+    t, temps,
+    // 미래 시각을 잘랐으면 원본을 남긴다(엣지 시계 앞섬 진단). 이미 잘린 값을 다시 정리할 때(pull → 저장)도 원본을 잃지 않는다.
+    ...(t0 != null && t !== t0 ? { edgeT: t0 } : (() => { const e = numOrNull(x.edgeT); return e != null && t != null && e > t ? { edgeT: e } : {}; })()),
     // v2.660: CPU 사용률(0~100 만 — 범위 밖은 퍼센트가 아니다). 구버전 엣지는 싣지 않는다.
     ...(() => { const c = numOrNull(x.cpu); return c != null && c >= 0 && c <= 100 ? { cpu: c } : {}; })(),
     ...(cyc != null && cyc >= 0 && cyc <= 7 * 86_400_000 ? { cycleMs: cyc } : {}),
@@ -114,7 +127,7 @@ export function sanitizeRemoteSensors(x) {
  *   (엣지가 보낸 state 는 받지 않는다). 상한 150 · 넘친 원소·못 읽은 원소는 개수로 밝힌다. 객체가 아니면 null.
  */
 export const REMOTE_SENSOR_DETAIL_MAX = 150;
-export function sanitizeRemoteSensorDetail(x) {
+export function sanitizeRemoteSensorDetail(x, { now = null } = {}) {
   if (!isPlainObj(x) || !Array.isArray(x.list)) return null;
   const list = [];
   let dropped = 0;
@@ -125,8 +138,14 @@ export function sanitizeRemoteSensorDetail(x) {
   }
   if (!list.length) return null;
   const om = numOrNull(x.omitted);
+  const raw = { at: numOrNull(x.at), thermalAt: numOrNull(x.thermalAt), collAt: numOrNull(x.collAt) };
+  const cl = { at: clampFuture(raw.at, now), thermalAt: clampFuture(raw.thermalAt, now), collAt: clampFuture(raw.collAt, now) };
+  const futureClamped = cl.at !== raw.at || cl.thermalAt !== raw.thermalAt || cl.collAt !== raw.collAt;
   return {
-    at: numOrNull(x.at), thermalAt: numOrNull(x.thermalAt), collAt: numOrNull(x.collAt),
+    ...cl,
+    // v2.682(R3S-02): 잘랐으면 엣지 원본 시각(재정리 때도 유지)
+    ...(futureClamped ? { edgeTimes: raw }
+      : isPlainObj(x.edgeTimes) ? { edgeTimes: { at: numOrNull(x.edgeTimes.at), thermalAt: numOrNull(x.edgeTimes.thermalAt), collAt: numOrNull(x.edgeTimes.collAt) } } : {}),
     collOk: x.collOk === true ? true : (x.collOk === false ? false : null),
     collError: remoteStr(x.collError, 300) || '',
     omitted: (om != null && om >= 0 ? om : 0) + dropped,
@@ -150,7 +169,8 @@ export function remoteVendor(v) {
  * **버리고 사유별 개수를 돌려준다**(호출부가 상태에 밝힌다 — 조용한 상한 금지).
  * @returns {{ servers: object[], dropped: { notObject:number, badId:number, overCount:number }, coerced:number }}
  */
-export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX } = {}) {
+export const REMOTE_HOSTNAMES_MAX = 16;
+export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX, now = Date.now() } = {}) {
   const dropped = { notObject: 0, badId: 0, overCount: 0 };
   let coerced = 0;
   const servers = [];
@@ -169,9 +189,20 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX } = {}) {
       const v = remoteVendor(s.vendor);
       if (v) o.vendor = v; else coerced += 1; // 모르는 값은 버리고 센다(조용히 빼지 않는다)
     }
+    // v2.682(R3E-01): OS 호스트네임 별칭(통합 성능 모니터링의 호스트네임·IP 근거) — 글자만 · 16개 · 255자. 글자가 아닌 원소는 버리고 센다.
+    if (Object.hasOwn(s, 'hostNames') && s.hostNames != null) {
+      if (Array.isArray(s.hostNames)) {
+        const names = [];
+        for (const h of s.hostNames.slice(0, REMOTE_HOSTNAMES_MAX)) {
+          const v = typeof h === 'string' ? h.trim().slice(0, 255) : null;
+          if (v) names.push(v); else coerced += 1;
+        }
+        o.hostNames = names;
+      } else coerced += 1;
+    }
     o.inv = sanitizeRemoteInv(s.inv);
-    o.sensors = sanitizeRemoteSensors(s.sensors);
-    o.sensorDetail = sanitizeRemoteSensorDetail(s.sensorDetail);
+    o.sensors = sanitizeRemoteSensors(s.sensors, { now });
+    o.sensorDetail = sanitizeRemoteSensorDetail(s.sensorDetail, { now });
     servers.push(o);
   }
   return { servers, dropped, coerced };

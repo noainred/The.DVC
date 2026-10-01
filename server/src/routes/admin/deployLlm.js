@@ -523,7 +523,9 @@ adminRouter.put('/llm-config', adminOnly, fleetOnly, (req, res) => {
   try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }
   catch (e) { res.status(e.status || 500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.post('/llm-test', adminOnly, async (req, res) => {
+// v2.682 R3S-04 — 형제 PUT /llm-config 와 같이 fleetOnly: 범위 관리자가 body.url 로 내부 주소에 요청을 일으켜
+// 응답(시한·거부·HTTP 코드)으로 포트를 탐색할 수 있었다.
+adminRouter.post('/llm-test', adminOnly, fleetOnly, async (req, res) => {
   // v2.590 D6: 본문 url 로 임의 주소를 찌르지 못하게 같은 검증을 건다(저장값을 쓰든 본문을 쓰든 동일).
   const saved = loadLlmConfig();
   const cfg = { ...saved, ...(req.body || {}) };

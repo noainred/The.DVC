@@ -52,6 +52,42 @@ const n0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 export const NOT_TARGET_KINDS = Object.freeze(['no-agent', 'not-found']);
 
 /**
+ * v2.682(R3A-03 — 재현): **영구 실패** VM. Server Core(quser 없음 → guest-error)·발행 작업이 꺼진 서버(stale 영구)·시계 어긋남
+ *   (clock-skew)은 NOT_TARGET_KINDS 에 없어 매 주기 '일시 실패' 로 세였고, 그런 VM 이 함대에 1대만 있어도 그 vCenter 와 **전체('')**
+ *   추이가 영원히 부분 합(null 적재)이었다. 같은 VM 이 **같은 사유로 연속 PERSISTENT_FAIL_CYCLES 주기** 실패하면 부분 합 판정에서
+ *   빼고(`vmsPersistent` 로 개수를 밝힌다) 나머지 서버의 값을 적재한다. 사유가 바뀌거나 한 번이라도 읽히면 카운터는 처음부터다.
+ *   ⚠ 막 실패한 VM(N주기 미만)은 여전히 일시 실패다 — 진짜 일시 부분 합은 예전처럼 적재하지 않는다(v2.606·v2.622 규약 유지).
+ *   ⚠ 카운터는 인메모리다(poller) — 재시작 직후 N주기 동안은 예전처럼 부분 합으로 보류된다(정직 기록).
+ */
+export const PERSISTENT_FAIL_CYCLES = 3;
+const failKeyOf = (r) => `${String(r?.vcenterId || '')}|${String(r?.vmId || r?.name || '')}`;
+const isTransientFail = (r) => r && r.ok === false && !NOT_TARGET_KINDS.includes(r.kind);
+
+/** 한 주기를 진행한다 — 실패 VM 의 연속 횟수(같은 사유일 때만 +1). 새 상태 Map 을 돌려준다(입력 불변). 순수. */
+export function advanceFailState(records, prev = new Map()) {
+  const next = new Map();
+  for (const r of records || []) {
+    if (!isTransientFail(r)) continue;
+    const k = failKeyOf(r);
+    const kind = String(r.kind || '');
+    const p = prev instanceof Map ? prev.get(k) : null;
+    next.set(k, { kind, count: p && p.kind === kind ? p.count + 1 : 1 });
+  }
+  return next;
+}
+/** 상태에서 '영구 실패' 키 집합 — 지금 레코드가 같은 사유로 실패 중이고 연속 cycles 회 이상일 때만. 순수. */
+export function persistentFailKeys(records, state, { cycles = PERSISTENT_FAIL_CYCLES } = {}) {
+  const out = new Set();
+  if (!(state instanceof Map) || !state.size) return out;
+  for (const r of records || []) {
+    if (!isTransientFail(r)) continue;
+    const st = state.get(failKeyOf(r));
+    if (st && st.kind === String(r.kind || '') && st.count >= cycles) out.add(failKeyOf(r));
+  }
+  return out;
+}
+
+/**
  * 한 VM 의 수집 결과(레코드) 형태:
  *   { vmId, vcenterId, name, folder, ts, ok, active, disc, other, sessions,
  *     users: [{name, kind}], error, reason }
@@ -67,8 +103,10 @@ export const NOT_TARGET_KINDS = Object.freeze(['no-agent', 'not-found']);
  *   names:Array<{name,domain,sessions,active,disc,vms:string[]}>
  * }}
  */
-export function aggregate(records) {
+export function aggregate(records, { persistent = null } = {}) {
   const list = (records || []).filter(Boolean);
+  const isPersistent = (r) => persistent instanceof Set && persistent.has(failKeyOf(r));
+  let vmsPersistent = 0;
   // 계정 키 → 집계. Map 은 삽입 순서를 지키므로 '처음 만난 원문' 이 표시 이름이 된다.
   const byUser = new Map();
   let sessions = 0; let sa = 0; let sd = 0; let so = 0;
@@ -76,7 +114,9 @@ export function aggregate(records) {
   for (const r of list) {
     if (r.ok === false) {
       vmsFailed++;
-      if (NOT_TARGET_KINDS.includes(r.kind)) vmsNotTarget++; else vmsTransient++;
+      if (NOT_TARGET_KINDS.includes(r.kind)) vmsNotTarget++;
+      else if (isPersistent(r)) vmsPersistent++;   // v2.682(R3A-03): 영구 실패 — 부분 합 원인이 아니다(개수만 밝힌다)
+      else vmsTransient++;
       continue;
     }
     if (r.skipped) { vmsSkipped++; continue; }
@@ -116,6 +156,8 @@ export function aggregate(records) {
     vms: list.length, vmsOk, vmsFailed, vmsSkipped,
     // v2.681(R2D-04): vmsFailed = vmsTransient(일시 실패 — 부분 합 원인) + vmsNotTarget(발행기 없음 등 — 대상 아님).
     vmsTransient, vmsNotTarget,
+    // v2.682(R3A-03): vmsFailed = vmsTransient + vmsNotTarget + vmsPersistent(같은 사유로 연속 N주기 실패 — 추이에서 제외한 서버).
+    vmsPersistent,
     // 원문이 잘린 서버가 하나라도 있으면 사용자·세션 수는 **최소값**이다(화면이 '최소 N명').
     vmsTruncated, usersLowerBound: known && vmsTruncated > 0,
     names: names.sort((a, b) => b.sessions - a.sessions || String(a.name).localeCompare(String(b.name), 'ko')),
@@ -128,7 +170,7 @@ export function aggregate(records) {
  * `usersUnion` 과 `usersByVcSum` 을 **둘 다** 낸다(위 머리말 참조) — 같은 계정이 여러 법인에
  * 있으면 두 값이 달라지고, 그 차이 자체가 사용자가 알아야 할 정보다.
  */
-export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
+export function aggregateAll(records, { vcNameOf = (id) => id, persistent = null } = {}) {
   const list = (records || []).filter(Boolean);
   const byVc = new Map();
   for (const r of list) {
@@ -137,9 +179,9 @@ export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
     byVc.get(id).push(r);
   }
   const vcenters = [...byVc.entries()].map(([id, rs]) => ({
-    vcenterId: id, vcenterName: vcNameOf(id), ...aggregate(rs),
+    vcenterId: id, vcenterName: vcNameOf(id), ...aggregate(rs, { persistent }),
   })).sort((a, b) => (b.users ?? -1) - (a.users ?? -1) || String(a.vcenterName).localeCompare(String(b.vcenterName), 'ko'));
-  const total = aggregate(list);
+  const total = aggregate(list, { persistent });
   // 값을 읽은 법인만 더한다 — 하나도 없으면 null(0 은 '0명' 이라는 거짓이다).
   const readVcs = vcenters.filter((v) => v.users != null);
   const byVcSum = readVcs.length ? readVcs.reduce((a, v) => a + v.users, 0) : null;

@@ -10,7 +10,7 @@ const NOW = new Date(2026, 8, 30, 12, 30).getTime();
 describe('iDRAC 통합 추이 문구(v2.660)', () => {
   it('요약은 결측을 빼고, 값이 없으면 null(0 이 아니다)', () => {
     const pts = [{ cpuPct: null }, { cpuPct: 10 }, { cpuPct: 30 }];
-    expect(statsOf(pts, 'cpuPct')).toEqual({ cur: 30, avg: 20, max: 30 });
+    expect(statsOf(pts, 'cpuPct')).toEqual({ cur: 30, curT: null, avg: 20, max: 30 });
     expect(statsOf([{ cpuPct: null }], 'cpuPct')).toBeNull();
     expect(valueText(null, '%')).toBe('—');
     expect(valueText(1234.5, ' W')).toBe('1,234.5 W');
