@@ -4,6 +4,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
 import { poolRun } from '../../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { linregSlope } from '../../util/linreg.js';
 
 
 // 동시 다발 폴링/클릭 최적화 — 여러 사용자가 같은 스냅샷에 대해 같은 무거운 계산을 각자 재실행하던
@@ -27,14 +28,9 @@ export async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraK
 /** Apply common query filters (?vcenterId=, ?region=, ?q=) to a collection. */
 // Small deterministic hash for synthesized demo series (stable per key).
 export function hash(s) { let h = 2166136261; const str = String(s); for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0); }
-// Least-squares slope of y over x.
-export function linregSlope(xs, ys) {
-  const n = xs.length; if (n < 2) return null;
-  const mx = xs.reduce((a, b) => a + b, 0) / n; const my = ys.reduce((a, b) => a + b, 0) / n;
-  let num = 0; let den = 0;
-  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
-  return den === 0 ? null : num / den;
-}
+// Least-squares slope of y over x — v2.672: 본체는 util/linreg.js(도메인 모듈 tools/dsGrowth.js 가 routes/ 를 import 하지 않게).
+// `export { x } from` 은 이 모듈 스코프에 이름을 만들지 않는다(v2.575) — import 후 다시 내보낸다.
+export { linregSlope };
 
 // Run `fn` over items with at most `limit` concurrent (for bounded on-demand vCenter queries).
 // v2.579(ARCH-01): 동시성 풀은 `util/pool.js` 하나다(v2.575 IMP-08). 이 함수는 그 규약을 세우면서

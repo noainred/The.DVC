@@ -33,7 +33,8 @@ import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
-import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { memoJson, hash, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
@@ -1611,38 +1612,31 @@ api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) =
 /**
  * 데이터스토어 용량 예측 — GET /tools/capacity-forecast
  *
- * ⚠️ v2.503 성능 수정(측정 근거): 이 라우트는 **DS 하나마다 시계열 조회 2회**(metrics `history()` 는
- * 시간버킷이면 `hourlyMin` + `bucketHourly`)를 동기로 돈다. `node:sqlite` 는 동기 API 뿐이라
- * 루프 전체가 **이벤트 루프를 한 번도 양보하지 않는다**. 1,100 DS × 120일 시간버킷(3.17M행)을
- * 실제로 만들어 재면 **요청당 1,563ms 하드블록**이었고(선형회귀 비용은 별도), memo 도 없어
- * 새로고침·다중 사용자마다 그대로 반복됐다(바로 위 형제 엔드포인트들은 전부 memoJson 을 쓴다).
+ * ⚠⚠ v2.672 운영 장애(2026-10-01): 이 라우트가 이벤트 루프를 **64~70초씩 반복해서** 멈춰 포탈 전체가 응답하지 않았다
+ * (stallwatch 스택 `metrics/db.js implHistory` ← 이 라우트, 힙 16~18% — 메모리 문제가 아니었다). 원인·규칙은
+ * `tools/dsGrowth.js` 머리말에 있다. 요약:
+ *  · 증가율은 **롤업만** 읽는다(원본 폴백 금지) — 예전 `db.history(...)` 는 롤업 도입 이전 원본이 남은 현장에서
+ *    데이터스토어마다 원본 약 17만 행을 집계했다(원본 보존 기본 5년 · ds_usedgb 는 분마다 저장).
+ *  · 증가율은 스냅샷과 무관한 15분 캐시(동시 계산 1건) — memo 키가 스냅샷 시각이라 30초마다 새 계산이 겹쳐 시작됐다.
+ *  · 시간 기준 양보(개수 기준 '100개마다' 는 한 건이 느리면 아무것도 못 막는다).
+ * 이 라우트에서 `db.history(` 를 다시 부르지 말 것 — test/capForecast2672.test.js 가 소스와 실제 호출 둘 다 고정한다.
  *
- * 두 가지를 같이 건다:
- *  1. `memoJson` — 스냅샷 리비전 + URL + scope 키로 30초 memo. 반복 조회 비용이 0 이 된다.
- *  2. `YIELD_EVERY` 마다 `setImmediate` 양보 — 총 CPU 는 그대로지만 1.5초 하드블록이 사라져
- *     같은 시간대의 다른 요청·폴러가 진행한다(`gpuSeriesExport`·`chunkedPrune` 과 같은 원칙).
- *
- * ⚠️ **'전 키 1쿼리 병합' 로 바꾸지 말 것** — 직관과 달리 **2.3배 느렸다**(실측 1,563ms → 3,586ms).
- * `samples_hourly` PK 가 `(metric,k,h)` 라 키별 조회는 인덱스 선탐색이지만,
- * `WHERE metric=? AND h>=? GROUP BY k,b` 는 metric 파티션 전체를 훑고 temp b-tree 로 정렬한다.
+ * (v2.503 기록) '전 키 1쿼리 병합' 은 이 스키마에서 2.3배 느렸다(1,563ms → 3,586ms) — 키별 PK 선탐색이 맞다.
  */
-const FORECAST_YIELD_EVERY = 100;   // DS 이만큼마다 이벤트 루프에 양보
-
 api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson(req, res, 'capacity-forecast', async (snap) => {
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
-  const dss = (snap.datastores || []).filter((d) => (!allowed || allowed.has(d.vcenterId)) && (!vcId || d.vcenterId === vcId));
-  let db = null; try { db = await getMetricsDb(); } catch { /* */ }
+  const all = snap.datastores || [];
+  const dss = all.filter((d) => (!allowed || allowed.has(d.vcenterId)) && (!vcId || d.vcenterId === vcId));
   const mock = snap.source === 'mock';
+  // 전 데이터스토어 한 벌로 센다(범위와 무관 — 범위는 바로 위 dss 에서 이미 골랐다). 첫 호출·첫 수집 직후에만 계산을 기다린다.
+  const growth = await dsGrowthFor(all.map((d) => d.id));
   const items = [];
-  let i = 0;
   for (const d of dss) {
-    if (++i % FORECAST_YIELD_EVERY === 0) await new Promise((r) => { setImmediate(r); });
-    let pts = [];
-    if (db) { try { pts = db.history('ds_usedgb', d.id, Date.now() - 120 * 86_400_000, 86_400_000, 200); } catch { /* */ } }
+    const g = growth.byId.get(d.id) || null;
     let slope = null; let synthesized = false; // GB/day
-    if (pts.length >= 3) {
-      slope = linregSlope(pts.map((p) => p.ts / 86_400_000), pts.map((p) => p.avg));
+    if (g && g.points >= 3) {
+      slope = g.slope;
     } else if (mock) {
       synthesized = true; slope = Math.max(0, (d.capacityGB * 0.0008) + (hash(d.id) % 5) * 0.2); // 합성 증가율
     }
@@ -1651,10 +1645,11 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
     const freeGB = d.freeGB != null ? d.freeGB
       : d.usedGB != null && d.capacityGB > 0 ? Math.max(0, d.capacityGB - d.usedGB) : null;
     const daysToFull = freeGB != null && slope && slope > 0.01 ? Math.round(freeGB / slope) : null;
-    items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized });
+    items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized, growthPoints: g?.points ?? 0, growthSince: g?.firstTs ?? null });
   }
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
-  return { scope: vcId || 'all', mock, items };
+  // 추세의 근거(정직): 롤업만 · 기준 시각 · 오래됐는지 · 계산 오류. 롤업 도입 이전 구간은 쓰지 않는다(항목의 growthSince 가 첫 점).
+  return { scope: vcId || 'all', mock, items, growth: { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error } };
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 
 /**

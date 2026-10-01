@@ -6,6 +6,7 @@
  */
 
 import { getMetricsDb } from '../metrics/db.js';
+import { createYielder } from '../util/timeSlice.js';
 
 // 최소제곱 선형회귀. points=[{x(ms), y}] → { slopePerDay, intercept, r2 }.
 function linreg(points) {
@@ -32,7 +33,13 @@ export async function forecastCapacity(snap, opts = {}) {
   // 항상 시간당 롤업 경로를 타게 한다(/tools/capacity-forecast 가 120일·일버킷으로 안전히 쓰는 패턴).
   const days = Math.max(3, Math.min(1830, Number(opts.days) || 14));
   const since = Date.now() - days * DAY;
-  const bucketMs = Math.max(60, Math.min(1440, Number(opts.bucketMin) || 60)) * 60_000;
+  // v2.672(운영 장애 — capacity-forecast 와 같은 경로): 시간당 롤업**만** 읽는다(historyRollup — 원본 폴백 없음).
+  //   history() 는 롤업 도입 이전 원본이 남은 현장에서 days 가 롤업 나이보다 길면 원본으로 떨어진다(원본 보존 기본 5년 ·
+  //   ds_usedgb 는 분마다 저장) — 데이터스토어 수천 개 루프에서 그것이 포탈을 수 분씩 멈춘다. 롤업은 1시간 단위라
+  //   버킷도 1시간 정배수로 맞춘다(예: 90분 → 2시간 — 응답 config.bucketMin 이 실제 값을 말한다).
+  const bucketMs = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number(opts.bucketMin) || 60)) / 60)) * 3_600_000;
+  const readRollup = typeof db.historyRollup === 'function' ? db.historyRollup.bind(db) : null;
+  const maybeYield = createYielder(15);   // 시간 기준 양보(개수 기준은 한 건이 느리면 못 막는다)
   const minR2 = opts.minR2 != null ? Number(opts.minR2) : 0.3;
   const now = Date.now();
 
@@ -50,7 +57,8 @@ export async function forecastCapacity(snap, opts = {}) {
   }
 
   const fit = (metric, k, cap) => {
-    const hist = db.history(metric, k, since, bucketMs, 5000);
+    // 롤업 조회가 없는 구버전 db 객체면 예측을 만들지 않는다 — history() 로 되돌리면 원본 집계 경로가 된다.
+    const hist = readRollup ? readRollup(metric, k, since, bucketMs, 5000) : [];
     if (hist.length < 4) return null;
     const pts = hist.map((h) => ({ x: h.ts, y: h.avg }));
     const lr = linreg(pts);
@@ -67,6 +75,7 @@ export async function forecastCapacity(snap, opts = {}) {
   // 데이터스토어 포화 예측
   const datastores = [];
   for (const [id, meta] of dsCap) {
+    await maybeYield();
     if (!meta.cap) continue;
     const f = fit('ds_usedgb', id, meta.cap);
     if (!f) continue;
@@ -78,6 +87,7 @@ export async function forecastCapacity(snap, opts = {}) {
   const gpu = [];
   const gpuLatest = db.latestAll('gpu_vc');
   for (const [k] of gpuLatest) {
+    await maybeYield();
     if (vcFilter && k !== vcFilter) continue;
     if (allowed && !allowed.has(k)) continue; // scope: 범위 밖 vCenter GPU 예측 유출 차단(확정 버그)
     const f = fit('gpu_vc', k, 100);
@@ -87,7 +97,7 @@ export async function forecastCapacity(snap, opts = {}) {
   gpu.sort((a, b) => (a.daysToLimit ?? 1e9) - (b.daysToLimit ?? 1e9));
 
   return {
-    config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '' },
+    config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '', source: readRollup ? 'rollup' : 'unavailable' },
     scannedDatastores: dsCap.size,
     datastores: datastores.slice(0, 100),
     gpu: gpu.slice(0, 100),

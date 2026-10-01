@@ -177,6 +177,19 @@ function initSqlite() {
       latestAll: (metric) => new Map(latestAllCached(metric)), // 기존 계약(매 호출 새 Map) 유지 — 호출부 변형이 캐시를 오염시키지 않게
       history: implHistory,
       /**
+       * v2.672(운영 장애 — 이벤트 루프 64~70초 정지 반복): 시간당 롤업**만** 읽는 장기 버킷 조회. 원본(samples)으로 절대 떨어지지 않는다.
+       * history() 는 원본이 롤업보다 오래됐으면(롤업 도입 이전 데이터) 원본으로 폴백한다(v2.600 DB2600-02 — 한 계열 차트용 판단).
+       * 그런데 원본 보존 기본은 롤업과 같은 5년(rawRetentionDays 0)이고 ds_usedgb 는 변화분 저장 대상이 아니라 분마다 쌓인다 —
+       * 키 하나에 120일이면 원본 17만 행이고, 그것을 키 수천 개 루프에서 돌면 포탈 전체가 수 분씩 멈춘다(capacity-forecast 실사고).
+       * **여러 키를 도는 루프는 이것을 쓴다.** 대가: 롤업 도입 이전 구간은 결과에 없다(첫 점 시각으로 밝힌다).
+       * bucketMs 는 1시간 정배수로 맞춘다(최소 1시간) — 롤업보다 잘게 나눌 수 없다.
+       */
+      historyRollup: (metric, k, sinceTs, bucketMs, limit) => {
+        const b = Math.max(HOUR, Math.round((Number(bucketMs) || HOUR) / HOUR) * HOUR);
+        return bucketHourly.all(b, b, metric, k, sinceTs, limit).reverse()
+          .map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
+      },
+      /**
        * v2.660: [startTs, endTs) 버킷 조회(오름차순). 규칙은 history()·historyStep() 과 같다 —
        * 1시간 정배수 버킷은 롤업(롤업이 원본만큼 거슬러 올라갈 때), 짧은 버킷의 dead-band 계열은 step 채움.
        * 끝이 과거면 그 뒤의 실제 샘플로 선을 잇지 않는다(lastActualTs 는 창 안에서만 쓴다).
@@ -378,6 +391,8 @@ function initJson() {
       }
       return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([b, g]) => ({ ts: b, avg: round1(g.sum / g.n), min: round1(g.min), max: round1(g.max) }));
     },
+    // v2.672: NDJSON 폴백에는 롤업이 없다(전량 원본 · 개발용 소규모) — 같은 API 만 맞춘다. 버킷은 SQLite 판과 같이 1시간 정배수.
+    historyRollup(metric, k, sinceTs, bucketMs, limit) { return this.history(metric, k, sinceTs, Math.max(3_600_000, Math.round((Number(bucketMs) || 3_600_000) / 3_600_000) * 3_600_000), limit); },
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     keysOf: (metric) => { const out = new Set(); for (const r of rows) if (r.m === metric) out.add(r.k); return out; },
