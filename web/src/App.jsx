@@ -649,7 +649,8 @@ function Portal({ user, onLogout }) {
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-                  {health ? `${conn}/${total} vCenter` : '연결 중…'}
+                  {/* v2.675: 분모는 비활성을 뺀 수다(V6 pill·consoleData 와 같은 기준) — v2.617 이 '분모에서 뺐다' 고 적었지만 이 헤더는 전체를 쓰고 있었다. */}
+                  {health ? <span title={off > 0 ? `비활성 ${off}곳은 분모에서 뺐습니다(수집하지 않음)` : undefined}>{`${conn}/${Math.max(0, total - off)} vCenter`}</span> : '연결 중…'}
                   {health && (allOk ? <span style={{ color: '#4ade80', fontWeight: 700 }}> OK</span> : tail)}
                 </span>
                 {health?.generatedAt && <span className="muted" style={{ fontSize: 11, textAlign: 'center' }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}

@@ -29,7 +29,7 @@ export default function LoginFails() {
   };
   const loadAll = async () => { await loadStatus(); await loadAnalysis(); };
   useEffect(() => {
-    loadAll();
+    (async () => { await loadStatus(); await loadAnalysis(); })();   // loadAll 과 같은 순서(effect 가 loadAll 을 잡으면 의존성 경고가 난다)
     const t1 = setInterval(loadStatus, 30_000);
     const t2 = setInterval(loadAnalysis, ANALYSIS_REFRESH_MS);
     return () => { clearInterval(t1); clearInterval(t2); };

@@ -679,14 +679,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/compare/matrix` | — | [server/src/routes/api/compareMatrix.js:28](../server/src/routes/api/compareMatrix.js#L28) |
 | GET | `/datastores` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:398](../server/src/routes/api/inventory.js#L398) |
 | GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:406](../server/src/routes/api/inventory.js#L406) |
-| GET | `/health` | — | [server/src/routes/api/overviewNsx.js:129](../server/src/routes/api/overviewNsx.js#L129) |
+| GET | `/health` | — | [server/src/routes/api/overviewNsx.js:130](../server/src/routes/api/overviewNsx.js#L130) |
 | GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:241](../server/src/routes/api/inventory.js#L241) |
 | GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:133](../server/src/routes/api/vmMetrics.js#L133) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:189](../server/src/routes/api/vmMetrics.js#L189) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:417](../server/src/routes/api/inventory.js#L417) |
-| GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:224](../server/src/routes/api/overviewNsx.js#L224) |
-| GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:258](../server/src/routes/api/overviewNsx.js#L258) |
-| GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:175](../server/src/routes/api/overviewNsx.js#L175) |
+| GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:229](../server/src/routes/api/overviewNsx.js#L229) |
+| GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:263](../server/src/routes/api/overviewNsx.js#L263) |
+| GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:180](../server/src/routes/api/overviewNsx.js#L180) |
 | GET | `/overview/cards` | — | [server/src/routes/api/overviewCards.js:85](../server/src/routes/api/overviewCards.js#L85) |
 | GET | `/overview/trend` | — | [server/src/routes/api/overviewCards.js:140](../server/src/routes/api/overviewCards.js#L140) |
 | GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:110](../server/src/routes/api/perfClient.js#L110) |

@@ -182,6 +182,8 @@ describe('④ 하단 상태바 — 첫 수집 중·미수신이면 0 이 아니�
     expect(app).toMatch(/\{sbCounts\.hosts\}/);
     expect(app).not.toMatch(/\(health\?\.hosts \|\| 0\)/);
     expect(app).not.toMatch(/\(health\?\.vms \|\| 0\)/);
+    expect(app, '헤더 pill 분모가 비활성을 포함한다(V6 와 다른 숫자)').toMatch(/\$\{conn\}\/\$\{Math\.max\(0, total - off\)\} vCenter/);
+    expect(app).not.toMatch(/`\$\{conn\}\/\$\{total\} vCenter`/);
     const v6 = src('../version_6/V6Shell.jsx');
     expect(v6).toMatch(/const sb = statusCounts\(health\);/);
     expect(v6).toMatch(/sb\.pending \? '—' : fmtInt\(health\?\.hosts\)/);

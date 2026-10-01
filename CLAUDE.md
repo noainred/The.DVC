@@ -2289,9 +2289,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         **스냅샷과 무관한 캐시 + 동시 계산 1건**(stale-while-revalidate — 캐시가 없거나 새 키가 많을 때만 기다린다) · 양보는 **시간 기준**
         (`createYielder` — 개수 기준 금지). 구버전 db 객체(historyRollup 없음)면 `history()` 로 되돌리지 말고 오류로 밝힌다.
       · 대가(정직): 롤업 도입 이전 구간은 예측에 쓰지 않는다 — 항목 `growthPoints`·`growthSince`, 응답 `growth`(출처·기준 시각)로 밝힌다.
-      · ⚠ 남은 위험(다음 릴리스 첫 후보): 한 키 차트의 장기 조회(`history()`)는 여전히 원본으로 폴백할 수 있다(키당 약 0.5초 추정) ·
-        이상 탐지(`historyAll`, 10분 버킷)는 원본을 한 SQL 문으로 집계한다(기본 24시간 · 데이터스토어 1,100개면 약 158만 행) ·
-        근본 해법은 롤업 이전 원본을 롤업으로 옮기는 백필이다. 첫 수집 중 화면의 0 표시(가상 서버 0대 · 0/0 vCenter)도 남았다.
+      · ✅ (v2.672 가 남긴 위험 — **v2.675 에 고쳤다**, 아래 v2.675 항목) 한 키 차트의 원본 폴백은 롤업 백필(`metrics/rollupBackfill.js`)로 ·
+        이상 탐지의 원본 한 문장 집계는 `historyAllSliced`(1시간 조각 + 양보)로 · 첫 수집 중 0 표시는 첫 병합 전 골격(`initial`)으로.
+        ⚠ 백필이 끝나기 전(기동 5분 뒤 시작)에는 한 키 차트가 여전히 원본을 읽을 수 있다.
     - ⚠⚠ **v2.673 — 같은 날 두 번째 멈춤 지점: 로그인 실패 분석(`security/loginFails.js`)은 좁은 조건 1회 · 1시간 조각 · 주기 감시는 증분**
       (`logs/loginFailPattern.js` 판정 단일 소스 + `logs/db.js loginFailCandidates`, 회귀 `server/test/loginFails2673.test.js` — 변이 4종 전부 검출):
       · 증상: v2.672 를 적용하기 전 운영 stallwatch 가 `analyzeLoginFails` 에서 14초 넘게 멈춘 것을 잡았다. 로그인 실패 모니터는 **기본 켜짐 · 15분 주기**.
@@ -2301,7 +2301,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         더할 것(테스트가 갈래마다 실제 SQLite 로 '놓친 실패 0' 을 고정). 훑기는 **최근 1시간 조각부터 거슬러** 시간 기준 양보 · 첫 조각은 위가 열려 있다
         (vCenter 시계가 앞선 실패) · 상한은 실패에만(2만, 넘으면 `scan.truncated`). **주기 감시만 증분**(직전 2시간 재훑기 · 6시간마다 전 범위) — 화면 수동 분석은 언제나 전 범위.
       · ⚠ 비용은 메시지 LIKE 12개가 대부분이다(재현 100만 행: 행 읽기 0.25초 · 조건 전체 1.46초). 조건을 줄여 빠르게 하려면 놓치는 실패가 생긴다 — 그래서 증분을 택했다.
-      · 정직 기록: 2시간보다 늦게 수집된 옛 이벤트는 다음 6시간 전 범위 훑기까지 자동 감시 집계에서 빠질 수 있다. 화면은 아직 `scan`(조각·후보·잘림)을 표시하지 않는다.
+      · 정직 기록: 2시간보다 늦게 수집된 옛 이벤트는 다음 6시간 전 범위 훑기까지 자동 감시 집계에서 빠질 수 있다.
+        ✅ 화면의 `scan` 표시(훑은 기간·후보·조각·잘림·분석 시각)는 v2.675 에 넣었다(`views/loginFailsText.js scanNote`·`analyzedAtText`).
     - ⚠⚠ **v2.674 — 포탈 DB 용량 예측은 '파일에 남긴 일 표본의 기울기' 다. 메모리 표본만으로 예측하지 말 것**
       (`insights/portalDb.js` + `portal-db-size-history.json`(상태 파일) + 웹 `views/tools/portalDbText.js`, 사용자 신고 "1개월·6개월·1년 후가 안 나와" ·
       요청 "1주일 후 · 1일 증가량 추가". 회귀 `server/test/portalDbForecast2674.test.js` — 변이 5종(영속·일 기울기·짧은 관측·급감 처리·감소 고정) 전부 검출):
@@ -2327,6 +2328,42 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         다음 단계 안내(`--confirm`)도 래퍼가 넘긴 호출 형태(`OTP_ENROLL_CMD` — 예 `sudo vmware-portal-otp`)를 쓴다. 예전에는 언제나
         `node server/src/tools/otp-enroll.js` 를 안내해 그대로 따라 하면 CONFIG_DIR 이 달라졌다(회귀 `test/otpToolHint2674.test.js`).
       · ⚠ `registerStateFile('x.json')` 을 `path.join(config.configDir, …)` **안에** 넣지 말 것 — `scripts/config-doc.mjs` 가 그 리터럴 모양으로 파일을 찾아 문서에서 빠진다(이번에 185 → 184 로 줄었다).
+    - ⚠⚠ **v2.675 — 운영 멈춤 후보 정리: '행 수에 비례하는 동기 SQL' 을 기동·화면 경로에서 뺐다. 숫자는 합성 대용량 DB 실측이다**
+      (사용자 요청 "코드개선 해줘" · 선택: **운영 멈춤 후보 우선** · 전체 검증. 회귀 `server/test/stall2675.test.js`(9건) + 웹 `views/stall2675.test.js`(25건) —
+      **변이 37종 중 36종 검출**(남은 1종은 결과가 같은 동등 변이 — 백필 하한 시간의 원본이 비어 있는 경우)):
+      · **잰 방법**: 운영 규모 합성 DB — 지표 `ds_usedgb` 1,100키 × 분 단위 × 20일 = 3,168만 행·4.5GB(앞 12일은 롤업 도입 이전 원본) ·
+        iDRAC 전력 1,000대 × 15일 = 2,160만 행·1.9GB. `node --import` 느린 SQL 훅(prepare 가로채기)과 stallwatch 로 고치기 전·후를 **같은 코드 경로**로 쟀다.
+        ⚠ 운영 DB 로는 재지 못했다 — 운영 수치는 행 수에 비례해 달라진다(추정).
+      · ⚠⚠ **'키별 최신값' 을 `GROUP BY k` + `MAX(ts)` 로 만들지 말 것 — 인덱스를 건너뛰며 키를 찾는다(재귀 CTE, loose index scan)**:
+        지표 최신값 시드 14,722.9ms → 8.9ms · iDRAC 전력 최신값 시드 1,606ms → 44.8ms · 지표 키 목록(`keysOf`) 1,708.8ms → 11.1ms. 셋 다 기동 직후
+        첫 `getDb()`·첫 화면에서 돌았다. 결과는 예전과 같다(테스트 대조). 이 형태는 `(metric, k, ts)`·`(server_id, ts)` 인덱스가 있어야 빠르다 —
+        그 인덱스를 지우거나 GROUP BY 로 되돌리면 다시 행 수에 비례한다. v2.550.3 `usage_latest` · v2.292 `withLatestCache` 와 같은 교훈의 세 번째다.
+      · ⚠⚠ **`meta()`(MIN·MAX·COUNT 한 문장)를 화면 경로에서 부르지 말 것** — v2.550.3 '집계 둘 이상이면 풀스캔' 의 재발이었다(GPU 추이 메타 2,348.7ms).
+        `metaRange`(MIN·MAX **단독 문장** 2개 — 0.1ms) + 개수가 꼭 필요하면 `countAsync`(6시간 조각·양보 — 총 약 1.1초, 최장 멈춤 16.6ms). GPU series-meta 는 5분 기억.
+        비었는지 확인은 `EXISTS`(iDRAC 롤업 마이그레이션 판정이 기동마다 `COUNT(*)` 를 했다).
+      · ⚠⚠ **이상 탐지는 `historyAllSliced` — 원본 한 문장 집계(`historyAll`)를 요청 경로에서 쓰지 말 것**: 1시간 조각(버킷 정배수) · 맨 위 조각은 위가 열려 있다
+        (시계가 앞선 표본) · 최신 조각부터 키당 상한 · **마지막 조립도 키마다 양보**(조각만 나누면 조립에서 약 250ms 가 남았다 — 자체 측정으로 잡았다).
+        응답 16,297ms → 1,248ms · 최장 멈춤 1,934.9ms → 71.8ms. 결과는 `historyAll` 과 같다(6가지 조건 대조).
+      · **롤업 백필**(`metrics/rollupBackfill.js` — v2.672 가 '근본 해법' 이라 적은 것): 롤업 도입(v2.252) 이전 원본을 `samples_hourly` 로 **한 번** 옮긴다.
+        기동 5분 뒤(`METRICS_ROLLUP_BACKFILL_DELAY_MS`) · 키마다 최신 구간부터 · `INSERT OR IGNORE`(이미 있는 시간은 건드리지 않는다) · 재개 지점은 MIN(h) ·
+        끝나면 `samples_meta` 표지(다시 하지 않는다) · 40ms 일하고 80ms 쉰다 · 디스크 여유 가드(`METRICS_ROLLUP_BACKFILL_MIN_FREE_GB` 기본 5 — 미만이면
+        `disk-low` 로 멈추고 사유를 남긴다) · 진행이 없는 키는 건너뛰고 센다(`stuckKeys` — 무한 루프 방지) · `METRICS_ROLLUP_BACKFILL=0` 으로 끈다.
+        ⚠ **원본은 지우지 않는다**(보존 정책은 그대로). 실측 1,897만 행 → 시간당 31만 6,800행 · 153초 · 이전 중 멈춤 경고 0건 · 이전 뒤 한 키 365일 차트
+        56.4ms → 1.6ms. 상태는 `/admin/metrics/settings` 의 `status.rollupBackfill` → 웹 `rollupBackfillText.js`(범위 관리자에게는 state·시각만 — 키·행 수는
+        전 함대 집계). ⚠ 지연 env 는 `numOrNull` 로 읽는다(`KEY=` 빈 값은 미지정 — v2.618 BUG-1 규약). 백필 로그의 소요 시간은 **실제 시계**(주입한 now 아님).
+      · ⚠⚠ **첫 병합 전에는 '골격' 을 먼저 게시한다**(`store.publishSkeleton` — 등록부만으로 vCenter 별 상태: 대기·비활성·점검·site→대기·인증 정지→불가,
+        인벤토리 0, `initial:true`. 원장 동기화·전력 오버레이는 부르지 않는다). `/overview`·`/health` 가 `initial` 을 싣고, 화면은 그 동안 **0 이 아니라**
+        '첫 수집 중' 을 말한다 — 개요(엔지니어·경영·V6)는 `overviewCardsText.firstCollectNotice`, V6 서버 3구분은 null, 하단 상태바(개발 포탈·V6)는
+        `views/statusBarText.statusCounts`(한 벌 — 두 상태바가 같이 쓴다). `/metrics` 는 첫 수집 중 vCenter 를 0(다운)으로 내보내지 않는다.
+        ⚠ 응답의 개수 필드(hosts·vms…)는 구버전 화면 호환으로 0 그대로다 — **화면이 `initial` 을 먼저 볼 것**. 읽은 호스트가 없으면 `/health` 의
+        `cpuUsagePct` 는 null(예전 `|| 0` 은 '0%' 라는 거짓). 병합이 한 번 일어나면 다시 골격을 내지 않는다(`_merged`).
+      · 로그인 실패 분석: 반복 공격 판정을 대상마다 전체 실패를 다시 훑던 것(대상 × 실패)에서 **한 번 훑기**로(예전 구현과 대조 테스트) · 최근 창 기준은
+        분석 시각(`now`) · 응답 `scan` 에 `rowsMax`·`days` · 라우트는 같은 조건 60초 기억 + 동시 요청 합류(`snapMemo('loginFails')`), '지금 분석' 이 비운다 ·
+        화면은 분석 5분마다·상태 30초마다 부르고 훑은 범위·잘림·분석 시각을 말한다.
+      · 헤더 'N/M vCenter' 의 분모는 **비활성을 뺀 수**다 — v2.617 이 '헤더도 분모에서 뺐다' 고 적었지만 개발 포탈 헤더는 빠져 있었다(V6 와 숫자가 달랐다).
+      · ⚠ 작업 방식: ① `pkill -f '<패턴>'` 은 그 패턴을 담은 **자기 셸까지 죽인다**(exit 144) — PID 를 `/proc/<pid>/environ` 의 PORT 로 찾아 kill 할 것
+        ② 골격 화면은 첫 연결 시한(15초 × 재시도) 동안만 유지된다 — Chromium 확인은 서버 재시작 직후 곧바로 찍고, 그 순간의 `/health` 를 함께 기록한다
+        ③ 변이 검증의 드레인 루프는 횟수를 묶을 것(진행 없음 가드를 되돌리는 변이가 테스트를 무한 루프로 만든다 — 실제로 겪었다).
     - ⚠ **표 안의 클릭 가능한 텍스트에 `<a>` 기본 링크 색을 쓰지 말 것**(v2.527 사용자 신고
       "법인 글자가 파란색이라서 안보여"): 이 어두운 표에서 링크 파랑은 읽기 어렵다. **표의 다른
       글자와 같은 색**(`color:'inherit'`)을 쓰고 클릭 가능함은 **점선 밑줄**로 알린다
