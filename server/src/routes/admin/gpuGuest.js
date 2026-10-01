@@ -67,7 +67,11 @@ export function scopeSamplerStatus(status, allowed) {
   if (!allowed || !status || typeof status !== 'object') return status;
   const lr = status.lastRun;
   const at = lr && typeof lr === 'object' ? (lr.at ?? null) : null;
-  return { ...status, lastRun: lr == null ? lr : { at, rows: null, hostsWithTemp: null }, fleetCountsHidden: true };
+  // v2.675: 롤업 백필 상태의 키·행 수도 전 함대 집계다 — 범위 관리자에게는 진행 상태·시각·멈춘 사유만(사유는 집계가 아니다).
+  const rb = status.rollupBackfill && typeof status.rollupBackfill === 'object'
+    ? { state: status.rollupBackfill.state ?? null, startedAt: status.rollupBackfill.startedAt ?? null, finishedAt: status.rollupBackfill.finishedAt ?? null, lastError: status.rollupBackfill.lastError ?? null }
+    : status.rollupBackfill;
+  return { ...status, lastRun: lr == null ? lr : { at, rows: null, hostsWithTemp: null }, ...(rb !== undefined ? { rollupBackfill: rb } : {}), fleetCountsHidden: true };
 }
 
 export function registerGpuGuest(adminRouter) {

@@ -16,6 +16,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { pushAll } from '../util/pushAll.js';
+import { createYielder } from '../util/timeSlice.js';
 
 const DB_PATH = config.temp.dbPath; // reuse the temp/metrics DB path
 
@@ -51,11 +52,23 @@ function initSqlite() {
           PRIMARY KEY (metric, k, h)
         );
         CREATE INDEX IF NOT EXISTS idx_hourly_h ON samples_hourly (h); -- prune(h<?)용
+        -- v2.675: 작은 상태 표(롤업 백필 완료 표지 등). 행 수 몇 개.
+        CREATE TABLE IF NOT EXISTS samples_meta (key TEXT PRIMARY KEY, v TEXT);
       `);
     } catch (e) { try { db.close(); } catch { /* */ } throw e; } // 잠금으로 실패하면 핸들을 닫고 재시도(L2597-02)
     const ins = db.prepare('INSERT INTO samples (metric, k, v, ts) VALUES (?, ?, ?, ?)');
-    const latestAll = db.prepare(`SELECT s.k AS k, s.v AS v, s.ts AS ts FROM samples s
-      JOIN (SELECT k, MAX(ts) mts FROM samples WHERE metric=? GROUP BY k) m ON s.k=m.k AND s.ts=m.mts WHERE s.metric=?`);
+    // v2.675(운영 멈춤 후보 — 합성 3,168만 행 실측): 키별 최신값 시드는 **인덱스를 건너뛰며** 키를 찾는다(loose index scan).
+    //   예전 `JOIN (SELECT k, MAX(ts) … GROUP BY k)` 는 그 지표의 원본 전부(분 단위 × 보존 5년)를 훑어 14.7초 동안 포탈을 멈췄다
+    //   (/insights/anomalies 첫 요청 — stallwatch 스택 latestAllCached ← detectAnomalies). 이 형태는 키 수 × 인덱스 탐색 2회라 11ms 다.
+    //   ⚠ GROUP BY + MAX 로 되돌리지 말 것 — 행 수에 비례한다(키 수가 아니라).
+    const latestAll = db.prepare(`WITH RECURSIVE ks(k) AS (
+        SELECT (SELECT MIN(k) FROM samples WHERE metric=?1)
+        UNION ALL
+        SELECT (SELECT MIN(k) FROM samples WHERE metric=?1 AND k>ks.k) FROM ks WHERE ks.k IS NOT NULL)
+      SELECT ks.k AS k,
+        (SELECT v FROM samples WHERE metric=?1 AND k=ks.k ORDER BY ts DESC LIMIT 1) AS v,
+        (SELECT MAX(ts) FROM samples WHERE metric=?1 AND k=ks.k) AS ts
+      FROM ks WHERE ks.k IS NOT NULL`);
     // 최신 limit개 버킷을 선택(ASC+LIMIT은 오래된 것부터 잘라 최근 데이터가 사라짐 — 현재
     // 호출부는 limit이 커서 미발현이나 idrac.history와 정책을 통일). DESC로 뽑아 JS에서 되돌린다.
     const bucket = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
@@ -113,6 +126,35 @@ function initSqlite() {
     const bucketHourlyRange = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? AND h<? GROUP BY b ORDER BY b`);
     const rawRange = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? AND ts<? ORDER BY ts');
+    // v2.675(운영 멈춤 후보 — 합성 3,168만 행 실측): historyAllSliced 의 한 조각([lo, hi)). 한 문장으로 24시간 × 키 1,100 을
+    //   집계하면 1.9초 동안 포탈이 멈췄다(/insights/anomalies 60초마다). 조각은 최장 44ms 이고 합계도 929ms 로 줄었다.
+    const bucketAllRange = db.prepare(`SELECT k, CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
+      WHERE metric=? AND ts>=? AND ts<? GROUP BY k, b`);
+    // v2.675: meta() 의 COUNT(*) 는 그 지표의 원본 전부를 훑는다(2.3초 — v2.550.3 'aggregate 를 한 쿼리에 여럿 두지 말 것').
+    //   기간은 단독 집계(인덱스 끝점 0.1ms), 개수는 조각으로 나눠 세는 countAsync 가 맡는다.
+    const firstTsStmt = db.prepare('SELECT MIN(ts) AS mn FROM samples WHERE metric=?');
+    const lastTsStmt = db.prepare('SELECT MAX(ts) AS mx FROM samples WHERE metric=?');
+    const countRange = db.prepare('SELECT COUNT(*) AS n FROM samples WHERE metric=? AND ts>=? AND ts<?');
+    // v2.675: keysOf 의 DISTINCT 도 원본 전부를 훑었다(1.7초) — 키를 인덱스로 건너뛴다(원본·롤업 각각, loose index scan).
+    const rawKeysStmt = db.prepare(`WITH RECURSIVE ks(k) AS (
+        SELECT (SELECT MIN(k) FROM samples WHERE metric=?1)
+        UNION ALL SELECT (SELECT MIN(k) FROM samples WHERE metric=?1 AND k>ks.k) FROM ks WHERE ks.k IS NOT NULL)
+      SELECT k FROM ks WHERE k IS NOT NULL`);
+    const hourlyKeysStmt = db.prepare(`WITH RECURSIVE ks(k) AS (
+        SELECT (SELECT MIN(k) FROM samples_hourly WHERE metric=?1)
+        UNION ALL SELECT (SELECT MIN(k) FROM samples_hourly WHERE metric=?1 AND k>ks.k) FROM ks WHERE ks.k IS NOT NULL)
+      SELECT k FROM ks WHERE k IS NOT NULL`);
+    const metricsStmt = db.prepare(`WITH RECURSIVE ms(m) AS (
+        SELECT (SELECT MIN(metric) FROM samples)
+        UNION ALL SELECT (SELECT MIN(metric) FROM samples WHERE metric>ms.m) FROM ms WHERE ms.m IS NOT NULL)
+      SELECT m FROM ms WHERE m IS NOT NULL`);
+    // v2.675 롤업 백필 — 롤업 도입(v2.252) 이전 원본을 시간당 롤업으로 옮긴다(history() 의 원본 폴백을 없애는 근본 해법, v2.672 남은 일).
+    const rawMaxBefore = db.prepare('SELECT MAX(ts) AS t FROM samples WHERE metric=? AND k=? AND ts<?');
+    const rawHourAgg = db.prepare(`SELECT CAST(ts/3600000 AS INTEGER)*3600000 AS h, COUNT(*) AS n, SUM(v) AS s, MIN(v) AS mn, MAX(v) AS mx
+      FROM samples WHERE metric=? AND k=? AND ts>=? AND ts<? GROUP BY h`);
+    const insHourIgnore = db.prepare('INSERT OR IGNORE INTO samples_hourly (metric, k, h, n, sum, mn, mx) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    const metaGet = db.prepare('SELECT v FROM samples_meta WHERE key=?');
+    const metaSet = db.prepare('INSERT INTO samples_meta (key, v) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET v=excluded.v');
     // dead-band 상태(v2.451): `${metric} ${k}` -> 마지막으로 **원본에 저장한** 샘플.
     // 프로세스 메모리에만 둔다 — 재시작하면 각 계열의 첫 샘플이 한 번 더 저장될 뿐이라 안전하다.
     // 크기는 (계열 x 키) 로 유계(호스트 658 + 클러스터/vCenter 집계 수준).
@@ -123,7 +165,7 @@ function initSqlite() {
       let c = latestCache.get(metric);
       if (!c) {
         c = new Map();
-        for (const r of latestAll.all(metric, metric)) c.set(r.k, { v: r.v, ts: r.ts });
+        for (const r of latestAll.all(metric)) if (r.ts != null) c.set(r.k, { v: r.v, ts: r.ts });
         latestCache.set(metric, c);
       }
       return c;
@@ -283,6 +325,103 @@ function initSqlite() {
         if (limitPerKey) for (const [k, arr] of out) if (arr.length > limitPerKey) out.set(k, arr.slice(-limitPerKey));
         return out;
       },
+      /**
+       * v2.675: historyAll 의 조각판(비동기 — 이상 탐지용). 결과는 historyAll 과 같다(테스트가 대조): 키별 [since, ∞) 의
+       * 최근 limitPerKey 개 버킷, 오름차순. [since, ∞) 를 **버킷 경계에 맞춘 약 1시간 조각**으로 나눠 최근 조각부터 집계하고
+       * 조각 사이에 양보한다 — 버킷이 조각 경계를 걸치지 않으므로 집계가 정확하다. 맨 위 조각은 위가 열려 있다(시계가 앞선 표본).
+       * 키당 보관은 상한 + 한 조각분으로 묶인다(예전 ROW_NUMBER 와 같은 메모리 상한 — 1분 버킷 7일 × 키 수천에서도).
+       */
+      historyAllSliced: async (metric, sinceTs, bucketMs, limitPerKey, opts = {}) => {
+        const B = Math.max(1, Math.round(Number(bucketMs) || 60_000));
+        const sliceMs = B * Math.max(1, Math.round(HOUR / B));
+        const nowTs = Number.isFinite(opts.nowTs) ? opts.nowTs : Date.now();
+        const maybeYield = typeof opts.maybeYield === 'function' ? opts.maybeYield : createYielder(15);
+        const cap = limitPerKey > 0 ? limitPerKey : Infinity;
+        const acc = new Map();
+        let hi = 8.64e15; // 위가 열린 첫 조각(Date 상한)
+        let lo = Math.floor(nowTs / sliceMs) * sliceMs;
+        for (;;) {
+          const lower = Math.max(sinceTs, lo);
+          if (lower < hi) {
+            // 이 조각 전에 이미 상한만큼 찬 키는 더 오래된 버킷이 필요 없다(최근부터 모은다).
+            const rows = bucketAllRange.all(B, B, metric, lower, hi);
+            const full = new Set();
+            for (const [k, arr] of acc) if (arr.length >= cap) full.add(k);
+            for (const r of rows) {
+              if (full.has(r.k)) continue;
+              let arr = acc.get(r.k);
+              if (!arr) { arr = []; acc.set(r.k, arr); }
+              arr.push(r);
+            }
+          }
+          if (lower <= sinceTs) break;
+          hi = lower; lo -= sliceMs;
+          await maybeYield();
+        }
+        const out = new Map();
+        // 키 순서는 historyAll(ORDER BY k)과 맞춘다 — 조각마다 처음 본 순서로 두면 호출마다 순서가 흔들린다.
+        for (const k of [...acc.keys()].sort()) {
+          const arr = acc.get(k);
+          arr.sort((a, b) => a.b - b.b);
+          const kept = arr.length > cap ? arr.slice(-cap) : arr;
+          out.set(k, kept.map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })));
+        }
+        return out;
+      },
+      /** v2.675: 지표의 첫/마지막 관측 시각만(단독 집계 둘 — 인덱스 끝점). meta() 의 COUNT 없이 기간이 필요한 곳용. */
+      metaRange: (metric) => ({ firstTs: firstTsStmt.get(metric)?.mn ?? null, lastTs: lastTsStmt.get(metric)?.mx ?? null }),
+      /**
+       * v2.675: 지표의 원본 행 수를 시간 조각(기본 6시간)으로 나눠 센다(비동기 — 조각 사이 양보). 한 번에 세면 지표 원본 전부를
+       * 동기로 훑는다(합성 3,168만 행 2.3초). 세는 동안 들어온 행은 들어갈 수도 빠질 수도 있다(표시용 근사).
+       */
+      countAsync: async (metric, opts = {}) => {
+        const mn = firstTsStmt.get(metric)?.mn;
+        const mx = lastTsStmt.get(metric)?.mx;
+        if (mn == null || mx == null) return 0;
+        const step = Number.isFinite(opts.sliceMs) && opts.sliceMs > 0 ? opts.sliceMs : 6 * HOUR;
+        const maybeYield = typeof opts.maybeYield === 'function' ? opts.maybeYield : createYielder(15);
+        let n = 0;
+        for (let lo = mn; lo <= mx; lo += step) {
+          n += Number(countRange.get(metric, lo, lo + step)?.n || 0);
+          await maybeYield();
+        }
+        return n;
+      },
+      /** v2.675 롤업 백필 — 원본이 있는 지표 목록(인덱스로 건너뛰며 찾는다). */
+      rollupBackfillMetrics: () => metricsStmt.all().map((r) => r.m),
+      /** v2.675 롤업 백필 — 그 지표의 원본 키 목록(인덱스로 건너뛰며 찾는다). */
+      rollupBackfillKeys: (metric) => rawKeysStmt.all(metric).map((r) => r.k),
+      /**
+       * v2.675 롤업 백필 한 걸음: 키 하나의 '롤업 첫 시각보다 이른 원본' 을 **최근 쪽부터** chunkHours 만큼 시간당으로 묶어
+       * 롤업에 넣는다(INSERT OR IGNORE — 있는 시간은 건드리지 않는다. 롤업은 MIN(h) 이전에 행이 없으므로 겹치지 않는다).
+       * ⚠ 최근 쪽부터 가는 이유: 중간에 멈추면 롤업의 첫 시각(MIN(h))이 '여기까지 채웠다' 는 표지가 된다. 오래된 쪽부터 가면
+       *   멈춘 뒤 가운데 구간이 영영 빈다(다음 실행은 MIN(h) 이전만 본다). 그래서 진행 상태를 따로 저장하지 않아도 이어진다.
+       * 롤업 도입(v2.252) 이전 원본은 dead-band(v2.451) 이전이라 전량 원본이다 — 시간당 n·합·최소·최대가 정확하다.
+       * @param {{minTs?:number, chunkHours?:number, capTs?:number}} opts minTs: 이보다 오래된 원본은 옮기지 않는다(롤업 보존 밖).
+       *   capTs: 롤업이 아예 없는 키의 상한(실행 시작 시각의 정시 — 적재 경로가 그 뒤 시간을 쓴다).
+       * @returns {{done:boolean, rows:number, hours:number}}
+       */
+      rollupBackfillStep: (metric, k, opts = {}) => {
+        const minTs = Number.isFinite(opts.minTs) ? opts.minTs : 0;
+        const chunkHours = Math.max(1, Math.round(Number(opts.chunkHours) || 24));
+        const first = hourlyMin.get(metric, k)?.mn;
+        const boundary = first != null ? first : (Number.isFinite(opts.capTs) ? opts.capTs : Math.floor(Date.now() / HOUR) * HOUR);
+        const prev = rawMaxBefore.get(metric, k, boundary)?.t;
+        if (prev == null || prev < minTs) return { done: true, rows: 0, hours: 0 };
+        const hi = Math.min(boundary, Math.floor(prev / HOUR) * HOUR + HOUR);
+        const lo = Math.max(Math.floor(minTs / HOUR) * HOUR, hi - chunkHours * HOUR);
+        const agg = rawHourAgg.all(metric, k, lo, hi);
+        let rows = 0, hours = 0;
+        db.exec('BEGIN');
+        try {
+          for (const a of agg) { rows += Number(a.n); hours += Number(insHourIgnore.run(metric, k, a.h, a.n, a.s, a.mn, a.mx).changes || 0); }
+          db.exec('COMMIT');
+        } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+        return { done: false, rows, hours };
+      },
+      /** v2.675: 작은 상태 표(samples_meta) 읽기/쓰기 — 롤업 백필 완료 표지. 값은 JSON. */
+      metaValue: (key) => { const r = metaGet.get(String(key)); if (!r) return null; try { return JSON.parse(r.v); } catch { return null; } },
+      setMetaValue: (key, value) => { metaSet.run(String(key), JSON.stringify(value)); },
       recentAvg: implRecentAvg,
       meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
       /**
@@ -298,9 +437,10 @@ function initSqlite() {
         return m;
       },
       keysOf: (metric) => {
+        // v2.675: DISTINCT 는 원본 전부를 훑었다(합성 3,168만 행 1.7초) — 키를 인덱스로 건너뛴다(키 수 × 인덱스 탐색).
         const out = new Set();
-        try { for (const r of db.prepare('SELECT DISTINCT k FROM samples_hourly WHERE metric=?').all(metric)) out.add(r.k); } catch { /* 구버전 */ }
-        try { for (const r of db.prepare('SELECT DISTINCT k FROM samples WHERE metric=?').all(metric)) out.add(r.k); } catch { /* */ }
+        try { for (const r of hourlyKeysStmt.all(metric)) out.add(r.k); } catch { /* 구버전 */ }
+        try { for (const r of rawKeysStmt.all(metric)) out.add(r.k); } catch { /* */ }
         return out;
       },
       metaKey: (metric, k) => {
@@ -380,6 +520,10 @@ function initJson() {
       const map = new Map(); for (const [k, g] of agg) map.set(k, { avg: round1(g.sum / g.n), max: round1(g.max) }); return map;
     },
     meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
+    // v2.675: SQLite 판과 같은 API 만 맞춘다(NDJSON 은 개발용 소규모 — 조각·양보가 필요 없다).
+    async historyAllSliced(metric, sinceTs, bucketMs, limitPerKey) { return this.historyAll(metric, sinceTs, bucketMs, limitPerKey); },
+    metaRange(metric) { const m = this.meta(metric); return { firstTs: m.firstTs, lastTs: m.lastTs }; },
+    async countAsync(metric) { return this.meta(metric).count; },
     // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
     // v2.620(SRV2620-02): NDJSON 폴백은 dead-band 를 쓰지 않아(전량 저장) step 조회가 곧 일반 조회다 — 같은 API 만 맞춘다.
     historyRange(metric, k, startTs, endTs, bucketMs) {

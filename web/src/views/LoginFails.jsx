@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
 import { STable } from '../components/STable.jsx';
+import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS } from './loginFailsText.js';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -16,15 +17,23 @@ export default function LoginFails() {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const loadAll = async () => {
-    try {
-      const st = await fetchJson('/admin/security/login-fails/status');
-      setS((cur) => cur || st.settings);
-      const an = await fetchJson('/admin/security/login-fails');
-      setD(an); setErr(null);
-    } catch (e) { setErr(e.message); }
+  // v2.675: 분석(7일치 전 범위)은 무겁다 — 예전에는 30초마다 다시 불러 서버가 매번 전 범위를 다시 훑었다. 설정·상태는 가볍게
+  //   30초마다, 분석 결과는 ANALYSIS_REFRESH_MS 마다(서버도 같은 조건을 60초 기억한다). '지금 분석'·'새로고침' 은 바로 부른다.
+  const loadStatus = async () => {
+    try { const st = await fetchJson('/admin/security/login-fails/status'); setS((cur) => cur || st.settings); setErr(null); }
+    catch (e) { setErr(e.message); }
   };
-  useEffect(() => { loadAll(); const t = setInterval(loadAll, 30_000); return () => clearInterval(t); }, []);
+  const loadAnalysis = async () => {
+    try { const an = await fetchJson('/admin/security/login-fails'); setD(an); setErr(null); }
+    catch (e) { setErr(e.message); }
+  };
+  const loadAll = async () => { await loadStatus(); await loadAnalysis(); };
+  useEffect(() => {
+    loadAll();
+    const t1 = setInterval(loadStatus, 30_000);
+    const t2 = setInterval(loadAnalysis, ANALYSIS_REFRESH_MS);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, []);
   if (err && !s && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!s || !d) return <Loading />;
 
@@ -52,12 +61,25 @@ export default function LoginFails() {
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
           <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={save}>저장</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={run}>지금 분석</button>
+          <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'reload'} onClick={async () => { setBusy('reload'); try { await loadAnalysis(); } finally { setBusy(''); } }} title="분석 결과를 다시 불러옵니다(같은 조건은 서버가 1분 동안 기억합니다)">새로고침</button>
           {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
         </div>
       </div>
 
       <GuestScanJobs type="login-fails" />
 
+      {(() => {
+        // v2.675: 무엇을 얼마나 훑었는지·잘렸는지·언제 분석한 값인지 — 잘렸는데 '총 실패' 가 전부인 것처럼 보이지 않게(v2.673 남은 일).
+        const sn = scanNote(d.scan);
+        const at = analyzedAtText(d.generatedAt);
+        if (!sn.text && !sn.warn && !at) return null;
+        return (
+          <div style={{ marginBottom: 8, fontSize: 12 }}>
+            {(at || sn.text) && <div className="muted">{[at, sn.text].filter(Boolean).join(' · ')}</div>}
+            {sn.warn && <div className="banner" style={{ marginTop: 4 }}>⚠ {sn.warn}</div>}
+          </div>
+        );
+      })()}
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         {[['총 실패', sm.total], ['vCenter', sm.vcenter], ['포탈', sm.portal], ['관련 계정', sm.users], ['관련 IP', sm.ips], ['브루트포스', sm.offenders, sm.offenders ? '#f59e0b' : ''], ['활성 공격', sm.active, sm.active ? '#ef4444' : '#22c55e']].map(([l, v, c]) => (
           <div key={l} className="card" style={{ padding: '10px 14px', minWidth: 96 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c || 'inherit' }}>{v}</div></div>

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **576개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **579개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-01)
@@ -221,7 +221,7 @@
 | `LOGS_META_TTL_MS` | `300000` |  | logs/db.js |
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
-## 메트릭 수집 (10)
+## 메트릭 수집 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -230,6 +230,9 @@
 | `METRICS_DEADBAND_MAX_GAP_MS` | `1800000` |  | metrics/deadband.js |
 | `METRICS_DEADBAND_POWER_W` | `3` |  | metrics/deadband.js |
 | `METRICS_DEADBAND_TEMP_C` | `0.5` |  | metrics/deadband.js |
+| `METRICS_ROLLUP_BACKFILL` | `''` |  | metrics/rollupBackfill.js |
+| `METRICS_ROLLUP_BACKFILL_DELAY_MS` |  |  | metrics/rollupBackfill.js |
+| `METRICS_ROLLUP_BACKFILL_MIN_FREE_GB` | `5` |  | metrics/rollupBackfill.js |
 | `VMPERF_DB_DIR` |  |  | metrics/vmperfDb.js |
 | `VMPERF_ENABLED` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
 | `VMPERF_MAX_OPEN_DB` |  |  | metrics/vmperfDb.js |
@@ -760,4 +763,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 576
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 579

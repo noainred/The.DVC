@@ -16,6 +16,34 @@ export function capText(b) {
   const tb = Number(b) / 1e12;
   return tb >= 1000 ? `${(tb / 1000).toFixed(2)} PB` : `${tb >= 100 ? nf.format(Math.round(tb)) : tb.toFixed(1)} TB`;
 }
+/**
+ * v2.675(v2.672 남은 일 — '첫 수집 중 화면의 0 표시'): 첫 병합 전 골격(/overview 의 initial)이면 인벤토리를 아직 하나도 읽지
+ * 않았다 — 0 대·0 호스트를 그리지 않고 이 안내를 보인다. 골격이 아니면 null(평소 화면).
+ * 동시성·데드라인 숫자는 문구에 박지 않는다(서버 설정으로 바뀐다 — v2.509 규약).
+ * @returns {{title:string, detail:string}|null}
+ */
+export function firstCollectNotice(ov) {
+  if (!ov || ov.initial !== true) return null;
+  const g = ov.global || {};
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const total = num(g.vcenters);
+  const off = num(g.vcentersDisabled);
+  const maint = num(g.vcentersMaintenance);
+  const unreach = num(g.vcentersUnreachable);
+  const pending = num(g.vcentersPending);
+  // 골격의 vCenter 는 비활성·점검 중·인증 정지(unreachable) 가 아니면 전부 첫 수집 중(pending)이다 — pending 이 0 이면 읽을 것이 없어
+  //   병합이 곧 끝난다('마무리'). 등록이 없거나 전부 꺼져 있으면 기다려도 채워지지 않으므로 조치를 말한다.
+  const [title, first] = pending > 0
+    ? [`첫 수집 중 — vCenter ${nf.format(pending)}곳을 처음 읽고 있습니다`, '끝나면 이 화면이 채워집니다. vCenter 수와 회선 지연에 따라 몇 분 걸릴 수 있습니다.']
+    : total === 0 ? ['등록된 vCenter 가 없습니다', '설정 › vCenter 에서 등록하면 수집을 시작합니다.']
+      : total - off === 0 ? ['켜진 vCenter 가 없습니다', '설정 › vCenter 에서 켜면 수집을 시작합니다.']
+        : ['첫 수집을 마무리하고 있습니다', '곧 이 화면이 채워집니다.'];
+  const parts = [first];
+  if (unreach > 0) parts.push(`인증 실패로 수집을 멈춘 vCenter ${nf.format(unreach)}곳은 기다려도 채워지지 않습니다 — 설정 › vCenter 에서 계정을 확인하세요.`);
+  if (maint > 0) parts.push(`점검 중 ${nf.format(maint)}곳은 수집하지 않습니다.`);
+  if (off > 0) parts.push(`비활성 ${nf.format(off)}곳은 제외했습니다.`);
+  return { title, detail: parts.join(' ') };
+}
 /** 측정 장비가 없는 칸(0 W)은 '—' — 0 kW 는 '전력 0' 으로 읽힌다. */
 export const kwOrDash = (w) => (Number(w) > 0 ? kwText(w) : '—');
 export const wText = (w) => (w == null || !Number.isFinite(Number(w)) ? '—' : `${nf.format(Math.round(Number(w)))} W`);

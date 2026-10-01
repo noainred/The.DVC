@@ -13,6 +13,7 @@ import { store, usageReadable } from './../store.js';
 const HOST_CPU_SERIES = String(process.env.HOST_CPU_SERIES ?? '').trim() !== '0';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
+import { rollupBackfillStatus, scheduleRollupBackfill } from './rollupBackfill.js'; // v2.675: 롤업 도입 이전 원본 → 시간당 롤업
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { loadGpuGuestSettings } from '../gpu/settings.js';
 import { updateVmStats } from '../reports/vmStats.js';
@@ -453,7 +454,7 @@ const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();
-  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun };
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun, rollupBackfill: rollupBackfillStatus() };
 }
 
 /** (Re)arm the periodic timer from the current effective settings. */
@@ -474,4 +475,6 @@ export function startMetricsSampler() {
   timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
   timer.unref?.();
   console.log(`[metrics] sampler started (every ${Math.round(sampleIntervalMs / 1000)}s, retention ${retentionDays}d)`);
+  // v2.675: 롤업 도입(v2.252) 이전 원본을 시간당 롤업으로 옮긴다(긴 기간 차트가 원본으로 떨어지지 않게). 기동 5분 뒤 · 천천히 · 1회.
+  scheduleRollupBackfill();
 }

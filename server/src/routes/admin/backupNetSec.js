@@ -20,12 +20,16 @@ import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../..
 import { denyScopedRun } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
 import { analyzeLoginFails } from '../../security/loginFails.js';
+import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
 import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
 import { dirPathIssue } from '../../util/dirPathGuard.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+
+// v2.675: 로그인 실패 분석 화면 조회 기억 시간(같은 조건 · 동시 요청 합류). '지금 분석' 이 비운다.
+export const LOGIN_FAILS_MEMO_MS = 60_000;
 
 // v2.612 AUTHZ2612-07: 엣지 목록·네트워크 모니터·캡처·로그인 실패 상태는 전 법인 공용 — 범위 제한 admin 은 403.
 const fleetOnly = fullScopeOnlyWith('엣지 네트워크 진단·로그인 실패 상태는 전 법인에 걸친 데이터라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
@@ -262,12 +266,20 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   // v2.607 AUTHZ2607-06: 이 분석에는 **포탈 로그인 실패**(전 사용자 계정명·출발 IP)가 vCenter 지정과 무관하게 섞인다 —
   //   법인 축으로 나눌 수 없으므로 범위 계정 403(v2.525 규약).
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 분석에는 포탈 전체 로그인 실패가 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
-  try { res.json(await analyzeLoginFails({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || loadLoginMonitor().days, threshold: Number(req.query.threshold) || loadLoginMonitor().threshold, windowMin: Number(req.query.windowMin) || loadLoginMonitor().windowMin })); }
+  try {
+    const mon = loadLoginMonitor();
+    const p = { vcenterId: String(req.query.vcenterId || ''), days: Number(req.query.days) || mon.days, threshold: Number(req.query.threshold) || mon.threshold, windowMin: Number(req.query.windowMin) || mon.windowMin };
+    // v2.675: 화면이 이 경로를 주기적으로 부른다 — 요청마다 7일치 전 범위 분석(v2.673 이후 조각으로 나눠 멈춤은 없지만 매번 같은
+    //   일 — 이벤트 100만 행에 약 1.5초 CPU)을 하지 않게 같은 조건은 60초 기억하고 동시 요청은 한 계산에 합류시킨다.
+    //   '지금 분석' 은 이 기억을 비운다(아래 /run). 응답의 generatedAt 이 분석 시각이다(화면이 밝힌다).
+    const key = `loginfails|${p.vcenterId}|${p.days}|${p.threshold}|${p.windowMin}`;
+    res.json(await snapMemo('loginFails', key, LOGIN_FAILS_MEMO_MS, () => analyzeLoginFails(p)));
+  }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json(loginMonitorStatus()));
 adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => (scopedVcenterIds(req.user, store.get()) ? res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.' }) : res.json(saveLoginMonitor(req.body || {}))));
-adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); snapCacheClear('loginFails'); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 네트워크 이슈(패킷드랍/에러) 분석.
 adminRouter.get('/security/net-issues', adminOnly, (req, res) => { const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return; try { res.json(analyzeNetIssues({ vcenterId, days: Number(req.query.days) || 7 })); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });

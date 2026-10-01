@@ -16,7 +16,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson, can, toolAllowed } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
-import { capText, kwText, countText, cardMeta } from './overviewCardsText.js';
+import { capText, kwText, countText, cardMeta, firstCollectNotice } from './overviewCardsText.js';
 import {
   headline, subline, briefingStamp, gauges, regionCards, siteRowsExec, sortSiteRows, usageTone, TONE_VAR,
   sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, TREND_DAYS, DAYS_KEY, normDays,
@@ -58,7 +58,13 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
   if (loading && !ov) return <Loading />;
   if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return null;
-  if (!g) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>수집 준비 중… (첫 vCenter 수집 완료 후 표시)</div>;
+  // v2.675: 첫 병합 전 골격(initial)이면 0 대·'정상 운영 중' 헤드라인을 그리지 않는다(firstCollectNotice).
+  const fc = firstCollectNotice(ov);
+  if (!g || fc) return (
+    <div className="muted" style={{ padding: 40, textAlign: 'center' }}>
+      {fc ? <><b style={{ color: 'var(--text)' }}>{fc.title}</b><br />{fc.detail}</> : '수집 준비 중… (첫 vCenter 수집 완료 후 표시)'}
+    </div>
+  );
 
   const head = headline(g);
   const pbc = ov.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;

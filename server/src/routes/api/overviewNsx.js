@@ -204,6 +204,8 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
     : (Array.isArray(sink.servers) ? { ...physicalCapacity(sink.servers), scoped: true } : null);
   return {
     generatedAt: snap.generatedAt, source: snap.source, ...rollups,
+    // v2.675: 첫 병합 전 골격(store.publishSkeleton) — 화면이 0 대신 '첫 수집 중' 을 말한다(인벤토리를 아직 읽지 않았다).
+    ...(snap.initial ? { initial: true } : {}),
     gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN,
     physical,
     physicalByCorp: pbc,

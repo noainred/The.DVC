@@ -20,6 +20,7 @@ import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJ
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
+import { snapMemo } from '../../util/snapCache.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -231,7 +232,8 @@ async function gpuSeriesExportCsvStream(req, res) {
   const hostMap = new Map();
   for (const h of snap.hosts || []) hostMap.set(h.id, h);
   const db = await getMetricsDb();
-  const meta = db.meta('gpu_util');
+  // v2.675: 시작 시각만 쓴다 — meta() 의 COUNT(*) 는 gpu_util 원본 전부를 동기로 훑는다(합성 3,168만 행 2.3초).
+  const meta = typeof db.metaRange === 'function' ? db.metaRange('gpu_util') : db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
   const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
@@ -303,7 +305,8 @@ async function gpuSeriesExportJsonStream(req, res) {
   const hostMap = new Map();
   for (const h of snap.hosts || []) hostMap.set(h.id, h);
   const db = await getMetricsDb();
-  const meta = db.meta('gpu_util');
+  // v2.675: 시작 시각만 쓴다 — meta() 의 COUNT(*) 는 gpu_util 원본 전부를 동기로 훑는다(합성 3,168만 행 2.3초).
+  const meta = typeof db.metaRange === 'function' ? db.metaRange('gpu_util') : db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
   const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
@@ -472,8 +475,15 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
 api.get('/tools/gpu/series-meta', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getMetricsDb();
-    const m = db.meta('gpu_util');
-    res.json({ collectedSince: m.firstTs, latestAt: m.lastTs, sampleCount: m.count });
+    // v2.675(운영 멈춤 후보): meta() 는 MIN·MAX·COUNT 를 한 문장으로 세어 gpu_util 원본 전부를 동기로 훑었다(창을 열 때마다 —
+    //   합성 3,168만 행 2.3초). 기간은 단독 집계(인덱스 끝점), 표본 수는 6시간 조각으로 나눠 세고(양보) 5분 기억한다 —
+    //   여러 사람이 창을 열어도 한 번만 센다(single-flight).
+    const payload = await snapMemo('gpuSeriesMeta', 'gpuSeriesMeta|gpu_util', 5 * 60_000, async () => {
+      const r = typeof db.metaRange === 'function' ? db.metaRange('gpu_util') : db.meta('gpu_util');
+      const sampleCount = typeof db.countAsync === 'function' ? await db.countAsync('gpu_util') : Number(r.count || 0);
+      return { collectedSince: r.firstTs, latestAt: r.lastTs, sampleCount };
+    });
+    res.json(payload);
   } catch { res.json({ collectedSince: null, latestAt: null, sampleCount: 0 }); }
 });
 api.get('/tools/gpu/export.csv', csvPerm, requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'csv'));

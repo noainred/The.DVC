@@ -12,7 +12,7 @@ import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
 import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.631(감사 WEB2631-02)
 import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
-import { countText, capText, kwText, cardMeta } from './overviewCardsText.js'; // v2.664 카드 8장
+import { countText, capText, kwText, cardMeta, firstCollectNotice } from './overviewCardsText.js'; // v2.664 카드 8장 · v2.675 첫 수집 안내
 
 import { chartGroup, REGION_ORDER } from './execOverviewText.js'; // v2.670 리전 차트 묶음(region-chart-change.md)
 
@@ -37,7 +37,13 @@ export default function Overview({ onSelectSite, onGotoTab, modeToggle = null })
   // 서버 첫 수집 완료 전에는 rollups(=global)가 없다 — 방어 없이 g.vcentersConnected 접근 시
   // TypeError 로 대시보드가 크래시한다(재시작 직후 실제 발생). /health 는 rollups?.global||{} 로
   // 이미 방어하므로 여기서도 수집 완료 전이면 로딩으로 처리한다(v2.385).
-  if (!ov.global) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>수집 준비 중… (첫 vCenter 수집 완료 후 표시)</div>;
+  // v2.675: 서버가 첫 병합 전 골격(initial)을 주면 0 을 그리지 않고 '첫 수집 중' 을 말한다(firstCollectNotice).
+  const fc = firstCollectNotice(ov);
+  if (!ov.global || fc) return (
+    <div className="muted" style={{ padding: 40, textAlign: 'center' }}>
+      {fc ? <><b style={{ color: 'var(--text)' }}>{fc.title}</b><br />{fc.detail}</> : '수집 준비 중… (첫 vCenter 수집 완료 후 표시)'}
+    </div>
+  );
 
   const g = ov.global;
   // v2.593(감사 DATA-05): 분모가 0 이면(호스트·데이터스토어 0 — 범위 계정의 vCenter 가 전부 연결 불가일 때 등) 서버 pct() 가

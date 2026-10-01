@@ -55,10 +55,11 @@ function initSqlite() {
     // 구버전 DB(원시 샘플만 있고 롤업이 비어 있음) 최초 마이그레이션: 기존 원시 데이터를 1회 백필.
     // (풀스캔 1회 — 신규 설치는 원시가 비어 즉시 통과, 기존 설치는 기동 시 1회만 수행.)
     try {
-      const hh = db.prepare('SELECT COUNT(*) AS n FROM power_hourly').get();
-      if (!hh.n) {
-        const ps = db.prepare('SELECT COUNT(*) AS n FROM power_samples').get();
-        if (ps.n) {
+      // v2.675: '비었는가' 는 EXISTS 로(첫 행에서 멈춘다). 예전 COUNT(*) 는 기동마다 롤업 전부(운영 90일 × 서버 1천 ≈ 216만 행)를 셌다.
+      const hh = db.prepare('SELECT EXISTS(SELECT 1 FROM power_hourly) AS has').get();
+      if (!hh.has) {
+        const ps = db.prepare('SELECT EXISTS(SELECT 1 FROM power_samples) AS has').get();
+        if (ps.has) {
           db.exec(`INSERT INTO power_hourly (server_id, hb, sumw, cnt, maxw, minw, last_ts)
             SELECT server_id, CAST(ts / 3600000 AS INTEGER) AS hb, SUM(watts), COUNT(*), MAX(watts), MIN(watts), MAX(ts)
             FROM power_samples GROUP BY server_id, hb`);
@@ -69,10 +70,18 @@ function initSqlite() {
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const insertStmt = db.prepare('INSERT INTO power_samples (server_id, watts, ts) VALUES (?, ?, ?)');
     const latestStmt = db.prepare('SELECT watts, ts FROM power_samples WHERE server_id = ? ORDER BY ts DESC LIMIT 1');
-    const latestAllStmt = db.prepare(`
-      SELECT s.server_id AS server_id, s.watts AS watts, s.ts AS ts FROM power_samples s
-      JOIN (SELECT server_id, MAX(ts) AS mts FROM power_samples GROUP BY server_id) m
-        ON s.server_id = m.server_id AND s.ts = m.mts`);
+    // v2.675(운영 멈춤 후보 — 합성 2,160만 행 실측): 서버별 최신값 시드는 **인덱스를 건너뛰며** 서버를 찾는다(loose index scan).
+    //   예전 `JOIN (SELECT server_id, MAX(ts) … GROUP BY server_id)` 는 power_samples 전부를 훑어 1.6초(운영 29GB 면 수십 초 추정)
+    //   동안 기동 직후 포탈을 멈췄다(withLatestCache 가 첫 getDb() 에서 부른다). 이 형태는 서버 수 × 인덱스 탐색 2회라 6ms 다.
+    //   ⚠ GROUP BY + MAX 로 되돌리지 말 것 — 행 수에 비례한다.
+    const latestAllStmt = db.prepare(`WITH RECURSIVE ks(k) AS (
+        SELECT (SELECT MIN(server_id) FROM power_samples)
+        UNION ALL
+        SELECT (SELECT MIN(server_id) FROM power_samples WHERE server_id > ks.k) FROM ks WHERE ks.k IS NOT NULL)
+      SELECT ks.k AS server_id,
+        (SELECT watts FROM power_samples WHERE server_id = ks.k ORDER BY ts DESC LIMIT 1) AS watts,
+        (SELECT MAX(ts) FROM power_samples WHERE server_id = ks.k) AS ts
+      FROM ks WHERE ks.k IS NOT NULL`);
     // 최신 limit개를 뽑아야 한다(ASC+LIMIT은 '가장 오래된' limit개를 반환해 최근 데이터가 잘림
     // — 60s 폴×24h=1440 > limit 1000이면 최근 ~7h가 차트에서 사라짐). DESC로 최신 limit개를
     // 선택한 뒤 오름차순으로 되돌려 NDJSON 폴백(slice(-limit))과 순서·의미를 일치시킨다.
@@ -176,7 +185,7 @@ function initSqlite() {
       latest: (serverId) => latestStmt.get(serverId) || null,
       latestAll: () => {
         const map = new Map();
-        for (const r of latestAllStmt.all()) map.set(r.server_id, { watts: r.watts, ts: r.ts });
+        for (const r of latestAllStmt.all()) if (r.ts != null) map.set(r.server_id, { watts: r.watts, ts: r.ts });
         return map;
       },
       /** 롤업 기준 서버별 마지막 관측 ts(dead-band 생략분 포함) — withLatestCache 시드 보정용. */
@@ -349,7 +358,7 @@ function initJsonFallback() {
  * 초 단위로 블로킹했다. 기동 시 1회만 시드하고 이후 쓰기 경로에서 O(1) 갱신, 읽기는 O(서버수).
  */
 function withLatestCache(db) {
-  const cache = db.latestAll(); // 시드(기동 시 1회 풀스캔) — 이후 재스캔 없음
+  const cache = db.latestAll(); // 시드(기동 시 1회 — v2.675 부터 서버 수 × 인덱스 탐색. 예전 GROUP BY MAX 는 풀스캔이었다) — 이후 재스캔 없음
   // v2.599 DB2599-01: 시드는 power_samples 만 보므로 dead-band 로 원시 저장을 건너뛴 마지막 표본의 ts 를 모른다.
   // 재시작 직후 puller 가 엣지의 같은 표본을 '새 것' 으로 받아 롤업(power_hourly)에 한 번 더 더했다(재현: cnt 2→3).
   // 롤업의 마지막 관측 ts 가 더 늦으면 ts 만 앞당긴다 — 값(watts)은 생략 판정상 저장값과 dead-band 이내다.
