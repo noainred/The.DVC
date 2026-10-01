@@ -96,7 +96,8 @@ async function runOnce() {
   if (running) return { skipped: true, reason: '이미 분석이 진행 중입니다 — 이번 요청은 건너뜁니다.' };
   running = true;
   try {
-    const r = await analyzeLoginFails({ days: s.days, threshold: s.threshold, windowMin: s.windowMin });
+    // v2.673: 주기 감시는 증분이다(직전 2시간만 다시 · 6시간마다 전 범위) — 15분마다 7일치를 다시 훑지 않는다(security/loginFails.js).
+    const r = await analyzeLoginFails({ days: s.days, threshold: s.threshold, windowMin: s.windowMin }, { incremental: true });
     lastRun = Date.now(); lastSummary = r.summary;
     if (!s.alert) return;
     const now = Date.now();

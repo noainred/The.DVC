@@ -4,37 +4,99 @@
  */
 
 import { getLogsDb } from '../logs/db.js';
+import { isLoginFailRow } from '../logs/loginFailPattern.js';
+import { createYielder } from '../util/timeSlice.js';
 import { getStoredFails } from './loginStore.js';
 
 const DAY = 86_400_000;
-const TYPE_RE = /BadUsername|InvalidLogin|NoAccess|AccountLock|LoginFailure|AuthenticationFailed|NoPermission/i;
-const MSG_RE = /cannot login|failed to (log\s?in|authenticate)|login failure|authentication failed|invalid (login|credential|user)|bad username|account.*lock|로그인.*실패|인증.*실패/i;
 const IPV4 = /(?:\d{1,3}\.){3}\d{1,3}/;
 
-const isLoginFail = (e) => TYPE_RE.test(e.type || '') || MSG_RE.test(e.message || '');
+// v2.673: 판정 정규식은 logs/loginFailPattern.js 하나다(SQL 후보 조건과 짝 — 한쪽만 고치면 놓친다).
+const isLoginFail = isLoginFailRow;
 const srcIp = (e) => (e.ip || IPV4.exec(e.message || '')?.[0] || '');
+
+/*
+ * v2.673(2026-10-01 운영 장애 — stallwatch 스택 analyzeLoginFails, 14초 넘게 정지):
+ * 예전에는 vCenter 이벤트 7일치를 'login'·'auth'·'fail'·'로그인' 으로 **네 번** LIKE 검색했다(검색어마다 5,000행).
+ *  ① 드문 단어는 매번 7일치 전체를 동기로 훑었다(재현: 이벤트 100만 행에 1회 849ms — 운영은 그보다 많다) — 기본 켜짐·15분 주기.
+ *  ② 흔한 'login'(정상 로그인 이벤트)이 5,000행 상한을 채워 실제 실패를 덜 셌다(재현: 1,000건 중 30건).
+ * 이제 좁은 조건 하나(정규식과 같은 뜻)로 **1시간 조각씩 한 번만** 훑고 조각 사이에 시간 기준으로 양보한다.
+ * 상한은 '실패 후보' 에만 걸리고, 걸리면 scan.truncated 로 밝힌다(최근 것부터 담는다).
+ */
+const CHUNK_MS = 3_600_000;
+export const LOGIN_FAIL_ROWS_MAX = 20_000;
+
+/*
+ * 증분(주기 감시 전용 — loginMonitor 가 deps.incremental 로 부른다). 15분마다 7일치를 다시 훑으면 이벤트가 많은 현장에서
+ * 총 CPU 가 크다(재현: 100만 행에 약 1.5초 — 조각으로 나눠 멈춤은 없지만 매번 같은 일을 한다). 그래서
+ *  · 직전 결과를 들고 있다가 **마지막으로 훑은 시각 − 2시간**부터만 다시 훑는다(엣지 push·수집 지연으로 늦게 들어온 이벤트).
+ *  · 그보다 더 늦게 들어온 이벤트는 **6시간마다 한 번** 전 범위를 다시 훑을 때 들어온다(그 사이에는 빠질 수 있다 — 정직 기록).
+ *  · 범위(vCenter)·기간(days)이 바뀌면 처음부터 다시 훑는다.
+ * 화면의 수동 분석은 증분을 쓰지 않는다(언제나 전 범위 — 사람이 누를 때만이다).
+ */
+export const LOGIN_FAIL_OVERLAP_MS = 2 * 3_600_000;
+export const LOGIN_FAIL_FULL_EVERY_MS = 6 * 3_600_000;
+const inc = { key: '', fails: [], upTo: 0, fullAt: 0 };
+/** 테스트 전용 — 증분 상태를 비운다. */
+export function _resetLoginFailIncForTest() { inc.key = ''; inc.fails = []; inc.upTo = 0; inc.fullAt = 0; }
+
+/** [from, ∞) 를 최근 1시간 조각부터 거슬러 훑어 실패를 모은다(최신순). scan 을 채운다. */
+async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan }) {
+  const seen = new Set();
+  const out = [];
+  // 첫 조각은 위쪽이 열려 있다 — vCenter 시계가 포탈보다 앞서 '미래 시각' 으로 찍힌 실패도 빠뜨리지 않게(예전 쿼리와 같다).
+  for (let hi = null, lo = now - CHUNK_MS; read; hi = Math.max(from, lo), lo -= CHUNK_MS) {
+    const lower = Math.max(from, lo);
+    await maybeYield();
+    scan.chunks++;
+    const room = rowsMax - out.length;
+    let rows = [];
+    try { rows = read({ vcenterId: vcenterId || '', since: lower, ...(hi != null ? { until: hi - 1 } : {}) }, room + 1); } catch { rows = []; }
+    scan.candidates += rows.length;
+    for (const e of rows) {
+      const id = `${e.vcenterId}|${e.ts}|${e.type}|${e.user}`;
+      if (seen.has(id) || !isLoginFail(e)) continue;
+      if (out.length >= rowsMax) { scan.truncated = true; break; }
+      seen.add(id);
+      out.push({ ts: e.ts, source: e.vcenterId, kind: 'vcenter', user: (e.user || '').trim() || '(unknown)', ip: srcIp(e), type: e.type, message: e.message });
+    }
+    if (scan.truncated || lower <= from) break;
+  }
+  return out;
+}
 
 /**
  * @param opts { vcenterId?, days=7, threshold=5, windowMin=10 }
  * threshold: 같은 사용자/IP가 이 횟수 이상이면 브루트포스 의심. windowMin: 활성 브루트포스 판정 창.
  */
-export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 5, windowMin = 10 } = {}) {
-  const db = await getLogsDb();
-  const since = Date.now() - Math.max(1, days) * DAY;
+export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 5, windowMin = 10 } = {}, deps = {}) {
+  const db = deps.db || await getLogsDb();
+  const now = Number.isFinite(deps.now) ? deps.now : Date.now();
+  const since = now - Math.max(1, days) * DAY;
+  const rowsMax = Number.isFinite(deps.rowsMax) && deps.rowsMax > 0 ? deps.rowsMax : LOGIN_FAIL_ROWS_MAX;
+  const maybeYield = createYielder(Number.isFinite(deps.sliceMs) ? deps.sliceMs : 15);
+  const t0 = performance.now();
 
-  // vCenter 이벤트에서 로그인 실패 후보를 LIKE로 좁혀 가져온 뒤 분류.
-  const seen = new Set();
-  const vcFails = [];
-  for (const q of ['login', 'auth', 'fail', '로그인']) {
-    let rows = [];
-    try { rows = db.query({ vcenterId: vcenterId || '', since, q }, 5000, 0); } catch { rows = []; }
-    for (const e of rows) {
-      const id = `${e.vcenterId}|${e.ts}|${e.type}|${e.user}`;
-      if (seen.has(id) || !isLoginFail(e)) continue;
-      seen.add(id);
-      vcFails.push({ ts: e.ts, source: e.vcenterId, kind: 'vcenter', user: (e.user || '').trim() || '(unknown)', ip: srcIp(e), type: e.type, message: e.message });
-    }
+  // vCenter 이벤트에서 로그인 실패 후보를 좁은 조건 하나로, 최근 1시간 조각부터 거슬러 가져와 정규식으로 분류.
+  const scan = { chunks: 0, candidates: 0, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since };
+  const read = typeof db.loginFailCandidates === 'function' ? db.loginFailCandidates : null;
+  if (!read) scan.source = 'unavailable';   // 구버전 db 객체 — 네 단어 전 범위 검색(정지 원인)으로 되돌리지 않는다
+  const key = `${vcenterId || ''}|${Math.max(1, days)}`;
+  const canInc = !!deps.incremental && read && inc.key === key && inc.upTo > since && now - inc.fullAt < LOGIN_FAIL_FULL_EVERY_MS;
+  let vcFails;
+  if (canInc) {
+    const from = Math.max(since, inc.upTo - LOGIN_FAIL_OVERLAP_MS);
+    const fresh = await scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan });
+    // [from, ∞) 는 방금 다시 훑은 값으로 바꾸고, 그 이전은 직전 결과에서 기간 안의 것만 이어 붙인다(ts 로 갈라 겹치지 않는다).
+    vcFails = [...fresh, ...inc.fails.filter((f) => f.ts >= since && f.ts < from)];
+    if (vcFails.length > rowsMax) { vcFails = vcFails.slice(0, rowsMax); scan.truncated = true; }
+    scan.mode = 'incremental'; scan.from = from;
+  } else {
+    vcFails = await scanVcFails({ read, vcenterId, from: since, now, rowsMax, maybeYield, scan });
+    if (deps.incremental) inc.fullAt = now;
   }
+  if (deps.incremental && read) { inc.key = key; inc.fails = vcFails; inc.upTo = now; }
+  scan.ms = Math.round(performance.now() - t0);
   // 저장된 실패(포탈 + 게스트 OS 조사). vCenter 범위 지정 시 게스트는 그 vCenter만.
   const stored = getStoredFails(since)
     .filter((r) => !vcenterId || r.kind === 'portal' || r.vcenterId === vcenterId)
@@ -80,6 +142,7 @@ export async function analyzeLoginFails({ vcenterId = '', days = 7, threshold = 
     topUsers: top(byUser), topIps: top(byIp), bySource: top(bySource, 30),
     timeline,
     recent: all.slice(0, 100),
+    scan,   // v2.673: 훑은 조각 수·후보 수·상한으로 잘렸는지·소요(정직 — 잘렸으면 화면이 '최근 N건까지' 라고 말할 수 있다)
     generatedAt: Date.now(),
   };
 }
