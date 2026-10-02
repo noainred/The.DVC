@@ -377,7 +377,34 @@ function gpuFlagOf(s, gpuKeys) {
   return gpuKeys ? gpuKeys(String(s.id)) : false;
 }
 
+/*
+ * v2.687 — 서버 종류 선택(사용자 요청 "CPU 만 있는 서버, GPU 도 있는 서버, 가상화 서버, 베어메탈 서버 선택"). GPU 판정 근거는 셋이고
+ * 하나라도 있으면 'gpu': ① GPU 온도(gpuFlagOf — 예전 'GPU 온도 있는 서버만' 의 기준) ② iDRAC 인벤토리 GPU ③ 매칭 ESXi 호스트의 GPU.
+ * 'cpu'(CPU 만)는 **GPU 가 0 장이라고 읽은 근거가 있을 때만**이다 — 인벤토리 GPU 를 못 읽었고 온도도 없으면 'unknown'(판정 불가).
+ * 못 읽은 서버를 CPU 만이라 하면 GPU 서버가 'CPU 만' 목록에 섞인다(거짓).
+ */
+export function gpuStateOf({ temp = false, esxi = null, idrac = null } = {}) {
+  // gpuCardsOf 결과({cards,total}) — null 은 '목록을 못 읽음', total 0 은 '읽었고 0 장'.
+  const n = (g) => (g && typeof g === 'object' && Number.isFinite(Number(g.total)) ? Number(g.total) : null);
+  const e = n(esxi); const i = n(idrac);
+  if (temp || (e != null && e > 0) || (i != null && i > 0)) return 'gpu';
+  if (e === 0 || i === 0) return 'cpu';
+  return 'unknown';
+}
+/** 종류 선택 판정(순수) — gpu: 'gpu'|'cpu'|'' · kind: 'esxi'|'baremetal'|''. 빈 값은 그 축을 거르지 않는다. 구버전 gpuOnly=1 은 gpu='gpu'. */
+export function typeFilterOf(q = {}) {
+  const gpu = q.gpuOnly === '1' ? 'gpu' : (q.gpu === 'gpu' || q.gpu === 'cpu' || q.gpu === 'unknown' ? q.gpu : '');
+  const kind = q.kind === 'esxi' || q.kind === 'baremetal' ? q.kind : '';
+  return { gpu, kind };
+}
+export function matchType(row, f) {
+  if (f.gpu && (row.gpuState || (row.gpu ? 'gpu' : 'unknown')) !== f.gpu) return false;
+  if (f.kind && row.kind !== f.kind) return false;
+  return true;
+}
+
 function serverRows(req, { gpuKeys = null } = {}) {
+  const hostMap = new Map((store.get().hosts || []).map((h) => [h.id, h]));
   const idx = scanSiteIndex();
   const all = analysisServersWithRemote().filter((s) => s.type !== 'ome');
   const r = scopeIdracServers(req, all);
@@ -386,11 +413,17 @@ function serverRows(req, { gpuKeys = null } = {}) {
   const rows = r.servers.map((s) => {
     const k = scopeKind(kindOf(s), sc);
     const inv = invForServer(s);
+    const temp = gpuFlagOf(s, gpuKeys);
+    const h = k.host?.id ? hostMap.get(k.host.id) : null;
+    const esxi = h ? gpuCardsOf(Array.isArray(h.gpus) ? h.gpus : null) : null;
+    const idrac = inv && inv?.collections?.gpus !== 'failed' ? gpuCardsOf(Array.isArray(inv.gpus) ? inv.gpus : null) : null;
     return {
       id: String(s.id), name: s.name || inv?.system?.hostName || s.id, corp: String(s.datacenterId || ''),
       corpName: s.datacenterId ? (dcName.get(String(s.datacenterId)) || String(s.datacenterId)) : '(법인 미지정)',
       site: siteNameOf(s, idx), serviceTag: k.serviceTag, kind: k.kind, model: s.model || inv?.system?.model || '',
-      remote: !!s.remote, dcSource: s.dcSource || '', gpu: gpuFlagOf(s, gpuKeys),
+      remote: !!s.remote, dcSource: s.dcSource || '', gpu: temp, gpuState: gpuStateOf({ temp, esxi, idrac }),
+      // v2.687: 매칭된 ESXi 호스트 id(범위 밖 호스트는 scopeKind 가 이미 null 로 바꿨다). 서버 표의 ESXi 계열 요약 키다.
+      hostId: k.host?.id ? String(k.host.id) : null,
     };
   });
   return { rows, omitted: r.omitted, scoped: !!r.sc };
@@ -444,7 +477,7 @@ function exportJob(req, res, ext, gpuKeys) {
   } else {
     targets = rows.filter((s) => s.id === String(req.query.id ?? ''));
   }
-  if (req.query.scope === 'dc' && req.query.gpuOnly === '1') targets = targets.filter((s) => s.gpu);
+  if (req.query.scope === 'dc') { const tf = typeFilterOf(req.query); targets = targets.filter((s) => matchType(s, tf)); }
   if (!targets.length) { res.status(404).json(NOT_FOUND); return null; }
   const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => EXPORT_COLS[c]);
   if (!cols.length) { res.status(400).json({ ok: false, reason: '내보낼 항목이 없습니다.' }); return null; }
@@ -489,6 +522,12 @@ export function tableHoursOf(v) {
   return Number.isInteger(n) && n >= TABLE_HOURS.min && n <= TABLE_HOURS.max ? n : null;
 }
 const TABLE_KEYS = ['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp'];
+/*
+ * v2.687: 차트에만 있던 ESXi 계열(매칭 호스트의 vCenter CPU · GPU 사용률 · GPU 메모리)도 표·조건 검색 대상이다(사용자 요청 "여기서 볼 수 있는
+ * 모든 차트에서 볼 수 있는 값의 변화를 조회"). iDRAC 계열(TABLE_KEYS)과 섞지 않는다 — 키가 서버 id 가 아니라 **매칭 호스트 id** 다.
+ * 매칭 호스트가 없는 서버(베어메탈·범위 밖 호스트)는 null(판정 불가) — 0 이 아니다.
+ */
+export const TABLE_HOST_KEYS = Object.freeze({ hostCpuPct: HOST_CPU_METRIC, ...HOST_GPU_METRICS });
 /** 여러 계열 요약을 하나로(CPU 사용률 — 샘플러가 서버·주기마다 한 출처만 적재하므로 합쳐도 이중 계수가 없다). */
 export function mergeStats(list) {
   const xs = list.filter((x) => x && x.n > 0);
@@ -505,11 +544,35 @@ export function buildTableRows(rows, { stats = {}, latest = {}, power = new Map(
       const cands = (latest[k] || []).map((m) => m.get(r.id)).filter((x) => x && x.ts >= since).sort((a, b) => b.ts - a.ts);
       out[k] = st ? { ...st, cur: cands[0] ? Math.round(cands[0].v * 10) / 10 : null } : null;
     }
+    for (const k of Object.keys(TABLE_HOST_KEYS)) {
+      const hid = r.hostId ? String(r.hostId) : null;
+      const st = hid ? stats[k]?.get(hid) || null : null;
+      const lt = hid ? (latest[k] || []).map((m) => m.get(hid)).find((x) => x && x.ts >= since) : null;
+      out[k] = st ? { ...st, cur: lt ? Math.round(lt.v * 10) / 10 : null } : null;
+    }
     const pk = powerKeyFor(r);
     const ps = pk ? power.get(pk) : null;
     out.powerW = ps && ps.count > 0 ? { avg: ps.avg, min: ps.min, max: ps.peak, n: ps.count, cur: null } : null;
     return out;
   });
+}
+
+/*
+ * v2.687 — 서버 표에서 찾은 서버의 '언제 · 얼마나' (사용자 요청 "서버를 찾으면 어느 날 어느 시간에 얼마 만큼의 변화가 있었는지 리스트로").
+ * 표와 **같은 창(시간 정렬 since ~ now)·같은 시간당 롤업**에서 시간별 평균·최대·최소를 준다 — 표의 최대가 목록의 어느 시간인지 그대로 맞는다.
+ * 판정(조건·묶기)은 화면이 한다(idracTrendText.changeEpisodes — 표의 조건 판정과 한 벌). 값이 없는 시간은 행이 없다(0 으로 채우지 않는다).
+ */
+export const HOURLY_KEYS = Object.freeze(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW', 'hostCpuPct', 'hostGpuPct', 'hostGpuMemPct']);
+/** 같은 시간 칸의 여러 출처(CPU 사용률 3계열 — 샘플러가 서버·주기마다 한 출처만 적재)를 하나로(순수). 평균은 출처 평균의 평균(참고값). */
+export function mergeHourly(lists) {
+  const m = new Map();
+  for (const list of lists) for (const p of list || []) {
+    const t = Number(p.ts);
+    if (!Number.isFinite(t) || ![p.avg, p.min, p.max].every((x) => typeof x === 'number' && Number.isFinite(x))) continue;
+    const g = m.get(t) || { sum: 0, n: 0, min: Infinity, max: -Infinity };
+    g.sum += p.avg; g.n += 1; g.min = Math.min(g.min, p.min); g.max = Math.max(g.max, p.max); m.set(t, g);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, avg: Math.round((g.sum / g.n) * 10) / 10, min: Math.round(g.min * 10) / 10, max: Math.round(g.max * 10) / 10 }));
 }
 
 export const TABLE_MEMO_MS = 30_000;
@@ -528,7 +591,8 @@ export function registerIdracTrend(adminRouter) {
     //   키 = 스냅샷 세대(첫 조각 — 세대가 바뀌면 옛 항목을 버린다) + 조건 + 범위 + 역할. 범위·역할이 다르면 다른 판본이다.
     const snap = store.get();
     const allowed = scopedVcenterIds(req.user, snap);
-    const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), req.query.gpuOnly === '1' ? 'g' : ''].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
+    const tf = typeFilterOf(req.query);
+    const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), tf.gpu, tf.kind].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
     const role = `${req.user?.role || ''}${req.user?.superAdmin ? '+sa' : ''}`;
     const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${allowed ? [...allowed].sort().join(',') : 'all'}|${role}`;
     try {
@@ -544,7 +608,7 @@ export function registerIdracTrend(adminRouter) {
     const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
     const corp = String(req.query.corp ?? '*'); const site = String(req.query.site ?? '*');
     let targets = rows.filter((r) => (corp === '*' || r.corp === corp) && (site === '*' || r.site === site));
-    if (req.query.gpuOnly === '1') targets = targets.filter((r) => r.gpu);
+    { const tf = typeFilterOf(req.query); targets = targets.filter((r) => matchType(r, tf)); }
     const errors = {};
     const stats = {}; const latest = {};
     try {
@@ -559,7 +623,8 @@ export function registerIdracTrend(adminRouter) {
       };
       await read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.sensor, CPU_FALLBACK_METRICS.bmIdrac]);
       for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) await read(k, [TREND_METRICS[k]]);
-      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) stats[k] = stats[k][0] || new Map();
+      for (const [k, m] of Object.entries(TABLE_HOST_KEYS)) await read(k, [m]);
+      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', ...Object.keys(TABLE_HOST_KEYS)]) stats[k] = stats[k][0] || new Map();
     } catch (e) { errors.metrics = e?.message || String(e); }
     let power = new Map(); let powerKeyFor = () => null;
     try {
@@ -684,6 +749,45 @@ export function registerIdracTrend(adminRouter) {
       console.warn(`[idrac] 통합 추이 엑셀 내보내기 실패: ${e?.message || e}`);
       if (!res.headersSent) res.status(500).json({ ok: false, reason: `엑셀 파일을 만들지 못했습니다: ${String(e?.message || e).slice(0, 200)}` });
     } finally { lock.release(); }
+  });
+
+  // v2.687: 시간별 평균·최대·최소(서버 표 '변화 시각' 목록). hours 는 표와 같은 규칙(1~720), keys 는 HOURLY_KEYS 안에서만.
+  adminRouter.get('/idrac/:id/trend/hourly', adminOnly, async (req, res) => {
+    const id = String(req.params.id || '');
+    const s = serverById(id);
+    if (!s || hiddenByScope(req, s)) return res.status(404).json(NOT_FOUND);
+    if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 추이를 지원하지 않습니다.' });
+    const hours = tableHoursOf(req.query.hours);
+    if (hours == null) return res.status(400).json({ ok: false, reason: `기간은 ${TABLE_HOURS.min}~${TABLE_HOURS.max}시간 정수입니다.` });
+    const want = String(req.query.keys || '').split(',').map((x) => x.trim()).filter((x) => HOURLY_KEYS.includes(x));
+    const keys = want.length ? [...new Set(want)] : [...HOURLY_KEYS];
+    const now = Date.now();
+    // 표가 조회한 창을 그대로 쓴다(시간 경계를 넘긴 뒤 열어도 표의 판정과 같은 창) — 시간 정렬 + 최대 기간 안일 때만 받는다.
+    const qs = Number(req.query.since);
+    const since = Number.isInteger(qs) && qs % HOUR === 0 && qs <= now && qs >= now - (TABLE_HOURS.max + 1) * HOUR
+      ? qs : Math.floor((now - hours * HOUR) / HOUR) * HOUR;
+    const k = scopeKind(kindOf(s), idracScopeOf(req));
+    const series = {}; const errors = {};
+    try {
+      const db = await getMetricsDb();
+      const read = (metric, key) => db.historyRange(metric, key, since, now + HOUR, HOUR, 0);
+      for (const key of keys) {
+        if (key === 'powerW') continue;
+        try {
+          if (key === 'cpuPct') series[key] = mergeHourly([TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.sensor, CPU_FALLBACK_METRICS.bmIdrac].map((m) => read(m, id)));
+          else if (TABLE_HOST_KEYS[key]) series[key] = k.host?.id ? mergeHourly([read(TABLE_HOST_KEYS[key], String(k.host.id))]) : null;
+          else series[key] = mergeHourly([read(TREND_METRICS[key], id)]);
+        } catch (e) { errors[key] = e?.message || String(e); series[key] = null; }
+      }
+    } catch (e) { errors.metrics = e?.message || String(e); }
+    if (keys.includes('powerW')) {
+      try {
+        const pdb = await getPowerDb();
+        const pk = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (x) => (typeof pdb.latest === 'function' ? pdb.latest(x) != null : false) });
+        series.powerW = pk.key && typeof pdb.hourlyStats === 'function' ? pdb.hourlyStats(pk.key, since, now + HOUR) : null;
+      } catch (e) { errors.powerW = e?.message || String(e); series.powerW = null; }
+    }
+    res.json({ ok: true, id, hours, since, now, series, errors, host: k.host ? { id: k.host.id, name: k.host.name } : null });
   });
 
   adminRouter.get('/idrac/:id/trend', adminOnly, async (req, res) => {

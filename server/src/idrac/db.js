@@ -89,6 +89,8 @@ function initSqlite() {
     // v2.660: iDRAC 통합 추이 — [start, end) 버킷 평균. 1시간 정배수면 롤업, 그 외 원본. CAST 는 node:sqlite 가 JS 수를
     //   REAL 로 바인딩하기 때문이다(v2.598 DB2598-01 — 없으면 버킷이 나뉘지 않는다).
     const rangeRawStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? AND ts < ? ORDER BY ts');
+    // v2.687: 한 서버의 시간별 평균·최대·최소(서버 표 '변화 시각' 목록 — 시간당 롤업 그대로, 인덱스 (server_id, hb) 범위).
+    const hourlyStatsStmt = db.prepare('SELECT hb, sumw, cnt, maxw, minw FROM power_hourly WHERE server_id = ? AND hb >= ? AND hb < ? ORDER BY hb');
     const rangeHourlyStmt = db.prepare('SELECT CAST(hb / ? AS INTEGER) AS bk, SUM(sumw) AS s, SUM(cnt) AS n FROM power_hourly WHERE server_id = ? AND hb >= ? AND hb < ? GROUP BY bk ORDER BY bk');
     // 청크 DELETE (v2.453) — metrics/db.js 와 같은 이유. idrac-power.db 도 운영 실측 26.9GB 라
     // 한 방 DELETE 는 이벤트 루프를 수 분 멈춘다. rowid 서브쿼리 + LIMIT 으로 끊는다.
@@ -220,6 +222,8 @@ function initSqlite() {
         return points.map((pt) => ({ ts: pt.ts, watts: Math.round(pt.avg) }));
       },
       // 시간당 롤업에서 계산(24h 윈도우 ≈ 24 시간버킷 스캔). 윈도우는 시간 단위로 정렬됨(대시보드 집계엔 무해).
+      hourlyStats: (serverId, startTs, endTs) => hourlyStatsStmt.all(String(serverId), Math.floor(startTs / HOUR_MS), Math.ceil(endTs / HOUR_MS))
+        .filter((r) => r.cnt > 0).map((r) => ({ ts: r.hb * HOUR_MS, avg: Math.round(r.sumw / r.cnt), min: Math.round(r.minw), max: Math.round(r.maxw) })),
       statsSince: (sinceTs) => {
         const hbSince = Math.floor(sinceTs / HOUR_MS);
         const m = new Map();
@@ -314,6 +318,11 @@ function initJsonFallback() {
       const acc = new Map();
       for (const r of rows) if (r.s === serverId && r.t >= startTs && r.t < endTs) { const b = Math.floor((r.t + off) / bucketMs) * bucketMs - off; const g = acc.get(b) || { s: 0, n: 0 }; g.s += r.w; g.n++; acc.set(b, g); }
       return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, watts: Math.round(g.s / g.n) }));
+    },
+    hourlyStats: (serverId, startTs, endTs) => {
+      const acc = new Map();
+      for (const r of rows) if (r.s === serverId && r.t >= startTs && r.t < endTs) { const b = Math.floor(r.t / 3_600_000) * 3_600_000; const g = acc.get(b) || { s: 0, n: 0, mn: Infinity, mx: -Infinity }; g.s += r.w; g.n++; g.mn = Math.min(g.mn, r.w); g.mx = Math.max(g.mx, r.w); acc.set(b, g); }
+      return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, avg: Math.round(g.s / g.n), min: Math.round(g.mn), max: Math.round(g.mx) }));
     },
     statsSince: (sinceTs) => {
       const acc = new Map(); // s -> {peak,min,sum,n,last}

@@ -157,6 +157,39 @@ export function serversOf(servers, corp, site) {
 }
 export const serverLabel = (s) => `${s.name || s.id} · ${s.kind === 'esxi' ? 'ESXi' : '베어메탈'}`;
 
+/*
+ * v2.687 — 서버 종류 선택(사용자 요청 "CPU 만 있는 서버, GPU 도 있는 서버, 가상화 서버, 베어메탈 서버 선택"). 두 축이고 함께 고를 수 있다:
+ * 구성(전체 · GPU 있음 · CPU 만) × 형태(전체 · 가상화 · 베어메탈). GPU 판정은 서버 gpuState(GPU 온도 · iDRAC 인벤토리 GPU · 매칭 ESXi 호스트 GPU
+ * 중 하나라도 있으면 'gpu', GPU 0 장이라고 읽었을 때만 'cpu', 근거가 없으면 'unknown') — 판정 불가는 'CPU 만' 에 넣지 않는다.
+ * 구버전 서버 응답(gpuState 없음)은 예전 GPU 온도 플래그로만 판정한다(gpu 아니면 판정 불가).
+ */
+export const GPU_TYPES = [{ k: '', label: '전체' }, { k: 'gpu', label: 'GPU 있음' }, { k: 'cpu', label: 'CPU 만' }];
+export const KIND_TYPES = [{ k: '', label: '전체' }, { k: 'esxi', label: '가상화(ESXi)' }, { k: 'baremetal', label: '베어메탈' }];
+export const EMPTY_TYPE = Object.freeze({ gpu: '', kind: '' });
+export const gpuStateOf = (s) => s?.gpuState || (s?.gpu ? 'gpu' : 'unknown');
+export function matchType(s, tf) {
+  if (tf?.gpu && gpuStateOf(s) !== tf.gpu) return false;
+  if (tf?.kind && s?.kind !== tf.kind) return false;
+  return true;
+}
+export const filterByType = (servers, tf) => (servers || []).filter((s) => matchType(s, tf));
+/** 칩 개수 — 각 축은 **다른 축의 선택만** 반영해 센다(자기 축 선택으로 다른 칩이 0 이 되어 못 고르는 일이 없게 — deviceFacets 규칙). */
+export function typeCounts(servers, tf = EMPTY_TYPE) {
+  const list = servers || [];
+  const gpu = {}; const kind = {};
+  for (const o of GPU_TYPES) gpu[o.k] = list.filter((s) => matchType(s, { gpu: o.k, kind: tf.kind })).length;
+  for (const o of KIND_TYPES) kind[o.k] = list.filter((s) => matchType(s, { gpu: tf.gpu, kind: o.k })).length;
+  const unknown = list.filter((s) => matchType(s, { gpu: '', kind: tf.kind }) && gpuStateOf(s) === 'unknown').length;
+  return { gpu, kind, unknown };
+}
+/** 서버 조회 쿼리(표·내보내기) — 빈 축은 싣지 않는다. */
+export const typeQuery = (tf) => ({ ...(tf?.gpu ? { gpu: tf.gpu } : {}), ...(tf?.kind ? { kind: tf.kind } : {}) });
+/** 선택 문구 — '' 이면 전체. */
+export function typeText(tf) {
+  const parts = [GPU_TYPES.find((o) => o.k === tf?.gpu && o.k)?.label, KIND_TYPES.find((o) => o.k === tf?.kind && o.k)?.label].filter(Boolean);
+  return parts.join(' · ');
+}
+
 /** 보관·빈 상태 안내(각주). 서버가 준 값만 쓴다(숫자를 박지 않는다). */
 export function retentionNote(data) {
   const r = data?.retention || {};
@@ -344,19 +377,67 @@ export function stylesQuery(styles, keys) {
 export const TABLE_HOUR_PRESETS = [1, 6, 12, 24, 48, 72, 168, 720];
 export const TABLE_HOURS_MAX = 720;
 export const hoursLabel = (h) => (h % 24 === 0 && h >= 48 ? `${h / 24}일` : `${h}시간`);
-export const COND_OPS = [{ k: 'ge', label: '이상' }, { k: 'le', label: '이하' }];
+/*
+ * v2.687 — '평균 대비 변화' 조건(사용자 요청 "7일 동안 CPU 사용률이 평균에서 10% 이상 변화가 있는 장비" — 선택: 절대 차이·비율 **둘 다** ·
+ * **기간 중 한 번이라도**). 변화 = max(최대 − 평균, 평균 − 최소) — 오르거나 내리거나. 단위가 같은 차이(devAbs: %는 %p, ℃, W)와
+ * 평균 대비 비율(devPct: 변화 ÷ 평균 × 100)을 따로 둔다. 비율은 평균이 0 이하이면 판정 불가다(0 으로 나눈 값을 지어내지 않는다).
+ * 값은 시간당 집계의 최대·최소라 1분 표본의 순간 스파이크까지 그대로 보인다(롤업이 최대·최소를 보존한다).
+ */
+export const COND_OPS = [
+  { k: 'ge', label: '이상' }, { k: 'le', label: '이하' },
+  { k: 'devAbs', label: '평균 대비 ± 이상 변화' }, { k: 'devPct', label: '평균 대비 ±% 이상 변화' },
+];
+const OP_KEYS = new Set(COND_OPS.map((o) => o.k));
+export const isDevOp = (op) => op === 'devAbs' || op === 'devPct';
+/*
+ * v2.687: 서버 표·조건 검색의 지표 = iDRAC 6계열 + ESXi 3계열(매칭 호스트 — 차트에 보이는 계열 전부). ESXi 계열은 베어메탈 서버에 값이 없다
+ * (판정 불가로 센다). SERIES(무응답 구간 판정용 iDRAC 6계열)는 그대로 둔다.
+ */
+export const TABLE_SERIES = [...SERIES, HOST_CPU_SERIES, ...HOST_GPU_SERIES];
+const seriesOf = (k) => TABLE_SERIES.find((s) => s.k === k);
+/** 조건 칸 옆 단위 — 비율 조건은 %, 퍼센트 지표의 절대 차이는 %p(퍼센트 포인트). */
+export function condUnit(k, op) {
+  const s = seriesOf(k);
+  if (!s) return '';
+  if (op === 'devPct') return '%';
+  const u = s.unit.trim();
+  return op === 'devAbs' && u === '%' ? '%p' : u;
+}
+/** 평균 대비 변화(순수) — { abs, pct, dir } | null. 평균·최대·최소 중 하나라도 없으면 null. pct 는 평균 ≤ 0 이면 null. */
+export function deviationOf(st) {
+  if (!st) return null;
+  const { avg, max, min } = st;
+  if (![avg, max, min].every((x) => typeof x === 'number' && Number.isFinite(x))) return null;
+  const up = max - avg; const down = avg - min;
+  const abs = Math.round(Math.max(up, down, 0) * 10) / 10;
+  const pct = avg > 0 ? Math.round((Math.max(up, down, 0) / avg) * 1000) / 10 : null;
+  return { abs, pct, dir: up >= down ? 'up' : 'down' };
+}
+/** 변화 한 줄(셀·CSV 공용) — '±12%p (40%)' · 비율을 못 내면 절대값만. */
+export function deviationText(st, k) {
+  const d = deviationOf(st);
+  if (!d) return '—';
+  const u = condUnit(k, 'devAbs');
+  return `${d.dir === 'up' ? '▲' : '▼'} ${d.abs.toLocaleString()}${u}${d.pct == null ? '' : ` (${d.pct.toLocaleString()}%)`}`;
+}
 let condSeq = 0;
 export const newCond = (k = 'cpuTemp', op = 'ge', v = '') => ({ id: `c${(condSeq += 1)}`, k, op, v });
 /** 입력 칸 → 판정용 조건(값이 빈 칸·숫자 아님이면 뺀다 — 빈 칸을 0 으로 읽지 않는다). */
 export function activeConds(conds) {
-  return (conds || []).filter((c) => SERIES.some((s) => s.k === c.k) && (c.op === 'ge' || c.op === 'le'))
+  return (conds || []).filter((c) => TABLE_SERIES.some((s) => s.k === c.k) && OP_KEYS.has(c.op))
     .map((c) => ({ ...c, n: typeof c.v === 'string' && c.v.trim() !== '' ? Number(c.v) : typeof c.v === 'number' ? c.v : NaN }))
-    .filter((c) => Number.isFinite(c.n));
+    // 변화 조건의 음수 기준은 뜻이 없다(언제나 참) — 빈 칸처럼 쓰지 않는다.
+    .filter((c) => Number.isFinite(c.n) && !(isDevOp(c.op) && c.n < 0));
 }
 /** 한 조건 → true | false | null(그 지표 값 없음). */
 export function condHit(row, c) {
   const st = row?.[c.k];
   if (!st) return null;
+  if (isDevOp(c.op)) {
+    const d = deviationOf(st);
+    const x = d ? (c.op === 'devPct' ? d.pct : d.abs) : null;
+    return x == null ? null : x >= c.n;
+  }
   const x = c.op === 'ge' ? st.max : st.min;
   if (typeof x !== 'number' || !Number.isFinite(x)) return null;
   return c.op === 'ge' ? x >= c.n : x <= c.n;
@@ -382,19 +463,110 @@ export function filterTable(rows, conds, mode = 'all') {
 export function condText(conds, mode = 'all') {
   const act = activeConds(conds);
   if (!act.length) return '';
-  const parts = act.map((c) => { const s = SERIES.find((x) => x.k === c.k); return `${s.label} ${c.n}${s.unit.trim()} ${c.op === 'ge' ? '이상' : '이하'}`; });
+  const parts = act.map((c) => {
+    const s = seriesOf(c.k);
+    if (isDevOp(c.op)) return `${s.label} 평균 대비 ±${c.n}${condUnit(c.k, c.op)} 이상 변화`;
+    return `${s.label} ${c.n}${s.unit.trim()} ${c.op === 'ge' ? '이상' : '이하'}`;
+  });
   return parts.join(mode === 'any' ? ' 또는 ' : ' 그리고 ');
+}
+/*
+ * v2.687 — 찾은 서버의 '언제 · 얼마나'(사용자 요청 "서버를 찾으면 어느 날 어느 시간에 얼마 만큼의 변화가 있었는지 리스트로").
+ * 입력: 서버 `/idrac/:id/trend/hourly` 의 시간별 평균·최대·최소 + 표의 기간 요약(평균 — 조건 판정 기준) + 조건.
+ * 시간마다 **표와 같은 규칙**으로 판정한다(이상 = 그 시간 최대, 이하 = 그 시간 최소, 변화 = 그 시간 최대·최소 중 기간 평균에서 더 먼 쪽).
+ * 연속한 시간은 한 구간으로 묶고(구간마다 가장 크게 벗어난 시간 = 정점), 값이 없는 시간은 판정하지 않는다(0 으로 보지 않는다).
+ */
+export const HOUR_MS = HOUR;
+export const EPISODE_MAX = 300;
+function hourHit(p, c, avg) {
+  if (![p?.avg, p?.min, p?.max].every((x) => typeof x === 'number' && Number.isFinite(x))) return null;
+  if (c.op === 'ge') return p.max >= c.n ? { value: p.max, dir: 'up', score: p.max } : null;
+  if (c.op === 'le') return p.min <= c.n ? { value: p.min, dir: 'down', score: -p.min } : null;
+  if (typeof avg !== 'number' || !Number.isFinite(avg)) return null;
+  const up = p.max - avg; const down = avg - p.min;
+  const d = Math.max(up, down, 0);
+  const abs = Math.round(d * 10) / 10;
+  const pct = avg > 0 ? Math.round((d / avg) * 1000) / 10 : null;
+  const x = c.op === 'devPct' ? pct : abs;
+  if (x == null || x < c.n) return null;
+  return up >= down ? { value: p.max, dir: 'up', score: d } : { value: p.min, dir: 'down', score: d };
+}
+/** 시간별 점 → 조건에 걸린 구간 목록(순수). 반환 { episodes, omitted, hitHours, readHours } — 최신 구간 먼저. */
+export function changeEpisodes(series, row, conds) {
+  const out = []; let hitHours = 0; const readHours = {};
+  for (const c of activeConds(conds)) {
+    const pts = series?.[c.k];
+    if (!Array.isArray(pts)) continue;
+    readHours[c.k] = pts.length;
+    const avg = row?.[c.k]?.avg;
+    let cur = null;
+    const close = () => { if (cur) { out.push(cur); cur = null; } };
+    for (const p of [...pts].sort((a, b) => a.ts - b.ts)) {
+      const h = hourHit(p, c, avg);
+      if (!h) { close(); continue; }
+      hitHours += 1;
+      if (cur && p.ts - cur.lastTs === HOUR) {
+        cur.lastTs = p.ts; cur.end = p.ts + HOUR; cur.hours += 1;
+        if (h.score > cur._score) Object.assign(cur, { peakTs: p.ts, peak: h.value, dir: h.dir, _score: h.score });
+      } else {
+        close();
+        cur = { id: `${c.id}:${p.ts}`, k: c.k, cond: c, start: p.ts, end: p.ts + HOUR, lastTs: p.ts, hours: 1, peakTs: p.ts, peak: h.value, dir: h.dir, _score: h.score, avg };
+      }
+    }
+    close();
+  }
+  for (const e of out) {
+    const hasAvg = typeof e.avg === 'number' && Number.isFinite(e.avg);
+    e.delta = hasAvg ? Math.round((e.peak - e.avg) * 10) / 10 : null;
+    e.deltaPct = hasAvg && e.avg > 0 ? Math.round(((e.peak - e.avg) / e.avg) * 1000) / 10 : null;
+    delete e._score; delete e.lastTs;
+  }
+  out.sort((a, b) => b.start - a.start || a.k.localeCompare(b.k));
+  return { episodes: out.slice(0, EPISODE_MAX), omitted: Math.max(0, out.length - EPISODE_MAX), hitHours, readHours };
+}
+/** 구간 시각 문구 — '10-01 14:00 ~ 16:00' · 날짜가 바뀌면 끝에도 날짜. 끝은 마지막 시간 칸의 끝(포함하지 않는 경계). */
+export function episodeRangeText(e) {
+  const s = new Date(e.start); const en = new Date(e.end);
+  const md = (d) => `${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  return `${md(s)} ${hm(e.start)} ~ ${ymd(e.start) === ymd(e.end - 1) ? '' : `${md(en)} `}${hm(e.end)}`;
+}
+/** 변화 문구 — '+12.5%p (+41.7%)' · 평균을 모르면 '—'. 퍼센트 지표의 차이는 %p. */
+export function episodeDeltaText(e) {
+  if (e.delta == null) return '—';
+  const sign = e.delta > 0 ? '+' : e.delta < 0 ? '−' : '±';
+  const u = condUnit(e.k, 'devAbs');
+  const pct = e.deltaPct == null ? '' : ` (${e.deltaPct > 0 ? '+' : e.deltaPct < 0 ? '−' : '±'}${Math.abs(e.deltaPct).toLocaleString()}%)`;
+  return `${sign}${Math.abs(e.delta).toLocaleString()}${u}${pct}`;
+}
+/** 조건 한 줄 문구(구간 표의 '조건' 칸). */
+export function condOneText(c) {
+  const s = seriesOf(c.k);
+  if (!s) return '';
+  if (isDevOp(c.op)) return `평균 대비 ±${c.n}${condUnit(c.k, c.op)} 이상`;
+  return `${c.n}${s.unit.trim()} ${c.op === 'ge' ? '이상' : '이하'}`;
+}
+/** 구간 목록 CSV(브라우저) — 결측은 빈 칸. */
+export function episodesCsv(server, episodes) {
+  const q = csvCell;
+  const head = ['서버', '지표', '조건', '시작', '끝', '지속(시간)', '정점 시각', '정점 값', '기간 평균', '평균 대비 변화', '평균 대비 변화(%)'];
+  const lines = [head.map(q).join(',')];
+  for (const e of episodes || []) {
+    const s = seriesOf(e.k);
+    lines.push([server, s?.label, condOneText(e.cond), `${ymd(e.start)} ${hm(e.start)}`, `${ymd(e.end)} ${hm(e.end)}`, e.hours,
+      `${ymd(e.peakTs)} ${hm(e.peakTs)}`, e.peak, e.avg, e.delta, e.deltaPct].map(q).join(','));
+  }
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 /** 셀 강조 — 이 지표에 조건이 있고 그 조건을 만족하면 true. */
 export const cellHit = (row, k, conds) => activeConds(conds).some((c) => c.k === k && condHit(row, c) === true);
 /** 표 CSV(브라우저에서 만든다 — 화면에 있는 값 그대로). 결측은 빈 칸. */
 export function tableCsv(rows, hours) {
   const q = csvCell; // 수식 인젝션 가드 공용 코어(util/csv.js)
-  const head = ['법인', '서비스', '서버', '서비스태그', '유형', ...SERIES.flatMap((s) => [`${s.label} 최대`, `${s.label} 평균`, `${s.label} 최소`])];
+  const head = ['법인', '서비스', '서버', '서비스태그', '유형', ...TABLE_SERIES.flatMap((s) => [`${s.label} 최대`, `${s.label} 평균`, `${s.label} 최소`, `${s.label} 평균 대비 변화(${condUnit(s.k, 'devAbs')})`, `${s.label} 평균 대비 변화(%)`])];
   const lines = [`# 최근 ${hoursLabel(hours)}`, head.map(q).join(',')];
   for (const r of rows || []) {
     lines.push([r.corpName, r.site, r.name, r.serviceTag, r.kind === 'esxi' ? 'ESXi' : '베어메탈',
-      ...SERIES.flatMap((s) => [r[s.k]?.max, r[s.k]?.avg, r[s.k]?.min])].map(q).join(','));
+      ...TABLE_SERIES.flatMap((s) => { const d = deviationOf(r[s.k]); return [r[s.k]?.max, r[s.k]?.avg, r[s.k]?.min, d?.abs, d?.pct]; })].map(q).join(','));
   }
   return `﻿${lines.join('\r\n')}\r\n`;
 }
