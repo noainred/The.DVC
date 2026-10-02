@@ -4102,6 +4102,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · 서버 머리 GPU 표지 = 응답 `gpuCards{esxi, idrac}`(모델별 장수 — `gpuCardsOf`, 모르면 null · [] 는 0장). ESXi 먼저, 두 출처 장수가 다르면 ⚠ + 툴팁(단정하지 않는다).
       · '데이터센터' 표기는 이 화면에서 **'서비스'** 다(사용자 요청 — 값은 그대로 스캔 대역 이름 `service`). 법인 귀속 문구처럼 진짜 DataCenter 를 뜻하는 곳은 바꾸지 않는다.
       · 정직 기록: 목 호스트에는 서비스태그·mgmtIp·NIC MAC 이 없어 브라우저 검증은 호스트네임 규칙으로만 연결됐다.
+    - ⚠⚠ **v2.687 — 서버 표 '평균 대비 변화' 조건 · ESXi 계열 · '언제 · 얼마나' 시간 목록**(사용자 요청 "모든 차트의 값의 변화를 조회 · 7일 동안 CPU 사용률이
+      평균에서 10% 이상 변화(단일·복합)" + "어느 날 어느 시간에 얼마 만큼의 변화가 있었는지 리스트로". 선택: 절대·비율 둘 다 · 기간 중 한 번이라도 · 전체 검증.
+      `idracTrendText.js deviationOf·changeEpisodes` + 웹 `IdracTrendChanges.jsx` + 서버 `GET /admin/idrac/:id/trend/hourly`·`mergeHourly`·`TABLE_HOST_KEYS` + 전력 `hourlyStats`.
+      회귀 `server/test/idracTrend2687.test.js` + 웹 `idracTrendChange2687.test.js`(변이 4/4):
+      · 변화 = max(기간 최대 − 평균, 평균 − 기간 최소) — devAbs(단위 그대로, %지표는 %p) · devPct(÷ 평균 × 100, **평균 ≤ 0 이면 판정 불가**). 음수 기준은 버린다.
+      · 표 지표는 `TABLE_SERIES`(iDRAC 6 + ESXi 3)다 — ESXi 계열은 **매칭 호스트 id**(`row.hostId`)로 요약한다. `SERIES`(무응답 구간 판정용 iDRAC 6계열)에 넣지 말 것.
+      · 시간 목록은 **표와 같은 창**(표 응답 `since` 를 넘긴다)·같은 시간당 롤업이고 판정 규칙도 표와 한 벌이다(이상=그 시간 최대 · 이하=최소 · 변화=기간 평균 기준).
+        그래서 표에서 걸린 서버는 목록에서 적어도 한 시간이 걸린다(테스트 고정). 1시간 단위라 분 단위 시각은 모른다 — 화면이 말한다. 구간 상한 300(`omitted`).
+      · **서버 종류 선택**(같은 릴리스 사용자 요청 "CPU 만 있는 서버, GPU 도 있는 서버, 가상화 서버, 베어메탈 서버 선택"): 구성(GPU 있음·CPU 만) × 형태(가상화·베어메탈) 두 축,
+        서버 `gpuStateOf`·`typeFilterOf`(쿼리 `gpu`·`kind`, 구버전 `gpuOnly=1` 호환) + 웹 `IdracTypeBar.jsx`·`typeCounts`(칩 개수는 다른 축 선택만 반영).
+        'CPU 만' 은 **GPU 0 장으로 읽었을 때만** — 근거가 없으면 unknown 이고 어느 칩에도 넣지 않는다. ⚠ `gpuCardsOf` 는 배열이 아니라 `{cards,total}` 을 돌려준다 —
+        초판이 배열로 읽어 전 서버가 unknown 이었고, **배열로 만든 단위 테스트는 통과했다**(목 서버 화면에서 발견). 테스트 입력은 실제 함수의 출력으로 만들 것.
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·

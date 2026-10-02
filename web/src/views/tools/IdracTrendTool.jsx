@@ -7,6 +7,7 @@ import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, Tooltip, 
 import { fetchJson, canCsv, CSV_DENIED_NOTE, downloadFile, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import { Modal } from '../../components/Modal.jsx';
+import { IdracTypeBar } from './IdracTypeBar.jsx';
 import { EntityDetail } from '../../components/EntityDetail.jsx';
 import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
@@ -15,7 +16,7 @@ import BoldText from '../../components/boldText.jsx';
 import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, staleCurText, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
-  corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
+  corpsOf, sitesOf, serversOf, serverLabel, EMPTY_TYPE, filterByType, matchType, typeQuery, typeText, gpuStateOf, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveVisibleKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
   gpuCardsText, TREND_HANDOFF, parseTrendHandoff, linkBasisText,
@@ -71,14 +72,14 @@ export default function IdracTrendTool() {
     return () => { alive = false; };
   }, []);
 
-  const [gpuOnly, setGpuOnly] = useState(false); // v2.661: GPU 온도가 있는 서버만
+  const [tf, setTf] = useState(EMPTY_TYPE); // v2.687: 서버 종류(구성 GPU·CPU × 형태 가상화·베어메탈) — v2.661 'GPU 온도 있는 서버만' 을 넓혔다
   // v2.676: 호스트 상세 '통합 성능 모니터링' 에서 넘어온 서버(메모리 인계 — URL 에 싣지 않는다). 목록이 오면 그 서버를 고른다.
   const [handoff, setHandoff] = useState(() => parseTrendHandoff(takeSearch(TREND_HANDOFF)));
   const [linked, setLinked] = useState(null);       // 적용된 인계(안내 줄) · 목록에 없으면 { missing:true }
   useEffect(() => onSearchHandoff((t) => { if (t === TREND_HANDOFF) setHandoff(parseTrendHandoff(takeSearch(TREND_HANDOFF))); }), []);
   const allServers = useMemo(() => list?.servers || [], [list]);
-  const gpuCount = useMemo(() => allServers.filter((s) => s.gpu).length, [allServers]);
-  const servers = useMemo(() => (gpuOnly ? allServers.filter((s) => s.gpu) : allServers), [allServers, gpuOnly]);
+  const servers = useMemo(() => filterByType(allServers, tf), [allServers, tf]);
+  const typeOn = !!(tf.gpu || tf.kind);
   const corps = useMemo(() => corpsOf(servers), [servers]);
   const sites = useMemo(() => (corp == null ? [] : sitesOf(servers, corp)), [servers, corp]);
   const sitesFor = useCallback((c) => sitesOf(servers, c), [servers]);
@@ -92,12 +93,12 @@ export default function IdracTrendTool() {
     if (!handoff || !list) return;
     const row = (list.servers || []).find((x) => x.id === handoff.id);
     if (row) {
-      if (gpuOnly && !row.gpu) setGpuOnly(false);
+      if (!matchType(row, tf)) setTf(EMPTY_TYPE);
       setCorp(row.corp); setSite(row.site); setServerId(row.id); setView('chart');
       setLinked({ ...handoff, missing: false });
     } else setLinked({ ...handoff, missing: true });
     setHandoff(null);
-  }, [handoff, list, gpuOnly]);
+  }, [handoff, list, tf]);
 
   // v2.666: 서버·기간을 바꾸면 스크롤을 최근으로 되돌린다.
   useEffect(() => { setBack(0); setDragBack(null); setAnchor(null); }, [range, serverId]);
@@ -141,19 +142,14 @@ export default function IdracTrendTool() {
   const empty = emptyNote(data);
   const gaps = data ? gapAreas(pts, data.firstTs) : [];
   const viewBtn = (k, label) => <button type="button" className={view === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px', marginTop: 0 }} aria-pressed={view === k} onClick={() => setView(k)}>{label}</button>;
-  const gpuBox = (
-    <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }} title="GPU 온도 센서를 보고하거나 GPU 온도가 한 번이라도 쌓인 서버만 목록에 남깁니다">
-      <input type="checkbox" checked={gpuOnly} disabled={!gpuCount && !gpuOnly} onChange={(e) => setGpuOnly(e.target.checked)} />
-      GPU 온도 있는 서버만 ({gpuCount}대)
-    </label>
-  );
+  const gpuBox = <IdracTypeBar servers={allServers} value={tf} onChange={setTf} />;
   const viewBar = <div className="flex wrap" style={{ gap: 6, marginBottom: 12 }} role="group" aria-label="보기">{viewBtn('chart', '📈 서버 추이')}{viewBtn('table', '📋 서버 표 · 조건 검색')}</div>;
   if (view === 'table') {
     return (
       <>
         {viewBar}
         <div className="flex wrap" style={{ gap: 12, marginBottom: 12, justifyContent: 'flex-end' }}>{gpuBox}</div>
-        <IdracTrendTable corps={corps} sitesFor={sitesFor} initCorp={corp} initSite={site} gpuOnly={gpuOnly}
+        <IdracTrendTable corps={corps} sitesFor={sitesFor} initCorp={corp} initSite={site} typeFilter={tf}
           onOpen={(r) => { setCorp(r.corp); setSite(r.site); setServerId(r.id); setView('chart'); }} />
       </>
     );
@@ -165,10 +161,10 @@ export default function IdracTrendTool() {
       <div className="flex wrap" style={{ gap: 12, marginBottom: 14, justifyContent: 'flex-end' }}>
         {sel('법인', corp, setCorp, corps)}
         {sel('서비스', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
-        {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: `${serverLabel(s)}${s.gpu ? ' · GPU' : ''}` })), 180)}
+        {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: `${serverLabel(s)}${gpuStateOf(s) === 'gpu' ? ' · GPU' : ''}` })), 180)}
         {gpuBox}
       </div>
-      {gpuOnly && !servers.length && <div className="banner" style={{ marginBottom: 10 }}>GPU 온도를 보고하는 서버가 없습니다 — 체크를 풀면 전체 서버가 보입니다.</div>}
+      {typeOn && !servers.length && <div className="banner" style={{ marginBottom: 10 }}>고른 종류({typeText(tf)})의 서버가 없습니다 — '전체' 를 누르면 전체 서버가 보입니다.</div>}
       {list.scoped && list.omittedOutOfScope > 0 && <div className="banner" style={{ marginBottom: 10 }}>범위 밖 서버 {list.omittedOutOfScope}대는 목록에서 뺐습니다.</div>}
 
       {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
@@ -404,7 +400,7 @@ export default function IdracTrendTool() {
       {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
       {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
       {(modal === 'csv' || modal === 'xlsx') && (
-        <CsvModal hasHost={!!data?.hostCpu} noGpu={data?.hostGpu?.hasGpu === false} fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+        <CsvModal hasHost={!!data?.hostCpu} noGpu={data?.hostGpu?.hasGpu === false} fmt={modal} typeFilter={tf} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
           range={range} custom={custom} on={on} onClose={() => setModal(null)} />
       )}
     </>
@@ -431,7 +427,7 @@ function HostDetailLoader({ host, onClose }) {
   return <EntityDetail type="host" item={item} onClose={onClose} />;
 }
 
-function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', typeFilter = EMPTY_TYPE, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
   const [scope, setScope] = useState('server');
   const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
   const [cols, setCols] = useState('all');
@@ -441,7 +437,7 @@ function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false
   const xlsx = fmt === 'xlsx';
   const go = async () => {
     setBusy(true); setE(null);
-    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site, ...(gpuOnly ? { gpuOnly: 1 } : {}) } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }), ...(xlsx && styles ? { styles: stylesQuery(styles, keys) } : {}) };
+    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site, ...typeQuery(typeFilter) } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }), ...(xlsx && styles ? { styles: stylesQuery(styles, keys) } : {}) };
     const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
     try { await downloadFile(`/admin/idrac/trend/export.${xlsx ? 'xlsx' : 'csv'}?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
   };
@@ -450,7 +446,7 @@ function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>범위</div>
       <div className="flex" style={{ flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         <button type="button" className={opt(scope, 'server')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('server')}>단일 서버 — {serverName}</button>
-        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>서비스 전체 — {site} ({siteCount}대{gpuOnly ? ' · GPU 서버만' : ''})</button>
+        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>서비스 전체 — {site} ({siteCount}대{typeText(typeFilter) ? ` · ${typeText(typeFilter)}` : ''})</button>
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>기간</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>

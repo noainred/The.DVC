@@ -138,7 +138,8 @@ test('R3P-02 — /admin/idrac/trend/table 같은 조건은 기억된 응답(계�
       const rs = await Promise.all(Array.from({ length: 5 }, () => fetch(`${base}?hours=24`)));
       for (const r of rs) assert.equal(r.status, 200);
       const first = calls;
-      assert.ok(first > 0 && first <= 7, `동시 5건이 계산 1회에 합류(latestAll 호출 ${first})`);
+      // v2.687: 계산 1회 = 지표 10개(iDRAC 7 + ESXi 3)의 latestAll — 5건이 각자 계산했다면 50.
+      assert.ok(first > 0 && first <= 10, `동시 5건이 계산 1회에 합류(latestAll 호출 ${first})`);
       const again = await fetch(`${base}?hours=24`); assert.equal(again.status, 200);
       assert.equal(calls, first, '30초 안 같은 조건은 다시 계산하지 않는다');
       await fetch(`${base}?hours=48`);
