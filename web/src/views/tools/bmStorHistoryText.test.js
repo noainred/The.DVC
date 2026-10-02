@@ -11,7 +11,7 @@ const pt = (h, used, extra = {}) => ({ ts: t0 + h * H, usedBytes: used * TB, tot
 
 describe('bmStorHistoryText', () => {
   it('보기 3종 · 기간 5종(1일/7일/1달/분기/반기)', () => {
-    expect(MODES.map((m) => m.label)).toEqual(['합계', '그룹별', '서버별']);
+    expect(MODES.map((m) => m.label)).toEqual(['전체 합계', '그룹별 합산', '전체 서버']);
     expect(FALLBACK_PERIODS.map((p) => p.label)).toEqual(['1일', '7일', '1달', '분기', '반기']);
   });
 
@@ -57,7 +57,7 @@ describe('bmStorHistoryText', () => {
 
   it('x 눈금: 1일은 시각, 그 밖은 날짜(KST)', () => {
     const at = Date.UTC(2026, 8, 28, 15, 0, 0);   // 09-29 00:00 KST
-    expect(xTicksFor(at, at + 24 * H, 1)[0].label).toBe('29일 00시');
+    expect(xTicksFor(at, at + 24 * H, 1)[0].label).toBe('09/29 00:00');
     expect(xTicksFor(at, at + 7 * 24 * H, 7)[0].label).toBe('09/29');
     expect(xTicksFor(null, 1, 1)).toEqual([]);
   });
