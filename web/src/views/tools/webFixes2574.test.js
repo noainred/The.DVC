@@ -23,11 +23,17 @@ describe('BUG-11 — kindAdvice 는 객체다. BoldText 에는 .text 를 넘긴�
     expect(boldParts(kindAdvice('no-agent')).map((p) => p.t).join('')).toBe('[object Object]');
   });
 
-  it('HorizonSessionsPanel 이 .text 를 쓴다(객체를 넘기지 않는다)', () => {
+  it('HorizonSessionsPanel 은 **자기가 import 하는 모듈**의 반환 모양대로 쓴다(v2.686 HZ-01 정정)', async () => {
+    // v2.574 의 이 테스트는 curUserText.kindAdvice(객체)를 근거로 '.text 를 써라' 를 고정했는데, 그 화면이 import 하는 것은
+    // horizonSessionText.kindAdvice(문자열)다 — 그래서 '.text' 는 언제나 undefined 였고 조치 안내가 한 번도 안 떴다.
     const src = read('HorizonSessionsPanel.jsx');
-    expect(src).toMatch(/kindAdvice\(detail\.kind\)\.text/);
-    // 객체를 그대로 넘기던 옛 형태가 남아 있으면 안 된다.
-    expect(src).not.toMatch(/<BoldText text=\{kindAdvice\(detail\.kind\)\}/);
+    const m = /import\s*\{[^}]*\bkindAdvice\b[^}]*\}\s*from\s*'\.\/([\w]+)\.js'/.exec(src);
+    expect(m && m[1]).toBe('horizonSessionText');
+    const { kindAdvice: hzAdvice } = await import('./horizonSessionText.js');
+    expect(typeof hzAdvice('no-endpoint')).toBe('string');
+    expect(hzAdvice('no-endpoint').length).toBeGreaterThan(0);
+    expect(src).not.toMatch(/kindAdvice\(detail\.kind\)\.text/);
+    expect(src).toMatch(/<BoldText text=\{kindAdvice\(detail\.kind\)\} \/>/);
   });
 
   it('문구가 없는 kind 에서는 아무것도 렌더하지 않는다 — 객체는 항상 truthy 였다', () => {

@@ -1,8 +1,10 @@
 /**
- * Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합).
+ * Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회.
  *
  * 등록: CONFIG_DIR/horizon.json (자격증명 포함 → 0600, 원자적 쓰기).
- * 조회: Horizon 8 REST API — POST /rest/login → GET /rest/config/v1/licenses → POST /rest/logout.
+ * 조회: Horizon REST API — POST /rest/login → GET /rest/config/v1/licenses → POST /rest/logout.
+ *   ⚠ v2.686 실측(Connection Server 7.13.1): /rest/login 은 동작하고 라이선스·세션·앱 풀 경로는 404 였다 —
+ *   경로별 가용성은 버전마다 다르므로 연결 테스트가 기능별로 확인한다(featureProbe.js).
  *   응답 필드는 버전에 따라 다르므로(expiration_time | subscription_slice_expiry 등) 방어적으로
  *   정규화한다. 만료 시각은 epoch ms, 없으면 영구/구독 미표기.
  * 캐시: 연결 서버당 10분 인메모리 캐시 — '라이선스 만료일 확인' 화면을 열 때마다 고RTT 로그인
@@ -24,6 +26,9 @@ import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.
 
 const FILE = path.join(config.configDir, 'horizon.json');
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
+// v2.686: 기능별 경로 확인·버전 판정·실패 문구는 순수 모듈 하나가 소유한다(옛 export 이름은 재수출 — 호출부 무변경).
+import { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, FEATURES, probePaths, probeVersion, featureSummary } from './featureProbe.js';
+export { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, featureSummary };
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
 // 주소를 그 순간에 검사한다. SNI(`servername`)·Host·인증서 검증은 원래 호스트명을 그대로 쓴다.
@@ -183,11 +188,20 @@ export async function withHorizonSession(s, fn) {
     body: JSON.stringify({ username: s.username, password: s.password, domain: s.domain }),
   }, timeoutMs);
   if (!login.ok) {
-    const e = new Error(`Horizon 로그인 실패 (HTTP ${login.status})${login.status === 401 ? ' — 계정/도메인 확인' : ''}`);
+    const e = new Error(`Horizon 로그인 실패 (HTTP ${login.status})${login.status === 401 ? ' — 계정/도메인 확인' : login.status === 404 ? ' — 이 주소에 로그인 API(/rest/login)가 없습니다(커넥션 서버 주소·REST API 지원 버전 확인)' : ''}`);
     e.httpStatus = login.status;
+    e.phase = 'login';   // v2.686: 로그인 단계 실패만 '자격증명 거부' 후보다(로그인 뒤 403 은 권한 부족 — sessionCollect)
     throw e;
   }
   const tok = await login.json().catch(() => ({}));
+  // v2.686 HZT-04: 2xx 인데 토큰이 없으면(HTML 안내 페이지·프록시 등) 'Bearer undefined' 로 계속 가지 않는다 —
+  //   그대로 두면 연결 테스트가 '로그인 성공 — 계정·주소는 맞습니다' 라고 거짓을 말한다.
+  if (typeof tok?.access_token !== 'string' || !tok.access_token) {
+    const e = new Error(`Horizon 로그인 응답에 토큰이 없습니다(HTTP ${login.status}, 응답 형식 미인식) — 등록 주소가 커넥션 서버가 아닌 장비(로드밸런서·프록시 안내 페이지)일 수 있습니다.`);
+    e.phase = 'login';
+    e.kind = 'no-token';
+    throw e;
+  }
   const bearer = { Authorization: `Bearer ${tok.access_token}`, Accept: 'application/json' };
   const get = (pathname, { query = null, timeout = timeoutMs } = {}) => {
     const qs = query ? `?${new URLSearchParams(query).toString()}` : '';
@@ -202,23 +216,6 @@ export async function withHorizonSession(s, fn) {
       body: JSON.stringify({ refresh_token: tok.refresh_token || '' }),
     }, 5_000).catch(() => {});
   }
-}
-
-/** 라이선스 조회 경로(Horizon 8 Server REST API — 공개 코드 horizon-mcp 가 2512~2606 에서 확인한 경로). */
-export const LICENSE_PATH = '/rest/config/v1/licenses';
-
-/**
- * 404 진단용 — 같은 세션으로 '다른 API 는 응답하는가' 와 커넥션 서버 버전을 본다(v2.685, 사용자 신고 HTTP 404).
- * ⚠ 정직 기록: 모니터 경로의 버전 필드 이름은 실장비로 확인하지 못했다 — 후보 이름으로 읽고 못 읽으면 null.
- */
-export const PROBE_PATHS = Object.freeze(['/rest/monitor/v1/connection-servers', '/rest/monitor/connection-servers', '/rest/config/v1/connection-servers']);
-export function csVersionOf(body) {
-  const arr = Array.isArray(body) ? body : body ? [body] : [];
-  for (const x of arr) {
-    const v = x?.version || x?.details?.version || x?.connection_server_version || x?.build_version || x?.details?.build;
-    if (v) return String(v).slice(0, 64);
-  }
-  return null;
 }
 
 /** 라이선스 응답 → 정규화 배열(순수). */
@@ -236,24 +233,35 @@ export function normalizeLicenses(data) {
   }));
 }
 
-/** 라이선스 조회 실패 문구 — 404 는 '로그인은 됐고 경로만 없다' 를 말한다(인증 문제로 오해하지 않게). */
-export function licenseFailText(status) {
-  if (status === 404) return `라이선스 조회 실패 (HTTP 404) — 로그인은 성공했지만 이 서버에 라이선스 API(${LICENSE_PATH})가 없습니다. Horizon 버전(8 2006 이상 필요)과 등록 주소가 커넥션 서버인지(UAG·로드밸런서 경로가 아닌지) 확인하세요.`;
-  if (status === 403) return '라이선스 조회 거부 (HTTP 403) — 로그인은 성공했지만 이 계정에 라이선스 조회 권한이 없습니다(Horizon 관리자 역할 확인).';
-  return `라이선스 조회 실패 (HTTP ${status})`;
-}
-
-/** 한 Connection Server의 라이선스 조회(로그인→조회→로그아웃). 반환: 정규화 배열. */
+/**
+ * 한 Connection Server의 라이선스 조회(로그인→조회→로그아웃). 반환: 정규화 배열.
+ * v2.686: 404 이면 같은 로그인으로 커넥션 서버 정보(버전)를 한 번 읽어 문구가 근거를 말하게 한다
+ * (버전을 읽었으면 UAG·로드밸런서 조치를 안내하지 않는다). 오류에 `licenseStatus`·`csVersion` 을 싣는다.
+ */
 export async function fetchHorizonLicenses(s) {
   return withHorizonSession(s, async (get) => {
     const r = await get(LICENSE_PATH);
-    if (!r.ok) { const e = new Error(licenseFailText(r.status)); e.licenseStatus = r.status; throw e; }
+    if (!r.ok) {
+      try { await r.body?.cancel?.(); } catch { /* */ }
+      const v = r.status === 404 ? await probeVersion(get, s.host) : null;
+      const e = new Error(licenseFailText(r.status, { versionRead: v?.kind === 'ok', version: v?.version }));
+      e.licenseStatus = r.status;
+      e.csVersion = v?.version || null;
+      throw e;
+    }
     return normalizeLicenses(await r.json());
   });
 }
 
-const cache = new Map(); // id -> { at, licenses, error }
+const cache = new Map(); // id -> { at, licenses, error, ttl }
 const TTL_MS = 10 * 60_000;
+/**
+ * v2.686 HZ-09: 그 서버에 라이선스 API 가 없는 것(404)은 10분 뒤에도 같다 — 화면을 열 때마다 AD 로그인을
+ * 반복하지 않게 길게 기억한다. 등록을 고치면 `upsertHorizon` 이 캐시를 지워 즉시 다시 확인한다.
+ */
+const UNSUPPORTED_TTL_MS = 6 * 3_600_000;
+/** 테스트 전용 — 캐시 항목(ttl·kind) 확인. */
+export function _horizonLicenseCacheEntry(id) { return cache.get(id) || null; }
 
 /** 등록된 모든(활성) Horizon 서버의 라이선스 행 취합 — 오래된 항목만 병렬 갱신. */
 export async function collectHorizonLicenses({ force = false } = {}) {
@@ -261,21 +269,37 @@ export async function collectHorizonLicenses({ force = false } = {}) {
   const now = Date.now();
   await Promise.all(servers.map(async (s) => {
     const c = cache.get(s.id);
-    if (!force && c && now - c.at < TTL_MS) return;
-    try { cache.set(s.id, { at: Date.now(), licenses: await fetchHorizonLicenses(s), error: null }); }
-    catch (e) { cache.set(s.id, { at: Date.now(), licenses: c?.licenses || [], error: describeError(e).message }); }
+    if (!force && c && now - c.at < (c.ttl || TTL_MS)) return;
+    try { const t = Date.now(); cache.set(s.id, { at: t, lastOkAt: t, licenses: await fetchHorizonLicenses(s), error: null, ttl: TTL_MS }); }
+    catch (e) {
+      const unsupported = e?.licenseStatus === 404;
+      // v2.686 HZ-10: 실패해도 직전 라이선스 행은 남기되(만료일이 갑자기 사라지면 더 나쁘다) **마지막 성공 시각**을 함께
+      //   들고 다닌다 — 없으면 화면이 몇 시간 전 값을 지금 값처럼 보인다.
+      cache.set(s.id, {
+        at: Date.now(), lastOkAt: c?.lastOkAt || null, licenses: c?.licenses || [], error: describeError(e).message,
+        ttl: unsupported ? UNSUPPORTED_TTL_MS : TTL_MS, kind: unsupported ? 'unsupported' : 'error', csVersion: e?.csVersion || null,
+      });
+    }
   }));
   const rows = []; const errors = [];
   for (const s of servers) {
     const c = cache.get(s.id);
     if (!c) continue;
-    if (c.error) errors.push({ id: s.id, name: s.name, reason: c.error });
-    for (const l of c.licenses || []) rows.push({ server: s, lic: l });
+    const carried = c.error ? (c.licenses || []).length : 0;
+    if (c.error) errors.push({ id: s.id, name: s.name, reason: c.error, kind: c.kind || 'error', csVersion: c.csVersion || null, checkedAt: c.at, carried, lastOkAt: c.lastOkAt || null });
+    for (const l of c.licenses || []) rows.push({ server: s, lic: l, stale: !!c.error, lastOkAt: c.lastOkAt || null });
   }
   return { rows, errors, servers: servers.length };
 }
 
-/** 연결 테스트(등록 전/후). 저장된 항목 id만 주면 저장 자격증명 사용. */
+/**
+ * 연결 테스트(등록 전/후). 저장된 항목 id만 주면 저장 자격증명 사용.
+ *
+ * v2.686: **같은 로그인 한 번** 안에서 기능별 경로를 각각 가장 작게 조회해 '무엇이 되고 무엇이 안 되는지' 를
+ * 돌려준다(`features`). v2.685 는 라이선스 하나만 보고 "실시간 사용자 수집은 동작할 수 있습니다" 라고 말했는데,
+ * 실장비 7.13.1 에서 세션 경로가 404 였다(사용자 curl 확인) — 확인하지 않은 것을 말하지 않는다.
+ * 문장은 웹(`horizonAdminText.js`)이 만든다. 서버는 판정(kind)·경로·상태코드만 준다.
+ */
 export async function testHorizon(body) {
   let entry = body;
   if (!entry.password && entry.id) {
@@ -294,28 +318,36 @@ export async function testHorizon(body) {
   if (ssrf) return { ok: false, reason: `host: ${ssrf}` };
   const started = Date.now();
   try {
-    // 로그인과 라이선스 조회를 나눠 말한다 — 404 는 '연결 실패' 가 아니다(사용자 신고: 등록 후 HTTP 404).
     const out = await withHorizonSession(entry, async (get) => {
-      const r = await get(LICENSE_PATH);
-      let csVersion = null; let probe = null;
-      if (!r.ok) {
-        for (const p of PROBE_PATHS) {
-          try {
-            const pr = await get(p);
-            probe = { path: p, status: pr.status };
-            if (pr.ok) { csVersion = csVersionOf(await pr.json().catch(() => null)); break; }
-          } catch (e) { probe = { path: p, status: null, error: describeError(e).message }; }
-        }
-        return { licenseStatus: r.status, csVersion, probe };
+      // 로그인 소요는 따로 잰다 — 예전 '로그인 성공 (1319ms)' 는 뒤 조회까지 합친 값이었다(HZ-11).
+      const loginMs = Date.now() - started;
+      const version = await probeVersion(get, entry.host);
+      const features = {};
+      let licBody = null;
+      for (const f of FEATURES) {
+        const r = await probePaths(get, f.paths, { query: f.query, expect: f.expect, keepBody: f.key === 'license' });
+        if (f.key === 'license' && r.kind === 'ok') { licBody = r.body; delete r.body; }
+        features[f.key] = r;
       }
-      return { lic: normalizeLicenses(await r.json()) };
+      return { loginMs, version, features, licBody };
     });
-    if (out.lic) return { ok: true, loginOk: true, ms: Date.now() - started, licenses: out.lic.length, first: out.lic[0]?.name || '' };
-    return {
-      ok: true, loginOk: true, ms: Date.now() - started, licenses: null,
-      licenseStatus: out.licenseStatus, licenseError: licenseFailText(out.licenseStatus),
-      csVersion: out.csVersion, probe: out.probe,
+    const lic = out.licBody != null ? normalizeLicenses(out.licBody) : null;
+    const v = out.version;
+    const licF = out.features.license;
+    const res = {
+      ok: true, loginOk: true, loginMs: out.loginMs, ms: Date.now() - started,
+      licenses: lic ? lic.length : null, first: lic?.[0]?.name || '',
+      csVersion: v.version || null, csVersions: v.versions || [], csVersionMatched: !!v.matched,
+      // 호환: 버전 판정에 쓴 시도 하나(probe) — 모든 시도는 versionProbe.attempts.
+      probe: v.path ? { path: v.path, status: v.status } : null,
+      versionProbe: { kind: v.kind, path: v.path, status: v.status, attempts: v.attempts },
+      features: out.features,
     };
+    if (licF.kind !== 'ok') {
+      res.licenseStatus = licF.status;
+      res.licenseError = licF.status ? licenseFailText(licF.status, { versionRead: v.kind === 'ok', version: v.version }) : `라이선스 조회 실패 (${licF.detail || licF.kind})`;
+    }
+    return res;
   } catch (e) {
     const d = describeError(e);
     return { ok: false, loginOk: e?.httpStatus ? false : null, reason: d.message, hint: d.hint, ms: Date.now() - started };

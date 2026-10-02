@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **580개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **581개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-02)
@@ -640,7 +640,7 @@
 | `GUEST_GPU_MAX_VMS_PER_AGENT` |  |  | gpu/store.js |
 | `GUEST_GPU_TTL_MS` | `30` |  | gpu/store.js |
 
-## Horizon (5)
+## Horizon (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -649,6 +649,7 @@
 | `HZSESS_ACTIVITY_MAX` | `500` |  | horizon/sessionActivityLog.js |
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
+| `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `6` |  | horizon/sessionPoller.js |
 
 ## iDRAC/전력 (15)
 
@@ -764,4 +765,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 580
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 581

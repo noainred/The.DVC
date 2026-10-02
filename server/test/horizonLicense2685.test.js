@@ -31,7 +31,8 @@ test('로그인 성공 + 라이선스 404 → ok·licenses null·버전·다른 
   try {
     const r = await hz.testHorizon({ host: `${f.url}/`, username: 'u', password: 'p', domain: 'd' });
     assert.equal(r.ok, true); assert.equal(r.loginOk, true); assert.equal(r.licenses, null);
-    assert.equal(r.licenseStatus, 404); assert.match(r.licenseError, /로그인은 성공/);
+    // v2.686: 같은 로그인으로 버전을 읽었으면 '주소·계정 문제가 아니다' 를 말하고 UAG 조치를 내지 않는다.
+    assert.equal(r.licenseStatus, 404); assert.match(r.licenseError, /8\.6\.0/); assert.doesNotMatch(r.licenseError, /UAG/);
     assert.equal(r.csVersion, '8.6.0'); assert.deepEqual(r.probe, { path: '/rest/monitor/v1/connection-servers', status: 200 });
     assert.ok(f.seen.includes('POST /rest/login'), '끝 슬래시를 정리해 //rest/login 이 되지 않는다');
   } finally { f.srv.close(); }

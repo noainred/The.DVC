@@ -119,7 +119,16 @@ export function emptyNote(rep) {
   if (!rep) return '';
   if (rep.available === false) return 'Horizon 세션 DB 를 쓸 수 없어 누적을 보여 드릴 수 없습니다.';
   if (rep.settings && rep.settings.enabled === false && !(rep.services || []).length) return 'Horizon 실시간 사용자 수집이 꺼져 있습니다 — 설정에서 켜면 이 날부터 누적이 쌓입니다.';
-  if (!(rep.services || []).length) return '이 기간에 기록된 사용이 없습니다 — 수집이 막 시작됐다면 다음 주기부터 쌓입니다.';
+  if (!(rep.services || []).length) {
+    // v2.686 HZ-08: 세션을 읽은 서버가 하나도 없으면 '기다리면 쌓인다' 가 아니다 — 실장비 7.13.1 은 세션 경로가 404 라
+    //   영원히 쌓이지 않는다. 기다리라는 말은 최근 수집 성공이 있을 때만 한다.
+    const meta = Array.isArray(rep.serverMeta) ? rep.serverMeta : [];
+    if (meta.length && !meta.some((m) => m?.ok)) {
+      if (meta.some((m) => m?.kind === 'no-endpoint')) return '세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 커넥션 서버가 세션 목록 API 를 제공하지 않습니다(404). 기다려도 채워지지 않습니다. 설정 › Horizon 연결 서버의 연결 테스트로 기능별 지원 여부를 확인하세요.';
+      return '세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 실시간 사용자 표의 서버별 사유를 확인하세요.';
+    }
+    return '이 기간에 기록된 사용이 없습니다 — 수집이 막 시작됐다면 다음 주기부터 쌓입니다.';
+  }
   return '';
 }
 

@@ -1714,6 +1714,20 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     주소는 `horizon.js normalizeHorizonHost` 하나(IP·호스트명 → https:// · 경로 제거 · http 존중)를 저장·연결 테스트·대량 등록이 쓰고,
     ⚠ `accessMoved` 에도 **정규화된 host** 를 넘긴다 — 원문으로 비교하면 표기만 다른 같은 주소에서 저장 비밀번호를 버린다(변이 검증). 대량 등록 조언은 `hostForm:'url-auto'`.
     연결 테스트는 로그인과 라이선스 조회를 나눠 말한다 — 라이선스 404 는 '로그인 성공 · 그 서버에 라이선스 API 없음'(버전·다른 API 응답을 함께 싣는다, 필드 이름은 실장비 미확인).
+  - ⚠⚠ **v2.686 — 연결 테스트는 확인한 기능만 말한다 · 판정은 `server/src/horizon/featureProbe.js` 하나**(사용자 스크린샷 + curl, 실장비 Connection Server 7.13.1.
+    회귀 `server/test/horizon2686.test.js` + 웹 `horizonAdmin2686.test.js` — 변이 14/14):
+    · v2.685 는 라이선스 경로만 보고 "실시간 사용자·앱별 사용 수집은 동작할 수 있습니다" 라고 말했는데 그 서버의 세션 경로는 404 였다. 이제 **같은 로그인 한 번** 안에서
+      기능별(`FEATURES` — 경로는 수집기 상수 `SESSION_PATH`·`CATALOG_PATHS` 를 그대로 쓴다)로 `page=1&size=1` 을 한 번씩 조회한다. **기능을 늘리면 FEATURES 와 웹 `FEATURE_LABEL` 을 함께**.
+    · 성공 = **2xx + JSON**(배열 기대면 배열). 사용자 브라우저 실측: 토큰 없는 요청은 없는 경로에도 200 HTML(509B)이고, 토큰을 붙인 요청은 없는 경로에 404 JSON 이다 —
+      그래서 인증된 404 는 '그 서버에 그 API 가 없다' 로 읽는다. 후보 경로는 404 일 때만 다음으로, 시도한 경로는 전부 `attempts` 에 남긴다.
+    · 실측 경로(7.13.1, 인증): `/rest/monitor/connection-servers` 200 · `monitor/v1`·`config/v1/connection-servers` 404 · 라이선스·세션·앱 풀 404 · 데스크톱 풀·팜 200.
+    · 같은 로그인으로 버전을 읽었으면 'UAG·로드밸런서인지 확인' 을 안내하지 않는다(그 주소는 커넥션 서버다). **근거 없는 최소 버전 숫자를 적지 말 것**(v2.685 '8 2006 이상' 은 근거가 없었다).
+    · 로그인 2xx 인데 토큰이 없으면 `no-token`(로그인 성공이라 말하지 않는다). 세션 수집 분류: **로그인 단계** 401/403 만 `auth`(주기 정지 대상) · 로그인 뒤 401/403 은 `forbidden`(역할 권한 — 정지하지 않는다) ·
+      로그인 404 는 `no-login-endpoint`. 세션 404 서버는 주기 수집만 `HZSESS_NO_ENDPOINT_BACKOFF_MS`(기본 6시간) 쉰다(수동·등록 변경은 즉시 재확인, 인메모리).
+    · 라이선스 404 는 6시간 기억(`kind:'unsupported'`) · 실패 중 이어 보이는 직전 라이선스 행은 `stale`·`lastOkAt` 을 든다.
+    · ⚠ `HorizonSessionsPanel` 이 import 하는 `horizonSessionText.kindAdvice` 는 **문자열**이다(`curUserText.kindAdvice` 는 객체) — v2.574 가 다른 모듈을 근거로 `.text` 를 붙여
+      조치 안내가 한 번도 안 떴다. **같은 이름 함수의 반환 모양을 모듈마다 확인할 것.**
+    · 정직 기록: 다른 Horizon 버전의 경로 가용성은 확인하지 못했다. 7.13.1 에서 실시간 사용자를 보려면 Horizon 8 업그레이드나 다른 수집 방식이 필요하다(범위 밖).
   - **Horizon 서버 등록도 CSV/자유텍스트 대량 등록을 쓴다 — 코어는 그대로 하나다**(`horizon/bulk.js` +
     `routes/admin/horizonAssign.js`, v2.525 — 사용자 요청 "호라이즌 서비스에 호라이즌 서버 등록이
     필요하면 csv/text import/export 기능 추가해줘"):

@@ -27,6 +27,8 @@ import { commitHzSessions, hzLatestRecords, pruneHzSessions, pruneHzUsage, hzSes
 import { combineServers, seriesRow } from './sessions.js';
 import { recordHzSessionActivity } from './sessionActivityLog.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { clampIntervalMs } from '../config.js';
+import { localStamp } from '../util/dayKey.js';
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
@@ -55,6 +57,24 @@ const authGuard = createAuthGuard({ file: 'horizon-auth-stops.json' });
 
 /** 테스트용 — 정지 기록 초기화. */
 export function _resetHzAuthGuard() { authGuard._resetForTest(); }
+
+/**
+ * v2.686 HZT-07: 세션 경로가 404(이 버전에 없음)인 서버는 다음 주기에도 404 다 — 실장비 7.13.1 이 그랬다(사용자 curl).
+ * 그대로 두면 주기(기본 5분)마다 AD 로그인·404·로그아웃을 무기한 반복한다. 그래서 **주기 수집만** 쉬고
+ * (`HZSESS_NO_ENDPOINT_BACKOFF_MS`, 기본 6시간), 그 사실과 다음 확인 시각을 결과에 싣는다(조용히 멈추지 않는다).
+ * ⚠ '지금 수집'(수동)은 막지 않고, 주소·계정·도메인이 바뀌거나 한 번 성공하면 즉시 지운다.
+ * 인메모리다 — 재시작하면 한 번 다시 확인하고 다시 쉰다(영속할 만큼 비싼 정보가 아니다).
+ */
+const NO_ENDPOINT_BACKOFF_MS = clampIntervalMs(Number(process.env.HZSESS_NO_ENDPOINT_BACKOFF_MS) || 6 * 3_600_000, 6 * 3_600_000, 10 * 60_000);
+const _noEndpoint = new Map();                      // serverId -> { until, sig }
+const accessSig = (srv) => `${srv.host || ''}|${srv.username || ''}|${srv.domain || ''}`.toLowerCase();
+export function _resetHzNoEndpoint() { _noEndpoint.clear(); }
+export function noEndpointBackoffFor(srv, now = Date.now()) {
+  const ne = _noEndpoint.get(srv?.id);
+  if (!ne) return null;
+  if (ne.sig !== accessSig(srv)) { _noEndpoint.delete(srv.id); return null; }   // 등록을 고쳤다 — 즉시 다시 확인
+  return ne.until > now ? ne : null;
+}
 
 export function hzSessionPollerStatus() {
   const s = loadHzSettings();
@@ -117,6 +137,19 @@ export async function runHzSessionsNow(trigger = 'manual') {
             usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
           };
         }
+        const ne = periodic && !mock ? noEndpointBackoffFor(srv) : null;
+        if (ne) {
+          // 활동 로그에는 남기지 않는다 — 시도하지 않은 주기를 이벤트로 쌓으면 상한을 비이벤트로 소진한다(v2.517 규약).
+          return {
+            serverId: srv.id, name: srv.name || srv.id, host: srv.host,
+            ok: false, kind: 'no-endpoint', backoffUntil: ne.until,
+            error: `이 커넥션 서버에는 세션 목록 API 가 없습니다(404) — 주기 수집은 ${localStamp(ne.until)} 에 다시 확인합니다`,
+            hint: '주기마다 로그인하지 않으려고 쉬는 중입니다. ‘지금 수집’ 은 그대로 동작합니다.',
+            parsed: false, sessions: null, connected: null, disconnected: null, pending: null,
+            users: null, usersConnected: null, names: [], pools: [],
+            usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
+          };
+        }
         const r = mock ? mockSessionResult(srv) : await collectServerSessions(srv, {
           pageSize: s.pageSize, maxPages: s.maxPages, maxUsers: s.maxUsers, timeoutMs: s.timeoutMs,
         });
@@ -125,6 +158,8 @@ export async function runHzSessionsNow(trigger = 'manual') {
         if (!mock) {
           if (r?.kind === 'auth') authGuard.markAuthStopped(srv.id, srv, r.error || '인증·권한 거부');
           else if (r?.ok) authGuard.clearAuthStop(srv.id);
+          if (r?.kind === 'no-endpoint') _noEndpoint.set(srv.id, { until: Date.now() + NO_ENDPOINT_BACKOFF_MS, sig: accessSig(srv) });
+          else if (r?.ok) _noEndpoint.delete(srv.id);
         }
         recordHzSessionActivity({
           deviceId: srv.id, name: srv.name || srv.id, host: srv.host, source: 'central',

@@ -11,7 +11,8 @@
  * `maxPages` 를 넘기면 **`truncated:true` 로 밝힌다** — 조용히 자르면 '전 세션을 봤다' 는 거짓이 된다.
  *
  * ── 실패를 원인별로 구분한다 ────────────────────────────────────────────────────
- * `auth`(401/403 — 계정·권한) / `no-endpoint`(404 — 이 Horizon 버전이 그 경로를 노출하지 않음)
+ * `auth`(로그인 단계 401/403 — 계정) / `forbidden`(로그인 뒤 401/403 — 역할 권한, v2.686) /
+ * `no-login-endpoint`(로그인 404) / `no-endpoint`(404 — 이 Horizon 버전이 그 경로를 노출하지 않음)
  * / `http`(그 외 상태코드) / `timeout` / `unparsed`(응답이 배열이 아니거나 계정 필드 없음).
  * 한 문구로 뭉개면 조치가 정반대인 상황을 같은 말로 덮는다(v2.517 규약).
  */
@@ -159,11 +160,18 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
   } catch (e) {
     const d = describeError(e);
     const st = Number(e?.httpStatus) || 0;
+    // v2.686 HZT-06·HZ-07: '자격증명 거부(auth)' 는 **로그인 단계**의 401/403 뿐이다. 로그인은 성공했는데 세션
+    //   조회가 403 이면 계정이 아니라 역할 권한 문제다 — 'auth' 로 두면 authGuard 가 주기 수집을 멈추고 '비밀번호를
+    //   고치면 재개' 라는 틀린 조치를 말한다. 로그인 자체가 404 면 '세션 경로가 없다' 가 아니라 로그인 API 가 없다.
+    const atLogin = e?.phase === 'login';
     const kind = e?.kind === 'unparsed' ? 'unparsed'
-      : st === 401 || st === 403 ? 'auth'
-        : st === 404 ? 'no-endpoint'
-          : st > 0 ? 'http'
-            : /timeout|aborted|timed out/i.test(String(d.message)) ? 'timeout' : 'error';
+      : e?.kind === 'no-token' ? 'no-token'
+        : atLogin && (st === 401 || st === 403) ? 'auth'
+          : atLogin && st === 404 ? 'no-login-endpoint'
+            : st === 401 || st === 403 ? 'forbidden'
+              : st === 404 ? 'no-endpoint'
+                : st > 0 ? 'http'
+                  : /timeout|aborted|timed out/i.test(String(d.message)) ? 'timeout' : 'error';
     return {
       ok: false, kind, error: d.message, hint: d.hint || '',
       pages: 0, truncated: false, ms: Date.now() - t0,
@@ -196,6 +204,10 @@ export const KIND_LABEL = Object.freeze({
   //   조치가 같아 보여도 사용자가 알아야 할 사실이 다르다(지금은 시도조차 하지 않는다).
   'auth-stopped': '인증 실패 — 주기 수집 정지',
   'no-endpoint': '이 버전에 없는 경로(404)',
+  // v2.686: 로그인 뒤 권한 부족 · 로그인 API 없음 · 로그인 응답에 토큰 없음 — 셋 다 '자격증명 거부' 가 아니다.
+  forbidden: '권한 부족(로그인은 성공)',
+  'no-login-endpoint': '로그인 API 없음(404)',
+  'no-token': '로그인 응답 형식 미인식',
   http: '조회 실패(HTTP)',
   timeout: '시한 초과',
   error: '조회 오류',

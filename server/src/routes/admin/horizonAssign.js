@@ -1,6 +1,6 @@
 // Horizon 등록·svcmon 할당 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue } from '../../horizon/horizon.js';
+import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary } from '../../horizon/horizon.js';
 import * as hzBulk from '../../horizon/bulk.js';                     // v2.525: CSV/자유텍스트 대량 등록
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
@@ -110,8 +110,9 @@ adminRouter.post('/horizon/servers/import/test', csvPerm, adminOnly, fleetOnly, 
       // (v2.480 감사 S6 — body.host 만 바꿔 평문 비밀번호를 받아 가는 경로 차단). 그래서
       // 접속처를 바꾼 행은 비밀번호를 적어야 하고, 안 적으면 위 검증이 먼저 거른다.
       const r = await testHorizon({ ...hzBulk.toSaveInput(row) });
+      // v2.686 HZT-12: 단건 테스트와 같은 기능별 판정을 요약한다 — 예전에는 라이선스 404 를 숨기고 초록 '로그인 성공' 만 말했다.
       return r?.ok
-        ? { ok: true, detail: { summary: r.licenses != null ? `로그인 성공 · 라이선스 ${r.licenses}건` : '로그인 성공' } }
+        ? { ok: true, detail: { summary: featureSummary(r) || (r.licenses != null ? `로그인 성공 · 라이선스 ${r.licenses}건` : '로그인 성공') } }
         : { ok: false, reason: r?.reason || '로그인 실패', detail: { hint: r?.hint } };
     },
   });

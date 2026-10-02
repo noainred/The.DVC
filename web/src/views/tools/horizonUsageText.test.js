@@ -47,6 +47,11 @@ describe('horizonUsageText (v2.684)', () => {
     expect(T.emptyNote({ available: true, settings: { enabled: false }, services: [] })).toMatch(/꺼져/);
     expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [] })).toMatch(/기록된 사용이 없/);
     expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [{}] })).toBe('');
+    // v2.686 HZ-08: 세션을 읽은 서버가 없으면 '다음 주기부터 쌓입니다'(기다리면 된다) 라고 말하지 않는다.
+    const noEp = T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: false, kind: 'no-endpoint' }] });
+    expect(noEp).toMatch(/404/); expect(noEp).toMatch(/기다려도 채워지지 않습니다/); expect(noEp).not.toMatch(/다음 주기부터/);
+    expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: false, kind: 'auth' }] })).toMatch(/서버별 사유/);
+    expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: true, kind: 'ok' }] })).toMatch(/다음 주기부터/);
   });
 
   it('기간 요약 — 수집 없는 날·일부 수집·기록 시작일', () => {

@@ -21,6 +21,9 @@ import { HorizonSessionSettings } from './tools/HorizonSessionSettings.jsx';
 import { hzTestMessage } from './horizonAdminText.js';
 
 const EMPTY = { id: '', name: '', host: '', username: '', password: '', domain: '' };
+/** 연결 테스트 줄의 색·표지(v2.686) — 됨 / 이 서버에 없음(404) / 확인 실패 / 참고. */
+const LINE_TONE = { ok: '#4ade80', warn: 'var(--amber)', bad: '#f87171', info: 'var(--text-dim)', muted: 'var(--text-dim)' };
+const LINE_MARK = { ok: '✓', warn: '✗', bad: '!', info: 'ⓘ', muted: '·' };
 
 /**
  * @param {object} p
@@ -110,7 +113,21 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
           <label>비밀번호 <input className="input" type="password" value={hzForm.password} onChange={hzSet('password')} placeholder={hzForm.id && (hz || []).some((s) => s.id === hzForm.id) ? '●●●●● (비우면 유지)' : ''} /></label>
           <label>AD 도메인 <input className="input" value={hzForm.domain} onChange={hzSet('domain')} placeholder="corp" /></label>
         </div>
-        {hzMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: hzMsg.ok ? 'rgba(34,197,94,.12)' : hzMsg.warn ? 'rgba(251,191,36,.12)' : 'rgba(239,68,68,.12)', color: hzMsg.ok ? '#4ade80' : hzMsg.warn ? 'var(--amber)' : '#f87171', whiteSpace: 'normal' }}>{hzMsg.text}</div>}
+        {hzMsg && (
+          <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: hzMsg.ok ? 'rgba(34,197,94,.12)' : hzMsg.warn ? 'rgba(251,191,36,.12)' : 'rgba(239,68,68,.12)', color: hzMsg.ok ? '#4ade80' : hzMsg.warn ? 'var(--amber)' : '#f87171', whiteSpace: 'normal' }}>
+            {/* v2.686: 기능별 한 줄 — 예전에는 한 문단으로 이어 붙여 무엇이 되고 안 되는지 읽기 어려웠다(사용자 스크린샷). */}
+            {Array.isArray(hzMsg.lines) && hzMsg.lines.length ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 10, rowGap: 3 }}>
+                {hzMsg.lines.map((l, i) => (
+                  <React.Fragment key={i}>
+                    <span style={{ color: LINE_TONE[l.tone] || 'inherit', whiteSpace: 'nowrap' }}>{LINE_MARK[l.tone] || '·'} {l.label}</span>
+                    <span style={{ color: l.tone === 'muted' || l.tone === 'info' ? 'var(--text-dim)' : 'var(--text)', overflowWrap: 'anywhere' }}>{l.text}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : hzMsg.text}
+          </div>
+        )}
         <div className="flex gap wrap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy || (!hzForm.host && !hzForm.id)} onClick={hzTest}>연결 테스트</button>
@@ -119,7 +136,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
           {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setHzBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
-          Connection Server 는 IP 나 호스트명만 적으면 됩니다 — https:// 는 자동으로 붙고, 붙여 넣은 주소의 경로(/admin 등)는 떼어 냅니다(http 로 쓰려면 http:// 를 직접 적으세요). Horizon 8(2006+) REST API(<code>/rest/login</code>)를 사용합니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
+          Connection Server 는 IP 나 호스트명만 적으면 됩니다 — https:// 는 자동으로 붙고, 붙여 넣은 주소의 경로(/admin 등)는 떼어 냅니다(http 로 쓰려면 http:// 를 직접 적으세요). Horizon REST API(<code>/rest/login</code>)로 로그인합니다. 라이선스 만료일·실시간 사용자·앱 목록은 각각 다른 경로를 쓰고 Horizon 버전에 따라 없을 수 있어(예: 7.13.1 은 세션·라이선스 경로가 404), <b>연결 테스트</b>가 같은 로그인으로 기능마다 확인해 됨/안 됨을 보여 줍니다. 브라우저 주소창으로 그 경로를 열면 로그인 토큰이 없어 판단할 수 없습니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
           대량 등록의 내보내기·샘플에는 <b>비밀번호가 담기지 않습니다</b>. host·계정·도메인 중 하나라도 바꾸면 저장된 비밀번호를 승계하지 않으므로(보안 규칙) 그 행은 비밀번호를 다시 적어야 합니다.
         </div>
       </div>
