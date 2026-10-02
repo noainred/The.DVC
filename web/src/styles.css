@@ -1613,3 +1613,37 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .st-head-right { max-width: none; flex-basis: 100%; }
   .st-editor-head, .st-editor-body, .st-editor-foot { padding-left: 14px; padding-right: 14px; }
 }
+
+/* ── 베어메탈 스토리지 v2(v2.688, 시안 'BM Storage v2') — .bm2 아래로만 ─────────────────────────── */
+.bm2 * { scrollbar-color: var(--border) transparent; scrollbar-width: thin; }
+.bm2-card { border-radius: 16px; padding: 22px 26px; margin-bottom: 14px; min-width: 0; }
+.bm2-label { font-family: var(--mono); font-size: 12px; letter-spacing: .16em; color: var(--text-dim); }
+.bm2-label::first-letter { color: var(--mint); }
+.bm2-status { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-top: 8px; line-height: 1.8; }
+.bm2-icon { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 6px; padding: 0 6px; cursor: pointer; font-size: 11px; line-height: 18px; }
+.bm2-icon:hover { color: var(--text); border-color: var(--accent); }
+.bm2-summary { display: flex; flex-wrap: wrap; gap: 22px 28px; align-items: stretch; }
+.bm2-bar { display: block; position: relative; border-radius: 8px; background: var(--border-soft); overflow: hidden; }
+.bm2-bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; }
+.bm2-quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; align-self: center; }
+.bm2-quad > div { padding: 12px 16px; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); margin: 0 -1px -1px 0; min-width: 0; }
+.bm2-qlabel { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--text-faint); }
+.bm2-qval { font-size: 20px; font-weight: 700; margin-top: 4px; white-space: nowrap; }
+.bm2-qsub { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.bm2-watch { display: flex; align-items: center; gap: 12px; flex: 1 1 360px; min-width: 0; padding: 14px 16px; border-radius: 14px; cursor: pointer; text-align: left; color: inherit; font: inherit; border: 1px solid; }
+.bm2-watch:hover { background: var(--panel-2); }
+.bm2-ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.bm2-gcard { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 16px 18px; border-radius: 14px; cursor: pointer; color: inherit; font: inherit; text-align: left; min-width: 0; border: 1px solid var(--border); }
+.bm2-gcard:hover { border-color: var(--accent); }
+.bm2-gcard.on { border-color: var(--mint); }
+.bm2-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text-dim); cursor: pointer; font-family: inherit; }
+.bm2-chip.on { border-color: var(--mint); color: var(--mint); }
+.bm2-gchip { display: inline-flex; align-items: center; gap: 5px; margin: 0 6px 2px 0; padding: 1px 8px; border-radius: 10px; background: var(--panel-deep); border: 1px solid var(--border-soft); white-space: nowrap; }
+.bm2-list { display: flex; flex-direction: column; gap: 2px; }
+.bm2-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.bm2-row:hover { background: var(--panel-2); }
+.bm2-row.on { border-color: var(--mint); background: color-mix(in srgb, var(--mint) 8%, transparent); }
+.bm2-foot { font-size: 11.5px; color: var(--text-faint); margin-top: 12px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .bm2-card { padding: 16px 14px; }
+}
