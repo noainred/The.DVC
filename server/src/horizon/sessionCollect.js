@@ -19,6 +19,61 @@ import { withHorizonSession } from './horizon.js';
 import { describeError } from '../util/errors.js';
 import { normalizeSessions, SESSION_PATH, PAGE_SIZE_MAX } from './sessions.js';
 import { pushAll } from '../util/pushAll.js';
+import { CATALOG_PATHS, normalizeCatalog, usageFromSessions } from './appUsage.js';
+import { numOrNull } from '../util/numOrNull.js';
+
+/*
+ * v2.684 — 앱·데스크톱 이름 카탈로그(앱 풀·데스크톱 풀·팜 목록).
+ * 목록은 자주 바뀌지 않는다 — **세션 조회와 같은 로그인 안에서**, 카탈로그가 낡았을 때만(기본 6시간) 읽는다.
+ * 새 로그인을 만들지 않는 것이 핵심이다(고RTT 법인에서 로그인 왕복이 곧 비용이고, AD 감사 로그도 늘린다).
+ * 읽기에 실패하면 **직전 카탈로그를 지우지 않는다**(한 번의 실패로 이름이 전부 ID 로 바뀌면 그날의 누적이
+ * 서비스 둘로 갈라진다). 실패 사유는 그대로 보고한다.
+ */
+const CATALOG_TTL_MS = (() => { const n = numOrNull(process.env.HZ_CATALOG_TTL_MS); return n != null && n >= 60_000 ? Math.min(n, 7 * 86_400_000) : 6 * 3_600_000; })();
+const CATALOG_PAGE = 1000;
+const CATALOG_MAX_PAGES = 10;
+const _catalogs = new Map();   // serverId -> { at, catalog, counts, usedPaths, errors, truncated }
+
+/** 다시 읽을 때인가 — 성공 뒤에는 TTL, 실패 뒤에는 30분(매 주기 같은 404 를 되풀이하지 않게). */
+export const CATALOG_RETRY_MS = 30 * 60_000;
+export function catalogDue(prev, now) {
+  if (!prev) return true;
+  const failed = prev.failedAt && prev.failedAt >= (prev.at || 0);
+  return failed ? now - prev.failedAt >= Math.min(CATALOG_RETRY_MS, CATALOG_TTL_MS) : now - (prev.at || 0) >= CATALOG_TTL_MS;
+}
+
+export function _resetCatalogsForTest() { _catalogs.clear(); }
+export function catalogInfo(serverId) {
+  const c = _catalogs.get(String(serverId || ''));
+  return c ? { at: c.at, failedAt: c.failedAt || null, counts: c.counts, usedPaths: c.usedPaths, errors: c.errors, truncated: c.truncated } : null;
+}
+
+async function fetchCatalog(get) {
+  const raw = { apps: [], desktops: [], farms: [] };
+  const usedPaths = {}; const errors = {}; const truncated = {};
+  const KIND_FIELD = { app: 'apps', desktop: 'desktops', farm: 'farms' };
+  for (const [kind, paths] of Object.entries(CATALOG_PATHS)) {
+    for (const p of paths) {
+      const acc = [];
+      let status = 0; let bad = false;
+      for (let page = 1; page <= CATALOG_MAX_PAGES; page++) {
+        const r = await get(p, { query: { page: String(page), size: String(CATALOG_PAGE) } });
+        if (!r.ok) { status = r.status; break; }
+        const body = await r.json().catch(() => null);
+        if (!Array.isArray(body)) { bad = true; break; }
+        pushAll(acc, body);
+        if (body.length < CATALOG_PAGE) break;
+        if (page === CATALOG_MAX_PAGES) truncated[kind] = true;
+      }
+      if (status === 404) { errors[kind] = `${p}: 404`; continue; }   // 이 버전에 없는 경로 — 다음 후보
+      if (status) { errors[kind] = `${p}: HTTP ${status}`; break; }
+      if (bad) { errors[kind] = `${p}: 응답이 배열이 아닙니다`; break; }
+      raw[KIND_FIELD[kind]] = acc; usedPaths[kind] = p; delete errors[kind];
+      break;
+    }
+  }
+  return { raw, usedPaths, errors, truncated };
+}
 
 const HAS_MORE_HEADERS = ['has_more_records', 'hasmorerecords', 'x-has-more-records'];
 
@@ -36,7 +91,7 @@ function headerSaysMore(res) {
  * @returns {{ok:boolean, kind:string, error:string|null, pages:number, truncated:boolean, ms:number, raw:object[]}}
  *          + `normalizeSessions()` 의 모든 필드(성공 시)
  */
-export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, maxUsers = 2000, timeoutMs } = {}) {
+export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, maxUsers = 2000, timeoutMs, catalog = true, now = Date.now() } = {}) {
   const t0 = Date.now();
   const size = Math.max(1, Math.min(PAGE_SIZE_MAX, Math.round(Number(pageSize) || 500)));
   const cap = Math.max(1, Math.round(Number(maxPages) || 20));
@@ -66,15 +121,40 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         if (body.length < size) break;       // 마지막 페이지
         if (page >= cap) { truncated = true; break; }
       }
+      // 카탈로그 — 같은 로그인 안에서, 낡았을 때만. 실패해도 세션 결과는 그대로 쓴다(이름만 ID 로 남는다).
+      const sid = String(s.id || '');
+      const prev = _catalogs.get(sid);
+      if (catalog && catalogDue(prev, now)) {
+        try {
+          const c = await fetchCatalog(get);
+          const got = Object.keys(c.usedPaths).length > 0;
+          if (got || !prev) {
+            // 일부 종류만 읽었으면 못 읽은 종류는 직전 값을 이어 쓴다(지우지 않는다).
+            const merged = { apps: c.raw.apps, desktops: c.raw.desktops, farms: c.raw.farms };
+            if (prev?.raw) for (const [k, f] of [['app', 'apps'], ['desktop', 'desktops'], ['farm', 'farms']]) if (!c.usedPaths[k]) merged[f] = prev.raw[f] || [];
+            const norm = normalizeCatalog(merged);
+            _catalogs.set(sid, { at: now, raw: merged, catalog: norm, counts: norm.counts, usedPaths: c.usedPaths, errors: c.errors, truncated: c.truncated });
+          } else {
+            _catalogs.set(sid, { ...prev, errors: c.errors, failedAt: now });
+          }
+        } catch (e) {
+          if (prev) _catalogs.set(sid, { ...prev, errors: { all: String(e?.message || e).slice(0, 200) }, failedAt: now });
+          else _catalogs.set(sid, { at: 0, failedAt: now, raw: null, catalog: normalizeCatalog({}), counts: { apps: 0, desktops: 0, farms: 0 }, usedPaths: {}, errors: { all: String(e?.message || e).slice(0, 200) }, truncated: {} });
+        }
+      }
       return { acc, pages, truncated };
     });
     const norm = normalizeSessions(out.acc, { maxUsers });
+    const cat = _catalogs.get(String(s.id || ''));
+    const usage = norm.parsed ? usageFromSessions(out.acc, { usedUserKey: norm.usedUserKey, usedStateKey: norm.usedStateKey, catalog: cat?.catalog }) : null;
     return {
       ok: true,
       kind: norm.parsed ? 'ok' : 'unparsed',
       error: norm.parsed ? null : '세션 응답에서 계정 필드를 찾지 못했습니다(형식 미인식).',
       pages: out.pages, truncated: out.truncated, ms: Date.now() - t0,
       ...norm,
+      usage,
+      catalog: catalogInfo(s.id),
     };
   } catch (e) {
     const d = describeError(e);

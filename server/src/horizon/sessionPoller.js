@@ -23,7 +23,7 @@ import { createAuthGuard } from '../util/authGuard.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { load as loadHzSettings, onHorizonSessionSettingsChange } from './sessionSettings.js';
 import { collectServerSessions, mockSessionResult } from './sessionCollect.js';
-import { commitHzSessions, hzLatestRecords, pruneHzSessions, hzSessionDbStatus, dropHzLatest } from './sessionDb.js';
+import { commitHzSessions, hzLatestRecords, pruneHzSessions, pruneHzUsage, hzSessionDbStatus, dropHzLatest } from './sessionDb.js';
 import { combineServers, seriesRow } from './sessions.js';
 import { recordHzSessionActivity } from './sessionActivityLog.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -174,7 +174,10 @@ export async function runHzSessionsNow(trigger = 'manual') {
       });
     }
 
-    if ((++tick % PRUNE_EVERY_RUNS) === 0) { try { await pruneHzSessions(s.retentionDays, { every: 1 }); } catch { /* */ } }
+    if ((++tick % PRUNE_EVERY_RUNS) === 0) {
+      try { await pruneHzSessions(s.retentionDays, { every: 1 }); } catch { /* */ }
+      try { await pruneHzUsage(s.usageRetentionDays); } catch { /* */ }
+    }
 
     lastRunTs = ts;
     lastResult = {
