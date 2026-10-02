@@ -61,6 +61,9 @@ describe('v2.686 — 연결 테스트는 기능별로 확인한 것만 말한다
     const labels = m.lines.map((l) => l.label);
     for (const k of FEATURE_ORDER) expect(labels.join('|')).toContain({ license: '라이선스', sessions: '실시간 사용자', apps: '앱 목록', desktops: '데스크톱 풀', farms: '팜' }[k]);
   });
+  it('기능 줄은 " — " 를 한 번만 쓴다(세 토막 문장 금지 — v2.560 규약, Chromium 판독에서 발견)', () => {
+    for (const l of m.lines.filter((x) => x.label !== '판정')) expect(l.text.split(' — ').length).toBeLessThanOrEqual(2);
+  });
   it('화면 문구에 백틱·별표가 없다(BoldText 를 거치지 않는다)', () => {
     expect(m.text).not.toMatch(/`|\*\*/);
     for (const v of Object.values(FEATURE_KIND_TEXT)) expect(v).not.toMatch(/`|\*\*/);

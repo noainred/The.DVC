@@ -33,7 +33,7 @@ export const FEATURE_KIND_TEXT = Object.freeze({
 
 /** 그 기능이 안 될 때 포탈에서 무엇이 안 되는가(조치가 아니라 영향). */
 const IMPACT = Object.freeze({
-  license: '라이선스 만료일을 볼 수 없습니다 — Horizon 관리 콘솔에서 확인하세요',
+  license: '라이선스 만료일을 볼 수 없습니다(Horizon 관리 콘솔에서 확인하세요)',
   sessions: '실시간 사용자·앱별 사용 수집이 동작하지 않습니다',
   apps: '앱 이름을 몰라 앱별 사용은 팜·데스크톱 풀 단위로만 보입니다',
   desktops: '데스크톱 풀이 이름 대신 ID 로 보입니다',
