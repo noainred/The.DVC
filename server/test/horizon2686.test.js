@@ -227,3 +227,162 @@ test('⑮ 대량 연결 테스트 경로는 단건과 같은 기능별 요약(fe
   assert.match(src, /summary:\s*featureSummary\(r\)\s*\|\|/, '대량 결과표가 라이선스 404·세션 404 를 숨기지 않게');
   assert.match(src, /import\s*\{[^}]*\bfeatureSummary\b[^}]*\}\s*from\s*'\.\.\/\.\.\/horizon\/horizon\.js'/);
 });
+
+// ── 적대적 리뷰(같은 릴리스) 반영분 ─────────────────────────────────────────────
+
+test('⑯ 연결 테스트 시간 예산은 대량 테스트의 행 시한보다 작고, 예산을 넘긴 기능은 "확인 안 함" 으로 밝힌다(WEB2686-06·HZ2686-R5)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const bulk = stripComments(fs.readFileSync(new URL('../src/util/bulkRun.js', import.meta.url), 'utf8'));
+  const m = bulk.match(/timeoutMs\s*=\s*([\d_]+)\s*\}/);
+  assert.ok(m, 'bulkRun 의 기본 행 시한을 읽지 못했다');
+  const rowDeadline = Number(m[1].replace(/_/g, ''));
+  assert.ok(hz.TEST_BUDGET_MS + 5_000 < rowDeadline, `예산 ${hz.TEST_BUDGET_MS} + 로그아웃 여유 < 행 시한 ${rowDeadline}`);
+  const assign = stripComments(fs.readFileSync(new URL('../src/routes/admin/horizonAssign.js', import.meta.url), 'utf8'));
+  assert.ok(assign.includes("kind: 'horizon'"), 'Horizon 대량 테스트 호출을 찾지 못했다');
+  assert.doesNotMatch(assign, /timeoutMs\s*:/, 'Horizon 대량 테스트가 기본 행 시한을 바꾸지 않는다(바꾸면 위 비교가 무의미하다)');
+  // 예산이 거의 남지 않으면 요청을 시작하지 않는다(시작해 놓고 잘리면 결과가 0).
+  let calls = 0;
+  const r = await fp.probePaths(async () => { calls += 1; return new Response('[]', { status: 200 }); }, ['/a', '/b'], { deadline: Date.now() + fp.MIN_SLICE_MS - 500 });
+  assert.equal(calls, 0);
+  assert.equal(r.kind, 'not-tried');
+  assert.ok(fp.PROBE_KINDS.includes('not-tried'));
+});
+
+test('⑰ 응답 본문 상한 — 로그인 응답이 상한을 넘으면 "형식 미인식" 이 아니라 상한 초과라고 말하고, 기능 조회도 원인을 구분한다(SEC-2686-01·HZ2686-R4)', async () => {
+  const big = JSON.stringify({ access_token: 't', pad: 'x'.repeat(80 * 1024) });
+  const f = await fake({ 'POST /rest/login': [200, big] });
+  try {
+    const r = await hz.testHorizon({ host: f.url, username: 'u', password: 'p', domain: 'd' });
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /상한/, '상한 초과를 응답 형식 탓으로 돌리지 않는다');
+  } finally { f.srv.close(); }
+  // 기능 조회: 상한 초과 · 본문 읽기 중단 · HTML 을 각각 다르게 말한다.
+  const huge = new Response('[' + '0,'.repeat(600_000) + '0]', { status: 200, headers: { 'content-type': 'application/json' } });
+  const a = await fp.classifyResponse(huge, 'array');
+  assert.match(String(a.detail), /상한/);
+  const html = await fp.classifyResponse(new Response('<html></html>', { status: 200 }), 'array');
+  assert.equal(html.kind, 'unparsed'); assert.match(html.detail, /JSON 이 아닌/);
+  const broken = { ok: true, status: 200, headers: new Headers(), body: { getReader() { return { read: async () => { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; }, releaseLock() {}, cancel: async () => {} }; } } };
+  const t = await fp.classifyResponse(broken, 'any');
+  assert.equal(t.kind, 'timeout', '본문을 읽다 끊긴 것을 "JSON 이 아닌 응답" 이라 말하지 않는다');
+});
+
+test('⑱ 로그인 404·토큰 없는 응답도 주기마다 다시 로그인하지 않는다 — AD 자격증명을 커넥션 서버가 아닐 수 있는 주소로 반복 전송 금지(HZ2686-R3·SEC-2686-02)', async () => {
+  const settings = await import('../src/horizon/sessionSettings.js');
+  const poller = await import('../src/horizon/sessionPoller.js');
+  assert.deepEqual([...poller.BACKOFF_KINDS].sort(), ['no-endpoint', 'no-login-endpoint', 'no-token']);
+  for (const routes of [{}, { 'POST /rest/login': [200, {}] }]) {
+    const f = await fake(routes);
+    try {
+      for (const s of hz.loadHorizon()) hz.removeHorizon(s.id);
+      assert.equal(hz.upsertHorizon({ id: 'hzL', name: 'L', host: f.url, username: 'svc', password: 'pw', domain: 'dvc' }).ok, true);
+      settings.save({ enabled: true });
+      poller._resetHzNoEndpoint();
+      await poller.runHzSessionsNow('timer');
+      assert.equal(f.logins(), 1);
+      const r2 = await poller.runHzSessionsNow('timer');
+      assert.equal(f.logins(), 1, '다음 주기에는 로그인하지 않는다');
+      assert.ok((r2.errors || []).some((e) => /다시 확인합니다/.test(e.error)), '쉬는 사실과 다음 확인 시각을 말한다');
+      await poller.runHzSessionsNow('manual');
+      assert.equal(f.logins(), 2, '수동 실행은 막지 않는다');
+    } finally { f.srv.close(); poller._resetHzNoEndpoint(); }
+  }
+});
+
+test('⑲ 쉬는 주기는 최신값 표에 쓰지 않는다 — "마지막 조회" 가 실제로 조회한 시각을 말한다(WEB2686-03)', async () => {
+  const settings = await import('../src/horizon/sessionSettings.js');
+  const poller = await import('../src/horizon/sessionPoller.js');
+  const db = await import('../src/horizon/sessionDb.js');
+  const f = await fake(REAL_7131);
+  try {
+    for (const s of hz.loadHorizon()) hz.removeHorizon(s.id);
+    hz.upsertHorizon({ id: 'hzB', name: 'B', host: f.url, username: 'svc', password: 'pw', domain: 'dvc' });
+    settings.save({ enabled: true });
+    poller._resetHzNoEndpoint();
+    await poller.runHzSessionsNow('timer');
+    const first = (await db.hzLatestRecords()).find((x) => x.serverId === 'hzB');
+    assert.ok(first, '실제로 조회한 주기는 기록된다');
+    await new Promise((r) => setTimeout(r, 20));
+    await poller.runHzSessionsNow('timer');
+    const second = (await db.hzLatestRecords()).find((x) => x.serverId === 'hzB');
+    assert.equal(second.ts, first.ts, '쉬는 주기가 마지막 조회 시각을 덮지 않는다');
+    assert.doesNotMatch(String(second.error || ''), /다시 확인합니다/, '포탈 문구가 "장비가 돌려준 사유" 칸에 들어가지 않는다');
+  } finally { f.srv.close(); poller._resetHzNoEndpoint(); }
+});
+
+test('⑳ 인증 정지 — v2.685 가 로그인 뒤 403 으로 남긴 정지는 풀고, 로그인이 성공한 결과(권한 부족 등)도 정지를 푼다(HZ2686-R1·WEB2686-01)', async () => {
+  const settings = await import('../src/horizon/sessionSettings.js');
+  const poller = await import('../src/horizon/sessionPoller.js');
+  const { credHashOf } = await import('../src/util/authGuard.js');
+  const stopFile = path.join(process.env.CONFIG_DIR, 'horizon-auth-stops.json');
+  const f = await fake({ ...LOGIN, 'GET /rest/inventory/v1/sessions': [403, {}] });
+  try {
+    for (const s of hz.loadHorizon()) hz.removeHorizon(s.id);
+    hz.upsertHorizon({ id: 'hzS', name: 'S', host: f.url, username: 'svc', password: 'pw', domain: 'dvc' });
+    settings.save({ enabled: true });
+    poller._resetHzNoEndpoint();
+    const srv = hz.loadHorizon().find((s) => s.id === 'hzS');
+    const plant = (reason) => {
+      poller._resetHzAuthGuard();
+      fs.writeFileSync(stopFile, JSON.stringify({ hzS: { credHash: credHashOf(srv), since: Date.now() - 3_600_000, at: Date.now() - 60_000, attempts: 3, reason } }));
+    };
+    // (a) 옛 분류로 남은 정지(사유가 '세션 조회 실패') — 주기 수집이 다시 시도하고 정지를 지운다.
+    plant('세션 조회 실패 (HTTP 403)');
+    await poller.runHzSessionsNow('timer');
+    assert.equal(f.logins(), 1, '옛 정지는 풀고 다시 확인한다');
+    assert.equal(JSON.parse(fs.readFileSync(stopFile, 'utf8')).hzS, undefined);
+    // (b) 진짜 로그인 거부로 남은 정지 — 주기 수집은 건너뛴다(계정 잠금 방지).
+    plant('Horizon 로그인 실패 (HTTP 401)');
+    await poller.runHzSessionsNow('timer');
+    assert.equal(f.logins(), 1, '로그인 거부 정지는 주기 수집이 지킨다');
+    // (c) 수동 실행에서 로그인은 성공하고 세션만 403 — 자격증명은 맞으므로 정지를 푼다.
+    const r = await poller.runHzSessionsNow('manual');
+    assert.equal(f.logins(), 2);
+    assert.ok((r.errors || []).some((e) => /403/.test(String(e.error))), '로그인 뒤 403 을 그대로 말한다');
+    assert.equal(JSON.parse(fs.readFileSync(stopFile, 'utf8')).hzS, undefined, '로그인이 된 결과는 정지를 남기지 않는다');
+  } finally { f.srv.close(); poller._resetHzAuthGuard(); }
+});
+
+test('㉑ 연결 테스트가 세션·라이선스 성공을 확인하면 쉬는 기록·라이선스 404 기억을 지운다 — 업그레이드 뒤 6시간 낡은 404 금지(HZ2686-R2)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(new URL('../src/routes/admin/horizonAssign.js', import.meta.url), 'utf8'));
+  const route = src.slice(src.indexOf("'/horizon/test'"));
+  assert.ok(route.length > 20, '연결 테스트 라우트를 찾지 못했다');
+  const body = route.slice(0, route.indexOf('\n});'));
+  assert.match(body, /features\??\.sessions\?\.kind\s*===\s*'ok'\)\s*clearHzNoEndpoint\(/);
+  assert.match(body, /features\??\.license\?\.kind\s*===\s*'ok'\)\s*invalidateHorizonLicenseCache\(/);
+  // 함수 자체도 실제로 지운다.
+  const poller = await import('../src/horizon/sessionPoller.js');
+  const f = await fake(REAL_7131);
+  try {
+    for (const s of hz.loadHorizon()) hz.removeHorizon(s.id);
+    hz.upsertHorizon({ id: 'hzC', name: 'C', host: f.url, username: 'svc', password: 'pw', domain: 'dvc' });
+    (await import('../src/horizon/sessionSettings.js')).save({ enabled: true });
+    poller._resetHzNoEndpoint();
+    await poller.runHzSessionsNow('timer');
+    const srv = hz.loadHorizon().find((s) => s.id === 'hzC');
+    assert.ok(poller.noEndpointBackoffFor(srv));
+    poller.clearHzNoEndpoint('hzC');
+    assert.equal(poller.noEndpointBackoffFor(srv), null);
+    await hz.collectHorizonLicenses({ force: true });
+    assert.ok(hz._horizonLicenseCacheEntry('hzC'));
+    hz.invalidateHorizonLicenseCache('hzC');
+    assert.equal(hz._horizonLicenseCacheEntry('hzC') ?? null, null);
+  } finally { f.srv.close(); poller._resetHzNoEndpoint(); }
+});
+
+test('㉒ 라이선스 만료 도구 화면 응답은 이어 보여 주는 직전 행의 낡음 표지를 버리지 않는다(HZ2686-R6)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(new URL('../src/routes/api/toolsInfo.js', import.meta.url), 'utf8'));
+  assert.match(src, /직전 조회 값/);
+  assert.match(src, /stale:\s*!!stale/);
+  assert.match(src, /lastOkAt/);
+});
+
+test('㉓ 실시간 사용자 표 응답은 쉬는 서버의 다음 확인 시각을 싣는다(표는 실제 조회 시각 그대로)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(new URL('../src/routes/api/horizonSessions.js', import.meta.url), 'utf8'));
+  assert.match(src, /noEndpointBackoffFor\(/);
+  assert.match(src, /backoffUntil:\s*ne\.until/);
+  assert.match(src, /servers:\s*admin\s*\?\s*withBackoff\s*:\s*maskHzRows\(withBackoff/);
+});

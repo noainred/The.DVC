@@ -35,7 +35,7 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { localStamp, fileStamp } from '../../util/dayKey.js';
 import { combineServers } from '../../horizon/sessions.js';
 import { KIND_LABEL } from '../../horizon/sessionCollect.js';
-import { hzSessionPollerStatus, runHzSessionsNow, targetServers } from '../../horizon/sessionPoller.js';
+import { hzSessionPollerStatus, runHzSessionsNow, targetServers, noEndpointBackoffFor } from '../../horizon/sessionPoller.js';
 import { listHzSessionActivity } from '../../horizon/sessionActivityLog.js';
 import { latestRecords as curUserLatest } from '../../curuser/db.js';
 import { load as loadCurUser, staleAfterMs } from '../../curuser/settings.js';
@@ -175,11 +175,17 @@ api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
   const pending = registered.filter((r) => r.enabled !== false && !rows.some((x) => x.serverId === r.id))
     .map((r) => ({ serverId: r.id, name: r.name || r.id, host: r.host }));
   const poller = hzSessionPollerStatus();
+  // v2.686 WEB2686-03: 쉬는 주기는 표(최신값)에 쓰지 않으므로 '다음 확인 시각' 을 여기서 붙인다 — 표는 실제로 조회한 시각을 그대로 말한다.
+  const byId = new Map(registered.map((r) => [r.id, r]));
+  const withBackoff = rows.map((x) => {
+    const ne = byId.has(x.serverId) ? noEndpointBackoffFor(byId.get(x.serverId)) : null;
+    return ne ? { ...x, backoffUntil: ne.until, backoffKind: ne.kind || 'no-endpoint' } : x;
+  });
   res.json({
     now: Date.now(),
     lastReadAt: latestTs,
     total,
-    servers: admin ? rows : maskHzRows(rows, hosts),
+    servers: admin ? withBackoff : maskHzRows(withBackoff, hosts),
     // 등록돼 있는데 아직 한 번도 수집되지 않은 서버 — '사용자 0명' 이 아니라 '수집 전' 이다.
     pending: admin ? pending : maskHzRows(pending, hosts),
     ...(admin ? {} : { addressHidden: true }),

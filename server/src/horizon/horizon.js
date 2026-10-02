@@ -28,6 +28,7 @@ const FILE = path.join(config.configDir, 'horizon.json');
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 // v2.686: 기능별 경로 확인·버전 판정·실패 문구는 순수 모듈 하나가 소유한다(옛 export 이름은 재수출 — 호출부 무변경).
 import { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, FEATURES, probePaths, probeVersion, featureSummary } from './featureProbe.js';
+import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: 로그인·라이선스 본문 상한(gzip 해제 후 크기)
 export { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, featureSummary };
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
@@ -193,11 +194,17 @@ export async function withHorizonSession(s, fn) {
     e.phase = 'login';   // v2.686: 로그인 단계 실패만 '자격증명 거부' 후보다(로그인 뒤 403 은 권한 부족 — sessionCollect)
     throw e;
   }
-  const tok = await login.json().catch(() => ({}));
+  // v2.686 SEC-2686-01: 토큰 응답은 수 KB 다 — 상한 없이 읽으면 등록 주소의 gzip 응답 하나가 수백 MB 로 부푼다(재현: 300KB → RSS +1.2GB).
+  let readErr = '';
+  const tok = await readJsonCapped(login, 64 * 1024, 'Horizon 로그인 응답').catch((e) => {
+    // 상한 초과는 '형식 미인식' 이 아니다 — 원인을 그대로 말한다(조치가 다르다).
+    if (/상한/.test(String(e?.message || ''))) readErr = String(e.message).slice(0, 160);
+    return {};
+  });
   // v2.686 HZT-04: 2xx 인데 토큰이 없으면(HTML 안내 페이지·프록시 등) 'Bearer undefined' 로 계속 가지 않는다 —
   //   그대로 두면 연결 테스트가 '로그인 성공 — 계정·주소는 맞습니다' 라고 거짓을 말한다.
   if (typeof tok?.access_token !== 'string' || !tok.access_token) {
-    const e = new Error(`Horizon 로그인 응답에 토큰이 없습니다(HTTP ${login.status}, 응답 형식 미인식) — 등록 주소가 커넥션 서버가 아닌 장비(로드밸런서·프록시 안내 페이지)일 수 있습니다.`);
+    const e = new Error(`Horizon 로그인 응답에 토큰이 없습니다(HTTP ${login.status}, ${readErr || '응답 형식 미인식'}) — 등록 주소가 커넥션 서버가 아닌 장비(로드밸런서·프록시 안내 페이지)일 수 있습니다.`);
     e.phase = 'login';
     e.kind = 'no-token';
     throw e;
@@ -249,7 +256,7 @@ export async function fetchHorizonLicenses(s) {
       e.csVersion = v?.version || null;
       throw e;
     }
-    return normalizeLicenses(await r.json());
+    return normalizeLicenses(await readJsonCapped(r, 4 * 1_048_576, 'Horizon 라이선스 응답'));
   });
 }
 
@@ -260,6 +267,8 @@ const TTL_MS = 10 * 60_000;
  * 반복하지 않게 길게 기억한다. 등록을 고치면 `upsertHorizon` 이 캐시를 지워 즉시 다시 확인한다.
  */
 const UNSUPPORTED_TTL_MS = 6 * 3_600_000;
+/** 연결 테스트가 그 서버의 라이선스 조회 성공을 확인하면 캐시를 버린다(v2.686 HZ2686-R2 — 업그레이드 뒤 6시간 낡은 404 금지). */
+export function invalidateHorizonLicenseCache(id) { if (id) cache.delete(String(id)); }
 /** 테스트 전용 — 캐시 항목(ttl·kind) 확인. */
 export function _horizonLicenseCacheEntry(id) { return cache.get(id) || null; }
 
@@ -293,6 +302,12 @@ export async function collectHorizonLicenses({ force = false } = {}) {
 }
 
 /**
+ * 연결 테스트 시간 예산(로그인 포함). 대량 연결 테스트의 행 시한(`util/bulkRun.js` 60초)보다 **반드시 작게** —
+ * 같거나 크면 시한이 먼저 던져 모은 결과가 통째로 버려진다(v2.528·v2.550.3 규약). 테스트가 두 숫자의 관계를 고정한다.
+ */
+export const TEST_BUDGET_MS = 45_000;
+
+/**
  * 연결 테스트(등록 전/후). 저장된 항목 id만 주면 저장 자격증명 사용.
  *
  * v2.686: **같은 로그인 한 번** 안에서 기능별 경로를 각각 가장 작게 조회해 '무엇이 되고 무엇이 안 되는지' 를
@@ -321,11 +336,14 @@ export async function testHorizon(body) {
     const out = await withHorizonSession(entry, async (get) => {
       // 로그인 소요는 따로 잰다 — 예전 '로그인 성공 (1319ms)' 는 뒤 조회까지 합친 값이었다(HZ-11).
       const loginMs = Date.now() - started;
-      const version = await probeVersion(get, entry.host);
+      // v2.686 WEB2686-06: 조회가 7~11회라 고RTT 서버에서 대량 테스트의 행 시한(60초)을 넘길 수 있다 — 예산을 넘으면
+      //   남은 기능은 'not-tried'(시간 예산 초과)로 밝히고 끝낸다(시작해 놓고 잘려 로그인 성공 사실까지 잃지 않게).
+      const budget = { deadline: started + TEST_BUDGET_MS, timeoutMs: effectiveRequestTimeoutMs(entry.timeoutMs, 15_000) };
+      const version = await probeVersion(get, entry.host, budget);
       const features = {};
       let licBody = null;
       for (const f of FEATURES) {
-        const r = await probePaths(get, f.paths, { query: f.query, expect: f.expect, keepBody: f.key === 'license' });
+        const r = await probePaths(get, f.paths, { query: f.query, expect: f.expect, keepBody: f.key === 'license', ...budget });
         if (f.key === 'license' && r.kind === 'ok') { licBody = r.body; delete r.body; }
         features[f.key] = r;
       }

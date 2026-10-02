@@ -22,6 +22,9 @@ import { normalizeSessions, SESSION_PATH, PAGE_SIZE_MAX } from './sessions.js';
 import { pushAll } from '../util/pushAll.js';
 import { CATALOG_PATHS, normalizeCatalog, usageFromSessions } from './appUsage.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: 세션·카탈로그 페이지 본문 상한(gzip 해제 후 크기)
+/** 한 페이지 상한 — size 최대 1000 세션 × 수 KB 를 넉넉히 덮는다. 넘으면 그 페이지는 형식 미인식이다. */
+const PAGE_MAX_BYTES = 32 * 1_048_576;
 
 /*
  * v2.684 — 앱·데스크톱 이름 카탈로그(앱 풀·데스크톱 풀·팜 목록).
@@ -60,7 +63,7 @@ async function fetchCatalog(get) {
       for (let page = 1; page <= CATALOG_MAX_PAGES; page++) {
         const r = await get(p, { query: { page: String(page), size: String(CATALOG_PAGE) } });
         if (!r.ok) { status = r.status; break; }
-        const body = await r.json().catch(() => null);
+        const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
         if (!Array.isArray(body)) { bad = true; break; }
         pushAll(acc, body);
         if (body.length < CATALOG_PAGE) break;
@@ -109,7 +112,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
           e.httpStatus = r.status;
           throw e;
         }
-        const body = await r.json().catch(() => null);
+        const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
         if (!Array.isArray(body)) {
           const e = new Error('세션 응답이 배열이 아닙니다(형식 미인식).');
           e.kind = 'unparsed';

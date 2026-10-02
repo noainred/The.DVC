@@ -24,11 +24,13 @@ export const FEATURE_KIND_TEXT = Object.freeze({
   ok: '됨',
   'not-found': '이 서버에 없음(HTTP 404)',
   forbidden: '권한 없음(HTTP 403) — 이 계정의 Horizon 역할을 확인하세요',
-  unauthorized: '토큰 거부(HTTP 401)',
+  // 로그인은 됐는데 그 경로가 401 — 세션 수집의 'forbidden'(권한 부족)과 같은 뜻으로 말한다(WEB2686-05).
+  unauthorized: '거부(HTTP 401) — 로그인은 됐지만 이 경로 조회가 거부됐습니다(역할 권한 확인)',
   unparsed: '응답 형식 미인식(JSON 이 아님)',
   http: 'HTTP 오류',
   timeout: '시한 초과',
   error: '확인 실패',
+  'not-tried': '시간 예산을 넘겨 확인하지 않았습니다(다시 누르면 다시 확인합니다)',
 });
 
 /** 그 기능이 안 될 때 포탈에서 무엇이 안 되는가(조치가 아니라 영향). */
@@ -43,6 +45,9 @@ const IMPACT = Object.freeze({
 const attemptsText = (atts) => (Array.isArray(atts) ? atts : [])
   .map((a) => `${a.path} ${a.status ? `HTTP ${a.status}` : (FEATURE_KIND_TEXT[a.kind] || a.kind)}`).join(' · ');
 
+/** 카탈로그(앱·데스크톱 풀·팜) 목록은 세션 수집이 될 때만 쓰인다 — 세션이 안 되면 그 영향 문구는 거짓이 된다(WEB2686-02). */
+const CATALOG_KEYS = new Set(['apps', 'desktops', 'farms']);
+
 function featureLine(key, f, r) {
   const label = FEATURE_LABEL[key] || key;
   if (!f) return { tone: 'muted', label, text: '확인하지 않았습니다' };
@@ -51,6 +56,10 @@ function featureLine(key, f, r) {
     return { tone: 'ok', label, text: `됨${extra}` };
   }
   const kindText = f.kind === 'http' && f.status ? `HTTP 오류(${f.status})` : (FEATURE_KIND_TEXT[f.kind] || f.kind);
+  if (f.kind === 'not-tried') return { tone: 'muted', label, text: kindText };
+  if (CATALOG_KEYS.has(key) && r.features?.sessions?.kind !== 'ok') {
+    return { tone: f.kind === 'not-found' ? 'warn' : 'bad', label, text: `${kindText} — 실시간 사용자 수집이 안 되는 서버라 지금은 영향이 없습니다` };
+  }
   // 404 는 '확인한 결과 없다' 이고, 그 밖은 '확인하지 못했다' 다 — 색을 나눈다(없음 = 주황, 실패 = 빨강).
   return { tone: f.kind === 'not-found' ? 'warn' : 'bad', label, text: `${kindText} — ${IMPACT[key] || ''}`.replace(/ — $/, ''), path: f.path };
 }

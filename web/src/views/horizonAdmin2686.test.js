@@ -5,7 +5,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hzTestMessage, FEATURE_ORDER, FEATURE_KIND_TEXT } from './horizonAdminText.js';
+import { hzTestMessage, FEATURE_ORDER, FEATURE_KIND_TEXT, FEATURE_LABEL } from './horizonAdminText.js';
+import { KIND_TONE, KIND_ADVICE, backoffNote } from './tools/horizonSessionText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const f = (path_, status, kind) => ({ path: path_, status, kind, attempts: [{ path: path_, status, kind }] });
@@ -59,7 +60,18 @@ describe('v2.686 — 연결 테스트는 기능별로 확인한 것만 말한다
   });
   it('기능 줄은 정해진 순서로 전부 있다', () => {
     const labels = m.lines.map((l) => l.label);
-    for (const k of FEATURE_ORDER) expect(labels.join('|')).toContain({ license: '라이선스', sessions: '실시간 사용자', apps: '앱 목록', desktops: '데스크톱 풀', farms: '팜' }[k]);
+    const idx = FEATURE_ORDER.map((k) => labels.indexOf(FEATURE_LABEL[k]));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    expect([...idx].sort((x, y) => x - y)).toEqual(idx);   // 순서까지 고정(예전 테스트는 포함 여부만 봤다 — WEB2686-07)
+    expect(FEATURE_ORDER).toEqual(['license', 'sessions', 'apps', 'desktops', 'farms']);
+  });
+  it('세션이 안 되는 서버에서 앱 목록 404 는 "앱별 사용이 팜 단위로 보인다" 고 말하지 않는다 — 수집 자체가 없다(WEB2686-02)', () => {
+    const apps = m.lines.find((l) => l.label === FEATURE_LABEL.apps);
+    expect(apps.text).toMatch(/실시간 사용자 수집이 안 되는 서버라 지금은 영향이 없습니다/);
+    expect(apps.text).not.toMatch(/팜·데스크톱 풀 단위로만/);
+    // 세션이 되는 서버라면 영향 문구가 맞다.
+    const ok = hzTestMessage({ ...REAL_7131, features: { ...REAL_7131.features, sessions: f('/rest/inventory/v1/sessions', 200, 'ok') } });
+    expect(ok.lines.find((l) => l.label === FEATURE_LABEL.apps).text).toMatch(/팜·데스크톱 풀 단위로만/);
   });
   it('기능 줄은 " — " 를 한 번만 쓴다(세 토막 문장 금지 — v2.560 규약, Chromium 판독에서 발견)', () => {
     for (const l of m.lines.filter((x) => x.label !== '판정')) expect(l.text.split(' — ').length).toBeLessThanOrEqual(2);
@@ -108,5 +120,47 @@ describe('v2.686 — 등록 화면 도움말', () => {
   });
   it('결과는 줄 단위로 그린다(lines)', () => {
     expect(src).toMatch(/hzMsg\.lines\.map/);
+  });
+});
+
+describe('v2.686 리뷰 반영 — 판정 종류·시간 예산·쉬는 주기', () => {
+  it('서버의 세션 판정 종류(KIND_LABEL)마다 웹에 색·조치 문구가 있다 — 한쪽만 늘면 회색 배지·빈 안내가 된다(WEB2686-07)', () => {
+    const src = fs.readFileSync(path.join(HERE, '../../../server/src/horizon/sessionCollect.js'), 'utf8');
+    const body = src.slice(src.indexOf('export const KIND_LABEL = Object.freeze({'));
+    const block = body.slice(0, body.indexOf('});'));
+    const keys = [...block.matchAll(/^\s*'?([a-z-]+)'?\s*:/gm)].map((x) => x[1]).filter((k) => k !== 'export');
+    expect(keys).toEqual(expect.arrayContaining(['forbidden', 'no-login-endpoint', 'no-token', 'no-endpoint', 'auth']));
+    for (const k of keys) {
+      expect(KIND_TONE[k], `KIND_TONE['${k}']`).toBeTruthy();
+      expect(k in KIND_ADVICE, `KIND_ADVICE['${k}']`).toBe(true);
+    }
+  });
+  it('로그인 뒤 401 은 "토큰 거부" 가 아니라 역할 권한 문제로 말한다(수집 쪽 forbidden 과 같은 뜻 — WEB2686-05)', () => {
+    expect(FEATURE_KIND_TEXT.unauthorized).toMatch(/로그인은 됐지만/);
+    expect(FEATURE_KIND_TEXT.unauthorized).toMatch(/역할 권한/);
+    expect(FEATURE_KIND_TEXT.unauthorized).not.toMatch(/토큰 거부/);
+  });
+  it('시간 예산을 넘겨 확인하지 않은 기능은 회색 "확인하지 않았습니다" 이고 실패로 칠하지 않는다', () => {
+    const r = hzTestMessage({ ...REAL_7131, features: { ...REAL_7131.features, farms: { path: '/rest/inventory/v1/farms', status: null, kind: 'not-tried', attempts: [] } } });
+    const farms = r.lines.find((l) => l.label === FEATURE_LABEL.farms);
+    expect(farms.tone).toBe('muted');
+    expect(farms.text).toMatch(/확인하지 않았습니다/);
+  });
+  it('쉬는 서버의 다음 확인 안내 — 시각이 지났거나 없으면 말하지 않는다', () => {
+    const now = 1_000_000_000_000;
+    expect(backoffNote(null, now)).toBe(null);
+    expect(backoffNote('', now)).toBe(null);
+    expect(backoffNote(now - 1, now)).toBe(null);
+    expect(backoffNote(now + 90 * 60_000, now)).toMatch(/약 1시간 30분 뒤 다시 확인합니다/);
+    expect(backoffNote(now + 10 * 60_000, now)).toMatch(/약 10분 뒤/);
+    expect(backoffNote(now + 10 * 60_000, now)).not.toMatch(/`|\*\*/);
+  });
+  it('로그인 API 없음·토큰 없음 안내도 주기 수집이 쉰다는 사실을 말한다(이번 릴리스부터 쉰다)', () => {
+    expect(KIND_ADVICE['no-login-endpoint']).toMatch(/쉬었다가/);
+    expect(KIND_ADVICE['no-token']).toMatch(/쉬었다가/);
+  });
+  it('실시간 사용자 상세 창이 다음 확인 안내를 그린다', () => {
+    const src = fs.readFileSync(path.join(HERE, 'tools/HorizonSessionsPanel.jsx'), 'utf8');
+    expect(src).toMatch(/\{backoffNote\(detail\.backoffUntil, data\?\.now\) && \(/);   // 조건부 렌더 자체를 고정(안쪽 글자만 보면 조건을 꺼도 통과한다)
   });
 });

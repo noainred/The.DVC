@@ -53,7 +53,7 @@ export const FEATURES = Object.freeze([
 ]);
 
 /** 조회 결과 종류 — 웹 `horizonAdminText.js FEATURE_KIND_TEXT` 와 1:1(테스트가 대조). */
-export const PROBE_KINDS = Object.freeze(['ok', 'not-found', 'forbidden', 'unauthorized', 'unparsed', 'http', 'timeout', 'error']);
+export const PROBE_KINDS = Object.freeze(['ok', 'not-found', 'forbidden', 'unauthorized', 'unparsed', 'http', 'timeout', 'error', 'not-tried']);
 
 function errKind(e) {
   const m = String(describeError(e).message || e?.message || '');
@@ -69,7 +69,14 @@ export async function classifyResponse(res, expect = 'any') {
     return { status, kind };
   }
   let body;
-  try { body = await readJsonCapped(res, PROBE_MAX_BYTES, 'Horizon 응답'); } catch { body = undefined; }
+  try { body = await readJsonCapped(res, PROBE_MAX_BYTES, 'Horizon 응답'); } catch (e) {
+    // v2.686 HZ2686-R4: 본문을 읽다 끊긴 것·상한 초과를 'JSON 이 아닌 응답' 이라 말하지 않는다(조치가 다르다).
+    const m = String(e?.message || e || '');
+    if (/timeout|aborted|timed out/i.test(m)) return { status, kind: 'timeout', detail: '본문을 읽는 중 시한 초과' };
+    if (/상한/.test(m)) return { status, kind: 'unparsed', detail: '응답이 상한(1MB)을 넘음' };
+    if (!(e instanceof SyntaxError)) return { status, kind: 'error', detail: m.slice(0, 200) };
+    body = undefined;
+  }
   if (body === undefined || body === null) return { status, kind: 'unparsed', detail: 'JSON 이 아닌 응답(HTML 등)' };
   if (expect === 'array' && !Array.isArray(body)) return { status, kind: 'unparsed', detail: '배열이 아닌 응답' };
   return { status, kind: 'ok', body, count: Array.isArray(body) ? body.length : null };
@@ -79,13 +86,27 @@ export async function classifyResponse(res, expect = 'any') {
  * 후보 경로를 차례로 조회한다(404 일 때만 다음). 예외는 삼키지 않고 그 시도의 결과로 남긴다 —
  * 한 조회의 시한 초과가 '로그인 성공' 사실을 지우지 않게(v2.686 HZT-05).
  */
-export async function probePaths(get, paths, { query = null, expect = 'any', keepBody = false } = {}) {
+/** 남은 시간이 이보다 적으면 새 조회를 시작하지 않는다(시작해 놓고 잘리면 결과가 0 이다 — v2.528 규약). */
+export const MIN_SLICE_MS = 2_000;
+
+export async function probePaths(get, paths, { query = null, expect = 'any', keepBody = false, deadline = 0, timeoutMs = 0 } = {}) {
   const attempts = [];
   let last = null;
   for (const p of paths) {
     let r;
+    // v2.686 WEB2686-06: 연결 테스트 전체가 대량 테스트의 행 시한(60초) 안에 끝나게 시간 예산을 본다.
+    const left = deadline ? deadline - Date.now() : Infinity;
+    if (left < MIN_SLICE_MS) {
+      r = { status: null, kind: 'not-tried', detail: '시간 예산을 다 써서 조회하지 않았습니다' };
+      attempts.push({ path: p, status: null, kind: 'not-tried' });
+      last = { path: p, ...r };
+      break;
+    }
     try {
-      const res = await get(p, query ? { query: { ...query } } : undefined);
+      const opts = {};
+      if (query) opts.query = { ...query };
+      if (Number.isFinite(left)) opts.timeout = Math.max(MIN_SLICE_MS, Math.min(timeoutMs > 0 ? timeoutMs : left, left));
+      const res = await get(p, Object.keys(opts).length ? opts : undefined);
       r = await classifyResponse(res, expect);
     } catch (e) {
       r = { status: null, kind: errKind(e), detail: String(describeError(e).message || '').slice(0, 200) };
@@ -139,8 +160,8 @@ export function versionMajor(v) {
 }
 
 /** 같은 로그인 안에서 커넥션 서버 정보(버전)를 읽는다. */
-export async function probeVersion(get, host = '') {
-  const r = await probePaths(get, PROBE_PATHS, { keepBody: true });
+export async function probeVersion(get, host = '', budget = {}) {
+  const r = await probePaths(get, PROBE_PATHS, { keepBody: true, ...budget });
   const info = r.kind === 'ok' ? csVersionInfo(r.body, host) : { version: null, versions: [], matched: false };
   const { body, ...rest } = r;
   return { ...rest, ...info };
@@ -165,7 +186,7 @@ export function licenseFailText(status, ctx = {}) {
 
 const SHORT = Object.freeze({
   ok: '됨', 'not-found': '이 서버에 없음(404)', forbidden: '권한 없음(403)', unauthorized: '토큰 거부(401)',
-  unparsed: '형식 미인식', http: 'HTTP 오류', timeout: '시한 초과', error: '확인 실패',
+  unparsed: '형식 미인식', http: 'HTTP 오류', timeout: '시한 초과', error: '확인 실패', 'not-tried': '시간 예산 초과로 확인 안 함',
 });
 
 /** 대량 연결 테스트 결과표용 한 줄 요약(서버 문자열 — 백틱·별표 없음). */

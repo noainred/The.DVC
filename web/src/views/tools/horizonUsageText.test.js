@@ -50,6 +50,10 @@ describe('horizonUsageText (v2.684)', () => {
     // v2.686 HZ-08: 세션을 읽은 서버가 없으면 '다음 주기부터 쌓입니다'(기다리면 된다) 라고 말하지 않는다.
     const noEp = T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: false, kind: 'no-endpoint' }] });
     expect(noEp).toMatch(/404/); expect(noEp).toMatch(/기다려도 채워지지 않습니다/); expect(noEp).not.toMatch(/다음 주기부터/);
+    // 섞여 있으면(한 대는 404, 다른 한 대는 고칠 수 있는 실패) 원인을 404 로 단정하지 않는다(WEB2686-04).
+    const mixed = T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: false, kind: 'no-endpoint' }, { ok: false, kind: 'auth' }] });
+    expect(mixed).not.toMatch(/기다려도 채워지지 않습니다/);
+    expect(mixed).toMatch(/서버별 사유/); expect(mixed).toMatch(/그중 1대는 세션 API 가 없는 버전/);
     expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: false, kind: 'auth' }] })).toMatch(/서버별 사유/);
     expect(T.emptyNote({ available: true, settings: { enabled: true }, services: [], serverMeta: [{ ok: true, kind: 'ok' }] })).toMatch(/다음 주기부터/);
   });

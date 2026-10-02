@@ -26,7 +26,7 @@ import CollectActivity from './CollectActivity.jsx';
 import { Card } from './shared.jsx';
 import { unitText } from '../unitText.js';
 import {
-  agoText, intervalText, kindTone, kindAdvice, authStopNote, collectStateNote, connectedText,
+  agoText, intervalText, kindTone, kindAdvice, authStopNote, backoffNote, collectStateNote, connectedText,
   unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
@@ -293,6 +293,9 @@ export default function HorizonSessionsPanel() {
               */}
             {kindAdvice(detail.kind) && (
               <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind)} /></div>
+            )}
+            {backoffNote(detail.backoffUntil, data?.now) && (
+              <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{backoffNote(detail.backoffUntil, data?.now)}</div>
             )}
             {/* 정지 사실만이 아니라 **시점·횟수**를 말한다(v2.528 규약) — 없으면 사용자가 그동안의 수치를 현재값으로 읽는다. */}
             {authStopNote(detail.authStopped, data?.now) && (

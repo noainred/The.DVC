@@ -649,7 +649,7 @@
 | `HZSESS_ACTIVITY_MAX` | `500` |  | horizon/sessionActivityLog.js |
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
-| `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `6` |  | horizon/sessionPoller.js |
+| `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `21600000` |  | horizon/sessionPoller.js |
 
 ## iDRAC/전력 (15)
 

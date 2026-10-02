@@ -220,10 +220,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   if (!scoped && !allowed) {
     try {
       const hz = await collectHorizonLicenses();
-      for (const { server: s, lic: l } of hz.rows) {
+      for (const { server: s, lic: l, stale, lastOkAt } of hz.rows) {
         const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
         items.push({
-          source: 'Horizon', where: s.name || s.id, vcenterId: '',
+          // v2.686 HZ2686-R6: 조회 실패 중 이어 보이는 직전 행은 행 자체가 그 사실을 말한다(표의 '어디' 칸 + stale·lastOkAt).
+          source: 'Horizon', where: stale ? `${s.name || s.id} (직전 조회 값)` : (s.name || s.id), vcenterId: '',
+          stale: !!stale, lastOkAt: stale ? (lastOkAt || null) : undefined,
           name: l.name, family: 'Horizon',
           edition: l.usageModel || '', product: 'Horizon', productVersion: '',
           key: l.key || '', total: null, used: null,

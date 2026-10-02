@@ -124,8 +124,10 @@ export function emptyNote(rep) {
     //   영원히 쌓이지 않는다. 기다리라는 말은 최근 수집 성공이 있을 때만 한다.
     const meta = Array.isArray(rep.serverMeta) ? rep.serverMeta : [];
     if (meta.length && !meta.some((m) => m?.ok)) {
-      if (meta.some((m) => m?.kind === 'no-endpoint')) return '세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 커넥션 서버가 세션 목록 API 를 제공하지 않습니다(404). 기다려도 채워지지 않습니다. 설정 › Horizon 연결 서버의 연결 테스트로 기능별 지원 여부를 확인하세요.';
-      return '세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 실시간 사용자 표의 서버별 사유를 확인하세요.';
+      // 모든 서버가 404 일 때만 '기다려도 안 된다' 의 원인을 404 로 말한다 — 섞여 있으면 고칠 수 있는 실패를 가린다(WEB2686-04).
+      if (meta.every((m) => m?.kind === 'no-endpoint')) return '세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 커넥션 서버가 세션 목록 API 를 제공하지 않습니다(404). 기다려도 채워지지 않습니다. 설정 › Horizon 연결 서버의 연결 테스트로 기능별 지원 여부를 확인하세요.';
+      const nEp = meta.filter((m) => m?.kind === 'no-endpoint').length;
+      return `세션을 읽은 Horizon 서버가 없어 누적이 쌓이지 않습니다 — 실시간 사용자 표의 서버별 사유를 확인하세요${nEp ? `(그중 ${nEp}대는 세션 API 가 없는 버전 — 404)` : ''}.`;
     }
     return '이 기간에 기록된 사용이 없습니다 — 수집이 막 시작됐다면 다음 주기부터 쌓입니다.';
   }

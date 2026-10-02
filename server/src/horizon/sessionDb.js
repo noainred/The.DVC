@@ -225,6 +225,9 @@ export async function commitHzSessions({ ts, records = [], series = [], maxUsers
   h.db.exec('BEGIN');
   try {
     for (const r of records) {
+      // v2.686 WEB2686-03: 쉬는 중(backoffUntil)인 주기는 조회하지 않았다 — 최신값을 덮으면 '마지막 조회' 가 방금으로 보이고
+      //   포탈 문구가 '장비가 돌려준 사유' 칸에 들어가며, 사용 누적의 수집 횟수(cover)에도 시도한 것처럼 잡힌다.
+      if (r.backoffUntil) continue;
       h.st.upLatest.run(
         String(r.serverId), String(r.name || ''), String(r.host || ''), Number(ts), r.ok ? 1 : 0,
         String(r.kind || 'error'), String(r.error || '').slice(0, 300),

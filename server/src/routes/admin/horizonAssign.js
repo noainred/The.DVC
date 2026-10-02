@@ -1,6 +1,7 @@
 // Horizon 등록·svcmon 할당 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary } from '../../horizon/horizon.js';
+import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary, invalidateHorizonLicenseCache } from '../../horizon/horizon.js';
+import { clearHzNoEndpoint } from '../../horizon/sessionPoller.js';
 import * as hzBulk from '../../horizon/bulk.js';                     // v2.525: CSV/자유텍스트 대량 등록
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
@@ -28,7 +29,17 @@ adminRouter.delete('/horizon/:id', adminOnly, fleetOnly, (req, res) => {
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.post('/horizon/test', adminOnly, fleetOnly, async (req, res) => res.json(await testHorizon(req.body || {})));
+adminRouter.post('/horizon/test', adminOnly, fleetOnly, async (req, res) => {
+  const r = await testHorizon(req.body || {});
+  // v2.686 HZ2686-R2: 저장된 서버의 테스트가 세션·라이선스 조회 성공을 확인하면 '이 서버에 없음' 기억(6시간)을 버린다 —
+  //   Horizon 을 업그레이드한 뒤 테스트는 '됨' 인데 수집·라이선스 화면은 몇 시간 동안 옛 404 를 말하던 것.
+  const id = String(req.body?.id || '');
+  if (id && r?.ok && r.features) {
+    if (r.features.sessions?.kind === 'ok') clearHzNoEndpoint(id);
+    if (r.features.license?.kind === 'ok') invalidateHorizonLicenseCache(id);
+  }
+  res.json(r);
+});
 
 /* ══════════════════ Horizon 서버 대량 등록(CSV·자유텍스트, v2.525) ══════════════════
  * 사용자 요청(2026-09-16): "호라이즌 서비스에 호라이즌 서버 등록이 필요하면 csv/text
