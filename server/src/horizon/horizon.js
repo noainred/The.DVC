@@ -9,6 +9,7 @@
  *   왕복이 발생하지 않게 한다(만료일은 분 단위로 변하는 값이 아님).
  */
 
+import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.685: 테스트 host 끝 슬래시(선형)
 import fs from 'node:fs';
 import path from 'node:path';
 import { Agent } from 'undici';
@@ -64,16 +65,36 @@ function saveHorizon(list) {
 export function redactHorizon(s) { const { password, ...rest } = s; return { ...rest, hasPassword: Boolean(password) }; }
 export function listHorizon() { return loadHorizon().map(redactHorizon); }
 
+/**
+ * 커넥션 서버 주소 정규화(v2.685, 사용자 요청 "ip만 넣어도 자동으로 https 등 필요한 거 붙이게"):
+ *  · 스킴이 없으면 https:// 를 붙인다(http:// 를 직접 적었으면 그대로 둔다).
+ *  · 붙여 넣은 경로·쿼리·계정 조각(/admin/, /rest/login 등)은 떼고 origin 만 남긴다 — API 경로는 이 모듈이 붙인다.
+ *  · 해석하지 못하면 원문(다듬은 것)을 돌려준다 — 검증이 그 사유를 말한다(지어내지 않는다).
+ * 저장·연결 테스트·대량 등록이 이 함수 하나를 쓴다(접속처 비교 accessMoved 도 정규화된 값으로 — 표기만 다른 같은 주소에서 비밀번호를 버리지 않게).
+ */
+export function normalizeHorizonHost(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return '';
+  if (t.length > 2048) return t.slice(0, 2048);
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`;
+  let u;
+  try { u = new URL(withScheme); } catch { return trimTrailingSlashes(t); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return trimTrailingSlashes(t);
+  if (!u.hostname) return trimTrailingSlashes(t);
+  return `${u.protocol}//${u.host}`;
+}
+
 function normalize(body, existing = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();
   const name = String(body.name ?? e.name ?? id).trim();
-  const host = String(body.host ?? e.host ?? '').trim().replace(/\/+$/, '');
+  const host = normalizeHorizonHost(body.host ?? e.host ?? '');
   const username = String(body.username ?? e.username ?? '').trim();
   const domain = String(body.domain ?? e.domain ?? '').trim();
   if (!id) return [null, 'id는 필수입니다.'];
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
-  if (!/^https?:\/\//.test(host)) return [null, 'host는 https://커넥션서버 형식이어야 합니다.'];
+  if (!host) return [null, 'host(커넥션 서버 IP 또는 주소)는 필수입니다.'];
+  if (!/^https?:\/\//.test(host)) return [null, `host 를 주소로 읽지 못했습니다 — IP·호스트명 또는 https://커넥션서버 형식으로 적으세요(입력: ${host.slice(0, 80)}).`];
   // SSRF 방어 — 저장된 host는 이후 서버가 자격증명을 붙여 호출하므로 링크로컬/메타데이터·
   // 루프백·미지정 주소는 등록 단계에서 막는다. 사내 IP(RFC1918)·FQDN은 그대로 통과한다.
   const ssrf = ssrfBlockReason(host);
@@ -96,7 +117,7 @@ function normalize(body, existing = null) {
   // 그대로 남아, 다음 수집 주기에 **운영 계정·비밀번호가 그 호스트로 평문 전송**된다.
   // v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로 저장 1회로 우회된다.
   // 버린 키는 호출부가 `droppedSecrets` 로 받아 '비밀번호를 다시 입력하세요' 를 안내한다.
-  const droppedSecrets = existing && accessMoved(existing, body, ['host', 'username', 'domain'])
+  const droppedSecrets = existing && accessMoved(existing, body.host !== undefined ? { ...body, host } : body, ['host', 'username', 'domain'])
     ? dropCarriedSecrets(entry, body, ['password']) : [];
   return [entry, null, droppedSecrets];
 }
@@ -183,23 +204,51 @@ export async function withHorizonSession(s, fn) {
   }
 }
 
+/** 라이선스 조회 경로(Horizon 8 Server REST API — 공개 코드 horizon-mcp 가 2512~2606 에서 확인한 경로). */
+export const LICENSE_PATH = '/rest/config/v1/licenses';
+
+/**
+ * 404 진단용 — 같은 세션으로 '다른 API 는 응답하는가' 와 커넥션 서버 버전을 본다(v2.685, 사용자 신고 HTTP 404).
+ * ⚠ 정직 기록: 모니터 경로의 버전 필드 이름은 실장비로 확인하지 못했다 — 후보 이름으로 읽고 못 읽으면 null.
+ */
+export const PROBE_PATHS = Object.freeze(['/rest/monitor/v1/connection-servers', '/rest/monitor/connection-servers', '/rest/config/v1/connection-servers']);
+export function csVersionOf(body) {
+  const arr = Array.isArray(body) ? body : body ? [body] : [];
+  for (const x of arr) {
+    const v = x?.version || x?.details?.version || x?.connection_server_version || x?.build_version || x?.details?.build;
+    if (v) return String(v).slice(0, 64);
+  }
+  return null;
+}
+
+/** 라이선스 응답 → 정규화 배열(순수). */
+export function normalizeLicenses(data) {
+  // 단일 객체 또는 배열 두 형태 모두 수용.
+  const arr = Array.isArray(data) ? data : [data];
+  return arr.filter(Boolean).map((l) => ({
+    name: l.license_edition || l.edition || 'Horizon License',
+    usageModel: l.licensed_usage_model || l.usage_model || '',
+    // 정식 만료(expiration_time) 우선, 구독 슬라이스 만료(subscription_slice_expiry) 폴백. epoch ms.
+    expiry: Number(l.expiration_time) > 0 ? Number(l.expiration_time)
+      : Number(l.subscription_slice_expiry) > 0 ? Number(l.subscription_slice_expiry) : null,
+    isExpired: l.is_expired === true || String(l.license_health || '').toUpperCase() === 'EXPIRED',
+    key: l.license_key ? `${String(l.license_key).slice(0, 5)}-…-${String(l.license_key).slice(-5)}` : '',
+  }));
+}
+
+/** 라이선스 조회 실패 문구 — 404 는 '로그인은 됐고 경로만 없다' 를 말한다(인증 문제로 오해하지 않게). */
+export function licenseFailText(status) {
+  if (status === 404) return `라이선스 조회 실패 (HTTP 404) — 로그인은 성공했지만 이 서버에 라이선스 API(${LICENSE_PATH})가 없습니다. Horizon 버전(8 2006 이상 필요)과 등록 주소가 커넥션 서버인지(UAG·로드밸런서 경로가 아닌지) 확인하세요.`;
+  if (status === 403) return '라이선스 조회 거부 (HTTP 403) — 로그인은 성공했지만 이 계정에 라이선스 조회 권한이 없습니다(Horizon 관리자 역할 확인).';
+  return `라이선스 조회 실패 (HTTP ${status})`;
+}
+
 /** 한 Connection Server의 라이선스 조회(로그인→조회→로그아웃). 반환: 정규화 배열. */
 export async function fetchHorizonLicenses(s) {
   return withHorizonSession(s, async (get) => {
-    const r = await get('/rest/config/v1/licenses');
-    if (!r.ok) throw new Error(`라이선스 조회 실패 (HTTP ${r.status})`);
-    const data = await r.json();
-    // 단일 객체 또는 배열 두 형태 모두 수용.
-    const arr = Array.isArray(data) ? data : [data];
-    return arr.filter(Boolean).map((l) => ({
-      name: l.license_edition || l.edition || 'Horizon License',
-      usageModel: l.licensed_usage_model || l.usage_model || '',
-      // 정식 만료(expiration_time) 우선, 구독 슬라이스 만료(subscription_slice_expiry) 폴백. epoch ms.
-      expiry: Number(l.expiration_time) > 0 ? Number(l.expiration_time)
-        : Number(l.subscription_slice_expiry) > 0 ? Number(l.subscription_slice_expiry) : null,
-      isExpired: l.is_expired === true || String(l.license_health || '').toUpperCase() === 'EXPIRED',
-      key: l.license_key ? `${String(l.license_key).slice(0, 5)}-…-${String(l.license_key).slice(-5)}` : '',
-    }));
+    const r = await get(LICENSE_PATH);
+    if (!r.ok) { const e = new Error(licenseFailText(r.status)); e.licenseStatus = r.status; throw e; }
+    return normalizeLicenses(await r.json());
   });
 }
 
@@ -239,14 +288,36 @@ export async function testHorizon(body) {
   // 연결 테스트는 normalize()를 거치지 않으므로(저장 전 임의 host 수용) 여기서 같은 SSRF 가드를
   // 적용한다 — 미저장 host로 링크로컬/루프백을 찔러 보는 통로가 되지 않게. 이 경로는 async라
   // DNS 해석까지 검사하는 resolved 가드로 '이름 기반 우회'(169.254.169.254로 해석되는 FQDN)도 차단.
+  // v2.685: 저장과 같은 정규화(IP 만 넣어도 https:// · 붙여 넣은 경로 제거) — SSRF 검사도 그 값으로 한다.
+  entry = { ...entry, host: normalizeHorizonHost(entry.host) };
   const ssrf = await ssrfBlockReasonResolved(String(entry.host));
   if (ssrf) return { ok: false, reason: `host: ${ssrf}` };
   const started = Date.now();
   try {
-    const lic = await fetchHorizonLicenses(entry);
-    return { ok: true, ms: Date.now() - started, licenses: lic.length, first: lic[0]?.name || '' };
+    // 로그인과 라이선스 조회를 나눠 말한다 — 404 는 '연결 실패' 가 아니다(사용자 신고: 등록 후 HTTP 404).
+    const out = await withHorizonSession(entry, async (get) => {
+      const r = await get(LICENSE_PATH);
+      let csVersion = null; let probe = null;
+      if (!r.ok) {
+        for (const p of PROBE_PATHS) {
+          try {
+            const pr = await get(p);
+            probe = { path: p, status: pr.status };
+            if (pr.ok) { csVersion = csVersionOf(await pr.json().catch(() => null)); break; }
+          } catch (e) { probe = { path: p, status: null, error: describeError(e).message }; }
+        }
+        return { licenseStatus: r.status, csVersion, probe };
+      }
+      return { lic: normalizeLicenses(await r.json()) };
+    });
+    if (out.lic) return { ok: true, loginOk: true, ms: Date.now() - started, licenses: out.lic.length, first: out.lic[0]?.name || '' };
+    return {
+      ok: true, loginOk: true, ms: Date.now() - started, licenses: null,
+      licenseStatus: out.licenseStatus, licenseError: licenseFailText(out.licenseStatus),
+      csVersion: out.csVersion, probe: out.probe,
+    };
   } catch (e) {
     const d = describeError(e);
-    return { ok: false, reason: d.message, hint: d.hint, ms: Date.now() - started };
+    return { ok: false, loginOk: e?.httpStatus ? false : null, reason: d.message, hint: d.hint, ms: Date.now() - started };
   }
 }

@@ -142,7 +142,7 @@ adminRouter.post('/horizon/servers/import', csvPerm, adminOnly, fleetOnly, (req,
   });
   const { report, hints } = enrichAdvice(base.report, p.rows, {
     text: p.raw, order: p.order, format: p.format, fields: hzBulk.COLUMNS, ctx: {},
-    hostForm: 'url',   // Horizon 의 host 는 `https://커넥션서버` 가 필수다 — 기본(IP/호스트명) 조언은 틀린 조언이 된다
+    hostForm: 'url-auto', // Horizon 의 host 는 URL 이고(기본 IP/호스트명 조언은 틀린 조언), v2.685 부터 스킴이 없으면 저장이 https:// 를 붙인다
 
   });
 

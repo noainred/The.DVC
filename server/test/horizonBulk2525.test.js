@@ -149,7 +149,7 @@ test('구조: 웹 공용 모달 하나를 세 화면이 쓴다(경로 조각만 
   const modal = fs.readFileSync(path.join(WEB, 'views/tools/BulkDeviceIo.jsx'), 'utf8');
   assert.match(modal, /resource = 'devices'/, '기본값이 바뀌면 기존 두 화면의 라우트가 깨진다');
   assert.match(modal, /\$\{base\}\/\$\{resource\}\/import/);
-  const lic = fs.readFileSync(path.join(WEB, 'views/tools/LicenseTools.jsx'), 'utf8');
+  const lic = fs.readFileSync(path.join(WEB, 'views/HorizonAdmin.jsx') /* v2.685: 공용 등록 컴포넌트 */, 'utf8');
   assert.match(lic, /base="\/admin\/horizon" resource="servers"/);
   assert.match(lic, /keyLabel="id"/, '화면이 host 라고 안내하면 사용자가 잘못된 파일을 만든다');
 });
@@ -190,6 +190,8 @@ test("조언: URL 형식 도구에서 https:// 가 없으면 붙이라고 말한
   assert.match(h[0].advice, /https:\/\//);
 });
 
-test("조언: 라우트가 hostForm:'url' 을 넘긴다", () => {
-  assert.match(read('routes/admin/horizonAssign.js'), /hostForm: 'url'/);
+test("조언: 라우트가 hostForm:'url-auto' 를 넘긴다(v2.685 — IP 만 적어도 저장이 https:// 를 붙인다)", () => {
+  assert.match(read('routes/admin/horizonAssign.js'), /hostForm: 'url-auto'/);
+  assert.deepEqual(preflightHints([{ _line: 2, host: '10.1.2.3' }], bulk.COLUMNS, { hostForm: 'url-auto' }), []);
+  assert.ok(preflightHints([{ _line: 2, host: 'https://a/' }, { _line: 3, host: 'https://b:8443' }], bulk.COLUMNS, { hostForm: 'url-auto' }).length === 0);
 });

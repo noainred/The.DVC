@@ -2,7 +2,7 @@
  * views/tools/HorizonSessionSettings.jsx — Horizon 실시간 사용자 수집 설정(v2.525).
  *
  * 설계 의도
- *  · **자격증명을 여기서 받지 않는다** — Connection Server 와 계정은 설정 › Horizon 등록이
+ *  · **자격증명을 여기서 받지 않는다** — Connection Server 와 계정은 설정 › Horizon 연결 서버이
  *    이미 갖고 있고 이 기능은 그것을 재사용한다(자격증명 스토어를 하나 더 만들면 비밀 승계·
  *    SSRF 가드를 두 곳에서 지켜야 한다 — v2.503 규칙). 여기서는 **어느 서버를 수집할지**와
  *    주기·상한만 정한다.
@@ -85,7 +85,7 @@ export function HorizonSessionSettings({ onClose }) {
           Horizon 실시간 사용자 수집 켜기
         </label>
         <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal', lineHeight: 1.55 }}>
-          <BoldText text="기본은 **꺼짐**입니다 — 켜면 주기마다 각 Connection Server 에 로그인·세션 조회·로그아웃 왕복이 발생합니다. 계정·비밀번호는 **설정 › Horizon 등록**의 값을 그대로 씁니다(여기서 따로 받지 않습니다)." />
+          <BoldText text="기본은 **꺼짐**입니다 — 켜면 주기마다 각 Connection Server 에 로그인·세션 조회·로그아웃 왕복이 발생합니다. 계정·비밀번호는 **설정 › Horizon 연결 서버**의 값을 그대로 씁니다(여기서 따로 받지 않습니다)." />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
@@ -114,7 +114,7 @@ export function HorizonSessionSettings({ onClose }) {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>수집 대상 Connection Server</div>
           {!src.servers?.length && (
             <div style={{ fontSize: 12, color: 'var(--text-faint)', whiteSpace: 'normal' }}>
-              등록된 Horizon 서버가 없습니다 — <b>설정 › Horizon 등록</b>에서 추가하세요(CSV·자유텍스트로 한꺼번에 등록할 수도 있습니다).
+              등록된 Horizon 서버가 없습니다 — <b>설정 › Horizon 연결 서버</b>에서 추가하세요(CSV·자유텍스트로 한꺼번에 등록할 수도 있습니다).
             </div>
           )}
           {src.servers?.length > 0 && (
@@ -129,7 +129,7 @@ export function HorizonSessionSettings({ onClose }) {
                         <td data-sort={on ? 1 : 0}><input type="checkbox" checked={on} onChange={(e) => setServer(x.id, e.target.checked)} /></td>
                         <td><b>{x.name}</b> <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{x.id}</span></td>
                         <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{hostText(x.host)}</td>
-                        <td style={{ fontSize: 11.5 }}>{x.enabled ? '활성' : '비활성(Horizon 등록에서 꺼짐)'}{x.hasPassword ? '' : ' · 비밀번호 없음'}</td>
+                        <td style={{ fontSize: 11.5 }}>{x.enabled ? '활성' : '비활성(Horizon 연결 서버 등록에서 꺼짐)'}{x.hasPassword ? '' : ' · 비밀번호 없음'}</td>
                       </tr>
                     );
                   })}

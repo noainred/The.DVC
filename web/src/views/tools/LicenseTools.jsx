@@ -1,14 +1,12 @@
 // LicenseTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson, canCsv } from '../../api.js';
-import { droppedSecretNote } from '../droppedSecretText.js';
+import { fetchJson, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { licenseScopeNote, licenseDupNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
-import BulkDeviceIo from './BulkDeviceIo.jsx';   // v2.525: Horizon 서버 CSV·자유텍스트 대량 등록(스토리지·SAN 과 같은 공용 모달)
-import { hzSummary } from './hzListText.js'; // v2.612 WEB2612-04
+import { HorizonServerManager } from '../HorizonAdmin.jsx'; // v2.685: Horizon 연결 서버 등록(설정 메뉴와 공용)
 
 
 export function Solutions() {
@@ -124,13 +122,6 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const [err, setErr] = useState(null);
   const [statusSel, setStatusSel] = useState('');
   const [familySel, setFamilySel] = useState('');
-  const [hz, setHz] = useState(null); // Horizon 서버 목록(관리자)
-  const [hzErr, setHzErr] = useState(null); // v2.612 WEB2612-04: 403 이 아닌 실패 — '0대 등록' 으로 칠하지 않는다
-  const [hzDenied, setHzDenied] = useState(null); // v2.611: 범위 제한 admin 은 Horizon 등록부 403 — '0대 등록' 으로 칠하지 않는다
-  const [hzBulk, setHzBulk] = useState(false); // v2.525: CSV·자유텍스트 대량 등록 모달
-  const [hzForm, setHzForm] = useState({ id: '', name: '', host: '', username: '', password: '', domain: '' });
-  const [hzMsg, setHzMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
 
   // 세대 가드(v2.611 WEB2611-07) — 범위를 바꾼 뒤 늦게 도착한 이전 범위 응답은 버린다.
   const licGen = useRef(0);
@@ -139,11 +130,6 @@ export function LicenseExpiry({ scope, isAdmin }) {
     fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {})
       .then((d) => { if (gen === licGen.current) { setData(d); setErr(null); } })
       .catch((e) => { if (gen === licGen.current) setErr(e.message); });
-    if (isAdmin) {
-      fetchJson('/admin/horizon')
-        .then((r) => { setHz(r.servers || []); setHzDenied(null); setHzErr(null); })
-        .catch((e) => { if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e)); });
-    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
 
@@ -177,32 +163,6 @@ export function LicenseExpiry({ scope, isAdmin }) {
     const csv = [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = 'license-expiry.csv'; a.click(); URL.revokeObjectURL(url);
-  };
-
-  const hzSet = (k) => (e) => setHzForm((f) => ({ ...f, [k]: e.target.value }));
-  const hzSave = async () => {
-    setBusy(true); setHzMsg(null);
-    try {
-      const body = { ...hzForm, id: hzForm.id || hzForm.host.replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9.-]+/g, '-') };
-      const r = await postJson('/admin/horizon', body);
-      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 폼을 비우지 않는다
-      setHzMsg(r.ok ? (dropNote ? { ok: false, text: dropNote } : { ok: true, text: '저장됨 — 라이선스를 다시 불러옵니다.' }) : { ok: false, text: r.reason });
-      if (r.ok && dropNote) { setHzForm((f) => ({ ...f, id: body.id, password: '' })); load(); }
-      else if (r.ok) { setHzForm({ id: '', name: '', host: '', username: '', password: '', domain: '' }); load(); }
-    } catch (e) { setHzMsg({ ok: false, text: e.message }); }
-    finally { setBusy(false); }
-  };
-  const hzTest = async () => {
-    setBusy(true); setHzMsg(null);
-    try {
-      const r = await postJson('/admin/horizon/test', hzForm.host ? hzForm : { id: hzForm.id });
-      setHzMsg(r.ok ? { ok: true, text: `연결 성공 (${r.ms}ms) · 라이선스 ${r.licenses}건${r.first ? ` · ${r.first}` : ''}` } : { ok: false, text: `${r.reason}${r.hint ? ` · ${r.hint}` : ''}` });
-    } catch (e) { setHzMsg({ ok: false, text: e.message }); }
-    finally { setBusy(false); }
-  };
-  const hzDel = async (id) => {
-    if (!window.confirm(`Horizon 서버 '${id}' 등록을 삭제할까요?`)) return;
-    try { await delJson(`/admin/horizon/${encodeURIComponent(id)}`); load(); } catch (e) { setHzMsg({ ok: false, text: e.message }); }
   };
 
   return (
@@ -242,61 +202,8 @@ export function LicenseExpiry({ scope, isAdmin }) {
         Horizon은 아래에 Connection Server를 등록하면 REST API로 만료일을 직수집합니다(10분 캐시).
       </div>
 
-      {isAdmin && hzDenied && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-          🖥️ Horizon 연결 서버 관리는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다(이 계정에서는 등록 목록을 보이지 않습니다).
-        </div>
-      )}
-      {isAdmin && !hzDenied && (
-        <details style={{ marginTop: 14 }} open={hzSummary(hz, hzErr).open}>
-          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{hzSummary(hz, hzErr).label}</summary>
-          {hzErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록 목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzErr}</div>}
-          <div className="card" style={{ marginTop: 8, padding: 14 }}>
-            {(hz || []).length > 0 && (
-              <STable minWidth={720} style={{ marginBottom: 10 }}>
-                <thead><tr><th>ID</th><th>이름</th><th>host</th><th>계정</th><th>도메인</th><th className="right">작업</th></tr></thead>
-                <tbody>
-                  {hz.map((s) => (
-                    <tr key={s.id}>
-                      <td><b>{s.id}</b></td><td>{s.name}</td><td className="muted">{s.host}</td><td className="muted">{s.username}</td><td className="muted">{s.domain}</td>
-                      <td className="right nowrap">
-                        <button className="tab" disabled={busy} onClick={() => { setHzForm({ id: s.id, name: s.name, host: s.host, username: s.username, password: '', domain: s.domain }); }}>편집</button>{' '}
-                        <button className="tab" style={{ color: 'var(--red)' }} onClick={() => hzDel(s.id)}>삭제</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </STable>
-            )}
-            <div className="spec-grid">
-              <label>ID <input className="input" value={hzForm.id} onChange={hzSet('id')} placeholder="비우면 host로 자동" /></label>
-              <label>표시 이름 <input className="input" value={hzForm.name} onChange={hzSet('name')} placeholder="본사 Horizon" /></label>
-              <label>Connection Server <input className="input" value={hzForm.host} onChange={hzSet('host')} placeholder="https://horizon.example.com" /></label>
-              <label>계정 <input className="input" value={hzForm.username} onChange={hzSet('username')} placeholder="administrator" /></label>
-              <label>비밀번호 <input className="input" type="password" value={hzForm.password} onChange={hzSet('password')} placeholder={hzForm.id && (hz || []).some((s) => s.id === hzForm.id) ? '●●●●● (비우면 유지)' : ''} /></label>
-              <label>AD 도메인 <input className="input" value={hzForm.domain} onChange={hzSet('domain')} placeholder="corp" /></label>
-            </div>
-            {hzMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: hzMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: hzMsg.ok ? '#4ade80' : '#f87171' }}>{hzMsg.text}</div>}
-            <div className="flex gap wrap" style={{ marginTop: 10 }}>
-              <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
-              <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy || (!hzForm.host && !hzForm.id)} onClick={hzTest}>연결 테스트</button>
-              {/* v2.525(사용자 요청 "호라이즌 서버 등록이 필요하면 csv/text import/export 기능 추가해줘"):
-                  스토리지·SAN 스위치와 **같은 공용 모달**을 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
-                  식별 키는 `id` 단독이고 타입 열은 없다(Horizon 은 장비 타입이 없다). */}
-              {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setHzBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
-            </div>
-            <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-              Horizon 8(2006+) REST API(<code>/rest/login → /rest/config/v1/licenses</code>)를 사용합니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
-              대량 등록의 내보내기·샘플에는 <b>비밀번호가 담기지 않습니다</b>. host·계정·도메인 중 하나라도 바꾸면 저장된 비밀번호를 승계하지 않으므로(보안 규칙) 그 행은 비밀번호를 다시 적어야 합니다.
-            </div>
-          </div>
-        </details>
-      )}
-      {canCsv() && hzBulk && (
-        <BulkDeviceIo base="/admin/horizon" resource="servers" unitLabel="서버" typeCol={null}
-          title="Horizon 연결 서버 대량 등록 — CSV · 자유텍스트" keyLabel="id"
-          onClose={() => setHzBulk(false)} onDone={() => { setHzBulk(false); load(); }} />
-      )}
+      {/* v2.685: 등록 화면은 HorizonServerManager 하나 — 설정 › Horizon 연결 서버 와 같은 컴포넌트 */}
+      {isAdmin && <HorizonServerManager variant="details" onChanged={load} />}
     </>
   );
 }

@@ -188,8 +188,9 @@ export function preflightHints(rows, fields = [], { hostForm = 'address' } = {})
     //   그래서 `hostForm:'url'` 일 때 아래 세 조언은 **틀린 조언**이 된다 — 그대로 따르면 등록이
     //   실패한다(Chromium 판독에서 실제로 "URL 이 들어갔습니다 — 주소만 남기세요" 가 떴다).
     //   조언은 틀리면 무음 실패보다 나쁘다(사용자가 잘못된 수정을 한다).
-    if (hostForm === 'url') {
-      if (!/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 는 **https://커넥션서버** 형식이어야 합니다 — 앞에 https:// 를 붙이세요.`);
+    // 'url-auto'(v2.685 Horizon): 저장이 스킴을 스스로 붙이므로(https://) 스킴이 없어도 조언하지 않는다.
+    if (hostForm === 'url' || hostForm === 'url-auto') {
+      if (hostForm === 'url' && !/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 는 **https://커넥션서버** 형식이어야 합니다 — 앞에 https:// 를 붙이세요.`);
       continue;   // 포트·끝 슬래시는 URL 형식에서 정상이다(끝 슬래시는 저장 시 자동으로 지워진다)
     }
     if (/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 에 URL 이 들어갔습니다 — ${host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '')} 처럼 주소만 남기세요.`);

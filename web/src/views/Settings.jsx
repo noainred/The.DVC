@@ -46,6 +46,7 @@ const ApiKeys = lazy(() => import('./ApiKeys.jsx'));                 // 외부 �
 import SecuritySelfCheck from './SecuritySelfCheck.jsx'; // 보안 자가진단(지금 이 서버의 실측 상태, v2.500)
 const Upgrade = lazy(() => import('./Upgrade.jsx'));
 import About from './About.jsx';
+import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -54,6 +55,7 @@ const SUB = [
   { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'vcenter' },
   { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'vcenter' },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
+  { k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin }, // v2.685: 라이선스 만료 도구 안에만 있던 등록을 설정에도
   // --- 수집 서버 그룹 ---
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
   { k: 'idrac-scan-log', label: '스캔 로그', C: IdracScanLog, group: 'collect' },

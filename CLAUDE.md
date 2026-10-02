@@ -1706,6 +1706,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       CSV 는 `data.csv` + 감사 로그. 계정명 가림은 상위 패널 정책 그대로이고 **가린 상태에서는 계정명으로 검색되지 않는다**(검색으로 이름을 알아내는 우회 차단).
     · ⚠ 정직 기록: 공식 문서는 여전히 차단 — 근거는 공개 코드 `matt-coppinger/horizon-mcp`. 실장비 커넥션 서버로는 확인하지 못했다(합성 데이터·가짜 응답).
       첫 실수집에서 '이름을 안 근거' 열을 볼 것 — '팜까지만 앎' 이 많으면 그 버전 세션 응답에 앱 이름 필드가 없다는 뜻이고, 2단계(이벤트 DB)가 답이다.
+  - **Horizon 연결 서버 등록 화면은 `web/src/views/HorizonAdmin.jsx` 한 벌이다**(v2.685, 사용자 신고 "설정에 Horizon 등록 메뉴가 없어"):
+    설정 › Horizon 연결 서버(`#/settings/horizon-admin`, variant page — 실시간 사용자 수집 설정 모달도 연다)와 라이선스 만료 도구(variant details)가
+    같은 `HorizonServerManager` 를 쓴다. 등록 폼을 다시 복제하지 말 것. ⚠ 통신 점검 딥링크(`linkcheck/settingsKinds.js SETTINGS_PATHS`)가 전부
+    `#/settings?tab=…` 라 어떤 메뉴에도 맞지 않았다(첫 해시 조각이 'settings?tab=…' 이 된다) — 설정 주소는 `#/settings/<하위 키>` 이고
+    `server/test/settingsLinks2685.test.js` 가 모든 링크가 실제 메뉴·도구·탭 키인지 고정한다. **화면 문구에 메뉴 이름을 적으면 그 메뉴가 실재하는지 볼 것.**
+    주소는 `horizon.js normalizeHorizonHost` 하나(IP·호스트명 → https:// · 경로 제거 · http 존중)를 저장·연결 테스트·대량 등록이 쓰고,
+    ⚠ `accessMoved` 에도 **정규화된 host** 를 넘긴다 — 원문으로 비교하면 표기만 다른 같은 주소에서 저장 비밀번호를 버린다(변이 검증). 대량 등록 조언은 `hostForm:'url-auto'`.
+    연결 테스트는 로그인과 라이선스 조회를 나눠 말한다 — 라이선스 404 는 '로그인 성공 · 그 서버에 라이선스 API 없음'(버전·다른 API 응답을 함께 싣는다, 필드 이름은 실장비 미확인).
   - **Horizon 서버 등록도 CSV/자유텍스트 대량 등록을 쓴다 — 코어는 그대로 하나다**(`horizon/bulk.js` +
     `routes/admin/horizonAssign.js`, v2.525 — 사용자 요청 "호라이즌 서비스에 호라이즌 서버 등록이
     필요하면 csv/text import/export 기능 추가해줘"):
