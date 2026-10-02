@@ -27,6 +27,8 @@ import { commitHzSessions, hzLatestRecords, pruneHzSessions, pruneHzUsage, hzSes
 import { combineServers, seriesRow } from './sessions.js';
 import { recordHzSessionActivity } from './sessionActivityLog.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { clampIntervalMs } from '../config.js';
+import { localStamp } from '../util/dayKey.js';
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
@@ -55,6 +57,34 @@ const authGuard = createAuthGuard({ file: 'horizon-auth-stops.json' });
 
 /** 테스트용 — 정지 기록 초기화. */
 export function _resetHzAuthGuard() { authGuard._resetForTest(); }
+
+/**
+ * v2.686 HZT-07: 세션 경로가 404(이 버전에 없음)인 서버는 다음 주기에도 404 다 — 실장비 7.13.1 이 그랬다(사용자 curl).
+ * 그대로 두면 주기(기본 5분)마다 AD 로그인·404·로그아웃을 무기한 반복한다. 그래서 **주기 수집만** 쉬고
+ * (`HZSESS_NO_ENDPOINT_BACKOFF_MS`, 기본 6시간), 그 사실과 다음 확인 시각을 결과에 싣는다(조용히 멈추지 않는다).
+ * ⚠ '지금 수집'(수동)은 막지 않고, 주소·계정·도메인이 바뀌거나 한 번 성공하면 즉시 지운다.
+ * 인메모리다 — 재시작하면 한 번 다시 확인하고 다시 쉰다(영속할 만큼 비싼 정보가 아니다).
+ */
+// 기본 21_600_000 = 6시간(env-doc 생성기가 곱셈식의 첫 숫자를 기본값으로 읽어 '6' 이라 적었다 — HZ2686-R7).
+const NO_ENDPOINT_BACKOFF_MS = clampIntervalMs(Number(process.env.HZSESS_NO_ENDPOINT_BACKOFF_MS) || 21_600_000, 21_600_000, 600_000);
+/**
+ * 쉬게 하는 종류 — 다음 주기에도 같은 결과가 나올 것이 확실한 것만(v2.686 HZ2686-R3·SEC-2686-02).
+ * 로그인 API 없음·토큰 없는 응답은 그 주소가 커넥션 서버가 아닐 수 있어, 주기마다 AD 자격증명을 그쪽으로 보내지 않게 쉰다.
+ */
+export const BACKOFF_KINDS = Object.freeze(['no-endpoint', 'no-login-endpoint', 'no-token']);
+/** 로그인이 **성공한** 결과 — 자격증명이 받아들여졌으므로 인증 정지를 풀어도 된다(HZ2686-R1). */
+const LOGIN_OK_KINDS = new Set(['ok', 'forbidden', 'no-endpoint', 'unparsed']);
+const _noEndpoint = new Map();                      // serverId -> { until, sig }
+const accessSig = (srv) => `${srv.host || ''}|${srv.username || ''}|${srv.domain || ''}`.toLowerCase();
+export function _resetHzNoEndpoint() { _noEndpoint.clear(); }
+/** 연결 테스트가 세션 조회 성공을 확인하면 쉬는 기록을 지운다(HZ2686-R2 — 업그레이드 뒤 6시간 낡은 404 금지). */
+export function clearHzNoEndpoint(id) { if (id) _noEndpoint.delete(String(id)); }
+export function noEndpointBackoffFor(srv, now = Date.now()) {
+  const ne = _noEndpoint.get(srv?.id);
+  if (!ne) return null;
+  if (ne.sig !== accessSig(srv)) { _noEndpoint.delete(srv.id); return null; }   // 등록을 고쳤다 — 즉시 다시 확인
+  return ne.until > now ? ne : null;
+}
 
 export function hzSessionPollerStatus() {
   const s = loadHzSettings();
@@ -103,7 +133,10 @@ export async function runHzSessionsNow(trigger = 'manual') {
     const results = await pool(servers, Math.min(CONCURRENCY_CAP, s.concurrency), (srv) => withJob(`horizon.sessions:${srv.id}`, async () => {
       inFlight.set(srv.id, Date.now());
       try {
-        const stop = periodic && !mock ? authGuard.authStopFor(srv) : null;
+        let stop = periodic && !mock ? authGuard.authStopFor(srv) : null;
+        // v2.686 HZ2686-R1: v2.685 까지는 로그인 뒤 403(역할 권한)도 'auth' 로 세어 정지를 남겼다. 그 정지는 로그인 단계
+        //   실패가 아니므로 풀고 다시 시도한다(이유 문구가 '세션 조회 실패' 로 시작한다 — 로그인 실패는 'Horizon 로그인 실패').
+        if (stop && /^세션 조회 실패/.test(String(stop.reason || ''))) { authGuard.clearAuthStop(srv.id); stop = null; }
         if (stop) {
           // ⚠ **조용히 멈추지 않는다**(규칙 1) — 정지 사실·시각·시도 횟수를 그대로 실어 화면이 말한다.
           //   말없이 건너뛰면 사용자는 '수집이 되는 줄' 안다.
@@ -117,6 +150,19 @@ export async function runHzSessionsNow(trigger = 'manual') {
             usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
           };
         }
+        const ne = periodic && !mock ? noEndpointBackoffFor(srv) : null;
+        if (ne) {
+          // 활동 로그에는 남기지 않는다 — 시도하지 않은 주기를 이벤트로 쌓으면 상한을 비이벤트로 소진한다(v2.517 규약).
+          return {
+            serverId: srv.id, name: srv.name || srv.id, host: srv.host,
+            ok: false, kind: ne.kind || 'no-endpoint', backoffUntil: ne.until,
+            error: `${ne.kind === 'no-login-endpoint' ? '이 주소에 로그인 API 가 없습니다(404)' : ne.kind === 'no-token' ? '로그인 응답에 토큰이 없었습니다' : '이 커넥션 서버에는 세션 목록 API 가 없습니다(404)'} — 주기 수집은 ${localStamp(ne.until)} 에 다시 확인합니다`,
+            hint: '주기마다 로그인하지 않으려고 쉬는 중입니다. ‘지금 수집’ 은 그대로 동작합니다.',
+            parsed: false, sessions: null, connected: null, disconnected: null, pending: null,
+            users: null, usersConnected: null, names: [], pools: [],
+            usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
+          };
+        }
         const r = mock ? mockSessionResult(srv) : await collectServerSessions(srv, {
           pageSize: s.pageSize, maxPages: s.maxPages, maxUsers: s.maxUsers, timeoutMs: s.timeoutMs,
         });
@@ -124,7 +170,9 @@ export async function runHzSessionsNow(trigger = 'manual') {
         // 바뀌면 `authStopFor` 가 credHash 비교로 이미 자동 재개하므로 여기는 성공 경로만 본다).
         if (!mock) {
           if (r?.kind === 'auth') authGuard.markAuthStopped(srv.id, srv, r.error || '인증·권한 거부');
-          else if (r?.ok) authGuard.clearAuthStop(srv.id);
+          else if (r?.ok || LOGIN_OK_KINDS.has(r?.kind)) authGuard.clearAuthStop(srv.id);   // 로그인이 됐으면 자격증명은 맞다
+          if (BACKOFF_KINDS.includes(r?.kind)) _noEndpoint.set(srv.id, { until: Date.now() + NO_ENDPOINT_BACKOFF_MS, sig: accessSig(srv), kind: r.kind });
+          else if (r?.ok) _noEndpoint.delete(srv.id);
         }
         recordHzSessionActivity({
           deviceId: srv.id, name: srv.name || srv.id, host: srv.host, source: 'central',

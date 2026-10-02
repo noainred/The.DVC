@@ -29,15 +29,18 @@ describe('Horizon 연결 서버 등록 — 설정 메뉴', () => {
 
 import { hzTestMessage } from './horizonAdminText.js';
 describe('연결 테스트 문구 — 로그인 성공 + 라이선스 404 를 실패와 구분', () => {
+  // v2.686: 문구가 기능별 줄로 바뀌었다(horizonAdmin2686.test.js 가 새 계약을 고정한다). 여기는 v2.685 의 약속만 남긴다.
   it('licenses null 이면 주황 경고이고 로그인 성공을 먼저 말한다', () => {
     const m = hzTestMessage({ ok: true, loginOk: true, ms: 120, licenses: null, licenseStatus: 404, licenseError: 'X 404', csVersion: '8.12', probe: { path: '/rest/monitor/v1/connection-servers', status: 200 } });
     expect(m.ok).toBe(false); expect(m.warn).toBe(true);
-    expect(m.text.startsWith('로그인 성공')).toBe(true);
-    expect(m.text).toContain('8.12'); expect(m.text).toContain('HTTP 200');
+    expect(m.lines[0].label).toBe('로그인');
+    expect(m.lines[0].text.startsWith('성공')).toBe(true);
+    expect(m.text).toContain('8.12');
     expect(m.text).not.toMatch(/`|\*\*/);
   });
-  it('정상·실패는 예전 문구', () => {
-    expect(hzTestMessage({ ok: true, ms: 5, licenses: 2, first: 'Enterprise' })).toEqual({ ok: true, text: '연결 성공 (5ms) · 라이선스 2건 · Enterprise' });
-    expect(hzTestMessage({ ok: false, reason: 'Horizon 로그인 실패 (HTTP 401)' }).ok).toBe(false);
+  it('실패는 빨강(ok·warn 둘 다 거짓)', () => {
+    const f = hzTestMessage({ ok: false, reason: 'Horizon 로그인 실패 (HTTP 401)' });
+    expect(f.ok).toBe(false); expect(f.warn).toBeFalsy();
+    expect(f.text).toContain('HTTP 401');
   });
 });

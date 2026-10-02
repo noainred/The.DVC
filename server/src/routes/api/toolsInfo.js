@@ -12,7 +12,7 @@ import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.j
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
-import { dayKey } from "../../util/dayKey.js";
+import { dayKey, localStamp } from "../../util/dayKey.js";
 import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -220,10 +220,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   if (!scoped && !allowed) {
     try {
       const hz = await collectHorizonLicenses();
-      for (const { server: s, lic: l } of hz.rows) {
+      for (const { server: s, lic: l, stale, lastOkAt } of hz.rows) {
         const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
         items.push({
-          source: 'Horizon', where: s.name || s.id, vcenterId: '',
+          // v2.686 HZ2686-R6: 조회 실패 중 이어 보이는 직전 행은 행 자체가 그 사실을 말한다(표의 '어디' 칸 + stale·lastOkAt).
+          source: 'Horizon', where: stale ? `${s.name || s.id} (직전 조회 값)` : (s.name || s.id), vcenterId: '',
+          stale: !!stale, lastOkAt: stale ? (lastOkAt || null) : undefined,
           name: l.name, family: 'Horizon',
           edition: l.usageModel || '', product: 'Horizon', productVersion: '',
           key: l.key || '', total: null, used: null,
@@ -234,7 +236,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
       // 비-admin 에게는 오류 원문 속 Connection Server 주소를 가린다(ENOTFOUND <host> 등 — v2.599 addressMask 규약).
       const hzHosts = isAdminReq(req) ? [] : listHorizon().map((s) => s.host).filter(Boolean);
       const scrub = (t) => (hzHosts.length ? scrubHosts(String(t ?? ''), hzHosts) : String(t ?? ''));
-      for (const e of hz.errors) collectionErrors.push(`Horizon ${e.name || e.id}: ${scrub(e.reason)}`);
+      // v2.686 HZ-10: 실패 중 이어 보여 주는 직전 행이 있으면 그 사실과 마지막 성공 시각을 함께 말한다(낡은 값을 지금 값처럼 보이지 않게).
+      for (const e of hz.errors) collectionErrors.push(`Horizon ${e.name || e.id}: ${scrub(e.reason)}${e.carried ? ` — 직전 조회 결과 ${e.carried}건을 계속 표시합니다(마지막 성공 ${e.lastOkAt ? localStamp(e.lastOkAt) : '기록 없음'})` : ''}`);
     } catch (e) { collectionErrors.push(`Horizon: ${isAdminReq(req) ? e.message : scrubHosts(String(e.message ?? ''), listHorizon().map((s) => s.host).filter(Boolean))}`); }
   }
   const summary = { expired: 0, expiring: 0, ok: 0, perpetual: 0 };

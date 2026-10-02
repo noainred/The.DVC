@@ -22,6 +22,10 @@ export const KIND_TONE = Object.freeze({
   disabled: 'gray',
   unparsed: 'amber',
   'no-endpoint': 'amber',
+  // v2.686: 로그인 뒤 권한 부족 · 로그인 API 없음 · 로그인 응답 형식 미인식 — 자격증명 거부가 아니다.
+  forbidden: 'red',
+  'no-login-endpoint': 'amber',
+  'no-token': 'amber',
   auth: 'red',
   'auth-stopped': 'red',
   http: 'red',
@@ -38,7 +42,10 @@ export const KIND_ADVICE = Object.freeze({
   disabled: '이 서버는 수집 대상에서 꺼져 있습니다(설정에서 켜세요).',
   auth: '계정·도메인·권한을 확인하세요. Horizon REST 세션 조회에는 세션을 볼 수 있는 역할이 필요합니다. 비밀번호를 반복 시도하면 AD 계정이 잠길 수 있어 포탈은 자동 재시도하지 않습니다.',
   'auth-stopped': '인증 실패가 이어져 **주기 수집을 멈췄습니다** — 같은 자격증명으로 계속 로그인하면 AD 계정이 잠깁니다. 설정 › Horizon 연결 서버에서 비밀번호를 고치면 **자동으로 재개**합니다. ‘지금 수집’ 버튼은 막히지 않으니 고친 뒤 눌러 확인하세요.',
-  'no-endpoint': '이 Horizon 버전이 세션 목록 경로를 노출하지 않습니다(404). Connection Server 버전을 확인하세요 — 포탈이 쓰는 경로는 화면 아래 **조회 경로**에 적혀 있습니다.',
+  'no-endpoint': '이 커넥션 서버는 세션 목록 경로에 **404** 로 응답합니다 — 그 버전에 세션 API 가 없어 실시간 사용자 수집이 동작하지 않습니다(예: 7.13.1 실측). 설정 › Horizon 연결 서버의 **연결 테스트**가 기능별로 됨/안 됨을 보여 줍니다. 주기 수집은 주기마다 로그인하지 않도록 몇 시간 쉬었다가 다시 확인합니다.',
+  forbidden: '로그인은 **성공**했지만 세션 조회가 거부됐습니다(401/403) — 비밀번호가 아니라 이 계정의 **Horizon 역할 권한**을 확인하세요. 자격증명 거부가 아니라서 주기 수집을 멈추지 않습니다.',
+  'no-login-endpoint': '이 주소에 로그인 API(/rest/login)가 없습니다(404) — 등록 주소가 커넥션 서버인지, REST API 를 지원하는 버전인지 확인하세요. 주기 수집은 그 주소로 자격증명을 반복해 보내지 않도록 몇 시간 쉬었다가 다시 확인합니다(‘지금 수집’ 은 바로 확인합니다).',
+  'no-token': '로그인 응답에 토큰이 없었습니다 — 등록 주소가 커넥션 서버가 아닌 장비(로드밸런서·프록시 안내 페이지)일 수 있습니다. 주기 수집은 그 주소로 자격증명을 반복해 보내지 않도록 몇 시간 쉬었다가 다시 확인합니다(‘지금 수집’ 은 바로 확인합니다).',
   unparsed: '응답을 받았지만 계정 필드를 알아보지 못했습니다. 상세의 **응답 필드** 목록을 개발자에게 알려주면 필드 이름을 맞출 수 있습니다.',
   timeout: '시한 내에 응답이 없었습니다. 고지연 회선이면 설정에서 시한을 늘리세요.',
   http: '조회가 HTTP 오류로 끝났습니다 — 아래 원문 사유를 확인하세요.',
@@ -86,6 +93,21 @@ export function authStopNote(stop, now = Date.now()) {
   if (last !== '—') bits.push(`마지막 시도 ${last}`);
   if (reason) bits.push(`사유: ${reason}`);
   return { text: bits.join(' · '), since, last, attempts, reason };
+}
+
+/**
+ * 주기 수집이 쉬는 중인 서버(v2.686 — 세션 API 404·로그인 API 404·토큰 없는 응답)의 다음 확인 시각.
+ * 표의 '마지막 조회' 는 실제로 조회한 시각 그대로다(쉬는 주기는 기록하지 않는다) — 그래서 다음 확인을 따로 말한다.
+ * @returns {null|string}
+ */
+export function backoffNote(until, now = Date.now()) {
+  // ⚠ `Number(null) === 0` — `== null` 을 먼저 본다(v2.525 규약).
+  if (until == null || until === '') return null;
+  const t = Number(until);
+  if (!Number.isFinite(t) || t <= now) return null;
+  const min = Math.max(1, Math.round((t - now) / 60_000));
+  const span = min >= 60 ? `${Math.floor(min / 60)}시간${min % 60 ? ` ${min % 60}분` : ''}` : `${min}분`;
+  return `주기 수집은 쉬는 중입니다 — 약 ${span} 뒤 다시 확인합니다. ‘지금 수집’ 은 바로 확인합니다.`;
 }
 
 /**

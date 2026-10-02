@@ -284,7 +284,9 @@ test("수집: HAS_MORE_RECORDS=false 헤더를 주면 그 페이지에서 멈춘
 });
 
 test('수집: 실패 원인을 구분한다 — 401/404/형식/기타', async () => {
-  for (const [status, kind] of [[401, 'auth'], [403, 'auth'], [404, 'no-endpoint'], [500, 'http']]) {
+  // v2.686: 로그인은 성공했는데 세션 조회가 401/403 이면 '자격증명 거부(auth)' 가 아니라 역할 권한(forbidden)이다 —
+  //   auth 로 두면 authGuard 가 주기 수집을 멈추고 '비밀번호를 고치면 재개' 라는 틀린 조치를 말한다(로그인 단계 401 은 아래 테스트).
+  for (const [status, kind] of [[401, 'forbidden'], [403, 'forbidden'], [404, 'no-endpoint'], [500, 'http']]) {
     const s = stubFetch((url) => {
       if (url.endsWith('/rest/login')) return json({ access_token: 't' });
       if (url.endsWith('/rest/logout')) return json({});
@@ -322,7 +324,7 @@ test('수집: 배열이 아닌 응답은 unparsed 다', async () => {
 });
 
 test('KIND_LABEL: 모든 판정에 한글 라벨이 있다', () => {
-  for (const k of ['ok', 'unparsed', 'auth', 'no-endpoint', 'http', 'timeout', 'error', 'mock', 'disabled']) {
+  for (const k of ['ok', 'unparsed', 'auth', 'no-endpoint', 'http', 'timeout', 'error', 'mock', 'disabled', 'forbidden', 'no-login-endpoint', 'no-token']) {
     assert.ok(KIND_LABEL[k], `${k} 라벨이 없으면 화면이 영문 코드를 그대로 보여준다`);
   }
 });

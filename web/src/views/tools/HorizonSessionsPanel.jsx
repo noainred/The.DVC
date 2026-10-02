@@ -26,7 +26,7 @@ import CollectActivity from './CollectActivity.jsx';
 import { Card } from './shared.jsx';
 import { unitText } from '../unitText.js';
 import {
-  agoText, intervalText, kindTone, kindAdvice, authStopNote, collectStateNote, connectedText,
+  agoText, intervalText, kindTone, kindAdvice, authStopNote, backoffNote, collectStateNote, connectedText,
   unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
@@ -285,8 +285,17 @@ export default function HorizonSessionsPanel() {
               *   문구가 없는 `ok` 에서도 그 상자가 떴다.
               *   같은 함수를 쓰는 `CurrentUsers.jsx:258` 은 처음부터 `adv.text` 로 올바르게 썼다.
               */}
-            {kindAdvice(detail.kind).text && (
-              <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind).text} /></div>
+            {/*
+              * ⚠⚠ v2.686 HZ-01 — 위 v2.574 주석은 **다른 모듈** 의 kindAdvice(`curUserText.js`, 객체)를 근거로 썼다.
+              *   이 파일이 import 하는 것은 `horizonSessionText.js kindAdvice` 이고 그것은 **문자열**을 돌려준다 →
+              *   `.text` 는 언제나 undefined 라 조치 안내(404 '이 버전에 없는 경로' 포함)가 **한 번도 표시되지 않았다**.
+              *   두 모듈의 반환 모양이 다르다 — 테스트(webFixes2574)가 이 파일이 import 하는 모듈의 값으로 고정한다.
+              */}
+            {kindAdvice(detail.kind) && (
+              <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind)} /></div>
+            )}
+            {backoffNote(detail.backoffUntil, data?.now) && (
+              <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{backoffNote(detail.backoffUntil, data?.now)}</div>
             )}
             {/* 정지 사실만이 아니라 **시점·횟수**를 말한다(v2.528 규약) — 없으면 사용자가 그동안의 수치를 현재값으로 읽는다. */}
             {authStopNote(detail.authStopped, data?.now) && (

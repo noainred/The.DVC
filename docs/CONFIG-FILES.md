@@ -3,7 +3,7 @@
 포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **185개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-01)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-02)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -90,7 +90,7 @@
 | `horizon-session-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | horizon/sessionActivityLog.js |
 | `horizon-sessions.db` | DB | Horizon 실시간 사용자 전용 DB(v2.525). |  |  | ✅ | horizon/sessionDb.js |
 | `horizon-sessions.json` | 설정 | Horizon 실시간 사용자 수집 설정(v2.525). | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
-| `horizon.json` | 설정 | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). | ✅ | ✅ | ✅ | horizon/horizon.js |
+| `horizon.json` | 설정 | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. | ✅ | ✅ | ✅ | horizon/horizon.js |
 | `host-access.json` | 설정 | 호스트 접근 제어 설정(`host-access.json`, v2.485). | ✅ | ✅ | ✅ | hostaccess/settings.js |
 | `host-temp.db` | DB | 지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB |  |  |  | config.js |
 | `idrac-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | idrac/poller.js |
