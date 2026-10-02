@@ -1689,6 +1689,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       쓸 때 `v == null` 을 먼저 볼 것.
     - Horizon 은 **vCenter 에 매인 자원이 아니다** — 법인 범위로 나눌 축이 없으므로 범위 제한 계정에는
       **403(`requiredOwner`)** 으로 거절한다. 빈 값을 주면 '사용자 0명' 이라는 거짓이 된다.
+  - ⚠⚠ **Horizon 앱·데스크톱별 사용 현황(v2.684) — 어느 앱인지 모르면 '팜(앱 미구분)' 이고, 누적은 하한이다**
+    (`horizon/appUsage.js`(순수 해석) · `appUsageReport.js`(순수 보고서) · `sessionCollect.js` 카탈로그 · `sessionDb.js` `hz_usage_daily`·`hz_usage_cover`
+    + `GET /tools/horizon-sessions/usage`·`usage.csv` + 웹 `views/tools/HorizonUsagePanel.jsx`·`horizonUsageText.js`, 사용자 요청 "커넥션 서버나 UAG API 로
+    어떤 사용자가 어떤 서비스를 쓰는지 실시간·누적" → 1단계(커넥션 서버만 — UAG 는 세션 수만 주고 앱을 모른다). 회귀 `server/test/horizonUsage2684.test.js` + 웹 `horizonUsageText.test.js` — 변이 8/8):
+    · **새 로그인을 만들지 않는다** — 앱 풀(`/rest/inventory/v1/application-pools`)·데스크톱 풀·팜 목록은 **세션 조회와 같은 `withHorizonSession` 안에서**,
+      6시간(`HZ_CATALOG_TTL_MS`)에 한 번 · 실패 뒤에는 30분 뒤에만 다시 읽는다. 데스크톱 풀·팜 경로는 버전이 붙어(`v13`·`v10`) 후보 체인이고 읽은 경로를 보고한다.
+      실패해도 **직전 목록을 지우지 않고** 실패를 새 성공으로 기록하지 않는다(`at` 그대로 · `failedAt`).
+    · **해석 순서가 계약이다**(`resolveServices`): 세션의 앱 이름 필드(후보 체인 — **확인된 필드 없음**) → 앱 풀 ID → 앱 세션의 팜(앱 하나면 그 앱 `farm-single-app`,
+      여럿이면 `kind:'farm'`) → 데스크톱 풀 → 미확인. **팜에 앱이 여럿인데 하나를 골라 붙이지 말 것**(오류 없이 틀린 값). 근거(`basis`)를 서비스마다 싣고
+      웹 `BASIS_TEXT` 와 1:1(테스트 대조). 서비스 키는 `종류:이름(소문자)` — 같은 이름 앱은 팟이 달라도 한 서비스다.
+    · **누적은 하한이고 화면이 매번 말한다**(주기 폴링이라 짧은 실행은 안 잡힌다). 하루 1행 upsert 의 관측·수집 횟수는 **더 늦은 ts 일 때만** 늘린다(같은 주기 재적재 금지).
+      **수집이 없던 날은 0명이 아니라 null('수집 없음')** · 지나간 날 중 기대 횟수의 절반 미만은 `partial` · 일평균 분모는 수집이 있던 지나간 날만.
+    · '지금 접속 중' 은 최신 수집 레코드의 `latest.services` 다 — 최신 수집 성공 서버가 0대면 '—'(0 아님), 여러 서버 합은 '+' 표지(같은 사람 중복 가능).
+    · 조회 기간 상한 92일(행 수 비례 동기 집계 — v2.672·v2.675), 최신 수집 시각 키로 결과 기억, 폴링 금지(마운트 + 버튼). 범위 계정 403(Horizon 은 법인 축이 없다).
+      CSV 는 `data.csv` + 감사 로그. 계정명 가림은 상위 패널 정책 그대로이고 **가린 상태에서는 계정명으로 검색되지 않는다**(검색으로 이름을 알아내는 우회 차단).
+    · ⚠ 정직 기록: 공식 문서는 여전히 차단 — 근거는 공개 코드 `matt-coppinger/horizon-mcp`. 실장비 커넥션 서버로는 확인하지 못했다(합성 데이터·가짜 응답).
+      첫 실수집에서 '이름을 안 근거' 열을 볼 것 — '팜까지만 앎' 이 많으면 그 버전 세션 응답에 앱 이름 필드가 없다는 뜻이고, 2단계(이벤트 DB)가 답이다.
   - **Horizon 서버 등록도 CSV/자유텍스트 대량 등록을 쓴다 — 코어는 그대로 하나다**(`horizon/bulk.js` +
     `routes/admin/horizonAssign.js`, v2.525 — 사용자 요청 "호라이즌 서비스에 호라이즌 서버 등록이
     필요하면 csv/text import/export 기능 추가해줘"):

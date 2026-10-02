@@ -30,6 +30,7 @@ import {
   unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
+import HorizonUsagePanel from './HorizonUsagePanel.jsx';   // v2.684 앱·데스크톱별 사용 현황
 
 const DAYS = [1, 7, 30, 90];
 const POLL_MS = 60_000;     // 수집 주기가 기본 5분 — 15초 폴링은 낭비다(CLAUDE.md V4 규약)
@@ -227,6 +228,9 @@ export default function HorizonSessionsPanel() {
         </div>
         {nameRows.length > 500 && <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>표에는 500명까지만 표시했습니다(전체 {nameRows.length}명).</div>}
       </div>
+
+      {/* v2.684 앱·데스크톱별 사용 현황(누적) — 서버를 고르면 그 서버만 */}
+      <HorizonUsagePanel serverId={picked ? picked.serverId : ''} serverName={picked ? (picked.name || picked.serverId) : ''} canShowNames={canShowNames} />
 
       {/* 추이 */}
       <div>

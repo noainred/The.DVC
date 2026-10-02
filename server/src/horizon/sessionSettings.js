@@ -23,6 +23,8 @@ export const LIMITS = Object.freeze({
   // 5분 기본. '실시간' 이라도 1분 주기는 28법인 고RTT 환경에서 로그인 왕복을 과하게 만든다.
   intervalMs: { min: 60_000, max: 6 * 3600_000, def: 5 * 60_000 },
   retentionDays: { min: 1, max: 3650, def: 180 },
+  // v2.684 앱별 사용 누적(사용자×서비스 하루 1행) 보존 — 기본 400일(작년 같은 달과 비교할 수 있게).
+  usageRetentionDays: { min: 7, max: 3650, def: 400 },
   concurrency: { min: 1, max: 8, def: 3 },
   timeoutMs: { min: 5_000, max: 300_000, def: 30_000 },
   pageSize: { min: 50, max: 1000, def: 500 },      // Horizon `size` 상한 1000
@@ -62,6 +64,7 @@ export function normalize(input = {}) {
     enabled: src.enabled === true,
     intervalMs: clampSetting(positive(src.intervalMs), LIMITS.intervalMs),
     retentionDays: clampSetting(positive(src.retentionDays), LIMITS.retentionDays),
+    usageRetentionDays: clampSetting(positive(src.usageRetentionDays), LIMITS.usageRetentionDays),
     concurrency: clampSetting(positive(src.concurrency), LIMITS.concurrency),
     timeoutMs: clampSetting(positive(src.timeoutMs), LIMITS.timeoutMs),
     pageSize: clampSetting(positive(src.pageSize), LIMITS.pageSize),

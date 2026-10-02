@@ -8,6 +8,8 @@
  *  GET  /tools/horizon-sessions/settings   설정 + 대상 서버 목록 (tools)
  *  PUT  /tools/horizon-sessions/settings   설정 변경 (admin)
  *  GET  /tools/current-users/combined      Windows ∪ VDI 고유 사용자 (tools)
+ *  GET  /tools/horizon-sessions/usage      v2.684 앱·데스크톱별 사용 누적(기간 고유 사용자·서비스·사용자별) (tools)
+ *  GET  /tools/horizon-sessions/usage.csv  같은 기간의 사용자×서비스 쌍 CSV (data.csv)
  *
  * 보안:
  *  · Horizon 은 **vCenter 에 매인 자원이 아니다** — 법인 범위(scope) 로 나눌 축이 없다. 그래서
@@ -26,7 +28,11 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { listHorizon } from '../../horizon/horizon.js';
 import { load as loadHzSettings, save as saveHzSettings, LIMITS } from '../../horizon/sessionSettings.js';
-import { hzLatestRecords, hzSeriesRange, hzSessionDbStatus } from '../../horizon/sessionDb.js';
+import { hzLatestRecords, hzSeriesRange, hzSessionDbStatus, hzUsageRange } from '../../horizon/sessionDb.js';
+import { buildUsageReport, dayRange } from '../../horizon/appUsageReport.js';
+import { KIND_LABEL as USAGE_KIND_LABEL, BASES as USAGE_BASES } from '../../horizon/appUsage.js';
+import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { localStamp, fileStamp } from '../../util/dayKey.js';
 import { combineServers } from '../../horizon/sessions.js';
 import { KIND_LABEL } from '../../horizon/sessionCollect.js';
 import { hzSessionPollerStatus, runHzSessionsNow, targetServers } from '../../horizon/sessionPoller.js';
@@ -83,7 +89,81 @@ function maskHzPoller(poller, hosts) {
   return p;
 }
 
+/*
+ * v2.684 앱별 사용 누적 — 화면을 열 때와 버튼으로만 부른다(폴링 금지). 결과는 '최신 수집 시각' 이 같으면
+ * 다시 계산하지 않는다(그 사이 DB 가 바뀌지 않는다). 기간은 최대 92일 — 그보다 긴 범위는 행 수에 비례하는
+ * 동기 SQL 이 된다(CLAUDE.md v2.672·v2.675: 화면 경로에서 행 수 비례 집계 금지).
+ */
+const USAGE_MAX_DAYS = 92;
+const clampUsageDays = (v) => Math.max(1, Math.min(USAGE_MAX_DAYS, Math.round(Number(v) || 7)));
+const _usageCache = new Map();   // key -> { at, body }
+
+async function usageReport({ days, serverId }) {
+  const s = loadHzSettings();
+  const latest = await hzLatestRecords();
+  const latestTs = latest.length ? Math.max(...latest.map((r) => Number(r.ts) || 0)) : 0;
+  const { fromDay, toDay } = dayRange(days);
+  const key = `${days}|${serverId}|${latestTs}|${toDay}`;
+  const hit = _usageCache.get(key);
+  if (hit) return hit.body;
+  const range = await hzUsageRange({ fromDay, toDay, serverId });
+  const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && (!serverId || r.serverId === serverId));
+  const report = buildUsageReport(range, {
+    fromDay, toDay, intervalMs: s.intervalMs,
+    servers: serverId ? 1 : Math.max(1, targetServers(s).length),
+    liveServices: fresh.flatMap((r) => (Array.isArray(r.services) ? r.services : [])),
+    liveServers: fresh.length, maxUsers: s.maxUsers,
+  });
+  const body = {
+    available: range.available, days, serverId, latestTs: latestTs || null, ...report,
+    serverMeta: latest.filter((r) => !serverId || r.serverId === serverId)
+      .map((r) => ({ serverId: r.serverId, name: r.name, host: r.host, ok: r.ok, ts: r.ts, kind: r.kind, usageMeta: r.usageMeta || {} })),
+    kindLabels: USAGE_KIND_LABEL, bases: USAGE_BASES,
+    settings: { enabled: s.enabled, intervalMs: s.intervalMs, usageRetentionDays: s.usageRetentionDays, showNamesInList: s.showNamesInList },
+    maxDays: USAGE_MAX_DAYS,
+  };
+  _usageCache.set(key, { at: Date.now(), body });
+  while (_usageCache.size > 16) _usageCache.delete(_usageCache.keys().next().value);
+  return body;
+}
+
 export function registerHorizonSessions(api) {
+
+api.get('/tools/horizon-sessions/usage', requirePerm('tools'), async (req, res) => {
+  if (denyScoped(req, res)) return;
+  const days = clampUsageDays(req.query.days);
+  const serverId = String(req.query.serverId || '').slice(0, 128);
+  const body = await usageReport({ days, serverId });
+  const admin = isAdminReq(req);
+  const hosts = admin ? [] : hzHosts();
+  res.json({
+    ...body,
+    serverMeta: admin ? body.serverMeta : maskHzRows(body.serverMeta, hosts),
+    ...(admin ? {} : { addressHidden: true }),
+    db: scopeDbStatus(await hzSessionDbStatus(), req.user),
+  });
+});
+
+api.get('/tools/horizon-sessions/usage.csv', requirePerm('data.csv'), async (req, res) => {
+  if (denyScoped(req, res)) return;
+  const days = clampUsageDays(req.query.days);
+  const serverId = String(req.query.serverId || '').slice(0, 128);
+  const { fromDay, toDay } = dayRange(days);
+  const range = await hzUsageRange({ fromDay, toDay, serverId });
+  if (!range.available) return res.status(503).json({ ok: false, reason: 'Horizon 세션 DB 를 쓸 수 없습니다.' });
+  const lines = [csvLine(['사용자', '서비스', '종류', '해석 근거', '사용 일수', '처음 관측', '마지막 관측', '관측 횟수', '접속 중 관측 횟수'])];
+  const rows = [...range.pairs].sort((a, b) => String(a.user).localeCompare(String(b.user), 'ko') || b.days - a.days);
+  for (const p of rows) {
+    lines.push(csvLine([p.user, p.service, USAGE_KIND_LABEL[p.kind] || p.kind, p.basis, p.days,
+      p.firstTs ? localStamp(p.firstTs) : '', p.lastTs ? localStamp(p.lastTs) : '', p.samples, p.connectedSamples]));
+  }
+  logAudit({ user: req.user?.username, action: 'horizon.usage.export', ip: req.ip || '', detail: JSON.stringify({ days, serverId, rows: rows.length }).slice(0, 300) });
+  const base = `horizon-usage-${fromDay}_${toDay}-${fileStamp()}`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${base}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(CSV_BOM + lines.join('\r\n') + '\r\n');
+});
 
 api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
   if (denyScoped(req, res)) return;
