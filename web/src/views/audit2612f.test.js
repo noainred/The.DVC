@@ -50,10 +50,11 @@ describe('WEB2612-03 베어메탈 상세 — 다른 서버·기간 응답을 버
 });
 
 describe('WEB2612-04 Horizon 등록 목록 — 요약은 hzSummary 하나', () => {
-  const s = code('views/tools/LicenseTools.jsx');
+  const s = code('views/HorizonAdmin.jsx'); // v2.685: 등록 화면이 공용 컴포넌트로 옮겨졌다
   it('403 이 아닌 실패를 기록하고 0대로 칠하지 않는다', () => {
     expect(s).toMatch(/else setHzErr\(/);
-    expect(s).toMatch(/hzSummary\(hz, hzErr\)\.label/);
+    expect(s).toMatch(/const sum = hzSummary\(hz, hzErr\)/);
+    expect(s).toMatch(/\{sum\.label\}/);
     expect(s).not.toMatch(/\(\{\(hz \|\| \[\]\)\.length\}대 등록\)/);
   });
 });

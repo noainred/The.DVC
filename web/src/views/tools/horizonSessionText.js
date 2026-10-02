@@ -37,7 +37,7 @@ export const KIND_ADVICE = Object.freeze({
   mock: '데모(mock) 모드입니다 — 실제 Horizon 에 접속하지 않습니다.',
   disabled: '이 서버는 수집 대상에서 꺼져 있습니다(설정에서 켜세요).',
   auth: '계정·도메인·권한을 확인하세요. Horizon REST 세션 조회에는 세션을 볼 수 있는 역할이 필요합니다. 비밀번호를 반복 시도하면 AD 계정이 잠길 수 있어 포탈은 자동 재시도하지 않습니다.',
-  'auth-stopped': '인증 실패가 이어져 **주기 수집을 멈췄습니다** — 같은 자격증명으로 계속 로그인하면 AD 계정이 잠깁니다. 설정 › Horizon 등록에서 비밀번호를 고치면 **자동으로 재개**합니다. ‘지금 수집’ 버튼은 막히지 않으니 고친 뒤 눌러 확인하세요.',
+  'auth-stopped': '인증 실패가 이어져 **주기 수집을 멈췄습니다** — 같은 자격증명으로 계속 로그인하면 AD 계정이 잠깁니다. 설정 › Horizon 연결 서버에서 비밀번호를 고치면 **자동으로 재개**합니다. ‘지금 수집’ 버튼은 막히지 않으니 고친 뒤 눌러 확인하세요.',
   'no-endpoint': '이 Horizon 버전이 세션 목록 경로를 노출하지 않습니다(404). Connection Server 버전을 확인하세요 — 포탈이 쓰는 경로는 화면 아래 **조회 경로**에 적혀 있습니다.',
   unparsed: '응답을 받았지만 계정 필드를 알아보지 못했습니다. 상세의 **응답 필드** 목록을 개발자에게 알려주면 필드 이름을 맞출 수 있습니다.',
   timeout: '시한 내에 응답이 없었습니다. 고지연 회선이면 설정에서 시한을 늘리세요.',
@@ -110,7 +110,7 @@ export function collectStateNote(d) {
   }
   if (!Number(d?.registered)) {
     return { kind: 'no-server', tone: 'warn', waiting: false,
-      text: 'Horizon Connection Server 가 등록되어 있지 않습니다 — 설정 › Horizon 등록에서 추가하세요(CSV·자유텍스트로 한꺼번에 등록할 수도 있습니다).',
+      text: 'Horizon Connection Server 가 등록되어 있지 않습니다 — 설정 › Horizon 연결 서버에서 추가하세요(CSV·자유텍스트로 한꺼번에 등록할 수도 있습니다).',
       short: '등록된 서버 없음' };
   }
   if (!s.enabled) {

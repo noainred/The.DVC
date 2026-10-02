@@ -54,7 +54,7 @@ const bool = (v, dflt = true) => {
  */
 export function rowIssue(row) {
   if (!row.id) return 'id 누락 — Horizon 서버를 구분하는 키입니다(예: hz-seoul)';
-  if (!row.host) return 'host 누락 — https://커넥션서버 형식으로 적으세요';
+  if (!row.host) return 'host 누락 — 커넥션 서버 IP·호스트명(또는 https://주소)을 적으세요';
   return null;
 }
 
@@ -95,7 +95,7 @@ export function sampleCsv() {
     csvLine(COLUMNS),
     // 주석 행 — id 가 '#...' 로 시작하므로 파싱에서 걸러진다(안내 목적). 실제 사용 시 이 행은 지운다.
     csvLine(['# id: 고유 식별자(이 값으로 갱신 여부를 판정)', '# name: 표시명',
-      '# host: https://커넥션서버', '# username: AD 계정', '# domain: AD 도메인',
+      '# host: 커넥션 서버 IP·호스트명 또는 https://주소 (https:// 는 자동으로 붙습니다)', '# username: AD 계정', '# domain: AD 도메인',
       '# timeoutMs: 조회 시한(기본 15000)', '# enabled: true|false',
       '# password: 비우면 기존 유지(신규는 필수)']),
     csvLine(['hz-seoul', 'Seoul Horizon', 'https://horizon.seoul.example.com', 'svc-horizon', 'CORP', '15000', 'true', 'ChangeMe!1']),
