@@ -31,6 +31,10 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # 알람 판정·알람 설정·저장 폴더 이동은 화면과 무관한 순수 논리라 CI 에서 테스트한다(실패하면 게시하지 않는다).
+      - name: Unit tests
+        run: dotnet test tests/UagMonitor.Tests.csproj -c Release
+
       - name: Publish single-file exe (win-x64, self-contained)
         run: >
           dotnet publish -c Release -r win-x64 --self-contained true

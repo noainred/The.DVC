@@ -14,12 +14,12 @@ namespace HorizonUagMonitor;
 /// </summary>
 public sealed class EndpointCard : Panel
 {
-    private static readonly Font FName = new("Segoe UI", 11f, FontStyle.Bold);
-    private static readonly Font FDc = new("Segoe UI", 8.5f);
-    private static readonly Font FHost = new("Segoe UI", 8f);
-    private static readonly Font FBig = new("Segoe UI", 19f, FontStyle.Bold);
-    private static readonly Font FStat = new("Segoe UI", 8.5f, FontStyle.Bold);
-    private static readonly Font FMetric = new("Segoe UI", 8f);
+    private static readonly Font FName = Theme.F(11f, FontStyle.Bold);
+    private static readonly Font FSub = Theme.F(8.5f);
+    private static readonly Font FBig = Theme.F(20f, FontStyle.Bold);
+    private static readonly Font FUnit = Theme.F(9f);
+    private static readonly Font FChip = Theme.F(8.5f, FontStyle.Bold);
+    private static readonly Font FMetric = Theme.F(8.5f);
 
     private EndpointStatus _es = new();
     private List<Sample> _recent = new();
@@ -30,11 +30,11 @@ public sealed class EndpointCard : Panel
     {
         DoubleBuffered = true;
         SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true); // 더블클릭 이벤트 활성
-        Width = 300;
-        Height = 152;
-        Margin = new Padding(8);
+        Width = 296;
+        Height = 150;
+        Margin = new Padding(6);
         Cursor = Cursors.Hand;
-        BackColor = Color.White;
+        BackColor = Theme.Page; // 둥근 모서리 바깥은 바탕색
     }
 
     public void SetData(EndpointStatus es, List<Sample> recent)
@@ -44,6 +44,10 @@ public sealed class EndpointCard : Panel
         Invalidate();
     }
 
+    /// <summary>
+    /// 시안의 카드: 둥근 모서리, 상태별 바탕·테두리(주의·위험은 옅게 물들임), 이름 + 상태 칩,
+    /// 큰 응답시간 + 인증서, 오른쪽 스파크라인, 아래 한 줄 메모. 왼쪽 막대(스트라이프)는 쓰지 않는다.
+    /// </summary>
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -54,51 +58,63 @@ public sealed class EndpointCard : Panel
         var ep = _es.Endpoint;
         var s = _es.Latest;
         var status = _es.Status;
-        var color = MainForm.StatusColor(status, ep.Enabled);
+        var pal = Theme.Of(status, ep.Enabled);
         int w = Width, h = Height;
 
-        // 카드 배경 + 테두리 + 좌측 상태 스트라이프
-        using (var bg = new SolidBrush(ep.Enabled ? Color.White : Color.FromArgb(248, 249, 250)))
-            g.FillRectangle(bg, 0, 0, w - 1, h - 1);
-        using (var border = new Pen(Color.FromArgb(226, 229, 233)))
-            g.DrawRectangle(border, 0, 0, w - 1, h - 1);
-        using (var stripe = new SolidBrush(color))
-            g.FillRectangle(stripe, 0, 0, 6, h - 1);
+        var card = new RectangleF(0.5f, 0.5f, w - 2, h - 2);
+        Theme.FillRound(g, card, 10, pal.CardBg);
+        Theme.DrawRound(g, card, 10, pal.CardBorder);
 
-        // 헤더: 이름 / 데이터센터 / 호스트
-        using var dark = new SolidBrush(Color.FromArgb(33, 37, 41));
-        using var gray = new SolidBrush(Color.FromArgb(134, 142, 150));
-        g.DrawString(Ellipsis(g, ep.Name, FName, w - 120), FName, dark, 16, 10);
-        var typeLabel = string.IsNullOrWhiteSpace(ep.Type) ? "UAG" : ep.Type;
-        var sub = string.IsNullOrEmpty(ep.Datacenter) ? typeLabel : $"{typeLabel} · {ep.Datacenter}";
-        g.DrawString(Ellipsis(g, sub, FDc, w - 120), FDc, gray, 16, 33);
-        g.DrawString(Ellipsis(g, $"{ep.Scheme}://{ep.Host}:{ep.Port}", FHost, w - 24), FHost, gray, 16, 52);
+        using var ink = new SolidBrush(Theme.Ink);
+        using var gray = new SolidBrush(Theme.Muted);
+        using var val = new SolidBrush(pal.Value);
 
-        // 우측 상단: 큰 현재 RTT + 상태 라벨
-        using var statBrush = new SolidBrush(color);
-        string big = !ep.Enabled ? "비활성"
-            : status == HealthStatus.Down ? "무응답"
-            : s?.ResponseMs is double rm ? $"{rm:F0} ms"
-            : "—";
-        var bigSz = g.MeasureString(big, FBig);
-        g.DrawString(big, FBig, statBrush, w - bigSz.Width - 14, 8);
+        // 1행: 이름(왼쪽) + 상태 칩(오른쪽)
         var statText = MainForm.StatusText(status, ep.Enabled);
-        var stSz = g.MeasureString(statText, FStat);
-        g.DrawString(statText, FStat, statBrush, w - stSz.Width - 14, 8 + bigSz.Height - 2);
+        var chipW = Theme.ChipSize(g, statText, FChip).Width;
+        Theme.DrawChip(g, statText, FChip, pal, w - 16 - chipW, 12);
+        g.DrawString(Ellipsis(g, ep.Name, FName, w - 16 - chipW - 28), FName, ink, 16, 12);
 
-        // 지표 행
-        var metrics = new List<string>();
-        if (s != null)
+        // 2행: 유형 · 데이터센터 · 호스트
+        var typeLabel = string.IsNullOrWhiteSpace(ep.Type) ? "UAG" : ep.Type;
+        var where = string.IsNullOrEmpty(ep.Datacenter) ? typeLabel : $"{typeLabel} · {ep.Datacenter}";
+        g.DrawString(Ellipsis(g, $"{where} · {ep.Host}:{ep.Port}", FSub, w - 32), FSub, gray, 16, 38);
+
+        // 3행: 큰 응답시간(왼쪽) + 스파크라인(오른쪽)
+        string big; string unit = "";
+        if (!ep.Enabled) big = "비활성";
+        else if (status == HealthStatus.Down) big = "—";
+        else if (s?.ResponseMs is double rm) { big = rm.ToString("F0", CultureInfo.InvariantCulture); unit = " ms"; }
+        else big = "—";
+        g.DrawString(big, FBig, val, 14, 60);
+        if (unit.Length > 0)
         {
-            metrics.Add(s.HttpStatus is int hs ? $"HTTP {hs}" : "HTTP —");
-            if (s.CertExpiryDays is int cd) metrics.Add($"인증서 {cd}일");
-            if (s.ConnectMs is double cm) metrics.Add($"연결 {cm:F0}ms");
+            var bw = g.MeasureString(big, FBig, 1000, StringFormat.GenericTypographic).Width;
+            g.DrawString(unit, FUnit, gray, 16 + bw, 72);
         }
-        else metrics.Add(ep.Enabled ? "측정 대기" : "측정 안 함");
-        g.DrawString(string.Join("  ·  ", metrics), FMetric, gray, 16, 74);
+        var metrics = new List<string> { "응답" };
+        if (s?.CertExpiryDays is int cd) metrics.Add($"인증서 {cd}일");
+        else if (s?.HttpStatus is int hs) metrics.Add($"HTTP {hs}");
+        g.DrawString(string.Join(" · ", metrics), FMetric, gray, 16, 92);
+        DrawSparkline(g, new Rectangle(w - 16 - 112, 62, 112, 34), pal.LineColor);
 
-        // 하단 스파크라인
-        DrawSparkline(g, new Rectangle(14, 94, w - 26, h - 94 - 10), color);
+        // 4행: 메모 — 문제가 있으면 사유, 아니면 점검 시각
+        string note;
+        Brush noteBrush;
+        if (!ep.Enabled) { note = "점검 안 함"; noteBrush = gray; }
+        else if (s == null) { note = "측정 대기"; noteBrush = gray; }
+        else if (status != HealthStatus.Up && !string.IsNullOrWhiteSpace(s.Error)) { note = s.Error!; noteBrush = val; }
+        else { note = AgeText(s.TimestampUtc) + " 점검"; noteBrush = gray; }
+        g.DrawString(Ellipsis(g, note, FMetric, w - 32), FMetric, noteBrush, 16, h - 28);
+    }
+
+    private static string AgeText(DateTime utc)
+    {
+        var sec = Math.Max(0, (DateTime.UtcNow - utc).TotalSeconds);
+        if (sec < 60) return $"{sec:F0}초 전";
+        if (sec < 3600) return $"{sec / 60:F0}분 전";
+        if (sec < 86400) return $"{sec / 3600:F0}시간 전";
+        return $"{sec / 86400:F0}일 전";
     }
 
     private void DrawSparkline(Graphics g, Rectangle area, Color baseColor)
@@ -106,7 +122,7 @@ public sealed class EndpointCard : Panel
         var pts = _recent;
         if (pts.Count == 0)
         {
-            using var br = new SolidBrush(Color.FromArgb(173, 181, 189));
+            using var br = new SolidBrush(Theme.Muted);
             g.DrawString("데이터 없음", FMetric, br, area.X, area.Y + area.Height / 2 - 7);
             return;
         }
@@ -115,13 +131,6 @@ public sealed class EndpointCard : Panel
         int n = pts.Count;
         float dx = n > 1 ? area.Width / (float)(n - 1) : 0;
         float Y(double v) => area.Bottom - (float)(area.Height * Math.Min(v, max) / max);
-
-        // 기준선(격자)
-        using (var grid = new Pen(Color.FromArgb(238, 240, 243)))
-        {
-            g.DrawLine(grid, area.X, area.Y, area.Right, area.Y);
-            g.DrawLine(grid, area.X, area.Bottom, area.Right, area.Bottom);
-        }
 
         // 연결선(유효 구간)
         var linePts = new List<PointF>();
@@ -142,7 +151,8 @@ public sealed class EndpointCard : Panel
             {
                 var c = MainForm.StatusColor(pts[i].Status, true);
                 using var br = new SolidBrush(c);
-                float r = pts[i].Status == HealthStatus.Up ? 1.8f : 2.6f;
+                if (pts[i].Status == HealthStatus.Up) continue; // 정상 점은 그리지 않는다(선만) — 문제 구간만 점으로 눈에 띄게
+                float r = 2.8f;
                 g.FillEllipse(br, x - r, Y(v) - r, r * 2, r * 2);
             }
             else
@@ -155,7 +165,7 @@ public sealed class EndpointCard : Panel
 
     private static void DrawPoly(Graphics g, List<PointF> pts, Color color)
     {
-        using var pen = new Pen(Color.FromArgb(150, color), 1.4f);
+        using var pen = new Pen(color, 1.6f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
         g.DrawLines(pen, pts.ToArray());
     }
 

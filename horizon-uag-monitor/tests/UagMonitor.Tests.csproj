@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Horizon UAG Monitor 단위 테스트 — 화면(WinForms)과 무관한 순수 논리만 검사한다:
+    알람 판정(AlarmEngine)·알람 설정(AlarmSettings)·저장 폴더(DataLocation)·폴더 이동(DataMigrator + Database).
+    앱은 Windows 전용이라 소스 파일을 직접 포함해 Linux/Windows 어디서든 `dotnet test` 로 돈다.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>HorizonUagMonitor.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Models.cs" />
+    <Compile Include="../Database.cs" />
+    <Compile Include="../AppLog.cs" />
+    <Compile Include="../DataLocation.cs" />
+    <Compile Include="../DataMigrator.cs" />
+    <Compile Include="../AlarmSettings.cs" />
+    <Compile Include="../AlarmEngine.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>

@@ -17,6 +17,8 @@ public sealed class TrayAppContext : ApplicationContext
     private readonly Database _db;
     private readonly MonitorService _monitor;
     private readonly MainForm _main;
+    private readonly AlarmController _alarms;
+    private ToolStripItem? _ackItem;
     private readonly NotifyIcon _tray;
     private bool _exiting;
     private bool _balloonShown;
@@ -32,6 +34,8 @@ public sealed class TrayAppContext : ApplicationContext
         DefaultEndpoints.SeedIfEmpty(_db);
 
         _monitor = new MonitorService(_db);
+        _alarms = new AlarmController(_db);
+        _monitor.SettingsApplied += () => _alarms.ReloadSettings(); // 설정 저장 직후(UI 스레드)
         _monitor.Start();
 
         _tray = new NotifyIcon
@@ -61,6 +65,8 @@ public sealed class TrayAppContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("열기", null, (_, _) => ShowMain());
         menu.Items.Add("지금 전체 점검", null, (_, _) => _monitor.CheckAllNow());
+        _ackItem = menu.Items.Add("알람 끄기", null, (_, _) => { _alarms.Acknowledge(); });
+        _ackItem.Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) => ExitApp());
         return menu;
@@ -98,6 +104,12 @@ public sealed class TrayAppContext : ApplicationContext
             : HealthStatus.Up;
         _tray.Text = Truncate($"Horizon UAG: 정상 {up} / 주의 {warn} / 위험 {down}", 63);
         UpdateTrayIcon(overall);
+        try
+        {
+            _alarms.Update(snap);
+            if (_ackItem != null) _ackItem.Enabled = _alarms.HasPending;
+        }
+        catch (Exception ex) { AppLog.Error("AlarmUpdate", ex); } // 알람 오류가 트레이 갱신을 멈추지 않게
     }
 
     private void UpdateTrayIcon(HealthStatus status, bool force = false)
@@ -184,6 +196,7 @@ public sealed class TrayAppContext : ApplicationContext
         try { _tray.Dispose(); } catch { /* ignore */ }
         try { _currentIcon?.Dispose(); } catch { /* ignore */ }
         if (_currentIconHandle != IntPtr.Zero) { try { DestroyIcon(_currentIconHandle); } catch { /* ignore */ } }
+        try { _alarms.Dispose(); } catch { /* ignore */ }
         try { _monitor.Dispose(); } catch { /* ignore */ }
         try { _db.Dispose(); } catch { /* ignore */ }
         ExitThread();

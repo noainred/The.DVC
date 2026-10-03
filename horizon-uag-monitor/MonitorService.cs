@@ -37,6 +37,9 @@ public sealed class MonitorService : IDisposable
     /// <summary>한 대상 점검이 끝날 때마다 발생(백그라운드 스레드). UI는 스스로 스레드 마샬링할 것.</summary>
     public event Action? Updated;
 
+    /// <summary>설정 화면에서 저장했을 때(UI 스레드) 발생 — 알람 설정 등 다른 구성요소가 다시 읽는다.</summary>
+    public event Action? SettingsApplied;
+
     public MonitorService(Database db, int maxConcurrency = 8)
     {
         _db = db;
@@ -72,6 +75,7 @@ public sealed class MonitorService : IDisposable
         CertWarnDays = _db.GetIntSetting("certWarnDays", 30);
         WarnLatencyMs = _db.GetIntSetting("warnLatencyMs", 3000);
         RetentionDays = _db.GetIntSetting("retentionDays", 365);
+        try { SettingsApplied?.Invoke(); } catch { /* 구독자 오류는 격리 */ }
     }
 
     /// <summary>현재 대상 + 최신 상태 스냅샷(UI 그리드용).</summary>

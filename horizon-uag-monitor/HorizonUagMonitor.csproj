@@ -18,7 +18,7 @@
     <AssemblyName>HorizonUagMonitor</AssemblyName>
     <Product>Horizon UAG Monitor</Product>
     <AssemblyTitle>Horizon UAG Monitor</AssemblyTitle>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- 단일 exe 자동압축 해제 방식(네이티브 SQLite 포함). -->
     <SelfContained>true</SelfContained>
@@ -28,6 +28,12 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 단위 테스트 프로젝트(tests/)의 소스를 앱에 포함시키지 않는다. -->
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- 자체 DB: 파일 기반 SQLite. SQLitePCLRaw 네이티브 번들 포함(추가 설치 불필요). -->

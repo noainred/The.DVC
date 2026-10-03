@@ -20,9 +20,10 @@ public sealed class MainForm : Form
     private readonly SummaryHeader _header = new();
     private readonly Panel _content = new() { Dock = DockStyle.Fill };
     private readonly WorldMap _map = new() { Dock = DockStyle.Fill };
-    private readonly FlowLayoutPanel _dashboard = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = Color.FromArgb(243, 244, 246), Padding = new Padding(12), Visible = false };
+    private readonly FlowLayoutPanel _dashboard = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = Theme.Page, Padding = new Padding(12), Visible = false };
     private readonly List<Label> _groupHeaders = new();
-    private readonly DataGridView _grid = new() { Dock = DockStyle.Fill, Visible = false };
+    private readonly DataGridView _grid = new() { Dock = DockStyle.Fill };
+    private readonly Panel _gridHost = new() { Dock = DockStyle.Fill, Visible = false, BackColor = Theme.Page, Padding = new Padding(14, 12, 14, 6) };
     private readonly Label _summary = new();
     private readonly ToolStripButton _viewMap;
     private readonly ToolStripButton _viewCards;
@@ -50,39 +51,55 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(820, 480);
         Font = new Font("Segoe UI", 9f);
-        BackColor = Color.White;
+        BackColor = Theme.Page;
 
-        var tool = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 2, 6, 2), Renderer = new ToolStripProfessionalRenderer() };
-        tool.Items.Add(new ToolStripButton("지금 전체 점검", null, (_, _) => _monitor.CheckAllNow()));
-        tool.Items.Add(new ToolStripButton("설정(대상 관리)", null, (_, _) => OpenSettings()));
-        tool.Items.Add(new ToolStripButton("이력 보기", null, (_, _) => OpenHistory()));
-        tool.Items.Add(new ToolStripButton("CSV 내보내기", null, (_, _) => ExportCsv()));
-        tool.Items.Add(new ToolStripButton("새로고침", null, (_, _) => { _dirty = true; }));
+        var tool = new ToolStrip
+        {
+            GripStyle = ToolStripGripStyle.Hidden,
+            Padding = new Padding(10, 4, 10, 4),
+            Renderer = new ThemedToolRenderer(),
+            BackColor = Color.White,
+            Font = Theme.F(9.5f),
+            AutoSize = false,
+            Height = 48,
+        };
+        ToolStripButton Btn(string text, EventHandler onClick, string? tag = null)
+            => new(text, null, onClick) { Tag = tag, Margin = new Padding(2, 0, 2, 0), Padding = new Padding(10, 0, 10, 0), AutoSize = true };
+        tool.Items.Add(Btn("지금 전체 점검", (_, _) => _monitor.CheckAllNow(), ThemedToolRenderer.PrimaryTag));
+        tool.Items.Add(Btn("설정", (_, _) => OpenSettings()));
+        tool.Items.Add(Btn("이력 보기", (_, _) => OpenHistory()));
+        tool.Items.Add(Btn("CSV 내보내기", (_, _) => ExportCsv()));
+        tool.Items.Add(Btn("새로고침", (_, _) => { _dirty = true; }));
         tool.Items.Add(new ToolStripSeparator());
-        _viewMap = new ToolStripButton("지도", null, (_, _) => SetView(ViewMode.Map)) { Checked = true };
-        _viewCards = new ToolStripButton("카드", null, (_, _) => SetView(ViewMode.Cards));
-        _viewTable = new ToolStripButton("표", null, (_, _) => SetView(ViewMode.Table));
+        _viewMap = Btn("지도", (_, _) => SetView(ViewMode.Map));
+        _viewMap.Checked = true;
+        _viewCards = Btn("카드", (_, _) => SetView(ViewMode.Cards));
+        _viewTable = Btn("표", (_, _) => SetView(ViewMode.Table));
         tool.Items.Add(_viewMap);
         tool.Items.Add(_viewCards);
         tool.Items.Add(_viewTable);
-        tool.Items.Add(new ToolStripButton("DB 위치 열기", null, (_, _) => OpenDbFolder()) { Alignment = ToolStripItemAlignment.Right });
+        var folderBtn = Btn("데이터 폴더 열기", (_, _) => OpenDbFolder(), ThemedToolRenderer.LinkTag);
+        folderBtn.Alignment = ToolStripItemAlignment.Right;
+        tool.Items.Add(folderBtn);
 
         _header.Dock = DockStyle.Top;
-        _header.Height = 74;
+        _header.Height = 92;
 
         _summary.Dock = DockStyle.Bottom;
-        _summary.Height = 24;
+        _summary.Height = 32;
         _summary.TextAlign = ContentAlignment.MiddleLeft;
-        _summary.Padding = new Padding(10, 0, 0, 0);
-        _summary.ForeColor = Color.FromArgb(108, 117, 125);
-        _summary.BackColor = Color.FromArgb(248, 249, 250);
+        _summary.Padding = new Padding(18, 0, 0, 0);
+        _summary.Font = Theme.F(8.5f);
+        _summary.ForeColor = Theme.Muted;
+        _summary.BackColor = Theme.Page;
 
         _dashboard.Resize += (_, _) => UpdateHeaderWidths();
 
         SetupGrid();
+        _gridHost.Controls.Add(_grid);
         _content.Controls.Add(_map);
         _content.Controls.Add(_dashboard);
-        _content.Controls.Add(_grid);
+        _content.Controls.Add(_gridHost);
 
         Controls.Add(_content);
         Controls.Add(_summary);
@@ -169,7 +186,7 @@ public sealed class MainForm : Form
         _viewTable.Checked = v == ViewMode.Table;
         _map.Visible = v == ViewMode.Map;
         _dashboard.Visible = v == ViewMode.Cards;
-        _grid.Visible = v == ViewMode.Table;
+        _gridHost.Visible = v == ViewMode.Table;
         _dirty = true;
     }
 
@@ -195,7 +212,7 @@ public sealed class MainForm : Form
             case ViewMode.Cards: RefreshDashboard(snap); break;
             case ViewMode.Table: RefreshGrid(snap); break;
         }
-        _summary.Text = $"DB: {_db.DbPath}";
+        _summary.Text = $"DB: {_db.DbPath}      ·      마지막 갱신 {DateTime.Now:HH:mm:ss}";
     }
 
     private void UpdateHeader(List<EndpointStatus> snap)
@@ -235,7 +252,7 @@ public sealed class MainForm : Form
             _dashboard.Controls.Add(new Label
             {
                 Text = "등록된 대상이 없습니다. 상단 '설정(대상 관리)'에서 UAG 주소를 추가/활성화하세요.",
-                AutoSize = true, ForeColor = Color.Gray, Margin = new Padding(8, 20, 8, 8),
+                AutoSize = true, ForeColor = Theme.Muted, Margin = new Padding(8, 20, 8, 8),
             });
             _dashboard.ResumeLayout();
             return;
@@ -255,8 +272,8 @@ public sealed class MainForm : Form
         {
             var header = new Label
             {
-                Text = dc, AutoSize = false, Height = 30, Font = new Font("Segoe UI", 11f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 58, 64), TextAlign = ContentAlignment.BottomLeft,
+                Text = dc, AutoSize = false, Height = 30, Font = Theme.F(11f, FontStyle.Bold),
+                ForeColor = Theme.Ink, TextAlign = ContentAlignment.BottomLeft,
                 Margin = new Padding(4, 8, 4, 2),
             };
             _dashboard.Controls.Add(header);
@@ -298,11 +315,26 @@ public sealed class MainForm : Form
         _grid.MultiSelect = false;
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         _grid.BackgroundColor = Color.White;
-        _grid.BorderStyle = BorderStyle.None;
+        _grid.BorderStyle = BorderStyle.FixedSingle;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.GridColor = Color.FromArgb(0xEE, 0xF1, 0xF6);
         _grid.EnableHeadersVisualStyles = false;
-        _grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(238, 240, 243);
-        _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-        _grid.RowTemplate.Height = 30;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+        _grid.ColumnHeadersHeight = 34;
+        _grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Page;
+        _grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Body;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.Page;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.Body;
+        _grid.ColumnHeadersDefaultCellStyle.Font = Theme.F(9f, FontStyle.Bold);
+        _grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
+        _grid.DefaultCellStyle.Font = Theme.F(9.5f);
+        _grid.DefaultCellStyle.ForeColor = Theme.Ink;
+        _grid.DefaultCellStyle.SelectionBackColor = Theme.SelectRow;
+        _grid.DefaultCellStyle.SelectionForeColor = Theme.Ink;
+        _grid.DefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
+        _grid.RowTemplate.Height = 36;
+        _grid.CellPainting += GridCellPainting;
         _grid.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0) OpenHistory(); };
 
         void Col(string name, string header, int fill)
@@ -329,6 +361,23 @@ public sealed class MainForm : Form
         foreach (DataGridViewColumn c in _grid.Columns) c.HeaderCell.SortGlyphDirection = SortOrder.None;
         _grid.Columns[col].HeaderCell.SortGlyphDirection = _sortAsc ? SortOrder.Ascending : SortOrder.Descending;
         _dirty = true;
+    }
+
+    // 상태 칸은 색 칩으로 직접 그린다(시안). 선택된 행은 선택 색 위에 칩만 얹는다.
+    private void GridCellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex != 0) return;
+        e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+        var g = e.Graphics!;
+        var text = Convert.ToString(e.Value, CultureInfo.InvariantCulture) ?? "";
+        var row = _grid.Rows[e.RowIndex];
+        var st = text switch { "정상" => HealthStatus.Up, "주의" => HealthStatus.Warn, "위험" => HealthStatus.Down, _ => HealthStatus.Unknown };
+        var pal = Theme.Of(st, enabled: text != "비활성");
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var font = Theme.F(8.5f, FontStyle.Bold);
+        var sz = Theme.ChipSize(g, text, font);
+        Theme.DrawChip(g, text, font, pal, e.CellBounds.X + 10, e.CellBounds.Y + (e.CellBounds.Height - sz.Height) / 2f);
+        e.Handled = true;
     }
 
     private List<EndpointStatus> SortSnap(List<EndpointStatus> snap)
@@ -387,12 +436,14 @@ public sealed class MainForm : Form
                 s == null ? (e.Enabled ? "대기" : "비활성") : AgeText(s.TimestampUtc));
             var row = _grid.Rows[idx];
             row.Tag = e.Id;
-            var color = StatusColor(es.Status, e.Enabled);
-            row.Cells[0].Style.BackColor = color;
-            row.Cells[0].Style.ForeColor = Color.White;
-            row.Cells[0].Style.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-            row.Cells[0].Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            if (!e.Enabled) row.DefaultCellStyle.ForeColor = Color.Gray;
+            var pal = Theme.Of(es.Status, e.Enabled);
+            row.DefaultCellStyle.BackColor = pal.RowBg;
+            if (!e.Enabled) row.DefaultCellStyle.ForeColor = Theme.Muted;
+            else if (es.Status != HealthStatus.Up && es.Status != HealthStatus.Unknown)
+                row.Cells["http"].Style.ForeColor = pal.Value; // 주의·위험은 HTTP 코드를 상태색으로
+            // 숫자 열은 오른쪽 정렬(자릿수가 맞아 읽기 쉽다).
+            foreach (var n in new[] { "connect", "resp", "cert", "checked" })
+                row.Cells[n].Style.Alignment = DataGridViewContentAlignment.MiddleRight;
             if (s?.Error != null) row.Cells["checked"].ToolTipText = s.Error;
         }
         _grid.ResumeLayout();
@@ -521,18 +572,20 @@ public sealed class MainForm : Form
         base.OnFormClosed(e);
     }
 
-    /// <summary>상단 요약 헤더 — 제목 + 상태 카운트 알약(pill)을 직접 그린다.</summary>
+    /// <summary>상단 요약 헤더 — 제목 + 상태별 개수 타일(시안)을 직접 그린다.</summary>
     private sealed class SummaryHeader : Panel
     {
-        private static readonly Font FTitle = new("Segoe UI", 14f, FontStyle.Bold);
-        private static readonly Font FSub = new("Segoe UI", 8.5f);
-        private static readonly Font FPill = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private static readonly Font FTitle = Theme.F(17f, FontStyle.Bold);
+        private static readonly Font FSub = Theme.F(9.5f);
+        private static readonly Font FLabel = Theme.F(8.5f);
+        private static readonly Font FNum = Theme.F(19f, FontStyle.Bold);
         private int _up, _warn, _down, _unknown, _total;
 
-        public SummaryHeader() { DoubleBuffered = true; BackColor = Color.FromArgb(33, 41, 54); }
+        public SummaryHeader() { DoubleBuffered = true; BackColor = Theme.Navy; }
 
         public void SetCounts(int up, int warn, int down, int unknown, int total)
         {
+            if (_up == up && _warn == warn && _down == down && _unknown == unknown && _total == total) return;
             _up = up; _warn = warn; _down = down; _unknown = unknown; _total = total;
             Invalidate();
         }
@@ -545,43 +598,31 @@ public sealed class MainForm : Form
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             using var white = new SolidBrush(Color.White);
-            using var sub = new SolidBrush(Color.FromArgb(173, 181, 189));
-            g.DrawString("Horizon UAG Monitor", FTitle, white, 16, 12);
-            g.DrawString($"전세계 데이터센터 UAG / Virtual App 포탈 443 상태  ·  대상 {_total}개", FSub, sub, 18, 44);
+            using var sub = new SolidBrush(Theme.TileText);
+            g.DrawString("Horizon UAG Monitor", FTitle, white, 24, 16);
+            g.DrawString($"전세계 데이터센터 UAG / Virtual App 포탈 443 상태  ·  대상 {_total}개", FSub, sub, 25, 52);
 
-            // 오른쪽에서 왼쪽으로 알약 배치.
-            var pills = new (string Label, int Count, Color Color)[]
+            // 오른쪽에서 왼쪽으로 개수 타일 배치(정상·주의·위험·대기 순서로 보이게).
+            var tiles = new (string Label, int Count, Color Dot)[]
             {
-                ("정상", _up, StatusColor(HealthStatus.Up, true)),
-                ("주의", _warn, StatusColor(HealthStatus.Warn, true)),
-                ("위험", _down, StatusColor(HealthStatus.Down, true)),
-                ("대기", _unknown, StatusColor(HealthStatus.Unknown, true)),
+                ("정상", _up, Color.FromArgb(0x2F, 0xBF, 0x7A)),
+                ("주의", _warn, Color.FromArgb(0xF2, 0xB0, 0x1E)),
+                ("위험", _down, Color.FromArgb(0xE5, 0x60, 0x5D)),
+                ("대기", _unknown, Color.FromArgb(0x8A, 0x94, 0xA3)),
             };
-            float x = Width - 16;
-            for (int i = pills.Length - 1; i >= 0; i--)
+            const float tw = 116, th = 60, gap = 10;
+            float x = Width - 24;
+            float y = (Height - th) / 2f;
+            for (int i = tiles.Length - 1; i >= 0; i--)
             {
-                var p = pills[i];
-                var text = $"{p.Label} {p.Count}";
-                var sz = g.MeasureString(text, FPill);
-                float pw = sz.Width + 26, ph = 30, py = (Height - ph) / 2f;
-                x -= pw;
-                var rect = new RectangleF(x, py, pw, ph);
-                using (var br = new SolidBrush(p.Color)) FillRoundedRect(g, rect, 15, br);
-                g.DrawString(text, FPill, white, x + 13, py + (ph - sz.Height) / 2f);
-                x -= 8;
+                var t = tiles[i];
+                x -= tw;
+                Theme.FillRound(g, new RectangleF(x, y, tw, th), 8, Theme.NavyTile);
+                using (var dot = new SolidBrush(t.Dot)) g.FillEllipse(dot, x + 14, y + 12, 8, 8);
+                g.DrawString(t.Label, FLabel, sub, x + 26, y + 7);
+                g.DrawString(t.Count.ToString(CultureInfo.InvariantCulture), FNum, white, x + 12, y + 22);
+                x -= gap;
             }
-        }
-
-        private static void FillRoundedRect(Graphics g, RectangleF r, float radius, Brush brush)
-        {
-            using var path = new GraphicsPath();
-            float d = radius * 2;
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            g.FillPath(brush, path);
         }
     }
 }

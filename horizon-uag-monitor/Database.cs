@@ -12,25 +12,45 @@ namespace HorizonUagMonitor;
 /// </summary>
 public sealed class Database : IDisposable
 {
-    private readonly SqliteConnection _conn;
+    private SqliteConnection _conn;
     private readonly object _gate = new();
 
-    public string DbPath { get; }
+    public string DbPath { get; private set; }
 
     public Database(string? overridePath = null)
     {
         DbPath = overridePath ?? DefaultDbPath();
         Directory.CreateDirectory(Path.GetDirectoryName(DbPath)!);
-        _conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DbPath }.ToString());
-        _conn.Open();
-        Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;");
+        _conn = OpenConnection(DbPath);
         CreateSchema();
     }
 
-    public static string DefaultDbPath()
+    /// <summary>기본(저장 폴더를 바꾸지 않았을 때의) DB 경로. 실제 경로는 <see cref="DataLocation"/> 이 정한다.</summary>
+    public static string DefaultDbPath() => DataLocation.DbPathIn(DataLocation.DefaultBaseDir());
+
+    // 풀링을 끈다 — 한 연결을 오래 쓰는 구조라 풀이 이득이 없고, 풀이 파일 핸들을 잡고 있으면
+    // 저장 폴더를 옮긴 뒤 예전 파일을 지울 수 없다.
+    private static SqliteConnection OpenConnection(string path, bool readOnly = false)
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HorizonUagMonitor");
-        return Path.Combine(dir, "monitor.db");
+        var cs = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Pooling = false,
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
+        }.ToString();
+        var c = new SqliteConnection(cs);
+        try
+        {
+            c.Open();
+            if (!readOnly)
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        catch { c.Dispose(); throw; }
+        return c;
     }
 
     private void CreateSchema()
@@ -341,6 +361,146 @@ public sealed class Database : IDisposable
 
     private static long ToMs(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
     private static DateTime FromMs(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
+
+    // ── 저장 폴더 이동(마이그레이션) ─────────────────────────────────────────
+    // 무거운 복사는 별도 읽기 연결에서 잠금 없이 한다(점검·화면이 멈추지 않게) — WAL 이라 쓰기와 동시에 읽을 수 있다.
+    // 복사하는 동안 쌓인 샘플은 마지막에 잠금을 잡고 짧게 따라잡는다(FinishMigration).
+
+    /// <summary>현재 DB 의 일관된 사본을 <paramref name="destFile"/> 에 만든다(VACUUM INTO). 현재 DB 는 건드리지 않는다.</summary>
+    public void ExportCopyTo(string destFile)
+    {
+        if (File.Exists(destFile)) File.Delete(destFile);
+        using var src = OpenConnection(DbPath);
+        using var cmd = src.CreateCommand();
+        cmd.CommandText = "VACUUM INTO '" + destFile.Replace("'", "''") + "'";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// 사본(<paramref name="copyFile"/>)에 복사 이후의 변경을 반영하고 검증한 뒤 <paramref name="finalFile"/> 로 옮기고,
+    /// <paramref name="persistLocation"/> 로 새 위치를 기록한 다음 연결을 새 파일로 바꾼다.
+    /// 어느 단계에서든 실패하면 현재 DB 는 그대로이며 만든 파일은 지운다.
+    /// </summary>
+    public void FinishMigration(string copyFile, string finalFile, Action persistLocation)
+    {
+        lock (_gate)
+        {
+            // 1) 따라잡기: 복사 이후 들어온 샘플 + 대상·설정(작은 표)은 통째로 다시 맞춘다.
+            using (var attach = _conn.CreateCommand())
+            {
+                attach.CommandText = "ATTACH DATABASE $p AS dst";
+                attach.Parameters.AddWithValue("$p", copyFile);
+                attach.ExecuteNonQuery();
+            }
+            try
+            {
+                Exec(@"BEGIN IMMEDIATE;
+                    INSERT INTO dst.samples (id,endpoint_id,ts,status,tcp_ok,connect_ms,tls_ok,http_status,response_ms,cert_expiry_days,error)
+                        SELECT id,endpoint_id,ts,status,tcp_ok,connect_ms,tls_ok,http_status,response_ms,cert_expiry_days,error
+                        FROM main.samples WHERE id > (SELECT IFNULL(MAX(id),0) FROM dst.samples);
+                    DELETE FROM dst.endpoints;
+                    INSERT INTO dst.endpoints SELECT * FROM main.endpoints;
+                    DELETE FROM dst.settings;
+                    INSERT INTO dst.settings SELECT * FROM main.settings;
+                    COMMIT;");
+            }
+            catch
+            {
+                try { Exec("ROLLBACK"); } catch { /* 이미 끝난 트랜잭션 */ }
+                try { Exec("DETACH DATABASE dst"); } catch { /* ignore */ }
+                throw;
+            }
+            Exec("DETACH DATABASE dst");
+
+            // 2) 검증(별도 연결): 무결성 + 대상·설정 개수 + 마지막 샘플 번호.
+            VerifyCopy(copyFile);
+
+            // 3) 제자리로 옮기고 새 연결을 먼저 열어 본다.
+            File.Move(copyFile, finalFile, overwrite: false);
+            SqliteConnection? next = null;
+            try
+            {
+                next = OpenConnection(finalFile);
+                persistLocation(); // 새 위치를 기록한 다음에만 연결을 바꾼다(기록이 실패하면 현재 DB 유지).
+            }
+            catch
+            {
+                try { next?.Dispose(); } catch { /* ignore */ }
+                SqliteConnection.ClearAllPools();
+                try { File.Delete(finalFile); } catch { /* ignore */ }
+                throw;
+            }
+
+            var old = _conn;
+            _conn = next;
+            DbPath = finalFile;
+            try { old.Dispose(); } catch { /* ignore */ }
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
+    /// <summary>이미 있는 DB 파일로 연결만 바꾼다(예전 폴더는 건드리지 않는다). 스키마가 옛 버전이면 올린다.</summary>
+    public void SwitchTo(string existingFile, Action persistLocation)
+    {
+        lock (_gate)
+        {
+            var next = OpenConnection(existingFile);
+            var old = _conn;
+            var oldPath = DbPath;
+            try
+            {
+                _conn = next;
+                DbPath = existingFile;
+                CreateSchema();
+                persistLocation();
+            }
+            catch
+            {
+                _conn = old;
+                DbPath = oldPath;
+                try { next.Dispose(); } catch { /* ignore */ }
+                throw;
+            }
+            try { old.Dispose(); } catch { /* ignore */ }
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
+    /// <summary>지금 DB 의 쓰기 대기 로그를 본 파일에 합친다(파일을 복사·삭제하기 전).</summary>
+    public void Checkpoint()
+    {
+        lock (_gate)
+        {
+            try { Exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch { /* ignore */ }
+        }
+    }
+
+    private void VerifyCopy(string file)
+    {
+        using var dst = OpenConnection(file, readOnly: true);
+        string Scalar(SqliteConnection c, string sql)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            return Convert.ToString(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) ?? "";
+        }
+        var check = Scalar(dst, "PRAGMA quick_check");
+        if (!string.Equals(check, "ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("복사본 무결성 검사 실패: " + check);
+        foreach (var t in new[] { "endpoints", "settings" })
+        {
+            var a = Scalar(_conn, $"SELECT COUNT(*) FROM main.{t}");
+            var b = Scalar(dst, $"SELECT COUNT(*) FROM main.{t}");
+            if (a != b) throw new InvalidOperationException($"복사본 검증 실패: {t} {a}행 → {b}행");
+        }
+        var ma = Scalar(_conn, "SELECT IFNULL(MAX(id),0) FROM main.samples");
+        var mb = Scalar(dst, "SELECT IFNULL(MAX(id),0) FROM main.samples");
+        if (ma != mb) throw new InvalidOperationException($"복사본 검증 실패: 마지막 샘플 번호 {ma} → {mb}");
+        // 복사 도중 보존 정리가 오래된 행을 지웠을 수 있으므로 사본이 더 많은 것은 정상, 적은 것만 오류.
+        var ca = long.Parse(Scalar(_conn, "SELECT COUNT(*) FROM main.samples"), CultureInfo.InvariantCulture);
+        var cb = long.Parse(Scalar(dst, "SELECT COUNT(*) FROM main.samples"), CultureInfo.InvariantCulture);
+        if (cb < ca) throw new InvalidOperationException($"복사본 검증 실패: 샘플 {ca}건 → {cb}건");
+    }
 
     public void Dispose()
     {
