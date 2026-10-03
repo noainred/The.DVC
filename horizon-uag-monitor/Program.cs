@@ -29,7 +29,7 @@ internal static class Program
         Application.ThreadException += (_, e) => Log("ThreadException", e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("UnhandledException", e.ExceptionObject as Exception);
 
-        string? dbPath = null;
+        string? dbPath = null;      // --db 로 직접 지정하면 저장 폴더 설정보다 우선(설정 화면에서 폴더 변경 불가)
         bool startHidden = false;
         for (int i = 0; i < args.Length; i++)
         {
@@ -37,6 +37,22 @@ internal static class Program
             if (a is "--hidden" or "-h" or "/hidden") startHidden = true;
             else if ((a == "--db" || a == "/db") && i + 1 < args.Length) dbPath = args[++i];
         }
+
+        // 설정에서 지정한 데이터·로그 폴더. 쓸 수 없으면(드라이브 분리 등) 기본 폴더로 시작하고 사유를 알린다.
+        string? folderWarning = null;
+        if (dbPath == null)
+        {
+            var dir = DataLocation.Default.ResolveForStartup(out folderWarning);
+            dbPath = DataLocation.DbPathIn(dir);
+            AppLog.Dir = dir;
+        }
+        else
+        {
+            DataLocation.CommandLineOverride = true;
+            AppLog.Dir = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
+        }
+        if (folderWarning != null)
+            MessageBox.Show(folderWarning, "Horizon UAG Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
         try
         {
@@ -48,15 +64,5 @@ internal static class Program
         }
     }
 
-    private static void Log(string kind, Exception? ex)
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(Database.DefaultDbPath())!;
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "error.log"),
-                $"[{DateTime.Now:u}] {kind}: {ex}\r\n");
-        }
-        catch { /* ignore */ }
-    }
+    private static void Log(string kind, Exception? ex) => AppLog.Error(kind, ex);
 }

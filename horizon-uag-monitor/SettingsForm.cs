@@ -24,14 +24,25 @@ public sealed class SettingsForm : Form
     private readonly TextBox _userLat = new();
     private readonly TextBox _userLon = new();
     private readonly ComboBox _mapShow = new();
+    // 알람
+    private readonly CheckBox _alarmOn = new();
+    private readonly ComboBox _alarmEdge = new();
+    private readonly NumericUpDown _alarmThick = new();
+    private readonly NumericUpDown _alarmLen = new();
+    private readonly NumericUpDown _alarmBlink = new();
+    private AlarmOverlay? _preview;
+    private System.Windows.Forms.Timer? _previewTimer;
+    // 데이터·로그 폴더
+    private readonly TextBox _dataDir = new();
+    private readonly string _currentDir;
 
     public SettingsForm(Database db, MonitorService monitor)
     {
         _db = db;
         _monitor = monitor;
-        Text = "설정 — 대상 관리";
+        Text = "설정";
         Width = 820;
-        Height = 680;
+        Height = 760;
         StartPosition = FormStartPosition.CenterParent;
         Font = new System.Drawing.Font("Segoe UI", 9f);
         MinimizeBox = false;
@@ -110,10 +121,23 @@ public sealed class SettingsForm : Form
         bottom.Controls.Add(ok);
         bottom.Controls.Add(cancel);
 
-        Controls.Add(_list);
-        Controls.Add(btns);
-        Controls.Add(thresh);
+        // 탭: 대상 관리(기존 화면 그대로) · 알람 · 데이터·로그 폴더. 아래 버튼줄은 모든 탭이 공유한다.
+        var pgTargets = new TabPage("대상 관리 · 임계값");
+        pgTargets.Controls.Add(_list);
+        pgTargets.Controls.Add(btns);
+        pgTargets.Controls.Add(thresh);
+        var pgAlarm = new TabPage("알람") { Padding = new Padding(12) };
+        BuildAlarmPage(pgAlarm);
+        var pgData = new TabPage("데이터·로그 폴더") { Padding = new Padding(12) };
+        _currentDir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_db.DbPath))!;
+        BuildDataPage(pgData);
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        tabs.TabPages.Add(pgTargets);
+        tabs.TabPages.Add(pgAlarm);
+        tabs.TabPages.Add(pgData);
+        Controls.Add(tabs);
         Controls.Add(bottom);
+        FormClosed += (_, _) => ClosePreview();
 
         LoadList();
     }
@@ -289,6 +313,7 @@ public sealed class SettingsForm : Form
 
     private void Save()
     {
+        // 폴더 변경은 마지막에 한다 — 다른 설정은 DB 에 먼저 써 두면 이동할 때 함께 따라간다.
         _db.SetSetting("certWarnDays", ((int)_certWarn.Value).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("warnLatencyMs", ((int)_latency.Value).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("retentionDays", ((int)_retention.Value).ToString(CultureInfo.InvariantCulture));
@@ -298,9 +323,250 @@ public sealed class SettingsForm : Form
         _db.SetSetting("userLon", ParseD(_userLon.Text).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("mapShow", _mapShow.SelectedIndex == 1 ? "uag" : _mapShow.SelectedIndex == 2 ? "portal" : "both");
         SetAutostart(_autostart.Checked);
+        ReadAlarmFromUi().Save(_db);
+        if (!ApplyDataDirChange()) { _monitor.ApplyThresholds(); return; } // 폴더 이동이 취소·실패하면 창을 열어 둔다.
         _monitor.ApplyThresholds();
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+
+    // ── 알람 탭 ──────────────────────────────────────────────────────────────
+    private static readonly (AlarmEdge Edge, string Label)[] EdgeItems =
+    {
+        (AlarmEdge.Top, "화면 위쪽"), (AlarmEdge.Bottom, "화면 아래쪽"),
+        (AlarmEdge.Left, "화면 왼쪽"), (AlarmEdge.Right, "화면 오른쪽"),
+    };
+
+    private void BuildAlarmPage(TabPage page)
+    {
+        var a = AlarmSettings.Load(_db);
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(4) };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        _alarmOn.Text = "장애가 생기면 화면 가장자리에 알람 띠를 띄운다";
+        _alarmOn.AutoSize = true;
+        _alarmOn.Checked = a.Enabled;
+        grid.Controls.Add(_alarmOn, 0, 0);
+        grid.SetColumnSpan(_alarmOn, 2);
+
+        grid.Controls.Add(Lbl("위치"), 0, 1);
+        _alarmEdge.DropDownStyle = ComboBoxStyle.DropDownList;
+        foreach (var (_, label) in EdgeItems) _alarmEdge.Items.Add(label);
+        _alarmEdge.SelectedIndex = Math.Max(0, Array.FindIndex(EdgeItems, x => x.Edge == a.Edge));
+        _alarmEdge.Width = 200;
+        grid.Controls.Add(_alarmEdge, 1, 1);
+
+        grid.Controls.Add(Lbl("두께(px)"), 0, 2);
+        _alarmThick.Minimum = AlarmSettings.MinThickness; _alarmThick.Maximum = AlarmSettings.MaxThickness; _alarmThick.Increment = 4;
+        _alarmThick.Value = a.ThicknessPx;
+        grid.Controls.Add(NumWithHint(_alarmThick, "위·아래면 높이, 왼쪽·오른쪽이면 너비"), 1, 2);
+
+        grid.Controls.Add(Lbl("길이(화면 변의 %)"), 0, 3);
+        _alarmLen.Minimum = AlarmSettings.MinLength; _alarmLen.Maximum = AlarmSettings.MaxLength; _alarmLen.Increment = 5;
+        _alarmLen.Value = a.LengthPercent;
+        grid.Controls.Add(NumWithHint(_alarmLen, "100 이면 변 전체, 작으면 가운데에 짧게"), 1, 3);
+
+        grid.Controls.Add(Lbl("깜빡이는 간격(ms)"), 0, 4);
+        _alarmBlink.Minimum = AlarmSettings.MinBlinkMs; _alarmBlink.Maximum = AlarmSettings.MaxBlinkMs; _alarmBlink.Increment = 50;
+        _alarmBlink.Value = a.BlinkMs;
+        grid.Controls.Add(NumWithHint(_alarmBlink, "작을수록 빠르게 깜빡입니다 (기본 600)"), 1, 4);
+
+        var preview = MakeBtn("미리보기 (저장 전 값으로 5초)", (_, _) => ShowAlarmPreview());
+        grid.Controls.Add(preview, 1, 5);
+
+        var note = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 150,
+            Padding = new Padding(4, 14, 4, 0),
+            ForeColor = System.Drawing.Color.FromArgb(90, 90, 90),
+            Text = "• '주의'와 '위험' 이 모두 알람 대상입니다. 위험은 빨강, 주의는 노랑으로 깜빡이고 둘이 섞이면 빨강입니다.\r\n" +
+                   "• 띠를 클릭하거나 트레이 메뉴 › 알람 끄기를 누르면 꺼집니다. 같은 상태가 이어지는 동안에는 다시 울리지 않습니다.\r\n" +
+                   "• 정상으로 돌아왔다가 다시 나빠지거나, 주의에서 위험으로 악화되거나, 다른 대상에 새 장애가 생기면 다시 울립니다.\r\n" +
+                   "• 프로그램을 켠 직후에는 최근 점검 결과가 있는 대상만 알람이 됩니다(예전 기록으로 울리지 않음).\r\n" +
+                   "• 알람 발생·확인·해소는 데이터 폴더의 alarm.log 에 기록됩니다. 알람 띠는 주 모니터에 표시됩니다.",
+        };
+        page.Controls.Add(note);
+        page.Controls.Add(grid);
+    }
+
+    private static Label Lbl(string text) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 8) };
+
+    private static Control NumWithHint(NumericUpDown n, string hint)
+    {
+        var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        n.Width = 90;
+        p.Controls.Add(n);
+        p.Controls.Add(new Label { Text = hint, AutoSize = true, ForeColor = System.Drawing.Color.Gray, Margin = new Padding(8, 5, 0, 0) });
+        return p;
+    }
+
+    private AlarmSettings ReadAlarmFromUi() => new AlarmSettings
+    {
+        Enabled = _alarmOn.Checked,
+        Edge = EdgeItems[Math.Max(0, _alarmEdge.SelectedIndex)].Edge,
+        ThicknessPx = (int)_alarmThick.Value,
+        LengthPercent = (int)_alarmLen.Value,
+        BlinkMs = (int)_alarmBlink.Value,
+    }.Clamped();
+
+    private void ShowAlarmPreview()
+    {
+        ClosePreview();
+        _preview = new AlarmOverlay();
+        _preview.Acknowledged += ClosePreview; // 클릭하면 닫힌다(실제 알람과 같은 동작을 직접 확인)
+        _preview.ShowAlarm(ReadAlarmFromUi(), Array.Empty<AlarmItem>(), preview: true);
+        _previewTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+        _previewTimer.Tick += (_, _) => ClosePreview();
+        _previewTimer.Start();
+    }
+
+    private void ClosePreview()
+    {
+        try { _previewTimer?.Stop(); _previewTimer?.Dispose(); } catch { /* ignore */ }
+        _previewTimer = null;
+        try { _preview?.Close(); _preview?.Dispose(); } catch { /* ignore */ }
+        _preview = null;
+    }
+
+    // ── 데이터·로그 폴더 탭 ───────────────────────────────────────────────────
+    private void BuildDataPage(TabPage page)
+    {
+        var locked = DataLocation.CommandLineOverride;
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(4) };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        grid.Controls.Add(Lbl("저장 폴더"), 0, 0);
+        _dataDir.Text = _currentDir;
+        _dataDir.Dock = DockStyle.Fill;
+        _dataDir.Enabled = !locked;
+        grid.Controls.Add(_dataDir, 1, 0);
+        var browse = MakeBtn("찾아보기…", (_, _) => BrowseDataDir());
+        browse.Enabled = !locked;
+        grid.Controls.Add(browse, 2, 0);
+
+        var row2 = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+        row2.Controls.Add(MakeBtn("현재 폴더 열기", (_, _) => OpenDir(_currentDir)));
+        var reset = MakeBtn("기본 폴더로", (_, _) => _dataDir.Text = DataLocation.DefaultBaseDir());
+        reset.Enabled = !locked;
+        row2.Controls.Add(reset);
+        grid.Controls.Add(row2, 1, 1);
+
+        var info = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 260,
+            Padding = new Padding(4, 14, 4, 0),
+            ForeColor = System.Drawing.Color.FromArgb(70, 70, 70),
+            Text = locked
+                ? "프로그램이 --db 옵션으로 실행되어 저장 폴더를 설정에서 바꿀 수 없습니다.\r\n\r\n"
+                : "이 폴더에 아래 파일이 저장됩니다.\r\n" +
+                  "  • monitor.db — 점검 이력, 대상, 설정 (WAL 보조 파일 포함)\r\n" +
+                  "  • error.log — 프로그램 오류 기록\r\n" +
+                  "  • alarm.log — 알람 발생·확인·해소 기록\r\n\r\n" +
+                  "폴더를 바꾸고 [저장]을 누르면 자동으로 이동합니다.\r\n" +
+                  "  • 이동하는 동안에도 점검은 계속되고, 그 사이 쌓인 결과도 빠짐없이 옮겨집니다.\r\n" +
+                  "  • 복사본을 검증한 뒤에만 새 폴더로 전환하고, 그 뒤에 예전 폴더의 파일을 지웁니다.\r\n" +
+                  "  • 어느 단계든 실패하면 예전 폴더를 그대로 계속 사용합니다.\r\n" +
+                  "  • 새 폴더에 이미 monitor.db 가 있으면 덮어쓰지 않고, 그 데이터베이스를 쓸지 물어봅니다.\r\n" +
+                  "  • 드라이브 전체 경로로 입력하세요. 네트워크 폴더는 끊기면 시작할 때 기본 폴더로 열립니다.",
+        };
+        page.Controls.Add(info);
+        page.Controls.Add(grid);
+    }
+
+    private void BrowseDataDir()
+    {
+        using var fbd = new FolderBrowserDialog { Description = "데이터·로그를 저장할 폴더", UseDescriptionForTitle = true, SelectedPath = _dataDir.Text };
+        if (fbd.ShowDialog(this) == DialogResult.OK) _dataDir.Text = fbd.SelectedPath;
+    }
+
+    private static void OpenDir(string dir)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true }); }
+        catch { /* ignore */ }
+    }
+
+    /// <summary>폴더가 바뀌었으면 점검·확인·이동을 진행한다. 계속 저장해도 되면 true.</summary>
+    private bool ApplyDataDirChange()
+    {
+        if (DataLocation.CommandLineOverride) return true;
+        var wanted = _dataDir.Text.Trim();
+        if (wanted.Length == 0 || DataLocation.SamePath(wanted, _currentDir)) return true;
+
+        var check = DataMigrator.Check(_db.DbPath, wanted);
+        bool useExisting = false;
+        switch (check.State)
+        {
+            case TargetState.Ok:
+                var mb = Math.Max(1, new System.IO.FileInfo(_db.DbPath).Length / (1024 * 1024));
+                if (MessageBox.Show(this,
+                        $"데이터를 아래 폴더로 이동합니다.\n\n{check.FullPath}\n\n" +
+                        $"• 데이터베이스 약 {mb} MB 를 복사하고 검증합니다.\n" +
+                        "• 이동하는 동안에도 점검은 계속됩니다.\n" +
+                        "• 성공하면 예전 폴더의 monitor.db 와 로그 파일은 삭제됩니다.\n\n계속할까요?",
+                        "저장 폴더 이동", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return false;
+                break;
+            case TargetState.HasExistingDb:
+                if (MessageBox.Show(this,
+                        $"'{check.FullPath}' 에 이미 데이터베이스(monitor.db)가 있습니다.\n\n" +
+                        "[예] 그 데이터베이스를 사용합니다. 지금 데이터는 예전 폴더에 그대로 남고, 새로 쓰는 데이터는 그 데이터베이스에 쌓입니다.\n" +
+                        "[아니오] 취소합니다. (기존 파일은 덮어쓰지 않습니다)",
+                        "기존 데이터베이스 발견", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return false;
+                useExisting = true;
+                break;
+            default:
+                MessageBox.Show(this, check.Message, "저장 폴더를 바꿀 수 없습니다", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+        }
+
+        var result = RunMigration(wanted, useExisting);
+        if (!result.Ok)
+        {
+            MessageBox.Show(this, result.Message, "저장 폴더 이동 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
+        var msg = result.Message + (result.Notes.Count > 0 ? "\n\n" + string.Join("\n", result.Notes) : "");
+        MessageBox.Show(this, msg, "저장 폴더 이동", MessageBoxButtons.OK, result.Notes.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        return true;
+    }
+
+    private MigrationResult RunMigration(string dir, bool useExisting)
+    {
+        MigrationResult? res = null;
+        using var dlg = new Form
+        {
+            Text = "저장 폴더 이동 중",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            ControlBox = false,
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new System.Drawing.Size(480, 96),
+            ShowInTaskbar = false,
+        };
+        var lbl = new Label { Text = "준비 중…", Left = 16, Top = 14, Width = 448, Height = 24, AutoEllipsis = true };
+        var bar = new ProgressBar { Style = ProgressBarStyle.Marquee, Left = 16, Top = 46, Width = 448, Height = 20, MarqueeAnimationSpeed = 30 };
+        dlg.Controls.Add(lbl);
+        dlg.Controls.Add(bar);
+        dlg.Shown += async (_, _) =>
+        {
+            try
+            {
+                res = await System.Threading.Tasks.Task.Run(() => DataMigrator.Migrate(_db, DataLocation.Default, dir, useExisting,
+                    m => { try { if (!dlg.IsDisposed) dlg.BeginInvoke(() => lbl.Text = m); } catch { /* 창이 닫히는 중 */ } }));
+            }
+            catch (Exception ex) { res = new MigrationResult(false, "이동 중 오류: " + ex.Message, null, Array.Empty<string>()); }
+            dlg.Close();
+        };
+        dlg.ShowDialog(this);
+        return res ?? new MigrationResult(false, "이동 결과를 확인하지 못했습니다.", null, Array.Empty<string>());
     }
 
     private void LookupUserCity()
