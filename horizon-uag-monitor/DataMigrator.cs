@@ -21,6 +21,22 @@ public sealed record MigrationResult(bool Ok, string Message, string? NewDbPath,
 /// </summary>
 public static class DataMigrator
 {
+    // 진행 문구 — 이동 진행 창이 StepOf 로 단계를 알아낸다(문구와 단계가 어긋나지 않게 한곳에 둔다).
+    public const string MsgSwitch = "대상 폴더의 기존 데이터베이스로 전환하는 중…";
+    public const string MsgCopy = "데이터베이스를 복사하는 중… (점검은 계속 동작합니다)";
+    public const string MsgVerify = "복사 중 쌓인 점검 결과를 반영하고 검증하는 중…";
+    public const string MsgLogs = "로그 파일을 옮기는 중…";
+    public const string MsgCleanup = "예전 폴더의 데이터베이스 파일을 정리하는 중…";
+
+    /// <summary>진행 문구가 속한 단계(0 점검 · 1 복사 · 2 반영·검증 · 3 전환·정리).</summary>
+    public static int StepOf(string message) => message switch
+    {
+        MsgCopy => 1,
+        MsgVerify => 2,
+        MsgSwitch or MsgLogs or MsgCleanup => 3,
+        _ => 0,
+    };
+
     private static readonly string[] LogFiles = { AppLog.ErrorFile, AppLog.AlarmFile };
 
     public static TargetCheck Check(string currentDbPath, string newDirInput)
@@ -95,7 +111,7 @@ public static class DataMigrator
         {
             if (check.State == TargetState.HasExistingDb)
             {
-                P("대상 폴더의 기존 데이터베이스로 전환하는 중…");
+                P(MsgSwitch);
                 db.SwitchTo(newDb, () => loc.SaveDataDir(newDir));
                 AppLog.Dir = newDir;
                 notes.Add($"예전 폴더({oldDir})의 데이터는 그대로 남아 있습니다.");
@@ -105,11 +121,11 @@ public static class DataMigrator
             var tmp = newDb + ".migrating";
             try
             {
-                P("데이터베이스를 복사하는 중… (점검은 계속 동작합니다)");
+                P(MsgCopy);
                 db.Checkpoint();
                 db.ExportCopyTo(tmp);
 
-                P("복사 중 쌓인 점검 결과를 반영하고 검증하는 중…");
+                P(MsgVerify);
                 db.FinishMigration(tmp, newDb, () => loc.SaveDataDir(newDir));
             }
             catch
@@ -125,7 +141,7 @@ public static class DataMigrator
         }
 
         // 여기까지 오면 새 DB 로 전환이 끝났다. 이후는 정리 — 실패해도 데이터는 안전하다.
-        P("로그 파일을 옮기는 중…");
+        P(MsgLogs);
         foreach (var name in LogFiles)
         {
             var src = Path.Combine(oldDir, name);
@@ -138,7 +154,7 @@ public static class DataMigrator
             catch (Exception ex) { notes.Add($"{name} 를 옮기지 못했습니다: {ex.Message}"); }
         }
 
-        P("예전 폴더의 데이터베이스 파일을 정리하는 중…");
+        P(MsgCleanup);
         foreach (var suffix in new[] { "", "-wal", "-shm" })
         {
             var f = oldDb + suffix;

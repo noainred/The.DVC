@@ -236,5 +236,17 @@ public class DataMigrationTests : IDisposable
         var msgs = new List<string>();
         DataMigrator.Migrate(db, loc, Path.Combine(_root, "new"), progress: msgs.Add);
         Assert.True(msgs.Count >= 3);
+        // 진행 창이 단계 표시를 거꾸로 되돌리지 않는다: 단계는 줄지 않고 마지막은 '전환·정리'(3)다.
+        var steps = msgs.Select(DataMigrator.StepOf).ToList();
+        Assert.Equal(steps.OrderBy(x => x).ToList(), steps);
+        Assert.Equal(3, steps.Last());
+        Assert.Contains(1, steps);
+        Assert.Contains(2, steps);
+    }
+
+    [Fact]
+    public void 모르는_문구는_첫_단계로_본다()
+    {
+        Assert.Equal(0, DataMigrator.StepOf("알 수 없는 문구"));
     }
 }

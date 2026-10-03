@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
@@ -26,7 +27,7 @@ public sealed class SettingsForm : Form
     private readonly ComboBox _mapShow = new();
     // 알람
     private readonly CheckBox _alarmOn = new();
-    private readonly ComboBox _alarmEdge = new();
+    private readonly RadioButton[] _edgeBtns = new RadioButton[4];
     private readonly NumericUpDown _alarmThick = new();
     private readonly NumericUpDown _alarmLen = new();
     private readonly NumericUpDown _alarmBlink = new();
@@ -44,7 +45,8 @@ public sealed class SettingsForm : Form
         Width = 820;
         Height = 760;
         StartPosition = FormStartPosition.CenterParent;
-        Font = new System.Drawing.Font("Segoe UI", 9f);
+        Font = Theme.F(9.5f);
+        BackColor = Theme.Page;
         MinimizeBox = false;
 
         _list.View = View.Details;
@@ -116,6 +118,7 @@ public sealed class SettingsForm : Form
 
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var ok = MakeBtn("저장", (_, _) => Save());
+        Theme.StyleButton(ok, primary: true);
         ok.DialogResult = DialogResult.None;
         var cancel = MakeBtn("닫기", (_, _) => { DialogResult = DialogResult.Cancel; Close(); });
         bottom.Controls.Add(ok);
@@ -144,7 +147,8 @@ public sealed class SettingsForm : Form
 
     private static Button MakeBtn(string text, EventHandler onClick)
     {
-        var b = new Button { Text = text, AutoSize = true, Padding = new Padding(6, 2, 6, 2) };
+        var b = new Button { Text = text, AutoSize = true, Margin = new Padding(3, 3, 3, 3) };
+        Theme.StyleButton(b);
         b.Click += onClick;
         return b;
     }
@@ -334,80 +338,138 @@ public sealed class SettingsForm : Form
     // ── 알람 탭 ──────────────────────────────────────────────────────────────
     private static readonly (AlarmEdge Edge, string Label)[] EdgeItems =
     {
-        (AlarmEdge.Top, "화면 위쪽"), (AlarmEdge.Bottom, "화면 아래쪽"),
-        (AlarmEdge.Left, "화면 왼쪽"), (AlarmEdge.Right, "화면 오른쪽"),
+        (AlarmEdge.Top, "위쪽"), (AlarmEdge.Bottom, "아래쪽"),
+        (AlarmEdge.Left, "왼쪽"), (AlarmEdge.Right, "오른쪽"),
     };
+
+    /// <summary>탭 한 장의 세로 배치 틀 — 도킹 순서에 기대지 않고 행 번호로 쌓는다.</summary>
+    private static TableLayoutPanel Stack()
+    {
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true, BackColor = Color.White, Padding = new Padding(10, 6, 10, 6) };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return t;
+    }
+
+    private static void AddRow(TableLayoutPanel t, Control c, int bottomGap = 10)
+    {
+        c.Dock = DockStyle.Top;
+        c.Margin = new Padding(0, 0, 0, bottomGap);
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.Controls.Add(c, 0, t.RowCount++);
+    }
 
     private void BuildAlarmPage(TabPage page)
     {
         var a = AlarmSettings.Load(_db);
-        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(4) };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        page.BackColor = Color.White;
+        var root = Stack();
 
         _alarmOn.Text = "장애가 생기면 화면 가장자리에 알람 띠를 띄운다";
         _alarmOn.AutoSize = true;
+        _alarmOn.Font = Theme.F(10.5f, FontStyle.Bold);
         _alarmOn.Checked = a.Enabled;
-        grid.Controls.Add(_alarmOn, 0, 0);
-        grid.SetColumnSpan(_alarmOn, 2);
+        _alarmOn.Margin = new Padding(0, 6, 0, 14);
+        AddRow(root, _alarmOn, 6);
 
-        grid.Controls.Add(Lbl("위치"), 0, 1);
-        _alarmEdge.DropDownStyle = ComboBoxStyle.DropDownList;
-        foreach (var (_, label) in EdgeItems) _alarmEdge.Items.Add(label);
-        _alarmEdge.SelectedIndex = Math.Max(0, Array.FindIndex(EdgeItems, x => x.Edge == a.Edge));
-        _alarmEdge.Width = 200;
-        grid.Controls.Add(_alarmEdge, 1, 1);
+        var grid = new TableLayoutPanel { AutoSize = true, ColumnCount = 2 };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        grid.Controls.Add(Lbl("두께(px)"), 0, 2);
+        // 위치: 네 칸짜리 선택 버튼(시안의 분할 버튼)
+        grid.Controls.Add(Lbl("위치"), 0, 0);
+        var seg = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 4) };
+        for (int i = 0; i < EdgeItems.Length; i++)
+        {
+            var rb = new RadioButton
+            {
+                Appearance = Appearance.Button, Text = EdgeItems[i].Label, AutoSize = false, Width = 92, Height = 32,
+                TextAlign = ContentAlignment.MiddleCenter, FlatStyle = FlatStyle.Flat, Margin = new Padding(0),
+                Cursor = Cursors.Hand, UseVisualStyleBackColor = false, BackColor = Color.White, ForeColor = Theme.Ink,
+            };
+            rb.FlatAppearance.BorderColor = Theme.BtnBorder;
+            rb.FlatAppearance.CheckedBackColor = Theme.Ink;
+            rb.FlatAppearance.MouseOverBackColor = Theme.Hover;
+            rb.CheckedChanged += (s2, _) =>
+            {
+                var r = (RadioButton)s2!;
+                r.ForeColor = r.Checked ? Color.White : Theme.Ink;
+                r.Font = Theme.F(9.5f, r.Checked ? FontStyle.Bold : FontStyle.Regular);
+            };
+            _edgeBtns[i] = rb;
+            seg.Controls.Add(rb);
+        }
+        _edgeBtns[Math.Max(0, Array.FindIndex(EdgeItems, x => x.Edge == a.Edge))].Checked = true;
+        grid.Controls.Add(seg, 1, 0);
+
         _alarmThick.Minimum = AlarmSettings.MinThickness; _alarmThick.Maximum = AlarmSettings.MaxThickness; _alarmThick.Increment = 4;
         _alarmThick.Value = a.ThicknessPx;
-        grid.Controls.Add(NumWithHint(_alarmThick, "위·아래면 높이, 왼쪽·오른쪽이면 너비"), 1, 2);
+        grid.Controls.Add(Lbl("두께"), 0, 1);
+        grid.Controls.Add(SliderRow(_alarmThick, AlarmSettings.MinThickness, AlarmSettings.MaxThickness, 4, "px", "위·아래면 높이, 왼쪽·오른쪽이면 너비"), 1, 1);
 
-        grid.Controls.Add(Lbl("길이(화면 변의 %)"), 0, 3);
         _alarmLen.Minimum = AlarmSettings.MinLength; _alarmLen.Maximum = AlarmSettings.MaxLength; _alarmLen.Increment = 5;
         _alarmLen.Value = a.LengthPercent;
-        grid.Controls.Add(NumWithHint(_alarmLen, "100 이면 변 전체, 작으면 가운데에 짧게"), 1, 3);
+        grid.Controls.Add(Lbl("길이"), 0, 2);
+        grid.Controls.Add(SliderRow(_alarmLen, AlarmSettings.MinLength, AlarmSettings.MaxLength, 5, "%", "화면 변의 길이 기준, 가운데 정렬"), 1, 2);
 
-        grid.Controls.Add(Lbl("깜빡이는 간격(ms)"), 0, 4);
         _alarmBlink.Minimum = AlarmSettings.MinBlinkMs; _alarmBlink.Maximum = AlarmSettings.MaxBlinkMs; _alarmBlink.Increment = 50;
         _alarmBlink.Value = a.BlinkMs;
-        grid.Controls.Add(NumWithHint(_alarmBlink, "작을수록 빠르게 깜빡입니다 (기본 600)"), 1, 4);
+        grid.Controls.Add(Lbl("깜빡이는 속도"), 0, 3);
+        grid.Controls.Add(SliderRow(_alarmBlink, AlarmSettings.MinBlinkMs, AlarmSettings.MaxBlinkMs, 50, "ms", "작을수록 빠르게 (기본 600)"), 1, 3);
+        AddRow(root, grid, 12);
 
-        var preview = MakeBtn("미리보기 (저장 전 값으로 5초)", (_, _) => ShowAlarmPreview());
-        grid.Controls.Add(preview, 1, 5);
+        // 미리보기 줄
+        var prev = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, BackColor = Theme.Page, Padding = new Padding(14, 10, 14, 10) };
+        prev.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        prev.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var prevText = new Label
+        {
+            AutoSize = false, Height = 40, Dock = DockStyle.Fill, ForeColor = Theme.Body, Font = Theme.F(9f),
+            Text = "미리보기 — 지금 입력한 값(저장 전)으로 실제 화면 가장자리에 5초간 띄웁니다. 띠를 클릭하면 바로 닫힙니다.",
+        };
+        var prevBtn = MakeBtn("미리보기", (_, _) => ShowAlarmPreview());
+        prev.Controls.Add(prevText, 0, 0);
+        prev.Controls.Add(prevBtn, 1, 0);
+        AddRow(root, prev, 12);
 
         var note = new Label
         {
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 150,
-            Padding = new Padding(4, 14, 4, 0),
-            ForeColor = System.Drawing.Color.FromArgb(90, 90, 90),
-            Text = "• '주의'와 '위험' 이 모두 알람 대상입니다. 위험은 빨강, 주의는 노랑으로 깜빡이고 둘이 섞이면 빨강입니다.\r\n" +
+            AutoSize = false, Height = 118, ForeColor = Theme.Body, Font = Theme.F(9f),
+            Text = "• '주의'와 '위험'이 모두 알람 대상입니다. 위험은 빨강, 주의는 노랑으로 깜빡이고 둘이 섞이면 빨강입니다.\r\n" +
                    "• 띠를 클릭하거나 트레이 메뉴 › 알람 끄기를 누르면 꺼집니다. 같은 상태가 이어지는 동안에는 다시 울리지 않습니다.\r\n" +
                    "• 정상으로 돌아왔다가 다시 나빠지거나, 주의에서 위험으로 악화되거나, 다른 대상에 새 장애가 생기면 다시 울립니다.\r\n" +
                    "• 프로그램을 켠 직후에는 최근 점검 결과가 있는 대상만 알람이 됩니다(예전 기록으로 울리지 않음).\r\n" +
                    "• 알람 발생·확인·해소는 데이터 폴더의 alarm.log 에 기록됩니다. 알람 띠는 주 모니터에 표시됩니다.",
         };
-        page.Controls.Add(note);
-        page.Controls.Add(grid);
+        AddRow(root, note, 0);
+        page.Controls.Add(root);
     }
 
-    private static Label Lbl(string text) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 8) };
+    private static Label Lbl(string text) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 10, 3, 10), ForeColor = Theme.Body };
 
-    private static Control NumWithHint(NumericUpDown n, string hint)
+    /// <summary>슬라이더 + 숫자 입력 + 단위 + 설명 한 줄. 둘은 서로 따라 움직인다.</summary>
+    private static Control SliderRow(NumericUpDown n, int min, int max, int small, string unit, string hint)
     {
+        var tb = new TrackBar
+        {
+            Minimum = min, Maximum = max, SmallChange = small, LargeChange = small * 5, TickStyle = TickStyle.None,
+            AutoSize = false, Width = 250, Height = 30, Value = (int)Math.Clamp(n.Value, min, max), Margin = new Padding(0, 4, 8, 0),
+        };
+        bool sync = false;
+        tb.ValueChanged += (_, _) => { if (sync) return; sync = true; n.Value = tb.Value; sync = false; };
+        n.ValueChanged += (_, _) => { if (sync) return; sync = true; tb.Value = (int)Math.Clamp(n.Value, min, max); sync = false; };
+        n.Width = 74; n.Margin = new Padding(0, 6, 4, 0); n.Font = Theme.F(9.5f);
         var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-        n.Width = 90;
+        p.Controls.Add(tb);
         p.Controls.Add(n);
-        p.Controls.Add(new Label { Text = hint, AutoSize = true, ForeColor = System.Drawing.Color.Gray, Margin = new Padding(8, 5, 0, 0) });
+        p.Controls.Add(new Label { Text = unit, AutoSize = true, Margin = new Padding(0, 9, 10, 0), ForeColor = Theme.Body });
+        p.Controls.Add(new Label { Text = hint, AutoSize = true, Margin = new Padding(0, 9, 0, 0), ForeColor = Theme.Muted, Font = Theme.F(8.5f) });
         return p;
     }
 
     private AlarmSettings ReadAlarmFromUi() => new AlarmSettings
     {
         Enabled = _alarmOn.Checked,
-        Edge = EdgeItems[Math.Max(0, _alarmEdge.SelectedIndex)].Edge,
+        Edge = EdgeItems[Math.Max(0, Array.FindIndex(_edgeBtns, x => x.Checked))].Edge,
         ThicknessPx = (int)_alarmThick.Value,
         LengthPercent = (int)_alarmLen.Value,
         BlinkMs = (int)_alarmBlink.Value,
@@ -436,50 +498,87 @@ public sealed class SettingsForm : Form
     private void BuildDataPage(TabPage page)
     {
         var locked = DataLocation.CommandLineOverride;
-        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(4) };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        page.BackColor = Color.White;
+        var root = Stack();
 
-        grid.Controls.Add(Lbl("저장 폴더"), 0, 0);
+        AddRow(root, new Label { Text = "저장 폴더", AutoSize = true, Font = Theme.F(10f, FontStyle.Bold) }, 6);
+
+        var pathRow = new TableLayoutPanel { AutoSize = true, ColumnCount = 2 };
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _dataDir.Text = _currentDir;
         _dataDir.Dock = DockStyle.Fill;
         _dataDir.Enabled = !locked;
-        grid.Controls.Add(_dataDir, 1, 0);
+        _dataDir.Font = Theme.F(10f);
+        _dataDir.BorderStyle = BorderStyle.FixedSingle;
+        _dataDir.Margin = new Padding(0, 3, 6, 3);
+        pathRow.Controls.Add(_dataDir, 0, 0);
         var browse = MakeBtn("찾아보기…", (_, _) => BrowseDataDir());
         browse.Enabled = !locked;
-        grid.Controls.Add(browse, 2, 0);
+        pathRow.Controls.Add(browse, 1, 0);
+        AddRow(root, pathRow, 2);
 
         var row2 = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-        row2.Controls.Add(MakeBtn("현재 폴더 열기", (_, _) => OpenDir(_currentDir)));
+        var openBtn = MakeBtn("현재 폴더 열기", (_, _) => OpenDir(_currentDir));
         var reset = MakeBtn("기본 폴더로", (_, _) => _dataDir.Text = DataLocation.DefaultBaseDir());
         reset.Enabled = !locked;
+        row2.Controls.Add(openBtn);
         row2.Controls.Add(reset);
-        grid.Controls.Add(row2, 1, 1);
+        AddRow(root, row2, 6);
 
-        var info = new Label
+        AddRow(root, new Label
         {
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 260,
-            Padding = new Padding(4, 14, 4, 0),
-            ForeColor = System.Drawing.Color.FromArgb(70, 70, 70),
+            AutoSize = false, Height = 40, Padding = new Padding(10, 6, 10, 0), BackColor = Color.FromArgb(0xEA, 0xF1, 0xFF), ForeColor = Color.FromArgb(0x1E, 0x3F, 0x8F), Font = Theme.F(9f),
             Text = locked
-                ? "프로그램이 --db 옵션으로 실행되어 저장 폴더를 설정에서 바꿀 수 없습니다.\r\n\r\n"
-                : "이 폴더에 아래 파일이 저장됩니다.\r\n" +
-                  "  • monitor.db — 점검 이력, 대상, 설정 (WAL 보조 파일 포함)\r\n" +
-                  "  • error.log — 프로그램 오류 기록\r\n" +
-                  "  • alarm.log — 알람 발생·확인·해소 기록\r\n\r\n" +
-                  "폴더를 바꾸고 [저장]을 누르면 자동으로 이동합니다.\r\n" +
-                  "  • 이동하는 동안에도 점검은 계속되고, 그 사이 쌓인 결과도 빠짐없이 옮겨집니다.\r\n" +
-                  "  • 복사본을 검증한 뒤에만 새 폴더로 전환하고, 그 뒤에 예전 폴더의 파일을 지웁니다.\r\n" +
-                  "  • 어느 단계든 실패하면 예전 폴더를 그대로 계속 사용합니다.\r\n" +
-                  "  • 새 폴더에 이미 monitor.db 가 있으면 덮어쓰지 않고, 그 데이터베이스를 쓸지 물어봅니다.\r\n" +
-                  "  • 드라이브 전체 경로로 입력하세요. 네트워크 폴더는 끊기면 시작할 때 기본 폴더로 열립니다.",
+                ? "프로그램이 --db 옵션으로 실행되어 저장 폴더를 설정에서 바꿀 수 없습니다."
+                : "다른 폴더로 바꾸고 [저장]을 누르면 자동으로 이동합니다. 드라이브 전체 경로로 입력하세요.",
+        }, 14);
+
+        AddRow(root, new Label { Text = "이 폴더에 저장되는 파일", AutoSize = true, Font = Theme.F(10f, FontStyle.Bold) }, 6);
+        var files = new ListView
+        {
+            View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BorderStyle = BorderStyle.FixedSingle,
+            Height = 104, Font = Theme.F(9.5f), BackColor = Color.White, MultiSelect = false,
         };
-        page.Controls.Add(info);
-        page.Controls.Add(grid);
+        files.Columns.Add("파일", 130);
+        files.Columns.Add("내용", 320);
+        files.Columns.Add("크기", 110, HorizontalAlignment.Right);
+        void AddFile(string name, string what, params string[] related)
+        {
+            long total = 0; bool any = false;
+            foreach (var n in new[] { name }.Concat(related))
+            {
+                try { var f = new System.IO.FileInfo(System.IO.Path.Combine(_currentDir, n)); if (f.Exists) { total += f.Length; any = true; } } catch { /* 읽을 수 없으면 건너뜀 */ }
+            }
+            files.Items.Add(new ListViewItem(new[] { name, what, any ? SizeText(total) : "아직 없음" }));
+        }
+        AddFile(DataLocation.DbFileName, "점검 이력 · 대상 · 설정", DataLocation.DbFileName + "-wal", DataLocation.DbFileName + "-shm");
+        AddFile(AppLog.AlarmFile, "알람 발생 · 확인 · 해소 기록");
+        AddFile(AppLog.ErrorFile, "프로그램 오류 기록");
+        AddRow(root, files, 14);
+
+        AddRow(root, new Label { Text = "폴더를 바꾸면 이렇게 이동합니다", AutoSize = true, Font = Theme.F(10f, FontStyle.Bold) }, 6);
+        AddRow(root, new Label
+        {
+            AutoSize = false, Height = 88, ForeColor = Theme.Body, Font = Theme.F(9f),
+            Text = "①  점검 — 경로 · 쓰기 가능 · 여유 공간 · 대상 폴더의 기존 DB 확인\r\n" +
+                   "②  복사 — 점검은 멈추지 않고 계속됩니다\r\n" +
+                   "③  검증 — 복사 중 쌓인 결과를 반영하고 무결성을 확인합니다\r\n" +
+                   "④  전환 — 새 폴더로 바꾼 뒤 예전 폴더의 파일을 정리합니다 (실패하면 예전 폴더를 그대로 사용)",
+        }, 6);
+        AddRow(root, new Label
+        {
+            AutoSize = false, Height = 40, ForeColor = Theme.Muted, Font = Theme.F(8.5f),
+            Text = "새 폴더에 이미 monitor.db 가 있으면 덮어쓰지 않고, 그 데이터베이스를 쓸지 물어봅니다. 네트워크 폴더가 끊기면 다음 시작 때 기본 폴더로 열립니다.",
+        }, 0);
+        page.Controls.Add(root);
     }
+
+    private static string SizeText(long bytes)
+        => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):F1} GB"
+         : bytes >= 1L << 20 ? $"{bytes / (double)(1L << 20):F1} MB"
+         : bytes >= 1L << 10 ? $"{bytes / (double)(1L << 10):F0} KB"
+         : $"{bytes} B";
 
     private void BrowseDataDir()
     {
@@ -548,19 +647,48 @@ public sealed class SettingsForm : Form
             FormBorderStyle = FormBorderStyle.FixedDialog,
             ControlBox = false,
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new System.Drawing.Size(480, 96),
+            ClientSize = new Size(520, 266),
             ShowInTaskbar = false,
+            BackColor = Color.White,
+            Font = Theme.F(9.5f),
         };
-        var lbl = new Label { Text = "준비 중…", Left = 16, Top = 14, Width = 448, Height = 24, AutoEllipsis = true };
-        var bar = new ProgressBar { Style = ProgressBarStyle.Marquee, Left = 16, Top = 46, Width = 448, Height = 20, MarqueeAnimationSpeed = 30 };
-        dlg.Controls.Add(lbl);
+        dlg.Controls.Add(new Label { Text = "데이터를 옮기고 있습니다", Left = 26, Top = 20, Width = 468, Height = 26, Font = Theme.F(12f, FontStyle.Bold), ForeColor = Theme.Ink });
+        dlg.Controls.Add(new Label { Text = dir, Left = 26, Top = 48, Width = 468, Height = 20, ForeColor = Theme.Body, AutoEllipsis = true });
+        var stepLabels = new[]
+        {
+            new Label { Text = "폴더 점검" },
+            new Label { Text = "데이터베이스 복사" },
+            new Label { Text = "복사 중 쌓인 결과 반영 · 검증" },
+            new Label { Text = "새 폴더로 전환 · 예전 파일 정리" },
+        };
+        for (int i = 0; i < stepLabels.Length; i++)
+        {
+            var l = stepLabels[i];
+            l.Left = 26; l.Top = 82 + i * 24; l.Width = 468; l.Height = 22; l.AutoSize = false;
+            dlg.Controls.Add(l);
+        }
+        void ShowStep(int current)
+        {
+            for (int i = 0; i < stepLabels.Length; i++)
+            {
+                var done = i < current; var now = i == current;
+                var l = stepLabels[i];
+                var text = new[] { "폴더 점검", "데이터베이스 복사", "복사 중 쌓인 결과 반영 · 검증", "새 폴더로 전환 · 예전 파일 정리" }[i];
+                l.Text = (done ? "✔  " : now ? "▶  " : "○  ") + text + (now ? " …" : "");
+                l.ForeColor = done ? Theme.Body : now ? Theme.Ink : Theme.Muted;
+                l.Font = Theme.F(9.5f, now ? FontStyle.Bold : FontStyle.Regular);
+            }
+        }
+        ShowStep(0);
+        var bar = new ProgressBar { Style = ProgressBarStyle.Marquee, Left = 26, Top = 190, Width = 468, Height = 10, MarqueeAnimationSpeed = 30 };
         dlg.Controls.Add(bar);
+        dlg.Controls.Add(new Label { Text = "이동하는 동안에도 점검은 계속됩니다. 창을 닫지 말고 기다려 주세요.", Left = 26, Top = 212, Width = 468, Height = 36, ForeColor = Theme.Body, Font = Theme.F(9f) });
         dlg.Shown += async (_, _) =>
         {
             try
             {
                 res = await System.Threading.Tasks.Task.Run(() => DataMigrator.Migrate(_db, DataLocation.Default, dir, useExisting,
-                    m => { try { if (!dlg.IsDisposed) dlg.BeginInvoke(() => lbl.Text = m); } catch { /* 창이 닫히는 중 */ } }));
+                    m => { try { if (!dlg.IsDisposed) dlg.BeginInvoke(() => ShowStep(DataMigrator.StepOf(m))); } catch { /* 창이 닫히는 중 */ } }));
             }
             catch (Exception ex) { res = new MigrationResult(false, "이동 중 오류: " + ex.Message, null, Array.Empty<string>()); }
             dlg.Close();

@@ -91,56 +91,90 @@ public sealed class AlarmOverlay : Form
         using (var bg = new SolidBrush(color)) g.FillRectangle(bg, ClientRectangle);
 
         var fg = worst == HealthStatus.Warn && _bright ? Color.FromArgb(0x2B, 0x1B, 0x00) : Color.White;
-        var text = Compose();
+        g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        var size = Math.Clamp(_s.ThicknessPx * 0.34f, 9f, 30f);
-        using var font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(fg);
-        using var fmt = new StringFormat(StringFormatFlags.NoWrap)
-        {
-            Alignment = StringAlignment.Near,
-            LineAlignment = StringAlignment.Center,
-            Trimming = StringTrimming.EllipsisCharacter,
-        };
 
-        var pad = 14;
         if (!_s.IsVertical)
         {
-            g.DrawString(text, font, brush, new RectangleF(pad, 0, Width - pad * 2, Height), fmt);
+            PaintBand(g, Width, Height, fg);
         }
         else
         {
-            // 세로 띠는 글자를 눕혀 쓴다(왼쪽은 아래→위, 오른쪽은 위→아래).
+            // 세로 띠는 글자를 눕혀 쓴다(왼쪽은 아래→위, 오른쪽은 위→아래). 가상의 가로 띠(길이 × 두께)에 그린 뒤 돌린다.
             var state = g.Save();
             try
             {
-                if (_s.Edge == AlarmEdge.Left)
-                {
-                    g.TranslateTransform(0, Height);
-                    g.RotateTransform(-90);
-                }
-                else
-                {
-                    g.TranslateTransform(Width, 0);
-                    g.RotateTransform(90);
-                }
-                g.DrawString(text, font, brush, new RectangleF(pad, 0, Height - pad * 2, Width), fmt);
+                if (_s.Edge == AlarmEdge.Left) { g.TranslateTransform(0, Height); g.RotateTransform(-90); }
+                else { g.TranslateTransform(Width, 0); g.RotateTransform(90); }
+                PaintBand(g, Height, Width, fg);
             }
             finally { g.Restore(state); }
         }
     }
 
-    private string Compose()
+    /// <summary>길이 <paramref name="len"/> × 두께 <paramref name="thick"/> 인 가로 띠 안쪽을 그린다: 아이콘 · 제목 · 이름들 · (오른쪽) 안내.</summary>
+    private void PaintBand(Graphics g, int len, int thick, Color fg)
+    {
+        var (head, names, hint) = Compose();
+        float px = Math.Clamp(thick * 0.36f, 10f, 30f);          // 제목 글자 크기
+        using var fHead = new Font("Segoe UI", px, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var fNames = new Font("Segoe UI", Math.Max(9f, px * 0.78f), FontStyle.Bold, GraphicsUnit.Pixel);
+        using var fHint = new Font("Segoe UI", Math.Max(9f, px * 0.62f), FontStyle.Regular, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(fg);
+        using var fmt = new StringFormat(StringFormat.GenericTypographic)
+        {
+            FormatFlags = StringFormatFlags.NoWrap,
+            Trimming = StringTrimming.EllipsisCharacter,
+            LineAlignment = StringAlignment.Center,
+        };
+
+        float pad = Math.Max(12f, thick * 0.3f);
+        float icon = Math.Clamp(thick * 0.42f, 12f, 40f);
+        float x = pad;
+        float cy = thick / 2f;
+        DrawWarnIcon(g, fg, x, cy - icon / 2f, icon);
+        x += icon + pad * 0.6f;
+
+        // 오른쪽 안내가 들어갈 자리를 먼저 잡는다(띠가 짧으면 안내를 뺀다).
+        float hintW = g.MeasureString(hint, fHint, 4000, StringFormat.GenericTypographic).Width;
+        bool showHint = len > 560 + hintW;
+        float right = len - pad - (showHint ? hintW + pad : 0);
+
+        float headW = g.MeasureString(head, fHead, 4000, StringFormat.GenericTypographic).Width;
+        g.DrawString(head, fHead, brush, new RectangleF(x, 0, Math.Max(10, right - x), thick), fmt);
+        x += headW + pad * 0.7f;
+        if (right - x > 40)
+            g.DrawString(names, fNames, brush, new RectangleF(x, 0, right - x, thick), fmt);
+        if (showHint)
+        {
+            using var right_ = new StringFormat(fmt) { Alignment = StringAlignment.Far };
+            g.DrawString(hint, fHint, brush, new RectangleF(len - pad - hintW - 4, 0, hintW + 4, thick), right_);
+        }
+    }
+
+    // 이모지 글자(⚠)는 글꼴마다 모양이 달라 선 아이콘으로 직접 그린다.
+    private static void DrawWarnIcon(Graphics g, Color color, float x, float y, float size)
+    {
+        float k = size / 26f;
+        using var pen = new Pen(color, Math.Max(1.6f, 2.2f * k)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+        PointF P(float px, float py) => new(x + px * k, y + py * k);
+        g.DrawPolygon(pen, new[] { P(13, 3.5f), P(24, 22.5f), P(2, 22.5f) });
+        g.DrawLine(pen, P(13, 10), P(13, 16));
+        using var dot = new SolidBrush(color);
+        g.FillEllipse(dot, x + 12f * k, y + 18.2f * k, 2f * k, 2f * k);
+    }
+
+    private (string Head, string Names, string Hint) Compose()
     {
         if (_preview)
-            return "⚠ 알람 미리보기 — 이 띠를 클릭하면 닫힙니다";
+            return ("알람 미리보기", "이 띠가 장애 때 이 위치·크기·속도로 깜빡입니다", "클릭하면 닫힙니다");
         var down = _items.Count(i => i.Status == HealthStatus.Down);
         var warn = _items.Count(i => i.Status == HealthStatus.Warn);
-        var head = down > 0 && warn > 0 ? $"⚠ 장애 {down + warn}건 (위험 {down} · 주의 {warn})"
-            : down > 0 ? $"⚠ 위험 {down}건" : $"⚠ 주의 {warn}건";
+        var head = down > 0 && warn > 0 ? $"위험 {down}건 · 주의 {warn}건"
+            : down > 0 ? $"위험 {down}건" : $"주의 {warn}건";
         var names = string.Join(", ", _items.Take(6).Select(i => $"{i.Name}({(i.Status == HealthStatus.Down ? "위험" : "주의")})"));
-        var more = _items.Count > 6 ? $" 외 {_items.Count - 6}건" : "";
-        return $"{head}  {names}{more}   — 클릭하면 알람이 꺼집니다";
+        if (_items.Count > 6) names += $" 외 {_items.Count - 6}건";
+        return (head, names, "클릭하면 알람이 꺼집니다");
     }
 
     private static Color Blend(Color a, Color b, float t)
