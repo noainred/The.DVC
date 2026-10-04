@@ -125,3 +125,14 @@ export function getIgnoreMatcher() {
   matcherCache.empty = global.length === 0 && Object.keys(vc).length === 0;
   return matcherCache;
 }
+
+/**
+ * v2.692: 무시 대역을 구간({lo,hi})으로 — '/24 가져오기' 가 무시 대역을 후보에서 빼는 데 쓴다(ipam/vcRangeSuggest.js annotateSubnets).
+ * 판정은 대장 숨김(getIgnoreMatcher)과 같은 목록·같은 파서다.
+ */
+export function ignoreRanges() {
+  const s = load();
+  const vcenters = {};
+  for (const [k, arr] of Object.entries(s.vcenters || {})) vcenters[k] = (arr || []).map(parseRange).filter(Boolean);
+  return { global: (s.global || []).map(parseRange).filter(Boolean), vcenters };
+}

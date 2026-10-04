@@ -4800,6 +4800,12 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       옛 키로 그리면 분기가 대장 목록으로 떨어져 `data.rows` 를 읽고 화면이 죽었다(Chromium 에서 실제로).
     · 남긴 것(2차 후보): `VcScanRangeEditor` 컴포넌트·`VcRangeImportModal` 은 더 그리지 않는다(RangeCheck 등 export 만 쓰인다) · vc-ranges API 는 호환으로 남김 ·
       netmap 은 `migratedRangesFor` 로 옮긴 대역을 그 vCenter 의 /24 목록에 계속 넣는다.
+  - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
+    `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
+    · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).
+    · ② = 예전 '에이전트별 스캔 대역' + '에이전트별 보고 현황' 한 표 + 설정 편집기. 보고 상태는 정상·늦음(90분)·꺼짐·대기 — 꺼짐·대기를 늦음으로 세지 않는다. 주소 `#/ipam/scan/<ranges|agents>`.
+    · 무시 대역 제외는 **호스트 주소(.1~.254)가 전부** 무시 대역에 들 때만이고(그 IP 는 대장에서 숨겨진다) 일부만 걸치면 남기고 표시한다. 출처: 전체 + VM 은 고른 vCenter, iDRAC 은 그 DataCenter 에 할당된 vCenter(iDRAC 대역에 vCenter 축이 없다).
+    · 공인/사설은 대장과 같은 분류기(`getClassifier().num`) — /24 안에서 갈리면 'mixed'. 공인 /24 는 기본 체크 해제(빼지는 않는다). 분류 키는 웹 `CLS_LABEL` 과 1:1.
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

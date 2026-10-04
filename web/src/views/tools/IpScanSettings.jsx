@@ -1,6 +1,8 @@
 // IpScanSettings.jsx — IP관리 › 스캔 대역·설정(에이전트별 능동 스캔 대역·포트·주기 + /24 제안 + 데이터센터 귀속). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
 // v2.691: 예전 '대역·스캔'(vCenter 별 대역)이 이 화면으로 합쳐졌다 — iDRAC 대역(서비스 선택)·VM 대역 가져오기, 다른 에이전트와 겹치는 대역 칸,
 //   에이전트별 스캔 대역 표, 1회 이전 안내(ScanRangeMigration). 판정 코어는 v2.690 vcRangeImportText 한 벌이다.
+// v2.692: 서브메뉴 2개 — ① 등록된 스캔 대역(대역 1줄 = 1행 · 줄 단위 수정/삭제, ScanRangeList) ② 에이전트별 대역·보고 현황
+//   (예전 '에이전트별 스캔 대역' + '에이전트별 보고 현황' 두 표를 한 표로 + 그 아래 설정 편집기). 주소 `#/ipam/scan/<ranges|agents>`.
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, canCsv, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -18,9 +20,13 @@ import { ScanRangeImportModal } from './ScanRangeImportModal.jsx'; // v2.691
 import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
 import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
+import { REPORT_STATE_TEXT, REPORT_STATE_TITLE, agentReportRows, reportKpis } from './scanRangeImportText.js';
+import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { dayStamp } from '../../dayStamp.js';
 
+const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }];
 const DUP_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' };
 
 /**
@@ -154,6 +160,17 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   const [importKind, setImportKind] = useState(null);
   const [dupText, setDupText] = useState('');
   const [dupMsg, setDupMsg] = useState(null);
+  // v2.692: 서브메뉴 — 페이지일 때만 해시에 싣는다(모달로 열면 해시를 건드리지 않는다).
+  const [subHash, setSubHash] = useHashTab({ base: ['ipam', 'scan'], valid: SUBS.map((x) => x.k), fallback: 'ranges' });
+  const [subLocal, setSubLocal] = useState('ranges');
+  const sub = asPage ? subHash : subLocal;
+  const setSub = asPage ? setSubHash : setSubLocal;
+  const [rangesData, setRangesData] = useState(null);
+  const [rangesErr, setRangesErr] = useState(null);
+  const [agentFilter, setAgentFilter] = useState('');
+  const editorRef = useRef(null);
+  const loadRanges = () => fetchJson('/admin/ipam/scan/ranges').then((r) => { setRangesData(r); setRangesErr(null); }).catch((e) => setRangesErr(e?.message || String(e)));
+  useEffect(() => { loadRanges(); }, []);
   const loadOwners = () => fetchJson('/admin/ipam/scan/owners').then((r) => { setOwners(r.owners || []); setOwnersErr(null); }).catch((e) => setOwnersErr(e?.message || String(e)));
   useEffect(() => { loadOwners(); }, []);
   const load = async (ag, first = false) => {
@@ -196,7 +213,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
       // v2.638: 400(등록되지 않은 데이터센터 등)은 putJson 이 던지지 않고 본문을 돌려준다 — 사유를 말하고 초안을 남긴다.
       if (r && r.ok === false) { setMsg({ text: `저장하지 못했습니다: ${r.reason || '서버가 거부했습니다'}`, list: (r.invalid || []).map((x) => serverInvalidText(x)) }); return; }
-      d.saved(r.settings); setStatus(r.status); loadOwners();
+      d.saved(r.settings); setStatus(r.status); loadOwners(); loadRanges();
       if ('datacenter' in r) setDcInfo(r.datacenter);
       onSaved?.();
       const cfg = r.settings || s;
@@ -255,6 +272,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
     try { await downloadFile('/tools/ipam/scan-report.csv', `ip-scan-report-${dayStamp()}.csv`); } catch (e) { setMsg(downloadFailText(e)); }
   };
   const agentRows = (owners || []).filter((o) => o.kind === 'agent');
+  // v2.692: ② 에이전트별 대역·보고 현황 — 두 표를 한 표로(판정은 scanRangeImportText.agentReportRows)
+  const reportList = agentReportRows({ agents: rangesData?.agents || agentRows.map((o) => ({ name: o.owner, enabled: o.enabled })), rows: rangesData?.rows || [], reports, localLast: status?.lastRun || null });
+  const kpi = reportKpis(reportList);
+  const openEditor = (a) => { if (a && a !== agent) switchAgent(a); setSub('agents'); setTimeout(() => editorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60); };
   const last = status?.lastRun;
   const runNowTitle = !isLocal ? '원격 에이전트는 자체 주기로 스캔합니다' : rangeTitle || (status?.running ? '스캔이 진행 중입니다' : '');
 
@@ -274,6 +295,60 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
       )}
 
+      <div className="flex gap wrap" role="tablist" aria-label="스캔 대역·설정 메뉴" style={{ borderBottom: '1px solid var(--border)', margin: '4px 0 12px' }}>
+        {SUBS.map((x) => {
+          const on = sub === x.k;
+          const n = x.k === 'ranges' ? (rangesData?.rows || []).length : reportList.length;
+          return (
+            <button key={x.k} type="button" role="tab" aria-selected={on} onClick={() => setSub(x.k)}
+              style={{ background: 'none', border: 0, borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`, color: on ? 'var(--text)' : 'var(--text-dim)', font: 'inherit', fontWeight: 700, padding: '8px 12px', cursor: 'pointer' }}>
+              {x.label} <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>{rangesData ? `${n}${x.k === 'ranges' ? '줄' : '곳'}` : ''}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {sub === 'ranges' && (
+        <ScanRangeList data={rangesData} err={rangesErr} agentFilter={agentFilter} setAgentFilter={setAgentFilter}
+          onReload={(a) => { loadRanges(); loadOwners(); if (!a || a === agent) load(agent, true); }}
+          onOpenEditor={openEditor} onImport={(k, a) => { openEditor(a); setImportKind(k); }} />
+      )}
+
+      {sub === 'agents' && (
+        <>
+          <div className="kpis" style={{ marginBottom: 10 }}>
+            <div className="kpi"><div className="label">에이전트</div><div className="value">{kpi.total}</div></div>
+            <div className="kpi"><div className="label">정상 보고</div><div className="value" style={{ color: kpi.ok ? 'var(--green)' : undefined }}>{kpi.ok}</div></div>
+            <div className="kpi"><div className="label">보고 늦음</div><div className="value" style={{ color: kpi.late ? 'var(--amber)' : undefined }}>{kpi.late}</div></div>
+            <div className="kpi"><div className="label">꺼짐</div><div className="value">{kpi.off}</div></div>
+            <div className="kpi"><div className="label">대기·보고 없음</div><div className="value">{kpi.waiting}</div></div>
+            <div className="kpi"><div className="label">응답한 IP(합)</div><div className="value">{kpi.aliveKnown ? kpi.alive.toLocaleString() : '—'}</div></div>
+          </div>
+          <STable className="v3-table" minWidth={980}>
+            <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th><th data-nosort>작업</th></tr></thead>
+            <tbody>
+              {reportList.map((x) => (
+                <tr key={x.name} style={x.name === agent ? { background: 'rgba(59,130,246,.10)' } : undefined}>
+                  <td><b>{agentName(x.name)}</b></td>
+                  <td>{x.datacenterName || <span className="muted">—</span>}</td>
+                  <td><span className={`badge ${x.enabled ? 'green' : 'gray'}`}>{x.enabled ? '켜짐' : '꺼짐'}</span></td>
+                  <td style={{ textAlign: 'right' }} data-sort={x.lines}>{x.lines} / {x.ips.toLocaleString()}{x.invalid ? <span style={{ color: 'var(--red)' }} title="형식 오류 줄 — IP 수에 넣지 않았습니다"> · 오류 {x.invalid}</span> : null}</td>
+                  <td className="muted" style={{ fontSize: 12 }} data-sort={x.at ?? ''}>{x.at ? fmtDt(x.at) : '보고 없음'}</td>
+                  <td style={{ textAlign: 'right' }} data-sort={x.alive ?? ''}>{x.scanned == null ? '—' : `${Number(x.scanned).toLocaleString()} / `}{x.scanned == null ? '' : <b>{x.alive == null ? '—' : Number(x.alive).toLocaleString()}</b>}</td>
+                  <td data-sort={x.state}><span className={`badge ${x.state === 'ok' ? 'green' : x.state === 'late' ? 'amber' : 'gray'}`} title={REPORT_STATE_TITLE[x.state]}>{REPORT_STATE_TEXT[x.state]}</span></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => openEditor(x.name)}>설정 편집</button>{' '}
+                    <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { setAgentFilter(x.name); setSub('ranges'); }}>대역 보기</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+          {reportList.length === 0 && <div className="muted" style={{ marginTop: 6 }}>{rangesErr ? `에이전트 목록을 읽지 못했습니다(${rangesErr}).` : '등록된 에이전트가 없습니다.'}</div>}
+          <div className="muted" style={{ fontSize: 11, margin: '6px 0 14px' }}>보고 상태는 꺼짐·대기를 ‘늦음’ 과 따로 셉니다. 이 포탈에서 직접 스캔한 결과는 마지막 실행으로 봅니다.</div>
+
+          <div ref={editorRef} className="card" style={{ padding: 14, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, marginBottom: 10 }}>설정 편집 — {agentName(agent)}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
@@ -375,54 +450,6 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
       )}
 
-      {/* v2.691: 에이전트별 스캔 대역 — 누가 어떤 대역을 스캔하는지 한 표로(누르면 그 에이전트를 고른다) */}
-      {agentRows.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>에이전트별 스캔 대역 — 이름을 누르면 그 에이전트를 고릅니다</div>
-          <div className="table-wrap" style={{ maxHeight: '28vh' }}>
-            <STable minWidth={560} wrap={false}>
-              <thead><tr><th>에이전트</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역</th><th>대역(앞 3줄)</th></tr></thead>
-              <tbody>
-                {agentRows.map((o) => (
-                  <tr key={o.owner} style={o.owner === agent ? { background: 'rgba(59,130,246,.10)' } : undefined}>
-                    <td><button className="linklike" style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }} onClick={() => switchAgent(o.owner)}><b>{agentName(o.owner)}</b></button></td>
-                    <td><span className={`badge ${o.enabled ? 'green' : 'gray'}`}>{o.enabled ? '켜짐' : '꺼짐'}</span></td>
-                    <td style={{ textAlign: 'right' }} data-sort={(o.ranges || []).length}>{(o.ranges || []).length}</td>
-                    <td className="muted" style={{ fontFamily: 'monospace', fontSize: 11.5, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(o.ranges || []).slice(0, 3).join(', ') || '—'}{(o.ranges || []).length > 3 ? ` 외 ${o.ranges.length - 3}줄` : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </STable>
-          </div>
-        </div>
-      )}
-
-      {/* 에이전트별 마지막 보고 현황 */}
-      {Object.keys(reports).length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>에이전트별 보고 현황</div>
-          <div className="table-wrap" style={{ maxHeight: '24vh' }}>
-            <STable minWidth={480} wrap={false}>
-              <thead><tr><th>에이전트</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th></tr></thead>
-              <tbody>
-                {Object.entries(reports).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).map(([name, r]) => {
-                  const ageMin = (Date.now() - (r.at || 0)) / 60000;
-                  const fresh = ageMin < 90; // 90분 내 보고면 정상
-                  return (
-                    <tr key={name}>
-                      <td><b>{agentLabel(name)}</b></td>
-                      <td className="muted" style={{ fontSize: 12 }} data-sort={r.at ?? ''}>{fmtDt(r.at)}</td>
-                      <td style={{ textAlign: 'right' }}>{(r.scanned ?? 0).toLocaleString()} / <b>{(r.alive ?? 0).toLocaleString()}</b></td>
-                      <td><span className={`badge ${fresh ? 'green' : 'gray'}`}>{fresh ? '정상' : '오래됨'}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </STable>
-          </div>
-        </div>
-      )}
-
       <div className="card" style={{ padding: 12, marginTop: 14, fontSize: 13 }}>
         <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
         <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
@@ -438,6 +465,9 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>}
         {!asPage && <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>}
       </div>
+          </div>
+        </>
+      )}
       {importKind && (
         <ScanRangeImportModal kind={importKind} agent={agent} text={rangeText} saved={saved}
           onClose={() => setImportKind(null)} onConfirm={onImportConfirm} />
