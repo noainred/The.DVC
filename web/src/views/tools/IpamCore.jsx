@@ -6,12 +6,12 @@ import { fetchJson, usePolling, hasRole, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, fmtDur, MGMT, MgmtBadge } from './ipamShared.jsx';
-import { IpamNetMap, IpamRanges, RangePolicies } from './IpamNet.jsx';
+import { IpamNetMap, RangePolicies } from './IpamNet.jsx';
 import { MemoEditor, OverrideEditor } from './IpamEditors.jsx';
 import { IpmsSettings } from './IpmsSettings.jsx';
 import { IpScanSettings } from './IpScanSettings.jsx';
 import { ScanStatusModal } from './IpamScanStatus.jsx';
-import { IPAM_PAGE_KEYS, ipamPage, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
+import { IPAM_HASH_KEYS, IPAM_PAGE_ALIASES, ipamPage, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
 import { dirtyKeys, dirtyPages, onDraftChange } from './ipamDraft.js';
 import { IpamScanLog } from './IpamScanLog.jsx';
 import { IpamCsv } from './IpamCsv.jsx';
@@ -73,7 +73,11 @@ function Ipam({ scope, onScope }) {
   const [histIp, setHistIp] = useState(null); // IP 사용 이력 모달 대상
   // 서브메뉴 페이지를 URL(#/ipam/<키>)에 싣는다(v2.438 · v2.636 에 전 페이지로 — 예전에는 list·sheet 만 유효해서
   //   '추천 기능 30선' 등을 누르면 해시가 바뀌는 순간 hashchange 가 목록으로 되돌렸다).
-  const [view, setView] = useHashTab({ base: ['ipam'], valid: IPAM_PAGE_KEYS, fallback: 'list' });
+  const [hashView, setView] = useHashTab({ base: ['ipam'], valid: IPAM_HASH_KEYS, fallback: 'list' });
+  // v2.691: 옛 주소(#/ipam/ranges — '대역·스캔')는 합쳐진 페이지로 옮긴다. 옮기기 전 한 번의 렌더도 새 페이지로 그린다
+  //   (옛 키로 그리면 아래 분기가 대장 목록으로 떨어져 대장을 읽기 전에 data.rows 를 읽는다 — Chromium 에서 실제로 화면이 죽었다).
+  const view = IPAM_PAGE_ALIASES[hashView] || hashView;
+  useEffect(() => { if (IPAM_PAGE_ALIASES[hashView]) setView(IPAM_PAGE_ALIASES[hashView]); }, [hashView]); // eslint-disable-line react-hooks/exhaustive-deps
   // v2.617: 이미 열린 화면이면 주소가 같아 다시 마운트되지 않는다 — 구독으로 즉시 받는다(목록 보기로 옮겨 결과가 보이게).
   useEffect(() => onSearchHandoff((t) => {
     if (t !== 'ipam') return;
@@ -281,9 +285,7 @@ function Ipam({ scope, onScope }) {
       : view === 'log' ? <IpamScanLog />
       : view === 'ipms' ? <IpmsSettings asPage access={access} />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
-      : view === 'ranges' ? (
-        <IpamRanges access={access} />
-      ) : view === 'netmap' ? (
+      : view === 'netmap' ? (
         <IpamNetMap />
       ) : view === 'policies' ? (
         ledgerWait || <RangePolicies scope={scope} canManage={canManage} vcenters={data.byVcenter} onChanged={() => setReload((n) => n + 1)} />

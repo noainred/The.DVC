@@ -1,6 +1,8 @@
-// IpScanSettings.jsx — IP관리 › IP 스캔 설정(에이전트별 능동 스캔 대역·포트·주기 + /24 제안 + 데이터센터 귀속). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
+// IpScanSettings.jsx — IP관리 › 스캔 대역·설정(에이전트별 능동 스캔 대역·포트·주기 + /24 제안 + 데이터센터 귀속). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
+// v2.691: 예전 '대역·스캔'(vCenter 별 대역)이 이 화면으로 합쳐졌다 — iDRAC 대역(서비스 선택)·VM 대역 가져오기, 다른 에이전트와 겹치는 대역 칸,
+//   에이전트별 스캔 대역 표, 1회 이전 안내(ScanRangeMigration). 판정 코어는 v2.690 vcRangeImportText 한 벌이다.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
@@ -12,6 +14,14 @@ import { checkRangeList, normalizeRangeText, serverInvalidText } from './ipmsRan
 import { agentLabel, fmtDt, Frame, LOCAL_AGENT } from './ipamShared.jsx';
 import { RangeCheck, SCAN_CAP } from './VcScanRangeEditor.jsx';
 import { ScanProgressBar } from './IpamScanStatus.jsx';
+import { ScanRangeImportModal } from './ScanRangeImportModal.jsx'; // v2.691
+import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
+import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
+import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
+import { downloadFailText } from '../downloadFailText.js';
+import { dayStamp } from '../../dayStamp.js';
+
+const DUP_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' };
 
 /**
  * v2.622(감사 WEB-08): IP 스캔 응답 수용 판정(순수). 응답은 요청한 에이전트가 지금 고른 에이전트와 같을 때만
@@ -138,6 +148,14 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   const [dcListErr, setDcListErr] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
+  // v2.691: 가져오기·중복 대역 칸·소유자(다른 에이전트 스캔 대역 — 중복 판정과 에이전트별 표)
+  const [owners, setOwners] = useState(null);
+  const [ownersErr, setOwnersErr] = useState(null);
+  const [importKind, setImportKind] = useState(null);
+  const [dupText, setDupText] = useState('');
+  const [dupMsg, setDupMsg] = useState(null);
+  const loadOwners = () => fetchJson('/admin/ipam/scan/owners').then((r) => { setOwners(r.owners || []); setOwnersErr(null); }).catch((e) => setOwnersErr(e?.message || String(e)));
+  useEffect(() => { loadOwners(); }, []);
   const load = async (ag, first = false) => {
     try {
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
@@ -168,7 +186,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   const rangeCheck = checkRangeList(s.ranges || [], { reversed: 'error', scanCap: SCAN_CAP });
   const rangeTitle = rangeCheck.invalid.length ? `형식 오류 ${rangeCheck.invalid.length}줄을 먼저 고치세요` : undefined;
   const msgView = typeof msg === 'string' ? { text: msg } : msg;
-  const switchAgent = (a) => { agentRef.current = a; setSFor(null); setMsg(null); setLoadErr(null); setDcInfo(undefined); setAgent(a); }; // 폼은 useIpamDraft 가 키(에이전트)마다 새로 시작한다
+  const switchAgent = (a) => { agentRef.current = a; setSFor(null); setMsg(null); setLoadErr(null); setDcInfo(undefined); setDupText(''); setDupMsg(null); setImportKind(null); setAgent(a); }; // v2.691: 중복 칸은 그 에이전트 것이다 — 다른 에이전트로 옮겨 가지 않게 비운다 // 폼은 useIpamDraft 가 키(에이전트)마다 새로 시작한다
   const save = async () => {
     // v2.622(감사 WEB-08): 다른 에이전트의 설정으로 채워진 폼은 저장하지 않는다.
     if (!ipScanAccept(sFor, agent)) { setMsg('이 폼은 지금 고른 에이전트의 설정이 아닙니다 — 다시 불러온 뒤 저장하세요.'); return; }
@@ -178,7 +196,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
       // v2.638: 400(등록되지 않은 데이터센터 등)은 putJson 이 던지지 않고 본문을 돌려준다 — 사유를 말하고 초안을 남긴다.
       if (r && r.ok === false) { setMsg({ text: `저장하지 못했습니다: ${r.reason || '서버가 거부했습니다'}`, list: (r.invalid || []).map((x) => serverInvalidText(x)) }); return; }
-      d.saved(r.settings); setStatus(r.status);
+      d.saved(r.settings); setStatus(r.status); loadOwners();
       if ('datacenter' in r) setDcInfo(r.datacenter);
       onSaved?.();
       const cfg = r.settings || s;
@@ -218,12 +236,32 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       setMsg(r.ok ? `대역 ${nRanges}개 스캔을 백그라운드에서 시작했습니다(전체 IP는 진행 막대에 표시). 창을 닫아도 계속 실행됩니다.` : `시작 실패: ${r.reason}`);
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); load(agent, false); }
   };
+  // v2.691: 가져오기·중복 칸 — 다른 에이전트의 스캔 대역(+ 옮기지 못한 vCenter 별 대역)과 겹치는지 본다.
+  const saved = ownersToSaved(owners || [], agent);
+  const rangeText = (s.ranges || []).join('\n');
+  const onImportConfirm = (rows, chosen) => {
+    const r = applyImport({ text: rangeText, dupText, rows, chosen, saved, vc: 'svc' });
+    setS({ ...s, ranges: r.text ? r.text.split('\n') : [] }); setDupText(r.dupText); setImportKind(null);
+    setDupMsg({ ok: true, text: `${r.added}개를 스캔 대역 칸에 넣었습니다${r.toDup ? ` · 겹치는 ${r.toDup}개는 아래 ‘중복 대역’ 칸에 두었습니다` : ''} — 아직 저장하지 않았습니다.` });
+  };
+  const reflect = () => {
+    const r = reflectDups({ text: rangeText, dupText, saved, vc: 'svc' });
+    setS({ ...s, ranges: r.text ? r.text.split('\n') : [] }); setDupText(r.dupText);
+    setDupMsg(r.kept.length ? { ok: false, text: `${r.added}줄을 반영했습니다 · ${r.kept.length}줄은 여전히 겹치거나 형식이 틀려 남겼습니다.` } : { ok: true, text: `${r.added}줄을 스캔 대역 칸에 반영했습니다 — 아직 저장하지 않았습니다.` });
+  };
+  const dupOthers = otherSavedRanges(saved, 'svc');
+  const dupLines = dupText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const downloadReport = async () => {
+    try { await downloadFile('/tools/ipam/scan-report.csv', `ip-scan-report-${dayStamp()}.csv`); } catch (e) { setMsg(downloadFailText(e)); }
+  };
+  const agentRows = (owners || []).filter((o) => o.kind === 'agent');
   const last = status?.lastRun;
   const runNowTitle = !isLocal ? '원격 에이전트는 자체 주기로 스캔합니다' : rangeTitle || (status?.running ? '스캔이 진행 중입니다' : '');
 
   return (
-    <Frame asPage={asPage} title="🛰️ IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
+    <Frame asPage={asPage} title="🛰️ 스캔 대역·설정 — IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
       <DraftBanner d={d} />
+      {asPage && <ScanRangeMigration onChanged={() => { loadOwners(); load(agent, true); }} />}
       <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
         vCenter가 모르는 <b>물리서버·타 가상화·네트워크 장비</b> IP를 TCP 커넥트 스캔으로 찾아 IP 관리대장에 채웁니다.
         <b> 할당 에이전트</b>를 고르면 해당 에이전트가 이 설정을 읽어가 자기 사이트에서 스캔하고 결과를 포탈에 보고합니다.
@@ -275,6 +313,26 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
               {csvOpen ? '▾' : '▸'} 스캔 대역 CSV 가져오기·내보내기
             </button>}
           </div>
+          <div className="flex gap wrap" style={{ marginTop: 6 }}>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} disabled={!sFor} title="DataCenter 의 iDRAC 스캔 대역 중 서비스 1개를 골라 /24 로 추가합니다" onClick={() => setImportKind('idrac')}>🖥️ iDRAC 대역 가져오기</button>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} disabled={!sFor} title="고른 vCenter 의 VM 이 쓰는 주소를 /24 로 묶어 추가합니다" onClick={() => setImportKind('vm')}>🧩 VM 대역 가져오기</button>
+          </div>
+          {ownersErr && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>다른 에이전트의 스캔 대역을 읽지 못했습니다({ownersErr}) — 겹침 검사 없이 넣습니다.</div>}
+          {dupMsg && <div style={{ fontSize: 11, marginTop: 4, color: dupMsg.ok ? 'var(--green)' : 'var(--amber)' }}>{dupMsg.text}</div>}
+          {dupLines.length > 0 && (
+            <div className="card" style={{ padding: 10, marginTop: 6, borderColor: 'var(--amber)', minWidth: 0 }}>
+              <div style={{ fontSize: 12, marginBottom: 4 }}><b>중복 대역 {dupLines.length}줄</b> <span className="muted">— 다른 에이전트의 스캔 대역과 겹치거나 이미 있어 위 칸에 넣지 않았습니다. 고친 뒤 ‘반영’ 을 누르면 다시 검사해 겹치지 않는 줄만 위 칸에 붙입니다.</span></div>
+              <textarea className="input" rows={Math.min(6, Math.max(2, dupLines.length))} value={dupText} onChange={(e) => setDupText(e.target.value)} style={DUP_TA} aria-label="중복 대역" />
+              <div style={{ fontSize: 11, marginTop: 4 }}>
+                {dupLines.slice(0, 8).map((l, i) => { const c = classifyLine(l, { text: rangeText, others: dupOthers }); return <div key={`${i}-${l}`} style={{ color: c.kind === 'new' ? 'var(--green)' : 'var(--amber)' }}>{c.kind === 'new' ? '✓' : '△'} {l} — {c.kind === 'new' ? '이제 겹치지 않습니다' : agentDupReasonText(c)}</div>; })}
+                {dupLines.length > 8 && <div className="muted">외 {dupLines.length - 8}줄</div>}
+              </div>
+              <div className="flex gap wrap" style={{ marginTop: 6 }}>
+                <button className="login-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={reflect}>반영</button>
+                <button className="logout-btn" style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => { setDupText(''); setDupMsg(null); }}>비우기</button>
+              </div>
+            </div>
+          )}
           {suggestOpen && <SubnetSuggest agent={agent} ranges={s.ranges || []} onAdd={(lines) => setS({ ...s, ranges: lines })} />}
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>포트</label>
@@ -317,6 +375,28 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
       )}
 
+      {/* v2.691: 에이전트별 스캔 대역 — 누가 어떤 대역을 스캔하는지 한 표로(누르면 그 에이전트를 고른다) */}
+      {agentRows.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>에이전트별 스캔 대역 — 이름을 누르면 그 에이전트를 고릅니다</div>
+          <div className="table-wrap" style={{ maxHeight: '28vh' }}>
+            <STable minWidth={560} wrap={false}>
+              <thead><tr><th>에이전트</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역</th><th>대역(앞 3줄)</th></tr></thead>
+              <tbody>
+                {agentRows.map((o) => (
+                  <tr key={o.owner} style={o.owner === agent ? { background: 'rgba(59,130,246,.10)' } : undefined}>
+                    <td><button className="linklike" style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }} onClick={() => switchAgent(o.owner)}><b>{agentName(o.owner)}</b></button></td>
+                    <td><span className={`badge ${o.enabled ? 'green' : 'gray'}`}>{o.enabled ? '켜짐' : '꺼짐'}</span></td>
+                    <td style={{ textAlign: 'right' }} data-sort={(o.ranges || []).length}>{(o.ranges || []).length}</td>
+                    <td className="muted" style={{ fontFamily: 'monospace', fontSize: 11.5, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(o.ranges || []).slice(0, 3).join(', ') || '—'}{(o.ranges || []).length > 3 ? ` 외 ${o.ranges.length - 3}줄` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+        </div>
+      )}
+
       {/* 에이전트별 마지막 보고 현황 */}
       {Object.keys(reports).length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -355,8 +435,13 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       <div className="flex gap wrap" style={{ marginTop: 14 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || rangeCheck.invalid.length > 0} title={rangeTitle} onClick={save}>저장{d.dirty ? ' ●' : ''}</button>
         <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running || !isLocal || rangeCheck.invalid.length > 0} title={runNowTitle} onClick={runNow}>지금 스캔(포탈)</button>
+        {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>}
         {!asPage && <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>}
       </div>
+      {importKind && (
+        <ScanRangeImportModal kind={importKind} agent={agent} text={rangeText} saved={saved}
+          onClose={() => setImportKind(null)} onConfirm={onImportConfirm} />
+      )}
     </Frame>
   );
 }

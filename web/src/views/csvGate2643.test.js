@@ -22,7 +22,8 @@ const TRIGGER = /export\.csv|sample\.csv|\/import'|\/import`|export\.txt|\.xlsx|
 
 // 표지가 있어도 사용자 트리거가 아닌 파일 — 사유와 함께 적는다(조용한 예외 금지).
 const ALLOW = new Map([
-  // 현재 비어 있다. 예: ['views/foo.jsx', '경로 상수만 정의하고 버튼은 호출부(bar.jsx)가 게이팅한다'],
+  // 예: ['views/foo.jsx', '경로 상수만 정의하고 버튼은 호출부(bar.jsx)가 게이팅한다'],
+  ['views/tools/ScanRangeImportModal.jsx', "v2.691 '/admin/ipam/scan/import' 는 /24 가져오기 제안(JSON 목록) — CSV 파일 입출력이 아니다(서버 superAdmin2643 NOT_CSV 와 같은 판단)"],
 ]);
 
 function walk(dir, out = []) {

@@ -7,9 +7,11 @@
 import { runScan } from './scanRunner.js';
 import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, listScanAgents, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
-import { recordScanLog } from './scanLog.js'; // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
+import { recordScanLog } from './scanLog.js';
+import { scheduleVcRangeMigration } from './vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
+// v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
 function effectiveRanges(s) {
   return [...new Set([...(s.ranges || []), ...enabledVcRanges()])];
 }
@@ -121,5 +123,7 @@ export function startIpScanPoller() {
     } catch { /* */ }
   }, 10 * 60_000);
   releaseTimer.unref?.();
+  // v2.691: 'vCenter 별 스캔 대역' 을 수집 에이전트의 스캔 대역으로 1회 옮긴다(이미 했으면 아무것도 하지 않는다).
+  try { scheduleVcRangeMigration(); } catch (e) { console.warn(`[ipscan] 대역 이전 예약 실패: ${e.message}`); }
   console.log(`[ipscan] poller started (enabled=${s.enabled}, ranges=${s.ranges.length}, every ${Math.round(s.intervalMs / 1000)}s)`);
 }

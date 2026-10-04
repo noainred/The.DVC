@@ -145,7 +145,9 @@ describe('WEB2613-10 views/** 에서 api.js 를 우회한 직접 fetch( 0건', (
     expect(bad).toEqual([]);
   });
   it('옮긴 곳이 delJson/downloadFile 을 쓴다', () => {
-    expect(code(path.join(SRC, 'views/tools/IpamNet.jsx'))).toMatch(/delJson\(`\/admin\/ipam\/vc-ranges\//);
+    // v2.691: IpamNet 의 vCenter 대역 삭제(대역·스캔 페이지)는 없어졌다 — 남은 대역은 스캔 대역·설정의 이전 안내가 postJson 으로 지운다.
+    expect(code(path.join(SRC, 'views/tools/IpamNet.jsx'))).not.toMatch(/fetch\(`\/api\/admin\/ipam\/vc-ranges/);
+    expect(code(path.join(SRC, 'views/tools/ScanRangeMigration.jsx'))).toMatch(/postJson\(path, body\)/);
     expect(code(path.join(SRC, 'views/tools/IpamEditors.jsx'))).toMatch(/delJson\(`\/tools\/ipam\/ip\//); // v2.639: OverrideEditor 는 IpamEditors.jsx
     expect(code(path.join(SRC, 'views/tools/GpuTool.jsx'))).toMatch(/downloadFile\(`\/tools\/gpu\/export\./);
     expect(code(path.join(SRC, 'views/PortalBackup.jsx'))).toMatch(/downloadFile\(`\/admin\/backup\/download\//);

@@ -1,126 +1,14 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../../api.js';
-import { downloadFailText } from '../downloadFailText.js';
+import React, { useEffect, useState } from 'react';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
-import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
-import { adminWriteGate, DEVTYPE_LABEL, fmtDt, MGMT, MgmtBadge } from './ipamShared.jsx';
-import { ScanProgressBar, ScanRunsTable } from './IpamScanStatus.jsx';
-import { VcScanRangeEditor } from './VcScanRangeEditor.jsx';
+import { DEVTYPE_LABEL, fmtDt, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { policySpecSize } from './ipmsRangeText.js';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { dayStamp } from '../../dayStamp.js';
 
 
-/**
- * vCenter별 IP 대역 저장 + 주기 스캔 + 스캔결과(첨부) 다운로드.
- * v2.639(U1·D4): 편집부는 VcScanRangeEditor(IPMS 설정 ② 와 같은 편집기 한 벌 — 초안·문법 검사·서버 400 표시·조회 실패 잠금).
- *   예전 이 페이지의 원시 textarea 는 셋 다 없었다. 저장된 대역(/tools/ipam/vc-ranges)은 여기서 읽어 편집기와 목록 표가 같이 쓴다.
- * v2.639(I3): 저장·삭제·CSV 가져오기·지금 스캔은 서버가 adminOnly 다 — access 'no'(403 확정)면 버튼을 잠그고 사유를 말한다.
- *   '모름' 은 잠그지 않는다(서버가 집행한다).
- */
-export function IpamRanges({ access = 'unknown' } = {}) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [vc, setVc] = useState('');
-  const [msg, setMsg] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [csvImport, setCsvImport] = useState(false); // 대역 CSV 가져오기 모달(공용 CsvImportModal)
-  const load = async () => { try { setData(await fetchJson('/tools/ipam/vc-ranges')); setError(null); } catch (e) { setError(e.message); } };
-  const statusDenied = useRef(false); // v2.611 LEFT2611-07: 스캔 상태는 전체 범위 계정만 — 403 이면 3초 폴링을 멈춘다
-  const loadStatus = () => { if (statusDenied.current) return; fetchJson('/admin/ipam/scan/status').then(setStatus).catch((e) => { setStatus(null); if (e?.status === 403) statusDenied.current = true; }); };
-  useEffect(() => { load(); loadStatus(); const t = setInterval(loadStatus, 3000); return () => clearInterval(t); }, []);
-  const write = adminWriteGate(access);
-  const removeVc = async (id) => {
-    if (write.locked) { setMsg({ ok: false, text: write.note }); return; }
-    if (!window.confirm(`'${id}' 대역을 삭제할까요?`)) return;
-    // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
-    //   예전 직접 fetch 는 res.ok 를 보지 않아 403·409 가 조용히 성공처럼 보였다(바로 load) — delJson 은 실패를 던진다.
-    try { const r = await delJson(`/admin/ipam/vc-ranges/${encodeURIComponent(id)}`); if (r?.ok === false) throw new Error(r.reason || '삭제 실패'); await load(); } catch (e) { setMsg({ ok: false, text: e.message }); }
-  };
-  // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
-  const downloadReport = async () => {
-    try { await downloadFile('/tools/ipam/scan-report.csv', `ip-scan-report-${dayStamp()}.csv`); } catch (e) { setMsg({ ok: false, text: downloadFailText(e) }); }
-  };
-  // v2.639: 저장된 대역을 못 읽어도 화면을 통째로 막지 않는다 — 편집기는 vcRangesGate 로 저장·스캔만 잠그고 사유를 말한다(v2.621 WEB-02).
-  const list = data?.ranges || [];
-  const runs = status?.runs || [];
-  return (
-    <>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>vCenter(법인)에 IP 대역을 저장하면 주기 스캔이 이 대역들을 함께 스캔해 사용 현황을 갱신합니다.</div>
-        <VcScanRangeEditor vc={vc} onVc={setVc} options={data ? (data.vcenters || []) : null} showSelect draftPrefix="ranges:vc" access={access}
-          vcRanges={data} vcRangesErr={error} onReloadRanges={load} onSaved={load}
-          scanRunning={!!status?.running} onScanStarted={loadStatus} title="vCenter별 스캔 대역" />
-        <div className="flex gap" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {canCsv() && <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>}
-        </div>
-        {status?.running && <div style={{ marginTop: 10 }}><ScanProgressBar progress={status.progress} /></div>}
-        {msg && <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{msg.text}</div>}
-      </div>
-
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="flex between wrap" style={{ alignItems: 'center' }}>
-          <b style={{ fontSize: 14 }}>저장된 대역 ({list.length})</b>
-          <span className="flex gap">
-            {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="저장된 대역 목록을 CSV 로 내려받기(가져오기 양식과 동일)"
-              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: downloadFailText(e) }))}>⤓ 대역 CSV</button>}
-            {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title={write.locked ? write.title : 'CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인'} disabled={write.locked}
-              onClick={() => setCsvImport(true)}>⤒ CSV 가져오기</button>}
-          </span>
-        </div>
-        {error && data && <div className="banner warn" style={{ marginTop: 8, whiteSpace: 'normal' }}>목록을 다시 읽지 못했습니다 — 아래는 마지막으로 받은 값입니다: {error}</div>}
-        <div className="table-wrap" style={{ marginTop: 8 }}>
-          <STable minWidth={640} wrap={false}><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
-            <tbody>
-              {!data && <tr><td colSpan={6} className="center muted" style={{ padding: 18, whiteSpace: 'normal' }}>{error ? `저장된 대역을 읽지 못했습니다(0개라는 뜻이 아닙니다): ${error}` : '저장된 대역을 불러오는 중…'}</td></tr>}
-              {data && list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 대역이 없습니다.</td></tr>}
-              {list.map((e) => (
-                <tr key={e.vcenterId}>
-                  <td><b>{e.vcenterName}</b></td>
-                  <td className="muted" style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{(e.ranges || []).join(', ')}</td>
-                  <td className="right">{(e.ipCount || 0).toLocaleString()}</td>
-                  <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
-                  <td className="muted" data-sort={e.updatedAt ?? ''}>{fmtDt(e.updatedAt)}</td>
-                  <td className="right nowrap">
-                    <button className="tab" onClick={() => setVc(e.vcenterId)}>{write.locked ? '보기' : '수정'}</button>
-                    <button className="tab" style={{ color: 'var(--red)' }} disabled={write.locked} title={write.title} onClick={() => removeVc(e.vcenterId)}>삭제</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody></STable>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="flex between wrap" style={{ alignItems: 'center' }}>
-          <b style={{ fontSize: 14 }}>완료된 스캔 (첨부)</b>
-          {canCsv() && <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport}>⬇ 전체 결과 CSV</button>}
-        </div>
-        {status == null && statusDenied.current && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 이력은 전체 범위 관리자 계정만 볼 수 있습니다.</div>}
-        <div style={{ marginTop: 8 }}>
-          <ScanRunsTable runs={runs} maxHeight="40vh" emptyText="완료된 스캔 기록이 없습니다. ‘지금 스캔’으로 실행하세요." />
-        </div>
-        {canCsv() && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>}
-      </div>
-
-      {canCsv() && csvImport && (
-        <CsvImportModal title="스캔 대역 CSV 가져오기" importPath="/admin/ipam/vc-ranges/import"
-          samplePath="/admin/ipam/vc-ranges/sample.csv"
-          description={<>헤더 행 필수(<code>vcenter</code>·<code>ranges</code> — vCenter 는 등록된 이름/ID, 대역은 세미콜론(;) 구분 CIDR·범위·IP, <code>enabled</code> 는 주기 스캔 포함 여부). vCenter 당 1행이며, <b>기존 vCenter 와 겹치는 행은 대역 전체가 CSV 값으로 교체</b>되므로 아래에서 덮어쓰기를 명시적으로 허용해야 적용됩니다. 대역 문법은 실제 스캐너와 같은 파서로 검증됩니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}
-          columns={[
-            { key: 'vcenter', label: 'vCenter', render: (r) => <b style={{ color: 'var(--text)' }}>{r.vcenter}</b> },
-            { key: 'rangeCount', label: '대역 수', align: 'right' },
-            { key: 'enabled', label: '주기 스캔', render: (r) => (r.enabled ? '포함' : '제외') },
-          ]}
-          overwriteLabel={(n) => <>기존 대역 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(그 vCenter 의 대역 전체가 CSV 값으로 교체됨)</>}
-          nameOf={(f) => f.vcenter || ''}
-          onClose={() => setCsvImport(false)} onDone={() => { setCsvImport(false); load(); loadStatus(); }} />
-      )}
-    </>
-  );
-}
+// v2.691: 'vCenter별 IP 대역 저장 + 주기 스캔' 페이지(IpamRanges)는 지웠다 — 스캔 대역·설정(IpScanSettings)으로 합쳐졌다.
 
 // 기간별 버킷 수/단위(v2.361, 사용자 요구) — '최근에 언제 사용했는지'를 직관적으로:
 //  1일→24칸(1시간) · 7일→7칸(1일) · 30일→30칸(1일) · 90일→9칸(10일) · 365일→12칸(1개월).
