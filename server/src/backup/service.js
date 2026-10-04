@@ -13,6 +13,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { createYielder } from '../util/timeSlice.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
@@ -156,31 +157,64 @@ function ensureDir() { fs.mkdirSync(BACKUP_DIR, { recursive: true }); }
 export const REDACTED_META = '__redacted__';
 /** 크기 상한으로 뺀 파일 `[{name,size}]`(v2.590 D5). 메타 키이고 파일이 아니다. */
 export const SKIPPED_META = '__skipped__';
-/** CONFIG_DIR(비재귀)에서 설정 파일들을 { name: content(utf8) }로 수집. */
+/** 수집 대상 파일인가 — 하위 디렉터리·데이터 파일·확장자 밖은 뺀다. */
+function isCollectable(e) {
+  if (!e.isFile()) return false; // backups/ 등 하위 디렉터리 제외
+  if (DENY_NAMES.has(e.name)) return false;
+  return ALLOW_EXT.has(path.extname(e.name).toLowerCase());
+}
+/** 읽은 내용을 번들에 싣는다 — .env 가림 규칙(v2.538)은 동기·비동기 수집이 같은 함수 하나를 쓴다. */
+function putCollected(out, name, content) {
+  // v2.538: .env 의 서명 키·봉인 키·토큰은 번들에 싣지 않는다(util/envRedact.js 머리말). 가린 개수는
+  // `out[REDACTED_META]` 로 돌려 화면·결과가 말한다 — 조용히 빼면 복원 뒤 '왜 키가 사라졌나' 를 모른다.
+  if (path.extname(name).toLowerCase() === '.env') {
+    const r = redactEnvSecrets(content);
+    content = r.text;
+    if (r.redacted) (out[REDACTED_META] ||= {})[name] = r.keys;
+  }
+  out[name] = content;
+}
+/**
+ * CONFIG_DIR(비재귀)에서 설정 파일들을 { name: content(utf8) }로 수집 — 동기판.
+ * 엣지 설정 push(agent/configPush.js)가 쓴다. 백업은 아래 collectConfigDirAsync 를 쓴다(v2.689 G2 I3).
+ */
 export function collectConfigDir(dir = CONFIG_DIR) {
   const out = {};
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
-    if (!e.isFile()) continue; // backups/ 등 하위 디렉터리 제외
+    if (!isCollectable(e)) continue;
     const name = e.name;
-    if (DENY_NAMES.has(name)) continue;
-    if (!ALLOW_EXT.has(path.extname(name).toLowerCase())) continue;
     try {
       const st = fs.statSync(path.join(dir, name));
       // v2.590 D5: 상한 초과 파일을 **조용히** 빼지 않는다 — 대규모 svcmon.json(실측 16.4MB)이 빠진 채 '백업 완료' 로
       // 보고되어 그 백업으로 복원하면 성능점검 대상 전량이 사라졌다. 뺀 파일을 결과·번들에 싣고 화면이 말한다.
       if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
-      let content = fs.readFileSync(path.join(dir, name), 'utf8');
-      // v2.538: .env 의 서명 키·봉인 키·토큰은 번들에 싣지 않는다(util/envRedact.js 머리말). 가린 개수는
-      // `out[REDACTED_META]` 로 돌려 화면·결과가 말한다 — 조용히 빼면 복원 뒤 '왜 키가 사라졌나' 를 모른다.
-      if (path.extname(name).toLowerCase() === '.env') {
-        const r = redactEnvSecrets(content);
-        content = r.text;
-        if (r.redacted) (out[REDACTED_META] ||= {})[name] = r.keys;
-      }
-      out[name] = content;
+      putCollected(out, name, fs.readFileSync(path.join(dir, name), 'utf8'));
     } catch { /* skip */ }
+  }
+  return out;
+}
+
+/**
+ * 비동기판(v2.689 G2 I3) — 백업 생성 경로. 파일당 최대 8MB × 수십~수백 개를 동기로 읽으면 변경 감시 백업(디바운스로 자주
+ * 돈다)마다 메인 루프가 멈춘다. 읽기는 libuv 스레드로, 파일 사이에서는 시간 기준으로 양보한다(util/timeSlice.js).
+ * 결과 모양·가림·크기 상한·메타 키는 동기판과 **같다**(같은 isCollectable · putCollected 를 쓴다).
+ */
+export async function collectConfigDirAsync(dir = CONFIG_DIR, { sliceMs = 15 } = {}) {
+  const out = {};
+  let ents = [];
+  try { ents = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return out; }
+  const maybeYield = createYielder(sliceMs);
+  for (const e of ents) {
+    if (!isCollectable(e)) continue;
+    const name = e.name;
+    try {
+      const st = await fs.promises.stat(path.join(dir, name));
+      if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
+      putCollected(out, name, await fs.promises.readFile(path.join(dir, name), 'utf8'));
+    } catch { /* skip */ }
+    await maybeYield();
   }
   return out;
 }
@@ -204,7 +238,7 @@ export function createBackup(reason = 'manual', opts = {}) {
 
 async function createBackupInner(reason, { retention = 30, skipIfUnchanged = false } = {}) {
   ensureDir();
-  const files = collectConfigDir();
+  const files = await collectConfigDirAsync();
   const redactedMeta = files[REDACTED_META] || null; delete files[REDACTED_META];
   const skippedFiles = files[SKIPPED_META] || []; delete files[SKIPPED_META];
   const fp = settingsFingerprint(files);
@@ -217,7 +251,9 @@ async function createBackupInner(reason, { retention = 30, skipIfUnchanged = fal
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeReason = /^[a-z-]{1,20}$/.test(String(reason)) ? reason : 'manual';
   const name = `portal-backup-${stamp}-${safeReason}.json.gz`;
-  fs.writeFileSync(path.join(BACKUP_DIR, name), gz, { mode: 0o600 });
+  // v2.689(G2 B3): 원자 쓰기(tmp + fsync + rename) — 직접 쓰기는 디스크 풀·크래시 때 잘린 .json.gz 를 남겨 목록의 '최신 백업' 이
+  //   되고, 이어지는 prune 이 온전한 오래된 백업을 지웠다. 쓰기가 실패하면 여기서 던지므로 prune·지문 갱신은 성공 뒤에만 돈다.
+  atomicWriteFileSync(path.join(BACKUP_DIR, name), gz, { mode: 0o600 });
   _lastFingerprint = fp;
   pruneBackups(retention);
   const edgeAgents = Object.keys(edges);
@@ -297,6 +333,7 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
   await createBackup('pre-restore', { retention });
   ensureDir();
   let restored = 0;
+  const failed = [];   // [{file, reason}] — 쓰기에 실패한 파일(v2.689 G2 B4)
   let envRestored = 0; const envDropped = [];
   for (const [name, content0] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
@@ -312,9 +349,12 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
     }
     // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 users.json 같은 핵심 설정이 부분기록으로
     // 손상된 채 남는다(복원이 오히려 파손 유발). tmp+rename으로 온전본만 남긴다.
-    try { atomicWriteFileSync(path.join(CONFIG_DIR, base), String(content)); restored++; } catch { /* */ }
+    // v2.689(G2 B4): 실패를 삼키지 않는다 — 예전에는 'restored N' 만 돌려 users.json 같은 파일이 복원되지 않았는데도 완전 복원처럼 보였다.
+    try { atomicWriteFileSync(path.join(CONFIG_DIR, base), String(content)); restored++; }
+    catch (e) { failed.push({ file: base, reason: String(e?.code || e?.message || e).slice(0, 200) }); }
   }
-  return { restored, edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped };
+  if (failed.length) console.warn(`[backup] 복원 실패 ${failed.length}개: ${failed.map((f) => `${f.file}(${f.reason})`).join(', ').slice(0, 500)}`);
+  return { restored, failed, edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped };
 }
 
 /** 업로드된 gzip 아카이브 버퍼를 파싱. */

@@ -78,17 +78,25 @@ export function compression() {
         res.setHeader('Vary', vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding');
         res.end(gz);
       };
+      const sendPlain = () => {
+        if (!res.getHeader('Content-Type')) res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Length', String(buf.length));
+        res.end(buf);
+      };
       // 같은 payload 를 이미 압축했다면 재압축 생략(#6) — M명 폴링 시 gzip 이 스냅샷당 1회.
       if (entry?.gz) { sendGz(entry.gz); return res; }
-      zlib.gzip(buf, (err, gz) => {
-        if (err) {
-          if (!res.getHeader('Content-Type')) res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.setHeader('Content-Length', String(buf.length));
-          return res.end(buf);
+      // v2.689(G2 I8): 첫 압축이 끝나기 전에 같은 payload 로 온 요청들은 진행 중인 압축 하나를 기다린다(single-flight).
+      //   예전에는 entry.gz 가 콜백에서야 세워져 스냅샷 교체 직후 몰린 요청 N개가 각자 수 MB 를 gzip 했다(CPU·메모리 N배).
+      //   실패하면 기억을 지운다 — 다음 요청이 다시 시도하고, 기다리던 요청은 원본으로 답한다(예전 실패 경로와 같다).
+      let p = entry?.gzPromise;
+      if (!p) {
+        p = new Promise((resolve, reject) => { zlib.gzip(buf, (err, gz) => (err ? reject(err) : resolve(gz))); });
+        if (entry) {
+          entry.gzPromise = p;
+          p.then((gz) => { entry.gz = gz; }, () => {}).finally(() => { if (entry.gzPromise === p) entry.gzPromise = null; });
         }
-        if (entry) entry.gz = gz;
-        sendGz(gz);
-      });
+      }
+      p.then(sendGz, sendPlain).catch((e) => { console.warn(`[compress] 응답 전송 실패: ${e?.message || e}`); });
       return res;
     };
     next();

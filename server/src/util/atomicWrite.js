@@ -7,6 +7,21 @@ import path from 'node:path';
  * 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유실될 수 있다. rename은 같은
  * 파일시스템에서 원자적이므로 '온전한 이전본' 또는 '온전한 새본'만 남는다.
  */
+/**
+ * v2.689(G2 B3): Buffer·TypedArray 도 받는다(백업 gzip 아카이브). `fs.writeSync(fd, buf)` 는 쓴 바이트 수를 돌려줄 뿐
+ * 전부 썼다고 보장하지 않으므로 바이너리는 끝까지 이어 쓴다. 문자열 경로는 예전과 같다.
+ */
+function writeAll(fd, data) {
+  if (!ArrayBuffer.isView(data)) { fs.writeSync(fd, data); return; }
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  let off = 0;
+  while (off < buf.length) {
+    const n = fs.writeSync(fd, buf, off, buf.length - off);
+    if (!(n > 0)) throw new Error(`atomicWrite: 쓰기가 진행되지 않습니다(${off}/${buf.length}바이트)`);
+    off += n;
+  }
+}
+
 export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
@@ -15,7 +30,7 @@ export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
     // 임시파일 데이터를 디스크에 fsync한 뒤 rename — fsync 없이는 rename 메타데이터가 데이터보다
     // 먼저 디스크에 닿아, 정전 시 대상이 0바이트/부분 파일로 남을 수 있다(정전 안전성 확보).
     const fd = fs.openSync(tmp, 'w', mode);
-    try { fs.writeSync(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    try { writeAll(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     try { fs.chmodSync(tmp, mode); } catch { /* */ }
     fs.renameSync(tmp, file); // 같은 FS에서 원자적 교체
     // 디렉터리 엔트리(rename)도 fsync — 새 파일명이 정전에도 유실되지 않게. 미지원 플랫폼은 무시.
