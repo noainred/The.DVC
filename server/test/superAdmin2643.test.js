@@ -42,6 +42,7 @@ const NOT_CSV = {
   '/tools/cvp/samples': 'CVP 원문 표본(관리자 진단)',
   '/targets/csv-schema': '성능점검 템플릿 편집 폼의 필드 목록 — 파일 입출력이 아니다(v2.643 에이전트 보고)',
   '/tools/vm-export': 'VM 내보내기 **미리보기**(100행 JSON) — CSV 다운로드는 .csv 경로가 게이트된다',
+  '/ipam/scan/import': '스캔 대역 /24 가져오기 제안(iDRAC 서비스·VM 주소 → JSON 목록, v2.691) — 파일 입출력이 아니다',
 };
 
 const ENUM = `

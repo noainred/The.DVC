@@ -56,7 +56,7 @@ describe('I2 — needsLedger 를 읽는 곳이 있다', () => {
   it('list·policies 만 대장을 기다린다', () => {
     expect(ipamPage('list').needsLedger).toBe(true);
     expect(ipamPage('policies').needsLedger).toBe(true);
-    for (const k of ['ranges', 'scan', 'status', 'log', 'ipms', 'csv', 'sheet', 'netmap', 'insights']) expect(!!ipamPage(k).needsLedger, k).toBe(false);
+    for (const k of ['scan', 'status', 'log', 'ipms', 'csv', 'sheet', 'netmap', 'insights']) expect(!!ipamPage(k).needsLedger, k).toBe(false);
     const core = read('./IpamCore.jsx');
     expect(core).toMatch(/ipamPage\(view\)\?\.needsLedger/);
     expect(core).not.toMatch(/const ledgerWait = data \? null/);
@@ -67,13 +67,11 @@ describe('U1·D4 — vCenter 스캔 대역 편집기는 한 벌이다', () => {
   const net = read('./IpamNet.jsx');
   const ipms = read('./IpmsSettings.jsx');
   const editor = read('./VcScanRangeEditor.jsx');
-  it('두 화면이 VcScanRangeEditor 를 쓰고, 대역·스캔 페이지에는 원시 textarea·자체 저장이 없다', () => {
-    expect(net).toMatch(/<VcScanRangeEditor [^>]*draftPrefix="ranges:vc"/);
-    expect(ipms).toMatch(/<VcScanRangeEditor [^>]*draftPrefix="ipms:vcscan"/);
-    const ranges = net.slice(net.indexOf('export function IpamRanges('), net.indexOf('const BUCKETS_FOR'));
-    expect(ranges).not.toMatch(/<textarea/);
-    expect(ranges).not.toMatch(/putJson\('\/admin\/ipam\/vc-ranges'/);
-    expect(ranges).not.toMatch(/if \(!data\) return <Loading/); // 못 읽어도 화면을 막지 않는다 — 편집기가 저장·스캔만 잠근다
+  it('v2.691: vCenter 별 스캔 대역 편집 화면(IPMS ②·대역·스캔)은 스캔 대역·설정으로 합쳐졌다 — 두 곳 모두 그 편집기를 그리지 않는다', () => {
+    expect(net).not.toMatch(/<VcScanRangeEditor/);
+    expect(net).not.toMatch(/export function IpamRanges\(/);
+    expect(ipms).not.toMatch(/<VcScanRangeEditor/);
+    expect(ipms).toMatch(/href="#\/ipam\/scan"/); // 안내는 합쳐진 페이지로 보낸다
     expect(ipms).not.toMatch(/putJson\('\/admin\/ipam\/vc-ranges'/);
     expect(ipms).not.toMatch(/aria-label="vCenter별 스캔 대역"/);
   });
@@ -132,10 +130,10 @@ describe('D6 — 스캔 상태 페이지: 조회 실패면 끝나지 않는 Load
 });
 
 describe('D7·U2·U3·U7·I6 — 소스 계약', () => {
-  it('D7: 대역 CSV 내려받기 실패도 downloadFailText', () => {
-    const net = read('./IpamNet.jsx');
-    expect(net).toMatch(/vc-ranges\.csv'\)\.catch\(\(e\) => setMsg\(\{ ok: false, text: downloadFailText\(e\) \}\)\)/);
-    expect(net).not.toMatch(/setMsg\(\{ ok: false, text: e\.message \}\)\)>⤓/);
+  it('D7: 스캔 결과 CSV 내려받기 실패도 downloadFailText(v2.691 — 대역·스캔 페이지에서 스캔 대역·설정으로 옮겼다)', () => {
+    const scan = read('./IpScanSettings.jsx');
+    expect(scan).toContain("downloadFile('/tools/ipam/scan-report.csv'");
+    expect(scan).toMatch(/catch \(e\) \{ setMsg\(downloadFailText\(e\)\); \}/);
   });
   it('U2: IpamSettings.jsx 는 재수출만 한다(구현 0) — 옛 import 경로는 그대로 동작', () => {
     const shell = read('./IpamSettings.jsx');
@@ -159,23 +157,18 @@ describe('D7·U2·U3·U7·I6 — 소스 계약', () => {
       expect(s, f).not.toMatch(/toLocaleString\('ko-KR'\)/);
     }
     const net = read('./IpamNet.jsx');
-    expect((net.match(/<ScanRunsTable /g) || []).length).toBe(1);
+    expect((net.match(/<ScanRunsTable /g) || []).length).toBe(0); // v2.691: 대역·스캔 페이지(이력 표 한 곳)가 없어졌다
     expect(net).not.toMatch(/durationMs \/ 1000\)\.toFixed/);
     expect(read('./IpamScanStatus.jsx').match(/<ScanRunsTable /g).length).toBe(1);
   });
-  it('I3: 대역·스캔 페이지의 쓰기 버튼은 access 로 잠근다 — IpamCore 가 access 를 넘긴다', () => {
+  it('I3: IPMS 설정에 access 를 넘긴다(v2.691 — 대역·스캔 페이지는 없어졌다)', () => {
     const core = read('./IpamCore.jsx');
-    expect(core).toMatch(/<IpamRanges access=\{access\} \/>/);
+    expect(core).not.toMatch(/<IpamRanges /);
     expect(core).toMatch(/<IpmsSettings asPage access=\{access\} \/>/);
-    const net = read('./IpamNet.jsx');
-    expect(net).toMatch(/export function IpamRanges\(\{ access = 'unknown' \} = \{\}\)/);
-    expect(net).toMatch(/disabled=\{write\.locked\} title=\{write\.title\} onClick=\{\(\) => removeVc/);
-    expect(net).toMatch(/disabled=\{write\.locked\}\s*onClick=\{\(\) => setCsvImport\(true\)\}/);
   });
   it('I6: 다열 표에 STable minWidth(스크롤 래퍼) — 서브넷 시트 12열 · 대역 목록 · 정책 · 이력 · 보고 현황', () => {
     expect(read('./IpamCore.jsx')).toMatch(/<STable minWidth=\{1100\} wrap=\{false\}>\s*<thead><tr><th>\{base\}\.X<\/th>/);
     const net = read('./IpamNet.jsx');
-    expect(net).toMatch(/<STable minWidth=\{640\} wrap=\{false\}><thead><tr><th>vCenter<\/th>/);
     expect(net).toMatch(/<STable minWidth=\{860\} wrap=\{false\}>/);
     expect(read('./IpamScanStatus.jsx')).toMatch(/<STable minWidth=\{520\} wrap=\{false\}>/);
     expect(read('./IpScanSettings.jsx')).toMatch(/<STable minWidth=\{480\} wrap=\{false\}>/);

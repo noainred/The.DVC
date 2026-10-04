@@ -4783,6 +4783,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 상태 넷: new / covered(이 칸에 이미) / partial(이 칸 다른 줄과 일부) / other(다른 vCenter 저장분과 겹침). new 만 텍스트 박스에, 나머지는 '중복 대역' 칸에 —
       '반영' 은 다시 판정해 겹치지 않는 줄만 옮긴다. 추가 직전에도 다시 판정한다(창을 연 뒤 텍스트를 고쳤을 수 있다). 문법·포함 판정은 `ipScanDcText.coverageOf` 한 벌.
     · ⚠ 확인 창 표에 '근거' 를 별도 열로 두지 말 것 — 400px 에서 그 열이 밀려 행 높이가 수백 px 가 됐다(Chromium 판독). 상태 칸 아래 작은 줄로 둔다.
+  - ⚠⚠ **v2.691 — '대역·스캔'(vCenter 별)과 'IP 스캔 설정'(에이전트별)은 하나다: 스캔 대역은 에이전트별(scanStore)만 편집한다**
+    (`server/src/ipam/vcRangeMigrate.js` + 라우트 `/admin/ipam/scan/{import,owners,migration[/move|/remove|/dismiss]}` + 웹
+    `IpScanSettings.jsx`·`ScanRangeImportModal.jsx`·`ScanRangeMigration.jsx`·`scanRangeImportText.js`, 사용자 요청 "두 기능을 합치고 IP 스캔 화면으로 ·
+    iDRAC 대역은 서비스별 1,2,3… 번호 · 이름 없으면 '이름 없음' · 서비스 하나를 골라 불러오기" + 선택 '수집하는 에이전트로 자동 이전'·'단계로 나눠 릴리스'(1차).
+    회귀 `server/test/ipScanUnify2691.test.js` + 웹 `scanRangeImportText.test.js`):
+    · 1회 이전(상태 파일 `ipam-vcrange-migration.json` · 원본 백업 `ipam-vcenter-ranges.json.pre-v2.691-<ts>.bak`): 중앙 직접 → `__local__`,
+      엣지 위임 → remoteAgent 또는 스냅샷 collectedBy(기존 스캔 에이전트 이름의 대소문자로). **담당을 모르면 옮기지 않는다**(no-agent) ·
+      삭제·비활성 vCenter·꺼진 대역(range-off — 켜면 동작이 바뀐다)도 남긴다. 남은 켜진 대역은 예전처럼 `enabledVcRanges()` 로 중앙이 계속 스캔한다
+      (조용한 손실 없음) — 화면 안내에서 옮기거나 지운다. 옮긴 에이전트가 꺼져 있었으면 켠다(`enabledAgent` 기록). 스냅샷 첫 병합 전에는 기다린다(최대 15분).
+    · ⚠ **동작 변화**: 엣지 법인 대역은 이제 그 엣지가 스캔한다(예전엔 중앙). 문법 오류 줄은 옮기지 않고 기록에 남긴다.
+    · iDRAC 가져오기는 서비스(엔트리)마다 `idracSubnets({entries:[e]})` 를 따로 부른다 — 합쳐서 계산하지 말 것(서비스 하나를 고르는 요구).
+      DataCenter 기본값은 `scanDatacenterOf(agent)` — 판정 불가(여러 DataCenter)면 비워 두고 고르게 한다(지어내지 않는다).
+    · 중복 판정은 v2.690 `vcRangeImportText` 한 벌이고 '다른 쪽' 은 `/scan/owners`(다른 에이전트 + 남은 vCenter 대역, `ownersToSaved` 가 지금 에이전트를 뺀다).
+    · ⚠ 옛 해시 `#/ipam/ranges` 는 `IPAM_PAGE_ALIASES` 로 옮기고 **옮기기 전 한 번의 렌더도 새 키로 그린다**(`view = ALIASES[hashView] || hashView`) —
+      옛 키로 그리면 분기가 대장 목록으로 떨어져 `data.rows` 를 읽고 화면이 죽었다(Chromium 에서 실제로).
+    · 남긴 것(2차 후보): `VcScanRangeEditor` 컴포넌트·`VcRangeImportModal` 은 더 그리지 않는다(RangeCheck 등 export 만 쓰인다) · vc-ranges API 는 호환으로 남김 ·
+      netmap 은 `migratedRangesFor` 로 옮긴 대역을 그 vCenter 의 /24 목록에 계속 넣는다.
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

@@ -321,9 +321,6 @@ export function IpamCsv({ scope, access, canManage, onGoto, onApplied }) {
       </Section>
       <ManageCsv scope={scope} canManage={canManage} onApplied={onApplied} />
       {access !== 'no' && <RangesCsv onApplied={onApplied} />}
-      <Section title="vCenter별 스캔 대역 CSV" note="vCenter 단위로 저장하는 스캔 대역(주기 스캔이 함께 스캔)은 ‘대역·스캔’ 페이지의 CSV 가져오기를 씁니다.">
-        <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => onGoto?.('ranges')}>🗂️ 대역·스캔 페이지로</button>
-      </Section>
     </div>
   );
 }

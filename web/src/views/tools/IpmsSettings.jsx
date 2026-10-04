@@ -1,12 +1,12 @@
-// IpmsSettings.jsx — IP관리 › IPMS 설정(무시 대역 · vCenter 스캔 대역 · 공인/사설 분류). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
-// ② vCenter별 스캔 대역은 VcScanRangeEditor(대역·스캔 페이지와 같은 편집기 한 벌 — U1)를 쓴다.
+// IpmsSettings.jsx — IP관리 › IPMS 설정(무시 대역 · 공인/사설 분류 · 스캔 대역 안내). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
+// ② vCenter별 스캔 대역은 v2.691 에 '스캔 대역·설정'(에이전트별)으로 합쳐졌다 — 여기서는 그 페이지로 안내만 한다.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { useIpamDraft } from './useIpamDraft.js'; // v2.636: 편집 초안 — 페이지를 옮기거나 대장이 다시 로딩돼도 입력이 남는다
 import { DraftBanner } from './IpamDraftBanner.jsx';
 import { Frame } from './ipamShared.jsx';
-import { RangeCheck, RangeMsg, RANGE_TA, VcScanRangeEditor } from './VcScanRangeEditor.jsx';
+import { RangeCheck, RangeMsg, RANGE_TA } from './VcScanRangeEditor.jsx';
 import { checkRangeList, ipmsSettingsErrors, normalizeRangeText, sameIpmsSettings, serverInvalidText, vcenterOptionLabel, vcenterOptions } from './ipmsRangeText.js';
 
 const SECTION = { border: '1px solid var(--border)', borderRadius: 10, padding: 12, minWidth: 0 };
@@ -23,14 +23,6 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
   const [vc, setVc] = useState('');
   const [msg, setMsg] = useState(null);         // { ok, text, list? } 하나의 모양
   const [saving, setSaving] = useState(false);
-  // vCenter별 스캔 대역(사전 정리 + 주기 스캔) — rangeStore(/vc-ranges) 백엔드 재사용. 편집은 VcScanRangeEditor 가 한다.
-  const [vcRanges, setVcRanges] = useState(null);
-  // v2.621(감사 WEB-02): 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 빈 칸을 '대역 없음' 으로 보이게 했고,
-  //   그 상태에서 '대역 저장' 을 누르면 PUT 이 그 vCenter 의 기존 대역 목록을 새 값으로 통째로 교체했다(꺼 둔 항목은 다시 켜짐).
-  const [vcRangesErr, setVcRangesErr] = useState(null);
-  const loadVcRanges = () => fetchJson('/tools/ipam/vc-ranges')
-    .then((r) => { setVcRanges(r); setVcRangesErr(null); })
-    .catch((e) => setVcRangesErr(e?.message || String(e)));
   const metaOf = (r) => ({ invalidSaved: r?.invalidSaved || [], orphanVcenters: r?.orphanVcenters || [], omittedOutOfScope: r?.omittedOutOfScope || 0 });
   // v2.637: vCenter 목록 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 선택기가 비어 vc 가 '' 인 채로
   //   'vCenter별 무시 대역' 입력이 `vcenters['']` 에 저장됐다(어느 vCenter 에도 적용되지 않는다 — 오류 없이 사라지는 입력).
@@ -40,7 +32,6 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
   useEffect(() => {
     fetchJson('/admin/ipam/settings').then((r) => { d.load(r.settings); setMeta(metaOf(r)); }).catch((e) => setLoadErr(e));
     loadVcs();
-    loadVcRanges();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 등록 목록이 비었거나 실패했어도 설정에만 남은(삭제된) vCenter 가 있으면 그것을 고를 수 있어야 한다 — 선택이 빈 채로 두지 않는다.
   useEffect(() => {
@@ -132,10 +123,12 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
 
         {/* vCenter별 스캔 대역 — 사전 정리 + 주기 스캔(rangeStore). 저장 버튼이 따로다(편집기 안). ① 의 vCenter 선택과 연동. */}
         <section style={SECTION}>
-          <VcScanRangeEditor vc={vc} options={opts} showSelect={false} draftPrefix="ipms:vcscan" access={access}
-            vcRanges={vcRanges} vcRangesErr={vcRangesErr} onReloadRanges={loadVcRanges} onSaved={loadVcRanges}
-            title="② vCenter별 스캔 대역 (주기 스캔)"
-            note="주기 IP 스캔이 이 대역을 함께 스캔해 사용 현황(네트워크 맵·관리대장)을 갱신합니다. ① 의 vCenter 선택과 연동됩니다. 이 칸은 아래 ‘대역 저장’ 으로 따로 저장합니다." />
+          <b style={{ fontSize: 13 }}>② 스캔 대역</b>
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginTop: 4 }}>
+            v2.691 부터 스캔 대역은 <b>에이전트별</b>로 한 곳에서 관리합니다 — 예전 vCenter 별 스캔 대역은 그 vCenter 를 수집하는 에이전트로 옮겼습니다
+            (중앙 직접 수집은 ‘이 포탈에서 직접’, 엣지 위임은 그 엣지). iDRAC 대역·VM 대역 가져오기도 그 페이지에 있습니다.
+          </div>
+          <a className="logout-btn" href="#/ipam/scan" style={{ display: 'inline-block', marginTop: 8, padding: '6px 12px', textDecoration: 'none', color: 'inherit' }}>🛰️ 스캔 대역·설정 페이지로</a>
         </section>
       </div>
 

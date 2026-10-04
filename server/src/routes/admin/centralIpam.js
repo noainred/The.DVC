@@ -19,6 +19,7 @@ import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js'
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
 import { idracSubnets, vmSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
+import { readMigrationState, runVcRangeMigration, moveVcRangeManually, removeVcRangeManually, dismissMigration } from '../../ipam/vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 에이전트
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
@@ -172,6 +173,111 @@ adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
     datacenter: scanDatacenterOf(agent, snap.vcenters),
     ...(Object.keys(inputs.errors || {}).length ? { inputErrors: inputs.errors } : {}),
   });
+});
+/**
+ * v2.691: 스캔 대역 소유자 목록(중복 판정용) — 에이전트별 스캔 대역 + 아직 옮기지 못한 vCenter 별 대역.
+ * 화면은 지금 고른 에이전트를 빼고 나머지와 겹치는지 본다(같은 대역을 둘이 주기 스캔하면 결과가 섞인다).
+ */
+function scanRangeOwners() {
+  const out = [];
+  for (const a of listScanAgents()) out.push({ owner: a.name, label: a.name === LOCAL ? '이 포탈에서 직접' : a.name, kind: 'agent', enabled: a.enabled !== false, ranges: a.ranges || [] });
+  if (!out.some((x) => x.owner === LOCAL)) { const l = loadScanSettings(LOCAL); out.push({ owner: LOCAL, label: '이 포탈에서 직접', kind: 'agent', enabled: l.enabled !== false, ranges: l.ranges || [] }); }
+  const vcName = {};
+  for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
+  for (const e of listVcRanges()) if ((e.ranges || []).length) out.push({ owner: `vc:${e.vcenterId}`, label: `vCenter ${vcName[e.vcenterId] || e.vcenterId}(옮기지 않은 대역)`, kind: 'vcenter', enabled: e.enabled !== false, ranges: e.ranges || [] });
+  return out;
+}
+adminRouter.get('/ipam/scan/owners', adminOnly, fleetOnly, (_req, res) => {
+  res.json({ ok: true, owners: scanRangeOwners() });
+});
+/**
+ * v2.691: 스캔 대역 '/24 가져오기'(에이전트 기준) — kind=idrac(DataCenter 의 iDRAC 스캔 대역을 **서비스별**로) · kind=vm(vCenter VM 의 IPv4).
+ * 스냅샷·설정 파일만 읽는다(장비 왕복 0). 텍스트 박스·다른 에이전트와의 중복 판정은 웹이 한다(저장 안 한 입력 기준).
+ * 전 법인 데이터(iDRAC 스캔 대역·전 vCenter VM)라 형제 스캔 설정 라우트와 같은 게이트(adminOnly + fleetOnly).
+ */
+adminRouter.get('/ipam/scan/import', adminOnly, fleetOnly, (req, res) => {
+  const agent = String(req.query.agent || LOCAL).slice(0, 128);
+  const kind = req.query.kind === 'idrac' ? 'idrac' : req.query.kind === 'vm' ? 'vm' : '';
+  if (!kind) return res.status(400).json({ ok: false, reason: 'kind 는 idrac 또는 vm 입니다.' });
+  const snap = store.get();
+  const { inputs } = currentScanDatacenters(snap.vcenters);
+  const mine = new Set(agentVcenterIds(agent, { vcenters: inputs.vcenters, snapVcenters: snap.vcenters, collectors: inputs.collectors }));
+  const base = { ok: true, kind, agent, cap: SUBNET_MAX };
+  if (kind === 'vm') {
+    const vcs = (snap.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, mine: mine.has(v.id) }))
+      .sort((a, b) => (Number(b.mine) - Number(a.mine)) || String(a.name).localeCompare(String(b.name)));
+    const asked = String(req.query.vcenterId || '').slice(0, 200);
+    if (asked && !vcs.some((v) => v.id === asked)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    const vcenterId = asked || vcs.find((v) => v.mine)?.id || '';
+    const vc = vcs.find((v) => v.id === vcenterId);
+    if (!vcenterId) return res.json({ ...base, vcenters: vcs, vcenterId: '', subnets: [], totals: {}, omitted: 0, noVcenter: true, initial: !!snap.initial });
+    return res.json({ ...base, vcenters: vcs, vcenterId, vcenterName: vc?.name || vcenterId, vcenterMine: !!vc?.mine, ...vmSubnets({ vms: snap.vms, vcenterId }), initial: !!snap.initial });
+  }
+  let datacenters = []; let datacentersError = '';
+  try { datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch (e) { datacentersError = e?.message || String(e); }
+  let decided = null;
+  try { decided = scanDatacenterOf(agent, snap.vcenters); } catch { decided = null; }
+  const assigned = decided?.datacenterId || '';
+  const asked = String(req.query.datacenterId || '').slice(0, 200);
+  const datacenterId = asked || assigned;
+  const dc = datacenters.find((d) => d.id.toLowerCase() === datacenterId.toLowerCase());
+  let entries = []; let rangesError = '';
+  try { entries = listIdracScanRanges(); } catch (e) { rangesError = e?.message || String(e); }
+  const low = datacenterId.toLowerCase();
+  const mineEntries = datacenterId ? entries.filter((e) => String(e?.datacenterId || '').trim().toLowerCase() === low) : [];
+  // 서비스마다 번호(1,2,3…)를 붙인다 — 이름이 없으면 화면이 '이름 없음' 으로 쓴다(지어내지 않는다).
+  const services = mineEntries.map((e, i) => {
+    const r = idracSubnets({ entries: [e], datacenterId });
+    return { no: i + 1, id: String(e.id || ''), service: String(e.service || '').trim(), ranges: (e.ranges || []).map((x) => String(x).trim()).filter(Boolean),
+      enabled: e.enabled !== false, scanAgent: String(e.agent || '').trim(), subnets: r.subnets, invalid: r.invalid, omitted: r.omitted };
+  });
+  res.json({
+    ...base, datacenterId, datacenterName: dc?.name || datacenterId, assignedDatacenterId: assigned,
+    datacenterSource: asked ? 'chosen' : assigned ? (decided?.source || 'auto') : 'none', datacenterMissing: !!datacenterId && !dc && !datacentersError,
+    datacenters, services, ...(datacentersError ? { datacentersError } : {}), ...(rangesError ? { rangesError } : {}),
+  });
+});
+/**
+ * v2.691: vCenter 별 스캔 대역 → 에이전트 이전 기록과 남은 대역. 아직 이전하지 않았고 스냅샷이 첫 병합을 지났으면 여기서 1회 실행한다
+ * (기동 뒤 예약 실행과 같은 함수 — 동기라 겹치지 않는다).
+ */
+function migrationView() {
+  let st = readMigrationState();
+  if (!st?.done && !store.get()?.initial) {
+    try { const r = runVcRangeMigration(); if (r.ran) { st = r.state; try { rescheduleScanPoller(); } catch { /* */ } } } catch { /* 화면이 '아직 이전 안 함' 으로 말한다 */ }
+  }
+  const vcName = {};
+  for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
+  const remaining = listVcRanges().map((e) => ({ vcenterId: e.vcenterId, vcenterName: vcName[e.vcenterId] || e.vcenterId, ranges: e.ranges || [], enabled: e.enabled !== false }));
+  const agents = [...new Set([LOCAL, ...listScanAgents().map((a) => a.name)])];
+  return { ok: true, state: st, remaining, agents };
+}
+adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
+adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
+  const agent = String(req.body?.agent || '').trim().slice(0, 128);
+  if (!vcenterId || !agent) return res.status(400).json({ ok: false, reason: 'vcenterId 와 agent 가 필요합니다.' });
+  const r = moveVcRangeManually(vcenterId, agent, { user: req.user?.username });
+  if (!r.ok) return res.status(r.status || 400).json(r);
+  invalidateScanDatacenters();
+  try { rescheduleScanPoller(); } catch { /* */ }
+  logAudit({ user: req.user?.username, action: 'IP 스캔 대역 옮기기', target: vcenterId, detail: `→ ${agent === LOCAL ? '이 포탈에서 직접' : agent} · 대역 ${r.moved}줄${r.enabledAgent ? ' · 그 에이전트 주기 스캔을 켰습니다' : ''}`, ip: req.ip || '' });
+  recordScanLog({ event: 'settings', agent, user: req.user?.username, message: `vCenter 별 스캔 대역을 에이전트로 옮김 — ${vcenterId.slice(0, 120)} · ${r.moved}줄` });
+  res.json({ ...r, ...migrationView() });
+});
+adminRouter.post('/ipam/scan/migration/remove', adminOnly, fleetOnly, (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
+  if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다.' });
+  const r = removeVcRangeManually(vcenterId, { user: req.user?.username });
+  if (!r.ok) return res.status(r.status || 400).json(r);
+  try { rescheduleScanPoller(); } catch { /* */ }
+  logAudit({ user: req.user?.username, action: 'IP 스캔 대역 지우기', target: vcenterId, detail: '옮기지 못한 vCenter 별 스캔 대역을 지웠습니다', ip: req.ip || '' });
+  recordScanLog({ event: 'settings', user: req.user?.username, message: `옮기지 못한 vCenter 별 스캔 대역 삭제 — ${vcenterId.slice(0, 120)}` });
+  res.json({ ...r, ...migrationView() });
+});
+adminRouter.post('/ipam/scan/migration/dismiss', adminOnly, fleetOnly, (_req, res) => {
+  const r = dismissMigration();
+  res.status(r.ok ? 200 : 404).json({ ...r, ...migrationView() });
 });
 // v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
 adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {

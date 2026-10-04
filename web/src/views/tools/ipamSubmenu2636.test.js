@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from '../../test/_stripComments.js';
-import { IPAM_PAGES, IPAM_PAGE_KEYS, IPAM_GROUPS, menuGroups, pageShown, pageDeniedNote, ipamPage } from './ipamPages.js';
+import { IPAM_PAGES, IPAM_PAGE_KEYS, IPAM_GROUPS, IPAM_PAGE_ALIASES, IPAM_HASH_KEYS, menuGroups, pageShown, pageDeniedNote, ipamPage } from './ipamPages.js';
 import * as D from './ipamDraft.js';
 import { splitCsvRecords, chunkRecords, mergeManageReports, commentRecord, ipColumnIndex, normHeader, utf8Len, sniffDelimiter } from './ipamCsvChunk.js';
 import * as L from './ipamScanLogText.js';
@@ -27,7 +27,11 @@ describe('① 페이지 정의', () => {
     const groups = new Set(IPAM_GROUPS.map(([g]) => g));
     for (const p of IPAM_PAGES) expect(groups.has(p.group), p.k).toBe(true);
     // 사용자가 요청한 페이지가 전부 있다
-    for (const k of ['list', 'sheet', 'insights', 'netmap', 'ranges', 'policies', 'scan', 'status', 'log', 'ipms', 'csv']) expect(ipamPage(k), k).toBeTruthy();
+    for (const k of ['list', 'sheet', 'insights', 'netmap', 'policies', 'scan', 'status', 'log', 'ipms', 'csv']) expect(ipamPage(k), k).toBeTruthy();
+    // v2.691: '대역·스캔'(ranges)은 '스캔 대역·설정'(scan)으로 합쳐졌다 — 옛 주소는 별칭으로 옮긴다
+    expect(ipamPage('ranges')).toBe(null);
+    expect(IPAM_PAGE_ALIASES.ranges).toBe('scan');
+    expect(IPAM_HASH_KEYS).toContain('ranges');
   });
   it("관리자 페이지는 '확실히 아님(no)' 일 때만 숨긴다 — 모름(unknown)은 보인다(권한은 서버가 집행)", () => {
     const keysOf = (a) => menuGroups(a).flatMap((g) => g.pages.map((p) => p.k));
@@ -217,7 +221,9 @@ describe('⑤ 화면 소스', () => {
     expect(ipamFn).not.toMatch(/if \(error\) return <ErrorBox/);
   });
   it('해시 키는 페이지 전부 · 설정은 모달이 아니라 페이지(asPage)', () => {
-    expect(ipamFn).toMatch(/useHashTab\(\{ base: \['ipam'\], valid: IPAM_PAGE_KEYS/);
+    expect(ipamFn).toMatch(/useHashTab\(\{ base: \['ipam'\], valid: IPAM_HASH_KEYS/);
+    expect(ipamFn).toMatch(/const view = IPAM_PAGE_ALIASES\[hashView\] \|\| hashView;/);
+    expect(ipamFn).toMatch(/IPAM_PAGE_ALIASES\[hashView\]\) setView\(IPAM_PAGE_ALIASES\[hashView\]\)/);
     // v2.638 부터 onSaved · v2.639 부터 access 도 넘긴다 — 'asPage 로 그린다' 만 고정한다(D3: 초판 정규식이 ' />' 까지 요구해 깨졌다).
     expect(ipamFn).toMatch(/<IpScanSettings asPage\b/);
     expect(ipamFn).toMatch(/<IpmsSettings asPage\b/);
@@ -231,8 +237,9 @@ describe('⑤ 화면 소스', () => {
     expect(stripComments(read('./IpmsSettings.jsx'))).toMatch(/useIpamDraft\('ipms:settings'\)/);
     const editor = stripComments(read('./VcScanRangeEditor.jsx'));
     expect(editor).toMatch(/useIpamDraft\(`\$\{draftPrefix\}:\$\{vc \|\| '-'\}`\)/);
-    expect(stripComments(read('./IpmsSettings.jsx'))).toMatch(/draftPrefix="ipms:vcscan"/);
-    expect(stripComments(read('./IpamNet.jsx'))).toMatch(/draftPrefix="ranges:vc"/);
+    // v2.691: vCenter 별 스캔 대역 편집 화면 두 곳(IPMS ②·대역·스캔)은 스캔 대역·설정으로 합쳐졌다 — 그 편집기를 더 그리지 않는다.
+    expect(stripComments(read('./IpmsSettings.jsx'))).not.toMatch(/<VcScanRangeEditor/);
+    expect(stripComments(read('./IpamNet.jsx'))).not.toMatch(/<VcScanRangeEditor|export function IpamRanges/);
     const scan = stripComments(read('./IpScanSettings.jsx'));
     expect(scan).toMatch(/useIpamDraft\(`scan:\$\{agent\}`\)/);
     expect(scan).toMatch(/d\.saved\(r\.settings\)/);

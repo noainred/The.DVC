@@ -20,16 +20,20 @@ export const IPAM_PAGES = Object.freeze([
   { k: 'sheet', label: '서브넷 대장', icon: '📊', group: 'ledger', title: '/24 서브넷 단위 엑셀형 대장' },
   { k: 'insights', label: '추천 기능 30선', icon: '🧠', group: 'ledger', title: '유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산' },
   { k: 'netmap', label: '네트워크 맵', icon: '🗺️', group: 'ledger', title: '대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵' },
-  { k: 'ranges', label: '대역·스캔', icon: '🗂️', group: 'range', title: 'vCenter별 IP 대역 저장·주기 스캔·결과 다운로드' },
   { k: 'policies', label: '대역 정책', icon: '🧩', group: 'range', needsLedger: true, title: '대역 단위 관리상태(예약·DHCP풀·폐기 등) 기본값' },
-  { k: 'scan', label: 'IP 스캔 설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 능동 스캔 대역·포트·주기' },
+  // v2.691: 예전 '대역·스캔'(vCenter 별 대역)은 이 페이지로 합쳐졌다 — 옛 주소 #/ipam/ranges 는 IPAM_PAGE_ALIASES 가 옮긴다.
+  { k: 'scan', label: '스캔 대역·설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 스캔 대역(iDRAC·VM 대역 가져오기)·포트·주기' },
   { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' },
   { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' },
   { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' },
   { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' },
 ]);
 export const IPAM_GROUPS = Object.freeze([['ledger', 'IP 대장'], ['range', '대역'], ['scan', '스캔'], ['setup', '설정·데이터']]);
+/** v2.691: 없어진 페이지의 옛 주소 → 새 페이지(북마크·공유 링크·다른 화면의 바로가기를 살린다). */
+export const IPAM_PAGE_ALIASES = Object.freeze({ ranges: 'scan' });
 export const IPAM_PAGE_KEYS = Object.freeze(IPAM_PAGES.map((p) => p.k));
+/** 주소로 받아들이는 키(옛 주소 포함) — 받은 뒤 IPAM_PAGE_ALIASES 로 옮긴다. */
+export const IPAM_HASH_KEYS = Object.freeze([...IPAM_PAGE_KEYS, ...Object.keys(IPAM_PAGE_ALIASES)]);
 const BY_KEY = new Map(IPAM_PAGES.map((p) => [p.k, p]));
 
 /** 페이지 정의(없으면 null). */

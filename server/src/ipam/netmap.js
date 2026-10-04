@@ -9,6 +9,7 @@
 import { buildIpamRows } from './ledger.js';
 import { getIpHistory } from './scanStore.js';
 import { rangesForVcenter } from './rangeStore.js';
+import { migratedRangesFor } from './vcRangeMigrate.js'; // v2.691: 에이전트로 옮긴 그 vCenter 의 대역
 import { expandRange, portService } from './scan.js';
 
 const DAY = 86_400_000;
@@ -60,7 +61,7 @@ function stateAt(hist, t) {
 export function netmapBases(snap, vcenterId = '', allowed = null) {
   const bases = new Set();
   // 1) vCenter 등록 대역에서 — 범위 밖 vCenter 의 대역은 조회하지 않는다(대역 열거 유출 차단).
-  const specs = (vcenterId && (!allowed || allowed.has(vcenterId))) ? rangesForVcenter(vcenterId) : [];
+  const specs = (vcenterId && (!allowed || allowed.has(vcenterId))) ? [...rangesForVcenter(vcenterId), ...migratedRangesFor(vcenterId)] : [];
   for (const spec of specs) {
     for (const ip of expandRange(spec)) { const p = ip.split('.'); bases.add(`${p[0]}.${p[1]}.${p[2]}`); }
   }
