@@ -264,6 +264,47 @@ insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) =>
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
+/*
+ * v2.689(I2): 이상 탐지·예측은 metrics DB 를 여러 번 훑는 가장 비싼 조회다. 두 가지를 막는다.
+ *  ① 캐시 키에 `req.originalUrl` 전체를 쓰면 의미 없는 쿼리(`&_=난수`)만 바꿔도 single-flight·60초 기억을 우회해 매번 재계산한다
+ *     → 키는 **계산이 실제로 읽는 인자를 클램프한 값**으로만 만들고, 계산에도 그 값을 넘긴다(키와 계산이 같은 값을 본다).
+ *     클램프 식은 detectAnomalies·forecastCapacity 의 식과 같다(그 함수들이 다시 클램프해도 결과가 같다 — 멱등).
+ *  ② 키가 다른 계산도 **전역 동시 1건**으로 줄 세운다(진행 중 계산 뒤에 붙는다). 서로 다른 인자 수십 개가 동시에 들어와도
+ *     DB 스캔이 겹치지 않는다. 같은 키의 동시 요청은 snapMemo 가 진행 중 Promise 에 합류시킨다.
+ */
+let _heavyTail = Promise.resolve();
+let _heavyActive = 0;
+let _heavyPeak = 0;
+export function runHeavyExclusive(fn) {
+  const run = _heavyTail.then(async () => {
+    _heavyActive += 1; if (_heavyActive > _heavyPeak) _heavyPeak = _heavyActive;
+    try { return await fn(); } finally { _heavyActive -= 1; }
+  });
+  _heavyTail = run.then(() => {}, () => {});
+  return run;
+}
+/** 테스트·진단용 — 동시에 돈 무거운 계산의 최대 개수(1 이어야 한다). */
+export function _insightsHeavyStats({ reset = false } = {}) {
+  const r = { active: _heavyActive, peak: _heavyPeak };
+  if (reset) _heavyPeak = _heavyActive;
+  return r;
+}
+const clampNum = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
+/** 이상 탐지 인자(anomaly.js detectAnomalies 와 같은 클램프). */
+function anomalyArgs(q = {}) {
+  return { z: Math.max(2, Number(q.z) || 3.5), windowHours: clampNum(q.windowHours, 1, 168, 24), bucketMin: clampNum(q.bucketMin, 1, 1440, 10) };
+}
+/** 예측 인자(forecast.js forecastCapacity 와 같은 클램프 — 버킷은 1시간 정배수). */
+function forecastArgs(q = {}) {
+  const days = Math.max(3, Math.min(1830, Number(q.days) || 14));
+  const bucketH = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number(q.bucketMin) || 60)) / 60));
+  const out = { days, bucketMin: bucketH * 60 };
+  if (q.minR2 != null) out.minR2 = Number(q.minR2);
+  if (q.vcenterId) out.vcenterId = String(q.vcenterId);
+  return out;
+}
+const argsKey = (o) => Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join('&');
+
 // --- AI 이상탐지 ---
 // 요청마다 전 시계열 재집계라 가장 비싼 조회였다 — 동일 파라미터의 동시/반복 요청을
 // single-flight + 60s TTL 로 1회 계산에 합류시킨다(N 사용자 폴링 → 계산 1회).
@@ -281,8 +322,9 @@ insightsRouter.get('/anomalies', async (req, res) => {
       for (const h of snap.hosts || []) if (allow.has(h.vcenterId)) allowedKeys.add(h.id);        // temp_host·gpu_util
       for (const d of snap.datastores || []) if (allow.has(d.vcenterId)) allowedKeys.add(d.id);   // ds_usedgb
     }
-    const key = `anomalies|${req.originalUrl}|${scopeKey(req.user, snap)}`;
-    const payload = await snapMemo('anomalies', key, 60_000, () => detectAnomalies({ ...req.query, allowedKeys }));
+    const args = anomalyArgs(req.query);
+    const key = `anomalies|${argsKey(args)}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('anomalies', key, 60_000, () => runHeavyExclusive(() => detectAnomalies({ ...args, allowedKeys })));
     sendCached(req, res, `${payload.generatedAt}|${key}`, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -293,8 +335,9 @@ insightsRouter.get('/forecast', async (req, res) => {
     const snap = store.get();
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId); // 데이터스토어 예측 scope
     const allowed = scopedVcenterIds(req.user, snap);               // GPU 예측 scope(스냅샷 밖 metrics DB 키)
-    const key = `${snap.generatedAt}|${req.originalUrl}|${scopeKey(req.user, snap)}`;
-    const payload = await snapMemo('forecast', key, 60_000, () => forecastCapacity(scoped, { ...req.query, allowed }));
+    const args = forecastArgs(req.query);
+    const key = `${snap.generatedAt}|forecast?${argsKey(args)}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('forecast', key, 60_000, () => runHeavyExclusive(() => forecastCapacity(scoped, { ...args, allowed })));
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

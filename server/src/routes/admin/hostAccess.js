@@ -1,13 +1,17 @@
 /**
  * 호스트 접근 제어 API(v2.485) — SSH/웹(80·443·포탈 포트) 클라이언트 제어 + OS 방화벽 추가 규칙.
- * 권한: 조회 admin · 초안 저장/계획 admin+설정 소유자 · 적용/확정/되돌림 admin+설정 소유자+**본인 OTP**
+ * 권한: 조회 admin+전체 범위+설정 소유자(v2.689) · 초안 저장/계획 admin+설정 소유자 · 적용/확정/되돌림 admin+설정 소유자+**본인 OTP**
  * (서버 접근 경로를 바꾸는 작업이라 세션 탈취만으로는 못 하게 한다). 모든 변경은 감사 로그.
  */
 import { config } from '../../config.js';
 import { logAudit } from '../../audit.js';
 import { verifyUserOtp, getUser } from '../../auth/auth.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+
+// v2.689(B4 게이트 비대칭): 상태 조회는 허용 CIDR 목록(관리망 구조)·방화벽 엔진 규칙·sudoers 힌트를 싣는다 — 변경 라우트와 같은
+//   설정 소유자 등급 + 전 법인 공용 서버 설정이라 전체 범위 계정만 조회한다(형제 `/backup/status` 와 같은 모양).
+const fleetReadOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 OS 방화벽)는 전 법인 공용 서버 설정이라 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 import { hostAccessStatus, saveDraft, planHostAccess, applyHostAccess, confirmHostAccess, revertHostAccess, SUDOERS_HINT } from '../../hostaccess/service.js';
 
 function requireOwnOtp(req, res, next) {
@@ -21,7 +25,7 @@ function requireOwnOtp(req, res, next) {
 }
 
 export function registerHostAccess(adminRouter) {
-  adminRouter.get('/host-access', adminOnly, async (req, res) => {
+  adminRouter.get('/host-access', adminOnly, fleetReadOnly, requireSettingsOwner, async (req, res) => {
     res.json({ ...(await hostAccessStatus({ requesterIp: clientIp(req) })), sudoersHint: SUDOERS_HINT() });
   });
   adminRouter.put('/host-access/draft', adminOnly, requireSettingsOwner, (req, res) => {
