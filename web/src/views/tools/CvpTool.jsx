@@ -249,7 +249,11 @@ export default function CvpTool() {
                 const cc = sysCell(d.cpuPct); const mc = sysCell(d.memPct);
                 return (
                   <tr key={`${d.cvpId}|${d.key}`} style={{ cursor: 'pointer' }} onClick={() => setDetailKey({ cvpId: d.cvpId, key: d.key, hostname: d.hostname })}>
-                    <td><b style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{d.hostname || d.key || '—'}</b></td>
+                    {/* 키보드로도 상세를 연다(v2.689 I7) — 행 클릭은 그대로 두고, 호스트명이 버튼 역할을 한다. 행 onClick 과 이중 호출되지 않게 전파를 막는다. */}
+                    <td><b role="button" tabIndex={0} title="장비 상세 열기"
+                      style={{ cursor: 'pointer', color: 'inherit', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+                      onClick={(e) => { e.stopPropagation(); setDetailKey({ cvpId: d.cvpId, key: d.key, hostname: d.hostname }); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDetailKey({ cvpId: d.cvpId, key: d.key, hostname: d.hostname }); } }}>{d.hostname || d.key || '—'}</b></td>
                     <td style={{ fontSize: 12 }}>{corpLabel({ corpId: d.corpId, corpName: d.corpName, missing: d.corpMissing })}</td>
                     <td style={{ fontSize: 12 }}>{d.model || '—'}</td>
                     <td style={{ fontSize: 12 }}>{d.serial || '—'}</td>

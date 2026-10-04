@@ -18,14 +18,15 @@ import BoldText from '../../components/boldText.jsx';
 import { Card } from './shared.jsx';
 import {
   USAGE_DAYS, daysLabel, lowerBoundNote, basisSummary, catalogNotes, nowText, NOW_SUM_NOTE, dayCell,
-  coverageNote, omittedNote, emptyNote, kindText, basisText, usageCsvPath,
+  coverageNote, omittedNote, emptyNote, kindText, basisText, usageCsvPath, usageReqKey, usageRepFor,
 } from './horizonUsageText.js';
 
 const tsText = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
 export default function HorizonUsagePanel({ serverId = '', serverName = '', canShowNames = false }) {
   const [days, setDays] = useState(7);
-  const [rep, setRep] = useState(null);
+  // 응답은 요청 키(기간·서버)와 함께 둔다 — 지금 선택과 다르면 그리지 않는다(v2.689 B10-a).
+  const [got, setGot] = useState(null);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
@@ -37,12 +38,17 @@ export default function HorizonUsagePanel({ serverId = '', serverName = '', canS
     setLoading(true); setErr('');
     try {
       const r = await fetchJson('/tools/horizon-sessions/usage', { days: String(d), ...(sid ? { serverId: sid } : {}) });
-      if (my === seq.current) setRep(r);
+      if (my === seq.current) setGot({ key: usageReqKey(d, sid), rep: r });
     } catch (e) { if (my === seq.current) setErr(e); }
     finally { if (my === seq.current) setLoading(false); }
   }, [days, serverId]);
 
   useEffect(() => { load(days, serverId); }, [serverId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 지금 선택(days·serverId)에 대한 응답만 — 서버·기간을 바꾼 뒤 응답 전·실패 동안은 이전 데이터를 숨긴다.
+  const rep = usageRepFor(got, days, serverId);
+  // CSV 는 화면에 그려진 응답의 키로 만든다 — 화면(7일)과 파일(30일)이 어긋나지 않게(B3).
+  const repKey = rep ? got.key : null;
 
   const basis = useMemo(() => basisSummary(rep?.serverMeta), [rep]);
   const catNotes = useMemo(() => catalogNotes(rep?.serverMeta), [rep]);
@@ -60,7 +66,7 @@ export default function HorizonUsagePanel({ serverId = '', serverName = '', canS
   }, [rep, q]);
   const chart = useMemo(() => (rep?.daily || []).map((d) => ({ ...d, label: d.day.slice(5) })), [rep]);
   const anySum = useMemo(() => (rep?.services || []).some((s) => s.nowBySum), [rep]);
-  const maxDays = Number(rep?.maxDays) || 92;
+  const maxDays = Number(got?.rep?.maxDays) || 92;   // 서버 상한(선택과 무관) — 선택이 바뀌어 rep 가 비어도 칩 목록이 흔들리지 않게
 
   const t = rep?.totals || {};
   const empty = emptyNote(rep);
@@ -78,7 +84,8 @@ export default function HorizonUsagePanel({ serverId = '', serverName = '', canS
         <button className="tab" style={{ padding: '2px 9px', fontSize: 11 }} onClick={() => load(days, serverId)} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {canCsv() && (
           <button className="tab" style={{ padding: '2px 9px', fontSize: 11 }}
-            onClick={() => { setDlErr(''); downloadFile(usageCsvPath(days, serverId)).catch((e) => setDlErr(e?.message || String(e))); }}>⬇ CSV(사용자×서비스)</button>
+            disabled={!repKey} title={repKey ? undefined : '화면에 표시된 집계가 없어 내려받을 수 없습니다'}
+            onClick={() => { if (!repKey) return; setDlErr(''); downloadFile(usageCsvPath(repKey.days, repKey.serverId)).catch((e) => setDlErr(e?.message || String(e))); }}>⬇ CSV(사용자×서비스)</button>
         )}
         {rep?.fromDay && <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{rep.fromDay === rep.toDay ? rep.fromDay : `${rep.fromDay} ~ ${rep.toDay}`}</span>}
       </div>

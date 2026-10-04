@@ -439,3 +439,13 @@ export function contributions(groupSeries, totalChange) {
     return { key: String(s.key ?? ''), name: s.name, change: ch, pct: l ? l.pct : null, share: ch != null && tot != null && tot > 0 ? Math.round((ch / tot) * 100) : null };
   }).sort((a, b) => ((b.change ?? -Infinity) - (a.change ?? -Infinity)) || String(a.name).localeCompare(String(b.name), 'ko'));
 }
+
+/**
+ * 지금 고른 기간의 응답만 돌려준다 — v2.689 B10-b. got = { period, data }.
+ * 기간을 바꾼 조회가 실패하거나 아직 오지 않았을 때 이전 기간의 응답을 새 기간 라벨 아래 그리지 않는다
+ * (기간 버튼은 '1달' 인데 차트·변화량은 '7일' 인 거짓). 맞지 않으면 null.
+ */
+export function historyForPeriod(got, period) {
+  if (!got || got.data == null) return null;
+  return String(got.period) === String(period) ? got.data : null;
+}
