@@ -14,9 +14,11 @@ import { Modal } from '../../components/Modal.jsx';
 import { STable } from '../../components/STable.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js';
 import { classifySubnets, countKinds, vmSummaryText } from './vcRangeImportText.js';
-import { AGENT_KIND_LABEL, agentName, defaultServiceNo, idracHeadText, serviceMeta, serviceTitle, serviceUnnamed } from './scanRangeImportText.js';
+import { AGENT_KIND_LABEL, CLS_BADGE, CLS_FILTERS, CLS_LABEL, agentName, clsCounts, defaultChosen, defaultServiceNo, filterByCls, idracHeadText, ignoredText, partialIgnoreText, serviceMeta, serviceTitle, serviceUnnamed } from './scanRangeImportText.js';
 
 const KIND_COLOR = { new: 'var(--green)', covered: 'var(--text-dim)', partial: 'var(--amber)', other: 'var(--amber)', invalid: 'var(--red)' };
+/** 선택했지만 필터 때문에 안 보이는 행 수 — 숨긴 채 추가되는 줄이 있다는 사실을 말한다. */
+function selRowsHidden(rows, shown, chosen) { if (!chosen) return 0; const vis = new Set(shown.map((r) => r.cidr)); return rows.filter((r) => chosen.has(r.cidr) && !vis.has(r.cidr)).length; }
 const SVC_KEY = 'svc'; // classifySubnets 의 vc 자리 — saved 목록에 같은 키가 없으므로 아무것도 빼지 않는다
 
 export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConfirm }) {
@@ -26,6 +28,7 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
   const [err, setErr] = useState(null);
   const [svcNo, setSvcNo] = useState(null);
   const [chosen, setChosen] = useState(null);
+  const [cls, setCls] = useState(''); // v2.692: 공인/사설 필터(표시만 거른다 — 선택은 그대로)
   useEffect(() => {
     let alive = true;
     setData(null); setErr(null); setChosen(null);
@@ -39,13 +42,18 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
   const svc = kind === 'idrac' ? services.find((s) => s.no === svcNo) || null : null;
   const subnets = kind === 'idrac' ? (svc?.subnets || []) : (data?.subnets || []);
   const rows = useMemo(() => classifySubnets(subnets, { text, saved, vc: SVC_KEY }), [subnets, text, saved]);
-  useEffect(() => { setChosen(new Set(rows.filter((r) => r.kind !== 'covered' && r.kind !== 'invalid').map((r) => r.cidr))); }, [data, svcNo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setChosen(defaultChosen(rows)); }, [data, svcNo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = filterByCls(rows, cls);
+  const clsN = clsCounts(rows);
+  const ignored = kind === 'idrac' ? svc?.ignored : data?.ignored;
+  const ignoredLine = ignoredText(ignored, data?.ignoreSources);
   const n = countKinds(rows);
   const sel = chosen || new Set();
   const selRows = rows.filter((r) => sel.has(r.cidr));
   const selNew = selRows.filter((r) => r.kind === 'new').length;
   const toggle = (cidr) => setChosen((c) => { const x = new Set(c || []); if (x.has(cidr)) x.delete(cidr); else x.add(cidr); return x; });
-  const setAll = (on) => setChosen(new Set(on ? rows.filter((r) => r.kind !== 'invalid').map((r) => r.cidr) : []));
+  const setAll = (on) => setChosen((c) => { const x = new Set(c || []); for (const r of shown) { if (r.kind === 'invalid') continue; if (on) x.add(r.cidr); else x.delete(r.cidr); } return x; }); // 보이는(필터) 행만
+  const hiddenSel = selRowsHidden(rows, shown, chosen);
   const who = agentName(agent);
   const title = kind === 'idrac' ? `iDRAC 대역 가져오기 — ${who}` : `VM 대역 가져오기 — ${who}`;
   const e = err ? errorBoxInput(err) : null;
@@ -110,8 +118,16 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
         )}
         {data && kind === 'vm' && data.vcenterId && <div style={{ margin: '6px 0' }}>{vmSummaryText(data)}</div>}
         {data && kind === 'vm' && data.noVcenter && <div className="muted" style={{ margin: '6px 0' }}>vCenter 를 고르세요 — 이 에이전트가 수집하는 vCenter 를 찾지 못했습니다(임의로 고르지 않습니다).</div>}
+        {data && ignoredLine && <div className="card" style={{ padding: '7px 10px', margin: '8px 0 4px', fontSize: 12, whiteSpace: 'normal' }}>{ignoredLine}</div>}
         {data && rows.length > 0 && (
           <>
+            <div className="flex gap wrap" role="group" aria-label="공인/사설 분류 필터" style={{ alignItems: 'center', margin: '8px 0 2px' }}>
+              <span className="muted">분류</span>
+              {CLS_FILTERS.filter((f) => !f.key || clsN[f.key] > 0 || cls === f.key).map((f) => (
+                <button key={f.key || 'all'} type="button" className={`tab${cls === f.key ? ' active' : ''}`} aria-pressed={cls === f.key} style={{ flex: 'none', padding: '3px 10px', fontSize: 11.5 }} onClick={() => setCls(f.key)}>{f.label} {clsN[f.key]}</button>
+              ))}
+              <span className="muted" style={{ fontSize: 11 }}>IPMS 설정 ③ 공인/사설 기준(명시 대역 우선 → 없으면 RFC1918). 공인 /24 는 기본으로 체크를 풀어 둡니다.</span>
+            </div>
             <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0 4px' }}>
               {svc && <b>{serviceTitle(svc)} — /24 {rows.length}개</b>}
               <span className="muted">새 대역 {n.new} · 이미 입력됨 {n.covered} · 일부 겹침 {n.partial} · 다른 에이전트와 겹침 {n.other}</span>
@@ -120,14 +136,16 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
             </div>
             <div style={{ maxHeight: 300, overflowY: 'auto' }}>
               <STable className="v3-table" minWidth={340}>
-                <thead><tr><th data-nosort>추가</th><th>대역(/24)</th><th>상태 · 근거</th></tr></thead>
+                <thead><tr><th data-nosort>추가</th><th>대역(/24)</th><th>분류</th><th>상태 · 근거</th></tr></thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {shown.map((r) => (
                     <tr key={r.cidr}>
                       <td data-sort={sel.has(r.cidr) ? 1 : 0}><input type="checkbox" aria-label={`${r.cidr} 추가`} checked={sel.has(r.cidr)} disabled={r.kind === 'invalid'} onChange={() => toggle(r.cidr)} /></td>
                       <td style={{ fontFamily: 'monospace' }}>{r.cidr}</td>
+                      <td data-sort={r.cls || ''}>{r.cls ? <span className={`badge ${CLS_BADGE[r.cls] || 'gray'}`}>{CLS_LABEL[r.cls] || r.cls}</span> : <span className="muted">—</span>}</td>
                       <td data-sort={r.kind} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
                         <div style={{ color: KIND_COLOR[r.kind] }}>{AGENT_KIND_LABEL[r.kind] || r.kind}{r.kind === 'other' && r.with?.length ? ` (${r.with.join(', ')})` : ''}</div>
+                        {r.ignore === 'partial' && <div style={{ fontSize: 11, color: 'var(--amber)' }}>△ {partialIgnoreText(r, data?.ignoreSources)}</div>}
                         {kind === 'vm' && <div className="muted" style={{ fontSize: 11 }}>{`VM ${r.vms ?? 0}대 · 주소 ${r.ips ?? 0}개${r.sample?.length ? ` · ${r.sample.join(', ')}${(r.vms ?? 0) > r.sample.length ? ' …' : ''}` : ''}`}</div>}
                       </td>
                     </tr>
@@ -137,10 +155,10 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
             </div>
           </>
         )}
-        {data && (svc || kind === 'vm') && rows.length === 0 && <div className="muted" style={{ margin: '8px 0' }}>가져올 /24 대역이 없습니다.</div>}
+        {data && (svc || kind === 'vm') && rows.length === 0 && <div className="muted" style={{ margin: '8px 0' }}>가져올 /24 대역이 없습니다{Number(ignored?.count) > 0 ? ' — 남은 후보가 전부 IPMS 무시 대역이었습니다' : ''}.</div>}
         {data && (
           <div style={{ marginTop: 10 }}>
-            <b>추가할 대역 {selRows.length}개</b>
+            <b>추가할 대역 {selRows.length}개</b>{hiddenSel > 0 && <span className="muted"> (지금 필터로 가린 {hiddenSel}개 포함)</span>}
             <span className="muted"> — 새 대역 {selNew}개는 스캔 대역 칸에, 겹치는 {selRows.length - selNew}개는 그 아래 ‘중복 대역’ 칸에 들어갑니다. 저장은 화면의 ‘저장’ 을 눌러야 됩니다.</span>
           </div>
         )}

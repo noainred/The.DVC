@@ -126,3 +126,58 @@ export function vmSubnets({ vms, vcenterId, cap = SUBNET_MAX } = {}) {
     totals: { vms: total, vmsWithIp: withIp, vmsNoIp: total - withIp, ips: ipCount, ipv6, excluded },
   };
 }
+
+/**
+ * v2.692: '/24 가져오기' 후보에 IPMS 설정을 적용한다(순수).
+ *   ① 무시 대역 — 전체(global) + 관련 vCenter 의 무시 목록. /24 의 **호스트 주소(.1~.254)가 전부** 무시 대역에 들어가면 후보에서 뺀다
+ *      (그 IP 는 대장에서 숨겨지므로 스캔해도 보이지 않는다). 일부만 걸치면 빼지 않고 `ignore:'partial'` 로 표시한다(나머지는 보인다).
+ *   ② 공인/사설 — IPMS ③ 판정(classifier.num — 명시 사설 > 명시 공인 > RFC1918). /24 안에서 갈리면 'mixed'.
+ * @param {Array<{cidr:string}>} subnets
+ * @param {{ ignore?: { global?: Array<{lo,hi}>, vcenters?: Record<string, Array<{lo,hi}>> }, vcenterIds?: string[], classify?: (n:number)=>string, vcName?: Record<string,string> }} opt
+ * @returns {{ subnets: Array<object>, ignored: { count:number, bySource: Record<string,number>, sample:string[] }, sources: Array<{key,label}> }}
+ */
+export function annotateSubnets(subnets, { ignore = {}, vcenterIds = [], classify = null, vcName = {} } = {}) {
+  const tagged = [];
+  for (const r of Array.isArray(ignore.global) ? ignore.global : []) if (r) tagged.push({ ...r, src: 'global' });
+  const vcs = ignore.vcenters && typeof ignore.vcenters === 'object' ? ignore.vcenters : {};
+  for (const id of [...new Set(vcenterIds || [])]) for (const r of Array.isArray(vcs[id]) ? vcs[id] : []) if (r) tagged.push({ ...r, src: `vc:${id}` });
+  const sources = [{ key: 'global', label: '전체(모든 vCenter)' }, ...[...new Set(vcenterIds || [])].map((id) => ({ key: `vc:${id}`, label: `vCenter ${vcName[id] || id}` }))];
+  const out = [];
+  const ignored = { count: 0, bySource: {}, sample: [] };
+  for (const s of Array.isArray(subnets) ? subnets : []) {
+    const base = baseOfCidr(s?.cidr);
+    if (base == null) { out.push(s); continue; }
+    const lo = base * 256 + 1; const hi = base * 256 + 254;
+    const hits = tagged.filter((r) => r.hi >= lo && r.lo <= hi);
+    let ignoreState = null;
+    if (hits.length) {
+      const iv = hits.map((r) => [Math.max(r.lo, lo), Math.min(r.hi, hi)]).sort((a, b) => a[0] - b[0]);
+      let covered = 0; let curLo = iv[0][0]; let curHi = iv[0][1];
+      for (const [a, b] of iv.slice(1)) { if (a <= curHi + 1) curHi = Math.max(curHi, b); else { covered += curHi - curLo + 1; curLo = a; curHi = b; } }
+      covered += curHi - curLo + 1;
+      ignoreState = covered >= hi - lo + 1 ? 'full' : 'partial';
+    }
+    const by = [...new Set(hits.map((r) => r.src))];
+    if (ignoreState === 'full') {
+      ignored.count += 1;
+      for (const k of by) ignored.bySource[k] = (ignored.bySource[k] || 0) + 1;
+      if (ignored.sample.length < 20) ignored.sample.push(s.cidr);
+      continue;
+    }
+    let cls = null;
+    if (typeof classify === 'function') {
+      let pub = 0; let priv = 0;
+      for (let n = lo; n <= hi; n += 1) { if (classify(n) === 'public') pub += 1; else priv += 1; if (pub && priv) break; }
+      cls = pub && priv ? 'mixed' : pub ? 'public' : 'private';
+    }
+    out.push({ ...s, cls, ...(ignoreState ? { ignore: ignoreState, ignoreBy: by } : {}) });
+  }
+  return { subnets: out, ignored, sources };
+}
+
+function baseOfCidr(cidr) {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.0\/24$/.exec(String(cidr || ''));
+  if (!m) return null;
+  const n = ipToNum(`${m[1]}.${m[2]}.${m[3]}.0`);
+  return n == null ? null : Math.floor(n / 256);
+}

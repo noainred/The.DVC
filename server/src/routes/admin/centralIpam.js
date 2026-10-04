@@ -2,12 +2,13 @@
 //   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier } from '../../ipam/settings.js';
 import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
-import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../../ipam/scanStore.js';
+import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, getScanResults, LOCAL } from '../../ipam/scanStore.js';
+import { buildScanRangeRows, applyRangeLineOp } from '../../ipam/scanRangeRows.js'; // v2.692: 등록된 스캔 대역 표 · 줄 단위 수정
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
@@ -15,9 +16,9 @@ import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
-import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
+import { listDatacenters, datacenterOfVcenter, getDatacenterAssign } from '../../datacenter/store.js';
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
-import { idracSubnets, vmSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
+import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
 import { readMigrationState, runVcRangeMigration, moveVcRangeManually, removeVcRangeManually, dismissMigration } from '../../ipam/vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 에이전트
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
@@ -211,7 +212,9 @@ adminRouter.get('/ipam/scan/import', adminOnly, fleetOnly, (req, res) => {
     const vcenterId = asked || vcs.find((v) => v.mine)?.id || '';
     const vc = vcs.find((v) => v.id === vcenterId);
     if (!vcenterId) return res.json({ ...base, vcenters: vcs, vcenterId: '', subnets: [], totals: {}, omitted: 0, noVcenter: true, initial: !!snap.initial });
-    return res.json({ ...base, vcenters: vcs, vcenterId, vcenterName: vc?.name || vcenterId, vcenterMine: !!vc?.mine, ...vmSubnets({ vms: snap.vms, vcenterId }), initial: !!snap.initial });
+    const vr = vmSubnets({ vms: snap.vms, vcenterId });
+    const ann = annotateSubnets(vr.subnets, { ...ipmsCtx(snap), vcenterIds: [vcenterId] });
+    return res.json({ ...base, vcenters: vcs, vcenterId, vcenterName: vc?.name || vcenterId, vcenterMine: !!vc?.mine, ...vr, subnets: ann.subnets, ignored: ann.ignored, ignoreSources: ann.sources, initial: !!snap.initial });
   }
   let datacenters = []; let datacentersError = '';
   try { datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch (e) { datacentersError = e?.message || String(e); }
@@ -226,16 +229,77 @@ adminRouter.get('/ipam/scan/import', adminOnly, fleetOnly, (req, res) => {
   const low = datacenterId.toLowerCase();
   const mineEntries = datacenterId ? entries.filter((e) => String(e?.datacenterId || '').trim().toLowerCase() === low) : [];
   // 서비스마다 번호(1,2,3…)를 붙인다 — 이름이 없으면 화면이 '이름 없음' 으로 쓴다(지어내지 않는다).
+  // v2.692: IPMS 무시 대역 — 전체 + 이 DataCenter 에 할당된 vCenter 의 무시 목록(iDRAC 대역에는 vCenter 축이 없어 DataCenter 로 잇는다).
+  let dcVcIds = [];
+  try { const asg = getDatacenterAssign(); dcVcIds = Object.keys(asg).filter((k) => String(asg[k] || '').toLowerCase() === datacenterId.toLowerCase()); } catch { dcVcIds = []; }
+  const ctx = ipmsCtx(snap);
+  let ignoreSources = null;
   const services = mineEntries.map((e, i) => {
-    const r = idracSubnets({ entries: [e], datacenterId });
+    const r0 = idracSubnets({ entries: [e], datacenterId });
+    const ann = annotateSubnets(r0.subnets, { ...ctx, vcenterIds: dcVcIds });
+    ignoreSources = ann.sources;
+    const r = { ...r0, subnets: ann.subnets, ignored: ann.ignored };
     return { no: i + 1, id: String(e.id || ''), service: String(e.service || '').trim(), ranges: (e.ranges || []).map((x) => String(x).trim()).filter(Boolean),
-      enabled: e.enabled !== false, scanAgent: String(e.agent || '').trim(), subnets: r.subnets, invalid: r.invalid, omitted: r.omitted };
+      enabled: e.enabled !== false, scanAgent: String(e.agent || '').trim(), subnets: r.subnets, ignored: r.ignored, invalid: r.invalid, omitted: r.omitted };
   });
   res.json({
     ...base, datacenterId, datacenterName: dc?.name || datacenterId, assignedDatacenterId: assigned,
     datacenterSource: asked ? 'chosen' : assigned ? (decided?.source || 'auto') : 'none', datacenterMissing: !!datacenterId && !dc && !datacentersError,
-    datacenters, services, ...(datacentersError ? { datacentersError } : {}), ...(rangesError ? { rangesError } : {}),
+    datacenters, services, ignoreSources: ignoreSources || annotateSubnets([], { vcenterIds: dcVcIds, vcName: ctx.vcName }).sources, ignoreVcenters: dcVcIds,
+    ...(datacentersError ? { datacentersError } : {}), ...(rangesError ? { rangesError } : {}),
   });
+});
+/**
+ * v2.692: '/24 가져오기' 에 쓰는 IPMS 설정 묶음 — 무시 대역(전체 + vCenter 별)과 공인/사설 분류기.
+ * 대장이 쓰는 것과 같은 목록·같은 분류기다(가져오기와 대장의 판정이 갈라지지 않게).
+ */
+function ipmsCtx(snap) {
+  const vcName = {};
+  for (const v of snap?.vcenters || []) vcName[v.id] = v.name || v.id;
+  let ignore = { global: [], vcenters: {} }; let classify = null;
+  try { ignore = ignoreRanges(); } catch { /* 설정을 못 읽으면 무시 대역 없이(빼지 않는 쪽) */ }
+  try { classify = getClassifier().num; } catch { classify = null; }
+  return { ignore, classify, vcName };
+}
+/**
+ * v2.692: '스캔 대역·설정 › ① 등록된 스캔 대역' — 에이전트별 스캔 대역을 한 줄 = 한 행으로. 스냅샷·설정·스캔 결과만 읽는다(왕복 0).
+ * 전 법인 데이터라 형제 스캔 설정 라우트와 같은 게이트(adminOnly + fleetOnly).
+ */
+adminRouter.get('/ipam/scan/ranges', adminOnly, fleetOnly, (_req, res) => {
+  const snap = store.get();
+  const { inputs } = currentScanDatacenters(snap.vcenters);
+  const agents = listScanAgents();
+  if (!agents.some((a) => a.name === LOCAL)) agents.unshift({ name: LOCAL, ...loadScanSettings(LOCAL) });
+  const ctx = ipmsCtx(snap);
+  const r = buildScanRangeRows({
+    agents, results: getScanResults(), classify: ctx.classify, ignore: ctx.ignore,
+    vcenterIdsOf: (a) => agentVcenterIds(a, { vcenters: inputs.vcenters, snapVcenters: snap.vcenters, collectors: inputs.collectors }),
+    datacenterOf: (a) => scanDatacenterOf(a, snap.vcenters),
+  });
+  const vcName = ctx.vcName;
+  res.json({ ok: true, rows: r.rows, agents: agents.map((a) => ({ name: a.name, enabled: a.enabled !== false })), vcName, scanInfo: scanInfo() });
+});
+/**
+ * v2.692: 줄 단위 추가·수정·삭제. 그 에이전트의 다른 줄은 건드리지 않는다. `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다).
+ * 대역 문법은 저장 PUT 과 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고).
+ */
+adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
+  const b = req.body || {};
+  const agent = String(b.agent || LOCAL).slice(0, 128);
+  const op = String(b.op || '');
+  const cur = loadScanSettings(agent);
+  const r = applyRangeLineOp(cur.ranges, { op, index: b.index, old: b.old, value: b.value });
+  if (!r.ok) return res.status(r.code === 'stale' ? 409 : 400).json({ ok: false, code: r.code, reason: r.reason });
+  const check = checkRangeList(r.ranges, { reversed: 'error', scanCap: RANGE_CAP });
+  if (op !== 'delete' && check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'ranges', agent, ...x })));
+  const settings = saveScanSettings(agent, { ranges: r.ranges });
+  invalidateScanDatacenters();
+  if (agent === LOCAL) { try { rescheduleScanPoller(); } catch { /* */ } }
+  const word = op === 'add' ? '추가' : op === 'edit' ? '수정' : '삭제';
+  recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: (settings.ranges || []).length, rangesSample: [String(b.value || b.old || '').slice(0, 80)],
+    message: `스캔 대역 ${word} — ${op === 'edit' ? `${String(b.old || '').slice(0, 80)} → ${String(b.value || '').slice(0, 80)}` : String(b.value || b.old || '').slice(0, 80)}` });
+  logAudit({ user: req.user?.username, action: `ipam.scan.range.${op}`, target: agent, detail: op === 'edit' ? `${b.old} → ${b.value}` : String(b.value || b.old || ''), ip: req.ip });
+  res.json({ ok: true, agent, ranges: settings.ranges, ...(check.warnings.length ? { warnings: check.warnings.slice(0, 50) } : {}) });
 });
 /**
  * v2.691: vCenter 별 스캔 대역 → 에이전트 이전 기록과 남은 대역. 아직 이전하지 않았고 스냅샷이 첫 병합을 지났으면 여기서 1회 실행한다
