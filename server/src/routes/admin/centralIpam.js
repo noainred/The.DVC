@@ -7,7 +7,7 @@ import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
-import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, getScanResults, LOCAL } from '../../ipam/scanStore.js';
+import { loadScanSettings, saveScanSettings, deleteScanAgent, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, getScanResults, LOCAL } from '../../ipam/scanStore.js';
 import { buildScanRangeRows, applyRangeLineOp } from '../../ipam/scanRangeRows.js'; // v2.692: 등록된 스캔 대역 표 · 줄 단위 수정
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
@@ -300,6 +300,44 @@ adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
     message: `스캔 대역 ${word} — ${op === 'edit' ? `${String(b.old || '').slice(0, 80)} → ${String(b.value || '').slice(0, 80)}` : String(b.value || b.old || '').slice(0, 80)}` });
   logAudit({ user: req.user?.username, action: `ipam.scan.range.${op}`, target: agent, detail: op === 'edit' ? `${b.old} → ${b.value}` : String(b.value || b.old || ''), ip: req.ip });
   res.json({ ok: true, agent, ranges: settings.ranges, ...(check.warnings.length ? { warnings: check.warnings.slice(0, 50) } : {}) });
+});
+/**
+ * v2.694: 에이전트별 대역 삭제(사용자 요청 "등록된 에이전트별 대역 삭제하는 기능").
+ *   mode 'ranges' = 그 에이전트의 스캔 대역만 전부 비운다(포트·주기 설정은 남는다 — 엣지는 assigned:false 로 스캔을 멈춘다).
+ *   mode 'agent'  = 설정 항목과 마지막 보고 기록까지 지운다(표에서 빠진다). 이 포탈(__local__)은 'agent' 를 받지 않는다.
+ *   `expect`(화면이 본 대역 목록)가 지금 값과 다르면 409 — 다른 관리자가 그사이 바꿨으면 지우지 않는다(줄 단위 수정과 같은 규칙).
+ *   이미 보고된 스캔 결과는 지우지 않는다(보존 기간·해제 판정이 정리한다) — 응답이 그 사실을 말한다.
+ */
+adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, (req, res) => {
+  const b = req.body || {};
+  const agent = String(b.agent || '').trim().slice(0, 128);
+  const mode = b.mode === 'agent' ? 'agent' : b.mode === 'ranges' ? 'ranges' : '';
+  if (!agent) return res.status(400).json({ ok: false, reason: '에이전트를 고르세요.' });
+  if (!mode) return res.status(400).json({ ok: false, reason: "mode 는 'ranges' 또는 'agent' 입니다." });
+  const isLocal = agent === LOCAL;
+  if (isLocal && mode === 'agent') return res.status(400).json({ ok: false, code: 'local', reason: '이 포탈(직접 스캔)은 등록을 지울 수 없습니다 — 대역만 비울 수 있습니다.' });
+  const cur = loadScanSettings(agent);
+  if (Array.isArray(b.expect)) {
+    const want = b.expect.map((x) => String(x ?? '').trim()).filter(Boolean);
+    if (want.join('\n') !== (cur.ranges || []).join('\n')) return res.status(409).json({ ok: false, code: 'stale', reason: '그사이 이 에이전트의 대역이 바뀌었습니다 — 목록을 다시 읽은 뒤 확인하세요.', ranges: cur.ranges || [] });
+  }
+  let removed = (cur.ranges || []).length;
+  let removedReport = false;
+  if (mode === 'ranges') {
+    saveScanSettings(agent, { ranges: [] });
+  } else {
+    const r = deleteScanAgent(agent);
+    removed = r.ranges.length; removedReport = r.removedReport;
+    if (!r.removedSettings && !r.removedReport) return res.status(404).json({ ok: false, code: 'unknown', reason: `등록된 스캔 설정이나 보고 기록이 없는 에이전트입니다: ${agent}` });
+  }
+  invalidateScanDatacenters();
+  if (isLocal) { try { rescheduleScanPoller(); } catch { /* */ } }
+  const word = mode === 'agent' ? '에이전트 등록 삭제' : '스캔 대역 전부 삭제';
+  recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: 0, rangesSample: (cur.ranges || []).slice(0, 5), message: `${word} — 대역 ${removed}줄` });
+  logAudit({ user: req.user?.username, action: mode === 'agent' ? 'ipam.scan.agent.delete' : 'ipam.scan.ranges.clear', target: agent, detail: `대역 ${removed}줄${(cur.ranges || []).length ? `: ${(cur.ranges || []).slice(0, 20).join(', ')}` : ''}`, ip: req.ip });
+  const results = scanInfo().byAgent || {};
+  const kept = Object.entries(results).find(([k]) => k.toLowerCase() === agent.toLowerCase())?.[1] || 0;
+  res.json({ ok: true, agent, mode, removedRanges: removed, removedReport, resultsKept: kept });
 });
 /**
  * v2.691: vCenter 별 스캔 대역 → 에이전트 이전 기록과 남은 대역. 아직 이전하지 않았고 스냅샷이 첫 병합을 지났으면 여기서 1회 실행한다

@@ -20,7 +20,9 @@ import { ScanRangeImportModal } from './ScanRangeImportModal.jsx'; // v2.691
 import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
 import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
-import { REPORT_STATE_TEXT, REPORT_STATE_TITLE, agentReportRows, reportKpis } from './scanRangeImportText.js';
+import { REPORT_STATE_TEXT, REPORT_STATE_TITLE, agentReportRows, reportKpis, agentDeleteConfirmText, agentDeleteResultText } from './scanRangeImportText.js';
+import { clearDraft } from './ipamDraft.js'; // v2.694: 지운 에이전트의 편집 초안이 옛 대역을 되살리지 않게
+import BoldText from '../../components/boldText.jsx';
 import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { downloadFailText } from '../downloadFailText.js';
@@ -169,6 +171,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   const [rangesErr, setRangesErr] = useState(null);
   const [agentFilter, setAgentFilter] = useState('');
   const editorRef = useRef(null);
+  // v2.694: ② 에이전트별 대역 삭제 — { row, mode:'ranges'|'agent' } · 진행 중 · 결과 문구
+  const [delTarget, setDelTarget] = useState(null);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delMsg, setDelMsg] = useState(null);
   const loadRanges = () => fetchJson('/admin/ipam/scan/ranges').then((r) => { setRangesData(r); setRangesErr(null); }).catch((e) => setRangesErr(e?.message || String(e)));
   useEffect(() => { loadRanges(); }, []);
   const loadOwners = () => fetchJson('/admin/ipam/scan/owners').then((r) => { setOwners(r.owners || []); setOwnersErr(null); }).catch((e) => setOwnersErr(e?.message || String(e)));
@@ -275,6 +281,25 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   // v2.692: ② 에이전트별 대역·보고 현황 — 두 표를 한 표로(판정은 scanRangeImportText.agentReportRows)
   const reportList = agentReportRows({ agents: rangesData?.agents || agentRows.map((o) => ({ name: o.owner, enabled: o.enabled })), rows: rangesData?.rows || [], reports, localLast: status?.lastRun || null });
   const kpi = reportKpis(reportList);
+  const askDelete = (row) => { setDelMsg(null); setDelTarget({ row, mode: 'ranges' }); };
+  const doDelete = async () => {
+    if (!delTarget) return;
+    const { row, mode } = delTarget;
+    const expect = (rangesData?.rows || []).filter((r) => String(r.agent).toLowerCase() === String(row.name).toLowerCase()).sort((p, q) => (p.index ?? 0) - (q.index ?? 0)).map((r) => r.range);
+    setDelBusy(true);
+    try {
+      const r = await postJson('/admin/ipam/scan/agent/delete', { agent: row.name, mode, expect });
+      if (!r || r.ok === false) { setDelMsg({ ok: false, text: `지우지 못했습니다: ${r?.reason || '서버가 거부했습니다'}` }); return; }
+      clearDraft(`scan:${row.name}`);
+      setDelTarget(null);
+      setDelMsg({ ok: true, text: agentDeleteResultText(r) });
+      loadRanges(); loadOwners();
+      if (mode === 'agent' && row.name === agent && row.name !== LOCAL_AGENT) switchAgent(LOCAL_AGENT);
+      else if (row.name === agent) { formForRef.current = null; load(agent, true); }
+    } catch (e) {
+      setDelMsg({ ok: false, text: `지우지 못했습니다: ${e?.message || e}` });
+    } finally { setDelBusy(false); }
+  };
   const openEditor = (a) => { if (a && a !== agent) switchAgent(a); setSub('agents'); setTimeout(() => editorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60); };
   const last = status?.lastRun;
   const runNowTitle = !isLocal ? '원격 에이전트는 자체 주기로 스캔합니다' : rangeTitle || (status?.running ? '스캔이 진행 중입니다' : '');
@@ -324,7 +349,24 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
             <div className="kpi"><div className="label">대기·보고 없음</div><div className="value">{kpi.waiting}</div></div>
             <div className="kpi"><div className="label">응답한 IP(합)</div><div className="value">{kpi.aliveKnown ? kpi.alive.toLocaleString() : '—'}</div></div>
           </div>
-          <STable className="v3-table" minWidth={980}>
+          {delMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: delMsg.ok ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{delMsg.text}</div>}
+          {delTarget && (
+            <div className="card" role="dialog" aria-label="에이전트 대역 삭제 확인" style={{ padding: 12, marginBottom: 10, border: '1px solid var(--red)', minWidth: 0 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>대역 삭제 — {agentName(delTarget.row.name)}</div>
+              <div className="flex gap wrap" style={{ marginBottom: 8, fontSize: 13 }}>
+                <label><input type="radio" name="scan-del-mode" checked={delTarget.mode === 'ranges'} onChange={() => setDelTarget({ ...delTarget, mode: 'ranges' })} /> 대역만 전부 삭제</label>
+                {delTarget.row.name !== LOCAL_AGENT && (
+                  <label><input type="radio" name="scan-del-mode" checked={delTarget.mode === 'agent'} onChange={() => setDelTarget({ ...delTarget, mode: 'agent' })} /> 에이전트 등록까지 삭제(설정·보고 기록)</label>
+                )}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 10, whiteSpace: 'normal', overflowWrap: 'anywhere' }}><BoldText text={agentDeleteConfirmText(delTarget.row, delTarget.mode)} /></div>
+              <div className="flex gap wrap">
+                <button className="logout-btn" style={{ padding: '4px 12px', color: 'var(--red)', fontWeight: 700 }} disabled={delBusy} onClick={doDelete}>{delBusy ? '지우는 중…' : '삭제'}</button>
+                <button className="logout-btn" style={{ padding: '4px 12px' }} disabled={delBusy} onClick={() => setDelTarget(null)}>취소</button>
+              </div>
+            </div>
+          )}
+          <STable className="v3-table" minWidth={1060}>
             <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th><th data-nosort>작업</th></tr></thead>
             <tbody>
               {reportList.map((x) => (
@@ -338,7 +380,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
                   <td data-sort={x.state}><span className={`badge ${x.state === 'ok' ? 'green' : x.state === 'late' ? 'amber' : 'gray'}`} title={REPORT_STATE_TITLE[x.state]}>{REPORT_STATE_TEXT[x.state]}</span></td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => openEditor(x.name)}>설정 편집</button>{' '}
-                    <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { setAgentFilter(x.name); setSub('ranges'); }}>대역 보기</button>
+                    <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { setAgentFilter(x.name); setSub('ranges'); }}>대역 보기</button>{' '}
+                    <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--red)' }} disabled={delBusy}
+                      title={x.name === LOCAL_AGENT ? '이 포탈의 스캔 대역을 전부 지웁니다' : '이 에이전트의 스캔 대역(또는 등록 전체)을 지웁니다'}
+                      onClick={() => askDelete(x)}>대역 삭제</button>
                   </td>
                 </tr>
               ))}

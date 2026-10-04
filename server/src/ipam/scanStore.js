@@ -226,6 +226,30 @@ export function saveScanSettings(agent, partial = {}) {
   return next;
 }
 
+/**
+ * v2.694: 에이전트 등록 삭제 — 스캔 설정 항목(대역·포트·주기)과 마지막 보고 기록을 지운다(대소문자 무시로 찾는다).
+ *   엣지는 다음 배정 조회(/api/central/ip-scan-assignment)에서 assigned:false 를 받아 스캔을 멈춘다.
+ *   ⚠ 이 에이전트가 이미 보고한 스캔 결과·실행 이력은 지우지 않는다 — 결과는 보존 기간·해제 판정으로 정리된다(관리상태가 붙은 IP 를 같이 지우지 않게).
+ *   이 포탈(__local__)은 지우지 않는다(라우트가 대역만 비우게 한다).
+ * @returns {{ removedSettings:boolean, removedReport:boolean, ranges:string[] }}
+ */
+export function deleteScanAgent(agent) {
+  const all = loadAll();
+  const key = agentKeyOf(all.agents, agent);
+  const ranges = key != null ? normalizeCfg(all.agents[key] || {}).ranges : [];
+  let removedSettings = false;
+  if (key != null) {
+    const agents = { ...all.agents };
+    delete agents[key];
+    saveAll({ ...all, agents });
+    removedSettings = true;
+  }
+  const rk = agentKeyOf(reports, agent);
+  let removedReport = false;
+  if (rk != null) { delete reports[rk]; scheduleWrite(REP); removedReport = true; }
+  return { removedSettings, removedReport, ranges };
+}
+
 export function listScanAgents() {
   const all = loadAll();
   return Object.keys(all.agents).map((name) => ({ name, ...normalizeCfg(all.agents[name]) }));

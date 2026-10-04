@@ -221,3 +221,26 @@ export function rangeRowCheck(r, sources) {
   if (r.ignore === 'partial') return { tone: 'amber', text: `IPMS 무시 대역에 일부 걸침(${(r.ignoreBy || []).map((k) => ignoreSourceName(k, sources)).join(', ')})` };
   return { tone: 'green', text: '정상' };
 }
+
+/**
+ * v2.694: ② 에이전트별 대역 삭제 — 확인 문구. mode 'ranges' = 대역만 비움 · 'agent' = 설정·보고 기록까지 지움.
+ * 이미 보고된 스캔 결과는 서버가 지우지 않는다(보존 기간·해제 판정이 정리) — 그 사실을 미리 말한다.
+ */
+export function agentDeleteConfirmText(row, mode) {
+  if (!row) return '';
+  const name = agentName(row.name);
+  const lines = Number(row.lines) || 0;
+  const head = mode === 'agent'
+    ? `**${name}** 의 스캔 설정(대역 ${lines}줄 · 포트 · 주기)과 마지막 보고 기록을 지웁니다. 이 표에서 빠집니다.`
+    : `**${name}** 의 스캔 대역 ${lines}줄을 전부 지웁니다. 포트·주기 설정은 남습니다.`;
+  const edge = row.name === '__local__' ? '이 포탈은 다음 주기부터 스캔할 대역이 없습니다.' : '그 엣지는 다음 배정 조회에서 스캔을 멈춥니다.';
+  return `${head} ${edge} 이미 보고된 스캔 결과는 지우지 않습니다(보존 기간이 지나면 정리됩니다).`;
+}
+
+/** v2.694: 삭제 결과 한 줄. */
+export function agentDeleteResultText(r) {
+  if (!r) return '';
+  const name = agentName(r.agent);
+  const head = r.mode === 'agent' ? `${name} 의 등록을 지웠습니다(대역 ${r.removedRanges ?? 0}줄${r.removedReport ? ' · 보고 기록' : ''}).` : `${name} 의 스캔 대역 ${r.removedRanges ?? 0}줄을 지웠습니다.`;
+  return r.resultsKept ? `${head} 이 에이전트가 보고한 스캔 결과 ${Number(r.resultsKept).toLocaleString()}개는 남아 있습니다.` : head;
+}
