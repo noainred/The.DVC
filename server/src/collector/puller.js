@@ -40,11 +40,11 @@ export function pullOptionsFor(failCount) {
   return { retries: failCount >= 1 ? SUSPECT_RETRIES : 2 };
 }
 
-async function pullOne(c, { retries = 2 } = {}) {
+async function pullOne(c, { retries = 2, signal = null } = {}) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
   const res = await resilientFetch(`${c.url}/api/collector/export`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
-    timeoutMs: config.collector.timeoutMs, retries,
+    timeoutMs: config.collector.timeoutMs, retries, ...(signal ? { signal } : {}),
     onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
   });
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
@@ -53,6 +53,8 @@ async function pullOne(c, { retries = 2 } = {}) {
   // v2.602(감사 CEN2602-01 high): 응답을 **쓰는 필드만·아는 타입으로** 좁힌 뒤에 쓴다 — 오염된 원소 하나(예:
   //   serviceTag:{toString:1})가 함대 전체 물리 서버 집계·온도·3단 지도를 죽이지 못하게(remoteInventory.js 머리말).
   const data = sanitizeEdgeExport(await readJsonCapped(res, EDGE_EXPORT_MAX_BYTES, '엣지 export 응답'));
+  // v2.693: 주기 상한을 넘겨 버려진 주기의 늦은 응답은 쓰지 않는다 — 새 주기가 같은 수집 서버를 이미 다시 당기고 있을 수 있다.
+  if (signal?.aborted) throw new Error('pull 주기 상한 초과로 버린 응답');
   // 응답 대기(재시도 포함 최대 60초+) 중 이 수집기가 삭제/비활성됐을 수 있다 — 그대로 쓰면
   // 관리 라우트의 정리(clear)를 뒤늦게 도착한 이 쓰기가 되돌려 유령 데이터가 재등장한다.
   const still = loadCollectors().find((x) => x.id === c.id && x.enabled !== false);
@@ -120,13 +122,85 @@ export function statusFromPull(r) {
   return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock };
 }
 
-let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
-// 같은 수집기의 clearCollectorHosts/setRemoteHost가 교차 실행돼 호스트가 일시 증발한다.
-export async function pullNow() {
-  if (pulling) return;
-  pulling = true;
-  try { await pullNowInner(); } finally { pulling = false; }
+/*
+ * 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐 같은 수집기의 clearCollectorHosts/setRemoteHost 가
+ * 교차 실행돼 호스트가 일시 증발한다.
+ * ⚠⚠ v2.693(2026-10-04 운영 사고): 이벤트 루프가 701초 멈춘 뒤 **pull 이 다시 돌지 않았다** — 멈춤이 풀린 뒤 `[collector]` 줄이
+ *   하나도 없었고(성공도 실패도 없다 = 시도하지 않았다) 위임 법인 데이터 전부가 낡아 갔다. 가드가 '끝나지 않은 주기' 에 걸린 채
+ *   남으면 이후 모든 틱이 조용히 건너뛰어진다(그 주기가 왜 끝나지 않았는지는 로그로 확정하지 못했다 — 정직 기록).
+ *   그래서 주기에 **상한**(PULL_CYCLE_MAX_MS — 기본 max(주기 × 3, 5분))을 두고, 넘긴 주기를 만나면 ① 경고를 남기고 ② 그 주기의
+ *   요청을 abort 하고 ③ 가드를 풀어 새 주기를 시작한다. 버려진 주기가 아직 붙잡고 있는 수집 서버는 새 주기가 건너뛴다(교차 실행 방지).
+ *   가드는 주기 번호로 들고 있어 늦게 끝난 옛 주기가 새 주기의 가드를 풀지 않는다.
+ */
+let pulling = 0;                 // 진행 중인 주기 번호(0 = 없음)
+let cycleSeq = 0;
+let cycleStartedAt = 0;
+let cycleAbort = null;
+const cycleBusy = new Map();     // 주기 pull 이 붙잡고 있는 collectorId → 시작 시각(버려진 주기 포함)
+const pullerStats = { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0 };
+
+/** 주기 상한(ms) — env COLLECTOR_PULL_CYCLE_MAX_MS(빈 값·0 은 기본), 하한 60초. */
+export function pullCycleMaxMs(intervalMs = config.collector.pullIntervalMs, env = process.env.COLLECTOR_PULL_CYCLE_MAX_MS) {
+  const v = Number(env);
+  if (env != null && String(env).trim() !== '' && Number.isFinite(v) && v > 0) return Math.max(60_000, Math.floor(v));
+  return Math.max(5 * 60_000, (Number(intervalMs) > 0 ? Number(intervalMs) : 60_000) * 3);
 }
+
+/** v2.693: 주기 상태(서비스 점검·iDRAC 통합 추이 배너가 읽는다). 진행 중 주기의 나이를 함께 준다. */
+export function pullerStatus(now = Date.now()) {
+  return {
+    ...pullerStats, intervalMs: config.collector.pullIntervalMs, cycleMaxMs: pullCycleMaxMs(),
+    running: !!pulling, runningForMs: pulling ? Math.max(0, now - cycleStartedAt) : null, busy: cycleBusy.size,
+  };
+}
+
+/**
+ * v2.693: 주기 상태 판정(순수) — 서비스 점검 '원격 수집기' 행. '기록이 있다' 를 '돌고 있다' 로 읽지 않는다.
+ * @returns {{ status:'ok'|'warn'|'off', detail:string }}
+ */
+export function pullerHealth(st, now = Date.now()) {
+  if (!st || !(st.intervalMs > 0)) return { status: 'off', detail: 'pull 주기 꺼짐(COLLECTOR_PULL_INTERVAL_MS=0)' };
+  const sec = (ms) => `${Math.round(ms / 1000)}초`;
+  const min = (ms) => (ms >= 120_000 ? `${Math.round(ms / 60_000)}분` : sec(ms));
+  if (st.running && st.runningForMs > st.cycleMaxMs) return { status: 'warn', detail: `pull 주기가 ${min(st.runningForMs)}째 끝나지 않았습니다(상한 ${min(st.cycleMaxMs)} — 다음 틱에 버리고 다시 시작합니다)` };
+  const lastEnd = st.lastEndAt || st.lastStartAt;
+  if (lastEnd && now - lastEnd > Math.max(st.cycleMaxMs, st.intervalMs * 3) && !st.running) {
+    return { status: 'warn', detail: `마지막 pull 주기가 ${min(now - lastEnd)} 전에 끝났습니다(주기 ${sec(st.intervalMs)}) — pull 이 돌지 않고 있습니다` };
+  }
+  const stuck = st.lastStuckAt && now - st.lastStuckAt < 24 * 3600_000 ? ` · 최근 24시간에 끝나지 않은 주기를 버림 ${st.stuckReleases}회(마지막 ${min(now - st.lastStuckAt)} 전)` : '';
+  const took = st.lastTookMs != null ? ` · 직전 주기 ${sec(st.lastTookMs)}` : '';
+  return { status: stuck ? 'warn' : 'ok', detail: `pull 주기 ${sec(st.intervalMs)}${took}${stuck}` };
+}
+
+export async function pullNow() {
+  if (pulling) {
+    const age = Date.now() - cycleStartedAt;
+    const max = pullCycleMaxMs();
+    if (age <= max) return;
+    pullerStats.stuckReleases += 1; pullerStats.lastStuckAt = Date.now(); pullerStats.lastStuckAgeMs = age;
+    console.warn(`[collector] pull 주기가 ${Math.round(age / 1000)}초째 끝나지 않아(상한 ${Math.round(max / 1000)}초) 그 주기를 버리고 새 주기를 시작합니다 — 아직 응답을 기다리는 수집 서버 ${cycleBusy.size}곳은 이번 주기에서 건너뜁니다. (누적 ${pullerStats.stuckReleases}회)`);
+    try { cycleAbort?.abort(new Error('pull 주기 상한 초과')); } catch { /* 이미 끝남 */ }
+    pulling = 0; cycleAbort = null;
+  }
+  const my = ++cycleSeq;
+  pulling = my; cycleStartedAt = Date.now();
+  const ac = new AbortController(); cycleAbort = ac;
+  pullerStats.cycles += 1; pullerStats.lastStartAt = cycleStartedAt;
+  try { await pullNowInner(ac.signal); } finally {
+    if (pulling === my) {
+      pulling = 0; cycleAbort = null;
+      pullerStats.lastEndAt = Date.now(); pullerStats.lastTookMs = pullerStats.lastEndAt - cycleStartedAt;
+    }
+  }
+}
+
+/** 테스트 전용. */
+export function _resetPullerForTest() {
+  pulling = 0; cycleSeq = 0; cycleStartedAt = 0; cycleAbort = null; cycleBusy.clear(); fails.clear(); inflight.clear();
+  Object.assign(pullerStats, { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0 });
+}
+/** 테스트 전용 — 주기 시작 시각을 과거로 돌린다(상한 경과 재현). */
+export function _ageCycleForTest(ms) { cycleStartedAt -= ms; }
 
 /**
  * 특정 에이전트(수집 서버)만 즉시 1회 당긴다 — 위임/PUSH 스캔이 엣지에 서버를 현지 등록한
@@ -140,7 +214,7 @@ export async function pullCollectorByAgent(agentName) {
   const c = loadCollectors().find((x) => x.enabled !== false && x.url
     && (String(x.id || '').toLowerCase() === key || String(x.name || '').toLowerCase() === key));
   if (!c) return false;
-  if (pulling || inflight.has(c.id)) return false; // 주기 폴/중복과 겹치지 않게
+  if (pulling || inflight.has(c.id) || cycleBusy.has(c.id)) return false; // 주기 폴/중복과 겹치지 않게
   inflight.add(c.id);
   try {
     const r = await pullTagged(c);
@@ -154,10 +228,19 @@ export async function pullCollectorByAgent(agentName) {
   } finally { inflight.delete(c.id); }
 }
 
-async function pullNowInner() {
+async function pullNowInner(signal = null) {
   // 즉시 당김이 진행 중인 수집기는 이번 주기에서 건너뛴다(같은 수집기 pullOne 교차 실행 방지).
   // v2.620(EDGE2620-02): 직전 실패 엣지는 큐 뒤로(아래 주석).
-  const collectors = orderForPull(loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id)), (id) => fails.get(id) || 0);
+  const enabled = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id));
+  // v2.693: 버려진 주기가 아직 붙잡고 있는 수집 서버는 건너뛴다(같은 수집 서버 pullOne 교차 실행 방지) — 개수는 상태에 남긴다.
+  //   단 그 pull 마저 상한의 2배를 넘겼으면 영영 끝나지 않는 것으로 보고 놓아준다 — 놓지 않으면 그 수집 서버는 다시는 pull 되지 않는다.
+  const nowMs = Date.now(); const maxMs = pullCycleMaxMs();
+  for (const [id, at] of cycleBusy) {
+    if (nowMs - at > maxMs * 2) { cycleBusy.delete(id); console.warn(`[collector] ${id} pull 이 ${Math.round((nowMs - at) / 1000)}초째 끝나지 않아 놓아줍니다 — 이번 주기에서 다시 당깁니다.`); }
+  }
+  const held = enabled.filter((c) => cycleBusy.has(c.id));
+  if (held.length) pullerStats.skippedBusy += held.length;
+  const collectors = orderForPull(enabled.filter((c) => !cycleBusy.has(c.id)), (id) => fails.get(id) || 0);
   // 레지스트리에서 제거/교체된 수집기의 잔류 호스트·상태 자동 정리(감사 M12) — 과거엔 수동
   // power-purge에서만 정리돼 유령 항목이 전력 합산을 오염시켰다.
   try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
@@ -171,9 +254,11 @@ async function pullNowInner() {
   let failedMs = 0; let failedCount = 0;
   const t0 = Date.now();
   await poolRun(collectors, config.collector.pullConcurrency, async (c) => {
+    if (signal?.aborted) return;   // v2.693: 버려진 주기는 남은 수집 서버를 새로 시작하지 않는다
     const tStart = Date.now();
+    const busyAt = Date.now(); cycleBusy.set(c.id, busyAt);
     try {
-      const r = await pullTagged(c, pullOptionsFor(fails.get(c.id) || 0));
+      const r = await pullTagged(c, { ...pullOptionsFor(fails.get(c.id) || 0), signal });
       fails.set(c.id, 0);
       setCollectorStatus(c.id, statusFromPull(r));
     } catch (err) {
@@ -198,7 +283,7 @@ async function pullNowInner() {
       }
       failedMs += Date.now() - tStart; failedCount++;
       console.warn(`[collector] ${c.id} pull 실패(${n}${n >= 2 ? ' · 재시도 없이 1회' : ''}): ${d.message}`);
-    }
+    } finally { if (cycleBusy.get(c.id) === busyAt) cycleBusy.delete(c.id); }
   });
   const took = Date.now() - t0;
   // 한 주기가 주기의 절반을 넘기면 알린다 — 동시 개수를 줄인 대가(벽시계 증가)를 조용히 두지 않는다.

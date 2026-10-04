@@ -211,6 +211,26 @@ describe('v2.663 서버 표 · 조건 검색 · CPU 진단', async () => {
   });
 });
 
+describe('v2.693 — 중앙 pull 이 멈췄으면 엣지 탓으로 말하지 않는다', async () => {
+  const m = await import('./idracTrendText.js');
+  it('ok 로 남은 상태라도 pullStale 이면 빨간 배너 · 중앙 pull 을 지목한다', () => {
+    const b = m.idracStateBanner({ stale: 'stale', remote: true, sampleAt: 1, ageMs: 50 * 60_000, maxAgeMs: 15 * 60_000,
+      collector: { known: true, ok: true, id: 'GM1', lastOkAt: 1, lastOkAgeMs: 41 * 60_000, pullStale: true, pullIntervalMs: 60_000, pullerRunningForMs: 12 * 60_000, pullerStuckReleases: 2 } });
+    expect(b.tone).toBe('red');
+    expect(b.title).toMatch(/중앙이 엣지에서/);
+    const t = b.lines.join();
+    expect(t).toMatch(/41분째 pull 하지 못하고/);
+    expect(t).toMatch(/12분째/);
+    expect(t).toMatch(/2회 버렸습니다/);
+    expect(t).not.toMatch(/pull 은 정상/);
+    expect(t).not.toMatch(/`/);
+  });
+  it('pullStale 이 없으면 예전 판정 그대로', () => {
+    const b = m.idracStateBanner({ stale: 'stale', remote: true, collector: { known: true, ok: true, id: 'GM1', lastOkAt: 1, lastOkAgeMs: 60_000 } });
+    expect(b.title).toMatch(/엣지의 iDRAC 수집/);
+  });
+});
+
 // v2.666 ────────────────────────────────────────────────────────────────
 import {
   CHART_SERIES, HOST_CPU_SERIES, loadCpuRef, saveCpuRef, showCpuRef, maxBackOf, scrollWindow, scrollLabel, presetSpanOf,
