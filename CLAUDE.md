@@ -4800,6 +4800,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       옛 키로 그리면 분기가 대장 목록으로 떨어져 `data.rows` 를 읽고 화면이 죽었다(Chromium 에서 실제로).
     · 남긴 것(2차 후보): `VcScanRangeEditor` 컴포넌트·`VcRangeImportModal` 은 더 그리지 않는다(RangeCheck 등 export 만 쓰인다) · vc-ranges API 는 호환으로 남김 ·
       netmap 은 `migratedRangesFor` 로 옮긴 대역을 그 vCenter 의 /24 목록에 계속 넣는다.
+  - **v2.694 — ② 에이전트별 대역·보고 현황의 '대역 삭제'**(`POST /admin/ipam/scan/agent/delete` + `scanStore.deleteScanAgent` + 웹 `IpScanSettings.jsx`·
+    `scanRangeImportText.agentDeleteConfirmText`, 회귀 `server/test/ipScanAgentDelete2694.test.js` — 변이 3/3): mode `ranges`(대역만 — 포트·주기·켜짐 유지) /
+    `agent`(설정 항목 + 마지막 보고 기록 — 대소문자 무시, 이 포탈은 400). 화면이 본 목록(`expect`)과 다르면 409 · **이미 보고된 스캔 결과는 지우지 않는다**
+    (관리상태 붙은 IP 까지 지우지 않게 — 보존 기간·해제 판정이 정리, 응답 `resultsKept`) · 지운 에이전트의 편집 초안도 지운다 · 감사·스캔 로그.
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):
