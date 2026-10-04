@@ -1483,6 +1483,29 @@ export function sensorFieldOf(name) {
 const _sensorPaths = new Map();
 export function _resetSensorPathsForTest() { _sensorPaths.clear(); }
 export function sensorPathCacheInfo() { return { entries: _sensorPaths.size, ttlMs: SENSOR_TTL_MS }; }
+/** 센서 경로 캐시 키 — fetchUsageSensors 와 pruneSensorPaths 가 같은 규칙을 쓴다(base|user, 소문자). */
+export function sensorPathKeyOf(entry) {
+  return `${trimTrailingSlashes(String(entry?.host || ''))}|${entry?.username || ''}`.toLowerCase();
+}
+/**
+ * v2.689(C-07): 센서 경로 캐시 정리. 예전에는 TTL 이 지나도 항목을 지우지 않았고(조회 때 덮어쓰기만) 키가 iDRAC 단위라
+ * 퇴역 서버가 프로세스 수명 내내 남았다. 지우는 것은 ① 등록부에 없는 키(퇴역·계정 변경) ② TTL 이 지난 항목
+ * (fetchUsageSensors 는 이미 그것을 '없는 것' 으로 본다 — `fresh` 판정 — 지워도 동작이 같다).
+ * **TTL 안의 live 키는 절대 지우지 않는다.** liveKeys 가 null 이면(등록부를 못 읽음) 퇴역 판정을 하지 않고 만료만 지운다.
+ * @returns {{expired:number, retired:number}}
+ */
+export function pruneSensorPaths(liveKeys, now = Date.now(), store = _sensorPaths) {
+  const live = liveKeys == null ? null : (liveKeys instanceof Set ? liveKeys : new Set(liveKeys));
+  let expired = 0;
+  let retired = 0;
+  for (const [k, v] of [...store.entries()]) {
+    if (live && !live.has(k)) { store.delete(k); retired += 1; continue; }
+    if (!(now - Number(v?.at) < SENSOR_TTL_MS)) { store.delete(k); expired += 1; }
+  }
+  return { expired, retired };
+}
+/** 테스트 전용 */
+export function _peekSensorPaths() { return _sensorPaths; }
 
 /** 이름 꼬리만(URL 마지막 조각) — 센서 id 가 곧 이름인 경우가 많다. */
 const tailOf = (u) => String(u || '').split('/').filter(Boolean).pop() || '';
@@ -1498,7 +1521,7 @@ const tailOf = (u) => String(u || '').split('/').filter(Boolean).pop() || '';
 export async function fetchUsageSensors(entry, { allowProbe = true, signal = null } = {}) {
   const base = String(entry.host || '').replace(/\/+$/, '');
   const G = (p) => get(base, p, entry.username, entry.password, { signal });
-  const key = `${base}|${entry.username || ''}`.toLowerCase();
+  const key = sensorPathKeyOf(entry);
   const cached = _sensorPaths.get(key);
   const fresh = cached && Date.now() - cached.at < SENSOR_TTL_MS;
   if (fresh && cached.absent) {

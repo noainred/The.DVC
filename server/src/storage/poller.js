@@ -9,7 +9,7 @@ import { config } from '../config.js';
 // v2.528: 인증 실패(401) 장비는 주기 수집을 멈춘다(계정 잠금 방지) + 자격증명 지문 표시.
 import { isAuthFailure, markAuthStopped, clearAuthStop, authStopFor } from './authGuard.js';
 import { credFingerprintParts } from '../util/credFingerprint.js';
-import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
+import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
 import { putSnapshot } from './store.js';
 import { emptySnapshot } from './types.js';
 import * as isilon from './collectors/isilon.js';
@@ -38,6 +38,18 @@ const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, uni
 const pollMs = () => runtimeIntervals().pollMs;
 const areasEveryMs = () => runtimeIntervals().areasMs;
 const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)
+/**
+ * v2.689(C-06): 등록부에서 빠진 장비의 영역 수집 시각을 지운다(예전엔 지우는 곳이 없어 프로세스 수명 내내 남았다).
+ * 이번 주기 장비(liveIds)는 절대 지우지 않는다. 등록부를 못 읽은 주기는 호출부가 부르지 않는다(빈 목록 = 전부 삭제가 아니게).
+ */
+export function pruneAreasAt(liveIds, store = _areasAt) {
+  const live = liveIds instanceof Set ? liveIds : new Set(liveIds || []);
+  let removed = 0;
+  for (const id of [...store.keys()]) if (!live.has(id)) { store.delete(id); removed += 1; }
+  return removed;
+}
+/** 테스트 전용 */
+export function _peekAreasAt() { return _areasAt; }
 let _timer = null;
 let _busy = false;
 let _last = { at: 0, collected: 0, failed: 0 };
@@ -157,6 +169,7 @@ export async function pollStorageOnce() {
   _busy = true;
   try {
     const devs = devicesForThisNode();
+    if (!registryLoadError()) pruneAreasAt(new Set(devs.map((d) => d.id)));
     let ok = 0, fail = 0;
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).
     let authStopped = 0;

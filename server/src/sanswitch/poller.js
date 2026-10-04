@@ -9,7 +9,7 @@
  *    (setInterval 은 생성 시 간격에 묶여 설정 변경이 재시작 전까지 안 먹는다).
  */
 import { config, clampIntervalMs } from '../config.js';
-import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
+import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
 import { putSnapshot, getSnapshot } from './store.js';
 import { recordActivity } from './activityLog.js';
 import { emptySnapshot } from './types.js';
@@ -159,6 +159,8 @@ export async function pollSanSwitchOnce({ manual = false } = {}) {
   let collected = 0; let failed = 0; let authStopped = 0;
   try {
     const devices = devicesForThisNode();
+    // v2.689(C-06): 등록부에서 빠진 장비의 명령 조사 캐시를 정리한다(등록부를 못 읽은 주기는 건너뛴다 — 빈 목록이 전부 삭제가 되지 않게).
+    if (!registryLoadError()) fosSsh.pruneCaps(new Set(devices.map((d) => fosSsh.capsKeyOf(d))));
     await pool(devices, CONCURRENCY, async (d) => {
       const r = await collectOne(d, { periodic: !manual });
       if (r === null) authStopped++; else if (r) collected++; else failed++;

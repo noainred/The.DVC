@@ -8,7 +8,7 @@
 import { config } from '../config.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { loadRegistry, correctHpeServiceTag } from './registry.js';
-import { fetchPower, fetchInventory, fetchSensors, fetchSensorCollection } from './redfish.js';
+import { fetchPower, fetchInventory, fetchSensors, fetchSensorCollection, pruneSensorPaths, sensorPathKeyOf } from './redfish.js';
 import { setThermalDetail, setSensorCollection, sensorCollectionStale } from './sensorDetailCache.js'; // v2.659 센서 상세
 import { pushSensorSample, setSensorPollCycle, markSensorPollStart } from './sensorStore.js';
 import { fetchOmeDevices } from './ome.js';
@@ -89,6 +89,16 @@ let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱�
 let _runningSince = null; // v2.634: 진행 중인 주기의 시작 시각
 let _lastDurationMs = null; // v2.634: 직전 주기 소요
 let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
+let _sensorPathPruneAt = 0; // v2.689(C-07): 센서 경로 캐시 정리 — 인벤토리 주기(30분)에 한 번
+/**
+ * v2.689(C-07): Enterprise 대체 경로(redfish.fetchUsageSensors)의 센서 경로 캐시를 등록부 기준으로 정리한다.
+ * live = 등록부 전체(비활성·비밀번호 미저장 포함 — 지우지 않는 쪽). 등록부가 비었으면 못 읽었을 수도 있어 퇴역 판정을 하지 않는다.
+ */
+export function pruneSensorPathCache(registry, now = Date.now()) {
+  const list = Array.isArray(registry) ? registry : [];
+  const live = list.length ? new Set(list.filter((s) => s && s.host).map((s) => sensorPathKeyOf(s))) : null;
+  return pruneSensorPaths(live, now);
+}
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
 async function pollOnce({ manual = false } = {}) {
@@ -120,6 +130,10 @@ async function pollOnceInner({ manual = false } = {}) {
   }
   // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).
   const registry = loadRegistry();
+  if (Date.now() - _sensorPathPruneAt >= INVENTORY_MAX_AGE_MS) {
+    _sensorPathPruneAt = Date.now();
+    try { pruneSensorPathCache(registry); } catch { /* 캐시 정리 실패가 폴을 막지 않는다 */ }
+  }
   const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
   // v2.493: 폴 대상에서 제외된 서버를 **이유와 함께** 기록한다. 이전에는 조용히 빠져 lastRun 에
   // 흔적조차 없었다 — 비밀번호 미저장·비활성 서버가 '수집이 멈춘 것' 으로 오해되고, 화면·로그
