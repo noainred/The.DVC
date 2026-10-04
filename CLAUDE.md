@@ -4672,6 +4672,46 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · 추이는 kind 없이 **한 번** 조회해 세 보기(전체 합계·그룹별 합산·전체 서버)를 그린다 — 보기·단위·강조는 다시 부르지 않는다. 7일 응답은 `onSeven` 으로 맨 위 요약·주의 카드가 같이 쓴다(따로 부르지 말 것). 폴링 금지는 그대로.
       · 90% 도달은 7일 온전한 점의 **선형 추정**이고 증가가 0 이하·점 2개 미만이면 null(말하지 않는다). 부분 합 점은 변화 계산에서 뺀다. 그룹 색은 이름 가나다 자리로 정한다(사용량 순위가 바뀌어도 색이 바뀌지 않게).
       · 셸(← 특수 기능 · 제목)은 SpecialTools 가 그린다 — 시안의 breadcrumb·h1 은 넣지 않았다.
+  - ⚠⚠ **v2.689 — 전체 소스 점검(6영역 분석 → 컨펌 → 7그룹 Opus 병렬 수정) 확정분**(사용자 요청 "전체 소스 분석해서 버그·개선 각 10개 찾아
+    중요도 보여주고 컨펌 받고 진행" · 사용자 질문 "분석은 Fable, 실행은 Opus 가 효과적인가?" → 그렇게 했고 **비교 데이터는 없다**(첫 기록 —
+    `docs/AUDIT-2026-10-04.md` 그룹별 소요·되돌림 0건). 회귀는 `server/test/{releaseVersions,capacitySummary,g2Backup,g2Compress,g3Audit,g3Gates,
+    g3Insights,g4CacheGc}2689.test.js` + 웹 `g5Web2689` + `horizon-uag-monitor/tests/MonitorFixTests.cs` + `uagmon/test/{server,units}2689` — 전부 변이 검증 통과):
+    - ⚠⚠ **릴리스 워크플로는 이전 `versions.json` 을 못 받으면 '빈 목록으로 시작' 하지 않는다**(`release.yml` 'Fetch previous versions.json'):
+      예전 `download … \|\| true` 한 줄이 일시 오류를 삼켜 새 버전 1개짜리 목록을 만들고, 그 뒤 prune 이 **목록 밖 버전 자산을 전부 지웠다**
+      (롤백 경로·이력 소실). 3회 재시도 → 그래도 못 받으면 `gh release view` 로 자산 유무를 확인해 **자산이 있으면 실패**, '정말 처음' 일 때만
+      `first=true` 로 prune 생략. `update-versions.mjs` 도 손상 목록은 중단. **이 두 보호를 `\|\| true` 로 되돌리지 말 것.**
+    - ⚠⚠ **`/capacity` 요약은 시간 기준 양보 + stale-while-revalidate**(`capacity/evaluate.js`): 호스트×임계 지표 동기 SQL 이 700호스트 합성에서
+      3,316ms 정지(최장 30ms 로) — v2.672 '양보는 시간 기준' 규약의 누락 지점. TTL 뒤에는 옛 값을 바로 주고 뒤에서 1건만 재계산하므로 응답
+      `summaryRefreshing`·`summaryAt` 이 그 사실을 말한다(화면 표시는 아직 — 남은 일).
+    - ⚠⚠ **세션 연장 상한은 `lt`(원래 로그인 시각) 기준**(`auth/auth.js signToken` · `routes/auth.js /extend`): `iat` 는 연장마다 새로 찍혀
+      `sessionMaxHours` 가 밀렸다(연쇄 연장 = 무기한). `lt` 는 토큰에 서명돼 승계되고 구버전 토큰만 iat 폴백. `/extend` 에 `requireEnrolled`.
+    - **로그인 감사·활성 세션·실패 분석의 IP 는 `clientIp(req)`** — XFF 원문은 판정에 쓰지 않고 `xff` 필드(64자)로만 남긴다(형제 `auditMiddleware` 는 이미
+      그랬다 — 비대칭). `/api`·`/api/svcmon` 에도 `auditMiddleware`(읽기성 POST 제외 목록 `audit.js AUDIT_SKIP` — 새 읽기성 POST 를 `/api` 에
+      만들면 여기에 넣을 것, 아니면 감사가 쏟아진다). 게이트: GET `/admin/host-access` 전체 범위+소유자 · `/memtrack` fleetOnly ·
+      `/emergency-stop` 은 범위 계정에 `by` 가림(`byHidden` — `audit2612a` 가 '상태는 본다' 를 고정해 403 으로 하지 않았다).
+    - **vGPU 사용률 캐시는 `max(주기×3, 15분)` 을 넘으면 적용하지 않는다**(`soapClient.js applyGpuUtilCache` — 값 없음, 0 금지) · 조회 실패 시에도
+      적용 루프는 돈다(예전엔 catch 가 적용을 통째로 건너뛰었다) · 캐시는 vCenter 별 Map 이고 수집마다 live ref 로 정리. 삭제 장비 캐시 정리 4곳
+      (`storage/poller pruneAreasAt` · `fosSsh pruneCaps` · `redfish pruneSensorPaths`)은 **등록부 손상이면 생략**(빈 목록 = 전부 삭제가 되지 않게).
+    - **백업 gz 는 `atomicWriteFileSync` 뒤에만 prune** · `restoreCentral` 은 `failed[]`(라우트가 감사 detail·`note` 에 싣는다) · `collectConfigDirAsync`
+      (동기판은 `agent/configPush.js` 가 쓰므로 남겼다) · `util/compress.js` 는 진행 중 gzip Promise 를 공유(`gzPromise`).
+    - **`routes/insights.js` 캐시 키는 클램프한 인자**(`originalUrl` 이면 `&_=난수` 로 single-flight 우회) + anomalies/forecast 는 `runHeavyExclusive`
+      전역 1건. ⚠ `shared.js memoJson` 의 키 방식은 42개 엔드포인트 공용(`extraKey: scopeKey` 규약)이라 **바꾸지 않았다**.
+    - **uagmon(Node)**: 핸들러 전체 try/catch(URL 400 · 그 밖 500) + `unhandledRejection` 로그 · `uncaughtException` 은 **로그 후 종료**(동기 핸들러가
+      던진 자리의 미완 프라미스가 `polling=true` 를 영원히 남긴다 — systemd `Restart=always`·데스크톱 1회 재시작이 재기동). 루프백 모드는
+      `lib/httpGuard.js`(Host 허용 목록 · 교차 출처 403 · JSON 필수 415 — pyportal `_cross_site` 와 같은 규칙, 데스크톱은 `http://127.0.0.1:<포트>` 로 열어 통과).
+      Electron `requestSingleInstanceLock`(**실행 미확인**). 삭제·수정된 대상의 늦은 결과 폐기 · 저장 실패 시 메모리 되돌림 · 로그인 실패 Map 15분 만료.
+    - **웹 — 선택(서버·기간)과 다른 응답은 그리지 않는다**(`horizonUsageText.usageRepFor` · `bmStorHistoryText.historyForPeriod`): 응답에 요청 키를 두고
+      키가 다르면 null → Loading/오류만. CSV 는 **그려진 응답의 키**로. `CvpTool` 호스트명은 role=button + Enter/Space(행 onClick 과 이중 호출 방지).
+    - **패키징**: `install.sh --port`(`^[0-9]{1,5}$`·1~65535)·`--prefix`(`^/[A-Za-z0-9._/-]+$`·`..` 금지) 검증 — `PORT='1/;d;s/x/'` 가 sed 로 들어가
+      **portal.env 를 0바이트로 비웠다**(AUTH_SECRET 까지) · `uninstall.sh` 도 prefix 검증(`rm -rf "$PREFIX"` 앞) + otp 링크는 `$PREFIX/app/otp-enroll.sh` 를
+      가리킬 때만 삭제 · `release.sh` 날짜 `TZ=Asia/Seoul` · CI 에 `node --test uagmon/test/*.test.js`(디렉터리 인자는 실패한다).
+    - ⚠ **NoNewPrivileges — 유닛은 바꾸지 않았다(사용자 판단 사항)**: 본체 유닛 `NoNewPrivileges=true` 아래 `sudo -n firewall-cmd` 는 거부된다
+      (컨테이너 `setpriv --no-new-privs` 재현: `sudo: The "no new privileges" flag is set…`). 그 문구는 `isSudoDenied` 에 걸리지 않아 화면은 `unavailable`
+      원문만 보였다(분석 보고의 'sudoers 안내' 는 틀렸다) → `hostaccess/service.js NNP_NOTE` 안내만 추가. 실서버에서 유닛 밖 `sudo -u vmportal sudo -n
+      /usr/bin/firewall-cmd --state` 와 포탈 화면을 비교해 가를 것. 근본 해결(NNP 해제 또는 헬퍼 분리)은 하드닝 약화라 별건.
+    - **UAG Monitor 1.2**(`horizon-uag-monitor/CLAUDE.md` v1.2 절) — Windows 화면 미확인.
+    - 남은 후보(다음 점검 첫 후보): `capacity hosts` 표 영구 잔존 · REST 폴백 `d.capacity||0` · NDJSON 폴백 직접 쓰기 3곳 · prune 틱 카운터 · `install.sh --user` ·
+      hostAccess 변경 라우트 5개 전체 범위 게이트 · 웹 `Diagnostics.jsx` memtrack 403 무음 · uagmon 비밀번호 무염 SHA-256 · Electron 버전 고정.
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면

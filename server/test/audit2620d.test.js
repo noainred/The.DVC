@@ -82,7 +82,8 @@ test('RECENT2620-03(SEC2620-06): 세션 풀은 그 라우트를 통과할 사용
   assert.match(stripComments(read('routes/svcmon/shared.js')), /export const canEdit = requireRole\('admin', 'operator'\);/);
   const idx = stripComments(read('index.js'));
   assert.match(idx, /sessionAllowed: \(_req, u, full\) => sessionBigBodyAllowed\(u, full, \{ permsOf: rolePermissionSet, scoped: /);
-  assert.match(idx, /app\.use\('\/api\/svcmon', authMiddleware, requireEnrolled, requirePerm\('svcmon'\), svcmonRouter\)/);
+  // v2.689(G3 I1): requirePerm 뒤에 auditMiddleware 가 붙었다(2xx 변경 감사) — 게이트 순서(auth → enrolled → perm)는 그대로다.
+  assert.match(idx, /app\.use\('\/api\/svcmon', authMiddleware, requireEnrolled, requirePerm\('svcmon'\), auditMiddleware, svcmonRouter\)/);
 });
 
 test('RECENT2620-03: viewer 두 명이 느린 본문을 흘려도 관리자의 로그 분석 붙여넣기는 들어간다(실제 HTTP)', async () => {

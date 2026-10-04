@@ -132,8 +132,14 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     const a = readBackup(req.params.name);
     if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
     const r = await restoreCentral(a, { retention: loadBackupSettings().retention });
-    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일`, ip: req.ip || '' });
-    res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
+    // v2.689(G2 B6): 파일별 복원 실패(`failed[]`)를 감사·응답 문구에 밝힌다 — 예전에는 성공 개수만 적어 일부 설정이 복원되지
+    //   않았는데 '복원 완료' 로 보였다.
+    const nFail = Array.isArray(r.failed) ? r.failed.length : 0;
+    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}`, ip: req.ip || '' });
+    const note = nFail
+      ? `중앙 설정 복원 — ${r.restored}개 성공 · ${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}). 실패한 파일은 복원되지 않았습니다. 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.`
+      : '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.';
+    res.json({ ok: true, ...r, note });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

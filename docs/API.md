@@ -74,8 +74,8 @@
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/history` | — | [server/src/routes/capacity.js:69](../server/src/routes/capacity.js#L69) |
-| GET | `/host` | — | [server/src/routes/capacity.js:57](../server/src/routes/capacity.js#L57) |
+| GET | `/history` | — | [server/src/routes/capacity.js:71](../server/src/routes/capacity.js#L71) |
+| GET | `/host` | — | [server/src/routes/capacity.js:59](../server/src/routes/capacity.js#L59) |
 | GET | `/summary` | — | [server/src/routes/capacity.js:39](../server/src/routes/capacity.js#L39) |
 
 ## `/api/insights`
@@ -362,7 +362,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | DELETE | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:297](../server/src/routes/admin/collectorsDc.js#L297) |
 | PUT | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:292](../server/src/routes/admin/collectorsDc.js#L292) |
 | PUT | `/datacenters/assign` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:283](../server/src/routes/admin/collectorsDc.js#L283) |
-| POST | `/deep-search/probe` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:256](../server/src/routes/admin/backupNetSec.js#L256) |
+| POST | `/deep-search/probe` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:262](../server/src/routes/admin/backupNetSec.js#L262) |
 | GET | `/dir-usage` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/dirUsage.js:28](../server/src/routes/admin/dirUsage.js#L28) |
 | PUT | `/dir-usage` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/dirUsage.js:41](../server/src/routes/admin/dirUsage.js#L41) |
 | GET | `/dir-usage/history/:targetId` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/dirUsage.js:63](../server/src/routes/admin/dirUsage.js#L63) |
@@ -395,7 +395,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/gpu-physical/poll` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/gpuGuest.js:278](../server/src/routes/admin/gpuGuest.js#L278) |
 | POST | `/gpu-physical/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/gpuGuest.js:335](../server/src/routes/admin/gpuGuest.js#L335) |
 | POST | `/gpu/collect-util` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:96](../server/src/routes/admin/gpuGuest.js#L96) |
-| POST | `/guest/add-user` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:233](../server/src/routes/admin/backupNetSec.js#L233) |
+| POST | `/guest/add-user` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:239](../server/src/routes/admin/backupNetSec.js#L239) |
 | GET | `/horizon` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:21](../server/src/routes/admin/horizonAssign.js#L21) |
 | POST | `/horizon` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:22](../server/src/routes/admin/horizonAssign.js#L22) |
 | DELETE | `/horizon/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:27](../server/src/routes/admin/horizonAssign.js#L27) |
@@ -499,18 +499,18 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/memtrack` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:202](../server/src/routes/admin/statusTools.js#L202) |
 | GET | `/metrics/settings` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:80](../server/src/routes/admin/gpuGuest.js#L80) |
 | PUT | `/metrics/settings` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:84](../server/src/routes/admin/gpuGuest.js#L84) |
-| GET | `/net/agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:165](../server/src/routes/admin/backupNetSec.js#L165) |
-| GET | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:197](../server/src/routes/admin/backupNetSec.js#L197) |
-| POST | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:172](../server/src/routes/admin/backupNetSec.js#L172) |
-| GET | `/net/history` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:214](../server/src/routes/admin/backupNetSec.js#L214) |
-| DELETE | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:216](../server/src/routes/admin/backupNetSec.js#L216) |
-| GET | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:215](../server/src/routes/admin/backupNetSec.js#L215) |
-| GET | `/net/log-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:224](../server/src/routes/admin/backupNetSec.js#L224) |
-| GET | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:219](../server/src/routes/admin/backupNetSec.js#L219) |
-| PUT | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:220](../server/src/routes/admin/backupNetSec.js#L220) |
-| DELETE | `/net/monitors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:221](../server/src/routes/admin/backupNetSec.js#L221) |
-| POST | `/net/monitors/:id/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:222](../server/src/routes/admin/backupNetSec.js#L222) |
-| POST | `/net/pcap` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:203](../server/src/routes/admin/backupNetSec.js#L203) |
+| GET | `/net/agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:171](../server/src/routes/admin/backupNetSec.js#L171) |
+| GET | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:203](../server/src/routes/admin/backupNetSec.js#L203) |
+| POST | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:178](../server/src/routes/admin/backupNetSec.js#L178) |
+| GET | `/net/history` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:220](../server/src/routes/admin/backupNetSec.js#L220) |
+| DELETE | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:222](../server/src/routes/admin/backupNetSec.js#L222) |
+| GET | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:221](../server/src/routes/admin/backupNetSec.js#L221) |
+| GET | `/net/log-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:230](../server/src/routes/admin/backupNetSec.js#L230) |
+| GET | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:225](../server/src/routes/admin/backupNetSec.js#L225) |
+| PUT | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:226](../server/src/routes/admin/backupNetSec.js#L226) |
+| DELETE | `/net/monitors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:227](../server/src/routes/admin/backupNetSec.js#L227) |
+| POST | `/net/monitors/:id/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:228](../server/src/routes/admin/backupNetSec.js#L228) |
+| POST | `/net/pcap` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:209](../server/src/routes/admin/backupNetSec.js#L209) |
 | GET | `/nfs-mounts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:18](../server/src/routes/admin/nfsMounts.js#L18) |
 | POST | `/nfs-mounts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:22](../server/src/routes/admin/nfsMounts.js#L22) |
 | DELETE | `/nfs-mounts/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:30](../server/src/routes/admin/nfsMounts.js#L30) |
@@ -558,15 +558,15 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/room-temp/spark` | 역할 `admin` | [server/src/routes/admin/idracCore.js:153](../server/src/routes/admin/idracCore.js#L153) |
 | GET | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:142](../server/src/routes/admin/opsSettings.js#L142) |
 | PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:145](../server/src/routes/admin/opsSettings.js#L145) |
-| GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:304](../server/src/routes/admin/backupNetSec.js#L304) |
-| PUT | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:310](../server/src/routes/admin/backupNetSec.js#L310) |
-| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:326](../server/src/routes/admin/backupNetSec.js#L326) |
-| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:327](../server/src/routes/admin/backupNetSec.js#L327) |
-| GET | `/security/login-fails` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:279](../server/src/routes/admin/backupNetSec.js#L279) |
-| POST | `/security/login-fails/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:297](../server/src/routes/admin/backupNetSec.js#L297) |
-| PUT | `/security/login-fails/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:296](../server/src/routes/admin/backupNetSec.js#L296) |
-| GET | `/security/login-fails/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:295](../server/src/routes/admin/backupNetSec.js#L295) |
-| GET | `/security/net-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:300](../server/src/routes/admin/backupNetSec.js#L300) |
+| GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:310](../server/src/routes/admin/backupNetSec.js#L310) |
+| PUT | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:316](../server/src/routes/admin/backupNetSec.js#L316) |
+| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:332](../server/src/routes/admin/backupNetSec.js#L332) |
+| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:333](../server/src/routes/admin/backupNetSec.js#L333) |
+| GET | `/security/login-fails` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:285](../server/src/routes/admin/backupNetSec.js#L285) |
+| POST | `/security/login-fails/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:303](../server/src/routes/admin/backupNetSec.js#L303) |
+| PUT | `/security/login-fails/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:302](../server/src/routes/admin/backupNetSec.js#L302) |
+| GET | `/security/login-fails/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:301](../server/src/routes/admin/backupNetSec.js#L301) |
+| GET | `/security/net-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:306](../server/src/routes/admin/backupNetSec.js#L306) |
 | GET | `/security/self-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/securityCheck.js:22](../server/src/routes/admin/securityCheck.js#L22) |
 | GET | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:169](../server/src/routes/admin/opsSettings.js#L169) |
 | PUT | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:170](../server/src/routes/admin/opsSettings.js#L170) |
@@ -596,9 +596,9 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/vcenters/import-suggestions` | 역할 `admin` · `csvPerm` | [server/src/routes/admin/nsxImport.js:103](../server/src/routes/admin/nsxImport.js#L103) |
 | POST | `/vcenters/test` | 역할 `admin` | [server/src/routes/admin/vcenters.js:88](../server/src/routes/admin/vcenters.js#L88) |
 | POST | `/vcenters/test-all` | 역할 `admin` | [server/src/routes/admin/vcenters.js:104](../server/src/routes/admin/vcenters.js#L104) |
-| POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:158](../server/src/routes/admin/backupNetSec.js#L158) |
-| PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:144](../server/src/routes/admin/backupNetSec.js#L144) |
-| GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:141](../server/src/routes/admin/backupNetSec.js#L141) |
+| POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:164](../server/src/routes/admin/backupNetSec.js#L164) |
+| PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:150](../server/src/routes/admin/backupNetSec.js#L150) |
+| GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:147](../server/src/routes/admin/backupNetSec.js#L147) |
 | GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:325](../server/src/routes/admin/collectorsDc.js#L325) |
 | POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:348](../server/src/routes/admin/collectorsDc.js#L348) |
 

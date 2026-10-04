@@ -12,7 +12,7 @@
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
 import { getCapacityDb } from '../capacity/db.js';
-import { evaluateHost, summarizeHosts, summarizeHostsAt, SUMMARY_TTL_MS, WINDOWS } from '../capacity/evaluate.js';
+import { evaluateHost, summarizeHosts, summarizeHostsAt, summarizeHostsRefreshing, SUMMARY_TTL_MS, WINDOWS } from '../capacity/evaluate.js';
 import { capacitySamplerStatus } from '../capacity/sampler.js';
 import { capacityPushStatus } from '../agent/capacityPush.js';
 import { collectorMeta } from '../capacity/collectors.js';
@@ -49,6 +49,8 @@ capacityRouter.get('/summary', async (req, res) => {
       // v2.632(A6-2632-01): 판정은 최대 SUMMARY_TTL_MS 만큼 앞서 계산한 값이다(30일 창) — 캐시임을 숨기지 않는다.
       summaryAt: summarizeHostsAt(),
       summaryTtlMs: SUMMARY_TTL_MS,
+      // v2.689(G2 B2): TTL 이 지나면 옛 값을 바로 주고 뒤에서 다시 계산한다(stale-while-revalidate) — 재계산 중이면 밝힌다.
+      summaryRefreshing: summarizeHostsRefreshing(),
     });
   } catch (e) { res.status(500).json({ error: `요약 실패: ${e.message}` }); }
 });
