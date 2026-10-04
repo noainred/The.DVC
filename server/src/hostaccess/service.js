@@ -24,13 +24,26 @@ export const SUDOERS_HINT = (user = 'vmportal') => [
   `${user} ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service`,
 ].join('\n');
 
+/**
+ * v2.689(NNP 조사): 본체 유닛(packaging/offline/vmware-portal.service)은 NoNewPrivileges=true 다. 그 프로세스의 자식은
+ * setuid 로 권한을 얻을 수 없어 sudo 가 sudoers 와 무관하게 거부한다 — 이 컨테이너에서 setpriv --no-new-privs 로
+ * 재현했다(sudo 1.9.15p5: 'The "no new privileges" flag is set, which prevents sudo from running as root.').
+ * 실서버(systemd)에서는 확인하지 못했다. 유닛은 바꾸지 않고 화면 문구로 원인 후보를 알린다(detail 이 화면에 그대로 나간다).
+ */
+export const NNP_NOTE = '본체 유닛에 NoNewPrivileges=true 가 있으면 sudoers 가 맞아도 거부됩니다 — 실서버에서 sudo -n /usr/bin/firewall-cmd --state 로 확인하세요.';
+// 구버전 sudo 는 NNP 아래에서 'effective uid is not 0' 으로 끝난다(추정 — 이 컨테이너 sudo 1.9.15p5 는 위 문구). nosuid 마운트도 같은 문구다.
+const NNP_RE = /no new privileges|effective uid is not 0/i;
+
 /** firewalld 상태 + 기본 존 --list-all. 실패 사유를 구조화(sudo 거부 / firewalld 미동작 / 미설치). */
 export async function readEngine() {
   const st = await deps.fw(['--state']);
   if (!st.ok) {
-    if (deps.isSudoDenied(st)) return { ok: false, reason: 'sudo-denied', detail: st.stderr.trim(), hint: SUDOERS_HINT(process.env.USER || 'vmportal') };
+    const err = String(st.stderr || '').trim();
+    if (deps.isSudoDenied(st)) return { ok: false, reason: 'sudo-denied', detail: `${err} — ${NNP_NOTE}`, hint: SUDOERS_HINT(process.env.USER || 'vmportal') };
     if (/not running/i.test(st.stdout + st.stderr)) return { ok: false, reason: 'not-running', detail: 'firewalld 가 실행 중이 아닙니다(systemctl enable --now firewalld).' };
-    return { ok: false, reason: 'unavailable', detail: (st.stderr || st.stdout || `exit ${st.code}`).trim() };
+    const raw = (st.stderr || st.stdout || `exit ${st.code}`).trim();
+    // sudo 가 NNP 플래그로 거부하면 위 sudo-denied 정규식에 걸리지 않아 여기로 온다 — 원인을 함께 말한다.
+    return { ok: false, reason: 'unavailable', detail: NNP_RE.test(raw) ? `${raw} — ${NNP_NOTE}` : raw };
   }
   const dz = await deps.fw(['--get-default-zone']);
   const zone = dz.ok ? dz.stdout.trim() : 'public';
