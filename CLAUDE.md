@@ -4800,6 +4800,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       옛 키로 그리면 분기가 대장 목록으로 떨어져 `data.rows` 를 읽고 화면이 죽었다(Chromium 에서 실제로).
     · 남긴 것(2차 후보): `VcScanRangeEditor` 컴포넌트·`VcRangeImportModal` 은 더 그리지 않는다(RangeCheck 등 export 만 쓰인다) · vc-ranges API 는 호환으로 남김 ·
       netmap 은 `migratedRangesFor` 로 옮긴 대역을 그 vCenter 의 /24 목록에 계속 넣는다.
+  - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
+    (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
+    회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):
+    · 원인은 확정하지 못했다(스택 없음 = 네이티브 동기 호출 추정, 직전 멈춤 19초·15초가 SAN 사용량 조회). SAN 조회는 법인 전 스위치 × 전 포트 × 최대 366일을 한 문장으로
+      GROUP BY 했다. 지금은 장비마다·버킷 정배수 6시간 조각마다 묻고 `createYielder` 로 양보한다 — 조각을 버킷 경계에 맞추므로 결과는 예전 한 문장과 **같다**(테스트 대조).
+      합성 2,200만 행 실측: 30일 조회 최장 멈춤 **21.0초 → 50ms**, 총 21.0초 → 8.9초. ⚠ 조각 경계를 버킷 정배수에서 떼면 한 그룹이 두 조각에 나뉘어 AVG 가 틀린다(변이 M4).
+    · 같은 조회는 합류, 다른 조회는 직렬(`_chain`), 결과 20초 기억(`SANSW_PERF_QUERY_TTL_MS`) · **쓰기(import·save·prune)는 기억을 버린다**(`invalidatePerfQueries` — 세대 번호로 진행 중 결과도 다시 기억하지 않는다).
+    · ⚠⚠ **재진입 가드는 '끝나지 않는 주기' 를 영원히 붙잡을 수 있다** — pull 주기에 상한(`pullCycleMaxMs`, 기본 max(주기×3, 5분), env `COLLECTOR_PULL_CYCLE_MAX_MS`). 넘긴 주기는 abort 하고
+      가드를 풀어 새 주기를 시작한다(가드는 주기 번호 — 늦게 끝난 옛 주기가 새 가드를 풀지 않는다). 버린 주기가 붙잡은 수집 서버(`cycleBusy`)는 새 주기가 건너뛰고, 그것도 상한×2 를 넘기면 놓아준다.
+      **새 폴러의 재진입 가드도 같은 질문을 할 것: '이 주기가 영원히 끝나지 않으면 무엇이 멈추는가'.** 상태는 `pullerStatus()`.
+    · 서비스 점검 '원격 수집기' 는 개수가 아니라 `pullerHealth` 로 판정 · iDRAC 배너는 상태 'ok' 라도 정상 pull 이 max(주기×3, 5분)를 넘기면 `pullStale` → '중앙이 pull 하지 못한다'.
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).

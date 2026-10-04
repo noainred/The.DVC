@@ -28,6 +28,7 @@ import { loadMetricsSettings } from '../../metrics/settings.js';
 import { getDb as getPowerDb } from '../../idrac/db.js';
 import { TREND_METRICS, TREND_SERIES_ENABLED, TREND_AIRFLOW_ENABLED, CPU_FALLBACK_METRICS, trendValuesOf, cpuFallbackDiag, currentCpuIndex } from '../../idrac/serverTrendSeries.js';
 import { remotePowerEntries, getCollectorStatus } from '../../collector/state.js';
+import { pullerStatus } from '../../collector/puller.js';
 import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
 import { sampleStaleReason } from '../../idrac/serverTempSeries.js';
 import { sampleMaxAgeMs, DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
@@ -175,7 +176,7 @@ export function mergeCpuSeries(win, { telemetry = [], sensor = [], bmIdrac = [],
  * (① 이 멈췄으면 중앙↔엣지 통신, ① 은 도는데 ② 만 멈췄으면 엣지의 iDRAC 수집).
  * `error` 는 전체 범위 계정에만 싣는다(엣지 주소가 들어갈 수 있다).
  */
-export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = null, collector = null, showError = false } = {}) {
+export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = null, collector = null, showError = false, puller = null } = {}) {
   const remote = !!s?.remote;
   const at = numOrNull(latest?.t);
   const reason = sampleStaleReason(latest, { now, remote, localCycle });
@@ -195,10 +196,25 @@ export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = 
       version: c?.version ? String(c.version).slice(0, 40) : '',
       error: showError && c?.error ? String(c.error).slice(0, 300) : '',
       errorHidden: !showError && !!c?.error,
+      // v2.693(2026-10-04 운영 사고): 'ok' 상태가 남아 있어도 정상 pull 이 주기보다 크게 오래됐으면 pull 자체가 돌지 않는 것이다 —
+      //   화면이 'pull 은 정상' 이라 말하지 않게 판정을 함께 싣는다. 경계 = max(주기 × 3, 5분)(엣지 하나 실패는 c.ok=false 가 말한다).
+      ...pullStaleOf(lastOk, puller, now),
     };
     out.exportAt = numOrNull(s?.pulledAt);
   }
   return out;
+}
+
+/** v2.693: 정상 pull 이 주기보다 크게 오래됐는가(순수). puller 를 모르면 판정하지 않는다(추측 금지). */
+export function pullStaleOf(lastOkAt, puller, now = Date.now()) {
+  const iv = Number(puller?.intervalMs);
+  if (!(iv > 0) || lastOkAt == null) return { pullIntervalMs: iv > 0 ? iv : null, pullStale: false };
+  const limit = Math.max(iv * 3, 5 * 60_000);
+  const age = Math.max(0, now - Number(lastOkAt));
+  return {
+    pullIntervalMs: iv, pullStaleLimitMs: limit, pullStale: age > limit,
+    pullerRunningForMs: numOrNull(puller?.runningForMs), pullerStuckReleases: numOrNull(puller?.stuckReleases) ?? 0,
+  };
 }
 
 /** v2.666: 매칭된 ESXi 호스트의 vCenter CPU 사용률 계열(metrics/sampler.js HOST_CPU_METRIC). iDRAC CPU 와 다른 계열이다. */
@@ -812,6 +828,7 @@ export function registerIdracTrend(adminRouter) {
         now, latest, localCycle: s.remote ? null : sensorPollCycle(now),
         collector: s.remote ? getCollectorStatus(s.collectorId) : null,
         showError: !idracScopeOf(req),
+        puller: s.remote ? (() => { try { return pullerStatus(now); } catch { return null; } })() : null,
       });
     } catch (e) { idracState = { error: e?.message || String(e) }; }
     const errList = Object.entries(errors);

@@ -15,6 +15,7 @@ import { backupStatus } from '../backup/settings.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { nsxStore } from '../nsx/store.js';
 import { allCollectorStatus } from '../collector/state.js';
+import { pullerStatus, pullerHealth } from '../collector/puller.js';
 import { listInventory } from '../central/inventory.js';
 import { listAgentConfigs } from '../central/agentConfig.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -344,7 +345,9 @@ export function getServiceCheck(opts = {}) {
   checks.push(wrap('collectors', '원격 수집기', () => {
     const cols = Object.entries(allCollectorStatus() || {});
     if (!cols.length) return { status: 'off', detail: '원격 수집기 없음', at: Date.now() };
-    return { status: 'ok', detail: `${cols.length}개`, at: Date.now() };
+    // v2.693: 개수만 보고 'ok' 라 하지 않는다 — pull 주기가 멈췄거나 끝나지 않으면 경고(2026-10-04 운영 사고).
+    const h = pullerHealth(pullerStatus());
+    return { status: h.status === 'off' ? 'ok' : h.status, detail: `${cols.length}개 · ${h.detail}`, at: Date.now() };
   }));
 
   checks.push(wrap('llm', 'AI(LLM)', () => {

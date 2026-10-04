@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **581개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **583개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-04)
@@ -300,12 +300,13 @@
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
 
-## 수집 서버 (5)
+## 수집 서버 (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `CENTRAL_SELF_REGISTER_MAX` | `256` |  | collector/registry.js |
 | `CENTRAL_SELF_REGISTER_UNVERIFIED_MAX` | `16` |  | collector/registry.js |
+| `COLLECTOR_PULL_CYCLE_MAX_MS` |  |  | collector/puller.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` |  |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
@@ -717,7 +718,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (28)
+## SAN 스위치 (29)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -737,6 +738,7 @@
 | `SANSW_PERF_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_MS` |  | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_ROWS` | `20000` | ✅ | sanswitch/perfPush.js |
+| `SANSW_PERF_QUERY_TTL_MS` | `20000` |  | sanswitch/perfDb.js |
 | `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
 | `SANSW_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/push.js |
 | `SANSW_PUSH_DEVICE_MAX_BYTES` | `900` |  | sanswitch/push.js |
@@ -765,4 +767,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 581
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 583

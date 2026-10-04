@@ -619,6 +619,14 @@ export function idracStateBanner(st) {
     return { tone: 'amber', title: 'iDRAC 수집이 멈췄습니다', lines };
   }
   const pulled = c.lastOkAt != null ? `${minText(c.lastOkAgeMs)} 전` : '기록 없음';
+  // v2.693(2026-10-04 운영 사고): 상태가 'ok' 로 남아 있어도 정상 pull 이 주기보다 크게 오래됐으면 **중앙이 pull 을 하지 못하고 있는 것**이다 —
+  //   'pull 은 정상' 이라고 말하면 엉뚱하게 엣지의 iDRAC 수집을 의심하게 된다. 판정은 서버(pullStale)가 한다.
+  if (c.pullStale) {
+    const run = c.pullerRunningForMs != null ? ` 지금 진행 중인 pull 주기는 ${minText(c.pullerRunningForMs)}째입니다.` : '';
+    const rel = c.pullerStuckReleases ? ` 끝나지 않은 주기를 ${c.pullerStuckReleases}회 버렸습니다.` : '';
+    lines.push(`중앙이 엣지(${c.id})에서 ${minText(c.lastOkAgeMs)}째 pull 하지 못하고 있습니다(주기 ${minText(c.pullIntervalMs)} · 마지막 정상 ${pulled}).${run}${rel} 엣지 문제가 아니라 **중앙의 pull 이 멈춘 것**일 수 있습니다 — 서비스 점검의 '원격 수집기' 행과 서비스 로그의 [collector] 줄을 확인하세요.`);
+    return { tone: 'red', title: '중앙이 엣지에서 데이터를 가져오지 못하고 있습니다', lines };
+  }
   if (c.ok) {
     lines.push(`중앙 → 엣지(${c.id}) pull 은 정상입니다(마지막 정상 ${pulled}). 엣지가 보내는 이 서버의 표본 시각이 멈췄으므로 **엣지의 iDRAC 수집**을 보세요 — 특수 기능 › 엣지 로그에서 그 엣지의 collect.idrac 줄(마지막 실행·진행 시간·주기).`);
     return { tone: 'amber', title: '엣지의 iDRAC 수집이 멈췄습니다', lines };

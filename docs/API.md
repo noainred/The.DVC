@@ -421,8 +421,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/idrac/:id/inventory` | 역할 `admin` | [server/src/routes/admin/idracScan.js:63](../server/src/routes/admin/idracScan.js#L63) |
 | GET | `/idrac/:id/sensors` | 역할 `admin` | [server/src/routes/admin/idracScan.js:117](../server/src/routes/admin/idracScan.js#L117) |
 | GET | `/idrac/:id/temp-history` | 역할 `admin` | [server/src/routes/admin/idracScan.js:161](../server/src/routes/admin/idracScan.js#L161) |
-| GET | `/idrac/:id/trend` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:793](../server/src/routes/admin/idracTrend.js#L793) |
-| GET | `/idrac/:id/trend/hourly` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:755](../server/src/routes/admin/idracTrend.js#L755) |
+| GET | `/idrac/:id/trend` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:809](../server/src/routes/admin/idracTrend.js#L809) |
+| GET | `/idrac/:id/trend/hourly` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:771](../server/src/routes/admin/idracTrend.js#L771) |
 | GET | `/idrac/:id/vcenter-host` | 역할 `admin` | [server/src/routes/admin/idracScan.js:85](../server/src/routes/admin/idracScan.js#L85) |
 | POST | `/idrac/assign-vcenter` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:513](../server/src/routes/admin/idracScan.js#L513) |
 | POST | `/idrac/bulk-add` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:236](../server/src/routes/admin/idracScan.js#L236) |
@@ -461,11 +461,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/idrac/scan-result` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:284](../server/src/routes/admin/idracScan.js#L284) |
 | GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:496](../server/src/routes/admin/idracCore.js#L496) |
 | POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:222](../server/src/routes/admin/idracCore.js#L222) |
-| GET | `/idrac/trend/export.csv` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:667](../server/src/routes/admin/idracTrend.js#L667) |
-| GET | `/idrac/trend/export.xlsx` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:691](../server/src/routes/admin/idracTrend.js#L691) |
-| GET | `/idrac/trend/resolve-host` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:644](../server/src/routes/admin/idracTrend.js#L644) |
-| GET | `/idrac/trend/servers` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:580](../server/src/routes/admin/idracTrend.js#L580) |
-| GET | `/idrac/trend/table` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:587](../server/src/routes/admin/idracTrend.js#L587) |
+| GET | `/idrac/trend/export.csv` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:683](../server/src/routes/admin/idracTrend.js#L683) |
+| GET | `/idrac/trend/export.xlsx` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:707](../server/src/routes/admin/idracTrend.js#L707) |
+| GET | `/idrac/trend/resolve-host` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:660](../server/src/routes/admin/idracTrend.js#L660) |
+| GET | `/idrac/trend/servers` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:596](../server/src/routes/admin/idracTrend.js#L596) |
+| GET | `/idrac/trend/table` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:603](../server/src/routes/admin/idracTrend.js#L603) |
 | GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:487](../server/src/routes/admin/idracCore.js#L487) |
 | GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:60](../server/src/routes/admin/centralIpam.js#L60) |
 | GET | `/ipam/scan/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:199](../server/src/routes/admin/centralIpam.js#L199) |
