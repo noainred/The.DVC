@@ -15,7 +15,9 @@ import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
-import { listDatacenters } from '../../datacenter/store.js';
+import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
+import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
+import { idracSubnets, vmSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
@@ -248,6 +250,44 @@ adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
     recordScanLog({ event: 'settings', user: req.user?.username, ranges: (r.ranges || []).length, rangesSample: (r.ranges || []).slice(0, 5), message: `vCenter 스캔 대역 저장 — ${String(b.vcenterId || '').slice(0, 120)}` });
   }
   res.status(r.ok ? 200 : 400).json(r);
+});
+/**
+ * v2.690: vCenter별 스캔 대역 편집기의 '/24 가져오기' — kind=idrac(그 vCenter 의 DataCenter 또는 고른 DataCenter 의 iDRAC 스캔 대역)
+ * · kind=vm(그 vCenter VM 의 IPv4). 스냅샷·설정 파일만 읽는다(장비 왕복 0). 텍스트 박스와의 중복 판정은 웹이 한다(저장 안 한 입력 기준).
+ *  · vCenter 는 조회 범위 안이어야 한다(밖이면 404 — 존재 은닉).
+ *  · iDRAC 스캔 대역은 전 법인 설정이라 지금도 전체 범위 계정만 읽는다(GET /admin/idrac/scan-ranges 와 같은 기준) — 범위 계정은 403 + 사유.
+ */
+adminRouter.get('/ipam/vc-ranges/suggest', adminOnly, (req, res) => {
+  const vcenterId = String(req.query.vcenterId || '').slice(0, 200);
+  const kind = req.query.kind === 'idrac' ? 'idrac' : req.query.kind === 'vm' ? 'vm' : '';
+  if (!kind) return res.status(400).json({ ok: false, reason: 'kind 는 idrac 또는 vm 입니다.' });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vc = (snap.vcenters || []).find((v) => v.id === vcenterId);
+  let registered = false;
+  try { registered = (loadVcenterConfig()?.vcenters || []).some((v) => v && v.id === vcenterId); } catch { registered = false; }
+  if (!vcenterId || (allowed && !allowed.has(vcenterId)) || (!vc && !registered)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+  const base = { ok: true, kind, vcenterId, vcenterName: vc?.name || vcenterId, cap: SUBNET_MAX };
+  if (kind === 'vm') {
+    if (!vc) return res.json({ ...base, ...vmSubnets({ vms: [], vcenterId }), notInSnapshot: true }); // 등록됐지만 아직 수집 전
+    return res.json({ ...base, ...vmSubnets({ vms: snap.vms, vcenterId }), initial: !!snap.initial });
+  }
+  if (allowed) return res.status(403).json({ ok: false, requiredFullScope: true, reason: 'iDRAC 스캔 대역은 전 법인 설정이라 전체 범위(vCenter 제한 없는) 계정만 읽을 수 있습니다 — VM 대역 가져오기는 쓸 수 있습니다.' });
+  let datacenters = []; let datacentersError = '';
+  try { datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch (e) { datacentersError = e?.message || String(e); }
+  let assigned = '';
+  try { assigned = datacenterOfVcenter(vcenterId); } catch { assigned = ''; }
+  const asked = String(req.query.datacenterId || '').slice(0, 200);
+  const datacenterId = asked || assigned;
+  const dc = datacenters.find((d) => d.id.toLowerCase() === datacenterId.toLowerCase());
+  let entries = []; let rangesError = '';
+  try { entries = listIdracScanRanges(); } catch (e) { rangesError = e?.message || String(e); }
+  const r = datacenterId ? idracSubnets({ entries, datacenterId }) : { subnets: [], entries: [], invalid: [], omitted: 0 };
+  res.json({
+    ...base, ...r, datacenterId, datacenterName: dc?.name || datacenterId, assignedDatacenterId: assigned,
+    datacenterSource: asked ? 'chosen' : assigned ? 'assigned' : 'none', datacenterMissing: !!datacenterId && !dc && !datacentersError,
+    datacenters, ...(datacentersError ? { datacentersError } : {}), ...(rangesError ? { rangesError } : {}),
+  });
 });
 adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
   if (!vcRangeWritable(req.user, req.params.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
