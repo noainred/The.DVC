@@ -66,7 +66,10 @@ export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
             return done({ ok: false, error: `인증 실패 (HTTP ${res.statusCode}) — UAG 관리 계정을 확인하세요` });
           }
           if (res.statusCode !== 200) return done({ ok: false, error: `HTTP ${res.statusCode}` });
-          done(parseStats(body));
+          // parseStats 가 예상 밖 응답에 던지면 이 'end' 핸들러 밖으로 나가 uncaughtException 이 되고,
+          // 이 프라미스는 끝나지 않는다(폴러가 영원히 '진행 중'). 오류 결과로 바꿔 돌려준다.
+          try { done(parseStats(body)); }
+          catch (err) { done({ ok: false, error: `응답 해석 실패: ${err?.message || err}` }); }
         });
       });
     } catch (err) {
@@ -100,9 +103,10 @@ export function parseStats(body) {
   }
   if (!doc || typeof doc !== 'object') return { ok: false, error: '알 수 없는 응답 형식(JSON/XML 아님)' };
 
-  const root = doc.accessPointStatusAndStats || doc;
+  const root = (doc.accessPointStatusAndStats && typeof doc.accessPointStatusAndStats === 'object') ? doc.accessPointStatusAndStats : doc;
 
-  const services = arr(root.edgeServiceSessionStats).map((s) => ({
+  // 객체가 아닌 원소(null·숫자)는 건너뛴다 — `s.identifier` 가 TypeError 로 던지지 않게.
+  const services = arr(root.edgeServiceSessionStats).filter((s) => s && typeof s === 'object').map((s) => ({
     id: str(s.identifier || s.edgeServiceId || s.id || '').toUpperCase() || 'UNKNOWN',
     status: str(s.edgeServiceStatus || s.status || '').toUpperCase(),
     sessions: num(s.totalSessionCount ?? s.activeSessionCount ?? s.sessionCount),
@@ -112,7 +116,7 @@ export function parseStats(body) {
   const sumSessions = services.reduce((a, s) => a + (s.sessions || 0), 0);
   const totalSessions = num(root.totalSessionCount) ?? (services.length ? sumSessions : null);
 
-  const sys = root.systemStats || root;
+  const sys = (root.systemStats && typeof root.systemStats === 'object') ? root.systemStats : root;
   let memPercent = num(sys.memoryUtilPercent);
   if (memPercent == null) {
     const totalMb = num(sys.totalMemoryMb ?? sys.totalMemoryMB);

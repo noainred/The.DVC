@@ -59,28 +59,35 @@ export class Store {
     fs.renameSync(tmp, this.file);
   }
 
+  /** 목록을 바꾸고 저장한다 — 저장이 실패하면(디스크 가득·권한) 메모리도 되돌리고 던진다.
+   *  되돌리지 않으면 화면은 '실패' 인데 메모리에는 남아 폴링되고, 재시작하면 사라진다(v2.689). */
+  #commit(next) {
+    const prev = this.targets;
+    this.targets = next;
+    try { this.save(); } catch (err) { this.targets = prev; throw err; }
+  }
+
   addTarget(body) {
     const t = normalizeTarget(body);
-    this.targets.push(t);
-    this.save();
+    this.#commit([...this.targets, t]);
     return t;
   }
 
   updateTarget(id, body) {
     const i = this.targets.findIndex((t) => t.id === id);
     if (i === -1) return null;
-    this.targets[i] = normalizeTarget(body, this.targets[i]);
-    this.save();
-    return this.targets[i];
+    const next = this.targets.slice();
+    next[i] = normalizeTarget(body, this.targets[i]);
+    this.#commit(next);
+    return next[i];
   }
 
   removeTarget(id) {
-    const before = this.targets.length;
-    this.targets = this.targets.filter((t) => t.id !== id);
-    if (this.targets.length === before) return false;
+    const next = this.targets.filter((t) => t.id !== id);
+    if (next.length === this.targets.length) return false;
+    this.#commit(next);
     this.latest.delete(id);
     this.history.delete(id);
-    this.save();
     return true;
   }
 
