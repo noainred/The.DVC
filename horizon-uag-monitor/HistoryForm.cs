@@ -61,34 +61,28 @@ public sealed class HistoryForm : Form
 
     private void Reload()
     {
-        var since = DateTime.UtcNow.AddMinutes(-_rangeMinutes);
-        var rows = _db.History(_ep.Id, since);
-        // 과다 시 스트라이드 다운샘플(최대 ~1500점).
-        const int max = 1500;
-        List<Sample> pts = rows;
-        if (rows.Count > max)
-        {
-            var stride = (int)Math.Ceiling(rows.Count / (double)max);
-            pts = rows.Where((_, i) => i % stride == 0).ToList();
-        }
-        _chart.SetData(pts, DateTime.UtcNow.AddMinutes(-_rangeMinutes), DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var since = now.AddMinutes(-_rangeMinutes);
+        // DB 가 시간 버킷으로 집계한다 — 원시 행을 상한으로 자르지 않으므로 365일도 전 기간을 덮는다(v1.1 까지는
+        // 최근 2만 건 ≈ 60초 주기 14일만 보였다). 버킷마다 위험 건수를 남겨 단발 장애가 다운샘플로 사라지지 않는다.
+        var bucketSec = HistoryRules.BucketSecFor(_rangeMinutes);
+        var buckets = _db.HistoryBuckets(_ep.Id, since, bucketSec);
+        _chart.SetData(buckets, since, now);
 
-        if (rows.Count == 0) { _stats.Text = "이 기간에 데이터가 없습니다."; return; }
-        var resp = rows.Where(r => r.ResponseMs.HasValue).Select(r => r.ResponseMs!.Value).ToList();
-        int up = rows.Count(r => r.Status == HealthStatus.Up);
-        int down = rows.Count(r => r.Status == HealthStatus.Down);
-        var avg = resp.Count > 0 ? resp.Average() : 0;
-        var mx = resp.Count > 0 ? resp.Max() : 0;
-        var uptime = rows.Count > 0 ? 100.0 * up / rows.Count : 0;
-        var lastErr = rows.LastOrDefault(r => !string.IsNullOrEmpty(r.Error))?.Error;
-        _stats.Text = $"샘플 {rows.Count} · 정상률 {uptime:F1}% · 위험 {down} · 평균 응답 {avg:F0}ms · 최대 {mx:F0}ms"
+        var sum = HistoryRules.Summarize(buckets);
+        if (sum.Count == 0) { _stats.Text = "이 기간에 데이터가 없습니다."; return; }
+        var lastErr = _db.LastError(_ep.Id, since);
+        var unit = bucketSec >= 3600 ? $"{bucketSec / 3600}시간" : bucketSec >= 60 ? $"{bucketSec / 60}분" : $"{bucketSec}초";
+        var avg = sum.AvgResponseMs is double a ? $"{a:F0}ms" : "—";
+        var mx = sum.MaxResponseMs is double m ? $"{m:F0}ms" : "—";
+        _stats.Text = $"샘플 {sum.Count} · 정상률 {sum.UptimePct:F1}% · 위험 {sum.Down} · 주의 {sum.Warn} · 평균 응답 {avg} · 최대 {mx} · 차트 {unit} 단위"
                       + (lastErr != null ? $"   ·   최근 오류: {lastErr}" : "");
     }
 
-    /// <summary>응답지연 산점 + 상태 색상 차트(커스텀 페인트).</summary>
+    /// <summary>응답지연 + 상태 색상 차트(커스텀 페인트). 점 = 버킷 평균, 세로 선 = 버킷 최대, 빨간 세로 표식 = 위험 포함 버킷.</summary>
     private sealed class ChartPanel : Panel
     {
-        private List<Sample> _data = new();
+        private List<HistoryBucket> _data = new();
         private DateTime _t0, _t1;
 
         public ChartPanel()
@@ -97,7 +91,7 @@ public sealed class HistoryForm : Form
             BackColor = Color.White;
         }
 
-        public void SetData(List<Sample> data, DateTime t0, DateTime t1)
+        public void SetData(List<HistoryBucket> data, DateTime t0, DateTime t1)
         {
             _data = data;
             _t0 = t0;
@@ -115,8 +109,8 @@ public sealed class HistoryForm : Form
             if (w <= 10 || h <= 10) return;
 
             using var axis = new Pen(Color.FromArgb(230, 232, 235));
-            var withResp = _data.Where(d => d.ResponseMs.HasValue).ToList();
-            double maxMs = withResp.Count > 0 ? Math.Max(1, withResp.Max(d => d.ResponseMs!.Value)) : 1;
+            var withResp = _data.Where(d => d.MaxResponseMs.HasValue).ToList();
+            double maxMs = withResp.Count > 0 ? Math.Max(1, withResp.Max(d => d.MaxResponseMs!.Value)) : 1;
             maxMs *= 1.15;
             long span = Math.Max(1, (_t1 - _t0).Ticks);
 
@@ -137,25 +131,28 @@ public sealed class HistoryForm : Form
                 return;
             }
 
-            float X(DateTime ts) => padL + (float)(w * ((ts - _t0).Ticks / (double)span));
+            float X(DateTime ts) => padL + (float)(w * Math.Clamp((ts - _t0).Ticks / (double)span, 0, 1));
             float Y(double ms) => padT + (float)(h * (1 - Math.Min(ms, maxMs) / maxMs));
 
+            using var downPen = new Pen(Color.FromArgb(120, 214, 60, 60));
+            using var rangePen = new Pen(Color.FromArgb(70, 120, 120, 130));
             foreach (var d in _data)
             {
-                float x = X(d.TimestampUtc);
-                var color = MainForm.StatusColor(d.Status, true);
-                if (d.ResponseMs.HasValue)
+                // 버킷 안 실제 샘플 구간의 가운데에 찍는다(버킷 경계가 조회 시작보다 앞일 수 있다).
+                float x = X(d.FirstUtc + TimeSpan.FromTicks((d.LastUtc - d.FirstUtc).Ticks / 2));
+                if (d.Down > 0)
                 {
-                    float y = Y(d.ResponseMs.Value);
-                    using var br = new SolidBrush(color);
-                    float r = d.Status == HealthStatus.Up ? 2.2f : 3.0f;
-                    g.FillEllipse(br, x - r, y - r, r * 2, r * 2);
+                    // 위험(무응답)이 한 건이라도 있는 칸 — 평균에 묻히지 않게 세로 표식.
+                    g.DrawLine(downPen, x, padT, x, padT + h);
                 }
-                else
+                if (d.AvgResponseMs is double avg)
                 {
-                    // 무응답(Down): 하단에 빨강 세로 표식
-                    using var pen = new Pen(Color.FromArgb(120, 214, 60, 60));
-                    g.DrawLine(pen, x, padT, x, padT + h);
+                    if (d.MaxResponseMs is double mx && mx > avg) g.DrawLine(rangePen, x, Y(avg), x, Y(mx));
+                    var color = MainForm.StatusColor(d.Worst, true);
+                    using var br = new SolidBrush(color);
+                    float r = d.Worst == HealthStatus.Up ? 2.2f : 3.0f;
+                    float y = Y(avg);
+                    g.FillEllipse(br, x - r, y - r, r * 2, r * 2);
                 }
             }
 

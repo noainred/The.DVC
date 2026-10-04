@@ -101,4 +101,19 @@ public sealed class AlarmEngine
     }
 
     public void Reset() => _items.Clear();
+
+    private int? _generation;
+
+    /// <summary>
+    /// DB 세대(<see cref="Database.Generation"/>)가 바뀌었으면 판정을 비운다(true 반환). 다른 DB 로 전환하면 대상 id 의 뜻이
+    /// 바뀌므로 예전 id 로 들고 있던 알람·'확인됨' 표시를 새 DB 의 다른 대상에 이어 붙이면 안 된다. 처음 부르면 기억만 한다.
+    /// </summary>
+    public bool SyncGeneration(int generation)
+    {
+        if (_generation == null) { _generation = generation; return false; }
+        if (_generation == generation) return false;
+        _generation = generation;
+        Reset();
+        return true;
+    }
 }

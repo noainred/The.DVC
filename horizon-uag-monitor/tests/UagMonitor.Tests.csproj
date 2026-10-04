@@ -23,6 +23,7 @@
     <Compile Include="../DataMigrator.cs" />
     <Compile Include="../AlarmSettings.cs" />
     <Compile Include="../AlarmEngine.cs" />
+    <Compile Include="../MonitorRules.cs" />
   </ItemGroup>
 
   <ItemGroup>
