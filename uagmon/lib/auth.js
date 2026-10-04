@@ -13,30 +13,52 @@ import crypto from 'node:crypto';
 const TOKEN_TTL_MS = 12 * 3600 * 1000;
 const MAX_FAILS = 5;
 const LOCK_MS = 5 * 60 * 1000;
+// 실패 기록 유지 시간 — 마지막 실패 뒤 이만큼 지나고 잠금도 풀렸으면 지운다(v2.689).
+// 예전에는 성공해야만 지워져 IP 마다 영구 누적됐다(무인증 요청으로 Map 이 자란다).
+export const FAIL_TTL_MS = 15 * 60 * 1000;
+const FAILS_MAX = 10_000; // 만료 정리 뒤에도 넘치면 잠기지 않은 오래된 기록부터 버린다
 
 export const hashPassword = (pw) => crypto.createHash('sha256').update(String(pw)).digest('hex');
 
 export class Auth {
   /** required=false 면 모든 검사가 통과한다(로컬 클라이언트 모드). */
-  constructor({ required, passwordHash }) {
+  constructor({ required, passwordHash, now = Date.now }) {
     this.required = Boolean(required);
     this.passwordHash = String(passwordHash || '');
     this.sessions = new Map(); // token -> issuedAt
-    this.fails = new Map();    // ip -> { count, lockedUntil }
+    this.fails = new Map();    // ip -> { count, lockedUntil, lastAt }
+    this.now = now;
+  }
+
+  /** 만료된 실패 기록 정리 — 잠금 중인 것은 남긴다(정리로 잠금이 풀리면 안 된다). */
+  pruneFails(t = this.now()) {
+    for (const [ip, f] of this.fails) {
+      if (f.lockedUntil <= t && t - (f.lastAt || 0) > FAIL_TTL_MS) this.fails.delete(ip);
+    }
+    if (this.fails.size > FAILS_MAX) {
+      for (const [ip, f] of this.fails) {
+        if (this.fails.size <= FAILS_MAX) break;
+        if (f.lockedUntil <= t) this.fails.delete(ip);
+      }
+    }
   }
 
   login(ip, password) {
     if (!this.required) return { ok: true, token: '' };
-    const f = this.fails.get(ip) || { count: 0, lockedUntil: 0 };
-    if (f.lockedUntil > Date.now()) {
-      return { ok: false, error: `실패가 반복되어 잠겼습니다. ${Math.ceil((f.lockedUntil - Date.now()) / 1000)}초 후 다시 시도하세요.` };
+    const t = this.now();
+    this.pruneFails(t);
+    const f = this.fails.get(ip) || { count: 0, lockedUntil: 0, lastAt: 0 };
+    if (f.lockedUntil > t) {
+      return { ok: false, error: `실패가 반복되어 잠겼습니다. ${Math.ceil((f.lockedUntil - t) / 1000)}초 후 다시 시도하세요.` };
     }
     const given = hashPassword(password);
     const okPw = this.passwordHash.length === given.length
       && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(this.passwordHash));
     if (!okPw) {
       f.count += 1;
-      if (f.count >= MAX_FAILS) { f.count = 0; f.lockedUntil = Date.now() + LOCK_MS; }
+      f.lastAt = t;
+      if (f.count >= MAX_FAILS) { f.count = 0; f.lockedUntil = t + LOCK_MS; }
+      this.fails.delete(ip); // 다시 넣어 Map 순서를 '최근 실패' 뒤로(초과분 정리가 오래된 것부터)
       this.fails.set(ip, f);
       return { ok: false, error: '비밀번호가 올바르지 않습니다.' };
     }

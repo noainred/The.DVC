@@ -18,7 +18,7 @@
     <AssemblyName>HorizonUagMonitor</AssemblyName>
     <Product>Horizon UAG Monitor</Product>
     <AssemblyTitle>Horizon UAG Monitor</AssemblyTitle>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- 단일 exe 자동압축 해제 방식(네이티브 SQLite 포함). -->
     <SelfContained>true</SelfContained>

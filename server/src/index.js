@@ -413,11 +413,11 @@ app.use('/api/insights', authMiddleware, requireEnrolled, requirePerm('insights'
 // 같은 라우터의 로그 파일 라우트도 편집 권한을 요구했는데 `/state`·`/edges`·`/templates` 만
 // 무가드였다(게이팅 비대칭). svcmon 에는 vCenter scope 축이 없어 범위 제한 계정도 전량을 본다.
 // 엣지 수집은 `/api/central/svcmon-*`(개별 토큰) 을 쓰므로 이 게이트에 영향받지 않는다(확인함).
-app.use('/api/svcmon', authMiddleware, requireEnrolled, requirePerm('svcmon'), svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
+app.use('/api/svcmon', authMiddleware, requireEnrolled, requirePerm('svcmon'), auditMiddleware, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링) · v2.689 I3: 2xx 변경 감사(읽기성 POST 제외 — audit.js AUDIT_SKIP)
 app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // 리소스 적정성 진단(라우터 내부 admin 강제)
 // auditMiddleware: 대상 추가/삭제·vCenter 시드·엣지 동기화가 전부 admin 전용 상태변경이다.
 app.use('/api/ping', authMiddleware, requireEnrolled, auditMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
-app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
+app.use('/api', authMiddleware, requireEnrolled, auditMiddleware, api);  // protected resource endpoints · v2.689 I3: 2xx 변경 감사(읽기성 POST 제외 — audit.js AUDIT_SKIP)
 archSetApp(app); // v2.614 아키텍처 점검 — 마운트 수준 게이트·BIG_JSON 등록을 app 라우터 스택에서 읽는다(라우터 마운트 뒤 1회)
 
 // 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).

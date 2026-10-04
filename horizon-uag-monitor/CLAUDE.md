@@ -2,7 +2,7 @@
 
 포탈(`server/`·`web/`)과 별개인 .NET 8 WinForms 앱이다. 릴리스는 `.github/workflows/horizon-monitor-release.yml`
 (롤링 릴리스 `horizon-monitor`)이고 포탈 버전과 무관하다. 소스를 고치면 `dotnet test tests/UagMonitor.Tests.csproj` 를 돌린다
-(화면과 무관한 논리 43건 — Linux 에서도 돈다. WinForms 화면은 Linux 에서 띄울 수 없다).
+(화면과 무관한 논리 53건 — Linux 에서도 돈다. WinForms 화면은 Linux 에서 띄울 수 없다).
 
 - **알람 판정은 `AlarmEngine`(순수)이 하고 화면(`AlarmOverlay`)은 그리기만 한다.** 규칙: 주의·위험이 알람, 끄면(확인) 같은 상태에서는
   다시 울리지 않고 ① 정상을 거쳐 재발 ② 주의→위험 악화 ③ 다른 대상의 새 장애에서만 다시 울린다. 위험→주의는 다시 울리지 않는다.
@@ -17,3 +17,10 @@
 - **디자인은 `Theme.cs` 한 곳**(승인된 Claude Design 시안: 남색 머리말 · 밝은 본문 · 상태 칩). 색·글꼴을 화면마다 새로 정하지 말 것.
   카드에 왼쪽 색 막대를 되살리지 않는다(시안은 칩 + 옅은 상태색 바탕).
 - ⚠ 정직 기록: v1.1 의 화면(알람 띠 · 설정 탭 · 시안 적용)은 Linux 에서 **컴파일과 논리 테스트까지만** 확인했다. 실제 모양은 Windows 에서 본 적이 없다.
+- **v1.2 — 세대(`Database.Generation`)·종료 분류·버킷 집계·청크 prune**: ① `SwitchTo`(기존 DB 로 전환)만 세대를 올린다 — 폴더 이동(`FinishMigration`)은
+  같은 내용·같은 id 를 옮기는 것이라 올리지 않는다(올리면 진행 중 정상 점검 8건을 버리고 끈 알람이 다시 울린다). 점검 루프는 대상 목록을 읽기 **전에**
+  세대를 잡고 `InsertSample(s, expectedGeneration)` 이 잠금 안에서 대조한다. `_inFlight` 키는 `(세대, id)`. ② 종료(앱 토큰 취소) 중 결과는 샘플을
+  만들지 않는다(`MonitorRules.ClassifyFailure` — 앱 토큰이면 예외 종류와 무관하게 `AppStopping`, 요청 시한만 '시간 초과'). ③ 이력 창은 원시
+  `History(LIMIT 20000)` 이 아니라 `HistoryBuckets`(1일=1분 … 365일=4시간, 점 ≤ 약 2,200)로 그리고 통계도 같은 집계다 — 2만 건 상한은 60초 주기에서
+  약 14일이었다. 버킷의 가장 나쁜 상태는 Down 이 하나라도 있으면 Down. ④ `Prune` 은 5,000건 청크 사이에 잠금을 놓고 끝에 `wal_checkpoint(TRUNCATE)`
+  (VACUUM 은 이동의 `VACUUM INTO` 가 담당). 되돌리기 전에 `tests/MonitorFixTests.cs`(변이 10종 검출)를 볼 것.

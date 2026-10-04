@@ -136,3 +136,23 @@ export function emptyNote(rep) {
 
 /** 다운로드 파일 경로(서버 CSV). */
 export const usageCsvPath = (days, serverId) => `/tools/horizon-sessions/usage.csv?days=${encodeURIComponent(days)}${serverId ? `&serverId=${encodeURIComponent(serverId)}` : ''}`;
+
+/**
+ * 응답이 어느 선택(기간·서버)에 대한 것인지 — v2.689 B10-a.
+ * 서버나 기간을 바꾼 뒤 응답이 오기 전·조회가 실패한 동안 이전 선택의 응답을 새 제목 아래 그리면
+ * 사용자는 A 서버 값을 B 서버 값으로 읽는다(오류 없이 틀린 값). 그래서 응답에 요청 키를 함께 둔다.
+ */
+export function usageReqKey(days, serverId) {
+  return { days: Number(days), serverId: serverId == null ? '' : String(serverId) };
+}
+export function sameUsageKey(a, b) {
+  return !!a && !!b && Number(a.days) === Number(b.days) && String(a.serverId ?? '') === String(b.serverId ?? '');
+}
+/**
+ * 지금 선택(days·serverId)에 맞는 응답만 돌려준다. 맞지 않으면 null — 화면은 이전 데이터 대신
+ * 불러오는 중(또는 오류 배너)을 보인다. got = { key: usageReqKey(...), rep }.
+ */
+export function usageRepFor(got, days, serverId) {
+  if (!got || !got.rep) return null;
+  return sameUsageKey(got.key, usageReqKey(days, serverId)) ? got.rep : null;
+}

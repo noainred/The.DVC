@@ -77,6 +77,20 @@ const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { 
  */
 const CAPS_TTL_MS = Math.max(60_000, Number(process.env.SANSW_CAPS_TTL_MS) || 6 * 3600_000);
 const _caps = new Map(); // `${host}|${user}` → { at, has:Set<string>, path:string[] }
+/** 명령 조사 캐시 키 — probeCommands 호출부와 pruneCaps 가 같은 규칙을 쓴다. */
+export function capsKeyOf(device) { return `${device?.host}|${device?.username}`; }
+/**
+ * v2.689(C-06): 등록부에서 빠진 장비(또는 바뀐 계정)의 조사 결과를 지운다(예전엔 지우는 곳이 없었다).
+ * 이번 주기 장비 키(liveKeys)는 절대 지우지 않는다. 등록부를 못 읽은 주기는 호출부가 부르지 않는다.
+ */
+export function pruneCaps(liveKeys, store = _caps) {
+  const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || []);
+  let removed = 0;
+  for (const k of [...store.keys()]) if (!live.has(k)) { store.delete(k); removed += 1; }
+  return removed;
+}
+/** 테스트 전용 */
+export function _peekCaps() { return _caps; }
 
 /** 장비가 돌려준 경로 문자열 중 **안전한 절대경로만** 통과(셸 조립에 그대로 들어가므로). */
 const SAFE_DIR = /^\/[A-Za-z0-9._/-]{1,200}$/;
@@ -179,7 +193,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
     const out = {}; const raw = []; const errors = {}; let countersAt = null;
     // 이 스위치가 실제로 가진 명령 집합을 먼저 조사한다(경로 추측 금지 — 위 머리말).
     trace?.('명령 가용성 조사(echo $PATH; ls) — 캐시 6시간');
-    const caps = await probeCommands(sh, `${device.host}|${device.username}`);
+    const caps = await probeCommands(sh, capsKeyOf(device));
     if (caps.probeError) trace?.(`명령 조사 실패(그대로 진행): ${caps.probeError}`, 'warn');
     else trace?.(`PATH ${caps.path.length}개 디렉터리 · 확인된 명령 ${caps.has.size}개`);
     if (caps.probeError) raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: false, sample: `명령 조사 실패(그대로 실행합니다): ${caps.probeError}` });

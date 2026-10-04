@@ -617,6 +617,7 @@ public sealed class SettingsForm : Form
                 if (MessageBox.Show(this,
                         $"'{check.FullPath}' 에 이미 데이터베이스(monitor.db)가 있습니다.\n\n" +
                         "[예] 그 데이터베이스를 사용합니다. 지금 데이터는 예전 폴더에 그대로 남고, 새로 쓰는 데이터는 그 데이터베이스에 쌓입니다.\n" +
+                        "      지금 입력한 임계값·알람 설정(내 위치·지도 표시 포함)은 대상 폴더 DB 에 저장된 값으로 대체됩니다.\n" +
                         "[아니오] 취소합니다. (기존 파일은 덮어쓰지 않습니다)",
                         "기존 데이터베이스 발견", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                     return false;

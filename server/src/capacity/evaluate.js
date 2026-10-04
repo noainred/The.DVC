@@ -20,6 +20,7 @@
 import { config } from '../config.js';
 import { collectorMeta } from './collectors.js';
 import { getCapacityDb } from './db.js';
+import { createYielder } from '../util/timeSlice.js';
 
 export const WINDOWS = [
   { key: 'day', label: '1일', ms: 24 * 3600_000 },
@@ -152,6 +153,16 @@ export async function evaluateHost(k) {
  *   최대 TTL 동안 정상으로 보이지 않게. 계산 시각은 `summarizeHostsAt()` 로 밝힌다(라우트가 summaryAt 으로 싣는다).
  */
 export const SUMMARY_TTL_MS = 60_000;
+/*
+ * v2.689(B1): 캐시 미스마다 (호스트 × 임계 지표) 동기 SQL 을 양보 없이 돌려 700호스트 합성 재현에서 이벤트 루프가
+ *   약 3초 연속 정지했다(30일 창은 원본 보존 밖이라 매번 시간당 롤업 720행 조회·정렬). 이제
+ *   ① 지표 조회 사이에 시간 기준 양보(SUMMARY_SLICE_MS 마다 setImmediate — 개수 기준이 아니다, v2.672 규약)
+ *   ② stale-while-revalidate — TTL 이 지난 캐시가 있으면 기다리지 않고 옛 값을 바로 주고 뒤에서 1건만 다시 계산한다.
+ *      그래서 응답의 판정은 TTL 보다 더 오래된 값일 수 있다 — summarizeHostsAt()(계산 시각)이 그 사실을 밝히고
+ *      summarizeHostsRefreshing() 이 재계산 중인지 말한다. 재계산이 실패하면 옛 값을 지우지 않는다(console.warn).
+ *   캐시가 없을 때(첫 호출·리셋 뒤)는 예전처럼 계산을 기다린다.
+ */
+export const SUMMARY_SLICE_MS = 25;
 let _summary = null;      // { at, rows }
 let _summaryFlight = null;
 const FRESH_MS = 5 * 60_000;
@@ -161,35 +172,56 @@ async function computeSummary() {
   const db = await getCapacityDb();
   const now = Date.now();
   const metas = collectorMeta().filter((m) => m.warn != null);
-  const rows = db.hosts().map((h) => {
+  const maybeYield = createYielder(SUMMARY_SLICE_MS);
+  const rows = [];
+  for (const h of db.hosts()) {
     const groups = {};
     for (const m of metas) {
+      await maybeYield();
       const stats = db.windowStats(m.key, h.k, now - 30 * 24 * 3600_000, now);
       const j = judgeMetric(m, 'month', stats);
       const cur = groups[m.group];
       if (!cur || VERDICT_RANK[j.verdict] > VERDICT_RANK[cur]) groups[m.group] = j.verdict;
     }
-    return { k: h.k, meta: h.meta, lastTs: h.lastTs, groups };
-  });
-  return { at: now, rows };
+    rows.push({ k: h.k, meta: h.meta, lastTs: h.lastTs, groups });
+  }
+  return { at: now, rows, yields: maybeYield.count() };
 }
 
-/** 전 호스트 요약(목록 화면) — 호스트별 1달 창 축 종합만 가볍게. SUMMARY_TTL_MS 동안 memo(single-flight). */
-export async function summarizeHosts() {
-  const now = Date.now();
-  if (_summary && now - _summary.at < SUMMARY_TTL_MS) return withFresh(_summary.rows, now);
+function startSummaryFlight() {
   if (!_summaryFlight) {
     _summaryFlight = computeSummary()
       .then((r) => { _summary = r; return r; })
       .finally(() => { _summaryFlight = null; });
   }
-  const r = await _summaryFlight;
+  return _summaryFlight;
+}
+
+/**
+ * 전 호스트 요약(목록 화면) — 호스트별 1달 창 축 종합만 가볍게. SUMMARY_TTL_MS 동안 memo(single-flight),
+ * TTL 이 지나면 옛 값을 바로 주고 뒤에서 다시 계산한다(stale-while-revalidate).
+ */
+export async function summarizeHosts() {
+  const now = Date.now();
+  if (_summary && now - _summary.at < SUMMARY_TTL_MS) return withFresh(_summary.rows, now);
+  if (_summary) {
+    // 뒤에서 1건만 — 실패해도 옛 값을 지우지 않는다(다음 호출이 다시 시도한다).
+    startSummaryFlight().catch((e) => { console.warn(`[capacity] 요약 재계산 실패(직전 값 유지): ${e?.message || e}`); });
+    return withFresh(_summary.rows, now);
+  }
+  const r = await startSummaryFlight();
   return withFresh(r.rows, Date.now());
 }
 
 /** 마지막 요약 계산 시각(없으면 null) — 응답이 캐시임을 밝히는 데 쓴다. */
 export function summarizeHostsAt() { return _summary ? _summary.at : null; }
+/** 뒤에서 재계산 중인가(stale-while-revalidate) — 응답이 TTL 보다 오래된 값일 수 있음을 밝히는 데 쓴다. */
+export function summarizeHostsRefreshing() { return !!_summaryFlight; }
+/** 마지막 계산이 양보한 횟수(진단·테스트용, 없으면 null). */
+export function summarizeHostsYields() { return _summary ? (_summary.yields ?? null) : null; }
 /** 테스트 전용 — memo 를 비운다. */
 export function _resetSummaryCache() { _summary = null; _summaryFlight = null; }
+/** 테스트 전용 — 캐시 계산 시각을 ms 만큼 과거로 민다(TTL 경과 재현). */
+export function _ageSummaryCache(ms) { if (_summary) _summary = { ..._summary, at: _summary.at - ms }; }
 
 export { fmtVal };

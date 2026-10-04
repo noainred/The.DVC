@@ -8,6 +8,8 @@
  * 보안 규칙(포탈/pyportal 감사 불변조건 준수):
  *   - 127.0.0.1 외 바인딩은 비밀번호 설정 없이는 기동을 거부한다(공개 무인증 금지).
  *   - 모든 API 는 Bearer 헤더 인증(쿠키 미사용 → CSRF 표면 없음), 로그인 실패 잠금은 IP별.
+ *   - 로컬 모드(인증 꺼짐)는 Host 가 루프백 이름이어야 하고, 상태 변경 API 는 교차출처 403 ·
+ *     JSON 외 본문 415(lib/httpGuard.js — 임의 웹페이지의 단순 POST·DNS 리바인딩 차단, v2.689).
  *   - 등록 주소는 SSRF 가드(guard.js)를 통과해야 한다. TLS 완화는 대상별 옵션으로만.
  *   - 자격증명 파일은 0600 + 원자적 쓰기 + 손상 보존(store.js).
  */
@@ -21,6 +23,8 @@ import { fetchUagStats } from './lib/uag.js';
 import { hostBlockReason } from './lib/guard.js';
 import { Store } from './lib/store.js';
 import { Auth, hashPassword } from './lib/auth.js';
+import { createPoller } from './lib/poller.js';
+import { loopbackHostOk, mutationVerdict } from './lib/httpGuard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = (() => {
@@ -71,22 +75,13 @@ if (!isLoopback && !passwordHash) {
 const auth = new Auth({ required: !isLoopback, passwordHash });
 
 /* --------------------------------- 폴러 --------------------------------- */
-// 재진입 가드 — 이전 주기가 느리면(고RTT UAG) 이번 틱을 건너뛴다(중첩 실행 금지).
-let polling = false;
-async function pollOnce() {
-  if (polling) return { skipped: true };
-  polling = true;
-  try {
-    await Promise.allSettled(store.targets.map(async (t) => {
-      const r = await fetchUagStats(t); // per-target 10s 타임아웃 내장
-      store.pushSample(t.id, r);
-    }));
-    return { ok: true, at: Date.now() };
-  } finally { polling = false; }
-}
-const pollTimer = setInterval(() => { pollOnce(); }, Math.max(10, store.settings.pollSeconds) * 1000);
+// 재진입 가드 + 대상 변경 직후 재실행 예약 + 삭제된 대상 결과 버림 — lib/poller.js.
+const poller = createPoller(store, (t) => fetchUagStats(t)); // per-target 10s 타임아웃 내장
+const pollOnce = (o) => poller.pollOnce(o);
+const pollTimer = setInterval(() => { pollOnce().catch(logPollError); }, Math.max(10, store.settings.pollSeconds) * 1000);
 pollTimer.unref?.();
-pollOnce();
+pollOnce().catch(logPollError);
+function logPollError(err) { console.error(`[uagmon] 폴링 실패: ${err?.stack || err}`); }
 
 /* ------------------------------ 정적 리소스 ------------------------------ */
 const PUB = path.join(__dirname, 'public');
@@ -145,16 +140,45 @@ function summarize() {
   const up = rows.filter((r) => r.state === 'up').length;
   const problem = rows.filter((r) => r.state === 'down' || r.state === 'warn').length;
   const sessions = rows.reduce((a, r) => a + (r.stats?.ok ? (r.stats.totalSessions || 0) : 0), 0);
-  return { version: VERSION, pollSeconds: store.settings.pollSeconds, polling, targets: rows, summary: { total: rows.length, up, problem, sessions } };
+  return { version: VERSION, pollSeconds: store.settings.pollSeconds, polling: poller.polling, targets: rows, summary: { total: rows.length, up, problem, sessions } };
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://x');
+// 요청 핸들러의 모든 예외는 여기서 잡는다. 예전에는 async 핸들러가 try 밖에서 던지면
+// (`GET //[ HTTP/1.1` → new URL() 의 ERR_INVALID_URL, 디스크 가득으로 store.save() 실패 …)
+// 아무도 받지 않는 rejection 이 되어 Node 22 가 프로세스를 끝냈다 — 무인증 요청 한 줄로
+// 서버가 죽었다(v2.689 B3). 원문(스택)은 콘솔에만 남기고 응답에는 싣지 않는다.
+const server = http.createServer((req, res) => {
+  handle(req, res).catch((err) => {
+    console.error(`[uagmon] 요청 처리 실패 ${req.method} ${String(req.url).slice(0, 200)}: ${err?.stack || err}`);
+    try {
+      if (!res.headersSent) json(res, 500, { ok: false, error: '내부 오류가 발생했습니다.' });
+      else res.destroy();
+    } catch { /* 소켓이 이미 닫힘 */ }
+  });
+});
+
+async function handle(req, res) {
+  let url;
+  try { url = new URL(req.url, 'http://x'); }
+  catch { req.resume(); return json(res, 400, { ok: false, error: '잘못된 요청 주소' }); }
   const p = url.pathname;
+
+  // 로컬(루프백) 모드는 인증이 꺼져 있다 — Host 가 루프백 이름이 아니면 거부한다.
+  // DNS 리바인딩(공격자 도메인 → 127.0.0.1)은 브라우저가 Host 에 공격자 도메인을 싣는다.
+  if (isLoopback && !loopbackHostOk(req.headers.host)) {
+    req.resume();
+    return json(res, 403, { ok: false, error: '허용되지 않은 Host 입니다. http://127.0.0.1:<포트> 로 접속하세요.' });
+  }
 
   // 정적(인증 불필요 — 로그인 화면 자체)
   const st = STATIC.get(p);
   if (st && req.method === 'GET') return serveStatic(res, st);
+
+  // 상태 변경 API — 교차출처 403 · JSON 외 본문 415(로그인 포함).
+  if (p.startsWith('/api/')) {
+    const v = mutationVerdict(req.method, req.headers, { loopback: isLoopback });
+    if (v) { req.resume(); return json(res, v.code, { ok: false, error: v.error }); }
+  }
 
   if (p === '/api/meta' && req.method === 'GET') {
     return json(res, 200, { ok: true, version: VERSION, authRequired: auth.required });
@@ -189,7 +213,7 @@ const server = http.createServer(async (req, res) => {
       const bad = validateTarget(body);
       if (bad) return json(res, 400, { ok: false, error: bad });
       const t = store.addTarget(body);
-      pollOnce();
+      pollOnce({ again: true }).catch(logPollError);
       return json(res, 201, { ok: true, target: store.redact(t) });
     }
 
@@ -201,7 +225,7 @@ const server = http.createServer(async (req, res) => {
       if (bad) return json(res, 400, { ok: false, error: bad });
       const t = store.updateTarget(mt[1], body);
       if (!t) return json(res, 404, { ok: false, error: '대상 없음' });
-      pollOnce();
+      pollOnce({ again: true }).catch(logPollError);
       return json(res, 200, { ok: true, target: store.redact(t) });
     }
     if (mt && req.method === 'DELETE') {
@@ -223,7 +247,7 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('not found');
-});
+}
 
 function validateTarget(body, partial = false) {
   if (!partial || body.host !== undefined) {
@@ -237,6 +261,23 @@ function validateTarget(body, partial = false) {
   if (!partial && !String(body.password || '')) return 'UAG 관리 비밀번호가 필요합니다.';
   return null;
 }
+
+// 프로세스 수준 안전망.
+//  - unhandledRejection: 로그만 남기고 계속. 요청 경로의 rejection 은 위 handle().catch 가 받으므로
+//    여기 오는 것은 그 밖(폴러 등)의 것이고, rejection 은 동기 스택을 반쯤 끝낸 채 남기지 않는다.
+//  - uncaughtException: 로그를 남기고 **종료**한다(계속하지 않는다). 이 서버의 영속 상태는
+//    원자적으로 쓰는 uag-config.json 하나라 재시작해도 잃는 것은 인메모리 추이·로그인 세션뿐이지만,
+//    반대로 계속 돌면 이벤트 핸들러가 던진 자리에서 settle 되지 않은 프라미스가 남을 수 있다 —
+//    예: UAG 응답 'end' 핸들러가 던지면 그 대상의 fetch 가 끝나지 않아 poller 의 polling 이 영원히
+//    true 가 되고 **모니터링이 조용히 멈춘다**. 조용히 멈춘 모니터가 재시작보다 나쁘다.
+//    재기동은 systemd(Restart=always, packaging/uagmon/uag-monitor.service)·데스크톱 앱(1회 재시작)이 한다.
+process.on('unhandledRejection', (reason) => {
+  console.error(`[uagmon] 처리되지 않은 rejection(계속 실행): ${reason?.stack || reason}`);
+});
+process.on('uncaughtException', (err) => {
+  console.error(`[uagmon] 처리되지 않은 예외 — 상태를 신뢰할 수 없어 종료합니다: ${err?.stack || err}`);
+  process.exit(1);
+});
 
 // slowloris/유휴 keep-alive 정리(pyportal 불변조건과 동형).
 server.headersTimeout = 20_000;

@@ -132,8 +132,14 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     const a = readBackup(req.params.name);
     if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
     const r = await restoreCentral(a, { retention: loadBackupSettings().retention });
-    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일`, ip: req.ip || '' });
-    res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
+    // v2.689(G2 B6): 파일별 복원 실패(`failed[]`)를 감사·응답 문구에 밝힌다 — 예전에는 성공 개수만 적어 일부 설정이 복원되지
+    //   않았는데 '복원 완료' 로 보였다.
+    const nFail = Array.isArray(r.failed) ? r.failed.length : 0;
+    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}`, ip: req.ip || '' });
+    const note = nFail
+      ? `중앙 설정 복원 — ${r.restored}개 성공 · ${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}). 실패한 파일은 복원되지 않았습니다. 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.`
+      : '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.';
+    res.json({ ok: true, ...r, note });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -236,8 +242,19 @@ adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
   if (!inUserWriteScope(req.user, store.get(), String(b.vcenterId || ''))) {
     return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
   }
-  try { res.json(await addUsersToVms(b)); }
-  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  // v2.689(B7): 누가·어느 vCenter 의 몇 대에·어떤 계정을(sudo 여부) 만들었는지 남긴다 — 일반 미들웨어 한 줄
+  //   ('POST /admin/guest/add-user')만으로는 사고 분석이 안 된다. 비밀번호·게스트 인증 계정 비밀번호는 싣지 않는다.
+  const nVm = Array.isArray(b.vmIds) ? b.vmIds.length : 0;
+  const acct = String(typeof b.username === 'string' ? b.username : '').slice(0, 64);
+  const what = `VM ${nVm}대 · 계정 ${acct || '(없음)'} · sudo=${b.sudo === undefined ? true : !!b.sudo}${b.nopasswd ? ' · NOPASSWD' : ''}`;
+  try {
+    const r = await addUsersToVms(b);
+    logAudit({ user: req.user?.username, action: '게스트 계정 추가', target: String(b.vcenterId || ''), detail: `${what} · 성공 ${r.ok} · 실패 ${r.fail}` });
+    res.json(r);
+  } catch (e) {
+    logAudit({ user: req.user?.username, action: '게스트 계정 추가 실패', target: String(b.vcenterId || ''), detail: `${what} · ${String(e?.message || e).slice(0, 200)}` });
+    res.status(400).json({ ok: false, reason: e.message });
+  }
 });
 
 // 심층 검색(게스트 탐침) — GPU 드라이버/프로세스 등 게스트 OS 조건. 관리자 전용(게스트 명령 실행).
@@ -256,7 +273,10 @@ adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
   }
   try {
     const candidates = snapshotFilter(store.get(), { vcenterIds, f: b.filters || {} }).map(slimVm);
-    const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms: Math.min(500, Number(b.maxVms) || 100) });
+    const maxVms = Math.min(500, Number(b.maxVms) || 100);
+    // v2.689(B7): 게스트 OS 에 명령을 실행하는 경로다 — 유형·대상 수를 남긴다(패턴·게스트 비밀번호는 싣지 않는다).
+    logAudit({ user: req.user?.username, action: '심층 검색 게스트 탐침', target: vcenterIds.length ? vcenterIds.slice(0, 20).join(',') : '(전체)', detail: `유형 ${String(b.probe.type).slice(0, 40)} · 후보 ${candidates.length}대 · 상한 ${maxVms}대` });
+    const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms });
     res.json({ candidates: candidates.length, ...r });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

@@ -56,21 +56,25 @@ authRouter.post('/login', async (req, res) => {
   if (username.length > USERNAME_MAX) {
     return res.status(400).json({ error: `username too long (max ${USERNAME_MAX})` });
   }
-  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
-  // 잠금 키의 출발지는 `clientIp(req)` 로 정한다(v2.503, 감사 S2): **`trust proxy` 가 설정된
-  // 배포에서만** XFF 기반 `req.ip` 를 쓰고, 아니면 실제 peer 를 쓴다 — XFF 를 무조건 믿으면
-  // 스푸핑으로 잠금을 무력화할 수 있고, 반대로 peer 로 고정하면 리버스 프록시 뒤에서 **전 사용자가
-  // 한 키를 공유**해 v2.500 의 계정 무관 카운터가 전체 로그인 잠금으로 번진다.
+  // 출발지는 `clientIp(req)` 로 정한다(v2.503, 감사 S2): **`trust proxy` 가 설정된 배포에서만** XFF 기반
+  // `req.ip` 를 쓰고, 아니면 실제 peer 를 쓴다 — XFF 를 무조건 믿으면 스푸핑으로 잠금을 무력화할 수 있고, 반대로 peer 로
+  // 고정하면 리버스 프록시 뒤에서 **전 사용자가 한 키를 공유**해 v2.500 의 계정 무관 카운터가 전체 로그인 잠금으로 번진다.
   // 전역 레이트리밋(util/rateLimit.js)과 같은 규약을 쓴다(v2.428 에서 같은 결함을 고쳤다).
-  // 감사 로그에는 XFF 원문(`ip`)을 그대로 남긴다.
+  // ⚠ v2.689(B2): 감사·활성 세션·로그인 실패 분석(loginStore)의 `ip` 도 **같은 값**이다. 예전에는 TRUST_PROXY 와 무관하게
+  //   XFF 원문 첫 조각을 `ip` 로 썼다 — 무인증 요청이 `X-Forwarded-For` 한 줄로 감사·공격 분석의 IP 를 타인 IP·요청마다 다른 값으로
+  //   위조할 수 있었다(형제 auditMiddleware 는 이미 clientIp 였다). 원문 XFF 는 64자로 잘라 별도 필드 `xff` 로만 남긴다(판정에 안 쓴다).
   const gateIp = clientIp(req);
+  const ip = gateIp;
+  const xffRaw = req.headers['x-forwarded-for'];
+  // 65자까지만 넘긴다 — audit.js 가 64자에서 자르고 '잘림' 표지를 붙인다(조용한 절단 금지).
+  const xff = xffRaw == null ? '' : String(Array.isArray(xffRaw) ? xffRaw.join(',') : xffRaw).slice(0, 65);
 
   // 무차별 대입 방어: peer+계정 잠금 상태면 인증 시도 자체를 막는다.
   const gate = checkLoginAllowed(gateIp, username);
   if (gate.blocked) {
     // v2.583(감사 확정): 잠긴 뒤의 시도는 공격자에게 비용이 없다 — 출처당 1분에 한 줄로 합친다(util/denyAuditGate.js).
     const sum = loginBlockedGate(gateIp);
-    if (sum.write) logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s${foldedNote(sum.folded)}`, ip });
+    if (sum.write) logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s${foldedNote(sum.folded)}`, ip, xff });
     return res.status(429).set('Retry-After', String(gate.retryAfterSec))
       .json({ error: `로그인 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` });
   }
@@ -82,8 +86,8 @@ authRouter.post('/login', async (req, res) => {
     let shadow = '';
     try { const sb = adShadowBlockOf(username); if (sb && Date.now() - sb.at < 10_000) shadow = ` · ${sb.reason}`; } catch { /* */ }
     // 잠금을 **발동시킨** 줄은 항상 남긴다. 그 밖의 실패는 출처당 1분에 한 줄 + 합친 개수(감사 이력 밀어내기 방지).
-    if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', detail: shadow.replace(/^ · /, '') || undefined, ip });
-    else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: (foldedNote(sum.folded) + shadow).replace(/^ · /, ''), ip }); }
+    if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', detail: shadow.replace(/^ · /, '') || undefined, ip, xff });
+    else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: (foldedNote(sum.folded) + shadow).replace(/^ · /, ''), ip, xff }); }
     try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
     if (lk.locked) {
       return res.status(429).set('Retry-After', String(lk.retryAfterSec))
@@ -105,7 +109,7 @@ authRouter.post('/login', async (req, res) => {
   const sid = singleSessionRequired(!!local?.demo) ? newSessionId() : null;
   const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(sid ? { sid } : {}) });
   if (sid) setActiveSession(user.username, sid, { at: Date.now(), ip });
-  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${sid ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });
+  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${sid ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
@@ -166,13 +170,17 @@ authRouter.get('/me', authMiddleware, (req, res) => {
  *     만료를 무한정 밀어 올릴 수 있다(정책 무력화). 창 밖 호출은 409 로 거절한다.
  *  2. 새 만료는 `지금 + M분`이 아니라 **`기존 만료 + M분`**이다. 사용자가 이해하는 '연장'이
  *     그것이고, 지금 기준으로 잡으면 경고 시점(만료 10분 전)에 눌렀을 때 실제로는 50분만 늘어난다.
- *  3. `sessionMaxHours`(0=무제한)로 **로그인 시각(iat) 기준 총 상한**을 강제한다. 상한에 걸리면
+ *  3. `sessionMaxHours`(0=무제한)로 **원래 로그인 시각(`lt`) 기준 총 상한**을 강제한다. 상한에 걸리면
  *     그 지점까지만 늘리고 `capped:true` 를 알린다(조용히 무시하지 않는다).
+ *     ⚠ v2.689(B4): 예전에는 `iat` 기준이었는데 연장 토큰의 iat 는 '직전 연장 시각' 이라 연장할 때마다
+ *     상한이 앞으로 밀렸다(연쇄 연장으로 무기한 유지). 로그인 때 찍힌 `lt` 를 그대로 승계한다 —
+ *     `lt` 가 없는 구버전 토큰만 iat 로 폴백한다.
+ *  5. `requireEnrolled` — OTP 등록 전용 세션은 /me·/totp/* 만 쓸 수 있다(v2.689 B5).
  *  4. 페이로드는 원본 토큰의 클레임을 그대로 승계한다 — 특히 `sid`(단일 세션)와 `tv`(토큰 버전).
  *     여기서 새 sid 를 발급하면 다른 기기의 세션을 밀어내고, tv 를 빼면 폐기된 토큰이 되살아난다.
  *     role/name 도 토큰이 아니라 resolveTokenUser 가 매 요청 레코드에서 다시 읽으므로 승계로 충분하다.
  */
-authRouter.post('/extend', authMiddleware, (req, res) => {
+authRouter.post('/extend', authMiddleware, requireEnrolled, (req, res) => {
   if (!config.auth.enabled) return res.json({ ok: true, disabled: true }); // 인증 off면 만료 개념이 없다
   const raw = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   const payload = raw && verifyToken(raw);
@@ -197,8 +205,10 @@ authRouter.post('/extend', authMiddleware, (req, res) => {
   let nextExp = payload.exp + extendSec;
   let capped = false;
   const maxH = Number(sec.sessionMaxHours) || 0;
+  // 원래 로그인 시각 — 구버전 토큰(lt 없음)은 iat 로 폴백(그 토큰부터 lt 가 승계된다).
+  const loginAt = Number(payload.lt) || Number(payload.iat) || now;
   if (maxH > 0) {
-    const hardLimit = (Number(payload.iat) || now) + maxH * 3600;
+    const hardLimit = loginAt + maxH * 3600;
     if (nextExp > hardLimit) { nextExp = hardLimit; capped = true; }
     if (nextExp <= now) {
       return res.status(409).json({ ok: false, reason: `세션 총 상한(${maxH}시간)에 도달해 더 연장할 수 없습니다. 다시 로그인하세요.`, capped: true });
@@ -208,7 +218,7 @@ authRouter.post('/extend', authMiddleware, (req, res) => {
   // (4) 클레임 승계 — sid/tv 를 반드시 유지한다.
   const { sub, role, name, src, tv, sid } = payload;
   const token = signToken(
-    { sub, role, name, ...(src ? { src, tv } : {}), ...(sid ? { sid } : {}) },
+    { sub, role, name, ...(src ? { src, tv } : {}), ...(sid ? { sid } : {}), lt: loginAt },
     { exp: nextExp },
   );
   logAudit({ user: req.user?.username, action: '세션 연장', target: `${sec.sessionExtendMin}분`, detail: capped ? `총 상한(${maxH}h)까지만 연장` : `만료 ${new Date(nextExp * 1000).toISOString()}` });

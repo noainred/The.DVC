@@ -58,6 +58,12 @@ jobs:
       - name: 서버 단위테스트 (node:test)
         run: npm --prefix server test
 
+      # v2.689(I1): uagmon(UAG 모니터) 단위테스트가 CI 어디서도 돌지 않아 SSRF 가드(lib/guard.js) 회귀가
+      # 게시까지 갈 수 있었다. Node 내장 모듈만 쓰므로 설치가 필요 없다.
+      # ⚠ 디렉터리 인자(`node --test uagmon/test/`)는 실패한다 — 파일 글롭으로 넘긴다.
+      - name: uagmon 단위테스트 (node:test)
+        run: node --test uagmon/test/*.test.js
+
       # v2.447(감사 I2): lint 가 CI 에 없어 eslint 경고 75건이 그대로 통과했다.
       # react-hooks/rules-of-hooks 는 error 라 화면 크래시(React #310)를 막는 게이트다 —
       # 경고는 통과시키되(--max-warnings 미지정) 에러는 반드시 실패시킨다.

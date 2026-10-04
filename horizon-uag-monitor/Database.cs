@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 using Microsoft.Data.Sqlite;
 
 namespace HorizonUagMonitor;
@@ -16,6 +17,16 @@ public sealed class Database : IDisposable
     private readonly object _gate = new();
 
     public string DbPath { get; private set; }
+
+    private int _generation;
+
+    /// <summary>
+    /// 데이터 세대 — 다른 DB 파일로 전환(<see cref="SwitchTo"/>)할 때마다 1 오른다. 대상 id 는 DB 마다 따로 매겨지므로
+    /// 전환 전에 읽은 대상의 점검 결과·알람 판정은 전환 뒤 DB 에 쓰면 안 된다(<see cref="InsertSample(Sample,int)"/>).
+    /// 폴더 이동(<see cref="FinishMigration"/>)은 같은 내용·같은 id 를 옮기므로 올리지 않는다 — 올리면 그 순간 진행 중이던
+    /// 정상 결과를 버리고 이미 끈 알람이 다시 울린다.
+    /// </summary>
+    public int Generation => Volatile.Read(ref _generation);
 
     public Database(string? overridePath = null)
     {
@@ -224,23 +235,39 @@ public sealed class Database : IDisposable
     // ── samples ──────────────────────────────────────────────────────────────
     public void InsertSample(Sample s)
     {
+        lock (_gate) InsertSampleLocked(s);
+    }
+
+    /// <summary>
+    /// 세대가 <paramref name="expectedGeneration"/> 그대로일 때만 저장한다(검사와 쓰기가 같은 잠금 안이다).
+    /// 점검 도중 다른 DB 로 전환됐으면 false — 그 결과는 예전 DB 의 대상 id 를 들고 있다.
+    /// </summary>
+    public bool InsertSample(Sample s, int expectedGeneration)
+    {
         lock (_gate)
         {
-            using var cmd = _conn.CreateCommand();
-            cmd.CommandText = @"INSERT INTO samples (endpoint_id,ts,status,tcp_ok,connect_ms,tls_ok,http_status,response_ms,cert_expiry_days,error)
-                VALUES ($e,$t,$s,$tcp,$c,$tls,$hs,$rm,$ce,$err)";
-            cmd.Parameters.AddWithValue("$e", s.EndpointId);
-            cmd.Parameters.AddWithValue("$t", ToMs(s.TimestampUtc));
-            cmd.Parameters.AddWithValue("$s", (int)s.Status);
-            cmd.Parameters.AddWithValue("$tcp", s.TcpOk ? 1 : 0);
-            cmd.Parameters.AddWithValue("$c", (object?)s.ConnectMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$tls", s.TlsOk ? 1 : 0);
-            cmd.Parameters.AddWithValue("$hs", (object?)s.HttpStatus ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$rm", (object?)s.ResponseMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$ce", (object?)s.CertExpiryDays ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$err", (object?)s.Error ?? DBNull.Value);
-            cmd.ExecuteNonQuery();
+            if (_generation != expectedGeneration) return false;
+            InsertSampleLocked(s);
+            return true;
         }
+    }
+
+    private void InsertSampleLocked(Sample s)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO samples (endpoint_id,ts,status,tcp_ok,connect_ms,tls_ok,http_status,response_ms,cert_expiry_days,error)
+            VALUES ($e,$t,$s,$tcp,$c,$tls,$hs,$rm,$ce,$err)";
+        cmd.Parameters.AddWithValue("$e", s.EndpointId);
+        cmd.Parameters.AddWithValue("$t", ToMs(s.TimestampUtc));
+        cmd.Parameters.AddWithValue("$s", (int)s.Status);
+        cmd.Parameters.AddWithValue("$tcp", s.TcpOk ? 1 : 0);
+        cmd.Parameters.AddWithValue("$c", (object?)s.ConnectMs ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$tls", s.TlsOk ? 1 : 0);
+        cmd.Parameters.AddWithValue("$hs", (object?)s.HttpStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$rm", (object?)s.ResponseMs ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ce", (object?)s.CertExpiryDays ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$err", (object?)s.Error ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
     }
 
     public Dictionary<long, Sample> LatestByEndpoint()
@@ -302,16 +329,104 @@ public sealed class Database : IDisposable
         }
     }
 
-    public int Prune(int retentionDays)
+    /// <summary>
+    /// 기간 이력을 시간 버킷으로 집계한다(ts 는 epoch ms). 원시 행을 상한으로 자르지 않으므로 365일 범위도 전 기간을 덮고,
+    /// 버킷마다 위험·주의 건수와 '가장 나쁜 상태' 를 남겨 단발 장애가 다운샘플로 사라지지 않는다.
+    /// </summary>
+    public List<HistoryBucket> HistoryBuckets(long endpointId, DateTime sinceUtc, int bucketSec)
     {
-        if (retentionDays <= 0) return 0;
+        long bucketMs = Math.Max(1, bucketSec) * 1000L;
+        lock (_gate)
+        {
+            var list = new List<HistoryBucket>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"SELECT CAST(ts / $b AS INTEGER) AS bk, COUNT(*), MIN(ts), MAX(ts),
+                    SUM(CASE WHEN status=$up THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status=$warn THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status=$down THEN 1 ELSE 0 END),
+                    COUNT(response_ms), TOTAL(response_ms), MAX(response_ms)
+                FROM samples WHERE endpoint_id=$e AND ts>=$since
+                GROUP BY bk ORDER BY bk";
+            cmd.Parameters.AddWithValue("$b", bucketMs);
+            cmd.Parameters.AddWithValue("$e", endpointId);
+            cmd.Parameters.AddWithValue("$since", ToMs(sinceUtc));
+            cmd.Parameters.AddWithValue("$up", (int)HealthStatus.Up);
+            cmd.Parameters.AddWithValue("$warn", (int)HealthStatus.Warn);
+            cmd.Parameters.AddWithValue("$down", (int)HealthStatus.Down);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                int respCount = r.GetInt32(7);
+                double respSum = r.GetDouble(8);
+                list.Add(new HistoryBucket(
+                    StartUtc: FromMs(r.GetInt64(0) * bucketMs),
+                    FirstUtc: FromMs(r.GetInt64(2)),
+                    LastUtc: FromMs(r.GetInt64(3)),
+                    Count: r.GetInt32(1),
+                    Up: r.GetInt32(4),
+                    Warn: r.GetInt32(5),
+                    Down: r.GetInt32(6),
+                    RespCount: respCount,
+                    RespSum: respSum,
+                    AvgResponseMs: respCount > 0 ? respSum / respCount : null,
+                    MaxResponseMs: r.IsDBNull(9) ? null : r.GetDouble(9)));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>기간 안의 가장 최근 오류 문구(없으면 null).</summary>
+    public string? LastError(long endpointId, DateTime sinceUtc)
+    {
         lock (_gate)
         {
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM samples WHERE ts < $before";
-            cmd.Parameters.AddWithValue("$before", ToMs(DateTime.UtcNow.AddDays(-retentionDays)));
-            return cmd.ExecuteNonQuery();
+            cmd.CommandText = @"SELECT error FROM samples WHERE endpoint_id=$e AND ts>=$since AND error IS NOT NULL AND error<>''
+                ORDER BY ts DESC LIMIT 1";
+            cmd.Parameters.AddWithValue("$e", endpointId);
+            cmd.Parameters.AddWithValue("$since", ToMs(sinceUtc));
+            return cmd.ExecuteScalar() as string;
         }
+    }
+
+    /// <summary>보존 기간 정리 한 번에 지우는 행 수. 청크 사이에 잠금을 놓아 점검 저장·화면 조회가 끼어들 수 있게 한다.</summary>
+    public const int PruneChunk = 5000;
+
+    /// <summary>
+    /// 보존일보다 오래된 샘플을 지운다(삭제 건수 반환). 한 문장으로 수백만 행을 지우면 그동안 잠금을 쥐어 화면·점검이 멈추므로
+    /// <see cref="PruneChunk"/> 행씩 지우고 청크마다 잠금을 놓는다. 많이 지웠으면 WAL 을 본 파일에 합쳐 줄인다(VACUUM 은 하지 않는다 —
+    /// 파일 크기 축소는 폴더 이동의 VACUUM INTO 가 맡는다). <paramref name="onChunk"/> 는 청크마다 잠금 밖에서 불린다(테스트용).
+    /// </summary>
+    public int Prune(int retentionDays, int chunk = PruneChunk, Action<int>? onChunk = null)
+    {
+        if (retentionDays <= 0) return 0;
+        chunk = Math.Max(1, chunk);
+        var before = ToMs(DateTime.UtcNow.AddDays(-retentionDays));
+        int total = 0;
+        while (true)
+        {
+            int n;
+            lock (_gate)
+            {
+                using var cmd = _conn.CreateCommand();
+                cmd.CommandText = "DELETE FROM samples WHERE id IN (SELECT id FROM samples WHERE ts < $before LIMIT $n)";
+                cmd.Parameters.AddWithValue("$before", before);
+                cmd.Parameters.AddWithValue("$n", chunk);
+                n = cmd.ExecuteNonQuery();
+            }
+            total += n;
+            if (n > 0) { try { onChunk?.Invoke(n); } catch { /* 관찰자 오류 격리 */ } }
+            if (n < chunk) break;
+            Thread.Sleep(1); // 잠금을 기다리던 쪽(UI 타이머·점검 저장)이 먼저 잡을 기회를 준다.
+        }
+        if (total >= chunk)
+        {
+            lock (_gate)
+            {
+                try { Exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch { /* 읽는 쪽이 있으면 다음에 */ }
+            }
+        }
+        return total;
     }
 
     // ── settings ─────────────────────────────────────────────────────────────
@@ -461,6 +576,7 @@ public sealed class Database : IDisposable
                 try { next.Dispose(); } catch { /* ignore */ }
                 throw;
             }
+            Interlocked.Increment(ref _generation); // 대상 id 의 뜻이 바뀌었다 — 진행 중 점검·알람 판정을 버리게 한다.
             try { old.Dispose(); } catch { /* ignore */ }
             SqliteConnection.ClearAllPools();
         }

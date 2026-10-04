@@ -20,7 +20,19 @@ public sealed class AlarmController : IDisposable
     {
         _db = db;
         _settings = AlarmSettings.Load(db);
+        _engine.SyncGeneration(db.Generation);
         _overlay.Acknowledged += Acknowledge;
+    }
+
+    /// <summary>
+    /// 저장 폴더를 '기존 DB 로 전환' 했으면 판정을 비우고 알람 설정을 새 DB 에서 다시 읽는다 —
+    /// 예전 DB 의 대상 id 로 들고 있던 알람·'확인됨' 이 새 DB 의 다른 대상에 붙지 않게.
+    /// </summary>
+    private void SyncGeneration()
+    {
+        if (!_engine.SyncGeneration(_db.Generation)) return;
+        _settings = AlarmSettings.Load(_db);
+        AppLog.Write(AppLog.AlarmFile, "저장 데이터베이스가 바뀌어 알람 판정을 처음부터 다시 합니다.");
     }
 
     /// <summary>끄지 않은 알람이 있는가(트레이 메뉴의 '알람 끄기' 활성화용).</summary>
@@ -29,6 +41,7 @@ public sealed class AlarmController : IDisposable
     /// <summary>설정 저장 직후 다시 읽는다. 위치·크기·속도는 곧바로 띠에 반영된다.</summary>
     public void ReloadSettings()
     {
+        SyncGeneration();
         _settings = AlarmSettings.Load(_db);
         if (!_settings.Enabled) { _overlay.HideAlarm(); return; }
         Render();
@@ -36,6 +49,7 @@ public sealed class AlarmController : IDisposable
 
     public void Update(IEnumerable<EndpointStatus> snapshot)
     {
+        SyncGeneration();
         if (!_settings.Enabled)
         {
             _engine.Reset();

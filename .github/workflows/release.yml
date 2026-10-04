@@ -155,13 +155,50 @@ jobs:
           for f in *.tar.gz *.zip; do sha256sum "$f" > "$f.sha256"; done
           ls -la
 
+      # ⚠⚠ v2.689(B1): 예전에는 `download … 2>/dev/null || true` 한 줄이라 **일시 오류(500·시한)가
+      #   조용히 삼켜졌고** prev 가 빈 목록이 됐다. 그러면 새 versions.json 에는 새 버전 1개만 남고,
+      #   이어지는 prune 이 '목록에 없는 버전' 의 자산을 **전부 지운다**(롤백 경로·버전 이력 소실).
+      #   그래서 ① 3회 재시도 ② 그래도 못 받으면 릴리스에 자산이 이미 있는지 보고, 있으면 **실패**한다.
+      #   빈 시작은 '릴리스가 없다' 또는 '릴리스는 있는데 자산이 0개' 로 **확인된** 경우뿐이다.
+      #   그때만 `first=true` 를 내보내고, prune 단계는 그 값으로만 생략한다.
+      #   복구: 릴리스에 versions.json 이 정말 없다면 직전 versions.json 을 손으로 올린 뒤 다시 돌린다.
       - name: Fetch previous versions.json (if any)
+        id: prevver
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p prev
-          gh release download "$RELEASE_TAG" -p versions.json -D prev 2>/dev/null || true
-          [ -f prev/versions.json ] || echo '{"latest":"","versions":[]}' > prev/versions.json
+          rm -f prev/versions.json
+          got=0
+          for i in 1 2 3; do
+            if gh release download "$RELEASE_TAG" -p versions.json -D prev --clobber 2>prev_dl_err.txt \
+                && [ -s prev/versions.json ]; then
+              got=1; break
+            fi
+            echo "::warning::versions.json 다운로드 실패($i/3): $(head -c 300 prev_dl_err.txt 2>/dev/null)"
+            rm -f prev/versions.json
+            [ "$i" -lt 3 ] && sleep $((i * 10))
+          done
+          if [ "$got" = 1 ]; then
+            echo "first=false" >> "$GITHUB_OUTPUT"
+            echo "이전 versions.json 수신: $(wc -c < prev/versions.json) 바이트"
+            exit 0
+          fi
+          # 못 받았다 — '정말 처음' 인지 확인한다. 확인하지 못하면 실패(빈 시작 = 자산 전량 prune 위험).
+          if gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' > prev_assets.txt 2>prev_view_err.txt; then
+            if [ -s prev_assets.txt ]; then
+              echo "::error::릴리스 '$RELEASE_TAG' 에 자산이 $(grep -c . prev_assets.txt)개 있는데 versions.json 을 받지 못했습니다. 빈 목록으로 계속하면 prune 이 기존 버전 자산을 전부 지웁니다 — 중단합니다."
+              exit 1
+            fi
+            echo "릴리스 '$RELEASE_TAG' 는 있지만 자산이 0개 — 빈 versions.json 으로 시작합니다."
+          elif grep -qi 'release not found' prev_view_err.txt; then
+            echo "릴리스 '$RELEASE_TAG' 가 아직 없습니다 — 빈 versions.json 으로 시작합니다."
+          else
+            echo "::error::릴리스 '$RELEASE_TAG' 상태를 확인하지 못했습니다: $(head -c 300 prev_view_err.txt) — 빈 목록으로 계속하지 않고 중단합니다."
+            exit 1
+          fi
+          echo '{"latest":"","versions":[]}' > prev/versions.json
+          echo "first=true" >> "$GITHUB_OUTPUT"
 
       - name: Build versions.json
         env:
@@ -175,6 +212,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # v2.689(B1): prev 가 '진짜 처음' 으로 확인된 경우에만 생략한다(그때는 지울 자산도 없다).
+          if [ "${{ steps.prevver.outputs.first }}" = "true" ]; then
+            echo "prune 생략: 첫 게시(이전 versions.json 없음 — 확인됨)"
+            exit 0
+          fi
           gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' > all_assets.txt 2>/dev/null || true
           if [ -s all_assets.txt ]; then
             node packaging/release/prune-assets.mjs dist-offline/versions.json < all_assets.txt > to_delete.txt || true

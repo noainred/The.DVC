@@ -49,12 +49,25 @@ const entry = {
   windows: names.windows, windows_size_bytes: win.size, windows_sha256: win.sha,
 };
 
+// ⚠⚠ v2.689(B1): 이전 versions.json 이 **있는데 읽지 못하면 실패**한다. 예전에는 손상을
+// '새로 시작' 으로 삼켜 새 버전 1개만 남은 목록을 만들었고, 이어지는 prune(prune-assets.mjs)이
+// 그 목록 밖의 버전 자산을 **전부 지웠다**. 빈 시작은 파일이 없을 때(워크플로가 '정말 처음' 을
+// 확인하고 빈 문서를 쓴 경우 포함)뿐이다.
 let doc = { latest: version, versions: [] };
 if (existingPath && existingPath !== '-' && fs.existsSync(existingPath)) {
+  let parsed;
   try {
-    const parsed = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
-    if (parsed && Array.isArray(parsed.versions)) doc = parsed;
-  } catch { /* 손상 시 새로 시작 */ }
+    parsed = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
+  } catch (e) {
+    console.error(`이전 versions.json 을 읽지 못했습니다(${existingPath}): ${e.message}. ` +
+      '손상된 목록으로 계속하면 prune 이 기존 버전 자산을 지웁니다 — 중단합니다.');
+    process.exit(1);
+  }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.versions)) {
+    console.error(`이전 versions.json 형식이 아닙니다(${existingPath}): versions 배열이 없습니다 — 중단합니다.`);
+    process.exit(1);
+  }
+  doc = parsed;
 }
 doc.versions = (doc.versions || []).filter((v) => v && v.version !== version);
 doc.versions.unshift(entry);

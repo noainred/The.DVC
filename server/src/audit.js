@@ -85,6 +85,14 @@ export const AUDIT_TRUNC_MARK = '…(잘림)';
 function auditClip(s) {
   return s.length > AUDIT_FIELD_MAX ? s.slice(0, AUDIT_FIELD_MAX) + AUDIT_TRUNC_MARK : s;
 }
+/**
+ * v2.689(B2): `ip`·`xff` 칸의 상한. IP 는 IPv6 + 존 표기까지 64자면 충분하고, 예전에는 상한이 없어 헤더 한도(16KB)까지
+ * 한 줄에 실렸다(로그인 성공·잠금 차단 줄은 출처당 게이트가 없다). 잘랐다는 사실은 값 끝에 밝힌다.
+ */
+export const AUDIT_IP_MAX = 64;
+function auditIpClip(s) {
+  return s.length > AUDIT_IP_MAX ? s.slice(0, AUDIT_IP_MAX) + AUDIT_TRUNC_MARK : s;
+}
 
 export function logAudit(opts = {}, ...rest) {
   // ⚠ `logAudit(req, '액션', {...})` 오용 감지 — 조용히 넘기면 위 사고가 반복된다.
@@ -98,15 +106,18 @@ export function logAudit(opts = {}, ...rest) {
       ip: opts.ip || '',
     };
   }
-  const { user = 'unknown', action, target = '', detail = '', ip = '' } = opts || {};
+  const { user = 'unknown', action, target = '', detail = '', ip = '', xff = '' } = opts || {};
   try {
+    // `xff`(선택): 로그인 경로가 남기는 X-Forwarded-For 원문(판정에 쓰지 않는 참고값). 비어 있으면 키를 싣지 않는다.
+    const xffStr = auditIpClip(auditStr(xff));
     const line = JSON.stringify({
       at: new Date().toISOString(),
       user: auditStr(user) || 'unknown',
       action: auditStr(action),
       target: auditClip(auditStr(target)),
       detail: auditClip(auditStr(detail)),
-      ip: auditStr(ip),
+      ip: auditIpClip(auditStr(ip)),
+      ...(xffStr ? { xff: xffStr } : {}),
     }) + '\n';
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.appendFileSync(FILE, line, { mode: 0o600 });
@@ -137,10 +148,39 @@ function maybeTrim() {
   } catch { /* ignore */ }
 }
 
+/**
+ * v2.689(I3): `auditMiddleware` 를 `/api`·`/api/svcmon` 마운트에도 단다. 그 마운트에는 **상태를 바꾸지 않는 POST**(본문으로
+ * 조회 조건을 받는 경로)가 섞여 있고, 일부는 viewer 화면이 자주 부른다 — 그대로 기록하면 감사 로그(줄 수 상한 AUDIT_MAX)를
+ * 읽기 기록이 밀어낸다. 아래는 **메서드 + 경로(앞의 /api 를 뗀 것)** 가 정확히 맞을 때만 건너뛴다(접두 매칭 금지 — 같은 접두의
+ * 변경 경로가 조용히 빠진다). 경로를 더할 때는 그 핸들러가 정말 저장·원격 실행을 하지 않는지 확인할 것.
+ */
+const AUDIT_SKIP = new Set([
+  'POST /tool-usage',               // 메뉴 사용 횟수 집계 — 화면이 도구를 열 때마다 부른다(viewer 포함)
+  'POST /vms/usage',                // VM 사용률 조회(본문 = VM 목록)
+  'POST /perf/client-stall',        // 브라우저 지연 보고(텔레메트리, 자체 스로틀)
+  'POST /provision/preview',        // VM 생성 미리보기(실행 아님)
+  'POST /search/nl',                // 자연어 검색
+  'POST /tools/esxi-temp/spark',    // 스파크라인 조회
+  'POST /tools/waste/spark',        // 스파크라인 조회
+  'POST /tools/vm-finder',          // VM 찾기 조회
+  'POST /tools/deep-search',        // 심층 검색(스냅샷 조회)
+  'POST /tools/cvp/parse-preview',  // 파서 시험 — 왕복 0·저장 0
+  'POST /tools/rma/tests/validate', // 테스트 정의 검증(저장 아님)
+  'POST /tools/credentials/inspect-key', // 개인키 사전 검증(저장하지 않고 지문만)
+  'POST /svcmon/targets/hostmap/parse',  // 호스트맵 텍스트 파싱(저장 아님)
+]);
+export function auditSkipped(method, urlPath) {
+  return AUDIT_SKIP.has(`${method} ${String(urlPath || '').replace(/^\/api(?=\/)/, '')}`);
+}
+
 /** Express middleware: auto-logs successful mutating requests on a router. */
 export function auditMiddleware(req, res, next) {
   if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) return next();
+  // 같은 요청이 두 마운트를 지나면(예: /api/admin 라우터가 못 찾아 /api 로 넘어온 경우) 한 번만 건다.
+  if (req.__auditAttached) return next();
+  req.__auditAttached = true;
   const urlPath = req.originalUrl.split('?')[0];
+  if (auditSkipped(req.method, urlPath)) return next();
   res.on('finish', () => {
     if (res.statusCode >= 400) return;
     logAudit({
@@ -166,6 +206,7 @@ export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
     target: auditStr(e.target),
     detail: auditStr(e.detail),
     ip: auditStr(e.ip),
+    ...(e.xff != null ? { xff: auditStr(e.xff) } : {}),
   });
   let items = lines.map((l) => { try { return clean(JSON.parse(l)); } catch { return null; } }).filter(Boolean).reverse();
   if (user) items = items.filter((e) => e.user === user);

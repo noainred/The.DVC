@@ -22,8 +22,11 @@ public sealed class MonitorService : IDisposable
     private readonly Database _db;
     private readonly SemaphoreSlim _concurrency;
     private readonly object _gate = new();
-    private readonly HashSet<long> _inFlight = new();
+    // 진행 중 점검 — (DB 세대, 대상 id). 세대를 키에 넣어 DB 전환 뒤 같은 id 의 새 대상이 예전 점검에 막히지 않게 하고,
+    // 예전 점검이 끝나며 지우는 항목이 새 세대 항목을 지우지 않게 한다.
+    private readonly HashSet<(int Gen, long Id)> _inFlight = new();
     private readonly Dictionary<long, DateTime> _lastCheck = new();
+    private int _lastGen;
     private readonly ConcurrentDictionary<Task, byte> _running = new(); // 진행 중 점검 태스크(종료 시 드레인)
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -105,21 +108,27 @@ public sealed class MonitorService : IDisposable
                 var force = _forceAll;
                 _forceAll = false;
                 var now = DateTime.UtcNow;
+                // 세대는 대상 목록을 읽기 '전에' 잡는다 — 읽은 뒤에 잡으면 그 사이 전환된 경우 예전 대상에 새 세대가 붙는다.
+                var gen = _db.Generation;
+                lock (_gate)
+                {
+                    if (gen != _lastGen) { _lastCheck.Clear(); _lastGen = gen; } // 다른 DB 로 전환 — 새 대상 전부 곧바로 점검
+                }
                 foreach (var ep in _db.ListEndpoints())
                 {
                     if (!ep.Enabled) continue;
                     bool due;
                     lock (_gate)
                     {
-                        if (_inFlight.Contains(ep.Id)) continue; // 진행 중이면 이번 틱 건너뜀
+                        if (_inFlight.Contains((gen, ep.Id))) continue; // 진행 중이면 이번 틱 건너뜀
                         due = force || !_lastCheck.TryGetValue(ep.Id, out var last)
                               || (now - last).TotalSeconds >= Math.Max(5, ep.IntervalSec);
                         if (!due) continue;
-                        _inFlight.Add(ep.Id);
+                        _inFlight.Add((gen, ep.Id));
                         _lastCheck[ep.Id] = now;
                     }
                     // 태스크를 추적해 Stop()에서 배수(fire-and-forget이지만 종료 시 대기 가능하게).
-                    var t = RunCheckAsync(ep, token);
+                    var t = RunCheckAsync(ep, gen, token);
                     _running.TryAdd(t, 0);
                     _ = t.ContinueWith(x => _running.TryRemove(x, out _), TaskScheduler.Default);
                 }
@@ -136,22 +145,33 @@ public sealed class MonitorService : IDisposable
         }
     }
 
-    private async Task RunCheckAsync(Endpoint ep, CancellationToken token)
+    private async Task RunCheckAsync(Endpoint ep, int gen, CancellationToken token)
     {
         bool acquired = false;
         try
         {
             await _concurrency.WaitAsync(token).ConfigureAwait(false);
             acquired = true;
-            var sample = await CheckEndpointAsync(ep, token).ConfigureAwait(false);
-            _db.InsertSample(sample);
+            Sample sample;
+            try
+            {
+                sample = await CheckEndpointAsync(ep, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // 앱 종료로 끊긴 점검 — 결과가 아니다. '시간 초과(위험)' 로 저장하면 다시 켰을 때 멀쩡한 장비에 알람이 울린다.
+                AppLog.Write(AppLog.ErrorFile, $"점검 중단(앱 종료): {ep.Name} — 결과를 저장하지 않았습니다.");
+                return;
+            }
+            if (!_db.InsertSample(sample, gen))
+                AppLog.Write(AppLog.ErrorFile, $"점검 결과 버림(저장 DB 전환): {ep.Name} — 전환 전 DB 의 대상이었습니다.");
         }
         catch { /* 개별 점검 실패/취소는 격리 */ }
         finally
         {
             // WaitAsync가 취소로 던져도(acquired=false) 재진입 가드는 반드시 해제(_inFlight 누수 방지).
             if (acquired) { try { _concurrency.Release(); } catch { /* ignore */ } }
-            lock (_gate) { _inFlight.Remove(ep.Id); }
+            lock (_gate) { _inFlight.Remove((gen, ep.Id)); }
             if (acquired) { try { Updated?.Invoke(); } catch { /* ignore */ } }
         }
     }
@@ -177,9 +197,11 @@ public sealed class MonitorService : IDisposable
         catch (Exception ex)
         {
             sw.Stop();
+            var kind = MonitorRules.ClassifyFailure(ex, token);
+            if (kind == CheckFailureKind.AppStopping) throw new OperationCanceledException("앱 종료로 점검 중단", ex, token);
             sample.TcpOk = false;
             sample.Status = HealthStatus.Down;
-            sample.Error = $"TCP {ep.Port} 연결 실패: {Short(ex)}";
+            sample.Error = $"TCP {ep.Port} 연결 실패: {MonitorRules.FailureText(ex, kind)}";
             return sample;
         }
 
@@ -223,9 +245,11 @@ public sealed class MonitorService : IDisposable
         catch (Exception ex)
         {
             sw2.Stop();
+            var kind = MonitorRules.ClassifyFailure(ex, token);
+            if (kind == CheckFailureKind.AppStopping) throw new OperationCanceledException("앱 종료로 점검 중단", ex, token);
             sample.ResponseMs = sw2.Elapsed.TotalMilliseconds;
             sample.TlsOk = tlsHandshook;
-            sample.Error = $"{(ep.Scheme == "http" ? "HTTP" : "HTTPS")} 오류: {Short(ex)}";
+            sample.Error = $"{(ep.Scheme == "http" ? "HTTP" : "HTTPS")} 오류: {MonitorRules.FailureText(ex, kind)}";
         }
 
         if (certNotAfterUtc != null)
@@ -253,12 +277,6 @@ public sealed class MonitorService : IDisposable
         if (!contentOk) reasons.Add("콘텐츠 불일치");
         if (reasons.Count > 0 && s.Error == null) s.Error = string.Join(", ", reasons);
         return HealthStatus.Warn;
-    }
-
-    private static string Short(Exception ex)
-    {
-        var m = ex is OperationCanceledException ? "시간 초과" : (ex.InnerException?.Message ?? ex.Message);
-        return m.Length > 120 ? m.Substring(0, 120) : m;
     }
 
     public void Dispose()

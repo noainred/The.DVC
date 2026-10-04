@@ -453,7 +453,7 @@ public sealed class MainForm : Form
     private void OpenSettings()
     {
         using var f = new SettingsForm(_db, _monitor);
-        if (f.ShowDialog(this) == DialogResult.OK) { _monitor.ApplyThresholds(); LoadUserLocation(); LoadMapShow(); _monitor.CheckAllNow(); _layoutSig = ""; _dirty = true; }
+        if (f.ShowDialog(this) == DialogResult.OK) { _monitor.ApplyThresholds(); LoadUserLocation(); LoadMapOverrides(); LoadMapShow(); _monitor.CheckAllNow(); _layoutSig = ""; _dirty = true; }
     }
 
     private void OpenHistory()

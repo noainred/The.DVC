@@ -44,7 +44,14 @@ adminRouter.post('/codex-check/write', adminOnly, fleetOnly, (req, res) => {
 });
 
 // ── 긴급중단(Emergency Stop) — 관리자 2명 OTP(2인 승인)로만 켜고/끈다 ──────────
-adminRouter.get('/emergency-stop', adminOnly, (_req, res) => res.json(getEmergencyStatus()));
+// v2.689(B8): 상태(active·at)는 범위 관리자도 본다(전 수집이 멈췄는지 알아야 한다 — v2.612 AUTHZ2612-08 의 판단,
+//   test/audit2612a 가 고정). 다만 `by`(승인 관리자 2명의 계정명)는 계정 열거 단서라 **전체 범위 계정에만** 싣고, 범위 계정에는
+//   빈 배열 + `byHidden:true` 로 가린 사실을 밝힌다(조용히 빼지 않는다). 변경(POST)은 v2.612 에 이미 fleetOnly 다.
+adminRouter.get('/emergency-stop', adminOnly, (req, res) => {
+  const st = getEmergencyStatus();
+  if (!scopedVcenterIds(req.user, store.get())) return res.json(st);
+  res.json({ ...st, by: [], byHidden: (st.by || []).length > 0 });
+});
 
 // Body: { action:'stop'|'resume', approvals:[{username,code},{username,code}] }
 // 검증: 정확히 2명 · 서로 다른 계정 · 둘 다 admin · 둘 다 현재 OTP 일치.
@@ -190,8 +197,9 @@ adminRouter.post('/portal-db/location/script', adminOnly, fleetOnly, (req, res) 
 });
 
 // 포탈 프로세스 메모리 추적(누수 관찰) — metrics DB 의 mem_* 시계열 + 현재값 + 기동 이후
-// 추세 판정. ?window=6h|24h|7d|30d. 서버 전역 자기진단 데이터라 vCenter scope 비대상(admin 전용).
-adminRouter.get('/memtrack', adminOnly, async (req, res) => {
+// 추세 판정. ?window=6h|24h|7d|30d. 서버 전역 자기진단 데이터라 vCenter 로 나눌 축이 없다 — v2.689(B8): 범위 관리자는
+// '관리자' 가 아니라 범위 계정이므로(v2.607) 같은 파일의 portal-db·logs 처럼 fleetOnly 다.
+adminRouter.get('/memtrack', adminOnly, fleetOnly, async (req, res) => {
   try { res.json(memtrackReport(await getMetricsDb(), String(req.query.window || '24h'))); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

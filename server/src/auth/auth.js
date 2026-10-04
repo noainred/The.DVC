@@ -92,7 +92,12 @@ function ttlSeconds(ttl) {
  */
 export function signToken(payload, { exp = null } = {}) {
   const now = Math.floor(Date.now() / 1000);
-  const body = { ...payload, iat: now, exp: exp != null ? Math.floor(exp) : now + ttlSeconds(config.auth.tokenTtl) };
+  // v2.689(B4): `lt`(login time, epoch 초) = **원래 로그인 시각**. 세션 연장(POST /auth/extend)이 새 토큰을 만들 때
+  //   `iat` 는 '이번 발급 시각' 으로 바뀌므로 총 상한(sessionMaxHours)을 iat 로 재면 연장할 때마다 상한이 밀린다.
+  //   호출부가 `lt` 를 넘기면(연장) 그대로 승계하고, 안 넘기면(로그인) 지금 = iat 다.
+  const lt0 = Number(payload?.lt);
+  const lt = Number.isFinite(lt0) && lt0 > 0 ? Math.floor(lt0) : now;
+  const body = { ...payload, lt, iat: now, exp: exp != null ? Math.floor(exp) : now + ttlSeconds(config.auth.tokenTtl) };
   const head = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const data = `${head}.${b64url(JSON.stringify(body))}`;
   const sig = crypto.createHmac('sha256', SECRET).update(data).digest('base64url');

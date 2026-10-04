@@ -24,7 +24,7 @@ public sealed class WorldMap : Panel
         Color.FromArgb(34, 160, 90), Color.FromArgb(214, 60, 60), Color.FromArgb(120, 120, 130),
     };
 
-    private sealed class Site
+    private new sealed class Site
     {
         public string Code = "";
         public string Region = "";

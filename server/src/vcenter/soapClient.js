@@ -24,8 +24,57 @@ export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
-// 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
+// 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
+// v2.689(C-05): vCenter 별로 나눠 두고 수집마다 live ref 로 정리한다(예전 `${vcId}:${ref}` 평면 키는 지우는 곳이 없었다).
 const _gpuUtilCache = new Map();
+
+/**
+ * v2.689(C-01): 캐시 값의 최대 나이. throttle 주기 사이에 마지막 값을 유지하는 것은 의도지만, 조회 실패·카운터 소실·
+ * vGPU 모드 해제가 이어지는 동안 며칠 전 값이 매 수집마다 '지금 값' 으로 다시 써지던 것은 의도 밖이었다.
+ * 경계 = max(주기 × 3, 15분). 넘으면 호스트에 적용하지 않는다(값 없음 — 0 으로 채우지 않는다).
+ */
+export const GPU_CACHE_MIN_AGE_MS = 15 * 60_000;
+export function gpuCacheMaxAgeMs(intervalMs) {
+  const i = Number(intervalMs);
+  return Math.max(Number.isFinite(i) && i > 0 ? i * 3 : 0, GPU_CACHE_MIN_AGE_MS);
+}
+
+/** 캐시된 GPU 값을 GPU 보유 호스트에 적용한다. 낡은 항목은 적용하지 않고 센다. */
+export function applyGpuUtilCache(vcId, hostByRef, now, intervalMs, store = _gpuUtilCache) {
+  const inner = store.get(vcId);
+  let applied = 0;
+  let staleExcluded = 0;
+  if (!inner) return { applied, staleExcluded };
+  const maxAge = gpuCacheMaxAgeMs(intervalMs);
+  for (const [ref, host] of hostByRef) {
+    const e = inner.get(ref);
+    if (!e || !(host.gpus || []).length) continue;
+    // at 이 없거나 숫자가 아니면 나이를 알 수 없다 — 낡은 것으로 본다(NaN 비교는 거짓).
+    if (!(now - Number(e.at) <= maxAge)) { staleExcluded += 1; continue; }
+    applied += 1;
+    if (e.pct != null) host.gpuUtilPct = e.pct;
+    // v2.653: ESXi 가 준 GPU 메모리·온도(vGPU/vSGA 호스트). 게스트 수집이 없어도 호스트 값이 채워진다.
+    if (e.memPct != null) host.gpuMemUsedPct = e.memPct;
+    if (e.memUsedKB != null) host.gpuMemUsedMB = Math.round(e.memUsedKB / 1024);
+    if (e.tempC != null) host.gpuTempC = e.tempC;
+  }
+  return { applied, staleExcluded };
+}
+
+/** v2.689(C-05): 그 vCenter 의 캐시를 이번 수집의 vGPU/vSGA 호스트 ref 로 좁힌다(퇴역·모드 해제 호스트 제거). */
+export function pruneGpuUtilCache(vcId, liveRefs, store = _gpuUtilCache) {
+  const inner = store.get(vcId);
+  if (!inner) return 0;
+  const live = liveRefs instanceof Set ? liveRefs : new Set(liveRefs || []);
+  let removed = 0;
+  for (const ref of [...inner.keys()]) {
+    if (!live.has(ref)) { inner.delete(ref); removed += 1; }
+  }
+  if (!inner.size) store.delete(vcId);
+  return removed;
+}
+/** 테스트 전용 */
+export function _peekGpuUtilCache() { return _gpuUtilCache; }
 let _gpuForce = false; // 수동 '지금 수집' 시 다음 수집을 강제(주기 무시)
 export function forceGpuUtilCollect() { _gpuForce = true; }
 export function clearGpuUtilForce() { _gpuForce = false; }
@@ -1524,42 +1573,58 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
           const gpuRefs = [...hostByRef]
             .filter(([, h]) => (h.gpus || []).some((g) => g.mode === 'vgpu' || g.mode === 'vsga' || g.vgpuMode))
             .map(([ref]) => ref);
-          const stale = _gpuForce ? gpuRefs : gpuRefs.filter((ref) => now - (_gpuUtilCache.get(`${vc.id}:${ref}`)?.at || 0) >= intervalMs);
+          // v2.689(C-05): 이번 수집의 vGPU/vSGA 호스트만 캐시에 남긴다(퇴역·모드 해제 호스트의 값이 남지 않게).
+          pruneGpuUtilCache(vc.id, new Set(gpuRefs));
+          const vcCache = () => {
+            let m = _gpuUtilCache.get(vc.id);
+            if (!m) { m = new Map(); _gpuUtilCache.set(vc.id, m); }
+            return m;
+          };
+          const stale = _gpuForce ? gpuRefs : gpuRefs.filter((ref) => now - (_gpuUtilCache.get(vc.id)?.get(ref)?.at || 0) >= intervalMs);
+          let logLine = null;
+          let queryErr = null;
           if (stale.length) {
-            // v2.653: 사용률과 같은 QueryPerf 로 메모리 점유·사용량·온도 카운터도 읽는다(왕복 추가 0). 없는 카운터는 그 값만 빈다.
-            const ids = await c.gpuPerfCounterIds();
-            const cid = ids.util;
-            if (cid || ids.memPct || ids.memUsedKB || ids.tempC) {
-              const perf = await c.queryHostGpuPerf(ids, stale);
-              const map = new Map([...perf].filter(([, r]) => r.util != null).map(([ref, r]) => [ref, r.util]));
-              /*
-               * v2.605(COL2605-03): 값을 받은 호스트만 사용률을 기록한다. 예전에는 '카운터가 있으면 값이 없어도(유휴) 0' 으로
-               *   적었는데, 표본 없음·-1(그 시각 값 없음)·연결 끊김도 전부 '0%(유휴)' 가 됐다 — v2.598 VC2598-08 전력
-               *   '표본 없음 = 미수집' 과 같은 규칙으로 맞춘다. 유휴 vGPU 는 vCenter 가 0 을 **보고할 때** 0 이다.
-               */
-              let noSample = 0;
-              for (const ref of stale) {
-                const got = map.has(ref);
-                if (!got) noSample += 1;
-                const r = perf.get(ref) || {};
-                _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: got ? map.get(ref) : null, memPct: r.memPct ?? null, memUsedKB: r.memUsedKB ?? null, tempC: r.tempC ?? null, at: now });
+            try {
+              // v2.653: 사용률과 같은 QueryPerf 로 메모리 점유·사용량·온도 카운터도 읽는다(왕복 추가 0). 없는 카운터는 그 값만 빈다.
+              const ids = await c.gpuPerfCounterIds();
+              const cid = ids.util;
+              if (cid || ids.memPct || ids.memUsedKB || ids.tempC) {
+                const perf = await c.queryHostGpuPerf(ids, stale);
+                const map = new Map([...perf].filter(([, r]) => r.util != null).map(([ref, r]) => [ref, r.util]));
+                /*
+                 * v2.605(COL2605-03): 값을 받은 호스트만 사용률을 기록한다. 예전에는 '카운터가 있으면 값이 없어도(유휴) 0' 으로
+                 *   적었는데, 표본 없음·-1(그 시각 값 없음)·연결 끊김도 전부 '0%(유휴)' 가 됐다 — v2.598 VC2598-08 전력
+                 *   '표본 없음 = 미수집' 과 같은 규칙으로 맞춘다. 유휴 vGPU 는 vCenter 가 0 을 **보고할 때** 0 이다.
+                 */
+                let noSample = 0;
+                const m = vcCache();
+                for (const ref of stale) {
+                  const got = map.has(ref);
+                  if (!got) noSample += 1;
+                  const r = perf.get(ref) || {};
+                  m.set(ref, { pct: got ? map.get(ref) : null, memPct: r.memPct ?? null, memUsedKB: r.memUsedKB ?? null, tempC: r.tempC ?? null, at: now });
+                }
+                const extra = [ids.memPct ? `메모리% ${[...perf.values()].filter((r) => r.memPct != null).length}` : '메모리% 카운터 없음', ids.tempC ? `온도 ${[...perf.values()].filter((r) => r.tempC != null).length}` : '온도 카운터 없음'].join(' · ');
+                logLine = `[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size}${noSample ? ` · 표본 없음 ${noSample}(미수집 — 0 으로 채우지 않음)` : ''} (gpu.utilization 카운터 ${cid ? 'OK' : '없음'} · ${extra})`;
+              } else {
+                console.warn(`[collect] ${vc.id} gpu.utilization 카운터 없음 — vGPU 사용률 미수집(NVIDIA vGPU Manager VIB/드라이버 또는 vCenter 카운터 확인)`);
               }
-              const extra = [ids.memPct ? `메모리% ${[...perf.values()].filter((r) => r.memPct != null).length}` : '메모리% 카운터 없음', ids.tempC ? `온도 ${[...perf.values()].filter((r) => r.tempC != null).length}` : '온도 카운터 없음'].join(' · ');
-              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size}${noSample ? ` · 표본 없음 ${noSample}(미수집 — 0 으로 채우지 않음)` : ''} (gpu.utilization 카운터 ${cid ? 'OK' : '없음'} · ${extra})`);
-            } else {
-              console.warn(`[collect] ${vc.id} gpu.utilization 카운터 없음 — vGPU 사용률 미수집(NVIDIA vGPU Manager VIB/드라이버 또는 vCenter 카운터 확인)`);
+            } catch (err) {
+              // v2.689(C-01): 조회가 실패해도 아래 적용(나이 제한)은 돈다 — 예전에는 catch 가 적용을 통째로 건너뛰어
+              //   throttle 주기 안의 정상 값까지 빠졌다.
+              queryErr = err;
             }
           }
-          // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).
-          for (const [ref, host] of hostByRef) {
-            const e = _gpuUtilCache.get(`${vc.id}:${ref}`);
-            if (!e || !(host.gpus || []).length) continue;
-            if (e.pct != null) host.gpuUtilPct = e.pct;
-            // v2.653: ESXi 가 준 GPU 메모리·온도(vGPU/vSGA 호스트). 게스트 수집이 없어도 호스트 값이 채워진다.
-            if (e.memPct != null) host.gpuMemUsedPct = e.memPct;
-            if (e.memUsedKB != null) host.gpuMemUsedMB = Math.round(e.memUsedKB / 1024);
-            if (e.tempC != null) host.gpuTempC = e.tempC;
-          }
+          // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지 — 단 최대 나이까지만, C-01).
+          const { staleExcluded } = applyGpuUtilCache(vc.id, hostByRef, now, intervalMs);
+          const staleNote = staleExcluded
+            ? ` · 낡은 캐시 제외 ${staleExcluded}(마지막 값이 ${Math.round(gpuCacheMaxAgeMs(intervalMs) / 60_000)}분보다 오래돼 적용하지 않음)`
+            : '';
+          if (logLine) console.log(`${logLine}${staleNote}`);
+          else if (queryErr) console.warn(`[collect] ${vc.id} GPU 사용률 수집 건너뜀: ${queryErr.message}${staleNote}`);
+          else if (staleExcluded) console.warn(`[collect] ${vc.id} vGPU 사용률 수집: 대상 0${staleNote}`);
+        } else {
+          _gpuUtilCache.delete(vc.id); // 수집을 껐으면 이 vCenter 의 캐시를 버린다(적용도 하지 않는다).
         }
       } catch (err) {
         console.warn(`[collect] ${vc.id} GPU 사용률 수집 건너뜀: ${err.message}`);

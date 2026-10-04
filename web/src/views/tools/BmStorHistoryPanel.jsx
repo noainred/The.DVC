@@ -15,7 +15,7 @@ import { ErrorBox } from '../../components/ui.jsx';
 import {
   MODES, FALLBACK_PERIODS, bytesText, changeText, summaryOf, pathFor, dotsFor, gapMsFor, xTicksFor,
   partialNote, emptyNote, spanNote, pctOf, changeOf, lastOf, headline, yRange, yTicks, contributions,
-  sortGroupsByUsed, groupColors, groupKeyOf, pctText, NO_GROUP, WARN_PCT,
+  sortGroupsByUsed, groupColors, groupKeyOf, pctText, NO_GROUP, WARN_PCT, historyForPeriod,
 } from './bmStorHistoryText.js';
 
 const H = 260; const PAD_L = 62; const PAD_B = 22; const PAD_T = 10; const PAD_R = 10;
@@ -181,7 +181,8 @@ export default function BmStorHistoryPanel({ groups = [], servers = [], request 
   const [scale, setScaleRaw] = useState(init.scale);
   const [focus, setFocus] = useState(null);
   const [gfilter, setGfilter] = useState(null); // 전체 서버 보기의 그룹 필터(그룹 이름) | null
-  const [data, setData] = useState(null);
+  // 응답은 요청한 기간과 함께 둔다 — 고른 기간과 다르면 그리지 않는다(v2.689 B10-b).
+  const [got, setGot] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
@@ -196,11 +197,11 @@ export default function BmStorHistoryPanel({ groups = [], servers = [], request 
 
   useEffect(() => {
     const my = ++seq.current;              // 늦게 온 이전 응답은 버린다(기간을 빠르게 바꿀 때)
-    setLoading(true);
+    setLoading(true); setErr(null);
     fetchJson(`/tools/bm-storage/history?period=${encodeURIComponent(period)}`)
       .then((d) => {
         if (my !== seq.current) return;
-        setData(d); setErr(null);
+        setGot({ period, data: d }); setErr(null);
         if (period === '7d' && onSevenRef.current) onSevenRef.current(d);
       })
       .catch((e) => { if (my === seq.current) setErr(e || new Error('조회 실패')); })
@@ -214,7 +215,10 @@ export default function BmStorHistoryPanel({ groups = [], servers = [], request 
     try { box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { /* 구형 브라우저 */ }
   }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const periods = data?.periods?.length ? data.periods : FALLBACK_PERIODS;
+  // 기간 목록은 기간과 무관한 서버 값이라 마지막 응답 것을 쓴다(실패 중에도 칩이 흔들리지 않게).
+  const periods = got?.data?.periods?.length ? got.data.periods : FALLBACK_PERIODS;
+  // 나머지(차트·요약·변화량)는 지금 고른 기간의 응답만 — 실패·대기 중에는 이전 기간 값을 새 라벨 아래 그리지 않는다.
+  const data = historyForPeriod(got, period);
   const per = periods.find((p) => p.key === period) || periods[1];
   const iv = data?.status?.intervalHours || 12;
   const all = useMemo(() => (Array.isArray(data?.series) ? data.series : []), [data]);
