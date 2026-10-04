@@ -4773,6 +4773,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **정직 기록**: v2.638 보고의 '웹 2,480건 통과' 는 **틀렸다** — `ipamSubmenu2636.test.js:221` 이 그 커밋에서 깨져 있었다(`onSaved` prop 추가를
       테스트가 못 받음). 이번에 고쳤다. 전량 테스트 결과를 보고할 때 **실패 수를 파일에서 grep 해** 적을 것(이번엔 `# fail 0` 을 파일로 확인).
       `scanInfo.byAgent` 키 순서가 IP 순에서 적재 순으로 바뀌었다(화면은 entries 를 join — 표시 순서만). 실장비 엣지·범위 계정 화면은 목 스택으로만 봤다.
+  - **대역·스캔의 '/24 가져오기'(v2.690) — 계산은 서버, 중복 판정은 웹(저장 안 한 입력 기준)**(`server/src/ipam/vcRangeSuggest.js` +
+    `GET /admin/ipam/vc-ranges/suggest?kind=idrac|vm` + 웹 `VcRangeImportModal.jsx`·`vcRangeImportText.js`, 사용자 요청 "선택한 DataCenter 의 iDRAC
+    scan 대역과 vCenter VM 대역을 /24 로 · 버튼 2개 · 추가 전에 확인 창 · 중복은 작은 칸에서 고쳐서 반영". 회귀 `server/test/vcRangeImport2690.test.js` + 웹
+    `vcRangeImportText.test.js` — 변이 3/3):
+    · iDRAC 스캔 대역은 vCenter 가 아니라 **DataCenter 단위**다 — 기본은 그 vCenter 의 DataCenter(`datacenterOfVcenter`), 할당이 없으면 비워 두고 고르게 한다(임의로 고르지 않는다).
+      꺼진 스캔 엔트리도 '입력한 대역' 이라 넣고 표시한다. 범위 계정은 iDRAC 쪽 403(전 법인 설정), VM 쪽은 범위 안 vCenter 만(밖은 404).
+    · VM 주소는 IPv4 만, 루프백·169.254·0/8·멀티캐스트·예약은 빼고 **개수를 밝힌다**. 사설 대역(172.17 등)은 임의로 빼지 않는다 — 확인 창의 VM 수를 보고 사람이 해제한다.
+    · 상태 넷: new / covered(이 칸에 이미) / partial(이 칸 다른 줄과 일부) / other(다른 vCenter 저장분과 겹침). new 만 텍스트 박스에, 나머지는 '중복 대역' 칸에 —
+      '반영' 은 다시 판정해 겹치지 않는 줄만 옮긴다. 추가 직전에도 다시 판정한다(창을 연 뒤 텍스트를 고쳤을 수 있다). 문법·포함 판정은 `ipScanDcText.coverageOf` 한 벌.
+    · ⚠ 확인 창 표에 '근거' 를 별도 열로 두지 말 것 — 400px 에서 그 열이 밀려 행 높이가 수백 px 가 됐다(Chromium 판독). 상태 칸 아래 작은 줄로 둔다.
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

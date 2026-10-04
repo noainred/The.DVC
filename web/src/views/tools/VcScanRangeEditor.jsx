@@ -19,6 +19,8 @@ import { useIpamDraft } from './useIpamDraft.js';
 import { DraftBanner } from './IpamDraftBanner.jsx';
 import { adminWriteGate } from './ipamShared.jsx';
 import { checkRangeList, cleanLines, lineIssueText, listSummaryText, normalizeRangeText } from './ipmsRangeText.js';
+import { VcRangeImportModal } from './VcRangeImportModal.jsx';
+import { applyImport, classifyLine, dupReasonText, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 
 export const RANGE_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%' };
 export const SCAN_CAP = 4096; // 서버 ipam/scan.js RANGE_CAP — 한 줄이 이보다 크면 스캔은 앞부분만 돈다(경고용)
@@ -98,6 +100,10 @@ export function VcScanRangeEditor({
   const setScanEnabled = (v) => sd.set((c) => ({ ...(c || { text: '' }), enabled: v }));
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState(null);
+  // v2.690: '/24 대역 가져오기' — 확인 창 종류('idrac'|'vm'|null)와 겹치는 대역을 모아 두는 '중복 대역' 칸(vCenter 마다 비운다).
+  const [importKind, setImportKind] = useState(null);
+  const [dupText, setDupText] = useState('');
+  const [dupMsg, setDupMsg] = useState(null);
   const vcRef = useRef(vc); vcRef.current = vc; // 늦게 온 저장 응답이 다른 vCenter 의 초안을 '저장됨' 으로 만들지 않게
   // 선택한 vCenter 의 저장된 스캔 대역을 폼에 채운다(초안이 있으면 초안이 이긴다 — useIpamDraft.load).
   useEffect(() => {
@@ -105,7 +111,7 @@ export function VcScanRangeEditor({
     const e = (vcRanges.ranges || []).find((x) => x.vcenterId === vc);
     sd.load({ text: e ? (e.ranges || []).join('\n') : '', enabled: e ? e.enabled !== false : true });
   }, [vc, vcRanges]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setScanMsg(null); }, [vc]); // 다른 vCenter 의 결과 문구를 새 vCenter 것처럼 두지 않는다
+  useEffect(() => { setScanMsg(null); setDupText(''); setDupMsg(null); setImportKind(null); }, [vc]); // 다른 vCenter 의 결과 문구를 새 vCenter 것처럼 두지 않는다
 
   const cur = (options || []).find((o) => o.id === vc) || null;
   const vcRangeEntry = (vcRanges?.ranges || []).find((x) => x.vcenterId === vc);
@@ -145,6 +151,26 @@ export function VcScanRangeEditor({
     } catch (e) { setScanMsg({ ok: false, text: e?.message || String(e) }); } finally { setScanBusy(false); }
   };
 
+  const savedList = vcRanges?.ranges || [];
+  const importTitle = (what) => (write.locked ? write.title : scanGate.locked ? scanGate.note : !vc ? 'vCenter 를 먼저 고르세요' : cur?.orphan ? '등록 목록에 없는 vCenter 입니다' : `${what} 을 /24 로 계산해 이 칸에 추가할 대역을 확인합니다`);
+  const onImportConfirm = (rows, chosen) => {
+    const r = applyImport({ text: scanText, dupText, rows, chosen, saved: savedList, vc });
+    setScanText(r.text); setDupText(r.dupText); setImportKind(null);
+    setDupMsg({ ok: true, text: `대역 ${r.added}개를 추가했습니다${r.toDup ? ` · 겹치는 ${r.toDup}개는 아래 ‘중복 대역’ 칸에 두었습니다` : ''} — 저장하려면 ‘대역 저장’ 을 누르세요.` });
+  };
+  const onReflect = () => {
+    const r = reflectDups({ text: scanText, dupText, saved: savedList, vc });
+    setScanText(r.text); setDupText(r.dupText);
+    setDupMsg({ ok: r.kept.length === 0, text: `반영 ${r.added}개${r.kept.length ? ` · 아직 겹치거나 형식이 틀린 ${r.kept.length}줄은 칸에 남겼습니다` : ''}` });
+  };
+  const dupOthers = otherSavedRanges(savedList, vc);
+  const dupLines = dupText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const importButtons = (
+    <span className="flex gap" style={{ flexWrap: 'wrap' }}>
+      <button className="logout-btn" style={{ padding: '6px 12px' }} disabled={inputLocked} title={importTitle('선택한 DataCenter 의 iDRAC 스캔 대역')} onClick={() => setImportKind('idrac')}>🖥️ iDRAC 대역 가져오기</button>
+      <button className="logout-btn" style={{ padding: '6px 12px' }} disabled={inputLocked} title={importTitle('이 vCenter VM 이 쓰는 주소')} onClick={() => setImportKind('vm')}>🧩 VM 대역 가져오기</button>
+    </span>
+  );
   const saveTitle = write.locked ? write.title : scanGate.locked ? scanGate.note : scanCheck.invalid.length ? `형식 오류 ${scanCheck.invalid.length}줄을 먼저 고치세요` : undefined;
   const scanTitle = write.locked ? write.title : scanGate.locked ? scanGate.note : scanRunning ? '스캔이 진행 중입니다 — 끝난 뒤 다시 시작할 수 있습니다' : scanDirty ? '저장하지 않은 대역 변경은 이번 스캔에 들어가지 않습니다' : undefined;
   return (
@@ -171,11 +197,32 @@ export function VcScanRangeEditor({
           {options == null && !vcRangesErr && <span className="muted" style={{ fontSize: 11 }}>목록을 불러오는 중…</span>}
           {options == null && vcRangesErr && <span className="muted" style={{ fontSize: 11 }}>vCenter 목록을 읽지 못했습니다(위 사유)</span>}
           {optionsNote}
+          {importButtons}
         </div>
       )}
+      {!showSelect && <div style={{ margin: '6px 0' }}>{importButtons}</div>}
       <DraftBanner d={sd} />
       <textarea className="input" rows={rows} value={scanText} disabled={inputLocked} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={RANGE_TA} aria-label="vCenter별 스캔 대역" />
       <RangeCheck check={scanCheck} />
+      {dupMsg && <div style={{ fontSize: 11, marginTop: 4, color: dupMsg.ok ? 'var(--green)' : 'var(--amber)' }}>{dupMsg.text}</div>}
+      {dupLines.length > 0 && (
+        <div style={{ marginTop: 8, padding: 8, borderRadius: 8, border: '1px solid var(--amber)', background: 'rgba(245,158,11,.06)' }}>
+          <div style={{ fontSize: 12, marginBottom: 4 }}><b>중복 대역 {dupLines.length}줄</b> <span className="muted">— 위 칸에 넣지 않았습니다. 고친 뒤 ‘반영’ 을 누르면 다시 검사해 겹치지 않는 줄만 위 칸에 붙입니다.</span></div>
+          <textarea className="input" rows={Math.min(6, Math.max(2, dupLines.length))} value={dupText} disabled={inputLocked} onChange={(e) => setDupText(e.target.value)} style={RANGE_TA} aria-label="중복 대역" />
+          <div style={{ fontSize: 11, lineHeight: 1.6, marginTop: 4 }}>
+            {dupLines.slice(0, 8).map((l, i) => { const c = classifyLine(l, { text: scanText, others: dupOthers }); return <div key={`${i}-${l}`} style={{ color: c.kind === 'new' ? 'var(--green)' : 'var(--amber)' }}>{c.kind === 'new' ? '✓' : '△'} {l} — {c.kind === 'new' ? '이제 겹치지 않습니다' : dupReasonText(c)}</div>; })}
+            {dupLines.length > 8 && <div className="muted">외 {dupLines.length - 8}줄</div>}
+          </div>
+          <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap' }}>
+            <button className="logout-btn" style={{ padding: '4px 12px' }} disabled={inputLocked} onClick={onReflect}>반영</button>
+            <button className="logout-btn" style={{ padding: '4px 12px' }} onClick={() => { setDupText(''); setDupMsg(null); }}>비우기</button>
+          </div>
+        </div>
+      )}
+      {importKind && (
+        <VcRangeImportModal kind={importKind} vc={vc} vcName={cur?.name || vc} text={scanText} saved={savedList}
+          onClose={() => setImportKind(null)} onConfirm={onImportConfirm} />
+      )}
       {cur?.orphan && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>이 vCenter 는 등록 목록에 없습니다(삭제됨) — 스캔 대역을 저장할 수 없습니다.</div>}
       <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} disabled={inputLocked} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
