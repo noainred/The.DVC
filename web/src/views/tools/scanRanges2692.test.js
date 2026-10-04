@@ -2,10 +2,12 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CLS_LABEL, clsCounts, filterByCls, defaultChosen, ignoredText, partialIgnoreText, reportState, agentReportRows, reportKpis, rangeRowCheck, REPORT_STATE_TEXT, REPORT_STATE_TITLE, REPORT_STALE_MS } from './scanRangeImportText.js';
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const NOW = 1_800_000_000_000;
-const src = (f) => fs.readFileSync(path.resolve(__dirname, f), 'utf8');
+const src = (f) => fs.readFileSync(path.resolve(HERE, f), 'utf8');
 
 describe('가져오기 — 공인/사설 · 무시 대역', () => {
   const rows = [{ cidr: 'a', cls: 'private', kind: 'new' }, { cidr: 'b', cls: 'public', kind: 'new' }, { cidr: 'c', cls: 'mixed', kind: 'new' }, { cidr: 'd', cls: 'private', kind: 'covered' }, { cidr: 'e', cls: null, kind: 'new' }];
