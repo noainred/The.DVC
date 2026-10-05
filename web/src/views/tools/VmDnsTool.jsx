@@ -550,8 +550,8 @@ function PolicyRow({ row, byIp, canWrite, onAdd, onRemove }) {
         {text.trim() && prev.length > 0 && (
           <div style={{ flexBasis: '100%', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
             {prev.map((x, i) => (
-              <span key={i} style={{ color: x.ok ? (x.warn ? 'var(--amber)' : 'var(--green)') : 'var(--red)' }}>
-                {x.ok ? `✓ ${x.value}${x.warn ? ` — ${x.warn}` : ''}` : `✗ ‘${x.raw}’ — ${x.reason}`}
+              <span key={i} style={{ color: x.ok ? 'var(--green)' : 'var(--red)' }}>
+                {x.ok ? `✓ ${x.value}` : `✗ ‘${x.raw}’ — ${x.reason}`}
               </span>
             ))}
           </div>

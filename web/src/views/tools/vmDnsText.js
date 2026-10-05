@@ -14,7 +14,6 @@
 import { numOrNull } from '../../numOrNull.js';
 import { unitText } from '../unitText.js';
 import { agoText } from './relTime.js';
-import { checkRangeSpec } from './ipmsRangeText.js';
 
 export const TABS = Object.freeze(['overview', 'server', 'policy', 'changes']);
 export const TAB_LABEL = Object.freeze({ overview: '개요', server: 'DNS 서버 상세', policy: '정책 · 도달성', changes: '변경 이력' });
@@ -583,23 +582,43 @@ export function vmListFoot(resp, shown) {
 
 // ── 정책 편집 ────────────────────────────────────────────────────────────────
 const CANON_IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+// '숫자 넷이고 각 255 이하' — 서버 ipToNum 이 읽는 모양(앞자리 0·앞뒤 빈 칸은 읽되 정규형이 아니다).
+const looseIpv4 = (b) => /^\s*\d+\.\d+\.\d+\.\d+\s*$/.test(b) && b.trim().split('.').every((o) => Number(o) <= 255);
+const ipNum = (b) => b.split('.').reduce((n, o) => n * 256 + Number(o), 0);
+const numIp = (n) => [24, 16, 8, 0].map((sh) => Math.floor(n / 2 ** sh) % 256).join('.');
+const notCanon = (b) => (looseIpv4(b) ? `‘${b}’ 는 정규형 IPv4 가 아닙니다(앞자리 0·빈 칸 없이)` : `‘${b || '(비어 있음)'}’ 는 IPv4 주소가 아닙니다`);
 
 /**
  * 정책 항목 한 줄 판정(미리보기 — 저장 때 서버가 다시 판정한다).
- * IPv4 정규형 또는 CIDR(/8~/32)만 받는다. 범위(a-b)는 받지 않는다.
- * @returns {{ ok: true, value: string, kind: 'ip'|'cidr', warn: string|null } | { ok: false, reason: string }}
+ * ⚠ 서버 `server/src/vmdns/policy.js checkPolicyEntry` 와 **같은 규칙의 사본**이다(번들 경계 — 웹은 서버 소스를 import 할 수 없다).
+ *   정규형 IPv4 또는 CIDR(정규형 기준 주소 + /8~/32, **네트워크 경계**). 앞자리 0·빈 마스크(/0 으로 읽힌다 — v2.637)·
+ *   경계가 아닌 CIDR 은 받지 않는다. 범위(a-b)는 형식이 아니라서 거부한다(문구만 친절하게).
+ * @returns {{ ok: true, value: string, kind: 'ip'|'cidr' } | { ok: false, reason: string }}
  */
 export function checkPolicyEntry(raw) {
-  const s = String(raw ?? '').trim();
-  if (!s) return { ok: false, reason: '비어 있습니다' };
-  if (s.length > 64) return { ok: false, reason: '너무 깁니다(64자 이하)' };
+  if (typeof raw !== 'string') return { ok: false, reason: '글자가 아닙니다' };
+  const s = raw.trim();
+  if (!s) return { ok: false, reason: '빈 항목' };
+  if (s.length > 64) return { ok: false, reason: '64자를 넘습니다' };
   if (s.includes('-')) return { ok: false, reason: '범위(시작-끝)는 받지 않습니다 — IP 하나 또는 CIDR(예: 10.20.0.0/24)로 쓰세요' };
-  const r = checkRangeSpec(s);
-  if (!r.ok) return { ok: false, reason: r.reason };
-  const [base, mask] = s.split('/').map((x) => x.trim());
-  if (!CANON_IPV4.test(base)) return { ok: false, reason: `‘${base}’ 는 정규형 IPv4 가 아닙니다(앞자리 0 없이 — 예: 10.20.0.53)` };
-  if (r.kind === 'cidr') return { ok: true, value: `${base}/${Number(mask)}`, kind: 'cidr', warn: r.warn };
-  return { ok: true, value: base, kind: 'ip', warn: null };
+  if (s.includes('/')) {
+    const parts = s.split('/');
+    if (parts.length !== 2) return { ok: false, reason: '‘/’ 가 두 번 이상 있습니다' };
+    const [b, m] = parts;
+    if (!CANON_IPV4.test(b)) return { ok: false, reason: notCanon(b) };
+    if (!m) return { ok: false, reason: '‘/’ 뒤 마스크가 비어 있습니다 — 비워 두면 전체 주소(/0)로 읽힐 수 있어 받지 않습니다' };
+    if (!/^\d{1,2}$/.test(m) || (m.length === 2 && m[0] === '0')) return { ok: false, reason: `마스크 ‘${m}’ 는 숫자(8~32)가 아닙니다` };
+    const k = Number(m);
+    if (k > 32) return { ok: false, reason: `마스크 /${k} 는 32 를 넘습니다` };
+    if (k < 8) return { ok: false, reason: `마스크 /${k} 는 너무 넓습니다(/8 이상만 받습니다)` };
+    const n = ipNum(b);
+    const size = 2 ** (32 - k);
+    const lo = Math.floor(n / size) * size;
+    if (lo !== n) return { ok: false, reason: `네트워크 경계가 아닙니다 — ${numIp(lo)}/${k} 로 적으세요` };
+    return { ok: true, value: `${b}/${k}`, kind: 'cidr' };
+  }
+  if (CANON_IPV4.test(s)) return { ok: true, value: s, kind: 'ip' };
+  return { ok: false, reason: looseIpv4(s) ? notCanon(s) : `‘${s.length > 40 ? `${s.slice(0, 40)}…` : s}’ 는 IPv4 주소나 CIDR 이 아닙니다` };
 }
 
 /** 입력 칸 → 항목 목록(쉼표·공백·줄바꿈으로 나눈다) 미리보기. 이미 있는 값은 dup. */
@@ -612,7 +631,7 @@ export function previewPolicyInput(text, existing = []) {
     if (!r.ok) return { raw: t, ok: false, reason: r.reason };
     if (have.has(r.value) || seen.has(r.value)) return { raw: t, ok: false, dup: true, value: r.value, reason: '이미 있습니다' };
     seen.add(r.value);
-    return { raw: t, ok: true, value: r.value, kind: r.kind, warn: r.warn };
+    return { raw: t, ok: true, value: r.value, kind: r.kind };
   });
 }
 

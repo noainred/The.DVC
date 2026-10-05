@@ -393,27 +393,30 @@ describe('DNS 서버 상세', () => {
 });
 
 describe('정책 입력 검증 미리보기', () => {
-  it('정규형 IPv4·CIDR 만 받는다', () => {
-    expect(checkPolicyEntry('10.20.0.53')).toMatchObject({ ok: true, value: '10.20.0.53', kind: 'ip' });
-    expect(checkPolicyEntry(' 10.20.0.0/24 ')).toMatchObject({ ok: true, value: '10.20.0.0/24', kind: 'cidr', warn: null });
-    expect(checkPolicyEntry('10.20.0.0/08')).toMatchObject({ ok: true, value: '10.20.0.0/8' });
+  it('정규형 IPv4·CIDR(네트워크 경계, /8~/32)만 받는다', () => {
+    expect(checkPolicyEntry('10.20.0.53')).toEqual({ ok: true, value: '10.20.0.53', kind: 'ip' });
+    expect(checkPolicyEntry(' 10.20.0.0/24 ')).toEqual({ ok: true, value: '10.20.0.0/24', kind: 'cidr' });
+    expect(checkPolicyEntry('10.0.0.0/8')).toMatchObject({ ok: true, value: '10.0.0.0/8' });
+    expect(checkPolicyEntry('10.20.0.53/32')).toMatchObject({ ok: true, value: '10.20.0.53/32' });
   });
   it('틀린 것은 사유와 함께 거부한다', () => {
     expect(checkPolicyEntry('').ok).toBe(false);
-    expect(checkPolicyEntry('010.20.0.53')).toMatchObject({ ok: false });
+    expect(checkPolicyEntry(null).ok).toBe(false);
     expect(checkPolicyEntry('010.20.0.53').reason).toMatch(/정규형/);
-    expect(checkPolicyEntry('10.20.0.256').ok).toBe(false);
+    expect(checkPolicyEntry('10.20.0.256').reason).toMatch(/IPv4 주소나 CIDR 이 아닙니다/);
     expect(checkPolicyEntry('10.20.0.1-50').reason).toMatch(/범위/);
     expect(checkPolicyEntry('10.0.0.0/').reason).toMatch(/마스크가 비어/);   // /0 로 읽히는 빈 마스크(v2.637)
-    expect(checkPolicyEntry('10.0.0.0/4').ok).toBe(false);
+    expect(checkPolicyEntry('10.0.0.0/08').reason).toMatch(/숫자\(8~32\)/);  // 앞자리 0 마스크
+    expect(checkPolicyEntry('10.0.0.0/4').reason).toMatch(/너무 넓습니다/);
     expect(checkPolicyEntry('10.0.0.0/33').ok).toBe(false);
+    expect(checkPolicyEntry('10.0.0.0 /24').reason).toMatch(/정규형/);       // 빈 칸이 낀 기준 주소
+    expect(checkPolicyEntry('1.2.3.4/24/1').reason).toMatch(/두 번 이상/);
     expect(checkPolicyEntry('dns.corp').ok).toBe(false);
     expect(checkPolicyEntry('x'.repeat(65)).reason).toMatch(/64자/);
   });
-  it('네트워크 경계가 아니면 경고(받기는 한다 — 서버의 CIDR 대조가 호스트 비트를 무시한다)', () => {
-    const r = checkPolicyEntry('10.20.0.5/24');
-    expect(r.ok).toBe(true);
-    expect(r.warn).toMatch(/10\.20\.0\.0\/24/);
+  it('네트워크 경계가 아니면 거부하고 맞는 표기를 알려 준다(서버와 같은 규칙)', () => {
+    expect(checkPolicyEntry('10.20.0.5/24')).toEqual({ ok: false, reason: '네트워크 경계가 아닙니다 — 10.20.0.0/24 로 적으세요' });
+    expect(checkPolicyEntry('192.168.1.130/25').reason).toMatch(/192\.168\.1\.128\/25/);
   });
   it('여러 값·중복·이미 있는 값', () => {
     const p = previewPolicyInput('10.20.0.53, 10.20.0.54 10.20.0.53\n010.1.1.1', ['10.20.0.54']);
