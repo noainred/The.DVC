@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **910개** |
+| 엔드포인트 | **912개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 86개 |
-| GET | 489개 |
+| 라우트 파일 | 87개 |
+| GET | 491개 |
 | POST | 282개 |
 | PUT | 90개 |
 | PATCH | 2개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 380 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 382 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -109,58 +109,58 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2043](../server/src/routes/central.js#L2043) |
-| GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:401](../server/src/routes/central.js#L401) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2128](../server/src/routes/central.js#L2128) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2132](../server/src/routes/central.js#L2132) |
-| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central.js:1468](../server/src/routes/central.js#L1468) |
-| POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:537](../server/src/routes/central.js#L537) |
-| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2107](../server/src/routes/central.js#L2107) |
-| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2111](../server/src/routes/central.js#L2111) |
-| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:932](../server/src/routes/central.js#L932) |
-| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1030](../server/src/routes/central.js#L1030) |
-| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:1889](../server/src/routes/central.js#L1889) |
-| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:1916](../server/src/routes/central.js#L1916) |
-| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central.js:1421](../server/src/routes/central.js#L1421) |
-| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central.js:1428](../server/src/routes/central.js#L1428) |
-| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1069](../server/src/routes/central.js#L1069) |
-| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1282](../server/src/routes/central.js#L1282) |
-| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1202](../server/src/routes/central.js#L1202) |
-| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:795](../server/src/routes/central.js#L795) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2228](../server/src/routes/central.js#L2228) |
-| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1126](../server/src/routes/central.js#L1126) |
-| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1136](../server/src/routes/central.js#L1136) |
-| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1148](../server/src/routes/central.js#L1148) |
-| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:695](../server/src/routes/central.js#L695) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2156](../server/src/routes/central.js#L2156) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2167](../server/src/routes/central.js#L2167) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2242](../server/src/routes/central.js#L2242) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2272](../server/src/routes/central.js#L2272) |
-| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2081](../server/src/routes/central.js#L2081) |
-| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2088](../server/src/routes/central.js#L2088) |
-| POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1390](../server/src/routes/central.js#L1390) |
-| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1458](../server/src/routes/central.js#L1458) |
-| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1585](../server/src/routes/central.js#L1585) |
-| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1604](../server/src/routes/central.js#L1604) |
-| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2016](../server/src/routes/central.js#L2016) |
-| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2024](../server/src/routes/central.js#L2024) |
-| POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:412](../server/src/routes/central.js#L412) |
-| POST | `/result` | `requireCentral` | [server/src/routes/central.js:490](../server/src/routes/central.js#L490) |
-| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:1815](../server/src/routes/central.js#L1815) |
-| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:1750](../server/src/routes/central.js#L1750) |
-| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:1835](../server/src/routes/central.js#L1835) |
-| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1640](../server/src/routes/central.js#L1640) |
-| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:1848](../server/src/routes/central.js#L1848) |
-| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1672](../server/src/routes/central.js#L1672) |
-| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:1731](../server/src/routes/central.js#L1731) |
-| GET | `/storage-config` | `requireCentral` | [server/src/routes/central.js:1364](../server/src/routes/central.js#L1364) |
-| POST | `/storage-data` | `requireCentral` | [server/src/routes/central.js:1486](../server/src/routes/central.js#L1486) |
-| GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:579](../server/src/routes/central.js#L579) |
-| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:595](../server/src/routes/central.js#L595) |
-| POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:514](../server/src/routes/central.js#L514) |
-| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2006](../server/src/routes/central.js#L2006) |
-| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:872](../server/src/routes/central.js#L872) |
-| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1054](../server/src/routes/central.js#L1054) |
+| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2046](../server/src/routes/central.js#L2046) |
+| GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:402](../server/src/routes/central.js#L402) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2131](../server/src/routes/central.js#L2131) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2135](../server/src/routes/central.js#L2135) |
+| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central.js:1471](../server/src/routes/central.js#L1471) |
+| POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:538](../server/src/routes/central.js#L538) |
+| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2110](../server/src/routes/central.js#L2110) |
+| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2114](../server/src/routes/central.js#L2114) |
+| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:935](../server/src/routes/central.js#L935) |
+| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1033](../server/src/routes/central.js#L1033) |
+| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:1892](../server/src/routes/central.js#L1892) |
+| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:1919](../server/src/routes/central.js#L1919) |
+| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central.js:1424](../server/src/routes/central.js#L1424) |
+| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central.js:1431](../server/src/routes/central.js#L1431) |
+| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1072](../server/src/routes/central.js#L1072) |
+| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1285](../server/src/routes/central.js#L1285) |
+| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1205](../server/src/routes/central.js#L1205) |
+| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:798](../server/src/routes/central.js#L798) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2231](../server/src/routes/central.js#L2231) |
+| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1129](../server/src/routes/central.js#L1129) |
+| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1139](../server/src/routes/central.js#L1139) |
+| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1151](../server/src/routes/central.js#L1151) |
+| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:698](../server/src/routes/central.js#L698) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2159](../server/src/routes/central.js#L2159) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2170](../server/src/routes/central.js#L2170) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2245](../server/src/routes/central.js#L2245) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2275](../server/src/routes/central.js#L2275) |
+| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2084](../server/src/routes/central.js#L2084) |
+| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2091](../server/src/routes/central.js#L2091) |
+| POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1393](../server/src/routes/central.js#L1393) |
+| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1461](../server/src/routes/central.js#L1461) |
+| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1588](../server/src/routes/central.js#L1588) |
+| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1607](../server/src/routes/central.js#L1607) |
+| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2019](../server/src/routes/central.js#L2019) |
+| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2027](../server/src/routes/central.js#L2027) |
+| POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:413](../server/src/routes/central.js#L413) |
+| POST | `/result` | `requireCentral` | [server/src/routes/central.js:491](../server/src/routes/central.js#L491) |
+| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:1818](../server/src/routes/central.js#L1818) |
+| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:1753](../server/src/routes/central.js#L1753) |
+| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:1838](../server/src/routes/central.js#L1838) |
+| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1643](../server/src/routes/central.js#L1643) |
+| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:1851](../server/src/routes/central.js#L1851) |
+| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1675](../server/src/routes/central.js#L1675) |
+| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:1734](../server/src/routes/central.js#L1734) |
+| GET | `/storage-config` | `requireCentral` | [server/src/routes/central.js:1367](../server/src/routes/central.js#L1367) |
+| POST | `/storage-data` | `requireCentral` | [server/src/routes/central.js:1489](../server/src/routes/central.js#L1489) |
+| GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:580](../server/src/routes/central.js#L580) |
+| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:596](../server/src/routes/central.js#L596) |
+| POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:515](../server/src/routes/central.js#L515) |
+| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2009](../server/src/routes/central.js#L2009) |
+| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:875](../server/src/routes/central.js#L875) |
+| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1057](../server/src/routes/central.js#L1057) |
 
 ## `/api/upgrade`
 
@@ -817,6 +817,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/horizon-sessions/settings` | 역할 `admin` | [server/src/routes/api/horizonSessions.js:265](../server/src/routes/api/horizonSessions.js#L265) |
 | GET | `/tools/horizon-sessions/usage` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:132](../server/src/routes/api/horizonSessions.js#L132) |
 | GET | `/tools/horizon-sessions/usage.csv` | 권한 `data.csv` | [server/src/routes/api/horizonSessions.js:147](../server/src/routes/api/horizonSessions.js#L147) |
+| GET | `/tools/host-hygiene` | 권한 `tools` | [server/src/routes/api/hostHygiene.js:35](../server/src/routes/api/hostHygiene.js#L35) |
+| GET | `/tools/host-hygiene.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hostHygiene.js:46](../server/src/routes/api/hostHygiene.js#L46) |
 | GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:36](../server/src/routes/api/toolsAnalytics.js#L36) |
 | GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:521](../server/src/routes/api/hardwareGpu.js#L521) |
 | POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:496](../server/src/routes/api/hardwareGpu.js#L496) |

@@ -92,6 +92,7 @@ export const TOOLS = [
   { k: 'licenses', icon: '🔑', label: '라이선스 한눈에', desc: '제품별 할당/사용/만료' },
   { k: 'license-expiry', icon: '📅', label: '라이선스 만료일 확인', desc: 'ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon 등 수집 가능한 전 라이선스의 유효/만료 날짜 — 만료·90일 임박 강조, Horizon 연결 서버 등록, CSV' },
   { k: 'esxi', icon: '🖳', label: 'ESXi 버전별', desc: '호스트 ESXi 버전 분포/목록' },
+  { k: 'host-hygiene', icon: '🛡️', label: 'ESXi 호스트 구성 점검', desc: 'ESXi 호스트 보안·구성을 한 표로 — 호스트 인증서 만료·재부팅 필요·SSH/ESXi Shell 실행·NTP/syslog 미설정·커뮤니티 VIB 허용·계정 잠금 꺼짐·MOB·잠금 모드 + 클러스터 안에서 빌드·NTP·DNS·syslog·허용 수준이 다른 호스트(구성 드리프트) · 아직 읽지 않은 호스트는 따로 센다 · CSV', aka: ['host hygiene', '보안 하드닝', 'hardening', 'CIS', 'STIG', 'lockdown', '잠금 모드', 'SSH', 'NTP', 'syslog', '드리프트', 'drift', '인증서 만료', 'reboot required', '재부팅 필요', 'acceptance level', 'VIB'] },
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: '게이트웨이·세그먼트·노드·DFW 방화벽·보안그룹 등 NSX 전체 관리', perm: 'inv.nsx' },
   { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },

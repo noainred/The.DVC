@@ -33,6 +33,7 @@ import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
 import { STable } from './STable.jsx';
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
+import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 
 function DRow({ label, children, full = false, nowrap = false }) {
   return (
@@ -494,6 +495,7 @@ export function EntityDetail({ type, item, onClose }) {
         )}
       </div>
       {type === 'vm' && <VmCfgSection vm={item} />}
+      {type === 'host' && <HostCfgSection host={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -556,6 +558,51 @@ export function EntityDetail({ type, item, onClose }) {
         <HostVmsModal host={item.name} vcenterId={item.vcenterId} onClose={() => setShowHostVms(false)} />
       )}
     </Modal>
+  );
+}
+
+/**
+ * v2.699: 호스트 구성·보안 — 인증서 만료·재부팅 필요·SSH/Shell·NTP·DNS·syslog·허용 수준·계정 잠금·MOB·잠금 모드.
+ * 값은 수집 서버가 오래된 호스트부터 나눠 읽은 캐시(host.hcfg). 판정은 hostCfgText.hostCfgFindings(서버와 같은 규칙 — 테스트 대조).
+ * 클러스터 드리프트는 여러 호스트를 비교해야 하므로 여기서는 하지 않는다(특수 기능 'ESXi 호스트 구성 점검').
+ */
+function HostCfgSection({ host }) {
+  const view = hostCfgRows(host);
+  const findings = hostCfgFindings(host);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>구성·보안{findings.length ? ` — 확인할 항목 ${findings.length}` : ''}</div>
+      {view.state === 'none' ? (
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{view.note}</div>
+      ) : (
+        <>
+          {findings.length > 0 ? (
+            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', display: 'grid', gap: 6 }}>
+              {findings.map((f) => {
+                const t = HOST_CFG_TEXT[f.code] || { title: f.code, fix: '' };
+                const [bl, bc] = SEV_BADGE[f.sev] || SEV_BADGE.info;
+                const extra = hostFindingDetail(f);
+                return (
+                  <li key={f.code} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                    <span className={`badge ${bc}`} style={{ flex: 'none', whiteSpace: 'nowrap' }}>{bl}</span>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>
+                      <b>{t.title}</b>
+                      <span className="muted" style={{ display: 'block', fontSize: 12 }}>{t.fix}{extra ? ` · ${extra}` : ''}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{host.connectionState === 'DISCONNECTED' ? '연결이 끊긴 호스트라 판정하지 않았습니다.' : '읽은 값에서 확인할 항목이 없습니다.'}</div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
+            {view.rows.map((r) => <DRow key={r.label} label={r.label}><span title={r.title}>{r.value}</span></DRow>)}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{view.note}</div>
+        </>
+      )}
+    </div>
   );
 }
 

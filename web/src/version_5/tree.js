@@ -41,7 +41,7 @@ export const GROUPS = Object.freeze([
       sub('장비'), tool('storage-mon'), tool('san-switch'), tool('pdu'), tool('hardware'), tool('hba'), tool('gpu'),
       tool('nic-speed'), tool('nic-models'),
       sub('검색'), tool('aisearch'), tool('explore'), tool('vmfinder'), tool('deepsearch'), tool('serial-lookup'),
-      sub('버전 · 구성'), tool('guestos'), tool('real-os'), tool('solutions'), tool('esxi'), tool('vcversion'),
+      sub('버전 · 구성'), tool('guestos'), tool('real-os'), tool('solutions'), tool('esxi'), tool('host-hygiene'), tool('vcversion'),
     ],
   },
   {

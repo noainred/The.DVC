@@ -47,6 +47,7 @@ import { registerCompareMatrix } from './api/compareMatrix.js';   // v2.499: 비
 import { registerPerfClient } from './api/perfClient.js'; // v2.498: 브라우저 장기 로딩(hang) 보고 수신
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 import { registerVmHygiene } from './api/vmHygiene.js'; // VM 구성 점검(B10 구성 속성 + 스냅샷 정책, v2.698)
+import { registerHostHygiene } from './api/hostHygiene.js'; // ESXi 호스트 구성 점검(v2.699)
 import { registerVmDns } from './api/vmDns.js'; // VM DNS 설정 확인(VM 이 쓰는 DNS 서버 · 정책 · 도달성 · 변경 이력, v2.696)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
@@ -126,4 +127,5 @@ registerRelayTopo(api);
 registerBmStorage(api);
 registerVmTrack(api);
 registerVmHygiene(api);
+registerHostHygiene(api);
 registerVmDns(api);

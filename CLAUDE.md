@@ -4849,6 +4849,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       cfg/dev 를 아직 읽지 않은 VM 은 `coverage.notCollected` 로 '구성 판정에서 빠졌다' 를 화면이 말한다.
     · 알림은 기본 꺼짐 · 하루 한 번(시각 이후) · 엣지(`config.agent.centralUrl`)는 보내지 않는다 · 상태 파일 `vm-hygiene-state.json`(등록·손상 보존).
     · ⚠ 칩 버튼은 `whiteSpace:'normal' + maxWidth:'100%'` — 긴 판정 제목이 400px 에서 페이지를 38px 밀어냈다(Chromium 측정).
+  - ⚠⚠ **v2.699 — ESXi 호스트 구성·보안(A1·A9·A11·A12). 수집은 호스트 전용 캐시 `hostcfg/cache.js`(VM 캐시와 나눴다) · 판정은 `hostcfg/parse.js` 하나**
+    (`hostcfg/{parse,cache,collect,analyze}.js` + `routes/api/hostHygiene.js` + 웹 `views/tools/HostHygieneTool.jsx`·`views/hostcfg/hostCfgText.js` + 호스트 상세 `HostCfgSection`.
+    회귀 `server/test/hostCfg2699.test.js` + 웹 `hostCfgText.test.js` — 변이 6/7 검출, 남은 1종(InvalidName 처리 제거)은 호출부 catch 가 같은 결과를 내는 동등 변이):
+    · ⚠ **VM 캐시(`vmcfg/cache.js`)에 호스트를 넣지 말 것** — 그 prune 은 VM ref 집합 기준이라 매 주기 호스트 항목을 지운다.
+    · ⚠ **prune 은 인벤토리의 호스트 전부(`allRefs`) 기준**이다 — 읽을 대상(연결된 호스트)으로 prune 하면 끊긴 호스트의 직전 값이 사라진다(테스트 고정).
+    · 경로는 5.0+ 만 본 요청에 · `config.lockdownMode`(6.0+)는 따로 요청하고 InvalidProperty 면 그 vCenter 는 다시 묻지 않는다(`noLockdownPath`) ·
+      고급 설정은 `ADV_OPTIONS` 이름마다 QueryOptions(없는 이름은 그 값만 null) · 허용 수준은 QueryHostAcceptanceLevel · 인증서는 HostCertificateManager.certificateInfo.
+      6시간 주기 · 주기당 40대 · 예산 15초(시작 전 예산을 넘기면 `cut`). 엣지 수신은 `sanitizeHostCfg`(아는 필드만).
+    · 값은 '모름(null)' 과 '없음(빈 값·0)' 을 구분한다 — `syslogHost:''` 는 '설정 없음'(판정), null 은 '아직 안 읽음'(판정 안 함). `ntpServers:[]` 도 읽은 값이다.
+    · 드리프트는 같은 클러스터의 **값을 아는 호스트끼리**만(standalone·한 대짜리 클러스터는 밖) · 다수값이 동률이면 `majority:null` 이고 양쪽을 다 표시한다.
+    · 끊긴 호스트·미수집 호스트는 판정하지 않고 `coverage` 로 센다. 수집 상태(`status` — vCenter 오류 원문)는 전체 범위 관리자에게만.
+    · 정직 기록: vLCM 이미지 준수(REST)는 넣지 않았다 · 실장비 응답(QueryOptions 값 타입·certificateInfo·lockdownMode)은 합성으로만 확인했다.
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).
