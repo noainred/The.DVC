@@ -11,6 +11,9 @@ export const HOST_CFG_CODES = Object.freeze({
   'acceptance-community': 'warn',
   'lockout-off': 'warn',
   'mob-enabled': 'warn',
+  'mp-dead': 'warn',
+  'mp-single': 'warn',
+  'vsan-disk-issue': 'warn',
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
@@ -29,12 +32,15 @@ export const HOST_CFG_TEXT = Object.freeze({
   'acceptance-community': { title: '커뮤니티 VIB 를 허용합니다', fix: '허용 수준을 PartnerSupported 이상으로 올리세요(서명되지 않은 VIB 설치 가능)' },
   'lockout-off': { title: '로그인 실패 계정 잠금이 꺼져 있습니다', fix: 'Security.AccountLockFailures 를 0 이 아닌 값으로(CIS 권고 5 이하)' },
   'mob-enabled': { title: 'MOB(관리 개체 브라우저)가 켜져 있습니다', fix: 'Config.HostAgent.plugins.solo.enableMob 를 끄세요(CIS 권고)' },
+  'mp-dead': { title: '죽은 스토리지 경로가 있습니다', fix: 'HBA·스위치 포트·케이블·어레이 포트를 확인하세요 · 남은 경로가 끊기면 데이터스토어에 접근하지 못합니다' },
+  'mp-single': { title: '경로가 하나뿐인 공유 LUN 이 있습니다', fix: 'FC·iSCSI LUN 은 경로가 둘 이상이어야 합니다 · 조닝·마스킹·두 번째 HBA 를 확인하세요' },
+  'vsan-disk-issue': { title: 'vSAN 디스크 문제가 보고됐습니다', fix: 'vSAN 디스크 관리에서 해당 디스크 상태를 확인하세요' },
   'ssh-autostart': { title: 'SSH 가 호스트와 함께 시작됩니다', fix: '시작 정책을 수동으로 바꾸세요' },
   'lockdown-off': { title: '잠금 모드(lockdown)가 꺼져 있습니다', fix: '참고 · 운영 정책에 따라 정상 모드 이상을 권고합니다' },
   'shell-timeout-off': { title: 'ESXi Shell 시간 제한이 없습니다', fix: 'UserVars.ESXiShellTimeOut 을 설정하세요(CIS 권고 900초 이하)' },
   drift: { title: '같은 클러스터의 다른 호스트와 구성이 다릅니다', fix: '클러스터 안에서는 빌드·NTP·DNS·syslog·허용 수준을 맞추세요' },
 });
-export const DRIFT_LABEL = Object.freeze({ build: 'ESXi 빌드', ntp: 'NTP 서버', dns: 'DNS 서버', syslog: 'syslog 대상', lockdown: '잠금 모드', acceptance: '허용 수준', sshPolicy: 'SSH 시작 정책' });
+export const DRIFT_LABEL = Object.freeze({ build: 'ESXi 빌드', ntp: 'NTP 서버', dns: 'DNS 서버', syslog: 'syslog 대상', lockdown: '잠금 모드', acceptance: '허용 수준', sshPolicy: 'SSH 시작 정책', sharedLuns: '공유 LUN 수' });
 export const SEV_LABEL = Object.freeze({ crit: '위험', warn: '주의', info: '참고' });
 export const SEV_BADGE = Object.freeze({ crit: 'red', warn: 'amber', info: 'gray' });
 const SEV_ORDER = { crit: 0, warn: 1, info: 2 };
@@ -63,6 +69,9 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mob === true) add('mob-enabled');
   if (h.lockdown === 'disabled') add('lockdown-off');
   if (h.shellTimeout === 0) add('shell-timeout-off');
+  if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
+  if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
+  if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
   return out;
 }
 
@@ -72,6 +81,9 @@ export function findingDetail(f) {
     case 'cert-expired': return `${x.days}일 전 만료`;
     case 'cert-expiring': return `${x.days}일 남음`;
     case 'ntp-none': return x.servers === 0 ? 'NTP 서버 없음' : 'ntpd 중지';
+    case 'mp-dead': return `죽은 경로 ${x.dead}개${x.luns?.length ? ` · ${x.luns.join(', ')}` : ''}`;
+    case 'mp-single': return `${x.count}개 LUN${x.luns?.length ? ` · ${x.luns.join(', ')}` : ''}`;
+    case 'vsan-disk-issue': return `${x.count}건`;
     case 'drift': return `${DRIFT_LABEL[x.field] || x.field}: ${x.value}${x.majority != null ? ` (다수 ${x.majority})` : ' (다수값 없음)'}`;
     default: return '';
   }
@@ -121,6 +133,8 @@ export function hostCfgRows(host, now = Date.now()) {
     { label: '로그인 실패 잠금', value: h.lockFailures == null ? '—' : h.lockFailures === 0 ? '꺼짐' : `${h.lockFailures}회` },
     { label: 'Shell 시간 제한', value: h.shellTimeout == null ? '—' : h.shellTimeout === 0 ? '없음' : `${h.shellTimeout}초` },
     { label: 'MOB', value: yn(h.mob, '켜짐', '꺼짐') },
+    { label: '스토리지 경로', value: h.mp ? `LUN ${h.mp.luns}(공유 ${h.mp.shared}) · 경로 ${h.mp.paths} · 죽은 경로 ${h.mp.dead}` : '—' },
+    { label: 'vSAN', value: !h.vsan ? '—' : h.vsan.enabled === true ? `참여 · 멤버 ${h.vsan.members ?? '—'} · 디스크 문제 ${h.vsan.diskIssues ?? '—'}` : h.vsan.enabled === false ? '참여 안 함' : '—' },
   ];
   const age = Number.isFinite(h.at) ? Math.max(0, Math.round((now - h.at) / 60_000)) : null;
   const note = `${age == null ? '' : age < 60 ? `${age}분 전에 읽은 값` : `${Math.round(age / 60)}시간 전에 읽은 값`} · 수집 서버가 주기적으로 다시 읽습니다${host.connectionState === 'DISCONNECTED' ? ' · 연결이 끊겨 판정하지 않습니다' : ''}.`;

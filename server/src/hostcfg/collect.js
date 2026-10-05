@@ -3,10 +3,15 @@
 // 실패는 격리한다 — 이 갱신이 실패해도 인벤토리 수집은 성공이고, 직전 캐시 값은 그대로(at 으로 낡음이 보인다).
 import { config } from '../config.js';
 import { poolSettled } from '../util/pool.js';
-import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, ADV_OPTIONS, parseHostCfgProps, parseOptionValue, parseCertInfo, applyAdvanced } from './parse.js';
+import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, HOST_VSAN_PATHS, HOST_MP_PATH, ADV_OPTIONS, parseHostCfgProps, parseOptionValue, parseCertInfo, applyAdvanced } from './parse.js';
 import { pickDue, put, prune, setStatus, statusOf } from './cache.js';
 
 export const HOST_CFG_BUDGET_MS = 15_000;
+const OPTIONAL_GROUPS = [
+  { flag: 'noLockdownPath', label: '잠금 모드', paths: [HOST_LOCKDOWN_PATH], chunk: 100 },
+  { flag: 'noVsanPath', label: 'vSAN 런타임', paths: HOST_VSAN_PATHS, chunk: 100 },
+  { flag: 'noMultipathPath', label: '멀티패스', paths: [HOST_MP_PATH], chunk: 10 },
+];
 const CONCURRENCY = 4;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const isPathErr = (m) => /InvalidProperty|InvalidArgument/i.test(m);
@@ -42,13 +47,19 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
   try {
     const objs = await c.retrieveManyObjectProps('HostSystem', due, HOST_CFG_PATHS, 100);
     const props = new Map(objs.map((o) => [o.ref, o.props]));
-    // lockdownMode 는 6.0+ — 5.x vCenter 면 InvalidProperty 이고 그 값만 모른다(요청 전체를 실패로 만들지 않는다).
-    if (!st.noLockdownPath) {
+    // 선택 경로 묶음 — 버전에 따라 없는 경로(InvalidProperty)는 그 묶음만 '모름' 이고 그 vCenter 는 다시 묻지 않는다.
+    //   lockdownMode(6.0+) · vSAN(5.5+) · 멀티패스(응답이 커서 10대씩).
+    for (const g of OPTIONAL_GROUPS) {
+      if (st[g.flag] || Date.now() >= budgetEnd) continue;
       try {
-        for (const o of await c.retrieveManyObjectProps('HostSystem', due, [HOST_LOCKDOWN_PATH], 100)) {
-          const p = props.get(o.ref); if (p) p[HOST_LOCKDOWN_PATH] = o.props[HOST_LOCKDOWN_PATH];
+        for (const o of await c.retrieveManyObjectProps('HostSystem', due, g.paths, g.chunk)) {
+          const p = props.get(o.ref); if (p) for (const k of g.paths) p[k] = o.props[k];
         }
-      } catch (err) { if (isPathErr(String(err?.message || err))) setStatus(vcId, { noLockdownPath: true }); else throw err; }
+      } catch (err) {
+        const m = String(err?.message || err);
+        if (isPathErr(m)) setStatus(vcId, { [g.flag]: true });
+        else console.warn(`[hostcfg] ${vcId} ${g.label} 읽기 실패: ${m.slice(0, 200)}`);
+      }
     }
     const certRefs = [...props.values()].map((p) => p['configManager.certificateManager']).filter((x) => typeof x === 'string' && x);
     const certByRef = new Map();

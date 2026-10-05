@@ -19,6 +19,7 @@
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
+import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
@@ -628,7 +629,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
  * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
  * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
  */
-const INV_NUM_KEYS = ['cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
+const INV_NUM_KEYS = ['vmfsMajor', 'cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
   'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'gpuMemUsedPct', 'gpuMemUsedMB', 'gpuTempC', 'uptimeSec',
   'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
   'snapshotOldestTs', 'snapshotNewestTs', 'orphanDeltaGB', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
@@ -690,6 +691,8 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     if (Object.hasOwn(o, 'dev') && o.dev != null) { const v = sanitizeVmDev(o.dev); if (v == null) dropped.coerced += 1; o.dev = v; }
     // v2.699: 호스트 구성·보안(hostcfg/parse.js) — 아는 필드만.
     if (Object.hasOwn(o, 'hcfg') && o.hcfg != null) { const v = sanitizeHostCfg(o.hcfg); if (v == null) dropped.coerced += 1; o.hcfg = v; }
+    // v2.700(A17): 데이터스토어 운영 속성(dscfg/parse.js) — 아는 필드만.
+    if (Object.hasOwn(o, 'dcfg') && o.dcfg != null) { const v = sanitizeDsCfg(o.dcfg); if (v == null) dropped.coerced += 1; o.dcfg = v; }
     out.push(o);
   }
   return out;

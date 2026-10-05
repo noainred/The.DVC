@@ -186,6 +186,9 @@ function mkHostCfg(h, site) {
     acceptance: i % 29 === 9 ? 'community' : 'partner',
     certNotAfter: Date.now() + ((i + s) % 15 === 0 ? -5 : (i + s) % 15 === 1 ? 20 : 400) * 86_400_000,
     certSubject: `CN=${h.name}.corp.local`,
+    mp: { luns: 14, shared: i % 15 === 7 ? 11 : 12, paths: 48, dead: i % 12 === 5 ? 2 : 0, deadLuns: i % 12 === 5 ? ['naa.6000eb3a1' + i] : [],
+      singlePath: i % 16 === 9 ? 1 : 0, singleLuns: i % 16 === 9 ? ['naa.6000eb3b2' + i] : [], policies: { VMW_PSP_RR: 12, VMW_PSP_FIXED: 2 } },
+    vsan: s % 3 === 0 ? { enabled: true, diskIssues: i % 21 === 3 ? 1 : 0, members: 8 } : { enabled: false, diskIssues: 0, members: 0 },
   };
 }
 
@@ -557,6 +560,17 @@ export function generateSnapshot() {
         usedGB: ds.capacityGB - freeGB,
         usagePct: Math.round(usedFrac * 100),
         accessible: true,
+        // v2.700(A17): VMFS 주 버전 · 운영 속성(dscfg/parse.js 와 같은 모양) — 판정 갈래가 나오게 idx 로 결정적.
+        ...(/vmfs/i.test(ds.type) ? { vmfsMajor: ds.idx % 9 === 4 ? 5 : 6 } : {}),
+        ...(ds.idx % 11 === 10 ? {} : { dcfg: {
+          at: Date.now() - (ds.idx % 5) * 600_000,
+          maintenance: ds.idx % 23 === 6 ? 'inMaintenance' : 'normal',
+          uncommittedGB: Math.round(ds.capacityGB * (ds.idx % 8 === 3 ? 0.9 : 0.15)),
+          sioc: ds.storageType === 'local' ? false : ds.idx % 4 !== 1,
+          vmCount: 8 + (ds.idx * 7) % 45,
+          inSdrs: ds.idx % 6 === 0,
+          mounts: ds.storageType === 'local' ? { total: 1, notAccessible: 0, notMounted: 0 } : { total: 8, notAccessible: ds.idx % 13 === 5 ? 1 : 0, notMounted: 0 },
+        } }),
       });
       if (usedFrac > 0.9) {
         alarms.push(mkAlarm(site.id, ds.name, 'datastore', usedFrac > 0.95 ? 'critical' : 'warning', `Datastore usage at ${Math.round(usedFrac * 100)}%`));

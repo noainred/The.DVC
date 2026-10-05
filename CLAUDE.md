@@ -4861,6 +4861,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 드리프트는 같은 클러스터의 **값을 아는 호스트끼리**만(standalone·한 대짜리 클러스터는 밖) · 다수값이 동률이면 `majority:null` 이고 양쪽을 다 표시한다.
     · 끊긴 호스트·미수집 호스트는 판정하지 않고 `coverage` 로 센다. 수집 상태(`status` — vCenter 오류 원문)는 전체 범위 관리자에게만.
     · 정직 기록: vLCM 이미지 준수(REST)는 넣지 않았다 · 실장비 응답(QueryOptions 값 타입·certificateInfo·lockdownMode)은 합성으로만 확인했다.
+  - ⚠⚠ **v2.700 — 데이터스토어·경로 점검(A2·A17·A19). 멀티패스·vSAN 은 호스트 캐시의 '선택 경로 묶음', DS 운영 속성은 DS 전용 캐시(`dscfg/`)**
+    (`dscfg/{parse,collect,analyze}.js` + `hostcfg/parse.js parseMultipath·parseVsan` + `routes/api/storagePaths.js` + 웹 `views/tools/StoragePathsTool.jsx`·`views/dscfg/dsCfgText.js`.
+    회귀 `server/test/dsCfg2700.test.js` + 웹 `dsCfgText.test.js` — 변이 7/7):
+    · `hostcfg/collect.js OPTIONAL_GROUPS` — 잠금 모드·vSAN·멀티패스를 각각 따로 요청하고 InvalidProperty 면 **그 묶음만** 다시 묻지 않는다(`no*Path`). 새 버전 의존 경로는 여기에 묶음으로 더할 것.
+    · ⚠ **멀티패스는 `<path>` 블록만 훑는다** — LU 블록 안에 `<lun>` 태그가 중첩돼 LU 로 자르면 틀린다. 단일 경로 판정은 **공유 LUN(FC·iSCSI·FCoE 전송)만**(로컬 디스크·CD-ROM 은 정상).
+    · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
+    · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
+    · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).

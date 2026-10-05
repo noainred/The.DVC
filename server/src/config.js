@@ -119,6 +119,10 @@ export const config = {
   hostCfgScan: process.env.HOST_CFG_SCAN !== 'false',
   hostCfgRefreshMs: clampIntervalMs(numEnv(process.env.HOST_CFG_REFRESH_MS, 21_600_000), 21_600_000, 300_000),
   hostCfgPerCycle: Math.max(1, Math.min(500, Math.trunc(numEnv(process.env.HOST_CFG_PER_CYCLE, 40)) || 40)),
+  // v2.700(A17): 데이터스토어 운영 속성(유지보수 모드·오버할당·SIOC·VM 수·호스트 마운트·SDRS). 30분 주기 · 주기당 상한.
+  dsCfgScan: process.env.DS_CFG_SCAN !== 'false',
+  dsCfgRefreshMs: clampIntervalMs(numEnv(process.env.DS_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
+  dsCfgPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.DS_CFG_PER_CYCLE, 500)) || 500)),
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
   // 외부 공개용 소개 페이지(정적 데모 — 포탈 데이터/인증과 무관). server/src 안에 두어

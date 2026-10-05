@@ -63,7 +63,7 @@ export const MENUS = Object.freeze([
     { name: '점검 · 분석', items: ['net-check', 'net-traffic', 'net-issues'] },
     { name: '중계 (HAProxy)', items: ['relaytopo', 'relaycheck'] }] },
   { id: 'storage', code: 'STORAGE', label: '스토리지', desc: '데이터스토어·스토리지 어레이·SAN — 용량과 증가 추이', groups: [
-    { name: '인벤토리', items: ['datastores', 'dsusage', 'storage-mon', 'san-switch', 'bm-storage'] },
+    { name: '인벤토리', items: ['datastores', 'dsusage', 'storage-paths', 'storage-mon', 'san-switch', 'bm-storage'] },
     { name: '추이 · 보고', items: ['storage-track', 'storage-growth', 'dir-usage'] }] },
   { id: 'protect', code: 'PROTECTION · COMPLIANCE', label: '보호/규정', desc: '백업 공백·스냅샷·인증서·버전 준수', groups: [
     { name: '백업 · 복제', items: ['unprotected-vms', 'vmware-backup'] },
