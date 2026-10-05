@@ -48,7 +48,7 @@ export const MENUS = Object.freeze([
     { name: '분석 · 검색', items: ['insights-hub', 'insights', 'aisearch', 'deepsearch'] }] },
   { id: 'asset', code: 'ASSETS', label: '자산', desc: '장비·소프트웨어·라이선스 인벤토리 — 무엇을 얼마나 갖고 있나', groups: [
     { name: '인벤토리', items: ['explore', 'hardware', 'serial-lookup', 'vm-export', 'topo3d'] },
-    { name: '라이선스', items: ['licenses', 'license-expiry'] },
+    { name: '라이선스', items: ['licenses', 'license-expiry', 'core-license'] },
     { name: '버전 · 솔루션', items: ['vcversion', 'solutions'] }] },
   { id: 'opt', code: 'OPTIMIZATION', label: '인프라 최적화', desc: '회수·적정화·예측 — 남는 자원을 찾고 부족해지기 전에 안다', groups: [
     { name: '회수', items: ['waste', 'zombie-vms', 'thinvms', 'orphanvmdk', 'guest-disk'] },
@@ -57,7 +57,7 @@ export const MENUS = Object.freeze([
   { id: 'server', code: 'SERVERS', label: '서버', desc: '물리 서버 · 가상화 호스트 · 가상화 서버(VM)를 나눠서 본다', groups: [
     { seg: 'phys', name: '물리 서버', items: ['fleet', 'serveranalysis', 'idrac-trend', 'bm-usage', 'corp-usage', 'power-total', 'gpu', 'esxitemp', 'roomtemp', 'pdu', 'powermap', 'nic-speed', 'nic-models'] },
     { seg: 'host', name: '가상화 호스트', items: ['hosts', 'esxi', 'host-hygiene', 'cluster-check', 'hba'] },
-    { seg: 'vm', name: '가상화 서버', items: ['vms', 'vmfinder', 'guestos', 'real-os', 'vmtools', 'curuser', 'vm-track', 'vm-changes'] }] },
+    { seg: 'vm', name: '가상화 서버', items: ['vms', 'vmfinder', 'guestos', 'real-os', 'vmtools', 'curuser', 'vm-track', 'vm-changes', 'vm-tags'] }] },
   { id: 'net', code: 'NETWORK', label: '네트워크', desc: '포트그룹·IP·NSX·스위치 — 인벤토리와 경로 점검', groups: [
     { name: '인벤토리', items: ['networks', 'ipam', 'vm-dns', 'nsx', 'cvp', 'dupip'] },
     { name: '점검 · 분석', items: ['net-check', 'net-traffic', 'net-issues'] },

@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T14:01:23.417Z",
-  "count": 100,
+  "generatedAt": "2026-10-05T14:32:47.639Z",
+  "count": 102,
   "tools": [
     {
       "k": "service-hub",
@@ -548,6 +548,22 @@
     },
     {
       "k": "host-hygiene",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "core-license",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-tags",
       "adminOnly": false,
       "perm": null,
       "external": null,

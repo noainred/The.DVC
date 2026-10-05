@@ -62,6 +62,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   insights: 'insights',
   ipam: 'ipam',
   'license-expiry': 'license-expiry',
+  'core-license': 'core-license',
+  'vm-tags': 'vm-tags',
   licenses: 'licenses',
   'network-check': 'net-check',
   // v2.506 추가 — 전용 엔드포인트를 가진(= 다른 도구와 공유하지 않는) 도구들. 공유 엔드포인트를

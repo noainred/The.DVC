@@ -223,6 +223,43 @@ function mkClusterCfg(env) {
   });
 }
 
+// v2.703(A15): 태그·사용자 지정 속성(tags/parse.js 의 tagInv 모양) — 누락이 고루 나오게 VM 순번으로 결정적 분포.
+function mkTagInv(env, site) {
+  const cats = [
+    { id: 'urn:cat:env', name: 'Environment', cardinality: 'SINGLE', types: ['VirtualMachine'] },
+    { id: 'urn:cat:team', name: 'Owner-Team', cardinality: 'SINGLE', types: ['VirtualMachine'] },
+    { id: 'urn:cat:corp', name: 'Corp', cardinality: 'SINGLE', types: ['VirtualMachine', 'HostSystem'] },
+    { id: 'urn:cat:backup', name: 'Backup', cardinality: 'MULTIPLE', types: ['VirtualMachine'] },
+  ];
+  const corpTag = site.name.replace(/^vcenter-/, '').toUpperCase();
+  const tags = [
+    { id: 'urn:tag:prod', name: 'Prod', cat: 0 }, { id: 'urn:tag:dev', name: 'Dev', cat: 0 }, { id: 'urn:tag:test', name: 'Test', cat: 0 },
+    { id: 'urn:tag:team-a', name: 'Platform', cat: 1 }, { id: 'urn:tag:team-b', name: 'App', cat: 1 },
+    { id: `urn:tag:corp-${site.id}`, name: corpTag, cat: 2 }, { id: 'urn:tag:corp-hq', name: 'HQ', cat: 2 },
+    { id: 'urn:tag:gold', name: 'Gold', cat: 3 }, { id: 'urn:tag:silver', name: 'Silver', cat: 3 },
+  ];
+  const vmTags = {}; const vmCustom = {};
+  for (const vm of env.vms) {
+    const i = vm.idx; const t = [];
+    if (i % 11 !== 0) t.push(i % 3);                 // Environment 누락 1/11
+    if (i % 7 !== 0) t.push(3 + (i % 2));            // Owner-Team 누락 1/7
+    if (i % 13 !== 0) t.push(i % 17 === 0 ? 6 : 5);  // Corp 누락 1/13 · 일부는 HQ
+    if (i % 2 === 0) t.push(7); if (i % 5 === 0) t.push(8);
+    if (t.length) vmTags[vm.name] = t;
+    const cv = {};
+    if (i % 4 !== 0) cv['101'] = ['kim', 'lee', 'park'][i % 3];
+    if (i % 6 !== 0) cv['102'] = `CC-${1000 + (i % 9)}`;
+    if (Object.keys(cv).length) vmCustom[vm.name] = cv;
+  }
+  const at = Date.now() - 3_600_000;
+  return {
+    at, tagsAt: at, customAt: at, tagsError: null, customError: null, tagsUnsupported: false,
+    categories: cats, tags, vmTags, hostTags: {},
+    fields: [{ key: 101, name: 'Owner', type: 'string', mo: 'VirtualMachine' }, { key: 102, name: 'CostCenter', type: 'string', mo: 'VirtualMachine' }, { key: 103, name: 'Retire-Date', type: 'string', mo: 'VirtualMachine' }],
+    vmCustom, truncated: { tags: 0, custom: 0 },
+  };
+}
+
 // v2.697(B10): VM 구성 속성(vmcfg/parse.js parseVmCfgProps 와 같은 모양) — 판정 갈래가 고루 나오게 idx 로 결정적 분포.
 function mkVmCfg(vm, powered) {
   const i = vm.idx;
@@ -284,10 +321,11 @@ function mkVmGpu(hostState, idx, ord = null) {
 function mkLicenses(site) {
   const n = site.hosts;
   return [
-    { name: 'vSphere 8 Enterprise Plus', total: n + 8, used: n, key: 'XXXXX-…-AAAAA', edition: 'esxEnterprisePlus', product: 'VMware ESX Server', productVersion: '8.0', expires: '2026-12-31' },
+    { name: 'vSphere 8 Enterprise Plus', total: n + 8, used: n, key: 'XXXXX-…-AAAAA', edition: 'esxEnterprisePlus', costUnit: 'cpuPackage', product: 'VMware ESX Server', productVersion: '8.0', expires: '2026-12-31' },
+    { name: 'VMware vSphere Foundation (cores)', total: n * 40, used: n * 34, key: 'VVVVV-…-EEEEE', edition: 'vvf', costUnit: 'core', product: 'VMware ESX Server', productVersion: '8.0', expires: '2027-03-31' },
     { name: 'vCenter Server 8 Standard', total: 1, used: 1, key: 'YYYYY-…-BBBBB', edition: 'vcExpress', product: 'VMware VirtualCenter Server', productVersion: '8.0', expires: '2026-12-31' },
     { name: 'NSX Data Center Advanced', total: n + 4, used: n, key: 'ZZZZZ-…-CCCCC', edition: 'nsx', product: 'NSX', productVersion: '4.1', expires: site.region === '중국' ? '2025-09-30' : '2027-06-30' },
-    { name: 'vSAN Enterprise', total: n, used: Math.round(n * 0.6), key: 'WWWWW-…-DDDDD', edition: 'vsanEnterprise', product: 'vSAN', productVersion: '8.0', expires: '2026-12-31' },
+    { name: 'vSAN Enterprise', total: n, used: Math.round(n * 0.6), key: 'WWWWW-…-DDDDD', edition: 'vsanEnterprise', costUnit: 'cpuPackage', product: 'vSAN', productVersion: '8.0', expires: '2026-12-31' },
   ];
 }
 function mkSolutions(site) {
@@ -429,6 +467,7 @@ export function generateSnapshot() {
       solutions: mkSolutions(site),
       licenses: mkLicenses(site),
       clusterCfg: mkClusterCfg(env),
+      tagInv: mkTagInv(env, site),
     });
 
     if (!vcReachable) {
@@ -471,6 +510,7 @@ export function generateSnapshot() {
         connectionState,
         powerState,
         cpuCores: h.cpuCores,
+        cpuSockets: h.cpuCores >= 24 ? 2 : 1,
         cpuTotalMhz,
         cpuUsageMhz,
         cpuUsagePct: Math.round((cpuUsageMhz / cpuTotalMhz) * 100),

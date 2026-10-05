@@ -51,6 +51,8 @@ import { registerHostHygiene } from './api/hostHygiene.js'; // ESXi 호스트 �
 import { registerStoragePaths } from './api/storagePaths.js'; // 데이터스토어·경로 점검(v2.700)
 import { registerClusterCheck } from './api/clusterCheck.js'; // 클러스터 HA·DRS 점검(v2.701)
 import { registerVmChanges } from './api/vmChanges.js'; // VM 이동·구성 변경 이력(v2.702)
+import { registerCoreLicense } from './api/coreLicense.js'; // 코어 라이선스 산정(v2.703)
+import { registerVmTags } from './api/vmTags.js'; // 태그·사용자 지정 속성 점검(v2.703)
 import { registerVmDns } from './api/vmDns.js'; // VM DNS 설정 확인(VM 이 쓰는 DNS 서버 · 정책 · 도달성 · 변경 이력, v2.696)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
@@ -134,4 +136,6 @@ registerHostHygiene(api);
 registerStoragePaths(api);
 registerClusterCheck(api);
 registerVmChanges(api);
+registerCoreLicense(api);
+registerVmTags(api);
 registerVmDns(api);

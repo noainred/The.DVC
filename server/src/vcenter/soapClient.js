@@ -28,6 +28,7 @@ import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11�
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
+import { refreshTagInv } from '../tags/collect.js';   // v2.703(A15)
 import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
@@ -233,6 +234,7 @@ export class VimSoapClient {
       perfManager: pick('perfManager'),
       extensionManager: pick('extensionManager'),
       licenseManager: pick('licenseManager'),
+      customFieldsManager: pick('customFieldsManager'),   // v2.703(A15): 사용자 지정 속성 정의
       guestOperationsManager: pick('guestOperationsManager'),
       eventManager: pick('eventManager'),
       version: aboutPick('version') || pick('version'),
@@ -593,12 +595,13 @@ export class VimSoapClient {
       const used = Number(/<used>(-?\d+)<\/used>/.exec(blk)?.[1] || 0);
       const key = /<licenseKey>([^<]*)<\/licenseKey>/.exec(blk)?.[1] || '';
       const edition = /<editionKey>([^<]*)<\/editionKey>/.exec(blk)?.[1] || '';
+      const costUnit = /<costUnit>([^<]{0,32})<\/costUnit>/.exec(blk)?.[1] || '';   // v2.703(A13): core · cpuPackage · server …
       const props = {};
       for (const pm of blk.matchAll(/<properties>\s*<key>([^<]+)<\/key>\s*<value[^>]*>([^<]*)<\/value>/g)) props[pm[1]] = pm[2];
       out.push({
         name, total, used,
         key: key ? `${key.slice(0, 5)}-…-${key.slice(-5)}` : '',
-        edition,
+        edition, costUnit,
         product: props.ProductName || '',
         productVersion: props.ProductVersion || '',
         expires: props.expirationDate || props.ExpirationDate || '',
@@ -1548,7 +1551,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         // v2.556: cpuModel 추가(사용자 요청 — 호스트 상세에 CPU 모델명). 같은 retrieveProperties
         // 에 필드 하나를 더하는 것이라 **SOAP 왕복은 늘지 않는다**(문자열 1개/호스트).
-        'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.cpuModel', 'summary.hardware.memorySize',
+        'summary.hardware.numCpuCores', 'summary.hardware.numCpuPkgs', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.cpuModel', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'config.pciPassthruInfo', 'hardware.pciDevice',
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
@@ -1617,6 +1620,8 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         memUsageMB,
         memUsagePct: pct(memUsageMB, memTotalMB),
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
+        // v2.703(A13): 소켓 수 — 코어 라이선스(소켓당 최소 16코어) 산정. 못 읽으면 null(1 소켓으로 지어내지 않는다).
+        cpuSockets: Number(p['summary.hardware.numCpuPkgs']) > 0 ? Number(p['summary.hardware.numCpuPkgs']) : null,
         // CPU 모델명(예: 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'). 못 받으면 빈 문자열 —
         // 화면이 '—' 로 표시한다(모델명을 코어 수나 클럭으로 추측해 지어내지 않는다).
         cpuModel: String(p['summary.hardware.cpuModel'] || '').trim(),
@@ -1910,6 +1915,9 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     const clusterRefs = objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => x.ref);
     try { await refreshClusterCfg(c, vc.id, clusterRefs); } catch (err) { console.warn(`[collect] ${vc.id} 클러스터 HA·DRS 갱신 건너뜀: ${err.message}`); }
     const clusterCfg = clusterRefs.map((r) => getClusterCfg(vc.id, r)).filter(Boolean);
+    // v2.703(A15): 태그·사용자 지정 속성 — tagRefreshMs 마다 한 번(그 사이에는 캐시). 실패는 tagInv 의 오류로만 남는다.
+    let tagInv = null;
+    try { tagInv = await refreshTagInv(c, vc, objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref), { signal }); } catch (err) { console.warn(`[collect] ${vc.id} 태그 갱신 건너뜀: ${err.message}`); }
 
     const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
     const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : [];
@@ -1920,7 +1928,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         id: vc.id, name: vc.name, location: vc.location,
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
         build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
-        solutions, licenses, clusterCfg,
+        solutions, licenses, clusterCfg, tagInv,
       },
       hosts, vms, datastores, networks, alarms,
     };

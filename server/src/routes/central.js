@@ -21,6 +21,7 @@ import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B1
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
+import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
@@ -630,7 +631,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
  * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
  * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
  */
-const INV_NUM_KEYS = ['vmfsMajor', 'cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
+const INV_NUM_KEYS = ['vmfsMajor', 'cpuCores', 'cpuSockets', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
   'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'gpuMemUsedPct', 'gpuMemUsedMB', 'gpuTempC', 'uptimeSec',
   'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
   'snapshotOldestTs', 'snapshotNewestTs', 'orphanDeltaGB', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
@@ -779,6 +780,12 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     const cc = sanitizeClusterCfgList(vcenter.clusterCfg);
     if (cc.dropped) dropped.coerced += cc.dropped;
     vcenter.clusterCfg = cc.value;
+  }
+  // v2.703(A15): 태그·사용자 지정 속성 — 아는 필드만·상한·VM 참조 형식(예약어 거부). 객체가 아니면 null(미수집).
+  if (Object.hasOwn(vcenter, 'tagInv')) {
+    const ti = sanitizeTagInv(vcenter.tagInv);
+    if (ti.dropped) dropped.coerced += ti.dropped;
+    vcenter.tagInv = ti.value;
   }
   const slice = {
     vcenter,
