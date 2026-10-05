@@ -28,6 +28,7 @@ import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11�
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
+import { inventoryViaUpdates, updateSessionStatus } from './updateSession.js';   // v2.705(B1)
 import { refreshTagInv } from '../tags/collect.js';   // v2.703(A15)
 import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
@@ -1574,11 +1575,11 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
   const c = new VimSoapClient(vc, { signal });
   await c.login();
   try {
-    const view = await c.createContainerView([
+    const INV_TYPES = [
       'HostSystem', 'VirtualMachine', 'Datastore', 'ClusterComputeResource',
       'Network', 'DistributedVirtualPortgroup', 'Folder', 'ResourcePool',
-    ]);
-    const objs = await c.retrieveProperties(view, [
+    ];
+    const INV_SPECS = [
       { type: 'Folder', paths: ['name', 'parent'] },
       { type: 'ClusterComputeResource', paths: ['name'] },
       { type: 'HostSystem', paths: [
@@ -1604,7 +1605,21 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible', 'info'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
-    ]);
+    ];
+    // v2.705(B1): VC_WAIT_UPDATES=true 면 오래 사는 별도 세션의 PropertyCollector 필터로 '바뀐 것만' 받는다(기본 꺼짐).
+    //   실패하면 그 주기는 예전 전체 조회로 받는다 — 증분 경로가 수집을 막지 않는다. 어느 쪽으로 받았는지 invFetch 로 밝힌다.
+    let objs = null;
+    let invFetch = { mode: 'full' };
+    if (config.vcWaitUpdates) {
+      try {
+        objs = await inventoryViaUpdates(vc, INV_TYPES, INV_SPECS, { makeClient: (v) => new VimSoapClient(v), signal });
+        invFetch = { mode: 'updates', ...(updateSessionStatus().sessions[vc.id]?.stats || {}) };
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        invFetch = { mode: 'full', updatesError: String(err?.message || err).slice(0, 200) };
+      }
+    }
+    if (!objs) objs = await c.retrieveProperties(await c.createContainerView(INV_TYPES), INV_SPECS);
 
     const clusterName = new Map();
     for (const o of objs) if (o.type === 'ClusterComputeResource') clusterName.set(o.ref, o.props.name);
@@ -1962,7 +1977,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         id: vc.id, name: vc.name, location: vc.location,
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
         build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
-        solutions, licenses, clusterCfg, tagInv,
+        solutions, licenses, clusterCfg, tagInv, invFetch,
       },
       hosts, vms, datastores, networks, alarms,
     };

@@ -126,6 +126,9 @@ export const config = {
   // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 클러스터는 수가 적고 구성은 드물게 바뀐다(기본 30분 · 주기당 50개 · 응답이 커서 5개씩).
   clusterCfgScan: process.env.CLUSTER_CFG_SCAN !== 'false',
   clusterCfgRefreshMs: clampIntervalMs(numEnv(process.env.CLUSTER_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
+  // v2.705(B1): 인벤토리 속성을 WaitForUpdatesEx 로 '바뀐 것만' 받는다 — 기본 꺼짐. 켜면 vCenter 마다 오래 사는 세션이 하나 더 열린다.
+  vcWaitUpdates: process.env.VC_WAIT_UPDATES === 'true',
+  vcWaitUpdatesFullMs: clampIntervalMs(numEnv(process.env.VC_WAIT_UPDATES_FULL_MS, 21_600_000), 21_600_000, 600_000),
   // v2.704(B2): 속성 조회 페이지(RetrievePropertiesEx maxObjects). 끄면 예전 RetrieveProperties 한 번.
   vcPropsPaging: process.env.VC_PROPS_PAGING !== 'false',
   vcPropsPageSize: Math.max(100, Math.min(10_000, Math.trunc(numEnv(process.env.VC_PROPS_PAGE_SIZE, 1000)) || 1000)),
