@@ -31,7 +31,19 @@ const MOCK_TYPES = [
   ['HostConnectionLostEvent', 'error', (u, e) => `Lost connection to host ${e}`],
   ['DatastoreCapacityIncreasedEvent', 'info', (u, e) => `Datastore ${e} capacity changed`],
   ['VmReconfiguredEvent', 'info', (u, e) => `Reconfigured ${e}`],
+  ['DrsVmMigratedEvent', 'info', (u, e) => `DRS migrated ${e}`],          // v2.702(A7)
+  ['PermissionAddedEvent', 'info', (u, e) => `Permission created for ${e}`], // v2.702(A8)
 ];
+// v2.702(A7·A8): 합성 이벤트의 상세 — 실수집(vmchanges/eventDetail.js)과 같은 모양.
+const VM_EVENT = new Set(['VmPoweredOnEvent', 'VmPoweredOffEvent', 'VmMigratedEvent', 'VmReconfiguredEvent', 'DrsVmMigratedEvent']);
+function synthDetail(type, i, hosts) {
+  const h = (k) => hosts.length ? hosts[(i + k) % hosts.length].name : null;
+  if (type === 'VmMigratedEvent') return i % 3 === 0 ? { from: h(0), to: h(0), fromDs: `ds-${i % 4}`, toDs: `ds-${(i + 1) % 4}`, kind: 'svmotion' } : { from: h(0), to: h(1), fromDs: 'ds-0', toDs: 'ds-0', kind: 'vmotion' };
+  if (type === 'DrsVmMigratedEvent') return { from: h(1), to: h(2), fromDs: 'ds-0', toDs: 'ds-0', kind: 'drs' };
+  if (type === 'VmReconfiguredEvent') return i % 2 ? { modified: `config.hardware.numCPU: 2 -> 4; config.hardware.memoryMB: 8192 -> 16384`, fields: ['numCPUs', 'memoryMB'], numCpu: 4, memoryMB: 16384 } : { added: 'config.hardware.device(2001): (key = 2001, deviceInfo = (label = "Hard disk 2"))', fields: ['deviceChange'], devices: ['add VirtualDisk'] };
+  if (type === 'PermissionAddedEvent') return { principal: `CORP\\ops${i % 3}`, role: i % 2 ? 'Admin' : 'ReadOnly', group: null, propagate: true };
+  return null;
+}
 // mock: sinceTs~now 사이에 분산된 합성 이벤트 N개.
 function synthEvents(vcId, sinceTs, n) {
   const snap = store.get();
@@ -44,9 +56,11 @@ function synthEvents(vcId, sinceTs, n) {
   const out = [];
   for (let i = 0; i < n; i++) {
     const [type, sev, msg] = MOCK_TYPES[(i + vcId.length) % MOCK_TYPES.length];
-    const entity = names[(i * 7 + vcId.length) % names.length];
+    // VM 이벤트는 VM 이름으로(이동·구성 변경 화면이 VM 으로 묶는다) — 같은 VM 이 여러 번 옮겨 다니게 앞쪽 VM 에 몰아 준다.
+    const entity = VM_EVENT.has(type) && vms.length ? vms[(i * 3 + vcId.length) % Math.min(vms.length, 12)].name : names[(i * 7 + vcId.length) % names.length];
     const ts = sinceTs + Math.floor(((i + 1) / (n + 1)) * span);
-    out.push({ key: `mock-${vcId}-${ts}-${i}`, ts, type, severity: sev, user: 'administrator@vsphere.local', entity, message: msg('administrator@vsphere.local', entity) });
+    const d = synthDetail(type, i, hosts);
+    out.push({ key: `mock-${vcId}-${ts}-${i}`, ts, type, severity: sev, user: 'administrator@vsphere.local', entity, message: msg('administrator@vsphere.local', entity), detail: d ? JSON.stringify(d) : null });
   }
   return out;
 }
@@ -100,7 +114,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
           : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll, signal }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
-          .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message }));
+          .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message, detail: e.detail ?? null }));
         if (rows.length) perVc.push(rows);
       } catch (e) { console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`); }
     });

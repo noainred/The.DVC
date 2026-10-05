@@ -28,6 +28,7 @@ import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11�
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
+import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -1513,6 +1514,8 @@ export function parseEventsXml(xml) {
       user: xmlUnescape(userName),
       entity: xmlUnescape(entity),
       message: xmlUnescape(message.slice(0, 1000)),
+      // v2.702(A7·A8): 이동·구성 변경·권한 이벤트만 상세(출발/도착 호스트·DS, 변경 원문, 주체·역할) — 그 밖은 null.
+      detail: detailJson(eventDetail(type, body)),
     });
   }
   return out;

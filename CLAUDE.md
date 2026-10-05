@@ -4869,6 +4869,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.702 — VM 이동·구성 변경 이력(A7·A8). 원천은 logs DB 의 vCenter 이벤트이고 상세는 수집 시점에 `detail` 열로 싣는다**
+    (`vmchanges/{eventDetail,analyze}.js` + `logs/db.js trackedEvents` + `routes/api/vmChanges.js` + 웹 `views/tools/VmChangesTool.jsx`·`vmchanges/vmChangesText.js` +
+    `EntityDetail.jsx VmChangesSection`. 회귀 `server/test/vmChanges2702.test.js`(변이 7/7) + 웹 `vmChangesText.test.js`):
+    · 상세는 이동·구성 변경·권한/역할 이벤트에만 싣는다(`TRACKED_TYPES` — 모든 이벤트에 붙이면 장기 보관 DB 가 커진다). 4KB 상한, 잘린 JSON 은 저장하지 않는다.
+    · ⚠⚠ **vSphere 이벤트 인자는 같은 태그가 중첩된다** — `<host><host type="HostSystem">host-2</host><name>esx-b</name></host>`. 첫 닫는 태그에서 끊으면 이름을
+      놓쳐 '도착 호스트 모름' 이 된다(자체 테스트가 잡았다). `eventDetail.js inner` 는 깊이를 센다. 장치 xsi:type 에는 숫자가 들어간다(`VirtualE1000`).
+    · ⚠ 조회는 `INDEXED BY idx_events_tracked`(부분 인덱스) — 통계가 없으면 플래너가 `(vcenterId,ts)` 인덱스로 기간의 **모든 이벤트**를 훑었다(EXPLAIN 실측 — 테스트가 계획을 고정).
+      옛 DB 는 `detail` 열을 table_info 로 확인해 더한다(v2.603 규칙). 2.702 이전 이벤트는 상세가 null 이고 화면이 개수로 밝힌다.
+    · VM 은 이벤트 엔티티 **이름**으로 묶는다(동명 VM 구분 불가 — 화면이 말한다). 과다 이동 기준 = 7일에 10회를 기간에 비례(`churnThreshold`, 최소 3).
+    · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`).
+    · VM 상세는 `/tools/vm-changes/of`(30일·20건, 범위 밖 VM 404) — 모달은 `white-space: nowrap` 을 물려받으므로 이력 줄에 `whiteSpace:'normal'` + 그리드 트랙 `minmax(0,1fr)` 이 필요하다
+      (Chromium 판독에서 오른쪽이 잘려 발견 — 같은 원인으로 구성 점검·클러스터 칸의 각주도 잘리고 있어 함께 고쳤다).
+    · ⚠ 정직 기록: 실장비 이벤트 본문(configChanges·PermissionAddedEvent)은 합성 입력으로만 확인했다.
   - ⚠⚠ **v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg 로 싣는다**
     (`clustercfg/{parse,collect,analyze}.js` + `hostcfg/parse.js parseNetwork` + `routes/api/clusterCheck.js` + 웹 `views/tools/ClusterCheckTool.jsx`·`views/clustercfg/clusterCfgText.js` +
     `EntityDetail.jsx ClusterCfgSection`. 회귀 `server/test/clusterCfg2701.test.js` + 웹 `clusterCfgText.test.js`·`hostCfgText.test.js` — 변이 12종 중 11종, 남은 1종은 동등 변이):

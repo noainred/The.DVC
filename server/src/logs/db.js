@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
+import { TRACKED_TYPES, TRACKED_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
 import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
@@ -71,7 +72,14 @@ function initSqlite() {
         WHERE type IN ('VmPoweredOffEvent','VmPoweredOnEvent');
     `);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
-    const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message) VALUES (?,?,?,?,?,?,?,?)');
+    // v2.702(A7·A8): 이동·구성 변경·권한 이벤트의 상세(JSON) 열. 옛 DB 에는 없다 — table_info 로 없을 때만 더하고
+    //   'duplicate column name' 만 삼킨다(v2.603 DB2603-01 — 잠금을 '열 있음' 으로 삼키면 프로세스 끝까지 폴백한다).
+    if (!db.prepare('PRAGMA table_info(events)').all().some((c) => c.name === 'detail')) {
+      try { db.exec('ALTER TABLE events ADD COLUMN detail TEXT'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message))) throw e; }
+    }
+    // 추적 종류만 담는 부분 인덱스(전원 인덱스와 같은 판단 — 전체 이벤트를 인덱싱하지 않는다). 조회는 같은 리터럴을 써야 탄다.
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_tracked ON events (vcenterId, type, ts) WHERE type IN ${TRACKED_SQL}`);
+    const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message,detail) VALUES (?,?,?,?,?,?,?,?,?)');
     const lastTsStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=?');
     // v2.601(감사 DB2601-03 — 재현): 예전 `DELETE FROM events WHERE ts < ?` 한 방은 183만 행에서 이벤트 루프를 4.8초 멈췄다
     // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
@@ -113,9 +121,22 @@ function initSqlite() {
     }
     return {
       kind: 'sqlite',
-      insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
+      insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
       lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
+      /**
+       * v2.702(A7·A8): 이동·구성 변경·권한 이벤트 — 부분 인덱스(idx_events_tracked)를 타도록 같은 IN 리터럴을 쓴다.
+       * f: { vcenterIds:[]|null, since, entity?, types?:[] } · 반환은 최신 먼저, 상한 limit(+1 행으로 잘림 판정).
+       */
+      trackedEvents: (f = {}, limit = 5000) => {
+        const w = [`type IN ${TRACKED_SQL}`]; const p = [];
+        if (Array.isArray(f.vcenterIds)) { if (!f.vcenterIds.length) return []; w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
+        if (Array.isArray(f.types) && f.types.length) { const ts = f.types.filter((t) => TRACKED_TYPES.includes(t)); if (!ts.length) return []; w.push(`type IN (${ts.map(() => '?').join(',')})`); p.push(...ts); }
+        if (Number.isFinite(f.since)) { w.push('ts>=?'); p.push(f.since); }
+        if (typeof f.entity === 'string' && f.entity) { w.push('entity=?'); p.push(f.entity); }
+        // INDEXED BY: 통계가 없으면 플래너가 (vcenterId,ts) 인덱스로 그 기간의 모든 이벤트를 훑는다(실측 — 테스트가 계획을 고정).
+        return db.prepare(`SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked WHERE ${w.join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...p, clampPage(limit, 0)[0]);
+      },
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
@@ -217,10 +238,16 @@ function initJson() {
     kind: 'json',
     insertMany: (recs) => {
       const fresh = [];
-      for (const r of recs) { const k = r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`; const id = `${r.vcenterId}|${k}`; if (seen.has(id)) continue; seen.add(id); const row = { vcenterId: r.vcenterId, k, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message }; rows.push(row); seqOf.set(row, ++seq); fresh.push(row); }
+      for (const r of recs) { const k = r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`; const id = `${r.vcenterId}|${k}`; if (seen.has(id)) continue; seen.add(id); const row = { vcenterId: r.vcenterId, k, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: typeof r.detail === 'string' ? r.detail : null }; rows.push(row); seqOf.set(row, ++seq); fresh.push(row); }
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
+    trackedEvents: (f = {}, limit = 5000) => rows.filter((r) => TRACKED_TYPES.includes(r.type)
+        && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId))
+        && (!Array.isArray(f.types) || !f.types.length || f.types.includes(r.type))
+        && (!Number.isFinite(f.since) || r.ts >= f.since) && (!f.entity || r.entity === f.entity))
+      .sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0])
+      .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
