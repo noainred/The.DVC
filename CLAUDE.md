@@ -4869,6 +4869,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.704 — vCenter 속성 조회는 페이지로 받는다(B2 — RetrievePropertiesEx). 파서는 한 벌이다**
+    (`vcenter/soapClient.js #retrieveSpec` + `soapParse.js retrieveResultToObjectXml` + config `VC_PROPS_PAGING`·`VC_PROPS_PAGE_SIZE`·`VC_PROPS_MAX_PAGES`.
+    회귀 `server/test/retrievePaging2704.test.js` — 변이 7/7):
+    · `retrieveProperties`·`retrieveManyObjectProps` 가 Ex + Continue 로 받는다. 응답의 `<objects>` 를 `<returnval>` 로 바꿔 **기존 `parseObjectContent` 를 그대로** 쓴다
+      (파서를 두 벌 두면 자기닫힘 같은 수정이 한쪽에만 들어간다). 토큰은 **첫 objects 앞**에서만 읽는다(속성 값 안의 `<token>` 원소를 토큰으로 읽지 않는다 — 테스트 고정).
+    · 실패하면 `CancelRetrievePropertiesEx`(외부 신호 무시 — 정리 호출) · `MethodNotFound` 면 그 클라이언트 동안 예전 방식 · 다른 오류(NoPermission 등)는 폴백하지 않는다 ·
+      페이지 상한을 넘으면 오류 + 취소. objects 없이 returnval 에 바로 obj 가 오는 응답(옛 모양)도 읽는다(버리면 인벤토리가 통째로 빈다).
+    · ⚠ 가짜 vCenter 테스트를 쓸 때 연산 이름 `RetrievePropertiesEx` 를 함께 처리할 것 — `audit2598d` 가 정확히 `RetrieveProperties` 에서만 매달려 실패했다.
+    · `retrieveObjectProps`(단일 객체)는 바꾸지 않았다. ⚠ 정직 기록: 실장비 vCenter 로 확인하지 못했다(가짜 서버).
   - ⚠⚠ **v2.703 — 코어 라이선스 산정(A13) + 태그·사용자 지정 속성 점검(A15). 규칙을 모르면 산정하지 않고, 못 읽은 vCenter 는 '확인 안 됨' 이다**
     (`corelicense/analyze.js` + `routes/api/coreLicense.js` + `tags/{parse,collect,policy,analyze}.js` + `routes/api/vmTags.js` + 웹 `views/tools/CoreLicenseTool.jsx`·
     `VmTagsTool.jsx`·`views/corelicense/coreLicenseText.js`·`views/tags/vmTagsText.js` + `EntityDetail.jsx VmTagsSection`. 회귀 `server/test/coreLicense2703.test.js`(변이 6/6)·

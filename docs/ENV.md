@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **601개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **604개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-05)
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (181)
+## 공통 (184)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -208,6 +208,9 @@
 | `UPGRADE_REMOTE_BASE` |  | ✅ | config.js |
 | `UPGRADE_TOKEN` | `''` |  | config.js |
 | `UPGRADE_WATCH_DIR` | `''` | ✅ | config.js |
+| `VC_PROPS_MAX_PAGES` |  |  | config.js |
+| `VC_PROPS_PAGE_SIZE` |  |  | config.js |
+| `VC_PROPS_PAGING` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VC_SOAP_METRICS` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VC_TLS_CIPHERS` | `'DEFAULT@SECLEVEL=0'` |  | config.js |
 | `VC_TLS_MIN_VERSION` | `'TLSv1'` |  | config.js |
@@ -785,4 +788,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 601
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 604

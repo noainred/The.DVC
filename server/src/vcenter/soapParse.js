@@ -273,3 +273,38 @@ export function effectiveRequestTimeoutMs(ms, dflt) {
   const n = normRequestTimeoutMs(ms);
   return n > 0 ? n : dflt;
 }
+
+/**
+ * v2.704(B2): RetrievePropertiesEx / ContinueRetrievePropertiesEx 응답 → { xml, token }.
+ * 응답은 `<returnval><token>T</token><objects>…</objects><objects>…</objects></returnval>` 이고(RetrieveResult — token 이 objects 앞),
+ * 기존 RetrieveProperties 는 객체마다 `<returnval>…</returnval>` 이다. objects 를 returnval 로 바꿔 **같은 파서**(parseObjectContent)를
+ * 그대로 쓴다 — 파서를 두 벌 두면 v2.598 자기닫힘 같은 수정이 한쪽에만 들어간다. 선형(indexOf) — 정규식으로 큰 응답을 훑지 않는다.
+ *  · token 은 첫 `<objects>` 앞에 있을 때만 읽는다(속성 값 안의 같은 이름 태그를 토큰으로 읽지 않는다).
+ *  · 결과가 없으면(vCenter 가 빈 RetrieveResult 를 주거나 returnval 이 없다) xml 은 '' 이고 token 은 null.
+ */
+export function retrieveResultToObjectXml(xml) {
+  if (typeof xml !== 'string') return { xml: '', token: null };
+  const a = xml.indexOf('<returnval>');
+  if (a < 0) return { xml: '', token: null };
+  const b = xml.lastIndexOf('</returnval>');
+  const body = b > a ? xml.slice(a + 11, b) : xml.slice(a + 11);
+  const firstObj = body.indexOf('<objects>');
+  const head = firstObj < 0 ? body : body.slice(0, firstObj);
+  const tm = /<token>([^<]{1,512})<\/token>/.exec(head);
+  // RetrieveProperties 모양(objects 없이 returnval 안에 바로 obj)으로 답하는 서버·프록시도 읽는다 — 버리면 인벤토리가 통째로 빈다.
+  if (firstObj < 0) return body.includes('<obj ') ? { xml: xml.slice(a), token: null } : { xml: '', token: tm ? tm[1] : null };
+  const parts = [];
+  let i = firstObj;
+  for (;;) {
+    const s = body.indexOf('<objects>', i);
+    if (s < 0) break;
+    const e = body.indexOf('</objects>', s);
+    if (e < 0) break;
+    parts.push('<returnval>', body.slice(s + 9, e), '</returnval>');
+    i = e + 10;
+  }
+  // 토큰은 앞에 오는 것이 WSDL 순서지만, 뒤에 붙는 구현도 대비해 마지막 objects 뒤도 본다.
+  const tail = body.slice(i);
+  const tm2 = tm || /<token>([^<]{1,512})<\/token>/.exec(tail);
+  return { xml: parts.join(''), token: tm2 ? tm2[1] : null };
+}
