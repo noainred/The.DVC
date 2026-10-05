@@ -91,7 +91,7 @@ export const TREE = Object.freeze([
   {
     id: 'report', label: '리포트', items: [
       tool('daily-health'), tool('compliance-report'), tool('change-history'),
-      tool('unprotected-vms'), tool('snapshot-age'), tool('cert-expiry'),
+      tool('unprotected-vms'), tool('snapshot-age'), tool('vm-hygiene'), tool('cert-expiry'),
       tool('licenses'), tool('license-expiry'), tool('vmware-backup'),
       tool('snapshots', true),
     ],

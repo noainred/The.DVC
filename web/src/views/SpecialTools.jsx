@@ -51,6 +51,7 @@ const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
+const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const VmDnsTool = React.lazy(() => import('./tools/VmDnsTool.jsx'));     // VM DNS 설정 확인(v2.696)
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
 const RemoteCommand = React.lazy(() => import('./tools/RemoteCommand.jsx'));
@@ -629,6 +630,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'real-os' && <RealOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
       {tool === 'vm-export' && <VmExport scope={scope} />}
+      {tool === 'vm-hygiene' && <VmHygieneTool scope={scope} />}
       {tool === 'vm-dns' && <VmDnsTool scope={scope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}

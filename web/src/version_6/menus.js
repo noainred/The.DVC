@@ -67,7 +67,7 @@ export const MENUS = Object.freeze([
     { name: '추이 · 보고', items: ['storage-track', 'storage-growth', 'dir-usage'] }] },
   { id: 'protect', code: 'PROTECTION · COMPLIANCE', label: '보호/규정', desc: '백업 공백·스냅샷·인증서·버전 준수', groups: [
     { name: '백업 · 복제', items: ['unprotected-vms', 'vmware-backup'] },
-    { name: '스냅샷', items: ['snapshots', 'snapshot-age'] },
+    { name: '스냅샷', items: ['snapshots', 'snapshot-age', 'vm-hygiene'] },
     { name: '준수', items: ['cert-expiry', 'compliance-report'] }] },
   { id: 'auto', code: 'AUTOMATION', label: '자동화', desc: '상태를 바꾸는 작업만 모았다 — 조회 메뉴에서 실행 버튼을 만나지 않게', groups: [
     { name: '프로비저닝 · 복제', items: ['vmprovision', 'vm-clone', 'diskadd', 'massdeploy', 'backup'] },

@@ -4839,6 +4839,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 캐시에 없는 VM 은 `cfg`·`dev` 키 자체가 없다(= 미수집) — 화면이 '아직 읽지 않았습니다' 라고 말한다. 불리언·수치는 못 읽으면 null, limit -1 은 '무제한'.
     · 엣지 수신은 `sanitizeVmCfg`·`sanitizeVmDev`(아는 필드만) · 인벤토리에서 사라진 VM 은 prune · 상태는 `storeStatus().vmCfg`.
     · 판정 코드(`VM_CFG_CODES` 15종)는 서버·웹 두 벌이고 테스트가 같은 입력으로 대조한다 — 코드를 더하면 웹 `VM_CFG_TEXT` 도. ② VM 점검 묶음(A3·A4·A5·A16·A18·A20)이 이 데이터를 쓴다.
+  - ⚠⚠ **v2.698 — 특수 기능 'VM 구성 점검'(`vm-hygiene`). 판정은 `server/src/vmhygiene/analyze.js` 하나이고 B10 판정(`vmCfgFindings`)을 그대로 쓴다**
+    (`vmhygiene/{analyze,settings,notifier}.js` + `routes/api/vmHygiene.js` + 웹 `views/tools/VmHygieneTool.jsx`·`views/vmcfg/vmHygieneText.js`, 사용자 요청 A3·A4·A5·A16·A18·A20.
+    회귀 `server/test/vmHygiene2698.test.js` + 웹 `vmHygieneText.test.js` — 변이 4/5 검출, 남은 1종은 결과가 같은 동등 변이(`numOrNull('')` 이 이미 null)):
+    · 코드 집합 = 서버 `ALL_CODES`(B10 15 + 이 모듈 6) = 웹 `ALL_TEXT` 키(테스트 대조). 설정 범위 `RANGES` 도 서버·웹 대조.
+    · **유령 스냅샷 후보 = 스냅샷 0개 + 델타 파일 있음**(`soapParse.snapshotInfo orphanDeltaGB` — 이미 받는 layoutEx 에서 계산, 왕복 0). 파일 목록이 없으면 null(모름) ·
+      스냅샷이 있으면 델타는 정상 체인이다. 엣지 수신 `INV_NUM_KEYS` 에 넣었다. 포탈은 파일을 지우지 않는다(v2.505 규약).
+    · 스냅샷 생성일을 모르면 나이를 판정하지 않는다 · 템플릿은 판정 밖(개수만) · 예외 목록(이름·메모 부분 일치)은 스냅샷 정책만 빼고 개수를 밝힌다 ·
+      cfg/dev 를 아직 읽지 않은 VM 은 `coverage.notCollected` 로 '구성 판정에서 빠졌다' 를 화면이 말한다.
+    · 알림은 기본 꺼짐 · 하루 한 번(시각 이후) · 엣지(`config.agent.centralUrl`)는 보내지 않는다 · 상태 파일 `vm-hygiene-state.json`(등록·손상 보존).
+    · ⚠ 칩 버튼은 `whiteSpace:'normal' + maxWidth:'100%'` — 긴 판정 제목이 400px 에서 페이지를 38px 밀어냈다(Chromium 측정).
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).

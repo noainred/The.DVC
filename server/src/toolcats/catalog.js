@@ -56,7 +56,7 @@ export const PRESET = Object.freeze([
   {
     id: 'storage', label: '스토리지', icon: '💾',
     tools: ['storage-mon', 'storage-growth', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
-      'dir-usage', 'portaldb', 'snapshots', 'snapshot-age', 'orphanvmdk', 'guest-disk'],
+      'dir-usage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'orphanvmdk', 'guest-disk'],
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',

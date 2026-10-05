@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T07:38:16.685Z",
-  "count": 95,
+  "generatedAt": "2026-10-05T12:33:01.073Z",
+  "count": 96,
   "tools": [
     {
       "k": "service-hub",
@@ -428,6 +428,14 @@
     },
     {
       "k": "snapshot-age",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-hygiene",
       "adminOnly": false,
       "perm": null,
       "external": null,

@@ -185,7 +185,7 @@ function mkVmCfg(vm, powered) {
     guestIdTools: toolsId,
     guestNameTools: powered ? vm.guestOS : null,
     guestHostName: powered ? (i % 19 === 0 ? `old-${vm.name}.corp.local` : `${vm.name}.corp.local`) : null,
-    bootTime: powered ? Date.now() - ((i % 120) + 1) * 86_400_000 : null,
+    bootTime: powered ? Date.now() - (i % 97 === 0 ? 400 + (i % 30) : (i % 120) + 1) * 86_400_000 : null,
     managedBy: i % 61 === 0 ? { extensionKey: 'com.vmware.vcHms', type: 'replica' } : null,
     question: powered && i % 97 === 0 ? { text: 'msg.uuid.altered: This virtual machine might have been moved or copied.' } : null,
   };
@@ -493,7 +493,7 @@ export function generateSnapshot() {
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
         // 버전/패치 준수 리포트용 — 실환경 SOAP의 guest.toolsVersionStatus2와 동일한 값 집합.
-        toolsVersionStatus: vm.idx % 17 === 0 ? 'guestToolsNeedUpgrade' : vm.idx % 11 === 0 ? 'guestToolsUnmanaged' : 'guestToolsCurrent',
+        toolsVersionStatus: vm.idx % 59 === 0 ? 'guestToolsNotInstalled' : vm.idx % 17 === 0 ? 'guestToolsNeedUpgrade' : vm.idx % 11 === 0 ? 'guestToolsUnmanaged' : 'guestToolsCurrent',
         hwVersion: `vmx-${[19, 17, 15, 13, 10][vm.idx % 5]}`,
         // 좀비 리포트용 — 소수(약 2%)는 고아/접근불가 상태.
         connectionState: vm.idx % 53 === 0 ? 'orphaned' : vm.idx % 47 === 0 ? 'inaccessible' : 'connected',
@@ -505,6 +505,7 @@ export function generateSnapshot() {
         snapshotOldestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 180) + 1) * 86_400_000 : null,
         snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
         snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
+        orphanDeltaGB: vm.idx % 6 === 0 ? null : (vm.idx % 71 === 0 ? 12.5 : 0), // v2.698(A3): 스냅샷 0개인데 델타 파일(유령 스냅샷)
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm) }),
