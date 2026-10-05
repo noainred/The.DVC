@@ -22,6 +22,8 @@ import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
+import { refreshVmCfg } from '../vmcfg/collect.js';   // v2.697(B10)
+import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -1742,9 +1744,15 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       await Promise.allSettled([collectPower(), collectGpu()]);
     }
 
+    // v2.697(B10): VM 구성 속성·장치 위생 요약 — 오래된 VM 부터 주기당 상한만큼 다시 읽고(vmcfg/collect.js), 캐시 값을
+    // vm.cfg·vm.dev 로 싣는다. 실패는 격리(인벤토리 수집은 성공) — 캐시에 없는 VM 은 키 자체가 없다(= 미수집).
+    const vmRefs = objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref);
+    try { await refreshVmCfg(c, vc.id, vmRefs); } catch (err) { console.warn(`[collect] ${vc.id} VM 구성 속성 갱신 건너뜀: ${err.message}`); }
+
     const vms = [];
     for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
       const p = o.props;
+      const cfgEntry = vmCfgCacheGet(vc.id, o.ref);
       const host = hostByRef.get(p['runtime.host']);
       if (host) host.vmCount++;
       const numCpu = num(p['summary.config.numCpu']);
@@ -1787,6 +1795,8 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         tags: [], // vSphere Tags require the tagging REST API; not collected via SOAP
         gpu: null, // 아래에서 GPU 호스트 위 VM만 대상으로 채움
         ...snapshotInfo(p['snapshot'], p['layoutEx.file']),
+        ...(cfgEntry?.cfg ? { cfg: cfgEntry.cfg } : {}),
+        ...(cfgEntry?.dev ? { dev: cfgEntry.dev } : {}),
       });
     }
 

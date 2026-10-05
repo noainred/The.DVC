@@ -4831,6 +4831,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       가드를 풀어 새 주기를 시작한다(가드는 주기 번호 — 늦게 끝난 옛 주기가 새 가드를 풀지 않는다). 버린 주기가 붙잡은 수집 서버(`cycleBusy`)는 새 주기가 건너뛰고, 그것도 상한×2 를 넘기면 놓아준다.
       **새 폴러의 재진입 가드도 같은 질문을 할 것: '이 주기가 영원히 끝나지 않으면 무엇이 멈추는가'.** 상태는 `pullerStatus()`.
     · 서비스 점검 '원격 수집기' 는 개수가 아니라 `pullerHealth` 로 판정 · iDRAC 배너는 상태 'ok' 라도 정상 pull 이 max(주기×3, 5분)를 넘기면 `pullStale` → '중앙이 pull 하지 못한다'.
+  - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
+    (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
+    회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
+    · 구성 16개 경로(`VM_CFG_PATHS`)는 30분, `config.hardware.device` 는 6시간 주기 · 주기당 1,000/150대 · 한 주기 추가 조회 예산 20초(넘기면 다음 조각을 시작하지 않는다).
+      **경로는 전부 vSphere 5.0+ 에 있는 것만** — 없는 경로 하나가 RetrievePropertiesEx 전체를 InvalidProperty 로 만든다. 그 오류는 그 종류만 갱신 주기만큼 쉰다.
+    · 캐시에 없는 VM 은 `cfg`·`dev` 키 자체가 없다(= 미수집) — 화면이 '아직 읽지 않았습니다' 라고 말한다. 불리언·수치는 못 읽으면 null, limit -1 은 '무제한'.
+    · 엣지 수신은 `sanitizeVmCfg`·`sanitizeVmDev`(아는 필드만) · 인벤토리에서 사라진 VM 은 prune · 상태는 `storeStatus().vmCfg`.
+    · 판정 코드(`VM_CFG_CODES` 15종)는 서버·웹 두 벌이고 테스트가 같은 입력으로 대조한다 — 코드를 더하면 웹 `VM_CFG_TEXT` 도. ② VM 점검 묶음(A3·A4·A5·A16·A18·A20)이 이 데이터를 쓴다.
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).

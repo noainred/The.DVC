@@ -164,6 +164,49 @@ function mkGpus(idx, site) {
 // v2.653: ord = 그 호스트 안에서 몇 번째 VM 인가. 예전에는 전역 idx % 3 만 봐서 GPU 호스트 49대 중 16대가 GPU VM 0대였다
 //   (VM 배치와 idx 주기가 겹쳤다) — 데모 표의 할당·동작·온도 칸이 그 호스트에서 전부 비었다. 이제 호스트마다 앞 VM 부터 준다
 //   (패스쓰루는 카드 수만큼, vGPU 는 호스트 VM 의 절반 — 프로파일 합이 VRAM 을 넘는 과할당도 재현된다).
+// v2.697(B10): VM 구성 속성(vmcfg/parse.js parseVmCfgProps 와 같은 모양) — 판정 갈래가 고루 나오게 idx 로 결정적 분포.
+function mkVmCfg(vm, powered) {
+  const i = vm.idx;
+  const linux = /linux|ubuntu|rhel|centos|rocky/i.test(vm.guestOS || '');
+  const cfgId = linux ? (i % 23 === 0 ? 'rhel7_64Guest' : 'rhel8_64Guest') : 'windows2019srv_64Guest';
+  const toolsId = powered ? (linux ? 'rhel8_64Guest' : 'windows2019srv_64Guest') : null;
+  return {
+    at: Date.now() - (i % 30) * 60_000,
+    consolidationNeeded: i % 37 === 0,
+    cbt: i % 9 !== 0,
+    cpuHotAdd: i % 4 === 0,
+    memHotAdd: i % 4 === 0,
+    cpuReservationMhz: i % 29 === 0 ? 2000 : 0,
+    cpuLimitMhz: i % 43 === 0 ? 4000 : -1,
+    memReservationMB: i % 31 === 0 ? Math.min(vm.memMB, 8192) : 0,
+    memLimitMB: i % 47 === 0 ? 4096 : -1,
+    firmware: i % 3 === 0 ? 'bios' : 'efi',
+    guestIdConfig: cfgId,
+    guestIdTools: toolsId,
+    guestNameTools: powered ? vm.guestOS : null,
+    guestHostName: powered ? (i % 19 === 0 ? `old-${vm.name}.corp.local` : `${vm.name}.corp.local`) : null,
+    bootTime: powered ? Date.now() - ((i % 120) + 1) * 86_400_000 : null,
+    managedBy: i % 61 === 0 ? { extensionKey: 'com.vmware.vcHms', type: 'replica' } : null,
+    question: powered && i % 97 === 0 ? { text: 'msg.uuid.altered: This virtual machine might have been moved or copied.' } : null,
+  };
+}
+function mkVmDev(vm) {
+  const i = vm.idx;
+  const cdConnected = i % 13 === 0;
+  return {
+    at: Date.now() - (i % 360) * 60_000,
+    cdroms: [{ label: 'CD/DVD drive 1', connected: cdConnected, startConnected: cdConnected, iso: cdConnected && i % 2 === 0,
+      host: cdConnected && i % 2 === 1, file: cdConnected && i % 2 === 0 ? '[iso-lib] os/rhel-8.9-x86_64-dvd.iso' : null }],
+    floppies: i % 53 === 0 ? [{ label: 'Floppy drive 1', connected: false }] : [],
+    disks: [
+      { label: 'Hard disk 1', mode: 'persistent', sharing: 'sharingNone', rdm: false, rdmMode: null, datastore: 'ds-01', capacityGB: 80 },
+      ...(i % 7 === 0 ? [{ label: 'Hard disk 2', mode: i % 49 === 0 ? 'independent_nonpersistent' : 'independent_persistent', sharing: i % 35 === 0 ? 'sharingMultiWriter' : 'sharingNone', rdm: false, rdmMode: null, datastore: 'ds-02', capacityGB: 200 }] : []),
+      ...(i % 59 === 0 ? [{ label: 'Hard disk 3', mode: 'independent_persistent', sharing: 'sharingNone', rdm: true, rdmMode: 'physicalMode', datastore: 'ds-01', capacityGB: 500 }] : []),
+    ],
+    usb: i % 67 === 0 ? 1 : 0, serial: 0, parallel: 0, omitted: 0,
+  };
+}
+
 function mkVmGpu(hostState, idx, ord = null) {
   const hg = hostState?.gpus || [];
   if (!hg.length) return null;
@@ -463,6 +506,8 @@ export function generateSnapshot() {
         snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
         snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
+        // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm) }),
       });
     }
 

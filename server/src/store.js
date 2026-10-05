@@ -29,6 +29,7 @@ import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀
 export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 import { pushAll } from './util/pushAll.js';
 import { createChangeLogger } from './util/logThrottle.js';
+import { vmCfgStatus } from './vmcfg/cache.js'; // v2.697(B10)
 const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
@@ -869,6 +870,7 @@ export function storeStatus() {
     lastError: store.lastError || null,
     ledgerSync: store.ledgerSync || null, // v2.603: IP 원장(ipam.db) 마지막 동기화 결과(실패 사유·연속 횟수)
     ledgerInputSkips: store.ledgerInputSkips || 0, // v2.619 PERF-1: 입력 지문이 같아 원장 재구성을 건너뛴 틱 수(프로세스 수명)
+    vmCfg: vmCfgStatus(), // v2.697(B10): VM 구성 속성·장치 목록 캐시(vCenter 별 개수·마지막 갱신·오류 — 자격증명 없음)
     refreshing: store._refreshing === true,
     intervalMs: config.pollIntervalMs,
     counts,

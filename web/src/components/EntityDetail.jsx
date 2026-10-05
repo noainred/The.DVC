@@ -32,6 +32,7 @@ import { fetchJson, postJson } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
 import { STable } from './STable.jsx';
+import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 
 function DRow({ label, children, full = false, nowrap = false }) {
   return (
@@ -349,6 +350,57 @@ function DsBrowseSection({ item }) {
   );
 }
 
+/**
+ * v2.697(B10): VM 구성 점검 — 통합 필요·CBT·예약/제한·게스트 OS 대조·CD-ROM·디스크 모드 등.
+ * 값은 수집 서버가 오래된 VM 부터 나눠 읽은 캐시(vm.cfg·vm.dev)이고 화면이 vCenter 에 따로 묻지 않는다(왕복 0).
+ * 판정은 vmCfgText.vmCfgFindings 하나(서버 vmcfg/parse.js 와 같은 규칙 — 테스트 대조).
+ */
+const SEV_BADGE = { crit: ['위험', 'red'], warn: ['주의', 'amber'], info: ['참고', 'gray'] };
+function VmCfgSection({ vm }) {
+  const view = vmCfgRows(vm);
+  const findings = vmCfgFindings(vm);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>구성 점검{findings.length ? ` — 확인할 항목 ${findings.length}` : ''}</div>
+      {view.state === 'none' ? (
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{view.note}</div>
+      ) : (
+        <>
+          {findings.length > 0 ? (
+            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', display: 'grid', gap: 6 }}>
+              {findings.map((f) => {
+                const t = VM_CFG_TEXT[f.code] || { title: f.code, fix: '' };
+                const [bl, bc] = SEV_BADGE[f.sev] || SEV_BADGE.info;
+                const extra = f.code === 'question' && f.facts.text ? f.facts.text
+                  : f.code === 'guestos-mismatch' ? `설정 ${f.facts.config} · 실제 ${f.facts.tools}`
+                  : f.code === 'cdrom-connected' && f.facts.file ? f.facts.file
+                  : f.code === 'hostname-mismatch' ? `게스트 ${f.facts.hostName}` : null;
+                return (
+                  <li key={f.code} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                    <span className={`badge ${bc}`} style={{ flex: 'none', whiteSpace: 'nowrap' }}>{bl}</span>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>
+                      <b>{t.title}</b>{f.facts.count > 1 ? ` (${f.facts.count})` : ''}
+                      <span className="muted" style={{ display: 'block', fontSize: 12 }}>{t.fix}{extra ? ` · ${extra}` : ''}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+              {view.state === 'ok' ? '읽은 값에서 확인할 항목이 없습니다.' : '읽은 값에서는 확인할 항목이 없습니다(일부 축은 아직 읽지 않았습니다).'}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
+            {view.rows.map((r) => <DRow key={r.label} label={r.label}><span title={r.title}>{r.value}</span></DRow>)}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{view.note}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
@@ -441,6 +493,7 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
+      {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
         <div style={{ marginTop: 14 }}>

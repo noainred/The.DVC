@@ -17,6 +17,7 @@
  */
 
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
+import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
@@ -683,6 +684,9 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       if (d == null) dropped.coerced += 1;
       o.dns = d;
     }
+    // v2.697(B10): VM 구성 속성·장치 위생 요약 — 아는 필드만(모양이 아니면 null = 모름).
+    if (Object.hasOwn(o, 'cfg') && o.cfg != null) { const v = sanitizeVmCfg(o.cfg); if (v == null) dropped.coerced += 1; o.cfg = v; }
+    if (Object.hasOwn(o, 'dev') && o.dev != null) { const v = sanitizeVmDev(o.dev); if (v == null) dropped.coerced += 1; o.dev = v; }
     out.push(o);
   }
   return out;
