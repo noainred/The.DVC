@@ -166,6 +166,15 @@ export class VCenterClient {
     return this.#request('/api/vcenter/network');
   }
 
+  // v2.703(A15): vSphere 태그(vAPI). 7.0U2+ 의 /api 경로 — 옛 /rest 는 쓰지 않는다(없으면 404 로 '지원 안 함').
+  listTagCategories() { return this.#request('/api/cis/tagging/category'); }
+  getTagCategory(id) { return this.#request(`/api/cis/tagging/category/${encodeURIComponent(id)}`); }
+  listTags() { return this.#request('/api/cis/tagging/tag'); }
+  getTag(id) { return this.#request(`/api/cis/tagging/tag/${encodeURIComponent(id)}`); }
+  listAttachedObjectsOnTags(tagIds) {
+    return this.#request('/api/cis/tagging/tag-association?action=list-attached-objects-on-tags', { method: 'POST', body: { tag_ids: tagIds } });
+  }
+
   /** Detailed per-VM metrics (CPU/mem) — best-effort, may not be enabled. */
   getVm(vmId) {
     return this.#request(`/api/vcenter/vm/${vmId}`);

@@ -71,7 +71,7 @@ export const PRESET = Object.freeze([
   {
     id: 'security', label: '보안·계정', icon: '🛡️',
     tools: ['threats', 'secret-scan', 'codex-check', 'credentials', 'login-fails', 'cert-expiry',
-      'compliance-report', 'licenses', 'license-expiry'],
+      'compliance-report', 'licenses', 'license-expiry', 'core-license', 'vm-tags'],
   },
   {
     id: 'report', label: '리포트·점검', icon: '📋',

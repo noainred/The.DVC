@@ -35,6 +35,7 @@ import { STable } from './STable.jsx';
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText } from '../views/vmchanges/vmChangesText.js'; // v2.702
+import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
 
 function DRow({ label, children, full = false, nowrap = false }) {
@@ -363,7 +364,7 @@ function VmCfgSection({ vm }) {
   const view = vmCfgRows(vm);
   const findings = vmCfgFindings(vm);
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>구성 점검{findings.length ? ` — 확인할 항목 ${findings.length}` : ''}</div>
       {view.state === 'none' ? (
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{view.note}</div>
@@ -499,6 +500,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
       {(type === 'vm' || type === 'host') && <ClusterCfgSection item={item} isVm={type === 'vm'} />}
+      {type === 'vm' && <VmTagsSection vm={item} />}
       {type === 'vm' && <VmChangesSection vm={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
@@ -574,7 +576,7 @@ function HostCfgSection({ host }) {
   const view = hostCfgRows(host);
   const findings = hostCfgFindings(host);
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>구성·보안{findings.length ? ` — 확인할 항목 ${findings.length}` : ''}</div>
       {view.state === 'none' ? (
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{view.note}</div>
@@ -632,7 +634,7 @@ function ClusterCfgSection({ item, isVm }) {
   if (!allowed || !cluster || cluster === 'standalone') return null;
   const d = st.data;
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>클러스터 — {cluster}{d?.findings?.length ? ` · 확인할 항목 ${d.findings.length}` : ''}</div>
       {st.error ? <div className="muted" style={{ fontSize: 12 }}>클러스터 구성을 불러오지 못했습니다.</div>
         : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
@@ -669,6 +671,40 @@ function ClusterCfgSection({ item, isVm }) {
 }
 
 /**
+ * v2.703(A15): 이 VM 의 vSphere 태그·사용자 지정 속성 + 빠진 필수 태그. 열 때 1회 조회 · 도구 권한이 없으면 부르지 않는다.
+ */
+function VmTagsSection({ vm }) {
+  const allowed = toolAllowed('vm-tags');
+  const [st, setSt] = useState({ data: null, error: null });
+  useEffect(() => {
+    if (!allowed || !vm?.id) return undefined;
+    let active = true;
+    setSt({ data: null, error: null });
+    fetchJson('/tools/vm-tags/of', { vmId: vm.id })
+      .then((d) => { if (active) setSt({ data: d, error: null }); })
+      .catch((e) => { if (active) setSt({ data: null, error: e }); });
+    return () => { active = false; };
+  }, [allowed, vm?.id]);
+  if (!allowed || !vm?.id) return null;
+  const d = st.data;
+  return (
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>태그·사용자 지정 속성{d?.missing?.length ? ` · 빠진 필수 태그 ${d.missing.length}` : ''}</div>
+      {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : '태그를 불러오지 못했습니다.'}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12 }}>
+            <div style={{ overflowWrap: 'anywhere' }}><span className="muted">태그 </span>{vmTagLine(d)}</div>
+            {d.missing?.length > 0 && <div>{d.missing.map((m) => <span key={m} className="badge amber" style={{ marginRight: 4 }}>{m} 없음</span>)}</div>}
+            <div style={{ overflowWrap: 'anywhere' }}><span className="muted">속성 </span>{d.custom == null ? '사용자 지정 속성을 아직 읽지 않았습니다' : d.custom.length ? d.custom.map((c) => `${c.name}: ${c.value}`).join(' · ') : '값이 있는 속성 없음'}</div>
+            {d.template && <div className="muted">템플릿 — 필수 태그 점검 대상이 아닙니다.</div>}
+          </div>
+        )}
+    </div>
+  );
+}
+
+/**
  * v2.702(A7·A8): 이 VM 의 최근 이동(vMotion·DRS·Storage vMotion)과 구성 변경 — 이 포탈이 받아 둔 vCenter 이벤트(30일).
  * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다 · 늦게 온 응답은 버린다.
  */
@@ -689,7 +725,7 @@ function VmChangesSection({ vm }) {
   const items = Array.isArray(d?.items) ? d.items : [];
   const moves = items.filter((x) => x.cat === 'move').length;
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>이동·구성 변경 — 최근 {d?.days ?? 30}일{d ? ` · 이동 ${moves} · 변경 ${items.length - moves}${d.more ? ` (더 있음 ${d.more})` : ''}` : ''}</div>
       {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : '이동·변경 이력을 불러오지 못했습니다.'}</div>
         : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>

@@ -126,6 +126,9 @@ export const config = {
   // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 클러스터는 수가 적고 구성은 드물게 바뀐다(기본 30분 · 주기당 50개 · 응답이 커서 5개씩).
   clusterCfgScan: process.env.CLUSTER_CFG_SCAN !== 'false',
   clusterCfgRefreshMs: clampIntervalMs(numEnv(process.env.CLUSTER_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
+  // v2.703(A15): vSphere 태그(vAPI REST)·사용자 지정 속성 — 인벤토리 수집 주기 안에서 이 주기마다 한 번(기본 6시간). REST 로그인이 한 번 더 든다.
+  tagScan: process.env.TAG_SCAN !== 'false',
+  tagRefreshMs: clampIntervalMs(numEnv(process.env.TAG_REFRESH_MS, 21_600_000), 21_600_000, 600_000),
   clusterCfgPerCycle: Math.max(1, Math.min(1_000, Math.trunc(numEnv(process.env.CLUSTER_CFG_PER_CYCLE, 50)) || 50)),
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),

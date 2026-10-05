@@ -4869,6 +4869,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.703 — 코어 라이선스 산정(A13) + 태그·사용자 지정 속성 점검(A15). 규칙을 모르면 산정하지 않고, 못 읽은 vCenter 는 '확인 안 됨' 이다**
+    (`corelicense/analyze.js` + `routes/api/coreLicense.js` + `tags/{parse,collect,policy,analyze}.js` + `routes/api/vmTags.js` + 웹 `views/tools/CoreLicenseTool.jsx`·
+    `VmTagsTool.jsx`·`views/corelicense/coreLicenseText.js`·`views/tags/vmTagsText.js` + `EntityDetail.jsx VmTagsSection`. 회귀 `server/test/coreLicense2703.test.js`(변이 6/6)·
+    `vmTags2703.test.js`(변이 7/7) + 웹 문구 테스트 2종):
+    · 코어 규칙 = 호스트마다 **소켓 × max(16, ceil(코어/소켓))**(`MIN_CORES_PER_SOCKET`). 소켓(`summary.hardware.numCpuPkgs` → `host.cpuSockets`)·코어를 모르면 그 호스트는
+      산정하지 않고 개수를 밝힌다. vSAN 추가분은 `VSAN_TIB_PER_CORE`(none 0 · vvf 0.25 · vcf 1) 기준 전체 합으로만 낸다. 보고된 코어 라이선스 비교는 **부분 합이면 하지 않는다**.
+      엣지 수신 `INV_NUM_KEYS` 에 `cpuSockets` — 위임 vCenter 는 엣지 2.703 이 필요하다.
+    · 태그는 vAPI REST(`/api/cis/tagging`, 7.0U2+)를 **인벤토리 수집 안에서 `tagRefreshMs`(기본 6시간)마다** 읽는다(`TAG_SCAN`·`TAG_REFRESH_MS`). REST 세션을 따로 연다.
+      사용자 지정 속성은 SOAP `CustomFieldsManager.field` + VM `customValue`. 실패해도 **직전 값을 유지**하고 오류만 남긴다. 엣지 수신은 `sanitizeTagInv`(아는 필드·상한·예약어 VM 참조 거부).
+    · 상태 판정은 `tags/analyze.js tagStateOf` 하나(웹 `vmTagsText.js` 와 키 1:1). 못 읽은 vCenter 의 VM 은 '누락' 이 아니라 '확인 안 됨'. 정책(`tag-policy.json` — 설정 파일,
+      비밀 없음)은 `rev` 충돌 409 · preserveCorrupt · 저장은 admin + 전체 범위 + 감사. CSV 는 `data.csv`.
+    · poolSettled 결과는 `{status, value|reason}` 이다 — `r.ok` 로 읽지 말 것(초판이 그랬다).
+    · ⚠ 정직 기록: Broadcom 코어 규칙은 공개 공지 기준(계약마다 다를 수 있다). vAPI 태그·customValue 응답은 실장비로 확인하지 못했다(목 데이터 · 합성 입력).
   - ⚠⚠ **v2.702 — VM 이동·구성 변경 이력(A7·A8). 원천은 logs DB 의 vCenter 이벤트이고 상세는 수집 시점에 `detail` 열로 싣는다**
     (`vmchanges/{eventDetail,analyze}.js` + `logs/db.js trackedEvents` + `routes/api/vmChanges.js` + 웹 `views/tools/VmChangesTool.jsx`·`vmchanges/vmChangesText.js` +
     `EntityDetail.jsx VmChangesSection`. 회귀 `server/test/vmChanges2702.test.js`(변이 7/7) + 웹 `vmChangesText.test.js`):

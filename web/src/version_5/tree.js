@@ -59,7 +59,7 @@ export const GROUPS = Object.freeze([
   {
     id: 'protect', section: 'OPERATIONS', label: '보호 · 규정', icon: 'shield',
     items: [tool('vmtools'), tool('snapshots'), tool('snapshot-age'), tool('vm-hygiene'), tool('cert-expiry'), tool('compliance-report'),
-      tool('change-history'), tool('vm-changes'), tool('unprotected-vms'), tool('licenses'), tool('license-expiry'), tool('vmware-backup')],
+      tool('change-history'), tool('vm-changes'), tool('vm-tags'), tool('unprotected-vms'), tool('licenses'), tool('license-expiry'), tool('core-license'), tool('vmware-backup')],
   },
   {
     id: 'auto', section: 'OPERATIONS', label: '자동화', icon: 'bolt',
