@@ -630,7 +630,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
 const INV_NUM_KEYS = ['cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
   'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'gpuMemUsedPct', 'gpuMemUsedMB', 'gpuTempC', 'uptimeSec',
   'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
-  'snapshotOldestTs', 'snapshotNewestTs', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
+  'snapshotOldestTs', 'snapshotNewestTs', 'orphanDeltaGB', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
 /**
  * 인벤토리 조각 원소 정리(v2.599 CEN-2599-01·02·03).
  *  - 평범한 객체만 받는다 — `hosts:[null]` 하나로 store.refresh 가 매 주기 throw 해 **전 함대 스냅샷이 멈췄다**.

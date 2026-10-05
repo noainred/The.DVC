@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **187개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **188개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-05)
@@ -199,6 +199,7 @@
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |
+| `vm-hygiene.json` | 설정 | VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다 | ✅ | ✅ |  | vmhygiene/settings.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) | ✅ | ✅ | ✅ | metrics/vmperfDb.js |
 | `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfSettings.js |

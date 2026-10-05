@@ -95,6 +95,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.horizon', label: 'Horizon 세션 수집', group: 'collect', mod: '../horizon/sessionPoller.js', fn: 'hzSessionPollerStatus' },
   { key: 'collect.vmseries', label: '스파이크 수집', group: 'collect', mod: '../vmseries/poller.js', fn: 'vmSeriesPollerStatus' },
   { key: 'collect.vmtrack', label: '추이 트래킹', group: 'collect', mod: '../vmtrack/poller.js', fn: 'vmtrackPollerStatus' },
+  { key: 'collect.vmHygiene', label: 'VM 스냅샷 정책 알림', group: 'collect', mod: '../vmhygiene/notifier.js', fn: 'vmHygieneNotifierStatus' }, // v2.698: 스냅샷만 읽는다
   { key: 'collect.vmDns', label: 'VM DNS 변경 이력', group: 'collect', mod: '../vmdns/poller.js', fn: 'vmDnsHistoryStatus' }, // v2.696: 스냅샷만 읽는다(왕복 0)
   { key: 'collect.guestDisk', label: '게스트 디스크 수집', group: 'collect', mod: '../guestdisk/poller.js', fn: 'guestDiskPollerStatus' },
   { key: 'collect.bmstor', label: '베어메탈 스토리지', group: 'collect', mod: '../bmstor/poller.js', fn: 'bmPollerStatus' },

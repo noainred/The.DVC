@@ -100,6 +100,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'vm-export': 'vm-export',
   'vm-finder': 'vmfinder',
   'vm-track': 'vm-track',
+  'vm-hygiene': 'vm-hygiene',        // VmHygieneTool.jsx 전용(v2.698) — VM 구성 점검·스냅샷 정책
   'vm-dns': 'vm-dns',                // VmDnsTool.jsx 전용(v2.696) — VM 이 쓰는 DNS 서버·정책·도달성·변경 이력
   vmtools: 'vmtools',
   waste: 'waste',

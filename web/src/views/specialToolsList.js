@@ -79,6 +79,7 @@ export const TOOLS = [
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
   { k: 'daily-health', icon: '📋', label: '일일 헬스체크 리포트', desc: 'vCheck 스타일 아침 점검 — 스냅샷·용량·Tools·연결·인증서 요약 + 매일 지정 시각 웹훅 자동 발송' },
   { k: 'snapshot-age', icon: '⏳', label: '스냅샷 나이 감시', desc: '생성일 기준 오래된 스냅샷 탐지 · 나이/크기 필터 · CSV' },
+  { k: 'vm-hygiene', icon: '🩺', label: 'VM 구성 점검', desc: 'VM 구성 위생을 한 표로 — 디스크 통합 필요·응답 대기 질문·CBT 꺼짐·CPU/메모리 제한·예약·설정 OS 와 실제 OS 불일치·CD-ROM 연결·독립/비영구 디스크·multi-writer·물리 RDM·레거시 장치 + 스냅샷 정책(나이·개수·크기, 예외 목록, 하루 한 번 알림)·유령 스냅샷(스냅샷 없이 남은 델타)·Tools 미설치·장기 미재부팅 · 아직 읽지 않은 VM 은 따로 센다 · CSV', aka: ['vm hygiene', '구성 점검', '스냅샷 정책', 'snapshot police', 'consolidation', '통합 필요', 'CBT', 'CD-ROM', 'ISO', '유령 스냅샷', 'ghost snapshot', 'RDM', 'multi-writer'] },
   { k: 'zombie-vms', icon: '🧟', label: '좀비/방치 리소스', desc: '고아·접근불가 VM · 장기 정지 VM · 템플릿 · 스냅샷 대식가 — 회수 가능 용량(RVTools 스타일)' },
   { k: 'cert-expiry', icon: '📜', label: '인증서 만료 감시', desc: 'vCenter·NSX TLS 인증서 만료일 — D-90 경고 · D-30 위험 · 12시간 자동 프로브' },
   { k: 'rightsizing', icon: '📐', label: 'VM 라이트사이징', desc: '관측 평균/피크 기반 과대할당 VM 축소 추천 · 회수 가능 vCPU/RAM' },

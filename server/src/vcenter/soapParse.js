@@ -66,8 +66,21 @@ export function snapshotInfo(snapXml, layoutXml) {
       if (n) names.push(n);
     }
   }
+  // v2.698(A3): 스냅샷이 0개인데 델타 체인 파일(-NNNNNN.vmdk · -delta · -sesparse)이 남아 있으면 '유령 스냅샷' 후보다
+  // (Snapshot Manager 에 보이지 않는데 디스크는 델타로 쓰이는 상태 — 통합 실패·백업 잔재). 파일 목록이 없으면 null(모름).
+  let orphanDeltaBytes = null;
+  if (snapshotCount === 0 && layoutXml) {
+    orphanDeltaBytes = 0;
+    for (const blk of layoutXml.split('<file>').slice(1)) {
+      const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
+      if (!SNAP_DELTA_RE.test(name)) continue;
+      const unique = /<uniqueSize>(\d+)<\/uniqueSize>/.exec(blk)?.[1];
+      orphanDeltaBytes += Number(unique ?? /<size>(\d+)<\/size>/.exec(blk)?.[1] ?? 0);
+    }
+  }
   return {
     snapshotCount,
+    orphanDeltaGB: orphanDeltaBytes == null ? null : Math.round(orphanDeltaBytes / 1024 ** 3 * 10) / 10,
     snapshotSizeGB: Math.round(bytes / 1024 ** 3 * 10) / 10,
     snapshotOldestTs: oldest,
     snapshotNewestTs: newest,
