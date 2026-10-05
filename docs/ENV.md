@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **596개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **599개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-05)
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (176)
+## 공통 (179)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -86,6 +86,9 @@
 | `CAPACITY_RAW_RETENTION_HOURS` |  |  | config.js |
 | `CAPACITY_ROLLUP_RETENTION_DAYS` |  |  | config.js |
 | `CAPACITY_SAMPLE_INTERVAL_MS` |  |  | config.js |
+| `CLUSTER_CFG_PER_CYCLE` |  |  | config.js |
+| `CLUSTER_CFG_REFRESH_MS` |  |  | config.js |
+| `CLUSTER_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `COLLECT_CONCURRENCY` | `8` |  | store.js |
 | `COLLECTOR_PULL_CONCURRENCY` | `4` |  | config.js |
 | `COLLECTOR_PULL_INTERVAL_MS` |  | ✅ | config.js |
@@ -780,4 +783,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 596
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 599

@@ -3,7 +3,7 @@
 // 실패는 격리한다 — 이 갱신이 실패해도 인벤토리 수집은 성공이고, 직전 캐시 값은 그대로(at 으로 낡음이 보인다).
 import { config } from '../config.js';
 import { poolSettled } from '../util/pool.js';
-import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, HOST_VSAN_PATHS, HOST_MP_PATH, ADV_OPTIONS, parseHostCfgProps, parseOptionValue, parseCertInfo, applyAdvanced } from './parse.js';
+import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, HOST_VSAN_PATHS, HOST_MP_PATH, HOST_NET_PATHS, ADV_OPTIONS, parseHostCfgProps, parseOptionValue, parseCertInfo, applyAdvanced } from './parse.js';
 import { pickDue, put, prune, setStatus, statusOf } from './cache.js';
 
 export const HOST_CFG_BUDGET_MS = 15_000;
@@ -11,6 +11,7 @@ const OPTIONAL_GROUPS = [
   { flag: 'noLockdownPath', label: '잠금 모드', paths: [HOST_LOCKDOWN_PATH], chunk: 100 },
   { flag: 'noVsanPath', label: 'vSAN 런타임', paths: HOST_VSAN_PATHS, chunk: 100 },
   { flag: 'noMultipathPath', label: '멀티패스', paths: [HOST_MP_PATH], chunk: 10 },
+  { flag: 'noNetPath', label: '가상 스위치·포트그룹', paths: HOST_NET_PATHS, chunk: 20 }, // v2.701(A10) — 포트그룹이 많으면 응답이 커서 20대씩
 ];
 const CONCURRENCY = 4;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

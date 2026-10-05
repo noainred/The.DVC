@@ -28,12 +28,13 @@ const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
 import { VmReconfigButton } from './VmReconfig.jsx';
-import { fetchJson, postJson } from '../api.js';
+import { fetchJson, postJson, toolAllowed } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
 import { STable } from './STable.jsx';
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
+import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
 
 function DRow({ label, children, full = false, nowrap = false }) {
   return (
@@ -496,6 +497,7 @@ export function EntityDetail({ type, item, onClose }) {
       </div>
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
+      {(type === 'vm' || type === 'host') && <ClusterCfgSection item={item} isVm={type === 'vm'} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -602,6 +604,64 @@ function HostCfgSection({ host }) {
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{view.note}</div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * v2.701(A6): 이 VM·호스트가 속한 클러스터의 HA·DRS·EVC·유효 호스트 + (VM 이면) 그 VM 이 들어 있는 선호도 규칙.
+ * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다(403 을 만들지 않게) · 늦게 온 응답은 버린다.
+ */
+function ClusterCfgSection({ item, isVm }) {
+  const allowed = toolAllowed('cluster-check');
+  const cluster = item?.cluster;
+  const [st, setSt] = useState({ data: null, error: null });
+  useEffect(() => {
+    if (!allowed || !item?.vcenterId || !cluster || cluster === 'standalone') return undefined;
+    let active = true;
+    setSt({ data: null, error: null });
+    const params = { vcenterId: item.vcenterId, cluster };
+    if (isVm && item.id) params.vmId = item.id;
+    fetchJson('/tools/cluster-check/of', params)
+      .then((d) => { if (active) setSt({ data: d, error: null }); })
+      .catch((e) => { if (active) setSt({ data: null, error: e }); });
+    return () => { active = false; };
+  }, [allowed, item?.vcenterId, item?.id, cluster, isVm]);
+  if (!allowed || !cluster || cluster === 'standalone') return null;
+  const d = st.data;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>클러스터 — {cluster}{d?.findings?.length ? ` · 확인할 항목 ${d.findings.length}` : ''}</div>
+      {st.error ? <div className="muted" style={{ fontSize: 12 }}>클러스터 구성을 불러오지 못했습니다.</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : !d.cluster ? <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>이 클러스터의 HA·DRS 구성을 아직 읽지 않았습니다 — 수집 서버가 주기적으로 읽습니다(엣지가 수집하는 vCenter 는 엣지 업그레이드 뒤에 채워집니다).</div>
+        : (
+          <>
+            {d.findings?.length > 0 && (
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', display: 'grid', gap: 6 }}>
+                {d.findings.map((f) => {
+                  const t = CLUSTER_TEXT[f.code] || { title: f.code, fix: '' };
+                  const [bl, bc] = SEV_BADGE[f.sev] || SEV_BADGE.info;
+                  const extra = clusterFindingDetail(f);
+                  return (
+                    <li key={f.code} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                      <span className={`badge ${bc}`} style={{ flex: 'none', whiteSpace: 'nowrap' }}>{bl}</span>
+                      <span style={{ minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>
+                        <b>{t.title}</b>
+                        <span className="muted" style={{ display: 'block', fontSize: 12 }}>{t.fix}{extra ? ` · ${extra}` : ''}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
+              {clusterDetailRows(d.cluster).map((r) => <DRow key={r.label} label={r.label}>{r.value}</DRow>)}
+            </div>
+            {isVm && vmRulesText(d.vmRules) && <div style={{ fontSize: 12, marginTop: 6, overflowWrap: 'anywhere' }}>{d.vmRules.length ? `이 VM 의 규칙: ${vmRulesText(d.vmRules)}` : vmRulesText(d.vmRules)}</div>}
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{clusterAgeText(d.cluster.at)}{clusterAgeText(d.cluster.at) ? ' · ' : ''}전체 목록은 특수 기능 '클러스터 HA·DRS 점검' 에서 봅니다.</div>
+          </>
+        )}
     </div>
   );
 }

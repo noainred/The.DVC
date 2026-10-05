@@ -27,6 +27,7 @@ import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
 import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
+import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -1902,6 +1903,11 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
 
     // Installed solutions / plug-ins + licenses (best-effort) — 병렬로 조회해 고RTT에서 두 호출이
     // 직렬로 합산(최대 2×timeout)되어 다음 폴 주기를 밀어내는 것을 방지.
+    // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 오래된 클러스터부터 상한만큼(clustercfg/collect.js). 캐시에 없는 클러스터는 배열에 없다(= 미수집).
+    const clusterRefs = objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => x.ref);
+    try { await refreshClusterCfg(c, vc.id, clusterRefs); } catch (err) { console.warn(`[collect] ${vc.id} 클러스터 HA·DRS 갱신 건너뜀: ${err.message}`); }
+    const clusterCfg = clusterRefs.map((r) => getClusterCfg(vc.id, r)).filter(Boolean);
+
     const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
     const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : [];
     const licenses = licRes.status === 'fulfilled' ? licRes.value.slice(0, 200) : [];
@@ -1911,7 +1917,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         id: vc.id, name: vc.name, location: vc.location,
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
         build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
-        solutions, licenses,
+        solutions, licenses, clusterCfg,
       },
       hosts, vms, datastores, networks, alarms,
     };

@@ -20,6 +20,7 @@ import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
+import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
@@ -772,6 +773,12 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     const loc = sanitizeVcLocation(vcenter.location);
     if (loc.coerced) dropped.coerced += loc.coerced;
     vcenter.location = loc.value;
+  }
+  // v2.701(A6): 클러스터 HA·DRS 구성 — 아는 필드만(규칙 이름·VM 참조는 길이·개수 상한). 배열이 아니면 null(미수집).
+  if (Object.hasOwn(vcenter, 'clusterCfg')) {
+    const cc = sanitizeClusterCfgList(vcenter.clusterCfg);
+    if (cc.dropped) dropped.coerced += cc.dropped;
+    vcenter.clusterCfg = cc.value;
   }
   const slice = {
     vcenter,

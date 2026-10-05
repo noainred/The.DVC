@@ -53,6 +53,7 @@ const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)
+const ClusterCheckTool = React.lazy(() => import('./tools/ClusterCheckTool.jsx')); // 클러스터 HA·DRS 점검(v2.701)
 const StoragePathsTool = React.lazy(() => import('./tools/StoragePathsTool.jsx')); // 데이터스토어·경로 점검(v2.700)
 const VmDnsTool = React.lazy(() => import('./tools/VmDnsTool.jsx'));     // VM DNS 설정 확인(v2.696)
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
@@ -634,6 +635,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-export' && <VmExport scope={scope} />}
       {tool === 'vm-hygiene' && <VmHygieneTool scope={scope} />}
       {tool === 'host-hygiene' && <HostHygieneTool scope={scope} />}
+      {tool === 'cluster-check' && <ClusterCheckTool scope={scope} />}
       {tool === 'storage-paths' && <StoragePathsTool scope={scope} />}
       {tool === 'vm-dns' && <VmDnsTool scope={scope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}

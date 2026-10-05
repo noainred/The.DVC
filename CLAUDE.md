@@ -4869,6 +4869,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg 로 싣는다**
+    (`clustercfg/{parse,collect,analyze}.js` + `hostcfg/parse.js parseNetwork` + `routes/api/clusterCheck.js` + 웹 `views/tools/ClusterCheckTool.jsx`·`views/clustercfg/clusterCfgText.js` +
+    `EntityDetail.jsx ClusterCfgSection`. 회귀 `server/test/clusterCfg2701.test.js` + 웹 `clusterCfgText.test.js`·`hostCfgText.test.js` — 변이 12종 중 11종, 남은 1종은 동등 변이):
+    · `configurationEx` 는 VM 별 재정의(dasVmConfig·drsVmConfig)를 함께 실어 커진다 — **5개씩**·30분 주기·주기당 50(`CLUSTER_CFG_*`). HA 의 첫 `<enabled>` 만 HA 다(defaultVmSettings 안의 enabled 를 읽지 말 것).
+    · 블록 추출은 선형 indexOf 이고 **태그 다음 글자가 공백·'>' 일 때만** 같은 태그다(`<rules>` 를 `<rule>` 로 읽지 않는다 — 테스트 고정). EVC 는 summary 를 읽었는데 키가 없으면 ''(꺼짐), summary 를 못 읽으면 null.
+    · 판정: HA 를 켰는지 모르면 수용 제어·모니터링도 판정하지 않는다 · 단일 호스트 클러스터는 single-host 하나 · EVC 혼재는 **연결된 호스트**의 CPU 모델로만.
+    · VM 상세의 '이 VM 의 규칙' 은 vmId 에서 **vCenter id 접두를 떼서** moref 를 얻는다(콜론 split 금지 — vCenter id 에 콜론이 있다). 상세 창은 `toolAllowed('cluster-check')` 를 먼저 본다(403 을 만들지 않게).
+    · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). **vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다**(기존 상태 — 별건).
+    · 네트워크(A10)는 호스트 캐시의 선택 경로 묶음 `noNetPath`(20대씩). 업링크 = 스위치 **직속 `<pnic>`**(브리지 nicDevice 아님) · 무차별 = **computedPolicy**(유효 정책) ·
+      포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
+    · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
   - **v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용**(`ipam/scanRangeRows.js`·`vcRangeSuggest.annotateSubnets`·`settings.ignoreRanges` +
     `GET /admin/ipam/scan/ranges`·`POST /admin/ipam/scan/ranges/line` + 웹 `ScanRangeList.jsx`·`scanRangeImportText.js`, 회귀 `server/test/ipScanRanges2692.test.js` + 웹 `scanRanges2692.test.js`, 변이 3/3):
     · ① 등록된 스캔 대역 = 대역 1줄 = 1행(사용자 선택). 수정·삭제·추가는 **그 한 줄만** 저장하고 `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다). 가져오기는 그 에이전트의 ② 편집기에서 연다(겹침 판정·중복 칸 사본 금지).

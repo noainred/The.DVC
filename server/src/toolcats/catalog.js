@@ -61,7 +61,7 @@ export const PRESET = Object.freeze([
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
     tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone',
-      'vmprovision', 'vm-export', 'esxi', 'host-hygiene', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
+      'vmprovision', 'vm-export', 'esxi', 'host-hygiene', 'cluster-check', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
   },
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',
