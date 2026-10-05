@@ -4869,6 +4869,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.705 — 인벤토리 증분 수집(B1 — WaitForUpdatesEx). 기본 꺼짐이고, 실패하면 그 주기는 전체 조회다**
+    (`vcenter/updateSession.js` + `soapClient.js collectFromVCenterSoap` 의 `INV_TYPES`·`INV_SPECS` + config `VC_WAIT_UPDATES`·`VC_WAIT_UPDATES_FULL_MS`.
+    회귀 `server/test/waitUpdates2705.test.js` — 변이 8/8):
+    · vCenter 마다 **주 수집과 별도의 오래 사는 세션** + 전용 PropertyCollector + 필터. `maxWaitSeconds=0`(기다리지 않는다) · 잘림이면 같은 호출에서 이어 받는다.
+    · 바뀐 속성 이름이 **요청 경로와 정확히 같을 때만** 적용하고, 더 깊은 경로·op add 는 그 객체만 RetrieveProperties 로 다시 읽는다(부분 변경을 합치다 틀리면 오류 없이 틀린 값).
+      enter 는 전체 값이다(이전 속성을 남기지 않는다).
+    · 실패는 상태를 버리고 던진다(DestroyPropertyCollector + Logout) → 수집기가 그 주기를 예전 전체 조회로. **abort 는 폴백하지 않고 그대로 던진다**(데드라인 규약).
+      세션 로그인 거부는 30분 쉰다(접속처·자격증명 지문이 바뀌면 즉시 재시도). 6시간마다 처음부터 · 15분 미사용 세션 정리.
+    · ⚠ `updateSession.js` 는 `soapClient.js` 를 import 하지 않는다 — 클라이언트는 호출자가 `makeClient` 로 넘긴다(순환 SCC 상한 `arch2579`).
+    · ⚠ 정직 기록: 실장비 vCenter 의 UpdateSet(특히 changeSet name 이 요청 경로보다 깊게 오는 빈도)은 확인하지 못했다 — 깊게 자주 오면 재조회가 늘어 이득이 줄어든다.
+      스냅샷 `vcenter.invFetch.refetched` 로 확인할 것. 설정은 포탈 단위다(엣지 하나에서 먼저 켤 것).
   - ⚠⚠ **v2.704 — vCenter 속성 조회는 페이지로 받는다(B2 — RetrievePropertiesEx). 파서는 한 벌이다**
     (`vcenter/soapClient.js #retrieveSpec` + `soapParse.js retrieveResultToObjectXml` + config `VC_PROPS_PAGING`·`VC_PROPS_PAGE_SIZE`·`VC_PROPS_MAX_PAGES`.
     회귀 `server/test/retrievePaging2704.test.js` — 변이 7/7):

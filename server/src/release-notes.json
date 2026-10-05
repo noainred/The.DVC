@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.705.0",
+      "date": "2026-10-06",
+      "title": "vCenter 인벤토리 증분 수집(B1 — WaitForUpdatesEx, 기본 꺼짐)",
+      "notes": [
+        "VC_WAIT_UPDATES=true 로 켜면 인벤토리 속성을 vSphere PropertyCollector 필터 + 버전으로 '바뀐 것만' 받습니다. 기본은 꺼짐이고 켜지 않으면 동작이 바뀌지 않습니다.",
+        "켜면 vCenter 마다 오래 사는 세션이 하나 더 열립니다(주 수집 세션과 별도). 쓰지 않은 세션은 15분 뒤 정리하고, VC_WAIT_UPDATES_FULL_MS(기본 6시간)마다 처음부터 다시 받아 어긋남을 바로잡습니다.",
+        "요청한 경로보다 깊은 부분 변경은 직접 합치지 않고 그 객체만 다시 읽습니다. 세션 만료·필터 소실 등으로 실패하면 그 주기는 예전 전체 조회로 받습니다. 세션 로그인이 거부되면 30분 동안 다시 로그인하지 않습니다(계정 잠금 방지).",
+        "스냅샷의 vcenter.invFetch 가 어느 방식으로 받았는지(updates/full)와 바뀐 객체 수를 밝힙니다.",
+        "정직 기록: 실장비 vCenter 로 확인하지 못했습니다(가짜 vCenter 로 enter/modify/leave·잘림·세션 만료·로그인 거부 검증). 설정은 포탈 단위라 엣지 포탈 하나에서 먼저 켜 보기를 권합니다."
+      ]
+    },
+    {
       "version": "2.704.0",
       "date": "2026-10-05",
       "title": "vCenter 속성 조회 페이징(B2 — RetrievePropertiesEx)",
