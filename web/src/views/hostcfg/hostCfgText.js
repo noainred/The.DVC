@@ -14,6 +14,10 @@ export const HOST_CFG_CODES = Object.freeze({
   'mp-dead': 'warn',
   'mp-single': 'warn',
   'vsan-disk-issue': 'warn',
+  'net-single-uplink': 'warn',
+  'net-uplink-down': 'warn',
+  'net-promisc': 'warn',
+  'net-no-uplink': 'info',
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
@@ -35,12 +39,16 @@ export const HOST_CFG_TEXT = Object.freeze({
   'mp-dead': { title: '죽은 스토리지 경로가 있습니다', fix: 'HBA·스위치 포트·케이블·어레이 포트를 확인하세요 · 남은 경로가 끊기면 데이터스토어에 접근하지 못합니다' },
   'mp-single': { title: '경로가 하나뿐인 공유 LUN 이 있습니다', fix: 'FC·iSCSI LUN 은 경로가 둘 이상이어야 합니다 · 조닝·마스킹·두 번째 HBA 를 확인하세요' },
   'vsan-disk-issue': { title: 'vSAN 디스크 문제가 보고됐습니다', fix: 'vSAN 디스크 관리에서 해당 디스크 상태를 확인하세요' },
+  'net-single-uplink': { title: '업링크가 하나뿐인 가상 스위치가 있습니다', fix: '물리 NIC 하나가 끊기면 그 스위치의 VM·관리망이 끊깁니다 · 업링크를 둘 이상(다른 물리 스위치로) 연결하세요' },
+  'net-uplink-down': { title: '링크가 내려간 업링크가 있습니다', fix: '그 물리 NIC 의 케이블·스위치 포트를 확인하세요 · 남은 업링크가 끊기면 통신이 끊깁니다' },
+  'net-promisc': { title: '무차별 모드를 허용하는 포트그룹이 있습니다', fix: '모니터링·중첩 가상화 같은 목적이 아니면 거부로 바꾸세요(다른 VM 트래픽을 볼 수 있습니다)' },
+  'net-no-uplink': { title: '업링크가 없는 가상 스위치가 있습니다', fix: '참고 · 의도한 내부 전용 스위치가 아니면 업링크를 연결하세요' },
   'ssh-autostart': { title: 'SSH 가 호스트와 함께 시작됩니다', fix: '시작 정책을 수동으로 바꾸세요' },
   'lockdown-off': { title: '잠금 모드(lockdown)가 꺼져 있습니다', fix: '참고 · 운영 정책에 따라 정상 모드 이상을 권고합니다' },
   'shell-timeout-off': { title: 'ESXi Shell 시간 제한이 없습니다', fix: 'UserVars.ESXiShellTimeOut 을 설정하세요(CIS 권고 900초 이하)' },
   drift: { title: '같은 클러스터의 다른 호스트와 구성이 다릅니다', fix: '클러스터 안에서는 빌드·NTP·DNS·syslog·허용 수준을 맞추세요' },
 });
-export const DRIFT_LABEL = Object.freeze({ build: 'ESXi 빌드', ntp: 'NTP 서버', dns: 'DNS 서버', syslog: 'syslog 대상', lockdown: '잠금 모드', acceptance: '허용 수준', sshPolicy: 'SSH 시작 정책', sharedLuns: '공유 LUN 수' });
+export const DRIFT_LABEL = Object.freeze({ build: 'ESXi 빌드', ntp: 'NTP 서버', dns: 'DNS 서버', syslog: 'syslog 대상', lockdown: '잠금 모드', acceptance: '허용 수준', sshPolicy: 'SSH 시작 정책', sharedLuns: '공유 LUN 수', portgroups: '표준 포트그룹(이름:VLAN)' });
 export const SEV_LABEL = Object.freeze({ crit: '위험', warn: '주의', info: '참고' });
 export const SEV_BADGE = Object.freeze({ crit: 'red', warn: 'amber', info: 'gray' });
 const SEV_ORDER = { crit: 0, warn: 1, info: 2 };
@@ -72,6 +80,20 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
   if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
   if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
+  if (h.net) {
+    const sw = Array.isArray(h.net.switches) ? h.net.switches : [];
+    const used = sw.filter((x) => x.kind === 'dvs' || x.pgs > 0);
+    const single = used.filter((x) => x.uplinks.length === 1).map((x) => x.name);
+    if (single.length) add('net-single-uplink', { switches: single.slice(0, 10) });
+    const none = used.filter((x) => x.uplinks.length === 0).map((x) => x.name);
+    if (none.length) add('net-no-uplink', { switches: none.slice(0, 10) });
+    const nics = new Map((Array.isArray(host.nics) ? host.nics : []).filter((n) => n && n.device).map((n) => [n.device, n]));
+    const down = [];
+    for (const x of used) for (const u of x.uplinks) { const n = nics.get(u); if (n && n.link === false) down.push(`${x.name}/${u}`); }
+    if (down.length) add('net-uplink-down', { count: down.length, list: down.slice(0, 10) });
+    const pr = (Array.isArray(h.net.pgs) ? h.net.pgs : []).filter((p) => p.promisc === true).map((p) => p.name);
+    if (pr.length) add('net-promisc', { count: pr.length, names: pr.slice(0, 10) });
+  }
   return out;
 }
 
@@ -84,6 +106,9 @@ export function findingDetail(f) {
     case 'mp-dead': return `죽은 경로 ${x.dead}개${x.luns?.length ? ` · ${x.luns.join(', ')}` : ''}`;
     case 'mp-single': return `${x.count}개 LUN${x.luns?.length ? ` · ${x.luns.join(', ')}` : ''}`;
     case 'vsan-disk-issue': return `${x.count}건`;
+    case 'net-single-uplink': case 'net-no-uplink': return (x.switches || []).join(', ');
+    case 'net-uplink-down': return (x.list || []).join(', ');
+    case 'net-promisc': return (x.names || []).join(', ');
     case 'drift': return `${DRIFT_LABEL[x.field] || x.field}: ${x.value}${x.majority != null ? ` (다수 ${x.majority})` : ' (다수값 없음)'}`;
     default: return '';
   }
@@ -115,6 +140,19 @@ const svcText = (s) => (!s ? '—' : `${s.running === true ? '실행 중' : s.ru
 const LOCK = { disabled: '꺼짐', normal: '정상(normal)', strict: '엄격(strict)' };
 const listText = (a) => (Array.isArray(a) ? (a.length ? a.join(', ') : '(없음)') : '—');
 
+function netSwitchText(n) {
+  if (!n || !Array.isArray(n.switches)) return '—';
+  if (!n.switches.length) return '(없음)';
+  return n.switches.map((x) => `${x.name}(${x.kind === 'dvs' ? '분산' : '표준'} · 업링크 ${x.uplinks.length ? x.uplinks.join('+') : '없음'})`).join(', ');
+}
+function netPgText(n) {
+  if (!n || !Array.isArray(n.pgs)) return '—';
+  if (!n.pgs.length) return '(없음)';
+  const shown = n.pgs.slice(0, 8).map((p) => `${p.name}${p.vlan == null ? '' : ` VLAN ${p.vlan}`}${p.promisc === true ? ' 무차별' : ''}`).join(', ');
+  const total = Number.isFinite(n.pgsTotal) ? n.pgsTotal : n.pgs.length;
+  return total > 8 ? `${shown} 외 ${total - 8}개` : shown;
+}
+
 /** 호스트 상세의 행 — 미수집이면 none + 이유. 값이 없으면 '—'(꺼짐·0 으로 채우지 않는다). */
 export function hostCfgRows(host, now = Date.now()) {
   const h = host?.hcfg;
@@ -135,6 +173,8 @@ export function hostCfgRows(host, now = Date.now()) {
     { label: 'MOB', value: yn(h.mob, '켜짐', '꺼짐') },
     { label: '스토리지 경로', value: h.mp ? `LUN ${h.mp.luns}(공유 ${h.mp.shared}) · 경로 ${h.mp.paths} · 죽은 경로 ${h.mp.dead}` : '—' },
     { label: 'vSAN', value: !h.vsan ? '—' : h.vsan.enabled === true ? `참여 · 멤버 ${h.vsan.members ?? '—'} · 디스크 문제 ${h.vsan.diskIssues ?? '—'}` : h.vsan.enabled === false ? '참여 안 함' : '—' },
+    { label: '가상 스위치', value: netSwitchText(h.net) },
+    { label: '포트그룹', value: netPgText(h.net) },
   ];
   const age = Number.isFinite(h.at) ? Math.max(0, Math.round((now - h.at) / 60_000)) : null;
   const note = `${age == null ? '' : age < 60 ? `${age}분 전에 읽은 값` : `${Math.round(age / 60)}시간 전에 읽은 값`} · 수집 서버가 주기적으로 다시 읽습니다${host.connectionState === 'DISCONNECTED' ? ' · 연결이 끊겨 판정하지 않습니다' : ''}.`;

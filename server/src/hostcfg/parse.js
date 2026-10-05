@@ -7,7 +7,8 @@
 //     ntpServers: string[]|null, dnsServers: string[]|null, syslogHost: string|null(빈 문자열 = 설정 없음),
 //     lockFailures: int|null, shellTimeout: int|null, mob: bool|null, acceptance: string|null,
 //     certNotAfter: ms|null, certSubject: string|null,
-//     mp: {luns,shared,paths,dead,deadLuns,singlePath,singleLuns,policies}|null(v2.700 A2), vsan: {enabled,diskIssues,members}|null(v2.700 A19) }
+//     mp: {luns,shared,paths,dead,deadLuns,singlePath,singleLuns,policies}|null(v2.700 A2), vsan: {enabled,diskIssues,members}|null(v2.700 A19),
+//     net: { switches:[{name,kind:'vss'|'dvs',uplinks:[vmnicN…],pgs:int|null}], pgs:[{name,vlan,sw,promisc}], pgsTotal }|null(v2.701 A10) }
 //   - 못 읽은 값은 null 이다(false·0·빈 목록이 아니다 — 그것은 값이다).
 import { xmlUnescape } from '../vcenter/soapParse.js';
 
@@ -21,6 +22,8 @@ export const HOST_LOCKDOWN_PATH = 'config.lockdownMode';
 export const HOST_VSAN_PATHS = Object.freeze(['config.vsanHostConfig.enabled', 'runtime.vsanRuntimeInfo']);
 /** v2.700(A2): 멀티패스 — LUN·경로 상태·경로 정책. 응답이 커서 10대씩 따로 읽는다. */
 export const HOST_MP_PATH = 'config.storageDevice.multipathInfo';
+/** v2.701(A10): 표준 스위치·포트그룹·분산 스위치 프록시 — 업링크 이중화·업링크 링크 상태·무차별 모드·포트그룹 드리프트. */
+export const HOST_NET_PATHS = Object.freeze(['config.network.vswitch', 'config.network.portgroup', 'config.network.proxySwitch']);
 /** 고급 설정 — 호스트당 이름마다 QueryOptions 1회. 이름이 없는 버전은 InvalidName → 그 값만 null. */
 export const ADV_OPTIONS = Object.freeze([
   'Syslog.global.logHost', 'Security.AccountLockFailures', 'UserVars.ESXiShellTimeOut', 'Config.HostAgent.plugins.solo.enableMob',
@@ -88,6 +91,7 @@ export function parseHostCfgProps(props = {}, at = Date.now()) {
     syslogHost: null, lockFailures: null, shellTimeout: null, mob: null, acceptance: null,
     certNotAfter: null, certSubject: null,
     mp: Object.hasOwn(p, HOST_MP_PATH) ? parseMultipath(p[HOST_MP_PATH]) : null,
+    net: HOST_NET_PATHS.some((k) => Object.hasOwn(p, k)) ? parseNetwork(p[HOST_NET_PATHS[0]], p[HOST_NET_PATHS[1]], p[HOST_NET_PATHS[2]]) : null,
     vsan: (Object.hasOwn(p, HOST_VSAN_PATHS[0]) || Object.hasOwn(p, HOST_VSAN_PATHS[1])) ? parseVsan(p[HOST_VSAN_PATHS[0]], p[HOST_VSAN_PATHS[1]]) : null,
   };
 }
@@ -163,6 +167,62 @@ export function parseVsan(enabledRaw, runtimeXml) {
   return { enabled, diskIssues: count('diskIssues'), members: count('membershipList') };
 }
 
+// ── v2.701(A10) 네트워크 ───────────────────────────────────────────────────
+export const NET_SW_MAX = 32;
+export const NET_PG_MAX = 128;
+/** 같은 이름의 블록 전부(선형 — indexOf). 다음 글자가 ' '·'>' 일 때만 같은 태그다(HostVirtualSwitchSpec 오인 방지). */
+function elems(xml, name, max) {
+  const out = [];
+  if (typeof xml !== 'string') return out;
+  let i = 0;
+  while (out.length < max) {
+    const s0 = xml.indexOf(`<${name}`, i);
+    if (s0 < 0) break;
+    const c = xml.charCodeAt(s0 + name.length + 1);
+    if (c !== 32 && c !== 62) { i = s0 + 1; continue; }
+    const open = xml.indexOf('>', s0);
+    const e = open < 0 ? -1 : xml.indexOf(`</${name}>`, open);
+    if (e < 0) break;
+    out.push(xml.slice(open + 1, e));
+    i = e + name.length + 3;
+  }
+  return out;
+}
+function inner(xml, name) {
+  const s0 = xml.indexOf(`<${name}`);
+  if (s0 < 0) return null;
+  const open = xml.indexOf('>', s0);
+  const e = open < 0 ? -1 : xml.indexOf(`</${name}>`, open);
+  return e < 0 ? null : xml.slice(open + 1, e);
+}
+const pnicName = (k) => String(k).replace(/^key-vim\.host\.PhysicalNic-/, '').slice(0, 32);
+const countAll = (xml, t) => (xml.match(new RegExp(`<${t}>`, 'g')) || []).length;
+
+/**
+ * 표준 스위치(HostVirtualSwitch)·분산 스위치 프록시(HostProxySwitch)·포트그룹(HostPortGroup).
+ * 세 응답이 모두 없으면 null(모름). 업링크 = 스위치 바로 아래 <pnic> 키(브리지 사양의 nicDevice 가 아니다).
+ * 포트그룹의 무차별 모드는 **유효 정책(computedPolicy)** 기준이다(스위치 기본값을 물려받은 값까지).
+ */
+export function parseNetwork(vswitchXml, pgXml, proxyXml) {
+  if (typeof vswitchXml !== 'string' && typeof pgXml !== 'string' && typeof proxyXml !== 'string') return null;
+  const switches = [];
+  for (const b of elems(vswitchXml, 'HostVirtualSwitch', NET_SW_MAX)) {
+    switches.push({ name: cap(tag(b, 'name'), 64) || '(이름 없음)', kind: 'vss', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: countAll(b, 'portgroup') });
+  }
+  for (const b of elems(proxyXml, 'HostProxySwitch', NET_SW_MAX - switches.length)) {
+    switches.push({ name: cap(tag(b, 'dvsName'), 64) || '(이름 없음)', kind: 'dvs', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: null });
+  }
+  const all = elems(pgXml, 'HostPortGroup', 10_000);
+  const pgs = [];
+  for (const b of all.slice(0, NET_PG_MAX)) {
+    const spec = inner(b, 'spec') || '';
+    const comp = inner(b, 'computedPolicy') || '';
+    const vlan = intOf(tag(spec, 'vlanId'));
+    pgs.push({ name: cap(tag(spec, 'name'), 64) || '(이름 없음)', vlan, sw: cap(tag(spec, 'vswitchName'), 64), promisc: boolOf(tag(comp, 'allowPromiscuous')) });
+  }
+  return { switches, pgs, pgsTotal: typeof pgXml === 'string' ? all.length : null };
+}
+
 export function applyAdvanced(h, name, raw) {
   if (raw == null) return;
   if (name === 'Syslog.global.logHost') h.syslogHost = cap(raw, 256) ?? '';
@@ -186,6 +246,10 @@ export const HOST_CFG_CODES = Object.freeze({
   'mp-dead': 'warn',
   'mp-single': 'warn',
   'vsan-disk-issue': 'warn',
+  'net-single-uplink': 'warn',
+  'net-uplink-down': 'warn',
+  'net-promisc': 'warn',
+  'net-no-uplink': 'info',
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
@@ -220,6 +284,22 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
   if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
   if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
+  if (h.net) {
+    const sw = Array.isArray(h.net.switches) ? h.net.switches : [];
+    // 포트그룹이 없는 표준 스위치는 쓰지 않는 스위치다 — 업링크 판정에서 뺀다. 분산 스위치는 늘 쓰는 것으로 본다(포트그룹 수를 모른다).
+    const used = sw.filter((x) => x.kind === 'dvs' || x.pgs > 0);
+    const single = used.filter((x) => x.uplinks.length === 1).map((x) => x.name);
+    if (single.length) add('net-single-uplink', { switches: single.slice(0, 10) });
+    const none = used.filter((x) => x.uplinks.length === 0).map((x) => x.name);
+    if (none.length) add('net-no-uplink', { switches: none.slice(0, 10) });
+    // 링크 상태는 인벤토리의 물리 NIC(host.nics[].link)로 본다 — 그 NIC 를 모르면 판정하지 않는다.
+    const nics = new Map((Array.isArray(host.nics) ? host.nics : []).filter((n) => n && n.device).map((n) => [n.device, n]));
+    const down = [];
+    for (const x of used) for (const u of x.uplinks) { const n = nics.get(u); if (n && n.link === false) down.push(`${x.name}/${u}`); }
+    if (down.length) add('net-uplink-down', { count: down.length, list: down.slice(0, 10) });
+    const pr = (Array.isArray(h.net.pgs) ? h.net.pgs : []).filter((p) => p.promisc === true).map((p) => p.name);
+    if (pr.length) add('net-promisc', { count: pr.length, names: pr.slice(0, 10) });
+  }
   return out;
 }
 
@@ -234,6 +314,14 @@ export const DRIFT_FIELDS = Object.freeze({
   sshPolicy: (host) => host.hcfg?.services?.ssh?.policy ?? null,
   // v2.700(A2): 같은 클러스터는 같은 공유 LUN 을 봐야 한다(개수가 다르면 존·마스킹·경로 문제 후보).
   sharedLuns: (host) => (host.hcfg?.mp ? String(host.hcfg.mp.shared) : null),
+  // v2.701(A10): 같은 클러스터는 같은 표준 포트그룹(이름:VLAN)을 가져야 vMotion·HA 가 그 VM 을 옮길 수 있다.
+  //   포트그룹 목록이 잘렸으면(상한 초과) 비교하지 않는다 — 잘린 목록끼리의 차이는 거짓 드리프트다.
+  portgroups: (host) => {
+    const n = host.hcfg?.net;
+    if (!n || !Array.isArray(n.pgs) || n.pgsTotal == null || n.pgsTotal > n.pgs.length) return null;
+    const v = n.pgs.map((p) => `${p.name}:${p.vlan ?? '?'}`).sort().join(', ');
+    return v ? (v.length > 1000 ? `${v.slice(0, 1000)}…` : v) : '(없음)';
+  },
 });
 
 /**
@@ -297,7 +385,25 @@ export function sanitizeHostCfg(v) {
     mp: sanitizeMp(v.mp),
     vsan: v.vsan && typeof v.vsan === 'object' && !Array.isArray(v.vsan)
       ? { enabled: typeof v.vsan.enabled === 'boolean' ? v.vsan.enabled : null, diskIssues: numOr(v.vsan.diskIssues), members: numOr(v.vsan.members) } : null,
+    net: sanitizeNet(v.net),
   };
+}
+const nicName = (x) => (typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,32}$/.test(x) ? x : null);
+function sanitizeNet(n) {
+  if (!n || typeof n !== 'object' || Array.isArray(n)) return null;
+  const sw = Array.isArray(n.switches) ? n.switches.slice(0, NET_SW_MAX).filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => ({
+    name: cap(typeof x.name === 'string' ? x.name : '', 64) || '(이름 없음)',
+    kind: x.kind === 'dvs' ? 'dvs' : 'vss',
+    uplinks: Array.isArray(x.uplinks) ? x.uplinks.map(nicName).filter(Boolean).slice(0, 16) : [],
+    pgs: numOr(x.pgs) != null && numOr(x.pgs) >= 0 ? numOr(x.pgs) : null,
+  })) : [];
+  const pgs = Array.isArray(n.pgs) ? n.pgs.slice(0, NET_PG_MAX).filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => ({
+    name: cap(typeof x.name === 'string' ? x.name : '', 64) || '(이름 없음)',
+    vlan: numOr(x.vlan), sw: typeof x.sw === 'string' ? cap(x.sw, 64) : null,
+    promisc: typeof x.promisc === 'boolean' ? x.promisc : null,
+  })) : [];
+  const total = numOr(n.pgsTotal);
+  return { switches: sw, pgs, pgsTotal: total != null && total >= 0 ? total : null };
 }
 function sanitizeMp(m) {
   if (!m || typeof m !== 'object' || Array.isArray(m)) return null;

@@ -11,6 +11,11 @@ const HOSTS = [
   { name: 'c', connectionState: 'DISCONNECTED', hcfg: { rebootRequired: true } },
   { name: 'd' },
   { name: 'e', hcfg: { certNotAfter: NOW + 400 * D, ntpServers: null, services: null } },
+  // v2.701(A10): 단일 업링크·업링크 없음·업링크 다운·무차별 — 포트그룹 없는 표준 스위치는 판정에서 뺀다.
+  { name: 'f', nics: [{ device: 'vmnic1', link: false }, { device: 'vmnic2', link: true }], hcfg: { net: {
+    switches: [{ name: 'vs0', kind: 'vss', uplinks: ['vmnic0'], pgs: 1 }, { name: 'vs1', kind: 'vss', uplinks: [], pgs: 0 },
+      { name: 'ds', kind: 'dvs', uplinks: ['vmnic1', 'vmnic2'], pgs: null }, { name: 'vsi', kind: 'vss', uplinks: [], pgs: 2 }],
+    pgs: [{ name: 'P', vlan: 5, sw: 'vs0', promisc: true }, { name: 'Q', vlan: 6, sw: 'vs0', promisc: null }], pgsTotal: 2 } } },
 ];
 
 describe('hostCfgText', () => {

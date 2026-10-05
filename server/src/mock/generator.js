@@ -189,7 +189,38 @@ function mkHostCfg(h, site) {
     mp: { luns: 14, shared: i % 15 === 7 ? 11 : 12, paths: 48, dead: i % 12 === 5 ? 2 : 0, deadLuns: i % 12 === 5 ? ['naa.6000eb3a1' + i] : [],
       singlePath: i % 16 === 9 ? 1 : 0, singleLuns: i % 16 === 9 ? ['naa.6000eb3b2' + i] : [], policies: { VMW_PSP_RR: 12, VMW_PSP_FIXED: 2 } },
     vsan: s % 3 === 0 ? { enabled: true, diskIssues: i % 21 === 3 ? 1 : 0, members: 8 } : { enabled: false, diskIssues: 0, members: 0 },
+    // v2.701(A10): 가상 스위치·포트그룹(hostcfg/parse.js parseNetwork 와 같은 모양) — 단일 업링크·무차별 모드·VLAN 드리프트가 보이게.
+    net: {
+      switches: [
+        { name: 'vSwitch0', kind: 'vss', uplinks: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], pgs: 2 },
+        { name: 'DSwitch-Prod', kind: 'dvs', uplinks: ['vmnic2', 'vmnic3'], pgs: null },
+      ],
+      pgs: [
+        { name: 'Management Network', vlan: 0, sw: 'vSwitch0', promisc: false },
+        { name: 'VM Network', vlan: i % 14 === 2 ? 20 : 10, sw: 'vSwitch0', promisc: i % 25 === 4 },
+      ],
+      pgsTotal: 2,
+    },
   };
+}
+
+// v2.701(A6): 클러스터 HA·DRS 구성(clustercfg/parse.js 와 같은 모양) — 판정 갈래가 고루 나오게 클러스터 순번으로 결정적 분포.
+function mkClusterCfg(env) {
+  return env.clusters.map((name, c) => {
+    const hs = env.hosts.filter((h) => h.cluster === name);
+    const vmNames = env.vms.filter((vm) => vm.host.cluster === name).map((vm) => vm.name);
+    const rules = vmNames.length >= 2 ? [{
+      name: `${name}-db-anti`, type: 'anti-affinity', enabled: c % 7 !== 6, inCompliance: c % 4 === 1 ? false : true, mandatory: false, vms: vmNames.slice(0, 2),
+    }] : [];
+    return {
+      ref: `domain-c${c + 7}`, name, at: Date.now() - (c % 5) * 600_000,
+      ha: { enabled: c % 4 !== 3, admission: c % 3 !== 1, hostMon: c % 5 === 2 ? 'disabled' : 'enabled', vmMon: 'vmMonitoringDisabled' },
+      drs: { enabled: c % 6 !== 5, behavior: c % 3 === 2 ? 'manual' : 'fullyAutomated' },
+      rules, rulesTotal: rules.length,
+      evc: c % 2 === 0 ? 'intel-skylake' : '',
+      numHosts: hs.length, numEffectiveHosts: Math.max(0, hs.length - (c % 8 === 3 ? 1 : 0)),
+    };
+  });
 }
 
 // v2.697(B10): VM 구성 속성(vmcfg/parse.js parseVmCfgProps 와 같은 모양) — 판정 갈래가 고루 나오게 idx 로 결정적 분포.
@@ -397,6 +428,7 @@ export function generateSnapshot() {
       build: '22617221',
       solutions: mkSolutions(site),
       licenses: mkLicenses(site),
+      clusterCfg: mkClusterCfg(env),
     });
 
     if (!vcReachable) {

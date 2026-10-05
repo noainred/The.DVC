@@ -32,6 +32,7 @@ import { createChangeLogger } from './util/logThrottle.js';
 import { vmCfgStatus } from './vmcfg/cache.js'; // v2.697(B10)
 import { hostCfgStatus } from './hostcfg/cache.js'; // v2.699
 import { dsCfgStatus } from './dscfg/collect.js'; // v2.700
+import { clusterCfgStatus } from './clustercfg/collect.js'; // v2.701
 const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
@@ -873,6 +874,7 @@ export function storeStatus() {
     ledgerSync: store.ledgerSync || null, // v2.603: IP 원장(ipam.db) 마지막 동기화 결과(실패 사유·연속 횟수)
     ledgerInputSkips: store.ledgerInputSkips || 0, // v2.619 PERF-1: 입력 지문이 같아 원장 재구성을 건너뛴 틱 수(프로세스 수명)
     dsCfg: dsCfgStatus(), // v2.700: 데이터스토어 운영 속성 캐시
+    clusterCfg: clusterCfgStatus(), // v2.701: 클러스터 HA·DRS 캐시
     hostCfg: hostCfgStatus(), // v2.699: 호스트 구성 캐시(vCenter 별 개수·마지막 갱신·오류)
     vmCfg: vmCfgStatus(), // v2.697(B10): VM 구성 속성·장치 목록 캐시(vCenter 별 개수·마지막 갱신·오류 — 자격증명 없음)
     refreshing: store._refreshing === true,

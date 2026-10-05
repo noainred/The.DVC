@@ -123,6 +123,10 @@ export const config = {
   dsCfgScan: process.env.DS_CFG_SCAN !== 'false',
   dsCfgRefreshMs: clampIntervalMs(numEnv(process.env.DS_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
   dsCfgPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.DS_CFG_PER_CYCLE, 500)) || 500)),
+  // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 클러스터는 수가 적고 구성은 드물게 바뀐다(기본 30분 · 주기당 50개 · 응답이 커서 5개씩).
+  clusterCfgScan: process.env.CLUSTER_CFG_SCAN !== 'false',
+  clusterCfgRefreshMs: clampIntervalMs(numEnv(process.env.CLUSTER_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
+  clusterCfgPerCycle: Math.max(1, Math.min(1_000, Math.trunc(numEnv(process.env.CLUSTER_CFG_PER_CYCLE, 50)) || 50)),
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
   // 외부 공개용 소개 페이지(정적 데모 — 포탈 데이터/인증과 무관). server/src 안에 두어
