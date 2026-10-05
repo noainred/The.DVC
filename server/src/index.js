@@ -119,6 +119,7 @@ import { startBmstorPoller } from './bmstor/poller.js';           // 베어메�
 import { startBmstorHistory } from './bmstor/historySampler.js';  // 〃 디스크 사용량 12시간 이력(v2.635) — 별도 DB, 장비 접속 없음
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
+import { startVmDnsHistory } from './vmdns/poller.js';              // VM DNS 서버 설정 변경 이력(v2.696) — 스냅샷만 읽는다
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
 import { startVmSeriesPoller } from './vmseries/poller.js';         // 실시간(20초) 스파이크 수집(v2.510) — vCenter별 독립 DB
 import { startVmSeriesConfigPull } from './agent/vmSeriesConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.510)
@@ -534,6 +535,7 @@ const stagger = [
   startBmstorHistory, // 〃 12시간 이력(v2.635) — 60초 틱 + 재진입 가드, 슬롯당 1회(부분 합이면 새 수집마다 보강)
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
+  startVmDnsHistory, // VM DNS 변경 이력(v2.696) — 적응형 타이머(기본 10분) + 재진입 가드, 스냅샷만 비교(vCenter 왕복 0)
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
   startGuestDiskPoller, // 게스트 디스크 회수 리포트(v2.459) — 60초 틱, opt-in(기본 꺼짐)·주기 경과 시에만 수집 + 재진입 가드
   resumeHostAccessPending, // 호스트 접근 제어(v2.485) — 확정 대기(commit-confirm)가 남아 있으면 기한을 이어받아 자동 되돌림 타이머 재무장

@@ -100,6 +100,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'vm-export': 'vm-export',
   'vm-finder': 'vmfinder',
   'vm-track': 'vm-track',
+  'vm-dns': 'vm-dns',                // VmDnsTool.jsx 전용(v2.696) — VM 이 쓰는 DNS 서버·정책·도달성·변경 이력
   vmtools: 'vmtools',
   waste: 'waste',
   // v2.510: 실시간 스파이크 수집(로컬 리포트 섹션·설정·순위) — Optimization(waste) 리포트의 부속 API.

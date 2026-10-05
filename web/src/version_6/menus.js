@@ -59,7 +59,7 @@ export const MENUS = Object.freeze([
     { seg: 'host', name: '가상화 호스트', items: ['hosts', 'esxi', 'hba'] },
     { seg: 'vm', name: '가상화 서버', items: ['vms', 'vmfinder', 'guestos', 'real-os', 'vmtools', 'curuser', 'vm-track'] }] },
   { id: 'net', code: 'NETWORK', label: '네트워크', desc: '포트그룹·IP·NSX·스위치 — 인벤토리와 경로 점검', groups: [
-    { name: '인벤토리', items: ['networks', 'ipam', 'nsx', 'cvp', 'dupip'] },
+    { name: '인벤토리', items: ['networks', 'ipam', 'vm-dns', 'nsx', 'cvp', 'dupip'] },
     { name: '점검 · 분석', items: ['net-check', 'net-traffic', 'net-issues'] },
     { name: '중계 (HAProxy)', items: ['relaytopo', 'relaycheck'] }] },
   { id: 'storage', code: 'STORAGE', label: '스토리지', desc: '데이터스토어·스토리지 어레이·SAN — 용량과 증가 추이', groups: [
