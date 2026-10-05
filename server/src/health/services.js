@@ -42,6 +42,7 @@ import * as m_curUserPoller from '../curuser/poller.js';
 import * as m_hzPoller from '../horizon/sessionPoller.js';
 import * as m_vmSeriesPoller from '../vmseries/poller.js';
 import * as m_vmtrackPoller from '../vmtrack/poller.js';
+import * as m_vmDnsPoller from '../vmdns/poller.js'; // v2.696: VM DNS 변경 이력
 import * as m_guestDiskPoller from '../guestdisk/poller.js';
 import * as m_bmstorPoller from '../bmstor/poller.js';
 import * as m_bmstorHistory from '../bmstor/historySampler.js';
@@ -82,6 +83,7 @@ const MODS = Object.freeze({
   '../horizon/sessionPoller.js': m_hzPoller,
   '../vmseries/poller.js': m_vmSeriesPoller,
   '../vmtrack/poller.js': m_vmtrackPoller,
+  '../vmdns/poller.js': m_vmDnsPoller,
   '../guestdisk/poller.js': m_guestDiskPoller,
   '../bmstor/poller.js': m_bmstorPoller,
   '../bmstor/historySampler.js': m_bmstorHistory,

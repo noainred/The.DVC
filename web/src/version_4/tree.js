@@ -56,7 +56,7 @@ export const TREE = Object.freeze([
     id: 'network', label: '네트워크', items: [
       page('network'),
       tab('networks', '포트그룹 목록', '#/networks'),
-      tool('ipam'), tool('nsx'), tool('dupip'), tool('net-check'), tool('net-traffic'),
+      tool('ipam'), tool('vm-dns'), tool('nsx'), tool('dupip'), tool('net-check'), tool('net-traffic'),
       tool('net-issues'), tool('relaytopo'), tool('relaycheck'), tool('link-check'), tool('comm-map'), tool('data-flow'), tool('device-flow'),
       tool('cvp'),
       tool('nic-speed'), tool('nic-models'),

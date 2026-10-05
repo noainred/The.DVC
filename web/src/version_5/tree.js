@@ -52,7 +52,7 @@ export const GROUPS = Object.freeze([
   },
   {
     id: 'network', section: 'OPERATIONS', label: '네트워크', icon: 'net',
-    items: [tab('networks', '네트워크'), tool('ipam'), tool('nsx'), tool('dupip'), tool('net-check'), tool('net-traffic'),
+    items: [tab('networks', '네트워크'), tool('ipam'), tool('vm-dns'), tool('nsx'), tool('dupip'), tool('net-check'), tool('net-traffic'),
       tool('net-issues'), tool('relaytopo'), tool('relaycheck'), tool('link-check'), tool('comm-map'), tool('data-flow'),
       tool('device-flow'), tool('cvp'), tool('topo3d')],
   },

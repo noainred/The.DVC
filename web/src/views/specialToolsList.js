@@ -71,6 +71,9 @@ export const TOOLS = [
   // 특수 기능 카드 그리드에는 안 보이지만 항목은 유지 — 권한 매트릭스(사용자 관리 › 도구별 접근)의
   // toolsDenied 'ipam' 키 편집 UI 가 이 목록에서 나오고, 그 값이 상단 탭 노출(App.jsx toolKey)을 결정한다.
   { k: 'ipam', icon: '📒', label: 'IP관리 (상단 메뉴)', desc: '상단 IP관리 탭으로 이동 — 여기서의 접근 차단이 상단 탭 노출에 그대로 적용됩니다.', topTab: true },
+  // v2.696 — 게스트 OS 가 VMware Tools 로 보고한 DNS 설정(v2.695 수집)을 모아 본다. 조회는 tools 권한(범위 계정은 허용 vCenter 만),
+  //   정책 저장·도달성 점검만 서버가 adminOnly + fullScopeOnly 로 집행한다 — 카드 자체는 adminOnly 가 아니다.
+  { k: 'vm-dns', icon: '🌍', label: 'VM DNS 설정 확인', desc: 'VM 이 쓰는 DNS 서버를 vCenter 별로 모아 본다 — 주소마다 정체(VM·ESXi 호스트·공인 DNS·대장에 없음)를 IP 대장에서 찾고, 법인별 승인 DNS 정책 위반·공인 DNS 사용·NIC 설정과 OS 실제 값 불일치·다른 법인 DNS·DNS 1개만 설정을 표시 · 법인 × DNS 매트릭스 · 53번 도달성 점검(누를 때만) · DNS 변경 이력 · 모름(Tools 미보고)과 미수집(엣지 구버전)은 따로 센다', aka: ['DNS', 'DNS 서버', '네임서버', 'resolver', 'nameserver', 'vm dns'] },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },

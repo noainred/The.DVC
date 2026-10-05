@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-30T07:56:34.635Z",
-  "count": 94,
+  "generatedAt": "2026-10-05T07:38:16.685Z",
+  "count": 95,
   "tools": [
     {
       "k": "service-hub",
@@ -384,6 +384,14 @@
       "perm": null,
       "external": null,
       "topTab": true,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-dns",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
       "comingSoon": false
     },
     {

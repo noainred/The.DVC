@@ -4811,6 +4811,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       이제 `dnsConfig` 블록을 먼저 지우고 읽는다(indexOf 선형 — 닫는 태그가 없으면 그 뒤를 IP 로 읽지 않는다).
     · DNS 는 같은 응답에서 `vm.dns = {servers, stack, nics}`(스택 먼저 합집합, 각 8개 상한)로 따로 싣는다 — **vCenter 왕복 0**. 보고 없음은 null(모름).
       엣지 수신은 `sanitizeVmDns`(아는 모양만). ⚠ 엣지 위임 vCenter 는 **엣지가 VM IP 를 읽어 보내므로** 엣지 2.695 이후에야 바로잡힌다.
+  - ⚠⚠ **v2.696 — 특수 기능 'VM DNS 설정 확인'(`vm-dns`). 판정은 `server/src/vmdns/analyze.js` 하나**(+ `policy.js`·`probe.js`·`db.js`·`poller.js` ·
+    `routes/api/vmDns.js` · 웹 `views/tools/VmDnsTool.jsx`·`vmDnsText.js`. 사용자 승인 시안 https://claude.ai/artifact/Wu69JoFtDDVrUBJAZujwHi .
+    회귀 `server/test/vmDns2696.test.js`(변이 10/10) + 웹 `vmDnsText.test.js`·`vmDnsRender.test.jsx`):
+    · VM DNS 는 세 상태다 — reported / **unknown**(`dns:null`, Tools 미보고) / **notCollected**(`'dns' in vm === false` — 2.695 이전 엣지·REST 폴백). 뒤 둘을 정상·0 에 넣지 않는다.
+    · 서버 주소 목록은 OS 스택 값이 먼저(없으면 NIC 합집합). 정책 판정 순서: 그 법인 목록에 맞으면 approved(명시 승인 우선) → `kind:'public'` 이고
+      publicUnapproved 면 unapproved → 목록이 비면 none(판정 안 함). `vcenters[].unapprovedVms` 는 vCenter 필터 밖이면 **null**(0 아님).
+    · 정책 항목은 정규형 IPv4·네트워크 경계 CIDR(/8~/32)만, 안쪽 빈 칸 거부 — 웹 `checkPolicyEntry` 와 같은 판정(테스트가 28개 입력으로 대조).
+    · 도달성 점검은 버튼으로만, 대상은 스냅샷에서 계산한 주소(요청 본문의 주소를 받지 않는다) · 엣지 법인만 쓰는 주소는 `edge-only` · 목 vCenter 만 쓰는 주소는 `mock` 건너뜀.
+    · 포탈 스냅샷 전원 표기는 `POWERED_ON`(밑줄)이다 — vSphere 원문 `poweredOn` 만 비교하면 전원 칸이 전부 '—' 가 된다(v2.696 Chromium 검증에서 잡았다).
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):
