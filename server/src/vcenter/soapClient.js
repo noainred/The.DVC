@@ -26,6 +26,7 @@ import { refreshVmCfg } from '../vmcfg/collect.js';   // v2.697(B10)
 import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
 import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
+import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -1852,8 +1853,17 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB),
         accessible: p['summary.accessible'] !== 'false',
         ...parseDatastoreStorage(p['info'], p['summary.type']),
+        // v2.700(A17): VMFS 주 버전 — 이미 받는 info 에서(왕복 0). VMFS 가 아니면 키가 없다.
+        ...(() => { const v = /<majorVersion>(\d+)<\/majorVersion>/.exec(p['info'] || '')?.[1]; return v ? { vmfsMajor: Number(v) } : {}; })(),
       };
     });
+    // v2.700(A17): 데이터스토어 운영 속성 — 오래된 DS 부터 상한만큼(dscfg/collect.js), 캐시 값을 ds.dcfg 로.
+    {
+      const dsRefs = objs.filter((x) => x.type === 'Datastore').map((x) => x.ref);
+      try { await refreshDsCfg(c, vc.id, dsRefs); } catch (err) { console.warn(`[collect] ${vc.id} 데이터스토어 운영 속성 갱신 건너뜀: ${err.message}`); }
+      const byId = new Map(datastores.map((d) => [d.id, d]));
+      for (const ref of dsRefs) { const e = getDsCfg(vc.id, ref); const d = byId.get(`${vc.id}:${ref}`); if (e && d) d.dcfg = e; }
+    }
 
     const networks = objs.filter((x) => x.type === 'Network' || x.type === 'DistributedVirtualPortgroup').map((o) => ({
       id: `${vc.id}:${o.ref}`,

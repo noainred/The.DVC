@@ -47,7 +47,7 @@ export const TREE = Object.freeze([
     id: 'storage', label: '스토리지', items: [
       page('storage'),
       tab('datastores', '데이터스토어 목록', '#/datastores'),
-      tool('dsusage'), tool('storage-track'), tool('orphanvmdk'), tool('guest-disk'),
+      tool('dsusage'), tool('storage-paths'), tool('storage-track'), tool('orphanvmdk'), tool('guest-disk'),
       tool('hba'), tool('storage-mon'), tool('storage-growth'), tool('bm-storage'), tool('san-switch'),
       tool('dir-usage'), tool('thinvms'), tool('portaldb'),
     ],

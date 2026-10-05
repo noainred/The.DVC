@@ -6,7 +6,8 @@
 //     services: { ssh:{running,policy}|null, shell:{running,policy}|null, ntpd:{running,policy}|null },
 //     ntpServers: string[]|null, dnsServers: string[]|null, syslogHost: string|null(빈 문자열 = 설정 없음),
 //     lockFailures: int|null, shellTimeout: int|null, mob: bool|null, acceptance: string|null,
-//     certNotAfter: ms|null, certSubject: string|null }
+//     certNotAfter: ms|null, certSubject: string|null,
+//     mp: {luns,shared,paths,dead,deadLuns,singlePath,singleLuns,policies}|null(v2.700 A2), vsan: {enabled,diskIssues,members}|null(v2.700 A19) }
 //   - 못 읽은 값은 null 이다(false·0·빈 목록이 아니다 — 그것은 값이다).
 import { xmlUnescape } from '../vcenter/soapParse.js';
 
@@ -16,6 +17,10 @@ export const HOST_CFG_PATHS = Object.freeze([
   'configManager.certificateManager', 'configManager.advancedOption', 'configManager.imageConfigManager',
 ]);
 export const HOST_LOCKDOWN_PATH = 'config.lockdownMode';
+/** v2.700(A19): vSAN(5.5+) — 호스트가 vSAN 에 참여하는지 · 디스크 문제 · 클러스터 멤버 수. 헬스 서비스(vsanHealth) API 는 아니다. */
+export const HOST_VSAN_PATHS = Object.freeze(['config.vsanHostConfig.enabled', 'runtime.vsanRuntimeInfo']);
+/** v2.700(A2): 멀티패스 — LUN·경로 상태·경로 정책. 응답이 커서 10대씩 따로 읽는다. */
+export const HOST_MP_PATH = 'config.storageDevice.multipathInfo';
 /** 고급 설정 — 호스트당 이름마다 QueryOptions 1회. 이름이 없는 버전은 InvalidName → 그 값만 null. */
 export const ADV_OPTIONS = Object.freeze([
   'Syslog.global.logHost', 'Security.AccountLockFailures', 'UserVars.ESXiShellTimeOut', 'Config.HostAgent.plugins.solo.enableMob',
@@ -82,6 +87,8 @@ export function parseHostCfgProps(props = {}, at = Date.now()) {
     dnsServers: dns == null ? null : tagsAll(dns, 'address'),
     syslogHost: null, lockFailures: null, shellTimeout: null, mob: null, acceptance: null,
     certNotAfter: null, certSubject: null,
+    mp: Object.hasOwn(p, HOST_MP_PATH) ? parseMultipath(p[HOST_MP_PATH]) : null,
+    vsan: (Object.hasOwn(p, HOST_VSAN_PATHS[0]) || Object.hasOwn(p, HOST_VSAN_PATHS[1])) ? parseVsan(p[HOST_VSAN_PATHS[0]], p[HOST_VSAN_PATHS[1]]) : null,
   };
 }
 
@@ -101,6 +108,59 @@ export function parseCertInfo(xml) {
   if (typeof xml !== 'string') return null;
   const na = Date.parse(tag(xml, 'notAfter') || '');
   return { notAfter: Number.isFinite(na) ? na : null, subject: cap(tag(xml, 'subject'), 200) };
+}
+
+const SHARED_TRANSPORT = /HostFibreChannelTargetTransport|HostInternetScsiTargetTransport|HostFibreChannelOverEthernetTargetTransport/;
+const MP_LUNS_MAX = 4096;
+/**
+ * 멀티패스 요약 — 경로 블록(<path>)만 훑는다(LU 블록 안에 <lun> 태그가 중첩돼 LU 로 자르면 틀린다).
+ * shared = 경로 전송이 FC·iSCSI·FCoE 인 LUN(로컬 디스크·CD-ROM 의 단일 경로는 정상이라 세지 않는다).
+ * 반환: { luns, shared, paths, dead, deadLuns:[], singlePath, singleLuns:[], policies:{psp:count} } | null(못 읽음)
+ */
+export function parseMultipath(xml) {
+  if (typeof xml !== 'string') return null;
+  const byLun = new Map();
+  let paths = 0; let dead = 0;
+  let i = 0;
+  for (;;) {
+    const s0 = xml.indexOf('<path>', i);
+    if (s0 < 0) break;
+    const e = xml.indexOf('</path>', s0);
+    if (e < 0) break;
+    const blk = xml.slice(s0, e);
+    i = e + 7;
+    const lun = tag(blk, 'lun');
+    if (!lun) continue;
+    paths += 1;
+    const st = (tag(blk, 'pathState') || tag(blk, 'state') || '').toLowerCase();
+    let L = byLun.get(lun);
+    if (!L) { if (byLun.size >= MP_LUNS_MAX) continue; L = { live: 0, dead: 0, shared: false }; byLun.set(lun, L); }
+    if (st === 'dead') { L.dead += 1; dead += 1; } else if (st === 'active' || st === 'standby') L.live += 1;
+    if (SHARED_TRANSPORT.test(blk)) L.shared = true;
+  }
+  const policies = {};
+  const re = /<policy>([A-Za-z0-9_.-]{1,64})<\/policy>/g;
+  let m;
+  while ((m = re.exec(xml))) policies[m[1]] = (policies[m[1]] || 0) + 1;
+  const short = (k) => String(k).replace(/^key-vim\.host\.[A-Za-z]+-/, '').slice(0, 80);
+  const deadLuns = []; const singleLuns = [];
+  let shared = 0; let singlePath = 0;
+  for (const [k, L] of byLun) {
+    if (L.dead > 0 && deadLuns.length < 10) deadLuns.push(short(k));
+    if (L.shared) {
+      shared += 1;
+      if (L.live < 2) { singlePath += 1; if (singleLuns.length < 10) singleLuns.push(short(k)); }
+    }
+  }
+  return { luns: byLun.size, shared, paths, dead, deadLuns, singlePath, singleLuns, policies };
+}
+
+/** vSAN 런타임 — enabled(bool|null) · diskIssues(개수) · members(클러스터 멤버 수). 응답이 없으면 null(모름). */
+export function parseVsan(enabledRaw, runtimeXml) {
+  const enabled = boolOf(enabledRaw);
+  if (enabled == null && typeof runtimeXml !== 'string') return null;
+  const count = (t) => (typeof runtimeXml === 'string' ? (runtimeXml.match(new RegExp(`<${t}>`, 'g')) || []).length : null);
+  return { enabled, diskIssues: count('diskIssues'), members: count('membershipList') };
 }
 
 export function applyAdvanced(h, name, raw) {
@@ -123,6 +183,9 @@ export const HOST_CFG_CODES = Object.freeze({
   'acceptance-community': 'warn',
   'lockout-off': 'warn',
   'mob-enabled': 'warn',
+  'mp-dead': 'warn',
+  'mp-single': 'warn',
+  'vsan-disk-issue': 'warn',
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
@@ -154,6 +217,9 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mob === true) add('mob-enabled');
   if (h.lockdown === 'disabled') add('lockdown-off');
   if (h.shellTimeout === 0) add('shell-timeout-off');
+  if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
+  if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
+  if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
   return out;
 }
 
@@ -166,6 +232,8 @@ export const DRIFT_FIELDS = Object.freeze({
   lockdown: (host) => host.hcfg?.lockdown ?? null,
   acceptance: (host) => host.hcfg?.acceptance ?? null,
   sshPolicy: (host) => host.hcfg?.services?.ssh?.policy ?? null,
+  // v2.700(A2): 같은 클러스터는 같은 공유 LUN 을 봐야 한다(개수가 다르면 존·마스킹·경로 문제 후보).
+  sharedLuns: (host) => (host.hcfg?.mp ? String(host.hcfg.mp.shared) : null),
 });
 
 /**
@@ -226,5 +294,20 @@ export function sanitizeHostCfg(v) {
     acceptance: typeof v.acceptance === 'string' ? cap(v.acceptance, 32) : null,
     certNotAfter: numOr(v.certNotAfter),
     certSubject: typeof v.certSubject === 'string' ? cap(v.certSubject, 200) : null,
+    mp: sanitizeMp(v.mp),
+    vsan: v.vsan && typeof v.vsan === 'object' && !Array.isArray(v.vsan)
+      ? { enabled: typeof v.vsan.enabled === 'boolean' ? v.vsan.enabled : null, diskIssues: numOr(v.vsan.diskIssues), members: numOr(v.vsan.members) } : null,
+  };
+}
+function sanitizeMp(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const pol = {};
+  if (m.policies && typeof m.policies === 'object' && !Array.isArray(m.policies)) {
+    for (const [k, n] of Object.entries(m.policies).slice(0, 16)) if (/^[A-Za-z0-9_.-]{1,64}$/.test(k) && Number.isFinite(n)) pol[k] = Math.trunc(n);
+  }
+  const n = (x) => (Number.isFinite(x) && x >= 0 ? Math.trunc(x) : 0);
+  return {
+    luns: n(m.luns), shared: n(m.shared), paths: n(m.paths), dead: n(m.dead), singlePath: n(m.singlePath),
+    deadLuns: strList(m.deadLuns)?.slice(0, 10) || [], singleLuns: strList(m.singleLuns)?.slice(0, 10) || [], policies: pol,
   };
 }

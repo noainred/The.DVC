@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **593개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **596개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-05)
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (173)
+## 공통 (176)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -120,6 +120,9 @@
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
 | `DIRUSAGE_JOB_TIMEOUT_MS` | `900000` |  | dirusage/scheduler.js |
 | `DIRUSAGE_TICK_MS` | `60000` |  | dirusage/scheduler.js |
+| `DS_CFG_PER_CYCLE` |  |  | config.js |
+| `DS_CFG_REFRESH_MS` |  |  | config.js |
+| `DS_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `EDGE_MODE` | `''` | ✅ | config.js |
 | `GUESTDISK_CONCURRENCY` | `4` |  | guestdisk/poller.js |
 | `GUESTDISK_DB_PATH` |  |  | guestdisk/db.js |
@@ -777,4 +780,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 593
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 596

@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T13:03:18.624Z",
-  "count": 97,
+  "generatedAt": "2026-10-05T13:28:02.534Z",
+  "count": 98,
   "tools": [
     {
       "k": "service-hub",
@@ -428,6 +428,14 @@
     },
     {
       "k": "snapshot-age",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "storage-paths",
       "adminOnly": false,
       "perm": null,
       "external": null,
