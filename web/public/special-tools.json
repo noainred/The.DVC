@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T13:46:08.809Z",
-  "count": 99,
+  "generatedAt": "2026-10-05T14:01:23.417Z",
+  "count": 100,
   "tools": [
     {
       "k": "service-hub",
@@ -548,6 +548,14 @@
     },
     {
       "k": "host-hygiene",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-changes",
       "adminOnly": false,
       "perm": null,
       "external": null,

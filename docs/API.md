@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **917개** |
+| 엔드포인트 | **920개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 89개 |
-| GET | 496개 |
+| 라우트 파일 | 90개 |
+| GET | 499개 |
 | POST | 282개 |
 | PUT | 90개 |
 | PATCH | 2개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 387 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 390 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1008,6 +1008,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/vclogs/federate` | 권한 `tools` | [server/src/routes/api/checksLogs.js:269](../server/src/routes/api/checksLogs.js#L269) |
 | POST | `/tools/vclogs/federate` | 권한 `tools` | [server/src/routes/api/checksLogs.js:250](../server/src/routes/api/checksLogs.js#L250) |
 | GET | `/tools/vclogs/sources` | 권한 `tools` | [server/src/routes/api/checksLogs.js:218](../server/src/routes/api/checksLogs.js#L218) |
+| GET | `/tools/vm-changes` | 권한 `tools` | [server/src/routes/api/vmChanges.js:48](../server/src/routes/api/vmChanges.js#L48) |
+| GET | `/tools/vm-changes.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmChanges.js:76](../server/src/routes/api/vmChanges.js#L76) |
+| GET | `/tools/vm-changes/of` | 권한 `tools` | [server/src/routes/api/vmChanges.js:61](../server/src/routes/api/vmChanges.js#L61) |
 | GET | `/tools/vm-clone` | 역할 `admin` | [server/src/routes/api/vmClone.js:32](../server/src/routes/api/vmClone.js#L32) |
 | GET | `/tools/vm-clone/badges` | 권한 `tools` | [server/src/routes/api/vmClone.js:109](../server/src/routes/api/vmClone.js#L109) |
 | POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:47](../server/src/routes/api/vmClone.js#L47) |

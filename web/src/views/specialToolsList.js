@@ -94,6 +94,7 @@ export const TOOLS = [
   { k: 'license-expiry', icon: '📅', label: '라이선스 만료일 확인', desc: 'ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon 등 수집 가능한 전 라이선스의 유효/만료 날짜 — 만료·90일 임박 강조, Horizon 연결 서버 등록, CSV' },
   { k: 'esxi', icon: '🖳', label: 'ESXi 버전별', desc: '호스트 ESXi 버전 분포/목록' },
   { k: 'host-hygiene', icon: '🛡️', label: 'ESXi 호스트 구성 점검', desc: 'ESXi 호스트 보안·구성을 한 표로 — 호스트 인증서 만료·재부팅 필요·SSH/ESXi Shell 실행·NTP/syslog 미설정·커뮤니티 VIB 허용·계정 잠금 꺼짐·MOB·잠금 모드 + 클러스터 안에서 빌드·NTP·DNS·syslog·허용 수준이 다른 호스트(구성 드리프트) · 아직 읽지 않은 호스트는 따로 센다 · CSV', aka: ['host hygiene', '보안 하드닝', 'hardening', 'CIS', 'STIG', 'lockdown', '잠금 모드', 'SSH', 'NTP', 'syslog', '드리프트', 'drift', '인증서 만료', 'reboot required', '재부팅 필요', 'acceptance level', 'VIB'] },
+  { k: 'vm-changes', icon: '🔀', label: 'VM 이동·구성 변경 이력', desc: 'vMotion·DRS·Storage vMotion 이동 횟수와 과다 이동(churn) VM, 구성 변경 전/후·권한/역할 변경·누가 바꿨는지 + VM 상세에 그 VM 의 최근 이력 · CSV', aka: ['vMotion', 'DRS', 'Storage vMotion', 'svMotion', 'migration', '이동 이력', 'churn', 'reconfigure', '구성 변경', '권한 변경', 'permission', 'audit', '누가 바꿨'] },
   { k: 'cluster-check', icon: '🧩', label: '클러스터 HA·DRS 점검', desc: '클러스터마다 HA(수용 제어·호스트 모니터링)·DRS(자동화 수준)·유효 호스트 수·선호도/반선호도 규칙 위반·EVC 꺼짐(CPU 세대 혼재)을 한 표로 + VM·호스트 상세에 그 클러스터 상태 · CSV', aka: ['HA', 'DRS', 'vSphere HA', 'admission control', '수용 제어', 'affinity', '선호도 규칙', 'anti-affinity', 'EVC', 'cluster', '클러스터 점검'] },
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: '게이트웨이·세그먼트·노드·DFW 방화벽·보안그룹 등 NSX 전체 관리', perm: 'inv.nsx' },

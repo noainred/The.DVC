@@ -34,6 +34,7 @@ import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives
 import { STable } from './STable.jsx';
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
+import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText } from '../views/vmchanges/vmChangesText.js'; // v2.702
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
 
 function DRow({ label, children, full = false, nowrap = false }) {
@@ -396,7 +397,7 @@ function VmCfgSection({ vm }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
             {view.rows.map((r) => <DRow key={r.label} label={r.label}><span title={r.title}>{r.value}</span></DRow>)}
           </div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{view.note}</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>{view.note}</div>
         </>
       )}
     </div>
@@ -498,6 +499,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
       {(type === 'vm' || type === 'host') && <ClusterCfgSection item={item} isVm={type === 'vm'} />}
+      {type === 'vm' && <VmChangesSection vm={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -601,7 +603,7 @@ function HostCfgSection({ host }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
             {view.rows.map((r) => <DRow key={r.label} label={r.label}><span title={r.title}>{r.value}</span></DRow>)}
           </div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{view.note}</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>{view.note}</div>
         </>
       )}
     </div>
@@ -659,9 +661,60 @@ function ClusterCfgSection({ item, isVm }) {
               {clusterDetailRows(d.cluster).map((r) => <DRow key={r.label} label={r.label}>{r.value}</DRow>)}
             </div>
             {isVm && vmRulesText(d.vmRules) && <div style={{ fontSize: 12, marginTop: 6, overflowWrap: 'anywhere' }}>{d.vmRules.length ? `이 VM 의 규칙: ${vmRulesText(d.vmRules)}` : vmRulesText(d.vmRules)}</div>}
-            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{clusterAgeText(d.cluster.at)}{clusterAgeText(d.cluster.at) ? ' · ' : ''}전체 목록은 특수 기능 '클러스터 HA·DRS 점검' 에서 봅니다.</div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>{clusterAgeText(d.cluster.at)}{clusterAgeText(d.cluster.at) ? ' · ' : ''}전체 목록은 특수 기능 '클러스터 HA·DRS 점검' 에서 봅니다.</div>
           </>
         )}
+    </div>
+  );
+}
+
+/**
+ * v2.702(A7·A8): 이 VM 의 최근 이동(vMotion·DRS·Storage vMotion)과 구성 변경 — 이 포탈이 받아 둔 vCenter 이벤트(30일).
+ * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다 · 늦게 온 응답은 버린다.
+ */
+function VmChangesSection({ vm }) {
+  const allowed = toolAllowed('vm-changes');
+  const [st, setSt] = useState({ data: null, error: null });
+  useEffect(() => {
+    if (!allowed || !vm?.id) return undefined;
+    let active = true;
+    setSt({ data: null, error: null });
+    fetchJson('/tools/vm-changes/of', { vmId: vm.id })
+      .then((d) => { if (active) setSt({ data: d, error: null }); })
+      .catch((e) => { if (active) setSt({ data: null, error: e }); });
+    return () => { active = false; };
+  }, [allowed, vm?.id]);
+  if (!allowed || !vm?.id) return null;
+  const d = st.data;
+  const items = Array.isArray(d?.items) ? d.items : [];
+  const moves = items.filter((x) => x.cat === 'move').length;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>이동·구성 변경 — 최근 {d?.days ?? 30}일{d ? ` · 이동 ${moves} · 변경 ${items.length - moves}${d.more ? ` (더 있음 ${d.more})` : ''}` : ''}</div>
+      {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : '이동·변경 이력을 불러오지 못했습니다.'}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : d.logs?.enabled === false ? <div className="muted" style={{ fontSize: 12 }}>vCenter 이벤트 수집이 꺼져 있어 이력을 보여 줄 수 없습니다(설정 › vCenter 로그).</div>
+        : !d.lastTs ? <div className="muted" style={{ fontSize: 12 }}>이 VM 의 vCenter 에서 받은 이벤트가 아직 없습니다 — '이동 없음' 이 아닙니다.</div>
+        : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.</div>
+        : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
+            {items.map((x, i) => (
+              <li key={`${x.ts}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0, fontSize: 12, whiteSpace: 'normal', flexWrap: 'wrap' }}>
+                <span className="muted" style={{ flex: 'none', whiteSpace: 'nowrap' }}>{vmChgTs(x.ts)}</span>
+                <span className={`badge ${x.cat === 'move' ? (x.kind === 'drs' ? 'gray' : 'blue') : 'amber'}`} style={{ flex: 'none', whiteSpace: 'nowrap' }}>
+                  {x.cat === 'move' ? (MOVE_KIND_LABEL[x.kind] || '이동') : '구성 변경'}
+                </span>
+                <span style={{ minWidth: 0, flex: '1 1 260px', overflowWrap: 'anywhere' }}>
+                  {x.cat === 'move'
+                    ? [routeText(x.from, x.to), x.fromDs || x.toDs ? `스토리지 ${routeText(x.fromDs, x.toDs)}` : ''].filter(Boolean).join(' · ')
+                    : changeText(x)}
+                  {x.user ? <span className="muted"> · {x.user}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>VM 이름으로 찾습니다(같은 vCenter 의 동명 VM 은 구분하지 못합니다) · 전체 목록은 특수 기능 'VM 이동·구성 변경 이력' 에서 봅니다.</div>
     </div>
   );
 }
