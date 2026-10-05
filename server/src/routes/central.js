@@ -16,6 +16,7 @@
  * 복사해 시작하면 이 방어가 빠진다.
  */
 
+import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
@@ -658,7 +659,7 @@ export function sanitizeVcLocation(v) {
   return { value: out, coerced };
 }
 
-function sanitizeInventoryList(list, vcId, max, dropped) {
+export function sanitizeInventoryList(list, vcId, max, dropped) {
   const out = [];
   for (const x of Array.isArray(list) ? list.slice(0, max) : []) {
     if (!isPlainObj(x)) { dropped.notObject += 1; continue; }
@@ -675,6 +676,12 @@ function sanitizeInventoryList(list, vcId, max, dropped) {
       const v = o[k];
       if (v == null || (typeof v === 'number' && Number.isFinite(v))) continue;
       o[k] = numOrNull(v); dropped.coerced += 1;
+    }
+    // v2.695: VM 이 쓰는 DNS 서버(soapClient.vmDns) — 아는 모양만 담는다(모양이 아니면 null = 모름).
+    if (Object.hasOwn(o, 'dns') && o.dns != null) {
+      const d = sanitizeVmDns(o.dns);
+      if (d == null) dropped.coerced += 1;
+      o.dns = d;
     }
     out.push(o);
   }
