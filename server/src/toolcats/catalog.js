@@ -44,7 +44,7 @@ export const MAX_LABEL = 40;
 export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
-    tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'esxitemp', 'roomtemp',
+    tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
       'powermap', 'pdu', 'gpu', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
       'bm-usage', 'corp-usage', 'power-total'],
   },
@@ -61,7 +61,7 @@ export const PRESET = Object.freeze([
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
     tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone',
-      'vmprovision', 'vm-export', 'esxi', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
+      'vmprovision', 'vm-export', 'esxi', 'host-hygiene', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
   },
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',

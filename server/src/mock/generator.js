@@ -164,6 +164,31 @@ function mkGpus(idx, site) {
 // v2.653: ord = 그 호스트 안에서 몇 번째 VM 인가. 예전에는 전역 idx % 3 만 봐서 GPU 호스트 49대 중 16대가 GPU VM 0대였다
 //   (VM 배치와 idx 주기가 겹쳤다) — 데모 표의 할당·동작·온도 칸이 그 호스트에서 전부 비었다. 이제 호스트마다 앞 VM 부터 준다
 //   (패스쓰루는 카드 수만큼, vGPU 는 호스트 VM 의 절반 — 프로파일 합이 VRAM 을 넘는 과할당도 재현된다).
+// v2.699: 호스트 구성(hostcfg/parse.js 와 같은 모양) — 판정 갈래·클러스터 드리프트가 나오게 idx 로 결정적 분포.
+function mkHostCfg(h, site) {
+  const i = h.idx; const s = site.id.length;
+  const ntp = i % 11 === 3 ? [] : (i % 7 === 5 ? ['ntp2.corp.local'] : ['ntp1.corp.local', 'ntp2.corp.local']);
+  return {
+    at: Date.now() - (i % 6) * 3_600_000,
+    lockdown: i % 4 === 0 ? 'normal' : 'disabled',
+    rebootRequired: i % 13 === 4,
+    services: {
+      ssh: { running: i % 5 === 1, policy: i % 10 === 1 ? 'on' : 'off' },
+      shell: { running: i % 17 === 2, policy: 'off' },
+      ntpd: { running: i % 19 !== 6, policy: 'on' },
+    },
+    ntpServers: ntp,
+    dnsServers: i % 8 === 7 ? ['10.0.0.53'] : ['10.0.0.53', '10.0.1.53'],
+    syslogHost: i % 9 === 4 ? '' : 'udp://syslog.corp.local:514',
+    lockFailures: i % 14 === 6 ? 0 : 5,
+    shellTimeout: i % 3 === 0 ? 0 : 900,
+    mob: i % 23 === 11,
+    acceptance: i % 29 === 9 ? 'community' : 'partner',
+    certNotAfter: Date.now() + ((i + s) % 15 === 0 ? -5 : (i + s) % 15 === 1 ? 20 : 400) * 86_400_000,
+    certSubject: `CN=${h.name}.corp.local`,
+  };
+}
+
 // v2.697(B10): VM 구성 속성(vmcfg/parse.js parseVmCfgProps 와 같은 모양) — 판정 갈래가 고루 나오게 idx 로 결정적 분포.
 function mkVmCfg(vm, powered) {
   const i = vm.idx;
@@ -446,6 +471,7 @@ export function generateSnapshot() {
           const pct = Math.round(cpuLoad * 60 + (h.idx % 13));
           return { gpuMemUsedPct: pct, gpuMemUsedMB: Math.round((capMB * pct) / 100), gpuTempC: Math.round(34 + cpuLoad * 30 + (h.idx % 5)) };
         })(),
+        ...(h.idx % 9 === 8 ? {} : { hcfg: mkHostCfg(h, site) }),
       });
 
       if (connectionState === 'DISCONNECTED') {

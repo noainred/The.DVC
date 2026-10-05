@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T12:33:01.073Z",
-  "count": 96,
+  "generatedAt": "2026-10-05T13:03:18.624Z",
+  "count": 97,
   "tools": [
     {
       "k": "service-hub",
@@ -532,6 +532,14 @@
     },
     {
       "k": "esxi",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "host-hygiene",
       "adminOnly": false,
       "perm": null,
       "external": null,

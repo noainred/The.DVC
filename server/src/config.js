@@ -114,6 +114,11 @@ export const config = {
   vmCfgPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.VM_CFG_PER_CYCLE, 1_000)) || 1_000)),
   vmDevRefreshMs: clampIntervalMs(numEnv(process.env.VM_DEV_REFRESH_MS, 21_600_000), 21_600_000, 300_000),
   vmDevPerCycle: Math.max(1, Math.min(1_000, Math.trunc(numEnv(process.env.VM_DEV_PER_CYCLE, 150)) || 150)),
+  // v2.699(A1·A9·A11·A12): 호스트 구성·보안(서비스·NTP·DNS·syslog·잠금 정책·MOB·허용 수준·인증서 만료·재부팅 필요).
+  // 고급 설정·허용 수준은 호스트당 호출 몇 번이라 **6시간 주기 · 주기당 상한**으로 오래된 호스트부터 나눠 읽는다(hostcfg/cache.js).
+  hostCfgScan: process.env.HOST_CFG_SCAN !== 'false',
+  hostCfgRefreshMs: clampIntervalMs(numEnv(process.env.HOST_CFG_REFRESH_MS, 21_600_000), 21_600_000, 300_000),
+  hostCfgPerCycle: Math.max(1, Math.min(500, Math.trunc(numEnv(process.env.HOST_CFG_PER_CYCLE, 40)) || 40)),
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
   // 외부 공개용 소개 페이지(정적 데모 — 포탈 데이터/인증과 무관). server/src 안에 두어

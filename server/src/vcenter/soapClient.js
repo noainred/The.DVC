@@ -24,6 +24,8 @@ export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
 import { refreshVmCfg } from '../vmcfg/collect.js';   // v2.697(B10)
 import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
+import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
+import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -1748,6 +1750,13 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     // vm.cfg·vm.dev 로 싣는다. 실패는 격리(인벤토리 수집은 성공) — 캐시에 없는 VM 은 키 자체가 없다(= 미수집).
     const vmRefs = objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref);
     try { await refreshVmCfg(c, vc.id, vmRefs); } catch (err) { console.warn(`[collect] ${vc.id} VM 구성 속성 갱신 건너뜀: ${err.message}`); }
+    // v2.699(A1·A9·A11·A12): 호스트 구성·보안 — 연결된 호스트만, 오래된 것부터 주기당 상한만큼(hostcfg/collect.js).
+    // 캐시 값을 host.hcfg 로 싣는다. 연결이 끊긴 호스트는 갱신하지 않지만 직전 값은 싣는다(판정은 연결 상태를 본다).
+    {
+      const liveHostRefs = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED').map(([ref]) => ref);
+      try { await refreshHostCfg(c, vc.id, liveHostRefs, { allRefs: [...hostByRef.keys()] }); } catch (err) { console.warn(`[collect] ${vc.id} 호스트 구성 갱신 건너뜀: ${err.message}`); }
+      for (const [ref, h] of hostByRef) { const e = hostCfgCacheGet(vc.id, ref); if (e) h.hcfg = e; }
+    }
 
     const vms = [];
     for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
