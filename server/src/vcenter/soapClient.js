@@ -621,9 +621,117 @@ function extractIPv4s(netXml, primary) {
   // 일부 vCenter는 guest.net의 IP 원소를 <ipAddress xsi:type="xsd:string">처럼 속성을 붙여
   // 직렬화한다 → 속성을 허용하지 않으면 guest.net의 IP가 전부 누락되고 primary(=주로 사설)만
   // 남아, 'VM에 공인/추가 IP가 있어도 사설만 보이는' 문제가 생긴다. [^>]* 로 속성을 허용한다.
-  if (netXml) { for (const m of netXml.matchAll(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/g)) add(m[1]); }
+  // v2.695: NIC 의 <dnsConfig> 안 <ipAddress> 는 그 VM 이 **쓰는 DNS 서버** 주소다 — VM 에 설정된 IP 가 아니다.
+  //   예전 정규식은 위치를 가리지 않아 8.8.8.8·사내 DNS 서버 주소가 VM IP 로 실려 IP 대장에 거짓 충돌·중복·멀티홈을 만들었다.
+  //   DNS 블록을 먼저 지우고 읽는다(DNS 는 vmDns() 가 따로 읽는다).
+  if (netXml) { for (const m of stripXmlBlocks(netXml, 'dnsConfig').matchAll(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/g)) add(m[1]); }
   add(primary);
   return out;
+}
+
+/**
+ * v2.695: `<tag …>…</tag>` 블록을 전부 지운다 — indexOf 로 선형(닫는 태그가 없는 입력에서 정규식 `[\s\S]*?` 는 시작마다 끝까지 훑는다).
+ * 닫는 태그가 없으면 그 시작부터 끝까지 지운다(그 뒤 내용이 DNS 블록 안인지 밖인지 알 수 없으므로 IP 로 읽지 않는 쪽).
+ */
+export function stripXmlBlocks(xml, tag) {
+  const s = String(xml || '');
+  const open = `<${tag}`; const close = `</${tag}>`;
+  let out = ''; let i = 0;
+  for (;;) {
+    let j = s.indexOf(open, i);
+    // `<dnsConfigX` 같은 다른 태그는 건너뛴다(다음 글자가 공백·> 또는 / 여야 같은 태그).
+    while (j >= 0 && !/[\s>/]/.test(s.charAt(j + open.length))) j = s.indexOf(open, j + 1);
+    if (j < 0) { out += s.slice(i); break; }
+    out += s.slice(i, j);
+    const gt = s.indexOf('>', j);
+    if (gt < 0) break;
+    if (s.charAt(gt - 1) === '/') { i = gt + 1; continue; }   // <dnsConfig/>
+    const k = s.indexOf(close, gt);
+    if (k < 0) break;
+    i = k + close.length;
+  }
+  return out;
+}
+
+/** `<tag …>…</tag>` 블록 내용 목록(선형). 같은 태그 중첩은 없는 필드에만 쓴다(dnsConfig·GuestStackInfo). */
+function xmlBlocks(xml, tag, max = 64) {
+  const s = String(xml || '');
+  const open = `<${tag}`; const close = `</${tag}>`;
+  const out = []; let i = 0;
+  while (out.length < max) {
+    let j = s.indexOf(open, i);
+    while (j >= 0 && !/[\s>/]/.test(s.charAt(j + open.length))) j = s.indexOf(open, j + 1);
+    if (j < 0) break;
+    const gt = s.indexOf('>', j);
+    if (gt < 0) break;
+    if (s.charAt(gt - 1) === '/') { i = gt + 1; continue; }
+    const k = s.indexOf(close, gt);
+    if (k < 0) break;
+    out.push(s.slice(gt + 1, k));
+    i = k + close.length;
+  }
+  return out;
+}
+
+const DNS_LIST_MAX = 8;
+const isIPv6 = (v) => /^[0-9a-f:.]+$/i.test(v) && v.includes(':') && v.length <= 45;
+/** DNS 서버 주소로 받을 값 — IPv4(정규형) 또는 IPv6. 루프백(127.x — systemd-resolved 의 127.0.0.53 등)도 **설정값이므로 남긴다**. */
+const dnsAddr = (v) => { v = String(v || '').trim(); return isIPv4(v) || isIPv6(v) ? v : null; };
+const xmlText = (blk, tag) => {
+  const v = new RegExp(`<${tag}(?:\\s[^>]*)?>([^<]*)</${tag}>`).exec(blk)?.[1];
+  return v == null ? null : v.trim().slice(0, 253);
+};
+const xmlBool = (blk, tag) => { const v = xmlText(blk, tag); return v === 'true' ? true : v === 'false' ? false : null; };
+
+/** NetDnsConfigInfo 블록 하나 → { servers, domain, search, dhcp, hostName }. 아무것도 없으면 null. */
+function parseDnsConfig(blk) {
+  const servers = [];
+  for (const m of blk.matchAll(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/g)) {
+    const a = dnsAddr(m[1]); if (a && !servers.includes(a) && servers.length < DNS_LIST_MAX) servers.push(a);
+  }
+  const search = [];
+  for (const m of blk.matchAll(/<searchDomain[^>]*>([^<]+)<\/searchDomain>/g)) {
+    const d = m[1].trim().slice(0, 253); if (d && !search.includes(d) && search.length < DNS_LIST_MAX) search.push(d);
+  }
+  const out = { servers, domain: xmlText(blk, 'domainName') || null, search, dhcp: xmlBool(blk, 'dhcp'), hostName: xmlText(blk, 'hostName') || null };
+  return (servers.length || out.domain || search.length || out.dhcp != null || out.hostName) ? out : null;
+}
+
+/**
+ * v2.695: VM 게스트가 보고한 DNS 설정 — `guest.net`(NIC 별 dnsConfig)과 `guest.ipStack`(OS 스택 dnsConfig).
+ * 이미 매 주기 받는 두 속성에서 읽으므로 vCenter 왕복이 늘지 않는다.
+ * @returns {null | { servers: string[], stack: object|null, nics: object[] }}
+ *   servers = 스택 먼저, 그다음 NIC 순 합집합(최대 8). VMware Tools 가 아무것도 보고하지 않으면 **null(모름)** — 빈 배열('DNS 없음')과 구분한다.
+ */
+export function vmDns(netXml, ipStackXml) {
+  let stack = null;
+  for (const st of xmlBlocks(ipStackXml, 'GuestStackInfo', 8)) {
+    for (const d of xmlBlocks(st, 'dnsConfig', 2)) { const c = parseDnsConfig(d); if (c) { stack = c; break; } }
+    if (stack) break;
+  }
+  const nics = [];
+  const nicBlocks = xmlBlocks(netXml, 'GuestNicInfo', 16);
+  for (const nb of nicBlocks) {
+    const d = xmlBlocks(nb, 'dnsConfig', 1)[0];
+    const c = d ? parseDnsConfig(d) : null;
+    if (!c) continue;
+    nics.push({ network: xmlText(stripXmlBlocks(nb, 'dnsConfig'), 'network') || null, mac: xmlText(nb, 'macAddress') || null,
+      servers: c.servers, domain: c.domain, search: c.search, dhcp: c.dhcp });
+    if (nics.length >= 8) break;
+  }
+  // GuestNicInfo 경계를 못 찾는 직렬화 — dnsConfig 블록만이라도 읽는다(어느 NIC 인지는 모른다).
+  if (!nicBlocks.length) {
+    for (const d of xmlBlocks(netXml, 'dnsConfig', 8)) {
+      const c = parseDnsConfig(d);
+      if (c) nics.push({ network: null, mac: null, servers: c.servers, domain: c.domain, search: c.search, dhcp: c.dhcp });
+    }
+  }
+  if (!stack && !nics.length) return null;
+  const servers = [];
+  for (const a of [...(stack?.servers || []), ...nics.flatMap((n) => n.servers)]) {
+    if (!servers.includes(a) && servers.length < DNS_LIST_MAX) servers.push(a);
+  }
+  return { servers, stack, nics };
 }
 export function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
@@ -1667,6 +1775,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
         gateways: vmGateways(p['guest.ipStack']),
+        dns: vmDns(p['guest.net'], p['guest.ipStack']),   // v2.695: VM 이 쓰는 DNS 서버(IP 와 분리)
         toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
           : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
         toolsVersion: p['guest.toolsVersion'] || '',

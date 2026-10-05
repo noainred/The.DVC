@@ -444,6 +444,7 @@ export function generateSnapshot() {
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
+        dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
@@ -530,6 +531,23 @@ function mkIps(site, idx) {
   if (idx % 3 === 0) ips.push(`172.16.${idx % 254}.${(idx * 7 % 253) + 1}`);
   if (idx % 5 === 0) ips.push(`192.168.${idx % 254}.${(idx * 3 % 253) + 1}`);
   return ips;
+}
+// v2.695: 게스트가 보고하는 DNS 설정(목). 사내 DNS 는 같은 법인 VM 1·2번의 IP(정체 대조가 VM 으로 찾게),
+//   일부는 공인 DNS·다른 법인 DNS·DHCP·NIC/OS 불일치·미보고(null)로 둔다.
+function mkDns(site, idx) {
+  if (idx % 19 === 0) return null;                                   // Tools 가 DNS 를 보고하지 않음(모름)
+  const corp = [mkIp(site, 1), mkIp(site, 2)];
+  const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
+  let servers = corp;
+  if (idx % 23 === 0) servers = ['8.8.8.8', corp[0]];
+  else if (idx % 41 === 0) servers = ['168.126.63.1', '168.126.63.2'];
+  else if (idx % 37 === 0) servers = ['10.0.0.53'];                  // 대장에 없는 주소
+  const dhcp = idx % 7 === 0;
+  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: `vm${idx}` };
+  const nicServers = idx % 31 === 0 ? [corp[1], '1.1.1.1'] : servers;   // NIC 설정 ≠ OS 실제
+  return { servers: [...new Set([...servers, ...nicServers])].slice(0, 8), stack,
+    nics: [{ network: 'VM Network', mac: `00:50:56:${(idx >> 8 & 255).toString(16).padStart(2, '0')}:${(idx & 255).toString(16).padStart(2, '0')}:01`,
+      servers: nicServers, domain: dom, search: [dom], dhcp }] };
 }
 function severityRank(s) {
   return { critical: 3, warning: 2, info: 1 }[s] || 0;
