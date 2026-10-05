@@ -357,6 +357,9 @@ describe('DNS 서버 상세', () => {
   });
   it('전원·방식 — 모르면 —', () => {
     expect(powerText('poweredOn')).toEqual({ text: '켜짐', badge: 'green' });
+    expect(powerText('POWERED_ON')).toEqual({ text: '켜짐', badge: 'green' });   // 포탈 스냅샷 표기
+    expect(powerText('POWERED_OFF').text).toBe('꺼짐');
+    expect(vmMatches({ powerState: 'POWERED_ON' }, 'on')).toBe(true);
     expect(powerText('poweredOff').text).toBe('꺼짐');
     expect(powerText(null)).toEqual({ text: '—', badge: '' });
     expect(modeText(true)).toBe('DHCP');
@@ -435,8 +438,10 @@ describe('정책 입력 검증 미리보기', () => {
     expect(rows.map((r) => [r.id, r.orphan])).toEqual([['vc-nj', false], ['vc-wa', false], ['vc-gone', true]]);
     expect(violText(rows[0])).toEqual({ text: '위반 9대', tone: 'warn' });
     expect(violText(rows[1])).toEqual({ text: '정책 없음', tone: 'muted' });
-    expect(violText(rows[2])).toMatchObject({ text: '—', tone: 'muted' });   // 서버가 주지 않으면 지어내지 않는다
-    expect(violText(rows[2]).title).toMatch(/주지 않습니다/);
+    expect(violText(rows[2])).toMatchObject({ text: '—', tone: 'muted' });   // 판정하지 않은 법인(null)은 지어내지 않는다
+    expect(violText(rows[2]).title).toMatch(/판정하지 않았습니다/);
+    expect(violText({ list: [], viol: 3 })).toMatchObject({ text: '공인 DNS 3대', tone: 'warn' });   // 목록이 비어도 공인 규칙 위반은 숨기지 않는다
+    expect(violText({ list: [], viol: 0 })).toEqual({ text: '정책 없음', tone: 'muted' });
     expect(violText({ list: ['1.1.1.1'], viol: 0 })).toEqual({ text: '위반 없음', tone: 'ok' });
   });
   it('범위 필드는 서버 응답 그대로', () => {

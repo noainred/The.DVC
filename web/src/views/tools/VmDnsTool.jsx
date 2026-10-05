@@ -67,7 +67,7 @@ function SectionTitle({ title, sub, right }) {
 
 export function KpiRow({ cards }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(148px, 100%), 1fr))', gap: 12 }}>
       {cards.map((k) => (
         <div key={k.key} className="card" style={{ padding: '14px 16px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="muted" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -152,7 +152,7 @@ export function MatrixSection({ matrix, servers }) {
         <div className="muted" style={{ padding: 16, fontSize: 13 }}>매트릭스로 보일 데이터가 없습니다.</div>
       ) : (
         <div style={{ padding: '10px 12px' }}>
-          <STable minWidth={Math.max(420, 90 + (m.cols.length + 1) * 64)} style={{ borderCollapse: 'separate', borderSpacing: 4 }}>
+          <STable minWidth={Math.max(360, 140 + (m.cols.length + 1) * 60)} style={{ borderCollapse: 'separate', borderSpacing: 4 }}>
             <thead>
               <tr>
                 <th style={{ padding: '4px 6px' }}>법인</th>
@@ -165,7 +165,7 @@ export function MatrixSection({ matrix, servers }) {
             <tbody>
               {m.rows.map((r) => (
                 <tr key={r.vcenterId || r.name}>
-                  <td title={`VM ${nText(r.total)}대`} style={{ padding: '4px 6px', fontWeight: 500, borderBottom: 0 }}>{r.name}</td>
+                  <td data-sort={r.name || ''} title={`${r.name} · VM ${nText(r.total)}대`} style={{ padding: '4px 6px', fontWeight: 500, borderBottom: 0, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
                   {r.cells.map((c, i) => (
                     <td key={i} data-sort={c.v ?? ''} title={c.title}
                       style={{ padding: 0, borderBottom: 0, height: 32, minWidth: 52, textAlign: 'center', borderRadius: 6, background: c.bg, fontFamily: MONO, fontSize: 12, color: c.strong ? 'var(--text)' : 'var(--text-faint)' }}>
@@ -603,7 +603,7 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-      <section className="card" style={{ ...PANEL, flex: '999 1 620px' }}>
+      <section className="card" style={{ ...PANEL, flex: '3 1 560px' }}>
         <SectionTitle
           title="법인별 승인 DNS"
           sub="비어 있는 법인은 판정하지 않습니다('정책 없음' — 위반으로 세지 않음)"
@@ -648,7 +648,7 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
         )}
       </section>
 
-      <section className="card" style={{ ...PANEL, flex: '1 1 460px' }}>
+      <section className="card" style={{ ...PANEL, flex: '2 1 520px' }}>
         <SectionTitle
           title="DNS 도달성 점검"
           sub="53번에 실제 질의를 보내 응답을 봅니다 · 누를 때만 실행"
@@ -671,7 +671,7 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
           {skippedByText(probe.summary) ? ` · 건너뜀: ${skippedByText(probe.summary)}` : ''}
         </div>
         {nServers > 0 && (
-          <STable minWidth={720} limit={50}>
+          <STable minWidth={600} limit={50}>
             <thead><tr><th>서버</th><th>UDP</th><th>TCP</th><th>질의 이름</th><th>잰 곳</th><th>시각</th></tr></thead>
             <tbody>
               {servers.map((s) => {
@@ -685,7 +685,7 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
                     <td style={{ fontFamily: MONO, color: TONE_COLOR[measured ? u.tone : 'muted'] }}>{measured ? u.text.replace(/^udp /, '') : '—'}</td>
                     <td style={{ fontFamily: MONO, color: TONE_COLOR[measured ? t.tone : 'muted'] }}>{measured ? t.text.replace(/^tcp /, '') : '—'}</td>
                     <td className="muted" style={{ fontFamily: MONO }}>{qnameText(p?.qname)}</td>
-                    <td className="muted" style={{ whiteSpace: 'normal', minWidth: 160 }}>{!p ? '점검 안 함' : p.where === 'edge-only' ? '중앙에서 못 잼(엣지 법인만 사용)' : p.skipped ? `중앙 · ${reachText(p).where}` : p.where === 'central' ? '중앙' : '—'}</td>
+                    <td className="muted" style={{ whiteSpace: 'normal', minWidth: 120 }}>{!p ? '점검 안 함' : p.where === 'edge-only' ? '중앙에서 못 잼(엣지 법인만 사용)' : p.skipped ? `중앙 · ${reachText(p).where}` : p.where === 'central' ? '중앙' : '—'}</td>
                     <td className="muted" data-sort={tsMs(p?.at) ?? ''}>{p?.at ? agoText(tsMs(p.at)) : '—'}</td>
                   </tr>
                 );

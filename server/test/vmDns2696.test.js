@@ -115,6 +115,13 @@ test('② 정책 — 명시 승인 우선 · 공인 비승인 · 목록 없음 n
   // 비승인 VM = A-APP1(8.8.8.8) · A-APP2(10.2.0.53) · A-APP3(10.1.0.9) · A-APP4(셋 다)
   assert.equal(out.kpis.unapprovedVms, 4);
   assert.equal(out.kpis.publicVms, 2, 'A-APP1(8.8.8.8) · A-APP4(203.0.113.7)');
+  // v2.696(리드 통합): 법인별 '위반 N대' — vcenters[].unapprovedVms 합 = KPI, vCenter 필터가 걸리면 다른 vCenter 는 null(판정 안 함)
+  const sumVc = out.vcenters.reduce((a, v) => a + (v.unapprovedVms || 0), 0);
+  assert.equal(sumVc, out.kpis.unapprovedVms);
+  const one = A.analyzeVmDns({ snap: snapBase(), policy: pol, vcenterId: 'vc-a' });
+  const others = one.vcenters.filter((v) => v.id !== 'vc-a');
+  assert.ok(others.length > 0 && others.every((v) => v.unapprovedVms === null), '필터 밖 vCenter 는 0 이 아니라 null');
+  assert.equal(typeof one.vcenters.find((v) => v.id === 'vc-a').unapprovedVms, 'number');
 });
 
 test('③ NIC≠OS · DHCP · DNS 1개 · 다른 법인 DNS', () => {
@@ -197,6 +204,8 @@ test('⑥ 매트릭스 · 도메인 · 도달성 점검 대상', () => {
 });
 
 test('⑦ 정책 검증 — 정규형 · CIDR 경계 · 빈 마스크 · stale · 손상 보존', () => {
+  assert.equal(P.checkPolicyEntry('10.0.0.0 /24').ok, false, '안쪽 빈 칸은 정규형이 아니다(웹 판정과 같다)');
+  assert.equal(P.checkPolicyEntry('10.0.0.1\t').ok, true, '앞뒤 공백은 다듬는다');
   const ok = (v) => P.checkPolicyEntry(v).ok;
   assert.ok(ok('10.20.0.53'));
   assert.ok(ok('10.20.0.0/24'));
@@ -483,4 +492,19 @@ test('⑪ 등록 — 도구 매핑 · 엣지 로그 표 · 서비스 점검 · D
   assert.equal(netTools.indexOf('vm-dns'), netTools.indexOf('ipam') + 1, 'ipam 옆');
   const st = PO.vmDnsHistoryStatus();
   assert.ok(st.intervalMs >= 60_000 && 'lastRunAt' in st);
+});
+
+test('⑫ 정책 항목 판정 — 서버와 웹 사본(vmDnsText.checkPolicyEntry)이 같은 입력에 같은 결과(번들 경계로 두 벌)', async () => {
+  const { pathToFileURL } = await import('node:url');
+  const web = await import(pathToFileURL(path.resolve(SRC, '../../web/src/views/tools/vmDnsText.js')).href);
+  const cases = ['10.20.0.53', ' 10.20.0.53 ', '10.20.0.53\t', '10.0.0.0 /24', '10.0.0.0/ 24', '10.0.0.0\t/24', '10. 0.0.1', '10.0.0.0/24',
+    '10.0.0.0/8', '10.0.0.0/7', '10.0.0.0/33', '10.0.0.0/', '10.0.0.0/08', '10.0.0.5/24', '010.0.0.1', '10..0.1', '256.0.0.1', '1.2.3',
+    '10.0.0.1-10.0.0.5', '10.0.0.0/24/1', '', '   ', 'abc', '8.8.8.8', '0.0.0.0', '255.255.255.255', `10.0.0.1${' '.repeat(70)}`, 'x'.repeat(65)];
+  const diff = [];
+  for (const c of cases) {
+    const s = P.checkPolicyEntry(c); const w = web.checkPolicyEntry(c);
+    if (s.ok !== w.ok || (s.ok && s.value !== w.value)) diff.push(`${JSON.stringify(c)} 서버 ${JSON.stringify(s)} / 웹 ${JSON.stringify(w)}`);
+  }
+  assert.deepEqual(diff, []);
+  assert.equal(P.checkPolicyEntry('10.0.0.0 /24').ok, false, '리드 지적 사례 — 빈 칸 낀 CIDR');
 });

@@ -325,11 +325,20 @@ export function analyzeVmDns(o = {}) {
   const { vms, servers, perVc, vcName, vcList, inScope } = idx;
   const policy = o.policy || {};
 
+  // 법인(vCenter)별 비승인 VM 수 — 정책 화면의 '위반 N대'. 판정한 VM(필터 안)으로만 센다:
+  //   vcenterId 필터가 걸렸으면 다른 vCenter 는 이번 응답에서 판정하지 않았으므로 null(0 이 아니다).
+  const unapprovedByVc = new Map();
+  for (const r of vms) {
+    if (!unapprovedByVc.has(r.vc)) unapprovedByVc.set(r.vc, 0);
+    if (r.info.state === 'reported' && (r.flags || []).includes('unapproved')) unapprovedByVc.set(r.vc, unapprovedByVc.get(r.vc) + 1);
+  }
   const vcenters = vcList.filter((v) => inScope(v.id)).map((v) => {
     const c = perVc.get(String(v.id)) || { vms: 0, reported: 0, unknown: 0, notCollected: 0 };
     const site = v.collectSource === 'site' || v.collectMode === 'site';
     const rest = v.collectSource === 'rest' || v.collectMethod === 'rest';
-    return { id: String(v.id), name: vcName.get(String(v.id)), ...c, collect: site ? 'site' : 'direct', rest };
+    const judged = !idx.vcFilter || idx.vcFilter === String(v.id);
+    return { id: String(v.id), name: vcName.get(String(v.id)), ...c, collect: site ? 'site' : 'direct', rest,
+      unapprovedVms: judged ? (unapprovedByVc.get(String(v.id)) ?? 0) : null };
   }).sort((a, b) => byName(a.name, b.name));
 
   const k = { vms: 0, reported: 0, unknown: 0, notCollected: 0, servers: servers.size, serversByKind: { vm: 0, host: 0, public: 0, unknown: 0 },

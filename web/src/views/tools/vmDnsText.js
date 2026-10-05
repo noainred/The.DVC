@@ -473,13 +473,15 @@ export function vmServerList(vm) {
 }
 /** 이 서버를 첫 DNS 로 쓰는가 — position 의 기준(0/1)에 기대지 않고 목록에서 직접 본다. */
 export const isFirstFor = (vm, ip) => vmServerList(vm)[0] === ip;
-export const isPoweredOn = (ps) => /^poweredon$/i.test(String(ps || '')) || ps === 'on';
-
+// 포탈 스냅샷은 POWERED_ON/POWERED_OFF/SUSPENDED(밑줄)이고, vSphere API 원문은 poweredOn 이다 — 둘 다 받는다.
+//   (v2.696 Chromium 검증에서 밑줄형을 못 읽어 전원 칸이 전부 '—'·'켜짐 0' 이던 것을 잡았다.)
+const normPower = (ps) => String(ps || '').replace(/_/g, '').toLowerCase();
+export const isPoweredOn = (ps) => { const s = normPower(ps); return s === 'poweredon' || s === 'on'; };
 export function powerText(ps) {
-  const s = String(ps || '');
-  if (/^poweredon$/i.test(s) || s === 'on') return { text: '켜짐', badge: 'green' };
-  if (/^poweredoff$/i.test(s) || s === 'off') return { text: '꺼짐', badge: 'gray' };
-  if (/^suspended$/i.test(s)) return { text: '일시중지', badge: 'gray' };
+  const s = normPower(ps);
+  if (s === 'poweredon' || s === 'on') return { text: '켜짐', badge: 'green' };
+  if (s === 'poweredoff' || s === 'off') return { text: '꺼짐', badge: 'gray' };
+  if (s === 'suspended') return { text: '일시중지', badge: 'gray' };
   return { text: '—', badge: '' };
 }
 export const modeText = (dhcp) => (dhcp === true ? 'DHCP' : dhcp === false ? '고정' : '—');
@@ -683,8 +685,12 @@ export function policyRows(vcenters, policy) {
 /** 법인 행의 판정 표지 — 목록이 비면 '정책 없음'(위반으로 세지 않는다). */
 export function violText(row) {
   if (!row) return { text: '—', tone: 'muted' };
-  if (!row.list?.length) return { text: '정책 없음', tone: 'muted' };
-  if (row.viol == null) return { text: '—', tone: 'muted', title: '서버가 법인별 위반 대수를 주지 않습니다 — 개요의 비승인 VM 수와 DNS 서버 상세에서 확인하세요' };
+  // 목록이 비어도 '공인 DNS 는 어느 법인에서도 비승인' 규칙은 적용된다 — 그 개수가 있으면 숨기지 않는다.
+  if (!row.list?.length) {
+    if (row.viol > 0) return { text: `공인 DNS ${nText(row.viol)}대`, tone: 'warn', title: '승인 목록은 비어 있지만 공인 DNS 를 쓰는 VM 입니다(공인 DNS 비승인 규칙)' };
+    return { text: '정책 없음', tone: 'muted' };
+  }
+  if (row.viol == null) return { text: '—', tone: 'muted', title: '이 법인은 이번 조회에서 판정하지 않았습니다(vCenter 필터) — 전체 vCenter 로 보면 나옵니다' };
   if (row.viol === 0) return { text: '위반 없음', tone: 'ok' };
   return { text: `위반 ${nText(row.viol)}대`, tone: 'warn' };
 }

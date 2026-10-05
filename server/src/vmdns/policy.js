@@ -40,6 +40,8 @@ export function checkPolicyEntry(raw) {
   const s = raw.trim();
   if (!s) return { ok: false, reason: '빈 항목' };
   if (s.length > ENTRY_LEN_MAX) return { ok: false, reason: `${ENTRY_LEN_MAX}자를 넘습니다` };
+  // 안쪽 빈 칸은 정규형이 아니다 — '10.0.0.0 /24' 를 받으면 빈 칸 낀 값이 저장돼 대조가 영원히 맞지 않는다(웹 판정과 같다).
+  if (/\s/.test(s)) return { ok: false, reason: `‘${s}’ 에 빈 칸이 있습니다 — 빈 칸 없이 적으세요` };
   if (s.includes('/')) {
     const parts = s.split('/');
     if (parts.length !== 2) return { ok: false, reason: '‘/’ 가 두 번 이상 있습니다' };
