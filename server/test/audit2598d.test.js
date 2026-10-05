@@ -196,7 +196,8 @@ function fakeSoap(hangOn) {
       const op = (/<(\w+) xmlns="urn:vim25"/.exec(b) || [])[1] || '?';
       seen.push(op);
       const send = (x) => { res.setHeader('Content-Type', 'text/xml'); res.end(`<soapenv:Envelope><soapenv:Body>${x}</soapenv:Body></soapenv:Envelope>`); };
-      if (op === hangOn) { res.on('close', () => closed.push({ op, at: Date.now() })); return; } // 응답하지 않는다
+      // v2.704(B2): 속성 조회는 RetrievePropertiesEx 로 나간다 — 같은 '속성 조회' 로 보고 매달린다
+      if (op === hangOn || (hangOn === 'RetrieveProperties' && op === 'RetrievePropertiesEx')) { res.on('close', () => closed.push({ op, at: Date.now() })); return; } // 응답하지 않는다
       if (op === 'RetrieveServiceContent') return send('<returnval><propertyCollector>pc</propertyCollector><rootFolder>rf</rootFolder><viewManager>vm</viewManager><sessionManager>sm</sessionManager><eventManager>em</eventManager><about><version>8.0</version></about></returnval>');
       if (op === 'Login') { res.setHeader('Set-Cookie', 'vmware_soap_session=x'); return send('<returnval><key>s</key></returnval>'); }
       if (op === 'CreateCollectorForEvents') return send('<returnval type="EventHistoryCollector">session[1]col</returnval>');
@@ -234,7 +235,7 @@ test('T2598-02 collectDetails — 게스트 디스크 시한 abort 가 속성 �
     const t0 = Date.now();
     await assert.rejects(withTimeout((signal) => collectDetails(vc, ['vm-1'], { signal }), 300, 'x'), /타임아웃/);
     for (let i = 0; i < 50 && !(closed.length && seen.includes('Logout')); i++) await new Promise((r) => setTimeout(r, 40));
-    assert.ok(seen.includes('RetrieveProperties'), `호출 ${seen.join(',')}`);
+    assert.ok(seen.some((o) => o === 'RetrieveProperties' || o === 'RetrievePropertiesEx'), `호출 ${seen.join(',')}`);
     assert.equal(closed.length, 1, '매달린 조회 소켓이 끊겨야 한다');
     assert.ok(closed[0].at - t0 < 3000);
     assert.ok(seen.includes('Logout'));

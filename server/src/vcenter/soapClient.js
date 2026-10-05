@@ -13,7 +13,7 @@ import { inferGpuMemGB } from '../gpu/gpuModelMem.js';
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
-import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
@@ -275,20 +275,57 @@ export class VimSoapClient {
     return ref;
   }
 
+  /**
+   * v2.704(B2): 속성 조회는 RetrievePropertiesEx + ContinueRetrievePropertiesEx 로 **페이지**를 나눠 받는다(maxObjects).
+   * 예전 RetrieveProperties 는 전체 인벤토리를 응답 하나(수 MB)로 받아 vCenter·포탈 양쪽에 한 번에 메모리를 썼다.
+   * 결과는 같다(같은 파서 — soapParse.retrieveResultToObjectXml 가 objects 를 returnval 로 바꾼다. 테스트가 동일성을 고정).
+   * 도중에 실패하면 CancelRetrievePropertiesEx 로 서버 쪽 결과 세트를 버린다(best effort). Ex 가 없는 서버(MethodNotFound)는
+   * 이 클라이언트 동안 예전 방식으로 되돌린다. VC_PROPS_PAGING=false 면 예전 방식만 쓴다.
+   */
+  async #retrieveSpec(specSetXml, { asyncParse = false } = {}) {
+    const pc = this.sc.propertyCollector;
+    const parse = (xml) => (asyncParse ? parseObjectContentAsync(xml) : parseObjectContent(xml));
+    const legacy = async () => parse(await this.#call(`<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}</RetrieveProperties>`));
+    if (!config.vcPropsPaging || this.noRetrieveEx) return legacy();
+    let first;
+    try {
+      first = await this.#call(`<RetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}<options><maxObjects>${config.vcPropsPageSize}</maxObjects></options></RetrievePropertiesEx>`);
+    } catch (err) {
+      if (err?.fault === 'MethodNotFound' || /RetrievePropertiesEx/.test(String(err?.message || ''))) { this.noRetrieveEx = true; return legacy(); }
+      throw err;
+    }
+    const out = [];
+    let { xml, token } = retrieveResultToObjectXml(first);
+    let pages = 1;
+    try {
+      for (;;) {
+        if (xml) pushAll(out, await parse(xml));
+        if (!token) break;
+        if (++pages > config.vcPropsMaxPages) throw new Error(`속성 조회 페이지가 ${config.vcPropsMaxPages}개를 넘었습니다(VC_PROPS_MAX_PAGES)`);
+        const next = await this.#call(`<ContinueRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></ContinueRetrievePropertiesEx>`);
+        ({ xml, token } = retrieveResultToObjectXml(next));
+      }
+    } catch (err) {
+      if (token) {
+        try { await this.#call(`<CancelRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></CancelRetrievePropertiesEx>`, { ignoreExternal: true }); } catch { /* best effort */ }
+      }
+      throw err;
+    }
+    this.lastRetrievePages = pages;
+    return out;
+  }
+
   /** RetrieveProperties for several types through a container view. */
   async retrieveProperties(viewRef, specs) {
     const propSets = specs.map((s) =>
       `<propSet><type>${s.type}</type>${s.paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>`
     ).join('');
-    const body =
-      `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
-      `<specSet>${propSets}` +
+    const specSet = `<specSet>${propSets}` +
       `<objectSet><obj type="ContainerView">${viewRef}</obj><skip>true</skip>` +
       `<selectSet xsi:type="TraversalSpec"><name>view</name><type>ContainerView</type><path>view</path><skip>false</skip></selectSet>` +
-      `</objectSet></specSet></RetrieveProperties>`;
-    const xml = await this.#call(body);
-    // 전체 인벤토리 응답(수 MB)의 CPU 바운드 파싱은 워커로 오프로딩(대형만, 실패 시 인라인 폴백).
-    return parseObjectContentAsync(xml);
+      `</objectSet></specSet>`;
+    // 전체 인벤토리 응답의 CPU 바운드 파싱은 워커로 오프로딩(대형만, 실패 시 인라인 폴백) — 페이지마다.
+    return this.#retrieveSpec(specSet, { asyncParse: true });
   }
 
   /** RetrieveProperties for a single managed object (no traversal). */
@@ -306,11 +343,8 @@ export class VimSoapClient {
     for (let i = 0; i < refs.length; i += chunk) {
       const slice = refs.slice(i, i + chunk);
       const objectSets = slice.map((r) => `<objectSet><obj type="${type}">${r}</obj></objectSet>`).join('');
-      const body =
-        `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
-        `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>` +
-        `${objectSets}</specSet></RetrieveProperties>`;
-      pushAll(out, parseObjectContent(await this.#call(body)));
+      const specSet = `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>${objectSets}</specSet>`;
+      pushAll(out, await this.#retrieveSpec(specSet));
     }
     return out;
   }
