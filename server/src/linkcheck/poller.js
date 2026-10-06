@@ -187,6 +187,7 @@ async function demoBackfill({ mine, node }) {
     const byFrom = new Map();
     for (const l of all) if (l.by === 'edge' && l.enabled !== false) { if (!byFrom.has(l.from)) byFrom.set(l.from, []); byFrom.get(l.from).push(l); }
     for (const [from, links] of byFrom) await putEdgeLinkReport(from, { results: links.map((l) => demoLinkResult(l, { ts, byNode: from, judge, summaryText })) });
+    await new Promise((r) => setImmediate(r));   // 기동 1회 백필이 이벤트 루프를 오래 막지 않게 회차마다 양보
   }
   console.log(`[mock] 통신 점검 데모 이력 백필: ${Math.round(span / step)}회 × 링크 ${all.length}개`);
 }

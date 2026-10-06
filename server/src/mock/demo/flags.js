@@ -8,9 +8,12 @@
  *  · 기본 꺼짐(opt-in) 기능은 데모에서 '켜진 것처럼' 동작한다(`demoOn`). 저장된 설정 파일은 바꾸지 않는다 —
  *    live 로 바꾸면 원래 설정(꺼짐)으로 돌아간다. 응답·상태에 `demo:true` 를 실어 화면이 데모임을 말할 수 있게 한다.
  */
-import { isMockMode } from '../seed.js';
+import { getDataSource } from '../../runtime-settings.js';
 
-export { isMockMode };
+/** mock(데모) 모드인가 — seed.js 를 거치지 않는다(seed.js 가 데모 모듈을 불러 순환이 생긴다). */
+export function isMockMode() {
+  try { return getDataSource() === 'mock'; } catch { return false; }
+}
 
 /** 저장된 '켜짐' 값 또는 데모 모드. */
 export function demoOn(saved) {
