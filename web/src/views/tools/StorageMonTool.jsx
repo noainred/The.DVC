@@ -847,6 +847,15 @@ export default function StorageMonTool() {
       {(() => {
         const mocks = rows.filter((r) => r.snap?.extra?.mock);
         if (!mocks.length) return null;
+        // v2.708: 데모 모드가 시드한 장비(extra.demo)뿐이면 '설정 누락' 경고가 아니라 데모 안내다.
+        if (mocks.every((r) => r.snap?.extra?.demo)) {
+          return (
+            <div className="card" style={{ padding: '10px 13px', marginTop: 8, borderColor: 'var(--accent)', fontSize: 12.5 }}>
+              <b>ℹ 데모(mock) 데이터 {mocks.length}대</b> — 데모 모드가 만든 합성 장비입니다(실제 장비에 접속하지 않습니다).
+              {' '}실제 수집은 설정 › vCenter 등록·관리 하단의 데이터 소스를 <b>LIVE</b> 로 바꾼 뒤 장비를 등록하세요.
+            </div>
+          );
+        }
         const nodes = [...new Set(mocks.map((r) => r.snap?.agent || r.agent || '중앙'))];
         return (
           <div className="card" style={{ padding: '10px 13px', marginTop: 8, borderColor: 'var(--red)', fontSize: 12.5 }}>

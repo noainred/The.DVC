@@ -179,7 +179,7 @@ export function DirUsageReport() {
           {history.length > 1 && (
             <>
               <h4 style={{ margin: '20px 0 8px', fontSize: 14 }}>수집 이력</h4>
-              <STable style={{ width: '100%', fontSize: 12.5 }}>
+              <STable minWidth={640} style={{ width: '100%', fontSize: 12.5 }}>
                 <thead><tr><th>수집 시각</th><th>전체 사용량</th><th>하위 폴더</th><th>메일</th><th data-nosort></th></tr></thead>
                 <tbody>
                   {history.map((h) => (

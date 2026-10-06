@@ -23,6 +23,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.607 SEC2607-07
+import { pushAll } from '../util/pushAll.js';
 
 const FILE = path.join(config.configDir, 'sanswitch-devices.json');
 const MAX_DEVICES = 300;
@@ -197,7 +198,7 @@ export function seedDemoDevices(list = []) {
   if (db.devices.length || loadErr.get()) return 0;
   const add = (Array.isArray(list) ? list : []).filter((d) => d && typeof d === 'object' && String(d.id || '').startsWith('mock-san-')).slice(0, MAX_DEVICES);
   if (!add.length) return 0;
-  db.devices.push(...add.map((d) => ({ ...d })));
+  pushAll(db.devices, add.map((d) => ({ ...d })));
   persist();
   return add.length;
 }

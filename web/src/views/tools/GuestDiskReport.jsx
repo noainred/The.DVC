@@ -381,7 +381,7 @@ export default function GuestDiskReport({ scope = '' }) {
           </div>
         )
       ) : group === 'none' ? (
-        <STable className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
+        <STable minWidth={980} className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
       ) : (
         <div className="gd-groups">
           {pageItems.map((g) => (
@@ -390,7 +390,7 @@ export default function GuestDiskReport({ scope = '' }) {
                 <span className="gd-group-name">{g.key}</span>
                 <span className="gd-group-meta">{g.rows.length}대 · 회수가능 <b className="gd-free">{fmtSize(g.free, unit)}</b> · 할당 {fmtSize(g.alloc, unit)}</span>
               </summary>
-              <STable className="gd-table">{tableHead}<tbody>{g.rows.map(rowEl)}</tbody></STable>
+              <STable minWidth={980} className="gd-table">{tableHead}<tbody>{g.rows.map(rowEl)}</tbody></STable>
             </details>
           ))}
         </div>

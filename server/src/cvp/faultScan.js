@@ -45,7 +45,8 @@ async function runInner({ now, reason, notify, send }) {
   const servers = listServers();
   const byId = new Map(servers.map((s) => [String(s.id), s]));
   const nameOf = (cvpId) => String(byId.get(String(cvpId))?.name || '');
-  const doNotify = typeof notify === 'boolean' ? notify : settings.faultAlerts === true;
+  // v2.708: 데모(mock) 모드에서는 주기 판정이 알림을 보내지 않는다 — 합성 장애가 설정된 실제 채널로 나가지 않게(명시적 notify 는 그대로).
+  const doNotify = typeof notify === 'boolean' ? notify : (settings.faultAlerts === true && !isMockMode());
 
   const devRes = await db.listDeviceRows();
   if (devRes.unavailable) {

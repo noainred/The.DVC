@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { notify as sendAlert } from '../alerts.js';
 import { evaluateRows, alertOf } from './alertRules.js';
+import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-alert-state.json');
 const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);
@@ -54,6 +55,8 @@ export function alertStateInfo() {
  */
 export async function runBmUsageAlerts(rows = [], settings = {}) {
   if (!settings.alertEnabled) return { ok: true, skipped: 'disabled' };
+  // v2.708: 데모(mock) 값으로 실제 채널에 알리지 않는다.
+  if (isMockMode()) return { ok: true, skipped: 'demo' };
   const cfg = {
     pct: settings.alertPct, sustainMin: settings.alertSustainMin,
     repeatHours: settings.alertRepeatHours, intervalMs: settings.intervalMs,
