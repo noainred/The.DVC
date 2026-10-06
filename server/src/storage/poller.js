@@ -19,14 +19,15 @@ import * as xtremio from './collectors/xtremio.js';       // v2.310
 import * as powermax from './collectors/powermax.js';     // v2.310(vmax·powermax 공용 — 같은 Unisphere REST)
 import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metronode 공용 — 같은 Element Manager REST 계열)
 import { collectAreasOnce } from './areasCollector.js';
-import { saveCapacityPoint } from './db.js';
+import { enabledAreas, ONEFS_AREAS } from './onefsCatalog.js';
+import { saveCapacityPoint, saveAreaResults } from './db.js';
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
 import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 // v2.708 데모(mock): 등록부 시드·이력 백필·타입별 합성 스냅샷. live 에서는 mock- 장비를 건너뛴다.
-import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId } from '../mock/demo/storage.js';
+import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId, demoIsilonAreas } from '../mock/demo/storage.js';
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
 // v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
@@ -73,6 +74,13 @@ async function collectOne(dev, { periodic = false } = {}) {
   } finally { _inFlight.delete(dev.id); }
 }
 
+/** mock 모드 Isilon 영역 — 합성 결과를 실제 수집기와 같은 DB 경로로 저장한다(장비 접속 없음). */
+async function saveDemoAreas(dev) {
+  const r = demoIsilonAreas(dev, enabledAreas(), ONEFS_AREAS.filter((a) => a.enabled === false));
+  try { await saveAreaResults(dev.id, r.results); } catch (e) { console.warn(`[storage-areas] 데모 DB 저장 실패(${dev.id}): ${e.message}`); }
+  return { summary: r.summary, endpoints: r.endpoints };
+}
+
 async function collectOneInner(dev, startedAt) {
   const fn = COLLECTORS[dev.type];
   const full = getDeviceWithSecret(dev.id) || dev;
@@ -109,8 +117,9 @@ async function collectOneInner(dev, startedAt) {
     if (Date.now() - last >= areasEveryMs()) {
       _areasAt.set(dev.id, Date.now());
       try {
+        // v2.709: mock 은 전 영역을 합성해 DB 에도 저장한다(예전엔 요약 2줄만 지어내 '영역 상세' 창이 비었다).
         const r = isMockMode()
-          ? { summary: [{ area: 'cluster', ok: 3, failed: 0 }, { area: 'node', ok: 1, failed: 0 }], endpoints: 4 }
+          ? await saveDemoAreas(full)
           // 시한이 끊어도 collectAreasOnce 는 던지지 않고 모은 결과를 저장·반환한다(stopped:'deadline').
           : await withDeadline(AREAS_TIMEOUT_MS, (signal) => collectAreasOnce(full, { signal }), '영역 수집 타임아웃');
         snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints,

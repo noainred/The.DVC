@@ -4893,6 +4893,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 데모 이력은 처음 한 번 백필(스토리지 400일·SAN 7일·PDU 30일·CVP 7일·iDRAC 14일·bm-usage 45일 등)하고 다시 쌓지 않는다. sensorStore 는 인메모리라 재시작마다 24시간 백필.
     · 남은 것: 준비 중 3기능(디스크 추가·백업·대용량 배포)은 화면이 없다 · serveranalysis '미지원 서버'·Isilon 영역 상세·REST 수집 SAN 은 데모 없음 · 실장비 미확인(전부 합성).
     · 함께 고친 제품 판정: 실제 OS 확인이 Windows Server 연도와 커널 버전(10.0.x)을 비교해 **모든 Windows VM 을 불일치**로 냈다(`inventory/osStore.js computeMismatch`).
+    · **v2.709 2차 점검**(107개 재조사): Isilon OneFS 영역은 `demoIsilonAreas` 가 실제 수집기와 같은 모양으로 만들어 **DB 에도 저장**한다(예전 요약 2줄만) ·
+      미지원 서버는 `ensureUnsupportedDemo`(저장소가 비어 있고 **법인 할당이 끝난 뒤에만**) · 데모 vCenter 의 법인 할당은 `pdu.js assignDemoCorps`
+      (**mock vCenter 이고 할당이 없을 때만** — 수집 엣지의 DataCenter 우선. ⚠ 데모 엣지 등록이 'Seoul' 같은 DataCenter 를 자동으로 만들므로 'DataCenter 목록이
+      비어 있을 때만' 이라는 v2.708 조건은 한 번도 참이 아니었다) · 데모 엣지는 파트 장애 보고(장비 0대)를 틱마다 싣는다 · 화면이 저장 설정으로 '꺼짐' 을
+      말하는 곳(bm-usage `emptyDiag`·corp-usage `collectOn`)은 데모를 먼저 본다. ⚠ 조사 스크립트는 **기동 직후 몇 분 동안 빈 화면이 정상**이다(첫 수집 전) — 원인을 단정하기 전에 API 로 다시 볼 것.
   - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
     (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
     웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):

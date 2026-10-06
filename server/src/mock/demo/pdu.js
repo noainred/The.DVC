@@ -27,7 +27,7 @@ export const pduDemoActive = (devices) => isMockMode() && (Array.isArray(devices
 
 /**
  * 데모 법인 목록 [{id, name, code}] — DataCenter 가 있으면 그것(앞 12곳), 없으면 mock vCenter 의 도시로 `dc-<도시>` 를 만든다.
- * ⚠ DataCenter 를 만드는 것은 mock 모드·목록이 비어 있을 때뿐이다(vCenter 할당은 건드리지 않는다).
+ * ⚠ DataCenter 를 만드는 것은 mock 모드·목록이 비어 있을 때뿐이다. vCenter 할당은 할당이 없는 vCenter 만 데모 법인으로 채운다(v2.709 assignDemoCorps).
  */
 export async function demoCorps(snapshot) {
   if (!isMockMode()) return [];
@@ -43,7 +43,36 @@ export async function demoCorps(snapshot) {
     }
     list = dcs.listDatacenters();
   }
+  await assignDemoCorps(dcs, snapshot).catch((e) => console.warn(`[mock] 데모 법인 할당 실패: ${e?.message || e}`));
+  list = dcs.listDatacenters();
   return list.slice(0, 12).map((d) => ({ id: String(d.id), name: String(d.name || d.id), code: (slug(d.name || d.id).replace(/^dc-/, '').slice(0, 3) || 'dc').toUpperCase() }));
+}
+
+/**
+ * v2.709: **mock vCenter 중 할당이 없는 것**을 데모 법인에 할당한다 — 할당이 없으면 전체 소비 전력·법인별 화면에서 서버가 전부
+ * '(법인 미지정)' 이었다(데모 재조사에서 발견). 순서: ① 그 vCenter 를 수집하는 데모 엣지의 DataCenter(이름 대소문자 무시 —
+ * 데모 엣지 등록이 'Seoul' 같은 DataCenter 를 자동으로 만든다) ② 없으면 도시 이름의 데모 법인 `dc-<도시>`(없으면 만든다 · note '데모(mock) 법인').
+ * 사람이 등록한 vCenter(목 vCenter 가 아님)와 이미 할당된 vCenter 는 건드리지 않는다.
+ */
+async function assignDemoCorps(dcs, snapshot) {
+  const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
+  if (!vcs.length) return;
+  const [{ isMockVcenter }, { demoEdgeOfVcenter }] = await Promise.all([import('../generator.js'), import('./edge.js')]);
+  const assigned = dcs.getDatacenterAssign();
+  const byName = new Map(dcs.listDatacenters().flatMap((d) => [[String(d.id).toLowerCase(), d.id], [String(d.name || '').toLowerCase(), d.id]]));
+  const fresh = [];
+  for (const vc of vcs) {
+    if (!vc?.id || assigned[vc.id] || !isMockVcenter(vc)) continue;
+    const edgeDc = String(demoEdgeOfVcenter(vc.id)?.datacenter || '').toLowerCase();
+    let dc = edgeDc ? byName.get(edgeDc) : null;
+    if (!dc) {
+      const city = vc.location?.city || vc.name || vc.id;
+      dc = `dc-${slug(city) || slug(vc.id)}`;
+      if (!byName.has(dc)) { dcs.ensureDatacenter({ id: dc, name: `${city} 법인`, region: vc.location?.region || vc.region || '', note: '데모(mock) 법인' }); byName.set(dc, dc); }
+    }
+    fresh.push({ vcenterId: String(vc.id), datacenterId: dc });
+  }
+  if (fresh.length) dcs.setVcenterDatacenterMany(fresh);
 }
 
 /** 법인 하나의 데모 PDU 목록(등록부 모양). 4~8대. */

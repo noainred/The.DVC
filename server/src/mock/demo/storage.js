@@ -448,3 +448,46 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
   })().finally(() => { _inflight = null; });
   return _inflight;
 }
+
+/* ───────────── Isilon OneFS API 영역(v2.709) ───────────── */
+
+/**
+ * 데모 Isilon 의 OneFS API 영역 수집 결과 — 실제 수집기(storage/areasCollector.js collectAreasOnce)와 **같은 모양**
+ * (`results` = DB 저장용 엔드포인트 단위, `summary` = 화면·push 용 영역 단위)을 장비 접속 없이 만든다.
+ * v2.708 까지 mock 은 요약 2줄만 지어내고 DB 에는 아무것도 넣지 않아 '영역 상세' 창이 비어 있었다.
+ * 원문은 엔드포인트 경로·장비 사양에서 결정적으로 만든 작은 JSON 이고 `demo:true` 를 싣는다(진짜 응답인 척하지 않는다).
+ * 일부 엔드포인트는 버전별 경로 차이처럼 HTTP 404 로 실패시킨다(실패 요약 표시 경로가 보이게).
+ */
+export function demoIsilonAreas(dev, areas, disabled = []) {
+  const spec = SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev || {});
+  const results = []; const summary = [];
+  for (const area of areas) {
+    let okCnt = 0, failCnt = 0, firstErr = '';
+    area.endpoints.forEach((ep, i) => {
+      // 둘째 이후 후보 경로 일부는 실패(구버전 경로) — 결정적.
+      const fail = i > 0 && demoRand(`${spec.k}:area:${ep}`) < 0.25;
+      if (fail) {
+        const error = 'HTTP 404 (데모 — 이 OneFS 버전에 없는 경로를 흉내 냅니다)';
+        results.push({ area: area.key, endpoint: ep, ok: false, error });
+        failCnt++; if (!firstErr) firstErr = error;
+        return;
+      }
+      results.push({ area: area.key, endpoint: ep, ok: true, data: demoAreaBody(spec, area.key, ep) });
+      okCnt++;
+    });
+    summary.push({ area: area.key, ok: okCnt, failed: failCnt, ...(firstErr ? { error: firstErr.slice(0, 120) } : {}) });
+  }
+  for (const a of disabled) summary.push({ area: a.key, ok: 0, failed: 0, skipped: true, error: a.reason });
+  return { summary, results, endpoints: results.length };
+}
+
+function demoAreaBody(spec, area, ep) {
+  const n = Math.max(1, Number(spec.nodes) || 1);
+  const base = { demo: true, endpoint: ep, cluster: spec.name };
+  if (area === 'node') return { ...base, nodes: Array.from({ length: n }, (_, i) => ({ id: i + 1, lnn: i + 1, status: { health: 'OK' } })) };
+  if (area === 'cluster') return { ...base, name: spec.name, onefs_version: { release: VERSION.isilon }, guid: `demo-${demoHash(spec.k).toString(16)}` };
+  if (area === 'capacity') return { ...base, storagepools: [{ name: `${String(spec.name).toLowerCase()}_h500`, usage: { total_bytes: String(Math.round((spec.tb || 0) * TB * 0.7)) } }] };
+  if (area === 'quota') return { ...base, quotas: Array.from({ length: 3 + (demoHash(spec.k) % 4) }, (_, i) => ({ path: `/ifs/data/proj${i + 1}`, type: 'directory' })) };
+  if (area === 'snapshot') return { ...base, snapshots: Array.from({ length: 2 + (demoHash(spec.k) % 3) }, (_, i) => ({ name: `daily_${i + 1}`, path: '/ifs/data' })) };
+  return { ...base, items: [] };
+}
