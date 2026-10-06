@@ -6,6 +6,7 @@ import { STable } from '../../components/STable.jsx';
 import {
   intfRows, statusBuckets, speedBuckets, xcvrBuckets, donutArcs, filterRows, descCell, deviceOptions, INTF_NOTE,
 } from './cvpIntfText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * CVP › 인터페이스 세부 정보(v2.649 — 사용자 요청 'CVP 의 Interfaces › Ethernet 화면을 똑같이').
@@ -80,11 +81,11 @@ export default function CvpInterfacesView({ devices = [], initial = null }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <b>인터페이스 세부 정보</b>
           <input className="input" placeholder="장비 검색(호스트명·모델·법인)" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 240, minWidth: 0 }} />
-          <select className="input" value={sel} onChange={(e) => { setSel(e.target.value); setFilters({}); }} style={{ maxWidth: 360, minWidth: 0 }}>
+          <Select className="input" value={sel} onChange={(e) => { setSel(e.target.value); setFilters({}); }} style={{ maxWidth: 360, minWidth: 0 }}>
             {!cur && <option value="">장비를 고르세요</option>}
             {cur && !shownOpts.some((o) => o.id === cur.id) && <option value={cur.id}>{cur.label}</option>}
             {shownOpts.map((o) => <option key={o.id} value={o.id}>{o.label}{o.model ? ` · ${o.model}` : ''}{o.corp ? ` · ${o.corp}` : ''}</option>)}
-          </select>
+          </Select>
           <button type="button" className="btn" onClick={() => setReload((x) => x + 1)} disabled={!cur}>새로고침</button>
         </div>
         {cur && r && (

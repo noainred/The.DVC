@@ -24,6 +24,7 @@ import {
   storeNote, logNote, maskNote, logRedactNote, lastAttemptNote, tableFootnotes, groupStatus, statusSummary, levelTone, identityNote, unregisteredNote,
   busyAdd, busyRemove, staleFetchNote,
 } from './edgeLogText.js';
+import Select from '../../components/Select.jsx';
 
 const LEVELS = [['', '전체'], ['error', '오류'], ['warn', '경고'], ['info', '정보']];
 
@@ -158,17 +159,17 @@ export function EdgeLog() {
           <SearchBox value={q} onChange={setQ} placeholder="엣지 이름·법인 검색" />
           <label style={{ fontSize: 12 }}>
             줄 수{' '}
-            <select value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ minWidth: 0 }}>
+            <Select sort={false} value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ minWidth: 0 }}>
               <option value={0}>기본({data?.limits?.defaultLimit ?? '?'})</option>
               <option value={100}>100</option>
               <option value={data?.limits?.maxLimit || 1000}>최대({data?.limits?.maxLimit ?? '?'})</option>
-            </select>
+            </Select>
           </label>
           <label style={{ fontSize: 12 }}>
             레벨{' '}
-            <select value={level} onChange={(e) => setLevel(e.target.value)}>
+            <Select sort={false} value={level} onChange={(e) => setLevel(e.target.value)}>
               {LEVELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </Select>
           </label>
           <label style={{ fontSize: 12 }}>
             <input type="checkbox" checked={showStatus} onChange={(e) => setShowStatus(e.target.checked)} /> 진행상태 함께

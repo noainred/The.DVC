@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /** 설정 → 게스트 계정 추가 — VMware Tools(게스트 작업)로 게스트 OS에 sudo 계정 추가. */
 export default function GuestAccount() {
@@ -52,7 +53,7 @@ export default function GuestAccount() {
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12 }}>
           <span className="muted">vCenter</span>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)}><option value="">선택</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
+          <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)}><option value="">선택</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</Select>
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12, marginTop: 12 }}>
           <span className="muted"><b>새 계정</b></span>

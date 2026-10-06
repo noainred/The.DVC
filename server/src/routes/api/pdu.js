@@ -28,6 +28,8 @@ import { summarize } from '../../pdu/types.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
+import { pduDemoActive } from '../../mock/demo/pdu.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -52,6 +54,9 @@ export function registerPdu(api) {
 
   // ---- 목록/현황 ------------------------------------------------------------
   api.get('/tools/pdu', toolsPerm, fullScopeOnly, (req, res) => {
+    // v2.708: mock 모드에서 아직 한 번도 수집하지 않았으면 데모 시드 + 첫 수집을 바로 시작한다(폴러 첫 주기는 기동 45초 뒤).
+    //   응답을 기다리게 하지 않는다 — 다음 새로고침부터 채워진다. 재진입은 pollOnce 의 가드가 막는다.
+    if (isMockMode() && !localSnapshots().length && !pduPollerStatus().running) pollOnce().catch(() => {});
     const th = loadThresholds();
     const snaps = new Map(allSnapshots().map((s) => [s.id, s]));
     // v2.606(감사 CEN2606-02): 장비별로 방어한다 — 한 장비의 깨진 스냅샷(엣지 보고 units:'x' 등)이 목록 전체를 500 으로
@@ -92,6 +97,7 @@ export function registerPdu(api) {
     const admin = isAdminReq(req);
     res.json({
       ok: true,
+      ...(pduDemoActive(listDevices()) ? { demo: true } : {}),
       devices: admin ? devices : devices.map(maskDeviceAddress),
       ...(admin ? {} : { addressHidden: true }),
       datacenters: listDatacenters(),

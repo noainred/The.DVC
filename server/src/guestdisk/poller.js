@@ -14,6 +14,7 @@ import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 �
 import { loadVcenterConfig } from '../config.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
+import { demoOn, isMockMode } from '../mock/demo/flags.js'; // v2.708
 
 const TICK_MS = 60_000;
 const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
@@ -25,7 +26,7 @@ let restoreTried = false;  // v2.601(TIM2601-04): 재시작 후 lastRunTs 를 DB
 let lastPruneTs = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 prune 하지 않는다(v2.453 규약)       // 보존 prune 스로틀(수집 enabled 와 무관하게 돈다 — 데이터가 push 로도 들어옴)
 const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
-export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs }; }
+export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs, ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
 
 // v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
@@ -128,7 +129,7 @@ export function startGuestDiskPoller() {
         lastPruneTs = Date.now();
         try { await prune(s.retentionDays); } catch (e) { console.warn(`[guestdisk] prune 실패: ${e.message}`); }
       }
-      if (!s.enabled) return;                 // opt-in — 주기 수집은 꺼져 있으면 안 한다(prune 은 위에서 이미 수행)
+      if (!demoOn(s.enabled)) return;                 // opt-in(데모는 켜진 것처럼 — v2.708) — 주기 수집은 꺼져 있으면 안 한다(prune 은 위에서 이미 수행)
       // ⚠ v2.601(감사 TIM2601-04): 재시작 직후 lastRunTs 가 0 이라 주기(기본 12시간)를 무시하고 전량 수집했다(28대 로그인 ·
       //   SOAP 벌크 조회). 형제 powerOffPoller 처럼 DB 의 마지막 적재 시각으로 복원한다 — 대상은 **중앙 직접 수집** vCenter 만
       //   (엣지 push 가 채운 site 행의 시각으로 복원하면 직접 수집이 그만큼 밀린다). 스냅샷이 아직 비었으면(첫 수집 전) 다음 틱에 본다.

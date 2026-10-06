@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /** 설정 → 감사 로그: 누가 언제 무엇을 했는지(쓰기/로그인) 기록 조회. */
 export default function Audit() {
@@ -37,10 +38,10 @@ export default function Audit() {
       <div className="section-title" style={{ margin: '6px 0' }}>감사 로그 (Audit)</div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>VM 생성·원격접속·설정 변경·로그인 등 쓰기/인증 행위를 기록합니다. (서버 <code>$CONFIG_DIR/audit.ndjson</code>)</div>
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
-        <select className="select" style={{ maxWidth: 200 }} value={user} onChange={(e) => setUser(e.target.value)}>
+        <Select className="select" style={{ maxWidth: 200 }} value={user} onChange={(e) => setUser(e.target.value)}>
           <option value="">전체 사용자</option>
           {(data.users || []).map((u) => <option key={u} value={u}>{u}</option>)}
-        </select>
+        </Select>
         <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="작업/대상 검색" value={q} onChange={setQ} />
         <span className="muted" style={{ fontSize: 12 }}>{data.total}건</span>
       </div>

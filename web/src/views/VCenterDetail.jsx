@@ -22,6 +22,7 @@ import {
   visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor, noSampleLabel,
 } from './vcdUsage.js';
 import { dayStamp } from '../dayStamp.js';
+import Select from '../components/Select.jsx';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -131,14 +132,14 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
             onClick={() => pickKind(k)} disabled={(k === 'cluster' && !clusterNames.length) || (k === 'host' && !hostList.length)}>{label}</button>
         ))}
         {scopeKind === 'cluster' && (
-          <select className="select" style={{ maxWidth: 260 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
+          <Select className="select" style={{ maxWidth: 260 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
             {clusterNames.map((c) => <option key={c} value={c}>{c} ({(clusters.find(([n]) => n === c)?.[1] || []).length} 호스트)</option>)}
-          </select>
+          </Select>
         )}
         {scopeKind === 'host' && (
-          <select className="select" style={{ maxWidth: 300 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
+          <Select className="select" style={{ maxWidth: 300 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
             {hostList.map((h) => <option key={h.id} value={h.id}>{h.name}{h.cluster ? ` · ${h.cluster}` : ''}</option>)}
-          </select>
+          </Select>
         )}
         {!isVc && <span className="muted">vCenter 성능 롤업을 요청 시 조회 — 우리 DB 에는 vCenter 합계만 저장됩니다</span>}
       </div>

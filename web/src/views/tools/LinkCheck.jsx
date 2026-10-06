@@ -28,6 +28,7 @@ import {
   STATE_LABEL, stateTone, rowState, msText, ageText, certText, kpisOf, headerNote,
   runResultText, EVENT_LABEL, eventTone, tableFootnotes, pairNote, trailFromLatest,
 } from './linkCheckText.js';
+import Select from '../../components/Select.jsx';
 // v2.553: 설정 전수 점검(25종) + 해결책 — 같은 화면의 탭이다(도구를 하나 더 만들지 않는다).
 const SettingsCheckPanel = React.lazy(() => import('./SettingsCheckPanel.jsx'));
 
@@ -234,10 +235,10 @@ export function LinkCheck() {
           setShowSettings((v) => !v);
         }}>{showSettings ? '설정 닫기' : '설정'}</button>
         <SearchBox value={q} onChange={setQ} placeholder="엣지·vCenter·호스트 검색" />
-        <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
+        <Select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
           <option value="">모든 종류</option>
           {(data?.kindKeys || []).map((k) => <option key={k} value={k}>{kinds[k]?.label || k}</option>)}
-        </select>
+        </Select>
         <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
           <input type="checkbox" checked={onlyBad} onChange={(e) => setOnlyBad(e.target.checked)} /> 실패만
         </label>
@@ -381,12 +382,12 @@ export function LinkCheck() {
       <div className="card">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
           <div style={{ fontWeight: 600 }}>점검 로그</div>
-          <select value={evHours} onChange={(e) => setEvHours(Number(e.target.value))}>
+          <Select sort={false} value={evHours} onChange={(e) => setEvHours(Number(e.target.value))}>
             {HOURS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
-          </select>
-          <select value={evKind} onChange={(e) => setEvKind(e.target.value)}>
+          </Select>
+          <Select sort={false} value={evKind} onChange={(e) => setEvKind(e.target.value)}>
             {EVENTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
+          </Select>
           {evLink && <button className="btn" onClick={() => setEvLink('')}>전체 링크 보기</button>}
           {evLink && <span style={{ fontSize: 11, color: 'var(--muted)' }}>필터: {evLink}</span>}
           {evLoading && <span style={{ fontSize: 11, color: 'var(--muted)' }}>불러오는 중…</span>}

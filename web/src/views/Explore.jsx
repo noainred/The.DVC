@@ -100,17 +100,17 @@ export default function Explore() {
       <div className="flex between wrap" style={{ marginBottom: 4 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>자원 최다 사용 Top 랭킹</div>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={pick.region} onChange={(e) => setPick({ region: e.target.value, vcenterId: '' })}>
+          <Select className="select" value={pick.region} onChange={(e) => setPick({ region: e.target.value, vcenterId: '' })}>
             <option value="">전체 리전</option>
             {regions.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <select className="select" value={pick.vcenterId} onChange={(e) => setPick((p) => ({ ...p, vcenterId: e.target.value }))}>
+          </Select>
+          <Select className="select" value={pick.vcenterId} onChange={(e) => setPick((p) => ({ ...p, vcenterId: e.target.value }))}>
             <option value="">전체 vCenter</option>
             {vcOptions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-          <select className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+          </Select>
+          <Select sort={false} className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
             {[5, 10, 20, 50].map((n) => <option key={n} value={n}>Top {n}</option>)}
-          </select>
+          </Select>
         </div>
       </div>
 
@@ -165,11 +165,11 @@ export default function Explore() {
           <label>최소 메모리 사용률(%)<input className="input" type="number" min="0" max="100" placeholder="예: 80" value={spec.memUsageMin} onChange={set('memUsageMin')} /></label>
           <label>Guest OS 포함<input className="input" placeholder="예: Windows" value={spec.os} onChange={set('os')} /></label>
           <label>전원 상태
-            <select className="select" value={spec.powerState} onChange={set('powerState')}>
+            <Select sort={false} className="select" value={spec.powerState} onChange={set('powerState')}>
               <option value="">전체</option>
               <option value="POWERED_ON">On</option>
               <option value="POWERED_OFF">Off</option>
-            </select>
+            </Select>
           </label>
           <label style={{ alignSelf: 'end' }}>
             <button className="tab" onClick={() => setSpec({ vcpuMin: '', ramMinGB: '', diskMinGB: '', cpuUsageMin: '', memUsageMin: '', os: '', powerState: 'POWERED_ON' })}>
@@ -199,3 +199,5 @@ export default function Explore() {
     </>
   );
 }
+
+import Select from '../components/Select.jsx';

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { postJson, usePolling } from '../api.js';
 import { VmLink, Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 const GPU_MODE = [['', '전체'], ['any', 'GPU 있음'], ['passthrough', '패스쓰루'], ['vgpu', 'vGPU'], ['none', 'GPU 없음']];
 
@@ -86,9 +87,9 @@ export default function DeepSearch() {
           <Field f={f} setF={setF} k="ip" ph="IP 시작" w={120} />
           <Field f={f} setF={setF} k="subnet" ph="서브넷 CIDR (10.0.0.0/8)" w={170} />
           <Field f={f} setF={setF} k="guestOS" ph="Guest OS 포함" w={130} />
-          <select className="select" value={f.powerState} onChange={(e) => setF({ ...f, powerState: e.target.value })}><option value="">전원 전체</option><option value="POWERED_ON">On</option><option value="POWERED_OFF">Off</option></select>
-          <select className="select" value={f.toolsStatus} onChange={(e) => setF({ ...f, toolsStatus: e.target.value })}><option value="">Tools 전체</option><option value="RUNNING">가동</option><option value="NOT_RUNNING">미실행</option></select>
-          <select className="select" value={f.gpuMode} onChange={(e) => setF({ ...f, gpuMode: e.target.value })}>{GPU_MODE.map(([v, l]) => <option key={v} value={v}>{`GPU: ${l}`}</option>)}</select>
+          <Select sort={false} className="select" value={f.powerState} onChange={(e) => setF({ ...f, powerState: e.target.value })}><option value="">전원 전체</option><option value="POWERED_ON">On</option><option value="POWERED_OFF">Off</option></Select>
+          <Select sort={false} className="select" value={f.toolsStatus} onChange={(e) => setF({ ...f, toolsStatus: e.target.value })}><option value="">Tools 전체</option><option value="RUNNING">가동</option><option value="NOT_RUNNING">미실행</option></Select>
+          <Select sort={false} className="select" value={f.gpuMode} onChange={(e) => setF({ ...f, gpuMode: e.target.value })}>{GPU_MODE.map(([v, l]) => <option key={v} value={v}>{`GPU: ${l}`}</option>)}</Select>
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10, marginTop: 10 }}>
           <Field f={f} setF={setF} k="cluster" ph="클러스터" w={120} />
@@ -107,7 +108,7 @@ export default function DeepSearch() {
       <div className="card" style={{ padding: 14, marginBottom: 10 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
           <span className="muted"><b>게스트 탐침</b></span>
-          <select className="select" value={probeType} onChange={(e) => setProbeType(e.target.value)}><option value="gpuDriver">GPU 드라이버 설치</option><option value="process">프로세스 실행</option></select>
+          <Select sort={false} className="select" value={probeType} onChange={(e) => setProbeType(e.target.value)}><option value="gpuDriver">GPU 드라이버 설치</option><option value="process">프로세스 실행</option></Select>
           {probeType === 'process' && <input className="input" placeholder="프로세스명/패턴 (예 nginx)" style={{ width: 200 }} value={pattern} onChange={(e) => setPattern(e.target.value)} />}
           <input className="input" placeholder="게스트 계정(선택)" style={{ width: 130 }} value={guest.user} onChange={(e) => setGuest({ ...guest, user: e.target.value })} />
           <input className="input" type="password" placeholder="비번(선택)" style={{ width: 120 }} value={guest.pass} onChange={(e) => setGuest({ ...guest, pass: e.target.value })} />

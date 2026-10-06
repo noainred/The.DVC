@@ -5,6 +5,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
+import Select from '../../components/Select.jsx';
 
 
 /**
@@ -59,18 +60,18 @@ export function NicSpeed() {
       <div className="card" style={{ padding: 14 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <label style={{ fontSize: 13 }}>DataCenter&nbsp;
-            <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setSpeedSel(''); }} style={{ minWidth: 160 }}>
+            <Select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setSpeedSel(''); }} style={{ minWidth: 160 }}>
               <option value="">전체</option>
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               <option value="__unmapped__">(미매핑)</option>
-            </select>
+            </Select>
           </label>
           <label style={{ fontSize: 13 }}>유형&nbsp;
-            <select className="select" value={type} onChange={(e) => { setType(e.target.value); setSpeedSel(''); }} style={{ minWidth: 130 }}>
+            <Select sort={false} className="select" value={type} onChange={(e) => { setType(e.target.value); setSpeedSel(''); }} style={{ minWidth: 130 }}>
               <option value="">전체</option>
               <option value="virtual">가상화(ESXi)</option>
               <option value="baremetal">베어메탈</option>
-            </select>
+            </Select>
           </label>
           <span className="muted" style={{ fontSize: 12 }}>
             대상 {data.totalServers} · 수집됨 {data.collected}{data.missing ? ` · 미수집 ${data.missing}` : ''} · 가상화 {data.virtual} · 베어메탈 {data.baremetal} · vCenter 매칭 {data.vcCollected || 0}
@@ -186,18 +187,18 @@ export function NicModels() {
       <div className="card" style={{ padding: 14 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <label style={{ fontSize: 13 }}>DataCenter&nbsp;
-            <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setModelSel(''); setVcModelSel(''); }} style={{ minWidth: 160 }}>
+            <Select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setModelSel(''); setVcModelSel(''); }} style={{ minWidth: 160 }}>
               <option value="">전체</option>
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               <option value="__unmapped__">(미매핑)</option>
-            </select>
+            </Select>
           </label>
           <label style={{ fontSize: 13 }}>유형&nbsp;
-            <select className="select" value={type} onChange={(e) => { setType(e.target.value); setModelSel(''); setVcModelSel(''); }} style={{ minWidth: 130 }}>
+            <Select sort={false} className="select" value={type} onChange={(e) => { setType(e.target.value); setModelSel(''); setVcModelSel(''); }} style={{ minWidth: 130 }}>
               <option value="">전체</option>
               <option value="virtual">가상화(ESXi)</option>
               <option value="baremetal">베어메탈</option>
-            </select>
+            </Select>
           </label>
           <span className="muted" style={{ fontSize: 12 }}>
             대상 {data.totalServers} · 수집됨 {data.collected}{data.missing ? ` · 미수집 ${data.missing}` : ''} · 모델 {(data.byModel || []).length}종 · vCenter 매칭 {data.vcCollected || 0} (모델 {(data.vcByModel || []).length}종)

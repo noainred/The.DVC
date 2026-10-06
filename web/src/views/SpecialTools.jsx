@@ -561,32 +561,32 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
         {scoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">범위</span>
-            <select className="select" value={scope} onChange={(e) => { setScope(e.target.value); setCluster(''); setFolder(''); }}>
+            <Select className="select" value={scope} onChange={(e) => { setScope(e.target.value); setCluster(''); setFolder(''); }}>
               <option value="">전체 vCenter</option>
               {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+            </Select>
           </label>
         )}
         {scoped && groupScoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">클러스터</span>
-            <select className="select" style={{ maxWidth: 230 }} value={cluster} disabled={!scope}
+            <Select className="select" style={{ maxWidth: 230 }} value={cluster} disabled={!scope}
               title={!scope ? 'vCenter 를 먼저 선택하세요(클러스터 이름은 vCenter 간 중복될 수 있습니다).' : ''}
               onChange={(e) => setCluster(e.target.value)}>
               <option value="">{scope ? '전체 클러스터' : 'vCenter 선택 후'}</option>
               {clusterList.map((c) => <option key={c.name} value={c.name}>{c.name} ({c.vms} VM · 호스트 {c.hosts})</option>)}
-            </select>
+            </Select>
           </label>
         )}
         {scoped && groupScoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">폴더</span>
-            <select className="select" style={{ maxWidth: 230 }} value={folder} disabled={!scope || !folderList.length}
+            <Select className="select" style={{ maxWidth: 230 }} value={folder} disabled={!scope || !folderList.length}
               title={!scope ? 'vCenter 를 먼저 선택하세요.' : !folderList.length ? '이 vCenter 는 폴더 정보가 수집되지 않았습니다(SOAP 수집 경로에서만 채워짐).' : ''}
               onChange={(e) => setFolder(e.target.value)}>
               <option value="">{!scope ? 'vCenter 선택 후' : !folderList.length ? '폴더 정보 없음' : '전체 폴더'}</option>
               {folderList.map((f) => <option key={f.name} value={f.name}>{f.name} ({f.vms} VM)</option>)}
-            </select>
+            </Select>
           </label>
         )}
       </div>
@@ -714,3 +714,4 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
 
 // 외부 파일 호환 재export(App.jsx lazy named import · Summary.jsx)
 export { GuestOsVmsModal } from './tools/GuestOsTools.jsx';
+import Select from '../components/Select.jsx';

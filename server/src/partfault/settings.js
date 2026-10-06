@@ -16,6 +16,7 @@
  * 중앙은 엣지별로도 끌 수 있다(`edges[<agent>].enabled`) — 판정 규칙이 바뀌어 특정 법인만 잠시 멈춰야 할 때.
  * ⚠ 이 파일은 **비밀을 담지 않는다**(SECRET_FILES 등록 대상 아님). 다만 `.gitignore` 에는 넣는다.
  */
+import { isMockMode } from '../mock/demo/flags.js'; // v2.708 데모(mock)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -117,6 +118,8 @@ export function partFaultEnabled() {
     if (s.central && typeof s.central.enabled === 'boolean') return { enabled: s.central.enabled, source: 'edge-central' };
     return { enabled: false, source: 'default' };
   }
+  // v2.708: 데모(mock) — 설정 파일은 바꾸지 않고 켜진 것처럼(source 'demo'). env PARTFAULT_ENABLED=false 가 여전히 이긴다(위).
+  if (!s.enabled && isMockMode()) return { enabled: true, source: 'demo', demo: true };
   return { enabled: !!s.enabled, source: s.enabled ? 'central' : 'default' };
 }
 

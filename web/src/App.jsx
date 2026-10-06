@@ -413,22 +413,22 @@ function Portal({ user, onLogout }) {
   // 필터바·본문·오버레이 — 기존 틀과 V5 틀이 **같은 요소**를 쓴다(화면을 두 벌 만들지 않는다).
   const filterBar = (showFilters && (
           <div className="filters">
-            {!v5On && <select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
+            {!v5On && <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
               <option value="">전체 리전</option>
               {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
               {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
                 .map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>}
+            </Select>}
             {/* V5 는 법인 범위를 상단 하나로 둔다 — 여기서 다시 고르게 하지 않는다. */}
-            {!v5On && <select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
+            {!v5On && <Select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
               <option value="">전체 vCenter</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>}
+            </Select>}
             {MENU_FILTERS[tab] && (
-              <select className="select" value={menuFilter[tab] || ''}
+              <Select sort={false} className="select" value={menuFilter[tab] || ''}
                 onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
                 {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </Select>
             )}
             <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
@@ -763,3 +763,5 @@ function VcDownList({ user, onClose }) {
     </Modal>
   );
 }
+
+import Select from './components/Select.jsx';

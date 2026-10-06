@@ -203,4 +203,19 @@ export function applyPulledServers(list) {
   return { count: next.length, removed: [...before].filter((id) => !nextIds.has(id)) };
 }
 
+/**
+ * v2.708 데모(mock) 시드 — 등록부가 **비어 있을 때만** 주어진 CVP 서버를 그대로 넣는다(id 는 호출자가 `mock-` 접두로 준다).
+ * 입력 검증·SSRF 판정을 건너뛰는 것은 데모 전용이라서다(접속하지 않는다) — 라우트에서 부르지 말 것(mock/demo/cvp.js 만 부른다).
+ * 등록부를 못 읽었으면(손상) 시드하지 않는다.
+ */
+export function seedDemoServers(list) {
+  if (!Array.isArray(list) || !list.length) return { ok: false, reason: '시드할 CVP 서버가 없습니다.' };
+  const db = load();
+  if (db.servers.length) return { ok: false, reason: '등록부가 비어 있지 않습니다.' };
+  if (loadErr.get()) return { ok: false, reason: '등록부를 읽지 못했습니다(손상 보존본이 있습니다).' };
+  db.servers = list.slice(0, MAX_SERVERS).map((s) => ({ ...s, id: String(s.id), createdAt: s.createdAt || Date.now(), updatedAt: Date.now() }));
+  persist();
+  return { ok: true, count: db.servers.length };
+}
+
 export function _resetForTest() { _db = null; loadErr.clear(); }

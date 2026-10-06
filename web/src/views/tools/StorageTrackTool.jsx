@@ -23,6 +23,7 @@ import DsTrendModal from './DsTrendModal.jsx'; // 개별 DS 추이 모달(v2.354
 
 const DAY_OPTS = [7, 30, 90, 365];
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
@@ -126,10 +127,10 @@ export default function StorageTrackTool() {
           </div>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
             <option value="">전체 vCenter(합계)</option>
             {(data.vcenterList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+          </Select>
           <span className="flex gap">
             {DAY_OPTS.map((d) => (
               <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>
@@ -523,11 +524,11 @@ function DsAllGrid({ days, vcenterId }) {
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <input className="input" placeholder="데이터스토어/유형 검색" value={q} onChange={(e) => setQ(e.target.value)}
             style={{ maxWidth: 190, padding: '6px 10px', fontSize: 12.5 }} />
-          <select className="input" value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+          <Select sort={false} className="input" value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
             <option value="used">사용량 큰 순</option>
             <option value="delta">{days}일 증감 큰 순</option>
             <option value="name">이름 순</option>
-          </select>
+          </Select>
           <span className="flex gap" style={{ alignItems: 'center' }}>
             <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} disabled={page <= 0} onClick={() => setPage((x) => Math.max(0, x - 1))}>◀ 이전</button>
             <span className="muted" style={{ fontSize: 12 }}>{page + 1}/{pages}</span>
@@ -651,14 +652,14 @@ function DsPerStore({ days, vcenterId }) {
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <input className="input" placeholder="데이터스토어/유형/vCenter 검색" value={q} onChange={(e) => setQ(e.target.value)}
             style={{ maxWidth: 210, padding: '6px 10px', fontSize: 12.5 }} />
-          <select className="input" value={sel} onChange={(e) => setSel(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5, maxWidth: 340 }}>
+          <Select className="input" value={sel} onChange={(e) => setSel(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5, maxWidth: 340 }}>
             <option value="">데이터스토어 선택{list ? ` (${filtered.length}개)` : ''}</option>
             {filtered.map((d) => (
               <option key={d.dsId} value={d.dsId}>
                 {d.name} · {d.vcenterId} · {gbTb(d.usedGB)}/{gbTb(d.capGB)} ({d.usagePct == null ? '—' : `${d.usagePct}%`})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
       {err && <div className="muted" style={{ fontSize: 12, marginTop: 6, color: 'var(--amber)' }}>⚠ {err}</div>}

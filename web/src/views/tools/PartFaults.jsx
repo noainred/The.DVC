@@ -29,6 +29,7 @@ import {
   EDGE_KIND_LABEL, EDGE_KIND_TONE,
   retentionText,
 } from './partFaultText.js';
+import Select from '../../components/Select.jsx';
 
 const stateColor = toneVar;
 
@@ -247,9 +248,9 @@ export function PartFaults() {
             <button className={`btn${tab === 'events' ? ' active' : ''}`} onClick={() => setTab('events')}>이력</button>
             {tab === 'open' && <SearchBox value={q} onChange={setQ} placeholder="장비·부품·원문 상태·법인 검색" />}
             {tab === 'events' && (
-              <select className="input" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+              <Select sort={false} className="input" value={days} onChange={(e) => setDays(Number(e.target.value))}>
                 {[7, 30, 90, 365].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
-              </select>
+              </Select>
             )}
           </div>
 

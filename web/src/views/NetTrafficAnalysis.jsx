@@ -98,7 +98,7 @@ function Monitors() {
           <div className="flex gap wrap" style={{ flexDirection: 'column', gap: 10 }}>
             <input className="input" placeholder="이름" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <div className="flex gap" style={{ alignItems: 'center' }}>
-              <select className="select" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option value="dual">동시(양방향)</option><option value="single">단일</option></select>
+              <Select sort={false} className="select" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option value="dual">동시(양방향)</option><option value="single">단일</option></Select>
               <span className="muted">주기</span><input className="input" type="number" style={{ width: 70 }} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: e.target.value })} /><span className="muted">분</span>
               <span className="muted">시간</span><input className="input" type="number" style={{ width: 60 }} value={form.seconds} onChange={(e) => setForm({ ...form, seconds: e.target.value })} /><span className="muted">초</span>
             </div>
@@ -230,11 +230,11 @@ function Capture() {
           <div className="flex gap" style={{ alignItems: 'center' }}>
             {[['single', '단일'], ['dual', '동시(양방향)']].map(([k, l]) => <button key={k} className={mode === k ? 'login-btn' : 'tab'} style={{ padding: '5px 11px' }} onClick={() => setMode(k)}>{l}</button>)}
           </div>
-          <select className="select" value={via} onChange={(e) => setVia(e.target.value)} title="실행 위치">
+          <Select sort={false} className="select" value={via} onChange={(e) => setVia(e.target.value)} title="실행 위치">
             <option value="central">중앙 직접 실행</option>
             <option value="agent">엣지 에이전트 위임</option>
-          </select>
-          {via === 'agent' && <select className="select" value={agent} onChange={(e) => setAgent(e.target.value)}><option value="">에이전트 선택</option>{agents.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+          </Select>
+          {via === 'agent' && <Select className="select" value={agent} onChange={(e) => setAgent(e.target.value)}><option value="">에이전트 선택</option>{agents.map((a) => <option key={a} value={a}>{a}</option>)}</Select>}
           {via === 'agent' && agentsErr && <ErrorBox message={agentsErr} />}
         </div>
       </div>
@@ -290,8 +290,8 @@ function LogIssues() {
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>🩺 로그 자체 분석 (장애/이슈 탐지)</div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)}><option value="">전체 vCenter</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
-          <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[1, 7, 30, 90].map((x) => <option key={x} value={x}>최근 {x}일</option>)}</select>
+          <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)}><option value="">전체 vCenter</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</Select>
+          <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[1, 7, 30, 90].map((x) => <option key={x} value={x}>최근 {x}일</option>)}</Select>
         </div>
       </div>
       {err ? <ErrorBox message={err} /> : !d ? <div className="muted">분석 중…</div> : (
@@ -315,3 +315,5 @@ function LogIssues() {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';

@@ -10,6 +10,7 @@ import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, spa
 import { unitText } from '../unitText.js';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { roomSparkScopeNote } from '../scopeOmitText.js';
+import Select from '../../components/Select.jsx';
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
 
@@ -528,9 +529,9 @@ export function RoomTemp() {
 
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10, gap: 8 }}>
         <span className="muted" style={{ fontSize: 12 }}>정렬</span>
-        <select className="select" value={sort} onChange={(e) => setSort(e.target.value)} style={{ minWidth: 150 }}>
+        <Select sort={false} className="select" value={sort} onChange={(e) => setSort(e.target.value)} style={{ minWidth: 150 }}>
           {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>보기</span>
         <div className="flex" style={{ gap: 2 }}>
           {VIEWS.map(([v, l]) => (

@@ -21,6 +21,7 @@ import { adminWriteGate } from './ipamShared.jsx';
 import { checkRangeList, cleanLines, lineIssueText, listSummaryText, normalizeRangeText } from './ipmsRangeText.js';
 import { VcRangeImportModal } from './VcRangeImportModal.jsx';
 import { applyImport, classifyLine, dupReasonText, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
+import Select from '../../components/Select.jsx';
 
 export const RANGE_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%' };
 export const SCAN_CAP = 4096; // 서버 ipam/scan.js RANGE_CAP — 한 줄이 이보다 크면 스캔은 앞부분만 돈다(경고용)
@@ -190,10 +191,10 @@ export function VcScanRangeEditor({
       {showSelect && (
         <div className="flex gap wrap" style={{ alignItems: 'center', margin: '6px 0 8px' }}>
           <span style={{ fontSize: 12 }}>vCenter</span>
-          <select className="select" value={vc} onChange={(e) => onVc?.(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="vCenter 선택">
+          <Select className="select" value={vc} onChange={(e) => onVc?.(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="vCenter 선택">
             <option value="">(선택)</option>
             {(options || []).map((o) => <option key={o.id} value={o.id}>{labelOf(o)}</option>)}
-          </select>
+          </Select>
           {options == null && !vcRangesErr && <span className="muted" style={{ fontSize: 11 }}>목록을 불러오는 중…</span>}
           {options == null && vcRangesErr && <span className="muted" style={{ fontSize: 11 }}>vCenter 목록을 읽지 못했습니다(위 사유)</span>}
           {optionsNote}

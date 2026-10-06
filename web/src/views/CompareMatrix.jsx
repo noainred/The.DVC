@@ -8,6 +8,7 @@ import { STable } from '../components/STable.jsx';
 import {
   cellText, cellColor, metricStats, sortRows, vcenterRows, truncatedNote, cellTitle, sparsityNote,
 } from './compareMatrixText.js';
+import Select from '../components/Select.jsx';
 
 /**
  * CompareMatrix.jsx — 비교 매트릭스 모달(v2.499).
@@ -147,10 +148,10 @@ export default function CompareMatrix({ onClose, initialAxis = 'cluster' }) {
               </label>
             )}
             {axis !== 'vcenter' && metrics.length > 0 && (
-              <select className="select" style={{ width: 168 }} value={metricKey} onChange={(e) => setMetricKey(e.target.value)}
+              <Select sort={false} className="select" style={{ width: 168 }} value={metricKey} onChange={(e) => setMetricKey(e.target.value)}
                 title="표의 셀에 표시할 지표">
                 {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </select>
+              </Select>
             )}
             <button className="logout-btn" style={{ flex: 'none' }} onClick={onClose}>닫기</button>
           </span>

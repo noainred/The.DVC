@@ -222,9 +222,9 @@ export default function UserAdmin() {
             <label>사용자 ID<input className="input" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} placeholder="alice" /></label>
             <label>이름<input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Alice" /></label>
             <label>역할
-              <select className="select" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
+              <Select sort={false} className="select" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
                 {roleOptions(meSuper, form.role).map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
+              </Select>
             </label>
           </div>
           <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>비밀번호 없이 생성되며, 아래 목록에서 <b>OTP 등록</b> 후 QR을 사용자에게 전달하면 됩니다.</div>
@@ -248,10 +248,10 @@ export default function UserAdmin() {
                 </td>
                 <td>{u.name}</td>
                 <td>
-                  <select className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}
+                  <Select sort={false} className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}
                     disabled={u.demo || u.superuser || superTargetLocked(meSuper, u)} title={u.demo ? '데모 계정은 viewer 고정입니다.' : u.superuser ? '수퍼관리자는 super_admin 고정입니다.' : superTargetLocked(meSuper, u) ? SUPER_LOCK_TITLE : undefined}>
                     {roleOptions(meSuper, u.role).map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
+                  </Select>
                 </td>
                 <td>
                   {u.totpEnabled
@@ -589,3 +589,5 @@ export default function UserAdmin() {
     </>
   );
 }
+
+import Select from '../components/Select.jsx';

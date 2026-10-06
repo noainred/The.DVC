@@ -12,6 +12,7 @@ import { VmLink } from '../../components/EntityDetail.jsx';
 import {
   MOVE_KIND_LABEL, CHANGE_KIND_LABEL, fmtTs, routeText, coverageNote, truncNote, noDetailNote, changeText,
 } from '../vmchanges/vmChangesText.js';
+import Select from '../../components/Select.jsx';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -106,10 +107,10 @@ export default function VmChangesTool({ scope }) {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder={tab === 'moves' ? 'VM·vCenter 검색' : 'VM·사용자·대상 검색'} value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {showCsv && <button type="button" className="btn" onClick={csv} disabled={csvBusy}>CSV</button>}

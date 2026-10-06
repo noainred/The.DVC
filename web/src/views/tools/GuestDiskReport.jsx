@@ -257,11 +257,11 @@ export default function GuestDiskReport({ scope = '' }) {
         </label>
         <label className="gd-min">
           <span>클러스터</span>
-          <select className="gd-sel" value={clusterSel} onChange={(e) => setClusterSel(e.target.value)}
+          <Select className="gd-sel" value={clusterSel} onChange={(e) => setClusterSel(e.target.value)}
             title={clusterOpts.length ? '' : '표시할 데이터가 있어야 클러스터가 채워집니다'}>
             <option value="">전체 클러스터{clusterOpts.length ? ` (${clusterOpts.length})` : ''}</option>
             {clusterOpts.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
         </label>
         <div className="gd-min">
           <span>최소 회수(GB)</span>
@@ -381,7 +381,7 @@ export default function GuestDiskReport({ scope = '' }) {
           </div>
         )
       ) : group === 'none' ? (
-        <STable className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
+        <STable minWidth={980} className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
       ) : (
         <div className="gd-groups">
           {pageItems.map((g) => (
@@ -390,7 +390,7 @@ export default function GuestDiskReport({ scope = '' }) {
                 <span className="gd-group-name">{g.key}</span>
                 <span className="gd-group-meta">{g.rows.length}대 · 회수가능 <b className="gd-free">{fmtSize(g.free, unit)}</b> · 할당 {fmtSize(g.alloc, unit)}</span>
               </summary>
-              <STable className="gd-table">{tableHead}<tbody>{g.rows.map(rowEl)}</tbody></STable>
+              <STable minWidth={980} className="gd-table">{tableHead}<tbody>{g.rows.map(rowEl)}</tbody></STable>
             </details>
           ))}
         </div>
@@ -400,3 +400,5 @@ export default function GuestDiskReport({ scope = '' }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

@@ -200,11 +200,11 @@ export default function VCenterAdmin() {
       <div className="card" style={{ marginTop: 16, marginBottom: 12, padding: '12px 14px' }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>데이터 소스</span>
-          <select className="select" value={data.dataSource} onChange={changeSource} style={{ maxWidth: 160 }}>
+          <Select sort={false} className="select" value={data.dataSource} onChange={changeSource} style={{ maxWidth: 160 }}>
             <option value="mock">MOCK (데모)</option>
             <option value="live">LIVE (실제 vCenter)</option>
             <option value="auto">AUTO (live+실패 시 mock)</option>
-          </select>
+          </Select>
           <span className="muted" style={{ fontSize: 11 }}>전환 시 즉시 재수집합니다. (환경변수 없이 포탈에서 변경)</span>
         </div>
       </div>
@@ -263,9 +263,9 @@ export default function VCenterAdmin() {
               <label>계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="monitor@vsphere.local" /></label>
               <label>비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} placeholder={editing ? '••••••' : ''} /></label>
               <label>리전
-                <select className="select" value={form.location.region} onChange={setLoc('region')}>
+                <Select className="select" value={form.location.region} onChange={setLoc('region')}>
                   {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
+                </Select>
               </label>
               <label>도시<input className="input" value={form.location.city} onChange={setLoc('city')} onBlur={autoGeocode} placeholder="Seoul" /></label>
               <label>국가<input className="input" value={form.location.country} onChange={setLoc('country')} onBlur={autoGeocode} placeholder="South Korea" /></label>
@@ -274,10 +274,10 @@ export default function VCenterAdmin() {
               <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
               <label>수집 타임아웃(ms, 0/빈칸=30000)<input className="input" type="number" value={form.timeoutMs} onChange={setF('timeoutMs')} placeholder="예: 60000 (고RTT)" /></label>
               <label style={{ gridColumn: '1 / -1' }} title="중앙 직접: 이 포탈(중앙)이 vCenter에 직접 접속해 수집. 사이트 위임: 그 사이트의 현장 서버(에이전트, AGENT_PUSH_INVENTORY=true)가 로컬에서 수집해 중앙으로 push — 고RTT 원격 사이트(폴란드/미국동부 등)에 권장. 위임 선택 시 중앙은 이 vCenter를 직접 폴링하지 않습니다.">수집 방식
-                <select className="select" value={form.collectMode || 'direct'} onChange={setF('collectMode')}>
+                <Select sort={false} className="select" value={form.collectMode || 'direct'} onChange={setF('collectMode')}>
                   <option value="direct">중앙 직접 수집(기본)</option>
                   <option value="site">사이트 위임(현장 서버가 수집→중앙 push, 고RTT 권장)</option>
-                </select>
+                </Select>
               </label>
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
                 <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> 수집 사용
@@ -388,3 +388,5 @@ function VcenterOrderCard() {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';

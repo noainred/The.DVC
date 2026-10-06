@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * 설정 › 자격증명 저장 방식(v2.296) — 프로그램이 쓰는 모든 계정 비밀번호(vCenter·NSX·엣지/
@@ -89,10 +90,10 @@ export default function SecretsSettings() {
             ))}
             <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 10 }}>
               <span className="muted" style={{ fontSize: 12 }}><b>알고리즘</b></span>
-              <select className="select" value={algorithm} onChange={(e) => setAlgorithm(e.target.value)} style={{ minWidth: 220 }}>
+              <Select sort={false} className="select" value={algorithm} onChange={(e) => setAlgorithm(e.target.value)} style={{ minWidth: 220 }}>
                 <option value="">자동 — 레벨 기본값 사용(권장)</option>
                 {ALGOS.map((a) => <option key={a} value={a}>{a}{a === 'chacha20-poly1305' ? ' (AES 가속 없는 CPU에 유리)' : ''}</option>)}
-              </select>
+              </Select>
               <span className="muted" style={{ fontSize: 11 }}>전부 AEAD(무결성 내장) — 변조된 값은 복호가 거부됩니다.</span>
             </div>
           </div>

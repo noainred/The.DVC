@@ -11,6 +11,8 @@ import { getTargetRaw, listTargetsRaw } from '../agent/deployRegistry.js';
 import { ipBlockReason } from '../collector/registry.js';
 import { loadTopologyRaw } from './store.js';
 import { renderManagedBlock, mergeManagedBlock, parseConfig, diffConfig } from './haproxy.js';
+import { demoInspectNode } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 사이트는 SSH 없이 합성
+import { isMockMode } from '../mock/demo/flags.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const TIMEOUT_MS = Math.max(10_000, Number(process.env.RELAYTOPO_SSH_TIMEOUT_MS) || 45_000);
@@ -85,6 +87,7 @@ const listenPorts = (out) => [...new Set(String(out || '').split(/\s+/).map((a) 
 
 /** 노드 1개 검사(SSH 1세션, 노드당 타임아웃). role: 'edge'|'irs'|'main'. */
 export async function inspectNode(topo, site, role, { timeoutMs = TIMEOUT_MS, trace = null } = {}) {
+  { const demo = demoInspectNode(topo, site, role, { renderManagedBlock }); if (demo) return demo; } // mock 아니면 null
   const acc = resolveNodeAccess(topo, site, role);
   const base = { role, dc: site?.dc || '', host: acc.host || '', port: acc.port || 0, via: acc.via || '', source: acc.source || '', at: Date.now() };
   if (acc.error) return { ...base, ok: false, error: acc.error };
@@ -187,6 +190,7 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
   const topo = loadTopologyRaw();
   const site = topo.sites.find((s) => s.dc === dc);
   if (!site) return { ok: false, reason: `사이트 '${dc}' 가 없습니다.` };
+  if (isMockMode() && demoInspectNode(topo, site, 'edge')) return { ok: false, demo: true, reason: '데모 사이트입니다 — 실제 노드에 접속·적용하지 않습니다.' };
   if (_busy.has(dc)) return { ok: false, reason: `사이트 '${dc}' 작업이 진행 중입니다(겹침 방지).` };
   const acc = resolveNodeAccess(topo, site, 'edge');
   if (acc.error) return { ok: false, reason: acc.error };
@@ -268,6 +272,7 @@ export async function testNode(dc, role, { timeoutMs = 20_000 } = {}) {
   const topo = loadTopologyRaw();
   const site = role === 'main' ? null : topo.sites.find((s) => s.dc === dc);
   if (role !== 'main' && !site) return { ok: false, reason: `사이트 '${dc}' 가 없습니다.` };
+  if (isMockMode() && (role === 'main' || demoInspectNode(topo, site, role))) return { ok: false, demo: true, reason: '데모 모드입니다 — 실제 노드에 SSH 접속하지 않습니다.' };
   const acc = resolveNodeAccess(topo, site, role);
   if (acc.error) return { ok: false, reason: acc.error, host: acc.host, port: acc.port, via: acc.via };
   const t0 = Date.now(); const trace = [];

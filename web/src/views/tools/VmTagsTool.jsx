@@ -9,6 +9,8 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { TAG_STATE_TEXT, pctText, coverageNote, policyNote } from '../tags/vmTagsText.js';
+import Select from '../../components/Select.jsx';
+import DataList from '../../components/DataList.jsx';
 
 function Chip({ active, onClick, children }) {
   return <button type="button" className={`tab${active ? ' active' : ''}`} onClick={onClick} style={{ padding: '4px 10px', fontSize: 12 }}>{children}</button>;
@@ -40,7 +42,7 @@ function PolicyEditor({ policy, rev, categories, onSaved }) {
           <input className="input" style={{ width: '100%', minWidth: 0 }} value={corp} onChange={(e) => setCorp(e.target.value)} placeholder="예: Corp" list="vmtag-cats" />
         </label>
       </div>
-      <datalist id="vmtag-cats">{names.map((n) => <option key={n} value={n} />)}</datalist>
+      <DataList id="vmtag-cats">{names.map((n) => <option key={n} value={n} />)}</DataList>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
         <button type="button" className="btn" onClick={save} disabled={busy}>{busy ? '저장 중…' : '정책 저장'}</button>
         {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
@@ -116,10 +118,10 @@ export default function VmTagsTool({ scope }) {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         {tab === 'missing' && <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="VM·vCenter·카테고리 검색" value={q} onChange={(e) => setQ(e.target.value)} />}
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {showCsv && tab === 'missing' && <button type="button" className="btn" onClick={csv} disabled={csvBusy}>CSV</button>}

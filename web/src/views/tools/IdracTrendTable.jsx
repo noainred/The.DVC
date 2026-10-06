@@ -12,6 +12,7 @@ import {
   TABLE_SERIES, TABLE_HOUR_PRESETS, TABLE_HOURS_MAX, hoursLabel, COND_OPS, newCond, filterTable, condText, cellHit, valueText, tableCsv, ymd, hm,
   activeConds, isDevOp, condUnit, deviationOf, deviationText, EMPTY_TYPE, typeQuery, typeText, gpuStateOf,
 } from './idracTrendText.js';
+import Select from '../../components/Select.jsx';
 
 const ALL = '*';
 const SORT_BY = [['max', '최대'], ['avg', '평균'], ['min', '최소'], ['cur', '현재'], ['dev', '변화']];
@@ -77,17 +78,17 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, typeFilte
       <div className="flex wrap" style={{ gap: 10, alignItems: 'center', marginBottom: 10 }}>
         <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>
           <span className="muted">법인</span>
-          <select className="select" value={corp} onChange={(e) => { setCorp(e.target.value); setSite(ALL); }}>
+          <Select className="select" value={corp} onChange={(e) => { setCorp(e.target.value); setSite(ALL); }}>
             <option value={ALL}>(전체 법인)</option>
             {corps.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>
           <span className="muted">서비스</span>
-          <select className="select" value={corp === ALL ? ALL : site} disabled={corp === ALL} onChange={(e) => setSite(e.target.value)}>
+          <Select className="select" value={corp === ALL ? ALL : site} disabled={corp === ALL} onChange={(e) => setSite(e.target.value)}>
             <option value={ALL}>(전체 서비스)</option>
             {sites.map((s) => <option key={s.value} value={s.value}>{s.value} · {s.n}대</option>)}
-          </select>
+          </Select>
         </label>
         <span className="flex wrap" style={{ gap: 4, alignItems: 'center' }} role="group" aria-label="최근 기간">
           <span className="muted" style={{ fontSize: 13 }}>최근</span>
@@ -116,14 +117,14 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, typeFilte
 
           return (
             <div key={c.id} className="flex wrap" style={{ gap: 6, alignItems: 'center', padding: '3px 0' }}>
-              <select className="select" aria-label="지표" value={c.k} onChange={(e) => setCond(c.id, { k: e.target.value })}>
+              <Select sort={false} className="select" aria-label="지표" value={c.k} onChange={(e) => setCond(c.id, { k: e.target.value })}>
                 {TABLE_SERIES.map((x) => <option key={x.k} value={x.k}>{x.label}</option>)}
-              </select>
+              </Select>
               <input className="input" aria-label="기준값" style={{ width: 90, minWidth: 0, padding: '3px 6px' }} inputMode="decimal" placeholder="값" value={c.v} onChange={(e) => setCond(c.id, { v: e.target.value })} />
               <span className="muted" style={{ fontSize: 12, width: 22 }}>{condUnit(c.k, c.op)}</span>
-              <select className="select" aria-label="비교" value={c.op} onChange={(e) => setCond(c.id, { op: e.target.value })}>
+              <Select sort={false} className="select" aria-label="비교" value={c.op} onChange={(e) => setCond(c.id, { op: e.target.value })}>
                 {COND_OPS.map((o) => <option key={o.k} value={o.k}>{o.label}</option>)}
-              </select>
+              </Select>
               <button type="button" className="tab" aria-label="조건 삭제" style={{ flex: 'none', padding: '2px 8px', marginTop: 0, fontSize: 12 }} onClick={() => setConds((cs) => cs.filter((x) => x.id !== c.id))}>✕</button>
             </div>
           );

@@ -10,6 +10,8 @@ import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로
 import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { notify } from '../alerts.js';
+import { demoRelayCheck } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 호스트는 접속하지 않고 합성
+import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.RELAYCHECK_CONCURRENCY) || 4));
@@ -70,7 +72,7 @@ export function transition(prev, ok, failStreak) {
 
 export async function runRelayChecks({ force = false } = {}) {
   const st = loadSettings();
-  if (!force && !st.enabled) return { ok: false, reason: 'HAProxy 경로 점검이 꺼져 있습니다.' };
+  if (!force && !demoOn(st.enabled)) return { ok: false, reason: 'HAProxy 경로 점검이 꺼져 있습니다.' };
   if (_busy) return { ok: false, reason: '이전 점검 진행 중(겹침 방지)' };
   _busy = true;
   const t0 = Date.now();
@@ -81,7 +83,7 @@ export async function runRelayChecks({ force = false } = {}) {
     await pool(targets, CONCURRENCY, async (t) => {
       seen.add(t.key);
       let r;
-      try { r = await runCheck(t, { timeoutMs: st.timeoutMs }); } catch (e) { r = { ok: false, phase: 'unknown', error: e.message, ms: 0 }; }
+      try { r = demoRelayCheck(t) || await runCheck(t, { timeoutMs: st.timeoutMs }); } catch (e) { r = { ok: false, phase: 'unknown', error: e.message, ms: 0 }; }
       const prev = _state.get(t.key);
       const { next, event } = transition(prev, r.ok, st.failStreak);
       const remedy = r.ok ? null : remedyFor({ kind: t.kind, host: t.host, port: t.port, phase: r.phase, error: r.error, expect: { agent: t.expectAgent, relayAgent: t.relayAgent }, got: r.got || null });
@@ -105,11 +107,11 @@ export async function runRelayChecks({ force = false } = {}) {
 function safeTopology() { try { return loadTopology(); } catch { return null; } }
 export function relayCheckStatus() {
   const st = loadSettings();
-  return { last: _last, busy: _busy, settings: st, results: [..._state.values()].sort((a, b) => (a.target.host + a.target.port).localeCompare(b.target.host + b.target.port, undefined, { numeric: true })), kinds: KINDS };
+  return { ...(isMockMode() ? { demo: true } : {}), last: _last, busy: _busy, settings: isMockMode() ? { ...st, enabled: demoOn(st.enabled) } : st, results: [..._state.values()].sort((a, b) => (a.target.host + a.target.port).localeCompare(b.target.host + b.target.port, undefined, { numeric: true })), kinds: KINDS };
 }
 
 export function startRelayCheckPoller() {
   if (_timer) return;
-  _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (loadSettings().enabled) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검', subscribe: onRelayCheckSettingsChange });
+  _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (demoOn(loadSettings().enabled)) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검', subscribe: onRelayCheckSettingsChange });
 }
 export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, ok: 0, fail: 0 }; }

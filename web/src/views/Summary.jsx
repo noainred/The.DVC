@@ -11,6 +11,7 @@ import { unitText } from './unitText.js';
 import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
 // v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 V6 와 같은 함수를 쓴다(형제 비대칭 — 개발 포탈만 0 행을 합계에 더했다).
 import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from '../version_6/v6Data.js';
+import Select from '../components/Select.jsx';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -163,10 +164,10 @@ export default function Summary({ scope, onGotoTab }) {
         <div className="section-title" style={{ margin: '6px 0' }}>전체 통합 합계 {corp ? `— ${corpName}` : '(모든 vCenter 자원 SUM)'}</div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           <span className="muted">법인 필터</span>
-          <select className="select" value={corp} onChange={(e) => setCorp(e.target.value)}>
+          <Select className="select" value={corp} onChange={(e) => setCorp(e.target.value)}>
             <option value="">전체 법인</option>
             {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       {/* 전체 통합 합계 — 화면 폭에 맞춰 모든 타일을 항상 '1줄'에 맞춘다(줄바꿈 없이 균등 축소). */}
@@ -213,16 +214,16 @@ export default function Summary({ scope, onGotoTab }) {
           <div className="flex between wrap" style={{ marginBottom: 8, gap: 8, alignItems: 'center' }}>
             <b>OS별 vCPU · 메모리 · 디스크 합계</b>
             <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-              <select className="select" value={osPower} onChange={(e) => setOsPower(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
+              <Select sort={false} className="select" value={osPower} onChange={(e) => setOsPower(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
                 <option value="all">전원 전체</option>
                 <option value="on">On만</option>
                 <option value="off">Off만</option>
-              </select>
-              <select className="select" value={osKind} onChange={(e) => setOsKind(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
+              </Select>
+              <Select sort={false} className="select" value={osKind} onChange={(e) => setOsKind(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
                 <option value="all">VM+템플릿</option>
                 <option value="vm">VM만</option>
                 <option value="template">템플릿만</option>
-              </select>
+              </Select>
               <span className="muted" style={{ fontSize: 12 }}>{osAlloc.length} OS · {fmt(osAllocTotals.vms)} VM</span>
             </div>
           </div>

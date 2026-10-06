@@ -63,9 +63,9 @@ export default function VcenterLogs() {
           <span className="muted" style={{ marginLeft: 8 }}><b>용량 제한</b></span>
           <input className="input" type="number" min="0" style={{ width: 90 }} value={s.maxSizeMB} onChange={(e) => setS({ ...s, maxSizeMB: e.target.value })} /> <span className="muted">MB (0=무제한)</span>
           <span className="muted" style={{ marginLeft: 8 }}>최소 심각도</span>
-          <select className="select" value={s.minSeverity} onChange={(e) => setS({ ...s, minSeverity: e.target.value })}>
+          <Select sort={false} className="select" value={s.minSeverity} onChange={(e) => setS({ ...s, minSeverity: e.target.value })}>
             <option value="info">정보 이상(전체)</option><option value="warning">경고 이상</option><option value="error">위험만</option>
-          </select>
+          </Select>
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12, marginTop: 12 }}>
           <span className="muted"><b>저장 경로</b></span>
@@ -163,13 +163,13 @@ function LogViewer() {
     <div className="card" style={{ padding: 14 }}>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={f.vcenterId} onChange={(e) => setF({ ...f, vcenterId: e.target.value })}>
+          <Select className="select" value={f.vcenterId} onChange={(e) => setF({ ...f, vcenterId: e.target.value })}>
             <option value="">전체 vCenter</option>
             {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-          <select className="select" value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value })}>
+          </Select>
+          <Select sort={false} className="select" value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value })}>
             <option value="">전체 심각도</option><option value="error">위험</option><option value="warning">경고</option><option value="info">정보</option>
-          </select>
+          </Select>
           <input className="input" placeholder="메시지/엔티티/사용자 검색…" style={{ width: 220 }} value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && load(true)} />
           <button className="tab" style={{ padding: '6px 12px' }} onClick={() => load(true)}>검색</button>
         </div>
@@ -206,3 +206,5 @@ function LogViewer() {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';

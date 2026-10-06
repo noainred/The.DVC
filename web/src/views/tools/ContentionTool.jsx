@@ -10,6 +10,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { CONTENTION_TEXT, SEV_LABEL, SEV_BADGE, pctText, msText, coverageNote, windowText, missingCounterNote } from '../contention/contentionText.js';
+import Select from '../../components/Select.jsx';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -100,10 +101,10 @@ export default function ContentionTool({ scope }) {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         {tab === 'vms' && (
           <>
             <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>보기</span>

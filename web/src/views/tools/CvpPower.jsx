@@ -6,6 +6,7 @@ import { STable } from '../../components/STable.jsx';
 import { agoText, countText } from './cvpText.js';
 import { corpLabel } from './cvpOverviewText.js';
 import { POWER_NOTE, wattText, powerKpis, basisText, powerEmptyNote } from './cvpPowerText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * CVP › 전력(v2.647 — 사용자 요청 '전체 네트워크 장비의 소비전력'). `/tools/cvp/power` 1회(폴링 금지 — 마운트 + 새로고침).
@@ -36,10 +37,10 @@ export default function CvpPowerView({ servers = [], onOpen }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <b>네트워크 장비 소비전력</b>
           {servers.length > 1 && (
-            <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+            <Select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
               <option value="">모든 CVP</option>
               {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
-            </select>
+            </Select>
           )}
           <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
         </div>

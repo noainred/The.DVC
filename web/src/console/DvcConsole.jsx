@@ -25,6 +25,7 @@ import ConsoleStorage from './pages/ConsoleStorage.jsx';
 import ConsoleNetwork from './pages/ConsoleNetwork.jsx';
 import ConsoleFacility from './pages/ConsoleFacility.jsx';
 import ConsoleAlarms from './pages/ConsoleAlarms.jsx';
+import Select from '../components/Select.jsx';
 
 export const CONSOLE_HASH = '#/console';
 export const isConsoleHash = (hash) => hashSegments(hash)[0] === 'console';
@@ -140,16 +141,16 @@ export default function DvcConsole({ user, health, onExit }) {
             {q ? <button className="dvc-kbd" style={{ background: 'transparent', color: '#6b7280', cursor: 'pointer' }} onClick={() => setQ('')}>지움</button> : <span className="dvc-kbd">필터</span>}
           </label>
           <label className="dvc-chip"><span>리전</span>
-            <select value={region} onChange={(e) => { setRegion(e.target.value); setFocusVc(''); }}>
+            <Select value={region} onChange={(e) => { setRegion(e.target.value); setFocusVc(''); }}>
               <option value="">전체</option>
               {regions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="dvc-chip"><span>vCenter</span>
-            <select value={focusVc} onChange={(e) => setFocusVc(e.target.value)}>
+            <Select value={focusVc} onChange={(e) => setFocusVc(e.target.value)}>
               <option value="">전체</option>
               {sitesAll.filter((s) => !region || s.region === region).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </Select>
           </label>
           <span style={{ flex: 1 }} />
           <div className={`dvc-live${health ? '' : ' down'}`} title="데이터 소스 · 마지막 수집 시각">

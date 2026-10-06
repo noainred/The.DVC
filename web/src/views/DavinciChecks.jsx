@@ -4,6 +4,7 @@ import { confirmPrompt, resultText, canConfirm } from './settingsFileConfirmText
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes, fmtAgo } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316' };
 const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림' };
@@ -152,10 +153,10 @@ export function VmwareConfigBackup() {
         vCenter 자체 백업을 대체하지 않는 <b>구성 스냅샷</b>(문서화·DR 참고·감사용)입니다.
       </p>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <select className="select" value={vc} onChange={(e) => setVc(e.target.value)}>
+        <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)}>
           <option value="">전체 사이트</option>
           {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-        </select>
+        </Select>
         <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'dl'} onClick={download}>{busy === 'dl' ? '내보내는 중…' : '⬇ 구성 백업 다운로드 (.json.gz)'}</button>
         {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>

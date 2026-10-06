@@ -50,7 +50,10 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
     const saved = await applyTransition(tr);
 
     let note = null;
-    if (notify && (tr.opened.length || tr.closed.length || tr.updated.some((u) => !u.sameState))) {
+    // v2.708: 데모(mock)로만 켜진 상태(source 'demo')면 알림을 보내지 않는다 — 합성 장애가 설정된 실제 채널(메일·웹훅)로 나가지 않게.
+    //   저장 설정으로 켠 경우는 예전 그대로. 전이·이벤트 기록은 그대로 한다.
+    const demoOnly = partFaultEnabled().source === 'demo';
+    if (notify && !demoOnly && (tr.opened.length || tr.closed.length || tr.updated.some((u) => !u.sameState))) {
       note = await notifyTransition(tr);
       if (tr.opened.length) await markNotified(tr.opened.map((p) => ({ agent: p.agent || '', partKey: p.partKey })));
     }
@@ -60,6 +63,7 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
       local: local.scanned, edgeAgents: edge.agents,
       stats: tr.stats, saved,
       notify: note ? { ...note, dropped: countDropped(note.results) } : null,
+      ...(demoOnly ? { demo: true, notifySuppressed: 'demo' } : {}),
     };
     // 성공·실패 **둘 다** 로그를 남긴다(무음 실패 금지).
     console.log(`[partfault] 점검(${reason}) ${Date.now() - t0}ms — 신규 ${tr.stats.opened} · 해소 ${tr.stats.closed} · 변화 ${tr.stats.changed}`

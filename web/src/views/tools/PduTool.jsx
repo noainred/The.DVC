@@ -352,23 +352,23 @@ function DeviceModal({ form, setF, setForm, close, save, runTest, busy, testing,
             <input className="input" type="password" value={form.password} onChange={setF('password')} autoComplete="new-password" />
           </F>
           <F label="법인(DataCenter)">
-            <select className="input" value={form.datacenterId} onChange={setF('datacenterId')}>
+            <Select className="input" value={form.datacenterId} onChange={setF('datacenterId')}>
               <option value="">(지정 안 함)</option>
               {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
-            </select>
+            </Select>
           </F>
           <F label="수집 주체">
-            <select className="input" value={form.agent} onChange={setF('agent')}>
+            <Select className="input" value={form.agent} onChange={setF('agent')}>
               <option value="">중앙 직접 수집</option>
               {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>{m.label}</option> : null; })()}
               {(data.agents || []).map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
+            </Select>
           </F>
           <F label="수집 여부">
-            <select className="input" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
+            <Select sort={false} className="input" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
               <option value="1">수집</option><option value="0">중지</option>
-            </select>
+            </Select>
           </F>
           <F label="메모"><input className="input" value={form.note} onChange={setF('note')} /></F>
         </div>
@@ -589,3 +589,5 @@ function F({ label, children }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

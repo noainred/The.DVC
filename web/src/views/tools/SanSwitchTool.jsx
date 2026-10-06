@@ -421,15 +421,15 @@ function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, s
         <label style={{ fontSize: 12 }}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
         <label style={{ fontSize: 12 }}>host (IP/호스트명)<input className="input" value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
         <label style={{ fontSize: 12 }}>타입
-          <select className="input" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
+          <Select className="input" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
             {data.types.map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
-          </select>
+          </Select>
         </label>
         <label style={{ fontSize: 12 }}>수집 방식
-          <select className="input" value={form.collectMethod} onChange={set('collectMethod')}
+          <Select sort={false} className="input" value={form.collectMethod} onChange={set('collectMethod')}
             title={(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint || ''}>
             {(type?.methods || []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
+          </Select>
         </label>
         <label style={{ fontSize: 12 }}>계정<input className="input" value={form.username} onChange={set('username')} autoComplete="off" /></label>
         <label style={{ fontSize: 12 }}>비밀번호
@@ -438,19 +438,19 @@ function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, s
         </label>
         <label style={{ fontSize: 12 }}>SSH 포트<input className="input" type="number" value={form.sshPort} onChange={set('sshPort')} /></label>
         <label style={{ fontSize: 12 }}>법인(DataCenter)
-          <select className="input" value={form.datacenterId} onChange={set('datacenterId')}>
+          <Select className="input" value={form.datacenterId} onChange={set('datacenterId')}>
             <option value="">(미지정)</option>
             {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
             {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
-          </select>
+          </Select>
         </label>
         <label style={{ fontSize: 12 }}>수집 주체
-          <select className="input" value={form.agent} onChange={set('agent')}
+          <Select className="input" value={form.agent} onChange={set('agent')}
             title="중앙에서 스위치에 직접 닿지 않으면 그 법인의 엣지를 지정하세요. 엣지가 현지에서 수집해 중앙으로 올립니다.">
             <option value="">중앙이 직접 수집</option>
             {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>엣지 {m.label}</option> : null; })()}
             {(data.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
-          </select>
+          </Select>
         </label>
         <label style={{ fontSize: 12 }} title="Virtual Fabrics 를 쓰는 장비에서 특정 논리 스위치만 볼 때 지정합니다. 비워두면 기본 컨텍스트만 수집합니다.">
           VF ID (선택)<input className="input" type="number" value={form.vfId} onChange={set('vfId')} placeholder="예: 128" />
@@ -1455,3 +1455,5 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
     </Modal>
   );
 }
+
+import Select from '../../components/Select.jsx';

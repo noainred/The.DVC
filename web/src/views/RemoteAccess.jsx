@@ -5,6 +5,7 @@ import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
 const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red' };
@@ -114,17 +115,17 @@ export default function RemoteAccess() {
             {vmList.length > 0 && (
               <div className="flex gap wrap" style={{ marginTop: 8 }}>
                 <label style={{ flex: 1, minWidth: 220 }}>VM ({vmList.length})
-                  <select className="select" value={vmSel?.id || ''} onChange={(e) => pickVm(e.target.value)}>
+                  <Select className="select" value={vmSel?.id || ''} onChange={(e) => pickVm(e.target.value)}>
                     <option value="">— VM 선택 —</option>
                     {vmList.map((v) => <option key={v.id} value={v.id}>{v.name} · {v.ips.length} IP · {v.powerState === 'POWERED_ON' ? 'On' : 'Off'}</option>)}
-                  </select>
+                  </Select>
                 </label>
                 {vmSel && (
                   <label style={{ flex: 1, minWidth: 200 }}>IP 선택 ({vmSel.ips.length})
-                    <select className="select" value={form.targetHost} onChange={(e) => setForm({ ...form, targetHost: e.target.value })}>
+                    <Select className="select" value={form.targetHost} onChange={(e) => setForm({ ...form, targetHost: e.target.value })}>
                       <option value="">— IP 선택 —</option>
                       {vmSel.ips.map((ip) => <option key={ip} value={ip}>{ip}</option>)}
-                    </select>
+                    </Select>
                   </label>
                 )}
               </div>
@@ -133,17 +134,17 @@ export default function RemoteAccess() {
           <div className="spec-grid" style={{ marginTop: 8 }}>
             <label>이름<input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="esxi-jump" /></label>
             <label>프로토콜
-              <select className="select" value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })}>
+              <Select sort={false} className="select" value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })}>
                 {PROTOCOLS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </Select>
             </label>
             <label>대상 호스트(IP)<input className="input" value={form.targetHost} onChange={(e) => setForm({ ...form, targetHost: e.target.value })} placeholder="VM 선택 또는 직접 입력" /></label>
             <label>대상 포트(보안상 22/3389 아닐 수 있음)<input className="input" type="number" value={form.targetPort} onChange={(e) => setForm({ ...form, targetPort: e.target.value })} placeholder={form.protocol === 'rdp' ? '3389' : '22'} /></label>
             <label>법인(vCenter, 선택)
-              <select className="select" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })}>
+              <Select className="select" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })}>
                 <option value="">— 선택 —</option>
                 {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
+              </Select>
             </label>
             <label>공개 포트(비우면 자동)<input className="input" type="number" value={form.publicPort} onChange={(e) => setForm({ ...form, publicPort: e.target.value })} placeholder="자동" /></label>
           </div>

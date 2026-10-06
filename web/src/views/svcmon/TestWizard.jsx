@@ -15,6 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { ADD_MENU, ADD_MENU_PLANNED, METHOD, TYPE_META, EMPTY_TEST } from './constants.js';
+import Select from '../../components/Select.jsx';
 
 export function TestWizard({ targetId, targetName, test = null, onClose, onSaved }) {
   // 초기 상태 — 원본 openWizard(398~409행)와 동일 규칙(수정 모드면 3단계로 직행).
@@ -100,10 +101,10 @@ export function TestWizard({ targetId, targetName, test = null, onClose, onSaved
                   <div className="pc-wiz-lead">이 대상에 적용할 점검 템플릿을 고르세요 — 템플릿의 점검들이 한 번에 추가됩니다.</div>
                   <div className="pc-wiz-form">
                     <label>점검 템플릿
-                      <select className="pc-input" value={wiz.tplId} autoFocus onChange={(e) => setWiz({ ...wiz, tplId: e.target.value })}>
+                      <Select className="pc-input" value={wiz.tplId} autoFocus onChange={(e) => setWiz({ ...wiz, tplId: e.target.value })}>
                         <option value="">(템플릿 선택)</option>
                         {wizTpls.map((t) => <option key={t.id} value={t.id}>{t.name} — 항목 {(t.items || []).length}개</option>)}
-                      </select>
+                      </Select>
                     </label>
                     {(() => {
                       const t = wizTpls.find((x) => x.id === wiz.tplId);

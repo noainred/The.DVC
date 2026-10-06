@@ -29,7 +29,7 @@ import { isStopped } from '../security/emergencyStop.js';
 import { load as loadCurUserSettings, staleAfterMs, onCurUserSettingsChange } from './settings.js';
 import { resolveTargets } from './scope.js';
 import { collectVcenterCurUsers, mockRecords } from './collect.js';
-import { commitCurUser, latestRecords, pruneCurUser, curUserDbStatus } from './db.js';
+import { commitCurUser, latestRecords, pruneCurUser, curUserDbStatus, seriesRange } from './db.js';
 import { refreshKinds } from './report.js';
 import { aggregateAll, seriesRow, advanceFailState, persistentFailKeys, PERSISTENT_FAIL_CYCLES } from './aggregate.js';
 import { recordCurUserActivity } from './activityLog.js';
@@ -37,6 +37,8 @@ import { pushCurUserRecords, curUserPushEnabled } from '../agent/curUserPush.js'
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
+import { demoOn, isMockMode } from '../mock/demo/flags.js';
+import { demoCurUserSettings, demoCurUserBackfillRows } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 import { pushAll } from '../util/pushAll.js';
 
 const CONCURRENCY_CAP = 8;
@@ -54,7 +56,7 @@ export function curUserPollerStatus() {
   const s = loadCurUserSettings();
   return {
     running, lastResult, lastRunTs,
-    intervalMs: s.intervalMs, enabled: s.enabled,
+    intervalMs: s.intervalMs, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}),
     guestPublishMs: s.guestPublishMs, staleAfterMs: staleAfterMs(s),
     concurrency: Math.min(CONCURRENCY_CAP, s.concurrency),
     inFlight: [...inFlight.entries()].map(([id, at]) => ({ deviceId: id, at })),
@@ -137,6 +139,24 @@ async function clearEmptied({ snap, s, mock, reg, byVc }) {
   return { ...(emptied.length ? { clearedVcenters: emptied } : {}), ...(pushed ? { pushed } : {}) };
 }
 
+/**
+ * v2.708 데모(mock) — 추이(vc_series)가 거의 비어 있으면 지난 7일을 한 번 채운다(최신값에서 법인별 최대치를 추정).
+ * 프로세스당 1회. 이미 7일치가 있으면(재시작) 건드리지 않는다.
+ */
+let _demoBackfilled = false;
+async function demoBackfillOnce(s, now) {
+  if (_demoBackfilled || !isMockMode()) return;
+  _demoBackfilled = true;
+  const have = await seriesRange('', now - 8 * 86_400_000, now);
+  if ((have.rows || []).length > 200) return;
+  const rows = demoCurUserBackfillRows(await latestRecords(), { now, days: 7, intervalMs: s.intervalMs });
+  for (let i = 0; i < rows.length; i++) {
+    await commitCurUser({ ts: rows[i].ts, records: [], series: rows[i].series });
+    if (i % 50 === 49) await new Promise((res) => setImmediate(res));   // 수천 커밋이 이벤트 루프를 한 번에 막지 않게
+  }
+  if (rows.length) console.log(`[mock] 현재 사용자 데모 추이 백필: ${rows.length}주기(7일)`);
+}
+
 /** 수집 1회(자동·수동 공용 — 같은 재진입 가드). */
 export async function runCurUserNow(trigger = 'manual') {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
@@ -144,7 +164,8 @@ export async function runCurUserNow(trigger = 'manual') {
   const started = Date.now();
   try {
     if (isStopped()) { lastResult = { at: Date.now(), trigger, skipped: '긴급중단' }; return { ok: false, ...lastResult }; }
-    const s = loadCurUserSettings();
+    // v2.708: 데모(mock)는 저장 설정이 꺼져 있거나 폴더 범위가 비어도 '켜진 것처럼' 본다(설정 파일은 바꾸지 않는다).
+    const s = demoCurUserSettings(loadCurUserSettings(), store.get());
     if (!s.enabled && trigger !== 'manual') return { ok: false, reason: '수집이 꺼져 있습니다(설정에서 켜세요).' };
     const db = await curUserDbStatus();
     if (!db.available) return { ok: false, reason: `DB 를 쓸 수 없습니다: ${db.error || 'node:sqlite 없음'}` };
@@ -234,6 +255,7 @@ export async function runCurUserNow(trigger = 'manual') {
     // '발행기 없음' 으로 뒤바뀐다(수집 실패와 값 없음은 다르다).
     const commit = await commitCurUser({ ts, records, series: [], replaceVcenters: [...collectedVc, ...emptied] });
     const ser = commit.ok ? await writeSeries(ts, s, vcNameOf, { advance: true }) : { series: 0, users: null };
+    if (commit.ok && mock) { try { await demoBackfillOnce(s, ts); } catch (e) { console.warn(`[curuser] 데모 추이 백필 실패: ${e.message}`); } }
     if (commit.ok && !mock && curUserPushEnabled()) for (const id of emptied) _pendingClear.add(id);
     for (const id of byVc.keys()) _pendingClear.delete(id);   // 대상이 돌아온 법인은 일반 교체가 맡는다
 
@@ -267,11 +289,11 @@ export function startCurUserPoller() {
   const getMs = () => Math.max(60_000, loadCurUserSettings().intervalMs);
   timer = startAdaptiveTimer(getMs, async () => {
     if (running) return;                              // 재진입 가드
-    if (!loadCurUserSettings().enabled) return;       // opt-in
+    if (!demoOn(loadCurUserSettings().enabled)) return;       // opt-in(데모는 켜진 것처럼 — v2.708)
     try { await runCurUserNow('auto'); } catch (e) { console.warn(`[curuser] 폴러 틱 오류: ${e.message}`); }
   }, { firstDelayMs: FIRST_DELAY_MS, name: 'curuser', subscribe: onCurUserSettingsChange });
   const s = loadCurUserSettings();
-  if (s.enabled) console.log(`[curuser] started — 주기 ${Math.round(s.intervalMs / 60_000)}분 · 동시 ${Math.min(CONCURRENCY_CAP, s.concurrency)} · 첫 실행 ${Math.round(FIRST_DELAY_MS / 1000)}초 후${curUserPushEnabled() ? ' · 중앙 push 켜짐' : ''}`);
+  if (demoOn(s.enabled)) console.log(`[curuser] started — 주기 ${Math.round(s.intervalMs / 60_000)}분 · 동시 ${Math.min(CONCURRENCY_CAP, s.concurrency)} · 첫 실행 ${Math.round(FIRST_DELAY_MS / 1000)}초 후${curUserPushEnabled() ? ' · 중앙 push 켜짐' : ''}`);
 }
 
 export function stopCurUserPoller() { timer?.stop?.(); timer = null; }

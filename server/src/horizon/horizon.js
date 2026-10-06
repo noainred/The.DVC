@@ -29,6 +29,8 @@ import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 // v2.686: 기능별 경로 확인·버전 판정·실패 문구는 순수 모듈 하나가 소유한다(옛 export 이름은 재수출 — 호출부 무변경).
 import { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, FEATURES, probePaths, probeVersion, featureSummary } from './featureProbe.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: 로그인·라이선스 본문 상한(gzip 해제 후 크기)
+import { isMockMode } from '../mock/demo/flags.js';
+import { isDemoEntryId, demoHorizonLicenses, ensureDemoHorizonSeed } from '../mock/demo/users.js'; // v2.708 데모 등록(`mock-`)은 접속하지 않는다
 export { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, featureSummary };
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
@@ -183,6 +185,12 @@ async function hzFetch(url, opts, timeoutMs) {
  * 호출부가 상태코드로 원인을 구분할 수 있게. 여기서 삼키면 '401 인지 404 인지' 를 잃는다).
  */
 export async function withHorizonSession(s, fn) {
+  // v2.708: 데모 등록(`mock-` id — 합성 사설 주소)에는 어떤 모드에서도 로그인하지 않는다(그 주소에 실제 서버가 있을 수 있다).
+  if (isDemoEntryId(s?.id)) {
+    const e = new Error('데모(mock) 등록입니다 — 이 커넥션 서버에는 접속하지 않습니다(합성 데이터).');
+    e.kind = 'mock';
+    throw e;
+  }
   const timeoutMs = effectiveRequestTimeoutMs(s.timeoutMs, 15_000); // v2.598 T2598-03: 옛 저장값(상한 이전)도 10분으로 자른다
   const login = await hzFetch(`${s.host}/rest/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -274,10 +282,14 @@ export function _horizonLicenseCacheEntry(id) { return cache.get(id) || null; }
 
 /** 등록된 모든(활성) Horizon 서버의 라이선스 행 취합 — 오래된 항목만 병렬 갱신. */
 export async function collectHorizonLicenses({ force = false } = {}) {
-  const servers = loadHorizon().filter((s) => s.enabled !== false);
+  // v2.708: 데모 등록(`mock-`)은 mock 에서만 대상이고 합성 라이선스를 쓴다(접속하지 않는다) — live 에서는 빠진다.
+  const mock = isMockMode();
+  if (mock) await ensureDemoHorizonSeed({ loadHorizon, upsertHorizon });   // 등록부가 비어 있을 때만 데모 커넥션 서버 2대(프로세스당 1회)
+  const servers = loadHorizon().filter((s) => s.enabled !== false && (mock || !isDemoEntryId(s.id)));
   const now = Date.now();
   await Promise.all(servers.map(async (s) => {
     const c = cache.get(s.id);
+    if (mock && isDemoEntryId(s.id)) { if (!c || force || now - c.at >= TTL_MS) cache.set(s.id, { at: now, lastOkAt: now, licenses: demoHorizonLicenses(s.id, now), error: null, ttl: TTL_MS, demo: true }); return; }
     if (!force && c && now - c.at < (c.ttl || TTL_MS)) return;
     try { const t = Date.now(); cache.set(s.id, { at: t, lastOkAt: t, licenses: await fetchHorizonLicenses(s), error: null, ttl: TTL_MS }); }
     catch (e) {

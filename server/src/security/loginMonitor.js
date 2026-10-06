@@ -10,6 +10,7 @@ import { analyzeLoginFails } from './loginFails.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = path.join(config.configDir, 'login-monitor.json');
 const DEFAULTS = { enabled: true, intervalMin: 15, days: 7, threshold: 5, windowMin: 10, alert: true };
@@ -106,7 +107,8 @@ async function runOnce() {
       lastIncomplete = { at: lastRun, failedChunks: r.scan?.failedChunks ?? null, error: r.scan?.error || null };
       console.warn(`[loginmon] vCenter 이벤트 일부를 읽지 못했습니다(조각 ${r.scan?.failedChunks}개) — 요약을 갱신하지 않습니다: ${r.scan?.error || ''}`);
     } else { lastSummary = r.summary; lastIncomplete = null; }
-    if (!s.alert) return;
+    // v2.708: 데모(mock) 이벤트는 합성 실패를 섞는다 — 실제 알림 채널로 보내지 않는다.
+    if (!s.alert || isMockMode()) return;
     const now = Date.now();
     const active = r.offenders.filter((o) => o.active);
     for (const o of active) {

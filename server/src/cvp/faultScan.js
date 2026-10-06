@@ -20,6 +20,7 @@ import { listServers, agentKeyEq } from './registry.js';
 import * as db from './db.js';
 import { observeDevice, transition, devIdOf } from './faults.js';
 import { notifyFaultTransition } from './faultNotify.js';
+import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모 CVP(mock-)가 있으면 수집이 켜진 것처럼(설정 파일은 그대로) — mock/demo/cvp.js 를 import 하면 순환이 된다
 
 /** 디바운스 — [1초, 2시간] 관문(v2.611 TIM2611-03: 상한 없는 env 는 2^31 초과에서 setTimeout 이 1ms 가 된다). */
 export const faultScanDebounceMs = (v) => deadlineMs(v, 15_000);
@@ -44,7 +45,8 @@ async function runInner({ now, reason, notify, send }) {
   const servers = listServers();
   const byId = new Map(servers.map((s) => [String(s.id), s]));
   const nameOf = (cvpId) => String(byId.get(String(cvpId))?.name || '');
-  const doNotify = typeof notify === 'boolean' ? notify : settings.faultAlerts === true;
+  // v2.708: 데모(mock) 모드에서는 주기 판정이 알림을 보내지 않는다 — 합성 장애가 설정된 실제 채널로 나가지 않게(명시적 notify 는 그대로).
+  const doNotify = typeof notify === 'boolean' ? notify : (settings.faultAlerts === true && !isMockMode());
 
   const devRes = await db.listDeviceRows();
   if (devRes.unavailable) {
@@ -144,11 +146,11 @@ function armCvpFaultTimer(source) {
  */
 export function cvpFaultScanStatus() {
   const s = loadSettings();
-  let servers = 0;
-  try { servers = listServers().length; } catch { servers = 0; }
+  let servers = 0; let demo = false;
+  try { const list = listServers(); servers = list.length; demo = isMockMode() && list.some((x) => String(x?.id || '').startsWith('mock-')); } catch { servers = 0; }
   return {
     ...(_last || {}),
-    enabled: s.enabled === true && servers > 0, faultAlerts: s.faultAlerts === true, servers,
+    enabled: (s.enabled === true || demo) && servers > 0, faultAlerts: s.faultAlerts === true, servers,
     intervalMs: numOrNull(s.intervalMs), debounceMs: DEBOUNCE_MS, pending: _pending, busy: !!_running,
     at: _last?.at ?? null, last: _last,
   };

@@ -269,6 +269,32 @@ export async function commitHzSessions({ ts, records = [], series = [], maxUsers
   return { ok: true, records: records.length, series: series.length, ms: Date.now() - t };
 }
 
+/**
+ * v2.708 데모(mock) 백필 — 지난 추이(hz_series)·누적(hz_usage_daily·hz_usage_cover)을 **한 트랜잭션**으로 채운다.
+ * 호출부(sessionPoller)가 mock 이고 추이가 비어 있을 때만 부른다. 이미 있는 행은 건드리지 않는다(INSERT OR IGNORE) —
+ * 실수집 행이 데모 행에 덮이지 않게. 값은 mock/demo/users.js demoHorizonBackfillRows 가 만든다.
+ */
+export async function backfillHzDemo({ series = [], usage = [], cover = [] } = {}) {
+  const h = await open();
+  if (!h) return { ok: false, reason: 'node:sqlite 없음' };
+  const insS = h.db.prepare(`INSERT OR IGNORE INTO hz_series
+    (server_id, ts, users, users_connected, sessions, connected, disconnected, pending, servers_ok, servers_failed) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  const insU = h.db.prepare(`INSERT OR IGNORE INTO hz_usage_daily
+    (day, server_id, user_key, service_key, user_name, service_name, kind, basis, first_ts, last_ts, samples, connected_samples) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insC = h.db.prepare('INSERT OR IGNORE INTO hz_usage_cover (day, server_id, cycles, ok_cycles, first_ts, last_ts) VALUES (?,?,?,?,?,?)');
+  h.db.exec('BEGIN');
+  try {
+    for (const r of series) insS.run(String(r.serverId || ''), Number(r.ts), nOrNull(r.users), nOrNull(r.usersConnected), nOrNull(r.sessions), nOrNull(r.connected), nOrNull(r.disconnected), nOrNull(r.pending), nOrNull(r.serversOk), nOrNull(r.serversFailed));
+    for (const u of usage) insU.run(String(u.day), String(u.serverId), String(u.userKey).slice(0, 256), String(u.serviceKey).slice(0, 300), String(u.user || '').slice(0, 256), String(u.service || '').slice(0, 256), String(u.kind || ''), String(u.basis || ''), Number(u.firstTs), Number(u.lastTs), Number(u.samples) || 0, Number(u.connectedSamples) || 0);
+    for (const c of cover) insC.run(String(c.day), String(c.serverId), Number(c.cycles) || 0, Number(c.okCycles) || 0, Number(c.firstTs), Number(c.lastTs));
+    h.db.exec('COMMIT');
+  } catch (e) {
+    try { h.db.exec('ROLLBACK'); } catch { /* */ }
+    return { ok: false, reason: String(e.message || e).slice(0, 200) };
+  }
+  return { ok: true, series: series.length, usage: usage.length, cover: cover.length };
+}
+
 /** latest.usage_meta — 해석 근거·카탈로그 상태(화면이 '앱 이름을 어떻게 알았나' 를 말하는 근거). */
 export function usageMetaOf(r) {
   const u = r?.usage;

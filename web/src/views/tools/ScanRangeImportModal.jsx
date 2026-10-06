@@ -15,6 +15,7 @@ import { STable } from '../../components/STable.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js';
 import { classifySubnets, countKinds, vmSummaryText } from './vcRangeImportText.js';
 import { AGENT_KIND_LABEL, CLS_BADGE, CLS_FILTERS, CLS_LABEL, agentName, clsCounts, defaultChosen, defaultServiceNo, filterByCls, idracHeadText, ignoredText, partialIgnoreText, serviceMeta, serviceTitle, serviceUnnamed } from './scanRangeImportText.js';
+import Select from '../../components/Select.jsx';
 
 const KIND_COLOR = { new: 'var(--green)', covered: 'var(--text-dim)', partial: 'var(--amber)', other: 'var(--amber)', invalid: 'var(--red)' };
 /** 선택했지만 필터 때문에 안 보이는 행 수 — 숨긴 채 추가되는 줄이 있다는 사실을 말한다. */
@@ -66,20 +67,20 @@ export function ScanRangeImportModal({ kind, agent, text, saved, onClose, onConf
         {data && kind === 'idrac' && (
           <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
             <span>DataCenter</span>
-            <select className="select" value={pickDc || data.datacenterId || ''} onChange={(ev) => setPickDc(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="DataCenter 선택">
+            <Select className="select" value={pickDc || data.datacenterId || ''} onChange={(ev) => setPickDc(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="DataCenter 선택">
               <option value="">(선택)</option>
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}{d.id === data.assignedDatacenterId ? ' (이 에이전트 소속)' : ''}</option>)}
-            </select>
+            </Select>
             {data.datacentersError && <span style={{ color: 'var(--amber)' }}>DataCenter 목록을 읽지 못했습니다({data.datacentersError})</span>}
           </div>
         )}
         {data && kind === 'vm' && (
           <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
             <span>vCenter</span>
-            <select className="select" value={pickVc || data.vcenterId || ''} onChange={(ev) => setPickVc(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="vCenter 선택">
+            <Select className="select" value={pickVc || data.vcenterId || ''} onChange={(ev) => setPickVc(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="vCenter 선택">
               {!data.vcenterId && <option value="">(선택)</option>}
               {(data.vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}{v.mine ? ' (이 에이전트가 수집)' : ''}</option>)}
-            </select>
+            </Select>
             {data.vcenterId && !data.vcenterMine && <span style={{ color: 'var(--amber)' }}>이 에이전트가 수집하지 않는 vCenter 입니다 — 이 에이전트 사이트에서 닿는 대역인지 확인하세요.</span>}
           </div>
         )}

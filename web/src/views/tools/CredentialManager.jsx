@@ -3,6 +3,8 @@ import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { resultSummary, ago } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
+import DataList from '../../components/DataList.jsx';
 
 /**
  * 특수기능 › 통합 계정 관리(v2.419).
@@ -118,10 +120,10 @@ function CredForm({ form, agents, onClose, onSaved }) {
       <div className="flex gap wrap">
         <label>이름 *<br /><input className="input" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="예: 리눅스 운영 계정(서울)" /></label>
         <label>종류 *<br />
-          <select className="input" value={f.kind} onChange={(e) => set('kind', e.target.value)}>
+          <Select sort={false} className="input" value={f.kind} onChange={(e) => set('kind', e.target.value)}>
             <option value="password">ID / 비밀번호</option>
             <option value="key">SSH 개인키 (+ 패스프레이즈)</option>
-          </select>
+          </Select>
         </label>
         <label>계정(ID) *<br /><input className="input" value={f.username} onChange={(e) => set('username', e.target.value)} placeholder="root / svc-monitor" /></label>
       </div>
@@ -144,7 +146,7 @@ function CredForm({ form, agents, onClose, onSaved }) {
       <div className="section-title" style={{ marginTop: 10 }}>사용 범위 (브로커가 둘 다 검사)</div>
       <div className="flex gap wrap">
         <label>사용 가능 법인(RMA) *<br /><input className="input" list="cred-agents" value={f.agents} onChange={(e) => set('agents', e.target.value)} placeholder="* 또는 Seoul,Poland" style={{ minWidth: 260 }} /></label>
-        <datalist id="cred-agents">{agents.map((a) => <option key={a} value={a} />)}</datalist>
+        <DataList id="cred-agents">{agents.map((a) => <option key={a} value={a} />)}</DataList>
         <label>대상 호스트 허용 *<br /><input className="input" value={f.hosts} onChange={(e) => set('hosts', e.target.value)} placeholder="10.10.0.0/16, db01.corp, *.corp.local (전체 *)" style={{ minWidth: 320 }} /></label>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>범위를 좁게 두세요 — 엣지 1대가 침해돼도 그 법인에 허용된 계정을, 허용된 대상에만 쓸 수 있습니다.</div>
@@ -190,7 +192,7 @@ function TestModal({ cred, rmaAgents, onClose }) {
     <Modal title={`연결 테스트 — ${cred.name} (${cred.username})`} onClose={onClose} width={720}>
       <div className="muted" style={{ fontSize: 12 }}>선택한 법인의 RMA 가 대상 서버에 이 계정으로 SSH 접속해 <code>echo RMA-CRED-OK; id -un; uname -n</code> 을 실행합니다. 비밀은 브로커로 RMA 메모리에만 전달됩니다. 엣지 <code>RMA_ALLOW_SSH=true</code> 가 필요합니다.</div>
       <div className="flex gap wrap" style={{ marginTop: 8, alignItems: 'flex-end' }}>
-        <label>법인(RMA)<br /><select className="input" value={agent} onChange={(e) => setAgent(e.target.value)}>{candidates.map((a) => <option key={a.agent} value={a.agent}>{a.agent}{a.online ? '' : ' (오프라인)'}{a.allowSsh ? '' : ' (SSH 미허용)'}</option>)}</select></label>
+        <label>법인(RMA)<br /><Select className="input" value={agent} onChange={(e) => setAgent(e.target.value)}>{candidates.map((a) => <option key={a.agent} value={a.agent}>{a.agent}{a.online ? '' : ' (오프라인)'}{a.allowSsh ? '' : ' (SSH 미허용)'}</option>)}</Select></label>
         <label>대상 호스트<br /><input className="input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="10.10.1.5" /></label>
         <label>포트<br /><input className="input" style={{ width: 70 }} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></label>
         <button className="login-btn" disabled={!agent || !host || (state && state.phase && state.phase !== 'done')} onClick={run}>테스트</button>

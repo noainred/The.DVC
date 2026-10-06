@@ -18,6 +18,7 @@ import {
   seriesMap, changeOf, daysTo90, daysText, changeText, pctText, watchList, sortGroupsByUsed, sortServers,
   groupColors, groupKeyOf, NO_GROUP, WARN_PCT,
 } from './bmStorHistoryText.js';
+import Select from '../../components/Select.jsx';
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -370,19 +371,19 @@ export default function BmStorageTool() {
               <label>계정<input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
               <label>비밀번호<input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? '비우면 기존 유지' : ''} autoComplete="new-password" /></label>
               <label>수집 주체 <span className="muted" style={{ fontSize: 11 }}>(등록된 수집 서버(원격)에서 선택)</span>
-                <select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
+                <Select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                   <option value="">중앙 직접(SSH)</option>
                   {(() => { const m = missingChoice(agents || [], form.agent); return m ? <option value={m.value}>엣지 위임 — {m.label}</option> : null; })()}
                   {(agents || []).map((a) => <option key={a} value={a}>엣지 위임 — {a}</option>)}
-                </select>
+                </Select>
               </label>
               {form.agent
                 ? <label>전달 방식 <span className="muted" style={{ fontSize: 11 }}>(iDRAC 스캔과 동일)</span>
-                  <select className="input" value={form.dispatch === 'push' ? 'push' : 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}
+                  <Select sort={false} className="input" value={form.dispatch === 'push' ? 'push' : 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}
                     title="폴링: 엣지가 중앙으로 폴링해 잡 인출(NAT 뒤 엣지 표준 — CENTRAL_URL 필요) · PUSH: 중앙이 수집 서버 URL 로 직접 전송">
                     <option value="poll">에이전트 폴링(기본)</option>
                     <option value="push">중앙→엣지 직접(PUSH)</option>
-                  </select>
+                  </Select>
                 </label>
                 : <span />}
               <label className="flex gap" style={{ alignItems: 'center', marginTop: 18, cursor: 'pointer' }}>

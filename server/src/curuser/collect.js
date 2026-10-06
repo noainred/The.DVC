@@ -15,6 +15,7 @@
  * ⚠ 실패는 **격리**한다. 한 법인이 로그인에 실패해도 다른 법인 수집을 막지 않고, 그 법인의
  *   결과를 '사용자 0명' 으로 만들지 않는다(레코드가 아예 없는 것과 0명은 다르다).
  */
+import { demoCurUserRecords } from '../mock/demo/users.js';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { isVcAuthError } from '../vcenter/restClient.js';
 import { morefOf } from '../vcenter/registry.js';
@@ -81,22 +82,6 @@ export async function collectVcenterCurUsers(vc, targets, { now = Date.now(), st
  * 값은 VM id 해시로 결정론적이고, 일부러 `no-agent`·`stale` 을 섞어 화면의 정직 분기를 실제로 보이게 한다.
  */
 export function mockRecords(targets, { now = Date.now() } = {}) {
-  const hash = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) >>> 0; return h; };
-  const POOL = ['DVC\\admin', 'DVC\\oper1', 'DVC\\oper2', 'backup_svc', 'DVC\\dba', 'monitor@dvc.local'];
-  return (targets || []).map((t, i) => {
-    const h = hash(t.vmId || String(i));
-    if (h % 11 === 0) return { ...t, kind: 'no-agent', ok: false, at: null, ageMs: null, active: null, disc: null, other: null, sessions: null, users: [], error: '', guestHost: '', chunks: 0, omitted: 0, unknownStates: [], noUsers: false };
-    if (h % 13 === 0) return { ...t, kind: 'guest-error', ok: false, at: now - 300_000, ageMs: 300_000, active: null, disc: null, other: null, sessions: null, users: [], error: 'quser produced no output (command missing or blocked)', guestHost: `MOCK-${i}`, chunks: 0, omitted: 0, unknownStates: [], noUsers: false };
-    const n = h % 4;                                  // 0~3 세션
-    const users = Array.from({ length: n }, (_, k) => ({ name: POOL[(h + k) % POOL.length], kind: (h + k) % 3 === 0 ? 'disc' : 'active' }));
-    const stale = h % 17 === 0;
-    const at = now - (stale ? 4 * 3600_000 : (h % 500_000));
-    return {
-      ...t, kind: stale ? 'stale' : 'ok', ok: !stale, at, ageMs: now - at,
-      active: users.filter((u) => u.kind === 'active').length,
-      disc: users.filter((u) => u.kind === 'disc').length,
-      other: 0, sessions: users.length, users, noUsers: users.length === 0,
-      unknownStates: [], omitted: 0, chunks: users.length ? 1 : 1, guestHost: `MOCK-WIN-${i}`, error: '',
-    };
-  });
+  // v2.708: 데모 합성은 mock/demo/users.js 하나가 소유한다(시간대 곡선 · 서버별 최대치 · 일부 no-agent·stale·guest-error).
+  return demoCurUserRecords(targets, { now });
 }

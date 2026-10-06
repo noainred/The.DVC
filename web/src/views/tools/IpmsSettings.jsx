@@ -8,6 +8,7 @@ import { DraftBanner } from './IpamDraftBanner.jsx';
 import { Frame } from './ipamShared.jsx';
 import { RangeCheck, RangeMsg, RANGE_TA } from './VcScanRangeEditor.jsx';
 import { checkRangeList, ipmsSettingsErrors, normalizeRangeText, sameIpmsSettings, serverInvalidText, vcenterOptionLabel, vcenterOptions } from './ipmsRangeText.js';
+import Select from '../../components/Select.jsx';
 
 const SECTION = { border: '1px solid var(--border)', borderRadius: 10, padding: 12, minWidth: 0 };
 
@@ -104,10 +105,10 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
           <RangeCheck check={checkRangeList(s.global || [])} />
           <div className="flex gap wrap" style={{ alignItems: 'center', margin: '12px 0 4px' }}>
             <span style={{ fontSize: 12 }}>vCenter별</span>
-            <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} disabled={!opts.length} aria-label="vCenter 선택">
+            <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} disabled={!opts.length} aria-label="vCenter 선택">
               {!opts.length && <option value="">{vcs == null && !vcsErr ? '불러오는 중…' : 'vCenter 없음'}</option>}
               {opts.map((o) => <option key={o.id} value={o.id}>{vcenterOptionLabel(o)}</option>)}
-            </select>
+            </Select>
           </div>
           {vcsErr && (
             <div className="banner warn" style={{ marginBottom: 6, whiteSpace: 'normal' }}>

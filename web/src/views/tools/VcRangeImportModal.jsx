@@ -13,6 +13,7 @@ import { Modal } from '../../components/Modal.jsx';
 import { STable } from '../../components/STable.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js';
 import { classifySubnets, countKinds, idracSummaryText, KIND_LABEL, vmSummaryText } from './vcRangeImportText.js';
+import Select from '../../components/Select.jsx';
 
 const KIND_COLOR = { new: 'var(--green)', covered: 'var(--text-dim)', partial: 'var(--amber)', other: 'var(--amber)', invalid: 'var(--red)' };
 
@@ -52,10 +53,10 @@ export function VcRangeImportModal({ kind, vc, vcName, text, saved, onClose, onC
         {kind === 'idrac' && data && (
           <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
             <span>DataCenter</span>
-            <select className="select" value={dcId || data.datacenterId || ''} onChange={(ev) => setDcId(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="DataCenter 선택">
+            <Select className="select" value={dcId || data.datacenterId || ''} onChange={(ev) => setDcId(ev.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} aria-label="DataCenter 선택">
               <option value="">(선택)</option>
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}{d.id === data.assignedDatacenterId ? ' (이 vCenter 소속)' : ''}</option>)}
-            </select>
+            </Select>
             {data.datacentersError && <span style={{ color: 'var(--amber)' }}>DataCenter 목록을 읽지 못했습니다({data.datacentersError})</span>}
           </div>
         )}

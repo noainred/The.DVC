@@ -8,6 +8,7 @@ import { fetchJson, putJson, downloadFile, canCsv, hasRole } from '../../api.js'
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { GROUP_LABEL, OFF_POLICY_LABEL, STORAGE_BASIS_LABEL, moneyText, numText, ratesNote, notesText, BASIS_NOTE } from '../bizreport/costText.js';
+import Select from '../../components/Select.jsx';
 
 function Chip({ active, onClick, children }) {
   return <button type="button" className={`tab${active ? ' active' : ''}`} onClick={onClick} style={{ padding: '4px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>{children}</button>;
@@ -57,13 +58,13 @@ function RateForm({ onSaved }) {
         {field('ramGB', '메모리 1GB / 월')}
         {field('storageGB', '스토리지 1GB / 월')}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, fontSize: 12 }}><span className="muted">스토리지 기준</span>
-          <select className="input" style={{ minWidth: 0 }} value={form.storageBasis} onChange={(e) => set('storageBasis', e.target.value)}>
+          <Select sort={false} className="input" style={{ minWidth: 0 }} value={form.storageBasis} onChange={(e) => set('storageBasis', e.target.value)}>
             {Object.entries(STORAGE_BASIS_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select></label>
+          </Select></label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, fontSize: 12 }}><span className="muted">꺼진 VM</span>
-          <select className="input" style={{ minWidth: 0 }} value={form.offPolicy} onChange={(e) => set('offPolicy', e.target.value)}>
+          <Select sort={false} className="input" style={{ minWidth: 0 }} value={form.offPolicy} onChange={(e) => set('offPolicy', e.target.value)}>
             {Object.entries(OFF_POLICY_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select></label>
+          </Select></label>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
         <button type="button" className="btn" onClick={save} disabled={busy}>{busy ? '저장 중…' : '단가 저장'}</button>
@@ -134,10 +135,10 @@ export default function CostShowbackTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>나누는 기준</span>
         {Object.entries(GROUP_LABEL).map(([k, l]) => <Chip key={k} active={by === k} onClick={() => setBy(k)}>{l}</Chip>)}
         {by === 'tag' && (
-          <select className="input" style={{ minWidth: 0, maxWidth: 220 }} value={category} onChange={(e) => setCategory(e.target.value)}>
+          <Select className="input" style={{ minWidth: 0, maxWidth: 220 }} value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">카테고리 선택</option>
             {(data.categories || []).map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
         )}
         <input className="input" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 280 }} placeholder="그룹 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

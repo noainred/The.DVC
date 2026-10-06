@@ -22,6 +22,7 @@ import os from 'node:os';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'partfault2548-'));
 process.env.CONFIG_DIR = dir;
 delete process.env.PARTFAULT_ENABLED;
+process.env.DATA_SOURCE = 'live';   // v2.708: 기본 데이터 소스(mock)면 파트 장애가 데모로 켜진다 — 이 파일은 저장값 판정을 고정한다
 
 const { makePart, partKeyOf, partKeyTail, partKeyFromTail, HOLD_REASON, DEVICE_KEY_KIND, COLLECTION_KINDS, PUSH_PROTOCOL } = await import('../src/partfault/types.js');
 const { extractIdracParts, deviceKeyOf } = await import('../src/partfault/extract/idrac.js');

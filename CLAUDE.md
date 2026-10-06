@@ -4880,6 +4880,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       단가 저장은 admin + 전체 범위 + 감사. 비용은 할당 기준이고 청구서가 아니다(화면이 말한다).
     · C7 등급 blocked > caution > ready > unknown — **막힘은 미수집이어도 사실**이라 먼저 판정하고, 그 밖에서 cfg·dev 중 하나라도 없으면 unknown. 준비율 분모는 판정한 VM(unknown 제외).
       코드 `MIG_CODES` 는 서버·웹 두 벌(테스트 대조). 가상 호환 RDM 은 막지 않는다(물리 호환만).
+  - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):
+    · 날 `<select>`·`<datalist>` 는 eslint `no-restricted-syntax` 와 `selectSort.test.js` 스윕이 막는다. 선택지는 보이는 글자 순(숫자 인식 — vcenter-2 < vcenter-10),
+      value ''·'all'·'*'·'__…' 이거나 글자가 '전체·모든·—·(·선택' 으로 시작하거나 `data-pin` 이면 맨 위 고정.
+    · **순서가 곧 뜻인 목록**(기간·심각도·단계·권장 먼저·최신 버전 먼저·폴링 중 에이전트 먼저)은 `sort={false}` — 데이터 목록에 붙이지 말 것(사용자 선택 '의미 순서 유지').
+  - ⚠⚠ **v2.708 — 데모(mock) 모드는 '특수 기능 전체가 동작' 이 목표다 — 규칙은 `server/src/mock/demo/flags.js` 머리말**(사용자 요청 "특수기능 포함 모든 메뉴의 데모모드 동작"):
+    · 데모 모듈 `server/src/mock/demo/`{storage,sanswitch,pdu,cvp,users,idrac,baremetal,edge,edgeSeed}.js. mock 모드에서만 · 등록부가 비어 있을 때만 `mock-` 항목 시드 ·
+      장비·엣지에 접속하지 않는다(SAN 은 FOS CLI 모양 텍스트를 진짜 파서에 넣는다) · 기본 꺼짐 기능은 `demoOn(saved)` 로 켜진 것처럼(**설정 파일은 바꾸지 않는다**) ·
+      live 폴러는 `mock-` 항목을 건너뛴다. 합성 수집은 **mock 모드 + `mock-` id** 에만 — 사람이 등록한 장비는 mock 모드에서도 예전처럼 수집한다(DATA_SOURCE 기본값이 mock 이라 테스트가 깨졌다).
+    · ⚠⚠ **데모 데이터로 실제 알림 채널에 보내지 않는다** — 파트 장애(source 'demo')·CVP 장애·베어메탈 임계·로그인 실패 브루트포스. 새 데모 경로가 알림을 낼 수 있으면 같은 가드를 둘 것.
+    · ⚠ `flags.js` 는 `runtime-settings.js` 에서 직접 판정한다 — `mock/seed.js` 를 거치면 seed → 데모 → flags 순환이 생긴다(arch2579 SCC 상한).
+    · 데모 이력은 처음 한 번 백필(스토리지 400일·SAN 7일·PDU 30일·CVP 7일·iDRAC 14일·bm-usage 45일 등)하고 다시 쌓지 않는다. sensorStore 는 인메모리라 재시작마다 24시간 백필.
+    · 남은 것: 준비 중 3기능(디스크 추가·백업·대용량 배포)은 화면이 없다 · serveranalysis '미지원 서버'·Isilon 영역 상세·REST 수집 SAN 은 데모 없음 · 실장비 미확인(전부 합성).
+    · 함께 고친 제품 판정: 실제 OS 확인이 Windows Server 연도와 커널 버전(10.0.x)을 비교해 **모든 Windows VM 을 불일치**로 냈다(`inventory/osStore.js computeMismatch`).
   - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
     (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
     웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):

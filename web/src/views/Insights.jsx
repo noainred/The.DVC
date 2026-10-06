@@ -12,6 +12,7 @@ import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 import { forecastPctText, forecastLimitKind } from './forecastRowText.js';
 import { unitText } from './unitText.js';
+import Select from '../components/Select.jsx';
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -136,9 +137,9 @@ function Anomaly() {
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <Kpi label="탐지된 이상" value={num(d?.total)} color={d?.total ? '#f87171' : '#34d399'} />
         <label className="muted" style={{ fontSize: 12 }}>민감도 Z =
-          <select className="select" value={z} onChange={(e) => setZ(Number(e.target.value))} style={{ marginLeft: 6 }}>
+          <Select sort={false} className="select" value={z} onChange={(e) => setZ(Number(e.target.value))} style={{ marginLeft: 6 }}>
             {[2.5, 3, 3.5, 4, 5].map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       {(d?.families || []).map((fam) => (
@@ -199,10 +200,10 @@ function Forecast() {
       <div className="card" style={{ padding: 12, marginBottom: 12, borderLeft: '3px solid var(--amber,#f59e0b)' }}>
         <div className="muted" style={{ fontSize: 13 }}>⚠ 용량예측은 전체 데이터스토어의 시계열을 회귀 분석하므로, <b>전체 vCenter 조회는 대규모 환경에서 수십 초~수 분</b>이 걸릴 수 있습니다(그동안 화면이 멈춘 듯 보일 수 있음). <b>vCenter를 선택</b>하면 훨씬 빠릅니다.</div>
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'center' }}>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 200 }}>
+          <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 200 }}>
             <option value="">전체 vCenter (느림)</option>
             {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-          </select>
+          </Select>
           <span className="muted">기간</span><input className="input" type="number" min={3} max={365} style={{ width: 72 }} value={days} onChange={(e) => setDays(e.target.value)} /><span className="muted">일</span>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={loading} onClick={run}>{loading ? '분석 중…(잠시만요)' : '조회'}</button>
           {d && !loading && <span className="muted" style={{ fontSize: 12 }}>분석 DS {num(d.scannedDatastores ?? 0)}개 · 범위 {d.config?.vcenterId || '전체'}</span>}
@@ -315,10 +316,10 @@ function Topology() {
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>vCenter → 클러스터 → 호스트 → VM 의존성 트리. 장애 영향 범위 파악용. 특정 vCenter 선택 시 개별 VM까지 펼칩니다.</p>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
-        <select className="select" value={vc} onChange={(e) => setVc(e.target.value)}>
+        <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)}>
           <option value="">전체 vCenter (호스트까지)</option>
           {(d?.vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12 }} title="'노드'는 트리의 모든 항목 합계입니다 — vCenter+클러스터+호스트(+선택 vCenter 시 VM). 호스트 수가 아닙니다.">
           노드 {num(d?.nodeCount)}
           {d?.counts && <> (vCenter {num(d.counts.vcenters)} · 클러스터 {num(d.counts.clusters)} · 호스트 {num(d.counts.hosts)}{d.counts.vms ? ` · VM ${num(d.counts.vms)}` : ''})</>}

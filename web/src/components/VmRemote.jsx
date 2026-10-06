@@ -3,6 +3,7 @@ import { postJson, can, downloadFile } from '../api.js';
 import { downloadFailText } from '../views/downloadFailText.js';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 import { openRemoteSession } from '../remote/sessions.js';
+import Select from './Select.jsx';
 
 const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
 const INP = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
@@ -107,15 +108,15 @@ export function VmRemoteButton({ item }) {
                 style={{ position: 'absolute', width: 1, height: 1, padding: 0, border: 0, opacity: 0, pointerEvents: 'none' }} />
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
                 <label style={FLD}>프로토콜{autoProto ? <span className="muted" style={{ fontWeight: 400 }}> · {isWindows ? 'Windows' : 'Linux'} 자동</span> : ''}
-                  <select className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); setAutoProto(false); }}>
+                  <Select sort={false} className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); setAutoProto(false); }}>
                     <option value="ssh">SSH</option>
                     <option value="rdp">RDP</option>
-                  </select>
+                  </Select>
                 </label>
                 <label style={FLD}>대상 IP{ips.length > 1 ? ` (${ips.length})` : ''}
-                  <select className="select" style={INP} value={ip} onChange={(e) => setIp(e.target.value)}>
+                  <Select className="select" style={INP} value={ip} onChange={(e) => setIp(e.target.value)}>
                     {ips.map((x) => <option key={x} value={x}>{x}</option>)}
-                  </select>
+                  </Select>
                 </label>
                 <label style={FLD}>포트(기본 {protocol === 'rdp' ? '3389' : '22'})
                   <input className="input" style={INP} type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />

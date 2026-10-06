@@ -239,14 +239,19 @@ test('mock 스냅샷은 extra.mock=true 로 표시된다(괄호 문자열에만 
   const src = fs.readFileSync(new URL('../src/storage/poller.js', import.meta.url), 'utf8');
   assert.ok(!/snap\.version = 'OneFS 9\.4\.0\(mock\)'/.test(src),
     "타입과 무관한 'OneFS' 버전을 mock 에 쓰면 PowerStore 등에서 실제 수집값으로 오인된다.");
-  // ⚠ 플래그는 mock 블록의 **마지막 snap.extra 재할당 안**에 있어야 한다. 앞에서 snap.extra.mock
-  //   만 세우면 뒤의 `snap.extra = { ... }` 가 통째로 덮어써 플래그가 사라진다(실측으로 잡은 실수).
-  const block = /config\.dataSource === 'mock'\)\s*\{([\s\S]*?)\n  \} else \{/.exec(src);
+  // v2.708: mock 분기는 타입별 합성 스냅샷을 mock/demo/storage.js demoStorageSnapshot 에 맡긴다 — 그 결과에
+  //   extra.mock=true 가 실제로 실리는지 **실행해서** 본다(예전 소스 검사는 '마지막 snap.extra 재할당' 을 봤다).
+  const block = /else if \(isMockMode\(\)\)\s*\{[^\n]*\n([\s\S]*?)\n  \} else \{/.exec(src);
   assert.ok(block, 'mock 분기를 찾지 못했습니다.');
-  const lastAssign = [...block[1].matchAll(/snap\.extra = \{([^}]*)\}/g)].pop();
-  assert.ok(lastAssign, 'mock 분기에 snap.extra 할당이 있어야 합니다.');
-  assert.match(lastAssign[1], /mock:\s*true/,
-    'mock 분기의 마지막 snap.extra 할당에 mock:true 가 있어야 플래그가 살아남는다.');
+  assert.match(block[1], /snap = demoStorageSnapshot\(full, startedAt\)/, 'mock 분기는 데모 스냅샷을 쓴다');
+  const { demoStorageSnapshot, demoStorageDevices } = await import('../src/mock/demo/storage.js');
+  for (const d of demoStorageDevices()) {
+    const s = demoStorageSnapshot(d);
+    assert.equal(s.extra?.mock, true, `${d.name}: extra.mock 플래그가 살아 있어야 MOCK 배지가 뜬다`);
+    assert.ok(!/\(mock\)/.test(s.version || ''), '괄호 표기에 기대지 않는다');
+  }
+  // 등록부에 없는 장비(데모 중 직접 등록)도 mock 표시가 붙는다
+  assert.equal(demoStorageSnapshot({ id: 'st-x', type: 'powerstore', name: 'X' }).extra.mock, true);
 });
 
 test('mock 모드로 기동하면 콘솔 경고가 있다(조용한 가짜 수집 금지)', async () => {

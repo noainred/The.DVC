@@ -9,6 +9,7 @@ import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
+import Select from '../../components/Select.jsx';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
 
@@ -345,15 +346,15 @@ export function Gpu({ scope }) {
               );
             })}
             <span style={{ width: 8 }} />
-            <select className="select" style={{ flex: 'none', maxWidth: 240 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} title="GPU 종류(모델)별로 보기">
+            <Select className="select" style={{ flex: 'none', maxWidth: 240 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} title="GPU 종류(모델)별로 보기">
               <option value="">GPU 종류: 전체</option>
               {(data.byModel || []).map((m) => <option key={m.model} value={m.model}>{m.model} (×{m.count})</option>)}
-            </select>
-            <select className="select" style={{ flex: 'none', maxWidth: 220 }} value={power} onChange={(e) => setPower(e.target.value)} title="GPU 할당 VM의 전원 상태로 호스트 필터">
+            </Select>
+            <Select sort={false} className="select" style={{ flex: 'none', maxWidth: 220 }} value={power} onChange={(e) => setPower(e.target.value)} title="GPU 할당 VM의 전원 상태로 호스트 필터">
               <option value="">전원: 전체</option>
               <option value="on">🟢 켜진 VM 있는 호스트</option>
               <option value="off">⚫ 꺼진 VM 있는 호스트</option>
-            </select>
+            </Select>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }} disabled={collecting}
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
@@ -501,10 +502,10 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>법인(vCenter) 선택</div>
-      <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 220, marginBottom: 12 }}>
+      <Select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 220, marginBottom: 12 }}>
         <option value="">전체 vCenter</option>
         {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-      </select>
+      </Select>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>내보낼 범위</div>
       <label className="flex gap" style={{ alignItems: 'center', marginBottom: 6, cursor: 'pointer' }}>

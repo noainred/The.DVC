@@ -14,7 +14,7 @@
  *   닿는다' 를 그 링크 상태로 기록하는 거짓이 된다(엣지는 닿는다) — 그 값은 엣지 보고
  *   (`central/linkCheckEdge.js`)가 채운다.
  */
-import { config } from '../config.js';
+import { config, currentVersion } from '../config.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { loadCollectors } from '../collector/registry.js';
 import { listRegistry as listVcenters } from '../vcenter/registry.js';
@@ -23,8 +23,12 @@ import { buildSettingsTargets } from './settingsLinks.js';
 import { runSettingsTarget } from './settingsRun.js';
 import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange } from './settings.js';
 import { runLink } from './run.js';
-import { insertResults, pruneLinkCheck } from './db.js';
+import { insertResults, pruneLinkCheck, latestAll } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { judge, summaryText } from './phases.js';
+import { isMockMode } from '../mock/demo/flags.js';
+// v2.708: 데모(mock) 모드 — 접속하지 않고 합성 측정값을 적재한다(판정·DB 는 그대로). mock 이 아니면 아무것도 바꾸지 않는다.
+import { demoLinkInputs, demoLinkResult, demoSettingsResult, isDemoCollector } from '../mock/demo/edge.js';
 
 /*
  * **측정자 이름은 지어내지 않는다.** 이 폴러는 중앙에서도 엣지에서도 돈다(중계 엣지는 자기
@@ -41,7 +45,8 @@ let tick = 0;
 export function linkCheckPollerStatus() {
   const s = loadLinkCheckSettings();
   return {
-    enabled: s.enabled, running,
+    enabled: linkCheckEnabled(), running,
+    ...(isMockMode() ? { demo: true } : {}),
     intervalMs: s.intervalMs, concurrency: s.concurrency,
     last: _last,
   };
@@ -51,8 +56,9 @@ export function linkCheckPollerStatus() {
 export function centralLinks() {
   const cols = loadCollectors();          // ⚠ 토큰이 필요하므로 redact 되지 않은 원본을 쓴다
   const s = loadLinkCheckSettings();
+  const inp = demoLinkInputs({ vcenters: listVcenters(), pairs: s.pairs, collectors: cols }); // mock 아니면 입력 그대로
   const { links, counts, problems } = buildLinks({
-    collectors: cols, vcenters: listVcenters(), pairs: s.pairs, settings: s,
+    collectors: cols, vcenters: inp.vcenters, pairs: inp.pairs, settings: s,
   });
   return {
     all: links, counts, problems,
@@ -85,7 +91,11 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs, sshMs: s.sshTimeoutMs, smtpMs: s.smtpTimeoutMs };
 
     const node = selfNode();
-    const results = await pool(mine, s.concurrency, (l) => runLink(l, { timeouts, ctx, byNode: node }));
+    const demo = isMockMode();
+    if (demo) await demoBackfill({ mine, node });
+    const results = demo
+      ? mine.map((l) => demoLinkResult(l, { byNode: node, judge, summaryText }))
+      : await pool(mine, s.concurrency, (l) => runLink(l, { timeouts, ctx, byNode: node }));
 
     /*
      * ⚠⚠ **설정 전수 점검도 같은 주기·같은 가드·같은 DB 를 쓴다**(v2.553). 폴러를 하나 더 만들면
@@ -104,8 +114,11 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
       const doable = built.targets.filter((x) => x.enabled !== false && !x.bad
         // 엣지 위임 장비는 중앙에서 닿지 않는 것이 **정상**이다 — 점검해서 '실패' 로 적으면 거짓이다.
         && !(x.agent && node === 'central') && !(node !== 'central' && x.agent && x.agent !== node));
-      setResults = await pool(doable, s.concurrency, (x) => runSettingsTarget(x, { timeouts, ctx }));
+      setResults = demo
+        ? doable.map((x) => demoSettingsResult(x, { judge, summaryText }))
+        : await pool(doable, s.concurrency, (x) => runSettingsTarget(x, { timeouts, ctx }));
     }
+    if (demo) await demoEdgeReports();
 
     const measured = [...results, ...setResults].filter((r) => r && r.verdict);
     const skippedLinks = [...results, ...setResults].filter((r) => r && r.skipped);
@@ -146,6 +159,37 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
   } finally {
     running = false;
   }
+}
+
+/* ── v2.708 데모(mock) — 엣지 측정분 보고 + 첫 주기 과거 이력 백필(접속 없음) ── */
+let _demoBackfilled = false;
+async function demoEdgeReports({ ts = Date.now() } = {}) {
+  const { putEdgeLinkReport } = await import('../central/linkCheckEdge.js');
+  const { all } = centralLinks();
+  const byFrom = new Map();
+  for (const l of all) if (l.by === 'edge' && l.enabled !== false) { if (!byFrom.has(l.from)) byFrom.set(l.from, []); byFrom.get(l.from).push(l); }
+  const ver = (() => { try { return currentVersion(); } catch { return ''; } })();
+  for (const c of loadCollectors().filter(isDemoCollector)) {
+    const name = String(c.name || c.id);
+    const links = byFrom.get(name) || [];
+    await putEdgeLinkReport(name, { version: ver, results: links.map((l) => demoLinkResult(l, { ts, byNode: name, judge, summaryText })), note: links.length ? '' : '잴 링크가 없습니다(데모)' });
+  }
+}
+async function demoBackfill({ mine, node }) {
+  if (_demoBackfilled) return;
+  _demoBackfilled = true;
+  if ((await latestAll().catch(() => [])).length) return;     // 이미 이력이 있으면 덮지 않는다
+  const { putEdgeLinkReport } = await import('../central/linkCheckEdge.js');
+  const { all } = centralLinks();
+  const now = Date.now(); const step = 15 * 60_000; const span = 3 * 24 * 3_600_000;
+  for (let ts = now - span; ts < now; ts += step) {
+    await insertResults(mine.map((l) => demoLinkResult(l, { ts, byNode: node, judge, summaryText })), { byNode: node });
+    const byFrom = new Map();
+    for (const l of all) if (l.by === 'edge' && l.enabled !== false) { if (!byFrom.has(l.from)) byFrom.set(l.from, []); byFrom.get(l.from).push(l); }
+    for (const [from, links] of byFrom) await putEdgeLinkReport(from, { results: links.map((l) => demoLinkResult(l, { ts, byNode: from, judge, summaryText })) });
+    await new Promise((r) => setImmediate(r));   // 기동 1회 백필이 이벤트 루프를 오래 막지 않게 회차마다 양보
+  }
+  console.log(`[mock] 통신 점검 데모 이력 백필: ${Math.round(span / step)}회 × 링크 ${all.length}개`);
 }
 
 export function startLinkCheckPoller() {

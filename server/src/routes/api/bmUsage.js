@@ -13,6 +13,7 @@
  *   (`server/CLAUDE.md`: "비밀 값은 어떤 API 응답에도 싣지 않는다").
  * ⚠ **폴링 금지** — '지금 수집' 은 SSH·Redfish 왕복이다. 화면은 마운트 1회 + 버튼(v2.508 규약).
  */
+import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모 표시
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
@@ -220,6 +221,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
     res.json({
       ok: true, at: Date.now(),
       enabled: bmUsageEnabled(),
+      // v2.708: 데모(mock) — 저장된 설정은 꺼짐이어도 수집이 켜진 것처럼 돈다(설정 파일은 바꾸지 않는다). 화면이 데모임을 말할 수 있게.
+      ...(isMockMode() ? { demo: true } : {}),
       settings: scopeMainSettings(loadBmUsageSettings(), allowed, isAdmin), defaults: DEFAULTS,
       targets, rows,
       // '왜 대상이 아닌지' 는 개수와 사유로만 준다(범위 밖 서버 이름을 흘리지 않기 위해).

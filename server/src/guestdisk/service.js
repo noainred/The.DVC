@@ -10,10 +10,11 @@ import { loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms } from './analyze.js';
-import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths } from './db.js';
+import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
+import { demoGuestDiskVms } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 
 /** vCenterId → { corpId, corpName, region } 매핑(법인=DataCenter 할당 + 스냅샷 region). */
 function buildVcMeta() {
@@ -48,7 +49,8 @@ export async function collectVcenterGuestDisk(vcenterId) {
   const snap = store.get();
   const vc = (snap.vcenters || []).find((v) => v.id === vcenterId);
   const vcName = vc?.name || vcenterId;
-  if (snap.source === 'mock') throw new Error('데모 모드 — 라이브 게스트 디스크 미조회');
+  // v2.708: 데모(mock)는 게스트에 접속하지 않고 스냅샷 VM 에서 파티션을 합성한다(같은 정제를 거친다).
+  if (snap.source === 'mock') return demoCollect(vcenterId, vcName, snap, Date.now());
   const vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
   if (!vcCfg) throw new Error('vCenter 접속 정보 없음');
   const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
@@ -77,8 +79,36 @@ export async function collectVcenterGuestDisk(vcenterId) {
   return { vcenterId, vcenterName: vcName, vms: out, total: vms.length, withGuest: out.length, ...(partsUnknown ? { partsUnknown } : {}) };
 }
 
+function demoCollect(vcenterId, vcName, snap, ts) {
+  const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
+  const out = sanitizeGuestDiskVms(demoGuestDiskVms(vcenterId, vms, ts));
+  return { vcenterId, vcenterName: vcName, vms: out, total: vms.length, withGuest: out.length, demo: true };
+}
+
+/**
+ * v2.708 데모(mock) — 이 vCenter 의 적재 이력이 없으면 지난 30일을 하루 1점씩 먼저 채운다(추이·'증가 중 보류' 판정이 보이게).
+ * 이력이 이미 있으면(재시작) 건드리지 않는다.
+ */
+async function demoBackfill(vcenterId, changeThresholdGB) {
+  const snap = store.get();
+  if (snap.source !== 'mock') return 0;
+  if (await lastCollectTs([vcenterId])) return 0;
+  const vcName = (snap.vcenters || []).find((v) => v.id === vcenterId)?.name || vcenterId;
+  const now = Date.now();
+  let n = 0;
+  for (let d = 30; d >= 1; d--) {
+    const ts = now - d * 86_400_000;
+    const r = demoCollect(vcenterId, vcName, snap, ts);
+    const c = await commitCollection(vcenterId, vcName, r.vms, { ts, changeThresholdGB });
+    if (c?.ok) n++;
+    await new Promise((res) => setImmediate(res));   // 하루치마다 양보(데모 백필이 이벤트 루프를 길게 막지 않게)
+  }
+  return n;
+}
+
 /** 한 vCenter 수집 + DB 커밋(폴러/수동 공용). */
 export async function collectAndStore(vcenterId, { changeThresholdGB = 1 } = {}) {
+  if (store.get()?.source === 'mock') { try { await demoBackfill(vcenterId, changeThresholdGB); } catch (e) { console.warn(`[guestdisk] 데모 백필 실패(${vcenterId}): ${e.message}`); } }
   const r = await collectVcenterGuestDisk(vcenterId);
   const ts = Date.now();
   const commit = await commitCollection(r.vcenterId, r.vcenterName, r.vms, { ts, changeThresholdGB });

@@ -23,6 +23,8 @@ import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02
 import { createAuthGuard } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
 import { numOrNull } from '../util/numOrNull.js';
+// v2.708 데모(mock): 접속 없이 df 결과를 만든다. live 에서는 mock- 서버(데모 시드 잔재)를 수집하지 않는다.
+import { isMockMode, demoBmResults, isDemoId } from '../mock/demo/storage.js';
 
 /**
  * 베어메탈 스토리지 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가 없는
@@ -156,7 +158,8 @@ export async function bmCollectNow(trigger = 'manual') {
   running = true;
   const started = Date.now();
   try {
-    const enabled = listBmServersRaw().filter((s) => s.enabled !== false);
+    const demo = isMockMode();
+    const enabled = listBmServersRaw().filter((s) => s.enabled !== false && (demo || !isDemoId(s.id)));
     // v2.590: **주기 수집만** 인증 실패 정지 서버를 뺀다(수동 '지금 수집' 은 막지 않는다). 빠진 서버는 결과에
     // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
     let authStopped = 0;
@@ -168,12 +171,13 @@ export async function bmCollectNow(trigger = 'manual') {
       latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, authStopped: stopView(stop), at: prev?.at || stop.at, agent: s.agent || '' });
       return false;
     });
-    const central = servers.filter((s) => !String(s.agent || '').trim());
+    // v2.708: 데모는 전 서버를 중앙에서 합성한다(엣지 PUSH·잡 큐를 타지 않는다 — 접속처가 없다).
+    const central = demo ? servers : servers.filter((s) => !String(s.agent || '').trim());
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
     for (const s of servers) {
       const a = String(s.agent || '').trim();
-      if (!a) continue;
+      if (!a || demo) continue;
       const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
       if (!map.has(a)) map.set(a, []);
       map.get(a).push(s);
@@ -185,7 +189,7 @@ export async function bmCollectNow(trigger = 'manual') {
       queued += list.length;
     }
     const [centralResults, ...edgeResults] = await Promise.all([
-      collectMany(central),
+      demo ? Promise.resolve(demoBmResults(central)) : collectMany(central),
       ...[...pushByAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
     ]);
     const at = Date.now();

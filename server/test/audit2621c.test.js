@@ -18,6 +18,8 @@ import path from 'node:path';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2621c-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
+// v2.708: mock 에서 파트 장애가 '데모로만' 켜지면 알림을 보내지 않는다 — 이 테스트는 알림 응답을 보므로 명시적으로 켠다.
+process.env.PARTFAULT_ENABLED = 'true';
 process.env.AUTH_ENABLED = 'true';
 delete process.env.CENTRAL_URL;
 

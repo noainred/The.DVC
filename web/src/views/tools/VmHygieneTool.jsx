@@ -13,6 +13,7 @@ import { VmLink } from '../../components/EntityDetail.jsx';
 import {
   ALL_TEXT, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote, notifyText, settingsPatch, RANGES,
 } from '../vmcfg/vmHygieneText.js';
+import Select from '../../components/Select.jsx';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -75,9 +76,9 @@ function PolicyPanel({ settings, notify, canWrite, onSaved }) {
         </label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span className="muted">보낼 시각</span>
-          <select className="input" style={{ minWidth: 0 }} disabled={!canWrite} value={form.notify.hour} onChange={(e) => setForm({ ...form, notify: { ...form.notify, hour: Number(e.target.value) } })}>
+          <Select sort={false} className="input" style={{ minWidth: 0 }} disabled={!canWrite} value={form.notify.hour} onChange={(e) => setForm({ ...form, notify: { ...form.notify, hour: Number(e.target.value) } })}>
             {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}시 이후</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       {notify && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{notifyText(notify)}</div>}
@@ -166,10 +167,10 @@ export default function VmHygieneTool({ scope }) {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.vms})</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>심각도</span>
         {['', 'crit', 'warn', 'info'].map((s) => <Chip key={s || 'all'} active={sev === s} onClick={() => setSev(s)}>{s ? SEV_LABEL[s] : '전체'}</Chip>)}
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="VM·호스트·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />

@@ -12,6 +12,7 @@
  * ⚠ 본문의 null·문자열 원소를 그대로 순회하면 TypeError 가 나고, **express 4 는 async 핸들러의
  *   throw 를 잡지 않아 요청이 응답 없이 매달린다**(v2.548 S1) — 원소마다 형을 확인한다.
  */
+import { demoLinkInputs } from '../mock/demo/edge.js'; // v2.708 데모(mock) 링크 입력 보강
 import { insertResults } from '../linkcheck/db.js';
 import { PHASES } from '../linkcheck/phases.js';
 import { KIND_KEYS, EDGE_KINDS, linkIdOf, buildLinks } from '../linkcheck/links.js';
@@ -72,7 +73,9 @@ export function assignedEdgeLinkIds(agent) {
   const ag = String(agent || '').toLowerCase();
   try {
     const st = loadLinkCheckSettings();
-    const { links } = buildLinks({ collectors: loadCollectors(), vcenters: listVcenters(), pairs: st.pairs, settings: st });
+    const cols = loadCollectors();
+    const inp = demoLinkInputs({ vcenters: listVcenters(), pairs: st.pairs, collectors: cols }); // v2.708: mock 아니면 입력 그대로
+    const { links } = buildLinks({ collectors: cols, vcenters: inp.vcenters, pairs: inp.pairs, settings: st });
     return new Set(links.filter((l) => EDGE_KINDS.includes(l.kind) && String(l.from || '').toLowerCase() === ag).map((l) => String(l.id).toLowerCase()));
   } catch { return null; }
 }

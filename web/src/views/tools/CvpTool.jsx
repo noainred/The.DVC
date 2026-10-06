@@ -32,6 +32,7 @@ import {
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
   eventDeviceRefs, eventDeviceSort,
 } from './cvpText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * 특수기능 › Arista CloudVision(CVP) — v2.608.
@@ -203,10 +204,10 @@ export default function CvpTool() {
           {/* v2.612 WEB2612-07: 장비 목록을 아직 받지 못했거나 실패했으면 '0대' 가 아니라 '—'(읽지 못함) */}
           <b>{deviceCountLabel(devices, shown.length, devList.length)}</b>
           {servers.length > 1 && (
-            <select className="input" value={cvpSel} onChange={(e) => setCvpSel(e.target.value)} style={{ maxWidth: 220 }}>
+            <Select className="input" value={cvpSel} onChange={(e) => setCvpSel(e.target.value)} style={{ maxWidth: 220 }}>
               <option value="">모든 CVP</option>
               {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
-            </select>
+            </Select>
           )}
           {canCsv() && <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={downloadCsv} disabled={!devices} title={CSV_NOTE.replace(/\*\*/g, '')}>CSV 내보내기</button>}
         </div>
@@ -724,10 +725,10 @@ function PortUsageCard({ servers, onOpen }) {
       <div style={ROW}>
         <b>포트 사용량</b>
         {servers.length > 1 && (
-          <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+          <Select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
             <option value="">모든 CVP</option>
             {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
-          </select>
+          </Select>
         )}
         {[[0, '전체'], [50, '50% 이상'], [80, '80% 이상']].map(([v, l]) => (
           <button key={v} type="button" className={`tab${minUtil === v ? ' active' : ''}`} onClick={() => setMinUtil(v)}>{l}</button>
@@ -796,10 +797,10 @@ function EventsCard({ servers, isAdmin, onOpen }) {
       <div style={ROW}>
         <b>CVP 이벤트</b>
         {servers.length > 1 && (
-          <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+          <Select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
             <option value="">모든 CVP</option>
             {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
-          </select>
+          </Select>
         )}
         {[[24, '1일'], [168, '7일'], [720, '30일']].map(([h, l]) => (
           <button key={h} type="button" className={`tab${hours === h ? ' active' : ''}`} onClick={() => setHours(h)}>{l}</button>
@@ -1093,9 +1094,9 @@ function PreviewPanel() {
       <b>파서 시험(응답 붙여넣기)</b>
       <div style={{ ...NOTE, marginTop: 4 }}><BoldText text={PREVIEW_NOTE} /></div>
       <div style={{ ...ROW, marginTop: 6 }}>
-        <select className="input" value={kind} onChange={(e) => setKind(e.target.value)} style={{ maxWidth: 220 }}>
+        <Select sort={false} className="input" value={kind} onChange={(e) => setKind(e.target.value)} style={{ maxWidth: 220 }}>
           {PREVIEW_KIND_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-        </select>
+        </Select>
         <button type="button" className="btn" onClick={run} disabled={busy || !text.trim()}>{busy ? '해석 중…' : '해석'}</button>
         {text.length > 900_000 && <span style={{ ...NOTE, color: 'var(--amber)' }}>본문이 큽니다({countText(text.length)}자) — 서버 상한(약 1MB)을 넘으면 거부됩니다. 앞부분만 붙여넣으세요.</span>}
       </div>
@@ -1262,17 +1263,17 @@ function AdminPanel({ onChanged }) {
               <label style={LBL}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: CVP-HQ" /></label>
               <label style={LBL}>주소<input className="input" value={form.host} onChange={set('host')} placeholder="https://cvp.example.local 또는 10.0.0.10" /></label>
               <label style={LBL}>수집 주체
-                <select className="input" value={form.agent} onChange={set('agent')}
+                <Select className="input" value={form.agent} onChange={set('agent')}
                   title="CVP 가 중앙에서 닿지 않으면 그 사이트의 엣지를 고르세요. 목록은 중앙과 통신한 적이 있는 엣지입니다.">
                   <option value="">중앙이 직접 수집</option>
                   {choiceOptions(choices.agents, form.agent).map((o) => <option key={o.value} value={o.value}>{o.missing ? o.label : `엣지 ${o.label}`}</option>)}
-                </select>
+                </Select>
               </label>
               <label style={LBL}>인증 방식
-                <select className="input" value={form.authMode} onChange={set('authMode')}>
+                <Select sort={false} className="input" value={form.authMode} onChange={set('authMode')}>
                   <option value="token">서비스 계정 토큰</option>
                   <option value="password">ID/비밀번호</option>
-                </select>
+                </Select>
               </label>
               {form.authMode === 'token' ? (
                 <label style={LBL}>토큰<input className="input" type="password" autoComplete="new-password" value={form.token} onChange={set('token')} /></label>
@@ -1283,11 +1284,11 @@ function AdminPanel({ onChanged }) {
                 </>
               )}
               <label style={LBL}>DataCenter(선택)
-                <select className="input" value={form.datacenterId} onChange={set('datacenterId')}
+                <Select className="input" value={form.datacenterId} onChange={set('datacenterId')}
                   title="설정 › DataCenter(법인) 에 등록된 목록입니다.">
                   <option value="">(미지정)</option>
                   {choiceOptions(choices.datacenters, form.datacenterId).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </Select>
               </label>
               <label style={LBL}>메모<input className="input" value={form.note} onChange={set('note')} /></label>
             </div>

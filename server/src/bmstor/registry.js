@@ -151,3 +151,26 @@ export function removeBmServer(id) {
   persist();
   return { ok: true };
 }
+
+/**
+ * v2.708 데모(mock) 시드 전용 — 서버 목록이 **비어 있을 때만** 넣는다(id 는 호출부가 `mock-` 접두).
+ * 검증은 bmServerInputIssue 단일 소스. 손상 보존 상태면 시드하지 않는다.
+ * @returns {{seeded:number, skipped:number, reason?:string}}
+ */
+export function seedBmServersIfEmpty(list) {
+  const data = load();
+  if (loadErr.get()) return { seeded: 0, skipped: 0, reason: 'registry-unreadable' };
+  if (data.servers.length) return { seeded: 0, skipped: 0, reason: 'not-empty' };
+  let skipped = 0;
+  for (const b of Array.isArray(list) ? list : []) {
+    if (!b || typeof b !== 'object' || !String(b.id || '').startsWith('mock-') || bmServerInputIssue(b)) { skipped += 1; continue; }
+    data.servers.push({
+      id: String(b.id), host: String(b.host).trim(), port: 22, username: String(b.username || 'root'),
+      name: String(b.name || b.host), agent: '', dispatch: 'poll',
+      groups: normalizeBmGroups(b.groups).groups, mounts: sanitizeMounts(b.mounts).mounts,
+      enabled: b.enabled !== false, password: String(b.password || ''),
+    });
+  }
+  if (data.servers.length) persist();
+  return { seeded: data.servers.length, skipped };
+}

@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { SEVERITY, SOURCES, coverageText, kpis, entityText, filterFindings, PASTE_HINT, ruleListNote, ruleOriginText } from './logAnalysisText.js';
+import Select from '../components/Select.jsx';
 
 /**
  * 설정 › Log › 로그 분석(개선점 도출) — v2.583.
@@ -134,15 +135,15 @@ export default function LogAnalysis() {
 
       <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
         {HOURS[source] && (
-          <select className="input" style={{ width: 'auto' }} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+          <Select sort={false} className="input" style={{ width: 'auto' }} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
             {HOURS[source].map((h) => <option key={h} value={h}>최근 {h >= 24 ? `${h / 24}일` : `${h}시간`}</option>)}
-          </select>
+          </Select>
         )}
         {source === 'edge' && (
-          <select className="input" style={{ width: 'auto', maxWidth: '100%' }} value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <Select className="input" style={{ width: 'auto', maxWidth: '100%' }} value={agent} onChange={(e) => setAgent(e.target.value)}>
             <option value="">엣지 선택</option>
             {(meta?.edges || []).map((e) => <option key={e.agent} value={e.agent}>{e.agent} ({(e.logCount ?? 0).toLocaleString()}줄)</option>)}
-          </select>
+          </Select>
         )}
         {source !== 'paste' && (
           // v2.603(감사 WEB2603-02): 주 실행 버튼이 전역 .tab(테두리·배경 없음)이라 맨 글자로 보였다 — 주 동작은 login-btn.
@@ -193,9 +194,9 @@ export default function LogAnalysis() {
             <button key={key} className={tab === key ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab(key)}>{l}</button>
           ))}
           {tab === 'findings' && (
-            <select className="input" style={{ width: 'auto', marginLeft: 'auto' }} value={minSev} onChange={(e) => setMinSev(e.target.value)}>
+            <Select sort={false} className="input" style={{ width: 'auto', marginLeft: 'auto' }} value={minSev} onChange={(e) => setMinSev(e.target.value)}>
               {SEV_ORDER.map((s) => <option key={s} value={s}>{SEVERITY[s].label} 이상</option>)}
-            </select>
+            </Select>
           )}
         </div>
 

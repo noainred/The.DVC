@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { blankOr } from './blankOr.js';
+import Select from '../components/Select.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 
@@ -69,9 +70,9 @@ export default function AdSettings() {
           <label>operator 그룹<input className="input" value={cfg.operatorGroup} onChange={set('operatorGroup')} placeholder="(선택)" /></label>
           <label>viewer 그룹<input className="input" value={cfg.viewerGroup} onChange={set('viewerGroup')} placeholder="(선택)" /></label>
           <label>기본 역할(매칭 없을 때)
-            <select className="select" value={cfg.defaultRole} onChange={set('defaultRole')}>
+            <Select sort={false} className="select" value={cfg.defaultRole} onChange={set('defaultRole')}>
               {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            </Select>
           </label>
         </div>
       </div>

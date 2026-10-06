@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { fmtBytes, fmtTime } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /** v2.590 D5: 크기 상한으로 번들에서 뺀 설정 파일 — '백업 완료' 가 전부를 담았다고 말하지 않게 한다. */
 export function skippedText(r) {
@@ -91,9 +92,9 @@ export default function PortalBackup() {
           </label>
           <span className="muted">매</span>
           <input className="input" type="number" min="1" style={{ width: 80 }} value={s.every} onChange={(e) => setS({ ...s, every: e.target.value })} disabled={!s.scheduleEnabled} />
-          <select className="select" value={s.unit} onChange={(e) => setS({ ...s, unit: e.target.value })} disabled={!s.scheduleEnabled}>
+          <Select sort={false} className="select" value={s.unit} onChange={(e) => setS({ ...s, unit: e.target.value })} disabled={!s.scheduleEnabled}>
             <option value="minute">분</option><option value="hour">시간</option><option value="day">일</option>
-          </select>
+          </Select>
           <span style={{ width: 16 }} />
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}>
             <input type="checkbox" checked={s.autoOnChange} onChange={(e) => setS({ ...s, autoOnChange: e.target.checked })} /> <b>설정 변경 시 자동 백업</b>

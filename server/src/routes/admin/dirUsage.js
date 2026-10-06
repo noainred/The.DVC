@@ -5,6 +5,7 @@
 //  - SMTP 접속 정보는 **여기 없다** — 포탈 공용 메일 설정(설정 › 메일 발송, `mail.json`)이 소유하고
 //    이 기능은 `sendPortalMail({ kind: 'dirusage' })` 로 보낸다. 따라서 이 라우트에 비밀 값이 없다.
 //  - 상태 변경은 전부 logAudit.
+import { demoDirUsageTargets } from '../../mock/demo/edge.js'; // v2.708 데모(mock)
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from './shared.js';
@@ -28,8 +29,12 @@ export function registerDirUsage(adminRouter) {
   adminRouter.get('/dir-usage', adminOnly, fleetReadOnly, async (_req, res) => {
     const db = await getDb();
     const latest = db ? db.latestAll() : [];
+    // v2.708: 데모(mock)에서 설정 대상이 비었으면 데모 대상을 응답에만 싣는다(설정 파일은 그대로 — 스케줄러는 돌지 않는다).
+    const cfgNow = redact();
+    const demoTargets = !(cfgNow.targets || []).length ? demoDirUsageTargets() : [];
     res.json({
-      settings: redact(),
+      settings: demoTargets.length ? { ...cfgNow, targets: demoTargets } : cfgNow,
+      ...(demoTargets.length ? { demo: true } : {}),
       status: schedulerStatus(),
       db: dbStatus(),
       agents: listRmaAgents().map((a) => ({ agent: a.agent, online: a.online, instances: a.instances })),

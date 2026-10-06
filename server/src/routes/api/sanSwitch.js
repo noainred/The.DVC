@@ -14,7 +14,9 @@ import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
 import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
-import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
+import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
+import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
+import { sanDemoStatus } from '../../mock/demo/sanswitch.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js';
 import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
@@ -94,7 +96,9 @@ export function registerSanSwitch(api) {
  * 통합 조회 — 이 노드(중앙) 직접 수집분 + 전 엣지 push 분을 합쳐 장비별 최신 스냅샷 반환.
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선(스토리지 화면과 동일 규칙).
  */
-api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
+  // v2.708: 데모(mock)면 비어 있을 때만 시드(장비·스냅샷 — 포트 사용량 백필은 뒤에서 이어진다). live 는 아무것도 안 한다.
+  if (isMockMode()) { try { await ensureSanSwitchDemo(); } catch (e) { console.warn(`[sanswitch] 데모 시드 실패: ${e.message}`); } }
   const byId = new Map();
   for (const s of [...localSnapshots(), ...edgeSanSwitchSnapshots()]) {
     const cur = byId.get(s.deviceId);
@@ -121,6 +125,7 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (req, res) => {
     poller: admin ? sanSwitchPollerStatus() : maskPollerStatus(sanSwitchPollerStatus(), listDevices().map((d) => d.host)),
     // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
     collectDrops: recentCollectDrops(),
+    ...(isMockMode() ? { demo: sanDemoStatus() } : {}),
   });
 });
 
@@ -570,7 +575,7 @@ async function perfDiagFor(deviceId, r) {
   if (agent) { try { edge = edgePerfStatusFor(deviceId, agent); } catch { /* 〃 */ } }
   const d = perfEmptyDiag({
     device: { id: dev.id, name: dev.name, agent, collectMethod: dev.collectMethod || 'ssh' },
-    settings: loadPerfSettings(),
+    settings: (() => { const st = loadPerfSettings(); return { ...st, enabled: demoOn(st.enabled) }; })(),   // v2.708: mock 은 켜진 것처럼
     dbUnavailable: r?.unavailable === true || !(await perfDbAvailable()),
     lastSampleAt, since: r?.since ?? null,
     poller: sanSwitchPerfStatus(), lastEvent, edge,
@@ -719,7 +724,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     ok: true, unit: 'bytesPerSec', hours, from, to, until: agg.until ?? null, rangeIssue: rangeIssue || null, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
     // v2.517: 화면이 '수집을 켜세요' 를 **꺼져 있을 때만** 말하게 하려면 실제 설정을 알아야 한다.
     // 예전에는 무조건 그 문구여서, 이미 켜져 있고 장비에서 실패하는 상황에서도 설정을 의심하게 만들었다.
-    perfEnabled: loadPerfSettings().enabled,
+    perfEnabled: demoOn(loadPerfSettings().enabled),   // v2.708: mock 은 켜진 것처럼(저장 설정은 그대로)
     edgeSwitches, edgeNote: edgeMissing.length
       ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 서버 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
       : '',
@@ -778,8 +783,9 @@ api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (
     // v2.682(R3A-02): 조용히 빼지 않는다 — 보고가 끊겨 합계에서 뺀(재배선·정리) 시리즈와, 장비가 멈춰 '모른다' 로 둔 시리즈.
     retiredSeries: t.retiredSeries ?? 0, heldSeries: t.heldSeries ?? 0,
     edgeSwitches: edgeRaw.length, edgeMissing, lastSampleAt,
-    intervalMs: st.intervalMs, enabled: !!st.enabled,
+    intervalMs: st.intervalMs, enabled: demoOn(st.enabled),   // v2.708: mock 은 켜진 것처럼
     unavailable: !!agg.unavailable,
+    ...(isMockMode() ? { demo: true } : {}),
   });
 });
 

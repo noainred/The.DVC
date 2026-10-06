@@ -8,6 +8,7 @@ import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { DS_TEXT, SEV_LABEL, SEV_BADGE, findingDetail, dsCoverageText, pathCoverageText, gbText } from '../dscfg/dsCfgText.js';
+import Select from '../../components/Select.jsx';
 
 const TABS = [['ds', '데이터스토어'], ['paths', '스토리지 경로'], ['vsan', 'vSAN']];
 
@@ -87,10 +88,10 @@ export default function StoragePathsTool({ scope }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         {TABS.map(([k, l]) => <Chip key={k} active={tab === k} onClick={() => setTab(k)}>{l}</Chip>)}
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {(data.vcenters || []).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 300 }} placeholder="이름·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {showCsv && tab === 'ds' && <button type="button" className="btn" onClick={csv} disabled={csvBusy}>CSV</button>}

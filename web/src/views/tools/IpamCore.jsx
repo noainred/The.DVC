@@ -18,6 +18,7 @@ import { IpamCsv } from './IpamCsv.jsx';
 import { reservedUntilText } from './ipamReserveText.js';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 
 // 한 번에 그리는 IPAM 목록 행 상한(v2.596) — 정렬은 전체 기준, 그리기만 자른다.
@@ -51,10 +52,10 @@ export function IpamStandalone({ defaultScope = '' } = {}) {
         <div className="section-title" style={{ margin: 0 }}>📒 센터별 IP 관리대장</div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           <span className="muted">범위</span>
-          <select className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
+          <Select className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value="">전체 vCenter</option>
             {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       <Ipam scope={scope} onScope={setScope} />
@@ -309,9 +310,9 @@ function Ipam({ scope, onScope }) {
           </div>
           <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
             <span className="muted" style={{ fontSize: 12 }}>서브넷</span>
-            <select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
+            <Select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
               {subnets.map((s) => <option key={s.base} value={s.base}>{s.subnet} · 사용 {s.used}</option>)}
-            </select>
+            </Select>
           </div>
           {sheet && (() => {
             // '사용중'에는 스캔으로 확인된 IP(scanned)도 포함(실제 사용 중인 IP이므로).

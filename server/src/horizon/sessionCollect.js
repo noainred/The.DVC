@@ -23,6 +23,7 @@ import { pushAll } from '../util/pushAll.js';
 import { CATALOG_PATHS, normalizeCatalog, usageFromSessions } from './appUsage.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: 세션·카탈로그 페이지 본문 상한(gzip 해제 후 크기)
+import { isDemoEntryId, demoHorizonSessionsRaw, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 /** 한 페이지 상한 — size 최대 1000 세션 × 수 KB 를 넉넉히 덮는다. 넘으면 그 페이지는 형식 미인식이다. */
 const PAGE_MAX_BYTES = 32 * 1_048_576;
 
@@ -187,15 +188,34 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
   }
 }
 
-/** 데모(mock) 모드용 — 없는 세션을 **지어내지 않는다**. 기능이 꺼진 이유를 그대로 돌려준다. */
-export function mockSessionResult(s) {
+/**
+ * 데모(mock) 모드용(v2.708) — 커넥션 서버에 **접속하지 않고** 합성 세션으로 수집 성공 결과를 만든다.
+ * 세션 해석·누적 쌍은 실수집과 **같은 순수 함수**(normalizeSessions·usageFromSessions·normalizeCatalog)를 거친다 —
+ * 판정을 복제하지 않는다. 데모 등록(`mock-` id)이 아닌 실등록 서버에는 예전처럼 '데모 모드' 로 답한다(지어내지 않는다).
+ */
+export function mockSessionResult(s, { maxUsers = 2000, now = Date.now() } = {}) {
+  if (!isDemoEntryId(s?.id)) {
+    return {
+      ok: false, kind: 'mock', error: '데모(mock) 모드에서는 Horizon 세션을 수집하지 않습니다.',
+      pages: 0, truncated: false, ms: 0, parsed: false,
+      sessions: null, connected: null, disconnected: null, pending: null,
+      users: null, usersConnected: null, names: [], pools: [],
+      usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
+      serverId: s?.id || '',
+    };
+  }
+  const sid = String(s.id);
+  const raw = demoHorizonSessionsRaw(sid, now);
+  if (catalogDue(_catalogs.get(sid), now)) {
+    const merged = demoHorizonCatalogRaw();
+    const norm = normalizeCatalog(merged);
+    _catalogs.set(sid, { at: now, raw: merged, catalog: norm, counts: norm.counts, usedPaths: { app: CATALOG_PATHS.app[0], desktop: CATALOG_PATHS.desktop[0], farm: CATALOG_PATHS.farm[0] }, errors: {}, truncated: {} });
+  }
+  const norm = normalizeSessions(raw, { maxUsers });
+  const usage = usageFromSessions(raw, { usedUserKey: norm.usedUserKey, usedStateKey: norm.usedStateKey, catalog: _catalogs.get(sid)?.catalog });
   return {
-    ok: false, kind: 'mock', error: '데모(mock) 모드에서는 Horizon 세션을 수집하지 않습니다.',
-    pages: 0, truncated: false, ms: 0, parsed: false,
-    sessions: null, connected: null, disconnected: null, pending: null,
-    users: null, usersConnected: null, names: [], pools: [],
-    usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
-    serverId: s?.id || '',
+    ok: true, kind: 'ok', error: null, pages: 1, truncated: false, ms: 5 + (raw.length % 40), demo: true,
+    ...norm, usage, catalog: catalogInfo(sid), serverId: sid,
   };
 }
 

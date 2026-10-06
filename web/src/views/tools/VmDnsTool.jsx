@@ -27,6 +27,7 @@ import {
   mismatchNote, serverHeadDesc, policyHeadText, vmListFoot, previewPolicyInput, normPolicy, samePolicy,
   invalidText, policyRows, violText, scopeOf, qnameText, skippedByText, historyNote,
 } from './vmDnsText.js';
+import Select from '../../components/Select.jsx';
 
 /** 동작(점검·저장·내려받기) 실패 — 403 은 접근 제어 안내(ErrorBox → AccessDenied), 그 밖은 사유 문장(5xx 를 '서비스 중단' 으로 말하지 않는다). */
 const isDenied = (e) => !!e && e.status === 403;
@@ -399,11 +400,11 @@ export function ServerDetail({ ip, vcId, data, byIp, onBack, onPick }) {
   const picker = (
     <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 13 }}>
       <span className="muted">DNS 서버</span>
-      <select className="select" value={ip || ''} onChange={(e) => onPick(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
+      <Select className="select" value={ip || ''} onChange={(e) => onPick(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
         <option value="">주소를 고르세요</option>
         {servers.map((s) => <option key={s.ip} value={s.ip}>{s.ip} — {kindLabel(s.kind)} · VM {nText(s.vms)}</option>)}
         {ip && !servers.some((s) => s.ip === ip) && <option value={ip}>{ip}</option>}
-      </select>
+      </Select>
     </label>
   );
 

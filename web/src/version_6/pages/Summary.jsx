@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import STable from '../../components/STable.jsx';
 import { GuestOsVmsModal } from '../../views/SpecialTools.jsx';
 import { capacityCards, totalTiles, osRows, corpContribution, contribNote, contribTotalLabel, dsUnknownMark } from '../v6Data.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * V6 Summary(v2.623) — **자원 총량과 할당**만 둔다(핸드오프: 물리 vs 할당 · 오버커밋 · OS별 할당 · 법인별 기여도).
@@ -27,10 +28,10 @@ export default function V6Summary({ vcenters }) {
     <div className="v6-sum">
       <div className="v6-sum-head">
         <h2>자원 총량과 할당</h2>
-        <select className="select" aria-label="법인 필터" value={corp} onChange={(e) => setCorp(e.target.value)}>
+        <Select className="select" aria-label="법인 필터" value={corp} onChange={(e) => setCorp(e.target.value)}>
           <option value="">전체 법인</option>
           {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-        </select>
+        </Select>
       </div>
       {error && <div className="v6-banner warn">갱신 실패(직전 데이터 표시 중): {String(error?.message || error)}</div>}
 

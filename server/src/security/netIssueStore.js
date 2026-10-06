@@ -8,6 +8,9 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
+import { isMockMode } from '../mock/demo/flags.js';
+import { demoNetIssues } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
+import { store } from '../store.js';
 
 const STATE = path.join(config.configDir, 'net-issues-state.json');
 const FILE = path.join(config.configDir, 'net-issues.ndjson');
@@ -57,10 +60,23 @@ export function recordNetScan({ vcenterId = '', vm = '', os = '' } = {}, ifaces 
 
 export function getNetIssues(sinceTs = 0) { load(); return issues.filter((r) => r.ts >= sinceTs); }
 
+/*
+ * v2.708 데모(mock) — 게스트 스캔 없이 화면을 채우는 합성 이슈. **저장소(issues·파일)에는 넣지 않는다** —
+ * 분석 시점에만 섞으므로 live 로 바꾸면 그대로 사라진다. 10분 단위로 다시 만든다(시간이 흐르면 새 이슈가 보이게).
+ */
+let _demo = { at: 0, rows: [] };
+function demoRows(now) {
+  if (!isMockMode()) return [];
+  if (now - _demo.at > 10 * 60_000) _demo = { at: now, rows: demoNetIssues(store.get(), { now, days: 30 }) };
+  return _demo.rows;
+}
+
 export function analyzeNetIssues({ vcenterId = '', days = 7 } = {}) {
   load();
-  const since = Date.now() - Math.max(1, days) * 86_400_000;
-  const rows = issues.filter((r) => r.ts >= since && (!vcenterId || r.vcenterId === vcenterId));
+  const now = Date.now();
+  const since = now - Math.max(1, days) * 86_400_000;
+  const demo = demoRows(now);
+  const rows = (demo.length ? [...issues, ...demo] : issues).filter((r) => r.ts >= since && (!vcenterId || r.vcenterId === vcenterId));
   const byVm = new Map(); const byIface = new Map();
   for (const r of rows) {
     const vk = `${r.vcenterId}/${r.vm}`;
@@ -73,6 +89,7 @@ export function analyzeNetIssues({ vcenterId = '', days = 7 } = {}) {
   const top = [...byVm.values()].sort((a, b) => (b.drop + b.err) - (a.drop + a.err));
   return {
     config: { days, vcenterId: vcenterId || '' },
+    ...(demo.length ? { demo: true } : {}),
     summary: { total: rows.length, vms: byVm.size, drops: rows.reduce((a, r) => a + r.newDrop, 0), errors: rows.reduce((a, r) => a + r.newErr, 0) },
     topVms: top.slice(0, 50),
     byIface: [...byIface.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([key, count]) => ({ key, count })),

@@ -134,7 +134,7 @@ export function PhysicalGpuManager({ vcs }) {
           <Field label="계정 *"><input className="input" style={{ width: 120 }} value={auto.username} onChange={setA('username')} placeholder="root" /></Field>
           <Field label="비밀번호"><input className="input" type="password" style={{ width: 130 }} value={auto.password} onChange={setA('password')} onKeyDown={(e) => e.key === 'Enter' && autoRegister()} /></Field>
           <Field label="포트"><input className="input" type="number" style={{ width: 70 }} value={auto.port} onChange={setA('port')} /></Field>
-          <Field label="소속 vCenter"><select className="select" value={auto.vcenterId} onChange={setA('vcenterId')} style={{ minWidth: 140 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
+          <Field label="소속 vCenter"><Select className="select" value={auto.vcenterId} onChange={setA('vcenterId')} style={{ minWidth: 140 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</Select></Field>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={autoBusy} onClick={() => autoRegister()}>{autoBusy ? '로그인·감지 중…' : '🔍 로그인 후 자동 등록'}</button>
           <button className="logout-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={() => setBulkOpen((v) => !v)}>📋 여러 IP 일괄 등록</button>
         </div>
@@ -231,8 +231,8 @@ export function PhysicalGpuManager({ vcs }) {
             <Field label="SSH 포트"><input className="input" type="number" style={{ width: 80 }} value={form.port} onChange={setF('port')} /></Field>
             <Field label="계정 *"><input className="input" style={{ width: 130 }} value={form.username} onChange={setF('username')} placeholder="root" /></Field>
             <Field label={`비밀번호${editing ? ' (비우면 유지)' : ''}`}><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={setF('password')} /></Field>
-            <Field label="OS"><select className="select" value={form.os} onChange={setF('os')}><option value="linux">Linux</option><option value="windows">Windows</option></select></Field>
-            <Field label="소속 vCenter(선택)"><select className="select" value={form.vcenterId} onChange={setF('vcenterId')} style={{ minWidth: 150 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
+            <Field label="OS"><Select sort={false} className="select" value={form.os} onChange={setF('os')}><option value="linux">Linux</option><option value="windows">Windows</option></Select></Field>
+            <Field label="소속 vCenter(선택)"><Select className="select" value={form.vcenterId} onChange={setF('vcenterId')} style={{ minWidth: 150 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</Select></Field>
           </div>
           <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
             <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={testing === 'form' || !form.host || !form.username} onClick={() => test({ host: form.host, username: form.username, password: form.password, port: form.port }, 'form')}>{testing === 'form' ? '테스트 중…' : 'SSH 테스트'}</button>
@@ -246,3 +246,5 @@ export function PhysicalGpuManager({ vcs }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';
