@@ -4904,6 +4904,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       데모 보강: 로그 폴러 첫 수집 91일(`MOCK_FIRST_DAYS` — 가용성 90일 보기) · iDRAC 스캔 로그(`seedIdracScanLogIfEmpty` — 과거 시각은 이 경로만, 비었을 때만) ·
       VM DNS 변경 이력(`mock/demo/vmdns.js` — 바뀐 뒤 = 지금 값, 첫 관측을 변경 이전으로 당긴다) · 태그 정책(파일 없음 + mock → `demo:true` 정책, 저장하면 그 값) ·
       용량 리포트 합성 추세(`withDemoForecast` — 실제 추세가 0개일 때만, R² null). ⚠ 합성 함수에서도 `Number(null) === 0` 을 밟았다(자체 테스트가 잡았다 — `numOrNull`).
+    · **v2.711 4차 점검**(400px 162 화면 + 서브탭·IP관리 70 경로): ⚠ **rAF 로 그리는 캔버스는 '화면에서 떨어진 캔버스' 를 그리지 않는다** —
+      React 효과 정리는 커밋 뒤에 돌아 그 사이 한 프레임이 폭 0 캔버스로 그려져 `createRadialGradient` 가 non-finite 로 던졌다(중계 토폴로지 graph → 다른 탭.
+      `cv.isConnected` + 크기 > 0 + 노드 좌표 유한 검사, 웹 `relayTopoCanvas2711.test.js`). **새 캔버스 화면도 같은 가드.**
+      데모 보강: 백업 스냅샷 이벤트(`mock/demo/backup.js` — 최근 8일·켜진 VM 약 60%, 미보호 리포트가 보호로 읽는다) · RMA 점검 상태(`edgeSeed.demoRmaTestResults` —
+      빈 스케줄에만 4개 등록 · `ingestResult(…, {alert:false})`) · 목 생성기 사용률 프로필(`vm.idx % 37 === 5` 유휴 · `% 41 === 7` 과부하 — 라이트사이징 세 탭).
   - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
     (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
     웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):

@@ -599,8 +599,14 @@ export function generateSnapshot() {
       const ord = vmOrd.get(vm.host.name) || 0; vmOrd.set(vm.host.name, ord + 1);
       const hostDown = hostState?.connectionState === 'DISCONNECTED';
       const powered = vm.baseOn && !hostDown;
-      const cpuUsagePct = powered ? Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100)) : 0;
-      const memUsagePct = powered ? Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100)) : 0;
+      // v2.711: 기본 공식은 CPU 15~75% · 메모리 25~80% 만 나와 라이트사이징 '유휴'(CPU<5%·MEM<20%)와 '과소'(>85%/>90%)가
+      //   데모에서 영원히 0건이었다. 일부 VM 에 결정적 프로필을 준다(약 2.7% 유휴 · 2.4% 과부하).
+      const profile = vm.idx % 37 === 5 ? 'idle' : vm.idx % 41 === 7 ? 'hot' : '';
+      const wave = (k, d) => Math.abs(Math.sin((vm.idx + tick) / d)) * k;
+      const cpuUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(1 + wave(3, 7)) : profile === 'hot' ? Math.round(88 + wave(9, 5))
+        : Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100));
+      const memUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(8 + wave(10, 9)) : profile === 'hot' ? Math.round(91 + wave(6, 6))
+        : Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100));
       vms.push({
         id: `${site.id}:${vm.name}`,
         vcenterId: site.id,

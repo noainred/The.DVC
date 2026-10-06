@@ -63,6 +63,9 @@ export default function RelayTopoTool() {
       const t = (now - t0) / 1000;
       if (autoRotate && !dragRef.current) camRef.current.rotY += 0.0035;
       const dpr = window.devicePixelRatio || 1; const w = cv.clientWidth, h = cv.clientHeight;
+      // v2.711: 화면을 떠날 때 React 의 효과 정리는 커밋 뒤에 돈다 — 그 사이 프레임은 DOM 에서 떨어진(폭 0) 캔버스를 받아
+      //   원근 투영이 NaN 이 되고 createRadialGradient 가 던졌다(전수 화면 조사에서 발견). 크기가 없으면 그리지 않는다.
+      if (!cv.isConnected || !(w > 0 && h > 0)) { raf = requestAnimationFrame(draw); return; }
       if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const bg = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, Math.max(w, h) * 0.8); bg.addColorStop(0, '#0f1a2e'); bg.addColorStop(1, '#05080f');
@@ -85,6 +88,7 @@ export default function RelayTopoTool() {
       }
       for (const n of f.nodes) {
         const r = (n.kind === 'main' ? 22 : n.small ? 9 : 15) * n.f;
+        if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !(r > 0)) continue; // 투영이 유한하지 않은 노드는 그리지 않는다
         const sc = COLORS[n.status] || COLORS.unknown;
         ctx.beginPath(); ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2); ctx.fillStyle = `${n.kind === 'main' ? COLORS.main : sc}22`; ctx.fill();
         ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
