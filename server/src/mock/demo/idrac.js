@@ -15,6 +15,7 @@
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 import { mockServiceTag } from '../seed.js';
 import { parseThermalTemp, parseThermalFan, parseRedfishSensor } from '../../idrac/sensorDetail.js';
+import { pushAll } from '../../util/pushAll.js';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -484,7 +485,7 @@ export async function backfillTrendMetrics(list, { now = Date.now() } = {}) {
     });
     const latestOf = (s) => s.sensors;
     const rows = buildServerTempRows(fake, { now: t, latestOf, localCycle: null }).rows;
-    rows.push(...buildServerTrendRows(fake, { now: t, latestOf, localCycle: null, cpuIndex: null, detailOf: () => null }));
+    pushAll(rows, buildServerTrendRows(fake, { now: t, latestOf, localCycle: null, cpuIndex: null, detailOf: () => null }));
     // Enterprise 라이선스 서버는 텔레메트리가 없다 — 실장비에서는 Sensors 컬렉션의 CPU Usage 센서(idracusage_cpu_rs)로 온다.
     for (const s of fake) {
       const p = prof.get(String(s.id));
