@@ -134,7 +134,18 @@ async function demoEdgeTickInner({ now = Date.now(), snap = null } = {}) {
   if (first) { await ensureRmaSeed(demoCollectors, { now }); await ensureCredentialSeed().catch(() => null); await ensureEdgePingSeed(demoCollectors, { now });
     await ensureDirUsageSeed({ now }); await ensureAssignmentSeed(); await ensureCaptureSeed({ now }); }
   await demoRmaTick({ now }).catch(() => null);
+  await demoPartFaultReports(demoCollectors, { now, version }).catch(() => null);
   return { edges: demoCollectors.length, demo: true };
+}
+
+/**
+ * v2.709: 데모 엣지의 파트 장애 보고(프로토콜 2 · 위임 장비 0대 = 판정할 부품 없음). 보고가 없으면 파트 장애 화면이 데모 엣지를 전부
+ * '꺼짐(중앙 설정)' 으로 분류했다(데모 재조사에서 발견) — 데모 엣지는 접속도 수집도 하지 않으므로 '판정할 장비가 없다' 는
+ * 정직한 보고를 틱마다 다시 싣는다(인메모리 · 3시간이면 낡음으로 바뀌므로 매 틱 갱신).
+ */
+async function demoPartFaultReports(cols, { now, version }) {
+  const [{ putEdgeReport }, { PUSH_PROTOCOL }] = await Promise.all([import('../../central/partFaultEdge.js'), import('../../partfault/types.js')]);
+  for (const c of cols) await putEdgeReport(c.name || c.id, { v: PUSH_PROTOCOL, version, at: now, devices: [], scanned: { devices: 0, demo: true } });
 }
 
 /** 누를 때만 당기는 보관소(엣지 로그·토큰 점검 자기보고·중앙→엣지 프로브)를 데모 엣지마다 1회 채운다. */

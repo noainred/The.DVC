@@ -744,7 +744,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/contention.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/contention.js:52](../server/src/routes/api/contention.js#L52) |
 | GET | `/tools/core-license` | 권한 `tools` | [server/src/routes/api/coreLicense.js:28](../server/src/routes/api/coreLicense.js#L28) |
 | GET | `/tools/core-license.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/coreLicense.js:33](../server/src/routes/api/coreLicense.js#L33) |
-| GET | `/tools/corp-usage` | 권한 `tools` | [server/src/routes/api/corpUsage.js:97](../server/src/routes/api/corpUsage.js#L97) |
+| GET | `/tools/corp-usage` | 권한 `tools` | [server/src/routes/api/corpUsage.js:98](../server/src/routes/api/corpUsage.js#L98) |
 | GET | `/tools/cost-showback` | 권한 `tools` | [server/src/routes/api/costShowback.js:32](../server/src/routes/api/costShowback.js#L32) |
 | GET | `/tools/cost-showback.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/costShowback.js:49](../server/src/routes/api/costShowback.js#L49) |
 | GET | `/tools/cost-showback/settings` | 권한 `tools` | [server/src/routes/api/costShowback.js:36](../server/src/routes/api/costShowback.js#L36) |

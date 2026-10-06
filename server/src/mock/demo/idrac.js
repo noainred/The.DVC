@@ -406,6 +406,7 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   if (!isMockMode()) return null;
   await repairMockServiceTags();
   await ensureBareMetalSeed(snapshot);
+  await ensureUnsupportedDemo(snapshot);
   const list = await demoServers(snapshot);
   if (!list.length) return { servers: 0, inventoryRefreshed: 0, demo: true };
   const [{ pushSensorSample, markSensorPollStart, setSensorPollCycle }, { setThermalDetail, setSensorCollection, sensorCollectionStale }, { setInventory, inventoryStale, getInventory }] = await Promise.all([
@@ -548,4 +549,44 @@ export function demoWatts(p, load) {
 }
 
 export function _resetBareMetalSeedForTest() { _specCache = new Map(); _seedDone = false; _tagRepaired = false; }
-export function _resetIdracDemoForTest() { _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
+export function _resetIdracDemoForTest() { _unsupDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
+
+let _unsupDone = false;
+/**
+ * 서버 분석 › 미지원 서버(v2.709) — 데모 스캔이 '발견한' 비-Dell Redfish 장비(HPE iLO·Lenovo XCC·Supermicro).
+ * 저장소(central/unsupportedServers.js)가 **비어 있을 때만** 1회 — 실제 스캔 결과가 있으면 건드리지 않는다.
+ * 그 중 HPE 일부는 '계정 없음(로그인 시도 안 함)' 으로 두어 iLO 계정 안내 경로가 보이게 한다. 장비 접속 0.
+ */
+export async function ensureUnsupportedDemo(snapshot) {
+  if (!isMockMode() || _unsupDone) return { skipped: 'done-or-not-mock' };
+  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean).slice(0, 4);
+  if (!vcs.length) return { skipped: 'no-snapshot' };
+  // 법인(DataCenter) 귀속은 데모 법인 할당(pdu.js assignDemoCorps)이 끝난 뒤에 — 그 전이면 다음 틱에 다시 본다
+  //   (vCenter id 를 법인 칸에 지어 넣지 않는다).
+  const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+  if (!vcs.every((vc) => datacenterOfVcenter(vc))) return { skipped: 'no-corp-yet' };
+  _unsupDone = true;
+  const { listUnsupportedServers, saveUnsupportedServers } = await import('../../central/unsupportedServers.js');
+  if (listUnsupportedServers().total > 0) return { skipped: 'exists' };
+  const KINDS = [
+    { vendor: 'hpe', vendorLabel: 'HPE', manufacturer: 'HPE', product: 'Integrated Lights-Out 5', model: 'ProLiant DL380 Gen10 Plus', evidence: 'Oem.Hpe (서비스 루트)' },
+    { vendor: 'hpe', vendorLabel: 'HPE', manufacturer: 'HPE', product: 'Integrated Lights-Out 6', model: 'ProLiant DL360 Gen11', evidence: 'Oem.Hpe (서비스 루트)' },
+    { vendor: 'lenovo', vendorLabel: 'Lenovo', manufacturer: 'Lenovo', product: 'XClarity Controller', model: 'ThinkSystem SR650 V2', evidence: 'Oem.Lenovo (서비스 루트)' },
+    { vendor: 'supermicro', vendorLabel: 'Supermicro', manufacturer: 'Supermicro', product: 'BMC', model: 'SYS-2029U', evidence: 'Vendor: Supermicro' },
+  ];
+  let n = 0;
+  vcs.forEach((vc, vi) => {
+    const city = String(vc).replace(/^vc-/, '');
+    const list = Array.from({ length: 2 + (demoHash(vc) % 3) }, (_, i) => {
+      const k = KINDS[(vi + i) % KINDS.length];
+      const id = `unsup|${vc}|${i}`;
+      return { ...k, ip: demoIp(id, 10), hostName: `${k.vendor}-${city}-${String(i + 1).padStart(2, '0')}`,
+        // 첫 HPE 는 iLO 계정이 없어 로그인하지 않은 것으로(noCreds) — 인증 실패와 다른 안내가 보이게.
+        ...(k.vendor === 'hpe' && i === 0 ? { noCreds: true } : {}) };
+    });
+    saveUnsupportedServers({ agent: '', datacenterId: datacenterOfVcenter(vc), service: `scan-${city}`, trigger: 'demo' }, list);
+    n += list.length;
+  });
+  console.log(`[mock] 미지원 서버(비-Dell) 데모 ${n}대`);
+  return { added: n };
+}

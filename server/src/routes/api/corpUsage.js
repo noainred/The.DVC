@@ -23,6 +23,7 @@ import { buildCorpUsage } from '../../corpusage/build.js';
 import { loadBmUsageSettings, bmUsageEnabled } from '../../bmusage/settings.js';
 import { latestUsage } from '../../bmusage/db.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { isMockMode } from '../../mock/demo/flags.js';
 
 const toolsPerm = requirePerm('tools');
 const t = (v) => String(v ?? '').trim();
@@ -147,12 +148,14 @@ export function registerCorpUsage(api) {
         const es = e?.snap?.settings;
         if (e?.snap?.enabled === true && es) for (const id of es.corps || []) edgeOn.add(t(id));
       }
-      for (const c of out.corps) { c.collectOnEdge = edgeOn.has(c.vcenterId); c.collectOn = !!(s.corps || {})[c.vcenterId] || c.collectOnEdge; }
+      // v2.709: 데모(mock)는 설정 파일과 무관하게 전 법인을 수집한 것처럼 동작한다(bmusage poller 의 demoOn) — '켠 법인 없음' 안내를 내지 않는다.
+      const demo = isMockMode();
+      for (const c of out.corps) { c.collectOnEdge = edgeOn.has(c.vcenterId); c.collectOn = demo || !!(s.corps || {})[c.vcenterId] || c.collectOnEdge; }
       return {
         ok: true, at: Date.now(), ...out,
         // 귀속 규칙으로 채운 물리 서버 수(법인 축 — 범위 계정에는 개수만 준다. 서버 목록은 싣지 않는다).
         attributed: { filled: allowed ? null : attr.filled, conflicts: allowed ? null : (attr.conflicts || 0) },
-        settings: { enabled: bmUsageEnabled(), includeVirtualization: !!s.includeVirtualization, idracTelemetry: !!s.idracTelemetry, intervalMs: numOrNull(s.intervalMs) },
+        settings: { demo, enabled: bmUsageEnabled(), includeVirtualization: !!s.includeVirtualization, idracTelemetry: !!s.idracTelemetry, intervalMs: numOrNull(s.intervalMs) },
         // 엣지 보관분 요약 — 엣지는 법인 축으로 나눌 수 없어 범위 계정에는 개수만(v2.525 규약).
         edgeSnaps: allowed ? { count: edges.filter((e) => e?.snap).length }
           : { count: edges.filter((e) => e?.snap).length, list: edges.filter((e) => e?.snap).map((e) => ({ agent: t(e.agent), snapAt: numOrNull(e.snapAt), rows: (e.snap.rows || []).length })).slice(0, 64) },

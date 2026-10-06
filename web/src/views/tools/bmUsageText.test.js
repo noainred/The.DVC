@@ -486,3 +486,13 @@ describe('v2.605 hostsUnreadNote', () => {
     expect(e).toMatch(/다시 수집/);
   });
 });
+
+describe('v2.709 데모(mock) 판정', () => {
+  it('데모이고 행이 있으면 저장 설정(꺼짐·법인 없음)으로 판정하지 않는다', () => {
+    const d = { demo: true, enabled: false, settings: { corps: {} }, rows: [{ key: 'A' }] };
+    expect(emptyDiag(d).kind).toBe('demo');
+  });
+  it('데모여도 행이 없으면 예전 판정', () => {
+    expect(emptyDiag({ demo: true, enabled: false, settings: {}, rows: [] }).kind).toBe('off');
+  });
+});

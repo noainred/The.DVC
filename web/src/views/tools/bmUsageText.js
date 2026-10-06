@@ -83,6 +83,11 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
   const st = d.status || {};
   const counts = d.counts || {};
   const corps = Object.keys((d.settings || {}).corps || {}).length;
+  // v2.709: 데모(mock) 모드는 설정 파일을 바꾸지 않고 켜진 것처럼 수집한다(mock/demo/flags.js demoOn) — 저장된 설정(꺼짐·법인 없음)으로
+  //   판정하면 데이터가 있는 화면 위에 '꺼져 있습니다·법인을 고르지 않았습니다' 가 뜬다(v2.709 데모 재조사에서 발견).
+  if (d.demo && (d.rows || []).length) {
+    return { kind: 'demo', waiting: false, text: '**데모(mock) 데이터**입니다 — 저장된 설정과 무관하게 합성 서버 전체를 수집한 것처럼 보입니다. 실제 수집은 데이터 소스를 LIVE 로 바꾸고 아래 설정에서 법인을 켜야 시작됩니다.' };
+  }
   if (!d.enabled) {
     return { kind: 'off', waiting: false, text: '베어메탈 사용률 수집이 **꺼져 있습니다**. 아래 설정에서 켜고 수집할 법인을 고르세요 — 켜야 쌓이기 시작합니다.' };
   }
