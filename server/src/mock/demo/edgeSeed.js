@@ -229,7 +229,48 @@ async function ensureRmaSeed(cols, { now }) {
       }
     }
   } catch (err) { console.warn(`[mock] 데모 RMA 이력 백필 실패: ${err?.message || err}`); }
-  if (!_rmaTimer) { _rmaTimer = setInterval(() => { demoRmaTick().catch(() => null); demoCaptureDrain().catch(() => null); }, 5_000); _rmaTimer.unref?.(); }
+  await demoRmaTestResults(cols, { now }).catch((err) => console.warn(`[mock] 데모 RMA 점검 결과 실패: ${err?.message || err}`));
+  if (!_rmaTimer) {
+    let n = 0;
+    _rmaTimer = setInterval(() => {
+      demoRmaTick().catch(() => null); demoCaptureDrain().catch(() => null);
+      if ((++n % 12) === 0) demoRmaTestResults(cols, { now: Date.now() }).catch(() => null);   // 1분마다 점검 결과 갱신
+    }, 5_000);
+    _rmaTimer.unref?.();
+  }
+}
+
+/**
+ * v2.711: RMA › 점검 상태가 '결과가 없습니다' 였다 — 데모 엣지마다 점검 스케줄 4개를 (그 엣지 스케줄이 비어 있을 때만) 등록하고,
+ * 그 결과를 1분마다 반영한다(실제 엣지 회신과 같은 ingestResult 경로 · **알림은 보내지 않는다** — flags.js 규칙).
+ * 결과는 인메모리(latest)라 재시작마다 다시 채운다. 상태는 결정적이고 일부는 주의·실패로 둔다(화면의 상태 색이 보이게).
+ */
+const RMA_DEMO_TESTS = [
+  { name: '포탈 서비스', test: 'service', args: { unit: 'vmware-portal', expect: 'active' }, intervalSec: 60 },
+  { name: '루트 디스크 여유', test: 'disk-free', args: { path: '/', minFreePct: 15 }, intervalSec: 300 },
+  { name: '중앙 포탈 TCP 443', test: 'tcp', args: { host: 'portal.demo.invalid', port: 443 }, intervalSec: 60 },
+  { name: 'NTP 오프셋', test: 'ntp', args: { maxOffsetMs: 500 }, intervalSec: 300 },
+];
+export async function demoRmaTestResults(cols, { now = Date.now() } = {}) {
+  const sch = await import('../../rma/schedules.js');
+  const tr = await import('../../rma/testResults.js');
+  let n = 0;
+  for (const c of cols) {
+    const agent = c.name || c.id;
+    if (!sch.scheduleFor(agent)?.tests?.length) {
+      for (const t of RMA_DEMO_TESTS) { try { sch.upsertScheduleItem(agent, t); } catch { /* 형식 거부면 그 항목만 건너뛴다 */ } }
+    }
+    const e = demoEdgeOf(c.id) || demoEdgeOf(c.name) || DEMO_EDGES[0];
+    for (const t of sch.scheduleFor(agent)?.tests || []) {
+      const r = demoHash(`rmat|${e.id}|${t.test}`) % 10;
+      const status = t.test === 'disk-free' && r < 3 ? 'warn' : t.test === 'tcp' && e.degraded ? 'bad' : 'ok';
+      const value = t.test === 'disk-free' ? 9 + r * 4 : t.test === 'ntp' ? 12 + r * 7 : t.test === 'tcp' ? (e.rttMs || 20) : null;
+      const reply = status === 'bad' ? '연결 시간 초과(데모)' : t.test === 'disk-free' ? `여유 ${value}% (데모)` : t.test === 'ntp' ? `오프셋 ${value}ms (데모)` : '정상(데모)';
+      await tr.ingestResult(agent, { id: t.id, test: t.test, name: t.name, status, reply, value, at: now - (demoHash(`rmaa|${e.id}|${t.id}`) % 50) * 1000, instance: 'rma-1' }, { now, alert: false, name: t.name });
+      n++;
+    }
+  }
+  return { results: n };
 }
 
 let _credSeeded = false;
