@@ -16,6 +16,10 @@ const HOSTS = [
     switches: [{ name: 'vs0', kind: 'vss', uplinks: ['vmnic0'], pgs: 1 }, { name: 'vs1', kind: 'vss', uplinks: [], pgs: 0 },
       { name: 'ds', kind: 'dvs', uplinks: ['vmnic1', 'vmnic2'], pgs: null }, { name: 'vsi', kind: 'vss', uplinks: [], pgs: 2 }],
     pgs: [{ name: 'P', vlan: 5, sw: 'vs0', promisc: true }, { name: 'Q', vlan: 6, sw: 'vs0', promisc: null }], pgsTotal: 2 } } },
+  // v2.706(C4): 크래시 대비 — 휘발성 스크래치·로그 소실/휘발·진단 파티션 없음·PSOD 자동 재부팅 끔 · 모르는 값은 판정하지 않는다.
+  { name: 'g', hcfg: { scratch: '/tmp/scratch', logDir: '[] /scratch/log', syslogHost: '', diagPartition: false, bsodTimeout: 0 } },
+  { name: 'h', hcfg: { scratch: '', logDir: '/tmp/log', syslogHost: 'udp://x:514', diagPartition: true, bsodTimeout: 120 } },
+  { name: 'i', hcfg: { scratch: null, logDir: '[] /scratch/log', syslogHost: '', diagPartition: null, bsodTimeout: null } },
 ];
 
 describe('hostCfgText', () => {
@@ -24,6 +28,10 @@ describe('hostCfgText', () => {
     expect(Object.keys(web.HOST_CFG_TEXT).sort()).toEqual(Object.keys(srv.HOST_CFG_CODES).sort());
     expect(Object.keys(web.DRIFT_LABEL).sort()).toEqual(Object.keys(srv.DRIFT_FIELDS).sort());
     expect(web.CERT_WARN_DAYS).toBe(srv.CERT_WARN_DAYS);
+    for (const [sc, ld] of [['/tmp/scratch', '[] /scratch/log'], ['', '/tmp/x'], [null, '[] /scratch/log'], ['/vmfs/volumes/a/.locker', '[] /scratch/log'], ['/x', '']]) {
+      expect(web.scratchVolatile(sc)).toBe(srv.scratchVolatile(sc));
+      expect(web.logDirVolatile(ld, sc)).toBe(srv.logDirVolatile(ld, sc));
+    }
   });
   it('판정 — 서버와 같은 입력에서 같은 결과', () => {
     for (const h of HOSTS) expect(web.hostCfgFindings(h, NOW)).toEqual(srv.hostCfgFindings(h, NOW));

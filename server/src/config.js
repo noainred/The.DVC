@@ -126,6 +126,13 @@ export const config = {
   // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 클러스터는 수가 적고 구성은 드물게 바뀐다(기본 30분 · 주기당 50개 · 응답이 커서 5개씩).
   clusterCfgScan: process.env.CLUSTER_CFG_SCAN !== 'false',
   clusterCfgRefreshMs: clampIntervalMs(numEnv(process.env.CLUSTER_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
+  // v2.706(C2·C3): CPU 경합(ready·co-stop·latency)·가상 디스크/데이터스토어 지연 — vCenter **실시간(20초) 통계의 최근 창**을
+  // 켜진 VM·연결된 호스트 묶음으로 한 번에 읽는다(contention/collect.js). 기본 15분 주기 · 주기당 400 VM · 창 15표본(5분).
+  // 실시간 통계는 ESXi 가 갖고 있어 vCenter 가 호스트에 묻는다 — 부담이 걱정되면 CONTENTION_SCAN=false 로 끈다.
+  contentionScan: process.env.CONTENTION_SCAN !== 'false',
+  contentionRefreshMs: clampIntervalMs(numEnv(process.env.CONTENTION_REFRESH_MS, 900_000), 900_000, 300_000),
+  contentionPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.CONTENTION_PER_CYCLE, 400)) || 400)),
+  contentionSamples: Math.max(3, Math.min(180, Math.trunc(numEnv(process.env.CONTENTION_SAMPLES, 15)) || 15)),
   // v2.705(B1): 인벤토리 속성을 WaitForUpdatesEx 로 '바뀐 것만' 받는다 — 기본 꺼짐. 켜면 vCenter 마다 오래 사는 세션이 하나 더 열린다.
   vcWaitUpdates: process.env.VC_WAIT_UPDATES === 'true',
   vcWaitUpdatesFullMs: clampIntervalMs(numEnv(process.env.VC_WAIT_UPDATES_FULL_MS, 21_600_000), 21_600_000, 600_000),

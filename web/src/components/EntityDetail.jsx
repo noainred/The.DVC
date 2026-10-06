@@ -36,6 +36,7 @@ import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText } from '../views/vmchanges/vmChangesText.js'; // v2.702
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
+import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
 
 function DRow({ label, children, full = false, nowrap = false }) {
@@ -405,6 +406,67 @@ function VmCfgSection({ vm }) {
   );
 }
 
+/**
+ * v2.706(C2·C3): CPU 경합·디스크 지연 — 수집 서버가 실시간 통계(최근 창)를 나눠 읽은 값(vm.perfc·host.perfc).
+ * 화면이 vCenter 에 따로 묻지 않는다(왕복 0). 값이 없으면 '측정하지 않음' 이지 '경합 없음' 이 아니다.
+ */
+function PerfcSection({ item, isVm }) {
+  const p = item?.perfc;
+  const off = isVm && item?.powerState && item.powerState !== 'POWERED_ON';
+  const findings = isVm ? vmContentionFindings(item) : [];
+  const ago = p && Number.isFinite(p.at) ? Math.max(0, Math.round((Date.now() - p.at) / 60_000)) : null;
+  return (
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+        CPU 경합·디스크 지연{p && ago != null ? ` — ${ago}분 전 측정` : ''}{findings.length ? ` · 확인할 항목 ${findings.length}` : ''}
+      </div>
+      {off ? <div className="muted" style={{ fontSize: 12 }}>꺼진 VM 은 측정하지 않습니다.</div>
+        : !p ? <div className="muted" style={{ fontSize: 12 }}>아직 측정하지 않았습니다 — 수집 서버가 주기마다 일부씩 읽습니다('경합 없음' 이 아닙니다).</div>
+        : (
+          <>
+            {findings.length > 0 && (
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', display: 'grid', gap: 6 }}>
+                {findings.map((f) => {
+                  const t = CONTENTION_TEXT[f.code] || { title: f.code, fix: '' };
+                  const [bl, bc] = SEV_BADGE[f.sev] || SEV_BADGE.info;
+                  return (
+                    <li key={f.code} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                      <span className={`badge ${bc}`} style={{ flex: 'none', whiteSpace: 'nowrap' }}>{bl}</span>
+                      <span style={{ minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>
+                        <b>{t.title}</b>
+                        <span className="muted" style={{ display: 'block', fontSize: 12 }}>{t.fix}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
+              {isVm ? (
+                <>
+                  <DRow label="CPU 대기(Ready)">{avgMaxText(p.readyPct, '%')}</DRow>
+                  <DRow label="Co-stop">{avgMaxText(p.costopPct, '%')}</DRow>
+                  <DRow label="CPU 지연(latency)">{avgMaxText(p.latencyPct, '%')}</DRow>
+                  <DRow label="디스크 읽기 지연">{avgMaxText(p.readMs, ' ms')}</DRow>
+                  <DRow label="디스크 쓰기 지연">{avgMaxText(p.writeMs, ' ms')}</DRow>
+                  {p.disk ? <DRow label="가장 느린 디스크">{p.disk}</DRow> : null}
+                </>
+              ) : (
+                <>
+                  <DRow label="최대 디스크 지연">{avgMaxText(p.diskMaxMs, ' ms')}</DRow>
+                  <DRow label="데이터스토어(측정)">{Array.isArray(p.ds) ? p.ds.length : '—'}</DRow>
+                </>
+              )}
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              평균(최대) · Ready·Co-stop 은 vCPU 당 % · 판정은 평균으로 합니다{isVm ? '' : ` · 디스크 지연 판정 기준 ${msText(20)}`} · 전체 목록은 특수 기능 'CPU 경합·디스크 지연' 에서 봅니다.
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
@@ -499,6 +561,7 @@ export function EntityDetail({ type, item, onClose }) {
       </div>
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
+      {(type === 'vm' || type === 'host') && <PerfcSection item={item} isVm={type === 'vm'} />}
       {(type === 'vm' || type === 'host') && <ClusterCfgSection item={item} isVm={type === 'vm'} />}
       {type === 'vm' && <VmTagsSection vm={item} />}
       {type === 'vm' && <VmChangesSection vm={item} />}

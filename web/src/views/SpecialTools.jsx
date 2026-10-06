@@ -55,6 +55,8 @@ const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // 
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)
 const ClusterCheckTool = React.lazy(() => import('./tools/ClusterCheckTool.jsx')); // 클러스터 HA·DRS 점검(v2.701)
 const VmChangesTool = React.lazy(() => import('./tools/VmChangesTool.jsx')); // VM 이동·구성 변경 이력(v2.702)
+const VmLifecycleTool = React.lazy(() => import('./tools/VmLifecycleTool.jsx')); // VM 생성·삭제 이력(v2.706 C5)
+const ContentionTool = React.lazy(() => import('./tools/ContentionTool.jsx')); // CPU 경합·디스크 지연(v2.706 C2·C3)
 const CoreLicenseTool = React.lazy(() => import('./tools/CoreLicenseTool.jsx')); // 코어 라이선스 산정(v2.703)
 const VmTagsTool = React.lazy(() => import('./tools/VmTagsTool.jsx')); // 태그·사용자 지정 속성 점검(v2.703)
 const StoragePathsTool = React.lazy(() => import('./tools/StoragePathsTool.jsx')); // 데이터스토어·경로 점검(v2.700)
@@ -640,6 +642,8 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'host-hygiene' && <HostHygieneTool scope={scope} />}
       {tool === 'cluster-check' && <ClusterCheckTool scope={scope} />}
       {tool === 'vm-changes' && <VmChangesTool scope={scope} />}
+      {tool === 'vm-lifecycle' && <VmLifecycleTool scope={scope} />}
+      {tool === 'contention' && <ContentionTool scope={scope} />}
       {tool === 'core-license' && <CoreLicenseTool scope={scope} />}
       {tool === 'vm-tags' && <VmTagsTool scope={scope} />}
       {tool === 'storage-paths' && <StoragePathsTool scope={scope} />}

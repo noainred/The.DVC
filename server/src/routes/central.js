@@ -20,6 +20,7 @@ import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
+import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // v2.706(C2·C3)
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
@@ -634,7 +635,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
 const INV_NUM_KEYS = ['vmfsMajor', 'cpuCores', 'cpuSockets', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
   'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'gpuMemUsedPct', 'gpuMemUsedMB', 'gpuTempC', 'uptimeSec',
   'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
-  'snapshotOldestTs', 'snapshotNewestTs', 'orphanDeltaGB', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
+  'snapshotOldestTs', 'snapshotNewestTs', 'orphanDeltaGB', 'bootTime', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
 /**
  * 인벤토리 조각 원소 정리(v2.599 CEN-2599-01·02·03).
  *  - 평범한 객체만 받는다 — `hosts:[null]` 하나로 store.refresh 가 매 주기 throw 해 **전 함대 스냅샷이 멈췄다**.
@@ -695,6 +696,12 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     if (Object.hasOwn(o, 'hcfg') && o.hcfg != null) { const v = sanitizeHostCfg(o.hcfg); if (v == null) dropped.coerced += 1; o.hcfg = v; }
     // v2.700(A17): 데이터스토어 운영 속성(dscfg/parse.js) — 아는 필드만.
     if (Object.hasOwn(o, 'dcfg') && o.dcfg != null) { const v = sanitizeDsCfg(o.dcfg); if (v == null) dropped.coerced += 1; o.dcfg = v; }
+    // v2.706(C2·C3): CPU 경합·디스크 지연(contention/parse.js) — VM·호스트 모양이 달라 둘 다 시도하지 않고 키로 가른다.
+    if (Object.hasOwn(o, 'perfc') && o.perfc != null) {
+      const v = Object.hasOwn(o.perfc, 'diskMaxMs') || Array.isArray(o.perfc?.ds) ? sanitizeHostPerfc(o.perfc) : sanitizeVmPerfc(o.perfc);
+      if (v == null) dropped.coerced += 1; o.perfc = v;
+    }
+    if (Object.hasOwn(o, 'dsUuid') && o.dsUuid != null && !(typeof o.dsUuid === 'string' && /^[\w.:-]{1,64}$/.test(o.dsUuid))) { o.dsUuid = null; dropped.coerced += 1; }
     out.push(o);
   }
   return out;

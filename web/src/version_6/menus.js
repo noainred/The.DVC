@@ -57,7 +57,7 @@ export const MENUS = Object.freeze([
   { id: 'server', code: 'SERVERS', label: '서버', desc: '물리 서버 · 가상화 호스트 · 가상화 서버(VM)를 나눠서 본다', groups: [
     { seg: 'phys', name: '물리 서버', items: ['fleet', 'serveranalysis', 'idrac-trend', 'bm-usage', 'corp-usage', 'power-total', 'gpu', 'esxitemp', 'roomtemp', 'pdu', 'powermap', 'nic-speed', 'nic-models'] },
     { seg: 'host', name: '가상화 호스트', items: ['hosts', 'esxi', 'host-hygiene', 'cluster-check', 'hba'] },
-    { seg: 'vm', name: '가상화 서버', items: ['vms', 'vmfinder', 'guestos', 'real-os', 'vmtools', 'curuser', 'vm-track', 'vm-changes', 'vm-tags'] }] },
+    { seg: 'vm', name: '가상화 서버', items: ['vms', 'vmfinder', 'guestos', 'real-os', 'vmtools', 'curuser', 'vm-track', 'vm-changes', 'vm-lifecycle', 'contention', 'vm-tags'] }] },
   { id: 'net', code: 'NETWORK', label: '네트워크', desc: '포트그룹·IP·NSX·스위치 — 인벤토리와 경로 점검', groups: [
     { name: '인벤토리', items: ['networks', 'ipam', 'vm-dns', 'nsx', 'cvp', 'dupip'] },
     { name: '점검 · 분석', items: ['net-check', 'net-traffic', 'net-issues'] },

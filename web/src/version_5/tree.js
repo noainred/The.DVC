@@ -41,7 +41,7 @@ export const GROUPS = Object.freeze([
       sub('장비'), tool('storage-mon'), tool('san-switch'), tool('pdu'), tool('hardware'), tool('hba'), tool('gpu'),
       tool('nic-speed'), tool('nic-models'),
       sub('검색'), tool('aisearch'), tool('explore'), tool('vmfinder'), tool('deepsearch'), tool('serial-lookup'),
-      sub('버전 · 구성'), tool('guestos'), tool('real-os'), tool('solutions'), tool('esxi'), tool('host-hygiene'), tool('cluster-check'), tool('vcversion'),
+      sub('버전 · 구성'), tool('guestos'), tool('real-os'), tool('solutions'), tool('esxi'), tool('host-hygiene'), tool('cluster-check'), tool('contention'), tool('vcversion'),
     ],
   },
   {
@@ -59,7 +59,7 @@ export const GROUPS = Object.freeze([
   {
     id: 'protect', section: 'OPERATIONS', label: '보호 · 규정', icon: 'shield',
     items: [tool('vmtools'), tool('snapshots'), tool('snapshot-age'), tool('vm-hygiene'), tool('cert-expiry'), tool('compliance-report'),
-      tool('change-history'), tool('vm-changes'), tool('vm-tags'), tool('unprotected-vms'), tool('licenses'), tool('license-expiry'), tool('core-license'), tool('vmware-backup')],
+      tool('change-history'), tool('vm-changes'), tool('vm-lifecycle'), tool('vm-tags'), tool('unprotected-vms'), tool('licenses'), tool('license-expiry'), tool('core-license'), tool('vmware-backup')],
   },
   {
     id: 'auto', section: 'OPERATIONS', label: '자동화', icon: 'bolt',

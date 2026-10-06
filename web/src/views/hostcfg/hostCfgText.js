@@ -21,9 +21,25 @@ export const HOST_CFG_CODES = Object.freeze({
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
+  // v2.706(C4) 크래시 대비
+  'logs-lost': 'crit',
+  'logs-volatile': 'warn',
+  'scratch-volatile': 'warn',
+  'coredump-partition-none': 'info',
+  'psod-no-reboot': 'info',
   drift: 'info',
 });
 export const CERT_WARN_DAYS = 30;
+
+/** v2.706(C4) — 서버 hostcfg/parse.js 와 같은 판정(번들 경계라 두 벌 — 테스트가 대조). */
+export const scratchVolatile = (scratch) => typeof scratch === 'string' && (scratch.trim() === '' || /^\/tmp(\/|$)/.test(scratch.trim()));
+export function logDirVolatile(logDir, scratch) {
+  if (typeof logDir !== 'string' || !logDir.trim()) return null;
+  const d = logDir.trim();
+  if (/^\/tmp(\/|$)/.test(d)) return true;
+  if (/(^|\s|\])\/?scratch(\/|$)/.test(d)) return scratch == null ? null : scratchVolatile(scratch);
+  return false;
+}
 
 export const HOST_CFG_TEXT = Object.freeze({
   'cert-expired': { title: '호스트 인증서가 만료됐습니다', fix: 'vCenter 에서 인증서를 갱신하세요(호스트 › 구성 › 인증서) · 만료되면 vCenter 연결·HA 가 실패할 수 있습니다' },
@@ -46,6 +62,11 @@ export const HOST_CFG_TEXT = Object.freeze({
   'ssh-autostart': { title: 'SSH 가 호스트와 함께 시작됩니다', fix: '시작 정책을 수동으로 바꾸세요' },
   'lockdown-off': { title: '잠금 모드(lockdown)가 꺼져 있습니다', fix: '참고 · 운영 정책에 따라 정상 모드 이상을 권고합니다' },
   'shell-timeout-off': { title: 'ESXi Shell 시간 제한이 없습니다', fix: 'UserVars.ESXiShellTimeOut 을 설정하세요(CIS 권고 900초 이하)' },
+  'logs-lost': { title: '크래시 직전 로그가 어디에도 남지 않습니다', fix: '로컬 로그가 램디스크(재부팅 때 사라짐)에 있고 원격 syslog 도 없습니다 · Syslog.global.logHost 를 지정하거나 영구 스크래치 위치를 설정하세요' },
+  'logs-volatile': { title: '로컬 로그가 재부팅 때 사라집니다', fix: '원격 syslog 는 있어 그쪽에는 남습니다 · 영구 스크래치(ScratchConfig.ConfiguredScratchLocation)를 지정하면 로컬에도 남습니다' },
+  'scratch-volatile': { title: '스크래치가 램디스크에 있습니다', fix: '영구 저장소가 없어 /tmp/scratch 를 씁니다 · 지원 번들·로그가 재부팅 때 사라집니다 · 데이터스토어의 폴더를 스크래치로 지정하세요(재부팅 필요)' },
+  'coredump-partition-none': { title: '진단(코어 덤프) 파티션이 없습니다', fix: '참고 · ESXi 7.0 이상은 코어 덤프를 파일로 둘 수 있는데 그 설정은 vSphere API 로 확인하지 못합니다 · 호스트에서 esxcli system coredump file list 로 확인하세요' },
+  'psod-no-reboot': { title: 'PSOD 뒤 자동으로 재부팅하지 않습니다', fix: '참고 · Misc.BlueScreenTimeout 이 0 이면 화면을 남겨 원인을 볼 수 있지만, 사람이 재부팅할 때까지 호스트가 멈춰 있습니다 · 운영 정책에 맞게 정하세요' },
   drift: { title: '같은 클러스터의 다른 호스트와 구성이 다릅니다', fix: '클러스터 안에서는 빌드·NTP·DNS·syslog·허용 수준을 맞추세요' },
 });
 export const DRIFT_LABEL = Object.freeze({ build: 'ESXi 빌드', ntp: 'NTP 서버', dns: 'DNS 서버', syslog: 'syslog 대상', lockdown: '잠금 모드', acceptance: '허용 수준', sshPolicy: 'SSH 시작 정책', sharedLuns: '공유 LUN 수', portgroups: '표준 포트그룹(이름:VLAN)' });
@@ -77,6 +98,11 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mob === true) add('mob-enabled');
   if (h.lockdown === 'disabled') add('lockdown-off');
   if (h.shellTimeout === 0) add('shell-timeout-off');
+  if (scratchVolatile(h.scratch)) add('scratch-volatile', { scratch: h.scratch });
+  const lv = logDirVolatile(h.logDir, h.scratch);
+  if (lv === true) add(h.syslogHost === '' ? 'logs-lost' : 'logs-volatile', { logDir: h.logDir, remote: h.syslogHost || null });
+  if (h.diagPartition === false) add('coredump-partition-none');
+  if (h.bsodTimeout === 0) add('psod-no-reboot');
   if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
   if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
   if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
@@ -109,6 +135,8 @@ export function findingDetail(f) {
     case 'net-single-uplink': case 'net-no-uplink': return (x.switches || []).join(', ');
     case 'net-uplink-down': return (x.list || []).join(', ');
     case 'net-promisc': return (x.names || []).join(', ');
+    case 'scratch-volatile': return x.scratch ? `스크래치 ${x.scratch}` : '스크래치 위치 없음';
+    case 'logs-lost': case 'logs-volatile': return `로그 위치 ${x.logDir || '—'}${x.remote ? ` · 원격 ${x.remote}` : ' · 원격 syslog 없음'}`;
     case 'drift': return `${DRIFT_LABEL[x.field] || x.field}: ${x.value}${x.majority != null ? ` (다수 ${x.majority})` : ' (다수값 없음)'}`;
     default: return '';
   }
@@ -159,6 +187,7 @@ export function hostCfgRows(host, now = Date.now()) {
   if (!h) return { state: 'none', rows: [], note: '이 호스트의 구성 속성을 아직 읽지 않았습니다 — 수집 서버가 오래된 호스트부터 나눠 읽습니다.' };
   const cert = Number.isFinite(h.certNotAfter) ? `${new Date(h.certNotAfter).toLocaleDateString('ko-KR')} (${Math.floor((h.certNotAfter - now) / DAY)}일)` : '—';
   const rows = [
+    { label: '마지막 부팅', value: Number.isFinite(host.bootTime) ? `${new Date(host.bootTime).toLocaleString('ko-KR')} (${Math.max(0, Math.floor((now - host.bootTime) / DAY))}일 전)` : '—' },
     { label: '재부팅 필요', value: yn(h.rebootRequired) },
     { label: '인증서 만료', value: cert, title: h.certSubject || '' },
     { label: '잠금 모드', value: LOCK[h.lockdown] || '—' },
@@ -171,6 +200,10 @@ export function hostCfgRows(host, now = Date.now()) {
     { label: '로그인 실패 잠금', value: h.lockFailures == null ? '—' : h.lockFailures === 0 ? '꺼짐' : `${h.lockFailures}회` },
     { label: 'Shell 시간 제한', value: h.shellTimeout == null ? '—' : h.shellTimeout === 0 ? '없음' : `${h.shellTimeout}초` },
     { label: 'MOB', value: yn(h.mob, '켜짐', '꺼짐') },
+    { label: '스크래치 위치', value: h.scratch == null ? '—' : h.scratch || '(없음)', title: scratchVolatile(h.scratch) ? '램디스크 — 재부팅 때 사라집니다' : '' },
+    { label: '로컬 로그 위치', value: h.logDir == null ? '—' : h.logDir || '(기본값)' },
+    { label: '진단 파티션', value: yn(h.diagPartition, '있음', '없음(7.0+ 는 코어 덤프 파일일 수 있음)') },
+    { label: 'PSOD 뒤 자동 재부팅', value: h.bsodTimeout == null ? '—' : h.bsodTimeout === 0 ? '안 함(화면 유지)' : `${h.bsodTimeout}초 뒤` },
     { label: '스토리지 경로', value: h.mp ? `LUN ${h.mp.luns}(공유 ${h.mp.shared}) · 경로 ${h.mp.paths} · 죽은 경로 ${h.mp.dead}` : '—' },
     { label: 'vSAN', value: !h.vsan ? '—' : h.vsan.enabled === true ? `참여 · 멤버 ${h.vsan.members ?? '—'} · 디스크 문제 ${h.vsan.diskIssues ?? '—'}` : h.vsan.enabled === false ? '참여 안 함' : '—' },
     { label: '가상 스위치', value: netSwitchText(h.net) },
@@ -180,3 +213,11 @@ export function hostCfgRows(host, now = Date.now()) {
   const note = `${age == null ? '' : age < 60 ? `${age}분 전에 읽은 값` : `${Math.round(age / 60)}시간 전에 읽은 값`} · 수집 서버가 주기적으로 다시 읽습니다${host.connectionState === 'DISCONNECTED' ? ' · 연결이 끊겨 판정하지 않습니다' : ''}.`;
   return { state: 'ok', rows, note };
 }
+
+// v2.706(C4) 최근 재부팅 — 서버 hostcfg/reboots.js REBOOT_KINDS 와 키 1:1(테스트 대조). 원인을 단정하지 않는다.
+export const REBOOT_KIND = Object.freeze({
+  unexpected: { label: '예기치 않은 재부팅 후보', tone: 'red', note: '유지보수 모드 없이, 부팅 직전 vCenter 와 연결이 끊겼습니다 — PSOD·정전·전원 문제·수동 강제 재부팅 후보입니다. 호스트의 vmkernel 로그·코어 덤프·BMC(iDRAC) 이벤트 로그를 확인하세요.' },
+  unknown: { label: '원인 미상', tone: 'amber', note: '그 시간대 이벤트는 받았는데 유지보수 모드 진입도 연결 끊김도 없습니다 — 짧은 끊김·직접 재부팅일 수 있어 판정하지 않습니다.' },
+  'no-events': { label: '판정 불가', tone: 'gray', note: '이 포탈이 그 시간대 vCenter 이벤트를 받지 못했습니다(수집 꺼짐·보관 기간 밖·수집 시작 전).' },
+  planned: { label: '계획된 재부팅', tone: 'green', note: '부팅 전 24시간 안에 유지보수 모드 진입 또는 vCenter 의 종료 요청이 있었습니다.' },
+});

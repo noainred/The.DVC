@@ -33,15 +33,29 @@ const MOCK_TYPES = [
   ['VmReconfiguredEvent', 'info', (u, e) => `Reconfigured ${e}`],
   ['DrsVmMigratedEvent', 'info', (u, e) => `DRS migrated ${e}`],          // v2.702(A7)
   ['PermissionAddedEvent', 'info', (u, e) => `Permission created for ${e}`], // v2.702(A8)
+  ['VmCreatedEvent', 'info', (u, e) => `Created virtual machine ${e}`],      // v2.706(C5)
+  ['VmClonedEvent', 'info', (u, e) => `Clone of VM completed: ${e}`],
+  ['VmRemovedEvent', 'info', (u, e) => `Removed ${e} on host`],
+  ['VmDeployedEvent', 'info', (u, e) => `Template deployed to ${e}`],
+  ['EnteredMaintenanceModeEvent', 'info', (u, e) => `Host ${e} in maintenance mode`], // v2.706(C4)
+  ['VmGuestRebootEvent', 'info', (u, e) => `Guest OS reboot for ${e}`],          // v2.707(C6) 대비
+  ['VmRestartedOnAlternateHostEvent', 'warning', (u, e) => `${e} was restarted on another host by vSphere HA`],
 ];
 // v2.702(A7·A8): 합성 이벤트의 상세 — 실수집(vmchanges/eventDetail.js)과 같은 모양.
-const VM_EVENT = new Set(['VmPoweredOnEvent', 'VmPoweredOffEvent', 'VmMigratedEvent', 'VmReconfiguredEvent', 'DrsVmMigratedEvent']);
+const VM_EVENT = new Set(['VmPoweredOnEvent', 'VmPoweredOffEvent', 'VmMigratedEvent', 'VmReconfiguredEvent', 'DrsVmMigratedEvent',
+  'VmCreatedEvent', 'VmClonedEvent', 'VmDeployedEvent', 'VmGuestRebootEvent', 'VmRestartedOnAlternateHostEvent']);
+const HOST_EVENT = new Set(['EnteredMaintenanceModeEvent', 'HostConnectionLostEvent']);
 function synthDetail(type, i, hosts) {
   const h = (k) => hosts.length ? hosts[(i + k) % hosts.length].name : null;
   if (type === 'VmMigratedEvent') return i % 3 === 0 ? { from: h(0), to: h(0), fromDs: `ds-${i % 4}`, toDs: `ds-${(i + 1) % 4}`, kind: 'svmotion' } : { from: h(0), to: h(1), fromDs: 'ds-0', toDs: 'ds-0', kind: 'vmotion' };
   if (type === 'DrsVmMigratedEvent') return { from: h(1), to: h(2), fromDs: 'ds-0', toDs: 'ds-0', kind: 'drs' };
   if (type === 'VmReconfiguredEvent') return i % 2 ? { modified: `config.hardware.numCPU: 2 -> 4; config.hardware.memoryMB: 8192 -> 16384`, fields: ['numCPUs', 'memoryMB'], numCpu: 4, memoryMB: 16384 } : { added: 'config.hardware.device(2001): (key = 2001, deviceInfo = (label = "Hard disk 2"))', fields: ['deviceChange'], devices: ['add VirtualDisk'] };
   if (type === 'PermissionAddedEvent') return { principal: `CORP\\ops${i % 3}`, role: i % 2 ? 'Admin' : 'ReadOnly', group: null, propagate: true };
+  // v2.706(C5): 생성·삭제 — 실수집(lifeDetail)과 같은 모양.
+  if (type === 'VmCreatedEvent') return { kind: 'create', host: h(0), ds: `ds-${i % 4}` };
+  if (type === 'VmClonedEvent') return { kind: 'clone', host: h(1), ds: `ds-${i % 4}`, source: `template-src-${i % 3}` };
+  if (type === 'VmDeployedEvent') return { kind: 'deploy', host: h(2), ds: `ds-${i % 4}`, source: `tpl-rhel9-${i % 2}` };
+  if (type === 'VmRemovedEvent') return { kind: 'remove', host: h(0) };
   return null;
 }
 // mock: sinceTs~now 사이에 분산된 합성 이벤트 N개.
@@ -57,10 +71,22 @@ function synthEvents(vcId, sinceTs, n) {
   for (let i = 0; i < n; i++) {
     const [type, sev, msg] = MOCK_TYPES[(i + vcId.length) % MOCK_TYPES.length];
     // VM 이벤트는 VM 이름으로(이동·구성 변경 화면이 VM 으로 묶는다) — 같은 VM 이 여러 번 옮겨 다니게 앞쪽 VM 에 몰아 준다.
-    const entity = VM_EVENT.has(type) && vms.length ? vms[(i * 3 + vcId.length) % Math.min(vms.length, 12)].name : names[(i * 7 + vcId.length) % names.length];
+    const entity = type === 'VmRemovedEvent' ? `retired-vm-${(i * 5 + vcId.length) % 40}`   // 삭제된 VM 은 인벤토리에 없다
+      : HOST_EVENT.has(type) && hosts.length ? hosts[(i + vcId.length) % hosts.length].name
+        : VM_EVENT.has(type) && vms.length ? vms[(i * 3 + vcId.length) % Math.min(vms.length, 12)].name : names[(i * 7 + vcId.length) % names.length];
     const ts = sinceTs + Math.floor(((i + 1) / (n + 1)) * span);
     const d = synthDetail(type, i, hosts);
-    out.push({ key: `mock-${vcId}-${ts}-${i}`, ts, type, severity: sev, user: 'administrator@vsphere.local', entity, message: msg('administrator@vsphere.local', entity), detail: d ? JSON.stringify(d) : null });
+    const user = /^Vm(Created|Cloned|Deployed|Removed)Event$/.test(type) ? ['administrator@vsphere.local', 'CORP\\ops1', 'svc-automation@vsphere.local'][i % 3] : 'administrator@vsphere.local';
+    out.push({ key: `mock-${vcId}-${ts}-${i}`, ts, type, severity: sev, user, entity, message: msg(user, entity), detail: d ? JSON.stringify(d) : null });
+  }
+  // v2.706(C4): 최근 재부팅한 호스트의 절반은 부팅 직전 연결 끊김(예기치 않은 재부팅 갈래), 나머지 일부는 유지보수 모드 진입(계획) —
+  //   실수집과 같은 종류·시각 관계로 합성한다. 그 시각이 이번 수집 구간 안일 때만.
+  for (const [k, h] of hosts.entries()) {
+    if (!Number.isFinite(h.bootTime)) continue;
+    const ts = h.bootTime - (k % 2 ? 10 * 60_000 : 3 * 3_600_000);
+    if (ts < sinceTs || ts > now) continue;
+    const type = k % 2 ? 'HostConnectionLostEvent' : 'EnteredMaintenanceModeEvent';
+    out.push({ key: `mock-${vcId}-boot-${h.name}-${ts}`, ts, type, severity: type === 'HostConnectionLostEvent' ? 'error' : 'info', user: type === 'HostConnectionLostEvent' ? '' : 'administrator@vsphere.local', entity: h.name, message: `${type === 'HostConnectionLostEvent' ? 'Lost connection to host' : 'Host in maintenance mode'} ${h.name}`, detail: null });
   }
   return out;
 }

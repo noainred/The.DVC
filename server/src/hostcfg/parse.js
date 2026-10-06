@@ -16,6 +16,7 @@ import { xmlUnescape } from '../vcenter/soapParse.js';
 export const HOST_CFG_PATHS = Object.freeze([
   'config.service', 'config.dateTimeInfo', 'config.network.dnsConfig', 'summary.rebootRequired',
   'configManager.certificateManager', 'configManager.advancedOption', 'configManager.imageConfigManager',
+  'configManager.diagnosticSystem',   // v2.706(C4): 진단(코어 덤프) 파티션 — HostDiagnosticSystem.activePartition 을 따로 읽는다
 ]);
 export const HOST_LOCKDOWN_PATH = 'config.lockdownMode';
 /** v2.700(A19): vSAN(5.5+) — 호스트가 vSAN 에 참여하는지 · 디스크 문제 · 클러스터 멤버 수. 헬스 서비스(vsanHealth) API 는 아니다. */
@@ -27,6 +28,8 @@ export const HOST_NET_PATHS = Object.freeze(['config.network.vswitch', 'config.n
 /** 고급 설정 — 호스트당 이름마다 QueryOptions 1회. 이름이 없는 버전은 InvalidName → 그 값만 null. */
 export const ADV_OPTIONS = Object.freeze([
   'Syslog.global.logHost', 'Security.AccountLockFailures', 'UserVars.ESXiShellTimeOut', 'Config.HostAgent.plugins.solo.enableMob',
+  // v2.706(C4) 크래시 대비 — 스크래치 위치(램디스크면 재부팅 때 로그가 사라진다) · 로컬 로그 위치 · PSOD 뒤 자동 재부팅 대기(0 = 화면에 머문다)
+  'ScratchConfig.CurrentScratchLocation', 'Syslog.global.logDir', 'Misc.BlueScreenTimeout',
 ]);
 
 const cap = (s, n = 256) => {
@@ -90,6 +93,7 @@ export function parseHostCfgProps(props = {}, at = Date.now()) {
     dnsServers: dns == null ? null : tagsAll(dns, 'address'),
     syslogHost: null, lockFailures: null, shellTimeout: null, mob: null, acceptance: null,
     certNotAfter: null, certSubject: null,
+    scratch: null, logDir: null, bsodTimeout: null, diagPartition: null,   // v2.706(C4)
     mp: Object.hasOwn(p, HOST_MP_PATH) ? parseMultipath(p[HOST_MP_PATH]) : null,
     net: HOST_NET_PATHS.some((k) => Object.hasOwn(p, k)) ? parseNetwork(p[HOST_NET_PATHS[0]], p[HOST_NET_PATHS[1]], p[HOST_NET_PATHS[2]]) : null,
     vsan: (Object.hasOwn(p, HOST_VSAN_PATHS[0]) || Object.hasOwn(p, HOST_VSAN_PATHS[1])) ? parseVsan(p[HOST_VSAN_PATHS[0]], p[HOST_VSAN_PATHS[1]]) : null,
@@ -229,6 +233,23 @@ export function applyAdvanced(h, name, raw) {
   else if (name === 'Security.AccountLockFailures') h.lockFailures = intOf(raw);
   else if (name === 'UserVars.ESXiShellTimeOut') h.shellTimeout = intOf(raw);
   else if (name === 'Config.HostAgent.plugins.solo.enableMob') h.mob = boolOf(String(raw).trim().toLowerCase());
+  else if (name === 'ScratchConfig.CurrentScratchLocation') h.scratch = cap(raw, 256) ?? '';
+  else if (name === 'Syslog.global.logDir') h.logDir = cap(raw, 256) ?? '';
+  else if (name === 'Misc.BlueScreenTimeout') h.bsodTimeout = intOf(raw);
+}
+
+/**
+ * v2.706(C4): 스크래치가 휘발성(램디스크)인가 — 영구 저장소가 없으면 ESXi 는 스크래치를 /tmp/scratch(램디스크)에 둔다.
+ * 빈 값도 '영구 위치 없음' 이다. 못 읽은 값(null)은 판정하지 않는다.
+ */
+export const scratchVolatile = (scratch) => typeof scratch === 'string' && (scratch.trim() === '' || /^\/tmp(\/|$)/.test(scratch.trim()));
+/** 로컬 로그 위치가 재부팅 때 사라지는가 — /tmp 이거나, 스크래치를 따라가는데(/scratch/…) 스크래치가 휘발성이면. 빈 값은 모른다(null). */
+export function logDirVolatile(logDir, scratch) {
+  if (typeof logDir !== 'string' || !logDir.trim()) return null;
+  const d = logDir.trim();
+  if (/^\/tmp(\/|$)/.test(d)) return true;
+  if (/(^|\s|\])\/?scratch(\/|$)/.test(d)) return scratch == null ? null : scratchVolatile(scratch);
+  return false;
 }
 
 // ── 판정 ────────────────────────────────────────────────────────────────────
@@ -253,6 +274,12 @@ export const HOST_CFG_CODES = Object.freeze({
   'ssh-autostart': 'info',
   'lockdown-off': 'info',
   'shell-timeout-off': 'info',
+  // v2.706(C4) 크래시 대비
+  'logs-lost': 'crit',              // 로컬 로그가 휘발성이고 원격 syslog 도 없다 — 크래시 직전 로그가 어디에도 남지 않는다
+  'logs-volatile': 'warn',          // 로컬 로그가 휘발성(원격 syslog 는 있다)
+  'scratch-volatile': 'warn',
+  'coredump-partition-none': 'info', // 진단 파티션 없음 — 7.0+ 의 코어 덤프 '파일' 은 이 API 로 확인하지 못한다
+  'psod-no-reboot': 'info',         // PSOD 뒤 자동 재부팅 안 함(Misc.BlueScreenTimeout 0)
   drift: 'info',
 });
 export const CERT_WARN_DAYS = 30;
@@ -281,6 +308,12 @@ export function hostCfgFindings(host, now = Date.now()) {
   if (h.mob === true) add('mob-enabled');
   if (h.lockdown === 'disabled') add('lockdown-off');
   if (h.shellTimeout === 0) add('shell-timeout-off');
+  // v2.706(C4) 크래시 대비 — 값을 읽었을 때만.
+  if (scratchVolatile(h.scratch)) add('scratch-volatile', { scratch: h.scratch });
+  const lv = logDirVolatile(h.logDir, h.scratch);
+  if (lv === true) add(h.syslogHost === '' ? 'logs-lost' : 'logs-volatile', { logDir: h.logDir, remote: h.syslogHost || null });
+  if (h.diagPartition === false) add('coredump-partition-none');
+  if (h.bsodTimeout === 0) add('psod-no-reboot');
   if (h.mp && h.mp.dead > 0) add('mp-dead', { dead: h.mp.dead, luns: h.mp.deadLuns });
   if (h.mp && h.mp.singlePath > 0) add('mp-single', { count: h.mp.singlePath, luns: h.mp.singleLuns });
   if (h.vsan?.enabled === true && h.vsan.diskIssues > 0) add('vsan-disk-issue', { count: h.vsan.diskIssues });
@@ -382,6 +415,10 @@ export function sanitizeHostCfg(v) {
     acceptance: typeof v.acceptance === 'string' ? cap(v.acceptance, 32) : null,
     certNotAfter: numOr(v.certNotAfter),
     certSubject: typeof v.certSubject === 'string' ? cap(v.certSubject, 200) : null,
+    scratch: typeof v.scratch === 'string' ? (v.scratch.trim() ? cap(v.scratch, 256) : '') : null,
+    logDir: typeof v.logDir === 'string' ? (v.logDir.trim() ? cap(v.logDir, 256) : '') : null,
+    bsodTimeout: numOr(v.bsodTimeout),
+    diagPartition: typeof v.diagPartition === 'boolean' ? v.diagPartition : null,
     mp: sanitizeMp(v.mp),
     vsan: v.vsan && typeof v.vsan === 'object' && !Array.isArray(v.vsan)
       ? { enabled: typeof v.vsan.enabled === 'boolean' ? v.vsan.enabled : null, diskIssues: numOr(v.vsan.diskIssues), members: numOr(v.vsan.members) } : null,

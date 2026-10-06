@@ -106,6 +106,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'host-hygiene': 'host-hygiene',    // HostHygieneTool.jsx 전용(v2.699) — ESXi 호스트 구성·보안 점검
   'storage-paths': 'storage-paths',  // StoragePathsTool.jsx 전용(v2.700) — 데이터스토어 운영·멀티패스·vSAN
   'vm-changes': 'vm-changes',        // VmChangesTool.jsx + VM 상세의 이동·변경 칸(v2.702) — 화면이 toolAllowed 를 먼저 본다
+  'vm-lifecycle': 'vm-lifecycle',    // VmLifecycleTool.jsx 전용(v2.706 C5)
+  'contention': 'contention',        // ContentionTool.jsx + VM·호스트 상세의 경합·지연 칸은 스냅샷 값만 그려 이 경로를 부르지 않는다(v2.706 C2·C3)
   'cluster-check': 'cluster-check',  // ClusterCheckTool.jsx + VM·호스트 상세의 클러스터 칸(v2.701) — 화면이 toolAllowed 를 먼저 본다
   'vm-dns': 'vm-dns',                // VmDnsTool.jsx 전용(v2.696) — VM 이 쓰는 DNS 서버·정책·도달성·변경 이력
   vmtools: 'vmtools',

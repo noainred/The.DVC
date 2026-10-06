@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-05T14:32:47.639Z",
-  "count": 102,
+  "generatedAt": "2026-10-06T00:13:14.645Z",
+  "count": 104,
   "tools": [
     {
       "k": "service-hub",
@@ -564,6 +564,22 @@
     },
     {
       "k": "vm-tags",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-lifecycle",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "contention",
       "adminOnly": false,
       "perm": null,
       "external": null,

@@ -15,7 +15,7 @@ import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
-import { TRACKED_TYPES, TRACKED_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
+import { TRACKED_TYPES, TRACKED_SQL, OPS_TYPES, OPS_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
 import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
@@ -79,8 +79,13 @@ function initSqlite() {
     }
     // 추적 종류만 담는 부분 인덱스(전원 인덱스와 같은 판단 — 전체 이벤트를 인덱싱하지 않는다). 조회는 같은 리터럴을 써야 탄다.
     db.exec(`CREATE INDEX IF NOT EXISTS idx_events_tracked ON events (vcenterId, type, ts) WHERE type IN ${TRACKED_SQL}`);
+    // v2.706(C5·C4·C6): 운영 이벤트(VM 생성·삭제·전원·HA 재시작 · 호스트 유지보수·연결 끊김) 전용 부분 인덱스.
+    //   추적 인덱스에 종류를 더하지 않은 이유: 옛 DB 의 idx_events_tracked 조건이 새 IN 목록을 덮지 못해 INDEXED BY 가 실패한다.
+    //   최초 생성 시 테이블 1회 스캔(기동 1회 — 전원·추적 인덱스와 같은 비용).
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_ops ON events (vcenterId, type, ts) WHERE type IN ${OPS_SQL}`);
     const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message,detail) VALUES (?,?,?,?,?,?,?,?,?)');
     const lastTsStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=?');
+    const firstTsStmt = db.prepare('SELECT MIN(ts) mn FROM events WHERE vcenterId=?'); // v2.706(C4): aggregate 하나 + (vcenterId,ts) 인덱스 — 선탐색
     // v2.601(감사 DB2601-03 — 재현): 예전 `DELETE FROM events WHERE ts < ?` 한 방은 183만 행에서 이벤트 루프를 4.8초 멈췄다
     // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
     const pruneChunkStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE ts < ? LIMIT ?)');
@@ -123,6 +128,7 @@ function initSqlite() {
       kind: 'sqlite',
       insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
+      firstTs: (vc) => { const v = firstTsStmt.get(vc)?.mn; return Number.isFinite(Number(v)) && v != null ? Number(v) : 0; },
       lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
       /**
        * v2.702(A7·A8): 이동·구성 변경·권한 이벤트 — 부분 인덱스(idx_events_tracked)를 타도록 같은 IN 리터럴을 쓴다.
@@ -136,6 +142,19 @@ function initSqlite() {
         if (typeof f.entity === 'string' && f.entity) { w.push('entity=?'); p.push(f.entity); }
         // INDEXED BY: 통계가 없으면 플래너가 (vcenterId,ts) 인덱스로 그 기간의 모든 이벤트를 훑는다(실측 — 테스트가 계획을 고정).
         return db.prepare(`SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked WHERE ${w.join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...p, clampPage(limit, 0)[0]);
+      },
+      /**
+       * v2.706(C5·C4·C6): 운영 이벤트 — 부분 인덱스(idx_events_ops)를 타도록 같은 IN 리터럴을 쓴다.
+       * f: { vcenterIds:[]|null, since, until?, entity?, types?:[] } · 최신 먼저, 상한 limit.
+       */
+      opsEvents: (f = {}, limit = 5000) => {
+        const w = [`type IN ${OPS_SQL}`]; const p = [];
+        if (Array.isArray(f.vcenterIds)) { if (!f.vcenterIds.length) return []; w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
+        if (Array.isArray(f.types) && f.types.length) { const ts = f.types.filter((t) => OPS_TYPES.includes(t)); if (!ts.length) return []; w.push(`type IN (${ts.map(() => '?').join(',')})`); p.push(...ts); }
+        if (Number.isFinite(f.since)) { w.push('ts>=?'); p.push(f.since); }
+        if (Number.isFinite(f.until)) { w.push('ts<=?'); p.push(f.until); }
+        if (typeof f.entity === 'string' && f.entity) { w.push('entity=?'); p.push(f.entity); }
+        return db.prepare(`SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_ops WHERE ${w.join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...p, clampPage(limit, 0)[0]);
       },
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
@@ -242,10 +261,17 @@ function initJson() {
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
+    firstTs: (vc) => rows.reduce((mn, r) => (r.vcenterId === vc && (!mn || r.ts < mn) ? r.ts : mn), 0),
     trackedEvents: (f = {}, limit = 5000) => rows.filter((r) => TRACKED_TYPES.includes(r.type)
         && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId))
         && (!Array.isArray(f.types) || !f.types.length || f.types.includes(r.type))
         && (!Number.isFinite(f.since) || r.ts >= f.since) && (!f.entity || r.entity === f.entity))
+      .sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0])
+      .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
+    opsEvents: (f = {}, limit = 5000) => rows.filter((r) => OPS_TYPES.includes(r.type)
+        && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId))
+        && (!Array.isArray(f.types) || !f.types.length || f.types.includes(r.type))
+        && (!Number.isFinite(f.since) || r.ts >= f.since) && (!Number.isFinite(f.until) || r.ts <= f.until) && (!f.entity || r.entity === f.entity))
       .sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0])
       .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },

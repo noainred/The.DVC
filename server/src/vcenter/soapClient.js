@@ -26,6 +26,9 @@ import { refreshVmCfg } from '../vmcfg/collect.js';   // v2.697(B10)
 import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
 import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
+import { refreshContention } from '../contention/collect.js';   // v2.706(C2·C3)
+import { get as contentionGet } from '../contention/cache.js';
+import { dsUuidOf } from '../contention/parse.js';
 import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
 import { inventoryViaUpdates, updateSessionStatus } from './updateSession.js';   // v2.705(B1)
@@ -1592,7 +1595,9 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.managementServerIp', 'config.network.vnic', 'config.network.pnic',
-        'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
+        'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage',
+        // v2.706(C4): 부팅 시각 — '유지보수 모드 없이 재부팅된 호스트(PSOD·정전 후보)' 판정. 시각 하나라 응답이 거의 늘지 않는다.
+        'runtime.bootTime'] },
       { type: 'ResourcePool', paths: ['name'] },
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'resourcePool', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
@@ -1674,6 +1679,8 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         // CPU 모델명(예: 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'). 못 받으면 빈 문자열 —
         // 화면이 '—' 로 표시한다(모델명을 코어 수나 클럭으로 추측해 지어내지 않는다).
         cpuModel: String(p['summary.hardware.cpuModel'] || '').trim(),
+        // v2.706(C4): 부팅 시각(ms) — 못 읽으면 null(지금 시각으로 지어내지 않는다).
+        bootTime: (() => { const t = Date.parse(p['runtime.bootTime'] || ''); return Number.isFinite(t) ? t : null; })(),
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
@@ -1816,6 +1823,15 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       try { await refreshHostCfg(c, vc.id, liveHostRefs, { allRefs: [...hostByRef.keys()] }); } catch (err) { console.warn(`[collect] ${vc.id} 호스트 구성 갱신 건너뜀: ${err.message}`); }
       for (const [ref, h] of hostByRef) { const e = hostCfgCacheGet(vc.id, ref); if (e) h.hcfg = e; }
     }
+    // v2.706(C2·C3): CPU 경합·디스크 지연 — 켜진 VM(템플릿 제외)·연결된 호스트의 실시간 통계 최근 창(contention/collect.js).
+    //   캐시 값을 vm.perfc·host.perfc 로 싣는다. 꺼진 VM·끊긴 호스트의 옛 값은 캐시가 버린다(지금 값처럼 보이지 않게).
+    if (c.sc.perfManager) {
+      const liveVms = objs.filter((x) => x.type === 'VirtualMachine' && (x.props['runtime.powerState'] || '').toUpperCase().includes('ON') && x.props['summary.config.template'] !== 'true')
+        .map((x) => ({ ref: x.ref, numCpu: num(x.props['summary.config.numCpu']) }));
+      const liveHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED').map(([ref]) => ref);
+      try { await refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts }); } catch (err) { console.warn(`[collect] ${vc.id} CPU 경합·디스크 지연 갱신 건너뜀: ${err.message}`); }
+      for (const [ref, h] of hostByRef) { const e = contentionGet(vc.id, 'host', ref); if (e) h.perfc = e; }
+    }
 
     const vms = [];
     for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
@@ -1865,6 +1881,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         ...snapshotInfo(p['snapshot'], p['layoutEx.file']),
         ...(cfgEntry?.cfg ? { cfg: cfgEntry.cfg } : {}),
         ...(cfgEntry?.dev ? { dev: cfgEntry.dev } : {}),
+        ...((() => { const e = powered ? contentionGet(vc.id, 'vm', o.ref) : null; return e ? { perfc: e } : {}; })()),
       });
     }
 
@@ -1913,6 +1930,8 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         ...parseDatastoreStorage(p['info'], p['summary.type']),
         // v2.700(A17): VMFS 주 버전 — 이미 받는 info 에서(왕복 0). VMFS 가 아니면 키가 없다.
         ...(() => { const v = /<majorVersion>(\d+)<\/majorVersion>/.exec(p['info'] || '')?.[1]; return v ? { vmfsMajor: Number(v) } : {}; })(),
+        // v2.706(C3): 데이터스토어 UUID(url 의 volumes/<uuid>) — 호스트 datastore.* 지연 카운터의 인스턴스와 맞춘다(왕복 0).
+        ...(() => { const u = dsUuidOf(p['info']); return u ? { dsUuid: u } : {}; })(),
       };
     });
     // v2.700(A17): 데이터스토어 운영 속성 — 오래된 DS 부터 상한만큼(dscfg/collect.js), 캐시 값을 ds.dcfg 로.

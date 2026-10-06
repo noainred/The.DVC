@@ -53,6 +53,8 @@ import { registerClusterCheck } from './api/clusterCheck.js'; // 클러스터 HA
 import { registerVmChanges } from './api/vmChanges.js'; // VM 이동·구성 변경 이력(v2.702)
 import { registerCoreLicense } from './api/coreLicense.js'; // 코어 라이선스 산정(v2.703)
 import { registerVmTags } from './api/vmTags.js'; // 태그·사용자 지정 속성 점검(v2.703)
+import { registerVmLifecycle } from './api/vmLifecycle.js'; // VM 생성·삭제 이력(v2.706 C5)
+import { registerContention } from './api/contention.js'; // CPU 경합·디스크 지연(v2.706 C2·C3)
 import { registerVmDns } from './api/vmDns.js'; // VM DNS 설정 확인(VM 이 쓰는 DNS 서버 · 정책 · 도달성 · 변경 이력, v2.696)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
@@ -138,4 +140,6 @@ registerClusterCheck(api);
 registerVmChanges(api);
 registerCoreLicense(api);
 registerVmTags(api);
+registerVmLifecycle(api);
+registerContention(api);
 registerVmDns(api);

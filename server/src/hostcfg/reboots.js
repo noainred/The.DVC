@@ -1,0 +1,59 @@
+/**
+ * hostcfg/reboots.js — 'ESXi 호스트 구성 점검' 의 '최근 재부팅' 판정(v2.706 — C4, 순수).
+ * 입력: 스냅샷 호스트의 bootTime(runtime.bootTime) + logs DB 의 호스트 운영 이벤트(유지보수 모드·연결 끊김·종료).
+ *
+ * 분류(근거를 같이 싣는다 — 원인을 단정하지 않는다)
+ *  · planned    : 부팅 전 24시간 안에 유지보수 모드 진입 또는 vCenter 의 종료 요청이 있었다.
+ *  · unexpected : 유지보수 모드 없이, 부팅 전 2시간 안에 vCenter 와 연결이 끊겼다 — PSOD·정전·전원 문제·수동 강제 재부팅 후보.
+ *  · unknown    : 그 시간대 이벤트는 받았는데 유지보수·연결 끊김이 없다(직접 재부팅·짧은 끊김 등 — 판정하지 않는다).
+ *  · no-events  : 이 포탈이 그 시간대 vCenter 이벤트를 받지 못했다(수집 꺼짐·보관 기간 밖·수집 시작 전). 판정 불가.
+ */
+const H = 3_600_000;
+export const PLANNED_WINDOW_MS = 24 * H;
+export const LOST_WINDOW_MS = 2 * H;
+export const REBOOT_KINDS = Object.freeze(['unexpected', 'unknown', 'no-events', 'planned']);
+
+/**
+ * @param hosts   스냅샷 호스트(범위로 자른 것)
+ * @param events  opsEvents 행(호스트 운영 종류 — 여러 호스트 섞임)
+ * @param opts    { now, days, vcName:Map, coverageOf:(vcId)=>({firstTs,lastTs}) }
+ */
+export function analyzeReboots(hosts, events, { now = Date.now(), days = 30, vcName = new Map(), coverageOf = () => null } = {}) {
+  const since = now - days * 86_400_000;
+  const byHost = new Map();
+  for (const e of events || []) {
+    const k = `${e.vcenterId}\u0000${e.entity}`;
+    if (!byHost.has(k)) byHost.set(k, []);
+    byHost.get(k).push(e);
+  }
+  const rows = [];
+  const counts = { unexpected: 0, unknown: 0, 'no-events': 0, planned: 0 };
+  let bootUnknown = 0;
+  for (const h of hosts || []) {
+    if (h.connectionState === 'DISCONNECTED') continue;
+    if (!Number.isFinite(h.bootTime)) { bootUnknown += 1; continue; }
+    if (h.bootTime < since) continue;
+    const boot = h.bootTime;
+    const evs = byHost.get(`${h.vcenterId}\u0000${h.name}`) || [];
+    const before = (ms, types) => evs.filter((e) => types.includes(e.type) && e.ts <= boot && e.ts >= boot - ms).sort((a, b) => b.ts - a.ts)[0] || null;
+    const maint = before(PLANNED_WINDOW_MS, ['EnteringMaintenanceModeEvent', 'EnteredMaintenanceModeEvent', 'HostShutdownEvent']);
+    const lost = before(LOST_WINDOW_MS, ['HostConnectionLostEvent']);
+    const cov = coverageOf(h.vcenterId);
+    // 그 시간대 이벤트를 받았는가 — 부팅 시각 이후의 이벤트를 받은 적이 있고, 수집 시작이 부팅 2시간 전보다 이르면 받은 것으로 본다.
+    const covered = !!cov && Number.isFinite(cov.lastTs) && cov.lastTs >= boot && Number.isFinite(cov.firstTs) && cov.firstTs <= boot - LOST_WINDOW_MS;
+    let kind;
+    if (maint) kind = 'planned';
+    else if (lost) kind = 'unexpected';
+    else kind = covered ? 'unknown' : 'no-events';
+    counts[kind] += 1;
+    rows.push({
+      id: h.id, name: h.name, vcenterId: h.vcenterId, vcenterName: vcName.get(h.vcenterId) || h.vcenterId, cluster: h.cluster || '',
+      bootTime: boot, kind,
+      evidence: maint ? { type: maint.type, ts: maint.ts, user: maint.user || '' } : lost ? { type: lost.type, ts: lost.ts } : null,
+      inMaintenanceNow: h.connectionState === 'MAINTENANCE',
+    });
+  }
+  const order = Object.fromEntries(REBOOT_KINDS.map((k, i) => [k, i]));
+  rows.sort((a, b) => order[a.kind] - order[b.kind] || b.bootTime - a.bootTime);
+  return { days, since, counts, bootUnknown, rows: rows.slice(0, 500), omitted: Math.max(0, rows.length - 500) };
+}
