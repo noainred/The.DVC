@@ -186,6 +186,11 @@ function mkHostCfg(h, site) {
     acceptance: i % 29 === 9 ? 'community' : 'partner',
     certNotAfter: Date.now() + ((i + s) % 15 === 0 ? -5 : (i + s) % 15 === 1 ? 20 : 400) * 86_400_000,
     certSubject: `CN=${h.name}.corp.local`,
+    // v2.706(C4): 크래시 대비 — 몇 대는 스크래치가 램디스크(/tmp/scratch), 그중 일부는 원격 syslog 도 없다(logs-lost).
+    scratch: i % 10 === 4 ? '/tmp/scratch' : `/vmfs/volumes/5f00-${i}/.locker-${h.name}`,
+    logDir: '[] /scratch/log',
+    bsodTimeout: i % 7 === 2 ? 0 : 120,
+    diagPartition: i % 6 !== 4,
     mp: { luns: 14, shared: i % 15 === 7 ? 11 : 12, paths: 48, dead: i % 12 === 5 ? 2 : 0, deadLuns: i % 12 === 5 ? ['naa.6000eb3a1' + i] : [],
       singlePath: i % 16 === 9 ? 1 : 0, singleLuns: i % 16 === 9 ? ['naa.6000eb3b2' + i] : [], policies: { VMW_PSP_RR: 12, VMW_PSP_FIXED: 2 } },
     vsan: s % 3 === 0 ? { enabled: true, diskIssues: i % 21 === 3 ? 1 : 0, members: 8 } : { enabled: false, diskIssues: 0, members: 0 },
@@ -201,6 +206,30 @@ function mkHostCfg(h, site) {
       ],
       pgsTotal: 2,
     },
+  };
+}
+
+// v2.706(C2·C3): 데이터스토어 UUID·호스트/VM 경합·지연(contention/parse.js 와 같은 모양) — 판정 갈래가 고루 나오게 결정적.
+const MOCK_BOOT_BASE = Date.now();   // 부팅 시각은 프로세스 동안 고정(매 갱신마다 움직이면 이벤트 시각과 어긋난다)
+const mockDsUuid = (siteId, idx) => `5f${(siteId.length * 131 + idx * 7919).toString(16).padStart(6, '0')}-0000-mock-${String(idx).padStart(4, '0')}`;
+const am = (avg, mx) => ({ avg: Math.round(avg * 10) / 10, max: Math.round(mx * 10) / 10 });
+function mkVmPerfc(i) {
+  if (i % 37 === 0) return null;                          // 아직 측정 전(키 없음) — 화면의 '미측정' 갈래
+  const ready = i % 29 === 3 ? 12.4 : i % 13 === 5 ? 6.2 : 0.4 + (i % 9) * 0.3;
+  const costop = i % 31 === 7 ? 4.8 : 0.1 + (i % 4) * 0.1;
+  const disk = i % 23 === 2 ? 64 : i % 11 === 6 ? 27 : 1.2 + (i % 7);
+  return {
+    at: Date.now() - (i % 10) * 60_000, samples: 15,
+    readyPct: am(ready, ready * 1.8), costopPct: am(costop, costop * 2), latencyPct: am(ready + 1.5, ready * 2 + 3),
+    readMs: am(disk, disk * 2.2), writeMs: am(disk * 0.7, disk * 1.6), disk: `scsi0:${i % 3}`,
+  };
+}
+function mkHostPerfc(h, site, dsList) {
+  const i = h.idx;
+  return {
+    at: Date.now() - (i % 10) * 60_000, samples: 15,
+    diskMaxMs: am(i % 17 === 4 ? 58 : 3 + (i % 9), i % 17 === 4 ? 140 : 12 + (i % 9)),
+    ds: dsList.slice(0, 8).map((d) => ({ uuid: mockDsUuid(site.id, d.idx), readMs: am(d.idx % 7 === 3 ? 32 : 1.5 + (d.idx % 5) * 0.8, 9 + (d.idx % 5)), writeMs: am(d.idx % 7 === 3 ? 41 : 2 + (d.idx % 4), 11 + (d.idx % 6)) })),
   };
 }
 
@@ -547,6 +576,9 @@ export function generateSnapshot() {
           return { gpuMemUsedPct: pct, gpuMemUsedMB: Math.round((capMB * pct) / 100), gpuTempC: Math.round(34 + cpuLoad * 30 + (h.idx % 5)) };
         })(),
         ...(h.idx % 9 === 8 ? {} : { hcfg: mkHostCfg(h, site) }),
+        // v2.706(C4): 부팅 시각 — 몇 대는 최근 7일 안에 재부팅됐다(유지보수 모드 이벤트 유무로 계획/예기치 않음이 갈린다).
+        bootTime: disconnected ? null : MOCK_BOOT_BASE - (h.idx % 19 === 3 ? 2 : h.idx % 19 === 11 ? 5 : 40 + (h.idx % 90)) * 86_400_000 - (h.idx % 7) * 3_600_000,
+        ...(disconnected ? {} : { perfc: mkHostPerfc(h, site, env.datastores) }),
       });
 
       if (connectionState === 'DISCONNECTED') {
@@ -610,6 +642,7 @@ export function generateSnapshot() {
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm) }),
+        ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }
 
@@ -634,6 +667,7 @@ export function generateSnapshot() {
         accessible: true,
         // v2.700(A17): VMFS 주 버전 · 운영 속성(dscfg/parse.js 와 같은 모양) — 판정 갈래가 나오게 idx 로 결정적.
         ...(/vmfs/i.test(ds.type) ? { vmfsMajor: ds.idx % 9 === 4 ? 5 : 6 } : {}),
+        dsUuid: mockDsUuid(site.id, ds.idx),
         ...(ds.idx % 11 === 10 ? {} : { dcfg: {
           at: Date.now() - (ds.idx % 5) * 600_000,
           maintenance: ds.idx % 23 === 6 ? 'inMaintenance' : 'normal',

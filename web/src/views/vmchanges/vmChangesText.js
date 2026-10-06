@@ -14,16 +14,16 @@ export function routeText(from, to) {
   return `${from || '?'} → ${to || '?'}`;
 }
 /** 수집 범위 문구 — 이벤트는 이 포탈이 받아 둔 것만이다. 수집이 꺼졌거나 받은 적 없는 vCenter 를 '이동 없음' 이라 말하지 않는다. */
-export function coverageNote(data, now = Date.now()) {
+export function coverageNote(data, now = Date.now(), { what = '이동', events = '이동·변경' } = {}) {
   if (!data) return null;
-  if (data.logs && data.logs.enabled === false) return 'vCenter 이벤트 수집이 꺼져 있습니다(설정 › vCenter 로그) — 이 화면은 그동안의 이동·변경을 보여 줄 수 없습니다.';
+  if (data.logs && data.logs.enabled === false) return `vCenter 이벤트 수집이 꺼져 있습니다(설정 › vCenter 로그 보관) — 이 화면은 그동안의 ${events}을 보여 줄 수 없습니다.`;
   const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const none = vcs.filter((v) => !v.lastTs);
   const stale = vcs.filter((v) => v.lastTs && now - v.lastTs > 2 * DAY);
   const parts = [];
-  if (none.length) parts.push(`이벤트를 받은 적 없는 vCenter ${none.length}곳(${none.slice(0, 4).map((v) => v.name).join(', ')}${none.length > 4 ? ' 외' : ''})은 결과에 없습니다 — '이동 없음' 이 아닙니다`);
+  if (none.length) parts.push(`이벤트를 받은 적 없는 vCenter ${none.length}곳(${none.slice(0, 4).map((v) => v.name).join(', ')}${none.length > 4 ? ' 외' : ''})은 결과에 없습니다 — '${what} 없음' 이 아닙니다`);
   if (stale.length) parts.push(`마지막 이벤트가 이틀 넘게 지난 vCenter ${stale.length}곳은 그 뒤가 비어 있을 수 있습니다`);
-  if (data.logs?.minSeverity && data.logs.minSeverity !== 'info') parts.push(`수집 최소 심각도가 ${data.logs.minSeverity} 라 정보 수준의 이동·변경 이벤트는 쌓이지 않습니다`);
+  if (data.logs?.minSeverity && data.logs.minSeverity !== 'info') parts.push(`수집 최소 심각도가 ${data.logs.minSeverity} 라 정보 수준의 ${events} 이벤트는 쌓이지 않습니다`);
   return parts.length ? `${parts.join(' · ')}.` : null;
 }
 export function truncNote(data) {

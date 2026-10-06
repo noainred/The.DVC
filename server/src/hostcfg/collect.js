@@ -69,6 +69,17 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
         for (const o of await c.retrieveManyObjectProps('HostCertificateManager', certRefs, ['certificateInfo'], 100)) certByRef.set(o.ref, parseCertInfo(o.props.certificateInfo));
       } catch (err) { console.warn(`[hostcfg] ${vcId} 호스트 인증서 정보를 읽지 못했습니다: ${String(err?.message || err).slice(0, 200)}`); }
     }
+    // v2.706(C4): 진단(코어 덤프) 파티션 — activePartition 이 없으면 false. 읽기 실패는 null(모름).
+    const diagRefs = [...props.values()].map((p) => p['configManager.diagnosticSystem']).filter((x) => typeof x === 'string' && x);
+    const diagByRef = new Map();
+    if (diagRefs.length && Date.now() < budgetEnd) {
+      try {
+        for (const o of await c.retrieveManyObjectProps('HostDiagnosticSystem', diagRefs, ['activePartition'], 100)) {
+          diagByRef.set(o.ref, typeof o.props.activePartition === 'string' && o.props.activePartition.includes('<id>'));
+        }
+        for (const r of diagRefs) if (!diagByRef.has(r)) diagByRef.set(r, false);
+      } catch (err) { console.warn(`[hostcfg] ${vcId} 진단 파티션을 읽지 못했습니다: ${String(err?.message || err).slice(0, 200)}`); }
+    }
     let fetched = 0; let cut = 0;
     await poolSettled(due, CONCURRENCY, async (ref) => {
       const p = props.get(ref);
@@ -77,6 +88,8 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       const h = parseHostCfgProps(p, now);
       const cert = certByRef.get(p['configManager.certificateManager']);
       if (cert) { h.certNotAfter = cert.notAfter; h.certSubject = cert.subject; }
+      const dg = diagByRef.get(p['configManager.diagnosticSystem']);
+      if (typeof dg === 'boolean') h.diagPartition = dg;
       const optRef = p['configManager.advancedOption'];
       if (typeof optRef === 'string' && optRef) {
         for (const name of ADV_OPTIONS) {

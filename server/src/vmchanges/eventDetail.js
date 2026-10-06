@@ -10,6 +10,21 @@ export const PERM_TYPES = Object.freeze(['PermissionAddedEvent', 'PermissionRemo
 export const TRACKED_TYPES = Object.freeze([...MOVE_TYPES, ...RECONFIG_TYPES, ...PERM_TYPES]);
 /** SQL `IN (...)` 리터럴 — 이름은 정규식 [A-Za-z]+ 로 고정돼 있어 인용이 안전하다(테스트가 고정). */
 export const TRACKED_SQL = `(${TRACKED_TYPES.map((t) => `'${t}'`).join(',')})`;
+
+/**
+ * v2.706(C5·C4) · v2.707(C6) — '운영 이벤트' 종류. 추적 이벤트(위)와 **다른 부분 인덱스**(idx_events_ops)를 쓴다 —
+ * 같은 인덱스에 종류를 더하면 옛 DB 의 인덱스 조건이 새 조회 조건을 덮지 못해 INDEXED BY 가 실패한다.
+ *  · LIFE  : VM 생성·복제·배포·등록·삭제(인벤토리 제거 포함)·이름 변경(C5)
+ *  · AVAIL : VM 전원·재설정·HA 재시작·게스트 재부팅/종료(C6 가용성 — v2.707 이 읽는다. 인덱스는 한 번만 만든다)
+ *  · HOSTOPS: 호스트 유지보수 모드·연결 끊김·종료(C4 '예기치 않은 재부팅' 판정)
+ */
+export const LIFE_TYPES = Object.freeze(['VmCreatedEvent', 'VmClonedEvent', 'VmDeployedEvent', 'VmRegisteredEvent', 'VmRemovedEvent', 'VmRenamedEvent']);
+export const AVAIL_TYPES = Object.freeze(['VmPoweredOnEvent', 'VmPoweredOffEvent', 'VmSuspendedEvent', 'VmResettingEvent', 'VmGuestRebootEvent',
+  'VmGuestShutdownEvent', 'VmRestartedOnAlternateHostEvent', 'VmDasBeingResetEvent', 'VmFailedToPowerOnEvent']);
+export const HOSTOPS_TYPES = Object.freeze(['EnteringMaintenanceModeEvent', 'EnteredMaintenanceModeEvent', 'ExitMaintenanceModeEvent',
+  'HostConnectionLostEvent', 'HostShutdownEvent']);
+export const OPS_TYPES = Object.freeze([...LIFE_TYPES, ...AVAIL_TYPES, ...HOSTOPS_TYPES]);
+export const OPS_SQL = `(${OPS_TYPES.map((t) => `'${t}'`).join(',')})`;
 export const DETAIL_MAX = 4096;
 const TEXT_MAX = 1500;
 
@@ -83,6 +98,24 @@ function reconfigDetail(body) {
   return Object.keys(out).length ? out : null;
 }
 
+/** v2.706(C5): VM 생성·삭제 계열 — 종류 · 호스트 · 데이터스토어 · 원본(복제 원본 VM·배포 템플릿) · 이름 변경 전후. */
+export const LIFE_KIND = Object.freeze({
+  VmCreatedEvent: 'create', VmClonedEvent: 'clone', VmDeployedEvent: 'deploy', VmRegisteredEvent: 'register', VmRemovedEvent: 'remove', VmRenamedEvent: 'rename',
+});
+function lifeDetail(t, body) {
+  const out = { kind: LIFE_KIND[t] };
+  const host = nameIn(body, 'host'); if (host) out.host = host;
+  const ds = nameIn(body, 'ds'); if (ds) out.ds = ds;
+  const src = t === 'VmClonedEvent' ? nameIn(body, 'sourceVm') : t === 'VmDeployedEvent' ? nameIn(body, 'srcTemplate') : null;
+  if (src) out.source = src;
+  if (t === 'VmRenamedEvent') {
+    const o = /<oldName>([^<]{1,512})<\/oldName>/.exec(body)?.[1]; const n = /<newName>([^<]{1,512})<\/newName>/.exec(body)?.[1];
+    if (o) out.oldName = cap(xmlUnescape(o), 128);
+    if (n) out.newName = cap(xmlUnescape(n), 128);
+  }
+  return out;
+}
+
 /** 이동 종류 — DRS 가 먼저, 그 다음 호스트·데이터스토어가 바뀌었는지. 이름을 모르면 이벤트 종류로만 말한다. */
 export function moveKind(type, d) {
   if (type === 'DrsVmMigratedEvent') return 'drs';
@@ -103,6 +136,7 @@ export function eventDetail(type, body) {
     return { ...d, kind: moveKind(t, d) };
   }
   if (RECONFIG_TYPES.includes(t)) return reconfigDetail(body);
+  if (LIFE_TYPES.includes(t)) return lifeDetail(t, body);
   if (PERM_TYPES.includes(t)) {
     const principal = /<principal>([^<]{1,256})<\/principal>/.exec(body)?.[1];
     const out = {

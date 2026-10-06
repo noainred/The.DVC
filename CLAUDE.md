@@ -4869,6 +4869,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
+    (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
+    웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):
+    · ⚠⚠ **운영 이벤트는 별도 부분 인덱스 `idx_events_ops`**(`OPS_TYPES` = 생성·삭제 + 가용성 + 호스트 운영) — `idx_events_tracked` 에 종류를 더하면 옛 DB 의 인덱스 정의와
+      `INDEXED BY` 가 어긋난다. 두 목록은 겹치지 않는다(테스트 고정). 가용성 종류(`AVAIL_TYPES`)는 v2.707 C6 이 같은 경로로 읽는다.
+    · C5: VM 은 이벤트 이름으로 묶는다 · VmRemovedEvent 는 '디스크 삭제' 와 '인벤토리 제거' 를 구분하지 못한다(화면이 말한다) · '지금 있는가' 는 이름 대조이고 첫 수집 중이면 null.
+    · C4: 스크래치·로그 위치·진단 파티션·BlueScreenTimeout 은 호스트 캐시(`ADV_OPTIONS`·`configManager.diagnosticSystem`). **못 읽은 값은 판정하지 않는다** —
+      로그가 스크래치를 따라가는데 스크래치를 모르면 null. 원격 syslog 가 빈 값('')일 때만 'logs-lost'(null 은 모름). 재부팅 분류는 계획(24h 안 유지보수·종료) → 예기치 않음(2h 안
+      연결 끊김) → 원인 불명(그 시간대 이벤트를 받았음 = 수집 시작이 부팅 2h 전보다 이르고 부팅 뒤 이벤트가 있음) → 이벤트 없음. 원인을 단정하지 않고 근거 이벤트를 싣는다.
+    · C2·C3: 실시간(20초) 통계 최근 15표본을 VM 50개·호스트 25개 묶음 QueryPerf 로(`CONTENTION_*` — 기본 켜짐·15분·주기당 400·15초 예산). Ready %/vCPU = ms ÷ (20,000 × vCPU) × 100,
+      `cpu.latency` 는 ×100 값 · -1 표본은 버리고 vCPU·카운터를 모르면 null(0 아님) · 판정은 창 **평균**, 최대는 근거. 측정 안 함·오래됨(max(45분, 주기×3))은 '경합 없음' 이 아니라 따로 센다.
+      DS 지연은 호스트 `datastore.*` 인스턴스(UUID) ↔ `ds.dsUuid`(info url) — 못 잇는 UUID 는 개수로. 이웃 VM 은 **상관**이다(화면이 말한다). 엣지 수신은 `sanitizeVmPerfc`·`sanitizeHostPerfc`.
+    · 정직 기록: 실장비 vCenter 응답(실시간 통계·HostDiagnosticSystem·BlueScreenTimeout 타입)은 확인하지 못했다(목·합성 입력).
   - ⚠⚠ **v2.705 — 인벤토리 증분 수집(B1 — WaitForUpdatesEx). 기본 꺼짐이고, 실패하면 그 주기는 전체 조회다**
     (`vcenter/updateSession.js` + `soapClient.js collectFromVCenterSoap` 의 `INV_TYPES`·`INV_SPECS` + config `VC_WAIT_UPDATES`·`VC_WAIT_UPDATES_FULL_MS`.
     회귀 `server/test/waitUpdates2705.test.js` — 변이 8/8):

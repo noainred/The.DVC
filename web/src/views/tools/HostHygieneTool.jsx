@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { HOST_CFG_TEXT, DRIFT_LABEL, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote } from '../hostcfg/hostCfgText.js';
+import { HOST_CFG_TEXT, DRIFT_LABEL, SEV_LABEL, SEV_BADGE, REBOOT_KIND, codeChips, findingDetail, coverageText, coverageNote } from '../hostcfg/hostCfgText.js';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -37,6 +37,72 @@ function DriftPanel({ clusters, omitted }) {
         </tbody>
       </STable>
       {omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>클러스터 {omitted.toLocaleString()}개는 표시하지 않았습니다(상한 200).</div>}
+    </div>
+  );
+}
+
+/** v2.706(C4): 최근 재부팅 — 부팅 시각 + 유지보수 모드·연결 끊김 이벤트로 계획/예기치 않음을 가른다(원인 단정 금지). */
+const REBOOT_DAYS = [7, 30, 90];
+function RebootPanel({ vcId }) {
+  const [days, setDays] = useState(30);
+  const [kind, setKind] = useState('');
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const gen = useRef(0);
+  useEffect(() => {
+    const my = ++gen.current;
+    const params = { days };
+    if (vcId) params.vcenterId = vcId;
+    fetchJson('/tools/host-hygiene/reboots', params)
+      .then((r) => { if (my === gen.current) { setD(r); setErr(null); } })
+      .catch((e) => { if (my === gen.current) setErr(e); });
+  }, [vcId, days]);
+  if (err && !d) return <div className="card" style={{ marginTop: 12 }}><ErrorBox error={err} /></div>;
+  if (!d) return null;
+  const rows = (Array.isArray(d.rows) ? d.rows : []).filter((r) => !kind || r.kind === kind);
+  const total = Object.values(d.counts || {}).reduce((a, b) => a + b, 0);
+  return (
+    <div className="card" style={{ marginTop: 12, minWidth: 0 }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>최근 재부팅 — 계획된 것과 예기치 않은 것</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+        <span className="muted" style={{ fontSize: 12 }}>기간</span>
+        {REBOOT_DAYS.map((x) => <Chip key={x} active={days === x} onClick={() => setDays(x)}>{x}일</Chip>)}
+        <Chip active={!kind} onClick={() => setKind('')}>전체 <b>{total}</b></Chip>
+        {Object.entries(REBOOT_KIND).map(([k, v]) => (
+          <Chip key={k} active={kind === k} onClick={() => setKind(kind === k ? '' : k)} title={v.note}>
+            <span className={`badge ${v.tone}`} style={{ marginRight: 4 }}>{v.label}</span><b>{d.counts?.[k] ?? 0}</b>
+          </Chip>
+        ))}
+      </div>
+      {d.logs?.enabled === false && <div className="banner" style={{ marginBottom: 6 }}>vCenter 이벤트 수집이 꺼져 있어(설정 › vCenter 로그 보관) 계획/예기치 않음을 가를 수 없습니다 — 전부 '판정 불가' 로 보입니다.</div>}
+      {rows.length === 0 ? (
+        <div className="muted" style={{ fontSize: 13 }}>{total === 0 ? `최근 ${days}일 안에 재부팅한 호스트가 없습니다(부팅 시각을 읽은 호스트 기준).` : '조건에 맞는 호스트가 없습니다.'}</div>
+      ) : (
+        <STable minWidth={760}>
+          <thead><tr><th>호스트</th><th>vCenter</th><th>클러스터</th><th>부팅 시각</th><th>판정</th><th>근거</th></tr></thead>
+          <tbody>
+            {rows.map((r) => {
+              const k = REBOOT_KIND[r.kind] || REBOOT_KIND['no-events'];
+              return (
+                <tr key={r.id}>
+                  <td><b>{r.name}</b>{r.inMaintenanceNow && <span className="badge gray" style={{ marginLeft: 6 }}>지금 유지보수</span>}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{r.vcenterName}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{r.cluster}</td>
+                  <td data-sort={r.bootTime} style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{new Date(r.bootTime).toLocaleString('ko-KR')}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}><span className={`badge ${k.tone}`} title={k.note}>{k.label}</span></td>
+                  <td style={{ fontSize: 12, whiteSpace: 'normal' }}>
+                    {r.evidence ? `${r.evidence.type === 'HostConnectionLostEvent' ? '연결 끊김' : r.evidence.type === 'HostShutdownEvent' ? '종료 요청' : '유지보수 모드'} ${new Date(r.evidence.ts).toLocaleString('ko-KR')}${r.evidence.user ? ` · ${r.evidence.user}` : ''}` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </STable>
+      )}
+      {d.omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{d.omitted.toLocaleString()}대는 표시하지 않았습니다(상한 500).</div>}
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        판정은 근거 이벤트로만 합니다 — '예기치 않은 재부팅 후보' 도 원인(PSOD·정전·강제 재부팅)을 단정하지 않습니다. 부팅 시각을 읽지 못한 호스트 {d.bootUnknown ?? 0}대와 연결이 끊긴 호스트는 목록에 없습니다.
+      </div>
     </div>
   );
 }
@@ -94,7 +160,7 @@ export default function HostHygieneTool({ scope }) {
   return (
     <div style={{ minWidth: 0 }}>
       <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-        ESXi 호스트 보안·구성(인증서 만료·재부팅 필요·SSH/Shell·NTP·syslog·허용 수준·계정 잠금·MOB·잠금 모드)과 클러스터 안 구성 드리프트를 한 표로 봅니다. 수집 서버가 호스트마다 몇 시간에 한 번 나눠 읽은 값입니다.
+        ESXi 호스트 보안·구성(인증서 만료·재부팅 필요·SSH/Shell·NTP·syslog·허용 수준·계정 잠금·MOB·잠금 모드·크래시 대비)과 클러스터 안 구성 드리프트를 한 표로 봅니다. 수집 서버가 호스트마다 몇 시간에 한 번 나눠 읽은 값입니다.
       </div>
       {data.initial && <div className="banner" style={{ marginBottom: 8 }}>첫 수집 중입니다 — 호스트 목록이 아직 비어 있을 수 있습니다.</div>}
       <div style={{ fontSize: 13, marginBottom: 6 }}>{coverageText(cov)}</div>
@@ -158,6 +224,7 @@ export default function HostHygieneTool({ scope }) {
       {data.omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>심각도 순 상위 {rows.length.toLocaleString()}대만 표시했습니다 — {data.omitted.toLocaleString()}대는 조건으로 좁혀 보세요.</div>}
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>배지에 마우스를 올리면 조치와 근거가 보입니다. 호스트 상세(VM호스트 탭 › 호스트 클릭)의 '구성·보안' 칸에서 값을 볼 수 있습니다. 드리프트는 같은 클러스터에서 값을 아는 호스트끼리만 비교합니다(다수값이 없으면 어느 쪽이 옳다고 말하지 않습니다).</div>
       <DriftPanel clusters={data.clusters} omitted={data.clustersOmitted} />
+      <RebootPanel vcId={vcId} />
     </div>
   );
 }

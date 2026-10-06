@@ -15,6 +15,10 @@ import { analyzeHostCfg } from '../../hostcfg/analyze.js';
 import { HOST_CFG_CODES } from '../../hostcfg/parse.js';
 import { hostCfgStatus } from '../../hostcfg/cache.js';
 import { config } from '../../config.js';
+import { analyzeReboots } from '../../hostcfg/reboots.js';
+import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { getLogsDb } from '../../logs/db.js';
+import { loadLogSettings } from '../../logs/settings.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -42,6 +46,24 @@ export function registerHostHygiene(api) {
       status: full ? hostCfgStatus() : null,
     };
   }, { extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role || ''}` }));
+
+  // v2.706(C4): 최근 재부팅 — bootTime(스냅샷) + 유지보수 모드·연결 끊김 이벤트(logs DB). vCenter 왕복 0.
+  api.get('/tools/host-hygiene/reboots', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene-reboots', async (snap) => {
+    const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
+    const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    const days = Math.min(90, Math.max(1, Math.trunc(Number(req.query.days)) || 30));
+    const ids = (scoped.vcenters || []).map((v) => v.id);
+    const db = await getLogsDb();
+    const since = Date.now() - days * 86_400_000 - 86_400_000;
+    const events = ids.length ? db.opsEvents({ vcenterIds: ids, since, types: [...HOSTOPS_TYPES] }, 20_000) : [];
+    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
+    const s = loadLogSettings();
+    return {
+      ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null }),
+      logs: { enabled: s.enabled, retentionDays: s.retentionDays },
+      initial: snap.initial === true,
+    };
+  }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}` }));
 
   api.get('/tools/host-hygiene.csv', csvPerm, toolsPerm, (req, res) => {
     const r = run(store.get(), req);

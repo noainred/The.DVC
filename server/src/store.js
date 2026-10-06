@@ -31,6 +31,7 @@ import { pushAll } from './util/pushAll.js';
 import { createChangeLogger } from './util/logThrottle.js';
 import { vmCfgStatus } from './vmcfg/cache.js'; // v2.697(B10)
 import { hostCfgStatus } from './hostcfg/cache.js'; // v2.699
+import { contentionStatus } from './contention/cache.js'; // v2.706(C2·C3)
 import { dsCfgStatus } from './dscfg/collect.js'; // v2.700
 import { clusterCfgStatus } from './clustercfg/collect.js'; // v2.701
 const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
@@ -876,6 +877,7 @@ export function storeStatus() {
     dsCfg: dsCfgStatus(), // v2.700: 데이터스토어 운영 속성 캐시
     clusterCfg: clusterCfgStatus(), // v2.701: 클러스터 HA·DRS 캐시
     hostCfg: hostCfgStatus(), // v2.699: 호스트 구성 캐시(vCenter 별 개수·마지막 갱신·오류)
+    contention: contentionStatus(), // v2.706(C2·C3): CPU 경합·디스크 지연 캐시(vCenter 별 개수·마지막 갱신·없는 카운터)
     vmCfg: vmCfgStatus(), // v2.697(B10): VM 구성 속성·장치 목록 캐시(vCenter 별 개수·마지막 갱신·오류 — 자격증명 없음)
     refreshing: store._refreshing === true,
     intervalMs: config.pollIntervalMs,
