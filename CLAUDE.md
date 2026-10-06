@@ -4869,6 +4869,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · DS 오버할당은 **내림**(149.9% 는 150% 가 아니다 — 자체 테스트가 잡았다) · 사용량을 모르면 판정하지 않는다 · SIOC 는 마운트 2대 이상 VMFS/NFS 만.
     · VMFS 주 버전은 30초 요청의 `info` 에서 뽑는다(왕복 0, `vmfsMajor` — 중앙 `INV_NUM_KEYS`). SDRS 는 부모 moref 'group-p' 규칙의 **추정**이고 화면이 그렇게 말한다.
     · vSAN 분할 = 보고 멤버 최소값 < vSAN 호스트 수(같으면 정상 — 테스트 고정). ⚠ vsanHealth API(리싱크·객체·헬스 점수)는 읽지 않는다 — 화면이 말한다.
+  - ⚠⚠ **v2.707 — 경영 보고 묶음(C6·C11·C7). 새 수집 없음 — 이벤트·스냅샷·B10 캐시만 읽는다**
+    (`availability/analyze.js` · `cost/{analyze,settings}.js`(`cost-rates.json`) · `migration/analyze.js` + 라우트 `vmAvailability.js`·`costShowback.js`·`migrationReadiness.js` +
+    웹 `views/bizreport/*Text.js` + `VmAvailabilityTool`·`CostShowbackTool`·`MigrationReadinessTool`. 회귀 `server/test/biz2707.test.js`(변이 9/9) + 웹 `bizreport/biz2707.test.js`):
+    · C6 가동률 = 1 − 정지 ÷ 측정 구간. 측정 구간 = max(기간 시작, 그 vCenter 이벤트 수집 시작, **그 VM 의 마지막 생성·복제·배포·등록**) ~ 지금.
+      정지 = 끔·일시정지 → 다음 켬(지금도 꺼져 있으면 지금까지). 첫 전원 이벤트가 '켬' 이면 그 전은 꺼져 있던 것이다. 재부팅·재설정·HA 재시작·켜기 실패는 **횟수만**.
+      판정 안 함: 이벤트를 받은 적 없는 vCenter(lastTs 없음) · 끔 이벤트 뒤 켬 이벤트 없이 지금 켜져 있음(inconsistent) · 기간 내내 꺼짐(offAll). 법인 합산 = 정지 합 ÷ 측정 합.
+      ⚠ '사람이 끈 정지' 판정의 시스템 계정 정규식에 **빈 대안 `^(|…)` 을 넣지 말 것** — 모든 문자열과 맞아 사람 판정이 항상 거짓이 됐다(자체 테스트가 잡았다).
+    · C11 단가는 월 단가 · **빈 칸 = null(계산 안 함) · 0 = 무료** · 꺼진 VM 정책 기본 storage · 합계는 단가가 있는 항목만(partialRates). 태그 기준은 첫 태그 하나(multiTag 로 밝힘).
+      단가 저장은 admin + 전체 범위 + 감사. 비용은 할당 기준이고 청구서가 아니다(화면이 말한다).
+    · C7 등급 blocked > caution > ready > unknown — **막힘은 미수집이어도 사실**이라 먼저 판정하고, 그 밖에서 cfg·dev 중 하나라도 없으면 unknown. 준비율 분모는 판정한 VM(unknown 제외).
+      코드 `MIG_CODES` 는 서버·웹 두 벌(테스트 대조). 가상 호환 RDM 은 막지 않는다(물리 호환만).
   - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
     (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
     웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):

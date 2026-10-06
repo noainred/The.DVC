@@ -55,6 +55,9 @@ import { registerCoreLicense } from './api/coreLicense.js'; // 코어 라이선�
 import { registerVmTags } from './api/vmTags.js'; // 태그·사용자 지정 속성 점검(v2.703)
 import { registerVmLifecycle } from './api/vmLifecycle.js'; // VM 생성·삭제 이력(v2.706 C5)
 import { registerContention } from './api/contention.js'; // CPU 경합·디스크 지연(v2.706 C2·C3)
+import { registerVmAvailability } from './api/vmAvailability.js'; // VM 가용성 SLA(v2.707 C6)
+import { registerCostShowback } from './api/costShowback.js'; // 비용 배분(v2.707 C11)
+import { registerMigrationReadiness } from './api/migrationReadiness.js'; // VM 이전 준비도(v2.707 C7)
 import { registerVmDns } from './api/vmDns.js'; // VM DNS 설정 확인(VM 이 쓰는 DNS 서버 · 정책 · 도달성 · 변경 이력, v2.696)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
@@ -142,4 +145,7 @@ registerCoreLicense(api);
 registerVmTags(api);
 registerVmLifecycle(api);
 registerContention(api);
+registerVmAvailability(api);
+registerCostShowback(api);
+registerMigrationReadiness(api);
 registerVmDns(api);

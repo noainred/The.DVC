@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-06T00:13:14.645Z",
-  "count": 104,
+  "generatedAt": "2026-10-06T00:35:32.101Z",
+  "count": 107,
   "tools": [
     {
       "k": "service-hub",
@@ -580,6 +580,30 @@
     },
     {
       "k": "contention",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "vm-availability",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "cost-showback",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "migration-readiness",
       "adminOnly": false,
       "perm": null,
       "external": null,
