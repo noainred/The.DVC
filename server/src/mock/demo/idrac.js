@@ -407,6 +407,7 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   await repairMockServiceTags();
   await ensureBareMetalSeed(snapshot);
   await ensureUnsupportedDemo(snapshot);
+  await ensureScanLogDemo(snapshot, now);
   const list = await demoServers(snapshot);
   if (!list.length) return { servers: 0, inventoryRefreshed: 0, demo: true };
   const [{ pushSensorSample, markSensorPollStart, setSensorPollCycle }, { setThermalDetail, setSensorCollection, sensorCollectionStale }, { setInventory, inventoryStale, getInventory }] = await Promise.all([
@@ -549,7 +550,7 @@ export function demoWatts(p, load) {
 }
 
 export function _resetBareMetalSeedForTest() { _specCache = new Map(); _seedDone = false; _tagRepaired = false; }
-export function _resetIdracDemoForTest() { _unsupDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
+export function _resetIdracDemoForTest() { _unsupDone = false; _scanLogDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
 
 let _unsupDone = false;
 /**
@@ -590,3 +591,52 @@ export async function ensureUnsupportedDemo(snapshot) {
   console.log(`[mock] 미지원 서버(비-Dell) 데모 ${n}대`);
   return { added: n };
 }
+
+/* ───────────────────────── v2.710 iDRAC 스캔 로그 데모 ───────────────────────── */
+let _scanLogDone = false;
+/**
+ * 설정 › 스캔 로그(`idrac-scan-log.json`)가 비어 '표시할 로그가 없습니다' 였다 — 법인마다 지난 14일의 주기 스캔(하루 1회) 결과를
+ * 한 번 넣는다. 엣지 위임 법인은 위임(dispatch) + 회신(result) 짝을 같은 reqId 로, 일부 회차에는 무응답·인증 실패·HPE 계정 없음을 섞는다.
+ * mock 모드 · 로그가 비어 있을 때 · 법인 할당(assignDemoCorps)이 끝난 뒤에만(법인 칸에 vCenter id 를 지어 넣지 않는다).
+ */
+export async function ensureScanLogDemo(snapshot, now = Date.now()) {
+  if (!isMockMode() || _scanLogDone) return { skipped: 'done-or-not-mock' };
+  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean);
+  if (!vcs.length) return { skipped: 'no-snapshot' };
+  const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+  if (!vcs.every((vc) => datacenterOfVcenter(vc))) return { skipped: 'no-corp-yet' };
+  _scanLogDone = true;
+  const { demoEdgeOfVcenter } = await import('./edge.js');
+  const { seedIdracScanLogIfEmpty } = await import('../../idrac/scanLog.js');
+  const seen = new Set();
+  const recs = [];
+  for (const vc of vcs) {
+    const dc = datacenterOfVcenter(vc);
+    if (!dc || seen.has(dc)) continue;
+    seen.add(dc);
+    const edge = demoEdgeOfVcenter(vc);
+    const service = `scan-${String(vc).replace(/^vc-/, '')}`;
+    const size = 64 + (demoHash(`sl|${dc}`) % 4) * 64;
+    for (let d = 14; d >= 1; d--) {
+      const at = Math.floor((now - d * DAY) / HOUR) * HOUR + (demoHash(`slh|${dc}`) % 6) * HOUR + 7 * MIN;
+      const r = demoRand(`sl|${dc}|${d}`);
+      const found = 6 + (demoHash(`slf|${dc}`) % 20);
+      const unreachable = r < 0.15 ? 3 + Math.floor(r * 40) : Math.floor(r * 3);
+      const authFailed = r > 0.9 ? 2 : 0;
+      const noCreds = /seoul|shanghai/i.test(dc) ? 1 : 0;
+      const base = { trigger: d === 1 ? 'manual' : 'periodic', datacenterId: dc, service, scanned: size, found, registered: d === 14 ? found : (r > 0.8 ? 1 : 0), unreachable, authFailed, authSkipped: 0, noCreds };
+      if (edge) {
+        const reqId = `demo-${demoHash(`slr|${dc}|${d}`).toString(16)}`;
+        recs.push({ ...base, at, phase: 'dispatch', kind: 'delegated', agent: edge.name, dispatch: 'poll', reqId, scanned: null, found: null, registered: null, unreachable: null, authFailed: null, authSkipped: null, noCreds: null });
+        recs.push({ ...base, at: at + 90_000 + (demoHash(reqId) % 60) * 1000, phase: 'result', kind: 'delegated', agent: edge.name, dispatch: 'poll', reqId, durationMs: 40_000 + (demoHash(reqId) % 50) * 1000,
+          ...(edge.degraded && r < 0.2 ? { error: '엣지 회신 시한 초과(데모)' } : {}) });
+      } else {
+        recs.push({ ...base, at, phase: 'result', kind: 'central', durationMs: 20_000 + (demoHash(`sld|${dc}|${d}`) % 40) * 1000 });
+      }
+    }
+  }
+  const n = seedIdracScanLogIfEmpty(recs);
+  if (n) console.log(`[mock] iDRAC 스캔 로그 데모 ${n}건(법인 ${seen.size}곳 · 14일)`);
+  return { added: n };
+}
+

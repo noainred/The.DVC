@@ -1,5 +1,6 @@
 // 일일 리포트(헬스·스냅샷 나이·좀비·인증서·라이트사이징 등) — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { pageArgs } from '../../util/pageArgs.js';
+import { numOrNull } from '../../util/numOrNull.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4): /tools 조회 tools 권한
 import { store } from '../../store.js';
@@ -17,7 +18,7 @@ import { certStatus } from '../../security/certMonitor.js';
 import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
-import { memoJson, scopeSlice, scopeKey } from './shared.js';
+import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
 
 /**
  * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
@@ -29,6 +30,29 @@ export function withForecastCap(r) {
   if (!r || typeof r !== 'object') return r;
   const capOf = (arr) => Array.isArray(arr) && arr.length >= FORECAST_LIST_LIMIT;
   return { ...r, listLimit: FORECAST_LIST_LIMIT, datastoresCapped: capOf(r.datastores), gpuCapped: capOf(r.gpu) };
+}
+
+/**
+ * v2.710 데모(mock) — 목 서버의 데이터스토어 사용량 롤업은 기동 뒤 몇 시간치뿐이라 회귀식(점 4개 이상 · R² ≥ 0.3)이 하나도 나오지
+ * 않아 이 리포트가 데모에서 늘 '0개' 였다. 실제 추세가 하나도 없을 때만 `/tools/capacity-forecast` 와 **같은 합성 증가율**로 채우고
+ * 행·응답에 synthesized 를 싣는다(R² 는 지어내지 않고 null). 실제 추세가 하나라도 있으면 건드리지 않는다.
+ */
+export function withDemoForecast(r, snap, vcFilter = '') {
+  if (!r || (r.datastores || []).length) return r;
+  const now = Date.now();
+  const rows = [];
+  for (const d of snap?.datastores || []) {
+    if (vcFilter && d.vcenterId !== vcFilter) continue;
+    // ⚠ Number(null) === 0 — 사용량을 모르는 DS 가 '0 GB 사용' 으로 둔갑하지 않게 numOrNull(자체 테스트가 잡았다).
+    const cap = numOrNull(d.capacityGB); const used = numOrNull(d.usedGB);
+    if (!(cap > 0) || used == null) continue;
+    const slope = Math.max(0, cap * 0.0008 + (hash(d.id) % 5) * 0.2);
+    if (!(slope > 0) || used >= cap) continue;
+    const daysToLimit = Math.round((cap - used) / slope);
+    rows.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, capacityGB: Math.round(cap), usedGB: Math.round(used), usagePct: d.usagePct, current: Math.round(used), slopePerDay: Number(slope.toFixed(2)), r2: null, daysToLimit, etaTs: now + daysToLimit * 86_400_000, synthesized: true });
+  }
+  rows.sort((a, b) => a.daysToLimit - b.daysToLimit);
+  return { ...r, datastores: rows.slice(0, 100), soon: rows.filter((x) => x.daysToLimit <= 30).slice(0, 30), synthesized: rows.length > 0 };
 }
 
 // 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX는 범위 제한 계정에는 숨긴다.
@@ -107,9 +131,12 @@ api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJso
 api.get('/tools/report/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-capacity', async (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
-  const r = forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
-  return withForecastCap(r);
+  // v2.710: forecastCapacity 는 async(v2.537~) — await 이 빠져 Promise 를 펼친 빈 객체({listLimit…})가 나가 이 리포트가
+  //   모든 모드에서 '추세 산출 0개 · 관측 undefined일' 이었다(데모 전수 조사에서 발견).
+  const r = await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
+  return withForecastCap(snap.source === 'mock' ? withDemoForecast(r, scoped, req.query.vcenterId || '') : r);
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+
 
 
 // ⑦ 알림 채널·이력 — 웹훅 URL(시크릿)은 절대 내리지 않는다(설정 여부만).

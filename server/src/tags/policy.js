@@ -10,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'tag-policy.json');
 export const REQUIRED_MAX = 20;
@@ -54,7 +55,11 @@ export function loadTagPolicy() {
   const base = { requiredCategories: [], corpCategory: '', updatedAt: null, updatedBy: null };
   const file = FILE();
   try {
-    if (fs.existsSync(file)) {
+    // v2.710 데모(mock): 정책 파일이 없으면 목 데이터의 카테고리로 만든 데모 정책을 쓴다 — 정책이 비어 있으면 '누락' 판정이
+    //   하나도 보이지 않는다. 파일은 만들지 않고(demo:true 로 밝힌다) 관리자가 저장하면 그 값이 이긴다.
+    if (!fs.existsSync(file) && isMockMode()) {
+      Object.assign(base, { requiredCategories: ['Environment', 'Owner-Team', 'Corp'], corpCategory: 'Corp', demo: true });
+    } else if (fs.existsSync(file)) {
       const p = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!isObj(p)) throw new Error('객체가 아닙니다');
       const n = normalizePolicy(p);

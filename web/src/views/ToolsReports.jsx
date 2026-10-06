@@ -342,11 +342,12 @@ export function CapacityForecast({ scope }) {
     { key: 'slopePerDay', label: '증가/일', align: 'right', render: (r) => `${r.slopePerDay > 0 ? '+' : ''}${r.slopePerDay}GB` },
     { key: 'daysToLimit', label: '고갈까지', align: 'right', render: (r) => (r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
     { key: 'etaTs', label: '예상일', render: (r) => fmtDay(r.etaTs) },
-    { key: 'r2', label: '신뢰도(R²)', align: 'right' },
+    { key: 'r2', label: '신뢰도(R²)', align: 'right', render: (r) => (r.r2 == null ? '—' : r.r2) }, // v2.710: 데모 합성 행은 R² 를 지어내지 않는다
   ];
   return (
     <>
       {errBanner(error)}
+      {data.synthesized && <div className="banner" style={{ marginBottom: 8 }}>데모 모드 — 추세를 계산할 사용량 이력이 아직 없어 합성 증가율로 채웠습니다(신뢰도 R² 는 ‘—’). 실제 운영에서는 시간당 사용량 롤업으로 계산합니다.</div>}
       <div className="kpis">
         <Kpi label="30일 내 고갈 예상" value={(data.soon || []).length} unit="개" accent={(data.soon || []).length ? 'var(--red)' : undefined} />
         <Kpi label="추세 산출" value={rows.length} unit="개" meta={`관측 ${data.config?.days}일 · 분석 대상 ${data.scannedDatastores}개`} />

@@ -55,8 +55,8 @@ const n = numOrNull;     // v2.561: 판정은 util/numOrNull.js 하나가 갖는
  *    scanned, found, registered, durationMs, error, stopped }
  * 비밀번호/자격증명 등 민감정보는 받지도 저장하지도 않는다.
  */
-export function appendIdracScanLog(rec = {}) {
-  const entry = {
+function appendShape(rec = {}) {
+  return {
     at: Date.now(),
     trigger: rec.trigger === 'manual' ? 'manual' : 'periodic',
     phase: rec.phase === 'dispatch' ? 'dispatch' : 'result',
@@ -80,12 +80,35 @@ export function appendIdracScanLog(rec = {}) {
     error: rec.error ? s(rec.error, 500) : null,
     stopped: rec.stopped ? true : undefined,
   };
+}
+
+export function appendIdracScanLog(rec = {}) {
+  const entry = appendShape(rec);
   const data = read();
   const entries = data.entries.length >= MAX_ENTRIES
     ? [...data.entries.slice(-(MAX_ENTRIES - 1)), entry]
     : [...data.entries, entry];
   write({ entries });
   return entry;
+}
+
+/**
+ * v2.710 데모(mock) 전용 — 비어 있는 로그에 과거 시각의 기록을 한 번에 넣는다(`appendIdracScanLog` 는 시각을
+ * 지금으로 찍으므로 과거 이력을 만들 수 없다). 로그가 이미 있으면 아무것도 하지 않는다(사람이 실행한 기록을 덮지 않게).
+ * 각 기록은 append 와 같은 정규화를 거친다(at 만 받은 값을 쓴다).
+ */
+export function seedIdracScanLogIfEmpty(recs = []) {
+  const data = read();
+  if (data.entries.length) return 0;
+  const entries = [];
+  for (const r of recs) {
+    const at = numOrNull(r?.at);
+    if (at == null) continue;
+    const e = appendShape(r); e.at = at; entries.push(e);
+  }
+  entries.sort((a, b) => a.at - b.at);
+  write({ entries: entries.slice(-MAX_ENTRIES) });
+  return entries.length;
 }
 
 /**

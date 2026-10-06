@@ -59,6 +59,8 @@ function synthDetail(type, i, hosts) {
   if (type === 'VmRemovedEvent') return { kind: 'remove', host: h(0) };
   return null;
 }
+// v2.710: 데모 첫 수집 기간(일) — 가용성 화면의 가장 긴 보기(90일)를 덮는다.
+export const MOCK_FIRST_DAYS = 91;
 // mock: sinceTs~now 사이에 분산된 합성 이벤트 N개.
 function synthEvents(vcId, sinceTs, n) {
   const snap = store.get();
@@ -138,9 +140,12 @@ export async function pollLogsOnce({ manual = false } = {}) {
       if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
       try {
         const last = db.lastTs(vc.id);
-        const sinceTs = last ? last + 1 : Date.now() - 7 * DAY; // 첫 수집은 최근 7일
+        // 첫 수집은 최근 7일. v2.710: 데모(mock)는 91일 — VM 가용성(7·30·90일 보기)이 합성 이벤트 7일치만으로
+        //   전 VM 을 '수집 시작부터만 잼(일부 기간)' 으로 내던 공백. 이벤트 수도 기간에 비례(7일마다 25건).
+        const firstDays = mock ? MOCK_FIRST_DAYS : 7;
+        const sinceTs = last ? last + 1 : Date.now() - firstDays * DAY;
         const events = mock
-          ? synthEvents(vc.id, sinceTs, 25)
+          ? synthEvents(vc.id, sinceTs, last ? 25 : 25 * Math.ceil(firstDays / 7))
           : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll, signal }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)

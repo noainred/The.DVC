@@ -96,6 +96,11 @@ export async function runVmDnsHistoryOnce({ snap = null, now = Date.now() } = {}
     for (const f of firsts) latest.set(f.vmId, { sig: f.sig, seen: now });
     for (const c of changes) latest.set(c.vmId, { sig: c.sig, seen: now });
     for (const t of touches) { const p = latest.get(t.vmId); if (p) p.seen = now; }
+    // v2.710: 데모(mock)에서는 첫 관측 뒤 한 번 과거 변경 이력을 채운다(mock 이 아니면 아무것도 하지 않는다).
+    if (firsts.length) {
+      const { ensureVmDnsChangeDemo } = await import('../mock/demo/vmdns.js');
+      await ensureVmDnsChangeDemo(s, now).catch((e) => console.warn(`[vm-dns] 데모 이력 실패: ${e?.message || e}`));
+    }
     lastRunAt = now;
     last = { at: now, vms, reported, unknown, notCollected, first: firsts.length, changed: changes.length, touched: touches.length, ms: Date.now() - t0, error: null };
     if ((++tick % PRUNE_EVERY) === 0) {
