@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { getDataSource } from '../runtime-settings.js';   // v2.708: mock 판정(flags.js 와 같은 판정 — 이 파일은 순환을 피해 직접 읽는다)
+import { registerExitFlush } from '../util/exitFlush.js';
 
 const FILE = path.join(config.configDir, 'sanswitch-latest.json');
 let _map = null;
@@ -22,7 +24,19 @@ function load() {
 }
 function flush() { atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 }); }
 
-export function putSnapshot(snap) { load().set(snap.deviceId, snap); flush(); }
+/**
+ * v2.708 데모(mock): 데모 장비가 수십 대라 장비마다 파일 전체를 다시 쓰면(장비 수²) 시드·주기마다 수백 MB 를 동기로 쓴다.
+ *   mock 에서만 2초 디바운스로 묶는다(이 파일은 캐시 성격 — 손상·유실 시 다음 폴링이 재구축). live 는 예전 그대로 즉시 쓴다.
+ */
+let _flushTimer = null;
+function flushSoon() {
+  if (_flushTimer) return;
+  _flushTimer = setTimeout(() => { _flushTimer = null; try { flush(); } catch (e) { console.warn(`[sanswitch] 스냅샷 저장 실패: ${e.message}`); } }, 2000);
+  _flushTimer.unref?.();
+}
+const isMock = () => { try { return getDataSource() === 'mock'; } catch { return false; } };
+registerExitFlush('sanswitch-latest', () => { if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; flush(); } });
+export function putSnapshot(snap) { load().set(snap.deviceId, snap); if (isMock()) flushSoon(); else flush(); }
 export function localSnapshots() { return [...load().values()]; }
 export function getSnapshot(deviceId) { return load().get(deviceId) || null; }
 export function dropSnapshot(deviceId) { if (load().delete(deviceId)) flush(); }

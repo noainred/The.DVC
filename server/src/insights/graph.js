@@ -6,6 +6,7 @@
  * 에이전트가 push한 vCenter는 그 에이전트 아래에, 중앙 직접수집 vCenter는 중앙 아래에 연결.
  */
 
+import { demoVcAgentPairs } from '../mock/demo/edge.js';
 import { listInventory } from '../central/inventory.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { listRegistry as listNsxRegistry } from '../nsx/registry.js';
@@ -49,6 +50,8 @@ export function buildGraph(snap, { vms = false, vcenterId = null, host = null, a
     if (!a || !a.agent || !Array.isArray(a.vcenters)) continue;
     for (const vc of a.vcenters) if (vc && vc.vcId) vcAgent.set(vc.vcId, a.agent);
   }
+  // v2.708: 데모(mock) — 인벤토리 push 기록이 없으면 데모 엣지가 맡는 vCenter 를 그 엣지에 붙인다(mock 아니면 빈 목록).
+  for (const [vcId, ag] of demoVcAgentPairs(vcenters)) if (!vcAgent.has(vcId)) vcAgent.set(vcId, ag);
   // 표시되는 vCenter를 담당하는 에이전트만(포커스 시 관련 엣지만).
   const agents = new Set();
   for (const v of vcenters) { const ag = vcAgent.get(v.id); if (ag) agents.add(ag); }

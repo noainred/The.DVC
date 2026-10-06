@@ -31,6 +31,7 @@ import { listCurUserActivity } from '../../curuser/activityLog.js';
 import { curUserPushStatus } from '../../agent/curUserPush.js';
 import { guestAgentScript, installCommand, AGENT_FILE } from '../../curuser/agentScript.js';
 import { KIND_LABEL } from '../../curuser/guestinfoSource.js';
+import { demoCurUserSettings } from '../../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 
 const DAY = 86_400_000;
 const clampDays = (v) => Math.max(1, Math.min(365, Math.round(Number(v) || 7)));
@@ -46,7 +47,8 @@ function scopeFilter(req, snap) {
 api.get('/tools/curuser', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const ok = scopeFilter(req, snap);
-  const s = loadCurUser();
+  // v2.708: 데모(mock)는 폴러와 같은 '켜진 것처럼' 설정으로 대상을 해석한다(저장 설정은 그대로).
+  const s = demoCurUserSettings(loadCurUser(), snap);
   const vcNameOf = (id) => (snap.vcenters || []).find((v) => v.id === id)?.name || id;
   const recs = (await latestRecords()).filter((r) => ok(r.vcenterId));
   const scope = resolveTargets(snap.vms || [], s);
@@ -73,6 +75,7 @@ api.get('/tools/curuser', requirePerm('tools'), async (req, res) => {
     poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)),   // v2.583: 전 법인 합계·범위 밖 id 차단
     db: scopeDbStatus(await curUserDbStatus(), req.user),
     mock: snap.source === 'mock',
+    ...(s.demo ? { demo: true } : {}),
   });
 });
 

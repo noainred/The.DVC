@@ -14,6 +14,7 @@
  * 설정 응답의 targets 는 범위 계정에 교집합만(범위 밖 id 열거 금지). 도구 게이트 키는 `waste`
  * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
  */
+import { demoOn, isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock)는 켜진 것처럼
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
@@ -212,7 +213,7 @@ api.get('/tools/vmseries/top', requirePerm('tools'), (req, res) => memoJson(req,
   }
   items.sort((a, b) => b.moments - a.moments);
   const s = loadVmSeriesSettings();
-  return { days, limit, items: items.slice(0, limit), total: items.length, missingDb, thresholds: s.thresholds, enabled: s.enabled, intervalSec: 20, synthesized: snap.source === 'mock' };
+  return { days, limit, items: items.slice(0, limit), total: items.length, missingDb, thresholds: s.thresholds, enabled: demoOn(s.enabled), intervalSec: 20, synthesized: snap.source === 'mock', ...(isMockMode() ? { demo: true } : {}) };
 }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${req.query.vcenterId || ''}|${req.query.days || ''}|${req.query.limit || ''}` }));
 
 api.delete('/tools/vmseries/data', requireRole('admin'), async (req, res) => {

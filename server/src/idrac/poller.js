@@ -125,7 +125,16 @@ async function pollOnceInner({ manual = false } = {}) {
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   // mock 데모: 실제 Redfish 폴 대신 합성 전력 샘플 적재(전력 화면이 비지 않게). live/auto엔 무영향.
   if (isMockMode()) {
-    try { const { store } = await import('../store.js'); const r = await mockIdracPollTick(store.get?.()); lastRun = { at: Date.now(), ok: r?.measured || 0, failed: 0, mock: true, results: [] }; } catch { /* */ }
+    // v2.708: 전력은 데모 곡선(demo/idrac.js demoPowerNow — 백필과 같은 곡선)으로 넘긴다.
+    let demoMod = null;
+    try { demoMod = await import('../mock/demo/idrac.js'); } catch { /* 데모 모듈 없음 — 예전 근사값 */ }
+    try { const { store } = await import('../store.js'); const snap = store.get?.(); const wattsOf = demoMod ? await demoMod.demoPowerNow(snap).catch(() => null) : null; const r = await mockIdracPollTick(snap, { wattsOf }); lastRun = { at: Date.now(), ok: r?.measured || 0, failed: 0, mock: true, results: [] }; } catch { /* */ }
+    // v2.708: 데모 — 센서·센서 상세·인벤토리·추이 백필(전력만 있던 mock 을 실제 폴러와 같은 저장소로 채운다). 장비 접속 0.
+    try {
+      const { store } = await import('../store.js');
+      const d = demoMod ? await demoMod.mockIdracDemoTick(store.get?.()) : null;
+      if (d && lastRun) lastRun = { ...lastRun, demo: true, sensors: d.servers, inventoryRefreshed: d.inventoryRefreshed };
+    } catch (e) { console.warn(`[idrac] mock 데모 틱 실패: ${e?.message || e}`); }
     return;
   }
   // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).

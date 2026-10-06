@@ -9,7 +9,7 @@
  *    (setInterval 은 생성 시 간격에 묶여 설정 변경이 재시작 전까지 안 먹는다).
  */
 import { config, clampIntervalMs } from '../config.js';
-import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
+import { devicesForThisNode, getDeviceWithSecret, registryLoadError, listDevices, seedDemoDevices } from './registry.js';
 import { putSnapshot, getSnapshot } from './store.js';
 import { recordActivity } from './activityLog.js';
 import { emptySnapshot } from './types.js';
@@ -21,6 +21,8 @@ import { createAuthGuard } from '../util/authGuard.js';
 import { credFingerprintParts } from '../util/credFingerprint.js';
 import { classifyFailure, makeTracer } from './testDiag.js';
 import { precheckTarget } from './precheck.js';
+import { isMockMode } from '../mock/demo/flags.js';   // v2.708 데모(mock) — live 동작은 바꾸지 않는다
+import { isSanDemoId, sanDemoLayoutFor, buildSanDemoSnapshot, ensureSanDemo, sanDemoDone } from '../mock/demo/sanswitch.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
@@ -103,6 +105,10 @@ async function collectOne(dev, { periodic = false } = {}) {
     if (!fn) {
       snap = emptySnapshot(full);
       snap.error = `수집기 미구현: ${full.type}`;
+    } else if (isMockMode()) {
+      // v2.708 데모: 장비에 접속하지 않는다 — 합성 CLI 출력을 실제 파서(buildSnapshot)에 넣어 스냅샷을 만든다.
+      const { store } = await import('../store.js');
+      snap = buildSanDemoSnapshot(full, sanDemoLayoutFor(full, store.get()), fosSsh.buildSnapshot, Date.now());
     } else {
       try {
         // 장비당 타임아웃 — 느린 1대가 전체 주기를 막지 않게(고RTT 법인 대비).
@@ -158,7 +164,9 @@ export async function pollSanSwitchOnce({ manual = false } = {}) {
   const t0 = Date.now();
   let collected = 0; let failed = 0; let authStopped = 0;
   try {
-    const devices = devicesForThisNode();
+    // v2.708: mock 이면 데모 시드(비어 있을 때만), live 는 데모 장비(mock-san-*)를 건너뛴다 — 지어낸 주소로 접속하지 않게.
+    if (isMockMode()) await ensureSanSwitchDemo().catch((e) => console.warn(`[sanswitch] 데모 시드 실패: ${e.message}`));
+    const devices = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
     // v2.689(C-06): 등록부에서 빠진 장비의 명령 조사 캐시를 정리한다(등록부를 못 읽은 주기는 건너뛴다 — 빈 목록이 전부 삭제가 되지 않게).
     if (!registryLoadError()) fosSsh.pruneCaps(new Set(devices.map((d) => fosSsh.capsKeyOf(d))));
     await pool(devices, CONCURRENCY, async (d) => {
@@ -174,6 +182,7 @@ export async function pollSanSwitchOnce({ manual = false } = {}) {
 export async function collectDeviceNow(id) {
   const dev = devicesForThisNode().find((d) => d.id === id) || getDeviceWithSecret(id);
   if (!dev) throw new Error('이 노드가 수집하는 장비가 아닙니다.');
+  if (!isMockMode() && isSanDemoId(dev.id)) throw new Error('데모(mock) 장비는 live 모드에서 수집하지 않습니다 — 지우거나 데모 모드에서 보세요.');
   // 폴러와 가드를 공유한다(CLAUDE.md '수동 실행 API 도 같은 가드') — 같은 스위치에 SSH 세션이 겹치면
   // in-flight 상태가 먼저 끝난 쪽에 지워지고 처리량 델타 간격이 흐트러진다.
   if (_inFlight.has(dev.id)) return false;
@@ -232,6 +241,44 @@ const summary = (s) => ({
   sections: s.sections,
 });
 
+/**
+ * v2.708 데모 시드(mock 에서만, 등록부가 비어 있을 때만) — 장비 등록 + 스냅샷 즉시 생성 + 포트 사용량 7일 백필.
+ * 화면 조회 라우트도 부른다(폴러 첫 주기 25초를 기다리지 않게). live 에서는 null.
+ */
+export async function ensureSanSwitchDemo() {
+  if (!isMockMode()) return null;
+  if (sanDemoDone()) return sanDemoDone();   // 끝났으면 법인 축 계산도 다시 하지 않는다(조회 라우트가 매번 부른다)
+  const { store } = await import('../store.js');
+  const { importSamples } = await import('./perfDb.js');
+  const { loadPerfSettings } = await import('./perfSettings.js');
+  const { recordRun } = await import('./healthHistory.js');
+  const { checkDevice, checkPorts } = await import('./healthCheck.js');
+  // 법인 축은 다른 데모 화면(스토리지·PDU)과 같은 규칙: 관리자 할당 → 데모 법인('<도시> 법인' — PDU 데모 demoCorps 가 만든다)
+  //   → vCenter id 그대로. 다르게 두면 같은 vCenter 가 화면마다 다른 법인으로 보인다.
+  const snapshot = store.get();
+  const dcByVc = new Map();
+  try {
+    const { demoCorps } = await import('../mock/demo/pdu.js');
+    await demoCorps(snapshot);
+    const dcs = await import('../datacenter/store.js');
+    const list = dcs.listDatacenters();
+    const assign = dcs.getDatacenterAssign() || {};
+    for (const vc of snapshot?.vcenters || []) {
+      const id = String(vc.id || '');
+      if (typeof assign[id] === 'string' && assign[id]) { dcByVc.set(id, assign[id]); continue; }
+      const city = String(vc.location?.city || '').trim();
+      const hit = city && list.find((d) => String(d.name || '').trim() === `${city} 법인`);
+      if (hit) dcByVc.set(id, String(hit.id));
+    }
+  } catch { /* 법인 축을 못 정하면 vCenter id 를 그대로 쓴다 */ }
+  return ensureSanDemo({
+    snapshot, registry: { listDevices, seedDemoDevices },
+    putSnapshot, recordActivity, buildSnapshot: fosSsh.buildSnapshot, importSamples, recordRun, checkDevice, checkPorts,
+    dcOf: (id) => dcByVc.get(String(id)) || id,
+    retentionDays: loadPerfSettings().retentionDays,
+  });
+}
+
 export function startSanSwitchPoller() {
   if (_timer) return;
   // 기동 25초 후 첫 수집(스토리지 폴러 15초와 겹치지 않게 어긋냄), 이후 현재 주기로 재무장.
@@ -239,5 +286,5 @@ export function startSanSwitchPoller() {
 }
 
 export function sanSwitchPollerStatus() {
-  return { ..._last, intervalMs: pollMs(), busy: _busy, inFlight: [..._inFlight.values()], concurrency: CONCURRENCY };
+  return { ..._last, intervalMs: pollMs(), busy: _busy, inFlight: [..._inFlight.values()], concurrency: CONCURRENCY, ...(isMockMode() ? { demo: true } : {}) };
 }

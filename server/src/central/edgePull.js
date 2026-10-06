@@ -29,6 +29,11 @@ import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.611: 끝 슬래시 제거는 선형 루프 하나
 import { findCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
+import { isMockMode } from '../mock/demo/flags.js';
+import { isDemoCollector, demoEdgePullBody } from '../mock/demo/edge.js'; // v2.708: 데모 엣지는 접속하지 않고 합성 응답
+import { recordOutbound } from '../util/outboundStats.js';
+import { currentVersion } from '../config.js';
+import { STATUS_SPEC } from '../edgelog/spec.js';
 
 /** 실패 종류 열거 — 세 pull 모듈이 낼 수 있는 kind 의 **전부**(웹 라벨 맵과 1:1). */
 export const EDGE_PULL_KINDS = Object.freeze([
@@ -90,6 +95,12 @@ export async function pullFromEdge(agent, path, {
 
   const p = String(path || '');
   const pathOnly = p.split('?')[0];
+  // v2.708: 데모(mock) 모드의 데모 엣지(mock- · .demo.invalid)는 **접속하지 않는다** — 합성 응답 또는 '데모 데이터 없음'.
+  if (isMockMode() && isDemoCollector(col)) {
+    const demo = demoEdgePullBody(col, p, { version: (() => { try { return currentVersion(); } catch { return undefined; } })(), statusSpec: STATUS_SPEC, record: recordOutbound });
+    if (demo) return { ok: true, ms: demo.ms, body: demo.body, col, fetched: true };
+    return { ok: false, kind: 'disabled', reason: '데모 엣지입니다 — 이 경로는 데모 데이터가 없습니다(실제 엣지에 접속하지 않습니다).', ms: 0, col, fetched: true };
+  }
   const url = `${trimTrailingSlashes(t(col.url))}${p}`;
 
   let res;

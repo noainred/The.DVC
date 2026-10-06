@@ -34,6 +34,7 @@ import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/
 import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
+import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 장비에 접속하지 않고 합성 행
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
@@ -93,7 +94,7 @@ const _prev = new Map();
 export function bmUsageStatus() {
   const s = loadBmUsageSettings();
   return {
-    enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs,
+    enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs, ...(isMockMode() ? { demo: true } : {}),
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     // v2.613 RUNTIME2613-05: 실제로 쓰는 예산(장비 시한과 묶인 값)과 잘랐는지.
     osBudgetMs: OS_BUDGET.effective, osBudgetClamped: OS_BUDGET.clamped, entBudgetEffectiveMs: ENT_BUDGET.effective, entBudgetClamped: ENT_BUDGET.clamped, budgetMarginMs: BUDGET_MARGIN_MS,
@@ -155,8 +156,9 @@ const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
 
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
 export async function currentTargets() {
-  const s = loadBmUsageSettings();
   const snap = store.get();
+  // v2.708: 데모(mock)는 판정 지점에서만 '켜짐 · 전 법인 선택' 으로 덮는다(설정 파일은 그대로).
+  const s = isMockMode() ? (await import('../mock/demo/baremetal.js')).demoBmSettings(loadBmUsageSettings(), snap?.vcenters || []) : loadBmUsageSettings();
   const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw, registryLoadError: bmRegistryLoadError }, { getInventory }] = await Promise.all([
     import('../insights/fleetInventory.js'), import('../idrac/registry.js'), import('../bmstor/registry.js'),
     import('../idrac/invCache.js'),
@@ -526,7 +528,11 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     _entBudget = ENT_BUDGET_PER_RUN;
     _entProbeBudget = ENT_PROBE_PER_RUN;
     _entDeferred = 0;
-    const results = await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
+    // v2.708: 데모(mock) — 장비(iDRAC·SSH)에 접속하지 않고 합성 행을 만든다. 첫 주기에 원시 14일 + 일 롤업 45일을 1회 백필한다.
+    const demo = isMockMode() ? await import('../mock/demo/baremetal.js') : null;
+    if (demo) await demo.backfillBmUsage(targets).catch(() => {});
+    const results = demo ? demo.demoBmUsageResults(targets, Date.now())
+      : await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
     /*
      * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
      *   HBA)을 들고 있어 서버당 수 KB 다. 법인을 끄거나 등록부에서 서버가 빠져도 예전에는 그 항목이
@@ -565,7 +571,7 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
         viaSsh: results.filter((r) => r?.ent?.ok && String(r.ent.via || '').includes('ssh')).length,
         unparsed: results.filter((r) => r?.ent && r.ent.kind === 'unparsed').length,
       },
-      dbOk: !!ins.ok, dbError: ins.error || null, counts, ...srcErr, trigger,
+      dbOk: !!ins.ok, dbError: ins.error || null, counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };
     return { ok: true, ...(_last) };

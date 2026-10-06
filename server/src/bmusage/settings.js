@@ -22,6 +22,7 @@ import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 ·
 import crypto from 'node:crypto';
 import { registerStateFile } from '../util/stateFiles.js';
 import { capStr } from '../util/capStr.js';
+import { demoOn } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 켜진 것처럼 — 설정 파일은 바꾸지 않는다
 
 const FILE = () => path.join(config.configDir, 'bmusage-settings.json');
 /*
@@ -408,7 +409,7 @@ export function bmUsageEnabled() {
   const env = String(process.env.BMUSAGE_ENABLED || '').trim().toLowerCase();
   if (env === 'false' || env === '0') return false;
   if (env === 'true' || env === '1') return true;
-  return loadBmUsageSettings().enabled;
+  return demoOn(loadBmUsageSettings().enabled);
 }
 
 /**

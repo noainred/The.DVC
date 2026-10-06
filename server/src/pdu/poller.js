@@ -21,6 +21,8 @@ import { emptySnapshot, summarize } from './types.js';
 import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts, readAlertKeys } from './thresholds.js';
 import { loadAlertConfig, notify } from '../alerts.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
+import { isMockMode } from '../mock/demo/flags.js';
+import { demoPduSnapshot, ensurePduDemo, isDemoId, pduDemoActive } from '../mock/demo/pdu.js'; // v2.708 데모(mock 전용)
 
 const CONCURRENCY = Math.max(1, Number(process.env.PDU_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
@@ -50,7 +52,11 @@ const _inFlight = new Set();          // v2.479(감사 도메인 B-3): 같은 �
 export async function collectDeviceNow(deviceId, { onTrace = null, periodic = false } = {}) {
   const dev = getDeviceWithSecret(deviceId);
   if (!dev) return { ok: false, reason: '없는 장비입니다.' };
-  if (periodic) {
+  // v2.708: 데모(mock-) 장비는 live/auto 에서 접속하지 않는다(합성 주소로 SSH 를 열지 않게).
+  // 데모 장비(mock-)만 합성한다 — mock 모드라도 사람이 등록한 장비는 예전처럼 수집한다(기존 동작 불변).
+  const demo = isMockMode() && isDemoId(dev.id);
+  if (!isMockMode() && isDemoId(dev.id)) return { ok: false, skipped: true, reason: '데모(mock) 장비는 mock 모드에서만 수집합니다.' };
+  if (periodic && !demo) {
     const stop = authGuard.authStopFor(dev);
     if (stop) {
       // 정지 사실을 스냅샷에 싣는다 — 재시작 뒤(인메모리가 빈 상태)에도 '미수집' 이 아니라 '멈췄다' 로 보이게.
@@ -66,9 +72,11 @@ export async function collectDeviceNow(deviceId, { onTrace = null, periodic = fa
   _inFlight.add(dev.id);
   const started = Date.now();
   try {
-    const snap = await withDeadline(DEVICE_TIMEOUT_MS,
-      (signal) => apcSsh.collect(dev, { signal, onTrace }), '수집 타임아웃');
+    // v2.708: mock 모드는 SSH 대신 합성 스냅샷(장비 접속 0). 실패 스냅샷(ok:false)은 값을 지어내지 않고 실패로 남긴다.
+    const snap = demo ? demoPduSnapshot(dev, Date.now())
+      : await withDeadline(DEVICE_TIMEOUT_MS, (signal) => apcSsh.collect(dev, { signal, onTrace }), '수집 타임아웃');
     snap.agent = config.agent.centralUrl ? config.agent.name : '';
+    if (demo && snap.ok === false) { _snapshots.set(dev.id, snap); return { ok: false, ms: Date.now() - started, reason: snap.error }; }
     _snapshots.set(dev.id, snap);
     authGuard.clearAuthStop(dev.id); // 로그인됐다 — 정지 해제
     await recordSnapshot(snap);
@@ -130,7 +138,9 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace
  */
 export async function pollOnce({ manual = false } = {}) {
   if (_running) return { ok: false, reason: '이미 수집 중입니다.', running: true };
-  const devices = devicesForThisNode();
+  // v2.708: mock 모드는 등록부가 비어 있으면 데모 PDU 를 시드한다(한 번만). live 는 데모(mock-) 장비를 건너뛴다.
+  if (isMockMode()) { try { await ensurePduDemo(); } catch (e) { console.warn(`[pdu] 데모 시드 실패: ${e.message}`); } }
+  const devices = isMockMode() ? devicesForThisNode() : devicesForThisNode().filter((d) => !isDemoId(d.id));
   // v2.583: 삭제·재배정된 장비의 스냅샷을 대상 목록 기준으로 걸러낸다 — 남겨 두면 없는 장비에 대해 계속
   //   임계 알림이 나가고 push 에도 실린다(인메모리 상태 맵은 대상 목록으로 정리한다 — v2.550.3 규약).
   {
@@ -193,7 +203,7 @@ export function startPduPoller() {
 }
 
 export function pduPollerStatus() {
-  return { running: _running, last: _last, intervalMs: pollMs(), concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS };
+  return { running: _running, last: _last, intervalMs: pollMs(), concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS, ...(pduDemoActive(devicesForThisNode()) ? { demo: true } : {}) };
 }
 
 /** 이 노드가 들고 있는 최근 스냅샷(중앙 직접 수집분 + 엣지 로컬분). */

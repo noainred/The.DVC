@@ -114,7 +114,8 @@ export function slimItems(items) {
  * 점검 1회 기록. **같은 스냅샷(`collectedAt`)이 이미 기록돼 있으면 건너뛴다.**
  * @returns { saved:boolean, reason?:string, id?:number, runs?:number }
  */
-export async function recordRun(result, { ports = null } = {}) {
+// v2.708: opts.at — 기록 시각(데모 이력 시드용). 없으면 예전처럼 지금이다(호출부 무변경).
+export async function recordRun(result, { ports = null, at: atOpt = null } = {}) {
   if (!result?.deviceId) return { saved: false, reason: 'deviceId 없음' };
   const h = await open();
   if (!h) return { saved: false, reason: initError ? String(initError.message).slice(0, 200) : 'node:sqlite 없음' };
@@ -124,7 +125,7 @@ export async function recordRun(result, { ports = null } = {}) {
     return { saved: false, reason: '같은 수집 시각의 점검이 이미 기록돼 있습니다(수집 1회 = 기록 1회).', id: last.id };
   }
   const c = result.counts || {};
-  const at = Date.now();
+  const at = Number.isFinite(atOpt) && atOpt > 0 ? atOpt : Date.now();
   h.db.exec('BEGIN');
   try {
     h.st.ins.run(

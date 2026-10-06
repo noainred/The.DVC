@@ -8,6 +8,8 @@
  *   · 12시간 주기 + 온디맨드 새로고침(관리자). 동시 프로브 6개 제한(고RTT 28대 순차 방지).
  */
 
+import { demoCertItems, demoCertInputs } from '../mock/demo/edge.js'; // v2.708 데모(mock) 인증서
+import { isMockMode } from '../mock/demo/flags.js';
 import tls from 'node:tls';
 import { loadRegistry as loadVcRegistry } from '../vcenter/registry.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
@@ -82,9 +84,11 @@ export async function refreshCerts() {
   running = true;
   try {
     const list = targets();
-    const items = new Array(list.length);
+    // v2.708: 데모(mock)에서 등록부가 비었으면 합성 인증서(TLS 접속 없음). mock 이 아니면 null.
+    const demo = !list.length && isMockMode() ? demoCertItems(certExpiryStatus, demoCertInputs()) : null;
+    const items = demo || new Array(list.length);
     let idx = 0;
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
+    if (!demo) await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
       while (idx < list.length) {
         const i = idx++;
         const { hostPort, ...t } = list[i];   // hostPort 는 검사용 — 응답 항목 형태는 예전 그대로

@@ -188,4 +188,18 @@ export function applyPulledDevices(list, { onRemoved = null } = {}) {
   return db.devices.length;
 }
 
+/**
+ * v2.708 데모(DATA_SOURCE=mock) 시드 — 등록부가 **비어 있고 손상도 아닐 때만** 넣는다(실데이터를 덮지 않는다).
+ * id 는 `mock-san-` 접두만 받는다(live 폴러가 그 접두를 건너뛴다 — poller.js). 넣은 개수를 돌려준다.
+ */
+export function seedDemoDevices(list = []) {
+  const db = load();
+  if (db.devices.length || loadErr.get()) return 0;
+  const add = (Array.isArray(list) ? list : []).filter((d) => d && typeof d === 'object' && String(d.id || '').startsWith('mock-san-')).slice(0, MAX_DEVICES);
+  if (!add.length) return 0;
+  db.devices.push(...add.map((d) => ({ ...d })));
+  persist();
+  return add.length;
+}
+
 export function _resetForTest() { _db = null; loadErr.clear(); }

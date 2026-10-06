@@ -34,6 +34,15 @@ export function computeMismatch(esxiGuestOS, detected) {
   const ef = classifyOs(esxiGuestOS || '');
   const df = detected.family || classifyOs(detected.os);
   if (ef !== 'Other' && df !== 'Other' && ef !== df) return true;
+  // v2.708: Windows 는 '메이저 숫자' 로 비교하지 않는다 — ESXi 는 'Windows Server 2022', 게스트 버전은 '10.0.20348' 이라
+  //   숫자 비교(2022 ≠ 10)가 **모든 Windows VM 을 불일치**로 만들었다(데모 화면에서 1,611대 중 447대 전부). 연도(20xx)끼리 비교하고,
+  //   ESXi 값이 'or later' 면 그 연도보다 **오래된** 게스트만 불일치다. 연도를 하나라도 못 읽으면 단정하지 않는다(false).
+  if (ef === 'Windows' && df === 'Windows') {
+    const ey = /\b(20\d\d)\b/.exec(String(esxiGuestOS || ''))?.[1];
+    const dy = /\b(20\d\d)\b/.exec(String(detected.os || ''))?.[1];
+    if (!ey || !dy) return false;
+    return /or later/i.test(String(esxiGuestOS || '')) ? Number(dy) < Number(ey) : ey !== dy;
+  }
   const em = majorOf(esxiGuestOS || ''); const dm = majorOf(detected.osVersion || detected.os || '');
   if (em && dm && em !== dm) return true;
   return false;

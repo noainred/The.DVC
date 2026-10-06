@@ -8,6 +8,9 @@
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
+import { isMockMode } from '../mock/demo/flags.js';
+import { isDemoCollector } from '../mock/demo/edge.js';
+import { demoEdgeTick } from '../mock/demo/edgeSeed.js'; // v2.708: 데모 엣지(mock- · .demo.invalid)는 접속하지 않는다
 import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote, hostsOfOtherCollectors, remoteSeriesKey } from './state.js';
 import { setCollectorServers, sanitizeEdgeExport } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
@@ -211,7 +214,7 @@ export function _ageCycleForTest(ms) { cycleStartedAt -= ms; }
 export async function pullCollectorByAgent(agentName) {
   const key = String(agentName || '').trim().toLowerCase();
   if (!key) return false;
-  const c = loadCollectors().find((x) => x.enabled !== false && x.url
+  const c = loadCollectors().find((x) => x.enabled !== false && x.url && !isDemoCollector(x)
     && (String(x.id || '').toLowerCase() === key || String(x.name || '').toLowerCase() === key));
   if (!c) return false;
   if (pulling || inflight.has(c.id) || cycleBusy.has(c.id)) return false; // 주기 폴/중복과 겹치지 않게
@@ -229,9 +232,12 @@ export async function pullCollectorByAgent(agentName) {
 }
 
 async function pullNowInner(signal = null) {
+  // v2.708: 데모(mock) 모드면 데모 엣지의 인메모리 상태를 채운다(접속 없음). mock 이 아니면 아무것도 하지 않는다.
+  //   기다리지 않는다(실제 pull 주기를 늦추지 않게) — 겹침은 demoEdgeTick 이 스스로 막는다.
+  if (isMockMode()) demoEdgeTick().catch((e) => console.warn(`[collector] 데모 엣지 틱 실패: ${e?.message || e}`));
   // 즉시 당김이 진행 중인 수집기는 이번 주기에서 건너뛴다(같은 수집기 pullOne 교차 실행 방지).
   // v2.620(EDGE2620-02): 직전 실패 엣지는 큐 뒤로(아래 주석).
-  const enabled = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id));
+  const enabled = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id) && !isDemoCollector(c));
   // v2.693: 버려진 주기가 아직 붙잡고 있는 수집 서버는 건너뛴다(같은 수집 서버 pullOne 교차 실행 방지) — 개수는 상태에 남긴다.
   //   단 그 pull 마저 상한의 2배를 넘겼으면 영영 끝나지 않는 것으로 보고 놓아준다 — 놓지 않으면 그 수집 서버는 다시는 pull 되지 않는다.
   const nowMs = Date.now(); const maxMs = pullCycleMaxMs();

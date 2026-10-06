@@ -31,6 +31,10 @@ import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 �
 import { numOrNull } from '../util/numOrNull.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
+import { demoOn, isMockMode } from '../mock/demo/flags.js';
+import { demoVmSeriesRows } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
+import { VM_COUNTERS, HOST_COUNTERS } from './counters.js';
+import { packMoments } from './spikes.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
 // v2.589: 빈 값·'abc' 가 Number() 로 0·NaN 이 되어 디스크 가드가 꺼졌다 — 못 읽으면 기본 5GB(명시적 0 만 '끔').
@@ -46,7 +50,7 @@ let timer = null;
 
 export function vmSeriesPollerStatus() {
   const s = loadVmSeriesSettings();
-  return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: s.enabled, concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES };
+  return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES };
 }
 
 // v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
@@ -83,20 +87,49 @@ async function collectOne(vc, snap, settings) {
 }
 
 /** 수집 1회(수동/자동 공용). 진행 중이면 skipped. */
+/**
+ * v2.708 데모(mock) — vCenter 에 접속하지 않고 스파이크 DB 를 합성으로 채운다(vCenter 마다 VM 20대 + 호스트 2대).
+ * 첫 실행은 지난 7일을 백필하고, 이후에는 커서(마지막 적재 시각)부터 지금까지만 덧붙인다.
+ * 저장 형식은 실수집과 같다(packMoments·cover·cursor) — 조회(top·local)가 그대로 읽는다. 결과에 `demo:true`.
+ */
+async function runDemoVmSeries(snap, settings, trigger, started) {
+  const now = Date.now();
+  const vcIds = (snap.vcenters || []).map((v) => v.id).sort();
+  let spikeRows = 0; let moments = 0; let vms = 0; const errors = [];
+  for (const vcId of vcIds) {
+    await new Promise((res) => setImmediate(res));   // vCenter 마다 양보(첫 실행은 7일 백필)
+    try {
+      const cursors = await loadCursors(vcId);
+      const last = cursors.size ? Math.max(...cursors.values()) : 0;
+      const fromTs = last > 0 ? last : now - 7 * 86_400_000;
+      if (now - fromTs < 60_000) continue;
+      const r = demoVmSeriesRows({
+        vcenterId: vcId, vms: (snap.vms || []).filter((v) => v.vcenterId === vcId), hosts: (snap.hosts || []).filter((h) => h.vcenterId === vcId),
+        fromTs, toTs: now, vmCols: VM_COUNTERS, hostCols: HOST_COUNTERS, pack: packMoments, thresholds: settings.thresholds,
+      });
+      // 커서 이후의 시간칸은 이미 센 표본이 있다 — 겹친 첫 시간은 다시 세지 않는다(cover 는 가산).
+      const cover = last > 0 ? r.cover.filter((c) => c.h >= Math.floor(last / 3_600_000) * 3_600_000 + 3_600_000) : r.cover;
+      const c = await commitVmSeries(vcId, { spikes: r.spikes, cover, cursors: r.cursors });
+      if (c?.ok) { spikeRows += r.spikes.length; moments += r.spikes.reduce((a, x) => a + x.n, 0); vms += r.entities; }
+      const vc = (snap.vcenters || []).find((v) => v.id === vcId);
+      await setVmSeriesMeta(vcId, 'vcenter', { id: vcId, name: vc?.name || vcId, lastPollAt: now, demo: true });
+    } catch (e) { errors.push({ vcenterId: vcId, error: String(e?.message || e).slice(0, 200) }); }
+  }
+  lastRunTs = now;
+  lastResult = { at: now, trigger, vcenters: vcIds.length, mock: true, demo: true, errors, skipped: [], ms: Date.now() - started, vms, hosts: 0, samples: null, moments, spikeRows };
+  return { ok: errors.length === 0, ...lastResult, note: '데모(mock) 모드 — 합성 스파이크입니다(vCenter 에 접속하지 않았습니다).' };
+}
+
 export async function runVmSeriesNow(trigger = 'manual') {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
   running = true;
   const started = Date.now();
   try {
     const settings = loadVmSeriesSettings();
-    if (!settings.enabled && trigger !== 'manual') return { ok: false, reason: '수집이 꺼져 있습니다(설정에서 켜세요).' };
+    if (!demoOn(settings.enabled) && trigger !== 'manual') return { ok: false, reason: '수집이 꺼져 있습니다(설정에서 켜세요).' };
     const snap = store.get();
     if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 스냅샷이 없습니다(폴링 전).' };
-    if (snap.source === 'mock') {
-      lastRunTs = Date.now();
-      lastResult = { at: lastRunTs, trigger, vcenters: 0, mock: true, errors: [], skipped: [], ms: 0, vms: 0, hosts: 0, samples: 0, moments: 0, spikeRows: 0 };
-      return { ok: true, ...lastResult, note: '데모(mock) 모드 — 실시간 표본이 없어 수집하지 않습니다(없는 스파이크를 지어내지 않는다).' };
-    }
+    if (snap.source === 'mock') return await runDemoVmSeries(snap, settings, trigger, started);
     // 디스크 여유 가드 — 부족하면 저장 자체를 건너뛴다(수집만 하고 버리는 낭비도 하지 않는다).
     const free = vmSeriesFreeBytes();
     if (free != null && MIN_FREE_BYTES > 0 && free < MIN_FREE_BYTES) {
@@ -155,10 +188,10 @@ export function startVmSeriesPoller() {
   const getMs = () => Math.max(60_000, loadVmSeriesSettings().intervalMin * 60_000);
   timer = startAdaptiveTimer(getMs, async () => {
     if (running) return;                         // 재진입 가드
-    if (!loadVmSeriesSettings().enabled) return; // opt-in — 꺼져 있으면 틱만 돈다
+    if (!demoOn(loadVmSeriesSettings().enabled)) return; // opt-in — 꺼져 있으면 틱만 돈다(데모는 켜진 것처럼 — v2.708)
     try { await runVmSeriesNow('auto'); } catch (e) { console.warn(`[vmseries] 폴러 틱 오류: ${e.message}`); }
   }, { firstDelayMs: FIRST_DELAY_MS, name: 'vmseries', subscribe: onVmSeriesSettingsChange });
-  if (loadVmSeriesSettings().enabled) console.log(`[vmseries] started — 주기 ${loadVmSeriesSettings().intervalMin}분 · 동시 ${CONCURRENCY} · 첫 실행 ${Math.round(FIRST_DELAY_MS / 1000)}초 후${vmSeriesPushEnabled() ? ' · 중앙 push 켜짐' : ''}`);
+  if (demoOn(loadVmSeriesSettings().enabled)) console.log(`[vmseries] started — 주기 ${loadVmSeriesSettings().intervalMin}분 · 동시 ${CONCURRENCY} · 첫 실행 ${Math.round(FIRST_DELAY_MS / 1000)}초 후${vmSeriesPushEnabled() ? ' · 중앙 push 켜짐' : ''}`);
 }
 
 /** 위임(엣지)이 아닌 중앙에서 push 로 받은 vCenter 도 prune 대상에 들어가도록 usage 를 쓴다 — 별도 export 없음. */

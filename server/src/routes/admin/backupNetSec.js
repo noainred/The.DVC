@@ -1,4 +1,5 @@
 // 백업(소유자 전용)·vc로그·네트워크 캡처/모니터·보안 조회 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
+import { demoAgentNames } from '../../mock/demo/edge.js'; // v2.708 데모(mock)
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
@@ -169,7 +170,7 @@ adminRouter.post('/vclogs/collect', adminOnly, async (req, res) => {
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────
 // 위임 캡처용 에이전트 목록(엣지가 사설망 서버를 대신 캡처).
 adminRouter.get('/net/agents', adminOnly, fleetOnly, (_req, res) => {
-  const agents = new Set([...Object.keys(getAllAgentConfigs() || {}), ...listInventory().map((x) => x.agent).filter(Boolean), ...getAllGpuGuestDiag().map((x) => x.agent).filter(Boolean)]);
+  const agents = new Set([...Object.keys(getAllAgentConfigs() || {}), ...listInventory().map((x) => x.agent).filter(Boolean), ...getAllGpuGuestDiag().map((x) => x.agent).filter(Boolean), ...demoAgentNames()]); // v2.708: mock 이면 데모 엣지(위임 캡처는 합성 결과)
   res.json({ agents: [...agents] });
 });
 

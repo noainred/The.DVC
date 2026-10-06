@@ -159,4 +159,17 @@ export function applyPulledDevices(list) {
   return { ok: true, count: list.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
+/**
+ * v2.708 데모(mock) 시드 — 등록부가 **비어 있을 때만** 주어진 장비를 그대로 넣는다(id 는 호출자가 `mock-` 접두로 준다).
+ * 입력 검증(deviceInputIssue)을 건너뛰는 것은 데모 전용이라서다 — 라우트에서 부르지 말 것(mock/demo/pdu.js 만 부른다).
+ * 등록부를 못 읽었으면(손상) 시드하지 않는다(보존본 위에 덮어쓰지 않게).
+ */
+export function seedDemoDevices(list) {
+  if (!Array.isArray(list) || !list.length) return { ok: false, reason: '시드할 장비가 없습니다.' };
+  if (load().devices.length) return { ok: false, reason: '등록부가 비어 있지 않습니다.' };
+  if (loadErr.get()) return { ok: false, reason: '등록부를 읽지 못했습니다(손상 보존본이 있습니다).' };
+  save(list.map((d) => ({ ...normalize(d), id: String(d.id) })));
+  return { ok: true, count: list.length };
+}
+
 export function _resetForTest() { _cache = null; loadErr.clear(); }

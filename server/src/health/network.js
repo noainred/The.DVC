@@ -12,6 +12,7 @@ import { listRegistry as listNsxRegistry } from '../nsx/registry.js';
 import { tcpProbeMany } from '../util/ping.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { visibleNsxManagers } from '../nsx/scope.js';
+import { demoNetworkProbes } from '../mock/demo/edge.js'; // v2.708: 데모(mock)에서 설정 vCenter 가 없으면 합성 도달성(접속 없음)
 
 const hostOf = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
 const rttGrade = (ms) => (ms == null ? 'down' : ms < 100 ? 'ok' : ms < 400 ? 'warn' : 'slow');
@@ -34,7 +35,8 @@ export async function getNetworkCheck(allowed = null) {
   for (const m of nsxMgrs) { const h = hostOf(m.host); if (h && m.enabled !== false) targets.push({ kind: 'nsx', id: m.id, name: m.name || h, host: h, port: 443, region: m.region || '' }); }
 
   // 고RTT(800ms+) 사이트는 왕복+재전송 여유를 위해 5s. 짧으면 살아있는 vCenter도 'unreachable' 오판.
-  const probed = await tcpProbeMany(targets, { timeoutMs: reqTimeoutMs(process.env.HEALTH_PROBE_TIMEOUT_MS, 5000, { min: 100, max: 60_000 }), concurrency: 12 }   /* v2.605 TIM2605-04 */);
+  const demo = !targets.length ? demoNetworkProbes(snap, visibleNsxManagers((nsxStore.get()?.managers || []).map((m) => ({ ...m, region: m.region || m.location?.region || '' })), snap.vcenters, allowed), allowed) : null;
+  const probed = demo || await tcpProbeMany(targets, { timeoutMs: reqTimeoutMs(process.env.HEALTH_PROBE_TIMEOUT_MS, 5000, { min: 100, max: 60_000 }), concurrency: 12 }   /* v2.605 TIM2605-04 */);
   const endpoints = probed.map((t) => ({
     kind: t.kind, id: t.id, name: t.name, host: t.host, region: t.region || '',
     reachable: t.alive, rttMs: t.rttMs, grade: rttGrade(t.rttMs),
@@ -49,7 +51,7 @@ export async function getNetworkCheck(allowed = null) {
   for (const n of nets) { const k = n.type || 'unknown'; byType[k] = (byType[k] || 0) + 1; }
   const nsxSnap = nsxStore.get();
   // NSX 세그먼트/게이트웨이 총계도 보이는 매니저 기준으로만(전 함대 총계 유출 차단).
-  const visMgrIds = new Set(targets.filter((t) => t.kind === 'nsx').map((t) => t.id));
+  const visMgrIds = new Set((demo || targets).filter((t) => t.kind === 'nsx').map((t) => t.id));
   const nsxSeg = allowed ? (nsxSnap.segments || []).filter((s) => visMgrIds.has(s.managerId)) : (nsxSnap.segments || []);
   const nsxGw = allowed ? (nsxSnap.gateways || []).filter((g) => visMgrIds.has(g.managerId)) : (nsxSnap.gateways || []);
 
@@ -62,5 +64,5 @@ export async function getNetworkCheck(allowed = null) {
     networks: nets.length, byType,
     nsxSegments: nsxSeg.length, nsxGateways: nsxGw.length,
   };
-  return { summary, endpoints, generatedAt: Date.now() };
+  return { summary, endpoints, generatedAt: Date.now(), ...(demo ? { demo: true } : {}) };
 }

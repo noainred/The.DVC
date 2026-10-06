@@ -10,6 +10,7 @@ import { collectVCenterEvents } from '../vcenter/soapClient.js';
 import { vcAuthGuard } from '../vcenter/restClient.js';
 import { getLogsDb } from './db.js';
 import { loadLogSettings } from './settings.js';
+import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
 
 const SEV_RANK = { info: 0, warning: 1, error: 2 };
 // 동시 수집 상한 — 28개를 한꺼번에 열면 매 주기 SOAP 파싱이 몰린다(store.collectPool 과 같은 취지).
@@ -88,6 +89,9 @@ function synthEvents(vcId, sinceTs, n) {
     const type = k % 2 ? 'HostConnectionLostEvent' : 'EnteredMaintenanceModeEvent';
     out.push({ key: `mock-${vcId}-boot-${h.name}-${ts}`, ts, type, severity: type === 'HostConnectionLostEvent' ? 'error' : 'info', user: type === 'HostConnectionLostEvent' ? '' : 'administrator@vsphere.local', entity: h.name, message: `${type === 'HostConnectionLostEvent' ? 'Lost connection to host' : 'Host in maintenance mode'} ${h.name}`, detail: null });
   }
+  // v2.708: 로그인 실패(BadUsername·SSO LoginFailure) — 시간 슬롯마다 결정적, 일부 vCenter 는 같은 출처의 무차별 대입.
+  //   위 MOCK_TYPES 회전과 섞지 않고 덧붙인다(다른 화면이 쓰는 합성 이벤트 분포를 바꾸지 않게).
+  for (const e of demoLoginFailEvents(vcId, sinceTs, now)) out.push(e);
   return out;
 }
 

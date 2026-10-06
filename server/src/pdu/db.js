@@ -134,6 +134,39 @@ export async function recordSnapshot(snap) {
   return true;
 }
 
+/**
+ * v2.708 데모 백필 — 스냅샷 여러 건을 묶어 적재한다(200건마다 트랜잭션 + COMMIT 뒤 양보). 반환: 적재한 스냅샷 수.
+ * recordSnapshot 을 수만 번 부르면 건마다 커밋한다 — 데모 시드(30일 이력)가 이벤트 루프를 오래 붙잡지 않게 나눈다.
+ */
+export async function recordSnapshots(list = [], { chunk = 200 } = {}) {
+  const db = await open();
+  if (!db || !Array.isArray(list) || !list.length) return 0;
+  let n = 0;
+  for (let i = 0; i < list.length; i += chunk) {
+    if (i > 0) await new Promise((r) => setImmediate(r));
+    db.conn.exec('BEGIN');
+    try {
+      for (const snap of list.slice(i, i + chunk)) {
+        if (!snap?.id) continue;
+        const ts = Number(snap.collectedAt) || Date.now();
+        for (const u of snap.units || []) {
+          db.insSample.run(String(snap.id), ts, Number(u.index) || 1, num(u.powerW), num(u.energyKwh), num(u.appPowerW), num(u.pf));
+          for (const b of u.banks || []) db.insBank.run(String(snap.id), ts, Number(u.index) || 1, Number(b.index), num(b.currentA));
+          for (const p of u.phases || []) db.insPhase.run(String(snap.id), ts, Number(u.index) || 1, Number(p.index), num(p.currentA), num(p.voltageV));
+        }
+        for (const s of snap.sensors || []) db.insEnv.run(String(snap.id), ts, Number(s.index) || 1, String(s.name || ''), num(s.tempC), num(s.humidityPct));
+        n++;
+      }
+      db.conn.exec('COMMIT');
+    } catch (e) {
+      try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+      console.error('[pdu-db] 일괄 적재 실패:', e.message);
+      return n;
+    }
+  }
+  return n;
+}
+
 // v2.600 DB2600-04: 청크 + 양보(v2.453 규약). 예전에는 표마다 DELETE 한 방이라 PDU_RETAIN_DAYS 를 줄이고 재시작하면
 // 쌓인 차액을 동기로 한 번에 지워 그동안 이벤트 루프가 멈췄다. 상한에 걸린 나머지는 다음 주기가 이어서 지운다.
 // 청크 사이에 적재가 끼어들 수 있으므로 prune 끼리는 겹치지 않게 한다(적재는 동기 트랜잭션이라 청크와 섞이지 않는다).

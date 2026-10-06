@@ -42,6 +42,7 @@ import { load as loadCurUser, staleAfterMs } from '../../curuser/settings.js';
 import { buildReport as buildCurUserReport } from '../../curuser/report.js';
 import { combineSources } from '../../curuser/combine.js';
 import { KIND_LABEL as CU_KIND_LABEL } from '../../curuser/guestinfoSource.js';
+import { demoOn, isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock)는 켜진 것처럼
 
 const DAY = 86_400_000;
 const clampDays = (v) => Math.max(1, Math.min(365, Math.round(Number(v) || 7)));
@@ -119,7 +120,7 @@ async function usageReport({ days, serverId }) {
     serverMeta: latest.filter((r) => !serverId || r.serverId === serverId)
       .map((r) => ({ serverId: r.serverId, name: r.name, host: r.host, ok: r.ok, ts: r.ts, kind: r.kind, usageMeta: r.usageMeta || {} })),
     kindLabels: USAGE_KIND_LABEL, bases: USAGE_BASES,
-    settings: { enabled: s.enabled, intervalMs: s.intervalMs, usageRetentionDays: s.usageRetentionDays, showNamesInList: s.showNamesInList },
+    settings: { enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), intervalMs: s.intervalMs, usageRetentionDays: s.usageRetentionDays, showNamesInList: s.showNamesInList },
     maxDays: USAGE_MAX_DAYS,
   };
   _usageCache.set(key, { at: Date.now(), body });
@@ -194,7 +195,7 @@ api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
     kindLabels: KIND_LABEL,
     // 화면이 숫자를 하드코딩하지 않도록 **서버가 주는 값만** 쓰게 한다(CLAUDE.md 규칙).
     settings: {
-      enabled: s.enabled, intervalMs: s.intervalMs, retentionDays: s.retentionDays,
+      enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), intervalMs: s.intervalMs, retentionDays: s.retentionDays,
       showNamesInList: s.showNamesInList, maxUsers: s.maxUsers, maxPages: s.maxPages, pageSize: s.pageSize,
     },
     poller: admin ? poller : maskHzPoller(poller, hosts),

@@ -193,4 +193,31 @@ export function applyPulledDevices(list) {
   return { count: db.devices.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
+/**
+ * v2.708 데모(mock) 시드 전용 — 등록부가 **비어 있을 때만** 주어진 장비를 넣는다(실데이터를 덮지 않는다).
+ * 호출부(mock/demo/storage.js)가 mock 모드인지 판정한다. id 는 호출부가 `mock-` 접두로 정한다(live 폴러가 건너뛴다).
+ * 검증은 deviceInputIssue 단일 소스를 그대로 탄다(형식이 틀린 시드는 버리고 개수를 돌려준다).
+ * 등록부를 못 읽은 상태(손상 보존)면 시드하지 않는다 — 손상 파일 자리에 데모 장비를 쓰면 복구 단서가 사라진다.
+ * @returns {{seeded:number, skipped:number, reason?:string}}
+ */
+export function seedDevicesIfEmpty(list) {
+  const db = load();
+  if (loadErr.get()) return { seeded: 0, skipped: 0, reason: 'registry-unreadable' };
+  if (db.devices.length) return { seeded: 0, skipped: 0, reason: 'not-empty' };
+  let skipped = 0;
+  for (const d of Array.isArray(list) ? list : []) {
+    if (!d || typeof d !== 'object' || !String(d.id || '').startsWith('mock-') || deviceInputIssue(d)) { skipped += 1; continue; }
+    db.devices.push({
+      id: String(d.id), createdAt: Date.now(), pulled: false,
+      type: d.type, name: d.name, host: d.host, username: d.username, password: String(d.password || ''),
+      agent: String(d.agent || ''), datacenterId: String(d.datacenterId || ''),
+      collectMethod: normalizeCollectMethod(d.type, String(d.collectMethod || '')), sshPort: 22,
+      enabled: d.enabled !== false, note: String(d.note || '').slice(0, 200),
+    });
+  }
+  const seeded = db.devices.length;
+  if (seeded) persist();
+  return { seeded, skipped };
+}
+
 export function _resetForTest() { _db = null; loadErr.clear(); }

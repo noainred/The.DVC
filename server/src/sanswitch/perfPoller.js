@@ -23,6 +23,8 @@ import { config } from '../config.js';
 import { pushPerfNow } from './perfPush.js';
 import { recordActivity, latestEventByDevice } from './perfActivityLog.js';
 import { sanAuthGuard, isSanAuthError } from './poller.js'; // v2.590: 기본 수집과 **같은 장비 계정** — 같은 정지 기록
+import { isMockMode, demoOn } from '../mock/demo/flags.js';   // v2.708 데모(mock)
+import { isSanDemoId, sanDemoLayoutFor, sanDemoPortBps } from '../mock/demo/sanswitch.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
@@ -65,7 +67,15 @@ async function collectOne(dev) {
   }
   const pre = full.vfId ? `setcontext ${Number(full.vfId)}; ` : '';
   const captureMs = Math.max(3000, st.sampleSeconds * 1000);
-  const r = await withDeadline(DEVICE_TIMEOUT_MS(captureMs), (signal) => withSsh(
+  // v2.708 데모(mock): 장비에 접속하지 않는다 — 결정적 합성 처리량(바이트/초).
+  const r = isMockMode()
+    ? await (async () => {
+      const { store } = await import('../store.js');
+      const ports = sanDemoPortBps(sanDemoLayoutFor(full, store.get()), Date.now());
+      const total = Object.values(ports).reduce((a, b) => a + b, 0);
+      return { parsed: { ports, total, samples: 1 } };
+    })()
+    : await withDeadline(DEVICE_TIMEOUT_MS(captureMs), (signal) => withSsh(
     { host: full.host, port: Number(full.sshPort) || 22, username: full.username, password: full.password || '', signal },
     async (sh) => {
       const caps = await probeCommands(sh, `${full.host}|${full.username}`);
@@ -97,13 +107,14 @@ async function collectOne(dev) {
 
 export async function pollPerfOnce({ force = false } = {}) {
   const st = loadPerfSettings();
-  if (!force && !st.enabled) return { ok: false, reason: '포트 사용량 수집이 꺼져 있습니다(설정에서 켜세요).' };
+  if (!force && !demoOn(st.enabled)) return { ok: false, reason: '포트 사용량 수집이 꺼져 있습니다(설정에서 켜세요).' };
   if (_busy) return { ok: false, reason: '이전 수집 진행 중(겹침 방지)' };
   _busy = true;
   const t0 = Date.now();
   let collected = 0; let failed = 0; let authStopped = 0; const errors = [];
   try {
-    const devices = devicesForThisNode();
+    // v2.708: live 는 데모 장비(mock-san-*)를 건너뛴다 — 지어낸 주소로 SSH 를 열지 않게.
+    const devices = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
     await pool(devices, CONCURRENCY, async (d) => {
       // v2.590(감사 F2): 인증 실패로 멈춘 장비는 **주기 수집에서만** 건너뛴다(`force` = 수동 실행 — 막지 않는다).
       // 기본 수집 폴러와 같은 정지 기록이다 — 그쪽이 멈췄으면 여기서도 같은 계정으로 로그인하지 않는다.
@@ -143,7 +154,7 @@ export async function pollPerfOnce({ force = false } = {}) {
 export function startSanSwitchPerfPoller() {
   if (_timer) return;
   _timer = startAdaptiveTimer(perfIntervalMs, async () => {
-    if (!loadPerfSettings().enabled) return;   // 꺼져 있으면 틱만 돌고 아무것도 하지 않는다
+    if (!demoOn(loadPerfSettings().enabled)) return;   // 꺼져 있으면 틱만 돌고 아무것도 하지 않는다(v2.708: mock 은 켜진 것처럼)
     await pollPerfOnce();
   }, { firstDelayMs: 70_000, name: 'SAN 포트 사용량 수집', subscribe: onPerfSettingsChange });
 }
@@ -156,7 +167,8 @@ export function sanSwitchPerfStatus() {
     // 조용히 빈다(v2.516 규약). 주기는 서버가 주는 값만 쓰고 문구에 숫자를 박지 않는다.
     intervalMs: perfIntervalMs(),
     inFlight: [..._inFlight.values()],
-    enabled: st.enabled,
+    enabled: demoOn(st.enabled),   // v2.708: mock 은 켜진 것처럼(저장 설정은 그대로 — settings.enabled 가 원래 값)
+    ...(isMockMode() ? { demo: true } : {}),
   };
 }
 

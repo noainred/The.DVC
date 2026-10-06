@@ -65,6 +65,8 @@ import { centralRouter } from '../central.js';
 import { collectorRouter } from '../collector.js';
 import { declaredRoutes as flowDeclaredRoutes } from './dataFlow.js';
 import { memoJson } from './shared.js';
+import { isMockMode } from '../../mock/demo/flags.js';
+import { isDemoCollector, demoProbeResult, demoSiteVcenters, demoInventoryRows } from '../../mock/demo/edge.js'; // v2.708 데모 엣지
 import { snapCacheClear } from '../../util/snapCache.js';
 import { currentVersion } from '../../config.js';
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
@@ -235,7 +237,11 @@ api.post('/tools/portal-check/tokens/probe', adminOnly, fullScopeOnly, async (re
   if (!rows.length) return res.status(400).json({ ok: false, reason: only ? `그 이름의 엣지가 없습니다: ${req.body?.agent}` : '점검할 엣지가 없습니다(설정 › 수집 서버에서 등록하세요).' });
   running = 'probe';
   try {
-    const out = await probeAll(rows, { tokenOf: tokenLookup() });
+    // v2.708: 데모(mock) 모드의 데모 엣지(mock- · .demo.invalid)는 접속하지 않고 합성 결과를 쓴다.
+    const demoRows = isMockMode() ? rows.filter((r) => isDemoCollector({ id: r.agent, url: r.url })) : [];
+    const liveRows = demoRows.length ? rows.filter((r) => !demoRows.includes(r)) : rows;
+    const out = liveRows.length ? await probeAll(liveRows, { tokenOf: tokenLookup() }) : { probes: [], budgetExceeded: 0, ms: 0 };
+    if (demoRows.length) out.probes = [...out.probes, ...demoRows.map((r) => demoProbeResult(r))];
     putProbeResults(out.probes);
     logAudit({ user: req.user?.username || '', action: '토큰 점검 — 중앙→엣지 프로브', target: only || `전체 ${rows.length}곳`, ip: req.ip || '' });
     const scanned = fullScan();
@@ -352,9 +358,13 @@ api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, r
  * 공유하지 않는다(공유할 왕복이 없다).
  */
 api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (_req, res) => {
+  // v2.708: 데모(mock) 모드에서 위임(site) vCenter 등록이 없으면 데모 엣지가 맡는 vCenter 를 입력으로 쓴다(판정은 그대로).
+  const regVcs = safe(() => listVcentersFull(), []);
+  const demoInv = isMockMode() && !regVcs.some((v) => v?.collectMode === 'site');
+  const snapNow = demoInv ? safe(() => store.get(), null) : null;
   const scan = scanInventory({
-    vcenters: safe(() => listVcentersFull(), []),
-    inventory: safe(() => listInventory(), []),
+    vcenters: demoInv ? [...regVcs, ...demoSiteVcenters(snapNow?.vcenters || [])] : regVcs,
+    inventory: demoInv ? [...safe(() => listInventory(), []), ...demoInventoryRows(snapNow)] : safe(() => listInventory(), []),
     ingestRows: safe(() => getIngestStats().rows, []),
     rejects: safe(() => rejectStats(), null),
     identity: safe(() => agentIdentitySummary(), null),
@@ -364,6 +374,7 @@ api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (_req, res) =
   const findings = invFindingsOf(scan);
   res.json({
     ok: true,
+    ...(demoInv ? { demo: true } : {}),
     ...scan,
     findings,
     findingGroups: invGroupFindings(findings),

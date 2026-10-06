@@ -14,7 +14,7 @@
  * ⚠ 다만 실패 서버의 **직전 값을 합계에 넣지 않는다** — 그건 지금 값이 아니다. 대신 빠졌다는
  *   사실을 밝힌다(v2.520 `stale` 처리와 같은 판단).
  */
-import { loadHorizon } from './horizon.js';
+import { loadHorizon, upsertHorizon } from './horizon.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withJob } from '../perf/monitor.js';
@@ -23,12 +23,15 @@ import { createAuthGuard } from '../util/authGuard.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { load as loadHzSettings, onHorizonSessionSettingsChange } from './sessionSettings.js';
 import { collectServerSessions, mockSessionResult } from './sessionCollect.js';
-import { commitHzSessions, hzLatestRecords, pruneHzSessions, pruneHzUsage, hzSessionDbStatus, dropHzLatest } from './sessionDb.js';
-import { combineServers, seriesRow } from './sessions.js';
+import { commitHzSessions, hzLatestRecords, pruneHzSessions, pruneHzUsage, hzSessionDbStatus, dropHzLatest, backfillHzDemo, hzSeriesRange } from './sessionDb.js';
+import { combineServers, seriesRow, normalizeSessions } from './sessions.js';
 import { recordHzSessionActivity } from './sessionActivityLog.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { clampIntervalMs } from '../config.js';
 import { localStamp } from '../util/dayKey.js';
+import { demoOn, isMockMode } from '../mock/demo/flags.js';
+import { ensureDemoHorizonSeed, isDemoEntryId, demoHorizonBackfillRows, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
+import { normalizeCatalog, usageFromSessions } from './appUsage.js';
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
@@ -90,7 +93,7 @@ export function hzSessionPollerStatus() {
   const s = loadHzSettings();
   return {
     running, lastResult, lastRunTs,
-    intervalMs: s.intervalMs, enabled: s.enabled,
+    intervalMs: s.intervalMs, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}),
     concurrency: Math.min(CONCURRENCY_CAP, s.concurrency),
     retentionDays: s.retentionDays,
     inFlight: [...inFlight.entries()].map(([id, at]) => ({ deviceId: id, at })),
@@ -104,7 +107,32 @@ async function pool(items, n, fn) {
 
 /** 대상 서버 — 등록 + 활성 + 설정에서 끄지 않은 것. */
 export function targetServers(settings = loadHzSettings()) {
-  return loadHorizon().filter((s) => s.enabled !== false && settings.servers?.[s.id]?.enabled !== false);
+  // v2.708: 데모 등록(`mock-` id)은 mock 에서만 대상이다 — live 로 바꾸면 그 합성 주소로 로그인하지 않는다.
+  const mock = isMockMode();
+  return loadHorizon().filter((s) => s.enabled !== false && settings.servers?.[s.id]?.enabled !== false && (mock || !isDemoEntryId(s.id)));
+}
+
+/**
+ * v2.708 데모(mock) — 추이가 거의 비어 있으면 지난 7일 추이 + 30일 누적을 한 번 채운다(데모 등록 서버만).
+ * 프로세스당 1회 · 이미 있는 행은 건드리지 않는다(sessionDb.backfillHzDemo 가 INSERT OR IGNORE).
+ */
+let _demoBackfilled = false;
+async function demoBackfillOnce(servers, s, now) {
+  if (_demoBackfilled || !isMockMode()) return;
+  _demoBackfilled = true;
+  const ids = servers.map((x) => x.id).filter(isDemoEntryId);
+  if (!ids.length) return;
+  const have = await hzSeriesRange('', now - 8 * 86_400_000, now);
+  if ((have?.rows || []).length > 200) return;
+  const catalog = normalizeCatalog(demoHorizonCatalogRaw());
+  const rows = await demoHorizonBackfillRows({
+    serverIds: ids, now, seriesDays: 7, usageDays: 30, intervalMs: s.intervalMs,
+    normalize: (raw) => normalizeSessions(raw, { maxUsers: s.maxUsers }),
+    usageOf: (raw, norm) => usageFromSessions(raw, { usedUserKey: norm.usedUserKey, usedStateKey: norm.usedStateKey, catalog }),
+    combine: (list) => combineServers(list),
+  });
+  const r = await backfillHzDemo(rows);
+  if (r.ok) console.log(`[mock] Horizon 데모 백필: 추이 ${r.series}행 · 누적 ${r.usage}행 · 수집 횟수 ${r.cover}행`);
 }
 
 /** 수집 1회(자동·수동 공용 — 같은 재진입 가드). */
@@ -115,11 +143,12 @@ export async function runHzSessionsNow(trigger = 'manual') {
   try {
     if (isStopped()) { lastResult = { at: Date.now(), trigger, skipped: '긴급중단' }; return { ok: false, ...lastResult }; }
     const s = loadHzSettings();
-    if (!s.enabled && trigger !== 'manual') return { ok: false, reason: '수집이 꺼져 있습니다(설정에서 켜세요).' };
+    if (!demoOn(s.enabled) && trigger !== 'manual') return { ok: false, reason: '수집이 꺼져 있습니다(설정에서 켜세요).' };
     const db = await hzSessionDbStatus();
     if (!db.available) return { ok: false, reason: `DB 를 쓸 수 없습니다: ${db.error || 'node:sqlite 없음'}` };
 
     const mock = store.get()?.source === 'mock';
+    if (mock) await ensureDemoHorizonSeed({ loadHorizon, upsertHorizon });   // v2.708: 등록부가 비어 있을 때만 데모 커넥션 서버 2대
     const servers = targetServers(s);
     if (!servers.length) {
       lastRunTs = Date.now();
@@ -163,7 +192,7 @@ export async function runHzSessionsNow(trigger = 'manual') {
             usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
           };
         }
-        const r = mock ? mockSessionResult(srv) : await collectServerSessions(srv, {
+        const r = mock ? mockSessionResult(srv, { maxUsers: s.maxUsers }) : await collectServerSessions(srv, {
           pageSize: s.pageSize, maxPages: s.maxPages, maxUsers: s.maxUsers, timeoutMs: s.timeoutMs,
         });
         // 401/403 이면 다음 **주기**부터 멈춘다. 성공하면 기록을 지워 재개한다(규칙 2 — 자격증명이
@@ -222,6 +251,8 @@ export async function runHzSessionsNow(trigger = 'manual') {
       });
     }
 
+    if (mock && commit.ok) { try { await demoBackfillOnce(servers, s, ts); } catch (e) { console.warn(`[horizon-sessions] 데모 백필 실패: ${e.message}`); } }
+
     if ((++tick % PRUNE_EVERY_RUNS) === 0) {
       try { await pruneHzSessions(s.retentionDays, { every: 1 }); } catch { /* */ }
       try { await pruneHzUsage(s.usageRetentionDays); } catch { /* */ }
@@ -247,11 +278,11 @@ export function startHzSessionPoller() {
   const getMs = () => Math.max(60_000, loadHzSettings().intervalMs);
   timer = startAdaptiveTimer(getMs, async () => {
     if (running) return;                              // 재진입 가드
-    if (!loadHzSettings().enabled) return;            // opt-in
+    if (!demoOn(loadHzSettings().enabled)) return;            // opt-in(데모는 켜진 것처럼 — v2.708)
     try { await runHzSessionsNow('auto'); } catch (e) { console.warn(`[horizon-sessions] 폴러 틱 오류: ${e.message}`); }
   }, { firstDelayMs: FIRST_DELAY_MS, name: 'horizon-sessions', subscribe: onHorizonSessionSettingsChange });
   const s = loadHzSettings();
-  if (s.enabled) console.log(`[horizon-sessions] started — 주기 ${Math.round(s.intervalMs / 60_000)}분 · 동시 ${Math.min(CONCURRENCY_CAP, s.concurrency)}`);
+  if (demoOn(s.enabled)) console.log(`[horizon-sessions] started — 주기 ${Math.round(s.intervalMs / 60_000)}분 · 동시 ${Math.min(CONCURRENCY_CAP, s.concurrency)}`);
 }
 
 export function stopHzSessionPoller() { timer?.stop?.(); timer = null; }

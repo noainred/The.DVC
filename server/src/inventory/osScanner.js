@@ -18,6 +18,8 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
 import { authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
+import { demoOn, isMockMode } from '../mock/demo/flags.js';
+import { demoRealOs } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 
 const FILE = path.join(config.configDir, 'os-scan.json');
 const DEFAULTS = { enabled: false, intervalMin: 720, scope: 'all', maxVms: 200, rescanDays: 30, concurrency: 4 };
@@ -186,8 +188,29 @@ export async function runOsScanNow(scopeVcId, { trigger = 'manual' } = {}) {
   running = true;
   try { return await runOsScanNowInner(scopeVcId, trigger === 'manual'); } finally { running = false; }
 }
+/**
+ * v2.708 데모(mock) — 게스트에 로그인하지 않고 스냅샷 VM 에서 '읽은 OS' 를 합성한다(일부 불일치·실패 포함).
+ * 대상 선별은 실스캔과 같은 pickTargets(수동 규칙 — 계정 정지 판정 없음).
+ */
+function runDemoOsScan(scope, s) {
+  const vcIds = (store.get().vcenters || []).map((v) => v.id).filter((id) => !scope || id === scope);
+  let total = 0; let failed = 0;
+  for (const id of vcIds) {
+    const { targets } = pickTargets(id, s, { manual: true });
+    for (const v of targets) {
+      const r = demoRealOs(v);
+      upsertOs(v, r.detected, r.error);
+      if (r.detected) total++; else failed++;
+    }
+  }
+  try { const ids = new Set((store.get().vms || []).map((v) => v.id)); pruneMissing(ids); } catch { /* */ }
+  write({ ...rawSettings(), lastRun: Date.now(), lastFound: total, lastErr: failed ? `데모 합성 — 탐지 실패 ${failed}대 포함` : '', lastAuth: null });
+  return { ok: true, found: total, summary: osSummary(), demo: true };
+}
+
 async function runOsScanNowInner(scopeVcId, manual) {
   const s = loadOsScanSettings();
+  if (isMockMode()) return runDemoOsScan(scopeVcId || (s.scope && s.scope !== 'all' ? s.scope : ''), s);
   const scope = scopeVcId || (s.scope && s.scope !== 'all' ? s.scope : '');
   const vcs = (loadVcenterConfig().vcenters || []).filter((v) => !scope || v.id === scope);
   if (!vcs.length) { write({ ...rawSettings(), lastRun: Date.now(), lastErr: 'live vCenter 설정 없음' }); return { ok: false, reason: 'live vCenter 설정 없음(데모/미구성)' }; }
@@ -214,7 +237,7 @@ async function runOsScanNowInner(scopeVcId, manual) {
 
 function rawSettings() { const s = loadOsScanSettings(); return { enabled: s.enabled, intervalMin: s.intervalMin, scope: s.scope, maxVms: s.maxVms, rescanDays: s.rescanDays, concurrency: s.concurrency }; }
 
-export function osScanStatus() { const s = loadOsScanSettings(); return { settings: rawSettings(), lastRun: s.lastRun, lastFound: s.lastFound, lastErr: s.lastErr, lastAuth: s.lastAuth || null, summary: osSummary() }; }
+export function osScanStatus() { const s = loadOsScanSettings(); return { settings: rawSettings(), lastRun: s.lastRun, lastFound: s.lastFound, lastErr: s.lastErr, lastAuth: s.lastAuth || null, summary: osSummary(), ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
 
 let timer = null;
 let running = false; // 재진입 방지 — 긴 스캔이 다음 tick과 겹쳐 SSH/SOAP 세션 폭증하는 것을 막는다.
@@ -225,7 +248,7 @@ let running = false; // 재진입 방지 — 긴 스캔이 다음 tick과 겹쳐
 export function osScanTick() {
   if (running) return null;
   const s = loadOsScanSettings();
-  if (!s.enabled) return null;
+  if (!demoOn(s.enabled)) return null;   // v2.708: 데모(mock)는 켜진 것처럼
   if (s.lastRun && Date.now() - s.lastRun < s.intervalMin * 60_000) return null;
   // 가드는 runOsScanNow 안에서 공유 · 주기 실행이므로 인증 실패 정지를 따른다('auto').
   return runOsScanNow(undefined, { trigger: 'auto' }).catch((e) => console.warn('[osscan] 실행 실패:', e?.message));

@@ -31,8 +31,21 @@ import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
+import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
+import { cvpDemoActive } from '../../mock/demo/cvp.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
+
+/**
+ * v2.708: mock 모드에서 아직 이번 기동에 수집한 CVP 가 없으면 데모 시드 + 첫 수집을 바로 시작한다(폴러 첫 주기는 기동 45초 뒤).
+ *   응답을 기다리게 하지 않는다 — 다음 새로고침부터 채워진다. 재진입은 pollCvpOnce 의 가드가 막는다.
+ */
+function kickDemo() {
+  if (!isMockMode() || isPollerBusy()) return;
+  const servers = listServers();
+  if (servers.length && servers.some((x) => getStatus(x.id))) return;
+  pollCvpOnce({ trigger: 'demo' }).catch(() => {});
+}
 
 const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
@@ -189,6 +202,7 @@ export function maskStatusText(st, hosts = []) {
 export function registerCvp(api) {
 
 api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
   const admin = isAdminReq(req);
   const settings = loadSettings();
   const servers = listServers();
@@ -198,7 +212,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
   const poller = cvpPollerStatus();
   const hosts = servers.map((s) => s.host);
   res.json({
-    enabled: settings.enabled, settings,
+    enabled: settings.enabled || cvpDemoActive(servers), settings, ...(cvpDemoActive(servers) ? { demo: true } : {}),
     poller: admin ? poller : maskPollerStatus(poller, servers.map((s) => s.host)),
     servers: servers.map((s) => {
       const st = statusOf(s);
@@ -217,6 +231,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
 });
 
 api.get('/tools/cvp/devices', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
   const admin = isAdminReq(req);
   const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
   const q = capStr(typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '', 128);
@@ -238,6 +253,7 @@ api.get('/tools/cvp/devices', toolsPerm, fullScopeOnly, async (req, res) => {
  *   장비·엣지 왕복 0(중앙 DB 최신값만). 화면은 폴링하지 않는다(마운트 1회 + 새로고침). 법인 = CVP 서버에 지정한 DataCenter.
  */
 api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
   const admin = isAdminReq(req);
   const settings = loadSettings();
   const servers = listServers();
@@ -267,7 +283,7 @@ api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
     return admin ? base : { ...base, detail: maskErrText(base.detail, hosts), label: f.kind === 'bgp' ? maskErrText(base.label, hosts) : base.label };
   });
   res.json({
-    ...ov, enabled: settings.enabled,
+    ...ov, enabled: settings.enabled || cvpDemoActive(servers), ...(cvpDemoActive(servers) ? { demo: true } : {}),
     servers: servers.length,
     serverStates: servers.map((s) => { const st = statusOf(s); return { id: s.id, name: s.name || s.id, ok: st?.ok ?? null, pending: st?.pending === true, collectedAt: st?.collectedAt ?? null }; }),
     portUsage: usage.counts || null, highPct: SYS_HIGH_PCT,
@@ -546,7 +562,7 @@ api.get('/tools/cvp/faults', toolsPerm, fullScopeOnly, async (req, res) => {
     open, events, days, unavailable,
     counts: await cdb.faultCounts().catch(() => ({ unavailable: true })),
     scan: faultScanView(cvpFaultScanStatus()),
-    settings: { enabled: settings.enabled, faultAlerts: settings.faultAlerts === true, faultAlertsClosed: settings.faultAlertsClosed !== false, intervalMs: settings.intervalMs },
+    settings: { enabled: settings.enabled || cvpDemoActive(servers), faultAlerts: settings.faultAlerts === true, faultAlertsClosed: settings.faultAlertsClosed !== false, intervalMs: settings.intervalMs },
     ...(admin ? {} : { addressHidden: true }),
   });
 });

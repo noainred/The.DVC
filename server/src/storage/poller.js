@@ -25,6 +25,8 @@ import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAda
 
 import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
+// v2.708 데모(mock): 등록부 시드·이력 백필·타입별 합성 스냅샷. live 에서는 mock- 장비를 건너뛴다.
+import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId } from '../mock/demo/storage.js';
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
 // v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
@@ -76,27 +78,15 @@ async function collectOneInner(dev, startedAt) {
   const full = getDeviceWithSecret(dev.id) || dev;
   let snap;
   if (!fn) { snap = emptySnapshot(full); snap.error = `수집기 미구현: ${dev.type}`; }
-  else if (config.dataSource === 'mock') { // v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
+  else if (isMockMode()) { // v2.708: 판정은 mock/demo/flags.js(런타임 데이터 소스 설정 반영 — 미설정이면 config.dataSource 와 같다). v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
     // mock 모드(개발): 결정적 가짜 스냅샷 — UI/집계/push 흐름 검증용.
-    snap = emptySnapshot(full);
     // ⚠ 이 값들은 **가짜**다. 예전에는 그 사실이 version 문자열의 '(mock)' 괄호로만 드러나서,
     //   PowerStore 장비에 'OneFS 9.4.0(mock)' 이 찍혀도 진짜 수집값처럼 보였다(실제 사용자 혼동).
     //   extra.mock 플래그를 세워 UI 가 배지·배너로 분명히 표시하게 한다 — 스냅샷은 중앙으로
     //   push 되므로 이 플래그가 엣지의 mock 을 중앙 화면에서도 드러낸다.
-    snap.ok = true; snap.version = 'MOCK(가짜 데이터)'; snap.serial = `MOCK-${dev.id}`;
-    snap.capacity = { totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 };
-    snap.media = { hdd: { totalBytes: 450e12, usedBytes: 290e12, pct: 64.4 }, ssd: { totalBytes: 50e12, usedBytes: 22e12, pct: 44 } };
-    snap.nodes = { count: 4, unhealthy: 0, unknown: 0, list: Array.from({ length: 4 }, (_, i) => ({
-      id: i + 1, ip: `10.94.41.${202 + i}`, health: 'ok', inBps: 3.4e6 * (i + 1), outBps: 1.2e7,
-      hdd: i < 2 ? { totalBytes: 108e12, usedBytes: 88e12, pct: 81.5 } : null,  // 무디스크 노드(No Storage HDDs) 재현
-      ssd: { totalBytes: 20.7e12, usedBytes: 17.6e12, pct: 85 },
-    })) };
-    snap.pools = [{ name: 'h500_30tb', totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 }];
-    snap.accounts = [{ name: 'root', enabled: true }, { name: 'admin', enabled: true }];
-    snap.sections = { config: 'ok', capacity: 'ok', nodes: 'ok', accounts: 'ok', alerts: 'ok' };
-    // ⚠ mock:true 를 여기(객체 리터럴)에 둔다 — 위에서 snap.extra.mock 만 세우면 이 줄의
-    //   재할당이 통째로 덮어써 플래그가 사라진다(실측으로 잡은 실수).
-    snap.extra = { mock: true, collectMethod: full.collectMethod || 'ssh', clusterHealth: 'OK', dataReduction: '1.00:1', storageEfficiency: '0.83:1', vhsBytes: 15.4 * 1024 ** 4, l3TotalBytes: 8.7 * 1024 ** 4 };
+    // v2.708: 타입별로 다른 합성 스냅샷(노드·풀·용량·경보·전력, 일부 노드 비정상·한 대 수집 실패)을
+    //   mock/demo/storage.js 가 만든다(extra.mock·extra.demo 를 그대로 싣는다 — MOCK 배지가 그대로 뜬다).
+    snap = demoStorageSnapshot(full, startedAt);
   } else {
     // 장비당 타임아웃(v2.417) — 예전에는 없었다(CLAUDE.md 'per-vCenter 타임아웃' 규약 위반). SSH 계열
     // 수집기는 device._signal 을 withSsh creds 로 넘겨 기한 만료 시 세션을 실제로 끊는다.
@@ -119,7 +109,7 @@ async function collectOneInner(dev, startedAt) {
     if (Date.now() - last >= areasEveryMs()) {
       _areasAt.set(dev.id, Date.now());
       try {
-        const r = config.dataSource === 'mock'
+        const r = isMockMode()
           ? { summary: [{ area: 'cluster', ok: 3, failed: 0 }, { area: 'node', ok: 1, failed: 0 }], endpoints: 4 }
           // 시한이 끊어도 collectAreasOnce 는 던지지 않고 모은 결과를 저장·반환한다(stopped:'deadline').
           : await withDeadline(AREAS_TIMEOUT_MS, (signal) => collectAreasOnce(full, { signal }), '영역 수집 타임아웃');
@@ -168,7 +158,11 @@ export async function pollStorageOnce() {
   if (_busy) return { skipped: true }; // 재진입 가드
   _busy = true;
   try {
-    const devs = devicesForThisNode();
+    // v2.708: 데모(mock) 모드면 등록부가 비어 있을 때만 데모 장비를 시드하고 이력을 백필한다(1회).
+    //   live/auto 에서는 mock- 장비(데모 시드 잔재)를 수집하지 않는다 — 합성 주소에 실제로 접속하지 않게.
+    const demo = isMockMode();
+    if (demo) { try { await ensureStorageDemo(); } catch (e) { console.warn(`[storage] 데모 시드 실패: ${e.message}`); } }
+    const devs = demo ? devicesForThisNode() : devicesForThisNode().filter((d) => !isDemoId(d.id));
     if (!registryLoadError()) pruneAreasAt(new Set(devs.map((d) => d.id)));
     let ok = 0, fail = 0;
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).

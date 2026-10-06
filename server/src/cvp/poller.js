@@ -25,6 +25,8 @@ import { portDelta, cpuPctFromCounters } from './parse.js';
 import * as db from './db.js';
 import { putStatus, getStatus, keepOnly } from './store.js';
 import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
+import { isMockMode } from '../mock/demo/flags.js';            // v2.708 데모(mock 전용)
+import { demoCvpCollect, ensureCvpDemo, isDemoId, cvpDemoActive } from '../mock/demo/cvp.js';
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
 import { PARTS_EVERY_MS } from './faults.js'; // v2.680: 장애 판정의 부품 신선도와 같은 값(한 벌)
@@ -89,7 +91,9 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
 
 async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) {
   const full = getServerWithSecret(srv.id) || srv;
-  if (periodic) {
+  // v2.708: 데모 CVP(mock-)는 접속하지 않고 합성 결과를 쓴다(인증 정지 판정도 하지 않는다). 사람이 등록한 CVP 는 mock 모드라도 예전 그대로.
+  const demo = isMockMode() && isDemoId(full.id);
+  if (periodic && !demo) {
     const stop = cvpAuthGuard.authStopFor(credOf(full));
     if (stop) {
       const prev = getStatus(full.id);
@@ -106,7 +110,8 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
   try {
     let r;
     try {
-      r = await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } }), 'CVP 수집 시한 초과');
+      r = demo ? await demoCvpCollect(full, { now: Date.now(), optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } })
+        : await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } }), 'CVP 수집 시한 초과');
     } catch (e) {
       const auth = !!e?.authFailed;
       const msg = e?.message || String(e);
@@ -149,7 +154,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     _descs.set(full.id, descMap);
     for (const d of r.devices) {
       fillDescs(descMap, d);
-      applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs);
+      if (!r.demo) applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs); // 데모는 처리량을 합성 값으로 바로 싣는다
       applySys(full.id, d);
       d.ts = d.countersAt ?? readAt;
       delete d.counters;
@@ -226,7 +231,9 @@ export function fillDescs(descMap, d) {
 
 export async function pollCvpOnce({ manual = false, only = null, trigger = manual ? 'manual' : 'timer' } = {}) {
   const settings = loadSettings();
-  if (!settings.enabled && !manual) {
+  // v2.708: mock 모드는 등록부가 비어 있으면 데모 CVP 를 시드한다(한 번만 · 메인 스냅샷이 생긴 뒤). 데모 CVP 가 있으면 꺼져 있어도 켜진 것처럼.
+  if (isMockMode()) { try { await ensureCvpDemo(); } catch (e) { console.warn(`[cvp] 데모 시드 실패: ${e.message}`); } }
+  if (!settings.enabled && !cvpDemoActive(serversForThisNode()) && !manual) {
     // v2.611(DB2611-05·RECENT2611-07): 보존 정리는 수집 켜짐과 무관하게 돈다 — 중앙은 꺼져 있어도 엣지 push 를 적재하고
     //   (CVP_SETTINGS_LOCAL=1 엣지·꺼진 상태의 수동 요청), 꺼진 뒤 남은 행도 보존일은 지켜야 한다(guestdisk/poller.js 와 같은 규약).
     db.maybePrune(settings).catch(() => {});
@@ -236,7 +243,8 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
   _busy = true;
   const t0 = Date.now();
   try {
-    const all = serversForThisNode();
+    // v2.708: live 는 데모(mock-) 서버에 접속하지 않는다.
+    const all = isMockMode() ? serversForThisNode() : serversForThisNode().filter((s) => !isDemoId(s.id));
     const ids = Array.isArray(only) ? new Set(only.map(String)) : null;
     const servers = ids ? all.filter((s) => ids.has(String(s.id))) : all;
     if (!ids) {
@@ -280,7 +288,8 @@ export function startCvpPoller() {
 export function cvpPollerStatus() {
   const s = loadSettings();
   return {
-    ..._last, lastRun: _last.at || null, running: _busy, busy: _busy, enabled: s.enabled, intervalMs: s.intervalMs, concurrency: s.concurrency,
+    ..._last, lastRun: _last.at || null, running: _busy, busy: _busy, enabled: s.enabled || cvpDemoActive(serversForThisNode()), intervalMs: s.intervalMs, concurrency: s.concurrency,
+    ...(cvpDemoActive(serversForThisNode()) ? { demo: true } : {}),
     inFlight: [..._inFlight.values()], partsEveryMs: PARTS_EVERY_MS,
   };
 }

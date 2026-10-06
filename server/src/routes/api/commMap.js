@@ -34,6 +34,7 @@ import { listDevices as listPdu } from '../../pdu/registry.js';
 import { edgeStorageReports } from '../../central/storageEdge.js';
 import { edgePduStatus } from '../../central/pduEdge.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { demoDecorateVcenters } from '../../mock/demo/edge.js'; // v2.708: mock 이면 데모 엣지가 맡는 vCenter 를 위임으로 표시(입력만)
 import { buildCommMap, RES_MAX_PER_KIND, DIRECT_MAX_PER_KIND, PUSH_FRESH_FACTOR, REASON_SEVERITY } from '../../commmap/build.js';
 
 const adminOnly = requireRole('admin');
@@ -74,7 +75,7 @@ export async function gatherCommInputs(snap, sourceErrors) {
     latestLinks: await latestAll().catch(() => []),
     edgeReports: allEdgeLinkReports(),
     vcenters: safeList(listVcenters, sourceErrors, 'vcenters'),
-    snapVcenters: snap.vcenters || [],
+    snapVcenters: demoDecorateVcenters(snap.vcenters || []),
     vcCounts,
     storage: safeList(listStorage, sourceErrors, 'storage'),
     sanswitch: safeList(listSanSwitch, sourceErrors, 'sanswitch'),

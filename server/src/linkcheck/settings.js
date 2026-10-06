@@ -5,6 +5,7 @@
  *   5분 주기에 하루 4만 회다. 회선·상대 부하를 보며 켜는 것이 설계다.
  * ⚠ 주기·보존 **숫자를 화면 문구에 박지 말 것** — 이 모듈이 주는 값만 쓴다(CLAUDE.md 규약).
  */
+import { demoOn } from '../mock/demo/flags.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -127,5 +128,5 @@ export function saveLinkCheckSettings(body = {}) {
 export function linkCheckEnabled() {
   if (String(process.env.LINKCHECK_ENABLED || '').toLowerCase() === 'true') return true;
   if (String(process.env.LINKCHECK_ENABLED || '').toLowerCase() === 'false') return false;
-  return loadLinkCheckSettings().enabled;
+  return demoOn(loadLinkCheckSettings().enabled); // v2.708: 데모(mock)면 켜진 것처럼(설정 파일은 그대로 — live 로 바꾸면 원래 값)
 }

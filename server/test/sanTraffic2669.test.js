@@ -108,7 +108,7 @@ test('⑤ 실제 라우트 — 어레이 포트만 합산 · 법인 필터 · �
     const all = await (await fetch(`${base}/tools/sanswitch/perf/traffic-total?hours=1`)).json();
     assert.equal(all.ok, true); assert.equal(all.unit, 'bytesPerSec');
     assert.equal(all.now?.bps, 1_500_000, JSON.stringify(all.now) + ' — 어레이 포트만(1MB + 0.5MB), HBA 제외');
-    assert.equal(all.switches, 2); assert.equal(all.datacenters, 2); assert.equal(all.enabled, ps.loadPerfSettings().enabled);
+    assert.equal(all.switches, 2); assert.equal(all.datacenters, 2); assert.equal(all.enabled, ps.loadPerfSettings().enabled || true); // v2.708: mock(이 테스트의 DATA_SOURCE)은 켜진 것처럼(demoOn) — 저장 설정은 그대로
     assert.equal(all.intervalMs, ps.loadPerfSettings().intervalMs);
     assert.deepEqual(all.byDatacenter.map((x) => [x.datacenterId, x.bps]), [['dcA', 1_000_000], ['dcB', 500_000]]);
     assert.ok(!JSON.stringify(all).includes('10.69.0.'), '응답에 관리 주소가 없어야 한다');
