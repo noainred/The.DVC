@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+import * as T from './idracTrendText.js';
 import {
   statsOf, gapAreas, customRangeError, periodText, pMaxOf, valueText, corpsOf, sitesOf, serversOf, serverLabel,
   retentionNote, emptyNote, bucketLabel, PRESETS, MIN, HOUR, DAY,
@@ -301,5 +302,43 @@ describe('v2.668 ESXi 호스트 GPU 계열', () => {
     expect(hostGpuNote({ hostGpu: { hasGpu: false } })).toBe('');
     expect(hostGpuEmptyText({ hostGpu: { hasGpu: false } })).toBe('GPU 없음');
     expect(hostGpuEmptyText({ hostGpu: { hasGpu: true } })).toMatch(/GPU 모니터링/);
+  });
+});
+
+describe('v2.712 GPU 온도 기준선', () => {
+  const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), m }; };
+  it('값은 정수 45 이상 100 미만만', () => {
+    expect(T.gpuRefValueOf(45)).toBe(45);
+    expect(T.gpuRefValueOf(99)).toBe(99);
+    expect(T.gpuRefValueOf('80')).toBe(80);
+    for (const bad of [44, 100, 120, 85.5, '', '  ', '8e1', null, undefined, true, [85], NaN]) expect(T.gpuRefValueOf(bad)).toBe(null);
+  });
+  it('잘못된 칸은 그 칸만 버리고 직전 값을 유지한다', () => {
+    let r = T.normalizeGpuRef(null);
+    expect(r).toEqual({ on: true, value: 85, color: '#ec4899', width: 2 });
+    r = T.setGpuRef(r, { value: 70, color: '#22C55E', width: 4 });
+    expect(r).toEqual({ on: true, value: 70, color: '#22c55e', width: 4 });
+    r = T.setGpuRef(r, { value: '', color: 'red;x', width: 9 });
+    expect(r).toEqual({ on: true, value: 70, color: '#22c55e', width: 4 });
+    r = T.setGpuRef(r, { value: 100 });
+    expect(r.value).toBe(70);
+  });
+  it('저장은 기본값과 다를 때만 · 손상된 저장값은 기본값', () => {
+    const s = mem();
+    T.saveGpuRef(s, T.normalizeGpuRef(null));
+    expect(s.m.has(T.GPU_REF_KEY)).toBe(false);
+    T.saveGpuRef(s, { on: false, value: 60, color: '#ef4444', width: 3 });
+    expect(T.loadGpuRef(s)).toEqual({ on: false, value: 60, color: '#ef4444', width: 3 });
+    s.setItem(T.GPU_REF_KEY, '{not json');
+    expect(T.loadGpuRef(s)).toEqual(T.normalizeGpuRef(null));
+    s.setItem(T.GPU_REF_KEY, JSON.stringify({ value: 30, color: 'url(x)', width: '2' }));
+    expect(T.loadGpuRef(s)).toEqual(T.normalizeGpuRef(null));
+  });
+  it('GPU 온도 계열이 보일 때만 그린다', () => {
+    const r = T.normalizeGpuRef(null);
+    expect(T.showGpuRef(r, { gpuTemp: true }, { gpuTemp: { max: 30 } })).toBe(true);
+    expect(T.showGpuRef(r, { gpuTemp: false }, { gpuTemp: { max: 30 } })).toBe(false);
+    expect(T.showGpuRef(r, { gpuTemp: true }, { gpuTemp: null })).toBe(false);
+    expect(T.showGpuRef({ ...r, on: false }, { gpuTemp: true }, { gpuTemp: { max: 30 } })).toBe(false);
   });
 });

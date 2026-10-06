@@ -246,6 +246,61 @@ export function saveCpuRef(storage, on) {
 export const showCpuRef = (refOn, on, st) => !!refOn && ((!!on?.cpuPct && !!st?.cpuPct) || (!!on?.hostCpuPct && !!st?.hostCpuPct));
 
 /*
+ * v2.712 — GPU 온도 기준선(사용자 요청 "GPU 온도 기준선 · 45도 이상 100도 미만 · 색상과 굵기를 사용자가 지정").
+ * 값·색·굵기·켜짐을 CPU 기준선처럼 **브라우저에만** 저장한다(기본값과 같으면 저장하지 않는다).
+ * 값은 정수 [GPU_REF_MIN, GPU_REF_MAX) — 범위 밖·빈 칸·숫자 아님은 저장하지 않고 직전 값을 쓴다(`Number('') === 0` 이 45 로 올라가지 않게).
+ * 색은 #rrggbb 만 받는다(style 에 그대로 들어가는 값이다). 기준선은 GPU 온도 계열이 보일 때만 그린다.
+ * ⚠ 포탈이 'GPU 온도 위험 수치' 를 정한 것이 아니다 — 모델·냉각마다 정상 범위가 다르다(v2.650 규약). 사용자가 고른 표시선이다.
+ */
+export const GPU_REF_KEY = 'idracTrend.gpuRef';
+export const GPU_REF_MIN = 45;
+export const GPU_REF_MAX = 100;   // 미만(포함하지 않는다)
+export const GPU_REF_DEFAULT = Object.freeze({ on: true, value: 85, color: '#ec4899', width: 2 });
+export const GPU_REF_COLORS = ['#ec4899', '#ef4444', '#f59e0b', '#facc15', '#22c55e', '#38bdf8', '#a855f7', '#e5e7eb'];
+const HEX_COLOR = /^#[0-9a-f]{6}$/;
+/** 기준선 값 판정 — 정수이고 [45, 100) 이면 그 수, 아니면 null. 빈 문자열·공백·불리언·배열은 숫자가 아니다. */
+export function gpuRefValueOf(v) {
+  if (typeof v === 'string') { if (!/^\s*\d+\s*$/.test(v)) return null; v = Number(v); }
+  if (typeof v !== 'number' || !Number.isInteger(v)) return null;
+  return v >= GPU_REF_MIN && v < GPU_REF_MAX ? v : null;
+}
+export function normalizeGpuRef(saved) {
+  const s = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  const d = GPU_REF_DEFAULT;
+  const color = typeof s.color === 'string' ? s.color.toLowerCase() : '';
+  return {
+    on: typeof s.on === 'boolean' ? s.on : d.on,
+    value: gpuRefValueOf(s.value) ?? d.value,
+    color: HEX_COLOR.test(color) ? color : d.color,
+    width: WIDTHS.includes(s.width) ? s.width : d.width,
+  };
+}
+/** 바꾼 칸만 반영 — 잘못된 값은 그 칸만 버린다(직전 값 유지). */
+export function setGpuRef(ref, patch) {
+  const cur = normalizeGpuRef(ref);
+  const next = { ...cur };
+  if (patch && 'on' in patch && typeof patch.on === 'boolean') next.on = patch.on;
+  if (patch && 'value' in patch) { const v = gpuRefValueOf(patch.value); if (v != null) next.value = v; }
+  if (patch && 'color' in patch) next.color = patch.color;
+  if (patch && 'width' in patch) next.width = Number(patch.width);
+  const out = normalizeGpuRef(next);
+  if (patch && 'color' in patch && out.color !== String(patch.color).toLowerCase()) out.color = cur.color;
+  if (patch && 'width' in patch && out.width !== Number(patch.width)) out.width = cur.width;
+  return out;
+}
+export const isDefaultGpuRef = (r) => r.on === GPU_REF_DEFAULT.on && r.value === GPU_REF_DEFAULT.value && r.color === GPU_REF_DEFAULT.color && r.width === GPU_REF_DEFAULT.width;
+export function loadGpuRef(storage) {
+  try { return normalizeGpuRef(JSON.parse(storage?.getItem(GPU_REF_KEY) || 'null')); } catch { return normalizeGpuRef(null); }
+}
+export function saveGpuRef(storage, ref) {
+  try {
+    const r = normalizeGpuRef(ref);
+    if (isDefaultGpuRef(r)) storage?.removeItem(GPU_REF_KEY); else storage?.setItem(GPU_REF_KEY, JSON.stringify(r));
+  } catch { /* 저장 못 하면 이번 화면에서만 */ }
+}
+export const showGpuRef = (ref, on, st) => !!ref?.on && !!on?.gpuTemp && !!st?.gpuTemp;
+
+/*
  * v2.661 — 카드 순서(사용자 요청 "사용자가 위치를 변경할 수 있게"). 브라우저에만 저장한다(사람마다 보는 순서가 다르다 —
  * 서버 설정으로 두면 한 사람이 바꾼 순서가 모두에게 바뀐다). 모르는 키는 버리고, 새 카드(다음 릴리스에 늘어난 계열)는 뒤에 붙인다.
  */
