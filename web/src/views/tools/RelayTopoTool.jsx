@@ -201,9 +201,9 @@ export default function RelayTopoTool() {
                   <td><input className="input" style={{ minWidth: 90, width: 100 }} value={s.key} onChange={(e) => setSvc(i, 'key', e.target.value)} placeholder="portal" /></td>
                   <td><input className="input" style={{ minWidth: 100, width: 130 }} value={s.label || ''} onChange={(e) => setSvc(i, 'label', e.target.value)} /></td>
                   <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.listenPort ?? ''} onChange={(e) => setSvc(i, 'listenPort', e.target.value)} /></td>
-                  <td><select className="input" style={{ minWidth: 150 }} value={s.target} onChange={(e) => setSvc(i, 'target', e.target.value)}>{Object.entries(data.targets).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
+                  <td><Select className="input" style={{ minWidth: 150 }} value={s.target} onChange={(e) => setSvc(i, 'target', e.target.value)}>{Object.entries(data.targets).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></td>
                   <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.targetPort ?? ''} onChange={(e) => setSvc(i, 'targetPort', e.target.value)} /></td>
-                  <td><select className="input" style={{ minWidth: 70 }} value={s.mode} onChange={(e) => setSvc(i, 'mode', e.target.value)}><option value="tcp">tcp</option><option value="http">http</option></select></td>
+                  <td><Select sort={false} className="input" style={{ minWidth: 70 }} value={s.mode} onChange={(e) => setSvc(i, 'mode', e.target.value)}><option value="tcp">tcp</option><option value="http">http</option></Select></td>
                   <td><button className="tab" onClick={() => setForm((p) => ({ ...p, services: p.services.filter((_, j) => j !== i) }))}>삭제</button></td>
                 </tr>))}</tbody>
             </STable>
@@ -447,7 +447,7 @@ function SiteForm({ site, onChange, deployTargets }) {
     <div style={{ fontSize: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 2fr', gap: 8 }}>
         <label>DC(사이트) *<input className="input" style={{ minWidth: 0, width: '100%' }} value={site.dc} onChange={(e) => set('dc', e.target.value)} placeholder="AZ" /></label>
-        <label>배포 대상(SSH 자격증명 폴백)<select className="input" style={{ minWidth: 0, width: '100%' }} value={site.sshTargetId || ''} onChange={(e) => set('sshTargetId', e.target.value)}><option value="">(같은 IP 의 배포 대상 자동)</option>{deployTargets.map((t) => <option key={t.id} value={t.id}>{t.host} ({t.username}) — {t.id}</option>)}</select></label>
+        <label>배포 대상(SSH 자격증명 폴백)<Select className="input" style={{ minWidth: 0, width: '100%' }} value={site.sshTargetId || ''} onChange={(e) => set('sshTargetId', e.target.value)}><option value="">(같은 IP 의 배포 대상 자동)</option>{deployTargets.map((t) => <option key={t.id} value={t.id}>{t.host} ({t.username}) — {t.id}</option>)}</Select></label>
         <label>비고<input className="input" style={{ minWidth: 0, width: '100%' }} value={site.note || ''} onChange={(e) => set('note', e.target.value)} /></label>
       </div>
       <NodeFields title="Edge DVC(중계 엣지 · HAProxy)" node={site.edge} onChange={(n) => set('edge', n)} hint="중앙이 접속하는 주소는 public IP 우선. SSH 는 root 또는 passwordless sudo(haproxy.cfg 교체·reload)." />
@@ -455,3 +455,5 @@ function SiteForm({ site, onChange, deployTargets }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

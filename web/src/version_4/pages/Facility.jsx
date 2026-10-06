@@ -12,6 +12,7 @@ import { bmcPollSummary, BMC_TONE_COLOR } from '../../views/bmcPollText.js'; // 
 import { scopeOmitNote } from '../../views/scopeOmitText.js'; // v2.631 A6-2631-05: 범위 계정에서 뺀 서버를 밝힌다
 import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty, Spark } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempCellColor, tempTextColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../data.js';
+import Select from '../../components/Select.jsx';
 
 export default function Facility({ global: g, ov, sitesAll, scope, polls, perms, spec, isAdmin, phase, phaseText, health }) {
   // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
@@ -174,12 +175,12 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
             <>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
                 <label className="v3-chip" style={{ flex: 1, minWidth: 200 }}><span>서버</span>
-                  <select value={tempSrv} onChange={(e) => setTempSrv(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
+                  <Select value={tempSrv} onChange={(e) => setTempSrv(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
                     <option value="">선택…</option>
                     {(polls.idrac.data?.servers || []).filter((sv) => scope.inScope(sv.mappedVcenterId || sv.vcenterId)).map((sv) => (
                       <option key={sv.id} value={sv.id}>{sv.name}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <div className="v4-modes">
                   {[1, 7, 30, 90, 365].map((d) => (

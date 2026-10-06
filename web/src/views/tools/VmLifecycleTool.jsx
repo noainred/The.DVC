@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { fmtTs, coverageNote, truncNote, noDetailNote } from '../vmchanges/vmChangesText.js';
 import { LIFE_KIND_LABEL, LIFE_KIND_TONE, ADD_KINDS, existsText, lifeSpanText, netText, sourceText, REMOVE_NOTE } from '../vmlife/vmLifeText.js';
+import Select from '../../components/Select.jsx';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -106,10 +107,10 @@ export default function VmLifecycleTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>기간</span>
         {DAYS.map((d) => <Chip key={d} active={days === d} onClick={() => setDays(d)}>{d}일</Chip>)}
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="VM·사용자·호스트·원본 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {showCsv && <button type="button" className="btn" onClick={csv} disabled={csvBusy}>CSV</button>}

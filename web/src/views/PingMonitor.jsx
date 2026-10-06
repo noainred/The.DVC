@@ -6,6 +6,7 @@ import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { pingEmptyReason } from './pingEmptyText.js';
 import { agoText } from './tools/relTime.js';
+import Select from '../components/Select.jsx';
 
 // 상태별 색상(파이썬 원본의 baseline 편차 색상 코딩 이식).
 const COLOR = { ok: '#22c55e', warn: '#eab308', crit: '#f97316', down: '#ef4444', unknown: '#6b7280' };
@@ -132,7 +133,7 @@ export default function PingMonitor() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 10 }}>
             <label style={{ fontSize: 12 }}>표시 이름<input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="예: 폴란드 vCenter" /></label>
             <label style={{ fontSize: 12 }}>대상 주소(호스트/IP) *<input className="input" value={form.host} onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))} placeholder="예: 10.0.0.5" /></label>
-            <label style={{ fontSize: 12 }}>측정 방식<select className="select" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}><option value="icmp">ICMP ping</option><option value="tcp">TCP 연결</option></select></label>
+            <label style={{ fontSize: 12 }}>측정 방식<Select sort={false} className="select" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}><option value="icmp">ICMP ping</option><option value="tcp">TCP 연결</option></Select></label>
             {form.kind === 'tcp' && <label style={{ fontSize: 12 }}>포트<input className="input" value={form.port} onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))} placeholder="443" /></label>}
             <label style={{ fontSize: 12 }}>기준 RTT(ms, 선택)<input className="input" value={form.baselineMs} onChange={(e) => setForm((f) => ({ ...f, baselineMs: e.target.value }))} placeholder="비우면 자동(중앙값)" /></label>
             <label style={{ fontSize: 12 }}>메모<input className="input" value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="비고(선택)" /></label>

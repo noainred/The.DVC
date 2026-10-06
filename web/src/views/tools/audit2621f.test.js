@@ -110,7 +110,7 @@ describe('WEB-06 400px 넘침', () => {
   it('법인별 온도 필터 행(선택·검색·↻)이 줄바꿈된다', () => {
     const s = code('HardwareTools.jsx');
     const body = s.slice(s.indexOf('function ServerTempFinder'), s.indexOf('function ServerFirmwareFinder'));
-    const i = body.indexOf('<select className="select select-sm" value={kind}');
+    const i = body.indexOf('<Select sort={false} className="select select-sm" value={kind}');
     expect(i).toBeGreaterThan(0);
     const row = body.slice(body.lastIndexOf('<div', i), i);
     expect(row).toMatch(/flexWrap: 'wrap'|className="[^"]*\bwrap\b/);

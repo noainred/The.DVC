@@ -3,6 +3,7 @@ import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * 성능점검 로그 분석 — CSV 로그를 기간·버킷(시간/일/주/월/분기/반기/연간)으로 집계해 본다.
@@ -67,15 +68,15 @@ export default function AnalyzeTab() {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>기간</span>
-            <select className="select" value={form.range} onChange={(e) => setForm({ ...form, range: e.target.value })}>
+            <Select sort={false} className="select" value={form.range} onChange={(e) => setForm({ ...form, range: e.target.value })}>
               {RANGES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>묶음 단위</span>
-            <select className="select" value={form.bucket} onChange={(e) => setForm({ ...form, bucket: e.target.value })}>
+            <Select sort={false} className="select" value={form.bucket} onChange={(e) => setForm({ ...form, bucket: e.target.value })}>
               {BUCKETS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="flex col" style={{ gap: 4, minWidth: 180 }}>
             <span className="muted" style={{ fontSize: 11 }}>경로 (앞부분 일치)</span>

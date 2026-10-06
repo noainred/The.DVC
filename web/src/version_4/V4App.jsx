@@ -38,6 +38,7 @@ import Network from './pages/Network.jsx';
 import Facility from './pages/Facility.jsx';
 import Alarms from './pages/Alarms.jsx';
 import Tools from './pages/Tools.jsx';
+import Select from '../components/Select.jsx';
 
 export const V4_HASH = '#/v4';
 export const isV4Hash = (hash) => hashSegments(hash)[0] === 'v4';
@@ -241,16 +242,16 @@ export default function V4App({ user, health, healthError, onExit }) {
             {q ? <button type="button" className="v3-kbd" style={{ cursor: 'pointer' }} onClick={() => setQ('')}>지움</button> : <span className="v3-kbd">필터</span>}
           </label>
           <label className="v3-chip"><span>리전</span>
-            <select value={region} onChange={(e) => { setRegion(e.target.value); setFocusVc(''); }}>
+            <Select value={region} onChange={(e) => { setRegion(e.target.value); setFocusVc(''); }}>
               <option value="">전체</option>
               {regions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="v3-chip"><span>vCenter</span>
-            <select value={focusVc} onChange={(e) => setFocusVc(e.target.value)}>
+            <Select value={focusVc} onChange={(e) => setFocusVc(e.target.value)}>
               <option value="">{sitesAll.length ? `전체 ${sitesAll.length}` : '전체'}</option>
               {sitesAll.filter((s) => !region || s.region === region).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </Select>
           </label>
           <span style={{ flex: 1 }} />
           <div className={`v3-live${health ? (progress?.pending || progress?.unreachable ? ' warn' : '') : ' down'}`}

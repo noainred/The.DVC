@@ -145,11 +145,11 @@ function JobForm({ d, form, setForm, onSaved }) {
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
         <label style={{ fontSize: 12 }}>vCenter<br />
-          <select className="select" value={form.vcenterId} disabled={!!form.id}
+          <Select className="select" value={form.vcenterId} disabled={!!form.id}
             onChange={(e) => setForm({ ...form, vcenterId: e.target.value, vmId: '', vmName: '', dest: { ...form.dest, datastoreName: '' } })}>
             <option value="">(선택)</option>
             {vcs.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
-          </select>
+          </Select>
         </label>
         {form.vcenterId && !form.id && (
           <label style={{ fontSize: 12, flex: '1 1 260px' }}>VM 검색·선택 ({vms.length}대 중)<br />
@@ -172,25 +172,25 @@ function JobForm({ d, form, setForm, onSaved }) {
 
       <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
         <label style={{ fontSize: 12 }}>백업 대상<br />
-          <select className="select" value={form.dest.type} onChange={(e) => setForm({ ...form, dest: { type: e.target.value, datastoreName: '', mountId: '', subdir: '' } })}>
+          <Select sort={false} className="select" value={form.dest.type} onChange={(e) => setForm({ ...form, dest: { type: e.target.value, datastoreName: '', mountId: '', subdir: '' } })}>
             <option value="datastore">다른 데이터스토어(서버측 클론)</option>
             <option value="nfs">NFS(Edge 노드 마운트 — 파일 백업)</option>
-          </select>
+          </Select>
         </label>
         {form.dest.type === 'datastore' ? (
           <label style={{ fontSize: 12 }}>대상 데이터스토어<br />
-            <select className="select" value={form.dest.datastoreName || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, datastoreName: e.target.value } })}>
+            <Select className="select" value={form.dest.datastoreName || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, datastoreName: e.target.value } })}>
               <option value="">(선택)</option>
               {dss.map((ds) => <option key={ds.id} value={ds.name}>{dsOptionLabel(ds)}</option>)}
-            </select>
+            </Select>
           </label>
         ) : (
           <>
             <label style={{ fontSize: 12 }}>NFS 마운트(설정 › NFS 마운트에서 등록)<br />
-              <select className="select" value={form.dest.mountId || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, mountId: e.target.value } })}>
+              <Select className="select" value={form.dest.mountId || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, mountId: e.target.value } })}>
                 <option value="">(선택)</option>
                 {(d.mounts || []).map((m) => <option key={m.id} value={m.id}>{m.server}:{m.exportPath} {m.mounted ? '· 마운트됨' : '· ⚠ 미마운트'}</option>)}
-              </select>
+              </Select>
             </label>
             <label style={{ fontSize: 12 }}>하위 폴더(선택)<br />
               <input className="input" style={{ width: 140 }} placeholder="예: prod" value={form.dest.subdir || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, subdir: e.target.value } })} />
@@ -198,11 +198,11 @@ function JobForm({ d, form, setForm, onSaved }) {
           </>
         )}
         <label style={{ fontSize: 12 }}>스케줄<br />
-          <select className="select" value={form.schedule.mode} onChange={(e) => setForm({ ...form, schedule: { mode: e.target.value, ...(e.target.value === 'daily' ? { time: '02:00' } : e.target.value === 'interval' ? { hours: 24 } : {}) } })}>
+          <Select sort={false} className="select" value={form.schedule.mode} onChange={(e) => setForm({ ...form, schedule: { mode: e.target.value, ...(e.target.value === 'daily' ? { time: '02:00' } : e.target.value === 'interval' ? { hours: 24 } : {}) } })}>
             <option value="daily">매일 지정 시각</option>
             <option value="interval">N시간 간격</option>
             <option value="manual">수동만</option>
-          </select>
+          </Select>
         </label>
         {form.schedule.mode === 'daily' && <label style={{ fontSize: 12 }}>시각<br /><input className="input" type="time" value={form.schedule.time || '02:00'} onChange={(e) => setForm({ ...form, schedule: { ...form.schedule, time: e.target.value } })} /></label>}
         {form.schedule.mode === 'interval' && <label style={{ fontSize: 12 }}>간격(시간)<br /><input className="input" type="number" min={1} max={168} style={{ width: 80 }} value={form.schedule.hours || 24} onChange={(e) => setForm({ ...form, schedule: { ...form.schedule, hours: Number(e.target.value) || 24 } })} /></label>}
@@ -219,3 +219,5 @@ function JobForm({ d, form, setForm, onSaved }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

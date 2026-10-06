@@ -11,6 +11,8 @@ import { STable } from '../components/STable.jsx';
 import { rowCards, displayIp, uaDisplay, tokenMismatchBanner, denyPathOf } from './collectorDiag.js';
 import { MOCK_VC_RE } from './collectors/emptyInvText.js';
 import { unitText } from './unitText.js';
+import Select from '../components/Select.jsx';
+import DataList from '../components/DataList.jsx';
 const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx')); // v2.560 — '빈 인벤토리' 원인·로그·조치
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
@@ -370,9 +372,9 @@ export default function Collectors() {
 
         <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
           <input className="input" style={{ maxWidth: 260 }} list="collector-agent-list" value={tokAgent} onChange={(e) => setTokAgent(e.target.value)} placeholder="엣지 이름(예: OC2)" />
-          <datalist id="collector-agent-list">
+          <DataList id="collector-agent-list">
             {(data.collectors || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </datalist>
+          </DataList>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !tokAgent.trim()} onClick={issueTok}>토큰 발급</button>
         </div>
       </details>
@@ -460,15 +462,15 @@ export default function Collectors() {
               <label>데이터센터
                 {/* 콤보박스: 등록된 법인 목록에서 선택하거나 직접 입력(datalist). */}
                 <input className="input" list="collector-dc-list" value={form.datacenter} onChange={setF('datacenter')} placeholder="목록에서 선택 또는 입력" autoComplete="off" />
-                <datalist id="collector-dc-list">
+                <DataList id="collector-dc-list">
                   {dcs.map((d) => <option key={d.id} value={d.id}>{d.name && d.name !== d.id ? `${d.name}${d.region ? ` · ${d.region}` : ''}` : (d.region || '')}</option>)}
-                </datalist>
+                </DataList>
               </label>
               <label>수집 여부
-                <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
+                <Select sort={false} className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
                   <option value="1">수집</option>
                   <option value="0">중지</option>
-                </select>
+                </Select>
               </label>
               <label style={{ gridColumn: '1 / -1' }}>수집 서버 URL *<input className="input" value={form.url} onChange={setF('url')} placeholder="http://10.10.0.5:4000" /></label>
               <label style={{ gridColumn: '1 / -1' }}>토큰 (COLLECTOR_TOKEN) {editing && <span className="muted">(비우면 유지)</span>}

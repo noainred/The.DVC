@@ -8,6 +8,8 @@ import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
 // (v2.295, 3차 감사 확정 #3) — vitest(bulkRows.test.js)가 서버 검증과의 드리프트를 고정한다.
 import { TABLE_CAP, MAX_COUNT, ipMsg, EMPTY_ROW, parseFree, validateRows, buildTargetRows } from './bulkRows.js';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
+import DataList from '../../components/DataList.jsx';
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -227,9 +229,9 @@ export default function BulkTab({ canEdit, prefill }) {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>구분</span>
-            <select className="select" value={kind} onChange={(e) => { setKind(e.target.value); setPreview(null); }}>
+            <Select sort={false} className="select" value={kind} onChange={(e) => { setKind(e.target.value); setPreview(null); }}>
               <option value="infra">인프라</option><option value="service">서비스</option>
-            </select>
+            </Select>
           </label>
           <label className="flex col" style={{ gap: 4, flex: 1, minWidth: 300 }}>
             <span className="muted" style={{ fontSize: 11 }}>트리 경로 — 구분자 <code>\</code> · 없는 폴더는 자동 생성</span>
@@ -349,7 +351,7 @@ export default function BulkTab({ canEdit, prefill }) {
         )}
 
         {/* 엣지 datalist(표/자유형식 공용 자동완성) */}
-        <datalist id="svc-edge-list">{edges.map((e) => <option key={e.agent} value={e.agent} />)}</datalist>
+        <DataList id="svc-edge-list">{edges.map((e) => <option key={e.agent} value={e.agent} />)}</DataList>
 
         <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 10 }}>
           {inputMode === 'table' && count <= TABLE_CAP && (
@@ -378,18 +380,18 @@ export default function BulkTab({ canEdit, prefill }) {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4, minWidth: 260 }}>
             <span className="muted" style={{ fontSize: 11 }}>적용할 템플릿 — 위에서 입력한 대상들에 적용</span>
-            <select className="select" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setPreview(null); }}>
+            <Select className="select" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setPreview(null); }}>
               <option value="">(점검 없이 대상만 등록)</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name} — 항목 {(t.items || []).length}개</option>)}
-            </select>
+            </Select>
           </label>
           <button type="button" className={`tab ${showTplMgr ? 'active' : ''}`} onClick={toggleTplMgr}
             title="탭 전환 없이 여기서 템플릿을 만들고 수정합니다">🛠 템플릿 관리 {showTplMgr ? '▲' : '▾'}</button>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>등록 직후 상태</span>
-            <select className="select" value={enabled ? '1' : '0'} onChange={(e) => { setEnabled(e.target.value === '1'); setPreview(null); }}>
+            <Select sort={false} className="select" value={enabled ? '1' : '0'} onChange={(e) => { setEnabled(e.target.value === '1'); setPreview(null); }}>
               <option value="0">중지 (권장)</option><option value="1">바로 사용</option>
-            </select>
+            </Select>
           </label>
           <span className="muted" style={{ fontSize: 11, alignSelf: 'center' }}>이미 있는 이름은 건너뜁니다(미리보기에 '건너뜀'으로 표시).</span>
         </div>

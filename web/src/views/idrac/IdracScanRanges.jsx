@@ -187,12 +187,12 @@ export function IdracScanRanges({ loadError = null, choiceErrors = null, data, v
           <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: '1 1 200px', minWidth: 180 }}>
               <label className="muted" style={{ fontSize: 11.5 }}>법인(DataCenter) *</label>
-              <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.datacenterId}
+              <Select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.datacenterId}
                 onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
                 <option value="">(선택)</option>
                 {(() => { const m = missingChoice(datacenters.map((d) => d.id), form.datacenterId); return m ? <option key={`missing:${m.value}`} value={m.value}>{m.label}</option> : null; })()}
                 {datacenters.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}{d.region ? ` · ${d.region}` : ''}</option>)}
-              </select>
+              </Select>
             </div>
             <div style={{ flex: '1 1 180px', minWidth: 160 }}>
               <label className="muted" style={{ fontSize: 11.5 }}>서비스명 <span className="muted">(한 법인 내 여러 서비스 구분)</span></label>
@@ -241,7 +241,7 @@ export function IdracScanRanges({ loadError = null, choiceErrors = null, data, v
             </div>
             <div style={{ flex: '1 1 160px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>스캔 수행 Agent</label>
-              <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
+              <Select sort={false} className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                 <option value="__local__">이 포탈에서 직접</option>
                 {(() => {
                   // 실제 잡을 인출하는 건 '지금 폴링 중인 이름'이다. 폴링 중인 에이전트를 위에 모아
@@ -258,23 +258,23 @@ export function IdracScanRanges({ loadError = null, choiceErrors = null, data, v
                     {idle.length > 0 && <optgroup label="등록됨(현재 미폴링)">{idle.map((a) => <option key={a} value={a}>{a}</option>)}</optgroup>}
                   </>);
                 })()}
-              </select>
+              </Select>
             </div>
             {form.agent && form.agent !== '__local__' && (
               <div style={{ flex: '1 1 200px' }}>
                 <label className="muted" style={{ fontSize: 11.5 }}>스캔 방식</label>
-                <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.dispatch || 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}>
+                <Select sort={false} className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.dispatch || 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}>
                   <option value="poll">에이전트 폴링(기본) — 엣지가 중앙으로 폴링</option>
                   <option value="push">중앙→엣지 직접(PUSH) — 엣지 폴링 불필요</option>
-                </select>
+                </Select>
               </div>
             )}
             <div style={{ flex: '1 1 140px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>등록 모드</label>
-              <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
+              <Select sort={false} className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
                 <option value="merge">병합(추가/갱신)</option>
                 <option value="replace-datacenter">이 법인만 교체</option>
-              </select>
+              </Select>
             </div>
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '8px 0' }} title="체크 시 주기 스캔에 포함">
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 주기 스캔 포함
@@ -333,3 +333,5 @@ export function IdracScanRanges({ loadError = null, choiceErrors = null, data, v
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

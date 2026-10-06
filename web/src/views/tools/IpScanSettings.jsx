@@ -27,6 +27,7 @@ import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { dayStamp } from '../../dayStamp.js';
+import Select from '../../components/Select.jsx';
 
 const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }];
 const DUP_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' };
@@ -397,9 +398,9 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }} aria-label="할당 에이전트">
+          <Select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }} aria-label="할당 에이전트">
             {agents.map((a) => <option key={a} value={a}>{agentOptionLabel(a)}</option>)}
-          </select>
+          </Select>
           <input className="input" style={{ width: 160, maxWidth: '100%' }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)}
             title="목록에 아직 없는 엣지의 AGENT_NAME 을 적으면 그 이름으로 스캔 설정을 미리 만들어 둡니다. 엣지가 붙으면 이 설정을 읽어 갑니다." aria-label="새 에이전트 이름" />
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} title="입력한 이름의 스캔 설정을 새로 만들거나(없으면) 그 에이전트를 고릅니다" onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
@@ -407,11 +408,11 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>데이터센터</label>
         <div style={{ minWidth: 0 }}>
-          <select className="select" value={s.datacenterId || ''} onChange={(e) => setS({ ...s, datacenterId: e.target.value })} style={{ maxWidth: '100%', width: 260 }} aria-label="스캔 결과 데이터센터">
+          <Select className="select" value={s.datacenterId || ''} onChange={(e) => setS({ ...s, datacenterId: e.target.value })} style={{ maxWidth: '100%', width: 260 }} aria-label="스캔 결과 데이터센터">
             <option value="">자동(에이전트가 속한 데이터센터)</option>
             {(dcList || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             {s.datacenterId && dcList && !dcList.some((x) => x.id === s.datacenterId) && <option value={s.datacenterId}>{s.datacenterId} (목록에 없음)</option>}
-          </select>
+          </Select>
           {dcListErr && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>DataCenter 목록을 읽지 못했습니다({dcListErr}) — 지금은 ‘자동’ 만 고를 수 있습니다.</div>}
           <DcDecision info={dcInfo} pending={(s.datacenterId || '') !== ((d.base && d.base.datacenterId) || '')} />
         </div>

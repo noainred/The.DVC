@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import Select from '../components/Select.jsx';
 
 // 3D 툴팁(nodeLabel)은 innerHTML 로 렌더되므로, 인벤토리 이름을 넣기 전 HTML 이스케이프한다(저장형 XSS 방지).
 const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -121,15 +122,15 @@ export default function Topology3D() {
           {counts && <span style={{ marginLeft: 8 }}>중앙 1 · 엣지 {counts.agents} · vCenter {counts.vcenters} · NSX {counts.nsx} · 호스트 {counts.hosts}{(showVms || vc || host) ? ` · VM ${counts.vms}` : ''}</span>}
         </div>
         <div className="flex gap wrap" style={{ flex: '1 1 auto', minWidth: 0, alignItems: 'center' }}>
-          <select className="select" style={{ maxWidth: 200 }} value={vc} onChange={(e) => pickVc(e.target.value)} title="vCenter 포커스(VM까지 표시)">
+          <Select className="select" style={{ maxWidth: 200 }} value={vc} onChange={(e) => pickVc(e.target.value)} title="vCenter 포커스(VM까지 표시)">
             <option value="">전체 (호스트까지)</option>
             {vcList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+          </Select>
           {vc && (
-            <select className="select" style={{ maxWidth: 200 }} value={host} onChange={(e) => pickHost(e.target.value)} title="호스트 포커스(그 호스트 VM만)">
+            <Select className="select" style={{ maxWidth: 200 }} value={host} onChange={(e) => pickHost(e.target.value)} title="호스트 포커스(그 호스트 VM만)">
               <option value="">전체 호스트</option>
               {hostList.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
-            </select>
+            </Select>
           )}
           {(vc || host) && <button className="logout-btn" style={{ padding: '6px 11px' }} onClick={resetFocus} title="포커스 해제">✕ 전체</button>}
           <button className="logout-btn" style={{ padding: '6px 11px' }} onClick={() => zoom(0.75)} title="줌인">＋</button>

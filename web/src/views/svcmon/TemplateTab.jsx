@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PreviewTable from './PreviewTable.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 /**
  * 점검 템플릿 — 서비스 유형(Linux 서버·웹/TLS·DNS…)별 점검 묶음을 정의하고 대상에 적용한다.
@@ -354,11 +355,11 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
             </label>
             <label className="flex col" style={{ gap: 4 }}>
               <span className="muted" style={{ fontSize: 11 }}>대상 구분</span>
-              <select className="select" value={draft.kind || ''} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+              <Select sort={false} className="select" value={draft.kind || ''} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
                 <option value="">제한 없음</option>
                 <option value="infra">인프라</option>
                 <option value="service">서비스</option>
-              </select>
+              </Select>
             </label>
           </div>
 
@@ -433,17 +434,17 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
               </label>
               <label className="flex col" style={{ gap: 4 }}>
                 <span className="muted" style={{ fontSize: 11 }}>유형</span>
-                <select className="select" value={itemEdit.item.type}
+                <Select className="select" value={itemEdit.item.type}
                   onChange={(e) => setItemEdit({ ...itemEdit, item: { ...itemEdit.item, type: e.target.value } })}>
                   {types.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                </Select>
               </label>
               <label className="flex col" style={{ gap: 4 }}>
                 <span className="muted" style={{ fontSize: 11 }}>사용</span>
-                <select className="select" value={itemEdit.item.enabled === false ? '0' : '1'}
+                <Select sort={false} className="select" value={itemEdit.item.enabled === false ? '0' : '1'}
                   onChange={(e) => setItemEdit({ ...itemEdit, item: { ...itemEdit.item, enabled: e.target.value === '1' } })}>
                   <option value="1">사용</option><option value="0">중지</option>
-                </select>
+                </Select>
               </label>
             </div>
 
@@ -459,9 +460,9 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
                       {f.label}{need && <span className="badge red" style={{ marginLeft: 4 }}>필수</span>}
                     </span>
                     {f.kind === 'bool' ? (
-                      <select className="select" value={val ? '1' : '0'} onChange={(e) => set(e.target.value === '1')}>
+                      <Select sort={false} className="select" value={val ? '1' : '0'} onChange={(e) => set(e.target.value === '1')}>
                         <option value="0">아니오</option><option value="1">예</option>
-                      </select>
+                      </Select>
                     ) : (
                       <input className="input" value={val ?? ''} onChange={(e) => set(e.target.value)}
                         placeholder={f.kind === 'int' ? `${f.min}~${f.max}${f.dflt ? ` (기본 ${f.dflt})` : ' (비우면 미지정)'}`
@@ -501,9 +502,9 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
           <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
             <label className="flex col" style={{ gap: 4 }}>
               <span className="muted" style={{ fontSize: 11 }}>대상 구분</span>
-              <select className="select" value={applyCfg.kind} onChange={(e) => { setApplyCfg({ ...applyCfg, kind: e.target.value }); setPreview(null); }}>
+              <Select sort={false} className="select" value={applyCfg.kind} onChange={(e) => { setApplyCfg({ ...applyCfg, kind: e.target.value }); setPreview(null); }}>
                 <option value="infra">인프라</option><option value="service">서비스</option>
-              </select>
+              </Select>
             </label>
             <label className="flex col" style={{ gap: 4, flex: 1, minWidth: 240 }}>
               <span className="muted" style={{ fontSize: 11 }}>경로 (비우면 그 구분의 전체)</span>

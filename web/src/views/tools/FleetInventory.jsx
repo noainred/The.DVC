@@ -14,13 +14,13 @@ import { fleetPartialsNote } from '../fleetPartialText.js'; // v2.607 LEFT2607-0
 // 통합 서버 인벤토리 — iDRAC/OME 물리 서버 + vCenter 호스트를 가상화/베어메탈로 분류.
 function TagSelect({ value, onChange, disabled }) {
   return (
-    <select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12 }}
+    <Select sort={false} className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12 }}
       onChange={(e) => onChange(e.target.value)}>
       <option value="auto">자동</option>
       <option value="baremetal">베어메탈</option>
       <option value="virtualization">가상화</option>
       <option value="exclude">제외</option>
-    </select>
+    </Select>
   );
 }
 
@@ -39,12 +39,12 @@ const VC_SRC = {
 function VcAssignSelect({ value, vcenters, onChange, disabled }) {
   const known = vcenters.some((v) => v.id === value);
   return (
-    <select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }}
+    <Select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }}
       onChange={(e) => onChange(e.target.value)} title="소속 법인(vCenter) 등록">
       <option value="">미지정</option>
       {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
       {value && !known && <option value={value}>{value} (알 수 없음)</option>}
-    </select>
+    </Select>
   );
 }
 
@@ -174,11 +174,11 @@ export function FleetInventory({ isAdmin }) {
           <button className={view === 'virt' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('virt')}>가상화 호스트 ({(d.virtualizationHosts || []).length})</button>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 220 }} title="법인(vCenter)/데이터센터 필터">
+          <Select className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 220 }} title="법인(vCenter)/데이터센터 필터">
             <option value="">전체 법인(vCenter)</option>
             {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}{v.region ? ` · ${v.region}` : ''}</option>)}
             <option value="__none__">(미지정)</option>
-          </select>
+          </Select>
           <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
           {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>}
         </div>
@@ -200,10 +200,10 @@ export function FleetInventory({ isAdmin }) {
           {isAdmin && (
             <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
               <span className="muted" style={{ fontSize: 12 }}>일괄 등록: <b>{selectedItems.length}</b>대 선택</span>
-              <select className="select" value={bulkVc} onChange={(e) => setBulkVc(e.target.value)} style={{ maxWidth: 200, padding: '5px 8px', fontSize: 12 }}>
+              <Select className="select" value={bulkVc} onChange={(e) => setBulkVc(e.target.value)} style={{ maxWidth: 200, padding: '5px 8px', fontSize: 12 }}>
                 <option value="">미지정(해제)</option>
                 {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
+              </Select>
               <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!selectedItems.length || busy === '__bulk__'} onClick={bulkAssign}>{busy === '__bulk__' ? '등록 중…' : '선택 일괄 등록'}</button>
               {sel.size > 0 && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setSel(new Set())}>선택 해제</button>}
             </div>
@@ -267,3 +267,5 @@ export function FleetInventory({ isAdmin }) {
     </>
   );
 }
+
+import Select from '../../components/Select.jsx';

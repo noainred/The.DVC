@@ -740,10 +740,10 @@ export default function StorageMonTool() {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, gap: 6 }}
           title="용량 표시 단위입니다. 사용량 증가를 추적할 때는 TB 또는 GB 로 고정하면 변화가 잘 보입니다.">
           단위
-          <select className="select" style={{ padding: '5px 8px', fontSize: 12 }} value={unit}
+          <Select sort={false} className="select" style={{ padding: '5px 8px', fontSize: 12 }} value={unit}
             onChange={(e) => setUnit(saveUnit(e.target.value))}>
             {UNIT_OPTIONS.map((u) => <option key={u.value} value={u.value} title={u.hint}>{u.label}</option>)}
-          </select>
+          </Select>
         </label>
         {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
       </div>
@@ -1554,7 +1554,7 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
         <label style={{ fontSize: 12 }}>타입<br />
-          <select className="select" value={form.type}
+          <Select className="select" value={form.type}
             onChange={(e) => {
               // 타입을 바꾸면 그 타입의 기본 수집 방식으로 함께 맞춘다 — 이전 타입의 방식(예: ssh)이
               // 남아 있으면 서버가 보정해 버려 화면에 보이던 값과 실제 저장값이 달라진다.
@@ -1563,7 +1563,7 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
               edit({ type: nt, collectMethod: list[0].value });
             }}>
             {(d.types || []).map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
-          </select>
+          </Select>
         </label>
         <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => edit({ name: e.target.value })} placeholder="WA-Isilon-01" /></label>
         <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => edit({ host: e.target.value })} placeholder="10.20.0.50" /></label>
@@ -1574,10 +1574,10 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
             표시한다('숨김'이 아니라 '고정'). 목록 자체는 서버(types.js COLLECT_METHODS)가 단일 소스. */}
         <label style={{ fontSize: 12 }} title={methodHint || '이 장비 타입이 지원하는 수집 방식입니다.'}>
           수집 방식{typeLabel ? ` (${typeLabel})` : ''}<br />
-          <select className="select" value={method} disabled={methods.length < 2}
+          <Select sort={false} className="select" value={method} disabled={methods.length < 2}
             onChange={(e) => edit({ collectMethod: e.target.value })}>
             {methods.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
+          </Select>
         </label>
         {methods.length < 2 && (
           <span className="muted" style={{ fontSize: 11, paddingBottom: 8 }}>이 타입은 이 방식만 지원합니다.</span>
@@ -1589,7 +1589,7 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => edit({ username: e.target.value })} /></label>
         <label style={{ fontSize: 12 }}>비밀번호{form.id ? '(변경 시만)' : ''}<br /><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={(e) => edit({ password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} /></label>
         <label style={{ fontSize: 12 }}>법인(DataCenter)<br />
-          <select className="select" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
+          <Select className="select" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
             <option value="">(미지정)</option>
             {(d.datacenters || []).map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
             {/* v2.515: 저장된 값이 목록에 없으면 **그 값을 옵션으로 추가**한다. 없으면 브라우저가
@@ -1600,7 +1600,7 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
             {form.datacenterId && !(d.datacenters || []).some((x) => x.id === form.datacenterId)
               ? <option value={form.datacenterId}>{form.datacenterId} — 법인 목록에 없는 값</option>
               : null}
-          </select>
+          </Select>
         </label>
         {/* 수집 주체(v2.312 개선): 알려진 엣지 목록을 제안하되 **직접 입력도 허용**(datalist).
             엣지가 아직 중앙에 한 번도 보고하지 않은 부트스트랩(토큰 미발급·최초 구성) 상황에서도
@@ -1609,9 +1609,9 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label style={{ fontSize: 12 }} title="중앙이 직접 못 닿는 폐쇄망 장비는 그 법인의 엣지 포탈이 현지에서 수집합니다(iDRAC 위임과 동일). 목록에 없으면 엣지 이름(AGENT_NAME)을 직접 입력하세요.">수집 주체(비우면 중앙 직접)<br />
           <input className="input" list="storage-agent-list" style={{ width: 200 }} value={form.agent || ''}
             onChange={(e) => setForm({ ...form, agent: e.target.value })} placeholder="🖥️ 중앙에서 직접 (또는 엣지 이름)" />
-          <datalist id="storage-agent-list">
+          <DataList id="storage-agent-list">
             {(d.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
-          </datalist>
+          </DataList>
         </label>
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
@@ -1716,10 +1716,10 @@ function StorageTrendPanel({ devices }) {
               style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setRange(v)}>{l}</button>
           ))}
         </div>
-        <select className="select" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 200 }}>
+        <Select className="select" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 200 }}>
           <option value="">전체 합계({(devices || []).length}대)</option>
           {(devices || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
+        </Select>
       </div>
 
       {last && (
@@ -1913,3 +1913,6 @@ function AreaJsonViewer({ deviceId, area, onClose }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';
+import DataList from '../../components/DataList.jsx';

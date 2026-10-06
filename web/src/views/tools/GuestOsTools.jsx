@@ -159,12 +159,12 @@ export function GuestOsVmsModal({ label, params, onClose }) {
               {vcenters.length > 1 && (
                 <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 12 }}>
                   <span className="muted">vCenter</span>
-                  <select value={vcf} onChange={(e) => setVcf(e.target.value)} style={{ padding: '4px 8px', fontSize: 12 }}>
+                  <Select value={vcf} onChange={(e) => setVcf(e.target.value)} style={{ padding: '4px 8px', fontSize: 12 }}>
                     <option value="">전체 ({vcenters.length})</option>
                     {vcenters.map((vc) => (
                       <option key={vc} value={vc}>{vc} ({allItems.filter((r) => r.vcenterId === vc).length})</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               )}
             </div>
@@ -277,3 +277,5 @@ export function RealOs({ scope }) {
     </>
   );
 }
+
+import Select from '../../components/Select.jsx';

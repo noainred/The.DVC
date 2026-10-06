@@ -4,6 +4,7 @@ import { agoText } from './relTime.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { blankOr } from '../blankOr.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * HAProxy 경로 점검(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 해결방안도 제시').
@@ -96,9 +97,9 @@ export default function RelayCheckTool() {
               </span>
             ))}
             <input className="input" style={{ width: 90 }} placeholder="포트" value={newProfile.port} onChange={(e) => setNewProfile({ ...newProfile, port: e.target.value })} />
-            <select className="input" style={{ width: 170 }} value={newProfile.kind} onChange={(e) => setNewProfile({ ...newProfile, kind: e.target.value })}>
+            <Select sort={false} className="input" style={{ width: 170 }} value={newProfile.kind} onChange={(e) => setNewProfile({ ...newProfile, kind: e.target.value })}>
               {Object.entries(kinds).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
+            </Select>
             <button className="tab" style={{ flex: 'none' }} onClick={() => { const port = Number(newProfile.port); if (port > 0) { set('profile', [...form.profile, { port, kind: newProfile.kind }]); setNewProfile({ port: '', kind: newProfile.kind }); } }}>추가</button>
             <button className="tab" style={{ flex: 'none' }} onClick={() => set('profile', data.defaultProfile)} title="구성도 기본값(4000/4065/4066/4067/4068/4001)으로 되돌립니다">기본값</button>
           </div>

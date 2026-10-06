@@ -4,6 +4,7 @@ import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
+import Select from '../../components/Select.jsx';
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
 export function MemoEditor({ init, onClose, onSaved }) {
@@ -126,16 +127,16 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
           : <input className="input" value={ip} disabled style={{ width: '100%', boxSizing: 'border-box', opacity: .8 }} />}
 
         <label style={L}>관리상태</label>
-        <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
+        <Select sort={false} className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
           <option value="">— 미지정 —</option>
           {statuses.map((s) => <option key={s} value={s}>{(MGMT[s]?.[0]) || s}</option>)}
-        </select>
+        </Select>
 
         <label style={L}>디바이스 종류</label>
-        <select className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
+        <Select sort={false} className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
           <option value="">— 미지정 —</option>
           {devTypes.map((d) => <option key={d} value={d}>{DEVTYPE_LABEL[d] || d}</option>)}
-        </select>
+        </Select>
 
         <label style={L}>담당자/팀</label>
         <input className="input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="예: 인프라팀 / 홍길동" style={{ width: '100%', boxSizing: 'border-box' }} />
@@ -147,10 +148,10 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
         <input className="input" value={hostnameOverride} onChange={(e) => setHostnameOverride(e.target.value)} placeholder="자동 수집 호스트명을 덮어쓸 이름(선택)" style={{ width: '100%', boxSizing: 'border-box' }} />
 
         <label style={L}>vCenter 귀속</label>
-        <select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
+        <Select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
           <option value="">— 없음(네트워크) —</option>
           {vcenters.filter((v) => v.vcenterId).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
-        </select>
+        </Select>
 
         <label style={L}>예약 만료일</label>
         <input className="input" type="date" value={reservedUntil} onChange={(e) => setReservedUntil(e.target.value)} style={{ width: 200, boxSizing: 'border-box' }} />

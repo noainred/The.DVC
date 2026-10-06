@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { blankOr } from '../blankOr.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * 성능점검 로그 설정 — 저장 경로·분할 단위·보관 기간·용량 상한.
@@ -80,16 +81,16 @@ export default function LogSettingsTab({ isAdmin }) {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>로그 기록</span>
-            <select className="select" value={cfg.enabled ? '1' : '0'} onChange={(e) => set('enabled', e.target.value === '1')} disabled={!canEdit}>
+            <Select sort={false} className="select" value={cfg.enabled ? '1' : '0'} onChange={(e) => set('enabled', e.target.value === '1')} disabled={!canEdit}>
               <option value="1">사용</option><option value="0">중지</option>
-            </select>
+            </Select>
           </label>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>기록 범위</span>
-            <select className="select" value={cfg.mode} onChange={(e) => set('mode', e.target.value)} disabled={!canEdit}>
+            <Select sort={false} className="select" value={cfg.mode} onChange={(e) => set('mode', e.target.value)} disabled={!canEdit}>
               <option value="all">모든 결과</option>
               <option value="changes">상태가 바뀐 시점만</option>
-            </select>
+            </Select>
           </label>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
@@ -126,11 +127,11 @@ export default function LogSettingsTab({ isAdmin }) {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>파일 분할 단위</span>
-            <select className="select" value={cfg.rotate} onChange={(e) => set('rotate', e.target.value)} disabled={!canEdit}>
+            <Select sort={false} className="select" value={cfg.rotate} onChange={(e) => set('rotate', e.target.value)} disabled={!canEdit}>
               {(cfg.rotateUnits || ['hour', 'day', 'week', 'month', 'quarter']).map((u) => (
                 <option key={u} value={u}>{(cfg.rotateLabels || {})[u] || u}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="flex col" style={{ gap: 4, width: 130 }}>
             <span className="muted" style={{ fontSize: 11 }}>보관 파일 수</span>

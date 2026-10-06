@@ -5,6 +5,8 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
+import DataList from '../../components/DataList.jsx';
 
 /**
  * 특수기능 › 원격 명령 실행(RMA, v2.416).
@@ -222,15 +224,15 @@ function RunModal({ group, catalog, modes, onClose }) {
     <Modal title={`▶ 원격 명령 — ${group.agent}`} onClose={onClose} width={900}>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
         <label>인스턴스<br />
-          <select className="input" value={instance} onChange={(e) => setInstance(e.target.value)}>
+          <Select className="input" value={instance} onChange={(e) => setInstance(e.target.value)}>
             <option value="">자동 (분배 방식: {modeLabel(group.mode, modes)})</option>
             {(group.instances || []).map((i) => <option key={i.instance} value={i.instance}>{i.instance}{i.online ? '' : ' (오프라인)'}</option>)}
-          </select>
+          </Select>
         </label>
         <label>명령<br />
-          <select className="input" value={cmd} onChange={(e) => pick(e.target.value)} style={{ minWidth: 340 }}>
+          <Select className="input" value={cmd} onChange={(e) => pick(e.target.value)} style={{ minWidth: 340 }}>
             {grouped.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map((p) => <option key={p.id} value={p.id}>{p.danger ? '⚠ ' : ''}{p.label}</option>)}</optgroup>)}
-          </select>
+          </Select>
         </label>
         <label>제한 시간(초)<br /><input className="input" style={{ width: 90 }} placeholder={preset?.timeoutMs ? String(preset.timeoutMs / 1000) : '30'} value={timeoutS} onChange={(e) => setTimeoutS(e.target.value.replace(/\D/g, ''))} /></label>
       </div>
@@ -240,10 +242,10 @@ function RunModal({ group, catalog, modes, onClose }) {
           <label><input type="checkbox" checked={useStored} onChange={(e) => setUseStored(e.target.checked)} /> <b>저장된 계정 정보 사용</b>(통합 계정 관리) — 비밀은 RMA 가 실행 직전에 브로커로 받아 메모리에서만 씁니다</label>
           {useStored ? (
             <div style={{ marginTop: 6 }}>
-              <select className="input" value={args.credentialId || ''} onChange={(e) => setArgs({ ...args, credentialId: e.target.value })} style={{ minWidth: 360 }}>
+              <Select className="input" value={args.credentialId || ''} onChange={(e) => setArgs({ ...args, credentialId: e.target.value })} style={{ minWidth: 360 }}>
                 <option value="">계정 선택…</option>
                 {creds.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.username} ({c.kind === 'key' ? 'SSH 키' : '비밀번호'}) · 대상 {(c.hosts || []).join(',')}</option>)}
-              </select>
+              </Select>
               {!creds.length && <div className="muted" style={{ fontSize: 12 }}>이 법인에 허용된 저장 계정이 없습니다 — 특수기능 › 통합 계정 관리에서 등록하세요.</div>}
             </div>
           ) : (
@@ -317,20 +319,20 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
     <Modal title={group.global ? '⚙️ RMA 전역 설정' : `⚙️ RMA 설정 — ${group.agent}`} onClose={onClose} width={640}>
       <div style={{ marginBottom: 8 }}>
         <label>{group.global ? '전역 기본 분배 방식' : '분배 방식'}<br />
-          <select className="input" value={mode} onChange={(e) => setMode(e.target.value)} style={{ minWidth: 320 }}>
+          <Select sort={false} className="input" value={mode} onChange={(e) => setMode(e.target.value)} style={{ minWidth: 320 }}>
             {!group.global && <option value="">전역 기본 따름 ({modeLabel(defaultMode, modes)})</option>}
             {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+          </Select>
         </label>
         <div className="muted" style={{ marginTop: 4 }}>{modes.find((m) => m.id === (mode || defaultMode))?.desc}</div>
       </div>
       {!group.global && (
         <div style={{ marginBottom: 8 }}>
           <label>주 인스턴스 (Active-Backup 전용, 비우면 RMA_PRIORITY 최저값)<br />
-            <select className="input" value={primary} onChange={(e) => setPrimary(e.target.value)}>
+            <Select className="input" value={primary} onChange={(e) => setPrimary(e.target.value)}>
               <option value="">자동(우선순위)</option>
               {(group.instances || []).map((i) => <option key={i.instance} value={i.instance}>{i.instance} (우선순위 {i.priority}{i.online ? '' : ', 오프라인'})</option>)}
-            </select>
+            </Select>
           </label>
         </div>
       )}
@@ -414,7 +416,7 @@ function ScheduleTab({ groups, tests, schedules }) {
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
-        <label>법인 <select className="input" value={agent} onChange={(e) => setAgent(e.target.value)}>{groups.map((g) => <option key={g.agent} value={g.agent}>{g.agent}{schedules.find((s) => s.agent === g.agent.toLowerCase()) ? ` (${schedules.find((s) => s.agent === g.agent.toLowerCase()).enabled}개)` : ''}</option>)}</select></label>
+        <label>법인 <Select className="input" value={agent} onChange={(e) => setAgent(e.target.value)}>{groups.map((g) => <option key={g.agent} value={g.agent}>{g.agent}{schedules.find((s) => s.agent === g.agent.toLowerCase()) ? ` (${schedules.find((s) => s.agent === g.agent.toLowerCase()).enabled}개)` : ''}</option>)}</Select></label>
         <button className="login-btn" disabled={!agent} onClick={openNew}>+ 점검 추가</button>
         {sch && <span className="muted">스케줄 v{sch.version} · {(sch.tests || []).length}개 · 인스턴스 지정이 없는 항목은 온라인 인스턴스에 자동 분산(중복 실행 없음)</span>}
       </div>
@@ -443,17 +445,17 @@ function ScheduleTab({ groups, tests, schedules }) {
         <Modal title={`${form.id ? '점검 수정' : '점검 추가'} — ${agent}`} onClose={() => setForm(null)} width={720}>
           <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
             <label>점검<br />
-              <select className="input" value={form.test} onChange={(e) => { const t = testOf(e.target.value); setForm({ ...form, test: e.target.value, args: defaultArgs(t) }); }} style={{ minWidth: 300 }}>
+              <Select className="input" value={form.test} onChange={(e) => { const t = testOf(e.target.value); setForm({ ...form, test: e.target.value, args: defaultArgs(t) }); }} style={{ minWidth: 300 }}>
                 {grouped.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</optgroup>)}
-              </select>
+              </Select>
             </label>
             <label>이름<br /><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="표시 이름(선택)" /></label>
             <label>주기(초)<br /><input className="input" style={{ width: 90 }} value={form.intervalSec} onChange={(e) => setForm({ ...form, intervalSec: e.target.value.replace(/\D/g, '') })} /></label>
             <label>인스턴스<br />
-              <select className="input" value={form.instance} onChange={(e) => setForm({ ...form, instance: e.target.value })}>
+              <Select className="input" value={form.instance} onChange={(e) => setForm({ ...form, instance: e.target.value })}>
                 <option value="">자동 분산</option>
                 {(group?.instances || []).map((i) => <option key={i.instance} value={i.instance}>{i.instance}</option>)}
-              </select>
+              </Select>
             </label>
             <label><input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성</label>
           </div>
@@ -462,10 +464,10 @@ function ScheduleTab({ groups, tests, schedules }) {
             <div key={p.name} style={{ marginTop: 6 }}>
               <label>{p.label}{p.required ? ' *' : ''} <span className="muted">({p.hint}{p.type === 'int' && p.min != null ? `, ${p.min}~${p.max}` : ''})</span><br />
                 {p.name === 'credentialId' && tform?.id === 'ssh'
-                  ? <select className="input" value={form.args[p.name] || ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} style={{ minWidth: 340 }}>
+                  ? <Select className="input" value={form.args[p.name] || ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} style={{ minWidth: 340 }}>
                       <option value="">저장된 계정 선택…</option>
                       {creds.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.username} ({c.kind === 'key' ? 'SSH 키' : '비밀번호'})</option>)}
-                    </select>
+                    </Select>
                   : p.type === 'shell'
                   ? <textarea className="input" rows={2} style={{ width: '100%', fontFamily: 'monospace' }} value={form.args[p.name] || ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} />
                   : <input className="input" style={{ width: p.type === 'int' ? 110 : 340 }} value={form.args[p.name] ?? ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} />}
@@ -491,7 +493,7 @@ function StatusTab({ groups }) {
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
-        <select className="input" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="">전체 법인</option>{groups.map((g) => <option key={g.agent} value={g.agent}>{g.agent}</option>)}</select>
+        <Select className="input" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="">전체 법인</option>{groups.map((g) => <option key={g.agent} value={g.agent}>{g.agent}</option>)}</Select>
         {(data?.summary || []).filter((s) => !filter || s.agent === filter).map((s) => (
           <span key={s.agent} className="badge" style={{ background: s.bad ? 'rgba(239,68,68,.15)' : s.warn ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)' }}>{s.agent}: ok {s.ok} · warn {s.warn} · bad {s.bad} · unknown {s.unknown}</span>
         ))}
@@ -593,7 +595,7 @@ function DeployModal({ preset, groups, onClose }) {
       <div className="section-title" style={{ marginTop: 12 }}>RMA 설정 (portal.env 에 기록)</div>
       <div className="flex gap wrap">
         <label>법인 이름(AGENT_NAME)<br /><input className="input" list="rma-known-agents" value={f.agentName} onChange={(e) => set('agentName', e.target.value)} placeholder="비우면 기존 값 유지" /></label>
-        <datalist id="rma-known-agents">{groups.map((g) => <option key={g.agent} value={g.agent} />)}</datalist>
+        <DataList id="rma-known-agents">{groups.map((g) => <option key={g.agent} value={g.agent} />)}</DataList>
         <label>CENTRAL_URL<br /><input className="input" value={f.centralUrl} onChange={(e) => set('centralUrl', e.target.value)} placeholder="비우면 기존 값 유지" /></label>
         <label>개별 토큰(CENTRAL_TOKEN)<br /><input className="input" type="password" value={f.centralToken} onChange={(e) => set('centralToken', e.target.value)} placeholder="비우면 기존 값 유지" /></label>
       </div>

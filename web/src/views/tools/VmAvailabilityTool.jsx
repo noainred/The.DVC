@@ -9,6 +9,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { pctText, downText, allowedDownMin, TARGETS, coverageNote, METHOD_NOTE } from '../bizreport/availText.js';
+import Select from '../../components/Select.jsx';
 
 const DAYS = [7, 30, 90];
 function Chip({ active, onClick, children }) {
@@ -76,10 +77,10 @@ export default function VmAvailabilityTool({ scope }) {
         {DAYS.map((d) => <Chip key={d} active={days === d} onClick={() => setDays(d)}>{d}일</Chip>)}
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>목표</span>
         {TARGETS.map((x) => <Chip key={x} active={target === x} onClick={() => setTarget(x)}>{x}%</Chip>)}
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체 vCenter</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
-        </select>
+        </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 300 }} placeholder="VM·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
         {canCsv() && <button type="button" className="btn" onClick={csv}>CSV</button>}

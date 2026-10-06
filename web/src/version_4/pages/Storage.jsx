@@ -139,14 +139,14 @@ export default function Storage({ global: g, scope, polls, perms, spec, phase, p
               </div>
               <div className="flex gap wrap" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '12px 0' }}>
                 <label className="v3-chip" style={{ flex: 1, minWidth: 200 }}><span>데이터스토어</span>
-                  <select value={scanDs} onChange={(e) => setScanDs(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
+                  <Select value={scanDs} onChange={(e) => setScanDs(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
                     <option value="">선택…</option>
                     {(odl.data?.items || []).filter((d) => scope.inScope(d.vcenterId)).map((d) => (
                       <option key={d.id} value={d.id} disabled={d.scannable === false}>
                         {d.name} ({fmtPct(d.usagePct)}){d.scannable === false ? ' — 스캔 불가' : ''}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <button type="button" className="v3-exit" disabled={!scanDs || scanning} onClick={runScan}>{scanning ? '스캔 중…' : '스캔'}</button>
               </div>
@@ -245,3 +245,5 @@ export default function Storage({ global: g, scope, polls, perms, spec, phase, p
     </>
   );
 }
+
+import Select from '../../components/Select.jsx';

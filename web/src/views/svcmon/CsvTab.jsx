@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { fetchJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 /**
  * 성능점검 대상 내보내기 — CSV · XLSX(엑셀) · JSON 세 포맷.
@@ -67,16 +68,16 @@ export default function CsvTab({ canEdit }) {
           <br />등록·가져오기는 Monitoring 트리의 <b>＋ 등록</b>(파일 모드에서 CSV/XLSX 가져오기)으로 통합됐습니다.
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={exp.kind} onChange={(e) => setExp({ ...exp, kind: e.target.value })}>
+          <Select sort={false} className="select" value={exp.kind} onChange={(e) => setExp({ ...exp, kind: e.target.value })}>
             <option value="">전체 (인프라 + 서비스)</option>
             <option value="infra">인프라만</option>
             <option value="service">서비스만</option>
-          </select>
+          </Select>
           <input className="input" style={{ minWidth: 260 }} placeholder="경로로 범위 좁히기 (예: A.Infra\OC2)"
             value={exp.path} onChange={(e) => setExp({ ...exp, path: e.target.value })} />
-          <select className="select" value={exp.format} onChange={(e) => setExp({ ...exp, format: e.target.value })} title="내보낼 파일 형식">
+          <Select sort={false} className="select" value={exp.format} onChange={(e) => setExp({ ...exp, format: e.target.value })} title="내보낼 파일 형식">
             {EXP_FMT.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
-          </select>
+          </Select>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
             <input type="checkbox" checked={exp.tests} onChange={(e) => setExp({ ...exp, tests: e.target.checked })} />
             점검 항목 포함

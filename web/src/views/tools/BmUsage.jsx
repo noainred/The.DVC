@@ -36,6 +36,7 @@ import {
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
   unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
+import Select from '../../components/Select.jsx';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -644,12 +645,12 @@ export function BmUsage() {
               </label>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <label style={{ fontSize: 12 }}>방식{' '}
-                  <select value={form.enterpriseMode || 'auto'} disabled={saving}
+                  <Select sort={false} value={form.enterpriseMode || 'auto'} disabled={saving}
                     onChange={(e) => saveSettings({ enterpriseMode: e.target.value })} style={{ minWidth: 0 }}>
                     <option value="auto">자동 — Redfish 센서 먼저, 못 읽으면 SSH</option>
                     <option value="api">Redfish 센서만(부하 가장 적음)</option>
                     <option value="ssh">iDRAC SSH(racadm)만</option>
-                  </select>
+                  </Select>
                 </label>
                 {form.enterpriseAckAt ? (
                   <span style={{ fontSize: 11, color: 'var(--muted)' }}>

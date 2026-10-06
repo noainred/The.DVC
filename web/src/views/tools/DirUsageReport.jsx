@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 /**
  * 특수 기능 › 폴더 사용량 Top-N (v2.454, admin 전용).
@@ -98,9 +99,9 @@ export function DirUsageReport() {
       <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>폴더 사용량 Top-N</h3>
         {targets.length > 0 && (
-          <select className="input" style={{ width: 280 }} value={sel} onChange={(e) => setSel(e.target.value)}>
+          <Select className="input" style={{ width: 280 }} value={sel} onChange={(e) => setSel(e.target.value)}>
             {targets.map((t) => <option key={t.id} value={t.id}>{t.label ? `${t.label} — ` : ''}{t.agent} : {t.path}</option>)}
-          </select>
+          </Select>
         )}
         {sel && <button className="logout-btn" style={{ padding: '4px 12px', fontSize: 12 }} disabled={busy} onClick={runNow}>지금 스캔</button>}
       </div>

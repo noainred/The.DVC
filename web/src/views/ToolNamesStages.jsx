@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react';
 import { sendJson } from '../api.js';
 import { TOOLS } from './specialToolsList.js';
 import { stagesOf, stageIdOf, removeStage, stageCounts, nextStageId, changedToolCount } from './toolSections.js';
+import Select from '../components/Select.jsx';
 
 /**
  * v2.680 D-01: 서버에서 읽어 온 설정인가. 서버 정규화(toolcats/settings.js)는 overrides 키를 언제나 싣는다 —
@@ -182,9 +183,9 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
                     {stages ? (
                       <span className="st-select-wrap">
                         <StageDot color={sc} />
-                        <select className="st-input" value={sid || ''} onChange={(e) => setOverride(t.k, { stage: e.target.value === stages[0].id ? '' : e.target.value })}>
+                        <Select sort={false} className="st-input" value={sid || ''} onChange={(e) => setOverride(t.k, { stage: e.target.value === stages[0].id ? '' : e.target.value })}>
                           {stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                        </select>
+                        </Select>
                       </span>
                     ) : <span className="st-faint">단계 안 씀</span>}
                   </div>

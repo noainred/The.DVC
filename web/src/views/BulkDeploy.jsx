@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, downloadFile, canCsv } from '../api.js';
 import { agoText } from './tools/relTime.js';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * Edge 노드 **대량 배포**(v2.432, 사용자 요구 '엣지노드 배포를 대용량으로 할 수 있게 import export text 방식과
@@ -141,9 +142,9 @@ export default function BulkDeploy() {
         {/* 열 순서 — 3열 표는 'host 이름 계정' 과 'host 계정 비밀번호' 를 값만 보고 구분할 수 없어 추측하지 않는다. */}
         <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6, fontSize: 12 }}>
           <b>열 순서</b>
-          <select className="input" style={{ minWidth: 300 }} value={columns} onChange={(e) => { setColumns(e.target.value); setPreview(null); }}>
+          <Select sort={false} className="input" style={{ minWidth: 300 }} value={columns} onChange={(e) => { setColumns(e.target.value); setPreview(null); }}>
             {(presets.length ? presets : [{ key: 'host-name-user-pass', label: 'host · 이름/법인 · 계정 · 비밀번호' }]).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </select>
+          </Select>
           <span className="muted">
             현재 <code>{(presets.find((p) => p.key === columns)?.columns || ['host']).map((c) => ({ host: 'host', agentName: '이름/법인', username: '계정', password: '비밀번호' }[c] || c)).join(' → ')}</code>
             {' '}· <b>헤더 행</b>을 적으면 이 선택보다 헤더가 우선합니다 · <code>root@10.1.1.1</code> 처럼 계정을 host 에 붙여 써도 됩니다.

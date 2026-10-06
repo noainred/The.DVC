@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { blankOr } from './blankOr.js';
+import Select from '../components/Select.jsx';
 
 /** 설정 → AI 검색: 자연어 검색용 로컬 LLM(Ollama) 구성 + 연결 테스트. */
 export default function LlmSettings() {
@@ -81,10 +82,10 @@ export default function LlmSettings() {
           <label>사용자(root)<input className="input" value={dep.username} onChange={setD('username')} /></label>
           <label>비밀번호<input className="input" type="password" value={dep.password} onChange={setD('password')} placeholder="(키 사용 시 비움)" /></label>
           <label>설치 모드
-            <select className="select" value={dep.mode} onChange={setD('mode')}>
+            <Select sort={false} className="select" value={dep.mode} onChange={setD('mode')}>
               <option value="online">온라인 (공식 스크립트, 인터넷 필요)</option>
               <option value="offline">오프라인 (tgz 전송)</option>
-            </select>
+            </Select>
           </label>
           <label>모델 pull(선택)<input className="input" value={dep.model} onChange={setD('model')} placeholder="llama3.1 (인터넷 필요)" /></label>
           {dep.mode === 'offline' && <label style={{ gridColumn: '1 / -1' }}>Ollama tgz 경로(중앙 서버)<input className="input" value={dep.binaryPath} onChange={setD('binaryPath')} placeholder="/root/ollama-linux-amd64.tgz" /></label>}

@@ -8,6 +8,7 @@ import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VSAN_PLAN_LABEL, fmtInt, fmtTib, coverageNote, reportedText, RULE_NOTE } from '../corelicense/coreLicenseText.js';
+import Select from '../../components/Select.jsx';
 
 function Kpi({ label, value, sub }) {
   return (
@@ -81,14 +82,14 @@ export default function CoreLicenseTool({ scope }) {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vSAN 포함 용량</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 240 }} value={plan} onChange={(e) => setPlan(e.target.value)}>
+        <Select sort={false} className="input" style={{ minWidth: 0, maxWidth: 240 }} value={plan} onChange={(e) => setPlan(e.target.value)}>
           {Object.entries(VSAN_PLAN_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-        </select>
+        </Select>
         <button type="button" className={`tab${view === 'vc' ? ' active' : ''}`} onClick={() => setView('vc')}>법인별</button>
         <button type="button" className={`tab${view === 'host' ? ' active' : ''}`} onClick={() => setView('host')}>호스트별</button>
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

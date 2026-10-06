@@ -3,6 +3,7 @@ import { fetchJson, postJson, delJson } from '../api.js';
 import { fmtAgo } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 const ROLE_LABEL = { viewer: '조회', operator: '운영', admin: '관리자' };
@@ -118,7 +119,7 @@ export default function EdgeUserDeploy() {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
           <label style={{ fontSize: 12 }}>사용자 ID<br /><input className="input" style={{ width: 150 }} value={form.username} placeholder="edgeadmin" onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></label>
           <label style={{ fontSize: 12 }}>이름<br /><input className="input" style={{ width: 130 }} value={form.name} placeholder="(선택)" onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></label>
-          <label style={{ fontSize: 12 }}>역할<br /><select className="select" style={{ width: 110 }} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>{ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></label>
+          <label style={{ fontSize: 12 }}>역할<br /><Select sort={false} className="select" style={{ width: 110 }} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>{ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</Select></label>
           <label style={{ fontSize: 12 }}>비밀번호<br /><input className="input" type="password" style={{ width: 170 }} value={form.password} placeholder="8자 이상 (수정 시 비우면 유지)" onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></label>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={busy || !form.username} onClick={deploy}>{busy ? '배포 중…' : '배포'}</button>
         </div>
@@ -153,10 +154,10 @@ export default function EdgeUserDeploy() {
       <div className="card" style={{ padding: 16, marginTop: 12 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b style={{ fontSize: 13 }}>배포된 사용자 보기</b>
-          <select className="select" style={{ minWidth: 260 }} value={viewTarget} onChange={(e) => setViewTarget(e.target.value)}>
+          <Select className="select" style={{ minWidth: 260 }} value={viewTarget} onChange={(e) => setViewTarget(e.target.value)}>
             <option value={ALL}>🌐 모든 엣지(전체){global.users ? ` · ${global.users}명` : ''}</option>
             {agents.map((a) => <option key={a.agent} value={a.agent}>📡 {a.agent}{a.users ? ` · ${a.users}명` : ''}{a.at ? ` · ${fmtAgo(a.at)}` : ''}</option>)}
-          </select>
+          </Select>
           {viewTarget !== ALL && <span className="muted" style={{ fontSize: 12 }}>이 엣지 전용 목록 — 실제 적용은 여기 + 🌐 모든 엣지 목록을 합쳐 반영됩니다.</span>}
         </div>
         <div className="table-wrap">

@@ -133,20 +133,20 @@ export default function NsxAdmin() {
               <label>계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="admin" /></label>
               <label>비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} placeholder={editing ? '••••••' : ''} /></label>
               <label>리전
-                <select className="select" value={form.location.region} onChange={setLoc('region')}>{REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+                <Select className="select" value={form.location.region} onChange={setLoc('region')}>{REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}</Select>
               </label>
               <label>연결 vCenter(선택)
-                <select className="select" value={form.vcenterId} onChange={setF('vcenterId')}>
+                <Select className="select" value={form.vcenterId} onChange={setF('vcenterId')}>
                   <option value="">— 선택 —</option>
                   {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
+                </Select>
               </label>
               <label title="다른 법인/사이트에 있어 직접 닿지 않는 NSX는 이미 등록된 중계 서버(HAProxy)를 골라 경유 연결합니다. 선택 시 그 프록시에 NSX:443 TCP 패스스루 매핑을 자동 생성·적용하고, 수집/테스트가 프록시를 통해 이뤄집니다. '직접 연결'은 중앙에서 NSX로 바로 접속합니다. ※ 선택한 프록시에 frontend 주소(proxyHost)가 설정돼 있어야 합니다.">프록시 경유(선택)
-                <select className="select" value={form.proxyId || ''} onChange={setF('proxyId')}>
+                <Select className="select" value={form.proxyId || ''} onChange={setF('proxyId')}>
                   <option value="">직접 연결(프록시 미사용)</option>
                   {proxies.filter((p) => p.proxyHost).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.proxyHost})</option>)}
                   {form.proxyId && !proxies.some((p) => p.id === form.proxyId && p.proxyHost) && <option value={form.proxyId}>{form.proxyId} (목록에 없음)</option>}
-                </select>
+                </Select>
                 {proxiesErr && <span className="muted" style={{ fontSize: 11, color: 'var(--amber)' }}>중계 서버 목록을 불러오지 못했습니다({proxiesErr}).</span>}
               </label>
               <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
@@ -172,3 +172,5 @@ export default function NsxAdmin() {
     </>
   );
 }
+
+import Select from '../components/Select.jsx';

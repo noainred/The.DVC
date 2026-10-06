@@ -26,6 +26,16 @@ export default [
       // no-undef(v2.421): 다른 컴포넌트의 지역 함수를 그대로 참조하는 실수(v2.416 SanSwitchTool `closeDetail` —
       // 포트 상세를 열면 ReferenceError 로 특수기능 전체 크래시, 2.416~2.420 실제 장애)를 CI 이전에 잡는다.
       'no-undef': 'error',
+      // v2.708: 드롭다운은 공용 <Select>(components/Select.jsx — 선택지 자동 정렬)를 쓴다. 날 <select> 는 정렬되지 않는다.
+      'no-restricted-syntax': ['error', {
+        selector: "JSXOpeningElement[name.name=/^(select|datalist)$/]",
+        message: '날 <select>·<datalist> 대신 components/Select.jsx·DataList.jsx 를 쓰세요(선택지 자동 정렬 — 순서가 곧 뜻이면 sort={false}).',
+      }],
     },
+  },
+  {
+    // 공용 Select 컴포넌트 자신만 날 <select> 를 그린다.
+    files: ['src/components/Select.jsx', 'src/components/DataList.jsx'],
+    rules: { 'no-restricted-syntax': 'off' },
   },
 ];

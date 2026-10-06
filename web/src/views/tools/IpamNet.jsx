@@ -6,6 +6,7 @@ import { DEVTYPE_LABEL, fmtDt, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { policySpecSize } from './ipmsRangeText.js';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 
 // v2.691: 'vCenter별 IP 대역 저장 + 주기 스캔' 페이지(IpamRanges)는 지웠다 — 스캔 대역·설정(IpScanSettings)으로 합쳐졌다.
@@ -73,21 +74,21 @@ export function IpamNetMap() {
       {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>⚠ 최근 조회 실패: {error} — 이전 데이터를 표시 중입니다.</div>}
       <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><span className="muted">vCenter</span>
-          <select className="select" value={vc} onChange={(e) => { setVc(e.target.value); setBase(''); }}>
+          <Select className="select" value={vc} onChange={(e) => { setVc(e.target.value); setBase(''); }}>
             <option value="">전체</option>
             {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><span className="muted">대역(/24)</span>
-          <select className="select" value={base} onChange={(e) => setBase(e.target.value)}>
+          <Select className="select" value={base} onChange={(e) => setBase(e.target.value)}>
             {(data.bases || []).map((b) => <option key={b} value={b}>{b}.0/24</option>)}
             {(!data.bases || data.bases.length === 0) && <option value="">(대역 없음)</option>}
-          </select>
+          </Select>
         </label>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><span className="muted">기간</span>
-          <select className="select" value={days} onChange={(e) => { setDays(Number(e.target.value)); setBucket(null); }}>
+          <Select sort={false} className="select" value={days} onChange={(e) => { setDays(Number(e.target.value)); setBucket(null); }}>
             {[1, 7, 30, 90, 365].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
-          </select>
+          </Select>
         </label>
       </div>
 
@@ -302,10 +303,10 @@ function PolicyForm({ policy, vcenters = [], onClose, onSaved }) {
 
         <label style={L}>관리상태</label>
         <div>
-          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
+          <Select sort={false} className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
             <option value="">— 미지정(필드만 적용) —</option>
             {Object.keys(MGMT).map((s) => <option key={s} value={s}>{MGMT[s][0]}</option>)}
-          </select>
+          </Select>
           {status === 'ignored' && <div className="muted" style={{ fontSize: 11, marginTop: 4, color: 'var(--amber,#f59e0b)' }}>⚠ 이 대역 전체가 대장에서 숨겨집니다(개별 IP override 제외). 1024개 이하 대역만 허용됩니다.</div>}
         </div>
 
@@ -316,16 +317,16 @@ function PolicyForm({ policy, vcenters = [], onClose, onSaved }) {
         </div>
 
         <label style={L}>vCenter 귀속</label>
-        <select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
+        <Select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
           <option value="">전역(모든 vCenter)</option>
           {vcenters.filter((v) => v.vcenterId).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
-        </select>
+        </Select>
 
         <label style={L}>디바이스 종류</label>
-        <select className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
+        <Select sort={false} className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
           <option value="">— 미지정 —</option>
           {Object.keys(DEVTYPE_LABEL).map((d) => <option key={d} value={d}>{DEVTYPE_LABEL[d]}</option>)}
-        </select>
+        </Select>
 
         <label style={L}>담당자/팀</label>
         <input className="input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="예: 인프라팀" style={{ width: '100%', boxSizing: 'border-box' }} />

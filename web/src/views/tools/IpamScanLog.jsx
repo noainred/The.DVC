@@ -5,6 +5,7 @@ import { usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { agentText, countsText, durationText, emptyText, eventText, EVENT_TEXT, levelBadge, listHeadText, rangesText, repeatText, triggerText } from './ipamScanLogText.js';
+import Select from '../../components/Select.jsx';
 
 const LIMITS = [100, 300, 1000];
 
@@ -29,20 +30,20 @@ export function IpamScanLog() {
         같은 사유로 연속 건너뛴 기록은 한 줄로 합치고 반복 횟수를 적습니다.
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
-        <select className="select" value={level} onChange={(e) => setLevel(e.target.value)} aria-label="수준">
+        <Select sort={false} className="select" value={level} onChange={(e) => setLevel(e.target.value)} aria-label="수준">
           <option value="">전체 수준</option>
           <option value="error">오류</option>
           <option value="warn">주의</option>
           <option value="info">정보</option>
-        </select>
-        <select className="select" value={event} onChange={(e) => setEvent(e.target.value)} aria-label="종류">
+        </Select>
+        <Select sort={false} className="select" value={event} onChange={(e) => setEvent(e.target.value)} aria-label="종류">
           <option value="">전체 종류</option>
           {Object.entries(EVENT_TEXT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        </Select>
         <input className="input" style={{ width: 180 }} placeholder="에이전트 이름(__local__ = 이 포탈)" value={agent} onChange={(e) => setAgent(e.target.value)} aria-label="에이전트" />
-        <select className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))} aria-label="표시 개수">
+        <Select sort={false} className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))} aria-label="표시 개수">
           {LIMITS.map((n) => <option key={n} value={n}>최근 {n}건</option>)}
-        </select>
+        </Select>
       </div>
       {error && data && <div className="banner warn" style={{ marginBottom: 8 }}>로그를 다시 읽지 못했습니다 — 아래는 마지막으로 받은 기록입니다: {String(error?.message || error)}</div>}
       {loading && !data ? <Loading /> : (

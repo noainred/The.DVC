@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, delJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 /**
  * 엣지 배정 — '어느 엣지가 어느 대상을 점검하는가'를 중앙에서 관리한다.
@@ -120,7 +121,7 @@ export default function AssignTab({ canEdit }) {
               <span className="muted" style={{ fontSize: 11 }}>엣지 선택 — 토큰이 발급된 엣지만</span>
               {/* 자유 입력을 없앤 이유: 토큰의 agent 이름과 대소문자 하나만 달라도 엣지 pull 이
                   영원히 '배정 없음'을 받는다(조회 키 불일치). 오타가 곧 무음 감시 공백이다. */}
-              <select className="select" style={{ minWidth: 220 }} value={form.agent}
+              <Select className="select" style={{ minWidth: 220 }} value={form.agent}
                 onChange={(e) => { setForm({ ...form, agent: e.target.value }); setPreview(null); }}>
                 <option value="">엣지를 선택하세요</option>
                 {(data?.candidates || []).map((c) => (
@@ -128,13 +129,13 @@ export default function AssignTab({ canEdit }) {
                     {c.agent}{c.reporting ? ' · 보고 중' : c.hasToken ? ' · 토큰만 발급됨' : ' · 토큰 없음'}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="flex col" style={{ gap: 4 }}>
               <span className="muted" style={{ fontSize: 11 }}>구분</span>
-              <select className="select" value={form.kind} onChange={(e) => { setForm({ ...form, kind: e.target.value }); setPreview(null); }}>
+              <Select sort={false} className="select" value={form.kind} onChange={(e) => { setForm({ ...form, kind: e.target.value }); setPreview(null); }}>
                 <option value="">전체</option><option value="infra">인프라</option><option value="service">서비스</option>
-              </select>
+              </Select>
             </label>
             <label className="flex col" style={{ gap: 4, flex: 1, minWidth: 240 }}>
               <span className="muted" style={{ fontSize: 11 }}>경로 (비우면 그 구분 전체)</span>

@@ -19,6 +19,7 @@ import RightsizeLocal from './RightsizeLocal.jsx';
 import { TEMPLATES, localPhaseText, fmtSec, coverageText } from '../vmSeriesText.js';
 // v2.578 D2·D3: 요청 기간이 프리셋으로 내려앉은 사실과 '기간 = 해상도' 인과를 화면이 말한다.
 import { normalizedDaysNote, resolutionNote, sourceNote } from '../trendMeta.js';
+import Select from '../../components/Select.jsx';
 
 /** 게스트 디스크 응답을 PDF 블록으로(게스트 디스크 상세 PDF 와 같은 구성, 파티션별 차트는 생략). */
 function guestDiskBlocks(gd, days) {
@@ -274,15 +275,15 @@ export default function RightsizeReport({ vm, onClose }) {
             <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,.14)' }} />
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title={TEMPLATES.map((t) => `${t.label}: ${t.desc}`).join('\n')}>
               <span className="muted">템플릿</span>
-              <select className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={template} onChange={(e) => setTemplate(e.target.value)}>
+              <Select sort={false} className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={template} onChange={(e) => setTemplate(e.target.value)}>
                 {TEMPLATES.map((t) => <option key={t.k} value={t.k}>{t.label}</option>)}
-              </select>
+              </Select>
             </label>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="관측 기간 — vCenter 성능 롤업에서 이 기간의 표본을 가져옵니다">
               <span className="muted">관측 기간</span>
-              <select className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+              <Select sort={false} className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
                 {DAYS.map((d) => <option key={d} value={d}>최근 {dayLabel(d)}</option>)}
-              </select>
+              </Select>
             </label>
             <button className="logout-btn" onClick={onClose}>닫기</button>
           </div>

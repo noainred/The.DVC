@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { usePolling, fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * 설정 → 수집 서버 → 스캔 로그 — 주기/수동 iDRAC 스캔의 법인(DataCenter)별 실행 이력.
@@ -51,15 +52,15 @@ export default function IdracScanLog() {
       {error && <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 8, fontSize: 12, background: 'rgba(245,158,11,.14)', color: '#fbbf24' }}>일시적 갱신 오류: {String(error)} — 직전 데이터를 표시 중입니다.</div>}
 
       <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        <select className="select" value={dc} onChange={(e) => setDc(e.target.value)} title="법인 필터 — 전체(통합) 또는 특정 법인만">
+        <Select className="select" value={dc} onChange={(e) => setDc(e.target.value)} title="법인 필터 — 전체(통합) 또는 특정 법인만">
           <option value="">전체 (통합)</option>
           {dcOptions.map((id) => <option key={id} value={id}>{dcName(id)} ({id})</option>)}
-        </select>
-        <select className="select" value={trigger} onChange={(e) => setTrigger(e.target.value)} title="실행 구분 필터">
+        </Select>
+        <Select sort={false} className="select" value={trigger} onChange={(e) => setTrigger(e.target.value)} title="실행 구분 필터">
           <option value="">주기+수동 전체</option>
           <option value="periodic">주기 스캔만</option>
           <option value="manual">수동 스캔만</option>
-        </select>
+        </Select>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}>
           <input type="checkbox" checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} /> 오류만
         </label>

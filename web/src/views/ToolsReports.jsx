@@ -18,6 +18,7 @@ import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternTe
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
 import { unitText } from './unitText.js';
 import { suggestCell, heldNote } from './rightsizeText.js';
+import Select from '../components/Select.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
 
@@ -353,9 +354,9 @@ export function CapacityForecast({ scope }) {
       <div className="card" style={{ marginBottom: 10 }}>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           <span className="muted">관측 기간</span>
-          <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
             {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d}일</option>)}
-          </select>
+          </Select>
           <span className="muted">증가 추세가 있는 데이터스토어만 표시됩니다(선형회귀 R² ≥ 0.3).</span>
         </label>
       </div>
@@ -554,13 +555,13 @@ export function ChangeHistory({ scope }) {
       {err && <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {err}</div>}
       <div className="card" style={{ marginBottom: 10 }}>
         <div className="flex wrap gap" style={{ alignItems: 'center' }}>
-          <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
             {[1, 3, 7, 14, 30, 90].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
-          </select>
-          <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+          </Select>
+          <Select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">전체 분류</option>
             {(data.categories || []).map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
           <SearchBox className="input" style={{ width: 160 }} placeholder="변경한 계정" value={user} onChange={setUser} />
           <SearchBox className="input" style={{ width: 160 }} placeholder="대상(VM/호스트)" value={entity} onChange={setEntity} />
           <span className="muted" style={{ fontSize: 13 }}>
@@ -630,9 +631,9 @@ export function UnprotectedVms({ scope }) {
         <div className="flex wrap gap" style={{ alignItems: 'center' }}>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">조회 기간</span>
-            <select className="select" value={lookbackDays} onChange={(e) => setLookbackDays(Number(e.target.value))}>
+            <Select sort={false} className="select" value={lookbackDays} onChange={(e) => setLookbackDays(Number(e.target.value))}>
               {[3, 7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d}일</option>)}
-            </select>
+            </Select>
           </label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, flex: 1, minWidth: 280 }}>
             <span className="muted nowrap">백업 계정 패턴</span>

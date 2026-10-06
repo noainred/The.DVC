@@ -3,6 +3,7 @@ import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * 스토리지 수집 주기(중앙 → 엣지 배포, v2.409 — 사용자 요구
@@ -12,7 +13,7 @@ import { STable } from '../components/STable.jsx';
  * 그래서 여기서 저장한 값은 엣지가 **다음 설정 pull 때 가져가서** 적용한다. 화면에서도 그
  * 지연을 숨기지 않고 표시한다(즉시 적용처럼 보이면 '설정했는데 안 바뀐다'는 오해가 생긴다).
  */
-// 셀 컴포넌트는 **렌더 함수 밖**에 둔다 — 안에서 정의하면 매 렌더마다 새 타입이 되어 <select> 가
+// 셀 컴포넌트는 **렌더 함수 밖**에 둔다 — 안에서 정의하면 매 렌더마다 새 타입이 되어 <Select sort={false}> 가
 // 언마운트/재마운트되고 값을 고른 직후 포커스를 잃는다(v2.416 리뷰 확정).
 // v2.598 WEBUI-2598-09: 중앙(직접 수집) 행은 엣지가 아니다 — 상속 끝의 값은 '엣지 로컬' 이 아니라 중앙 자신의
 //   env·기본값이고, 중앙은 자기에게 push·설정 pull 을 하지 않으므로 그 두 칸은 적용 대상이 아니다.
@@ -29,7 +30,7 @@ function Cell({ target, form, s, globalForm, setCell }) {
   // 첫 옵션('미지정')을 표시해 '미지정'으로 읽힌다(상태에는 값이 남아 저장 시 유지되는데 화면만 다름).
   const extra = cur && !presets.some((p) => String(p.ms) === String(cur)) ? [{ ms: Number(cur), label: `${msLabel(Number(cur))} (직접 지정)` }] : [];
   return (
-    <select className="input" style={{ minWidth: 104 }} value={cur}
+    <Select sort={false} className="input" style={{ minWidth: 104 }} value={cur}
       onChange={(e) => setCell(target, s.key, e.target.value)}
       title={`${s.label}\n하한 ${msLabel(s.min)} · 기본 ${msLabel(s.def)}\n${s.hint}`}>
       <option value="">
@@ -38,7 +39,7 @@ function Cell({ target, form, s, globalForm, setCell }) {
           : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : inheritTail(target)})`}
       </option>
       {[...extra, ...presets].map((p) => <option key={p.ms} value={String(p.ms)}>{p.label}</option>)}
-    </select>
+    </Select>
   );
 }
 

@@ -3,6 +3,7 @@ import { fetchJson, postJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import Select from '../components/Select.jsx';
 
 /**
  * 설정 › 폴더 사용량 리포트(v2.454, admin 전용) — 사용자 요구사항:
@@ -152,11 +153,11 @@ export default function DirUsageSettings() {
                 <td><input className="input" style={{ width: 110 }} value={t.label || ''} placeholder="공유 폴더"
                   onChange={(e) => setT(i, { label: e.target.value })} /></td>
                 <td>
-                  <select className="input" style={{ width: 130 }} value={t.agent} onChange={(e) => setT(i, { agent: e.target.value })}>
+                  <Select className="input" style={{ width: 130 }} value={t.agent} onChange={(e) => setT(i, { agent: e.target.value })}>
                     <option value="">(선택)</option>
                     {agents.map((a) => <option key={a.agent} value={a.agent}>{a.agent}{a.online ? '' : ' (오프라인)'}</option>)}
                     {t.agent && !agents.some((a) => a.agent === t.agent) && <option value={t.agent}>{t.agent} (미접속)</option>}
-                  </select>
+                  </Select>
                   {t.agent && online === false && <div className="muted" style={{ fontSize: 11, color: '#f0a' }}>RMA 오프라인</div>}
                 </td>
                 <td><input className="input" style={{ width: 200 }} value={t.path} placeholder="/mnt/share"

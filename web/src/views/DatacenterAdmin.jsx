@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * DataCenter(법인) 관리 — vCenter의 상위 개념.
@@ -162,10 +163,10 @@ export default function DatacenterAdmin() {
                 <tr key={v.id} style={changed ? { background: 'rgba(56,189,248,.08)' } : undefined}>
                   <td><b>{v.name || v.id}</b> <span className="muted" style={{ fontSize: 12 }}>{v.id}</span></td>
                   <td>
-                    <select className="select" value={cur} onChange={(e) => setVcDc(v.id, e.target.value)} style={{ minWidth: 220 }} disabled={dcs.length === 0}>
+                    <Select className="select" value={cur} onChange={(e) => setVcDc(v.id, e.target.value)} style={{ minWidth: 220 }} disabled={dcs.length === 0}>
                       <option value="">(미지정)</option>
                       {dcs.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}{d.region ? ` · ${d.region}` : ''}</option>)}
-                    </select>
+                    </Select>
                     {changed && <span className="badge blue" style={{ marginLeft: 8, fontSize: 11 }}>변경됨</span>}
                   </td>
                 </tr>

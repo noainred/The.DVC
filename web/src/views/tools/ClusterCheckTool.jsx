@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import {
   CLUSTER_TEXT, SEV_LABEL, SEV_BADGE, RULE_TYPE_LABEL, codeChips, findingDetail, coverageText, coverageNote, haText, drsText, evcText,
 } from '../clustercfg/clusterCfgText.js';
+import Select from '../../components/Select.jsx';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -105,10 +106,10 @@ export default function ClusterCheckTool({ scope }) {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.clusters})</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>심각도</span>
         {['', 'warn', 'info'].map((s) => <Chip key={s || 'all'} active={sev === s} onClick={() => setSev(s)}>{s ? SEV_LABEL[s] : '전체'}</Chip>)}
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="클러스터·vCenter 검색" value={q} onChange={(e) => setQ(e.target.value)} />

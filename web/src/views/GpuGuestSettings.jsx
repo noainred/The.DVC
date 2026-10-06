@@ -144,13 +144,13 @@ export default function GpuGuestSettings() {
   const targetCard = (
       <div className="card" style={{ padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 13 }}>설정 대상</b>
-        <select className="select" style={{ minWidth: 260 }} value={deployAgent} onChange={(e) => { setDeployAgent(e.target.value); setMsg(null); }}
+        <Select className="select" style={{ minWidth: 260 }} value={deployAgent} onChange={(e) => { setDeployAgent(e.target.value); setMsg(null); }}
           title="이 포탈(로컬)에서 직접 수집할지, 원격 엣지 앞으로 설정을 배포할지 선택. 원격 엣지 앞 설정은 엣지가 주기적으로 가져가 적용합니다.">
           <option value="">🖥️ 이 포탈(로컬 수집)</option>
           {agents.length > 0 && <optgroup label="원격 엣지에 배포(pull)">
             {agents.map((a) => <option key={a.agent} value={a.agent}>📡 {a.agent}{a.assigned ? ` · 배포됨(vC ${a.vcenters}·VM계정 ${a.vmCreds})` : ''}</option>)}
           </optgroup>}
-        </select>
+        </Select>
         {deployAgent && (
           <span className="muted" style={{ fontSize: 12, color: 'var(--amber,#f59e0b)' }}>
             ℹ 이 설정은 원격 엣지 <b>{deployAgent}</b>로 배포됩니다. 엣지가 다음 pull 주기(약 1분)에 가져가 로컬에 적용하고, <b>실제 SSH/게스트작업은 엣지에서</b> 수행합니다. (테스트 버튼은 중앙에서 원격 VM에 도달 못 하므로 비활성)
@@ -203,13 +203,13 @@ export default function GpuGuestSettings() {
             {...numInput('timeoutMs', Math.round(form.timeoutMs / 1000))} /></Field>
           <Field label="법인당 최대 VM"><input className="input" type="number" min={1} max={100000} style={{ width: 100 }}
             {...numInput('maxVmsPerVcenter', form.maxVmsPerVcenter)} /></Field>
-          <Field label="수집 방식"><select className="select" style={{ width: 210 }} value={form.collectMethod}
+          <Field label="수집 방식"><Select sort={false} className="select" style={{ width: 210 }} value={form.collectMethod}
             title="auto(권장)=게스트작업 먼저→실패 시 SSH 자동 폴백(VM별 성공 방식 학습). VMware Tools=게스트작업만. SSH 직접=게스트 IP로 SSH해 nvidia-smi만."
             onChange={(e) => setForm((f) => ({ ...f, collectMethod: e.target.value }))}>
             <option value="auto">auto · 자동 폴백(권장)</option>
             <option value="guestops">VMware Tools만</option>
             <option value="ssh">SSH 직접만</option>
-          </select></Field>
+          </Select></Field>
           {form.collectMethod !== 'guestops' && (
             <Field label="SSH 포트"><input className="input" type="number" min={1} max={65535} style={{ width: 80 }}
               {...numInput('sshPort', form.sshPort)} /></Field>
@@ -380,3 +380,5 @@ function toForm(settings, vcs, prev) {
     collectMethod: settings.collectMethod || 'auto', sshPort: settings.sshPort || 22, vcenters,
   };
 }
+
+import Select from '../components/Select.jsx';

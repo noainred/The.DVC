@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { agentName, migrationRow, migrationVisible } from './scanRangeImportText.js';
+import Select from '../../components/Select.jsx';
 
 const TONE = { ok: 'var(--green)', warn: 'var(--amber)', dim: 'var(--text-dim)' };
 
@@ -73,10 +74,10 @@ export function ScanRangeMigration({ onChanged }) {
               <b style={{ minWidth: 120 }}>{r.vcenterName}</b>
               <span className={`badge ${r.enabled ? 'green' : 'gray'}`}>{r.enabled ? '스캔 중(이 포탈)' : '꺼짐'}</span>
               <span style={{ fontFamily: 'monospace', fontSize: 12, overflowWrap: 'anywhere' }}>{(r.ranges || []).slice(0, 3).join(', ')}{(r.ranges || []).length > 3 ? ` 외 ${r.ranges.length - 3}줄` : ''}</span>
-              <select className="select" value={pick[r.vcenterId] || ''} onChange={(e) => setPick((p) => ({ ...p, [r.vcenterId]: e.target.value }))} aria-label={`${r.vcenterName} 옮길 에이전트`} style={{ maxWidth: '100%', minWidth: 0 }}>
+              <Select className="select" value={pick[r.vcenterId] || ''} onChange={(e) => setPick((p) => ({ ...p, [r.vcenterId]: e.target.value }))} aria-label={`${r.vcenterName} 옮길 에이전트`} style={{ maxWidth: '100%', minWidth: 0 }}>
                 <option value="">에이전트 선택</option>
                 {(m.agents || []).map((a) => <option key={a} value={a}>{agentName(a)}</option>)}
-              </select>
+              </Select>
               <button className="login-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} disabled={busy || !pick[r.vcenterId]}
                 onClick={() => act('/admin/ipam/scan/migration/move', { vcenterId: r.vcenterId, agent: pick[r.vcenterId] }, (x) => `${r.vcenterName} 대역 ${x.moved ?? 0}줄을 ${agentName(pick[r.vcenterId])} 로 옮겼습니다${x.enabledAgent ? ' — 그 에이전트 주기 스캔을 켰습니다' : ''}.`)}>선택한 에이전트로 옮기기</button>
               <button className="logout-btn" style={{ padding: '5px 12px', fontSize: 12, color: 'var(--red)' }} disabled={busy}

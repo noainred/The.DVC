@@ -190,34 +190,34 @@ export default function VmProvision() {
         <b style={{ fontSize: 14 }}>2. 배치 (클러스터 · 호스트 · 스토리지 · 폴더 · 리소스풀 · 프로파일)</b>
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label>클러스터
-            <select className="select" value={form.placement.cluster} onChange={(e) => setForm((f) => ({ ...f, placement: { ...f.placement, cluster: e.target.value, host: '' } }))}>
+            <Select className="select" value={form.placement.cluster} onChange={(e) => setForm((f) => ({ ...f, placement: { ...f.placement, cluster: e.target.value, host: '' } }))}>
               <option value="">— 자동/원본과 동일 —</option>
               {(placement?.clusters || []).map((c) => <option key={c.name} value={c.name}>{c.name} (호스트 {c.hosts})</option>)}
-            </select>
+            </Select>
           </label>
           <label>호스트(ESXi)
-            <select className="select" value={form.placement.host} onChange={setP('host')}>
+            <Select className="select" value={form.placement.host} onChange={setP('host')}>
               <option value="">— 자동(DRS) —</option>
               {(placement?.hosts || []).filter((h) => !form.placement.cluster || h.cluster === form.placement.cluster).map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
-            </select>
+            </Select>
           </label>
           <label>데이터스토어
-            <select className="select" value={form.placement.datastore} onChange={setP('datastore')}>
+            <Select className="select" value={form.placement.datastore} onChange={setP('datastore')}>
               <option value="">— 자동/원본과 동일 —</option>
               {(placement?.datastores || []).map((d) => <option key={d.id} value={d.name}>{d.name}{d.freeGB != null ? ` · 여유 ${d.freeGB >= 1024 ? `${(d.freeGB / 1024).toFixed(1)}TB` : `${d.freeGB}GB`}` : ''}</option>)}
-            </select>
+            </Select>
           </label>
           <label>폴더(VM Folder)
             <input className="input" list="prov-folders" value={form.placement.folder} onChange={setP('folder')} placeholder="예: Production" />
-            <datalist id="prov-folders">{(placement?.folders || []).map((x) => <option key={x} value={x} />)}</datalist>
+            <DataList id="prov-folders">{(placement?.folders || []).map((x) => <option key={x} value={x} />)}</DataList>
           </label>
           <label>리소스 풀(Resource Pool)
             <input className="input" list="prov-pools" value={form.placement.resourcePool} onChange={setP('resourcePool')} placeholder="예: Prod" />
-            <datalist id="prov-pools">{(placement?.resourcePools || []).map((x) => <option key={x} value={x} />)}</datalist>
+            <DataList id="prov-pools">{(placement?.resourcePools || []).map((x) => <option key={x} value={x} />)}</DataList>
           </label>
           <label>스토리지 프로파일(정책)
             <input className="input" list="prov-profiles" value={form.placement.storageProfile} onChange={setP('storageProfile')} placeholder="예: vSAN Default Storage Policy" />
-            <datalist id="prov-profiles">{(placement?.profiles || []).map((x) => <option key={x} value={x} />)}</datalist>
+            <DataList id="prov-profiles">{(placement?.profiles || []).map((x) => <option key={x} value={x} />)}</DataList>
           </label>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>비워두면 원본 VM과 동일한 위치(클러스터/호스트/데이터스토어)에 배치됩니다. 폴더·리소스풀·프로파일은 vCenter의 정확한 이름을 입력하세요(목록은 추천값).</div>
@@ -244,17 +244,17 @@ export default function VmProvision() {
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label>Hostname 패턴<input className="input" value={form.guest.hostnamePattern} onChange={setG('hostnamePattern')} placeholder="web-{n}" /></label>
           <label>IP 방식
-            <select className="select" value={form.guest.ipMode} onChange={setG('ipMode')}>
+            <Select sort={false} className="select" value={form.guest.ipMode} onChange={setG('ipMode')}>
               <option value="static">고정 IP</option>
               <option value="dhcp">DHCP</option>
-            </select>
+            </Select>
           </label>
           {form.guest.ipMode === 'static' && (
             <label>IP 할당
-              <select className="select" value={form.guest.ipAssign} onChange={setG('ipAssign')}>
+              <Select sort={false} className="select" value={form.guest.ipAssign} onChange={setG('ipAssign')}>
                 <option value="sequential">순차 증가 (시작 IP +1)</option>
                 <option value="list">직접 입력 (떨어진 IP)</option>
-              </select>
+              </Select>
             </label>
           )}
           {form.guest.ipMode === 'static' && form.guest.ipAssign === 'sequential' && (
@@ -293,9 +293,9 @@ export default function VmProvision() {
               <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
                 <span className="badge blue" style={{ alignSelf: 'center' }}>NIC{i + 2}</span>
                 <label style={{ fontSize: 12 }}>IP 방식
-                  <select className="select" value={e.ipMode} onChange={(ev) => setNic(i, 'ipMode', ev.target.value)}>
+                  <Select sort={false} className="select" value={e.ipMode} onChange={(ev) => setNic(i, 'ipMode', ev.target.value)}>
                     <option value="static">고정 IP</option><option value="dhcp">DHCP</option>
-                  </select>
+                  </Select>
                 </label>
                 {e.ipMode === 'static' && <>
                   <label style={{ fontSize: 12 }}>시작 IP<input className="input" value={e.ipStart} onChange={(ev) => setNic(i, 'ipStart', ev.target.value)} placeholder="10.20.0.50" /></label>
@@ -558,3 +558,6 @@ function IpGuideModal({ onClose }) {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';
+import DataList from '../components/DataList.jsx';

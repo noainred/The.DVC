@@ -185,7 +185,7 @@ export default function AgentScans() {
                     )}
                   </>
                 ) : (
-                  <select className="select" value={form.agent || ''} onChange={(e) => {
+                  <Select className="select" value={form.agent || ''} onChange={(e) => {
                     const v = e.target.value;
                     if (v === '__custom__') { setCustomAgent(true); setForm((f) => ({ ...f, agent: '' })); }
                     else setForm((f) => ({ ...f, agent: v }));
@@ -197,13 +197,13 @@ export default function AgentScans() {
                       </option>
                     ))}
                     <option value="__custom__">＋ 직접 입력(목록에 없는 새 이름)…</option>
-                  </select>
+                  </Select>
                 )}
               </label>
               <label>수집 여부
-                <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
+                <Select sort={false} className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
                   <option value="1">활성</option><option value="0">중지</option>
-                </select>
+                </Select>
               </label>
               <label>iDRAC 계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="root" /></label>
               <label>iDRAC 비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} /></label>
@@ -291,3 +291,5 @@ export default function AgentScans() {
     </>
   );
 }
+
+import Select from '../components/Select.jsx';

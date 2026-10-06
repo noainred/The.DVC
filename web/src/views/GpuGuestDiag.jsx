@@ -178,10 +178,10 @@ export default function GpuGuestDiag() {
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           <span className="muted">vCenter(법인)</span>
-          <select className="select" value={vcFilter} onChange={(e) => setVcFilter(e.target.value)}>
+          <Select className="select" value={vcFilter} onChange={(e) => setVcFilter(e.target.value)}>
             <option value="">전체 ({vcOptions.length}){diagVcIds.size !== vcOptions.length ? ` · 수집됨 ${diagVcIds.size}` : ''}</option>
             {vcOptions.map((o) => <option key={o.id} value={o.id}>{o.name}{o.hasData ? '' : ' · 데이터 없음'}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="인증/실행에 실패한 VM만 표시">
           <input type="checkbox" checked={failOnly} onChange={(e) => setFailOnly(e.target.checked)} /> 실패한 VM만
@@ -227,3 +227,5 @@ export default function GpuGuestDiag() {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';

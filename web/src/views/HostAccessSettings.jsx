@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import Select from '../components/Select.jsx';
 
 /**
  * 호스트 접근 제어(v2.485) — 이 서버(포탈 호스트)의 SSH·웹(80/443/포탈 포트) 클라이언트 제어와 OS 방화벽 추가 규칙.
@@ -172,8 +173,8 @@ export default function HostAccessSettings() {
             {draft.extra.map((r, i) => (
               <tr key={i}>
                 <td><input className="input" style={{ width: 110 }} value={r.port} onChange={(e) => updExtra(i, 'port', e.target.value)} /></td>
-                <td><select className="select" value={r.proto} onChange={(e) => updExtra(i, 'proto', e.target.value)}><option value="tcp">tcp</option><option value="udp">udp</option></select></td>
-                <td><select className="select" value={r.action} onChange={(e) => updExtra(i, 'action', e.target.value)}><option value="accept">accept(허용)</option><option value="drop">drop(무응답 차단)</option><option value="reject">reject(거부 응답)</option></select></td>
+                <td><Select sort={false} className="select" value={r.proto} onChange={(e) => updExtra(i, 'proto', e.target.value)}><option value="tcp">tcp</option><option value="udp">udp</option></Select></td>
+                <td><Select sort={false} className="select" value={r.action} onChange={(e) => updExtra(i, 'action', e.target.value)}><option value="accept">accept(허용)</option><option value="drop">drop(무응답 차단)</option><option value="reject">reject(거부 응답)</option></Select></td>
                 <td><input className="input" style={{ width: 240, fontFamily: 'monospace' }} value={r.sources} onChange={(e) => updExtra(i, 'sources', e.target.value)} placeholder="10.0.0.0/8, 192.168.1.5" /></td>
                 <td><input className="input" style={{ width: 160 }} value={r.comment || ''} onChange={(e) => updExtra(i, 'comment', e.target.value)} /></td>
                 <td><button className="tab" style={{ padding: '2px 8px' }} onClick={() => upd('extra', draft.extra.filter((_, j) => j !== i))}>삭제</button></td>

@@ -235,10 +235,10 @@ export default function AgentDeploy() {
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
             <label style={{ fontSize: 12 }}>버전
-              <select className="select" value={dl.version} onChange={(e) => setDl({ ...dl, version: e.target.value })}>
+              <Select sort={false} className="select" value={dl.version} onChange={(e) => setDl({ ...dl, version: e.target.value })}>
                 <option value="">latest{pkg?.remote?.latest ? ` (${pkg.remote.latest})` : ''}</option>
                 {(pkg?.remote?.versions || []).map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
-              </select>
+              </Select>
             </label>
             <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>선택 {(dl.kinds || []).length}종</span>
             <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={dl.busy || !(dl.kinds || []).length} onClick={downloadPkg}>{dl.busy ? '다운로드 중…' : '다운로드'}</button>
@@ -319,9 +319,9 @@ export default function AgentDeploy() {
           <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 아래 '수집 서버 자동 등록'을 켜면 배포 후 중앙에 자동 등록됩니다.">
             <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span>
             <input className="input" list="collector-dc-list" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2 (목록에서 선택 또는 직접 입력)" />
-            <datalist id="collector-dc-list">
+            <DataList id="collector-dc-list">
               {dcs.map((d) => <option key={d.id} value={d.id}>{d.name && d.name !== d.id ? `${d.name}${d.region ? ` · ${d.region}` : ''}` : (d.region || d.id)}</option>)}
-            </datalist></label>
+            </DataList></label>
           <label title="에이전트 인스턴스가 자기 서버에서 열 HTTP 포트(기본 4000). 그 호스트에서 포트 충돌이 없으면 그대로 두세요.">
             <span className="cap">포탈 포트</span><input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
           <label style={{ gridColumn: '1 / -1' }} title="보통 비워두세요 — 중앙이 download/의 el9 오프라인 패키지를 자동 선택해 SSH로 전송·설치합니다. 특정 tarball을 강제하려면 '중앙 서버' 상의 절대경로를 입력하세요.">
@@ -345,10 +345,10 @@ export default function AgentDeploy() {
             <div style={{ gridColumn: '1 / -1', fontSize: 13 }} className="muted">⚠️ vCenter <b>id는 중앙과 동일</b>해야 호스트/VM이 매칭됩니다. 아래 드롭다운에서 중앙 vCenter를 고르면 id가 맞춰집니다. <b>host</b>는 이 agent가 vCenter에 접속할 주소(IP/FQDN)로, 필요하면 수정하세요.</div>
             <label title="중앙에 등록된 vCenter를 선택하면 id가 자동으로 맞춰집니다(오버레이 매칭에 필수).">
               <span className="cap">대상 vCenter(중앙과 동일 id)</span>
-              <select className="input" value={f.gpuGuest.vcenterId} onChange={(e) => pickGpuVc(e.target.value)}>
+              <Select className="input" value={f.gpuGuest.vcenterId} onChange={(e) => pickGpuVc(e.target.value)}>
                 <option value="">vCenter 선택…</option>
                 {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id} ({v.id})</option>)}
-              </select></label>
+              </Select></label>
             <label title="이 agent가 vCenter에 접속할 주소. 중앙 등록 host를 기본값으로 채우지만, agent가 다른 경로(예: 내부 IP)로 접속하면 수정하세요.">
               <span className="cap">vCenter 접속 host(IP/FQDN)</span><input className="input" value={f.gpuGuest.vcenterHost} onChange={setG('vcenterHost')} placeholder="예: 192.168.21.200" /></label>
             <label title="vCenter SOAP 로그인 계정(게스트 작업 권한 필요).">
@@ -513,3 +513,6 @@ export default function AgentDeploy() {
     </>
   );
 }
+
+import Select from '../components/Select.jsx';
+import DataList from '../components/DataList.jsx';

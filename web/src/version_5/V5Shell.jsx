@@ -7,6 +7,7 @@ import { statusCard } from './overviewData.js';
 import { handoffSearch } from '../hooks/searchHandoff.js';
 import { agoText } from '../views/tools/relTime.js';
 import './v5.css';
+import Select from '../components/Select.jsx';
 
 /**
  * V5 셸(v2.616) — 기존 라우터 위의 새 틀. 본문(children)은 App 이 그리는 기존 화면 그대로다.
@@ -280,10 +281,10 @@ export default function V5Shell({
           <label className="v5-scope" title="법인(vCenter) 범위 — 인벤토리 화면과 특수 기능의 vCenter 범위에 함께 적용됩니다">
             <Icon name="building" size={16} stroke="var(--mint)" />
             <span className="v5-scope-name">{scopeName}</span>
-            <select aria-label="법인 범위" value={scope || ''} onChange={(e) => setScope(e.target.value)}>
+            <Select aria-label="법인 범위" value={scope || ''} onChange={(e) => setScope(e.target.value)}>
               <option value="">전체 법인</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+            </Select>
           </label>
           <div className="v5-user">
             <div className="v5-avatar" title={`${user?.name || ''} (${user?.role || ''})`}>{(user?.name || 'U').slice(0, 1).toUpperCase()}</div>

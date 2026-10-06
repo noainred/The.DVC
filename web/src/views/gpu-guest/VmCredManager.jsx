@@ -9,6 +9,7 @@ import { VmLink } from '../../components/ui.jsx';
 import { fmtAgo } from '../../util/fmt.js'; // v2.613 DEPS2613-11: 코어는 util/fmt, 결측 표기('없음')만 이 화면 계약
 import { droppedSecretNote } from '../droppedSecretText.js'; // v2.611: VM 계정명 변경 시 폐기된 비밀번호 안내
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 /** 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표). */
 function SortTh({ k, sort, onSort, children }) {
@@ -232,20 +233,20 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
         <b>VM별 계정 (계정이 VM마다 다를 때)</b>
         {/* v2.580: 필터 3개 + 버튼이 한 줄 고정이라 400px 에서 166px 가로 넘침(Chromium A/B — 기존 결함). 줄바꿈 허용. */}
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="select" value={osFilter} onChange={(e) => setOsFilter(e.target.value)} style={{ minWidth: 110 }} title="OS별로 구분해 보기">
+          <Select sort={false} className="select" value={osFilter} onChange={(e) => setOsFilter(e.target.value)} style={{ minWidth: 110 }} title="OS별로 구분해 보기">
             <option value="all">전체 OS</option>
             <option value="linux">🐧 Linux</option>
             <option value="windows">🪟 Windows</option>
-          </select>
-          <select className="select" value={powerFilter} onChange={(e) => setPowerFilter(e.target.value)} style={{ minWidth: 120 }} title="전원 상태로 구분해 보기 — 꺼진 VM은 수집 대상이 아닙니다.">
+          </Select>
+          <Select sort={false} className="select" value={powerFilter} onChange={(e) => setPowerFilter(e.target.value)} style={{ minWidth: 120 }} title="전원 상태로 구분해 보기 — 꺼진 VM은 수집 대상이 아닙니다.">
             <option value="all">전체 전원</option>
             <option value="on">🟢 켜짐</option>
             <option value="off">⚫ 꺼짐</option>
-          </select>
-          <select className="select" value={selVc} onChange={(e) => pickVc(e.target.value)} style={{ minWidth: 200 }}>
+          </Select>
+          <Select className="select" value={selVc} onChange={(e) => pickVc(e.target.value)} style={{ minWidth: 200 }}>
             <option value="">법인(vCenter) 선택…</option>
             {vcs.map((vc) => <option key={vc.id} value={vc.id}>{vc.name || vc.id}</option>)}
-          </select>
+          </Select>
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={!selVc || loading} onClick={() => loadVms(selVc)}>{loading ? '조회 중…' : '↻ VM 조회'}</button>
         </div>
       </div>
@@ -297,10 +298,10 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                           : <span className="badge gray" title="아직 게스트에서 사용률을 읽어오지 못함">미수집</span>}
                       </td>
                       <td>
-                        <select className="select" value={r.mode} onChange={(e) => setRow(r.id, { mode: e.target.value })} style={{ width: 84 }}>
+                        <Select sort={false} className="select" value={r.mode} onChange={(e) => setRow(r.id, { mode: e.target.value })} style={{ width: 84 }}>
                           <option value="shared">공용</option>
                           <option value="own">별도</option>
-                        </select>
+                        </Select>
                       </td>
                       <td>
                         {r.mode === 'own' ? (
@@ -320,13 +321,13 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                       </td>
                       <td>
                         {(r.ipAddresses || []).length > 0 ? (
-                          <select className="select" style={{ width: 148 }} value={r.ipOverride || ''}
+                          <Select className="select" style={{ width: 148 }} value={r.ipOverride || ''}
                             onChange={(e) => setRow(r.id, { ipOverride: e.target.value })}
                             title="SSH 접속에 사용할 IP를 고정합니다. 다중 NIC VM에서 도달 가능한 IP를 직접 지정하세요. '자동'이면 보고된 모든 IP를 순차 시도합니다.">
                             <option value="">자동(모든 IP)</option>
                             {(r.ipAddresses || []).map((ip) => <option key={ip} value={ip}>{ip}</option>)}
                             {r.ipOverride && !(r.ipAddresses || []).includes(r.ipOverride) && <option value={r.ipOverride}>{r.ipOverride} (미보고)</option>}
-                          </select>
+                          </Select>
                         ) : <span className="muted" style={{ fontSize: 11 }} title="VMware Tools가 IP를 보고하지 않아 선택할 IP가 없습니다.">IP 없음</span>}
                       </td>
                       <td>
@@ -350,12 +351,12 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
             {selected.size > 0 && <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setSelected(new Set())}>선택 해제</button>}
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="테스트 수집 방식. SSH=게스트 IP로 직접 접속해 nvidia-smi(VMware Tools 게스트작업 인증이 막힐 때). auto=SSH 우선 실패 시 게스트작업.">
               <span className="muted">방식</span>
-              <select className="select" style={{ width: 120 }} value={testMethod} onChange={(e) => setTestMethod(e.target.value)}>
+              <Select sort={false} className="select" style={{ width: 120 }} value={testMethod} onChange={(e) => setTestMethod(e.target.value)}>
                 <option value="">설정값</option>
                 <option value="auto">auto(자동 폴백)</option>
                 <option value="guestops">VMware Tools</option>
                 <option value="ssh">SSH 직접</option>
-              </select>
+              </Select>
             </label>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 전송되는 계정명과 비밀번호 길이를 표시합니다(디버그). 비밀번호 값은 서버가 보내지 않으며, 이 응답에만 보이고 디스크/중앙에는 기록되지 않습니다.">
               <input type="checkbox" checked={revealCreds} onChange={(e) => setRevealCreds(e.target.checked)} /> 🔓 자격증명 확인(계정명·비번 길이)

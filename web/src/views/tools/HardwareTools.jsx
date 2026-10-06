@@ -17,6 +17,7 @@ import { intervalText } from './collectActivityText.js';
 import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge, detailServerOf } from './serverVendorText.js';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { gpuFinderNote } from './gpuFinderText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -211,11 +212,11 @@ function HardwareSummary() {
         </div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter) 기준. 스캔 등록분은 법인 직접, 그 외는 vCenter→법인 할당으로 해석.">
           <span className="muted">법인(DataCenter)</span>
-          <select className="select" value={dc} onChange={(e) => setDc(e.target.value)} style={{ minWidth: 180 }}>
+          <Select className="select" value={dc} onChange={(e) => setDc(e.target.value)} style={{ minWidth: 180 }}>
             <option value="">전체 데이터센터</option>
             {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
             <option value="__unmapped__">{dcErr ? '법인 정보를 읽지 못함' : '⚠ 미지정(법인 없음)'}</option>
-          </select>
+          </Select>
         </label>
       </div>
       <DcErrNote err={dcErr} />
@@ -405,10 +406,10 @@ function ServerListBody({ corpName, model, servers, onRow }) {
         </span>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           {vendorOpts.length > 0 && (
-            <select className="select select-sm" value={vendorKey} onChange={(e) => setVendor(e.target.value)} title="BMC 벤더로 거릅니다 — 벤더 미상은 벤더를 보고하지 않는 2.621 이전 엣지의 서버입니다" style={{ minWidth: 130 }}>
+            <Select className="select select-sm" value={vendorKey} onChange={(e) => setVendor(e.target.value)} title="BMC 벤더로 거릅니다 — 벤더 미상은 벤더를 보고하지 않는 2.621 이전 엣지의 서버입니다" style={{ minWidth: 130 }}>
               <option value="">전체 벤더</option>
               {vendorOpts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-            </select>
+            </Select>
           )}
           <input className="input" placeholder="이름/모델/태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
           {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>}
@@ -608,15 +609,15 @@ export function ServerAnalysis() {
           {/* 1차 박스: 법인(DataCenter) — 고르면 그 법인의 모든 장비 */}
           <label className="flex gap" style={{ alignItems: 'center' }} title="1차: 법인(DataCenter). 고르면 그 법인의 모든 장비가 보입니다.">
             <span className="muted">법인(DataCenter)</span>
-            <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(''); }} style={{ minWidth: 150 }}>
+            <Select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(''); }} style={{ minWidth: 150 }}>
               <option value="">{dcErr ? '전체 (법인 정보를 읽지 못함)' : '전체'}</option>
               {dcs.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
-            </select>
+            </Select>
           </label>
           {/* 2차 박스: vCenter(가상화) / Baremetal — 1차 선택에 연동 */}
           <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
             <span className="muted">구분</span>
-            <select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }}>
+            <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }}>
               <option value="">{dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
@@ -624,7 +625,7 @@ export function ServerAnalysis() {
                 </optgroup>
               )}
               <option value="baremetal">🔩 Baremetal (미가상화 물리)</option>
-            </select>
+            </Select>
           </label>
         </div>
       </div>
@@ -779,9 +780,9 @@ function ServerTempFinder({ vc, onServer }) {
         </div>
         {/* v2.621(감사 WEB-06): 줄바꿈이 없어 400px 에서 '↻' 가 뷰포트 밖으로 나갔다(v2.580 BUG-C 규약). */}
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="select select-sm" value={kind} onChange={(e) => setKind(e.target.value)} style={{ minWidth: 130 }}>
+          <Select sort={false} className="select select-sm" value={kind} onChange={(e) => setKind(e.target.value)} style={{ minWidth: 130 }}>
             {TEMP_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
+          </Select>
           <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/센서/서비스태그 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻</button>
         </div>

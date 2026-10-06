@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { postJson, usePolling } from '../../api.js';
 import { DataTable, ErrorBox, StateBadge, UsageCell, VmLink } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
+import Select from '../../components/Select.jsx';
 
 
 // 모듈 스코프(props만 사용) — VmFinder 렌더 바디 안에 정의하면 매 렌더 새 타입이 되어 칩
@@ -75,9 +76,9 @@ export function VmFinder() {
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 6 }}>
           <label style={{ fontSize: 12 }}>전원
-            <select className="select" value={f.powerState} onChange={(e) => setF({ ...f, powerState: e.target.value })}>
+            <Select sort={false} className="select" value={f.powerState} onChange={(e) => setF({ ...f, powerState: e.target.value })}>
               <option value="">전체</option><option value="POWERED_ON">On</option><option value="POWERED_OFF">Off</option>
-            </select>
+            </Select>
           </label>
           <label style={{ fontSize: 12 }}>OS 포함<input className="input" value={f.os} onChange={(e) => setF({ ...f, os: e.target.value })} placeholder="예: Windows" /></label>
           <label style={{ fontSize: 12 }}>이름/IP<input className="input" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} placeholder="검색" /></label>

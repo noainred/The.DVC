@@ -233,13 +233,13 @@ function WasteTrend({ scope }) {
     <>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <span className="muted" style={{ fontSize: 12 }}>기간</span>
-        <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ minWidth: 110 }}>
+        <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ minWidth: 110 }}>
           {[1, 7, 30, 90, 365].map((n) => <option key={n} value={n}>최근 {n}일</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12 }}>집계</span>
-        <select className="select" value={bucket} onChange={(e) => setBucket(e.target.value)} style={{ minWidth: 110 }}>
+        <Select sort={false} className="select" value={bucket} onChange={(e) => setBucket(e.target.value)} style={{ minWidth: 110 }}>
           <option value="auto">자동</option><option value="hour">1시간</option><option value="day">1일</option><option value="week">1주</option>
-        </select>
+        </Select>
         <div className="flex gap" style={{ marginLeft: 4 }}>
           <button className={mode === 'pct' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setMode('pct')}>사용률(%)</button>
           <button className={mode === 'abs' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setMode('abs')}>절대량</button>
@@ -446,10 +446,10 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           placeholder="🔍 VM 이름 검색" value={q} onChange={setQ} />}
         {tab !== 'trend' && canCsv() && ( /* v2.643: 근거 리포트 내보내기는 관리자 이상 + data.csv 권한만 */
           <span className="flex gap" style={{ alignItems: 'center', flex: 'none' }}>
-            <select className="select" style={{ width: 116 }} value={exportDays} disabled={exporting}
+            <Select sort={false} className="select" style={{ width: 116 }} value={exportDays} disabled={exporting}
               onChange={(e) => setExportDays(Number(e.target.value))} title="근거 리포트의 vCenter 성능 관측 기간">
               {[7, 30, 90, 180, 365].map((d) => <option key={d} value={d}>근거 {d}일</option>)}
-            </select>
+            </Select>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={exporting} onClick={runExport}
               title={exportTitle({ reportVms: reportCount(data, { nameFilter: q }), vcenters: (data.byVcenter || []).length || 1, days: exportDays, nameFilter: q })}>
               {exportLabel({ busy: exporting, elapsedSec: exportSec })}
@@ -656,3 +656,5 @@ export function ThinVms({ scope }) {
     </>
   );
 }
+
+import Select from '../../components/Select.jsx';

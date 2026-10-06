@@ -8,6 +8,7 @@ import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { HOST_CFG_TEXT, DRIFT_LABEL, SEV_LABEL, SEV_BADGE, REBOOT_KIND, codeChips, findingDetail, coverageText, coverageNote } from '../hostcfg/hostCfgText.js';
+import Select from '../../components/Select.jsx';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -169,10 +170,10 @@ export default function HostHygieneTool({ scope }) {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
+        <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
           {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.hosts})</option>)}
-        </select>
+        </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>심각도</span>
         {['', 'crit', 'warn', 'info'].map((s) => <Chip key={s || 'all'} active={sev === s} onClick={() => setSev(s)}>{s ? SEV_LABEL[s] : '전체'}</Chip>)}
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="호스트·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />

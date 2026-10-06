@@ -8,6 +8,7 @@ import {
   measureVerdict, slowRate, routeHint, ridMatches, ridLookupText,
 } from './perfMonitorText.js';
 import { unitText } from './unitText.js';
+import Select from '../components/Select.jsx';
 
 /**
  * 설정 › 서버 성능 측정(v2.498) — 사용자 요청: "'불러오는 중…' 이 3분 이상 지속될 때가 있다.
@@ -360,15 +361,15 @@ export default function PerfMonitor() {
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14, marginTop: 10 }}>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
               느린 요청 보관
-              <select className="select" style={{ width: 100 }} value={form.keepSlow} onChange={(e) => setForm({ ...form, keepSlow: Number(e.target.value) })}>
+              <Select sort={false} className="select" style={{ width: 100 }} value={form.keepSlow} onChange={(e) => setForm({ ...form, keepSlow: Number(e.target.value) })}>
                 {KEEP_PRESETS.map((n) => <option key={n} value={n}>{n}건</option>)}
-              </select>
+              </Select>
             </label>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
               hang 보관
-              <select className="select" style={{ width: 100 }} value={form.keepHangs} onChange={(e) => setForm({ ...form, keepHangs: Number(e.target.value) })}>
+              <Select sort={false} className="select" style={{ width: 100 }} value={form.keepHangs} onChange={(e) => setForm({ ...form, keepHangs: Number(e.target.value) })}>
                 {KEEP_PRESETS.map((n) => <option key={n} value={n}>{n}건</option>)}
-              </select>
+              </Select>
             </label>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
               로그 보존(일)

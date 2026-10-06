@@ -12,6 +12,7 @@ import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData, dsUnknownNote } from './storageTrack.js';
 import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
 
 const DAY_OPTS = [7, 30, 90, 365];
 // 슬롯 라벨: '8/21 00시' — 하루 2점이라 날짜만으로는 구분이 안 된다.
@@ -97,10 +98,10 @@ export default function VmTrackTool() {
           </div>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
             <option value="">전체 vCenter(합계)</option>
             {(data.vcenterList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+          </Select>
           <span className="flex gap">
             {DAY_OPTS.map((d) => (
               <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>

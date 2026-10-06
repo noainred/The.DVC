@@ -257,11 +257,11 @@ export default function GuestDiskReport({ scope = '' }) {
         </label>
         <label className="gd-min">
           <span>클러스터</span>
-          <select className="gd-sel" value={clusterSel} onChange={(e) => setClusterSel(e.target.value)}
+          <Select className="gd-sel" value={clusterSel} onChange={(e) => setClusterSel(e.target.value)}
             title={clusterOpts.length ? '' : '표시할 데이터가 있어야 클러스터가 채워집니다'}>
             <option value="">전체 클러스터{clusterOpts.length ? ` (${clusterOpts.length})` : ''}</option>
             {clusterOpts.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
         </label>
         <div className="gd-min">
           <span>최소 회수(GB)</span>
@@ -400,3 +400,5 @@ export default function GuestDiskReport({ scope = '' }) {
     </div>
   );
 }
+
+import Select from '../../components/Select.jsx';

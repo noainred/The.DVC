@@ -12,6 +12,7 @@ import { postJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { checkRangeSpec, serverInvalidText } from './ipmsRangeText.js';
 import { CLS_BADGE, CLS_LABEL, agentName, rangeRowCheck } from './scanRangeImportText.js';
+import Select from '../../components/Select.jsx';
 
 const TONE = { green: 'var(--green)', amber: 'var(--amber)', red: 'var(--red)', gray: 'var(--text-dim)' };
 const BTN = { flex: 'none', padding: '4px 10px', fontSize: 12 };
@@ -67,9 +68,9 @@ export function ScanRangeList({ data, err, agentFilter, setAgentFilter, onReload
       <div className="card" style={{ padding: 10, marginTop: 10, minWidth: 0 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <b style={{ fontSize: 12.5 }}>대역 추가</b>
-          <select className="select" value={targetAgent} onChange={(e) => setAddAgent(e.target.value)} aria-label="추가할 에이전트" style={{ maxWidth: '100%', minWidth: 0 }}>
+          <Select className="select" value={targetAgent} onChange={(e) => setAddAgent(e.target.value)} aria-label="추가할 에이전트" style={{ maxWidth: '100%', minWidth: 0 }}>
             {chipAgents.map((a) => <option key={a} value={a}>{agentName(a)}</option>)}
-          </select>
+          </Select>
           <input className="input" style={{ width: 210, maxWidth: '100%', minWidth: 0, fontFamily: 'monospace' }} placeholder="10.0.0.0/24 · 10.0.0.1-50 · IP" value={addValue} onChange={(e) => setAddValue(e.target.value)} aria-label="추가할 대역" />
           <button className="login-btn" style={{ ...BTN, padding: '5px 12px' }} disabled={busy || !addCheck?.ok}
             onClick={async () => { const v = addValue.trim(); if (await send({ agent: targetAgent, op: 'add', value: v }, `${agentName(targetAgent)} 에 ${v} 를 추가했습니다.`)) setAddValue(''); }}>＋ 추가</button>

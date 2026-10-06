@@ -6,6 +6,7 @@ import { STable } from '../../components/STable.jsx';
 import { agoText, countText } from './cvpText.js';
 import { corpLabel } from './cvpOverviewText.js';
 import { OPTICS_NOTE, dbmText, opticRowState, basisText, opticsKpis, opticsEmptyNote } from './cvpOpticsText.js';
+import Select from '../../components/Select.jsx';
 
 /**
  * CVP › 광신호(v2.646 — 사용자 요청 '각 GBIC 의 광신호 세기를 확인 · 신호가 약하면 장애로 판정').
@@ -38,10 +39,10 @@ export default function CvpOpticsView({ servers = [], onOpen }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <b>GBIC 광신호(수신 광량)</b>
           {servers.length > 1 && (
-            <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+            <Select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
               <option value="">모든 CVP</option>
               {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
-            </select>
+            </Select>
           )}
           <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
         </div>

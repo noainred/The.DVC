@@ -22,6 +22,7 @@ import {
   gpuCardsText, TREND_HANDOFF, parseTrendHandoff, linkBasisText,
   CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
 } from './idracTrendText.js';
+import Select from '../../components/Select.jsx';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
 const ALL_ON = Object.fromEntries(CHART_SERIES.map((s) => [s.k, true]));
@@ -134,9 +135,9 @@ export default function IdracTrendTool() {
   const sel = (label, value, onChange, opts, minWidth) => (
     <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>
       <span className="muted" style={{ whiteSpace: 'nowrap' }}>{label}</span>
-      <select className="select" style={{ minWidth: minWidth || 0, maxWidth: '100%' }} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+      <Select className="select" style={{ minWidth: minWidth || 0, maxWidth: '100%' }} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      </Select>
     </label>
   );
   const empty = emptyNote(data);
@@ -235,9 +236,9 @@ export default function IdracTrendTool() {
                 </span>
                 <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12 }}>
                   굵기
-                  <select className="input" style={{ minWidth: 0, width: 64, padding: '2px 6px' }} value={x.width} onChange={(e) => applyStyles(setStyle(styles, s.k, { width: Number(e.target.value) }))}>
+                  <Select sort={false} className="input" style={{ minWidth: 0, width: 64, padding: '2px 6px' }} value={x.width} onChange={(e) => applyStyles(setStyle(styles, s.k, { width: Number(e.target.value) }))}>
                     {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
                   <input type="checkbox" checked={x.dot} onChange={(e) => applyStyles(setStyle(styles, s.k, { dot: e.target.checked }))} /> 점 표시

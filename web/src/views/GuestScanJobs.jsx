@@ -57,9 +57,9 @@ export default function GuestScanJobs({ type }) {
         <div className="card" style={{ padding: 12, marginTop: 10, border: '1px solid var(--accent,#2563eb)' }}>
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
             <input className="input" placeholder="이름" style={{ width: 150 }} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            {!type && <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option value="login-fails">로그인 실패</option><option value="net-issues">네트워크 이슈</option></select>}
-            <select className="select" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })}><option value="">vCenter 선택</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
-            <select className="select" value={form.os} onChange={(e) => setForm({ ...form, os: e.target.value })}><option value="all">전체 OS</option><option value="linux">Linux</option><option value="windows">Windows</option></select>
+            {!type && <Select sort={false} className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option value="login-fails">로그인 실패</option><option value="net-issues">네트워크 이슈</option></Select>}
+            <Select className="select" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })}><option value="">vCenter 선택</option>{(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</Select>
+            <Select sort={false} className="select" value={form.os} onChange={(e) => setForm({ ...form, os: e.target.value })}><option value="all">전체 OS</option><option value="linux">Linux</option><option value="windows">Windows</option></Select>
             <span className="muted">주기</span><input className="input" type="number" style={{ width: 64 }} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: e.target.value })} /><span className="muted">분</span>
             <span className="muted">최대</span><input className="input" type="number" style={{ width: 64 }} value={form.maxVms} onChange={(e) => setForm({ ...form, maxVms: e.target.value })} /><span className="muted">대</span>
           </div>
@@ -75,3 +75,5 @@ export default function GuestScanJobs({ type }) {
     </div>
   );
 }
+
+import Select from '../components/Select.jsx';

@@ -145,15 +145,15 @@ function VmReconfigModal({ vm, onClose }) {
               <span key={i} className="flex" style={{ gap: 4, alignItems: 'center' }}>
                 <input className="input" type="number" min={1} placeholder="GB" value={a.gb} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, gb: e.target.value } : x)))} style={{ width: 80 }} />
                 {hw.scsi.length > 1 && (
-                  <select className="select" value={a.ctrl} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ctrl: e.target.value } : x)))} style={{ maxWidth: 150, fontSize: 12 }}>
+                  <Select className="select" value={a.ctrl} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ctrl: e.target.value } : x)))} style={{ maxWidth: 150, fontSize: 12 }}>
                     {hw.scsi.map((s) => <option key={s.key} value={s.key}>{s.label || `SCSI ${s.busNumber}`}</option>)}
-                  </select>
+                  </Select>
                 )}
                 {datastores.length > 0 && (
-                  <select className="select" value={a.ds} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ds: e.target.value } : x)))} style={{ maxWidth: 200, fontSize: 12 }} title="디스크를 생성할 데이터스토어">
+                  <Select className="select" value={a.ds} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ds: e.target.value } : x)))} style={{ maxWidth: 200, fontSize: 12 }} title="디스크를 생성할 데이터스토어">
                     <option value="">기존 위치(자동)</option>
                     {datastores.map((d) => <option key={d.name} value={d.name}>{d.name} · 여유 {fmtCap(d.freeGB)} / 총 {fmtCap(d.capacityGB)}</option>)}
-                  </select>
+                  </Select>
                 )}
                 <button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setAdds((arr) => arr.filter((_, j) => j !== i))}>✕</button>
               </span>
@@ -178,10 +178,10 @@ function VmReconfigModal({ vm, onClose }) {
           <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {nicAdds.map((id, i) => (
               <span key={i} className="flex" style={{ gap: 4, alignItems: 'center' }}>
-                <select className="select" value={id} onChange={(e) => setNicAdds((a) => a.map((x, j) => (j === i ? e.target.value : x)))} style={{ maxWidth: 220 }}>
+                <Select className="select" value={id} onChange={(e) => setNicAdds((a) => a.map((x, j) => (j === i ? e.target.value : x)))} style={{ maxWidth: 220 }}>
                   <option value="">네트워크 선택…</option>
                   {networks.map((nw) => <option key={nw.id} value={nw.id}>{nw.name}{nw.type === 'DISTRIBUTED_PORTGROUP' ? ' (DVS)' : ''}</option>)}
-                </select>
+                </Select>
                 <button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNicAdds((a) => a.filter((_, j) => j !== i))}>✕</button>
               </span>
             ))}
@@ -197,3 +197,5 @@ function VmReconfigModal({ vm, onClose }) {
     </Modal>
   );
 }
+
+import Select from './Select.jsx';

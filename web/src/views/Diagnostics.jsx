@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import Select from '../components/Select.jsx';
 
 const LEVEL_COLOR = { error: '#f87171', warn: '#fbbf24', info: '#93c5fd' };
 
@@ -194,12 +195,12 @@ export default function Diagnostics() {
                   표본 {(mem.meta?.count || 0).toLocaleString()}건
                   {mem.meta?.firstTs ? ` · 수집 개시 ${new Date(mem.meta.firstTs).toLocaleDateString('ko-KR')}` : ''}
                 </span>
-                <select className="select select-sm" value={memWin} onChange={(e) => setMemWin(e.target.value)}>
+                <Select sort={false} className="select select-sm" value={memWin} onChange={(e) => setMemWin(e.target.value)}>
                   <option value="6h">최근 6시간</option>
                   <option value="24h">최근 24시간</option>
                   <option value="7d">최근 7일</option>
                   <option value="30d">최근 30일</option>
-                </select>
+                </Select>
               </div>
             </div>
 
@@ -256,12 +257,12 @@ export default function Diagnostics() {
       <div className="card">
         <div className="flex between wrap gap" style={{ marginBottom: 10 }}>
           <div className="flex gap">
-            <select className="select select-sm" value={level} onChange={(e) => setLevel(e.target.value)}>
+            <Select sort={false} className="select select-sm" value={level} onChange={(e) => setLevel(e.target.value)}>
               <option value="all">전체</option>
               <option value="info">info</option>
               <option value="warn">warn</option>
               <option value="error">error</option>
-            </select>
+            </Select>
             <input
               className="select select-sm"
               style={{ minWidth: 180 }}
