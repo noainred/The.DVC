@@ -65,6 +65,8 @@ function prepare(db) {
     updChange: db.prepare('UPDATE dns_latest SET vcenter_id=?, vm_name=?, sig=?, servers=?, ts=?, seen=? WHERE vm_id=?'),
     insChange: db.prepare('INSERT INTO dns_change (ts, vm_id, vcenter_id, vm_name, before, after, first) VALUES (?,?,?,?,?,?,0)'),
     touch: db.prepare('UPDATE dns_latest SET seen=?, vm_name=? WHERE vm_id=?'),
+    // v2.710 데모 전용(mock/demo/vmdns.js) — 과거 변경 행을 넣은 VM 의 첫 관측을 그 변경 이전으로 당기고 '마지막 확인' 은 지금으로 둔다.
+    backdate: db.prepare('UPDATE dns_latest SET first_ts=?, first_servers=?, seen=? WHERE vm_id=? AND first_ts > ?'),
     recent: db.prepare('SELECT ts, vm_id, vcenter_id, vm_name, before, after, first FROM dns_change WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?'),
     byVm: db.prepare('SELECT ts, before, after, first FROM dns_change WHERE vm_id = ? ORDER BY ts DESC, id DESC LIMIT ?'),
     pruneChange: db.prepare('DELETE FROM dns_change WHERE rowid IN (SELECT rowid FROM dns_change WHERE ts < ? LIMIT ?)'),
@@ -101,6 +103,14 @@ const parse = (s) => { try { const v = JSON.parse(s); return Array.isArray(v) ? 
 const s128 = (v) => String(v ?? '').slice(0, 256);
 
 export function vmDnsChangeRev() { return _rev; }
+
+/** v2.710 데모 전용 — 첫 관측 시각·값을 과거로(변경 이력보다 첫 관측이 늦게 보이지 않게). mock 이 아니면 부르지 않는다. */
+export async function demoBackdateFirst(vmId, firstTs, firstServers, seen) {
+  const h = await open();
+  if (!h) return false;
+  h.st.backdate.run(firstTs, json(firstServers), seen, s128(vmId), firstTs);
+  return true;
+}
 
 /** 최신값 전량(폴러가 기동 뒤 한 번 읽어 메모리에 둔다). DB 가 없으면 null. */
 export async function loadLatestMap() {

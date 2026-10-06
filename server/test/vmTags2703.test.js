@@ -78,9 +78,11 @@ test('④ 분석 — 못 읽은 vCenter 의 VM 은 확인 안 됨 · 누락 · �
   assert.deepEqual(vmTagsOf(null, 'vm-1'), { tags: null, custom: null });
 });
 
-test('⑤ 정책 — 정규화·중복 제거·제어 문자 거부·rev 충돌·손상 파일 보존', () => {
-  _resetTagPolicy();
-  assert.deepEqual(loadTagPolicy().requiredCategories, []);
+test('⑤ 정책 — 정규화·중복 제거·제어 문자 거부·rev 충돌·손상 파일 보존', async () => {
+  // v2.710: mock 모드 + 파일 없음이면 데모 정책이다(demo2710 ④) — '파일 없음 = 빈 정책' 은 실데이터 모드의 계약이라 live 로 본다.
+  const { setDataSource } = await import('../src/runtime-settings.js');
+  setDataSource('live');
+  try { _resetTagPolicy(); assert.deepEqual(loadTagPolicy().requiredCategories, []); } finally { setDataSource('mock'); _resetTagPolicy(); }
   const n = normalizePolicy({ requiredCategories: [' Env ', 'env', 'a\u0001b', ''], corpCategory: 'Corp' });
   assert.deepEqual(n.policy.requiredCategories, ['Env']); assert.equal(n.invalid.length, 2);
   const bad = saveTagPolicy({ requiredCategories: ['a\u0001b'] }, 'u');

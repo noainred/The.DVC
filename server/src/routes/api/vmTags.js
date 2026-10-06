@@ -39,7 +39,7 @@ export function registerVmTags(api) {
       const vcs = scopedVcs(req, snap);
       const ids = new Set(vcs.map((v) => v.id));
       const r = analyzeTags(vcs, (snap.vms || []).filter((v) => ids.has(v.vcenterId)), pol, { q: qStr(req.query.q, 128) });
-      return { ...r, policyRev: pol.rev, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
+      return { ...r, policyRev: pol.rev, policyDemo: pol.demo === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
         status: req.user?.role === 'admin' && !scopedVcenterIds(req.user, snap) ? tagInvStatus() : null };
     }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}` });
   });

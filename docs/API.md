@@ -918,16 +918,16 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/relaytopo/import` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/relaytopo.js:83](../server/src/routes/api/relaytopo.js#L83) |
 | GET | `/tools/relaytopo/render/:dc` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaytopo.js:114](../server/src/routes/api/relaytopo.js#L114) |
 | POST | `/tools/relaytopo/test-ssh` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaytopo.js:139](../server/src/routes/api/relaytopo.js#L139) |
-| GET | `/tools/report/alerts` | 권한 `tools` | [server/src/routes/api/reports.js:116](../server/src/routes/api/reports.js#L116) |
-| GET | `/tools/report/capacity` | 권한 `tools` | [server/src/routes/api/reports.js:107](../server/src/routes/api/reports.js#L107) |
-| GET | `/tools/report/certs` | 권한 `tools` | [server/src/routes/api/reports.js:88](../server/src/routes/api/reports.js#L88) |
-| GET | `/tools/report/changes` | 권한 `tools` | [server/src/routes/api/reports.js:139](../server/src/routes/api/reports.js#L139) |
-| GET | `/tools/report/compliance` | 권한 `tools` | [server/src/routes/api/reports.js:132](../server/src/routes/api/reports.js#L132) |
-| GET | `/tools/report/health` | 권한 `tools` | [server/src/routes/api/reports.js:48](../server/src/routes/api/reports.js#L48) |
-| GET | `/tools/report/rightsizing` | 권한 `tools` | [server/src/routes/api/reports.js:93](../server/src/routes/api/reports.js#L93) |
-| GET | `/tools/report/snapshot-age` | 권한 `tools` | [server/src/routes/api/reports.js:58](../server/src/routes/api/reports.js#L58) |
-| GET | `/tools/report/unprotected` | 권한 `tools` | [server/src/routes/api/reports.js:167](../server/src/routes/api/reports.js#L167) |
-| GET | `/tools/report/zombies` | 권한 `tools` | [server/src/routes/api/reports.js:82](../server/src/routes/api/reports.js#L82) |
+| GET | `/tools/report/alerts` | 권한 `tools` | [server/src/routes/api/reports.js:143](../server/src/routes/api/reports.js#L143) |
+| GET | `/tools/report/capacity` | 권한 `tools` | [server/src/routes/api/reports.js:131](../server/src/routes/api/reports.js#L131) |
+| GET | `/tools/report/certs` | 권한 `tools` | [server/src/routes/api/reports.js:112](../server/src/routes/api/reports.js#L112) |
+| GET | `/tools/report/changes` | 권한 `tools` | [server/src/routes/api/reports.js:166](../server/src/routes/api/reports.js#L166) |
+| GET | `/tools/report/compliance` | 권한 `tools` | [server/src/routes/api/reports.js:159](../server/src/routes/api/reports.js#L159) |
+| GET | `/tools/report/health` | 권한 `tools` | [server/src/routes/api/reports.js:72](../server/src/routes/api/reports.js#L72) |
+| GET | `/tools/report/rightsizing` | 권한 `tools` | [server/src/routes/api/reports.js:117](../server/src/routes/api/reports.js#L117) |
+| GET | `/tools/report/snapshot-age` | 권한 `tools` | [server/src/routes/api/reports.js:82](../server/src/routes/api/reports.js#L82) |
+| GET | `/tools/report/unprotected` | 권한 `tools` | [server/src/routes/api/reports.js:194](../server/src/routes/api/reports.js#L194) |
+| GET | `/tools/report/zombies` | 권한 `tools` | [server/src/routes/api/reports.js:106](../server/src/routes/api/reports.js#L106) |
 | GET | `/tools/rightsize` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1069](../server/src/routes/api/toolsCapacity.js#L1069) |
 | GET | `/tools/rma` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/rma.js:35](../server/src/routes/api/rma.js#L35) |
 | PUT | `/tools/rma/agents/:agent/access` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/rma.js:92](../server/src/routes/api/rma.js#L92) |

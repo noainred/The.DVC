@@ -4898,6 +4898,12 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (**mock vCenter 이고 할당이 없을 때만** — 수집 엣지의 DataCenter 우선. ⚠ 데모 엣지 등록이 'Seoul' 같은 DataCenter 를 자동으로 만들므로 'DataCenter 목록이
       비어 있을 때만' 이라는 v2.708 조건은 한 번도 참이 아니었다) · 데모 엣지는 파트 장애 보고(장비 0대)를 틱마다 싣는다 · 화면이 저장 설정으로 '꺼짐' 을
       말하는 곳(bm-usage `emptyDiag`·corp-usage `collectOn`)은 데모를 먼저 본다. ⚠ 조사 스크립트는 **기동 직후 몇 분 동안 빈 화면이 정상**이다(첫 수집 전) — 원인을 단정하기 전에 API 로 다시 볼 것.
+    · **v2.710 3차 점검**(상단 탭 11 · 설정 51 · 특수 기능 100 전수 — 오류·4xx·넘침 0): ⚠⚠ **제품 결함 하나를 찾았다** — `/tools/report/capacity` 가
+      async `forecastCapacity` 를 `await` 없이 펼쳐 v2.537 부터 **모든 모드에서** 리포트가 비었다(`config`·`datastores` 없이 `{listLimit…}` 만).
+      **async 로 바꾼 함수는 호출부 전수를 grep 할 것** — 일회성 스윕(`export async function` 이름 × `await` 없는 `= 이름(`)으로 저장소 전체에서 이 한 곳뿐이었다.
+      데모 보강: 로그 폴러 첫 수집 91일(`MOCK_FIRST_DAYS` — 가용성 90일 보기) · iDRAC 스캔 로그(`seedIdracScanLogIfEmpty` — 과거 시각은 이 경로만, 비었을 때만) ·
+      VM DNS 변경 이력(`mock/demo/vmdns.js` — 바뀐 뒤 = 지금 값, 첫 관측을 변경 이전으로 당긴다) · 태그 정책(파일 없음 + mock → `demo:true` 정책, 저장하면 그 값) ·
+      용량 리포트 합성 추세(`withDemoForecast` — 실제 추세가 0개일 때만, R² null). ⚠ 합성 함수에서도 `Number(null) === 0` 을 밟았다(자체 테스트가 잡았다 — `numOrNull`).
   - ⚠⚠ **v2.706 — 운영 점검 묶음(C5·C4·C2·C3). 새 수집은 '실시간 통계 최근 창' 하나뿐이고, 나머지는 이미 받는 이벤트·호스트 캐시에 얹었다**
     (`vmlife/analyze.js` · `hostcfg/reboots.js` · `contention/{parse,cache,collect,analyze}.js` + 라우트 `vmLifecycle.js`·`contention.js`·`hostHygiene.js /reboots` +
     웹 `VmLifecycleTool.jsx`·`ContentionTool.jsx`·`HostHygieneTool RebootPanel`·`EntityDetail PerfcSection`. 회귀 `server/test/ops2706.test.js`(변이 8/8) + 웹 `views/ops2706.test.js`·`hostCfgText.test.js`):

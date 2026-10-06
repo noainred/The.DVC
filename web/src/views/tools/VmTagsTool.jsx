@@ -106,6 +106,7 @@ export default function VmTagsTool({ scope }) {
       {data.scan?.enabled === false && <div className="banner" style={{ marginBottom: 8 }}>태그 수집이 꺼져 있습니다(TAG_SCAN=false).</div>}
       {cov && <div className="banner" style={{ marginBottom: 8 }}>{cov}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
+      {data.policyDemo && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>데모 모드 — 저장된 정책이 없어 데모 정책(필수: Environment · Owner-Team · Corp, 법인 카테고리: Corp)으로 판정했습니다. 정책을 저장하면 그 값이 쓰입니다.</div>}
 
       {isAdmin && <PolicyEditor policy={data.policy} rev={data.policyRev} categories={cats} onSaved={() => setNonce((n) => n + 1)} />}
 
