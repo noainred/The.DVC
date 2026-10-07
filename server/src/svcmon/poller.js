@@ -19,6 +19,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { listTargets, storeRevision } from './store.js';
 import { runBatch, poolStats } from './pool.js';
 import { appendResult, logStats } from './csvlog.js';
+import { ensureSvcmonDemo, isSvcmonDemoTarget, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
 // v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
@@ -161,6 +162,7 @@ async function sweep(force = false) {
   running = true;
   const t0 = Date.now();
   try {
+    await ensureSvcmonDemo().catch((e) => console.warn(`[svcmon] 데모 대상 등록 실패: ${e?.message || e}`));
     rebuildIndex();
     const now = Date.now();
     // 커서에서 시작해 **원형으로** 훑는다 — 0번부터 훑으면 상한을 넘는 순간 뒤쪽이 굶는다.
@@ -195,7 +197,12 @@ async function sweep(force = false) {
     // 만기를 먼저 밀어 둔다 — 실행이 오래 걸려도 다음 틱에서 중복 선정되지 않게.
     for (const { test } of due) nextDue.set(test.id, now + test.intervalSec * 1000);
 
-    const out = await runBatch(due.map(({ test, host }) => ({ test, host })));
+    // v2.716: 데모(mock) 대상은 네트워크에 나가지 않고 합성 결과를 쓴다 — 사람이 등록한 대상은 예전처럼 실제로 점검한다.
+    const live = due.filter(({ target }) => !isSvcmonDemoTarget(target));
+    const out = live.length ? await runBatch(live.map(({ test, host }) => ({ test, host }))) : [];
+    for (const { test, host, target } of due) {
+      if (isSvcmonDemoTarget(target)) out.push({ testId: test.id, ...demoSvcmonResult(test, host) });
+    }
     const byId = new Map(out.map((r) => [r.testId, r]));
     const ts = Date.now();
     // 결과 반영은 수천 건이 한꺼번에 몰린다 — 통째로 돌리면 이 동기 루프가 이벤트 루프를

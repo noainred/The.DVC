@@ -7,6 +7,8 @@
  * Values drift slightly on every poll to make the live dashboard feel real.
  */
 
+import { mockServiceTag } from './serviceTag.js';
+
 /**
  * mock 데이터 식별(v2.443, 사용자 신고 '신규 배포 엣지가 live 인데 east us 목업이 올라옴').
  *
@@ -552,6 +554,9 @@ export function generateSnapshot() {
         version: ESXI_VERSIONS[(h.idx + site.id.length) % ESXI_VERSIONS.length],
         vendor: HW[(h.idx + site.id.length) % HW.length].vendor,
         model: HW[(h.idx + site.id.length) % HW.length].model,
+        // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
+        //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
+        serviceTag: mockServiceTag(`${site.id}|${h.name}`),
         hbas: mkHbas(h.idx),
         gpus: mkGpus(h.idx, site),
         // approximate host power draw (W): idle baseline + per-core + load-dependent
@@ -601,9 +606,11 @@ export function generateSnapshot() {
       const powered = vm.baseOn && !hostDown;
       // v2.711: 기본 공식은 CPU 15~75% · 메모리 25~80% 만 나와 라이트사이징 '유휴'(CPU<5%·MEM<20%)와 '과소'(>85%/>90%)가
       //   데모에서 영원히 0건이었다. 일부 VM 에 결정적 프로필을 준다(약 2.7% 유휴 · 2.4% 과부하).
-      const profile = vm.idx % 37 === 5 ? 'idle' : vm.idx % 41 === 7 ? 'hot' : '';
+      // v2.716: 'lean'(CPU 평균 8~16%) — 라이트사이징 '과대할당'(vCPU≥2 · CPU 평균<20%)이 데모에서 0건이었다(기본 공식 평균 ≈ 53%).
+      const profile = vm.idx % 37 === 5 ? 'idle' : vm.idx % 41 === 7 ? 'hot' : vm.idx % 23 === 4 ? 'lean' : '';
       const wave = (k, d) => Math.abs(Math.sin((vm.idx + tick) / d)) * k;
       const cpuUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(1 + wave(3, 7)) : profile === 'hot' ? Math.round(88 + wave(9, 5))
+        : profile === 'lean' ? Math.round(8 + wave(8, 6))
         : Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100));
       const memUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(8 + wave(10, 9)) : profile === 'hot' ? Math.round(91 + wave(6, 6))
         : Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100));
@@ -629,10 +636,11 @@ export function generateSnapshot() {
         dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
-        toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
+        toolsStatus: powered ? (vm.idx % 19 === 3 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
         // 버전/패치 준수 리포트용 — 실환경 SOAP의 guest.toolsVersionStatus2와 동일한 값 집합.
-        toolsVersionStatus: vm.idx % 59 === 0 ? 'guestToolsNotInstalled' : vm.idx % 17 === 0 ? 'guestToolsNeedUpgrade' : vm.idx % 11 === 0 ? 'guestToolsUnmanaged' : 'guestToolsCurrent',
+        // v2.716: '업그레이드 필요' 를 idx%17(=템플릿 — 리포트가 빼는 집합)에서 떼었다 — 예전엔 데모에서 항상 0대였다.
+        toolsVersionStatus: vm.idx % 59 === 0 ? 'guestToolsNotInstalled' : vm.idx % 19 === 3 ? 'guestToolsNeedUpgrade' : vm.idx % 11 === 0 ? 'guestToolsUnmanaged' : 'guestToolsCurrent',
         hwVersion: `vmx-${[19, 17, 15, 13, 10][vm.idx % 5]}`,
         // 좀비 리포트용 — 소수(약 2%)는 고아/접근불가 상태.
         connectionState: vm.idx % 53 === 0 ? 'orphaned' : vm.idx % 47 === 0 ? 'inaccessible' : 'connected',

@@ -61,7 +61,7 @@ export function attachSshGateway(server) {
       // OTP 등록 전 세션(부트스트랩 비밀번호 로그인)은 등록 외 아무 것도 할 수 없다 — HTTP는
       // requireEnrolled 가 막지만 WS 업그레이드는 그 미들웨어를 타지 않으므로 여기서 직접 막는다
       // (누락 시 미등록 관리자가 내부 서버로 SSH 터널을 개통할 수 있었다).
-      if (user.mustEnrollOtp) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
+      if (user.mustEnrollOtp || user.demoGuest) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
       // 기능 권한 매트릭스로 검사 — admin 은 항상 통과, 그 외는 'remote.access' 보유 시만.
       if (!userHasPermission(user, 'remote.access')) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }

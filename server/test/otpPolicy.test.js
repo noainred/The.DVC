@@ -8,6 +8,9 @@ import * as totp from '../src/auth/totp.js';
 // auth.js 는 import 시점의 CONFIG_DIR/DEFAULT_ADMIN_PASSWORD 를 사용 → 격리 후 로드.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'otp-policy-test-'));
 process.env.CONFIG_DIR = TMP;
+// v2.716: mock 모드의 데모 계정은 요청 문맥이 admin + demoGuest 다(auth/demoGuest.js — demoGuest2716.test.js 가 확인).
+//   이 파일은 live 의 viewer 계약을 고정한다.
+process.env.DATA_SOURCE = 'live';
 process.env.DEFAULT_ADMIN_PASSWORD = 'bootstrap-pass-1';
 
 const auth = await import('../src/auth/auth.js?otp-policy');

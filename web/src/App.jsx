@@ -76,7 +76,7 @@ const TABS = [
   // ⚠ 'insights' 카드는 다른 화면(운영 인사이트)이다).
   // 옛 주소 #/insights[/<패널>] 는 hooks/hashTab.js movedTabHash 가 새 주소로 바꾼다.
   { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true, perm: 'settings' },
-  { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade' },
+  { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade', noDemoGuest: true },
 ];
 
 // 기능 권한 보유 여부 — admin 은 항상 전체. permissions 배열이 없으면(구버전/인증 비활성) 통과.
@@ -216,7 +216,7 @@ function Portal({ user, onLogout }) {
   const isOwner = isSettingsOwner(user);
   const isAllowed = (id) => {
     const t = TABS.find((x) => x.id === id);
-    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm)
+    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && !(t.noDemoGuest && user.demoGuest) && hasPerm(user, t.perm)
       && (!t.toolKey || toolAllowed(t.toolKey))); // 특수 기능에서 승격한 탭은 도구별 접근(toolsDenied)도 유지
   };
   // 특수 기능으로 옮긴 옛 탭 주소(#/insights …)를 새 주소로 바꾼다 — 기록을 남기지 않고 교체(뒤로가기 루프 방지).
@@ -362,6 +362,7 @@ function Portal({ user, onLogout }) {
   const visibleTabs = TABS.filter((t) => {
     if (t.adminOnly && user.role !== 'admin') return false;
     if (t.ownerOnly && !isOwner) return false; // '설정'은 소유 계정만(설정 › 세션 보안에서 지정)
+    if (t.noDemoGuest && user.demoGuest) return false; // v2.716: 데모 계정(mock)은 업그레이드 화면을 쓰지 않는다(서버도 막는다)
     if (t.feature && !health?.features?.[t.feature]) return false;
     if (!hasPerm(user, t.perm)) return false;   // 기능 권한 매트릭스로 탭 노출 제어
     if (t.toolKey && !toolAllowed(t.toolKey)) return false; // 승격 탭의 도구별 접근(toolsDenied) 보존
@@ -665,7 +666,7 @@ function Portal({ user, onLogout }) {
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div className="user-meta">
             <div className="user-name">{user.name}</div>
-            <div className="user-role muted">{user.superAdmin ? 'super_admin' : user.role}</div>
+            <div className="user-role muted">{user.demoGuest ? '데모 계정' : user.superAdmin ? 'super_admin' : user.role}</div>
           </div>
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>

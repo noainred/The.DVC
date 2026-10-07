@@ -11,6 +11,14 @@ import { userHasPermission } from './permissions.js';
 import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
 import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
+import { getDataSource } from '../runtime-settings.js';
+import { denyDemoGuest } from './demoGuest.js';
+
+/** v2.716: 내장 데모 계정이 mock 모드에서 쓰일 때 — 요청 문맥은 admin + demoGuest(auth/demoGuest.js 가 요청을 먼저 거른다). */
+function demoGuestOf(u) {
+  if (!u?.demo) return false;
+  try { return getDataSource() === 'mock'; } catch { return false; }
+}
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -363,8 +371,9 @@ export function authenticateLocal(username, credential) {
     username: user.username,
     name: user.name || user.username,
     // v2.643: 요청 문맥의 역할은 super_admin → 'admin' 으로 접고 superAdmin 을 더한다(auth/roles.js 머리말).
-    role: authzRole(role),
+    role: demoGuestOf(user) ? 'admin' : authzRole(role),
     ...(role === SUPER_ADMIN ? { superAdmin: true } : {}),
+    ...(demoGuestOf(user) ? { demoGuest: true } : {}),
     source: 'local',
     totpEnabled: !!user.totpEnabled,
     // OTP 전용 강제 대상이 아직 OTP 미등록 → 이번 세션은 'OTP 등록 전용'.
@@ -1047,7 +1056,8 @@ export function resolveTokenUser(token) {
       // v2.643: super_admin 은 요청 문맥에서 'admin' + superAdmin:true(auth/roles.js 머리말 — 기존 admin 판정을 전부 그대로 통과).
       // v2.680(감사 C-03): 로컬 계정 토큰 표지 — AD 세션이 같은 이름의 로컬 계정에 본인 작업(OTP 등록)을 하지 못하게 한다.
       authSrc: 'local',
-      username: payload.sub, role: authzRole(role), ...(role === SUPER_ADMIN ? { superAdmin: true } : {}), name: payload.name, scope: normalizedScope(u),
+      username: payload.sub, role: demoGuestOf(u) ? 'admin' : authzRole(role), ...(role === SUPER_ADMIN ? { superAdmin: true } : {}),
+      ...(demoGuestOf(u) ? { demoGuest: true } : {}), name: payload.name, scope: normalizedScope(u),
       mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
     };
   }
@@ -1070,6 +1080,7 @@ export function authMiddleware(req, res, next) {
   const user = resolveTokenUser(token);
   if (!user) return res.status(401).json({ error: 'unauthorized' });
   req.user = user;
+  if (denyDemoGuest(req, res)) return; // v2.716: 데모 계정은 조회 + 안전한 실행만(auth/demoGuest.js)
   next();
 }
 
