@@ -20,6 +20,7 @@
  * ⚠ 계정명은 개인정보성이다. 사용자 선택(2026-09-16)대로 **목록 기본 표시는 가림**이고
  *   `settings.showNamesInList` 가 정한다 — 화면이 그 사실을 밝힌다.
  */
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { isAdminReq, maskActivityEvents, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
@@ -235,7 +236,7 @@ api.get('/tools/horizon-sessions/activity', requirePerm('tools'), (req, res) => 
 
 api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, res) => {
   if (denyScoped(req, res)) return;   // v2.605 AUTHZ2605-02: 조회가 전부 403 인데 실행·설정 변경만 열려 있었다
-  const r = await runHzSessionsNow('manual');
+  const r = await runHzSessionsNow('manual', { demoOnly: isDemoGuest(req.user) }); // v2.720: 데모 계정은 데모 서버만
   logAudit({
     user: req.user?.username, action: 'horizon.sessions.collect', ip: req.ip || '',
     detail: JSON.stringify({ ok: r.ok, servers: r.servers ?? null, skipped: !!r.skipped }).slice(0, 300),

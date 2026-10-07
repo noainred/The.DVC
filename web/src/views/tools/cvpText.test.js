@@ -506,3 +506,23 @@ describe('totalsFromDevices · filterKpiNote (v2.652)', () => {
     expect(s).not.toMatch(/`/);
   });
 });
+
+describe('totalsFromDevices — 확인 불가 장비 (v2.720 감사 B1-02)', () => {
+  it('서버가 unconfirmed 로 판정한 장비의 남은 값은 합산하지 않고 사유별로 센다', () => {
+    const t = totalsFromDevices([
+      { streaming: true, parts: { fault: 1, warn: 0, unknown: 0 }, bgp: { down: 1 }, ports: { down: 3 }, cpuPct: 95, memPct: 50, unconfirmed: null, partsStale: false },
+      { streaming: true, parts: { fault: 2 }, bgp: { down: 4 }, ports: { down: 9 }, cpuPct: 99, memPct: 99, unconfirmed: 'stale' },
+      { streaming: false, parts: { fault: 5 }, bgp: null, ports: null, unconfirmed: 'not-streaming' },
+      { streaming: true, parts: { fault: 7 }, bgp: { down: 0 }, ports: { down: 0 }, cpuPct: 10, partsStale: true },
+    ]);
+    expect(t).toMatchObject({ devices: 4, unconfirmed: 2, partsStale: 1, partsFault: 1, bgpDown: 1, portsDown: 3, cpuHigh: 1, streaming: 2 });
+    expect(t.unconfirmedBy).toMatchObject({ stale: 1, 'not-streaming': 1 });
+  });
+  it('unconfirmedNote — 뺀 대수를 말하고, 없으면 null · 백틱 없음', () => {
+    const s = T.unconfirmedNote({ unconfirmed: 3, unconfirmedBy: { stale: 2, 'telemetry-failed': 1 }, partsStale: 1 });
+    expect(s).toMatch(/3대/); expect(s).toMatch(/오래됨 2대/); expect(s).toMatch(/부품 목록이 오래된 장비 1대/);
+    expect(s).not.toMatch(/`/);
+    expect(T.unconfirmedNote({ unconfirmed: 0, partsStale: 0 })).toBeNull();
+    expect(T.unconfirmedNote(null)).toBeNull();
+  });
+});

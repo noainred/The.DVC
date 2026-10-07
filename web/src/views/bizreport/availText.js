@@ -41,3 +41,14 @@ export function coverageNote(data) {
   return parts.length ? `${parts.join(' · ')}.` : null;
 }
 export const METHOD_NOTE = '정지 시간은 전원 끔·일시 정지부터 다음 전원 켬까지입니다. 게스트 재부팅·재설정·HA 재시작은 정지 시간을 이벤트로 알 수 없어 횟수로만 셉니다. 사람이 끈 정지(사용자 기록이 있는 전원 끔)가 계획 정지인지는 포탈이 알 수 없어, 그것을 뺀 가동률을 함께 보여 줍니다.';
+/**
+ * v2.720(감사 R2-03): 기간 중 생성된 VM 의 행 표지. 서버는 v2.719 B1-03 부터 첫 전원 기록이 '켬' 이면 첫 켬부터 잰다
+ * (생성~첫 켬은 서비스 시작 전). '생성 뒤부터 잼' 이라고만 적으면 실제 측정 구간과 다른 기준을 말한다 — 서버가 준
+ * 측정 시작 시각(windowFrom)을 함께 적는다. 시각을 모르면 시각 없이 말한다(지어내지 않는다).
+ */
+export function bornWindowText(row, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
+  if (!row?.bornInWindow) return null;
+  const from = Number(row.windowFrom);
+  const base = '기간 중 생성 — 생성 이후만 잼(첫 기록이 켬이면 그 시각부터)';
+  return Number.isFinite(from) && from > 0 ? `기간 중 생성 — ${fmt(from)} 부터 잼` : base;
+}

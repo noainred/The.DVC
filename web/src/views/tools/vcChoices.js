@@ -7,20 +7,33 @@
  *
  * 규칙: '전체'(vcenterId 없음) 응답의 목록이 기준이다(사라진 vCenter 도 여기서 빠진다).
  * vCenter 를 고른 응답은 직전 목록을 지우지 않고, 같은 id 항목만 새 값(개수)으로 바꾼다.
- * 직전 목록이 비어 있으면(범위가 미리 골라진 채 처음 연 경우) 응답 목록을 그대로 쓴다.
+ * 직전 목록이 '전체' 응답에서 온 것이 아니면(범위가 미리 골라진 채 처음 연 경우 등) 응답 목록을 그대로 쓴다(v2.720 R2-04).
  */
 export function vcChoiceList(list, idKey = 'vcenterId') {
   return Array.isArray(list) ? list.filter((v) => v && typeof v === 'object' && v[idKey]) : [];
 }
 
+// v2.720(감사 R2-04): '전체' 응답에서 온 목록(또는 그것에서 병합한 목록)만 기준으로 표시한다. 범위가 미리 골라진 채
+//   도구를 열면 '전체' 응답이 한 번도 오지 않는데, 그때 방문한 vCenter 를 모아 붙이면 일부가 전부처럼 보였다.
+//   표지가 없는 직전 목록(고른 응답에서 온 것)은 병합하지 않고 응답 목록만 쓴다. 배열 상태(useState)에 그대로 담기므로
+//   배열 자체에 속성을 붙이지 않고 WeakSet 으로 기억한다.
+const FULL_LISTS = new WeakSet();
+
+/** 이 목록이 '전체' 응답에서 온 기준 목록인가. */
+export function isFullVcChoices(list) {
+  return Array.isArray(list) && FULL_LISTS.has(list);
+}
+
 export function mergeVcChoices(prev, list, requestedVcId, idKey = 'vcenterId') {
   const cur = vcChoiceList(list, idKey);
+  if (!requestedVcId) { FULL_LISTS.add(cur); return cur; }
+  if (!isFullVcChoices(prev)) return cur;
   const before = vcChoiceList(prev, idKey);
-  if (!requestedVcId || before.length === 0) return cur;
   const byId = new Map(cur.map((v) => [v[idKey], v]));
   const out = before.map((v) => byId.get(v[idKey]) || v);
   const seen = new Set(out.map((v) => v[idKey]));
   for (const v of cur) if (!seen.has(v[idKey])) out.push(v);
+  FULL_LISTS.add(out);
   return out;
 }
 

@@ -22,6 +22,7 @@ import { credFingerprintParts } from '../util/credFingerprint.js';
 import { classifyFailure, makeTracer } from './testDiag.js';
 import { precheckTarget } from './precheck.js';
 import { isMockMode } from '../mock/demo/flags.js';   // v2.708 데모(mock) — live 동작은 바꾸지 않는다
+import { DEMO_ONLY_REASON } from '../auth/demoGuest.js'; // v2.720(감사 B2-01)
 import { isSanDemoId, sanDemoLayoutFor, buildSanDemoSnapshot, ensureSanDemo, sanDemoDone } from '../mock/demo/sanswitch.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
@@ -160,7 +161,9 @@ async function collectOne(dev, { periodic = false } = {}) {
  * @param {{manual?: boolean}} [opts] manual — 관리자 '전체 수집'. v2.590: 수동 실행은 인증 실패 정지 장비도
  *   1회 시도한다(고쳤는지 확인할 길을 없애지 않는다). 타이머는 인자 없이 부른다(= 주기 수집).
  */
-export async function pollSanSwitchOnce({ manual = false } = {}) {
+/*  v2.720(감사 R1-03·B2-01): `demoOnly` — 데모 계정의 수동 수집은 데모(mock-) 장비만 돈다(mock 모드에서도 사람이 등록한
+ *   스위치는 v2.719 부터 실제로 SSH 수집되므로, 데모 계정이 누르면 실장비 로그인이 된다). 뺀 대수는 skippedNonDemo 로 밝힌다. */
+export async function pollSanSwitchOnce({ manual = false, demoOnly = false } = {}) {
   if (_busy) return { ok: false, reason: '이전 수집 진행 중(겹침 방지)' };
   _busy = true;
   const t0 = Date.now();
@@ -168,22 +171,29 @@ export async function pollSanSwitchOnce({ manual = false } = {}) {
   try {
     // v2.708: mock 이면 데모 시드(비어 있을 때만), live 는 데모 장비(mock-san-*)를 건너뛴다 — 지어낸 주소로 접속하지 않게.
     if (isMockMode()) await ensureSanSwitchDemo().catch((e) => console.warn(`[sanswitch] 데모 시드 실패: ${e.message}`));
-    const devices = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
+    const allDevs = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
+    const devices = demoOnly ? allDevs.filter((d) => isSanDemoId(d.id)) : allDevs;
+    const skippedNonDemo = allDevs.length - devices.length;
     // v2.689(C-06): 등록부에서 빠진 장비의 명령 조사 캐시를 정리한다(등록부를 못 읽은 주기는 건너뛴다 — 빈 목록이 전부 삭제가 되지 않게).
-    if (!registryLoadError()) fosSsh.pruneCaps(new Set(devices.map((d) => fosSsh.capsKeyOf(d))));
+    if (!registryLoadError()) fosSsh.pruneCaps(new Set(allDevs.map((d) => fosSsh.capsKeyOf(d))));
     await pool(devices, CONCURRENCY, async (d) => {
       const r = await collectOne(d, { periodic: !manual });
       if (r === null) authStopped++; else if (r) collected++; else failed++;
     });
-    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length };
+    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
     return { ok: true, ..._last };
   } finally { _busy = false; }
 }
 
-/** 단건 즉시 수집(중앙 UI '수집' 버튼 — 중앙 직접 수집 장비용). */
-export async function collectDeviceNow(id) {
+/**
+ * 단건 즉시 수집(중앙 UI '수집' 버튼 — 중앙 직접 수집 장비용).
+ * v2.720(감사 B2-01): `demoOnly` 면 데모(mock-) 장비가 아닐 때 접속하지 않고 `{skipped, demoOnly, reason}` 을 돌려준다(참 값 —
+ *   호출부는 false(수집 중)와 구분해 읽는다).
+ */
+export async function collectDeviceNow(id, { demoOnly = false } = {}) {
   const dev = devicesForThisNode().find((d) => d.id === id) || getDeviceWithSecret(id);
   if (!dev) throw new Error('이 노드가 수집하는 장비가 아닙니다.');
+  if (demoOnly && !isSanDemoId(dev.id)) return { ok: false, skipped: true, demoOnly: true, reason: DEMO_ONLY_REASON };
   if (!isMockMode() && isSanDemoId(dev.id)) throw new Error('데모(mock) 장비는 live 모드에서 수집하지 않습니다 — 지우거나 데모 모드에서 보세요.');
   // 폴러와 가드를 공유한다(CLAUDE.md '수동 실행 API 도 같은 가드') — 같은 스위치에 SSH 세션이 겹치면
   // in-flight 상태가 먼저 끝난 쪽에 지워지고 처리량 델타 간격이 흐트러진다.

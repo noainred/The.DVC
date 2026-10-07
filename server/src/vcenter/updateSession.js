@@ -26,6 +26,15 @@ const accessKey = (vc) => `${vc?.host || ''}|${credHashOf(vc)}`;
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const IDLE_MS = 15 * 60_000;
 const FAIL_BACKOFF_MS = 30 * 60_000;
+// v2.720(감사 S1-02): 인증 외 실패(시한·SOAP fault·응답 형식·재조회 실패)도 연속이면 쉰다 — 예전에는 failUntil 이 로그인
+//   거부에만 붙어, 지속 실패하면 30초 주기마다 새 로그인·수집기·필터·첫 전체 enter 를 다시 보내고(고RTT 에서 폴백 전체 조회의
+//   데드라인까지 먹었다) 다시 실패했다. 2회 연속부터 5분 → 10분 → … 30분(상한). 수집 중단(abort)은 세지 않는다.
+const SOFT_FAIL_AFTER = 2;
+const SOFT_BACKOFF_BASE_MS = 5 * 60_000;
+export function softBackoffMs(failCount) {
+  if (!(failCount >= SOFT_FAIL_AFTER)) return 0;
+  return Math.min(FAIL_BACKOFF_MS, SOFT_BACKOFF_BASE_MS * 2 ** (failCount - SOFT_FAIL_AFTER));
+}
 
 /** @type {Map<string, any>} vc.id → 세션 상태 */
 const sessions = new Map();
@@ -127,16 +136,20 @@ export async function inventoryViaUpdates(vc, types, specs, { makeClient, signal
   let st = sessions.get(vc.id);
   if (st?.failUntil && now < st.failUntil && st.credHash === accessKey(vc)) throw new Error(st.lastError || '증분 수집 세션을 잠시 쉽니다');
   if (st?.busy) throw new Error('증분 수집 세션이 사용 중입니다');
+  // v2.720(S1-02): 직전 실패 기록에서 연속 실패를 이어 센다(아래에서 실패 기록을 지우기 전에 읽는다). 접속처·계정이 바뀌면 처음부터.
+  const prevFailCount = st && st.credHash === accessKey(vc) ? (st.failCount || 0) : 0;
   const key = specKeyOf(types, specs);
   if (st && (!st.client || st.specKey !== key || st.credHash !== accessKey(vc) || now - st.lastFullAt > config.vcWaitUpdatesFullMs)) {
     sessions.delete(vc.id); await destroy(st); st = null;
   }
   if (!st) {
+    const failCount = prevFailCount;
     try { st = await openSession(vc, types, specs, now, makeClient); }
     catch (err) {
-      sessions.set(vc.id, { failUntil: now + FAIL_BACKOFF_MS, lastError: String(err?.message || err).slice(0, 300), credHash: accessKey(vc), lastUsed: now });
+      sessions.set(vc.id, { failUntil: now + FAIL_BACKOFF_MS, lastError: String(err?.message || err).slice(0, 300), credHash: accessKey(vc), lastUsed: now, failCount: failCount + 1 });
       throw err;
     }
+    st.failCount = failCount;
     sessions.set(vc.id, st);
   }
   st.busy = true; st.lastUsed = now; st.client.signal = signal;
@@ -175,12 +188,15 @@ export async function inventoryViaUpdates(vc, types, specs, { makeClient, signal
       for (const r of refs) if (!seen.has(r)) st.objs.delete(r);   // 그 사이 사라진 객체
     }
     st.stats = { at: now, mode: initial ? 'initial' : 'incremental', changed, refetched, objects: st.objs.size, pages };
-    st.lastError = null;
+    st.lastError = null; st.failCount = 0;
     return [...st.objs.values()].map((o) => ({ type: o.type, ref: o.ref, props: { ...o.props } }));
   } catch (err) {
     sessions.delete(vc.id);
-    const e = { lastError: String(err?.message || err).slice(0, 300), lastUsed: now, credHash: st.credHash };
+    const aborted = !!signal?.aborted;   // 수집 데드라인으로 끊겼다 — 이 세션의 실패로 세지 않는다
+    const failCount = (st.failCount || 0) + (aborted ? 0 : 1);
+    const e = { lastError: String(err?.message || err).slice(0, 300), lastUsed: now, credHash: st.credHash, failCount };
     if (err?.authFailed) e.failUntil = now + FAIL_BACKOFF_MS;   // 세션 로그인이 거부됐으면 쉬기
+    else if (!aborted && softBackoffMs(failCount)) e.failUntil = now + softBackoffMs(failCount);   // v2.720(S1-02)
     sessions.set(vc.id, e);
     await destroy(st);
     throw err;
@@ -194,7 +210,9 @@ export function updateSessionStatus() {
   const out = {};
   for (const [id, st] of sessions) {
     out[id] = { active: !!st.client, version: st.client ? (st.version ? 'set' : 'none') : null, objects: st.objs?.size ?? null,
-      stats: st.stats || null, lastError: st.lastError || null, failUntil: st.failUntil || null };
+      stats: st.stats || null, lastError: st.lastError || null, failUntil: st.failUntil || null,
+      // v2.720(S1-02): 연속 실패 횟수 · 다음 시도 시각(쉬는 중이 아니면 null)
+      failCount: st.failCount || 0, nextTryAt: st.failUntil || null };
   }
   return { enabled: !!config.vcWaitUpdates, sessions: out };
 }

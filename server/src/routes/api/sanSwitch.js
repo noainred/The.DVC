@@ -43,6 +43,8 @@ import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
+import { isSanDemoId } from '../../mock/demo/sanswitch.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -281,6 +283,9 @@ api.post('/tools/sanswitch/devices/:id/collect', adminOnly, fullScopeOnly, async
   try {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
+    // v2.720(감사 B2-01·R1-06): 데모 계정은 데모(mock-) 장비만 — 중앙 직접은 실제 SSH 로그인, 엣지 위임은 엣지의 실제 로그인이 된다.
+    const demoGuest = isDemoGuest(req.user);
+    if (demoGuest && !isSanDemoId(dev.id)) return res.status(403).json({ ok: false, error: 'forbidden', demoGuest: true, skipped: true, reason: DEMO_ONLY_REASON });
     if ((dev.agent || '').trim()) {
       const dup = hasPendingRequest(dev.id);
       requestCollect(dev.id, dev.agent);
@@ -289,7 +294,9 @@ api.post('/tools/sanswitch/devices/:id/collect', adminOnly, fullScopeOnly, async
         reason: `${dup ? '이미 재수집 요청이 대기 중입니다' : '재수집 요청 등록'} — 엣지 '${dev.agent}' 의 다음 설정 pull 때 즉시 수집하고 바로 push 합니다.` });
     }
     // v2.591 L1: 이미 수집 중이면 새 세션을 열지 않는다 — '됐다' 고 말하지 않고 409 로 그 사실을 알린다.
-    if (!(await collectDeviceNow(req.params.id))) return res.status(409).json({ ok: false, busy: true, reason: '이 장비는 지금 수집 중입니다 — 끝나면 결과가 표에 반영됩니다(같은 장비에 세션을 두 개 열지 않습니다).' });
+    const done = await collectDeviceNow(req.params.id, { demoOnly: demoGuest });
+    if (done?.skipped) return res.status(403).json({ ...done, error: 'forbidden', demoGuest: true });
+    if (!done) return res.status(409).json({ ok: false, busy: true, reason: '이 장비는 지금 수집 중입니다 — 끝나면 결과가 표에 반영됩니다(같은 장비에 세션을 두 개 열지 않습니다).' });
     logAudit({ user: req.user?.username, action: 'SAN 스위치 즉시 수집', target: req.params.id });
     res.json({ ok: true });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
@@ -342,9 +349,17 @@ api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, async (req, re
  * 이제 위임 엣지마다 재수집 요청을 등록하고(one-shot·TTL 15분), 응답에 '즉시 N대 / 요청 M대' 를 싣는다.
  */
 api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, async (req, res) => {
-  const devices = listDevices().filter((d) => d.enabled !== false);
+  // v2.720(감사 R1-03·B2-01·R1-06): 데모 계정은 데모(mock-) 장비만 — force 캡처(중앙)와 엣지 요청(엣지 몫 전체를 SSH 캡처) 둘 다.
+  //   엣지 요청은 엣지 단위(그 엣지 몫 전체를 캡처)라 데모 장비만 고를 수 없다 — 데모 계정은 엣지 요청을 아예 등록하지 않는다.
+  //   뺀 대수는 skippedNonDemo(비-데모 장비)·edgeSkipped(요청하지 않은 엣지 장비)로 밝힌다.
+  const demoGuest = isDemoGuest(req.user);
+  const allDevs = listDevices().filter((d) => d.enabled !== false);
+  const devices = demoGuest ? allDevs.filter((d) => isSanDemoId(d.id)) : allDevs;
+  const skippedNonDemo = allDevs.length - devices.length;
   const centralIds = devices.filter((d) => !(d.agent || '').trim()).map((d) => d.id);
-  const edgeDevices = devices.filter((d) => (d.agent || '').trim());
+  const edgeAll = devices.filter((d) => (d.agent || '').trim());
+  const edgeDevices = demoGuest ? [] : edgeAll;
+  const edgeSkipped = edgeAll.length - edgeDevices.length;
   // 엣지 단위로 요청(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다 — 장비별로 나눌 이유가 없다).
   const agents = [...new Set(edgeDevices.map((d) => String(d.agent).trim()))];
   const requested = []; const alreadyQueued = [];
@@ -354,9 +369,9 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, async (req, 
   }
   logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집',
     detail: `중앙 직접 ${centralIds.length}대 · 엣지 요청 ${requested.length}곳${alreadyQueued.length ? ` (대기중 ${alreadyQueued.length}곳)` : ''}` });
-  const result = await pollPerfOnce({ force: true });
+  const result = await pollPerfOnce({ force: true, demoOnly: demoGuest });
   res.json({
-    ok: true, result,
+    ok: true, result, ...(demoGuest ? { demoOnly: true, skippedNonDemo, edgeSkipped } : {}),
     central: centralIds.length, edgeDevices: edgeDevices.length,
     requested, alreadyQueued,
     // 엣지는 다음 설정 pull 때(≤5분) 가져가 즉시 수집·push 한다 — '지금 수집했다' 가 아니다.
@@ -702,9 +717,11 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     if (s.endpointKind !== 'array') continue;
     const k = s.datacenterId ?? '';
     if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, avgTotal: 0, maxTotal: 0, peakAvg: 0, peakTotal: 0, switches: new Set() };
+    // v2.720(감사 B1-05): 버킷이 전부 부분 합으로 비워진 계열(avgTotal null)은 0 으로 더하지 않고 따로 센다.
+    if (s.avgTotal == null) { byDc[k].unmeasured = (byDc[k].unmeasured || 0) + 1; for (const id of s.deviceIds) byDc[k].switches.add(id); continue; }
     byDc[k].storages++;
     byDc[k].avgTotal += s.avgTotal;
-    byDc[k].maxTotal += s.maxTotal;
+    byDc[k].maxTotal += s.maxTotal ?? 0;
     byDc[k].peakAvg += s.peakAvg || 0;
     byDc[k].peakTotal += s.peakTotal || 0;
     for (const id of s.deviceIds) byDc[k].switches.add(id);
@@ -822,7 +839,11 @@ api.get('/tools/sanswitch/activity', toolsPerm, fullScopeOnly, (req, res) => {
  */
 api.post('/tools/sanswitch/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
   try {
-    const all = listDevices().filter((d) => d.enabled !== false);
+    // v2.720(감사 R1-03·B2-01·R1-06): 데모 계정은 데모(mock-) 장비만 — 중앙 수집·엣지 재수집 요청 둘 다. 뺀 대수는 밝힌다.
+    const demoGuest = isDemoGuest(req.user);
+    const allDevs = listDevices().filter((d) => d.enabled !== false);
+    const all = demoGuest ? allDevs.filter((d) => isSanDemoId(d.id)) : allDevs;
+    const skippedNonDemo = allDevs.length - all.length;
     const edgeDevs = all.filter((d) => String(d.agent || '').trim());
     const central = all.length - edgeDevs.length;
     // 엣지 요청 먼저 등록 — 중앙 수집(수십 초)이 끝나기를 기다리지 않게.
@@ -831,18 +852,18 @@ api.post('/tools/sanswitch/collect-all', adminOnly, fullScopeOnly, async (req, r
       if (hasPendingRequest(d.id)) { alreadyQueued++; continue; }
       try { requestCollect(d.id, d.agent); requested++; } catch { /* 한 대 실패가 전체를 막지 않게 */ }
     }
-    const result = await pollSanSwitchOnce({ manual: true });   // { ok, collected, failed, ... } 또는 { ok:false, reason }
+    const result = await pollSanSwitchOnce({ manual: true, demoOnly: demoGuest });   // { ok, collected, failed, ... } 또는 { ok:false, reason }
     logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집',
       detail: `중앙 ${central}대 즉시(${result.ok === false ? result.reason : `성공 ${result.collected ?? 0}·실패 ${result.failed ?? 0}`})`
         + ` · 엣지 ${edgeDevs.length}대 중 요청 ${requested}(대기중 ${alreadyQueued})` });
-    res.json({ ok: true, central, edge: edgeDevs.length, requested, alreadyQueued, result });
+    res.json({ ok: true, central, edge: edgeDevs.length, requested, alreadyQueued, result, ...(demoGuest ? { demoOnly: true, skippedNonDemo } : {}) });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */
 api.post('/tools/sanswitch/poll', adminOnly, fullScopeOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집 실행' });
-  res.json(await pollSanSwitchOnce({ manual: true })); // v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
+  res.json(await pollSanSwitchOnce({ manual: true, demoOnly: isDemoGuest(req.user) })); // v2.720(감사 B2-01): SAFE_ACTIONS 밖이라 데모 계정은 미들웨어가 막지만 같은 규칙을 둔다 · v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
 });
 
 

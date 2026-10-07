@@ -27,6 +27,8 @@ import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../sto
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
+import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 B2-04)
+import { isDemoId } from '../../mock/demo/storage.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -235,11 +237,13 @@ api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
  */
 api.post('/tools/storage/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
   try {
-    const all = listDevices().filter((d) => d.enabled !== false);
+    // v2.720(감사 B2-04): 데모 계정은 데모 장비(mock-)만 — 사람이 등록한 장비에 접속하거나 엣지 재수집을 요청하지 않는다.
+    const demoOnly = isDemoGuest(req.user);
+    const all = listDevices().filter((d) => d.enabled !== false && (!demoOnly || isDemoId(d.id)));
     const edgeDevs = all.filter((d) => (d.agent || '').trim());
     const edge = edgeDevs.length;
     const central = all.length - edge;
-    const result = await pollStorageOnce(); // { ok, fail } 또는 { skipped:true }(이미 진행 중)
+    const result = await pollStorageOnce({ demoOnly }); // { ok, fail } 또는 { skipped:true }(이미 진행 중)
     // v2.582 BUG-2: 엣지 위임 장비는 '다음 주기' 로 안내만 했다 — 형제 도구(SAN 스위치 v2.516)는 재수집 요청을
     // 등록해 엣지가 다음 설정 pull 때 즉시 수집·push 한다. 같은 큐(collectRequests)를 쓰고 연타는 hasPendingRequest 가 막는다.
     let requested = 0; let alreadyQueued = 0;
@@ -262,6 +266,8 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, fullScopeOnly, async (
   try {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
+    // v2.720(감사 B2-04): 데모 계정은 데모 장비만 수집할 수 있다(사람이 등록한 장비 접속·엣지 요청 금지).
+    if (isDemoGuest(req.user) && !isDemoId(dev.id)) return res.status(403).json({ ok: false, error: 'forbidden', demoGuest: true, reason: '데모 계정은 데모 장비만 수집할 수 있습니다.' });
     if ((dev.agent || '').trim()) {
       const dup = hasPendingRequest(dev.id);
       requestCollect(dev.id, dev.agent);

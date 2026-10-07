@@ -104,7 +104,7 @@ test('④ SAN 포트 사용량: 저장 설정이 꺼진 채 데모로 도는 주
 
 test('⑤ 스토리지: 사람이 등록한 Isilon 의 영역 DB 에는 합성 행을 저장하지 않는다(데모 장비는 저장)', async () => {
   const reg = await import('../src/storage/registry.js');
-  const r = reg.saveDevice({ type: 'isilon', name: 'real-isi', host: '10.250.1.10', username: 'admin', password: 'p', collectMethod: 'api' });
+  const r = reg.saveDevice({ type: 'isilon', name: 'real-isi', host: 'real-isi.invalid', username: 'admin', password: 'p', collectMethod: 'api' });
   const id = r?.device?.id || r?.id;
   assert.ok(id && !String(id).startsWith('mock-'), JSON.stringify(r));
   const poller = await import('../src/storage/poller.js');

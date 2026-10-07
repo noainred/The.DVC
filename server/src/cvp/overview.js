@@ -19,6 +19,7 @@
  */
 import { partsSummary, bgpSummary } from './parse.js';
 import { TELEMETRY_OK, partsFresh } from './faults.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 export const UNASSIGNED_CORP = '';
 export const TOP_DEVICES_PER_CORP = 5;
@@ -191,18 +192,22 @@ export function buildCvpOverview(i = {}) {
     if (!t || typeof t !== 'object') continue;
     const corp = corpFor(t.cvpId);
     const measured = Number(t.measured) || 0; const unmeasured = Number(t.unmeasured) || 0;
-    const inB = Number(t.inBps) || 0; const outB = Number(t.outBps) || 0;
+    // v2.720(감사 B1-06): 한 방향을 하나도 못 읽었으면 그 방향은 null 이다 — 0 으로 더하지 않고 방향별로 센다.
+    const inN = numOrNull(t.inBps); const outN = numOrNull(t.outBps);
+    const inB = inN ?? 0; const outB = outN ?? 0;
     corp.traffic.portsMeasured += measured; corp.traffic.portsUnmeasured += unmeasured;
     tTotals.portsMeasured += measured; tTotals.portsUnmeasured += unmeasured;
     if (measured > 0) {
       corp.traffic.inBps += inB; corp.traffic.outBps += outB; corp.traffic.devicesMeasured++;
       tTotals.inBps += inB; tTotals.outBps += outB; tTotals.devicesMeasured++;
+      if (inN == null) { corp.traffic.inUnread = (corp.traffic.inUnread || 0) + 1; tTotals.inUnread = (tTotals.inUnread || 0) + 1; }
+      if (outN == null) { corp.traffic.outUnread = (corp.traffic.outUnread || 0) + 1; tTotals.outUnread = (tTotals.outUnread || 0) + 1; }
       if (!topBy.has(corp.corpId)) topBy.set(corp.corpId, []);
-      topBy.get(corp.corpId).push({ cvpId: t.cvpId, key: t.key, hostname: nameOf.get(devKey(t.agent, t.cvpId, t.key)) || t.key, inBps: inB, outBps: outB, ports: measured });
+      topBy.get(corp.corpId).push({ cvpId: t.cvpId, key: t.key, hostname: nameOf.get(devKey(t.agent, t.cvpId, t.key)) || t.key, inBps: inN, outBps: outN, ports: measured });
     } else if (unmeasured > 0) { corp.traffic.devicesUnmeasured++; tTotals.devicesUnmeasured++; }
   }
   for (const [cid, list] of topBy) {
-    list.sort((a, b) => (b.inBps + b.outBps) - (a.inBps + a.outBps));
+    list.sort((a, b) => ((b.inBps ?? 0) + (b.outBps ?? 0)) - ((a.inBps ?? 0) + (a.outBps ?? 0)));
     corps.get(cid).traffic.top = list.slice(0, TOP_DEVICES_PER_CORP);
   }
 

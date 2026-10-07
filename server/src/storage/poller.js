@@ -77,19 +77,25 @@ async function collectOne(dev, { periodic = false } = {}) {
 /** mock 모드 Isilon 영역 — 합성 결과를 실제 수집기와 같은 DB 경로로 저장한다(장비 접속 없음). */
 async function saveDemoAreas(dev) {
   const r = demoIsilonAreas(dev, enabledAreas(), ONEFS_AREAS.filter((a) => a.enabled === false));
-  // v2.719(감사 B2-02): 영역 DB 에는 **데모 장비(mock-)만** 저장한다 — 사람이 등록한 Isilon 의 영역 DB 에 합성 행이 실측처럼
-  //   남지 않게(v2.709 이전처럼 요약만 돌려준다). 요약에는 데모 표지가 붙지 않지만 스냅샷 자체가 mock 표지(extra.mock)를 싣는다.
-  if (!isDemoId(dev.id)) return { summary: r.summary, endpoints: r.endpoints, demoNotStored: true };
+  // v2.719(감사 B2-02)의 '사람 등록 장비면 저장 안 함' 분기는 v2.720(감사 R1-05)에 지웠다 — 이제 이 함수는 데모 장비(mock-)에만 불린다
+  //   (합성 조건 `useDemoSynth`). 사람이 등록한 Isilon 은 mock 모드에서도 실제 영역 수집을 탄다.
   try { await saveAreaResults(dev.id, r.results); } catch (e) { console.warn(`[storage-areas] 데모 DB 저장 실패(${dev.id}): ${e.message}`); }
   return { summary: r.summary, endpoints: r.endpoints };
 }
+
+/**
+ * v2.720(감사 R1-05·B2-04): 합성 스냅샷 조건 — **mock 모드 + 데모 장비(mock-)** 일 때만. SAN·PDU·CVP(v2.719)와 같은 규칙.
+ *   예전엔 isMockMode() 하나라 mock 포탈에 사람이 등록한 장비도 합성 스냅샷이 실측처럼 저장되고 용량 이력(capacity_daily, 5년)에
+ *   합성 행이 쌓였다. 사람이 등록한 장비는 mock 모드에서도 실제로 수집한다(CLAUDE.md v2.708 규칙).
+ */
+export const useDemoSynth = (dev) => isMockMode() && isDemoId(dev?.id);
 
 async function collectOneInner(dev, startedAt) {
   const fn = COLLECTORS[dev.type];
   const full = getDeviceWithSecret(dev.id) || dev;
   let snap;
   if (!fn) { snap = emptySnapshot(full); snap.error = `수집기 미구현: ${dev.type}`; }
-  else if (isMockMode()) { // v2.708: 판정은 mock/demo/flags.js(런타임 데이터 소스 설정 반영 — 미설정이면 config.dataSource 와 같다). v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
+  else if (useDemoSynth(dev)) { // v2.720(감사 R1-05): 데모 장비만. v2.708: 판정은 mock/demo/flags.js(런타임 데이터 소스 설정 반영 — 미설정이면 config.dataSource 와 같다). v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
     // mock 모드(개발): 결정적 가짜 스냅샷 — UI/집계/push 흐름 검증용.
     // ⚠ 이 값들은 **가짜**다. 예전에는 그 사실이 version 문자열의 '(mock)' 괄호로만 드러나서,
     //   PowerStore 장비에 'OneFS 9.4.0(mock)' 이 찍혀도 진짜 수집값처럼 보였다(실제 사용자 혼동).
@@ -121,7 +127,7 @@ async function collectOneInner(dev, startedAt) {
       _areasAt.set(dev.id, Date.now());
       try {
         // v2.709: mock 은 전 영역을 합성해 DB 에도 저장한다(예전엔 요약 2줄만 지어내 '영역 상세' 창이 비었다).
-        const r = isMockMode()
+        const r = useDemoSynth(dev)
           ? await saveDemoAreas(full)
           // 시한이 끊어도 collectAreasOnce 는 던지지 않고 모은 결과를 저장·반환한다(stopped:'deadline').
           : await withDeadline(AREAS_TIMEOUT_MS, (signal) => collectAreasOnce(full, { signal }), '영역 수집 타임아웃');
@@ -166,7 +172,9 @@ async function collectOneInner(dev, startedAt) {
   return snap.ok;
 }
 
-export async function pollStorageOnce() {
+/*  v2.720(감사 B2-04): `demoOnly` — 데모 계정의 '전체 새로고침' 은 데모 장비(mock-)만 합성하고 사람이 등록한 장비에는 접속하지 않는다
+ *   (bmstor·bmusage 와 같은 규칙). 건너뛴 대수는 `skippedNonDemo` 로 밝힌다. */
+export async function pollStorageOnce({ demoOnly = false } = {}) {
   if (_busy) return { skipped: true }; // 재진입 가드
   _busy = true;
   try {
@@ -176,10 +184,12 @@ export async function pollStorageOnce() {
     if (demo) { try { await ensureStorageDemo(); } catch (e) { console.warn(`[storage] 데모 시드 실패: ${e.message}`); } }
     const devs = demo ? devicesForThisNode() : devicesForThisNode().filter((d) => !isDemoId(d.id));
     if (!registryLoadError()) pruneAreasAt(new Set(devs.map((d) => d.id)));
+    const runDevs = demoOnly ? devs.filter((d) => isDemoId(d.id)) : devs;
+    const skippedNonDemo = devs.length - runDevs.length;
     let ok = 0, fail = 0;
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).
     let authStopped = 0;
-    await poolRun(devs, 3, async (d) => {
+    await poolRun(runDevs, 3, async (d) => {
       const r = await collectOne(d, { periodic: true });
       // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
       // 새 장애처럼 보인다 — 별도로 센다.
@@ -187,7 +197,7 @@ export async function pollStorageOnce() {
       else if (r) ok++; else fail++;
     });
     _last = { at: Date.now(), collected: ok, failed: fail, authStopped };
-    return { ok, fail, authStopped };
+    return { ok, fail, authStopped, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
   } finally { _busy = false; }
 }
 

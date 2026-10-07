@@ -38,7 +38,14 @@ export const READ_DENY = [
   // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
   //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.
   '/api/tools/secret-scan', '/api/tools/portal-check/tokens',
+  // v2.720(감사 B2-03): 같은 이유(전 법인 엣지 주소·내부 IP)로 — 저장된 엣지 콘솔 로그·노드 상태(edge-log), 엣지 주소·인증서 주체·
+  //   응답 조각(link-check), RMA 에이전트 허용 IP·명령 이력(rma), 전 사이트 내부 IP 가 든 HAProxy 관리 블록(relaytopo/render).
+  //   데모 계정 화면에서 이 도구들은 403(demoGuest 표지 → 데모 안내)으로 보인다 — 의도다.
+  '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/rma', '/api/tools/relaytopo/render',
 ];
+
+/** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */
+export const DEMO_ONLY_REASON = '데모 계정은 데모(mock) 장비만 수집합니다 — 사람이 등록한 장비에는 접속하지 않습니다.';
 
 /**
  * v2.719(감사 R1-02): 조회(GET·HEAD)인데 **실제 호스트·네트워크에 접속하는** 경로. 데모 계정은 요청 문맥이 admin·전체 범위라

@@ -319,13 +319,16 @@ export function sanTotals(cells) {
 /** /tools/pdu.devices → 요약(수집 성공/실패·전력 합·최고 온도·센서 수). */
 export function pduSummary(pdu) {
   const devs = pdu?.devices || [];
-  const out = { devices: devs.length, ok: 0, failed: 0, none: 0, powerW: 0, sensors: 0, tempMaxC: null, violations: (pdu?.activeViolations || []).length };
+  // v2.720(감사 B1-07): 전력은 값을 읽은 PDU 만 더하고 그 대수(powerRead)를 함께 센다 — 수집은 됐지만 전력을 못 읽은
+  //   PDU 를 0 W 로 더하면 부분 합이 전체처럼 보였다. 한 대도 못 읽었으면 powerW 는 null('—')이다(0 kW 금지).
+  const out = { devices: devs.length, ok: 0, failed: 0, none: 0, powerW: null, powerRead: 0, sensors: 0, tempMaxC: null, violations: (pdu?.activeViolations || []).length };
   for (const d of devs) {
     const s = d.snapshot;
     if (!s) { out.none += 1; continue; }
     if (s.ok === false) { out.failed += 1; continue; }
     out.ok += 1;
-    out.powerW += s.summary?.powerW ?? 0;
+    const w = num(s.summary?.powerW);
+    if (w != null) { out.powerRead += 1; out.powerW = (out.powerW ?? 0) + w; }
     out.sensors += s.summary?.sensors ?? 0;
     const t = num(s.summary?.tempMaxC);
     if (t != null) out.tempMaxC = out.tempMaxC == null ? t : Math.max(out.tempMaxC, t);
@@ -448,7 +451,9 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
   {
     const ps = pdu ? pduSummary(pdu) : null;
     const level = ps == null ? (g?.powerReporting ? 0 : null) : ps.violations >= 1 ? (ps.failed ? 2 : 1) : ps.failed ? 1 : g?.powerReporting || ps.devices ? 0 : null;
-    const kw = g?.powerKw != null ? `${fmtInt(g.powerKw)} kW` : '—';
+    // v2.720(감사 B1-03): 전력 보고 서버가 0대면 store 롤업의 powerKw 는 0(round(0/1000))이다 — 그대로 그리면 '소비 0 kW' 라는
+    //   거짓이 된다. V4 Facility·콘솔 Facility KPI 처럼 보고 대수가 있을 때만 kW 를 보인다.
+    const kw = g?.powerReporting && g?.powerKw != null ? `${fmtInt(g.powerKw)} kW` : '—';
     const meta = [`서버 전력 보고 ${fmtInt(g?.powerReporting)}대`, ps ? `PDU ${ps.devices}${ps.failed ? ` (실패 ${ps.failed})` : ''}` : (permission.pdu === false ? 'PDU 권한 없음' : 'PDU 수집 대기'), ps?.violations ? `임계 위반 ${ps.violations}` : null].filter(Boolean).join(' · ');
     tiles.push({ page: 'facility', name: '설비 · 전력', level, value: kw, meta, crit: ps?.violations ? String(ps.violations) : '0', warn: ps?.failed ? String(ps.failed) : '0', info: '0' });
   }

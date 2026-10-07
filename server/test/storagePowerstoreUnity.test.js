@@ -241,7 +241,9 @@ test('mock 스냅샷은 extra.mock=true 로 표시된다(괄호 문자열에만 
     "타입과 무관한 'OneFS' 버전을 mock 에 쓰면 PowerStore 등에서 실제 수집값으로 오인된다.");
   // v2.708: mock 분기는 타입별 합성 스냅샷을 mock/demo/storage.js demoStorageSnapshot 에 맡긴다 — 그 결과에
   //   extra.mock=true 가 실제로 실리는지 **실행해서** 본다(예전 소스 검사는 '마지막 snap.extra 재할당' 을 봤다).
-  const block = /else if \(isMockMode\(\)\)\s*\{[^\n]*\n([\s\S]*?)\n  \} else \{/.exec(src);
+  // v2.720: 분기 조건은 useDemoSynth(dev)(mock 모드 + 데모 id) — 사람이 등록한 장비는 mock 에서도 실제 수집한다.
+  const block = /else if \(useDemoSynth\(dev\)\)\s*\{[^\n]*\n([\s\S]*?)\n  \} else \{/.exec(src);
+  assert.match(src, /export const useDemoSynth = \(dev\) => isMockMode\(\) && isDemoId\(dev\?\.id\)/, '합성은 mock 모드 + 데모 id 일 때만');
   assert.ok(block, 'mock 분기를 찾지 못했습니다.');
   assert.match(block[1], /snap = demoStorageSnapshot\(full, startedAt\)/, 'mock 분기는 데모 스냅샷을 쓴다');
   const { demoStorageSnapshot, demoStorageDevices } = await import('../src/mock/demo/storage.js');

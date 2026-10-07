@@ -1059,7 +1059,9 @@ function DcStoragePerf({ dcPerf, onClose }) {
     values: (peak ? s.peak : s.sum) || [],
   })), 8);
   const rows = toChartRows(data?.buckets || [], chartSeries);
-  const grand = series.reduce((a, s) => a + avgOf(s), 0);
+  // v2.720(감사 B1-05): 버킷이 전부 비워진 계열(null)은 합에 넣지 않고 개수를 밝힌다(0 으로 섞으면 '쓰지 않음' 처럼 보인다).
+  const grandUnmeasured = series.filter((s) => avgOf(s) == null).length;
+  const grand = series.reduce((a, s) => a + (avgOf(s) ?? 0), 0);
   const SORTERS = {
     dc: (s) => s.datacenterName || null,
     name: (s) => s.key,
@@ -1126,7 +1128,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
         <RangePicker hours={hours} setHours={setHours} range={range} setRange={setRange} />
         {data && (
           <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }} title={peak ? '표시 중인 스토리지들의 피크 기준 평균(버킷별 MAX 합 선의 평균)을 더한 값' : '표시 중인 스토리지들의 평균 기준 평균을 더한 값'}>
-            스위치 {data.switches.length}대 합산 · {series.length}개 · {peak ? '피크 평균 합' : '평균 합'} {bytesPerSecText(grand)}
+            스위치 {data.switches.length}대 합산 · {series.length}개 · {peak ? '피크 평균 합' : '평균 합'} {bytesPerSecText(grand)}{grandUnmeasured ? ` · 측정 없음 ${grandUnmeasured}개 제외` : ''}
           </span>
         )}
       </div>

@@ -321,6 +321,9 @@ export function contribNote(c) {
   const parts = [];
   if (c?.excluded > 0) parts.push(`첫 수집 중·점검 중·연결 불가(보관 인벤토리 없음)·비활성 ${c.excluded}곳은 값을 모르므로 합계에서 뺐습니다`);
   if (c?.carried > 0) parts.push(`점검 중·연결 불가 ${c.carried}곳은 직전 수집 값을 합계에 포함했습니다`);
+  // v2.720(감사 B1-04): 서버가 전력 보고 호스트 없는 vCenter 의 powerKw 를 null 로 준다 — 그 수를 따로 말한다(뺀 행 제외).
+  const pwMissing = (Number(c?.missing?.powerKw) || 0) - (Number(c?.excluded) || 0);
+  if (pwMissing > 0) parts.push(`전력 열은 전력을 보고하는 호스트가 없는 ${pwMissing}곳을 합계에서 뺐습니다`);
   if (c?.dsUnknown > 0) parts.push(`스토리지 열은 사용량을 읽은 데이터스토어만 합했습니다(사용량 미상 ${c.dsUnknown}개 제외)`);
   return parts.join(' · ');
 }

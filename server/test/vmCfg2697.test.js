@@ -136,6 +136,12 @@ test('⑦ 엣지 수신 정제 — 아는 필드만, 모양이 아니면 null', 
 test('⑧ 수집기 배선 — 인벤토리 수집이 refreshVmCfg 를 부르고 캐시 값을 vm.cfg·vm.dev 로 싣는다', () => {
   const src = fs.readFileSync(new URL('../src/vcenter/soapClient.js', import.meta.url), 'utf8');
   assert.match(src, /refreshVmCfg\(c, vc\.id, vmRefs\b/);
+  // v2.720(감사 R2-01): '기다린 뒤 캐시를 싣는다' 를 고정한다 — runAux 앞의 await 를 지우면 아래 VM 조립이 갱신 전 캐시를 싣고
+  //   갱신의 SOAP 호출이 finally 의 로그아웃과 경쟁한다. 형제 갱신(호스트·경합·DS·클러스터·태그)도 같은 모양으로 고정한다.
+  assert.match(src, /await runAux\('vmcfg',[^\n]*refreshVmCfg\(c, vc\.id, vmRefs\b/);
+  for (const [k, fn] of [['hostcfg', 'refreshHostCfg'], ['contention', 'refreshContention'], ['dscfg', 'refreshDsCfg'], ['clustercfg', 'refreshClusterCfg'], ['tags', 'refreshTagInv']]) {
+    assert.match(src, new RegExp(`await runAux\\('${k}',[^\\n]*${fn}\\(`), `${k} 갱신은 await runAux 로 기다린다`);
+  }
   assert.match(src, /cfgEntry\?\.cfg \? \{ cfg: cfgEntry\.cfg \}/);
   // 30초 인벤토리 요청 자체에는 구성 경로를 싣지 않는다(응답 크기 — vmcfg/cache.js 머리말).
   const vmSpec = /type: 'VirtualMachine', paths: \[([\s\S]*?)\] \}/.exec(src)[1];

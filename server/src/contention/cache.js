@@ -53,4 +53,7 @@ export function contentionStatus() {
   return { vcenters: vcenters.slice(0, 64), omitted: Math.max(0, vcenters.length - 64) };
 }
 
+/** v2.720(감사 S1-01): 그 vCenter 의 캐시를 통째로 버린다 — 삭제됐거나 접속처가 바뀌었다(hostcfg/cache.js syncVcConfigCaches). */
+export function dropVcCache(vcId) { _byVc.delete(vcId); _status.delete(vcId); }
+
 export function _resetContentionCache() { _byVc.clear(); _status.clear(); }

@@ -487,12 +487,14 @@ test('collectDeviceNow(mock): 수집 스냅샷이 localSnapshots 에 저장된�
   process.env.DATA_SOURCE = process.env.DATA_SOURCE || 'mock';
   const { collectDeviceNow } = await import('../src/storage/poller.js');
   const { localSnapshots } = await import('../src/storage/store.js');
-  const d = reg.saveDevice({ type: 'isilon', name: 'MOCK-ISI', host: '10.99.0.10', username: 'root', password: 'x' });
+  // v2.720(감사 R1-05): mock 모드에서도 사람이 등록한 장비는 실제로 수집한다(합성 금지) — 이름 해석이 바로 실패하는 .invalid 주소로
+  //   '실패해도 스냅샷이 저장된다' 를 본다(putSnapshot 경로 회귀 방지라는 원래 목적은 그대로).
+  const d = reg.saveDevice({ type: 'isilon', name: 'MOCK-ISI', host: 'isi-test.invalid', username: 'root', password: 'x' });
   try {
     await collectDeviceNow(d.id);
     const snap = localSnapshots().find((x) => x.deviceId === d.id);
     assert.ok(snap, 'v2.308 회귀: putSnapshot 이 collectOne 정규 경로에서 빠지면 여기서 실패한다');
-    assert.equal(snap.ok, true);
+    assert.notEqual(snap.extra?.mock, true, '사람이 등록한 장비에 합성 스냅샷을 만들지 않는다');
   } finally { reg.deleteDevice(d.id); }
 });
 

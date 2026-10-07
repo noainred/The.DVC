@@ -630,15 +630,16 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
     const ports = [...s.ports.values()];
     series.push({
       key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
-      avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,   // 버킷 평균 합의 평균
-      maxTotal: vals.length ? Math.max(...vals) : 0,                                 // 버킷 평균 합의 최댓값
-      peakAvg: pv.length ? pv.reduce((a, b) => a + b, 0) / pv.length : 0,           // 버킷 피크 합의 평균
-      peakTotal: pv.length ? Math.max(...pv) : 0,                                    // 버킷 피크 합의 최댓값(기간 내 최고 피크)
+      // v2.720(감사 B1-05): 모든 버킷이 부분 합으로 비워졌으면(vals 0개) 0 이 아니라 null(측정 없음) — 0 은 '트래픽 없음' 이라는 거짓이다.
+      avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,   // 버킷 평균 합의 평균
+      maxTotal: vals.length ? Math.max(...vals) : null,                                 // 버킷 평균 합의 최댓값
+      peakAvg: pv.length ? pv.reduce((a, b) => a + b, 0) / pv.length : null,           // 버킷 피크 합의 평균
+      peakTotal: pv.length ? Math.max(...pv) : null,                                    // 버킷 피크 합의 최댓값(기간 내 최고 피크)
       // v2.621(감사 DATA-03): 빠진 포트가 있어 그리지 않은 버킷(번호)과 직전 표본으로 채운 (포트×버킷) 칸 수 — 조용히 채우거나 빼지 않는다.
       partial, partialBuckets: partial.length, carriedCells,
     });
   }
-  series.sort((a, b) => b.avgTotal - a.avgTotal);
+  series.sort((a, b) => (b.avgTotal ?? -1) - (a.avgTotal ?? -1));   // v2.720(B1-05): 측정 없음(null)은 뒤로
   return { buckets, bucketMs, since, until, series, carryMs: lim };
 }
 

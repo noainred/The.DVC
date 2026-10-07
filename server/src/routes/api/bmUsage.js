@@ -27,6 +27,7 @@ import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken } from '../../auth/addressMask.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
+import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -321,7 +322,7 @@ api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
   }
-  const r = await pollBmUsageOnce({ trigger: 'manual' });
+  const r = await pollBmUsageOnce({ trigger: 'manual', demoOnly: isDemoGuest(req.user) }); // v2.720(감사 R1-03): 데모 계정은 데모 대상만
   logAudit({
     user: req.user?.username, action: 'bm-usage.collect', ip: req.ip || '',
     detail: JSON.stringify({ ok: !!r.ok, servers: r.servers ?? null }).slice(0, 300),

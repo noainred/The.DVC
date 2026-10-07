@@ -133,8 +133,8 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
   const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
-  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; b.powerW += h.powerWatts || 0; }
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0, powerN: 0 }; acc.set(id, b); } return b; };
+  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
   for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; b.provGB += v.storageGB || 0; }
   // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
   //   v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)는 storageTotalTBAll 로 따로 싣는다 — 프로비저닝 비교는 그 값을 쓴다.
@@ -154,7 +154,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       vcpuAllocated: b.vcpu,
       ramAllocatedGB: round(b.ramMB / 1024),
       provisionedTB: round(b.provGB / 1024, 1),
-      powerKw: round(b.powerW / 1000, 1),
+      // v2.720(감사 B1-04): 전력을 보고한 호스트가 0대면 0 kW 가 아니라 null(측정 없음) — store.powerOf 와 같은 규칙.
+      //   측정 대수(powerServers)를 함께 실어 합계 쪽이 null 행을 빼고 그 개수를 밝힌다.
+      powerKw: b.powerN > 0 ? round(b.powerW / 1000, 1) : null,
+      powerServers: b.powerN,
     };
   }).sort((a, b) => b.vms - a.vms);
 
