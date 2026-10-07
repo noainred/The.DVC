@@ -23,6 +23,7 @@ import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMulti, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
 import { createYielder } from '../util/timeSlice.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 const lockRetry = createLockRetry();
@@ -319,7 +320,9 @@ let _queryStats = { runs: 0, joined: 0, cached: 0, maxQueue: 0, queued: 0, lastM
  *   DB 핸들을 다시 연다. 뒤에 줄 선 다른 조회는 곧바로 이어서 돈다. 포탈 프로세스 전체를 재시작하지 않는다 — 집계는 양보하며
  *   돌기 때문에 다른 화면은 살아 있고, 프로세스 재시작은 모든 사용자의 세션·폴러를 함께 끊는다.
  */
-const PERF_QUERY_MAX_MS = Math.max(10_000, Number(process.env.SANSW_PERF_QUERY_MAX_MS) || 60_000);
+// 빈 값·숫자 아님·범위(10초~1시간) 밖은 기본 60초(Number('') === 0 이 시한 0 이 되지 않게 — TIM2605-04 규약).
+const _qmEnv = numOrNull(process.env.SANSW_PERF_QUERY_MAX_MS ?? 60000);
+const PERF_QUERY_MAX_MS = _qmEnv != null && _qmEnv >= 10_000 && _qmEnv <= 3_600_000 ? Math.round(_qmEnv) : 60_000;
 let _cancelGen = 0;
 let _restarts = { count: 0, lastAt: null, lastKey: null, lastMs: null };
 /** 진행 중인 집계가 양보 지점마다 부른다 — 감시가 엔진을 재시작했으면 그 자리에서 멈춘다. */
