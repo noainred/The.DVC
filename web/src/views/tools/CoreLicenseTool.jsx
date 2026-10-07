@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { VSAN_PLAN_LABEL, fmtInt, fmtTib, coverageNote, reportedText, RULE_NOTE } from '../corelicense/coreLicenseText.js';
+import { VSAN_PLAN_LABEL, fmtInt, fmtTib, addonText, coverageNote, reportedText, RULE_NOTE } from '../corelicense/coreLicenseText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
 
@@ -80,7 +80,7 @@ export default function CoreLicenseTool({ scope }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 8, marginBottom: 10 }}>
         <Kpi label="필요 코어(산정)" value={fmtInt(t.licensed)} sub={`호스트 ${fmtInt(t.counted)}대 · 소켓 ${fmtInt(t.sockets)}`} />
         <Kpi label="물리 코어" value={fmtInt(t.cores)} sub={t.padded ? `최소 16코어로 ${fmtInt(t.padded)}코어 더함(${fmtInt(t.paddedHosts)}대)` : '최소 16코어로 더한 코어 없음'} />
-        <Kpi label="vSAN 용량" value={fmtTib(t.vsanTib)} sub={rate ? `포함 ${fmtTib(t.vsanIncludedTib)} · 추가 필요 ${fmtTib(t.vsanAddonTib)}` : 'vSAN 포함 용량은 가정을 고르면 계산합니다'} />
+        <Kpi label="vSAN 용량" value={fmtTib(t.vsanTib)} sub={rate ? `포함 ${fmtTib(t.vsanIncludedTib)} · 추가 필요 ${addonText(t.vsanAddonTib, t.vsanAddonBound)}` : 'vSAN 포함 용량은 가정을 고르면 계산합니다'} />
         <Kpi label="산정 못 한 호스트" value={fmtInt(t.unknown)} sub={`전체 ${fmtInt(t.hosts)}대 중`} />
       </div>
 
@@ -118,7 +118,7 @@ export default function CoreLicenseTool({ scope }) {
                       <td data-sort={r.licensed}><b>{fmtInt(r.licensed)}</b></td>
                       <td data-sort={r.padded}>{r.padded ? `+${fmtInt(r.padded)}` : '—'}</td>
                       <td data-sort={r.vsanDs ? r.vsanTib : ''}>{r.vsanDs ? fmtTib(r.vsanTib) : '—'}</td>
-                      {rate ? <td data-sort={r.vsanAddonTib ?? ''}>{r.vsanDs ? fmtTib(r.vsanAddonTib) : '—'}</td> : null}
+                      {rate ? <td data-sort={r.vsanAddonTib ?? ''}>{r.vsanDs ? addonText(r.vsanAddonTib, r.vsanAddonBound) : '—'}</td> : null}
                       <td style={{ whiteSpace: 'normal', fontSize: 12 }} className={rep.tone === 'muted' ? 'muted' : ''}>
                         {rep.tone === 'warn' ? <span className="badge amber">{rep.text}</span> : rep.text}
                       </td>

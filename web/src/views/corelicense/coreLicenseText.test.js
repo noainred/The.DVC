@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { VSAN_TIB_PER_CORE } from '../../../../server/src/corelicense/analyze.js';
-import { VSAN_PLAN_LABEL, fmtInt, fmtTib, coverageNote, reportedText } from './coreLicenseText.js';
+import { VSAN_PLAN_LABEL, fmtInt, fmtTib, coverageNote, reportedText, ADDON_BOUND_NOTE, addonText } from './coreLicenseText.js';
+import { addonBoundOf } from '../../../../server/src/corelicense/analyze.js';
 
 describe('coreLicenseText', () => {
   it('vSAN 가정 키가 서버와 1:1', () => {
@@ -28,5 +29,25 @@ describe('coreLicenseText', () => {
       const s = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       expect(s.includes('\\`')).toBe(false);
     }
+  });
+});
+
+// v2.721(감사 B1-03) — vSAN 추가분의 확정 여부. 서버 addonBoundOf 와 키 1:1.
+describe('vSAN 추가분 확정 여부(v2.721)', () => {
+  it('서버가 내는 bound 값마다 문구 키가 있다', () => {
+    const bounds = new Set([addonBoundOf(0, 0, 1), addonBoundOf(1, 0, 1), addonBoundOf(0, 1, 1), addonBoundOf(1, 1, 1)]);
+    expect([...bounds].sort()).toEqual(Object.keys(ADDON_BOUND_NOTE).sort());
+  });
+  it('상한·하한·산정 불가를 표기한다', () => {
+    expect(addonText(22, 'exact')).toBe('22 TiB');
+    expect(addonText(22, 'upper')).toBe('최대 22 TiB');
+    expect(addonText(22, 'lower')).toBe('최소 22 TiB');
+    expect(addonText(null, 'unknown')).toBe('산정 불가');
+    expect(addonText(null, null)).toBe('—');
+  });
+  it('coverageNote 가 확정이 아닌 추가분의 방향을 말한다', () => {
+    expect(coverageNote({ unknown: 2, vsanAddonBound: 'upper' })).toMatch(/실제보다 클 수 있습니다\(상한\)/);
+    expect(coverageNote({ vsanUnknown: 1, vsanAddonBound: 'lower' })).toMatch(/실제보다 작을 수 있습니다\(하한\)/);
+    expect(coverageNote({ vsanAddonBound: 'exact' })).toBeNull();
   });
 });

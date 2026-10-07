@@ -1,5 +1,6 @@
 // 호스트 구성 갱신(v2.699) — 인벤토리 수집 한 주기 안에서 '오래된 호스트부터 상한만큼' 다시 읽는다.
-// 시간 예산(기본 15초)을 넘기면 다음 호스트를 시작하지 않는다(시작해 놓고 잘리면 버려진다 — v2.528 판단). 시작한 호스트는 끝까지 읽는다(v2.720 R1-01).
+// 시간 예산(기본 15초)을 넘기면 다음 호스트를 시작하지 않는다(시작해 놓고 잘리면 버려진다 — v2.528 판단). 시작한 호스트는 끝까지 읽는다(v2.720 R1-01) —
+// 단 예산 끝 + 유예(HOST_OVERRUN_GRACE_MS)를 넘기면 멈추고 시한 실패로 센다(v2.721 R1-01).
 // 실패는 격리한다 — 이 갱신이 실패해도 인벤토리 수집은 성공이고, 직전 캐시 값은 그대로(at 으로 낡음이 보인다).
 import { config } from '../config.js';
 import { poolSettled } from '../util/pool.js';
@@ -7,6 +8,13 @@ import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, HOST_VSAN_PATHS, HOST_MP_PATH, HOST
 import { pickDue, put, prune, setStatus, statusOf, noteTransientFail, HOST_FAIL_MAX } from './cache.js';
 
 export const HOST_CFG_BUDGET_MS = 15_000;
+// v2.721(감사 R1-01): 시작한 호스트의 상한 — 예산 끝(그 호스트가 예산 뒤에 시작했으면 시작 시각) + 유예.
+//   v2.720 은 시작한 호스트를 끝까지 읽게 했는데, 느린 vCenter(호출당 수 초)에서 한 호스트의 8회 조회가 예산과
+//   수집 여유(soapClient AUX_RESERVE_MS 15초)를 넘기면 수집 데드라인이 vCenter 수집 전체를 끊었고, 그 abort 는
+//   '시한' 으로 세지 않아 백오프 기록 없이 다음 주기에 같은 호스트가 다시 맨 먼저 골라졌다(매 주기 반복).
+//   유예는 수집 여유보다 짧아야 한다(같거나 길면 데드라인이 먼저 끊는다). 예산 초과만으로 결과를 버리지는 않는다 —
+//   유예 안에 다 읽으면 그대로 쓴다. 유예를 넘기거나 예산을 넘긴 채 abort 로 끊긴 호스트만 시한 실패로 센다.
+export const HOST_OVERRUN_GRACE_MS = 10_000;
 const OPTIONAL_GROUPS = [
   { flag: 'noLockdownPath', label: '잠금 모드', paths: [HOST_LOCKDOWN_PATH], chunk: 100 },
   { flag: 'noVsanPath', label: 'vSAN 런타임', paths: HOST_VSAN_PATHS, chunk: 100 },
@@ -52,7 +60,7 @@ async function queryAcceptance(c, imgRef) {
  * @param {string} vcId
  * @param {string[]} hostRefs 이번에 읽을 수 있는 호스트(연결된 호스트) · opts.allRefs = 인벤토리의 호스트 전부(prune 기준)
  */
-export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budgetMs = HOST_CFG_BUDGET_MS, settings = config, allRefs = hostRefs, signal = null } = {}) {
+export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budgetMs = HOST_CFG_BUDGET_MS, settings = config, allRefs = hostRefs, signal = null, overrunGraceMs = HOST_OVERRUN_GRACE_MS } = {}) {
   if (!settings.hostCfgScan) return { skipped: 'off' };
   prune(vcId, new Set(allRefs)); // 인벤토리에서 사라진 호스트만 — 연결이 끊긴 호스트의 직전 값은 남긴다
   const st = statusOf(vcId) || {};
@@ -95,7 +103,7 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
         for (const r of diagRefs) if (!diagByRef.has(r)) diagByRef.set(r, false);
       } catch (err) { console.warn(`[hostcfg] ${vcId} 진단 파티션을 읽지 못했습니다: ${String(err?.message || err).slice(0, 200)}`); }
     }
-    let fetched = 0; let cut = 0; let transient = 0; let backoff = 0; let gaveUp = 0; let started = 0;
+    let fetched = 0; let cut = 0; let transient = 0; let backoff = 0; let gaveUp = 0; let started = 0; let capped = 0;
     await poolSettled(due, CONCURRENCY, async (ref) => {
       const p = props.get(ref);
       if (!p) return; // 그사이 사라진 호스트
@@ -106,6 +114,10 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       //   예산을 0 이하로 받았으면(호출자가 시간이 없다) 시작하지 않는다.
       if (signal?.aborted || (Date.now() >= budgetEnd && (started > 0 || budgetMs <= 0))) { cut += 1; return; }
       started += 1;
+      // v2.721(감사 R1-01): 이 호스트의 상한. overran() — 예산을 넘겨 끝내지 못했는가(abort 로 끊긴 경우 그 호스트 탓으로 센다).
+      const hostCap = Math.max(budgetEnd, Date.now()) + overrunGraceMs;
+      const overran = () => Date.now() >= budgetEnd;
+      const pastCap = () => Date.now() >= hostCap;
       const h = parseHostCfgProps(p, now);
       const cert = certByRef.get(p['configManager.certificateManager']);
       if (cert) { h.certNotAfter = cert.notAfter; h.certSubject = cert.subject; }
@@ -118,13 +130,17 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       const optRef = p['configManager.advancedOption'];
       if (typeof optRef === 'string' && optRef) {
         for (const name of ADV_OPTIONS) {
-          if (signal?.aborted) { incomplete = true; break; }
-          try { applyAdvanced(h, name, await queryOption(c, optRef, name)); } catch (err) { if (isTransientErr(err, signal)) { incomplete = true; timedOut = isTimeoutErr(err, signal); break; } /* 그 값만 모름(null 유지) */ }
+          if (signal?.aborted) { incomplete = true; timedOut = overran(); break; }
+          if (pastCap()) { incomplete = true; timedOut = true; capped += 1; break; }
+          try { applyAdvanced(h, name, await queryOption(c, optRef, name)); } catch (err) { if (isTransientErr(err, signal)) { incomplete = true; timedOut = isTimeoutErr(err, signal) || (!!signal?.aborted && overran()); break; } /* 그 값만 모름(null 유지) */ }
         }
       }
       const img = p['configManager.imageConfigManager'];
-      if (!incomplete && !signal?.aborted && typeof img === 'string' && img) {
-        try { h.acceptance = await queryAcceptance(c, img); } catch (err) { if (isTransientErr(err, signal)) { incomplete = true; timedOut = isTimeoutErr(err, signal); } /* 그 밖은 모름 */ }
+      const hasImg = typeof img === 'string' && !!img;
+      if (!incomplete && hasImg && signal?.aborted) { incomplete = true; timedOut = overran(); }
+      if (!incomplete && hasImg && pastCap()) { incomplete = true; timedOut = true; capped += 1; }
+      if (!incomplete && hasImg) {
+        try { h.acceptance = await queryAcceptance(c, img); } catch (err) { if (isTransientErr(err, signal)) { incomplete = true; timedOut = isTimeoutErr(err, signal) || (!!signal?.aborted && overran()); } /* 그 밖은 모름 */ }
       }
       if (incomplete && !timedOut) { transient += 1; return; } // 수집 중단 — 이 호스트 탓이 아니다(실패로 세지 않고 다음 주기에 다시)
       if (incomplete) {
@@ -137,14 +153,19 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       put(vcId, ref, h);
       fetched += 1;
     });
-    setStatus(vcId, { at: now, error: null, fetched, cut, transient, backoff, gaveUp, due: due.length });
+    setStatus(vcId, { at: now, error: null, fetched, cut, transient, backoff, gaveUp, capped, due: due.length });
     if (transient) console.warn(`[hostcfg] ${vcId} 호스트 ${transient}대는 중단·시한으로 다 읽지 못해 캐시하지 않았습니다(직전 값 유지 · 그중 요청 시한 ${backoff}대는 쉬었다가 다시 시도)`);
     if (gaveUp) console.warn(`[hostcfg] ${vcId} 호스트 ${gaveUp}대는 ${HOST_FAIL_MAX}회 연속 요청 시한이라 읽은 만큼(못 읽은 값은 비움)으로 기록했습니다`);
-    return { due: due.length, fetched, cut, transient, backoff, gaveUp };
+    if (capped) console.warn(`[hostcfg] ${vcId} 호스트 ${capped}대는 예산 + 유예(${Math.round(overrunGraceMs / 1000)}초)를 넘겨 중간에 멈췄습니다(시한 실패로 기록 — 쉬었다가 다시 시도)`);
+    return { due: due.length, fetched, cut, transient, backoff, gaveUp, capped };
   } catch (err) {
     const msg = String(err?.message || err).slice(0, 300);
-    setStatus(vcId, { error: msg, errorAt: now, backoffUntil: isPathErr(msg) ? now + settings.hostCfgRefreshMs : 0 });
-    console.warn(`[hostcfg] ${vcId} 호스트 구성 갱신 실패: ${msg}`);
-    return { error: msg };
+    // v2.721(감사 S1-03): 첫 일괄 조회(또는 그 뒤 조회)가 요청 시한에 걸렸으면 이번에 고른 호스트들을 쉬게 한다 —
+    //   예전에는 backoffUntil 0 이라 같은 호스트들을 매 주기 맨 먼저 다시 골라 매 주기 요청 시한을 먹었다(수집 중단은 세지 않는다).
+    let rested = 0;
+    if (isTimeoutErr(err, signal || c?.signal)) for (const ref of due) { noteTransientFail(vcId, ref, { now, periodMs: settings.hostCfgRefreshMs }); rested += 1; }
+    setStatus(vcId, { error: msg, errorAt: now, backoffUntil: isPathErr(msg) ? now + settings.hostCfgRefreshMs : 0, rested });
+    console.warn(`[hostcfg] ${vcId} 호스트 구성 갱신 실패: ${msg}${rested ? `(호스트 ${rested}대는 쉬었다가 다시 시도)` : ''}`);
+    return { error: msg, rested };
   }
 }

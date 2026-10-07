@@ -670,6 +670,7 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
         <div className="muted" style={{ padding: '4px 18px', fontSize: 12 }}>
           {probe.lastRunAt ? `마지막 점검 ${dateTimeText(probe.lastRunAt)}(${agoText(tsMs(probe.lastRunAt))}) · 결과는 메모리에만 있어 포탈을 재시작하면 지워집니다` : '아직 점검한 적이 없습니다(재시작하면 결과가 지워집니다)'}
           {skippedByText(probe.summary) ? ` · 건너뜀: ${skippedByText(probe.summary)}` : ''}
+          {probe.summaryHidden ? ' · 점검 요약은 전 법인 집계라 범위 계정에는 보이지 않습니다(질의 이름도 가립니다)' : ''}
         </div>
         {nServers > 0 && (
           <STable minWidth={600} limit={50}>

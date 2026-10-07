@@ -4876,6 +4876,22 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · vCenter 삭제·접속처 변경 시 구성 캐시 6종 비움(`syncVcConfigCaches`) · 증분 수집 세션 연속 실패 백오프.
     · ⚠ 작업 방식: mock 모드 + 사람 등록 장비에 기대던 기존 테스트 3개(storageMon·audit2600b·audit2599c)를 `.invalid` 주소·`SSH_READY_TIMEOUT_MS` 로 빨리 실패하게 바꿨다 —
       **실장비 수집으로 바뀐 경로의 테스트는 닿지 않는 주소에서 시한을 기다리지 않게** 할 것(audit2599c 가 120초 시한에 걸렸다).
+  - ⚠⚠ **v2.721 — 3회차: 이번에도 직전 수정이 만든 회귀가 절반이었다**(6축 감사 → 반증 → 6그룹 수정, 확정 18 · 가능성 1. 회귀 `server/test/audit2721{a..f}.test.js` +
+    웹 `views/audit2721d.test.js`·`views/tools/sanStorageSum2721.test.js` — 고친 파일마다 변이 검증. 상세 `docs/AUDIT-2026-10-08.md`):
+    · ⚠⚠ **'시작한 대상은 끝까지' 에는 상한이 짝이다**(R1-01 — v2.720 R1-01 의 반대편): 예산을 무시하고 끝까지 읽게 하자 느린 호스트 하나가 store 데드라인까지 달려
+      vCenter 수집 전체를 끊었고, 데드라인 abort 는 시한 실패로 세지 않아 다음 주기에 같은 호스트를 다시 골랐다. 이제 시작한 호스트도 `예산 끝 + 10초`(AUX_RESERVE 15초보다 짧게)를
+      넘기면 시한 실패로 백오프하고, 예산을 넘긴 채 abort 로 끊긴 호스트도 실패로 센다. **'버리지 않는다' 규칙을 만들 때 '그 일이 끝나지 않으면 무엇이 멈추는가' 를 함께 답할 것.**
+    · **부가 갱신 4종(dscfg·clustercfg·vmcfg·contention)도 대상별 재시도 백오프**(S1-03, `dscfg/collect.js createRetryTracker` — hostcfg 와 같은 규칙, abort 제외).
+      ⚠ 호출별 SOAP 시한을 남은 예산으로 줄이는 것은 `soapClient.js` 에 인자가 없어 남겼다.
+    · **구성 캐시 정리는 수집 전**(S1-01·R1-04 — `store.js` loadVcenterConfig 직후 한 번): 수집 뒤에 하면 접속처를 바꾼 첫 주기에 옛 vCenter 값이 새 스냅샷에 붙는다.
+    · **mock 모드에서 이미 합성만 하는 경로에 demoOnly 필터를 겹치지 말 것**(R1-03·S1-02): Horizon 은 mock 에서 비-데모 서버에 로그인하지 않는데 필터가 정리 기준을 좁혀
+      등록 서버의 최신 행을 지웠다. 필터는 mock 이 아닐 때만, 정리 기준은 등록 전체, 거른 실행은 전체 추이를 적재하지 않는다. bmstor demoOnly 실행은 lastRunAt 을 갱신하지 않는다.
+    · **null 을 만들었으면 그 값의 모든 보기를 따라갈 것**(R1-02·R2-01·R2-02 — v2.720 B1-05 의 나머지 절반): SAN 법인 소계 초기값 0 · 피크 보기 `|| 0` 이 '측정 없음' 을 0 bps 로 되돌렸다
+      (`sanStorageDcSubtotals` · 웹 `sanStorageSumText.js`). Summary 기여도 안내는 조건을 따로 쓰지 말고 `contribNote` 문장 자체가 있을 때(R2-04).
+    · CVP '스트리밍 아님' = `unconfirmedBy['not-streaming']` 만(R2-03 — 서버 `cvpTotals`·웹 `totalsFromDevices` 같은 규칙).
+    · 판정 정직성: 비용 태그 부분 읽기 · 이전 준비도 그룹 분모(판정 불가 제외 — 전체와 같은 규칙) · vSAN 추가분 bound(upper·lower·unknown → `addonText`) · 재부팅 분류는 이벤트 읽기
+      상한(limit+1)으로 절단을 보고 잘린 구간 부팅을 `readCut` 으로 둔다 · 범위 계정에 VM DNS 점검 요약·질의 이름, VM 구성 점검 예외 내용·수정자를 가린다.
+    · 남긴 것: 새 상태 필드(capped·rested·backoffTargets 등)의 화면 표시 · 재시도 기록의 vCenter 삭제 시 즉시 정리 · 실장비 미확인(가짜 클라이언트·합성 입력).
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

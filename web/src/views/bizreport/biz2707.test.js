@@ -73,3 +73,15 @@ describe('v2.719 가용성 판정 보류 사유 문구', () => {
     expect(n).not.toMatch(/빠졌을 수 있습니다/);
   });
 });
+
+// v2.721(감사 B1-01·B1-05) — 비용 배분 문구: 부분 읽기 태그·vCPU·메모리 미상 VM 을 말한다.
+describe('costText v2.721', () => {
+  it('B1-05 cpuUnknown 을 말한다 · B1-01 tagPartial 을 (태그 없음) 과 구분해 말한다', () => {
+    expect(notesText({ notes: { cpuUnknown: 3 } })).toMatch(/vCPU·메모리를 모르는 VM 3대는 vCPU·메모리 합계·비용에서 빠졌습니다/);
+    const t = notesText({ notes: { tagPartial: 2 } });
+    expect(t).toMatch(/일부만 읽은 vCenter/);
+    expect(t).toMatch(/2대/);
+    expect(t).toMatch(/태그가 없다는 뜻이 아닙니다/);
+    expect(t.includes('`')).toBe(false);
+  });
+});

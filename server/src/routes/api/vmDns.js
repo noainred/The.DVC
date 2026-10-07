@@ -69,8 +69,30 @@ function inputsOf(req, snap) {
   return {
     snap, allowed, policy: loadVmDnsPolicy(), classify: classifier(),
     ledgerOf: allowed ? null : ledgerOf,
-    probeOf: probeResultOf,
+    probeOf: allowed ? scopedProbeOf : probeResultOf,
   };
+}
+
+/*
+ * v2.721(감사 B2-01): 도달성 점검의 질의 이름(qname)은 **전 함대** VM 도메인 최빈값으로 정해진다(analyze.js probeTargets) —
+ * 같은 DNS 서버를 다른 법인과 같이 쓰면 그 법인의 도메인 이름이 된다. 범위 계정에는 qname 을 빼고 그 사실을 표지로 밝힌다.
+ * 응답 여부(udp·tcp)는 그 서버가 범위 안 VM 이 쓰는 서버일 때만 조회되므로 그대로 둔다.
+ */
+function scopedProbeOf(ip) {
+  const r = probeResultOf(ip);
+  if (!r) return null;
+  const { qname, ...rest } = r;
+  return qname == null ? rest : { ...rest, qnameHidden: true };
+}
+
+/**
+ * v2.721(감사 B2-01): 점검 요약(targets·answered·failed·skippedBy)은 전 함대 집계다 — 범위 계정에는 summary 를 null 로
+ * 주고 `summaryHidden` 으로 밝힌다(0 으로 채우지 않는다 — 화면은 '—' 로 그린다). 실행 시각·진행 여부는 그대로.
+ */
+function probeStateFor(allowed) {
+  const st = vmDnsProbeState();
+  if (!allowed) return st;
+  return { ...st, summary: null, summaryHidden: true };
 }
 
 /*
@@ -114,7 +136,7 @@ export function registerVmDns(api) {
       const inp = withIndex(req, s, vcenterId);
       const vcName = new Map((s?.vcenters || []).map((v) => [String(v.id), String(v.name || v.id)]));
       const changes = await recentChanges(inp.allowed, vcenterId, vcName);
-      const body = analyzeVmDns({ ...inp, changes, probeState: vmDnsProbeState() });
+      const body = analyzeVmDns({ ...inp, changes, probeState: probeStateFor(inp.allowed) });
       const hist = vmDnsHistoryStatus();
       body.history = { lastRunAt: hist.lastRunAt, intervalMs: hist.intervalMs, retentionDays: hist.retentionDays, idleReason: hist.idleReason || '' };
       if (pol.invalid?.length) body.policy.invalid = pol.invalid.length;

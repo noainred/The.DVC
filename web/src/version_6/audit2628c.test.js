@@ -56,7 +56,8 @@ describe('WEB2628-02 법인별 기여도 합계', () => {
   });
   it('Summary 화면이 뺀 개수를 합계 행에 말한다', () => {
     const src = read('./pages/Summary.jsx');
-    expect(src).toMatch(/contrib\.excluded/);
+    // v2.721(감사 R2-04): 표시 조건은 contribNote 문장 자체(excluded 를 포함한 모든 사유를 그 함수가 말한다).
+    expect(src).toMatch(/contribNote\(contrib\) &&/);
     expect(src).toMatch(/r\.statusLabel/);
   });
 });

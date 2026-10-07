@@ -25,6 +25,20 @@ export function hostCoreLicense(h) {
 
 const GIB_PER_TIB = 1024;
 
+/**
+ * v2.721(감사 B1-03): vSAN 추가분이 확정값인지. 산정 못 한 호스트가 있으면 licensed 가 하한이라 포함 용량도 하한 →
+ * 추가분은 상한('upper'), 용량 미상 vSAN 데이터스토어가 있으면 vSAN 합계가 하한 → 추가분은 하한('lower'),
+ * 둘 다면 방향을 알 수 없다('unknown' — 값을 null 로 둔다). 추가분 0 이고 vSAN 미상이 없으면 확정 0 이다.
+ * reportedDiff 가 부분 합이면 비교하지 않는 것과 같은 규칙이다.
+ */
+export function addonBoundOf(unknownHosts, vsanUnknown, addon) {
+  const u = unknownHosts > 0; const v = vsanUnknown > 0;
+  if (u && v) return 'unknown';
+  if (v) return 'lower';
+  if (u) return addon > 0 ? 'upper' : 'exact';
+  return 'exact';
+}
+
 export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' } = {}) {
   const allow = vcenterIds ? new Set(vcenterIds) : null;
   const vcs = (snap?.vcenters || []).filter((v) => !allow || allow.has(v.id));
@@ -65,10 +79,13 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
   const list = [...rows.values()].map((r) => {
     const vsanTib = Math.round(r.vsanTib * 100) / 100;
     const included = r.licensed * rate;
+    const addon = rate ? Math.max(0, Math.round((vsanTib - included) * 100) / 100) : null;
+    const bound = rate ? addonBoundOf(r.unknown, r.vsanUnknown, addon) : null;
     return {
       ...r, vsanTib,
       vsanIncludedTib: rate ? Math.round(included * 100) / 100 : null,
-      vsanAddonTib: rate ? Math.max(0, Math.round((vsanTib - included) * 100) / 100) : null,
+      vsanAddonTib: bound === 'unknown' ? null : addon,
+      vsanAddonBound: bound,
       // vCenter 보고와의 차이 — 산정 못 한 호스트가 있으면 비교하지 않는다(부분 합끼리 비교하면 거짓 차이).
       reportedDiff: r.reportedCoreUsed != null && r.unknown === 0 ? r.reportedCoreUsed - r.licensed : null,
     };
@@ -82,6 +99,8 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
   };
   // 포함 용량은 계약 전체에서 합쳐진다(법인별 초과를 더하면 다른 법인의 남는 몫을 무시해 과대가 된다) — 합계는 전체 기준.
   totals.vsanAddonTib = rate ? Math.max(0, Math.round((totals.vsanTib - totals.licensed * rate) * 100) / 100) : null;
+  totals.vsanAddonBound = rate ? addonBoundOf(totals.unknown, totals.vsanUnknown, totals.vsanAddonTib) : null;
+  if (totals.vsanAddonBound === 'unknown') totals.vsanAddonTib = null;
   hostRows.sort((a, b) => (b.padded ?? -1) - (a.padded ?? -1) || String(a.name).localeCompare(String(b.name)));
   return { rule: { minCoresPerSocket: MIN_CORES_PER_SOCKET, vsanPlan, vsanTibPerCore: rate }, totals, vcenters: list, hosts: hostRows.slice(0, 3000), hostsOmitted: Math.max(0, hostRows.length - 3000) };
 }

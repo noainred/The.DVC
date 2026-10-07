@@ -213,7 +213,9 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     // 마지막 수집 결과가 지워져 화면에 용량 0·'미수집'으로 남는다.
     const ids = new Set(listBmServersRaw().map((s) => s.id));
     for (const id of [...latest.keys()]) if (!ids.has(id)) latest.delete(id);
-    lastRunAt = at;
+    // v2.721(감사 S1-04): 데모 계정의 demoOnly 실행은 실서버를 건너뛰었으므로 주기 기준 시각을 갱신하지 않는다 —
+    //   갱신하면 사람이 등록한 서버의 주기 수집이 누를 때마다 한 주기씩 밀린다.
+    if (!demoOnly) lastRunAt = at;
     // 필드명 okCount — { ok:true, ...summary } 스프레드에서 성공 여부(boolean)를 덮지 않게.
     lastRunSummary = { at, trigger, servers: servers.length - skippedNonDemo, okCount: ok, errors, queued, authStopped, ms: at - started, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
     return { ok: true, ...lastRunSummary };

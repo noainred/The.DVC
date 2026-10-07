@@ -517,6 +517,10 @@ describe('totalsFromDevices — 확인 불가 장비 (v2.720 감사 B1-02)', () 
     ]);
     expect(t).toMatchObject({ devices: 4, unconfirmed: 2, partsStale: 1, partsFault: 1, bgpDown: 1, portsDown: 3, cpuHigh: 1, streaming: 2 });
     expect(t.unconfirmedBy).toMatchObject({ stale: 1, 'not-streaming': 1 });
+    // v2.721(감사 R2-03): '스트리밍 아님' 은 not-streaming 판정 1대뿐이다 — 낡음(stale) 장비는 확인 불가로 따로 말한다(예전 4−2=2 는 거짓).
+    expect(t.notStreaming).toBe(1);
+    const meta = T.kpiItems(t).find((k) => k.key === 'streaming').meta;
+    expect(meta).toMatch(/스트리밍 아님 1(?!\d)/); expect(meta).toMatch(/확인 불가 1/); expect(meta).not.toMatch(/스트리밍 아님 2/);
   });
   it('unconfirmedNote — 뺀 대수를 말하고, 없으면 null · 백틱 없음', () => {
     const s = T.unconfirmedNote({ unconfirmed: 3, unconfirmedBy: { stale: 2, 'telemetry-failed': 1 }, partsStale: 1 });
@@ -524,5 +528,23 @@ describe('totalsFromDevices — 확인 불가 장비 (v2.720 감사 B1-02)', () 
     expect(s).not.toMatch(/`/);
     expect(T.unconfirmedNote({ unconfirmed: 0, partsStale: 0 })).toBeNull();
     expect(T.unconfirmedNote(null)).toBeNull();
+  });
+});
+
+describe('streamingMeta (v2.721 감사 R2-03)', () => {
+  it('낡음·텔레메트리 실패로 확인 불가인 스트리밍 장비를 스트리밍 아님으로 세지 않는다', () => {
+    const t = totalsFromDevices([
+      { streaming: true, unconfirmed: 'stale' },
+      { streaming: true, unconfirmed: 'telemetry-failed' },
+      { streaming: true, parts: { fault: 0 }, bgp: null, ports: null },
+    ]);
+    expect(t.notStreaming).toBe(0);
+    const meta = T.streamingMeta(t);
+    expect(meta).toMatch(/스트리밍 아님 0/); expect(meta).toMatch(/확인 불가 2/);
+  });
+  it('옛 합계(필드 없음)는 예전 뺄셈 · 값이 없으면 빈 문자열', () => {
+    expect(T.streamingMeta({ devices: 5, streaming: 3 })).toBe('스트리밍 아님 2');
+    expect(T.streamingMeta({})).toBe('');
+    expect(T.streamingMeta({ devices: 3, streaming: 1, notStreaming: 2, unconfirmed: 2, unconfirmedBy: { 'not-streaming': 2 } })).toBe('스트리밍 아님 2');
   });
 });

@@ -68,7 +68,8 @@ function PolicyPanel({ settings, notify, canWrite, onSaved }) {
       </div>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10, fontSize: 12 }}>
         <span className="muted">스냅샷 정책 예외 — VM 이름이나 메모에 이 글자가 들어 있으면 스냅샷 정책 판정에서 뺍니다(한 줄에 하나, 대소문자 무시)</span>
-        <textarea className="input" rows={3} disabled={!canWrite} value={form.exceptionsText} onChange={(e) => setForm({ ...form, exceptionsText: e.target.value })} style={{ minWidth: 0, fontFamily: 'var(--mono)' }} />
+        {settings.exceptionsHidden && <span className="muted">예외 {Number(settings.exceptionsCount || 0).toLocaleString()}개 — 다른 법인 VM 이름이 들어 있을 수 있어 범위 계정에는 내용을 보이지 않습니다</span>}
+        <textarea className="input" rows={3} disabled={!canWrite || settings.exceptionsHidden} value={form.exceptionsText} onChange={(e) => setForm({ ...form, exceptionsText: e.target.value })} style={{ minWidth: 0, fontFamily: 'var(--mono)' }} />
       </label>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 10, fontSize: 13 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

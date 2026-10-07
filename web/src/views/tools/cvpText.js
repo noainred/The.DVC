@@ -67,6 +67,23 @@ export function pctText(v) {
  * totals → KPI 목록. 값이 0 이면 강조색(accent)을 주지 않는다. 못 읽은 항목 수는 따로 적는다.
  * @returns [{ key, label, value, accent|null, meta }]
  */
+/**
+ * v2.721(감사 R2-03): '스트리밍 아님' 은 CVP 가 스트리밍하지 않는다고 판정한 장비 수(`notStreaming` = unconfirmedBy['not-streaming'])뿐이다.
+ *   예전에는 장비 − 스트리밍 중 으로 계산해, 낡음·기록 없음·텔레메트리 실패로 확인 불가인 장비(스트리밍 중일 수 있다)까지 '스트리밍 아님' 으로 단정했다.
+ *   확인 불가는 따로 말한다. 두 필드가 없는 옛 합계만 예전 뺄셈을 쓴다.
+ */
+export function streamingMeta(totals) {
+  const t = totals && typeof totals === 'object' ? totals : {};
+  const by = t.unconfirmedBy && typeof t.unconfirmedBy === 'object' ? t.unconfirmedBy : null;
+  const ns = numOrNull(t.notStreaming) ?? (by ? (numOrNull(by['not-streaming']) ?? 0) : null);
+  if (ns == null) {
+    const d = numOrNull(t.devices); const s = numOrNull(t.streaming);
+    return d != null && s != null ? `스트리밍 아님 ${countText(Math.max(0, d - s))}` : '';
+  }
+  const other = Math.max(0, (numOrNull(t.unconfirmed) ?? 0) - (by ? (numOrNull(by['not-streaming']) ?? 0) : 0));
+  return [`스트리밍 아님 ${countText(ns)}`, other > 0 ? `확인 불가 ${countText(other)}(스트리밍 여부를 세지 않음)` : null].filter(Boolean).join(' · ');
+}
+
 export function kpiItems(totals) {
   const t = totals && typeof totals === 'object' ? totals : {};
   const n = (k) => numOrNull(t[k]);
@@ -82,7 +99,7 @@ export function kpiItems(totals) {
   return [
     { key: 'devices', label: '장비', value: countText(n('devices')), accent: null, meta: 'CVP 인벤토리 기준' },
     { key: 'streaming', label: '스트리밍 중', value: countText(n('streaming')), accent: null,
-      meta: n('devices') != null && n('streaming') != null ? `스트리밍 아님 ${countText(Math.max(0, n('devices') - n('streaming')))}` : '' },
+      meta: streamingMeta(t) },
     { key: 'parts', label: '장애 파트', value: countText(fault), accent: fault > 0 ? red : (warn > 0 ? amber : null), meta: faultMeta },
     { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: [n('bgpStateUnknown') > 0 ? `상태 미확인 ${countText(n('bgpStateUnknown'))}(down 에 넣지 않음)` : null, unread('bgpUnread', 'BGP 를')].filter(Boolean).join(' · ') },
     { key: 'ports', label: '포트 down', value: countText(n('portsDown')), accent: n('portsDown') > 0 ? amber : null,
@@ -103,7 +120,7 @@ export function kpiItems(totals) {
 export function totalsFromDevices(rows) {
   const t = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0,
     portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0, cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null,
-    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0 };
+    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0, notStreaming: 0 };
   const n0 = (v) => numOrNull(v) ?? 0;
   for (const d of Array.isArray(rows) ? rows : []) {
     if (!d || typeof d !== 'object') continue;
@@ -112,6 +129,7 @@ export function totalsFromDevices(rows) {
     //   따로 센다(서버 cvpTotals 와 같은 규칙 — 판정은 서버 cvpDeviceConfirm 한 벌, 화면은 그 결과만 읽는다). 부품만 낡은 장비는 부품만 뺀다.
     if (typeof d.unconfirmed === 'string' && d.unconfirmed) {
       t.unconfirmed++; t.unconfirmedBy[d.unconfirmed] = (t.unconfirmedBy[d.unconfirmed] || 0) + 1;
+      if (d.unconfirmed === 'not-streaming') t.notStreaming++; // v2.721(감사 R2-03): 서버 cvpTotals 와 같은 규칙
       continue;
     }
     if (d.streaming === true) t.streaming++;

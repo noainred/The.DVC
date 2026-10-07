@@ -29,8 +29,12 @@ export function notesText(data) {
   const n = data?.notes || {};
   const parts = [];
   if (n.excludedOff) parts.push(`꺼진 VM ${n.excludedOff.toLocaleString()}대는 설정대로 뺐습니다`);
+  // v2.721(감사 B1-05): vCPU·메모리를 모르는 VM 은 그 합계·비용에서 빠진다 — 서버가 세는 cpuUnknown 을 말하지 않으면 부분 합이 전체처럼 보인다.
+  if (n.cpuUnknown) parts.push(`vCPU·메모리를 모르는 VM ${n.cpuUnknown.toLocaleString()}대는 vCPU·메모리 합계·비용에서 빠졌습니다`);
   if (n.storageUnknown) parts.push(`스토리지 용량을 모르는 VM ${n.storageUnknown.toLocaleString()}대는 스토리지 합계에서 빠졌습니다`);
   if (n.tagUnknown) parts.push(`태그를 읽지 못한 vCenter 의 VM ${n.tagUnknown.toLocaleString()}대는 '(태그 확인 안 됨)' 으로 묶었습니다`);
+  // v2.721(감사 B1-01): 태그 연결을 일부만 읽은 vCenter 에서 태그가 안 보인 VM — '없음' 으로 단정하지 않는다.
+  if (n.tagPartial) parts.push(`태그를 일부만 읽은 vCenter 에서 이 카테고리 태그가 보이지 않은 VM ${n.tagPartial.toLocaleString()}대는 '(태그 확인 안 됨 — 부분 읽기)' 로 묶었습니다(태그가 없다는 뜻이 아닙니다)`);
   if (n.multiTag) parts.push(`같은 카테고리 태그가 둘 이상인 VM ${n.multiTag.toLocaleString()}대는 첫 태그에만 넣었습니다(두 번 세지 않습니다)`);
   return parts.length ? `${parts.join(' · ')}.` : null;
 }

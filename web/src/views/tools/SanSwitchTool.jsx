@@ -25,6 +25,7 @@ import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 
 import { powerText } from './sanPowerText.js';
 import { CapacityCard, TrafficCard, DcGrid } from './SanSwitchV2Parts.jsx'; // v2.669 시안 'SAN Switch v2'
 import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
+import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 
 /**
@@ -1045,8 +1046,9 @@ function DcStoragePerf({ dcPerf, onClose }) {
 
   // 보기 기준(v2.420): 평균 = sum/avgTotal/maxTotal, 피크 = peak/peakAvg/peakTotal. 정렬 키와 표시 값이 같은 계산이어야 한다.
   const peak = mode === 'peak';
-  const avgOf = (s) => (peak ? (s.peakAvg || 0) : s.avgTotal);
-  const maxOf = (s) => (peak ? (s.peakTotal || 0) : s.maxTotal);
+  // v2.721(감사 R2-01): 피크 보기도 측정 없음을 null 로 둔다(예전 피크 분기는 null 을 0 으로 바꿔 '0 bps' 로 그렸다).
+  const avgOf = (s) => perfAvgOf(s, peak);
+  const maxOf = (s) => perfMaxOf(s, peak);
   const effHours = data?.hours || hours;
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
   const multiDc = dcSet.size !== 1;   // 법인 2곳 이상 또는 전체 — 그때만 분리/합산이 의미 있다
@@ -1078,8 +1080,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
   // 법인 소계 앞에 '전체 합계'를 둔다 — 법인별로 나눠 보면서도 전사 총량을 함께 봐야
   // '어느 법인이 전체의 몇 %인가'를 판단할 수 있다.
   const dcTotals = data?.byDatacenter || [];
-  const grandAvg = dcTotals.reduce((a, d) => a + avgOf(d), 0);
-  const grandMax = dcTotals.reduce((a, d) => a + maxOf(d), 0);
+  // v2.721(감사 R2-02): 측정 없는 법인(null)은 합에서 빼고 개수를 밝힌다.
+  const dcGrand = dcGrandTotals(dcTotals, peak);
+  const grandAvg = dcGrand.avg;
+  const grandMax = dcGrand.max;
 
   return (
     <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
@@ -1167,13 +1171,15 @@ function DcStoragePerf({ dcPerf, onClose }) {
         <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
           {dcTotals.length > 1 && (
             <Kpi label={`🌐 전체 합계(${peak ? '피크' : '평균'} 기준)`} value={bytesPerSecText(grandAvg)} accent="var(--blue)"
-              meta={`법인 ${dcTotals.length} · 스토리지 ${dcTotals.reduce((a, d) => a + d.storages, 0)} · 최대 ${bytesPerSecText(grandMax)}(법인별 최댓값의 단순 합 — 동시 최대가 아닌 상한)`} />
+              meta={`법인 ${dcTotals.length} · 스토리지 ${dcGrand.storages} · 최대 ${bytesPerSecText(grandMax)}(법인별 최댓값의 단순 합 — 동시 최대가 아닌 상한)`
+                + (dcGrand.unmeasuredSeries ? ` · 측정 없음 ${dcGrand.unmeasuredSeries}개 제외` : '')} />
           )}
           {dcTotals.map((d) => (
             <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(avgOf(d))}
-              pct={grandAvg ? Math.round((avgOf(d) / grandAvg) * 100) : undefined}
+              pct={dcSharePct(d, grandAvg, peak)}
               meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(maxOf(d))}(스토리지별 최댓값의 합)`
-                + (dcTotals.length > 1 && grandAvg ? ` · 전체의 ${Math.round((avgOf(d) / grandAvg) * 100)}%` : '')} />
+                + dcUnmeasuredNote(d)
+                + (dcTotals.length > 1 && dcSharePct(d, grandAvg, peak) != null ? ` · 전체의 ${dcSharePct(d, grandAvg, peak)}%` : '')} />
           ))}
         </div>
       )}

@@ -268,6 +268,10 @@ class Store {
       }
 
       const { vcenters } = loadVcenterConfig();
+      // v2.721(감사 S1-01·R1-04): 구성 캐시 6종 정리는 수집 '전' 에 한다. 수집 뒤에 하면 접속처(host)를 바꾼 첫 주기에
+      //   soapClient 가 아직 남은 옛 vCenter 의 같은 moref 구성·태그·경합 값을 새 스냅샷에 싣고, 그 값이 다음 수집까지(실패면
+      //   lastGood 으로 더 오래) 지금 값처럼 서빙된다(오류 없이 틀린 값). 삭제된 vCenter 의 항목 정리도 여기서 함께 한다.
+      syncVcConfigCaches(vcenters);
       // v2.675: 첫 병합 전에는 등록부만으로 '첫 수집 중' 골격을 먼저 게시한다(publishSkeleton 머리말).
       if (!this._merged) this.publishSkeleton(vcenters, dataSource);
       const now = Date.now();
@@ -331,7 +335,7 @@ class Store {
       for (const id of [...this.vcCache.keys()]) if (!ids.has(id)) this.vcCache.delete(id);
       for (const id of [...this.vcLast.keys()]) if (!ids.has(id)) this.vcLast.delete(id); // 마지막 수집시각 맵도 동기화
       pruneInventory(ids); // 위임 인벤토리 캐시도 동기화
-      syncVcConfigCaches(vcenters); // v2.720(감사 S1-01): 구성 캐시 6종도 — 삭제된 vCenter·접속처(host)가 바뀐 vCenter 의 항목을 버린다
+      // (구성 캐시 6종 정리는 수집 전에 한다 — 위 v2.721 S1-01·R1-04)
 
       // Rebuild the merged snapshot from cache every tick (cheap), so non-due
       // vCenters keep serving their last-known data instead of disappearing.
