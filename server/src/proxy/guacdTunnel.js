@@ -67,7 +67,7 @@ export function attachRdpGateway(server) {
       user = resolveTokenUser(url.searchParams.get('token'));
       if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
       // OTP 등록 전 세션은 차단 — WS 업그레이드는 requireEnrolled 미들웨어를 타지 않는다.
-      if (user.mustEnrollOtp) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
+      if (user.mustEnrollOtp || user.demoGuest) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
       // 기능 권한 매트릭스로 검사 — admin 은 항상 통과, 그 외는 'remote.access' 보유 시만.
       if (!userHasPermission(user, 'remote.access')) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }

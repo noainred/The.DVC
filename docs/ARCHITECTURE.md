@@ -77,7 +77,7 @@
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
 | `agent/` | 42 | 5,502 | `agent/envTimeout.js` (18) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
-| `auth/` | 11 | 3,086 | `auth/scope.js` (55) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
+| `auth/` | 12 | 3,187 | `auth/scope.js` (55) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 123 | `availability/analyze.js` (1) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 3 | 590 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |
 | `bmstor/` | 9 | 1,324 | `bmstor/poller.js` (4) | bmstor/poller.js — 베어메탈 스토리지 주기 수집(v2.340). |
@@ -157,7 +157,7 @@
 | `vmseries/` | 9 | 1,291 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,380 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 80개 · 파일 839개 · 167,163줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 80개 · 파일 840개 · 167,264줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
