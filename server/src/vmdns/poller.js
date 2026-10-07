@@ -105,6 +105,9 @@ export async function runVmDnsHistoryOnce({ snap = null, now = Date.now() } = {}
     last = { at: now, vms, reported, unknown, notCollected, first: firsts.length, changed: changes.length, touched: touches.length, ms: Date.now() - t0, error: null };
     if ((++tick % PRUNE_EVERY) === 0) {
       lastPrune = await pruneVmDns(vmDnsRetentionDays()).catch((e) => ({ error: String(e?.message || e).slice(0, 200) }));
+      // v2.719(감사 S1-06): DB 최신 행을 지웠으면 메모리 기준도 다시 읽는다 — set 만 하던 Map 이 지워진 VM(인스턴트 클론 등)을
+      //   프로세스 수명 내내 들고 있었고, 지워진 VM 이 돌아오면 메모리 기준 때문에 첫 관측 행을 다시 쓰지 않았다.
+      if (Number(lastPrune?.latest) > 0) latest = null;
     }
     return { ok: true, first: firsts.length, changed: changes.length, touched: touches.length, unknown, notCollected };
   } finally {

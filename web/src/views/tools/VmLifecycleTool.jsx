@@ -12,6 +12,7 @@ import { VmLink } from '../../components/EntityDetail.jsx';
 import { fmtTs, coverageNote, truncNote, noDetailNote } from '../vmchanges/vmChangesText.js';
 import { LIFE_KIND_LABEL, LIFE_KIND_TONE, ADD_KINDS, existsText, lifeSpanText, netText, sourceText, REMOVE_NOTE } from '../vmlife/vmLifeText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -44,6 +45,8 @@ export default function VmLifecycleTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -64,6 +67,7 @@ export default function VmLifecycleTool({ scope }) {
       const d = await fetchJson('/tools/vm-lifecycle', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, days, kind, qApplied]);
   useEffect(() => { load(); }, [load]);
@@ -81,7 +85,6 @@ export default function VmLifecycleTool({ scope }) {
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
   const life = data.life || {};
-  const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const cov = coverageNote(data, Date.now(), { what: '생성·삭제', events: '생성·삭제' });
   const trunc = truncNote(data);
   const events = Array.isArray(life.events) ? life.events : [];
@@ -109,7 +112,7 @@ export default function VmLifecycleTool({ scope }) {
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
         </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder="VM·사용자·호스트·원본 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

@@ -27,6 +27,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { openSecretsDeep, sealSecretsDeep } from './secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
+import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'credentials.json');
 const MAX_ITEMS = 500;
@@ -129,8 +130,19 @@ export function agentAllowed(agent, list) {
   return Array.isArray(list) && list.some((x) => lc(x) === '*' || lc(x) === a);
 }
 
+/**
+ * v2.719(감사 R1-07): 데모 계정 표지 — mock 모드 시드(actor 'mock-demo')가 만든 계정. 사람이 고쳐 저장하면 표지가 풀린다
+ * (demo:false). live 모드에서는 브로커 인출·사전 검사에서 선택하지 않는다(비밀번호 'mock' 인 합성 계정이 10.0.0.0/8·전 법인에 열려 있었다).
+ */
+export function isDemoCredential(c) {
+  if (!c || c.demo === false) return false;
+  return c.demo === true || c.createdBy === 'mock-demo';
+}
+const DEMO_LIVE_REASON = (c) => `계정 '${c.name}' 은 데모 계정이라 live 모드에서 쓰지 않습니다(설정 › 계정에서 삭제하거나 비밀번호를 고쳐 저장하세요).`;
+const demoBlocked = (c) => isDemoCredential(c) && !isMockMode();
+
 const publicView = (c) => ({
-  id: c.id, name: c.name, kind: c.kind, username: c.username, hosts: c.hosts || [], agents: c.agents || [], note: c.note || '',
+  id: c.id, ...(isDemoCredential(c) ? { demo: true } : {}), name: c.name, kind: c.kind, username: c.username, hosts: c.hosts || [], agents: c.agents || [], note: c.note || '',
   hasPassword: !!c.password, hasKey: !!c.privateKey, hasPassphrase: !!c.passphrase, keyType: c.keyType || '', fingerprint: c.fingerprint || '',
   createdBy: c.createdBy || '', createdAt: c.createdAt || null, updatedAt: c.updatedAt || null, updatedBy: c.updatedBy || '',
   lastUsedAt: c.lastUsedAt || null, lastUsedBy: c.lastUsedBy || '', useCount: c.useCount || 0,
@@ -186,6 +198,8 @@ export function saveCredential(input = {}, { actor = '' } = {}) {
     delete rec.password;
   }
   rec.updatedAt = now; rec.updatedBy = actor;
+  if (actor === 'mock-demo') rec.demo = true;
+  else if (existing && isDemoCredential(existing)) rec.demo = false;   // 사람이 고쳐 저장하면 자기 계정이 된다(v2.719 R1-07)
   if (!existing) { if (db.items.length >= MAX_ITEMS) throw new Error(`계정은 최대 ${MAX_ITEMS}개`); db.items.push(rec); }
   persist();
   return publicView(rec);
@@ -208,6 +222,7 @@ export function deleteCredential(id) {
 export function brokerFetch(id, { agent, host }) {
   const c = load().items.find((x) => x.id === id);
   if (!c) return { ok: false, reason: '계정을 찾을 수 없습니다(삭제됨).' };
+  if (demoBlocked(c)) return { ok: false, reason: DEMO_LIVE_REASON(c) };
   if (!agentAllowed(agent, c.agents)) return { ok: false, reason: `계정 '${c.name}' 은 법인 '${agent}' 에 허용되지 않았습니다.` };
   if (!hostAllowed(host, c.hosts)) return { ok: false, reason: `계정 '${c.name}' 은 대상 '${host}' 에 허용되지 않았습니다.` };
   c.useCount = (c.useCount || 0) + 1; c.lastUsedAt = Date.now(); c.lastUsedBy = `${agent}→${host}`;
@@ -222,6 +237,7 @@ export function brokerFetch(id, { agent, host }) {
 export function credentialUsable(id, { agent, host }) {
   const c = load().items.find((x) => x.id === id);
   if (!c) return { ok: false, reason: '계정을 찾을 수 없습니다.' };
+  if (demoBlocked(c)) return { ok: false, reason: DEMO_LIVE_REASON(c) };
   if (!agentAllowed(agent, c.agents)) return { ok: false, reason: `계정 '${c.name}' 은 법인 '${agent}' 에 허용되지 않았습니다.` };
   if (host && !hostAllowed(host, c.hosts)) return { ok: false, reason: `계정 '${c.name}' 은 대상 '${host}' 에 허용되지 않았습니다.` };
   return { ok: true, name: c.name, kind: c.kind, username: c.username };

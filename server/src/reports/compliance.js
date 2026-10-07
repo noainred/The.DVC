@@ -15,6 +15,9 @@ const ESXI_EOL = [
   { prefix: '8.0', label: 'ESXi 8.0', eol: '2027-10-11' },
 ];
 
+/** v2.719(감사 B1-07): '업그레이드 필요' 로 세는 toolsVersionStatus2 값 — 이전 준비도(migration/analyze.js)도 같은 집합을 쓴다. */
+export const TOOLS_NEED_UPGRADE = Object.freeze(['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted']);
+
 export function esxiSupportStatus(version, now = Date.now()) {
   const v = String(version || '');
   const hit = ESXI_EOL.find((e) => v.startsWith(e.prefix));
@@ -62,8 +65,8 @@ export function computeCompliance(snap, opts = {}) {
     const noToolsData = !v.toolsVersionStatus && (v.toolsStatus == null || v.toolsStatus === '');
     const st = v.toolsVersionStatus || (noToolsData ? '(미수집)' : v.toolsStatus === 'RUNNING' ? 'guestToolsCurrent' : 'guestToolsNotInstalled');
     toolsDist.set(st, (toolsDist.get(st) || 0) + 1);
-    if (['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted'].includes(st)) needUpgradeCount += 1;
-    if (['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted'].includes(st) && needUpgrade.length < LIST_MAX) {
+    if (TOOLS_NEED_UPGRADE.includes(st)) needUpgradeCount += 1;
+    if (TOOLS_NEED_UPGRADE.includes(st) && needUpgrade.length < LIST_MAX) {
       needUpgrade.push({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsVersion: v.toolsVersion || '', status: st, powerState: v.powerState });
     }
   }

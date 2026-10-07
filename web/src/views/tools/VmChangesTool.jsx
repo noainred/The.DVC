@@ -13,6 +13,7 @@ import {
   MOVE_KIND_LABEL, CHANGE_KIND_LABEL, fmtTs, routeText, coverageNote, truncNote, noDetailNote, changeText,
 } from '../vmchanges/vmChangesText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -45,6 +46,8 @@ export default function VmChangesTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -65,6 +68,7 @@ export default function VmChangesTool({ scope }) {
       const d = await fetchJson('/tools/vm-changes', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, days, kind, qApplied]);
   useEffect(() => { load(); }, [load]);
@@ -83,7 +87,6 @@ export default function VmChangesTool({ scope }) {
   if (!data) return <Loading />;
   const mv = data.moves || {};
   const ch = data.changes || {};
-  const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const cov = coverageNote(data);
   const trunc = truncNote(data);
   const vmRows = (Array.isArray(mv.vms) ? mv.vms : []).filter((v) => !churnOnly || v.churn);
@@ -109,7 +112,7 @@ export default function VmChangesTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
         </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 180px', maxWidth: 320 }} placeholder={tab === 'moves' ? 'VM·vCenter 검색' : 'VM·사용자·대상 검색'} value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

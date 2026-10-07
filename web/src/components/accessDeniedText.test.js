@@ -84,3 +84,34 @@ describe('buildRequestText — 관리자에게 전달할 요청 문구', () => {
     expect(t).not.toContain('서버 사유:');
   });
 });
+
+describe('v2.719(감사 W1-02) 데모 계정 거부 — 범위 확대 요청이 아니다', () => {
+  it('HttpError 가 demoGuest 표지를 싣고 describePermission 이 그것을 먼저 본다', async () => {
+    const { HttpError } = await import('../api.js');
+    const e = new HttpError('forbidden', { status: 403, body: { error: 'forbidden', demoGuest: true, reason: '데모 계정은 설정을 바꿀 수 없습니다.' } });
+    expect(e.demoGuest).toBe(true);
+    const d = describePermission(e);
+    expect(d.kind).toBe('demo');
+    expect(d.noRequest).toBe(true);
+    expect(d.need).toContain('데모 계정은 설정·실제 접속 실행이 막혀 있습니다');
+    expect(`${d.need} ${d.how}`).not.toContain('범위 확대');
+    expect(buildRequestText({ info: e })).not.toContain('범위 확대');
+    // 표지가 없으면 예전 판정 그대로
+    expect(new HttpError('x', { status: 403, body: { reason: 'r' } }).demoGuest).toBe(false);
+    expect(describePermission({ requiredRole: ['admin'], demoGuest: false }).kind).toBe('role');
+  });
+});
+
+describe('v2.719(감사 W1-02) AccessDenied 렌더 — 데모 거부에는 요청 문구 상자가 없다', () => {
+  it('demoGuest 이면 요청 문구 복사 버튼을 그리지 않고, 일반 거부는 그대로', async () => {
+    const { createElement } = await import('react');
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { default: AccessDenied } = await import('./AccessDenied.jsx');
+    const demo = renderToStaticMarkup(createElement(AccessDenied, { info: { demoGuest: true, serverReason: '데모' } }));
+    expect(demo).toContain('데모 계정은 설정·실제 접속 실행이 막혀 있습니다');
+    expect(demo).not.toContain('요청 문구 복사');
+    expect(demo).not.toContain('범위 확대');
+    const normal = renderToStaticMarkup(createElement(AccessDenied, { info: { requiredRole: ['admin'] } }));
+    expect(normal).toContain('요청 문구 복사');
+  });
+});

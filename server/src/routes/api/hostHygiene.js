@@ -55,7 +55,8 @@ export function registerHostHygiene(api) {
     const ids = (scoped.vcenters || []).map((v) => v.id);
     const db = await getLogsDb();
     const since = Date.now() - days * 86_400_000 - 86_400_000;
-    const events = ids.length ? db.opsEvents({ vcenterIds: ids, since, types: [...HOSTOPS_TYPES] }, 20_000) : [];
+    // v2.719(감사 S1-04): 시간 조각 + 양보로 읽는다.
+    const events = ids.length ? await db.opsEventsAsync({ vcenterIds: ids, since, types: [...HOSTOPS_TYPES] }, 20_000) : [];
     const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
     const s = loadLogSettings();
     return {

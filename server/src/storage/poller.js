@@ -77,6 +77,9 @@ async function collectOne(dev, { periodic = false } = {}) {
 /** mock 모드 Isilon 영역 — 합성 결과를 실제 수집기와 같은 DB 경로로 저장한다(장비 접속 없음). */
 async function saveDemoAreas(dev) {
   const r = demoIsilonAreas(dev, enabledAreas(), ONEFS_AREAS.filter((a) => a.enabled === false));
+  // v2.719(감사 B2-02): 영역 DB 에는 **데모 장비(mock-)만** 저장한다 — 사람이 등록한 Isilon 의 영역 DB 에 합성 행이 실측처럼
+  //   남지 않게(v2.709 이전처럼 요약만 돌려준다). 요약에는 데모 표지가 붙지 않지만 스냅샷 자체가 mock 표지(extra.mock)를 싣는다.
+  if (!isDemoId(dev.id)) return { summary: r.summary, endpoints: r.endpoints, demoNotStored: true };
   try { await saveAreaResults(dev.id, r.results); } catch (e) { console.warn(`[storage-areas] 데모 DB 저장 실패(${dev.id}): ${e.message}`); }
   return { summary: r.summary, endpoints: r.endpoints };
 }

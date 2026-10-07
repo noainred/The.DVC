@@ -8,6 +8,7 @@
  *  - 등록부 CRUD·연결 테스트·설정: adminOnly(자격증명) + 감사로그(비밀 미기재).
  *  - 연결 테스트가 저장 비밀을 물려받으면 **host·계정·인증 방식을 저장값으로 고정**한다(v2.480 — 저장 비밀이 요청자 호스트로 가지 않게).
  */
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { logAudit } from '../../audit.js';
@@ -663,7 +664,7 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
   let busy = false;
   if (direct.length) {
     if (isPollerBusy()) busy = true;
-    else pollCvpOnce({ manual: true, only: direct.map((s) => s.id), trigger: 'manual' }).catch((e) => console.warn(`[cvp] 수동 수집 실패: ${e.message}`));
+    else pollCvpOnce({ manual: true, only: direct.map((s) => s.id), demoOnly: isDemoGuest(req.user), trigger: 'manual' }).catch((e) => console.warn(`[cvp] 수동 수집 실패: ${e.message}`));
   }
   let requested = 0;
   for (const s of edge) { requestCvpCollect(s.id, s.agent); requested++; }

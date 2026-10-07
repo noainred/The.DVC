@@ -57,6 +57,8 @@ export default function AccessDenied({ info = null, message = '', compact = fals
         {reason ? (<><dt>서버 사유</dt><dd className="ad-reason">{reason}</dd></>) : null}
       </dl>
 
+      {/* v2.719(감사 W1-02): 데모 계정 거부는 권한 요청으로 풀리지 않는다 — 요청 문구 상자를 그리지 않는다. */}
+      {d.noRequest ? null : (
       <div className="ad-action">
         <p className="ad-ask">
           이 기능이 업무에 필요하면 <strong>포탈 관리자에게 아래 내용을 전달해</strong> 권한을 요청하세요.
@@ -66,6 +68,7 @@ export default function AccessDenied({ info = null, message = '', compact = fals
           {copied ? '✓ 복사했습니다' : '요청 문구 복사'}
         </button>
       </div>
+      )}
     </div>
   );
 }

@@ -22,17 +22,18 @@ import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
-import { refreshVmCfg } from '../vmcfg/collect.js';   // v2.697(B10)
+import { numOrNull } from '../util/numOrNull.js';   // v2.719(B1-09)
+import { refreshVmCfg, VM_CFG_BUDGET_MS } from '../vmcfg/collect.js';   // v2.697(B10)
 import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
-import { refreshHostCfg } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
+import { refreshHostCfg, HOST_CFG_BUDGET_MS } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
-import { refreshContention } from '../contention/collect.js';   // v2.706(C2·C3)
+import { refreshContention, CONTENTION_BUDGET_MS } from '../contention/collect.js';   // v2.706(C2·C3)
 import { get as contentionGet } from '../contention/cache.js';
 import { dsUuidOf } from '../contention/parse.js';
-import { refreshDsCfg, getDsCfg } from '../dscfg/collect.js';   // v2.700(A17)
-import { refreshClusterCfg, getClusterCfg } from '../clustercfg/collect.js';   // v2.701(A6)
+import { refreshDsCfg, getDsCfg, DS_CFG_BUDGET_MS } from '../dscfg/collect.js';   // v2.700(A17)
+import { refreshClusterCfg, getClusterCfg, CLUSTER_CFG_BUDGET_MS } from '../clustercfg/collect.js';   // v2.701(A6)
 import { inventoryViaUpdates, updateSessionStatus } from './updateSession.js';   // v2.705(B1)
-import { refreshTagInv } from '../tags/collect.js';   // v2.703(A15)
+import { refreshTagInv, getTagInv, TAG_BUDGET_MS } from '../tags/collect.js';   // v2.703(A15)
 import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
@@ -1568,13 +1569,44 @@ export function parseEventsXml(xml) {
 
 const num = (v) => (v == null || v === '' ? 0 : Number(v) || 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
+// v2.719(감사 B1-09): 바이트 → GB, 못 읽은 값은 null(0 이면 '디스크 0GB' 라는 거짓이 되고 비용 배분의 '용량 모름' 경로가 막힌다).
+const gbOrNull = (v) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 1024 ** 3); };
+
+// v2.719(감사 S1-01): 부가 갱신(구성·호스트·경합·DS·클러스터·태그)은 vCenter 수집 데드라인 안에서만 돈다.
+//   각 갱신의 자체 예산 합(약 115초)이 데드라인(최소 90초)보다 커서, 고RTT vCenter 에서 부가 갱신이 본 인벤토리까지
+//   데드라인 실패로 만들 수 있었다. 끝난 뒤 할 일(VM 조립·솔루션·라이선스 조회)을 위해 여유를 남기고, 남은 시간이
+//   하한보다 적으면 그 갱신을 건너뛰고 사유를 남긴다(직전 캐시 값은 그대로 싣는다).
+export const AUX_RESERVE_MS = 15_000;
+export const AUX_MIN_MS = 3_000;
+/** store.vcDeadlineMs 와 같은 식(순환 import 를 피하려고 여기에 둔다 — 테스트가 두 값을 대조한다). */
+export const collectDeadlineMs = (vc) => Math.max(90_000, effectiveRequestTimeoutMs(vc?.timeoutMs, 30_000) * 3);
+/** 부가 갱신 하나에 줄 예산(ms). 남은 시간이 하한 미만이거나 신호가 끊겼으면 null(= 건너뜀). */
+export function auxBudgetMs(deadlineAt, ownMs, now = Date.now(), signal = null) {
+  if (signal?.aborted) return null;
+  const left = deadlineAt - AUX_RESERVE_MS - now;
+  if (!(left >= AUX_MIN_MS)) return null;
+  return Math.min(ownMs, left);
+}
 
 /**
  * Collect a normalized snapshot (same shape as the mock generator) from one
  * vCenter via SOAP. Throws on connection/login failure so the caller can fall
  * back to the REST collector.
+ * opts.deadlineAt — 이 수집의 데드라인 시각(없으면 지금 + collectDeadlineMs). 부가 갱신 예산의 기준(v2.719 S1-01).
  */
-export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
+export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = Date.now() + collectDeadlineMs(vc) } = {}) {
+  const auxSkipped = [];
+  // 부가 갱신 실행기 — 예산을 데드라인에 맞추고, 모자라면 건너뛴 사유를 남긴다(조용히 빼지 않는다).
+  const runAux = async (kind, label, ownMs, fn) => {
+    const b = auxBudgetMs(deadlineAt, ownMs, Date.now(), signal);
+    if (b == null) {
+      const reason = signal?.aborted ? 'aborted' : 'deadline';
+      auxSkipped.push({ kind, reason });
+      console.warn(`[collect] ${vc.id} ${label} 갱신 건너뜀: ${reason === 'aborted' ? '수집이 중단됨' : '수집 데드라인까지 남은 시간이 부족함'}(직전 값 유지 · 다음 주기에 다시 시도)`);
+      return { skipped: reason };
+    }
+    try { return await fn(b); } catch (err) { console.warn(`[collect] ${vc.id} ${label} 갱신 건너뜀: ${err.message}`); return null; }
+  };
   const c = new VimSoapClient(vc, { signal });
   await c.login();
   try {
@@ -1815,12 +1847,12 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     // v2.697(B10): VM 구성 속성·장치 위생 요약 — 오래된 VM 부터 주기당 상한만큼 다시 읽고(vmcfg/collect.js), 캐시 값을
     // vm.cfg·vm.dev 로 싣는다. 실패는 격리(인벤토리 수집은 성공) — 캐시에 없는 VM 은 키 자체가 없다(= 미수집).
     const vmRefs = objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref);
-    try { await refreshVmCfg(c, vc.id, vmRefs); } catch (err) { console.warn(`[collect] ${vc.id} VM 구성 속성 갱신 건너뜀: ${err.message}`); }
+    await runAux('vmcfg', 'VM 구성 속성', VM_CFG_BUDGET_MS, (budgetMs) => refreshVmCfg(c, vc.id, vmRefs, { budgetMs }));
     // v2.699(A1·A9·A11·A12): 호스트 구성·보안 — 연결된 호스트만, 오래된 것부터 주기당 상한만큼(hostcfg/collect.js).
     // 캐시 값을 host.hcfg 로 싣는다. 연결이 끊긴 호스트는 갱신하지 않지만 직전 값은 싣는다(판정은 연결 상태를 본다).
     {
       const liveHostRefs = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED').map(([ref]) => ref);
-      try { await refreshHostCfg(c, vc.id, liveHostRefs, { allRefs: [...hostByRef.keys()] }); } catch (err) { console.warn(`[collect] ${vc.id} 호스트 구성 갱신 건너뜀: ${err.message}`); }
+      await runAux('hostcfg', '호스트 구성', HOST_CFG_BUDGET_MS, (budgetMs) => refreshHostCfg(c, vc.id, liveHostRefs, { allRefs: [...hostByRef.keys()], budgetMs, signal }));
       for (const [ref, h] of hostByRef) { const e = hostCfgCacheGet(vc.id, ref); if (e) h.hcfg = e; }
     }
     // v2.706(C2·C3): CPU 경합·디스크 지연 — 켜진 VM(템플릿 제외)·연결된 호스트의 실시간 통계 최근 창(contention/collect.js).
@@ -1829,7 +1861,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       const liveVms = objs.filter((x) => x.type === 'VirtualMachine' && (x.props['runtime.powerState'] || '').toUpperCase().includes('ON') && x.props['summary.config.template'] !== 'true')
         .map((x) => ({ ref: x.ref, numCpu: num(x.props['summary.config.numCpu']) }));
       const liveHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED').map(([ref]) => ref);
-      try { await refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts }); } catch (err) { console.warn(`[collect] ${vc.id} CPU 경합·디스크 지연 갱신 건너뜀: ${err.message}`); }
+      await runAux('contention', 'CPU 경합·디스크 지연', CONTENTION_BUDGET_MS, (budgetMs) => refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts, budgetMs, signal }));
       for (const [ref, h] of hostByRef) { const e = contentionGet(vc.id, 'host', ref); if (e) h.perfc = e; }
     }
 
@@ -1859,9 +1891,9 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         guestOS: p['summary.config.guestFullName'] || 'unknown',
         cpuCount: numCpu,
         memMB,
-        storageGB: Math.round(num(p['summary.storage.committed']) / 1024 ** 3),
+        storageGB: gbOrNull(p['summary.storage.committed']),   // v2.719(B1-09): 못 읽으면 null(0 아님)
         // Thin 추정: uncommitted(여유 가능 공간)이 의미있게 크면 thin 디스크 존재.
-        uncommittedGB: Math.round(num(p['summary.storage.uncommitted']) / 1024 ** 3),
+        uncommittedGB: gbOrNull(p['summary.storage.uncommitted']),
         thin: num(p['summary.storage.uncommitted']) > 1024 ** 3,
         cpuUsagePct: powered ? pct(cpuUsageMhz, vmCpuCapacity) : 0,
         memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
@@ -1937,7 +1969,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     // v2.700(A17): 데이터스토어 운영 속성 — 오래된 DS 부터 상한만큼(dscfg/collect.js), 캐시 값을 ds.dcfg 로.
     {
       const dsRefs = objs.filter((x) => x.type === 'Datastore').map((x) => x.ref);
-      try { await refreshDsCfg(c, vc.id, dsRefs); } catch (err) { console.warn(`[collect] ${vc.id} 데이터스토어 운영 속성 갱신 건너뜀: ${err.message}`); }
+      await runAux('dscfg', '데이터스토어 운영 속성', DS_CFG_BUDGET_MS, (budgetMs) => refreshDsCfg(c, vc.id, dsRefs, { budgetMs }));
       const byId = new Map(datastores.map((d) => [d.id, d]));
       for (const ref of dsRefs) { const e = getDsCfg(vc.id, ref); const d = byId.get(`${vc.id}:${ref}`); if (e && d) d.dcfg = e; }
     }
@@ -1981,11 +2013,12 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     // 직렬로 합산(최대 2×timeout)되어 다음 폴 주기를 밀어내는 것을 방지.
     // v2.701(A6): 클러스터 HA·DRS·규칙·EVC — 오래된 클러스터부터 상한만큼(clustercfg/collect.js). 캐시에 없는 클러스터는 배열에 없다(= 미수집).
     const clusterRefs = objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => x.ref);
-    try { await refreshClusterCfg(c, vc.id, clusterRefs); } catch (err) { console.warn(`[collect] ${vc.id} 클러스터 HA·DRS 갱신 건너뜀: ${err.message}`); }
+    await runAux('clustercfg', '클러스터 HA·DRS', CLUSTER_CFG_BUDGET_MS, (budgetMs) => refreshClusterCfg(c, vc.id, clusterRefs, { budgetMs }));
     const clusterCfg = clusterRefs.map((r) => getClusterCfg(vc.id, r)).filter(Boolean);
     // v2.703(A15): 태그·사용자 지정 속성 — tagRefreshMs 마다 한 번(그 사이에는 캐시). 실패는 tagInv 의 오류로만 남는다.
-    let tagInv = null;
-    try { tagInv = await refreshTagInv(c, vc, objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref), { signal }); } catch (err) { console.warn(`[collect] ${vc.id} 태그 갱신 건너뜀: ${err.message}`); }
+    //   v2.719(S1-01): 건너뛰면(데드라인 부족) 캐시 값을 그대로 싣는다.
+    let tagInv = await runAux('tags', '태그', TAG_BUDGET_MS, (budgetMs) => refreshTagInv(c, vc, objs.filter((x) => x.type === 'VirtualMachine').map((x) => x.ref), { signal, budgetMs }));
+    if (!tagInv || tagInv.skipped) tagInv = getTagInv(vc.id);
 
     const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
     const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : [];
@@ -1997,6 +2030,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
         build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
         solutions, licenses, clusterCfg, tagInv, invFetch,
+        ...(auxSkipped.length ? { auxSkipped } : {}),   // v2.719(S1-01): 데드라인이 모자라 건너뛴 부가 갱신
       },
       hosts, vms, datastores, networks, alarms,
     };

@@ -32,6 +32,18 @@ export function demoBmSettings(saved = {}, vcenters = []) {
   return { ...saved, enabled: true, corps, includeUnassigned: true, idracTelemetry: true, demo: true };
 }
 
+/**
+ * v2.719(감사 R1-03): 데모 대상인가 — iDRAC 등록 id(serverId·regId)가 `mock-` 이거나, iDRAC 없이 OS 계정만 있는 대상이면
+ * 그 OS 등록 id 가 `mock-` 일 때. mock 모드라도 사람이 등록한 서버(`mock-` 아님)는 합성하지 않고 예전처럼 수집한다
+ * (합성 값이 실장비 키로 이력 DB 에 실측처럼 남지 않게 — flags.js 규칙).
+ */
+export function isDemoBmTarget(tg) {
+  const m = (v) => String(v || '').startsWith('mock-');
+  if (!tg || typeof tg !== 'object') return false;
+  if (m(tg.serverId) || m(tg.idrac?.regId)) return true;
+  return !tg.idrac && !String(tg.serverId || '').trim() && m(tg.osHost?.id);
+}
+
 const r1 = (v) => Math.round(v * 10) / 10;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -50,7 +62,8 @@ export function demoBmUsageRow(target, t) {
   const fast = /db|gpu/.test(String(target.name || '')) ? 25e9 : 10e9;
   const hasFc = /db/.test(String(target.name || ''));
   return {
-    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac',
+    // v2.719(감사 R1-03): 데모 행 표지 — src 토큰 'demo'. 'idrac' 토큰은 그대로 둔다(iDRAC 출처 판정 bmSrcIsIdrac·IDRAC_ONLY_SQL 이 같게 읽는다).
+    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac+demo',
     cpu_pct: r1(load), mem_pct: r1(clamp(memBase + load * 0.25 + (wob('m') - 0.5) * 4, 1, 99)),
     disk_busy_pct: null, disk_used_pct: null,
     net_pct: netPct, net_bps: Math.round((netPct / 100) * (fast / 8)),

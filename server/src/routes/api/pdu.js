@@ -8,6 +8,7 @@
  *  - CSV 비밀번호 포함 내보내기는 **설정 소유자 전용**(평문 자격증명 덤프이므로).
  */
 
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
 import { requireSettingsOwner } from '../admin/shared.js';
@@ -274,13 +275,13 @@ export function registerPdu(api) {
         reason: `${dup ? '이미 재수집 요청이 대기 중입니다' : '재수집 요청 등록'} — 엣지 '${dev.agent}' 의 다음 설정 pull 때 즉시 수집하고 바로 push 합니다.`,
       });
     }
-    const r = await collectDeviceNow(dev.id);
+    const r = await collectDeviceNow(dev.id, { demoOnly: isDemoGuest(req.user) }); // v2.719(감사 R1-06): 데모 계정은 데모 장비만
     logAudit({ user: req.user?.username, action: 'PDU 즉시 수집', target: dev.id });
     res.status(r.ok ? 200 : 502).json(r);
   });
 
   api.post('/tools/pdu/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
-    const r = await pollOnce({ manual: true }); // v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
+    const r = await pollOnce({ manual: true, demoOnly: isDemoGuest(req.user) }); // v2.719(R1-06) 데모 계정은 데모 장비만 · v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
     logAudit({ user: req.user?.username, action: 'PDU 전체 수집', target: `${r.devices ?? 0}대` });
     res.json(r);
   });

@@ -135,7 +135,7 @@ test('⑦ 엣지 수신 정제 — 아는 필드만, 모양이 아니면 null', 
 
 test('⑧ 수집기 배선 — 인벤토리 수집이 refreshVmCfg 를 부르고 캐시 값을 vm.cfg·vm.dev 로 싣는다', () => {
   const src = fs.readFileSync(new URL('../src/vcenter/soapClient.js', import.meta.url), 'utf8');
-  assert.match(src, /await refreshVmCfg\(c, vc\.id, vmRefs\)/);
+  assert.match(src, /refreshVmCfg\(c, vc\.id, vmRefs\b/);
   assert.match(src, /cfgEntry\?\.cfg \? \{ cfg: cfgEntry\.cfg \}/);
   // 30초 인벤토리 요청 자체에는 구성 경로를 싣지 않는다(응답 크기 — vmcfg/cache.js 머리말).
   const vmSpec = /type: 'VirtualMachine', paths: \[([\s\S]*?)\] \}/.exec(src)[1];

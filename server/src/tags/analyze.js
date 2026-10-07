@@ -5,7 +5,15 @@
  *  · 태그를 못 읽은 vCenter 의 VM 은 '누락' 이 아니라 '확인 안 됨' 으로 센다(빈 결과를 '모두 붙어 있다' 라 말하지 않는다).
  *  · 필수 카테고리가 그 vCenter 에 아예 없으면 그 사실을 따로 밝힌다(모든 VM 이 누락으로 보이는 이유).
  *  · 템플릿은 점검하지 않는다(운영 VM 이 아니다).
+ *  · v2.719(감사 B1-04): 태그 연결을 일부만 읽은 vCenter(시간 예산·상한으로 잘림)의 '필수 카테고리 없음' 은 단정하지 않는다 —
+ *    읽지 못한 태그가 그 VM 에 붙어 있을 수 있다. 누락 대신 '확인 안 됨(부분)' 으로 따로 센다(partialUnchecked).
  */
+/** 그 vCenter 의 태그 연결을 다 읽지 못했는가. partialTags 가 없는 보고(구버전 엣지)는 잘림 개수로 판정한다(보수적). */
+export function tagsPartialOf(inv) {
+  if (!inv) return false;
+  if (typeof inv.partialTags === 'boolean') return inv.partialTags;
+  return Number(inv.truncated?.tags) > 0;
+}
 const lc = (s) => String(s || '').toLowerCase();
 export const ROWS_MAX = 2000;
 
@@ -41,7 +49,7 @@ export function analyzeTags(vcenters, vms, policy = {}, { q = '' } = {}) {
   const missingByCat = Object.fromEntries(req.map((r) => [r.name, 0]));
   const rows = [];
   const corp = new Map();   // tag -> {tag, vms, vcenters:Set}
-  let checked = 0; let unchecked = 0; let corpUnassigned = 0; let corpChecked = 0;
+  let checked = 0; let unchecked = 0; let corpUnassigned = 0; let corpChecked = 0; let partialUnchecked = 0;
   const vmsBy = new Map();
   for (const v of vms || []) { if (v.template) continue; const a = vmsBy.get(v.vcenterId) || []; a.push(v); vmsBy.set(v.vcenterId, a); }
   for (const vc of vcenters || []) {
@@ -52,7 +60,8 @@ export function analyzeTags(vcenters, vms, policy = {}, { q = '' } = {}) {
     (inv?.categories || []).forEach((c, i) => { if (c) catIdxByKey.set(lc(c.name), i); });
     const reqAbsent = req.filter((r) => !catIdxByKey.has(r.key)).map((r) => r.name);
     const tagsOk = state === 'ok' || state === 'stale';
-    const vs = { vcenterId: vc.id, name: vc.name || vc.id, state, tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null,
+    const partial = tagsOk && tagsPartialOf(inv);
+    const vs = { partial, partialUnchecked: partial ? 0 : null, vcenterId: vc.id, name: vc.name || vc.id, state, tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null,
       tagsError: inv?.tagsError || null, customError: inv?.customError || null, vms: list.length,
       categories: tagsOk ? (inv.categories || []).length : null, tags: tagsOk ? (inv.tags || []).length : null,
       requiredAbsent: tagsOk ? reqAbsent : null, withMissing: tagsOk ? 0 : null, truncated: inv?.truncated || null };
@@ -92,12 +101,15 @@ export function analyzeTags(vcenters, vms, policy = {}, { q = '' } = {}) {
         if (corpKey && ck === corpKey) corpTags.push(t.name);
       }
       const missing = req.filter((r) => !present.has(r.key)).map((r) => r.name);
-      for (const m of missing) missingByCat[m] += 1;
-      if (corpKey) {
+      // 연결을 일부만 읽었으면 '없다' 를 단정하지 않는다 — 확인 안 됨(부분)으로 세고 누락 행·집계에 넣지 않는다.
+      const unsure = partial && missing.length > 0;
+      if (unsure) { partialUnchecked += 1; vs.partialUnchecked += 1; } else for (const m of missing) missingByCat[m] += 1;
+      if (corpKey && (corpTags.length || !partial)) {   // 일부만 읽었으면 법인 태그 '없음' 도 단정하지 않는다
         corpChecked += 1;
         if (!corpTags.length) corpUnassigned += 1;
         for (const ct of corpTags) { const e = corp.get(ct) || { tag: ct, vms: 0, vcenters: new Set() }; e.vms += 1; e.vcenters.add(vc.id); corp.set(ct, e); }
       }
+      if (unsure) continue;
       if (missing.length) {
         vs.withMissing += 1;
         if (!qq || [vm.name, vs.name, ...missing].some((x) => lc(x).includes(qq))) {
@@ -110,7 +122,8 @@ export function analyzeTags(vcenters, vms, policy = {}, { q = '' } = {}) {
   rows.sort((a, b) => b.missing.length - a.missing.length || String(a.vcenterName).localeCompare(String(b.vcenterName)) || String(a.vm).localeCompare(String(b.vm)));
   return {
     policy: { requiredCategories: req.map((r) => r.name), corpCategory: policy.corpCategory || '' },
-    coverage: { vcenters: vcList.length, tagsOk: vcList.filter((v) => v.state === 'ok' || v.state === 'stale').length, checkedVms: checked, uncheckedVms: unchecked },
+    coverage: { vcenters: vcList.length, tagsOk: vcList.filter((v) => v.state === 'ok' || v.state === 'stale').length, checkedVms: checked, uncheckedVms: unchecked,
+      partialVcenters: vcList.filter((v) => v.partial).length, partialUncheckedVms: partialUnchecked },
     vcenters: vcList.sort((a, b) => String(a.name).localeCompare(String(b.name))),
     categories: [...cats.values()].map((e) => ({ name: e.name, cardinality: e.cardinality, tags: [...e.tags].sort().slice(0, 50), tagCount: e.tags.size, vms: e.vms, vcenters: e.vcenters.size })).sort((a, b) => b.vms - a.vms || a.name.localeCompare(b.name)),
     missingByCategory: missingByCat,

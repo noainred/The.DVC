@@ -13,7 +13,11 @@ import { isMockMode, demoHash } from './flags.js';
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const RECENT_MS = 2 * DAY;
-let _done = false;
+// v2.719(감사 R2-04): 래치는 vCenter 단위다. 예전 전역 _done 은 작업 전에 서서, 빈 첫 호출(VM 이 아직 없는 스냅샷)·
+//   적재 실패·나중에 생긴 vCenter 가 재시작 전까지 백필되지 않았다. 채웠거나 이미 과거가 있는 vCenter 만 기록하고
+//   나머지는 다음 샘플에 다시 본다.
+const _doneVc = new Set();
+const _runningVc = new Set();   // 샘플러는 기다리지 않고 부른다 — 진행 중인 vCenter 를 두 호출이 함께 채우지 않게
 
 /** 과거 시각 t 의 계수(순수 · 결정적). 사용량은 하루·주 주기 + 증가 추세, 할당량은 느린 계단. */
 export function demoVmperfFactor(metric, k, t, now) {
@@ -33,26 +37,33 @@ export function demoVmperfFactor(metric, k, t, now) {
  * @returns {Promise<{filled:number, vcenters:number}|{skipped:string}>}
  */
 export async function demoVmperfBackfill(byVc, ts = Date.now(), { days = 90 } = {}) {
-  if (_done) return { skipped: 'done' };
   if (!isMockMode()) return { skipped: 'not-mock' };
   if (!byVc || typeof byVc[Symbol.iterator] !== 'function') return { skipped: 'no-rows' };
-  _done = true;
+  const pending = [...byVc].filter(([vcId, rows]) => rows?.length && !_doneVc.has(vcId) && !_runningVc.has(vcId));
+  if (!pending.length) return { skipped: 'done' };
+  for (const [vcId] of pending) _runningVc.add(vcId);
+  try { return await backfillPending(pending, ts, days); } finally { for (const [vcId] of pending) _runningVc.delete(vcId); }
+}
+
+async function backfillPending(pending, ts, days) {
   const { insertVmperf, vmperfMeta } = await import('../../metrics/vmperfDb.js');
   let filled = 0; let vcs = 0;
-  for (const [vcId, rows] of byVc) {
-    if (!rows?.length) continue;
-    const meta = await vmperfMeta(vcId, rows[0].metric).catch(() => null);
-    if (meta?.firstTs != null && meta.firstTs < ts - RECENT_MS) continue;   // 이미 과거가 있다 — 건드리지 않는다
+  for (const [vcId, rows] of pending) {
+    let meta;
+    try { meta = await vmperfMeta(vcId, rows[0].metric); } catch { continue; }   // 못 읽었으면 다음 샘플에 다시
+    if (meta?.firstTs != null && meta.firstTs < ts - RECENT_MS) { _doneVc.add(vcId); continue; }   // 이미 과거가 있다 — 건드리지 않는다
     const stop = (meta?.firstTs ?? ts) - HOUR;
     vcs += 1;
+    let failed = false;
     for (let t = Math.floor((ts - days * DAY) / HOUR) * HOUR; t <= stop; t += HOUR) {
       const past = rows.map((r) => ({ metric: r.metric, k: r.k, v: Math.round(r.v * demoVmperfFactor(r.metric, r.k, t, ts) * 10) / 10 }));
-      try { filled += await insertVmperf(vcId, past, t); } catch (e) { console.warn(`[mock] vmperf 데모 백필 실패(${vcId || '전체'}): ${e.message}`); break; }
+      try { filled += await insertVmperf(vcId, past, t); } catch (e) { console.warn(`[mock] vmperf 데모 백필 실패(${vcId || '전체'}) — 다음 샘플에 다시 시도: ${e.message}`); failed = true; break; }
       if ((t / HOUR) % 240 === 0) await new Promise((r) => setImmediate(r));   // 긴 루프 — 이벤트 루프에 양보
     }
+    if (!failed) _doneVc.add(vcId);
   }
   if (vcs) console.log(`[mock] VM 할당·사용 추이 데모 백필: vCenter ${vcs}개 · ${days}일 · ${filled}행`);
   return { filled, vcenters: vcs };
 }
 
-export function _resetVmperfDemoForTest() { _done = false; }
+export function _resetVmperfDemoForTest() { _doneVc.clear(); _runningVc.clear(); }

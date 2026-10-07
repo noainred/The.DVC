@@ -171,13 +171,17 @@ export async function bmCollectNow(trigger = 'manual') {
       latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, authStopped: stopView(stop), at: prev?.at || stop.at, agent: s.agent || '' });
       return false;
     });
-    // v2.708: 데모는 전 서버를 중앙에서 합성한다(엣지 PUSH·잡 큐를 타지 않는다 — 접속처가 없다).
-    const central = demo ? servers : servers.filter((s) => !String(s.agent || '').trim());
+    // v2.708: 데모는 데모 서버를 중앙에서 합성한다(엣지 PUSH·잡 큐를 타지 않는다 — 접속처가 없다).
+    // v2.719(감사 R1-03): 합성은 **데모 서버(mock-)에만** — 사람이 등록한 서버는 mock 모드에서도 예전처럼 실제로 수집한다
+    //   (합성 용량이 실서버 결과·12시간 이력에 실측처럼 남지 않게).
+    const demoServers = demo ? servers.filter((s) => isDemoId(s.id)) : [];
+    const realServers = demo ? servers.filter((s) => !isDemoId(s.id)) : servers;
+    const central = realServers.filter((s) => !String(s.agent || '').trim());
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
-    for (const s of servers) {
+    for (const s of realServers) {
       const a = String(s.agent || '').trim();
-      if (!a || demo) continue;
+      if (!a) continue;
       const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
       if (!map.has(a)) map.set(a, []);
       map.get(a).push(s);
@@ -189,7 +193,7 @@ export async function bmCollectNow(trigger = 'manual') {
       queued += list.length;
     }
     const [centralResults, ...edgeResults] = await Promise.all([
-      demo ? Promise.resolve(demoBmResults(central)) : collectMany(central),
+      (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central) : [])])(),
       ...[...pushByAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
     ]);
     const at = Date.now();

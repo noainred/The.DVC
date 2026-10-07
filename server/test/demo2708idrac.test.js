@@ -85,7 +85,7 @@ test('① 베어메탈 사양·사용률 행 — 결정적, ESXi 이름과 겹�
   const tg = { key: specs[0].serviceTag, serverId: specs[0].id, name: specs[0].name, vcenterId: specs[0].vcenterId };
   const row = bm.demoBmUsageRow(tg, NOW);
   assert.deepEqual(row, bm.demoBmUsageRow(tg, NOW));
-  assert.equal(row.src, 'idrac');
+  assert.equal(row.src, 'idrac+demo'); // v2.719 R1-03: 데모 행 표지
   assert.ok(row.cpu_pct >= 0 && row.cpu_pct <= 100 && row.mem_pct > 0);
   assert.equal(row.disk_busy_pct, null, '디스크 busy 는 iDRAC 경로에 없다 — 지어내지 않는다');
   assert.equal(row.disk_used_pct, null);

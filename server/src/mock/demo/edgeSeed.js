@@ -244,12 +244,22 @@ async function ensureRmaSeed(cols, { now }) {
   if (!_rmaTimer) {
     let n = 0;
     _rmaTimer = setInterval(() => {
+      // v2.719(감사 R2-05): live 로 바꾸면 스스로 멈춘다 — 캡처 잡 합성 종결·RMA 점검 결과 합성 적재가 실데이터를 덮지 않게.
+      if (stopRmaTimerIfLive()) return;
       demoRmaTick().catch(() => null); demoCaptureDrain().catch(() => null);
       if ((++n % 12) === 0) demoRmaTestResults(cols, { now: Date.now() }).catch(() => null);   // 1분마다 점검 결과 갱신
     }, 5_000);
     _rmaTimer.unref?.();
   }
 }
+
+/** live 모드면 데모 RMA 타이머를 멈추고 true(v2.719 감사 R2-05). 다시 mock 으로 돌아오면 다음 재시작 때 새로 건다. */
+export function stopRmaTimerIfLive() {
+  if (isMockMode()) return false;
+  if (_rmaTimer) { clearInterval(_rmaTimer); _rmaTimer = null; console.warn('[mock] 데이터 소스가 live 라 데모 RMA·캡처 합성 타이머를 멈춥니다.'); }
+  return true;
+}
+export function _rmaTimerActiveForTest() { return !!_rmaTimer; }
 
 /**
  * v2.711: RMA › 점검 상태가 '결과가 없습니다' 였다 — 데모 엣지마다 점검 스케줄 4개를 (그 엣지 스케줄이 비어 있을 때만) 등록하고,

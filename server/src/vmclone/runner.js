@@ -26,6 +26,8 @@ import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
 import { logAudit } from '../audit.js';
 import { getJob, recordRun, pruneList } from './store.js';
+import { isMockMode } from '../mock/demo/flags.js';
+import { isVmCloneDemoJob } from '../mock/demo/vmclone.js';
 import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot,
   destroyClone, vmFilePaths, parseDsPath, backupFileFilter, datacenterPathOf, downloadDsFile,
@@ -68,6 +70,11 @@ async function runJob(jobId, trigger) {
 async function runJobBody(jobId, trigger) {
   const job = getJob(jobId);
   if (!job || !job.enabled) return;
+  // v2.719(감사 R1-07 후속): live 에서는 데모 잡(가짜 vCenter·사본)을 수동 실행으로도 돌리지 않는다 — 실패 기록·감사 로그만 쌓인다.
+  if (!isMockMode() && isVmCloneDemoJob(job)) {
+    recordRun(jobId, { ok: false, skipped: 'demo-job', detail: '데모(mock) 모드에서 만든 잡이라 실행하지 않았습니다 — 지우고 실제 VM 으로 새로 만드세요.', ms: 0 });
+    return;
+  }
   _running.jobId = jobId; _running.phase = '시작'; _running.startedAt = Date.now();
   const t0 = Date.now();
   const done = (ok, detail, extra = {}) => {

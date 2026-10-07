@@ -9,6 +9,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { HOST_CFG_TEXT, DRIFT_LABEL, SEV_LABEL, SEV_BADGE, REBOOT_KIND, codeChips, findingDetail, coverageText, coverageNote } from '../hostcfg/hostCfgText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices, selectionKey, keyedResult } from './vcChoices.js';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -47,19 +48,38 @@ const REBOOT_DAYS = [7, 30, 90];
 function RebootPanel({ vcId }) {
   const [days, setDays] = useState(30);
   const [kind, setKind] = useState('');
-  const [d, setD] = useState(null);
+  const [rd, setD] = useState(null);
   const [err, setErr] = useState(null);
   const gen = useRef(0);
+  // v2.719(감사 W1-03): 응답에 '어느 선택으로 받았는지' 를 붙여 둔다 — 기간·vCenter 를 바꾸면 옛 데이터를 새 선택처럼
+  // 그리지 않고(문구가 새 기간으로 옛 응답을 설명했다), 재조회가 실패하면 옛 데이터 대신 오류를 말한다.
+  const want = selectionKey(vcId, days);
   useEffect(() => {
     const my = ++gen.current;
     const params = { days };
     if (vcId) params.vcenterId = vcId;
+    const k = selectionKey(vcId, days);
+    setErr(null);
     fetchJson('/tools/host-hygiene/reboots', params)
-      .then((r) => { if (my === gen.current) { setD(r); setErr(null); } })
-      .catch((e) => { if (my === gen.current) setErr(e); });
+      .then((r) => { if (my === gen.current) { setD({ key: k, r }); setErr(null); } })
+      .catch((e) => { if (my === gen.current) setErr({ key: k, e }); });
   }, [vcId, days]);
-  if (err && !d) return <div className="card" style={{ marginTop: 12 }}><ErrorBox error={err} /></div>;
-  if (!d) return null;
+  const shown = keyedResult(rd, err, want);
+  if (!shown.data && !shown.error && !rd) return null;
+  if (!shown.data) {
+    // 기간 칩은 남긴다 — 실패한 선택에서 다른 기간으로 돌아갈 길을 없애지 않는다.
+    return (
+      <div className="card" style={{ marginTop: 12, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>최근 재부팅 — 계획된 것과 예기치 않은 것</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12 }}>기간</span>
+          {REBOOT_DAYS.map((x) => <Chip key={x} active={days === x} onClick={() => setDays(x)}>{x}일</Chip>)}
+        </div>
+        {shown.error ? <ErrorBox error={shown.error} /> : <div className="muted" style={{ fontSize: 13 }}>최근 {days}일 재부팅 기록을 불러오는 중…</div>}
+      </div>
+    );
+  }
+  const d = shown.data;
   const rows = (Array.isArray(d.rows) ? d.rows : []).filter((r) => !kind || r.kind === kind);
   const total = Object.values(d.counts || {}).reduce((a, b) => a + b, 0);
   return (
@@ -115,6 +135,8 @@ export default function HostHygieneTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -136,6 +158,7 @@ export default function HostHygieneTool({ scope }) {
       const d = await fetchJson('/tools/host-hygiene', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, code, sev, qApplied]);
   useEffect(() => { load(); }, [load]);
@@ -154,7 +177,6 @@ export default function HostHygieneTool({ scope }) {
   if (!data) return <Loading />;
   const cov = data.coverage;
   const chips = codeChips(data.byCode);
-  const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const note = coverageNote(cov, data.scan);
   const rows = Array.isArray(data.rows) ? data.rows : [];
 
@@ -172,7 +194,7 @@ export default function HostHygieneTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.hosts})</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.hosts})</option>)}
         </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>심각도</span>
         {['', 'crit', 'warn', 'info'].map((s) => <Chip key={s || 'all'} active={sev === s} onClick={() => setSev(s)}>{s ? SEV_LABEL[s] : '전체'}</Chip>)}

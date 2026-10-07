@@ -45,6 +45,8 @@ export function registerContention(api) {
         missingCounters: Array.isArray(v.missingCounters) ? v.missingCounters : [], cut: v.cut ?? 0, errors: v.errors ?? 0,
         error: isFullAdmin ? (v.error || null) : (v.error ? '(오류 — 관리자 화면에서 확인)' : null),
       })),
+      // v2.719: 선택지는 수집 상태가 아니라 범위 안 vCenter 전부(상태가 없는 vCenter — 첫 수집 전·데모 — 도 고를 수 있게).
+      vcenterChoices: S.vcenters.map((v) => ({ vcenterId: v.id, name: v.name || v.id })),
       initial: snap.initial === true,
     };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role === 'admin' ? 'a' : 'u'}` }));

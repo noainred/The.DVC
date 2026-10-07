@@ -161,17 +161,26 @@ export function vmContentionFindings(vm) {
 const fin = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? r1(Math.min(v, 1e7)) : null);
 const am = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? (fin(v.avg) == null ? null : { avg: fin(v.avg), max: fin(v.max) ?? fin(v.avg) }) : null);
 const intOr = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null);
-export function sanitizeVmPerfc(v) {
+/**
+ * v2.719(감사 B1-06): 엣지가 보낸 at 은 수신 시각(now)으로 자른다 — 미래 시각이면 'now - at <= staleMs' 가 영원히 참이라
+ * 수집이 멈춰도 마지막 경합 값이 지금 값처럼 남았다(v2.682 R3S-01 규약). 원본은 edgeAt 으로 남긴다.
+ */
+function clampAt(v, now) {
+  const at = intOr(v.at);
+  if (at == null || !Number.isFinite(now) || at <= now) return { at };
+  return { at: Math.trunc(now), edgeAt: at };
+}
+export function sanitizeVmPerfc(v, now = Date.now()) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   return {
-    at: intOr(v.at), samples: Math.max(0, Math.min(1000, intOr(v.samples) ?? 0)),
+    ...clampAt(v, now), samples: Math.max(0, Math.min(1000, intOr(v.samples) ?? 0)),
     readyPct: am(v.readyPct), costopPct: am(v.costopPct), latencyPct: am(v.latencyPct), readMs: am(v.readMs), writeMs: am(v.writeMs),
     disk: typeof v.disk === 'string' && /^[\w:.-]{1,32}$/.test(v.disk) ? v.disk : null,
   };
 }
-export function sanitizeHostPerfc(v) {
+export function sanitizeHostPerfc(v, now = Date.now()) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const ds = Array.isArray(v.ds) ? v.ds.slice(0, HOST_DS_MAX).filter((x) => x && typeof x === 'object' && !Array.isArray(x) && typeof x.uuid === 'string' && /^[\w.:-]{1,64}$/.test(x.uuid))
     .map((x) => ({ uuid: x.uuid, readMs: am(x.readMs), writeMs: am(x.writeMs) })) : [];
-  return { at: intOr(v.at), samples: Math.max(0, Math.min(1000, intOr(v.samples) ?? 0)), diskMaxMs: am(v.diskMaxMs), ds };
+  return { ...clampAt(v, now), samples: Math.max(0, Math.min(1000, intOr(v.samples) ?? 0)), diskMaxMs: am(v.diskMaxMs), ds };
 }

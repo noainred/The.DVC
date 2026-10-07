@@ -100,7 +100,10 @@ export function saveJob(input = {}) {
     keep: clampKeep(input.keep),
     quiesce: !!input.quiesce,
     enabled: input.enabled !== false,
+    // v2.719(감사 R1-07): 데모 표지 — 새 잡에만 입력으로 받고, 수정은 기존 표지를 유지한다(live 스케줄러가 건너뛴다).
+    demo: existing ? existing.demo === true : input.demo === true,
   });
+  if (!job.demo) delete job.demo;
   if (!existing) {
     if (db.jobs.length >= MAX_JOBS) throw new Error(`복제 잡은 최대 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
     // 같은 VM 에 잡 중복 금지 — 같은 VM 을 두 잡이 스냅샷/클론하면 서로 간섭한다.

@@ -93,6 +93,9 @@ export function sanitizeTagInv(x) {
     tagsUnsupported: x.tagsUnsupported === true,
     categories: null, tags: null, vmTags: null, hostTags: null, fields: null, vmCustom: null,
     truncated: { tags: num(x.truncated?.tags) || 0, custom: num(x.truncated?.custom) || 0 },
+    // v2.719(감사 B1-04): 엣지도 '태그 연결을 다 읽지 못했다' 를 싣는다 — 없으면(구버전 엣지) analyze 가 잘림 개수로 판정한다.
+    ...(typeof x.partialTags === 'boolean' ? { partialTags: x.partialTags } : {}),
+    retryAt: num(x.retryAt),
   };
   if (Array.isArray(x.categories)) out.categories = x.categories.slice(0, CATEGORIES_MAX).filter((c) => c && typeof c === 'object').map((c) => ({ id: str(c.id, 200), name: str(c.name, 128), cardinality: c.cardinality === 'SINGLE' || c.cardinality === 'MULTIPLE' ? c.cardinality : null, types: Array.isArray(c.types) ? c.types.slice(0, 20).map((t) => str(t, 64)) : [] }));
   if (Array.isArray(x.tags)) {

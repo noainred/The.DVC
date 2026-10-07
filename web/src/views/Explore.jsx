@@ -86,7 +86,7 @@ export default function Explore() {
     { key: 'powerState', label: '전원', render: (v) => <StateBadge state={v.powerState} /> },
     { key: 'cpuCount', label: 'vCPU', align: 'right' },
     { key: 'memMB', label: 'RAM', align: 'right', render: (v) => `${Math.round(v.memMB / 1024)} GB` },
-    { key: 'storageGB', label: '디스크', align: 'right', render: (v) => `${v.storageGB} GB` },
+    { key: 'storageGB', label: '디스크', align: 'right', render: (v) => (v.storageGB == null ? '—' : `${v.storageGB} GB`) },
     { key: 'cpuUsagePct', label: 'CPU', render: (v) => <UsageCell pct={v.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (v) => <UsageCell pct={v.memUsagePct} /> },
     { key: 'guestOS', label: 'Guest OS' },
