@@ -100,3 +100,24 @@ test('v2.717 ⑤ VM 복제 데모 잡 — 검증 통과 · 법인마다 하나 �
     assert.deepEqual(await ensureVmCloneDemo(), { skipped: true }, '두 번 시드하지 않는다');
   } finally { store.get = orig; }
 });
+
+test('v2.718 ⑥ vmperf 데모 백필 — 과거가 없을 때만 · 결정적 · 할당은 계단 · 사용은 추세', async () => {
+  const { demoVmperfFactor, demoVmperfBackfill, _resetVmperfDemoForTest } = await import('../src/mock/demo/vmperf.js');
+  const now = 1_790_000_000_000;
+  assert.equal(demoVmperfFactor('vm_cpu_used_mhz', 'a', now - 3_600_000, now), demoVmperfFactor('vm_cpu_used_mhz', 'a', now - 3_600_000, now));
+  assert.ok(demoVmperfFactor('vm_cpu_alloc_mhz', 'a', now - 80 * 86_400_000, now) < 1);
+  assert.equal(demoVmperfFactor('vm_cpu_alloc_mhz', 'a', now - 3_600_000, now), 1);
+  const { insertVmperf, vmperfHistory, vmperfMeta } = await import('../src/metrics/vmperfDb.js');
+  const ts = Date.now();
+  const rows = [{ metric: 'vm_cpu_alloc_mhz', k: 'vc-demo-t', v: 1000 }, { metric: 'vm_cpu_used_mhz', k: 'vc-demo-t', v: 400 }];
+  await insertVmperf('vc-demo-t', rows, ts);
+  _resetVmperfDemoForTest();
+  const r = await demoVmperfBackfill(new Map([['vc-demo-t', rows]]), ts, { days: 10 });
+  assert.equal(r.vcenters, 1);
+  const meta = await vmperfMeta('vc-demo-t');
+  assert.ok(meta.firstTs <= ts - 9 * 86_400_000, '10일 전까지 채워졌다');
+  const pts = await vmperfHistory('vc-demo-t', 'vm_cpu_used_mhz', ts - 10 * 86_400_000, 86_400_000, 50);
+  assert.ok(pts.length >= 9);
+  _resetVmperfDemoForTest();
+  assert.equal((await demoVmperfBackfill(new Map([['vc-demo-t', rows]]), ts, { days: 10 })).vcenters, 0, '과거가 있으면 다시 채우지 않는다');
+});

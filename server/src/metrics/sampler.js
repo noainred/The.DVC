@@ -26,6 +26,7 @@ import { serverTrendRows } from '../idrac/serverTrendSeries.js'; // v2.660: iDRA
 
 let timer = null;
 import { pushAll } from '../util/pushAll.js';
+import { demoVmperfBackfill } from '../mock/demo/vmperf.js'; // v2.718: 데모(mock) 과거 90일 백필(한 번)
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
 let _vmperfPruneTicks = 0; // vmperf(vCenter별 DB) prune 카운터 — DB 개수만큼 DELETE 라 더 드물게
@@ -366,6 +367,8 @@ async function sampleOnceInner() {
         //   33곳 연속이면 84ms 멈췄다(실측). 파일 하나당 약 3ms 조각으로 나뉜다.
         await new Promise((r) => setImmediate(r));
       }
+      // v2.718: 데모(mock)는 과거 이력이 없으면 한 번 채운다(기다리지 않는다 — 샘플러 주기를 붙잡지 않게). mock 이 아니면 즉시 끝난다.
+      demoVmperfBackfill(vmperfByVc, ts).catch((e) => console.warn(`[vmperf] 데모 백필 실패: ${e?.message || e}`));
       // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
       // v2.583: `% 120 === 1` 은 **기동 첫 샘플에서 즉시 참**이었다(v2.453 규약 위반 — 보존일을 줄이고 재시작하면
       //   첫 틱이 그 차액을 한 번에 지운다). `(++t % N) === 0` 으로 쓴다.

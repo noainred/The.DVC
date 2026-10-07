@@ -116,9 +116,9 @@
 | `loganalysis/` | 8 | 2,026 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
 | `logs/` | 4 | 665 | `logs/db.js` (11) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
 | `mail/` | 3 | 416 | `mail/service.js` (3) | mail/service.js — 포탈 공용 메일 발송 진입점 (v2.454). |
-| `metrics/` | 7 | 1,948 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
+| `metrics/` | 7 | 1,951 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
 | `migration/` | 1 | 129 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
-| `mock/` | 17 | 5,028 | `mock/demo/flags.js` (34) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
+| `mock/` | 18 | 5,087 | `mock/demo/flags.js` (34) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
 | `net/` | 4 | 628 | `net/captureHistory.js` (4) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,060 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 162 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
@@ -157,7 +157,7 @@
 | `vmseries/` | 9 | 1,291 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,380 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 80개 · 파일 843개 · 167,461줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 80개 · 파일 844개 · 167,523줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
