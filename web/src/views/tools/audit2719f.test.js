@@ -21,7 +21,8 @@ describe('W1-01 mergeVcChoices — 전체 응답의 목록을 기억한다', () 
     expect(mergeVcChoices([A], [A, B, C], undefined)).toEqual([A, B, C]);
   });
   it('vCenter 를 고른 응답이 목록을 하나로 좁혀도 다른 vCenter 를 지우지 않는다', () => {
-    const out = mergeVcChoices([A, B, C], [{ ...A, vms: 11 }], 'vc-a');
+    const full = mergeVcChoices(null, [A, B, C], '');
+    const out = mergeVcChoices(full, [{ ...A, vms: 11 }], 'vc-a');
     expect(out.map((v) => v.vcenterId)).toEqual(['vc-a', 'vc-b', 'vc-c']);
     expect(out[0].vms).toBe(11);   // 고른 항목은 새 값으로
   });
@@ -29,7 +30,8 @@ describe('W1-01 mergeVcChoices — 전체 응답의 목록을 기억한다', () 
     expect(mergeVcChoices([], [A], 'vc-a')).toEqual([A]);
   });
   it('직전에 없던 항목은 뒤에 붙이고, 모양이 잘못된 원소는 버린다', () => {
-    expect(mergeVcChoices([A], [B, null, 'x', { name: 'no-id' }], 'vc-b').map((v) => v.vcenterId)).toEqual(['vc-a', 'vc-b']);
+    const full = mergeVcChoices(null, [A], '');
+    expect(mergeVcChoices(full, [B, null, 'x', { name: 'no-id' }], 'vc-b').map((v) => v.vcenterId)).toEqual(['vc-a', 'vc-b']);
     expect(vcChoiceList(null)).toEqual([]);
   });
 });

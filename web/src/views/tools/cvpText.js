@@ -102,14 +102,22 @@ export function kpiItems(totals) {
  */
 export function totalsFromDevices(rows) {
   const t = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0,
-    portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0, cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null };
+    portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0, cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null,
+    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0 };
   const n0 = (v) => numOrNull(v) ?? 0;
   for (const d of Array.isArray(rows) ? rows : []) {
     if (!d || typeof d !== 'object') continue;
     t.devices++;
+    // v2.720(감사 B1-02): 서버가 판정한 '확인 불가'(낡음·스트리밍 아님·텔레메트리 실패) 장비의 남은 값은 지금 값이 아니다 — 합산하지 않고
+    //   따로 센다(서버 cvpTotals 와 같은 규칙 — 판정은 서버 cvpDeviceConfirm 한 벌, 화면은 그 결과만 읽는다). 부품만 낡은 장비는 부품만 뺀다.
+    if (typeof d.unconfirmed === 'string' && d.unconfirmed) {
+      t.unconfirmed++; t.unconfirmedBy[d.unconfirmed] = (t.unconfirmedBy[d.unconfirmed] || 0) + 1;
+      continue;
+    }
     if (d.streaming === true) t.streaming++;
-    const p = d.parts && typeof d.parts === 'object' ? d.parts : null;
-    if (p) { t.partsFault += n0(p.fault); t.partsWarn += n0(p.warn); t.partsUnknown += n0(p.unknown); } else t.partsUnread++;
+    const p = d.partsStale === true ? null : (d.parts && typeof d.parts === 'object' ? d.parts : null);
+    if (d.partsStale === true) t.partsStale++;
+    else if (p) { t.partsFault += n0(p.fault); t.partsWarn += n0(p.warn); t.partsUnknown += n0(p.unknown); } else t.partsUnread++;
     const b = d.bgp && typeof d.bgp === 'object' ? d.bgp : null;
     if (b) { t.bgpDown += n0(b.down); t.bgpStateUnknown += n0(b.stateUnknown); } else t.bgpUnread++;
     const po = d.ports && typeof d.ports === 'object' ? d.ports : null;
@@ -135,6 +143,24 @@ export function filterKpiNote({ active, shown, total, omitted } = {}) {
   if (numOrNull(omitted) > 0) bits.push(`장비 목록이 상한으로 ${countText(omitted)}대 잘려 받은 장비만 셌습니다`);
   bits.push('‘열린 장애(전이)’ 는 필터를 반영하지 않은 전체 기준입니다');
   return bits.join(' · ');
+}
+
+/**
+ * v2.720(감사 B1-02): KPI 합계에서 뺀 '확인 불가' 장비를 한 줄로 말한다(없으면 null). 화면이 합계 옆에 그대로 쓴다 —
+ *   빼고 말하지 않으면 '장애 0' 이 '전부 확인했다' 로 읽힌다. 사유는 서버 cvpDeviceConfirm 의 코드와 1:1.
+ */
+export const UNCONFIRMED_REASON_TEXT = { never: '수집 기록 없음', stale: '마지막 수집이 오래됨', 'not-streaming': '스트리밍 아님', 'telemetry-failed': '텔레메트리 못 읽음' };
+export function unconfirmedNote(totals) {
+  const n = numOrNull(totals?.unconfirmed);
+  const ps = numOrNull(totals?.partsStale);
+  const bits = [];
+  if (n > 0) {
+    const by = Object.entries(totals?.unconfirmedBy || {}).filter(([, v]) => numOrNull(v) > 0)
+      .map(([k, v]) => `${UNCONFIRMED_REASON_TEXT[k] || k} ${countText(v)}대`);
+    bits.push(`확인 불가 장비 **${countText(n)}대**는 남은 값(부품·BGP·포트·CPU)을 합계에 넣지 않았습니다${by.length ? `(${by.join(' · ')})` : ''}`);
+  }
+  if (ps > 0) bits.push(`부품 목록이 오래된 장비 ${countText(ps)}대는 부품 합계에서 뺐습니다`);
+  return bits.length ? bits.join(' · ') : null;
 }
 
 // ── 서버(CVP) 상태 ───────────────────────────────────────────────────────────

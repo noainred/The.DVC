@@ -23,7 +23,7 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
     <>
       <div className="dvc-kpis">
         <KpiCard label="서버 소비전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#f59e0b" meta={g ? `전력 보고 ${fmtInt(g.powerReporting)}대${g.powerRegistered ? ` / iDRAC 등록 ${fmtInt(g.powerRegistered)}대` : ''}${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : '수집 대기'} />
-        <KpiCard label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#0f172a" meta={ps ? (ps.devices ? `수집 정상 ${ps.ok} · 실패 ${ps.failed} · 임계 위반 ${ps.violations}${ps.powerW ? ` · ${(ps.powerW / 1000).toFixed(1)} kW` : ''}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
+        <KpiCard label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#0f172a" meta={ps ? (ps.devices ? `수집 정상 ${ps.ok} · 실패 ${ps.failed} · 임계 위반 ${ps.violations}${ps.powerW != null ? ` · 전력 ${ps.powerRead ?? '?'}/${ps.devices}대 합 ${(ps.powerW / 1000).toFixed(1)} kW` : ''}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
         <KpiCard label="호스트 온도 (ESXi/iDRAC 보고)" value={maxT != null ? `${maxT}°C` : '—'} accent={maxT == null ? '#6b7280' : maxT >= 26 ? '#ef4444' : maxT >= 24 ? '#f59e0b' : '#22c55e'} meta={hosts.data ? `최고값 · 측정 ${fmtInt(measured)}/${fmtInt(hostN)}대 · 26°C 이상 ${hot}대` : '호스트 수집 대기'} />
         <KpiCard label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0891b2" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : '호스트 수집 대기'} />
         {/* v2.631(감사 WEB2631-07): 폴링한 서버가 0 이면(긴급중단·대상 없음) 초록 '0/0' 이 아니라 '—' + 사유(bmcPollSummary). */}

@@ -64,6 +64,13 @@ test('② 판정 보류 — 이벤트 없는 vCenter · 켬 이벤트 놓침 · 
   assert.equal(born.coverage.belowTarget, 0);
   assert.equal(born.vcenters[0].availability, 100, '생성 전 27일도, 생성~첫 켬도 정지가 아니다');
   assert.equal(born.vms.length, 0, '정지·재부팅이 없으니 목록에 없다');
+  // v2.720(감사 R2-03): 목록에 오르는 기간 중 생성 VM — 측정 시작(windowFrom)은 첫 켬 시각이고 bornInWindow 표지가 선다(화면 행 표지의 근거).
+  const born2 = analyzeAvailability([ev('m', NOW - 3 * DAY, 'VmCreatedEvent'), ev('m', NOW - 3 * DAY + H, 'VmPoweredOnEvent'),
+    ev('m', NOW - DAY, 'VmPoweredOffEvent'), ev('m', NOW - DAY + H, 'VmPoweredOnEvent')], [vm('m')], { days: 30, now: NOW, coverageOf: FULL });
+  assert.equal(born2.vms.length, 1);
+  assert.equal(born2.vms[0].bornInWindow, true);
+  assert.equal(born2.vms[0].windowFrom, NOW - 3 * DAY + H, '측정은 첫 켬부터');
+  assert.equal(born2.vms[0].downMs, H);
   const before = analyzeAvailability([ev('p', NOW - 3 * DAY, 'VmPoweredOnEvent')], [vm('p')], { days: 30, now: NOW, coverageOf: FULL, onlyBelow: true });
   assert.equal(before.vms[0].downMs, 27 * DAY, '생성 기록이 없으면 기간 시작부터 꺼져 있던 것');
   assert.equal(userInitiated('vpxuser'), false); assert.equal(userInitiated('CORP\\ops'), true); assert.equal(userInitiated(''), false);

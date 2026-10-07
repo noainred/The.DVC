@@ -76,6 +76,22 @@ export function describePermission(info) {
 }
 
 /**
+ * v2.720(감사 R2-02): 데모 계정은 요청 문맥 역할이 admin 이라(서버 auth.js — 설정 뺀 조회 전부를 열기 위해) 그대로
+ * roleName 에 넣으면 '관리자(admin)' 가 떠, '데모 계정' 이라는 헤더·안내와 화면이 모순됐다. 거부 사유가 데모이거나
+ * 계정이 데모면 역할 칸은 '데모 계정' 이다.
+ */
+export function deniedRoleLabel(user, d) {
+  if (d?.kind === 'demo' || user?.demoGuest === true) return '데모 계정';
+  return user?.role ? roleName(user.role) : '';
+}
+
+/** v2.720(감사 R2-02): 머리말 둘째 문장 — 데모 거부는 '재로그인으로 해결되지 않는다' 가 아니라 일반 계정 로그인으로 풀린다. */
+export function deniedSubText(d) {
+  if (d?.kind === 'demo') return '데모 계정에서는 이 기능을 쓸 수 없습니다. 일반 계정으로 다시 로그인하면 사용할 수 있습니다.';
+  return '새로고침이나 재로그인으로는 해결되지 않습니다.';
+}
+
+/**
  * 관리자에게 그대로 전달할 요청 문구 — '무엇을 열어줘야 하는지'가 담겨야 왕복이 줄어든다.
  * 비밀·토큰은 담지 않는다(서버 사유 문구만 인용).
  */

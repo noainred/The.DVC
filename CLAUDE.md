@@ -4861,6 +4861,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 가용성: 이벤트 상한 절단은 잘린 시점부터만 잰다(`readCut`) · 생성 → 첫 켬은 정지가 아니다 · 마지막이 켬인데 지금 꺼짐은 `missedOff` · 측정 0 은 `clockSkew`(웹 문구 함께).
     · SAN 조회 감시 재시작은 사용 중인 핸들을 닫지 않는다(진행 중 prune 이 0 을 거짓 보고하던 것).
     · 남긴 것: 새 상태 필드(`demoSkipped`·`auxSkipped`·`partialTags`·`hostcfg transient`)의 화면 표시 · `edge-log-local` 데모 계정 조회(정책 판단) · 웹 10화면 vCenter 선택 Chromium 미확인 시 보고.
+  - ⚠⚠ **v2.720 — 2회차: 1회차 수정이 만든 회귀 4건이 먼저였다**(6축 감사 → 반증 → 5그룹 수정, 23건. 회귀 `server/test/audit2720g{1,2,3,4}.test.js` +
+    웹 `views/audit2720g5.test.js` — 고친 파일마다 변이 검증. 상세 `docs/AUDIT-2026-10-07b.md`):
+    · ⚠⚠ **예산은 '다음 대상을 시작할지' 만 정한다 — 시작한 대상의 일을 버리지 말 것**(hostcfg R1-01): v2.719 가 호스트 안 조회마다 예산을 보고 잘린 호스트를
+      버리자, 사전 조회에 예산을 다 쓰는 고지연 vCenter 는 **매 주기 0대만 저장되는 정체**가 됐다(축소 재현 0/0/0 → 수정 후 4/8/12). 진짜 abort 만 일을 버린다.
+    · **'다음 주기 재시도' 에는 백오프와 상한이 있어야 한다**(R1-02): 계속 시한에 걸리는 호스트를 캐시하지 않으면 30초마다 다시 묻는다 — 10분부터 지수 백오프,
+      3회 연속이면 예전처럼 null 로 캐시. 태그는 부분 결과가 완전한 직전 연결을 덮지 않는다(R1-04). **'캐시하지 않는다' 를 고치는 수정은 재조회 빈도를 함께 볼 것.**
+    · ⚠⚠ **mock 합성 범위를 좁히면 데모 계정의 '안전한 실행' 이 실장비 로그인으로 바뀐다**(R1-03 — v2.719 의 부작용): 수집형 SAFE_ACTIONS 는 전부
+      `demoOnly: isDemoGuest(req.user)` 를 넘긴다 — `audit2720g2` 가 SAFE_ACTIONS 의 수집 경로를 라우트 소스에서 훑어 고정한다(curuser 는 mock 이면 전 vCenter 합성이라 예외로 적었다).
+      엣지 위임 장비의 재수집 요청도 데모 계정이면 등록하지 않는다. 데모 계정은 엣지 로그·통신 점검·RMA·중계 렌더 조회를 볼 수 없다(B2-03 — 정책 판단으로 막았다).
+    · 스토리지 폴러 합성 조건도 `isMockMode() && isDemoId` 다(R1-05 — v2.719 가 영역 DB 만 막았다).
+    · **알림 해소는 '봤는데 없다' 일 때만**(B1-01): 목록 상한으로 잘린 꼬리와 읽지 못한 vCenter 의 키는 해소 판정 보류(HELD_MAX_MS).
+    · 결측 → 0 세 곳 더: CVP KPI 의 확인 불가 장비 합산(B1-02 — Overview 와 같은 판정 재사용) · CVP 트래픽 방향 결측(`inUnread`·`outUnread`) · SAN 스토리지 사용량 null 계열 · 전력 보고 없는 vCenter.
+    · vCenter 삭제·접속처 변경 시 구성 캐시 6종 비움(`syncVcConfigCaches`) · 증분 수집 세션 연속 실패 백오프.
+    · ⚠ 작업 방식: mock 모드 + 사람 등록 장비에 기대던 기존 테스트 3개(storageMon·audit2600b·audit2599c)를 `.invalid` 주소·`SSH_READY_TIMEOUT_MS` 로 빨리 실패하게 바꿨다 —
+      **실장비 수집으로 바뀐 경로의 테스트는 닿지 않는 주소에서 시한을 기다리지 않게** 할 것(audit2599c 가 120초 시한에 걸렸다).
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

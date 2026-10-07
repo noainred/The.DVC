@@ -32,6 +32,16 @@ function scopedVcs(req, snap) {
   return vcs;
 }
 
+/** v2.720(감사 B2-02): 오류 원문을 볼 수 있는가 — admin + 전체 범위(vCenter 제한 없음). */
+function isFullAdmin(req, snap) { return req.user?.role === 'admin' && !scopedVcenterIds(req.user, snap); }
+export const ERROR_HIDDEN_TEXT = '(오류 — 관리자 화면에서 확인)';
+/** v2.720(감사 B2-02): vCenter 행의 tagsError·customError 를 고정 문구로 바꾼다(없으면 null 그대로). */
+export function maskVcErrors(rows) {
+  return (Array.isArray(rows) ? rows : []).map((v) => (v && (v.tagsError || v.customError)
+    ? { ...v, tagsError: v.tagsError ? ERROR_HIDDEN_TEXT : null, customError: v.customError ? ERROR_HIDDEN_TEXT : null }
+    : v));
+}
+
 export function registerVmTags(api) {
   api.get('/tools/vm-tags', toolsPerm, (req, res) => {
     const pol = loadTagPolicy();
@@ -39,9 +49,14 @@ export function registerVmTags(api) {
       const vcs = scopedVcs(req, snap);
       const ids = new Set(vcs.map((v) => v.id));
       const r = analyzeTags(vcs, (snap.vms || []).filter((v) => ids.has(v.vcenterId)), pol, { q: qStr(req.query.q, 128) });
-      return { ...r, policyRev: pol.rev, policyDemo: pol.demo === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
-        status: req.user?.role === 'admin' && !scopedVcenterIds(req.user, snap) ? tagInvStatus() : null };
-    }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}` });
+      // v2.720(감사 B2-02): 오류 원문(vAPI 경로·상태·응답 앞부분·내부 IP)은 전체 범위 관리자에게만 — 같은 라우트의 status 와
+      //   형제(contention·host-hygiene)와 같은 규칙. 나머지에게는 '오류가 있다' 는 사실만 고정 문구로 준다.
+      const full = isFullAdmin(req, snap);
+      const vcRows = full ? r.vcenters : maskVcErrors(r.vcenters);
+      return { ...r, vcenters: vcRows, ...(full ? {} : { errorsHidden: true }), policyRev: pol.rev, policyDemo: pol.demo === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
+        status: full ? tagInvStatus() : null };
+      // v2.720(감사 B2-02): 캐시 키에 역할 — scopeKey 는 범위만이라 전체 범위 admin 의 판본(오류 원문·status)이 operator 에게 나갔다.
+    }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}|${req.user?.role === 'admin' ? 'a' : 'u'}` });
   });
 
   api.get('/tools/vm-tags/of', toolsPerm, (req, res) => {

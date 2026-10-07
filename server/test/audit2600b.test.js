@@ -172,7 +172,7 @@ function runLive(script) {
     console.log('@@' + JSON.stringify(out));
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', boot], {
-    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' },
+    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', SSH_READY_TIMEOUT_MS: '2000', AUTH_ENABLED: 'false' },
     encoding: 'utf8', cwd: ROOT, timeout: 180_000,
   });
   assert.equal(r.status, 0, `자식 프로세스 실패: ${r.stderr?.slice(-2000)}`);
@@ -209,6 +209,8 @@ test('실제 라우터 — admin/operator/범위 operator 응답(RECENT2600-03·
     const swId = sanReg.listDevices()[0].id; const stId = storageReg.listDevices()[0].id;
     await (await import(${J('sanswitch/poller.js')})).collectDeviceNow(swId).catch(() => {});
     await (await import(${J('storage/poller.js')})).collectDeviceNow(stId).catch(() => {});
+    // v2.720(감사 R1-05): mock 모드에서도 사람이 등록한 스토리지는 실제로 수집한다(합성 스냅샷 없음) — 시리얼 색인용 스냅샷은 직접 넣는다.
+    (await import(${J('storage/store.js')})).putSnapshot({ deviceId: stId, ok: true, serial: 'SYNTHSER2720', collectedAt: Date.now() });
 
     const admin = await start(mk({ username: 'root', role: 'admin', scope: null }));
     const oper = await start(mk({ username: 'op', role: 'operator', scope: null }));

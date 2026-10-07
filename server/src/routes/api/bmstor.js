@@ -4,6 +4,7 @@ import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue } from '../../bmstor/registry.js';
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
+import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { aggregate } from '../../bmstor/agg.js';
 import { bmServersToCsv, sampleCsv as bmSampleCsv, parseBmServersCsv, analyzeBmServersImport } from '../../bmstor/csv.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -133,7 +134,7 @@ export function registerBmStorage(api) {
 
   // 지금 수집 — 진행 중이면 skipped(재진입 가드 공유, net/monitor.runMonitorNow 패턴).
   api.post('/tools/bm-storage/collect', adminOnly, fullScopeOnly, async (req, res) => {
-    const r = await bmCollectNow('manual');
+    const r = await bmCollectNow('manual', { demoOnly: isDemoGuest(req.user) }); // v2.720(감사 R1-03·B2-01): 데모 계정은 데모 서버만
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 수동 수집', detail: `서버 ${r.servers} · 성공 ${r.okCount} · 오류 ${r.errors}`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 409).json(r);
   });

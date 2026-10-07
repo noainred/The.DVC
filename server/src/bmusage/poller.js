@@ -518,7 +518,10 @@ async function pool(items, limit, fn) {
 /**
  * 한 주기. `trigger:'manual'` 이면 인증 정지를 무시한다(사람이 1회 누르는 것은 잠금 위험이 없다).
  */
-export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
+/*  v2.720(감사 R1-03): `demoOnly` — 데모 계정의 '지금 수집' 은 데모 대상(mock-)만 합성하고 사람이 등록한 서버에는 접속하지 않는다
+ *   (v2.719 부터 mock 모드에서도 실서버는 실제로 수집되고, 수동 실행은 인증 정지도 무시한다). 뺀 대수는 skippedNonDemo 로 밝힌다.
+ *   ⚠ 대상 목록(live)은 그대로 둔다 — 뺀 서버의 누적 카운터를 지우면 다음 주기 실수집이 '첫 표본' 이 된다. */
+export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {}) {
   if (!bmUsageEnabled()) return { ok: false, reason: '베어메탈 사용률 수집이 꺼져 있습니다(설정에서 켜세요).' };
   if (_running) return { ok: false, reason: '이전 수집이 진행 중입니다.' };
   _running = true;
@@ -547,7 +550,10 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     // v2.719(감사 R1-03): 합성은 데모 대상(mock-)에만 — 사람이 등록한 서버는 mock 모드에서도 예전처럼 실제로 수집한다.
     const demo = isMockMode() ? await import('../mock/demo/baremetal.js') : null;
     const demoTargets = demo ? targets.filter((tg) => demo.isDemoBmTarget(tg)) : [];
-    const realTargets = demo ? targets.filter((tg) => !demo.isDemoBmTarget(tg)) : targets;
+    const realAll = demo ? targets.filter((tg) => !demo.isDemoBmTarget(tg)) : targets;
+    const realTargets = demoOnly ? [] : realAll;
+    const skippedNonDemo = realAll.length - realTargets.length;
+    const runCount = targets.length - skippedNonDemo;
     if (demo && demoTargets.length) await demo.backfillBmUsage(demoTargets).catch(() => {});
     const results = [
       ...(demo ? demo.demoBmUsageResults(demoTargets, Date.now()) : []),
@@ -577,8 +583,8 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     const okCount = results.filter((r) => r?.ok).length;
     _last = {
-      at: Date.now(), ms: Date.now() - t0, servers: targets.length,
-      okCount, failCount: targets.length - okCount, inserted: ins.inserted || 0,
+      at: Date.now(), ms: Date.now() - t0, servers: runCount,
+      okCount, failCount: runCount - okCount, inserted: ins.inserted || 0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}),
       /*
        * Enterprise 대체 수집 요약(v2.554) — 화면이 '동의했는데 왜 값이 없나' 를 말할 수 있게.
        * ⚠ 개수만 담는다(장비 이름·법인은 담지 않는다 — `status.last` 는 무스코프로 나간다. v2.550.3).

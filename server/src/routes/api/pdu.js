@@ -8,7 +8,8 @@
  *  - CSV 비밀번호 포함 내보내기는 **설정 소유자 전용**(평문 자격증명 덤프이므로).
  */
 
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js';
+import { isDemoId as isDemoPduId } from '../../mock/demo/pdu.js'; // v2.720(감사 R1-06)
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
 import { requireSettingsOwner } from '../admin/shared.js';
@@ -267,6 +268,9 @@ export function registerPdu(api) {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
     if ((dev.agent || '').trim()) {
+      // v2.720(감사 R1-06): 데모 계정은 엣지 위임 장비에도 데모(mock-) 장비만 — 사람이 등록한 위임 장비에 재수집을 걸면 엣지가
+      //   다음 설정 pull 때 실제로 로그인한다(아래 중앙 분기의 demoOnly 보다 이 분기가 먼저라 빠져 있었다).
+      if (isDemoGuest(req.user) && !isDemoPduId(dev.id)) return res.status(403).json({ ok: false, error: 'forbidden', demoGuest: true, skipped: true, reason: DEMO_ONLY_REASON });
       const dup = hasPendingRequest(dev.id);
       requestCollect(dev.id, dev.agent);
       logAudit({ user: req.user?.username, action: 'PDU 재수집 요청(엣지)', target: `${dev.name}(${dev.id})`, detail: `엣지 ${dev.agent}` });

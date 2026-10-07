@@ -131,7 +131,7 @@ test('C-06: fosSsh _caps — 키 규칙 하나 · live 는 남기고 빠진 장�
   assert.equal(pruneCaps(live, store), 2);
   assert.deepEqual([...store.keys()], ['10.0.0.1|admin']);
   const s = src('sanswitch/poller.js');
-  assert.match(s, /if \(!registryLoadError\(\)\) fosSsh\.pruneCaps\(new Set\(devices\.map\(\(d\) => fosSsh\.capsKeyOf\(d\)\)\)\)/);
+  assert.match(s, /if \(!registryLoadError\(\)\) fosSsh\.pruneCaps\(new Set\((?:devices|allDevs)\.map\(\(d\) => fosSsh\.capsKeyOf\(d\)\)\)\)/);
   assert.match(src('sanswitch/collectors/fosSsh.js'), /probeCommands\(sh, capsKeyOf\(device\)\)/);
 });
 

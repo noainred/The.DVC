@@ -26,7 +26,7 @@ import {
   missingFootnotes, itemLabel, CANDIDATE_NOTE, deviceCountLabel, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
   EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
-  isTruncated, canCollect, listNotes, totalsFromDevices, filterKpiNote, partsMissingText, telemetryText,
+  isTruncated, canCollect, listNotes, totalsFromDevices, unconfirmedNote, filterKpiNote, partsMissingText, telemetryText,
   edgeReportView, serverMetaText, dbStatsText, DEVICE_CHIPS, chipCounts, filterByChip, devicesCsvPath, CSV_NOTE,
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
@@ -182,6 +182,7 @@ export default function CvpTool() {
         ))}
       </div>}
       {view !== 'overview' && kpiNote && <div style={NOTE}><BoldText text={kpiNote} /></div>}
+      {view !== 'overview' && unconfirmedNote(kpiTotals) && <div style={NOTE}><BoldText text={unconfirmedNote(kpiTotals)} /></div>}
 
       <div style={ROW}>
         {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (

@@ -1027,7 +1027,8 @@ export async function trafficByDevice({ staleMs = 30 * 60_000, now = Date.now() 
             (oper='up' AND rate_ts IS NOT NULL AND rate_ts >= ? AND (in_bps IS NOT NULL OR out_bps IS NOT NULL)) AS fresh
           FROM port_latest)
     GROUP BY agent, cvp_id, device_key`).all(cut);
-  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, inBps: r.in_sum == null ? 0 : Number(r.in_sum), outBps: r.out_sum == null ? 0 : Number(r.out_sum),
+  // v2.720(감사 B1-06): 신선한 포트가 있어도 그 방향 값을 하나도 못 읽었으면(SUM 이 NULL) 0 bps 가 아니라 null — '수신 없음' 이라는 거짓을 만들지 않는다.
+  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, inBps: r.in_sum == null ? null : Number(r.in_sum), outBps: r.out_sum == null ? null : Number(r.out_sum),
     measured: Number(r.measured || 0), unmeasured: Number(r.unmeasured || 0) })) };
 }
 

@@ -12,7 +12,7 @@
  */
 import { useState } from 'react';
 import { getCurrentUser } from '../api.js';
-import { describePermission, buildRequestText, roleName } from './accessDeniedText.js';
+import { describePermission, buildRequestText, deniedRoleLabel, deniedSubText } from './accessDeniedText.js';
 
 export default function AccessDenied({ info = null, message = '', compact = false }) {
   const [copied, setCopied] = useState(false);
@@ -42,14 +42,15 @@ export default function AccessDenied({ info = null, message = '', compact = fals
           {/* 가장 중요한 한 줄 — 사용자가 장애로 오해하지 않게 먼저 말한다. */}
           <p className="ad-sub">
             시스템 장애나 오류가 아닙니다. 계정 권한에 따라 <strong>정상적으로 차단</strong>된 접근입니다.
-            새로고침이나 재로그인으로는 해결되지 않습니다.
+            {' '}{deniedSubText(d)}
           </p>
         </div>
       </div>
 
       <dl className="ad-facts">
         <dt>내 계정</dt>
-        <dd>{user?.username || '(알 수 없음)'}{user?.role ? ` · ${roleName(user.role)}` : ''}</dd>
+        {/* v2.720(감사 R2-02): 데모 계정은 요청 문맥 역할이 admin 이라 '관리자(admin)' 대신 '데모 계정' 으로 표기한다. */}
+        <dd>{user?.username || '(알 수 없음)'}{deniedRoleLabel(user, d) ? ` · ${deniedRoleLabel(user, d)}` : ''}</dd>
         <dt>필요한 권한</dt>
         <dd>{d.need}</dd>
         <dt>권한 부여 방법</dt>

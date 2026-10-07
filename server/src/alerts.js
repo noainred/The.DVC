@@ -145,6 +145,9 @@ export function saveAlertConfig(body = {}) {
 
 /** 값을 못 읽어 판정 보류된 발생 알림을 유지하는 최대 시간(v2.598) — 넘으면 해소 알림 없이 끊는다. */
 export const HELD_MAX_MS = 6 * 3600_000;
+/** v2.720(감사 B1-01): 지금 값을 읽지 못한 vCenter 상태 — 그 vCenter 의 alarm/host/ds 알림은 해소 판정을 보류한다. */
+const UNREAD_VC_STATUS = new Set(['unreachable', 'maintenance', 'pending', 'disabled']);
+const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
 
 /** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
 export function evaluate(snap, cfg = loadAlertConfig()) {
@@ -157,9 +160,17 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   //   나갔다. 그 vCenter 의 경보 해소 판정을 보류한다(tick 이 st.alert.vcenterId 로 본다 — 키에는 vCenter 축이 없다).
   const alarmsHeldVc = new Set((snap.vcenters || []).filter((v) => v && v.alarmsUnknown === true && v.id != null).map((v) => String(v.id)));
   Object.defineProperty(out, 'alarmsHeldVcenters', { value: alarmsHeldVc, enumerable: false });
+  // v2.720(감사 B1-01): 지금 값을 읽지 못한 vCenter(연결 불가·점검중·첫 수집 중·비활성)의 alarm/host/ds 항목이 목록에서
+  //   빠진 것은 '복구' 가 아니라 '모름' 이다 — LASTGOOD_HOLD(6시간)가 지나 인벤토리를 비운 vCenter 가 그 예다. tick 이
+  //   st.alert.vcenterId 로 보류한다(HELD_MAX_MS 규칙 그대로).
+  const unreadVc = new Set((snap.vcenters || []).filter((v) => v && v.id != null && UNREAD_VC_STATUS.has(v.status)).map((v) => String(v.id)));
+  Object.defineProperty(out, 'unreadVcenters', { value: unreadVc, enumerable: false });
+  // v2.720(감사 B1-01): 상한으로 잘린 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — 순서만 바뀌어 101번째로 밀린
+  //   알림을 해소로 기록하고 다시 들어오면 새 알림으로 재발송하던 것. 잘린 항목의 키를 판정 보류로 둔다.
+  const holdTail = (list, cap, keyOf) => { for (const x of list.slice(cap)) { const k = keyOf(x); if (k) held.add(k); } return list.slice(0, cap); };
   const R = cfg.rules;
   if (R.criticalAlarms?.enabled) {
-    for (const a of (snap.alarms || []).filter((x) => x.severity === 'critical').slice(0, 100)) {
+    for (const a of holdTail((snap.alarms || []).filter((x) => x.severity === 'critical'), 100, (x) => `alarm:${x.id || x.name}`)) {
       out.push({ key: `alarm:${a.id || a.name}`, vcenterId: a.vcenterId || '', severity: 'critical', title: `위험 알람: ${a.name || a.entity || ''}`, detail: `${a.vcenterId || ''} ${a.entity || ''} ${a.status || ''}`.trim() });
     }
   }
@@ -169,7 +180,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     }
   }
   if (R.hostDisconnected?.enabled) {
-    for (const h of (snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED').slice(0, 100)) {
+    for (const h of holdTail((snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED'), 100, (x) => `host:${x.id}`)) {
       out.push({ key: `host:${h.id}`, vcenterId: h.vcenterId || '', severity: 'warning', title: `호스트 연결 끊김: ${h.name}`, detail: `${h.vcenterId} / ${h.cluster || ''}` });
     }
   }
@@ -179,7 +190,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     // 예전 `(x.usagePct || 0) >= th` 는 그것을 0% 로 읽어 **발생 중이던 용량 알림을 '해소' 로 보냈다**. 못 읽은 값은 초과도
     // 정상도 아니다 — 판정 보류(held)로 두고 tick 이 해소하지 않는다(bmusage·PDU F5 와 같은 규약).
     for (const d of snap.datastores || []) if (numOrNull(d.usagePct) == null && d.id != null) held.add(`ds:${d.id}`);
-    for (const d of (snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th).slice(0, 200)) {
+    for (const d of holdTail((snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th), 200, (x) => (x.id != null ? `ds:${x.id}` : null))) {
       out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
     }
   }
@@ -469,6 +480,7 @@ async function refreshState(cfg, sendEnabled) {
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
   const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
+  const unreadVc = active.unreadVcenters instanceof Set ? active.unreadVcenters : new Set(); // v2.720(감사 B1-01)
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
   // 직전상태 맵은 항상 갱신해 다음 주기 비교를 유지한다.
   try {
@@ -504,7 +516,8 @@ async function refreshState(cfg, sendEnabled) {
     // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
     // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
     const alarmHeld = key.startsWith('alarm:') && alarmsHeldVc.has(String(st.alert?.vcenterId ?? ''));
-    if (held.has(key) || alarmHeld) {
+    const vcUnread = UNREAD_VC_KEY_RE.test(key) && unreadVc.has(String(st.alert?.vcenterId ?? '')); // v2.720(감사 B1-01)
+    if (held.has(key) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
       firing.delete(key); changed = true; continue;

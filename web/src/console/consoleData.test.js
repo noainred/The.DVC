@@ -141,7 +141,7 @@ describe('설비', () => {
   });
   it('PDU 요약', () => {
     const p = { devices: [{ snapshot: { ok: true, summary: { powerW: 1200, sensors: 2, tempMaxC: 27 } } }, { snapshot: { ok: false } }, { snapshot: null }], activeViolations: [{ key: 'k' }] };
-    expect(pduSummary(p)).toEqual({ devices: 3, ok: 1, failed: 1, none: 1, powerW: 1200, sensors: 2, tempMaxC: 27, violations: 1 });
+    expect(pduSummary(p)).toEqual({ devices: 3, ok: 1, failed: 1, none: 1, powerW: 1200, powerRead: 1, sensors: 2, tempMaxC: 27, violations: 1 });
   });
   it('svcmon 레벨', () => { expect(svcmonLevel(null)).toBeNull(); expect(svcmonLevel({ total: 0 })).toBeNull(); expect(svcmonLevel({ total: 3, bad: 1 })).toBe(2); expect(svcmonLevel({ total: 3, bad: 0, warn: 0, stale: 1 })).toBe(1); expect(svcmonLevel({ total: 3, bad: 0, warn: 0, stale: 0 })).toBe(0); });
 });

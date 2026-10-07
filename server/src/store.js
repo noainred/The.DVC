@@ -30,7 +30,7 @@ export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_
 import { pushAll } from './util/pushAll.js';
 import { createChangeLogger } from './util/logThrottle.js';
 import { vmCfgStatus } from './vmcfg/cache.js'; // v2.697(B10)
-import { hostCfgStatus } from './hostcfg/cache.js'; // v2.699
+import { hostCfgStatus, syncVcConfigCaches } from './hostcfg/cache.js'; // v2.699 · v2.720(S1-01) 삭제·접속처 변경 vCenter 의 구성 캐시 정리
 import { contentionStatus } from './contention/cache.js'; // v2.706(C2·C3)
 import { dsCfgStatus } from './dscfg/collect.js'; // v2.700
 import { clusterCfgStatus } from './clustercfg/collect.js'; // v2.701
@@ -331,6 +331,7 @@ class Store {
       for (const id of [...this.vcCache.keys()]) if (!ids.has(id)) this.vcCache.delete(id);
       for (const id of [...this.vcLast.keys()]) if (!ids.has(id)) this.vcLast.delete(id); // 마지막 수집시각 맵도 동기화
       pruneInventory(ids); // 위임 인벤토리 캐시도 동기화
+      syncVcConfigCaches(vcenters); // v2.720(감사 S1-01): 구성 캐시 6종도 — 삭제된 vCenter·접속처(host)가 바뀐 vCenter 의 항목을 버린다
 
       // Rebuild the merged snapshot from cache every tick (cheap), so non-due
       // vCenters keep serving their last-known data instead of disappearing.

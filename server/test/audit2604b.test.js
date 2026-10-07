@@ -83,7 +83,7 @@ test('공개 API — 스토리지 이름·파트 식별자의 IP 를 가리고, 
     })();
     console.log('@@' + JSON.stringify(out));
     process.exit(0);
-  `, { DATA_SOURCE: 'mock' });
+  `, { DATA_SOURCE: 'mock', SSH_READY_TIMEOUT_MS: '2000' });   // v2.720: 사람이 등록한 장비는 mock 에서도 실제 수집(닿지 않는 주소 — 빨리 실패)
 
   // AUTHZ-2604-01
   assert.equal(r.storage.status, 200, r.storage.text.slice(0, 300));
@@ -205,7 +205,7 @@ test('GET /admin/alerts — 범위 제한 admin 은 범위 vCenter 의 알림만
     const out = { A, vcs, full: await g(full), sc: await g(sc) };
     console.log('@@' + JSON.stringify(out));
     process.exit(0);
-  `, { DATA_SOURCE: 'mock' });
+  `, { DATA_SOURCE: 'mock', SSH_READY_TIMEOUT_MS: '2000' });   // v2.720: 사람이 등록한 장비는 mock 에서도 실제 수집(닿지 않는 주소 — 빨리 실패)
   assert.ok(r.vcs.length >= 2, `목 데이터에서 여러 vCenter 알림이 필요하다: ${JSON.stringify(r.vcs)}`);
   const fullVcs = new Set(r.full.firing.map((a) => a.vcenterId).filter(Boolean));
   assert.ok(fullVcs.size >= 2, '전체 admin 은 전 vCenter 를 받는다');

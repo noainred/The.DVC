@@ -153,7 +153,9 @@ async function collectViaEdge(agent, servers) {
 }
 
 /** 전체 1회 수집. 진행 중이면 { skipped: true } — 폴러/수동 API 가 같은 가드를 쓴다. */
-export async function bmCollectNow(trigger = 'manual') {
+/*  v2.720(감사 R1-03·B2-01): `demoOnly` — 데모 계정의 수동 수집은 데모 서버(mock-)만 합성한다. 사람이 등록한 서버(중앙 SSH·엣지 잡·
+ *   엣지 PUSH)는 건드리지 않고 뺀 대수를 skippedNonDemo 로 밝힌다. */
+export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
   running = true;
   const started = Date.now();
@@ -175,7 +177,9 @@ export async function bmCollectNow(trigger = 'manual') {
     // v2.719(감사 R1-03): 합성은 **데모 서버(mock-)에만** — 사람이 등록한 서버는 mock 모드에서도 예전처럼 실제로 수집한다
     //   (합성 용량이 실서버 결과·12시간 이력에 실측처럼 남지 않게).
     const demoServers = demo ? servers.filter((s) => isDemoId(s.id)) : [];
-    const realServers = demo ? servers.filter((s) => !isDemoId(s.id)) : servers;
+    const realAll = demo ? servers.filter((s) => !isDemoId(s.id)) : servers;
+    const realServers = demoOnly ? [] : realAll;
+    const skippedNonDemo = realAll.length - realServers.length;
     const central = realServers.filter((s) => !String(s.agent || '').trim());
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
@@ -211,7 +215,7 @@ export async function bmCollectNow(trigger = 'manual') {
     for (const id of [...latest.keys()]) if (!ids.has(id)) latest.delete(id);
     lastRunAt = at;
     // 필드명 okCount — { ok:true, ...summary } 스프레드에서 성공 여부(boolean)를 덮지 않게.
-    lastRunSummary = { at, trigger, servers: servers.length, okCount: ok, errors, queued, authStopped, ms: at - started };
+    lastRunSummary = { at, trigger, servers: servers.length - skippedNonDemo, okCount: ok, errors, queued, authStopped, ms: at - started, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
     return { ok: true, ...lastRunSummary };
   } finally {
     running = false;

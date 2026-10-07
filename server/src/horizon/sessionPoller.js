@@ -136,7 +136,7 @@ async function demoBackfillOnce(servers, s, now) {
 }
 
 /** 수집 1회(자동·수동 공용 — 같은 재진입 가드). */
-export async function runHzSessionsNow(trigger = 'manual') {
+export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
   running = true;
   const started = Date.now();
@@ -149,10 +149,13 @@ export async function runHzSessionsNow(trigger = 'manual') {
 
     const mock = store.get()?.source === 'mock';
     if (mock) await ensureDemoHorizonSeed({ loadHorizon, upsertHorizon });   // v2.708: 등록부가 비어 있을 때만 데모 커넥션 서버 2대
-    const servers = targetServers(s);
+    // v2.720(감사 R1-03 후속): 데모 계정의 수동 수집은 데모 등록(mock-)만 — mock 모드에서도 사람이 등록한 커넥션 서버는 실제 AD 로그인이다.
+    const allServers = targetServers(s);
+    const servers = demoOnly ? allServers.filter((x) => isDemoEntryId(x.id)) : allServers;
+    const skippedNonDemo = allServers.length - servers.length;
     if (!servers.length) {
       lastRunTs = Date.now();
-      lastResult = { at: lastRunTs, trigger, servers: 0, records: 0, errors: [], ms: Date.now() - started };
+      lastResult = { at: lastRunTs, trigger, servers: 0, records: 0, errors: [], ms: Date.now() - started, ...(demoOnly ? { skippedNonDemo } : {}) };
       return { ok: true, ...lastResult, reason: '대상 Horizon 서버가 없습니다(설정 › Horizon 등록에서 추가하세요).' };
     }
 
@@ -266,7 +269,7 @@ export async function runHzSessionsNow(trigger = 'manual') {
       usersLowerBound: !!total?.usersLowerBound, connectedLowerBound: !!total?.connectedLowerBound,
       serversTruncated: total?.serversTruncated ?? 0,
       serversFailed: total?.serversFailed ?? null,
-      errors, mock, ms: Date.now() - started, commit,
+      errors, mock, ms: Date.now() - started, commit, ...(demoOnly ? { skippedNonDemo } : {}),
     };
     return { ok: errors.length === 0, ...lastResult };
   } finally { running = false; }

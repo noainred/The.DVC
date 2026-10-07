@@ -27,13 +27,14 @@ import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
-import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX } from '../../cvp/overview.js'; // v2.645
+import { buildCvpOverview, corpResolver, freshnessBounds, deviceHealth, RECENT_EVENTS_MAX } from '../../cvp/overview.js'; // v2.645
+import { partsFresh } from '../../cvp/faults.js'; // v2.720(감사 B1-02): KPI 도 Overview·장애 판정과 같은 부품 신선도
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
-import { cvpDemoActive } from '../../mock/demo/cvp.js';
+import { cvpDemoActive, isDemoId as isDemoCvpId } from '../../mock/demo/cvp.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -85,14 +86,38 @@ export function pickEdgeStatus(list, srv) {
  * 장비 행 → KPI 합계(순수 — 테스트 고정). v2.611(WEB2611-02): BGP·포트를 **읽지 못한 장비 수**도 센다 —
  *   예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
  */
-export function cvpTotals(rows) {
+/**
+ * v2.720(감사 B1-02): 장비 한 대를 KPI 에 '지금 값' 으로 셀 수 있는가 — 판정은 Overview 의 `deviceHealth` 하나를 쓴다(복제 금지).
+ *   마지막 수집이 낡았거나(stale·never) 스트리밍이 아니거나 텔레메트리를 못 읽은 장비는 `unconfirmed`(사유)이고, 그 장비에 남은
+ *   부품·BGP·포트·CPU 값(며칠 전 장애·과부하일 수 있다)은 합산하지 않는다. 'unread'(아무것도 못 읽음)는 지금 수집은 된 것이라
+ *   예전처럼 항목별 '못 읽음' 칸이 센다. 부품 목록만 낡은 장비는 `partsStale` — 부품만 빼고 나머지는 센다(Overview 와 같다).
+ */
+export function cvpDeviceConfirm(d, { now = Date.now(), intervalMs, partsEveryMs } = {}) {
+  const dev = d && typeof d === 'object' ? d : {};
+  const h = deviceHealth(dev, { now, staleMs: freshnessBounds(intervalMs).staleMs, intervalMs, partsEveryMs });
+  const unconfirmed = h.state === 'unknown' && h.reasons[0] !== 'unread' ? h.reasons[0] : null;
+  const partsStale = !unconfirmed && Array.isArray(dev.partsList) && !partsFresh(dev, { intervalMs, partsEveryMs, now });
+  return { unconfirmed, partsStale };
+}
+
+/**
+ * @param {object[]} rows DB 장비 행
+ * @param {{now?:number, intervalMs?:number, partsEveryMs?:number}} [opts] v2.720(감사 B1-02): 주면 확인 불가 장비를 합산에서 빼고
+ *   `unconfirmed`·`unconfirmedBy` 로 따로 센다(라우트는 언제나 준다). 주지 않으면 예전 합산(신선도 판정 없음 — 순수 합산 시험용).
+ */
+export function cvpTotals(rows, opts = null) {
   const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0, portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0,
-    cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null };
+    cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null,
+    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0 };
   for (const d of Array.isArray(rows) ? rows : []) {
+    if (!d || typeof d !== 'object') continue;
     totals.devices++;
+    const c = opts ? cvpDeviceConfirm(d, opts) : { unconfirmed: null, partsStale: false };
+    if (c.unconfirmed) { totals.unconfirmed++; totals.unconfirmedBy[c.unconfirmed] = (totals.unconfirmedBy[c.unconfirmed] || 0) + 1; continue; }
     if (d.streaming === true) totals.streaming++;
-    const p = partsSummary(d.partsList);
-    if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
+    const p = c.partsStale ? null : partsSummary(d.partsList);
+    if (c.partsStale) totals.partsStale++;
+    else if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
     if (d.bgpPeers) { const b = bgpSummary(d.bgpPeers); totals.bgpDown += b.down; totals.bgpStateUnknown += b.stateUnknown || 0; } else totals.bgpUnread++; // v2.630 A2-03: 모르는 상태는 down 이 아니다
     if (d.ports) { totals.portsDown += d.ports.down; totals.portsNoLink += d.ports.noLink || 0; } else totals.portsUnread++; // v2.630 A2-02
     // v2.641: 빈 응답(경로에 값 없음)으로 못 읽은 장비는 따로 센다 — '형식을 못 읽음' 과 조치가 다르다.
@@ -140,8 +165,10 @@ function rowBelongs(row, servers) {
   return String(srv.agent || '').trim() ? agentKeyEq(row.agent, srv.agent) : row.agent === cdb.LOCAL_AGENT;
 }
 
-function publicDevice(d, admin) {
+function publicDevice(d, admin, confirm = null) {
   return {
+    // v2.720(감사 B1-02): 화면의 필터 KPI(cvpText.totalsFromDevices)가 같은 판정을 쓰도록 서버 판정 결과를 싣는다(판정은 한 벌).
+    ...(confirm ? { unconfirmed: confirm.unconfirmed, partsStale: confirm.partsStale } : {}),
     key: d.key, cvpId: d.cvpId, agent: d.agent, hostname: d.hostname, model: d.model, serial: d.serial,
     mgmtIp: admin ? d.mgmtIp : '', eosVersion: d.eosVersion, streaming: d.streaming,
     parts: partsSummary(d.partsList), partsAt: d.partsAt,
@@ -209,7 +236,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
   const servers = listServers();
   const { rows, unavailable } = await cdb.listDeviceRows();
   const mine = rows.filter((r) => rowBelongs(r, servers));
-  const totals = cvpTotals(mine);
+  const totals = cvpTotals(mine, { now: Date.now(), intervalMs: settings.intervalMs }); // v2.720(감사 B1-02)
   const poller = cvpPollerStatus();
   const hosts = servers.map((s) => s.host);
   res.json({
@@ -243,8 +270,9 @@ api.get('/tools/cvp/devices', toolsPerm, fullScopeOnly, async (req, res) => {
   const omitted = Math.max(0, list.length - DEVICE_LIST_MAX);
   // v2.645: 법인(= 그 CVP 서버에 지정한 DataCenter) — 화면의 법인·모델 칩이 쓴다. 지정이 없으면 corpId '' ('법인 미지정').
   const corpOf = corpResolver(servers, dcList());
+  const confOpts = { now: Date.now(), intervalMs: loadSettings().intervalMs }; // v2.720(감사 B1-02)
   res.json({
-    devices: list.slice(0, DEVICE_LIST_MAX).map((d) => { const c = corpOf(d.cvpId); return { ...publicDevice(d, admin), corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { corpMissing: true } : {}) }; }),
+    devices: list.slice(0, DEVICE_LIST_MAX).map((d) => { const c = corpOf(d.cvpId); return { ...publicDevice(d, admin, cvpDeviceConfirm(d, confOpts)), corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { corpMissing: true } : {}) }; }),
     omitted, ...(unavailable ? { dbUnavailable: true } : {}), ...(admin ? {} : { addressHidden: true }),
   });
 });
@@ -667,9 +695,14 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
     else pollCvpOnce({ manual: true, only: direct.map((s) => s.id), demoOnly: isDemoGuest(req.user), trigger: 'manual' }).catch((e) => console.warn(`[cvp] 수동 수집 실패: ${e.message}`));
   }
   let requested = 0;
-  for (const s of edge) { requestCvpCollect(s.id, s.agent); requested++; }
-  logAudit({ user: req.user?.username, action: 'CVP 지금 수집', target: only || '(전체)', detail: `중앙 즉시 ${busy ? 0 : direct.length}대${busy ? '(진행 중이라 건너뜀)' : ''} · 엣지 요청 ${requested}대` });
-  res.json({ ok: true, direct: busy ? 0 : direct.length, requested, ...(busy ? { busy: true, reason: '이전 수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' } : {}) });
+  // v2.720(감사 R1-06): 데모 계정은 엣지 위임 서버에도 데모(mock-) 서버만 요청한다 — 사람이 등록한 위임 CVP 에 재수집을 걸면
+  //   엣지가 다음 설정 pull 때 실제로 로그인한다(중앙 직접 수집만 demoOnly 로 막고 이 분기가 빠져 있었다). 뺀 대수는 밝힌다.
+  const demoGuest = isDemoGuest(req.user);
+  const edgeRun = demoGuest ? edge.filter((s) => isDemoCvpId(s.id)) : edge;
+  const skippedNonDemo = edge.length - edgeRun.length;
+  for (const s of edgeRun) { requestCvpCollect(s.id, s.agent); requested++; }
+  logAudit({ user: req.user?.username, action: 'CVP 지금 수집', target: only || '(전체)', detail: `중앙 즉시 ${busy ? 0 : direct.length}대${busy ? '(진행 중이라 건너뜀)' : ''} · 엣지 요청 ${requested}대${skippedNonDemo ? ` · 데모 계정이라 엣지 요청 제외 ${skippedNonDemo}대` : ''}` });
+  res.json({ ok: true, direct: busy ? 0 : direct.length, requested, ...(skippedNonDemo ? { skippedNonDemo } : {}), ...(busy ? { busy: true, reason: '이전 수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' } : {}) });
 });
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────
