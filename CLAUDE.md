@@ -4823,6 +4823,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 정책 항목은 정규형 IPv4·네트워크 경계 CIDR(/8~/32)만, 안쪽 빈 칸 거부 — 웹 `checkPolicyEntry` 와 같은 판정(테스트가 28개 입력으로 대조).
     · 도달성 점검은 버튼으로만, 대상은 스냅샷에서 계산한 주소(요청 본문의 주소를 받지 않는다) · 엣지 법인만 쓰는 주소는 `edge-only` · 목 vCenter 만 쓰는 주소는 `mock` 건너뜀.
     · 포탈 스냅샷 전원 표기는 `POWERED_ON`(밑줄)이다 — vSphere 원문 `poweredOn` 만 비교하면 전원 칸이 전부 '—' 가 된다(v2.696 Chromium 검증에서 잡았다).
+  - ⚠⚠ **v2.715 — SAN 사용량: 목업 데모 장비는 수식 값 · 1분 넘는 조회는 조회 엔진만 재시작**(`sanswitch/demoPerfSynth.js` + `perfDb.js heavyQuery` 감시 +
+    웹 `SanSwitchV2Parts.jsx` 대기 안내, 사용자 지시 "mock 모드 SAN 모니터링이 멈춘다 · 랜덤 숫자로 채우기 · 1분 넘으면 재시작해 전체 서비스 복원". 회귀 `server/test/sanDemoPerf2715.test.js`·`stall2713.test.js` — 변이 검증):
+    · 수식 경로는 **mock 모드 + 장비 전부 `mock-san-`** 일 때만이다(`isDemoPerfQuery`). 사람이 등록한 장비가 하나라도 섞이면 예전처럼 DB 를 읽는다. 응답 모양은 실제 집계와
+      같아야 한다(화면·trafficTotal 이 그대로 쓴다) — 집계 응답에 필드를 더하면 합성 쪽도 더할 것. 데모 장비 표본은 적재하지 않는다(포트 정보만) — `latestSampleTs` 는 데모 장비에 '지금' 을 준다.
+    · 감시(`SANSW_PERF_QUERY_MAX_MS`, 기본 60초·하한 10초): 넘긴 조회는 `query-restarted` 로 실패, 취소 세대를 올려 진행 중 집계가 다음 양보 지점에서 멈추고, 기억한 결과를 버리고,
+      DB 핸들을 다시 연다. **포탈 프로세스를 재시작하지 않는다** — 집계가 양보하며 돌아 다른 화면은 살아 있고, 프로세스 재시작은 모든 세션·폴러를 끊는다. 감시는 양보 지점이 있어야
+      동작한다(동기 SQL 한 문장 안에서는 끊지 못한다 — v2.693 조각화가 전제다). 상태는 `perfQueryStats().restarts`.
+    · 화면은 이 조회만 90초·재시도 0(`usePolling` 넷째 인자 `{timeoutMs, retries}` — 기본은 예전 그대로) · 대기 안내는 빨간 깜빡임(`.san2-loading-alert`, 움직임 줄이기면 정지).
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

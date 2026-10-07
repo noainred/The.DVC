@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **610개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **611개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-06)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-07)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -745,7 +745,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (29)
+## SAN 스위치 (30)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -765,6 +765,7 @@
 | `SANSW_PERF_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_MS` |  | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_ROWS` | `20000` | ✅ | sanswitch/perfPush.js |
+| `SANSW_PERF_QUERY_MAX_MS` | `60000` |  | sanswitch/perfDb.js |
 | `SANSW_PERF_QUERY_TTL_MS` | `20000` |  | sanswitch/perfDb.js |
 | `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
 | `SANSW_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/push.js |
@@ -794,4 +795,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 610
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 611

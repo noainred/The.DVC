@@ -100,7 +100,9 @@ async function collectOne(dev) {
     port: p.index, attachedName: p.attachedName || '', attachedWwn: (p.attached || [])[0] || '',
     speed: p.speed || '', portType: p.portType || '',
   }));
-  const saved = await savePerfSample(dev.id, Date.now(), r.parsed.ports, meta, st.retentionDays);
+  // v2.715 목업: 데모 장비는 표본을 쌓지 않는다(조회가 수식으로 만든다 — demoPerfSynth.js). 포트 정보만 갱신한다.
+  const demo = isMockMode() && isSanDemoId(dev.id);
+  const saved = await savePerfSample(dev.id, Date.now(), demo ? {} : r.parsed.ports, meta, st.retentionDays);
   return { ports: Object.keys(r.parsed.ports).length, total: r.parsed.total, saved: saved.saved };
 }
 

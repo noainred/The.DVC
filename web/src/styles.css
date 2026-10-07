@@ -1646,3 +1646,9 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @media (max-width: 720px) {
   .bm2-card { padding: 16px 14px; }
 }
+
+/* v2.715: SAN 스위치 사용량 대기 안내 — 빨간색으로 깜빡인다(사용자 요청). 움직임 줄이기 설정이면 깜빡이지 않는다. */
+.san2-loading-alert { color: var(--red); font-size: 14px; font-weight: 600; animation: san2-blink 1.1s ease-in-out infinite; }
+.san2-loading-alert .san2-loading-sub { display: block; font-weight: 400; font-size: 12.5px; margin-top: 4px; }
+@keyframes san2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .san2-loading-alert { animation: none; } }

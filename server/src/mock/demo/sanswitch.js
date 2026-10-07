@@ -595,17 +595,14 @@ export function ensureSanDemo(deps = {}) {
           const lay = sanDemoLayouts(snapshot).get(d.id);
           const last = times[times.length - 1];
           const meta = lay.ports.filter((p) => ONLINE.has(p.kind)).map((p) => ({ d: d.id, p: p.idx, ts: last, name: p.symb || '', wwn: p.wwn || p.peer?.wwn || '', speed: `${p.speed}G`, type: p.kind === 'isl' ? 'E-Port' : 'F-Port' }));
-          // 같은 (장비,포트,시각)은 importSamples 가 건너뛴다(재시도해도 중복이 쌓이지 않는다).
-          const rowsOf = [];
-          for (const ts of times) for (const [port, b] of Object.entries(sanDemoPortBps(lay, ts))) rowsOf.push({ d: d.id, ts, p: Number(port), b });
-          for (let i = 0; i < rowsOf.length; i += 2000) {
-            const r = await importSamples(rowsOf.slice(i, i + 2000), i + 2000 >= rowsOf.length ? meta : [], retentionDays);
-            rows += Number(r?.inserted || 0);
-            await yieldFn();
-          }
+          // v2.715: 표본은 적재하지 않는다 — 조회가 포트 정보로 수식 값을 만든다(sanswitch/demoPerfSynth.js). 사양이 낮은 데모
+          //   서버에서 86대 × 7일 표본(수십만 행)의 적재·집계가 화면을 1분 넘게 멈췄다. 포트 정보(연결 장비 이름)만 남긴다.
+          const r = await importSamples([], meta, retentionDays);
+          rows += Number(r?.inserted || 0);
+          await yieldFn();
         }
         _seedDone.perfRows = rows; _seedDone.backfill = 'done';
-        console.log(`[mock] SAN 스위치 데모 포트 사용량 백필 ${rows.toLocaleString()}행(최근 7일 · ${n}대)`);
+        console.log(`[mock] SAN 스위치 데모 포트 정보 ${n}대 등록(포트 사용량은 조회 때 수식으로 만든다)`);
         return rows;
       })().catch((e) => { _seedDone.backfill = `failed: ${e.message}`; console.warn(`[mock] SAN 데모 백필 실패: ${e.message}`); return 0; });
     }
