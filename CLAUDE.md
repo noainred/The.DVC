@@ -4090,6 +4090,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       iDRAC `SERIES` 에는 넣지 않는다(`gpu:true` 표지). 응답 `hostGpu.hasGpu`(`hostHasGpu` — 스냅샷 host.gpus, 모르면 null)가 **false 일 때만**
       카드·선·내보내기 열을 숨긴다(모르면 보인다 — 'GPU 없음' 을 단정하지 않는다). GPU 온도는 iDRAC gpuTemp 가 있어 싣지 않는다.
       샘플러의 gpu_util 은 ESXi 보고값 → 게스트 nvidia-smi 순이라 출처가 섞여 있다(각주가 둘 다 말한다).
+    - **v2.712 — GPU 온도 기준선**(사용자 요청 "45도 이상 100도 미만 · 색상과 굵기를 사용자가 지정"): `idracTrendText.js gpuRefValueOf·normalizeGpuRef·setGpuRef·loadGpuRef·saveGpuRef·showGpuRef`
+      (키 `idracTrend.gpuRef` — 브라우저 저장, 기본값과 같으면 지운다). 값은 **정수 [45, 100)** 만 — 범위 밖·빈 칸은 저장하지 않고 직전 값(`Number('')===0` 함정).
+      색은 `#rrggbb` 만(style 에 들어간다), 굵기는 `WIDTHS`. GPU 온도 계열이 보일 때만 그린다. 포탈이 정한 위험 수치가 아니다(v2.650 — 임계를 정하지 않는다). 엑셀 내보내기에는 없다.
     - ⚠⚠ **v2.676 — 호스트 상세 '통합 성능 모니터링'(ESXi 호스트 → iDRAC 서버)은 규칙 넷을 각각 판정한다**(`idrac/serverForHost.js`(순수) +
       `GET /admin/idrac/trend/resolve-host` + 웹 `components/IdracTrendLinkButton.jsx` · 회귀 `server/test/idracLink2676.test.js`(변이 5/5) + 웹
       `views/tools/idracLink2676.test.js`. 사용자 요청 "hostname, TAG 넘버, IP 등으로 복합 조회해서 확실하게 연결"):

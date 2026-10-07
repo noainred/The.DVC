@@ -20,7 +20,7 @@ import {
   loadOrder, saveOrder, moveVisibleKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
   gpuCardsText, TREND_HANDOFF, parseTrendHandoff, linkBasisText,
-  CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
+  CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, loadGpuRef, saveGpuRef, setGpuRef, showGpuRef, isDefaultGpuRef, GPU_REF_MIN, GPU_REF_MAX, GPU_REF_COLORS, GPU_REF_DEFAULT, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
 } from './idracTrendText.js';
 import Select from '../../components/Select.jsx';
 
@@ -62,6 +62,9 @@ export default function IdracTrendTool() {
   const applyStyles = (next) => { setStyles(next); saveStyles(store(), next); };
   const [refOn, setRefOn] = useState(() => loadCpuRef(store()));   // v2.666: CPU 75/90 기준선 표시(브라우저 저장)
   const applyRefOn = (v) => { setRefOn(v); saveCpuRef(store(), v); };
+  const [gpuRef, setGpuRefState] = useState(() => loadGpuRef(store()));   // v2.712: GPU 온도 기준선(값·색·굵기 — 브라우저 저장)
+  const applyGpuRef = (patch) => { const next = setGpuRef(gpuRef, patch); setGpuRefState(next); saveGpuRef(store(), next); };
+  const [gpuRefDraft, setGpuRefDraft] = useState(null);   // 입력 중인 기준선 값(범위를 벗어나면 저장하지 않는다)
   const [back, setBack] = useState(0);             // v2.666: 과거로 몇 칸(0 = 최근 구간 · 폴링)
   const [dragBack, setDragBack] = useState(null);  // 슬라이더를 끄는 중인 값(놓을 때만 조회)
   const [anchor, setAnchor] = useState(null);      // 스크롤을 시작한 순간의 끝 시각(칸 경계가 폴링 사이에 밀리지 않게)
@@ -212,8 +215,51 @@ export default function IdracTrendTool() {
         <button type="button" className={refOn ? 'login-btn' : 'tab'} aria-pressed={refOn} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
           title={`CPU 사용률 ${WARN_PCT}% 주의 · ${CRIT_PCT}% 위험 기준선을 차트에 그릴지 — 이 브라우저에 저장됩니다`}
           onClick={() => applyRefOn(!refOn)}>{refOn ? `📏 CPU 기준선(${WARN_PCT}·${CRIT_PCT}%) 켜짐` : `📏 CPU 기준선(${WARN_PCT}·${CRIT_PCT}%) 꺼짐`}</button>
+        <button type="button" className={gpuRef.on ? 'login-btn' : 'tab'} aria-pressed={gpuRef.on} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
+          title="GPU 온도 기준선을 차트에 그릴지 — 값·색·굵기와 함께 이 브라우저에 저장됩니다"
+          onClick={() => applyGpuRef({ on: !gpuRef.on })}>{gpuRef.on ? `🌡 GPU 기준선(${gpuRef.value}℃) 켜짐` : `🌡 GPU 기준선(${gpuRef.value}℃) 꺼짐`}</button>
         <span style={{ color: 'var(--text-faint)' }}>{arrange ? '◀ ▶ 로 옮기거나 카드를 끌어다 놓으세요 — 이 브라우저에 저장됩니다.' : '카드를 끌어다 놓아도 순서가 바뀝니다.'}</span>
       </div>
+      {gpuRef.on && (() => {
+        const draftBad = gpuRefDraft != null && !(gpuRefDraft.trim() && /^\d+$/.test(gpuRefDraft.trim()) && Number(gpuRefDraft) >= GPU_REF_MIN && Number(gpuRefDraft) < GPU_REF_MAX);
+        return (
+          <div className="card idrac-trend-gpuref" style={{ padding: '10px 14px', marginBottom: 12, minWidth: 0 }}>
+            <div className="flex wrap" style={{ alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <b style={{ fontSize: 13 }}>GPU 온도 기준선</b>
+              <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12 }}>
+                값
+                <input className="input" type="number" min={GPU_REF_MIN} max={GPU_REF_MAX - 1} step={1} aria-label="GPU 온도 기준선 값(℃)" aria-invalid={draftBad}
+                  style={{ minWidth: 0, width: 72, padding: '2px 6px', borderColor: draftBad ? 'var(--red)' : undefined }}
+                  value={gpuRefDraft ?? String(gpuRef.value)}
+                  onChange={(e) => { setGpuRefDraft(e.target.value); applyGpuRef({ value: e.target.value }); }}
+                  onBlur={() => setGpuRefDraft(null)} />℃
+              </label>
+              <span className="flex wrap" style={{ alignItems: 'center', gap: 4 }} role="group" aria-label="기준선 색">
+                {GPU_REF_COLORS.map((c) => (
+                  <button key={c} type="button" title={c} aria-label={`색 ${c}`} aria-pressed={gpuRef.color === c} onClick={() => applyGpuRef({ color: c })}
+                    style={{ flex: 'none', width: 20, height: 20, padding: 0, borderRadius: 999, cursor: 'pointer', background: c, border: gpuRef.color === c ? '2px solid #fff' : '1px solid var(--border)' }} />
+                ))}
+                <input type="color" aria-label="기준선 색 직접 고르기" title="직접 고르기" value={gpuRef.color} onChange={(e) => applyGpuRef({ color: e.target.value })}
+                  style={{ width: 28, height: 22, padding: 0, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer' }} />
+              </span>
+              <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12 }}>
+                굵기
+                <Select sort={false} className="input" style={{ minWidth: 0, width: 64, padding: '2px 6px' }} value={gpuRef.width} onChange={(e) => applyGpuRef({ width: Number(e.target.value) })}>
+                  {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
+                </Select>
+              </label>
+              <svg width="40" height="10" aria-hidden="true" style={{ flex: 'none' }}><line x1="0" y1="5" x2="40" y2="5" stroke={gpuRef.color} strokeWidth={gpuRef.width} strokeDasharray="5 4" /></svg>
+              <button type="button" className="tab" style={{ flex: 'none', padding: '3px 10px', marginTop: 0 }} disabled={isDefaultGpuRef({ ...gpuRef, on: GPU_REF_DEFAULT.on })}
+                onClick={() => { setGpuRefDraft(null); applyGpuRef({ value: GPU_REF_DEFAULT.value, color: GPU_REF_DEFAULT.color, width: GPU_REF_DEFAULT.width }); }}>기본값</button>
+            </div>
+            <div style={{ fontSize: 11, marginTop: 6, color: draftBad ? 'var(--amber)' : 'var(--text-faint)', overflowWrap: 'anywhere' }}>
+              {draftBad ? `값은 ${GPU_REF_MIN}℃ 이상 ${GPU_REF_MAX}℃ 미만의 정수만 받습니다 — 지금은 ${gpuRef.value}℃ 로 그립니다.`
+                : `${GPU_REF_MIN}℃ 이상 ${GPU_REF_MAX}℃ 미만에서 고릅니다 · 이 브라우저에 저장됩니다. 포탈이 정한 위험 수치가 아니라 직접 고른 표시선입니다(GPU 모델·냉각마다 정상 범위가 다릅니다).`}
+              {data && !st?.gpuTemp ? ' 이 서버는 GPU 온도 값이 없어 선이 그려지지 않습니다.' : ''}
+            </div>
+          </div>
+        );
+      })()}
       {styling && (
         <div className="card idrac-trend-styles" style={{ padding: '12px 14px', marginBottom: 12, minWidth: 0 }}>
           <div className="flex wrap" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -346,6 +392,7 @@ export default function IdracTrendTool() {
                 {gaps.map((g) => <ReferenceArea key={g.x1} yAxisId="pct" x1={g.x1} x2={g.x2} fill="rgba(139,155,180,.10)" strokeOpacity={0} label={{ value: 'iDRAC 무응답 — 값 없음', fill: '#8b9bb4', fontSize: 11, position: 'insideTop' }} />)}
                 {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={WARN_PCT} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: `CPU ${WARN_PCT}% 주의`, fill: '#fbbf24', fontSize: 11, position: 'insideTopLeft' }} />}
                 {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={CRIT_PCT} stroke="#ef4444" strokeDasharray="5 4" label={{ value: `CPU ${CRIT_PCT}% 위험`, fill: '#f87171', fontSize: 11, position: 'insideTopLeft' }} />}
+                {showGpuRef(gpuRef, on, st) && <ReferenceLine yAxisId="pct" y={gpuRef.value} stroke={gpuRef.color} strokeWidth={gpuRef.width} strokeDasharray="5 4" label={{ value: `GPU ${gpuRef.value}℃`, fill: gpuRef.color, fontSize: 11, position: 'insideBottomRight' }} />}
                 <Tooltip contentStyle={tipStyle} labelStyle={{ color: '#8b9bb4' }}
                   labelFormatter={(t) => `${span >= DAY ? `${ymd(t)} ` : ''}${hm(t)}${data.bucketMs > 60_000 ? ` · ${bucketLabel(data.bucketMs)} 평균` : ''}`}
                   formatter={(v, name) => { const s = CHART_SERIES.find((x) => x.label === name); return [valueText(v, s?.unit || ''), name]; }} />
