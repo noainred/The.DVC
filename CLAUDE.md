@@ -4842,6 +4842,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · Monitoring(svcmon) 데모 대상은 배치 태그 `mock-demo` 로 식별하고(대상 id 는 서버가 발급) **폴러가 runBatch 에 넘기지 않고 합성 결과**를 쓴다. 응답에 '(데모)' 를 붙인다. 사람이 등록한 대상은 mock 에서도 실제 점검.
     · 목업 ESXi 호스트 `serviceTag` = `mockServiceTag(vcenterId|name)` — iDRAC 데모 시드와 **같은 규칙**이어야 한다(다르면 v2.682 R3D-04 가 같은 장비를 '다른 장비' 로 본다). 규칙은 잎 모듈 `mock/serviceTag.js` 하나.
     · 목업 VM 의 판정용 분포를 다른 판정 집합과 겹치게 두지 말 것 — 'Tools 업그레이드 필요' 가 템플릿(idx%17)과 같은 VM 에 걸려 리포트에서 언제나 0이었다.
+  - **v2.717 데모 데이터 보완 2회차**: VM 복제 데모 잡(`mock/demo/vmclone.js` — 잡이 비어 있을 때만 · 스케줄러 틱이 부른다 · 시드 직후 `isDue` 거짓이어야 한다,
+    마지막 실행 기록이 '지금' 이라 곧바로 실행되지 않는다) · 데모 엣지 베어메탈(`mock/demo/edgeSeed.js` 가 틱마다 `setEdgeFleet` — 실제 /fleet push 와 같은 모양, watts 없음).
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

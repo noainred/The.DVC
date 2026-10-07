@@ -10,6 +10,7 @@
 
 import { listJobs, isDue } from './store.js';
 import { enqueueRun, runnerStatus } from './runner.js';
+import { ensureVmCloneDemo } from '../mock/demo/vmclone.js'; // v2.717: 데모(mock) 잡 시드(비어 있을 때만)
 
 let _timer = null;
 let _ticking = false;
@@ -18,6 +19,7 @@ let _lastTick = 0;
 function tick() {
   if (_ticking) return; // 재진입 가드
   _ticking = true;
+  ensureVmCloneDemo().catch((e) => console.warn(`[vmclone] 데모 잡 등록 실패: ${e?.message || e}`));
   try {
     const now = Date.now();
     _lastTick = now;
@@ -30,6 +32,7 @@ function tick() {
 export function startVmCloneScheduler() {
   if (_timer) return;
   _timer = setInterval(tick, 60_000);
+  setTimeout(() => ensureVmCloneDemo().catch(() => null), 30_000).unref?.(); // 데모: 첫 틱(60초)을 기다리지 않게
   _timer.unref?.(); // 테스트/종료 시 프로세스를 붙잡지 않게
 }
 

@@ -118,7 +118,7 @@
 | `mail/` | 3 | 416 | `mail/service.js` (3) | mail/service.js — 포탈 공용 메일 발송 진입점 (v2.454). |
 | `metrics/` | 7 | 1,948 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
 | `migration/` | 1 | 129 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
-| `mock/` | 16 | 4,951 | `mock/demo/flags.js` (34) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
+| `mock/` | 17 | 5,028 | `mock/demo/flags.js` (34) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
 | `net/` | 4 | 628 | `net/captureHistory.js` (4) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,060 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 162 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
@@ -150,14 +150,14 @@
 | `vcenter/` | 12 | 4,195 | `vcenter/registry.js` (20) | vCenter registry — read/write the managed list of vCenters in |
 | `vmcfg/` | 3 | 388 | `vmcfg/cache.js` (2) | VM 구성 속성 캐시(B10, v2.697) — vCenter 별 · VM moref 별. 인메모리(재시작하면 비고 몇 주기에 걸쳐 다시 찬다 — |
 | `vmchanges/` | 2 | 272 | `vmchanges/eventDetail.js` (8) | VM 이동 이력(A7)·구성 변경(A8) — 이벤트 본문에서 화면이 쓰는 몇 필드만 뽑는다(v2.702, 순수). |
-| `vmclone/` | 4 | 632 | `vmclone/scheduler.js` (3) | vmclone/scheduler.js — 복제 잡 스케줄러(v2.299). |
+| `vmclone/` | 4 | 635 | `vmclone/scheduler.js` (3) | vmclone/scheduler.js — 복제 잡 스케줄러(v2.299). |
 | `vmdns/` | 5 | 1,211 | `vmdns/poller.js` (3) | vmdns/poller.js — VM DNS 서버 설정 **변경 이력** 적재(v2.696). 10분마다 인벤토리 스냅샷만 읽는다 — vCenter·게스트 왕복 0. |
 | `vmhygiene/` | 3 | 311 | `vmhygiene/notifier.js` (3) | vmhygiene/notifier.js — 스냅샷 정책 위반 하루 한 번 알림(A20, v2.698). 기본 꺼짐(설정 notify.enabled). |
 | `vmlife/` | 1 | 90 | `vmlife/analyze.js` (1) | vmlife/analyze.js — 특수 기능 'VM 생성·삭제 이력'(도구 키 `vm-lifecycle`, v2.706 — C5) 판정(순수). |
 | `vmseries/` | 9 | 1,291 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,380 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 80개 · 파일 842개 · 167,381줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 80개 · 파일 843개 · 167,461줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

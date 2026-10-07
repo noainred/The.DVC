@@ -102,6 +102,17 @@ async function demoEdgeTickInner({ now = Date.now(), snap = null } = {}) {
       fails: degraded ? 1 : 0, hosts, version, datacenter: c.datacenter || e.datacenter, agent: name,
       hostname: `${e.slug}.corp.example`, identity: null, mock: false, demo: true, vms,
     });
+    // v2.717: 엣지가 올리는 베어메탈(전력 미보고 메타) — 시리얼 조회 '엣지 베어메탈' 이 0건이었다. 실제 엣지 /fleet push 와 같은 모양.
+    try {
+      const vc = (snap?.vcenters || []).find((v) => demoEdgeOfVcenter(v.id) === e);
+      if (vc) {
+        const { setEdgeFleet } = await import('../../central/fleet.js');
+        const { mockServiceTag } = await import('../serviceTag.js');
+        const bm = [1, 2].map((k) => ({ fleetId: `mock-edgebm-${e.slug}-${k}`, name: `${e.slug}-bm-0${k}`, model: k === 1 ? 'PowerEdge R650' : 'PowerEdge R750xs',
+          serviceTag: mockServiceTag(`edgebm|${e.slug}|${k}`), vcenterId: vc.id, source: 'demo' }));
+        setEdgeFleet(name, bm, new Date(now).toISOString());
+      }
+    } catch (err) { console.warn(`[mock] 데모 엣지 베어메탈 보고 실패(${name}): ${err?.message || err}`); }
     // ── push(엣지 → 중앙): 처음엔 과거 기록이 없으므로 그 틱에 전 경로를 1회 기록한다. ──
     for (const p of PUSH_EPS) {
       if (!first && (_tickN % p.every) !== 0) continue;

@@ -78,3 +78,25 @@ test('④ 폴러는 데모 대상을 runBatch 에 넘기지 않는다(소스)', 
   assert.match(src, /const live = due\.filter\(\(\{ target \}\) => !isSvcmonDemoTarget\(target\)\)/);
   assert.match(src, /runBatch\(live\.map/);
 });
+
+test('v2.717 ⑤ VM 복제 데모 잡 — 검증 통과 · 법인마다 하나 · 바로 실행되지 않음(최근 실행 기록이 있다)', async () => {
+  const { demoVmCloneJobs, ensureVmCloneDemo } = await import('../src/mock/demo/vmclone.js');
+  const defs = demoVmCloneJobs(snap);
+  assert.ok(defs.length >= 3, `jobs=${defs.length}`);
+  assert.equal(new Set(defs.map((d) => d.vcenterId)).size, defs.length);
+  const { store } = await import('../src/store.js');
+  const orig = store.get; store.get = () => snap;
+  try {
+    const r = await ensureVmCloneDemo();
+    assert.equal(r.added, defs.length);
+    const { listJobs, isDue } = await import('../src/vmclone/store.js');
+    const jobs = listJobs();
+    assert.equal(jobs.length, defs.length);
+    for (const j of jobs) {
+      assert.ok(j.clones.length >= 2 && j.lastRun, j.vmName);
+      assert.equal(isDue(j), false, `${j.vmName} 이 시드 직후 바로 실행되면 안 된다`);
+    }
+    assert.ok(jobs.some((j) => j.lastRun.ok === false), '실패 기록 1건');
+    assert.deepEqual(await ensureVmCloneDemo(), { skipped: true }, '두 번 시드하지 않는다');
+  } finally { store.get = orig; }
+});
