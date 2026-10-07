@@ -22,7 +22,7 @@ const sub = (label) => ({ kind: 'sub', label });
 export const TAB_NAMES = Object.freeze({
   overview: 'Overview', summary: 'Summary', vcenters: 'Platform', svcmon: 'Monitoring',
   hosts: 'VM호스트', vms: '가상머신', datastores: '스토리지', networks: '네트워크', ipam: 'IP관리',
-  alarms: '알람', tools: '특수 기능 전체', settings: '설정', upgrade: '업그레이드',
+  alarms: '알람', board: '게시판', tools: '특수 기능 전체', settings: '설정', upgrade: '업그레이드',
 });
 
 export const HOME = Object.freeze([tab('overview', 'Overview'), tab('summary', 'Summary')]);
@@ -72,7 +72,7 @@ export const GROUPS = Object.freeze([
   },
   {
     id: 'platform', section: 'ADMINISTRATION', label: '플랫폼 관리', icon: 'gear',
-    items: [tab('settings', '설정'), tab('upgrade', '업그레이드'), tab('tools', '특수 기능 전체'), tool('service-hub'),
+    items: [tab('board', '게시판'), tab('settings', '설정'), tab('upgrade', '업그레이드'), tab('tools', '특수 기능 전체'), tool('service-hub'),
       tool('portal-check'), tool('edge-log'), tool('davinci-svc'), tool('capacity-advisor'), tool('portaldb'), tool('mail-diag')],
   },
 ]);

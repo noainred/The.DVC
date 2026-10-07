@@ -23,6 +23,7 @@ export const TAB_INFO = Object.freeze({
   ipam: { icon: '📒', label: 'IP관리', desc: '센터별 IP 관리대장 · 대역/할당 현황 · 자체 vCenter 범위 선택' },
   datastores: { icon: '🗄️', label: '데이터스토어 목록', desc: 'VMFS / NFS / vSAN 데이터스토어 전체 · 용량·사용률' },
   vcenters: { icon: '🏢', label: 'Platform (vCenter)', desc: 'vCenter 연결 현황 · 법인별 드릴다운' },
+  board: { icon: '📝', label: '게시판', desc: '포탈 게시판 · 접속 공지(팝업) 관리' },
   settings: { icon: '⚙️', label: '설정', desc: '사용자·권한 · 감사 로그 · 컬렉터 · 특수 기능 분류' },
   upgrade: { icon: '⬆️', label: '업그레이드', desc: '새 버전 적용 · 릴리즈 노트' },
 });
@@ -78,7 +79,7 @@ export const MENUS = Object.freeze([
     { name: '점검', items: ['secret-scan', 'codex-check'] },
     { name: '계정', items: ['credentials'] }] },
   { id: 'platform', code: 'PLATFORM', label: '플랫폼 관리', desc: 'vCenter 연결·포탈 설정·엣지 통신', groups: [
-    { name: 'vCenter · 포탈', items: ['vcenters', 'settings', 'upgrade', 'portaldb', 'mail-diag'] },
+    { name: 'vCenter · 포탈', items: ['vcenters', 'board', 'settings', 'upgrade', 'portaldb', 'mail-diag'] },
     { name: '엣지 통신', items: ['link-check', 'comm-map', 'data-flow', 'device-flow', 'portal-check', 'edge-log'] },
     { name: '바로가기', items: ['service-hub'] }] },
 ]);

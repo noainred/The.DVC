@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { GROUPS, HOME, MUTATING_TOOLS, treeToolKeys, treeTabIds, groupOfTool, resolveTree, activeKeyOf } from './tree.js';
 import { TOOLS } from '../views/specialToolsList.js';
 
-const ALL_TABS = ['overview', 'summary', 'vcenters', 'svcmon', 'hosts', 'vms', 'datastores', 'networks', 'ipam', 'alarms', 'tools', 'settings', 'upgrade'];
+const ALL_TABS = ['overview', 'summary', 'vcenters', 'svcmon', 'hosts', 'vms', 'datastores', 'networks', 'ipam', 'alarms', 'board', 'tools', 'settings', 'upgrade'];
 
 describe('V5 트리 커버리지', () => {
   it('모든 도구가 정확히 1회 — 누락 0 · 중복 0 · 유령 0', () => {

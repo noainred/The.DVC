@@ -1652,3 +1652,29 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .san2-loading-alert .san2-loading-sub { display: block; font-weight: 400; font-size: 12.5px; margin-top: 4px; }
 @keyframes san2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { .san2-loading-alert { animation: none; } }
+
+/* v2.722 접속 공지 팝업 · 게시판 */
+.notice-popup-overlay { z-index: 1200; }
+.notice-popup { width: 560px; max-width: calc(100vw - 40px); max-height: 85vh; overflow-y: auto; }
+.notice-title { font-size: 16px; display: block; overflow-wrap: anywhere; }
+.notice-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; line-height: 1.6; font-size: 13.5px; }
+.notice-level { display: inline-block; border: 1px solid; border-radius: 4px; padding: 0 6px; font-size: 11.5px; font-weight: 600; }
+.notice-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.board-page { min-width: 0; }
+.board-search { min-width: 0; width: 260px; max-width: 100%; }
+.board-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; color: inherit; overflow-wrap: anywhere; }
+.board-pin { display: inline-block; font-size: 11px; color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
+.board-editor { display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.board-editor .input { min-width: 0; width: 100%; }
+.board-editor textarea.input { resize: vertical; font-family: inherit; }
+.board-title { margin: 12px 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.board-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; line-height: 1.65; font-size: 13.5px; }
+.board-comments { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+.board-comment { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.board-comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; font-size: 13px; }
+.board-comment-input { min-width: 0; flex: 1 1 240px; resize: vertical; font-family: inherit; }
+.board-notice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px; align-items: end; }
+.board-notice-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; min-width: 0; }
+.board-notice-grid .input, .board-notice-grid .select { min-width: 0; width: 100%; }
+.board-notice-grid .board-check { flex-direction: row; align-items: center; gap: 6px; }
+.board-notice-snippet { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
