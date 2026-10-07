@@ -178,7 +178,7 @@ export default function Upgrade() {
           <div className="spec-grid">
             <label style={{ gridColumn: '1 / -1' }}>원격 소스 URL (versions.json 디렉터리)
               <input className="input" value={form.remoteBase} onChange={setF('remoteBase')}
-                placeholder="https://raw.githubusercontent.com/noainred/The.DVC/main/download" />
+                placeholder="비워 두면 원격 확인을 하지 않습니다 · 예: https://<사내 미러>/downloads" />
             </label>
             <label>토큰 (사설 레포)
               <input className="input" type="password" value={form.token} onChange={setF('token')}

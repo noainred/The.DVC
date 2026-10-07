@@ -132,7 +132,7 @@ export default function V6Shell({
         <div className="v6-brand">
           <div className="v6-logo">V</div>
           <div className="v6-brand-text">
-            <b>The Davinci <span>Virtual Platform</span></b>
+            <b>The Davinci</b>
             <div className="v6-badges">
               {health?.version && <button type="button" className="v6-badge v6-badge-link" onClick={onShowNotes} title="릴리즈 노트 보기">v{health.version}</button>}
               {health?.source && <span className="v6-badge">{String(health.source).toUpperCase()}</span>}
