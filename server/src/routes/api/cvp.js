@@ -108,13 +108,20 @@ export function cvpDeviceConfirm(d, { now = Date.now(), intervalMs, partsEveryMs
 export function cvpTotals(rows, opts = null) {
   const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0, portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0,
     cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null,
-    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0 };
+    unconfirmed: 0, unconfirmedBy: { never: 0, stale: 0, 'not-streaming': 0, 'telemetry-failed': 0 }, partsStale: 0, notStreaming: 0 };
   for (const d of Array.isArray(rows) ? rows : []) {
     if (!d || typeof d !== 'object') continue;
     totals.devices++;
     const c = opts ? cvpDeviceConfirm(d, opts) : { unconfirmed: null, partsStale: false };
-    if (c.unconfirmed) { totals.unconfirmed++; totals.unconfirmedBy[c.unconfirmed] = (totals.unconfirmedBy[c.unconfirmed] || 0) + 1; continue; }
+    // v2.721(감사 R2-03): '스트리밍 아님' 은 notStreaming(= unconfirmedBy['not-streaming']) 뿐이다 — 낡음·기록 없음·텔레메트리 실패로 빠진
+    //   장비를 장비 − 스트리밍 중 뺄셈으로 '스트리밍 아님' 에 넣지 않게 화면(cvpText.streamingMeta)이 이 필드를 읽는다.
+    if (c.unconfirmed) {
+      totals.unconfirmed++; totals.unconfirmedBy[c.unconfirmed] = (totals.unconfirmedBy[c.unconfirmed] || 0) + 1;
+      if (c.unconfirmed === 'not-streaming') totals.notStreaming++;
+      continue;
+    }
     if (d.streaming === true) totals.streaming++;
+    else if (!opts && d.streaming === false) totals.notStreaming++; // 신선도 판정 없는 순수 합산(시험용)도 같은 뜻을 지킨다
     const p = c.partsStale ? null : partsSummary(d.partsList);
     if (c.partsStale) totals.partsStale++;
     else if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;

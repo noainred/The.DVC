@@ -11,13 +11,16 @@
  *    한 VM 에 그 카테고리 태그가 둘 이상이면 **첫 태그 하나**에만 넣고 개수를 밝힌다(두 번 세면 합계가 실제보다 커진다).
  *  · 템플릿은 넣지 않는다.
  */
-import { vmRefOf, vmTagsOf, tagStateOf } from '../tags/analyze.js';
+import { vmRefOf, vmTagsOf, tagStateOf, tagsPartialOf } from '../tags/analyze.js';
 
 export const GROUP_KINDS = Object.freeze(['vcenter', 'cluster', 'folder', 'tag']);
 export const ROWS_MAX = 500;
 export const VM_ROWS_MAX = 2000;
 export const NO_TAG = '(태그 없음)';
 export const TAG_UNKNOWN = '(태그 확인 안 됨)';
+// v2.721(감사 B1-01): 태그 연결을 일부만 읽은 vCenter(partialTags)에서 그 카테고리 태그가 안 보인 VM 은 '없음' 이 아니다 —
+// 읽지 못한 연결에 붙어 있을 수 있다. '(태그 없음)' 과 섞지 않고 따로 묶어 notes.tagPartial 로 밝힌다(tags/analyze.js 와 같은 판정).
+export const TAG_PARTIAL = '(태그 확인 안 됨 — 부분 읽기)';
 const r2 = (x) => Math.round(x * 100) / 100;
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -55,7 +58,7 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
   const invByVc = new Map((snap.vcenters || []).map((vc) => [vc.id, vc.tagInv || null]));
   const catKey = String(category || '').toLowerCase();
   const groups = new Map();
-  const notes = { excludedOff: 0, storageUnknown: 0, cpuUnknown: 0, multiTag: 0, tagUnknown: 0, templates: 0 };
+  const notes = { excludedOff: 0, storageUnknown: 0, cpuUnknown: 0, multiTag: 0, tagUnknown: 0, tagPartial: 0, templates: 0 };
   const vmRows = [];
   const total = { vms: 0, vcpu: 0, ramGB: 0, storageGB: 0, cpu: 0, ram: 0, storage: 0, total: 0 };
   for (const v of snap.vms || []) {
@@ -77,7 +80,8 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
       else {
         const tags = (vmTagsOf(inv, vmRefOf(v.vcenterId, v.id)).tags || []).filter((t) => String(t.category).toLowerCase() === catKey);
         if (tags.length > 1) notes.multiTag += 1;
-        label = tags[0]?.tag || NO_TAG; key = label;
+        if (!tags.length && tagsPartialOf(inv)) { key = TAG_PARTIAL; label = TAG_PARTIAL; notes.tagPartial += 1; }
+        else { label = tags[0]?.tag || NO_TAG; key = label; }
       }
     }
     const g = groups.get(key) || { key, label, vcenterId: kind === 'cluster' || kind === 'folder' || kind === 'vcenter' ? v.vcenterId : null,

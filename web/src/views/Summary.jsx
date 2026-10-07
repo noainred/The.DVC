@@ -306,7 +306,8 @@ export default function Summary({ scope, onGotoTab }) {
       </div>
 
       <div className="section-title">vCenter별 기여도 (사이트별 합계)</div>
-      {(contrib.excluded > 0 || contrib.carried > 0 || contrib.dsUnknown > 0) && <div className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{contribNote(contrib)}</div>}
+      {/* v2.721(감사 R2-04): 표시 조건은 안내 문장 자체 — 전력만 빠진 경우(excluded·carried·dsUnknown 모두 0)도 말한다. */}
+      {contribNote(contrib) && <div className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{contribNote(contrib)}</div>}
       <div className="table-wrap">
         <STable>
           <thead><tr>{vcCols.map((col) => <th key={col.key} style={{ textAlign: col.align || 'left' }}>{col.label}</th>)}</tr></thead>

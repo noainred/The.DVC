@@ -149,9 +149,13 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
 
     const mock = store.get()?.source === 'mock';
     if (mock) await ensureDemoHorizonSeed({ loadHorizon, upsertHorizon });   // v2.708: 등록부가 비어 있을 때만 데모 커넥션 서버 2대
-    // v2.720(감사 R1-03 후속): 데모 계정의 수동 수집은 데모 등록(mock-)만 — mock 모드에서도 사람이 등록한 커넥션 서버는 실제 AD 로그인이다.
+    // v2.720(감사 R1-03 후속): 데모 계정의 수동 수집은 데모 등록(mock-)만.
+    // v2.721(감사 R1-03·S1-02): mock 모드에서는 거르지 않는다 — mockSessionResult 가 비-데모 서버를 로그인 없이 거부하므로
+    //   막을 로그인이 없고, 거르면 아래 정리가 사람이 등록한 서버의 최신 행을 지우고 합계 추이에 부분 합(실패 0)을 적었다.
+    //   거르는 것은 스냅샷이 아직 mock 이 아닐 때(실제 로그인이 날 수 있는 경우)뿐이고, 그때는 정리·합계 적재를 건너뛴다.
     const allServers = targetServers(s);
-    const servers = demoOnly ? allServers.filter((x) => isDemoEntryId(x.id)) : allServers;
+    const filtered = demoOnly && !mock;
+    const servers = filtered ? allServers.filter((x) => isDemoEntryId(x.id)) : allServers;
     const skippedNonDemo = allServers.length - servers.length;
     if (!servers.length) {
       lastRunTs = Date.now();
@@ -235,7 +239,8 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
     const commit = await commitHzSessions({ ts, records, series: [], maxUsers: s.maxUsers });
 
     // 등록이 사라진 서버의 낡은 최신값 정리(화면에 유령 행이 남지 않게).
-    const live = new Set(servers.map((x) => x.id));
+    // v2.721(감사 R1-03·S1-02): 정리 기준은 걸러내기 전 등록 전체다 — 걸러낸 목록이면 수집하지 않은 서버를 '등록이 사라졌다' 로 읽는다.
+    const live = new Set(allServers.map((x) => x.id));
     for (const row of await hzLatestRecords()) if (!live.has(row.serverId)) await dropHzLatest(row.serverId);
 
     let total = null;
@@ -248,7 +253,8 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
         ts,
         records: [],
         series: [
-          { serverId: '', ...seriesRow(total), serversOk: total.serversOk, serversFailed: total.serversFailed },
+          // v2.721(감사 S1-02): 걸러낸 실행의 합계는 일부 서버만의 부분 합이다 — '전체' 추이('')에 적재하지 않는다.
+          ...(filtered ? [] : [{ serverId: '', ...seriesRow(total), serversOk: total.serversOk, serversFailed: total.serversFailed }]),
           ...fresh.filter((r) => r.ok).map((r) => ({ serverId: r.serverId, ...seriesRow(r), serversOk: 1, serversFailed: 0 })),
         ],
       });

@@ -71,7 +71,7 @@ export default function V6Summary({ vcenters }) {
       </div>
 
       <div className="v6-panel">
-        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b>{(contrib.excluded > 0 || contrib.carried > 0 || contrib.dsUnknown > 0) && <span>{contribNote(contrib)}</span>}</div>
+        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b>{/* v2.721(감사 R2-04): 표시 조건은 안내 문장 자체 — 전력만 빠진 경우(excluded·carried·dsUnknown 모두 0)도 말한다. */}{contribNote(contrib) && <span>{contribNote(contrib)}</span>}</div>
         <STable className="v6-table" minWidth={900}>
           <thead><tr><th>법인</th><th className="right">호스트</th><th className="right">VM</th><th className="right">코어</th><th className="right">메모리(GB)</th><th className="right">스토리지(TB)</th><th className="right">vCPU 할당</th><th className="right">RAM 할당(GB)</th><th className="right">프로비저닝(TB)</th><th className="right">전력(kW)</th></tr></thead>
           <tbody>

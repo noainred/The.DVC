@@ -92,6 +92,35 @@ export function parsePortsParam(v) {
   return String(v || '').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isInteger).slice(0, 64);
 }
 
+/**
+ * 법인별 스토리지(어레이) 처리량 소계 — storage-summary 의 byDatacenter.
+ * v2.721(감사 R1-02·R2-02): 계열이 전부 측정 없음(avgTotal null — 버킷이 전부 부분 합)인 법인은
+ * avgTotal·maxTotal·peakAvg·peakTotal 을 0 이 아니라 null 로 낸다. 0 이면 화면이 '0 bps'(트래픽 없음)라는
+ * 거짓을 말한다. 측정된 계열 수는 storages, 측정 없음 계열 수는 unmeasured(0 포함 — 화면이 항상 읽는다).
+ * 정렬은 측정값 큰 순이고 null 은 뒤로 보낸다.
+ */
+export function sanStorageDcSubtotals(series, dcNameOf = (id) => id || '(법인 미지정)') {
+  const byDc = {};
+  for (const s of Array.isArray(series) ? series : []) {
+    if (!s || s.endpointKind !== 'array') continue;
+    const k = s.datacenterId ?? '';
+    if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, unmeasured: 0, avgTotal: 0, maxTotal: 0, peakAvg: 0, peakTotal: 0, switches: new Set() };
+    for (const id of s.deviceIds || []) byDc[k].switches.add(id);
+    // v2.720(감사 B1-05): 버킷이 전부 부분 합으로 비워진 계열(avgTotal null)은 0 으로 더하지 않고 따로 센다.
+    if (s.avgTotal == null) { byDc[k].unmeasured++; continue; }
+    byDc[k].storages++;
+    byDc[k].avgTotal += s.avgTotal;
+    byDc[k].maxTotal += s.maxTotal ?? 0;
+    byDc[k].peakAvg += s.peakAvg ?? 0;
+    byDc[k].peakTotal += s.peakTotal ?? 0;
+  }
+  return Object.values(byDc).map((x) => {
+    const row = { ...x, switches: x.switches.size };
+    if (x.storages === 0) { row.avgTotal = null; row.maxTotal = null; row.peakAvg = null; row.peakTotal = null; }
+    return row;
+  }).sort((a, b) => (b.avgTotal ?? -1) - (a.avgTotal ?? -1));
+}
+
 export function registerSanSwitch(api) {
 
 /**
@@ -711,21 +740,8 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     };
   });
   const counts = series.reduce((a, s) => { a[s.endpointKind] = (a[s.endpointKind] || 0) + 1; return a; }, {});
-  // 법인별 소계 — '어느 법인이 얼마나 쓰나'를 한눈에(스토리지만 합산, 호스트 제외).
-  const byDc = {};
-  for (const s of series) {
-    if (s.endpointKind !== 'array') continue;
-    const k = s.datacenterId ?? '';
-    if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, avgTotal: 0, maxTotal: 0, peakAvg: 0, peakTotal: 0, switches: new Set() };
-    // v2.720(감사 B1-05): 버킷이 전부 부분 합으로 비워진 계열(avgTotal null)은 0 으로 더하지 않고 따로 센다.
-    if (s.avgTotal == null) { byDc[k].unmeasured = (byDc[k].unmeasured || 0) + 1; for (const id of s.deviceIds) byDc[k].switches.add(id); continue; }
-    byDc[k].storages++;
-    byDc[k].avgTotal += s.avgTotal;
-    byDc[k].maxTotal += s.maxTotal ?? 0;
-    byDc[k].peakAvg += s.peakAvg || 0;
-    byDc[k].peakTotal += s.peakTotal || 0;
-    for (const id of s.deviceIds) byDc[k].switches.add(id);
-  }
+  // 법인별 소계 — '어느 법인이 얼마나 쓰나'를 한눈에(스토리지만 합산, 호스트 제외). 규칙은 sanStorageDcSubtotals 머리말.
+  const byDcRows = sanStorageDcSubtotals(series, dcNameOf);
   // 화면이 창을 닫지 않고 범위를 바꿀 수 있게, **필터와 무관한 전 법인 목록**을 함께 준다
   // (스위치가 등록된 법인만). 이게 없으면 사용자가 목록 화면으로 돌아가 칩을 다시 골라야 한다.
   const allDcs = (() => {
@@ -745,8 +761,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     edgeSwitches, edgeNote: edgeMissing.length
       ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 서버 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
       : '',
-    byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
-      .sort((a, b) => b.avgTotal - a.avgTotal),
+    byDatacenter: byDcRows,
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
     buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
     ...(admin ? {} : { addressHidden: true }),

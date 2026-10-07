@@ -75,6 +75,6 @@ describe('WEB2632-02 기여도 표', () => {
   it('V6 요약 표도 스토리지 셀에 미상 표지를 단다', () => {
     const src = read('../version_6/pages/Summary.jsx');
     expect(src).toMatch(/dsUnknownMark\(r\)/);
-    expect(src).toMatch(/contrib\.dsUnknown > 0/);
+    expect(src).toMatch(/contribNote\(contrib\) &&/);   // v2.721(감사 R2-04): dsUnknown 도 contribNote 가 말한다
   });
 });

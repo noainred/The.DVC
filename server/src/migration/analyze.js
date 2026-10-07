@@ -118,7 +118,9 @@ export function analyzeMigration(vms, { q = '', level = '', code = '', vcName = 
   const lr = { blocked: 0, caution: 1, unknown: 2, ready: 3 };
   shown.sort((a, b) => lr[a.level] - lr[b.level] || b.findings.length - a.findings.length || String(a.name).localeCompare(String(b.name)));
   const total = counts.blocked + counts.caution + counts.unknown + counts.ready;
-  const groupRows = [...groups.values()].map((g) => ({ ...g, readyPct: g.vms ? Math.round((g.ready / g.vms) * 1000) / 10 : null }))
+  // v2.721(감사 B1-02): 그룹 준비율도 전체와 같은 분모(판정한 VM — 미수집 제외)다. vms 로 나누면 미수집이 많은 법인이
+  // 전체 KPI 100% 인데 표에서는 25% 로 '준비 안 됨' 처럼 보였다. 판정한 VM 이 0 이면 null.
+  const groupRows = [...groups.values()].map((g) => ({ ...g, readyPct: g.vms - g.unknown > 0 ? Math.round((g.ready / (g.vms - g.unknown)) * 1000) / 10 : null }))
     .sort((a, b) => b.blocked - a.blocked || b.caution - a.caution || String(a.vcenterName).localeCompare(String(b.vcenterName)));
   return {
     codes: MIG_CODES, counts, total, templates, storageGB: gb,

@@ -95,6 +95,7 @@ function RebootPanel({ vcId }) {
           </Chip>
         ))}
       </div>
+      {d.truncated && <div className="banner" style={{ marginBottom: 6 }}>운영 이벤트가 읽기 상한({Number(d.readLimit || 0).toLocaleString()}건)에서 잘렸습니다{d.readCut > 0 ? ` — 근거 구간이 잘린 부팅 ${d.readCut}대는 '이벤트 없음' 으로 두고 판정하지 않았습니다` : ''}. 기간을 줄이거나 vCenter 를 골라 보세요.</div>}
       {d.logs?.enabled === false && <div className="banner" style={{ marginBottom: 6 }}>vCenter 이벤트 수집이 꺼져 있어(설정 › vCenter 로그 보관) 계획/예기치 않음을 가를 수 없습니다 — 전부 '판정 불가' 로 보입니다.</div>}
       {rows.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>{total === 0 ? `최근 ${days}일 안에 재부팅한 호스트가 없습니다(부팅 시각을 읽은 호스트 기준).` : '조건에 맞는 호스트가 없습니다.'}</div>

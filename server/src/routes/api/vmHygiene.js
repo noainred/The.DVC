@@ -9,6 +9,7 @@
  * 화면은 폴링하지 않는다(마운트 1회 + 새로고침).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
@@ -44,8 +45,14 @@ export function registerVmHygiene(api) {
     return { ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
   }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${req.user?.role || ''}` }));
 
-  api.get('/tools/vm-hygiene/settings', toolsPerm, (_req, res) => {
+  api.get('/tools/vm-hygiene/settings', toolsPerm, (req, res) => {
     const s = loadVmHygieneSettings();
+    // v2.721(감사 B2-02): exceptions 는 전 법인 공통 자유 입력(다른 법인 VM 이름·메모 조각)이고 updatedBy 는 계정명이다 —
+    // 범위 계정에는 개수만(exceptionsHidden) · updatedBy null. 저장은 어차피 전체 범위 전용이다. 전체 범위 응답은 그대로.
+    if (scopedVcenterIds(req.user, store.get())) {
+      const n = Array.isArray(s.exceptions) ? s.exceptions.length : 0;
+      return res.json({ ok: true, settings: { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null }, codes: ALL_CODES });
+    }
     res.json({ ok: true, settings: s, codes: ALL_CODES });
   });
 

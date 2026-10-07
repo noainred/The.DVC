@@ -154,7 +154,9 @@ test('S1-01 삭제된 vCenter·접속처가 바뀐 vCenter 의 구성 캐시를 
   const { stripComments } = await import('./_stripComments.js');
   const fs = await import('node:fs');
   const src = stripComments(fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8'));
-  assert.match(src, /pruneInventory\(ids\);\s*syncVcConfigCaches\(vcenters\);/);
+  // v2.721(감사 S1-01): 정리는 수집 '전'(loadVcenterConfig 직후) 한 번이다.
+  assert.match(src, /const \{ vcenters \} = loadVcenterConfig\(\);\s*syncVcConfigCaches\(vcenters\);/);
+  assert.equal((src.match(/syncVcConfigCaches\(vcenters\)/g) || []).length, 1, '호출은 한 곳뿐');
 });
 
 test('S1-02 증분 수집 세션이 인증 외 실패로 2회 연속 끝나면 쉬고, 상태에 다음 시도 시각을 싣는다', async () => {

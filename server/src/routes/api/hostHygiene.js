@@ -56,11 +56,17 @@ export function registerHostHygiene(api) {
     const db = await getLogsDb();
     const since = Date.now() - days * 86_400_000 - 86_400_000;
     // v2.719(감사 S1-04): 시간 조각 + 양보로 읽는다.
-    const events = ids.length ? await db.opsEventsAsync({ vcenterIds: ids, since, types: [...HOSTOPS_TYPES] }, 20_000) : [];
+    // v2.721(감사 B1-04): 상한 + 1 로 읽어 절단을 감지한다 — 최신부터 읽으므로 잘렸으면 마지막 행 ts(readFrom) 이전은 입력에 없다.
+    const READ_MAX = 20_000;
+    const got = ids.length ? await db.opsEventsAsync({ vcenterIds: ids, since, types: [...HOSTOPS_TYPES] }, READ_MAX + 1) : [];
+    const truncated = got.length > READ_MAX;
+    const events = truncated ? got.slice(0, READ_MAX) : got;
+    const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
     const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
     const s = loadLogSettings();
     return {
-      ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null }),
+      ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null, readFrom }),
+      truncated, readFrom, readLimit: READ_MAX,
       logs: { enabled: s.enabled, retentionDays: s.retentionDays },
       initial: snap.initial === true,
     };
