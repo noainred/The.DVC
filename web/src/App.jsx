@@ -666,7 +666,7 @@ function Portal({ user, onLogout }) {
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div className="user-meta">
             <div className="user-name">{user.name}</div>
-            <div className="user-role muted">{user.superAdmin ? 'super_admin' : user.role}</div>
+            <div className="user-role muted">{user.demoGuest ? '데모 계정' : user.superAdmin ? 'super_admin' : user.role}</div>
           </div>
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>

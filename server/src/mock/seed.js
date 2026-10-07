@@ -19,15 +19,9 @@ export function isMockMode() {
 
 // 이름 기반 안정 해시(같은 서버는 항상 같은 기준값 → 틱마다 미세 흔들림만).
 function hash(s) { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0; return Math.abs(h); }
-/**
- * v2.708: Dell 서비스태그 모양(7자) — 'M' + 6자리 36진수. 같은 입력은 같은 태그(FNV-1a 두 개 — 충돌 사실상 없음).
- * 데모 모듈(demo/idrac.js)이 이것을 가져다 쓴다(시드와 데모가 같은 태그 규칙 — 한 벌).
- */
-export function mockServiceTag(seed) {
-  const fnv = (t) => { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
-  const a = fnv(`tag|${seed}`).toString(36).toUpperCase(); const b = fnv(`tag2|${seed}`).toString(36).toUpperCase();
-  return `M${(a + b).replace(/[^0-9A-Z]/g, '').padEnd(6, '0').slice(0, 6)}`;
-}
+// v2.716: 서비스태그 규칙은 mock/serviceTag.js 하나(생성기도 같은 규칙으로 ESXi 호스트 태그를 만든다 — 순환을 피해 잎 모듈로 옮겼다).
+import { mockServiceTag } from './serviceTag.js';
+export { mockServiceTag };
 function jitter(base, pct = 0.08) { return Math.max(0, Math.round(base * (1 + (Math.random() * 2 - 1) * pct))); }
 const HOUR = 3_600_000;
 

@@ -260,7 +260,7 @@ export default function V4App({ user, health, healthError, onExit }) {
           </div>
           <div className="v3-user">
             <div className="v3-avatar" title={user?.name}>{(user?.name || 'U').slice(0, 1).toUpperCase()}</div>
-            <div><div className="v3-user-name">{user?.name}</div><div className="v3-user-role">{user?.superAdmin ? 'super_admin' : user?.role}</div></div>
+            <div><div className="v3-user-name">{user?.name}</div><div className="v3-user-role">{user?.demoGuest ? '데모 계정' : user?.superAdmin ? 'super_admin' : user?.role}</div></div>
           </div>
           <button type="button" className="v3-exit" onClick={() => onExit()} title="기존 개발 포탈 화면으로 돌아갑니다">개발 포탈 ↗</button>
         </div>

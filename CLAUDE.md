@@ -4831,6 +4831,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       DB 핸들을 다시 연다. **포탈 프로세스를 재시작하지 않는다** — 집계가 양보하며 돌아 다른 화면은 살아 있고, 프로세스 재시작은 모든 세션·폴러를 끊는다. 감시는 양보 지점이 있어야
       동작한다(동기 SQL 한 문장 안에서는 끊지 못한다 — v2.693 조각화가 전제다). 상태는 `perfQueryStats().restarts`.
     · 화면은 이 조회만 90초·재시도 0(`usePolling` 넷째 인자 `{timeoutMs, retries}` — 기본은 예전 그대로) · 대기 안내는 빨간 깜빡임(`.san2-loading-alert`, 움직임 줄이기면 정지).
+  - ⚠⚠ **v2.716 — mock 모드 내장 데모 계정은 '설정 뺀 조회 전부 + 안전한 실행만'. 판정은 `server/src/auth/demoGuest.js` 하나**
+    (사용자 요청 "guest/demo 계정은 설정 제외한 모든 기능 가능하게" · 선택 '조회 전부 + 안전한 실행만' · '내장 데모 계정만'. 회귀 `server/test/demoGuest2716.test.js`(실제 authMiddleware · mock/live) + 웹 `demoGuest2716.test.js`):
+    · 대상은 저장 레코드에 `demo:true` 인 로컬 계정 + `DATA_SOURCE=mock` 일 때만이다. 요청 문맥 역할은 `admin` + `demoGuest:true`(superAdmin·설정 소유자 아님) — live 면 예전 viewer.
+    · ⚠⚠ **거부는 라우트 게이트보다 먼저 `authMiddleware` 안에서** 한다: 조회는 `READ_DENY` 접두(설정·계정·감사·백업·비밀·호스트 접근·업그레이드·원격) 밖만, 쓰기는 읽기성 POST(`auditSkipped`)와
+      `SAFE_ACTIONS`(데모 데이터만 다시 만드는 수집·점검)만. **실제 호스트·네트워크에 닿는 실행(연결 테스트·배포·스캔·업그레이드·종료·방화벽·원격 명령)을 SAFE_ACTIONS 에 넣지 말 것.**
+      새 설정 화면의 API 접두를 만들면 `READ_DENY` 에도 넣을 것(안 넣으면 데모 계정이 그 설정을 읽는다). WS SSH/RDP 게이트웨이는 미들웨어를 타지 않아 따로 거부한다.
+    · 화면: 업그레이드 탭 `noDemoGuest` · 설정 탭은 소유자 조건으로 이미 숨는다 · 역할 칸은 '데모 계정'(admin 으로 보이지 않게).
+  - ⚠ **v2.716 데모 데이터 보완 1회차**(`mock/demo/svcmon.js` + `svcmon/poller.js` · `mock/generator.js` · `mock/serviceTag.js`, 회귀 `server/test/demoData2716.test.js` — 변이 4/4):
+    · Monitoring(svcmon) 데모 대상은 배치 태그 `mock-demo` 로 식별하고(대상 id 는 서버가 발급) **폴러가 runBatch 에 넘기지 않고 합성 결과**를 쓴다. 응답에 '(데모)' 를 붙인다. 사람이 등록한 대상은 mock 에서도 실제 점검.
+    · 목업 ESXi 호스트 `serviceTag` = `mockServiceTag(vcenterId|name)` — iDRAC 데모 시드와 **같은 규칙**이어야 한다(다르면 v2.682 R3D-04 가 같은 장비를 '다른 장비' 로 본다). 규칙은 잎 모듈 `mock/serviceTag.js` 하나.
+    · 목업 VM 의 판정용 분포를 다른 판정 집합과 겹치게 두지 말 것 — 'Tools 업그레이드 필요' 가 템플릿(idx%17)과 같은 VM 에 걸려 리포트에서 언제나 0이었다.
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

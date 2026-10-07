@@ -784,3 +784,11 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - ⚠ **저장 레코드(`getUser`·`listUsers`)의 역할을 `'admin'` 문자열과 비교하지 말 것 — `isAdminTier`**(v2.674 에 찾은 누락 3곳): 긴급중단 승인자
   판정이 super_admin 인 noainred 를 '관리자가 아닙니다' 로 거부했고(`security/emergencyStop.js approverRoleIssue` + 범위 판정은 `authzRole`),
   보안 자가진단 OTP 범위와 OTP 콘솔 도구 `--list` 가 super_admin 을 고권한 계정에서 뺐다. 회귀 `test/emergencyStop.test.js`(라우트 소스도 검사).
+
+## 2026-10-07 mock 모드 내장 데모 계정(v2.716) — 되돌리지 말 것
+
+- 데모 계정(`u.demo`)은 mock 모드에서만 요청 문맥이 `admin` + `demoGuest:true` 다(`auth/auth.js demoGuestOf`). 그 대신 `authMiddleware` 가 라우트 게이트보다 먼저
+  `auth/demoGuest.js denyDemoGuest` 로 거른다 — 이 호출을 지우면 데모 계정이 **관리자 권한 전부**를 얻는다(설정 저장·연결 테스트·배포·원격 명령).
+- `SAFE_ACTIONS` 는 데모 데이터만 바꾸는 수집·점검이다. 실제 장비·네트워크에 닿는 실행을 넣지 말 것. `READ_DENY` 는 설정·계정·비밀 조회를 막는다 — 새 설정 API 접두는 여기에도.
+- WS SSH/RDP 게이트웨이(`proxy/sshGateway.js`·`guacdTunnel.js`)는 `user.demoGuest` 를 거부한다(미들웨어를 타지 않는다).
+- live/auto 에서는 데모 계정이 예전처럼 viewer 다(`demoGuestOf` 가 `getDataSource()==='mock'` 을 본다) — 판정을 저장 레코드만으로 바꾸지 말 것.
