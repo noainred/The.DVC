@@ -9,7 +9,8 @@ import { fmtBytes } from '../util/fmt.js';
 
 export const TEMPLATES = [
   { k: 'vcenter', label: 'vCenter Only', desc: '기존 리포트 — vCenter 롤업 통계만(각 점 = 롤업 간격 평균)' },
-  { k: 'both', label: 'Local + vCenter', desc: 'vCenter 롤업(평균·p95·곡선) + 포탈 로컬 20초 수집(임계 이상 순간·최대·스파이크 빈도·지속·커버리지)을 각각 표시' },
+  // v2.723: 표시 이름 'Local' → '20초 Peak'(사용자 요청). 키 'both' 는 그대로다(저장된 선택·URL 호환).
+  { k: 'both', label: '20초 Peak + vCenter', desc: 'vCenter 롤업(평균·p95·곡선) + 20초 Peak — 실시간 데이터를 수집해 20초 간격의 Peak 데이터(임계 이상 순간·최대·스파이크 빈도·지속·커버리지)를 수집해 함께 표시' },
 ];
 
 export const ESXI_REALTIME_BUFFER_MIN = 60; // ESXi 실시간 구간 보관(20초 × 180). 화면 경고 문구의 근거.

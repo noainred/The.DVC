@@ -192,7 +192,7 @@ export default function VmSeriesSettings() {
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.65, whiteSpace: 'normal' }}>
           ESXi 가 보관하는 <b>20초 실시간 표본</b>을 주기마다 받아, 임계 이상인 순간의 <b>모든 카운터 값</b>(CPU 사용률/MHz/Ready · 메모리 usage/active/consumed/벌룬/스왑 · 디스크·네트워크 처리량)을 남깁니다.
-          평균·p95 는 vCenter 롤업이 맡고(롤업은 평균을 보존), 이 수집은 롤업이 없애는 <b>피크·스파이크 빈도·지속시간</b>을 남깁니다. 자원 축소 근거 리포트의 <b>Local + vCenter</b> 템플릿에서 봅니다.
+          평균·p95 는 vCenter 롤업이 맡고(롤업은 평균을 보존), 이 수집은 롤업이 없애는 <b>피크·스파이크 빈도·지속시간</b>을 남깁니다. 자원 축소 근거 리포트의 <b>20초 Peak + vCenter</b> 템플릿에서 봅니다.
           <br />DB 는 <b>vCenter 마다 독립 파일</b>(<code>vmseries/&lt;id&gt;.db</code>)이라 대상에서 빼면 파일째 지워 용량을 즉시 회수합니다. 크기는 임계 이상 표본 수에 비례해 워크로드마다 다르므로 예측값 대신 아래 <b>실측 크기</b>를 보세요.
           {d.mock && <><br /><span className="badge gray">데모(mock)</span> 실시간 표본이 없어 수집하지 않습니다(리포트는 합성값을 배지와 함께 표시).</>}
         </div>

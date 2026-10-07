@@ -2628,7 +2628,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **DB 파일은 `vmseries/<id>-<sha1 8자>.db`** — `metrics/vmperfDb.js dbFileName` 재사용(단사 매핑). 조회
       경로는 `create:false` 로 열어 없는 id 로 파일을 무한 생성하지 않는다. 대상 제외 = 파일째 삭제.
     - **권고 vCPU 산정에 20초 최대를 넣지 말 것** — `rightsize.js:176` 의 `최대 > p95 × 1.5` 규칙에 20초 최대를
-      넣으면 거의 전 VM 이 스파이크형이 되어 권고가 전반적으로 커진다. 'Local + vCenter' 템플릿은 표시만 한다.
+      넣으면 거의 전 VM 이 스파이크형이 되어 권고가 전반적으로 커진다. '20초 Peak + vCenter' 템플릿(v2.723 에 'Local + vCenter' 에서 이름만 바꿨다 — 키 'both' 그대로)은 표시만 한다.
       반영 규칙(예: 지속 1분 이상 run 만)은 운영 데이터를 본 뒤 별도 결정.
     - 주기 50분은 겹침 10분(ESXi 버퍼 60분) — 한 주기 실패 = 40분 영구 소실. 상한 60·하한 20 을 서버가
       강제하고 설정 화면이 `intervalWarning` 으로 그 사실을 적는다. 기본 **꺼짐(opt-in)**, 디스크 여유 가드
@@ -5142,6 +5142,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
     · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
     · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
+  - **게시판 답글·공감(v2.723)** — 답글은 댓글 배열에 `parentId`(최상위 댓글 id)로 묶는 **한 단계**다(답글에 단 답글은 최상위 아래로 옮기고 `replyTo`).
+    답글이 달린 댓글을 지우면 **자리를 남기고**(`deleted` — 내용·작성자 지움, 세지 않음) 마지막 답글이 지워지면 자리도 치운다. 공감은 이름 목록 `likes` 이고
+    요청은 상태를 명시한다(`POST …/like {on:true|false}` — 연타·재전송이 두 번 세지 않는다). 응답에는 개수·내 공감·앞 30명만(`likeView`) — `likes` 배열을 내보내지 말 것.
+    공감·답글도 쓰기 권한(admin·operator, 서버 불변조건). 옛 board.json 은 그대로 읽힌다(필드 없음 = 공감 0·최상위). 회귀 `server/test/bulletin2723.test.js`(변이 3/3).
+  - ⚠⚠ **CLI 계정 관리 메뉴(v2.723) — `server/src/tools/user-admin.js` + 래퍼 `user-admin.sh` → 설치본 `sudo vmware-portal-users`**(사용자 요청 "cli 로 계정 생성 · 특정 계정은
+    비밀번호로 로그인 · 계정 편집 · ascii 메뉴"). 회귀 `server/test/userAdmin2723.test.js`(변이 3/3):
+    · 계정별 로그인 방식은 **새 저장소를 만들지 않고** 기존 `login-policy-users.txt`(v2.273 사용자별 재정의)를 쓴다 — `securitySettings.setFileLoginPolicy`(그 사용자 줄만 바꾸고 주석·다른 줄 보존, 0600)·
+      `loginPolicyOverrideOf`(파일·env 출처 구분). 포탈이 3초 캐시로 다시 읽으므로 **재시작 불필요**. 관리자에게 '비밀번호' 를 지정하면 경고 + 확인.
+    · ⚠⚠ 메뉴가 보여 주는 로그인 판정(`userAdminText.loginStateOf`)은 `authenticateLocal`·`isOtpOnlyUser` 규칙을 글로 옮긴 것이다 — **그 규칙을 바꾸면 여기도**.
+      테스트가 역할 3 × 비번 × OTP × 방식 4 = 48 조합을 **실제로 로그인해** 대조한다.
+    · 계정·비밀번호·OTP 변경은 users.json 직접 쓰기라 **실행 중인 포탈은 재시작해야 안다**(otp-enroll 과 같다) — 끝날 때 재시작을 묻고(래퍼가 root 일 때 종료코드 10 → systemctl restart),
+      동작마다 디스크를 다시 읽는다(`auth.reloadUsersFromDisk` — 메뉴를 띄워 둔 사이 포탈 저장을 덮어쓰지 않게). ⚠ users.json 이 아직 없으면 다시 읽지 않는다 —
+      다시 시드하며 initial-admin-password.txt 를 다른 값으로 덮어썼다(자체 검증에서 발견). `trusted:true` 신뢰 경로(otp-enroll 과 같은 판단)이지만 데모 역할 고정·수퍼관리자 삭제 불가·마지막 관리자 보호는 그대로.
+    · 비밀번호는 화면에 찍지 않는다(TTY 는 입력 숨김, 테스트가 출력에 비밀번호 0 을 고정). 한글 폭은 `dispWidth`(2칸)로 맞춘다 — 글자 수로 맞추면 오른쪽 테두리가 밀린다.
+    · 패키지: `build-package.sh` 가 복사, `install.sh` 가 링크, `uninstall.sh` 는 **이 설치본을 가리킬 때만** 링크를 지운다(OTP 링크와 같은 규칙). in-app 업그레이드 설치본은 링크가 없어 `<설치경로>/app/user-admin.sh` 로 실행한다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

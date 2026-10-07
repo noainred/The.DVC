@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readHides, isHidden, visibleNotices, withHidden, writeHides, timeText, windowText, noticeState, toLocalInput, fromLocalInput, HIDE_KEY, HIDE_MAX } from './bulletinText.js';
+import { readHides, isHidden, visibleNotices, withHidden, writeHides, timeText, windowText, noticeState, toLocalInput, fromLocalInput, HIDE_KEY, HIDE_MAX, threadComments, likersText, applyLike } from './bulletinText.js';
 
 const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
 const N = (rev, extra = {}) => ({ id: rev.split(':')[0], rev, title: rev, ...extra });
@@ -56,5 +56,37 @@ describe('공지 표기', () => {
     expect(noticeState({ startAt: 2000 }, now).key).toBe('scheduled');
     expect(noticeState({ endAt: 1000 }, now).key).toBe('ended');
     expect(noticeState({ startAt: 500, endAt: 2000 }, now).key).toBe('live');
+  });
+});
+
+describe('답글·공감(v2.723)', () => {
+  it('최상위 댓글 아래에 답글을 작성 순으로 묶고, 부모 없는 답글은 버리지 않는다', () => {
+    const t = threadComments([
+      { id: 'r2', parentId: 'a', createdAt: 5 },
+      { id: 'a', createdAt: 1 },
+      { id: 'b', createdAt: 3 },
+      { id: 'r1', parentId: 'a', createdAt: 2 },
+      { id: 'o', parentId: 'gone', createdAt: 4 },
+      null,
+    ]);
+    expect(t.map((x) => x.c.id)).toEqual(['a', 'b', 'o']);
+    expect(t[0].replies.map((c) => c.id)).toEqual(['r1', 'r2']);
+    expect(t[2].orphan).toBe(true);
+    expect(threadComments(undefined)).toEqual([]);
+  });
+  it('공감 툴팁은 0명·외 N명을 말한다', () => {
+    expect(likersText({ likeCount: 0 })).toBe('아직 공감한 사람이 없습니다');
+    expect(likersText({})).toBe('아직 공감한 사람이 없습니다');
+    expect(likersText({ likeCount: 2, likers: ['a', 'b'] })).toBe('공감: a, b');
+    expect(likersText({ likeCount: 32, likers: ['a', 'b'] })).toBe('공감: a, b 외 30명');
+  });
+  it('공감 응답을 글·댓글에 반영한다', () => {
+    const p = { id: 'p', likeCount: 0, comments: [{ id: 'c', likeCount: 0 }, { id: 'd', likeCount: 3 }] };
+    const r = { likeCount: 1, liked: true, likers: ['me'] };
+    expect(applyLike(p, null, r).likeCount).toBe(1);
+    const q = applyLike(p, 'c', r);
+    expect(q.comments[0]).toMatchObject({ likeCount: 1, liked: true });
+    expect(q.comments[1].likeCount).toBe(3);
+    expect(p.comments[0].likeCount).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **611개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **612개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-07)
@@ -303,7 +303,7 @@
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 
-## 분석 도구 (5)
+## 분석 도구 (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -311,7 +311,8 @@
 | `DISKTREND_SNAPSHOT_MAX_HOURS` | `72` |  | tools/diskTrend.js |
 | `DISKTREND_WARN_PCT` | `75` |  | tools/diskTrend.js |
 | `OTP_ENROLL_CMD` | `''` |  | tools/otp-enroll.js |
-| `SERVICE_NAME` | `'vmware-portal'` |  | tools/otp-enroll.js |
+| `SERVICE_NAME` | `'vmware-portal'` |  | tools/otp-enroll.js, tools/user-admin.js |
+| `USER_ADMIN_CAN_RESTART` | `기본 아님('1' 일 때만 적용)` |  | tools/user-admin.js |
 
 ## 서비스 모니터 (9)
 
@@ -531,7 +532,7 @@
 | `AD_VIEWER_GROUP` | `''` |  | auth/ad.js |
 | `AUTH_DISABLED_ROLE` |  |  | auth/auth.js |
 | `DEFAULT_ADMIN_PASSWORD` | `''` | ✅ | auth/auth.js, config.js |
-| `OTP_ROLE_ENFORCE` | `기본 적용('false' 로 끄기)` |  | auth/auth.js |
+| `OTP_ROLE_ENFORCE` | `기본 적용('false' 로 끄기)` |  | auth/auth.js, tools/user-admin.js |
 
 ## 중계 경로 점검 (1)
 
@@ -795,4 +796,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 611
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 612

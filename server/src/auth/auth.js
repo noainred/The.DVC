@@ -209,6 +209,18 @@ export function loadUsers() {
   return users;
 }
 
+/**
+ * 디스크의 users.json 을 다시 읽는다 — **콘솔 계정 도구(tools/user-admin.js) 전용**(v2.723).
+ * 도구는 메뉴를 오래 띄워 둘 수 있으므로, 실행 중인 포탈이 그 사이 사용자 파일을 저장했으면(OTP 카운터 등)
+ * 동작마다 다시 읽어 그 저장을 덮어쓰지 않게 한다. 포탈 프로세스는 이 함수를 부르지 않는다.
+ */
+export function reloadUsersFromDisk() {
+  // 파일이 아직 없으면(첫 설치 — 시드한 관리자가 메모리에만 있다) 비우지 않는다: 비우면 다시 시드하면서
+  // 임의 비밀번호를 새로 만들어 initial-admin-password.txt 를 다른 값으로 덮어쓴다(v2.723 자체 검증에서 발견).
+  if (fs.existsSync(path.join(CONFIG_DIR, 'users.json'))) users = null;
+  return loadUsers();
+}
+
 function persistUsers() {
   const file = path.join(CONFIG_DIR, 'users.json');
   // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.

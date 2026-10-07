@@ -5,10 +5,12 @@ import { describe, it, expect } from 'vitest';
 import { TEMPLATES, intervalWarning, thresholdText, localPhase, localPhaseText, coverageText, coverageCells, historicalIntervalText, peakNote, lastRunText, fmtSec, scopeSummaryText } from './vmSeriesText.js';
 
 describe('templates', () => {
-  it('vCenter Only · Local + vCenter 두 가지, 키 고정', () => {
+  it('vCenter Only · 20초 Peak + vCenter 두 가지, 키 고정', () => {
     expect(TEMPLATES.map((t) => t.k)).toEqual(['vcenter', 'both']);
     expect(TEMPLATES[0].label).toBe('vCenter Only');
-    expect(TEMPLATES[1].label).toBe('Local + vCenter');
+    expect(TEMPLATES[1].label).toBe('20초 Peak + vCenter');
+    expect(TEMPLATES[1].desc).toMatch(/실시간 데이터를 수집해 20초 간격의 Peak 데이터/);
+    expect(TEMPLATES.map((t) => t.label).join(' ')).not.toMatch(/Local/);
   });
 });
 

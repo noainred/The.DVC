@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **952개** |
+| 엔드포인트 | **954개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 98개 |
 | GET | 521개 |
-| POST | 285개 |
+| POST | 287개 |
 | PUT | 94개 |
 | PATCH | 2개 |
 | DELETE | 50개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 422 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 424 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -688,13 +688,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/alarm-mutes` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:506](../server/src/routes/api/inventory.js#L506) |
 | DELETE | `/alarm-mutes/:id` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:514](../server/src/routes/api/inventory.js#L514) |
 | GET | `/alarms` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:486](../server/src/routes/api/inventory.js#L486) |
-| GET | `/board/posts` | — | [server/src/routes/api/bulletin.js:72](../server/src/routes/api/bulletin.js#L72) |
-| POST | `/board/posts` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:81](../server/src/routes/api/bulletin.js#L81) |
-| DELETE | `/board/posts/:id` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:96](../server/src/routes/api/bulletin.js#L96) |
-| GET | `/board/posts/:id` | — | [server/src/routes/api/bulletin.js:77](../server/src/routes/api/bulletin.js#L77) |
-| PUT | `/board/posts/:id` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:88](../server/src/routes/api/bulletin.js#L88) |
-| POST | `/board/posts/:id/comments` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:104](../server/src/routes/api/bulletin.js#L104) |
-| DELETE | `/board/posts/:id/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:112](../server/src/routes/api/bulletin.js#L112) |
+| GET | `/board/posts` | — | [server/src/routes/api/bulletin.js:74](../server/src/routes/api/bulletin.js#L74) |
+| POST | `/board/posts` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:83](../server/src/routes/api/bulletin.js#L83) |
+| DELETE | `/board/posts/:id` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:98](../server/src/routes/api/bulletin.js#L98) |
+| GET | `/board/posts/:id` | — | [server/src/routes/api/bulletin.js:79](../server/src/routes/api/bulletin.js#L79) |
+| PUT | `/board/posts/:id` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:90](../server/src/routes/api/bulletin.js#L90) |
+| POST | `/board/posts/:id/comments` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:106](../server/src/routes/api/bulletin.js#L106) |
+| DELETE | `/board/posts/:id/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:126](../server/src/routes/api/bulletin.js#L126) |
+| POST | `/board/posts/:id/comments/:cid/like` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:122](../server/src/routes/api/bulletin.js#L122) |
+| POST | `/board/posts/:id/like` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:118](../server/src/routes/api/bulletin.js#L118) |
 | GET | `/compare/matrix` | — | [server/src/routes/api/compareMatrix.js:28](../server/src/routes/api/compareMatrix.js#L28) |
 | GET | `/datastores` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:401](../server/src/routes/api/inventory.js#L401) |
 | GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:409](../server/src/routes/api/inventory.js#L409) |
@@ -703,11 +705,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:133](../server/src/routes/api/vmMetrics.js#L133) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:189](../server/src/routes/api/vmMetrics.js#L189) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:420](../server/src/routes/api/inventory.js#L420) |
-| GET | `/notices` | — | [server/src/routes/api/bulletin.js:44](../server/src/routes/api/bulletin.js#L44) |
-| POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:47](../server/src/routes/api/bulletin.js#L47) |
-| DELETE | `/notices/:id` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:62](../server/src/routes/api/bulletin.js#L62) |
-| PUT | `/notices/:id` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:54](../server/src/routes/api/bulletin.js#L54) |
-| GET | `/notices/active` | — | [server/src/routes/api/bulletin.js:40](../server/src/routes/api/bulletin.js#L40) |
+| GET | `/notices` | — | [server/src/routes/api/bulletin.js:46](../server/src/routes/api/bulletin.js#L46) |
+| POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:49](../server/src/routes/api/bulletin.js#L49) |
+| DELETE | `/notices/:id` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:64](../server/src/routes/api/bulletin.js#L64) |
+| PUT | `/notices/:id` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:56](../server/src/routes/api/bulletin.js#L56) |
+| GET | `/notices/active` | — | [server/src/routes/api/bulletin.js:42](../server/src/routes/api/bulletin.js#L42) |
 | GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:229](../server/src/routes/api/overviewNsx.js#L229) |
 | GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:263](../server/src/routes/api/overviewNsx.js#L263) |
 | GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:180](../server/src/routes/api/overviewNsx.js#L180) |

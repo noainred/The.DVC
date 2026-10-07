@@ -1678,3 +1678,23 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .board-notice-grid .input, .board-notice-grid .select { min-width: 0; width: 100%; }
 .board-notice-grid .board-check { flex-direction: row; align-items: center; gap: 6px; }
 .board-notice-snippet { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* 게시판 답글·공감(v2.723) */
+.board-like-count { color: var(--red); font-weight: 600; white-space: nowrap; }
+.board-post-like { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.board-like { display: inline-flex; align-items: center; gap: 4px; background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+.board-like:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.board-like.on { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.board-like:disabled { cursor: default; opacity: 0.75; }
+.board-like-n { margin-left: 2px; }
+.board-thread { border-bottom: 1px solid var(--border); }
+.board-thread .board-comment { border-bottom: 0; }
+.board-comment.reply { margin-left: 22px; padding-left: 12px; border-left: 2px solid var(--border); }
+.board-comment-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.board-comment-meta { font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.board-comment-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.board-act { background: none; border: 0; padding: 2px 4px; color: var(--accent); font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.board-act.danger { color: var(--red); }
+.board-act:disabled { opacity: 0.6; cursor: default; }
+.board-mention { color: var(--accent); font-weight: 600; }
+.board-reply-box { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; margin: 4px 0 10px 36px; }
+@media (max-width: 720px) { .board-comment.reply { margin-left: 10px; } .board-reply-box { margin-left: 12px; } }

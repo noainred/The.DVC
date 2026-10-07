@@ -7,8 +7,16 @@
  *
  * 상한(조용히 버리지 않는다 — 넘으면 저장을 거부하고 사유를 돌려준다):
  *   공지 200개 · 제목 200자 · 본문 5,000자
- *   글 2,000개 · 제목 200자 · 본문 10,000자 · 글당 댓글 300개 · 댓글 2,000자
+ *   글 2,000개 · 제목 200자 · 본문 10,000자 · 글당 댓글 300개(답글·삭제 표시 포함) · 댓글 2,000자 · 항목당 공감 2,000명
  * 시각은 epoch ms 숫자 하나다. 문자열 값은 `capStr` 로 평탄화해 원문(SlicedString)을 붙잡지 않는다.
+ *
+ * v2.723 — 답글(대댓글)과 공감:
+ *  · 답글은 댓글 배열에 그대로 두고 `parentId`(최상위 댓글 id)로 묶는다 — 한 단계만이다. 답글에 답글을 달면 같은 최상위 댓글
+ *    아래에 붙고 `replyTo`(답하는 사람)를 남긴다. 저장 모양이 예전 댓글과 같아 옛 board.json 을 그대로 읽는다.
+ *  · 답글이 달린 댓글을 지우면 내용만 지우고 자리('삭제된 댓글')를 남긴다 — 통째로 지우면 답글이 무엇에 대한 것인지 사라진다.
+ *    그 자리의 마지막 답글까지 지워지면 자리도 지운다.
+ *  · 공감은 누른 사람 이름 목록(`likes`)이다 — 한 사람당 한 번, 다시 누르면 취소. 요청은 상태를 명시한다(`on: true|false`)라
+ *    연타·재전송이 두 번 세지 않는다. 화면에는 개수·내가 눌렀는지·앞 30명 이름만 내보낸다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,8 +27,10 @@ import { capStr } from '../util/capStr.js';
 
 export const LIMITS = Object.freeze({
   noticeMax: 200, noticeTitle: 200, noticeBody: 5000,
-  postMax: 2000, postTitle: 200, postBody: 10000, commentMax: 300, commentBody: 2000,
+  postMax: 2000, postTitle: 200, postBody: 10000, commentMax: 300, commentBody: 2000, likeMax: 2000,
 });
+/** 화면에 싣는 공감한 사람 이름 수(개수는 전부 센다). */
+export const LIKERS_SHOWN = 30;
 export const NOTICE_LEVELS = Object.freeze(['info', 'warn', 'crit']);
 
 const noticesFile = () => path.join(config.configDir, 'notices.json');
@@ -145,11 +155,23 @@ export function deleteNotice(id) {
 
 /* ───────────────────────── 게시판 ───────────────────────── */
 
+const likesOf = (x) => (Array.isArray(x?.likes) ? x.likes.filter((u) => typeof u === 'string') : []);
+const commentsOf = (p) => (Array.isArray(p?.comments) ? p.comments.filter((c) => c && typeof c === 'object' && typeof c.id === 'string') : []);
+/** 화면에 세는 댓글 수 — 삭제 자리는 세지 않는다. */
+const liveComments = (p) => commentsOf(p).filter((c) => !c.deleted).length;
+
+/** 공감 표시용 — 저장된 이름 목록을 그대로 내보내지 않는다. */
+function likeView(x, me) {
+  const l = likesOf(x);
+  return { likeCount: l.length, liked: !!me && l.includes(me), likers: l.slice(-LIKERS_SHOWN).reverse() };
+}
+
 const summary = (p) => ({
   id: p.id, title: p.title, author: p.author, pinned: !!p.pinned,
   createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt,
-  comments: Array.isArray(p.comments) ? p.comments.length : 0,
-  lastActivityAt: Math.max(p.updatedAt || 0, p.createdAt || 0, ...(Array.isArray(p.comments) ? p.comments.map((c) => c.createdAt || 0) : [])),
+  comments: liveComments(p),
+  likes: likesOf(p).length,
+  lastActivityAt: Math.max(p.updatedAt || 0, p.createdAt || 0, ...commentsOf(p).map((c) => c.createdAt || 0)),
 });
 
 /**
@@ -166,10 +188,24 @@ export function listPosts({ q = '', offset = 0, limit = 50 } = {}) {
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit) };
 }
 
-export function getPost(id) {
+/** 글 한 건 — 공감은 개수·내 공감 여부·이름 일부로 바꿔 내보낸다(`me` = 보는 사람). */
+export function getPost(id, me = '') {
   const p = load(boardFile(), 'posts').find((x) => x.id === id);
   if (!p) throw notFound();
-  return { ...p, comments: Array.isArray(p.comments) ? p.comments : [] };
+  return viewPost(p, me);
+}
+
+function viewPost(p, me) {
+  const { likes: _l, comments: _c, ...rest } = p;
+  return {
+    ...rest,
+    ...likeView(p, me),
+    commentCount: liveComments(p),
+    comments: commentsOf(p).map((c) => {
+      const { likes: _cl, ...cr } = c;
+      return { ...cr, parentId: c.parentId || null, replyTo: c.replyTo || null, ...likeView(c, me) };
+    }),
+  };
 }
 
 /** 수정·삭제 권한: 작성자 본인 또는 관리자. */
@@ -184,10 +220,10 @@ export function createPost(body, user, { isAdmin = false } = {}) {
     title: text(body?.title, LIMITS.postTitle, 'title', { required: true }),
     body: text(body?.body, LIMITS.postBody, 'body', { required: true }),
     pinned: isAdmin && body?.pinned === true,
-    author: user, createdAt: now, updatedAt: now, comments: [],
+    author: user, createdAt: now, updatedAt: now, comments: [], likes: [],
   };
   save(boardFile(), 'posts', [...list, p]);
-  return p;
+  return viewPost(p, user);
 }
 
 export function updatePost(id, body, user, { isAdmin = false } = {}) {
@@ -208,7 +244,7 @@ export function updatePost(id, body, user, { isAdmin = false } = {}) {
   };
   const next = [...list]; next[i] = p;
   save(boardFile(), 'posts', next);
-  return p;
+  return viewPost(p, user);
 }
 
 export function deletePost(id, user, { isAdmin = false } = {}) {
@@ -220,29 +256,91 @@ export function deletePost(id, user, { isAdmin = false } = {}) {
   return p;
 }
 
+/**
+ * 댓글·답글 쓰기. `body.parentId` 가 있으면 답글이다 — 답글에 단 답글은 그 최상위 댓글 아래로 옮기고 `replyTo` 를 남긴다.
+ * 답할 댓글이 없거나(지워짐) 삭제 자리면 거부한다(사라진 대화에 답글이 붙지 않게).
+ */
 export function addComment(postId, body, user) {
   const list = load(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === postId);
   if (i < 0) throw notFound();
   const cur = list[i];
-  const comments = Array.isArray(cur.comments) ? cur.comments : [];
-  if (comments.length >= LIMITS.commentMax) throw limitError(`댓글은 글마다 ${LIMITS.commentMax}개까지입니다`);
-  const c = { id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now() };
+  const comments = commentsOf(cur);
+  if (comments.length >= LIMITS.commentMax) throw limitError(`댓글은 글마다 ${LIMITS.commentMax}개까지입니다(답글·삭제 표시 포함)`);
+  let parentId = null; let replyTo = null;
+  if (body?.parentId != null && body.parentId !== '') {
+    const target = comments.find((c) => c.id === body.parentId);
+    if (!target || target.deleted) { const e = new Error('답글을 달 댓글이 없습니다 — 지워졌을 수 있습니다. 글을 다시 열어 주세요'); e.status = 404; throw e; }
+    parentId = target.parentId || target.id;
+    if (target.parentId) replyTo = target.author || null;
+  }
+  const c = {
+    id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now(),
+    ...(parentId ? { parentId } : {}), ...(replyTo ? { replyTo } : {}), likes: [],
+  };
   const next = [...list]; next[i] = { ...cur, comments: [...comments, c] };
   save(boardFile(), 'posts', next);
-  return c;
+  return viewPost({ id: '', comments: [c] }, user).comments[0];
 }
 
+/**
+ * 댓글 지우기 — 답글이 달린 최상위 댓글은 내용만 지우고 자리를 남긴다(`deleted`). 마지막 답글이 지워지면 그 자리도 지운다.
+ * @returns {{ comment, kept: boolean }} kept = 자리를 남겼는가
+ */
 export function deleteComment(postId, commentId, user, { isAdmin = false } = {}) {
   const list = load(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === postId);
   if (i < 0) throw notFound();
-  const comments = Array.isArray(list[i].comments) ? list[i].comments : [];
+  const comments = commentsOf(list[i]);
   const c = comments.find((x) => x.id === commentId);
-  if (!c) throw notFound();
+  if (!c || c.deleted) throw notFound();
   if (!canModify(c, user, isAdmin)) throw forbidden('작성자 본인이나 관리자만 지울 수 있습니다');
-  const next = [...list]; next[i] = { ...list[i], comments: comments.filter((x) => x.id !== commentId) };
+  const hasReplies = !c.parentId && comments.some((x) => x.parentId === c.id);
+  let rest;
+  if (hasReplies) {
+    rest = comments.map((x) => (x.id === c.id ? { id: c.id, author: '', body: '', createdAt: c.createdAt, deleted: true, deletedAt: Date.now(), likes: [] } : x));
+  } else {
+    rest = comments.filter((x) => x.id !== commentId);
+    // 답글을 지워 그 최상위 삭제 자리에 남은 답글이 없으면 자리도 치운다.
+    if (c.parentId) {
+      const parent = rest.find((x) => x.id === c.parentId);
+      if (parent?.deleted && !rest.some((x) => x.parentId === parent.id)) rest = rest.filter((x) => x.id !== parent.id);
+    }
+  }
+  const next = [...list]; next[i] = { ...list[i], comments: rest };
   save(boardFile(), 'posts', next);
-  return c;
+  return { comment: c, kept: hasReplies };
 }
 
+/**
+ * 공감 — 상태를 명시한다(`on` true 면 누름, false 면 취소). 이미 그 상태면 저장하지 않는다(재전송·연타가 두 번 세지 않는다).
+ * `commentId` 를 주면 그 댓글, 없으면 글.
+ * @returns {{ likeCount, liked, likers, changed }}
+ */
+export function setLike(postId, commentId, user, on) {
+  if (!user) throw forbidden('로그인한 사용자만 공감할 수 있습니다');
+  if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
+  const list = load(boardFile(), 'posts');
+  const i = list.findIndex((p) => p.id === postId);
+  if (i < 0) throw notFound();
+  const post = list[i];
+  let target = post; let ci = -1;
+  const comments = commentsOf(post);
+  if (commentId) {
+    ci = comments.findIndex((c) => c.id === commentId);
+    if (ci < 0 || comments[ci].deleted) throw notFound();
+    target = comments[ci];
+  }
+  const cur = likesOf(target);
+  const has = cur.includes(user);
+  if (has === on) return { ...likeView(target, user), changed: false };
+  if (on && cur.length >= LIMITS.likeMax) throw limitError(`공감은 항목마다 ${LIMITS.likeMax}명까지 셉니다`);
+  const likes = on ? [...cur, user] : cur.filter((u) => u !== user);
+  const updated = { ...target, likes };
+  const nextPost = commentId
+    ? { ...post, comments: comments.map((c, k) => (k === ci ? updated : c)) }
+    : { ...post, likes };
+  const next = [...list]; next[i] = nextPost;
+  save(boardFile(), 'posts', next);
+  return { ...likeView(updated, user), changed: true };
+}

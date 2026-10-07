@@ -23,7 +23,7 @@ function Stat({ k, v, sub, color }) {
   return <div style={{ minWidth: 118 }}><div className="muted" style={{ fontSize: 11 }}>{k}</div><div style={{ fontWeight: 700, color }}>{v}</div>{sub && <div className="muted" style={{ fontSize: 10.5, whiteSpace: 'normal' }}>{sub}</div>}</div>;
 }
 
-const LOCAL_BADGE = <span className="badge blue" style={{ fontSize: 10 }}>Local · 20초</span>;
+const LOCAL_BADGE = <span className="badge blue" style={{ fontSize: 10 }}>20초 Peak</span>;
 // 스파이크 순간 점 — recharts 기본 원(반지름 ~4.5px)은 수백 점에서 선을 덮어 버린다(Chromium 확인). 작은 점 + 반투명.
 const Dot = (p) => (p.cx == null || p.cy == null ? null : <circle cx={p.cx} cy={p.cy} r={1.8} fill="#f97316" fillOpacity={0.75} />);
 
@@ -56,7 +56,7 @@ export default function RightsizeLocal({ local, localError, r, days }) {
   return (
     <div className="card" style={{ marginBottom: 10, borderLeft: '4px solid #0ea5e9' }}>
       <div className="flex between" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
-        <b>Local — 포탈 실시간 수집(20초 표본, 임계 이상 순간만 저장) {LOCAL_BADGE}</b>
+        <b>20초 Peak — 실시간 데이터를 수집해 20초 간격의 Peak 데이터를 수집합니다(임계 이상 순간만 저장) {LOCAL_BADGE}</b>
         <span className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
           {local?.synthesized && <span className="badge gray">데모(mock) 합성 데이터</span>}
           <span className={`badge ${phase === 'ok' ? (local?.runs?.count ? 'amber' : 'green') : 'gray'}`}>{txt.short}</span>
@@ -87,14 +87,14 @@ export default function RightsizeLocal({ local, localError, r, days }) {
           )}
 
           {/* CPU: vCenter 롤업 선 + 로컬 20초 순간 점 */}
-          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>사용 MHz — 파란 선 = vCenter 롤업({r?.window?.intervalSec == null ? '간격 미상' : `${r.window.intervalSec}초 평균`}) · 주황 점 = 로컬 20초 표본 중 임계 이상 순간{local.downsampled ? ` (점이 많아 구간별 최대만 ${local.moments.length}개 표시)` : ''}</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>사용 MHz — 파란 선 = vCenter 롤업({r?.window?.intervalSec == null ? '간격 미상' : `${r.window.intervalSec}초 평균`}) · 주황 점 = 20초 Peak(20초 간격 실시간 표본 중 임계 이상 순간){local.downsampled ? ` (점이 많아 구간별 최대만 ${local.moments.length}개 표시)` : ''}</div>
           <div style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={cpuRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
                 <XAxis dataKey="t" type="number" domain={[win.start || 'dataMin', win.end || 'dataMax']} stroke="#8b9bb4" fontSize={11} minTickGap={50} tickFormatter={(t) => tick(t, days)} />
                 <YAxis stroke="#8b9bb4" fontSize={11} width={60} domain={[0, (max) => Math.max(max, r?.cpu?.allocMhz || 0)]} tickFormatter={(v) => `${(v / 1000).toFixed(1)}G`} />
-                <Tooltip contentStyle={tip} labelFormatter={(t) => when(t)} formatter={(v, k) => [ghz(v), k === 'vc' ? 'vCenter 롤업' : '로컬 20초']} />
+                <Tooltip contentStyle={tip} labelFormatter={(t) => when(t)} formatter={(v, k) => [ghz(v), k === 'vc' ? 'vCenter 롤업' : '20초 Peak']} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line type="monotone" dataKey="vc" name="vCenter 롤업" stroke="#3b82f6" strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls />
                 <Scatter data={pts} dataKey="mhz" name="로컬 20초 순간" fill="#f97316" shape={Dot} isAnimationActive={false} />
