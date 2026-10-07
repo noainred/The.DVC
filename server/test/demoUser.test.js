@@ -7,6 +7,9 @@ import path from 'node:path';
 // auth.js 는 import 시점의 CONFIG_DIR 을 사용 → 격리된 임시 디렉터리로 지정 후 로드.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-user-test-'));
 process.env.CONFIG_DIR = TMP;
+// v2.716: mock 모드의 데모 계정은 요청 문맥이 admin + demoGuest 다(auth/demoGuest.js — demoGuest2716.test.js 가 확인).
+//   이 파일은 live 의 viewer 계약을 고정한다.
+process.env.DATA_SOURCE = 'live';
 
 const auth = await import('../src/auth/auth.js');
 

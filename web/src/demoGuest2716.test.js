@@ -4,7 +4,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const read = (p) => fs.readFileSync(path.join(__dirname, p), 'utf8');
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
 
 describe('데모 계정 화면 계약', () => {
   const app = read('App.jsx');
