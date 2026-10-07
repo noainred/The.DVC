@@ -10,7 +10,7 @@ import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로
 import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { notify } from '../alerts.js';
-import { demoRelayCheck } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 호스트는 접속하지 않고 합성
+import { demoRelayCheck, isDemoHost } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 호스트는 접속하지 않고 합성
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
@@ -18,6 +18,7 @@ const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.RELAYCHECK_CONCU
 let _timer = null;
 let _busy = false;
 let _last = { at: 0, total: 0, ok: 0, fail: 0 };
+let _demoSuppressed = 0; // v2.719(감사 R1-05): 데모 호스트라 보내지 않은 알림 수
 const _state = new Map(); // `${host}:${port}` → { target, ok, phase, error, detail, ms, at, okStreak, failStreak, alerted, lastOkAt, lastFailAt, remedy }
 
 /**
@@ -77,7 +78,13 @@ export async function runRelayChecks({ force = false } = {}) {
   _busy = true;
   const t0 = Date.now();
   try {
-    const targets = buildTargets(st, loadCollectors(), safeTopology());
+    // v2.719(감사 R1-05): 저장 설정이 꺼져 있는데 mock 모드라 도는 실행(demoOn·데모 시드의 force)은 **데모 호스트만**
+    //   점검한다 — 사람이 넣은 호스트·실제 수집 서버(엣지 포털 점검은 수집 토큰을 싣는다)에 접속하지 않게.
+    //   저장 설정이 켜져 있으면 예전처럼 전부 점검한다. 뺀 개수는 `skippedNonDemo` 로 밝힌다.
+    const all = buildTargets(st, loadCollectors(), safeTopology());
+    const demoOnly = isMockMode() && st.enabled !== true;
+    const targets = demoOnly ? all.filter((t) => isDemoHost(t.host)) : all;
+    const skippedNonDemo = all.length - targets.length;
     const seen = new Set();
     let okN = 0, failN = 0;
     await pool(targets, CONCURRENCY, async (t) => {
@@ -92,14 +99,16 @@ export async function runRelayChecks({ force = false } = {}) {
         ok: r.ok, phase: r.ok ? 'ok' : (r.phase || 'unknown'), error: r.error || '', detail: r.detail || '', got: r.got || null, ms: r.ms || 0, at: now,
         lastOkAt: r.ok ? now : prev?.lastOkAt || null, lastFailAt: r.ok ? prev?.lastFailAt || null : now, remedy });
       if (r.ok) okN++; else failN++;
-      if (event && st.alerts) {
+      // v2.719(감사 R1-05): 데모 호스트의 전이는 상태만 남기고 실제 알림 채널로 보내지 않는다(partfault demoOnly 와 같은 가드).
+      if (event && st.alerts && isDemoHost(t.host)) _demoSuppressed++;
+      else if (event && st.alerts) {
         const key = `relaycheck:${t.key}`;
         if (event === 'fail') notify({ key, severity: 'critical', title: `[HAProxy 경로] ${t.site ? `${t.site} · ` : ''}${remedy.title}`, detail: `${remedy.cause}\n조치: ${remedy.steps.slice(0, 2).join(' / ')}` }).catch(() => {});
         else notify({ key: `${key}:ok`, severity: 'warning', title: `[HAProxy 경로] ${t.site ? `${t.site} · ` : ''}${t.label} ${t.host}:${t.port} 복구`, detail: r.detail || '' }).catch(() => {});
       }
     });
     for (const k of [..._state.keys()]) if (!seen.has(k)) _state.delete(k); // 대상에서 빠진 항목 정리
-    _last = { at: Date.now(), total: targets.length, ok: okN, fail: failN, durationMs: Date.now() - t0 };
+    _last = { at: Date.now(), total: targets.length, ok: okN, fail: failN, durationMs: Date.now() - t0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}), ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}) };
     return { ok: true, ..._last };
   } finally { _busy = false; }
 }
@@ -114,4 +123,4 @@ export function startRelayCheckPoller() {
   if (_timer) return;
   _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (demoOn(loadSettings().enabled)) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검', subscribe: onRelayCheckSettingsChange });
 }
-export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, ok: 0, fail: 0 }; }
+export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, ok: 0, fail: 0 }; _demoSuppressed = 0; }

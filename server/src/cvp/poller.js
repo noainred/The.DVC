@@ -229,7 +229,7 @@ export function fillDescs(descMap, d) {
   for (const p of d.ports) if (p && p.desc == null && m.has(p.name)) p.desc = m.get(p.name);
 }
 
-export async function pollCvpOnce({ manual = false, only = null, trigger = manual ? 'manual' : 'timer' } = {}) {
+export async function pollCvpOnce({ manual = false, only = null, demoOnly = false, trigger = manual ? 'manual' : 'timer' } = {}) {
   const settings = loadSettings();
   // v2.708: mock 모드는 등록부가 비어 있으면 데모 CVP 를 시드한다(한 번만 · 메인 스냅샷이 생긴 뒤). 데모 CVP 가 있으면 꺼져 있어도 켜진 것처럼.
   if (isMockMode()) { try { await ensureCvpDemo(); } catch (e) { console.warn(`[cvp] 데모 시드 실패: ${e.message}`); } }
@@ -246,7 +246,13 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
     // v2.708: live 는 데모(mock-) 서버에 접속하지 않는다.
     const all = isMockMode() ? serversForThisNode() : serversForThisNode().filter((s) => !isDemoId(s.id));
     const ids = Array.isArray(only) ? new Set(only.map(String)) : null;
-    const servers = ids ? all.filter((s) => ids.has(String(s.id))) : all;
+    // v2.719(감사 R1-06): 저장 설정은 꺼져 있는데 데모 CVP 때문에 켜진 것처럼 도는 주기, 그리고 데모 계정의 수동 실행
+    //   (`demoOnly`)은 **데모(mock-) 서버만** 수집한다 — 사람이 등록한 CVP 에 실제 로그인하지 않게. 저장 설정이 켜진
+    //   주기·관리자 수동 실행은 예전 그대로다. 뺀 개수는 `skippedNonDemo` 로 밝힌다.
+    const demoScope = demoOnly || (isMockMode() && !settings.enabled && !manual);
+    const picked = ids ? all.filter((s) => ids.has(String(s.id))) : all;
+    const servers = demoScope ? picked.filter((s) => isDemoId(s.id)) : picked;
+    const skippedNonDemo = picked.length - servers.length;
     if (!ids) {
       // 대상에서 빠진 CVP 의 인메모리 상태·이전 카운터를 정리한다(누수 + 몇 시간 전 카운터와 비교하는 거짓 방지 — v2.550.3).
       const live = new Set(all.map((s) => String(s.id)));
@@ -261,7 +267,7 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
     const count = (v) => res.filter((x) => x.status === 'fulfilled' && x.value === v).length;
     const crashed = res.filter((x) => x.status === 'rejected');
     for (const c of crashed) console.warn(`[cvp] 수집 중 예외: ${c.reason?.message || c.reason}`);
-    _last = { at: Date.now(), trigger, total: servers.length, collected: count('ok'), failed: count('failed') + crashed.length, authStopped: count('stopped'), durationMs: Date.now() - t0 };
+    _last = { at: Date.now(), trigger, total: servers.length, collected: count('ok'), failed: count('failed') + crashed.length, authStopped: count('stopped'), durationMs: Date.now() - t0, ...(demoScope ? { demoOnly: true, skippedNonDemo } : {}) };
     db.maybePrune(settings).catch(() => {}); // maybePrune 가 실패를 콘솔에 남긴다
     if (config.agent.centralUrl && servers.length) {
       import('./push.js').then((m) => m.pushCvpNow()).catch((e) => console.warn(`[cvp] 수집 뒤 push 실패: ${e.message}`));

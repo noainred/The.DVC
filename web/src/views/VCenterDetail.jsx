@@ -613,7 +613,7 @@ export default function VCenterDetail({ site, onBack }) {
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                   label={<Highlight text={vm.name} tokens={tokens} />} badge={<StateBadge state={vm.powerState} />}
                   sub={<>
-                    {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${fmtGb(vm.storageGB || 0)}`}
+                    {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}

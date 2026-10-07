@@ -9,6 +9,7 @@
  *  · 등급: blocked(이대로는 옮길 수 없다 — 먼저 조치) > caution(옮길 수 있지만 준비·확인이 필요) > ready > unknown.
  *  · 판정 근거(코드)를 함께 싣는다 — 문구는 웹이 같은 키로 만든다(1:1 테스트).
  */
+import { TOOLS_NEED_UPGRADE } from '../reports/compliance.js';
 export const MIG_CODES = Object.freeze({
   // blocked
   'rdm-physical': 'blocked',       // 물리 호환 RDM — 디스크를 그대로 옮길 수 없다(가상 디스크로 바꾸거나 LUN 을 대상에 다시 매핑)
@@ -51,7 +52,8 @@ export function migrationOf(vm) {
   const ts = String(vm?.toolsStatus || '');
   const tv = String(vm?.toolsVersionStatus || '');
   if (vm?.powerState === 'POWERED_ON' && (/notInstalled/i.test(tv) || /NOT_RUNNING|NOT_INSTALLED/i.test(ts))) add('tools-missing', { status: ts || tv });
-  else if (/OUTDATED|NeedUpgrade|Unsupported/i.test(ts + ' ' + tv)) add('tools-old', { status: tv || ts });
+  // v2.719(감사 B1-07): guestToolsTooOld·Blacklisted 도 업그레이드 필요다(규정 준수 리포트와 같은 집합).
+  else if (TOOLS_NEED_UPGRADE.includes(tv) || /OUTDATED|NeedUpgrade|Unsupported/i.test(ts + ' ' + tv)) add('tools-old', { status: tv || ts });
   if (c) {
     if (c.question) add('question', { text: c.question.text || null });
     if (c.consolidationNeeded === true) add('consolidation');

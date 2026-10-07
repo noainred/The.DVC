@@ -33,7 +33,8 @@ export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000,
     byHost.get(hk).vms.push(v);
     const p = v.perfc;
     if (!p) { cov.notMeasured += 1; continue; }
-    const stale = !(Number.isFinite(p.at) && now - p.at <= staleMs);
+    // v2.719(감사 B1-06): at 이 지금보다 뒤(시계 어긋남)면 신선하다고 보지 않는다.
+    const stale = !(Number.isFinite(p.at) && p.at <= now && now - p.at <= staleMs);
     if (stale) { cov.stale += 1; continue; }
     cov.measured += 1;
     const fs = vmContentionFindings(v);
@@ -58,7 +59,7 @@ export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000,
   for (const h of hosts) {
     if (h.connectionState === 'DISCONNECTED') continue;
     cov.hostsConnected += 1;
-    const hp = h.perfc && Number.isFinite(h.perfc.at) && now - h.perfc.at <= staleMs ? h.perfc : null;
+    const hp = h.perfc && Number.isFinite(h.perfc.at) && h.perfc.at <= now && now - h.perfc.at <= staleMs ? h.perfc : null;
     if (hp) cov.hostsMeasured += 1;
     const g = byHost.get(`${h.vcenterId}\u0000${h.name}`);
     const diskMax = hp?.diskMaxMs?.avg ?? null;
@@ -83,7 +84,7 @@ export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000,
   const dsAgg = new Map();
   let unmatchedDs = 0;
   for (const h of hosts) {
-    const hp = h.perfc && Number.isFinite(h.perfc.at) && now - h.perfc.at <= staleMs ? h.perfc : null;
+    const hp = h.perfc && Number.isFinite(h.perfc.at) && h.perfc.at <= now && now - h.perfc.at <= staleMs ? h.perfc : null;
     for (const x of hp?.ds || []) {
       const d = dsByUuid.get(`${h.vcenterId}\u0000${x.uuid}`);
       if (!d) { unmatchedDs += 1; continue; }

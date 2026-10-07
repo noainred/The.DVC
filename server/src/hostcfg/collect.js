@@ -16,6 +16,12 @@ const OPTIONAL_GROUPS = [
 const CONCURRENCY = 4;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const isPathErr = (m) => /InvalidProperty|InvalidArgument/i.test(m);
+// v2.719(감사 S1-03): 수집 중단·요청 시한 실패 — '그 값이 없다' 가 아니라 '이번에 못 읽었다' 다(캐시에 '방금 읽음' 으로 넣지 않는다).
+export function isTransientErr(err, signal = null) {
+  if (signal?.aborted) return true;
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return true;
+  return /abort|timed? ?out|timeout|데드라인|시한|중단/i.test(String(err?.message || err || ''));
+}
 
 async function queryOption(c, optRef, name) {
   try {
@@ -37,7 +43,7 @@ async function queryAcceptance(c, imgRef) {
  * @param {string} vcId
  * @param {string[]} hostRefs 이번에 읽을 수 있는 호스트(연결된 호스트) · opts.allRefs = 인벤토리의 호스트 전부(prune 기준)
  */
-export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budgetMs = HOST_CFG_BUDGET_MS, settings = config, allRefs = hostRefs } = {}) {
+export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budgetMs = HOST_CFG_BUDGET_MS, settings = config, allRefs = hostRefs, signal = null } = {}) {
   if (!settings.hostCfgScan) return { skipped: 'off' };
   prune(vcId, new Set(allRefs)); // 인벤토리에서 사라진 호스트만 — 연결이 끊긴 호스트의 직전 값은 남긴다
   const st = statusOf(vcId) || {};
@@ -80,29 +86,38 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
         for (const r of diagRefs) if (!diagByRef.has(r)) diagByRef.set(r, false);
       } catch (err) { console.warn(`[hostcfg] ${vcId} 진단 파티션을 읽지 못했습니다: ${String(err?.message || err).slice(0, 200)}`); }
     }
-    let fetched = 0; let cut = 0;
+    let fetched = 0; let cut = 0; let transient = 0;
     await poolSettled(due, CONCURRENCY, async (ref) => {
       const p = props.get(ref);
       if (!p) return; // 그사이 사라진 호스트
-      if (Date.now() >= budgetEnd) { cut += 1; return; }
+      if (signal?.aborted || Date.now() >= budgetEnd) { cut += 1; return; }
       const h = parseHostCfgProps(p, now);
       const cert = certByRef.get(p['configManager.certificateManager']);
       if (cert) { h.certNotAfter = cert.notAfter; h.certSubject = cert.subject; }
       const dg = diagByRef.get(p['configManager.diagnosticSystem']);
       if (typeof dg === 'boolean') h.diagPartition = dg;
+      // v2.719(감사 S1-03): 중단·시한 실패나 예산 소진이면 이 호스트를 캐시에 넣지 않는다 — 넣으면 null 값이 '방금 읽음' 이
+      //   되어 갱신 주기(기본 6시간) 동안 다시 고르지 않는다. 직전 캐시 값은 그대로 두고 다음 주기에 다시 고른다.
+      //   그 밖의 오류(권한 등)는 예전처럼 그 값만 null — 매 주기 같은 결과를 반복해 묻지 않게.
+      let incomplete = false;
       const optRef = p['configManager.advancedOption'];
       if (typeof optRef === 'string' && optRef) {
         for (const name of ADV_OPTIONS) {
-          try { applyAdvanced(h, name, await queryOption(c, optRef, name)); } catch { /* 그 값만 모름(null 유지) */ }
+          if (signal?.aborted || Date.now() >= budgetEnd) { incomplete = true; break; }
+          try { applyAdvanced(h, name, await queryOption(c, optRef, name)); } catch (err) { if (isTransientErr(err, signal)) { incomplete = true; break; } /* 그 값만 모름(null 유지) */ }
         }
       }
       const img = p['configManager.imageConfigManager'];
-      if (typeof img === 'string' && img) { try { h.acceptance = await queryAcceptance(c, img); } catch { /* 모름 */ } }
+      if (!incomplete && typeof img === 'string' && img) {
+        try { h.acceptance = await queryAcceptance(c, img); } catch (err) { if (isTransientErr(err, signal)) incomplete = true; /* 그 밖은 모름 */ }
+      }
+      if (incomplete) { transient += 1; return; }
       put(vcId, ref, h);
       fetched += 1;
     });
-    setStatus(vcId, { at: now, error: null, fetched, cut, due: due.length });
-    return { due: due.length, fetched, cut };
+    setStatus(vcId, { at: now, error: null, fetched, cut, transient, due: due.length });
+    if (transient) console.warn(`[hostcfg] ${vcId} 호스트 ${transient}대는 중단·시한으로 다 읽지 못해 캐시하지 않았습니다(직전 값 유지 · 다음 주기에 다시 시도)`);
+    return { due: due.length, fetched, cut, transient };
   } catch (err) {
     const msg = String(err?.message || err).slice(0, 300);
     setStatus(vcId, { error: msg, errorAt: now, backoffUntil: isPathErr(msg) ? now + settings.hostCfgRefreshMs : 0 });

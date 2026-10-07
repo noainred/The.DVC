@@ -12,6 +12,9 @@
  *  · 사람이 끈 정지(사용자 기록이 있는 PoweredOff)는 '계획 정지' 후보다 — 계획 여부는 포탈이 알 수 없으므로 두 가동률(전체 / 사람이 끈 정지 제외)을 함께 낸다.
  *  · 기간 중에 만든 VM 은 마지막 생성·복제·배포·등록 이벤트부터 잰다(그 전을 정지로 세지 않는다).
  *  · VM 은 이벤트 이름으로 묶는다(동명 VM 구분 불가 — 화면이 말한다).
+ *  · v2.719(감사 B1-01·02·03·08): 읽기 상한으로 앞쪽 이벤트가 잘렸으면(readFrom) 그 시각부터만 잰다(잘린 '끔' 을 모른 채
+ *    첫 '켬' 앞을 정지로 세지 않게) · 마지막 이벤트가 '켬' 인데 지금 꺼져 있으면(끔 이벤트 누락) 판정 보류 · 기간 중 생긴 VM 은
+ *    첫 '켬' 부터 잰다(생성~첫 켬은 서비스 시작 전) · 측정 구간이 0 이하(시계 어긋남)면 측정하지 않고 따로 센다.
  */
 import { AVAIL_TYPES } from '../vmchanges/eventDetail.js';
 
@@ -30,18 +33,23 @@ export const userInitiated = (user) => typeof user === 'string' && user.trim() !
 /**
  * @param rows   opsEvents 행(AVAIL_TYPES — 순서 무관)
  * @param vms    스냅샷 VM(범위로 이미 거른 것 · 템플릿 제외는 여기서)
- * @param opts   { days, now, target(%), vcName:Map, coverageOf:(vcId)=>({firstTs,lastTs})|null, q, onlyBelow }
+ * @param opts   { days, now, target(%), vcName:Map, coverageOf:(vcId)=>({firstTs,lastTs})|null, q, onlyBelow,
+ *                 readFrom:(ms|null) — 읽기 상한으로 이 시각 이하 이벤트가 잘렸을 수 있다(최신 먼저 읽었으므로 그 뒤는 온전하다) }
  */
-export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), target = 99.9, vcName = new Map(), coverageOf = () => null, q = '', onlyBelow = false } = {}) {
+export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), target = 99.9, vcName = new Map(), coverageOf = () => null, q = '', onlyBelow = false, readFrom = null } = {}) {
   const since = now - days * 86_400_000;
+  // v2.719(감사 B1-01): 잘린 경계 시각의 이벤트는 같은 ts 묶음 중 일부만 남았을 수 있어 경계 자체도 버린다.
+  const cut = Number.isFinite(readFrom) && readFrom >= since ? readFrom : null;
   const byVm = new Map();
   for (const r of rows || []) {
     if (!(AVAIL_TYPES.includes(r.type) || BORN.has(r.type)) || !(r.ts >= since && r.ts <= now)) continue;
+    if (cut != null && r.ts <= cut) continue;
     const k = `${r.vcenterId}\u0000${r.entity}`;
     if (!byVm.has(k)) byVm.set(k, []);
     byVm.get(k).push(r);
   }
-  const cov = { vms: 0, measured: 0, noEvents: 0, partialWindow: 0, inconsistent: 0, offAll: 0, belowTarget: 0 };
+  // v2.719: readCut(상한으로 앞이 잘려 짧게 잰 VM) · missedOff(끔 이벤트 누락 — 판정 보류) · clockSkew(측정 구간 0 이하 — 판정 보류)
+  const cov = { vms: 0, measured: 0, noEvents: 0, partialWindow: 0, inconsistent: 0, missedOff: 0, offAll: 0, clockSkew: 0, readCut: 0, belowTarget: 0 };
   const perVc = new Map();
   const out = [];
   const seen = new Set();
@@ -57,12 +65,21 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
     vc.vms += 1;
     if (!c || !Number.isFinite(c.lastTs) || !c.lastTs) { cov.noEvents += 1; vc.noEvents += 1; continue; }
     const born = (byVm.get(k) || []).filter((e) => BORN.has(e.type)).reduce((m, e) => Math.max(m, e.ts), 0);
-    const covFrom = Math.max(since, Number.isFinite(c.firstTs) && c.firstTs > 0 ? c.firstTs : since);
-    const from = Math.max(covFrom, born);
-    if (covFrom > since) cov.partialWindow += 1;
-    vc.from = vc.from == null ? from : Math.max(vc.from, from);
-    const span = now - from;
+    const covFrom0 = Math.max(since, Number.isFinite(c.firstTs) && c.firstTs > 0 ? c.firstTs : since);
+    // v2.719(감사 B1-01): 상한으로 잘렸으면 그 경계부터만 잰다(경계 이전 상태는 모른다).
+    const cutHere = cut != null && cut > covFrom0;
+    const covFrom = cutHere ? cut : covFrom0;
+    let from = Math.max(covFrom, born);
     const evs = (byVm.get(k) || []).filter((e) => e.ts >= from && !BORN.has(e.type)).sort((a, b) => a.ts - b.ts);
+    // v2.719(감사 B1-03): 기간 중 생긴 VM 의 첫 전원 이벤트가 '켬' 이면 생성~첫 켬은 서비스 시작 전이다 — 첫 켬부터 잰다.
+    const firstPower0 = evs.find((e) => e.type === ON || OFF.has(e.type));
+    if (born > 0 && born >= covFrom && firstPower0?.type === ON) from = firstPower0.ts;
+    const span = now - from;
+    // v2.719(감사 B1-08): 측정 구간이 0 이하(수집 시작이 지금보다 뒤 — vCenter 시계가 앞섬)면 가동률을 낼 수 없다.
+    if (!(span > 0)) { cov.clockSkew += 1; continue; }
+    if (covFrom > since) cov.partialWindow += 1;
+    if (cutHere) cov.readCut += 1;
+    vc.from = vc.from == null ? from : Math.max(vc.from, from);
     const onNow = v.powerState === 'POWERED_ON';
     let down = 0; let userDown = 0; let offs = 0; let userOffs = 0;
     let reboots = 0; let resets = 0; let ha = 0; let failed = 0;
@@ -85,18 +102,22 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
     if (!isOn) {
       if (onNow) { cov.inconsistent += 1; continue; }   // 켬 이벤트를 놓쳤다 — 정지 시간을 알 수 없다
       const d = now - offAt; down += d; if (offByUser) userDown += d;
+    } else if (!onNow) {
+      // v2.719(감사 B1-02): 마지막 전원 이벤트는 '켬' 인데 지금 꺼져 있다 — 끔 이벤트를 놓쳤거나 아직 수집 전이다.
+      //   언제 꺼졌는지 모르므로 계산하지 않는다(지금까지의 꺼짐을 0 으로 세면 가동률이 실제보다 높게 나온다).
+      cov.missedOff += 1; continue;
     }
     const availability = pctOf(down, span);
     const unplanned = pctOf(down - userDown, span);
     cov.measured += 1;
     vc.measured += 1; vc.downMs += down; vc.spanMs += span;
     vc.min = vc.min == null ? availability : Math.min(vc.min, availability);
-    const below = availability < target;
+    const below = availability != null && availability < target;
     if (below) { cov.belowTarget += 1; vc.below += 1; }
     out.push({
       id: v.id, name: v.name, vcenterId: v.vcenterId, vcenterName: vc.name, cluster: v.cluster || '', powerState: v.powerState,
       availability, unplanned, downMs: down, userDownMs: userDown, offs, userOffs, reboots, resets, ha, failed,
-      windowFrom: from, partial: covFrom > since, bornInWindow: born > 0, below,
+      windowFrom: from, partial: covFrom > since, readCut: cutHere, bornInWindow: born > 0, below,
     });
   }
   const qq = String(q || '').toLowerCase();
@@ -118,5 +139,5 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
     reboots: out.reduce((a, r) => a + r.reboots, 0), failed: out.reduce((a, r) => a + r.failed, 0),
     offs: out.reduce((a, r) => a + r.offs, 0), userOffs: out.reduce((a, r) => a + r.userOffs, 0),
   };
-  return { days, since, target, coverage: cov, totals, vcenters, matched: shown.length, vms: shown.slice(0, ROWS_MAX), omitted: Math.max(0, shown.length - ROWS_MAX) };
+  return { days, since, target, readFrom: cut, coverage: cov, totals, vcenters, matched: shown.length, vms: shown.slice(0, ROWS_MAX), omitted: Math.max(0, shown.length - ROWS_MAX) };
 }

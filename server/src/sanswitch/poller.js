@@ -105,7 +105,9 @@ async function collectOne(dev, { periodic = false } = {}) {
     if (!fn) {
       snap = emptySnapshot(full);
       snap.error = `수집기 미구현: ${full.type}`;
-    } else if (isMockMode()) {
+    } else if (isMockMode() && isSanDemoId(full.id || dev.id)) {
+      // v2.719(감사 R2-03·B2-01): 합성은 데모 장비(mock-san-)에만 — 사람이 등록한 스위치는 mock 모드에서도 예전처럼 실제로 수집한다
+      //   (합성 스냅샷이 실장비 스냅샷을 덮지 않게 — pdu·cvp 와 같은 규칙).
       // v2.708 데모: 장비에 접속하지 않는다 — 합성 CLI 출력을 실제 파서(buildSnapshot)에 넣어 스냅샷을 만든다.
       const { store } = await import('../store.js');
       snap = buildSanDemoSnapshot(full, sanDemoLayoutFor(full, store.get()), fosSsh.buildSnapshot, Date.now());

@@ -9,6 +9,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VSAN_PLAN_LABEL, fmtInt, fmtTib, coverageNote, reportedText, RULE_NOTE } from '../corelicense/coreLicenseText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 function Kpi({ label, value, sub }) {
   return (
@@ -25,6 +26,8 @@ export default function CoreLicenseTool({ scope }) {
   const [plan, setPlan] = useState('none');
   const [view, setView] = useState('vc');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -41,6 +44,7 @@ export default function CoreLicenseTool({ scope }) {
       const d = await fetchJson('/tools/core-license', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, plan]);
   useEffect(() => { load(); }, [load]);
@@ -84,7 +88,7 @@ export default function CoreLicenseTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
         </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vSAN 포함 용량</span>
         <Select sort={false} className="input" style={{ minWidth: 0, maxWidth: 240 }} value={plan} onChange={(e) => setPlan(e.target.value)}>

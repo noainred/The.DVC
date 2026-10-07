@@ -62,3 +62,14 @@ describe('availText', () => {
     expect(coverageNote({ coverage: {} })).toBeNull();
   });
 });
+
+describe('v2.719 가용성 판정 보류 사유 문구', () => {
+  it('끔 놓침·시계 앞섬·잘린 시점부터를 말한다', async () => {
+    const { coverageNote } = await import('./availText.js');
+    const n = coverageNote({ coverage: { missedOff: 2, clockSkew: 1, readCut: 3 }, truncated: true, readMax: 50000 });
+    expect(n).toMatch(/언제 꺼졌는지 알 수 없어/);
+    expect(n).toMatch(/앞서 측정 구간이 없는 VM 1대/);
+    expect(n).toMatch(/잘린 시점부터만 쟀습니다\(VM 3대\)/);
+    expect(n).not.toMatch(/빠졌을 수 있습니다/);
+  });
+});

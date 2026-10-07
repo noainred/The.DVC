@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { pctText, downText, allowedDownMin, TARGETS, coverageNote, METHOD_NOTE } from '../bizreport/availText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 const DAYS = [7, 30, 90];
 function Chip({ active, onClick, children }) {
@@ -24,6 +25,8 @@ export default function VmAvailabilityTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvErr, setCsvErr] = useState(null);
@@ -41,8 +44,9 @@ export default function VmAvailabilityTool({ scope }) {
     const my = ++gen.current;
     setLoading(true);
     try {
-      const d = await fetchJson('/tools/vm-availability', params());
-      if (my === gen.current) { setData(d); setError(null); }
+      const p = params();
+      const d = await fetchJson('/tools/vm-availability', p);
+      if (my === gen.current) { setData(d); setError(null); setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, p.vcenterId)); }
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [params]);
   useEffect(() => { load(); }, [load]);
@@ -79,7 +83,7 @@ export default function VmAvailabilityTool({ scope }) {
         {TARGETS.map((x) => <Chip key={x} active={target === x} onClick={() => setTarget(x)}>{x}%</Chip>)}
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체 vCenter</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
         </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 300 }} placeholder="VM·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

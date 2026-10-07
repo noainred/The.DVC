@@ -34,7 +34,18 @@ export const roleName = (r) => ROLE_LABEL[r] || String(r);
  * 그 다음 기능 권한. 아무 메타데이터도 없는 403 은 대개 **데이터 범위(scope)** 제한이다
  * (서버가 `{ok:false, reason}` 만 주는 경로 — 그때는 서버 사유를 그대로 보여줘 추측하지 않는다).
  */
+export const DEMO_GUEST_NEED = '데모 계정은 설정·실제 접속 실행이 막혀 있습니다';
 export function describePermission(info) {
+  // v2.719(감사 W1-02): 데모(mock) 계정 거부를 가장 먼저 본다 — 메타가 없어 'scope' 로 떨어지면 범위 제한이 없는 계정에
+  //   '범위 확대 요청' 이라는 틀린 원인·틀린 조치를 말했다. 권한 요청으로 풀리는 것이 아니므로 요청문도 만들지 않는다(noRequest).
+  if (info?.demoGuest === true || info?.body?.demoGuest === true) {
+    return {
+      kind: 'demo',
+      need: DEMO_GUEST_NEED,
+      how: '데모 계정은 조회와 데모 데이터 수집·점검만 할 수 있습니다. 설정 변경이나 실제 장비 접속이 필요하면 일반 계정으로 로그인하세요.',
+      noRequest: true,
+    };
+  }
   if (info?.requiredOwner) {
     return {
       kind: 'owner',

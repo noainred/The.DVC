@@ -11,6 +11,7 @@ import {
   CLUSTER_TEXT, SEV_LABEL, SEV_BADGE, RULE_TYPE_LABEL, codeChips, findingDetail, coverageText, coverageNote, haText, drsText, evcText,
 } from '../clustercfg/clusterCfgText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -47,6 +48,8 @@ export default function ClusterCheckTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -68,6 +71,7 @@ export default function ClusterCheckTool({ scope }) {
       const d = await fetchJson('/tools/cluster-check', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, code, sev, qApplied]);
   useEffect(() => { load(); }, [load]);
@@ -86,7 +90,6 @@ export default function ClusterCheckTool({ scope }) {
   if (!data) return <Loading />;
   const cov = data.coverage;
   const chips = codeChips(data.byCode);
-  const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const note = coverageNote(cov, data.scan);
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const t = data.totals || {};
@@ -108,7 +111,7 @@ export default function ClusterCheckTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.clusters})</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name} ({v.withFindings}/{v.clusters})</option>)}
         </Select>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>심각도</span>
         {['', 'warn', 'info'].map((s) => <Chip key={s || 'all'} active={sev === s} onClick={() => setSev(s)}>{s ? SEV_LABEL[s] : '전체'}</Chip>)}

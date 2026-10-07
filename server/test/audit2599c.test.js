@@ -72,7 +72,7 @@ function runLive(script) {
     console.log('@@' + JSON.stringify(out));
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', boot], {
-    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' },
+    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', SSH_READY_TIMEOUT_MS: '2000' } /* v2.719: mock 모드에서도 사람이 등록한 장비는 실제로 접속한다(R1-03) — 닿지 않는 주소에서 빨리 실패하게 */,
     encoding: 'utf8', cwd: ROOT, timeout: 180_000,
   });
   assert.equal(r.status, 0, `자식 프로세스 실패: ${r.stderr?.slice(-2000)}`);

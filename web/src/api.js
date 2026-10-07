@@ -125,6 +125,8 @@ export class HttpError extends Error {
     this.requiredRole = Array.isArray(body?.requiredRole) ? body.requiredRole : null;
     this.requiredPerm = Array.isArray(body?.requiredPerm) ? body.requiredPerm : null;
     this.requiredOwner = !!body?.requiredOwner;
+    // v2.719(감사 W1-02): mock 모드 데모 계정 거부(auth/demoGuest.js)의 표지 — 없으면 화면이 '범위 밖' 으로 잘못 안내했다.
+    this.demoGuest = body?.demoGuest === true;
     this.serverReason = body?.reason || '';
     // v2.522: 실패 응답 본문을 그대로 보관한다. 예전에는 위 네 필드만 남기고 버려서, 서버가
     // 사유와 함께 내려준 구조화 정보(예: 스토리지 중복 등록의 `conflict` — 어느 장비와

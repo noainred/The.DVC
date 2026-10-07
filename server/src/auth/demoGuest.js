@@ -35,7 +35,48 @@ export const READ_DENY = [
   '/api/admin/portal-db', '/api/admin/status', '/api/admin/emergency-stop', '/api/admin/net', '/api/admin/dir-usage',
   '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/report', '/api/admin/logs',
   '/api/auth/ad-config', '/api/upgrade', '/api/tools/credentials', '/api/remote',
+  // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
+  //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.
+  '/api/tools/secret-scan', '/api/tools/portal-check/tokens',
 ];
+
+/**
+ * v2.719(감사 R1-02): 조회(GET·HEAD)인데 **실제 호스트·네트워크에 접속하는** 경로. 데모 계정은 요청 문맥이 admin·전체 범위라
+ * 라우트 게이트를 통과하므로 여기서 막는다(머리말 규칙 '실제 호스트에 닿는 실행은 막는다' 의 GET 판).
+ *   · relay-test: 임의 host:port 로 TCP·TLS·HTTP(내부망 포트 탐색) · gpu-probe: 저장 iDRAC 계정으로 Redfish 로그인
+ *   · inventory?refresh=1 · sensors?live=1: 같은 화면의 캐시 조회는 열어 두고 즉시 수집 질의만 막는다
+ *   · network-check: 등록된 vCenter·NSX 주소로 TCP 프로브
+ * 질의값은 하나라도 걸리면 거부한다(같은 키 반복·인코딩 '%31' 도 디코드해 본다 — 라우트보다 넓게).
+ * 새 '실접속 GET' 을 만들면 여기에 더할 것 — server/test/audit2719b.test.js 가 라우터 스택에서 이 목록을 대조한다.
+ */
+export const LIVE_GET_DENY = [
+  { path: '/api/admin/vcenter/relay-test' },
+  { path: '/api/admin/idrac/:id/gpu-probe' },
+  { path: '/api/admin/idrac/:id/inventory', query: ['refresh', '1'] },
+  { path: '/api/admin/idrac/:id/sensors', query: ['live', '1'] },
+  { path: '/api/tools/network-check' },
+];
+
+const LIVE_RE = LIVE_GET_DENY.map((d) => ({
+  re: new RegExp(`^${d.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:id/g, '[^/]+')}$`),
+  query: d.query || null,
+}));
+
+function liveGetDenied(p, originalUrl) {
+  const hit = LIVE_RE.filter((x) => x.re.test(p));
+  if (!hit.length) return false;
+  let qs = null;
+  for (const h of hit) {
+    if (!h.query) return true;
+    if (!qs) {
+      const raw = String(originalUrl || '').split('#')[0];
+      const i = raw.indexOf('?');
+      try { qs = new URLSearchParams(i >= 0 ? raw.slice(i + 1) : ''); } catch { return true; }
+    }
+    if (qs.getAll(h.query[0]).some((v) => String(v).trim() === h.query[1])) return true;
+  }
+  return false;
+}
 
 /** 데모 계정에 허용하는 실행(상태 변경) — 전부 데모(mock) 데이터만 다시 만들거나 판정한다. `:id` 는 한 세그먼트. */
 export const SAFE_ACTIONS = [
@@ -71,7 +112,8 @@ export function demoGuestDenial(method, originalUrl) {
   const p = normApiPath(originalUrl);
   const denied = READ_DENY.some((d) => p === d || p.startsWith(`${d}/`));
   if (m === 'GET' || m === 'HEAD') {
-    return denied ? '데모 계정은 설정·계정·보안 화면을 볼 수 없습니다.' : null;
+    if (denied) return '데모 계정은 설정·계정·보안 화면을 볼 수 없습니다.';
+    return liveGetDenied(p, originalUrl) ? '데모 계정은 실제 장비·네트워크에 접속하는 조회(연결 확인·즉시 수집·프로브)를 할 수 없습니다.' : null;
   }
   if (denied) return '데모 계정은 설정을 바꿀 수 없습니다.';
   if (auditSkipped(m, p)) return null;

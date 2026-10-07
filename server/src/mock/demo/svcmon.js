@@ -15,9 +15,34 @@ export const SVCMON_DEMO_BATCH = 'mock-demo';
 
 let _tried = false;
 
-/** 이 대상이 데모 대상인가 — mock 모드 + 데모 배치 태그 둘 다. */
+/**
+ * 데모 표지(배치 태그)가 붙은 대상인가 — **모드와 무관**하다.
+ * v2.719(감사 R1-01·R2-02): 예전 판정은 isMockMode() 와 묶여 있어 live 로 바꾸면 false 가 되고, 폴러가 합성 10.x 주소·
+ * 목 호스트 이름을 실제로 ping·TCP·HTTP 점검했다(SAN·PDU 폴러는 live 에서 데모 항목을 건너뛴다 — 형제 비대칭).
+ */
+export function isSvcmonDemoBatch(target) {
+  return !!target && target.batch === SVCMON_DEMO_BATCH;
+}
+
+/** 이 대상이 데모 대상인가 — mock 모드 + 데모 배치 태그 둘 다(합성 결과를 쓸 대상). */
 export function isSvcmonDemoTarget(target) {
-  return !!target && target.batch === SVCMON_DEMO_BATCH && isMockMode();
+  return isSvcmonDemoBatch(target) && isMockMode();
+}
+
+/**
+ * 이번 실행분을 셋으로 나눈다(순수 — mock 판정은 인자로).
+ *  · live: 실제로 점검할 것(사람이 등록한 대상 — 모드 무관)
+ *  · demo: mock 모드의 데모 대상(합성 결과)
+ *  · skipped: live 모드의 데모 대상 — 점검하지 않는다(v2.719 감사 R1-01).
+ */
+export function splitSvcmonDue(due, { mock = isMockMode() } = {}) {
+  const live = [], demo = [], skipped = [];
+  for (const d of due || []) {
+    if (!isSvcmonDemoBatch(d?.target)) live.push(d);
+    else if (mock) demo.push(d);
+    else skipped.push(d);
+  }
+  return { live, demo, skipped };
 }
 
 const T = (name, type, extra = {}) => ({ name, type, intervalSec: 60, ...extra });

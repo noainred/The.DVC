@@ -106,7 +106,7 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
   if (opt.sev && SEV_ORDER[opt.sev] != null) shown = shown.filter((r) => r.findings.some((f) => f.sev === opt.sev));
   if (q) shown = shown.filter((r) => `${r.name} ${r.host} ${r.cluster} ${r.vcenterName}`.toLowerCase().includes(q));
   shown.sort((a, b) => SEV_ORDER[a.worst] - SEV_ORDER[b.worst] || b.findings.length - a.findings.length || String(a.name).localeCompare(String(b.name)));
-  return {
+  const out = {
     coverage,
     byCode,
     vcenters: [...byVc.values()].sort((a, b) => b.crit - a.crit || b.warn - a.warn || String(a.name).localeCompare(String(b.name))),
@@ -116,12 +116,18 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
     omitted: Math.max(0, shown.length - ROWS_MAX),
     settings: { snapAgeDays: s.snapAgeDays, snapCount: s.snapCount, snapSizeGB: s.snapSizeGB, uptimeDays: s.uptimeDays, exceptions: s.exceptions },
   };
+  // v2.719(감사 B1-05): 알림 요약은 화면 상한(ROWS_MAX)으로 자르기 전의 거른 전체로 센다 — 잘린 rows 로 세면 위반 대수가
+  //   과소 보고되고, crit 행이 상한을 채우면 위반 0 으로 읽혀 그날 알림이 아예 나가지 않았다.
+  //   응답(JSON)·펼침에 실리지 않게 열거하지 않는 속성으로 둔다.
+  Object.defineProperty(out, 'allRows', { value: shown, enumerable: false });
+  return out;
 }
 
 /** 알림 요약(스냅샷 정책·유령 스냅샷만 — 하루 한 번). 반환 null 이면 보낼 것이 없다. */
 export function snapshotPolicySummary(result, limit = 30) {
   const codes = ['snap-age', 'snap-count', 'snap-size', 'snap-orphan-delta'];
-  const hits = result.rows.filter((r) => r.findings.some((f) => codes.includes(f.code)));
+  const src = Array.isArray(result.allRows) ? result.allRows : result.rows;   // v2.719(B1-05): 상한 전 전체
+  const hits = src.filter((r) => r.findings.some((f) => codes.includes(f.code)));
   if (!hits.length) return null;
   const lines = hits.slice(0, limit).map((r) => {
     const parts = r.findings.filter((f) => codes.includes(f.code)).map((f) => (

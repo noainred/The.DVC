@@ -31,9 +31,20 @@ export function demoVmCloneJobs(snapshot) {
       dest: { type: 'datastore', datastoreName: ds.name },
       schedule: i % 2 === 0 ? { mode: 'daily', time: `0${2 + i}:30` } : { mode: 'interval', hours: 12 },
       keep: 2 + (i % 3), quiesce: i % 2 === 0, enabled: i !== 4,
+      demo: true,   // v2.719(감사 R1-07): live 로 바꾸면 스케줄러가 이 잡을 실행하지 않는다
     });
   }
   return out;
+}
+
+/**
+ * 데모 잡인가 — **모드와 무관**(v2.719 감사 R1-07). 표지 demo:true, 또는 표지가 생기기 전(v2.717~2.718)에 시드된
+ * 잡은 합성 사본 ref 접두 'mock-demo-' 로 알아본다.
+ */
+export function isVmCloneDemoJob(job) {
+  if (!job) return false;
+  if (job.demo === true) return true;
+  return Array.isArray(job.clones) && job.clones.some((c) => String(c?.ref || '').startsWith('mock-demo-'));
 }
 
 /** 잡이 비어 있으면 데모 잡과 과거 사본·실행 기록을 1회 만든다. */

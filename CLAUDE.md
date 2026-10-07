@@ -4846,6 +4846,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     마지막 실행 기록이 '지금' 이라 곧바로 실행되지 않는다) · 데모 엣지 베어메탈(`mock/demo/edgeSeed.js` 가 틱마다 `setEdgeFleet` — 실제 /fleet push 와 같은 모양, watts 없음).
   - **v2.718 데모 데이터 보완 3회차**: vmperf(VM 할당·사용) 과거 90일 백필(`mock/demo/vmperf.js` — 샘플러가 적재 직후 부르고 기다리지 않는다 · 그 vCenter 첫 표본이 최근 2일 이내일 때만 ·
     240시간마다 양보). 3회차 점검 결과 400px 160화면·서브탭 75개 넘침·오류 0. 데모로 채우지 않은 것: 네트워크 모니터·게스트 조사(실제 접속) · svcmon 엣지 배정 · 설정 등록부(사람이 정함).
+  - ⚠⚠ **v2.719 — 데모 모드·데모 계정이 실제 장비·운영 동작에 닿던 경로를 막았다(코드 리뷰·안정화 1회차)**(6축 감사 → 반증 → 8그룹 수정, 확정 31 · 가능성 2, 회귀
+    `server/test/audit2719{a1,a2,a3,b,c,d,e}.test.js` + 웹 `views/tools/audit2719f.test.js` — 고친 파일마다 변이 검증. 상세 `docs/AUDIT-2026-10-07.md`):
+    · ⚠⚠ **'mock 모드' 와 '데모 항목' 은 다른 축이다 — 판정은 언제나 둘의 논리곱**: 합성 수집은 `isMockMode() && mock- id`(SAN 기본·사용량 · bmstor · Isilon 영역 DB ·
+      bm-usage 대상 `isDemoBmTarget`)이고, 사람이 등록한 장비는 mock 모드에서도 실제로 수집한다(v2.708 규칙을 v2.709 이후 여러 폴러가 어기고 있었다 — 합성 값이 실장비 이력에 쌓였다).
+      반대로 **live 에서는 데모 표지 항목을 실제로 점검·실행·선택하지 않는다**(svcmon 배치 `mock-demo` · vmclone `demo:true`(옛 시드는 clone ref `mock-demo-`) · 볼트 `isDemoCredential`) —
+      건너뛴 개수는 상태(`demoSkipped`)와 콘솔에 남긴다. `demoOn` 으로 켜진 주기(저장 설정은 꺼짐)는 데모 대상만 돈다(PDU·CVP·HAProxy 경로·SAN).
+    · ⚠⚠ **데모 계정의 GET 도 실제 접속을 할 수 있다** — `auth/demoGuest.js LIVE_GET_DENY`(relay-test · iDRAC gpu-probe · inventory?refresh=1 · sensors?live=1 등)와 보안 조회
+      (secret-scan · portal-check/tokens)를 막는다. **새 실접속 GET 을 만들면 LIVE_GET_DENY 에 더할 것** — `audit2719b` 가 라우트 소스에서 실접속 함수(`LIVE_CALLEES`)를 부르는
+      GET 을 훑어 전부 거부되는지 고정한다. 데모 계정 수동 수집(PDU·CVP)은 `demoOnly` 로 데모 장비만. 403 의 `demoGuest` 표지는 화면이 '데모 계정' 안내로 말한다.
+    · 데모 알림 가드 둘 더: PDU 임계(`splitDemoAlerts`) · HAProxy 경로 데모 호스트 전이 — 상태는 기록하고 보내지 않는다(`demoAlertsSuppressed`).
+    · **vCenter 부가 갱신 예산은 남은 수집 시한에서 뺀다**(`auxBudgetMs` — 하한 미만이면 건너뛰고 `auxSkipped`). 중단·시한 실패는 '읽음' 으로 캐시하지 않는다(태그는 `retryAt` 10분,
+      호스트 구성은 put 하지 않음). 태그 연결이 잘린 vCenter 는 `partialTags` → 누락이 아니라 '확인 안 됨(부분)'(엣지 정제도 싣는다). VM `storageGB` 결측은 null.
+    · 가용성: 이벤트 상한 절단은 잘린 시점부터만 잰다(`readCut`) · 생성 → 첫 켬은 정지가 아니다 · 마지막이 켬인데 지금 꺼짐은 `missedOff` · 측정 0 은 `clockSkew`(웹 문구 함께).
+    · SAN 조회 감시 재시작은 사용 중인 핸들을 닫지 않는다(진행 중 prune 이 0 을 거짓 보고하던 것).
+    · 남긴 것: 새 상태 필드(`demoSkipped`·`auxSkipped`·`partialTags`·`hostcfg transient`)의 화면 표시 · `edge-log-local` 데모 계정 조회(정책 판단) · 웹 10화면 vCenter 선택 Chromium 미확인 시 보고.
   - ⚠⚠ **v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 번에 하나'**
     (`sanswitch/perfDb.js bucketAgg`·`sliceBounds`·`heavyQuery` + `collector/puller.js` 주기 상한 + `health/services.js` + `idracTrend.js pullStaleOf` + 웹 `idracStateBanner`.
     회귀 `server/test/stall2693.test.js` 7건 — 변이 5/5 · 웹 `idracTrendText.test.js` v2.693 절):

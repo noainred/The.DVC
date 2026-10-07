@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { CONTENTION_TEXT, SEV_LABEL, SEV_BADGE, pctText, msText, coverageNote, windowText, missingCounterNote } from '../contention/contentionText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -27,6 +28,8 @@ export default function ContentionTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -47,6 +50,7 @@ export default function ContentionTool({ scope }) {
       const d = await fetchJson('/tools/contention', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenterChoices || d?.status, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, sev, qApplied]);
   useEffect(() => { load(); }, [load]);
@@ -67,7 +71,6 @@ export default function ContentionTool({ scope }) {
   const cov = data.coverage || {};
   const note = coverageNote(data);
   const miss = missingCounterNote(data.status);
-  const vcs = Array.isArray(data.status) ? data.status : [];
   const vms = Array.isArray(data.vms) ? data.vms : [];
   const hosts = Array.isArray(data.hosts) ? data.hosts : [];
   const dss = Array.isArray(data.datastores) ? data.datastores : [];
@@ -103,7 +106,7 @@ export default function ContentionTool({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {vcs.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
         </Select>
         {tab === 'vms' && (
           <>

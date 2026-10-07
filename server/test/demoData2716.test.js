@@ -75,7 +75,7 @@ test('④ live 모드에서는 데모 대상도 실제 점검 대상이다(합�
 
 test('④ 폴러는 데모 대상을 runBatch 에 넘기지 않는다(소스)', () => {
   const src = fs.readFileSync(new URL('../src/svcmon/poller.js', import.meta.url), 'utf8');
-  assert.match(src, /const live = due\.filter\(\(\{ target \}\) => !isSvcmonDemoTarget\(target\)\)/);
+  assert.match(src, /splitSvcmonDue\(due\)/); // v2.719: 판정이 splitSvcmonDue 로 옮겨졌다(audit2719a1 이 동작을 고정)
   assert.match(src, /runBatch\(live\.map/);
 });
 

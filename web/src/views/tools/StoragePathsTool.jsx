@@ -9,6 +9,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { DS_TEXT, SEV_LABEL, SEV_BADGE, findingDetail, dsCoverageText, pathCoverageText, gbText } from '../dscfg/dsCfgText.js';
 import Select from '../../components/Select.jsx';
+import { mergeVcChoices } from './vcChoices.js';
 
 const TABS = [['ds', '데이터스토어'], ['paths', '스토리지 경로'], ['vsan', 'vSAN']];
 
@@ -38,6 +39,8 @@ export default function StoragePathsTool({ scope }) {
   const [q, setQ] = useState('');
   const [qApplied, setQApplied] = useState('');
   const [data, setData] = useState(null);
+  // v2.719(감사 W1-01): vCenter 를 고른 응답은 목록을 그 하나로 거른다 — 선택지는 '전체' 응답에서 본 목록을 기억해 쓴다.
+  const [vcOpts, setVcOpts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -58,6 +61,7 @@ export default function StoragePathsTool({ scope }) {
       const d = await fetchJson('/tools/storage-paths', params);
       if (my !== gen.current) return;
       setData(d); setError(null);
+      setVcOpts((prev) => mergeVcChoices(prev, d?.vcenters, params.vcenterId));
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, code, qApplied, onlyIssues]);
   useEffect(() => { load(); }, [load]);
@@ -90,7 +94,7 @@ export default function StoragePathsTool({ scope }) {
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>vCenter</span>
         <Select className="input" style={{ minWidth: 0, maxWidth: 260 }} value={vcId} onChange={(e) => setVcId(e.target.value)}>
           <option value="">전체</option>
-          {(data.vcenters || []).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
+          {vcOpts.map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.name}</option>)}
         </Select>
         <input className="input" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 300 }} placeholder="이름·클러스터 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <button type="button" className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>

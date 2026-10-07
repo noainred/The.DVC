@@ -29,7 +29,7 @@ export function perfQueryBody(perfManager, entityType, refs, metrics, samples) {
  * @param vcId
  * @param opts.vms   [{ref, numCpu}] 켜진 VM · opts.hostRefs 연결된 호스트
  */
-export async function refreshContention(c, vcId, { vms = [], hostRefs = [], now = Date.now(), budgetMs = CONTENTION_BUDGET_MS, settings = config } = {}) {
+export async function refreshContention(c, vcId, { vms = [], hostRefs = [], now = Date.now(), budgetMs = CONTENTION_BUDGET_MS, settings = config, signal = null } = {}) {
   if (!settings.contentionScan) return { skipped: 'off' };
   // 꺼진 VM·끊긴 호스트의 옛 값은 버린다 — 그 값을 '지금' 경합처럼 보이면 거짓이다.
   prune(vcId, 'vm', new Set(vms.map((v) => v.ref)));
@@ -60,7 +60,7 @@ export async function refreshContention(c, vcId, { vms = [], hostRefs = [], now 
     const run = async (refs, chunk, entityType, metrics, onEach) => {
       if (!metrics.length) return;
       for (let i = 0; i < refs.length; i += chunk) {
-        if (Date.now() >= budgetEnd) { cut += refs.length - i; return; }
+        if (signal?.aborted || Date.now() >= budgetEnd) { cut += refs.length - i; return; }
         const slice = refs.slice(i, i + chunk);
         try {
           const xml = await c.callRaw(perfQueryBody(c.sc.perfManager, entityType, slice, metrics, samples));
@@ -80,7 +80,8 @@ export async function refreshContention(c, vcId, { vms = [], hostRefs = [], now 
     return { vmFetched, hostFetched, cut, missing, errors: chunkErrors.length };
   } catch (err) {
     const msg = String(err?.message || err).slice(0, 300);
-    setStatus(vcId, { error: msg, errorAt: now, backoffUntil: now + Math.min(periodMs, 3_600_000) });
+    // v2.719(감사 S1-01): 수집 중단(데드라인)은 이 갱신의 실패가 아니다 — 쉬지 않고 다음 주기에 다시 시도한다.
+    setStatus(vcId, { error: msg, errorAt: now, backoffUntil: signal?.aborted ? 0 : now + Math.min(periodMs, 3_600_000) });
     console.warn(`[contention] ${vcId} CPU 경합·디스크 지연 갱신 실패: ${msg}`);
     return { error: msg };
   }

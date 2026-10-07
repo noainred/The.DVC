@@ -158,7 +158,9 @@ const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
 export async function currentTargets() {
   const snap = store.get();
   // v2.708: 데모(mock)는 판정 지점에서만 '켜짐 · 전 법인 선택' 으로 덮는다(설정 파일은 그대로).
-  const s = isMockMode() ? (await import('../mock/demo/baremetal.js')).demoBmSettings(loadBmUsageSettings(), snap?.vcenters || []) : loadBmUsageSettings();
+  const saved = loadBmUsageSettings();
+  const demoMod = isMockMode() ? await import('../mock/demo/baremetal.js') : null;
+  const s = demoMod ? demoMod.demoBmSettings(saved, snap?.vcenters || []) : saved;
   const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw, registryLoadError: bmRegistryLoadError }, { getInventory }] = await Promise.all([
     import('../insights/fleetInventory.js'), import('../idrac/registry.js'), import('../bmstor/registry.js'),
     import('../idrac/invCache.js'),
@@ -204,18 +206,31 @@ export async function currentTargets() {
     if (_srcErrLog(`src:${se.source}`, se.error)) console.warn(`[bmusage] 대상 해석 입력 실패(${se.source}): ${se.error}`);
   }
   const isEdge = !!config.agent?.centralUrl;
+  const resolveInput = {
+    bareMetal, registry, bmServers,
+    // v2.625: 가상화 호스트(ESXi)도 — `includeVirtualization` 일 때만 대상이 된다. ⚠ 호스트를 못 읽은 vCenter 는
+    //   베어메탈과 같은 이유로 뺀다(판정이 흔들린다 — 아래 withholdUnreadBareMetal 과 같은 집합).
+    virtHosts: (fleet.virtualizationHosts || []).filter((h) => !hostsUnread || !(hostsUnread.vcenters || []).includes(h.vcenterId)),
+    vcenters: snap?.vcenters || [],
+    agentName: config.agent?.name || '', isEdge,
+    // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
+    inventoryOf: (id) => getInventory(id),
+  };
+  let resolved = resolveTargets({ ...resolveInput, settings: s });
+  if (demoMod) {
+    // v2.719(감사 R1-03): 데모 설정(켜짐·전 법인)은 **데모 대상(mock-)에만** 적용한다. 사람이 등록한 서버는 저장된 설정
+    //   그대로 판정하고(꺼져 있으면 대상이 아니다) 폴러가 예전처럼 실제로 수집한다 — 합성 값이 실장비 키로 이력에 남지 않게.
+    //   빠진 실등록 대수는 demoScope.realNotEnabled 로 밝힌다(조용한 제외 금지).
+    const realRes = saved.enabled === true ? resolveTargets({ ...resolveInput, settings: saved }) : null;
+    const demoT = resolved.targets.filter((x) => demoMod.isDemoBmTarget(x));
+    const realT = realRes ? realRes.targets.filter((x) => !demoMod.isDemoBmTarget(x)) : [];
+    const realKeys = new Set(realT.map((x) => x.key));
+    const realNotEnabled = resolved.targets.filter((x) => !demoMod.isDemoBmTarget(x) && !realKeys.has(x.key)).length;
+    resolved = { ...resolved, targets: [...demoT, ...realT], demoScope: { demo: demoT.length, real: realT.length, realNotEnabled } };
+  }
   return {
     settings: s,
-    ...resolveTargets({
-      bareMetal, registry, bmServers, settings: s,
-      // v2.625: 가상화 호스트(ESXi)도 — `includeVirtualization` 일 때만 대상이 된다. ⚠ 호스트를 못 읽은 vCenter 는
-      //   베어메탈과 같은 이유로 뺀다(판정이 흔들린다 — 아래 withholdUnreadBareMetal 과 같은 집합).
-      virtHosts: (fleet.virtualizationHosts || []).filter((h) => !hostsUnread || !(hostsUnread.vcenters || []).includes(h.vcenterId)),
-      vcenters: snap?.vcenters || [],
-      agentName: config.agent?.name || '', isEdge,
-      // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
-      inventoryOf: (id) => getInventory(id),
-    }),
+    ...resolved,
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id })),
     isEdge,
     attributed: { filled: attr.filled || 0, conflicts: attr.conflicts || 0, ...(attr.error ? { error: attr.error } : {}) },
@@ -529,10 +544,15 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     _entProbeBudget = ENT_PROBE_PER_RUN;
     _entDeferred = 0;
     // v2.708: 데모(mock) — 장비(iDRAC·SSH)에 접속하지 않고 합성 행을 만든다. 첫 주기에 원시 14일 + 일 롤업 45일을 1회 백필한다.
+    // v2.719(감사 R1-03): 합성은 데모 대상(mock-)에만 — 사람이 등록한 서버는 mock 모드에서도 예전처럼 실제로 수집한다.
     const demo = isMockMode() ? await import('../mock/demo/baremetal.js') : null;
-    if (demo) await demo.backfillBmUsage(targets).catch(() => {});
-    const results = demo ? demo.demoBmUsageResults(targets, Date.now())
-      : await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
+    const demoTargets = demo ? targets.filter((tg) => demo.isDemoBmTarget(tg)) : [];
+    const realTargets = demo ? targets.filter((tg) => !demo.isDemoBmTarget(tg)) : targets;
+    if (demo && demoTargets.length) await demo.backfillBmUsage(demoTargets).catch(() => {});
+    const results = [
+      ...(demo ? demo.demoBmUsageResults(demoTargets, Date.now()) : []),
+      ...(realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : []),
+    ];
     /*
      * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
      *   HBA)을 들고 있어 서버당 수 KB 다. 법인을 끄거나 등록부에서 서버가 빠져도 예전에는 그 항목이

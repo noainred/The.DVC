@@ -215,20 +215,33 @@ export async function savePerfSample(deviceId, ts, samples = {}, meta = [], rete
 // 공유해, 보존일을 줄이고 '지금 정리' 를 누르면 옛 경계로 도는 정리의 결과(deleted:0)를 돌려받았다(새 경계보다 오래된 행이
 // 남은 채로 '정리됨'). 보존일이 다르면 진행 중인 것이 끝난 뒤 새 경계로 한 번 더 돈다(끼리 겹치지 않는 규칙은 그대로).
 const _pruneFlight = createPruneFlight();   // util/chunkedPrune.js — 같은 보존일이면 공유, 다르면 끝난 뒤 한 번 더
+// v2.719(감사 R2-01): prune 은 청크 사이에 양보하므로 그 동안 조회 감시(restartEngine)가 핸들을 닫으면 준비문이
+//   finalize 되어 '이미 지운 청크가 있는데 deleted:0' 이 됐다(재현). 쓰는 동안 핸들을 '사용 중' 으로 잡고, 재시작은
+//   사용자가 다 끝난 뒤에 옛 핸들을 닫는다. 대기열에서 늦게 도는 prune 은 넘겨받은 db 대신 지금 핸들을 연다
+//   (그 사이 재시작으로 넘겨받은 핸들이 닫혔을 수 있다).
+function holdDb(db) { db.users = (db.users || 0) + 1; return () => { db.users -= 1; if (db.retired && db.users <= 0) closeDb(db); }; }
+function closeDb(db) { if (db.closed) return; db.closed = true; try { db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ } }
+function retireDb(db) { if (!db || db === 'unavailable') return; db.retired = true; if (!(db.users > 0)) closeDb(db); }
 function pruneOld(db, retentionDays) {
   const days = Math.max(1, Number(retentionDays) || 90);
   return _pruneFlight.run(days, async () => {
-    const cut = Date.now() - days * 86400e3;
-    // ts 단독 인덱스(idx_pp_ts)가 rowid 서브쿼리의 풀스캔을 막는다
-    const stmt = db.conn.prepare('DELETE FROM port_perf WHERE rowid IN (SELECT rowid FROM port_perf WHERE ts < ? LIMIT ?)');
-    const r = await chunkedDelete(stmt, [cut], { label: 'sanswitch-perf.port_perf' });
-    const meta = db.conn.prepare('DELETE FROM port_meta WHERE ts < ?').run(cut); // 장비×포트(≤4096) 규모라 한 번에
-    if (r.deleted > 0 || Number(meta?.changes) > 0) {
-      _counts = null;
-      console.log(`[sanswitch-perf] prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'} · 메타 ${Number(meta?.changes || 0)}행`);
-    }
-    return { deleted: r.deleted, done: r.done, metaDeleted: Number(meta?.changes || 0) };
+    if (db.retired || db.closed) db = await open();
+    if (!db) throw new Error('DB 를 열 수 없습니다');
+    const release = holdDb(db);
+    try { return await pruneOldInner(db, days); } finally { release(); }
   });
+}
+async function pruneOldInner(db, days) {
+  const cut = Date.now() - days * 86400e3;
+  // ts 단독 인덱스(idx_pp_ts)가 rowid 서브쿼리의 풀스캔을 막는다
+  const stmt = db.conn.prepare('DELETE FROM port_perf WHERE rowid IN (SELECT rowid FROM port_perf WHERE ts < ? LIMIT ?)');
+  const r = await chunkedDelete(stmt, [cut], { label: 'sanswitch-perf.port_perf' });
+  const meta = db.conn.prepare('DELETE FROM port_meta WHERE ts < ?').run(cut); // 장비×포트(≤4096) 규모라 한 번에
+  if (r.deleted > 0 || Number(meta?.changes) > 0) {
+    _counts = null;
+    console.log(`[sanswitch-perf] prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'} · 메타 ${Number(meta?.changes || 0)}행`);
+  }
+  return { deleted: r.deleted, done: r.done, metaDeleted: Number(meta?.changes || 0) };
 }
 /** 적재 경로용 — 기다리지 않는다. 실패는 콘솔에 남긴다(조용히 삼키지 않는다). */
 function pruneInBackground(db, retentionDays) {
@@ -331,7 +344,7 @@ function restartEngine(key, ms) {
   _cancelGen += 1;
   _qgen += 1; _qcache.clear();
   _restarts = { count: _restarts.count + 1, lastAt: Date.now(), lastKey: String(key).slice(0, 200), lastMs: ms };
-  try { if (_db && _db !== 'unavailable') _db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ }
+  retireDb(_db);   // v2.719(감사 R2-01): 진행 중인 prune 이 쥔 핸들은 그 prune 이 끝난 뒤에 닫는다
   _db = null;
   console.warn(`[sanswitch-perf] 사용량 조회가 ${Math.round(ms / 1000)}초를 넘어 조회 엔진을 재시작했습니다(${_restarts.count}회째) — 대기 중인 다른 조회는 이어서 돕니다.`);
 }

@@ -25,6 +25,24 @@ const daysOf = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(
 /** 목표 가동률 — 90~100 사이 숫자만. 빈 값·글자는 기본 99.9. */
 export function targetOf(v) { const n = numOrNull(v); return n != null && n >= 90 && n <= 100 ? Math.round(n * 1000) / 1000 : 99.9; }
 
+// v2.719(감사 S1-04): 같은 조건의 계산은 60초 동안 화면·CSV 가 함께 쓴다(진행 중이면 합류) — CSV 가 매 요청 이벤트를 다시 읽지 않게.
+const RUN_TTL_MS = 60_000;
+const RUN_MEMO_MAX = 32;
+const _runMemo = new Map();   // key → { at, p }
+function runShared(req, snap) {
+  const key = JSON.stringify([scopeKey(req.user, snap), qStr(req.query.vcenterId, 128), daysOf(req.query.days), targetOf(req.query.target), qStr(req.query.q, 128), req.query.below === '1']);
+  const now = Date.now();
+  const hit = _runMemo.get(key);
+  if (hit && now - hit.at < RUN_TTL_MS) return hit.p;
+  const p = run(req, snap);
+  _runMemo.delete(key);
+  _runMemo.set(key, { at: now, p });
+  p.catch(() => { if (_runMemo.get(key)?.p === p) _runMemo.delete(key); });   // 실패는 기억하지 않는다
+  while (_runMemo.size > RUN_MEMO_MAX) _runMemo.delete(_runMemo.keys().next().value);
+  return p;
+}
+export function _resetVmAvailabilityMemoForTest() { _runMemo.clear(); }
+
 async function run(req, snap) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const ids = (scoped.vcenters || []).map((v) => v.id);
@@ -32,28 +50,31 @@ async function run(req, snap) {
   const now = Date.now();
   const since = now - days * DAY;
   const db = await getLogsDb();
-  const rows = ids.length ? db.opsEvents({ vcenterIds: ids, since, types: [...AVAIL_TYPES, ...LIFE_TYPES.filter((t) => t !== 'VmRemovedEvent' && t !== 'VmRenamedEvent')] }, AVAIL_READ_MAX + 1) : [];
+  // v2.719(감사 S1-04): 시간 조각 + 양보로 읽는다(한 문장 정렬이 이벤트 루프를 멈췄다).
+  const rows = ids.length ? await db.opsEventsAsync({ vcenterIds: ids, since, types: [...AVAIL_TYPES, ...LIFE_TYPES.filter((t) => t !== 'VmRemovedEvent' && t !== 'VmRenamedEvent')] }, AVAIL_READ_MAX + 1, { now }) : [];
   const truncated = rows.length > AVAIL_READ_MAX;
   if (truncated) rows.length = AVAIL_READ_MAX;
+  // v2.719(감사 B1-01): 최신 먼저 읽어 잘렸으므로 남은 가장 오래된 시각 이전은 모른다 — 그 시각부터만 잰다.
+  const readFrom = truncated && rows.length ? rows[rows.length - 1].ts : null;
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
   const r = analyzeAvailability(rows, scoped.vms, {
     days, now, target: targetOf(req.query.target), vcName, coverageOf: (id) => cov.get(id) || null,
-    q: qStr(req.query.q, 128), onlyBelow: req.query.below === '1',
+    q: qStr(req.query.q, 128), onlyBelow: req.query.below === '1', readFrom,
   });
   const s = loadLogSettings();
-  // 잘렸으면 '가장 최근 N건' 만 본 것이다 — 앞쪽 정지가 빠졌을 수 있으므로 화면이 그 사실을 말한다.
+  // 잘렸으면 '가장 최근 N건' 만 본 것이다 — v2.719(B1-01): 그 경계(readFrom) 이후만 쟀고 화면이 그 사실을 말한다.
   return { ...r, truncated, readMax: AVAIL_READ_MAX, logs: { enabled: s.enabled, retentionDays: s.retentionDays, minSeverity: s.minSeverity } };
 }
 
 export function registerVmAvailability(api) {
   api.get('/tools/vm-availability', toolsPerm, (req, res) => memoJson(req, res, 'vm-availability', async (snap) => ({
-    ...(await run(req, snap)), initial: snap.initial === true,
+    ...(await runShared(req, snap)), initial: snap.initial === true,
   }), { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}` }));
 
   api.get('/tools/vm-availability.csv', csvPerm, toolsPerm, async (req, res) => {
     try {
-      const r = await run(req, store.get());
+      const r = await runShared(req, store.get());
       const pct = (x) => (x == null ? '' : String(x));
       const lines = [CSV_BOM + csvLine(['VM', 'vCenter', '클러스터', '가동률(%)', '사람이 끈 정지 제외(%)', '정지 시간(분)', '전원 끔 횟수', '사람이 끈 횟수', '게스트 재부팅', '재설정', 'HA 재시작', '전원 켜기 실패', '측정 시작(UTC)', '측정 구간 짧음'])];
       for (const v of r.vms) {

@@ -33,7 +33,8 @@ async function load(req, snap) {
   const days = daysOf(req.query.days);
   const since = Date.now() - days * DAY;
   const db = await getLogsDb();
-  const rows = ids.length ? db.opsEvents({ vcenterIds: ids, since, types: [...LIFE_TYPES] }, LIFE_READ_MAX + 1) : [];
+  // v2.719(감사 S1-04): 시간 조각 + 양보로 읽는다(기간 내 일치 행 전부를 한 문장으로 정렬하지 않는다).
+  const rows = ids.length ? await db.opsEventsAsync({ vcenterIds: ids, since, types: [...LIFE_TYPES] }, LIFE_READ_MAX + 1) : [];
   const truncated = rows.length > LIFE_READ_MAX;
   if (truncated) rows.length = LIFE_READ_MAX;
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));

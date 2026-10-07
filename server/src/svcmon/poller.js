@@ -19,7 +19,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { listTargets, storeRevision } from './store.js';
 import { runBatch, poolStats } from './pool.js';
 import { appendResult, logStats } from './csvlog.js';
-import { ensureSvcmonDemo, isSvcmonDemoTarget, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
+import { ensureSvcmonDemo, splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
 // v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
@@ -56,6 +56,15 @@ let lastSweepTs = 0;
 let lastSweepMs = 0;
 let lastCount = 0;
 let timer = null;
+// v2.719(감사 R1-01): live 모드에서 건너뛴 데모 대상 점검 수 — 조용히 빼지 않고 상태·콘솔에 밝힌다.
+// 0 인 틱에는 지우지 않는다(대상마다 만기가 달라 틱마다 개수가 흔들린다) — at 이 마지막으로 건너뛴 시각이다.
+let demoSkipped = { lastCount: 0, total: 0, at: null, reason: '' };
+let demoSkipWarned = false;
+export function noteDemoSkipped(n, at = Date.now()) {
+  if (!(n > 0)) return;
+  if (!demoSkipWarned) { demoSkipWarned = true; console.warn(`[svcmon] 데이터 소스가 live 라 데모 대상(배치 mock-demo) 점검 ${n}개를 건너뜁니다 — 필요 없으면 Monitoring 에서 삭제하세요.`); }
+  demoSkipped = { lastCount: n, total: demoSkipped.total + n, at, reason: 'live 모드 — 데모 대상(배치 mock-demo)은 점검하지 않습니다' };
+}
 
 export function getResults() { return results; }
 
@@ -129,6 +138,7 @@ export function pollerStats() {
     // 이 둘이 0 이 아니면 '등록한 주기로 돌지 않는다'는 뜻이다(화면·엣지 보고에 노출).
     overdueSkipped,
     maxLagMs,
+    demoSkipped: { ...demoSkipped },   // v2.719(감사 R1-01)
     scanCursor: cursor,
     pool: poolStats(),
     log: logStats(),
@@ -198,11 +208,11 @@ async function sweep(force = false) {
     for (const { test } of due) nextDue.set(test.id, now + test.intervalSec * 1000);
 
     // v2.716: 데모(mock) 대상은 네트워크에 나가지 않고 합성 결과를 쓴다 — 사람이 등록한 대상은 예전처럼 실제로 점검한다.
-    const live = due.filter(({ target }) => !isSvcmonDemoTarget(target));
+    // v2.719(감사 R1-01·R2-02): live 모드의 데모 대상(배치 mock-demo — 합성 주소)은 점검하지 않고 건너뛴 개수를 상태에 남긴다.
+    const { live, demo, skipped } = splitSvcmonDue(due);
+    noteDemoSkipped(skipped.length, now);
     const out = live.length ? await runBatch(live.map(({ test, host }) => ({ test, host }))) : [];
-    for (const { test, host, target } of due) {
-      if (isSvcmonDemoTarget(target)) out.push({ testId: test.id, ...demoSvcmonResult(test, host) });
-    }
+    for (const { test, host } of demo) out.push({ testId: test.id, ...demoSvcmonResult(test, host) });
     const byId = new Map(out.map((r) => [r.testId, r]));
     const ts = Date.now();
     // 결과 반영은 수천 건이 한꺼번에 몰린다 — 통째로 돌리면 이 동기 루프가 이벤트 루프를

@@ -68,7 +68,9 @@ async function collectOne(dev) {
   const pre = full.vfId ? `setcontext ${Number(full.vfId)}; ` : '';
   const captureMs = Math.max(3000, st.sampleSeconds * 1000);
   // v2.708 데모(mock): 장비에 접속하지 않는다 — 결정적 합성 처리량(바이트/초).
-  const r = isMockMode()
+  // v2.719(감사 R2-03·B2-01): 합성은 데모 장비(mock-san-)에만 — 사람이 등록한 스위치는 mock 모드에서도 예전처럼 SSH 로 수집한다
+  //   (합성 처리량이 실장비 id 로 sanswitch-perf.db 에 실측처럼 쌓이지 않게).
+  const r = (isMockMode() && isSanDemoId(full.id || dev.id))
     ? await (async () => {
       const { store } = await import('../store.js');
       const ports = sanDemoPortBps(sanDemoLayoutFor(full, store.get()), Date.now());
@@ -116,7 +118,12 @@ export async function pollPerfOnce({ force = false } = {}) {
   let collected = 0; let failed = 0; let authStopped = 0; const errors = [];
   try {
     // v2.708: live 는 데모 장비(mock-san-*)를 건너뛴다 — 지어낸 주소로 SSH 를 열지 않게.
-    const devices = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
+    // v2.719(감사 B2-01): 저장 설정이 꺼져 있는데 데모(demoOn)로 돌고 있으면 **데모 장비만** 수집한다 — 사람이 등록한
+    //   장비를 데모 때문에 켜진 것처럼 수집하지 않는다(수동 force 는 예전 그대로 전부). 뺀 대수는 notEnabled 로 밝힌다.
+    const all = devicesForThisNode().filter((d) => isMockMode() || !isSanDemoId(d.id));
+    const demoOnly = !force && st.enabled !== true;
+    const devices = demoOnly ? all.filter((d) => isSanDemoId(d.id)) : all;
+    const notEnabled = all.length - devices.length;
     await pool(devices, CONCURRENCY, async (d) => {
       // v2.590(감사 F2): 인증 실패로 멈춘 장비는 **주기 수집에서만** 건너뛴다(`force` = 수동 실행 — 막지 않는다).
       // 기본 수집 폴러와 같은 정지 기록이다 — 그쪽이 멈췄으면 여기서도 같은 계정으로 로그인하지 않는다.
@@ -146,7 +153,7 @@ export async function pollPerfOnce({ force = false } = {}) {
         });
       } finally { _inFlight.delete(String(d.id)); }
     });
-    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5) };
+    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5), ...(notEnabled ? { notEnabled } : {}) };
     // 엣지(v2.423): 수집 직후 중앙으로 중계 — push 타이머를 기다리면 최대 한 주기(기본 5분)가 더 걸린다.
     if (collected && config.agent.centralUrl && config.agent.centralToken) pushPerfNow().catch(() => {});
     return { ok: true, ..._last };

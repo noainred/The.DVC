@@ -18,7 +18,7 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { recordSnapshot } from './db.js';
 import { pollMs, startAdaptiveTimer } from './intervals.js';
 import { emptySnapshot, summarize } from './types.js';
-import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts, readAlertKeys } from './thresholds.js';
+import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts, readAlertKeys, deviceOfAlertKey } from './thresholds.js';
 import { loadAlertConfig, notify } from '../alerts.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 import { isMockMode } from '../mock/demo/flags.js';
@@ -49,9 +49,12 @@ const _inFlight = new Set();          // v2.479(감사 도메인 B-3): 같은 �
  * @param {{onTrace?: Function, periodic?: boolean}} [opts] periodic — 주기 수집(폴러). v2.590: 인증 실패로 멈춘
  *   장비는 **주기 수집에서만** 건너뛴다. 수동 '지금 수집'(기본값 false)은 막지 않는다.
  */
-export async function collectDeviceNow(deviceId, { onTrace = null, periodic = false } = {}) {
+export async function collectDeviceNow(deviceId, { onTrace = null, periodic = false, demoOnly = false } = {}) {
   const dev = getDeviceWithSecret(deviceId);
   if (!dev) return { ok: false, reason: '없는 장비입니다.' };
+  // v2.719(감사 R1-06): 데모 계정의 '안전한 실행' 은 데모(mock-) 장비만 다시 만든다 — 사람이 등록한 PDU 에
+  //   실제 SSH 로그인을 반복시키지 않게(수동 실행은 인증 정지도 넘으므로 연타가 곧 로그인 시도다).
+  if (demoOnly && !isDemoId(dev.id)) return { ok: false, skipped: true, demoOnly: true, reason: '데모 계정은 데모(mock) 장비만 수집합니다.' };
   // v2.708: 데모(mock-) 장비는 live/auto 에서 접속하지 않는다(합성 주소로 SSH 를 열지 않게).
   // 데모 장비(mock-)만 합성한다 — mock 모드라도 사람이 등록한 장비는 예전처럼 수집한다(기존 동작 불변).
   const demo = isMockMode() && isDemoId(dev.id);
@@ -136,7 +139,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace
  * 한 주기: 이 노드가 맡은 장비 전부를 동시성 제한 아래 수집.
  * @param {{manual?: boolean}} [opts] manual — 관리자 '전체 수집'(인증 실패 정지 장비도 1회 시도한다 — v2.590).
  */
-export async function pollOnce({ manual = false } = {}) {
+export async function pollOnce({ manual = false, demoOnly = false } = {}) {
   if (_running) return { ok: false, reason: '이미 수집 중입니다.', running: true };
   // v2.708: mock 모드는 등록부가 비어 있으면 데모 PDU 를 시드한다(한 번만). live 는 데모(mock-) 장비를 건너뛴다.
   if (isMockMode()) { try { await ensurePduDemo(); } catch (e) { console.warn(`[pdu] 데모 시드 실패: ${e.message}`); } }
@@ -149,13 +152,18 @@ export async function pollOnce({ manual = false } = {}) {
     for (const id of gone) _snapshots.delete(id);
     if (gone.length) forgetDeviceAlerts(gone);   // 없어진 장비를 '정상 복귀' 로 알리지 않는다
   }
+  // v2.719(감사 R1-06): 데모 계정 요청은 데모 장비만 수집한다(사람 등록 장비는 건너뛰고 개수를 밝힌다).
+  //   스냅샷 정리는 전체 목록 기준이라 위에서 끝냈다(건너뛴 장비의 직전 스냅샷을 지우지 않는다).
+  const targets = demoOnly ? devices.filter((d) => isDemoId(d.id)) : devices;
+  const skippedNonDemo = devices.length - targets.length;
+  if (!targets.length) { _last = { ..._last, at: Date.now(), ok: 0, fail: 0 }; return { ok: true, devices: 0, ...(demoOnly ? { skippedNonDemo } : {}) }; }
   if (!devices.length) { _last = { ..._last, at: Date.now(), ok: 0, fail: 0 }; return { ok: true, devices: 0 }; }
   _running = true;
   const started = Date.now();
   let ok = 0, fail = 0, authStopped = 0;
   try {
     // v2.575 IMP-08: 동시성 풀 단일 소스.
-    await poolRun(devices, CONCURRENCY, async (d) => {
+    await poolRun(targets, CONCURRENCY, async (d) => {
       const r = await collectDeviceNow(d.id, { periodic: !manual });
       // 정지로 건너뛴 장비는 실패로 세지 않는다(매 주기 '실패 N대' 가 새 장애처럼 보인다 — 스토리지 v2.528).
       if (r.ok) ok++; else if (r.skipped && r.authStopped) authStopped++; else fail++;
@@ -164,7 +172,7 @@ export async function pollOnce({ manual = false } = {}) {
     // 아직 수집 안 된 장비를 '위반 해소'로 잘못 읽는다(diffAlerts 는 전체 위반 집합을 본다).
     await evaluateAndNotify();
     _last = { at: Date.now(), ok, fail, authStopped, durationMs: Date.now() - started };
-    return { ok: true, devices: devices.length, collected: ok, failed: fail, authStopped };
+    return { ok: true, devices: targets.length, collected: ok, failed: fail, authStopped, ...(demoOnly ? { skippedNonDemo } : {}) };
   } finally { _running = false; }
 }
 
@@ -187,12 +195,25 @@ async function evaluateAndNotify() {
     const cfg = loadAlertConfig();
     const { fire, resolve, dropped } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000, heldDeviceIds, readKeys });
     if (dropped?.length) console.warn(`[pdu] 값을 오래 읽지 못한 경보 ${dropped.length}건을 해소 알림 없이 끊었습니다(복구가 아니라 확인 불가): ${dropped.slice(0, 5).join(', ')}`);
-    for (const a of [...fire, ...resolve]) {
+    // v2.719(감사 R1-04): 데모(mock-) 장비의 경보는 상태(diffAlerts)만 남기고 실제 알림 채널로 보내지 않는다
+    //   (partfault demoOnly 와 같은 가드 — 데모 데이터는 실제 채널에 닿지 않는다).
+    const { send, suppressed } = splitDemoAlerts([...fire, ...resolve]);
+    _demoSuppressed += suppressed;
+    for (const a of send) {
       await notify(a, cfg).catch(() => {}); // 알림 실패가 수집을 막지 않는다
     }
   } catch (e) {
     console.error('[pdu] 임계치 평가 실패:', e.message);
   }
+}
+
+let _demoSuppressed = 0;
+/** v2.719(감사 R1-04): 알림 목록을 '보낼 것' 과 '데모라 보내지 않을 것' 으로 나눈다(순수 — 테스트 고정). */
+export function splitDemoAlerts(alerts) {
+  const send = [];
+  let suppressed = 0;
+  for (const a of alerts || []) { if (isDemoId(deviceOfAlertKey(a?.key))) suppressed++; else send.push(a); }
+  return { send, suppressed };
 }
 
 export function startPduPoller() {
@@ -203,7 +224,7 @@ export function startPduPoller() {
 }
 
 export function pduPollerStatus() {
-  return { running: _running, last: _last, intervalMs: pollMs(), concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS, ...(pduDemoActive(devicesForThisNode()) ? { demo: true } : {}) };
+  return { running: _running, last: _last, intervalMs: pollMs(), concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS, ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}), ...(pduDemoActive(devicesForThisNode()) ? { demo: true } : {}) };
 }
 
 /** 이 노드가 들고 있는 최근 스냅샷(중앙 직접 수집분 + 엣지 로컬분). */
@@ -215,4 +236,4 @@ export function forgetDevices(ids) {
   return gone.length;
 }
 export function getLocalSnapshot(id) { return _snapshots.get(id) || null; }
-export function _resetForTest() { _snapshots.clear(); _running = false; _last = { at: null, ok: 0, fail: 0, durationMs: null }; authGuard._resetForTest(); }
+export function _resetForTest() { _snapshots.clear(); _running = false; _last = { at: null, ok: 0, fail: 0, durationMs: null }; authGuard._resetForTest(); _demoSuppressed = 0; }
