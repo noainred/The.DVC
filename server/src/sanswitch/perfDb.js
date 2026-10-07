@@ -22,6 +22,9 @@ import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { loadPerfSettings } from './perfSettings.js';
+import { isMockMode } from '../mock/demo/flags.js';
+import { numOrNull } from '../util/numOrNull.js';
+import { isDemoPerfQuery, demoStorageMulti, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
 import { createYielder } from '../util/timeSlice.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 const lockRetry = createLockRetry();
 
@@ -123,8 +126,10 @@ export async function metaFor(deviceIds = []) {
 
 /** 각 장비의 최신 표본 시각(중앙 화면 '엣지 마지막 반영' 표시용). → Map(deviceId → ts) */
 export async function latestSampleTs(deviceIds = []) {
-  const db = await open();
   const out = new Map();
+  // v2.715 목업: 데모 장비는 표본을 저장하지 않고 조회 때 만든다 — '마지막 표본' 은 지금이다(수집이 멈췄다는 거짓 진단 방지).
+  if (isMockMode()) for (const id of deviceIds) if (String(id).startsWith('mock-san-')) out.set(String(id), Date.now());
+  const db = await open();
   if (!db || !deviceIds.length) return out;
   const ids = [...new Set(deviceIds.map(String))].slice(0, 500);
   // v2.583(감사 확정 — 반증 에이전트 실측 8.85M 행): `IN (...) GROUP BY device_id` + MAX(ts) 는 SQLite 의 min/max
@@ -276,7 +281,7 @@ export function sliceBounds(since, until, bucketMs) {
  * (device, port, b) 버킷 집계를 장비·조각 단위로 나눠 실행한다. 반환 행 모양은 예전 단일 문장과 같다.
  * @param {{ ports?: number[]|null, lastTs?: boolean, yielder?: Function }} opt
  */
-export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports = null, lastTs = false, yielder = createYielder(15), sort = true } = {}) {
+export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports = null, lastTs = false, yielder = createYielder(15), sort = true, gen = null } = {}) {
   const pf = ports?.length ? ` AND port IN (${ports.map(() => '?').join(',')})` : '';
   const stmt = db.conn.prepare(
     `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps${lastTs ? ', MAX(ts) AS last_ts' : ''}
@@ -290,6 +295,7 @@ export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports =
       const part = stmt.all(String(id), lo, hi, ...(ports || []));
       for (const r of part) rows.push(r);
       await yielder();
+      if (gen != null) checkCancel(gen);   // v2.715: 감시가 엔진을 재시작했으면 여기서 멈춘다
     }
   }
   // v2.713: 정렬이 필요 없는 호출자(storageSeriesMulti — 버킷 목록을 따로 정렬한다)는 sort:false. 데모 SAN 86대·24h(33만 행)에서
@@ -307,7 +313,29 @@ const PERF_QUERY_TTL_MS = Math.max(0, Number(process.env.SANSW_PERF_QUERY_TTL_MS
 const _qcache = new Map();          // key → { at, promise }
 let _chain = Promise.resolve();
 let _queryStats = { runs: 0, joined: 0, cached: 0, maxQueue: 0, queued: 0, lastMs: null, maxMs: 0 };
-export function perfQueryStats() { return { ..._queryStats, ttlMs: PERF_QUERY_TTL_MS }; }
+/*
+ * v2.715 — 조회 감시(사용자 지시 "SAN 사용량 조회가 1분이 넘어가면 그 서비스를 재시작해 전체 서비스를 복원"):
+ *   한 조회가 PERF_QUERY_MAX_MS(기본 60초)를 넘으면 **조회 엔진만** 재시작한다 — 그 조회를 실패로 끝내 기다리던 요청에
+ *   사유를 돌려주고, 취소 세대(_cancelGen)를 올려 진행 중인 집계가 다음 양보 지점에서 멈추게 하고, 기억한 결과를 버리고,
+ *   DB 핸들을 다시 연다. 뒤에 줄 선 다른 조회는 곧바로 이어서 돈다. 포탈 프로세스 전체를 재시작하지 않는다 — 집계는 양보하며
+ *   돌기 때문에 다른 화면은 살아 있고, 프로세스 재시작은 모든 사용자의 세션·폴러를 함께 끊는다.
+ */
+// 빈 값·숫자 아님·범위(10초~1시간) 밖은 기본 60초(Number('') === 0 이 시한 0 이 되지 않게 — TIM2605-04 규약).
+const _qmEnv = numOrNull(process.env.SANSW_PERF_QUERY_MAX_MS ?? 60000);
+const PERF_QUERY_MAX_MS = _qmEnv != null && _qmEnv >= 10_000 && _qmEnv <= 3_600_000 ? Math.round(_qmEnv) : 60_000;
+let _cancelGen = 0;
+let _restarts = { count: 0, lastAt: null, lastKey: null, lastMs: null };
+/** 진행 중인 집계가 양보 지점마다 부른다 — 감시가 엔진을 재시작했으면 그 자리에서 멈춘다. */
+function checkCancel(gen) { if (gen !== _cancelGen) { const e = new Error('조회 엔진이 재시작되어 이 집계를 멈췄습니다'); e.cancelled = true; throw e; } }
+function restartEngine(key, ms) {
+  _cancelGen += 1;
+  _qgen += 1; _qcache.clear();
+  _restarts = { count: _restarts.count + 1, lastAt: Date.now(), lastKey: String(key).slice(0, 200), lastMs: ms };
+  try { if (_db && _db !== 'unavailable') _db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ }
+  _db = null;
+  console.warn(`[sanswitch-perf] 사용량 조회가 ${Math.round(ms / 1000)}초를 넘어 조회 엔진을 재시작했습니다(${_restarts.count}회째) — 대기 중인 다른 조회는 이어서 돕니다.`);
+}
+export function perfQueryStats() { return { ..._queryStats, ttlMs: PERF_QUERY_TTL_MS, maxQueryMs: PERF_QUERY_MAX_MS, restarts: { ..._restarts } }; }
 function heavyQuery(key, fn) {
   const now = Date.now();
   for (const [k, v] of _qcache) if (now - v.at > PERF_QUERY_TTL_MS && v.done) _qcache.delete(k);
@@ -318,7 +346,17 @@ function heavyQuery(key, fn) {
   const run = _chain.then(async () => {
     _queryStats.queued--; _queryStats.runs++;
     const t0 = Date.now();
-    try { return await fn(); } finally {
+    const gen = _cancelGen;
+    let timer = null;
+    const watchdog = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        restartEngine(key, Date.now() - t0);
+        const e = new Error(`SAN 사용량 조회가 ${Math.round(PERF_QUERY_MAX_MS / 1000)}초를 넘어 조회 엔진을 재시작했습니다. 잠시 뒤 다시 시도하세요.`);
+        e.code = 'query-restarted'; reject(e);
+      }, PERF_QUERY_MAX_MS);
+    });
+    try { return await Promise.race([fn(gen), watchdog]); } finally {
+      clearTimeout(timer);
       const ms = Date.now() - t0; _queryStats.lastMs = ms; _queryStats.maxMs = Math.max(_queryStats.maxMs, ms);
     }
   });
@@ -333,6 +371,17 @@ function heavyQuery(key, fn) {
 let _qgen = 0;
 export function invalidatePerfQueries() { _qgen += 1; _qcache.clear(); }
 const qkey = (name, o) => JSON.stringify([name, o]);
+
+/** v2.715: 목업 데모 장비의 포트 정보(장비×포트 수천 행 — 작다). DB 를 못 열면 빈 배열(그러면 시리즈도 빈다). */
+async function demoMeta(deviceIds) {
+  const db = await open();
+  if (!db) return [];
+  const ids = deviceIds.map(String);
+  const out = [];
+  const q = db.conn.prepare('SELECT device_id, port, attached_name, speed, port_type FROM port_meta WHERE device_id = ?');
+  for (const id of ids) for (const r of q.all(id)) out.push(r);
+  return out;
+}
 
 export function rangeOf({ hours = 24, from = null, to = null, points = 120 } = {}) {
   const now = Date.now();
@@ -355,11 +404,15 @@ export function rangeOf({ hours = 24, from = null, to = null, points = 120 } = {
  * @returns { buckets:[ts...], series:[{port, name, speed, avg[], max}], bucketMs }
  */
 export async function portSeries(deviceId, { hours = 24, ports = null, points = 120, from = null, to = null } = {}) {
-  return heavyQuery(qkey('port', { deviceId: String(deviceId), hours, ports, points, from, to }), async () => {
+  if (isDemoPerfQuery(isMockMode(), [deviceId])) {
+    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+    return demoPortSeries(String(deviceId), await demoMeta([deviceId]), { since, until, bucketMs, ports });
+  }
+  return heavyQuery(qkey('port', { deviceId: String(deviceId), hours, ports, points, from, to }), async (gen) => {
     const db = await open();
     if (!db) return { buckets: [], series: [], bucketMs: 0, unavailable: true };
     const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
-    const rows = await bucketAgg(db, [String(deviceId)], since, until, bucketMs, { ports });   // v2.693: 조각 + 양보
+    const rows = await bucketAgg(db, [String(deviceId)], since, until, bucketMs, { ports, gen });   // v2.693: 조각 + 양보
     return { ...shape(db, deviceId, rows, bucketMs, since), until };
   });
 }
@@ -393,13 +446,17 @@ function shape(db, deviceId, rows, bucketMs, since) {
  */
 export async function storageSeries(deviceId, opt = {}) {
   const { hours = 24, points = 120, from = null, to = null } = opt;
-  return heavyQuery(qkey('storage', { deviceId: String(deviceId), hours, points, from, to }), () => storageSeriesInner(deviceId, { hours, points, from, to }));
+  if (isDemoPerfQuery(isMockMode(), [deviceId])) {
+    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+    return demoStorageOne(await demoMeta([deviceId]), { since, until, bucketMs, storageKey });
+  }
+  return heavyQuery(qkey('storage', { deviceId: String(deviceId), hours, points, from, to }), (gen) => storageSeriesInner(deviceId, { hours, points, from, to, gen }));
 }
-async function storageSeriesInner(deviceId, { hours = 24, points = 120, from = null, to = null } = {}) {
+async function storageSeriesInner(deviceId, { hours = 24, points = 120, from = null, to = null, gen = null } = {}) {
   const db = await open();
   if (!db) return { buckets: [], series: [], unavailable: true };
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
-  const rows = await bucketAgg(db, [String(deviceId)], since, until, bucketMs);   // v2.693: 조각 + 양보
+  const rows = await bucketAgg(db, [String(deviceId)], since, until, bucketMs, { gen });   // v2.693: 조각 + 양보
   const metaRows = db.conn.prepare('SELECT port, attached_name FROM port_meta WHERE device_id = ?').all(String(deviceId));
   const groupOf = new Map(metaRows.map((m) => [Number(m.port), storageKey(m.attached_name)]));
 
@@ -465,10 +522,14 @@ export function storageKey(name) {
  */
 export async function storageSeriesMulti(deviceIds = [], opt = {}) {
   const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null } = opt;
+  if (isDemoPerfQuery(isMockMode(), deviceIds)) {
+    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+    return demoStorageMulti(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs() });
+  }
   const key = qkey('multi', { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null });
-  return heavyQuery(key, () => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs }));
+  return heavyQuery(key, (gen) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, gen }));
 }
-async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null } = {}) {
+async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, gen = null } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
@@ -477,7 +538,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   // v2.713: 아래 행·시리즈 조립도 양보한다 — 데모 모드 SAN 86대·24h(33만 행)에서 조립만 양보 없이 약 2초 멈췄다(stallwatch 실측,
   //   멈춘 지점 이 함수). 같은 yielder 를 조회와 조립이 같이 쓴다.
   const yielder = createYielder(15);
-  const rows = await bucketAgg(db, deviceIds.map(String), since, until, bucketMs, { lastTs: true, yielder, sort: false });
+  const rows = await bucketAgg(db, deviceIds.map(String), since, until, bucketMs, { lastTs: true, yielder, sort: false, gen });
   const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
@@ -505,7 +566,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const byGroup = new Map();
   for (let ri = 0; ri < rows.length; ri++) {
     const r = rows[ri];
-    if ((ri & 1023) === 0) await yielder();
+    if ((ri & 1023) === 0) { await yielder(); if (gen != null) checkCancel(gen); }
     const st = storageOf.get(`${r.device_id}|${Number(r.port)}`) || '(미확인)';
     // groupOf 가 주어지면(법인별 분리) 같은 어레이라도 **법인마다 따로** 집계한다 —
     // 복수 법인을 한꺼번에 보면서도 법인 구분이 사라지지 않게(사용자 요구, v2.414).
@@ -524,6 +585,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const series = [];
   for (const s of byGroup.values()) {
     await yielder();
+    if (gen != null) checkCancel(gen);
     const n = buckets.length;
     const sum = new Array(n).fill(null);
     const peak = new Array(n).fill(null);

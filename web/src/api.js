@@ -430,12 +430,14 @@ export async function fetchMe() {
 // 폴링용 조건부 fetch — ETag(If-None-Match) 지원. 서버가 캐시 헤더(ETag)를 주는 무거운
 // 엔드포인트는 변동 없으면 304(본문 없음)를 받아 대역폭/직렬화를 아낀다. ETag 미지원 응답은
 // 기존과 동일하게 전체 본문을 받는다(하위호환). 반환 { notModified, data, etag }.
-async function pollFetch(path, params, signal, etag) {
+async function pollFetch(path, params, signal, etag, opts = {}) {
   const qs = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && v !== null)
   ).toString();
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
-  const retries = 2;
+  // v2.715: 오래 걸리는 것이 정상인 조회(SAN 트래픽 합계 — 서버 감시 60초)는 시한·재시도를 호출자가 정한다. 기본은 예전 그대로.
+  const retries = Number.isInteger(opts.retries) && opts.retries >= 0 ? opts.retries : 2;
+  const timeoutMs = opts.timeoutMs > 0 ? opts.timeoutMs : GET_TIMEOUT_MS;
   const perfId = startReq(path, 'GET');   // v2.498: 폴링 요청도 진행 중 목록에 보인다
   try {
   let lastErr;
@@ -444,7 +446,7 @@ async function pollFetch(path, params, signal, etag) {
     try {
       res = await fetch(url, {
         headers: authHeaders(ridHeader(perfId, etag ? { 'If-None-Match': etag } : {})),
-        signal: withTimeout(signal, GET_TIMEOUT_MS),
+        signal: withTimeout(signal, timeoutMs),
         cache: 'no-store', // 브라우저 캐시 대신 우리가 ETag/304를 직접 구동(결정적)
       });
     } catch (err) {
@@ -494,7 +496,7 @@ export const ensurePerfClientConfig = () => {
 /** Poll an endpoint on an interval and expose {data, error, loading}.
  *  최적화: 백그라운드 탭이면 폴링 일시정지(가시화 시 즉시 갱신), 주기에 ±10% 지터(동시 사용자
  *  부하 분산), ETag/304로 변동 없는 응답은 본문 미수신. in-flight 가드·언마운트 취소 유지. */
-export function usePolling(path, params = {}, intervalMs = 15_000) {
+export function usePolling(path, params = {}, intervalMs = 15_000, fetchOpts = null) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   // 권한 거부(403) 정보 — 있으면 뷰가 '접근 제어 안내'로 렌더할 수 있다(ErrorBox 가 자동 처리하므로
@@ -523,7 +525,7 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
       if (inFlight || !active || forbidden) return;
       inFlight = true;
       try {
-        const r = await pollFetch(path, savedParams.current, controller.signal, lastEtag);
+        const r = await pollFetch(path, savedParams.current, controller.signal, lastEtag, fetchOpts || {});
         if (active) {
           lastEtag = r.etag || lastEtag;
           if (!r.notModified) setData(r.data); // 304면 직전 데이터 유지(변동 없음)

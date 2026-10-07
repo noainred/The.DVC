@@ -71,7 +71,9 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
   const [hours, setHours] = useState(24);
   const params = { hours };
   if (datacenterIds.length) params.datacenterId = datacenterIds.join(',');
-  const { data, error } = usePolling('/tools/sanswitch/perf/traffic-total', params, 60_000);
+  // v2.715: 이 조회는 오래 걸릴 수 있다(서버 감시 60초 — 넘기면 조회 엔진을 재시작하고 사유를 돌려준다). 화면은 그보다 길게 기다리고
+  //   재시도하지 않는다(재시도하면 같은 무거운 조회를 다시 줄 세운다).
+  const { data, error } = usePolling('/tools/sanswitch/perf/traffic-total', params, 60_000, { timeoutMs: 90_000, retries: 0 });
   const s = trafficSummary(data, { selected });
   const rows = trafficChartRows(data);
   const avgG = toGbps(data?.avg);
@@ -92,7 +94,12 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
         </div>
       </div>
       {error && !data ? <div className="muted" style={{ fontSize: 13 }}>트래픽 합계를 불러오지 못했습니다 — {String(error)}</div> : null}
-      {!data && !error ? <div className="muted" style={{ fontSize: 13 }}>불러오는 중…</div> : null}
+      {!data && !error ? (
+        <div className="san2-loading-alert" role="status">
+          SAN 스위치 사용량을 불러오는 중입니다 — <b>최소 1분 이상</b> 기다려야 할 수 있습니다.
+          <span className="san2-loading-sub">1분을 넘기면 서버가 조회 엔진을 스스로 재시작하고 이 자리에 사유를 알려 드립니다. 그동안 다른 화면은 계속 쓸 수 있습니다.</span>
+        </div>
+      ) : null}
       {data && (s.state === 'off' || s.state === 'unavailable') ? (
         <div style={{ fontSize: 14 }}>
           {s.sub}
