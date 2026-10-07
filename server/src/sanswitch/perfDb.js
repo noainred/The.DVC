@@ -276,7 +276,7 @@ export function sliceBounds(since, until, bucketMs) {
  * (device, port, b) 버킷 집계를 장비·조각 단위로 나눠 실행한다. 반환 행 모양은 예전 단일 문장과 같다.
  * @param {{ ports?: number[]|null, lastTs?: boolean, yielder?: Function }} opt
  */
-export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports = null, lastTs = false, yielder = createYielder(15) } = {}) {
+export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports = null, lastTs = false, yielder = createYielder(15), sort = true } = {}) {
   const pf = ports?.length ? ` AND port IN (${ports.map(() => '?').join(',')})` : '';
   const stmt = db.conn.prepare(
     `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps${lastTs ? ', MAX(ts) AS last_ts' : ''}
@@ -292,7 +292,9 @@ export async function bucketAgg(db, deviceIds, since, until, bucketMs, { ports =
       await yielder();
     }
   }
-  rows.sort((x, y) => Number(x.b) - Number(y.b));
+  // v2.713: 정렬이 필요 없는 호출자(storageSeriesMulti — 버킷 목록을 따로 정렬한다)는 sort:false. 데모 SAN 86대·24h(33만 행)에서
+  //   이 정렬 하나가 양보 없이 약 0.3초를 먹었다.
+  if (sort) rows.sort((x, y) => Number(x.b) - Number(y.b));
   return rows;
 }
 
@@ -472,7 +474,10 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
   const ph = deviceIds.map(() => '?').join(',');
   // v2.693: 장비·조각 단위 + 양보(예전 IN(전 장비) × 전 기간 한 문장이 운영 멈춤 후보였다 — 위 bucketAgg 머리말).
-  const rows = await bucketAgg(db, deviceIds.map(String), since, until, bucketMs, { lastTs: true });
+  // v2.713: 아래 행·시리즈 조립도 양보한다 — 데모 모드 SAN 86대·24h(33만 행)에서 조립만 양보 없이 약 2초 멈췄다(stallwatch 실측,
+  //   멈춘 지점 이 함수). 같은 yielder 를 조회와 조립이 같이 쓴다.
+  const yielder = createYielder(15);
+  const rows = await bucketAgg(db, deviceIds.map(String), since, until, bucketMs, { lastTs: true, yielder, sort: false });
   const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
@@ -498,7 +503,9 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const buckets = bucketSet.map((b) => b * bucketMs);
   const idx = new Map(bucketSet.map((b, i) => [b, i]));
   const byGroup = new Map();
-  for (const r of rows) {
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri];
+    if ((ri & 1023) === 0) await yielder();
     const st = storageOf.get(`${r.device_id}|${Number(r.port)}`) || '(미확인)';
     // groupOf 가 주어지면(법인별 분리) 같은 어레이라도 **법인마다 따로** 집계한다 —
     // 복수 법인을 한꺼번에 보면서도 법인 구분이 사라지지 않게(사용자 요구, v2.414).
@@ -514,7 +521,9 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
     if (!cell) { cell = new Map(); s.cells.set(pk, cell); }
     cell.set(idx.get(Number(r.b)), { avg: Math.round(Number(r.avg_bps)), max: Math.round(Number(r.max_bps)), ts: Number(r.last_ts) });
   }
-  const series = [...byGroup.values()].map((s) => {
+  const series = [];
+  for (const s of byGroup.values()) {
+    await yielder();
     const n = buckets.length;
     const sum = new Array(n).fill(null);
     const peak = new Array(n).fill(null);
@@ -544,7 +553,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
     const vals = sum.filter((v) => v != null);
     const pv = peak.filter((v) => v != null);
     const ports = [...s.ports.values()];
-    return {
+    series.push({
       key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
       avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,   // 버킷 평균 합의 평균
       maxTotal: vals.length ? Math.max(...vals) : 0,                                 // 버킷 평균 합의 최댓값
@@ -552,8 +561,9 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
       peakTotal: pv.length ? Math.max(...pv) : 0,                                    // 버킷 피크 합의 최댓값(기간 내 최고 피크)
       // v2.621(감사 DATA-03): 빠진 포트가 있어 그리지 않은 버킷(번호)과 직전 표본으로 채운 (포트×버킷) 칸 수 — 조용히 채우거나 빼지 않는다.
       partial, partialBuckets: partial.length, carriedCells,
-    };
-  }).sort((a, b) => b.avgTotal - a.avgTotal);
+    });
+  }
+  series.sort((a, b) => b.avgTotal - a.avgTotal);
   return { buckets, bucketMs, since, until, series, carryMs: lim };
 }
 
