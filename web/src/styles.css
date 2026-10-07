@@ -84,7 +84,6 @@ body {
 }
 .brand h1 { font-size: 13px; margin: 0; font-weight: 700; letter-spacing: .2px; white-space: nowrap; }
 .brand h1 .bt-strong { font-weight: 700; }
-.brand h1 .bt-dim { font-weight: 500; color: var(--text-dim); }
 /* 업그레이드 진행 중 헤더 배지(v2.458) — 서버 재시작으로 포탈이 멈추는 구간을 빨간 점멸로 알린다. */
 .upgrading-badge { margin-left: 8px; color: #fff; background: #dc2626; border-color: #dc2626 !important; animation: blink-red 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .upgrading-badge { animation: none; } }

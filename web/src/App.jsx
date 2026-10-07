@@ -591,7 +591,7 @@ function Portal({ user, onLogout }) {
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
-            <h1 className="brand-title"><span className="bt-strong">The Davinci</span> <span className="bt-dim">Virtual Platform</span></h1>
+            <h1 className="brand-title"><span className="bt-strong">The Davinci</span></h1>
             {upgrading ? (
               <span className="ver-badge brand-ver upgrading-badge"
                 title={`업그레이드 진행 중 — 서버가 재시작되어 잠시 응답하지 않습니다${health?.latestVersion ? ` (→ v${health.latestVersion})` : ''}`}>
