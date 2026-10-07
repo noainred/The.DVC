@@ -5137,6 +5137,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       개요 카드 원천 오류 원문은 admin + 전체 범위만(R3S-07, memo 키에 역할). ⚠ **R3S-05(범위 관리자의 메일 이력 조회)는 정책 판단이라 남겼다.**
     · 성능: 아키텍처 점검 import 그래프 비동기 빌드(최장 정지 354.9 → 25.5ms — 대신 첫 응답 총시간은 231 → 424ms) · iDRAC 통합 추이 서버 표 30초 memo.
     · ⚠ `routes/publicApi.js` 라우트 본문이 길어지면 `scripts/api-doc.mjs` 가 '인자 목록을 읽지 못한 라우트' 로 멈춘다 — 행·meta 조립을 헬퍼로 뺐다(이번에도 밟았다).
+  - **접속 공지 팝업 · 게시판(v2.722)** — `server/src/bulletin/store.js`(notices.json·board.json, 원자 쓰기·손상 보존·상한 거부) + `routes/api/bulletin.js`
+    (`/notices/*`·`/board/*`, 회귀 `server/test/bulletin2722.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/board/`{Board.jsx,NoticePopup.jsx,bulletinText.js}:
+    · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
+    · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
+    · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
