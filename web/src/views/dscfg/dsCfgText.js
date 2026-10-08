@@ -57,7 +57,8 @@ export function findingDetail(f) {
     case 'ds-overcommit': return `프로비저닝 ${x.pct}%`;
     case 'ds-vmfs-old': return `VMFS ${x.version}`;
     case 'ds-many-vms': return `VM ${x.count}대(기준 ${x.limit}대 초과)`;
-    case 'vsan-partition': return `멤버 ${x.members} · vSAN 호스트 ${x.hosts}`;
+    // v2.727(감사 C-05): hosts 는 멤버 수를 아는 호스트 수다 — 못 읽은 호스트는 판정에서 빠졌고 개수를 함께 말한다.
+    case 'vsan-partition': return `멤버 ${x.members} · vSAN 호스트 ${x.hosts}${x.membersUnknown ? ` · 멤버 수 미확인 ${x.membersUnknown}대 제외` : ''}`;
     case 'vsan-disk-issue': return `${x.count}건${x.hosts?.length ? ` · ${x.hosts.join(', ')}` : ''}`;
     case 'vsan-capacity-high': return `사용률 ${x.pct}%(기준 ${x.limit}%)`;
     default: return '';

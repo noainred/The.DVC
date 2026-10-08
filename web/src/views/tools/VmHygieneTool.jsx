@@ -110,9 +110,11 @@ export default function VmHygieneTool({ scope }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState(null);
+  const [settingsErr, setSettingsErr] = useState(null); // v2.727(감사 E-04): 정책 설정 조회 실패 — 삼키면 패널이 조용히 사라진다
   const [csvBusy, setCsvBusy] = useState(false);
   const [csvErr, setCsvErr] = useState(null);
   const gen = useRef(0);
+  const sgen = useRef(0); // 설정 조회 세대 — 새로고침 → 저장 순서가 뒤집히면 저장 전 값이 보인다
 
   useEffect(() => { setVcId(scope || ''); }, [scope]);
   useEffect(() => { const t = setTimeout(() => setQApplied(q.trim()), 300); return () => clearTimeout(t); }, [q]);
@@ -133,7 +135,14 @@ export default function VmHygieneTool({ scope }) {
     } catch (e) { if (my === gen.current) setError(e); } finally { if (my === gen.current) setLoading(false); }
   }, [vcId, code, sev, qApplied]);
   const loadSettings = useCallback(async () => {
-    try { const r = await fetchJson('/tools/vm-hygiene/settings'); setSettings(r?.settings || null); } catch { setSettings(null); }
+    // v2.727(감사 E-04): 실패를 settingsErr 로 든다 — 예전 `catch { setSettings(null) }` 는 PolicyPanel(설정 없으면 null 렌더)을 통째로
+    //   사라지게 해 '기능이 없어졌다' 로 읽혔다(v2.590 W2 계열). 직전에 읽은 값은 지우지 않는다(마지막으로 읽은 값임을 화면이 말한다).
+    const my = ++sgen.current;
+    try {
+      const r = await fetchJson('/tools/vm-hygiene/settings');
+      if (my !== sgen.current) return;
+      if (r?.settings) { setSettings(r.settings); setSettingsErr(null); } else setSettingsErr(new Error('설정 응답에 settings 가 없습니다'));
+    } catch (e) { if (my === sgen.current) setSettingsErr(e); }
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -224,6 +233,14 @@ export default function VmHygieneTool({ scope }) {
       </div>
       {data.omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>심각도 순 상위 {rows.length.toLocaleString()}대만 표시했습니다 — {data.omitted.toLocaleString()}대는 조건(vCenter·판정·검색)으로 좁혀 보세요.</div>}
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>배지에 마우스를 올리면 조치와 근거가 보입니다. VM 이름을 누르면 VM 상세(구성 점검 칸)가 열립니다.</div>
+      {settingsErr && (
+        <div className="card" style={{ marginTop: 14, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>스냅샷 정책 · 판정 기준</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>정책 설정을 읽지 못했습니다 — 기능이 없어진 것이 아닙니다.{settings ? ' 아래 패널의 값은 마지막으로 읽은 것입니다.' : ''}</div>
+          <ErrorBox error={settingsErr} />
+          <button type="button" className="btn" onClick={loadSettings}>다시 시도</button>
+        </div>
+      )}
       <PolicyPanel settings={settings} notify={data.notify} canWrite={canWrite} onSaved={() => { loadSettings(); load(); }} />
     </div>
   );

@@ -17,10 +17,11 @@
  *  ④ 비활성 서버는 현황 화면과 같이 합계·그룹에서 뺀다(`agg.js aggregate` 규칙을 그대로 쓴다 — 판정 복제 금지).
  */
 import { aggregate, groupsOf } from './agg.js';
+import { DAY_OFFSET_MIN } from '../util/dayKey.js';   // v2.727(감사 C-03): 슬롯 경계는 포탈 오프셋(util/dayKey.js) 하나 — KST 상수 금지
 
 const HOUR = 3_600_000;
-/** 한국 시각 기준(v2.531 `DAY_OFFSET_MIN` 과 같은 이유 — 사람이 세는 오전/오후 경계). */
-const KST_OFFSET_MS = 9 * HOUR;
+/** 포탈 오프셋(기본 KST — v2.531 `DAY_OFFSET_MIN` 과 같은 이유 — 사람이 세는 오전/오후 경계). v2.727: PORTAL_TZ_OFFSET_MIN 을 따른다(기본 540 에서 예전과 같은 값). */
+const TZ_OFFSET_MS = DAY_OFFSET_MIN * 60_000;
 
 /** 기본 적재 간격(사용자 요청 12시간). env 로 1~24시간 사이에서 바꿀 수 있다. */
 export function historyIntervalHours() {
@@ -41,13 +42,13 @@ export function historyRetentionDays() {
 /** 슬롯 번호 — KST 0시·12시(간격 12시간 기준)에 바뀐다. 한 슬롯에 한 번만 적재한다. */
 export function slotOf(ts, intervalHours = historyIntervalHours()) {
   const iv = Math.max(1, Number(intervalHours) || 12) * HOUR;
-  return Math.floor((Number(ts) + KST_OFFSET_MS) / iv);
+  return Math.floor((Number(ts) + TZ_OFFSET_MS) / iv);
 }
 
 /** 슬롯 시작 시각(ms, epoch). */
 export function slotStart(slot, intervalHours = historyIntervalHours()) {
   const iv = Math.max(1, Number(intervalHours) || 12) * HOUR;
-  return Number(slot) * iv - KST_OFFSET_MS;
+  return Number(slot) * iv - TZ_OFFSET_MS;
 }
 
 /** 수집 결과가 '지금 값' 으로 볼 만큼 신선한가의 경계(ms). 폴러 주기 × 3, 최소 30분. */

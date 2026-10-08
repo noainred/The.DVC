@@ -97,7 +97,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
     const hit = protectedByVcName.get(key(v.vcenterId, v.name)) || protectedByNameOnly.get(v.name);
     const item = {
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
-      guestOS: v.guestOS || '', storageGB: v.storageGB || 0,
+      guestOS: v.guestOS || '', storageGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(0 GB 아님)
     };
     if (hit) { protectedList.push({ ...item, lastBackupTs: hit.ts, backupUser: hit.user }); continue; }
     const why = logBlocked || (covered && !covered.has(String(v.vcenterId)) ? 'no-events' : null);
@@ -106,10 +106,11 @@ export function computeUnprotected(vms, rows, opts = {}) {
       undeterminedList.push({ ...item, reason: why });
     } else unprotectedList.push(item);
   }
-  undeterminedList.sort((a, b) => b.storageGB - a.storageGB);
+  const byStorageDesc = (a, b) => (b.storageGB ?? -1) - (a.storageGB ?? -1);   // v2.727(C-01): 값 있는 것 먼저
+  undeterminedList.sort(byStorageDesc);
   const noEventVcenters = covered
     ? [...new Set(undeterminedList.filter((x) => x.reason === 'no-events').map((x) => String(x.vcenterId)))] : [];
-  unprotectedList.sort((a, b) => b.storageGB - a.storageGB);
+  unprotectedList.sort(byStorageDesc);
   protectedList.sort((a, b) => b.lastBackupTs - a.lastBackupTs);
 
   return {

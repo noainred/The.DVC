@@ -12,6 +12,7 @@
  * 게시판은 vCenter 축이 없는 포탈 공용 게시판이라 범위 계정도 같은 글을 본다.
  */
 import { requireRole } from '../../auth/auth.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { pageArgs } from '../../util/pageArgs.js';
@@ -26,12 +27,18 @@ const writers = requireRole('admin', 'operator');
 const noticeFleetOnly = fullScopeOnlyWith('공지는 전 법인 사용자에게 보이므로 전체 범위(vCenter 제한 없는) 관리자만 작성·수정·삭제할 수 있습니다.');
 
 const userOf = (req) => req.user?.username || 'anonymous';
-const isAdmin = (req) => req.user?.role === 'admin';
+/*
+ * v2.727(감사 B-06): 데모 계정(mock)은 요청 문맥 역할이 admin 이지만 authMiddleware 의 demoGuest 판정이 쓰기를 403 으로 막는다 —
+ * 그 계정에 `isAdmin:true`·`canWrite:true`·`canEdit:true` 를 주면 화면이 글쓰기·공지 편집·고정 버튼을 보이고 누르면 403 이 된다
+ * (화면이 거짓말한다). 표시 플래그와 서버 판정(createPost 의 pinned·canModify)을 같은 함수로 계산한다.
+ */
+const isAdmin = (req) => req.user?.role === 'admin' && !isDemoGuest(req.user);
+const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 const ID_RE = /^[a-f0-9]{16}$/;
 
-/** 저장소 오류(status 가 붙은 것)를 응답으로 — 그 밖은 전역 처리기로. */
+/** 저장소 오류(status 가 붙은 것)를 응답으로 — 그 밖은 전역 처리기로. `e.extra`(v2.727 board-full 의 bytes·max)는 그대로 싣는다. */
 function fail(res, e, next) {
-  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}) });
+  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
   return next(e);
 }
 const badId = (res) => res.status(404).json({ ok: false, reason: '없는 항목입니다' });

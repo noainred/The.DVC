@@ -64,8 +64,10 @@ test('① normalizeMenu — 모양·상한·중복·빈 그룹', () => {
   assert.throws(() => store.normalizeMenu({ groups: Array.from({ length: 41 }, (_, i) => ({ id: `g${i}`, tab: `t${i}` })) }), /최대 40개/);
   assert.throws(() => store.normalizeMenu({ groups: [{ id: 'a', children: Array.from({ length: 401 }, (_, i) => ({ tool: `k${i}` })) }] }), /최대 400개/);
   assert.throws(() => store.normalizeMenu({ groups: [{ id: 'a', children: [] }] }), /하나도 없습니다/);
+  // v2.727(감사 A-07): 라벨 41자는 자르지 않고 400 — 40자는 그대로 받는다.
+  assert.throws(() => store.normalizeMenu({ groups: [{ id: 'a', label: 'x'.repeat(41), tab: 'vms' }] }), /최대 40자/);
   const r = store.normalizeMenu({ groups: [
-    { id: 'server', label: 'x'.repeat(80), children: [{ tab: 'vms' }, { tab: 'vms' }, { tool: 'gpu' }] },
+    { id: 'server', label: 'x'.repeat(40), children: [{ tab: 'vms' }, { tab: 'vms' }, { tool: 'gpu' }] },
     { id: 'empty', children: [] },
     { id: 'again', children: [{ tool: 'gpu' }] },
     { id: 'tools', tab: 'tools' },
@@ -155,8 +157,10 @@ test('④ 유지 배포는 직접 만든 메뉴를 두고, 강제 배포는 prev
   g = await call('view', 'GET', '/user-menu');
   assert.equal(g.j.mine, null, 'force 는 내 메뉴를 지운다');
   assert.equal(g.j.prev.mode, 'force');
-  assert.equal(g.j.prev.by, 'noainred');
+  assert.equal(g.j.prev.by, undefined, 'v2.727(A-10): viewer 응답에는 배포자 계정명을 싣지 않는다(admin 쪽 확인은 audit2727a)');
+  assert.equal(g.j.distributed.by, undefined);
   const sup = await call('sup', 'GET', '/user-menu');
+  assert.equal(sup.j.distributed.by, 'noainred', 'admin 역할은 배포자를 본다');
   assert.ok(sup.j.mine, '배포자 자신의 메뉴는 그대로');
   // 복원
   const rs = await call('view', 'POST', '/user-menu/restore-prev');

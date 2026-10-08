@@ -10,6 +10,8 @@
  *    가정값(`vsanTibPerCore`)을 화면이 밝히고, 사람이 고른다.
  *  · vCenter 가 보고한 코어 단위 라이선스(costUnit 'core')의 사용량과 나란히 둔다 — 둘이 다르면 그 사실만 말한다.
  */
+import { numOrNull } from '../util/numOrNull.js';   // v2.727(감사 C-02)
+
 export const MIN_CORES_PER_SOCKET = 16;
 export const VSAN_TIB_PER_CORE = Object.freeze({ none: 0, vvf: 0.25, vcf: 1 });
 
@@ -47,6 +49,8 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     vcenterId: v.id, vcenterName: v.name || v.id, hosts: 0, counted: 0, unknown: 0, disconnected: 0,
     sockets: 0, cores: 0, licensed: 0, padded: 0, paddedHosts: 0,
     vsanTib: 0, vsanDs: 0, vsanUnknown: 0, reportedCoreUsed: null, reportedCoreTotal: null, coreLicenses: 0,
+    // v2.727(감사 C-02): used/total 을 못 읽은(null) 코어 라이선스 개수 — 하나라도 있으면 보고 합은 null(부분 합 금지).
+    reportedUsedUnknown: 0, reportedTotalUnknown: 0,
   }]));
   const hostRows = [];
   for (const h of snap?.hosts || []) {
@@ -72,8 +76,17 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     const core = (Array.isArray(v.licenses) ? v.licenses : []).filter((l) => String(l?.costUnit || '').toLowerCase() === 'core');
     if (core.length) {
       r.coreLicenses = core.length;
-      r.reportedCoreUsed = core.reduce((a, l) => a + (Number(l.used) > 0 ? Number(l.used) : 0), 0);
-      r.reportedCoreTotal = core.reduce((a, l) => a + (Number(l.total) > 0 ? Number(l.total) : 0), 0);
+      // v2.727(감사 C-02): soapClient 가 <used>/<total> 없는 라이선스를 null 로 싣는다(예전엔 0). null 을 0 으로 더하면
+      //   '보고 0 코어' 라는 없는 값으로 reportedDiff = −licensed 가 된다 — 하나라도 모르면 합을 내지 않고 개수를 밝힌다.
+      //   보고된 0·음수는 예전처럼 0 으로 센다(값이 있는 것이다).
+      let used = 0; let total = 0;
+      for (const l of core) {
+        const u = numOrNull(l.used); const t = numOrNull(l.total);
+        if (u == null) r.reportedUsedUnknown += 1; else if (u > 0) used += u;
+        if (t == null) r.reportedTotalUnknown += 1; else if (t > 0) total += t;
+      }
+      r.reportedCoreUsed = r.reportedUsedUnknown > 0 ? null : used;
+      r.reportedCoreTotal = r.reportedTotalUnknown > 0 ? null : total;
     }
   }
   const list = [...rows.values()].map((r) => {
@@ -96,6 +109,7 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     sockets: sum('sockets'), cores: sum('cores'), licensed: sum('licensed'), padded: sum('padded'), paddedHosts: sum('paddedHosts'),
     vsanTib: Math.round(sum('vsanTib') * 100) / 100, vsanUnknown: sum('vsanUnknown'),
     vsanIncludedTib: rate ? Math.round(sum('licensed') * rate * 100) / 100 : null,
+    reportedUsedUnknown: sum('reportedUsedUnknown'), reportedTotalUnknown: sum('reportedTotalUnknown'),   // v2.727(감사 C-02)
   };
   // 포함 용량은 계약 전체에서 합쳐진다(법인별 초과를 더하면 다른 법인의 남는 몫을 무시해 과대가 된다) — 합계는 전체 기준.
   totals.vsanAddonTib = rate ? Math.max(0, Math.round((totals.vsanTib - totals.licensed * rate) * 100) / 100) : null;

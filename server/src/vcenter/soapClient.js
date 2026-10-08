@@ -630,8 +630,11 @@ export class VimSoapClient {
     // Array elements are typed <LicenseManagerLicenseInfo>, not the property name.
     for (const blk of xml.split(/<LicenseManagerLicenseInfo(?=[ >])/).slice(1)) {
       const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
-      const total = Number(/<total>(-?\d+)<\/total>/.exec(blk)?.[1] || 0);
-      const used = Number(/<used>(-?\d+)<\/used>/.exec(blk)?.[1] || 0);
+      // v2.727(감사 C-02): <total>/<used> 는 vim25 LicenseManagerLicenseInfo 에서 optional 이다 — 태그가 없으면 '0 코어 사용' 이
+      //   아니라 **모름(null)** 이다. 예전 `|| 0` 은 코어 라이선스 비교(corelicense/analyze.js)에 '보고 0' 이라는 없는 값을 넣어
+      //   `reportedDiff = -licensed` 라는 거짓 차이를 만들었다. 보고된 0 은 그대로 0 이다(numOrNull — 값이 있을 때만 숫자).
+      const total = numOrNull(/<total>(-?\d+)<\/total>/.exec(blk)?.[1]);
+      const used = numOrNull(/<used>(-?\d+)<\/used>/.exec(blk)?.[1]);
       const key = /<licenseKey>([^<]*)<\/licenseKey>/.exec(blk)?.[1] || '';
       const edition = /<editionKey>([^<]*)<\/editionKey>/.exec(blk)?.[1] || '';
       const costUnit = /<costUnit>([^<]{0,32})<\/costUnit>/.exec(blk)?.[1] || '';   // v2.703(A13): core · cpuPackage · server …
@@ -814,7 +817,9 @@ function parseGpus(xml) {
     const deviceName = /<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || '';
     const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
     const gtype = /<graphicsType>([^<]*)<\/graphicsType>/.exec(blk)?.[1] || '';
-    const memKB = Number(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1] || 0);
+    // v2.727(감사 E-12): memorySizeInKB 가 없으면 VRAM 을 **모르는 것**이다 — 0 GB 로 싣지 않는다(화면 '0 GB' = 거짓).
+    //   보고된 0 은 그대로 0 이다. 소비처(gpu/hostGpu.js 는 이미 numOrNull 로 null 을 '용량 모름' 으로 본다).
+    const memKB = numOrNull(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1]);
     const pciId = /<pciId>([^<]*)<\/pciId>/.exec(blk)?.[1] || '';
     // graphicsType: sharedDirect=vGPU(GRID), shared=vSGA 만 graphics로 '관리되는' GPU.
     // 그 외(basic/공란)는 vGPU로 단정하지 말 것 — 패스쓰루 GPU도 graphicsInfo에 빈
@@ -825,7 +830,7 @@ function parseGpus(xml) {
       out.push({
         model: deviceName || vendorName,
         vendor: vendorName,
-        memGB: memKB ? Math.round(memKB / 1024 / 1024) : 0,
+        memGB: memKB == null ? null : Math.round(memKB / 1024 / 1024),
         mode,
         vgpuMode: mode === 'vgpu',
         pciId,

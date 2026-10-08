@@ -5,8 +5,11 @@
 //
 // ⚠ 바꾸는 것은 **화면에 보이는 이름·설명·단계뿐**이다. 기능 키·링크(#/tools/키)·권한·사용 횟수는 키 기준 그대로다.
 // 저장은 '완료' 한 번에 한다(입력마다 PUT 하지 않는다) — 실패하면 닫지 않고 오류를 보여준다.
+// v2.727(감사 E-03): 저장 실패는 ErrorBox 하나로 그린다 — PUT /admin/tool-categories 는 v2.614 부터 전체 범위 관리자 전용(fleetOnly)이라
+//   범위 제한 관리자는 403 을 받는데, 예전에는 e.message('forbidden') 한 단어를 빨간 글자로 보여 장애로 오해하게 했다(v2.398 규약 — 403 은 권한 안내).
 import React, { useMemo, useState } from 'react';
 import { sendJson } from '../api.js';
+import { ErrorBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
 import { stagesOf, stageIdOf, removeStage, stageCounts, nextStageId, changedToolCount } from './toolSections.js';
 import Select from '../components/Select.jsx';
@@ -56,7 +59,7 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
   const [q, setQ] = useState('');
   const [chip, setChip] = useState('all');
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState(null); // 문자열(검증·400 사유) 또는 오류 객체(throw — 403 이면 AccessDenied)
   const [note, setNote] = useState('');
 
   const stages = stagesOf(draft);
@@ -111,7 +114,7 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
   const loaded = editorSettingsLoaded(settings);
   const save = async () => {
     if (!loaded) { setErr('저장된 설정을 읽지 못한 채 열린 편집기라 저장하지 않습니다 — 화면을 새로 연 뒤 다시 시도하세요(저장하면 기존 이름·단계가 지워집니다).'); return; }
-    setBusy(true); setErr(''); setNote('');
+    setBusy(true); setErr(null); setNote('');
     try {
       const r = await sendJson('/admin/tool-categories', 'PUT', { overrides: draft.overrides, stages: draft.stages, stageDisplay: draft.stageDisplay });
       if (!r || r.ok === false) { setErr(r?.reason || '저장하지 못했습니다.'); return; }
@@ -120,7 +123,7 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
       onSaved?.(r.settings);
       if (onClose && !warn) onClose();
     } catch (e) {
-      setErr(e?.message || String(e));
+      setErr(e); // 객체 그대로 — ErrorBox(errorBoxInput)가 403 → 권한 안내, 5xx → 일시적 미가용으로 가른다
     } finally {
       setBusy(false);
     }
@@ -243,9 +246,9 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
         )}
       </div>
 
+      {err && <div style={{ padding: '0 22px' }}><ErrorBox error={err} /></div>}
       <div className="st-editor-foot">
         <span className="st-faint">이름·설명 바꾼 기능 {changedN}개 · 단계 {stages ? `${stages.length}개` : '안 씀'}</span>
-        {err && <span className="st-err">{err}</span>}
         {note && <span className="st-warn">{note}</span>}
         <span style={{ flex: 1 }} />
         <button className="st-btn st-btn-danger" onClick={resetAll} disabled={busy}>기본값으로 되돌리기</button>

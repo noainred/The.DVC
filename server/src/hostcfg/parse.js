@@ -168,7 +168,11 @@ export function parseVsan(enabledRaw, runtimeXml) {
   const enabled = boolOf(enabledRaw);
   if (enabled == null && typeof runtimeXml !== 'string') return null;
   const count = (t) => (typeof runtimeXml === 'string' ? (runtimeXml.match(new RegExp(`<${t}>`, 'g')) || []).length : null);
-  return { enabled, diskIssues: count('diskIssues'), members: count('membershipList') };
+  const members = count('membershipList');
+  // v2.727(감사 C-05): vSAN 이 켜진 호스트인데 membershipList 원소가 0개면 '멤버 0' 이 아니라 **아직 못 읽은 것**(가입 직후·축약
+  //   응답)일 수 있다 — 0 으로 두면 dscfg/analyze.js 가 '분할(vsan-partition)' 로 판정한다(crit). null 로 두고 판정을 보류한다.
+  //   vSAN 이 꺼진 호스트의 0 은 값이다(멤버가 아니다).
+  return { enabled, diskIssues: count('diskIssues'), members: enabled === true && members === 0 ? null : members };
 }
 
 // ── v2.701(A10) 네트워크 ───────────────────────────────────────────────────

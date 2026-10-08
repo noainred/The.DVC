@@ -70,10 +70,12 @@ export function analyzeVsan(hosts, dss, opt = {}) {
     if (!v) { unknownHosts += 1; continue; }
     if (v.enabled !== true) continue;
     const k = `${h.vcenterId}\u0000${h.cluster}`;
-    const c = byCl.get(k) || { vcenterId: h.vcenterId, vcenterName: opt.vcName?.get(h.vcenterId) || h.vcenterId, cluster: h.cluster, hosts: 0, diskIssues: 0, minMembers: null, issueHosts: [] };
+    const c = byCl.get(k) || { vcenterId: h.vcenterId, vcenterName: opt.vcName?.get(h.vcenterId) || h.vcenterId, cluster: h.cluster, hosts: 0, diskIssues: 0, minMembers: null, membersUnknown: 0, issueHosts: [] };
     c.hosts += 1;
     if (Number.isFinite(v.diskIssues) && v.diskIssues > 0) { c.diskIssues += v.diskIssues; if (c.issueHosts.length < 10) c.issueHosts.push(h.name); }
+    // v2.727(감사 C-05): 멤버 수를 못 읽은(null) 호스트는 분할 판정에서 뺀다 — 비교 분모(hosts)에서도 빼고 개수(membersUnknown)를 밝힌다.
     if (Number.isFinite(v.members)) c.minMembers = c.minMembers == null ? v.members : Math.min(c.minMembers, v.members);
+    else c.membersUnknown += 1;
     byCl.set(k, c);
   }
   const vsanDs = (Array.isArray(dss) ? dss : []).filter((d) => /vsan/i.test(d.type || ''));
@@ -82,7 +84,9 @@ export function analyzeVsan(hosts, dss, opt = {}) {
   const clusters = [];
   for (const c of byCl.values()) {
     const findings = [];
-    if (c.minMembers != null && c.minMembers < c.hosts) findings.push({ code: 'vsan-partition', sev: VSAN_CODES['vsan-partition'], facts: { members: c.minMembers, hosts: c.hosts } });
+    // v2.727(감사 C-05): 멤버 수를 아는 호스트끼리만 비교한다(hosts − membersUnknown). 전부 모르면 판정하지 않는다(minMembers null).
+    const judged = c.hosts - c.membersUnknown;
+    if (c.minMembers != null && c.minMembers < judged) findings.push({ code: 'vsan-partition', sev: VSAN_CODES['vsan-partition'], facts: { members: c.minMembers, hosts: judged, ...(c.membersUnknown ? { membersUnknown: c.membersUnknown } : {}) } });
     if (c.diskIssues > 0) findings.push({ code: 'vsan-disk-issue', sev: VSAN_CODES['vsan-disk-issue'], facts: { count: c.diskIssues, hosts: c.issueHosts } });
     clusters.push({ ...c, findings });
   }

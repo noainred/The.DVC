@@ -20,6 +20,8 @@
  * (점 수·기간)을 넘을 때만 계산하고, 못 미치면 이유를 문장으로 돌려준다.
  */
 
+import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01): VM storageGB/uncommittedGB 결측(null)을 0 으로 되돌리지 않는다
+
 export const CITATIONS = [
   {
     id: 'aria-reclaim',
@@ -148,11 +150,19 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   const all = vms || [];
   const real = all.filter((v) => !v.template);
   const templates = all.filter((v) => v.template);
-  const committedOf = (arr) => arr.reduce((a, v) => a + num(v.storageGB), 0);
+  // v2.727(감사 C-01): storageGB 가 null(v2.719 부터 '못 읽음')인 VM 은 커밋·할당·정지 합계에서 **빼고 센다** — 예전 num() 은
+  //   null 을 0 으로 더해 합계가 조용히 작아졌다(같은 스냅샷에서 비용 배분은 '용량 모름 N대' 를 말하는데 이 화면은 0 GB 로 더했다).
+  //   uncommitted 만 null 이면 committed 는 더하고(prov ≥ used 항등식 — sampler.js 와 같은 판단) 그 VM 을 uncommittedUnknown 으로 센다.
+  //   보고된 0 은 값이다(numOrNull 이 0 을 지킨다).
+  const committedOf = (arr) => arr.reduce((a, v) => { const n = numOrNull(v.storageGB); return n == null ? a : a + n; }, 0);
+  const storageUnknownOf = (arr) => arr.filter((v) => numOrNull(v.storageGB) == null).length;
   const committedGB = committedOf(real);
-  const uncommittedGB = real.reduce((a, v) => a + num(v.uncommittedGB), 0);
+  const storageUnknown = storageUnknownOf(real);
+  const uncommittedUnknown = real.filter((v) => numOrNull(v.storageGB) != null && numOrNull(v.uncommittedGB) == null).length;
+  const uncommittedGB = real.reduce((a, v) => (numOrNull(v.storageGB) == null ? a : a + (numOrNull(v.uncommittedGB) ?? 0)), 0);
   const provGB = committedGB + uncommittedGB;
   const templateGB = committedOf(templates);
+  const templateStorageUnknown = storageUnknownOf(templates);
   const thin = real.filter((v) => v.thin);
   const on = real.filter((v) => v.powerState === 'POWERED_ON');
   const off = real.filter((v) => v.powerState !== 'POWERED_ON');
@@ -165,6 +175,7 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   const snapOldGB = snapOld.reduce((a, v) => a + num(v.snapshotSizeGB), 0);
   const snapUnknownAge = snaps.filter((v) => !v.snapshotOldestTs).length;
   const offGB = committedOf(off);
+  const offStorageUnknown = storageUnknownOf(off);   // v2.727(C-01): 정지 VM 중 디스크 용량을 못 읽어 회수량에서 뺀 수
   // v2.629(감사 DATA2629-01 — 재현: 정지 VM 1대 100GB + 스냅샷 60GB → 회수 160GB · pctOfUsed 160%):
   //   정지 VM 의 storageGB(= summary.storage.committed)는 스냅샷 델타 파일까지 포함한다. 그 VM 의 스냅샷을 또 더하면
   //   같은 바이트를 두 번 센다 — 회수량의 스냅샷 항은 **정지 VM 에 속하지 않은** 스냅샷만(snapshotReclaimGB 한 벌).
@@ -178,7 +189,8 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   // 음수(범위 밖 VM 이 그 DS 를 쓰거나 로컬 DS 가 목록에 없을 때)는 의미가 없으므로 null.
   const otherRaw = usedGB - committedGB - templateGB;
   // 사용량을 못 읽은 DS 가 있으면 그 DS 위 VM 커밋은 빼지 못하므로 계산하지 않는다(부분 차이는 거짓).
-  const otherGB = capGB > 0 && otherRaw >= 0 && usageUnknown === 0 ? otherRaw : null;
+  // v2.727(C-01): 커밋을 못 읽은 VM·템플릿이 있어도 같다 — 빼지 못한 커밋이 'VM 외 사용량' 으로 둔갑한다.
+  const otherGB = capGB > 0 && otherRaw >= 0 && usageUnknown === 0 && storageUnknown === 0 && templateStorageUnknown === 0 ? otherRaw : null;
 
   // v2.622(감사 DATA-04 — 재현: 사용량 미상 DS 1개로 오버서브스크립션 150%·회수 비율 100%·회수 후 사용률 0%):
   //   VM 할당·커밋·회수량(분자)은 모든 DS 위 VM 인데 capGB 는 사용량을 읽은 DS 만이다. 할당 비율의 분모는 **용량을 아는 DS 전체**
@@ -193,12 +205,15 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
     vm: {
       count: real.length, on: on.length, off: off.length, thinCount: thin.length, templates: templates.length,
       provGB: r1(provGB), committedGB: r1(committedGB), uncommittedGB: r1(uncommittedGB), templateGB: r1(templateGB),
+      // v2.727(C-01): 합계에서 뺀 VM 수 — storageUnknown(커밋 미상 · 할당·커밋·정지 전부에서 제외) · uncommittedUnknown(미커밋만 미상 ·
+      //   할당이 그 VM 몫만큼 하한) · templateStorageUnknown(템플릿 커밋 미상). 화면이 '0 으로 채우지 않았다' 를 말하는 근거.
+      storageUnknown, uncommittedUnknown, templateStorageUnknown,
       overcommitPct: pct(provGB, capAllGB),         // 할당 ÷ 용량 (100 초과 = over-subscription) — v2.622 DATA-04: 용량을 아는 DS 전체
       committedPctOfCap: pct(committedGB, capAllGB),
       capBasisGB: r1(capAllGB),                     // v2.622 DATA-04: 위 두 비율의 분모(사용량 미상 DS 포함 용량)
     },
     reclaim: {
-      off: { count: off.length, gb: r1(offGB) },
+      off: { count: off.length, gb: r1(offGB), storageUnknown: offStorageUnknown },   // v2.727(C-01)
       snap: { count: snaps.length, gb: r1(snapGB), reclaimGB: r1(snapReclaimGB), overlapGB: r1(snapOverlapGB) },   // v2.629 DATA2629-01
       snapOld: { count: snapOld.length, gb: r1(snapOldGB), maxHours: policy.snapshotMaxHours, unknownAge: snapUnknownAge },
       totalGB: r1(reclaimGB),
@@ -207,7 +222,8 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
       ...(ratioBlocked ? { ratioUnavailable: ratioBlocked } : {}),   // v2.622 DATA-04: 사용량 대비 비율을 내지 않은 사유
     },
     other: { gb: r1(otherGB) },
-    topOff: top(off, (v) => num(v.storageGB)).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: num(v.storageGB), guestOS: v.guestOS || '' })),
+    // v2.727(C-01): 용량을 모르는 VM 은 null 그대로(0 GB 로 보이지 않게) · 정렬은 값 있는 것 먼저.
+    topOff: top(off, (v) => numOrNull(v.storageGB) ?? -1).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: numOrNull(v.storageGB), guestOS: v.guestOS || '' })),
     topSnap: top(snaps, (v) => num(v.snapshotSizeGB)).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: num(v.snapshotCount), snapshotSizeGB: r1(num(v.snapshotSizeGB)), ageDays: ageDays(v), powerState: v.powerState })),
   };
 }
@@ -282,8 +298,8 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
       // v2.629(감사 DATA2629-01): 정지 VM 에 속한 스냅샷은 정지 VM 디스크에 이미 들어 있어 합계에 한 번만 센다 — 그 사실을 제목이 말한다.
       title: `회수 가능 ${fmtGB(r.totalGB)} — 정지 VM ${r.off.count}대(${fmtGB(r.off.gb)}) + 스냅샷 ${r.snap.count}대(${fmtGB(r.snap.reclaimGB ?? r.snap.gb)})${r.snap.overlapGB > 0 ? ` · 정지 VM 의 스냅샷 ${fmtGB(r.snap.overlapGB)} 는 정지 VM 디스크에 이미 포함` : ''}`,
       detail: r.totalGB > 0
-        ? `${r.pctOfUsed != null ? `사용량의 ${r.pctOfUsed}% 입니다. 전부 회수하면 사용률 ${usagePct}% → ${r.afterReclaimUsagePct}%` : `사용량을 읽지 못한 데이터스토어 ${b.ds.usageUnknown}개가 있어 사용량 대비 비율·회수 후 사용률은 계산하지 않았습니다`}${daysGainedByReclaim != null ? `, 현재 증가율 기준 약 ${daysGainedByReclaim}일치 여유` : ''}. 회수 뒤 배열에 공간이 돌아가려면 UNMAP(VMFS6 자동)이 동작해야 합니다. 유휴 VM·고아 디스크는 이 수치에 포함되지 않습니다(관측 불가).`
-        : '정지 VM 과 스냅샷이 없어 이 방식으로 회수할 용량이 없습니다.',
+        ? `${r.pctOfUsed != null ? `사용량의 ${r.pctOfUsed}% 입니다. 전부 회수하면 사용률 ${usagePct}% → ${r.afterReclaimUsagePct}%` : `사용량을 읽지 못한 데이터스토어 ${b.ds.usageUnknown}개가 있어 사용량 대비 비율·회수 후 사용률은 계산하지 않았습니다`}${daysGainedByReclaim != null ? `, 현재 증가율 기준 약 ${daysGainedByReclaim}일치 여유` : ''}. 회수 뒤 배열에 공간이 돌아가려면 UNMAP(VMFS6 자동)이 동작해야 합니다. 유휴 VM·고아 디스크는 이 수치에 포함되지 않습니다(관측 불가).${r.off.storageUnknown > 0 ? ` 디스크 용량을 읽지 못한 정지 VM ${r.off.storageUnknown}대는 이 수치에서 뺐습니다(0 으로 채우지 않았습니다).` : ''}`
+        : (r.off.storageUnknown > 0 ? `정지 VM ${r.off.count}대의 디스크 용량을 읽지 못해(${r.off.storageUnknown}대) 회수량을 산정하지 못했습니다 — 0 이 아니라 '모름' 입니다.` : '정지 VM 과 스냅샷이 없어 이 방식으로 회수할 용량이 없습니다.'),
       cite: ['aria-reclaim', 'vsphere-unmap'],
     });
     if (r.snapOld.count > 0) verdicts.push({ level: 'warn', key: 'snapshot-age', title: `${r.snapOld.maxHours}시간 넘은 스냅샷 ${r.snapOld.count}대(${fmtGB(r.snapOld.gb)})`, detail: `스냅샷은 오래 둘수록 커져 데이터스토어를 고갈시키고 성능을 떨어뜨립니다(권고: 72시간 이내 삭제). 백업 소프트웨어가 남긴 스냅샷이면 백업 성공 후 삭제됐는지 확인하세요.${r.snapOld.unknownAge ? ` 생성 시각을 모르는 스냅샷 ${r.snapOld.unknownAge}대는 나이 판정에서 제외했습니다.` : ''}`, cite: ['kb-snapshot-bp', 'aria-reclaim-settings'] });

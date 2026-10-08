@@ -151,6 +151,9 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
+  // v2.727(감사 E-03): 이름·단계 저장(PUT /admin/tool-categories)은 v2.614 부터 전체 범위 관리자 전용(fleetOnly)이다 —
+  //   범위 제한 관리자에게 드로어를 열어 주면 저장에서 403 만 받는다. 판정은 VmHygieneTool·VmDnsTool 과 같은 모양(hasRole + scope 비어 있음).
+  const [canEditNames, setCanEditNames] = useState(false);
   // 외부 포탈 주소(서버 env SERVICE_HUB_URL). 인증 후에만 내려오며, 없으면 카드도 숨긴다.
   const [externalUrls, setExternalUrls] = useState({});
   const [topKeys, setTopKeys] = useState([]); // 사용 횟수(전체 사용자 합산)
@@ -222,7 +225,10 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   useEffect(() => {
     // v2.613 WEB2613-01: /auth/me 를 다시 부르지 않는다 — App 이 렌더 전에 채운 현재 사용자 객체 하나(api.js)에서 읽는다.
     setIsAdmin(hasRole('admin'));
-    setExternalUrls({ serviceHubUrl: getCurrentUser()?.serviceHubUrl || '' });
+    const u = getCurrentUser();
+    const fullScope = !(u?.scope?.vcenters?.length || u?.scope?.regions?.length);
+    setCanEditNames(hasRole('admin') && fullScope);
+    setExternalUrls({ serviceHubUrl: u?.serviceHubUrl || '' });
   }, []);
   // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
   // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(→ 200).
@@ -327,7 +333,7 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
           <div className="st-eyebrow">SPECIAL TOOLS</div>
           <div className="st-title-row">
             <h1 className="st-h1">특수 기능</h1>
-            {isAdmin && (
+            {canEditNames && (
               <button className="st-set-btn" onClick={() => setDrawer(true)} disabled={catsState !== 'ok'}
                 title={catsState === 'ok' ? '기능별 표시 이름·설명·개발 단계를 바꿉니다(관리자)'
                   : catsState === 'loading' ? '저장된 이름·단계 설정을 불러오는 중입니다 — 불러온 뒤에 열 수 있습니다'
