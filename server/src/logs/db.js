@@ -128,6 +128,18 @@ function initSqlite() {
       if (f.q) { w.push("(message LIKE ? ESCAPE '\\' OR entity LIKE ? ESCAPE '\\' OR user LIKE ? ESCAPE '\\' OR type LIKE ? ESCAPE '\\')"); const like = `%${likeEscape(f.q)}%`; p.push(like, like, like, like); }
       return build(w.length ? `WHERE ${w.join(' AND ')}` : '', p);
     }
+    /**
+     * v2.727(감사 F-01): trackedEvents 공통 조건(type·vCenter·types·entity) — 결과가 없을 것이 확정이면 null.
+     *   동기 판과 조각 판이 **같은 WHERE** 를 쓰게 하나로 뺐다(두 벌이면 조건 하나가 한쪽에만 들어가 결과가 갈린다).
+     */
+    function trackedBase(f) {
+      const w = [`type IN ${TRACKED_SQL}`]; const p = [];
+      if (Array.isArray(f.vcenterIds)) { if (!f.vcenterIds.length) return null; w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
+      if (Array.isArray(f.types) && f.types.length) { const ts = f.types.filter((t) => TRACKED_TYPES.includes(t)); if (!ts.length) return null; w.push(`type IN (${ts.map(() => '?').join(',')})`); p.push(...ts); }
+      const byEntity = typeof f.entity === 'string' && f.entity;
+      if (byEntity) { w.push('entity=?'); p.push(f.entity); }
+      return { w, p, byEntity: !!byEntity };
+    }
     /** opsEvents 공통 조건(type·vCenter·entity) — 결과가 없을 것이 확정이면 null. */
     function opsBase(f) {
       const w = [`type IN ${OPS_SQL}`]; const p = [];

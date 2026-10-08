@@ -372,7 +372,8 @@ function NoticeAdmin() {
                     <td><span className="notice-level" style={{ color: LEVEL_TONE[n.level], borderColor: LEVEL_TONE[n.level] }}>{LEVEL_TEXT[n.level] || n.level}</span></td>
                     <td style={{ whiteSpace: 'normal' }}><b>{n.title}</b>{n.body ? <div className="muted board-notice-snippet">{n.body}</div> : null}</td>
                     <td style={{ whiteSpace: 'normal' }}>{windowText(n)}</td>
-                    <td data-sort={n.updatedAt}>{timeText(n.updatedAt)}<div className="muted" style={{ fontSize: 11 }}>{n.updatedBy || n.createdBy}</div></td>
+                    {/* v2.727(B-04): 작성·수정자 계정명은 서버가 admin 에게만 싣는다 — 없으면 칸을 비운다(빈 줄을 만들지 않는다) */}
+                    <td data-sort={n.updatedAt}>{timeText(n.updatedAt)}{(n.updatedBy || n.createdBy) ? <div className="muted" style={{ fontSize: 11 }}>{n.updatedBy || n.createdBy}</div> : null}</td>
                     {canEdit && (
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button className="btn btn-sm" disabled={busy} onClick={() => edit(n)}>수정</button>{' '}

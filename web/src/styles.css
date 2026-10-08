@@ -1752,6 +1752,9 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .board-search { min-width: 0; width: 260px; max-width: 100%; }
 .board-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; color: inherit; overflow-wrap: anywhere; }
 .board-pin { display: inline-block; font-size: 11px; color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
+/* v2.727(감사 E-05): 고정 글 행 강조 — 배지(.board-pin)와 같은 호박색 계열, 옅은 바탕 + 왼쪽 테두리(규칙 없이 붙어 있던 죽은 클래스였다). */
+.board-pinned > td { background: color-mix(in srgb, var(--amber) 7%, transparent); }
+.board-pinned > td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 .board-editor { display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .board-editor .input { min-width: 0; width: 100%; }
 .board-editor textarea.input { resize: vertical; font-family: inherit; }
