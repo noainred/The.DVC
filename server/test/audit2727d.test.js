@@ -111,6 +111,8 @@ test('F-01: trackedEventsAsync 는 한 문장 trackedEvents 와 같은 결과(�
   assert.ok(maxGap * 2 < oneShot, `조각 판 최장 동기 구간 ${maxGap.toFixed(1)}ms 가 한 문장 ${oneShot.toFixed(1)}ms 의 절반 이상이다(조각·양보가 깨졌다)`);
   // 폴백(NDJSON)에도 같은 이름의 API 가 있다(라우트가 db.kind 를 가리지 않고 부른다)
   assert.match(code('logs/db.js'), /trackedEventsAsync: async \(f = \{\}, limit = 5000\) => api\.trackedEvents\(f, limit\)/);
+  // 화면·CSV 의 load() 가 조각 판을 쓴다(한 문장 판으로 되돌리면 동기 정지가 재발한다)
+  assert.match(code('routes/api/vmChanges.js'), /await db\.trackedEventsAsync\(\{ vcenterIds: ids, since \}, READ_MAX \+ 1\)/);
   resetLogsDb();
 });
 

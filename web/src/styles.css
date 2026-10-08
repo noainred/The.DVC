@@ -1383,9 +1383,15 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .sd-table { min-width: 1000px; width: 100%; }
 
 /* v2.660 iDRAC 통합 추이 KPI — 넓은 폭은 한 줄 4칸, 720px 이하는 2×2(4칸으로 좁히면 라벨이 말줄임으로 사라진다 — 400px 스크린샷 판독). */
-.idrac-trend-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+/* v2.727(A안 — 사용자 선택): 차트 위를 세 줄로 — ① 보기 탭 + 선택 ② 종류 칩 + 도구. 오른쪽 덩어리는 넘치면 아래 줄로 내려간다. */
+.idrac-trend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; min-width: 0; }
+.idrac-trend-row-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; min-width: 0; }
+.idrac-trend-tools { gap: 6px; font-size: 12px; }
+.idrac-trend-kpi-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-top: 3px; min-width: 0; }
+.idrac-trend-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
 @media (max-width: 1280px) { .idrac-trend-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .idrac-trend-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .idrac-trend-row-end { margin-left: 0; } }
 
 /* v2.669 SAN 스위치 화면(시안 'SAN Switch v2') — 큰 카드 radius 16 · 섹션 제목 mono 12px + ▸ 민트. 대문자 변환 금지(v2.575). */
 .san2-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 18px; margin: 0 0 16px; }
