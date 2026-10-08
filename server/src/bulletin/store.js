@@ -17,6 +17,23 @@
  *    그 자리의 마지막 답글까지 지워지면 자리도 지운다.
  *  · 공감은 누른 사람 이름 목록(`likes`)이다 — 한 사람당 한 번, 다시 누르면 취소. 요청은 상태를 명시한다(`on: true|false`)라
  *    연타·재전송이 두 번 세지 않는다. 화면에는 개수·내가 눌렀는지·앞 30명 이름만 내보낸다.
+ *
+ * v2.727(감사 B-01/F-02) — 쓰기는 디바운스·비동기, 합계에 상한:
+ *  · 예전에는 공감 한 번도 파일 **전체**를 동기로 다시 직렬화(들여쓰기 1)하고 fsync 했다 — 13MB 에서 공감 1회 145~306ms,
+ *    상한 곱(약 1.2GB) 근처에서는 클릭당 초 단위의 이벤트 루프 정지였다(합성 글 500·댓글 20 실측은 fix-G2.md).
+ *  · 이제 캐시(메모리)가 진실이고 파일 쓰기는 `WRITE_DELAY_MS`(300ms) 안의 변경을 묶어 **한 번** 비동기로 쓴다(tmp → fsync →
+ *    rename). 쓰는 중에 또 바뀌면 끝난 뒤 한 번 더 쓴다. 실패는 console.warn + `bulletinStoreStatus().lastWriteError` 에 남기고
+ *    **다음 변경 때** 다시 쓴다(무음 실패 금지 — 자동 재시도 루프는 두지 않는다: 디스크가 계속 거부하면 루프가 곧 부하다).
+ *    종료 때는 `util/exitFlush.js` 에 등록한 동기 flush 가 대기분을 쓴다(v2.582 규약 — 자체 process.on 금지).
+ *  · `central/edgeRecord.js createDebouncedWriter` 를 쓰지 않은 이유: 그 헬퍼는 파일을 **상태 파일**로 등록해(`registerStateFile`)
+ *    백업 변경 감시·엣지 설정 push 가 그 파일을 설정이 아닌 것으로 본다. 게시판·공지는 사용자 데이터라 백업 번들에는 들어가야
+ *    하고(변경 감시 지문에서만 뺀다 — backup/service.js CHANGE_WATCH_EXCLUDE), 그 헬퍼는 fsync·실패 상태도 없다.
+ *  · 합계 상한 `boardMaxBytes()`(env BOARD_MAX_BYTES, 기본 16MB): 항목 상한의 곱이 1.2GB 라 파일 총량을 막는 것이 없었다.
+ *    글 작성·수정·댓글 추가가 상한을 넘기게 되면 **409 `board-full`**(bytes·max 동봉)로 거부한다 — 조용히 자르지 않는다.
+ *    공감·고정·삭제는 상한과 무관하다(정리가 막히면 안 된다). 크기는 마지막 실제 쓰기의 바이트 + 그 뒤 변경분의 추정 합이고
+ *    실제 쓰기마다 다시 맞춘다(전체를 다시 직렬화해 재지 않는다 — 그것이 바로 없애려는 비용이다).
+ *  ⚠ 남는 창(정직 기록): 동기 flush(종료·테스트)와 진행 중인 비동기 rename 이 겹치면 세대 번호(`gen`)로 옛 본문의 rename 을
+ *    건너뛰지만, 이미 커널에 넘긴 rename 까지는 막지 못한다 — 종료 시 최대 한 묶음(300ms)분이 옛 본문으로 남을 수 있다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,6 +41,8 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
+import { numOrNull } from '../util/numOrNull.js';
+import { registerExitFlush } from '../util/exitFlush.js';
 
 export const LIMITS = Object.freeze({
   noticeMax: 200, noticeTitle: 200, noticeBody: 5000,
@@ -33,37 +52,188 @@ export const LIMITS = Object.freeze({
 export const LIKERS_SHOWN = 30;
 export const NOTICE_LEVELS = Object.freeze(['info', 'warn', 'crit']);
 
+/** v2.727 — board.json 합계 상한 기본값(바이트). */
+export const BOARD_MAX_BYTES_DEFAULT = 16 * 1024 * 1024;
+/** v2.727 — 변경을 묶어 쓰는 창(ms). 테스트가 이 값으로 기다린다. */
+export const WRITE_DELAY_MS = 300;
+/**
+ * 합계 상한 — env `BOARD_MAX_BYTES`(바이트). 빈 값·비수치는 미지정(= 기본값, v2.618 BUG-1 규약 — `KEY=` 한 줄이 상한을 0 으로
+ * 만들지 않게 numOrNull), 0 이하도 기본값, 하한 64KB(그 아래는 글 한 개도 못 쓴다). 매 호출 읽는다(문자열 하나 — 테스트가 바꾼다).
+ */
+export function boardMaxBytes() {
+  const n = numOrNull(process.env.BOARD_MAX_BYTES);
+  if (n == null || n <= 0) return BOARD_MAX_BYTES_DEFAULT;
+  return Math.max(65_536, Math.trunc(n));
+}
+
 const noticesFile = () => path.join(config.configDir, 'notices.json');
 const boardFile = () => path.join(config.configDir, 'board.json');
 
 const caches = new Map(); // file → { list }
+/** file → 쓰기 상태(v2.727). bytes = 마지막 실제 쓰기(또는 로드) 바이트 + 그 뒤 변경분 추정. */
+const writers = new Map();
+
+function writerOf(file, key) {
+  let w = writers.get(file);
+  if (!w) {
+    w = { key, timer: null, writing: false, dirty: false, gen: 0, bytes: null, writes: 0, lastWriteAt: null, lastWriteError: null };
+    writers.set(file, w);
+  }
+  return w;
+}
 
 function load(file, key) {
   const hit = caches.get(file);
   if (hit) return hit.list;
+  const w = writerOf(file, key);
   let list = [];
+  let bytes = 0;
   try {
     if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const raw = fs.readFileSync(file, 'utf8');
+      const j = JSON.parse(raw);
       if (!j || typeof j !== 'object' || !Array.isArray(j[key])) throw new Error(`${key} 배열이 없습니다`);
       list = j[key].filter((x) => x && typeof x === 'object' && typeof x.id === 'string');
+      bytes = Buffer.byteLength(raw, 'utf8');
     }
   } catch (e) {
     preserveCorrupt(file, e.message);
     console.warn(`[bulletin] ${path.basename(file)} 를 읽지 못해 빈 목록으로 시작합니다: ${e.message}`);
-    list = [];
+    list = []; bytes = 0;
   }
   caches.set(file, { list });
+  if (w.bytes == null) w.bytes = bytes;
   return list;
 }
 
-function save(file, key, list) {
-  atomicWriteFileSync(file, JSON.stringify({ [key]: list }, null, 1), { mode: 0o600 });
+/** 캐시를 바꾸고 쓰기를 예약한다(v2.727). deltaBytes 는 이 변경이 파일 크기에 주는 추정 변화(바이트). */
+function save(file, key, list, deltaBytes = 0) {
+  const w = writerOf(file, key);
   caches.set(file, { list });
+  w.bytes = Math.max(0, (w.bytes ?? 0) + (Number.isFinite(deltaBytes) ? deltaBytes : 0));
+  scheduleWrite(file);
 }
 
-/** 테스트 전용 — 캐시를 비운다(CONFIG_DIR 를 바꾼 뒤 다시 읽게). */
-export function _resetBulletinCache() { caches.clear(); }
+function scheduleWrite(file) {
+  const w = writers.get(file);
+  if (!w) return;
+  w.dirty = true;
+  if (w.timer) return;
+  w.timer = setTimeout(() => runWrite(file), WRITE_DELAY_MS);
+  w.timer.unref?.();
+}
+
+const serialize = (w, file) => JSON.stringify({ [w.key]: caches.get(file)?.list || [] });
+const tmpPathOf = (file) => path.join(path.dirname(file), `.${path.basename(file)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
+
+function noteWriteFail(w, file, e) {
+  const message = e?.message || String(e);
+  w.lastWriteError = { at: Date.now(), message };
+  w.dirty = true; // 캐시는 그대로 — 다음 변경·종료 flush 가 다시 쓴다
+  console.warn(`[bulletin] ${path.basename(file)} 저장 실패 — 다음 변경 때 다시 씁니다: ${message}`);
+}
+
+function runWrite(file) {
+  const w = writers.get(file);
+  if (!w) return;
+  w.timer = null;
+  if (w.writing) { scheduleWrite(file); return; } // 이전 쓰기 진행 중 — 끝난 뒤 한 번 더(늦게 끝난 옛 본문이 새 본문을 덮지 않게)
+  if (!caches.has(file)) { w.dirty = false; return; } // 캐시가 비었으면(테스트 reset) 쓸 것이 없다
+  const body = serialize(w, file);
+  const gen = ++w.gen;
+  w.dirty = false; w.writing = true;
+  const tmp = tmpPathOf(file);
+  let failed = false;
+  (async () => {
+    try {
+      await fs.promises.mkdir(path.dirname(file), { recursive: true });
+      const fh = await fs.promises.open(tmp, 'w', 0o600);
+      try { await fh.writeFile(body, 'utf8'); await fh.sync(); } finally { await fh.close(); }
+      await fs.promises.chmod(tmp, 0o600).catch(() => {});
+      if (gen !== w.gen) { await fs.promises.unlink(tmp).catch(() => {}); return; } // 그 사이 동기 flush 가 더 새 본문을 썼다
+      await fs.promises.rename(tmp, file);
+      try { const d = await fs.promises.open(path.dirname(file), 'r'); try { await d.sync(); } finally { await d.close(); } } catch { /* 디렉터리 fsync 미지원 */ }
+      if (gen === w.gen) { w.bytes = Buffer.byteLength(body, 'utf8'); w.writes += 1; w.lastWriteAt = Date.now(); w.lastWriteError = null; }
+    } catch (e) {
+      failed = true;
+      noteWriteFail(w, file, e);
+      await fs.promises.unlink(tmp).catch(() => {});
+    } finally {
+      w.writing = false;
+      if (w.dirty && !failed) scheduleWrite(file); // 쓰는 동안 바뀐 것은 한 번 더
+    }
+  })();
+}
+
+/** 대기·진행 중인 쓰기를 동기로 끝낸다(종료 훅·테스트). 실패는 상태·콘솔에 남긴다. @returns 썼는가 */
+function flushSync(file) {
+  const w = writers.get(file);
+  if (!w) return false;
+  if (w.timer) { clearTimeout(w.timer); w.timer = null; }
+  if (!w.dirty && !w.writing) return false;
+  if (!caches.has(file)) { w.dirty = false; return false; }
+  const body = serialize(w, file);
+  w.gen += 1; // 진행 중인 비동기 쓰기의 rename 을 무효화한다(옛 본문으로 덮지 않게)
+  try {
+    atomicWriteFileSync(file, body, { mode: 0o600 });
+    w.dirty = false; w.bytes = Buffer.byteLength(body, 'utf8'); w.writes += 1; w.lastWriteAt = Date.now(); w.lastWriteError = null;
+    return true;
+  } catch (e) { noteWriteFail(w, file, e); return false; }
+}
+
+/** 두 파일의 대기분을 지금 동기로 쓴다(테스트·종료). @returns {{ flushed: number }} */
+export function flushBulletinNow() {
+  let flushed = 0;
+  for (const file of [...writers.keys()]) if (flushSync(file)) flushed += 1;
+  return { flushed };
+}
+registerExitFlush('bulletin/store', () => { flushBulletinNow(); });
+
+/** 테스트 전용 — 예약·진행 중인 쓰기가 전부 끝날 때까지 기다린다(상한 안에서). 실패해 대기분(dirty)만 남은 상태는 '끝난 것' 이다. */
+export async function bulletinIdle({ maxMs = 5_000 } = {}) {
+  const t0 = Date.now();
+  while ([...writers.values()].some((w) => w.writing || w.timer)) {
+    if (Date.now() - t0 > maxMs) return false;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return true;
+}
+
+/**
+ * 저장소 상태(v2.727) — 파일별 추정 크기·상한·대기/진행·실제 쓰기 횟수·마지막 실패. `lastWriteError` 는 가장 최근 실패(어느 파일이든).
+ * 화면·점검이 '저장이 안 되고 있다' 를 볼 수 있게 — 조용한 실패 금지.
+ */
+export function bulletinStoreStatus() {
+  const files = {};
+  let lastWriteError = null;
+  for (const [file, w] of writers) {
+    const name = path.basename(file);
+    files[name] = {
+      bytes: w.bytes, max: w.key === 'posts' ? boardMaxBytes() : null,
+      pending: !!(w.dirty || w.timer), writing: w.writing, writes: w.writes, lastWriteAt: w.lastWriteAt, lastWriteError: w.lastWriteError,
+    };
+    if (w.lastWriteError && (!lastWriteError || w.lastWriteError.at > lastWriteError.at)) lastWriteError = { file: name, ...w.lastWriteError };
+  }
+  return { delayMs: WRITE_DELAY_MS, files, lastWriteError };
+}
+
+/** 테스트 전용 — 대기분을 쓰고 캐시를 비운다(CONFIG_DIR 를 바꾼 뒤 다시 읽게). */
+export function _resetBulletinCache() { flushBulletinNow(); caches.clear(); writers.clear(); }
+
+/** JSON 으로 쓰였을 때의 바이트(추정 변화량 계산용). */
+const jsonBytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
+function boardFullError(bytes, max) {
+  const e = new Error('board-full');
+  e.status = 409; e.extra = { bytes, max };
+  return e;
+}
+/** 이 변경(deltaBytes)으로 board.json 이 상한을 넘기면 409 board-full. 합계는 추정(머리말). */
+function assertBoardRoom(deltaBytes) {
+  const w = writerOf(boardFile(), 'posts');
+  const max = boardMaxBytes();
+  const cur = w.bytes ?? 0;
+  if (cur + deltaBytes > max) throw boardFullError(cur, max);
+}
 
 const newId = () => crypto.randomBytes(8).toString('hex');
 /** 문자열 칸: 앞뒤 공백 제거 · 제어 문자(줄바꿈·탭 제외) 제거 · 상한 초과는 오류. */
@@ -112,18 +282,27 @@ function cleanNotice(body, prev = {}) {
 
 const sortNotices = (a) => [...a].sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
 
-export function listNotices() { return sortNotices(load(noticesFile(), 'notices')); }
+/**
+ * 관리 목록(전부). v2.727(감사 B-04): `by:false` 면 작성·수정자 계정명(createdBy·updatedBy)을 뺀다 — 공지 작성자는 정의상
+ * 전체 범위 관리자라 모든 로그인 사용자(데모 계정 포함)에게 그 계정명을 주면 관리자 계정 열거 단서가 된다. 라우트가 admin 에게만 싣는다.
+ */
+export function listNotices({ by = true } = {}) {
+  const list = sortNotices(load(noticesFile(), 'notices'));
+  if (by) return list;
+  return list.map(({ createdBy: _c, updatedBy: _u, ...rest }) => rest);
+}
 
 /**
  * 지금 보여 줄 공지 — 켜져 있고 노출 기간 안. 심각도(crit → warn → info) 다음 최신순.
  * `rev` 는 화면의 '다시 보지 않기' 키에 쓴다 — 내용을 고치면 다시 보인다.
+ * v2.727(감사 B-04): `by:false` 면 게시자 계정명(`by`)을 빈 값으로 — 팝업은 모든 로그인 사용자가 받는다.
  */
-export function activeNotices(now = Date.now()) {
+export function activeNotices(now = Date.now(), { by = true } = {}) {
   const rank = { crit: 0, warn: 1, info: 2 };
   return load(noticesFile(), 'notices')
     .filter((n) => n.enabled !== false && (n.startAt == null || n.startAt <= now) && (n.endAt == null || n.endAt > now))
     .sort((a, b) => (rank[a.level] ?? 3) - (rank[b.level] ?? 3) || (b.updatedAt || 0) - (a.updatedAt || 0))
-    .map((n) => ({ id: n.id, rev: `${n.id}:${n.updatedAt || 0}`, title: n.title, body: n.body, level: n.level, startAt: n.startAt ?? null, endAt: n.endAt ?? null, updatedAt: n.updatedAt || null, by: n.updatedBy || n.createdBy || '' }));
+    .map((n) => ({ id: n.id, rev: `${n.id}:${n.updatedAt || 0}`, title: n.title, body: n.body, level: n.level, startAt: n.startAt ?? null, endAt: n.endAt ?? null, updatedAt: n.updatedAt || null, by: by ? (n.updatedBy || n.createdBy || '') : '' }));
 }
 
 export function createNotice(body, user) {
@@ -222,7 +401,9 @@ export function createPost(body, user, { isAdmin = false } = {}) {
     pinned: isAdmin && body?.pinned === true,
     author: user, createdAt: now, updatedAt: now, comments: [], likes: [],
   };
-  save(boardFile(), 'posts', [...list, p]);
+  const delta = jsonBytes(p) + 1; // v2.727: 이 글이 파일에 더하는 바이트(쉼표 포함)
+  assertBoardRoom(delta);
+  save(boardFile(), 'posts', [...list, p], delta);
   return viewPost(p, user);
 }
 
@@ -242,8 +423,11 @@ export function updatePost(id, body, user, { isAdmin = false } = {}) {
     updatedAt: editsContent ? Math.max(Date.now(), (cur.updatedAt || 0) + 1) : cur.updatedAt,
     ...(editsContent ? { editedBy: user } : {}),
   };
+  // v2.727: 제목·본문이 커지는 수정만 상한을 본다(고정 토글·줄이는 수정은 막지 않는다). 댓글은 그대로라 글 본문 차이만 센다.
+  const delta = (jsonBytes(p.title) - jsonBytes(cur.title)) + (jsonBytes(p.body) - jsonBytes(cur.body)) + (editsContent && !cur.editedBy ? jsonBytes(user) + 14 : 0);
+  if (editsContent && delta > 0) assertBoardRoom(delta);
   const next = [...list]; next[i] = p;
-  save(boardFile(), 'posts', next);
+  save(boardFile(), 'posts', next, delta);
   return viewPost(p, user);
 }
 
@@ -252,7 +436,7 @@ export function deletePost(id, user, { isAdmin = false } = {}) {
   const p = list.find((x) => x.id === id);
   if (!p) throw notFound();
   if (!canModify(p, user, isAdmin)) throw forbidden('작성자 본인이나 관리자만 지울 수 있습니다');
-  save(boardFile(), 'posts', list.filter((x) => x.id !== id));
+  save(boardFile(), 'posts', list.filter((x) => x.id !== id), -(jsonBytes(p) + 1));
   return p;
 }
 
@@ -278,8 +462,10 @@ export function addComment(postId, body, user) {
     id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now(),
     ...(parentId ? { parentId } : {}), ...(replyTo ? { replyTo } : {}), likes: [],
   };
+  const delta = jsonBytes(c) + 1; // v2.727
+  assertBoardRoom(delta);
   const next = [...list]; next[i] = { ...cur, comments: [...comments, c] };
-  save(boardFile(), 'posts', next);
+  save(boardFile(), 'posts', next, delta);
   return viewPost({ id: '', comments: [c] }, user).comments[0];
 }
 
@@ -308,7 +494,8 @@ export function deleteComment(postId, commentId, user, { isAdmin = false } = {})
     }
   }
   const next = [...list]; next[i] = { ...list[i], comments: rest };
-  save(boardFile(), 'posts', next);
+  // v2.727: 자리를 남기면 본문만 빠진다(추정) · 통째로 빠지면 댓글 전체 바이트가 빠진다. 삭제는 상한을 보지 않는다.
+  save(boardFile(), 'posts', next, hasReplies ? -jsonBytes(c.body || '') : -(jsonBytes(c) + 1));
   return { comment: c, kept: hasReplies };
 }
 
@@ -341,6 +528,6 @@ export function setLike(postId, commentId, user, on) {
     ? { ...post, comments: comments.map((c, k) => (k === ci ? updated : c)) }
     : { ...post, likes };
   const next = [...list]; next[i] = nextPost;
-  save(boardFile(), 'posts', next);
+  save(boardFile(), 'posts', next, (on ? 1 : -1) * (jsonBytes(user) + 1)); // v2.727: 공감은 상한과 무관(이름 하나 ±)
   return { ...likeView(updated, user), changed: true };
 }

@@ -130,7 +130,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
   const exportCsv = () => {
     const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
     const lines = [head.join(',')];
-    for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));
+    for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB ?? '', r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));   // v2.727(C-01): 못 읽은 용량은 빈 칸
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -142,7 +142,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.host || '—'}</span> },
     { key: 'cpu', label: 'CPU', align: 'right', render: (r) => `${r.cpu}` },
     { key: 'memGB', label: 'MEM(GB)', align: 'right' },
-    { key: 'diskGB', label: 'DISK(GB)', align: 'right' },
+    { key: 'diskGB', label: 'DISK(GB)', align: 'right', render: (r) => (r.diskGB == null ? <span className="muted" title="디스크 용량을 읽지 못했습니다(0 GB 가 아닙니다)">—</span> : r.diskGB) },   // v2.727(C-01)
     { key: 'ip', label: 'IP', render: (r) => <span style={{ fontSize: 12 }}>{r.ip || '—'}</span> },
     { key: 'powerState', label: '전원', render: (r) => (r.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>) },
   ];

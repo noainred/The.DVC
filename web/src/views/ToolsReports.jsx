@@ -16,11 +16,13 @@ import { dailyReportFailNote } from './dailyReportText.js';
 import { alertChannelsBody } from './alertChannelsBody.js';
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
+import { numOrNull } from '../numOrNull.js'; // v2.727(C-01)
 import { unitText } from './unitText.js';
 import { suggestCell, heldNote } from './rightsizeText.js';
 import Select from '../components/Select.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
-const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
+// v2.727(감사 C-01): 값이 없으면(null — 못 읽은 디스크 용량) '0 GB' 가 아니라 '—'.
+const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${Math.round(n)} GB`); };
 
 // CSV 내보내기 — BOM 필수(엑셀 한글 깨짐 방지).
 function exportCsv(name, head, rows) {
@@ -215,9 +217,10 @@ export function ZombieVms({ scope }) {
       {errBanner(error)}
       <div className="kpis">
         <Kpi label="회수 가능(추정)" value={tb(s.reclaimableGB)} meta={reclaimMeta(s, tb)} accent="var(--green)" />
-        <Kpi label="정지 VM 점유" value={tb(s.poweredOffGB)} />
+        {/* v2.727(C-01): 용량을 못 읽은 VM 은 합계에서 뺐다 — 개수를 말한다(0 으로 채우지 않음). */}
+        <Kpi label="정지 VM 점유" value={tb(s.poweredOffGB)} meta={s.poweredOffStorageUnknown ? `용량 미상 ${s.poweredOffStorageUnknown}대 제외` : undefined} />
         <Kpi label="스냅샷 델타" value={tb(s.snapshotHogGB)} />
-        <Kpi label="템플릿 점유" value={tb(s.templateGB)} />
+        <Kpi label="템플릿 점유" value={tb(s.templateGB)} meta={s.templateStorageUnknown ? `용량 미상 ${s.templateStorageUnknown}대 제외` : undefined} />
         <Kpi label="고아/접근불가" value={s.orphanedCount} unit="대" accent={s.orphanedCount ? 'var(--red)' : undefined} />
       </div>
       <div className="vcd-views" style={{ marginBottom: 10 }}>

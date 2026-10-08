@@ -13,7 +13,7 @@ import { search, flatten } from './palette.js';
 
 const KIND_LABEL = { tool: '기능', page: '화면', tab: '탭' };
 
-export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null }) {
+export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null, includePages = true }) {
   const [q, setQ] = useState('');
   const [cur, setCur] = useState(0);
   const inputRef = useRef(null);
@@ -25,7 +25,7 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null 
     () => visibleTools(TOOLS, { isAdmin, toolsAllowed: JSON.parse(allowKey), hideAdminOnly: true }),
     [isAdmin, allowKey],
   );
-  const res = useMemo(() => search(q, { tools, pageMeta: PAGE_META }), [q, tools]);
+  const res = useMemo(() => search(q, { tools, pageMeta: PAGE_META, pages: includePages }), [q, tools, includePages]);
   const flat = useMemo(() => flatten(res), [res]);
   // v2.613(CATALOG2613-07): 잠긴 도구는 제안에서 빼지 않고(숨김 축은 위 visibleTools) 🔒 와 사유를 붙인다 —
   //   판정은 카드 그리드·V4 내비·기능 찾기와 같은 lockReasonOf(perm 축 포함).

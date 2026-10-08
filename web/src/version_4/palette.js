@@ -48,12 +48,13 @@ const norm = (v) => String(v ?? '').toLowerCase();
  * 검색 결과 — 기능 → 화면 → 탭 순으로 묶어 돌려준다(같은 묶음 안에서는 매칭 점수 순).
  * `limit` 은 묶음별 상한이다. 잘라낸 개수를 함께 돌려준다 — 조용히 자르지 않는다.
  */
-export function search(q, { tools, pageMeta, limit = 6 } = {}) {
+export function search(q, { tools, pageMeta, limit = 6, pages: withPages = true } = {}) {
   const needle = norm(q).trim();
   const toolHits = needle
     ? searchTools(tools || [], needle, { catsOf: (t) => groupLabelsOfTool(t.k) })
     : [];
-  const pages = pageEntries(pageMeta);
+  // v2.727: 개발 포탈 헤더의 ⌘K(사용자 선택 C안)는 V4 화면(#/v4/…)을 제안하지 않는다 — 고르면 셸이 V4 로 바뀐다.
+  const pages = withPages ? pageEntries(pageMeta) : [];
   const tabs = tabEntries();
   const pick = (list) => (needle
     ? list.map((e, i) => ({ e, s: matchScore({ label: e.label, k: e.id, desc: e.group }, needle), i }))

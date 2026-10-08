@@ -9,12 +9,16 @@
  */
 
 import { snapshotReclaimGB } from '../tools/diskTrend.js'; // v2.629 DATA2629-02: 회수량 스냅샷 항 판정 한 벌
+import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
 
 const DAY = 86_400_000;
+// v2.727(감사 C-01): storageGB 는 v2.719 부터 못 읽으면 null 이다 — `|| 0` 은 그 VM 을 '0 GB 점유' 로 보이게 하고 합계를 작게 만든다.
+//   null 은 그대로 싣고(화면은 '—'), 정렬은 값 있는 것 먼저, 합계는 뺀 수를 함께 밝힌다. 보고된 0 은 값(numOrNull 이 지킨다).
 const slim = (v) => ({
   id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
-  powerState: v.powerState, storageGB: v.storageGB || 0, guestOS: v.guestOS || '',
+  powerState: v.powerState, storageGB: numOrNull(v.storageGB), guestOS: v.guestOS || '',
 });
+const byStorageDesc = (a, b) => (b.storageGB ?? -1) - (a.storageGB ?? -1);
 
 export function computeZombies(snap, opts = {}) {
   const now = Number(opts.now) || Date.now();
@@ -29,9 +33,9 @@ export function computeZombies(snap, opts = {}) {
   const poweredOff = vms
     .filter((v) => v.powerState === 'POWERED_OFF' && !v.template && (!v.connectionState || v.connectionState === 'connected'))
     .map(slim)
-    .sort((a, b) => b.storageGB - a.storageGB);
+    .sort(byStorageDesc);
 
-  const templates = vms.filter((v) => v.template).map(slim).sort((a, b) => b.storageGB - a.storageGB);
+  const templates = vms.filter((v) => v.template).map(slim).sort(byStorageDesc);
 
   const snapshotHogs = vms
     .filter((v) => (v.snapshotCount || 0) > 0)
@@ -44,6 +48,10 @@ export function computeZombies(snap, opts = {}) {
     .sort((a, b) => b.snapshotSizeGB - a.snapshotSizeGB);
 
   const sumGB = (arr, k = 'storageGB') => Math.round(arr.reduce((a, x) => a + (x[k] || 0), 0));
+  // v2.727(C-01): 디스크 합계는 값을 읽은 VM 만 — 못 읽은 수를 따로 센다(0 으로 채우지 않는다).
+  const storageUnknownOf = (arr) => arr.filter((x) => x.storageGB == null).length;
+  const poweredOffStorageUnknown = storageUnknownOf(poweredOff);
+  const templateStorageUnknown = storageUnknownOf(templates);
   // v2.629(감사 DATA2629-02 — 재현: 정지 VM 100GB + 스냅샷 60GB → 회수 160GB): 정지 VM 디스크(committed)는 스냅샷 델타를
   //   포함하므로 그 VM 의 스냅샷을 또 더하지 않는다. snapshotHogGB 는 전체 표시 그대로, 겹친 몫은 snapshotInPoweredOffGB 로 밝힌다.
   const offIds = new Set(poweredOff.map((v) => v.id));
@@ -53,7 +61,9 @@ export function computeZombies(snap, opts = {}) {
     summary: {
       orphanedCount: orphaned.length,
       poweredOffCount: poweredOff.length, poweredOffGB: sumGB(poweredOff),
+      poweredOffStorageUnknown,                        // v2.727(C-01): 용량을 못 읽어 poweredOffGB·reclaimableGB 에서 뺀 정지 VM 수
       templateCount: templates.length, templateGB: sumGB(templates),
+      templateStorageUnknown,                          // v2.727(C-01): 용량을 못 읽어 templateGB 에서 뺀 템플릿 수
       snapshotHogCount: snapshotHogs.length, snapshotHogGB: sumGB(snapshotHogs, 'snapshotSizeGB'),
       snapshotInPoweredOffGB: Math.max(0, sumGB(snapshotHogs, 'snapshotSizeGB') - hogReclaimGB),   // v2.629 DATA2629-02
       // 회수 가능 추정: 정지 VM 디스크 + (정지 VM 에 속하지 않은) 스냅샷 델타(템플릿은 보존 가능성이 높아 제외).

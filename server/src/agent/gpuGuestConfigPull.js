@@ -51,6 +51,17 @@ async function _pullGpuGuestConfigNow() {
       if (_logChange('404', `${c.kind}: ${c.reason}`)) console.warn(`[gpu-guest-config] ${c.reason}`);
       return { ok: false, kind: c.kind, reason: c.reason, error: c.reason };
     }
+    // v2.727(감사 D-01): 중앙 배포 파일 손상(503 settingsUnreadable)은 '중앙 지정 없음' 이 아니다 — 로컬 설정(직전 적용분)을 그대로 두고
+    //   사유를 상태(last.reason)·콘솔에 남긴다. 예전에는 중앙이 200 assigned:false 를 내려 구분할 수 없었다.
+    if (res.status === 503) {
+      let b = null; try { b = await res.json(); } catch { b = null; }
+      if (b && b.reason === 'settingsUnreadable') {
+        const detail = String(b.detail || '중앙 GPU 게스트 배포 파일을 읽지 못했습니다').slice(0, 300);
+        last = { ...(last || {}), at: Date.now(), applied: false, ok: false, reason: 'settingsUnreadable', error: detail };
+        if (_logChange('unreadable', detail)) console.warn(`[gpu-guest-config] 중앙 배포 설정을 받지 못했습니다(중앙 설정 파일 손상 — 직전 적용분 유지): ${detail}`);
+        return { ok: false, reason: 'settingsUnreadable', error: detail };
+      }
+    }
     if (!res.ok) throw new Error(`gpu-guest-config <- ${res.status}`);
     const body = await res.json();
     if (!body || !body.assigned || !body.settings) { last = { at: Date.now(), applied: false, reason: '중앙 지정 없음' }; return { ok: true, applied: false }; }

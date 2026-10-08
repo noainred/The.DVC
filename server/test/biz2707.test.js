@@ -177,3 +177,19 @@ test('⑧ 배선 — 라우트·도구 키·카탈로그', () => {
   const r = fs.readFileSync(new URL('../src/routes/api/costShowback.js', import.meta.url), 'utf8');
   assert.match(r, /api\.put\('\/tools\/cost-showback\/settings', adminOnly, fleetOnly/);
 });
+
+// v2.727(감사 C-04): 할당 일부를 모르는 VM 의 비용은 부분 합이다 — 행·그룹·노트가 그 사실을 싣는다.
+test('⑥ 비용 — thin 여유 모름(provisionedPartial) · vCPU 모름(partialCost) · 그룹 partialVms · 아는 VM 은 표지 없음', () => {
+  const s = { ...cs.DEFAULTS, vcpu: 10, ramGB: 2, storageGB: 0.5, storageBasis: 'provisioned', offPolicy: 'full' };
+  const r = cost.analyzeCost({ vcenters: [{ id: 'vc1', name: 'VC1' }], vms: [
+    vm('ok', 'POWERED_ON', { cpuCount: 4, memMB: 8192, storageGB: 100, uncommittedGB: 50 }),
+    vm('thin', 'POWERED_ON', { cpuCount: 4, memMB: 8192, storageGB: 100, uncommittedGB: null }),
+    vm('cpu', 'POWERED_ON', { cpuCount: null, memMB: 8192, storageGB: 100, uncommittedGB: 0 }),
+  ] }, s);
+  assert.equal(r.notes.provisionedPartial, 1); assert.equal(r.notes.partialVms, 2);
+  assert.equal(r.groups[0].partialVms, 2);
+  const by = Object.fromEntries(r.vms.map((v) => [v.name, v]));
+  assert.equal(by.thin.provisionedPartial, true); assert.equal(by.thin.partialCost, true); assert.equal(by.thin.storageGB, 100, '사용량만으로 만든 할당량(표지 있음)');
+  assert.equal(by.cpu.partialCost, true); assert.equal(by.cpu.cost, 8192 / 1024 * 2 + 100 * 0.5, '아는 항목만의 합');
+  assert.equal('partialCost' in by.ok, false); assert.equal('provisionedPartial' in by.ok, false);
+});

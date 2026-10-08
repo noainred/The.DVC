@@ -172,8 +172,8 @@ export function registerOverviewCards(api) {
         // v2.682 R3D-01: 카드도 못 읽음·오래됨·일부만 읽음을 싣는다 — 예전에는 measured 만 실어 부분 합을 전체처럼 보였다.
         power = { totalWatts: p.totalWatts,
           servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
-          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, outputOnly: p.network.outputOnly },
-          storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale },
+          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, noTime: p.network.noTime, outputOnly: p.network.outputOnly }, // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
+          storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale, noTime: p.storage.noTime },
           ...cardErrorsFor(p.errors, admin) };
       }
       return {

@@ -9,9 +9,12 @@
  *    라이선스 만료 도구가 같이 쓴다(`variant` 로 감싸는 모양만 다르다).
  *  · 등록 목록 403(범위 제한 관리자)·읽기 실패를 '0대 등록' 으로 칠하지 않는다(v2.611·v2.612 규약 — `hzSummary`).
  *  · 접속처(host·계정·도메인)가 바뀌면 저장 비밀번호를 승계하지 않는다 — 서버가 알려 주면 폼을 비우지 않고 그 사실을 말한다(v2.607).
+ *  · v2.727(감사 E-01): `delJson` 은 400 본문(`{ok:false, reason}`)을 **돌려준다**(throw 하지 않는다 — api.js sendJson). 삭제도 저장처럼
+ *    `r.ok` 를 본다. 예전에는 반환값을 보지 않아 삭제가 거부돼도 목록만 다시 읽고 화면은 아무 말이 없었다(행이 그대로 남는다).
+ *  · v2.727(감사 E-09): 목록 조회는 세대 번호로 늦게 온 이전 응답을 버린다(연속 changed()·언마운트).
  * ⚠ 훅은 전부 조기 return 위에(React #310).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { STable } from '../components/STable.jsx';
@@ -40,12 +43,15 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
   const [busy, setBusy] = useState(false);
   const [sessOpen, setSessOpen] = useState(false);
 
+  // v2.727(감사 E-09): 세대 번호 — 마지막으로 부른 load() 의 응답만 받는다. 언마운트 뒤 도착하는 응답도 버린다.
+  const loadSeq = useRef(0);
   const load = () => {
+    const my = ++loadSeq.current;
     fetchJson('/admin/horizon')
-      .then((r) => { setHz(r.servers || []); setHzDenied(false); setHzErr(null); })
-      .catch((e) => { if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e) || '알 수 없는 오류'); });
+      .then((r) => { if (my !== loadSeq.current) return; setHz(r.servers || []); setHzDenied(false); setHzErr(null); })
+      .catch((e) => { if (my !== loadSeq.current) return; if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e) || '알 수 없는 오류'); });
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); return () => { loadSeq.current += 1; }; }, []);
   const changed = () => { load(); onChanged?.(); };
 
   const hzSet = (k) => (e) => setHzForm((f) => ({ ...f, [k]: e.target.value }));
@@ -71,7 +77,15 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
   };
   const hzDel = async (id) => {
     if (!window.confirm(`Horizon 서버 '${id}' 등록을 삭제할까요?`)) return;
-    try { await delJson(`/admin/horizon/${encodeURIComponent(id)}`); changed(); } catch (e) { setHzMsg({ ok: false, text: e.message }); }
+    setBusy(true); setHzMsg(null);
+    try {
+      // v2.727(감사 E-01): 400 본문은 돌아온다 — r.ok 를 본다(hzSave 와 같은 규칙). 거부됐어도 목록은 다시 읽는다(화면 = 실제 등록부).
+      const r = await delJson(`/admin/horizon/${encodeURIComponent(id)}`);
+      if (r?.ok === false) setHzMsg({ ok: false, text: r.reason || '삭제하지 못했습니다.' });
+      else setHzMsg({ ok: true, text: '삭제했습니다.' });
+      changed();
+    } catch (e) { setHzMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
   };
 
   if (hzDenied) {
@@ -95,7 +109,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
                   <td><b>{s.id}</b></td><td>{s.name}</td><td className="muted">{s.host}</td><td className="muted">{s.username}</td><td className="muted">{s.domain}</td>
                   <td className="right nowrap">
                     <button className="tab" disabled={busy} onClick={() => { setHzForm({ id: s.id, name: s.name, host: s.host, username: s.username, password: '', domain: s.domain }); }}>편집</button>{' '}
-                    <button className="tab" style={{ color: 'var(--red)' }} onClick={() => hzDel(s.id)}>삭제</button>
+                    <button className="tab" style={{ color: 'var(--red)' }} disabled={busy} onClick={() => hzDel(s.id)}>삭제</button>
                   </td>
                 </tr>
               ))}

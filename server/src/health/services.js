@@ -379,7 +379,7 @@ export function getServiceCheck(opts = {}) {
     skippedOnEdge,
     // push/pull 워커는 이 화면의 대상이 아니다 — 엣지 로그 화면(특수기능 › 엣지 로그)이 그 상태를 보여 준다.
     notCovered,
-    note: `점검 대상: 고정 항목 + 로컬 폴러 ${specs.length - skippedOnEdge.length}개(edgelog/spec.js collect.* + 중앙 전용 ${CENTRAL_ONLY_SPEC.length}개${skippedOnEdge.length ? ` — 엣지 노드라 ${skippedOnEdge.length}개 제외` : ''}). 대상 밖: push/pull 워커 ${notCovered.length}개(엣지 로그 화면에서 본다).`,
+    note: `점검 대상: 고정 항목 + 로컬 폴러 ${specs.length - skippedOnEdge.length}개(edgelog/spec.js collect.* + 중앙 전용 ${CENTRAL_ONLY_SPEC.length}개${skippedOnEdge.length ? ` — 엣지 노드라 ${skippedOnEdge.length}개 제외` : ''}). 대상 밖: push/pull 워커${notCovered.some((k) => !/^(push|pull)\./.test(k)) ? '·메일 발송 상태' : ''} ${notCovered.length}개(엣지 로그 화면에서 본다).`,
   };
 
   const summary = {

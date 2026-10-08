@@ -75,3 +75,14 @@ test('④ 범위 — vcenterIds 밖은 행도 합계도 없다 · 수집 경로�
   assert.match(soap, /<costUnit>/);
   assert.match(fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8'), /INV_NUM_KEYS = \[[^\]]*'cpuSockets'/);
 });
+
+// v2.727(감사 C-02): used 를 보고하지 않은 코어 라이선스는 '보고 0' 이 아니다 — 합·차이는 null, 개수로 밝힌다.
+test('⑤ 보고값 미상 — used null 인 코어 라이선스가 있으면 reportedCoreUsed·reportedDiff 는 null + reportedUsedUnknown', () => {
+  const snap = { vcenters: [{ id: 'a', name: 'A', licenses: [{ costUnit: 'core', total: 200 }] }],   // used 없음(vim25 optional)
+    hosts: [{ vcenterId: 'a', name: 'h1', cpuSockets: 2, cpuCores: 64, connectionState: 'CONNECTED' }], datastores: [] };
+  const v = analyzeCoreLicense(snap).vcenters[0];
+  assert.equal(v.reportedCoreUsed, null); assert.equal(v.reportedDiff, null, '예전엔 0 − 64 = −64 라는 없는 차이');
+  assert.equal(v.reportedUsedUnknown, 1); assert.equal(v.reportedCoreTotal, 200);
+  const z = analyzeCoreLicense({ ...snap, vcenters: [{ id: 'a', name: 'A', licenses: [{ costUnit: 'core', total: 200, used: 0 }] }] }).vcenters[0];
+  assert.equal(z.reportedCoreUsed, 0, '보고된 0 은 값'); assert.equal(z.reportedDiff, -64);
+});

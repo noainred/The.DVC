@@ -18,6 +18,7 @@ export function normalizeWithheld(x) {
       staleVcenters: cnt(x.staleVcenters), byReason: x.byReason && typeof x.byReason === 'object' ? x.byReason : {},
       totalWithheld: !!x.totalWithheld, totalPartial: !!x.totalPartial,
       maintenanceExcluded: cnt(x.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
+      dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),   // v2.727(C-01)
     };
   }
   const ss = x.staleSkipped || {}; const vs = x.vmperfStale || {};
@@ -25,6 +26,7 @@ export function normalizeWithheld(x) {
     staleVcenters: cnt(ss.vcenters), byReason: ss.byReason && typeof ss.byReason === 'object' ? ss.byReason : {},
     totalWithheld: !!vs.totalWithheld, totalPartial: !!vs.totalPartial,
     maintenanceExcluded: cnt(vs.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
+    dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),     // v2.727(C-01)
   };
 }
 
@@ -48,5 +50,8 @@ export function samplerWithheldNote(x, { totalView = true } = {}) {
   if (totalView && n.totalWithheld) out.push('그래서 전체 합계는 이번 주기에 적재하지 않았습니다(부분 합은 거짓 하락이 됩니다)');
   else if (totalView && n.totalPartial) out.push(`전체 합계는 점검중 vCenter ${n.maintenanceExcluded || ''}${n.maintenanceExcluded ? '곳을' : '를'} 뺀 부분 합입니다`);
   if (n.vmStatsSkipped) out.push(`라이트사이징 누적에서 VM ${n.vmStatsSkipped}대를 뺐습니다`);
+  // v2.727(C-01): 결측을 0 으로 채우지 않고 뺀 사실 — 추이의 마지막 점이 '못 읽은 장비를 뺀 값' 임을 말한다.
+  if (n.vmStorageUnknown) out.push(`스토리지 용량을 읽지 못한 VM ${n.vmStorageUnknown}대는 VM 디스크 계열(할당·커밋·정지·스냅샷)에서 뺐습니다 — 0 으로 채우지 않았습니다`);
+  if (n.dsUsedUnknown) out.push(`사용량을 읽지 못한 데이터스토어 ${n.dsUsedUnknown}개는 용량·사용 계열에서 뺐습니다`);
   return out.length ? `${out.join('. ')}.` : null;
 }

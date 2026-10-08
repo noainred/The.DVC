@@ -10,9 +10,13 @@
  *    `superAdmin:true` 로 접힌다, auth/roles.js). 전 사용자 화면을 바꾸는 동작이라 감사 로그를 남긴다.
  * 응답의 `categories`·`overrides` 는 특수 기능 분류 설정(toolcats)에서 읽는다 — 사이드바의 '특수 기능' 하위(분류 바로가기)와 도구 이름
  * 덮어쓰기를 한 번의 조회로 받기 위해서다(화면이 `/admin/tool-categories` 를 또 부르지 않게).
+ * v2.727(감사 A-09): GET 두 핸들러도 `fail()` 로 감싼다 — 저장소의 400-status 오류(빈 사용자 이름)가 500 으로 나갔다.
+ * v2.727(감사 A-10·B-04): `distributed.by`·`prev.by`(배포자 = 슈퍼 관리자 계정명)는 **admin 역할에게만** 싣는다(데모 계정 제외) —
+ *   viewer 응답에 관리자 계정명을 실을 이유가 없다(v2.500 L-2 계정 열거 단서). 필드를 생략하고 화면은 '슈퍼 관리자' 로 말한다.
  */
 import { requireRole, listUsers } from '../../auth/auth.js';
 import { isSuperAdmin } from '../../auth/roles.js';
+import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.727(감사 A-10·B-04)
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { clientIp } from '../../util/rateLimit.js';
@@ -30,6 +34,8 @@ function requireSuperAdmin(req, res, next) {
 }
 
 const userOf = (req) => req.user?.username || 'anonymous';
+/** 배포자·보관자 계정명을 응답에 실어도 되는 요청인가(v2.727 A-10) — admin 역할 + 데모 계정 아님. */
+const seesNames = (req) => req.user?.role === 'admin' && !isDemoGuest(req.user);
 const audit = (req, action, target, detail = '') => logAudit({ user: userOf(req), action, target, detail, ip: clientIp(req) });
 const localUsernames = () => listUsers().map((u) => u.username);
 
@@ -58,28 +64,31 @@ function catalogBits() {
 }
 
 export function registerUserMenu(api) {
-  api.get('/user-menu', (req, res) => {
-    const me = userMenuOf(userOf(req));
-    const d = distributedMenu();
-    res.set('Cache-Control', 'no-store');
-    res.json({
-      ok: true,
-      username: userOf(req),
-      mine: me.mine,
-      updatedAt: me.updatedAt,
-      prev: me.prev,
-      distributed: d ? { menu: d.menu, at: d.at, by: d.by, mode: d.mode } : null,
-      canDistribute: isSuperAdmin(req.user),
-      limits: LIMITS,
-      ...catalogBits(),
-    });
+  api.get('/user-menu', (req, res, next) => {
+    try {
+      const me = userMenuOf(userOf(req));
+      const d = distributedMenu();
+      const names = seesNames(req);
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        username: userOf(req),
+        mine: me.mine,
+        updatedAt: me.updatedAt,
+        prev: me.prev ? { at: me.prev.at, mode: me.prev.mode, ...(names ? { by: me.prev.by } : {}) } : null,
+        distributed: d ? { menu: d.menu, at: d.at, mode: d.mode, ...(names ? { by: d.by } : {}) } : null,
+        canDistribute: isSuperAdmin(req.user),
+        limits: LIMITS,
+        ...catalogBits(),
+      });
+    } catch (e) { fail(res, e, next); }
   });
 
   api.put('/user-menu', (req, res, next) => {
     try {
       const r = saveUserMenu(userOf(req), req.body?.menu ?? req.body);
-      audit(req, 'user-menu.save', userOf(req), `groups=${r.menu.groups.length}${r.dedup ? ` dedup=${r.dedup}` : ''}${r.emptyDropped ? ` emptyDropped=${r.emptyDropped}` : ''}`);
-      res.json({ ok: true, menu: r.menu, dedup: r.dedup, emptyDropped: r.emptyDropped });
+      audit(req, 'user-menu.save', userOf(req), `groups=${r.menu.groups.length}${r.dedup ? ` dedup=${r.dedup}` : ''}${r.emptyDropped ? ` emptyDropped=${r.emptyDropped}` : ''}${r.prevKept ? ' prev=save' : ''}`);
+      res.json({ ok: true, menu: r.menu, dedup: r.dedup, emptyDropped: r.emptyDropped, prevKept: r.prevKept });
     } catch (e) { fail(res, e, next); }
   });
 
@@ -100,13 +109,15 @@ export function registerUserMenu(api) {
     } catch (e) { fail(res, e, next); }
   });
 
-  api.get('/user-menu/distribute', adminOnly, menuFleetOnly, requireSuperAdmin, (req, res) => {
-    const st = distributeStatus(localUsernames());
-    res.json({
-      ok: true, users: st.users, custom: st.custom, customKnown: st.customKnown,
-      distributed: st.distributed ? { at: st.distributed.at, by: st.distributed.by, mode: st.distributed.mode, counts: st.distributed.counts, groups: st.distributed.menu.groups.length } : null,
-      history: st.history, modes: MODES, hasMine: !!userMenuOf(userOf(req)).mine,
-    });
+  api.get('/user-menu/distribute', adminOnly, menuFleetOnly, requireSuperAdmin, (req, res, next) => {
+    try {
+      const st = distributeStatus(localUsernames());
+      res.json({
+        ok: true, users: st.users, custom: st.custom, customKnown: st.customKnown,
+        distributed: st.distributed ? { at: st.distributed.at, by: st.distributed.by, mode: st.distributed.mode, counts: st.distributed.counts, groups: st.distributed.menu.groups.length } : null,
+        history: st.history, modes: MODES, hasMine: !!userMenuOf(userOf(req)).mine,
+      });
+    } catch (e) { fail(res, e, next); }
   });
 
   api.post('/user-menu/distribute', adminOnly, menuFleetOnly, requireSuperAdmin, (req, res, next) => {

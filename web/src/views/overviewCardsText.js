@@ -132,12 +132,14 @@ export function powerCardMeta(p) {
   }
   const unread = n(p.servers?.unread) + n(p.network?.unread) + n(p.storage?.unread);
   const stale = n(p.network?.stale) + n(p.storage?.stale);
+  const noTime = n(p.network?.noTime) + n(p.storage?.noTime);   // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
   const partial = n(p.network?.partial) + n(p.storage?.partial);
   const bits = [devicesKnown ? `측정 ${countText(measured)}/${countText(devices)}대` : `측정 ${countText(measured)}대`];
   if (unread) bits.push(`못 읽음 ${countText(unread)}`);
   if (stale) bits.push(`오래된 값 ${countText(stale)}`);
+  if (noTime) bits.push(`시각 없음 ${countText(noTime)}`);
   if (partial) bits.push(`일부만 읽음 ${countText(partial)}`);
-  if (unread || stale || partial) bits.push('읽은 장비만의 합');
+  if (unread || stale || noTime || partial) bits.push('읽은 장비만의 합');
   return `${head} · ${bits.join(' · ')}`;
 }
 /** 전력 카테고리 문구 — 측정 대수와 뺀 대수를 함께. */
@@ -161,6 +163,7 @@ export function powerCatNote(cat, x) {
   if (cat === 'storage' && x.partial) miss.push(`일부 부품만 읽음 ${x.partial}(합계가 실제보다 작음)`);
   if (x.unread) miss.push(`못 읽음 ${x.unread}`);
   if (x.stale) miss.push(`오래된 값 ${x.stale}`);
+  if (x.noTime) miss.push(`수집 시각 없음 ${x.noTime}`);   // v2.727(감사 C-06)
   if (cat === 'storage' && x.unsupported) miss.push(`수집 경로 없음 ${x.unsupported}`);
   if (cat === 'network' && x.outputOnly) miss.push(`출력 전력만 ${x.outputOnly}`);
   return `측정 ${countText(x.measured)}/${countText(x.devices)}대${miss.length ? ` · ${miss.join(' · ')}` : ''}`;
@@ -175,6 +178,7 @@ export const STORAGE_POWER_REASON = Object.freeze({
   'skipped': '수집 시간 예산이 모자라 이번 주기에 건너뜀',
   'parse-failed': '전원 출력 해석 실패',
   stale: '6시간보다 오래된 값',
+  'no-time': '값은 있으나 수집 시각이 없음(언제 값인지 몰라 합계에서 뺌 — 수집기 시각 필드 확인)',   // v2.727(감사 C-06)
 });
 export function storagePowerReasonText(code) { return STORAGE_POWER_REASON[code] || String(code || '사유 미상'); }
 /** 사유별 개수 → '응답에 전원 필드 없음 12 · …'(많은 순). */

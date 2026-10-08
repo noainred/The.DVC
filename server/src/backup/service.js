@@ -133,9 +133,18 @@ function fingerprintContent(name, content) {
   const extra = MIXED_EXTRA_RUN_FIELDS.get(name);
   return JSON.stringify(stripRunFields(extra ? extra(obj) : obj));
 }
+/**
+ * v2.727(감사 B-07): 설정이 아니라 **사용자 데이터**인데 상태 파일도 아닌 것 — 게시판 글·댓글·공감(`board.json`)과 접속 공지(`notices.json`).
+ * 백업 번들에는 들어간다(복원해야 할 사용자 데이터라 `isRuntimeStateFile` 로 분류하지 않는다 — 그 판정은 엣지 설정 push 에서도
+ * 뺀다). 다만 '설정 변경 시 자동 백업' 의 **중복 판정 지문**에서는 뺀다 — 글·공감마다 지문이 바뀌면 change 백업이 생겨 자동
+ * 사유 보관 슬롯(10)의 실제 설정 변경 백업을 밀어낸다(v2.590 P1 과 같은 이유). ⚠ 변경 감시의 디바운스 자체(backup/settings.js
+ * startWatcher)는 `isRuntimeStateFile` 만 보므로 이 파일의 쓰기도 10초 디바운스를 깨운다 — 그 백업은 지문이 같아 생략된다.
+ */
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json']);
+export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');
-  for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && n !== SKIPPED_META && !isRuntimeStateFile(n)).sort()) {
+  for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && n !== SKIPPED_META && !isRuntimeStateFile(n) && !isChangeWatchExcluded(n)).sort()) {
     h.update(name); h.update('\0'); h.update(fingerprintContent(name, files[name])); h.update('\0');
   }
   return h.digest('hex');

@@ -64,7 +64,7 @@ export default function Vms({ filters }) {
             <div className="card kpi"><div className="label">평균 CPU 사용량</div><div className="value">{unitText(t.avgCpuUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.cpu)}</div></div>
             <div className="card kpi"><div className="label">할당 메모리 합계</div><div className="value" style={{ color: 'var(--purple)' }}>{fmt(t.ramGB)}<small> GB</small></div><div className="meta">≈ {(t.ramGB / 1024).toFixed(1)} TB</div></div>
             <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{unitText(t.avgMemUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.mem)}</div></div>
-            <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB</div></div>
+            <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB{t.storageUnknown ? ` · 용량 미상 ${fmt(t.storageUnknown)}대 제외` : ''}</div></div>
             <div className="card kpi"><div className="label">평균 디스크 사용률</div><div className="value">{unitText(t.avgDiskUsagePct, '%')}</div><div className="meta">프로비저닝 대비 사용</div></div>
             <div className="card kpi" role="button" tabIndex={0}
               style={{ cursor: 'pointer', outline: (gpuOnly || gpuType) ? '1px solid var(--green)' : 'none' }}

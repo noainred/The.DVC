@@ -6,6 +6,11 @@ import { dropVcCache as dropContention } from '../contention/cache.js';
 import { dropVcCache as dropDsCfg } from '../dscfg/collect.js';
 import { dropVcCache as dropClusterCfg } from '../clustercfg/collect.js';
 import { dropVcCache as dropTags } from '../tags/collect.js';
+// v2.727(감사 F-04): 부가 갱신 재시도 추적기(v2.721 S1-03)도 함께 버린다 — vmcfg·contention 의 `dropVcRetry` 는 정의만 있고 호출부가 0 이라
+//   삭제된 vCenter 의 항목이 재시작까지 남고, 같은 id 로 접속처를 바꾸면 옛 moref 의 retryAt 이 새 vCenter 의 같은 moref 를 최대 갱신 주기만큼
+//   쉬게 했다(dscfg·clustercfg 는 자기 dropVcCache 안에서 지운다 — 형제 비대칭). 순환 없음: 두 collect.js 는 config·parse·cache·dscfg/collect 만 import 한다.
+import { dropVcRetry as dropVmCfgRetry } from '../vmcfg/collect.js';
+import { dropVcRetry as dropContentionRetry } from '../contention/collect.js';
 const _byVc = new Map();
 const _status = new Map();
 // v2.720(감사 R1-02): 요청 시한으로 계속 못 읽는 호스트 — vcId -> Map(ref -> { count, retryAt }).
@@ -83,6 +88,7 @@ const _accessByVc = new Map(); // vcId -> 접속처 키
 const accessKeyOf = (vc) => String(vc?.host ?? '').trim().toLowerCase();
 const CACHE_DROPPERS = [
   dropVcCache, dropVmCfg, dropContention, dropDsCfg, dropClusterCfg, dropTags,
+  dropVmCfgRetry, dropContentionRetry, // v2.727(F-04)
 ];
 export function dropVcConfigCaches(vcId) { for (const d of CACHE_DROPPERS) d(vcId); }
 /** @param {Array<{id:string, host?:string}>} vcenters 등록부 전체 @returns {{dropped:string[]}} */

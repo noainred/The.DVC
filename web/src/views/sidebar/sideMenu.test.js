@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { MENU_GROUPS, locate, visibleMenu, hashOf } from '../topMenu.js';
 import { TOOLS } from '../specialToolsList.js';
-import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible } from './sideMenu.js';
+import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible, retryDelayMs, MENU_RETRY_MS, nextOpenGroup } from './sideMenu.js';
 
 describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
   it('저장된 메뉴가 없으면 포탈 기본 메뉴 그대로다', () => {
@@ -89,5 +89,51 @@ describe('missingDefaults · toolEligible · itemKey', () => {
     expect(itemKey({ tool: 'serveranalysis' })).toBe('tool:serveranalysis');
     expect(itemKey({ tool: 'serveranalysis', seg: 'baremetal' })).toBe('tool:serveranalysis/baremetal');
     expect(itemKey({})).toBe('');
+  });
+});
+
+describe('v2.727 감사 A-01 — 조회 실패는 포탈 기본 메뉴가 아니다', () => {
+  it('failed 면 source 는 unknown 이고 그룹은 기본(또는 마지막으로 읽은 메뉴)으로 그린다', () => {
+    const r = resolveMenu({ mine: null, distributed: null, catalog: TOOLS, failed: true });
+    expect(r.source).toBe('unknown');
+    expect(r.groups).toBe(MENU_GROUPS);
+    const kept = resolveMenu({ mine: defaultMenu(), catalog: TOOLS, failed: true });
+    expect(kept.source).toBe('unknown');
+    expect(kept.groups.map((g) => g.id)).toEqual(MENU_GROUPS.map((g) => g.id));
+    expect(resolveMenu({ mine: null, catalog: TOOLS, failed: false }).source).toBe('default');
+    expect(resolveMenu({ mine: null, catalog: TOOLS }).source).toBe('default');
+  });
+  it('재시도 간격은 5초 → 15초 → 60초 상한', () => {
+    expect(MENU_RETRY_MS).toEqual([5000, 15000, 60000]);
+    expect([0, 1, 2, 3, 10].map(retryDelayMs)).toEqual([5000, 15000, 60000, 60000, 60000]);
+    expect(retryDelayMs(-1)).toBe(5000);
+    expect(retryDelayMs(undefined)).toBe(5000);
+  });
+});
+
+describe('v2.727 감사 A-06 — 특수 기능이 하위 항목인 메뉴에서의 locate', () => {
+  it('도구는 자기 자리가 먼저고, 메뉴에 없는 도구만 특수 기능 하위 항목으로 떨어진다(그룹 id 를 박지 않는다)', () => {
+    const mine = { v: 1, groups: [{ id: 'custom-1', label: '내 그룹', children: [{ tab: 'tools' }, { tool: 'storage-mon' }] }] };
+    const { groups } = resolveMenu({ mine, catalog: TOOLS });
+    expect(groups.map((g) => g.id)).toEqual(['custom-1']);
+    expect(locate('tools', '#/tools/storage-mon', groups)).toEqual({ group: 'custom-1', child: 'mon' });
+    expect(locate('tools', '#/tools/storage-mon/faults', groups)).toEqual({ group: 'custom-1', child: 'mon' });
+    expect(locate('tools', '#/tools/pdu', groups)).toEqual({ group: 'custom-1', child: 'tools' });
+    expect(locate('tools', '#/tools', groups)).toEqual({ group: 'custom-1', child: 'tools' });
+    // 특수 기능 항목이 아예 없는 메뉴에서는 모르는 도구가 어느 그룹도 켜지 않는다(없는 'tools' 그룹을 지어내지 않는다)
+    const none = resolveMenu({ mine: { v: 1, groups: [{ id: 'overview', tab: 'overview' }] }, catalog: TOOLS }).groups;
+    expect(locate('tools', '#/tools/pdu', none)).toEqual({ group: null, child: null });
+  });
+});
+
+describe('sideMenu.nextOpenGroup(v2.727) — 아코디언: 펼친 그룹은 하나', () => {
+  it('닫힌 그룹을 누르면 그 그룹만 열린다(이전 그룹은 닫힌다)', () => {
+    expect(nextOpenGroup('server', 'storage')).toBe('storage');
+    expect(nextOpenGroup(null, 'storage')).toBe('storage');
+  });
+  it('열린 그룹을 다시 누르면 닫힌다(0개 허용) · 빈 id 는 변화 없음', () => {
+    expect(nextOpenGroup('server', 'server')).toBe(null);
+    expect(nextOpenGroup('server', '')).toBe('server');
+    expect(nextOpenGroup(undefined, null)).toBe(null);
   });
 });

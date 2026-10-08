@@ -355,7 +355,8 @@ export function headline(mode, ctx = {}, focusKey = null) {
   if (mode === 'group') {
     const rows = list.map((s) => ({ s, l: lastOf(s), ch: changeOf(s) }));
     const read = rows.filter((r) => r.l && r.l.pct != null);
-    if (!read.length) return { main: `${list.length}개 그룹 중 사용률을 읽은 그룹이 **—** 없습니다.`, sub: '온전한 기록이 쌓이면 보입니다.' };
+    // v2.727(감사 E-07): 문장형 머리글에는 '—' 를 끼우지 않는다 — '읽은 그룹이 — 없습니다' 는 기호 오류처럼 읽힌다(값형 '변화는 — 입니다' 만 유지).
+    if (!read.length) return { main: `${list.length}개 그룹 중 사용률을 읽은 그룹이 없습니다.`, sub: '온전한 기록이 쌓이면 보입니다.' };
     const top = [...read].sort((a, b) => b.l.pct - a.l.pct)[0];
     const warn = read.filter((r) => r.l.pct >= WARN_PCT).length;
     const grow = rows.filter((r) => r.ch != null).sort((a, b) => b.ch - a.ch)[0];
@@ -373,7 +374,7 @@ export function headline(mode, ctx = {}, focusKey = null) {
   return {
     main: grow
       ? `${scope} ${list.length}대 중 사용량이 가장 많이 늘어난 서버는 **${grow.s.name} ${changeText(grow.ch)}**입니다.`
-      : `${scope} ${list.length}대 중 기간 변화를 계산할 수 있는 서버가 **—** 없습니다.`,
+      : `${scope} ${list.length}대 중 기간 변화를 계산할 수 있는 서버가 없습니다.`,
     sub: `75% 이상 ${warn}대 · 90% 이상 ${crit}대 · 선 색은 소속 그룹 색입니다.`,
   };
 }

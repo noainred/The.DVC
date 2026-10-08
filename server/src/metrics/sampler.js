@@ -116,24 +116,42 @@ export function vmAllocRows(snap, settings) {
     if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0, diskProv: 0, diskUsed: 0, diskOff: 0, snapGB: 0, snapOnGB: 0 }; agg.set(id, e); }
     return e;
   };
+  // v2.727(감사 C-01 — 재현 c01_sampler.mjs: VM a 500/100 + VM b storageGB·uncommittedGB null → prov 600·used 500·off 500 이
+  //   **표지 없이** 적재됐다): soapClient.js 는 v2.719(B1-09)부터 summary.storage 를 못 읽은 VM 의 storageGB/uncommittedGB 를
+  //   null 로 싣는데 여기가 `Number(null) || 0` 으로 0 을 더해 vm_disk_* 계열이 못 읽은 VM 만큼 **조용히 작게** 쌓였다(되돌릴 수 없다).
+  //   DS 쪽(dsUsedUnknown — 아래)과 같은 규칙으로 VM 을 세어 lastRun 에 싣는다. 판정:
+  //   · committed(storageGB)를 모르는 VM 은 디스크 계열 **다섯(prov/used/off/snap/snapOn) 전부에서 뺀다** — 다섯 계열이 같은 VM 집합을
+  //     말해야 '회수 = off + snapOn' · '사용 ÷ 할당' 이 뜻을 갖는다. 스냅샷 크기(layoutEx)는 알 수 있어도 그 델타는 그 VM 의
+  //     committed 에 이미 든 바이트라 committed 없이 더하면 계열끼리 짝이 안 맞는다.
+  //   · uncommitted 만 모르는 VM 은 committed 를 prov/used/off/snap 에 더한다 — prov 에서도 빼면 그 vCenter 행이 prov < used 가 되어
+  //     (prov = used + uncommitted 항등식 위반) 차트가 '미커밋 음수' 라는 거짓을 그린다. prov 는 그 VM 의 uncommitted 만큼 하한이므로
+  //     같은 카운터(vmStorageUnknown)로 세어 행이 부분 합임을 밝힌다(사유는 vmStorageUnknownBy 로 나눈다).
+  //   ⚠ 계열 전체를 보류(행을 안 만듦)하지 않는다 — 영구 결측 VM 하나가 그 vCenter 계열을 영원히 비운다(v2.682 R3A-03 교훈).
+  //   ⚠ 보고된 0 은 값이다 — numOrNull 은 0 을 지키고 null·''·NaN 만 결측으로 본다.
+  let vmStorageUnknown = 0;
+  const vmStorageUnknownBy = { committed: 0, uncommitted: 0 };
   for (const v of snap.vms || []) {
     if (v.template) continue;
     if (!fresh(v.vcenterId)) continue;
     // 디스크 트렌드(v2.446) — 용량 리포트 › 디스크 트렌드의 '할당(프로비저닝)/커밋/정지 VM/스냅샷' 계열.
     // 전원 OFF VM 도 스토리지는 점유하므로 CPU/MEM 과 달리 **전원 무관하게** 집계한다.
     if (vmperfTracks(v.vcenterId, settings)) {
-      const committed = Number(v.storageGB) || 0;
-      const uncommitted = Number(v.uncommittedGB) || 0;
+      const committed = numOrNull(v.storageGB);
+      const uncommitted = numOrNull(v.uncommittedGB);
       const snapGB = Number(v.snapshotSizeGB) || 0;
-      for (const id of (settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId])) {
-        const e = bucket(id);
-        e.diskProv += committed + uncommitted;
-        e.diskUsed += committed;
-        if (v.powerState !== 'POWERED_ON') e.diskOff += committed;
-        e.snapGB += snapGB;
-        // v2.630(감사 DATA2630-01): 전원 켜진 VM 의 스냅샷만 — 정지 VM 의 스냅샷 델타는 diskOff(committed)에 이미 들어 있다.
-        //   회수 가능 시계열은 diskOff + snapOn 이어야 현재값(diskTrend.snapshotReclaimGB 의 offIds 판정 '!== POWERED_ON')과 같은 뜻이다.
-        if (v.powerState === 'POWERED_ON') e.snapOnGB += snapGB;
+      if (committed == null) { vmStorageUnknown += 1; vmStorageUnknownBy.committed += 1; }
+      else {
+        if (uncommitted == null) { vmStorageUnknown += 1; vmStorageUnknownBy.uncommitted += 1; }
+        for (const id of (settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId])) {
+          const e = bucket(id);
+          e.diskProv += committed + (uncommitted ?? 0);
+          e.diskUsed += committed;
+          if (v.powerState !== 'POWERED_ON') e.diskOff += committed;
+          e.snapGB += snapGB;
+          // v2.630(감사 DATA2630-01): 전원 켜진 VM 의 스냅샷만 — 정지 VM 의 스냅샷 델타는 diskOff(committed)에 이미 들어 있다.
+          //   회수 가능 시계열은 diskOff + snapOn 이어야 현재값(diskTrend.snapshotReclaimGB 의 offIds 판정 '!== POWERED_ON')과 같은 뜻이다.
+          if (v.powerState === 'POWERED_ON') e.snapOnGB += snapGB;
+        }
       }
     }
     if (v.powerState !== 'POWERED_ON') continue;
@@ -206,6 +224,8 @@ export function vmAllocRows(snap, settings) {
     if (rows.length) out.set(k, rows);
   }
   out.dsUsedUnknown = dsUsedUnknown;             // 사용량을 못 읽어 디스크 합계에서 뺀 DS 수(lastRun 에 싣는다)
+  out.vmStorageUnknown = vmStorageUnknown;       // v2.727(C-01): 스토리지를 못 읽어 VM 디스크 계열에서 뺐거나(committed) 부분 합으로 만든(uncommitted) VM 수
+  out.vmStorageUnknownBy = vmStorageUnknownBy;   //   { committed, uncommitted } — 조치가 다르다(전자는 계열에서 빠짐 · 후자는 prov 만 하한)
   out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수(점검중 제외)
   out.maintenanceExcluded = maintenanceTracked;   // v2.622(RECENT-01): 점검중이라 행을 빼고 전체 합계에서도 빠진 대상 vCenter 수
   out.totalWithheld = false;
@@ -218,6 +238,7 @@ export function vmAllocRows(snap, settings) {
 async function sampleOnceInner() {
   let gpuMemPartialHosts = 0; // v2.681 R2D-06 — 게스트 GPU 메모리 합이 부분 합이라 게스트 값을 적재하지 않은 호스트 수
   let dsUsedUnknown = 0; // v2.598 RECENT2598-03 — vmAllocRows 가 센 '사용량 미상으로 뺀 DS' 수
+  let vmStorageUnknown = 0; let vmStorageUnknownBy = null; // v2.727(C-01) — vmAllocRows 가 센 '스토리지 미상 VM' 수·사유
   const snap = store.get();
   const db = await getMetricsDb();
   const ts = Date.now();
@@ -354,6 +375,8 @@ async function sampleOnceInner() {
       // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
       const vmperfByVc = vmAllocRows(snap, vmperfCfg);
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
+      vmStorageUnknown = vmperfByVc.vmStorageUnknown || 0;
+      vmStorageUnknownBy = vmStorageUnknown ? { ...vmperfByVc.vmStorageUnknownBy } : null;
       if (vmperfByVc.staleVcenters || vmperfByVc.maintenanceExcluded) {
         vmperfStale = {
           vcenters: vmperfByVc.staleVcenters || 0, totalWithheld: !!vmperfByVc.totalWithheld,
@@ -437,6 +460,8 @@ async function sampleOnceInner() {
   }
   lastRun = {
     at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}), ...(gpuMemPartialHosts ? { gpuMemPartialHosts } : {}),
+    // v2.727(C-01): DS 와 같은 자리 — 스토리지를 못 읽어 VM 디스크 계열에서 뺀 VM 수(0 이면 싣지 않는다).
+    ...(vmStorageUnknown ? { vmStorageUnknown, vmStorageUnknownBy } : {}),
     // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
     ...(staleSkipped.vcenters ? { staleSkipped } : {}),
     ...(vmperfStale ? { vmperfStale } : {}),
@@ -467,8 +492,12 @@ export function samplerWithheldOf(lastRun) {
     totalPartial: !!vs?.totalPartial,
     maintenanceExcluded: _num(vs?.maintenanceExcluded) || 0,
     vmStatsSkipped: _num(lastRun.vmStatsSkipped) || 0,
+    // v2.727(C-01): 결측으로 뺀 DS·VM 수 — 추이 화면이 '마지막 점이 못 읽은 장비를 뺀 값' 임을 말한다(0 으로 채우지 않았다).
+    dsUsedUnknown: _num(lastRun.dsUsedUnknown) || 0,
+    vmStorageUnknown: _num(lastRun.vmStorageUnknown) || 0,
   };
-  if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped) return null;
+  if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped
+    && !out.dsUsedUnknown && !out.vmStorageUnknown) return null;
   return out;
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);

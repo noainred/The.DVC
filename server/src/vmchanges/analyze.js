@@ -9,8 +9,8 @@
  *  · 행을 상한으로 자르면 truncated 로 밝힌다(조용한 상한 금지).
  */
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES, parseDetail, moveKind } from './eventDetail.js';
+import { dayIndex, dayStartMs } from '../util/dayKey.js';   // v2.727(감사 C-03): 날짜 경계는 포탈 오프셋(util/dayKey.js) 하나 — KST 상수 금지
 
-const DAY = 86_400_000;
 /** 7일에 10번 — 기간에 비례해 늘린다(14일이면 20). VM 하나가 이 이상 옮겨 다니면 '과다 이동' 후보다. */
 export const CHURN_PER_WEEK = 10;
 export const churnThreshold = (days) => Math.max(3, Math.ceil(CHURN_PER_WEEK * Math.max(1, days) / 7));
@@ -29,7 +29,7 @@ export function analyzeMoves(rows, { days = 7, now = Date.now(), vcName = new Ma
     if (!d) noDetail += 1;
     const kind = d?.kind && Object.hasOwn(byKind, d.kind) ? d.kind : moveKind(r.type, d);
     byKind[kind] += 1;
-    const day = Math.floor((r.ts + 9 * 3_600_000) / DAY);   // 한국 날짜(UTC+9)로 묶는다 — 사람이 세는 하루
+    const day = dayIndex(r.ts);   // 포탈 오프셋 날짜(기본 KST)로 묶는다 — 사람이 세는 하루. v2.727: dayKey 코어 사용(PORTAL_TZ_OFFSET_MIN 을 따른다)
     byDay.set(day, (byDay.get(day) || 0) + 1);
     const k = `${r.vcenterId}\u0000${r.entity}`;
     let v = byVm.get(k);
@@ -48,9 +48,9 @@ export function analyzeMoves(rows, { days = 7, now = Date.now(), vcName = new Ma
   vms.sort((a, b) => b.moves - a.moves || (b.last ?? 0) - (a.last ?? 0) || String(a.vm).localeCompare(String(b.vm)));
   const matched = vms.length;
   // 하루 칸 — 기간 전체(빈 날은 0 이 아니라 '이벤트 없음' 이지만, 수집이 켜져 있었다면 0 이 맞다 — 화면이 수집 범위를 함께 말한다).
-  const today = Math.floor((now + 9 * 3_600_000) / DAY);
+  const today = dayIndex(now);
   const series = [];
-  for (let d = today - Math.max(1, days) + 1; d <= today; d++) series.push({ day: d * DAY - 9 * 3_600_000, moves: byDay.get(d) || 0 });
+  for (let d = today - Math.max(1, days) + 1; d <= today; d++) series.push({ day: dayStartMs(d), moves: byDay.get(d) || 0 });
   return { total: moves.length, byKind, noDetail, churnThreshold: thr, churnVms, vmCount: byVm.size, series, matched, vms: vms.slice(0, VM_ROWS_MAX), omitted: Math.max(0, matched - VM_ROWS_MAX) };
 }
 

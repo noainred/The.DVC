@@ -91,8 +91,36 @@ export function fromLocalInput(v) {
   return Number.isFinite(t) ? t : null;
 }
 
-/** 저장 실패 문구 — 서버 reason 을 그대로 쓰고, 없으면 일반 문구. */
-export const saveFailText = (r) => (r && r.reason ? `저장하지 못했습니다 — ${r.reason}` : '저장하지 못했습니다.');
+/** 바이트 → MB 표기(소수 1자리). 값이 없으면 '—'(0 으로 보이지 않게). */
+export const mbText = (bytes) => (Number.isFinite(bytes) && bytes >= 0 ? `${(bytes / 1048576).toFixed(1)} MB` : '—');
+
+/**
+ * v2.727(감사 B-01): 게시판 합계 상한 초과(서버 409 `{reason:'board-full', bytes, max}`) 문구. 서버는 사유 코드만 주고 문장은 여기서 만든다.
+ * 조용히 잘리지 않았다는 사실(저장 안 됨)과 조치(관리자가 지난 글 정리)를 같이 말한다.
+ */
+export function boardFullText(r) {
+  return `저장하지 못했습니다 — 게시판 저장 용량이 상한(${mbText(r?.max)})에 닿았습니다(지금 약 ${mbText(r?.bytes)}). 글·댓글은 저장되지 않았습니다 — 관리자에게 지난 글 정리를 요청하세요.`;
+}
+
+/** 저장 실패 문구 — 서버 reason 을 그대로 쓰고, 없으면 일반 문구. 사유 코드 `board-full` 은 문장으로 바꾼다(v2.727). */
+export const saveFailText = (r) => {
+  if (r && r.reason === 'board-full') return boardFullText(r);
+  return r && r.reason ? `저장하지 못했습니다 — ${r.reason}` : '저장하지 못했습니다.';
+};
+
+/**
+ * v2.727(감사 E-02): '가장 최근 요청만 반영' 가드. 같은 화면의 load() 를 효과·버튼·뒤로가기가 각자 부르면 늦게 온 이전 응답이
+ * 최신 목록을 덮는다 — 호출마다 번호를 받고(`next`) 응답이 왔을 때 아직 최신인지(`isLatest`) 본다. 언마운트는 `invalidate`.
+ * (HorizonUsagePanel 의 useRef(seq) 모양을 순수 객체로 떼어 테스트할 수 있게 했다.)
+ */
+export function makeLatest() {
+  let n = 0;
+  return {
+    next: () => ++n,
+    isLatest: (k) => k === n,
+    invalidate: () => { n += 1; },
+  };
+}
 
 /**
  * 댓글을 스레드로 묶는다(v2.723) — 최상위 댓글(작성 순) 아래에 그 답글(작성 순).

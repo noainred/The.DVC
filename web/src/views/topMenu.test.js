@@ -70,6 +70,21 @@ describe('locate — 지금 화면이 어느 메뉴인가', () => {
     expect(locate('tools', '#/tools/pdu')).toEqual({ group: 'tools', child: null });
     expect(locate('tools', '#/tools')).toEqual({ group: 'tools', child: null });
   });
+  it('v2.727(A-06): 사용자 메뉴에서 특수 기능이 하위 항목이어도 도구는 자기 자리가 먼저다 · 폴백 그룹 id 를 박지 않는다', () => {
+    const groups = [
+      { id: 'overview', label: 'Overview', tab: 'overview' },
+      { id: 'mine', label: '내 그룹', children: [{ id: 'tools', label: '특수 기능', tab: 'tools' }, { id: 'mon', label: '스토리지 현황', tool: 'storage-mon' }] },
+      { id: 'later', label: '뒤 그룹', children: [{ id: 'gpu', label: 'GPU', tool: 'gpu' }] },
+    ];
+    expect(locate('tools', '#/tools/storage-mon', groups)).toEqual({ group: 'mine', child: 'mon' });
+    expect(locate('tools', '#/tools/gpu', groups)).toEqual({ group: 'later', child: 'gpu' });
+    expect(locate('tools', '#/tools/pdu', groups)).toEqual({ group: 'mine', child: 'tools' });
+    expect(locate('tools', '#/tools', groups)).toEqual({ group: 'mine', child: 'tools' });
+    expect(locate('tools', '#/tools/pdu', [{ id: 'overview', label: 'Overview', tab: 'overview' }])).toEqual({ group: null, child: null });
+    const src = stripComments(read('./topMenu.js'));
+    const body = src.slice(src.indexOf('export function locate('), src.indexOf('function groupOfTool('));
+    expect(body).not.toMatch(/group:\s*'tools'/);
+  });
   it('옛 탭 주소는 새 메뉴 자리로 간다(#/hosts → 서버 › ESXi 호스트, #/upgrade → 설정 › 업그레이드)', () => {
     expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'esxi' });
     expect(locate('vms', '#/vms')).toEqual({ group: 'server', child: 'vm' });
@@ -121,6 +136,25 @@ describe('화면 배선(소스)', () => {
     expect(app).toMatch(/locate\(tab, hashNow, resolvedMenu\.groups\)/);
     // 도구 노출은 특수 기능 카드와 같은 잠금 판정을 쓴다(규칙을 App 에 다시 쓰지 않는다).
     expect(app).toMatch(/lockReasonOf\(meta,/);
+    // v2.727(A-01): 조회 상태 세 값 · 실패는 resolveMenu 의 failed 로 · 재시도 간격은 sideMenu.retryDelayMs(숫자를 App 에 박지 않는다)
+    expect(app).toMatch(/useState\('loading'\)/);
+    expect(app).toMatch(/failed: menuState === 'error'/);
+    expect(app).toMatch(/setTimeout\(load, retryDelayMs\(fails\)\)/);
+    expect(app).toMatch(/menuState=\{menuState\} onRetry=\{retryMenu\}/);
+    // v2.727(E-06): 서랍이 열리면 본문 스크롤을 잠그고 닫히면 복원한다
+    expect(app).toMatch(/document\.body\.style\.overflow = 'hidden'/);
+    expect(app).toMatch(/document\.body\.style\.overflow = prevOverflow/);
+    const sb = stripComments(read('./sidebar/Sidebar.jsx'));
+    expect(sb).toMatch(/querySelector\('\.sb-nav \.sb-item'\)/);
+    expect(sb).toMatch(/el\.focus\(\)/);
+    // v2.727(A-01·A-04·A-05·A-14): 편집 창은 조회 상태로 저장을 잠그고, 추가 대상은 그룹 id, 바뀐 항목은 저장 기준, 기본 overrides 는 상수.
+    const me = stripComments(read('./sidebar/MenuEditor.jsx'));
+    expect(me).toMatch(/const locked = menuState !== 'ok'/);
+    expect(me).toMatch(/disabled=\{!!busy \|\| locked \|\| changed === 0\}/);
+    expect(me).toMatch(/groups\.findIndex\(\(g\) => g\.id === targetId\)/);
+    expect(me).toMatch(/changesToSave\(baseline, groups\)/);
+    expect(me).toMatch(/data\?\.overrides \|\| NO_OVERRIDES/);
+    expect(me).not.toMatch(/useState\(\(\) => firstGroup\(/);
   });
   it('사이드바 CSS 는 .sb 아래로 한정하고 대문자 변환을 쓰지 않는다 · 옛 하위 메뉴 줄(.subtabs) 규칙은 없다', () => {
     const css = read('../styles.css').replace(/\/\*[\s\S]*?\*\//g, '');

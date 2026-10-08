@@ -45,10 +45,47 @@ describe('좌측 사이드바 셸 (v2.726)', () => {
         const t = one.trim();
         // .statusbar .sb-cell / .sb-label / .sb-val 은 v2.556 하단 상태바 규칙(이름만 같다) — 사이드바와 무관.
         if (t.startsWith('.statusbar')) continue;
+        // 헤더의 햄버거(.sb-toggle)는 헤더에 있으므로 .topbar 아래(v2.727 A-02).
+        if (/^\.topbar \.sb-toggle(:|$)/.test(t)) continue;
         expect(t, t).toMatch(/^(\.sb(-[a-z-]+)?|\.me(-[a-z-]+)?|\.app-body)(\b|[.:\s>])/);
       }
       expect(r.body, r.sel).not.toMatch(/text-transform/);
     }
+  });
+
+  it('★★ v2.727(A-02) 반대 방향 — `.sb-` 로 시작하는 바닥 선택자 0건 · 사이드바 규칙은 하단 상태바(.statusbar .sb-label)에 닿지 않는다', () => {
+    // 상태바 4칸은 v2.556 부터 사이드바와 같은 이름(.sb-cell/.sb-label/.sb-val)을 쓴다. 바닥 `.sb-label { flex:1 1 auto }` 가
+    // 상태바 라벨에도 붙어 4칸 배치가 바뀌었다 — 선택자는 .sb 자손(.sb .sb-xxx) · .topbar .sb-toggle · .app-body > .sb-backdrop 뿐이어야 한다.
+    const all = rules(BODY);
+    const touching = [];
+    for (const r of all) {
+      for (const one of r.sel.split(',')) {
+        const t = one.trim();
+        if (!/\.sb-[a-z-]+/.test(t)) continue;
+        touching.push(t);
+        expect(t, `바닥 선택자: ${t}`).not.toMatch(/^\.sb-/);
+        expect(t, t).toMatch(/^(\.sb(\.|\s|:|$)|\.statusbar\s|\.topbar\s\.sb-toggle|\.app-body\s*>\s*\.sb-backdrop)/);
+      }
+    }
+    expect(touching.length).toBeGreaterThan(30);
+    // 상태바 라벨 규칙에는 flex 가 없다(칸 안의 배치는 .statusbar .sb-cell 의 justify-content:center 가 정한다 — v2.556 그대로).
+    const label = all.filter((r) => r.sel.split(',').some((x) => x.trim() === '.statusbar .sb-label'));
+    expect(label.length).toBeGreaterThan(0);
+    for (const r of label) expect(r.body, r.sel).not.toMatch(/\bflex\b/);
+    // 사이드바 라벨 규칙(.sb .sb-label)은 있고, 상태바 요소에 매칭될 수 있는 모양(.sb-label 단독)은 없다.
+    expect(all.some((r) => r.sel === '.sb .sb-label')).toBe(true);
+    expect(all.some((r) => r.sel.split(',').some((x) => x.trim() === '.sb-label'))).toBe(false);
+    // 레일·서랍 변형도 aside 가 .sb 를 함께 가지므로 .sb.sb-rail / .sb.sb-drawer 로 쓴다(Sidebar.jsx 마크업 — `sb sb-${mode}`).
+    expect(all.some((r) => r.sel === '.sb.sb-rail')).toBe(true);
+    expect(all.some((r) => r.sel === '.sb.sb-drawer.open')).toBe(true);
+    const sbx = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'views', 'sidebar', 'Sidebar.jsx'), 'utf8');
+    expect(sbx).toMatch(/className=\{`sb sb-\$\{mode\}/);
+  });
+
+  it('v2.727(A-13): 인쇄물에서 사이드바·햄버거·서랍 백드롭을 숨긴다', () => {
+    const print = BODY.match(/@media print\s*\{([\s\S]*?)\}\s*\}/);
+    expect(print, '@media print 블록이 없습니다').toBeTruthy();
+    expect(print[1]).toMatch(/\.sb,\s*\.topbar \.sb-toggle,\s*\.app-body > \.sb-backdrop\s*\{\s*display:\s*none/);
   });
 
   it('사이드바 높이는 App 이 재서 넘기는 --topbar-h·--statusbar-h 로 정한다(숫자를 박지 않는다)', () => {
@@ -63,7 +100,7 @@ describe('좌측 사이드바 셸 (v2.726)', () => {
   it('레일은 64px · 플라이아웃은 .sb-nav overflow:visible 위에서 hover/focus-within 으로 뜬다 · 서랍은 닫히면 visibility hidden', () => {
     expect(BODY).toMatch(/\.sb-rail\s*\{[^}]*width:\s*64px/);
     expect(BODY).toMatch(/\.sb-rail\s+\.sb-nav\s*\{[^}]*overflow:\s*visible/);
-    expect(BODY).toMatch(/\.sb-rail\s+\.sb-group:hover\s+\.sb-sub,\s*\.sb-rail\s+\.sb-group:focus-within\s+\.sb-sub\s*\{/);
+    expect(BODY).toMatch(/\.sb\.sb-rail\s+\.sb-group:hover\s+\.sb-sub,\s*\.sb\.sb-rail\s+\.sb-group:focus-within\s+\.sb-sub\s*\{/);
     expect(BODY).toMatch(/\.sb-drawer\s*\{[^}]*visibility:\s*hidden/);
     expect(BODY).toMatch(/\.sb-drawer\.open\s*\{[^}]*visibility:\s*visible/);
   });

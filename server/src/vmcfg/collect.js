@@ -15,7 +15,7 @@ export const VM_CFG_BUDGET_MS = 20_000;
 const _retry = { cfg: createRetryTracker(), dev: createRetryTracker() };
 export function vmCfgRetryOf(vcId, ref, kind = 'cfg') { return _retry[kind]?.get(vcId, ref) || null; }
 export function vmCfgRetrySummary(vcId) { return { cfg: _retry.cfg.summary(vcId), dev: _retry.dev.summary(vcId) }; }
-/** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js syncVcConfigCaches 에 연결할 것). */
+/** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js CACHE_DROPPERS 가 부른다 — v2.727 감사 F-04 에 연결, 그 전에는 호출부 0). */
 export function dropVcRetry(vcId) { _retry.cfg.drop(vcId); _retry.dev.drop(vcId); }
 export function _resetVmCfgRetry() { _retry.cfg.reset(); _retry.dev.reset(); }
 

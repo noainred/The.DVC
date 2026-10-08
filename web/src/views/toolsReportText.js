@@ -24,8 +24,12 @@ export function listOmittedNote(omitted, listLimit, unit = '대') {
 export function reclaimMeta(summary, fmt = (gb) => `${gb} GB`) {
   const base = '정지 VM 디스크 + 정지 VM 에 속하지 않은 스냅샷 델타';
   const over = summary?.snapshotInPoweredOffGB;
-  if (typeof over === 'number' && Number.isFinite(over) && over > 0) return `${base}(겹친 ${fmt(over)} 제외)`;
-  return base;
+  let out = base;
+  if (typeof over === 'number' && Number.isFinite(over) && over > 0) out = `${base}(겹친 ${fmt(over)} 제외)`;
+  // v2.727(C-01): 디스크 용량을 못 읽은 정지 VM 은 회수량에서 뺐다(0 으로 채우지 않음) — 그 수를 말한다.
+  const unk = summary?.poweredOffStorageUnknown;
+  if (typeof unk === 'number' && Number.isFinite(unk) && unk > 0) out += ` · 용량 미상 정지 VM ${unk}대 제외`;
+  return out;
 }
 
 /** Tools 업그레이드 KPI 부가 설명 — Tools 상태를 못 읽은(미수집) VM 은 업그레이드 필요 판정에 들지 않는다. */

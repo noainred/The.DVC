@@ -36,7 +36,9 @@ import { lockReasonOf } from './views/toolVisibility.js';
 // v2.726 좌측 사이드바 — 계정별 메뉴(내 메뉴 > 배포 메뉴 > 기본)의 해석은 views/sidebar/sideMenu.js, 편집 창은 MenuEditor(lazy).
 import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
-import { resolveMenu } from './views/sidebar/sideMenu.js';
+import { resolveMenu, retryDelayMs } from './views/sidebar/sideMenu.js';
+import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, SEARCH_TITLE } from './views/headerText.js'; // v2.727 헤더 C안
+const Palette = lazy(() => import('./version_4/Palette.jsx')); // v2.727: 헤더 ⌘K — V4 팔레트 컴포넌트 재사용(판정·검색은 같은 모듈)
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
@@ -292,6 +294,14 @@ function Portal({ user, onLogout }) {
   const [consoleOn, setConsoleOn] = useState(isConsoleHash);
   // 신규 포탈(V4) 표시 여부(v2.508) — 해시 첫 세그먼트 'v4' 로 판단해 새로고침해도 신규 포탈에 머문다.
   const [v4On, setV4On] = useState(isV4Hash);
+  const [paletteOn, setPaletteOn] = useState(false); // v2.727 헤더 ⌘K(사용자 선택 C안)
+  // v2.727: ⌘K / Ctrl+K 는 기본 셸에서만 — V4·V6 셸은 자기 핸들러를 갖는다(둘 다 걸면 두 번 열린다). 의존성에 셸 플래그를 둬 전환 때 떼고 붙인다.
+  useEffect(() => {
+    if (consoleOn || v4On || v5On || v6On) return undefined;
+    const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') { e.preventDefault(); setPaletteOn((v) => !v); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [consoleOn, v4On, v5On, v6On]);
 
   const cur = tabFilters[tab] || {};
   // V5 는 법인 범위를 상단 하나로 둔다(탭마다 따로 두지 않는다) — 리전 선택은 V5 에서 쓰지 않는다.
@@ -323,14 +333,36 @@ function Portal({ user, onLogout }) {
     import('./views/specialToolsList.js').then((m) => { if (alive) setToolCatalog(m.TOOLS || []); }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  // v2.726 좌측 사이드바 — 계정별 메뉴(서버 저장) · 접힘/서랍 · 편집 창. 못 읽으면 포탈 기본 메뉴(메뉴가 비는 일은 없다).
+  // v2.726 좌측 사이드바 — 계정별 메뉴(서버 저장) · 접힘/서랍 · 편집 창. 못 읽으면 포탈 기본 메뉴로 그린다(메뉴가 비는 일은 없다).
+  // v2.727(감사 A-01): 조회 상태를 'loading'|'ok'|'error' 로 들고, 실패하면 5초→15초→60초(상한) 지수 백오프로 다시 시도한다(성공하면
+  //   멈춘다). 실패 상태는 '포탈 기본 메뉴' 가 아니라 `source:'unknown'` 이고 편집 창이 저장을 잠근다 — 재시작 직후 1~2초 창에서 기본
+  //   메뉴 + 편집을 저장해 저장돼 있던 내 메뉴를 덮어쓰던 경로(v2.618 WEB-2 계열). 직전에 읽은 값이 있으면 그것을 유지한다.
   const [menuData, setMenuData] = useState(null);
+  const [menuState, setMenuState] = useState('loading');
   const [menuRev, setMenuRev] = useState(0);
   useEffect(() => {
     let alive = true;
-    fetchJson('/user-menu').then((r) => { if (alive) setMenuData(r && r.ok ? r : null); }).catch(() => { if (alive) setMenuData(null); });
-    return () => { alive = false; };
+    let timer = null;
+    let fails = 0;
+    const load = async () => {
+      try {
+        const r = await fetchJson('/user-menu', {}, undefined, { retries: 0 });
+        if (!alive) return;
+        if (!(r && r.ok)) throw new Error(r?.reason || 'bad-response');
+        setMenuData(r);
+        setMenuState('ok');
+      } catch {
+        if (!alive) return;
+        setMenuState('error');
+        timer = setTimeout(load, retryDelayMs(fails));
+        fails += 1;
+      }
+    };
+    setMenuState((s) => (s === 'ok' ? s : 'loading'));
+    load();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
   }, [menuRev]);
+  const retryMenu = () => setMenuRev((n) => n + 1);
   const [railPref, setRailPref] = useState(readRailPref);
   const [vw, setVw] = useState(() => window.innerWidth);
   useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on); }, []);
@@ -342,7 +374,10 @@ function Portal({ user, onLogout }) {
     if (!drawerOpen) return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setDrawerOpen(false); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // v2.727(E-06): 서랍이 열린 동안 본문 스크롤을 잠근다(닫히거나 언마운트되면 복원). 첫 항목 포커스는 Sidebar 가 한다.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; };
   }, [drawerOpen]);
   const toggleRail = () => { const next = sbMode === 'rail' ? 'open' : 'rail'; setRailPref(next); writeRailPref(next); };
   // 헤더·상태바의 실제 높이 → 사이드바 sticky 위치·높이(CSS 변수). 좁은 폭에서 헤더가 두 줄이 되면 값이 바뀐다(숫자를 박지 않는다).
@@ -449,7 +484,8 @@ function Portal({ user, onLogout }) {
   // v2.726: 메뉴 원천은 계정별 저장 메뉴(내 메뉴 > 배포 메뉴 > 포탈 기본) — 해석은 sideMenu.resolveMenu 하나.
   const resolvedMenu = useMemo(() => resolveMenu({
     mine: menuData?.mine || null, distributed: menuData?.distributed?.menu || null, catalog: toolCatalog, overrides: menuData?.overrides || null,
-  }), [menuData, toolCatalog]);
+    failed: menuState === 'error',
+  }), [menuData, toolCatalog, menuState]);
   const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk }, resolvedMenu.groups);
   const here = locate(tab, hashNow, resolvedMenu.groups);
   // 특수 기능 카드·옛 주소로 들어와도 '그 대메뉴에서 마지막으로 본 하위 메뉴' 를 기억한다(대메뉴를 다시 누르면 그리로 간다).
@@ -619,9 +655,18 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
+      {paletteOn && (
+        <Suspense fallback={null}>
+          <div className="hdr-palette">{/* v2.727: V4 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
+            <Palette includePages={false} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
+              onClose={() => setPaletteOn(false)}
+              onPick={(h) => { setPaletteOn(false); if (h && window.location.hash !== h) window.location.hash = h; }} />
+          </div>
+        </Suspense>
+      )}
       {showMenuEdit && (
         <Suspense fallback={null}>
-          <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []}
+          <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []} menuState={menuState} onRetry={retryMenu}
             onClose={() => setShowMenuEdit(false)} onChanged={() => setMenuRev((n) => n + 1)} />
         </Suspense>
       )}
@@ -701,7 +746,7 @@ function Portal({ user, onLogout }) {
           onClick={() => (sbMode === 'drawer' ? setDrawerOpen((v) => !v) : toggleRail())}><Icon name="menu" size={18} /></button>
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
-          <div>
+          <div className="brand-line">{/* v2.727 C안: 이름 옆 한 줄에 버전·LIVE */}
             <h1 className="brand-title"><span className="bt-strong">The Davinci</span></h1>
             {upgrading ? (
               <span className="ver-badge brand-ver upgrading-badge"
@@ -730,6 +775,14 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
+        {/* v2.727(사용자 선택 C안): 가운데 ⌘K 검색 — 기존 V4 팔레트(기능·탭)를 연다. 400px 미만은 아이콘만(CSS). */}
+        <div className="tb-search">
+          <button type="button" className="tb-cmdk" onClick={() => setPaletteOn(true)} title={SEARCH_TITLE} aria-label={SEARCH_TITLE}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <span className="tb-cmdk-text">{SEARCH_PLACEHOLDER}</span>
+            <kbd className="tb-cmdk-kbd">⌘K</kbd>
+          </button>
+        </div>
         <div className="status-pill">
           {(() => {
             const total = health?.vcenters ?? 0;
@@ -751,15 +804,16 @@ function Portal({ user, onLogout }) {
               else if (pending > 0) tail = <span role="button" title="클릭하면 수집 중인 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({pending} 수집중)</span>;
               else tail = <span role="button" title="클릭하면 해당 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({total - conn - maint - off} 확인중)</span>;
             }
+            const genText = generatedAtText(health?.generatedAt); // v2.727 C안: 시각을 아래 줄이 아니라 같은 줄 꼬리에
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.3, whiteSpace: 'nowrap' }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
                   {/* v2.675: 분모는 비활성을 뺀 수다(V6 pill·consoleData 와 같은 기준) — v2.617 이 '분모에서 뺐다' 고 적었지만 이 헤더는 전체를 쓰고 있었다. */}
                   {health ? <span title={off > 0 ? `비활성 ${off}곳은 분모에서 뺐습니다(수집하지 않음)` : undefined}>{`${conn}/${Math.max(0, total - off)} vCenter`}</span> : '연결 중…'}
                   {health && (allOk ? <span style={{ color: '#4ade80', fontWeight: 700 }}> OK</span> : tail)}
                 </span>
-                {health?.generatedAt && <span className="muted" style={{ fontSize: 11, textAlign: 'center' }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+                {genText && <span className="muted" style={{ fontSize: 11 }} title="마지막 수집 시각">· {genText}</span>}
               </div>
             );
           })()}
@@ -768,7 +822,7 @@ function Portal({ user, onLogout }) {
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div className="user-meta">
             <div className="user-name">{user.name}</div>
-            <div className="user-role muted">{user.demoGuest ? '데모 계정' : user.superAdmin ? 'super_admin' : user.role}</div>
+            <div className="user-role muted">{roleLabel(user)}</div>{/* v2.727: 역할 원문(super_admin) 대신 한글 — views/headerText.js 하나가 소유 */}
           </div>
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
@@ -778,8 +832,8 @@ function Portal({ user, onLogout }) {
       <div className="app-body" style={{ '--topbar-h': `${shellH.top}px`, '--statusbar-h': `${shellH.bottom}px` }}>
         <Sidebar mode={sbMode} open={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)}
           menu={menu} here={here} menuLast={menuLast}
-          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }}
-          isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={!!menuData} />
+          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }} onRetry={retryMenu}
+          isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={menuState === 'ok'} menuState={menuState} />
         <main className="content">
           {filterBar}
 

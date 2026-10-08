@@ -17,9 +17,11 @@
  *   root 로 node 를 직접 실행하면 users.json 이 root 소유가 되어 포탈이 저장하지 못한다.
  */
 import process from 'node:process';
+import os from 'node:os';
 import readline from 'node:readline';
 import { spawnSync } from 'node:child_process';
 import { config, currentVersion } from '../config.js';
+import { logAudit } from '../audit.js'; // v2.727(감사 B-05): CLI 변경도 감사 로그에(웹 경로와 같은 등급)
 import {
   listUsers, getUser, createUser, updateUser, setLocalPassword, clearLoginCredentials, deleteUser,
   beginTotpEnroll, confirmTotpEnroll, disableTotp, reloadUsersFromDisk, normalizedScope,
@@ -35,6 +37,21 @@ const RESTART_EXIT = 10; // 래퍼(user-admin.sh)가 이 종료코드를 보면 
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const ok = (s) => out(`  [완료] ${s}`);
+/*
+ * v2.727(감사 B-05): 계정 생성·삭제·역할·비밀번호·OTP·로그인 방식 변경을 `audit.ndjson` 에 남긴다 — 웹 경로(routes/admin/users.js)는
+ *   감사 대상인데 같은 변경을 이 도구로 하면 흔적이 없었다. 주체는 `cli:<OS 사용자>`(래퍼가 서비스 계정으로 강등하므로 sudo 호출자는
+ *   SUDO_USER 로 함께 적는다), ip 는 'console'. ⚠ 비밀번호·OTP 키는 어떤 필드에도 싣지 않는다(테스트가 파일에 비밀 문자열 0 을 고정).
+ *   `logAudit` 은 파일 추가라 포탈 재시작과 무관하게 남는다(실패해도 도구는 멈추지 않는다 — audit.js 가 catch 한다).
+ */
+function cliActor() {
+  let name = '';
+  try { name = os.userInfo().username || ''; } catch { name = process.env.USER || process.env.LOGNAME || ''; }
+  return `cli:${name || 'unknown'}`;
+}
+function audit(action, target, detail = '') {
+  const sudo = process.env.SUDO_USER ? ` (sudo:${process.env.SUDO_USER})` : '';
+  logAudit({ user: cliActor(), action, target, detail: `${detail}${sudo}`, ip: 'console' });
+}
 const warn = (s) => out(`  [주의] ${s}`);
 const fail = (s) => out(`  [실패] ${s}`);
 
@@ -204,6 +221,7 @@ async function applyPolicy(username, role, choice) {
   const r = setFileLoginPolicy(username, choice);
   if (!r.ok) { fail(r.reason); return false; }
   policyChanged = true;
+  audit('cli.user.login-policy', username, choice ? `policy=${r.policy}` : 'policy=default(지정 삭제)');
   ok(`로그인 방식을 ${choice ? `'${POLICY_TEXT[r.policy]}'` : '기본 규칙'}(으)로 정했습니다 → ${r.file}`);
   out('  이 설정은 포탈 재시작 없이 몇 초 안에 적용됩니다.');
   const o = loginPolicyOverrideOf(username);
@@ -243,6 +261,7 @@ async function doCreate() {
   const r = createUser({ username, name, role, password: password || undefined }, { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.create', username, `role=${role} · password=${password ? 'set' : 'none'}`);
   ok(`계정 '${username}' 을(를) 만들었습니다.`);
   if (choice) await applyPolicy(username, role, choice);
   showLogin(username);
@@ -267,6 +286,7 @@ async function doEdit() {
   const r = updateUser(u.username, patch, { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.update', u.username, Object.keys(patch).map((k) => (k === 'role' ? `role=${u.role}→${patch.role}` : k === 'scope' ? `scope=${patch.scope ? (patch.scope.vcenters || []).join(',') : 'all'}` : k)).join(' · '));
   ok(`'${u.username}' 을(를) 바꿨습니다.`);
   if (patch.role) showLogin(u.username);
 }
@@ -288,6 +308,7 @@ async function doPassword() {
   const r = setLocalPassword(u.username, pw, { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.password', u.username, 'set');
   ok(`'${u.username}' 의 비밀번호를 바꿨습니다(이 계정의 기존 로그인 세션은 끊깁니다).`);
   showLogin(u.username);
   const st = loginStateOf(listUsers().find((x) => x.username === u.username), contextOf(u.username));
@@ -313,7 +334,7 @@ async function doPolicy() {
       if (pw) {
         reloadUsersFromDisk();
         const r = setLocalPassword(u.username, pw, { trusted: true });
-        if (r.ok) { usersChanged = true; ok('비밀번호를 정했습니다.'); } else fail(r.reason);
+        if (r.ok) { usersChanged = true; audit('cli.user.password', u.username, 'set'); ok('비밀번호를 정했습니다.'); } else fail(r.reason);
       }
     }
   }
@@ -327,6 +348,7 @@ async function doOtpEnroll() {
   const r = beginTotpEnroll(u.username, '', { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.otp-enroll', u.username, 'begin'); // 키·otpauth 는 싣지 않는다
   out('');
   out('  인증 앱(Google Authenticator·MS Authenticator 등)에서 \'설정 키 직접 입력\' 을 고르고 아래 키를 넣으세요.');
   out(`    계정 이름 : ${u.username}`);
@@ -339,6 +361,7 @@ async function doOtpEnroll() {
   reloadUsersFromDisk();
   const c = confirmTotpEnroll(u.username, code, { trusted: true });
   if (!c.ok) { fail(`${c.reason} (코드가 맞는지·시계가 맞는지 확인하세요)`); return; }
+  audit('cli.user.otp-enroll', u.username, 'confirm');
   ok(`'${u.username}' OTP 등록을 마쳤습니다.`);
   showLogin(u.username);
 }
@@ -352,6 +375,7 @@ async function doOtpDisable() {
   const r = disableTotp(u.username, { force: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.otp-disable', u.username, '');
   ok('OTP 를 해제했습니다.');
   showLogin(u.username);
 }
@@ -364,6 +388,7 @@ async function doBlock() {
   const r = clearLoginCredentials(u.username, { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.block', u.username, 'password+otp cleared');
   ok('로그인을 막았습니다.');
 }
 
@@ -376,10 +401,11 @@ async function doDelete() {
   const r = deleteUser(u.username, { trusted: true });
   if (!r.ok) { fail(r.reason); return; }
   usersChanged = true;
+  audit('cli.user.delete', u.username, `role=${u.role}`);
   ok(`'${u.username}' 을(를) 지웠습니다.`);
   if (loginPolicyOverrideOf(u.username).file) {
     const p = setFileLoginPolicy(u.username, null);
-    if (p.ok) { policyChanged = true; out('  이 계정의 로그인 방식 지정도 지웠습니다.'); }
+    if (p.ok) { policyChanged = true; audit('cli.user.login-policy', u.username, 'policy=default(계정 삭제로 지정 삭제)'); out('  이 계정의 로그인 방식 지정도 지웠습니다.'); }
   }
 }
 

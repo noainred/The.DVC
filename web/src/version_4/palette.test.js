@@ -67,3 +67,14 @@ describe('커맨드 팔레트', () => {
     for (const x of flat) expect(typeof x.hash).toBe('string');
   });
 });
+
+describe('palette(v2.727) — pages:false 는 V4 화면을 제안하지 않는다(개발 포탈 헤더 ⌘K)', () => {
+  it('도구·탭은 그대로 찾고 화면 묶음만 비운다', () => {
+    const r = search('ov', { tools: TOOLS, pageMeta: PAGE_META, pages: false });
+    expect(r.pages).toEqual([]);
+    expect(r.pagesOmitted).toBe(0);
+    const full = search('ov', { tools: TOOLS, pageMeta: PAGE_META });
+    expect(full.pages.length).toBeGreaterThan(0);
+    expect(r.tabs).toEqual(full.tabs);
+  });
+});

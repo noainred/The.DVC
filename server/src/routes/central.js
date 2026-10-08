@@ -27,7 +27,7 @@ import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
-import { getAssignment, setResult, listAssignments as listScanAssignments } from '../central/assignments.js';
+import { getAssignment, setResult, listAssignments as listScanAssignments, assignmentsLoadError } from '../central/assignments.js'; // v2.727(D-01): 손상 판정
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
@@ -49,7 +49,7 @@ import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
 import { getAssignmentForAgent, markPulled, ackAssignment, svcmonAssignLoadError } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
-import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
+import { getAssignedGpuGuest, gpuGuestConfigLoadError } from '../central/agentGpuGuestConfig.js'; // v2.727(D-01): 손상 판정
 import { getEffectiveUsers, registryLoadError as agentUsersLoadError } from '../central/agentUsers.js';
 import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQueries.js';
 import { specToRange } from '../ipam/rangePolicies.js';
@@ -404,6 +404,8 @@ function reqAgentDenied(req, assignedAgent) {
 
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).
 centralRouter.get('/assignment', requireCentral({ notFound: { ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' } }), (req, res) => {
+  // v2.727(감사 D-01): 배정 파일이 손상(보존본만 남음)이면 `assigned:false` 가 아니라 503 — 엣지는 '중앙 지정 없음' 과 구분해 직전 상태를 유지한다.
+  if (settingsUnreadable(res, assignmentsLoadError, 'iDRAC 스캔 배정')) return;
   const a = getAssignment(req.query.agent);
   if (!a || a.enabled === false) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, agent: a.agent, ips: a.ips, username: a.username, password: a.password });
@@ -627,7 +629,11 @@ const isPlainObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 /** 화면이 글자로 그리는 인벤토리 필드 — 객체·배열이면 null 로 바꾼다(React #31 방지 — CEN-2599-03). */
 const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'version', 'build', 'vendor', 'model', 'cpuModel',
   'guestOS', 'powerState', 'connectionState', 'toolsStatus', 'toolsVersionStatus', 'ipAddress', 'folder', 'resourcePool', 'notes',
-  'hwVersion', 'storageType', 'severity', 'message', 'entity', 'entityType', 'status', 'location', 'overallStatus'];
+  'hwVersion', 'storageType', 'severity', 'message', 'entity', 'entityType', 'status', 'location', 'overallStatus',
+  // v2.727(감사 D-05): 호스트 ↔ iDRAC 연결 규칙(idrac/hostMatch.js·serverForHost.js)이 글자로 읽는 식별 필드 — 객체가 오면 null(규칙 미적용 = 모름).
+  'hostName', 'serviceTag', 'mgmtIp'];
+/** v2.727(감사 D-05): 글자가 아니면 뜻이 없는 필드(IP 는 수가 아니다) — 문자열 외에는 null 로 버린다. */
+const INV_STR_ONLY_KEYS = ['mgmtIp'];
 /**
  * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
  * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
@@ -667,6 +673,10 @@ export function sanitizeVcLocation(v) {
 
 export function sanitizeInventoryList(list, vcId, max, dropped) {
   const out = [];
+  // v2.727(감사 D-04): 상한(max)으로 넘친 원소 수를 센다 — 예전 `slice(0, max)` 는 셋째 원소가 어디에도 남지 않았다(조용한 상한 금지).
+  //   넘침이 없으면 키를 만들지 않는다(응답 `dropped` 의 모양은 예전 그대로 — 기존 소비처·테스트 호환).
+  const over = Array.isArray(list) ? Math.max(0, list.length - max) : 0;
+  if (over) dropped.overCount = (dropped.overCount || 0) + over;
   for (const x of Array.isArray(list) ? list.slice(0, max) : []) {
     if (!isPlainObj(x)) { dropped.notObject += 1; continue; }
     if (x.vcenterId != null && String(x.vcenterId) !== vcId) { dropped.otherVcenter += 1; continue; }
@@ -675,6 +685,10 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     for (const k of INV_TEXT_KEYS) {
       const v = o[k];
       if (v != null && typeof v === 'object') { o[k] = null; dropped.coerced += 1; }
+    }
+    for (const k of INV_STR_ONLY_KEYS) { // v2.727(D-05)
+      const v = o[k];
+      if (v != null && typeof v !== 'string') { o[k] = null; dropped.coerced += 1; }
     }
     // v2.605(CEN2605-01): 수치 필드도 좁힌다 — '32' 같은 글자가 오면 store 롤업의 `+=` 가 문자열 연결이 되어 **전 함대**
     //   KPI(global·byRegion)가 오류 없이 틀린다(cpuCores '3232'). 숫자 글자는 수로, 그 밖(객체·'abc')은 null(읽지 못함).
@@ -802,8 +816,8 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     networks: sanitizeInventoryList(b.networks, vcId, 50_000, dropped),
     alarms: sanitizeInventoryList(b.alarms, vcId, 50_000, dropped),
   };
-  const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId;
-  if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId})`);
+  const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId + (dropped.overCount || 0); // v2.727(D-04): 상한 넘침도 '뺀 것' 이다
+  if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId}${dropped.overCount ? ` · 상한 초과 ${dropped.overCount}` : ''})`);
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
@@ -1309,6 +1323,8 @@ centralRouter.post('/gpu-guest-data', requireCentral(), (req, res) => {
 centralRouter.get('/gpu-guest-config', requireCentral(), (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  // v2.727(감사 D-01): 배포 파일이 손상(보존본만 남음)이면 `assigned:false` 가 아니라 503 — 엣지는 직전 적용분(로컬 사본)을 유지한다.
+  if (settingsUnreadable(res, gpuGuestConfigLoadError, 'GPU 게스트 수집 배포')) return;
   const settings = getAssignedGpuGuest(agent);
   if (!settings) return res.json({ ok: true, agent, assigned: false }); // 지정 없음 → 엣지는 로컬 설정 유지
   const { _updatedAt, ...s } = settings;

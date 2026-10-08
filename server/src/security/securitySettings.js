@@ -240,11 +240,13 @@ export function setFileLoginPolicy(username, policy) {
     const m = l.split('#')[0].trim().match(/^([^=:\s]+)\s*[=:\s]\s*(\S+)$/);
     return !!m && m[1] === user;
   };
+  // v2.727(감사 B-08): 같은 줄의 인라인 주석(`alice=otp # 담당자 메모`)은 보존한다 — 머리말 '다른 줄·주석은 그대로' 의 예외였다.
+  const inlineComment = (l) => { const i = l.indexOf('#'); return i >= 0 ? ` ${l.slice(i).trim()}` : ''; };
   let placed = false;
   const out = [];
   for (const l of lines) {
     if (!isUserLine(l)) { out.push(l); continue; }
-    if (canon && !placed) { out.push(`${user}=${canon}`); placed = true; }
+    if (canon && !placed) { out.push(`${user}=${canon}${inlineComment(l)}`); placed = true; }
   }
   while (out.length && out[out.length - 1] === '') out.pop();
   if (canon && !placed) {

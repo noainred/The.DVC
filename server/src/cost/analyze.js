@@ -30,11 +30,18 @@ export function vmAllocation(v, s) {
   if (!on && s.offPolicy === 'none') return null;
   const cpuOk = on || s.offPolicy === 'full';
   const used = fin(v.storageGB) ? v.storageGB : null;
+  // v2.727(감사 C-04): 할당 기준(provisioned)인데 thin 여유(uncommittedGB)를 모르면(v2.719 부터 null 로 온다) 사용량만으로 만든
+  //   '할당량' 은 실제보다 작을 수 있다 — 값은 내되 provisionedPartial 로 밝힌다(0 으로 채운 것을 전체처럼 말하지 않는다).
+  const provPartial = used != null && s.storageBasis === 'provisioned' && !fin(v.uncommittedGB);
   const storage = used == null ? null : s.storageBasis === 'provisioned' ? used + (fin(v.uncommittedGB) ? v.uncommittedGB : 0) : used;
+  const vcpu = cpuOk && fin(v.cpuCount) ? v.cpuCount : (cpuOk ? null : 0);
+  const ramGB = cpuOk && fin(v.memMB) ? r2(v.memMB / 1024) : (cpuOk ? null : 0);
   return {
-    vcpu: cpuOk && fin(v.cpuCount) ? v.cpuCount : (cpuOk ? null : 0),
-    ramGB: cpuOk && fin(v.memMB) ? r2(v.memMB / 1024) : (cpuOk ? null : 0),
+    vcpu, ramGB,
     storageGB: storage == null ? null : r2(storage),
+    ...(provPartial ? { provisionedPartial: true } : {}),
+    // v2.727(감사 C-04): 할당 항목 하나라도 모르면 그 VM 의 비용 합은 아는 항목만의 합(부분 합)이다 — 행 표지.
+    ...(vcpu == null || ramGB == null || storage == null || provPartial ? { partialCost: true } : {}),
   };
 }
 
@@ -58,7 +65,8 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
   const invByVc = new Map((snap.vcenters || []).map((vc) => [vc.id, vc.tagInv || null]));
   const catKey = String(category || '').toLowerCase();
   const groups = new Map();
-  const notes = { excludedOff: 0, storageUnknown: 0, cpuUnknown: 0, multiTag: 0, tagUnknown: 0, tagPartial: 0, templates: 0 };
+  // v2.727(감사 C-04): provisionedPartial = thin 여유를 몰라 사용량만으로 할당량을 만든 VM 수 · partialVms = 할당 일부를 몰라 비용이 부분 합인 VM 수.
+  const notes = { excludedOff: 0, storageUnknown: 0, cpuUnknown: 0, provisionedPartial: 0, partialVms: 0, multiTag: 0, tagUnknown: 0, tagPartial: 0, templates: 0 };
   const vmRows = [];
   const total = { vms: 0, vcpu: 0, ramGB: 0, storageGB: 0, cpu: 0, ram: 0, storage: 0, total: 0 };
   for (const v of snap.vms || []) {
@@ -67,6 +75,8 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
     if (!a) { notes.excludedOff += 1; continue; }
     if (a.storageGB == null) notes.storageUnknown += 1;
     if (a.vcpu == null || a.ramGB == null) notes.cpuUnknown += 1;
+    if (a.provisionedPartial) notes.provisionedPartial += 1;
+    if (a.partialCost) notes.partialVms += 1;
     const c = costOf(a, s);
     let key; let label;
     if (kind === 'vcenter') { key = v.vcenterId; label = vcName.get(v.vcenterId) || v.vcenterId; }
@@ -86,8 +96,9 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
     }
     const g = groups.get(key) || { key, label, vcenterId: kind === 'cluster' || kind === 'folder' || kind === 'vcenter' ? v.vcenterId : null,
       vcenterName: kind === 'tag' ? null : vcName.get(v.vcenterId) || v.vcenterId,
-      vms: 0, on: 0, vcpu: 0, ramGB: 0, storageGB: 0, storageUnknown: 0, cpu: 0, ram: 0, storage: 0, total: 0 };
+      vms: 0, on: 0, vcpu: 0, ramGB: 0, storageGB: 0, storageUnknown: 0, partialVms: 0, cpu: 0, ram: 0, storage: 0, total: 0 };
     g.vms += 1; if (v.powerState === 'POWERED_ON') g.on += 1;
+    if (a.partialCost) g.partialVms += 1;   // v2.727(감사 C-04): 이 그룹 합계 안에 부분 합 VM 이 몇 대인지
     if (a.vcpu != null) g.vcpu += a.vcpu; if (a.ramGB != null) g.ramGB += a.ramGB;
     if (a.storageGB != null) g.storageGB += a.storageGB; else g.storageUnknown += 1;
     if (c.cpu != null) g.cpu += c.cpu; if (c.ram != null) g.ram += c.ram; if (c.storage != null) g.storage += c.storage; if (c.total != null) g.total += c.total;

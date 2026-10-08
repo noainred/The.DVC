@@ -112,6 +112,15 @@ export const valueText = (v, unit) => (v == null || !Number.isFinite(Number(v)) 
  * 네 계열이 모두 빈 연속 구간 → [{x1,x2}]. 단 **수집 시작(firstTs) 이전**은 무응답이 아니라 '수집 전' 이라 빼고,
  * 전 구간이 비어 있으면 무응답으로 칠하지 않는다(그건 '데이터 없음' 이고 화면이 따로 말한다).
  */
+/**
+ * v2.727: 무응답 구간 글자는 구간이 충분히 넓을 때만 — 좁은 구간 가운데에 '…값 없음' 을 두면 글자가 구간 밖(왼쪽 축 너머)으로
+ * 넘쳐 잘린다(Chromium 판독에서 'AC 무응답' 으로 잘린 것을 발견). 음영은 그대로 두고, 뜻은 차트 아래 각주가 말한다.
+ */
+export const GAP_LABEL_MIN_FRAC = 0.12;
+export function gapLabelShown(g, span) {
+  const w = Number(g?.x2) - Number(g?.x1);
+  return Number.isFinite(w) && Number.isFinite(span) && span > 0 && w / span >= GAP_LABEL_MIN_FRAC;
+}
 export function gapAreas(points, firstTs = null) {
   const pts = (points || []).filter((p) => !(Number.isFinite(firstTs) && p.t < firstTs));
   if (!pts.some((p) => SERIES.some((s) => p[s.k] != null))) return [];

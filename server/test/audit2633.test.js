@@ -16,13 +16,15 @@ process.env.AUTH_ENABLED = 'true'; // 인증 꺼짐이면 requireRole 이 익명
 delete process.env.PARTFAULT_ENABLED;
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
-// 13개 배포 설정 파일 — 원본 없이 손상 보존본만(재시작 뒤 상태). 보존본 내용은 테스트가 읽지 않는다.
+// 15개 배포 설정 파일 — 원본 없이 손상 보존본만(재시작 뒤 상태). 보존본 내용은 테스트가 읽지 않는다.
+//   v2.727(감사 D-01): iDRAC 스캔 배정(`agent-assignments.json`)·GPU 게스트 배포(`central-agent-gpu-guest.json`) 두 모듈이 등록됐다(13 → 15).
 const FILES = ['linkcheck-settings.json', 'rma-schedules.json', 'central-svcmon-assign.json', 'ipam-scan.json',
   'bmusage-settings.json', 'bmusage-distribute.json', 'vmseries.json', 'sanswitch-perf-settings.json', 'storage-intervals.json',
-  'cvp-settings.json', 'partfault-settings.json', 'pdu-intervals.json', 'curuser-settings.json'];
+  'cvp-settings.json', 'partfault-settings.json', 'pdu-intervals.json', 'curuser-settings.json',
+  'agent-assignments.json', 'central-agent-gpu-guest.json'];
 const MODULES = ['linkcheck/settings.js', 'rma/schedules.js', 'central/svcmonAssign.js', 'ipam/scanStore.js', 'bmusage/settings.js',
   'vmseries/settings.js', 'sanswitch/perfSettings.js', 'storage/intervals.js', 'cvp/settings.js', 'partfault/settings.js',
-  'pdu/intervals.js', 'curuser/settings.js'];
+  'pdu/intervals.js', 'curuser/settings.js', 'central/assignments.js', 'central/agentGpuGuestConfig.js'];
 for (const f of FILES) fs.writeFileSync(path.join(CFG, `${f}.corrupt.2026-09-27T00-00-00`), 'x');
 
 const express = (await import('express')).default;
@@ -55,7 +57,7 @@ before(async () => {
   SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: [vc] } };
 });
 
-test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다)', () => {
+test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.727 부터 15개', () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const calls = [];
   for (const f of walk(SRC)) {
@@ -63,11 +65,11 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
     const s = stripComments(fs.readFileSync(f, 'utf8'));
     for (const m of s.matchAll(/makeSettingsLoadError\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
   }
-  assert.equal(calls.length, 13, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  assert.equal(calls.length, 15, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 
-test('⑤ 서비스 점검 목록: 13개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
+test('⑤ 서비스 점검 목록: 15개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
   const errs = util.listSettingsLoadErrors();
   const names = errs.map((e) => e.file).sort();
   assert.deepEqual(names, [...FILES].sort());
@@ -85,7 +87,7 @@ test('③ 라우트 게이트: operator 403 · 범위 관리자 403 · 파일 �
   assert.equal((await call(api, FULL, 'POST', u, { file: '../cvp-settings.json' })).status, 404);
 });
 
-test('② 13개 전부 관리자 확정이 성공하고, 오류가 풀리며, 보존본은 남는다 · 두 번째는 409 · 감사 로그', async () => {
+test('② 15개 전부 관리자 확정이 성공하고, 오류가 풀리며, 보존본은 남는다 · 두 번째는 409 · 감사 로그', async () => {
   const u = '/tools/service-check/settings-files/confirm';
   for (const f of FILES) {
     const r = await call(api, FULL, 'POST', u, { file: f });

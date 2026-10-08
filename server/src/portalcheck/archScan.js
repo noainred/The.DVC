@@ -176,6 +176,9 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'ping-targets.json': 'Ping 감시 대상 등록부(ping/store.js — 사용자가 손으로 등록, v2.580 손상 보존). v2.614 첫 목 실행에서 미분류로 잡혀 등재',
   'initial-admin-password.txt': '첫 관리자 임시 비밀번호(auth/auth.js — 0600, 비밀번호를 바꾸면 지운다). v2.614 첫 목 실행에서 미분류로 잡혀 여기 등재',
   'user-menus.json': '계정별 좌측 메뉴(내 메뉴)·슈퍼 관리자 배포 메뉴(usermenu/store.js — 사용자가 손으로 만든 값, 원자 쓰기·손상 보존, v2.726)',
+  // v2.727(감사 B-07): 사용자 데이터(설정도 상태 파일도 아님) — 백업 번들에는 들어가고 변경 감시 지문에서만 뺀다(backup/service.js CHANGE_WATCH_EXCLUDE)
+  'notices.json': '접속 공지(팝업) 목록(bulletin/store.js — 전체 범위 관리자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존, v2.722)',
+  'board.json': '게시판 글·댓글·공감(bulletin/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 BOARD_MAX_BYTES, v2.722)',
 });
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────────── */

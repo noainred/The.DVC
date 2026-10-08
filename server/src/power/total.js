@@ -95,14 +95,17 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
 
   // ② 네트워크 — CVP PSU.
   // v2.680 A-05: partial = 장착 PSU 중 일부만 읽은 장비(전력은 더하되 '측정' 이 아니다 — 합계가 실제보다 작다는 뜻).
-  const net = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unread: 0, stale: 0, outputOnly: 0, items: [] };
+  // v2.727(감사 C-06): noTime = 값은 읽었는데 시각(partsAt·collectedAt)이 둘 다 없는 장비 — '오래됨(stale)' 이 아니라 '언제 값인지 모름' 이다.
+  //   합계에서 빼는 것은 같다(지금 값인지 알 수 없다). 조치가 다르다(수집기 시각 필드 결함 vs 주기 지연).
+  const net = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unread: 0, stale: 0, noTime: 0, outputOnly: 0, items: [] };
   for (const d of network || []) {
     if (!d) continue;
     net.devices += 1;
     const at = numOrNull(d.partsAt) ?? numOrNull(d.collectedAt);
     const p = cvpDevicePower(d);
     if (p.watts == null) { net.unread += 1; continue; }
-    if (at == null || now - at > NET_STALE_MS) { net.stale += 1; continue; }
+    if (at == null) { net.noTime += 1; continue; }
+    if (now - at > NET_STALE_MS) { net.stale += 1; continue; }
     if (p.basis === 'output') net.outputOnly += 1;
     net.watts += p.watts; add('network', d.corp?.corpId || '', p.watts);
     if (p.partial) { net.partial += 1; net.partialWatts += p.watts; } else net.measured += 1;
@@ -111,7 +114,7 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
 
   // ③ 스토리지 — 수집기가 실은 extra.power(v2.667: 못 읽은 사유를 extra.powerProbe 로 받는다).
   // v2.682 R3D-03: partial = 일부 부품(PSU·노드)의 값을 못 읽은 장비 — 전력은 더하되 '측정' 이 아니다(네트워크 A-05 와 같은 규칙).
-  const sto = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unsupported: 0, unread: 0, stale: 0, byType: {}, unreadBy: {}, unsupportedBy: {}, items: [], issues: [], issuesOmitted: 0 };
+  const sto = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unsupported: 0, unread: 0, stale: 0, noTime: 0, byType: {}, unreadBy: {}, unsupportedBy: {}, items: [], issues: [], issuesOmitted: 0 };
   const issue = (d, t, state, reason, extra = {}) => {
     if (sto.issues.length >= ISSUE_MAX) { sto.issuesOmitted += 1; return; }
     sto.issues.push({ id: String(d.id), name: d.name || String(d.id), type: t, method: d.collectMethod || '', corpId: String(d.datacenterId || ''), state, reason, ...extra });
@@ -145,7 +148,9 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     const pAt = numOrNull(pw.at); const cAt = numOrNull(d.snap?.collectedAt);
     let at = pAt != null && cAt != null ? Math.min(pAt, cAt) : (pAt ?? cAt);
     if (at != null && at > now) at = now;
-    if (at == null || now - at > STORAGE_STALE_MS) { sto.stale += 1; issue(d, t, 'stale', 'stale', { ts: at }); continue; }
+    // v2.727(감사 C-06): 시각이 둘 다 없으면 'no-time'(언제 값인지 모름) — stale(6시간 넘음)과 사유를 나눈다. 합계 제외는 같다.
+    if (at == null) { sto.noTime += 1; issue(d, t, 'no-time', 'no-time', { ts: null }); continue; }
+    if (now - at > STORAGE_STALE_MS) { sto.stale += 1; issue(d, t, 'stale', 'stale', { ts: at }); continue; }
     const part = pw.partial === true;
     sto.watts += w; add('storage', d.datacenterId || '', w);
     if (part) { sto.partial += 1; sto.partialWatts += w; } else { sto.measured += 1; bt.measured += 1; }

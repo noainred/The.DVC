@@ -16,8 +16,12 @@
  *    (`relaycheck/view.js relayCheckView`)을 반드시 거쳐야 하는데(v2.500 D/M1: operator 가 `tools` 를
  *    기본 보유하므로 원격 `haproxy.cfg`·내부 IP 가 샌다) 이 경로에서 그 규칙을 다시 지키게 하면
  *    두 갈래가 된다. relaycheck 는 자기 화면이 이미 있다.
- *  · 중앙 전용 상태(`mail/service.js`·`collector/state.js`·`partfault/poller.js`)도 뺀다 — 엣지에서
- *    읽으면 '꺼짐' 만 돌려주어 화면을 잡음으로 채운다.
+ *  · 중앙 전용 상태(`collector/state.js`·`partfault/poller.js`)는 뺀다 — 엣지에서 읽으면 '꺼짐' 만 돌려주어
+ *    화면을 잡음으로 채운다. ⚠ v2.727(감사 D-02) 정정: 여기 함께 적혀 있던 `mail/service.js` 는 **중앙 전용이 아니다** —
+ *    알림 엔진(`alerts.js startAlertEngine`)은 `index.js` 공통 스태거에 있고 엣지 분기가 없어 엣지도 자기 vCenter 알람을
+ *    평가해 메일을 보낸다. `mailStatus()` 에는 비밀이 없고(발송 이력 `history` 는 종류·제목·수신자·사유만, 비밀번호는
+ *    `util/smtp.js` 가 오류 문구에서 가린다) SMTP 인증 실패 정지(v2.591)가 그 엣지의 진단이라 `service.mail` 로 등재했다.
+ *    `mail/service.js` 는 index.js 가 직접 import 하지 않지만 `alerts.js` 가 부팅에 import 하므로 캐시 적중이다(새 타이머 없음).
  *
  * ⚠ 값에 비밀이 섞일 수 있다(설정 pull 상태가 토큰을 담는 등) — `collect.js` 가 `redactDeep` 으로
  *   훑는다. **이 표에 새 항목을 더할 때 그 가림을 우회하는 경로를 만들지 말 것.**
@@ -28,6 +32,7 @@ export const GROUP_LABEL = Object.freeze({
   push: '중앙으로 보내기(push)',
   pull: '중앙 설정 받기(pull)',
   collect: '로컬 수집(폴러)',
+  service: '포탈 자체 서비스', // v2.727(감사 D-02): 수집·push/pull 이 아닌 상태(메일 발송) — health/services.js MODS(collect.* 만) 대상이 아니다
 });
 
 /**
@@ -142,6 +147,13 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.vcLogs', label: 'vCenter 로그·이벤트 수집', group: 'collect', mod: '../logs/poller.js', fn: 'logStatus' },
   { key: 'collect.capacity', label: '리소스 적정성 샘플러', group: 'collect', mod: '../capacity/sampler.js', fn: 'capacitySamplerStatus' },
   { key: 'collect.certs', label: 'TLS 인증서 만료 감시', group: 'collect', mod: '../security/certMonitor.js', fn: 'certStatus' },
+  // ── 포탈 자체 서비스 ──────────────────────────────────────────────────────
+  /*
+   * v2.727(감사 D-02): 메일 발송 상태 — 엣지도 알림 메일을 보낸다(머리말 정정 참조). SMTP 인증 실패 정지(authStopped)·마지막
+   *   실패 사유·시간당 시도/성공 수가 그 엣지의 진단이다. 값에 비밀 없음(수신자 주소·제목은 있다 — 화면은 adminOnly + 전체 범위,
+   *   collect.js 의 redactDeep 도 거친다).
+   */
+  { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

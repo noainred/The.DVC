@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **612개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **615개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-07)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-08)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (190)
+## 공통 (191)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
 | `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
+| `BOARD_MAX_BYTES` |  |  | bulletin/store.js |
 | `CAPACITY_DB_PATH` |  |  | config.js |
 | `CAPACITY_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `CAPACITY_PUSH` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -303,15 +304,17 @@
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 
-## 분석 도구 (6)
+## 분석 도구 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `DISKTREND_CRIT_PCT` | `85` |  | tools/diskTrend.js |
 | `DISKTREND_SNAPSHOT_MAX_HOURS` | `72` |  | tools/diskTrend.js |
 | `DISKTREND_WARN_PCT` | `75` |  | tools/diskTrend.js |
+| `LOGNAME` | `''` |  | tools/user-admin.js |
 | `OTP_ENROLL_CMD` | `''` |  | tools/otp-enroll.js |
 | `SERVICE_NAME` | `'vmware-portal'` |  | tools/otp-enroll.js, tools/user-admin.js |
+| `SUDO_USER` |  |  | tools/user-admin.js |
 | `USER_ADMIN_CAN_RESTART` | `기본 아님('1' 일 때만 적용)` |  | tools/user-admin.js |
 
 ## 서비스 모니터 (9)
@@ -796,4 +799,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 612
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 615

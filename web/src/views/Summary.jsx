@@ -204,7 +204,8 @@ export default function Summary({ scope, onGotoTab }) {
             sub={k.sub}
             accent={k.accent} onClick={() => setShowMemRatio(true)} />
         ); })()}
-        <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub="VM 디스크 할당 총량" accent="var(--accent-2)" />
+        {/* v2.727(C-01): 용량을 못 읽은 VM 은 합계에서 뺐다(0 으로 채우지 않음) — 그 수를 한 줄로 말한다. */}
+        <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub={`VM 디스크 할당 총량${al.vmStorageUnknown ? ` · 용량 미상 VM ${al.vmStorageUnknown}대 제외` : ''}`} accent="var(--accent-2)" />
         <Big label="호스트당 평균 VM" value={al.avgVmPerHost} sub={`전체 ${fmt(c.vms)} VM / ${fmt(c.hosts)} 호스트`} />
       </div>
 
@@ -239,7 +240,7 @@ export default function Summary({ scope, onGotoTab }) {
                     <td className="right tabular">{fmt(o.vms)}</td>
                     <td className="right tabular">{fmt(o.vcpu)}</td>
                     <td className="right tabular">{fmt(o.ramGB)}</td>
-                    <td className="right tabular">{fmt(o.diskGB)}</td>
+                    <td className="right tabular">{fmt(o.diskGB)}{o.storageUnknown ? <span className="muted" style={{ fontSize: 11 }} title="디스크 용량을 못 읽은 VM 은 이 값에서 뺐습니다(0 으로 채우지 않음)"> · 미상 {o.storageUnknown}</span> : null}</td>
                   </tr>
                 ))}
                 {osAlloc.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 20 }}>데이터 없음</td></tr>}
@@ -323,7 +324,7 @@ export default function Summary({ scope, onGotoTab }) {
                 <td className="right tabular" data-sort={r.memTotalGB ?? ''}>{fmtOr(r.memTotalGB)}</td>
                 <td className="right tabular" data-sort={r.ramAllocatedGB ?? ''}>{fmtOr(r.ramAllocatedGB)}</td>
                 <td className="right tabular" data-sort={r.storageTotalTB ?? ''}>{fmtOr(r.storageTotalTB, 1)}{dsUnknownMark(r) && <span className="muted" style={{ fontSize: 11 }} title="사용량을 못 읽은 데이터스토어는 이 값에서 뺐습니다"> · {dsUnknownMark(r)}</span>}</td>
-                <td className="right tabular" data-sort={r.provisionedTB ?? ''}>{fmtOr(r.provisionedTB, 1)}</td>
+                <td className="right tabular" data-sort={r.provisionedTB ?? ''}>{fmtOr(r.provisionedTB, 1)}{r.vmStorageUnknown > 0 && <span className="muted" style={{ fontSize: 11 }} title="디스크 용량을 못 읽은 VM 은 이 값에서 뺐습니다(0 으로 채우지 않음)"> · 미상 {r.vmStorageUnknown}</span>}</td>
               </tr>
             ))}
             <tr data-pin style={{ borderTop: '2px solid var(--accent)', fontWeight: 700 }}>

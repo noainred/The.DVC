@@ -1,10 +1,12 @@
 // shared.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, HttpError } from '../../api.js';
+import { numOrNull } from '../../numOrNull.js'; // v2.727(C-01)
 
 
 
-export const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
+// v2.727(감사 C-01): 값이 없으면(null — v2.719 부터 서버가 못 읽은 용량을 null 로 싣는다) 단위를 붙이지 않는다('null GB'·'0 GB' 금지).
+export const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${n} GB`); };
 
 /**
  * 목록 응답 언랩(v2.349) — 인벤토리 엔드포인트는 두 형태가 섞여 있다:

@@ -1,3 +1,5 @@
+import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
+
 /**
  * inventory/guestOsAgg.js — Guest OS 분포 + 할당 코어(vCPU) 집계(v2.328, 사용자 요구).
  *
@@ -17,6 +19,7 @@ export function aggregateGuestOs(vms, osFamily, vcMeta = new Map()) {
   const byFamily = new Map();   // 계열 → 집계
   const byVc = new Map();       // vcenterId → { total, vcpu, os: Map(os→{count,vcpu,family}) }
   let totalVcpu = 0;
+  let storageUnknown = 0;       // v2.727(C-01): storageGB 를 못 읽어(null) diskGB 합에서 뺀 VM 수
 
   for (const v of vms) {
     const os = (v.guestOS || '미상').trim() || '미상';
@@ -24,11 +27,14 @@ export function aggregateGuestOs(vms, osFamily, vcMeta = new Map()) {
     const on = v.powerState === 'POWERED_ON';
     const vcpu = Number(v.cpuCount) || 0;
     const memMB = Number(v.memMB) || 0;
-    const diskGB = Number(v.storageGB) || 0;
+    // v2.727(감사 C-01): v2.719 부터 storageGB 는 못 읽으면 null 이다 — `Number(null) || 0` 은 그 VM 을 0 GB 로 더해 OS 별 디스크 합계를
+    //   조용히 작게 만들었다. null 은 합에서 빼고 개수를 센다(보고된 0 은 값 — numOrNull 이 지킨다).
+    const diskGB = numOrNull(v.storageGB);
     totalVcpu += vcpu;
 
-    const n = byName.get(os) || { os, family: fam, total: 0, on: 0, off: 0, vcpu: 0, memGB: 0, diskGB: 0 };
-    n.total++; if (on) n.on++; else n.off++; n.vcpu += vcpu; n.memGB += memMB / 1024; n.diskGB += diskGB;
+    const n = byName.get(os) || { os, family: fam, total: 0, on: 0, off: 0, vcpu: 0, memGB: 0, diskGB: 0, storageUnknown: 0 };
+    n.total++; if (on) n.on++; else n.off++; n.vcpu += vcpu; n.memGB += memMB / 1024;
+    if (diskGB == null) { n.storageUnknown++; storageUnknown++; } else n.diskGB += diskGB;
     byName.set(os, n);
 
     const f = byFamily.get(fam) || { family: fam, total: 0, on: 0, vcpu: 0 };
@@ -57,5 +63,6 @@ export function aggregateGuestOs(vms, osFamily, vcMeta = new Map()) {
     };
   }).sort((a, b) => b.total - a.total);
 
-  return { total: vms.length, distinctOs: byName.size, totalVcpu, families, items, byVcenter };
+  // storageUnknown(v2.727): items[].diskGB 합에서 뺀 VM 수(전체) — 0 이면 전부 읽었다.
+  return { total: vms.length, distinctOs: byName.size, totalVcpu, storageUnknown, families, items, byVcenter };
 }

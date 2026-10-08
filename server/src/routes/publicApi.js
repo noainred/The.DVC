@@ -221,7 +221,10 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     datastoresUsageUnknown: dss.filter(dsUsageUnknownOf).length,
     vmVcpu: sum(vms, (v) => v.cpuCount),
     vmRamMB: sum(vms, (v) => v.memMB),
+    // v2.727(감사 C-01): storageGB 는 v2.719 부터 못 읽으면 null — 합은 읽은 VM 만이고(sum 이 null 을 건너뛴다) 뺀 수를
+    //   vmStorageUnknown 으로 밝힌다(내부 /summary allocation.vmStorageUnknown · datastoresUsageUnknown 과 같은 규약).
     vmProvisionedGB: sum(vms, (v) => v.storageGB),
+    vmStorageUnknown: vms.filter((v) => numOrNull(v.storageGB) == null).length,
   };
   return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt) });
 }));

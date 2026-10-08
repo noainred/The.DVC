@@ -35,6 +35,8 @@ export function coverageNote(t) {
 }
 /** vCenter 가 보고한 코어 라이선스 사용량과 산정값 비교 문구. */
 export function reportedText(r) {
+  // v2.727(감사 C-02): vCenter 가 used 를 보고하지 않은 코어 라이선스가 있으면 보고 합이 null 이다 — '없음' 이 아니라 '일부 미상' 이고 비교하지 않는다.
+  if (r.reportedUsedUnknown > 0) return { text: `보고값 일부 미상(사용량 없는 코어 라이선스 ${r.reportedUsedUnknown}개) · 비교 안 함`, tone: 'muted' };
   if (r.reportedCoreUsed == null) return { text: '코어 단위 라이선스 없음', tone: 'muted' };
   if (r.reportedDiff == null) return { text: `보고 ${fmtInt(r.reportedCoreUsed)}(산정이 부분 합이라 비교 안 함)`, tone: 'muted' };
   if (r.reportedDiff === 0) return { text: `보고 ${fmtInt(r.reportedCoreUsed)} · 일치`, tone: 'ok' };

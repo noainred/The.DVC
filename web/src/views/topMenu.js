@@ -77,19 +77,21 @@ export function hashOf(item) {
 export function locate(tab, hash, groups = MENU_GROUPS) {
   const segs = segsOf(hash);
   const toolKey = tab === 'tools' && segs[0] === 'tools' ? (segs[1] || '') : '';
+  // v2.727(감사 A-06): 도구는 메뉴의 자기 자리(그룹·조각)가 먼저다 — 사용자 메뉴에서 '특수 기능' 이 하위 항목({tab:'tools'})으로
+  //   들어가면 예전 순서(탭 검사 먼저)는 **모든** 도구 화면을 그 항목으로 가리켰다. 메뉴에 없는 도구만 '특수 기능' 항목(단독 그룹이든
+  //   하위 항목이든 — id 를 박지 않는다)으로 떨어진다.
+  if (toolKey) {
+    const hit = groupOfTool(toolKey, segs[2], groups);
+    if (hit) return hit;
+  }
   for (const g of groups) {
     if (!g.children) {
-      if (g.tab === tab && !(tab === 'tools' && toolKey && groupOfTool(toolKey, segs[2], groups))) return { group: g.id, child: null };
+      if (g.tab === tab) return { group: g.id, child: null };
       continue;
     }
     for (const c of g.children) {
       if (c.tab && c.tab === tab) return { group: g.id, child: c.id };
     }
-  }
-  if (toolKey) {
-    const hit = groupOfTool(toolKey, segs[2], groups);
-    if (hit) return hit;
-    return { group: 'tools', child: null };
   }
   return { group: null, child: null };
 }

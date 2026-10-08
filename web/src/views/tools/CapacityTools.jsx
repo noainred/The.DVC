@@ -405,8 +405,9 @@ export function Waste({ scope, cluster = '', folder = '' }) {
                 </div>
               )}
               <div className="waste-band-meta">
-                <span><i className="waste-dot" style={{ background: 'var(--amber)' }} />꺼진 VM {data.poweredOff.count}대 점유 {sizeText(data.poweredOff.storageGB)}</span>
-                <span><i className="waste-dot" style={{ background: '#7c6bd6' }} />Thin 여유 {sizeText(data.thinReclaim.reclaimableGB)} · {data.thinReclaim.count} VM</span>
+                {/* v2.727(C-01): 용량을 못 읽은 VM 은 합계에서 뺐다(0 으로 채우지 않음) — 개수를 말한다. */}
+                <span><i className="waste-dot" style={{ background: 'var(--amber)' }} />꺼진 VM {data.poweredOff.count}대 점유 {sizeText(data.poweredOff.storageGB)}{data.poweredOff.storageUnknown > 0 ? <span className="muted"> (용량 미상 {data.poweredOff.storageUnknown}대 제외)</span> : null}</span>
+                <span><i className="waste-dot" style={{ background: '#7c6bd6' }} />Thin 여유 {sizeText(data.thinReclaim.reclaimableGB)} · {data.thinReclaim.count} VM{data.thinReclaim.uncommittedUnknown > 0 ? <span className="muted"> (미커밋 미상 {data.thinReclaim.uncommittedUnknown}대 제외)</span> : null}</span>
               </div>
             </div>
             <div className="waste-band-cell">
@@ -643,8 +644,9 @@ export function ThinVms({ scope }) {
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="Thin VM" value={data.thinVms.toLocaleString()} meta={`전체 ${data.totalVms.toLocaleString()} 중 ${data.thinPct}%`} />
-        <Card label="사용 합계" value={`${data.committedTB} TB`} meta="committed" />
-        <Card label="할당 합계" value={`${data.provisionedTB} TB`} meta="provisioned" />
+        {/* v2.727(C-01): 사용·할당을 못 읽은 행은 합계에서 뺐다(0 으로 채우지 않음) — 개수를 말한다. */}
+        <Card label="사용 합계" value={`${data.committedTB} TB`} meta={`committed${data.storageUnknown > 0 ? ` · 용량 미상 ${data.storageUnknown}대 제외` : ''}`} />
+        <Card label="할당 합계" value={`${data.provisionedTB} TB`} meta={`provisioned${(data.storageUnknown > 0 || data.uncommittedUnknown > 0) ? ` · 미상 ${(data.storageUnknown || 0) + (data.uncommittedUnknown || 0)}대 제외` : ''}`} />
         <Card label="회수 가능(추정)" value={`${data.reclaimableTB} TB`} accent="var(--amber)" meta="uncommitted 합" />
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ Thin 판정은 vCenter의 uncommitted(여유) 기준 <b>추정</b>입니다. 회수 가능 용량은 정확한 값이 아니라 참고치입니다.</div>

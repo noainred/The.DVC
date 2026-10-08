@@ -17,19 +17,33 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 import { agentKeyOf } from '../util/agentKey.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
 
 const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
 
 // null-proto: agent 이름을 키로 쓰므로 '__proto__' 등 프로토타입 오염 방지.
 let byAgent = Object.create(null); // agent -> gpuGuestSettings(전체 병합 객체) + { _updatedAt }
+/*
+ * v2.727(감사 D-01): 로드 오류 상태. 손상 → preserveCorrupt → 빈 배정이면 `GET /api/central/gpu-guest-config` 가 `200 assigned:false` 를
+ *   내려 엣지(agent/gpuGuestConfigPull.js)가 '중앙 지정 없음' 으로 읽었다 — 로컬 설정은 유지되지만 **중앙이 지운 VM 자격증명이 엣지에
+ *   그대로 남는 창**이 생기고, 서비스 점검(listSettingsLoadErrors)에도 나오지 않았다. v2.631 settingsLoadError 의 누락 지점.
+ *   오류면 라우트가 503 settingsUnreadable 로 답한다. 재시작 뒤(원본이 .corrupt 로 옮겨져 ENOENT)도 보존본만 있으면 못 읽은 것이다.
+ *   관리자 저장(persist)만 해제한다. confirm 은 지금 메모리 값(손상이면 빈 맵)을 그대로 쓴다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'GPU 게스트 수집 배포(엣지별)', confirm: () => persist() });
+/** 배포 파일을 못 읽었으면 { at, reason }, 읽었으면 null — 라우트가 pull 응답 전에 본다. 파일이 없고 보존본만 있으면 오류다. */
+export function gpuGuestConfigLoadError() { if (!_loadErr.get() && !fs.existsSync(FILE)) _loadErr.missing(); return _loadErr.get(); }
 // v2.296 배포 사본 계정 복호. ⚠ 손상 시 조용히 빈 객체로 출발하면 다음 persist()가 온전했던
 // 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {})); }
-catch (err) { preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
+try {
+  if (fs.existsSync(FILE)) { byAgent = Object.assign(Object.create(null), openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {})); _loadErr.ok(); }
+  else _loadErr.missing();
+} catch (err) { _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(byAgent)), { mode: 0o600 }); // 암호화 모드면 password 봉인(복제 — byAgent 평문 유지)
+  _loadErr.ok(); // v2.727(D-01): 관리자 저장이 로드 오류를 푼다(settingsLoadError 규약)
 }
 
 const cleanAgent = (a) => String(a || '').trim();
