@@ -37,6 +37,8 @@ import { lockReasonOf } from './views/toolVisibility.js';
 import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
 import { resolveMenu, retryDelayMs } from './views/sidebar/sideMenu.js';
+import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, SEARCH_TITLE } from './views/headerText.js'; // v2.727 헤더 C안
+const Palette = lazy(() => import('./version_4/Palette.jsx')); // v2.727: 헤더 ⌘K — V4 팔레트 컴포넌트 재사용(판정·검색은 같은 모듈)
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
@@ -292,6 +294,14 @@ function Portal({ user, onLogout }) {
   const [consoleOn, setConsoleOn] = useState(isConsoleHash);
   // 신규 포탈(V4) 표시 여부(v2.508) — 해시 첫 세그먼트 'v4' 로 판단해 새로고침해도 신규 포탈에 머문다.
   const [v4On, setV4On] = useState(isV4Hash);
+  const [paletteOn, setPaletteOn] = useState(false); // v2.727 헤더 ⌘K(사용자 선택 C안)
+  // v2.727: ⌘K / Ctrl+K 는 기본 셸에서만 — V4·V6 셸은 자기 핸들러를 갖는다(둘 다 걸면 두 번 열린다). 의존성에 셸 플래그를 둬 전환 때 떼고 붙인다.
+  useEffect(() => {
+    if (consoleOn || v4On || v5On || v6On) return undefined;
+    const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') { e.preventDefault(); setPaletteOn((v) => !v); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [consoleOn, v4On, v5On, v6On]);
 
   const cur = tabFilters[tab] || {};
   // V5 는 법인 범위를 상단 하나로 둔다(탭마다 따로 두지 않는다) — 리전 선택은 V5 에서 쓰지 않는다.
@@ -645,6 +655,15 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
+      {paletteOn && (
+        <Suspense fallback={null}>
+          <div className="hdr-palette">{/* v2.727: V4 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
+            <Palette includePages={false} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
+              onClose={() => setPaletteOn(false)}
+              onPick={(h) => { setPaletteOn(false); if (h && window.location.hash !== h) window.location.hash = h; }} />
+          </div>
+        </Suspense>
+      )}
       {showMenuEdit && (
         <Suspense fallback={null}>
           <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []} menuState={menuState} onRetry={retryMenu}
@@ -727,7 +746,7 @@ function Portal({ user, onLogout }) {
           onClick={() => (sbMode === 'drawer' ? setDrawerOpen((v) => !v) : toggleRail())}><Icon name="menu" size={18} /></button>
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
-          <div>
+          <div className="brand-line">{/* v2.727 C안: 이름 옆 한 줄에 버전·LIVE */}
             <h1 className="brand-title"><span className="bt-strong">The Davinci</span></h1>
             {upgrading ? (
               <span className="ver-badge brand-ver upgrading-badge"
@@ -756,6 +775,14 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
+        {/* v2.727(사용자 선택 C안): 가운데 ⌘K 검색 — 기존 V4 팔레트(기능·탭)를 연다. 400px 미만은 아이콘만(CSS). */}
+        <div className="tb-search">
+          <button type="button" className="tb-cmdk" onClick={() => setPaletteOn(true)} title={SEARCH_TITLE} aria-label={SEARCH_TITLE}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <span className="tb-cmdk-text">{SEARCH_PLACEHOLDER}</span>
+            <kbd className="tb-cmdk-kbd">⌘K</kbd>
+          </button>
+        </div>
         <div className="status-pill">
           {(() => {
             const total = health?.vcenters ?? 0;
@@ -777,15 +804,16 @@ function Portal({ user, onLogout }) {
               else if (pending > 0) tail = <span role="button" title="클릭하면 수집 중인 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({pending} 수집중)</span>;
               else tail = <span role="button" title="클릭하면 해당 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({total - conn - maint - off} 확인중)</span>;
             }
+            const genText = generatedAtText(health?.generatedAt); // v2.727 C안: 시각을 아래 줄이 아니라 같은 줄 꼬리에
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.3, whiteSpace: 'nowrap' }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
                   {/* v2.675: 분모는 비활성을 뺀 수다(V6 pill·consoleData 와 같은 기준) — v2.617 이 '분모에서 뺐다' 고 적었지만 이 헤더는 전체를 쓰고 있었다. */}
                   {health ? <span title={off > 0 ? `비활성 ${off}곳은 분모에서 뺐습니다(수집하지 않음)` : undefined}>{`${conn}/${Math.max(0, total - off)} vCenter`}</span> : '연결 중…'}
                   {health && (allOk ? <span style={{ color: '#4ade80', fontWeight: 700 }}> OK</span> : tail)}
                 </span>
-                {health?.generatedAt && <span className="muted" style={{ fontSize: 11, textAlign: 'center' }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+                {genText && <span className="muted" style={{ fontSize: 11 }} title="마지막 수집 시각">· {genText}</span>}
               </div>
             );
           })()}
@@ -794,7 +822,7 @@ function Portal({ user, onLogout }) {
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div className="user-meta">
             <div className="user-name">{user.name}</div>
-            <div className="user-role muted">{user.demoGuest ? '데모 계정' : user.superAdmin ? 'super_admin' : user.role}</div>
+            <div className="user-role muted">{roleLabel(user)}</div>{/* v2.727: 역할 원문(super_admin) 대신 한글 — views/headerText.js 하나가 소유 */}
           </div>
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>

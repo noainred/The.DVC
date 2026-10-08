@@ -15,6 +15,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { entryOf } from '../topMenu.js';
+import { nextOpenGroup } from './sideMenu.js'; // v2.727 아코디언 전이 규칙
 import { Icon, iconNameOf } from './sidebarIcons.jsx';
 
 const SOURCE_TEXT = { mine: '내 메뉴', distributed: '배포된 메뉴', default: '포탈 기본 메뉴', unknown: '메뉴를 읽지 못했습니다', loading: '메뉴 불러오는 중…' };
@@ -25,11 +26,13 @@ export default function Sidebar({
   onGo, onToggleRail, onEdit, onRetry,
   isAdmin = false, source = 'default', unknown = 0, menuLoaded = true, menuState = 'ok',
 }) {
-  // 수동으로 접거나 편 그룹 — 지금 화면의 그룹은 기본 펼침이고, 화면이 바뀌면 그 그룹을 다시 편다.
-  const [manual, setManual] = useState({});
-  useEffect(() => { if (here.group) setManual((m) => (m[here.group] === true ? m : { ...m, [here.group]: true })); }, [here.group]);
-  const isOpen = (id) => (mode === 'rail' ? true : (manual[id] ?? here.group === id));
-  const toggle = (id) => setManual((m) => ({ ...m, [id]: !isOpen(id) }));
+  // v2.727(사용자 요청 "한 번에 1개의 메뉴만 펼치게"): 펼친 그룹은 **하나**다(아코디언). 화면이 바뀌면 그 화면의 그룹이 열리고
+  //   다른 그룹은 닫힌다. 열린 그룹을 다시 누르면 닫힌다(0개 허용). 레일 모드는 플라이아웃이라 전부 '열림' 으로 본다.
+  //   전이 규칙은 sideMenu.nextOpenGroup 하나(테스트 고정).
+  const [openId, setOpenId] = useState(here.group || null);
+  useEffect(() => { if (here.group) setOpenId(here.group); }, [here.group]);
+  const isOpen = (id) => (mode === 'rail' ? true : openId === id);
+  const toggle = (id) => setOpenId((cur) => nextOpenGroup(cur, id));
   const rail = mode === 'rail';
   // v2.727(E-06): 서랍이 열리면 첫 메뉴 항목으로 포커스 — 키보드 사용자가 서랍 밖에 남지 않게.
   const asideRef = useRef(null);

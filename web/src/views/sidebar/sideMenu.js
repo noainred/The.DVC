@@ -120,3 +120,12 @@ export function missingDefaults(groups) {
   for (const [key, d] of defaultIndex().items) if (!present.has(key)) out.push({ key, ...d });
   return out;
 }
+
+/**
+ * 아코디언 전이(v2.727, 사용자 요청 "한 번에 1개의 메뉴만 펼치게") — 열린 그룹 id 하나만 든다.
+ *  · 닫힌 그룹을 누르면 그 그룹만 열린다(다른 그룹은 닫힌다) · 열린 그룹을 누르면 닫힌다(0개 허용) · 잘못된 id 는 변화 없음.
+ */
+export function nextOpenGroup(current, clicked) {
+  if (!clicked) return current ?? null;
+  return current === clicked ? null : clicked;
+}

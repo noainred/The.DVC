@@ -226,6 +226,10 @@ test('C-01 ⑧ 실제 라우터 — 결측 VM 수가 응답마다 실리고 합�
     const on = real.find((v) => v.powerState === 'POWERED_ON' && v.storageGB > 0 && !off.includes(v));
     const thin = real.find((v) => v.thin && v.uncommittedGB > 0 && v.storageGB > 0 && !off.includes(v) && v !== on);
     const removed = off[0].storageGB + off[1].storageGB + on.storageGB;
+    // 셋 중 thin 인 VM 은 uncommitted 도 null 이 되어 thin 회수 가능에서도 빠진다 — 기대값을 그 수로 계산한다.
+    const thinAmong = [...off, on].filter((v) => v.thin);
+    const thinNulls = thinAmong.length + (thin ? 1 : 0);
+    const thinRemoved = thinAmong.reduce((a, v) => a + (v.uncommittedGB || 0), 0) + (thin ? thin.uncommittedGB : 0);
     const k = keys.issueApiKey({ name: 'c', groups: ['inventory'] }).plaintext;
     // 변경 전(모두 읽은 스냅샷) — memoJson 은 스냅샷 세대 키라 뒤 요청은 generatedAt 을 바꿔 새로 계산하게 한다.
     const before = {
@@ -245,7 +249,7 @@ test('C-01 ⑧ 실제 라우터 — 결측 VM 수가 응답마다 실리고 합�
     const disk = (await get('/api/tools/capacity/disk-history?days=7')).body;
     const pub = (await get('/api/v1/inventory/summary', k)).body;
     return {
-      ids: [...off, on].map((v) => v.id), thinId: thin ? thin.id : null, removed, thinUncommitted: thin ? thin.uncommittedGB : null,
+      ids: [...off, on].map((v) => v.id), thinId: thin ? thin.id : null, removed, thinNulls, thinRemoved,
       before: { provTB: before.summary.allocation.provisionedStorageTB, beforeUnknown: before.summary.allocation.vmStorageUnknown,
         diskGB: before.vms.totals.diskGB, offGB: before.waste.poweredOff.storageGB, thinGB: before.waste.thinReclaim.reclaimableGB,
         thinProvTB: before.thin.provisionedTB, pubProv: before.pub.data.vmProvisionedGB, pubUnknown: before.pub.data.vmStorageUnknown },
@@ -280,10 +284,11 @@ test('C-01 ⑧ 실제 라우터 — 결측 VM 수가 응답마다 실리고 합�
   const nullRows = r.waste.off.vms.filter((v) => v.storageGB == null);
   assert.ok(nullRows.length <= 2 && nullRows.every((v) => r.ids.includes(v.id)), '목록의 null 은 그 VM 뿐이고 0 으로 바뀌지 않는다');
   if (r.thinId) {
-    assert.equal(r.waste.thin.uncommittedUnknown, 1, 'thin VM 의 미커밋 결측');
-    assert.equal(r.waste.thin.reclaimableGB, b.thinGB - r.thinUncommitted, 'Thin 회수 가능은 읽은 VM 만');
-    assert.equal(r.thin.uncommittedUnknown, 1);
-    assert.equal(r.thin.nullProv, 1, 'thin-vms: 미커밋을 모르면 할당도 모른다');
+    assert.ok(r.thinNulls >= 1);
+    assert.equal(r.waste.thin.uncommittedUnknown, r.thinNulls, 'thin VM 의 미커밋 결측(셋 중 thin 인 것 포함)');
+    assert.equal(r.waste.thin.reclaimableGB, b.thinGB - r.thinRemoved, 'Thin 회수 가능은 읽은 VM 만');
+    assert.equal(r.thin.uncommittedUnknown, r.thinNulls);
+    assert.equal(r.thin.nullProv, r.thinNulls, 'thin-vms: 미커밋을 모르면 할당도 모른다');
     assert.ok(r.thin.provTB <= b.thinProvTB, 'thin-vms 할당 합계는 줄거나 같다(0 으로 채우지 않는다)');
   }
   // /tools/guest-os
@@ -295,7 +300,7 @@ test('C-01 ⑧ 실제 라우터 — 결측 VM 수가 응답마다 실리고 합�
   // disk-history breakdown
   assert.ok(r.disk, 'disk-history 가 breakdown 을 돌려준다');
   assert.equal(r.disk.storageUnknown, unknownCount);
-  assert.equal(r.disk.uncommittedUnknown, r.thinId ? 1 : 0);
+  assert.equal(r.disk.uncommittedUnknown, r.thinId ? 1 : 0, 'committed 를 모르는 VM 은 uncommittedUnknown 이 아니라 storageUnknown 이다');
   // 공개 API — 선언 필드 그대로, 내부와 같은 수
   assert.equal(r.pub.vmStorageUnknown, unknownCount);
   assert.equal(r.pub.vmProvisionedGB, b.pubProv - r.removed, '공개 API vmProvisionedGB 는 뺀 VM 용량만큼 줄어든다');

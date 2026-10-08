@@ -189,10 +189,10 @@ export function flushBulletinNow() {
 }
 registerExitFlush('bulletin/store', () => { flushBulletinNow(); });
 
-/** 테스트 전용 — 비동기 쓰기가 전부 끝날 때까지 기다린다(상한 안에서). */
+/** 테스트 전용 — 예약·진행 중인 쓰기가 전부 끝날 때까지 기다린다(상한 안에서). 실패해 대기분(dirty)만 남은 상태는 '끝난 것' 이다. */
 export async function bulletinIdle({ maxMs = 5_000 } = {}) {
   const t0 = Date.now();
-  while ([...writers.values()].some((w) => w.writing || w.timer || w.dirty)) {
+  while ([...writers.values()].some((w) => w.writing || w.timer)) {
     if (Date.now() - t0 > maxMs) return false;
     await new Promise((r) => setTimeout(r, 10));
   }

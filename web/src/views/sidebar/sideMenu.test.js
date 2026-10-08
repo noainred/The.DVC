@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { MENU_GROUPS, locate, visibleMenu, hashOf } from '../topMenu.js';
 import { TOOLS } from '../specialToolsList.js';
-import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible, retryDelayMs, MENU_RETRY_MS } from './sideMenu.js';
+import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible, retryDelayMs, MENU_RETRY_MS, nextOpenGroup } from './sideMenu.js';
 
 describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
   it('저장된 메뉴가 없으면 포탈 기본 메뉴 그대로다', () => {
@@ -123,5 +123,17 @@ describe('v2.727 감사 A-06 — 특수 기능이 하위 항목인 메뉴에서�
     // 특수 기능 항목이 아예 없는 메뉴에서는 모르는 도구가 어느 그룹도 켜지 않는다(없는 'tools' 그룹을 지어내지 않는다)
     const none = resolveMenu({ mine: { v: 1, groups: [{ id: 'overview', tab: 'overview' }] }, catalog: TOOLS }).groups;
     expect(locate('tools', '#/tools/pdu', none)).toEqual({ group: null, child: null });
+  });
+});
+
+describe('sideMenu.nextOpenGroup(v2.727) — 아코디언: 펼친 그룹은 하나', () => {
+  it('닫힌 그룹을 누르면 그 그룹만 열린다(이전 그룹은 닫힌다)', () => {
+    expect(nextOpenGroup('server', 'storage')).toBe('storage');
+    expect(nextOpenGroup(null, 'storage')).toBe('storage');
+  });
+  it('열린 그룹을 다시 누르면 닫힌다(0개 허용) · 빈 id 는 변화 없음', () => {
+    expect(nextOpenGroup('server', 'server')).toBe(null);
+    expect(nextOpenGroup('server', '')).toBe('server');
+    expect(nextOpenGroup(undefined, null)).toBe(null);
   });
 });
