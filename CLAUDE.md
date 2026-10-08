@@ -922,6 +922,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - `shellStyles.test.js` 의 기존 7개 계약(탭 선택자 범위·전역 `.tab` 스타일·brandrow
       flex-wrap·`.topbar .tabs` overflow-x:auto 등)은 전부 무수정으로 통과 — 이번 변경은 이
       계약들과 독립적인 **폭 조건부 순서 재배치**다.
+  - ⚠⚠ **v2.725 — 상단 메뉴는 대메뉴 10개 + 하위 메뉴 줄(시안 A '2단 탭')이고, 표는 `web/src/views/topMenu.js` 하나다**
+    (사용자 요청 메뉴 재구성 + Claude Design 시안 https://claude.ai/artifact/HMEPTddM42sLXFikvQX1eq · 업그레이드는 설정 하위. 회귀 `web/src/views/topMenu.test.js`):
+    · 화면을 새로 만들지 않는다 — 하위 메뉴는 기존 탭(`#/<tab>`)이나 특수 기능 도구(`#/tools/<k>`)를 가리킬 뿐이다. **탭 id·도구 키는 그대로**
+      (V5·V6·해시 라우팅·toolsDenied 가 쓴다). 옛 주소(#/hosts 등)는 그대로 열린다.
+    · ⚠ **App 의 TABS 에 탭을 더하면 MENU_GROUPS 에도 넣을 것** — 빠진 탭은 메뉴로 갈 길이 없다(테스트가 두 집합을 대조한다).
+    · 지금 위치는 `locate(tab, hash)` 하나가 판정한다 — 특수 기능 카드로 연 도구도 그 도구가 속한 메뉴가 켜진다. 물리 서버는 서버 분석의
+      셋째 주소 조각 `baremetal`(`#/tools/serveranalysis/baremetal/<하위 탭>`)이고 서버 분석은 그 모드에서 구분을 Baremetal 로 고정한다
+      (모드가 바뀌면 `key` 로 화면을 새로 만든다 — 하위 탭 훅의 base 가 모드마다 다르다).
+    · 노출은 탭 = App visibleTabs, 도구 = `toolVisibility.lockReasonOf`(특수 기능 카드와 같은 판정). 하위 메뉴가 모두 빠진 대메뉴는 숨긴다.
+      카탈로그는 첫 번들을 키우지 않게 동적 import 이고, 불러오기 전에는 toolAllowed 만 본다.
+    · ⚠ 인증을 끈 목 서버는 화면 쪽 사용자가 언제나 Anonymous 관리자다(App.jsx `!cfg.authEnabled`) — viewer·operator 메뉴는 **인증을 켜고 실제 계정으로**
+      확인해야 한다(v2.725 검증: viewer 는 서버·스토리지·네트워크 일부만, operator 는 관리자 전용 도구가 빠진다).
 
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —

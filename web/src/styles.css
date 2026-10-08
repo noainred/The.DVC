@@ -166,6 +166,23 @@ body {
   .topbar .tb-brandrow .status-pill { order: 3; }
   .topbar .tb-brandrow .user-box { order: 4; }
 }
+/* v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴 옆 하위 메뉴 개수 · 하위 메뉴 줄.
+   ⚠ 선택자는 `.topbar` 아래로 한정한다(전역 `.tab` 버튼과 같은 이유 — v2.556). 대문자 변환을 걸지 말 것(v2.575). */
+.topbar .tabs .tab .tab-count {
+  margin-left: 4px; font-family: var(--font-mono); font-size: 10px; font-weight: 500; color: var(--text-dim);
+}
+.topbar .subtabs {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; overflow-x: auto;
+  padding: 7px 20px; background: var(--panel-deep); border-top: 1px solid var(--border-soft);
+}
+.topbar .subtabs .subtab {
+  flex: none; padding: 5px 13px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.topbar .subtabs .subtab:hover { color: var(--text); border-color: var(--text-faint); }
+.topbar .subtabs .subtab.active { color: var(--text); background: rgba(34, 211, 238, .14); border-color: var(--accent-2); }
+.topbar .subtabs .subtab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .dot.live { animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
