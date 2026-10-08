@@ -23,7 +23,9 @@ test('LEFT2628-01 samplerWithheldOf — 적재 제외가 없으면 null, 있으�
     at: 5, staleSkipped: { vcenters: 2, hosts: 4, datastores: 1, byReason: { maintenance: 1, stale: 1 } },
     vmperfStale: { vcenters: 1, totalWithheld: false, maintenanceExcluded: 1, totalPartial: true }, vmStatsSkipped: 7,
   });
-  assert.deepEqual(r, { at: 5, staleVcenters: 2, byReason: { maintenance: 1, stale: 1 }, totalWithheld: false, totalPartial: true, maintenanceExcluded: 1, vmStatsSkipped: 7 });
+  // v2.727(C-01): 결측으로 뺀 DS·VM 수가 함께 실린다(없으면 0)
+  assert.deepEqual(r, { at: 5, staleVcenters: 2, byReason: { maintenance: 1, stale: 1 }, totalWithheld: false, totalPartial: true, maintenanceExcluded: 1, vmStatsSkipped: 7, dsUsedUnknown: 0, vmStorageUnknown: 0 });
+  assert.equal(samplerWithheldOf({ at: 6, vmStorageUnknown: 3 }).vmStorageUnknown, 3, 'VM 스토리지 결측만 있어도 null 이 아니다');
   assert.equal(samplerWithheldOf({ vmperfStale: { vcenters: 1, totalWithheld: true } }).totalWithheld, true);
 });
 

@@ -57,6 +57,10 @@ before(async () => {
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(500).json({ ok: false, error: 'internal error', message: err.message }));
   srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  // v2.727: 앞 테스트의 spawnSync(CEN2603-03, 14만 행)가 이 프로세스를 수 초 막는 동안 서버의 keep-alive 유휴 시한(기본 5초)이 지나면,
+  //   막힘이 풀린 순간 fetch 가 닫히는 중인 소켓을 다시 써 ECONNRESET('fetch failed')가 난다 — 전량 실행(부하)에서만 실제로 났다.
+  //   제품 동작과 무관한 하니스 경합이라 유휴 시한을 테스트 길이보다 길게 둔다.
+  srv.keepAliveTimeout = 120_000;
   base = `http://127.0.0.1:${srv.address().port}/api/central`;
   const { issueAgentToken } = await import('../src/central/agentTokens.js');
   AGENT_TOKEN_G = issueAgentToken('edgeG').token;

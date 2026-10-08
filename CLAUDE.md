@@ -961,6 +961,33 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · ⚠ 정직 기록: Chromium 은 인증을 켠 목 서버(비밀번호 로그인 재정의 `login-policy-users.txt`)에서 admin·noainred(super_admin)·operator·viewer × 1440/400 을
       봤다. AD 계정·실운영 계정 수백 명 규모의 배포는 보지 못했다(대상 수는 로컬 계정 수).
 
+  - ⚠⚠ **v2.727 — 버그 점검 6축(사이드바·게시판·정직성·엣지·화면·성능) + 상단 메뉴 C안 + 메뉴 아코디언 + iDRAC 통합 추이 A안**
+    (사용자 요청 "버그 찾아서 개선해줘" 외 3건. 상세 `docs/AUDIT-2026-10-08b.md`. 회귀 `server/test/audit2727{a,b,c,d,e}.test.js` + 웹 `audit2727e`·`audit2727g3a`·
+    `headerText`·`sideMenu`·`menuEdit`·`topMenu`·`shellStyles`·`bulletinText`·`idracLayout2727` — 그룹별 변이 검증):
+    · ⚠⚠ **메뉴를 읽지 못했으면 편집을 잠근다**(A-01 — v2.618 WEB-2 '조회 실패 → 저장' 의 재발): App 의 메뉴 조회 상태 `loading|ok|error` + 백오프 재시도(5→15→60초),
+      `resolveMenu({failed})` 는 `source:'unknown'`, 편집 창은 저장·삭제·복원·배포를 잠근다. 서버는 내용이 바뀐 저장의 직전 메뉴를 `prev{mode:'save'}` 로 한 단계 보관한다.
+    · **사용자 메뉴 키는 `usermenu/store.js menuUserKey`**(소문자 · `[a-z0-9._@-]{1,64}` 밖이면 `h:<sha1>`) — AD 이름의 역슬래시·공백이 500 이던 것, 대소문자가 다른 메뉴이던 것.
+      로드 때 옛 키를 옮기며 같은 키는 더 최근 것만. 비-admin·데모 계정 응답에는 `distributed.by`·`prev.by` 를 싣지 않는다.
+    · ⚠ **사이드바 CSS 는 전부 `.sb` 자손**(A-02) — 바닥 선택자 `.sb-label` 이 하단 상태바의 같은 이름 클래스를 바꿨다. `shellStyles.test.js` 가 `.sb-` 바닥 선택자 0 을 고정한다.
+    · **좌측 메뉴는 한 번에 한 그룹만 펼친다**(`sideMenu.nextOpenGroup` — 열린 그룹을 다시 누르면 닫힘, 지금 위치의 그룹은 자동으로 열림, 레일은 영향 없음).
+    · **상단 메뉴 C안**(`views/headerText.js`): 역할은 한글(`roleLabel` — 데모 계정 → 슈퍼 관리자 → 관리자·운영자·조회자 순), 가운데 '기능 · 화면 찾기' 버튼이
+      V4 팔레트를 **페이지 없이**(`includePages={false}`) 연다, ⌘K/Ctrl+K 는 **기본 셸에서만**(V4·V5·V6·관제 콘솔은 각자 단축키). `.user-role` 에 text-transform 금지.
+    · **게시판·공지 쓰기는 300ms 묶음 비동기**(`bulletin/store.js` — tmp → fsync → rename, 종료 flush 등록, 실패는 상태·콘솔에, 자동 재시도 루프 없음) + 합계 상한
+      (`BOARD_MAX_BYTES` 기본 16MB — 넘는 글·댓글은 409 `board-full`, 공감·삭제는 막지 않는다). `central/edgeRecord.createDebouncedWriter` 를 쓰지 않은 이유: 그 헬퍼는 파일을
+      **상태 파일**로 등록하는데 게시판은 사용자 데이터라 백업 번들에 들어가야 한다(대신 백업 '변경 감시' 지문에서는 뺐다 — 글마다 change 백업 금지).
+    · ⚠⚠ **결측을 null 로 바꿨으면 소비처를 전수로 따라갈 것 — 이번엔 12곳**(C-01 — v2.719 B1-09 의 VM `storageGB`/`uncommittedGB`): 디스크 추이 시계열·인벤토리 합계·
+      정지 VM 회수량·공개 API 가 `|| 0` 으로 더했다. 합계에서 빼고 `vmStorageUnknown`(공개 API 선언 필드 추가)으로 센다. GPU VRAM(`memGB`)·라이선스 used/total·
+      vSAN 멤버 수(enabled 인데 0개 = null)·비용 배분 일부 모름(`partialCost`)·전력 '시각 없음'(`noTime`)도 같은 규칙. 날짜 경계 KST 리터럴은 `arch2582` 스윕이 금지한다.
+    · **VM 이동·구성 변경 이력은 `trackedEventsAsync`**(F-01 — 1일 조각 + 양보, 한 문장 판과 결과 동일 대조, 최장 동기 구간은 비율) · 손상된 iDRAC 스캔 배정·GPU 게스트 배포
+      파일은 503 `settingsUnreadable`(D-01) · 인벤토리 상한 넘침 `overCount` · `pushBundleToEdge` 도 `recordOutbound`(`/api/upgrade/` 추적 접두) · vCenter 삭제 때 vmcfg·contention
+      재시도 기록도 비움(F-04 — 그 전엔 호출부 0) · CLI 계정 메뉴의 변경은 감사 로그(비밀 미기재).
+    · ⚠ **감사 보고를 그대로 믿지 말 것**(D-03): '엣지가 추적을 자르지 않는다·재전송이 거짓 실패를 남긴다' 는 틀렸다 — `makeTracer` 가 이미 600줄·2,000자로 자르고
+      `completeTestRun` 은 완료된 run 에 `already` 를 준다(멱등). BIG_JSON 등록만 했다.
+    · **iDRAC 통합 추이 A안**: `.idrac-trend-row`(① 보기 탭 + 법인·서비스·서버 ② 종류 칩 + 도구 버튼) + KPI 카드 `.idrac-trend-kpi-val`(값 옆에 평균·최대). 720px 이하는
+      오른쪽 덩어리를 왼쪽 정렬로. 도구 버튼의 기준선 숫자는 켜졌을 때만 글자에, 꺼졌을 때는 title 에.
+    · ⚠ 작업 방식: 수정 에이전트 셋이 세션 한도로 중간에 멈췄다 — 변이 백업·작업 트리 대조로 남은 변이가 없는지 확인하고, 변이 단계 전에 멈춘 그룹은 리드가 파일 단위로
+      감사 시작 커밋판으로 되돌려 다시 검증했다. WIP 커밋 두 개가 변이 도중의 파일을 담았다(작업 트리가 정답 — 그 커밋판으로 되돌리지 말 것).
+
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):

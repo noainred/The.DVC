@@ -98,7 +98,9 @@ test('RUNTIME2613-01: 서비스 점검은 edgelog/spec.js 의 collect.* 폴러 �
   // 중앙 전용(이 프로세스는 CENTRAL_URL 없음 = 중앙) — relaycheck·partfault 행이 있다
   for (const k of svc.CENTRAL_ONLY_SPEC.map((x) => x.key)) assert.ok(have.has(k), `중앙 전용 ${k} 행이 없다`);
   // 대상 밖(push/pull 워커)을 문구로 말한다
-  assert.ok(Array.isArray(r.coverage.notCovered) && r.coverage.notCovered.every((k) => /^(push|pull)\./.test(k)));
+  // v2.727(D-02): 메일 발송 상태(service.mail)도 엣지 로그 표에만 있다 — 서비스 점검 대상 밖이고 문구가 그 사실을 말한다
+  assert.ok(Array.isArray(r.coverage.notCovered) && r.coverage.notCovered.every((k) => /^(push|pull|service)\./.test(k)));
+  if (r.coverage.notCovered.includes('service.mail')) assert.match(r.coverage.note, /메일 발송 상태/);
   assert.match(r.coverage.note, /push\/pull 워커/);
   assert.equal(r.coverage.pollers, collect.length + svc.CENTRAL_ONLY_SPEC.length);
   // 소스 대조: spec 의 mod 경로 전부가 services.js 대응표(MODS)에 있다

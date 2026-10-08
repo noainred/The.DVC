@@ -283,7 +283,9 @@ test('TESTDOC2613-13 — MIXED_STATE_FILES 스윕: 항목마다 last*/useCount �
     if (!/atomicWriteFileSync\(/.test(s) || !RUN_WRITE.test(s)) continue;
     const lits = [...s.matchAll(/configDir(?:\(\))?,\s*'([^']+\.json)'\)/g)].map((m) => m[1]);
     if (!lits.length) continue; // 파일명을 변수로 조립하는 모듈은 이 스윕이 못 본다(정직 기록)
-    if (!lits.some((n) => backup.MIXED_STATE_FILES.has(n) || backup.isRuntimeStateFile(n))) gaps.push(`${r}: ${lits.join('·')}`);
+    // v2.727(B-07): 변경 감시에서 통째로 빠진 사용자 데이터 파일(board.json·notices.json)도 'change 백업이 생기지 않는' 쪽이다 —
+    //   bulletin/store.js 의 lastWriteAt·lastWriteError 는 저장 레코드가 아니라 쓰기기 상태지만 정규식이 그것까지 본다.
+    if (!lits.some((n) => backup.MIXED_STATE_FILES.has(n) || backup.isRuntimeStateFile(n) || backup.isChangeWatchExcluded(n))) gaps.push(`${r}: ${lits.join('·')}`);
   }
   assert.deepEqual(gaps, [], `실행 필드를 쓰는데 혼합·상태 어느 목록에도 없다(폴러 실행마다 change 백업이 생긴다): ${gaps.join(', ')}`);
   // ③ 지문 — 혼합 파일의 last*/useCount 변화는 지문을 바꾸지 않고, 설정 변화는 바꾼다(중첩 포함).

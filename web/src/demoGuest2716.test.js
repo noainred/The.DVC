@@ -15,7 +15,9 @@ describe('데모 계정 화면 계약', () => {
     expect(app).toMatch(/if \(t\.noDemoGuest && user\.demoGuest\) return false;/);
   });
   it('역할 표기는 admin 이 아니라 데모 계정이다(개발 포탈 · V4)', () => {
-    expect(app).toMatch(/user\.demoGuest \? '데모 계정'/);
+    // v2.727(헤더 C안): 개발 포탈 헤더는 views/headerText.js roleLabel 이 판정한다 — 데모 계정이 먼저다.
+    expect(app).toMatch(/\{roleLabel\(user\)\}/);
+    expect(read('views/headerText.js')).toMatch(/if \(user\.demoGuest\) return '데모 계정';/);
     expect(read('version_4/V4App.jsx')).toMatch(/user\?\.demoGuest \? '데모 계정'/);
   });
 });
