@@ -34,7 +34,9 @@ async function load(req, snap) {
   const days = daysOf(req.query.days);
   const since = Date.now() - days * DAY;
   const db = await getLogsDb();
-  const rows = ids.length ? db.trackedEvents({ vcenterIds: ids, since }, READ_MAX + 1) : [];
+  // v2.727(감사 F-01): 화면·CSV 둘 다 1일 조각 + 양보로 읽는다(한 문장 판은 기간 안 일치 행 전부를 TEMP B-TREE 로 흘려 동기 정지).
+  //   결과(행·순서·상한)는 trackedEvents 와 같다 — `/of`(entity 전용 인덱스, 행이 적다)만 동기 판을 그대로 쓴다.
+  const rows = ids.length ? await db.trackedEventsAsync({ vcenterIds: ids, since }, READ_MAX + 1) : [];
   const truncated = rows.length > READ_MAX;
   if (truncated) rows.length = READ_MAX;
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));

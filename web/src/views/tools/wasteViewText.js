@@ -19,6 +19,9 @@ export function reclaimStorage(data) {
     offPct: total > 0 && off != null ? Math.round((off / total) * 100) : null,
     thinVms: numOrNull(data?.thinReclaim?.count),
     partial: off == null || thin == null,
+    // v2.727(C-01): 서버가 용량을 못 읽어 합계에서 뺀 VM 수(0 으로 채우지 않았다 — 합계는 그만큼 하한).
+    offUnknown: numOrNull(data?.poweredOff?.storageUnknown) || 0,
+    thinUnknown: numOrNull(data?.thinReclaim?.uncommittedUnknown) || 0,
   };
 }
 

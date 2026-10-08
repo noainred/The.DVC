@@ -6,9 +6,13 @@
  *         기본 메뉴 항목 중 내 메뉴에 없는 것(지운 것·업그레이드로 새로 생긴 것)도 같은 방법으로 다시 넣는다.
  * 저장은 `PUT /user-menu`(계정별 서버 저장) — 권한은 넓어지지 않는다(권한 없는 항목은 사이드바가 숨긴다). 편집 연산은
  * menuEdit.js(순수)가 소유한다. 배포(super_admin)는 저장된 내 메뉴를 보내므로 바뀐 것이 있으면 먼저 저장하게 한다.
+ * v2.727(감사 A-01): `menuState !== 'ok'`(서버에서 메뉴를 못 읽음)이면 저장·삭제·복원·배포를 **잠그고 사유를 말한다** — 기본 메뉴 +
+ *   편집으로 저장하면 저장돼 있던 내 메뉴가 통째로 사라진다. 다시 읽기에 성공하면 편집 중이던 것을 서버 메뉴 기준으로 되돌린다.
+ * v2.727(감사 A-04): '추가 대상' 은 그룹 **id** 로 든다(인덱스면 ▲▼·삭제 뒤 다른 그룹에 들어갔다). A-05: '바뀐 항목'·저장 활성은
+ *   저장 결과 기준(`changesToSave`). A-10: 배포자 이름이 응답에 없으면(viewer) '슈퍼 관리자' 로 말한다.
  * ⚠ 문구에 백틱·`**` 를 쓰지 않는다(BoldText 규약). 대문자 변환 금지. 표는 쓰지 않는다(목록이라 STable 대상 아님).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ErrorBox, Loading } from '../../components/ui.jsx';
 import { fetchJson, postJson, putJson, delJson, can, toolAllowed, getCurrentUser } from '../../api.js';
 import { fmtAgo } from '../../util/fmt.js';
@@ -17,17 +21,18 @@ import { Icon, iconNameOf } from './sidebarIcons.jsx';
 import { missingDefaults } from './sideMenu.js';
 import {
   toEditable, toStored, defaultEditable, moveGroup, moveItem, removeItem, addItem, newGroup, renameGroup, removeGroup,
-  changeCount, availableTools, filterTools, countItems, LIMITS,
+  changesToSave, firstGroupId, prevNoteText, distNoteText, lockedNoteText, availableTools, filterTools, countItems, LIMITS,
 } from './menuEdit.js';
 
-const SOURCE_TEXT = { mine: '내 메뉴', distributed: '배포된 메뉴', default: '포탈 기본 메뉴' };
+const SOURCE_TEXT = { mine: '내 메뉴', distributed: '배포된 메뉴', default: '포탈 기본 메뉴', unknown: '메뉴를 읽지 못했습니다' };
+/** v2.727(A-14): 기본값을 렌더마다 새 객체로 만들지 않는다(useMemo(tools) 가 매 렌더 무효가 됐다). */
+const NO_OVERRIDES = Object.freeze({});
 
-export default function MenuEditor({ user, data, resolved, catalog = [], onClose, onChanged }) {
+export default function MenuEditor({ user, data, resolved, catalog = [], menuState = 'ok', onRetry, onClose, onChanged }) {
   const isAdmin = user?.role === 'admin';
   const [groups, setGroups] = useState(() => toEditable(resolved?.groups || []));
   const baseline = useMemo(() => toEditable(resolved?.groups || []), [resolved]);
-  const firstGroup = (gs) => Math.max(0, gs.findIndex((g) => !g.tab));
-  const [target, setTarget] = useState(() => firstGroup(toEditable(resolved?.groups || [])));
+  const [targetId, setTargetId] = useState(() => firstGroupId(toEditable(resolved?.groups || [])));
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('all');
   const [busy, setBusy] = useState('');
@@ -36,24 +41,44 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
   const [showDist, setShowDist] = useState(false);
   const [newName, setNewName] = useState('');
 
-  const changed = changeCount(baseline, groups);
+  // 조회 실패/불러오는 중이면 잠근다. 잠겼다가 풀리면(다시 읽기 성공) 편집본을 서버 메뉴 기준으로 되돌린다 — 잠긴 동안의 편집은
+  // 틀린 바탕(기본 메뉴) 위의 것이라 그대로 저장하면 안 된다.
+  const locked = menuState !== 'ok';
+  const wasLocked = useRef(locked);
+  useEffect(() => {
+    if (wasLocked.current && !locked) {
+      const fresh = toEditable(resolved?.groups || []);
+      setGroups(fresh);
+      setTargetId(firstGroupId(fresh));
+      setNote('서버에서 메뉴를 다시 읽었습니다 — 편집 중이던 내용은 서버 메뉴 기준으로 되돌렸습니다.');
+    }
+    wasLocked.current = locked;
+  }, [locked, resolved]);
+
+  const changed = changesToSave(baseline, groups);
   const items = countItems(groups);
-  const overrides = data?.overrides || {};
+  const overrides = data?.overrides || NO_OVERRIDES;
   const lockOf = (t) => lockReasonOf(t, { isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed ?? null, can, toolAllowed });
   const tools = useMemo(() => availableTools(catalog, groups, { overrides, lockOf }), [catalog, groups, overrides]); // eslint-disable-line react-hooks/exhaustive-deps
   const cats = Array.isArray(data?.categories) ? data.categories : [];
   const catSet = cat !== 'all' ? new Set((cats.find((c) => c.id === cat)?.tools) || []) : null;
   const shownTools = filterTools(tools.filter((t) => !catSet || catSet.has(t.k)), q);
   const missing = missingDefaults(groups);
-  const targetGroup = groups[target] && !groups[target].tab ? groups[target] : null;
+  const target = groups.findIndex((g) => g.id === targetId);
+  const targetGroup = target >= 0 && !groups[target].tab ? groups[target] : null;
   const targetLabel = targetGroup ? targetGroup.label : '(그룹을 고르세요)';
 
   const apply = (r) => { if (r.ok === false) { setNote(r.reason || ''); return; } setNote(''); setGroups(r.groups); };
   const add = (item) => { if (!targetGroup) { setNote('왼쪽에서 "여기에 추가" 로 대상 그룹을 먼저 고르세요'); return; } apply(addItem(groups, target, item)); };
-  const addGroup = () => { const r = newGroup(groups, newName); apply(r); if (r.ok) { setTarget(r.gi); setNewName(''); } };
-  const delGroup = (gi) => { apply(removeGroup(groups, gi)); if (gi === target) setTarget(firstGroup(groups.filter((_, k) => k !== gi))); };
+  const addGroup = () => { const r = newGroup(groups, newName); apply(r); if (r.ok) { setTargetId(r.groups[r.gi].id); setNewName(''); } };
+  const delGroup = (gi) => {
+    const r = removeGroup(groups, gi);
+    apply(r);
+    if (r.ok && groups[gi]?.id === targetId) setTargetId(firstGroupId(r.groups));
+  };
 
   const save = async () => {
+    if (locked) { setNote(lockedNoteText(menuState)); return; }
     setBusy('save'); setErr(null); setNote('');
     try {
       const r = await putJson('/user-menu', { menu: toStored(groups) });
@@ -63,10 +88,12 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
     } catch (e) { setErr(e); } finally { setBusy(''); }
   };
   const useDistributedOrDefault = async () => {
+    if (locked) return;
     setBusy('clear'); setErr(null);
     try { await delJson('/user-menu'); onChanged?.('cleared'); onClose?.(); } catch (e) { setErr(e); } finally { setBusy(''); }
   };
   const restorePrev = async () => {
+    if (locked) return;
     setBusy('restore'); setErr(null);
     try { await postJson('/user-menu/restore-prev'); onChanged?.('restored'); onClose?.(); } catch (e) { setErr(e); } finally { setBusy(''); }
   };
@@ -74,6 +101,7 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
   const src = resolved?.source || 'default';
   const prev = data?.prev || null;
   const dist = data?.distributed || null;
+  const lockTitle = locked ? lockedNoteText(menuState) : undefined;
 
   return (
     <Modal title="메뉴 편집" onClose={onClose} width={1120}>
@@ -85,18 +113,24 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
             {data?.username && <span className="me-meta">· {data.username}</span>}
           </div>
           <div className="me-head-r">
-            <button type="button" className="btn" disabled={!!busy} onClick={() => { setGroups(defaultEditable(catalog)); setNote('포탈 기본 메뉴로 되돌렸습니다 — 저장을 눌러야 적용됩니다'); }}>기본 메뉴로 되돌리기</button>
-            {prev && <button type="button" className="btn" disabled={!!busy} onClick={restorePrev} title={`${prev.by || '?'} 가 ${prev.at ? fmtAgo(prev.at) : '—'} 강제 배포하면서 보관한 직전 메뉴`}>이전 메뉴 복원</button>}
-            {src === 'mine' && (dist ? <button type="button" className="btn" disabled={!!busy} onClick={useDistributedOrDefault}>배포된 메뉴로 바꾸기</button>
-              : <button type="button" className="btn" disabled={!!busy} onClick={useDistributedOrDefault}>내 메뉴 삭제(기본 메뉴 사용)</button>)}
-            {data?.canDistribute && <button type="button" className="btn" disabled={!!busy || changed > 0} title={changed > 0 ? '바뀐 것이 있습니다 — 먼저 저장한 뒤 배포할 수 있습니다' : '내 메뉴(저장된 것)를 전체 사용자에게 배포'} onClick={() => setShowDist(true)}>전체 사용자에게 배포…</button>}
+            <button type="button" className="btn" disabled={!!busy || locked} title={lockTitle} onClick={() => { setGroups(defaultEditable(catalog)); setNote('포탈 기본 메뉴로 되돌렸습니다 — 저장을 눌러야 적용됩니다'); }}>기본 메뉴로 되돌리기</button>
+            {prev && <button type="button" className="btn" disabled={!!busy || locked} onClick={restorePrev} title={lockTitle || prevNoteText(prev, prev.at ? fmtAgo(prev.at) : null)}>{prev.mode === 'save' ? '저장 전 메뉴 복원' : '이전 메뉴 복원'}</button>}
+            {src === 'mine' && (dist ? <button type="button" className="btn" disabled={!!busy || locked} title={lockTitle} onClick={useDistributedOrDefault}>배포된 메뉴로 바꾸기</button>
+              : <button type="button" className="btn" disabled={!!busy || locked} title={lockTitle} onClick={useDistributedOrDefault}>내 메뉴 삭제(기본 메뉴 사용)</button>)}
+            {data?.canDistribute && <button type="button" className="btn" disabled={!!busy || locked || changed > 0} title={lockTitle || (changed > 0 ? '바뀐 것이 있습니다 — 먼저 저장한 뒤 배포할 수 있습니다' : '내 메뉴(저장된 것)를 전체 사용자에게 배포')} onClick={() => setShowDist(true)}>전체 사용자에게 배포…</button>}
             <button type="button" className="btn" disabled={!!busy} onClick={onClose}>취소</button>
-            <button type="button" className="btn primary" disabled={!!busy || changed === 0} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+            <button type="button" className="btn primary" disabled={!!busy || locked || changed === 0} title={lockTitle} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
           </div>
         </div>
+        {locked && (
+          <div className="banner warn me-locked">
+            {lockedNoteText(menuState)}
+            {menuState === 'error' && onRetry && <> <button type="button" className="btn btn-sm" onClick={onRetry}>다시 시도</button></>}
+          </div>
+        )}
         {err && <ErrorBox error={err} />}
         {note && <div className="banner warn">{note}</div>}
-        {dist && src !== 'distributed' && <div className="me-hint muted">배포된 메뉴가 있습니다({dist.by || '?'} · {dist.at ? fmtAgo(dist.at) : '—'} · {dist.mode === 'force' ? '강제 적용' : '유지'}). 내 메뉴가 있으면 내 메뉴가 먼저입니다.</div>}
+        {dist && src !== 'distributed' && <div className="me-hint muted">{distNoteText(dist, dist.at ? fmtAgo(dist.at) : null)}</div>}
 
         <div className="me-body">
           <section className="me-left">
@@ -110,7 +144,7 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
             </div>
             <div className="me-groups">
               {groups.map((g, gi) => (
-                <div key={g.id} className={`me-group${gi === target ? ' target' : ''}${g.tab ? ' single' : ''}`}>
+                <div key={g.id} className={`me-group${g.id === targetId ? ' target' : ''}${g.tab ? ' single' : ''}`}>
                   <div className="me-group-head">
                     <Icon name={iconNameOf(g.id)} size={15} className="me-gico" />
                     {g.tab ? <span className="me-gname">{g.label}</span>
@@ -118,7 +152,7 @@ export default function MenuEditor({ user, data, resolved, catalog = [], onClose
                         onChange={(e) => setGroups(renameGroup(groups, gi, e.target.value))} />}
                     <span className="me-gcount">{g.tab ? '단독' : `${(g.children || []).length}개`}</span>
                     <span className="me-gbtns">
-                      {!g.tab && <button type="button" className={`btn btn-sm${gi === target ? ' primary' : ''}`} aria-pressed={gi === target} onClick={() => setTarget(gi)}>{gi === target ? '추가 대상' : '여기에 추가'}</button>}
+                      {!g.tab && <button type="button" className={`btn btn-sm${g.id === targetId ? ' primary' : ''}`} aria-pressed={g.id === targetId} onClick={() => setTargetId(g.id)}>{g.id === targetId ? '추가 대상' : '여기에 추가'}</button>}
                       <button type="button" className="btn btn-sm" aria-label="위로" disabled={gi === 0} onClick={() => setGroups(moveGroup(groups, gi, -1))}>▲</button>
                       <button type="button" className="btn btn-sm" aria-label="아래로" disabled={gi === groups.length - 1} onClick={() => setGroups(moveGroup(groups, gi, 1))}>▼</button>
                       {!g.tab && <button type="button" className="btn btn-sm" aria-label="그룹 삭제" title="그룹을 지웁니다 — 안의 항목은 오른쪽 '기본 메뉴 항목' 으로 돌아갑니다" onClick={() => delGroup(gi)}>✕</button>}
@@ -251,7 +285,7 @@ export function DistributeDialog({ onClose, onDone }) {
               </label>
             </fieldset>
             <div className="me-dist-last muted">
-              {last ? <>마지막 배포: {last.by || '?'} · {last.at ? fmtAgo(last.at) : '—'} · {last.mode === 'force' ? '강제 적용' : '유지'} · 그룹 {last.groups} · 강제 적용 {last.counts?.forced ?? 0}명</> : '마지막 배포 없음'}
+              {last ? <>마지막 배포: {last.by || '슈퍼 관리자'} · {last.at ? fmtAgo(last.at) : '—'} · {last.mode === 'force' ? '강제 적용' : '유지'} · 그룹 {last.groups} · 강제 적용 {last.counts?.forced ?? 0}명</> : '마지막 배포 없음'}
               {' · '}배포 기록과 감사 로그가 남습니다. 권한은 바뀌지 않습니다(권한 없는 항목은 그 사용자에게 보이지 않습니다).
             </div>
             <div className="me-dist-btns">

@@ -84,6 +84,9 @@ test('④ 부분 인덱스 리터럴 — 이름은 [A-Za-z]+ 이고 조회가 �
   assert.equal(db.trackedEvents({ vcenterIds: ['vc1'], since: NOW - 2 * DAY, entity: 'web01', types: MOVE_TYPES }, 100).length, 2);
   assert.deepEqual(db.trackedEvents({ vcenterIds: [] }, 10), [], '빈 vCenter 목록은 전체가 아니라 0건');
   assert.deepEqual(db.trackedEvents({ types: ['VmPoweredOnEvent'] }, 10), [], '추적 종류 밖은 0건');
+  // v2.727(감사 F-01): 조각 판은 한 문장 판과 같은 결과다(화면·CSV 가 이것을 쓴다) — 큰 합성 DB 대조는 audit2727d.test.js
+  assert.deepEqual(await db.trackedEventsAsync({ vcenterIds: ['vc1', 'vc2'], since: NOW - 2 * DAY }, 100, { now: NOW }), rows);
+  assert.deepEqual(await db.trackedEventsAsync({ vcenterIds: [] , since: 0 }, 10), []);
   resetLogsDb();
   const raw = new DatabaseSync(file);
   assert.ok(raw.prepare('PRAGMA table_info(events)').all().some((c) => c.name === 'detail'));
@@ -92,6 +95,10 @@ test('④ 부분 인덱스 리터럴 — 이름은 [A-Za-z]+ 이고 조회가 �
   raw.close();
   // 조회 코드가 같은 강제를 쓰는지(없으면 플래너가 (vcenterId,ts) 인덱스로 기간 전체를 훑는다 — v2.702 실측)
   assert.match(fs.readFileSync(new URL('../src/logs/db.js', import.meta.url), 'utf8'), /FROM events INDEXED BY idx_events_tracked WHERE/);
+  // v2.727(감사 F-01): 화면·CSV 의 load() 는 조각 판을 쓰고, 동기 판은 /of(entity 전용 인덱스)에만 남는다.
+  const route = fs.readFileSync(new URL('../src/routes/api/vmChanges.js', import.meta.url), 'utf8');
+  assert.match(route, /await db\.trackedEventsAsync\(\{ vcenterIds: ids, since \}/);
+  assert.equal((route.match(/db\.trackedEvents\(/g) || []).length, 1, '동기 trackedEvents 는 /of 한 곳뿐');
 });
 
 function mv(vc, vm, ts, type = 'VmMigratedEvent', d = {}) {

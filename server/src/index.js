@@ -351,6 +351,12 @@ app.use('/api/central/pdu-data', BIG_JSON);
 // 포트 사용량(sanswitch-perf)도 같은 축이라 함께 올린다(v2.517 에 상태 payload 가 더해졌다).
 app.use('/api/central/sanswitch-data', BIG_JSON);
 app.use('/api/central/sanswitch-perf', BIG_JSON);
+// v2.727(감사 D-03): SAN 스위치 연결 테스트 **대행 결과 회신**(v2.421) — 본문 상한 산수가 1MB 를 넘을 수 있다:
+//   추적 로그 600줄 × 2,000자(엣지 `testDiag.js makeTracer` 상한 = 중앙 `testRuns.js sanitizeResult` 상한) = 최대 1.2MB
+//   + CLI 원문 40 × 4,000자(160KB) + 섹션 64 × 2,000자(128KB). verbose(ssh2 debug) 테스트가 디렉터(포트 512~768·명령 20여 개)에서
+//   그 상한을 채우면 기본 1MB 파서가 413 을 주고, 413 은 재시도 대상이 아니라 중앙 run 은 시한까지 'running' → 화면은 '엣지 무응답' 으로
+//   읽는다(실제로는 결과가 컸다). ⚠ 정직 기록: 실측이 아니라 상한 산수다 — 정상 테스트는 수십 KB 다.
+app.use('/api/central/sanswitch-test-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수

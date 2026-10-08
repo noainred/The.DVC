@@ -28,9 +28,20 @@ import { STORAGE_POWER_REASON, reasonCountsText } from './overviewCardsText.js';
 import { PROBE_REASONS } from '../../../server/src/storage/power.js';
 describe('v2.667 스토리지 전력 사유', () => {
   it('서버 사유 코드 전부에 문구가 있다', () => {
-    for (const k of [...PROBE_REASONS, 'no-snapshot', 'collect-failed', 'not-reported', 'stale']) expect(STORAGE_POWER_REASON[k], k).toBeTruthy();
+    for (const k of [...PROBE_REASONS, 'no-snapshot', 'collect-failed', 'not-reported', 'stale', 'no-time']) expect(STORAGE_POWER_REASON[k], k).toBeTruthy();   // v2.727(감사 C-06): no-time
   });
   it('사유별 개수는 많은 순 · 0 은 뺀다', () => {
     expect(reasonCountsText({ 'no-field': 3, skipped: 0, 'collect-failed': 5 })).toBe('장비 수집 실패(스토리지 모니터링의 오류 참조) 5 · 응답에 전원 필드 없음 3');
+  });
+});
+
+// v2.727(감사 C-06): 시각 없음(noTime)은 오래됨(stale)과 다른 사유 — 카드·카테고리 문구가 따로 말한다.
+import { powerCardMeta, powerCatNote } from './overviewCardsText.js';
+describe('v2.727 전력 noTime', () => {
+  it('powerCatNote · powerCardMeta 가 수집 시각 없음을 말한다', () => {
+    expect(powerCatNote('storage', { measured: 1, devices: 3, noTime: 1, stale: 1 })).toMatch(/수집 시각 없음 1/);
+    expect(powerCatNote('network', { measured: 2, devices: 2 })).not.toMatch(/시각 없음/);
+    const m = powerCardMeta({ servers: { watts: 0, measured: 0, devices: 0 }, network: { watts: 0, measured: 0, devices: 1, noTime: 1 }, storage: { watts: 0, measured: 0, devices: 0 } });
+    expect(m).toMatch(/시각 없음 1/); expect(m).toMatch(/읽은 장비만의 합/);
   });
 });

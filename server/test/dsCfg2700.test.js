@@ -129,3 +129,17 @@ test('⑥ 엣지 정제 — dcfg 아는 필드만', () => {
   const out = sanitizeInventoryList([{ id: 'vc1:ds-1', name: 'd', dcfg: 'junk', vmfsMajor: '6' }], 'vc1', 10, dropped);
   assert.equal(out[0].dcfg, null); assert.equal(out[0].vmfsMajor, 6);
 });
+
+// v2.727(감사 C-05): 멤버 0개 입력에서 vsan-partition 이 나지 않는다 — enabled + membershipList 0 은 '못 읽음(null)' 이다.
+test('⑦ vSAN 멤버 0개 — parseVsan 은 null(판정 보류) · analyzeVsan 은 분할이라 말하지 않고 membersUnknown 으로 센다', () => {
+  const v0 = parseVsan('true', '<diskIssues><diskId>d</diskId></diskIssues>');
+  assert.equal(v0.members, null); assert.equal(v0.diskIssues, 1);
+  assert.equal(parseVsan('false', '').members, 0, '꺼진 호스트의 0 은 값');
+  const hosts = [
+    { id: 'a', name: 'a', vcenterId: 'v', cluster: 'Z', connectionState: 'CONNECTED', hcfg: { vsan: v0 } },
+    { id: 'b', name: 'b', vcenterId: 'v', cluster: 'Z', connectionState: 'CONNECTED', hcfg: { vsan: parseVsan('true', '') } },
+  ];
+  const r = analyzeVsan(hosts, []);
+  assert.deepEqual(r.clusters[0].findings.map((f) => f.code), ['vsan-disk-issue'], 'vsan-partition 없음');
+  assert.equal(r.clusters[0].membersUnknown, 2); assert.equal(r.clusters[0].minMembers, null);
+});

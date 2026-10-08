@@ -140,3 +140,13 @@ test('⑩ 합산 — 경로 표 · 못 읽음 사유별 · 경로 없음 사유�
   const b = s.issues.find((x) => x.id === 'b'); assert.deepEqual(b.seenKeys, ['model']);
   assert.equal(s.issues.length, 4, '경로 없는 장비는 목록이 아니라 개수로만');
 });
+
+// v2.727(감사 C-06): 시각이 둘 다 없는 장비는 '오래됨' 이 아니라 '시각 없음' 이다 — 합계 제외는 같고 사유만 다르다.
+test('⑪ 합산 — 시각 없음(no-time)은 stale 과 다른 사유로 센다', () => {
+  const r = buildPowerTotal({ now: NOW, storage: [
+    { id: 'a', type: 'powerstore', snap: { ok: true, extra: { power: { watts: 700, source: 'PowerStore' } } } },                     // at·collectedAt 없음
+    { id: 'b', type: 'powerstore', snap: { ok: true, collectedAt: NOW - 7 * 3_600_000, extra: { power: { watts: 700 } } } },     // 오래됨
+  ] });
+  assert.equal(r.storage.noTime, 1); assert.equal(r.storage.stale, 1); assert.equal(r.storage.measured, 0); assert.equal(r.storage.watts, 0);
+  assert.deepEqual(r.storage.issues.map((x) => [x.id, x.reason]).sort(), [['a', 'no-time'], ['b', 'stale']]);
+});

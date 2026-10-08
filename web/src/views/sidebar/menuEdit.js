@@ -129,6 +129,45 @@ export function sameMenu(a, b) {
   return JSON.stringify(toStored(a)) === JSON.stringify(toStored(b));
 }
 
+/**
+ * 화면의 '바뀐 항목 N' · 저장 버튼 활성의 기준(v2.727 감사 A-05) — **저장 결과(toStored)가 기준과 같으면 0**.
+ * `changeCount` 는 빈 새 그룹도 세는데 그 그룹은 저장에서 빠지므로 '바뀐 항목 1 · 저장 가능' 이 거짓이었다(헛저장·헛감사).
+ */
+export function changesToSave(base, cur) {
+  if (sameMenu(base, cur)) return 0;
+  const saved = (groups) => (groups || []).filter((g) => g.tab || (g.children || []).length); // 저장에서 빠지는 빈 그룹은 세지 않는다
+  return changeCount(saved(base), saved(cur));
+}
+
+/** '추가 대상' 기본값 — 하위 메뉴가 있는 첫 그룹의 **id**(v2.727 A-04: 인덱스로 들면 ▲▼·삭제 뒤 다른 그룹을 가리킨다). 없으면 null. */
+export function firstGroupId(groups) {
+  return (groups || []).find((g) => !g.tab)?.id ?? null;
+}
+
+/** 편집 창 '이전 메뉴 복원' 버튼의 설명(v2.727 A-01·A-10) — 보관한 동작(저장/강제 배포)을 가르고, 배포자 이름이 없으면 '슈퍼 관리자'. */
+export function prevNoteText(prev, agoText = null) {
+  if (!prev) return '';
+  const when = agoText || '—';
+  if (prev.mode === 'save') return `내가 ${when} 저장하면서 덮은 직전 메뉴로 되돌립니다`;
+  return `${prev.by || '슈퍼 관리자'} 가 ${when} 강제 배포하면서 보관한 직전 메뉴로 되돌립니다`;
+}
+
+/** 편집 창 머리의 '배포된 메뉴가 있습니다' 문구(v2.727 A-10 — 배포자 이름이 없으면 '슈퍼 관리자'). */
+export function distNoteText(dist, agoText = null) {
+  if (!dist) return '';
+  return `배포된 메뉴가 있습니다(${dist.by || '슈퍼 관리자'} · ${agoText || '—'} · ${dist.mode === 'force' ? '강제 적용' : '유지'}). 내 메뉴가 있으면 내 메뉴가 먼저입니다.`;
+}
+
+/**
+ * 조회 실패 상태의 편집 창 안내(v2.727 A-01). 저장·삭제·복원·배포를 잠그는 이유를 한 문장으로.
+ * @param {'loading'|'ok'|'error'} state
+ */
+export function lockedNoteText(state) {
+  if (state === 'ok') return '';
+  if (state === 'loading') return '서버에서 메뉴를 불러오는 중입니다 — 끝나면 편집할 수 있습니다.';
+  return '서버에서 메뉴를 읽지 못했습니다. 지금 보이는 것은 포탈 기본 메뉴(또는 마지막으로 읽은 메뉴)라 이대로 저장하면 저장돼 있던 내 메뉴를 덮어씁니다 — 저장·삭제·복원·배포를 잠갔습니다. 다시 시도한 뒤 편집하세요.';
+}
+
 /** 최장 공통 부분열 길이 — '자리가 바뀐 항목' 을 최소로 센다(하나를 지우면 아래 항목이 전부 밀리지만 그것은 바뀐 것이 아니다). */
 function lcsLen(a, b) {
   const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));

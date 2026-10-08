@@ -22,6 +22,20 @@ export function memText(usedMB, totalMB) {
   return `${gb1(u)} / ${gb1(t)} GB`;
 }
 export function gbText(gb) { const n = numOrNull(gb); return n == null ? '—' : `${n >= 100 ? Math.round(n) : Math.round(n * 10) / 10} GB`; }
+
+/**
+ * v2.727(감사 E-12): VRAM 칸 — 카드가 용량을 보고하지 않으면(서버가 null 로 싣는다) '0 GB' 가 아니라 '—' 다. 보고된 0 은 '0 GB' 그대로.
+ *   호스트·모델 표 둘 다 이 함수를 쓴다(예전 `${r.memGB} GB` 는 null 을 'null GB'·0 을 '0 GB' 로 그렸다 — 둘 다 '없는 값' 을 수치처럼 보였다).
+ */
+export const VRAM_UNKNOWN_TITLE = '카드가 VRAM 을 보고하지 않았습니다(vCenter memorySizeInKB 없음) — 0 GB 가 아니라 모르는 값입니다';
+export function vramText(memGB) { const n = numOrNull(memGB); return n == null ? '—' : `${Math.round(n)} GB`; }
+/** 모델별 집계 행의 VRAM 툴팁 — 전부 못 읽었으면 VRAM_UNKNOWN_TITLE, 일부면 '최대값 기준 · N대 미보고', 전부 읽었으면 ''. */
+export function vramTitle(row) {
+  if (!row) return '';
+  const unknown = numOrNull(row.memUnknownHosts) || 0;
+  if (numOrNull(row.memGB) == null) return VRAM_UNKNOWN_TITLE;
+  return unknown > 0 ? `보고한 호스트 중 최대 VRAM 기준 — 호스트 ${unknown}대는 VRAM 을 보고하지 않았습니다(합산·비교에서 뺐습니다)` : '';
+}
 export function tempText(c) { const n = numOrNull(c); return n == null ? '—' : `${Math.round(n)}℃`; }
 
 /**

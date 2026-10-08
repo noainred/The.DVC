@@ -186,7 +186,7 @@ export default function Explore() {
             <SumCard label="검색된 VM" value={vmResult.totals.count.toLocaleString()} meta={`구동중 ${vmResult.totals.poweredOn.toLocaleString()}`} />
             <SumCard label="vCPU 합계" value={vmResult.totals.vcpu.toLocaleString()} meta="할당 vCPU" accent="var(--accent)" />
             <SumCard label="RAM 합계" value={`${vmResult.totals.ramGB.toLocaleString()} GB`} meta={`≈ ${(vmResult.totals.ramGB / 1024).toFixed(1)} TB`} accent="var(--purple)" />
-            <SumCard label="디스크 합계" value={`${vmResult.totals.diskTB.toLocaleString()} TB`} meta={`${vmResult.totals.diskGB.toLocaleString()} GB`} accent="var(--accent-2)" />
+            <SumCard label="디스크 합계" value={`${vmResult.totals.diskTB.toLocaleString()} TB`} meta={`${vmResult.totals.diskGB.toLocaleString()} GB${vmResult.totals.storageUnknown ? ` · 용량 미상 ${vmResult.totals.storageUnknown}대 제외` : ''}`} accent="var(--accent-2)" />
             <SumCard label="평균 CPU 사용률" value={unitText(vmResult.totals.avgCpuUsagePct, '%')} meta="구동중 VM 기준" />
             <SumCard label="평균 메모리 사용률" value={unitText(vmResult.totals.avgMemUsagePct, '%')} meta="구동중 VM 기준" />
           </div>

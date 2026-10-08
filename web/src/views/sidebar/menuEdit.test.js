@@ -5,7 +5,8 @@ import { TOOLS } from '../specialToolsList.js';
 import { resolveMenu } from './sideMenu.js';
 import {
   toEditable, toStored, defaultEditable, moveGroup, moveItem, removeItem, addItem, newGroup, renameGroup, removeGroup,
-  placedIn, countItems, sameMenu, changeCount, availableTools, filterTools, LIMITS,
+  placedIn, countItems, sameMenu, changeCount, changesToSave, firstGroupId, prevNoteText, distNoteText, lockedNoteText,
+  availableTools, filterTools, LIMITS,
 } from './menuEdit.js';
 
 const base = () => toEditable(MENU_GROUPS);
@@ -112,5 +113,44 @@ describe('availableTools · filterTools', () => {
     expect(filterTools(list, 'finops').some((t) => t.k === 'insights-hub')).toBe(true); // aka
     expect(filterTools(list, '')).toBe(list);
     expect(filterTools(list, 'zzz-none')).toEqual([]);
+  });
+});
+
+describe('v2.727 감사 — 저장 기준의 바뀐 항목 · 추가 대상 id · 보관/배포 문구', () => {
+  it('A-05: 빈 새 그룹만 있으면 changeCount 는 1 이지만 저장 결과가 같으므로 changesToSave 는 0 이다', () => {
+    const g = newGroup(base(), '빈 그룹').groups;
+    expect(changeCount(base(), g)).toBe(1);
+    expect(sameMenu(base(), g)).toBe(true);
+    expect(changesToSave(base(), g)).toBe(0);
+    // 항목이 실제로 바뀌면 그대로 센다
+    const moved = moveGroup(base(), 2, -1);
+    expect(changesToSave(base(), moved)).toBe(changeCount(base(), moved));
+    expect(changesToSave(base(), moved)).toBeGreaterThan(0);
+    // 빈 그룹 + 실제 변경 — 빈 그룹은 세지 않고 실제 변경만
+    const both = moveGroup(g, 2, -1);
+    expect(changesToSave(base(), both)).toBe(1);
+  });
+  it('A-04: 추가 대상은 그룹 id 다 — 하위 메뉴가 있는 첫 그룹, 없으면 null', () => {
+    expect(firstGroupId(base())).toBe('server');
+    expect(firstGroupId([{ id: 'overview', tab: 'overview' }])).toBe(null);
+    expect(firstGroupId([])).toBe(null);
+    // 그룹을 옮겨도 같은 id 를 findIndex 로 찾는다(인덱스로 들면 다른 그룹을 가리킨다 — 감사 재현)
+    const g = base();
+    const storageAt = g.findIndex((x) => x.id === 'storage');
+    const m = moveGroup(g, storageAt, 1);
+    expect(m[storageAt].id).not.toBe('storage');
+    expect(m.findIndex((x) => x.id === 'storage')).toBe(storageAt + 1);
+  });
+  it('A-01·A-10: 보관 문구는 mode 를 가르고 배포자 이름이 없으면 슈퍼 관리자로 말한다 · 잠금 사유', () => {
+    expect(prevNoteText({ mode: 'save', at: 1 }, '3분 전')).toMatch(/^내가 3분 전 저장하면서 덮은 직전 메뉴/);
+    expect(prevNoteText({ mode: 'force', by: 'noainred' }, '1시간 전')).toMatch(/^noainred 가 1시간 전 강제 배포/);
+    expect(prevNoteText({ mode: 'force' }, null)).toMatch(/^슈퍼 관리자 가 — 강제 배포/);
+    expect(prevNoteText(null)).toBe('');
+    expect(distNoteText({ mode: 'keep' }, '2일 전')).toContain('슈퍼 관리자 · 2일 전 · 유지');
+    expect(distNoteText({ mode: 'force', by: 'noainred' }, null)).toContain('noainred · — · 강제 적용');
+    expect(lockedNoteText('ok')).toBe('');
+    expect(lockedNoteText('loading')).toMatch(/불러오는 중/);
+    expect(lockedNoteText('error')).toMatch(/읽지 못했습니다[\s\S]*저장·삭제·복원·배포를 잠갔습니다/);
+    for (const t of [prevNoteText({ mode: 'save' }, 'x'), distNoteText({ mode: 'keep' }, 'x'), lockedNoteText('error')]) expect(t).not.toMatch(/[`*]/);
   });
 });

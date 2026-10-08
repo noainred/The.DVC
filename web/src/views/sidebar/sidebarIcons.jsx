@@ -24,6 +24,7 @@ export const ICON_PATH = Object.freeze({
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
   close: 'M6 6l12 12M18 6L6 18',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  refresh: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5', // v2.727(A-01) 사이드바 '메뉴 다시 읽기'
 });
 
 /** 그룹 id → 아이콘 이름. 사용자 그룹(custom-…)·모르는 id 는 folder. */

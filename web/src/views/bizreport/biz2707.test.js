@@ -85,3 +85,15 @@ describe('costText v2.721', () => {
     expect(t.includes('`')).toBe(false);
   });
 });
+
+// v2.727(감사 C-04): 부분 합 VM 을 한 줄로 말한다 — thin 여유 모름 · 할당 일부 모름.
+describe('costText v2.727', () => {
+  it('provisionedPartial · partialVms 를 말한다', () => {
+    const t = notesText({ notes: { provisionedPartial: 2, partialVms: 3 } });
+    expect(t).toMatch(/thin 여유를 모르는 VM 2대/);
+    expect(t).toMatch(/할당 일부를 모르는 VM 3대/);
+    expect(t).toMatch(/부분 합/);
+    expect(t.includes('`')).toBe(false);
+    expect(notesText({ notes: { provisionedPartial: 0, partialVms: 0 } })).toBeNull();
+  });
+});

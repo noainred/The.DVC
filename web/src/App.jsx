@@ -36,7 +36,7 @@ import { lockReasonOf } from './views/toolVisibility.js';
 // v2.726 좌측 사이드바 — 계정별 메뉴(내 메뉴 > 배포 메뉴 > 기본)의 해석은 views/sidebar/sideMenu.js, 편집 창은 MenuEditor(lazy).
 import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
-import { resolveMenu } from './views/sidebar/sideMenu.js';
+import { resolveMenu, retryDelayMs } from './views/sidebar/sideMenu.js';
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
@@ -323,14 +323,36 @@ function Portal({ user, onLogout }) {
     import('./views/specialToolsList.js').then((m) => { if (alive) setToolCatalog(m.TOOLS || []); }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  // v2.726 좌측 사이드바 — 계정별 메뉴(서버 저장) · 접힘/서랍 · 편집 창. 못 읽으면 포탈 기본 메뉴(메뉴가 비는 일은 없다).
+  // v2.726 좌측 사이드바 — 계정별 메뉴(서버 저장) · 접힘/서랍 · 편집 창. 못 읽으면 포탈 기본 메뉴로 그린다(메뉴가 비는 일은 없다).
+  // v2.727(감사 A-01): 조회 상태를 'loading'|'ok'|'error' 로 들고, 실패하면 5초→15초→60초(상한) 지수 백오프로 다시 시도한다(성공하면
+  //   멈춘다). 실패 상태는 '포탈 기본 메뉴' 가 아니라 `source:'unknown'` 이고 편집 창이 저장을 잠근다 — 재시작 직후 1~2초 창에서 기본
+  //   메뉴 + 편집을 저장해 저장돼 있던 내 메뉴를 덮어쓰던 경로(v2.618 WEB-2 계열). 직전에 읽은 값이 있으면 그것을 유지한다.
   const [menuData, setMenuData] = useState(null);
+  const [menuState, setMenuState] = useState('loading');
   const [menuRev, setMenuRev] = useState(0);
   useEffect(() => {
     let alive = true;
-    fetchJson('/user-menu').then((r) => { if (alive) setMenuData(r && r.ok ? r : null); }).catch(() => { if (alive) setMenuData(null); });
-    return () => { alive = false; };
+    let timer = null;
+    let fails = 0;
+    const load = async () => {
+      try {
+        const r = await fetchJson('/user-menu', {}, undefined, { retries: 0 });
+        if (!alive) return;
+        if (!(r && r.ok)) throw new Error(r?.reason || 'bad-response');
+        setMenuData(r);
+        setMenuState('ok');
+      } catch {
+        if (!alive) return;
+        setMenuState('error');
+        timer = setTimeout(load, retryDelayMs(fails));
+        fails += 1;
+      }
+    };
+    setMenuState((s) => (s === 'ok' ? s : 'loading'));
+    load();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
   }, [menuRev]);
+  const retryMenu = () => setMenuRev((n) => n + 1);
   const [railPref, setRailPref] = useState(readRailPref);
   const [vw, setVw] = useState(() => window.innerWidth);
   useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on); }, []);
@@ -342,7 +364,10 @@ function Portal({ user, onLogout }) {
     if (!drawerOpen) return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setDrawerOpen(false); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // v2.727(E-06): 서랍이 열린 동안 본문 스크롤을 잠근다(닫히거나 언마운트되면 복원). 첫 항목 포커스는 Sidebar 가 한다.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; };
   }, [drawerOpen]);
   const toggleRail = () => { const next = sbMode === 'rail' ? 'open' : 'rail'; setRailPref(next); writeRailPref(next); };
   // 헤더·상태바의 실제 높이 → 사이드바 sticky 위치·높이(CSS 변수). 좁은 폭에서 헤더가 두 줄이 되면 값이 바뀐다(숫자를 박지 않는다).
@@ -449,7 +474,8 @@ function Portal({ user, onLogout }) {
   // v2.726: 메뉴 원천은 계정별 저장 메뉴(내 메뉴 > 배포 메뉴 > 포탈 기본) — 해석은 sideMenu.resolveMenu 하나.
   const resolvedMenu = useMemo(() => resolveMenu({
     mine: menuData?.mine || null, distributed: menuData?.distributed?.menu || null, catalog: toolCatalog, overrides: menuData?.overrides || null,
-  }), [menuData, toolCatalog]);
+    failed: menuState === 'error',
+  }), [menuData, toolCatalog, menuState]);
   const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk }, resolvedMenu.groups);
   const here = locate(tab, hashNow, resolvedMenu.groups);
   // 특수 기능 카드·옛 주소로 들어와도 '그 대메뉴에서 마지막으로 본 하위 메뉴' 를 기억한다(대메뉴를 다시 누르면 그리로 간다).
@@ -621,7 +647,7 @@ function Portal({ user, onLogout }) {
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
       {showMenuEdit && (
         <Suspense fallback={null}>
-          <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []}
+          <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []} menuState={menuState} onRetry={retryMenu}
             onClose={() => setShowMenuEdit(false)} onChanged={() => setMenuRev((n) => n + 1)} />
         </Suspense>
       )}
@@ -778,8 +804,8 @@ function Portal({ user, onLogout }) {
       <div className="app-body" style={{ '--topbar-h': `${shellH.top}px`, '--statusbar-h': `${shellH.bottom}px` }}>
         <Sidebar mode={sbMode} open={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)}
           menu={menu} here={here} menuLast={menuLast}
-          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }}
-          isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={!!menuData} />
+          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }} onRetry={retryMenu}
+          isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={menuState === 'ok'} menuState={menuState} />
         <main className="content">
           {filterBar}
 

@@ -271,3 +271,17 @@ test('TUNE-4 — vmseries 파일별 DB 핸들 상한 기본값은 운영 vCenter
   assert.ok(m.VMSERIES_MAX_OPEN_DEFAULT >= 36, `기본 ${m.VMSERIES_MAX_OPEN_DEFAULT}`);
   assert.ok(!/Math\.min\(32,/.test(code('vmseries/db.js')), '하드캡 32 는 33 vCenter 현장에서 env 로도 넘을 수 없었다');
 });
+
+/* ── v2.727(감사 C-03): KST 오프셋 리터럴 스윕 ────────────────────────────────── */
+test('C-03 스윕 — 날짜·슬롯 경계를 `9 * 3_600_000`·`9 * HOUR`·`540 * 60_000` 류 리터럴로 자르는 모듈이 없다(util/dayKey.js 하나)', () => {
+  // vmchanges/vmlife/bmstor 가 v2.702~2.706 에 KST 상수를 박아 PORTAL_TZ_OFFSET_MIN 을 우회했다 — BUG-3 스윕은 toISOString 형태만 봐서 못 잡았다.
+  // mock/ 은 walk() 가 제외한다(합성 데이터의 '표기는 KST' 는 날짜 경계 판정이 아니다).
+  const RE = /\b9\s*\*\s*(3_?600_?000|HOUR\b|60\s*\*\s*60\s*\*\s*1000)|\b(3_?600_?000|HOUR)\s*\*\s*9\b|\b540\s*\*\s*60_?000\b|\b32_?400_?000\b/;
+  const bad = [];
+  for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f);
+    if (rel === 'util/dayKey.js') continue;
+    if (RE.test(code(rel))) bad.push(rel);
+  }
+  assert.deepEqual(bad, [], `dayIndex()/dayStartMs()/DAY_OFFSET_MIN 을 쓸 것: ${bad.join(', ')}`);
+});

@@ -29,3 +29,14 @@ describe('dsCfgText', () => {
     expect(web.gbText(2048)).toBe('2.0 TB');
   });
 });
+
+// v2.727(감사 C-05): 분할 판정 facts 의 hosts 는 멤버 수를 아는 호스트 수 — 못 읽은 호스트 수를 함께 말한다.
+describe('dsCfgText v2.727', () => {
+  it('vsan-partition 상세 — membersUnknown 이 있을 때만 제외 개수를 붙인다', () => {
+    expect(web.findingDetail({ code: 'vsan-partition', facts: { members: 1, hosts: 2, membersUnknown: 1 } })).toBe('멤버 1 · vSAN 호스트 2 · 멤버 수 미확인 1대 제외');
+    expect(web.findingDetail({ code: 'vsan-partition', facts: { members: 2, hosts: 3 } })).toBe('멤버 2 · vSAN 호스트 3');
+    // 서버 — 멤버 0개(null) 호스트만 있으면 분할 판정 없음
+    const h = (id, members) => ({ id, name: id, vcenterId: 'v', cluster: 'C', connectionState: 'CONNECTED', hcfg: { vsan: { enabled: true, diskIssues: 0, members } } });
+    expect(an.analyzeVsan([h('a', null), h('b', null)], []).clusters[0].findings).toEqual([]);
+  });
+});

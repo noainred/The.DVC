@@ -13,7 +13,7 @@ const HOST_CHUNK = 25;
 //   at=0 으로 남고 매 주기 맨 먼저 다시 골라져 매 주기 요청 시한(최대 30초)을 먹었다. 수집 중단(abort)은 세지 않는다.
 const _retry = { vm: createRetryTracker(), host: createRetryTracker() };
 export function contentionRetryOf(vcId, kind, ref) { return _retry[kind]?.get(vcId, ref) || null; }
-/** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js syncVcConfigCaches 에 연결할 것). */
+/** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js CACHE_DROPPERS 가 부른다 — v2.727 감사 F-04 에 연결, 그 전에는 호출부 0). */
 export function dropVcRetry(vcId) { _retry.vm.drop(vcId); _retry.host.drop(vcId); }
 export function _resetContentionRetry() { _retry.vm.reset(); _retry.host.reset(); }
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

@@ -16,21 +16,35 @@ import { parseCsvRows } from '../util/csv.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
 
 // ---- assignments ----------------------------------------------------------
 
+/*
+ * v2.727(감사 D-01): 로드 오류 상태. 손상 → preserveCorrupt → 빈 배정이면 `GET /api/central/assignment` 가 `200 assigned:false` 를 내려
+ *   엣지 스캐너(agent/scanner.js)가 '중앙 지정 없음' 으로 읽고 **조용히 멈췄다**(28곳의 위임 iDRAC 스캔). v2.631 settingsLoadError 가
+ *   이 배포 경로를 빠뜨렸다(등록 13곳 중 이 파일과 GPU 게스트 배포가 없었다). 오류면 라우트가 503 settingsUnreadable 로 답하고
+ *   엣지는 직전 상태를 유지한다. 재시작 뒤(원본이 .corrupt 로 옮겨져 ENOENT)도 보존본만 있으면 여전히 못 읽은 것이다(missing()).
+ *   오류는 **관리자 저장**(save — 추가·수정·삭제·가져오기)만 해제한다. confirm 은 지금 읽히는 값(손상이면 빈 목록)을 그대로 쓴다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'iDRAC 스캔 배정(엣지별)', confirm: () => save(loadAssignments()) });
+/** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null — 라우트가 pull 응답 전에 본다. */
+export function assignmentsLoadError() { loadAssignments(); return _loadErr.get(); }
+
 export function loadAssignments() {
-  if (!fs.existsSync(FILE)) return [];
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); return []; }
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    _loadErr.ok();
     return Array.isArray(p?.assignments) ? openSecretsDeep(p.assignments) : [];
   } catch (err) {
     // ⚠ 손상 파일을 조용히 []로 넘기면 다음 save()가 온전했던 원본(=iDRAC 자격증명 전량)을 빈
     // 목록으로 영구히 덮어쓴다 — server/CLAUDE.md '자격증명 파일은 원자적 쓰기 + 로드 손상
     // preserveCorrupt' 불변조건. 보존 후에만 빈 값을 반환한다.
+    _loadErr.corrupt(err); // v2.727(D-01): 보존 전에 세운다(보존 뒤에는 파일이 없어 missing() 이 같은 상태를 유지한다)
     preserveCorrupt(FILE, err.message);
     console.error(`[central] agent-assignments.json 파싱 실패: ${err.message}`);
     return [];
@@ -39,6 +53,7 @@ export function loadAssignments() {
 
 function save(list) {
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ assignments: list }), null, 2), { mode: 0o600 });
+  _loadErr.ok(); // v2.727(D-01): 관리자 저장이 로드 오류를 푼다(settingsLoadError 규약)
 }
 
 export function redact(a) {

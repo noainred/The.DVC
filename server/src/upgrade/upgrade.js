@@ -20,6 +20,7 @@ import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-06: 크기 상한을 사후가 아니라 읽는 중에
+import { recordOutbound } from '../util/outboundStats.js'; // v2.727(감사 D-06): 전역 fetch 경로라 직접 기록(collector/upgradePush.js 와 같은 형태)
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
@@ -537,8 +538,11 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = process.en
     const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
     const ok = res.ok && body.ok !== false;
     const reason = str(body.reason, 500) || str(body.error, 500) || (ok ? '' : `HTTP ${res.status}`);
+    // v2.727(감사 D-06): 성패·시각을 outboundStats 에 남긴다(토큰·본문은 싣지 않는다 — 키는 origin + 경로, 쿼리는 버린다).
+    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: data.length, method: 'POST', error: ok ? '' : reason, tag: 'upgrade-edge' });
     return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}) };
   } catch (err) {
+    recordOutbound(url, { error: String(err?.message || err), method: 'POST', tag: 'upgrade-edge' }); // v2.727(D-06)
     return { edge: edge.url, ok: false, reason: err.message };
   }
 }

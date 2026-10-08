@@ -51,3 +51,13 @@ describe('vSAN 추가분 확정 여부(v2.721)', () => {
     expect(coverageNote({ vsanAddonBound: 'exact' })).toBeNull();
   });
 });
+
+// v2.727(감사 C-02): used 를 보고하지 않은 코어 라이선스가 있으면 '없음' 이 아니라 '일부 미상' 이고 비교하지 않는다.
+describe('coreLicenseText v2.727', () => {
+  it('reportedUsedUnknown 이 있으면 일부 미상 문구 · 비교 안 함', () => {
+    const t = reportedText({ reportedCoreUsed: null, reportedDiff: null, reportedUsedUnknown: 1, coreLicenses: 1 });
+    expect(t.tone).toBe('muted');
+    expect(t.text).toMatch(/일부 미상/); expect(t.text).toMatch(/1개/); expect(t.text).not.toMatch(/없음/);
+    expect(reportedText({ reportedCoreUsed: null, reportedUsedUnknown: 0 }).text).toContain('없음');
+  });
+});

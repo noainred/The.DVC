@@ -13,8 +13,11 @@ import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
 import { makeScanAuthPolicy } from '../idrac/scanAuth.js';
 import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.621(감사 LIFE-01)
+import { createChangeLogger } from '../util/logThrottle.js';
 
 let timer = null;
+// v2.727(감사 D-01): 중앙 설정 파일 손상(503 settingsUnreadable)은 주기마다 같은 사유라 같은 사유는 10분에 한 줄만 콘솔에.
+const _logUnreadable = createChangeLogger({ windowMs: 10 * 60_000 });
 let last = null; // { at, agent, scanned, foundCount, registered, error }
 let running = false; // 재진입 가드 — 스캔이 인터벌을 넘기면 중첩 실행돼 이중 스캔/보고, CPU 누적
 
@@ -22,9 +25,18 @@ function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
+/**
+ * 배정 인출. 반환 `{ assigned, … }` 또는 **중앙 설정 파일 손상**이면 `{ unreadable: true, detail }`(v2.727 감사 D-01).
+ *   중앙은 배정 파일을 못 읽으면(손상 → 보존본만) `assigned:false` 대신 503 settingsUnreadable 로 답한다 — 그것을 '중앙 지정 없음' 으로
+ *   읽으면 스캐너가 조용히 멈춘다. 다른 비-2xx 는 예전처럼 던진다(상태 `error`).
+ */
 async function pullAssignment() {
   const url = `${config.agent.centralUrl}/api/central/assignment?agent=${encodeURIComponent(config.agent.name)}`;
   const res = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
+  if (res.status === 503) {
+    let body = null; try { body = await res.json(); } catch { body = null; }
+    if (body && body.reason === 'settingsUnreadable') return { unreadable: true, detail: String(body.detail || '중앙 iDRAC 스캔 배정 파일을 읽지 못했습니다').slice(0, 300) };
+  }
   if (!res.ok) throw new Error(`assignment -> ${res.status}`);
   return res.json();
 }
@@ -49,7 +61,14 @@ export async function runAgentScan() {
   const started = Date.now();
   try {
     const a = await pullAssignment();
-    if (!a?.assigned) { last = { at: Date.now(), agent: config.agent.name, assigned: false }; return last; }
+    if (a?.unreadable) {
+      // v2.727(감사 D-01): '중앙 지정 없음' 이 아니다 — 직전 스캔 결과(last)는 두고 사유만 바꾼다. 중앙 관리자가 보존본을 복구하거나 배정을
+      //   다시 저장하면 다음 주기에 그대로 재개된다(엣지에서 할 조치는 없다).
+      last = { ...(last || {}), at: Date.now(), agent: config.agent.name, reason: 'settingsUnreadable', error: a.detail };
+      if (_logUnreadable('unreadable', a.detail)) console.warn(`[agent] 중앙 iDRAC 스캔 배정을 받지 못했습니다(중앙 설정 파일 손상 — 직전 상태 유지): ${a.detail}`);
+      return last;
+    }
+    if (!a?.assigned) { last = { at: Date.now(), agent: config.agent.name, assigned: false, reason: 'unassigned' }; return last; }
 
     // v2.591(감사 F3): 이 경로는 타이머만 부른다(수동 진입점 없음 — grep 확인) → 주기 스캔 규칙을 적용한다.
     //   직전 인증 실패 IP·주 폴러가 같은 계정으로 이미 멈춘 등록 서버는 건너뛰고 개수를 `last` 에 남긴다.

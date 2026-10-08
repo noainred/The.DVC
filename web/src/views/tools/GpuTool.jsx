@@ -7,7 +7,8 @@ import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary, vramText, vramTitle } from './gpuUsageText.js';
+import { numOrNull } from '../../numOrNull.js'; // v2.727(E-12): VRAM 결측(null)을 0 으로 접지 않는다
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 import Select from '../../components/Select.jsx';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
@@ -160,8 +161,13 @@ export function Gpu({ scope }) {
     const m = new Map();
     for (const h of items) {
       const k = `${h.vcenterId}|${h.model}`;
-      const g = m.get(k) || { key: k, vcenterId: h.vcenterId, model: h.model, gpus: 0, hosts: 0, assignedVms: 0, memGB: h.memGB || 0, modeSet: new Set() };
-      g.gpus += h.count; g.hosts++; g.assignedVms += h.assignedVms || 0; if (h.mode) g.modeSet.add(h.mode); g.memGB = Math.max(g.memGB, h.memGB || 0); m.set(k, g);
+      // v2.727(감사 E-12): VRAM 을 보고하지 않은 호스트(memGB null)는 최대값 비교에서 빼고 개수를 센다 — 예전 `h.memGB || 0` 은
+      //   그 모델의 VRAM 을 '0 GB' 로 보였다(보고된 0 과 구분 불가). 전부 못 읽었으면 memGB 는 null(화면 '—').
+      const g = m.get(k) || { key: k, vcenterId: h.vcenterId, model: h.model, gpus: 0, hosts: 0, assignedVms: 0, memGB: null, memUnknownHosts: 0, modeSet: new Set() };
+      g.gpus += h.count; g.hosts++; g.assignedVms += h.assignedVms || 0; if (h.mode) g.modeSet.add(h.mode);
+      const mg = numOrNull(h.memGB);
+      if (mg == null) g.memUnknownHosts++; else g.memGB = g.memGB == null ? mg : Math.max(g.memGB, mg);
+      m.set(k, g);
     }
     return [...m.values()].map((g) => ({ ...g, modes: [...g.modeSet] }));
   };
@@ -187,7 +193,7 @@ export function Gpu({ scope }) {
         <span className="gpu-sub">{r.vcenterId} · <span style={{ color: r.collectPath === 'site' ? 'var(--amber)' : 'var(--accent-2)' }}>{r.collectPath === 'site' ? `엣지${r.collectAgent ? ` ${r.collectAgent}` : ''}` : '중앙 직접'}</span></span>
       </div>
     ) },
-    { key: 'count', label: 'GPU', align: 'left', sortValue: (r) => r.count, render: (r) => <span className="nowrap">{r.model} <span className="muted gpu-mono">×{r.count} · {r.memGB} GB</span></span> },
+    { key: 'count', label: 'GPU', align: 'left', sortValue: (r) => r.count, render: (r) => <span className="nowrap">{r.model} <span className="muted gpu-mono" title={vramTitle(r)}>×{r.count} · {vramText(r.memGB)}</span></span> },
     { key: 'mode', label: '방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
     { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
       : <span className="flex gap" style={{ alignItems: 'center', flexWrap: 'nowrap' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="gpu-src" title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
@@ -278,7 +284,7 @@ export function Gpu({ scope }) {
     { key: 'model', label: 'GPU 모델' },
     { key: 'gpus', label: 'GPU 장수', align: 'right', render: (r) => <b style={{ color: 'var(--accent)' }}>{r.gpus}</b> },
     { key: 'hosts', label: '호스트 수', align: 'right' },
-    { key: 'memGB', label: 'VRAM', align: 'right', render: (r) => `${r.memGB} GB` },
+    { key: 'memGB', label: 'VRAM', align: 'right', sortValue: (r) => r.memGB ?? '', render: (r) => <span title={vramTitle(r)}>{vramText(r.memGB)}{r.memUnknownHosts > 0 ? <span className="muted" style={{ fontSize: 11 }}> · 미보고 {r.memUnknownHosts}</span> : null}</span> },
     { key: 'modes', label: '사용 방식', sortValue: (r) => (r.modes || []).join(','), render: (r) => (r.modes || []).map((m) => <GpuModeBadge key={m} mode={m} />) },
     { key: 'assignedVms', label: '할당 VM', align: 'right', render: (r) => (r.assignedVms ? <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.vcenterId} · ${r.model}`, params: { vcenterId: r.vcenterId, model: r.model } })}>{r.assignedVms}</button> : <span className="muted">0</span>) },
   ];

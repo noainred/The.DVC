@@ -159,18 +159,46 @@ function initSqlite() {
        * f: { vcenterIds:[]|null, since, entity?, types?:[] } · 반환은 최신 먼저, 상한 limit(+1 행으로 잘림 판정).
        */
       trackedEvents: (f = {}, limit = 5000) => {
-        const w = [`type IN ${TRACKED_SQL}`]; const p = [];
-        if (Array.isArray(f.vcenterIds)) { if (!f.vcenterIds.length) return []; w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
-        if (Array.isArray(f.types) && f.types.length) { const ts = f.types.filter((t) => TRACKED_TYPES.includes(t)); if (!ts.length) return []; w.push(`type IN (${ts.map(() => '?').join(',')})`); p.push(...ts); }
+        const b = trackedBase(f); if (!b) return [];
+        const { w, p, byEntity } = b;
         if (Number.isFinite(f.since)) { w.push('ts>=?'); p.push(f.since); }
-        const byEntity = typeof f.entity === 'string' && f.entity;
-        if (byEntity) { w.push('entity=?'); p.push(f.entity); }
         // INDEXED BY: 통계가 없으면 플래너가 (vcenterId,ts) 인덱스로 그 기간의 모든 이벤트를 훑는다(실측 — 테스트가 계획을 고정).
         // v2.719(감사 S1-05): entity 를 주면 (vcenterId, entity, ts) 부분 인덱스로 그 VM 행만 읽는다.
         const sql = byEntity
           ? `SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked_entity WHERE ${w.join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`
           : `SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked WHERE ${w.join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`;
         return db.prepare(sql).all(...p, clampPage(limit, 0)[0]);
+      },
+      /**
+       * v2.727(감사 F-01): trackedEvents 와 같은 결과(최신 먼저 · `ts DESC, rowid DESC` · 상한 limit)를 **시간 조각**으로 나눠 읽는다 —
+       *   형제 opsEventsAsync(v2.719 S1-04)와 같은 모양. `vcenterId IN (28개) AND type IN (10종)` 다중 조건은 idx_events_tracked 로 ts 순서를
+       *   얻지 못해 기간 안 일치 행 전부를 TEMP B-TREE 로 흘린 뒤 LIMIT 했다(합성 150만 행 · 90일 조회 한 문장 약 0.3초 동기 정지 —
+       *   화면 조회·CSV 내보내기마다, 30초 memo 가 사용자·필터 조합마다 다시). 최신 1일 조각부터 거꾸로 읽고 조각 사이 시간 기준 양보
+       *   (createYielder), 상한에 닿으면 멈춘다. 조각은 ts 로 겹치지 않으므로 순서·내용은 한 문장 판과 같다(테스트가 deepStrictEqual 로 대조).
+       *   since 가 없거나 entity 조회(전용 인덱스 — 행이 적다)면 한 문장 판 그대로.
+       */
+      trackedEventsAsync: async (f = {}, limit = 5000, { sliceMs = 86_400_000, now = Date.now(), yieldMs = 15 } = {}) => {
+        const lim = clampPage(limit, 0)[0];
+        if (!Number.isFinite(f.since)) return api.trackedEvents(f, limit);
+        const b = trackedBase(f); if (!b) return [];
+        if (b.byEntity) return api.trackedEvents(f, limit);
+        const step = Number.isFinite(sliceMs) && sliceMs >= 60_000 ? sliceMs : 86_400_000;
+        const sel = 'SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked WHERE';
+        // 맨 위 조각은 위가 열려 있다(vCenter 시계가 앞선 이벤트도 한 문장 판처럼 포함).
+        const topSt = db.prepare(`${sel} ${[...b.w, 'ts>=?'].join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const lowSt = db.prepare(`${sel} ${[...b.w, 'ts>=?', 'ts<?'].join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const maybeYield = createYielder(yieldMs);
+        const out = [];
+        let lo = Math.max(f.since, now - step);
+        for (const r of topSt.all(...b.p, lo, lim)) out.push(r);
+        let hiExcl = lo;
+        while (out.length < lim && hiExcl > f.since) {
+          await maybeYield();
+          lo = Math.max(f.since, hiExcl - step);
+          for (const r of lowSt.all(...b.p, lo, hiExcl, lim - out.length)) out.push(r);
+          hiExcl = lo;
+        }
+        return out.length > lim ? out.slice(0, lim) : out;
       },
       /**
        * v2.706(C5·C4·C6): 운영 이벤트 — 부분 인덱스(idx_events_ops)를 타도록 같은 IN 리터럴을 쓴다.
@@ -333,6 +361,7 @@ function initJson() {
       .sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0])
       .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
     opsEventsAsync: async (f = {}, limit = 5000) => api.opsEvents(f, limit),   // v2.719(S1-04): SQLite 판과 같은 API
+    trackedEventsAsync: async (f = {}, limit = 5000) => api.trackedEvents(f, limit),   // v2.727(F-01): SQLite 판과 같은 API
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.

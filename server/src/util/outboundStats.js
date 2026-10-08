@@ -25,7 +25,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const MAX_KEYS = 2000;
-const PREFIXES = ['/api/collector/', '/api/central/'];
+// v2.727(감사 D-06): `/api/upgrade/` — 업그레이드 설정 `edges[]` 로의 번들 push(`upgrade/upgrade.js pushBundleToEdge`, 전역 fetch 경로라
+//   직접 기록). ⚠ 데이터 흐름 지도(`dataflow/build.js`)는 `/api/collector/` 행만 엣지 노드에 붙이므로 이 행은 **아직 지도에 보이지 않는다**
+//   (업그레이드 `edges[]` 는 수집 서버 등록부와 별개라 붙일 노드가 없다 — 노드 종류를 늘리는 설계 판단은 별건). 기록은 `outboundStats()` 에 남는다.
+const PREFIXES = ['/api/collector/', '/api/central/', '/api/upgrade/'];
 const map = new Map();
 const startedAt = Date.now();
 const tagStore = new AsyncLocalStorage();

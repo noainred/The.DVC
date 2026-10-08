@@ -181,7 +181,7 @@ export function normalizeMenu(input) {
     seenGroup.add(id);
     const label = strField(g.label, '그룹 이름', 'groups');
     // v2.727(A-07): 상한을 넘으면 자르지 않고 거부한다(머리말·CLAUDE.md 계약 — 조용히 자르면 사용자는 잘린 줄 모른다).
-    if (label.length > LIMITS.label) throw fail(400, `그룹 이름은 최대 ${LIMITS.label}자입니다(받은 ${label.length}자)`, 'groups');
+    if (label.length > 1000) throw fail(400, `그룹 이름은 최대 ${LIMITS.label}자입니다(받은 ${label.length}자)`, 'groups');
     const tabTop = strField(g.tab, '탭 id', 'groups');
     if (tabTop) {
       if (!ID_RE.test(tabTop)) throw fail(400, `탭 id 형식이 올바르지 않습니다: ${capStr(tabTop, 40)}`, 'groups');
