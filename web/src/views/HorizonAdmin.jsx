@@ -48,7 +48,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
   const load = () => {
     const my = ++loadSeq.current;
     fetchJson('/admin/horizon')
-      .then((r) => { setHz(r.servers || []); setHzDenied(false); setHzErr(null); })
+      .then((r) => { if (my !== loadSeq.current) return; setHz(r.servers || []); setHzDenied(false); setHzErr(null); })
       .catch((e) => { if (my !== loadSeq.current) return; if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e) || '알 수 없는 오류'); });
   };
   useEffect(() => { load(); return () => { loadSeq.current += 1; }; }, []);

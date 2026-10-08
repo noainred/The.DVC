@@ -46,12 +46,16 @@ const audit = (req, action, target, detail = '') => logAudit({ user: userOf(req)
 
 export function registerBulletin(api) {
   /* 공지 */
-  api.get('/notices/active', (_req, res) => {
+  // v2.727(감사 B-04): 게시자·작성자·수정자 계정명(by·createdBy·updatedBy)은 admin 에게만 — 공지 작성자는 정의상 전체 범위
+  //   관리자라 모든 로그인 사용자(데모 계정 포함)에게 주면 관리자 계정 열거 단서가 된다. 목록 자체는 예전처럼 로그인 사용자 전부
+  //   (게시판 › 공지 탭이 모든 사용자에게 보인다 — adminOnly 로 바꾸면 그 화면이 403 이 된다).
+  api.get('/notices/active', (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, notices: activeNotices() });
+    res.json({ ok: true, notices: activeNotices(Date.now(), { by: isAdmin(req) }) });
   });
   api.get('/notices', (req, res) => {
-    res.json({ ok: true, notices: listNotices(), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: isAdmin(req) });
+    const admin = isAdmin(req);
+    res.json({ ok: true, notices: listNotices({ by: admin }), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: admin });
   });
   api.post('/notices', adminOnly, noticeFleetOnly, (req, res, next) => {
     try {
@@ -81,7 +85,7 @@ export function registerBulletin(api) {
   api.get('/board/posts', (req, res) => {
     const { offset, limit } = pageArgs(req.query, { def: 50, max: 200 });
     const q = typeof req.query.q === 'string' ? req.query.q : '';
-    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: ['admin', 'operator'].includes(req.user?.role), isAdmin: isAdmin(req), me: userOf(req) });
+    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: canWrite(req), isAdmin: isAdmin(req), me: userOf(req) });
   });
   api.get('/board/posts/:id', (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);

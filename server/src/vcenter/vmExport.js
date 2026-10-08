@@ -21,6 +21,7 @@ import { parseVmDevices, parseGuestDisks } from './soapParse.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import { csvLine, CSV_BOM } from '../util/csv.js';
+import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
 
 // 라이브 보강으로 가져올 per-VM 속성 — 없는 속성은 응답에서 빠질 뿐이라 전부 best-effort.
 const ENRICH_PROPS = [
@@ -142,7 +143,9 @@ export const VM_EXPORT_COLUMNS = [
   { key: 'rdmCount', label: 'RDM 수', get: (vm, d) => (d.disks.length ? d.disks.filter((x) => x.rdm).length : '') },
   { key: 'storageUsedGB', label: '스토리지 사용(GB, committed)', get: (vm) => vm.storageGB ?? '' },
   { key: 'storageUncommittedGB', label: '스토리지 미할당(GB, uncommitted)', get: (vm) => vm.uncommittedGB ?? '' },
-  { key: 'storageProvisionedGB', label: '스토리지 프로비저닝(GB)', get: (vm) => num(vm.storageGB) + num(vm.uncommittedGB) },
+  // v2.727(감사 C-01): committed·uncommitted 중 하나라도 못 읽었으면(null — v2.719 부터) 합을 지어내지 않는다 — 빈 칸. 예전 num() 은
+  //   null 을 0 으로 더해 '프로비저닝 = 읽은 쪽만' 이라는 틀린 수치를 CSV 에 썼다. 보고된 0 은 값이다.
+  { key: 'storageProvisionedGB', label: '스토리지 프로비저닝(GB)', get: (vm) => { const c = numOrNull(vm.storageGB); const u = numOrNull(vm.uncommittedGB); return c == null || u == null ? '' : c + u; } },
   { key: 'thin', label: 'Thin 여부(추정)', get: (vm) => yn(!!vm.thin) },
   { key: 'guestPartCount', label: '게스트 파티션 수', get: (vm, d) => (d.guest.length ? d.guest.length : '') },
   {

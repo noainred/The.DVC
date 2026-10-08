@@ -810,7 +810,8 @@ function vmGateways(ipStackXml) {
 }
 
 // Parse host config.graphicsInfo (<HostGraphicsInfo> elements) into GPU list.
-function parseGpus(xml) {
+// v2.727(감사 E-12): 테스트가 memGB null 규칙을 고정할 수 있게 export(호출부는 그대로 모듈 내부).
+export function parseGpus(xml) {
   if (!xml) return [];
   const out = [];
   for (const blk of xml.split(/<HostGraphicsInfo(?=[ >])/).slice(1)) {

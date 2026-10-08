@@ -5,6 +5,8 @@
  * 보호(protected)로 본다. 휴리스틱임을 리포트에 명시한다(이벤트 보관 기간·계정 패턴 의존).
  */
 
+import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
+
 export const DEFAULT_BACKUP_PATTERNS = ['veeam', 'backup', 'commvault', 'netbackup', 'nbu', 'avamar', 'rubrik', 'cohesity', 'networker', 'vranger', 'nakivo'];
 
 /**

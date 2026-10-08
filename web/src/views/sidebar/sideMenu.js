@@ -11,6 +11,9 @@
  *  · **모르는 항목은 버리고 개수를 밝힌다**(`unknown`) — 삭제된 탭·도구 키·카탈로그에 없는 키. 지어내지 않는다.
  *  · 권한 판정은 여기 없다 — 호출부가 topMenu.visibleMenu(tabOk·toolOk) 로 거른다(메뉴에 넣어도 권한이 넓어지지 않는다).
  *  · 특수 기능은 단독 항목(`#/tools`)이다 — 분류 바로가기(하위 메뉴)는 사용자 결정으로 두지 않았다(2026-10-08 "분류 바로가기 제외").
+ *  · v2.727(감사 A-01): **`GET /user-menu` 를 못 읽은 상태는 '포탈 기본 메뉴' 가 아니다** — `failed:true` 면 그리기는 기본(또는 마지막으로
+ *    읽은 메뉴)으로 하되 `source:'unknown'` 이다. 화면은 그것을 '메뉴를 읽지 못했습니다 · 다시 시도' 로 말하고 편집 창의 저장을 잠근다
+ *    (조회 실패 → 기본 메뉴 + 편집 저장 → 저장돼 있던 내 메뉴 소실 경로, v2.618 WEB-2 계열).
  */
 import { MENU_GROUPS } from '../topMenu.js';
 
@@ -45,14 +48,22 @@ export function defaultIndex() {
   return { groupLabel, items };
 }
 
+/** `GET /user-menu` 실패 뒤 재시도 간격(ms) — 5초 → 15초 → 60초 상한(v2.727 A-01). `attempt` 는 0 부터(실패 횟수 − 1). */
+export const MENU_RETRY_MS = Object.freeze([5000, 15000, 60000]);
+export function retryDelayMs(attempt) {
+  const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 0;
+  return MENU_RETRY_MS[Math.min(n, MENU_RETRY_MS.length - 1)];
+}
+
 /**
  * 저장된 메뉴(내 메뉴 > 배포 메뉴) → 화면이 그릴 그룹 배열(topMenu.MENU_GROUPS 와 같은 모양).
- * @returns {{ groups: object[], source: 'mine'|'distributed'|'default', unknown: number }}
+ * @param {object} [opt.failed] 서버에서 메뉴를 읽지 못했다(v2.727 A-01) — 그룹은 그대로 만들되 source 는 'unknown'
+ * @returns {{ groups: object[], source: 'mine'|'distributed'|'default'|'unknown', unknown: number }}
  */
-export function resolveMenu({ mine = null, distributed = null, catalog = null, overrides = null } = {}) {
+export function resolveMenu({ mine = null, distributed = null, catalog = null, overrides = null, failed = false } = {}) {
   const base = (mine && Array.isArray(mine.groups)) ? mine : (distributed && Array.isArray(distributed.groups)) ? distributed : null;
-  if (!base) return { groups: MENU_GROUPS, source: 'default', unknown: 0 };
-  const source = base === mine ? 'mine' : 'distributed';
+  if (!base) return { groups: MENU_GROUPS, source: failed ? 'unknown' : 'default', unknown: 0 };
+  const source = failed ? 'unknown' : (base === mine ? 'mine' : 'distributed');
   const { groupLabel, items } = defaultIndex();
   const toolMap = new Map((catalog || []).filter(toolEligible).map((t) => [t.k, t]));
   const seen = new Set();

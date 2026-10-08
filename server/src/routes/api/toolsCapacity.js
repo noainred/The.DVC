@@ -235,22 +235,26 @@ function wasteReport(scoped, vms, { topOff = 300, topOther = 50 } = {}) {
   // vCenter 별 집계(전체 기준, 절단 무관). 과할당 후보 수는 items 가 아닌 후보 판정을 다시 세지 않고
   // cpuTop/memTop(전량일 때만 완전) 대신 임계로 직접 센다 — 화면 KPI 의 candidates 와 같은 규칙.
   const byVc = new Map();
-  const bump = (id, f) => { let e = byVc.get(id); if (!e) { e = { vcenterId: id, vms: 0, poweredOff: 0, poweredOffGB: 0, snapshots: 0, snapshotGB: 0, noTools: 0, thinReclaimGB: 0, cpuCandidates: 0, memCandidates: 0 }; byVc.set(id, e); } f(e); };
+  // v2.727(감사 C-01): storageGB·uncommittedGB 는 v2.719 부터 못 읽으면 null 이다 — `|| 0` 은 그 VM 을 '0 GB 점유' 로 더해 회수량이
+  //   조용히 작아졌다. 합은 읽은 VM 만, 못 읽은 수는 poweredOffStorageUnknown·thinUncommittedUnknown(법인별·전체 둘 다). 보고된 0 은 값.
+  const bump = (id, f) => { let e = byVc.get(id); if (!e) { e = { vcenterId: id, vms: 0, poweredOff: 0, poweredOffGB: 0, poweredOffStorageUnknown: 0, snapshots: 0, snapshotGB: 0, noTools: 0, thinReclaimGB: 0, thinUncommittedUnknown: 0, cpuCandidates: 0, memCandidates: 0 }; byVc.set(id, e); } f(e); };
   for (const v of vms) bump(v.vcenterId, (e) => { e.vms++; });
-  for (const v of off) bump(v.vcenterId, (e) => { e.poweredOff++; e.poweredOffGB += v.storageGB || 0; });
+  for (const v of off) bump(v.vcenterId, (e) => { e.poweredOff++; const g = numOrNull(v.storageGB); if (g == null) e.poweredOffStorageUnknown++; else e.poweredOffGB += g; });
   for (const v of snaps) bump(v.vcenterId, (e) => { e.snapshots++; e.snapshotGB += v.snapshotSizeGB || 0; });
   for (const v of noTools) bump(v.vcenterId, (e) => { e.noTools++; });
-  for (const v of thin) bump(v.vcenterId, (e) => { e.thinReclaimGB += v.uncommittedGB || 0; });
+  for (const v of thin) bump(v.vcenterId, (e) => { const u = numOrNull(v.uncommittedGB); if (u == null) e.thinUncommittedUnknown++; else e.thinReclaimGB += u; });
+  const sumKnown = (arr, key) => arr.reduce((a, v) => { const n = numOrNull(v[key]); return n == null ? a : a + n; }, 0);
+  const unknownOf = (arr, key) => arr.filter((v) => numOrNull(v[key]) == null).length;
   for (const v of overAllocated.cpuCandidatesList || []) bump(v.vcenterId, (e) => { e.cpuCandidates++; });
   for (const v of overAllocated.memCandidatesList || []) bump(v.vcenterId, (e) => { e.memCandidates++; });
   delete overAllocated.cpuCandidatesList; delete overAllocated.memCandidatesList;
   return {
     overAllocated,
-    poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
-      vms: top(off, (v) => v.storageGB || 0, topOff).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
+    poweredOff: { count: off.length, storageGB: sumKnown(off, 'storageGB'), storageUnknown: unknownOf(off, 'storageGB'),   // v2.727(C-01)
+      vms: top(off, (v) => numOrNull(v.storageGB) ?? -1, topOff).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: numOrNull(v.storageGB), guestOS: v.guestOS })) },
     snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),
       vms: top(snaps, (v) => v.snapshotSizeGB || 0, topOther).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
-    thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
+    thinReclaim: { count: thin.length, reclaimableGB: sumKnown(thin, 'uncommittedGB'), uncommittedUnknown: unknownOf(thin, 'uncommittedGB') },   // v2.727(C-01)
     noTools: { count: noTools.length, vms: noTools.slice(0, topOther).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
     byVcenter: [...byVc.values()].sort((a, b) => a.vcenterId.localeCompare(b.vcenterId)).map((e) => ({ ...e, poweredOffGB: r1(e.poweredOffGB), snapshotGB: r1(e.snapshotGB), thinReclaimGB: r1(e.thinReclaimGB) })),
   };
@@ -1120,21 +1124,30 @@ api.get('/tools/thin-vms', requirePerm('tools'), (req, res) => memoJson(req, res
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const round = (v, d = 1) => Number((v || 0).toFixed(d));
-  const items = vms.filter((v) => v.thin).map((v) => ({
-    id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-    powerState: v.powerState, guestOS: v.guestOS,
-    committedGB: v.storageGB || 0,
-    uncommittedGB: v.uncommittedGB || 0,
-    provisionedGB: (v.storageGB || 0) + (v.uncommittedGB || 0),
-  })).sort((a, b) => b.uncommittedGB - a.uncommittedGB);
+  // v2.727(감사 C-01): committed(storageGB)·uncommitted 는 v2.719 부터 못 읽으면 null 이다 — `|| 0` 은 '사용 0 GB'·'할당 = 미커밋' 이라는
+  //   틀린 행을 만들고 합계를 작게 했다. null 은 그대로(화면 '—'), 할당은 둘 다 읽었을 때만, 합계는 읽은 행만 + 뺀 수. 보고된 0 은 값.
+  const items = vms.filter((v) => v.thin).map((v) => {
+    const c = numOrNull(v.storageGB); const u = numOrNull(v.uncommittedGB);
+    return {
+      id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
+      powerState: v.powerState, guestOS: v.guestOS,
+      committedGB: c,
+      uncommittedGB: u,
+      provisionedGB: c == null || u == null ? null : c + u,
+    };
+  }).sort((a, b) => (b.uncommittedGB ?? -1) - (a.uncommittedGB ?? -1));
+  const sumKnown = (key) => items.reduce((a, x) => (x[key] == null ? a : a + x[key]), 0);
   return {
     scope: req.query.vcenterId || 'all',
     totalVms: vms.length,
     thinVms: items.length,
     thinPct: vms.length ? Math.round((items.length / vms.length) * 100) : 0,
-    committedTB: round(items.reduce((a, x) => a + x.committedGB, 0) / 1024, 1),
-    provisionedTB: round(items.reduce((a, x) => a + x.provisionedGB, 0) / 1024, 1),
-    reclaimableTB: round(items.reduce((a, x) => a + x.uncommittedGB, 0) / 1024, 1),
+    committedTB: round(sumKnown('committedGB') / 1024, 1),
+    provisionedTB: round(sumKnown('provisionedGB') / 1024, 1),
+    reclaimableTB: round(sumKnown('uncommittedGB') / 1024, 1),
+    // v2.727(C-01): 합계에서 뺀 행 수 — storageUnknown(사용·할당 합계에서 제외) · uncommittedUnknown(회수 가능·할당 합계에서 제외).
+    storageUnknown: items.filter((x) => x.committedGB == null).length,
+    uncommittedUnknown: items.filter((x) => x.uncommittedGB == null).length,
     items,
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));

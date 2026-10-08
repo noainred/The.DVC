@@ -12,6 +12,7 @@ import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.j
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
+import { numOrNull } from '../../util/numOrNull.js'; // v2.727(C-01)
 import { dayKey, localStamp } from "../../util/dayKey.js";
 import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
@@ -74,7 +75,7 @@ api.get('/tools/guest-os/vms', requirePerm('tools'), (req, res) => {
   const items = vms.map((v) => ({
     name: v.name, vcenterId: v.vcenterId, cluster: v.cluster || '', host: v.host || '',
     guestOS: v.guestOS || '', powerState: v.powerState,
-    cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: v.storageGB || 0,
+    cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(화면 '—')
     ip: (v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' '),
   })).sort((a, b) => (a.vcenterId === b.vcenterId
     ? String(a.name || '').localeCompare(String(b.name || ''))

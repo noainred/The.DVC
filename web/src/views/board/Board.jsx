@@ -4,8 +4,10 @@
  *  · 공지 작성·수정·삭제는 전체 범위 관리자(서버가 집행). 공지는 로그인 뒤 팝업으로 보인다.
  * 폴링하지 않는다(마운트 1회 + 동작 뒤 다시 읽기 + 새로고침 버튼).
  * v2.723 — 답글(대댓글, 한 단계)과 공감(글·댓글, 한 사람 1회 · 다시 누르면 취소). 공감·답글도 쓰기 권한(admin·operator)이다.
+ * v2.727(감사 E-02) — 목록·글·공지의 load() 는 세대 번호(`makeLatest`)로 늦게 온 이전 응답을 버린다. 예전 `alive` 가드는 useEffect 정리로만
+ *   꺼져 새로고침 버튼·뒤로가기가 띄운 요청은 정리되지 않았다(검색어 B 인데 목록은 A). 언마운트는 세대를 올려 무효화한다.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
@@ -13,8 +15,16 @@ import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   LEVEL_TEXT, LEVEL_TONE, timeText, windowText, noticeState, toLocalInput, fromLocalInput, saveFailText,
-  threadComments, likersText, applyLike,
+  threadComments, likersText, applyLike, makeLatest,
 } from './bulletinText.js';
+
+/** 세대 가드 하나를 컴포넌트 수명 동안 들고, 언마운트 때 무효화한다(v2.727 E-02). */
+function useLatest() {
+  const ref = useRef(null);
+  if (!ref.current) ref.current = makeLatest();
+  useEffect(() => () => { ref.current.invalidate(); }, []);
+  return ref.current;
+}
 
 const SUBS = [['posts', '게시글'], ['notices', '공지(접속 팝업)']];
 
@@ -42,16 +52,16 @@ function Posts() {
   const [openId, setOpenId] = useState('');
   const [writing, setWriting] = useState(false);
 
+  const latest = useLatest();
   const load = useCallback(() => {
-    let alive = true;
+    const k = latest.next();
     fetchJson('/board/posts', { q: query, limit: 200 })
-      .then((r) => { if (alive) { setList(r); setErr(null); } })
-      .catch((e) => { if (alive) setErr(e); });
-    return () => { alive = false; };
-  }, [query]);
-  useEffect(() => load(), [load]);
+      .then((r) => { if (latest.isLatest(k)) { setList(r); setErr(null); } })
+      .catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [query, latest]);
+  useEffect(() => { load(); }, [load]);
 
-  if (openId) return <PostDetail id={openId} me={list?.me} isAdmin={!!list?.isAdmin} canWrite={!!list?.canWrite} onBack={() => { setOpenId(''); load(); }} />;
+  if (openId) return <PostDetail id={openId} me={list?.me} isAdmin={!!list?.isAdmin} canWrite={!!list?.canWrite} limits={list?.limits} onBack={() => { setOpenId(''); load(); }} />;
   if (err && !list) return <ErrorBox error={err} />;
   if (!list) return <Loading label="게시판" />;
 
@@ -154,7 +164,7 @@ function LikeButton({ item, canWrite, busy, onToggle, label = '공감' }) {
   );
 }
 
-function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
+function PostDetail({ id, me, isAdmin, canWrite, limits, onBack }) {
   const [post, setPost] = useState(null);
   const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -164,12 +174,12 @@ function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const latest = useLatest();
   const load = useCallback(() => {
-    let alive = true;
-    fetchJson(`/board/posts/${id}`).then((r) => { if (alive) { setPost(r.post); setErr(null); } }).catch((e) => { if (alive) setErr(e); });
-    return () => { alive = false; };
-  }, [id]);
-  useEffect(() => load(), [load]);
+    const k = latest.next();
+    fetchJson(`/board/posts/${id}`).then((r) => { if (latest.isLatest(k)) { setPost(r.post); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [id, latest]);
+  useEffect(() => { load(); }, [load]);
 
   const mine = (x) => isAdmin || (!!me && x?.author === me);
   const act = async (fn, after) => {
@@ -225,7 +235,7 @@ function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
     <div className="card">
       <button className="btn" onClick={onBack}>← 목록</button>
       {editing
-        ? <div style={{ marginTop: 10 }}><PostEditor initial={post} isAdmin={isAdmin} onCancel={() => setEditing(false)} onSaved={(p) => { setEditing(false); setPost((cur) => ({ ...p, comments: cur.comments, commentCount: cur.commentCount })); }} /></div>
+        ? <div style={{ marginTop: 10 }}><PostEditor initial={post} isAdmin={isAdmin} limits={limits} onCancel={() => setEditing(false)} onSaved={(p) => { setEditing(false); setPost((cur) => ({ ...p, comments: cur.comments, commentCount: cur.commentCount })); }} /></div>
         : (
           <>
             <h3 className="board-title">{post.pinned && <span className="board-pin">고정</span>}{post.title}</h3>
@@ -289,12 +299,12 @@ function NoticeAdmin() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const latest = useLatest();
   const load = useCallback(() => {
-    let alive = true;
-    fetchJson('/notices').then((r) => { if (alive) { setData(r); setErr(null); } }).catch((e) => { if (alive) setErr(e); });
-    return () => { alive = false; };
-  }, []);
-  useEffect(() => load(), [load]);
+    const k = latest.next();
+    fetchJson('/notices').then((r) => { if (latest.isLatest(k)) { setData(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [latest]);
+  useEffect(() => { load(); }, [load]);
 
   if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading label="공지" />;
