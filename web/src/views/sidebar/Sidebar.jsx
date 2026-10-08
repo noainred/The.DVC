@@ -5,8 +5,8 @@
  *   full   — 236px, 그룹을 누르면 하위 메뉴가 펼쳐진다(아코디언, 여러 그룹 동시 펼침 가능 · 지금 화면의 그룹은 자동 펼침)
  *   rail   — 64px 아이콘 레일, 아이콘 위에 올리면(또는 포커스) 하위 메뉴가 옆으로 뜬다. 그룹을 누르면 마지막 하위 메뉴로 간다
  *   drawer — 720px 미만, 왼쪽에서 밀려 나오는 서랍(백드롭 클릭·Esc·이동으로 닫힌다)
- * 메뉴 데이터는 App 이 준다(topMenu.visibleMenu 로 권한을 거른 그룹) — 여기서 권한을 다시 보지 않는다.
- * 특수 기능 그룹은 저장된 하위 메뉴가 없고 `toolsSub`(전체 카드 + 분류 바로가기)를 그릴 때 합성한다(sideMenu.toolsChildren).
+ * 메뉴 데이터는 App 이 준다(topMenu.visibleMenu 로 권한을 거른 그룹) — 여기서 권한을 다시 보지 않는다. 특수 기능은 단독 항목이다
+ * (분류 바로가기 하위 메뉴는 사용자 결정으로 두지 않았다 — 2026-10-08).
  * ⚠ CSS 는 `.sb` 아래로 한정한다(전역 `.tab`·`.btn` 과 겹치지 않게). 대문자 변환 금지(v2.575).
  */
 import React, { useEffect, useState } from 'react';
@@ -18,8 +18,7 @@ const SOURCE_TEXT = { mine: '내 메뉴', distributed: '배포된 메뉴', defau
 export default function Sidebar({
   mode = 'full', open = false, onCloseDrawer,
   menu = [], here = { group: null, child: null }, menuLast = {},
-  toolsSub = [], toolsActive = null,
-  onGo, onGoHash, onToggleRail, onEdit,
+  onGo, onToggleRail, onEdit,
   isAdmin = false, source = 'default', unknown = 0, menuLoaded = true,
 }) {
   // 수동으로 접거나 편 그룹 — 지금 화면의 그룹은 기본 펼침이고, 화면이 바뀌면 그 그룹을 다시 편다.
@@ -30,7 +29,6 @@ export default function Sidebar({
   const rail = mode === 'rail';
 
   const go = (g, c) => { if (onGo) onGo(g, c); if (mode === 'drawer' && onCloseDrawer) onCloseDrawer(); };
-  const goHash = (h) => { if (onGoHash) onGoHash(h); if (mode === 'drawer' && onCloseDrawer) onCloseDrawer(); };
 
   const renderChildren = (g, children, activeId, onPick) => (
     <ul className="sb-sub" role="list">
@@ -51,23 +49,6 @@ export default function Sidebar({
   const renderGroup = (g) => {
     const active = here.group === g.id;
     const icon = iconNameOf(g.id);
-    // 특수 기능 — 저장된 하위 메뉴는 없지만 분류 바로가기를 합성해 그린다(분류가 없으면 단독 항목).
-    if (g.tab === 'tools' && toolsSub.length > 1) {
-      const opened = isOpen(g.id);
-      return (
-        <div key={g.id} className={`sb-group${active ? ' active' : ''}${opened ? ' open' : ''}`}>
-          <button type="button" className={`sb-item sb-top${active ? ' active' : ''}`} aria-expanded={opened} aria-current={active && !toolsActive ? 'page' : undefined}
-            title={rail ? g.label : undefined}
-            onClick={() => { if (rail || !active) goHash('#/tools'); if (!rail) toggle(g.id); }}>
-            <Icon name={icon} className="sb-ico" />
-            <span className="sb-label">{g.label}</span>
-            <span className="sb-count" aria-hidden="true">{toolsSub.length - 1}</span>
-            <Icon name="chevronDown" size={14} className="sb-chev" />
-          </button>
-          {opened && renderChildren(g, toolsSub, toolsActive, (c) => goHash(c.hash))}
-        </div>
-      );
-    }
     if (!g.children) {
       return (
         <button key={g.id} type="button" className={`sb-item sb-top${active ? ' active' : ''}`} aria-current={active ? 'page' : undefined}

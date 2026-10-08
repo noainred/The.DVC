@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { MENU_GROUPS, locate, visibleMenu, hashOf } from '../topMenu.js';
 import { TOOLS } from '../specialToolsList.js';
-import { resolveMenu, defaultMenu, missingDefaults, toolsChildren, activeToolsChild, catHash, catFromHash, itemKey, toolEligible, CAT_SEG } from './sideMenu.js';
+import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible } from './sideMenu.js';
 
 describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
   it('저장된 메뉴가 없으면 포탈 기본 메뉴 그대로다', () => {
@@ -89,35 +89,5 @@ describe('missingDefaults · toolEligible · itemKey', () => {
     expect(itemKey({ tool: 'serveranalysis' })).toBe('tool:serveranalysis');
     expect(itemKey({ tool: 'serveranalysis', seg: 'baremetal' })).toBe('tool:serveranalysis/baremetal');
     expect(itemKey({})).toBe('');
-  });
-});
-
-describe('특수 기능 하위(분류 바로가기)', () => {
-  it('전체 카드 + 켜진 분류 · 주소는 #/tools/_cat/<id>', () => {
-    const subs = toolsChildren([{ id: 'server', label: '서버', icon: '🖥️' }, { id: 'ops', label: '운영 작업' }]);
-    expect(subs.map((s) => s.id)).toEqual(['all', 'cat:server', 'cat:ops']);
-    expect(subs[1].hash).toBe(`#/tools/${CAT_SEG}/server`);
-    expect(toolsChildren([])).toHaveLength(1);
-    expect(toolsChildren(null)[0].hash).toBe('#/tools');
-  });
-  it('catHash ↔ catFromHash 왕복 · 분류 주소는 locate 에서 특수 기능 그룹이다', () => {
-    expect(catHash('server')).toBe('#/tools/_cat/server');
-    expect(catHash('all')).toBe('#/tools');
-    expect(catHash('')).toBe('#/tools');
-    expect(catFromHash('#/tools/_cat/server')).toBe('server');
-    expect(catFromHash('#/tools/_cat/%ED%95%9C')).toBe('한');
-    expect(catFromHash('#/tools/esxitemp')).toBe('');
-    expect(catFromHash('#/tools')).toBe('');
-    expect(locate('tools', '#/tools/_cat/server')).toEqual({ group: 'tools', child: null });
-  });
-  it('activeToolsChild — 목록은 all, 분류는 cat:<id>, 도구가 열려 있으면 null', () => {
-    expect(activeToolsChild('tools', '#/tools')).toBe('all');
-    expect(activeToolsChild('tools', '#/tools/_cat/ops')).toBe('cat:ops');
-    expect(activeToolsChild('tools', '#/tools/_cat')).toBe('all');
-    expect(activeToolsChild('tools', '#/tools/esxitemp')).toBe(null);
-    expect(activeToolsChild('vms', '#/vms')).toBe(null);
-  });
-  it('도구 키에 _cat 같은 예약어가 없다(둘째 조각 충돌 방지)', () => {
-    for (const t of TOOLS) expect(t.k.startsWith('_'), t.k).toBe(false);
   });
 });

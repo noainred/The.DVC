@@ -935,6 +935,32 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · ⚠ 인증을 끈 목 서버는 화면 쪽 사용자가 언제나 Anonymous 관리자다(App.jsx `!cfg.authEnabled`) — viewer·operator 메뉴는 **인증을 켜고 실제 계정으로**
       확인해야 한다(v2.725 검증: viewer 는 서버·스토리지·네트워크 일부만, operator 는 관리자 전용 도구가 빠진다).
 
+  - ⚠⚠ **v2.726 — 메뉴는 좌측 사이드바이고, 계정별 메뉴(내 메뉴 > 배포 메뉴 > 포탈 기본)는 서버에 저장한다**
+    (사용자 요청 "상단 1줄과 하위 메뉴 재구성을 좌측 사이드바 구성으로" + "사용자가 자신만의 메뉴 · 슈퍼 관리자는 전체 사용자에게 강제 배포(직접 만든
+    사용자에게 강제 적용할지 선택)" · Claude Design 시안 https://claude.ai/artifact/LmmbvpcR9wp9pMWUWmLRu4 · 선택 '전체 검증' · '분류 바로가기 제외'.
+    서버 `usermenu/store.js`(순수 정규화 + 파일 `user-menus.json`) · `routes/api/userMenu.js` · 웹 `views/sidebar/`{sideMenu.js,menuEdit.js,
+    Sidebar.jsx,MenuEditor.jsx,sidebarIcons.jsx}. 회귀 `server/test/userMenu2726.test.js`(실제 api 라우터) + 웹 `sideMenu.test.js`·`menuEdit.test.js`·
+    `shellStyles.test.js`·`topMenu.test.js`):
+    · **포탈 기본 메뉴는 여전히 `topMenu.js MENU_GROUPS` 하나**다. 저장 메뉴는 주소(탭·도구+조각)만 담고 라벨·id 는 화면이 기본 메뉴·카탈로그에서
+      채운다(`sideMenu.resolveMenu` — 서버는 라벨을 모른다). 모르는 항목은 버리고 `unknown` 으로 센다(지어내지 않는다). `locate`·`visibleMenu`·`entryOf` 는
+      groups 인자를 받아 사용자 메뉴에도 그대로 쓴다 — **권한 판정은 바뀌지 않는다**(메뉴에 넣어도 넓어지지 않고, 뺀 화면은 카드·주소로 열린다).
+    · ⚠⚠ **저장 모양의 계약**: `{v:1, groups:[{id,label?,tab}|{id,label?,children:[{tab}|{tool,seg?}]}]}` — 같은 항목은 앞의 것만, 빈 그룹은 저장 시 제외,
+      상한(그룹 40·항목 400·라벨 40)을 넘으면 400(`field`). 사용자 그룹 id 는 `custom-n`. 특수 기능은 단독 항목(`#/tools`)이다 — 분류 바로가기 하위 메뉴는
+      사용자 결정으로 두지 않았다(SpecialTools.jsx 무변경).
+    · **배포는 superAdmin 만**(`requireSuperAdmin` — `isSuperAdmin(req.user)`, 범위 superAdmin 도 403 `menuFleetOnly`). `force` 는 직접 만든 사용자의 메뉴를
+      `prev`(누가·언제·방식) 로 옮기고 지운다(배포자 자신은 제외) · `keep` 은 건드리지 않는다. 철회(DELETE)는 배포 메뉴만 지운다. 기록 `history` 20건 +
+      감사 로그(`user-menu.*`). 대상 수는 로컬 계정 기준이고 AD 계정은 미리 셀 수 없다 — 화면이 말한다. 배포는 '저장된 내 메뉴' 만(바뀐 것이 있으면 버튼 비활성).
+    · **새 게이트 이름 `menuFleetOnly`·`requireSuperAdmin` 은 `scripts/api-doc.mjs GUARD_NOTE` 에, 파일은 `archScan KNOWN_CONFIG_FILES` 에 등재했다.**
+      상태가 아니라 설정 파일(백업 감시 대상)이다. 손상이면 `preserveCorrupt` + 빈 저장소(저장분도 `safeMenu` 로 재정규화해 읽는다).
+    · **사이드바 셸**: full 236px / rail 64px(hover·focus-within 플라이아웃 — `.sb-nav` 가 `overflow:visible` 이어야 하고 `.sb` 에 backdrop-filter·transform 을
+      걸지 말 것) / drawer(<720px, 닫히면 `visibility:hidden`). 높이는 App 이 ResizeObserver 로 잰 `--topbar-h`·`--statusbar-h`(숫자를 박지 않는다).
+      `localStorage ui.sidebar`('rail'|'open', try/catch) · 저장값 없으면 1200px 미만은 레일. **CSS 는 `.sb`·`.me`·`.app-body` 아래로만**, 전역 `.tab` 그대로,
+      uppercase 금지 — `shellStyles.test.js` 가 고정한다. v2.556·v2.573·v2.725 의 상단 메뉴 규칙(`.topbar .tabs`·`.subtabs`·1600px 한 줄)은 지웠다.
+    · 편집 창(`MenuEditor`)의 '바뀐 항목' 은 `menuEdit.changeCount`(LCS 기반 최소 개수 — 항목 하나를 지우면 1 이지 밀린 뒤 항목 전부가 아니다).
+      저장·삭제·복원·배포는 `putJson/delJson/postJson` 이고 403 은 `ErrorBox error={}` 로 권한 안내.
+    · ⚠ 정직 기록: Chromium 은 인증을 켠 목 서버(비밀번호 로그인 재정의 `login-policy-users.txt`)에서 admin·noainred(super_admin)·operator·viewer × 1440/400 을
+      봤다. AD 계정·실운영 계정 수백 명 규모의 배포는 보지 못했다(대상 수는 로컬 계정 수).
+
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):

@@ -1,10 +1,11 @@
 /**
- * shellStyles.test.js — 2단 상단 메뉴 CSS 규약 고정(v2.556).
+ * shellStyles.test.js — 셸 CSS 규약 고정(v2.556 → v2.726 좌측 사이드바).
  *
- * 왜 소스(CSS)를 검사하는가: 이 규칙을 전역 `.tab` 으로 되돌리면 **앱 전역의 일반 버튼 수십 개**
- * (접속확인·필터 초기화·CSV 선택·집계 단위 …)가 테두리 없는 밑줄 글자가 된다. Chromium 으로
- * 확인했지만(전역 .tab: radius 8px·active 파란 채움 / 헤더 탭: radius 0·청록 밑줄) 그 검증은
- * 매 커밋마다 돌지 않으므로 여기서 계약을 고정한다.
+ * 왜 소스(CSS)를 검사하는가: 메뉴 규칙을 전역 `.tab` 으로 되돌리면 **앱 전역의 일반 버튼 수십 개**
+ * (접속확인·필터 초기화·CSV 선택·집계 단위 …)가 테두리 없는 밑줄 글자가 된다. v2.726 부터 메뉴는
+ * 좌측 사이드바(`.sb`)이고 상단 메뉴 규칙(`.topbar .tabs`·`.subtabs`)은 지웠다 — 사이드바 규칙은
+ * 전부 `.sb` 아래로 한정하고, 전역 `.tab` 은 그대로다. Chromium 으로 확인했지만 그 검증은 매 커밋마다
+ * 돌지 않으므로 여기서 계약을 고정한다.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -15,10 +16,56 @@ const CSS = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 /** 주석을 지운 CSS — 규칙을 설명하는 주석이 통과 근거가 되면 안 된다(v2.535 규약). */
 const BODY = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
 
-describe('2단 상단 메뉴 (v2.556)', () => {
-  it('★ 밑줄 탭 규칙은 .topbar .tabs .tab 으로 한정된다', () => {
-    expect(BODY).toMatch(/\.topbar\s+\.tabs\s+\.tab\s*\{/);
-    expect(BODY).toMatch(/\.topbar\s+\.tabs\s+\.tab\.active\s*\{/);
+/** 선택자 목록 → 규칙 블록(선택자, 본문). 중첩 블록(@media) 안도 한 단계 들어간다. */
+function rules(css) {
+  const out = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while ((m = re.exec(css))) {
+    const sel = m[1].trim();
+    if (sel.startsWith('@')) continue;
+    out.push({ sel, body: m[2] });
+  }
+  return out;
+}
+
+describe('좌측 사이드바 셸 (v2.726)', () => {
+  it('★ 상단 메뉴 규칙(.topbar .tabs · .subtabs · .tab-count · 1600px 한 줄 합치기)은 지웠다', () => {
+    expect(BODY).not.toMatch(/\.topbar\s+\.tabs/);
+    expect(BODY).not.toMatch(/\.subtabs/);
+    expect(BODY).not.toMatch(/\.tab-count/);
+    expect(BODY).not.toMatch(/min-width:\s*1600px/);
+  });
+
+  it('★★ 사이드바·편집 창 규칙은 .sb / .me / .app-body 아래로만 — 전역 .tab·.btn 을 건드리지 않는다', () => {
+    const sb = rules(BODY).filter((r) => /\.sb\b|\.sb-|\.me\b|\.me-|\.app-body/.test(r.sel));
+    expect(sb.length).toBeGreaterThan(40);
+    for (const r of sb) {
+      for (const one of r.sel.split(',')) {
+        const t = one.trim();
+        // .statusbar .sb-cell / .sb-label / .sb-val 은 v2.556 하단 상태바 규칙(이름만 같다) — 사이드바와 무관.
+        if (t.startsWith('.statusbar')) continue;
+        expect(t, t).toMatch(/^(\.sb(-[a-z-]+)?|\.me(-[a-z-]+)?|\.app-body)(\b|[.:\s>])/);
+      }
+      expect(r.body, r.sel).not.toMatch(/text-transform/);
+    }
+  });
+
+  it('사이드바 높이는 App 이 재서 넘기는 --topbar-h·--statusbar-h 로 정한다(숫자를 박지 않는다)', () => {
+    const sb = rules(BODY).find((r) => r.sel === '.sb');
+    expect(sb).toBeTruthy();
+    expect(sb.body).toMatch(/top:\s*var\(--topbar-h\)/);
+    expect(sb.body).toMatch(/calc\(100vh - var\(--topbar-h\) - var\(--statusbar-h\)\)/);
+    // 레일 플라이아웃이 갇히지 않게 .sb 에는 backdrop-filter·transform 을 걸지 않는다.
+    expect(sb.body).not.toMatch(/backdrop-filter|transform/);
+  });
+
+  it('레일은 64px · 플라이아웃은 .sb-nav overflow:visible 위에서 hover/focus-within 으로 뜬다 · 서랍은 닫히면 visibility hidden', () => {
+    expect(BODY).toMatch(/\.sb-rail\s*\{[^}]*width:\s*64px/);
+    expect(BODY).toMatch(/\.sb-rail\s+\.sb-nav\s*\{[^}]*overflow:\s*visible/);
+    expect(BODY).toMatch(/\.sb-rail\s+\.sb-group:hover\s+\.sb-sub,\s*\.sb-rail\s+\.sb-group:focus-within\s+\.sb-sub\s*\{/);
+    expect(BODY).toMatch(/\.sb-drawer\s*\{[^}]*visibility:\s*hidden/);
+    expect(BODY).toMatch(/\.sb-drawer\.open\s*\{[^}]*visibility:\s*visible/);
   });
 
   it('★★ 전역 .tab 은 예전 스타일(둥근 모서리 + active 파란 채움)을 유지한다', () => {
@@ -34,12 +81,6 @@ describe('2단 상단 메뉴 (v2.556)', () => {
     const row = BODY.match(/\.topbar\s+\.tb-brandrow\s*\{([^}]*)\}/);
     expect(row, '.tb-brandrow 규칙이 없습니다').toBeTruthy();
     expect(row[1]).toMatch(/flex-wrap:\s*wrap/);
-  });
-
-  it('메뉴 행은 가로 스크롤한다(탭이 많아도 페이지를 밀지 않게)', () => {
-    const tabs = BODY.match(/\.topbar\s+\.tabs\s*\{([^}]*)\}/);
-    expect(tabs).toBeTruthy();
-    expect(tabs[1]).toMatch(/overflow-x:\s*auto/);
   });
 
   it('시안 토큰 4개가 :root 에 있고 같은 색에 새 hex 를 늘리지 않았다', () => {

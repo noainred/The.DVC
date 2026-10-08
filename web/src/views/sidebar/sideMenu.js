@@ -10,13 +10,10 @@
  *    카탈로그(specialToolsList.js, 이름 덮어쓰기 적용)에서 가져온다. 서버는 라벨을 모른다(주소만 저장한다).
  *  · **모르는 항목은 버리고 개수를 밝힌다**(`unknown`) — 삭제된 탭·도구 키·카탈로그에 없는 키. 지어내지 않는다.
  *  · 권한 판정은 여기 없다 — 호출부가 topMenu.visibleMenu(tabOk·toolOk) 로 거른다(메뉴에 넣어도 권한이 넓어지지 않는다).
- *  · 특수 기능 하위(전체 카드 + 분류 바로가기)는 저장하지 않고 **그릴 때 합성**한다 — 분류는 설정 › 특수 기능 분류를 따른다.
- *    분류 주소는 `#/tools/_cat/<분류 id>` 다(둘째 조각이 도구 키 자리라 `_cat` 은 도구 키로 쓰지 않는 예약어 — 도구 키는
- *    영문 소문자·숫자·하이픈이고 `_` 로 시작하지 않는다).
+ *  · 특수 기능은 단독 항목(`#/tools`)이다 — 분류 바로가기(하위 메뉴)는 사용자 결정으로 두지 않았다(2026-10-08 "분류 바로가기 제외").
  */
 import { MENU_GROUPS } from '../topMenu.js';
 
-export const CAT_SEG = '_cat';
 export const CUSTOM_PREFIX = 'custom-';
 export const CUSTOM_GROUP_LABEL = '내 그룹';
 
@@ -111,39 +108,4 @@ export function missingDefaults(groups) {
   const out = [];
   for (const [key, d] of defaultIndex().items) if (!present.has(key)) out.push({ key, ...d });
   return out;
-}
-
-/** 특수 기능 하위 — 전체 카드 + 켜진 분류(설정 › 특수 기능 분류). 분류가 없으면 '전체 카드' 하나다. */
-export function toolsChildren(categories = []) {
-  const out = [{ id: 'all', label: '전체 카드', hash: '#/tools' }];
-  for (const c of categories || []) {
-    if (!c || !c.id) continue;
-    out.push({ id: `cat:${c.id}`, label: String(c.label || c.id), icon: String(c.icon || ''), hash: catHash(c.id) });
-  }
-  return out;
-}
-
-const segsOf = (hash) => String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
-
-/** 분류 주소. `all`·빈 값은 목록(#/tools). */
-export function catHash(id) {
-  const v = String(id || '').trim();
-  return v && v !== 'all' ? `#/tools/${CAT_SEG}/${encodeURIComponent(v)}` : '#/tools';
-}
-
-/** 주소에서 분류 id — 분류 주소가 아니면 ''. */
-export function catFromHash(hash) {
-  const s = segsOf(hash);
-  if (s[0] !== 'tools' || s[1] !== CAT_SEG) return '';
-  try { return decodeURIComponent(s[2] || ''); } catch { return ''; }
-}
-
-/** 특수 기능 하위 중 지금 켜진 것 — 'all' | 'cat:<id>' · 도구가 열려 있거나 특수 기능 탭이 아니면 null. */
-export function activeToolsChild(tab, hash) {
-  if (tab !== 'tools') return null;
-  const s = segsOf(hash);
-  if (s[0] !== 'tools') return null;
-  if (!s[1]) return 'all';
-  if (s[1] === CAT_SEG) { const c = catFromHash(hash); return c ? `cat:${c}` : 'all'; }
-  return null;
 }

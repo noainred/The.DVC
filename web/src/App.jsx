@@ -36,7 +36,7 @@ import { lockReasonOf } from './views/toolVisibility.js';
 // v2.726 좌측 사이드바 — 계정별 메뉴(내 메뉴 > 배포 메뉴 > 기본)의 해석은 views/sidebar/sideMenu.js, 편집 창은 MenuEditor(lazy).
 import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
-import { resolveMenu, toolsChildren, activeToolsChild } from './views/sidebar/sideMenu.js';
+import { resolveMenu } from './views/sidebar/sideMenu.js';
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
@@ -452,9 +452,6 @@ function Portal({ user, onLogout }) {
   }), [menuData, toolCatalog]);
   const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk }, resolvedMenu.groups);
   const here = locate(tab, hashNow, resolvedMenu.groups);
-  // 특수 기능 하위(전체 카드 + 분류 바로가기)는 저장하지 않고 그릴 때 합성한다.
-  const toolsSub = useMemo(() => toolsChildren(menuData?.categories || []), [menuData]);
-  const toolsActive = activeToolsChild(tab, hashNow);
   // 특수 기능 카드·옛 주소로 들어와도 '그 대메뉴에서 마지막으로 본 하위 메뉴' 를 기억한다(대메뉴를 다시 누르면 그리로 간다).
   useEffect(() => {
     if (!here.group || !here.child) return;
@@ -475,8 +472,6 @@ function Portal({ user, onLogout }) {
     if (item.tab === 'vcenters') setPlatformResetSeq((n) => n + 1);
     setTab(item.tab);
   };
-  // 특수 기능 분류 바로가기(#/tools · #/tools/_cat/<id>) — 탭은 tools, 주소는 그대로.
-  const goHash = (h) => { setTabState('tools'); setHashNow(h); if (window.location.hash !== h) window.location.hash = h; };
 
   // 현재 탭이 권한/필터로 더 이상 접근 불가하면 안전한 탭(overview)으로 되돌린다.
   useEffect(() => {
@@ -782,8 +777,8 @@ function Portal({ user, onLogout }) {
 
       <div className="app-body" style={{ '--topbar-h': `${shellH.top}px`, '--statusbar-h': `${shellH.bottom}px` }}>
         <Sidebar mode={sbMode} open={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)}
-          menu={menu} here={here} menuLast={menuLast} toolsSub={toolsSub} toolsActive={toolsActive}
-          onGo={goMenu} onGoHash={goHash} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }}
+          menu={menu} here={here} menuLast={menuLast}
+          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }}
           isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={!!menuData} />
         <main className="content">
           {filterBar}
