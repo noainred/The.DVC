@@ -26,3 +26,17 @@ describe('iDRAC 통합 추이 A안 배치', () => {
     expect(css).toMatch(/@media \(max-width: 720px\) \{ \.idrac-trend-row-end \{ margin-left: 0; \} \}/);
   });
 });
+
+describe('무응답 구간 글자(v2.727 Chromium 판독)', async () => {
+  const { gapLabelShown, GAP_LABEL_MIN_FRAC } = await import('./idracTrendText.js');
+  it('구간이 기간의 12% 이상일 때만 글자를 둔다 — 좁은 구간 가운데 글자는 축 밖으로 넘쳐 잘린다', () => {
+    const span = 1000;
+    expect(GAP_LABEL_MIN_FRAC).toBe(0.12);
+    expect(gapLabelShown({ x1: 0, x2: 50 }, span)).toBe(false);
+    expect(gapLabelShown({ x1: 0, x2: 120 }, span)).toBe(true);
+    expect(gapLabelShown({ x1: 0, x2: 500 }, span)).toBe(true);
+    expect(gapLabelShown({ x1: 0, x2: 500 }, 0)).toBe(false);
+    expect(gapLabelShown(null, span)).toBe(false);
+    expect(read('./IdracTrendTool.jsx')).toMatch(/label=\{gapLabelShown\(g, span\) \?/);
+  });
+});

@@ -15,7 +15,7 @@ import { IdracTrendTable } from './IdracTrendTable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js';
 import {
-  PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, staleCurText, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
+  PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, staleCurText, gapAreas, gapLabelShown, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, EMPTY_TYPE, filterByType, matchType, typeQuery, typeText, gpuStateOf, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveVisibleKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
@@ -173,16 +173,16 @@ export default function IdracTrendTool() {
       <div className="idrac-trend-row">
         {gpuBox}
         <div className="idrac-trend-row-end idrac-trend-tools">
-          <button type="button" className={arrange ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
+          <button type="button" className={arrange ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px', marginTop: 0 }}
             title="카드를 끌어다 놓아도 순서가 바뀝니다 — 이 브라우저에 저장됩니다"
-            onClick={() => setArrange((v) => !v)}>{arrange ? '✓ 순서 편집 끝' : '↔ 카드 순서'}</button>
-          <button type="button" className={styling ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setStyling((v) => !v)}>{styling ? '✓ 선 모양 닫기' : '〰 선 모양'}</button>
+            onClick={() => setArrange((v) => !v)}>{arrange ? '✓ 순서 끝' : '↔ 카드 순서'}</button>
+          <button type="button" className={styling ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setStyling((v) => !v)}>{styling ? '✓ 선 모양' : '〰 선 모양'}</button>
           <button type="button" className={refOn ? 'login-btn' : 'tab'} aria-pressed={refOn} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
-            title={`CPU 사용률 ${WARN_PCT}% 주의 · ${CRIT_PCT}% 위험 기준선을 차트에 그릴지 — 이 브라우저에 저장됩니다`}
-            onClick={() => applyRefOn(!refOn)}>{refOn ? `📏 CPU 기준선 ${WARN_PCT}·${CRIT_PCT}%` : '📏 CPU 기준선 꺼짐'}</button>
+            title={`CPU 사용률 ${WARN_PCT}% 주의 · ${CRIT_PCT}% 위험 기준선 — 지금 ${refOn ? '켜짐' : '꺼짐'} · 누르면 ${refOn ? '끕니다' : '켭니다'}(이 브라우저에 저장)`}
+            onClick={() => applyRefOn(!refOn)}>{refOn ? `📏 CPU ${WARN_PCT}·${CRIT_PCT}%` : '📏 CPU 기준선'}</button>
           <button type="button" className={gpuRef.on ? 'login-btn' : 'tab'} aria-pressed={gpuRef.on} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
-            title={`GPU 온도 기준선(${gpuRef.value}℃)을 차트에 그릴지 — 값·색·굵기와 함께 이 브라우저에 저장됩니다`}
-            onClick={() => applyGpuRef({ on: !gpuRef.on })}>{gpuRef.on ? `🌡 GPU 기준선 ${gpuRef.value}℃` : '🌡 GPU 기준선 꺼짐'}</button>
+            title={`GPU 온도 기준선(${gpuRef.value}℃) — 지금 ${gpuRef.on ? '켜짐' : '꺼짐'} · 누르면 ${gpuRef.on ? '끕니다' : '켭니다'}(값·색·굵기와 함께 이 브라우저에 저장)`}
+            onClick={() => applyGpuRef({ on: !gpuRef.on })}>{gpuRef.on ? `🌡 GPU ${gpuRef.value}℃` : '🌡 GPU 기준선'}</button>
         </div>
       </div>
       {arrange && (
@@ -403,7 +403,7 @@ export default function IdracTrendTool() {
                 <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} scale="time" stroke="#8b9bb4" fontSize={11} minTickGap={40} tickFormatter={(t) => fmtTick(t, span)} />
                 <YAxis yAxisId="pct" domain={[0, 100]} stroke="#8b9bb4" fontSize={11} width={40} />
                 <YAxis yAxisId="w" orientation="right" domain={[0, pMaxOf(pts)]} stroke="#f59e0b" fontSize={11} width={56} unit=" W" />
-                {gaps.map((g) => <ReferenceArea key={g.x1} yAxisId="pct" x1={g.x1} x2={g.x2} fill="rgba(139,155,180,.10)" strokeOpacity={0} label={{ value: 'iDRAC 무응답 — 값 없음', fill: '#8b9bb4', fontSize: 11, position: 'insideTop' }} />)}
+                {gaps.map((g) => <ReferenceArea key={g.x1} yAxisId="pct" x1={g.x1} x2={g.x2} fill="rgba(139,155,180,.10)" strokeOpacity={0} label={gapLabelShown(g, span) ? { value: 'iDRAC 무응답 — 값 없음', fill: '#8b9bb4', fontSize: 11, position: 'insideTop' } : undefined} />)}
                 {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={WARN_PCT} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: `CPU ${WARN_PCT}% 주의`, fill: '#fbbf24', fontSize: 11, position: 'insideTopLeft' }} />}
                 {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={CRIT_PCT} stroke="#ef4444" strokeDasharray="5 4" label={{ value: `CPU ${CRIT_PCT}% 위험`, fill: '#f87171', fontSize: 11, position: 'insideTopLeft' }} />}
                 {showGpuRef(gpuRef, on, st) && <ReferenceLine yAxisId="pct" y={gpuRef.value} stroke={gpuRef.color} strokeWidth={gpuRef.width} strokeDasharray="5 4" label={{ value: `GPU ${gpuRef.value}℃`, fill: gpuRef.color, fontSize: 11, position: 'insideBottomRight' }} />}
