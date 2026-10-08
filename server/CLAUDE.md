@@ -93,6 +93,8 @@
     서비스 계정 강등을 처리하므로 문서에서 `node`를 직접 안내하지 말 것(root 실행 시 users.json이
     root 소유가 되어 포탈이 쓰기 불가). 기동 시 `warnIfNoOtpAdmin()`이 부재를 경고한다.
     긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모는 강제 대상이 아니다.
+  - v2.723 콘솔 계정 메뉴(`tools/user-admin.js` + `user-admin.sh`, 설치본 `vmware-portal-users`)도 같은 신뢰 경로(`trusted:true`)다 —
+    래퍼의 서비스 계정 강등을 빼지 말 것(같은 이유). 계정별 로그인 방식은 `login-policy-users.txt`(UI 미노출 규칙 그대로 — 화면·API 에 싣지 않는다)를 쓴다.
   - **전역 로그인 정책(v2.272)**: OTP 강제 여부는 이제 설정 소유자가 '설정 › 세션 보안'에서 고르는
     전역 정책(`security-session.json` `loginPolicy`)이 결정한다 — `isOtpOnlyRole`이 이 값을 읽는다
     (핫패스라 `securitySettings.effectiveLoginPolicy`가 3초 캐시·저장 시 즉시 무효화). 값:

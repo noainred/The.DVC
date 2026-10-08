@@ -7,6 +7,8 @@
  *  · 게시판 조회: 로그인 사용자 전부.
  *  · 게시판 글·댓글 쓰기: admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)'). 수정·삭제는 작성자 본인 또는 관리자.
  *    상단 고정은 관리자만. 데모 계정은 authMiddleware 의 demoGuest 판정이 쓰기를 막는다(SAFE_ACTIONS 밖).
+ *  · 답글(v2.723): 댓글 쓰기 본문의 `parentId`. 공감(v2.723): `POST …/like`·`POST …/comments/:cid/like` 본문 `{on:true|false}` —
+ *    상태 변경이라 쓰기 권한(admin·operator)과 같다. 공감한 사람 이름 목록 전체는 응답에 싣지 않는다(개수·내 공감·앞 30명).
  * 게시판은 vCenter 축이 없는 포탈 공용 게시판이라 범위 계정도 같은 글을 본다.
  */
 import { requireRole } from '../../auth/auth.js';
@@ -16,7 +18,7 @@ import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
 import {
   activeNotices, listNotices, createNotice, updateNotice, deleteNotice,
-  listPosts, getPost, createPost, updatePost, deletePost, addComment, deleteComment, LIMITS, NOTICE_LEVELS,
+  listPosts, getPost, createPost, updatePost, deletePost, addComment, deleteComment, setLike, LIMITS, NOTICE_LEVELS,
 } from '../../bulletin/store.js';
 
 const adminOnly = requireRole('admin');
@@ -76,7 +78,7 @@ export function registerBulletin(api) {
   });
   api.get('/board/posts/:id', (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
-    try { res.json({ ok: true, post: getPost(req.params.id) }); } catch (e) { fail(res, e, next); }
+    try { res.json({ ok: true, post: getPost(req.params.id, userOf(req)) }); } catch (e) { fail(res, e, next); }
   });
   api.post('/board/posts', writers, (req, res, next) => {
     try {
@@ -103,18 +105,30 @@ export function registerBulletin(api) {
   });
   api.post('/board/posts/:id/comments', writers, (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
+    const parentId = req.body?.parentId;
+    if (parentId != null && parentId !== '' && !(typeof parentId === 'string' && ID_RE.test(parentId))) {
+      return res.status(400).json({ ok: false, reason: 'parentId: 댓글 id 형식이 아닙니다', field: 'parentId' });
+    }
     try {
       const c = addComment(req.params.id, req.body, userOf(req));
-      audit(req, 'board.comment.create', `${req.params.id}/${c.id}`);
+      audit(req, c.parentId ? 'board.reply.create' : 'board.comment.create', `${req.params.id}/${c.id}`, c.parentId ? `답글 → ${c.parentId}` : '');
       res.json({ ok: true, comment: c });
     } catch (e) { fail(res, e, next); }
+  });
+  api.post('/board/posts/:id/like', writers, (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, ...setLike(req.params.id, null, userOf(req), req.body?.on) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/board/posts/:id/comments/:cid/like', writers, (req, res, next) => {
+    if (!ID_RE.test(req.params.id) || !ID_RE.test(req.params.cid)) return badId(res);
+    try { res.json({ ok: true, ...setLike(req.params.id, req.params.cid, userOf(req), req.body?.on) }); } catch (e) { fail(res, e, next); }
   });
   api.delete('/board/posts/:id/comments/:cid', writers, (req, res, next) => {
     if (!ID_RE.test(req.params.id) || !ID_RE.test(req.params.cid)) return badId(res);
     try {
-      const c = deleteComment(req.params.id, req.params.cid, userOf(req), { isAdmin: isAdmin(req) });
-      audit(req, 'board.comment.delete', `${req.params.id}/${c.id}`, `작성자 ${c.author}`);
-      res.json({ ok: true });
+      const { comment: c, kept } = deleteComment(req.params.id, req.params.cid, userOf(req), { isAdmin: isAdmin(req) });
+      audit(req, 'board.comment.delete', `${req.params.id}/${c.id}`, `작성자 ${c.author}${kept ? ' · 답글이 있어 자리를 남김' : ''}`);
+      res.json({ ok: true, kept });
     } catch (e) { fail(res, e, next); }
   });
 }

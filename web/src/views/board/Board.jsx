@@ -3,6 +3,7 @@
  *  · 읽기는 로그인 사용자 전부, 글·댓글 쓰기는 admin·operator(서버가 집행). 수정·삭제는 작성자 본인 또는 관리자.
  *  · 공지 작성·수정·삭제는 전체 범위 관리자(서버가 집행). 공지는 로그인 뒤 팝업으로 보인다.
  * 폴링하지 않는다(마운트 1회 + 동작 뒤 다시 읽기 + 새로고침 버튼).
+ * v2.723 — 답글(대댓글, 한 단계)과 공감(글·댓글, 한 사람 1회 · 다시 누르면 취소). 공감·답글도 쓰기 권한(admin·operator)이다.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
@@ -12,6 +13,7 @@ import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   LEVEL_TEXT, LEVEL_TONE, timeText, windowText, noticeState, toLocalInput, fromLocalInput, saveFailText,
+  threadComments, likersText, applyLike,
 } from './bulletinText.js';
 
 const SUBS = [['posts', '게시글'], ['notices', '공지(접속 팝업)']];
@@ -73,8 +75,8 @@ function Posts() {
       {list.rows.length === 0
         ? <div className="muted" style={{ padding: 16 }}>{query ? `‘${query}’ 에 맞는 글이 없습니다.` : '아직 글이 없습니다.'}</div>
         : (
-          <STable className="v3-table" minWidth={560}>
-            <thead><tr><th>제목</th><th>작성자</th><th>댓글</th><th>작성</th><th>최근 활동</th></tr></thead>
+          <STable className="v3-table" minWidth={600}>
+            <thead><tr><th>제목</th><th>작성자</th><th>댓글</th><th>공감</th><th>작성</th><th>최근 활동</th></tr></thead>
             <tbody>
               {list.rows.map((r) => (
                 <tr key={r.id} className={r.pinned ? 'board-pinned' : ''}>
@@ -87,6 +89,7 @@ function Posts() {
                   </td>
                   <td>{r.author}</td>
                   <td className="right" data-sort={r.comments}>{r.comments}</td>
+                  <td className="right" data-sort={r.likes ?? 0}>{r.likes ? <span className="board-like-count">♥ {r.likes}</span> : <span className="muted">0</span>}</td>
                   <td data-sort={r.createdAt}>{timeText(r.createdAt)}</td>
                   <td data-sort={r.lastActivityAt}>{timeText(r.lastActivityAt)}</td>
                 </tr>
@@ -136,11 +139,28 @@ function PostEditor({ initial, isAdmin, limits, onCancel, onSaved }) {
   );
 }
 
+/** 공감(하트) 버튼 — 눌렀으면 채운 하트. 쓰기 권한이 없으면 개수만 보이고 누를 수 없다(사유는 툴팁). */
+function LikeButton({ item, canWrite, busy, onToggle, label = '공감' }) {
+  const n = Number.isFinite(item?.likeCount) ? item.likeCount : 0;
+  const liked = !!item?.liked;
+  const title = canWrite
+    ? `${liked ? '공감 취소' : '공감하기'} · ${likersText(item)}`
+    : `공감은 운영자·관리자만 할 수 있습니다 · ${likersText(item)}`;
+  return (
+    <button type="button" className={`board-like${liked ? ' on' : ''}`} disabled={!canWrite || busy}
+      aria-pressed={liked} title={title} onClick={onToggle}>
+      <span aria-hidden="true">{liked ? '♥' : '♡'}</span> {label}{n ? <b className="board-like-n">{n}</b> : null}
+    </button>
+  );
+}
+
 function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
   const [post, setPost] = useState(null);
   const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState('');
+  const [reply, setReply] = useState(null); // { rootId, toId, toAuthor } — 답글 입력 중
+  const [replyText, setReplyText] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -154,16 +174,58 @@ function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
   const mine = (x) => isAdmin || (!!me && x?.author === me);
   const act = async (fn, after) => {
     setBusy(true); setMsg('');
-    try { const r = await fn(); if (r?.ok) after?.(); else setMsg(saveFailText(r)); } catch (e) { setMsg(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+    try { const r = await fn(); if (r?.ok) after?.(r); else setMsg(saveFailText(r)); } catch (e) { setMsg(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+  };
+  const toggleLike = (x, commentId = null) => act(
+    () => postJson(commentId ? `/board/posts/${id}/comments/${commentId}/like` : `/board/posts/${id}/like`, { on: !x.liked }),
+    (r) => setPost((p) => applyLike(p, commentId, r)),
+  );
+  const openReply = (root, target) => {
+    setReply({ rootId: root.id, toId: target.id, toAuthor: target.author || '' });
+    setReplyText('');
+  };
+  const sendReply = () => act(
+    () => postJson(`/board/posts/${id}/comments`, { body: replyText, parentId: reply.toId }),
+    () => { setReply(null); setReplyText(''); load(); },
+  );
+  const removeComment = (c, hasReplies) => {
+    const q = hasReplies ? '이 댓글을 지울까요? 답글이 있어 ‘삭제된 댓글입니다’ 자리는 남습니다.' : '이 댓글을 지울까요?';
+    if (window.confirm(q)) act(() => delJson(`/board/posts/${id}/comments/${c.id}`), load);
   };
 
   if (err && !post) return <div><button className="btn" onClick={onBack}>← 목록</button><div style={{ marginTop: 10 }}><ErrorBox error={err} /></div></div>;
   if (!post) return <Loading label="글" />;
+  const threads = threadComments(post.comments);
+  const count = Number.isFinite(post.commentCount) ? post.commentCount : post.comments.filter((c) => !c.deleted).length;
+
+  // 렌더 함수로 부른다(컴포넌트로 두면 렌더마다 새 타입이 되어 행이 다시 마운트된다).
+  const commentRow = ({ c, root, isReply, hasReplies }) => (
+    <div key={c.id} className={`board-comment${isReply ? ' reply' : ''}`}>
+      {c.deleted
+        ? <div className="muted board-comment-body">삭제된 댓글입니다.</div>
+        : (
+          <>
+            <div className="board-comment-head">
+              <span className="board-comment-meta">
+                <b>{c.author}</b><span className="muted"> · {timeText(c.createdAt)}</span>
+              </span>
+              <span className="board-comment-actions">
+                {canWrite && <button type="button" className="board-act" disabled={busy} onClick={() => openReply(root, c)}>답글</button>}
+                <LikeButton item={c} canWrite={canWrite} busy={busy} onToggle={() => toggleLike(c, c.id)} />
+                {canWrite && mine(c) && <button type="button" className="board-act danger" disabled={busy} onClick={() => removeComment(c, hasReplies)}>삭제</button>}
+              </span>
+            </div>
+            <div className="board-comment-body">{c.replyTo ? <span className="board-mention">@{c.replyTo} </span> : null}{c.body}</div>
+          </>
+        )}
+    </div>
+  );
+
   return (
     <div className="card">
       <button className="btn" onClick={onBack}>← 목록</button>
       {editing
-        ? <div style={{ marginTop: 10 }}><PostEditor initial={post} isAdmin={isAdmin} onCancel={() => setEditing(false)} onSaved={(p) => { setEditing(false); setPost({ ...p, comments: post.comments }); }} /></div>
+        ? <div style={{ marginTop: 10 }}><PostEditor initial={post} isAdmin={isAdmin} onCancel={() => setEditing(false)} onSaved={(p) => { setEditing(false); setPost((cur) => ({ ...p, comments: cur.comments, commentCount: cur.commentCount })); }} /></div>
         : (
           <>
             <h3 className="board-title">{post.pinned && <span className="board-pin">고정</span>}{post.title}</h3>
@@ -171,6 +233,10 @@ function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
               {post.author} · 작성 {timeText(post.createdAt)}{post.updatedAt && post.updatedAt !== post.createdAt ? ` · 수정 ${timeText(post.updatedAt)}${post.editedBy && post.editedBy !== post.author ? `(${post.editedBy})` : ''}` : ''}
             </div>
             <div className="board-body">{post.body}</div>
+            <div className="board-post-like">
+              <LikeButton item={post} canWrite={canWrite} busy={busy} onToggle={() => toggleLike(post)} />
+              {!canWrite && <span className="muted" style={{ fontSize: 12 }}>공감·댓글은 운영자·관리자만 할 수 있습니다</span>}
+            </div>
             {canWrite && mine(post) && (
               <div className="flex" style={{ gap: 6, marginTop: 10 }}>
                 <button className="btn" disabled={busy} onClick={() => setEditing(true)}>수정</button>
@@ -180,14 +246,22 @@ function PostDetail({ id, me, isAdmin, canWrite, onBack }) {
           </>
         )}
       <div className="board-comments">
-        <b>댓글 {post.comments.length}</b>
-        {post.comments.map((c) => (
-          <div key={c.id} className="board-comment">
-            <div className="flex between" style={{ gap: 8 }}>
-              <span className="muted" style={{ fontSize: 12 }}>{c.author} · {timeText(c.createdAt)}</span>
-              {canWrite && mine(c) && <button className="btn btn-sm" disabled={busy} onClick={() => { if (window.confirm('이 댓글을 지울까요?')) act(() => delJson(`/board/posts/${id}/comments/${c.id}`), load); }}>삭제</button>}
-            </div>
-            <div className="board-comment-body">{c.body}</div>
+        <b>댓글 {count}</b>
+        {threads.map(({ c, orphan, replies }) => (
+          <div key={c.id} className="board-thread">
+            {orphan && <div className="muted" style={{ fontSize: 11 }}>원래 댓글을 찾지 못한 답글입니다.</div>}
+            {commentRow({ c, root: c, hasReplies: replies.length > 0 })}
+            {replies.map((r) => commentRow({ c: r, root: c, isReply: true }))}
+            {reply?.rootId === c.id && (
+              <div className="board-reply-box">
+                <textarea className="input board-comment-input" rows={2} value={replyText} maxLength={2000} autoFocus
+                  onChange={(e) => setReplyText(e.target.value)} placeholder={reply.toAuthor ? `@${reply.toAuthor} 에게 답글` : '답글'} />
+                <span className="flex" style={{ gap: 6 }}>
+                  <button className="btn" disabled={busy} onClick={() => setReply(null)}>취소</button>
+                  <button className="btn primary" disabled={busy || !replyText.trim()} onClick={sendReply}>답글 등록</button>
+                </span>
+              </div>
+            )}
           </div>
         ))}
         {canWrite

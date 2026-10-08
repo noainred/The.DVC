@@ -85,7 +85,7 @@ const VC_BADGE = <span className="badge gray" style={{ fontSize: 10, marginLeft:
 function localBlocks(local, r) {
   if (!local) return [];
   const t = localPhaseText(local, { settings: local.settings });
-  const blocks = [{ type: 'heading', text: `Local — 포탈 실시간 20초 수집 (${t.short})${local.synthesized ? ' · 데모(mock) 합성' : ''}` }];
+  const blocks = [{ type: 'heading', text: `20초 Peak — 실시간 데이터를 수집해 20초 간격의 Peak 데이터를 수집 (${t.short})${local.synthesized ? ' · 데모(mock) 합성' : ''}` }];
   if (local.available === false || local.empty) { blocks.push({ type: 'note', text: t.long }); return blocks; }
   const p = local.peak || {}; const c = local.coverage || {};
   const g = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`); const m = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);

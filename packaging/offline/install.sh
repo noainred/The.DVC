@@ -246,6 +246,11 @@ if [[ -x "$APP_DST/otp-enroll.sh" ]]; then
   ln -sf "$APP_DST/otp-enroll.sh" /usr/local/bin/vmware-portal-otp 2>/dev/null \
     && echo "==> OTP 등록 도구: vmware-portal-otp (→ $APP_DST/otp-enroll.sh)"
 fi
+# 6-2) 계정 관리 콘솔 메뉴(v2.723) — 계정 생성·편집·비밀번호·계정별 로그인 방식·OTP·삭제.
+if [[ -x "$APP_DST/user-admin.sh" ]]; then
+  ln -sf "$APP_DST/user-admin.sh" /usr/local/bin/vmware-portal-users 2>/dev/null \
+    && echo "==> 계정 관리 메뉴: vmware-portal-users (→ $APP_DST/user-admin.sh)"
+fi
 
 # 7) firewalld (optional, best-effort) ---------------------------------------
 if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
@@ -276,3 +281,4 @@ echo "        미리 지정했다면 그 값을 쓰세요.)"
 echo "    2) admin 으로 로그인 → 화면의 안내에 따라 OTP(QR) 등록을 마치면"
 echo "       비밀번호는 자동 삭제되고 이후에는 OTP 6자리로만 로그인합니다."
 echo "    · 웹 없이 콘솔에서 등록하려면: sudo vmware-portal-otp admin"
+echo "    · 계정 생성·편집·비밀번호·로그인 방식(콘솔 메뉴): sudo vmware-portal-users"

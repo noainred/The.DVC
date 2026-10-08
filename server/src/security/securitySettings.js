@@ -188,6 +188,74 @@ export function userLoginPolicy(username) {
   return fileUserLoginPolicies().get(String(username || '')) || null;
 }
 
+/** 사용자 이름 형식(파일·env 와 같은 규칙). */
+const USER_RE = /^[A-Za-z0-9._@-]{2,64}$/;
+
+/**
+ * 이 사용자의 재정의가 어디서 오는가(v2.723 CLI 계정 메뉴용) — 파일 값과 env 값을 따로 돌려준다.
+ * 적용 규칙은 그대로다(파일이 env 를 이긴다). 형식이 틀린 줄은 없는 것으로 본다.
+ * @returns {{ file: string|null, env: string|null, effective: string|null }}
+ */
+export function loginPolicyOverrideOf(username) {
+  const want = String(username || '');
+  const pick = (lines) => {
+    let out = null;
+    for (const raw of lines) {
+      const m = raw.match(/^([^=:\s]+)\s*[=:\s]\s*(\S+)$/);
+      if (m && m[1] === want) out = POLICY_ALIASES[String(m[2]).toLowerCase()] || out;
+    }
+    return out;
+  };
+  const env = pick(String(process.env.LOGIN_POLICY_USERS || '').split(',').map((x) => x.trim()).filter(Boolean));
+  let file = null;
+  try {
+    if (fs.existsSync(USER_POLICY_FILE)) file = pick(fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/).map((l) => l.split('#')[0].trim()).filter(Boolean));
+  } catch { file = null; }
+  return { file, env, effective: file || env };
+}
+
+/**
+ * 파일의 사용자별 재정의를 쓰거나(policy) 지운다(null) — v2.723 CLI 계정 메뉴 전용.
+ * 다른 줄·주석은 그대로 두고 그 사용자의 줄만 바꾼다(같은 사용자 줄이 여럿이면 하나로 합친다).
+ * 원자적 쓰기(0600). 쓰고 나면 캐시를 비워 바로 적용한다(포탈 프로세스는 3초 캐시 뒤 다시 읽는다 — 재시작 불필요).
+ * @param {string} username
+ * @param {string|null} policy 별칭(otp·password·both) 또는 정식 값, null 이면 재정의 삭제
+ * @returns {{ ok: boolean, reason?: string, file: string, policy: string|null }}
+ */
+export function setFileLoginPolicy(username, policy) {
+  const user = String(username || '').trim();
+  if (!USER_RE.test(user)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.', file: USER_POLICY_FILE, policy: null };
+  let canon = null;
+  if (policy != null) {
+    canon = POLICY_ALIASES[String(policy).trim().toLowerCase()] || null;
+    if (!canon) return { ok: false, reason: `로그인 방식은 ${Object.keys(POLICY_ALIASES).join('·')} 중 하나여야 합니다.`, file: USER_POLICY_FILE, policy: null };
+  }
+  let lines = [];
+  try {
+    if (fs.existsSync(USER_POLICY_FILE)) lines = fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/);
+  } catch (e) {
+    return { ok: false, reason: `재정의 파일을 읽지 못했습니다(${e.code || e.message}) — 덮어쓰지 않습니다.`, file: USER_POLICY_FILE, policy: null };
+  }
+  const isUserLine = (l) => {
+    const m = l.split('#')[0].trim().match(/^([^=:\s]+)\s*[=:\s]\s*(\S+)$/);
+    return !!m && m[1] === user;
+  };
+  let placed = false;
+  const out = [];
+  for (const l of lines) {
+    if (!isUserLine(l)) { out.push(l); continue; }
+    if (canon && !placed) { out.push(`${user}=${canon}`); placed = true; }
+  }
+  while (out.length && out[out.length - 1] === '') out.pop();
+  if (canon && !placed) {
+    if (!out.length) out.push('# 사용자별 로그인 방식 재정의 — <사용자>=<otp_only|password_only|otp_or_password> (CLI 계정 메뉴·운영자가 직접 편집)');
+    out.push(`${user}=${canon}`);
+  }
+  atomicWriteFileSync(USER_POLICY_FILE, `${out.join('\n')}\n`, { mode: 0o600 });
+  invalidateLoginPolicyCache();
+  return { ok: true, file: USER_POLICY_FILE, policy: canon };
+}
+
 /** 테스트·핫리로드용 — 전역/사용자별 로그인 정책 캐시를 즉시 무효화. */
 export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; _ssAt = 0; }
 

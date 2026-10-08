@@ -93,3 +93,40 @@ export function fromLocalInput(v) {
 
 /** 저장 실패 문구 — 서버 reason 을 그대로 쓰고, 없으면 일반 문구. */
 export const saveFailText = (r) => (r && r.reason ? `저장하지 못했습니다 — ${r.reason}` : '저장하지 못했습니다.');
+
+/**
+ * 댓글을 스레드로 묶는다(v2.723) — 최상위 댓글(작성 순) 아래에 그 답글(작성 순).
+ * 부모를 찾지 못한 답글(옛 데이터 등)은 버리지 않고 최상위로 올리고 `orphan` 으로 표시한다(조용히 사라지지 않게).
+ * @returns {{ c: object, orphan?: boolean, replies: object[] }[]}
+ */
+export function threadComments(comments) {
+  const list = (Array.isArray(comments) ? comments : []).filter((c) => c && typeof c.id === 'string');
+  const byTime = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
+  const ids = new Set(list.filter((c) => !c.parentId).map((c) => c.id));
+  const tops = [];
+  const kids = new Map();
+  for (const c of list) {
+    if (c.parentId && ids.has(c.parentId)) {
+      if (!kids.has(c.parentId)) kids.set(c.parentId, []);
+      kids.get(c.parentId).push(c);
+    } else tops.push({ c, orphan: !!c.parentId });
+  }
+  return tops.sort((a, b) => byTime(a.c, b.c)).map((t) => ({ ...t, replies: (kids.get(t.c.id) || []).sort(byTime) }));
+}
+
+/** 공감 버튼 툴팁 — 누른 사람 이름(서버가 앞 30명만 준다). 개수가 더 많으면 '외 N명'. */
+export function likersText(x) {
+  const n = Number.isFinite(x?.likeCount) ? x.likeCount : 0;
+  if (n === 0) return '아직 공감한 사람이 없습니다';
+  const names = Array.isArray(x?.likers) ? x.likers : [];
+  const more = n - names.length;
+  return `공감: ${names.join(', ')}${more > 0 ? ` 외 ${more}명` : ''}`;
+}
+
+/** 공감 응답을 글·댓글에 반영한 새 글 객체. commentId 가 없으면 글 자신. */
+export function applyLike(post, commentId, r) {
+  if (!post || !r) return post;
+  const patch = { likeCount: r.likeCount, liked: r.liked, likers: r.likers };
+  if (!commentId) return { ...post, ...patch };
+  return { ...post, comments: (post.comments || []).map((c) => (c.id === commentId ? { ...c, ...patch } : c)) };
+}

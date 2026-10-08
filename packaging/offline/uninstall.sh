@@ -48,6 +48,16 @@ if [[ -L "$OTP_LINK" ]]; then
   fi
 fi
 
+# v2.723: 계정 관리 메뉴 링크도 같은 규칙(이 설치본을 가리킬 때만).
+USERS_LINK="/usr/local/bin/vmware-portal-users"
+if [[ -L "$USERS_LINK" ]]; then
+  if [[ "$(readlink "$USERS_LINK")" == "$PREFIX/app/user-admin.sh" ]]; then
+    rm -f "$USERS_LINK" && echo "==> 계정 관리 메뉴 링크 제거: $USERS_LINK"
+  else
+    echo "==> 계정 관리 메뉴 링크 유지: $USERS_LINK → $(readlink "$USERS_LINK") (이 설치본이 아님)"
+  fi
+fi
+
 echo "==> 앱/런타임 제거: $PREFIX"
 rm -rf "$PREFIX" "$PREFIX".bak.* 2>/dev/null || true
 
