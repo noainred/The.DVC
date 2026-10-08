@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -321,7 +322,7 @@ test('C-01 ⑩ 소스 스윕 — 소비처 10곳에 VM 스토리지 결측을 0 
     'vcenter/vmExport.js', 'routes/api/inventory.js', 'routes/api/toolsCapacity.js', 'routes/api/toolsInfo.js', 'routes/publicApi.js'];
   const bad = /(?:Number\((?:v|vm|x)\.(?:storageGB|uncommittedGB)\)\s*\|\|\s*0)|(?:(?:v|vm|x)\.(?:storageGB|uncommittedGB)\s*\|\|\s*0)|(?:num\((?:v|vm|x)\.(?:storageGB|uncommittedGB)\))/;
   for (const f of files) {
-    const src = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const src = stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));
     const m = src.match(bad);
     assert.equal(m, null, `${f}: ${m && m[0]}`);
   }
