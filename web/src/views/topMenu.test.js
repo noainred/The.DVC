@@ -111,20 +111,25 @@ describe('visibleMenu · entryOf', () => {
 
 describe('화면 배선(소스)', () => {
   const app = stripComments(read('../App.jsx'));
-  it('상단 메뉴는 topMenu 의 메뉴를 그리고, 하위 메뉴 줄이 있다', () => {
-    expect(app).toMatch(/<nav className="tabs"[^>]*>\s*\{menu\.map\(/);
-    expect(app).toMatch(/<nav className="subtabs"/);
-    expect(app).not.toMatch(/<nav className="tabs">\s*\{visibleTabs\.map\(/);
+  it('v2.726: 메뉴는 좌측 사이드바(Sidebar)가 그리고, 상단 탭·하위 메뉴 줄은 없다', () => {
+    expect(app).toMatch(/<Sidebar mode=\{sbMode\}/);
+    expect(app).not.toMatch(/<nav className="tabs"/);
+    expect(app).not.toMatch(/<nav className="subtabs"/);
+    // 메뉴 해석(내 메뉴 > 배포 메뉴 > 기본)은 sideMenu.resolveMenu 하나 — App 은 그 결과를 visibleMenu·locate 에 넘긴다.
+    expect(app).toMatch(/resolveMenu\(\{/);
+    expect(app).toMatch(/visibleMenu\(\{[^}]*\},\s*resolvedMenu\.groups\)/);
+    expect(app).toMatch(/locate\(tab, hashNow, resolvedMenu\.groups\)/);
     // 도구 노출은 특수 기능 카드와 같은 잠금 판정을 쓴다(규칙을 App 에 다시 쓰지 않는다).
     expect(app).toMatch(/lockReasonOf\(meta,/);
   });
-  it('하위 메뉴 CSS 는 .topbar 아래로 한정하고 대문자 변환을 쓰지 않는다', () => {
-    const css = read('../styles.css');
-    const rules = css.match(/[^}]*\.subtabs[^{]*\{[^}]*\}/g) || [];
-    expect(rules.length).toBeGreaterThan(0);
+  it('사이드바 CSS 는 .sb 아래로 한정하고 대문자 변환을 쓰지 않는다 · 옛 하위 메뉴 줄(.subtabs) 규칙은 없다', () => {
+    const css = read('../styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).not.toMatch(/\.subtabs/);
+    const rules = css.match(/[^{}]*\.sb-(?:nav|item|sub|group|foot)[^{]*\{[^}]*\}/g) || [];
+    expect(rules.length).toBeGreaterThan(5);
     for (const r of rules) {
-      const sel = r.slice(0, r.indexOf('{')).replace(/\/\*[\s\S]*?\*\//g, '').trim();
-      expect(sel.split(',').every((x) => x.trim().startsWith('.topbar ')), sel).toBe(true);
+      const sel = r.slice(0, r.indexOf('{')).trim();
+      expect(sel.split(',').every((x) => /^\.sb(\b|-)/.test(x.trim())), sel).toBe(true);
       expect(r).not.toMatch(/text-transform/);
     }
   });

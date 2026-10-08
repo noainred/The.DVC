@@ -175,6 +175,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'db-location.json': 'DB 저장 디렉터리 설정(insights/dbLocation.js)',
   'ping-targets.json': 'Ping 감시 대상 등록부(ping/store.js — 사용자가 손으로 등록, v2.580 손상 보존). v2.614 첫 목 실행에서 미분류로 잡혀 등재',
   'initial-admin-password.txt': '첫 관리자 임시 비밀번호(auth/auth.js — 0600, 비밀번호를 바꾸면 지운다). v2.614 첫 목 실행에서 미분류로 잡혀 여기 등재',
+  'user-menus.json': '계정별 좌측 메뉴(내 메뉴)·슈퍼 관리자 배포 메뉴(usermenu/store.js — 사용자가 손으로 만든 값, 원자 쓰기·손상 보존, v2.726)',
 });
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────────── */

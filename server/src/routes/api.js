@@ -60,6 +60,7 @@ import { registerCostShowback } from './api/costShowback.js'; // 비용 배분(v
 import { registerMigrationReadiness } from './api/migrationReadiness.js'; // VM 이전 준비도(v2.707 C7)
 import { registerVmDns } from './api/vmDns.js'; // VM DNS 설정 확인(VM 이 쓰는 DNS 서버 · 정책 · 도달성 · 변경 이력, v2.696)
 import { registerBulletin } from './api/bulletin.js'; // 접속 공지(팝업) · 게시판(v2.722)
+import { registerUserMenu } from './api/userMenu.js'; // 계정별 좌측 메뉴 · 슈퍼 관리자 배포(v2.726)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
 // 도메인 구현은 ./api/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서)이므로
@@ -151,3 +152,4 @@ registerCostShowback(api);
 registerMigrationReadiness(api);
 registerVmDns(api);
 registerBulletin(api);
+registerUserMenu(api);

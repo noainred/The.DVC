@@ -33,6 +33,11 @@ import { movedTabHash } from './hooks/hashTab.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
+// v2.726 좌측 사이드바 — 계정별 메뉴(내 메뉴 > 배포 메뉴 > 기본)의 해석은 views/sidebar/sideMenu.js, 편집 창은 MenuEditor(lazy).
+import Sidebar from './views/sidebar/Sidebar.jsx';
+import { Icon } from './views/sidebar/sidebarIcons.jsx';
+import { resolveMenu } from './views/sidebar/sideMenu.js';
+const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
@@ -124,6 +129,12 @@ const fmtUptime = (s) => {
   if (h > 0) return `${h}시간 ${m}분`;
   return `${m}분`;
 };
+// v2.726 사이드바 접힘 상태(브라우저 저장 — 사람마다 다른 선호). 720px 미만은 서랍, 1200px 미만은 저장값이 없으면 레일.
+const SB_PREF_KEY = 'ui.sidebar';
+const SB_DRAWER_MAX = 720;
+const SB_RAIL_MAX = 1200;
+const readRailPref = () => { try { const v = localStorage.getItem(SB_PREF_KEY); return v === 'rail' || v === 'open' ? v : null; } catch { return null; } };
+const writeRailPref = (v) => { try { localStorage.setItem(SB_PREF_KEY, v); } catch { /* 저장 불가 — 이번 세션에만 적용 */ } };
 const LANDING_KEY = 'vmportal.landingTab';
 const getLandingTab = () => {
   // v2.681(감사 R2C-05): 저장소 접근이 throw 하는 환경(프라이빗 창·차단)에서도 첫 렌더가 죽지 않게.
@@ -312,6 +323,43 @@ function Portal({ user, onLogout }) {
     import('./views/specialToolsList.js').then((m) => { if (alive) setToolCatalog(m.TOOLS || []); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // v2.726 좌측 사이드바 — 계정별 메뉴(서버 저장) · 접힘/서랍 · 편집 창. 못 읽으면 포탈 기본 메뉴(메뉴가 비는 일은 없다).
+  const [menuData, setMenuData] = useState(null);
+  const [menuRev, setMenuRev] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    fetchJson('/user-menu').then((r) => { if (alive) setMenuData(r && r.ok ? r : null); }).catch(() => { if (alive) setMenuData(null); });
+    return () => { alive = false; };
+  }, [menuRev]);
+  const [railPref, setRailPref] = useState(readRailPref);
+  const [vw, setVw] = useState(() => window.innerWidth);
+  useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on); }, []);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showMenuEdit, setShowMenuEdit] = useState(false);
+  const sbMode = vw < SB_DRAWER_MAX ? 'drawer' : ((railPref ? railPref === 'rail' : vw < SB_RAIL_MAX) ? 'rail' : 'full');
+  useEffect(() => { if (sbMode !== 'drawer') setDrawerOpen(false); }, [sbMode]);
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setDrawerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
+  const toggleRail = () => { const next = sbMode === 'rail' ? 'open' : 'rail'; setRailPref(next); writeRailPref(next); };
+  // 헤더·상태바의 실제 높이 → 사이드바 sticky 위치·높이(CSS 변수). 좁은 폭에서 헤더가 두 줄이 되면 값이 바뀐다(숫자를 박지 않는다).
+  const topbarRef = useRef(null);
+  const statusRef = useRef(null);
+  const [shellH, setShellH] = useState({ top: 56, bottom: 34 });
+  useEffect(() => {
+    const calc = () => setShellH({
+      top: Math.round(topbarRef.current?.getBoundingClientRect().height || 56),
+      bottom: Math.round(statusRef.current?.getBoundingClientRect().height || 34),
+    });
+    calc();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(calc) : null;
+    if (ro) { if (topbarRef.current) ro.observe(topbarRef.current); if (statusRef.current) ro.observe(statusRef.current); }
+    window.addEventListener('resize', calc);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
+  }, [v5On, v6On, v4On, consoleOn]);
   useEffect(() => {
     // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
     if (isV3Hash()) redirectV3();
@@ -398,9 +446,12 @@ function Portal({ user, onLogout }) {
     const meta = toolCatalog.find((x) => x.k === k);
     return !!meta && !lockReasonOf(meta, { isAdmin: user.role === 'admin', toolsAllowed: getCurrentUser()?.toolsAllowed ?? null, can, toolAllowed });
   };
-  const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk });
-  const here = locate(tab, hashNow);
-  const activeGroup = menu.find((g) => g.id === here.group) || null;
+  // v2.726: 메뉴 원천은 계정별 저장 메뉴(내 메뉴 > 배포 메뉴 > 포탈 기본) — 해석은 sideMenu.resolveMenu 하나.
+  const resolvedMenu = useMemo(() => resolveMenu({
+    mine: menuData?.mine || null, distributed: menuData?.distributed?.menu || null, catalog: toolCatalog, overrides: menuData?.overrides || null,
+  }), [menuData, toolCatalog]);
+  const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk }, resolvedMenu.groups);
+  const here = locate(tab, hashNow, resolvedMenu.groups);
   // 특수 기능 카드·옛 주소로 들어와도 '그 대메뉴에서 마지막으로 본 하위 메뉴' 를 기억한다(대메뉴를 다시 누르면 그리로 간다).
   useEffect(() => {
     if (!here.group || !here.child) return;
@@ -568,6 +619,12 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
+      {showMenuEdit && (
+        <Suspense fallback={null}>
+          <MenuEditor user={user} data={menuData} resolved={resolvedMenu} catalog={toolCatalog || []}
+            onClose={() => setShowMenuEdit(false)} onChanged={() => setMenuRev((n) => n + 1)} />
+        </Suspense>
+      )}
       {showVcDown && <VcDownList user={user} onClose={() => setShowVcDown(false)} />}
       <RemoteConsoleWindow />
     </>
@@ -632,17 +689,16 @@ function Portal({ user, onLogout }) {
   return (
     <div className="app">
       {/*
-        v2.573: 상단 메뉴 1행 통합(사용자 요청 — 버전/메뉴/로그인 사용자가 한 줄에 보이게).
-        v2.556 의 2단 분리(브랜드행 + 메뉴행)를 되돌려 메뉴(nav.tabs)를 브랜드 행 안으로 옮기고
-        예전 `.spacer` 자리를 메뉴가 대신 채운다(flex:1) — 넓은 화면에서 로고~메뉴~상태~사용자가
-        한 줄에 정렬된다. ⚠ CSS 는 `.topbar .tabs .tab` 로 **한정**한다 — `className="tab"` 은
-        앱 전역에서 일반 버튼으로도 쓰이므로(접속확인·필터 초기화·CSV 선택 등 수십 곳) 전역
-        `.tab` 을 건드리면 그 버튼들이 전부 밑줄 탭이 된다.
-        ⚠ 좁은 폭에서는 `.tb-brandrow` 의 `flex-wrap: wrap`(v2.556 이 400px 가로 넘침을 잡은 값,
-        되돌리지 말 것)이 그대로 안전망이다 — 한 줄에 다 안 들어가면 다음 줄로 흘러 넘침을 막는다.
+        v2.726: 상단은 한 줄(햄버거 · 브랜드 · 상태 · 사용자)이고 메뉴는 전부 좌측 사이드바(views/sidebar/Sidebar.jsx)다 —
+        v2.725 의 대메뉴 탭·하위 메뉴 줄은 지웠다(사용자 선택 '좌측 사이드바 구성'). ⚠ `className="tab"` 은 앱 전역에서
+        일반 버튼으로도 쓰이므로 전역 `.tab` 규칙은 그대로다. ⚠ `.tb-brandrow` 의 `flex-wrap: wrap`(v2.556 이 400px 가로
+        넘침을 잡은 값)은 그대로 안전망이다.
       */}
-      <header className="topbar">
+      <header className="topbar" ref={topbarRef}>
         <div className="tb-brandrow">
+        <button type="button" className="sb-toggle" aria-label={sbMode === 'drawer' ? '메뉴 열기' : (sbMode === 'rail' ? '메뉴 펼치기' : '메뉴 접기')}
+          aria-expanded={sbMode === 'drawer' ? drawerOpen : undefined} title={sbMode === 'drawer' ? '메뉴' : (sbMode === 'rail' ? '메뉴 펼치기' : '메뉴 접기(아이콘만)')}
+          onClick={() => (sbMode === 'drawer' ? setDrawerOpen((v) => !v) : toggleRail())}><Icon name="menu" size={18} /></button>
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
@@ -674,15 +730,6 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
-        <nav className="tabs" aria-label="대메뉴">
-          {menu.map((g) => (
-            <button key={g.id} className={`tab ${here.group === g.id ? 'active' : ''}`} aria-current={here.group === g.id ? 'page' : undefined}
-              onClick={() => goMenu(g, g.children ? entryOf(g, menuLast) : null)}>
-              {g.label}
-              {g.children && <span className="tab-count" aria-hidden="true">{g.children.length}</span>}
-            </button>
-          ))}
-        </nav>
         <div className="status-pill">
           {(() => {
             const total = health?.vcenters ?? 0;
@@ -726,24 +773,21 @@ function Portal({ user, onLogout }) {
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
         </div>
-        {/* v2.725 하위 메뉴 줄(시안 A) — 하위 메뉴가 있는 대메뉴에서만 보인다. */}
-        {activeGroup?.children && (
-          <nav className="subtabs" aria-label={`${activeGroup.label} 하위 메뉴`}>
-            {activeGroup.children.map((c) => (
-              <button key={c.id} className={`subtab ${here.child === c.id ? 'active' : ''}`} aria-current={here.child === c.id ? 'page' : undefined}
-                onClick={() => goMenu(activeGroup, c)}>{c.label}</button>
-            ))}
-          </nav>
-        )}
       </header>
 
-      <main className="content">
-        {filterBar}
+      <div className="app-body" style={{ '--topbar-h': `${shellH.top}px`, '--statusbar-h': `${shellH.bottom}px` }}>
+        <Sidebar mode={sbMode} open={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)}
+          menu={menu} here={here} menuLast={menuLast}
+          onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }}
+          isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={!!menuData} />
+        <main className="content">
+          {filterBar}
 
-        {tabBody}
-      </main>
+          {tabBody}
+        </main>
+      </div>
 
-      <footer className="statusbar">
+      <footer className="statusbar" ref={statusRef}>
         <div className="sb-cell"><span className="sb-label">서버 Uptime</span><span className="sb-val">{fmtUptime(health?.uptimeSec)}</span></div>
         {/* v2.675: 첫 수집 중(health.initial)·미수신이면 0 이 아니라 '—' — 판정은 statusBarText.statusCounts 하나(V6 상태바와 공용). */}
         <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val" title={sbCounts.title}>{sbCounts.hosts}</span></div>
