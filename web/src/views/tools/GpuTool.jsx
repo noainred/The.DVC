@@ -106,6 +106,8 @@ export function Gpu({ scope }) {
   const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [checkOpen, setCheckOpen] = useState(false); // v2.658 수집 점검 창
+  // v2.724: '게스트 GPU 값을 읽지 못한 호스트' 박스는 평소 숨기고 '수집 점검' 버튼으로 펼친다(사용자 요청). 법인별 창은 박스 안 링크로 연다.
+  const [whyShown, setWhyShown] = useState(false);
   const openHist = (level, key, metric = 'util') => setHist({ level, key, metric });
   const closeHist = () => setHist(null);
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
@@ -360,11 +362,26 @@ export function Gpu({ scope }) {
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
             {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setExportOpen(true)} title="수집된 GPU 사용률 데이터(전체/기간)를 CSV·JSON으로 내려받기.">⬇ 내보내기</button>}
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setCheckOpen(true)}
-              title="GPU 값을 읽지 못한 호스트를 법인별로 전부 봅니다(배너에 다 싣지 못한 것 포함).">🩺 수집 점검{(data.guestWhy || []).length ? ` (${new Set((data.guestWhy || []).map((x) => x.vcenterId)).size}개 법인)` : ''}</button>
+            <button className={`logout-btn${whyShown ? ' gpu-check-on' : ''}`} style={{ flex: 'none', padding: '7px 12px' }} aria-expanded={whyShown}
+              onClick={() => setWhyShown((v) => !v)}
+              title={whyShown ? '수집 점검 내용을 접습니다' : 'GPU 값을 읽지 못한 호스트(법인별 사유)를 펼쳐 봅니다'}>🩺 수집 점검{(data.guestWhy || []).length ? ` (${new Set((data.guestWhy || []).map((x) => x.vcenterId)).size}개 법인)` : ''} {whyShown ? '▴' : '▾'}</button>
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
           {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
+          {whyShown && (whyBannerItems(data.guestWhy).length > 0 ? (
+            <div className="gpu-why-banner">
+              <span className="dot" />
+              <b>게스트 GPU 값을 읽지 못한 호스트가 있습니다</b>
+              <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title} className="item"><span>{x.text}</span>{x.detail && <span className="detail">{x.detail}</span>}</span>)}<button type="button" className="gpu-why-more" onClick={() => setCheckOpen(true)} title="수집 점검 창에서 법인별로 전부 봅니다">{whyBannerItems(data.guestWhy).length > 6 ? `외 ${whyBannerItems(data.guestWhy).length - 6}건 — 전부 보기` : '법인별 전부 보기'}</button></span>
+              <a href="#/settings/gpu-guest" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>수집 진단 열기 →</a>
+            </div>
+          ) : (
+            <div className="gpu-why-banner ok">
+              <span className="dot" />
+              <b>게스트 GPU 값을 읽지 못한 호스트가 없습니다</b>
+              <button type="button" className="gpu-why-more" onClick={() => setCheckOpen(true)} title="수집 점검 창에서 법인별 상태를 봅니다">법인별 상태 보기</button>
+            </div>
+          ))}
           {rows.length === 0 && data.items.length > 0 ? (
             <div className="card" style={{ padding: 16 }}>
               <span className="muted">현재 필터에 해당하는 GPU 호스트가 없습니다{mode ? ` (사용 방식: ${{ vgpu: 'vGPU', passthrough: '패스쓰루', vsga: 'vSGA' }[mode] || mode})` : ''}{modelFilter ? ` (모델: ${modelFilter})` : ''}. GPU는 총 {data.totalGpus}장 있습니다.</span>
@@ -372,14 +389,6 @@ export function Gpu({ scope }) {
             </div>
           ) : (
             <>
-              {view === 'host' && whyBannerItems(data.guestWhy).length > 0 && (
-                <div className="gpu-why-banner">
-                  <span className="dot" />
-                  <b>게스트 GPU 값을 읽지 못한 호스트가 있습니다</b>
-                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title} className="item"><span>{x.text}</span>{x.detail && <span className="detail">{x.detail}</span>}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <button type="button" className="gpu-why-more" onClick={() => setCheckOpen(true)} title="수집 점검 창에서 전부 봅니다">외 {whyBannerItems(data.guestWhy).length - 6}건 — 전부 보기</button>}</span>
-                  <a href="#/settings/gpu-guest" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>수집 진단 열기 →</a>
-                </div>
-              )}
               <DataTable
                 className={view === 'host' ? 'gpu-host-table' : ''}
                 columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}

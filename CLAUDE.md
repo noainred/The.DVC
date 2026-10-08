@@ -3993,6 +3993,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **GPU '수집 점검' 창(v2.658)은 배너와 같은 판정(guestWhy)을 법인별로 전부 보여 준다**(`gpuWhyText.collectCheckGroups`·`readCell` +
     `GpuTool.jsx GpuCollectCheckModal`, 사용자 요청 "외 22건 말고 전체를 법인별로 클릭해서"): 배너는 앞 6줄 + '외 N건'(누르면 이 창)이고, 창은 '일부만 수집'
     까지 싣는다. 법인 칩으로 거르고 호스트 줄은 값마다 읽음(출처)/못 읽음을 적는다. 새 조회를 만들지 않는다(이미 받은 /tools/gpu 응답만).
+  - **v2.724 — GPU 수집 경고 박스는 기본 숨김이고 '🩺 수집 점검' 버튼이 펼친다**(사용자 요청 — `GpuTool.jsx whyShown`, 회귀 `web/src/views/tools/gpuCheckToggle2724.test.js`):
+    버튼은 이제 박스 토글(`aria-expanded`)이고, 법인별 창(`GpuCollectCheckModal`)은 박스 안 '외 N건 — 전부 보기'·'법인별 전부 보기' 가 연다. 박스는 보기·필터와 무관하게 펼쳐진다.
+    ⚠ 예전처럼 `view === 'host'` 조건만으로 자동 표시로 되돌리지 말 것(테스트가 고정).
   - ⚠⚠ **서버 온도 › 센서 상세(v2.659) — iDRAC 전 센서. 판정은 장비 Health → 장비 임계값 순이고, 포탈은 임계를 지어내지 않는다**
     (`idrac/sensorDetail.js`(순수 판정) · `sensorDetailCache.js` · `redfish.js fetchSensorCollection` · `tools/serverSensors.js` ·
     `routes/api/serverSensors.js` + 웹 `views/tools/serverTemp/SensorDetailView.jsx`·`sensorDetailText.js`, 사용자 요청 "서버 온도를 세부적으로 ·
