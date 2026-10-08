@@ -1,6 +1,8 @@
 // HardwareTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
+import { hashSegments } from '../../hooks/hashTab.js';
+import { BAREMETAL_SEG } from '../topMenu.js';
 import { fetchJson, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, Modal, SearchBox } from '../../components/ui.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -567,11 +569,25 @@ function PartsInventory({ vc, onServer }) {
   );
 }
 
+// v2.725 상단 메뉴 '서버 › 물리 서버' = 이 화면의 구분 Baremetal(미가상화 물리) · 전체 법인.
+//   주소 #/tools/serveranalysis/baremetal/<하위 탭> 이면 그 모드다(새로고침·북마크에서도 유지). 모드가 바뀌면 화면을 새로
+//   만든다(key) — 하위 탭 해시 훅의 base 가 모드마다 다르므로 한 인스턴스에서 base 를 바꾸면 하위 탭 상태와 주소가 어긋난다.
+const isBaremetalHash = (h) => { const s = hashSegments(h); return s[0] === 'tools' && s[1] === 'serveranalysis' && s[2] === BAREMETAL_SEG; };
 export function ServerAnalysis() {
+  const [bm, setBm] = useState(() => isBaremetalHash(window.location.hash));
+  useEffect(() => {
+    const on = () => { const s = hashSegments(window.location.hash); if (s[0] === 'tools' && s[1] === 'serveranalysis') setBm(isBaremetalHash(window.location.hash)); };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return <ServerAnalysisView key={bm ? 'bm' : 'all'} bm={bm} />;
+}
+
+function ServerAnalysisView({ bm = false }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [sub, setSub] = useHashTab({ base: ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: 'info' });
+  const [sub, setSub] = useHashTab({ base: bm ? ['tools', 'serveranalysis', BAREMETAL_SEG] : ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: 'info' });
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
-  const [lvl2, setLvl2] = useState(''); // 2차 박스: '' 전체 | vc:<id> | baremetal
+  const [lvl2, setLvl2] = useState(bm ? 'baremetal' : ''); // 2차 박스: '' 전체 | vc:<id> | baremetal (물리 서버 메뉴면 baremetal 고정)
   const [vcs, setVcs] = useState([]);
   const [dcs, setDcs] = useState([]); // 등록된 DataCenter(법인)
   const [assign, setAssign] = useState({}); // vCenter → DataCenter 할당
@@ -609,7 +625,7 @@ export function ServerAnalysis() {
           {/* 1차 박스: 법인(DataCenter) — 고르면 그 법인의 모든 장비 */}
           <label className="flex gap" style={{ alignItems: 'center' }} title="1차: 법인(DataCenter). 고르면 그 법인의 모든 장비가 보입니다.">
             <span className="muted">법인(DataCenter)</span>
-            <Select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(''); }} style={{ minWidth: 150 }}>
+            <Select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(bm ? 'baremetal' : ''); }} style={{ minWidth: 150 }}>
               <option value="">{dcErr ? '전체 (법인 정보를 읽지 못함)' : '전체'}</option>
               {dcs.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
             </Select>
@@ -617,7 +633,8 @@ export function ServerAnalysis() {
           {/* 2차 박스: vCenter(가상화) / Baremetal — 1차 선택에 연동 */}
           <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
             <span className="muted">구분</span>
-            <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }}>
+            <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }} disabled={bm}
+              title={bm ? '서버 › 물리 서버 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › 서버 분석에서 고릅니다.' : undefined}>
               <option value="">{dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
@@ -629,6 +646,11 @@ export function ServerAnalysis() {
           </label>
         </div>
       </div>
+      {bm && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          물리 서버 — 서버 분석의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
+        </div>
+      )}
       <DcErrNote err={dcErr} />
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}

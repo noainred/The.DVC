@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
+import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed, can, getCurrentUser } from './api.js';
 import { SearchBox, Modal, StateBadge, Loading, ErrorBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -30,6 +30,9 @@ const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 import { movedTabHash } from './hooks/hashTab.js';
+// v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
+import { visibleMenu, locate, entryOf, hashOf } from './views/topMenu.js';
+import { lockReasonOf } from './views/toolVisibility.js';
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
@@ -294,10 +297,21 @@ function Portal({ user, onLogout }) {
   const setQIpms = (v) => patchFilter({ qIpms: v });
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
-  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
+  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); };
   // Platform 탭 재클릭 신호 — vCenter 상세로 드릴다운한 상태에서 상단메뉴 Platform을 다시
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
+  // v2.725 상단 메뉴 — 지금 주소(도구 키까지 봐야 어느 메뉴인지 안다) · 대메뉴마다 마지막으로 본 하위 메뉴(이번 세션만).
+  const [hashNow, setHashNow] = useState(() => window.location.hash);
+  const [menuLast, setMenuLast] = useState({});
+  // 도구 잠금 판정에 카탈로그(adminOnly·perm)가 필요하다 — 첫 화면 번들을 키우지 않게 나중에 불러온다.
+  //   불러오기 전에는 도구별 접근(toolsDenied)만 본다(관리자 전용 표시 관례는 불러온 뒤 반영).
+  const [toolCatalog, setToolCatalog] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    import('./views/specialToolsList.js').then((m) => { if (alive) setToolCatalog(m.TOOLS || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
     if (isV3Hash()) redirectV3();
@@ -316,6 +330,7 @@ function Portal({ user, onLogout }) {
       if (isV4Hash()) { setV4On(true); setConsoleOn(false); return; }       // 신규 포탈 내부 페이지 전환은 V4App 이 처리
       setConsoleOn(false); setV4On(false);
       migrateMovedHash();
+      setHashNow(window.location.hash);
       const t = tabFromHash(); if (t) setTabState(t);
     };
     window.addEventListener('hashchange', onHash);
@@ -374,6 +389,38 @@ function Portal({ user, onLogout }) {
     if (t.toolKey && !toolAllowed(t.toolKey)) return false; // 승격 탭의 도구별 접근(toolsDenied) 보존
     return true;
   });
+
+  // v2.725 상단 메뉴(대메뉴 + 하위 메뉴 줄). 탭 노출은 위 visibleTabs, 도구 노출은 특수 기능 카드와 같은
+  //   잠금 판정(toolVisibility.lockReasonOf)을 쓴다 — 여기서 권한 규칙을 다시 쓰지 않는다.
+  const visibleTabIds = new Set(visibleTabs.map((t) => t.id));
+  const menuToolOk = (k) => {
+    if (!toolCatalog) return toolAllowed(k);
+    const meta = toolCatalog.find((x) => x.k === k);
+    return !!meta && !lockReasonOf(meta, { isAdmin: user.role === 'admin', toolsAllowed: getCurrentUser()?.toolsAllowed ?? null, can, toolAllowed });
+  };
+  const menu = visibleMenu({ tabOk: (id) => visibleTabIds.has(id), toolOk: menuToolOk });
+  const here = locate(tab, hashNow);
+  const activeGroup = menu.find((g) => g.id === here.group) || null;
+  // 특수 기능 카드·옛 주소로 들어와도 '그 대메뉴에서 마지막으로 본 하위 메뉴' 를 기억한다(대메뉴를 다시 누르면 그리로 간다).
+  useEffect(() => {
+    if (!here.group || !here.child) return;
+    setMenuLast((m) => (m[here.group] === here.child ? m : { ...m, [here.group]: here.child }));
+  }, [here.group, here.child]);
+  // 메뉴 항목으로 이동 — 탭은 기존 setTab, 도구는 특수 기능 카드와 같은 주소(#/tools/<k>)와 사용 횟수 기록.
+  const goMenu = (g, c) => {
+    const item = c || g;
+    if (!item) return;
+    if (c) setMenuLast((m) => ({ ...m, [g.id]: c.id }));
+    if (item.tool) {
+      postJson('/tool-usage', { k: item.tool }).catch(() => {});
+      const h = hashOf(item);
+      setTabState('tools'); setHashNow(h);
+      if (window.location.hash !== h) window.location.hash = h;
+      return;
+    }
+    if (item.tab === 'vcenters') setPlatformResetSeq((n) => n + 1);
+    setTab(item.tab);
+  };
 
   // 현재 탭이 권한/필터로 더 이상 접근 불가하면 안전한 탭(overview)으로 되돌린다.
   useEffect(() => {
@@ -627,11 +674,12 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
-        <nav className="tabs">
-          {visibleTabs.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
-              {t.label}
+        <nav className="tabs" aria-label="대메뉴">
+          {menu.map((g) => (
+            <button key={g.id} className={`tab ${here.group === g.id ? 'active' : ''}`} aria-current={here.group === g.id ? 'page' : undefined}
+              onClick={() => goMenu(g, g.children ? entryOf(g, menuLast) : null)}>
+              {g.label}
+              {g.children && <span className="tab-count" aria-hidden="true">{g.children.length}</span>}
             </button>
           ))}
         </nav>
@@ -678,6 +726,15 @@ function Portal({ user, onLogout }) {
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
         </div>
+        {/* v2.725 하위 메뉴 줄(시안 A) — 하위 메뉴가 있는 대메뉴에서만 보인다. */}
+        {activeGroup?.children && (
+          <nav className="subtabs" aria-label={`${activeGroup.label} 하위 메뉴`}>
+            {activeGroup.children.map((c) => (
+              <button key={c.id} className={`subtab ${here.child === c.id ? 'active' : ''}`} aria-current={here.child === c.id ? 'page' : undefined}
+                onClick={() => goMenu(activeGroup, c)}>{c.label}</button>
+            ))}
+          </nav>
+        )}
       </header>
 
       <main className="content">
