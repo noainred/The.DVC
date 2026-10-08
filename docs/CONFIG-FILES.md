@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **192개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **193개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-07)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-08)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -194,6 +194,7 @@
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
+| `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 |  |  | ✅ | logs/db.js |

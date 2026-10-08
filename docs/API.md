@@ -22,14 +22,14 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **954개** |
+| 엔드포인트 | **961개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 98개 |
-| GET | 521개 |
-| POST | 287개 |
-| PUT | 94개 |
+| 라우트 파일 | 99개 |
+| GET | 523개 |
+| POST | 289개 |
+| PUT | 95개 |
 | PATCH | 2개 |
-| DELETE | 50개 |
+| DELETE | 52개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 424 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 431 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1100,6 +1100,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/top` | — | [server/src/routes/api/inventory.js:441](../server/src/routes/api/inventory.js#L441) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:302](../server/src/routes/api/toolsInfo.js#L302) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:304](../server/src/routes/api/toolsInfo.js#L304) |
+| DELETE | `/user-menu` | — | [server/src/routes/api/userMenu.js:86](../server/src/routes/api/userMenu.js#L86) |
+| GET | `/user-menu` | — | [server/src/routes/api/userMenu.js:61](../server/src/routes/api/userMenu.js#L61) |
+| PUT | `/user-menu` | — | [server/src/routes/api/userMenu.js:78](../server/src/routes/api/userMenu.js#L78) |
+| DELETE | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:124](../server/src/routes/api/userMenu.js#L124) |
+| GET | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:103](../server/src/routes/api/userMenu.js#L103) |
+| POST | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:112](../server/src/routes/api/userMenu.js#L112) |
+| POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:94](../server/src/routes/api/userMenu.js#L94) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:12](../server/src/routes/api/vcTools.js#L12) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:718](../server/src/routes/api/toolsCapacity.js#L718) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:285](../server/src/routes/api/inventory.js#L285) |
@@ -1141,6 +1148,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `noticeFleetOnly` | 3 | **전체 범위 계정만**(v2.722 — 접속 공지 작성·수정·삭제. 공지는 전 법인 사용자에게 보인다). 범위 제한 계정은 403. |
 | `reauth` | 3 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `auditMiddleware` | 3 | 상태변경 감사 로그 기록. |
+| `menuFleetOnly` | 3 | **전체 범위 계정만**(v2.726 — 좌측 메뉴 배포. 전 사용자 화면을 바꾼다). 범위 제한 계정은 403. |
+| `requireSuperAdmin` | 3 | **super_admin 전용**(v2.726 — 좌측 메뉴를 전체 사용자에게 배포·철회). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`. |
 | `adFleetOnly` | 3 | **전체 범위 계정만**(v2.628 SEC2628-04 — AD 설정 조회·저장·연결 테스트. AD 는 전 사용자 공통 인증 소스다). 범위 제한 계정은 403. |
 | `express.json` | 3 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
