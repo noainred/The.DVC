@@ -95,10 +95,13 @@ function initSqlite() {
     // 키 하나의 첫/마지막 관측 시각(v2.504). **COUNT 를 넣지 않는다** — `meta(metric)` 의 COUNT(*) 는
     // 그 metric 파티션 전체를 훑는다(감사 P2 #11). MIN/MAX 만이면 PK/인덱스 양끝 seek 로 끝난다.
     // 용도: '수집 시작 이전' 을 화면이 소급 표시하지 않게 하는 기준선(v2.351 '+2만 TB' 오표시 교훈).
-    const keyMinMax = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx FROM samples WHERE metric=? AND k=?');
+    // ⚠ v2.729: MIN 과 MAX 를 **한 문장에 넣지 않는다** — 둘이면 SQLite 의 끝점 탐색(min/max 최적화)이 꺼지고 그 키의
+    //   **전체 이력**을 인덱스로 훑는다(v2.550.3 에 기록한 함정의 키 단위판. 오래 쌓인 GPU·호스트 계열에서 iDRAC 통합 추이가
+    //   요청마다 수십만 항목을 읽었다). 하나씩 물으면 양끝 seek 다.
     // v2.600 DB2600-02: history() 의 롤업 선택용 — 원본의 첫 표본. aggregate 하나라 인덱스 끝점 탐색이다(v2.550.3).
     const rawMin = db.prepare('SELECT MIN(ts) AS mn FROM samples WHERE metric=? AND k=?');
-    const keyHourMinMax = db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM samples_hourly WHERE metric=? AND k=?');
+    const rawMax = db.prepare('SELECT MAX(ts) AS mx FROM samples WHERE metric=? AND k=?');
+    const hourlyMax = db.prepare('SELECT MAX(h) AS mx FROM samples_hourly WHERE metric=? AND k=?');
     const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
     // ⚠ 키별 상한을 **SQL 에서** 적용한다(2026-08-13 감사 '성능 잔여 A'). 과거에는 창 전체를
     //   전량 읽어 JS 에서 arr.slice(-limitPerKey) 로 잘랐다 — 창이 클램프(최대 7일)돼도
@@ -261,6 +264,54 @@ function initSqlite() {
           return stepBuckets({ carry, rows, start: startTs, nowTs: endTs - 1, bucketMs, maxGapMs: p.maxGapMs, lastActualTs }).points;
         }
         return bucketRange.all(off, bucketMs, bucketMs, off, metric, k, startTs, endTs).map(mapRow);
+      },
+      /**
+       * v2.729: historyRange() 와 **같은 결과**를 내되, 원본(samples)을 읽는 경우 기간을 조각(기본 6시간, 버킷 정배수)으로 나눠
+       * 읽고 조각 사이에 양보한다. 원본 인덱스(metric,k,ts)에는 값(v)이 없어 행마다 표 본체를 따로 읽는다 — 1분마다 전 장비 값이
+       * 섞여 쌓이므로 한 계열의 행은 파일 곳곳에 흩어져 있고, 캐시에 없으면 행마다 디스크 임의 읽기다. 그 읽기는 동기라
+       * 한 문장이 길면 그동안 포탈 전체가 멈춘다(운영 iDRAC 통합 추이 7일: /api/health 가 14초 대기). 조각은 버킷 경계에 맞추므로
+       * 한 버킷이 두 조각에 나뉘지 않고, 결과는 한 문장 조회와 같다(테스트가 대조한다). 롤업 경로는 한 문장 그대로다(행 수가 작다).
+       * @param {{sliceMs?:number, yieldFn?:()=>Promise<void>}} [opts]
+       */
+      historyRangeAsync: async (metric, k, startTs, endTs, bucketMs, offsetMs = 0, opts = {}) => {
+        const off = Number.isFinite(offsetMs) && offsetMs % HOUR === 0 ? offsetMs : 0;
+        const turn = typeof opts.yieldFn === 'function' ? opts.yieldFn : () => new Promise((r) => { setImmediate(r); });
+        const mapRow = (r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) });
+        if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
+          const mn = hourlyMin.get(metric, k)?.mn;
+          const rawFirst = mn != null && mn > startTs ? rawMin.get(metric, k)?.mn : null;
+          if (mn != null && (mn <= startTs || rawFirst == null || mn <= rawFirst)) {
+            const out = bucketHourlyRange.all(off, bucketMs, bucketMs, off, metric, k, startTs, endTs).map(mapRow);
+            await turn();
+            return out;
+          }
+        }
+        const want = Number.isFinite(opts.sliceMs) && opts.sliceMs > 0 ? opts.sliceMs : 6 * HOUR;
+        const slice = Math.max(bucketMs, Math.floor(want / bucketMs) * bucketMs);
+        // 조각 경계 = startTs 이후 첫 버킷 경계 + n × slice — 버킷이 두 조각에 걸치지 않는다.
+        const b0 = Math.floor((startTs + off) / bucketMs) * bucketMs - off;
+        const bounds = [startTs];
+        for (let t = b0 + slice; t < endTs; t += slice) if (t > startTs) bounds.push(t);
+        bounds.push(endTs);
+        const p = deadbandPolicyOf(metric);
+        if (p && bucketMs < HOUR) {
+          const c = carryOne.get(metric, k, startTs, startTs - p.maxGapMs - STEP_SLACK_MS);
+          const carry = c && c.ts != null ? { v: c.v, ts: c.ts } : null;
+          const rows = [];
+          for (let i = 0; i + 1 < bounds.length; i += 1) {
+            await turn();
+            for (const r of rawRange.all(metric, k, bounds[i], bounds[i + 1])) rows.push({ v: r.v, ts: r.ts });
+          }
+          const last = latestOf(metric, k)?.ts ?? null;
+          const lastActualTs = last != null && last < endTs ? last : null;
+          return stepBuckets({ carry, rows, start: startTs, nowTs: endTs - 1, bucketMs, maxGapMs: p.maxGapMs, lastActualTs }).points;
+        }
+        const out = [];
+        for (let i = 0; i + 1 < bounds.length; i += 1) {
+          await turn();
+          for (const r of bucketRange.all(off, bucketMs, bucketMs, off, metric, k, bounds[i], bounds[i + 1])) out.push(mapRow(r));
+        }
+        return out;
       },
       /**
        * v2.620(SRV2620-02): dead-band 를 아는 짧은 버킷 조회. 온도 계열은 0.5℃ 미만 변화면 원본을 건너뛰므로
@@ -468,9 +519,9 @@ function initSqlite() {
         return out;
       },
       metaKey: (metric, k) => {
-        const a = keyMinMax.get(metric, k) || {};
+        const a = { mn: rawMin.get(metric, k)?.mn, mx: rawMax.get(metric, k)?.mx };
         let b = {};
-        try { b = keyHourMinMax.get(metric, k) || {}; } catch { /* 롤업 테이블이 없는 구버전 */ }
+        try { b = { mn: hourlyMin.get(metric, k)?.mn, mx: hourlyMax.get(metric, k)?.mx }; } catch { /* 롤업 테이블이 없는 구버전 */ }
         const mins = [a.mn, b.mn].filter((x) => x != null);
         const maxs = [a.mx, b.mx].filter((x) => x != null);
         return { firstTs: mins.length ? Math.min(...mins) : null, lastTs: maxs.length ? Math.max(...maxs) : null };
@@ -560,6 +611,7 @@ function initJson() {
       }
       return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([b, g]) => ({ ts: b, avg: round1(g.sum / g.n), min: round1(g.min), max: round1(g.max) }));
     },
+    async historyRangeAsync(metric, k, startTs, endTs, bucketMs, offsetMs = 0) { return this.historyRange(metric, k, startTs, endTs, bucketMs, offsetMs); },
     // v2.672: NDJSON 폴백에는 롤업이 없다(전량 원본 · 개발용 소규모) — 같은 API 만 맞춘다. 버킷은 SQLite 판과 같이 1시간 정배수.
     historyRollup(metric, k, sinceTs, bucketMs, limit) { return this.history(metric, k, sinceTs, Math.max(3_600_000, Math.round((Number(bucketMs) || 3_600_000) / 3_600_000) * 3_600_000), limit); },
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },

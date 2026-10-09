@@ -12,7 +12,7 @@ import { agoText } from './relTime.js';
 
 export const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 export const PRESETS = [['1h', '1시간', HOUR], ['6h', '6시간', 6 * HOUR], ['24h', '24시간', DAY], ['7d', '7일', 7 * DAY], ['30d', '30일', 30 * DAY], ['90d', '90일', 90 * DAY], ['1y', '1년', 365 * DAY]];
-export const BUCKET_LABELS = [[MIN, '1분'], [5 * MIN, '5분'], [30 * MIN, '30분'], [2 * HOUR, '2시간'], [6 * HOUR, '6시간'], [DAY, '1일']];
+export const BUCKET_LABELS = [[MIN, '1분'], [5 * MIN, '5분'], [30 * MIN, '30분'], [HOUR, '1시간'], [2 * HOUR, '2시간'], [6 * HOUR, '6시간'], [DAY, '1일']];
 export const bucketLabel = (ms) => (BUCKET_LABELS.find(([m]) => m === ms) || [0, `${Math.round(ms / MIN)}분`])[1];
 
 export const SERIES = [
