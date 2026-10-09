@@ -21,7 +21,7 @@ export function autoRegisterCollector(target, portalPort) {
   if (!target?.collectorToken || target.registerCollector === false) return null;
   const port = Number(portalPort) || 4000;
   const id = collectorIdFor(target);
-  const url = String(target.advertiseUrl || '').trim().replace(/\/+$/, '') || `http://${target.host}:${port}`;
+  const url = String(target.advertiseUrl || '').trim().replace(/\/+$/, '') || `${target.portalTls === true ? 'https' : 'http'}://${target.host}:${port}`;
   const body = { id, name: target.agentName || target.collectorDatacenter || target.host, datacenter: target.collectorDatacenter || '', url, token: target.collectorToken, enabled: true };
   const exists = loadCollectors().find((c) => c.id === id);
   const r = exists ? updateCollector(id, body) : addCollector(body);

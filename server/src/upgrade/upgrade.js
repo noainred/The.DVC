@@ -22,6 +22,13 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-06: 크기 상한을 사후가 아니라 읽는 중에
 import { recordOutbound } from '../util/outboundStats.js'; // v2.727(감사 D-06): 전역 fetch 경로라 직접 기록(collector/upgradePush.js 와 같은 형태)
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
+import { readTextCapped } from '../util/readCapped.js';
+// v2.730(검토 S-10·I-08): 배포자 서명 판정 하나(signature.js) · 메타데이터 상한·형식(versionsDoc.js)
+import {
+  decideSignature, signatureSummary, manifestPathForArchive, archiveVersionOf, readManifestFile, encodeManifestHeader, MANIFEST_HEADER,
+} from './signature.js';
+import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
+import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets } from './versionsDoc.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -238,15 +245,32 @@ function preserveUserConfig(fromDir, toDir) {
 
 /* ----------------------------- high-level apply --------------------------- */
 
-/** Apply an archive file if it is newer than currentVersion. */
-export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgName) {
-  let members;
+/**
+ * Apply an archive file if it is newer than currentVersion.
+ * v2.730(검토 S-10): 설치 **전에** 배포자 서명을 확인한다 — 번들 옆의 `vmware-portal-<버전>.manifest.json`(또는 호출자가
+ * 넘긴 manifestText)을 `decideSignature` 하나로 판정하고, 통과하지 못하면 아카이브를 풀지도 않는다.
+ * 감시 폴더·원격 다운로드 모두 이 함수로 끝난다. opts.trust 는 테스트·도구 주입용(HTTP 경로에서 받지 않는다).
+ */
+export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgName, { manifestText, trust, where = 'watch' } = {}) {
+  let buf;
   try {
-    members = readPackageMembers(archivePath, pkgName);
+    buf = fs.readFileSync(archivePath);
   } catch (err) {
     return { ok: false, reason: `failed to read archive: ${err.message}` };
   }
-  const res = applyIfNewer(members, installDir, currentVersion);
+  const sig = decideSignature({
+    manifestText: manifestText !== undefined ? manifestText : readManifestFile(manifestPathForArchive(archivePath)),
+    bytes: buf, name: path.basename(archivePath), kind: 'bundle', expectVersion: archiveVersionOf(archivePath) || undefined, where, trust,
+  });
+  if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
+  let members;
+  try {
+    members = collectMembers(archivePath.endsWith('.zip') ? parseZip(buf) : parseTarGz(buf), pkgName);
+  } catch (err) {
+    return { ok: false, reason: `failed to read archive: ${err.message}`, signature: signatureSummary(sig) };
+  }
+  const res = applyIfNewer(members, installDir, currentVersion, { signedVersion: sig.verified ? sig.version : null });
+  res.signature = signatureSummary(sig);
   // 적용된 아카이브 경로를 노출 — manager.pushToEdges가 이 경로로 엣지에 같은 번들을 푸시한다.
   // (이전엔 res.appliedArchive가 항상 undefined라, watchDir 없는 remoteBase-only 중앙은 엣지
   //  업그레이드 푸시가 조용히 no-op이 되어 버전이 갈라졌다.)
@@ -254,20 +278,34 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
   return res;
 }
 
-/** Apply pushed bundle bytes (edge side). allowSame re-installs an equal version. */
-export function upgradeFromBundleBytes(data, installDir, currentVersion, pkgName, { allowSame = false } = {}) {
+/**
+ * Apply pushed bundle bytes (edge side). allowSame re-installs an equal version.
+ * v2.730(검토 S-10): push 는 파일 이름이 없다 — manifest(헤더 `X-Bundle-Manifest`)의 bundle 항목을 sha256 으로 찾고,
+ * 번들 안 package.json 버전이 서명된 버전과 같아야 한다. 같은 요청의 `X-Bundle-Sha256` 은 서명이 아니다(자기신고 해시).
+ */
+export function upgradeFromBundleBytes(data, installDir, currentVersion, pkgName, { allowSame = false, manifestText = null, trust, where = 'push' } = {}) {
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const sig = decideSignature({ manifestText, bytes, kind: 'bundle', where, trust });
+  if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
   let members;
   try {
-    members = readBundleBytes(data, pkgName);
+    members = readBundleBytes(bytes, pkgName);
   } catch (err) {
-    return { ok: false, reason: `failed to read bundle: ${err.message}` };
+    return { ok: false, reason: `failed to read bundle: ${err.message}`, signature: signatureSummary(sig) };
   }
-  return applyIfNewer(members, installDir, currentVersion, { allowSame });
+  const res = applyIfNewer(members, installDir, currentVersion, { allowSame, signedVersion: sig.verified ? sig.version : null });
+  res.signature = signatureSummary(sig);
+  return res;
 }
 
-function applyIfNewer(members, installDir, currentVersion, { allowSame = false } = {}) {
+function applyIfNewer(members, installDir, currentVersion, { allowSame = false, signedVersion = null } = {}) {
   const newV = membersVersion(members);
   if (!newV) return { ok: false, reason: 'no valid vmware-portal package/version in archive' };
+  // v2.730(S-10): 서명된 버전과 번들 안의 버전이 같아야 한다(서명 항목은 바이트를 묶지만, 그 바이트가 다른 버전을 담고 있으면
+  //   이름표와 내용이 어긋난 릴리스다 — 설치하지 않는다).
+  if (signedVersion && vstr(newV) !== signedVersion) {
+    return { ok: false, code: 'content-version-mismatch', reason: `번들 안의 버전(${vstr(newV)})이 서명된 manifest 버전(${signedVersion})과 다릅니다 — 설치를 거부합니다`, version: vstr(newV) };
+  }
   const cur = parseVersion(currentVersion) || [0, 0, 0];
   const c = cmpVersionTuple(newV, cur);
   if (c < 0 || (c === 0 && !allowSame)) {
@@ -366,22 +404,47 @@ function authHeaders(url, token) {
   return headers;
 }
 
-/** Fetch base/versions.json -> [data, error]. */
+/**
+ * Fetch base/versions.json -> [data, error].
+ * v2.730(검토 I-08): 예전에는 `res.json()` 으로 본문을 통째로 읽었다(재현: 8,388,651바이트를 그대로 받아 파싱).
+ *   이제 ① fetch·본문 읽기를 **한 전체 시한**으로 묶고(시한이 지나면 본문 스트림·소켓을 끊는다) ② 바이트 상한을 **읽는
+ *   중에** 걸고(Content-Length 가 없거나 거짓이어도 스트림 실측) ③ 항목 수·문자열·필드 타입을 검사해 **선언한 필드만**
+ *   돌려준다(versionsDoc.js). 사유 문구에서 주소의 계정·비밀번호·쿼리·토큰을 지운다.
+ */
 export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}) {
   const url = joinUrl(base, 'versions.json');
+  const secrets = token ? [token] : [];
+  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || 10_000));
+  const dl = deadlineSignal(totalMs);
   try {
-    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: timeout, retries: 2 });
-    if (!res.ok) return [null, `versions.json HTTP ${res.status}`];
-    return [await res.json(), null];
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: totalMs, retries: 2, signal: dl.signal });
+    if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return [null, `versions.json HTTP ${res.status}`]; }
+    const raw = await readJsonCapped(res, VERSIONS_MAX_BYTES, 'versions.json');
+    const v = validateVersionsDoc(raw);
+    if (!v.ok) return [null, v.reason];
+    return [v.doc, null];
   } catch (err) {
+    if (dl.aborted()) return [null, `versions.json 을 전체 시한(${Math.round(totalMs / 1000)}초) 안에 다 받지 못해 중단했습니다`];
+    if (err instanceof SyntaxError) return [null, 'versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)'];
+    const msg = scrubUrlSecrets(err?.message || err, secrets);
+    if (/상한/.test(msg)) return [null, `versions.json 이 크기 상한을 넘어 받지 않았습니다 — ${msg}`];
     const code = err?.cause?.code || err?.code || '';
     const offline = /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|UND_ERR/i
       .test(`${err?.message} ${code} ${err?.cause?.message || ''}`);
-    const base = `원격 소스(versions.json) 접속 실패: ${err.message}`;
+    const head = `원격 소스(versions.json) 접속 실패: ${msg}`;
     return [null, offline
-      ? `${base} — 폐쇄망(오프라인) 서버는 인터넷 업그레이드가 불가합니다. '감시 폴더'에 업그레이드 번들을 넣어 적용하세요.`
-      : base];
-  }
+      ? `${head} — 폐쇄망(오프라인) 서버는 인터넷 업그레이드가 불가합니다. '감시 폴더'에 업그레이드 번들을 넣어 적용하세요.`
+      : head];
+  } finally { dl.clear(); }
+}
+
+/** latest 항목의 manifest 파일 이름 — 항목에 적힌 이름이 규칙(같은 버전)에 맞으면 그것, 아니면 규칙 이름. */
+function manifestNameOf(entry, latest) {
+  const ver = String(latest || '').replace(/^v/, '');
+  const given = typeof entry?.manifest === 'string' ? entry.manifest : '';
+  const m = MANIFEST_NAME_RE.exec(path.basename(given));
+  if (given && m && m[1] === ver) return given;
+  return manifestNameFor(ver);
 }
 
 /** Check remote for a newer version (no download). */
@@ -389,8 +452,9 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
   const base = resolveBase(baseUrl, token);
   const [data, err] = await fetchRemoteVersions(base, { token, timeout });
   const cur = parseVersion(currentVersion) || [0, 0, 0];
-  const out = { ok: !err, current: vstr(cur), available: false, checkedAt: Date.now(), source: joinUrl(base, 'versions.json') };
-  if (err) { out.error = err; return out; }
+  // v2.730(I-08): 화면·상태에 싣는 주소는 계정·쿼리를 뗀 것(사내 미러 URL 에 user:pass@·?token= 이 들어갈 수 있다).
+  const out = { ok: !err, current: vstr(cur), available: false, checkedAt: Date.now(), source: safeUrlText(joinUrl(base, 'versions.json')) };
+  if (err) { out.error = scrubUrlSecrets(err, token ? [token] : []); return out; }
 
   const latest = String(data.latest || '');
   const lt = parseVersion(latest);
@@ -402,10 +466,32 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
       out.sizeBytes = v.size_bytes;
       out.sha256 = v.sha256 || v.tar_gz_sha256 || '';
       if (v.tar_gz) out.downloadUrl = joinUrl(base, v.tar_gz);
+      // v2.730(S-10): 그 버전의 서명 manifest — 번들보다 먼저 받아 서명을 확인한다.
+      if (lt) { out.manifestName = manifestNameOf(v, latest); out.manifestUrl = joinUrl(base, out.manifestName); }
       break;
     }
   }
   return out;
+}
+
+/**
+ * 원격 manifest 를 받는다(상한 64KB · 전체 시한). 404 는 `missing`(소스에 서명이 없다), 그 밖의 실패는 `reason`
+ * (받지 못했다 — '없음' 과 구분한다). 사유에 주소의 계정·쿼리를 싣지 않는다.
+ */
+export async function fetchManifestText(url, { token, timeout = 30_000 } = {}) {
+  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || 30_000));
+  const dl = deadlineSignal(totalMs);
+  try {
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: totalMs, retries: 2, signal: dl.signal });
+    if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true, reason: `원격 소스에 서명 manifest 가 없습니다(404 · ${safeUrlText(url)})` }; }
+    if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
+    return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
+  } catch (err) {
+    if (dl.aborted()) return { text: null, reason: `서명 manifest 를 전체 시한(${Math.round(totalMs / 1000)}초) 안에 받지 못했습니다` };
+    // 상한(64KB)을 넘는 manifest 는 '받지 못함' 이 아니라 **형식 오류**다(정책과 무관하게 거부).
+    if (/상한/.test(String(err?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
+    return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(err?.message || err, token ? [token] : [])}` };
+  } finally { dl.clear(); }
 }
 
 /** 주소를 화면에 싣기 전에 자격증명·쿼리를 뗀다(사내 미러 URL 에 user:pass@ 나 ?token= 이 들어갈 수 있다). */
@@ -426,8 +512,13 @@ export function downloadFailReason(status, url) {
   return `download HTTP ${status} — ${where}`;
 }
 
-/** Download a remote archive into destDir (validates name, caps size, auth). */
-export async function downloadArchive(url, destDir, { token, timeout = 120_000, maxBytes = MAX_BUNDLE_BYTES, sha256 } = {}) {
+/**
+ * Download a remote archive into destDir (validates name, caps size, auth).
+ * v2.730(검토 S-10): sha256(versions.json — 같은 채널) 대조에 더해 **배포자 서명**을 확인한 뒤에만 디스크에 쓴다.
+ *   manifest 는 `manifestText`(미리 받은 것) 또는 `manifestUrl` 에서 받는다. 통과하면 번들 옆에 manifest 도 저장한다
+ *   (이후 엣지·수집기 push 가 같은 manifest 를 싣는다). 재현했던 '교체한 번들 + 그 번들의 새 sha' 는 이제 서명에서 걸린다.
+ */
+export async function downloadArchive(url, destDir, { token, timeout = 120_000, maxBytes = MAX_BUNDLE_BYTES, sha256, manifestText, manifestUrl, expectVersion, trust } = {}) {
   const name = path.basename(String(url || '').split('?')[0]);
   if (!ARCHIVE_RE.test(name)) return { ok: false, reason: `disallowed archive name: ${name || '(none)'}` };
   try {
@@ -440,6 +531,7 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     // 무결성 검증: versions.json의 sha256과 대조(TLS 미검증 미러/변조 번들 차단).
     // 보안(H2): sha256이 없으면 기본적으로 '검증 불가'로 설치를 거부한다(공식 릴리스는 항상 sha256 제공).
     // 서명 없는 사내 미러 등 부득이한 경우만 UPGRADE_ALLOW_UNVERIFIED=true로 우회(비권장).
+    // ⚠ v2.730: 이 sha 는 versions.json 과 **같은 채널**에서 온다 — 전송 손상을 잡을 뿐 배포자를 인증하지 않는다(아래 서명이 그 역할).
     if (!sha256) {
       if (process.env.UPGRADE_ALLOW_UNVERIFIED === 'true') {
         console.warn('[upgrade] ⚠ sha256 없이 설치(UPGRADE_ALLOW_UNVERIFIED=true) — 무결성 미검증 번들. 신뢰 미러에서만 사용하세요.');
@@ -452,26 +544,51 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
         return { ok: false, reason: `sha256 불일치 — 번들 무결성 검증 실패(기대 ${String(sha256).slice(0, 12)}…, 실제 ${got.slice(0, 12)}…)` };
       }
     }
+    // v2.730(S-10): 배포자 서명 — 설치·저장 전에.
+    let manText = manifestText;
+    let unavailable;
+    let malformed;
+    if (manText === undefined && manifestUrl) {
+      const m = await fetchManifestText(manifestUrl, { token, timeout: Math.min(Number(timeout) || 30_000, 30_000) });
+      manText = m.text; unavailable = m.missing ? undefined : m.reason; malformed = m.malformed;
+    }
+    const sig = decideSignature({
+      manifestText: manText ?? null, bytes: buf, name, kind: 'bundle', where: 'remote', trust,
+      expectVersion: expectVersion || archiveVersionOf(name) || undefined, unavailableReason: unavailable, malformedReason: malformed,
+    });
+    if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
     fs.mkdirSync(destDir, { recursive: true });
     const dest = path.join(destDir, name);
     fs.writeFileSync(dest, buf);
-    return { ok: true, path: dest, size: buf.length };
+    const manPath = manifestPathForArchive(dest);
+    if (manText && manPath) { try { fs.writeFileSync(manPath, String(manText)); } catch { /* push 가 manifest 를 못 싣게 될 뿐 — 수신측이 '없음' 으로 거부한다 */ } }
+    return { ok: true, path: dest, size: buf.length, signature: signatureSummary(sig), manifestText: manText ?? null };
   } catch (err) {
-    return { ok: false, reason: `download failed: ${err.message}` };
+    return { ok: false, reason: `download failed: ${scrubUrlSecrets(err.message, token ? [token] : [])}` };
   }
 }
 
 /** Check remote, download the newest, and install it (restart left to caller). */
-export async function upgradeFromRemote(baseUrl, installDir, currentVersion, destDir, { token, timeout = 120_000, pkgName } = {}) {
+export async function upgradeFromRemote(baseUrl, installDir, currentVersion, destDir, { token, timeout = 120_000, pkgName, trust } = {}) {
   const info = await checkRemote(baseUrl, currentVersion, { token, timeout: Math.min(timeout, 15_000) });
   if (!info.ok) return { ok: false, reason: info.error || 'version check failed', check: info };
   if (!info.available) return { ok: false, reason: `already up to date (${info.latest})`, check: info, upToDate: true };
   if (!info.downloadUrl) return { ok: false, reason: 'no download URL found', check: info };
 
-  const dl = await downloadArchive(info.downloadUrl, destDir, { token, timeout, sha256: info.sha256 });
-  if (!dl.ok) return { ok: false, reason: dl.reason, check: info };
+  // v2.730(S-10): 서명 manifest 를 **번들보다 먼저** 받아 확인한다 — 서명을 확인할 수 없는 릴리스면 큰 번들을 받지 않는다
+  //   (자동 적용이 확인 주기마다 수백 MB 를 받았다 버리는 일을 막는다). 받은 뒤 바이트로 한 번 더(크기·sha) 확인한다.
+  const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token, timeout: Math.min(timeout, 30_000) }) : { text: null, missing: true };
+  const pre = decideSignature({
+    manifestText: man.text, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'remote-preflight', trust,
+    unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,
+    preflight: true, sha256: info.sha256 || undefined, size: Number.isSafeInteger(info.sizeBytes) ? info.sizeBytes : undefined,
+  });
+  if (!pre.ok) return { ok: false, reason: pre.reason, signature: signatureSummary(pre), check: info };
 
-  const res = upgradeFromArchive(dl.path, installDir, currentVersion, pkgName);
+  const dl = await downloadArchive(info.downloadUrl, destDir, { token, timeout, sha256: info.sha256, manifestText: man.text, expectVersion: info.latest, trust });
+  if (!dl.ok) return { ok: false, reason: dl.reason, signature: dl.signature, check: info };
+
+  const res = upgradeFromArchive(dl.path, installDir, currentVersion, pkgName, { manifestText: dl.manifestText, trust, where: 'remote' });
   res.check = info;
   res.downloaded = dl.size;
   return res;
@@ -507,9 +624,12 @@ export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(proc
 /** 엣지 업그레이드 응답 상한 — 작은 JSON 이다(해제 후 크기). */
 export const EDGE_UPGRADE_RESPONSE_MAX_BYTES = 256 * 1024;
 
-export async function pushBundleToEdge(edge, archivePath, { timeout = process.env.EDGE_PUSH_TIMEOUT_MS } = {}) {
+export async function pushBundleToEdge(edge, archivePath, { timeout = process.env.EDGE_PUSH_TIMEOUT_MS, manifestText } = {}) {
   const data = fs.readFileSync(archivePath);
   const sha = crypto.createHash('sha256').update(data).digest('hex'); // v2.480: 수신측 검증용
+  // v2.730(검토 S-10): 번들 옆의 서명 manifest 를 함께 보낸다 — 엣지는 자기가 가진 신뢰 공개키로 설치 전에 검증한다.
+  //   manifest 가 없으면 헤더 없이 보낸다(구버전 엣지는 서명을 보지 않고, 새 엣지는 '서명 없음' 으로 거부해 사유를 돌려준다).
+  const manHeader = encodeManifestHeader(manifestText !== undefined ? manifestText : readManifestFile(manifestPathForArchive(archivePath)));
   // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
   // (currentVersion()이 디스크의 package.json을 읽어 '새 버전'으로 보고하므로 재푸시도 거부됨.)
   const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle?restart=true`;
@@ -519,6 +639,7 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = process.en
       headers: {
         'Content-Type': 'application/gzip',
         'X-Bundle-Sha256': sha,
+        ...(manHeader ? { [MANIFEST_HEADER]: manHeader } : {}),
         ...(edge.token ? { Authorization: `Bearer ${edge.token}` } : {}),
       },
       body: data,

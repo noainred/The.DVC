@@ -1,11 +1,13 @@
 // v2.669 SAN 스위치 화면(시안 'SAN Switch v2') — 포트 용량 카드 · 스토리지 트래픽 카드 · 법인 카드 격자.
 // 판정·문구는 sanSwitchViewText.js(순수 — 테스트가 고정)가 소유하고, 여기는 그리기만 한다.
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import { usePolling } from '../../api.js';
 import { capacityLevel, usedPctText, aggregate, switchesMeta, alertsMeta } from './sanSwitchPorts.js';
 import { trafficSummary, trafficChartRows, dcShare, collectBadgeText, bpsText, toGbps, TRAFFIC_RANGES } from './sanSwitchViewText.js';
 import { numOrNull } from '../../numOrNull.js';
+import { trackFetch, echoMatches, freshState, freshNote, badgeFor } from './sanFreshText.js'; // 검토 I-04: 갱신 실패를 숨기지 않는다
+import { FreshNote } from './SanFreshNote.jsx';
 
 const LVL_COLOR = { bad: 'var(--red)', warn: 'var(--amber)', ok: 'var(--green)', unknown: 'var(--text-dim)' };
 const levelColor = (pct) => LVL_COLOR[capacityLevel(pct)] || 'var(--text-dim)';
@@ -57,6 +59,11 @@ export function CapacityCard({ agg, scopeLabel }) {
   );
 }
 
+const TRAFFIC_POLL_MS = 60_000;      // 수집은 수 분 주기라 1분 폴링으로 충분하다
+const TRAFFIC_TIMEOUT_MS = 90_000;   // v2.715: 서버 감시 60초보다 길게 기다린다
+// 실패 중 배지 — 실시간(●·민트) 표시를 쓰지 않는다(검토 I-04).
+const STALE_BADGE = { background: 'rgba(245,158,11,.12)', color: 'var(--amber)', fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 9px', borderRadius: 999, whiteSpace: 'nowrap', letterSpacing: 0 };
+
 const tick = (hours) => (ts) => {
   const d = new Date(ts);
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -73,19 +80,29 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
   if (datacenterIds.length) params.datacenterId = datacenterIds.join(',');
   // v2.715: 이 조회는 오래 걸릴 수 있다(서버 감시 60초 — 넘기면 조회 엔진을 재시작하고 사유를 돌려준다). 화면은 그보다 길게 기다리고
   //   재시도하지 않는다(재시도하면 같은 무거운 조회를 다시 줄 세운다).
-  const { data, error } = usePolling('/tools/sanswitch/perf/traffic-total', params, 60_000, { timeoutMs: 90_000, retries: 0 });
+  const { data: polled, error, errorInfo } = usePolling('/tools/sanswitch/perf/traffic-total', params, TRAFFIC_POLL_MS, { timeoutMs: TRAFFIC_TIMEOUT_MS, retries: 0 });
+  // 검토 I-04: 직전 값은 남기되(차트를 지우지 않는다) 실패는 이 카드 안에 말한다 — 마지막 성공·실패 시작 시각을 구분한다.
+  //   추적기는 전이 때만 시각을 바꾸는 순수 함수라 렌더마다 불러도 같다(StrictMode 이중 렌더 안전). 선택(법인·기간)이 바뀐 직후
+  //   usePolling 이 아직 비우지 않은 이전 조건의 data 는 carried 로 걸러지고, 응답이 되돌려 준 조건(hours·datacenterIds)과도 대조한다.
+  const reqKey = JSON.stringify(params);
+  const trRef = useRef(null);
+  trRef.current = trackFetch(trRef.current, { data: polled, error, key: reqKey }, Date.now());
+  const fs = freshState(trRef.current, { matches: echoMatches(polled, { hours, datacenterIds: datacenterIds.length ? datacenterIds : [] }) });
+  const data = fs.usable ? polled : null;
+  const note = freshNote(fs, { what: '트래픽 합계', pollMs: TRAFFIC_POLL_MS, timeoutMs: TRAFFIC_TIMEOUT_MS, stopped: !!errorInfo });
   const s = trafficSummary(data, { selected });
   const rows = trafficChartRows(data);
   const avgG = toGbps(data?.avg);
   const share = dcShare(data, 5);
-  const badge = data ? collectBadgeText(data) : '';
+  const badge = badgeFor(fs, data ? collectBadgeText(data) : '');
   const hasLine = rows.some((r) => r.gbps != null);
   return (
     <div className="san2-card san2-traffic">
       <div className="flex wrap" style={{ alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
         <div className="san2-title">
           스토리지 트래픽 · {selected ? '선택 법인' : '전체'}
-          {badge ? <span className="san2-badge-live">● {badge}</span> : null}
+          {badge.text && badge.live ? <span className="san2-badge-live">● {badge.text}</span> : null}
+          {badge.text && !badge.live ? <span style={STALE_BADGE} title="지금 조회가 실패하고 있습니다 — 아래 값은 마지막 성공 시점의 것입니다">{badge.text}</span> : null}
         </div>
         <div className="san2-seg" role="group" aria-label="조회 기간">
           {TRAFFIC_RANGES.map(([h, l]) => (
@@ -93,8 +110,8 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
           ))}
         </div>
       </div>
-      {error && !data ? <div className="muted" style={{ fontSize: 13 }}>트래픽 합계를 불러오지 못했습니다 — {String(error)}</div> : null}
-      {!data && !error ? (
+      <FreshNote note={note} />
+      {fs.state === 'loading' ? (
         <div className="san2-loading-alert" role="status">
           SAN 스위치 사용량을 불러오는 중입니다 — <b>최소 1분 이상</b> 기다려야 할 수 있습니다.
           <span className="san2-loading-sub">1분을 넘기면 서버가 조회 엔진을 스스로 재시작하고 이 자리에 사유를 알려 드립니다. 그동안 다른 화면은 계속 쓸 수 있습니다.</span>

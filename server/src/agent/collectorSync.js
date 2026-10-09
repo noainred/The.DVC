@@ -13,14 +13,32 @@
  */
 import { collectorIdFor } from './autoRegister.js';
 import { localStamp } from '../util/dayKey.js';
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
+import { urlTransport, allowlistMatch } from '../collector/transportPolicy.js';
 
-/** 중앙이 이 대상에 접속할 URL(순수). v2.429 advertiseUrl(중계 엣지 경유)이 있으면 그것이 진실. */
+/**
+ * 중앙이 이 대상에 접속할 URL(순수). v2.429 advertiseUrl(중계 엣지 경유)이 있으면 그것이 진실.
+ * S-09(그룹 J): 광고 URL 이 없으면 대상이 TLS 로 리스닝한다고 **기록돼 있을 때만**(`portalTls === true`) https 다.
+ *   중앙은 엣지가 TLS 를 켰는지 모른다 — 기록 없이 https 로 지어내면 그 주소는 닿지 않는다. 그래서 기본은 예전처럼 http 이고,
+ *   그 http 는 행의 `transport.insecure` 로 드러나며 수집 서버로 추가할 때 등록부의 평문 HTTP 정책(승인된 예외만)을 받는다.
+ */
 export function targetUrl(t) {
-  const adv = String(t?.advertiseUrl || '').trim().replace(/\/+$/, '');
+  const adv = trimTrailingSlashes(String(t?.advertiseUrl || '').trim());
   if (adv) return adv;
   const host = String(t?.host || '').trim();
   if (!host) return '';
-  return `http://${host}:${Number(t?.portalPort) || 4000}`;
+  return `${t?.portalTls === true ? 'https' : 'http'}://${host}:${Number(t?.portalPort) || 4000}`;
+}
+
+/**
+ * 행의 전송 보호 상태(순수, S-09). insecure 면 `blocked`(운영자 허용 목록에도 없음 — 추가하면 등록부가 거부한다)를 함께 준다.
+ * 판정은 등록부와 같은 transportPolicy 를 쓴다(복제 금지).
+ */
+export function targetTransport(url, env = process.env) {
+  const t = urlTransport(url);
+  if (!t.valid) return { scheme: '', insecure: false, blocked: false };
+  const allowed = t.insecure ? allowlistMatch(url, env) : null;
+  return { scheme: t.scheme, insecure: t.insecure, blocked: t.insecure && !allowed, ...(allowed ? { allowRule: allowed } : {}) };
 }
 
 /** URL → 'host:port'(순수). 비교 키로만 쓴다. 파싱 실패면 ''. */
@@ -71,7 +89,7 @@ export function diffTargets(targets = [], collectors = []) {
   }
   const usedCollector = new Map();   // collectorId → 먼저 차지한 대상(중복 매칭 감지, v2.436)
   const rows = [];
-  const summary = { total: 0, linked: 0, missing: 0, noToken: 0, mismatch: 0, conflict: 0, disabled: 0, addable: 0, fixable: 0 };
+  const summary = { total: 0, linked: 0, missing: 0, noToken: 0, mismatch: 0, conflict: 0, disabled: 0, addable: 0, fixable: 0, insecureHttp: 0, httpBlocked: 0 };
 
   for (const t of targets) {
     const url = targetUrl(t);
@@ -86,6 +104,7 @@ export function diffTargets(targets = [], collectors = []) {
       collectorId: col?.id || '', collectorUrl: col?.url || '', collectorEnabled: col ? col.enabled !== false : null,
       wantId, ...installedHint(t),
       status: 'linked', issue: '', fix: '', action: 'none', canAdd: false, canFix: false,
+      transport: targetTransport(url),
     };
     const takenBy = col ? usedCollector.get(col.id) : null;
     if (col && !takenBy) usedCollector.set(col.id, row);
@@ -106,6 +125,10 @@ export function diffTargets(targets = [], collectors = []) {
       row.issue = `수집 서버 목록에 ${url} 이 없습니다 — 중앙이 이 엣지에서 데이터를 당겨오지 않습니다.`;
       row.fix = hasToken ? `수집 서버 '${wantId}' 로 추가` : `수집 토큰을 생성해 엣지에 반영한 뒤 '${wantId}' 로 추가`;
       row.action = 'add'; row.canAdd = true;
+      // S-09: 평문 HTTP 대상은 등록부가 승인된 예외만 받는다 — 추가 전에 그 사실을 말한다(추가는 막지 않는다 — 허용 목록·예외가 있을 수 있다).
+      if (row.transport.blocked) {
+        row.transportNote = `수집 URL ${url} 은 평문 HTTP 라 그대로는 추가되지 않습니다 — 엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 광고 URL(advertiseUrl)을 https:// 로 지정하거나, 설정 › 수집 서버에서 사유와 함께 평문 HTTP 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 넣으세요.`;
+      }
     } else if (key && urlKey(col.url) !== key) {
       row.status = 'url-mismatch';
       row.issue = `이름은 같은데 URL 이 다릅니다 — 수집 서버 '${col.id}' = ${col.url}, 이 대상은 ${url}.`;
@@ -135,6 +158,8 @@ export function diffTargets(targets = [], collectors = []) {
     if (row.status === 'disabled') summary.disabled++;
     if (row.canAdd) summary.addable++;
     if (row.canFix) summary.fixable++;
+    if (row.transport.insecure) summary.insecureHttp++;
+    if (row.canAdd && row.transport.blocked) summary.httpBlocked++;
     delete row.collectorToken;   // 방어 — 토큰 값은 절대 싣지 않는다
     rows.push(row);
   }

@@ -17,6 +17,7 @@ import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
+import { deviceTlsConnect } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { retryTransient } from '../util/resilientFetch.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 // v2.612(SEC2612-03): 로그인 본문(비밀번호)·토큰 헤더가 교차 출처 리다이렉트를 따라가지 않게 — 같은 상대만 따른다.
@@ -27,17 +28,20 @@ import { bmcFetch } from './redfish.js';
 // `idrac/poller.js` 가 이 이름을 import 하므로 export 는 유지한다.
 export const eachLimited = poolSettled;
 
+// 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다(모드는 iDRAC 과 같이 VC_TLS_REJECT_UNAUTHORIZED — security/tlsTrust.js).
 const dispatcher = new Agent({
-  connect: {
-    rejectUnauthorized: config.rejectUnauthorized,
-    minVersion: config.vcTlsMinVersion,
-    ciphers: config.vcTlsCiphers,
-    secureOptions:
-      cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
-      cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
-    timeout: config.idrac.timeoutMs,
-    lookup: ssrfLookup, // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-  },
+  connect: deviceTlsConnect({
+    subsystem: 'ome', envKey: 'VC_TLS_REJECT_UNAUTHORIZED', envRaw: process.env.VC_TLS_REJECT_UNAUTHORIZED, mode: config.vcTlsVerifyMode,
+    tls: {
+      minVersion: config.vcTlsMinVersion,
+      ciphers: config.vcTlsCiphers,
+      secureOptions:
+        cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
+        cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+      timeout: config.idrac.timeoutMs,
+      lookup: ssrfLookup, // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
+    },
+  }),
   connectTimeout: config.idrac.timeoutMs,
 });
 

@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { withSsh } from '../proxy/sshExec.js';
+import { manifestPathForArtifact } from '../upgrade/signature.js'; // 2026-10-09 검토 S-10: 서명 manifest 를 패키지와 함께 보낸다
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -235,15 +236,27 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
       // 있었다 — `rm -rf && mkdir -p` 사이에 그 사용자가 디렉터리를 다시 만들면 root 가 **남의 디렉터리**에 풀고
       // 그 안의 install.sh 를 root 로 실행한다(교체 경합 = root 권한 상승). root 소유 0700 mktemp 디렉터리를 쓴다.
       const tmp = await remoteTmpDir(exec, 'vmportal-agent');
-      const remotePkg = `${tmp}/pkg.tar.gz`;
+      // 2026-10-09 검토 S-10: 패키지를 **원래 이름**으로 올린다 — 대상의 install.sh(v2.730+)가 서명 manifest 에서
+      //   파일 이름으로 항목을 찾는다. 이름 정규식이 셸 안전을 보장한다(아니면 예전 이름 — 그때는 manifest 대조가 실패해 멈춘다).
+      const pkgBase = path.basename(installer);
+      const remotePkg = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$/.test(pkgBase) ? `${tmp}/${pkgBase}` : `${tmp}/pkg.tar.gz`;
       const workDir = `${tmp}/x`;
       try {
       await exec(`mkdir ${workDir}`);
       await putFile(installer, remotePkg);                       // SFTP upload (fastPut)
+      // 패키지 폴더에 vmware-portal-<버전>.manifest.json 이 있으면 함께 보내 install.sh 가 서명을 확인하게 한다.
+      // 없으면 대상이 v2.730 이상일 때 install.sh 가 사유와 함께 멈추고 그 사유가 배포 결과로 나간다(조용히 통과하지 않는다).
+      const manLocal = manifestPathForArtifact(installer);
+      let sigArgs = '';
+      if (manLocal) {
+        const remoteMan = `${tmp}/${path.basename(manLocal)}`;
+        await putFile(manLocal, remoteMan);
+        sigArgs = ` --package ${remotePkg} --manifest ${remoteMan}`;
+      }
       const untar = await exec(`tar xzf ${remotePkg} -C ${workDir}`);
       if (untar.code !== 0) return { ok: false, reason: `압축 해제 실패: ${untar.stderr}` };
 
-      const inst = await exec(`cd ${workDir}/vmware-portal-offline-* && ./install.sh --port ${port}`);
+      const inst = await exec(`cd ${workDir}/vmware-portal-offline-* && ./install.sh --port ${port}${sigArgs}`);
       if (inst.code !== 0) return { ok: false, reason: `install.sh 실패: ${(inst.stderr || inst.stdout).slice(-500)}` };
 
       // Inject agent settings into portal.env — upsert(키 교체)로 재배포 시 중복/이전 값 정리.

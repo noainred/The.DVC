@@ -10,6 +10,7 @@ import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visib
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
+import { isPagedRequest, prepareVmPage, buildVmPage } from '../../inventory/vmPaging.js'; // v2.730(I-02)
 
 /**
  * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
@@ -63,6 +64,61 @@ export function sortAlarmsRecent(list) {
       return sx !== sy ? sx - sy : x[2] - y[2];
     })
     .map((r) => r[1]);
+}
+
+/**
+ * v2.730(검토 I-02): /vms 의 범위·조건 판정 한 벌 — 페이지 판정(캐시 앞, 순서 기억을 다시 만들 때)과 본 계산이
+ * 같은 일치 집합을 보게 라우트 본문에서 떼어 냈다(본문은 예전 그대로). 범위(scope)는 applyFilters 가 먼저 강제한다.
+ */
+function matchVms(snap, q, user) {
+  // v2.670: ?nameOnly=1 — VM 이름만 검색(Platform 화면 '전체 vCenter VM 이름 조회'). 범위(scope)는 applyFilters 가 먼저 강제한다.
+  const nameOnly = q.nameOnly === '1' || q.nameOnly === 'true';
+  let vms = applyFilters(snap.vms, q, snap, nameOnly ? ['name'] : ['name', 'guestOS', 'ipAddress', 'host'], user);
+
+  // 필터 단일 패스(v2.343 #7): 종전엔 조건마다 .filter 로 최대 14회 전체 재순회+중간 배열을
+  // 만들었다(5,000행 × 14패스/요청). 조건 판정과 GPU 집계를 한 루프에 합친다 — 의미는 동일
+  // (gpuCounts 는 GPU 필터 '이전' 집합 기준, gpu/gpuType 필터는 그 뒤 적용 — 기존 순서 보존).
+  const num = (v) => (v === undefined || v === '' ? undefined : Number(v));
+  const ranges = [
+    ['cpuCount', num(q.vcpuMin), num(q.vcpuMax)],
+    ['memMB', num(q.ramMinGB) != null ? num(q.ramMinGB) * 1024 : undefined, num(q.ramMaxGB) != null ? num(q.ramMaxGB) * 1024 : undefined],
+    ['storageGB', num(q.diskMinGB), num(q.diskMaxGB)],
+    ['cpuUsagePct', num(q.cpuUsageMin), num(q.cpuUsageMax)],
+    ['memUsagePct', num(q.memUsageMin), num(q.memUsageMax)],
+  ].filter(([, min, max]) => (min != null && !Number.isNaN(min)) || (max != null && !Number.isNaN(max)));
+  const osq = q.os ? String(q.os).toLowerCase() : null;
+  const wantGpu = q.gpu === '1' || q.gpu === 'true';
+  const gpuType = (v) => v.gpu?.type || null;
+  const gpuCounts = { total: 0, vgpu: 0, passthrough: 0, mixed: 0 };
+  const out = [];
+  for (const v of vms) {
+    if (q.powerState && v.powerState !== q.powerState) continue;
+    if (q.host && v.host !== q.host) continue; // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
+    let hit = true;
+    for (const [field, min, max] of ranges) {
+      // v2.631(감사 AX2-03): 값이 없는 항목(null)은 범위 조건에 맞지 않는다 — JS 비교에서 null 은 0 으로 강제돼
+      //   'cpuUsageMax=5' 가 사용률 미상 VM 을 '0%' 로 통과시켰다(같은 응답 totals.usageUnknown 은 미상으로 센다).
+      const val = numOrNull(v[field]);
+      if (val == null) { hit = false; break; }
+      if (min != null && !Number.isNaN(min) && !(val >= min)) { hit = false; break; }
+      if (max != null && !Number.isNaN(max) && !(val <= max)) { hit = false; break; }
+    }
+    if (!hit) continue;
+    if (osq && !String(v.guestOS).toLowerCase().includes(osq)) continue;
+    if (q.toolsStatus && v.toolsStatus !== q.toolsStatus) continue;
+    // GPU 집계는 GPU 필터 이전 집합 기준(현재 필터 범위의 GPU 분포 표시용).
+    if (v.gpu) {
+      gpuCounts.total++;
+      const t = gpuType(v);
+      if (t === 'vgpu') gpuCounts.vgpu++;
+      else if (t === 'passthrough') gpuCounts.passthrough++;
+      else if (t === 'mixed') gpuCounts.mixed++;
+    }
+    if (wantGpu && !v.gpu) continue;
+    if (q.gpuType && gpuType(v) !== q.gpuType) continue;
+    out.push(v);
+  }
+  return { vms: out, gpuCounts };
 }
 
 export function registerInventory(api) {
@@ -290,58 +346,26 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   return { total: hosts.length, items: hosts, summary };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
-api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
-  const q = req.query;
-  // v2.670: ?nameOnly=1 — VM 이름만 검색(Platform 화면 '전체 vCenter VM 이름 조회'). 범위(scope)는 applyFilters 가 먼저 강제한다.
-  const nameOnly = q.nameOnly === '1' || q.nameOnly === 'true';
-  let vms = applyFilters(snap.vms, q, snap, nameOnly ? ['name'] : ['name', 'guestOS', 'ipAddress', 'host'], req.user);
-
-  // 필터 단일 패스(v2.343 #7): 종전엔 조건마다 .filter 로 최대 14회 전체 재순회+중간 배열을
-  // 만들었다(5,000행 × 14패스/요청). 조건 판정과 GPU 집계를 한 루프에 합친다 — 의미는 동일
-  // (gpuCounts 는 GPU 필터 '이전' 집합 기준, gpu/gpuType 필터는 그 뒤 적용 — 기존 순서 보존).
-  const num = (v) => (v === undefined || v === '' ? undefined : Number(v));
-  const ranges = [
-    ['cpuCount', num(q.vcpuMin), num(q.vcpuMax)],
-    ['memMB', num(q.ramMinGB) != null ? num(q.ramMinGB) * 1024 : undefined, num(q.ramMaxGB) != null ? num(q.ramMaxGB) * 1024 : undefined],
-    ['storageGB', num(q.diskMinGB), num(q.diskMaxGB)],
-    ['cpuUsagePct', num(q.cpuUsageMin), num(q.cpuUsageMax)],
-    ['memUsagePct', num(q.memUsageMin), num(q.memUsageMax)],
-  ].filter(([, min, max]) => (min != null && !Number.isNaN(min)) || (max != null && !Number.isNaN(max)));
-  const osq = q.os ? String(q.os).toLowerCase() : null;
-  const wantGpu = q.gpu === '1' || q.gpu === 'true';
-  const gpuType = (v) => v.gpu?.type || null;
-  const gpuCounts = { total: 0, vgpu: 0, passthrough: 0, mixed: 0 };
-  const out = [];
-  for (const v of vms) {
-    if (q.powerState && v.powerState !== q.powerState) continue;
-    if (q.host && v.host !== q.host) continue; // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
-    let hit = true;
-    for (const [field, min, max] of ranges) {
-      // v2.631(감사 AX2-03): 값이 없는 항목(null)은 범위 조건에 맞지 않는다 — JS 비교에서 null 은 0 으로 강제돼
-      //   'cpuUsageMax=5' 가 사용률 미상 VM 을 '0%' 로 통과시켰다(같은 응답 totals.usageUnknown 은 미상으로 센다).
-      const val = numOrNull(v[field]);
-      if (val == null) { hit = false; break; }
-      if (min != null && !Number.isNaN(min) && !(val >= min)) { hit = false; break; }
-      if (max != null && !Number.isNaN(max) && !(val <= max)) { hit = false; break; }
-    }
-    if (!hit) continue;
-    if (osq && !String(v.guestOS).toLowerCase().includes(osq)) continue;
-    if (q.toolsStatus && v.toolsStatus !== q.toolsStatus) continue;
-    // GPU 집계는 GPU 필터 이전 집합 기준(현재 필터 범위의 GPU 분포 표시용).
-    if (v.gpu) {
-      gpuCounts.total++;
-      const t = gpuType(v);
-      if (t === 'vgpu') gpuCounts.vgpu++;
-      else if (t === 'passthrough') gpuCounts.passthrough++;
-      else if (t === 'mixed') gpuCounts.mixed++;
-    }
-    if (wantGpu && !v.gpu) continue;
-    if (q.gpuType && gpuType(v) !== q.gpuType) continue;
-    out.push(v);
+// v2.730(검토 I-02): `paged=1` 또는 `cursor=` 를 주면 5,000 상한 뒤를 페이지로 이어 받는다 — 계약·스냅샷 변경 규칙은
+//   `inventory/vmPaging.js` 머리말. 둘 다 없으면 예전 응답 그대로(items 순서·limit 동일)이고 새 필드(returned·hasMore·
+//   nextCursor:null·snapshotAt)만 붙는다. 형식·정렬·조건·범위·순서 기억 판정은 캐시 앞에서 한다 — 400·409 는 캐시하지 않는다.
+//   범위(scope)는 여전히 applyFilters(req.user)가 먼저 강제하고, 캐시 키는 URL(cursor·정렬·조건 포함) + scopeKey 다.
+api.get('/vms', invVms, (req, res) => {
+  const paged = isPagedRequest(req.query);
+  if (paged) {
+    const snapNow = store.get();
+    const chk = prepareVmPage({ q: req.query, snapAt: snapNow.generatedAt, scopeKeyStr: scopeKey(req.user, snapNow),
+      matched: () => matchVms(snapNow, req.query, req.user).vms });
+    if (!chk.ok) return res.status(chk.status).json({ ok: false, error: chk.code, reason: chk.code, ...(chk.why ? { why: chk.why } : {}) });
   }
-  vms = out;
+  return memoJson(req, res, 'inv:vms', (snap) => {
+  const q = req.query;
+  const matched = matchVms(snap, q, req.user);
+  let vms = matched.vms;
+  const gpuCounts = matched.gpuCounts;
 
-  if (q.sortBy) vms = sortBy(vms, q.sortBy, q.order);
+  // 페이지 순회는 vmPaging 이 전순서(정렬 값 → VM id)로 정렬한다 — 예전 정렬(동률은 스냅샷 순서)은 경계에서 누락·중복이 난다.
+  if (q.sortBy && !paged) vms = sortBy(vms, q.sortBy, q.order);
   const limit = Math.max(1, Math.min(Number(q.limit) || 500, 5000)); // Math.max(1,…): 음수 limit 이 slice(0,-n)로 뒤에서 잘리는 것 방지
 
   // Aggregate over ALL matched VMs (not just the page) so the UI can show the
@@ -378,8 +402,18 @@ api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
       (v) => (v.storageGB / (v.storageGB + v.uncommittedGB)) * 100),
     gpu: gpuCounts,
   };
-  return { total: vms.length, items: vms.slice(0, limit), totals };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+  const snapshotAt = snap.generatedAt ?? null;
+  if (paged) {
+    const pg = buildVmPage({ vms, q, snapAt: snap.generatedAt, scopeKeyStr: scopeKey(req.user, snap) });
+    // 위 판정과 같은 틱이라 여기서 실패하는 것은 경합뿐이다 — 캐시에 남기지 않도록 던진다(memoJson 500 → 클라이언트 재시도 → 409).
+    if (!pg.ok) throw new Error(pg.code);
+    return { total: vms.length, items: pg.items, totals, returned: pg.items.length, hasMore: pg.hasMore, nextCursor: pg.nextCursor, snapshotAt, page: pg.page };
+  }
+  const items = vms.slice(0, limit);
+  // 예전 응답에는 이어 받는 방법이 없다(nextCursor:null) — 나머지는 paged=1 로 다시 요청한다.
+  return { total: vms.length, items, totals, returned: items.length, hasMore: vms.length > items.length, nextCursor: null, snapshotAt };
+}, { extraKey: scopeKey(req.user, store.get()) });
+});
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
 api.get('/vms/lookup', invVms, (req, res) => {

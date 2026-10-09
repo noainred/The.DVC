@@ -10,6 +10,10 @@ import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue } from '../../collector/registry.js';
+// 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
+import { withDefaultScheme, urlTransport, transportSummary, allowlistSummary, rejectedHttpRegistrations, centralUrlTransport } from '../../collector/transportPolicy.js';
+import { tlsListenerStatus } from '../../util/httpsServer.js';
+import { wanTlsStatus } from '../../util/resilientFetch.js';
 import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
@@ -76,32 +80,59 @@ function vmScopeDenied(req, vm, write) {
   return null;
 }
 
+/** 관리자 문맥(S-09) — 이 문맥만 본문의 평문 HTTP 예외(allowInsecureHttp + insecureHttpReason)를 쓸 수 있다. */
+const adminTransport = (req) => ({ source: 'admin', actor: req.user?.username || '' });
+/** 감사 문구 — 이번 저장이 평문 HTTP 예외를 새로 남겼으면(사유 포함) 적는다. 사유는 비밀이 아니다. */
+function httpExceptionAudit(collector, sinceMs) {
+  const ex = collector?.insecureHttp;
+  if (!ex || ex.source !== 'admin' || !(Number(ex.at) >= sinceMs)) return '';
+  return ` · 평문 HTTP 예외 승인(사유=${String(ex.reason || '').slice(0, 200)})`;
+}
+/** 화면용 전송 상태 — 이 포탈의 리스너·사설 CA·허용 목록·거부 기록·(엣지면) CENTRAL_URL. 파일 경로는 admin 전체 범위 라우트라 싣는다. */
+function transportView(list) {
+  const known = new Set(list.flatMap((c) => [String(c.id || '').toLowerCase(), String(c.name || '').toLowerCase()]));
+  const l = tlsListenerStatus();
+  return {
+    summary: transportSummary(list),
+    allowlist: allowlistSummary(),
+    rejected: rejectedHttpRegistrations().filter((r) => !known.has(String(r.name || '').toLowerCase())),
+    listener: { tls: l.tls, tlsPort: l.tlsPort, httpPort: l.httpPort, httpAlso: l.httpAlso, listening: l.listening,
+      cert: l.cert ? { subject: l.cert.subject, notAfter: l.cert.notAfter, daysLeft: l.cert.daysLeft, selfSigned: l.cert.selfSigned, san: l.cert.san } : null,
+      warnings: l.warnings, reload: l.reload },
+    wanTls: wanTlsStatus(),
+    centralUrl: centralUrlTransport(config.agent?.centralUrl),
+  };
+}
+
 export function registerCollectorsDc(adminRouter) {
 
 // ---- Distributed collection: remote collector agents ----------------------
 
 // List registered collectors (tokens redacted) + live pull status.
 adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
-  res.json({ collectors: listCollectors(), status: allCollectorStatus(), identity: agentIdentitySummary() });
+  const collectors = listCollectors();
+  res.json({ collectors, status: allCollectorStatus(), identity: agentIdentitySummary(), transport: transportView(collectors) });
 });
 
 adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
   // 관리자 UI 등록 = 수동 고정(managed) — 엣지 자기등록이 URL/토큰을 덮어쓰지 못하게.
-  const result = addCollector(req.body || {}, { managed: true });
-  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
+  const t0 = Date.now();
+  const result = addCollector(req.body || {}, { managed: true, transport: adminTransport(req) });
+  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
 adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
   // 관리자 UI 수정 = 수동 고정(managed) — 저장한 URL/토큰이 자기등록으로 원복되던 버그 방지.
-  const result = updateCollector(req.params.id, req.body || {}, { managed: true });
+  const t0 = Date.now();
+  const result = updateCollector(req.params.id, req.body || {}, { managed: true, transport: adminTransport(req) });
   if (result.ok) {
     ensureCollectorDatacenter(result.collector);
     // 비활성화 시 그 수집기의 원격 데이터도 즉시 걷어낸다 — 풀러는 disabled를 건너뛰므로
     // 남겨두면 서버 분석/전력 화면에 유령 서버가 재시작 전까지 계속 표시된다.
     if (result.collector?.enabled === false) { clearCollectorHosts(req.params.id); clearCollectorServers(req.params.id); }
     pullNow().catch(() => {});
-    logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' });
+    logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 400).json(result);
 });
@@ -160,42 +191,53 @@ adminRouter.post('/collectors/import', csvPerm, adminOnly, fleetOnly, (req, res)
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
 
   // 대소문자 무시 id 조회 → 기존 항목의 실제 id(registry dedupe 규칙과 동일 키).
-  const existing = new Map(loadCollectors().map((c) => [String(c.id).toLowerCase(), c.id]));
+  const loaded = loadCollectors();
+  const existing = new Map(loaded.map((c) => [String(c.id).toLowerCase(), c.id]));
   const existingId = (id) => existing.get(String(id).toLowerCase());
+  const existingEntry = new Map(loaded.map((c) => [String(c.id).toLowerCase(), c]));
+  // S-09: 가져오기 전체에 대한 평문 HTTP 예외(관리자 명시 + 사유) — 드라이런과 실행이 같은 값으로 판정한다.
+  //   덮어쓰기 행은 기존 항목을 넘긴다(URL 이 그대로면 '기존 항목' 규칙으로 통과 — 예전엔 기존 항목 없이 검증했다).
+  const httpEx = req.body?.allowInsecureHttp === true ? { allowInsecureHttp: true, insecureHttpReason: String(req.body?.insecureHttpReason ?? '') } : {};
+  const ctx = adminTransport(req);
+  const validate = (input) => collectorInputIssue({ ...input, ...httpEx }, existingEntry.get(String(input.id).toLowerCase()) || null, ctx);
+  const t0 = Date.now();
 
-  const { report, summary } = analyzeCollectorsImport(rows, { existingId, validate: collectorInputIssue });
+  const { report, summary } = analyzeCollectorsImport(rows, { existingId, validate });
+  // 평문 HTTP 주소 행 수(화면이 '예외 승인' 칸을 보일지 정한다).
+  const insecureRows = report.filter((r) => urlTransport(withDefaultScheme(r.url)).insecure).length;
   if (req.body?.dryRun) {
-    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length, insecureRows });
   }
 
   const allowOverwrite = req.body?.overwrite === true;
-  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  let added = 0, overwritten = 0, httpApproved = 0; const failed = []; const skipped = [];
   const verdictByLine = new Map(report.map((r) => [r.line, r])); // O(rows²) find → O(rows) (v2.342 성능)
   for (const row of rows) {
     const verdict = verdictByLine.get(row._line);
     if (verdict?.action === 'error') { failed.push({ line: verdict.line, id: verdict.id, reason: verdict.reason }); continue; }
     const input = { id: row.id, name: row.name, url: row.url, datacenter: row.datacenter,
-      vcenterId: row.vcenterId, enabled: row.enabled };
+      vcenterId: row.vcenterId, enabled: row.enabled, ...httpEx };
     if (row._hasToken) input.token = row.token; // 비우면 기존 유지(normalize 규칙)
     const curId = existingId(row.id);
     if (curId) {
       if (!allowOverwrite) { skipped.push({ line: row._line, id: row.id, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
-      const r = updateCollector(curId, input, { managed: true });
+      const r = updateCollector(curId, input, { managed: true, transport: ctx });
       if (r.ok) {
         overwritten++; ensureCollectorDatacenter(r.collector);
+        if (httpExceptionAudit(r.collector, t0)) httpApproved++;
         // v2.583 #31: PUT 라우트와 같게 — CSV 로 비활성화해도 원격 데이터를 즉시 걷어낸다(유령 서버 방지).
         if (r.collector?.enabled === false) { clearCollectorHosts(curId); clearCollectorServers(curId); }
       }
       else failed.push({ line: row._line, id: row.id, reason: r.reason });
     } else {
-      const r = addCollector(input, { managed: true });
-      if (r.ok) { added++; ensureCollectorDatacenter(r.collector); existing.set(row.id.toLowerCase(), row.id); }
+      const r = addCollector(input, { managed: true, transport: ctx });
+      if (r.ok) { added++; ensureCollectorDatacenter(r.collector); existing.set(row.id.toLowerCase(), row.id); if (httpExceptionAudit(r.collector, t0)) httpApproved++; }
       else failed.push({ line: row._line, id: row.id, reason: r.reason });
     }
   }
   if (added || overwritten) pullNow().catch(() => {});
-  logAudit({ user: req.user?.username, action: '수집 서버 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
-  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
+  logAudit({ user: req.user?.username, action: '수집 서버 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}${httpApproved ? ` · 평문 HTTP 예외 승인 ${httpApproved}건(사유=${String(httpEx.insecureHttpReason || '').slice(0, 200)})` : ''}`, ip: req.ip || '' });
+  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length, httpApproved });
 });
 
 // 엣지 포탈 로컬 계정 비밀번호 일괄 변경 — 기본(admin) 비번을 중앙에서 한 번에 교체.
@@ -401,7 +443,7 @@ adminRouter.post('/collectors/upgrade', adminOnly, fleetOnly, async (req, res) =
     const why = lastBundleReject();
     return res.status(409).json({ ok: false, reason: why || '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
   }
-  const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force) });
+  const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force), manifest: bundle.manifest || null }); // v2.730(S-10): 서명 manifest 를 함께
   const ok = results.filter((r) => r.ok).length;
   res.json({ ok: true, version: bundle.version, source: bundle.source, pushed: results.length, succeeded: ok, results });
 });
@@ -417,7 +459,7 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
     if (saved) { if (!token) { token = saved.token; url = saved.url; } else { url = url || saved.url; } }
   }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
-  if (!/^https?:\/\//.test(url)) url = `http://${url}`;
+  url = withDefaultScheme(String(url)); // S-09: 스킴 없는 주소의 기본은 https://
   // SSRF 방어: 링크로컬/클라우드 메타데이터 주소로는 토큰을 붙여 요청하지 않는다(등록 경로와 동일 가드).
   const ssrf = ssrfBlockReason(url);
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
@@ -425,6 +467,8 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   let retried = 0;
   // 단계별 추적(v2.424, 사용자 요구 '중앙→엣지A→엣지B 포워딩 트러블슈팅'): 어디서 막히는지(TCP/토큰/정체) 분리한다.
   const steps = [];
+  // S-09: 평문 HTTP 로 시험하면 토큰이 평문으로 나간다 — 막지는 않되(관리자가 누른 1회 시험) 단계에 먼저 적는다.
+  if (urlTransport(url).insecure) steps.push({ msg: `평문 HTTP(${url}) — 이 시험의 X-Collector-Token 이 암호화되지 않은 채 전송됩니다. 엣지에 TLS 를 켜고 https:// 로 등록하세요.`, level: 'warn' });
   const entry = body.id ? loadCollectors().find((c) => c.id === body.id) : null;
   let host = '', port = 0;
   try { const u = new URL(url); host = u.hostname.replace(/^\[|\]$/g, ''); port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* */ }
@@ -482,7 +526,7 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, fleetOnly, async (req
   if (!token) return res.status(400).json({ ok: false, reason: '토큰이 없습니다. 이 화면에서 토큰을 입력(또는 자동 생성)한 뒤 다시 시도하세요.' });
   // v2.480(3차 감사 S2): 저장 토큰(req.body.token 없음)을 쓰는 동기화는 URL 도 저장값 고정
   let url = String((req.body?.token ? req.body?.url : '') || saved.url || '').trim();
-  if (url && !/^https?:\/\//.test(url)) url = `http://${url}`;
+  if (url) url = withDefaultScheme(url); // S-09: 스킴 없는 주소의 기본은 https://
   const ssrf = url ? ssrfBlockReason(url) : 'URL이 없습니다.';
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
   let host = ''; let urlPort = 0;

@@ -18,7 +18,7 @@
 | RAM | 2 GB | 8 GB+ |
 | 디스크 | 5 GB | 20 GB+ (전력/지표 시계열 DB 보존) |
 | 권한 | 설치에 `sudo`(root) | 동일 |
-| 런타임 | **불필요** — 오프라인 패키지에 Node.js 런타임이 **포함**됨 | 동일 |
+| 런타임 | **불필요** — 오프라인 패키지에 Node.js 런타임(릴리스 빌드는 **22.23.2**)이 **포함**됨 | 동일 |
 
 - 방화벽에서 포탈 포트(**기본 4000/tcp**)를 열어야 합니다(§6).
 - 인터넷이 없어도 됩니다(에어갭). 자동 업그레이드만 사내 미러 또는 GitHub 릴리스가 필요합니다(§8).
@@ -82,6 +82,9 @@ curl -L -O $BASE/vmware-portal-offline-<버전>-el9-x64.tar.gz.sha256
 # 3) 무결성 검증(필수) — 통과해야 §2.1 로 진행
 sha256sum -c vmware-portal-offline-<버전>-el9-x64.tar.gz.sha256
 
+# 4) (v2.730+) 서명 manifest 도 함께 받습니다 — 업그레이드 설치(§8 수동 업그레이드)에 필요합니다
+curl -L -O $BASE/vmware-portal-<버전>.manifest.json
+
 # (폐쇄망) 서버로 전송
 scp vmware-portal-offline-<버전>-el9-x64.tar.gz <서버>:/tmp/
 ```
@@ -93,7 +96,7 @@ scp vmware-portal-offline-<버전>-el9-x64.tar.gz <서버>:/tmp/
 git clone https://github.com/noainred/The.DVC.git
 cd The.DVC
 
-# 의존성 설치 + 웹 빌드 (Node 20+ 필요 — 소스 실행은 런타임을 직접 준비해야 함)
+# 의존성 설치 + 웹 빌드 (Node 22.x 필요 — engines '>=22.5.0 <23', 검증 버전 22.23.2. 소스 실행은 런타임을 직접 준비해야 함 — 부록 A.0)
 npm install
 npm run build
 
@@ -327,6 +330,15 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 자세한 통신/방화벽 매트릭스는 [docs/NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) 참고.
 
+> **HTTPS 전환(v2.730+, 검토 S-09)**: 포탈은 기본으로 평문 HTTP(4000)로 받습니다. 중앙↔엣지 구간에는 수집 토큰·배포 자격증명이 흐르므로
+> HTTPS 로 바꾸기를 권장합니다. ① 각 노드 `portal.env` 에 `TLS_CERT_FILE`·`TLS_KEY_FILE`(+ 중간 CA 체인 `TLS_CA_FILE`)을 주고 전환 기간에는
+> `TLS_PORT=4443` + `TLS_HTTP_ALSO=true` 로 평문과 함께 연다(설정이 틀리면 평문으로 열지 않고 기동이 멈춘다) ② 사설 CA 면 상대 노드에
+> `WAN_TLS_CA_FILE`(PEM)을 둔다 — `WAN_TLS_INSECURE=true` 대신 ③ 설정 › 수집 서버의 URL·엣지의 `CENTRAL_URL`·`EDGE_ADVERTISE_URL` 을
+> `https://` 로 바꾼다 ④ 확인 뒤 `TLS_HTTP_ALSO` 를 지운다. 방화벽에는 TLS_PORT 를 연다.
+> v2.730 부터 **새 원격 `http://` 수집 서버 등록은 거부**됩니다(스킴 없는 주소는 https 로 해석). 업그레이드 전에 저장된 http 항목은 그대로
+> 동작하되 화면·보안 자가진단이 경고합니다. 꼭 필요한 보호 구간은 설정 › 수집 서버에서 **사유와 함께 예외**로 두거나 중앙
+> `COLLECTOR_HTTP_ALLOW`(대역) 로 허용합니다.
+
 > **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › Security › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 `firewall-cmd` sudo 가 필요하며 `packaging/offline/install.sh` 가 `/etc/sudoers.d/vmware-portal-hostaccess` 로 설치한다. 수동 설치(이 문서 방식)나 v2.485 이전에 설치한 서버는 화면이 안내하는 두 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 추가한다. 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
 
 ---
@@ -381,6 +393,23 @@ UPGRADE_POLL_INTERVAL_MS=3600000                      # 1시간
 새 **설치 패키지**를 풀고 `sudo ./install.sh --port 4000`을 재실행하면 기존 앱이
 백업(`app.bak.<ts>`)된 뒤 교체됩니다(설정 `portal.env`·DB 유지). 적용 직전 라이브 SQLite는
 WAL 체크포인트로 복사 정합성을 확보합니다.
+
+**서명 확인(v2.730+, 검토 S-10)** — 업그레이드 설치는 **기존 설치본의** 확인 도구와 신뢰 공개키로 새 패키지와 서명 manifest 를
+먼저 확인하고, 통과하지 못하면 아무것도 바꾸지 않고 멈춥니다. sha256 은 패키지와 같은 채널에서 오므로 '누가 만들었는지' 를 증명하지
+못합니다 — 그래서 서명을 따로 봅니다(상세 [RELEASE-SIGNING.md](RELEASE-SIGNING.md)).
+
+```bash
+# 풀기 전에 — 기존 설치본의 도구로(가장 확실한 확인. 새 패키지 안의 install.sh 는 패키지와 함께 바뀔 수 있다)
+sudo vmware-portal-verify --file vmware-portal-offline-<버전>-el9-x64.tar.gz --manifest vmware-portal-<버전>.manifest.json
+
+# 설치 — 패키지·manifest 가 압축을 푼 폴더 옆에 있으면 자동으로 찾는다. 다른 위치면 지정한다
+sudo ./install.sh --port 4000 --package /경로/vmware-portal-offline-<버전>-el9-x64.tar.gz --manifest /경로/vmware-portal-<버전>.manifest.json
+```
+
+- manifest 를 찾지 못하면 업그레이드 설치는 사유와 함께 멈춥니다. `--skip-signature-check` 는 확인을 건너뛰는 탈출구이고 권장하지 않습니다.
+- 신규 설치(기존 설치본 없음)는 호스트에 신뢰 기준이 없어 **새 패키지 안의 도구로 무결성만** 봅니다 — 배포자 확인은 신뢰하는 다른 서버의 `vmware-portal-verify` 로 하세요.
+- v2.730 이전 설치본에는 확인 도구가 없어, 그 위에 올리는 첫 업그레이드도 무결성만 봅니다(도구가 그 뒤부터 생깁니다).
+- 포탈 안의 자동 업그레이드(원격·감시 폴더·중앙 push)도 같은 판정을 씁니다 — 신뢰 공개키가 없으면 어떤 번들도 설치하지 않습니다(설정 › 업그레이드의 '릴리스 서명' 카드).
 
 ---
 
@@ -486,14 +515,45 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 
 오프라인 tarball(운영 권장) 대신 저장소를 클론해 소스로 실행합니다. **인터넷 되는 환경·개발용**에 적합합니다.
 
-### A.1 Node.js 22 LTS 이상 설치 (컴파일러 불필요)
+### A.0 런타임 계약 — 검증된 Node 버전
+
+| 항목 | 값 | 어디에 적혀 있나 |
+|---|---|---|
+| 지원 major | **Node 22 만** | `server/src/util/runtimeCheck.js` `RUNTIME_CONTRACT` |
+| 범위(engines) | `>=22.5.0 <23` | 루트·`server`·`web` 의 `package.json` `engines` |
+| 검증 버전 | **22.23.2** | `.nvmrc` · `.node-version` · CI(`ci.yml`) · 릴리스(`release.yml NODE_VERSION`) · 오프라인 번들 기본값(`build-package.sh`) |
+
+- **22.5.0 은 기술적 하한**입니다(내장 `node:sqlite` 가 처음 들어간 버전). 검증한 버전은 22.23.2 이고, 22.x 의 다른 패치는 계약 안이지만
+  CI 로 검증하지 않았습니다. 하한 미만이면 SQLite 대신 NDJSON 폴백이 됩니다.
+- **Node 24 이상은 지원하지 않습니다.** 서버의 장비·엣지 통신은 전역 `fetch` 에 패키지 `undici`(6.x)의 `Agent` 를 넘기는데,
+  전역 `fetch` 는 Node 가 내장한 undici 라 major 마다 버전이 다릅니다. 검토 환경 Node 26.6.0 에서는 이 조합이
+  `UND_ERR_INVALID_ARG: invalid onError method` 로 실패했습니다 — vCenter·iDRAC·Horizon·스토리지 수집이 전부 '연결 실패' 처럼 보입니다.
+  (Node 22 의 결함이 아닙니다. Node 24 는 직접 확인하지 못했습니다 — 기동 자가 점검이 판정합니다.)
+- ⚠ **npm 의 `engines` 는 실행을 막지 않습니다** — `npm install` 이 `EBADENGINE` 경고만 내고(`engine-strict` 가 꺼져 있으면) 설치는 진행되며,
+  `node server/src/index.js` 는 engines 를 전혀 보지 않습니다. 그래서 포탈이 **기동할 때 스스로 점검**합니다:
+  - 버전 판정 + **실제 호환성 자가 점검**(127.0.0.1 임시 서버에 전역 `fetch` + undici `Agent` 로 1회 요청, 실패하면 같은 Agent 로 패키지
+    `undici.fetch` 를 한 번 더 — 그쪽만 되면 '런타임 불일치' 로 확정). 비동기·짧은 시한이라 기동을 늦추지 않습니다.
+  - 결과는 기동 로그 한 줄(`[runtime] Node v… — …`), `GET /api/health` 의 `runtime` 필드(관리자: 버전·계약·자가 점검 상세 / 그 밖의 계정: `state` 만),
+    특수 기능 › 다빈치 서비스 점검의 'Node 런타임 호환성' 행에 나옵니다. `state` 는 `ok` · `unsupported`(계약 밖 버전) · `mismatch`(통신 불일치 확인) ·
+    `error`(판정 불가) · `checking` · `unchecked` 입니다.
+  - **비지원 버전이어도 기동을 막지 않습니다**(경고 + 상태 노출). 막으면 업그레이드·런타임 교체 중 포탈 화면 자체가 사라져 원인을 볼 곳이 없어지고,
+    관리 화면·백업·비-HTTP 수집(SSH)은 그 상태에서도 동작하기 때문입니다.
+- 오프라인 패키지는 런타임을 함께 담습니다. `build-package.sh --node-tarball` 로 다른 버전을 넣을 수 있으니 반드시 `node-v22.23.2-…` 를 쓰세요
+  (in-app 업그레이드 번들은 앱만 바꾸고 런타임은 그대로 둡니다).
+
+```bash
+nvm install && nvm use       # .nvmrc(22.23.2)
+node -v                      # v22.23.2
+```
+
+### A.1 Node.js 22 설치 (컴파일러 불필요 · 24 이상 금지 — A.0)
 
 ```bash
 # Rocky/RHEL/CentOS 9
 curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - && sudo dnf install -y nodejs git
 # Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs git
-node -v   # v22.x
+node -v   # v22.x (권장 v22.23.2 — 배포판 저장소의 22.x 패치는 계약 안이지만 검증 버전과 다를 수 있음)
 ```
 
 ### A.2 클론 + 빌드
@@ -529,7 +589,7 @@ set -a; . /etc/vmware-portal/portal.env; set +a
 NODE_OPTIONS=--experimental-sqlite npm start
 ```
 
-> `--experimental-sqlite`는 Node 22의 내장 `node:sqlite`를 켭니다(없으면 NDJSON 폴백, 대용량 시계열 성능↓). Node 23.5+/24는 불필요.
+> `--experimental-sqlite`는 Node 22의 내장 `node:sqlite`를 켭니다(없으면 NDJSON 폴백, 대용량 시계열 성능↓). 최근 22.x 는 플래그 없이도 켜지지만(22.22.2 에서 확인 — 어느 패치부터인지는 확인하지 않았습니다) 붙여 두어도 무해합니다. Node 23 이상은 지원하지 않습니다(A.0).
 > 최초 로그인 비번: `cat /etc/vmware-portal/initial-admin-password.txt`(§2.2). 검증: `curl -s http://localhost:4000/api/health`.
 
 ### A.5 systemd 서비스(상시 구동)

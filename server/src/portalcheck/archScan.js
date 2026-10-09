@@ -171,6 +171,11 @@ export const DB_MIGRATE_EXCLUDED = Object.freeze({
 /** CONFIG_DIR 의 설정 파일 중 PURPOSES·SECRET_FILES·상태 판정 어디에도 없지만 설치가 만드는 것으로 확인된 파일. */
 export const KNOWN_CONFIG_FILES = Object.freeze({
   'portal.env': '설치 스크립트가 만드는 env 파일(config.js 가 읽는다)',
+  'secrets-policy.json': '자격증명 저장 방식(평문/암호화) 정책(security/secretVault.js — 비밀 없음, 소유자 + OTP 로만 바꾼다)',
+  'secrets-policy.trusted.json': '자격증명 저장 방식 정책의 신뢰 사본(security/secretVault.js — 정책 파일 손상·유실 시 복구용, S-07 2026-10-09)',
+  'peer-trust.json': '장비 지문 신뢰(SSH 호스트키·TLS 인증서 승인 · 정책 enforce/observe — security/peerTrust.js, S-01·S-02 2026-10-09)',
+  'release-signing-keys.conf': '릴리스 서명 신뢰 공개키(호스트 관리자가 직접 두는 파일 — 비밀 없음, 0600/0640 · upgrade/signature.js, S-10 2026-10-09)',
+  'tls-ca-bundle.pem': '사설 CA 번들(PEM, 비밀 아님 — 관리자가 직접 둔다 · security/tlsTrust.js, S-02 2026-10-09)',
   'settings-owners.txt': '설정 소유 계정 목록(routes/admin/shared.js requireSettingsOwner)',
   'db-location.json': 'DB 저장 디렉터리 설정(insights/dbLocation.js)',
   'ping-targets.json': 'Ping 감시 대상 등록부(ping/store.js — 사용자가 손으로 등록, v2.580 손상 보존). v2.614 첫 목 실행에서 미분류로 잡혀 등재',

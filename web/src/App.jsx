@@ -6,6 +6,7 @@ import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import SessionExpiryGuard from './components/SessionExpiryGuard.jsx';
+import { createActivityPinger, sendActivity, serverLogout, ACTIVITY_EVENTS } from './sessionActivity.js'; // 2026-10-09 검토 S-05 — 서버 로그아웃·활동 신호
 import GlobalProgress from './components/GlobalProgress.jsx'; // 3초 넘는 대기의 진행상태(v2.501)
 import { STable } from './components/STable.jsx';
 
@@ -113,6 +114,7 @@ import OverviewModeToggle from './views/OverviewModeToggle.jsx'; // v2.670
 import { modeFromHash } from './views/execOverviewText.js';
 import { MODE_KEY, normMode, resolveMode } from './version_4/mode.js';
 import { statusCounts } from './views/statusBarText.js'; // v2.675 — 첫 수집 중 상태바는 0 이 아니라 '—'
+import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검토 I-06
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
@@ -171,21 +173,35 @@ export default function App() {
     const mins = Math.max(1, Number(authCfg?.idleLogoutMin) || 30);
     const IDLE_MS = mins * 60 * 1000;
     let t;
-    const doLogout = () => { setToken(null); broadcastLogout(); setLoginNotice(`${mins}분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.`); setUser(null); };
+    const doLogout = () => { serverLogout(getToken()); setToken(null); broadcastLogout(); setLoginNotice(`${mins}분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.`); setUser(null); };
     const reset = () => { clearTimeout(t); t = setTimeout(doLogout, IDLE_MS); };
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'visibilitychange'];
+    const events = ACTIVITY_EVENTS; // 서버 활동 신호(아래)와 같은 사건
     events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
     reset();
     return () => { clearTimeout(t); events.forEach((e) => window.removeEventListener(e, reset)); };
   }, [user, authCfg]);
 
-  const logout = () => { setToken(null); broadcastLogout(); setUser(null); };
+  // 서버측 유휴 만료의 기준(S-05) — 자동 폴링은 활동이 아니므로 키보드·마우스 활동을 최대 1분에 한 번 서버에 알린다.
+  //   유휴 로그아웃 설정과 무관하게 보낸다(서버 설정이 화면을 연 뒤 켜질 수 있다). 화면을 연 것(로그인·새로고침)도 활동이다.
+  useEffect(() => {
+    if (!user || user === 'loading' || !getToken()) return undefined;
+    if (authCfg && authCfg.authEnabled === false) return undefined;
+    const pinger = createActivityPinger({ send: () => sendActivity(getToken()) });
+    pinger.ping(true);
+    const on = () => { pinger.ping(); };
+    ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, on, { passive: true }));
+    return () => { ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, on)); };
+  }, [user, authCfg]);
+
+  // 로그아웃(S-05): 서버에 이 세션의 폐기를 먼저 알린다(복사해 둔 토큰도 무효가 된다). 실패해도 화면 로그아웃은 그대로 진행한다.
+  const logout = () => { serverLogout(getToken()); setToken(null); broadcastLogout(); setUser(null); };
 
   // 크로스탭 로그아웃 — 한 탭에서 로그아웃하면 다른 탭도 즉시 세션 종료(sessionStorage 토큰
   // 탭 포함). 이전에는 리스너가 없어 복제 탭이 무기한 인증 상태로 남았다.
   useEffect(() => {
     const onStorage = (e) => {
-      if (e.key === LOGOUT_BROADCAST_KEY) { setToken(null); setUser(null); }
+      // 다른 탭의 로그아웃 — 이 탭이 따로 들고 있던 토큰(sessionStorage)도 서버에서 폐기한다(같은 토큰이면 이미 폐기돼 401 — 무해).
+      if (e.key === LOGOUT_BROADCAST_KEY) { serverLogout(getToken()); setToken(null); setUser(null); }
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
@@ -552,6 +568,13 @@ function Portal({ user, onLogout }) {
   };
 
   // 필터바·본문·오버레이 — 기존 틀과 V5 틀이 **같은 요소**를 쓴다(화면을 두 벌 만들지 않는다).
+  // 2026-10-09 검토 I-06: 서버 Node 런타임 불일치 — 장비 수집 실패를 장비 장애로 오판하기 전에 원인을 먼저 말한다(세 셸 공통).
+  const rtBanner = runtimeBanner(health);
+  const rtBannerEl = rtBanner && (
+    <div className="banner" role="alert" style={{ borderColor: rtBanner.tone === 'bad' ? 'var(--red)' : 'var(--amber)', whiteSpace: 'normal', marginBottom: 10 }}>
+      <b>{rtBanner.title}</b> — {rtBanner.text}
+    </div>
+  );
   const filterBar = (showFilters && (
           <div className="filters">
             {!v5On && <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
@@ -701,6 +724,7 @@ function Portal({ user, onLogout }) {
           <V6Shell user={user} health={health} healthError={healthError} upgrading={upgrading} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
             onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
             onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV6} onLogout={onLogout}>
+            {rtBannerEl}
             {filterBar}
             {tabBody}
           </V6Shell>
@@ -719,6 +743,7 @@ function Portal({ user, onLogout }) {
             scope={v5Scope} setScope={setV5Scope}
             onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
             onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV5} onLogout={onLogout}>
+            {rtBannerEl}
             {filterBar}
             {tabBody}
           </V5Shell>
@@ -835,6 +860,7 @@ function Portal({ user, onLogout }) {
           onGo={goMenu} onToggleRail={toggleRail} onEdit={() => { setShowMenuEdit(true); setDrawerOpen(false); }} onRetry={retryMenu}
           isAdmin={user.role === 'admin'} source={resolvedMenu.source} unknown={resolvedMenu.unknown} menuLoaded={menuState === 'ok'} menuState={menuState} />
         <main className="content">
+          {rtBannerEl}
           {filterBar}
 
           {tabBody}

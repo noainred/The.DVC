@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf } from '../auth/auth.js';
+import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser } from '../auth/auth.js';
 import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
-import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
+import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/ad.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
-import { newSessionId, setActiveSession } from '../auth/sessions.js';
+import { newSessionId, setActiveSession, clearActiveSessionIf } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
@@ -98,23 +98,33 @@ authRouter.post('/login', async (req, res) => {
 
   recordLoginSuccess(gateIp, username);
   // 로컬 계정 토큰에는 src/tv(tokenVersion)를 실어 서버측 폐기(비번/역할 변경 시 즉시 무효)를
-  // 가능하게 한다(감사 M5). AD 계정은 로컬 레코드가 없어 다음 로그인 시점에 역할이 반영된다.
+  // 가능하게 한다(감사 M5). AD 계정은 src:'ad' + 정책 epoch(ep) — AD 를 끄거나 역할 매핑을 바꾸면
+  // 그 전에 발급된 AD 토큰이 무효가 된다(2026-10-09 검토 S-08). 역할은 다음 로그인에 다시 정해진다.
   const local = user.source === 'local' ? getUser(user.username) : null;
-  // 단일 세션 강제(ID 공유 금지, v2.280) — 강제 대상이면 이 로그인에 새 세션 ID(sid)를 발급해 토큰에
-  // 싣고 계정의 활성 세션으로 등록한다. 이 등록이 같은 계정의 이전 세션 sid 를 덮어써(최신 로그인
-  // 우선) 이전 토큰이 resolveTokenUser 에서 무효가 된다. 아니면 sid 를 싣지 않는다(다중 세션 허용).
+  const isAd = user.source === 'ad';
+  // 세션 ID(sid)는 **모든 로그인**에 발급한다(2026-10-09 검토 S-05) — 서버 로그아웃·유휴 판정·열린 장기 연결 폐기가
+  // 세션 단위로 동작하려면 식별자가 필요하다(다중 세션 허용 상태에서도 그 세션만 끊는다).
+  // 단일 세션 강제(ID 공유 금지, v2.280)는 예전 그대로 '강제 대상일 때만' 활성 세션으로 등록한다 — 이 등록이 같은 계정의
+  // 이전 세션 sid 를 덮어써(최신 로그인 우선) 이전 토큰이 resolveTokenUser 에서 무효가 된다.
   // v2.294: 판정은 singleSessionRequired 하나로(resolveTokenUser 와 동일 함수 — 발급/검사 쌍 유지).
   // 내장 데모 계정(local.demo)은 '설정 › 세션 보안'의 Demo 중복 접속 모드에 따라 전역과 독립 판정:
-  // 'allow'=중복 허용(전역 단일세션이어도 sid 미발급·미검사), 'single'=데모만 단일 세션, 미설정=전역 따름.
-  const sid = singleSessionRequired(!!local?.demo) ? newSessionId() : null;
-  const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(sid ? { sid } : {}) });
-  if (sid) setActiveSession(user.username, sid, { at: Date.now(), ip });
-  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${sid ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
+  // 'allow'=중복 허용(전역 단일세션이어도 미등록·미검사), 'single'=데모만 단일 세션, 미설정=전역 따름.
+  const sid = newSessionId();
+  const single = singleSessionRequired(!!local?.demo);
+  // S-06: 최초 토큰에도 총 상한(sessionMaxHours, AD 는 AD 세션 상한까지)을 적용한다 — 예전에는 연장에서만 적용돼
+  //   연장하지 않는 것만으로 상한을 넘겨 쓸 수 있었다. 계산은 auth.js loginTokenExpSec(sessionPolicy.js) 하나.
+  const exp = loginTokenExpSec({ isAd });
+  const claims = { sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(isAd ? { src: 'ad', ep: user.adEpoch } : {}), sid };
+  const token = signToken(claims, { exp });
+  if (single) setActiveSession(user.username, sid, { at: Date.now(), ip });
+  noteIssuedSession({ sub: user.username, sid, exp });
+  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${single ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
+  const { adEpoch: _adEpoch, ...userOut } = user; // 정책 epoch 는 토큰에만 싣는다(응답에는 필요 없다)
   const enriched = {
-    ...user,
+    ...userOut,
     permissions: userPermissions(user),   // v2.643: super_admin·admin 행(CSV) 반영 — 판정은 userPermissionSet 하나
     /*
      * ⚠⚠ **사용자 재정의를 반영한 유효값**이다(v2.555). `roleToolsDenied(role)` 로 되돌리면
@@ -201,28 +211,60 @@ authRouter.post('/extend', authMiddleware, requireEnrolled, (req, res) => {
     });
   }
 
-  // (2) 기존 만료 기준으로 연장. (3) 총 상한이 있으면 그 지점까지만.
-  let nextExp = payload.exp + extendSec;
-  let capped = false;
-  const maxH = Number(sec.sessionMaxHours) || 0;
-  // 원래 로그인 시각 — 구버전 토큰(lt 없음)은 iat 로 폴백(그 토큰부터 lt 가 승계된다).
-  const loginAt = Number(payload.lt) || Number(payload.iat) || now;
-  if (maxH > 0) {
-    const hardLimit = loginAt + maxH * 3600;
-    if (nextExp > hardLimit) { nextExp = hardLimit; capped = true; }
-    if (nextExp <= now) {
-      return res.status(409).json({ ok: false, reason: `세션 총 상한(${maxH}시간)에 도달해 더 연장할 수 없습니다. 다시 로그인하세요.`, capped: true });
-    }
+  // (2) 기존 만료 기준으로 연장. (3) 총 상한이 있으면 그 지점까지만 — 계산은 auth.js extendTokenExpSec(sessionPolicy.js) 하나.
+  //   총 상한 = 원래 로그인 시각(lt) + min(sessionMaxHours, AD 면 AD 세션 상한). 최초 발급·검사와 같은 함수 계열이다.
+  const ext = extendTokenExpSec(payload, extendSec, now);
+  const nextExp = ext.exp;
+  const capped = ext.capped;
+  const capH = ext.hardLimit != null ? Math.round((ext.hardLimit - ext.loginAt) / 360) / 10 : 0;
+  if (ext.hardLimit != null && nextExp <= now) {
+    return res.status(409).json({ ok: false, reason: `세션 총 상한(${capH}시간)에 도달해 더 연장할 수 없습니다. 다시 로그인하세요.`, capped: true });
   }
 
-  // (4) 클레임 승계 — sid/tv 를 반드시 유지한다.
-  const { sub, role, name, src, tv, sid } = payload;
+  // (4) 클레임 승계 — sid/tv/ep 를 반드시 유지한다.
+  const { sub, role, name, src, tv, sid, ep } = payload;
   const token = signToken(
-    { sub, role, name, ...(src ? { src, tv } : {}), ...(sid ? { sid } : {}), lt: loginAt },
+    { sub, role, name, ...(src === 'local' ? { src, tv } : {}), ...(src === 'ad' ? { src, ep } : {}), ...(sid ? { sid } : {}), lt: ext.loginAt },
     { exp: nextExp },
   );
-  logAudit({ user: req.user?.username, action: '세션 연장', target: `${sec.sessionExtendMin}분`, detail: capped ? `총 상한(${maxH}h)까지만 연장` : `만료 ${new Date(nextExp * 1000).toISOString()}` });
+  // '계속 사용 중입니다' 클릭은 명시적인 사용자 활동이다(S-05 서버측 유휴).
+  noteIssuedSession({ sub, sid, exp: nextExp });
+  logAudit({ user: req.user?.username, action: '세션 연장', target: `${sec.sessionExtendMin}분`, detail: capped ? `총 상한(${capH}h)까지만 연장` : `만료 ${new Date(nextExp * 1000).toISOString()}` });
   res.json({ ok: true, token, expiresAt: nextExp * 1000, extendedMin: sec.sessionExtendMin, capped });
+});
+
+/**
+ * 로그아웃(2026-10-09 검토 S-05) — **이 세션을 서버에서 폐기**한다. 예전에는 브라우저가 토큰을 지우는 것뿐이라 복사해 둔
+ * 토큰이 만료까지 계속 통과했다(이 라우트가 없었다).
+ *  · 단일 세션 강제 여부와 무관하게 그 세션(sid)만 폐기한다 — 같은 계정의 다른 기기 세션은 그대로다.
+ *  · 폐기는 파일에 남아 재시작 후에도 유지되고, resolveTokenUser(HTTP·WS 공통)가 거부한다. 열린 SSH·RDP 연결에도 이벤트를 낸다.
+ *  · requireEnrolled 를 붙이지 않는다 — OTP 등록 전용 세션도 로그아웃할 수 있어야 한다.
+ *  · 이미 무효인 토큰은 authMiddleware 가 401 로 돌려준다(폐기할 것이 없다 — 화면은 그래도 로그아웃을 진행한다).
+ */
+authRouter.post('/logout', authMiddleware, (req, res) => {
+  if (!config.auth.enabled) return res.json({ ok: true, disabled: true });
+  const raw = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const r = revokeTokenSession(raw, { reason: 'logout' });
+  if (!r.ok) return res.status(401).json({ ok: false, reason: '토큰이 유효하지 않습니다.' });
+  if (r.sid) clearActiveSessionIf(r.username, r.sid);
+  logAudit({ user: req.user?.username, action: '로그아웃', detail: r.kind === 'session' ? '세션 폐기' : '토큰 폐기(구버전 토큰)', ip: clientIp(req) });
+  res.json({ ok: true, revoked: r.kind });
+});
+
+/**
+ * 사용자 활동 신호(2026-10-09 검토 S-05) — 서버측 유휴 만료의 기준. 웹이 키보드·마우스 활동이 있을 때 스로틀해(최대 분당 1회) 보낸다.
+ * 자동 폴링은 활동이 아니다(그래서 별도 신호다). 이미 유휴 만료·폐기된 세션은 401 — 되살리지 않는다(아래 ⚠ — resolveTokenUser 로 직접 판정).
+ * requireEnrolled 를 붙이지 않는다(OTP 등록 화면에서 QR 을 보는 동안에도 세션이 살아 있어야 한다).
+ */
+// ⚠ authMiddleware 를 쓰지 않고 같은 판정(resolveTokenUser — touchSessionActivity 안)을 직접 한다: authMiddleware 는 mock 모드
+//   데모 계정의 상태 변경 요청을 SAFE_ACTIONS 로 거르는데, 활동 신호는 데이터를 바꾸지 않는 세션 관리(로그아웃·연장과 같은 부류)라
+//   막히면 데모 계정이 활동 중에도 서버 유휴로 끊긴다. 토큰이 무효면 401 이다(인증은 그대로).
+authRouter.post('/activity', (req, res) => {
+  if (!config.auth.enabled) return res.json({ ok: true, disabled: true });
+  const raw = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!raw || !resolveTokenUser(raw)) return res.status(401).json({ error: 'unauthorized' });
+  const noted = touchSessionActivity(raw);
+  res.json({ ok: true, noted });
 });
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.
@@ -250,7 +292,9 @@ const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin')];
 const adFleetOnly = fullScopeOnlyWith('AD 설정은 전 사용자 공통이라 전체 범위 관리자만 다룰 수 있습니다.');
 
 authRouter.get('/ad-config', ...adminOnly, adFleetOnly, (_req, res) => {
-  res.json({ ad: loadAdConfig() });
+  const ad = loadAdConfig();
+  // transport: 인증 연결 보호 방식(ldaps·starttls·plain)과 경고 코드(S-03) — 화면이 평문 위험을 말한다.
+  res.json({ ad, transport: adTransportStatus(ad) });
 });
 
 // ⚠ 변경은 requireSettingsOwner 다(4차 재감사). AD 설정을 바꿀 수 있으면 자기가 통제하는 LDAP 를
@@ -258,7 +302,15 @@ authRouter.get('/ad-config', ...adminOnly, adFleetOnly, (_req, res) => {
 // OTP 우회 벡터이고, displayName 으로는 소유자 이름 위장 경로였다(권한 축을 username 으로
 // 단일화해 후자는 닫혔지만, 인증 소스 자체를 바꾸는 권능은 소유자 등급이 맞다).
 authRouter.put('/ad-config', ...adminOnly, adFleetOnly, requireSettingsOwner, (req, res) => {
-  res.json({ ok: true, ad: saveAdConfig(req.body || {}) });
+  let ad;
+  try { ad = saveAdConfig(req.body || {}); }
+  catch (e) {
+    // S-03: 새로 저장하는 평문 ldap://·잘못된 CA 등은 400 + 사유(저장하지 않는다).
+    if (e?.status === 400) return res.status(400).json({ ok: false, reason: e.message, field: e.field, code: e.code });
+    throw e;
+  }
+  logAudit({ user: req.user?.username, action: 'AD 설정 변경', detail: `사용=${ad.enabled ? '켬' : '끔'}·전송=${adTransportStatus(ad).mode}·정책=${ad.policyEpoch}`, ip: clientIp(req) });
+  res.json({ ok: true, ad, transport: adTransportStatus(ad) });
 });
 
 // Test connectivity / a sample login. Body: { config?, username?, password? }

@@ -21,9 +21,5 @@ export function areasStopNote(extra) {
   return { tone: base.tone, text: n == null ? `${base.text}.` : `${base.text} — 시도하지 않은 영역 **${n}개**.`, fix: base.fix };
 }
 
-/** 영역 배지 꼬리 글자 — 비활성(카탈로그)과 미시도(이번 주기)를 구분한다. */
-export function areaBadgeSuffix(a) {
-  if (a?.notTried) return ' (미시도)';
-  if (a?.skipped) return ' (비활성)';
-  return a?.failed ? ` ${a.ok}/${a.ok + a.failed}` : '';
-}
+// 영역 배지 판정(예전 areaBadgeSuffix)은 2026-10-09 검토 I-03 에 views/tools/onefsAreaState.js 로 옮겼다 — 예전 판정은 중간에 멈춘
+// 영역(failed 0)을 정상('')으로 그렸으므로 되살리지 말 것.

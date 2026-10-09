@@ -9,6 +9,8 @@ export default function GuestAccount() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [vc, setVc] = useState('');
   const [vms, setVms] = useState(null);
+  // 2026-10-09 검토 I-02 후속: /vms 상한(1000)에 걸려 잘렸는지 · 조회 실패인지 — '가동 중인 VM 없음' 으로 뭉개지 않는다.
+  const [vmsMeta, setVmsMeta] = useState(null);   // { total, returned, hasMore } | { error }
   const [sel, setSel] = useState(new Set());
   const [f, setF] = useState({ username: '', password: '', sudo: true, nopasswd: false, guestUser: 'root', guestPass: '' });
   const [busy, setBusy] = useState(false);
@@ -22,10 +24,16 @@ export default function GuestAccount() {
   useEffect(() => {
     if (!vc) { setVms(null); setSel(new Set()); return; }
     const gen = ++vmGen.current;
-    setVms(null); setSel(new Set());
+    setVms(null); setSel(new Set()); setVmsMeta(null);
     fetchJson('/vms', { vcenterId: vc, powerState: 'POWERED_ON', limit: 1000 })
-      .then((d) => { if (gen === vmGen.current) setVms(d.items || []); })
-      .catch(() => { if (gen === vmGen.current) setVms([]); });
+      .then((d) => {
+        if (gen !== vmGen.current) return;
+        const items = d.items || [];
+        setVms(items);
+        const total = Number.isFinite(d.total) ? d.total : null;
+        setVmsMeta({ total, returned: items.length, hasMore: d.hasMore === true || (total != null && total > items.length) });
+      })
+      .catch((e) => { if (gen === vmGen.current) { setVms([]); setVmsMeta({ error: e?.message || String(e) }); } });
   }, [vc]);
 
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -76,7 +84,9 @@ export default function GuestAccount() {
             <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>대상 VM ({sel.size} 선택)</div>
             <div className="flex gap"><button className="tab" style={{ padding: '5px 10px' }} onClick={selectAll}>Tools 가동 모두 선택</button><button className="tab" style={{ padding: '5px 10px' }} onClick={() => setSel(new Set())}>해제</button></div>
           </div>
-          {!vms ? <Loading /> : vms.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>가동 중인 VM이 없습니다.</div> : (
+          {vmsMeta?.error && <div className="banner warn" style={{ fontSize: 12, marginBottom: 8 }}>VM 목록을 불러오지 못했습니다: {vmsMeta.error}</div>}
+          {vmsMeta?.hasMore && <div className="banner warn" style={{ fontSize: 12, marginBottom: 8 }}>가동 중인 VM {vmsMeta.total != null ? `${vmsMeta.total.toLocaleString()}대` : ''} 중 앞 {vmsMeta.returned.toLocaleString()}대만 불러왔습니다 — 목록에 없는 VM 은 이 화면에서 고를 수 없습니다.</div>}
+          {!vms ? <Loading /> : vms.length === 0 ? (vmsMeta?.error ? null : <div className="muted" style={{ fontSize: 12 }}>가동 중인 VM이 없습니다.</div>) : (
             <div className="table-wrap" style={{ maxHeight: '40vh' }}>
               <STable><thead><tr><th></th><th>VM</th><th>Guest OS</th><th>VMware Tools</th><th>호스트</th></tr></thead>
                 <tbody>{vms.map((v) => (

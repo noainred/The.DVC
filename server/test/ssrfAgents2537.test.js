@@ -59,7 +59,8 @@ test('★ src 의 모든 undici Agent 생성부에 lookup: ssrfLookup 이 있다
        */
       let hooked = /lookup: ssrfLookup|withSsrfLookup\(|lookup: pinnedLookup\(/.test(body);
       // `connect: vcConnect` 처럼 변수를 참조하면 그 변수의 정의가 withSsrfLookup( 으로 감싸져 있어야 한다.
-      const ref = /connect:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(body);
+      // 2026-10-09 S-02: 장비 수집기는 `connect: deviceTlsConnect({ …, tls: <옵션> })` 이다 — 옵션 변수(`tls: vcConnectOpts`)도 같은 규칙.
+      const ref = /(?:connect|tls):\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(body);
       if (!hooked && ref) hooked = new RegExp(`const ${ref[1]} = withSsrfLookup\\(`).test(code);
       if (!hooked) offenders.push(`${path.relative(SRC, f)}: ${body.replace(/\s+/g, ' ').trim().slice(0, 70)}`);
     }
@@ -74,8 +75,9 @@ test('★ v2.537 에 추가한 8개 dispatcher 파일이 실제로 훅을 가진
     assert.match(strip(read(f)), /lookup: ssrfLookup|withSsrfLookup\(/, `${f} 에 lookup 훅이 없다`);
   }
   // 삼항으로 갈리는 두 파일은 **양쪽**이 감싸져야 한다 — withSsrfLookup( 이 삼항 바깥에 있어야 한다.
-  assert.match(strip(read('nsx/client.js')), /connect: withSsrfLookup\(nsxVerify \?/, 'nsx: 삼항 바깥에서 감싸야 검증 ON 배포도 덮인다');
-  assert.match(strip(read('vcenter/restClient.js')), /const vcConnect = withSsrfLookup\(config\.rejectUnauthorized/, 'vcenter: 삼항 바깥에서 감싸야 한다');
+  // (2026-10-09 S-02: 삼항은 이제 '엄격이면 최신 TLS, 아니면 구형 호환 옵션' 을 고르고 그 옵션이 deviceTlsConnect 의 tls 로 간다.)
+  assert.match(strip(read('nsx/client.js')), /tls: withSsrfLookup\(nsxMode === 'strict' \?/, 'nsx: 삼항 바깥에서 감싸야 검증 ON 배포도 덮인다');
+  assert.match(strip(read('vcenter/restClient.js')), /const vcConnectOpts = withSsrfLookup\(vcStrict/, 'vcenter: 삼항 바깥에서 감싸야 한다');
 });
 
 let IDRAC; let NSX; let BM; let PROXY; let SCAN;

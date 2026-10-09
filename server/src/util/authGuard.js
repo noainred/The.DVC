@@ -52,7 +52,20 @@ import { poolRun } from './pool.js';
  * `test/sshAuthStop2541.test.js` 가 양성 12건·음성 11건을 전부 고정한다.
  * @param {...string} texts
  */
+/**
+ * 2026-10-09 검토 S-01·S-02: 장비 신원 거부(SSH 호스트키·TLS 인증서)는 인증 실패가 아니다 — 비밀번호를 보내기 **전에** 끊었다.
+ * 거부 문구에는 장비 주소·제시된 지문이 들어가므로('array-403'·지문 조각) 아래 정규식의 401/403 에 우연히 걸릴 수 있다.
+ * 걸리면 주기 수집이 '인증 정지' 되고 자격증명을 바꿔야 풀린다(지문을 승인해도 다시 붙지 않는다). 그래서 표지를 먼저 본다.
+ * util 은 도메인을 import 하지 않으므로(arch2579) 표지 문자열을 여기 적는다 — proxy/sshExec.js SSH_HOSTKEY_ERROR_CODE ·
+ * security/tlsTrust.js TLS_PEER_ERROR_CODE·buildMessage 와 같은 값이어야 한다(test/rvLead_rejectMarkers.test.js 가 대조).
+ */
+export const PEER_REJECT_MARKERS = Object.freeze(['[SSH_HOSTKEY_UNTRUSTED]', 'ERR_TLS_PEER_UNTRUSTED', '장비 인증서를 신뢰할 수 없어 연결을 끊었습니다']);
+export function isPeerRejectText(...texts) {
+  return texts.some((t) => { const s = String(t || ''); return PEER_REJECT_MARKERS.some((m) => s.includes(m)); });
+}
+
 export function isAuthFailureText(...texts) {
+  if (isPeerRejectText(...texts)) return false;
   return texts.some((t) => /인증 실패|\b401\b|\b403\b|authentication (?:\w+\s+){0,3}fail|client-authentication|permission denied|invalid (?:user|password|credential)|auth(?:entication)? (?:rejected|denied)/i
     .test(String(t || '')));
 }

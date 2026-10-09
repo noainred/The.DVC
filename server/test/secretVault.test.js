@@ -19,8 +19,11 @@ test('정책 저장/정규화 — 기본 평문(하위호환)·레벨/알고리�
   assert.deepEqual(v.loadSecretsPolicy(), { mode: 'plain', level: 2, algorithm: '' });
   const p = v.saveSecretsPolicy({ mode: 'encrypted', level: 3, algorithm: 'chacha20-poly1305' });
   assert.deepEqual(p, { mode: 'encrypted', level: 3, algorithm: 'chacha20-poly1305' });
-  // 무효값은 안전한 값으로 정규화(무효 모드=plain, 무효 레벨=2, 무효 알고리즘=자동)
-  const bad = v.saveSecretsPolicy({ mode: 'rot13', level: 9, algorithm: 'aes-256-cbc' });
+  // 무효 레벨·알고리즘은 안전한 값으로 정규화(레벨=2, 알고리즘=자동).
+  // S-07(2026-10-09): 무효 **모드**는 plain 으로 정규화하지 않고 거부한다 — 평문 전환은 명시적 'plain' 으로만.
+  assert.throws(() => v.saveSecretsPolicy({ mode: 'rot13', level: 9, algorithm: 'aes-256-cbc' }), /알 수 없는 저장 방식/);
+  assert.deepEqual(v.loadSecretsPolicy(), { mode: 'encrypted', level: 3, algorithm: 'chacha20-poly1305' }, '거부된 저장은 정책을 바꾸지 않는다');
+  const bad = v.saveSecretsPolicy({ mode: 'plain', level: 9, algorithm: 'aes-256-cbc' });
   assert.deepEqual(bad, { mode: 'plain', level: 2, algorithm: '' });
 });
 

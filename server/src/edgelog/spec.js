@@ -154,6 +154,7 @@ export const STATUS_SPEC = Object.freeze([
    *   collect.js 의 redactDeep 도 거친다).
    */
   { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
+  { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

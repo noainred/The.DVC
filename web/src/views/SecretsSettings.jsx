@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import Select from '../components/Select.jsx';
+import { policyStateText } from './secretsPolicyText.js';
 
 /**
  * 설정 › 자격증명 저장 방식(v2.296) — 프로그램이 쓰는 모든 계정 비밀번호(vCenter·NSX·엣지/
@@ -29,7 +30,8 @@ export default function SecretsSettings() {
 
   useEffect(() => {
     fetchJson('/admin/secrets/policy')
-      .then((r) => { setD(r); setMode(r.policy.mode); setLevel(r.policy.level); setAlgorithm(r.policy.algorithm || ''); })
+      // S-07: 잠금 상태(mode 'unavailable')면 아무 방식도 미리 고르지 않는다 — 사람이 명시적으로 골라야 저장된다.
+      .then((r) => { setD(r); setMode(['plain', 'encrypted'].includes(r.policy.mode) ? r.policy.mode : ''); setLevel(r.policy.level); setAlgorithm(r.policy.algorithm || ''); })
       .catch((e) => setErr(e.message));
   }, []);
   if (err) return <ErrorBox message={err} />;
@@ -63,6 +65,12 @@ export default function SecretsSettings() {
         설정 파일에 <b>평문</b>으로 둘지 <b>암호화</b>해 둘지 정합니다. 저장하면 기존 저장분이 <b>즉시 일괄 전환</b>되며
         (양방향), 실행 중인 수집·접속 동작에는 영향이 없습니다(메모리에서는 항상 복호되어 사용).
       </p>
+
+      {policyStateText(d.policy) && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 10, borderColor: d.policy.locked ? 'var(--red,#ef4444)' : 'var(--amber,#f59e0b)', fontSize: 12.5, lineHeight: 1.7 }}>
+          {d.policy.locked ? '⛔ ' : '⚠ '}{policyStateText(d.policy)}
+        </div>
+      )}
 
       <div className="card" style={{ padding: 16 }}>
         {/* 저장 모드 */}
@@ -116,7 +124,7 @@ export default function SecretsSettings() {
             <span className="muted">변경 확인 — <b>OTP 6자리</b></span>
             <input className="input" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6} style={{ width: 120, letterSpacing: 3 }}
               value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || otp.length !== 6} onClick={save}>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || otp.length !== 6 || !mode} onClick={save}>
               {busy ? '전환 중…' : '저장 및 일괄 전환(OTP 확인)'}
             </button>
           </div>

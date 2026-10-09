@@ -14,6 +14,8 @@ import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
 import { dispatcherFor } from '../util/resilientFetch.js';
 import { recordOutbound } from '../util/outboundStats.js'; // v2.587 — 전역 fetch 경로라 직접 기록(데이터 흐름 지도) // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
+// v2.730(검토 S-10): 서명 manifest 를 헤더로 싣는다 — 수집기는 자기 신뢰 공개키로 설치 전에 검증한다.
+import { encodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js';
 
 // 실패 HTTP 상태를 사람이 이해할 원인으로 분류(엣지별로 '무엇을 점검할지' 바로 알려주기 위함).
 export function httpFailHint(status) {
@@ -37,14 +39,15 @@ export function netFailReason(msg) {
 
 const _shaCache = new WeakMap(); // 같은 번들 버퍼는 1회만 해시(수집기 수만큼 반복 해시 방지)
 function bundleSha(bytes) { let v = _shaCache.get(bytes); if (!v) { v = createHash('sha256').update(bytes).digest('hex'); _shaCache.set(bytes, v); } return v; }
-export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = process.env.EDGE_PUSH_TIMEOUT_MS } = {}) {
+export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = process.env.EDGE_PUSH_TIMEOUT_MS, manifest = null } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
+  const manHeader = encodeManifestHeader(manifest); // 없거나 상한을 넘으면 null — 보내지 않는다(수신측이 '서명 없음' 으로 판정)
   // v2.632(감사 E 후속): 시한이 undici 기본 입출력 시한(300초)을 넘으면 긴 시한 디스패처(wanLongAgent) — 아니면 headersTimeout 이 먼저 끊는다.
   const pushTimeoutMs = reqTimeoutMs(timeout, 600_000, { max: 7_200_000 });
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/gzip', 'X-Bundle-Sha256': bundleSha(bytes), ...(c.token ? { 'X-Collector-Token': c.token } : {}) }, // v2.480: 수신측 무결성 검증
+      headers: { 'Content-Type': 'application/gzip', 'X-Bundle-Sha256': bundleSha(bytes), ...(manHeader ? { [MANIFEST_HEADER]: manHeader } : {}), ...(c.token ? { 'X-Collector-Token': c.token } : {}) }, // v2.480: 수신측 무결성 검증 · v2.730: 서명 manifest
       body: bytes,
       dispatcher: dispatcherFor(undefined, pushTimeoutMs), // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
       // v2.583(감사 확정): 기본 redirect:'follow' 는 교차 출처에서 X-Collector-Token 을 떼지 않는다(undici 는
@@ -75,10 +78,10 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
  * Push to all enabled collectors (or a subset of ids). Records the outcome in
  * each collector's status so the admin UI can show upgrade results.
  */
-export async function pushUpgradeToCollectors(bytes, { ids = null, force = false } = {}) {
+export async function pushUpgradeToCollectors(bytes, { ids = null, force = false, manifest = null } = {}) {
   const list = loadCollectors().filter((c) => c.enabled !== false && c.url && (!ids || ids.includes(c.id)));
   const results = await Promise.all(list.map(async (c) => {
-    const r = await pushBundleToCollector(c, bytes, { force });
+    const r = await pushBundleToCollector(c, bytes, { force, manifest });
     const prev = getCollectorStatus(c.id) || {};
     setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error } });
     return r;

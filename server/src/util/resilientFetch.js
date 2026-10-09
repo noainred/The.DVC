@@ -13,6 +13,9 @@
  *  3) 일시적 오류(연결 리셋/타임아웃/5xx 게이트웨이)는 지수 백오프로 재시도한다.
  */
 
+import fs from 'node:fs';
+import tls from 'node:tls';
+import crypto from 'node:crypto';
 import { recordOutbound } from './outboundStats.js';
 import { Agent } from 'undici';
 import { ssrfLookup } from './ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
@@ -28,7 +31,66 @@ import { ssrfBlockReason } from './ssrfBlock.js'; // v2.583: 리다이렉트 hop
 // 큐잉으로 연결 수를 묶는다. WAN_MAX_CONNECTIONS로 조정(기본 6).
 export const WAN_TLS_VERIFY = process.env.WAN_TLS_INSECURE !== 'true';
 if (!WAN_TLS_VERIFY) {
-  console.warn('[wan] ⚠ WAN_TLS_INSECURE=true — 중앙↔엣지 HTTPS 인증서 검증이 비활성입니다(자체서명 엣지 호환용). 가능하면 사설 CA를 신뢰시키고 이 옵션을 끄세요.');
+  console.warn('[wan] ⚠ WAN_TLS_INSECURE=true — 중앙↔엣지 HTTPS 인증서 검증이 비활성입니다(자체서명 엣지 호환용). 가능하면 사설 CA를 신뢰시키고(WAN_TLS_CA_FILE) 이 옵션을 끄세요.');
+}
+
+/*
+ * 2026-10-09 검토 S-09(그룹 J): 사설 CA 신뢰 — `WAN_TLS_CA_FILE`(PEM, 여러 인증서 가능).
+ *   중앙 ↔ 엣지를 HTTPS 로 옮기면 대개 사내 CA 가 발급한 인증서를 쓴다. 예전에는 그 CA 를 믿게 할 방법이
+ *   `WAN_TLS_INSECURE=true`(검증 통째 해제)뿐이라, HTTPS 로 옮겨도 중간자를 막지 못했다. 이 파일의 CA 를
+ *   **기본 신뢰 목록에 더한다**(대체가 아니다 — GitHub 등 공인 인증서도 계속 검증된다).
+ *   ⚠ 파일을 못 읽으면 기본 신뢰만 쓴다 — 사설 CA 서버와의 연결은 인증서 오류로 **실패한다(fail-closed)**.
+ *     검증을 끄는 쪽으로 떨어지지 않는다. 그 사실을 기동 경고와 `wanTlsStatus()` 가 말한다.
+ *   ⚠ `ca` 옵션을 주면 Node 는 기본 목록을 **대체**하므로 기본 목록(NODE_EXTRA_CA_CERTS 포함)을 앞에 붙인다.
+ */
+const CA_FILE_MAX_BYTES = 1048576;
+const CA_CERTS_MAX = 200;
+/** PEM 텍스트에서 인증서 블록만 뽑는다(선형 — 정규식 지연 반복 금지). */
+function pemBlocks(text) {
+  const out = [];
+  const B = '-----BEGIN CERTIFICATE-----'; const E = '-----END CERTIFICATE-----';
+  let i = 0;
+  while (out.length < CA_CERTS_MAX) {
+    const a = text.indexOf(B, i);
+    if (a < 0) break;
+    const b = text.indexOf(E, a + B.length);
+    if (b < 0) break;
+    out.push(text.slice(a, b + E.length));
+    i = b + E.length;
+  }
+  return out;
+}
+/**
+ * env → 추가 CA(순수에 가깝다 — 파일만 읽는다).
+ * @returns {{file:string, ca:string[]|null, count:number, subjects:string[], error:string|null}}
+ */
+export function loadWanCa(env = process.env) {
+  const file = String((env && env.WAN_TLS_CA_FILE) ?? '').trim();
+  if (!file) return { file: '', ca: null, count: 0, subjects: [], error: null };
+  try {
+    const st = fs.statSync(file);
+    if (st.size > CA_FILE_MAX_BYTES) throw new Error(`파일이 너무 큽니다(${st.size}바이트 — ${CA_FILE_MAX_BYTES} 이하)`);
+    const blocks = pemBlocks(fs.readFileSync(file, 'utf8'));
+    const subjects = [];
+    for (const pem of blocks) {
+      const x = new crypto.X509Certificate(pem);
+      subjects.push(String(x.subject || '').replace(/\n/g, ', ').slice(0, 200));
+    }
+    if (!blocks.length) throw new Error('PEM 인증서(BEGIN CERTIFICATE)가 없습니다');
+    const base = typeof tls.getCACertificates === 'function' ? tls.getCACertificates('default') : tls.rootCertificates;
+    return { file, ca: [...base, ...blocks], count: blocks.length, subjects, error: null };
+  } catch (e) {
+    const why = e?.code === 'ENOENT' ? '파일이 없습니다' : e?.code === 'EACCES' ? '읽기 권한이 없습니다' : String(e?.message || e);
+    return { file, ca: null, count: 0, subjects: [], error: `WAN_TLS_CA_FILE(${file}) 을(를) 쓰지 못했습니다 — ${why}` };
+  }
+}
+const WAN_CA = loadWanCa();
+if (WAN_CA.error) console.warn(`[wan] ⚠ ${WAN_CA.error} — 기본 신뢰 목록만 씁니다(사설 CA 로 발급된 중앙·엣지 인증서는 검증에 실패합니다).`);
+else if (WAN_CA.count) console.log(`[wan] 사설 CA ${WAN_CA.count}개를 중앙↔엣지 TLS 신뢰 목록에 더했습니다(${WAN_CA.file}).`);
+const WAN_CA_OPT = WAN_CA.ca ? { ca: WAN_CA.ca } : {};
+/** 중앙↔엣지 TLS 신뢰 상태(진단·자체점검용 — CA 원문은 싣지 않는다). */
+export function wanTlsStatus() {
+  return { verify: WAN_TLS_VERIFY, caFile: WAN_CA.file, caCount: WAN_CA.count, caSubjects: WAN_CA.subjects.slice(0, 10), caError: WAN_CA.error };
 }
 // v2.506(감사 S1 #2): 기본 디스패처에 DNS 리바인딩 차단 lookup 을 단다. 이 에이전트를 쓰는
 // 전 호출부(수집 서버 연결 테스트·동기화 등 dispatcher 미지정 경로 전부)가 한 번에 보호된다.
@@ -36,7 +98,7 @@ if (!WAN_TLS_VERIFY) {
 // 막으므로, GitHub 업그레이드 다운로드·중앙↔엣지 같은 정상 흐름에는 영향이 없다
 // (루프백을 치는 resilientFetch 호출부가 없음을 grep 으로 확인했다).
 const wanAgent = new Agent({
-  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup },
+  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup, ...WAN_CA_OPT },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
@@ -53,7 +115,7 @@ const wanAgent = new Agent({
 export const UNDICI_DEFAULT_IO_TIMEOUT_MS = 300_000;
 const LONG_IO_TIMEOUT_MS = 1_800_000 + 60_000;
 const wanLongAgent = new Agent({
-  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup },
+  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup, ...WAN_CA_OPT },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
@@ -148,6 +210,11 @@ export function trustedRedirect(cur, next) {
   } catch { return false; }
 }
 
+/** https → http 하향인가(순수). */
+export function isDowngrade(cur, next) {
+  try { return new URL(cur).protocol === 'https:' && new URL(next).protocol === 'http:'; } catch { return false; }
+}
+
 /**
  * 리다이렉트를 **직접** 따라간다 — 출처가 바뀌는 순간 비밀 헤더를 뗀다(SEC-14).
  * 반환은 최종 응답이며, 뺀 헤더가 있으면 `res.__secretsDroppedOnRedirect` 로 밝힌다
@@ -166,6 +233,15 @@ async function fetchFollowing(url, init, disp, timeoutMs) {
     const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
     if (!loc || callerManual) { if (dropped.length) res.__secretsDroppedOnRedirect = dropped; return res; }
     const next = new URL(loc, cur).href;
+    // S-09(그룹 J): HTTPS 로 시작한 요청은 평문으로 내려가지 않는다 — https → http 리다이렉트는 따라가지 않고 그 응답을
+    //   돌려준다(호출부는 3xx 를 실패로 본다). 비밀 헤더는 출처가 바뀌어 어차피 떼지만, 응답 본문·요청 본문(303 전환 전)과
+    //   그 뒤 요청이 평문 구간으로 나가는 것 자체가 하향이다. 같은 호스트의 http → https 상향은 예전대로 믿는다.
+    if (isDowngrade(cur, next)) {
+      res.__redirectRefused = `HTTPS 에서 평문 HTTP 로 내려가는 리다이렉트는 따라가지 않습니다(→ ${new URL(next).host})`;
+      if (dropped.length) res.__secretsDroppedOnRedirect = dropped;
+      try { await res.body?.cancel?.(); } catch { /* */ }
+      return res;
+    }
     // v2.583(감사 확정 — 반증 에이전트 재현): ① 리다이렉트 대상이 **IP 리터럴**이면 dispatcher 의 DNS lookup
     //   가드를 타지 않는다 — hop 마다 차단 대역을 직접 검사한다(루프백·링크로컬·메타데이터로 끌려가지 않게).
     const blocked = ssrfBlockReason(next);
@@ -295,4 +371,4 @@ export async function retryTransient(fn, { retries = 1, backoffMs = 400 } = {}) 
 }
 
 // 테스트/진단용 노출.
-export const _internals = { isTransientErr, RETRYABLE_STATUS, wanAgent, wanLongAgent };
+export const _internals = { isTransientErr, RETRYABLE_STATUS, wanAgent, wanLongAgent, pemBlocks };

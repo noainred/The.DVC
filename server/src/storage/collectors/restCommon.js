@@ -6,15 +6,17 @@
  */
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../../util/ssrfLookup.js';
+import { deviceTlsConnect } from '../../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 바꾼다 — 순수 모듈.
 import { describeFetchError, isTransportError } from './netError.js';
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 
-// 기본은 자체서명 장비 대응으로 검증 해제(기존 동작 유지). 보안(M-4, 2026-09-12): 사설 CA·공인
-// 인증서를 쓰는 사이트는 STORAGE_TLS_VERIFY=true 로 검증을 켜 MITM(어레이 관리자 자격증명 탈취)을 막는다.
+// 2026-10-09 S-02(사용자 승인 기본값 전환): 미설정 = CA 체인(시스템 루트 + 사설 CA 번들) 또는 장비별 승인 지문 —
+// 예전 기본(자체서명 허용 · M-4 의 'STORAGE_TLS_VERIFY=true 일 때만 검증')은 어레이 관리자 자격증명을 상대 확인 없이 보냈다.
+// STORAGE_TLS_VERIFY=true 는 CA 체인만(엄격), =false 는 명시적 예외(예전처럼 어떤 인증서든 — 상태에 드러난다).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-const dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' }) });
+const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'storage', envKey: 'STORAGE_TLS_VERIFY', envRaw: process.env.STORAGE_TLS_VERIFY, tls: withSsrfLookup({}) }) });
 // v2.605(감사 TIM2605-04): 음수·2^32 이상은 AbortSignal.timeout 이 RangeError(모든 REST 요청 실패), 3e9 는 1ms abort — [1초, 10분].
 const TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_HTTP_TIMEOUT_MS, 15_000);
 /** 요청 signal(v2.421): 호출자 취소(signal) + 요청 타임아웃을 합친다 — 연결 테스트가 끝난 뒤 수집기가 백그라운드에서 계속

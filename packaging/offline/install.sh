@@ -11,6 +11,12 @@
 #   - dedicated system user    -> vmportal
 #
 # Usage:  sudo ./install.sh [--port 4000] [--prefix /opt/vmware-portal]
+#                          [--package <설치 패키지.tar.gz>] [--manifest <vmware-portal-<버전>.manifest.json>]
+#                          [--skip-signature-check]
+#
+# v2.730(검토 S-10): 기존 설치본 위에 다시 설치(업그레이드)할 때는 **기존 설치본의** 확인 도구·신뢰 공개키로
+#   새 패키지 파일과 서명 manifest 를 먼저 확인한다(release-verify-lib.sh). 기본 위치는 압축을 푼 폴더 옆의
+#   <패키지>.tar.gz 와 vmware-portal-<버전>.manifest.json 이다. 확인에 실패하면 아무것도 바꾸지 않고 멈춘다.
 
 set -euo pipefail
 
@@ -19,6 +25,9 @@ SERVICE_USER="vmportal"
 SERVICE_NAME="vmware-portal"
 CONFIG_DIR="/etc/vmware-portal"
 PORT="4000"
+PKG_FILE=""
+MANIFEST_FILE=""
+SKIP_SIG=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [[ $# -gt 0 ]]; do
@@ -26,6 +35,9 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     --user) SERVICE_USER="$2"; shift 2 ;;
+    --package) PKG_FILE="$2"; shift 2 ;;
+    --manifest) MANIFEST_FILE="$2"; shift 2 ;;
+    --skip-signature-check) SKIP_SIG=1; shift ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
@@ -72,6 +84,17 @@ fi
 
 VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo unknown)"
 echo "==> VMware Global Monitoring Portal 오프라인 설치 (v${VERSION}) — Rocky Linux 9"
+
+# 0) 패키지 서명 확인(v2.730 검토 S-10) — 런타임·앱을 바꾸기 **전에**(기존 런타임·도구가 신뢰 기준이다).
+if [[ -f "$SCRIPT_DIR/release-verify-lib.sh" ]]; then
+  # shellcheck source=release-verify-lib.sh
+  source "$SCRIPT_DIR/release-verify-lib.sh"
+  if ! verify_release_package "$PREFIX" "$SCRIPT_DIR" "$CONFIG_DIR" "$VERSION" "$PKG_FILE" "$MANIFEST_FILE" "$SKIP_SIG"; then
+    exit 1
+  fi
+else
+  echo "⚠ release-verify-lib.sh 가 패키지에 없습니다 — 서명 확인을 하지 못했습니다(v2.730 이전 형식의 패키지)."
+fi
 
 # 1) Service user ------------------------------------------------------------
 if ! id "$SERVICE_USER" &>/dev/null; then
@@ -245,6 +268,11 @@ fi
 if [[ -x "$APP_DST/otp-enroll.sh" ]]; then
   ln -sf "$APP_DST/otp-enroll.sh" /usr/local/bin/vmware-portal-otp 2>/dev/null \
     && echo "==> OTP 등록 도구: vmware-portal-otp (→ $APP_DST/otp-enroll.sh)"
+fi
+# 6-1-1) 릴리스 서명 확인 도구(v2.730 검토 S-10) — 다음 오프라인 업그레이드 전에 이 설치본(신뢰 기준)으로 새 패키지를 확인한다.
+if [[ -x "$APP_DST/release-verify.sh" ]]; then
+  ln -sf "$APP_DST/release-verify.sh" /usr/local/bin/vmware-portal-verify 2>/dev/null \
+    && echo "==> 패키지 서명 확인 도구: vmware-portal-verify (→ $APP_DST/release-verify.sh)"
 fi
 # 6-2) 계정 관리 콘솔 메뉴(v2.723) — 계정 생성·편집·비밀번호·계정별 로그인 방식·OTP·삭제.
 if [[ -x "$APP_DST/user-admin.sh" ]]; then

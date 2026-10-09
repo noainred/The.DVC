@@ -17,6 +17,7 @@ import { classifyBmcVendor } from './vendorMatch.js'; // v2.495: 비-Dell BMC �
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
+import { deviceTlsConnect, isTlsPeerError, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 import { pctFromMetric, pickReports, buildIdracUsage } from '../bmusage/parse/idracTelemetry.js'; // v2.613 DEPS2613-02: 같은 모듈을 :1204 에서 동적으로 또 import 하던 것을 이 한 줄로
 import { readTextCapped } from '../util/readCapped.js';
@@ -39,19 +40,30 @@ export const AUTH_BODY_MAX_BYTES = 16 * 1024;
 export const PROBE_SYSTEMS_MAX_BYTES = 1024 * 1024;
 export const OVERSIZED_REASON = '응답 과대(상한 초과 — 이 IP 는 건너뜀)';
 
-// Dedicated dispatcher so iDRAC self-signed certs / legacy TLS always work,
-// regardless of the global vCenter dispatcher.
+// Dedicated dispatcher so iDRAC legacy TLS always works, regardless of the global vCenter dispatcher.
+// 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다 — CA 체인(시스템 루트 + 사설 CA 번들) 또는 관리자가 승인한 지문만
+// 받는다(모드는 예전처럼 VC_TLS_REJECT_UNAUTHORIZED 를 따른다 — 미설정 = 판정 · true = CA 체인만 · false = 명시적 예외).
+// 구형 TLS 호환 옵션은 그대로 둔다(협상만 넓히고 상대 확인은 판정이 한다).
+const BMC_TLS = {
+  minVersion: config.vcTlsMinVersion,
+  ciphers: config.vcTlsCiphers,
+  secureOptions:
+    cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
+    cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+  timeout: config.idrac.timeoutMs,
+};
 const dispatcher = new Agent({
-  connect: {
-    rejectUnauthorized: config.rejectUnauthorized,
-    minVersion: config.vcTlsMinVersion,
-    ciphers: config.vcTlsCiphers,
-    secureOptions:
-      cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
-      cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
-    timeout: config.idrac.timeoutMs,
-    lookup: ssrfLookup, // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-  },
+  // v2.537: DNS 리바인딩(TOCTOU) 차단 — `lookup: ssrfLookup`(util/ssrfLookup.js 머리말).
+  connect: deviceTlsConnect({ subsystem: 'idrac', envKey: 'VC_TLS_REJECT_UNAUTHORIZED', envRaw: process.env.VC_TLS_REJECT_UNAUTHORIZED, mode: config.vcTlsVerifyMode, tls: { ...BMC_TLS, lookup: ssrfLookup } }),
+  connectTimeout: config.idrac.timeoutMs,
+});
+/**
+ * 무인증 서비스 루트 조회 전용(스캔 1단계 — `probeIdrac`). 자격증명·토큰을 싣지 않으므로 인증서를 판정하지 않는다
+ * (S-02 범위는 '자격증명을 보내는 연결'). 판정 dispatcher 로 두면 스캔 대역의 HTTPS 장비 전부(스위치 웹 UI·프린터 …)가
+ * 지문 저장소에 '대기·관찰' 로 쌓인다. ⚠ 이 dispatcher 에 자격증명을 싣는 요청을 보내지 말 것 — 로그인은 `dispatcher` 다.
+ */
+const probeDispatcher = new Agent({
+  connect: { ...BMC_TLS, rejectUnauthorized: false, lookup: ssrfLookup }, // v2.537: lookup: ssrfLookup
   connectTimeout: config.idrac.timeoutMs,
 });
 
@@ -441,12 +453,11 @@ const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
 export async function probeIdrac(host, username, password, timeoutMs = 3000, { credsFor = null } = {}) {
   let base = String(host).replace(/\/+$/, '');
   if (!/^https?:\/\//.test(base)) base = `https://${base}`;
-  const opt = (extra) => ({ headers: { Accept: 'application/json', ...extra }, signal: AbortSignal.timeout(timeoutMs), dispatcher });
-
   // 1) Redfish service root (no auth). Identifies Redfish + Dell signature.
+  //    2026-10-09 S-02: 자격증명이 없는 요청이라 판정하지 않는 probeDispatcher — 로그인(2단계)은 rawGet 이 판정 dispatcher 로 한다.
   let root;
   try {
-    const res = await bmcFetch(`${base}/redfish/v1`, opt());
+    const res = await bmcFetch(`${base}/redfish/v1`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs), dispatcher: probeDispatcher });
     if (!res.ok && res.status !== 401) return { ok: false, reason: `HTTP ${res.status}` };
     // v2.606(SEC2606-01): 64KB 상한. 넘으면 '응답 과대' 로 이 IP 를 건너뛴다. JSON 이 아니면 예전처럼 빈 객체.
     let text;
@@ -514,7 +525,12 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000, { c
         }
       }
     }
-  } catch { /* identity optional; service root already classified it */ }
+  } catch (e) {
+    // 2026-10-09 S-02: 인증서 판정 거부는 '정체 확인 실패(선택)' 가 아니다 — 로그인을 시도하지 못했으므로 발견으로 세면
+    //   확인되지 않은 장비가 등록된다. 접속 실패로 돌려주고(자격증명은 나가지 않았다) 대기 지문은 장비 신뢰 화면에 남는다.
+    if (isTlsPeerError(e)) return { ok: false, reason: tlsPeerErrorOf(e).message, tlsUntrusted: true, ...vendorFields() };
+    /* identity optional; service root already classified it */
+  }
 
   if ((manufacturer + model).toLowerCase().includes('dell')) dell = true;
   // 인증이 통했으면 Manufacturer/Model 로 벤더 판별을 보강한다(Oem 키가 없는 범용 BMC 등).

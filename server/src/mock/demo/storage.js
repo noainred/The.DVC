@@ -15,6 +15,8 @@
  *    (화면의 MOCK 배지·경고가 그대로 뜬다 — 가짜를 진짜처럼 보이지 않게).
  */
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
+// v2.730(검토 I-03): 영역 요약 모양은 실제 수집기(storage/areasCollector.js)와 같은 순수 모듈 하나 — import 없는 잎 모듈이라 순환이 생기지 않는다.
+import { triedAreaEntry, notTriedAreaEntry, disabledAreaEntry, areaTotals } from '../../storage/onefsAreaSummary.js';
 
 export { isMockMode };
 
@@ -31,11 +33,14 @@ export const isDemoId = (id) => String(id || '').startsWith(DEMO_PREFIX);
 /**
  * 장비 사양 — vc 는 메인 스냅샷(목 생성기)의 vCenter id. 용량은 TB(10진), pct 는 지금 사용률, grow 는 하루 증가(사용률 %p).
  * fail: 최근 몇 시간 수집 실패 · badNodes: 비정상 노드 수 · power: 'read'|'no-field' (경로가 있는 타입만 의미).
+ * areasStop: OneFS 영역 수집이 도중에 멈춘 모습 — { area, after(그 영역에서 성공한 엔드포인트 수), reason('deadline'|'auth'|'transport') }.
  */
 const SPECS = [
   { k: 'ps-sel-01', type: 'isilon', name: 'PS-SEL-01', vc: 'vc-ap-northeast', method: 'ssh', nodes: 6, tb: 1200, pct: 68, grow: 0.09, power: 'read' },
   { k: 'ps-fra-01', type: 'isilon', name: 'PS-FRA-01', vc: 'vc-eu-central', method: 'api', nodes: 8, tb: 2100, pct: 74, grow: 0.06, badNodes: 1, power: 'read' },
-  { k: 'ps-ash-01', type: 'isilon', name: 'PS-ASH-01', vc: 'vc-us-east', method: 'ssh', nodes: 5, tb: 900, pct: 81, grow: 0.12, power: 'read' },
+  { k: 'ps-ash-01', type: 'isilon', name: 'PS-ASH-01', vc: 'vc-us-east', method: 'ssh', nodes: 5, tb: 900, pct: 81, grow: 0.12, power: 'read',
+    // v2.730(검토 I-03): OneFS 영역 수집이 capacity 영역 첫 엔드포인트 뒤 시한에 걸린 모습(부분 수집·이후 미시도 화면 확인용).
+    areasStop: { area: 'capacity', after: 1, reason: 'deadline' } },
   { k: 'ps-sha-01', type: 'isilon', name: 'PS-SHA-01', vc: 'vc-cn-east', method: 'ssh', nodes: 4, tb: 600, pct: 55, grow: 0.04, power: 'no-field' },
   { k: 'unity-sel-02', type: 'unity480', name: 'UNITY-SEL-02', vc: 'vc-ap-northeast', method: 'ssh', nodes: 2, tb: 117.5, pct: 25, grow: 0.05, power: 'read' },
   { k: 'unity-sjc-01', type: 'unity480', name: 'UNITY-SJC-01', vc: 'vc-us-west', method: 'api', nodes: 2, tb: 160, pct: 63, grow: 0.08, power: 'read' },
@@ -461,24 +466,37 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
 export function demoIsilonAreas(dev, areas, disabled = []) {
   const spec = SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev || {});
   const results = []; const summary = [];
+  const stopAt = spec.areasStop || null; // v2.730(검토 I-03): 영역 중간 멈춤 데모 — 실제 수집기와 같은 규칙으로 요약한다
+  let stopped = null;
   for (const area of areas) {
+    const expected = area.endpoints.length;
+    if (stopped) { summary.push(notTriedAreaEntry(area.key, expected, stopped)); continue; }
     let okCnt = 0, failCnt = 0, firstErr = '';
-    area.endpoints.forEach((ep, i) => {
+    let stopHere = null;
+    for (let i = 0; i < area.endpoints.length; i++) {
+      if (stopAt && stopAt.area === area.key && okCnt + failCnt >= (Number(stopAt.after) || 0)) { stopHere = stopAt.reason || 'deadline'; break; }
+      const ep = area.endpoints[i];
       // 둘째 이후 후보 경로 일부는 실패(구버전 경로) — 결정적.
       const fail = i > 0 && demoRand(`${spec.k}:area:${ep}`) < 0.25;
       if (fail) {
         const error = 'HTTP 404 (데모 — 이 OneFS 버전에 없는 경로를 흉내 냅니다)';
         results.push({ area: area.key, endpoint: ep, ok: false, error });
         failCnt++; if (!firstErr) firstErr = error;
-        return;
+        continue;
       }
       results.push({ area: area.key, endpoint: ep, ok: true, data: demoAreaBody(spec, area.key, ep) });
       okCnt++;
-    });
-    summary.push({ area: area.key, ok: okCnt, failed: failCnt, ...(firstErr ? { error: firstErr.slice(0, 120) } : {}) });
+    }
+    if (stopHere) stopped = stopHere;
+    if (stopHere && okCnt + failCnt === 0) { summary.push(notTriedAreaEntry(area.key, expected, stopHere)); continue; }
+    summary.push(triedAreaEntry(area.key, { expected, ok: okCnt, failed: failCnt, firstErr, stopReason: stopHere }));
   }
-  for (const a of disabled) summary.push({ area: a.key, ok: 0, failed: 0, skipped: true, error: a.reason });
-  return { summary, results, endpoints: results.length };
+  for (const a of disabled) summary.push(disabledAreaEntry(a));
+  const t = areaTotals(summary);
+  return {
+    summary, results, endpoints: results.length, stopped,
+    notTried: t.notTried, notTriedEndpoints: t.notTriedEndpoints, partialAreas: t.partialAreas, expectedEndpoints: t.expectedEndpoints,
+  };
 }
 
 function demoAreaBody(spec, area, ep) {

@@ -9,6 +9,10 @@
  *   vmware-portal-offline-<v>-el9-x64.tar.gz       (el9 설치 패키지)
  *   vmware-portal-offline-<v>-cent9-x64.tar.gz     (cent9 설치 패키지)
  *   vmware-portal-win-<v>-x64.zip                  (Windows 수집기)
+ *   vmware-portal-<v>.manifest.json                (v2.730 검토 S-10: 배포자 서명 manifest — scripts/release-sign.mjs 가 만든다)
+ *
+ * manifest 가 distDir 에 있으면 항목에 `manifest` 이름을 싣는다(수신측이 그 이름으로 받아 설치 전에 서명을 확인한다).
+ * env REQUIRE_MANIFEST=1(CI)이면 없을 때 실패한다 — 서명 없는 버전을 versions.json 에 올리면 서명 필수 현장이 받지 못한다.
  */
 
 import fs from 'node:fs';
@@ -26,6 +30,7 @@ const names = {
   installer: `vmware-portal-offline-${version}-el9-x64.tar.gz`,
   installer_cent9: `vmware-portal-offline-${version}-cent9-x64.tar.gz`,
   windows: `vmware-portal-win-${version}-x64.zip`,
+  manifest: `vmware-portal-${version}.manifest.json`,
 };
 
 function stat(name) {
@@ -41,8 +46,15 @@ const el9 = stat(names.installer);
 const c9 = stat(names.installer_cent9);
 const win = stat(names.windows);
 
+const hasManifest = fs.existsSync(path.join(distDir, names.manifest));
+if (!hasManifest && process.env.REQUIRE_MANIFEST === '1') {
+  console.error(`서명 manifest 가 없습니다: ${path.join(distDir, names.manifest)} — scripts/release-sign.mjs 단계가 먼저 돌아야 합니다(docs/RELEASE-SIGNING.md).`);
+  process.exit(1);
+}
+
 const entry = {
   version,
+  ...(hasManifest ? { manifest: names.manifest } : {}),
   tar_gz: names.tar_gz, size_bytes: tg.size, sha256: tg.sha,
   installer: names.installer, installer_size_bytes: el9.size, installer_sha256: el9.sha,
   installer_cent9: names.installer_cent9, installer_cent9_size_bytes: c9.size, installer_cent9_sha256: c9.sha,

@@ -40,6 +40,7 @@ import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, applyIdracScanResult, setIdracScanProgress, agentOfReq, noteIdracScanBusyPoll } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
+import { selfRegisterDerivedUrl } from '../collector/transportPolicy.js'; // 2026-10-09 검토 S-09
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
 import { recordPull, PULL_UNAUTH_KEY } from '../central/pullStats.js';
 // v2.570: 거부된 push 를 기록한다 — 아래 집계는 4xx/5xx 를 빼므로, 그것만으로는 '안 보냈다' 와
@@ -450,8 +451,8 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
     if (/^(127\.|::1$|::$)/.test(ip) || ip === 'localhost') {
       return res.status(400).json({ ok: false, reason: '요청 IP가 루프백입니다(중앙이 프록시 뒤). 엣지에 EDGE_ADVERTISE_URL(urlHint)를 지정하세요.' });
     }
-    if (ip.includes(':')) ip = `[${ip}]`; // IPv6
-    url = `http://${ip}:${port}`;
+    // 2026-10-09 검토 S-09: 엣지가 TLS 로 받는다고 알렸을 때만 https(scheme==='https'). 지어내지 않는다 — 평문이면 등록부가 판정한다.
+    url = selfRegisterDerivedUrl({ ip, port, scheme: b.scheme });
   }
   // 엣지 자기등록 URL(특히 urlHint)은 신뢰 경계 밖 입력 — 저장 전 **해석형** SSRF 가드로 DNS 우회까지
   // 차단한다. 중앙이 이 URL 로 주기적 수집 요청을 보내므로(SSRF), 저장 경로 sync 검사만으로는 차단
@@ -473,6 +474,7 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
   }
   // v2.604(감사 CEN2604-04): 검증 결과와 토큰 종류를 넘긴다 — 공유 토큰의 새 이름 생성은 개수 상한, 미검증 항목은 '아는 엣지' 가 아니다.
   const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc, unverified: !!unverified, shared: req.centralAuth?.mode !== 'agent' });
+  if (!r.ok && r.code === 'insecure-http') console.warn(`[central] 엣지 자기등록 거부(평문 HTTP): ${name} → ${url} — ${r.reason}`);
   if (!r.ok && r.capped) { console.warn(`[central] 엣지 자기등록 상한: ${name} — ${r.reason}`); return res.status(429).json({ ok: false, reason: r.reason, capped: true }); }
   if (r.ok) _knownNames = { at: 0, set: null }; // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);

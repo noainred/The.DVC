@@ -84,6 +84,14 @@ mv "$EXTRACTED" "$STAGE/runtime/node"
 
 NODE_BIN="$STAGE/runtime/node/bin/node"
 NPM_CLI="$STAGE/runtime/node/lib/node_modules/npm/bin/npm-cli.js"
+# 검토 I-06: 런타임 계약은 Node 22.x(검증 22.23.2 — server/src/util/runtimeCheck.js RUNTIME_CONTRACT). 다른 major 를 넣으면
+# 장비 통신(전역 fetch + undici Agent)이 실패할 수 있다 — 패키지는 만들되 크게 경고한다(포탈도 기동 때 같은 점검을 한다).
+BUNDLED_NODE_VER="$("$NODE_BIN" -v 2>/dev/null || echo unknown)"
+if [[ "$BUNDLED_NODE_VER" != v22.* ]]; then
+  echo "⚠⚠ 번들 Node 런타임이 ${BUNDLED_NODE_VER} 입니다 — 지원 범위는 Node 22.x(검증 22.23.2)입니다. 장비 통신이 실패할 수 있습니다(docs/INSTALL.md 부록 A.0)." >&2
+elif [[ "$BUNDLED_NODE_VER" != "v22.23.2" ]]; then
+  echo "ⓘ 번들 Node 런타임 ${BUNDLED_NODE_VER} — 계약(22.x) 안이지만 검증 버전(22.23.2)과 다릅니다."
+fi
 run_npm() { "$NODE_BIN" "$NPM_CLI" "$@"; }
 
 # 2) Build the web client (prebuilt static assets — no build on target) ------
@@ -119,6 +127,9 @@ cp "$REPO_ROOT/package.json" "$APP/"
 cp "$REPO_ROOT/otp-enroll.sh" "$APP/otp-enroll.sh" && chmod 0755 "$APP/otp-enroll.sh"
 # 계정 관리 콘솔 메뉴 래퍼(v2.723): install.sh 가 이 파일이 있을 때만 /usr/local/bin/vmware-portal-users 를 건다.
 cp "$REPO_ROOT/user-admin.sh" "$APP/user-admin.sh" && chmod 0755 "$APP/user-admin.sh"
+# 릴리스 서명 확인 래퍼(v2.730 검토 S-10): 설치본이 다음 패키지를 확인하는 신뢰 기준이 된다(install.sh 가 vmware-portal-verify 를 건다).
+#   ⚠ 서명 **개인키**·서명 스크립트(scripts/)는 패키지에 넣지 않는다 — 공개키 목록(server/src/upgrade/release-signing-keys.json)만 들어간다.
+cp "$SCRIPT_DIR/release-verify.sh" "$APP/release-verify.sh" && chmod 0755 "$APP/release-verify.sh"
 cp -r "$REPO_ROOT/web/dist" "$APP/web/dist"
 # 서비스 바로가기 허브(별도 페이지·별도 프로세스, Python 표준 라이브러리 전용).
 # 포탈 본체와 무관하게 동작하므로 소스만 담고 기동은 운영자가 systemd 로 켠다.
@@ -147,6 +158,7 @@ fi
 # 4) Installer assets --------------------------------------------------------
 echo "==> Adding installer + systemd unit"
 cp "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/uninstall.sh" "$STAGE/"
+cp "$SCRIPT_DIR/release-verify-lib.sh" "$STAGE/"   # v2.730(S-10): install.sh 가 source 하는 패키지 서명 확인
 cp "$SCRIPT_DIR/vmware-portal.service" "$STAGE/"
 cp "$SCRIPT_DIR/vmware-portal-rma@.service" "$STAGE/"
 cp "$SCRIPT_DIR/portal.env.example" "$STAGE/"
@@ -176,3 +188,5 @@ echo "    설치 패키지 : $TARBALL  ($(du -h "$TARBALL" | cut -f1))"
 echo "                  → 최초 설치/수동 재설치: 풀고 sudo ./install.sh"
 echo "    업그레이드 번들: $BUNDLE  ($(du -h "$BUNDLE" | cut -f1))"
 echo "                  → 자동/수동 업그레이드: 감시 폴더에 넣거나 관리자 UI로 적용"
+echo "    ⚠ v2.730: 설치·업그레이드에는 서명 manifest(vmware-portal-${VERSION}.manifest.json)가 함께 필요합니다 —"
+echo "      CI 는 scripts/release-sign.mjs 로 만듭니다(로컬 빌드는 서명되지 않습니다 · docs/RELEASE-SIGNING.md)."

@@ -234,7 +234,8 @@ test('② 리바인딩 취약 접속부 전부에 lookup 이 붙어 있다', () 
   const cases = [
     ['util/resilientFetch.js', /connect: \{[^}]*lookup: ssrfLookup/],
     ['alerts.js', /new UndiciAgent\(\{ connect: \{[^}]*lookup: ssrfLookup/],
-    ['horizon/horizon.js', /new Agent\(\{ connect: \{[^}]*lookup: ssrfLookup/],
+    // 2026-10-09 S-02: Horizon 은 deviceTlsConnect({ …, tls: { lookup: ssrfLookup } }) — 인증서 판정 connect 함수에 같은 lookup 을 넘긴다.
+    ['horizon/horizon.js', /new Agent\(\{ connect: (?:\{|deviceTlsConnect\(\{[^}]*tls: \{)[^}]*lookup: ssrfLookup/],
   ];
   for (const [f, re] of cases) assert.match(read(f), re, `${f} 에 lookup 이 없다`);
   // tls.connect / https.request 계열은 옵션 객체에 직접 붙는다.
@@ -259,7 +260,7 @@ test('② dispatcher 훅은 사전 가드가 없던 경로도 덮는다(horizon 
   // 검사만 있었다. 감사가 제안한 '호출부마다 사전 검사 추가' 방식이면 이 경로를 빠뜨릴 수 있다.
   // dispatcher 에 lookup 을 달면 그 dispatcher 를 쓰는 전 요청이 자동으로 덮인다.
   const hz = read('horizon/horizon.js');
-  assert.match(hz, /const dispatcher = new Agent\(\{ connect: \{[^}]*lookup: ssrfLookup/);
+  assert.match(hz, /const dispatcher = new Agent\(\{ connect: (?:\{|deviceTlsConnect\(\{[^}]*tls: \{)[^}]*lookup: ssrfLookup/);
   assert.match(hz, /hzFetch[\s\S]{0,200}dispatcher/, 'hzFetch 가 그 dispatcher 를 써야 폴러 경로가 덮인다');
 });
 

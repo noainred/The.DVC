@@ -3,14 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { authenticateAD, loadAdConfig } from './ad.js';
+import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { userHasPermission } from './permissions.js';
 import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
-import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity } from '../security/securitySettings.js';
+import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity, sessionPolicySettings } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
+import { notifySessionRevoked } from './sessionRevocation.js';
+import { initialExpSec, extendedExpSec, hardLimitSec, sessionVerdict, loginAtOf, revokeRetentionSec } from './sessionPolicy.js';
+import { isSessionRevoked, isTokenDigestRevoked, tokenDigest, lastActivity, noteActivity, sessionNotBefore, forgetUserActivity, revokeSession as revokeSessionImpl, revokeTokenDigest as revokeDigestImpl } from './sessionState.js';
 import { getDataSource } from '../runtime-settings.js';
 import { denyDemoGuest } from './demoGuest.js';
 
@@ -224,7 +227,32 @@ export function reloadUsersFromDisk() {
 function persistUsers() {
   const file = path.join(CONFIG_DIR, 'users.json');
   // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.
-  atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
+  try {
+    atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
+  } finally {
+    // 저장이 실패해도 인메모리 tokenVersion 은 이미 올라 HTTP 는 거부한다 — 열린 장기 연결(SSH·RDP WS)에도 같은 사실을 알린다.
+    flushUserRevocations();
+  }
+}
+
+/*
+ * 계정 단위 세션 폐기 이벤트(2026-10-09 검토 S-04) — 로컬 계정은 tokenVersion·삭제를 resolveTokenUser 가 다음 요청부터 이미
+ * 반영한다(HTTP 는 이미 닫혀 있다). 이 이벤트는 그 사이에도 열려 있는 장기 연결을 즉시 닫게 하는 보조 수단이다.
+ * 발행 지점을 라우트가 아니라 여기(bumpTokenVersion·삭제)에 둔 이유: 관리자 화면·중앙 계정 배포·본인 OTP 등록 등
+ * tokenVersion 을 올리는 경로가 여럿이라 라우트마다 발행하면 한 경로가 빠진다. 저장 직후(persistUsers)에 한 번 낸다.
+ */
+const _pendingRevoke = new Map(); // 소문자 이름 → { username, reason }
+function queueUserRevocation(username, reason) {
+  const u = String(username || '');
+  if (u) _pendingRevoke.set(u.toLowerCase(), { username: u, reason });
+}
+function flushUserRevocations() {
+  if (!_pendingRevoke.size) return;
+  const list = [..._pendingRevoke.values()];
+  _pendingRevoke.clear();
+  for (const e of list) {
+    try { notifySessionRevoked({ scope: 'user', username: e.username, source: 'local', reason: e.reason }); } catch { /* 구독자 오류는 저장 경로를 막지 않는다 */ }
+  }
 }
 
 /**
@@ -427,7 +455,10 @@ export function normalizedScope(u) {
 
 // 서버측 토큰 폐기(감사 M5) — 자격증명/역할이 바뀌면 버전을 올려 그 전에 발급된 토큰을
 // authMiddleware에서 즉시 무효화한다(로컬 계정 한정; AD는 다음 로그인에 반영).
-function bumpTokenVersion(u) { u.tokenVersion = (u.tokenVersion || 0) + 1; }
+function bumpTokenVersion(u, reason = 'token-version') {
+  u.tokenVersion = (u.tokenVersion || 0) + 1;
+  queueUserRevocation(u.username, reason);
+}
 
 /** Public-safe user list (no secrets/hashes). */
 export function listUsers() {
@@ -523,7 +554,7 @@ export function setLocalPassword(username, password, { actor = null, actorUser =
     || superAdminGuardDenied(u, { actor, actorUser, trusted, what: '비밀번호 변경' });
   if (denied) return denied;
   u.passwordHash = hashPassword(pw);
-  bumpTokenVersion(u); // 비번 변경 → 기존 세션 토큰 즉시 폐기
+  bumpTokenVersion(u, 'password-changed'); // 비번 변경 → 기존 세션 토큰 즉시 폐기
   persistUsers();
   return { ok: true, totpEnabled: !!u.totpEnabled };
 }
@@ -549,7 +580,7 @@ export function clearLoginCredentials(username, { actor = null, actorUser = null
   u.totpEnabled = false;
   delete u.totpSecret;
   delete u.totpPendingSecret;
-  bumpTokenVersion(u); // 라이브 세션도 즉시 종료
+  bumpTokenVersion(u, 'login-blocked'); // 라이브 세션도 즉시 종료
   persistUsers();
   return { ok: true };
 }
@@ -583,7 +614,7 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
     if (isAdminTier(u.role) && !isAdminTier(role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
     }
-    if (u.role !== role) bumpTokenVersion(u); // 역할 변경(강등 포함) → 기존 토큰 폐기
+    if (u.role !== role) bumpTokenVersion(u, 'role-changed'); // 역할 변경(강등 포함) → 기존 토큰 폐기
     u.role = role;
   }
   if (name !== undefined) u.name = name || u.username;
@@ -612,7 +643,9 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }
   users = list.filter((x) => x.username !== username);
+  queueUserRevocation(username, 'account-deleted');
   persistUsers();
+  try { forgetUserActivity(username); } catch { /* 정리 실패는 삭제 결과와 무관 */ }
   return { ok: true };
 }
 
@@ -641,10 +674,12 @@ export function applyManagedUsers(managed = []) {
       if (m.passwordHash) u.passwordHash = m.passwordHash;
       list.push(u); result.created++;
     } else {
+      const prevRole = existing.role;
       existing.name = m.name || username; existing.role = m.role; existing.managedBy = 'central';
       // 비번이 '실제로 바뀐' 경우에만 기존 토큰 폐기(M5) — 매 동기화마다 세션이 끊기지 않게
       // 동일 해시 재전송은 무시한다(중앙이 비번을 회전하면 라이브 세션도 함께 만료돼야 함).
-      if (m.passwordHash && m.passwordHash !== existing.passwordHash) { existing.passwordHash = m.passwordHash; bumpTokenVersion(existing); }
+      if (m.passwordHash && m.passwordHash !== existing.passwordHash) { existing.passwordHash = m.passwordHash; bumpTokenVersion(existing, 'password-changed'); }
+      else if (prevRole !== m.role) queueUserRevocation(username, 'role-changed'); // 역할은 매 요청 레코드에서 읽는다 — 열린 장기 연결만 닫는다
       result.updated++;
     }
   }
@@ -653,6 +688,7 @@ export function applyManagedUsers(managed = []) {
     if (u.managedBy === 'central' && !want.has(u.username)) {
       if (isAdminTier(u.role) && list.filter((x) => isAdminTier(x.role)).length <= 1) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
       list.splice(i, 1); result.removed++;
+      queueUserRevocation(u.username, 'account-deleted');
     }
   }
   if (result.created || result.updated || result.removed) persistUsers();
@@ -896,7 +932,7 @@ export function confirmTotpEnroll(username, code, { actor = null, actorUser = nu
   // OTP 전용 강제 대상만 비밀번호를 폐기(이후 OTP 로만 로그인). 혼용/비번전용 정책·사용자별
   // 재정의에서는 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
   if (isOtpOnlyUser(u.username, u.role || 'viewer')) delete u.passwordHash;
-  bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
+  bumpTokenVersion(u, 'otp-enrolled'); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
   // 부트스트랩용 임의 비밀번호 파일(평문)은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
   // (정책과 무관하게 항상 지운다 — 임의 생성 초기 비번 평문이 서버에 남는 사고를 막는다).
@@ -948,7 +984,7 @@ export function disableTotp(username, { password, force = false, actor = null, a
   delete u.totpSecret;
   delete u.totpPendingSecret;
   if (password) u.passwordHash = hashPassword(password); // restore a temp password so they can log in to re-enroll
-  bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
+  bumpTokenVersion(u, 'otp-disabled'); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
   return { ok: true };
 }
@@ -1038,16 +1074,119 @@ if (!config.auth.enabled) {
   console.warn(`[auth] ⚠ 인증이 비활성(AUTH_ENABLED=false) — 모든 요청이 익명 '${AUTH_DISABLED_ROLE}' 권한으로 처리됩니다. 운영 환경에서는 인증을 켜거나 AUTH_DISABLED_ROLE=viewer 로 제한하세요.`);
 }
 
+/* ------------------------- 세션 수명 정책(S-05·S-06·S-08) ------------------------- */
+
+/** 설정된 토큰 수명(초) — AUTH_TOKEN_TTL. */
+export function tokenTtlSeconds() { return ttlSeconds(config.auth.tokenTtl); }
+
+/** 이 토큰(클레임)이 AD 출처로 취급되는가 — 로컬 표지가 없으면 AD(구버전 무표지 토큰 포함). */
+const isAdPayload = (p) => p?.src !== 'local';
+
+/** 세션 정책 입력값 — 설정 캐시(3초)에서 읽는다(핫패스: 파일 read 없음). */
+function sessionPolicyInputs(isAd) {
+  const sp = sessionPolicySettings();
+  let adMaxHours = 0;
+  if (isAd) { try { adMaxHours = adPolicyState().maxSessionHours || 0; } catch { adMaxHours = 0; } }
+  return { maxHours: sp.sessionMaxHours || 0, adMaxHours, isAd, idleEnabled: !!sp.idleLogoutEnabled, idleMin: sp.idleLogoutMin };
+}
+
+/**
+ * 로그인 토큰의 만료(초) — min(지금 + TTL, 로그인 시각 + 총 상한)(S-06). 로그인 라우트가 이 값을 signToken 에 넘긴다.
+ * ⚠ signToken 안에 정책을 넣지 않는다(호출부가 정책을 소유 — 연장도 같은 함수 계열(sessionPolicy.js)을 쓴다).
+ */
+export function loginTokenExpSec({ nowSec = Math.floor(Date.now() / 1000), isAd = false } = {}) {
+  const c = sessionPolicyInputs(isAd);
+  return initialExpSec({ nowSec, ttlSec: tokenTtlSeconds(), loginAt: nowSec, maxHours: c.maxHours, adMaxHours: c.adMaxHours, isAd });
+}
+
+/** 연장 만료 계산(S-06·S-08) — 총 상한은 원래 로그인 시각(lt) 기준. 라우트가 경고 창 판정 뒤 부른다. */
+export function extendTokenExpSec(payload, extendSec, nowSec = Math.floor(Date.now() / 1000)) {
+  const isAd = isAdPayload(payload);
+  const c = sessionPolicyInputs(isAd);
+  const loginAt = loginAtOf(payload, nowSec);
+  const r = extendedExpSec({ curExp: payload?.exp, extendSec, loginAt, maxHours: c.maxHours, adMaxHours: c.adMaxHours, isAd });
+  return { ...r, loginAt, maxHours: c.maxHours, adMaxHours: c.adMaxHours };
+}
+
+/** 이 토큰의 세션 정보(서명 검증 후) — 장기 연결 레지스트리(WS)·로그아웃이 sid·출처를 알 때 쓴다. 권한 판정용이 아니다. */
+export function sessionInfoOf(token) {
+  const p = token && verifyToken(token);
+  if (!p) return null;
+  return { username: p.sub, sid: p.sid ? String(p.sid) : null, source: p.src === 'local' ? 'local' : 'ad', legacy: !p.src, exp: p.exp || null, lt: loginAtOf(p, p.iat) };
+}
+
+/**
+ * 로그아웃(S-05) — 이 토큰의 세션을 서버에서 폐기한다. sid 가 있으면 그 세션만(다른 기기 세션은 그대로), 없으면(구버전 토큰)
+ * 토큰 원문의 지문을 폐기한다. 폐기 기록은 그 세션의 토큰이 가질 수 있는 가장 늦은 만료까지 남는다(재시작 후에도 유지).
+ * @returns {{ ok: boolean, kind?: 'session'|'token', username?: string, sid?: string|null }}
+ */
+export function revokeTokenSession(token, { reason = 'logout' } = {}) {
+  const p = token && verifyToken(token);
+  if (!p) return { ok: false };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const c = sessionPolicyInputs(isAdPayload(p));
+  const hard = hardLimitSec({ loginAt: loginAtOf(p, nowSec), maxHours: c.maxHours, adMaxHours: c.adMaxHours, isAd: c.isAd });
+  const untilSec = revokeRetentionSec({ nowSec, exp: p.exp, ttlSec: tokenTtlSeconds(), hardLimit: hard });
+  const source = p.src === 'local' ? 'local' : 'ad';
+  if (p.sid) {
+    revokeSessionImpl(String(p.sid), { username: p.sub, untilSec, reason });
+    try { notifySessionRevoked({ scope: 'session', username: p.sub, sid: String(p.sid), source, reason }); } catch { /* */ }
+    return { ok: true, kind: 'session', username: p.sub, sid: String(p.sid) };
+  }
+  revokeDigestImpl(tokenDigest(token), { username: p.sub, untilSec, reason });
+  return { ok: true, kind: 'token', username: p.sub, sid: null };
+}
+
+/** 사용자 활동 기록(S-05) — 로그인·연장·`POST /auth/activity`. 토큰이 지금 유효할 때만(폐기·유휴 만료된 세션을 되살리지 않는다). */
+const _touchAt = new Map();
+export function touchSessionActivity(token, { minIntervalMs = 0 } = {}) {
+  const p = token && verifyToken(token);
+  if (!p?.sid) return false;
+  const now = Date.now();
+  if (minIntervalMs > 0) {
+    const last = _touchAt.get(p.sid) || 0;
+    if (now - last < minIntervalMs) return true;
+  }
+  if (!resolveTokenUser(token)) return false;
+  if (_touchAt.size > 20_000) _touchAt.clear();
+  _touchAt.set(p.sid, now);
+  return noteActivity(String(p.sid), { username: p.sub, atSec: Math.floor(now / 1000), expSec: p.exp });
+}
+/** 로그인·연장 직후 활동 기록(토큰을 막 발급했으므로 재검증 없이). */
+export function noteIssuedSession(payloadLike) {
+  if (!payloadLike?.sid) return false;
+  return noteActivity(String(payloadLike.sid), { username: payloadLike.sub, expSec: payloadLike.exp });
+}
+
+/** 세션 정책 판정 — 일괄 무효 시각 → 개별 폐기 → 총 상한 → 서버측 유휴. */
+function sessionAlive(payload, token) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const c = sessionPolicyInputs(isAdPayload(payload));
+  const revoked = payload.sid ? isSessionRevoked(String(payload.sid)) : isTokenDigestRevoked(tokenDigest(token));
+  const lastActivitySec = (c.idleEnabled && payload.sid) ? lastActivity(String(payload.sid), { username: payload.sub, expSec: payload.exp, now: nowSec }) : null;
+  return sessionVerdict(payload, { nowSec, ...c, notBeforeSec: sessionNotBefore(), revoked, lastActivitySec }).ok;
+}
+
 /**
  * 토큰 → 유효 사용자 해석(공용) — 서명/만료 검증 + 서버측 토큰 폐기(감사 M5) + 최신 역할 적용.
  * 로컬 계정 토큰(src:'local')은 사용자 레코드의 tokenVersion과 대조(비번/역할 변경·삭제 시
  * 즉시 무효)하고, 역할은 토큰이 아니라 현재 사용자 레코드에서 읽는다(강등 즉시 반영).
  * HTTP authMiddleware뿐 아니라 WS SSH/RDP 게이트웨이도 이 함수를 써야 폐기가 우회되지 않는다.
  * (loadUsers는 메모이즈되어 호출당 파일 IO 없음. 구버전 토큰(src 없음)은 TTL 내 자연 만료.)
+ *
+ * 2026-10-09 검토 S-05·S-06·S-08 — 세션 정책도 여기 한 곳에서 본다(HTTP·WS 공통):
+ *   · 로그아웃한 세션(sid)·토큰은 무효(서버 폐기 목록 — 재시작 후에도 유지).
+ *   · 총 상한(sessionMaxHours, AD 는 AD 세션 상한까지)은 연장 여부와 무관하게 원래 로그인 시각 기준.
+ *     운영 중 상한을 줄이면 기존 세션에도 다음 요청부터 적용된다.
+ *   · 서버측 유휴(idleLogoutMin): 마지막 '사용자 활동'(로그인·연장·활동 신호) 기준. 자동 폴링은 활동이 아니다.
+ *   · AD 토큰(src:'ad')은 AD 가 켜져 있고 발급 당시 정책 epoch 가 지금과 같을 때만 유효.
+ *     구버전 무표지 토큰(src 없음)은 업그레이드 뒤 AD 정책이 한 번도 바뀌지 않았을 때만(호환) — 그 뒤로는 무효.
  */
 export function resolveTokenUser(token) {
   const payload = token && verifyToken(token);
   if (!payload) return null;
+  // 모르는 출처 표지는 무효(fail-closed). 'local' · 'ad' · 표지 없음(구버전 AD) 셋만 안다.
+  if (payload.src != null && payload.src !== 'local' && payload.src !== 'ad') return null;
   // 단일 세션 강제(ID 공유 금지, v2.280) — 강제 대상이면 이 계정의 '현재 활성 세션' sid 와 일치하는
   // 토큰만 유효하다. 다른 기기/사람이 새로 로그인하면 그 로그인이 활성 sid 를 덮어써(최신 로그인
   // 우선) 이전 세션의 토큰은 여기서 무효가 된다. sid 없는(기능 도입/활성화 전 발급) 토큰도 무효 →
@@ -1058,7 +1197,9 @@ export function resolveTokenUser(token) {
   // 판정을 여기·로그인 라우트에서 각자 만들면 sid 발급/검사 비대칭으로 데모가 벽돌이 된다(주석 참조).
   const localU = payload.src === 'local' ? getUser(payload.sub) : null;
   if (payload.src === 'local' && !localU) return null; // 삭제된 계정
+  if (!sessionAlive(payload, token)) return null;      // 로그아웃·총 상한·서버측 유휴(S-05·S-06)
   if (singleSessionRequired(!!localU?.demo) && !isActiveSession(payload.sub, payload.sid)) return null;
+  const sidOf = payload.sid ? { sid: String(payload.sid) } : {};
   if (payload.src === 'local') {
     const u = localU;
     if ((u.tokenVersion || 0) !== (payload.tv || 0)) return null; // 폐기된 토큰
@@ -1071,15 +1212,28 @@ export function resolveTokenUser(token) {
       username: payload.sub, role: demoGuestOf(u) ? 'admin' : authzRole(role), ...(role === SUPER_ADMIN ? { superAdmin: true } : {}),
       ...(demoGuestOf(u) ? { demoGuest: true } : {}), name: payload.name, scope: normalizedScope(u),
       mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
+      ...sidOf,
     };
   }
   // v2.681(R2B-01): 로컬 계정과 같은 이름(대소문자 무시)의 비-로컬(AD) 토큰은 무효다 — 업그레이드 전에 발급된
   //   토큰도 여기서 죽는다. 로그인(authenticate)이 이미 그런 AD 세션을 만들지 않지만, 로컬 계정이 나중에 생긴
   //   경우·구버전이 발급한 토큰을 함께 막는다(이름 기반 소유자·자격증명 가드의 우회 차단).
   if (localNameTaken(payload.sub)) return null;
+  // S-08: AD 정책 대조. 판정에 쓰는 상태는 3초 캐시(저장 시 즉시 무효화) — 매 요청 LDAP 를 부르지 않는다.
+  let ad;
+  try { ad = adPolicyState(); } catch { return null; }
+  if (payload.src === 'ad') {
+    if (!ad.enabled) return null;                                   // AD 를 끄면 기존 AD 세션도 끝난다
+    if (!payload.ep || String(payload.ep) !== ad.epoch) return null; // 역할 매핑·디렉터리 설정이 바뀐 뒤의 토큰
+  } else if (ad.counter > 0) {
+    return null; // 구버전 무표지 토큰 — 업그레이드 뒤 AD 정책이 바뀐 적이 있으면 그 전 정책으로 받은 역할을 믿지 않는다
+  }
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
   // super_admin 은 로컬 계정 전용이다 — 토큰 클레임이 super_admin 이어도 admin 으로 접는다(v2.643).
-  return { username: payload.sub, role: authzRole(payload.role), name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] } };
+  return {
+    username: payload.sub, role: authzRole(payload.role), name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] },
+    ...(payload.src === 'ad' ? { authSrc: 'ad' } : {}), ...sidOf,
+  };
 }
 
 export function authMiddleware(req, res, next) {

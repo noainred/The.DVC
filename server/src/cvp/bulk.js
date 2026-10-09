@@ -138,7 +138,7 @@ export function sampleCsv() {
     // 주석 행 — id 가 '#...' 로 시작하므로 파싱에서 걸러진다(안내 목적).
     csvLine(['# id: 비우면 새 등록 · 있으면 그 서버 수정', '# name: 표시명', '# host: https://cvp.example 또는 호스트[:포트]',
       '# authMode: token | password', '# username: password 방식의 계정', '# agent: 담당 엣지(비우면 중앙 직접)',
-      '# datacenter: DataCenter id 또는 이름', '# verifyTls: true|false', '# enabled: true|false', '# note: 메모',
+      '# datacenter: DataCenter id 또는 이름', '# verifyTls: true = CA 체인만(엄격) · false = CA 체인 또는 장비 신뢰 승인 지문(검증을 끄는 값이 아님)', '# enabled: true|false', '# note: 메모',
       '# password: 비우면 기존 유지', '# token: 비우면 기존 유지']),
     csvLine(['', 'CVP Seoul', 'https://cvp.seoul.example.com', 'token', '', '', '', 'false', 'true', '', '', 'ChangeMe-service-account-token']),
     csvLine(['', 'CVP Warsaw', 'cvp.wa.example.com:443', 'password', 'svc-cvp', '', '', 'false', 'true', '', 'ChangeMe!2', '']),

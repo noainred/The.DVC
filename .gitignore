@@ -258,3 +258,6 @@ server/config/*
 # v2.597(감사 DEPS2597-02): 저장소 루트에서 서버를 띄우면 CONFIG_DIR 기본값이 ./config 가 되어 런타임 DB 가 생긴다
 # (config/vm-track.db 가 v2.537 부터 추적되고 있었다). 서버 설정은 server/config 다.
 /config/
+# 2026-10-09 검토 S-10: 릴리스 서명 개인키는 저장소에 두지 않는다(scripts/release-keygen.mjs 는 저장소 밖에만 쓴다 — 사람이 옮겨 둔 경우 대비).
+*.key.pem
+release-signing-*.key*

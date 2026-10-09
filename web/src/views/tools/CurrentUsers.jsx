@@ -240,7 +240,7 @@ function WindowsUsersPanel({ scope }) {
                 <td>{r.name || r.vmId}</td>
                 <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{r.folder || '—'}</td>
                 <td data-sort={`${kindTone(r.kind)}-${r.kind}`}><KindBadge kind={r.kind} labels={labels} /></td>
-                <td data-sort={String(r.ok ? new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size : -1)}>
+                <td data-sort={r.ok ? String(new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size) : ''}>
                   {r.ok ? usersCountText(new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size, r.truncated) : '—'}
                 </td>
                 <td data-sort={String(r.sessions ?? '')}>{r.sessions == null ? '—' : r.sessions}</td>

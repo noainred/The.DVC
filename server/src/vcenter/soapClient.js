@@ -5,8 +5,9 @@
  * that pyVmomi/govmomi-based monitoring tools use.
  *
  * Built with the standard library only: HTTP(S) via global fetch, hand-built
- * SOAP envelopes, and defensive regex parsing of the responses. TLS verification
- * follows the global dispatcher configured in restClient.js (self-signed OK).
+ * SOAP envelopes, and defensive regex parsing of the responses. TLS: restClient.js 의 vcDispatcher(vCenter 전용 로컬 —
+ * 2026-10-09 S-02 부터 CA 체인 또는 장비별 승인 지문만 받는다. security/tlsTrust.js). getThumbprint(콘솔 URL 용 지문 읽기)는
+ * 자격증명을 싣지 않는 probe 라 판정하지 않는다.
  */
 
 import { inferGpuMemGB } from '../gpu/gpuModelMem.js';

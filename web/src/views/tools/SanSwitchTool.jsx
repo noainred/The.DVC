@@ -24,6 +24,8 @@ import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
 import { CapacityCard, TrafficCard, DcGrid } from './SanSwitchV2Parts.jsx'; // v2.669 시안 'SAN Switch v2'
+import { trackFetch, freshState, freshNote, clockText } from './sanFreshText.js'; // 검토 I-04: 목록 갱신 실패를 숨기지 않는다
+import { FreshNote } from './SanFreshNote.jsx';
 import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
 import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
@@ -57,6 +59,8 @@ function failReason(s) {
 
 const EMPTY_FORM = { type: 'brocade', name: '', host: '', username: 'admin', password: '',
   collectMethod: 'ssh', sshPort: 22, agent: '', datacenterId: '', vfId: '', note: '', enabled: true };
+
+const LIST_POLL_MS = 30_000;   // 스위치 목록 갱신 주기(머리 문구·안내가 같은 값을 쓴다)
 
 export default function SanSwitchTool() {
   // ⚠ 훅은 전부 조기 return 위에(React #310 회귀 방지 — CLAUDE.md).
@@ -94,9 +98,15 @@ export default function SanSwitchTool() {
   };
   useEffect(() => {
     load();
-    pollRef.current = setInterval(load, 30_000);
+    pollRef.current = setInterval(load, 30_000);   // = LIST_POLL_MS(머리 문구·안내가 같은 값을 쓴다 — audit2630f 가 이 글자를 고정한다)
     return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
+  // 검토 I-04: 첫 성공 뒤 목록 조회가 실패하면 예전에는 오류가 어디에도 보이지 않았다(error && !data 일 때만 그렸다).
+  //   직전 목록은 그대로 두고 '갱신 실패 — 직전 조회 결과 표시 중' 과 두 시각을 머리에 말한다(훅·ref 는 조기 return 위에).
+  const listTr = useRef(null);
+  listTr.current = trackFetch(listTr.current, { data, error, key: 'list' }, Date.now());
+  const listFresh = freshState(listTr.current);
+  const listNote = freshNote(listFresh, { what: '스위치 목록', pollMs: LIST_POLL_MS, stopped: error?.status === 403 });
 
   const dcName = useMemo(() => {
     const m = new Map((data?.datacenters || []).map((d) => [d.id, d.name || d.id]));
@@ -218,7 +228,9 @@ export default function SanSwitchTool() {
                 <span className="san2-dot" style={{ background: dot }} />
                 <span>{hs.text}</span>
                 {last ? <span>· 마지막 수집 {ago(last)}</span> : null}
-                <span>· 30초마다 갱신</span>
+                {listFresh.state === 'failed-with-data'
+                  ? <span style={{ color: 'var(--amber)' }}>· 갱신 실패 {clockText(listFresh.failAt)}부터(마지막 성공 {clockText(listFresh.okAt)})</span>
+                  : <span>· {Math.round(LIST_POLL_MS / 1000)}초마다 갱신</span>}
               </div>
             );
           })()}
@@ -238,6 +250,8 @@ export default function SanSwitchTool() {
           <button type="button" className="san2-btn primary" onClick={() => openForm(null)}>+ 스위치 등록</button>
         </div>
       </div>
+
+      <FreshNote note={listNote} style={{ marginBottom: 12 }} />
 
       {/* 포트 용량 — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
       <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} />
@@ -814,16 +828,20 @@ function PerfPanel({ deviceId, ports }) {
   // v2.728(SAN 1차): 조건을 바꾸거나 창을 닫으면 **이전 요청을 끊는다**(AbortController). 예전에는 결과만 버리고 요청은 끝까지 돌아
   //   서버가 아무도 안 볼 집계를 계속 했다 — 서버는 연결이 끊긴 요청을 대기열에서 빼거나 진행 중 집계를 멈춘다.
   //   긴 조회는 기본 20초 × 3회 재시도가 오히려 같은 무거운 집계를 세 번 줄 세운다 → 90초 · 재시도 없음.
+  // 검토 I-04: 응답·오류에 요청 키(장비·기간·뷰)를 붙인다 — 조건을 바꾼 직후 한 번의 렌더(효과가 비우기 전)에
+  //   이전 조건의 차트·오류가 새 조건의 것처럼 보이지 않게.
+  const perfKey = JSON.stringify([deviceId, hours, range, view]);
   useEffect(() => {
     const ac = new AbortController();
     setData(null); setError(null);
     const v = view;
+    const key = perfKey;
     const path = v === 'storage' ? `/tools/sanswitch/devices/${deviceId}/perf/storage` : `/tools/sanswitch/devices/${deviceId}/perf`;
     fetchJson(path, perfQuery({ hours, range }), ac.signal, { timeoutMs: 90_000, retries: 0 })
-      .then((d) => { if (!ac.signal.aborted) setData({ ...d, view: v }); })
-      .catch((e) => { if (!ac.signal.aborted) setError(e.message); });
+      .then((d) => { if (!ac.signal.aborted) setData({ ...d, view: v, reqKey: key }); })
+      .catch((e) => { if (!ac.signal.aborted) setError({ key, msg: e.message }); });
     return () => ac.abort();
-  }, [deviceId, hours, range, view]);
+  }, [deviceId, hours, range, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const collectNow = () => {
     setCollecting(true); setCollectMsg('수집 요청 중…');
@@ -840,7 +858,8 @@ function PerfPanel({ deviceId, ports }) {
   }, [ports]);
 
   // 뷰가 일치하는 응답만 사용(위 주석 참조). 필드도 방어적으로 읽는다.
-  const shown = data && data.view === view ? data : null;
+  const shown = data && data.view === view && data.reqKey === perfKey ? data : null;
+  const errNow = error && error.key === perfKey ? error.msg : null;
   const raw = shown?.series || [];
   // 어레이/호스트 구분은 서버와 같은 규칙(perfDb.endpointKind)을 쓴다 — 이름에 '::' 가 있으면 어레이.
   const kindOf = (key) => (String(key) === '(미확인)' ? 'unknown' : (String(key).includes('::') ? 'array' : 'host'));
@@ -909,8 +928,8 @@ function PerfPanel({ deviceId, ports }) {
       {shown && <div style={{ marginBottom: 6 }}><MetricHelp mode={mode} bucketMs={shown.bucketMs} hours={effHours} scope={range ? rangeLabel(range) : ''} /></div>}
       {shown?.rangeIssue && <div className="card muted" style={{ fontSize: 12, borderColor: 'var(--amber)' }}>⚠ 기간 지정 무시됨: {shown.rangeIssue} — 최근 24시간으로 표시합니다.</div>}
 
-      {error && <ErrorBox message={error} />}
-      {!error && !shown && <Loading />}
+      {errNow && <ErrorBox message={errNow} />}
+      {!errNow && !shown && <Loading />}
       {shown && (!rows.length || !top.length) && (
         rows.length && raw.length && !seriesAll.length
           ? (
@@ -1025,8 +1044,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const [hours, setHours] = useState(24);
   const [range, setRange] = useState(null);     // 기간 지정(v2.420)
   const [mode, setMode] = useState('avg');      // 평균/피크 기준(v2.420)
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  // 검토 I-04: 응답·오류는 요청 키(법인·기간·분리·종류)와 함께 둔다 — 조건을 바꾼 직후 한 번의 렌더(효과가 비우기 전)에
+  //   이전 조건의 표·차트가 새 조건의 것처럼 보이지 않게. 아래 코드는 지금 키와 같은 것만 data·error 로 읽는다.
+  const [got, setGot] = useState(null);       // { key, d }
+  const [errGot, setErrGot] = useState(null); // { key, msg }
   // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
   const [kind, setKind] = useState('array');
   const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
@@ -1042,16 +1063,20 @@ function DcStoragePerf({ dcPerf, onClose }) {
   //   종류를 바꾸면 다시 받는다 — 같은 기간·범위면 서버가 집계를 기억해 두므로 다시 계산하지 않는다.
   //   이전 요청은 끊는다(서버가 대기열에서 빼거나 집계를 멈춘다) · 90초 · 재시도 없음(같은 무거운 집계를 세 번 줄 세우지 않게).
   const [tableMax, setTableMax] = useState(PERF_TABLE_PAGE);
+  const sumKey = JSON.stringify([dcParam, hours, range, split, kind]);
   useEffect(() => {
     const ac = new AbortController();
-    setData(null); setError(null); setTableMax(PERF_TABLE_PAGE);
+    const key = sumKey;
+    setGot(null); setErrGot(null); setTableMax(PERF_TABLE_PAGE);
     fetchJson('/tools/sanswitch/perf/storage-summary',
       { datacenterId: dcParam, ...perfQuery({ hours, range }), split: split ? '1' : '0', kind: kind === 'all' ? '' : kind },
       ac.signal, { timeoutMs: 90_000, retries: 0 })
-      .then((d) => { if (!ac.signal.aborted) setData(d); })
-      .catch((e) => { if (!ac.signal.aborted) setError(e.message); });
+      .then((d) => { if (!ac.signal.aborted) setGot({ key, d }); })
+      .catch((e) => { if (!ac.signal.aborted) setErrGot({ key, msg: e.message }); });
     return () => ac.abort();
-  }, [dcParam, hours, range, split, kind]);
+  }, [dcParam, hours, range, split, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = got && got.key === sumKey ? got.d : null;
+  const error = errGot && errGot.key === sumKey ? errGot.msg : null;
 
   // 보기 기준(v2.420): 평균 = sum/avgTotal/maxTotal, 피크 = peak/peakAvg/peakTotal. 정렬 키와 표시 값이 같은 계산이어야 한다.
   const peak = mode === 'peak';

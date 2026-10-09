@@ -2,12 +2,42 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
+import { policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10
 
 function Row({ label, children }) {
   return (
     <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)' }}>
       <span className="muted">{label}</span>
       <span style={{ textAlign: 'right' }}>{children}</span>
+    </div>
+  );
+}
+
+function Toned({ v }) {
+  return <span style={{ color: TONE_COLOR[v.tone] || 'inherit', whiteSpace: 'normal' }}>{v.text}</span>;
+}
+
+/** 릴리스 서명 상태 — 짧게(정책·신뢰 키 수·마지막 검증). 판정은 서버, 문구는 upgradeSignatureText.js. */
+function SignatureCard({ sig }) {
+  const pol = policyText(sig);
+  const trust = trustText(sig);
+  const last = lastVerifyText(sig);
+  const counts = countsText(sig);
+  return (
+    <div className="card" style={{ marginBottom: 16, minWidth: 0 }}>
+      <b>릴리스 서명</b>
+      <div style={{ marginTop: 10 }}>
+        <Row label="정책"><Toned v={pol} /></Row>
+        <Row label="신뢰 공개키"><Toned v={trust} /></Row>
+        <Row label="마지막 검증"><Toned v={last} /></Row>
+      </div>
+      {last.detail && (
+        <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal', wordBreak: 'break-word' }}>{last.detail}</div>
+      )}
+      {counts && <div className="muted" style={{ marginTop: 4, fontSize: 11.5 }}>{counts}</div>}
+      <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal' }}>
+        서명 정책은 화면에서 바꿀 수 없습니다 — 호스트의 portal.env 와 docs/RELEASE-SIGNING.md 를 보세요.
+      </div>
     </div>
   );
 }
@@ -131,11 +161,18 @@ export default function Upgrade() {
               {check.remote && <Row label="원격(GitHub)">{check.remote.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
                 : <span className="muted">{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
+              {/* v2.730 I-08: 원격 확인이 실패했을 때 직전 정상 확인(참고용 — 설치에는 쓰지 않는다). */}
+              {check.remote && remoteLastGoodText(check.remote) && (
+                <div className="muted" style={{ fontSize: 11.5, padding: '4px 0', whiteSpace: 'normal' }}>{remoteLastGoodText(check.remote)}</div>
+              )}
               <Row label="업그레이드 가능">{newer ? <span className="badge green">예</span> : <span className="badge gray">아니오</span>}</Row>
             </div>
           )}
         </div>
       </div>
+
+      {/* v2.730 S-10: 릴리스 서명 — 정책·신뢰 공개키·마지막 검증. 설정은 화면에서 바꾸지 않는다(호스트 portal.env · docs/RELEASE-SIGNING.md). */}
+      <SignatureCard sig={status.signature} />
 
       {/* Editable settings */}
       <div className="card" style={{ marginBottom: 16 }}>

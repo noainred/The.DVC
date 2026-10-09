@@ -53,8 +53,8 @@ export function sampleCsv() {
     csvLine(['# id: 엣지(에이전트) 이름 — 대소문자 무시 동일 키', '# name: 표시 이름', '# url: http(s)://호스트:포트',
       '# datacenter: 법인/사이트 라벨(선택)', '# vcenterId: 원격 호스트 귀속 vCenter(선택)',
       '# enabled: true|false', '# token: 비우면 기존 유지(신규는 없음)']),
-    csvLine(['WA-Edge', '바르샤바 수집기', 'http://10.20.0.10:4000', 'WA', 'vc-wa-01', 'true', 'ChangeMe-Token']),
-    csvLine(['KR-Edge', '한국 수집기', 'http://10.10.0.10:4000', '한국', '', 'true', '']),
+    csvLine(['WA-Edge', '바르샤바 수집기', 'https://10.20.0.10:4443', 'WA', 'vc-wa-01', 'true', 'ChangeMe-Token']),
+    csvLine(['KR-Edge', '한국 수집기', 'https://10.10.0.10:4443', '한국', '', 'true', '']),
   ];
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }

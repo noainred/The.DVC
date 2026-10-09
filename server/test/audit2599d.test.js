@@ -26,6 +26,10 @@ import ssh2 from 'ssh2';
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2599d-'));
 process.env.CONFIG_DIR = DIR;
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
+// 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가
+// 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
+process.env.SSH_HOSTKEY_POLICY = 'observe';
+const TEST_HOST_KEY = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
 
 // ── C2599-01 ────────────────────────────────────────────────────────────────
 test('C2599-01 — Isilon REST 노드 처리량은 B/s×8 = bps, 못 읽은 값은 null', async () => {
@@ -194,7 +198,7 @@ test('C2599-05 — DFW 정책 60개 상한은 뺀 개수·규칙 수 하한으�
 
 // ── C2599-04 (가짜 ssh2 APC 서버) ───────────────────────────────────────────
 function apcServer(table) {
-  const hostKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
+  const hostKey = TEST_HOST_KEY;
   const srv = new ssh2.Server({ hostKeys: [hostKey] }, (client) => {
     client.on('authentication', (ctx) => ctx.accept());
     client.on('ready', () => client.on('session', (accept) => {

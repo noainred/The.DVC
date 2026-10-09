@@ -76,8 +76,9 @@ test('자격증명 스토어 6종: 로드 catch 에 preserveCorrupt(FILE) 존재
 test('secretVault: 정책 파일 손상 시 직전 유효 정책 유지(plain 무음 폴백 금지)', () => {
   const s = read('security/secretVault.js');
   assert.match(s, /_lastGoodPolicy/);
-  assert.match(s, /return _lastGoodPolicy/);
-  assert.match(s, /암호화가 조용히 해제되지 않도록/);
+  // S-07(2026-10-09): 직전 유효 정책은 '복구값' 표지와 함께 돌려준다(두 번째 load·재시작까지 — 동작은 secretsPolicyS07.test.js 가 실제 저장으로 고정).
+  assert.match(s, /return \{ \.\.\._lastGoodPolicy, recovered: [^}]*'last-good', problem \}/);
+  assert.match(s, /평문으로 내려가지 않도록 직전 유효 정책/);
 });
 
 /* ── [MEDIUM] WS FD 누수 catch-all + [LOW] 매핑 소유/scope 재검사 ── */

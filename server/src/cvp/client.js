@@ -11,8 +11,8 @@
  *   끝나면 logout(실패 무시). **로그인(또는 토큰 모드의 첫 조회) 401/403 만 자격증명 거부**로 본다(`err.authFailed`) —
  *   장비별 텔레메트리 경로의 403 은 RBAC 거부일 수 있어 'forbidden' 사유로만 남긴다(주기 수집을 멈추지 않는다).
  *
- * 보안: undici Agent 는 `withSsrfLookup`(DNS 리바인딩 차단 — v2.537 스윕), verifyTls=false 면 **로컬** dispatcher 로만
- *   rejectUnauthorized:false(전역 금지). 모든 요청에 signal(호출자 시한이 세션을 실제로 끊는다 — v2.417).
+ * 보안: undici Agent 는 `withSsrfLookup`(DNS 리바인딩 차단 — v2.537 스윕), 인증서는 security/tlsTrust.js 가 판정한다
+ *   (verifyTls=true 엄격 · 아니면 CA 체인 또는 승인 지문 — 2026-10-09 S-02). 모든 요청에 signal(호출자 시한이 세션을 실제로 끊는다 — v2.417).
  *   응답 본문은 상한(기본 8MB) 스트림 읽기 — 넘으면 그 항목만 실패로 기록한다(v2.583 readCapped).
  *
  * 예산(v2.528 규약): 장비별 조회가 장비 수 × 경로 수라 느린 회선에서 시한을 넘기기 쉽다. ① 세션 예산(`budgetMs` —
@@ -22,6 +22,7 @@
  */
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
+import { deviceTlsConnect, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { readTextCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js';
@@ -31,8 +32,11 @@ import { pushAll } from '../util/pushAll.js';
 import { baseUrlOf } from './registry.js';
 import * as P from './parse.js';
 
-const dispVerify = new Agent({ connect: withSsrfLookup({}) });
-const dispNoVerify = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: false }) });
+// 2026-10-09 S-02: 서버별 `verifyTls`(등록 폼 체크박스)가 true 면 CA 체인만(엄격), 아니면(기본) CA 체인 또는 장비별 승인 지문
+// (security/tlsTrust.js). 예전 기본(verifyTls=false)은 어떤 인증서든 받아 CVP 계정·토큰을 상대 확인 없이 보냈다 — CVP 에는
+// '명시적 예외' 모드가 없다(체크박스 기본값이 false 라 '사람이 끈 것' 과 구분할 수 없다).
+const dispVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'strict', strictHint: 'CVP 등록의 ‘TLS 인증서 검증’ 을 끄면 승인 지문을 허용합니다', tls: withSsrfLookup({}) }) });
+const dispNoVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'verify', tls: withSsrfLookup({}) }) });
 const REQ_TIMEOUT_MS = reqTimeoutMs(process.env.CVP_HTTP_TIMEOUT_MS, 30_000);
 export const BODY_MAX_BYTES = Math.max(1_048_576, Number(process.env.CVP_BODY_MAX_BYTES) || 8 * 1_048_576);
 const DEVICE_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.CVP_DEVICE_CONCURRENCY) || 6));
@@ -241,7 +245,7 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
       res = await fetch(`${base}/cvpservice/login/authenticate.do`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body, dispatcher, signal: sig(signal, leftMs), redirect: 'manual',
       });
-    } catch (e) { throw new Error(`로그인 요청 실패: ${e?.cause?.code || e?.message || e}`); }
+    } catch (e) { throw new Error(`로그인 요청 실패: ${tlsPeerErrorOf(e)?.message || e?.cause?.code || e?.message || e}`, { cause: e }); } // S-02: 인증서 거부는 문구(지문·조치)를 살린다
     if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`로그인 ${redirectReason(res, base)}`); }
     if (res.status === 401 || res.status === 403) {
       try { await res.body?.cancel?.(); } catch { /* */ }
@@ -269,7 +273,7 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
       try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal, leftMs), redirect: 'manual' }); }
       catch (e) {
         if (signal?.aborted) throw e;
-        return { ok: false, status: 0, reason: `연결 실패: ${e?.cause?.code || e?.message || e}` };
+        return { ok: false, status: 0, reason: `연결 실패: ${tlsPeerErrorOf(e)?.message || e?.cause?.code || e?.message || e}` };
       }
       if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: redirectReason(res, base), redirect: true }; }
       if (!res.ok) {
@@ -287,7 +291,7 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
       try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal, leftMs), redirect: 'manual' }); }
       catch (e) {
         if (signal?.aborted) throw e;
-        return { ok: false, status: 0, reason: `연결 실패: ${e?.cause?.code || e?.message || e}` };
+        return { ok: false, status: 0, reason: `연결 실패: ${tlsPeerErrorOf(e)?.message || e?.cause?.code || e?.message || e}` };
       }
       if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: redirectReason(res, base), redirect: true }; }
       if (!res.ok) {

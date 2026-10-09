@@ -1294,7 +1294,7 @@ function AdminPanel({ onChanged }) {
               <label style={LBL}>메모<input className="input" value={form.note} onChange={set('note')} /></label>
             </div>
             <div style={ROW}>
-              <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!form.verifyTls} onChange={set('verifyTls')} /> TLS 인증서 검증</label>
+              <label style={{ fontSize: 12 }} title="끄면 사설 CA 또는 장비 신뢰 화면의 승인 지문으로 확인합니다(검증을 끄는 옵션이 아닙니다)"><input type="checkbox" checked={!!form.verifyTls} onChange={set('verifyTls')} /> CA 체인만 허용(엄격)</label>
               <label style={{ fontSize: 12 }}><input type="checkbox" checked={form.enabled !== false} onChange={set('enabled')} /> 사용</label>
             </div>
             <div style={NOTE}>

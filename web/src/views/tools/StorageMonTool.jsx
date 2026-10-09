@@ -23,7 +23,7 @@ import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구�
 import UnityCapacityPlanPanel from './UnityCapacityPlanPanel.jsx'; // v2.540: Unity 용량 산정
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { areasStopNote, areaBadgeSuffix } from './areasStopText.js'; // v2.598 T2598-01: 영역 수집이 도중에 멈춘 사실
+import { areaStates, areasStopNoteFull, areasEndpointText } from './onefsAreaState.js'; // v2.730 검토 I-03: 영역 배지·멈춤 안내 판정(부분 수집을 초록으로 칠하지 않는다). v2.598 areasStopText 를 감싼다
 import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
@@ -31,7 +31,6 @@ import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } f
 // v2.615: '장애 장비' KPI·화면 — 판정은 노드 ⚠ 표지와 같은 조건 하나(storageFaultText.hasNodeFault). v2.567 철회 교훈.
 import { hasNodeFault, faultKpi, faultRows, faultNodeRows, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote, faultJudgeOpts } from './storageFaultText.js';
 import { versionCellInfo } from './storageVersionText.js';
-import { unitText } from '../unitText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
 import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 
@@ -1382,20 +1381,22 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               수집 노드 DB(중앙 수집 장비만 이 화면에서 열람 — 엣지 원문은 엣지 DB, 안내 표시). */}
           {s.extra?.areas && (
             <>
-              <div className="section-title" style={{ fontSize: 13 }}>OneFS API 영역 수집 {s.extra.areas.filter((a) => !a.skipped).length}
-                <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> — 엔드포인트 {unitText(s.extra.areasEndpoints, '개')} · {s.extra.areasAt ? new Date(s.extra.areasAt).toLocaleString('ko-KR') : ''} · 원문은 수집 노드 DB 저장</span>
+              <div className="section-title" style={{ fontSize: 13 }}>OneFS API 영역 수집 {areaStates(s.extra).filter((st) => st.clickable).length}
+                <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> — 엔드포인트 {areasEndpointText(s.extra)} · {s.extra.areasAt ? new Date(s.extra.areasAt).toLocaleString('ko-KR') : ''} · 원문은 수집 노드 DB 저장</span>
               </div>
               <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-                {s.extra.areas.map((a) => (
-                  <span key={a.area} className={`badge ${a.notTried ? 'amber' : a.skipped ? 'gray' : a.failed === 0 ? 'green' : a.ok > 0 ? 'amber' : 'red'}`}
-                    title={a.error || `성공 ${a.ok} · 실패 ${a.failed}`} style={{ fontSize: 10.5, cursor: !a.skipped && !r.agent ? 'pointer' : 'default' }}
-                    onClick={() => { if (!a.skipped && !r.agent) setAreaView(a.area); }}>
-                    {a.area}{areaBadgeSuffix(a)}
+                {/* v2.730 검토 I-03: 색·꼬리 글자·툴팁은 onefsAreaState.areaStates 하나가 판정한다 — 예전 인라인 판정은
+                    영역 중간에서 멈춘 영역(남은 엔드포인트가 있다)과 첫 요청 전에 끊긴 영역을 failed===0 이라 초록으로 칠했다. */}
+                {areaStates(s.extra).map((st) => (
+                  <span key={st.area} className={`badge ${st.tone}`}
+                    title={st.title} style={{ fontSize: 10.5, cursor: st.clickable && !r.agent ? 'pointer' : 'default' }}
+                    onClick={() => { if (st.clickable && !r.agent) setAreaView(st.area); }}>
+                    {st.area}{st.suffix}
                   </span>
                 ))}
               </div>
               {(() => {
-                const st = areasStopNote(s.extra);
+                const st = areasStopNoteFull(s.extra);
                 if (!st) return null;
                 return (
                   <div style={{ fontSize: 11.5, marginBottom: 8, padding: '6px 10px', borderRadius: 6, lineHeight: 1.6,

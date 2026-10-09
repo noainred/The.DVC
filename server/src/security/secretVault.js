@@ -45,6 +45,9 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 // 모듈 평가 시점에 config.configDir 를 읽으면 순환 import TDZ 로 기동이 죽는다. 함수 호출
 // 시점에는 양쪽 모듈 평가가 끝나 있어 안전하다(ESM 순환의 표준 해법).
 const policyFile = () => path.join(config.configDir, 'secrets-policy.json');
+// S-07(2026-10-09): 정책의 신뢰 사본 — 정책을 저장하거나 정상으로 읽을 때마다 같은 내용으로 맞춘다. 정책 파일이 손상·삭제되면
+// 이 사본으로 복구한다(아래 loadSecretsPolicy). 비밀은 담지 않는다(모드·레벨·알고리즘뿐).
+const trustedPolicyFile = () => path.join(config.configDir, 'secrets-policy.trusted.json');
 const keyFile = () => path.join(config.configDir, 'secrets-key');
 
 // 봉인 대상 필드(정확 일치). token = 엣지/수집기 접속 토큰(collectors.json — 사용자 요구의
@@ -120,23 +123,111 @@ function normPolicy(p = {}) {
   };
 }
 
-// 마지막으로 성공 로드한 정책(v2.322 보안 감사): 정책 파일이 손상되면 normPolicy()=plain 으로
-// 조용히 폴백하던 것을, 직전 유효 정책으로 유지한다. mode='encrypted' 운영 중 파일이 손상되면
-// plain 폴백은 이후 자격증명 저장을 **조용히 평문으로 다운그레이드**(at-rest 암호화 무음 해제)한다.
-let _lastGoodPolicy = null;
-export function loadSecretsPolicy() {
+/*
+ * S-07(2026-10-09 검토 보고서 — 재현): v2.322 의 '손상 시 직전 유효 정책 유지' 는 첫 load 한 번만 지켜졌다. preserveCorrupt 가
+ * 손상 원본을 옆으로 치우므로 **둘째 load 는 '파일 없음' 이 되어 plain** 이었고, 재시작하면 직전 정책도 없어 처음부터 plain 이었다.
+ * `{}`·알 수 없는 mode 도 normPolicy 가 plain 으로 정규화했다. 그 뒤의 저장은 새 비밀을 **평문으로** 썼고, 이미 봉인돼 있던 값도
+ * 메모리의 평문 그대로 다시 써서 풀었다. 이제:
+ *  - 정책 파일은 **mode 가 있고 알려진 값일 때만** 유효하다(validatePolicy). 아니면 손상과 같이 원본을 보존(preserveCorrupt)한다.
+ *  - 못 읽으면 ① 직전 유효 정책(이 프로세스) → ② 신뢰 사본(secrets-policy.trusted.json) 순으로 복구한다(`recovered`).
+ *  - 둘 다 없을 때 '정책 파일 없음' 이고 **암호화를 쓴 흔적이 없으면** 신규 설치다 — 예전처럼 plain(모양도 같다).
+ *  - 흔적(키 파일 · 봉인된 값 · 정책 손상 보존본)이 있으면 **잠금**(`locked`): 새 비밀은 저장하지 않고(throw), 이미 봉인돼
+ *    있던 값은 그 암호문 그대로 다시 쓴다. 평문 전환은 PUT /admin/secrets/policy(소유자 + OTP + 감사)로만 한다.
+ *  - 정책 파일을 자동으로 다시 쓰지 않는다 — 복구는 명시적으로(설정 화면 저장 또는 손상본을 되돌리기). 키는 건드리지 않는다.
+ */
+function validatePolicy(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+  if (!MODES.includes(p.mode)) return null;
+  if (p.level !== undefined && ![1, 2, 3].includes(Number(p.level))) return null;
+  if (p.algorithm !== undefined && p.algorithm !== '' && !Object.prototype.hasOwnProperty.call(ALGOS, p.algorithm)) return null;
+  return normPolicy(p);
+}
+/** 정책 파일 한 개 읽기 → { state: ok|missing|unreadable|corrupt|invalid, policy?, error? } */
+function readPolicyFile(fp) {
+  let raw;
   try {
-    if (fs.existsSync(policyFile())) { _lastGoodPolicy = normPolicy(JSON.parse(fs.readFileSync(policyFile(), 'utf8'))); return _lastGoodPolicy; }
-  } catch (e) {
-    preserveCorrupt(policyFile(), e.message);
-    // 손상 시 plain 으로 내려가지 않고 직전 유효 정책 유지 — 암호화였다면 보안 경고를 명시 출력
-    // (preserveCorrupt 의 '데이터 유실' 메시지만으론 보안 다운그레이드를 운영자가 인지 못 함).
-    if (_lastGoodPolicy) {
-      if (_lastGoodPolicy.mode === 'encrypted') console.error('[secrets] ⚠ 정책 파일 손상 — 암호화가 조용히 해제되지 않도록 직전 유효 정책(encrypted) 유지. 정책 파일을 복구하세요.');
-      return _lastGoodPolicy;
-    }
+    if (!fs.existsSync(fp)) return { state: 'missing' };
+    raw = fs.readFileSync(fp, 'utf8');
+  } catch (e) { return { state: 'unreadable', error: e.message }; }   // 권한·입출력 — 손상이 아니므로 옆으로 치우지 않는다
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { return { state: 'corrupt', error: e.message }; }
+  const pol = validatePolicy(parsed);
+  return pol ? { state: 'ok', policy: pol } : { state: 'invalid', error: 'mode 가 없거나 알 수 없는 값(plain|encrypted 아님)' };
+}
+
+// 암호화를 쓴 흔적 — 정책도 신뢰 사본도 없을 때 '신규 설치' 와 '정책 유실' 을 가른다. 키를 만들지 않는다(존재만 본다).
+// 정상 경로(정책 파일 있음)에서는 부르지 않는다. 정책 파일이 없는 평문 설치는 저장 때마다(3초 캐시) 여기에 오므로 30초 기억한다.
+let _evidence = null, _evidenceAt = 0;
+const EVIDENCE_TTL_MS = 30_000;
+function encryptionEvidence() {
+  const now = Date.now();
+  if (_evidence && now - _evidenceAt < EVIDENCE_TTL_MS) return _evidence;
+  const ev = [];
+  try { if (fs.existsSync(keyFile())) ev.push('key-file'); } catch { /* 존재 확인 실패는 흔적 없음으로 */ }
+  try { if (fs.readdirSync(config.configDir).some((n) => n.startsWith('secrets-policy.json.corrupt.'))) ev.push('corrupt-policy-copy'); } catch { /* */ }
+  for (const name of SECRET_FILES) {
+    try {
+      const fp = path.join(config.configDir, name);
+      if (fs.existsSync(fp) && fs.readFileSync(fp, 'utf8').includes(PREFIX)) { ev.push('sealed-values'); break; }
+    } catch { /* 읽지 못한 파일은 건너뛴다 */ }
   }
-  return normPolicy();
+  _evidence = ev; _evidenceAt = now;
+  return ev;
+}
+
+// 신뢰 사본 맞추기 — 정상 정책을 읽거나 저장할 때. 같은 내용이면 쓰지 않는다(mtime·백업 감시 배려).
+let _trustedSig = null;
+function syncTrustedCopy(pol) {
+  const body = JSON.stringify(pol, null, 2);
+  try {
+    if (_trustedSig === body && fs.existsSync(trustedPolicyFile())) return;
+    const cur = fs.existsSync(trustedPolicyFile()) ? fs.readFileSync(trustedPolicyFile(), 'utf8') : null;
+    if (cur !== body) atomicWriteFileSync(trustedPolicyFile(), body, { mode: 0o600 });
+    _trustedSig = body;
+  } catch (e) { warnPolicyOnce(`trusted-write|${e.message}`, `[secrets] ⚠ 정책 신뢰 사본(${path.basename(trustedPolicyFile())})을 쓰지 못했습니다(${e.message}) — 정책 파일이 손상되면 재시작 뒤 복구할 사본이 없습니다. CONFIG_DIR 권한을 확인하세요.`); }
+}
+
+let _policyWarnKey = null;
+function warnPolicyOnce(key, msg) { if (_policyWarnKey === key) return; _policyWarnKey = key; console.error(msg); }
+
+const PROBLEM_TEXT = { missing: '없음', unreadable: '읽기 실패', corrupt: '손상(JSON 아님)', invalid: '내용 오류' };
+
+// 마지막으로 성공 로드한 정책(v2.322 보안 감사 — S-07 에 '두 번째 load·재시작' 까지 넓혔다).
+let _lastGoodPolicy = null;
+let _lastGoodFrom = null;   // 'policy-file' | 'trusted-copy' — 복구 문구가 출처를 바르게 말하게(사본에서 온 값을 '직전 정책' 이라 하지 않는다)
+export function loadSecretsPolicy() {
+  const r = readPolicyFile(policyFile());
+  if (r.state === 'ok') {
+    _lastGoodPolicy = r.policy; _lastGoodFrom = 'policy-file';
+    if (_policyWarnKey && !_policyWarnKey.startsWith('trusted-write|')) _policyWarnKey = null;
+    syncTrustedCopy(r.policy);
+    return { ...r.policy };
+  }
+  // 손상·내용 오류는 원본을 지우지 않고 옆으로 치운다(.corrupt.<ts> — 운영자가 되돌릴 수 있게).
+  if (r.state === 'corrupt' || r.state === 'invalid') { preserveCorrupt(policyFile(), r.error); _evidence = null; }
+  const problem = r.state;
+  if (_lastGoodPolicy) {
+    warnPolicyOnce(`last-good|${problem}`, `[secrets] ⚠ 정책 파일 ${PROBLEM_TEXT[problem]} — 평문으로 내려가지 않도록 직전 유효 정책(${_lastGoodPolicy.mode})을 유지합니다. 설정 › 자격증명 저장 방식에서 다시 저장하거나 정책 파일을 복구하세요.`);
+    return { ..._lastGoodPolicy, recovered: _lastGoodFrom === 'trusted-copy' ? 'trusted-copy' : 'last-good', problem };
+  }
+  const t = readPolicyFile(trustedPolicyFile());
+  if (t.state === 'ok') {
+    _lastGoodPolicy = t.policy; _lastGoodFrom = 'trusted-copy';
+    warnPolicyOnce(`trusted|${problem}`, `[secrets] ⚠ 정책 파일 ${PROBLEM_TEXT[problem]} — 신뢰 사본(${path.basename(trustedPolicyFile())})의 정책(${t.policy.mode})으로 계속합니다. 설정 › 자격증명 저장 방식에서 다시 저장해 정책 파일을 복구하세요.`);
+    return { ...t.policy, recovered: 'trusted-copy', problem };
+  }
+  const evidence = encryptionEvidence();
+  if (problem === 'missing' && !evidence.length) return normPolicy();   // 신규 설치(또는 정책을 저장한 적 없는 평문 설치) — 예전과 같다
+  warnPolicyOnce(`locked|${problem}|${evidence.join(',')}`, `[secrets] ⛔ 정책 파일 ${PROBLEM_TEXT[problem]} · 신뢰 사본 없음 · 암호화 흔적(${evidence.join(', ') || '정책 파일 손상'}) — 평문으로 저장하지 않도록 새 비밀 저장을 막습니다(기존 암호문은 그대로 유지). 설정 › 자격증명 저장 방식에서 방식을 다시 선택하거나 손상 보존본(secrets-policy.json.corrupt.*)을 되돌리세요.`);
+  return { mode: 'unavailable', level: 2, algorithm: '', locked: true, problem, evidence };
+}
+
+/** 정책을 읽지 못해 새 비밀을 봉인할 수 없을 때(S-07) — 평문으로 저장하는 대신 던진다. */
+export class SecretsPolicyUnavailableError extends Error {
+  constructor(pol) {
+    super(`자격증명 저장 방식(secrets-policy.json)을 읽지 못해(${PROBLEM_TEXT[pol?.problem] || '알 수 없음'}) 새 비밀을 저장하지 않았습니다 — 평문으로 저장하지 않기 위해서입니다. 설정 › 자격증명 저장 방식에서 방식을 다시 선택하세요.`);
+    this.code = 'SECRETS_POLICY_UNAVAILABLE';
+  }
 }
 
 // 핫패스 캐시(3초) — 모든 save 경로가 정책을 읽으므로 파일 IO 를 매 저장마다 하지 않는다.
@@ -147,12 +238,26 @@ function policy() {
   _polCache = loadSecretsPolicy(); _polAt = now;
   return _polCache;
 }
+/** 테스트용 — 3초 정책 캐시를 비운다(다음 저장이 정책 파일을 다시 읽는다). */
+export function _resetSecretsPolicyCache() { _polAt = 0; }
 
 export function saveSecretsPolicy(partial = {}) {
-  const next = normPolicy({ ...loadSecretsPolicy(), ...partial });
+  const cur = loadSecretsPolicy();
+  // S-07: 값이 undefined 인 키는 '바꾸지 않음' 이다 — 예전에는 `{...cur, mode: undefined}` 가 plain 으로 정규화돼
+  // 레벨만 바꾸는 저장이 평문 전환(+ 전 파일 평문 재기록)이 됐다. 알 수 없는 mode 도 plain 으로 바꾸지 않고 거부한다.
+  const want = {};
+  for (const k of ['mode', 'level', 'algorithm']) if (partial?.[k] !== undefined) want[k] = partial[k];
+  if (want.mode !== undefined && !MODES.includes(want.mode)) throw new Error(`알 수 없는 저장 방식(mode): ${String(want.mode).slice(0, 40)} — plain 또는 encrypted 를 고르세요.`);
+  if (cur.locked && want.mode === undefined) throw new Error('현재 저장 방식을 읽지 못했습니다 — 평문/암호화 중 하나를 명시해 저장하세요.');
+  const base = cur.locked ? {} : { mode: cur.mode, level: cur.level, algorithm: cur.algorithm };
+  const next = normPolicy({ ...base, ...want });
+  // 암호화를 켜면 키를 미리 준비한다(있으면 그대로 — 새로 만들지 않는다). 첫 봉인 전에 정책을 잃어도 키 파일이 '암호화를 쓴 흔적' 이 되게.
+  if (next.mode === 'encrypted') masterKey();
   atomicWriteFileSync(policyFile(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _lastGoodPolicy = next; _lastGoodFrom = 'policy-file'; _evidence = null; _policyWarnKey = null;
+  syncTrustedCopy(next);
   _polAt = 0; // 캐시 즉시 무효화 — 이후 save 부터 새 정책으로 봉인
-  return next;
+  return { ...next };
 }
 
 /* ── 마스터 키 ────────────────────────────────────────────────────────────── */
@@ -301,7 +406,8 @@ export function _vaultStats() { return { scryptCalls: _scryptCalls, kdfCache: kd
 /** 평문 → 암호문(현재 정책). mode=plain 이면 평문 그대로, 이미 봉인된 값은 그대로(이중 봉인 방지). */
 export function sealSecret(plain, pol = policy()) {
   if (typeof plain !== 'string' || plain === '' || isSealed(plain)) return plain;
-  if (pol.mode !== 'encrypted') return plain;
+  if (pol?.mode === 'plain') return plain;
+  if (pol?.mode !== 'encrypted') throw new SecretsPolicyUnavailableError(pol);   // S-07: 정책을 모르면 평문으로 내보내지 않는다
   const lv = LEVELS[pol.level] || LEVELS[2];
   const alg = pol.algorithm || lv.alg;
   const { salt, key } = sessionKey(alg, lv.logN);           // v2.598 L2598-01: 프로세스당 1회 유도 — 값마다 scrypt 하지 않는다
@@ -403,7 +509,8 @@ function walkCtx(obj, fn, segs = []) {
  * 실행 중 메모리가 암호문으로 오염돼 다음 vCenter 로그인부터 전부 실패한다.
  */
 export function sealSecretsDeep(obj, pol = policy(), extraFields = null) {
-  if (pol.mode !== 'encrypted') return obj;               // 평문 모드 — 복제 비용도 생략
+  if (pol?.mode === 'plain') return obj;                  // 평문 모드 — 복제 비용도 생략
+  if (pol?.mode !== 'encrypted') return sealLocked(obj, pol, extraFields);   // S-07: 정책을 읽지 못함(잠금)
   const clone = structuredClone(obj);
   const want = policyParams(pol);
   const emitted = new Set();   // v2.599: 이 봉인에서 이미 낸 암호문 — 한 파일 안에서 같은 암호문을 두 번 내지 않는다
@@ -426,6 +533,37 @@ export function sealSecretsDeep(obj, pol = policy(), extraFields = null) {
   });
 }
 
+// 키가 이미 있는가(만들지 않는다) — 잠금 상태에서 재사용 기억을 볼 때 masterKey() 가 새 키를 만들지 않게 먼저 본다.
+function keyPresent() {
+  if (_key) return true;
+  const env = process.env.SECRETS_KEY;
+  if (env && env.length >= 16) return true;
+  try { return fs.existsSync(keyFile()); } catch { return false; }
+}
+
+/**
+ * 잠금(S-07) — 정책을 읽지 못한 상태의 저장. 새 봉인은 하지 않는다(어느 레벨·알고리즘이었는지 모른다). 이미 봉인된 값과
+ * 이 프로세스가 읽어 둔 암호문(재사용 기억 — 레벨·알고리즘 무관, 원래 암호문 그대로)은 다시 쓰고, 그 밖의 비어 있지 않은
+ * 비밀이 하나라도 있으면 던진다 — 평문으로도 새 정책으로도 쓰지 않는다. 그래서 비밀을 바꾸지 않은 수정은 계속 저장된다.
+ * ⚠ 재사용 문맥에 식별 필드(name 등)가 들어가므로 이름을 바꾸는 수정은 잠금 동안 거부된다(새로 봉인해야 하는 값이 된다).
+ */
+function sealLocked(obj, pol, extraFields) {
+  const clone = structuredClone(obj);
+  const canReuse = keyPresent();
+  const emitted = new Set();
+  return walkCtx(clone, (k, v, parent, segs) => {
+    if (!(k && (SECRET_FIELDS.has(k) || extraFields?.has(k)) && typeof v === 'string' && v !== '')) return undefined;
+    if (isSealed(v)) { emitted.add(v); return v; }
+    if (canReuse) {
+      for (const ctx of pathCtxs(segs, parent, k)) {
+        const prev = reuse.get(reuseKey(ctx, v));
+        if (prev && !emitted.has(prev)) { emitted.add(prev); return prev; }
+      }
+    }
+    throw new SecretsPolicyUnavailableError(pol);
+  });
+}
+
 /* ── 모드 전환 마이그레이션 ───────────────────────────────────────────────── */
 
 /**
@@ -435,6 +573,8 @@ export function sealSecretsDeep(obj, pol = policy(), extraFields = null) {
  * @returns {{ files: Array<{file, changed, secrets}>, errors: Array<{file, error}> }}
  */
 export function migrateSecretFiles(newPolicy) {
+  // S-07: 정책이 아닌 값(잠금 상태 객체·알 수 없는 mode)을 normPolicy 로 plain 으로 바꿔 전 파일을 평문으로 재기록하지 않는다.
+  if (!newPolicy || !MODES.includes(newPolicy.mode)) throw new Error(`전환할 저장 방식이 올바르지 않습니다(mode: ${String(newPolicy?.mode).slice(0, 40)}).`);
   const pol = normPolicy(newPolicy);
   const out = { files: [], errors: [] };
   for (const name of SECRET_FILES) {

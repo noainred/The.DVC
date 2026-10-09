@@ -15,6 +15,8 @@ import { bumpFleetRev } from '../insights/fleetRev.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js'; // v2.613 DEPS2613-03: 동적 import 에서 정적으로(순환 없음)
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
+// 2026-10-09 검토 S-09(그룹 J): 원격 URL 은 HTTPS 가 기본 — 평문 HTTP 는 승인된 예외만(판정은 transportPolicy.js 하나).
+import { withDefaultScheme, evaluateCollectorUrl, transportOf, recordRejectedHttpRegistration, clearRejectedHttpRegistration, INSECURE_HTTP_CODE } from './transportPolicy.js';
 
 const FILE = path.join(config.configDir, 'collectors.json');
 
@@ -78,7 +80,8 @@ function save(list) {
 
 export function redact(c) {
   const { token, ...rest } = c;
-  return { ...rest, hasToken: Boolean(token) };
+  // S-09: 전송 보호 상태(https / 루프백 / 평문 HTTP — 승인 예외·허용 목록·승인 기록 없음)를 함께 싣는다(화면 경고의 원천).
+  return { ...rest, hasToken: Boolean(token), transport: transportOf(c) };
 }
 
 export function listCollectors() {
@@ -171,7 +174,14 @@ export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', to
   return { ok: false, reason: `${why}. NAT/포워딩 뒤 엣지는 portal.env 에 EDGE_ADVERTISE_URL=http://<중앙에서 닿는 주소>:<포트> 를 지정하세요(중계 엣지의 포워딩 포트).` };
 }
 
-function normalize(body, existing = null) {
+/**
+ * @param {object} body
+ * @param {object|null} existing
+ * @param {{source?:'admin'|'self-register'|'internal', actor?:string}|null} [ctx] 전송 정책 문맥(S-09).
+ *   'admin' 만 본문의 평문 HTTP 예외(allowInsecureHttp + insecureHttpReason)를 쓸 수 있다. 없으면 'internal'.
+ * @returns {[entry|null, string|null, string[]?, string?]} [항목, 오류, 버린 비밀, 오류 코드]
+ */
+function normalize(body, existing = null, ctx = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();
   const name = String(body.name ?? e.name ?? '').trim();
@@ -186,7 +196,8 @@ function normalize(body, existing = null) {
   if (!url) return [null, '수집 서버 URL은 필수입니다.'];
   // v2.611 LEFT2611-06: 길이 상한 + 선형 끝 '/' 제거 — 정규식 끝-슬래시 치환은 긴 입력에서 O(n²) 였다(4만 자 620ms).
   if (url.length > COLLECTOR_URL_MAX) return [null, `수집 서버 URL이 너무 깁니다(${COLLECTOR_URL_MAX}자 이하).`];
-  if (!/^https?:\/\//.test(url)) url = `http://${url}`;
+  // S-09: 스킴 없는 주소의 기본은 https:// 다(예전 http:// — 평문 기본값이 토큰을 노출했다).
+  url = withDefaultScheme(url);
   url = trimTrailingSlashes(url);
   // URL 형식 검증 — http/https + 유효 호스트만 허용(잘못된 스킴/입력 차단).
   try {
@@ -198,12 +209,18 @@ function normalize(body, existing = null) {
   // 사설 IP(192.168.x.x 등)에 두므로 RFC1918 사설 대역은 계속 허용된다.
   const ssrf = ssrfBlockReason(url);
   if (ssrf) return [null, `수집 서버 URL: ${ssrf}`];
+  // S-09: 평문 HTTP 는 승인된 예외만 — 기존 항목의 같은 URL·관리자 명시 예외(사유)·운영자 허용 목록(COLLECTOR_HTTP_ALLOW).
+  const tp = evaluateCollectorUrl({ url, existing, body, ctx });
+  if (!tp.ok) return [null, tp.reason, [], tp.code];
 
   const entry = {
     id, name, url, datacenter, vcenterId,
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
+  // 예외 기록: keep 이면 기존 것을 그대로(같은 URL), 아니면 새 판정값(https·루프백이면 지운다 — URL 이 바뀌면 승계하지 않는다).
+  if (tp.keep) { if (e.insecureHttp) entry.insecureHttp = e.insecureHttp; }
+  else if (tp.exception) entry.insecureHttp = tp.exception;
   // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — 접속처(url)가 바뀌면 저장 토큰을 승계하지 않는다.
   // 수집 서버 토큰은 중앙이 그 URL 로 **자격증명을 실어 호출**하는 열쇠다(v2.500 C-1 이 막은
   // `/register-collector` 횡탈과 같은 자산). 저장 요청 1회로 url 만 바꾸면 그 토큰이 새 주소로
@@ -218,36 +235,46 @@ function normalize(body, existing = null) {
  * 저장 없이 돌려 오류 문구만 돌려준다(null=통과). 규칙을 복제하지 않아 드라이런 통과 =
  * 실제 저장 성공이 보장된다(SSRF/URL/필수값 검증 포함).
  */
-export function collectorInputIssue(body, existing = null) {
-  const [, err] = normalize(body, existing);
+export function collectorInputIssue(body, existing = null, ctx = null) {
+  const [, err] = normalize(body, existing, ctx);
   return err || null;
+}
+
+/** 저장 판정 실패 공통 처리 — 비-관리자 경로의 평문 HTTP 거부는 기록해 화면이 말하게 한다(S-09). */
+function rejectResult(err, code, body, ctx) {
+  if (code === INSECURE_HTTP_CODE && ctx?.source !== 'admin') {
+    try { recordRejectedHttpRegistration({ source: ctx?.source, name: body?.name || body?.id, url: body?.url }); } catch { /* 기록 실패가 판정을 바꾸지 않는다 */ }
+  }
+  return { ok: false, reason: err, ...(code ? { code } : {}) };
 }
 
 // managed=true: 관리자가 UI에서 직접 등록/수정한 항목(=수동 고정). 엣지 자기등록이 URL/토큰을
 // 덮어쓰지 않는다(NAT/포트포워딩으로 관리자가 URL·토큰을 실제 값과 다르게 지정하는 경우 보존).
-export function addCollector(body, { managed = false } = {}) {
+export function addCollector(body, { managed = false, transport = null } = {}) {
   const list = loadCollectors();
-  const [entry, err] = normalize(body);
-  if (err) return { ok: false, reason: err };
+  const [entry, err, , code] = normalize(body, null, transport);
+  if (err) return rejectResult(err, code, body, transport);
   // 대소문자 무시 중복 방지 — 'GM1'이 있으면 'gm1' 추가를 막는다(같은 엣지 이중 등록 방지).
   const dupe = list.find((c) => String(c.id).toLowerCase() === String(entry.id).toLowerCase());
   if (dupe) return { ok: false, reason: `이미 존재하는 id: ${dupe.id}` };
   entry.managed = Boolean(managed);
   list.push(entry);
   save(list);
+  clearRejectedHttpRegistration(entry.id);
   return { ok: true, collector: redact(entry) };
 }
 
-export function updateCollector(id, body, { managed } = {}) {
+export function updateCollector(id, body, { managed, transport = null } = {}) {
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, reason: `없는 수집 서버: ${id}` };
-  const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
-  if (err) return { ok: false, reason: err };
+  const [entry, err, droppedSecrets, code] = normalize({ ...body, id }, list[idx], transport);
+  if (err) return rejectResult(err, code, { ...body, id }, transport);
   // managed 명시 시 갱신, 아니면 기존 값 보존(자기등록이 고정 플래그를 지우지 않게).
   entry.managed = managed != null ? Boolean(managed) : Boolean(list[idx].managed);
   list[idx] = entry;
   save(list);
+  clearRejectedHttpRegistration(entry.id);
   // v2.607(통합): url 이 바뀌어 저장 토큰을 폐기했으면 그 사실을 응답에 싣는다 — 화면(droppedSecretText)이 '다시 입력' 을 안내한다.
   //   예전에는 normalize 가 돌려준 목록을 여기서 버려, 다음 pull 이 빈 토큰으로 403 이 될 때까지 아무도 몰랐다.
   return { ok: true, collector: redact(entry), ...(droppedSecrets?.length ? { droppedSecrets } : {}) };
@@ -260,6 +287,8 @@ export function updateCollector(id, body, { managed } = {}) {
  *   다음 자기등록 주기에 원복되던 버그 방지. (관리자 편집이 곧 '이 값으로 고정' 의사표시)
  */
 export function upsertCollectorFromAgent({ name, url, token, datacenter = '', unverified = false, shared = false } = {}) {
+  // S-09: 자기등록은 평문 HTTP 예외를 스스로 만들 수 없다 — 같은 URL 갱신·운영자 허용 목록만 받는다.
+  const transport = { source: 'self-register' };
   const id = String(name || '').trim();
   if (!id) return { ok: false, reason: 'name(에이전트 이름)은 필수입니다.' };
   const list = loadCollectors();
@@ -268,7 +297,7 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '', un
   const existing = list.find((c) => String(c.id).toLowerCase() === id.toLowerCase());
   if (existing) {
     if (existing.managed) return { ok: true, collector: redact(existing), skipped: 'managed' };
-    const r = updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id }, { managed: false });
+    const r = updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id }, { managed: false, transport });
     if (r.ok) markSelfRegVerification(existing.id, unverified);
     return r;
   }
@@ -280,7 +309,7 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '', un
     if (selfReg.length >= SELF_REG_MAX) return { ok: false, capped: true, reason: `자기등록 수집 서버가 상한(${SELF_REG_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 관리자가 설정 › 수집 서버에서 등록하거나 엣지별 개별 토큰을 쓰세요.` };
     if (unverified && selfReg.filter((c) => c.selfRegUnverified).length >= SELF_REG_UNVERIFIED_MAX) return { ok: false, capped: true, reason: `검증되지 않은 자기등록이 상한(${SELF_REG_UNVERIFIED_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 등록 URL(EDGE_ADVERTISE_URL)이 이 엣지에 닿는지 확인하거나 관리자가 직접 등록하세요.` };
   }
-  const r = addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false });
+  const r = addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false, transport });
   if (r.ok) markSelfRegVerification(id, unverified);
   return r;
 }

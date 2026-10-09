@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scopedVcenterIds, inUserScope } from '../src/auth/scope.js';
+import { stripComments } from './_stripComments.js';
 
 // v2.207 보안 감사(4차) 회귀 방지 —
 //  S1: WS SSH/RDP 터널이 'OTP 등록 전 세션'을 거부하는지(게이트 조건 자체를 검증)
@@ -35,12 +36,16 @@ test('S2 scopedVcenterIds: 명시 vCenter + 리전 합집합', () => {
 
 test('S1: WS 게이트웨이 소스가 mustEnrollOtp 를 거부하는지(정적 검증)', async () => {
   const fs = await import('node:fs');
+  // 2026-10-09 S-04(그룹 H): 판정 본문은 sshGateway.js remoteUserIssue 하나이고 RDP 게이트웨이는 그 함수를 쓴다
+  //   (업그레이드·열린 연결 재검증이 같은 판정 — 복제하면 한쪽만 바뀐다). 실행 검증은 test/rvH_remoteSession.test.js.
+  const strip = stripComments; // v2.574 규약 — 2줄 정규식 사본 금지(test/_stripComments.js 하나)
+  const ssh = strip(fs.readFileSync(new URL('../src/proxy/sshGateway.js', import.meta.url), 'utf8'));
+  assert.ok(/user\.mustEnrollOtp/.test(ssh),
+    'sshGateway: OTP 등록 전 세션 차단이 빠졌습니다 — WS 는 requireEnrolled 미들웨어를 타지 않으므로 여기서 직접 막아야 합니다');
+  assert.ok(/userHasPermission\(user, 'remote\.access'\)/.test(ssh), 'sshGateway: remote.access 권한 검사가 빠졌습니다');
   for (const f of ['../src/proxy/sshGateway.js', '../src/proxy/guacdTunnel.js']) {
-    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
-    assert.ok(/user\.mustEnrollOtp/.test(src),
-      `${f}: OTP 등록 전 세션 차단이 빠졌습니다 — WS 는 requireEnrolled 미들웨어를 타지 않으므로 여기서 직접 막아야 합니다`);
-    assert.ok(/userHasPermission\(user, 'remote\.access'\)/.test(src),
-      `${f}: remote.access 권한 검사가 빠졌습니다`);
+    const src = strip(fs.readFileSync(new URL(f, import.meta.url), 'utf8'));
+    assert.ok(/const deny = remoteUserIssue\(user\);/.test(src), `${f}: 업그레이드가 공용 판정(remoteUserIssue)을 거치지 않습니다`);
   }
 });
 

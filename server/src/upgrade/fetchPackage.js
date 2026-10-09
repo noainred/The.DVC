@@ -14,7 +14,11 @@ import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { readBytesCapped } from '../util/readBytesCapped.js';
-import { readJsonCapped } from '../util/readCapped.js';
+import { readJsonCapped, readTextCapped } from '../util/readCapped.js';
+// v2.730(검토 I-08·S-10): 메타데이터 형식·상한 + 배포자 서명(원격 다운로드 경로 — 여기 받은 파일은 /dl 로 엣지에 나가고 설치에 쓰인다)
+import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets } from './versionsDoc.js';
+import { decideSignature, signatureSummary } from './signature.js';
+import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
 
 // v2.607 SEC2607-06: 설치 패키지 다운로드의 바이트 상한 — 예전엔 상한 자체가 없어 원격 소스(사내 미러·중간자)가
 //   거대 본문을 주면 sha256 검증 전에 전량을 메모리에 받았다. 오프라인 설치 패키지(노드 런타임 포함)는 수백 MB 라
@@ -30,11 +34,38 @@ export async function fetchRemoteVersions(baseUrl) {
   // 메타데이터는 차단, 사내 RFC1918·공개 미러는 허용(업그레이드 remoteBase 와 동일 정책).
   const block = await ssrfBlockReasonResolved(`${trim(base)}/versions.json`);
   if (block) throw new Error(`패키지 저장소 주소가 차단되었습니다: ${block}`);
-  // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
-  const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2 });
-  if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);
-  // v2.632(감사 AX3-06): 저장소 응답은 상한까지만 읽는다(외부 응답 .json() 금지 — v2.604 규약).
-  return readJsonCapped(res, 4 * 1024 * 1024, 'versions.json');
+  // v2.730(검토 I-08): fetch·본문 읽기를 한 전체 시한(20초)으로 묶고, 상한(VERSIONS_MAX_BYTES — 업그레이드 확인과 같은 값)과
+  //   형식(항목 수·문자열·필드 타입)을 upgrade.js 와 **같은 함수**로 검사한다. 선언하지 않은 필드는 버린다.
+  const dl = deadlineSignal(20000);
+  try {
+    // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
+    const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2, signal: dl.signal });
+    if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`versions.json HTTP ${res.status}`); }
+    // v2.632(감사 AX3-06): 저장소 응답은 상한까지만 읽는다(외부 응답 .json() 금지 — v2.604 규약).
+    const raw = await readJsonCapped(res, VERSIONS_MAX_BYTES, 'versions.json');
+    const v = validateVersionsDoc(raw);
+    if (!v.ok) throw new Error(v.reason);
+    return v.doc;
+  } catch (e) {
+    if (dl.aborted()) throw new Error('versions.json 을 전체 시한(20초) 안에 다 받지 못해 중단했습니다');
+    if (e instanceof SyntaxError) throw new Error('versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)');
+    throw new Error(scrubUrlSecrets(e?.message || e));
+  } finally { dl.clear(); }
+}
+
+/** 원격 manifest(상한 64KB·전체 시한 30초). 404 → missing, 그 밖 실패 → reason, 상한 초과 → malformed. */
+async function fetchPackageManifest(url) {
+  const dl = deadlineSignal(30000);
+  try {
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, timeoutMs: 30000, retries: 2, signal: dl.signal });
+    if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true }; }
+    if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
+    return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
+  } catch (e) {
+    if (dl.aborted()) return { text: null, reason: '서명 manifest 를 시한(30초) 안에 받지 못했습니다' };
+    if (/상한/.test(String(e?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
+    return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(e?.message || e)}` };
+  } finally { dl.clear(); }
 }
 
 export function listLocalPackages(dir = getPackageDir()) {
@@ -47,10 +78,10 @@ export function listLocalPackages(dir = getPackageDir()) {
 }
 
 const KIND = {
-  installer: { file: 'installer', sha: 'installer_sha256' },               // el9 offline installer (Rocky 9)
-  installer_cent9: { file: 'installer_cent9', sha: 'installer_cent9_sha256' }, // CentOS Stream 9 offline installer
-  bundle: { file: 'tar_gz', sha: 'sha256' },                               // app upgrade bundle
-  windows: { file: 'windows', sha: 'windows_sha256' },                     // Windows zip
+  installer: { file: 'installer', sha: 'installer_sha256', manifestKind: 'installer' },                     // el9 offline installer (Rocky 9)
+  installer_cent9: { file: 'installer_cent9', sha: 'installer_cent9_sha256', manifestKind: 'installer_cent9' }, // CentOS Stream 9 offline installer
+  bundle: { file: 'tar_gz', sha: 'sha256', manifestKind: 'bundle' },                                       // app upgrade bundle
+  windows: { file: 'windows', sha: 'windows_sha256', manifestKind: 'windows' },                            // Windows zip
 };
 
 /** Download one package kind (default: latest installer). Verifies SHA-256. */
@@ -65,6 +96,7 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   if (!v) return { ok: false, reason: '원격 버전 정보를 찾을 수 없습니다.' };
   const fname = v[k.file];
   const sha = v[k.sha];
+  const wantVersion = String(v.version || '').replace(/^v/, '');
   if (!fname) return { ok: false, reason: `버전 ${v.version}에 ${kind} 파일이 없습니다.` };
   // fname 은 원격 versions.json 값 — path.join(dir, fname) 에 그대로 쓰면 '../' 로 packages.dir 밖에
   // 임의 파일을 쓸 수 있다(TLS 로 GitHub 는 신뢰하지만 사내 미러·수기 versions.json 대비 심층 방어).
@@ -98,7 +130,19 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
     return { ok: false, reason: '체크섬 불일치 — 파일 손상/변조 가능' };
   }
 
+  // v2.730(검토 S-10): 배포자 서명 — 여기 받은 파일은 중앙 /dl 로 엣지 자동 업그레이드에 나가고 원격 설치에 쓰인다.
+  //   versions.json 의 sha 는 같은 채널이라 배포자를 인증하지 않는다. manifest 가 버전 항목에 적혀 있으면 그 이름, 아니면 규칙 이름.
+  const manName = (typeof v.manifest === 'string' && MANIFEST_NAME_RE.exec(path.basename(v.manifest))?.[1] === wantVersion) ? path.basename(v.manifest) : manifestNameFor(wantVersion);
+  const man = await fetchPackageManifest(`${trim(baseUrl)}/${manName}`);
+  const sig = decideSignature({
+    manifestText: man.text, bytes: buf, name: safeName, kind: k.manifestKind, expectVersion: wantVersion, where: 'package',
+    unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,
+  });
+  if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
+
   const dest = path.join(dir, safeName);
   fs.writeFileSync(dest, buf);
-  return { ok: true, kind, version: v.version, file: safeName, path: dest, sizeBytes: buf.length, sha256: got, verified: Boolean(sha) };
+  // manifest 도 같은 폴더에 둔다 — 중앙 /dl 이 엣지에 함께 내주고(routes/dlsource.js), 엣지가 설치 전에 검증한다.
+  if (man.text) { try { fs.writeFileSync(path.join(dir, manName), man.text); } catch { /* 엣지가 '서명 없음' 으로 거부한다 — 사유가 보인다 */ } }
+  return { ok: true, kind, version: v.version, file: safeName, path: dest, sizeBytes: buf.length, sha256: got, verified: Boolean(sha), signature: signatureSummary(sig) };
 }

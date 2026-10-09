@@ -7,7 +7,10 @@
 
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { findNewerArchive, checkRemote, vstr } from './upgrade.js';
+import { findNewerArchive, checkRemote, vstr, fetchManifestText } from './upgrade.js';
+// v2.730(검토 S-10): 수집 에이전트로 밀어 넣기 전에 배포자 서명을 확인하고, 같은 manifest 를 push 에 싣는다.
+import { decideSignature, manifestPathForArchive, readManifestFile } from './signature.js';
+import path from 'node:path';
 import { currentVersion } from '../config.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -61,7 +64,11 @@ export async function resolveBundleBytes(settings) {
   if (s.watchDir) {
     const found = findNewerArchive(s.watchDir, '0.0.0');
     if (found?.path && fs.existsSync(found.path) && cmp3(found.version, cur) >= 0) {
-      return { bytes: fs.readFileSync(found.path), version: vstr(found.version), source: 'watch' };
+      const bytes = fs.readFileSync(found.path);
+      const manifest = readManifestFile(manifestPathForArchive(found.path));
+      const sig = decideSignature({ manifestText: manifest, bytes, name: path.basename(found.path), kind: 'bundle', expectVersion: vstr(found.version), where: 'bundle-source' });
+      if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return null; }
+      return { bytes, version: vstr(found.version), source: 'watch', manifest, signature: sig };
     }
   }
 
@@ -81,7 +88,14 @@ export async function resolveBundleBytes(settings) {
         const bytes = rd.buf;
         // 무결성 검증(checkRemote가 versions.json에서 읽어온 sha256과 대조). 실패면 번들 없음으로 취급.
         if (!verifyBundleSha(bytes, info.sha256)) return null;
-        return { bytes, version: info.latest, source: 'remote' };
+        // v2.730(S-10): sha 는 같은 채널(versions.json)이다 — 배포자 서명을 확인한 뒤에만 수집기로 민다.
+        const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token: s.token, timeout: 30_000 }) : { text: null, missing: true };
+        const sig = decideSignature({
+          manifestText: man.text, bytes, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'bundle-source',
+          unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,
+        });
+        if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return null; }
+        return { bytes, version: info.latest, source: 'remote', manifest: man.text, signature: sig };
       }
     }
   }

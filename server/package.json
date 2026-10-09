@@ -1,8 +1,11 @@
 {
   "name": "vmware-portal-server",
-  "version": "2.729.0",
+  "version": "2.730.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0 <23"
+  },
   "description": "Aggregation API for the VMware global monitoring portal",
   "main": "src/index.js",
   "scripts": {

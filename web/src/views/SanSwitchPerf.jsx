@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { RETENTION_PRESETS, bytesText, retentionEstimate } from './tools/sanSwitchPerfText.js';
@@ -7,6 +7,10 @@ import { STable } from '../components/STable.jsx';
 // v2.599 LO2599-01: 빈 칸은 보내지 않는다(Number('')=0 → 서버가 기본값으로 저장하던 것 — 보존 3650→90일).
 import { blankOr } from './blankOr.js';
 import { countsAtNote, rowsText, rollupStatusText } from './sanPerfDbText.js';
+import { trackFetch, freshState, freshNote } from './tools/sanFreshText.js'; // 검토 I-04: 상태 갱신 실패를 숨기지 않는다
+import { FreshNote } from './tools/SanFreshNote.jsx';
+
+const POLL_MS = 20_000;   // 상태(보관 현황·수집 상태) 갱신 주기
 
 /**
  * 설정 › 수집 서버 › SAN 스위치 포트 사용량 수집(v2.411, 사용자 요구
@@ -26,7 +30,12 @@ export default function SanSwitchPerf() {
     try { const d = await fetchJson('/tools/sanswitch/perf/settings'); setData(d); setForm((f) => f || d.settings); setError(null); }
     catch (e) { setError(e.message); }
   };
-  useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); }, []);
+  // 검토 I-04: 첫 성공 뒤 상태 조회가 실패하면 예전에는 오류가 보이지 않았다(error && !data 일 때만). 직전 값은 두고
+  //   '갱신 실패 — 직전 조회 결과 표시 중' 과 두 시각을 말한다(ref 는 조기 return 위에).
+  const trRef = useRef(null);
+  trRef.current = trackFetch(trRef.current, { data, error, key: 'settings' }, Date.now());
+  const note = freshNote(freshState(trRef.current), { what: '수집 상태', pollMs: POLL_MS });
 
   if (error && !data) return <ErrorBox message={error} />;
   if (!data || !form) return <Loading />;
@@ -77,6 +86,7 @@ export default function SanSwitchPerf() {
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>📊 SAN 스위치 포트 사용량 수집</div>
+      <FreshNote note={note} style={{ marginBottom: 10 }} />
 
       <div className="card" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.7 }}>
         등록된 Brocade 스위치에 주기적으로 접속해 <code>portperfshow</code> 를 실행하고, 포트별 처리량을
@@ -203,7 +213,7 @@ export default function SanSwitchPerf() {
                   return (
                     <tr key={e.agent}>
                       <td><b>{e.agent}</b></td>
-                      <td data-sort={String(e.at || 0)}>{edgePerfLine(e)}</td>
+                      <td data-sort={e.at ? String(e.at) : ''}>{edgePerfLine(e)}</td>
                       <td>
                         {!failed.length ? <span className="muted">—</span> : (
                           <div style={{ display: 'grid', gap: 4 }}>

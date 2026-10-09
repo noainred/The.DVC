@@ -16,6 +16,7 @@ import { allPhysicalServers, corpAttribution } from '../../idrac/corpAttribution
 import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
 import { numOrNull } from '../../util/numOrNull.js'; // v2.675: /health 의 사용률은 못 읽으면 null
+import { runtimeForHealth } from '../../util/runtimeCheck.js'; // 검토 I-06: Node 런타임 계약·통신 자가 점검
 
 // v2.626: `allPhysicalServers`·`corpAttribution` 은 `idrac/corpAttribution.js` 로 옮겼다 — 법인별 서버 사용량·
 //   베어메탈 사용률이 **같은 귀속 입력**을 쓰게(개요만 DataCenter 규칙을 알던 것이 '물리 서버 없음' 의 원인이었다).
@@ -172,6 +173,10 @@ api.get('/health', (req, res) => {
     updateAvailable,
     latestVersion: upR || upW || null,
     features: { upgradeTab: config.ui.showUpgradeTab },
+    // 검토 I-06: Node 런타임 계약·전역 fetch + undici Agent 자가 점검(util/runtimeCheck.js). 비지원 major 에서 장비 수집 실패가
+    //   '장비 장애' 처럼 보이지 않게 화면이 이 값으로 배너를 띄운다. 관리자(전체 범위·데모 아님)만 버전·계약·상세를 받고,
+    //   나머지 계정은 배너 판정에 필요한 state 하나만(서버 소프트웨어 버전 노출을 줄인다). 경로·비밀은 어느 쪽에도 없다.
+    runtime: runtimeForHealth(req.user?.role === 'admin' && !allowed && !req.user?.demoGuest),
   });
 });
 

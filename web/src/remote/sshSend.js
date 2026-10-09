@@ -34,5 +34,13 @@ export function sshDataFrames(data, maxChars = SSH_DATA_CHUNK_CHARS) {
  */
 export function sshCloseReasonText(code) {
   if (code === 1009) return '보낸 데이터가 한 번에 받을 수 있는 크기(256KB)를 넘어 서버가 연결을 닫았습니다. 붙여넣기를 나눠서 다시 접속해 보내세요.';
+  // 2026-10-09 검토 S-04·I-07: 게이트웨이가 닫은 이유(서버 proxy/sshGateway.js closeAll 코드와 1:1)
+  if (code === 4401) return '로그인 세션이 만료되었거나 로그아웃되어 서버가 연결을 닫았습니다. 다시 로그인한 뒤 접속하세요.';
+  if (code === 4403) return '이 계정의 권한·범위가 바뀌어 서버가 연결을 닫았습니다.';
+  if (code === 4008) return '화면이 출력을 받지 못하는 상태가 오래 이어져 서버가 연결을 닫았습니다(브라우저 탭이 멈췄거나 네트워크가 느립니다).';
+  if (code === 4009) return '받지 못한 출력이 너무 많이 쌓여 서버가 연결을 닫았습니다(대량 출력 — 다시 접속해 출력을 나눠 보세요).';
+  if (code === 4000) return '입력이 없는 시간이 길어 서버가 세션을 닫았습니다(유휴 종료). 다시 접속하세요.';
+  if (code === 4404) return '이 원격 접속 매핑을 찾을 수 없어 서버가 연결을 닫았습니다(삭제되었거나 바뀌었습니다).';
+  if (code === 4429) return '동시에 열 수 있는 원격 콘솔 수를 넘었습니다 — 다른 콘솔을 닫고 다시 접속하세요.';
   return null;
 }

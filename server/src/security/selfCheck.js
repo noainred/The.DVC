@@ -24,6 +24,12 @@ import { config } from '../config.js';
 import { SECRET_FILES, loadSecretsPolicy } from './secretVault.js';
 import { effectiveLoginPolicy, fileUserLoginPolicies, loadSessionSecurity } from './securitySettings.js';
 import { isAdminTier } from '../auth/roles.js';
+import { signatureStatus } from '../upgrade/signature.js'; // 2026-10-09 검토 S-10
+import { adTransportStatus } from '../auth/ad.js'; // 2026-10-09 검토 S-03
+import { wanTransportCheckItem } from '../collector/transportPolicy.js'; // 2026-10-09 검토 S-09
+import { loadCollectors } from '../collector/registry.js';
+import { tlsListenerStatus } from '../util/httpsServer.js';
+import { wanTlsStatus } from '../util/resilientFetch.js';
 
 /* ── 순수 판정 ───────────────────────────────────────────────────────────── */
 
@@ -129,13 +135,18 @@ export const RELAX_SWITCHES = [
   { env: 'AUTH_ENABLED', onValue: 'false', title: '인증 비활성', why: '모든 API 가 인증 없이 열린다(개발용).' },
   { env: 'WAN_TLS_INSECURE', onValue: 'true', title: '중앙↔엣지 TLS 검증 해제', why: '엣지 통신의 인증서 검증을 끈다 — 그 경로로 토큰·자격증명이 흐른다.' },
   { env: 'UPGRADE_ALLOW_UNVERIFIED', onValue: 'true', title: '업그레이드 번들 서명 검증 생략', why: 'sha256 없이도 번들을 적용한다 — 함대 확산 경로.' },
+  { env: 'UPGRADE_SIGNATURE_POLICY', onValue: 'warn', title: '업그레이드 서명 필수 해제(warn)', why: '서명 없는 번들도 경고만 남기고 설치한다 — 배포자 확인이 빠진다(틀린 서명은 warn 이어도 거부).' },
   { env: 'OTP_ROLE_ENFORCE', onValue: 'false', title: 'OTP 강제 해제', why: '고권한 계정의 OTP 전용 정책을 끈다(잠금 복구용 긴급 스위치).' },
   { env: 'RMA_ALLOW_CUSTOM', onValue: 'true', title: '원격 자유 명령 허용', why: '프리셋 밖의 임의 명령을 이 엣지에서 실행할 수 있다.' },
   { env: 'RMA_ALLOW_SSH', onValue: 'true', title: '원격 SSH 실행 허용', why: '엣지가 저장 계정으로 다른 장비에 SSH 명령을 낸다.' },
   { env: 'RMA_ALLOW_REBOOT', onValue: 'true', title: '원격 재부팅 허용', why: '재부팅 프리셋이 활성화된다.' },
   { env: 'UAGMON_ALLOW_PUBLIC', onValue: 'true', title: 'UAG 모니터 공개 IP 허용', why: '공개 IP 대상에도 Basic 자격증명을 보낸다.' },
-  { env: 'STORAGE_TLS_VERIFY', onValue: 'false', title: '스토리지 수집 TLS 검증 해제', why: '자체서명 허용이 기본이라 명시적으로 끈 경우만 표시된다.', optIn: true },
-  { env: 'SANSWITCH_TLS_VERIFY', onValue: 'false', title: 'SAN 스위치 TLS 검증 해제', why: '자체서명 허용이 기본이라 명시적으로 끈 경우만 표시된다.', optIn: true },
+  // 2026-10-09 검토 S-02: 장비 TLS 검증이 기본 켜짐(CA 체인 또는 승인 지문)으로 바뀌어 false 는 '명시적 예외' 다 — 판정은 security/tlsTrust.js.
+  { env: 'VC_TLS_REJECT_UNAUTHORIZED', onValue: 'false', title: 'vCenter·iDRAC·OME TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'HORIZON_TLS_VERIFY', onValue: 'false', title: 'Horizon TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'NSX_TLS_REJECT_UNAUTHORIZED', onValue: 'false', title: 'NSX TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'STORAGE_TLS_VERIFY', onValue: 'false', title: '스토리지 수집 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'SANSWITCH_TLS_VERIFY', onValue: 'false', title: 'SAN 스위치 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
 ];
 
 /**
@@ -259,14 +270,21 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
     id: 'secrets-policy',
     group: '비밀 보관',
     title: '자격증명 저장 방식',
-    status: polErr ? 'unknown' : secretsModeStatus(pol?.mode),
+    // S-07: 정책을 읽지 못해 잠긴 상태(새 비밀 저장 거부)는 risk, 직전 정책·신뢰 사본으로 복구해 쓰는 중이면 warn.
+    status: polErr ? 'unknown' : pol?.locked ? 'risk' : pol?.recovered ? 'warn' : secretsModeStatus(pol?.mode),
     detail: polErr
       ? `정책을 읽지 못했다: ${polErr}`
+      : pol?.locked
+        ? `정책 파일을 읽지 못했고(${pol.problem}) 신뢰 사본도 없다. 암호화를 쓴 흔적(${(pol.evidence || []).join(', ')})이 있어 평문으로 저장하지 않도록 새 비밀 저장을 막고 있다.`
+      : pol?.recovered
+        ? `정책 파일을 읽지 못해(${pol.problem}) ${pol.recovered === 'last-good' ? '직전 유효 정책' : '신뢰 사본(secrets-policy.trusted.json)'}으로 계속 ${pol.mode === 'encrypted' ? '봉인' : '평문'} 저장 중이다.`
       : (pol?.mode === 'encrypted'
         ? `봉인 저장(${pol.alg || 'aes-256-gcm'} · 레벨 ${pol.level ?? 2}). 키 파일이 같은 호스트에 있으므로 at-rest 보호이며 호스트 완전 장악은 막지 못한다.`
         : '평문 저장(기본값). 파일 권한(0600)만이 보호 수단이다.'),
     evidence: 'secrets-policy.json',
-    howto: pol?.mode === 'plain' ? '설정 › 자격증명 저장 방식에서 암호화로 전환할 수 있다(전환 시 기존 파일이 마이그레이션된다).' : '',
+    howto: (pol?.locked || pol?.recovered)
+      ? '설정 › 자격증명 저장 방식에서 방식을 다시 선택해 저장하거나, 손상 보존본(secrets-policy.json.corrupt.*)을 secrets-policy.json 으로 되돌린다. 키(secrets-key)는 지우거나 바꾸지 않는다.'
+      : pol?.mode === 'plain' ? '설정 › 자격증명 저장 방식에서 암호화로 전환할 수 있다(전환 시 기존 파일이 마이그레이션된다).' : '',
   });
 
   /* 8. 손상 보존 파일 ---------------------------------------------------- */
@@ -305,6 +323,42 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
     evidence: 'portal.env · 프로세스 환경변수',
     howto: relaxOn.length ? '필요 없는 스위치는 portal.env 에서 지우고 포탈을 재시작한다.' : '',
   });
+
+  /* 2026-10-09 검토 S-03: AD 인증 연결 보호 — 평문 ldap:// simple bind 는 비밀번호가 그대로 흐른다(새 저장은 거부, 기존 설정은 경고). */
+  let adT = null; let adErr = null;
+  try { adT = adTransportStatus(); } catch (e) { adErr = e?.message || String(e); }
+  add({
+    id: 'ad-transport', group: '인증·계정', title: 'AD 인증 연결 보호',
+    status: adErr ? 'unknown' : !adT.enabled ? 'ok' : adT.warnings.includes('plain-ldap') ? 'risk' : adT.warnings.length ? 'warn' : 'ok',
+    detail: adErr ? `읽지 못했다: ${adErr}` : !adT.enabled ? 'AD 인증 꺼짐'
+      : `방식 ${adT.mode} · 인증서 검증 ${adT.verify ? '켬' : '끔'} · 사설 CA ${adT.ca ? '있음' : '없음'} · 경고 ${adT.warnings.join(', ') || '없음'}`,
+    evidence: 'auth.json · auth/ad.js adTransportStatus',
+    howto: adT && adT.enabled && adT.warnings.length ? '설정 › AD 에서 ldaps:// 로 바꾸거나 StartTLS 를 켜고 사설 CA 를 넣는다.' : '',
+  });
+
+  /* 2026-10-09 검토 S-10: 업그레이드 서명 준비 — 신뢰 공개키가 없으면 서명 필수 정책에서 어떤 번들도 설치하지 않는다(fail-closed). */
+  let sig = null; let sigErr = null;
+  try { sig = signatureStatus(); } catch (e) { sigErr = e?.message || String(e); }
+  add({
+    id: 'upgrade-signing',
+    group: '통신·실행',
+    title: '업그레이드 서명 검증 준비',
+    status: sigErr ? 'unknown' : sig.policy === 'warn' ? 'risk' : sig.ready ? 'ok' : 'warn',
+    detail: sigErr ? `서명 상태를 읽지 못했다: ${sigErr}`
+      : `정책 ${sig.policy}(${sig.policySource}) · 신뢰 공개키 ${sig.trustedKeys}개 · 회수 ${sig.revokedKeys}개${sig.fatal ? ` · 키 파일 오류: ${String(sig.fatal).slice(0, 120)}` : ''}`
+        + (!sig.ready && sig.policy !== 'warn' ? ' — 신뢰 키가 없어 서명 필수 정책에서 업그레이드 번들을 설치하지 않는다.' : ''),
+    evidence: 'server/src/upgrade/release-signing-keys.json · CONFIG_DIR/release-signing-keys.conf · portal.env UPGRADE_SIGNATURE_POLICY',
+    howto: sig && sig.policy === 'warn' ? 'portal.env 의 UPGRADE_SIGNATURE_POLICY=warn 을 지우고 재시작한다.'
+      : sig && !sig.ready ? 'docs/RELEASE-SIGNING.md 절차로 서명 키를 만들고 공개키를 등록한다(새 릴리스에 포함되거나 호스트 파일로).' : '',
+  });
+
+  /* 2026-10-09 검토 S-09: 중앙↔엣지 전송 보호 — 평문 HTTP 수집 서버(승인 기록 없음 = risk)·평문 CENTRAL_URL·평문 리스너. */
+  try {
+    add(wanTransportCheckItem({ collectors: loadCollectors(), env, listener: tlsListenerStatus(), wanTls: wanTlsStatus(), centralUrl: config.agent?.centralUrl }));
+  } catch (e) {
+    add({ id: 'wan-transport', group: '통신·실행', title: '중앙↔엣지 전송 보호(HTTPS)', status: 'unknown',
+      detail: `판정하지 못했다: ${String(e?.message || e).slice(0, 200)}`, evidence: 'collectors.json · TLS_* · CENTRAL_URL', howto: '' });
+  }
 
   /* 10. 세션 보안 설정 ---------------------------------------------------- */
   let sess = null; let sessErr = null;

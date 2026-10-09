@@ -19,14 +19,17 @@
 import { Agent } from 'undici';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { withSsrfLookup } from '../../util/ssrfLookup.js';
+import { deviceTlsConnect, unwrapTlsPeer } from '../../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
 import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SSH 경로와 같은 스키마
 
-// 자체서명 인증서 장비 한정 로컬 디스패처 — 전역 TLS 오염 금지(server/CLAUDE.md).
-// 보안(M-4, 2026-09-12): SANSWITCH_TLS_VERIFY=true 면 검증을 켠다(기본은 기존대로 해제 — 자체서명 FOS 대응).
+// FOS REST 전용 로컬 디스패처 — 전역 TLS 오염 금지(server/CLAUDE.md).
+// 2026-10-09 S-02(사용자 승인 기본값 전환): 미설정 = CA 체인(시스템 루트 + 사설 CA 번들) 또는 장비별 승인 지문 —
+// 예전 기본(자체서명 허용 · M-4 의 'SANSWITCH_TLS_VERIFY=true 일 때만 검증')은 스위치 계정을 상대 확인 없이 보냈다.
+// SANSWITCH_TLS_VERIFY=true 는 CA 체인만(엄격), =false 는 명시적 예외(예전처럼 어떤 인증서든 — 상태에 드러난다).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-const dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.SANSWITCH_TLS_VERIFY === 'true' }) });
+const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'sanswitch', envKey: 'SANSWITCH_TLS_VERIFY', envRaw: process.env.SANSWITCH_TLS_VERIFY, tls: withSsrfLookup({}) }) });
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 const TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_HTTP_TIMEOUT_MS, 20_000);   // v2.606 TIM2606-03: 음수·2^31 초과 차단
 
@@ -89,11 +92,12 @@ function makeClient(device, signal) {
   const vf = device.vfId ? `?vf-id=${Number(device.vfId)}` : '';
   return {
     async login() {
+      // S-02: 인증서 거부는 'fetch failed' 대신 판정 문구(대상·지문·조치)로 — 장비 화면의 오류 칸이 이 문구를 그대로 보인다.
       const res = await fetch(`${base}/login`, {
         method: 'POST', headers: { Authorization: `Basic ${auth}`, Accept: 'application/yang-data+json' },
         redirect: NO_REDIRECT, // v2.620 SEC2620-01
         dispatcher, signal: sig(TIMEOUT_MS, signal),
-      });
+      }).catch((e) => { throw unwrapTlsPeer(e); });
       refuseRedirect(res, 'SAN 스위치');
       if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
       if (res.status === 404) throw new Error('/rest 없음(404) — FOS 8.2.1 미만으로 보입니다. 수집 방식을 SSH 로 바꾸세요.');
@@ -107,7 +111,7 @@ function makeClient(device, signal) {
         headers: { Authorization: token, Accept: 'application/yang-data+json' },
         redirect: NO_REDIRECT, // v2.620 SEC2620-01
         dispatcher, signal: sig(TIMEOUT_MS, signal),
-      });
+      }).catch((e) => { throw unwrapTlsPeer(e); });
       refuseRedirect(res, 'SAN 스위치');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = await res.json();
@@ -217,7 +221,7 @@ const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Nu
 export async function collect(device, { signal, trace = null } = {}) {
   const c = makeClient(device, signal);
   const t0 = Date.now();
-  trace?.(`REST 로그인 → https://${device.host}:${Number(device.httpsPort) || 443}/rest/login (Basic, 자체서명 허용)`);
+  trace?.(`REST 로그인 → https://${device.host}:${Number(device.httpsPort) || 443}/rest/login (Basic · 인증서는 CA 체인 또는 승인 지문 — security/tlsTrust.js)`);
   try { await c.login(); trace?.(`REST 로그인 성공 +${Date.now() - t0}ms`); }
   catch (e) { trace?.(`REST 로그인 실패: ${e.message} +${Date.now() - t0}ms`, 'error'); throw e; }
   const parts = {}; const sections = {}; const doneAt = {};

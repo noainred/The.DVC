@@ -26,6 +26,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { notifySessionRevoked } from './sessionRevocation.js';
 
 const FILE = path.join(config.configDir, 'active-sessions.json');
 
@@ -63,8 +64,13 @@ export function newSessionId() { return crypto.randomBytes(16).toString('hex'); 
 export function setActiveSession(username, sid, { at = Date.now(), ip = '' } = {}) {
   const u = String(username || '');
   if (!u || !sid) return;
+  const prev = load().get(u);
   load().set(u, { sid: String(sid), at, ip: String(ip || '') });
   persist();
+  // 2026-10-09 검토 S-04: 덮어쓴 이전 세션은 HTTP 에서 이미 무효다(isActiveSession). 열린 장기 연결(SSH·RDP WS)도 즉시 닫게 알린다.
+  if (prev && prev.sid && prev.sid !== String(sid)) {
+    try { notifySessionRevoked({ scope: 'session', username: u, sid: prev.sid, reason: 'single-session-replaced' }); } catch { /* */ }
+  }
 }
 
 /**
@@ -81,6 +87,14 @@ export function isActiveSession(username, sid) {
 /** 로그아웃/계정 폐기 시 활성 세션 제거(다음 로그인이 어차피 덮어쓰지만 명시적 정리용). */
 export function clearActiveSession(username) {
   if (load().delete(String(username || ''))) persist();
+}
+
+/** 로그아웃(S-05) — 이 계정의 활성 세션이 바로 이 sid 일 때만 지운다(다른 기기의 최신 세션을 지우지 않는다). */
+export function clearActiveSessionIf(username, sid) {
+  const u = String(username || '');
+  const rec = load().get(u);
+  if (rec && sid && rec.sid === String(sid)) { load().delete(u); persist(); return true; }
+  return false;
 }
 
 /** 관리/디버그용 — 현재 활성 세션 요약(sid 자체는 노출하지 않는다). */

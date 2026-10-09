@@ -19,6 +19,7 @@ import * as xtremio from './collectors/xtremio.js';       // v2.310
 import * as powermax from './collectors/powermax.js';     // v2.310(vmax·powermax 공용 — 같은 Unisphere REST)
 import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metronode 공용 — 같은 Element Manager REST 계열)
 import { collectAreasOnce } from './areasCollector.js';
+import { areasExtraFields } from './onefsAreaSummary.js'; // v2.730 검토 I-03
 import { enabledAreas, ONEFS_AREAS } from './onefsCatalog.js';
 import { saveCapacityPoint, saveAreaResults } from './db.js';
 import { recordActivity } from './activityLog.js';
@@ -80,7 +81,8 @@ async function saveDemoAreas(dev) {
   // v2.719(감사 B2-02)의 '사람 등록 장비면 저장 안 함' 분기는 v2.720(감사 R1-05)에 지웠다 — 이제 이 함수는 데모 장비(mock-)에만 불린다
   //   (합성 조건 `useDemoSynth`). 사람이 등록한 Isilon 은 mock 모드에서도 실제 영역 수집을 탄다.
   try { await saveAreaResults(dev.id, r.results); } catch (e) { console.warn(`[storage-areas] 데모 DB 저장 실패(${dev.id}): ${e.message}`); }
-  return { summary: r.summary, endpoints: r.endpoints };
+  const { results: _drop, ...rest } = r; // 원문(results)은 DB 로만 — 스냅샷에 싣지 않는다
+  return rest;
 }
 
 /**
@@ -131,8 +133,9 @@ async function collectOneInner(dev, startedAt) {
           ? await saveDemoAreas(full)
           // 시한이 끊어도 collectAreasOnce 는 던지지 않고 모은 결과를 저장·반환한다(stopped:'deadline').
           : await withDeadline(AREAS_TIMEOUT_MS, (signal) => collectAreasOnce(full, { signal }), '영역 수집 타임아웃');
-        snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints,
-          ...(r.stopped ? { areasStopped: r.stopped, areasNotTried: r.notTried ?? 0 } : {}) };
+        // v2.730(검토 I-03): 영역마다 예정·시도·미시도 엔드포인트와 부분 수집 여부를 싣는다 — 필드 조립은 실제 수집·데모가
+        //   같은 함수(onefsAreaSummary.areasExtraFields)를 지난다. `areasNotTried` 는 예전처럼 영역 개수다.
+        snap.extra = { ...snap.extra, ...areasExtraFields(r) };
         putSnapshot(snap); // 요약 갱신분 재저장(push 가 최신 요약을 실어가게)
       } catch (e) { snap.extra = { ...snap.extra, areasError: e.message }; putSnapshot(snap); }
     }

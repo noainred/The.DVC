@@ -70,6 +70,8 @@ import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
 import { bigJsonStats } from '../util/bigJsonGate.js';
 import { listSettingsLoadErrors } from '../util/settingsLoadError.js';
+import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
+import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -210,6 +212,7 @@ export function getServiceCheck(opts = {}) {
   const checks = [];
 
   checks.push(wrap('api', '중앙 API', () => ({ status: 'ok', detail: `응답 정상 · v${upgradeManager.status().version}`, at: Date.now() })));
+  checks.push(wrap('runtime', 'Node 런타임 호환성', () => runtimeServiceRow({ isAdmin: opts.isAdmin }))); // 2026-10-09 검토 I-06
 
   checks.push(wrap('vcenter', 'vCenter 수집', () => {
     const s = store.get();
@@ -258,6 +261,23 @@ export function getServiceCheck(opts = {}) {
     return { status: 'warn',
       detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나, 그 설정 화면에서 다시 저장하거나, 관리자가 이 행의 [기본값으로 확정] 으로 지금 기본값을 저장하세요(그 기본값이 전 엣지에 배포됩니다).`,
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
+  }));
+
+  // 2026-10-09 검토 I-05: 게시판·공지 — 메모리에 받은 변경이 디스크에 저장되지 않고 있으면 warn(재시작하면 사라질 수 있다).
+  //   pending 60초 경계는 화면(10초)보다 넉넉하게 — 묶음 저장 창마다 이 행이 깜빡이지 않게.
+  checks.push(wrap('bulletin-store', '게시판·공지 저장', () => {
+    const h = bulletinHealth({ admin: true });
+    const parts = []; let worst = 'ok'; let at = Date.now();
+    for (const [k, label] of [['board', '게시판'], ['notices', '공지']]) {
+      const x = h[k];
+      if (!x || x.state === 'saved') continue;
+      const stuck = x.state === 'pending' && x.unsavedSince && Date.now() - x.unsavedSince > 60_000;
+      if (x.state === 'failed' || stuck) worst = 'warn';
+      if (x.unsavedSince) at = Math.min(at, x.unsavedSince);
+      parts.push(`${label} ${x.state === 'failed' ? '저장 실패' : '저장 대기'} — 미저장 변경 ${x.unsaved}건${x.lastWriteError ? ` · ${x.lastWriteError.code}(${x.lastWriteError.phase})` : ''}${x.retrying ? ' · 자동 재시도 예약' : x.retryExhausted ? ' · 자동 재시도 멈춤' : ''}`);
+    }
+    if (!parts.length) return { status: 'ok', detail: '게시판·공지 변경이 모두 디스크에 저장됨', at };
+    return { status: worst, detail: `${parts.join(' / ')} — 원인을 해결한 뒤 게시판 화면의 '지금 다시 저장'(전체 범위 관리자)을 누르거나 다음 변경 때 저장됩니다. 재시작 전에 저장되지 않으면 미저장 변경이 사라질 수 있습니다.`, at };
   }));
 
   checks.push(wrap('nsx', 'NSX 수집', () => {

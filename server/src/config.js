@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reqTimeoutMs } from './util/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동)
+import { tlsModeFromEnv } from './security/tlsMode.js';   // 2026-10-09 S-02: 장비 TLS 검증 모드(무의존 leaf 모듈)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -99,9 +100,14 @@ export const config = {
   dbDir: DB_DIR,
   // How often (ms) the collector refreshes the aggregated snapshot.
   pollIntervalMs: clampIntervalMs(Number(process.env.POLL_INTERVAL_MS) || 30_000, 30_000, 5_000),
-  // Allow self-signed vCenter certificates (common in private DCs).
-  rejectUnauthorized: process.env.VC_TLS_REJECT_UNAUTHORIZED === 'true',
-  // TLS compatibility for older vCenter appliances (used when cert verify is off).
+  // vCenter(SOAP·REST·게스트 파일 전송·VM 복제)·iDRAC/OME·NSX(NSX_TLS_REJECT_UNAUTHORIZED 미설정 시) 의 인증서 검증 모드
+  // (2026-10-09 검토 S-02 — 사용자 승인 기본값 전환. 판정은 security/tlsTrust.js):
+  //   미설정 = 'verify'(CA 체인[시스템 루트 + CONFIG_DIR/tls-ca-bundle.pem] 또는 장비별 승인 지문 — 예전엔 미설정 = 검증 안 함)
+  //   true   = 'strict'(CA 체인만) · false = 'insecure'(**명시적 예외** — 예전처럼 어떤 인증서든. 상태에 '예외 사용 중' 으로 드러난다)
+  vcTlsVerifyMode: tlsModeFromEnv(process.env.VC_TLS_REJECT_UNAUTHORIZED),
+  // 하위 호환: 'strict' 일 때만 true(예전 이름 — 새 코드는 vcTlsVerifyMode 를 볼 것).
+  rejectUnauthorized: tlsModeFromEnv(process.env.VC_TLS_REJECT_UNAUTHORIZED) === 'strict',
+  // TLS compatibility for older vCenter appliances (used unless VC_TLS_REJECT_UNAUTHORIZED=true — 판정은 tlsTrust 가 따로 한다).
   vcTlsMinVersion: process.env.VC_TLS_MIN_VERSION || 'TLSv1',
   vcTlsCiphers: process.env.VC_TLS_CIPHERS || 'DEFAULT@SECLEVEL=0',
   // Use the vim25 SOAP API for real host/VM metrics (default on; REST is a fallback).
