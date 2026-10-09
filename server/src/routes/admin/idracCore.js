@@ -11,6 +11,8 @@ import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { idracGpuCounts, gpuModelOf, gpuCountable } from '../../idrac/gpuCount.js'; // v2.683: Overview GPU 카드와 같은 집계
 import { allPhysicalServers, vcIndexFromSnap } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌
 import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { serverPartsCell } from '../../idrac/serverParts.js'; // v2.728: 서버 목록 '부품 이상' 열(표시 전용)
+import { createYielder } from '../../util/timeSlice.js'; // v2.728: 부품 요약 첫 계산의 시간 기준 양보
 import { roomTempReport, UNASSIGNED_KEY } from '../../idrac/roomTemp.js';
 import { roomTempHistory, roomTempSparks } from '../../idrac/roomTempSeries.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -180,7 +182,7 @@ adminRouter.get('/room-temp', adminOnly, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.get('/idrac', adminOnly, (req, res) => {
+adminRouter.get('/idrac', adminOnly, async (req, res) => {
   const tagMap = hostVcByTag();
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
   // v2.590: 인증 실패로 주기 수집이 멈춘 서버를 행마다 싣는다(조용한 정지 금지 — authGuard 규칙 1).
@@ -191,11 +193,25 @@ adminRouter.get('/idrac', adminOnly, (req, res) => {
   const vendorOf = (s) => (s.type === 'ome' ? {} : { vendor: isHpeEntry(s) ? 'hpe' : 'dell' });
   const local = listServers().map((s) => ({ ...s, ...vendorOf(s), mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '', ...(stops.has(String(s.id)) ? { authStopped: stops.get(String(s.id)) } : {}) }));
   const seen = new Set(local.map((s) => String(s.id)));
+  const remoteInv = new Map();
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
-    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', vendor: s.vendor === 'hpe' || s.vendor === 'dell' ? s.vendor : '', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
+    .map((s) => { remoteInv.set(String(s.id), s.inv || null); return { id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', vendor: s.vendor === 'hpe' || s.vendor === 'dell' ? s.vendor : '', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }; });
   // v2.629(AUTHZ2629-03): 범위 계정은 귀속 vCenter 가 허용 집합인 서버만(BMC 주소·계정명·서비스태그 전 법인분 유출 차단).
   const r = scopeIdracServers(req, local.concat(remote));
+  // v2.728: ?parts=1 이면 행마다 부품 상태 요약(장애·경고·확인 불가·빈 슬롯 개수 — 판정은 partfault 추출기 그대로, **표시 전용**).
+  //   V4·관제 콘솔이 이 경로를 60초마다 폴링하므로 기본은 싣지 않는다(서버 분석 › 법인별 서버 정보 목록만 요청한다).
+  //   요약은 인벤토리 수집 시각으로 기억해 목록을 열 때마다 전 서버를 다시 추출하지 않고(serverPartsCell — 실측 1,000대
+  //   첫 계산 약 160ms · 기억 약 2ms), 첫 계산도 시간 기준으로 양보한다(util/timeSlice.js — 15ms 마다). 범위로 자른 뒤에만 계산한다.
+  if (req.query.parts === '1') {
+    const maybeYield = createYielder(15);
+    for (const s of r.servers) {
+      if (s.type === 'ome') continue;
+      const inv = s.remote ? remoteInv.get(String(s.id)) : getIdracInventory(s.id);
+      s.parts = serverPartsCell({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || inv?.system?.serviceTag || '' }, inv || null, { remote: !!s.remote, scopeKey: s.remote ? String(s.collectorId || '') : '' });
+      await maybeYield();
+    }
+  }
   if (!r.sc) return res.json({ servers: r.servers, poller: getPollerStatus() });
   // 폴러 상태는 모양을 유지하되(화면이 읽는 키) 전 법인 집계를 빼고 범위 안 값만 싣는다 — lastRun(전 법인 성공·실패 수·
   //   오류 목록)은 범위로 가를 수 없어 null(첫 수집 전과 같은 표시), 인증 정지 목록은 범위 안 서버만.

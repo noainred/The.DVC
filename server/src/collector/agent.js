@@ -15,6 +15,7 @@ import { allOmeDevices } from '../idrac/omeCache.js';
 import { loadRegistry as loadIdracRegistry, isHpeEntry } from '../idrac/registry.js';
 import { getInventory } from '../idrac/invCache.js';
 import { getSensorSeries, sensorPollCycle } from '../idrac/sensorStore.js';
+import { compactInv } from './compactInv.js'; // v2.728: 축약 인벤토리(순수 — 데모와 공유)
 
 // 최신 온도 센서(콤팩트) — 중앙 '법인별 온도'가 위임 법인(엣지 등록) 서버도 보이게 실어 보낸다.
 // 센서 이름→℃ 맵 + 관측 시각만(시계열 전체는 안 보냄, 센서 수 상한 64).
@@ -49,41 +50,9 @@ function compactSensors(serverId) {
   };
 }
 
-// 서버 분석용 콤팩트 인벤토리(중앙 '서버 분석' 4개 탭이 쓰는 필드만; 자격증명·잡정보 제외).
-// 큰 항목은 firmware 배열뿐이라 O(구성요소 수)로 유지된다.
-export function compactInv(inv) {
-  if (!inv) return null;
-  return {
-    // hostName: 파트/분석 화면에서 IP와 나란히 표시(iDRAC 이 보고하는 OS 호스트네임) — 누락 시
-    // 위임(엣지) 서버는 hostname 컬럼이 영구 공백이 된다.
-    system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion, hostName: inv.system.hostName } : undefined,
-    cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores } : undefined,
-    memory: inv.memory ? { totalGiB: inv.memory.totalGiB } : undefined,
-    gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB })) : [],
-    idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion } : undefined,
-    bios: inv.bios ? { version: inv.bios.version } : undefined,
-    firmware: Array.isArray(inv.firmware) ? inv.firmware.map((f) => ({ type: f.type, version: f.version, name: f.name })) : [],
-    // NIC 어댑터/포트 — 중앙 '서버 NIC 속도/모델 확인'용. 과거 이 필드가 누락돼 엣지 원격
-    // 서버가 전부 '정보없음'(모델 0종)으로 나왔다. 포트는 id/link/speedMbps만(콤팩트 유지).
-    nics: Array.isArray(inv.nics) ? inv.nics.map((n) => ({
-      name: n.name, model: n.model,
-      // v2.682(R3E-01): 포트 MAC 도 싣는다 — 중앙 '통합 성능 모니터링' 의 MAC 규칙(ESXi NIC MAC ↔ iDRAC 포트 MAC)이 위임 서버에도 동작하게.
-      //   중앙 remoteInventory INV_SHAPE 에도 'mac' 이 있어야 한다(한쪽만이면 버려진다). 없으면 키를 만들지 않는다.
-      ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps, ...(typeof p.mac === 'string' && p.mac ? { mac: p.mac.slice(0, 64) } : {}) })) : [],
-    })) : [],
-    // 파트 인벤토리 탭용 — 집계에 필요한 식별 필드만(시리얼 등 자산정보 제외, 페이로드 절약).
-    // 이 필드들을 빼면 위임(엣지) 법인의 서버가 파트 탭에서 전부 공백이 된다(과거 nics 누락과
-    // 동일한 회귀 패턴 — test/compactInv.test.js 가 고정).
-    cpus: Array.isArray(inv.cpus) ? inv.cpus.map((c) => ({ socket: c.socket, model: c.model, cores: c.cores })) : [],
-    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol })) : [],
-    psus: Array.isArray(inv.psus) ? inv.psus.map((p) => ({ model: p.model, manufacturer: p.manufacturer, capacityWatts: p.capacityWatts })) : [],
-    memoryDimms: Array.isArray(inv.memoryDimms) ? inv.memoryDimms.map((m) => ({ sizeGB: m.sizeGB, type: m.type, speedMHz: m.speedMHz, manufacturer: m.manufacturer, partNumber: m.partNumber })) : [],
-    storageControllers: Array.isArray(inv.storageControllers) ? inv.storageControllers.map((c) => ({ model: c.model, firmware: c.firmware, protocols: c.protocols })) : [],
-    pcie: Array.isArray(inv.pcie) ? inv.pcie.map((d) => ({ model: d.model, manufacturer: d.manufacturer, deviceType: d.deviceType })) : [],
-    fans: Array.isArray(inv.fans) ? inv.fans.map((f) => ({ name: f.name, model: f.model, partNumber: f.partNumber })) : [],
-    collectedAt: inv.collectedAt,
-  };
-}
+// 서버 분석용 콤팩트 인벤토리 — v2.728 에 collector/compactInv.js 로 옮겼다(데모가 import 순환 없이 같은 함수를 쓰게).
+// ⚠ 재수출은 import 뒤 export 다(`export { x } from` 은 이 모듈 스코프에 이름을 만들지 않는다 — v2.575). 아래 localServersForExport 가 쓴다.
+export { compactInv };
 
 // 이 엣지의 iDRAC 레지스트리를 '서버 분석'용으로 직렬화(자격증명 제외). 위임 스캔으로 현지
 // 등록된 서버 + 캐시 인벤토리를 중앙이 병합해 위임 법인도 서버 분석에 나타나게 한다.

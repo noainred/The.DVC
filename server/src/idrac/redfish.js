@@ -25,6 +25,7 @@ import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
 import { trimTrailingSlashes } from '../util/trimSlashes.js';
 import { reqTimeoutMs } from '../util/envTimeout.js';
 import { parseThermalTemp, parseThermalFan, parseRedfishSensor } from './sensorDetail.js'; // v2.659: 센서 상세(임계값·상태)
+import { dedupNicPorts } from './nicPorts.js'; // v2.728: 같은 물리 포트(NetworkPorts·Ports 두 URL) 중복 제거
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
@@ -840,19 +841,25 @@ export async function fetchInventory(entry) {
           try { const r = await G(link); if (Array.isArray(r.Members)) portRefs.push(...r.Members.map((m) => m['@odata.id']).filter(Boolean)); else portRefs.push(link); }
           catch { /* skip link */ }
         }
+        // v2.728: 같은 물리 포트가 NetworkPorts(옛 스키마)·Ports(새 스키마) 두 URL 로 나오면 URL Set 으로는 걸러지지 않아
+        //   포트가 두 번씩 실렸다(사용자 신고 R640 — NIC.Integrated.1-1~1-4 가 8개). 받은 뒤 **포트 Id 로** 묶는다
+        //   (idrac/nicPorts.js dedupNicPorts — 링크·속도·MAC 을 아는 쪽을 남긴다). 중복을 감안해 URL 은 32개까지 읽고
+        //   묶은 뒤 16개로 자른다(예전 상한 16 은 중복이 반을 먹었다). ⚠ 실장비 응답은 확인하지 못했다(추정 — nicPorts.js 머리말).
+        //   링크 원문은 LinkStatus → LinkState(Port 스키마의 관리 상태) → Status.State 순이고 판정은 nicLinkState 가 한다
+        //   (Status.State 'Enabled' 는 링크가 아니라 자원 상태라 'unknown' 이다).
         const ports = [];
-        for (const pref of [...new Set(portRefs)].slice(0, 16)) {
+        for (const pref of [...new Set(portRefs)].slice(0, 32)) {
           try {
             const p = await G(pref);
             ports.push({
-              id: p.Id || p.Name || '', link: p.LinkStatus || p.Status?.State || '', speedMbps: portSpeedMbps(p),
+              id: p.Id || p.Name || '', link: p.LinkStatus || p.LinkState || p.Status?.State || '', speedMbps: portSpeedMbps(p),
               // MAC — 파트/자산 추적용(같은 응답, 추가 HTTP 0회). 표기가 세대별로 갈린다.
               mac: (p.AssociatedNetworkAddresses || [])[0] || (p.Ethernet?.AssociatedMACAddresses || [])[0] || '',
             });
           } catch { /* skip port */ }
         }
         inv.nics.push({
-          name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports,
+          name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports: dedupNicPorts(ports).slice(0, 16),
           // 파트 인벤토리용 식별 필드(어댑터 응답에 이미 있음).
           partNumber: a.PartNumber || '', serial: a.SerialNumber || '',
           firmware: (a.Controllers || [])[0]?.FirmwarePackageVersion || '',

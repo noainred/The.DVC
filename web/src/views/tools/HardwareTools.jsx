@@ -20,6 +20,7 @@ import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions,
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { gpuFinderNote } from './gpuFinderText.js';
 import Select from '../../components/Select.jsx';
+import { partsCell } from '../idrac/hwStatusText.js'; // v2.728: '부품 이상' 열(판정은 서버 — 색·문구만)
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -250,7 +251,8 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const [scopeMeta, setScopeMeta] = useState(null);
   const load = () => Promise.all([
     // v2.630 UI2630-01: 응답의 범위 필드(scoped·omittedOutOfScope)도 함께 든다 — 목록만 꺼내면 뺀 서버 수가 사라진다.
-    fetchJson('/admin/idrac').then((r) => { setScopeMeta(r?.scoped ? { scoped: true, omittedOutOfScope: r.omittedOutOfScope } : null); return r.servers || []; }),
+    // v2.728: ?parts=1 — 행마다 부품 상태 요약(장애·경고·확인 불가). V4·관제 콘솔의 60초 폴링은 이 값을 받지 않는다.
+    fetchJson('/admin/idrac?parts=1').then((r) => { setScopeMeta(r?.scoped ? { scoped: true, omittedOutOfScope: r.omittedOutOfScope } : null); return r.servers || []; }),
     fetchJson('/admin/datacenters').then((r) => { setDcErr(null); return { datacenters: r.datacenters || [], assign: r.assign || {} }; }).catch((e) => { setDcErr(e); return { datacenters: [], assign: {} }; }),
   ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
@@ -417,9 +419,10 @@ function ServerListBody({ corpName, model, servers, onRow }) {
           {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>}
         </div>
       </div>
-      <STable minWidth={720} className="data-table" style={{ width: '100%', fontSize: 13 }}>
+      <STable minWidth={820} className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr>
           <th style={{ textAlign: 'left' }}>이름</th><th>유형</th>{allMode && <th style={{ textAlign: 'left' }}>모델</th>}<th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
+          <th style={{ textAlign: 'left' }} title="iDRAC 인벤토리로 본 부품 상태(PSU·디스크·메모리·CPU·GPU·팬·컨트롤러·PCIe) — 표시 전용입니다. 기록·알림은 특수 기능 › 파트 장애가 맡습니다.">부품 이상</th>
         </tr></thead>
         <tbody>{rows.map((s) => {
           const isOme = s.type === 'ome';
@@ -432,6 +435,15 @@ function ServerListBody({ corpName, model, servers, onRow }) {
               <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
               <td className="muted">{s.serviceTag || '—'}</td>
               <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
+              {(() => {
+                // v2.728: 판정 불가(인벤토리 없음·장비 불통·구버전 엣지)는 '—' + 사유(0 건이라 말하지 않는다). OME 는 대상 아님.
+                const pc = isOme ? { badges: [], sort: '', title: 'OME 관리 콘솔 등록은 부품 상태를 보지 않습니다' } : partsCell(s.parts);
+                return (
+                  <td data-sort={pc.sort} title={pc.title || undefined} style={{ whiteSpace: 'nowrap' }}>
+                    {pc.badges.length ? pc.badges.map((b, i) => <span key={i} className={`badge ${b.cls}`} title={b.title} style={{ marginRight: 3 }}>{b.text}</span>) : <span className="muted">—</span>}
+                  </td>
+                );
+              })()}
             </tr>
           );
         })}</tbody>

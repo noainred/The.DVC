@@ -148,6 +148,8 @@ export function scanFrom({
  * 뺀다** — collector/agent.js:47-57. 즉 중앙은 판정할 데이터 자체가 없다), `devicesForThisNode()` 도
  * agent 없는 스토리지·SAN 만 준다. 그래서 위임 장비의 파트 상태는 **그 엣지가 v2.548 이상일 때만**
  * 중앙에 보이고, 그 전까지 화면은 '장애 없음' 이 아니라 **'구버전 엣지 N곳'** 이라고 말한다.
+ * ⚠ v2.728: 엣지 compactInv 가 이제 부품 이름·health·state 를 싣는다(iDRAC 상세 화면 표시용 — idrac/serverParts.js).
+ *   그래도 **중앙이 그 값으로 위임 장비를 판정하지 않는다** — 판정·전이·알림은 그 엣지가 한다(같은 부품이 두 번 열리지 않게).
  */
 export async function runScan() {
   const [{ loadRegistry }, { getInventory, inventoryStale }, cfg, stReg, stStore, swReg, swStore] = await Promise.all([

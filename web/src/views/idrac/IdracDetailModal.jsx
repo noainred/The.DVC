@@ -9,7 +9,7 @@
 // 컴팩트 후 이어받기 메모: views/idrac/ 디렉터리는 v2.292 에서 IdracAdmin 분할로 생성 —
 // IdracDetailModal(HardwareTools 전용)·ScanJobLogModal·IdracScanJobs·IdracScanRanges(셸이 조립).
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, toolAllowed } from '../../api.js';
 // 센서 탭 문구 판정(v2.493) — '값 없음' 을 '텔레메트리 미지원' 으로 단정하지 않게 순수 모듈로 고정.
 import {
   cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote,
@@ -23,6 +23,10 @@ import { fmtTrendTick } from '../tools/shared.jsx';   // ESXi 온도 추이와 *
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
 import { bmcLabel } from '../tools/serverVendorText.js';
+// v2.728: 부품 상태·링크·파트 장애 연결 문구(판정은 서버 — 여기는 색·문구만).
+import { partStatusBadge, linkBadge, portSpeedText, partsHeadline, failedKindsNote, statusMissingNote, partFaultNote } from './hwStatusText.js';
+import BoldText from '../../components/boldText.jsx';
+import { holdText } from '../tools/partFaultText.js';
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -106,9 +110,67 @@ function TempTrend({ serverId }) {
   );
 }
 
+/**
+ * v2.728 — 하드웨어 탭 맨 위 '부품 상태'(사용자 요청 "서버 장애 파트(CPU, Memory, disk 등)에 장애가 발생해도 확인되게").
+ * 요약·장애 목록은 서버(idrac/serverParts.js — 파트 장애 추출기·판정 그대로, **표시 전용**)가 주고, 기록·알림은 기존 파트 장애
+ * 기능이 맡는다(꺼져 있으면 그렇게 말한다). 판정 불가(인벤토리 없음·장비 불통·구버전 엣지)는 0 건이라 말하지 않는다.
+ */
+function PartsSummary({ resp }) {
+  if (!resp) return null;
+  const p = resp.parts;
+  const head = partsHeadline(p);
+  const failed = failedKindsNote(p);
+  const pf = partFaultNote(resp.partFault, { allowed: toolAllowed('part-faults') });
+  const faults = Array.isArray(p?.faults) ? p.faults : [];
+  const open = Array.isArray(resp.partFault?.open) ? resp.partFault.open : [];
+  const toneColor = { red: 'var(--red)', amber: 'var(--amber)', green: 'var(--green)', gray: 'rgba(148,163,184,.5)' };
+  return (
+    <div className="card" style={{ padding: '10px 12px', marginBottom: 12, borderLeft: `3px solid ${toneColor[head.tone] || toneColor.gray}`, whiteSpace: 'normal' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>부품 상태</div>
+      <div style={{ fontSize: 12.5 }}><BoldText text={head.text} /></div>
+      {failed && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{failed}</div>}
+      {faults.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <STable className="data-table" minWidth={520} style={{ width: '100%', fontSize: 12.5 }}>
+            <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>종류</th><th style={{ textAlign: 'left' }}>부품</th><th style={{ textAlign: 'left' }}>장비 보고</th></tr></thead>
+            <tbody>{faults.map((f, i) => (
+              <tr key={`${f.kind}:${f.partId}:${i}`}>
+                <td data-sort={f.state === 'fault' ? 0 : 1}><span className={`badge ${f.state === 'fault' ? 'red' : 'amber'}`}>{f.state === 'fault' ? '장애' : '경고'}</span></td>
+                <td>{f.kindLabel}</td>
+                <td><b>{f.label}</b>{f.detail ? <div className="muted" style={{ fontSize: 11 }}>{f.detail}</div> : null}</td>
+                <td className="muted">{f.raw || '—'}</td>
+              </tr>
+            ))}</tbody>
+          </STable>
+          {p.faultsOmitted > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>외 {p.faultsOmitted}개는 표시하지 않았습니다(상한).</div>}
+        </div>
+      )}
+      {pf && (
+        <div style={{ fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(148,163,184,.15)' }}>
+          <BoldText text={pf.text} />
+          {pf.link && <a href={pf.link} style={{ marginLeft: 8, color: 'inherit', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{pf.linkText} ›</a>}
+          {pf.hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{pf.hint}</div>}
+          {open.length > 0 && (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {open.map((o, i) => (
+                <li key={i} className="muted" style={{ fontSize: 11.5 }}>
+                  <span className={`badge ${o.state === 'fault' ? 'red' : o.state === 'warn' ? 'amber' : 'gray'}`} style={{ fontSize: 10, marginRight: 4 }}>{o.state === 'fault' ? '장애' : o.state === 'warn' ? '경고' : o.state}</span>
+                  {o.kindLabel} {o.label}{o.firstSeenAt ? ` · 열림 ${new Date(o.firstSeenAt).toLocaleString('ko-KR')}` : ''}{holdText(o.holdReason) ? ` · ${holdText(o.holdReason)}` : ''}
+                </li>
+              ))}
+              {resp.partFault.omitted > 0 && <li className="muted" style={{ fontSize: 11 }}>외 {resp.partFault.omitted}건</li>}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
 export function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
+  const [invResp, setInvResp] = useState(null); // v2.728: 응답 전체(parts·partFault·remote·statusMissing)
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);
   const [sensErr, setSensErr] = useState(null); // 센서 조회 실패(수집 0 과 구분해 표시)
@@ -117,7 +179,7 @@ export function IdracDetailModal({ server, onClose }) {
   const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
   const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
   const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
-    .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
+    .then((r) => { setInv(r.inventory); setInvResp(r); setInvErr(null); }).catch((e) => setInvErr(e.message));
   // v2.493: 오류를 삼키지 않는다 — 404/400/403 이 와도 예전에는 '아직 수집된 센서 샘플이 없습니다'
   // 와 똑같이 보여 '수집 0' 과 '조회 실패' 를 구분할 수 없었다.
   const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`)
@@ -291,6 +353,7 @@ export function IdracDetailModal({ server, onClose }) {
         {tab === 'versions' && (
           invErr ? <ErrorBox message={invErr} /> : !inv ? <Loading /> : (
             <div>
+              <PartsSummary resp={invResp} />
               <div className="flex gap wrap" style={{ marginBottom: 12 }}>
                 {Object.entries({ 전체: inv.health?.overall, CPU: inv.health?.processor, 메모리: inv.health?.memory, 스토리지: inv.health?.storage, PSU: inv.health?.psu }).map(([k, v]) => v ? (
                   <span key={k} className={`badge ${/ok/i.test(v) ? 'green' : /warn/i.test(v) ? 'amber' : 'red'}`}>{k}: {v}</span>
@@ -311,17 +374,23 @@ export function IdracDetailModal({ server, onClose }) {
                 {inv.powerCap?.limitWatts != null && <div><span className="muted">전력 한도</span><div>{inv.powerCap.limitWatts} W</div></div>}
               </div>
 
+              {statusMissingNote(invResp) && (
+                <div className="card" style={{ padding: '8px 12px', marginBottom: 12, borderLeft: '3px solid var(--amber)', fontSize: 12.5, whiteSpace: 'normal' }}>{statusMissingNote(invResp)}</div>
+              )}
               {(inv.psus || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>전원공급장치(PSU) {inv.psus.length}</div>
                   <STable className="data-table" minWidth={560} style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>용량/출력</th><th style={{ textAlign: 'left' }}>입력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
-                    <tbody>{inv.psus.map((p, i) => (
-                      <tr key={i}><td>{p.name}</td><td className="muted">{p.model || '—'}</td>
-                        <td className="tabular">{p.capacityWatts ? `${p.capacityWatts}W` : '—'}{p.outputWatts != null ? ` / ${p.outputWatts}W` : ''}</td>
-                        <td className="tabular">{p.lineInputVoltage != null ? `${p.lineInputVoltage}V` : '—'}{p.inputWatts != null ? ` · ${p.inputWatts}W` : ''}</td>
-                        <td><span className={`badge ${/ok/i.test(p.health) ? 'green' : p.health ? 'amber' : 'gray'}`}>{p.health || p.state || '—'}</span></td></tr>
-                    ))}</tbody>
+                    <tbody>{inv.psus.map((p, i) => {
+                      const b = partStatusBadge(p);
+                      return (
+                        <tr key={i}><td>{p.name || '—'}</td><td className="muted">{p.model || '—'}</td>
+                          <td className="tabular">{p.capacityWatts ? `${p.capacityWatts}W` : '—'}{p.outputWatts != null ? ` / ${p.outputWatts}W` : ''}</td>
+                          <td className="tabular">{p.lineInputVoltage != null ? `${p.lineInputVoltage}V` : '—'}{p.inputWatts != null ? ` · ${p.inputWatts}W` : ''}</td>
+                          <td data-sort={b.state}><span className={`badge ${b.cls}`} title={b.title}>{b.text}</span></td></tr>
+                      );
+                    })}</tbody>
                   </STable>
                 </div>
               )}
@@ -332,12 +401,15 @@ export function IdracDetailModal({ server, onClose }) {
                   <div style={{ maxHeight: 200, overflow: 'auto' }}>
                     <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                       <thead><tr><th style={{ textAlign: 'left' }}>디스크</th><th style={{ textAlign: 'left' }}>용량</th><th style={{ textAlign: 'left' }}>미디어</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
-                      <tbody>{inv.disks.map((d, i) => (
-                        <tr key={i}><td>{d.name}<div className="muted" style={{ fontSize: 11 }}>{d.model}</div></td>
-                          <td className="tabular">{d.capacityGB != null ? `${d.capacityGB} GB` : '—'}</td>
-                          <td className="muted">{d.media || '—'}{d.protocol ? ` · ${d.protocol}` : ''}</td>
-                          <td>{d.predictiveFailure ? <span className="badge red">예측 실패</span> : <span className={`badge ${/ok/i.test(d.health) ? 'green' : d.health ? 'amber' : 'gray'}`}>{d.health || d.state || '—'}</span>}</td></tr>
-                      ))}</tbody>
+                      <tbody>{inv.disks.map((d, i) => {
+                        const b = partStatusBadge(d);
+                        return (
+                          <tr key={i}><td>{d.name || '—'}<div className="muted" style={{ fontSize: 11 }}>{d.model}</div></td>
+                            <td className="tabular">{d.capacityGB != null ? `${d.capacityGB} GB` : '—'}</td>
+                            <td className="muted">{d.media || '—'}{d.protocol ? ` · ${d.protocol}` : ''}</td>
+                            <td data-sort={b.state}><span className={`badge ${b.cls}`} title={b.title}>{b.text}</span></td></tr>
+                        );
+                      })}</tbody>
                     </STable>
                   </div>
                 </div>
@@ -348,10 +420,13 @@ export function IdracDetailModal({ server, onClose }) {
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>GPU(iDRAC 인식) {inv.gpus.length}</div>
                   <STable className="data-table" minWidth={420} style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
-                    <tbody>{inv.gpus.map((g, i) => (
-                      <tr key={i}><td>{g.name}</td><td className="muted">{[g.manufacturer, g.model].filter(Boolean).join(' ') || '—'}</td>
-                        <td><span className={`badge ${/ok/i.test(g.health) ? 'green' : g.health ? 'amber' : 'gray'}`}>{g.health || g.state || '—'}</span></td></tr>
-                    ))}</tbody>
+                    <tbody>{inv.gpus.map((g, i) => {
+                      const b = partStatusBadge(g);
+                      return (
+                        <tr key={i}><td>{g.name || '—'}</td><td className="muted">{[g.manufacturer, g.model].filter(Boolean).join(' ') || '—'}</td>
+                          <td data-sort={b.state}><span className={`badge ${b.cls}`} title={b.title}>{b.text}</span></td></tr>
+                      );
+                    })}</tbody>
                   </STable>
                 </div>
               )}
@@ -364,11 +439,15 @@ export function IdracDetailModal({ server, onClose }) {
                       <div key={i} style={{ marginBottom: 6 }}>
                         <div style={{ fontSize: 12, fontWeight: 600 }}>{n.model || n.name}</div>
                         <div className="flex gap wrap" style={{ marginTop: 2 }}>
-                          {(n.ports || []).length === 0 ? <span className="muted" style={{ fontSize: 11 }}>포트 정보 없음</span> : n.ports.map((p, j) => (
-                            <span key={j} className={`badge ${/up|enabled|linkup/i.test(p.link) ? 'green' : 'gray'}`} style={{ fontSize: 11 }}>
-                              {p.id} {/up|enabled|linkup/i.test(p.link) ? '🔗' : '⛔'} {p.speedMbps ? `${p.speedMbps >= 1000 ? `${(p.speedMbps / 1000).toFixed(0)}G` : `${p.speedMbps}M`}` : ''}
-                            </span>
-                          ))}
+                          {(n.ports || []).length === 0 ? <span className="muted" style={{ fontSize: 11 }}>포트 정보 없음</span> : n.ports.map((p, j) => {
+                            // v2.728: 링크 판정은 서버(nicLinkState) — 못 읽은 포트(unknown)를 ⛔(다운)로 칠하지 않는다.
+                            const lb = linkBadge(p);
+                            return (
+                              <span key={j} className={`badge ${lb.cls}`} style={{ fontSize: 11 }} title={lb.title}>
+                                {p.id} {lb.icon} {portSpeedText(p.speedMbps)}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}

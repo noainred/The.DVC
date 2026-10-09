@@ -255,6 +255,15 @@ export async function partFaultDbStatus() {
   };
 }
 
+/**
+ * v2.728: DB 파일이 이미 있는가 — 조회 화면(iDRAC 상세 '부품 상태')이 기능을 한 번도 켠 적 없는 노드에서 DB 를 **새로 만들지
+ * 않게** 먼저 본다(open() 은 파일이 없으면 만든다). 열려 있으면 true.
+ */
+export function partFaultDbExists() {
+  if (x) return true;
+  try { return fs.existsSync(DB_PATH()); } catch { return false; }
+}
+
 /** 지금 열려 있는 장애 전량 — 전이 계산의 입력. `agent` 열이 함께 나온다(법인 축). */
 export async function openFaults({ scope = '', limit = 20_000 } = {}) {
   const h = await open();

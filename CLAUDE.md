@@ -989,6 +989,44 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · ⚠ 작업 방식: 수정 에이전트 셋이 세션 한도로 중간에 멈췄다 — 변이 백업·작업 트리 대조로 남은 변이가 없는지 확인하고, 변이 단계 전에 멈춘 그룹은 리드가 파일 단위로
       감사 시작 커밋판으로 되돌려 다시 검증했다. WIP 커밋 두 개가 변이 도중의 파일을 담았다(작업 트리가 정답 — 그 커밋판으로 되돌리지 말 것).
 
+  - ⚠⚠ **v2.728 — SAN 사용량은 '미리 합친 집계 표(15분·1시간)' 로 계산한다. 결과는 원본 한 문장 집계와 같아야 한다**
+    (사용자 요청 "SAN 사용량 1·2차 개선" · 선택 '원본 90일 유지 · 집계 2년' · 전체 검증. `sanswitch/perfRollup.js`(순수 계획) + `perfDb.js`
+    `aggPorts`·`addRollups`·`runRollupBackfill`·`heavyQuery` + 웹 `SanSwitchTool.jsx DcStoragePerf`·`SanSwitchPerf.jsx`·`sanSwitchPerfText.js`·`sanPerfDbText.js`.
+    회귀 `server/test/sanPerf2728.test.js`(원본 대조 · 변이 11/11) + 웹 `views/tools/sanPerf2728.test.js`·`sanPerfDbText.test.js`):
+    · 표 `pp_15m`(31일 · `SANSW_PERF_ROLLUP_15M_DAYS`)·`pp_1h`(설정 `rollupRetentionDays` 기본 730, 30~3650)는 (dev, b, port) WITHOUT ROWID 이고 **평균이 아니라
+      n·s·mx·lt** 를 둔다 — 여러 행을 합쳐도 원본 AVG 와 같은 값이 나오게. 장비 id 는 `pp_dev` 번호. 쓰기(`savePerfSample`·`importSamples`)는 **원본에 실제로 들어간 행만**
+      같은 트랜잭션에서 더한다(중복 재전송은 원본 `INSERT … WHERE NOT EXISTS` 가 걸러 두 번 세지 않는다).
+    · 조회 버킷은 `snapBucketMs` 로 10분 이상이면 15분·1시간 정배수(24시간 120칸 → 96칸 · 7일 2시간), 31일보다 오래된 구간을 포함하면 1시간 정배수다.
+      `planSegments` 가 앞뒤 자투리와 **완성되지 않은 구간(워터마크 `complete_since` 이후 아님)** 을 원본으로 읽는다. 예외 하나 — 원본이 보존일로 지워진 머리
+      자투리는 집계 버킷 전체를 쓴다(`headApprox` — 응답 `source` 로 밝힌다). 결과 동일성은 테스트 ② 가 9가지 버킷 × 3구간을 예전 한 문장 SQL 과 대조한다.
+    · 업그레이드 직후 워터마크는 `alignUp(지금, 1시간)` 이고 그 이전 원본은 백필이 옮긴다(기동 `SANSW_PERF_ROLLUP_BACKFILL_DELAY_MS` 기본 2분 뒤 · 6시간 조각을 최신부터 거꾸로 ·
+      40ms 일하고 80ms 쉰다 · `INSERT OR REPLACE` · 조각마다 워터마크를 내려 재개 가능 · `SANSW_PERF_ROLLUP_BACKFILL=0` 끔). 상태는 `perfDbStats().rollup` → 설정 화면.
+    · 원본 정리와 집계 표 정리는 **따로** 한다(`pruneRollups` — 원본 90일이 지나도 1시간 표는 2년 남는다). '지금 정리' 는 `rollupDeleted` 를 함께 말한다.
+    · ⚠⚠ **집계 표 조회에 GROUP BY 를 두지 말 것** — `addRow` 가 같은 칸에 n·s 를 더하고 mx·lt 최댓값을 잡으므로 결과가 같고, GROUP BY 는 임시 B-tree 정렬로 조회 시간의
+      절반을 썼다. 행은 `setReturnArrays` 배열로 받는다(없는 런타임은 객체를 같은 순서로 푼다 — 테스트가 두 경로를 대조). 한 문장은 1시간 표 7일 · 15분 표 2일까지
+      (`rollupChunkBuckets`) — 30일씩 읽던 첫 판은 한 문장이 9만 행이라 최장 멈춤이 300ms 를 넘었다. 누적은 포트마다 `Float64Array(4 × 버킷)` 하나(행 객체 금지).
+    · 실측(합성 2,065만 행 · 스위치 40대 × 포트 128 × 14일, 같은 DB 를 이전 코드와 새 코드로): 법인 전체 조회 24시간 3.46초 → 0.62초 · 7일 6.84초 → 0.8초 ·
+      14일 13.9초 → 1.4초, 최장 멈춤 약 150ms → 60ms 미만. 백필 88초(최장 멈춤 161ms). ⚠ 운영 DB 로는 재지 못했다(추정 — 행 수에 비례).
+    · **보관 현황(`perfDbStats`)은 행을 세지 않는다** — 설정 화면이 20초마다 부르는데 COUNT 가 합성 DB 에서 1.1초 동안 포탈 전체를 멈췄다. 행 수는 rowid 끝값 차(`rowsApprox:true`,
+      화면 '약'), 스위치 수는 `port_meta`, MIN·MAX 는 단독 문장(v2.550.3).
+    · **조회 기억 TTL = 수집 주기**(`SANSW_PERF_QUERY_TTL_MS` 로 덮는다)이고 **쓰기가 기억을 지우지 않는다** — 지우면 5분마다 오는 엣지 push 가 매번 기억을 버렸다. 비우는 것은
+      '지금 수집'(`invalidatePerfQueries`) 하나이고, **진행 중인 같은 조회는 지우지 않는다**(지우면 같은 조회가 두 번 돈다 — 테스트 고정).
+    · **줄은 둘이다**(`lane: 'multi'`(법인·전체 합산) / `'single'`(장비 하나)) — 가벼운 장비 조회가 법인 합산 셋 뒤에 18.8초 줄 서던 것(v2.727 조사).
+    · **취소는 끝까지 전달한다**: 라우트 `perfAbortSignal(res)`(연결이 닫히면 abort) → 줄에서 기다리던 조회는 실행하지 않고(`skipped`), 도는 중이면 기다리는 요청이 0이 될 때
+      다음 양보 지점에서 멈춘다(`checkCancel` → code `abandoned`, 라우트는 응답하지 않고 끝낸다). 다른 요청이 같은 조회를 기다리면 멈추지 않는다.
+    · `storage-summary` 는 `kind`(array|host|unknown)로 그 종류 시리즈만 보낸다 — `counts`·법인 소계는 전 종류 기준. 웹은 종류를 바꾸면 다시 받고(같은 조건은 서버 기억),
+      앞 요청을 `AbortController` 로 끊고, 사용량 조회는 90초 · 재시도 0(무거운 집계를 세 번 줄 세우지 않게). '전체' 개수는 `kindCountOf`(counts 합). 표는 정렬한 뒤 200행 + '더 보기'
+      (`limitRows` — 뺀 개수를 말한다). 계산 시각·기억 시간·출처는 `perfComputedNote`.
+  - ⚠⚠ **v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다**(사용자 신고 iDRAC 상세 하드웨어 탭 PSU·디스크 '—' ·
+    NIC 1-1~1-4 중복·전부 ⛔. `collector/compactInv.js`(의존 없는 모듈 — `agent.js` 는 재수출) + `collector/remoteInventory.js INV_SHAPE` + `idrac/nicPorts.js`·`invView.js`.
+    회귀 `server/test/idracInv2728.test.js`·`compactInv.test.js` + 웹 `views/idrac/hwStatusText.test.js` — 변이 16/16):
+    · 엣지만 고치면 중앙 정제가 버린다 — **새 필드는 두 곳에 함께 넣을 것**(v2.611 CEN2611-01 와 같은 유형). 구버전 엣지 판정은 값이 아니라 **키 유무**
+      (`invView.statusFieldsMissing`) — 새 엣지는 빈 health('') 를 보낸다. 일련번호·부품번호·펌웨어는 여전히 싣지 않는다(500대 export 원본 4.1MB → 5.4MB 실측).
+    · **NIC 포트는 Id 로 중복을 걸러낸다**(`nicPorts.dedupNicPorts` — fetchInventory 는 NetworkPorts·Ports 두 경로를 모으고 URL 로만 걸러 iDRAC 7.x 에서 2배가 됐다 —
+      가짜 Redfish 재현, 실장비 응답은 미확인 추정). 링크 판정은 `nicLinkState` 하나 — `Status.State 'Enabled'`·빈 값은 unknown(회색 '?')이다. ⛔ 로 칠하지 말 것.
+    · **서버 부품 요약(`idrac/serverParts.js`)은 표시 전용**이다 — 판정은 `partfault/extract/idrac.js` 를 그대로 쓰고 **partfault DB·전이·알림에 쓰지 않는다**(중앙이 위임 장비를
+      판정하면 같은 부품이 두 번 열린다 — v2.548). 목록 `GET /admin/idrac` 은 `?parts=1` 일 때만 싣는다(V4·관제 콘솔 60초 폴링에는 없다) · 범위로 자른 뒤에만 · 15ms 양보.
+      상세의 '파트 장애' 칸은 DB 파일이 없으면 열지도 만들지도 않는다(`partFaultDbExists`). 인벤토리 없음·불통·Systems 실패·구버전 엣지는 판정 불가(0건이라 말하지 않는다).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
@@ -3853,7 +3891,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **svcmon 변경은 전체 범위 계정만**(AUTHZ-2602-01): 변경 라우트 32개 `fullScopeOnly`. 조회 GET 은 그대로(N-2).
     - **`/\/+$/` 는 O(n²) 이다 — 선형 루프로**(SEC2602-01·04 + normPath): 입력 길이 상한과 함께. ✅ 저장소에 남은 `collector/registry.js` 2곳은 v2.611 `util/trimSlashes.js` 로 고쳤다.
     - ⚠ **정정**: v2.550.3 이 `sanswitch/perfDb.js perfDbStats` 를 '폴링하지 않는 진단 경로' 로 적은 것은 틀렸다 — 설정 화면이 **20초마다** 부른다.
-      이제 MIN/MAX 단독 + COUNT 60초 캐시(`countsAt`)다. '폴링하지 않는다' 고 적기 전에 화면의 호출 주기를 grep 할 것.
+      v2.602 에 MIN/MAX 단독 + COUNT 60초 캐시(`countsAt`)로 줄였고, **v2.728 에 COUNT 자체를 없앴다**(rowid 어림 — 아래 v2.728 SAN 항목). '폴링하지 않는다' 고 적기 전에 화면의 호출 주기를 grep 할 것.
     - **다운로드는 `res.ok` 를 먼저**(WEB2602-01): 409·403 오류 JSON 이 .xlsx 로 저장되던 8곳 → `api.js downloadFile`·`saveResponseAsFile`.
       웹 스윕 테스트가 `.blob()` 을 쓰는 화면 파일의 `res.ok` 확인을 고정한다.
     - **설정 push 감시는 백업과 같은 상태 파일 기준**(EDGE2602-01 — `isRuntimeStateFile` 한 벌 + 설정 지문 무변경 생략).
@@ -4968,6 +5006,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       GROUP BY 했다. 지금은 장비마다·버킷 정배수 6시간 조각마다 묻고 `createYielder` 로 양보한다 — 조각을 버킷 경계에 맞추므로 결과는 예전 한 문장과 **같다**(테스트 대조).
       합성 2,200만 행 실측: 30일 조회 최장 멈춤 **21.0초 → 50ms**, 총 21.0초 → 8.9초. ⚠ 조각 경계를 버킷 정배수에서 떼면 한 그룹이 두 조각에 나뉘어 AVG 가 틀린다(변이 M4).
     · 같은 조회는 합류, 다른 조회는 직렬(`_chain`), 결과 20초 기억(`SANSW_PERF_QUERY_TTL_MS`) · **쓰기(import·save·prune)는 기억을 버린다**(`invalidatePerfQueries` — 세대 번호로 진행 중 결과도 다시 기억하지 않는다).
+      ⚠ v2.728 정정: 기억은 수집 주기만큼이고 **쓰기는 기억을 버리지 않는다**(5분마다 오는 엣지 push 가 매번 버렸다) · 줄은 둘(multi/single) · 진행 중 조회는 비우지 않는다 — 위 v2.728 SAN 항목.
     · ⚠⚠ **재진입 가드는 '끝나지 않는 주기' 를 영원히 붙잡을 수 있다** — pull 주기에 상한(`pullCycleMaxMs`, 기본 max(주기×3, 5분), env `COLLECTOR_PULL_CYCLE_MAX_MS`). 넘긴 주기는 abort 하고
       가드를 풀어 새 주기를 시작한다(가드는 주기 번호 — 늦게 끝난 옛 주기가 새 가드를 풀지 않는다). 버린 주기가 붙잡은 수집 서버(`cycleBusy`)는 새 주기가 건너뛰고, 그것도 상한×2 를 넘기면 놓아준다.
       **새 폴러의 재진입 가드도 같은 질문을 할 것: '이 주기가 영원히 끝나지 않으면 무엇이 멈추는가'.** 상태는 `pullerStatus()`.
