@@ -83,9 +83,9 @@ set COLLECTOR_DATACENTER=Seoul-DC1
 ## Windows 패키지 빌드 (인터넷 되는 빌드 PC에서 1회)
 ```bash
 # 1) Node Windows 런타임 zip 준비
-#    https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-x64.zip
+#    https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip   (런타임 계약: Node 22.x · 검증 22.23.2)
 # 2) 의존성 설치(최초 1회) 후 빌드
 npm run install:all
-packaging/windows/build-collector-win.sh --node-zip /path/node-v22.20.0-win-x64.zip
+packaging/windows/build-collector-win.sh --node-zip /path/node-v22.23.2-win-x64.zip
 # 결과: dist-offline/vmware-portal-win-<버전>-x64.zip
 ```

@@ -8,6 +8,7 @@ import { requireRole } from '../auth/auth.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
+import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -203,7 +204,9 @@ upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip'
     const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body);
     if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
 
-    const result = upgradeFromBundleBytes(req.body, s.installDir, currentVersion(), s.packageName);
+    // v2.730(검토 S-10): 배포자 서명 — 이 엣지가 가진 신뢰 공개키로 설치 전에 검증한다(정책 require 이면 manifest 없이는 설치하지 않는다).
+    const result = upgradeFromBundleBytes(req.body, s.installDir, currentVersion(), s.packageName,
+      { manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-edge' });
     upgradeManager.lastResult = { at: Date.now(), source: 'edge-push', ...result };
     res.json(result);
     if (result.ok && String(req.query.restart) === 'true') setTimeout(() => restartProcess(), 250);

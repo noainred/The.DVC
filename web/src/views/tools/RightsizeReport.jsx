@@ -492,8 +492,8 @@ export default function RightsizeReport({ vm, onClose }) {
                               <td data-sort={p.capGB} className="gd-num">{fmtSize(p.capGB, gdUnit)}</td>
                               <td data-sort={p.usedGB} className="gd-num">{fmtSize(p.usedGB, gdUnit)}</td>
                               <td data-sort={p.freeGB} className="gd-num" style={{ color: '#4ade80' }}>{fmtSize(p.freeGB, gdUnit)}</td>
-                              <td data-sort={rp == null ? -1 : rp} className="gd-num">{rp == null ? '—' : `${rp}%`}</td>
-                              <td data-sort={p.trend?.growthGBPerDay == null ? -9999 : p.trend.growthGBPerDay} className="gd-num">{p.trend?.growthGBPerDay == null ? '—' : p.trend.growthGBPerDay}</td>
+                              <td data-sort={rp == null ? '' : rp} className="gd-num">{rp == null ? '—' : `${rp}%`}</td>
+                              <td data-sort={p.trend?.growthGBPerDay == null ? '' : p.trend.growthGBPerDay} className="gd-num">{p.trend?.growthGBPerDay == null ? '—' : p.trend.growthGBPerDay}</td>
                               <td data-sort={p.trend?.spanDays || 0} className="gd-num">{p.trend?.spanDays ? `${p.trend.spanDays}일` : '—'}</td>
                               <td><span style={{ color: trendLabel(p.trend?.trend).color }}>{trendLabel(p.trend?.trend).label}</span></td>
                               <td data-nosort>{p.advice?.label || '—'}</td>

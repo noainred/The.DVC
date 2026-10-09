@@ -5,9 +5,11 @@
  */
 
 import { Client as SSHClient } from 'ssh2';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
+import { checkPeer } from '../security/peerTrust.js';
 // v2.605(감사 TIM2605-04 — 재현): 'Number(env) || 기본값' 은 음수·2^31 초과를 통과시켜 setTimeout 이 1ms 가 됐다 —
 //   SSH_EXEC_TIMEOUT_MS=3000000000 이면 모든 SSH 수집(스토리지·SAN·PDU·베어메탈)의 exec 가 2ms 만에 '타임아웃' 이었다.
 //   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
@@ -24,11 +26,106 @@ export function execTimeoutMs(v) {
 }
 
 /**
+ * SSH 호스트키 확인(2026-10-09 검토 S-01) — **모든 SSH 연결이 지나는 단일 관문**이다(이 모듈의 connect 와 웹 SSH
+ * 게이트웨이 `proxy/sshGateway.js` 가 같은 함수를 쓴다).
+ *
+ * 왜: ssh2 는 `hostVerifier` 가 없으면 **어떤 호스트키든 받아들인다**(ssh2/lib/protocol/kex.js 'Host accepted by
+ * default'). 경로·DNS 를 가로챈 쪽이 자기 SSH 서버로 접속을 유도하면 포탈은 장비 비밀번호를 그대로 보냈다.
+ * hostVerifier 는 키 교환(KEX) 안에서, **인증(비밀번호 전송) 이전에** 불린다 — 여기서 false 면 ssh2 가
+ * 'Host denied (verification failed)' 로 끊고 비밀번호는 서버에 닿지 않는다(테스트가 서버 쪽 authentication 이벤트 0 으로 고정).
+ *
+ * 판정은 `security/peerTrust.js checkPeer('ssh', host, port, 지문)` 하나다(정책 enforce/observe·승인·거부·변경 감지는
+ * 그 모듈이 소유). 지문은 OpenSSH `ssh-keygen -lf` 와 같은 표기 `SHA256:<base64, 패딩 없음>` — 관리자가 장비 콘솔에서
+ * 직접 확인한 값과 눈으로 대조할 수 있어야 한다.
+ *
+ * ⚠⚠ 거부 오류는 **인증 실패가 아니다** — `code = SSH_HOSTKEY_ERROR_CODE`, 문구에 '인증'·authentication 을 쓰지 않는다.
+ *   수집기들은 `isSshAuthError`·`util/authGuard.js isAuthFailureText` 로 '계정 잠금 방지 주기 정지' 를 판정하는데,
+ *   호스트키 거부를 인증 실패로 읽으면 ① 사용자가 멀쩡한 비밀번호를 고치고 ② 주기 수집이 '인증 정지' 된다
+ *   (자격증명을 바꿔야 풀리는 정지라 키를 승인해도 다시 붙지 않는다). 조치는 '설정에서 지문 승인' 이다.
+ *   문구에 장비 호스트명도 넣지 않는다(이름에 '…-403' 이 있으면 문구 판정 \b403\b 에 걸린다 — 호출자 화면이 장비를 이미 안다).
+ */
+export const SSH_HOSTKEY_ERROR_CODE = 'SSH_HOSTKEY_UNTRUSTED';
+
+/** ssh2 hostVerifier 가 주는 키(Buffer — SSH wire 형식 공개키) → 'SHA256:<base64>'(OpenSSH 표기). */
+export function sshHostKeyFingerprint(key) {
+  if (!Buffer.isBuffer(key) || !key.length) return '';
+  return `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
+}
+
+/** 공개키 blob 의 첫 문자열(키 종류 — 'ssh-ed25519'·'ecdsa-sha2-nistp256' …). 못 읽으면 ''. */
+export function sshHostKeyAlgo(key) {
+  try {
+    if (!Buffer.isBuffer(key) || key.length < 5) return '';
+    const n = key.readUInt32BE(0);
+    if (n < 1 || n > 64 || key.length < 4 + n) return '';
+    const s = key.toString('latin1', 4, 4 + n);
+    return /^[\x21-\x7e]+$/.test(s) ? s : '';
+  } catch { return ''; }
+}
+
+const HOSTKEY_REASON_TEXT = Object.freeze({
+  unknown: '아직 승인되지 않은 장비 키입니다',
+  changed: '승인(또는 관찰)된 키와 다릅니다 — 장비 키가 교체됐거나 다른 서버로 연결됐을 수 있습니다',
+  rejected: '관리자가 거부한 키입니다',
+  'not-approved': '관찰만 된 키입니다(정책이 승인된 지문만 허용으로 바뀌었습니다)',
+  'bad-fingerprint': '서버가 내민 키를 읽지 못했습니다',
+  internal: '장비 신뢰 저장소를 확인하지 못했습니다',
+});
+
+/**
+ * 키 하나를 판정한다(순수에 가까운 래퍼 — 상태 기록은 checkPeer 가 한다). 저장소 오류는 **닫는 쪽**(거부)이다:
+ * 판정을 못 하는데 통과시키면 그것이 곧 무음 TOFU 다.
+ * @returns {{ok:boolean, reason:string, fp:string, algo:string, mode?:string, host:string, port:number}}
+ */
+export function verifySshHostKey(host, port, key) {
+  const fp = sshHostKeyFingerprint(key);
+  const algo = sshHostKeyAlgo(key);
+  const p = Number(port) || 22;
+  try {
+    const r = checkPeer('ssh', host, p, fp, { algo });
+    return { ok: !!r.ok, reason: r.reason, mode: r.mode, fp, algo, host: String(host ?? ''), port: p };
+  } catch (e) {
+    console.warn(`[sshExec] 호스트키 판정 실패(연결 거부): ${e?.message || e}`);
+    return { ok: false, reason: 'internal', fp, algo, host: String(host ?? ''), port: p };
+  }
+}
+
+/** ssh2 `hostVerifier` 옵션 — 판정 결과를 onResult 로 넘긴다(오류 문구를 바꾸는 데 쓴다). */
+export function makeSshHostVerifier(host, port, onResult) {
+  return (key) => {
+    const r = verifySshHostKey(host, port, key);
+    try { onResult?.(r); } catch { /* */ }
+    return r.ok;
+  };
+}
+
+/** 호스트키 거부 오류 — 인증 실패와 구분되는 code·문구(머리말 ⚠⚠). */
+export function sshHostKeyError(r = {}) {
+  const why = HOSTKEY_REASON_TEXT[r.reason] || HOSTKEY_REASON_TEXT.unknown;
+  const err = new Error(
+    `SSH 호스트키 확인 거부 — 이 장비가 내민 키(${r.algo || '종류 미상'} ${r.fp || '지문 없음'})는 ${why}. 비밀번호는 보내지 않았습니다. `
+    + '장비 콘솔 등 별도 경로로 지문을 확인한 뒤 관리자가 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)에서 승인해야 연결됩니다. '
+    + `[${SSH_HOSTKEY_ERROR_CODE}]`,
+  );
+  err.code = SSH_HOSTKEY_ERROR_CODE;
+  err.level = 'host-key';
+  err.hostKey = { fp: r.fp || '', algo: r.algo || '', reason: r.reason || 'unknown', mode: r.mode || null };
+  return err;
+}
+
+/** 오류가 호스트키 거부인가 — 객체(code)·문구(표지) 둘 다 본다(문구만 남은 결과 객체에서도 판정되게). */
+export function isSshHostKeyError(err) {
+  if (!err) return false;
+  if (err.code === SSH_HOSTKEY_ERROR_CODE) return true;
+  return String(err.message ?? err).includes(`[${SSH_HOSTKEY_ERROR_CODE}]`);
+}
+
+/**
  * 구형 장비 호환 알고리즘(v2.421). ssh2 기본 목록은 현대 알고리즘만 켜 두는데, 구형 Fabric OS/iDRAC 등은
  * diffie-hellman-group1-sha1 · ssh-dss · aes-cbc · hmac-sha1-96 만 제공하는 경우가 있어 "no matching key
  * exchange algorithm" 으로 핸드셰이크가 실패한다. 이때 **1회만** 라이브러리가 지원하는 전 목록으로 재시도한다
- * (SSH_LEGACY_FALLBACK=0 으로 끔). 정직한 한계: 이 포탈은 known_hosts 호스트키 검증을 하지 않으므로 알고리즘
- * 하향 자체가 MITM 방어 수준을 낮추는 것은 아니다(원래 없음) — 다만 약한 알고리즘 사용은 추적 로그에 남긴다.
+ * (SSH_LEGACY_FALLBACK=0 으로 끔). 호스트키 확인(S-01, 위 verifySshHostKey)은 이 재시도에도 그대로 걸린다 — 알고리즘
+ * 호환과 키 신뢰는 별개다. 약한 알고리즘 사용은 추적 로그에 남긴다.
  */
 const LEGACY_FALLBACK = process.env.SSH_LEGACY_FALLBACK !== '0';
 const LEGACY_ALGOS = (() => {
@@ -45,6 +142,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
     const conn = new SSHClient();
     const t0 = Date.now();
+    let hk = null; // 호스트키 판정(S-01) — 거부면 error 를 호스트키 오류로 바꾼다
     say(`SSH 접속 시도 → ${host}:${port} 계정=${username || '(없음)'} 인증=${privateKey ? '개인키' : '비밀번호'}${_legacy ? ' [구형 알고리즘 포함 재시도]' : ''} (readyTimeout ${Math.round(readyTimeout / 1000)}s)`);
     // 취소(signal) — 호출자의 장비당 타임아웃이 접속 대기 중에 만료되면 접속 시도 자체를 끊는다.
     const onAbort = () => { try { conn.end(); } catch { /* */ } say('SSH 접속 취소(호출자 타임아웃)', 'error'); reject(new Error('SSH 접속 취소(타임아웃)')); };
@@ -52,6 +150,14 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); say(`SSH 세션 준비 완료(인증 성공) +${Date.now() - t0}ms`); resolve(conn); });
     conn.on('error', (e) => {
       signal?.removeEventListener('abort', onAbort);
+      // S-01: 호스트키 거부는 ssh2 가 'Host denied (verification failed)' 로만 말한다 — 원인(승인 대기·변경·거부)과
+      //   조치(설정에서 승인)를 담은 오류로 바꾼다. 인증 실패로 읽히지 않게 code 가 따로 있다(머리말 ⚠⚠).
+      if (hk && !hk.ok) {
+        const he = sshHostKeyError(hk);
+        say(`SSH 호스트키 거부(${hk.reason}) ${hk.algo} ${hk.fp} +${Date.now() - t0}ms`, 'error');
+        try { conn.end(); } catch { /* */ }
+        return reject(he);
+      }
       say(`SSH 오류: ${e.message}${e.level ? ` (level=${e.level})` : ''}${e.code ? ` code=${e.code}` : ''} +${Date.now() - t0}ms`, 'error');
       // 구형 알고리즘 폴백 — 협상 실패에만, 1회만.
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
@@ -70,7 +176,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     conn.once('error', () => { settled = true; });
     conn.on('close', () => {
       if (trace) say(`SSH 연결 종료 +${Date.now() - t0}ms`, 'debug');
-      if (!settled) { settled = true; signal?.removeEventListener('abort', onAbort); reject(new Error('SSH 연결이 준비 전에 닫혔습니다(서버가 세션을 끊음 — 접속 제한/알고리즘/배너 확인)')); }
+      if (!settled) { settled = true; signal?.removeEventListener('abort', onAbort); reject(hk && !hk.ok ? sshHostKeyError(hk) : new Error('SSH 연결이 준비 전에 닫혔습니다(서버가 세션을 끊음 — 접속 제한/알고리즘/배너 확인)')); }
     });
     if (trace) {
       conn.on('banner', (msg) => say(`서버 배너: ${String(msg).trim().slice(0, 300)}`));
@@ -83,6 +189,11 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       finish(prompts.map(() => password || ''));
     });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
+    // S-01: 호스트키 확인 — 키 교환 안에서, 비밀번호를 보내기 **전에** 판정한다. 이 줄을 지우면 ssh2 가 어떤 키든 받는다.
+    auth.hostVerifier = makeSshHostVerifier(host, port, (r) => {
+      hk = r;
+      if (r.ok && r.reason !== 'approved') say(`SSH 호스트키 ${r.algo} ${r.fp} — ${r.reason === 'observed-new' ? '처음 관찰(미승인 · 관찰 모드)' : '관찰 키(미승인 · 관찰 모드)'}`, 'warn');
+    });
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
     else { auth.password = password; auth.tryKeyboard = true; }
     if (_legacy) auth.algorithms = LEGACY_ALGOS;
@@ -540,6 +651,8 @@ function sftpWriteFile(conn, path, content, mode = 0o644) {
  */
 export function isSshAuthError(err) {
   if (!err) return false;
+  // S-01: 호스트키 거부는 자격증명 문제가 아니다 — 주기 수집을 '인증 정지' 시키면 키를 승인해도 다시 붙지 않는다.
+  if (isSshHostKeyError(err)) return false;
   if (err.level === 'client-authentication') return true;
   return /all configured authentication methods failed|authentication (?:\w+\s+){0,3}fail/i.test(String(err.message || ''));
 }

@@ -97,7 +97,7 @@ export async function runSettingsTarget(target = {}, { timeouts = {}, ctx = {} }
     return finish(target, ts, steps, '');
   }
   if (mode === 'ssh') {
-    steps.ssh = await stepSsh(ip, port, { timeoutMs: timeouts.sshMs || timeouts.httpMs });
+    steps.ssh = await stepSsh(ip, port, { timeoutMs: timeouts.sshMs || timeouts.httpMs, host }); // 2026-10-09 S-01: 이름으로 승인한 키를 찾게
     return finish(target, ts, steps, '');
   }
   if (mode === 'smtp') {

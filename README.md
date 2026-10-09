@@ -173,7 +173,12 @@ NSX/원격접속 scope 갭). 상세 [설치 가이드 §7](docs/INSTALL.md)·[�
 
 ## 빠른 시작
 
+> **Node 런타임 계약**: Node **22.x 만**(`engines` `>=22.5.0 <23`, 검증 버전 **22.23.2** — `.nvmrc`·`.node-version`). Node 24 이상은 지원하지 않습니다 —
+> 장비·엣지 통신(전역 fetch + undici Agent)이 다른 major 에서 실패할 수 있고, npm `engines` 는 실행을 막지 않으므로 포탈이 기동 때 스스로
+> 점검해 `/api/health` 의 `runtime` 과 기동 로그로 알립니다. 상세: [docs/INSTALL.md 부록 A.0](docs/INSTALL.md#a0-런타임-계약--검증된-node-버전).
+
 ```bash
+nvm install && nvm use       # .nvmrc → Node 22.23.2
 npm run install:all          # 루트 + server + web 의존성
 npm run dev                  # API :4000 + 웹 :5173 (핫리로드) → http://localhost:5173
 # 또는 단일 포트(프로덕션)
@@ -617,9 +622,9 @@ packaging/offline/build-package.sh                                   # → dist-
 # CentOS Stream 9 표기 변형
 STAMP=cent9-x64 packaging/offline/build-package.sh
 # 오프라인 빌드(미리 받은 Node)
-packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.20.0-linux-x64.tar.xz
+packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.23.2-linux-x64.tar.xz   # 검증 버전과 같은 Node 를 넣을 것
 # Windows (포탈/수집 에이전트)
-packaging/windows/build-collector-win.sh --node-zip /path/node-v22.20.0-win-x64.zip
+packaging/windows/build-collector-win.sh --node-zip /path/node-v22.23.2-win-x64.zip
 
 # 설치 (Rocky 9, systemd)
 tar -xzf vmware-portal-offline-<버전>-el9-x64.tar.gz && cd vmware-portal-offline-*

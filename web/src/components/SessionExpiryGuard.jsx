@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getToken, setToken, postJson } from '../api.js';
+import { notifyTokenRenewed } from '../remote/tokenRenew.js';
 
 /**
  * 세션 만료 경고 + 연장(v2.428).
@@ -71,6 +72,7 @@ export default function SessionExpiryGuard({ cfg, onExpire }) {
       if (r?.token) {
         // 기존 저장 방식(로컬/세션)을 유지해야 '이 탭만 로그인' 선택이 뒤집히지 않는다.
         setToken(r.token, { persist: !!localStorage.getItem('vmportal.token') });
+        notifyTokenRenewed(r.token); // 2026-10-09 S-04: 열린 원격 콘솔이 옛 토큰 만료 시각에 끊기지 않게
         setLeftMs(null);
         if (r.capped) setErr(''); // 상한까지만 연장된 경우도 성공 — 남은 시간은 다음 틱에 반영된다
       } else {

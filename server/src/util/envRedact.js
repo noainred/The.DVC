@@ -68,3 +68,42 @@ export function mergeRedactedEnv(incoming, current) {
   }
   return { text: lines.join('\n'), restored, dropped };
 }
+
+/**
+ * 2026-10-09 검토 S-10(리드 통합): 보안 스위치는 **호스트 값을 유지**한다 — 백업 복원(웹 화면 경로)이 portal.env 를
+ * 번들 값으로 되돌려 서명 정책·TLS 예외·인증 같은 보호를 약하게 만들지 못하게. 이 키들은 호스트 관리자가 파일을
+ * 직접 고쳐서만 바꾼다. 현재 파일에 그 키가 있으면 현재 값을 쓰고, 없으면 번들의 그 줄을 버린다(보호 기본값으로 둔다).
+ */
+export const HOST_PINNED_ENV = Object.freeze([
+  'UPGRADE_SIGNATURE_POLICY', 'UPGRADE_ALLOW_UNVERIFIED', 'UPGRADE_TLS_INSECURE',
+  'WAN_TLS_INSECURE', 'VC_TLS_REJECT_UNAUTHORIZED', 'HORIZON_TLS_VERIFY', 'NSX_TLS_REJECT_UNAUTHORIZED',
+  'STORAGE_TLS_VERIFY', 'SANSWITCH_TLS_VERIFY', 'SSH_HOSTKEY_POLICY', 'TLS_PEER_POLICY',
+  'AUTH_ENABLED', 'OTP_ROLE_ENFORCE', 'RMA_ALLOW_CUSTOM', 'RMA_ALLOW_SSH', 'RMA_ALLOW_REBOOT', 'UAGMON_ALLOW_PUBLIC',
+]);
+const PINNED_SET = new Set(HOST_PINNED_ENV);
+
+/** @returns {{ text:string, pinned:string[] }} — pinned: 번들 값 대신 현재 값(또는 생략)으로 둔 키 */
+export function pinHostSecurityEnv(incoming, current) {
+  const cur = new Map();
+  for (const line of String(current ?? '').split('\n')) {
+    const m = LINE_RE.exec(line);
+    if (m) cur.set(m[2], line);
+  }
+  const pinned = [];
+  const seen = new Set();
+  const lines = [];
+  for (const line of String(incoming ?? '').split('\n')) {
+    const m = LINE_RE.exec(line);
+    if (!m || !PINNED_SET.has(m[2])) { lines.push(line); continue; }
+    const key = m[2];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (cur.has(key)) { if (cur.get(key) !== line) pinned.push(key); lines.push(cur.get(key)); }
+    else pinned.push(key);
+  }
+  // 현재 파일에만 있는 보안 키는 그대로 이어 붙인다(복원이 호스트가 켠 보호를 지우지 않게).
+  for (const [key, line] of cur) {
+    if (PINNED_SET.has(key) && !seen.has(key)) { lines.push(line); }
+  }
+  return { text: lines.join('\n'), pinned };
+}

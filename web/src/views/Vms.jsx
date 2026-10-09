@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, EntityDetail, GpuBadge } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import { unitText } from './unitText.js';
+import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navAfterError } from './vmPageText.js';
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -19,14 +20,42 @@ export default function Vms({ filters }) {
   // v2.631(감사 WEB2631-10): 서버 정렬 없이 limit 만 주면 스냅샷 순서(vCenter 순)의 앞 1000개가 온다 — 그것을
   //   '상위 1,000개' 라 말하면 거짓이다(뒤 vCenter 의 CPU 100% VM 이 빠진다). 표의 기본 정렬(CPU 사용률 내림차순)과
   //   같은 기준으로 서버가 고르게 하고, 다른 열 정렬은 그 안에서만이라는 사실을 표 위에 적는다.
-  const VM_LIMIT = 1000;
-  const params = { ...filters, limit: VM_LIMIT, sortBy: 'cpuUsagePct', order: 'desc' };
+  // v2.730(검토 I-02): 상한 뒤의 VM 은 서버 페이지(paged=1 → nextCursor)로 이어 받는다 — 전량을 한 번에 그리지 않는다.
+  //   커서 스택은 필터·GPU 선택이 바뀌면 버린다(다른 조건의 커서는 서버가 400 으로 거절한다). 판정·문구는 vmPageText.js.
+  const queryKey = vmPageQueryKey(filters, gpuOnly, gpuType);
+  const [nav, setNav] = useState(() => navFirst(queryKey));
+  const { stack, notice } = navView(nav, queryKey);
+  const cursor = stack.length ? stack[stack.length - 1] : null;
+  const params = { ...filters, limit: VM_PAGE_SIZE, sortBy: 'cpuUsagePct', order: 'desc', paged: '1' };
+  if (cursor) params.cursor = cursor;
   if (gpuOnly) params.gpu = '1';
   if (gpuType) { params.gpu = '1'; params.gpuType = gpuType; }
   const { data, error, loading } = usePolling('/vms', params, 15_000);
+  // 순서 기억 만료(409)·커서 거절(400)은 장애가 아니다 — 첫 페이지로 돌아가고 그 사실을 말한다.
+  const reset = navAfterError(nav, queryKey, error);
+  useEffect(() => {
+    if (reset) setNav(reset);
+  }, [reset?.notice, reset?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (reset) return <Loading />;
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const rows = data?.items || [];
+  const navState = pageNavState(stack, data);
+  const pageSum = vmPageSummary(data);
+  const sortNote = vmPageSortNote(data);
+  const goFirst = () => setNav(navFirst(queryKey));
+  const goPrev = () => setNav(navPrev(nav, queryKey));
+  const goNext = () => { if (navState.nextCursor) setNav(navNext(nav, queryKey, navState.nextCursor)); };
+  const btnStyle = (on) => ({ flex: 'none', padding: '6px 11px', opacity: on ? 1 : 0.45, cursor: on ? 'pointer' : 'default' });
+  const pager = (navState.canPrev || navState.canNext) ? (
+    <div className="flex gap wrap" style={{ alignItems: 'center', flexWrap: 'wrap', margin: '6px 0 10px' }}>
+      <button className="tab" style={btnStyle(navState.canFirst)} disabled={!navState.canFirst} onClick={goFirst}>⏮ 처음</button>
+      <button className="tab" style={btnStyle(navState.canPrev)} disabled={!navState.canPrev} onClick={goPrev}>◀ 이전 페이지</button>
+      <span className="muted" style={{ fontSize: 12 }}>{navState.pageNo.toLocaleString('en-US')}페이지</span>
+      <button className="tab" style={btnStyle(navState.canNext)} disabled={!navState.canNext} onClick={goNext}
+        title={navState.canNext ? '서버에서 다음 페이지를 불러옵니다' : '더 불러올 VM 이 없습니다'}>다음 페이지 불러오기 ▶</button>
+    </div>
+  ) : null;
 
   const showGpuCol = gpuOnly || gpuType || rows.some((v) => v.gpu);
   const columns = [
@@ -91,13 +120,16 @@ export default function Vms({ filters }) {
           </button>
         ))}
       </div>
-      <ResultCount total={data.total} shown={rows.length} label="VM" filtered={Object.keys(filters || {}).length > 0 || gpuOnly || !!gpuType} />
-      {data.total > rows.length && (
-        <div className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>
-          CPU 사용률 높은 순으로 {rows.length.toLocaleString('en-US')}개만 받았습니다 — 다른 열로 정렬하면 이 {rows.length.toLocaleString('en-US')}개 안에서만 정렬됩니다(나머지 {(data.total - rows.length).toLocaleString('en-US')}개는 필터로 좁혀 보세요).
-        </div>
-      )}
+      <ResultCount total={data.total} label="VM" filtered={Object.keys(filters || {}).length > 0 || gpuOnly || !!gpuType} />
+      {notice && <div className="badge amber" style={{ display: 'block', marginBottom: 8, padding: '6px 10px', whiteSpace: 'normal' }}>{resetNoticeText(notice)}</div>}
+      <div className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 6, whiteSpace: 'normal' }}>
+        <div>{pageSum.head}</div>
+        {pageSum.notes.map((n) => <div key={n}>{n}</div>)}
+        {sortNote && <div>{sortNote} 표의 다른 열로 정렬하면 이 페이지 안에서만 정렬됩니다.</div>}
+      </div>
+      {pager}
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
+      {rows.length > 30 && pager}
 
       <IpmsMatches filters={filters} />
       {selected && <EntityDetail type="vm" item={selected} onClose={() => setSelected(null)} />}

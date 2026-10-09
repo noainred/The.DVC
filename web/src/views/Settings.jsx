@@ -45,6 +45,7 @@ import SecretsSettings from './SecretsSettings.jsx'; // 자격증명 저장 방�
 const ApiKeys = lazy(() => import('./ApiKeys.jsx'));                 // 외부 포탈 조회 API 키(v2.562)
 import SecuritySelfCheck from './SecuritySelfCheck.jsx'; // 보안 자가진단(지금 이 서버의 실측 상태, v2.500)
 const Upgrade = lazy(() => import('./Upgrade.jsx'));
+const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장비 신뢰(SSH 호스트키·TLS 인증서 승인) — 2026-10-09 검토 S-01·S-02
 import About from './About.jsx';
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 
@@ -85,6 +86,7 @@ const SUB = [
   { k: 'api-keys', label: '연동 키(외부 포탈 조회 API)', C: ApiKeys, group: 'security' },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
   { k: 'host-access', label: '호스트 접근 제어', C: HostAccessSettings, group: 'security' },
+  { k: 'peer-trust', label: '장비 신뢰(SSH 호스트키·TLS 인증서)', C: PeerTrustSettings, group: 'security' },
   { k: 'security-self-check', label: '보안 자가진단', C: SecuritySelfCheck, group: 'security' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
@@ -112,7 +114,7 @@ const GROUPS = {
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
   usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동을 한 곳에서.' },
-  security: { label: '🛡️ Security', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)를 한 곳에서.' },
+  security: { label: '🛡️ Security', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)·장비 신뢰(SSH 호스트키·TLS 인증서)를 한 곳에서.' },
   log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그를 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);

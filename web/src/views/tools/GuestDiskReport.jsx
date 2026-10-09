@@ -15,6 +15,8 @@ import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { partsUnknownNote, partialVmsNote } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
+import { guestDiskParams, guestDiskCsvPath } from './guestDiskCsv.js'; // 검토 I-10: 조회·CSV 가 같은 조건 · CSV 경로는 /api 이후
+import { downloadFailText } from '../downloadFailText.js';
 
 // ── 단위 변환(값은 GB 기준) ──────────────────────────────────────────────
 const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
@@ -73,14 +75,11 @@ export default function GuestDiskReport({ scope = '' }) {
   const [detailVm, setDetailVm] = useState(null);   // { id, name } — 추이 상세 팝업 대상
   const [form, setForm] = useState(null);
   const reqGen = useRef(0);   // v2.606 WEB2606-07: 마지막 reload 세대
+  const [applied, setApplied] = useState(null); // 검토 I-10: 지금 표를 만든 조건(응답을 받은 조회의 조건) — CSV 가 같은 목록을 내려받게
 
   const reload = useCallback(async (mrStr = minReclaimStr, ratioStr = maxRatioStr, fStr = factorStr) => {
     setError(null);
-    const mr = Number(mrStr);
-    const params = { minReclaimGB: Number.isFinite(mr) ? mr : 0 };
-    if (ratioStr !== '' && Number.isFinite(Number(ratioStr))) params.maxRatioPct = Number(ratioStr);
-    if (fStr !== '' && Number.isFinite(Number(fStr)) && Number(fStr) > 0 && Number(fStr) !== 1) params.usageFactor = Number(fStr);
-    if (scopeRef.current) params.vcenterId = scopeRef.current;
+    const params = guestDiskParams({ minReclaimStr: mrStr, maxRatioStr: ratioStr, factorStr: fStr, scope: scopeRef.current });
     // v2.606(감사 WEB2606-07): 세대 ref — vCenter·필터를 바꿔 reload 가 겹치면 **마지막 요청의 응답만** 반영한다.
     // 느린 '전체' 응답이 뒤에 오면 선택은 vCenter X 인데 표는 전 법인이 됐다(v2.596 WS 규약의 누락).
     const gen = ++reqGen.current;
@@ -88,6 +87,7 @@ export default function GuestDiskReport({ scope = '' }) {
       const r = await fetchJson('/tools/guest-disk', params);
       if (gen !== reqGen.current) return;
       setData(r);
+      setApplied(params);
       setForm({ enabled: !!r.settings?.enabled, intervalHours: r.settings?.intervalHours ?? 12 });
     } catch (e) { if (gen === reqGen.current) setError(e.message); }
   }, [minReclaimStr, maxRatioStr, factorStr]);
@@ -121,12 +121,10 @@ export default function GuestDiskReport({ scope = '' }) {
     try { await putJson('/tools/guest-disk/settings', form); await reload(minReclaimStr); }
     catch (e) { alert(`저장 실패: ${e.message}`); } finally { setBusy(''); }
   };
+  // 검토 I-10: downloadFile 은 '/api 이후 경로' 를 받는다(예전 인자 '/api/tools/…' 는 실제로 /api/api/… 로 나가 CSV 가 실패했다).
+  // 조건은 지금 표를 만든 조회의 조건(applied) — 입력칸에 쳐 두고 '적용' 하지 않은 값이 CSV 에만 들어가지 않게.
   const exportCsv = () => {
-    const q = new URLSearchParams({ minReclaimGB: String(Number(minReclaimStr) || 0) });
-    if (maxRatioStr !== '' && Number.isFinite(Number(maxRatioStr))) q.set('maxRatioPct', String(Number(maxRatioStr)));
-    if (Number.isFinite(Number(factorStr)) && Number(factorStr) > 0 && Number(factorStr) !== 1) q.set('usageFactor', String(Number(factorStr)));
-    if (scope) q.set('vcenterId', scope);
-    downloadFile(`/api/tools/guest-disk/export.csv?${q.toString()}`).catch((e) => alert(e.message));
+    downloadFile(guestDiskCsvPath(applied || guestDiskParams({ minReclaimStr, maxRatioStr, factorStr, scope }))).catch((e) => alert(downloadFailText(e)));
   };
 
   // 콤보용 클러스터 목록 — 서버 인벤토리 기준(선택 vCenter 의 클러스터, 게스트 데이터가 없어도 채워짐).
@@ -196,7 +194,7 @@ export default function GuestDiskReport({ scope = '' }) {
       <td data-sort={r.allocGB} className="gd-num">{fmtSize(r.allocGB, unit)}</td>
       <td data-sort={r.usedGB} className="gd-num">{fmtSize(r.usedGB, unit)}</td>
       <td data-sort={r.freeGB} className="gd-num gd-free" title={uf !== 1 ? `${fmtSize(r.allocGB, unit)} − ${fmtSize(r.usedGB, unit)} × ${uf} (필요 ${fmtSize(r.neededGB, unit)})` : undefined}>{fmtSize(r.freeGB, unit)}</td>
-      <td data-sort={r.ratioPct == null ? -1 : r.ratioPct} className="gd-num">
+      <td data-sort={r.ratioPct == null ? '' : r.ratioPct} className="gd-num">
         <div className="gd-ratio"><span>{pct(r.ratioPct)}</span><i style={{ width: `${Math.min(100, r.ratioPct || 0)}%` }} /></div>
       </td>
       <td data-sort={r.partCount} className="gd-num">{r.partCount}</td>
@@ -344,7 +342,7 @@ export default function GuestDiskReport({ scope = '' }) {
                   <td>{c.corpName || '—'}</td>
                   <td>{c.collectSource === 'site' ? '엣지 수집(push)' : '중앙 직접'}</td>
                   <td data-sort={c.vmCount} className="gd-num">{c.vmCount.toLocaleString()}</td>
-                  <td data-sort={c.lastTs || 0}>{when(c.lastTs)}</td>
+                  <td data-sort={c.lastTs || ''}>{when(c.lastTs)}</td>
                   <td data-nosort>{c.vmCount > 0 ? '✅ 데이터 있음' : (c.collectSource === 'site' ? '⏳ 엣지 push 대기' : '⏳ 미수집')}</td>
                 </tr>
               ))}

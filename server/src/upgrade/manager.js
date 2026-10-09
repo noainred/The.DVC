@@ -12,8 +12,10 @@ import { loadSettings, saveSettings, redactSettings, clampPollMs } from './setti
 import { checkpointConfigDbs } from './dbCheckpoint.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
-  restartProcess, pushBundleToEdge, vstr,
+  restartProcess, pushBundleToEdge, vstr, safeUrlText,
 } from './upgrade.js';
+import { signatureStatus } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
+import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 직전 정상 확인 결과 유지 계약
 import { resolveBundleBytes } from './bundleSource.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { loadCollectors } from '../collector/registry.js';
@@ -49,9 +51,11 @@ class UpgradeManager {
       ...redactSettings(s),
       version: currentVersion(),
       remoteConfigured: Boolean(s.remoteBase),
-      remoteVersionsUrl: s.remoteBase ? `${s.remoteBase.replace(/\/+$/, '')}/versions.json` : null,
+      // v2.730(I-08): 주소의 계정·비밀번호·쿼리(토큰)는 화면에 싣지 않는다.
+      remoteVersionsUrl: s.remoteBase ? safeUrlText(`${s.remoteBase.replace(/\/+$/, '')}/versions.json`) : null,
       lastCheck: this.lastCheck,
       lastResult: this.lastResult,
+      signature: (() => { try { return signatureStatus(); } catch (e) { return { error: String(e?.message || e).slice(0, 200) }; } })(),
     };
   }
 
@@ -73,7 +77,9 @@ class UpgradeManager {
       result.watch = found ? { available: true, version: vstr(found.version), path: found.path } : { available: false };
     }
     if (s.remoteBase) {
-      result.remote = await checkRemote(s.remoteBase, cur, { token: s.token });
+      // v2.730(I-08): 실패한 확인은 직전 정상값을 `lastGood` 으로 **참고만** 싣는다 — available 은 이번 확인 기준(false)이고,
+      //   설치(apply)는 언제나 upgradeFromRemote 가 방금 새로 받은 메타데이터로만 진행한다.
+      result.remote = rememberRemoteCheck(this, await checkRemote(s.remoteBase, cur, { token: s.token }));
     }
     this.lastCheck = result;
     return result;
@@ -131,7 +137,7 @@ class UpgradeManager {
     if (!loadCollectors().some((c) => c.enabled !== false)) return [];
     const bundle = await resolveBundleBytes(this.settings);
     if (!bundle) return [];
-    const results = await pushUpgradeToCollectors(bundle.bytes);
+    const results = await pushUpgradeToCollectors(bundle.bytes, { manifest: bundle.manifest || null }); // v2.730(S-10): 서명 manifest 를 함께
     const ok = results.filter((r) => r.ok).length;
     if (results.length) console.log(`[upgrade] 수집 에이전트 업그레이드 푸시: ${ok}/${results.length} 성공`);
     return results;

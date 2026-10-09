@@ -22,9 +22,8 @@
  *  · 예전에는 공감 한 번도 파일 **전체**를 동기로 다시 직렬화(들여쓰기 1)하고 fsync 했다 — 13MB 에서 공감 1회 145~306ms,
  *    상한 곱(약 1.2GB) 근처에서는 클릭당 초 단위의 이벤트 루프 정지였다(합성 글 500·댓글 20 실측은 fix-G2.md).
  *  · 이제 캐시(메모리)가 진실이고 파일 쓰기는 `WRITE_DELAY_MS`(300ms) 안의 변경을 묶어 **한 번** 비동기로 쓴다(tmp → fsync →
- *    rename). 쓰는 중에 또 바뀌면 끝난 뒤 한 번 더 쓴다. 실패는 console.warn + `bulletinStoreStatus().lastWriteError` 에 남기고
- *    **다음 변경 때** 다시 쓴다(무음 실패 금지 — 자동 재시도 루프는 두지 않는다: 디스크가 계속 거부하면 루프가 곧 부하다).
- *    종료 때는 `util/exitFlush.js` 에 등록한 동기 flush 가 대기분을 쓴다(v2.582 규약 — 자체 process.on 금지).
+ *    rename). 쓰는 중에 또 바뀌면 끝난 뒤 한 번 더 쓴다. 종료 때는 `util/exitFlush.js` 에 등록한 동기 flush 가 대기분을 쓴다
+ *    (v2.582 규약 — 자체 process.on 금지).
  *  · `central/edgeRecord.js createDebouncedWriter` 를 쓰지 않은 이유: 그 헬퍼는 파일을 **상태 파일**로 등록해(`registerStateFile`)
  *    백업 변경 감시·엣지 설정 push 가 그 파일을 설정이 아닌 것으로 본다. 게시판·공지는 사용자 데이터라 백업 번들에는 들어가야
  *    하고(변경 감시 지문에서만 뺀다 — backup/service.js CHANGE_WATCH_EXCLUDE), 그 헬퍼는 fsync·실패 상태도 없다.
@@ -32,8 +31,23 @@
  *    글 작성·수정·댓글 추가가 상한을 넘기게 되면 **409 `board-full`**(bytes·max 동봉)로 거부한다 — 조용히 자르지 않는다.
  *    공감·고정·삭제는 상한과 무관하다(정리가 막히면 안 된다). 크기는 마지막 실제 쓰기의 바이트 + 그 뒤 변경분의 추정 합이고
  *    실제 쓰기마다 다시 맞춘다(전체를 다시 직렬화해 재지 않는다 — 그것이 바로 없애려는 비용이다).
- *  ⚠ 남는 창(정직 기록): 동기 flush(종료·테스트)와 진행 중인 비동기 rename 이 겹치면 세대 번호(`gen`)로 옛 본문의 rename 을
- *    건너뛰지만, 이미 커널에 넘긴 rename 까지는 막지 못한다 — 종료 시 최대 한 묶음(300ms)분이 옛 본문으로 남을 수 있다.
+ *
+ * 리뷰 I-05(그룹 D) — '수용됨' 과 '저장 완료' 를 나눈다:
+ *  · 변경마다 파일별 순번(`seq`)을 올리고, 디스크에 실제로 쓴 마지막 순번을 `savedSeq` 로 든다. 한 변경의 상태는 셋이다 —
+ *    `saved`(savedSeq ≥ 그 순번) · `failed`(아직 안 썼고 가장 최근 쓰기 시도가 실패했다) · `pending`(아직 안 썼고 실패 기록 없음 —
+ *    정상 묶음 창). 화면·점검은 이 판정 하나(`persistOf`)를 쓴다.
+ *  · 글·댓글 작성·수정·삭제와 공지는 라우트가 `waitBulletinPersist` 로 **상한 있는 확인**(PERSIST_WAIT_MS)을 한다 — 묶음 창을
+ *    앞당겨(expedite) 곧바로 쓰고 그 결과를 응답에 싣는다. 공감은 기다리지 않는다(연타 묶음이 v2.727 의 목적이다).
+ *  · 실패하면 **제한된 지수 backoff** 로 다시 쓴다(`RETRY` — 기본 5초부터 두 배씩 최대 6회·상한 5분). 6회를 넘기면 멈추고
+ *    다음 변경·관리자 '지금 다시 저장'(`retryBulletinWrites`)·종료 flush 가 다시 시도한다(무한 루프 금지 — 디스크가 계속 거부하면
+ *    루프가 곧 부하다). 실패 상태는 저장될 때까지 남는다.
+ *  · 실패 기록(`lastWriteError`)은 **사유 코드(ENOSPC 등) + 단계(write·rename …) + 짧은 문구**다 — 오류 원문은 tmp 파일의 절대
+ *    경로를 담으므로 상태에도 콘솔에도 싣지 않는다(코드·syscall 만).
+ *  · ✅ 예전 머리말의 '남는 창'(동기 flush 와 진행 중 비동기 rename 이 겹치면 옛 본문이 새 본문을 덮는다 — 그때 상태는 '저장됨'
+ *    이라 말했다, 재현 확인)을 닫았다: 동기 flush 가 진행 중인 비동기 쓰기의 **tmp 파일을 먼저 지운다**. 아직 커널에 닿지 않은
+ *    rename 은 ENOENT 로 실패하고(대체됨 — 실패로 세지 않는다), 이미 끝난 rename 은 그 뒤 동기 쓰기가 덮는다. rename(2) 는 원자라
+ *    둘 중 하나다.
+ *  · 테스트는 `_setBulletinIoForTest` 로 파일 입출력(mkdir·tmp 쓰기·rename·동기 원자 쓰기)을 바꿔 ENOSPC·EACCES·rename 실패를 주입한다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +70,34 @@ export const NOTICE_LEVELS = Object.freeze(['info', 'warn', 'crit']);
 export const BOARD_MAX_BYTES_DEFAULT = 16 * 1024 * 1024;
 /** v2.727 — 변경을 묶어 쓰는 창(ms). 테스트가 이 값으로 기다린다. */
 export const WRITE_DELAY_MS = 300;
+/** 리뷰 I-05 — 중요한 쓰기(글·댓글·공지)의 라우트가 디스크 저장 결과를 기다리는 상한(ms). 넘기면 'pending' 으로 응답한다. */
+export const PERSIST_WAIT_MS = 3000;
+/** 리뷰 I-05 — 쓰기 실패 뒤 자동 재시도(지수 backoff, 횟수 상한). 기본값만 — 테스트는 `_setBulletinIoForTest` 로 줄인다. */
+export const RETRY_DEFAULTS = Object.freeze({ max: 6, baseMs: 5000, capMs: 300000 });
+let RETRY = { ...RETRY_DEFAULTS };
+
+/**
+ * 쓰기 실패 사유 코드 → 짧은 문구(화면용). 오류 원문(e.message)은 tmp 파일의 절대 경로를 담으므로 상태·응답에 싣지 않는다.
+ * 모르는 코드는 일반 문구 — 코드 자체는 그대로 보인다.
+ */
+export const WRITE_ERROR_TEXT = Object.freeze({
+  ENOSPC: '디스크 공간이 부족합니다',
+  EDQUOT: '디스크 할당량(quota)을 넘었습니다',
+  EACCES: '저장 폴더·파일에 쓰기 권한이 없습니다',
+  EPERM: '저장 폴더·파일에 대한 작업이 허용되지 않습니다',
+  EROFS: '읽기 전용 파일 시스템입니다',
+  EISDIR: '저장 파일 자리에 폴더가 있습니다',
+  ENOTDIR: '설정 폴더 경로의 일부가 폴더가 아닙니다',
+  ENOENT: '설정 폴더를 찾지 못했습니다',
+  EMFILE: '열린 파일이 너무 많습니다',
+  ENFILE: '시스템 전체의 열린 파일이 너무 많습니다',
+  EIO: '디스크 입출력 오류입니다',
+  EBUSY: '파일이 사용 중입니다',
+  EUNKNOWN: '파일을 쓰지 못했습니다(서버 로그에서 원인을 확인하세요)',
+});
+/** 실패 단계 — 화면 문구는 웹이 만든다. */
+export const WRITE_PHASES = Object.freeze(['mkdir', 'write', 'rename', 'flush']);
+
 /**
  * 합계 상한 — env `BOARD_MAX_BYTES`(바이트). 빈 값·비수치는 미지정(= 기본값, v2.618 BUG-1 규약 — `KEY=` 한 줄이 상한을 0 으로
  * 만들지 않게 numOrNull), 0 이하도 기본값, 하한 64KB(그 아래는 글 한 개도 못 쓴다). 매 호출 읽는다(문자열 하나 — 테스트가 바꾼다).
@@ -68,15 +110,53 @@ export function boardMaxBytes() {
 
 const noticesFile = () => path.join(config.configDir, 'notices.json');
 const boardFile = () => path.join(config.configDir, 'board.json');
+/** 라우트가 쓰는 저장소 이름 → 파일·배열 키. */
+const KINDS = Object.freeze({ board: { fileOf: boardFile, key: 'posts' }, notices: { fileOf: noticesFile, key: 'notices' } });
+
+/* ───── 파일 입출력(테스트가 바꿔 끼운다 — 실패 주입) ───── */
+const realIo = Object.freeze({
+  mkdir: (dir) => fs.promises.mkdir(dir, { recursive: true }),
+  /** tmp 파일을 0600 으로 만들어 쓰고 fsync 한다. */
+  writeTmp: async (tmp, body) => {
+    const fh = await fs.promises.open(tmp, 'w', 0o600);
+    try { await fh.writeFile(body, 'utf8'); await fh.sync(); } finally { await fh.close(); }
+    await fs.promises.chmod(tmp, 0o600).catch(() => {});
+  },
+  rename: (from, to) => fs.promises.rename(from, to),
+  unlink: (p) => fs.promises.unlink(p),
+  syncDir: async (dir) => { const d = await fs.promises.open(dir, 'r'); try { await d.sync(); } finally { await d.close(); } },
+  /** 동기 원자 쓰기(종료 flush) — util/atomicWrite.js. */
+  writeFileAtomicSync: (file, body) => atomicWriteFileSync(file, body, { mode: 0o600 }),
+  unlinkSync: (p) => fs.unlinkSync(p),
+});
+let io = realIo;
+
+/**
+ * 테스트 전용 — 파일 입출력의 일부를 바꾸고(실패·지연 주입) 재시도 상수를 줄인다. 인자 없이 부르면 원래대로.
+ * @param {Partial<typeof realIo>|null} over
+ * @param {{ max?: number, baseMs?: number, capMs?: number }} [retry]
+ */
+export function _setBulletinIoForTest(over = null, retry = null) {
+  io = over ? { ...realIo, ...over } : realIo;
+  RETRY = retry ? { ...RETRY_DEFAULTS, ...retry } : { ...RETRY_DEFAULTS };
+}
 
 const caches = new Map(); // file → { list }
-/** file → 쓰기 상태(v2.727). bytes = 마지막 실제 쓰기(또는 로드) 바이트 + 그 뒤 변경분 추정. */
+/**
+ * file → 쓰기 상태(v2.727 + 리뷰 I-05).
+ *  bytes = 마지막 실제 쓰기(또는 로드) 바이트 + 그 뒤 변경분 추정 · seq = 변경 순번 · savedSeq = 디스크에 쓴 마지막 순번 ·
+ *  attemptSeq = 진행 중 쓰기가 담은 순번 · lastFailSeq = 마지막으로 실패한 쓰기가 담은 순번 · unsavedSince = 저장 안 된 가장 오래된 변경 시각.
+ */
 const writers = new Map();
 
 function writerOf(file, key) {
   let w = writers.get(file);
   if (!w) {
-    w = { key, timer: null, writing: false, dirty: false, gen: 0, bytes: null, writes: 0, lastWriteAt: null, lastWriteError: null };
+    w = {
+      key, timer: null, writing: false, dirty: false, gen: 0, bytes: null, writes: 0, lastWriteAt: null, lastWriteError: null,
+      seq: 0, savedSeq: 0, attemptSeq: 0, lastFailSeq: 0, unsavedSince: null, nextUnsavedAt: null,
+      attempts: 0, failCount: 0, failTotal: 0, retryTimer: null, retryAt: null, expedite: false, tmp: null, inflight: null, waiters: [],
+    };
     writers.set(file, w);
   }
   return w;
@@ -111,6 +191,10 @@ function save(file, key, list, deltaBytes = 0) {
   const w = writerOf(file, key);
   caches.set(file, { list });
   w.bytes = Math.max(0, (w.bytes ?? 0) + (Number.isFinite(deltaBytes) ? deltaBytes : 0));
+  const now = Date.now();
+  if (w.seq === w.savedSeq) w.unsavedSince = now;          // 저장 안 된 변경이 이것부터 시작한다
+  if (w.writing && w.seq === w.attemptSeq) w.nextUnsavedAt = now; // 진행 중 쓰기가 담지 못한 첫 변경
+  w.seq += 1;
   scheduleWrite(file);
 }
 
@@ -123,46 +207,116 @@ function scheduleWrite(file) {
   w.timer.unref?.();
 }
 
+function clearRetry(w) {
+  if (w.retryTimer) { clearTimeout(w.retryTimer); w.retryTimer = null; }
+  w.retryAt = null;
+}
+
+const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 const serialize = (w, file) => JSON.stringify({ [w.key]: caches.get(file)?.list || [] });
 const tmpPathOf = (file) => path.join(path.dirname(file), `.${path.basename(file)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
 
-function noteWriteFail(w, file, e) {
-  const message = e?.message || String(e);
-  w.lastWriteError = { at: Date.now(), message };
-  w.dirty = true; // 캐시는 그대로 — 다음 변경·종료 flush 가 다시 쓴다
-  console.warn(`[bulletin] ${path.basename(file)} 저장 실패 — 다음 변경 때 다시 씁니다: ${message}`);
+/** 오류 → 사유 코드(절대 경로가 든 원문은 쓰지 않는다). */
+function errCodeOf(e) {
+  const c = typeof e?.code === 'string' ? e.code : '';
+  return /^E[A-Z0-9]{2,15}$/.test(c) ? c : 'EUNKNOWN';
+}
+
+/** 실패 기록 + 제한된 지수 backoff 재시도 예약. seq = 실패한 쓰기가 담은 순번. */
+function noteWriteFail(w, file, e, phase, seq) {
+  const code = errCodeOf(e);
+  w.lastWriteError = { at: Date.now(), code, phase, message: WRITE_ERROR_TEXT[code] || WRITE_ERROR_TEXT.EUNKNOWN };
+  w.lastFailSeq = Math.max(w.lastFailSeq, seq);
+  w.dirty = true; // 캐시는 그대로 — 재시도·다음 변경·종료 flush 가 다시 쓴다
+  w.failCount += 1; w.failTotal += 1;
+  clearRetry(w);
+  let next = '';
+  if (w.failCount <= RETRY.max) {
+    const delay = Math.min(RETRY.capMs, RETRY.baseMs * 2 ** (w.failCount - 1));
+    w.retryAt = Date.now() + delay;
+    w.retryTimer = setTimeout(() => {
+      w.retryTimer = null; w.retryAt = null;
+      if (writers.get(file) !== w) return;             // 테스트 reset
+      if (w.seq <= w.savedSeq || w.writing || w.timer) return; // 이미 저장됐거나 다른 쓰기가 맡았다
+      runWrite(file);
+    }, delay);
+    w.retryTimer.unref?.();
+    next = `${Math.round(delay / 1000)}초 뒤 다시 씁니다(${w.failCount}/${RETRY.max})`;
+  } else {
+    next = `자동 재시도 ${RETRY.max}회를 다 써서 멈춥니다 — 다음 변경·관리자 '지금 다시 저장'·종료 때 다시 씁니다`;
+  }
+  // 원문(e.message)에는 tmp 파일 절대 경로가 들어 있다 — 코드·syscall 만 남긴다.
+  const sys = typeof e?.syscall === 'string' ? ` ${e.syscall}` : '';
+  console.warn(`[bulletin] ${path.basename(file)} 저장 실패(${code}${sys} · ${phase}) — 미저장 변경 ${Math.max(0, w.seq - w.savedSeq)}건 · ${next}`);
+}
+
+function noteWriteOk(w, seq, body) {
+  w.savedSeq = Math.max(w.savedSeq, seq);
+  w.bytes = Buffer.byteLength(body, 'utf8'); w.writes += 1; w.lastWriteAt = Date.now();
+  w.lastWriteError = null; w.failCount = 0;
+  clearRetry(w);
+  w.unsavedSince = w.seq > w.savedSeq ? (w.nextUnsavedAt ?? Date.now()) : null;
+}
+
+/** 대기자 정리 — 저장됐으면 saved, 그 순번을 담은 쓰기가 실패했으면 failed 로 끝낸다. */
+function settleWaiters(w) {
+  if (!w.waiters.length) return;
+  const keep = [];
+  for (const x of w.waiters) {
+    if (w.savedSeq >= x.seq || (w.lastWriteError && w.lastFailSeq >= x.seq)) { clearTimeout(x.t); x.resolve(persistOfWriter(w, x.seq)); } else keep.push(x);
+  }
+  w.waiters = keep;
 }
 
 function runWrite(file) {
   const w = writers.get(file);
   if (!w) return;
-  w.timer = null;
+  if (w.timer) { clearTimeout(w.timer); w.timer = null; }
   if (w.writing) { scheduleWrite(file); return; } // 이전 쓰기 진행 중 — 끝난 뒤 한 번 더(늦게 끝난 옛 본문이 새 본문을 덮지 않게)
+  clearRetry(w);
   if (!caches.has(file)) { w.dirty = false; return; } // 캐시가 비었으면(테스트 reset) 쓸 것이 없다
   const body = serialize(w, file);
+  const seq = w.seq;
   const gen = ++w.gen;
-  w.dirty = false; w.writing = true;
+  w.dirty = false; w.writing = true; w.attemptSeq = seq; w.nextUnsavedAt = null; w.attempts += 1;
   const tmp = tmpPathOf(file);
+  w.tmp = tmp;
   let failed = false;
-  (async () => {
+  let phase = 'mkdir';
+  w.inflight = (async () => {
     try {
-      await fs.promises.mkdir(path.dirname(file), { recursive: true });
-      const fh = await fs.promises.open(tmp, 'w', 0o600);
-      try { await fh.writeFile(body, 'utf8'); await fh.sync(); } finally { await fh.close(); }
-      await fs.promises.chmod(tmp, 0o600).catch(() => {});
-      if (gen !== w.gen) { await fs.promises.unlink(tmp).catch(() => {}); return; } // 그 사이 동기 flush 가 더 새 본문을 썼다
-      await fs.promises.rename(tmp, file);
-      try { const d = await fs.promises.open(path.dirname(file), 'r'); try { await d.sync(); } finally { await d.close(); } } catch { /* 디렉터리 fsync 미지원 */ }
-      if (gen === w.gen) { w.bytes = Buffer.byteLength(body, 'utf8'); w.writes += 1; w.lastWriteAt = Date.now(); w.lastWriteError = null; }
+      await io.mkdir(path.dirname(file));
+      phase = 'write';
+      await io.writeTmp(tmp, body);
+      if (gen !== w.gen) { await io.unlink(tmp).catch(() => {}); return; } // 그 사이 동기 flush 가 더 새 본문을 썼다
+      phase = 'rename';
+      await io.rename(tmp, file);
+      try { await io.syncDir(path.dirname(file)); } catch { /* 디렉터리 fsync 미지원 */ }
+      if (gen === w.gen) noteWriteOk(w, seq, body);
     } catch (e) {
-      failed = true;
-      noteWriteFail(w, file, e);
-      await fs.promises.unlink(tmp).catch(() => {});
+      // 동기 flush 가 이 쓰기를 대체했다(그 flush 가 tmp 를 지워 rename 이 ENOENT 가 된다) — 실패로 세지 않는다.
+      if (gen === w.gen) { failed = true; noteWriteFail(w, file, e, phase, seq); }
+      await io.unlink(tmp).catch(() => {});
     } finally {
-      w.writing = false;
-      if (w.dirty && !failed) scheduleWrite(file); // 쓰는 동안 바뀐 것은 한 번 더
+      w.writing = false; w.tmp = null; w.inflight = null;
+      const urgent = w.expedite; w.expedite = false;
+      settleWaiters(w);
+      // 쓰는 동안 바뀐 것은 한 번 더. 실패했으면 backoff 가 맡는다 — 단 중요한 쓰기가 기다리고 있으면(urgent, 사람의 동작) 지금 한 번 더 시도해
+      // 그 쓰기가 자기 결과를 받게 한다(루프가 아니다 — urgent 는 매번 지운다).
+      if (w.dirty && (urgent || !failed)) { if (urgent) runWrite(file); else scheduleWrite(file); }
     }
   })();
+}
+
+/**
+ * 이 파일의 대기분을 묶음 창을 기다리지 않고 지금 쓰게 한다(중요한 쓰기·관리자 재시도). 쓰는 중이면 끝난 뒤 곧바로 한 번 더.
+ * 재시도 backoff 를 기다리고 있던 대기분도 지금 다시 쓴다(사람의 동작 — 루프가 아니다).
+ */
+function expediteWrite(file) {
+  const w = writers.get(file);
+  if (!w || w.seq <= w.savedSeq) return;
+  if (w.writing) { w.expedite = true; w.dirty = true; return; }
+  runWrite(file);
 }
 
 /** 대기·진행 중인 쓰기를 동기로 끝낸다(종료 훅·테스트). 실패는 상태·콘솔에 남긴다. @returns 썼는가 */
@@ -170,15 +324,21 @@ function flushSync(file) {
   const w = writers.get(file);
   if (!w) return false;
   if (w.timer) { clearTimeout(w.timer); w.timer = null; }
-  if (!w.dirty && !w.writing) return false;
+  if (!w.dirty && !w.writing && w.seq <= w.savedSeq) return false;
   if (!caches.has(file)) { w.dirty = false; return false; }
   const body = serialize(w, file);
-  w.gen += 1; // 진행 중인 비동기 쓰기의 rename 을 무효화한다(옛 본문으로 덮지 않게)
+  const seq = w.seq;
+  w.gen += 1; // 진행 중인 비동기 쓰기를 무효화한다(옛 본문으로 덮지 않게)
+  // 진행 중인 비동기 쓰기의 tmp 를 먼저 지운다 — 아직 커널에 닿지 않은 rename 은 ENOENT 로 실패하고(대체됨),
+  // 이미 끝난 rename 은 아래 동기 쓰기가 덮는다(rename(2) 는 원자라 둘 중 하나다). 이것이 '옛 본문이 새 본문을 덮는' 창을 닫는다.
+  if (w.writing && w.tmp) { try { io.unlinkSync(w.tmp); } catch { /* 이미 rename 됐거나 아직 만들어지지 않았다 */ } }
   try {
-    atomicWriteFileSync(file, body, { mode: 0o600 });
-    w.dirty = false; w.bytes = Buffer.byteLength(body, 'utf8'); w.writes += 1; w.lastWriteAt = Date.now(); w.lastWriteError = null;
+    io.writeFileAtomicSync(file, body);
+    w.dirty = false;
+    noteWriteOk(w, seq, body);
+    settleWaiters(w);
     return true;
-  } catch (e) { noteWriteFail(w, file, e); return false; }
+  } catch (e) { noteWriteFail(w, file, e, 'flush', seq); settleWaiters(w); return false; }
 }
 
 /** 두 파일의 대기분을 지금 동기로 쓴다(테스트·종료). @returns {{ flushed: number }} */
@@ -189,7 +349,7 @@ export function flushBulletinNow() {
 }
 registerExitFlush('bulletin/store', () => { flushBulletinNow(); });
 
-/** 테스트 전용 — 예약·진행 중인 쓰기가 전부 끝날 때까지 기다린다(상한 안에서). 실패해 대기분(dirty)만 남은 상태는 '끝난 것' 이다. */
+/** 테스트 전용 — 예약·진행 중인 쓰기가 전부 끝날 때까지 기다린다(상한 안에서). 실패해 대기분(dirty)·backoff 재시도만 남은 상태는 '끝난 것' 이다. */
 export async function bulletinIdle({ maxMs = 5_000 } = {}) {
   const t0 = Date.now();
   while ([...writers.values()].some((w) => w.writing || w.timer)) {
@@ -199,8 +359,108 @@ export async function bulletinIdle({ maxMs = 5_000 } = {}) {
   return true;
 }
 
+/* ───── 저장 상태 판정(하나) ───── */
+
+/** 한 변경(순번 seq)의 저장 상태 — saved / failed / pending. 판정 단일 소스. */
+function persistOfWriter(w, seq) {
+  const state = w.savedSeq >= seq ? 'saved' : (w.lastWriteError ? 'failed' : 'pending');
+  return { state, seq, savedSeq: w.savedSeq };
+}
+
+/** 저장소 이름(board·notices) → 쓰기 상태(아직 읽은 적 없으면 null — 이 프로세스에서 바뀐 것이 없다). */
+function writerOfKind(kind) {
+  const k = KINDS[kind];
+  if (!k) throw new Error(`알 수 없는 저장소: ${kind}`);
+  return writers.get(k.fileOf()) || null;
+}
+
+/** 지금까지 받은 마지막 변경 순번(라우트가 쓰기 직후 불러 그 변경의 순번으로 쓴다 — 쓰기는 동기라 사이에 다른 변경이 끼지 않는다). */
+export function bulletinSeq(kind) { return writerOfKind(kind)?.seq ?? 0; }
+
+/** 한 변경의 저장 상태(기다리지 않는다). */
+export function bulletinPersistOf(kind, seq) {
+  const w = writerOfKind(kind);
+  if (!w) return { state: 'saved', seq: 0, savedSeq: 0 };
+  return persistOfWriter(w, seq);
+}
+
 /**
- * 저장소 상태(v2.727) — 파일별 추정 크기·상한·대기/진행·실제 쓰기 횟수·마지막 실패. `lastWriteError` 는 가장 최근 실패(어느 파일이든).
+ * 한 변경이 디스크에 닿을 때까지(또는 그 변경을 담은 쓰기가 실패할 때까지) 기다린다 — 상한 maxMs. 묶음 창을 앞당긴다.
+ * 상한을 넘기면 그때의 상태(대개 pending)를 돌려준다 — 거부하지 않는다(변경은 이미 받아들여졌다).
+ */
+export function waitBulletinPersist(kind, seq, { maxMs = PERSIST_WAIT_MS, expedite = true } = {}) {
+  const w = writerOfKind(kind);
+  if (!w || w.savedSeq >= seq) return Promise.resolve(w ? persistOfWriter(w, seq) : { state: 'saved', seq: 0, savedSeq: 0 });
+  if (expedite) expediteWrite(KINDS[kind].fileOf());
+  if (w.savedSeq >= seq || (w.lastWriteError && w.lastFailSeq >= seq && !w.writing)) return Promise.resolve(persistOfWriter(w, seq));
+  return new Promise((resolve) => {
+    const x = { seq, resolve, t: null };
+    x.t = setTimeout(() => {
+      w.waiters = w.waiters.filter((y) => y !== x);
+      resolve(persistOfWriter(w, seq));
+    }, Math.max(0, Math.trunc(Number(maxMs) || 0)));
+    x.t.unref?.();
+    w.waiters.push(x);
+  });
+}
+
+/**
+ * 저장소 건강 — 화면 배너·관리자 상세가 쓴다. `admin:false` 면 상태·시각만(사유 코드·횟수는 관리자 상세다).
+ * 경로·파일 내용·계정명은 싣지 않는다.
+ */
+function healthOfWriter(w, { admin = false, now = Date.now() } = {}) {
+  if (!w) return { state: 'saved', loaded: false, unsavedSince: null, retrying: false, retryExhausted: false };
+  const p = persistOfWriter(w, w.seq);
+  const retrying = !!w.retryTimer;
+  const out = {
+    state: p.state, loaded: true, unsavedSince: p.state === 'saved' ? null : w.unsavedSince,
+    retrying, retryExhausted: p.state === 'failed' && !retrying && w.failCount > RETRY.max,
+    writing: w.writing,
+  };
+  if (!admin) return out;
+  return {
+    ...out,
+    unsaved: Math.max(0, w.seq - w.savedSeq),
+    lastSavedAt: w.lastWriteAt, lastWriteError: w.lastWriteError ? { ...w.lastWriteError } : null,
+    failCount: w.failCount, failTotal: w.failTotal, attempts: w.attempts, writes: w.writes,
+    nextRetryAt: retrying ? w.retryAt : null, retryMax: RETRY.max,
+    unsavedForMs: out.unsavedSince ? Math.max(0, now - out.unsavedSince) : null,
+  };
+}
+
+/** 두 저장소의 건강(라우트용). */
+export function bulletinHealth({ admin = false } = {}) {
+  return { board: healthOfWriter(writerOfKind('board'), { admin }), notices: healthOfWriter(writerOfKind('notices'), { admin }) };
+}
+
+/**
+ * 관리자 '지금 다시 저장' — 저장 안 된 변경이 있는 파일마다 backoff 를 초기화하고 지금 다시 쓴 뒤 결과를 기다린다(상한 maxMs).
+ * 진행 중인 쓰기가 있으면 그것이 끝난 뒤 곧바로 한 번 더 쓴다(동시에 두 번 쓰지 않는다 — 단일 비행 보존).
+ * @returns {{ kind, attempted, state, code? }[]}
+ */
+export async function retryBulletinWrites({ maxMs = PERSIST_WAIT_MS } = {}) {
+  const out = [];
+  for (const kind of Object.keys(KINDS)) {
+    const w = writerOfKind(kind);
+    if (!w || w.seq <= w.savedSeq) { out.push({ kind, attempted: false, state: 'saved' }); continue; }
+    w.failCount = 0; clearRetry(w);
+    const target = w.seq;
+    const deadline = Date.now() + maxMs;
+    // 진행 중인 쓰기는 버튼을 누르기 전에 시작된 것이다 — 끝나기를 기다린 뒤 **한 번** 새로 쓴다(동시에 두 번 쓰지 않는다 — 단일 비행).
+    while (w.writing && Date.now() < deadline) {
+      const left = Math.max(1, deadline - Date.now());
+      await Promise.race([w.inflight || sleep(10), sleep(left)]);
+    }
+    if (w.seq > w.savedSeq && !w.writing) runWrite(KINDS[kind].fileOf());
+    const r = await waitBulletinPersist(kind, target, { maxMs: Math.max(1, deadline - Date.now()), expedite: false });
+    out.push({ kind, attempted: true, state: r.state, ...(w.lastWriteError && r.state !== 'saved' ? { code: w.lastWriteError.code } : {}) });
+  }
+  return out;
+}
+
+/**
+ * 저장소 상태(v2.727 + 리뷰 I-05) — 파일별 추정 크기·상한·대기/진행·실제 쓰기 횟수·마지막 실패·미저장 변경 수·재시도.
+ * `lastWriteError` 는 가장 최근 실패(어느 파일이든) — 사유 코드·단계·짧은 문구만이고 절대 경로·원문은 없다.
  * 화면·점검이 '저장이 안 되고 있다' 를 볼 수 있게 — 조용한 실패 금지.
  */
 export function bulletinStoreStatus() {
@@ -208,17 +468,30 @@ export function bulletinStoreStatus() {
   let lastWriteError = null;
   for (const [file, w] of writers) {
     const name = path.basename(file);
+    const h = healthOfWriter(w, { admin: true });
     files[name] = {
       bytes: w.bytes, max: w.key === 'posts' ? boardMaxBytes() : null,
-      pending: !!(w.dirty || w.timer), writing: w.writing, writes: w.writes, lastWriteAt: w.lastWriteAt, lastWriteError: w.lastWriteError,
+      state: h.state, unsaved: h.unsaved, unsavedSince: h.unsavedSince,
+      pending: !!(w.dirty || w.timer || h.unsaved > 0), writing: w.writing, writes: w.writes, lastWriteAt: w.lastWriteAt, lastSavedAt: w.lastWriteAt,
+      lastWriteError: h.lastWriteError, failCount: w.failCount, attempts: w.attempts,
+      retry: { scheduled: h.retrying, nextAt: h.nextRetryAt, exhausted: h.retryExhausted, max: RETRY.max },
     };
     if (w.lastWriteError && (!lastWriteError || w.lastWriteError.at > lastWriteError.at)) lastWriteError = { file: name, ...w.lastWriteError };
   }
-  return { delayMs: WRITE_DELAY_MS, files, lastWriteError };
+  return { delayMs: WRITE_DELAY_MS, persistWaitMs: PERSIST_WAIT_MS, retry: { ...RETRY }, files, lastWriteError };
 }
 
 /** 테스트 전용 — 대기분을 쓰고 캐시를 비운다(CONFIG_DIR 를 바꾼 뒤 다시 읽게). */
-export function _resetBulletinCache() { flushBulletinNow(); caches.clear(); writers.clear(); }
+export function _resetBulletinCache() {
+  flushBulletinNow();
+  for (const w of writers.values()) {
+    clearRetry(w);
+    if (w.timer) { clearTimeout(w.timer); w.timer = null; }
+    for (const x of w.waiters) { clearTimeout(x.t); x.resolve(persistOfWriter(w, x.seq)); }
+    w.waiters = [];
+  }
+  caches.clear(); writers.clear();
+}
 
 /** JSON 으로 쓰였을 때의 바이트(추정 변화량 계산용). */
 const jsonBytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');

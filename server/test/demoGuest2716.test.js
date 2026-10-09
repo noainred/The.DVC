@@ -94,6 +94,8 @@ test('② live 모드: 데모 계정은 예전처럼 viewer', () => {
 });
 
 test('③ WS SSH/RDP 게이트웨이는 데모 계정을 거부한다', () => {
+  // 2026-10-09 S-04(그룹 H): 판정 본문은 sshGateway.js remoteUserIssue 하나 — RDP 게이트웨이는 그 함수를 쓴다(실행 검증 test/rvH_remoteSession.test.js).
+  assert.match(fs.readFileSync(path.join(SRC, 'proxy/sshGateway.js'), 'utf8'), /user\.mustEnrollOtp \|\| user\.demoGuest/);
   for (const f of ['proxy/sshGateway.js', 'proxy/guacdTunnel.js'])
-    assert.match(fs.readFileSync(path.join(SRC, f), 'utf8'), /user\.mustEnrollOtp \|\| user\.demoGuest/, f);
+    assert.match(fs.readFileSync(path.join(SRC, f), 'utf8'), /const deny = remoteUserIssue\(user\);/, f);
 });

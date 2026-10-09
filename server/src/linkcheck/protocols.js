@@ -17,6 +17,37 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import { failKindOfCode } from './phases.js';
+import { sshHostKeyFingerprint, sshHostKeyAlgo } from '../proxy/sshExec.js';
+import { peekPeer } from '../security/peerTrust.js';
+
+/**
+ * 호스트키 관찰(2026-10-09 S-01, 그룹 H) — 이 점검은 **인증하지 않으므로 키를 거부하지 않는다**(보낼 비밀이 없다).
+ * 대신 서버가 내민 키의 지문을 결과에 싣고, 장비 신뢰 저장소에서 그 키가 어떤 상태인지(승인·관찰·변경·미승인)를
+ * **읽기만** 해서 함께 말한다(peekPeer — checkPeer 를 부르면 5분 주기 점검이 IP 키로 '관찰' 항목을 쌓고 observe 모드의
+ * 첫 신뢰를 점검이 대신 해 버린다). 'changed' 면 수집기 연결이 거부될 것이라는 뜻이라 점검 화면에서 먼저 보인다.
+ * 조회는 등록 이름(host)이 있으면 그것으로, 없으면 IP 로 한다(수집기는 등록된 이름으로 접속하므로 그 키가 맞다).
+ */
+const HOSTKEY_TRUST_NOTE = Object.freeze({
+  approved: '승인된 키와 같습니다',
+  observed: '관찰만 된 키입니다(아직 승인되지 않음)',
+  changed: '⚠ 승인(또는 관찰)된 키와 다릅니다 — 이 장비의 수집 연결은 거부됩니다',
+  pending: '승인 대기 중인 키입니다',
+  rejected: '⚠ 관리자가 거부한 키입니다',
+  unknown: '장비 신뢰 저장소에 없는 키입니다',
+});
+function hostKeyInfo(key, lookups, port) {
+  const fp = sshHostKeyFingerprint(key);
+  if (!fp) return null;
+  const algo = sshHostKeyAlgo(key);
+  let peek = null;
+  for (const h of lookups) {
+    if (!h) continue;
+    try { peek = peekPeer('ssh', h, port, fp); } catch { peek = null; }
+    if (peek && peek.state !== 'unknown') break;
+  }
+  const trust = peek?.state || 'unknown';
+  return { fp, algo, trust, note: HOSTKEY_TRUST_NOTE[trust] || '' };
+}
 
 const t = (v) => String(v ?? '').trim();
 const ms = (t0) => Date.now() - t0;
@@ -25,7 +56,7 @@ const ms = (t0) => Date.now() - t0;
  * SSH — **협상까지**. 반환의 `banner`·`kex`·`serverKey` 가 이슈 분석 자료다.
  * @param {string} ip   DNS 단계가 검사한 주소
  */
-export async function stepSsh(ip, port, { timeoutMs = 12_000 } = {}) {
+export async function stepSsh(ip, port, { timeoutMs = 12_000, host = '' } = {}) {
   const t0 = Date.now();
   let Client;
   try { ({ Client } = await import('ssh2')); }
@@ -35,6 +66,7 @@ export async function stepSsh(ip, port, { timeoutMs = 12_000 } = {}) {
     let done = false;
     const conn = new Client();
     let ident = '';
+    let hostKey = null;
     const fin = (r) => {
       if (done) return; done = true;
       try { conn.end(); } catch { /* */ }
@@ -55,7 +87,8 @@ export async function stepSsh(ip, port, { timeoutMs = 12_000 } = {}) {
         banner: ident.slice(0, 200),
         kex: t(info?.kex), serverHostKey: t(info?.serverHostKey),
         cipher: t(info?.cs?.cipher) || t(info?.encrypt),
-        note: '인증은 시도하지 않았습니다(협상까지만).',
+        ...(hostKey ? { hostKey } : {}),
+        note: `인증은 시도하지 않았습니다(협상까지만).${hostKey ? ` 호스트키 ${hostKey.fp} — ${hostKey.note}.` : ''}`,
       });
     });
     conn.on('greeting', (g) => { ident = t(g) || ident; });
@@ -80,6 +113,8 @@ export async function stepSsh(ip, port, { timeoutMs = 12_000 } = {}) {
         host: ip, port, readyTimeout: timeoutMs,
         // 인증 수단을 **주지 않는다**. handshake 에서 끊으므로 인증 단계에 도달하지 않는다.
         username: 'linkcheck-probe', tryKeyboard: false,
+        // 키를 관찰만 한다 — 인증 전 handshake 에서 끊으므로 비밀이 나가지 않는다(위 hostKeyInfo 머리말).
+        hostVerifier: (key) => { try { hostKey = hostKeyInfo(key, [host, ip], port); } catch { hostKey = null; } return true; },
       });
     } catch (e) { clearTimeout(timer); fin({ ok: false, failKind: 'unknown', error: String(e?.message || e).slice(0, 200) }); }
   });

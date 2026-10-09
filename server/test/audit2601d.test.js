@@ -19,6 +19,9 @@ import { createRequire } from 'node:module';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2601d-'));
 process.env.CONFIG_DIR = TMP;
+// 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가
+// 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
+process.env.SSH_HOSTKEY_POLICY = 'observe';
 
 const { parseNvidiaSmiCsv, gpuLostError } = await import('../src/gpu/guestops.js');
 const { detectPhysicalGpu, collectVmGpuSsh, parseGpuNameLines } = await import('../src/gpu/sshCollect.js');
@@ -31,10 +34,10 @@ const { mergePulledGpuGuestSettings, applyPulledGpuGuestSettings, saveGpuGuestSe
 
 const require = createRequire(import.meta.url);
 const ssh2 = require('ssh2');
+// ⚠ ssh2.utils.generateKeyPairSync('ed25519') 는 자기 파서가 거부하는 키를 0.5% 만든다(v2.590 CI 사고) — EC SEC1 PEM.
+const TEST_HOST_KEY = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
 async function fakeSsh(handler, bindIp = '127.0.0.1') {
-  // ⚠ ssh2.utils.generateKeyPairSync('ed25519') 는 자기 파서가 거부하는 키를 0.5% 만든다(v2.590 CI 사고) — EC SEC1 PEM.
-  const hostKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
-  const srv = new ssh2.Server({ hostKeys: [hostKey] }, (client) => {
+  const srv = new ssh2.Server({ hostKeys: [TEST_HOST_KEY] }, (client) => {
     client.on('authentication', (ctx) => ctx.accept());
     client.on('ready', () => client.on('session', (accept) => {
       const s = accept();

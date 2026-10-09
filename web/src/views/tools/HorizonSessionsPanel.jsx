@@ -31,6 +31,7 @@ import {
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
 import HorizonUsagePanel from './HorizonUsagePanel.jsx';   // v2.684 앱·데스크톱별 사용 현황
+import { createHistLoader, histView } from './horizonHistLoader.js'; // 검토 I-09: 추이는 최신 요청만 반영
 
 const DAYS = [1, 7, 30, 90];
 const POLL_MS = 60_000;     // 수집 주기가 기본 5분 — 15초 폴링은 낭비다(CLAUDE.md V4 규약)
@@ -63,8 +64,15 @@ export default function HorizonSessionsPanel() {
   const [setOpen, setSetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [hist, setHist] = useState(null);
-  const [histErr, setHistErr] = useState('');
+  // 검토 I-09: 추이 응답은 요청 키(days·serverId)와 함께 둔다 — 늦게 온 이전 요청·다른 선택의 응답은 그리지 않는다.
+  const [histState, setHistState] = useState(null);
+  const histLoader = useMemo(
+    () => createHistLoader((p, signal) => fetchJson('/tools/horizon-sessions/history', p, signal), setHistState),
+    [],
+  );
+  useEffect(() => () => histLoader.cancel(), [histLoader]);                       // unmount — 진행 중 요청을 끊고 결과를 버린다
+  useEffect(() => { histLoader.dropUnless(days, serverId); }, [histLoader, days, serverId]); // 선택이 바뀌면 다른 조건의 요청을 끊는다
+  const { hist, err: histErr, loading: histLoading } = histView(histState, days, serverId);
 
   const servers = data?.servers || [];
   const labels = data?.kindLabels || {};
@@ -79,11 +87,7 @@ export default function HorizonSessionsPanel() {
   const canShowNames = showNames || data?.settings?.showNamesInList === true;
   const since = hist ? sinceNote({ span: hist.span, retentionDays: hist.retentionDays, now: hist.now }) : null;
 
-  const loadHist = async (d = days, sid = serverId) => {
-    setHistErr(''); setHist(null);
-    try { setHist(await fetchJson('/tools/horizon-sessions/history', { serverId: sid, days: d })); }
-    catch (e) { setHistErr(e?.message || String(e)); }
-  };
+  const loadHist = (d = days, sid = serverId) => histLoader.load(d, sid);
   const collectNow = async () => {
     if (busy) return;
     setBusy(true); setMsg('');
@@ -151,7 +155,7 @@ export default function HorizonSessionsPanel() {
       <div>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>
           Connection Server 별
-          {picked && <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 6 }} onClick={() => { setServerId(''); setHist(null); }}>전체 보기</button>}
+          {picked && <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 6 }} onClick={() => setServerId('')}>전체 보기</button>}
         </div>
         <div className="table-wrap">
           <STable className="v3-table">
@@ -164,7 +168,7 @@ export default function HorizonSessionsPanel() {
             <tbody>
               {servers.map((s) => (
                 <tr key={s.serverId} style={{ background: s.serverId === serverId ? 'var(--hover)' : undefined }}>
-                  <td style={{ cursor: 'pointer' }} onClick={() => { setServerId(s.serverId === serverId ? '' : s.serverId); setHist(null); }}><b>{s.name || s.serverId}</b></td>
+                  <td style={{ cursor: 'pointer' }} onClick={() => setServerId(s.serverId === serverId ? '' : s.serverId)}><b>{s.name || s.serverId}</b></td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{hostText(s.host)}</td>
                   <td data-sort={s.kind}>
                     {/* ⚠ 실패 사유를 툴팁에만 두지 말 것(v2.516) — 버튼으로 상세를 연다. */}
@@ -176,7 +180,7 @@ export default function HorizonSessionsPanel() {
                   <td data-sort={String(s.users ?? '')}>{s.users ?? '—'}</td>
                   <td data-sort={String(s.sessions ?? '')}>{s.sessions ?? '—'}</td>
                   <td style={{ fontSize: 11.5 }}>{`${s.connected ?? '—'} / ${s.disconnected ?? '—'} / ${s.pending ?? '—'}`}</td>
-                  <td data-sort={String(s.ts || 0)}>{agoText(s.ts, data?.now)}</td>
+                  <td data-sort={s.ts ? String(s.ts) : ''}>{agoText(s.ts, data?.now)}</td>
                   <td style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'normal', maxWidth: 320 }}><BoldText text={provenanceText(s) || '—'} /></td>
                 </tr>
               ))}
@@ -240,7 +244,8 @@ export default function HorizonSessionsPanel() {
             <button key={d} className="tab" style={{ padding: '2px 9px', fontSize: 11, opacity: d === days ? 1 : 0.6 }}
               onClick={() => { setDays(d); loadHist(d, serverId); }}>{d}일</button>
           ))}
-          {!hist && !histErr && <button className="tab" style={{ padding: '2px 9px', fontSize: 11 }} onClick={() => loadHist(days, serverId)}>불러오기</button>}
+          {!hist && !histErr && !histLoading && <button className="tab" style={{ padding: '2px 9px', fontSize: 11 }} onClick={() => loadHist(days, serverId)}>불러오기</button>}
+          {histLoading && <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>불러오는 중…</span>}
         </div>
         {histErr && <ErrorBox error={histErr} inline />}
         {since && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}><BoldText text={since.text} /></div>}

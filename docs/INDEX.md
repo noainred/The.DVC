@@ -222,6 +222,7 @@
 | [MAINTENANCE-PAGE.md](MAINTENANCE-PAGE.md) | 업데이트·재시작 안내 페이지 (다운타임 안내) |
 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) | 네트워크 통신 · 방화벽 오픈 가이드 (The DVC Portal) |
 | [PERF-AUDIT-2026-09-13.md](PERF-AUDIT-2026-09-13.md) | 성능·보안 전수조사 (2026-09-13, v2.503.0) |
+| [RELEASE-SIGNING.md](RELEASE-SIGNING.md) | 릴리스 서명(배포자 서명 검증) |
 | [RELEASES.md](RELEASES.md) | 릴리스/다운로드 — GitHub Releases 가이드 |
 | [REVIEW-2026-09-07.md](REVIEW-2026-09-07.md) | 전체 소스 리뷰 (2026-09-07, v2.409 ~ v2.415 신규 모듈 중심) — 결과와 남은 개선 포인트 |
 | [SERVICE-HUB.md](SERVICE-HUB.md) | 글로벌 데이터센터 서비스 허브 (pyportal) — 운영 가이드 |
@@ -232,5 +233,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 92개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 93개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

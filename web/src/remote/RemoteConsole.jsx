@@ -5,6 +5,7 @@ import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
 import { getToken, postJson } from '../api.js';
 import { sshDataFrames, sshCloseReasonText } from './sshSend.js';
+import { onTokenRenewed, tokenAckText } from './tokenRenew.js';
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -26,6 +27,11 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
 
   const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
   const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; try { clearTimeout(connTimerRef.current); } catch { /* */ } connTimerRef.current = null; };
+  // 2026-10-09 S-04: 세션 연장 토큰을 열린 연결에 보낸다(서버가 옛 토큰 만료 시각에 닫지 않게). 연결이 없으면 아무것도 안 한다.
+  useEffect(() => onTokenRenewed((token) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'token', token })); } catch { /* 닫히는 중 */ } }
+  }), []);
   useEffect(() => () => { stopTimer(); try { roRef.current?.disconnect(); } catch { /* */ } try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
   // Auto-connect when duplicated (credentials carried over).
   useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
@@ -69,6 +75,8 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
         try {
           const j = JSON.parse(s);
           if (j && j.type === 'hostname') { onHostname?.(j.name); return; }
+          // 2026-10-09 S-04: 토큰 교체 응답 — 터미널 출력으로 흘리지 않는다. 거부면 사유를 한 줄로 알린다.
+          if (j && j.type === 'token-ack') { const w = tokenAckText(j); if (w) { setStatus(w); term.write(`\r\n\x1b[33m${w}\x1b[0m\r\n`); } return; }
           if (j && j.type === 'status') {
             setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`);
             const t = j.text || '';
@@ -141,12 +149,18 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
 export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
   const elRef = useRef(null);
   const clientRef = useRef(null);
+  const tunnelRef = useRef(null); // 2026-10-09 S-04: 세션 연장 토큰을 보낼 터널
   const kbdRef = useRef(null); // document 전역 키보드 핸들러 — 언마운트 시 반드시 해제(리스너 누수 방지, 감사 M21)
   const activeRef = useRef(active);
   const [creds, setCreds] = useState(initialCreds && initialCreds.username ? initialCreds : { username: '', password: '', domain: '' });
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('');
   useEffect(() => { activeRef.current = active; }, [active]);
+  // 2026-10-09 S-04: 세션 연장 토큰을 RDP 터널에도 보낸다(서버가 'dvc-token' 명령을 소비 — guacd 로 넘기지 않는다).
+  useEffect(() => onTokenRenewed((token) => {
+    const t = tunnelRef.current;
+    if (t && clientRef.current) { try { t.sendMessage('dvc-token', token); } catch { /* 닫히는 중 */ } }
+  }), []);
   useEffect(() => () => {
     try { clientRef.current?.disconnect(); } catch { /* */ }
     // Guacamole.Keyboard는 document에 직접 addEventListener하므로 disconnect로는 제거되지 않는다 —
@@ -171,6 +185,7 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
     const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
     const client = new Guacamole.Client(tunnel);
     clientRef.current = client;
+    tunnelRef.current = tunnel;
     setTimeout(() => {
       elRef.current.appendChild(client.getDisplay().getElement());
       client.onstatechange = (s) => setStatus(['초기화', '연결 중', '대기', '연결됨', '연결 종료', '오류'][s] || String(s));

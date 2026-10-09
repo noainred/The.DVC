@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+process.env.COLLECTOR_HTTP_ALLOW = '*'; // 2026-10-09 S-09 이후 원격 http 등록은 예외·허용 목록만 — 이 테스트는 평문 픽스처를 쓴다
 
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-2503-'));
 process.env.CONFIG_DIR = CFG;

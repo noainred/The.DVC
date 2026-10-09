@@ -58,6 +58,16 @@ if [[ -L "$USERS_LINK" ]]; then
   fi
 fi
 
+# 2026-10-09 검토 S-10: 패키지 서명 확인 도구 링크도 같은 규칙(이 설치본을 가리킬 때만).
+VERIFY_LINK="/usr/local/bin/vmware-portal-verify"
+if [[ -L "$VERIFY_LINK" ]]; then
+  if [[ "$(readlink "$VERIFY_LINK")" == "$PREFIX/app/release-verify.sh" ]]; then
+    rm -f "$VERIFY_LINK" && echo "==> 패키지 서명 확인 도구 링크 제거: $VERIFY_LINK"
+  else
+    echo "==> 패키지 서명 확인 도구 링크 유지: $VERIFY_LINK → $(readlink "$VERIFY_LINK") (이 설치본이 아님)"
+  fi
+fi
+
 echo "==> 앱/런타임 제거: $PREFIX"
 rm -rf "$PREFIX" "$PREFIX".bak.* 2>/dev/null || true
 

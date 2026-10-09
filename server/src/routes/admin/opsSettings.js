@@ -157,7 +157,7 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
   // 정책 저장 직후 기존 저장분 일괄 전환(평문→암호화/암호화→평문/레벨·알고리즘 변경 재봉인).
   // 자기서술 암호문이라 부분 실패해도 혼재 상태로 정상 동작 — 실패 파일은 응답으로 보고.
   const mig = migrateSecretFiles(after);
-  const lbl = (p) => (p.mode === 'encrypted' ? `암호화(L${p.level}${p.algorithm ? `·${p.algorithm}` : ''})` : '평문');
+  const lbl = (p) => (p.locked ? '정책 읽기 실패(잠금)' : p.mode === 'encrypted' ? `암호화(L${p.level}${p.algorithm ? `·${p.algorithm}` : ''})${p.recovered ? '(복구값)' : ''}` : `평문${p.recovered ? '(복구값)' : ''}`); // S-07: 잠금·복구 상태를 '평문' 으로 적지 않는다
   logAudit({
     user: username, action: '자격증명 저장 방식 변경', target: 'secrets/policy',
     detail: `${lbl(before)} → ${lbl(after)} · 전환 파일 ${mig.files.filter((f) => f.changed).length}/${mig.files.length}${mig.errors.length ? ` · 실패 ${mig.errors.length}` : ''}`,

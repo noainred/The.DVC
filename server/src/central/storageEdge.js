@@ -54,14 +54,97 @@ export function narrowStoragePower(ex, now = Date.now()) {
   return narrowed;
 }
 
+/**
+ * v2.730(검토 I-03): OneFS 영역 수집 요약(`extra.areas` + `extra.areas*`)을 **아는 필드만** 받는다. 예전에는 그대로 저장돼
+ *   원소의 `error:{…}` 하나가 장비 상세 창을 React #31 로 죽일 수 있었고, 이번에 더한 부분 수집 필드(`expectedEndpoints`·
+ *   `attempted`·`notTriedEndpoints`·`partial`·`stopReason`)도 검증 없이 통과했다.
+ *   - 구버전 엣지(새 필드 없음)는 **필드를 지어내지 않는다** — 없는 키는 없는 채로 둬야 화면이 구버전 판정 규칙으로 떨어진다.
+ *   - 수치는 `numOrNull` 이고 음수는 값이 아니다(null — 0 으로 만들지 않는다). 불리언은 `true` 일 때만 참.
+ *   - 원소는 평범한 객체 + 글자 `area` 일 때만, 상한 AREAS_MAX. 뺀 개수는 `areasDropped` 로 밝힌다(조용한 상한 금지).
+ *   - `areasAt` 은 엣지 시계라 수신 시각으로 자른다(v2.680 F-06 전력 시각과 같은 판단). `ex` 를 제자리에서 고친다. 좁힌 개수를 돌려준다.
+ */
+export const AREAS_MAX = 64;
+const AREA_NUM_KEYS = Object.freeze(['ok', 'failed', 'expectedEndpoints', 'attempted', 'notTriedEndpoints']);
+const AREA_BOOL_KEYS = Object.freeze(['skipped', 'notTried', 'partial']);
+const AREA_STR_KEYS = Object.freeze([['area', 64], ['stopReason', 32], ['error', 300]]);
+const AREAS_EXTRA_NUM_KEYS = Object.freeze(['areasEndpoints', 'areasExpectedEndpoints', 'areasNotTried', 'areasNotTriedEndpoints', 'areasPartial', 'areasDropped']);
+const AREAS_EXTRA_KEYS = Object.freeze(['areas', 'areasAt', 'areasStopped', 'areasError', ...AREAS_EXTRA_NUM_KEYS]);
+const countOrNull = (v) => { const n = numOrNull(v); return n == null || n < 0 ? null : n; };
+const strOrNull = (v, max) => (typeof v === 'string' ? capStr(v, max) : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null));
+
+export function narrowStorageAreas(ex, now = Date.now()) {
+  let narrowed = 0;
+  if (Object.hasOwn(ex, 'areas') && ex.areas != null) {
+    if (!Array.isArray(ex.areas)) { ex.areas = null; narrowed += 1; } else {
+      const out = []; let dropped = 0;
+      for (const a of ex.areas) {
+        if (!isPlainObj(a) || typeof a.area !== 'string' || !a.area.trim() || out.length >= AREAS_MAX) { dropped += 1; continue; }
+        const m = {};
+        for (const [k, max] of AREA_STR_KEYS) {
+          if (!Object.hasOwn(a, k)) continue;
+          const v = a[k];
+          if (v == null) { m[k] = v; continue; }
+          const sv = strOrNull(v, max);
+          if (sv == null || typeof v !== 'string') narrowed += 1;
+          m[k] = sv;
+        }
+        for (const k of AREA_NUM_KEYS) {
+          if (!Object.hasOwn(a, k)) continue;
+          const v = a[k];
+          if (v == null) { m[k] = null; continue; }
+          const n = countOrNull(v);
+          if (n !== v) narrowed += 1;
+          m[k] = n;
+        }
+        for (const k of AREA_BOOL_KEYS) {
+          if (!Object.hasOwn(a, k)) continue;
+          if (typeof a[k] !== 'boolean') narrowed += 1;
+          m[k] = a[k] === true;
+        }
+        if (Object.keys(a).some((k) => !Object.hasOwn(m, k))) narrowed += 1; // 모르는 필드는 담지 않는다
+        out.push(m);
+      }
+      ex.areas = out;
+      if (dropped) { ex.areasDropped = (countOrNull(ex.areasDropped) || 0) + dropped; narrowed += dropped; }
+    }
+  }
+  for (const k of AREAS_EXTRA_NUM_KEYS) {
+    if (!Object.hasOwn(ex, k) || ex[k] == null) continue;
+    const n = countOrNull(ex[k]);
+    if (n !== ex[k]) { narrowed += 1; ex[k] = n; }
+  }
+  if (Object.hasOwn(ex, 'areasAt') && ex.areasAt != null) {
+    const t = numOrNull(ex.areasAt);
+    const c = t == null ? null : Math.min(t, now);
+    if (c !== ex.areasAt) { if (t == null) narrowed += 1; ex.areasAt = c; }
+  }
+  for (const [k, max] of [['areasStopped', 32], ['areasError', 300]]) {
+    if (!Object.hasOwn(ex, k) || ex[k] == null) continue;
+    if (typeof ex[k] !== 'string') { ex[k] = null; narrowed += 1; } else if (ex[k].length > max) ex[k] = capStr(ex[k], max);
+  }
+  return narrowed;
+}
+
 export function narrowStorageSnapshot(d) {
   if (!isPlainObj(d) || !Object.hasOwn(d, 'extra') || d.extra == null) return { snap: d, narrowed: 0 };
   if (!isPlainObj(d.extra)) return { snap: { ...d, extra: null }, narrowed: 1 };
+  // v2.730(검토 I-03): 영역 요약은 아래 어느 반환 경로든 먼저 거친다(전력 재귀·appliances 조기 반환 포함).
+  let na = 0;
+  if (AREAS_EXTRA_KEYS.some((k) => Object.hasOwn(d.extra, k))) {
+    const exA = { ...d.extra };
+    na = narrowStorageAreas(exA);
+    d = { ...d, extra: exA };
+  }
+  const r = narrowStorageSnapshotRest(d);
+  return { snap: r.snap, narrowed: r.narrowed + na };
+}
+
+function narrowStorageSnapshotRest(d) {
   if (d.extra.power != null || d.extra.powerProbe != null) {
     const exP = { ...d.extra };
     const np = narrowStoragePower(exP);
     d = { ...d, extra: exP };
-    if (np) { const r = narrowStorageSnapshot(d); return { snap: r.snap, narrowed: r.narrowed + np }; }
+    if (np) { const r = narrowStorageSnapshotRest(d); return { snap: r.snap, narrowed: r.narrowed + np }; }
   }
   // v2.607(감사 CEN2607-02 — 재현): 화면이 글자로 그리는 extra 필드(헬스 배지·경보 문구·용량 기준 설명·버전 원문)가
   //   객체면 null 로. 예전에는 `extra.alertsNote:{a:1}` 가 그대로 저장돼 상세 모달이 React #31 로 죽었다.

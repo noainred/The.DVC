@@ -22,6 +22,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { stripComments } from './_stripComments.js';
 
+// 2026-10-09: 아래 targets.js·osSsh.js 동적 import 가 sshExec → security/peerTrust → config.js 를 끌어와 config 를 **먼저** 굳힌다.
+// 그러면 DB 왕복 테스트의 CONFIG_DIR 지정이 늦어 server/config/bm-usage.db 에 쓰고, 두 번째 실행부터 '같은 ts 중복' 으로 실패한다(재현).
+// 파일 맨 앞에서 임시 CONFIG_DIR 을 고정해 어떤 import 순서에서도 저장소 config 를 건드리지 않게 한다.
+const FILE_CFG_DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'bmusage-perf-'));
+const PREV_CFG_DIR = process.env.CONFIG_DIR;
+process.env.CONFIG_DIR = FILE_CFG_DIR;
+test.after(() => {
+  if (PREV_CFG_DIR === undefined) delete process.env.CONFIG_DIR; else process.env.CONFIG_DIR = PREV_CFG_DIR;
+  fs.rmSync(FILE_CFG_DIR, { recursive: true, force: true });
+});
+
 const SRC = (rel) => fs.readFileSync(path.join(import.meta.dirname, '../src', rel), 'utf8');
 /** 주석을 지운 소스 — 규칙을 설명하는 주석이 검사 통과 근거가 되면 안 된다(v2.535 규약). */
 const bare = (rel) => stripComments(SRC(rel));   // v2.613 TESTDOC2613-08: 2줄 판본 → 코어
@@ -153,12 +164,10 @@ test('⚠⚠ 세션 예산 < 장비 시한 — 두 번 시도해도 결과가 �
 
 // ── 실제 DB 왕복(산수·중복·순서) ──────────────────────────────────────────────
 test('실제 DB 왕복 — 롤업 산수 · 중복 방지 · 낡은 ts · null 처리 · agent 격리', async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'bmusage-perf-'));
-  const prevCfg = process.env.CONFIG_DIR;
-  process.env.CONFIG_DIR = dir;
   try {
     const cfg = await import('../src/config.js');
     const realDir = cfg.config.dbDir || cfg.config.configDir;
+    assert.equal(realDir, FILE_CFG_DIR, '테스트 DB 가 임시 폴더가 아닌 곳에 열린다 — 저장소 config 를 오염시킨다');
     const db = await import('../src/bmusage/db.js');
     db._resetForTest();
     if (!(await db.available())) { console.log('  (node:sqlite 없음 — 건너뜀)'); return; }
@@ -210,7 +219,6 @@ test('실제 DB 왕복 — 롤업 산수 · 중복 방지 · 낡은 ts · null �
     assert.ok(st.countsAt, '행 수가 캐시임을 밝혀야 한다(숨기지 않는다)');
     db._resetForTest();
   } finally {
-    if (prevCfg === undefined) delete process.env.CONFIG_DIR; else process.env.CONFIG_DIR = prevCfg;
-    fs.rmSync(dir, { recursive: true, force: true });
+    /* 임시 CONFIG_DIR 정리는 test.after 가 한다(파일 단위) */
   }
 });

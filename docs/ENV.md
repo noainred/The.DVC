@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **618개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **639개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-09)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (29)
+## 공용 유틸 (35)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -41,12 +41,18 @@
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
 | `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | util/ssrfBlock.js |
 | `STORAGE_GROWTH_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
+| `TLS_CA_FILE` |  | ✅ | util/httpsServer.js |
+| `TLS_CERT_FILE` |  | ✅ | util/httpsServer.js |
+| `TLS_HTTP_ALSO` | `기본 아님('true' 일 때만 적용)` | ✅ | util/httpsServer.js |
+| `TLS_KEY_FILE` |  | ✅ | util/httpsServer.js |
+| `TLS_PORT` | `PORT 와 같음(평문 HTTP 를 HTTPS 로 바꾼다)` | ✅ | util/httpsServer.js |
+| `TLS_RELOAD_CHECK_MS` | `3600000` |  | util/httpsServer.js |
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
+| `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
-| `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (190)
+## 공통 (189)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -218,7 +224,6 @@
 | `VC_SOAP_METRICS` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VC_TLS_CIPHERS` | `'DEFAULT@SECLEVEL=0'` |  | config.js |
 | `VC_TLS_MIN_VERSION` | `'TLSv1'` |  | config.js |
-| `VC_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `VC_WAIT_UPDATES` | `기본 아님('true' 일 때만 적용)` |  | config.js |
 | `VC_WAIT_UPDATES_FULL_MS` |  |  | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
@@ -285,7 +290,7 @@
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
 
-## 보안 (13)
+## 보안 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -297,11 +302,15 @@
 | `LOGIN_MAX_FAILS` | `8` |  | security/loginRateLimit.js |
 | `LOGIN_POLICY_USERS` | `''` |  | security/securitySettings.js |
 | `LOGIN_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
+| `NODE_EXTRA_CA_CERTS` |  |  | security/tlsTrust.js |
 | `OTP_FAIL_WINDOW_MS` | `10` |  | security/loginRateLimit.js |
 | `OTP_LOCKOUT_MS` | `10` |  | security/loginRateLimit.js |
 | `OTP_MAX_FAILS` | `5` |  | security/loginRateLimit.js |
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
+| `SSH_HOSTKEY_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
+| `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
+| `X` |  |  | security/tlsTrust.js, util/dayKey.js 외 1 |
 
 ## 분석 도구 (8)
 
@@ -330,12 +339,13 @@
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
 
-## 수집 서버 (6)
+## 수집 서버 (7)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `CENTRAL_SELF_REGISTER_MAX` | `256` |  | collector/registry.js |
 | `CENTRAL_SELF_REGISTER_UNVERIFIED_MAX` | `16` |  | collector/registry.js |
+| `COLLECTOR_HTTP_ALLOW` | `''` | ✅ | collector/transportPolicy.js |
 | `COLLECTOR_PULL_CYCLE_MAX_MS` |  |  | collector/puller.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` |  |  | collector/upgradePush.js, upgrade/upgrade.js |
@@ -364,7 +374,7 @@
 | `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
 | `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
 | `STORAGE_PUSH_MS` | `5 * 60_000` |  | storage/intervals.js |
-| `STORAGE_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
+| `STORAGE_TLS_VERIFY` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
 | `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
 | `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
@@ -376,7 +386,7 @@
 |---|---|---|---|
 | `NFS_MOUNT_BASE` | `'/mnt/portal-nfs'` |  | system/nfsMounts.js |
 
-## 업그레이드 (5)
+## 업그레이드 (7)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -384,7 +394,9 @@
 | `NOTIFY_SOCKET` |  |  | upgrade/upgrade.js |
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
+| `UPGRADE_SIGNATURE_POLICY` | `'require'` |  | upgrade/signature.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
+| `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
 ## 엣지 에이전트 (41)
 
@@ -474,7 +486,7 @@
 | `RMA_TEST_CONCURRENCY` | `4` | ✅ | rma/agent.js |
 | `RMA_TEST_HISTORY_DAYS` | `90` |  | rma/testResults.js |
 
-## 원격 접속(프록시) (25)
+## 원격 접속(프록시) (31)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -496,6 +508,12 @@
 | `REMOTE_IDLE_TIMEOUT_MS` |  |  | proxy/sshGateway.js |
 | `REMOTE_MAPPING_TTL_MS` | `24` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
+| `REMOTE_MAX_SESSIONS_PER_USER` | `20` |  | proxy/sshGateway.js |
+| `REMOTE_REVALIDATE_MS` | `30000` |  | proxy/sshGateway.js |
+| `REMOTE_WS_HIGH_WATER_BYTES` | `1048576` |  | proxy/sshGateway.js |
+| `REMOTE_WS_LOW_WATER_BYTES` | `262144` |  | proxy/sshGateway.js |
+| `REMOTE_WS_MAX_QUEUE_BYTES` | `8388608` |  | proxy/sshGateway.js |
+| `REMOTE_WS_STALL_MS` | `60000` |  | proxy/sshGateway.js |
 | `SSH_EXEC_MAX_OUTPUT` | `4` |  | proxy/sshExec.js |
 | `SSH_EXEC_TIMEOUT_MS` |  |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
@@ -516,7 +534,7 @@
 | `PORTAL_DB_SAMPLE_MS` | `10` |  | insights/portalDb.js |
 | `SERIAL_INDEX_CACHE_MS` | `30000` |  | insights/serialLookup.js |
 
-## 인증·권한 (15)
+## 인증·권한 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -527,6 +545,8 @@
 | `AD_ENABLED` | `기본 아님('true' 일 때만 적용)` | ✅ | auth/ad.js |
 | `AD_GROUP_MATCH` | `기본 아님('substring' 일 때만 적용)` | ✅ | auth/ad.js |
 | `AD_OPERATOR_GROUP` | `''` |  | auth/ad.js |
+| `AD_SESSION_MAX_HOURS` | `12` |  | auth/ad.js |
+| `AD_STARTTLS` | `기본 아님('true' 일 때만 적용)` |  | auth/ad.js |
 | `AD_TIMEOUT_MS` | `8000` |  | auth/ad.js |
 | `AD_TLS_REJECT_UNAUTHORIZED` | `기본 적용('false' 로 끄기)` | ✅ | auth/ad.js |
 | `AD_URL` | `''` | ✅ | auth/ad.js |
@@ -675,14 +695,14 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `HORIZON_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | horizon/horizon.js |
+| `HORIZON_TLS_VERIFY` |  |  | horizon/horizon.js |
 | `HZ_CATALOG_TTL_MS` |  |  | horizon/sessionCollect.js |
 | `HZSESS_ACTIVITY_MAX` | `500` |  | horizon/sessionActivityLog.js |
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 | `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `21600000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (16)
+## iDRAC/전력 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -702,6 +722,7 @@
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
 | `ROOMTEMP_STALE_CAP_MS` |  |  | idrac/roomTemp.js |
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
+| `VC_TLS_REJECT_UNAUTHORIZED` |  | ✅ | config.js, idrac/ome.js 외 3 |
 
 ## IP 관리 (10)
 
@@ -732,7 +753,7 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
-| `NSX_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` |  | nsx/client.js |
+| `NSX_TLS_REJECT_UNAUTHORIZED` |  |  | nsx/client.js |
 
 ## PDU (10)
 
@@ -785,7 +806,7 @@
 | `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
 | `SANSW_ZONE_MAX` | `4000` |  | sanswitch/zoning.js |
 | `SANSWITCH_ACTIVITY_MAX` | `500` |  | sanswitch/activityLog.js |
-| `SANSWITCH_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | sanswitch/collectors/fosRest.js |
+| `SANSWITCH_TLS_VERIFY` |  |  | sanswitch/collectors/fosRest.js |
 
 ## vCenter 수집 (2)
 
@@ -802,4 +823,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 618
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 639

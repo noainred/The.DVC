@@ -12,6 +12,9 @@ import { execFileSync } from 'node:child_process';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2606c-'));
 process.env.CONFIG_DIR = TMP;
+// 2026-10-09 S-02: 가짜 HTTPS 장비는 openssl 자체서명이다 — 장비 인증서 지문 정책을 observe(처음 본 장비는 기록 후 통과)로 둔다
+// (새 설치 기본은 enforce 라 승인 전에는 자격증명을 보내지 않는다 — security/tlsTrust.js). 이 테스트가 보는 것은 TLS 가 아니다.
+process.env.TLS_PEER_POLICY = 'observe';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.DATA_SOURCE = 'live';
 process.env.CURUSER_DB_PATH = path.join(TMP, 'curuser.db');

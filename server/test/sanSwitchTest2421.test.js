@@ -12,6 +12,10 @@ import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sansw2421-'));
+// 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가
+// 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
+process.env.SSH_HOSTKEY_POLICY = 'observe';
+const TEST_HOST_KEY = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'pkcs1', format: 'pem' } }).privateKey;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function closedPort() {
@@ -98,7 +102,7 @@ test('testRuns: 엣지 위임 장비는 큐 → 엣지가 가져감(비밀번호
 
 /** 로컬 ssh2 서버 — 비밀번호 인증 + exec 'echo' 응답. algorithms 로 구형 전용 서버를 흉내낼 수 있다. */
 function startSshServer({ algorithms, respond = (cmd) => `ran:${cmd}\n` } = {}) {
-  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'pkcs1', format: 'pem' } });
+  const privateKey = TEST_HOST_KEY;
   const clients = new Set();
   const server = new ssh2.Server({ hostKeys: [privateKey], banner: 'FOS-TEST', ...(algorithms ? { algorithms } : {}) }, (client) => {
     clients.add(client); client.on('close', () => clients.delete(client));

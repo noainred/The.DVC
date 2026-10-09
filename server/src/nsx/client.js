@@ -15,14 +15,14 @@
  *   GET /policy/api/v1/infra/domains/default/security-policies -> DFW policies
  *   GET /policy/api/v1/infra/domains/default/groups            -> security groups
  *
- * TLS verification reuses the global undici dispatcher configured for vCenter
- * (self-signed certs are common on private NSX appliances).
+ * TLS: NSX 전용 로컬 dispatcher(security/tlsTrust.js deviceTlsConnect — CA 체인 또는 승인 지문, 2026-10-09 S-02).
  */
 
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
+import { deviceTlsConnect, tlsModeFromEnv, unwrapTlsPeer } from '../security/tlsTrust.js'; // 2026-10-09 S-02
 import { ensureNsxDial } from './proxy.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 import { createAuthGuard } from '../util/authGuard.js';
@@ -82,18 +82,26 @@ export const listCount = (l) => Math.max((l?.results || []).length, Number.isFin
 
 // 보안: 과거엔 기본 분기가 '전역(미검증)' 디스패처에 기댔으나, 전역 디스패처가 검증 ON 기본으로
 // 복원되면서(감사 C1/C3) NSX 전용 '로컬' 디스패처로 명시한다 — 자체서명 NSX 기본 동작은 그대로.
-// 검증 여부: NSX_TLS_REJECT_UNAUTHORIZED=true 명시 또는 vCenter 전역 검증(VC_TLS_REJECT_
-// UNAUTHORIZED=true)을 승계 — 검증 ON 배포에서 NSX만 조용히 무검증이 되지 않게 한다.
-// 미검증일 때는 종전 전역 디스패처가 갖던 구형 TLS 호환(legacy 재협상·SECLEVEL)도 유지한다.
-const nsxVerify = process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true' || config.rejectUnauthorized;
+// 검증 모드(2026-10-09 S-02 — security/tlsTrust.js): NSX_TLS_REJECT_UNAUTHORIZED 가 있으면 그 값(미설정 아님 —
+// true=엄격 · false=명시적 예외), 없으면 vCenter 모드(VC_TLS_REJECT_UNAUTHORIZED)를 승계한다 — 예전에도 vCenter 검증 ON 을
+// 승계했다(검증 ON 배포에서 NSX 만 조용히 무검증이 되지 않게). 기본은 CA 체인 또는 승인 지문이다.
+// 엄격(strict)이 아니면 종전 구형 TLS 호환(legacy 재협상·SECLEVEL)도 유지한다 — 상대 확인은 판정이 따로 한다.
+const NSX_TLS_ENV = process.env.NSX_TLS_REJECT_UNAUTHORIZED;
+const nsxOwnEnv = NSX_TLS_ENV != null && String(NSX_TLS_ENV).trim() !== '';
+const nsxMode = nsxOwnEnv ? tlsModeFromEnv(NSX_TLS_ENV) : config.vcTlsVerifyMode;
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
 // ⚠ 삼항 **양쪽**에 붙인다 — 검증 ON 배포에서만 훅이 빠지는 실수를 막기 위해 withSsrfLookup 으로 감싼다.
 const nsxDispatcher = new Agent({
-  connect: withSsrfLookup(nsxVerify ? { rejectUnauthorized: true } : {
-    rejectUnauthorized: false,
-    minVersion: config.vcTlsMinVersion,
-    ciphers: config.vcTlsCiphers,
-    secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT | cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+  connect: deviceTlsConnect({
+    subsystem: 'nsx',
+    envKey: nsxOwnEnv ? 'NSX_TLS_REJECT_UNAUTHORIZED' : 'VC_TLS_REJECT_UNAUTHORIZED',
+    envRaw: nsxOwnEnv ? NSX_TLS_ENV : process.env.VC_TLS_REJECT_UNAUTHORIZED,
+    mode: nsxMode,
+    tls: withSsrfLookup(nsxMode === 'strict' ? {} : {
+      minVersion: config.vcTlsMinVersion,
+      ciphers: config.vcTlsCiphers,
+      secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT | cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+    }),
   }),
 });
 
@@ -116,7 +124,7 @@ export class NsxClient {
       redirect: NO_REDIRECT, // v2.620 SEC2620-01
       dispatcher: nsxDispatcher,
       signal: AbortSignal.timeout(this.timeoutMs),
-    });
+    }).catch((e) => { throw unwrapTlsPeer(e); }); // S-02: 인증서 거부는 판정 문구(대상·지문·조치)로
     refuseRedirect(res, 'NSX Manager');
     if (!res.ok) {
       const text = await res.text().catch(() => '');

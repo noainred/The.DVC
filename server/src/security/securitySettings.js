@@ -98,6 +98,24 @@ export function singleSessionEnabled() {
   return _ssCache;
 }
 
+// 세션 수명 정책(핫패스 캐시, 2026-10-09 검토 S-05·S-06) — resolveTokenUser 가 매 요청 유휴·총 상한을 본다.
+// 파일을 매 요청 읽지 않게 3초 캐시하고 저장 시 즉시 무효화한다(로그인 정책 캐시와 같은 규칙).
+let _spAt = 0, _spCache = null;
+export function sessionPolicySettings() {
+  const now = Date.now();
+  if (_spAt && now - _spAt < 3000 && _spCache) return _spCache;
+  const c = loadConfiguredSecurity();
+  _spCache = {
+    idleLogoutEnabled: !!c.idleLogoutEnabled,
+    idleLogoutMin: c.idleLogoutMin,
+    sessionMaxHours: Number(c.sessionMaxHours) || 0,
+    sessionWarnMin: c.sessionWarnMin,
+    sessionExtendMin: c.sessionExtendMin,
+  };
+  _spAt = now;
+  return _spCache;
+}
+
 // Demo/Guest 중복 접속 모드(핫패스 캐시, v2.294) — resolveTokenUser 가 데모 토큰마다 참조.
 let _dsAt = 0, _dsCache = null;
 export function demoSessionMode() {
@@ -259,7 +277,7 @@ export function setFileLoginPolicy(username, policy) {
 }
 
 /** 테스트·핫리로드용 — 전역/사용자별 로그인 정책 캐시를 즉시 무효화. */
-export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; _ssAt = 0; }
+export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; _ssAt = 0; _spAt = 0; }
 
 /**
  * 파일/환경변수로 지정한 설정 소유 계정 — 운영자가 서버에서 직접 편집하는 경로.
@@ -344,6 +362,6 @@ export function saveSessionSecurity(partial = {}) {
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  _polAt = 0; _ssAt = 0; _dsAt = 0; // 로그인 정책·단일세션·데모모드 캐시 즉시 무효화
+  _polAt = 0; _ssAt = 0; _dsAt = 0; _spAt = 0; // 로그인 정책·단일세션·데모모드·세션 수명 정책 캐시 즉시 무효화
   return next;
 }

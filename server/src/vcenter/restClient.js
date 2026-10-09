@@ -2,6 +2,7 @@ import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
+import { deviceTlsConnect } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { createAuthGuard } from '../util/authGuard.js';
 import { effectiveRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한(2^31ms 이상이면 1ms 로 abort)
 
@@ -47,8 +48,9 @@ export function vcRequestSignal(timeoutMs, external) {
  *   GET  /api/vcenter/datastore       -> datastores
  *   GET  /api/vcenter/network         -> networks
  *
- * Many private vCenters use self-signed certs, so TLS verification is
- * configurable via VC_TLS_REJECT_UNAUTHORIZED (default: off).
+ * Many private vCenters use self-signed certs. 2026-10-09 S-02: 기본(VC_TLS_REJECT_UNAUTHORIZED 미설정)은
+ * CA 체인(시스템 루트 + 사설 CA 번들) 또는 관리자가 승인한 인증서 지문(security/peerTrust.js)만 받는다.
+ * true = CA 체인만 · false = 명시적 예외(예전처럼 어떤 인증서든) — security/tlsTrust.js 머리말.
  */
 
 // vCenter/게스트 파일전송 전용 로컬 디스패처(감사 C1/C3 수정) — 과거에는 setGlobalDispatcher로
@@ -58,11 +60,14 @@ export function vcRequestSignal(timeoutMs, external) {
 // dispatcher 옵션으로 이 permissive Agent를 명시 주입한다(soapClient/guestops/nsx도 동일 패턴).
 // 구형 어플라이언스는 legacy TLS/재협상을 요구하므로 검증 off일 때 SECLEVEL을 낮춘다(기존 동작 유지).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-// soapClient.js 도 이 vcDispatcher 를 쓰므로 여기 한 곳이 vCenter SOAP·REST 접속 전부를 덮는다.
-const vcConnect = withSsrfLookup(config.rejectUnauthorized
-  ? { rejectUnauthorized: true, timeout: 15_000 }
+// soapClient.js 도 이 vcDispatcher 를 쓰므로 여기 한 곳이 vCenter SOAP·REST 접속 전부를 덮는다
+// (게스트 파일 전송 gpu/guestops.js·VM 복제 vmclone/vsphere.js 의 ESXi 호스트 URL 도 이 dispatcher 다).
+// 2026-10-09 S-02: 인증서 판정은 deviceTlsConnect 가 핸드셰이크 직후·요청 전에 한다(검증 off 일 때만 쓰던 구형 TLS 호환
+// 옵션은 'strict'(=true) 가 아니면 그대로 둔다 — 상대 확인은 지문·체인 판정이 하고, 구형 어플라이언스 협상은 깨지 않는다).
+const vcStrict = config.vcTlsVerifyMode === 'strict';
+const vcConnectOpts = withSsrfLookup(vcStrict
+  ? { timeout: 15_000 }
   : {
-    rejectUnauthorized: false,
     minVersion: config.vcTlsMinVersion,           // default TLSv1
     ciphers: config.vcTlsCiphers,                 // default DEFAULT@SECLEVEL=0
     secureOptions:
@@ -74,7 +79,7 @@ const vcConnect = withSsrfLookup(config.rejectUnauthorized
 // 죽은 소켓을 재사용하면 응답을 기다리다 타임아웃('operation was aborted due to timeout')한다.
 // 유휴 소켓을 짧게 회수해 매 폴링마다 새 연결로 재접속하도록 한다(폴링 간격 << keepAlive면 영향 없음).
 export const vcDispatcher = new Agent({
-  connect: vcConnect,
+  connect: deviceTlsConnect({ subsystem: 'vcenter', envKey: 'VC_TLS_REJECT_UNAUTHORIZED', envRaw: process.env.VC_TLS_REJECT_UNAUTHORIZED, mode: config.vcTlsVerifyMode, tls: vcConnectOpts }),
   connectTimeout: 15_000,
   keepAliveTimeout: Number(process.env.VC_KEEPALIVE_MS) || 4_000,
   keepAliveMaxTimeout: 10_000,

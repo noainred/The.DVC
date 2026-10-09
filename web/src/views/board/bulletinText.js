@@ -158,3 +158,101 @@ export function applyLike(post, commentId, r) {
   if (!commentId) return { ...post, ...patch };
   return { ...post, comments: (post.comments || []).map((c) => (c.id === commentId ? { ...c, ...patch } : c)) };
 }
+
+/* ───────────── 리뷰 I-05 — '수용됨' 과 '저장 완료' ─────────────
+ * 서버 계약(routes/api/bulletin.js): 쓰기 응답 `persist.state` = 'saved'(디스크에 있다) · 'pending'(아직 안 썼다 — 정상 묶음 창) ·
+ * 'failed'(아직 안 썼고 가장 최근 쓰기가 실패했다). `GET /board/persist` = 두 저장소(board·notices)의 상태 — 관리자에게만 사유 코드·
+ * 미저장 변경 수·마지막 저장 완료 시각·다음 재시도 시각이 붙는다. 판정은 서버가 하고 여기서는 문장만 만든다.
+ */
+
+/** 'pending' 이 이 시간을 넘기면 정상 묶음 창이 아니라 '밀려 있다' 로 본다(서버 묶음 창 300ms · 확인 상한 3초보다 넉넉히). */
+export const PERSIST_STUCK_MS = 10_000;
+/** 저장 안 된 변경이 있는 동안 상태를 다시 읽는 간격(저장되면 멈춘다 — 상시 폴링 아님). */
+export const PERSIST_POLL_MS = 10_000;
+export const STORE_LABEL = Object.freeze({ board: '게시판', notices: '공지' });
+/** 서버 lastWriteError.phase → 문구(server/src/bulletin/store.js WRITE_PHASES 와 1:1). */
+export const WRITE_PHASE_TEXT = Object.freeze({ mkdir: '설정 폴더 준비', write: '임시 파일 쓰기', rename: '파일 교체', flush: '즉시·종료 저장' });
+
+/** 저장 안 된 변경이 있는가(폴링을 이어 갈지). 모르는 모양은 false. */
+export function needsPersistPoll(stores) {
+  if (!stores || typeof stores !== 'object') return false;
+  return Object.values(stores).some((h) => h && typeof h === 'object' && (h.state === 'pending' || h.state === 'failed'));
+}
+
+const secsText = (ms) => `${Math.max(1, Math.round(ms / 1000))}초`;
+
+/**
+ * 한 저장소의 경고 — null 이면 경고 없음. tone: 'bad'(실패) | 'warn'(밀림).
+ * 'pending' 은 정상 묶음 창이라 PERSIST_STUCK_MS 를 넘겨야 경고한다(공감 직후마다 경고가 깜빡이지 않게).
+ * 관리자 상세(사유 코드·미저장 수·마지막 저장 완료)는 서버가 관리자에게만 싣는다 — 있으면 쓴다.
+ */
+export function storeWarning(h, { label = '게시판', now = Date.now() } = {}) {
+  if (!h || typeof h !== 'object' || h.state === 'saved' || (h.state !== 'pending' && h.state !== 'failed')) return null;
+  const since = Number.isFinite(h.unsavedSince) ? h.unsavedSince : null;
+  const age = since != null ? Math.max(0, now - since) : null;
+  const detail = [];
+  if (h.lastWriteError && typeof h.lastWriteError === 'object') {
+    const e = h.lastWriteError;
+    const ph = WRITE_PHASE_TEXT[e.phase] || e.phase || '';
+    detail.push(`원인: ${e.message || '파일을 쓰지 못했습니다'}${e.code ? `(${e.code}${ph ? ` · ${ph} 단계` : ''})` : ''}`);
+  }
+  const counts = [];
+  if (Number.isFinite(h.unsaved)) counts.push(`미저장 변경 ${h.unsaved}건`);
+  if (since != null) counts.push(`미저장 시작 ${timeText(since)}`);
+  if (Object.hasOwn(h, 'lastSavedAt')) counts.push(`마지막 저장 완료 ${h.lastSavedAt ? timeText(h.lastSavedAt) : '기동 뒤 아직 없음'}`);
+  if (counts.length) detail.push(counts.join(' · '));
+  if (h.state === 'pending') {
+    if (age == null || age < PERSIST_STUCK_MS) return null;
+    return {
+      tone: 'warn',
+      title: `${label}: 아직 디스크에 저장되지 않은 변경이 있습니다(${secsText(age)}째)`,
+      lines: ['화면에는 반영됐고 저장을 기다리는 중입니다 — 저장되면 이 안내가 사라집니다.', ...detail],
+    };
+  }
+  let retry;
+  if (h.retrying) retry = `자동으로 다시 저장합니다${Number.isFinite(h.nextRetryAt) ? `(다음 시도 ${timeText(h.nextRetryAt)})` : ''}.`;
+  else if (h.retryExhausted) retry = '자동 재시도 횟수를 다 써서 멈췄습니다 — 관리자의 ‘지금 다시 저장’ 이나 다음 변경 때 다시 저장합니다.';
+  else retry = '다음 변경 때 다시 저장합니다.';
+  return {
+    tone: 'bad',
+    title: `${label} 저장 실패 — 최근 변경이 서버 디스크에 저장되지 않았습니다`,
+    lines: ['화면에는 보이지만 포탈이 다시 시작되면 사라질 수 있습니다. 저장될 때까지 이 안내가 남습니다.', retry, ...detail],
+  };
+}
+
+/** 두 저장소의 경고 목록(실패 먼저). */
+export function persistWarnings(stores, { now = Date.now() } = {}) {
+  if (!stores || typeof stores !== 'object') return [];
+  const out = [];
+  for (const k of ['board', 'notices']) {
+    const w = storeWarning(stores[k], { label: STORE_LABEL[k], now });
+    if (w) out.push({ kind: k, ...w });
+  }
+  return out.sort((a, b) => (a.tone === 'bad' ? 0 : 1) - (b.tone === 'bad' ? 0 : 1));
+}
+
+/**
+ * 쓰기 응답 한 건의 안내 — 빈 문자열이면 안내 없음. waited=false(공감 — 서버가 기다리지 않는다)면 'pending' 은 정상이라 말하지 않는다.
+ */
+export function writeResultNote(persist, { waited = true } = {}) {
+  const s = persist?.state;
+  if (s === 'failed') {
+    const why = persist.error?.message ? ` 원인: ${persist.error.message}${persist.error.code ? `(${persist.error.code})` : ''}.` : '';
+    return `반영됐지만 서버 디스크에 저장하지 못했습니다 — 포탈이 다시 시작되면 사라질 수 있습니다. 다시 저장 상태는 화면 위 안내가 저장될 때까지 알려 줍니다.${why}`;
+  }
+  if (s === 'pending' && waited) return '반영됐고 디스크 저장을 기다리는 중입니다 — 저장되지 않으면 위 안내가 알려 줍니다.';
+  return '';
+}
+
+/** 관리자 '지금 다시 저장' 결과 문구. */
+export function retryResultText(r) {
+  const rows = Array.isArray(r?.result) ? r.result.filter((x) => x && x.attempted) : [];
+  if (!r?.ok) return saveFailText(r);
+  if (!rows.length) return '다시 저장할 변경이 없습니다 — 이미 모두 저장돼 있습니다.';
+  return rows.map((x) => {
+    const label = STORE_LABEL[x.kind] || x.kind;
+    if (x.state === 'saved') return `${label}: 저장했습니다.`;
+    if (x.state === 'failed') return `${label}: 여전히 저장하지 못했습니다${x.code ? `(${x.code})` : ''} — 원인을 해결한 뒤 다시 누르세요.`;
+    return `${label}: 저장 결과를 아직 받지 못했습니다 — 잠시 뒤 상태가 갱신됩니다.`;
+  }).join(' ');
+}

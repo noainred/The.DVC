@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **193개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **198개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-09)
@@ -19,7 +19,7 @@
 | 파일 | 종류 | 용도 | 원자적 | 손상보존 | 0600 | 정의 모듈 |
 |---|---|---|:--:|:--:|:--:|---|
 | `_index.json` | 설정 | VM 성능 시계열 — **vCenter 별 독립 DB**(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfDb.js, vmseries/db.js |
-| `<이름>` | 디렉터리 | iDRAC 센서 상세 캐시(v2.659) — 서버별 ① Thermal 상세(매 폴 주기, 인메모리) ② Sensors 컬렉션(인벤토리 주기, 파일 보관). | ✅ |  | ✅ | idrac/sensorDetailCache.js |
+| `<이름>` | 디렉터리 | 서버측 세션 상태 — 폐기 목록 + 마지막 사용자 활동(2026-10-09 검토 S-05). | ✅ | ✅ | ✅ | auth/sessionState.js, idrac/sensorDetailCache.js |
 | `active-sessions.json` | 설정 | 활성 세션 레지스트리 (v2.280) — '단일 세션 강제'(ID 공유 금지)의 상태 저장소. | ✅ |  | ✅ | auth/sessions.js |
 | `agent-assignments.json` | 설정 | Central store for per-agent scan assignments and the results agents report | ✅ | ✅ | ✅ | central/assignments.js |
 | `agent-deploy-targets.json` | 설정 | Edge 노드 설치 대상(SSH 접속 정보) | ✅ | ✅ | ✅ | agent/deployRegistry.js |
@@ -145,6 +145,7 @@
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ | ✅ | ✅ | pdu/intervals.js |
 | `pdu-thresholds.json` | 설정 | PDU 임계치 판정 + 알림 연동(v2.425). | ✅ | ✅ | ✅ | pdu/thresholds.js |
 | `pdu.db` | DB | PDU 전력 시계열 |  |  | ✅ | pdu/db.js |
+| `peer-trust.json` | 설정 | 장비 SSH 호스트키·TLS 인증서 지문 신뢰 저장소(검토 S-01·S-02) | ✅ | ✅ | ✅ | security/peerTrust.js |
 | `perf-hangs.ndjson` | 로그(NDJSON) | hang(이벤트 루프 정체·화면 장기 로딩) 이벤트를 `perf-hangs.ndjson` 에 남긴다(v2.498). | ✅ |  | ✅ | perf/hangLog.js |
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
 | `permissions.json` | 설정 | 역할별 권한 매트릭스 + 도구별 접근 거부 | ✅ | ✅ | ✅ | auth/permissions.js |
@@ -157,6 +158,7 @@
 | `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ | ✅ | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
 | `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped | ✅ | ✅ | ✅ | release-notes.js |
+| `release-signing-keys.conf` | 기타 | 업그레이드 서명 신뢰 공개키(호스트 관리자가 직접 둔다, 검토 S-10) |  |  |  | (외부/설치 스크립트) |
 | `remote-access.json` | 설정 | Remote-access configuration + mapping store (CONFIG_DIR/remote-access.json). | ✅ | ✅ | ✅ | proxy/registry.js |
 | `rma-agents.json` | 설정 | 중앙 측 RMA 에이전트 비밀번호 저장소 — `rma-agents.json` { version, agents: { name: { password, updatedAt } } }. | ✅ | ✅ | ✅ | rma/agentSecrets.js |
 | `rma-history.db` | DB | 원격 명령(RMA) 실행 이력 |  |  | ✅ | rma/historyDb.js |
@@ -176,7 +178,9 @@
 | `sanswitch-perf.db` | DB | SAN 스위치 포트 처리량(누적 카운터 델타) |  |  | ✅ | sanswitch/perfDb.js |
 | `secrets-key` | 디렉터리 | 자격증명 봉인 키(암호화 모드) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
+| `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `storage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | storage/activityLog.js |
 | `storage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | storage/authGuard.js |
@@ -190,6 +194,7 @@
 | `svcmon-templates.json` | 설정 | 성능점검 '점검 템플릿' — 서비스 유형별 점검 묶음을 저장하고 대상에 적용한다. | ✅ | ✅ |  | svcmon/templates.js |
 | `svcmon.json` | 설정 | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | ✅ | ✅ |  | svcmon/store.js |
 | `tag-policy.json` | 설정 | 태그 점검 정책(`tag-policy.json`, v2.703 — A15). 사람이 정하는 **설정** 파일이다(비밀 없음). | ✅ | ✅ | ✅ | tags/policy.js |
+| `tls-ca-bundle.pem` | 기타 | 장비 TLS 사설 CA 번들(PEM — 관리자가 직접 둔다, 검토 S-02) |  |  |  | (외부/설치 스크립트) |
 | `tool-categories.json` | 설정 | 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). | ✅ | ✅ | ✅ | toolcats/settings.js |
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
@@ -218,6 +223,11 @@
 - **`auth-secret`** — ⚠ 바뀌면 전 사용자 세션 무효(재로그인). 유출 시 임의 계정 토큰 위조 가능 — 0600 유지
 - **`users.json`** — ⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성
 - **`secrets-key`** — ⚠ 지우면 저장된 모든 비밀번호를 복호할 수 없다(재입력 필요)
+- **`secrets-policy.trusted.json`** — 정책 파일이 손상·유실되면 이 사본으로 복구한다. 둘 다 없는데 암호화 흔적이 있으면 새 비밀 저장을 막는다(평문 저장 금지) — 지우지 말 것
+- **`peer-trust.json`** — 종류(ssh/tls)·호스트·포트마다 승인·관찰·거부 지문과 정책(enforce/observe)을 담는다. 손상이면 보존 후 두 종류 모두 enforce 로 닫는다 — 지우면 승인 기록이 사라져 새 설치처럼 엄격 모드로 시작한다(장비마다 다시 승인)
+- **`tls-ca-bundle.pem`** — 비밀이 아니다. 백업 확장자 화이트리스트 밖이라 백업에 들어가지 않는다 — 복원 뒤 다시 둘 것. 개인키를 넣지 말 것(인증서가 아닌 블록은 세어 경고한다)
+- **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
+- **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다
 - **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다
 - **`bmusage-central.json`** — 중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다

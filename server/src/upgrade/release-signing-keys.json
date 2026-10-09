@@ -1,0 +1,7 @@
+{
+  "format": "vmware-portal-release-keys",
+  "schema": 1,
+  "_comment": "릴리스 서명 신뢰 공개키(Ed25519, base64 SPKI DER). 개인키는 절대 여기에 두지 않는다. 키 추가·교체·회수 절차: docs/RELEASE-SIGNING.md. 이 목록이 비어 있으면 CI(release 워크플로)가 게시 전에 실패한다.",
+  "keys": [],
+  "revoked": []
+}

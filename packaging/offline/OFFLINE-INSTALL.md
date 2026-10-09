@@ -34,14 +34,15 @@ packaging/offline/build-package.sh
 미리 두 가지만 준비하면 네트워크 없이도 패키지를 만들 수 있습니다:
 
 1. Node.js 런타임 압축본을 미리 받아 복사:
-   `https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz`
+   `https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz`
+   (런타임 계약: Node 22.x 만, 검증 버전 22.23.2 — 다른 major 를 넣으면 장비 통신이 실패할 수 있습니다. `docs/INSTALL.md` 부록 A.0)
 2. 의존성이 포함된 저장소(온라인에서 `npm run install:all` 1회 실행 → `node_modules` 포함).
 
 그런 다음 네트워크 없이:
 
 ```bash
 packaging/offline/build-package.sh --offline \
-  --node-tarball /경로/node-v22.20.0-linux-x64.tar.xz
+  --node-tarball /경로/node-v22.23.2-linux-x64.tar.xz
 ```
 
 > 인터넷이 어디에도 없다면 빌드 과정 없이 **미리 빌드된 tarball을 받아** 바로 설치하면 됩니다.
@@ -130,6 +131,12 @@ cd vmware-portal-offline-<새버전>-el9-x64
 sudo ./install.sh --port 4000
 ```
 기존 앱이 백업된 뒤 교체되고 서비스가 자동 재시작됩니다. (설정 `portal.env` 는 유지)
+
+> **v2.730+ 서명 확인(검토 S-10)**: 같은 버전의 `vmware-portal-<버전>.manifest.json` 을 릴리스 자산에서 함께 받아 패키지 옆에 두세요.
+> 업그레이드 설치는 **기존 설치본의** 확인 도구·신뢰 공개키로 패키지와 manifest 를 먼저 확인하고, 실패하면 아무것도 바꾸지 않고 멈춥니다.
+> 풀기 전에 직접 확인하려면 `sudo vmware-portal-verify --file <패키지.tar.gz> --manifest vmware-portal-<버전>.manifest.json`.
+> 다른 위치면 `sudo ./install.sh --port 4000 --package <파일> --manifest <파일>`, 확인을 건너뛰는 `--skip-signature-check` 는 권장하지 않습니다.
+> 상세: `docs/RELEASE-SIGNING.md`.
 
 ### 방법 2) 관리자 UI로 수동 업그레이드 (새 파일 받아서 적용)
 

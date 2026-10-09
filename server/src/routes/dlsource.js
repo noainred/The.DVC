@@ -25,7 +25,10 @@ wrapAsyncRouter(dlSourceRouter);
 
 const REPO_DOWNLOAD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..', 'download');
 const BUNDLE_RE = /^vmware-portal-(\d+\.\d+\.\d+)\.tar\.gz$/;
-const SAFE_RE = /^[\w.+-]+\.(tar\.gz|zip)$/;
+// v2.730(검토 S-10): 서명 manifest(`vmware-portal-<버전>.manifest.json`)도 내준다 — 엣지가 이 소스에서 받은 번들을
+//   설치 전에 자기 신뢰 공개키로 검증한다. 공개해도 되는 파일이다(공개키 서명 — 비밀이 없다).
+const SAFE_RE = /^(?:[\w.+-]+\.(tar\.gz|zip)|vmware-portal-\d{1,9}\.\d{1,9}\.\d{1,9}\.manifest\.json)$/;
+const manifestName = (ver) => `vmware-portal-${ver}.manifest.json`;
 const cmp = (a, b) => { const A = a.split('.').map(Number); const B = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((A[i] || 0) !== (B[i] || 0)) return (A[i] || 0) - (B[i] || 0); } return 0; };
 
 function sourceDirs() {
@@ -70,7 +73,12 @@ async function buildVersions() {
       const m = BUNDLE_RE.exec(f);
       if (!m) continue;
       if (byVer.has(m[1])) continue;
-      try { byVer.set(m[1], { version: m[1], tar_gz: f, size_bytes: fs.statSync(path.join(d, f)).size, _path: path.join(d, f) }); } catch { /* */ }
+      try {
+        const e = { version: m[1], tar_gz: f, size_bytes: fs.statSync(path.join(d, f)).size, _path: path.join(d, f) };
+        // v2.730(S-10): 같은 폴더에 manifest 가 있으면 이름을 싣는다(없으면 엣지가 규칙 이름으로 찾다가 '서명 없음' 으로 거부한다).
+        if (fs.existsSync(path.join(d, manifestName(m[1])))) e.manifest = manifestName(m[1]);
+        byVer.set(m[1], e);
+      } catch { /* */ }
     }
   }
   const versions = [...byVer.values()].sort((a, b) => cmp(b.version, a.version));

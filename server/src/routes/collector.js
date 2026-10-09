@@ -12,6 +12,7 @@ import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
+import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
 import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
@@ -242,7 +243,9 @@ collectorRouter.post('/upgrade',
     // without configuring UPGRADE_INSTALL_DIR explicitly.
     const installDir = upgradeManager.settings.installDir || config.appRoot;
     const force = String(req.query.force) === 'true';
-    const result = upgradeFromBundleBytes(req.body, installDir, currentVersion(), upgradeManager.settings.packageName, { allowSame: force });
+    // v2.730(검토 S-10): 배포자 서명 — 이 수집기가 가진 신뢰 공개키로 설치 전에 검증한다(force 재설치도 같다).
+    const result = upgradeFromBundleBytes(req.body, installDir, currentVersion(), upgradeManager.settings.packageName,
+      { allowSame: force, manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector' });
     res.json(result);
     if (result.ok && String(req.query.restart) === 'true') setTimeout(() => restartProcess(), 250);
   });

@@ -14,8 +14,12 @@ import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
 import DataList from '../components/DataList.jsx';
 const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx')); // v2.560 — '빈 인벤토리' 원인·로그·조치
+// 2026-10-09 검토 S-09(그룹 J): 중앙↔엣지 전송 보호 — 평문 HTTP 는 승인된 예외만(판정은 서버, 문장은 transportText).
+import TransportPanel from './collectors/TransportPanel.jsx';
+import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 
-const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
+// S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
+const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
 
 export default function Collectors() {
   const [data, setData] = useState(null);
@@ -105,7 +109,15 @@ export default function Collectors() {
   if (!data) return <Loading />;
 
   const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); setShowToken(false); };
-  const openEdit = (c) => { setEditing(true); setForm({ ...EMPTY, ...c, token: '' }); setMsg(null); setShowToken(false); };
+  // S-09: 거부 기록의 '예외로 등록' — 이름·주소를 채우고 예외 칸을 연다(토큰·사유는 관리자가 넣는다).
+  const openAddPrefill = (r) => { setEditing(false); setForm({ ...EMPTY, id: r?.name || '', name: r?.name || '', url: r?.url || 'https://', allowInsecureHttp: true }); setMsg(null); setShowToken(false); };
+  // 수정 폼은 기존 예외(관리자 승인)를 그대로 보여 준다 — 같은 사유로 다시 보내면 서버가 승인자·시각을 덮지 않는다.
+  const openEdit = (c) => {
+    setEditing(true);
+    setForm({ ...EMPTY, ...c, token: '', _origUrl: c.url || '',
+      allowInsecureHttp: c.insecureHttp?.source === 'admin', insecureHttpReason: c.insecureHttp?.source === 'admin' ? String(c.insecureHttp.reason || '') : '' });
+    setMsg(null); setShowToken(false);
+  };
   const close = () => { setForm(null); setMsg(null); setShowToken(false); };
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -131,7 +143,8 @@ export default function Collectors() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = editing ? await putJson(`/admin/collectors/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/collectors', form);
+      const { _origUrl, ...payload } = form; // 화면 전용 필드는 보내지 않는다
+      const r = editing ? await putJson(`/admin/collectors/${encodeURIComponent(form.id)}`, payload) : await postJson('/admin/collectors', payload);
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: URL 이 바뀌어 저장 토큰 폐기(서버가 싣는 경우)
       if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }
       else if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
@@ -316,6 +329,9 @@ export default function Collectors() {
 
       <IngestStats data={ingest} onReset={resetIngest} />
 
+      {/* S-09: 평문 HTTP 수집 서버·이 포탈의 TLS 리스너·사설 CA·거부된 자기등록 */}
+      <TransportPanel transport={data.transport} onApprove={openAddPrefill} />
+
       {/* 엣지별 개별 central 토큰 — 공유 토큰 1개면 엣지 1대 침해로 전 사이트 자격증명이 노출된다. */}
       <details className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
@@ -408,6 +424,7 @@ export default function Collectors() {
                   <td>{c.datacenter ? <span className="badge blue">{c.datacenter}</span> : <span className="muted">—</span>}</td>
                   <td className="muted">{c.url}
                     {c.managed && <span className="badge gray" style={{ marginLeft: 6 }} title="관리자가 수동 수정한 항목 — 엣지 자기등록이 URL/토큰을 덮어쓰지 않습니다">🔒 고정</span>}
+                    {(() => { const b = transportBadge(c.transport); return b ? <span className={`badge ${b.tone}`} style={{ marginLeft: 6 }} title={b.title}>{b.label}</span> : null; })()}
                   </td>
                   <td>{!s ? <span className="badge gray">대기</span>
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
@@ -472,7 +489,26 @@ export default function Collectors() {
                   <option value="0">중지</option>
                 </Select>
               </label>
-              <label style={{ gridColumn: '1 / -1' }}>수집 서버 URL *<input className="input" value={form.url} onChange={setF('url')} placeholder="http://10.10.0.5:4000" /></label>
+              <label style={{ gridColumn: '1 / -1' }}>수집 서버 URL *<input className="input" value={form.url} onChange={setF('url')} placeholder="https://10.10.0.5:4443" /></label>
+              {(() => {
+                // S-09: 평문 HTTP 주소면 저장 전에 말하고 예외(사유) 칸을 연다 — 저장 판정은 서버가 다시 한다.
+                const note = formHttpNote({ url: form.url, editing, originalUrl: form._origUrl });
+                if (!note) return null;
+                return (
+                  <div style={{ gridColumn: '1 / -1', padding: '9px 12px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.6, minWidth: 0,
+                    background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.30)', color: '#fbbf24', overflowWrap: 'anywhere' }}>
+                    ⚠ {note.text}
+                    <label className="flex gap" style={{ alignItems: 'center', marginTop: 8, cursor: 'pointer', color: 'var(--text)', flexWrap: 'wrap' }}>
+                      <input type="checkbox" checked={!!form.allowInsecureHttp} onChange={(e) => setForm((f) => ({ ...f, allowInsecureHttp: e.target.checked }))} />
+                      평문 HTTP 예외 승인(VPN·IPsec 등 별도로 보호된 구간)
+                    </label>
+                    {form.allowInsecureHttp && (
+                      <input className="input" style={{ marginTop: 6, width: '100%', minWidth: 0 }} value={form.insecureHttpReason || ''} maxLength={200}
+                        onChange={setF('insecureHttpReason')} placeholder="사유(3~200자) — 예: IPsec 터널 안 구간" />
+                    )}
+                  </div>
+                );
+              })()}
               <label style={{ gridColumn: '1 / -1' }}>토큰 (COLLECTOR_TOKEN) {editing && <span className="muted">(비우면 유지)</span>}
                 <div className="flex gap" style={{ alignItems: 'stretch' }}>
                   <input className="input" style={{ flex: 1 }} type={showToken ? 'text' : 'password'} value={form.token} onChange={setF('token')} placeholder={editing ? '••••••' : '에이전트의 COLLECTOR_TOKEN'} />
@@ -903,6 +939,12 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // S-09: 가져오기 전체의 평문 HTTP 예외(사유) — 바꾸면 다시 검증해야 한다(드라이런과 실행이 같은 판정).
+  const [httpEx, setHttpEx] = useState(false);
+  const [httpReason, setHttpReason] = useState('');
+  const [checkedKey, setCheckedKey] = useState(null);
+  const httpBody = () => (httpEx ? { allowInsecureHttp: true, insecureHttpReason: httpReason } : {});
+  const curKey = `${httpEx ? 1 : 0}|${httpEx ? httpReason : ''}`;
   const onFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -913,20 +955,20 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
   const verify = async () => {
     setBusy(true); setErr(null); setResult(null); setCheck(null); setAllowOverwrite(false);
     try {
-      const r = await postJson('/admin/collectors/import', { csv: text, dryRun: true });
+      const r = await postJson('/admin/collectors/import', { csv: text, dryRun: true, ...httpBody() });
       if (r.ok === false) setErr(r.reason);
-      else { setCheck(r); setCheckedText(text); }
+      else { setCheck(r); setCheckedText(text); setCheckedKey(curKey); }
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const run = async () => {
     setBusy(true); setErr(null); setResult(null);
     try {
-      const r = await postJson('/admin/collectors/import', { csv: text, overwrite: allowOverwrite });
+      const r = await postJson('/admin/collectors/import', { csv: text, overwrite: allowOverwrite, ...httpBody() });
       if (r.ok === false) setErr(r.reason);
       else setResult(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
-  const verified = check && checkedText === text; // 검증 후 내용이 바뀌면 재검증 요구
+  const verified = check && checkedText === text && checkedKey === curKey; // 검증 후 내용·예외가 바뀌면 재검증 요구
   const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
@@ -956,7 +998,7 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
               {' · '}<span style={{ color: 'var(--amber)' }}>덮어쓰기 {check.summary.overwrite}</span>
               {' · '}<span style={{ color: check.summary.error ? 'var(--red)' : 'var(--text-dim)' }}>오류 {check.summary.error}</span>
               {' · '}토큰 교체 {check.summary.withToken}건
-              {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
+              {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용·예외가 변경됨 — 재검증 필요</b>}
             </div>
             <div className="table-wrap" style={{ maxHeight: '26vh' }}>
               <STable>
@@ -975,6 +1017,17 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
                 </tbody>
               </STable>
             </div>
+            {/* S-09: 평문 HTTP 행 — 예외(사유)를 승인하면 다시 검증한다 */}
+            {Number(check.insecureRows) > 0 && !result && (
+              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.6, background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.30)', color: '#fbbf24', minWidth: 0, overflowWrap: 'anywhere' }}>
+                ⚠ {importHttpNote(check, { approved: httpEx })}
+                <label className="flex gap" style={{ alignItems: 'center', marginTop: 6, cursor: 'pointer', color: 'var(--text)', flexWrap: 'wrap' }}>
+                  <input type="checkbox" checked={httpEx} onChange={(e) => setHttpEx(e.target.checked)} />
+                  평문 HTTP 예외 승인(이 가져오기의 평문 주소 전체)
+                </label>
+                {httpEx && <input className="input" style={{ marginTop: 6, width: '100%', minWidth: 0 }} value={httpReason} maxLength={200} onChange={(e) => setHttpReason(e.target.value)} placeholder="사유(3~200자) — 예: 전용선 구간" />}
+              </div>
+            )}
             {/* 덮어쓰기 확인(사용자 요구) — 명시 체크 없이는 기존 항목을 건드리지 않는다. */}
             {verified && check.summary.overwrite > 0 && !result && (
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 12.5, marginTop: 8, cursor: 'pointer', color: 'var(--amber)' }}>

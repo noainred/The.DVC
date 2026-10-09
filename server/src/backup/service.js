@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { createYielder } from '../util/timeSlice.js';
-import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
+import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 
@@ -85,7 +85,9 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   // v2.630(감사 A4-04): 성능점검 엣지 배정 — 엣지 pull(markPulled → pulledAt)·적용 회신(ack · state 전이)마다 파일 전체를 다시 쓴다.
   //   배정 1회 변경당 엣지마다 추가 write 2회, 적용이 오류로 끝나면 5분 pull 마다 반복돼 자동 사유 보관 칸을 잡음 백업이 채웠다.
   //   필드 이름이 last* 가 아니라 아래 MIXED_EXTRA_RUN_FIELDS 로 따로 지정한다(이름을 바꾸면 화면·엣지 계약이 바뀐다).
-  'central-svcmon-assign.json']);
+  'central-svcmon-assign.json',
+  // 2026-10-09 검토 S-01·S-02: 장비 지문 신뢰(peer-trust.json)는 승인·정책(설정)과 연결마다 바뀌는 lastSeen·lastSeenCount(실행)를 한 파일에 둔다.
+  'peer-trust.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
 /**
@@ -344,7 +346,7 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
   ensureDir();
   let restored = 0;
   const failed = [];   // [{file, reason}] — 쓰기에 실패한 파일(v2.689 G2 B4)
-  let envRestored = 0; const envDropped = [];
+  let envRestored = 0; const envDropped = []; const envPinned = [];
   for (const [name, content0] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
     if (base === REDACTED_META || base === SKIPPED_META) continue; // 메타 키는 파일이 아니다
@@ -356,6 +358,9 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
       let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
       const m = mergeRedactedEnv(String(content0), cur);
       content = m.text; envRestored += m.restored; envDropped.push(...m.dropped.map((k) => `${base}:${k}`));
+      // 2026-10-09 검토 S-10: 보안 스위치(서명 정책·TLS 예외·인증)는 호스트 값을 유지한다 — 복원이 보호를 약하게 만들지 못하게.
+      const p = pinHostSecurityEnv(content, cur);
+      content = p.text; envPinned.push(...p.pinned.map((k) => `${base}:${k}`));
     }
     // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 users.json 같은 핵심 설정이 부분기록으로
     // 손상된 채 남는다(복원이 오히려 파손 유발). tmp+rename으로 온전본만 남긴다.
@@ -364,7 +369,7 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
     catch (e) { failed.push({ file: base, reason: String(e?.code || e?.message || e).slice(0, 200) }); }
   }
   if (failed.length) console.warn(`[backup] 복원 실패 ${failed.length}개: ${failed.map((f) => `${f.file}(${f.reason})`).join(', ').slice(0, 500)}`);
-  return { restored, failed, edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped };
+  return { restored, failed, edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned };
 }
 
 /** 업로드된 gzip 아카이브 버퍼를 파싱. */

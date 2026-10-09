@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { areasStopNote, areaBadgeSuffix } from './areasStopText.js';
+import { areasStopNote } from './areasStopText.js';
 
 describe('areasStopText (v2.598 T2598-01)', () => {
   it('멈추지 않았으면 안내가 없다', () => {
@@ -19,11 +19,5 @@ describe('areasStopText (v2.598 T2598-01)', () => {
       const n = areasStopNote({ areasStopped: k, areasNotTried: 1 });
       expect(n.text + n.fix).not.toContain('`');
     }
-  });
-  it('미시도와 비활성을 다른 배지로 그린다', () => {
-    expect(areaBadgeSuffix({ skipped: true, notTried: true })).toBe(' (미시도)');
-    expect(areaBadgeSuffix({ skipped: true })).toBe(' (비활성)');
-    expect(areaBadgeSuffix({ ok: 3, failed: 1 })).toBe(' 3/4');
-    expect(areaBadgeSuffix({ ok: 3, failed: 0 })).toBe('');
   });
 });

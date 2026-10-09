@@ -34,12 +34,25 @@
 - **secretVault 정책 fail-safe(보안 다운그레이드 금지)**: `secrets-policy.json` 손상 시 plain 으로 조용히
   폴백하지 않는다 — 직전 유효 정책(`_lastGoodPolicy`)을 유지하고 암호화였다면 보안 경고를 출력한다.
   손상→plain 폴백은 이후 자격증명 저장을 무음 평문화한다.
+  ⚠⚠ **S-07(2026-10-09 검토 — 재현)**: 위 규칙은 **첫 load 한 번만** 지켜졌다 — preserveCorrupt 가 원본을 옆으로 치워 둘째 load 는
+  '파일 없음' 으로 plain, 재시작이면 처음부터 plain, `{}`·모르는 mode 도 plain, mode 없는 저장(레벨만 변경)도 plain 이었다. 이제
+  ① 정책은 **mode 가 있고 알려진 값일 때만** 유효(아니면 손상과 같이 보존) ② 못 읽으면 직전 정책 → 신뢰 사본(`secrets-policy.trusted.json`,
+  저장·정상 load 때 맞춘다) ③ 둘 다 없고 '파일 없음' 이며 암호화 흔적(키 파일·봉인 값·`secrets-policy.json.corrupt.*`)도 없을 때만 신규 설치 plain
+  ④ 그 밖은 **잠금** — `sealSecret`/`sealSecretsDeep` 이 새 비밀을 `SECRETS_POLICY_UNAVAILABLE` 로 던지고 기존 암호문은 재사용 기억으로 그대로 쓴다
+  ⑤ 저장은 undefined 키를 '유지' 로 보고 모르는 mode 를 거부, `migrateSecretFiles` 도 정책이 아닌 값을 거부. 정책 파일을 자동으로 다시 쓰지 않고
+  키를 만들지 않는다(암호화를 켜는 저장만 키를 미리 준비 — 없을 때만). 회귀 `test/secretsPolicyS07.test.js`(실제 NSX 등록부 저장 + 실제 PUT 라우트 · 변이 16/16).
 - **SSRF 재검증에 타임아웃 없는 DNS 조회를 핫패스에 넣지 말 것**: `ssrfBlockReasonResolved` 는 타임아웃이
   없어 폴러 루프에서 매 점검마다 부르면 DNS 지연이 이벤트 루프를 막는다(svcmon 비-HTTP 재검증 보류 사유).
   실행시점 재검증이 필요하면 `dns.lookup`(타임아웃)+`ipBlockReason` 후 그 IP 로 직접 접속(uagmon 핀 패턴).
 
 - **전역 TLS 디스패처 금지**: `setGlobalDispatcher`로 프로세스 전체 fetch의 인증서 검증을 끄지 않는다(과거 vCenter용 설정이 업그레이드 번들·NSX까지 오염). 자체서명이 필요한 곳만 로컬 디스패처를 `dispatcher:` 옵션으로 주입한다(`vcenter/restClient.js vcDispatcher`, `nsx/client.js`, `util/resilientFetch.js wanAgent`).
 - **WAN(중앙↔엣지) TLS 기본 검증 ON**: `WAN_TLS_INSECURE`는 `=== 'true'`일 때만 검증 해제. 의미를 반전시키지 말 것(과거 '미설정=검증 off'였고 그 구간으로 토큰·자격증명이 흐른다).
+- **중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(2026-10-09 S-09, 사용자 승인 기본값 전환): 판정은 `collector/transportPolicy.js evaluateCollectorUrl` 하나 —
+  등록부 normalize 가 모든 경로(화면·CSV·자기등록·배포 자동등록·배포 대상 동기화)를 덮는다. 원격 http 는 ⓐ 저장값과 같은 URL(업그레이드 전 항목 — 경고) ⓑ 관리자 예외
+  (`allowInsecureHttp` + 사유, 감사) ⓒ `COLLECTOR_HTTP_ALLOW` 일 때만이고 그 밖은 400 `insecure-http`. 자기등록은 예외를 만들 수 없고 저장된 https 를 http 로 하향할 수 없다.
+  URL 이 바뀌면 예외를 승계하지 않는다. 스킴 없는 주소는 https. 포탈 직접 TLS 는 `util/httpsServer.js`(TLS_CERT_FILE·TLS_KEY_FILE, 설정이 틀리면 fail-closed —
+  평문으로 내려가지 않는다), 사설 CA 는 `WAN_TLS_CA_FILE`(기본 신뢰 저장소에 덧붙인다 — 대체하지 않는다). `resilientFetch` 는 https→http 리다이렉트를 따라가지 않는다.
+  광고 URL 은 TLS 리스닝일 때만 https(`advertisedListen` — 지어내지 않는다). 회귀 `test/rvJ_s09Transport.test.js`.
 - **상태변경 라우트 RBAC**: `/api` 의 POST/PUT/PATCH/DELETE에는 `requireRole('admin','operator')`를 붙인다(읽기성 POST 제외). WS SSH/RDP 게이트웨이도 역할을 검사한다.
   - ✅ **수정됨(v2.313)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)에 `requirePerm('remote.access')`
     추가 + 소유자 없는 매핑은 admin 전용으로 보정(과거 `m.owner && …` 단락으로 소유자 없는 레거시 매핑을
@@ -69,6 +82,9 @@
     실제 방어는 토큰 + TLS(`upgradeAgent`·https 엣지)이고, 이 검사를 근거로 그 둘을 약화하지 말 것. 원격 다운로드
     (`verifyBundleSha`)는 sha 를 별도 TLS 채널(versions.json)에서 받으므로 건전하다. 진짜 push 무결성은 수신측 키 서명
     (rma/signing.js HMAC 패턴)이 필요하다 — 별건.
+  - ✅ **2026-10-09 S-10 — 위 두 줄의 '별건' 은 Ed25519 서명 manifest 로 해결했다**(`upgrade/signature.js decideSignature` 하나). 그리고 v2.591 이 '원격 다운로드는
+    건전하다' 고 적은 것도 정정한다 — versions.json 의 sha 는 번들과 **같은 채널**(롤링 릴리스·사내 미러)에서 오므로 미러·배포 토큰을 가진 쪽이 둘을 함께 바꿀 수 있다
+    (재현). sha256 은 전송 손상만 잡고, 배포자 확인은 미리 고정한 공개키로 한 서명 검증이 한다. 같은 채널에서 온 SHA·탈취 가능한 전송 토큰 HMAC 을 배포자 서명으로 오인하지 말 것.
   - **연결 테스트는 저장 비밀번호를 물려받을 때 host/url 도 저장값으로 고정**(v2.480): vCenter·NSX·Horizon·iDRAC `testConnection`/`testServer`·수집 서버 `/collectors/test`·SMTP·PDU·베어메탈·GPU 게스트 테스트 전부 `{...saved, ...body}` 병합에서 host/url/ip 를 요청값으로 두면 저장 비밀번호가 공격자 호스트로 평문 전송된다(uagmon M3 클래스). 새 "저장 항목 테스트" 를 만들 때 같은 규칙.
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
@@ -309,8 +325,12 @@
   express.raw 본문 한도는 MAX_BUNDLE_BYTES 근처(210mb)로 유지.
 - **verifyPassword 는 해시/솔트 길이를 검증**(`auth/auth.js`, L-7): `scrypt$<32hex salt>$<128hex hash>` 규격 미달(특히 빈
   해시)은 즉시 false — 손상/주입 해시가 만능키가 되지 않게. 회귀 테스트: `test/security2026-09-12.test.js`.
-- **REST 수집기 TLS 검증 옵트인**(`storage/collectors/*`·`sanswitch/collectors/fosRest.js`, M-4): `STORAGE_TLS_VERIFY`/
-  `SANSWITCH_TLS_VERIFY` 로 켤 수 있게 하되 기본은 자체서명 허용(기존 동작). 전역 디스패처로 바꾸지 말 것.
+- **장비 TLS 상대 인증 — 판정은 `security/tlsTrust.js` 하나**(2026-10-09 S-02, 사용자 승인 기본값 전환 — 예전 M-4 '기본은 자체서명 허용' 을 대체):
+  자격증명을 보내는 장비 클라이언트(vCenter·NSX·iDRAC/OME·Horizon·스토리지 REST·Isilon·SAN REST·CVP)는 Agent 의 connect 를 `deviceTlsConnect` 로 만든다 —
+  CA 체인(시스템 + `CONFIG_DIR/tls-ca-bundle.pem`) 또는 peerTrust 승인 지문만, 판정은 핸드셰이크 직후·요청 전. env 미설정=판정 · `true`=엄격 · `false`=명시적 예외
+  (상태 `exceptions`·자가진단 relax-switches). 새 장비 클라이언트는 이 함수를 쓸 것(`rvI_tlsTrust` ⑨ 스윕이 9개 파일을 고정). 거부 오류(`ERR_TLS_PEER_UNTRUSTED`)에
+  `authFailed` 를 붙이지 말 것 — authGuard 가 인증 정지로 읽는다. 무인증 probe(자격증명 없음)만 판정 밖이고 그 dispatcher 로 로그인하지 말 것(idrac probeDispatcher).
+  재개 세션은 인증서를 다시 보내지 않으므로 판정 통과 세션만 기억한다. 전역 디스패처로 바꾸지 말 것. (v2.574 SEC-16 'Horizon 기본값은 그대로 둔다' 도 이 결정으로 대체됐다.)
 - **.gitignore 는 SECRET_FILES 를 모두 포함**(L-8): `SECRET_FILES ⊆ .gitignore` 를 유지하고, 런타임 DB 는 `server/config/*.db`
   와일드카드로 선차단한다. 배포 기본값(`ipam-scan.json`)에 활성 스캔을 커밋하지 말 것(L-9 — 없으면 스캔 기본 비활성).
 
@@ -794,3 +814,44 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - `SAFE_ACTIONS` 는 데모 데이터만 바꾸는 수집·점검이다. 실제 장비·네트워크에 닿는 실행을 넣지 말 것. `READ_DENY` 는 설정·계정·비밀 조회를 막는다 — 새 설정 API 접두는 여기에도.
 - WS SSH/RDP 게이트웨이(`proxy/sshGateway.js`·`guacdTunnel.js`)는 `user.demoGuest` 를 거부한다(미들웨어를 타지 않는다).
 - live/auto 에서는 데모 계정이 예전처럼 viewer 다(`demoGuestOf` 가 `getDataSource()==='mock'` 을 본다) — 판정을 저장 레코드만으로 바꾸지 말 것.
+
+## 2026-10-09 검토 보고서 — 세션·AD(S-03·S-05·S-06·S-08) — 되돌리지 말 것
+
+- **세션 판정은 `resolveTokenUser` 한 곳**이다 — 순서 not-before → 폐기 → 총 상한(`lt` 기준) → 유휴(`auth/sessionPolicy.js`·`sessionState.js`, 파일 `session-state.json`).
+  활동으로 세는 것은 로그인·연장·`POST /auth/activity`(화면 입력 신호, 분당 1회 이하)뿐이고 **폴링은 활동이 아니다**(폴링을 세면 유휴 판정이 영원히 오지 않는다).
+- **로그아웃·폐기는 서버가 기억한다**(`POST /auth/logout` — 화면은 토큰을 지우기 **전에** 서버에 알린다). 폐기는 즉시 파일에 쓰고 재시작해도 유지되며 노드별이다.
+  폐기 이벤트는 `auth/sessionRevocation.js`(잎 모듈)로 알린다 — WS 게이트웨이가 구독해 열린 콘솔을 끊는다(S-04, 아래 절).
+- **AD 토큰은 `src`·`ep`·`sid` 를 싣고 `AD_SESSION_MAX_HOURS`(기본 12) 상한**이다 — AD 쪽 계정 잠금·비활성이 포탈에 반영되는 최대 지연이 이 값이다. 카운터를 되돌려도 폐기된 토큰은 부활하지 않는다.
+  ⚠ 로컬 계정과 같은 이름의 AD 로그인 거부(v2.681 R2B-01)는 그대로다.
+- **평문 AD 의 새 저장은 거부한다**(`ldap://` simple bind — 비밀번호가 평문으로 흐른다). 기존 설정은 경고만(자가진단 `ad-transport`). StartTLS(`AD_STARTTLS`)는 **업그레이드 성공을
+  확인한 뒤에만** bind 하고, 인증서 검증 표지는 명시적 `false` 만 끈다(`tlsRejectUnauthorized: null` = 검증).
+- 업그레이드 직후 옛 탭은 한 번 로그아웃될 수 있다(새 토큰 형식) — 릴리스 노트가 말한다. 회귀 `test/rvF_*.test.js`.
+
+
+## 2026-10-09 검토 보고서 — SSH 호스트키·원격 콘솔 세션·출력 백프레셔(S-01·S-04·I-07) — 되돌리지 말 것
+
+- **SSH 는 인증 전에 호스트키를 확인한다**(`proxy/sshExec.js makeSshHostVerifier` + `security/peerTrust.js checkPeer`, S-01 — 사용자 승인 기본값 전환):
+  ssh2 는 `hostVerifier` 가 없으면 어떤 키든 받는다(수정 전 재현: 다른 키의 가짜 서버에 **비밀번호가 도착**했다). 공통 connect·웹 SSH 게이트웨이가 같은
+  verifier 를 쓰고, 거부면 ssh2 가 키 교환 안에서 끊어 비밀번호를 보내지 않는다. **새 SSH 접속은 반드시 `withSsh`/sshExec connect 경유** — ssh2 를
+  직접 여는 코드를 만들면 이 확인이 빠진다(`grep -rln "from 'ssh2'" server/src` 로 확인: 접속은 sshExec·sshGateway·linkcheck 셋뿐).
+  · 정책: **새 설치 enforce · 기존 현장 observe**(처음 보는 키는 기록 후 통과, **바뀐 키는 거부**). 기존 현장 판정은 `EXISTING_MARKERS`(장비 등록부 19종 —
+    SSH 를 쓰는 등록부를 새로 만들면 여기에 넣을 것. 빠지면 그것만 쓰던 현장이 업그레이드 직후 SSH 가 전부 끊긴다). env `SSH_HOSTKEY_POLICY` 가 강제.
+    손상 파일은 보존 후 두 종류 모두 enforce(닫는 쪽).
+  · 거부 오류 `sshHostKeyError`(code `SSH_HOSTKEY_UNTRUSTED`, 문구 끝 `[SSH_HOSTKEY_UNTRUSTED]`, `level:'host-key'`). TLS 거부(`ERR_TLS_PEER_UNTRUSTED`)와 함께
+    **인증 실패가 아니다** — `util/authGuard.js isAuthFailureText` 와 `util/errors.js describeError` 가 표지(`PEER_REJECT_MARKERS`)를 **먼저** 본다. 지문 base64 속
+    '+401/' 같은 조각이 주기 수집을 '인증 정지' 시키지 않게(재현 픽스처: 주소 'array-403'). 표지 문자열을 바꾸면 그 상수도 같이 바꿀 것(테스트가 대조).
+  · 통신 점검(`linkcheck/protocols.js`)은 **관찰만**(`peekPeer` — 상태를 바꾸지 않는다). checkPeer 를 부르면 5분 점검이 observe TOFU 를 대신 해 버린다.
+    설정 전수 점검은 등록 호스트 이름을 넘긴다(`stepSsh(…, { host })` — IP 로만 찾으면 이름으로 승인한 키가 '미등록' 이 된다).
+  · 관리 API `/api/admin/security/peer-trust*` 6개는 adminOnly + fleetOnly(정책 변경은 + requireSettingsOwner), 승인은 본문 `confirmVerified:true` 필수 · 전부 감사 로그.
+    화면 설정 › 보안 › 장비 신뢰(`PeerTrustSettings.jsx`, 키 `peer-trust`) — 폴링 없음.
+- **열린 원격 콘솔도 세션 폐기를 따른다**(`proxy/sshGateway.js` 원격 세션 레지스트리 — SSH·RDP 공용, S-04): 업그레이드 때 한 번만 보던 토큰을
+  ① 폐기 이벤트(`onSessionRevoked` — 로그아웃·삭제·강등·비번 변경·sid 교체) ② 토큰 exp 시각 타이머 ③ `REMOTE_REVALIDATE_MS`(기본 30초) 재검증으로 다시 본다.
+  재검증은 **업그레이드 게이트와 같은 함수** `remoteUserIssue(resolveTokenUser(token))` + 계정 동일성 + 매핑 소유·범위다(판정을 둘로 두지 말 것).
+  닫힘 코드 4401(무효)·4403(권한·범위·호스트키)·4404(매핑 없음)·4429(동시 세션 초과) — 웹 `remote/sshSend.js sshCloseReasonText` 와 1:1(웹 테스트가 서버 소스에서 코드를 뽑아 대조).
+  · 세션 연장: SSH `{type:'token', token}` → `{type:'token-ack', ok, code}` · RDP `dvc-token` Guacamole 명령(guacd 로 넘기지 않는다) — **같은 계정·같은 sid·지금 권한**일
+    때만 교체. 웹은 `remote/tokenRenew.js`(SessionExpiryGuard 가 `/auth/extend` 성공 뒤 알린다) — 이 배선을 지우면 연장해도 옛 만료 시각에 콘솔이 닫힌다.
+  · 콘솔 입력(SSH data · RDP key/mouse/touch)은 활동이다 — 연결마다 1분 1회 `touchSessionActivity`. RDP 를 닫을 때는 **guacd 소켓을 먼저 destroy**.
+  · 한계(정직): 폐기 이벤트는 프로세스 단위다. 이벤트 없는 변경(콘솔 도구로 users.json 수정)은 재검증 주기만큼 늦게 닫힌다.
+- **웹 SSH 출력은 백프레셔를 건다**(I-07): `ws.bufferedAmount ≥ high(1MB)` 면 SSH 스트림을 pause(ssh2 창 흐름 제어로 대상 쓰기가 막힌다), `≤ low(256KB)` 면 resume.
+  멈춘 채 60초면 4008, 대기열이 8MB 를 넘으면(pause 를 듣지 않는 스트림) 4009. 계정당 동시 세션 `REMOTE_MAX_SESSIONS_PER_USER`(기본 20, 0=끔). UTF-8 은 `StringDecoder`
+  로 잇는다. 최악 메모리 ≈ 세션당 3MB × 전체 상한 80. 회귀 `test/rvH_*.test.js`(변이 44/46 — 남은 2종은 동등 변이).

@@ -9,6 +9,7 @@
 
 import { config, currentVersion } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { advertisedListen } from '../util/httpsServer.js'; // 2026-10-09 검토 S-09
 
 const RETRY_MS = 60_000;           // 실패(중앙 미기동 등) 재시도
 const REANNOUNCE_MS = 6 * 3_600_000; // 성공 후 재알림
@@ -34,7 +35,8 @@ export async function registerOnce() {
   try {
     const body = {
       name: config.agent.name,
-      port: config.port,
+      // 2026-10-09 검토 S-09: TLS 로 받고 있으면 그 포트·https 를 알린다(아니면 예전과 같은 PORT·http).
+      ...(() => { const a = advertisedListen(config.port); return { port: a.port, scheme: a.scheme }; })(),
       collectorToken: config.collector.token,
       datacenter: config.collector.datacenter || '',
       urlHint: (process.env.EDGE_ADVERTISE_URL || '').trim(),

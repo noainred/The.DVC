@@ -14,6 +14,7 @@
 
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../../util/ssrfLookup.js';
+import { deviceTlsConnect } from '../../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
@@ -29,10 +30,10 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 
-// Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
-// 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
+// Isilon 전용 로컬 TLS 디스패처(다른 fetch 에 주입 금지). 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다 —
+// 미설정 = CA 체인 또는 장비별 승인 지문 · STORAGE_TLS_VERIFY=true 엄격 · =false 명시적 예외(restCommon.js 와 같은 env).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
-const isilonDispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' }) });
+const isilonDispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'storage', envKey: 'STORAGE_TLS_VERIFY', envRaw: process.env.STORAGE_TLS_VERIFY, tls: withSsrfLookup({}) }) });
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
 // v2.605(TIM2605-04): 음수·2^31 초과 env 는 AbortSignal.timeout 의 RangeError·즉시 중단이 된다 → [1초, 10분].
 const TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_HTTP_TIMEOUT_MS, 15_000);

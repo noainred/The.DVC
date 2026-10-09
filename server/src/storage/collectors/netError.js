@@ -46,10 +46,12 @@ const BY_CODE = {
   ENOTFOUND: ['호스트 이름을 찾을 수 없습니다', 'DNS 또는 등록한 호스트명 확인(IP 로 등록 권장)'],
   EAI_AGAIN: ['이름 해석에 실패했습니다', '수집 서버의 DNS 설정 확인'],
   EPROTO: ['TLS 협상에 실패했습니다', 'HTTPS 포트가 맞는지 확인(HTTP 포트에 HTTPS 로 접속하면 이렇게 됩니다)'],
-  ERR_TLS_CERT_ALTNAME_INVALID: ['인증서의 호스트명이 접속 주소와 다릅니다', 'STORAGE_TLS_VERIFY 를 끄거나 인증서를 교체'],
-  CERT_HAS_EXPIRED: ['장비 인증서가 만료되었습니다', '인증서 갱신 또는 STORAGE_TLS_VERIFY 해제'],
-  DEPTH_ZERO_SELF_SIGNED_CERT: ['자체서명 인증서가 거부되었습니다', 'STORAGE_TLS_VERIFY=true 로 켜져 있다면 사설 CA 등록 필요'],
-  SELF_SIGNED_CERT_IN_CHAIN: ['인증서 체인에 자체서명이 있습니다', '사설 CA 를 신뢰 목록에 등록하거나 STORAGE_TLS_VERIFY 해제'],
+  // 2026-10-09 S-02: 스토리지 REST 의 인증서 판정은 security/tlsTrust.js 가 하고 거부는 ERR_TLS_PEER_UNTRUSTED 로 온다(위 분기).
+  //   아래 코드는 그 판정을 거치지 않는 경로에서만 남는다 — 조치는 '검증 해제' 가 아니라 사설 CA 등록·지문 승인이다.
+  ERR_TLS_CERT_ALTNAME_INVALID: ['인증서의 호스트명이 접속 주소와 다릅니다', '인증서를 교체하거나 장비 신뢰 화면에서 지문을 승인'],
+  CERT_HAS_EXPIRED: ['장비 인증서가 만료되었습니다', '인증서 갱신 또는 장비 신뢰 화면에서 지문 승인'],
+  DEPTH_ZERO_SELF_SIGNED_CERT: ['자체서명 인증서가 거부되었습니다', '장비 신뢰 화면에서 지문을 승인하거나 사설 CA 등록(CONFIG_DIR/tls-ca-bundle.pem)'],
+  SELF_SIGNED_CERT_IN_CHAIN: ['인증서 체인에 자체서명이 있습니다', '사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록'],
   UNABLE_TO_VERIFY_LEAF_SIGNATURE: ['인증서를 검증할 수 없습니다', '중간 CA 누락 — 장비 인증서 체인 확인'],
 };
 
@@ -74,6 +76,14 @@ export function describeFetchError(err, { host = '', port = 443, timeoutMs = 0, 
   if (/TimeoutError|The operation was aborted|This operation was aborted|HeadersTimeout|BodyTimeout/i.test(text)) {
     const sec = timeoutMs > 0 ? `${Math.round(timeoutMs / 1000)}초` : '제한 시간';
     return `${where}응답이 없습니다(${sec} 초과) — 방화벽·ACL 차단이거나 장비 관리 서비스가 응답하지 않는 상태입니다`;
+  }
+
+  // 2026-10-09 S-02: 인증서 상대 인증 거부(security/tlsTrust.js)는 그 문구가 곧 조치다(대상·제시된 지문·승인 경로) —
+  //   아래 'fetch failed' 갈래로 보내면 120자로 잘려 지문이 사라진다. 문구에 대상이 들어 있으므로 where 를 다시 붙이지 않는다.
+  if (code === 'ERR_TLS_PEER_UNTRUSTED') {
+    for (let e = err, i = 0; e && i < 5; e = e.cause, i += 1) {
+      if (e.code === code && e.message) return String(e.message);
+    }
   }
 
   const hit = BY_CODE[code];

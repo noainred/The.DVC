@@ -1027,6 +1027,34 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **서버 부품 요약(`idrac/serverParts.js`)은 표시 전용**이다 — 판정은 `partfault/extract/idrac.js` 를 그대로 쓰고 **partfault DB·전이·알림에 쓰지 않는다**(중앙이 위임 장비를
       판정하면 같은 부품이 두 번 열린다 — v2.548). 목록 `GET /admin/idrac` 은 `?parts=1` 일 때만 싣는다(V4·관제 콘솔 60초 폴링에는 없다) · 범위로 자른 뒤에만 · 15ms 양보.
       상세의 '파트 장애' 칸은 DB 파일이 없으면 열지도 만들지도 않는다(`partFaultDbExists`). 인벤토리 없음·불통·Systems 실패·구버전 엣지는 판정 불가(0건이라 말하지 않는다).
+  - ⚠⚠ **2026-10-09 검토 보고서 개선(기준 v2.729.0 · 20건) — 되돌리지 말 것**(사용자 제공 `DVC-CLAUDE-CODE-REVIEW-2026-10-09.md`. 항목마다 실패하는 회귀
+    테스트 → 최소 수정 → 변이 검증. 테스트 파일 이름의 `rv<그룹>_` 접두가 그 항목이다. 보안 기본값 전환(S-01·S-02·S-09·S-10)은 사용자 승인):
+    · **I-01 공용 정렬은 부호를 읽는다**(`components/sortableText.js NUM_RE`): `-3` 이 +3 으로 정렬되던 것. 유니코드 마이너스(−)·`±0` 도 숫자다.
+      ⚠ 결측 정렬값은 음수 sentinel(`-1`·`-9999`)이 아니라 **`''`** 다 — 이제 진짜 음수로 읽혀 오름차순 맨 앞에 온다(`sortableTextSignI01.test.js` 스윕).
+    · **I-02 `/api/vms` 는 `paged=1`·`cursor` 로 5,000 뒤를 페이지로**(`inventory/vmPaging.js`): 순서는 첫 페이지 시점에 고정(pin) — 키셋으로 바꾸지 말 것(값이 바뀌는 정렬에서
+      중복·누락). 기억 없음 + 스냅샷 변경이면 409 `cursor-stale`. 400·409 는 memoJson **앞**에서. 필터를 늘리면 `VM_FILTER_KEYS` 에도. 파라미터 없으면 예전 응답 그대로.
+    · **I-03 OneFS 영역 수집 요약은 영역마다 예정·시도·미시도 엔드포인트를 싣고 판정은 웹 `onefsAreaState.js` 하나**: 중간에서 멈춘 영역은 `failed===0` 이어도 초록이 아니다 ·
+      시한이 끊은 요청은 failed 가 아니라 미시도 · 구버전 요약은 '완료 여부 미상'(지어내지 않는다). 중앙 정제 `storageEdge.narrowStorageAreas`(아는 필드만).
+    · **I-04 `usePolling` 은 실패해도 직전 data 를 남긴다** — `error && !data` 만 그리면 첫 성공 뒤의 실패가 화면에서 사라진다(`views/tools/sanFreshText.js`):
+      '직전 조회 결과 표시 중' + 마지막 성공·실패 시작 시각을 말하고 실패 중엔 실시간 배지를 쓰지 않는다. 선택을 바꾼 직후 한 렌더는 이전 조건 data 다 — 요청 키로 거른다.
+    · **I-05 게시판·공지는 '수용됨' 과 '저장 완료' 를 나눈다**(`bulletin/store.js` seq/savedSeq): 쓰기 응답 `persist.state` saved·pending·failed · 디스크 실패는 200 + failed(되돌리지 않음) ·
+      제한된 backoff 재시도(6회·상한 5분) · `GET /board/persist`·`POST /board/persist/retry`(전체 범위 관리자) · 오류 원문(tmp 절대 경로)은 상태·콘솔에 싣지 않는다 ·
+      ⚠ 동기 flush 는 진행 중 비동기 쓰기의 tmp 를 먼저 지운다 — 지우면 늦은 rename 이 새 본문을 덮고 상태는 '저장됨' 이라 말한다(재현). 서비스 점검 `bulletin-store` 행.
+    · **I-06 Node 런타임 계약은 `util/runtimeCheck.js RUNTIME_CONTRACT` 하나**(major 22 · engines `>=22.5.0 <23` · 검증 22.23.2 — .nvmrc·.node-version·CI·release.yml·build-package.sh):
+      `rvE_runtimeCheck.test.js` 가 일치를 고정한다. 전역 fetch + 패키지 undici 6 Agent 라 다른 major 에서 통신이 실패할 수 있어(검토 Node 26 `invalid onError method`)
+      기동 자가 점검(루프백 1회)이 `/api/health runtime`·서비스 점검·기동 로그·화면 배너(`views/runtimeBannerText.js` — 세 셸 공통)로 말한다. **기동은 막지 않는다.**
+    · **I-07·S-01·S-04·S-02** — `server/CLAUDE.md` 의 같은 날짜 절(장비 신뢰·WS 폐기·백프레셔). **S-03·S-05·S-06·S-08** — 세션·AD(`server/CLAUDE.md`).
+    · **I-08·S-10 업그레이드 설치 경로는 전부 `upgrade/signature.js decideSignature` 하나**(Ed25519 manifest — 원격·감시 폴더·push 엣지/수집기·패키지 받기·중앙 /dl·오프라인
+      verifyCli·install.sh·배포 deploy.js). 신뢰 키 = 저장소 `release-signing-keys.json` + 호스트 `release-signing-keys.conf`(회수는 어느 출처든 이긴다) · 기본 require ·
+      탈출구는 portal.env `UPGRADE_SIGNATURE_POLICY=warn` 뿐이고 '틀린 서명' 은 warn 이어도 거부 · **CI 는 공개키 목록이 비면 게시 전에 실패한다 — 그 점검을 지우지 말 것**(개인키는
+      CI 비밀에만). 백업 복원은 보안 스위치(`envRedact.HOST_PINNED_ENV`)를 현재 호스트 값으로 고정한다(번들이 정책을 약화하지 못하게). 절차 `docs/RELEASE-SIGNING.md`.
+    · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
+    · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
+    · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):
+      원격 http 는 ⓐ 저장값과 같은 URL(업그레이드 전 항목 — 경고) ⓑ 관리자 예외(사유·감사) ⓒ `COLLECTOR_HTTP_ALLOW` 뿐 · 스킴 없는 주소 = https · 자기등록은 예외를 못 만들고
+      https 를 http 로 내리지 못한다. 포탈 직접 TLS 는 `util/httpsServer.js`(TLS_CERT_FILE·TLS_KEY_FILE, 틀리면 fail-closed · 인증서 재로드 · TLS_HTTP_ALSO 전환기) —
+      index.js 의 `server` 는 리스너 묶음이고 게이트웨이·upgrade catch-all·타임아웃은 리스너마다 건다. 사설 CA 는 `WAN_TLS_CA_FILE`(기본 신뢰 저장소에 덧붙인다).
+      resilientFetch 는 https→http 리다이렉트를 따라가지 않는다. 자가진단 `wan-transport`.
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):

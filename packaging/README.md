@@ -11,18 +11,18 @@
 **A. 인터넷 되는 곳에서 (가장 간단)**
 
 ```bash
-packaging/offline/build-package.sh --node-version 22.20.0
+packaging/offline/build-package.sh --node-version 22.23.2   # 기본값도 22.23.2(런타임 계약 — docs/INSTALL.md 부록 A.0)
 # 결과: dist-offline/vmware-portal-offline-<버전>-el9-x64.tar.gz  (+ .sha256)
 ```
 
 **B. 인터넷이 전혀 없는 빌드 호스트에서**
 
-Node 런타임 압축본(`node-v22.20.0-linux-x64.tar.xz`)을 미리 받아두고, 저장소에
+Node 런타임 압축본(`node-v22.23.2-linux-x64.tar.xz` — 검증 버전. 22.x 가 아닌 major 는 넣지 마세요)을 미리 받아두고, 저장소에
 `node_modules`가 있는 상태(온라인에서 `npm run install:all` 1회)에서:
 
 ```bash
 packaging/offline/build-package.sh --offline \
-  --node-tarball /경로/node-v22.20.0-linux-x64.tar.xz
+  --node-tarball /경로/node-v22.23.2-linux-x64.tar.xz
 ```
 
 빌드 과정: Node.js 런타임(다운로드 또는 로컬 압축본) → 웹 클라이언트 빌드(web/dist) →

@@ -32,7 +32,10 @@ export function textOf(node, depth = 0) {
 
 const UNIT_MUL = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
 // 단위: 순수 단위(ms/초/분/…)를 먼저 보고, 그 다음 접두(K/M/G/T/P) + B/bps/W/Hz — 'ms' 의 m 이 메가로 오인되지 않게.
-const NUM_RE = /^[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?\s*(?:(ms|초|분|시간|일|%|대|개|명|행|건|장|포트|코어)|([kKmMgGtTpP])?(i?[bB](?:ps)?|[wW]|Hz))?\s*$/;
+// 부호는 첫 캡처(sign)로 잡는다(I-01, 2026-10-09 검토 — 예전에는 `[-+]?` 가 캡처 밖이라 '-3' 이 +3 으로 정렬됐다).
+// U+2212 '−' 는 증가량 문구(storageGrowthText·bmStorHistoryText 등)가 쓰는 마이너스, '±' 는 '±0' 표기다.
+// 캡처 번호: 1 부호 · 2 정수부 · 3 (콤마 그룹) · 4 소수부 · 5 순수 단위 · 6 접두 · 7 B/bps/W/Hz
+const NUM_RE = /^([-+\u2212\u00b1]?)(\d{1,3}(,\d{3})+|\d+)(\.\d+)?\s*(?:(ms|초|분|시간|일|%|대|개|명|행|건|장|포트|코어)|([kKmMgGtTpP])?(i?[bB](?:ps)?|[wW]|Hz))?\s*$/;
 const KO_DATE_RE = /(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.(?:\s*(오전|오후)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?/;
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/;
 
@@ -42,12 +45,14 @@ export function sortKeyOf(raw) {
   if (EMPTY_TOKENS.has(s)) return { kind: 'empty', v: null };
   const n = s.match(NUM_RE);
   if (n) {
-    const base = Number(n[1].replace(/,/g, '') + (n[3] || ''));
-    const mul = UNIT_MUL[(n[5] || '').toLowerCase()] ?? 1;
+    const sign = n[1] === '-' || n[1] === '\u2212' ? -1 : 1;
+    const base = Number(n[2].replace(/,/g, '') + (n[4] || ''));
+    const mul = UNIT_MUL[(n[6] || '').toLowerCase()] ?? 1;
     // 시간 단위는 초로 통일(ms/초/분/시간/일)
-    const unit = n[4] || '';
+    const unit = n[5] || '';
     const tmul = unit === 'ms' ? 0.001 : unit === '분' ? 60 : unit === '시간' ? 3600 : unit === '일' ? 86400 : 1;
-    return { kind: 'num', v: base * mul * tmul };
+    const v = sign * base * mul * tmul;
+    return { kind: 'num', v: v === 0 ? 0 : v };   // -0 은 0 으로(정렬 키 비교·표시 테스트에서 -0 이 섞이지 않게)
   }
   const ko = s.match(KO_DATE_RE);
   if (ko) {

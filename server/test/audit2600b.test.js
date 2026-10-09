@@ -27,6 +27,7 @@ import { sumCapacityBuckets } from '../src/storage/db.js';
 import { maskSerialRow } from '../src/routes/api/serialLookup.js';
 import { maskHostPower } from '../src/routes/api/vmMetrics.js';
 import { maskTargetAddress, publicTarget } from '../src/bmusage/targets.js';
+process.env.COLLECTOR_HTTP_ALLOW = '*'; // 2026-10-09 S-09 이후 원격 http 등록은 예외·허용 목록만 — 이 테스트는 평문 픽스처를 쓴다
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');

@@ -21,6 +21,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { deviceTlsConnect, tlsModeInfo } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — AD 계정 전에 판정
 import { normRequestTimeoutMs, effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분]
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
@@ -32,30 +33,24 @@ import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: �
 import { isMockMode } from '../mock/demo/flags.js';
 import { isDemoEntryId, demoHorizonLicenses, ensureDemoHorizonSeed } from '../mock/demo/users.js'; // v2.708 데모 등록(`mock-`)은 접속하지 않는다
 export { LICENSE_PATH, PROBE_PATHS, csVersionOf, licenseFailText, featureSummary };
-// 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
 // 주소를 그 순간에 검사한다. SNI(`servername`)·Host·인증서 검증은 원래 호스트명을 그대로 쓴다.
 // 자세한 근거는 util/ssrfLookup.js 머리말.
-export const HORIZON_TLS_VERIFY = process.env.HORIZON_TLS_VERIFY === 'true';
 /*
- * ⚠ v2.574 SEC-16 — **기본값(검증 off)은 그대로 둔다. 다만 조용하지 않게 한다.**
- * 2026-09-21 감사가 "TLS 검증 기본 OFF + AD 도메인 계정" 을 지적했다. 사실이지만, 이 저장소는
- * 장비·어플라이언스 수집기에 대해 **"기본은 자체서명 허용(기존 동작), env 로 켠다"** 를 명시적
- * 규약으로 채택해 두었다(server/CLAUDE.md M-4 — `STORAGE_TLS_VERIFY`·`SANSWITCH_TLS_VERIFY`,
- * `sanswitch/collectors/fosRest.js:26`·`storage/collectors/isilon.js:22` 가 같은 형태다).
- * 기본을 뒤집으면 자체서명 커넥션 서버를 쓰는 **모든 현장에서 Horizon 수집이 즉시 죽는다** —
- * 그것은 감사 지적을 고치는 것이 아니라 장애를 만드는 것이다.
- *
- * 그래서 고친 것은 **정직성**이다: `resilientFetch` 가 `WAN_TLS_INSECURE=true` 일 때 하는 것처럼
- * 기동 시 한 번 경고하고, 상태(`horizonTlsInfo`)로 화면이 말할 수 있게 한다.
- * ⚠ 기본을 켜려면 **별건**으로 다룰 것 — 현장 인증서 실태를 확인하고 마이그레이션 안내가 필요하다.
+ * ⚠⚠ 2026-10-09 검토 S-02 — **기본값을 바꿨다(사용자 승인)**. v2.574 SEC-16 은 "기본(검증 off)은 그대로 두고 조용하지 않게
+ * 한다" 였다 — 기본을 켜면 자체서명 커넥션 서버 현장의 수집이 즉시 죽기 때문이다. 이제는 그 이유를 **장비별 승인 지문**
+ * (security/peerTrust.js)이 해결한다: 미설정 = CA 체인(시스템 루트 + 사설 CA 번들) 또는 승인 지문 · 기존 현장은 업그레이드
+ * 첫 기동에 observe(처음 본 서버는 기록 후 통과, 바뀐 지문은 거부)로 시작해 수집이 끊기지 않는다.
+ * HORIZON_TLS_VERIFY=true 는 CA 체인만(엄격), =false 는 **명시적 예외**(예전처럼 어떤 인증서든 — 기동 경고·상태에 드러난다).
  */
-if (!HORIZON_TLS_VERIFY) {
-  console.warn('[horizon] ⚠ HTTPS 인증서 검증이 꺼져 있습니다(기본값) — 커넥션 서버로 AD 계정이 전송되는 경로입니다. 사설 CA 를 신뢰시키고 HORIZON_TLS_VERIFY=true 로 켜는 것을 권장합니다.');
+const HZ_TLS = tlsModeInfo(process.env.HORIZON_TLS_VERIFY);
+export const HORIZON_TLS_VERIFY = HZ_TLS.mode !== 'insecure';
+if (HZ_TLS.mode === 'insecure') {
+  console.warn('[horizon] ⚠ HTTPS 인증서 검증이 꺼져 있습니다(HORIZON_TLS_VERIFY=false 예외) — 커넥션 서버로 AD 계정이 전송되는 경로입니다. 사설 CA 를 등록하거나 장비 신뢰 화면에서 지문을 승인하고 HORIZON_TLS_VERIFY 를 지우는 것을 권장합니다.');
 }
-/** 화면·진단이 '지금 검증 중인가' 를 말할 수 있게 한다(조용한 약한 설정 금지). */
-export const horizonTlsInfo = () => ({ verify: HORIZON_TLS_VERIFY, env: 'HORIZON_TLS_VERIFY' });
-const dispatcher = new Agent({ connect: { rejectUnauthorized: HORIZON_TLS_VERIFY, lookup: ssrfLookup } });
+/** 화면·진단이 '지금 검증 중인가' 를 말할 수 있게 한다(조용한 약한 설정 금지). mode: verify(체인 또는 승인 지문) · strict · insecure. */
+export const horizonTlsInfo = () => ({ verify: HORIZON_TLS_VERIFY, mode: HZ_TLS.mode, env: 'HORIZON_TLS_VERIFY' });
+const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'horizon', envKey: 'HORIZON_TLS_VERIFY', envRaw: process.env.HORIZON_TLS_VERIFY, tls: { lookup: ssrfLookup } }) });
 
 export function loadHorizon() {
   if (!fs.existsSync(FILE)) return [];

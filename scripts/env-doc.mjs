@@ -42,6 +42,15 @@ const MANUAL = {
   METRICS_DEADBAND_TEMP_C: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '0.5' },
   METRICS_DEADBAND_POWER_W: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '3' },
   METRICS_DEADBAND_MAX_GAP_MS: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '1800000' },
+  // 2026-10-09 검토: 기본값이 IIFE·posInt 인자·상수 식별자라 스캐너가 못 읽는 키, 그리고 키 이름을 런타임에 조합하는 키(ENV_KEY[kind]).
+  REMOTE_MAX_SESSIONS_PER_USER: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '20' },
+  REMOTE_WS_HIGH_WATER_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '1048576' },
+  REMOTE_WS_LOW_WATER_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '262144' },
+  REMOTE_WS_MAX_QUEUE_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '8388608' },
+  TLS_RELOAD_CHECK_MS: { area: '공통', file: 'util/httpsServer.js', def: '3600000' },
+  TLS_PORT: { area: '공통', file: 'util/httpsServer.js', def: 'PORT 와 같음(평문 HTTP 를 HTTPS 로 바꾼다)' },
+  SSH_HOSTKEY_POLICY: { area: '보안', file: 'security/peerTrust.js', def: '미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)' },
+  TLS_PEER_POLICY: { area: '보안', file: 'security/peerTrust.js', def: '미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)' },
 };
 
 /** 런타임이 주는 값 — 포탈 설정이 아니므로 문서에서 제외. */

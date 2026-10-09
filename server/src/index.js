@@ -21,6 +21,9 @@ import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { startLoopLagMonitor } from './util/loopLag.js';
+import { initPeerTrust } from './security/peerTrust.js'; // 2026-10-09 검토 S-01·S-02
+import { loadCaBundle } from './security/tlsTrust.js'; // 2026-10-09 검토 S-02: 사설 CA 번들 오류를 기동 로그에
+import { startRuntimeCheck } from './util/runtimeCheck.js'; // 2026-10-09 검토 I-06: Node 런타임 계약 + 통신 자가 점검
 import { startStallWatch } from './perf/stallWatch.js'; // v2.617: 멈춘 동안에도 stderr 로 보고 + 스택 자동 채취
 import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
@@ -45,6 +48,8 @@ import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
 import { attachRdpGateway } from './proxy/guacdTunnel.js';
+import { createPortalServers, tlsListenerStatus } from './util/httpsServer.js'; // 2026-10-09 S-09: 직접 TLS 리스너(opt-in)
+import { centralUrlTransport } from './collector/transportPolicy.js'; // 〃 엣지 CENTRAL_URL 평문 경고
 import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { startSelfRegister } from './agent/selfRegister.js';
@@ -497,6 +502,15 @@ app.use((err, req, res, _next) => {
 // 부팅 직후 동시 폴링으로 인한 CPU 스파이크를 평탄화한다(이후 각자 주기 반복).
 // CONFIG_DIR/vmware-portal-release 에 현재 버전을 명시(redhat-release 방식). 기동 시마다 갱신.
 try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록`); } catch { /* best effort */ }
+// 2026-10-09 검토 S-01·S-02: 장비 지문 신뢰 정책(새 설치 enforce / 기존 현장 observe)을 **장비가 등록되기 전에** 굳힌다.
+// 늦게(첫 연결 때) 판단하면 새 설치에서 막 등록한 장비 때문에 '기존 현장' 으로 오판한다. 실패가 기동을 막지 않는다.
+try {
+  const pt = initPeerTrust();
+  for (const [k, v] of Object.entries(pt.kinds || {})) {
+    console.log(`[peer-trust] ${k} 정책 ${v.policy.mode}(${v.policy.source}${v.policy.origin ? ' · ' + v.policy.origin : ''}) · 승인 ${v.counts.approved} · 관찰 ${v.counts.observed} · 대기 ${v.counts.pending}`);
+  }
+} catch (e) { console.warn(`[peer-trust] 초기화 실패(${e?.message || e}) — 연결 시점에 다시 판단합니다`); }
+try { loadCaBundle({ force: true }); } catch (e) { console.warn(`[tlsTrust] 사설 CA 번들 로드 실패(${e?.message || e})`); }
 // 스토리지 사용량 보존 기간(v2.531) — **스태거에 넣지 않는다.** 폴러가 첫 용량 점을 적재하면
 // 그 안에서 prune 이 돌 수 있으므로, 사용자가 지정한 보존값이 그 전에 DB 모듈에 들어가 있어야
 // 한다(스태거로 늦게 주입하면 첫 prune 이 기본값 기준으로 돌아 더 지울 수 있다).
@@ -572,49 +586,69 @@ const stagger = [
 const STAGGER_STEP_MS = Math.min(1500, Math.floor(60_000 / Math.max(1, stagger.length)));
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * STAGGER_STEP_MS).unref?.());
 
-const server = app.listen(config.port, () => {
+// 2026-10-09 검토 S-09: 리스너는 util/httpsServer.js 가 만든다 — TLS_CERT_FILE·TLS_KEY_FILE 을 주면 HTTPS(opt-in),
+// 없으면 예전과 같은 평문 HTTP. 설정이 틀리면 평문으로 내려가지 않고 기동을 멈춘다(fail-closed).
+// `server` 는 리스너 묶음(close·closeAllConnections·closeIdleConnections)이다 — 아래 종료 경로가 그대로 쓴다.
+let server;
+try {
+  server = createPortalServers(app, { port: config.port });
+} catch (e) {
+  console.error(`[listen] ${e?.message || e}`);
+  process.exit(1);
+}
+
+/** 리스너 하나마다 같은 규칙을 건다(평문 + TLS 동시 리스닝이면 둘 다). */
+function wireListener(server, port) {
+  // 고RTT·대용량 push(분산 에이전트의 인벤토리/번들)를 고려한 명시적 서버 타임아웃.
+  // - keepAliveTimeout: 기본 5s는 고RTT 클라이언트의 유휴 keep-alive 소켓을 너무 빨리 끊어
+  //   재연결 churn/죽은 소켓 재사용을 유발 → 75s로 상향.
+  // - headersTimeout는 keepAliveTimeout보다 커야 함(Node 권장). requestTimeout은 느린 대용량
+  //   업로드가 중간에 끊기지 않도록 넉넉히(0=무제한 대신 명시적 큰 값).
+  server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_MS) || 75_000;
+  server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS) || 90_000;
+  server.requestTimeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS) || 600_000;
+
+  // listen 오류(포트 충돌/특권포트 등)를 명확히 안내. 특권포트(<1024) EACCES가 흔한 원인.
+  server.on('error', (err) => {
+    if (err.code === 'EACCES') console.error(`[listen] 포트 ${port} 권한 거부(EACCES). 1024 미만 특권포트입니다. PORT·TLS_PORT 를 1024 이상(예: 4000)으로 설정하세요. (portal.env 확인)`);
+    else if (err.code === 'EADDRINUSE') console.error(`[listen] 포트 ${port} 이미 사용 중(EADDRINUSE). 다른 프로세스가 점유 중이거나 PORT·TLS_PORT 를 바꾸세요.`);
+    else console.error('[listen] 서버 시작 실패:', err);
+    process.exit(1);
+  });
+
+  // Browser SSH/RDP consoles (WebSocket upgrades on /api/remote/ssh and /rdp). https 서버에도 같은 'upgrade' 가 온다.
+  attachSshGateway(server);
+  attachRdpGateway(server);
+  // 미일치 경로 upgrade 는 소켓을 파기한다(v2.322 보안 감사): Node http 서버는 'upgrade' 리스너가
+  // 하나라도 있으면 미처리 소켓을 자동으로 닫지 않고 리스너에 위임한다. 위 두 게이트웨이는 자기
+  // 경로가 아니면 return 만 하므로, catch-all 이 없으면 임의 경로 + Upgrade 헤더로 소켓/FD 를 무한
+  // 점유하는 무인증 DoS 가 가능했다. 마지막에 등록해 앞선 핸들러가 처리하지 못한 소켓만 파기한다.
+  server.on('upgrade', (req, socket) => {
+    let p = '';
+    try { p = new URL(req.url, 'http://localhost').pathname; } catch { /* 파싱 실패 = 미일치 */ }
+    if (p !== '/api/remote/ssh' && p !== '/api/remote/rdp') { try { socket.destroy(); } catch { /* already gone */ } }
+  });
+}
+for (const l of server.servers) wireListener(l.server, l.port);
+
+server.listen(() => {
+  const st = tlsListenerStatus();
   console.log(`\n  VMware Global Monitoring Portal — API`);
-  console.log(`  ▸ listening on http://localhost:${config.port}`);
+  if (st.tls) console.log(`  ▸ listening on https://localhost:${st.tlsPort}${st.httpAlso ? `  (+ 평문 http :${st.httpPort} — TLS_HTTP_ALSO)` : ''}`);
+  else console.log(`  ▸ listening on http://localhost:${config.port}  (평문 HTTP — TLS_CERT_FILE·TLS_KEY_FILE 미설정)`);
   console.log(`  ▸ data source: ${config.dataSource}`);
   // v2.451: DB 저장 경로를 기동 로그에 남긴다 — 옮겼는데 권한 문제로 폴백된 경우를 여기서 알 수 있다.
   console.log(`  ▸ db dir: ${config.dbDir || `${config.configDir} (기본)`}`);
   console.log(`  ▸ poll interval: ${config.pollIntervalMs / 1000}s`);
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
+  // 2026-10-09 S-09: 엣지의 CENTRAL_URL 이 평문 http 면 토큰이 평문으로 흐른다 — 기동 때 한 줄로 알린다.
+  try { const cu = centralUrlTransport(config.agent?.centralUrl); if (cu.insecure || (cu.configured && !cu.scheme)) console.warn(`[wan] ⚠ ${cu.warning}`); } catch { /* 경고 실패가 기동을 막지 않게 */ }
   // OTP 전용 정책에서 로그인 가능한 관리자가 하나도 없으면 콘솔 등록 절차를 안내(조용한 잠금 방지).
   try { warnIfNoOtpAdmin(); } catch { /* 안내 실패가 기동을 막지 않게 */ }
+  startRuntimeCheck().catch(() => {}); // 2026-10-09 검토 I-06: 비동기 — 기동을 막지 않는다. 끝나면 '[runtime] Node v… — …' 한 줄(불일치·비지원은 warn)
   // v2.443: 차단이 들어오기 전에 저장된 목(가짜) 인벤토리를 1회 정리한다 — 업그레이드만 해도
   // 중앙 화면에서 데모 사이트('east us' 등)가 사라진다(사용자 신고).
   try { pruneMockInventory(); } catch { /* 정리 실패가 기동을 막지 않게 */ }
-});
-
-// 고RTT·대용량 push(분산 에이전트의 인벤토리/번들)를 고려한 명시적 서버 타임아웃.
-// - keepAliveTimeout: 기본 5s는 고RTT 클라이언트의 유휴 keep-alive 소켓을 너무 빨리 끊어
-//   재연결 churn/죽은 소켓 재사용을 유발 → 75s로 상향.
-// - headersTimeout는 keepAliveTimeout보다 커야 함(Node 권장). requestTimeout은 느린 대용량
-//   업로드가 중간에 끊기지 않도록 넉넉히(0=무제한 대신 명시적 큰 값).
-server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_MS) || 75_000;
-server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS) || 90_000;
-server.requestTimeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS) || 600_000;
-
-// listen 오류(포트 충돌/특권포트 등)를 명확히 안내. 특권포트(<1024) EACCES가 흔한 원인.
-server.on('error', (err) => {
-  if (err.code === 'EACCES') console.error(`[listen] 포트 ${config.port} 권한 거부(EACCES). 1024 미만 특권포트입니다. PORT를 1024 이상(예: 4000)으로 설정하세요. (portal.env의 PORT 확인)`);
-  else if (err.code === 'EADDRINUSE') console.error(`[listen] 포트 ${config.port} 이미 사용 중(EADDRINUSE). 다른 프로세스가 점유 중이거나 PORT를 바꾸세요.`);
-  else console.error('[listen] 서버 시작 실패:', err);
-  process.exit(1);
-});
-
-// Browser SSH/RDP consoles (WebSocket upgrades on /api/remote/ssh and /rdp).
-attachSshGateway(server);
-attachRdpGateway(server);
-// 미일치 경로 upgrade 는 소켓을 파기한다(v2.322 보안 감사): Node http 서버는 'upgrade' 리스너가
-// 하나라도 있으면 미처리 소켓을 자동으로 닫지 않고 리스너에 위임한다. 위 두 게이트웨이는 자기
-// 경로가 아니면 return 만 하므로, catch-all 이 없으면 임의 경로 + Upgrade 헤더로 소켓/FD 를 무한
-// 점유하는 무인증 DoS 가 가능했다. 마지막에 등록해 앞선 핸들러가 처리하지 못한 소켓만 파기한다.
-server.on('upgrade', (req, socket) => {
-  let p = '';
-  try { p = new URL(req.url, 'http://localhost').pathname; } catch { /* 파싱 실패 = 미일치 */ }
-  if (p !== '/api/remote/ssh' && p !== '/api/remote/rdp') { try { socket.destroy(); } catch { /* already gone */ } }
 });
 startMappingExpiry(); // remove ephemeral quick-connect mappings 1 day after last use
 
