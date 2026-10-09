@@ -6,7 +6,7 @@ import { edgePerfLine, perfCollectSummary } from './tools/sanPerfDiagText.js';
 import { STable } from '../components/STable.jsx';
 // v2.599 LO2599-01: 빈 칸은 보내지 않는다(Number('')=0 → 서버가 기본값으로 저장하던 것 — 보존 3650→90일).
 import { blankOr } from './blankOr.js';
-import { countsAtNote } from './sanPerfDbText.js';
+import { countsAtNote, rowsText, rollupStatusText } from './sanPerfDbText.js';
 
 /**
  * 설정 › 수집 서버 › SAN 스위치 포트 사용량 수집(v2.411, 사용자 요구
@@ -56,7 +56,7 @@ export default function SanSwitchPerf() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/tools/sanswitch/perf/prune', {});
-      setMsg(r.ok ? `정리 완료 — ${Number(r.deleted || 0).toLocaleString()}행 삭제${r.unavailable ? ' (DB 사용 불가)' : ''}. 파일 크기는 SQLite 특성상 즉시 줄지 않고 빈 공간이 재사용됩니다.` : `정리 실패: ${r.reason}`);
+      setMsg(r.ok ? `정리 완료 — 원본 ${Number(r.deleted || 0).toLocaleString()}행 삭제${Number(r.rollupDeleted) > 0 ? ` · 집계 표 ${Number(r.rollupDeleted).toLocaleString()}행 삭제` : ''}${r.unavailable ? ' (DB 사용 불가)' : ''}. 파일 크기는 SQLite 특성상 즉시 줄지 않고 빈 공간이 재사용됩니다.` : `정리 실패: ${r.reason}`);
       await load();
     } catch (e) { setMsg(`정리 실패: ${e.message}`); }
     finally { setBusy(false); }
@@ -69,6 +69,10 @@ export default function SanSwitchPerf() {
   const retDays = form.retentionDays ?? data.settings?.retentionDays;   // 빈 칸이면 저장값(보내지 않으므로 그대로 유지된다)
   const est = retentionEstimate({ rows: db.rows, fileBytes: db.fileBytes, rowsLastDay: db.rowsLastDay, retentionDays: retDays });
   const dirty = form.retentionDays !== data.settings?.retentionDays;
+  // v2.728(SAN 2차): 집계 표(1시간) 보관 — 구버전 서버는 limits 에 없다(그때는 칸을 그리지 않는다).
+  const LR = L?.rollupRetentionDays || null;
+  const rollupDirty = LR ? form.rollupRetentionDays !== data.settings?.rollupRetentionDays : false;
+  const rs = rollupStatusText(db.rollup);
 
   return (
     <>
@@ -115,6 +119,15 @@ export default function SanSwitchPerf() {
               onChange={(e) => set('retentionDays', blankOr(e.target.value))} />
             <span className="muted" style={{ fontSize: 11 }}>{L.retentionDays.min}~{L.retentionDays.max.toLocaleString()}일 · 기본 {L.retentionDays.def}일</span>
           </label>
+          {LR && (
+            <label style={{ fontSize: 12 }} title="1시간 단위로 미리 합쳐 둔 집계 표를 며칠 보관할지 정합니다. 원본(위 보관 기간)이 지워진 뒤에도 긴 기간 추이를 이 표로 볼 수 있습니다. 15분 집계 표는 31일 고정입니다.">
+              집계 표 보관(일, 1시간 단위)
+              <input className="input" type="number" value={form.rollupRetentionDays ?? ''}
+                min={LR.min} max={LR.max}
+                onChange={(e) => set('rollupRetentionDays', blankOr(e.target.value))} />
+              <span className="muted" style={{ fontSize: 11, display: 'block' }}>{LR.min}~{LR.max.toLocaleString()}일 · 기본 {LR.def}일{rollupDirty ? ' · 변경됨 — 저장해야 적용' : ''}</span>
+            </label>
+          )}
         </div>
         {/* 보관 기간 프리셋 + 영향 설명(v2.420, 사용자 요구 '수집값을 얼마나 오래 저장할지 지정'). */}
         <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 8, fontSize: 12 }}>
@@ -130,9 +143,10 @@ export default function SanSwitchPerf() {
           <b>보관 기간이 영향을 주는 것</b> — ① 사용량 분석 화면에서 조회할 수 있는 최대 과거 범위(기간 지정도 보관 기간 밖은 데이터가 없음)
           ② DB 파일 크기(스위치 수 × 포트 수 × 하루 수집 횟수 × 보관일 만큼 행이 쌓임)
           ③ 정리 비용(삭제는 <code>ts</code> 인덱스를 타므로 행 수와 무관하게 빠르지만, 파일 크기는 SQLite 특성상 즉시 줄지 않고 빈 공간이 재사용됨).
+          {LR ? <> 원본과 따로 <b>집계 표</b>(15분 31일 · 1시간 {form.rollupRetentionDays ?? data.settings?.rollupRetentionDays ?? LR.def}일)를 둡니다 — 긴 기간 조회는 이 표를 읽어 빠르고, 원본이 지워진 구간도 1시간 단위로 볼 수 있습니다. 집계 표는 원본보다 행이 12배(1시간)·3배(15분) 적지만 보관이 길어 파일에 함께 쌓입니다.</> : null}
           {est ? (
             <div style={{ marginTop: 4 }}>
-              <b>추정</b>(최근 24시간 적재 {est.rowsPerDay.toLocaleString()}행, 행당 약 {Math.round(est.bytesPerRow)}바이트 — 현재 파일 크기 ÷ 행 수, WAL 포함이라 실제보다 다소 클 수 있음):
+              <b>추정</b>(최근 24시간 적재 {db.rowsApprox ? '약 ' : ''}{est.rowsPerDay.toLocaleString()}행, 행당 약 {Math.round(est.bytesPerRow)}바이트 — 현재 파일 크기 ÷ 원본 행 수라 WAL·집계 표가 함께 들어가 실제보다 다소 클 수 있음):
               하루 약 <b>{bytesText(est.bytesPerDay)}</b> → 보관 {retDays}일이면 최대 약 <b>{bytesText(est.bytesAtRetention)}</b>({Math.round(est.rowsAtRetention).toLocaleString()}행).
               수집 주기·표본 시간·스위치 수를 바꾸면 달라집니다.
             </div>
@@ -154,10 +168,12 @@ export default function SanSwitchPerf() {
           마지막 수집: {fmtTs(st.at)} · 성공 {st.collected ?? 0} / 실패 {st.failed ?? 0}
           {st.busy ? ' · 수집 진행중' : ''}<br />
           DB: {db.available === false ? <span style={{ color: 'var(--amber)' }}>사용 불가(node:sqlite 미지원 — 수집·화면은 동작하고 이력만 비활성)</span>
-            : <>{(db.rows ?? 0).toLocaleString()}행 · 스위치 {db.devices ?? 0}대 · {fmtTs(db.oldest)} ~ {fmtTs(db.newest)}
+            : <>원본 {rowsText(db.rows ?? 0, db.rowsApprox)} · {db.devicesSource === 'meta' ? '포트 정보가 있는 ' : ''}스위치 {db.devices ?? 0}대 · {fmtTs(db.oldest)} ~ {fmtTs(db.newest)}
                 {db.fileBytes != null ? <> · 파일 <b>{bytesText(db.fileBytes)}</b>(WAL 포함)</> : null}
-                {db.rowsLastDay != null ? <> · 최근 24시간 적재 {Number(db.rowsLastDay).toLocaleString()}행</> : null}
-                {countsAtNote(db, Date.now()) ? <><br /><span style={{ fontSize: 11 }}>{countsAtNote(db, Date.now())}</span></> : null}</>}
+                {db.rowsLastDay != null ? <> · 최근 24시간 적재 {rowsText(db.rowsLastDay, db.rowsApprox)}</> : null}
+                {db.rowsApprox ? <><br /><span style={{ fontSize: 11 }}>행 수는 세지 않고 저장 순번으로 어림합니다(전체를 세면 큰 DB 에서 포탈이 멈춥니다) — 정리로 생긴 빈 순번까지 세므로 실제보다 클 수 있습니다.</span></> : null}
+                {countsAtNote(db, Date.now()) ? <><br /><span style={{ fontSize: 11 }}>{countsAtNote(db, Date.now())}</span></> : null}
+                {rs ? <><br /><span style={{ fontSize: 11, color: rs.tone === 'bad' ? 'var(--red)' : rs.tone === 'busy' ? 'var(--amber)' : undefined }}>집계 표: {rs.text}</span></> : null}</>}
           {db.file ? <><br />파일: <code style={{ overflowWrap: 'anywhere' }}>{db.file}</code></> : null}
           {st.errors?.length ? <><br /><span style={{ color: 'var(--amber)' }}>최근 오류: {st.errors.join(' / ')}</span></> : null}
         </div>

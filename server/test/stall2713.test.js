@@ -60,7 +60,8 @@ test('③ 조립 루프 두 곳에 양보가 있다(합성 입력이 작아 ①�
   const { stripComments } = await import('./_stripComments.js');
   const src = stripComments(fs.readFileSync(new URL('../src/sanswitch/perfDb.js', import.meta.url), 'utf8'));
   const body = src.slice(src.indexOf('async function storageSeriesMultiInner'));
-  assert.match(body, /for \(let ri = 0; ri < rows\.length; ri\+\+\) \{[\s\S]{0,80}await yielder\(\)/, '행 조립 양보');
+  // v2.728(SAN 2차·F): 행 객체 대신 포트별 숫자 배열(aggPorts)을 조립한다 — 포트 순회에 양보가 있어야 한다.
+  assert.match(body, /for \(const x of agg\.ports\.values\(\)\) \{[\s\S]{0,80}await yielder\(\)/, '포트 조립 양보');
   assert.match(body, /for \(const s of byGroup\.values\(\)\) \{\s*await yielder\(\)/, '시리즈 조립 양보');
-  assert.match(body, /sort: false/, '정렬 생략');
+  assert.match(body, /aggPorts\(/, '숫자 배열 누적(정렬 없음)');
 });

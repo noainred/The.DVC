@@ -16,6 +16,7 @@
 import { edgeId, isPlainObj } from '../central/edgeRecord.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { expandCompact, compactSensor } from '../idrac/sensorDetail.js'; // v2.659 센서 상세
+import { dedupNics } from '../idrac/nicPorts.js'; // v2.728 NIC 포트 중복 제거
 
 const byCollector = new Map(); // collectorId -> { at, datacenter, servers: [...] }
 
@@ -40,23 +41,29 @@ export function remoteStr(v, max = STR_MAX) {
 const scalar = (v) => (typeof v === 'boolean' ? v : (typeof v === 'number' ? (Number.isFinite(v) ? v : null) : remoteStr(v)));
 
 // 엣지 collector/agent.js compactInv 의 모양 — 키마다 'o'(객체)/'a'(배열) + 잎 필드. 잎은 scalar.
+// ⚠ v2.728: 부품 이름·상태·PSU 입력값·디스크 예측 실패·롤업을 받는다 — 엣지 compactInv 와 **짝**이다(한쪽만 넓히면 버려진다,
+//   v2.611 CEN2611-01). 상태가 없던 구버전 엣지 보고는 키 자체가 없고, 화면은 그것을 idrac/invView.js statusFieldsMissing 으로 가른다.
+const ST = ['health', 'state'];
 const INV_SHAPE = {
-  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName']],
-  cpu: ['o', ['model', 'count', 'cores']],
-  memory: ['o', ['totalGiB']],
-  gpus: ['a', ['model', 'name', 'memoryMiB']],
+  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health']],
+  cpu: ['o', ['model', 'count', 'cores', 'health']],
+  memory: ['o', ['totalGiB', 'health']],
+  gpus: ['a', ['model', 'name', 'memoryMiB', ...ST]],
   idrac: ['o', ['firmwareVersion']],
   bios: ['o', ['version']],
   firmware: ['a', ['type', 'version', 'name']],
   nics: ['a', ['name', 'model'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
-  cpus: ['a', ['socket', 'model', 'cores']],
-  disks: ['a', ['model', 'capacityGB', 'media', 'protocol']],
-  psus: ['a', ['model', 'manufacturer', 'capacityWatts']],
-  memoryDimms: ['a', ['sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber']],
-  storageControllers: ['a', ['model', 'firmware'], null, ['protocols']],
-  pcie: ['a', ['model', 'manufacturer', 'deviceType']],
-  fans: ['a', ['name', 'model', 'partNumber']],
+  cpus: ['a', ['socket', 'model', 'cores', ...ST]],
+  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure']],
+  psus: ['a', ['name', 'model', 'manufacturer', 'capacityWatts', 'inputWatts', 'outputWatts', 'lineInputVoltage', ...ST]],
+  memoryDimms: ['a', ['locator', 'sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber', ...ST]],
+  storageControllers: ['a', ['name', 'model', 'firmware', 'health'], null, ['protocols']],
+  pcie: ['a', ['name', 'model', 'manufacturer', 'deviceType', 'health']],
+  fans: ['a', ['name', 'model', 'partNumber', ...ST]],
+  health: ['o', ['overall', 'processor', 'memory', 'storage', 'psu', 'fan', 'battery', 'gpu']],
 };
+/** 컬렉션 메타 키 — idrac/redfish.js fetchInventory 의 inv.collections 와 같은 이름(값은 'ok'|'failed' 만 받는다). */
+const COLL_KEYS = ['system', 'psus', 'disks', 'storageControllers', 'memoryDimms', 'cpus', 'gpus', 'pcie', 'fans'];
 function pickLeaves(src, keys, subArrays, scalarArrays) {
   const o = {};
   for (const k of keys) if (Object.hasOwn(src, k)) o[k] = scalar(src[k]);
@@ -79,6 +86,15 @@ export function sanitizeRemoteInv(inv) {
     if (kind === 'o') out[k] = isPlainObj(inv[k]) ? pickLeaves(inv[k], keys, sub, scal) : null;
     else out[k] = Array.isArray(inv[k]) ? inv[k].slice(0, ARR_MAX).filter(isPlainObj).map((x) => pickLeaves(x, keys, sub, scal)) : [];
   }
+  // v2.728: 컬렉션 메타 — 아는 키 + 'ok'|'failed' 만(그 밖은 버린다). reachable 은 불리언만.
+  if (isPlainObj(inv.collections)) {
+    const c = {};
+    for (const k of COLL_KEYS) if (Object.hasOwn(inv.collections, k) && (inv.collections[k] === 'ok' || inv.collections[k] === 'failed')) c[k] = inv.collections[k];
+    out.collections = c;
+  }
+  if (typeof inv.reachable === 'boolean') out.reachable = inv.reachable;
+  // v2.728: 같은 물리 포트가 두 컬렉션으로 두 번 실린 구버전 엣지 보고도 중앙에서 한 번으로 묶는다(idrac/nicPorts.js).
+  if (Array.isArray(out.nics)) out.nics = dedupNics(out.nics);
   if (Object.hasOwn(inv, 'collectedAt')) out.collectedAt = scalar(inv.collectedAt);
   return out;
 }

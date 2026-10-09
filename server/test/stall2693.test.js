@@ -85,7 +85,7 @@ test('③ 조각 사이에 양보한다(장비 × 조각 수만큼 기회)', asy
   assert.ok(ticks >= asked / 2, `다른 작업이 사이사이 돌았다(${ticks})`);
 });
 
-test('④ 같은 조회는 합류 · 서로 다른 조회는 하나씩 · 쓰기는 기억을 버린다', async () => {
+test('④ 같은 조회는 합류 · 같은 줄의 다른 조회는 하나씩 · 적재는 기억을 버리지 않고 지금 수집·정리만 버린다(v2.728)', async () => {
   const m = await import('../src/sanswitch/perfDb.js');
   m.invalidatePerfQueries();
   const before = m.perfQueryStats();
@@ -94,16 +94,20 @@ test('④ 같은 조회는 합류 · 서로 다른 조회는 하나씩 · 쓰기
   assert.equal(a, b, '같은 결과 객체(합류)');
   const mid = m.perfQueryStats();
   assert.equal(mid.runs - before.runs, 1); assert.ok(mid.joined - before.joined >= 1);
-  // 직렬: 서로 다른 조회 두 개는 줄을 선다(둘 다 대기열에 들어간 뒤 하나씩 실행된다)
+  // 직렬: 같은 줄(법인 단위)의 서로 다른 조회 두 개는 줄을 선다(둘 다 대기열에 들어간 뒤 하나씩 실행된다)
   const q0 = m.perfQueryStats().maxQueue;
-  await Promise.all([m.storageSeriesMulti(['swC'], args), m.portSeries('swA', args)]);
+  await Promise.all([m.storageSeriesMulti(['swC'], args), m.storageSeriesMulti(['swA'], args)]);
   assert.ok(m.perfQueryStats().maxQueue >= Math.max(2, q0), '두 조회가 동시에 대기열에 있었다(한 번에 하나)');
-  // 캐시 적중 뒤 쓰기는 기억을 버린다
+  // v2.728(SAN 1차 ②): 적재는 기억을 버리지 않는다 — 기억 시간(수집 주기) 안에서는 같은 결과
   const c1 = await m.storageSeriesMulti(['swA', 'swB'], args);
   assert.equal(c1, a, 'TTL 안에서는 기억한 결과');
   await m.importSamples([{ d: 'swA', ts: BASE - 1000, p: 0, b: 1 }], [], 3650);
   const c2 = await m.storageSeriesMulti(['swA', 'swB'], args);
-  assert.notEqual(c2, a, '쓰기 뒤에는 새로 계산');
+  assert.equal(c2, a, '적재만으로는 기억을 버리지 않는다(엣지 전송·스위치 1대 저장마다 다시 집계하던 것)');
+  // 사람이 누른 '지금 수집'·'지금 정리' 는 버린다(라우트가 invalidatePerfQueries 를 부른다)
+  m.invalidatePerfQueries();
+  const c3 = await m.storageSeriesMulti(['swA', 'swB'], args);
+  assert.notEqual(c3, a, '명시적으로 버리면 새로 계산');
 });
 
 test('⑤ pull 주기 상한·판정(순수)', async () => {

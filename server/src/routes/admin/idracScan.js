@@ -25,6 +25,8 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../../idrac/redfish.js';
 import { listCollectors } from '../../collector/registry.js';
 import { findRemoteServer } from '../../collector/remoteInventory.js';
+import { inventoryView, statusFieldsMissing } from '../../idrac/invView.js'; // v2.728: 상세 화면용 판정(NIC 중복·링크·부품 상태)
+import { summarizeServerParts, serverPartFaultInfo } from '../../idrac/serverParts.js'; // v2.728: 부품 상태 요약(표시 전용)
 import { findHostByServiceTag } from '../../idrac/hostMatch.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
 import { allCollectorStatus } from '../../collector/state.js';
@@ -60,24 +62,43 @@ const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m
 export function registerIdracScan(adminRouter) {
 
 // 서버 상세 인벤토리(iDRAC/BIOS/드라이버 버전 등). 캐시 우선, ?refresh=1이면 즉시 재수집.
+// v2.728: 응답에 화면용 판정을 싣는다 — ① `inventory` 는 inventoryView 사본(NIC 포트 중복 제거 + linkState, 부품마다 partState)
+//   ② `parts` 는 부품 상태 요약(partfault 추출기·판정을 그대로 쓰는 **표시 전용** — DB·전이·알림에 넣지 않는다)
+//   ③ `partFault` 는 파트 장애 기능(기록·알림) 켜짐 여부 + 이 서버의 열린 장애 ④ 원격이면 `statusMissing`(2.728 이전 엣지라
+//   축약 인벤토리에 상태 필드가 없다 — 화면이 '엣지를 올리면 보인다' 를 말한다). 저장된 인벤토리는 고치지 않는다.
+async function inventoryResponse(req, server, inv, { remote = false, collectorId = '', fresh = false } = {}) {
+  const tag = String(server.serviceTag || inv?.system?.serviceTag || '').trim();
+  const sv = { id: server.id, name: server.name, host: server.host, serviceTag: tag };
+  const agents = remote ? [collectorId, listCollectors().find((c) => String(c.id) === String(collectorId))?.name || ''] : [''];
+  return {
+    ok: true, fresh, ...(remote ? { remote: true, collectorId } : {}),
+    inventory: inventoryView(inv || null),
+    ...(remote ? { statusMissing: statusFieldsMissing(inv) } : {}),
+    parts: summarizeServerParts(sv, inv || null, { remote }),
+    partFault: await serverPartFaultInfo(sv, { remote, agents, scoped: !!idracScopeOf(req) }),
+  };
+}
+
 adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
   if (!s) {
     // 위임 법인의 원격 서버 — 중앙이 직접 못 닿으므로 엣지가 실어보낸 인벤토리를 그대로 반환(재수집 불가).
     const rs = findRemoteServer(req.params.id);
     if (rs && hiddenByScope(req, rs)) return res.status(404).json(NOT_FOUND);
-    if (rs) return res.json({ ok: true, fresh: false, remote: true, collectorId: rs.collectorId, inventory: rs.inv || null });
+    if (rs) return res.json(await inventoryResponse(req, rs, rs.inv || null, { remote: true, collectorId: rs.collectorId }));
     return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
   }
   if (hiddenByScope(req, s)) return res.status(404).json(NOT_FOUND);
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 상세 인벤토리를 지원하지 않습니다(iDRAC 직접만).' });
   if (req.query.refresh === '1') {
     if (denyLive(req, res)) return;
-    try { return res.json({ ok: true, fresh: true, inventory: await fetchIdracInventory(s) }); }
+    let fresh;
+    try { fresh = await fetchIdracInventory(s); }
     catch (e) { return res.status(502).json({ ok: false, reason: e.message }); }
+    return res.json(await inventoryResponse(req, s, fresh, { fresh: true }));
   }
   const inv = getIdracInventory(s.id);
-  res.json({ ok: true, fresh: false, inventory: inv?.data || inv || null });
+  res.json(await inventoryResponse(req, s, inv?.data || inv || null));
 });
 
 // 서비스태그(= ESXi 하드웨어 일련번호)로 이 iDRAC 물리 서버에 대응하는 vCenter 가상화 호스트 조회.

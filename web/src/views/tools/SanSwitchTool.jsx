@@ -5,7 +5,7 @@ import { fetchJson, postJson, delJson, canCsv, hasRole } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
-import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
+import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS, kindCountOf, PERF_TABLE_PAGE, limitRows, perfComputedNote, perfBucketMsFor } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
@@ -651,10 +651,10 @@ function RangePicker({ hours, setHours, range, setRange }) {
   };
   return (
     <>
-      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }} title="차트·표가 계산되는 시간 구간입니다. 구간을 120 등분한 폭이 '버킷'이 되며, 버킷 폭은 차트 위 설명에 표시됩니다.">기간</span>
+      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }} title="차트·표가 계산되는 시간 구간입니다. 구간을 약 120 등분한 폭(10분 이상이면 15분·1시간 단위로 맞춤)이 '버킷'이 되며, 버킷 폭은 차트 위 설명에 표시됩니다.">기간</span>
       {HOURS.map(([h, label]) => (
         <button key={h} className={!range && hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
-          title={`지금부터 최근 ${label} 을 봅니다. 버킷 폭 ≈ ${bucketText(Math.max(60_000, (h * 3600_000) / 120))}`}
+          title={`지금부터 최근 ${label} 을 봅니다. 버킷 폭 ≈ ${bucketText(perfBucketMsFor(h))}`}
           onClick={() => { setRange(null); setHours(h); }}>{label}</button>
       ))}
       <button className={range ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
@@ -710,7 +710,7 @@ function MetricHelp({ mode, bucketMs, hours, scope, intervalHint }) {
         <div className="card muted" style={{ marginTop: 6, padding: '8px 10px' }}>
           <div><b>① 원천 표본</b> — 설정된 수집 주기{intervalHint ? `(${intervalHint})` : ''}마다 각 스위치에 SSH 로 <code>portperfshow</code> 를 표본 시간만큼 받아쓰고,
             마지막 화면 1벌의 <b>포트별 바이트/초</b>를 DB 에 저장합니다. 즉 표본 1개는 그 순간(약 1초 창)의 처리량이며, <b>수집 주기 사이의 순간 변동은 관측되지 않습니다</b>(정직한 한계).</div>
-          <div><b>② 버킷</b> — 조회 구간({scope || `최근 ${hours}시간`})을 120 등분(하한 60초)한 폭이 버킷입니다. 지금은 <b>{bw}</b>. 버킷마다 포트별로 표본의 <b>평균(AVG)</b>과 <b>최댓값(MAX)</b>을 계산합니다. 구간이 길수록 버킷이 넓어집니다.</div>
+          <div><b>② 버킷</b> — 조회 구간({scope || `최근 ${hours}시간`})을 약 120 등분(하한 60초)한 폭이 버킷입니다. 10분 이상이면 15분·1시간 단위로 맞춥니다 — 미리 합쳐 둔 집계 표(15분·1시간)를 그대로 쓸 수 있게 해서 긴 기간도 빨리 계산합니다(값은 원본으로 계산한 것과 같습니다). 지금은 <b>{bw}</b>. 버킷마다 포트별로 표본의 <b>평균(AVG)</b>과 <b>최댓값(MAX)</b>을 계산합니다. 구간이 길수록 버킷이 넓어집니다.</div>
           <div><b>③ 평균 기준</b> — 버킷 안 포트별 AVG 를 같은 스토리지(어레이)에 물린 포트끼리 <b>합산</b>한 선입니다. 표의 '평균'은 이 선의 평균, '최대'는 이 선의 최댓값입니다. 지속 부하(평소 사용량)를 보는 데 맞고, 구간이 길면 순간 피크가 평균에 깎입니다.</div>
           <div><b>④ 피크 기준</b> — 버킷 안 포트별 MAX 를 같은 스토리지의 포트끼리 <b>합산</b>한 선입니다. 표의 '평균'은 이 선의 평균, '최대'는 기간 내 최고 피크입니다. 포화·증설 판단에 맞습니다. ⚠ 포트마다 최댓값이 찍힌 시각이 다를 수 있어 "동시에 발생한 총량"보다 <b>크거나 같은 상한값</b>입니다.</div>
           <div><b>⑤ 법인 카드·전체 합계</b> — 스토리지별 값의 <b>단순 합</b>입니다. 각 스토리지의 최댓값 시각이 다르므로 카드의 '최대'는 동시 최대가 아니라 상한입니다(예: A 가 10시에 200, B 가 14시에 150 이면 카드 최대 350).</div>
@@ -811,15 +811,18 @@ function PerfPanel({ deviceId, ports }) {
    * 끼어들었다. 그 렌더에서 포트 시리즈에 없는 `s.ports.length` 를 읽어 화면 전체가 크래시했다
    * (Playwright 로 실제로 잡음). 뷰-데이터 짝을 강제하면 이 부류가 원천 차단된다.
    */
+  // v2.728(SAN 1차): 조건을 바꾸거나 창을 닫으면 **이전 요청을 끊는다**(AbortController). 예전에는 결과만 버리고 요청은 끝까지 돌아
+  //   서버가 아무도 안 볼 집계를 계속 했다 — 서버는 연결이 끊긴 요청을 대기열에서 빼거나 진행 중 집계를 멈춘다.
+  //   긴 조회는 기본 20초 × 3회 재시도가 오히려 같은 무거운 집계를 세 번 줄 세운다 → 90초 · 재시도 없음.
   useEffect(() => {
-    let alive = true;
+    const ac = new AbortController();
     setData(null); setError(null);
     const v = view;
     const path = v === 'storage' ? `/tools/sanswitch/devices/${deviceId}/perf/storage` : `/tools/sanswitch/devices/${deviceId}/perf`;
-    fetchJson(path, perfQuery({ hours, range }))
-      .then((d) => { if (alive) setData({ ...d, view: v }); })
-      .catch((e) => { if (alive) setError(e.message); });
-    return () => { alive = false; };
+    fetchJson(path, perfQuery({ hours, range }), ac.signal, { timeoutMs: 90_000, retries: 0 })
+      .then((d) => { if (!ac.signal.aborted) setData({ ...d, view: v }); })
+      .catch((e) => { if (!ac.signal.aborted) setError(e.message); });
+    return () => ac.abort();
   }, [deviceId, hours, range, view]);
 
   const collectNow = () => {
@@ -1035,14 +1038,20 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const [dcSet, setDcSet] = useState(() => new Set(dcPerf.datacenterIds || []));
   const dcParam = [...dcSet].join(',');
 
+  // v2.728(SAN 1차): 고른 연결 대상 종류만 서버에서 받는다(법인 합산의 서버 HBA 는 수천 개 — 응답이 압축 전 12MB 였다).
+  //   종류를 바꾸면 다시 받는다 — 같은 기간·범위면 서버가 집계를 기억해 두므로 다시 계산하지 않는다.
+  //   이전 요청은 끊는다(서버가 대기열에서 빼거나 집계를 멈춘다) · 90초 · 재시도 없음(같은 무거운 집계를 세 번 줄 세우지 않게).
+  const [tableMax, setTableMax] = useState(PERF_TABLE_PAGE);
   useEffect(() => {
-    let alive = true;
-    setData(null); setError(null);
-    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcParam, ...perfQuery({ hours, range }), split: split ? '1' : '0' })
-      .then((d) => { if (alive) setData(d); })
-      .catch((e) => { if (alive) setError(e.message); });
-    return () => { alive = false; };
-  }, [dcParam, hours, range, split]);
+    const ac = new AbortController();
+    setData(null); setError(null); setTableMax(PERF_TABLE_PAGE);
+    fetchJson('/tools/sanswitch/perf/storage-summary',
+      { datacenterId: dcParam, ...perfQuery({ hours, range }), split: split ? '1' : '0', kind: kind === 'all' ? '' : kind },
+      ac.signal, { timeoutMs: 90_000, retries: 0 })
+      .then((d) => { if (!ac.signal.aborted) setData(d); })
+      .catch((e) => { if (!ac.signal.aborted) setError(e.message); });
+    return () => ac.abort();
+  }, [dcParam, hours, range, split, kind]);
 
   // 보기 기준(v2.420): 평균 = sum/avgTotal/maxTotal, 피크 = peak/peakAvg/peakTotal. 정렬 키와 표시 값이 같은 계산이어야 한다.
   const peak = mode === 'peak';
@@ -1050,7 +1059,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const avgOf = (s) => perfAvgOf(s, peak);
   const maxOf = (s) => perfMaxOf(s, peak);
   const effHours = data?.hours || hours;
+  // 서버가 이미 종류로 걸러 보낸다(kindFilter). 구버전 서버(필드 없음)는 전부 보내므로 여기서도 한 번 거른다 — 결과는 같다.
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
+  // 이 종류가 아닌 다른 종류에는 시리즈가 있는가(빈 상태 문구 — '전체를 눌러 보라' 는 그때만).
+  const otherKinds = data ? kindCountOf(data, 'all') > series.length : false;
   const multiDc = dcSet.size !== 1;   // 법인 2곳 이상 또는 전체 — 그때만 분리/합산이 의미 있다
   const showDcCol = !!data?.split;
   const chartSeries = topSeries(series.map((s) => ({
@@ -1074,6 +1086,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
     cap: (s) => (s.capacity?.pct ?? null),   // 용량 미매칭은 null → 항상 뒤로
   };
   const sorted = sortRows(series, SORTERS[sort.key] || SORTERS.avg, sort.dir, (s) => s.key);
+  // 표는 정렬한 뒤 상위 tableMax 행만 그린다(호스트 수천 행을 한 번에 그리면 창이 굳는다) — 뺀 개수는 표 아래에서 말한다.
+  const tableLim = limitRows(sorted, tableMax);
   const scopeLabel = dcSet.size === 0
     ? '전체 법인'
     : (data?.allDatacenters || []).filter((d) => dcSet.has(d.id)).map((d) => d.name).join(', ') || dcPerf.label;
@@ -1115,7 +1129,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
             title={k === 'array'
               ? '벤더 심볼릭 이름이 어레이 형식이거나, 등록된 스토리지의 시리얼과 일치하는 연결 대상입니다.'
               : k === 'host' ? '서버 HBA 등 스토리지가 아닌 연결 대상입니다.' : '구분 없이 모두 봅니다.'}>
-            {label}{data?.counts?.[k] != null ? ` ${data.counts[k]}` : (k === 'all' && data ? ` ${(data.series || []).length}` : '')}
+            {label}{data ? ` ${kindCountOf(data, k)}` : ''}
           </button>
         ))}
         {/* 법인이 2곳 이상일 때만 의미가 있다 — 한 법인이면 분리·합산이 같은 결과다. */}
@@ -1137,6 +1151,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
         )}
       </div>
       {data && <div style={{ marginBottom: 6 }}><MetricHelp mode={mode} bucketMs={data.bucketMs} hours={effHours} scope={range ? rangeLabel(range) : ''} /></div>}
+      {data && perfComputedNote(data, Date.now()) && <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>⏱ {perfComputedNote(data, Date.now())}</div>}
       {data?.rangeIssue && <div className="card muted" style={{ fontSize: 12, borderColor: 'var(--amber)' }}>⚠ 기간 지정 무시됨: {data.rangeIssue} — 최근 24시간으로 표시합니다.</div>}
 
       {error && <ErrorBox message={error} />}
@@ -1149,7 +1164,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
       )}
       {data && (!rows.length || !series.length) && (
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
-          {data.series?.length && !series.length ? null : <>'{scopeLabel}' 범위에 아직 수집된 포트 사용량이 없습니다.</>}
+          {otherKinds && !series.length ? null : <>'{scopeLabel}' 범위에 아직 수집된 포트 사용량이 없습니다.</>}
           <div style={{ marginTop: 4 }}>
             {/* v2.517: **꺼져 있을 때만** '켜세요' 라고 말한다. 예전에는 무조건 이 문구여서, 이미 켜져
                 있고 장비에서 실패하는 상황에서도 사용자가 멀쩡한 설정을 의심하며 헤맸다(장비별 진단은
@@ -1159,7 +1174,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
               : <>포트 사용량 수집은 <b>켜져 있습니다</b> — 표본이 없는 이유는 스위치마다 다릅니다. 장비를 눌러 <b>사용량 분석</b> 탭을 열면 그 스위치의 사유(첫 주기 대기 / 엣지 미보고 / 명령 실패 등)를 알려줍니다.</>}
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
             {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}
-            {data.series?.length && !series.length
+            {otherKinds && !series.length
               ? <div style={{ marginTop: 4 }}>'{kind === 'array' ? '스토리지' : '호스트(HBA)'}' 로 분류된 연결 대상이 없습니다 — 위에서 '전체'를 눌러 보세요.</div>
               : null}
           </div>
@@ -1230,7 +1245,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((s) => (
+                {tableLim.rows.map((s) => (
                   <tr key={`${s.datacenterId ?? ''}|${s.key}`}>
                     {showDcCol && <td style={ELLIPSIS} title={s.datacenterName || ''}><b>{s.datacenterName || '—'}</b></td>}
                     <td style={ELLIPSIS} title={s.key}>
@@ -1257,6 +1272,13 @@ function DcStoragePerf({ dcPerf, onClose }) {
               </tbody>
             </STable>
           </div>
+          {tableLim.omitted > 0 && (
+            <div className="flex gap wrap" style={{ alignItems: 'center', fontSize: 12, marginTop: 6 }}>
+              <span className="muted">정렬 기준 상위 {tableLim.rows.length.toLocaleString()}개만 표시 — {tableLim.omitted.toLocaleString()}개 더 있습니다(합계·차트는 전부 포함).</span>
+              <button className="tab" style={{ flex: 'none', padding: '3px 10px' }}
+                onClick={() => setTableMax((n) => n + PERF_TABLE_PAGE)}>{Math.min(PERF_TABLE_PAGE, tableLim.omitted).toLocaleString()}개 더 보기</button>
+            </div>
+          )}
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             합산 대상 스위치: {data.switches.map((s) => s.name).join(' · ')}
           </div>

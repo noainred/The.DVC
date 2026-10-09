@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **615개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **618개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-08)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-09)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (191)
+## 공통 (190)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -162,7 +162,6 @@
 | `PARTFAULT_DB_PATH` |  |  | partfault/db.js |
 | `PARTFAULT_ENABLED` |  |  | partfault/settings.js |
 | `PARTFAULT_HOOK_DEBOUNCE_MS` |  |  | partfault/hooks.js |
-| `PARTFAULT_INV_MAX_AGE_MS` | `90` |  | partfault/scan.js |
 | `PARTFAULT_POLL_MS` | `10` |  | partfault/poller.js |
 | `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
 | `PARTFAULT_PUSH_MAX_DEVICES` | `5000` |  | partfault/push.js |
@@ -683,7 +682,7 @@
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 | `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `21600000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (15)
+## iDRAC/전력 (16)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -699,6 +698,7 @@
 | `IDRAC_TREND_AIRFLOW` | `기본 적용('false' 로 끄기)` |  | idrac/serverTrendSeries.js |
 | `IDRAC_TREND_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTrendSeries.js |
 | `OME_POWER_CONCURRENCY` | `16` |  | idrac/ome.js |
+| `PARTFAULT_INV_MAX_AGE_MS` | `90` |  | idrac/serverParts.js, partfault/scan.js |
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
 | `ROOMTEMP_STALE_CAP_MS` |  |  | idrac/roomTemp.js |
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
@@ -749,7 +749,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (30)
+## SAN 스위치 (33)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -770,7 +770,10 @@
 | `SANSW_PERF_PUSH_MS` |  | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_ROWS` | `20000` | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_QUERY_MAX_MS` | `60000` |  | sanswitch/perfDb.js |
-| `SANSW_PERF_QUERY_TTL_MS` | `20000` |  | sanswitch/perfDb.js |
+| `SANSW_PERF_QUERY_TTL_MS` |  |  | sanswitch/perfDb.js |
+| `SANSW_PERF_ROLLUP_15M_DAYS` | `31` |  | sanswitch/perfDb.js |
+| `SANSW_PERF_ROLLUP_BACKFILL` | `''` |  | sanswitch/perfDb.js |
+| `SANSW_PERF_ROLLUP_BACKFILL_DELAY_MS` | `120000` |  | sanswitch/perfDb.js |
 | `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
 | `SANSW_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/push.js |
 | `SANSW_PUSH_DEVICE_MAX_BYTES` | `900` |  | sanswitch/push.js |
@@ -799,4 +802,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 615
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 618

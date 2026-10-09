@@ -22,6 +22,9 @@ export const LIMITS = {
   intervalMs: { min: 60_000, max: 6 * 3600_000, def: 5 * 60_000 },
   sampleSeconds: { min: 3, max: 60, def: 8 },     // portperfshow 를 몇 초 동안 받아쓸지
   retentionDays: { min: 1, max: 3650, def: 90 },
+  // v2.728(SAN 2차): 1시간 집계 표 보관 기간 — 원본(retentionDays)과 따로 둔다(사용자 선택 '원본 90일 유지 · 집계 2년').
+  //   원본이 지워진 기간의 추이는 이 표로 본다. 15분 집계 표는 31일 고정이다(SANSW_PERF_ROLLUP_15M_DAYS).
+  rollupRetentionDays: { min: 30, max: 3650, def: 730 },
 };
 const clamp = (v, l, def) => {
   const n = Number(v);
@@ -76,6 +79,7 @@ export function normalizePerfSettings(input = {}) {
     intervalMs: clamp(input.intervalMs, LIMITS.intervalMs, LIMITS.intervalMs.def),
     sampleSeconds: clamp(input.sampleSeconds, LIMITS.sampleSeconds, LIMITS.sampleSeconds.def),
     retentionDays: clamp(input.retentionDays, LIMITS.retentionDays, LIMITS.retentionDays.def),
+    rollupRetentionDays: clamp(input.rollupRetentionDays, LIMITS.rollupRetentionDays, LIMITS.rollupRetentionDays.def),
   };
 }
 

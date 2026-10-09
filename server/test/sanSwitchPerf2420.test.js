@@ -33,7 +33,9 @@ test('rangeParams: hours 기본, from/to 우선, 역전·366일 초과는 24h �
 test('rangeOf: from/to 는 그 구간, hours 는 지금까지 — 버킷 폭은 구간/120(하한 60초)', async () => {
   const { rangeOf } = await import('../src/sanswitch/perfDb.js');
   const a = rangeOf({ hours: 24 });
-  assert.equal(a.bucketMs, 720_000, '24h/120 = 12분');
+  // v2.728(SAN 2차): 10분 이상 버킷은 집계 표(15분·1시간)의 정배수로 올린다 — 24h/120 = 12분 → 15분(96점).
+  assert.equal(a.bucketMs, 900_000, '24h/120 = 12분 → 15분 정배수');
+  assert.equal(rangeOf({ hours: 24 * 7 }).bucketMs, 2 * 3600_000, '7일/120 = 84분 → 2시간');
   const b = rangeOf({ hours: 1 });
   assert.equal(b.bucketMs, 60_000, '1h/120 = 30초 → 하한 60초');
   const from = 1_000_000_000_000, to = from + 12 * 3600_000;
@@ -85,6 +87,9 @@ test('pruneNow: 보관 기간 밖 표본을 즉시 삭제하고 삭제 행 수�
   const r = await pruneNow(5);
   assert.equal(r.deleted, 1);
   const st2 = await perfDbStats();
-  assert.equal(st2.rows, st1.rows - 1);
+  // v2.728(SAN 1차): 행 수는 rowid 범위로 어림한다(전체 COUNT 가 운영 DB 에서 서버 전체를 멈췄다) — 정리로 생긴 틈은 세므로
+  //   줄지 않을 수는 있어도 늘지는 않는다. 어림값이라는 표지를 함께 준다.
+  assert.equal(st2.rowsApprox, true);
+  assert.ok(st2.rows <= st1.rows);
   _resetForTest();
 });

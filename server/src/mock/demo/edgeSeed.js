@@ -113,6 +113,8 @@ async function demoEdgeTickInner({ now = Date.now(), snap = null } = {}) {
         setEdgeFleet(name, bm, new Date(now).toISOString());
       }
     } catch (err) { console.warn(`[mock] 데모 엣지 베어메탈 보고 실패(${name}): ${err?.message || err}`); }
+    // v2.728: 첫 데모 엣지에 위임 iDRAC 서버 2대(축약 인벤토리) — 상세 화면의 부품 상태·PSU 이름/입력·NIC 링크 판정을 위임 서버로도 보게.
+    if (e === DEMO_EDGES[0]) await demoRemoteIdracServers(c, e, { now }).catch((err) => console.warn(`[mock] 데모 위임 iDRAC 서버 보고 실패(${name}): ${err?.message || err}`));
     // ── push(엣지 → 중앙): 처음엔 과거 기록이 없으므로 그 틱에 전 경로를 1회 기록한다. ──
     for (const p of PUSH_EPS) {
       if (!first && (_tickN % p.every) !== 0) continue;
@@ -147,6 +149,41 @@ async function demoEdgeTickInner({ now = Date.now(), snap = null } = {}) {
   await demoRmaTick({ now }).catch(() => null);
   await demoPartFaultReports(demoCollectors, { now, version }).catch(() => null);
   return { edges: demoCollectors.length, demo: true };
+}
+
+/**
+ * v2.728: 데모 위임(엣지) iDRAC 서버 — 실제 엣지와 **같은 경로**로 넣는다: 데모 인벤토리(mock/demo/idrac.js demoInventory) →
+ * 엣지 축약(collector/compactInv.js) → 중앙 수신 정제(collector/remoteInventory.js setCollectorServers). 2대:
+ *   ① PSU 2 장애(Critical — 데모) ② rNDC 포트 하나의 링크 값이 비어 있다(못 읽음 → 화면 '?', 다운으로 칠하지 않는다).
+ * mock 에서만(demoEdgeTick 안에서만 불린다) · 접속 0 · 알림 없음 — 중앙은 위임 장비를 파트 장애로 판정하지 않는다(v2.548),
+ * 이 서버들은 표시 전용 요약에만 나온다. setCollectorServers 는 그 엣지의 목록을 **교체**하므로 틱마다 같은 2대다.
+ */
+async function demoRemoteIdracServers(c, e, { now }) {
+  const [{ setCollectorServers }, { compactInv }, idr, { mockServiceTag }] = await Promise.all([
+    import('../../collector/remoteInventory.js'), import('../../collector/compactInv.js'), import('./idrac.js'), import('../serviceTag.js'),
+  ]);
+  const at = now - 10 * MIN;
+  const servers = [1, 2].map((k) => {
+    const id = `mock-edgeidrac-${e.slug}-${k}`;
+    const server = {
+      id, name: `${e.slug}-r640-0${k}`, host: `https://${demoIp(`edgeidrac|${e.slug}|${k}`)}`,
+      serviceTag: mockServiceTag(`edgeidrac|${e.slug}|${k}`), vcenterId: '', datacenterId: c.datacenter || e.datacenter,
+    };
+    const p = idr.demoServerProfile(server, { spec: { model: 'PowerEdge R640', cpuModel: 'Intel(R) Xeon(R) Gold 6248R CPU @ 3.00GHz', sockets: 2, cores: 48, memGB: 384, gpus: [], loadBase: 30 } });
+    const inv = idr.demoInventory(server, p, at);
+    if (k === 1 && Array.isArray(inv.psus) && inv.psus[1]) {
+      inv.psus[1] = { ...inv.psus[1], health: 'Critical', inputWatts: null, outputWatts: null, lineInputVoltage: 0 };
+    }
+    if (k === 2 && inv.nics?.[0]?.ports?.[1]) inv.nics[0].ports[1] = { ...inv.nics[0].ports[1], link: '' };
+    const r = idr.demoSensorReadingAt(p, now - MIN);
+    return {
+      id, name: server.name, host: server.host, serviceTag: server.serviceTag, model: p.model, vcenterId: '', datacenterId: server.datacenterId,
+      type: 'idrac', vendor: 'dell', hostName: `${e.slug}-r640-0${k}.corp.example`,
+      inv: compactInv(inv),
+      sensors: { t: now - MIN, temps: Object.fromEntries(r.temps.map((x) => [x.name, x.celsius])), ...(r.cpuUsagePct != null ? { cpu: r.cpuUsagePct } : {}) },
+    };
+  });
+  setCollectorServers(c.id, c.datacenter || e.datacenter, servers);
 }
 
 /**

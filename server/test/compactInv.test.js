@@ -38,13 +38,16 @@ test('compactInv: 파트 필드(cpus·disks·psus·dimm·controller·pcie·fans)
     fans: [{ name: 'Fan 1A', model: '', partNumber: 'FAN-XYZ', manufacturer: 'DROP' }],
     collectedAt: 2,
   });
-  assert.deepEqual(out.cpus, [{ socket: 'CPU.1', model: 'Xeon 6346', cores: 16 }]);
-  assert.deepEqual(out.disks, [{ model: 'MZWLJ', capacityGB: 1920, media: 'SSD', protocol: 'NVMe' }], '시리얼은 싣지 않음');
-  assert.deepEqual(out.psus, [{ model: 'PWR 1400W', manufacturer: 'DELL', capacityWatts: 1400 }]);
-  assert.deepEqual(out.memoryDimms, [{ sizeGB: 32, type: 'DDR4', speedMHz: 3200, manufacturer: 'SK Hynix', partNumber: 'HMA' }]);
-  assert.deepEqual(out.storageControllers, [{ model: 'PERC H755', firmware: '52.x', protocols: 'SAS' }]);
-  assert.deepEqual(out.pcie, [{ model: 'BOSS-S2', manufacturer: 'DELL', deviceType: 'SingleFunction' }]);
-  assert.deepEqual(out.fans, [{ name: 'Fan 1A', model: '', partNumber: 'FAN-XYZ' }]);
+  // v2.728: 부품 이름·상태(health·state)·PSU 입력값·디스크 예측 실패를 싣는다 — 못 읽은 상태도 **키는 싣는다**(빈 문자열 —
+  //   중앙이 '구버전 엣지(키 없음)' 와 '못 읽음' 을 가른다). 예측 실패는 미확인이면 null(false 로 굳히지 않는다).
+  assert.deepEqual(out.cpus, [{ socket: 'CPU.1', model: 'Xeon 6346', cores: 16, health: 'OK', state: '' }]);
+  assert.deepEqual(out.disks, [{ name: '', model: 'MZWLJ', capacityGB: 1920, media: 'SSD', protocol: 'NVMe', health: '', state: '', predictiveFailure: null }], '시리얼은 싣지 않음');
+  assert.deepEqual(out.psus, [{ name: '', model: 'PWR 1400W', manufacturer: 'DELL', capacityWatts: 1400, inputWatts: null, outputWatts: null, lineInputVoltage: null, health: '', state: '' }]);
+  assert.deepEqual(out.memoryDimms, [{ locator: '', sizeGB: 32, type: 'DDR4', speedMHz: 3200, manufacturer: 'SK Hynix', partNumber: 'HMA', health: '', state: '' }]);
+  assert.deepEqual(out.storageControllers, [{ name: '', model: 'PERC H755', firmware: '52.x', protocols: 'SAS', health: '' }]);
+  assert.deepEqual(out.pcie, [{ name: '', model: 'BOSS-S2', manufacturer: 'DELL', deviceType: 'SingleFunction', health: '' }]);
+  assert.deepEqual(out.fans, [{ name: 'Fan 1A', model: '', partNumber: 'FAN-XYZ', health: '' }]);
+  for (const k of ['psus', 'disks', 'memoryDimms']) for (const x of out[k]) assert.ok(!('serial' in x), `${k}: 시리얼 미포함`);
   // 구버전(필드 부재) 호환 — 전부 빈 배열.
   const old = compactInv({ system: { model: 'R640' } });
   for (const k of ['cpus', 'disks', 'psus', 'memoryDimms', 'storageControllers', 'pcie', 'fans']) assert.deepEqual(old[k], [], k);

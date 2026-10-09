@@ -35,7 +35,7 @@ import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPe
 import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
 import { recordRun, listRuns, compareRuns, healthHistoryStatus, MAX_RUNS } from '../../sanswitch/healthHistory.js';
 import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
-import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable } from '../../sanswitch/perfDb.js';
+import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -399,6 +399,9 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, async (req, 
   logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집',
     detail: `중앙 직접 ${centralIds.length}대 · 엣지 요청 ${requested.length}곳${alreadyQueued.length ? ` (대기중 ${alreadyQueued.length}곳)` : ''}` });
   const result = await pollPerfOnce({ force: true, demoOnly: demoGuest });
+  // v2.728(SAN 1차): 적재는 더 이상 기억한 조회를 버리지 않는다(수집 주기 동안 유지) — 사람이 '지금 수집' 을 눌렀으면
+  //   방금 넣은 표본이 바로 보여야 하므로 여기서 버린다(진행 중인 조회는 그대로 두고 끝난 것만).
+  invalidatePerfQueries();
   res.json({
     ok: true, result, ...(demoGuest ? { demoOnly: true, skippedNonDemo, edgeSkipped } : {}),
     central: centralIds.length, edgeDevices: edgeDevices.length,
@@ -641,19 +644,36 @@ async function withPerfDiag(deviceId, r, req = null) {
   return { ...r, diag };
 }
 
+/**
+ * v2.728(SAN 1차 ⑤): 브라우저가 연결을 끊으면(기간을 바꿔 이전 요청을 취소·창 닫기) 그 조회를 멈추게 하는 신호.
+ * 같은 조회를 기다리는 다른 요청이 있으면 멈추지 않는다(perfDb.heavyQuery 가 요청자 수를 센다).
+ * 응답을 다 보낸 뒤의 close 는 취소가 아니다(writableEnded).
+ */
+function perfAbortSignal(res) {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  return ac.signal;
+}
+/** 요청한 화면이 떠나 멈춘 조회 — 받을 사람이 없으니 응답하지 않는다(소켓은 이미 닫혔다). */
+const abandoned = (e) => e?.code === 'abandoned';
+
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
   // ⚠ `''.split(',')` 은 [''] 이고 Number('') 은 0 이라, 빈 토큰을 먼저 걸러야 한다 — 안 거르면
   //   ports 미지정이 '포트 0 만' 으로 둔갑한다(v2.416 리뷰 확정 결함).
   const ports = parsePortsParam(req.query.ports);
-  const r = await portSeries(req.params.id, { hours, from, to, ports: ports.length ? ports : null });
+  let r;
+  try { r = await portSeries(req.params.id, { hours, from, to, ports: ports.length ? ports : null, signal: perfAbortSignal(res) }); }
+  catch (e) { if (abandoned(e)) return; throw e; }
   res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
 });
 
 /** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
 api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
-  const r = await storageSeries(req.params.id, { hours, from, to });
+  let r;
+  try { r = await storageSeries(req.params.id, { hours, from, to, signal: perfAbortSignal(res) }); }
+  catch (e) { if (abandoned(e)) return; throw e; }
   res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
 });
 
@@ -693,7 +713,9 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const edgeSwitches = edgeRaw.map((d) => ({ id: d.id, name: d.name || d.host || d.id, agent: d.agent, lastSampleAt: lastTs.get(String(d.id)) || null }));
   const edgeMissing = edgeSwitches.filter((e) => !e.lastSampleAt);
   const groupOf = split ? new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')])) : null;
-  const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
+  let agg;
+  try { agg = await storageSeriesMulti(ids, { hours, from, to, groupOf, signal: perfAbortSignal(res) }); }
+  catch (e) { if (abandoned(e)) return; throw e; }
 
   // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -742,6 +764,12 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const counts = series.reduce((a, s) => { a[s.endpointKind] = (a[s.endpointKind] || 0) + 1; return a; }, {});
   // 법인별 소계 — '어느 법인이 얼마나 쓰나'를 한눈에(스토리지만 합산, 호스트 제외). 규칙은 sanStorageDcSubtotals 머리말.
   const byDcRows = sanStorageDcSubtotals(series, dcNameOf);
+  // v2.728(SAN 1차 C): 화면이 고른 연결 대상 종류만 보낸다 — 법인 합산에서 서버 HBA 가 수천 개 잡히면 응답이 압축 전 12MB 였다
+  //   (v2.727 조사 실측). 화면 기본은 어레이뿐이므로 HBA 계열은 '호스트'·'전체' 를 고를 때 따로 받는다. 개수(counts)·법인 소계는
+  //   전 종류 기준 그대로다. kind 를 안 보내면(구버전 화면) 예전처럼 전부.
+  const kindQ = String(req.query.kind || '');
+  const kindFilter = ['array', 'host', 'unknown'].includes(kindQ) ? kindQ : null;
+  const seriesOut = kindFilter ? series.filter((s) => s.endpointKind === kindFilter) : series;
   // 화면이 창을 닫지 않고 범위를 바꿀 수 있게, **필터와 무관한 전 법인 목록**을 함께 준다
   // (스위치가 등록된 법인만). 이게 없으면 사용자가 목록 화면으로 돌아가 칩을 다시 골라야 한다.
   const allDcs = (() => {
@@ -763,7 +791,10 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
       : '',
     byDatacenter: byDcRows,
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
-    buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
+    buckets: agg.buckets, bucketMs: agg.bucketMs, series: seriesOut, counts, unavailable: agg.unavailable || false,
+    kindFilter, seriesOmitted: series.length - seriesOut.length,
+    // v2.728: 결과를 언제 계산했는지 · 얼마나 기억하는지 · 어디서 읽었는지(원본 / 집계 표) — 화면 각주가 말한다.
+    computedAt: agg.computedAt ?? null, cacheTtlMs: perfQueryTtlMs(), source: agg.source ?? null,
     ...(admin ? {} : { addressHidden: true }),
   });
 });
@@ -782,7 +813,9 @@ api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (
   const ids = devices.map((d) => d.id);
   const groupOf = new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')]));
   const st = loadPerfSettings();
-  const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
+  let agg;
+  try { agg = await storageSeriesMulti(ids, { hours, from, to, groupOf, signal: perfAbortSignal(res) }); }
+  catch (e) { if (abandoned(e)) return; throw e; }
   // v2.682(R3A-02): 장비별 마지막 표본 — 등록·사용 중인 스위치가 보고를 멈추면 그 시리즈를 '없어진 것' 으로 빼지 않는다(trafficTotal ⑦).
   let lastTs = new Map();
   try { lastTs = await latestSampleTs(ids); } catch { /* DB 불가 — unavailable 이 말한다 */ }
@@ -817,6 +850,7 @@ api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (
     edgeSwitches: edgeRaw.length, edgeMissing, lastSampleAt,
     intervalMs: st.intervalMs, enabled: demoOn(st.enabled),   // v2.708: mock 은 켜진 것처럼
     unavailable: !!agg.unavailable,
+    computedAt: agg.computedAt ?? null, cacheTtlMs: perfQueryTtlMs(), source: agg.source ?? null,   // v2.728
     ...(isMockMode() ? { demo: true } : {}),
   });
 });

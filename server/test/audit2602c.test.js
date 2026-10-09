@@ -118,29 +118,26 @@ test('DB2602-01 — pruneNow 는 청크로 지우며 청크 사이에 이벤트 
   assert.equal(left, 10, '보존일 안의 표본은 남는다');
 });
 
-test('DB2602-02 — perfDbStats 는 행 수를 60초 캐시하고 countsAt 으로 밝히며, 적재·prune 이 캐시를 버린다', async () => {
+// v2.728(SAN 1차) 정정: 60초 캐시(countsAt)는 없앴다 — COUNT 자체가 운영 DB 에서 포탈을 멈췄기 때문이다. 이제 행 수는 세지 않고
+//   rowid 끝값으로 어림한다(rowsApprox). 그래서 외부에서 넣은 행도 다음 호출에 바로 보이고, 캐시 시각을 밝힐 것이 없다.
+test('DB2602-02(v2.728 정정) — perfDbStats 는 행을 세지 않고 rowid 로 어림하며 매 호출 최신이다', async () => {
   const db = await import('../src/sanswitch/perfDb.js');
   const now = Date.now();
   const a = await db.perfDbStats({ now: T0 });
   assert.equal(a.available, true);
-  assert.equal(a.countsAt, T0);
+  assert.equal(a.rowsApprox, true, '어림값임을 밝힌다');
+  assert.equal('countsAt' in a, false, '캐시가 없으므로 캐시 시각도 없다');
   const before = a.rows;
-  // 캐시 안(60초 이내)에서는 COUNT 를 다시 하지 않는다 — 외부에서 행을 넣어도 같은 값
   const { DatabaseSync } = await import('node:sqlite');
   const conn = new DatabaseSync(path.join(CFG, 'sanswitch-perf.db'));
   conn.prepare('INSERT INTO port_perf (device_id, ts, port, bps) VALUES (?,?,?,?)').run('swX', now, 1, 1);
   conn.close();
   const b = await db.perfDbStats({ now: T0 + 30_000 });
-  assert.equal(b.rows, before, '캐시 값');
-  assert.equal(b.countsAt, T0);
-  assert.ok(b.newest >= now - 1, 'MIN/MAX 는 캐시하지 않는다(인덱스 양끝 조회)');
-  const c = await db.perfDbStats({ now: T0 + 61_000 });
-  assert.equal(c.rows, before + 1, 'TTL 이 지나면 다시 센다');
-  // 적재가 캐시를 버린다
+  assert.equal(b.rows, before + 1, '다음 호출에 바로 보인다(캐시 없음)');
+  assert.ok(b.newest >= now - 1, 'MIN/MAX 는 인덱스 양끝 조회');
   await db.importSamples([{ d: 'swX', ts: now, p: 2, b: 1 }], [], 90);
   const d = await db.perfDbStats({ now: T0 + 62_000 });
   assert.equal(d.rows, before + 2);
-  assert.equal(d.countsAt, T0 + 62_000);
 });
 
 test('DB2602-01/02 — 소스에 단일 대형 DELETE·다중 aggregate 풀스캔이 남지 않는다', async () => {
