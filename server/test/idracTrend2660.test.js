@@ -30,7 +30,7 @@ const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * MIN;
 test('① 집계 단위 — 표본 ≤ 400, 핸드오프 표와 같다', () => {
   assert.equal(bucketOf(HOUR), MIN);
   assert.equal(bucketOf(DAY), 5 * MIN);
-  assert.equal(bucketOf(7 * DAY), 30 * MIN);
+  assert.equal(bucketOf(7 * DAY), HOUR); // v2.729: 30분 → 1시간(롤업을 읽는다)
   assert.equal(bucketOf(30 * DAY), 2 * HOUR);
   assert.equal(bucketOf(90 * DAY), 6 * HOUR);
   assert.equal(bucketOf(365 * DAY), DAY);

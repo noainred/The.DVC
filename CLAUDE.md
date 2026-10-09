@@ -4224,6 +4224,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         서버 `gpuStateOf`·`typeFilterOf`(쿼리 `gpu`·`kind`, 구버전 `gpuOnly=1` 호환) + 웹 `IdracTypeBar.jsx`·`typeCounts`(칩 개수는 다른 축 선택만 반영).
         'CPU 만' 은 **GPU 0 장으로 읽었을 때만** — 근거가 없으면 unknown 이고 어느 칩에도 넣지 않는다. ⚠ `gpuCardsOf` 는 배열이 아니라 `{cards,total}` 을 돌려준다 —
         초판이 배열로 읽어 전 서버가 unknown 이었고, **배열로 만든 단위 테스트는 통과했다**(목 서버 화면에서 발견). 테스트 입력은 실제 함수의 출력으로 만들 것.
+    - ⚠⚠ **v2.729 — 7일 보기가 원본을 읽어 포탈 전체를 멈췄다. 1시간보다 잔 버킷은 원본을 읽는다는 사실을 버킷 표에 반영할 것**
+      (사용자 캡처: 7일 조회 24초째 · 같은 시각 `/api/health` 14초 대기 — 이 화면은 iDRAC 에 접속하지 않고 로컬 DB 만 읽는다.
+      `routes/admin/idracTrend.js BUCKETS`·`seriesForMemo` + `metrics/db.js historyRangeAsync`·`metaKey`, 회귀 `server/test/idracTrendPerf2729.test.js` — 변이 7/7):
+      · **30분 버킷을 되살리지 말 것** — 1시간 미만 버킷은 `samples_hourly` 를 못 써 분 단위 원본을 읽는다. 원본 인덱스 `(metric,k,ts)` 에는 v 가 없어
+        행마다 표 본체를 읽고, 원본은 1분마다 전 장비 값이 섞여 쌓여 한 계열의 행이 파일 곳곳에 흩어진다(캐시에 없으면 행마다 디스크 임의 읽기).
+        7일 × 30분 = 계열당 약 1만 행. 지금 BUCKETS 는 [1분, 5분, 1시간, 2시간, 6시간, 1일] — 원본은 약 33시간 이하 창만 읽는다.
+      · **키 단위 MIN·MAX 도 한 문장이면 그 키 전체 이력을 훑는다**(v2.550.3 의 '파티션으로 좁히면 2.7ms' 는 짧은 키 이야기였다 — 오래 쌓인 GPU·호스트
+        계열은 수십만 항목). `metaKey` 는 단독 MIN/MAX 문장 4개다. 테스트가 `k=?` 로 좁힌 준비문에 MIN(ts|h)·MAX(ts|h) 동시 사용 0 을 스윕한다.
+      · 원본을 읽는 경로는 `historyRangeAsync` — 6시간 조각(버킷 정배수, 첫 경계는 시작 이후 첫 버킷 경계)마다 양보하고 결과는 `historyRange` 와 같다
+        (테스트가 dead-band·일반 계열 × 1분·5분 × 경계 아닌 시작 × 조각 크기로 대조). 라우트는 같은 서버·기간 결과를 30초 기억하고 진행 중 조회에 합류한다.
+      · 실측(합성 813만 행, 1분마다 807계열): 7일 처음 1,328ms → 74ms · 다시 217ms → 13ms · 최장 멈춤 1,288ms → 27ms. ⚠ 이 컨테이너는 임의 읽기 0.05ms 라
+        운영 시간은 더 길다(운영 DB 로는 재지 못했다). **남은 것**: 24시간(5분)은 여전히 원본 1,440행/계열을 읽는다(조각·양보로 멈춤만 줄였다).
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·

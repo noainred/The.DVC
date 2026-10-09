@@ -53,7 +53,10 @@ const NOT_FOUND = { ok: false, reason: '서버를 찾을 수 없습니다.' };
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 export const PRESETS = Object.freeze({ '1h': HOUR, '6h': 6 * HOUR, '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY, '1y': 365 * DAY });
 /** 표본 ≤ 약 400 이 되도록 집계 단위를 고른다 — 화면(idracTrendText.js BUCKET_LABELS)과 같은 표. */
-export const BUCKETS = Object.freeze([MIN, 5 * MIN, 30 * MIN, 2 * HOUR, 6 * HOUR, DAY]);
+// ⚠ v2.729: 30분 단위를 뺐다 — 1시간보다 잘은 버킷은 시간당 롤업(samples_hourly)을 쓰지 못해 **분 단위 원본**을 읽는다.
+//   7일 × 30분이면 계열마다 원본 약 1만 행을 흩어진 위치에서 읽었고(운영: 24초+ · 그동안 포탈 전체 정지) 지금은 1시간(168점)이라
+//   롤업에서 읽는다. 원본을 읽는 것은 약 33시간 이하 창(1분·5분 버킷)뿐이다. 30분을 되살리지 말 것.
+export const BUCKETS = Object.freeze([MIN, 5 * MIN, HOUR, 2 * HOUR, 6 * HOUR, DAY]);
 export const bucketOf = (span) => BUCKETS.find((ms) => span / ms <= 400) || DAY;
 /** 조회 가능 기간(일) — 핸드오프 365일. metrics 롤업 보존이 더 짧으면 그 값(0 = 무제한은 365 그대로). */
 export function trendRetentionDays(metricsRetentionDays = loadMetricsSettings().retentionDays, env = process.env) {
@@ -226,6 +229,40 @@ export const HOST_CPU_METRIC = 'host_cpu_pct';
  */
 export const HOST_GPU_METRICS = Object.freeze({ hostGpuPct: 'gpu_util', hostGpuMemPct: 'gpu_mem' });
 
+/*
+ * v2.729: 같은 서버·같은 기간·같은 버킷 결과를 짧게 기억한다(30초 — 서버 표와 같은 TABLE_MEMO_MS). 화면은 서버를 다시 고르거나
+ * 기간을 왔다 갔다 하며 같은 조회를 되풀이하고, 1시간 보기는 30초마다 다시 부른다. **진행 중인 같은 조회는 합류**한다 —
+ * 연타가 같은 원본 읽기를 겹쳐 시작하지 않게(v2.672 capacity-forecast 와 같은 판단). 프리셋 기간의 키는 버킷에 맞춘 시작 시각이라
+ * 같은 버킷 안에서는 같은 키다. 일부 계열을 못 읽은 결과(errors)는 기억하지 않는다(다음 요청이 다시 시도한다).
+ */
+export const TREND_MEMO_MS = 30_000;
+const TREND_MEMO_MAX = 64;
+const _trendMemo = new Map(); // key → { at, done, p }
+const _trendMemoStats = { hits: 0, misses: 0, joined: 0 };
+export function trendMemoStats() { return { ..._trendMemoStats, size: _trendMemo.size }; }
+export function _resetTrendMemo() { _trendMemo.clear(); _trendMemoStats.hits = 0; _trendMemoStats.misses = 0; _trendMemoStats.joined = 0; }
+export function trendMemoKey(s, win, host) {
+  return [String(s?.id || ''), host?.id ? String(host.id) : '', win.start, win.custom ? win.end : '', win.bucketMs, win.offsetMs || 0].join('|');
+}
+async function seriesForMemo(s, win, opts = {}, now = Date.now()) {
+  const key = trendMemoKey(s, win, opts.host);
+  const hit = _trendMemo.get(key);
+  if (hit && (!hit.done || now - hit.at < TREND_MEMO_MS)) {
+    if (hit.done) _trendMemoStats.hits += 1; else _trendMemoStats.joined += 1;
+    return hit.p;
+  }
+  _trendMemoStats.misses += 1;
+  const ent = { at: now, done: false, p: null };
+  ent.p = seriesFor(s, win, opts).then((v) => {
+    ent.done = true; ent.at = Date.now();
+    if (v?.errors && Object.keys(v.errors).length && _trendMemo.get(key) === ent) _trendMemo.delete(key);
+    return v;
+  }, (e) => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); throw e; });
+  _trendMemo.delete(key); _trendMemo.set(key, ent);
+  while (_trendMemo.size > TREND_MEMO_MAX) _trendMemo.delete(_trendMemo.keys().next().value);
+  return ent.p;
+}
+
 async function seriesFor(s, win, { host = undefined } = {}) {
   const id = String(s?.id || '');
   const errors = {};
@@ -238,23 +275,28 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   let cpuHistoryKey = null;
   try {
     const db = await getMetricsDb();
-    const read = (k, metric) => {
-      try { return db.historyRange(metric, id, win.start, win.end, win.bucketMs, win.offsetMs || 0); }
+    // v2.729: 계열마다 조각으로 읽고 사이에 양보한다(historyRangeAsync — 결과는 historyRange 와 같다). 한 계열 원본을 한 문장으로
+    //   읽으면 그동안 포탈 전체가 멈췄다. 구버전 db 객체(테스트 대역)에는 없으니 동기판으로 되돌린다.
+    const range = (metric, key) => (typeof db.historyRangeAsync === 'function'
+      ? db.historyRangeAsync(metric, key, win.start, win.end, win.bucketMs, win.offsetMs || 0)
+      : db.historyRange(metric, key, win.start, win.end, win.bucketMs, win.offsetMs || 0));
+    const read = async (k, metric) => {
+      try { return await range(metric, id); }
       catch (e) { errors[k] = e?.message || String(e); return []; }
     };
-    cpuParts.telemetry = read('cpuPct', TREND_METRICS.cpuPct);
-    cpuParts.sensor = read('cpuPct', CPU_FALLBACK_METRICS.sensor);
-    cpuParts.bmIdrac = read('cpuPct', CPU_FALLBACK_METRICS.bmIdrac);
-    out.cpuTemp = read('cpuTemp', TREND_METRICS.cpuTemp);
-    out.gpuTemp = read('gpuTemp', TREND_METRICS.gpuTemp);
-    out.inletTemp = read('inletTemp', TREND_METRICS.inletTemp);
-    out.exhaustTemp = read('exhaustTemp', TREND_METRICS.exhaustTemp);
+    cpuParts.telemetry = await read('cpuPct', TREND_METRICS.cpuPct);
+    cpuParts.sensor = await read('cpuPct', CPU_FALLBACK_METRICS.sensor);
+    cpuParts.bmIdrac = await read('cpuPct', CPU_FALLBACK_METRICS.bmIdrac);
+    out.cpuTemp = await read('cpuTemp', TREND_METRICS.cpuTemp);
+    out.gpuTemp = await read('gpuTemp', TREND_METRICS.gpuTemp);
+    out.inletTemp = await read('inletTemp', TREND_METRICS.inletTemp);
+    out.exhaustTemp = await read('exhaustTemp', TREND_METRICS.exhaustTemp);
     if (matched?.id) {
-      try { out.hostCpuPct = db.historyRange(HOST_CPU_METRIC, String(matched.id), win.start, win.end, win.bucketMs, win.offsetMs || 0); }
+      try { out.hostCpuPct = await range(HOST_CPU_METRIC, String(matched.id)); }
       catch (e) { errors.hostCpuPct = e?.message || String(e); }
       try { hostCpuFirstTs = db.metaKey?.(HOST_CPU_METRIC, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
       for (const [k, metric] of Object.entries(HOST_GPU_METRICS)) {
-        try { out[k] = db.historyRange(metric, String(matched.id), win.start, win.end, win.bucketMs, win.offsetMs || 0); }
+        try { out[k] = await range(metric, String(matched.id)); }
         catch (e) { errors[k] = e?.message || String(e); }
         try { hostGpuFirstTs[k] = db.metaKey?.(metric, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
       }
@@ -815,7 +857,7 @@ export function registerIdracTrend(adminRouter) {
     const win = parseWindow(req.query, { retentionDays: keep });
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
     const k = scopeKind(kindOf(s), idracScopeOf(req));
-    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs, hostGpuFirstTs } = await seriesFor(s, win, { host: k.host });
+    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs, hostGpuFirstTs } = await seriesForMemo(s, win, { host: k.host });
     // v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지 + iDRAC 표본이 지금 들어오는지(멈춤 진단).
     let cpuDiag = null; let idracState = null;
     const now = Date.now();

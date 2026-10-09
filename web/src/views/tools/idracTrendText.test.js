@@ -37,6 +37,7 @@ describe('iDRAC 통합 추이 문구(v2.660)', () => {
     expect(periodText(NOW - HOUR, NOW)).toBe('11:30 ~ 12:30');
     expect(periodText(NOW - DAY, NOW)).toBe('2026-09-29 12:30 ~ 2026-09-30 12:30');
     expect(bucketLabel(5 * MIN)).toBe('5분');
+    expect(bucketLabel(HOUR)).toBe('1시간'); // v2.729: 7일은 1시간 버킷('60분' 이 아니다)
     expect(PRESETS.map(([k]) => k)).toEqual(['1h', '6h', '24h', '7d', '30d', '90d', '1y']);
   });
 
