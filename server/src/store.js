@@ -725,6 +725,24 @@ export const dsUsedOf = (d) => (d.usedGB != null ? d.usedGB : Math.max(0, (d.cap
 /** v2.622(감사 RECENT-02): '사용량 미상' 으로 세는 DS — 롤업 datastoresUsageUnknown 과 같은 기준(일일 헬스체크가 공유한다). */
 export const dsUsageUnknownOf = (d) => !!d && !dsUsageReadable(d) && (d.capacityGB || 0) > 0;
 
+/**
+ * v2.732(점검 2회차 B2-01): 담당 엣지의 push 가 SITE_STALE_MS 를 넘긴 위임(site) vCenter — **status 와 무관**하게 센다.
+ * 병합(위 site 분기)은 엣지가 마지막으로 보낸 status 를 그대로 두고 `stale`·`receivedAt` 만 붙인다 — 그래서 헤더 'N/M' 의
+ * 연결 수에는 그대로 들어가고(구버전 화면·V4·V6 계약이라 바꾸지 않는다), 며칠 전 값이 지금 값처럼 보였다(v2.570 이 '가장 위험한
+ * 거짓' 이라 적은 상태). 롤업 vcentersStale · /health · 공개 API /inventory/collection 이 **이 판정 하나**를 쓴다.
+ * 접속 실패로 마지막 정상 값을 이월 중인 직접 수집 vCenter(LASTGOOD — status unreachable)는 이미 '불가' 로 보이므로 여기 넣지 않는다.
+ */
+export const siteInventoryStale = (v) => !!v && v.collectSource === 'site' && v.stale === true;
+
+/**
+ * v2.732(점검 2회차 B2-05): 경보를 **조회하지 않은** vCenter — REST 폴백 수집(restClient.js `alarmsUnknown:true · alarms:[]`)과
+ * 엣지가 REST 로 받은 위임 vCenter(병합이 collectMethod 로 보존). 이 vCenter 의 경보 0 건은 '0 건' 이 아니라 '모른다' 다.
+ * 웹 `views/restFallbackText.js alarmsUnknown` 과 같은 규칙(번들 경계라 두 벌 — 서버 판정은 이것 하나).
+ */
+export const vcAlarmsUnknown = (v) => !!v && typeof v === 'object' && (v.alarmsUnknown === true
+  || (Array.isArray(v.restUnknown) && v.restUnknown.includes('alarms'))
+  || v.collectSource === 'rest' || v.collectMethod === 'rest');
+
 function rollupsOf(snap, { scoped = false } = {}) {
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
@@ -766,6 +784,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
     //   불가를 세어 재시작 직후 첫 수집 중인 vCenter 까지 '연결 불가' 로 보였다(v2.509 '기다리면 되는지' 규약).
     vcentersPending: snap.vcenters.filter((v) => v.status === 'pending').length,
     vcentersUnreachable: snap.vcenters.filter((v) => v.status === 'unreachable').length,
+    // v2.732(점검 2회차 B2-01): 엣지 push 가 낡은 위임 vCenter — status 와 무관(대개 connected 로 함께 세어진다). 연결 수는 바꾸지 않는다.
+    vcentersStale: snap.vcenters.filter(siteInventoryStale).length,
     hosts: snap.hosts.length,
     hostsConnected: hc.connected,
     hostsMaintenance: hc.maintenance,

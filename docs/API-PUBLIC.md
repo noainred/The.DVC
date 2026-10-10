@@ -203,23 +203,43 @@ ISO 문자열이 섞여 나오지 않습니다.
 > 포탈 화면은 GHz·GB·TB 로 보여주므로 같은 수를 다르게 표시합니다(값은 같습니다).
 > ⚠ `meta.collectedAt` 은 **스냅샷을 만든 시각**입니다. 봉투의 `generatedAt`(응답 시각)과
 > 다른 것이 정상이고, 둘의 차이가 곧 데이터의 나이입니다.
+> ⚠ (v2.732) 다만 스냅샷 안의 **엣지 위임 vCenter 값은 그 엣지가 마지막으로 보낸 값**입니다 — 엣지의 보고가 끊기면 합계에
+> 낡은 값이 섞입니다. 그런 vCenter 수는 `/inventory/collection` 의 `stale`, 어느 vCenter 인지와 실제 수신 시각은
+> `/inventory/vcenters` 의 행 `stale`·`collectedAt` 으로 확인하세요.
 
 ### 7-2. `GET /inventory/vcenters` — vCenter 별 개수·상태
 
 분류 `inventory` · **vCenter 범위 적용** · 배열
 
-필드: `id` `name` `status` `version` `hosts` `vms` `datastores` `alarms` `collectedAt`
+필드: `id` `name` `status` `version` `hosts` `vms` `datastores` `alarms` `collectedAt` `stale`
 
 ```json
 {
-  "id": "vc-us-east", "name": "vcenter-us-east-01",
-  "status": "connected", "version": "8.0.2",
-  "hosts": 24, "vms": 240, "datastores": 5, "alarms": 7,
-  "collectedAt": 1789727271549
+  "data": [{
+    "id": "vc-us-east", "name": "vcenter-us-east-01",
+    "status": "connected", "version": "8.0.2",
+    "hosts": 24, "vms": 240, "datastores": 5, "alarms": 7,
+    "collectedAt": 1791598267492, "stale": false
+  }],
+  "meta": {
+    "scopedToVcenters": null, "count": 11, "truncated": false, "omitted": 0, "limit": 5000,
+    "staleCount": 0, "alarmsUnknownCount": 0,
+    "note": "stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다)."
+  }
 }
 ```
 
 `status` 값: `connected` / `pending`(첫 수집 전·중) / `unreachable`(접속 실패) / `maintenance`.
+
+> ⚠⚠ (v2.732) **`collectedAt` 은 그 행의 값을 실제로 받은 시각**입니다.
+> 엣지 위임 vCenter 는 **담당 엣지의 보고를 중앙이 받은 시각**(아직 받은 적이 없으면 `null`), 접속 실패로 **마지막 정상 수집 값을
+> 이월 중인** vCenter 는 그 정상 수집 시각, 그 밖(중앙 직접 수집 정상)은 스냅샷 시각입니다.
+> v2.731 까지는 모든 행이 스냅샷 시각이라, 담당 엣지가 며칠 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔습니다.
+> ⚠⚠ **`stale: true` 인 행은 지금 값이 아닙니다.** 엣지 위임 vCenter 는 엣지의 보고가 끊겨도 `status` 가 **엣지가 마지막으로 보낸
+> 값 그대로**(대개 `connected`)입니다 — `status` 만 보고 '정상' 으로 판정하지 마세요. 접속 실패 이월은 `status: "unreachable"` 이면서
+> `stale: true` 입니다. `meta.staleCount` 가 그 행 수입니다.
+> ⚠ (v2.732) **`alarms: null` 은 경보 0 건이 아닙니다** — 그 vCenter 는 REST 폴백으로 수집돼 경보를 **조회하지 않았습니다.**
+> 개수는 `meta.alarmsUnknownCount` 입니다. 합계를 낼 때 0 으로 더하지 말고 빼고 몇 곳을 뺐는지 밝히세요.
 
 > ⚠ **접속처·자격증명은 주지 않습니다.** 이름과 id 까지입니다.
 
@@ -231,12 +251,18 @@ ISO 문자열이 섞여 나오지 않습니다.
 {
   "data": {
     "registered": 11, "connected": 11,
-    "pending": 0, "unreachable": 0, "maintenance": 0,
-    "generatedAt": 1789727271549, "source": "mock", "intervalMs": 30000
+    "pending": 0, "unreachable": 0, "maintenance": 0, "stale": 0,
+    "generatedAt": 1791598267492, "source": "mock", "intervalMs": 30000
   },
-  "meta": { "scopedToVcenters": null, "note": "pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다." }
+  "meta": { "scopedToVcenters": null, "note": "pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다. stale 은 담당 엣지의 보고가 끊겨 마지막으로 받은 값을 보여 주는 위임 vCenter 수입니다(상태 개수와 겹칩니다)." }
 }
 ```
+
+> ⚠⚠ (v2.732) **`stale` 은 위 상태 개수와 겹치는 별도 축**입니다 — 담당 엣지의 보고가 기준 시간(기본 5분)을 넘긴 **엣지 위임 vCenter**
+> 수이고, 그 vCenter 는 대개 `connected` 로도 함께 세어집니다(`status` 는 엣지가 마지막으로 보낸 값 그대로). 그래서
+> `registered = connected + pending + unreachable + maintenance (+ 비활성)` 의 합에 `stale` 을 더하지 마세요.
+> 포탈 내부 헤더(`/api/health` 의 `vcentersStale`)와 같은 판정입니다. 중앙 직접 수집 vCenter 의 접속 실패 이월은 `unreachable` 로
+> 세고 여기 넣지 않습니다(행 단위로는 `/inventory/vcenters` 의 `stale: true`).
 
 > 범위를 지정한 키에서는 `registered`·`connected`·`pending`·`unreachable`·`maintenance` 가 **그 범위의 vCenter 만**
 > 센 값이고, `meta.scopedToVcenters` 에 범위 vCenter 개수가 실립니다(범위 미지정 키는 `null` = 전체).
@@ -275,11 +301,16 @@ ISO 문자열이 섞여 나오지 않습니다.
   "data": [],
   "meta": {
     "count": 0, "truncated": false, "omitted": 0, "limit": 5000,
-    "usedUnknownCount": 0,
+    "usedUnknownCount": 0, "capacityUnreadCount": 0,
     "note": "사용량을 읽지 못한 장비는 usedBytes 가 null 로 나갑니다(0 으로 채우지 않습니다)."
   }
 }
 ```
+
+> ⚠⚠ (v2.732) **수집에 실패한 장비·용량을 수집하지 않는 장비(VPLEX 등)는 `totalBytes`·`usedBytes`·`usedPct` 가 모두 `null`
+> 이고 `usedUnknown: true`** 입니다. v2.731 까지는 그 장비가 `totalBytes: 0, usedBytes: 0, usedUnknown: false`(= '용량 0 · 사용 0 을
+> 읽었다')로 나갔습니다. 판정은 포탈 내부 Overview 스토리지 카드와 같습니다(전체 용량이 양수가 아니거나 수집 실패).
+> 그런 장비 수는 `meta.capacityUnreadCount` 이고 `meta.usedUnknownCount` 에 포함됩니다.
 
 > ⚠⚠ **`usedUnknown: true` 인 장비를 '사용량 0' 으로 세지 마세요.** 그 장비는 값을 읽지
 > 못한 것이지 비어 있는 것이 아닙니다. 합계를 낼 때 **분모에서 빼고 몇 대를 뺐는지
@@ -343,6 +374,17 @@ ISO 문자열이 섞여 나오지 않습니다.
 > **받아서 직접 거르세요** — `meta.mutedCount` 가 그 개수입니다.
 > ⚠ 위 예시에서 `name`·`triggeredAt` 이 `null` 인 것은 **데모 데이터에 그 필드가 없기
 > 때문**입니다. 운영 vCenter 에서는 채워집니다(못 읽으면 그대로 `null`).
+> ⚠⚠ (v2.732) **경보를 조회하지 않은 vCenter 가 있습니다** — REST 폴백으로 수집된 vCenter 는 경보를 읽지 않으므로 그 vCenter 의 행이
+> 없는 것은 '경보 0 건' 이 아닙니다. `meta.alarmsUnknownVcenters`(개수)·`meta.alarmsUnknownVcenterIds`(범위 안 vCenter id 목록)가
+> 그 vCenter 를 밝히고, `meta.note` 가 같은 사실을 문장으로 말합니다.
+
+```json
+"meta": {
+  "scopedToVcenters": null, "count": 58, "truncated": false, "omitted": 0, "limit": 5000,
+  "mutedCount": 0, "alarmsUnknownVcenters": 0, "alarmsUnknownVcenterIds": [],
+  "note": "음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다."
+}
+```
 
 ### 7-8. `GET /faults/parts` — 물리 부품 장애
 
@@ -493,6 +535,8 @@ const usedPct = sum.data.memTotalMB ? (sum.data.memUsedMB / sum.data.memTotalMB)
 | `truncated` 무시 | 5,000행에서 잘린 것을 전체로 보고 | `meta.truncated`·`meta.omitted` 확인 |
 | `503 not-collected` 를 장애로 알림 | 재시작 직후마다 오경보 | 재시도하고, 계속되면 그때 알림 |
 | `pending` 을 `unreachable` 과 합산 | 멀쩡한 첫 수집을 장애로 보고 | 따로 세기 |
+| `status: connected` 만 보고 정상 판정 | 담당 엣지가 멈춘 위임 vCenter 의 **며칠 전 값**을 지금 값으로 표시 | 행 `stale`·`collectedAt` 확인 |
+| vCenter `alarms: null` 을 0 으로 더함 | 경보를 조회하지 않은 법인을 '경보 없음' 으로 표시 | 합계에서 빼고 `alarmsUnknownCount` 밝히기 |
 | `unknown`·`absent` 부품을 장애로 집계 | 정상 장비에 장애 수십 건 | `state` 세 갈래로 분리 |
 | 응답을 CDN·프록시에 캐시 | **다른 키의 범위 데이터가 섞임** | `no-store` 존중 |
 | 키를 쿼리스트링에 | 액세스 로그에 평문 잔존 | 헤더로만 |

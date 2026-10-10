@@ -76,7 +76,9 @@ export const ENDPOINTS = Object.freeze([
   {
     path: '/inventory/vcenters', group: 'inventory', method: 'GET', scoped: true,
     summary: 'vCenter 별 개수·상태 — 이름과 id 는 주고 자격증명·주소는 주지 않는다',
-    fields: ['id', 'name', 'status', 'version', 'hosts', 'vms', 'datastores', 'alarms', 'collectedAt'],
+    // v2.732(점검 2회차 B2-01·B2-05): collectedAt 은 그 값을 실제로 받은 시각(위임 → 엣지 push 수신 · 접속 실패 이월 → 마지막
+    //   정상 수집), stale 은 그 값이 낡았는가(true/false), alarms 는 경보를 조회하지 않은 vCenter(REST 폴백)면 null.
+    fields: ['id', 'name', 'status', 'version', 'hosts', 'vms', 'datastores', 'alarms', 'collectedAt', 'stale'],
   },
   {
     // v2.599(AUTHZ-2599-04): 범위 키에는 그 범위 vCenter 만 센다 — 내부 /health(v2.583)와 같은 기준.
@@ -87,7 +89,9 @@ export const ENDPOINTS = Object.freeze([
      *   그대로 센다 — `/health`(`routes/api/overviewNsx.js:88`)와 **같은 기준**이다.
      *   추측 정규식으로 분류하면 두 화면이 다른 수를 말한다.
      */
-    fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'generatedAt', 'source', 'intervalMs'],
+    // v2.732(점검 2회차 B2-01): stale — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 수(상태 개수와 겹치는 별도 축,
+    //   /health vcentersStale 과 같은 판정).
+    fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'stale', 'generatedAt', 'source', 'intervalMs'],
   },
   {
     path: '/capacity/datastores', group: 'capacity', method: 'GET', scoped: true,
