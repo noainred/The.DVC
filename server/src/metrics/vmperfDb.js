@@ -168,7 +168,11 @@ function prepare(db) {
     rawMin: db.prepare('SELECT MIN(ts) AS mn FROM samples WHERE metric=? AND k=?'), // v2.600 DB2600-02 — aggregate 하나(인덱스 끝점)
     // v2.447(감사 B3): k 필터 추가 — 파일이 한 vCenter 전용이라도, 구버전 충돌 파일이 남아 있으면
     // 남의 행까지 세어 '수집 시작' 이 틀리게 표시됐다.
-    meta: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=? AND k=?'),
+    // v2.733(점검 3회차 C6-05 — v2.729 규약의 형제 누락): 첫·마지막 시각은 **단독 문장** 둘로 묻는다. MIN·MAX·COUNT 를 한 문장에 두면
+    //   인덱스 끝점 최적화가 걸리지 않아 그 키의 전 이력(1분 × 90일 = 약 13만 행)을 훑는다(합성 129.6만 행 실측 약 12ms → 0.01ms).
+    //   첫 시각은 위 rawMin 을 그대로 쓴다. 행 수는 화면이 쓰지 않는다 — 진단·테스트만 vmperfCount 로 따로 센다.
+    rawMax: db.prepare('SELECT MAX(ts) AS mx FROM samples WHERE metric=? AND k=?'),
+    count: db.prepare('SELECT COUNT(*) AS n FROM samples WHERE metric=? AND k=?'),
     // v2.583(검증 에이전트 권고): 청크 삭제용 — 공용 metrics/db.js 와 같은 형태(LIMIT 은 chunkedDelete 가 붙인다)
     prune: db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)'),
     pruneHourly: db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)'),
@@ -252,12 +256,22 @@ export async function vmperfHistory(vcenterId, metric, sinceTs, bucketMs, limit)
   return map(x.st.bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit));
 }
 
-/** 관측 시작/종료·행 수. */
+/**
+ * 관측 시작/종료 시각(빈 키는 null). v2.733 C6-05: 행 수(count)는 더 싣지 않는다 — 호출부(화면 3곳·데모 백필)는 시각만 쓰고,
+ * 함께 세면 그 키의 전 이력을 훑는다. 행 수가 필요하면 vmperfCount.
+ */
 export async function vmperfMeta(vcenterId, metric = 'vm_cpu_alloc_mhz') {
   const x = await getVmperfDb(vcenterId);
-  if (!x) return { firstTs: null, lastTs: null, count: 0 };
-  const r = x.st.meta.get(metric, String(vcenterId ?? ''));
-  return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) };
+  if (!x) return { firstTs: null, lastTs: null };
+  const k = String(vcenterId ?? '');
+  return { firstTs: x.st.rawMin.get(metric, k)?.mn ?? null, lastTs: x.st.rawMax.get(metric, k)?.mx ?? null };
+}
+
+/** 키 하나의 원본 행 수(진단·테스트용 — 키의 전 이력을 센다. 폴링·화면 경로에서 부르지 말 것). DB 를 쓸 수 없으면 null. */
+export async function vmperfCount(vcenterId, metric = 'vm_cpu_alloc_mhz') {
+  const x = await getVmperfDb(vcenterId);
+  if (!x) return null;
+  return Number(x.st.count.get(metric, String(vcenterId ?? ''))?.n || 0);
 }
 
 /** 보존기간 prune(0 = 무제한이면 아무것도 하지 않음). 롤업도 함께 정리. */

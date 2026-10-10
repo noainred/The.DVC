@@ -158,6 +158,7 @@ test('② live 재현 — 입력이 그대로인 새 세대의 폴링은 원장�
       S.syncLedger();
       assert.equal(S.ledgerInputSkips, skips + 1, '입력이 같은데 store 가 원장을 다시 만들었다(테스트 전제)');
       const builds = led._ledgerCacheStats().builds;
+      assert.equal(typeof builds, 'number', '원장 재구성 횟수를 읽지 못했다');
       const r = await getJson('/tools/ipam/subnets');
       assert.equal(r.status, 200);
       assert.ok(isDeepStrictEqual(r.body.subnets, first.body.subnets), '같은 입력인데 결과가 다르다');
@@ -210,6 +211,13 @@ test('③ 기억은 입력이 바뀌면 버려진다 — 관리 입력(override�
   assert.deepEqual(has(r.body.subnets, '10.252.3.0/24'), { subnet: '10.252.3.0/24', base: '10.252.3', used: 1 });
   assert.ok(isDeepStrictEqual(r.body.subnets, oldList(next, '', null)), '바뀐 입력에서 옛 구현과 다르다');
 
+  // 넘긴 지문이 관리 리비전을 모르더라도(호출부가 옛 리비전으로 계산했더라도) 기억 키의 리비전이 결과를 바꾼다
+  const fixedSig = 'fixed-sig-2733j';
+  assert.equal(has(led.listSubnets(next, '', null, { inputSig: fixedSig }), '10.254.0.0/24'), undefined);
+  assert.equal(ov.setOverride('10.254.0.3', { owner: '예약' }, { username: 't' }).ok, true);
+  assert.deepEqual(has(led.listSubnets(next, '', null, { inputSig: fixedSig }), '10.254.0.0/24'), { subnet: '10.254.0.0/24', base: '10.254.0', used: 1 }, '관리 리비전이 바뀌었는데 기억을 썼다');
+  ov.clearOverride('10.254.0.3');
+
   // 안전망 — 같은 지문이라도 10분이 지나면 다시 센다(지문이 모르는 입력이 생겼을 때 store 의 LEDGER_FULL_CHECK_MS 와 같은 성격)
   const sig = st.ledgerInputSignatureOf(next);
   const T = Date.now();
@@ -232,4 +240,21 @@ test('④ 입력 지문 기억 — 같은 스냅샷 객체·같은 관리 리비
   assert.notEqual(b, a, '관리 리비전이 바뀌었는데 옛 지문을 줬다');
   assert.equal(b, st.ledgerInputSignature(snap));
   ov.clearOverride('10.253.0.1');
+});
+
+test('⑤ 기억 키에는 데이터센터 귀속이 들어간다 — vCenter 의 DataCenter 할당을 바꾸면 그 vCenter 보기의 스캔 행이 다시 판정된다', async () => {
+  const dcs = await import('../src/datacenter/store.js');
+  assert.equal(dcs.addDatacenter({ id: 'dc-a', name: 'A' }).ok, true);
+  assert.equal(dcs.addDatacenter({ id: 'dc-b', name: 'B' }).ok, true);
+  ss.saveScanSettings('edge-dc', { datacenterId: 'dc-b', ranges: ['10.249.0.0/24'] });
+  ss.mergeScanResults([{ ip: '10.249.0.9', openPorts: [22] }], Date.now(), 'edge-dc');
+  const snap = randomSnap(77);
+  const has = (list) => list.some((x) => x.subnet === '10.249.0.0/24');
+  const sig = 'sig-dc-2733j';
+  assert.equal(has(led.listSubnets(snap, 'vc1', null, { inputSig: sig })), true, 'DataCenter 할당 전에는 귀속 없는 vCenter 보기에도 보인다');
+  assert.equal(dcs.setVcenterDatacenter('vc1', 'dc-a').ok, true);
+  const after = led.listSubnets(snap, 'vc1', null, { inputSig: sig });
+  assert.equal(has(after), false, 'vc1 이 dc-a 가 됐는데 dc-b 에이전트의 스캔 행을 기억에서 줬다');
+  assert.ok(isDeepStrictEqual(after, oldList(snap, 'vc1', null)), '옛 구현과 다르다');
+  dcs.setVcenterDatacenter('vc1', '');
 });

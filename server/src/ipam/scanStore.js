@@ -436,6 +436,13 @@ function cleanAliveHost(h) {
 //   집합' 을 매번 26만 개를 훑어 모으던 것을(실측 약 150ms) 적재·정리 시점에 유지한다. 갱신 지점은 셋뿐이다 — 로드 정제·
 //   mergeScanResults(새 IP·에이전트 교체)·pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
 const _agentCount = new Map();
+// v2.733(점검 3회차 C6-02 — 재현): 결과의 lastSeen 최댓값. scanInfo()(IP 스캔 '상태'·'설정' 화면이 **2초마다** 부른다)가 이 값 하나를 위해
+//   결과 전량(상한 262,144)을 Object.values 로 훑었다(20만 p50 약 200ms). 적재·정리 시점에 유지한다 — 갱신 지점은 _agentCount 와 같다:
+//   로드 정제 · mergeScanResults(새 IP·덮어쓰기·부분 결과의 마지막 확인 전진) · pruneScanResults(남은 항목으로 다시 계산 — 관리 IP 는 오래돼도 남으므로
+//   '지운 것이 최댓값이면 0' 은 틀린다). ⚠ scanRev() 로 기억하면 틀린다 — lastSeen 만 전진한 보고는 scanRev 를 올리지 않는다.
+//   비교는 예전 훑기와 같은 `(lastSeen || 0) > 현재` 다(값이 같다 — 테스트가 옛 훑기와 대조한다). results 를 다른 곳에서 고치면 여기도 함께.
+let _maxSeen = 0;
+function noteSeen(v) { const x = v || 0; if (x > _maxSeen) _maxSeen = x; }
 function bumpAgent(agent, d) {
   const k = agent || LOCAL;
   const n = (_agentCount.get(k) || 0) + d;
@@ -448,6 +455,7 @@ function cleanStoredResults(raw) {
     if (!r || typeof r !== 'object' || !isIpv4(ip)) continue;
     out[ip] = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
     bumpAgent(out[ip].agent, 1);
+    noteSeen(out[ip].lastSeen); // v2.733 C6-02
   }
   return out;
 }
@@ -537,7 +545,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     merged++;
     if (seenOnly && prev) {
       // v2.733 C1-02: 부분 결과 — 마지막 확인 시각만. 소유 에이전트도 바꾸지 않는다(이력 항목의 것을 그대로 넘긴다).
-      if (ts > (prev.lastSeen || 0)) { prev.lastSeen = ts; resWritten = true; }
+      if (ts > (prev.lastSeen || 0)) { prev.lastSeen = ts; resWritten = true; noteSeen(ts); }
       recordSeen(h, ts, history[h.ip]?.agent || prev.agent || agent);
       continue;
     }
@@ -548,6 +556,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
       || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
     results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    noteSeen(ts); // v2.733 C6-02
     resWritten = true;
     recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
   }
@@ -787,17 +796,21 @@ export function pruneScanResults(retentionDays) {
   let changed = false;
   const isManaged = managedChecker();
   // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
-  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
+  let maxLeft = 0; // v2.733 C6-02: 남은 항목의 lastSeen 최댓값(같은 훑기에서)
+  for (const [ip, r] of Object.entries(results)) {
+    if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
+    else if ((r.lastSeen || 0) > maxLeft) maxLeft = r.lastSeen || 0;
+  }
+  _maxSeen = maxLeft;
   if (changed) { scheduleWrite(RES); scanRevN++; }
 }
 
 export function scanInfo() {
-  // v2.639 I2: 정렬(scanResultList) 없이 — 에이전트별 개수는 _agentCount, 마지막 관측은 한 번 훑는다(값은 예전과 같다).
+  // v2.639 I2: 정렬(scanResultList) 없이 — 에이전트별 개수는 _agentCount(값은 예전과 같다).
   const byAgent = {};
   for (const [a, n] of _agentCount) byAgent[a] = n;
-  let lastSeen = 0;
-  for (const r of Object.values(results)) if ((r.lastSeen || 0) > lastSeen) lastSeen = r.lastSeen || 0;
-  return { count: _resultCount, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: lastSeen || null, byAgent };
+  // v2.733 C6-02: 마지막 관측은 적재·정리 때 유지한 값이다(위 _maxSeen 머리말) — 요청마다 결과 전량을 훑지 않는다.
+  return { count: _resultCount, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: _maxSeen || null, byAgent };
 }
 
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------

@@ -105,10 +105,14 @@ test('④ 키 하나의 첫·마지막 시각은 MIN·MAX 를 따로 묻는다 �
   assert.ok(m.lastTs >= NOW - 2 * MIN, '마지막 시각');
   assert.deepEqual(db.metaKey('없는지표', 's1'), { firstTs: null, lastTs: null });
   // 소스 스윕: k=? 로 좁힌 준비문에 MIN(ts|h) 와 MAX(ts|h) 가 함께 있으면 안 된다(v2.550.3 함정의 키 단위판).
-  const src = stripComments(fs.readFileSync(path.join(SRC, 'metrics/db.js'), 'utf8'));
-  const stmts = [...src.matchAll(/prepare\((['`])([\s\S]*?)\1/g)].map((x) => x[2]);
-  const bad = stmts.filter((q) => /\bk=\?/.test(q) && !/GROUP BY/i.test(q) && /MIN\((ts|h)\)/.test(q) && /MAX\((ts|h)\)/.test(q));
-  assert.deepEqual(bad, [], '첫·마지막 시각을 한 문장으로 묻는 준비문');
+  // v2.733(점검 3회차 C6-05): 같은 모양이 metrics/vmperfDb.js(vmperfMeta — vCenter 상세 사용량 추이를 열 때마다 2회)에 남아 있었다 — 대상에 넣는다.
+  for (const rel of ['metrics/db.js', 'metrics/vmperfDb.js']) {
+    const src = stripComments(fs.readFileSync(path.join(SRC, rel), 'utf8'));
+    const stmts = [...src.matchAll(/prepare\((['`])([\s\S]*?)\1/g)].map((x) => x[2]);
+    assert.ok(stmts.length > 3, `${rel}: 준비문을 읽지 못했다(${stmts.length}개) — 스윕이 공허하다`);
+    const bad = stmts.filter((q) => /\bk=\?/.test(q) && !/GROUP BY/i.test(q) && /MIN\((ts|h)\)/.test(q) && /MAX\((ts|h)\)/.test(q));
+    assert.deepEqual(bad, [], `${rel}: 첫·마지막 시각을 한 문장으로 묻는 준비문`);
+  }
 });
 
 test('⑤ 같은 서버·같은 기간 조회는 30초 기억하고, 진행 중인 같은 조회는 합류한다 — 키는 버킷에 맞춘 시작 시각', async () => {
