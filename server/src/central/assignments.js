@@ -85,8 +85,13 @@ export function ipsKey(v) {
   return [...new Set(items)].sort().join(',');
 }
 
-/** 폐기 안내(응답 skipped·passwordDropped 의 reason) — 엣지는 다음 배정 조회에서 빈 비밀번호를 받는다. */
-export const ASSIGN_PASSWORD_DROPPED_REASON = 'IP 대역·iDRAC 계정이 바뀌어 저장된 iDRAC 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(그 전까지 이 에이전트의 스캔은 iDRAC 로그인에 실패합니다).';
+/**
+ * 폐기 안내(응답 skipped·passwordDropped 의 reason) — 엣지는 다음 배정 조회에서 빈 비밀번호를 받는다.
+ * v2.732(점검 2회차 B1-03): 2.731 이상 엣지는 빈 비밀번호 할당을 **스캔하지 않는다**(agent/scanner.js 'no-password' — 대역 전체에
+ *   빈 비밀번호로 로그인하면 계정이 잠긴다). 예전 문구 '스캔은 iDRAC 로그인에 실패합니다' 는 2.730 이하 엣지에만 맞는 말이라
+ *   관리자가 iDRAC 인증 실패 로그·계정 잠금을 찾게 했다(건너뜀을 실패라 말하지 않는다 — v2.513 규약). 구버전 엣지의 실패는 단서로 남긴다.
+ */
+export const ASSIGN_PASSWORD_DROPPED_REASON = 'IP 대역·iDRAC 계정이 바뀌어 저장된 iDRAC 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(그 전까지 이 에이전트는 iDRAC 스캔을 하지 않습니다. 단 2.730 이하 엣지는 빈 비밀번호로 로그인을 시도해 실패합니다).';
 
 /**
  * 반환 [entry, err, dropped]. dropped = 기존 비밀번호를 승계하지 않고 버렸는가.

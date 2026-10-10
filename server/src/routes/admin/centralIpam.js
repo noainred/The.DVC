@@ -57,8 +57,12 @@ function scanDatacenterView(agent) {
 export function registerCentralIpam(adminRouter) {
 
 // Shareable IP ledger DB location + record count (for other-program integration).
-adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
-  res.json(await ledgerInfo());
+// v2.732(점검 2회차 B3-08): 행 수는 전 법인 원장(ipam.db 전체)의 합계다 — 범위 계정에는 싣지 않는다(count null + fleetCountsHidden,
+//   v2.583 scopeStatus · v2.629 AUTHZ2629-05 '전 법인 합계는 범위 안에서 다시 세거나 null'). 경로·종류·갱신 시각은 그대로(정책 — 경로 가림은 별건).
+adminRouter.get('/ipam/db-info', adminOnly, async (req, res) => {
+  const info = await ledgerInfo();
+  if (scopedVcenterIds(req.user, store.get())) return res.json({ ...info, count: null, fleetCountsHidden: true });
+  res.json(info);
 });
 
 // IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
