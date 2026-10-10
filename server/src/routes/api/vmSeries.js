@@ -87,15 +87,29 @@ export function scopeVmSeriesStatus(st, allowed) {
  * v2.732(점검 2회차 B5-02): 저장된 targets 중 지금 스냅샷에 없는 것 — vCenter 키 · 호스트 id · VM id.
  * 화면은 스냅샷에 있는 것만 트리로 그리므로(삭제된 VM 은 체크박스가 없다) 이 목록이 사람이 낡은 대상을 해제할 유일한 길이다.
  * 클러스터·폴더는 이름 문자열이라(서버도 형식만 검사) 대상이 아니다. 호출부가 범위로 거른 targets 를 넘긴다.
- *  반환 { staleIds: string[](평탄), staleTargets: { [vcId]: { vcenter: bool, hosts: [], vms: [] } } }
+ *  반환 { staleIds: string[](평탄), staleTargets: { [vcId]: { vcenter: bool, hosts: [], vms: [] } },
+ *        staleUnknown: { [vcId]: { reason, hosts: n, vms: n } } }
+ *
+ * v2.733(점검 3회차 C1-03 — v2.732 회귀, 재현): 위 판정을 스냅샷의 id 집합만으로 하면 **그 vCenter 의 인벤토리를 아직(또는 지금)
+ *   못 읽은 동안** 선택 호스트·VM 전부가 '목록에 없음' 이 된다 — 재시작 직후 골격(`snap.initial`, 호스트·VM 0)에서 선택 202개가
+ *   전부 칩으로 떴고, 그 칩을 ✕ + 저장하면 수집 대상에서 빠진다. 그래서 vCenter 의 **수집 상태**로 먼저 가른다
+ *   (`inventoryUnreadReason` — 지어내지 않는다: 근거는 status·stale·그 vCenter 의 이월 인벤토리 유무). 판정하지 않은 vCenter 는
+ *   staleTargets 에 넣지 않고 staleUnknown 에 사유와 **선택 개수**를 싣는다(화면이 '수집 전이라 판정하지 않음' 을 말한다).
  */
 export function vmSeriesStaleOf(targets, snap) {
   const vcs = new Set((snap?.vcenters || []).map((v) => v.id));
   const hostIds = new Set((snap?.hosts || []).map((h) => h.id));
   const vmIds = new Set((snap?.vms || []).map((v) => v.id));
-  const staleIds = []; const staleTargets = {};
+  const unread = inventoryUnreadReasons(snap);
+  const staleIds = []; const staleTargets = {}; const staleUnknown = {};
   for (const [id, t] of Object.entries(targets && typeof targets === 'object' ? targets : {})) {
     const gone = !vcs.has(id);
+    if (!gone && unread.has(id)) {
+      // 판정하지 않는다 — 선택 개수만 밝힌다(전체 선택이면 판정할 id 가 없으니 싣지 않는다).
+      const n = (k) => (t && !t.all && Array.isArray(t[k]) ? t[k].length : 0);
+      if (n('hosts') || n('vms')) staleUnknown[id] = { reason: unread.get(id), hosts: n('hosts'), vms: n('vms') };
+      continue;
+    }
     const list = (k, known) => (t && !t.all && Array.isArray(t[k]) ? t[k].map(String).filter((x) => !known.has(x)) : []);
     const hosts = list('hosts', hostIds); const vms = list('vms', vmIds);
     if (!gone && !hosts.length && !vms.length) continue;
@@ -103,7 +117,37 @@ export function vmSeriesStaleOf(targets, snap) {
     if (gone) staleIds.push(id);
     pushAll(staleIds, hosts); pushAll(staleIds, vms);   // v2.603 규약 — 인벤토리 규모 배열에 스프레드 push 금지
   }
-  return { staleIds, staleTargets };
+  return { staleIds, staleTargets, staleUnknown };
+}
+
+/** 사유 코드 전부 — 웹 staleSettingIds.js STALE_UNKNOWN_REASON 과 1:1(웹 테스트가 이 줄을 읽어 대조한다). */
+export const INVENTORY_UNREAD_REASONS = Object.freeze(['disabled', 'pending', 'unreachable', 'maintenance', 'initial']);
+
+/**
+ * v2.733(C1-03): 인벤토리를 읽지 못한 vCenter 와 그 사유(순수). 근거는 store.js 병합의 상태값뿐이다.
+ *   · disabled — 수집하지 않는다(인벤토리 없음). · pending — 첫 수집 중·site 첫 push 대기(인벤토리 없음).
+ *   · unreachable·maintenance — 마지막 정상값을 이월하면(그 vCenter 의 호스트·VM 이 스냅샷에 있으면) 그 값으로 판정하고,
+ *     최소 항목(lastGood 없음·보존 창 초과·직전 캐시 없는 점검중)이면 판정하지 않는다.
+ *   · 골격(`snap.initial`) — 첫 병합 전이라 상태와 무관하게 인벤토리가 없다(상태가 위 넷이 아니면 'initial').
+ *   연결된(connected) vCenter 가 정말 비어 있으면 **판정한다** — 읽은 결과다.
+ * @returns {Map<string, 'disabled'|'pending'|'unreachable'|'maintenance'|'initial'>}
+ */
+export function inventoryUnreadReasons(snap) {
+  const out = new Map();
+  const hasInv = new Set();
+  for (const h of snap?.hosts || []) if (h && h.vcenterId != null) hasInv.add(String(h.vcenterId));
+  for (const v of snap?.vms || []) if (v && v.vcenterId != null) hasInv.add(String(v.vcenterId));
+  for (const vc of snap?.vcenters || []) {
+    if (!vc || vc.id == null) continue;
+    const id = String(vc.id);
+    const st = vc.status === 'maintenance' || vc.maintenance === true ? 'maintenance' : String(vc.status || '');
+    let reason = null;
+    if (st === 'disabled' || st === 'pending') reason = st;
+    else if ((st === 'unreachable' || st === 'maintenance') && !hasInv.has(id)) reason = st;
+    else if (snap?.initial === true && !hasInv.has(id)) reason = 'initial';
+    if (reason) out.set(id, reason);
+  }
+  return out;
 }
 
 export function registerVmSeries(api) {

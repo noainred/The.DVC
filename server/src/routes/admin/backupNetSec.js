@@ -236,7 +236,13 @@ adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res)
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return;   // v2.607 AUTHZ2607-06
-  try { res.json(await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 })); }
+  try {
+    const r = await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 });
+    // v2.733(점검 3회차 C1-01): 수집하지 않는 vCenter 목록은 범위 안 것만(범위 계정은 vCenter 하나를 고르므로 보통 그 하나뿐이다 — 심층 방어).
+    const allowed = scopedVcenterIds(req.user, store.get());
+    if (allowed && Array.isArray(r?.notCollected)) r.notCollected = r.notCollected.filter((x) => allowed.has(String(x?.vcenterId)));
+    res.json(r);
+  }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
