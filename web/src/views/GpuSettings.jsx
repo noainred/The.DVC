@@ -2,6 +2,7 @@ import { blankOr } from './blankOr.js';
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { scopeSavedText } from './scopeSaveMsg.js'; // v2.733(C5-03): 범위 계정의 전역 값 미적용(ignoredGlobal)을 말한다
 
 const PRESETS = [
   { label: '30초', s: 30 }, { label: '1분', s: 60 }, { label: '5분', s: 300 },
@@ -36,7 +37,7 @@ export default function GpuSettings() {
     try {
       const r = await putJson('/admin/metrics/settings', { gpuUtilEnabled: enabled, gpuUtilIntervalSec: blankOr(sec) }); // v2.598: 빈 칸은 보내지 않는다(60 으로 둔갑 금지)
       setData(r); setSec(r.settings.gpuUtilIntervalSec ?? 60);
-      setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
+      setMsg(scopeSavedText(r, '저장되었습니다.', ' 새 주기가 즉시 적용됩니다.').text); // v2.733(C5-03)
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   const collectNow = async () => {

@@ -7,7 +7,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 const canWrite = requireRole('admin', 'operator');
 import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
-import { store } from '../../store.js';
+import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
@@ -156,9 +156,11 @@ api.get('/tools/ipam/insights', requirePerm('tools'), (req, res) => {
 });
 
 // Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
+// v2.733(C6-01): V4·관제 콘솔이 60초마다 부른다 — 스냅샷 세대가 아니라 원장 입력 지문으로 기억해(ledger.js listSubnets)
+//   입력이 그대로인 폴링은 원장 재구성·/24 시트 조립을 하지 않는다(결과는 같다).
 api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
   const snap = store.get();
-  res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)) });
+  res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap), { inputSig: ledgerInputSignatureOf(snap) }) });
 });
 api.get('/tools/ipam/sheet', requirePerm('tools'), (req, res) => {
   const snap = store.get();

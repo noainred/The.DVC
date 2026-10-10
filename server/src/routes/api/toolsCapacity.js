@@ -751,9 +751,9 @@ const usageHostPerm = requirePerm('inv.hosts');
 
 api.get('/vcenters/:id/usage-history', async (req, res) => {
   if (/^(host|cluster):/.test(String(req.query.scope || '').trim())) {
-    let allowed = false;
-    usageHostPerm(req, res, () => { allowed = true; });
-    if (!allowed) return;   // 403 은 게이트가 이미 보냈다(requiredPerm 포함)
+    let permOk = false;
+    usageHostPerm(req, res, () => { permOk = true; });
+    if (!permOk) return;   // 403 은 게이트가 이미 보냈다(requiredPerm 포함)
   }
   const vcId = String(req.params.id || '');
   const snap = store.get();

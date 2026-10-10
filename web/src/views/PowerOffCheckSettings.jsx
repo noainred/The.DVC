@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { blankOr } from './blankOr.js';
+import { scopeSavedText } from './scopeSaveMsg.js'; // v2.733(C5-03): 범위 계정의 전역 값 미적용(ignoredGlobal)을 말한다
 
 const PRESETS = [1, 3, 6, 12, 24];
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '없음');
@@ -38,7 +39,9 @@ export default function PowerOffCheckSettings() {
       const h = raw === undefined ? undefined : Math.min(lim.maxHours, Math.max(lim.minHours, Math.round(raw)));
       const r = await putJson('/tools/waste/off-check/settings', { enabled, intervalHours: h });
       setHours(String(r.settings.intervalHours)); setEnabled(r.settings.enabled);
-      setMsg({ ok: true, text: `저장됨 — ${r.settings.enabled ? `${r.settings.intervalHours}시간마다 점검` : '점검 꺼짐'}(재시작 없이 다음 틱부터 적용)` });
+      // v2.733(C5-03): 범위 계정이면 서버가 적용하지 않는다(ignoredGlobal) — 칸은 기존 값으로 돌아가므로 '저장됨' 만 말하지 않는다.
+      const out = scopeSavedText(r, `저장됨 — ${r.settings.enabled ? `${r.settings.intervalHours}시간마다 점검` : '점검 꺼짐'}`, '(재시작 없이 다음 틱부터 적용)');
+      setMsg({ ok: !out.partial, warn: out.partial, text: out.text });
       load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
@@ -76,7 +79,7 @@ export default function PowerOffCheckSettings() {
           <button className="tab" disabled={busy !== ''} onClick={runNow}>{busy === 'run' ? '점검 중…' : '지금 점검'}</button>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>허용 범위 {lim.minHours}~{lim.maxHours}시간. 기본 6시간.</div>
-        {msg && <div style={{ marginTop: 8, fontSize: 12.5, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</div>}
+        {msg && <div style={{ marginTop: 8, fontSize: 12.5, color: msg.ok ? 'var(--green)' : msg.warn ? 'var(--amber)' : 'var(--red)' }}>{msg.text}</div>}
       </div>
       <div className="card">
         <div style={{ fontWeight: 700, marginBottom: 6 }}>최근 점검</div>

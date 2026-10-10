@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
+import { readFailText, installerState } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
 import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
@@ -24,6 +25,10 @@ export default function AgentDeploy() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [targets, setTargets] = useState([]);
+  // v2.733(C5-02): 조회 실패는 따로 든다 — 예전에는 catch 가 대상을 '(0)·없습니다', 설치 패키지를 '찾을 수 없습니다'(틀린 원인 + 배포 잠금)로 그렸다.
+  const [targetsErr, setTargetsErr] = useState(null);
+  const [targetsLoaded, setTargetsLoaded] = useState(false); // 한 번이라도 성공했는가(직전 값 유지 판단)
+  const [installerErr, setInstallerErr] = useState(null);
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
@@ -35,7 +40,10 @@ export default function AgentDeploy() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — 대상 CSV 일괄 관리(v2.339)
   const csvOk = canCsv(); // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
 
-  const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
+  // v2.733(C5-02): 실패를 { available:false } 로 지어내지 않는다 — '알 수 없음' 이고 배포는 서버가 판정한다(installerState).
+  const loadInstaller = () => fetchJson('/admin/agent-deploy/installer')
+    .then((r) => { setInstaller(r); setInstallerErr(null); })
+    .catch((e) => setInstallerErr(e || new Error('설치 패키지 조회 실패')));
   // v2.621(감사 WEB-07): 폼은 웹 지정값만 채운다(기본값은 placeholder) — 유효값으로 채워 두 칸을 다 보내면 저장 경로만
   //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
   const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
@@ -44,7 +52,10 @@ export default function AgentDeploy() {
     setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
     await loadPkg();
   };
-  const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
+  // v2.733(C5-02): 실패면 직전 목록을 지우지 않고(있으면) 사유를 말한다 — 빈 목록 '(0)' 으로 그리지 않는다.
+  const loadTargets = () => fetchJson('/admin/agent-deploy/targets')
+    .then((d) => { setTargets(Array.isArray(d?.targets) ? d.targets : []); setTargetsLoaded(true); setTargetsErr(null); })
+    .catch((e) => setTargetsErr(e || new Error('배포 대상 조회 실패')));
   // 실행 중 서버의 중앙 토큰/기본값을 읽어 폼에 자동 입력.
   const [showCentralToken, setShowCentralToken] = useState(false);   // v2.500: 중앙 토큰 가리기 토글
   const [tokenInfo, setTokenInfo] = useState({ hasToken: false });
@@ -181,7 +192,10 @@ export default function AgentDeploy() {
     setResult({ kind: 'deploy', ...r }); setBusy(false);
   };
 
-  if (!installer) return <Loading />;
+  const inst = installerState(installer, installerErr);
+  if (inst.kind === 'loading') return <Loading />;
+  // v2.733(C5-02): 대상 목록 — 한 번도 못 읽었으면 개수를 말하지 않는다('(0)' 금지).
+  const targetsFail = readFailText('저장된 배포 대상 목록', targetsErr, { notMeaning: '대상이 없다는 뜻이 아닙니다', stale: targetsLoaded });
 
   return (
     <>
@@ -257,10 +271,10 @@ export default function AgentDeploy() {
       )}
 
       {subtab === 'add' && (<>
-      <div className="card" style={{ marginBottom: 12, borderColor: installer.available ? undefined : 'var(--red)' }}>
-        {installer.available
-          ? <span className="muted" style={{ fontSize: 13 }}>설치 패키지: <code>{installer.name}</code> ({(installer.sizeBytes / 1048576).toFixed(1)} MB) — 중앙 서버에서 SFTP 전송됩니다.</span>
-          : <span style={{ color: 'var(--red)', fontSize: 13 }}>설치 패키지를 찾을 수 없습니다. 중앙 서버 <code>download/</code> 에 offline tarball을 두거나 아래 경로를 지정하세요.</span>}
+      <div className="card" style={{ marginBottom: 12, borderColor: inst.kind === 'missing' ? 'var(--red)' : inst.kind === 'unknown' ? 'var(--amber)' : undefined }}>
+        {inst.kind === 'ok' && <span className="muted" style={{ fontSize: 13 }}>설치 패키지: <code>{installer.name}</code> ({(installer.sizeBytes / 1048576).toFixed(1)} MB) — 중앙 서버에서 SFTP 전송됩니다.</span>}
+        {inst.kind === 'missing' && <span style={{ color: 'var(--red)', fontSize: 13 }}>설치 패키지를 찾을 수 없습니다. 중앙 서버 <code>download/</code> 에 offline tarball을 두거나 아래 경로를 지정하세요.</span>}
+        {inst.kind === 'unknown' && <span style={{ color: 'var(--amber)', fontSize: 13 }}>{inst.text} <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={loadInstaller}>다시 읽기</button></span>}
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -367,7 +381,7 @@ export default function AgentDeploy() {
         <button className="logout-btn" style={{ padding: '9px 16px' }} disabled={busy || !f.host} onClick={test}>SSH 테스트</button>
         <button className="logout-btn" style={{ padding: '9px 16px' }} disabled={busy || !f.host} onClick={saveTarget}>{f.id ? '대상 수정' : '대상 저장'}</button>
         {f.id && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setF(EMPTY)}>새 대상</button>}
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !f.host || !installer.available} onClick={deploy}>{busy ? '진행 중…' : '배포 + 설치'}</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !f.host || !inst.canDeploy} onClick={deploy}>{busy ? '진행 중…' : '배포 + 설치'}</button>
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
@@ -381,11 +395,11 @@ export default function AgentDeploy() {
       {subtab === 'status' && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
-            <b style={{ fontSize: 14 }}>저장된 대상 ({targets.length})</b>
+            <b style={{ fontSize: 14 }}>저장된 대상 ({targetsLoaded ? targets.length : '—'})</b>
             <span className="flex gap" style={{ alignItems: 'center' }}>
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="저장된 배포 대상을 CSV 로 내려받기(기본 비밀값 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>}
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="CSV 로 배포 대상 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>}
-              {targets.length > 0 && <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>}
+              {targets.length > 0 && <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !inst.canDeploy} onClick={deployAll}>전체 배포</button>}
             </span>
           </div>
           {csvOk && csvModal === 'export' && (
@@ -408,8 +422,11 @@ export default function AgentDeploy() {
               overwriteLabel={(n) => <>기존 배포 대상 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(URL·옵션이 CSV 값으로 교체됨)</>}
               onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); loadTargets(); }} />
           )}
+          {targetsFail && (
+            <div className="banner warn" style={{ marginBottom: 8 }}>{targetsFail} <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={loadTargets}>다시 읽기</button></div>
+          )}
           {targets.length === 0
-            ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span>
+            ? (targetsLoaded ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span> : null)
             : <div className="table-wrap">
             <STable>
               <thead><tr>
@@ -436,7 +453,7 @@ export default function AgentDeploy() {
                     <td className="muted" style={{ fontSize: 12 }}>{t.centralUrl || '—'}</td>
                     <td>{t.lastResult ? <span className={`badge ${t.lastResult.ok ? 'green' : 'red'}`}>{t.lastResult.ok ? t.lastResult.active || 'ok' : '실패'}</span> : <span className="muted">—</span>}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy || !installer.available} onClick={() => deployTarget(t)}>배포</button>{' '}
+                      <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy || !inst.canDeploy} onClick={() => deployTarget(t)}>배포</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} disabled={busy} onClick={() => checkStatus(t)} title="재배포 없이 대상 서비스 상태를 SSH로 확인">상태 확인</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => editTarget(t)}>편집</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeTarget(t)}>삭제</button>

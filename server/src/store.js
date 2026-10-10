@@ -122,6 +122,21 @@ export function ledgerInputSignature(snap, revKey = ipamRevKey()) {
   for (const x of hosts) h.update([x?.name, x?.vcenterId, x?.powerState, x?.version, x?.cluster].map(f).join('|') + ';');
   return h.digest('hex');
 }
+/*
+ * v2.733(점검 3회차 C6-01): 스냅샷 객체 → 그 스냅샷의 원장 입력 지문(관리 리비전별 한 번). syncLedger 가 매 갱신 계산한 값을
+ *   `/tools/ipam/subnets`(60초 폴링)가 다시 쓴다 — 서브넷 목록은 세대가 아니라 이 지문으로 기억한다(ipam/ledger.js listSubnets).
+ *   스냅샷은 게시 뒤 바꾸지 않으므로 같은 객체·같은 리비전이면 값이 같다. WeakMap 이라 옛 세대 스냅샷과 함께 사라진다.
+ */
+const _inputSigOf = new WeakMap(); // snap -> { rev, sig }
+export function ledgerInputSignatureOf(snap) {
+  const rev = ipamRevKey();
+  if (!snap || typeof snap !== 'object') return ledgerInputSignature(snap, rev);
+  const hit = _inputSigOf.get(snap);
+  if (hit && hit.rev === rev) return hit.sig;
+  const sig = ledgerInputSignature(snap, rev);
+  _inputSigOf.set(snap, { rev, sig });
+  return sig;
+}
 
 // 입력 지문이 같아도 이 간격마다 한 번은 원장을 전량 다시 만들어 서명과 비교한다(지문이 모르는 입력이 생겼을 때의 안전망).
 const LEDGER_FULL_CHECK_MS = clampIntervalMs(process.env.LEDGER_FULL_CHECK_MS, 10 * 60_000, 60_000);
@@ -500,7 +515,7 @@ class Store {
       //   ledgerInputSignature 머리말). 30초마다 84~162ms 이벤트 루프를 막던 것(buildIpamRows·서명·행 GC)의 대부분이다.
       //   입력 지문이 모르는 입력이 생겨도 LEDGER_FULL_CHECK_MS 마다 한 번은 전량을 다시 만들어 서명과 비교한다.
       const now = Date.now();
-      const inSig = ledgerInputSignature(this.snapshot);
+      const inSig = ledgerInputSignatureOf(this.snapshot); // v2.733 C6-01: 같은 값을 서브넷 목록 라우트가 다시 쓴다(스냅샷 객체별 기억)
       const fullDue = now - (this._ledgerFullAt || 0) >= LEDGER_FULL_CHECK_MS;
       if (inSig === this._lastLedgerInputSig && !fullDue) {
         this.ledgerInputSkips = (this.ledgerInputSkips || 0) + 1;

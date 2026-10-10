@@ -17,6 +17,8 @@ import { partsUnknownNote, partialVmsNote } from './guestDiskText.js'; // v2.600
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 import { guestDiskParams, guestDiskCsvPath } from './guestDiskCsv.js'; // 검토 I-10: 조회·CSV 가 같은 조건 · CSV 경로는 /api 이후
 import { downloadFailText } from '../downloadFailText.js';
+import { requireChanged } from '../changeResult.js'; // v2.733(C5-03): putJson 은 400 본문을 돌려준다 — 실패를 성공으로 읽지 않는다
+import { scopeSavedText } from '../scopeSaveMsg.js'; // v2.733(C5-03): 범위 계정의 전역 값 미적용(ignoredGlobal) 안내
 
 // ── 단위 변환(값은 GB 기준) ──────────────────────────────────────────────
 const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
@@ -74,6 +76,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const [page, setPage] = useState(0);              // 0-based
   const [detailVm, setDetailVm] = useState(null);   // { id, name } — 추이 상세 팝업 대상
   const [form, setForm] = useState(null);
+  const [saveMsg, setSaveMsg] = useState(null); // v2.733(C5-03): 설정 저장 결과(범위 계정의 미적용 안내 포함)
   const reqGen = useRef(0);   // v2.606 WEB2606-07: 마지막 reload 세대
   const [applied, setApplied] = useState(null); // 검토 I-10: 지금 표를 만든 조건(응답을 받은 조회의 조건) — CSV 가 같은 목록을 내려받게
 
@@ -116,9 +119,16 @@ export default function GuestDiskReport({ scope = '' }) {
       else if (!r.ok) alert(`수집 실패: ${r.reason || '알 수 없음'}`);
     } catch (e) { alert(`수집 실패: ${e.message}`); } finally { setBusy(''); }
   };
+  // v2.733(C5-03): 응답을 읽는다 — 예전에는 버려서 ① 400 본문을 성공으로 지나갔고 ② 범위 계정이면 서버가 전역 설정을 적용하지 않는데
+  //   (ignoredGlobal) 칸만 조용히 기존 값으로 돌아갔다. 결과 문장은 형제 화면과 같은 scopeSaveSuffix(scopeSavedText)로.
   const saveSettings = async () => {
-    setBusy('save');
-    try { await putJson('/tools/guest-disk/settings', form); await reload(minReclaimStr); }
+    setBusy('save'); setSaveMsg(null);
+    try {
+      const r = requireChanged(await putJson('/tools/guest-disk/settings', form));
+      const out = scopeSavedText(r, '저장했습니다.');
+      setSaveMsg({ ok: !out.partial, text: out.text });
+      await reload(minReclaimStr);
+    }
     catch (e) { alert(`저장 실패: ${e.message}`); } finally { setBusy(''); }
   };
   // 검토 I-10: downloadFile 은 '/api 이후 경로' 를 받는다(예전 인자 '/api/tools/…' 는 실제로 /api/api/… 로 나가 CSV 가 실패했다).
@@ -290,6 +300,7 @@ export default function GuestDiskReport({ scope = '' }) {
           <label className="gd-chk"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 주기 수집 사용(opt-in)</label>
           <label className="gd-inline">주기(시간)<input type="text" inputMode="numeric" value={String(form.intervalHours)} onChange={(e) => setForm({ ...form, intervalHours: e.target.value.replace(/[^\d]/g, '') })} /></label>
           <button type="button" className="gd-btn primary" disabled={busy === 'save'} onClick={saveSettings}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+          {saveMsg && <span className="gd-admin-note" style={{ color: saveMsg.ok ? 'var(--green)' : 'var(--amber)', fontSize: 12 }}>{saveMsg.text}</span>}
           <span className="gd-admin-note">5,850 VM 규모라 기본 꺼짐입니다. 켜면 {form.intervalHours || 12}시간마다 전 vCenter 게스트 디스크를 수집해 추이를 쌓습니다.</span>
         </div>
       )}

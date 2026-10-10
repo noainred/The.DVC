@@ -4,6 +4,7 @@ import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
+import { readFailText } from './readFailText.js'; // v2.733(C5-02): 원본 목록 조회 실패를 '0개 일치' 로 그리지 않는다
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -28,6 +29,11 @@ export default function VmProvision() {
   const [srcTotal, setSrcTotal] = useState(0);
   const [srcQuery, setSrcQuery] = useState('');
   const [srcLoading, setSrcLoading] = useState(false);
+  // v2.733(C5-02): 원본 목록 조회 실패 — 예전에는 catch 가 빈 목록·0개로 바꿔 '0개 일치 · 일치하는 템플릿/VM이 없습니다' 라 했다.
+  //   행은 **같은 조건으로 받은 것**일 때만 남긴다(keepRowsOnError — 다른 법인·검색어의 행을 새 선택 아래 보이지 않게).
+  const [srcErr, setSrcErr] = useState(null);
+  const srcKeyRef = useRef(null);
+  const [srcRetry, setSrcRetry] = useState(0); // '다시 읽기' — 같은 조건으로 한 번 더 조회
   const [placement, setPlacement] = useState(null);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -53,14 +59,19 @@ export default function VmProvision() {
     const params = new URLSearchParams();
     if (form.vcenterId) params.set('vcenterId', form.vcenterId);
     if (srcQuery.trim()) params.set('q', srcQuery.trim());
+    const key = queryKey({ vcenterId: form.vcenterId, q: srcQuery.trim() });
     const t = setTimeout(() => {
       fetchJson(`/provision/sources?${params.toString()}`)
-        .then((r) => { if (active) { setSources(r.sources || []); setSrcTotal(r.total ?? (r.sources || []).length); } })
-        .catch(() => { if (active) { setSources([]); setSrcTotal(0); } })
+        .then((r) => { if (active) { setSources(r.sources || []); setSrcTotal(r.total ?? (r.sources || []).length); srcKeyRef.current = key; setSrcErr(null); } })
+        .catch((e) => {
+          if (!active) return;
+          if (!keepRowsOnError(srcKeyRef.current, key)) { setSources([]); setSrcTotal(0); srcKeyRef.current = null; }
+          setSrcErr(e || new Error('원본 목록 조회 실패'));
+        })
         .finally(() => { if (active) setSrcLoading(false); });
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [form.vcenterId, srcQuery]);
+  }, [form.vcenterId, srcQuery, srcRetry]);
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setG = (k) => (e) => setForm((f) => ({ ...f, guest: { ...f.guest, [k]: e.target.value } }));
@@ -159,14 +170,20 @@ export default function VmProvision() {
           placeholder="이름으로 검색 (예: A → A로 시작하는 모든 VM/템플릿)" style={{ marginBottom: 8 }} />
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           {form.vcenterId ? `${vcenters?.find((v) => v.id === form.vcenterId)?.name || form.vcenterId} · ` : '전체 법인 · '}
-          {srcLoading ? '검색 중…' : `${srcTotal.toLocaleString()}개 일치${srcTotal > sources.length ? ` (상위 ${sources.length}개 표시 — 이름을 더 입력해 좁히세요)` : ''}`}
+          {srcLoading ? '검색 중…' : (srcErr && !sources.length) ? '— 일치 개수를 모릅니다(목록을 읽지 못함)' : `${srcTotal.toLocaleString()}개 일치${srcTotal > sources.length ? ` (상위 ${sources.length}개 표시 — 이름을 더 입력해 좁히세요)` : ''}`}
         </div>
+        {srcErr && !srcLoading && (
+          <div className="banner warn" style={{ marginBottom: 8 }}>
+            {readFailText('복제할 원본(템플릿/VM) 목록', srcErr, { notMeaning: '일치하는 원본이 없다는 뜻이 아닙니다', stale: sources.length > 0 })}
+            <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={() => setSrcRetry((n) => n + 1)}>다시 읽기</button>
+          </div>
+        )}
 
         <div className="table-wrap" style={{ maxHeight: '34vh' }}>
           <STable>
             <thead><tr><th>유형</th><th>이름</th><th>Guest OS</th><th>전원/상태</th><th className="right">vCPU / RAM</th></tr></thead>
             <tbody>
-              {sources.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>{srcLoading ? '검색 중…' : '일치하는 템플릿/VM이 없습니다.'}</td></tr>}
+              {sources.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>{srcLoading ? '검색 중…' : srcErr ? '목록을 읽지 못했습니다 — 위 안내를 보세요.' : '일치하는 템플릿/VM이 없습니다.'}</td></tr>}
               {sources.map((s) => (
                 <tr key={s.id} style={{ cursor: 'pointer', background: form.sourceId === s.id ? 'rgba(99,102,241,.14)' : undefined }}
                   onClick={() => setForm((f) => ({ ...f, sourceId: s.id }))}>

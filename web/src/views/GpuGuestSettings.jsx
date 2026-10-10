@@ -17,6 +17,7 @@ import { STable } from '../components/STable.jsx';
 import { applyDrafts } from './blankKeep.js';
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.611: 계정명 변경 시 폐기된 비밀번호 안내
 import BoldText from '../components/boldText.jsx'; // v2.733(C4-01): 위임·비활성 안내의 **강조**
+import { readFailText } from './readFailText.js'; // v2.733(C5-02): vCenter 목록 조회 실패를 '등록된 vCenter 가 없습니다' 로 그리지 않는다
 
 // v2.601(감사 RECENT2601-05): 숫자 칸의 저장값 변환(하한·초→ms). 입력 중에는 원문(초안)만 들고 있고
 // 저장할 때 한 번만 적용한다 — 입력 중에 걸면 칸을 비울 수 없고 하한이 중간 입력을 망가뜨린다.
@@ -83,6 +84,11 @@ export function gpuSkippedNote(last) {
 export default function GpuGuestSettings() {
   const [data, setData] = useState(null);   // { settings, status }
   const [vcs, setVcs] = useState([]);       // [{id,name,...}]
+  // v2.733(C5-02): vCenter 목록 조회 실패 — 예전에는 catch 가 빈 목록으로 바꿔 '등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.'(틀린 조치)를 그렸다.
+  //   실패면 직전에 읽은 목록을 그대로 쓴다(30초 폴링이 한 번 실패해도 표가 사라지지 않게).
+  const [vcsErr, setVcsErr] = useState(null);
+  const [vcsLoaded, setVcsLoaded] = useState(false);
+  const vcsRef = useRef([]);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);   // local editable copy (전역 + 공용 계정)
   const [formFor, setFormFor] = useState(null); // v2.622(감사 WEB-01): 폼을 채운 대상('' = 로컬)
@@ -103,17 +109,20 @@ export default function GpuGuestSettings() {
     const mySeq = force ? ++seqRef.current : seqRef.current;
     const stale = () => agent !== targetRef.current || mySeq !== seqRef.current;
     try {
-      const [d, v] = await Promise.all([
+      const [d, vr] = await Promise.all([
         fetchJson(settingsUrl(agent)),
-        fetchJson('/admin/vcenters').catch(() => ({ vcenters: [] })),
+        fetchJson('/admin/vcenters').then((v) => ({ ok: true, list: Array.isArray(v?.vcenters) ? v.vcenters : [] }), (e) => ({ ok: false, err: e })),
       ]);
       if (stale()) return;
       // 로컬: { settings, status } · 배포: { assigned, settings } (미지정이면 settings=null)
       const settings = agent ? (d.settings || { vcenters: {} }) : d.settings;
       setData(agent ? { settings, status: {}, deploy: true, assigned: !!d.assigned } : d);
-      setVcs(v.vcenters || []);
+      // v2.733(C5-02): vCenter 목록 실패는 직전 목록을 쓰고 사유를 따로 든다(빈 목록으로 바꾸지 않는다).
+      const list = vr.ok ? vr.list : vcsRef.current;
+      if (vr.ok) { vcsRef.current = list; setVcs(list); setVcsLoaded(true); setVcsErr(null); }
+      else setVcsErr(vr.err || new Error('vCenter 목록 조회 실패'));
       // 대상 전환(force) 시 폼을 새로 채움. 로컬 30초 폴링은 최초 1회만(미저장 입력 보존).
-      setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, v.vcenters || []) : cur));
+      setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, list) : cur));
       if (force) setDrafts({});
       setFormFor(agent);
       setError(null);
@@ -265,12 +274,18 @@ export default function GpuGuestSettings() {
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
         <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>법인(vCenter)별 모니터링 + 공용 계정</b>
-          <span className="muted" style={{ fontSize: 12 }}>선택됨 {monitoredCount} / {vcs.length}</span>
+          <span className="muted" style={{ fontSize: 12 }}>선택됨 {monitoredCount} / {vcsLoaded ? vcs.length : '—'}</span>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           여기 계정은 그 법인 VM에 <b>공용(기본)</b>으로 쓰입니다. <b>Linux/Windows를 구분</b>해 입력하면 게스트 OS에 맞는 계정으로 수집합니다(Windows 칸 비우면 Linux 계정으로 폴백). VM마다 계정이 다르면 아래 <b>VM별 계정</b>에서 개별 지정하세요(개별이 공용보다 우선).
         </div>
-        {vcs.length === 0 ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : (
+        {vcsErr && (
+          <div className="banner warn" style={{ marginBottom: 8 }}>
+            {readFailText('vCenter 목록', vcsErr, { notMeaning: '등록된 vCenter 가 없다는 뜻이 아닙니다', stale: vcsLoaded })}
+            <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={() => load(deployAgent, false)}>다시 읽기</button>
+          </div>
+        )}
+        {vcs.length === 0 ? (vcsLoaded ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : null) : (
           <div style={{ overflowX: 'auto' }}>
             <STable className="data-table" style={{ width: '100%' }}>
               <thead><tr>
