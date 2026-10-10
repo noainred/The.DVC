@@ -170,7 +170,7 @@ export default function VmProvision() {
           placeholder="이름으로 검색 (예: A → A로 시작하는 모든 VM/템플릿)" style={{ marginBottom: 8 }} />
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           {form.vcenterId ? `${vcenters?.find((v) => v.id === form.vcenterId)?.name || form.vcenterId} · ` : '전체 법인 · '}
-          {srcLoading ? '검색 중…' : (srcErr && !sources.length) ? '— 일치 개수를 모릅니다(목록을 읽지 못함)' : `${srcTotal.toLocaleString()}개 일치${srcTotal > sources.length ? ` (상위 ${sources.length}개 표시 — 이름을 더 입력해 좁히세요)` : ''}`}
+          {srcLoading ? '검색 중…' : (srcErr && !sources.length) ? '일치 개수를 모릅니다(목록을 읽지 못함)' : `${srcTotal.toLocaleString()}개 일치${srcTotal > sources.length ? ` (상위 ${sources.length}개 표시 — 이름을 더 입력해 좁히세요)` : ''}`}
         </div>
         {srcErr && !srcLoading && (
           <div className="banner warn" style={{ marginBottom: 8 }}>

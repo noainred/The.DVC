@@ -137,7 +137,7 @@ describe('스윕 — await delJson/putJson/patchJson/sendJson 의 반환값을 �
     'views/RemoteAccess.jsx': 2, 'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
     'views/gpu-guest/PhysicalGpuManager.jsx': 1, 'views/sidebar/MenuEditor.jsx': 2, 
     'views/tools/BmStorageTool.jsx': 1, 'views/tools/CvpTool.jsx': 1, 
-    'views/tools/GuestDiskReport.jsx': 1, 'views/tools/PduTool.jsx': 1, 'views/tools/SanHealthCheck.jsx': 1,
+    'views/tools/PduTool.jsx': 1, 'views/tools/SanHealthCheck.jsx': 1,
     'views/tools/SanSwitchTool.jsx': 1, 'views/tools/StorageMonTool.jsx': 1, 
   };
   const USED_TAIL = /(=|return|\?|:|\(|\|\||&&|,|\[|\?\?|=>\s*\{?)\s*$/;

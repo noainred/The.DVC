@@ -1109,6 +1109,46 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       조회 실패를 '없음'·'미지정' 으로 보이지 않는다. `audit2727e` 허용 목록에서 고친 6파일을 뺐다(늘리지 말 것).
     · 남긴 것(3회차 후보): storage/store.js 전체 재기록 · sanSwitchConfigPull 장비마다 쓰기 · gpu/poller.js 가 site·비활성·점검중을 거르지 않음 · iDRAC 스캔 주기 쓰기 전 캐시 ·
       `DELETE /perf/hangs` 실패에도 감사 · 전력 합계 네트워크 6시간 기준 vs CVP partsFresh · 게이트웨이 빈 비밀번호 서버측 거부 · 데모 계정의 관리 IP 조회(정책).
+  - ⚠⚠ **v2.733 — 점검 3회차(6축 분석 → 반증 → 11그룹 수정) 확정분**(같은 요청의 3회차. 상세 `docs/AUDIT-2026-10-10c.md`,
+    회귀 `server/test/audit2733*` + 웹 `audit2733*` — 그룹별 변이 검증):
+    · ⚠⚠ **수집을 멈춘 대상은 그 데이터를 쓰는 리포트 전부가 '0건' 이 아니라 '수집하지 않음' 으로 말한다**(C1-01 — v2.732 B4-01 의 파급): 판정은 `logs/coverage.js
+      eventNotCollectedMap` 하나(등록부 + `directCollectSkipReason`, mock 은 빈 맵 — 로그 폴러와 같은 기준). 단일 선택은 판정 불가·null, 전체 보기는 빼고 개수를 밝힌다.
+      logs DB 를 읽는 새 리포트는 `notCollected:[{vcenterId, why}]`(범위 안만)를 싣고 웹 문구는 `views/eventCoverageText.js`. **어떤 수집을 끄는 변경은 그 데이터의 소비처를 같은 릴리스에서 따라갈 것.**
+    · ⚠⚠ **시한 초과는 '결과 없음' 이 아니다**(C1-02 — v2.732 B4-02 회귀): IP 스캔이 시한에 걸리면 결과를 버려 해제 판정이 살아 있는 IP 를 down 으로 바꿨다.
+      실패·시한은 `recordAgentIncomplete`(완료로 기록하지 않음) · 완료 스캔이 해제 기준 안에 없으면 해제 보류(시한 = 기준 + max(기준, 24시간), 지나면 `unverified`) ·
+      시한 안에 받은 응답은 `mergeScanResults(…, {seenOnly:true})`. 엣지의 `incomplete` 보고는 중앙 2.733.0 확인 뒤에만(구버전 중앙은 완료로 받는다).
+      ⚠ **동작 변화**: 스캔이 꺼졌거나 삭제·불통인 에이전트의 IP 는 해제까지 3시간이 아니라 기본 27시간 뒤 '미확인 해제' 다.
+    · **데모 합성은 mock 모드에서만**(C2-01 — NSX 등록 0개가 live 에서 데모 매니저 3대를 `source:'live'` 로 만들었다).
+    · **vCenter 추정 전력은 `idrac/service.js vcPowerSkipReason` 을 지난다**(C2-02): 읽지 못한 vCenter·끊긴 호스트는 적재·합산·폴백 합계·fleet 전력 칸에서 빼고
+      `vcPowerSkipped` 로 센다. 판정 본체는 leaf `metrics/unreadVcenters.js`(store 는 sampler 를 import 할 수 없다 — 순환 SCC) — sampler 는 import + export 로 재수출만.
+    · **호스트 용량을 모르면 null**(C2-06 — REST 폴백): `store.hostCapacityKnown` · 롤업 `hostsCapacityUnknown` · 비율·여유는 '—'. 웹 `clusterRows` 의 부하도 둘 다 모르면 null(용량 어드바이저가 '부하 0' 으로 추천하던 것).
+    · **증가량 합계는 실제 구간이 요청 일수 × 1.1(내림)을 넘는 장비를 빼고 `inexact` 로 센다**(C2-03 — 장비 칸은 그대로, 1일·1주는 하루 공백도 뺀다). 서버 growth.js·웹 storageGrowthText.js
+      두 벌이고 테스트가 같은 입력으로 대조한다. 공개 API 는 행 `growthSpanDays` + meta `maxSpanDays`·`inexactCount`·`spanNote`(키 집합 변경).
+    · **N+1 잔여 용량은 VM 을 받을 수 있는 호스트만**(C2-04 — MAINTENANCE 제외, 부하는 사용량에 남김 · 클러스터 없는 호스트 묶음은 `n1Ok:null`) · **예측 ETA 는 마지막 표본 시각부터**(C2-07 — `lastTs`·`stale`).
+    · **설정 화면의 '목록에 없음' 판정은 그 vCenter 의 인벤토리를 읽었을 때만**(C1-03 — vmseries `staleUnknown`, 골격·pending·disabled·이월 없는 unreachable/maintenance).
+    · **GPU 게스트 폴러도 `directCollectSkipReason` 으로 site·비활성·점검중을 로그인 전에 거른다**(C4-01 — v2.732 B4-01 의 형제 누락). site 는 unreadVcenters(push 보류 사유)에
+      넣지 않는다 — '못 읽음' 이 아니라 '이 노드의 몫 아님'. **새 vCenter 로그인 수집기는 이 판정을 먼저 볼 것.**
+    · **엣지 설정 pull 은 '지금 수집' 을 기다리지 않는다**(C4-02 — SAN: 테스트 대행 먼저, 수집은 단일비행 작업 + 호스트 잠금). storage·PDU 는 후보로 남았다.
+    · **스토리지 스냅샷도 SAN 과 같이 주기 끝 1회 + 안전 타이머 + 종료 flush**(C4-03) — 쓰기 실패는 수집을 멈추지 않고 콘솔·`snapshotSave` 에 남는다. 여러 대를 차례로 수집하는
+      호출부는 `collectDeviceNow(id, {flush:false})` + 끝에 `flushSnapshotsNow()` 한 번(SAN·스토리지 둘 다 인자가 있다). `util/adaptiveTimer.js` 는 fn 오류를 1시간에 한 번 로그한다.
+    · ⚠ **설정·등록부 캐시는 디스크 쓰기 성공 뒤에만 바꾸고 리스너도 그 뒤에**(C4-04 — v2.732 B5-03 이 2곳, 이번 8곳: partfault·pdu·cvp(엣지 applyCentral 포함)·curuser·relaycheck·
+      relaytopo·storage growth·iDRAC 스캔 주기). 캐시를 먼저 바꾸면 쓰기 실패 뒤 다음 pull 이 '이미 같다' 로 건너뛴다. 삭제·정리 라우트는 실패를 200 으로 주지 않는다(C4-05 perf/hangs).
+    · ⚠⚠ **주문형 vCenter 성능 조회도 인증 정지를 본다 — `vcenter/authStopGate.js` 하나**(C3-01 — v2.590 가드의 누락 5경로: 스파크라인·VM 사용량·호스트/클러스터 추이·라이트사이징·VM 찾기):
+      정지면 로그인 0(여러 대상 경로는 그 vCenter 만 null + `authStopped`, 단건은 409) · 거부는 주 폴러와 같은 기록 · 여러 대상은 `createVcAuthGate` 로 vCenter 당 **첫 시도 결과를 본 뒤** 나머지를 시작한다
+      (동시에 시작하면 틀린 비밀번호가 대상 수만큼 로그인한다 — 재현 112회 → 0). 정지 VM 의 유휴 판정은 null(판정 불가). 웹 문구 `views/vcAuthStopText.js`. **새 주문형 성능 경로도 이 헬퍼로.**
+    · **쓰기 범위 판정은 '조회 밖 404 → 쓰기 밖 403' 순서의 한 함수**(C3-02a — 게스트 조사 작업 `guestScanAccess`): 바깥 조건을 `scopedVcenterIds` 로 두면 조회 무제한 + writeVcenters 계정이
+      통째로 빠진다. GET 은 조회 범위로 보여 주고 쓰기 밖 작업에 `writable:false` — 화면이 버튼을 잠그고 사유를 말한다.
+    · ⚠ **폴링 라우트는 스냅샷 세대 키로 기억하지 말 것**(C6-01 — `/tools/ipam/subnets`): v2.619 '입력이 같으면 원장을 안 만든다' 와 세대 키 캐시가 만나면 새 세대 캐시는 늘 비어
+      요청마다 원장·시트를 동기로 다시 만든다(합성 4만 VM 1,041ms → 7.6ms). 원장 입력 지문 `store.ledgerInputSignatureOf` + vCenter·범위·리비전·귀속으로 기억하고 used 는 원장 행에서 센다.
+      스캔 lastSeen 최댓값(`_maxSeen`)은 `_agentCount` 와 같은 세 지점(로드·병합·정리)에서 유지한다 — results 를 고치는 새 경로는 둘 다 갱신할 것.
+      `vmperfMeta` 는 단독 MIN·MAX 문장(v2.550.3), 행 수는 `vmperfCount`(C6-05).
+    · **조회 실패는 `views/readFailText.js` 로 말한다**(C5-02 — 6곳): catch 에서 빈 목록·`{available:false}`·null 로 바꾸면 '0개·패키지 없음' 이라는 틀린 원인이 된다. 폴링 화면은 직전 값을 지우지 않는다.
+      범위 계정 저장 응답의 `ignoredGlobal` 은 `views/scopeSaveMsg.js` 로 말한다(C5-03 — '즉시 적용' 이라 말하지 않는다).
+    · **결과 문구를 쓰고 곧바로 목록을 다시 읽는 함수를 부르지 말 것**(C5-01 VmCredManager) — 다시 읽기의 초기화가 성공·비밀번호 폐기 안내를 지운다. 문구는 다시 읽기에 넘기고,
+      거부(400)면 다시 읽지 않아 입력을 남긴다(판정 `vmCredSaveOutcome`).
+    · 범위 관리자에게 GPU 게스트 수집 상태(lastRun·overlay)는 실행 시각과 허용 vCenter 목록만(`scopeGpuGuestStatus` — v2.629 A6-04 와 같은 기준).
+    · 남긴 것(4회차 첫 후보): docs/AUDIT-2026-10-10c.md '다음 회차 후보' · 정책 판단 3건(C3-02b·c·d — 원격 터널·GPU 게스트 시험·수집 데이터 삭제의 쓰기 범위) ·
+      스파크라인은 자격증명이 맞으면 여전히 VM 마다 로그인한다(vCenter 별 1회 배치는 soapClient 변경 — 다음 후보).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
