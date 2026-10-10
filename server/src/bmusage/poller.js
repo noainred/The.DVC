@@ -36,6 +36,7 @@ import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 장비에 접속하지 않고 합성 행
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { numOrNull } from '../util/numOrNull.js';
 import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
@@ -322,6 +323,24 @@ function mainIdracStop(target) {
 const _authStopped = new Map();
 
 /**
+ * v2.732(감사 B1-01): 누적 카운터 간격 한계(`rates.spanLimitMs`)의 입력 — 설정 주기와 여유(slack).
+ *   적응 타이머는 **직전 실행이 끝난 뒤** 재무장하므로 같은 서버의 두 표본 간격은
+ *   (직전 주기에서 이 서버를 읽은 뒤 그 주기가 끝나기까지) + 주기 + (이번 주기에서 이 서버가 읽히기까지) ≤ 직전 실행 소요 + 주기 + 이번 offset 이다.
+ *   그래서 slack = 직전 실행 소요 + 이번 offset 이고, 한계 = max(60분, 주기 × 3 + slack) 이다(CVP counterGapOk 와 같은 배수).
+ *   ⚠ 예전에는 buildUsage 에 주기를 넘기지 않아 한계가 60분 고정이었다 — 주기 60분이면 매 주기 CPU·디스크·네트워크·HBA 가 비었다.
+ *   ⚠ 수동 '지금 수집' 도 같은 값을 쓴다(주기는 그 순간의 설정 — 타이머가 다시 읽는 값과 같다).
+ * @param {{intervalMs?:number|null, prevRunMs?:number|null, runT0?:number|null, sampledAt?:number|null}} p
+ * @returns {{intervalMs:number|null, slackMs:number}}
+ */
+export function spanArgsFor({ intervalMs = null, prevRunMs = 0, runT0 = null, sampledAt = null } = {}) {
+  const iv = numOrNull(intervalMs);
+  const prevRun = numOrNull(prevRunMs);
+  const t0 = numOrNull(runT0); const at = numOrNull(sampledAt);
+  const offset = t0 != null && at != null ? Math.max(0, at - t0) : 0;
+  return { intervalMs: iv != null && iv > 0 ? iv : null, slackMs: (prevRun != null && prevRun > 0 ? prevRun : 0) + offset };
+}
+
+/**
  * 한 서버 수집 — 두 경로를 병렬로 시도하고 실패도 사유와 함께 돌려준다.
  *
  * ⚠⚠ **표본 시각은 이 서버가 실제로 읽힌 시각이다**(v2.550.3 에 고친 결함). 예전에는 주기 시작
@@ -332,7 +351,7 @@ const _authStopped = new Map();
  *   실제 경과 490초인데 300초로 나눠 **63% 과다**, 200초→10초면 **63% 과소**, 5초→250초면
  *   **82% 과다**. `now` 를 다시 전 서버 공용으로 되돌리지 말 것.
  */
-async function collectOne(target, { trigger = 'auto' } = {}) {
+async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null } = {}) {
   const t0 = Date.now();
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
@@ -449,7 +468,8 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
     _authStopped.delete(target.key);
   }
 
-  const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt });
+  // v2.732(B1-01): 주기·여유를 넘긴다 — 넘기지 않으면 간격 한계가 60분 고정이라 주기 60분 이상에서 누적 카운터 지표가 매 주기 빈다.
+  const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt, ...spanArgsFor({ intervalMs, prevRunMs, runT0, sampledAt }) });
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok || ent?.ok);
   recordBmUsage({
@@ -526,6 +546,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
   if (_running) return { ok: false, reason: '이전 수집이 진행 중입니다.' };
   _running = true;
   const t0 = Date.now();
+  // v2.732(B1-01): 직전 주기 실행 소요 — 이번 주기에서 _last 를 덮기 전에 읽는다(간격 한계의 여유 — spanArgsFor).
+  const prevRunMs = numOrNull(_last?.ms) ?? 0;
   try {
     const { targets, counts, settings, sourceErrors = [], classifyFailed } = await currentTargets();
     const srcErr = sourceErrors.length ? { sourceErrors: sourceErrors.slice(0, 8) } : {};
@@ -537,7 +559,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       return { ok: false, reason, ...srcErr };
     }
     if (!targets.length) {
-      // v2.628 EDGE2628-02: 0대 경로도 누적 카운터·정지 기록을 정리한다(마지막 대상의 카운터가 남아 돌아왔을 때 MAX_SPAN_MS 에 걸리지 않게).
+      // v2.628 EDGE2628-02: 0대 경로도 누적 카운터·정지 기록을 정리한다(마지막 대상의 카운터가 남아 돌아왔을 때 간격 한계 — rates.spanLimitMs, 최소 60분 — 에 걸리지 않게).
       dropStaleState(new Set());
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
@@ -555,15 +577,17 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     const skippedNonDemo = realAll.length - realTargets.length;
     const runCount = targets.length - skippedNonDemo;
     if (demo && demoTargets.length) await demo.backfillBmUsage(demoTargets).catch(() => {});
+    // v2.732(B1-01): 간격 한계용 주기 — 타이머가 재무장에 쓰는 값과 같은 출처(loadBmUsageSettings — 엣지는 배포분이 겹친 유효 설정)다.
+    const intervalMs = loadBmUsageSettings().intervalMs;
     const results = [
       ...(demo ? demo.demoBmUsageResults(demoTargets, Date.now()) : []),
-      ...(realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : []),
+      ...(realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0 }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : []),
     ];
     /*
      * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
      *   HBA)을 들고 있어 서버당 수 KB 다. 법인을 끄거나 등록부에서 서버가 빠져도 예전에는 그 항목이
      *   프로세스 수명 내내 남았다 — 등록부를 오래 편집하는 현장에서 조용히 늘어나는 누수다.
-     *   더 나쁜 것: 서버가 **되돌아오면** 몇 시간 전 카운터와 비교해 `MAX_SPAN_MS`(1시간) 상한에
+     *   더 나쁜 것: 서버가 **되돌아오면** 몇 시간 전 카운터와 비교해 간격 한계(`rates.spanLimitMs` — 최소 1시간, v2.732 부터 주기 × 3 + 여유)에
      *   걸려 그 주기가 통째로 `null` 이 된다(첫 수집이라고 말하지도 않는다).
      */
     const live = new Set(targets.map((t2) => t2.key));

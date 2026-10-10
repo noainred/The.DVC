@@ -156,7 +156,8 @@ export function memtrackReport(db, windowKey = '24h') {
     trend: { heapUsed: heapTrend, rss: rssTrend, verdict: assessTrend(heapTrend, rssTrend) },
     // v2.731(A6-04): 수집 개시/최종 시각은 단독 MIN·MAX 두 문장(metaRange — 인덱스 끝점)으로 읽는다. 예전 db.meta()(MIN·MAX·COUNT 한 문장)는
     //   mem_rss 파티션 전체를 훑었다(1분 1행·원본 5년 보존 — 1년 약 45ms·5년 약 240ms, 진단 화면 60초 폴링마다 · v2.675 '화면 경로에서 meta() 금지').
-    //   표본 수는 화면이 쓰지 않아 세지 않는다 — count 는 null('세지 않음'), 0 이 아니다.
+    //   표본 수는 세지 않는다 — count 는 null('세지 않음'), 0 이 아니다. v2.732(B1-02): 예전 이 줄은 '화면이 쓰지 않아' 라고 적었지만
+    //   진단 화면(Diagnostics.jsx)이 `count || 0` 으로 언제나 '표본 0건' 을 보였다 — 화면은 이제 count 가 null 이면 표본 수를 말하지 않는다(memMetaText).
     meta: memMeta(db),
   };
 }

@@ -19,7 +19,7 @@
  *   말해야 한다(v2.517 규약: '기다리면 되는지' 를 말한다).
  *   Windows 경로는 `Win32_PerfFormattedData_*` 가 순간값이라 첫 주기부터 나온다 — 그 차이도 밝힌다.
  */
-import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, MAX_SPAN_MS } from './rates.js';
+import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs } from './rates.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const n = numOrNull;   // v2.561: 공용 판정
@@ -30,6 +30,20 @@ const findBy = (list, field, val) => (Array.isArray(list) ? list.find((x) => x[f
 const pAtOf = (prev) => n(prev?.at);
 
 /**
+ * v2.732(B1-01): 간격을 사람이 읽는 글자로 — **한계보다 길다는 사실과 모순되지 않게** 쓴다.
+ *   예전 `Math.round(분)` 은 60.2분 간격을 '60분 전이라(60분 초과)' 로 써서 문장이 스스로 모순됐다. 분 단위로 반올림한 값이
+ *   한계(분, 내림) 이하가 되면 초까지(올림) 적는다 — 적은 값은 언제나 한계보다 크다.
+ */
+function gapText(gapMs, limMs) {
+  const limMin = Math.floor(limMs / 60_000);
+  const r = Math.round(gapMs / 60_000);
+  if (r > limMin) return `${r}분`;
+  const totalSec = Math.ceil(gapMs / 1000);
+  const m = Math.floor(totalSec / 60); const sec = totalSec % 60;
+  return sec ? `${m}분 ${sec}초` : `${m}분`;
+}
+
+/**
  * 한 서버의 한 주기.
  * @param {object} p
  * @param {object} p.target      `targets.resolveTargets()` 의 항목
@@ -38,10 +52,17 @@ const pAtOf = (prev) => n(prev?.at);
  * @param {object|null} p.ent    `collectors/idracEnterprise.collectEnterpriseUsage()` 결과(v2.554)
  * @param {object|null} p.prev   이전 주기의 `{ at, counters }`(같은 서버)
  * @param {number} p.now
+ * @param {number|null} [p.intervalMs] 설정 수집 주기 — 누적 카운터 간격 한계(v2.732 B1-01 `rates.spanLimitMs`). 넘기지 않으면 예전 60분.
+ * @param {number} [p.slackMs]   간격 한계에 더할 여유(직전 주기 실행 소요 + 이번 주기에서 이 서버가 읽히기까지 — poller.spanArgsFor)
  */
-export function buildUsage({ target = {}, idrac = null, os = null, ent = null, prev = null, now = Date.now() } = {}) {
+export function buildUsage({ target = {}, idrac = null, os = null, ent = null, prev = null, now = Date.now(), intervalMs = null, slackMs = 0 } = {}) {
   const srcOf = {};
   const notes = [];
+  /*
+   * v2.732(감사 B1-01): 누적 카운터 간격 한계를 **한 번** 계산해 CPU·디스크 I/O·네트워크·HBA·iDRAC NIC/FC 가 **전부 같은 값**을 쓴다
+   *   (v2.731 A2-04 '한 행 안에서 같은 경계' 원칙). 예전 60분 고정은 주기 60분 이상(설정 상한 6시간)에서 매 주기 값을 비웠다.
+   */
+  const lim = spanLimitMs(intervalMs, slackMs);
   const out = {
     key: target.key, name: target.name, vcenterId: target.vcenterId || '', ts: now,
     cpu_pct: null, mem_pct: null, disk_busy_pct: null, disk_used_pct: null,
@@ -74,20 +95,22 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     const pc = prev?.counters || null;
     const pAt = n(prev?.at);
     // CPU — jiffies 누적의 차이. v2.731 A2-04: 표본 간격도 넘긴다(디스크·네트워크와 같은 경계 — 긴 공백의 평균을 이번 주기 값으로 쓰지 않는다).
-    const cpu = cpuPctFromJiffies(pc?.cpu, c.cpu, pAt, now);
+    const cpu = cpuPctFromJiffies(pc?.cpu, c.cpu, pAt, now, lim);
     if (cpu != null) { out.cpu_pct = cpu; srcOf.cpu = 'os'; }
     else if (pc == null) notes.push('첫 수집이라 CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다(누적 카운터의 차이가 필요합니다).');
-    if (pc != null && !spanOk(pAt, now)) {
+    if (pc != null && !spanOk(pAt, now, lim)) {
       // 조용히 비우지 않는다 — 왜 이번 주기 누적 카운터 값이 없는지 말한다(다음 주기부터 이 표본이 새 기준이다).
+      // v2.732(B1-01): 한계는 주기에 비례하므로(주기 × 3 + 여유) 다음 주기 간격은 한계 안이다 — '다음 주기부터' 가 참이 된다.
       const gapMs = pAt != null ? now - pAt : null;
-      notes.push(gapMs != null && gapMs > MAX_SPAN_MS
-        ? `직전 표본이 ${Math.round(gapMs / 60_000)}분 전이라(${MAX_SPAN_MS / 60_000}분 초과) OS 누적 카운터 사용률(CPU·디스크 I/O·네트워크·HBA)은 이번 주기 비웠습니다(긴 공백의 평균을 지금 값으로 쓰지 않습니다 — 다음 주기부터 나옵니다).`
+      const basis = n(intervalMs) != null && n(intervalMs) > 0 ? ' — 수집 주기의 3배 + 수집 소요, 최소 60분' : '';
+      notes.push(gapMs != null && gapMs > lim
+        ? `직전 표본이 ${gapText(gapMs, lim)} 전이라 허용 간격(${Math.floor(lim / 60_000)}분${basis})을 넘어 OS 누적 카운터 사용률(CPU·디스크 I/O·네트워크·HBA)은 이번 주기 비웠습니다(긴 공백의 평균을 지금 값으로 쓰지 않습니다 — 다음 주기부터 나옵니다).`
         : '직전 표본과의 간격이 비정상이라(시각 없음·역행·너무 짧음) OS 누적 카운터 사용률(CPU·디스크 I/O·네트워크·HBA)은 이번 주기 비웠습니다(다음 주기부터 나옵니다).');
     }
     // 메모리 — 순간값이라 첫 주기부터 나온다.
     if (n(os.mem?.usedPct) != null) { out.mem_pct = n(os.mem.usedPct); srcOf.mem = 'os'; }
     // 디스크 busy — io_ticks 증가 / 경과.
-    const busy = maxOrNull((c.disks || []).map((d) => busyPct(findBy(pc?.disks, 'name', d.name)?.ioTicksMs, d.ioTicksMs, pAt, now)));
+    const busy = maxOrNull((c.disks || []).map((d) => busyPct(findBy(pc?.disks, 'name', d.name)?.ioTicksMs, d.ioTicksMs, pAt, now, lim)));
     if (busy != null) { out.disk_busy_pct = busy; srcOf.diskBusy = 'os'; }
     // 디스크 사용 공간 — df(순간값).
     const used = maxOrNull((os.mounts || []).map((m) => m.usedPct));
@@ -95,8 +118,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     // 네트워크 — rx+tx 초당 바이트, 링크 속도를 아는 인터페이스만 퍼센트.
     const perIf = (c.nets || []).map((x) => {
       const p = findBy(pc?.nets, 'iface', x.iface);
-      const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now);
-      const tx = perSecond(p?.txBytes, x.txBytes, pAt, now);
+      const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim);
+      const tx = perSecond(p?.txBytes, x.txBytes, pAt, now, lim);
       const bps = sumStrict([rx, tx]);
       return { iface: x.iface, bps, pct: x.virtual ? null : linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.virtual ? null : x.bitsPerSec, ...(x.virtual ? { virtual: true } : {}) };
     });
@@ -113,8 +136,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     // HBA — tx/rx words(4바이트) 누적. 속도를 모르면 퍼센트 없음.
     const perFc = (c.hbas || []).map((x) => {
       const p = findBy(pc?.hbas, 'host', x.host);
-      const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now);
-      const tx = perSecond(p?.txBytes, x.txBytes, pAt, now);
+      const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim);
+      const tx = perSecond(p?.txBytes, x.txBytes, pAt, now, lim);
       const bps = sumStrict([rx, tx]);
       return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, speedRaw: x.speedRaw };
     });
@@ -159,8 +182,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     };
     const idracRow = (p, x) => {
       const sp = idracSpan(p, x);
-      const rx = sp ? perSecond(p?.rxBytes, x.rxBytes, sp[0], sp[1]) : null;
-      const tx = sp ? perSecond(p?.txBytes, x.txBytes, sp[0], sp[1]) : null;
+      const rx = sp ? perSecond(p?.rxBytes, x.rxBytes, sp[0], sp[1], lim) : null;
+      const tx = sp ? perSecond(p?.txBytes, x.txBytes, sp[0], sp[1], lim) : null;
       return { rx, tx };
     };
     if ((idrac.nics || []).length) {

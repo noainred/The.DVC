@@ -10,33 +10,55 @@
  * ⚠ **카운터 리셋(음수 델타)도 `null`** 이다. 재부팅하면 카운터가 0 으로 돌아가므로 그 주기의
  *   값은 '모른다' 가 맞다(0 도 아니고 거대한 음수도 아니다).
  * ⚠ **시간 간격이 비정상이면 `null`** — 주기를 건너뛰거나 시계가 뒤로 가면(NTP 보정) 비율이
- *   말이 안 되는 값이 된다. 상한(`MAX_SPAN_MS`)을 넘긴 간격은 버린다.
+ *   말이 안 되는 값이 된다. 간격 한계(`spanLimitMs` — 기본 `MAX_SPAN_MS`)를 넘긴 간격은 버린다.
  */
 import { numOrNull } from '../util/numOrNull.js';
 export const MIN_SPAN_MS = 1_000;
-export const MAX_SPAN_MS = 60 * 60_000;   // 1시간 넘게 벌어진 두 표본은 비율로 쓰지 않는다
+/** 간격 한계의 **하한**이자, 주기를 모르는 호출(옛 호출·단위 테스트)의 한계다(v2.732 B1-01 — 아래 spanLimitMs). */
+export const MAX_SPAN_MS = 60 * 60_000;
 
 const fin = numOrNull; // v2.561: 공용 판정
 
 /**
- * 두 표본 시각의 간격이 비율 계산에 쓸 만한가(MIN_SPAN ~ MAX_SPAN). 시각을 못 읽었으면 false.
- * 이 모듈의 누적 카운터 환산(perSecond·busyPct·cpuPctFromJiffies)이 **같은 경계**를 쓴다 — 한 행 안에서 CPU 만 긴 공백의 평균을
- * 내고 디스크·네트워크는 비우는 어긋남(v2.731 A2-04)을 막는다.
+ * v2.732(감사 B1-01): 두 표본 간격의 **한계** = max(MAX_SPAN_MS(60분), 수집 주기 × 3 + slack).
+ *   예전에는 60분 고정이었다 — 적응 타이머는 **실행이 끝난 뒤** 재무장하므로 같은 서버의 두 표본 간격은 '주기 + 실행 소요' 다.
+ *   그래서 주기를 60분(설정 상한 6시간)으로 두면 간격이 **언제나** 60분을 넘어, v2.731 A2-04 이후 Linux CPU 가 매 주기 null 이었고
+ *   (디스크·네트워크·HBA 는 v2.550 부터) 화면은 매 주기 '다음 주기부터 나옵니다' 라는 거짓을 말했다.
+ *   배수 3 은 CVP `counterGapOk`(주기 × 3 + 직전 실행 소요)와 같다 — 설정한 주기를 두 번 놓친 공백까지 허용한다.
+ *   ⚠ **60분 하한을 지우지 말 것** — 기본 5분 주기에서 한계가 15분으로 좁아지면 20분 끊김만으로도 값이 빈다(별개 동작 변경).
+ *   ⚠ 주기를 모르면(넘기지 않은 호출) 예전 60분 그대로다. slack 은 음수·결측이면 0.
+ * @param {number|null} [intervalMs] 설정 수집 주기
+ * @param {number|null} [slackMs]    간격에 더할 여유(직전 주기 실행 소요 + 이번 주기에서 이 서버가 읽히기까지 — poller.spanArgsFor)
  */
-export function spanOk(prevAt, curAt) {
+export function spanLimitMs(intervalMs, slackMs = 0) {
+  const iv = fin(intervalMs);
+  if (iv == null || iv <= 0) return MAX_SPAN_MS;
+  const sl = fin(slackMs);
+  return Math.max(MAX_SPAN_MS, iv * 3 + (sl != null && sl > 0 ? sl : 0));
+}
+
+/**
+ * 두 표본 시각의 간격이 비율 계산에 쓸 만한가(MIN_SPAN ~ 간격 한계). 시각을 못 읽었으면 false.
+ * 이 모듈의 누적 카운터 환산(perSecond·busyPct·cpuPctFromJiffies)이 **같은 경계**를 쓴다 — 한 행 안에서 CPU 만 긴 공백의 평균을
+ * 내고 디스크·네트워크는 비우는 어긋남(v2.731 A2-04)을 막는다. 호출부는 한 행 안에서 **같은 maxSpanMs** 를 넘길 것(usage.js).
+ * @param {number|null} [maxSpanMs] 간격 한계(spanLimitMs) — 주지 않거나 못 읽으면 MAX_SPAN_MS
+ */
+export function spanOk(prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
   const pa = fin(prevAt); const ca = fin(curAt);
   if (pa == null || ca == null) return false;
+  const lim = fin(maxSpanMs);
+  const max = lim != null && lim >= MIN_SPAN_MS ? lim : MAX_SPAN_MS;
   const span = ca - pa;
-  return span >= MIN_SPAN_MS && span <= MAX_SPAN_MS;
+  return span >= MIN_SPAN_MS && span <= max;
 }
 
 /**
  * 누적값 두 개의 초당 증가량.
  * @returns {number|null} `null` = 판정 보류(첫 표본 · 리셋 · 간격 비정상)
  */
-export function perSecond(prevVal, curVal, prevAt, curAt) {
+export function perSecond(prevVal, curVal, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
   const p = fin(prevVal); const c = fin(curVal);
-  if (p == null || c == null || !spanOk(prevAt, curAt)) return null;
+  if (p == null || c == null || !spanOk(prevAt, curAt, maxSpanMs)) return null;
   const span = fin(curAt) - fin(prevAt);
   const d = c - p;
   if (d < 0) return null;                    // 리셋 — 0 으로 채우지 않는다
@@ -47,7 +69,7 @@ export function perSecond(prevVal, curVal, prevAt, curAt) {
  * 두 누적 시간 묶음에서 CPU 사용률(%).
  * `/proc/stat` 의 `cpu` 줄은 **jiffies 누적**이라 (전체증가 − idle증가) / 전체증가 다.
  *
- * ⚠ v2.731 A2-04: 표본 시각을 가진 호출부는 **prevAt·curAt 를 반드시 넘긴다** — 간격이 MIN~MAX_SPAN 밖이면 `null`
+ * ⚠ v2.731 A2-04: 표본 시각을 가진 호출부는 **prevAt·curAt 를 반드시 넘긴다** — 간격이 MIN~간격 한계(maxSpanMs) 밖이면 `null`
  *   (perSecond·busyPct 와 같은 경계). jiffies 비율은 간격으로 나누지 않아 값 자체는 '공백 구간 평균' 이지만, 몇 시간~하루 공백 뒤
  *   첫 표본이 그 평균을 **이번 주기 값처럼** 원시·일 롤업·임계 판정에 넣었다(같은 행의 디스크·네트워크는 null 인데 CPU 만 값).
  *   시각 인자를 아예 넘기지 않는 호출(둘 다 undefined — 단위 테스트·시각 없는 옛 호출)만 간격 판정을 하지 않는다.
@@ -55,9 +77,10 @@ export function perSecond(prevVal, curVal, prevAt, curAt) {
  * @param {{total:number, idle:number}} cur
  * @param {number|null} [prevAt]
  * @param {number|null} [curAt]
+ * @param {number|null} [maxSpanMs] 간격 한계(v2.732 B1-01 — 같은 행의 디스크·네트워크와 **같은 값**을 넘긴다)
  */
-export function cpuPctFromJiffies(prev, cur, prevAt, curAt) {
-  if ((prevAt !== undefined || curAt !== undefined) && !spanOk(prevAt, curAt)) return null;
+export function cpuPctFromJiffies(prev, cur, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  if ((prevAt !== undefined || curAt !== undefined) && !spanOk(prevAt, curAt, maxSpanMs)) return null;
   const pt = fin(prev?.total); const pi = fin(prev?.idle);
   const ct = fin(cur?.total); const ci = fin(cur?.idle);
   if (pt == null || pi == null || ct == null || ci == null) return null;
@@ -85,9 +108,9 @@ export function linkPct(bytesPerSec, linkBitsPerSec) {
  * 디스크 사용 시간 기반 사용률(%). `/proc/diskstats` 10번째 필드(`io_ticks`, ms)는 **I/O 중이던 시간**
  * 누적이라 (증가 ms / 경과 ms) × 100 이 곧 busy% 다(iostat 의 `%util` 과 같은 계산).
  */
-export function busyPct(prevTicksMs, curTicksMs, prevAt, curAt) {
+export function busyPct(prevTicksMs, curTicksMs, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
   const p = fin(prevTicksMs); const c = fin(curTicksMs);
-  if (p == null || c == null || !spanOk(prevAt, curAt)) return null;
+  if (p == null || c == null || !spanOk(prevAt, curAt, maxSpanMs)) return null;
   const span = fin(curAt) - fin(prevAt);
   const d = c - p;
   if (d < 0) return null;
