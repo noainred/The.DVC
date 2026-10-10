@@ -38,6 +38,9 @@ export function noteVcAuthFailure(vc, err) {
   return view(rec, `vCenter 인증 실패 — ${err.message}`);
 }
 
+/** 표지 → 응답 필드(부분 결과의 vCenter 별 `authStopped` 값과 같은 모양 — `{since, at, attempts, reason}`). */
+export const authStopView = (info) => (info ? { since: info.since, at: info.at, attempts: info.attempts, reason: info.reason } : null);
+
 /** 응답 본문용 — `{ok:false, ...표지}`. */
 export const authStopBody = (info) => ({ ok: false, ...info });
 
@@ -102,7 +105,7 @@ export function createVcAuthGate() {
     /** 이 요청에서 정지로 확인된 vCenter → 표지(이유 문장 포함). 없으면 빈 객체. */
     stopped() {
       const out = {};
-      for (const [id, s] of state) if (s.stop) out[id] = { since: s.stop.since, at: s.stop.at, attempts: s.stop.attempts, reason: s.stop.reason };
+      for (const [id, s] of state) if (s.stop) out[id] = authStopView(s.stop);
       return out;
     },
     isStopped(vcId) { return !!state.get(String(vcId || ''))?.stop; },

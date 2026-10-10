@@ -169,9 +169,10 @@ export function regionCounts(rows) {
 /** /tools/capacity.clusters → 부하 내림차순. load = CPU/메모리 사용률 중 최대. */
 export function clusterRows(clusters, limit = Infinity) {
   return (clusters || []).map((c) => ({
-    ...c, load: Math.max(num(c.cpuUsedPct) ?? 0, num(c.memUsedPct) ?? 0),
+    // v2.733: CPU·메모리 사용률을 둘 다 모르면(REST 폴백·끊긴 호스트만) 부하도 모른다 — 0 으로 두면 '부하 최저 → 신규 배치 우선' 으로 뽑혔다.
+    ...c, load: (num(c.cpuUsedPct) == null && num(c.memUsedPct) == null) ? null : Math.max(num(c.cpuUsedPct) ?? 0, num(c.memUsedPct) ?? 0),
     name: c.cluster, key: `${c.vcenterId}|${c.cluster}`,
-  })).sort((a, b) => b.load - a.load || b.hosts - a.hosts).slice(0, limit);
+  })).sort((a, b) => (a.load == null) - (b.load == null) || (b.load ?? 0) - (a.load ?? 0) || b.hosts - a.hosts).slice(0, limit);
 }
 
 export function clusterCountByVc(clusters) {
@@ -193,7 +194,7 @@ export function capacityAdvice(clusters) {
   if (hot) out.push({ level: 2, title: `${hot.name} (${hot.vcenterId}) 사용률 ${hot.load}% — 증설 검토`, meta: `CPU ${fmtPct(hot.cpuUsedPct)} · MEM ${fmtPct(hot.memUsedPct)} · 호스트 ${hot.hosts} · 규칙: 사용률 ≥ ${CRIT_PCT}%` });
   const over = rows.filter((c) => num(c.ramOvercommitPct) >= 100).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct)[0];
   if (over) out.push({ level: 1, title: `${over.name} (${over.vcenterId}) RAM 오버커밋 ${over.ramOvercommitPct}%`, meta: `구동 VM 할당 ${fmtInt(over.ramAllocatedGB)} / 물리 ${fmtInt(over.memTotalGB)} GB · 규칙: 오버커밋 ≥ 100%` });
-  const room = [...rows].filter((c) => c.hosts >= 3).sort((a, b) => a.load - b.load)[0];
+  const room = [...rows].filter((c) => c.hosts >= 3 && c.load != null).sort((a, b) => a.load - b.load)[0];
   if (room) out.push({ level: 0, title: `${room.name} (${room.vcenterId}) 부하 ${room.load}% — 신규 배치 우선`, meta: `호스트 ${room.hosts} · RAM 여유 ${fmtInt(room.ramHeadroomGB)} GB · 규칙: 호스트 ≥ 3 중 부하 최저` });
   return out;
 }

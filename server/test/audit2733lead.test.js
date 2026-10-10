@@ -89,3 +89,36 @@ test('③ SAN 단건 수집은 flush 인자를 받는다 — flush:false 면 스
   assert.match(pull, /collectDeviceNow\(String\(id\),\s*\{\s*flush:\s*false\s*\}\)/, '스토리지 재수집 묶음은 flush:false');
   assert.match(pull, /flushSnapshotsNow\(\)/, '묶음 끝에 한 번 쓴다');
 });
+
+test('④ GPU 게스트 수집 상태 — 범위 관리자에게 전 함대 집계를 싣지 않는다(허용 vCenter 목록만)', async () => {
+  const { scopeGpuGuestStatus } = await import('../src/routes/admin/gpuGuest.js');
+  const status = {
+    enabled: true, pollIntervalMs: 60_000, monitored: 3, overlay: { hosts: 40, vms: 120 },
+    lastRun: {
+      at: 123, mode: 'live', vcenters: 3, hosts: 40, vms: 120, errors: 2, authStoppedVms: 1, overlay: { hosts: 40 },
+      unreadVcenters: [{ vcId: 'vc-a', reason: '예외' }, { vcId: 'vc-z', reason: '예외' }],
+      skippedVcenters: [{ vcId: 'vc-z', why: 'site' }], skippedCounts: { site: 1 }, vcAuthStopped: ['vc-a', 'vc-z'],
+    },
+  };
+  const settings = { vcenters: { 'vc-a': { enabled: true }, 'vc-b': { enabled: false }, 'vc-z': { enabled: true } } };
+  const allowed = new Set(['vc-a', 'vc-b']);
+  const out = scopeGpuGuestStatus(status, allowed, settings);
+  assert.equal(out.fleetCountsHidden, true);
+  assert.equal(out.monitored, 1, '허용 vCenter 중 켠 수');
+  assert.equal(out.overlay, null);
+  assert.equal(out.lastRun.at, 123);
+  assert.equal(out.lastRun.hosts, null);
+  assert.equal(out.lastRun.vms, null);
+  assert.equal(out.lastRun.errors, null);
+  assert.equal(out.lastRun.skippedCounts, undefined, '전 함대 사유 분포를 싣지 않는다');
+  assert.deepEqual(out.lastRun.unreadVcenters.map((x) => x.vcId), ['vc-a']);
+  assert.deepEqual(out.lastRun.skippedVcenters, []);
+  assert.deepEqual(out.lastRun.vcAuthStopped, ['vc-a']);
+  assert.ok(!JSON.stringify(out).includes('vc-z'), '범위 밖 vCenter id 가 남지 않는다');
+  assert.equal(scopeGpuGuestStatus(status, null, settings), status, '전체 범위는 그대로');
+  const fsMod = await import('node:fs');
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fsMod.readFileSync(new URL('../src/routes/admin/gpuGuest.js', import.meta.url), 'utf8'));
+  assert.equal((src.match(/status:\s*gpuGuestStatus\(\)/g) || []).length, 0, '설정 조회·저장 응답은 가린 상태만 싣는다');
+  assert.equal((src.match(/scopeGpuGuestStatus\(gpuGuestStatus\(\)/g) || []).length, 2);
+});

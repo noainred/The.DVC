@@ -74,6 +74,29 @@ export function scopeSamplerStatus(status, allowed) {
   return { ...status, lastRun: lr == null ? lr : { at, rows: null, hostsWithTemp: null }, ...(rb !== undefined ? { rollupBackfill: rb } : {}), fleetCountsHidden: true };
 }
 
+/**
+ * v2.733: GPU 게스트 수집 상태의 lastRun·overlay 는 **전 함대 집계**다(수집한 호스트·VM 수, 오류 수, 못 읽은·건너뛴 vCenter id 와 사유,
+ *   인증 정지 VM 수). 범위 관리자에게는 실행 시각·모드와 **허용 vCenter 에 해당하는 목록만** 준다(v2.629 A6-04 scopeSamplerStatus 와 같은 기준 —
+ *   v2.550.3 '상태 객체에 집계를 담아 내보내지 말 것'). monitored 는 허용 vCenter 중 켠 수로 다시 센다. 순수.
+ */
+export function scopeGpuGuestStatus(status, allowed, settings) {
+  if (!allowed || !status || typeof status !== 'object') return status;
+  const vcOf = (x) => String(x && typeof x === 'object' ? (x.vcId ?? '') : (x ?? ''));
+  const keep = (arr) => (Array.isArray(arr) ? arr.filter((x) => allowed.has(vcOf(x))) : arr);
+  const lr = status.lastRun;
+  const lastRun = lr && typeof lr === 'object'
+    ? {
+        at: lr.at ?? null, mode: lr.mode ?? null, ...(lr.skipped ? { skipped: lr.skipped } : {}),
+        hosts: null, vms: null, errors: null, authStoppedVms: null, overlay: null,
+        unreadVcenters: keep(lr.unreadVcenters), skippedVcenters: keep(lr.skippedVcenters),
+        ...(Array.isArray(lr.vcAuthStopped) ? { vcAuthStopped: keep(lr.vcAuthStopped) } : {}),
+      }
+    : lr;
+  const vcs = settings && settings.vcenters && typeof settings.vcenters === 'object' ? settings.vcenters : {};
+  const monitored = Object.entries(vcs).filter(([id, v]) => v && v.enabled && allowed.has(id)).length;
+  return { ...status, monitored, lastRun, overlay: null, fleetCountsHidden: true };
+}
+
 export function registerGpuGuest(adminRouter) {
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
@@ -122,7 +145,8 @@ function scopedGpuGuestView(settings, allowed) {
 }
 adminRouter.get('/gpu-guest/settings', adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
-  res.json({ ...scopedGpuGuestView(loadGpuGuestSettings(), allowed), status: gpuGuestStatus() });
+  const settings = loadGpuGuestSettings();
+  res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings) });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
@@ -146,7 +170,7 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
   res.json({
-    ok: true, ...scopedGpuGuestView(settings, allowed), status: gpuGuestStatus(),
+    ok: true, ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings),
     ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}),
     ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}),
     ...ignoredGlobalFields(ignoredGlobal),
