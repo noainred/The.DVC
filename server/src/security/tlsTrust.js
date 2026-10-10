@@ -29,7 +29,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { buildConnector } from 'undici';
 import { config } from '../config.js';
-import { checkPeer, getPeerPolicy, normalizeFingerprint } from './peerTrust.js';
+import { checkPeer, getPeerPolicy, normalizeFingerprint, peerApproveWhere } from './peerTrust.js';
 import { tlsModeInfo, TLS_VERIFY_MODES } from './tlsMode.js';
 
 export { tlsModeFromEnv, tlsModeInfo, TLS_VERIFY_MODES } from './tlsMode.js';
@@ -259,7 +259,7 @@ const CHAIN_TEXT = {
 };
 const PIN_TEXT = {
   unknown: '승인된 지문이 없습니다',
-  changed: '이전에 기록된 인증서와 지문이 다릅니다(인증서 교체 또는 중간자 가능성)',
+  changed: '이전에 기록된 인증서와 지문이 다릅니다(인증서 교체·중간자 가능성, 또는 같은 주소 뒤 다른 서버 — 로드밸런서면 서버마다 지문을 확인해 추가 승인하거나 발급 CA 를 등록)',
   rejected: '관리자가 거부한 지문입니다',
   'not-approved': '관찰만 된 지문이고 아직 승인되지 않았습니다',
   'bad-fingerprint': '인증서 지문을 읽지 못했습니다',
@@ -267,16 +267,23 @@ const PIN_TEXT = {
   'resumed-unknown': '기억하지 않은 TLS 세션이 재개됐습니다',
 };
 
+/**
+ * 거부 문구. v2.731(A1-02): 승인할 노드를 말한다 — 엣지가 만든 문구는 스냅샷 오류로 중앙 화면에 실리는데 승인 저장소·CA 번들·env 는
+ * 노드마다 따로라 중앙에서는 조치할 수 없다(peerTrust.js peerApproveWhere). ⚠ '장비 인증서를 신뢰할 수 없어 연결을 끊었습니다' 는
+ * 표지(util/authGuard.js PEER_REJECT_MARKERS·로그 분석 probe)라 바꾸지 말 것.
+ */
 function buildMessage({ sub, host, port, mode, chainError, reason, fingerprint }) {
   const where = `${sub.label} ${host}:${port}`;
   const chain = chainError ? `CA 검증: ${CHAIN_TEXT[chainError] || chainError}` : '';
   const pin = mode === 'strict' ? '' : `지문: ${PIN_TEXT[reason] || reason}`;
   const why = [chain, pin].filter(Boolean).join(' · ');
   const fp = fingerprint ? ` · 제시된 인증서 SHA-256 ${fingerprint}` : '';
+  let node = { text: '설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)', note: '' };
+  try { node = peerApproveWhere(); } catch { /* 문구만 덜 구체적이 된다 — 거부 판정은 그대로 */ }
   const fix = mode === 'strict'
     ? `${sub.envKey ? `${sub.envKey}=true(엄격 — CA 체인만 허용)` : 'CA 체인만 허용(엄격)'}이므로 사설 CA 를 CONFIG_DIR/${CA_BUNDLE_FILE} 로 등록하거나 ${sub.strictHint || (sub.envKey ? `${sub.envKey} 를 지워 승인 지문을 허용하세요` : '승인 지문을 허용하도록 설정을 바꾸세요')}`
-    : `설정의 장비 신뢰(인증서·호스트키) 화면에서 이 지문을 확인해 승인하거나, 사설 CA 를 CONFIG_DIR/${CA_BUNDLE_FILE} 로 등록하세요`;
-  return `${where} 장비 인증서를 신뢰할 수 없어 연결을 끊었습니다(요청·자격증명은 보내지 않았습니다) — ${why}${fp} — ${fix}`;
+    : `${node.text} 화면에서 이 지문을 확인해 승인하거나, 사설 CA 를 CONFIG_DIR/${CA_BUNDLE_FILE} 로 등록하세요`;
+  return `${where} 장비 인증서를 신뢰할 수 없어 연결을 끊었습니다(요청·자격증명은 보내지 않았습니다) — ${why}${fp} — ${fix}${node.note ? `(${node.note})` : ''}`;
 }
 
 /* ── 판정 ──────────────────────────────────────────────────────────────────── */

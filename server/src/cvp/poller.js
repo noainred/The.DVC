@@ -44,7 +44,7 @@ let _busy = false;
 let _last = { at: 0 };
 const _inFlight = new Map();
 const _prevCounters = new Map(); // `${cvpId}|${deviceKey}|${port}` → { at, c }
-const _prevCpu = new Map();      // v2.641: `${cvpId}|${deviceKey}` → { busy, total } (누적 CPU 카운터 — 첫 표본은 null)
+const _prevCpu = new Map();      // v2.641: `${cvpId}|${deviceKey}` → { busy, total, at } (누적 CPU 카운터 — 첫 표본은 null · v2.731 A2-04: 표본 시각 at)
 const _prefer = new Map();       // cvpId → Map(kind → 경로 후보)
 const _partsAt = new Map();      // cvpId → 마지막 부품 조회 시각
 // v2.649: 포트 설명은 부품 주기에만 읽는다 — 사이 주기에는 직전에 읽은 설명을 채워 push 해시가 30분마다 뒤집히지 않게 한다(재시작 직후는 DB 가 COALESCE 로 유지).
@@ -63,12 +63,22 @@ export const pollMs = () => loadSettings().intervalMs;
 /**
  * v2.641 ③: 장비 CPU·메모리 값을 레코드 필드로 옮긴다(제자리). CPU 가 누적 카운터면 이전 표본과의 차이로 사용률을 계산한다
  *   (첫 표본·리셋은 null — 0% 가 아니다). 못 읽었으면 전부 null.
+ * v2.731 A2-04: 이전 표본에 **시각(at = CPU 를 읽은 시각 sysAt)** 을 함께 두고, 간격이 포트 처리량(applyDeltas → portDelta)과 같은
+ *   한계(주기 × 3 + 직전 실행 소요)를 넘으면 그 주기는 null 이다(스트리밍이 끊겼다 돌아온 장비의 첫 표본이 '몇 시간 평균' 을 지금 값처럼
+ *   적재하지 않게). 이번 표본은 언제나 새 기준이 된다. opts 를 주지 않으면 지금 설정의 수집 주기를 쓴다.
+ * @param {{intervalMs?:number, slackMs?:number}} [opts]
  */
-export function applySys(cvpId, dev, prevMap = _prevCpu) {
+export function applySys(cvpId, dev, prevMap = _prevCpu, opts = {}) {
   const k = `${cvpId}|${dev.key}`;
   let cpu = null;
   if (dev.cpu && dev.cpu.pct != null) cpu = dev.cpu.pct;
-  else if (dev.cpu && dev.cpu.counters) { cpu = cpuPctFromCounters(prevMap.get(k) || null, dev.cpu.counters); prevMap.set(k, dev.cpu.counters); }
+  else if (dev.cpu && dev.cpu.counters) {
+    const at = typeof dev.sysAt === 'number' && Number.isFinite(dev.sysAt) ? dev.sysAt : Date.now(); // CPU 를 읽은 시각(client.js) — 없으면 지금
+    const cur = { ...dev.cpu.counters, at };
+    const intervalMs = opts?.intervalMs ?? pollMs();
+    cpu = cpuPctFromCounters(prevMap.get(k) || null, cur, { intervalMs, slackMs: opts?.slackMs ?? 0 });
+    prevMap.set(k, cur);
+  }
   dev.cpuPct = cpu;
   dev.memPct = dev.mem ? dev.mem.pct : null;
   dev.memTotal = dev.mem ? dev.mem.total : null;
@@ -155,7 +165,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     for (const d of r.devices) {
       fillDescs(descMap, d);
       if (!r.demo) applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs); // 데모는 처리량을 합성 값으로 바로 싣는다
-      applySys(full.id, d);
+      applySys(full.id, d, _prevCpu, { intervalMs: settings.intervalMs, slackMs }); // v2.731 A2-04: 포트와 같은 간격 한계
       d.ts = d.countersAt ?? readAt;
       delete d.counters;
     }

@@ -37,6 +37,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { snapshotResults, pollerStats } from '../svcmon/poller.js';
 import { logStats } from '../svcmon/csvlog.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { advertisedListen } from '../util/httpsServer.js';
 
 const gzipAsync = promisify(zlib.gzip);
 
@@ -100,7 +101,9 @@ function capabilities(p) {
     pingMode: p?.pool?.pingMode || 'unknown',
     svcmonEnabled: !!p?.enabled,
     // 중앙의 통신 진단(probe)이 이 포트로 TCP RTT 를 잰다.
-    portalPort: Number(config.port) || 0,
+    // v2.731(G2b A4-02): config.port 가 아니라 **실제로 듣는 광고 포트**(selfRegister 와 같은 판정 — v2.730). TLS_PORT ≠ PORT 로
+    //   HTTPS 만 열면 PORT 는 듣지 않아, 예전 값으로는 중앙이 정상 엣지를 'TCP 실패' 로 말했다.
+    portalPort: advertisedListen(config.port).port || 0,
     workers: p?.pool?.workers ?? null,
     inlineFallbacks: p?.pool?.inlineFallbacks ?? 0,
     version: config.version || '',

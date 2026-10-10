@@ -33,6 +33,13 @@ import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
 import HorizonUsagePanel from './HorizonUsagePanel.jsx';   // v2.684 앱·데스크톱별 사용 현황
 import { createHistLoader, histView } from './horizonHistLoader.js'; // 검토 I-09: 추이는 최신 요청만 반영
 
+/**
+ * 작업 로그 정렬값 — 결측은 빈 문자열(v2.730 I-01 규약). 예전 String(x ?? -1) 은 I-01 뒤 진짜 음수로 읽혀
+ * 수집 실패 행(—)이 오름차순 맨 앞에 왔다(점검 A5-05). STable 은 빈 정렬값을 방향과 무관하게 뒤로 보낸다.
+ * '현재 사용자'(CurrentUsers.jsx)의 Windows 수집 작업 로그도 이 함수를 쓴다.
+ */
+export const activitySortValue = (v) => (v == null || v === '' ? '' : String(v));
+
 const DAYS = [1, 7, 30, 90];
 const POLL_MS = 60_000;     // 수집 주기가 기본 5분 — 15초 폴링은 낭비다(CLAUDE.md V4 규약)
 
@@ -273,8 +280,8 @@ export default function HorizonSessionsPanel() {
         title="📋 Horizon 세션 수집 작업"
         emptyText="아직 수집 기록이 없습니다."
         metricCols={[
-          { key: 'sessions', label: '세션', render: (e) => (e.sessions == null ? '—' : `${e.sessions}`), sort: (e) => String(e.sessions ?? -1) },
-          { key: 'users', label: '고유 사용자', render: (e) => (e.users == null ? '—' : `${e.users}명`), sort: (e) => String(e.users ?? -1) },
+          { key: 'sessions', label: '세션', render: (e) => (e.sessions == null ? '—' : `${e.sessions}`), sort: (e) => activitySortValue(e.sessions) },
+          { key: 'users', label: '고유 사용자', render: (e) => (e.users == null ? '—' : `${e.users}명`), sort: (e) => activitySortValue(e.users) },
         ]}
       />
 

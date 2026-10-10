@@ -687,7 +687,9 @@ export function registerIdracTrend(adminRouter) {
     let power = new Map(); let powerKeyFor = () => null;
     try {
       const pdb = await getPowerDb();
-      power = pdb.statsSince(since);
+      // v2.731(A6-03): 서버마다 PK 범위 seek + 양보(statsSinceAsync). 예전 statsSince(`GROUP BY server_id`)는 power_hourly 를 PK 로
+      //   전부 훑어 30일 창이면 1초 넘게 포탈 전체를 멈췄다(1,000대 × 90일 합성 실측). 결과는 같다.
+      power = typeof pdb.statsSinceAsync === 'function' ? await pdb.statsSinceAsync(since) : pdb.statsSince(since);
       const entries = remotePowerEntries();
       const find = serverLookup();
       powerKeyFor = (r) => { const s = find(r.id); return s ? powerKeyOf(s, { entries, hasSeries: (k) => power.has(k) }).key : null; };

@@ -151,7 +151,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
     { key: 'source', label: '소스', render: (i) => <span className="muted">{i.source} · {i.where}</span> },
     { key: 'productVersion', label: '버전', render: (i) => <span className="muted">{i.productVersion || '—'}</span> },
     { key: 'key', label: '키', render: (i) => <span className="muted" style={{ fontSize: 11 }}>{i.key || '—'}</span> },
-    { key: 'used', label: '사용/총량', align: 'right', sortValue: (i) => i.used ?? -1, render: (i) => (i.total != null ? `${i.used ?? '—'}/${i.total}` : '—') },
+    { key: 'used', label: '사용/총량', align: 'right', sortValue: (i) => i.used ?? null, render: (i) => (i.total != null ? `${i.used ?? '—'}/${i.total}` : '—') },
     { key: 'expires', label: '만료일', sortValue: (i) => (i.expires ? Date.parse(i.expires) : Infinity), render: (i) => (i.expires ? <b style={{ color: statusColor[i.status] }}>{i.expires}</b> : <span className="muted">영구/미표기</span>) },
     { key: 'daysLeft', label: '남은 기간', align: 'right', sortValue: (i) => (i.daysLeft == null ? Infinity : i.daysLeft), render: (i) => <b style={{ color: statusColor[i.status] }}>{dday(i) || '—'}</b> },
     { key: 'status', label: '상태', render: (i) => <span className="badge" style={{ color: statusColor[i.status], borderColor: statusColor[i.status] }}>{statusLabel[i.status]}</span> },

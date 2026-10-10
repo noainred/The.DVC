@@ -243,7 +243,7 @@ CENTRAL_TOKEN=<강력한-공유-토큰-1>     # 중앙의 CENTRAL_TOKEN과 동�
 
 AGENT_PUSH_INVENTORY=true              # vCenter 인벤토리(hosts/vms/...) push
 # AGENT_PUSH_FLEET=false               # 베어메탈 push 끄기(기본 on) — 끌 때만 설정
-AGENT_SCAN_INTERVAL_MS=3600000         # 위임 iDRAC/IP 스캔 주기(기본 1시간)
+AGENT_SCAN_INTERVAL_MS=3600000         # 위임 iDRAC 스캔 주기(기본 1시간). IP 스캔은 중앙 IP관리 주기 우선(배정 전·구버전 중앙이면 이 값)
 AGENT_AUTO_REGISTER=true               # 발견 iDRAC 로컬 자동 등록
 ```
 

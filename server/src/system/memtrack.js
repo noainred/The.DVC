@@ -113,6 +113,19 @@ const WINDOWS = {
 
 const toMB = (b) => Number((b / MB).toFixed(1));
 
+/**
+ * v2.731(A6-04): 메모리 추세 수집 개시·최종 시각. metaRange(단독 MIN·MAX)를 쓰고, 그 API 가 없는 옛 db 객체만 meta() 로 되돌린다.
+ * @returns {{firstTs:number|null, lastTs:number|null, count:number|null}} count 는 세지 않으면 null.
+ */
+export function memMeta(db) {
+  if (db && typeof db.metaRange === 'function') {
+    const r = db.metaRange('mem_rss') || {};
+    return { firstTs: r.firstTs ?? null, lastTs: r.lastTs ?? null, count: null };
+  }
+  const m = db?.meta?.('mem_rss') || {};
+  return { firstTs: m.firstTs ?? null, lastTs: m.lastTs ?? null, count: m.count ?? null };
+}
+
 /** /admin/memtrack 응답 — 현재값 + 창(window)별 시계열 + 기동 이후 추세 판정. */
 export function memtrackReport(db, windowKey = '24h') {
   const key = Object.prototype.hasOwnProperty.call(WINDOWS, windowKey) ? windowKey : '24h';
@@ -141,6 +154,9 @@ export function memtrackReport(db, windowKey = '24h') {
     },
     series,
     trend: { heapUsed: heapTrend, rss: rssTrend, verdict: assessTrend(heapTrend, rssTrend) },
-    meta: db.meta('mem_rss'), // 수집 개시/최종 시각·총 표본 수
+    // v2.731(A6-04): 수집 개시/최종 시각은 단독 MIN·MAX 두 문장(metaRange — 인덱스 끝점)으로 읽는다. 예전 db.meta()(MIN·MAX·COUNT 한 문장)는
+    //   mem_rss 파티션 전체를 훑었다(1분 1행·원본 5년 보존 — 1년 약 45ms·5년 약 240ms, 진단 화면 60초 폴링마다 · v2.675 '화면 경로에서 meta() 금지').
+    //   표본 수는 화면이 쓰지 않아 세지 않는다 — count 는 null('세지 않음'), 0 이 아니다.
+    meta: memMeta(db),
   };
 }

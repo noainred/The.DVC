@@ -41,7 +41,7 @@ export function describeError(err) {
     hint = '연결 시간 초과 — telnet(TCP)은 되는데 여기서 막히면 중계(HAProxy) reload·방화벽 idle로 keep-alive 연결이 끊긴 경우가 많습니다(다음 주기에 새 연결로 자동 복구). 지속되면 네트워크 경로·중계 서버 상태를 확인하세요.';
   } else if (/CERT|SELF_SIGNED|self-signed|DEPTH_ZERO|UNABLE_TO_VERIFY|HOSTNAME/i.test(test)) {
     // 2026-10-09 검토 S-02: 검증을 끄는 env 를 권하지 않는다 — 사설 CA 등록 또는 지문 승인이 조치다.
-    hint = '인증서 오류 — 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 승인하세요. 중앙↔엣지(수집 서버) 자체서명 HTTPS 도 WAN_TLS_INSECURE 대신 같은 방법을 우선하세요.';
+    hint = '인증서 오류 — 장비라면 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 승인하세요. 중앙↔엣지(수집 서버) HTTPS 는 장비 신뢰가 아니라 portal.env 의 WAN_TLS_CA_FILE(사설 CA)로 신뢰합니다 — WAN_TLS_INSECURE 로 검증을 끄지 마세요.';
   } else if (/ECONNRESET/i.test(test)) {
     hint = '연결이 재설정됨 — 네트워크/프록시/TLS 설정을 확인하세요.';
   } else if (/EHOSTUNREACH|ENETUNREACH/i.test(test)) {

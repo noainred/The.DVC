@@ -663,7 +663,11 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = process.en
     recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: data.length, method: 'POST', error: ok ? '' : reason, tag: 'upgrade-edge' });
     return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}) };
   } catch (err) {
-    recordOutbound(url, { error: String(err?.message || err), method: 'POST', tag: 'upgrade-edge' }); // v2.727(D-06)
-    return { edge: edge.url, ok: false, reason: err.message };
+    // v2.731(G2b A4-01): undici 는 원인을 err.cause 에 둔다 — 'fetch failed' 만 남기면 인증서 거부·연결 거부·시한을 가를 수 없다
+    //   (사설 CA 엣지가 실패해도 화면에는 'fetch failed' 뿐이었다). 원인 문구를 덧붙인다(토큰·본문은 원인에 들어 있지 않다).
+    const cause = err?.cause && err.cause.message && err.cause.message !== err?.message ? ` — ${String(err.cause.message).slice(0, 200)}` : '';
+    const reason = `${String(err?.message || err)}${cause}`;
+    recordOutbound(url, { error: reason.slice(0, 300), method: 'POST', tag: 'upgrade-edge' }); // v2.727(D-06)
+    return { edge: edge.url, ok: false, reason };
   }
 }

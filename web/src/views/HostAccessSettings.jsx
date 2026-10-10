@@ -30,6 +30,30 @@ function OtpModal({ title, onSubmit, onClose, busy }) {
   );
 }
 
+/**
+ * 서버가 준 '실제로 듣는 포탈 포트' 목록(v2.731 A4-02) — 문자열 배열, 중복 없음. TLS_PORT ≠ PORT 로 HTTPS 만 열면 PORT 는
+ * 듣지 않으므로 화면이 config.port 하나를 '포탈 포트' 라 말하면 거짓이고, 그 값으로 허용목록을 만들면 실제 포트가 열린 채 남는다.
+ * 구버전 서버는 portalPorts 가 없어 portalPort 하나를 쓴다.
+ */
+export function portalPortsOf(data) {
+  const list = Array.isArray(data?.portalPorts) && data.portalPorts.length ? data.portalPorts : [data?.portalPort];
+  const out = [];
+  for (const p of list) { const t = String(p ?? '').trim(); if (/^\d{1,5}$/.test(t) && !out.includes(t)) out.push(t); }
+  return out;
+}
+/** 웹 접근 제어가 다룰 포트 = 포탈 포트 전부 + 고른 80/443(중복 없이). */
+export function webPortsOf(data, draft) {
+  const out = portalPortsOf(data);
+  for (const [on, p] of [[draft?.web80, '80'], [draft?.web443, '443']]) if (on && !out.includes(p)) out.push(p);
+  return out;
+}
+/** ② 머리 문구 — '포탈 포트 4443·4000 · 80'. 포탈 포트를 모르면 '—'. */
+export function webPortsLabel(data, draft) {
+  const pp = portalPortsOf(data);
+  const extra = webPortsOf(data, draft).filter((p) => !pp.includes(p));
+  return [pp.length ? `포탈 포트 ${pp.join('·')}` : '포탈 포트 —', ...extra].join(' · ');
+}
+
 const fromServer = (s) => ({
   sshMode: s.ssh.mode, sshAllow: listToText(s.ssh.allow), sshStop: !!s.ssh.stopService,
   webMode: s.web.mode, webAllow: listToText(s.web.allow), web80: s.web.ports.includes('80'), web443: s.web.ports.includes('443'),
@@ -67,7 +91,7 @@ export default function HostAccessSettings() {
 
   const toSettings = () => ({
     ssh: { mode: draft.sshMode, allow: textToList(draft.sshAllow), stopService: draft.sshStop },
-    web: { mode: draft.webMode, allow: textToList(draft.webAllow), ports: [String(data.portalPort), ...(draft.web80 ? ['80'] : []), ...(draft.web443 ? ['443'] : [])] },
+    web: { mode: draft.webMode, allow: textToList(draft.webAllow), ports: webPortsOf(data, draft) },
     firewall: { extra: draft.extra.map((r) => ({ ...r, sources: textToList(r.sources) })) },
     confirmMinutes: Number(draft.confirmMinutes) || 5,
   });
@@ -106,7 +130,7 @@ export default function HostAccessSettings() {
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             firewalld 실행 중 · 기본 존 <b>{eng.zone}</b>{cur?.active ? ' (active)' : ''} · target <b>{cur?.target}</b> · 인터페이스 {cur?.interfaces?.join(', ') || '—'}
             <div>서비스: {cur?.services?.join(', ') || '—'} · 포트: {cur?.ports?.join(', ') || '—'}</div>
-            <div>sshd: <b style={{ color: data.sshdActive ? 'var(--green)' : 'var(--red)' }}>{data.sshdActive == null ? '알 수 없음' : data.sshdActive ? '실행 중' : '중지'}</b> · 내 IP <b>{data.requesterIp || '판별 불가'}</b> · 포탈 포트 {data.portalPort}
+            <div>sshd: <b style={{ color: data.sshdActive ? 'var(--green)' : 'var(--red)' }}>{data.sshdActive == null ? '알 수 없음' : data.sshdActive ? '실행 중' : '중지'}</b> · 내 IP <b>{data.requesterIp || '판별 불가'}</b> · 포탈 포트 {portalPortsOf(data).join(' · ') || '—'}
               {data.applied ? <> · 마지막 확정 {when(data.applied.at)}({data.applied.by}){data.dirty ? <span style={{ color: 'var(--amber)' }}> · 초안이 확정본과 다름</span> : ''}</> : ' · 아직 확정한 적 없음'}</div>
             {cur?.richRules?.length > 0 && (
               <details style={{ marginTop: 6 }}><summary className="muted" style={{ cursor: 'pointer' }}>현재 rich rule {cur.richRules.length}개</summary>
@@ -147,7 +171,7 @@ export default function HostAccessSettings() {
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontWeight: 700 }}>② 웹(포탈 포트 {data.portalPort}{draft.web80 ? ' · 80' : ''}{draft.web443 ? ' · 443' : ''}) 접근</div>
+        <div style={{ fontWeight: 700 }}>② 웹({webPortsLabel(data, draft)}) 접근</div>
         <div className="flex gap wrap" style={{ gap: 14, marginTop: 6, alignItems: 'center' }}>
           {[['open', '열림(모든 클라이언트)'], ['allowlist', '허용목록만']].map(([v, l]) => (
             <label key={v} className="flex gap" style={{ alignItems: 'center', gap: 4 }}><input type="radio" name="webMode" checked={draft.webMode === v} onChange={() => upd('webMode', v)} /> {l}</label>

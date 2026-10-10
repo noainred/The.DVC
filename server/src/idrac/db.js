@@ -14,6 +14,7 @@ import { stepBuckets, STEP_SLACK_MS } from '../metrics/db.js'; // v2.660: 기간
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { createYielder } from '../util/timeSlice.js';   // v2.731(A6-03): 서버 표 전력 요약 — 서버 사이 시간 기준 양보
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.idrac.dbPath;
@@ -119,6 +120,16 @@ function initSqlite() {
     const rollupOne = (serverId, watts, ts) => rollupStmt.run(serverId, Math.floor(ts / HOUR_MS), watts, watts, watts, ts);
     // 24h 통계를 시간당 롤업에서 계산: peak=MAX(maxw), min=MIN(minw), avg=SUM(sumw)/SUM(cnt), last=MAX(last_ts).
     const statsHourlyStmt = db.prepare('SELECT server_id, MAX(maxw) AS peak, MIN(minw) AS minw, SUM(sumw) AS sumw, SUM(cnt) AS cnt, MAX(last_ts) AS last FROM power_hourly WHERE hb >= ? GROUP BY server_id');
+    // v2.731(A6-03): 위 문장은 `GROUP BY server_id` 때문에 플래너가 PK(server_id, hb)를 골라 **보존기간 전부**를 훑는다
+    //   (1,000대 × 90일 = 216만 행 합성: 24시간 창 130ms · 30일 1.2초 동기 — iDRAC 통합 추이 '서버 표' 의 전력 요약).
+    //   요청 경로는 서버를 인덱스로 건너뛰며 찾고(loose index scan) 서버마다 PK 범위(server_id=? AND hb>=?)만 읽는다 —
+    //   읽는 행 = 창 안의 행뿐이고 서버 사이에 양보할 수 있다(statsSinceAsync). 결과는 statsSince 와 같다(테스트 대조).
+    const hourlyIdsStmt = db.prepare(`WITH RECURSIVE ks(k) AS (
+        SELECT (SELECT MIN(server_id) FROM power_hourly)
+        UNION ALL
+        SELECT (SELECT MIN(server_id) FROM power_hourly WHERE server_id > ks.k) FROM ks WHERE ks.k IS NOT NULL)
+      SELECT ks.k AS server_id FROM ks WHERE ks.k IS NOT NULL`);
+    const statsHourlyOneStmt = db.prepare('SELECT MAX(maxw) AS peak, MIN(minw) AS minw, SUM(sumw) AS sumw, SUM(cnt) AS cnt, MAX(last_ts) AS last FROM power_hourly WHERE server_id = ? AND hb >= ?');
     const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
     // v2.670: 함대 전력 추이(경영 보기 Overview 스파크라인) — **지정한 시간(hb)들만** 인덱스로 읽어 시간마다 서버별 평균의 합을 낸다.
     //   창 전체를 서버별로 묶으면 90일 × 서버 1천 대 = 216만 행을 훑어 실측 3.7초 동기 정지였다(v2.670 측정). 칸마다 대표 시간
@@ -230,6 +241,22 @@ function initSqlite() {
         for (const r of statsHourlyStmt.all(hbSince)) m.set(r.server_id, { peak: Math.round(r.peak), min: Math.round(r.minw), avg: Math.round(r.sumw / r.cnt), last: r.last, count: r.cnt });
         return m;
       },
+      /**
+       * v2.731(A6-03): statsSince 의 요청 경로판 — 서버마다 PK 범위 seek + 시간 기준 양보(metrics statsSinceAllAsync 와 같은 모양).
+       * 창 밖 행을 읽지 않는다. 창 안에 행이 없는 서버는 예전처럼 결과에 없다(0 으로 채우지 않는다).
+       * @param {{maybeYield?: () => Promise<unknown>}} [opts] 양보 함수 주입(테스트) — 기본 15ms 시간 기준
+       */
+      statsSinceAsync: async (sinceTs, opts = {}) => {
+        const maybeYield = typeof opts.maybeYield === 'function' ? opts.maybeYield : createYielder(15);
+        const hbSince = Math.floor(sinceTs / HOUR_MS);
+        const m = new Map();
+        for (const { server_id: id } of hourlyIdsStmt.all()) {
+          const r = statsHourlyOneStmt.get(id, hbSince);
+          if (r && r.cnt != null) m.set(id, { peak: Math.round(r.peak), min: Math.round(r.minw), avg: Math.round(r.sumw / r.cnt), last: r.last, count: r.cnt });
+          await maybeYield();
+        }
+        return m;
+      },
       bucketsSince: (sinceTs, bucketMs) => {
         if (bucketMs === HOUR_MS) {
           const hbSince = Math.floor(sinceTs / HOUR_MS);
@@ -336,6 +363,8 @@ function initJsonFallback() {
       for (const [s, a] of acc) m.set(s, { peak: a.peak, min: a.min, avg: Math.round(a.sum / a.n), last: a.last, count: a.n });
       return m;
     },
+    // v2.731(A6-03): SQLite 판과 같은 API 만 맞춘다(NDJSON 폴백은 개발용 소규모).
+    async statsSinceAsync(sinceTs) { return this.statsSince(sinceTs); },
     bucketsSince: (sinceTs, bucketMs) => {
       const acc = new Map(); // `${s}|${bk}` -> {sum,n}
       for (const r of rows) {

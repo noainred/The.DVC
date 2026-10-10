@@ -18,6 +18,34 @@ import { STable } from '../components/STable.jsx';
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 
+/**
+ * /vcenters 조회 결과 → 범위 편집 창의 목록 상태(점검 A5-10). r = { ok:true, v } | { ok:false, e }.
+ *   { list: [...] }  — 읽었다(빈 배열이면 정말 0개)
+ *   { err }          — 못 읽었다(조회 실패 · 배열이 아닌 응답). '표시할 vCenter가 없습니다' 라고 말하지 않는다.
+ */
+export function vcListState(r) {
+  if (r && r.ok && Array.isArray(r.v)) return { list: r.v };
+  if (r && r.ok) return { err: 'vCenter 목록 응답의 형식을 읽지 못했습니다.' };
+  return { err: r?.e || 'vCenter 목록을 읽지 못했습니다.' };
+}
+
+/** 범위 편집 창 — vCenter 목록을 못 읽었을 때. 지금 선택된 id 를 그대로 보이고(저장해도 유지된다) 다시 읽기를 준다. */
+function VcListError({ err, selected, onRetry, stale = false }) {
+  const msg = typeof err === 'string' ? err : (err?.message || 'vCenter 목록을 읽지 못했습니다.');
+  const sel = Array.isArray(selected) ? selected : [];
+  const selText = sel.length ? `(${sel.slice(0, 10).join(', ')}${sel.length > 10 ? ` 외 ${sel.length - 10}개` : ''})` : '(없음)';
+  return (
+    <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal', marginBottom: stale ? 6 : 0 }}>
+      <div style={{ color: 'var(--amber)', fontWeight: 700 }}>
+        {stale ? 'vCenter 목록을 다시 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다.' : 'vCenter 목록을 읽지 못했습니다 — 0개라는 뜻이 아닙니다.'}
+      </div>
+      <div className="muted" style={{ overflowWrap: 'anywhere' }}>사유: {msg}</div>
+      {!stale && <div className="muted">목록을 읽기 전에는 vCenter 선택을 바꿀 수 없습니다. 저장해도 지금 선택{selText}은 그대로 유지됩니다.</div>}
+      <button className="tab" style={{ padding: '3px 10px', fontSize: 12, marginTop: 4 }} onClick={onRetry}>다시 읽기</button>
+    </div>
+  );
+}
+
 /** 설정 → 사용자 관리: 계정 CRUD + Google OTP(TOTP) 등록/해제 + 기능 권한 매트릭스 + 데이터 범위(scope). */
 export default function UserAdmin() {
   const [data, setData] = useState(null);
@@ -31,6 +59,9 @@ export default function UserAdmin() {
   const [perms, setPerms] = useState(null);   // { catalog, roles, matrix }
   const [permDirty, setPermDirty] = useState(false);
   const [vcx, setVcx] = useState([]);         // 범위 지정용 vCenter 목록 [{id,name,region}]
+  // 점검 A5-10: vCenter 목록 조회 실패를 '표시할 vCenter가 없습니다'(= 0개)로 말하지 않는다. 실패는 따로 들고
+  //   범위 편집 창이 '읽지 못했습니다' + 다시 읽기를 보인다(그 동안 vCenter 체크박스는 그릴 수 없다 — 지금 선택은 그대로 저장된다).
+  const [vcxErr, setVcxErr] = useState(null);
   const [scopeEdit, setScopeEdit] = useState(null); // { username, vcenters:[], regions:[] }
   // ⚠ 모든 훅은 아래 조기 return(if (!data) return <Loading/>) 이전에 선언해야 한다 —
   // v2.202에서 pwEdit useState 를 조기 return 뒤에 뒀다가 렌더 간 훅 개수가 달라져
@@ -39,20 +70,30 @@ export default function UserAdmin() {
   // v2.555 사용자별 특수기능 접근 — { username, role, mode, tools:[], q }
   const [toolEdit, setToolEdit] = useState(null);
 
+  /** /vcenters 결과 적용 — 실패는 vcxErr 로(직전 목록 유지), 배열이 아니면 '형식을 읽지 못함' 이다(0개로 바꾸지 않는다). */
+  const applyVcList = (r) => {
+    const st = vcListState(r);
+    if (st.list) { setVcx(st.list); setVcxErr(null); } else setVcxErr(st.err);
+  };
   const load = async () => {
     try {
       const [u, p, vc] = await Promise.all([
         fetchJson('/admin/users'),
         fetchJson('/admin/permissions').catch(() => null),
-        fetchJson('/vcenters').catch(() => []),
+        fetchJson('/vcenters').then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })),
       ]);
       setData(u);
       if (p) { setPerms(p); setPermDirty(false); }
-      setVcx(Array.isArray(vc) ? vc : []);
+      applyVcList(vc);
       setError(null);
     } catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); }, []);
+  // vCenter 목록만 다시 읽는다(범위 편집 창의 '다시 읽기') — 실패하면 직전 목록을 지우지 않는다.
+  const reloadVcx = async () => {
+    setVcxErr(null);
+    applyVcList(await fetchJson('/vcenters').then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })));
+  };
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -534,7 +575,8 @@ export default function UserAdmin() {
           </div>
           <div style={{ fontWeight: 700, fontSize: 13, margin: '6px 0' }}>vCenter</div>
           <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, padding: 10 }}>
-            {vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
+            {vcxErr && <VcListError err={vcxErr} selected={scopeEdit.vcenters} onRetry={reloadVcx} stale={vcx.length > 0} />}
+            {!vcxErr && vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
             {vcx.map((v) => (
               <label key={v.id} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
                 <input type="checkbox" checked={scopeEdit.vcenters.includes(v.id)}
@@ -550,7 +592,8 @@ export default function UserAdmin() {
             <b> 변경 작업이 선택한 vCenter 로 제한</b>됩니다(조회 범위와의 교집합만 유효 — 서버에서 강제).
           </div>
           <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, padding: 10 }}>
-            {vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
+            {vcxErr && <VcListError err={vcxErr} selected={scopeEdit.writeVcenters} onRetry={reloadVcx} stale={vcx.length > 0} />}
+            {!vcxErr && vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
             {vcx.map((v) => (
               <label key={v.id} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
                 <input type="checkbox" checked={scopeEdit.writeVcenters.includes(v.id)}

@@ -267,7 +267,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰. **엣지별 개별 토큰**을 발급했다면 그 엣지에는 개별 토큰 값을 넣는다(자기 데이터만 접근) |
 | `CENTRAL_REQUIRE_AGENT_TOKEN` | `false` | `true`면 공유 `CENTRAL_TOKEN` 거부 — 엣지별 개별 토큰만 허용(전 엣지 이관 후 권장) |
 | `WAN_TLS_INSECURE` | `false`(검증 ON) | 중앙↔엣지 HTTPS 인증서 검증. **자체서명 HTTPS 엣지**가 있는 노드만 `true`(대부분 엣지는 http라 무영향) |
-| `AGENT_NAME` / `CENTRAL_URL` / `AGENT_SCAN_INTERVAL_MS` | hostname / — / `3600000` | 에이전트 이름·중앙 주소·스캔 주기 |
+| `AGENT_NAME` / `CENTRAL_URL` / `AGENT_SCAN_INTERVAL_MS` | hostname / — / `3600000` | 에이전트 이름·중앙 주소·iDRAC 위임 스캔 주기(IP 스캔은 중앙 IP관리 주기 우선 — v2.731) |
 | `AGENT_PUSH_INVENTORY` / `AGENT_PUSH_FLEET` | `false` / `true` | 엣지→중앙 vCenter 인벤토리 push · 베어메탈 push(엣지 기본 on) |
 | `CENTRAL_FLEET_TTL_MS` / `CENTRAL_FLEET_MAX_AGENTS` | `1800000` / `500` | 중앙의 엣지 베어메탈 만료시간 · 에이전트 상한 |
 | `AGENT_PING_POLL_MS` / `AGENT_LOGQ_POLL_MS` / `AGENT_CAPTURE_POLL_MS` | `4000` | 위임 ping·로그조회·캡처 워커 폴링 주기 |

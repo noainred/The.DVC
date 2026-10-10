@@ -3,6 +3,15 @@ import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
 import { policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10
+import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
+
+// 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
+const baseKey = (v) => {
+  const t = String(v ?? '').trim().toLowerCase();
+  let e = t.length;
+  while (e > 0 && t.charCodeAt(e - 1) === 47) e--; // 끝 '/' — 정규식 /\/+$/ 는 긴 입력에서 O(n²)(v2.602 규약)
+  return t.slice(0, e);
+};
 
 function Row({ label, children }) {
   return (
@@ -109,7 +118,9 @@ export default function Upgrade() {
       if (pollPatch !== undefined) body.pollIntervalMs = pollPatch;
       if (form.token) body.token = form.token;
       const r = await putJson('/upgrade/settings', body);
-      setMsg({ action: 'save', r: { ok: r.ok, version: undefined } });
+      // v2.731(A3-01 ①): 서버가 저장 토큰을 폐기했으면 '성공' 대신 그 사실을 말한다(폐기 사유는 서버 skipped 문구).
+      //   putJson 은 400 을 던지지 않고 본문을 돌려준다 — 실패 사유(reason)도 함께 싣는다.
+      setMsg({ action: 'save', r: { ok: r.ok, reason: r.reason, note: droppedSecretNote(r) } });
       setForm((f) => ({ ...f, token: '' }));
       if (r.ok && pollPatch !== undefined) setPollInit(form.pollMinutes);
       await load();
@@ -124,6 +135,8 @@ export default function Upgrade() {
   const setChk = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
 
   const check = status.lastCheck;
+  // v2.731(A3-01 ①): 저장 토큰이 있는데 주소를 바꿨고 새 토큰을 넣지 않았다 → 저장하면 서버가 그 토큰을 폐기한다(미리 말한다).
+  const tokenWillDrop = !!status.hasToken && !form.token && baseKey(form.remoteBase) !== baseKey(status.remoteBase);
   const result = status.lastResult;
   const newer = check && (check.watch?.available || check.remote?.available);
 
@@ -219,7 +232,9 @@ export default function Upgrade() {
             </label>
             <label>토큰 (사설 레포)
               <input className="input" type="password" value={form.token} onChange={setF('token')}
-                placeholder={status.hasToken ? '저장됨 (비우면 유지)' : '선택'} />
+                placeholder={status.hasToken ? (tokenWillDrop ? '주소를 바꾸면 저장된 토큰은 폐기됩니다' : '저장됨 (비우면 유지)') : '선택'} />
+              {tokenWillDrop && <span style={{ fontSize: 11.5, color: '#fbbf24', display: 'block', marginTop: 4, whiteSpace: 'normal' }}>
+                원격 소스 주소가 바뀌어 저장된 토큰은 새 주소로 보내지 않습니다 — 이 주소에 토큰이 필요하면 다시 입력하세요.</span>}
             </label>
             <label>확인 주기 (분, 0=끔 · 1~10080분 — 범위 밖은 서버가 맞춥니다)
               <input className="input" type="number" min="0" max="10080" value={form.pollMinutes} onChange={setF('pollMinutes')} />
@@ -263,9 +278,9 @@ export default function Upgrade() {
 
         {msg && (
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
-            background: msg.r.ok ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
-            color: msg.r.ok ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
-            <b>{msg.action}</b> · {msg.r.ok
+            background: msg.r.ok && !msg.r.note ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
+            color: msg.r.ok && !msg.r.note ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
+            <b>{msg.action}</b> · {msg.r.ok && msg.r.note ? msg.r.note : msg.r.ok
               ? `성공${msg.r.version ? ` — v${msg.r.from || '?'} → v${msg.r.version}` : ''}${msg.r.backup ? ` (백업: ${msg.r.backup})` : ''}${msg.r.restarting ? ' · 재시작 중' : ''}`
               : (msg.r.reason || '실패')}
           </div>

@@ -27,6 +27,7 @@ import { trimTrailingSlashes } from '../util/trimSlashes.js';
 import { reqTimeoutMs } from '../util/envTimeout.js';
 import { parseThermalTemp, parseThermalFan, parseRedfishSensor } from './sensorDetail.js'; // v2.659: 센서 상세(임계값·상태)
 import { dedupNicPorts } from './nicPorts.js'; // v2.728: 같은 물리 포트(NetworkPorts·Ports 두 URL) 중복 제거
+import { partHealthRollup } from './invView.js'; // v2.731 A2-02: 하위 시스템 롤업 = 원소 partState(못 읽음을 OK 로, Critical 을 Warning 으로 접지 않는다)
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
@@ -702,7 +703,8 @@ export async function fetchInventory(entry) {
         inv.powerCap = { limitWatts: num(pc.PowerLimit.LimitInWatts), allocatedWatts: num(pc.PowerAllocatedWatts), metricWatts: num(pc.PowerConsumedWatts) };
       }
     }
-    if (inv.psus.length) inv.health.psu = inv.psus.some((p) => p.health && p.health !== 'OK') ? 'Warning' : 'OK';
+    // v2.731 A2-02: 예전 `some(p => p.health && p.health !== 'OK') ? 'Warning' : 'OK'` 는 못 읽은 PSU 를 OK, Critical 을 Warning 으로 접었다.
+    if (inv.psus.length) inv.health.psu = partHealthRollup(inv.psus).word;
     inv.collections.psus = 'ok'; // Chassis GET 성공 — 개별 Chassis/Power 실패(continue)는 컬렉션을 뒤집지 않는다
   } catch { inv.collections.psus = 'failed'; /* psu optional */ }
 
@@ -748,7 +750,7 @@ export async function fetchInventory(entry) {
           } catch { /* skip drive */ }
         }
       }
-      if (inv.disks.length) inv.health.storage = inv.disks.some((d) => d.predictiveFailure || (d.health && d.health !== 'OK')) ? 'Warning' : 'OK';
+      if (inv.disks.length) inv.health.storage = partHealthRollup(inv.disks).word; // v2.731 A2-02(예측 실패는 ok→warn 만 — classify.js 규칙)
       // 한 GET(Storage)에서 두 컬렉션을 읽으므로 둘을 같이 찍는다.
       inv.collections.disks = 'ok';
       inv.collections.storageControllers = 'ok';
@@ -823,7 +825,7 @@ export async function fetchInventory(entry) {
         }
         inv.gpus.push({ name: p.Name || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '', health: p.Status?.Health || '', state: p.Status?.State || '' });
       }
-      if (inv.gpus.length) inv.health.gpu = inv.gpus.some((g) => g.health && g.health !== 'OK') ? 'Warning' : 'OK';
+      if (inv.gpus.length) inv.health.gpu = partHealthRollup(inv.gpus).word; // v2.731 A2-02
       // Processors 한 GET 에서 GPU 와 CPU 소켓을 함께 읽으므로 둘을 같이 찍는다.
       inv.collections.gpus = 'ok';
       inv.collections.cpus = 'ok';

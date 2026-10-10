@@ -17,6 +17,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
+import { accessMoved } from '../util/secretCarry.js'; // v2.731(점검 A3-01 ②): 접속처가 바뀌면 저장 비밀번호를 승계하지 않는다
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -71,6 +72,30 @@ export function getAssignment(agentName) {
   return loadAssignments().find((a) => String(a.agent).trim().toLowerCase() === key) || null;
 }
 
+/**
+ * 스캔 대역 비교 키(순수) — 줄·쉼표로 나눈 항목을 정규화한 집합. 순서·공백·대소문자·주석('#' 뒤)만 다른 입력은 같은 대역이다
+ * (idrac/iprange.js expandIpList 와 같은 구분자 — 줄 · 쉼표. CSV 가져오기는 ';'·'|' 를 줄로 바꿔 둔다).
+ */
+export function ipsKey(v) {
+  const items = [];
+  for (const line of String(v ?? '').split(/\r?\n/)) {
+    const body = line.split('#')[0];
+    for (const t of body.split(/[,;|]/)) { const k = t.replace(/\s+/g, '').toLowerCase(); if (k) items.push(k); }
+  }
+  return [...new Set(items)].sort().join(',');
+}
+
+/** 폐기 안내(응답 skipped·passwordDropped 의 reason) — 엣지는 다음 배정 조회에서 빈 비밀번호를 받는다. */
+export const ASSIGN_PASSWORD_DROPPED_REASON = 'IP 대역·iDRAC 계정이 바뀌어 저장된 iDRAC 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(그 전까지 이 에이전트의 스캔은 iDRAC 로그인에 실패합니다).';
+
+/**
+ * 반환 [entry, err, dropped]. dropped = 기존 비밀번호를 승계하지 않고 버렸는가.
+ * v2.731(점검 A3-01 ②): 대역(ips — 정규화 집합)·계정(username)이 바뀌었는데 새 비밀번호가 없으면 기존 비밀번호를 승계하지 않는다
+ *   (server/CLAUDE.md '접속처가 바뀌면 저장 비밀을 승계하지 않는다 — 자격증명 스토어 전부'. 형제 idrac/scanRanges.js 는 v2.606
+ *   LEFT2606-02 에 같은 결함을 고쳤는데 이 스토어만 빠졌다). 예전에는 수정 창(비밀번호 칸이 빈 채로 열린다)에서 대역만 바꿔
+ *   저장하면 엣지가 새 대역의 Redfish 응답 호스트마다 저장 iDRAC 비밀번호로 로그인했다(재현). CSV merge 가져오기도 이 함수를 지난다.
+ *   대역 '추가' 도 대상이다 — 추가된 대역이 곧 새 접속처다.
+ */
 function normalize(body, existing = null) {
   const e = existing ? { ...existing } : {};
   const agent = String(body.agent ?? e.agent ?? '').trim();
@@ -79,11 +104,14 @@ function normalize(body, existing = null) {
   if (!agent) return [null, '에이전트 이름(agent)은 필수입니다.'];
   if (!ips) return [null, 'IP 대역(ips)은 필수입니다.'];
   if (!username) return [null, 'iDRAC 계정(username)은 필수입니다.'];
+  const newPw = body.password ? String(body.password) : '';
+  const moved = Boolean(existing) && (ipsKey(e.ips) !== ipsKey(ips) || accessMoved({ username: e.username || '' }, { username }, ['username']));
+  const dropped = !newPw && moved && Boolean(e.password);
   return [{
     agent, ips, username,
-    password: body.password ? String(body.password) : e.password || '',
+    password: newPw || (dropped ? '' : e.password || ''),
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
-  }, null];
+  }, null, dropped];
 }
 
 export function addAssignment(body) {
@@ -99,10 +127,11 @@ export function updateAssignment(agent, body) {
   const list = loadAssignments();
   const idx = list.findIndex((a) => a.agent.toLowerCase() === String(agent).toLowerCase());
   if (idx === -1) return { ok: false, reason: `없는 에이전트: ${agent}` };
-  const [entry, err] = normalize({ ...body, agent: list[idx].agent }, list[idx]);
+  const [entry, err, dropped] = normalize({ ...body, agent: list[idx].agent }, list[idx]);
   if (err) return { ok: false, reason: err };
   list[idx] = entry; save(list);
-  return { ok: true, assignment: redact(entry) };
+  // v2.731(A3-01 ②): 폐기 사실은 응답이 말한다(v2.607 droppedSecrets 규약 — 화면 views/droppedSecretText.js 가 읽는다).
+  return { ok: true, assignment: redact(entry), ...(dropped ? { droppedSecrets: ['password'], skipped: [{ field: 'password', reason: ASSIGN_PASSWORD_DROPPED_REASON }] } : {}) };
 }
 
 export function removeAssignment(agent) {
@@ -154,10 +183,12 @@ export function importAssignments(incoming, mode = 'merge') {
   const result = mode === 'replace' ? [] : [...existing];
   let added = 0, updated = 0;
   const skipped = [];
+  const passwordDropped = []; // v2.731(A3-01 ②): merge 로 대역·계정이 바뀌어 비밀번호를 승계하지 않은 에이전트(화면 passwordDroppedLines)
   for (const raw of incoming) {
     const base = mode === 'replace' ? null : existing.find((a) => a.agent.toLowerCase() === String(raw?.agent || '').toLowerCase());
-    const [entry, err] = normalize(raw || {}, base);
+    const [entry, err, dropped] = normalize(raw || {}, base);
     if (err) { skipped.push({ agent: raw?.agent || '(이름없음)', reason: err }); continue; }
+    if (dropped) passwordDropped.push({ name: entry.agent, reason: ASSIGN_PASSWORD_DROPPED_REASON });
     const idx = result.findIndex((a) => a.agent.toLowerCase() === entry.agent.toLowerCase());
     if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
   }
@@ -166,7 +197,7 @@ export function importAssignments(incoming, mode = 'merge') {
     return { ok: false, mode, added: 0, updated: 0, skipped, total: existing.length, reason: '가져올 유효한 할당이 없어 전체 교체를 취소했습니다(기존 유지).' };
   }
   save(result);
-  return { ok: true, mode, added, updated, skipped, total: result.length };
+  return { ok: true, mode, added, updated, skipped, total: result.length, ...(passwordDropped.length ? { passwordDropped } : {}) };
 }
 
 // ---- results --------------------------------------------------------------

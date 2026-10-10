@@ -13,10 +13,14 @@
  *   · 정책 변경 — 위 + 설정 소유 계정(requireSettingsOwner). observe 로 바꾸면 처음 보는 장비가 관찰로 통과하므로 보안 정책 등급이다.
  *   · OTP 등록 전 세션은 /api/admin 마운트의 requireEnrolled 가 막는다 · 데모 계정은 READ_DENY('/api/admin/security') 가 막는다.
  * 모든 변경은 logAudit(지문은 공개 정보라 기록한다 — 비밀이 아니다).
+ *
+ * v2.731(A1-01): 한 장비(주소·포트)에 신뢰 지문을 여럿 둘 수 있다(로드밸런서 뒤 서버마다 다른 인증서·호스트키). 승인은 기본이 **추가**이고
+ *   본문 `replace:true` 일 때만 교체(키 교체 — 그 지문만 남긴다). 개별 지문 회수는 /reject 에 그 지문을 준다(응답 revoked).
+ * v2.731(A1-02): GET 응답 `node`(이 포탈이 엣지인가·이름) — 화면이 '엣지가 접속하는 장비는 그 엣지 포탈에서 승인' 을 말한다.
  */
 import {
-  PEER_KINDS, PEER_MODES, normalizeFingerprint, normalizePeerHost, listPeers, peerTrustStatus,
-  approvePeer, rejectPeer, removePeer, approveAllObserved, setPeerPolicy,
+  PEER_KINDS, PEER_MODES, TRUSTED_MAX, normalizeFingerprint, normalizePeerHost, listPeers, peerTrustStatus,
+  approvePeer, rejectPeer, removePeer, approveAllObserved, setPeerPolicy, peerApproveNode,
 } from '../../security/peerTrust.js';
 import { tlsTrustStatus } from '../../security/tlsTrust.js';
 import { logAudit } from '../../audit.js';
@@ -52,7 +56,9 @@ export function registerPeerTrust(adminRouter) {
     let tls = null;
     let tlsError = null;
     try { tls = tlsTrustStatus(); } catch (e) { tlsError = String(e?.message || e).slice(0, 200); }
-    res.json({ ok: true, status: peerTrustStatus(), peers: listPeers({ kind }), kinds: PEER_KINDS, modes: PEER_MODES, tls, tlsError });
+    let node = null;
+    try { node = peerApproveNode(); } catch { node = null; }
+    res.json({ ok: true, status: peerTrustStatus(), peers: listPeers({ kind }), kinds: PEER_KINDS, modes: PEER_MODES, trustedMax: TRUSTED_MAX, node, tls, tlsError });
   });
 
   adminRouter.post('/security/peer-trust/approve', adminOnly, fleetOnly, (req, res) => {
@@ -65,12 +71,20 @@ export function registerPeerTrust(adminRouter) {
     if (b.fp != null && b.fp !== '' && !normalizeFingerprint(t.kind, b.fp)) {
       return res.status(400).json({ ok: false, reason: t.kind === 'ssh' ? '지문 형식은 SHA256:<base64 43자> 입니다.' : '지문 형식은 SHA-256 16진 64자리(콜론 구분 가능)입니다.', field: 'fp' });
     }
-    const before = listPeers({ kind: t.kind }).find((e) => e.host === normalizePeerHost(t.host) && e.port === t.port) || null;
-    const r = approvePeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req), note: typeof b.note === 'string' ? b.note : '' });
-    if (!r.ok) return res.status(400).json({ ok: false, reason: r.error === 'nothing-to-approve' ? '승인할 지문이 없습니다(관찰·대기 지문이 없으면 지문을 직접 입력하세요).' : r.error, code: r.error });
-    const prev = before?.trusted?.fp && before.trusted.fp !== r.fp ? before.trusted.fp : null;
+    if (b.replace != null && typeof b.replace !== 'boolean') return res.status(400).json({ ok: false, reason: 'replace 는 true/false 입니다.', field: 'replace' });
+    const replace = b.replace === true;
+    const r = approvePeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req), note: typeof b.note === 'string' ? b.note : '', replace });
+    if (!r.ok) {
+      const reason = r.error === 'nothing-to-approve' ? '승인할 지문이 없습니다(관찰·대기 지문이 없으면 지문을 직접 입력하세요).'
+        : r.error === 'trusted-full' ? `이 장비에는 승인 지문이 이미 ${r.max}개입니다(상한) — 쓰지 않는 지문을 거부(회수)한 뒤 다시 승인하거나 교체 승인을 쓰세요.`
+          : r.error;
+      return res.status(400).json({ ok: false, reason, code: r.error });
+    }
+    const how = replace
+      ? (r.replaced.length ? ` (이전 ${r.replaced.join(', ')} → 교체)` : ' (교체 — 이전 신뢰 지문 없음)')
+      : r.already ? ' (이미 승인된 지문)' : ` (추가 승인 — 신뢰 지문 ${r.trustedCount}개)`;
     audit(req, '장비 신뢰 지문 승인', `${t.kind} ${t.host}:${t.port}`,
-      `${r.fp}${prev ? ` (이전 ${prev} → 교체)` : ''}${r.matchedPresented === false ? ' · 장비가 내민 지문과 다른 값을 미리 승인' : ''}`);
+      `${r.fp}${how}${r.matchedPresented === false ? ' · 장비가 내민 지문과 다른 값을 미리 승인' : ''}`);
     res.json({ ok: true, ...r, status: peerTrustStatus() });
   });
 
@@ -81,7 +95,7 @@ export function registerPeerTrust(adminRouter) {
     if (b.fp != null && b.fp !== '' && !normalizeFingerprint(t.kind, b.fp)) return res.status(400).json({ ok: false, reason: '지문 형식이 올바르지 않습니다.', field: 'fp' });
     const r = rejectPeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req) });
     if (!r.ok) return res.status(400).json({ ok: false, reason: '거부할 지문이 없습니다.', code: r.error });
-    audit(req, '장비 신뢰 지문 거부', `${t.kind} ${t.host}:${t.port}`, r.fp);
+    audit(req, '장비 신뢰 지문 거부', `${t.kind} ${t.host}:${t.port}`, r.revoked ? `${r.fp} (신뢰 목록에서 회수 — 남은 신뢰 지문 ${r.trustedCount}개)` : r.fp);
     res.json({ ok: true, ...r, status: peerTrustStatus() });
   });
 

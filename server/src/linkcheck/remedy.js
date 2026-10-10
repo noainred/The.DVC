@@ -189,7 +189,9 @@ export function resultFindings(target = {}, verdict = null, steps = {}) {
     if (d < 0) out.push(find('cert-expired', 'blocker', { days: d, subject: t(steps.tls.subject) }));
   }
   if (steps?.tls && steps.tls.authorized === false && t(steps.tls.authError)) {
-    // 이 현장은 자체서명이 흔하다 — **info** 다(우리는 검증을 끄고 접속한다). 사실만 알린다.
+    // 이 현장은 자체서명이 흔하다 — **info** 다. 사실만 알린다. ⚠ v2.731: '검증을 끄고 접속한다' 는 더는 사실이 아니다 —
+    //   장비 TLS 는 장비 신뢰(v2.730 S-02), 중앙↔엣지는 WAN 신뢰(S-09)가 판정한다. 이 점검(stepTls)만 판정하지 않는다.
+    //   (현재 유일한 호출부 routes/api/linkCheck.js 의 요약 행에는 authorized 가 없어 이 분기는 도달하지 않는다 — 정직 기록.)
     out.push(find('cert-untrusted', 'info', { authError: t(steps.tls.authError), issuer: t(steps.tls.issuer) }));
   }
   if (steps?.ssh?.ok && t(steps.ssh.banner)) out.push(find('ssh-banner', 'info', { banner: t(steps.ssh.banner).slice(0, 120) }));

@@ -82,7 +82,8 @@ test('② 새 설치 = enforce — 모르는 지문 거부 · 승인 뒤 통과 
   assert.match(au[0].detail, new RegExp(`${FP_A.slice(0, 20)}.*${FP_B.slice(0, 20)}`));
   assert.equal(pt.peerTrustStatus().kinds.ssh.counts.pendingChanged, 1);
 
-  const ap2 = pt.approvePeer('ssh', 'sw1', 22, FP_B, { by: 'admin1' });
+  // v2.731(A1-01): 승인은 기본이 '추가'(로드밸런서 뒤 여러 서버) — 키 교체는 replace 로 명시한다.
+  const ap2 = pt.approvePeer('ssh', 'sw1', 22, FP_B, { by: 'admin1', replace: true });
   assert.equal(ap2.ok, true);
   const e1 = pt.listPeers({ kind: 'ssh' })[0];
   assert.equal(e1.trusted.fp, FP_B); assert.equal(e1.trusted.prevFp, FP_A); assert.equal(e1.pending, undefined);
@@ -241,7 +242,7 @@ test('⑤-b 승인은 confirmVerified 필수 · 형식 검사 · 감사 로그(�
     r = await call('/approve', 'POST', { kind: 'ssh', host: 'sw9', port: 22, fp: 'nope', confirmVerified: true });
     assert.equal(r.body.field, 'fp');
     const before = auditLines().length;
-    r = await call('/approve', 'POST', { kind: 'ssh', host: 'sw9', port: 22, confirmVerified: true });
+    r = await call('/approve', 'POST', { kind: 'ssh', host: 'sw9', port: 22, replace: true, confirmVerified: true }); // v2.731: 교체는 명시
     assert.equal(r.status, 200); assert.equal(r.body.fp, FP_B);
     const a = auditLines().slice(before).find((x) => x.action === '장비 신뢰 지문 승인');
     assert.ok(a, '승인은 감사 로그에 남는다');

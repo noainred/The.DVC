@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
-import { checkPeer } from '../security/peerTrust.js';
+import { checkPeer, peerApproveWhere } from '../security/peerTrust.js';
 // v2.605(감사 TIM2605-04 — 재현): 'Number(env) || 기본값' 은 음수·2^31 초과를 통과시켜 setTimeout 이 1ms 가 됐다 —
 //   SSH_EXEC_TIMEOUT_MS=3000000000 이면 모든 SSH 수집(스토리지·SAN·PDU·베어메탈)의 exec 가 2ms 만에 '타임아웃' 이었다.
 //   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
@@ -65,7 +65,7 @@ export function sshHostKeyAlgo(key) {
 
 const HOSTKEY_REASON_TEXT = Object.freeze({
   unknown: '아직 승인되지 않은 장비 키입니다',
-  changed: '승인(또는 관찰)된 키와 다릅니다 — 장비 키가 교체됐거나 다른 서버로 연결됐을 수 있습니다',
+  changed: '승인(또는 관찰)된 키와 다릅니다 — 장비 키가 교체됐거나 다른 서버로 연결됐을 수 있습니다(같은 주소 뒤에 서버가 여럿인 로드밸런서면 서버마다 지문을 확인해 추가 승인합니다)',
   rejected: '관리자가 거부한 키입니다',
   'not-approved': '관찰만 된 키입니다(정책이 승인된 지문만 허용으로 바뀌었습니다)',
   'bad-fingerprint': '서버가 내민 키를 읽지 못했습니다',
@@ -99,12 +99,18 @@ export function makeSshHostVerifier(host, port, onResult) {
   };
 }
 
-/** 호스트키 거부 오류 — 인증 실패와 구분되는 code·문구(머리말 ⚠⚠). */
+/**
+ * 호스트키 거부 오류 — 인증 실패와 구분되는 code·문구(머리말 ⚠⚠).
+ * v2.731(A1-02): 승인할 노드를 말한다 — 엣지가 만든 이 문구는 스냅샷 오류로 중앙 화면에 그대로 실리는데, 승인 저장소는 노드마다
+ * 따로라 중앙에서는 승인할 수 없다(peerTrust.js peerApproveWhere — 엣지 이름은 인증 판정 낱말이 없을 때만 싣는다).
+ */
 export function sshHostKeyError(r = {}) {
   const why = HOSTKEY_REASON_TEXT[r.reason] || HOSTKEY_REASON_TEXT.unknown;
+  let where = { text: '설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)', note: '' };
+  try { where = peerApproveWhere(); } catch { /* 문구만 덜 구체적이 된다 — 거부 판정은 그대로 */ }
   const err = new Error(
     `SSH 호스트키 확인 거부 — 이 장비가 내민 키(${r.algo || '종류 미상'} ${r.fp || '지문 없음'})는 ${why}. 비밀번호는 보내지 않았습니다. `
-    + '장비 콘솔 등 별도 경로로 지문을 확인한 뒤 관리자가 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)에서 승인해야 연결됩니다. '
+    + `장비 콘솔 등 별도 경로로 지문을 확인한 뒤 관리자가 ${where.text}에서 승인해야 연결됩니다${where.note ? `(${where.note})` : ''}. `
     + `[${SSH_HOSTKEY_ERROR_CODE}]`,
   );
   err.code = SSH_HOSTKEY_ERROR_CODE;

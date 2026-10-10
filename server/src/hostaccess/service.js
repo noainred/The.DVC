@@ -13,6 +13,14 @@ import { config } from '../config.js';
 import { loadHostAccess, saveHostAccess } from './settings.js';
 import { normalizeSettings, parseListAll, planCommands, fingerprint } from './render.js';
 import * as realExec from './exec.js';
+import { listeningPortalPorts } from '../util/httpsServer.js';
+
+/**
+ * v2.731(G2b A4-02): 관리 대상·자기 잠금 검사에 넣는 포탈 포트 = **실제로 듣는 포트 전부**(util/httpsServer.js 하나가 판정).
+ *   `TLS_PORT ≠ PORT` 로 HTTPS 만 열면 PORT 는 듣지 않는다 — config.port 로 허용목록을 만들면 실제 포탈 포트가 모든 출처에
+ *   열린 채 남는다(재현: web.ports ['4000'] · 4443/tcp 그대로). HTTP·HTTPS 를 함께 열면(TLS_HTTP_ALSO) 둘 다 관리한다.
+ */
+const portalPorts = () => listeningPortalPorts(config.port);
 
 let deps = realExec;
 export function _setExec(e) { deps = e || realExec; }
@@ -59,16 +67,18 @@ export async function hostAccessStatus({ requesterIp = '' } = {}) {
   const engine = await readEngine();
   let sshdActive = null;
   try { sshdActive = await deps.sshdActive(); } catch { sshdActive = null; }
+  const ports = portalPorts();
   return {
     ok: true, draft: st.draft, applied: st.applied, pending: st.pending, engine, sshdActive, requesterIp,
-    portalPort: config.port, busy,
+    // portalPort(하나)는 예전 화면 호환 — 광고 포트(TLS 면 TLS_PORT). 관리 대상은 portalPorts 전부다.
+    portalPort: ports[0], portalPorts: ports, busy,
     dirty: st.applied ? fingerprint(st.draft) !== st.applied.fingerprint : true,
   };
 }
 
 /** 초안 저장(적용 아님). */
 export function saveDraft(input) {
-  const { settings, errors } = normalizeSettings(input, { portalPort: config.port });
+  const { settings, errors } = normalizeSettings(input, { portalPorts: portalPorts() });
   if (errors.length) return { ok: false, errors, settings };
   saveHostAccess({ draft: settings });
   return { ok: true, settings };
@@ -76,7 +86,7 @@ export function saveDraft(input) {
 
 /** 계획(dry-run): 현재 존 상태와 초안을 비교 — 실행하지 않는다. */
 export async function planHostAccess(input, { requesterIp = '' } = {}) {
-  const { settings, errors } = normalizeSettings(input, { portalPort: config.port });
+  const { settings, errors } = normalizeSettings(input, { portalPorts: portalPorts() });
   const engine = await readEngine();
   if (!engine.ok) return { ok: false, errors: [...errors, `방화벽 엔진 사용 불가: ${engine.detail || engine.reason}`], engine, settings };
   const prevRich = loadHostAccess().applied?.rich || [];

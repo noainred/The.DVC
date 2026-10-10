@@ -827,6 +827,19 @@ export function parseCounters(text) {
 }
 
 /**
+ * 두 표본 시각의 간격이 누적 카운터 차이에 쓸 만한가 — 0 초과이고 (주기 × 3 + 직전 실행 소요) 이하.
+ * portDelta(포트)와 cpuPctFromCounters(CPU)가 **같은 한계**를 쓴다(v2.731 A2-04 — 한 장비 안에서 CPU 만 긴 공백 평균을 내지 않게).
+ * 시각을 못 읽었으면 false.
+ */
+export function counterGapOk(prevAt, curAt, intervalMs, slackMs = 0) {
+  if (prevAt == null || curAt == null) return false;
+  const gapMs = Number(curAt) - Number(prevAt);
+  const slack = Number(slackMs);
+  const lim = Math.max(1, Number(intervalMs) || 0) * 3 + (Number.isFinite(slack) && slack > 0 ? slack : 0);
+  return Number.isFinite(gapMs) && gapMs > 0 && gapMs <= lim;
+}
+
+/**
  * 두 표본 사이 델타(순수 — 테스트 고정).
  *  · 첫 표본(prev 없음) → null  · 음수 델타(카운터 리셋) → null  · 간격이 0 이하거나 주기의 3배 초과 → null
  *  · 사용률은 **방향별** — in_bps / speed, out_bps / speed(rx+tx 합을 한 방향 속도로 나누지 않는다 — v2.590 F9).
@@ -840,10 +853,8 @@ export function parseCounters(text) {
 export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
   const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, reason: null };
   if (!prev || !prev.c) { out.reason = 'first'; return out; }
-  const gapMs = Number(cur?.at) - Number(prev.at);
-  const slack = Number(slackMs);
-  const lim = Math.max(1, Number(intervalMs) || 0) * 3 + (Number.isFinite(slack) && slack > 0 ? slack : 0);
-  if (!Number.isFinite(gapMs) || gapMs <= 0 || gapMs > lim) { out.reason = 'gap'; return out; }
+  if (!counterGapOk(prev.at, cur?.at, intervalMs, slackMs)) { out.reason = 'gap'; return out; }
+  const gapMs = Number(cur.at) - Number(prev.at);
   const sec = gapMs / 1000;
   const d = (a, b) => (a == null || b == null ? null : (b - a < 0 ? null : b - a));
   const inO = d(prev.c.inOctets, cur.c.inOctets);
@@ -981,9 +992,19 @@ export function parseCpu(text) {
   return { pct: null, counters: { busy: total - idle, total }, keys };
 }
 
-/** 누적 CPU 카운터 두 개 → 사용률(첫 표본·리셋·간격 0 이면 null — rates.js 규약). */
-export function cpuPctFromCounters(prev, cur) {
+/**
+ * 누적 CPU 카운터 두 개 → 사용률(첫 표본·리셋·간격 0 이면 null — rates.js 규약).
+ * ⚠ v2.731 A2-04: 표본 시각을 가진 호출부(poller.applySys)는 **`{ intervalMs, slackMs }` 와 prev.at·cur.at** 을 넘긴다 —
+ *   간격이 portDelta 와 같은 한계(주기 × 3 + 직전 실행 소요)를 넘으면 null. 스트리밍이 끊겼다 돌아온 장비의 첫 표본이
+ *   '몇 시간 평균' 을 지금 값처럼 적재하던 것(같은 장비의 포트 처리량은 같은 주기에 null)을 막는다.
+ *   opts.intervalMs 를 넘기지 않는 호출(단위 테스트)만 간격 판정을 하지 않는다.
+ * @param {{busy:number,total:number,at?:number}|null} prev
+ * @param {{busy:number,total:number,at?:number}|null} cur
+ * @param {{intervalMs?:number, slackMs?:number}} [opts]
+ */
+export function cpuPctFromCounters(prev, cur, opts = {}) {
   if (!prev || !cur) return null;
+  if (opts && opts.intervalMs != null && !counterGapOk(prev.at, cur.at, opts.intervalMs, opts.slackMs)) return null;
   const dt = cur.total - prev.total; const db = cur.busy - prev.busy;
   if (!(dt > 0) || db < 0) return null;
   const p = (db / dt) * 100;

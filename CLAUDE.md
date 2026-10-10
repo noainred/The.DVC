@@ -1055,6 +1055,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       https 를 http 로 내리지 못한다. 포탈 직접 TLS 는 `util/httpsServer.js`(TLS_CERT_FILE·TLS_KEY_FILE, 틀리면 fail-closed · 인증서 재로드 · TLS_HTTP_ALSO 전환기) —
       index.js 의 `server` 는 리스너 묶음이고 게이트웨이·upgrade catch-all·타임아웃은 리스너마다 건다. 사설 CA 는 `WAN_TLS_CA_FILE`(기본 신뢰 저장소에 덧붙인다).
       resilientFetch 는 https→http 리다이렉트를 따라가지 않는다. 자가진단 `wan-transport`.
+  - ⚠⚠ **v2.731 — 점검 1회차(6축 분석 → 반증 → 9그룹 수정) 확정분**(사용자 요청 "전체 소스 분석해서 버그 잡고 프로그램 개선하는 작업 5번" 의 1회차.
+    상세 `docs/AUDIT-2026-10-10.md`, 회귀 `server/test/audit2731*` + 웹 `audit2731*` — 그룹별 변이 검증):
+    · ⚠⚠ **장비 신뢰는 지문 '목록'이다(상한 8, 승인은 추가가 기본, 교체는 `replace:true`)** — 이중화 SP·VIP 뒤 장비는 인증서·호스트키가 둘 이상이라 하나만 기억하면
+      관찰 모드에서도 번갈아 거부됐다(A1-01). 저장은 첫 지문 `trusted`(객체) + 나머지 `trustedMore` — **`trusted` 를 배열로 바꾸지 말 것**(되돌림 설치가 전 장비 거부).
+      거부 문구는 승인할 노드를 말한다(엣지면 그 엣지 이름). 처음 보는 장비 기록은 2초 묶음 저장, 바뀐 지문·관리자 동작은 즉시.
+    · ⚠⚠ **접속처가 바뀌면 저장 비밀을 승계하지 않는다 — 두 곳 더**(A3-01, v2.503 S-2 의 누락): 업그레이드 원격 토큰(remoteBase 변경)·위임 IP 스캔 할당 비밀번호
+      (대역 집합·계정 변경). env 위에 덮는 설정은 폐기를 `delete` 가 아니라 저장값 `''` 로 한다(delete 면 env 비밀이 되살아난다). 엣지는 비밀번호가 빈 할당을
+      스캔하지 않는다(`no-password` — 빈 비밀번호로 대역 전체에 로그인하면 계정 잠금 위험).
+    · **중앙↔엣지 클라이언트가 자체 Agent 를 만들면 `resilientFetch.wanTlsConnectOptions()` 를 통째로**(A4-01 — 사설 CA 엣지 거짓 tls-fail) ·
+      **'포탈 포트' 는 `httpsServer.listeningPortalPorts()`**(A4-02 — HTTPS 전용 구성에서 config.port 는 듣지 않는 포트) ·
+      **엣지가 중앙 주기를 따르는 워커는 '재확인 간격 + 마지막 스캔 시도 기준 due'**(A4-03 — setInterval(env) 금지, 변경 알림이 없다).
+    · **측정 끝을 '지금' 으로 두지 않는다**(A2-01 — VM 가용성: 그 vCenter 이벤트가 온전한 마지막 시각까지만 재고, 자른 VM 은 행이 말한다) ·
+      **서버 온도 ESXi 대체 행도 `unreadVcenterReasons` 로 오래됨**(A2-03) · **하위 시스템 롤업 배지는 `idrac/invView.js partHealthRollup` 하나**(A2-02 — 못 읽음을 OK 로,
+      Critical 을 Warning 으로 접지 않는다) · **누적 카운터 '비율' 도 간격 경계**(A2-04 — bmusage `rates.spanOk` · CVP `parse.counterGapOk`).
+    · **putJson·patchJson·delJson 반환값은 `views/changeResult.js requireChanged` 로 판정한 뒤 성공 처리**(A5-01 — 400 본문을 '저장됨' 으로 읽던 5화면 23곳.
+      api.js 의 400 본문 반환 규약은 그대로, `audit2727e` 스윕이 버린 반환값을 센다) · **원격 콘솔 닫힘 사유가 원인 코드**(A5-02 — `host-key-<사유>`·`mapping-denied`…,
+      웹 `remote/sshSend.js remoteCloseReasonText` 와 1:1. 새 닫힘 사유는 그 표에도) · 표 자리는 `pollPart`(data·오류·조회 중) · 추이는 `createHistLoader`.
+    · **목록 응답은 요약만, 응답 기억 키는 입력 내용 지문**(A6-05 — SAN 목록이 스위치마다 조닝 전체를 싣고 요청마다 재직렬화: 260대 11.55MB → 0.68MB.
+      스냅샷 세대 키(memoJson)면 '지금 수집' 직후 옛 값을 준다) · **`power_hourly` 서버별 요약은 `statsSinceAsync`**(A6-03 — GROUP BY server_id 는 보존기간 전체,
+      30일 최장 멈춤 1.2초 → 18ms) · 메모리 추세 `metaRange`(A6-04).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
@@ -5092,7 +5112,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - ⚠⚠ **v2.707 — 경영 보고 묶음(C6·C11·C7). 새 수집 없음 — 이벤트·스냅샷·B10 캐시만 읽는다**
     (`availability/analyze.js` · `cost/{analyze,settings}.js`(`cost-rates.json`) · `migration/analyze.js` + 라우트 `vmAvailability.js`·`costShowback.js`·`migrationReadiness.js` +
     웹 `views/bizreport/*Text.js` + `VmAvailabilityTool`·`CostShowbackTool`·`MigrationReadinessTool`. 회귀 `server/test/biz2707.test.js`(변이 9/9) + 웹 `bizreport/biz2707.test.js`):
-    · C6 가동률 = 1 − 정지 ÷ 측정 구간. 측정 구간 = max(기간 시작, 그 vCenter 이벤트 수집 시작, **그 VM 의 마지막 생성·복제·배포·등록**) ~ 지금.
+    · C6 가동률 = 1 − 정지 ÷ 측정 구간. 측정 구간 = max(기간 시작, 그 vCenter 이벤트 수집 시작, **그 VM 의 마지막 생성·복제·배포·등록**) ~ 그 vCenter 이벤트가 온전한 마지막 시각(로그 폴러의 마지막 수집 성공 — 지금과의 차이가 max(1시간, 수집 주기×3) 안이면 지금. v2.731 A2-01 — 예전 '~ 지금' 은 수집이 멈춘 꼬리를 정상 가동으로 셌다).
       정지 = 끔·일시정지 → 다음 켬(지금도 꺼져 있으면 지금까지). 첫 전원 이벤트가 '켬' 이면 그 전은 꺼져 있던 것이다. 재부팅·재설정·HA 재시작·켜기 실패는 **횟수만**.
       판정 안 함: 이벤트를 받은 적 없는 vCenter(lastTs 없음) · 끔 이벤트 뒤 켬 이벤트 없이 지금 켜져 있음(inconsistent) · 기간 내내 꺼짐(offAll). 법인 합산 = 정지 합 ÷ 측정 합.
       ⚠ '사람이 끈 정지' 판정의 시스템 계정 정규식에 **빈 대안 `^(|…)` 을 넣지 말 것** — 모든 문자열과 맞아 사람 판정이 항상 거짓이 됐다(자체 테스트가 잡았다).

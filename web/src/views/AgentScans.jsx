@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { countText, durationText, strField } from './agentScanText.js'; // v2.598 CENTRAL-03: 숫자만 글자로, 나머지는 —
+import { droppedSecretNote, passwordDroppedLines } from './droppedSecretText.js'; // v2.731(A3-01 ②): 대역·계정 변경 시 비밀번호 폐기 안내
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -47,10 +48,13 @@ export default function AgentScans() {
     setBusy(true); setImportMsg(null);
     try {
       const r = await postJson('/admin/assignments/import', { csv: csvText, mode: replaceMode ? 'replace' : 'merge' });
+      // v2.731(A3-01 ②): merge 로 대역·계정이 바뀌어 비밀번호를 승계하지 않은 에이전트가 있으면 **창을 닫지 않고** 말한다
+      //   (닫으면 이 안내가 함께 사라지고 다음 스캔이 인증에 실패한다 — views/droppedSecretText.js 규약).
+      const dropped = r.ok ? passwordDroppedLines(r) : [];
       setImportMsg(r.ok
-        ? { ok: true, text: `가져오기 완료 — 추가 ${r.added}, 갱신 ${r.updated}, 건너뜀 ${r.skipped.length} (총 ${r.total})`, skipped: r.skipped }
+        ? { ok: !dropped.length, text: `가져오기 완료 — 추가 ${r.added}, 갱신 ${r.updated}, 건너뜀 ${r.skipped.length} (총 ${r.total})`, skipped: r.skipped, dropped }
         : { ok: false, text: r.reason });
-      if (r.ok) { await load(); setCsvOpen(false); setCsvText(''); }
+      if (r.ok) { await load(); if (!dropped.length) { setCsvOpen(false); setCsvText(''); } }
     } catch (e) { setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -78,7 +82,10 @@ export default function AgentScans() {
     setBusy(true); setMsg(null);
     try {
       const r = editing ? await putJson(`/admin/assignments/${encodeURIComponent(form.agent)}`, form) : await postJson('/admin/assignments', form);
-      if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
+      // v2.731(A3-01 ②): 대역·계정이 바뀌어 저장된 비밀번호를 폐기했으면 창을 닫지 않고 그 사실을 말한다(다시 입력할 수 있게).
+      const note = r.ok ? droppedSecretNote(r) : '';
+      if (r.ok && note) { await load(); setForm((f) => ({ ...f, password: '' })); setMsg({ ok: false, warn: true, text: note }); }
+      else if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -206,7 +213,7 @@ export default function AgentScans() {
                 </Select>
               </label>
               <label>iDRAC 계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="root" /></label>
-              <label>iDRAC 비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} /></label>
+              <label>iDRAC 비밀번호 {editing && <span className="muted">(비우면 유지 — IP 대역·계정을 바꾸면 폐기)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} /></label>
               <label style={{ gridColumn: '1 / -1' }}>IP 대역 (한 줄에 하나 · 범위 · CIDR)
                 <textarea className="input" style={{ width: '100%', minHeight: 120, fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
                   value={form.ips} onChange={setF('ips')} placeholder={'10.0.0.0/24\n10.0.5.1 - 10.0.5.50'} />
@@ -214,7 +221,7 @@ export default function AgentScans() {
             </div>
             {msg && (
               <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, fontSize: 13,
-                background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>
+                background: msg.ok ? 'rgba(34,197,94,.12)' : msg.warn ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : msg.warn ? '#fbbf24' : '#f87171', whiteSpace: 'normal' }}>{msg.text}</div>
             )}
             <div className="flex gap" style={{ marginTop: 16 }}>
               <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={save}>
@@ -267,8 +274,14 @@ export default function AgentScans() {
 
             {importMsg && (
               <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 8, fontSize: 13,
-                background: importMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: importMsg.ok ? '#4ade80' : '#f87171' }}>
+                background: importMsg.ok ? 'rgba(34,197,94,.12)' : importMsg.dropped?.length ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)',
+                color: importMsg.ok ? '#4ade80' : importMsg.dropped?.length ? '#fbbf24' : '#f87171' }}>
                 {importMsg.text}
+                {importMsg.dropped?.length > 0 && (
+                  <ul style={{ margin: '6px 0 0', paddingLeft: 18, whiteSpace: 'normal' }}>
+                    {importMsg.dropped.map((t, i) => <li key={i}>{t}</li>)}
+                  </ul>
+                )}
                 {importMsg.skipped?.length > 0 && (
                   <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--amber)' }}>
                     {importMsg.skipped.slice(0, 8).map((s, i) => <li key={i}>{s.agent}: {s.reason}</li>)}

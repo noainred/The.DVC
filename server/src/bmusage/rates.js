@@ -13,10 +13,22 @@
  *   말이 안 되는 값이 된다. 상한(`MAX_SPAN_MS`)을 넘긴 간격은 버린다.
  */
 import { numOrNull } from '../util/numOrNull.js';
-const MIN_SPAN_MS = 1_000;
+export const MIN_SPAN_MS = 1_000;
 export const MAX_SPAN_MS = 60 * 60_000;   // 1시간 넘게 벌어진 두 표본은 비율로 쓰지 않는다
 
 const fin = numOrNull; // v2.561: 공용 판정
+
+/**
+ * 두 표본 시각의 간격이 비율 계산에 쓸 만한가(MIN_SPAN ~ MAX_SPAN). 시각을 못 읽었으면 false.
+ * 이 모듈의 누적 카운터 환산(perSecond·busyPct·cpuPctFromJiffies)이 **같은 경계**를 쓴다 — 한 행 안에서 CPU 만 긴 공백의 평균을
+ * 내고 디스크·네트워크는 비우는 어긋남(v2.731 A2-04)을 막는다.
+ */
+export function spanOk(prevAt, curAt) {
+  const pa = fin(prevAt); const ca = fin(curAt);
+  if (pa == null || ca == null) return false;
+  const span = ca - pa;
+  return span >= MIN_SPAN_MS && span <= MAX_SPAN_MS;
+}
 
 /**
  * 누적값 두 개의 초당 증가량.
@@ -24,10 +36,8 @@ const fin = numOrNull; // v2.561: 공용 판정
  */
 export function perSecond(prevVal, curVal, prevAt, curAt) {
   const p = fin(prevVal); const c = fin(curVal);
-  const pa = fin(prevAt); const ca = fin(curAt);
-  if (p == null || c == null || pa == null || ca == null) return null;
-  const span = ca - pa;
-  if (span < MIN_SPAN_MS || span > MAX_SPAN_MS) return null;
+  if (p == null || c == null || !spanOk(prevAt, curAt)) return null;
+  const span = fin(curAt) - fin(prevAt);
   const d = c - p;
   if (d < 0) return null;                    // 리셋 — 0 으로 채우지 않는다
   return (d / span) * 1000;
@@ -36,10 +46,18 @@ export function perSecond(prevVal, curVal, prevAt, curAt) {
 /**
  * 두 누적 시간 묶음에서 CPU 사용률(%).
  * `/proc/stat` 의 `cpu` 줄은 **jiffies 누적**이라 (전체증가 − idle증가) / 전체증가 다.
+ *
+ * ⚠ v2.731 A2-04: 표본 시각을 가진 호출부는 **prevAt·curAt 를 반드시 넘긴다** — 간격이 MIN~MAX_SPAN 밖이면 `null`
+ *   (perSecond·busyPct 와 같은 경계). jiffies 비율은 간격으로 나누지 않아 값 자체는 '공백 구간 평균' 이지만, 몇 시간~하루 공백 뒤
+ *   첫 표본이 그 평균을 **이번 주기 값처럼** 원시·일 롤업·임계 판정에 넣었다(같은 행의 디스크·네트워크는 null 인데 CPU 만 값).
+ *   시각 인자를 아예 넘기지 않는 호출(둘 다 undefined — 단위 테스트·시각 없는 옛 호출)만 간격 판정을 하지 않는다.
  * @param {{total:number, idle:number}} prev
  * @param {{total:number, idle:number}} cur
+ * @param {number|null} [prevAt]
+ * @param {number|null} [curAt]
  */
-export function cpuPctFromJiffies(prev, cur) {
+export function cpuPctFromJiffies(prev, cur, prevAt, curAt) {
+  if ((prevAt !== undefined || curAt !== undefined) && !spanOk(prevAt, curAt)) return null;
   const pt = fin(prev?.total); const pi = fin(prev?.idle);
   const ct = fin(cur?.total); const ci = fin(cur?.idle);
   if (pt == null || pi == null || ct == null || ci == null) return null;
@@ -69,10 +87,8 @@ export function linkPct(bytesPerSec, linkBitsPerSec) {
  */
 export function busyPct(prevTicksMs, curTicksMs, prevAt, curAt) {
   const p = fin(prevTicksMs); const c = fin(curTicksMs);
-  const pa = fin(prevAt); const ca = fin(curAt);
-  if (p == null || c == null || pa == null || ca == null) return null;
-  const span = ca - pa;
-  if (span < MIN_SPAN_MS || span > MAX_SPAN_MS) return null;
+  if (p == null || c == null || !spanOk(prevAt, curAt)) return null;
+  const span = fin(curAt) - fin(prevAt);
   const d = c - p;
   if (d < 0) return null;
   return Math.min(100, Math.round((d / span) * 1000) / 10);

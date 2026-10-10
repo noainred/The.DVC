@@ -28,7 +28,7 @@ import { analysisServersWithRemote } from '../admin/shared.js';
 import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
-import { metricsSamplerStatus, samplerWithheldOf } from '../../metrics/sampler.js'; // v2.628(LEFT2628-01): 최근 샘플의 적재 제외·부분 합을 추이 응답에 싣는다
+import { metricsSamplerStatus, samplerWithheldOf, unreadVcenterReasons } from '../../metrics/sampler.js'; // v2.628(LEFT2628-01): 최근 샘플의 적재 제외·부분 합을 추이 응답에 싣는다 · v2.731(A2-03): 읽히지 않는 vCenter 판정(샘플러와 한 벌)
 import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
@@ -1245,6 +1245,11 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
   const allowed = scopedVcenterIds(req.user, snap);
   const hosts = (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId) && h.tempC != null);
   const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+  /* v2.731(점검 r1 A2-03): 지금 읽히지 않는 vCenter(unreachable·점검중·낡은 위임)의 호스트 온도는 마지막 수집 값이다
+   * (LASTGOOD_HOLD·위임 캐시가 서빙한다). 지표 샘플러는 같은 판정(unreadVcenterReasons)으로 적재에서 빼는데 이 화면은
+   * 그 값을 '현재 온도' 로 요약·법인 표·클러스터/vCenter 집계에 넣었다. 행은 남기되 오래됨(사유)으로 표시하고 집계에서 뺀다. */
+  const unread = unreadVcenterReasons(snap);
+  const staleWhy = (h) => unread.get(String(h.vcenterId ?? '')) || null;
   /* ── 최근 평균 창(v2.512 수정) ──────────────────────────────────────────────
    * 예전에는 창이 **고정 5분**이었다. 온도 샘플러 주기는 설정에서 최대 24시간까지 올릴 수 있어
    * (metrics/settings.js MAX_INTERVAL_MS), 주기가 5분을 넘는 현장에서는 그 창에 표본이 하나도
@@ -1273,11 +1278,18 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
   } catch (e) { avgErr = e?.message || '시계열 조회 실패'; }
   const grp = (keyFn, avg5Map) => {
     const m = new Map();
-    for (const h of hosts) { const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, sum: 0, max: -Infinity }; g.count++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); m.set(k, g); }
+    for (const h of hosts) {
+      const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, fresh: 0, stale: 0, sum: 0, max: -Infinity }; g.count++;
+      // v2.731(A2-03): 오래된(읽히지 않는 vCenter) 호스트는 현재값·최고에 넣지 않고 개수로 밝힌다.
+      if (staleWhy(h)) g.stale++; else { g.fresh++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); }
+      m.set(k, g);
+    }
     return [...m.values()].map((g) => {
       const a5 = avg5Map.get(g.key);
-      return { key: g.key, hosts: g.count, curC: r1(g.sum / g.count), avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried, maxC: r1(Math.max(g.max, a5?.max ?? -Infinity)) };
-    }).sort((a, b) => b.curC - a.curC);
+      const mx = Math.max(g.max, a5?.max ?? -Infinity);
+      return { key: g.key, hosts: g.count, curC: g.fresh ? r1(g.sum / g.fresh) : null, avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried,
+        maxC: Number.isFinite(mx) ? r1(mx) : null, ...(g.stale ? { staleHosts: g.stale } : {}) };
+    }).sort((a, b) => (b.curC ?? -Infinity) - (a.curC ?? -Infinity));   // 현재값이 없는(전부 오래된) 묶음은 뒤로
   };
   /* ── iDRAC 서버 온도(v2.512) ────────────────────────────────────────────────
    * scope: iDRAC 서버는 vCenter 귀속이 없을 수 있다(베어메탈). 범위 제한 계정에는
@@ -1296,6 +1308,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
       dcName: (id) => dcNames.get(String(id)) || id,
       maxAgeMs: DEFAULT_MAX_AGE_MS,
       localCycle: sensorPollCycle(),   // v2.634: 폴 주기가 길면 신선도 경계를 넓힌다
+      unreadVcenters: unread,          // v2.731(A2-03): 읽히지 않는 vCenter 의 ESXi 대체 행은 오래됨
     });
     idrac = { enabled: true, ...rep, reason: rep.counts.idrac ? '' : 'iDRAC 센서를 보고한 서버가 없습니다(등록·자격증명·수집 주기를 확인하세요).' };
     // 데모(mock): iDRAC 등록이 없어 물리 서버가 0 이면 화면의 물리/가상화 분리를 확인할 수 없다.
@@ -1316,7 +1329,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
       });
       const mrep = buildServerTempReport({
         idracServers: fake, hosts, latestOf: (s) => s.sensors,
-        dcName: (id) => dcNames.get(String(id)) || id, maxAgeMs: 0,
+        dcName: (id) => dcNames.get(String(id)) || id, maxAgeMs: 0, unreadVcenters: unread,
       });
       idrac = { enabled: true, ...mrep, reason: '', synthesized: true };
     }
@@ -1335,6 +1348,8 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     scope: vcId || 'all',
     ...(isAdminReq(req) ? {} : { addressHidden: true }),
     reportingHosts: hosts.length,
+    // v2.731(A2-03): 그중 읽히지 않는 vCenter 의 호스트(값이 오래됨 — 집계에서 뺐다)
+    staleHosts: hosts.filter((h) => staleWhy(h)).length,
     totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
     // 평균 창 — 화면이 '5분 평균' 대신 실제 창을 라벨로 쓴다.
     avgWindowMs: windowMs, avgWindowLabel: avgWindowLabel(windowMs),
@@ -1344,7 +1359,9 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     idrac,
     hosts: hosts.map((h) => {
       const a5 = avg5Host.get(h.id);
-      return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };
+      const why = staleWhy(h);   // v2.731(A2-03): 마지막 수집 값 — 오래됨 표지(사유)와 함께 남긴다
+      return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [],
+        stale: !!why, ...(why ? { staleReason: why } : {}) };
     }).sort((a, b) => b.curC - a.curC),
     clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, avg5Cluster),
     vcenters: grp((h) => h.vcenterId, avg5Vc),

@@ -38,9 +38,12 @@ import {
   usersCountText, truncatedNote,
 } from './curUserText.js';
 import { CurrentUsersSettings } from './CurrentUsersSettings.jsx';
-import HorizonSessionsPanel from './HorizonSessionsPanel.jsx';
+import HorizonSessionsPanel, { activitySortValue } from './HorizonSessionsPanel.jsx'; // v2.731 A5-05: 작업 로그 정렬값(결측 = '')
 import { combinedNote, partialNote, SOURCE_STATE_LABEL, unionValueText } from './horizonSessionText.js';
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
+// v2.731(점검 A5-03): 추이는 최신 요청만 반영한다 — Horizon 추이(검토 I-09)와 같은 로더. 예전 loadHist 는 순번·취소 없이
+//   setHist 를 해, 90일을 누르고 응답이 오기 전에 7일(또는 다른 법인)을 고르면 늦게 온 90일 응답이 7일 선택을 덮었다.
+import { createHistLoader, histView } from './horizonHistLoader.js';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -65,7 +68,7 @@ function KindBadge({ kind, labels }) {
  */
 const POLL_MS = 60_000;
 
-function WindowsUsersPanel({ scope }) {
+export function WindowsUsersPanel({ scope }) {
   const [nonce, setNonce] = useState(0);
   const params = useMemo(() => ({ ...(scope ? { vcenterId: scope } : {}), ...(nonce ? { _r: String(nonce) } : {}) }), [scope, nonce]);
   const { loading, data: fresh, error } = usePolling('/tools/curuser', params, POLL_MS);
@@ -81,8 +84,17 @@ function WindowsUsersPanel({ scope }) {
   const [setOpen, setSetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [hist, setHist] = useState(null);
-  const [histErr, setHistErr] = useState('');
+  // 추이 응답은 요청 키(days·법인)와 함께 둔다 — 늦게 온 이전 요청·다른 선택의 응답은 그리지 않는다(점검 A5-03).
+  const [histState, setHistState] = useState(null);
+  const histLoader = useMemo(
+    () => createHistLoader((p, signal) => fetchJson('/tools/curuser/history', { vcenterId: p.serverId, days: p.days }, signal), setHistState),
+    [],
+  );
+  useEffect(() => () => histLoader.cancel(), [histLoader]);                      // unmount — 진행 중 요청을 끊고 결과를 버린다
+  useEffect(() => { histLoader.dropUnless(days, picked); }, [histLoader, days, picked]); // 선택이 바뀌면 다른 조건의 요청을 끊는다
+  const { hist, err: histErr, loading: histLoading } = histView(histState, days, picked);
+  /** 법인을 바꿀 때 — 진행 중 요청을 끊고 차트를 비운다(예전 setHist(null) 과 같은 화면). */
+  const clearHist = () => { histLoader.cancel(); setHistState(null); };
 
   const vcenters = data?.vcenters || [];
   const records = data?.records || [];
@@ -100,11 +112,7 @@ function WindowsUsersPanel({ scope }) {
   const skip = useMemo(() => skippedSummary(data?.skipped, data?.skipReasons), [data]);
   const guide = useMemo(() => agentGuide({ guestPublishMs: data?.settings?.guestPublishMs }), [data]);
 
-  const loadHist = async (d = days, vc = picked) => {
-    setHistErr(''); setHist(null);
-    try { setHist(await fetchJson('/tools/curuser/history', { vcenterId: vc, days: d })); }
-    catch (e) { setHistErr(e?.message || String(e)); }
-  };
+  const loadHist = (d = days, vc = picked) => histLoader.load(d, vc);
   const collectNow = async () => {
     if (busy) return;
     setBusy(true); setMsg('');
@@ -168,7 +176,7 @@ function WindowsUsersPanel({ scope }) {
 
       {/* 법인별 — 행 클릭으로 전체↔법인 전환 */}
       <div>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>법인(vCenter)별 {picked && <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 6 }} onClick={() => { setPicked(''); setHist(null); }}>전체 보기</button>}</div>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>법인(vCenter)별 {picked && <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 6 }} onClick={() => { setPicked(''); clearHist(); }}>전체 보기</button>}</div>
         <div className="table-wrap">
         <STable className="v3-table">
           <thead>
@@ -178,7 +186,7 @@ function WindowsUsersPanel({ scope }) {
           </thead>
           <tbody>
             {vcenters.map((v) => (
-              <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); setHist(null); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
+              <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); clearHist(); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
                 <td>{v.vcenterName || v.vcenterId}</td>
                 <td data-sort={String(v.users ?? '')}>{usersCountText(v.users, v.usersLowerBound)}</td>
                 <td data-sort={String(v.usersActive ?? '')}>{v.usersActive ?? '—'}</td>
@@ -314,7 +322,7 @@ function WindowsUsersPanel({ scope }) {
             </ResponsiveContainer>
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>{hist ? '이 기간에 저장된 표본이 없습니다.' : '기간을 골라 불러오세요.'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>{histLoading ? '불러오는 중…' : (hist ? '이 기간에 저장된 표본이 없습니다.' : (histErr ? '' : '기간을 골라 불러오세요.'))}</div>
         )}
       </div>
 
@@ -331,8 +339,8 @@ function WindowsUsersPanel({ scope }) {
         title="📋 현재 사용자 수집 작업"
         emptyText="아직 수집 기록이 없습니다."
         metricCols={[
-          { key: 'vms', label: '서버', render: (e) => (e.vms == null ? '—' : `${e.vms}대`), sort: (e) => String(e.vms ?? -1) },
-          { key: 'users', label: '고유 사용자', render: (e) => (e.users == null ? '—' : `${e.users}명`), sort: (e) => String(e.users ?? -1) },
+          { key: 'vms', label: '서버', render: (e) => (e.vms == null ? '—' : `${e.vms}대`), sort: (e) => activitySortValue(e.vms) },
+          { key: 'users', label: '고유 사용자', render: (e) => (e.users == null ? '—' : `${e.users}명`), sort: (e) => activitySortValue(e.users) },
         ]}
       />
 

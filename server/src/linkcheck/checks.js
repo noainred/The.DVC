@@ -20,7 +20,7 @@ import { ipBlockReason } from '../collector/registry.js';
 // ⚠ DNS 단계가 이미 검사한 주소로 **핀**한다(재해석 금지 — 단계별 계측과 기록의 정직성 때문).
 //   판정은 `util/ssrfLookup.js` 하나가 소유한다(v2.506·v2.537 규약 — 훅을 파일마다 복제하지 말 것).
 import { pinnedLookup } from '../util/ssrfLookup.js';
-import { WAN_TLS_VERIFY } from '../util/resilientFetch.js'; // v2.583: 비밀 헤더를 싣는 점검은 WAN 검증 설정을 따른다
+import { wanTlsConnectOptions } from '../util/resilientFetch.js'; // v2.583: 비밀 헤더를 싣는 점검은 WAN 검증 설정을 따른다(v2.731: 사설 CA 포함)
 import { certExpiryStatus } from '../security/certMonitor.js';
 import { failKindOfCode } from './phases.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
@@ -145,9 +145,13 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
     //   점검 요청은 **리다이렉트를 따라가지 않는다**(3xx 는 그 상태 그대로 결과다). 비밀이 없는 정체 확인
     //   (vCenter·장비 무인증 경로)은 자체서명이 흔하므로 예전처럼 검증하지 않는다 — 보낼 비밀이 없다.
     const carriesSecret = Object.keys(headers || {}).some((k) => /token|authorization|cookie|api-key/i.test(k));
+    // ⚠ v2.731(G2b A4-01): 비밀을 싣는 점검은 WAN 신뢰를 **통째로**(검증 여부 + 사설 CA `WAN_TLS_CA_FILE`) 따른다. 예전에는
+    //   검증 여부만 가져와 사설 CA 로 발급한 정상 엣지·중앙을 'tls-fail' 로 기록했다(수집 pull 은 같은 CA 로 정상인데) — 통신 점검·
+    //   데이터 흐름 지도가 거짓 장애를 말했다. 엣지 쪽 edge->central 링크도 이 함수다.
+    const tlsOpts = carriesSecret ? wanTlsConnectOptions() : { rejectUnauthorized: false };
     const dispatcher = new Agent({
       // ⚠ 같은 이유로 SNI 에 IP 를 넣지 않는다(RFC 6066 · Node DEP0123).
-      connect: { rejectUnauthorized: carriesSecret ? WAN_TLS_VERIFY : false, lookup: pinnedLookup(ip), ...(net.isIP(u.hostname) ? {} : { servername: u.hostname }) },
+      connect: { ...tlsOpts, lookup: pinnedLookup(ip), ...(net.isIP(u.hostname) ? {} : { servername: u.hostname }) },
       headersTimeout: timeoutMs, bodyTimeout: timeoutMs,
     });
     res = await fetch(url, { method, headers, dispatcher, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });

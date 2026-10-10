@@ -153,12 +153,18 @@ export function splitAggregate(rows) {
  * @param latestOf      (server) => { t, temps } — 로컬은 sensorStore, 원격은 s.sensors
  * @param dcName        (datacenterId) => 표시 이름
  * @param maxAgeMs      이 나이를 넘은 iDRAC 표본은 stale 로 표시(0 이면 검사 안 함)
+ * @param unreadVcenters v2.731(점검 r1 A2-03): Map(vcenterId → 사유) — 지금 읽히지 않는 vCenter(unreachable·점검중·낡은 위임 —
+ *                      `metrics/sampler.js unreadVcenterReasons` 를 라우트가 넘긴다. 판정을 여기서 복제하지 않는다). 그 vCenter 의
+ *                      ESXi 대체 행은 마지막 수집 값(LASTGOOD_HOLD·위임 캐시)이라 지금 온도가 아니다 — stale(+staleReason)로 표시해
+ *                      요약·법인 표에서 뺀다(iDRAC 행의 오래됨과 같은 규칙 — aggregate 의 staleExcluded).
  * @returns { rows, summary, byDatacenter, counts }
  */
 export function buildServerTempReport({
   idracServers = [], hosts = [], latestOf = () => null,
   dcName = (id) => id, now = Date.now(), maxAgeMs = 15 * 60_000, localCycle = null,
+  unreadVcenters = null,
 } = {}) {
+  const unreadWhy = (vcId) => (unreadVcenters && typeof unreadVcenters.get === 'function' ? unreadVcenters.get(String(vcId ?? '')) || null : null);
   const tagMap = hostsByServiceTag(hosts);
   const rows = [];
   const usedHostIds = new Set();
@@ -200,6 +206,9 @@ export function buildServerTempReport({
     if (h.tempC == null) continue;
     const sum = summarizeSensors(h.temps);
     counts.esxi += 1;
+    // v2.731(A2-03): 읽히지 않는 vCenter 의 호스트 온도는 직전 값이다 — 행에는 남기되 오래됨으로(요약·법인 표에서 빠진다).
+    const why = unreadWhy(h.vcenterId);
+    if (why) counts.stale += 1;
     rows.push({
       id: h.id, source: 'esxi', kind: 'virtual',
       name: h.name, ip: '', serviceTag: h.serviceTag || '',
@@ -207,7 +216,8 @@ export function buildServerTempReport({
       cluster: h.cluster || '', hostName: h.name,
       curC: r1(h.tempC), maxC: r1(h.tempMaxC ?? h.tempC),
       inletC: r1(sum.inlet), exhaustC: r1(sum.exhaust), cpuC: r1(sum.cpu),
-      sensors: sum.count || (h.temps || []).length, at: null, stale: false,
+      sensors: sum.count || (h.temps || []).length, at: null, stale: !!why,
+      ...(why ? { staleReason: why } : {}),
     });
   }
 

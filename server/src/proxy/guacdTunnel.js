@@ -95,7 +95,8 @@ function handle(ws, params, user, token = null) {
   if (!m || m.protocol !== 'rdp') { safeWsClose(ws, 1011, 'rdp mapping not found'); return; }
   // v2.322: 소유·scope 재검사(SSH 게이트웨이와 동일 — 범위 밖/타인 매핑 차단).
   const issue = mappingAccessIssue(user, m);
-  if (issue) { safeWsClose(ws, 1011, 'forbidden'); return; }
+  // v2.731(A5-02·A1-03): SSH 게이트웨이와 같은 사유 코드 — 브라우저 Guacamole 터널은 닫힘 사유를 상태 메시지로 넘기고 화면이 그것으로 문구를 고른다.
+  if (issue) { safeWsClose(ws, 1011, 'mapping-denied'); return; }
   touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
   const proxy = getProxyById(m.proxyId);
   if (!proxy.guacd?.host) { safeWsClose(ws, 1011, 'guacd not configured'); return; }

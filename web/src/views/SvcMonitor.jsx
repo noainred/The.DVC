@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile, canCsv } from '../api.js';
+// v2.731(A5-01): putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 성공 처리 전에 판정한다.
+import { requireChanged } from './changeResult.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { useTreeDnd } from '../hooks/useTreeDnd.js';
 import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
@@ -253,10 +255,10 @@ export default function SvcMonitor() {
     try {
       if (modal.kind === 'target') {
         const body = { ...form, kind: mode };
-        if (modal.edit) await putJson(`/svcmon/targets/${modal.edit}`, body); else await postJson('/svcmon/targets', body);
+        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.edit}`, body)); else await postJson('/svcmon/targets', body);
       } else {
         const body = { ...form, port: form.port || undefined, intervalSec: Number(form.intervalSec) || 60 };
-        if (modal.edit) await putJson(`/svcmon/targets/${modal.targetId}/tests/${modal.edit}`, body);
+        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.targetId}/tests/${modal.edit}`, body));
         else await postJson(`/svcmon/targets/${modal.targetId}/tests`, body);
       }
       setModal(null); refresh();
@@ -282,7 +284,7 @@ export default function SvcMonitor() {
     const name = window.prompt('새 폴더 이름', cur);
     const n = (name || '').trim();
     if (!n || n === cur) return;
-    try { await putJson('/svcmon/folders/rename', { kind: mode, path: p, newName: n }); refresh(); }
+    try { requireChanged(await putJson('/svcmon/folders/rename', { kind: mode, path: p, newName: n })); refresh(); }
     catch (e) { window.alert(e.message); }
   };
   // 대상(등록 노드) 이름 빠른 변경 — 폴더 rename 과 같은 프롬프트 방식. name 만 부분 업데이트(호스트·점검 보존).
@@ -292,7 +294,7 @@ export default function SvcMonitor() {
     const name = window.prompt('새 대상 이름', t.name);
     const n = (name || '').trim();
     if (!n || n === t.name) return;
-    try { await putJson(`/svcmon/targets/${id}`, { name: n }); refresh(); }
+    try { requireChanged(await putJson(`/svcmon/targets/${id}`, { name: n })); refresh(); }
     catch (e) { window.alert(e.message); }
   };
   // 대상 수정 모달(이름·호스트·위치) 열기 — 현재 값으로 프리필. (기존 '대상 수정' 모달을 활성화)
@@ -348,13 +350,13 @@ export default function SvcMonitor() {
     const drag = targets.find((t) => t.id === dragId);
     if (!ref || !drag) return;
     const destPath = ref.path;
-    if (drag.path !== destPath) await putJson(`/svcmon/targets/${dragId}`, { path: destPath });
+    if (drag.path !== destPath) requireChanged(await putJson(`/svcmon/targets/${dragId}`, { path: destPath }));
     let ids = targets.filter((t) => t.path === destPath)
       .sort((a, b) => ((a.order ?? 0) - (b.order ?? 0)) || a.name.localeCompare(b.name, 'ko'))
       .map((t) => t.id).filter((id) => id !== dragId);
     const idx = ids.indexOf(refTargetId);
     ids.splice(after ? idx + 1 : idx, 0, dragId);
-    await putJson('/svcmon/reorder/targets', { kind: mode, path: destPath, ids });
+    requireChanged(await putJson('/svcmon/reorder/targets', { kind: mode, path: destPath, ids }));
     refresh();
   };
   // 폴더 X 를 refPath 형제 기준 앞/뒤로. 부모가 다르면 그 부모로 옮기고(reparent) 위치는 기본(끝).
@@ -371,7 +373,7 @@ export default function SvcMonitor() {
       .sort((a, b) => fidx.get(a) - fidx.get(b)).filter((p) => p !== dragPath);
     const idx = paths.indexOf(refPath);
     paths.splice(after ? idx + 1 : idx, 0, dragPath);
-    await putJson('/svcmon/reorder/folders', { kind: mode, parent: destParent, paths });
+    requireChanged(await putJson('/svcmon/reorder/folders', { kind: mode, parent: destParent, paths }));
     refresh();
   };
 
@@ -388,13 +390,13 @@ export default function SvcMonitor() {
           await reorderFolderTo(item.path, id, zone === 'after');
         }
       } else if (isFolder) {
-        await putJson(`/svcmon/targets/${item.id}`, { path: id });                                    // 대상 → 폴더 안으로
+        requireChanged(await putJson(`/svcmon/targets/${item.id}`, { path: id }));                    // 대상 → 폴더 안으로
         setExpanded((ex) => ({ ...ex, [id]: true }));
         refresh();
       } else {
         await reorderTargetTo(item.id, id, zone === 'after');                                          // 대상 순서 재정렬
       }
-    } catch (e) { setMoveErr(e.message || '이동 실패'); }
+    } catch (e) { setMoveErr(e.message || '이동 실패'); refresh(); } // 경로 이동은 됐는데 순서 저장이 거부된 경우도 트리를 서버 값으로 다시 맞춘다(v2.731 A5-01)
   };
   // 소비부(TreeRows 등)가 쓰는 dnd 객체 형태는 v2.319 이전과 동일 — 기계 부분만 훅에서 온다.
   // start 시 setMoveErr('') 는 기존 동작 보존(새 드래그 시작 시 이전 오류 배너 제거).
@@ -404,7 +406,7 @@ export default function SvcMonitor() {
   };
 
   const setSortMode = async (m) => {
-    try { await putJson('/svcmon/sort', { kind: mode, mode: m }); refresh(); }
+    try { requireChanged(await putJson('/svcmon/sort', { kind: mode, mode: m })); refresh(); }
     catch (e) { window.alert(e.message); }
   };
   const openLogSettings = async () => {
@@ -413,12 +415,13 @@ export default function SvcMonitor() {
   const saveLogSettings = async () => {
     setBusy(true);
     try {
-      const r = await putJson('/svcmon/log', {
+      // v2.731(A5-01): putJson 은 400 을 던지지 않고 본문을 돌려준다 — 실패 본문({error})으로 폼(logCfg)을 덮지 않는다.
+      const r = requireChanged(await putJson('/svcmon/log', {
         enabled: logCfg.enabled, mode: logCfg.mode, rotate: logCfg.rotate,
         // v2.605(감사 LEFT2605-02): 빈 칸은 보내지 않는다(blankOr) — Number('')=0 이 보관 1개·상한 0(무제한)이 됐다.
         keepFiles: blankOr(logCfg.keepFiles), maxFileMB: blankOr(logCfg.maxFileMB),
         maxTotalMB: blankOr(logCfg.maxTotalMB),
-      });
+      }));
       setLogCfg(r);
     } catch (e) { window.alert(e.message); } finally { setBusy(false); }
   };
@@ -449,7 +452,7 @@ export default function SvcMonitor() {
   const removeSel = async () => {
     if (!selTarget) return;
     if (!window.confirm(`'${selTarget.name}' 대상과 점검 ${selTarget.tests.length}개를 삭제할까요?`)) return;
-    try { await delJson(`/svcmon/targets/${selTarget.id}`); setSel(''); refresh(); } catch (e) { window.alert(e.message); }
+    try { requireChanged(await delJson(`/svcmon/targets/${selTarget.id}`)); setSel(''); refresh(); } catch (e) { window.alert(e.message); }
   };
 
   return (
@@ -793,7 +796,7 @@ export default function SvcMonitor() {
                 <button className="pc-btn" onClick={() => { const d = detail; setDetail(null); openWizard(d.target.id, d.target.name, d.test); }}>✎ 수정</button>
                 <button className="pc-btn" onClick={async () => {
                   if (!window.confirm(`점검 '${detail.test.name}' 을 삭제할까요?`)) return;
-                  try { await delJson(`/svcmon/targets/${detail.target.id}/tests/${detail.test.id}`); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
+                  try { requireChanged(await delJson(`/svcmon/targets/${detail.target.id}/tests/${detail.test.id}`)); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
                 }}>✕ 삭제</button>
               </div>
             )}

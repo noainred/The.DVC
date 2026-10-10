@@ -72,8 +72,11 @@ describe('장비 신뢰 화면 렌더', () => {
     expect(html).toContain('ssh-ed25519');
     expect(html).toContain('교체 예정');
     expect(html).toContain('관찰 지문 1개 일괄 승인');
-    // 승인 버튼은 승인할 지문(대기·관찰)이 있는 행에만 — 4행(대기 2 · 관찰 1 · TLS 제외)
-    expect((html.match(/>승인<\/button>/g) || []).length).toBe(3 + 1); // + 직접 등록 '승인'
+    // 승인 버튼은 승인할 지문(대기·관찰)이 있는 행에만 — 대기 2 · 관찰 1(TLS 제외).
+    // v2.731(A1-01): 이미 신뢰 지문이 있는 행(sw1 — 바뀐 지문 대기)은 '승인' 대신 '추가 승인'·'교체 승인' 둘이다.
+    expect((html.match(/>승인<\/button>/g) || []).length).toBe(2 + 1); // sw2·sw3 + 직접 등록 '승인'
+    expect((html.match(/>추가 승인<\/button>/g) || []).length).toBe(1);
+    expect((html.match(/>교체 승인<\/button>/g) || []).length).toBe(1);
     expect(html).not.toContain('TLS 검증 상태를 읽지 못했습니다'); // SSH 탭에는 TLS 패널이 없다
   });
   it('TLS 탭 — 환경변수 강제 정책 · CA 번들 경고 · 예외 배너 · 수집기 표 · 최근 거부(승인 가능 여부)', () => {

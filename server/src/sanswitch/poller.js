@@ -111,6 +111,10 @@ async function collectOne(dev, { periodic = false } = {}) {
       //   (합성 스냅샷이 실장비 스냅샷을 덮지 않게 — pdu·cvp 와 같은 규칙).
       // v2.708 데모: 장비에 접속하지 않는다 — 합성 CLI 출력을 실제 파서(buildSnapshot)에 넣어 스냅샷을 만든다.
       const { store } = await import('../store.js');
+      // v2.731(A6-07): 장비마다 매크로태스크 양보 — 데모 분기에는 I/O 가 없어 pool 전체가 마이크로태스크로만 이어져 86대(1,189ms)·260대
+      //   (3,412ms)를 한 덩어리로 조립했다(stallwatch '약 5초' 포착). 장비 하나 조립은 6~29ms 라 그 사이마다 다른 요청이 돈다.
+      //   live 경로는 SSH I/O 가 이미 양보하므로 해당 없다.
+      await new Promise((r) => { setImmediate(r); });
       snap = buildSanDemoSnapshot(full, sanDemoLayoutFor(full, store.get()), fosSsh.buildSnapshot, Date.now());
     } else {
       try {

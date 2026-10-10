@@ -7,6 +7,8 @@
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
+import crypto from 'node:crypto';
+import { snapMemo, sendCached } from '../../util/snapCache.js';   // v2.731(A6-05): 목록 응답 기억 — 내용 지문 키
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus, maskedNameLabel, scrubStringsDeep } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
@@ -55,12 +57,67 @@ const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(
 //   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
-/** 목록 화면용 축약 — 포트 상세(수백 행)는 빼고 요약만 보낸다(목록 응답이 MB 가 되지 않게). */
-const listShape = (s) => {
+/*
+ * 목록 화면용 축약 — 목록이 그리는 요약만 보낸다(목록 응답이 MB 가 되지 않게).
+ * v2.731(A6-05): 예전에는 `ports.list` 만 빼고 나머지를 그대로 실었다 — 조닝 전체(zones·aliases 배열 — v2.511 에 숫자에서 배열이 됐다)·
+ *   extra 상세(raslog·usedCmds·sensors·isl·trunk·lsan·bottleneck·fabricMembers)·nsRoles 가 따라가 데모 260대 응답이 11.4MB(장비당 44KB,
+ *   그중 조닝 77%)였고 요청마다 직렬화·SHA-1 이 약 120ms 였다. 같은 패브릭의 스위치는 패브릭 전체 조닝을 보고하므로 '스위치 수 × zone 수'
+ *   로 커진다. 상세는 장비 단위 라우트가 준다 — /devices/:id/ports(extra·zoning 전체 — 상세 창 DeviceInfo)·/devices/:id/zoning(조닝 그림)·
+ *   /devices/:id/healthcheck(점검 원천). 목록이 쓰는 값(웹 전수 grep — SanSwitchTool·sanSwitchPorts·sanSwitchViewText·edgeLateText·
+ *   storageAuthText·consoleData.sanCells): 이름·모델·FOS·Domain·ok·error·sections·switchState·ports 요약·health.alerts·collectedAt·agent·
+ *   edgeClockAheadMs · extra.authStopped·credFp·credFpSource·switchType · zoning.effectiveConfig. 뺀 것은 응답 detailOmitted 로 밝힌다.
+ */
+export const LIST_EXTRA_OBJECT_KEYS = Object.freeze(['authStopped', 'credFp']);
+export const LIST_DETAIL_OMITTED = Object.freeze({
+  fields: ['ports.list', 'zoning.zones', 'zoning.aliases', 'nsRoles', 'extra 의 목록·객체 값(raslog·usedCmds·sensors·isl·trunk·lsan·bottleneck·fabricMembers 등)'],
+  where: '/tools/sanswitch/devices/:id/ports · /zoning · /healthcheck',
+});
+const isPlainObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+/** 조닝 요약 — zones·aliases 배열/맵만 빼고 개수·이름·상한 표지는 그대로(aliasCount 를 더한다). */
+export function zoningListSummary(z) {
+  if (!isPlainObj(z)) return z ?? null;
+  const { zones, aliases, ...rest } = z;
+  const aliasCount = isPlainObj(aliases) ? Object.keys(aliases).length : (Array.isArray(aliases) ? aliases.length : null);
+  return { ...rest, aliasCount };
+}
+/** extra 축약 — 스칼라 값은 전부, 객체·배열 값은 목록이 쓰는 두 키(authStopped·credFp)만. */
+export function extraListSummary(extra) {
+  if (!isPlainObj(extra)) return extra ?? null;
+  const out = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (v == null || typeof v !== 'object' || LIST_EXTRA_OBJECT_KEYS.includes(k)) out[k] = v;
+  }
+  return out;
+}
+export function sanListShape(s) {
   if (!s) return null;
   const { list, ...ports } = s.ports || {};
-  return { ...s, ports: { ...ports, listCount: (list || []).length } };
-};
+  const out = { ...s, ports: { ...ports, listCount: (list || []).length } };
+  delete out.nsRoles;
+  if ('zoning' in s) out.zoning = zoningListSummary(s.zoning);
+  if ('extra' in s) out.extra = extraListSummary(s.extra);
+  return out;
+}
+const listShape = sanListShape;
+
+/*
+ * v2.731(A6-05): 목록 응답 기억 키 — 응답을 만드는 입력 전부의 지문(내용이 바뀌면 키가 바뀐다 → 수집·등록 직후에도 낡은 응답을 주지 않는다).
+ *   vCenter 스냅샷 세대(memoJson 의 키)는 SAN 데이터와 무관해 쓰지 않는다 — 그 키면 '지금 수집' 뒤 기억 시간 동안 옛 값이 보인다.
+ *   로컬 스냅샷은 putSnapshot 이 언제나 새 객체를 넣으므로 객체 정체성 번호로, 엣지 보관분은 (agent·push 시각·수집 시각)으로 가른다.
+ *   기억 시간(SAN_LIST_MEMO_MS)은 시각에 따라 바뀌는 값(엣지 staleMs·고아 만료 판정)의 낡음 상한이다.
+ */
+export const SAN_LIST_MEMO_MS = 30_000;
+const _snapIds = new WeakMap(); let _snapSeq = 0;
+const snapIdOf = (s) => { if (!s || typeof s !== 'object') return '-'; let n = _snapIds.get(s); if (!n) { n = ++_snapSeq; _snapIds.set(s, n); } return n; };
+export function sanListKeyOf({ local = [], edge = [], devices = [], pending = [], extras = [], admin = false } = {}) {
+  const h = crypto.createHash('sha1');
+  for (const s of local) h.update(`L${s?.deviceId}:${snapIdOf(s)};`);
+  for (const s of edge) h.update(`E${s?.agent}:${s?.deviceId}:${s?.pushedAt ?? ''}:${s?.collectedAt ?? ''};`);
+  h.update(JSON.stringify(devices));
+  h.update(JSON.stringify(pending));
+  for (const x of extras) h.update(JSON.stringify(x ?? null));
+  return `${h.digest('hex')}|${admin ? 'admin' : 'masked'}`;
+}
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
 export const NONE_DC = '__none__';
@@ -130,34 +187,54 @@ export function registerSanSwitch(api) {
 api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
   // v2.708: 데모(mock)면 비어 있을 때만 시드(장비·스냅샷 — 포트 사용량 백필은 뒤에서 이어진다). live 는 아무것도 안 한다.
   if (isMockMode()) { try { await ensureSanSwitchDemo(); } catch (e) { console.warn(`[sanswitch] 데모 시드 실패: ${e.message}`); } }
-  const byId = new Map();
-  for (const s of [...localSnapshots(), ...edgeSanSwitchSnapshots()]) {
-    const cur = byId.get(s.deviceId);
-    if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) byId.set(s.deviceId, s);
-  }
-  const devices = listDevices().map((d) => ({ ...d, snap: listShape(byId.get(d.id)), pending: hasPendingRequest(d.id) }));
-  const known = new Set(devices.map((d) => d.id));
-  // v2.583: 등록부에 없는 장비(orphan) 중 엣지 보고가 ORPHAN_TTL 을 넘긴 것은 목록에서 내리고 **개수를 밝힌다** —
-  //   보고를 멈춘(철거된) 엣지의 스위치가 '고아' 로 무기한 남던 것(중앙 SAN 보관소에는 TTL 이 없다).
-  const orphanAll = [...byId.values()].filter((s) => !known.has(s.deviceId));
-  const orphans = orphanAll.filter((s) => !(s.staleMs > ORPHAN_TTL_MS)).map(listShape);
-  const orphansExpired = orphanAll.length - orphans.length;
+  const local = localSnapshots(); const edge = edgeSanSwitchSnapshots();
+  const regDevs = listDevices();
+  const pending = regDevs.map((d) => hasPendingRequest(d.id));
   // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
   const admin = isAdminReq(req);
-  res.json({
-    devices: admin ? devices : devices.map(maskDeviceAddress),
-    orphans: admin ? orphans : orphans.map(maskSnapAddress),
-    ...(admin ? {} : { addressHidden: true }),
-    ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
-    types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
-    datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
-    agents: knownAgentNames(),
-    // v2.604 AUTHZ-2604-04: 같은 응답의 devices 는 가리는데 poller.inFlight 의 이름(IP)이 샜다 — 형제 perf/activity 와 같은 기준.
-    poller: admin ? sanSwitchPollerStatus() : maskPollerStatus(sanSwitchPollerStatus(), listDevices().map((d) => d.host)),
-    // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
-    collectDrops: recentCollectDrops(),
-    ...(isMockMode() ? { demo: sanDemoStatus() } : {}),
-  });
+  const pollerSt = sanSwitchPollerStatus();
+  const drops = recentCollectDrops();
+  const datacenters = (() => { try { return listDatacenters(); } catch { return []; } })();
+  const agents = knownAgentNames();
+  const demo = isMockMode() ? sanDemoStatus() : undefined;
+  // v2.731(A6-05): 같은 내용이면 같은 응답 객체를 돌려준다(직렬화·gzip·ETag 를 다시 하지 않는다 — util/compress.js 정체성 기억).
+  //   키는 입력 전부의 지문 + 역할(가림 판본이 다르다). 이 라우트는 전체 범위 전용(fullScopeOnly)이라 범위 축은 없다.
+  const key = sanListKeyOf({ local, edge, devices: regDevs, pending, extras: [pollerSt, drops, datacenters, agents, demo], admin });
+  try {
+    const payload = await snapMemo('sanswitch-list', key, SAN_LIST_MEMO_MS, () => {
+      const byId = new Map();
+      for (const s of [...local, ...edge]) {
+        const cur = byId.get(s.deviceId);
+        if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) byId.set(s.deviceId, s);
+      }
+      const devices = regDevs.map((d, i) => ({ ...d, snap: listShape(byId.get(d.id)), pending: pending[i] }));
+      const known = new Set(devices.map((d) => d.id));
+      // v2.583: 등록부에 없는 장비(orphan) 중 엣지 보고가 ORPHAN_TTL 을 넘긴 것은 목록에서 내리고 **개수를 밝힌다** —
+      //   보고를 멈춘(철거된) 엣지의 스위치가 '고아' 로 무기한 남던 것(중앙 SAN 보관소에는 TTL 이 없다).
+      const orphanAll = [...byId.values()].filter((s) => !known.has(s.deviceId));
+      const orphans = orphanAll.filter((s) => !(s.staleMs > ORPHAN_TTL_MS)).map(listShape);
+      const orphansExpired = orphanAll.length - orphans.length;
+      return {
+        devices: admin ? devices : devices.map(maskDeviceAddress),
+        orphans: admin ? orphans : orphans.map(maskSnapAddress),
+        ...(admin ? {} : { addressHidden: true }),
+        ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
+        // v2.731(A6-05): 목록에서 뺀 상세가 무엇이고 어디서 받는지 밝힌다(조용한 축약 금지).
+        detailOmitted: LIST_DETAIL_OMITTED,
+        types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
+        datacenters,
+        agents,
+        // v2.604 AUTHZ-2604-04: 같은 응답의 devices 는 가리는데 poller.inFlight 의 이름(IP)이 샜다 — 형제 perf/activity 와 같은 기준.
+        poller: admin ? pollerSt : maskPollerStatus(pollerSt, regDevs.map((d) => d.host)),
+        // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
+        collectDrops: recentCollectDrops(),
+        ...(isMockMode() ? { demo } : {}),
+      };
+    });
+    sendCached(req, res, key, payload);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || 'internal error' });
+  }
 });
 
 /**

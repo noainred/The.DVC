@@ -170,7 +170,7 @@ export const CATALOG_RULES = [
   C({ id: "collect-vc-cert", tag: "collect", severity: "high", category: "network", entity: 1, entityLabel: "vCenter id",
     re: "(\\S+) \\((.*?)\\) 연결 실패: .* — 인증서 오류",
     src: "server/src/store.js", probe: ") 연결 실패:",
-    sample: "[collect] vc-e (VC-LAB) 연결 실패: fetch failed: self-signed certificate — 인증서 오류 — 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 승인하세요. 중앙↔엣지(수집 서버) 자체서명 HTTPS 도 WAN_TLS_INSECURE 대신 같은 방법을 우선하세요.",
+    sample: "[collect] vc-e (VC-LAB) 연결 실패: fetch failed: self-signed certificate — 인증서 오류 — 장비라면 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 승인하세요. 중앙↔엣지(수집 서버) HTTPS 는 장비 신뢰가 아니라 portal.env 의 WAN_TLS_CA_FILE(사설 CA)로 신뢰합니다 — WAN_TLS_INSECURE 로 검증을 끄지 마세요.",
     title: "TLS 인증서 검증에 실패해 연결 자체를 하지 않았습니다",
     meaning: "TLS 인증서 검증에 실패해 연결 자체를 하지 않았습니다. vCenter 인증서가 바뀌었거나(갱신·재발급) 자체서명입니다.",
     action: "vCenter 인증서의 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 확인해 승인하세요(검증을 끄는 env 는 권하지 않습니다). 인증서 만료 점검 도구로 만료 여부도 확인하세요.",
