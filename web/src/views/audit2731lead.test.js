@@ -2,6 +2,7 @@
 //  ① 표 정렬값에 음수 sentinel 을 쓰지 않는다(I-01 이후 음수는 진짜 값으로 읽혀 결측이 오름차순 맨 앞에 온다 — DataTable 은 null 을 언제나 뒤로 보낸다).
 //  ② GPU 내보내기 창의 vCenter 목록 조회 실패를 빈 선택지로 숨기지 않는다.
 //  ④ VM 가용성 표 — 수집이 멈춰 측정 끝을 자른 VM(tailCut)은 행이 '어디까지 쟀는지' 를 말한다(A2-01 의 화면판).
+//  ⑤ vCenter 상세 400px — 머리 KPI 줄·검색 줄은 줄바꿈, 트리는 상자 안에서 가로 스크롤(기존 236px 넘침 — Chromium A/B 로 기존 결함 확인).
 //  ③ 서버 온도 'ESXi 호스트별' 보기가 서버가 오래됨으로 판정한 호스트(읽히지 않는 vCenter)에 표지를 단다(A2-03 의 화면판).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -50,5 +51,12 @@ describe('v2.731 리드 — 웹', () => {
     expect(tailCutText({ tailCut: true, windowTo: null })).toBe('수집 멈춤 — 멈춘 시각까지만 잼');
     const s = stripComments(fs.readFileSync(path.join(SRC, 'views/tools/VmAvailabilityTool.jsx'), 'utf8'));
     expect(s).toMatch(/v\.tailCut && <div[^>]*>\{tailCutText\(v\)\}/);
+  });
+  it('⑤ vCenter 상세 — 머리 KPI 줄·검색 줄 flexWrap · .vcd-tree overflow-x', () => {
+    const s = stripComments(fs.readFileSync(path.join(SRC, 'views/VCenterDetail.jsx'), 'utf8'));
+    expect(s).toMatch(/style=\{\{ fontSize: 12, alignItems: 'center', flexWrap: 'wrap'/);
+    expect(s).toMatch(/style=\{\{ alignItems: 'center', margin: '10px 0', flexWrap: 'wrap'/);
+    const css = fs.readFileSync(path.join(SRC, 'styles.css'), 'utf8');
+    expect(css).toMatch(/\.vcd-tree \{[^}]*overflow-x: auto/);
   });
 });

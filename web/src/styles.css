@@ -809,7 +809,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* vCenter detail (vSphere-like inventory) */
 .vcd-views { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-.vcd-tree { padding: 10px 12px; }
+.vcd-tree { padding: 10px 12px; overflow-x: auto; } /* v2.731: 노드 줄이 nowrap 이라 400px 에서 페이지를 밀었다 — 트리 안에서 스크롤 */
 .vcd-node { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
 .vcd-node:hover { background: rgba(59,130,246,.08); }
 .vcd-root { font-size: 14px; }

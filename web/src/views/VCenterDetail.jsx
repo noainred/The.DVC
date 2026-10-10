@@ -480,7 +480,8 @@ export default function VCenterDetail({ site, onBack }) {
           </div>
           <StateBadge state={site.status} />
         </div>
-        <div className="flex gap" style={{ fontSize: 12, alignItems: 'center' }}>
+        {/* v2.731: 400px 에서 이 줄이 페이지를 236px 밀어냈다(기존 결함 — A/B 확인) — 줄바꿈을 허용한다. */}
+        <div className="flex gap" style={{ fontSize: 12, alignItems: 'center', flexWrap: 'wrap', rowGap: 6 }}>
           <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{m.hosts ?? (hostsOk ? hosts.length : '—')}</b></span>
           {/* VM 수(v2.336): 'Off VM 포함' 해제 시 켜진 VM 만 센다. 체크 시엔 서버 집계(m.vms)가
               정확한 소스(응답 상한 무관). CPU/메모리 %는 호스트 실사용률이라 전원 필터와 무관. */}
@@ -530,7 +531,7 @@ export default function VCenterDetail({ site, onBack }) {
 
       {(view === 'hosts' || view === 'vms') && (
         <>
-          <div className="flex gap" style={{ alignItems: 'center', margin: '10px 0' }}>
+          <div className="flex gap" style={{ alignItems: 'center', margin: '10px 0', flexWrap: 'wrap', rowGap: 6 }}>
             <SearchBox value={q} onChange={setQ} placeholder={view === 'hosts' ? '🔍 호스트·VM 검색 — 여러 단어는 공백 구분(각 단어 포함 항목 모두 표시, OR)' : '🔍 VM 검색 — 여러 단어는 공백 구분(예: "NTP WA" → NTP 포함 + WA 포함 모두)'}
               style={{ flex: 1, maxWidth: 420 }} />
             {/* 메모 포함(v2.293) — vSphere VM 메모(annotation)도 검색 대상에 넣는다. 메모로만 걸린
