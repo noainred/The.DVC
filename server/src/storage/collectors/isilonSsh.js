@@ -16,8 +16,8 @@
  */
 
 import { withSsh } from '../../proxy/sshExec.js';
-import { powerResult, powerProbe } from '../power.js';
-import { pickIsiPowerKey, keyNamesOfText, isiPowerFromStats, cachedIsiPowerKey, rememberIsiPowerKey, ISI_POWER_KEYS_CMD, isiPowerQueryCmd } from './isilonPower.js';
+import { powerProbe } from '../power.js';
+import { pickIsiPowerKey, keyNamesOfText, isiPowerFromStats, isiPowerResult, cachedIsiPowerKey, rememberIsiPowerKey, ISI_POWER_KEYS_CMD, isiPowerQueryCmd } from './isilonPower.js';
 import { sshFailureSnapshot } from './cliSsh.js';
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
@@ -352,8 +352,11 @@ export function markMixedBasis(snap, deviceId, now = Date.now()) {
   return snap;
 }
 
-/** SSH 전원(v2.667) — { power } | { probe }. 키는 pickIsiPowerKey 가 `[\w.]+` 로만 통과시키므로 명령에 그대로 넣어도 안전하다. */
-export async function readIsiPowerSsh(sh, host) {
+/**
+ * SSH 전원(v2.667) — { power } | { probe }. 키는 pickIsiPowerKey 가 `[\w.]+` 로만 통과시키므로 명령에 그대로 넣어도 안전하다.
+ * v2.732(B2-07): `expectedNodes`(isi status 노드 수)보다 적게 읽었거나 값 없는 노드 행이 있으면 부분 합(partial)으로 싣는다.
+ */
+export async function readIsiPowerSsh(sh, host, { expectedNodes = null } = {}) {
   const source = 'isi statistics(전원 키 탐색)';
   try {
     let c = cachedIsiPowerKey(host);
@@ -365,8 +368,8 @@ export async function readIsiPowerSsh(sh, host) {
     if (!c?.key) return { probe: powerProbe('no-field', { source, detail: '통계 키 목록에 전원 키가 없습니다' }) };
     const q = await sh.exec(isiPowerQueryCmd(c.key), 20_000);
     let j = null; try { j = JSON.parse(String(q.stdout || '').trim()); } catch { /* 아래에서 사유 */ }
-    const p = j ? isiPowerFromStats(j, c.key) : null;
-    const power = p ? powerResult({ watts: p.watts, source: `isi statistics ${c.key}`, basis: 'input', scope: p.nodes ? 'node' : 'system', parts: p.parts, keys: [c.key] }) : null;
+    const p = j ? isiPowerFromStats(j, c.key, { expectedNodes }) : null;
+    const power = isiPowerResult(p, c.key, `isi statistics ${c.key}`);
     if (power) return { power };
     return { probe: powerProbe(j ? 'no-field' : 'parse-failed', { source, detail: `${c.key} 값을 읽지 못했습니다`, seenKeys: c.seen }) };
   } catch (e) {
@@ -380,17 +383,19 @@ export async function collectViaSsh(device) {
       { host: device.host, port: Number(device.sshPort) || 22, username: device.username, password: device.password || '', signal: device._signal },
       async (sh) => {
         const status = await sh.exec('isi status'); // 핵심 — 실패하면 아래 catch 로(수집 실패)
+        // v2.732(B2-07): 노드 수(전원 부분 합 대조용)를 위해 여기서 해석한다 — 아래에서 다시 해석하지 않는다.
+        const parsedStatus = parseIsiStatus(status.stdout || '');
         // 부가 명령은 각각 best-effort: 버전·계정이 없어도 status 파싱 결과는 살린다.
         const ver = await sh.exec('isi version').catch(() => ({ stdout: '' }));
         const usersRaw = await sh.exec('isi auth users list --format json').catch(() => ({ stdout: '' }));
         // v2.604(COL-2604-01): 정확한 용량 바이트(best-effort) — 못 읽으면 isi status 반올림 값을 쓰고 그 사실을 밝힌다.
         const stats = await sh.exec(ISI_STATS_CMD, 20_000).catch(() => ({ stdout: '' }));
         // v2.667 — 전원(best-effort): 키 탐색(6시간 캐시) → 그 키 하나의 현재값. 못 읽으면 사유만 남긴다.
-        const power = await readIsiPowerSsh(sh, device.host);
-        return { status: status.stdout || '', ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', stats: stats.stdout || '', power };
+        const power = await readIsiPowerSsh(sh, device.host, { expectedNodes: parsedStatus.nodes.length || null });
+        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', stats: stats.stdout || '', power };
       },
     );
-    const parsed = parseIsiStatus(r.status);
+    const parsed = r.parsedStatus || parseIsiStatus(r.status);
     const version = /OneFS\s*v?([\d.]+)/i.exec(r.ver)?.[1] || '';
     let users = null;
     try { const j = JSON.parse(r.usersRaw); users = Array.isArray(j) ? j : null; } catch { /* 계정 섹션만 생략 */ }

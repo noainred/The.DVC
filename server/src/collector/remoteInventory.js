@@ -77,8 +77,25 @@ function pickLeaves(src, keys, subArrays, scalarArrays) {
   }
   return o;
 }
-/** 엣지 콤팩트 인벤토리를 모양대로 좁힌다(모르는 키는 버린다). 객체가 아니면 null. */
-export function sanitizeRemoteInv(inv) {
+/**
+ * v2.732(점검 2회차 B4-04): 인벤토리 수집 시각 → epoch ms(못 읽으면 null). 숫자·숫자 글자는 numOrNull, 그 밖의 글자(ISO)만
+ * Date.parse 에 넘긴다(숫자 글자를 Date.parse 에 넘기면 연도로 읽힌다 — v2.562 규약). idrac/gpuCount.js tsMs 와 같은 규칙.
+ */
+function invTimeMs(v) {
+  if (typeof v === 'boolean') return null;
+  const n = numOrNull(v);
+  if (n != null) return n;
+  if (typeof v === 'string' && v.trim()) { const p = Date.parse(v); return Number.isFinite(p) ? p : null; }
+  return null;
+}
+/**
+ * 엣지 콤팩트 인벤토리를 모양대로 좁힌다(모르는 키는 버린다). 객체가 아니면 null.
+ * v2.732(B4-04): `collectedAt` 이 받은 시각(now)보다 미래면 now 로 자르고 원본을 `edgeCollectedAt` 에 남긴다 — 센서 `t`·
+ *   센서 상세 시각(v2.682 R3S-01/02)과 같은 규칙. 미래 시각은 `now - collectedAt` 이 음수라 엣지가 멈춘 뒤에도 인벤토리가
+ *   **영원히 신선**(serverParts·gpuCount 의 '낡음' 판정이 오지 않는다)했다. 재정리(pull → 저장)에서도 원본을 잃지 않는다.
+ *   now 가 없으면 자르지 않는다(순수 판정 호환).
+ */
+export function sanitizeRemoteInv(inv, { now = null } = {}) {
   if (!isPlainObj(inv)) return null;
   const out = {};
   for (const [k, [kind, keys, sub, scal]] of Object.entries(INV_SHAPE)) {
@@ -95,7 +112,17 @@ export function sanitizeRemoteInv(inv) {
   if (typeof inv.reachable === 'boolean') out.reachable = inv.reachable;
   // v2.728: 같은 물리 포트가 두 컬렉션으로 두 번 실린 구버전 엣지 보고도 중앙에서 한 번으로 묶는다(idrac/nicPorts.js).
   if (Array.isArray(out.nics)) out.nics = dedupNics(out.nics);
-  if (Object.hasOwn(inv, 'collectedAt')) out.collectedAt = scalar(inv.collectedAt);
+  if (Object.hasOwn(inv, 'collectedAt')) {
+    const c0 = scalar(inv.collectedAt);
+    const ms = invTimeMs(c0);
+    if (ms != null && now != null && Number.isFinite(now) && ms > now) {
+      out.collectedAt = now; out.edgeCollectedAt = ms;
+    } else {
+      out.collectedAt = c0;
+      const e = numOrNull(inv.edgeCollectedAt);
+      if (e != null && ms != null && e > ms) out.edgeCollectedAt = e; // 이미 잘린 값의 재정리 — 원본 유지
+    }
+  }
   return out;
 }
 /** 최신 센서 {t, temps:{이름:℃}} — 온도는 숫자만(못 읽은 값은 0 이 아니라 뺀다), 이름은 식별자 규칙. */
@@ -186,6 +213,13 @@ export function remoteVendor(v) {
  * @returns {{ servers: object[], dropped: { notObject:number, badId:number, overCount:number }, coerced:number }}
  */
 export const REMOTE_HOSTNAMES_MAX = 16;
+/**
+ * v2.732(점검 2회차 B6-05): 이 모듈이 기본 상한·지금 시각으로 정제한 목록(배열 객체 자체)을 기억한다 — pull 경로는
+ * sanitizeEdgeExport 가 이미 정제한 목록을 setCollectorServers 가 **한 번 더** 정제했다(결과 동일 · 1,100대 약 45ms 낭비).
+ * 표지는 모듈 안 WeakSet 이라 바깥(엣지 JSON·다른 호출부)이 위조할 수 없다 — 옵션 플래그(`sanitized:true`)로 두면 정제 안 한
+ * 목록에 그 플래그를 붙이는 실수가 방어선을 끈다. 상한을 넓히거나 미래 now 로 정제한 목록은 표지하지 않는다(다시 정제).
+ */
+const _sanitizedLists = new WeakSet();
 export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX, now = Date.now() } = {}) {
   const dropped = { notObject: 0, badId: 0, overCount: 0 };
   let coerced = 0;
@@ -216,11 +250,12 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX, now = Da
         o.hostNames = names;
       } else coerced += 1;
     }
-    o.inv = sanitizeRemoteInv(s.inv);
+    o.inv = sanitizeRemoteInv(s.inv, { now });
     o.sensors = sanitizeRemoteSensors(s.sensors, { now });
     o.sensorDetail = sanitizeRemoteSensorDetail(s.sensorDetail, { now });
     servers.push(o);
   }
+  if (max <= REMOTE_SERVERS_MAX && Number.isFinite(now) && now <= Date.now()) _sanitizedLists.add(servers);
   return { servers, dropped, coerced };
 }
 
@@ -271,7 +306,8 @@ export function setCollectorServers(collectorId, datacenter, servers) {
   const id = String(collectorId || '').trim();
   if (!id) return;
   // 정리는 이 함수 안에서 한다(v2.602 CEN2602-01) — 다른 호출부가 생겨도 원본을 그대로 보관하지 않게.
-  const list = sanitizeRemoteServers(servers).servers;
+  // v2.732(B6-05): 이 모듈이 이미 정제한 목록(WeakSet 표지 — pull 의 sanitizeEdgeExport 결과)은 다시 정제하지 않는다.
+  const list = Array.isArray(servers) && _sanitizedLists.has(servers) ? servers : sanitizeRemoteServers(servers).servers;
   byCollector.set(id, { at: Date.now(), datacenter: String(datacenter || ''), servers: list });
 }
 

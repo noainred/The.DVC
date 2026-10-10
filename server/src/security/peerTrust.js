@@ -21,6 +21,8 @@
  *   예전 이름 `seenCount` 가 그랬다. 읽을 때는 옛 이름도 받아 옮긴다).
  * 손상 파일은 preserveCorrupt 로 보존하고 **두 종류 모두 enforce 로 닫는다**(승인 목록을 잃은 채 observe 로 열면
  * 그 사이 공격자 키가 '관찰' 로 들어온다). 상태의 `loadError` 가 그 사실을 말한다.
+ * v2.732(B4-03): **읽기 실패(EACCES 등)도 같은 규칙**이고 닫힌 정책을 곧바로 파일에 남긴다(재시작이 observe 로 내려가지 않게 —
+ *   failClosed). 원본을 옮기지 못하면 쓰기를 막는다(`loadError.writeBlocked`).
  *
  * 다중 지문(v2.731 A1-01): 같은 주소(host:port) 뒤에 서버가 여럿인 장비(로드밸런서·DNS 라운드로빈 — 서버마다 자체서명 인증서·
  * 호스트키)는 정상적으로 여러 지문을 낸다. 그래서 항목은 신뢰 지문 **목록**(상한 TRUSTED_MAX)을 갖고 승인은 **추가**다(교체는 명시 옵션
@@ -176,9 +178,23 @@ function sanitizeTrustedList(kind, e) {
   return out;
 }
 
+/**
+ * v2.732(점검 2회차 B4-03): 읽지 못한 원본을 옆으로 옮기지 못했으면(원본이 그 자리에 남아 있음) **쓰지 않는다** —
+ *   빈 승인 목록으로 원본을 덮으면 승인 지문이 영구히 사라지고 다음 기동이 정책 없는 파일을 '기존 현장' 으로 읽어 observe 로 연다.
+ *   관리자 동작(승인·거부·삭제·정책)은 **메모리를 바꾸기 전에** 이 검사로 거절한다(저장 못 한 정책 변경이 메모리에만 남지 않게).
+ *   status 409 · code 'peer-trust-unwritable' — 화면은 상태의 loadError.writeBlocked 로 사유를 본다.
+ */
+function assertWritable() {
+  if (!_loadError?.writeBlocked) return;
+  const e = new Error('peer-trust.json 을 읽지 못했고 원본을 옆으로 옮기지 못해 저장하지 않습니다 — 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요');
+  e.status = 409; e.code = 'peer-trust-unwritable';
+  throw e;
+}
+
 function persist() {
   const st = load();
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  assertWritable();
   const obj = { v: 1, policy: st.policy, origin: st.origin, entries: [...st.entries.values()].map(entryToJson) };
   atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 1), { mode: 0o600 });
   _dirty = false;
@@ -195,6 +211,7 @@ function persist() {
  */
 function persistSoon() {
   _dirty = true;
+  if (_loadError?.writeBlocked) return; // v2.732 B4-03 — 쓸 수 없는 동안 연결마다 저장 시도·경고를 쌓지 않는다(기동 경고 1줄이 말한다)
   try { registerExitFlush('peer-trust', () => { if (_dirty) persist(); }); } catch { /* */ }
   if (_saveTimer) return;
   _saveTimer = setTimeout(() => { _saveTimer = null; if (_dirty) persistSafe(); }, SAVE_DEBOUNCE_MS);
@@ -207,14 +224,52 @@ export function flushPeerTrust() {
   if (_dirty && _st) persistSafe();
 }
 
+/**
+ * v2.732(B4-03): 예전에 손상·읽기 실패로 원본을 옆으로 옮긴 흔적(`peer-trust.json.corrupt.*`)이 있는가.
+ * 보존 직후 새 파일을 쓰지 못한 채 재시작하면 파일이 '없음' 으로 보여 decideDefaults 가 기존 현장을 observe 로 열었다 —
+ * 흔적이 있으면 승인 목록을 잃은 상태이므로 enforce 로 닫는다(관리자가 화면에서 observe 로 바꿀 수 있다).
+ */
+function lostTrustTrace() {
+  try {
+    const base = path.basename(FILE());
+    return fs.readdirSync(path.dirname(FILE())).find((n) => n.startsWith(`${base}.corrupt.`)) || null;
+  } catch { return null; }
+}
+
 function decideDefaults(st) {
-  const migration = existingInstall();
+  const trace = lostTrustTrace();
+  const migration = !trace && existingInstall();
   const now = Date.now();
   for (const kind of PEER_KINDS) {
     if (PEER_MODES.includes(st.policy[kind])) continue;
-    st.policy[kind] = migration ? 'observe' : 'enforce';
-    st.origin[kind] = { origin: migration ? 'upgrade-migration' : 'new-install', at: now };
+    st.policy[kind] = trace ? 'enforce' : migration ? 'observe' : 'enforce';
+    st.origin[kind] = trace ? { origin: 'load-error', at: now, trace } : { origin: migration ? 'upgrade-migration' : 'new-install', at: now };
   }
+}
+
+/**
+ * v2.732(점검 2회차 B4-03): 읽기 실패(EACCES 등)와 손상은 **같은 규칙**이다 — 원본을 `preserveCorrupt` 로 옆에 보존하고,
+ * 두 종류 정책을 **상태에** enforce(origin 'load-error')로 채운 뒤 곧바로 그 상태를 쓴다. 예전 읽기 실패 갈래는 보존도 정책
+ * 기록도 없어 ① 첫 연결 기록(2초 묶음 저장)이 원본을 빈 승인 목록으로 덮었고 ② 다음 기동이 정책 키 없는 파일을 기존 현장으로
+ * 판정해 **observe(upgrade-migration)** 로 열었다 — 승인 목록을 잃은 채 관찰로 여는 것이 머리말이 막으려던 바로 그 상황이다.
+ * 손상 갈래도 보존 뒤 재시작하면 '파일 없음' 이라 같은 하향이 있었다 → 즉시 기록 + decideDefaults 의 흔적 판정.
+ * 원본을 옮기지 못했으면(rename 실패 — 파일이 그 자리에 남음) 쓰기를 막는다(`writeBlocked`) — 원본을 덮지 않는다.
+ */
+function failClosed(st, code, detail = '') {
+  let bak = null;
+  try { bak = preserveCorrupt(FILE(), code === 'corrupt' ? 'peer-trust 손상' : `peer-trust 읽기 실패(${detail || code})`); } catch { /* */ }
+  let stillThere = false;
+  if (!bak) { try { fs.lstatSync(FILE()); stillThere = true; } catch { /* 없음 */ } }
+  _loadError = { code, ...(detail ? { detail } : {}), ...(bak ? { preserved: path.basename(bak) } : {}), ...(stillThere ? { writeBlocked: true } : {}) };
+  const now = Date.now();
+  for (const kind of PEER_KINDS) { st.policy[kind] = 'enforce'; st.origin[kind] = { origin: 'load-error', at: now }; }
+  _st = st;
+  console.warn(`[peerTrust] peer-trust.json 을 ${code === 'corrupt' ? '해석하지' : `읽지(${detail || code})`} 못했습니다 — `
+    + (bak ? `원본을 ${path.basename(bak)} 로 보존했습니다. ` : stillThere ? '원본을 옮기지 못해 이 파일에 쓰지 않습니다(권한 확인 후 재시작). ' : '')
+    + '승인 목록이 없으므로 SSH·TLS 모두 승인 지문만 허용(enforce)으로 닫습니다.');
+  // 닫힌 정책을 곧바로 남긴다 — 그래야 이후 재시작이 observe 로 내려가지 않는다(원본은 이미 옮겼다).
+  if (!stillThere) { try { persist(); } catch (e) { console.warn(`[peerTrust] 닫힌 정책 저장 실패: ${e?.message || e}`); } }
+  return st;
 }
 
 function load() {
@@ -222,19 +277,12 @@ function load() {
   const st = emptyState();
   let raw = null;
   try { raw = fs.readFileSync(FILE(), 'utf8'); } catch (e) {
-    if (e?.code !== 'ENOENT') { _loadError = { code: 'unreadable', detail: String(e?.code || e?.message || e).slice(0, 120) }; }
+    if (e?.code !== 'ENOENT') return failClosed(st, 'unreadable', String(e?.code || e?.message || e).slice(0, 120));
   }
   if (raw != null) {
     let obj = null;
     try { obj = JSON.parse(raw); } catch { obj = null; }
-    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.entries)) {
-      try { preserveCorrupt(FILE(), 'peer-trust 손상'); } catch { /* */ }
-      _loadError = { code: 'corrupt' };
-      console.warn('[peerTrust] peer-trust.json 을 읽지 못했습니다(손상 원본 보존) — 승인 목록이 없으므로 SSH·TLS 모두 승인 지문만 허용(enforce)으로 닫습니다.');
-      for (const kind of PEER_KINDS) { st.policy[kind] = 'enforce'; st.origin[kind] = { origin: 'load-error', at: Date.now() }; }
-      _st = st;
-      return st;
-    }
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.entries)) return failClosed(st, 'corrupt');
     for (const kind of PEER_KINDS) {
       if (PEER_MODES.includes(obj.policy?.[kind])) st.policy[kind] = obj.policy[kind];
       if (obj.origin?.[kind] && typeof obj.origin[kind] === 'object') st.origin[kind] = obj.origin[kind];
@@ -277,6 +325,7 @@ export function setPeerPolicy(kind, mode, { by = '' } = {}) {
   if (!PEER_MODES.includes(mode)) return { ok: false, error: 'unknown-mode' };
   if (envPolicy(kind)) return { ok: false, error: 'env-forced', envKey: ENV_KEY[kind] };
   const st = load();
+  assertWritable(); // v2.732 B4-03 — 저장할 수 없으면 메모리를 바꾸기 전에 거절
   st.policy[kind] = mode;
   st.origin[kind] = { origin: 'admin', at: Date.now(), by: String(by || '').slice(0, 64) };
   persist();
@@ -422,6 +471,7 @@ function persistSafe() {
 export function approvePeer(kind, host, port, fp, { by = '', note = '', replace = false } = {}) {
   if (!PEER_KINDS.includes(kind)) return { ok: false, error: 'unknown-kind' };
   const st = load();
+  assertWritable(); // v2.732 B4-03 — 저장할 수 없으면 메모리를 바꾸기 전에 거절
   const key = peerKey(kind, host, port);
   const [, h, p] = key.split('|');
   if (!h) return { ok: false, error: 'bad-host' };
@@ -470,6 +520,7 @@ export function approvePeer(kind, host, port, fp, { by = '', note = '', replace 
 export function rejectPeer(kind, host, port, fp, { by = '' } = {}) {
   if (!PEER_KINDS.includes(kind)) return { ok: false, error: 'unknown-kind' };
   const st = load();
+  assertWritable(); // v2.732 B4-03 — 저장할 수 없으면 메모리를 바꾸기 전에 거절
   const key = peerKey(kind, host, port);
   const e = st.entries.get(key);
   const nfp = fp ? normalizeFingerprint(kind, fp) : (e?.pending?.fp || '');
@@ -488,6 +539,7 @@ export function rejectPeer(kind, host, port, fp, { by = '' } = {}) {
 /** 항목 삭제(장비 폐기 등). 다음 연결은 처음 보는 장비로 판정된다. */
 export function removePeer(kind, host, port) {
   const st = load();
+  assertWritable(); // v2.732 B4-03 — 저장할 수 없으면 메모리를 바꾸기 전에 거절
   const key = peerKey(kind, host, port);
   const had = st.entries.delete(key);
   if (had) persist();
@@ -498,6 +550,7 @@ export function removePeer(kind, host, port) {
 export function approveAllObserved(kind, { by = '' } = {}) {
   if (!PEER_KINDS.includes(kind)) return { ok: false, error: 'unknown-kind' };
   const st = load();
+  assertWritable(); // v2.732 B4-03 — 저장할 수 없으면 메모리를 바꾸기 전에 거절
   const now = Date.now();
   let n = 0;
   const who = String(by || '').slice(0, 64);
