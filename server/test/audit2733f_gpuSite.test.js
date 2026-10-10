@@ -90,13 +90,14 @@ test('C4-01 ② 건너뛴 개수·사유를 상태·진단에 남긴다 — site
   assert.deepEqual(last.skippedCounts, { disabled: 1, maintenance: 1, site: 1 });
   const site = last.skippedVcenters.find((x) => x.vcId === 'vc-site');
   assert.equal(site?.why, 'site');
-  assert.equal(site?.remoteAgent, 'edge-a', '담당 엣지를 밝힌다');
+  assert.equal(site?.remoteAgent, undefined, '엣지 이름은 상태(범위 계정에도 가는 응답)에 싣지 않는다 — 진단에만');
   const unread = last.unreadVcenters.map((x) => x.vcId).sort();
   assert.ok(unread.includes('vc-maint') && unread.includes('vc-off'), '비활성·점검중은 예전처럼 unread(엣지 push 보류 동작 불변)');
   assert.ok(!unread.includes('vc-site'), "site 는 '못 읽음' 이 아니라 '이 노드의 몫이 아님' — push 보류 사유로 넣지 않는다");
   const d = g.getGpuGuestDiag().vcenters.find((x) => x.vcId === 'vc-site');
   assert.match(d.stage, /엣지 위임/);
   assert.equal(d.skipped, 'site');
+  assert.equal(d.remoteAgent, 'edge-a', '진단은 담당 엣지를 밝힌다');
   assert.equal(d.results.length, 0);
 });
 

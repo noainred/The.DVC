@@ -328,7 +328,7 @@ async function pollOnce() {
           const why = directCollectSkipReason(vc);
           if (why) {
             const sk = skippedVcenterDiag(vc, why);
-            skippedVcenters.push({ vcId, why, ...(why === 'site' ? { remoteAgent: sk.diag.remoteAgent } : {}) });
+            skippedVcenters.push({ vcId, why, ...(why === 'site' ? { remoteAgent: sk.diag.remoteAgent } : {}) }); // remoteAgent 는 콘솔 줄에만(lastRun 에는 싣지 않는다 — 아래)
             if (sk.unread) unreadVcenters.push({ vcId, reason: sk.unread });
             diags.push(sk.diag);
             return;
@@ -348,13 +348,14 @@ async function pollOnce() {
     const authStoppedVms = diags.reduce((a, d) => a + (d.authStoppedVms || 0), 0);
     const vcAuthStopped = diags.filter((d) => d.authStopped).map((d) => d.vcId);
     // v2.733(C4-01): 건너뛴 vCenter 는 개수·사유를 상태에 싣고, 콘솔에는 그 집합이 바뀔 때(또는 10분에 한 번)만 남긴다.
+    //   담당 엣지 이름은 진단(전체 범위 전용 라우트)·콘솔에만 — 상태(lastRun)는 설정 화면이 범위 계정에도 주므로 싣지 않는다.
     skippedVcenters.sort((a, b) => String(a.vcId).localeCompare(String(b.vcId)));
     const skippedCounts = skippedCountsOf(skippedVcenters.map((x) => ({ why: x.why })));
     if (skippedVcenters.length) {
       const line = skippedVcenters.map((x) => `${x.vcId}(${x.why === 'site' ? `엣지 위임 → ${x.remoteAgent || '담당 엣지 미지정'}` : x.why === 'disabled' ? '비활성' : x.why === 'maintenance' ? '점검중' : x.why})`).join(', ');
       if (_skipLog('skipped', line)) console.log(`[gpu-guest] 직접 수집 대상이 아닌 vCenter ${skippedVcenters.length}곳은 로그인하지 않습니다: ${line}`);
     }
-    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}), unreadVcenters, skippedVcenters: skippedVcenters.slice(0, 64), skippedCounts };
+    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}), unreadVcenters, skippedVcenters: skippedVcenters.slice(0, 64).map(({ vcId, why }) => ({ vcId, why })), skippedCounts };
     lastDiag = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: diags };
   } finally { running = false; }
 }

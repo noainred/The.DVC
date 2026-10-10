@@ -60,7 +60,7 @@ let _collectCurrent = null;
 let _collectRun = null;
 
 /** 호스트 키(대소문자·앞뒤 공백 무시 — 같은 스위치는 같은 키). 빈 값이면 잠그지 않는다. */
-export function sanHostKey(host) { return String(host ?? '').trim().toLowerCase(); }
+function sanHostKey(host) { return String(host ?? '').trim().toLowerCase(); }
 const _hostLocks = new Map(); // 호스트 키 → 꼬리 프라미스(대기 순서 = 등록 순서)
 /**
  * 같은 호스트에 대한 작업(연결 테스트 대행·'지금 수집')을 차례로 돌린다 — 같은 장비에 SSH 세션을 겹치지 않게.
