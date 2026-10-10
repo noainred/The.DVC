@@ -335,3 +335,13 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
   고쳐졌다는 뜻이 아니다). 알림 제목은 'CVP 장애 판정 제외'.
 - 판정은 엣지에서 한다(`client.js`). 엣지 위임 CVP 는 엣지를 2.656 이상으로 올려야 Tx·바이어스 장애가 새로 열리지 않는다.
 - 장비 목록의 '🛰 CVP 버전' 칩은 장비를 관리하는 CVP 서버의 버전(getCvpInfo)이다 — EOS 버전 칩과 다른 축이다. 버전을 못 읽은 CVP 는 '(CVP 버전 미상)'.
+
+## 18. 낡은 부품 값 · 담당 판정 한 벌(v2.732)
+
+- 전력·GBIC 탭은 **부품 값이 지금 값일 때만** 합계·판정 KPI 에 넣는다 — 기준은 장비 KPI·Overview·장애 판정과 같은 `faults.partsFresh`.
+  낡은 장비(`parts-stale`·`stale`·`never`·`not-streaming`·`telemetry-failed`)는 행을 남기고 지금 값 칸만 비운 채 사유별로 센다(`stale`·`staleBy`).
+  항등식: 전력 `devices = read + stale + Σunread`.
+- 장비 담당(어느 CVP 서버의 행인가)은 `cvp/overview.js rowOwnerOf(servers)` 하나다 — 라우트·Overview 카드·장애 판정이 같은 판정을 쓴다.
+  담당을 바꾼 장비를 Overview 카드가 두 번 세던 것을 고쳤다(옛 엣지 행이 남아 있어도 지금 담당 행만 센다).
+- 포트 사용량 화면의 포트 설명은 비-admin 에게 가린다(주소·호스트명이 들어간다 — 장비 상세와 같은 규칙).
+- 회귀: `server/test/audit2732b.test.js` · 웹 `tools/audit2732b.test.js`.

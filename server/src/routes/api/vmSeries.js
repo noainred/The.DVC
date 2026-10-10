@@ -29,6 +29,7 @@ import { localReportFor, topSpikers } from '../../vmseries/query.js';
 import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
 import { mockLocalReport } from '../../vmseries/mock.js';
 import { memoJson, scopeKey } from './shared.js';
+import { pushAll } from '../../util/pushAll.js';
 /**
  * v2.595(감사 AUTHZ-2595-02): push 상태도 범위로 거른다 — status 만 거르고 push.last 로 범위 밖 vCenter id·오류 문구·
  * centralUrl 이 나갔다(v2.574 SEC-07 과 같은 우회). 범위 계정은 자기 범위 vCenter 의 마지막 보고만, centralUrl·오류 원문은 admin 만.
@@ -100,7 +101,7 @@ export function vmSeriesStaleOf(targets, snap) {
     if (!gone && !hosts.length && !vms.length) continue;
     staleTargets[id] = { vcenter: gone, hosts, vms };
     if (gone) staleIds.push(id);
-    staleIds.push(...hosts, ...vms);
+    pushAll(staleIds, hosts); pushAll(staleIds, vms);   // v2.603 규약 — 인벤토리 규모 배열에 스프레드 push 금지
   }
   return { staleIds, staleTargets };
 }

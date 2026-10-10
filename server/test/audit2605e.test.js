@@ -85,7 +85,8 @@ test('WEB2605-05·06: 알림 화면은 빈 칸을 보내지 않고, 주기 변�
   const s = webSrc('views/Alerts2.jsx');
   assert.doesNotMatch(s, /Number\(e\.target\.value\)/);
   assert.match(s, /threshold:\s*blankOr\(v\.threshold\)/);
-  assert.match(s, /putJson\('\/admin\/alerts',\s*toBody\(c\)\)/);
+  // v2.732(i3): 범위 계정에서 가린 웹훅 URL 은 보내지 않는다(withoutHiddenUrls) — 빈 칸을 보내지 않는 규칙은 toBody 가 그대로 한다.
+  assert.match(s, /putJson\('\/admin\/alerts',\s*toBody\((?:withoutHiddenUrls\()?c\)?\)\)/);
   assert.doesNotMatch(s, /재시작 후 적용/, '저장 즉시 rescheduleAlertEngine 이 재적용한다');
 });
 
