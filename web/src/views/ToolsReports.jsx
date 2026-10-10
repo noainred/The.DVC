@@ -16,9 +16,11 @@ import { dailyReportFailNote } from './dailyReportText.js';
 import { alertChannelsBody } from './alertChannelsBody.js';
 import { alertsLockReason, channelUrlField, withoutHiddenUrls } from './alertChannelUrlText.js'; // v2.732(그룹 i3): 범위 계정 URL 가림·저장 잠금
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
+import { notCollectedNote, notCollectedOf, notCollectedOneText } from './eventCoverageText.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
 import { numOrNull } from '../numOrNull.js'; // v2.727(C-01)
 import { unitText } from './unitText.js';
+import { forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { suggestCell, heldNote } from './rightsizeText.js';
 import Select from '../components/Select.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
@@ -345,7 +347,7 @@ export function CapacityForecast({ scope }) {
     { key: 'capacityGB', label: '전체', align: 'right', render: (r) => tb(r.capacityGB) },
     { key: 'slopePerDay', label: '증가/일', align: 'right', render: (r) => `${r.slopePerDay > 0 ? '+' : ''}${r.slopePerDay}GB` },
     { key: 'daysToLimit', label: '고갈까지', align: 'right', render: (r) => (r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
-    { key: 'etaTs', label: '예상일', render: (r) => fmtDay(r.etaTs) },
+    { key: 'etaTs', label: '예상일', render: (r) => <>{fmtDay(r.etaTs)}{forecastStaleText(r, data.generatedAt) && <div className="muted" style={{ fontSize: 11, color: 'var(--amber)' }} title={FORECAST_STALE_TITLE}>{forecastStaleText(r, data.generatedAt)}</div>}</> },
     { key: 'r2', label: '신뢰도(R²)', align: 'right', render: (r) => (r.r2 == null ? '—' : r.r2) }, // v2.710: 데모 합성 행은 R² 를 지어내지 않는다
   ];
   return (
@@ -550,6 +552,24 @@ export function ComplianceReport({ scope }) {
 }
 
 /* ── ⑨ 구성 변경 이력 ──────────────────────────────────────────────── */
+/**
+ * v2.733(점검 3회차 C1-01): 구성 변경 이력의 수집 범위 안내. 서버가 `notCollected`(이 포탈이 지금 이벤트를 수집하지 않는 vCenter —
+ * 엣지 위임·비활성·점검중)를 싣는다. 고른 vCenter 가 그 목록에 있으면 그 한 문장, 전체 보기면 목록 한 줄. 없으면 ''.
+ */
+export function changeCoverageNote(data, scope) {
+  const one = notCollectedOf(data?.notCollected, scope);
+  if (one) return notCollectedOneText(one, { what: '변경' });
+  if (scope) return '';
+  return notCollectedNote(data?.notCollected, { what: '변경' });
+}
+
+/** 빈 표의 문구 — 고른 vCenter 를 지금 수집하지 않으면 '변경 없음' 이라 말하지 않는다. */
+export function changeEmptyText(data, scope) {
+  return notCollectedOf(data?.notCollected, scope)
+    ? '이 vCenter 는 이 포탈이 지금 이벤트를 수집하지 않아 이 기간의 변경을 알 수 없습니다.'
+    : '조건에 맞는 변경 이벤트가 없습니다.';
+}
+
 export function ChangeHistory({ scope }) {
   const [days, setDays] = useState(7);
   const [category, setCategory] = useState('');
@@ -588,12 +608,13 @@ export function ChangeHistory({ scope }) {
             (data.rows || []).map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.category, r.type, r.user, r.entity, r.message]))}>CSV</button>}
         </div>
       </div>
+      {changeCoverageNote(data, scope) && <div className="banner" style={{ marginBottom: 8, fontSize: 12 }}>{changeCoverageNote(data, scope)}</div>}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap" style={{ maxHeight: '62vh' }}>
           <STable>
             <thead><tr><th>시각</th><th>분류</th><th>계정</th><th>대상</th><th>내용</th><th>vCenter</th></tr></thead>
             <tbody>
-              {(data.rows || []).length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16, textAlign: 'center' }}>조건에 맞는 변경 이벤트가 없습니다.</td></tr>}
+              {(data.rows || []).length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16, textAlign: 'center', whiteSpace: 'normal' }}>{changeEmptyText(data, scope)}</td></tr>}
               {(data.rows || []).map((r, i) => (
                 <tr key={i}>
                   <td className="nowrap">{fmtDate(r.ts)}</td>

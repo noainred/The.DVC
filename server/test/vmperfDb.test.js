@@ -63,17 +63,20 @@ test('prune 이 보존기간 밖 행을 지운다(0 이면 무제한)', { skip: 
   const old = Date.now() - 40 * 86_400_000;   // 40일 전
   await db.insertVmperf('vc-p', rowsFor('vc-p', 1000, 500), old);
   await db.insertVmperf('vc-p', rowsFor('vc-p', 1000, 500), Date.now());
-  // vmperfMeta 는 metric 단위 count(기본 vm_cpu_alloc_mhz) → 40일전 1 + 최근 1 = 2행.
+  // vmperfCount 는 metric 단위 행 수(기본 vm_cpu_alloc_mhz) → 40일전 1 + 최근 1 = 2행.
+  // (v2.733 C6-05: vmperfMeta 는 첫·마지막 시각만 준다 — 행 수를 함께 세면 키의 전 이력을 훑는다.)
+  assert.equal(await db.vmperfCount('vc-p'), 2, 'metric 당 2행(40일전·최근)');
   const before = await db.vmperfMeta('vc-p');
-  assert.equal(before.count, 2, 'metric 당 2행(40일전·최근)');
+  assert.equal(before.firstTs, old, '첫 시각 = 40일 전');
 
   assert.equal(await db.pruneVmperf('vc-p', 0), 0, '0 = 무제한(삭제 없음)');
-  assert.equal((await db.vmperfMeta('vc-p')).count, 2);
+  assert.equal(await db.vmperfCount('vc-p'), 2);
 
   // rowsFor 가 메트릭 2종을 넣으므로 40일 전 시점의 삭제 행은 2행이다(전체 테이블 기준).
   const removed = await db.pruneVmperf('vc-p', 7);   // 7일 보존 → 40일 전 행 삭제
   assert.equal(removed, 2, `삭제 ${removed}행(메트릭 2종 × 1시점)`);
-  assert.equal((await db.vmperfMeta('vc-p')).count, 1, '최근 시점만 남음');
+  assert.equal(await db.vmperfCount('vc-p'), 1, '최근 시점만 남음');
+  assert.ok((await db.vmperfMeta('vc-p')).firstTs > old, '첫 시각이 최근 시점으로 옮겨졌다');
 });
 
 test('제외 시 파일 삭제로 용량을 회수한다', { skip: !sqliteOk ? 'node:sqlite 미지원' : false }, async () => {

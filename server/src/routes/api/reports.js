@@ -19,8 +19,7 @@ import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
-import { loadRegistry as listVcenterRegistry } from '../../vcenter/registry.js';
-import { directCollectSkipReason } from '../../vcenter/collectTarget.js'; // v2.732: 직접 수집 대상 판정 한 벌(로그 폴러와 같다)
+import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다)
 
 /**
  * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
@@ -182,9 +181,14 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
     const rows = db.query(f, SCAN_MAX, 0);
     const changes = filterChangeEvents(rows, { category: req.query.category || '', user: req.query.user || '', entity: req.query.entity || '' });
     const { limit, offset } = pageArgs(req.query, { def: 300, max: 1000 });   // v2.594: limit=-1 → slice(o, o-1) 전량이었다
+    // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)를 밝힌다 — 그 vCenter 의 '0건' 은
+    //   '변경 없음' 이 아니고, 남은 행은 수집을 멈추기 전 것이다. 범위 계정은 범위 안 것만, vCenter 를 골랐으면 그 하나만.
+    const names = new Map((snap.vcenters || []).map((v) => [String(v.id), v.name || '']));
+    const notCollected = notCollectedList(eventNotCollectedMap(), { allowed, only: vcParam ? [vcParam] : null, names });
     res.json({
       total: changes.length, scanned: rows.length, truncated: rows.length >= SCAN_MAX,
       days, categories: CHANGE_CATEGORIES,
+      notCollected,
       rows: changes.slice(offset, offset + limit),
     });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -215,11 +219,13 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     const coveredVcenterIds = new Set();
     // v2.732(점검 2회차 B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 창 안에 옛 이벤트가 남아 있어도
     //   '판정 가능' 이 아니다 — 수집을 멈춘 뒤의 스냅샷 이벤트가 없으므로 그 VM 을 미보호로 세면 거짓 백업 공백이다(로그 폴러가 2.732 부터 그 셋을 건너뛴다).
-    const regById = new Map((listVcenterRegistry() || []).map((v) => [String(v.id), v]));
-    const notCollectedVcenterIds = new Set();
+    // v2.733(점검 3회차 C1-01): 판정은 logs/coverage.js 하나(형제 리포트와 같다). mock 모드는 로그 폴러가 스냅샷 vCenter 전부를 모으므로 빈 맵이다.
+    //   id → 사유 맵을 그대로 넘겨 summary.notCollectedVcenters 가 사유를 함께 싣는다.
+    const ncMap = eventNotCollectedMap();
+    const notCollectedVcenterIds = new Map();
     for (const vc of scoped.vcenters || []) {
-      const reg = regById.get(String(vc.id));
-      if (reg && directCollectSkipReason(reg)) { notCollectedVcenterIds.add(String(vc.id)); continue; }
+      const why = ncMap.get(String(vc.id));
+      if (why) { notCollectedVcenterIds.set(String(vc.id), why); continue; }
       if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
     }
     return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds });

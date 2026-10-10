@@ -7,6 +7,8 @@ import { guestAuthLines } from './authSkipText.js'; // v2.591(감사 F2): 게스
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const TYPE_LBL = { 'login-fails': '로그인 실패', 'net-issues': '네트워크 이슈' };
+// v2.733(C3-02a): 서버 GET 이 이 계정의 쓰기 범위 밖 작업에 writable:false 를 싣는다 — 버튼을 잠그고 사유를 말한다(반응 없는 버튼은 고장으로 읽힌다).
+const roTitle = (j) => (j && j.writable === false ? '이 계정의 쓰기 범위 밖 vCenter 작업입니다 — 조회만 할 수 있습니다' : undefined);
 
 /**
  * 변경 요청 응답이 거부인가 — 사유 문구 또는 null(점검 A5-09). putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려주고,
@@ -67,9 +69,9 @@ export default function GuestScanJobs({ type }) {
               <td>{j.enabled ? <span className="badge green">동작</span> : <span className="badge gray">중지</span>}
                 {j.lastAuth?.jobStopped && <span className="badge red" style={{ marginLeft: 4, whiteSpace: 'nowrap' }}>인증 실패 정지</span>}</td>
               <td><div className="flex gap">
-                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy} onClick={() => run(j.id)}>지금</button>
-                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy} onClick={() => toggle(j)}>{j.enabled ? '중지' : '시작'}</button>
-                <button className="tab" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red)' }} disabled={busy} onClick={() => del(j.id)}>삭제</button>
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy || j.writable === false} title={roTitle(j)} onClick={() => run(j.id)}>지금</button>
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy || j.writable === false} title={roTitle(j)} onClick={() => toggle(j)}>{j.enabled ? '중지' : '시작'}</button>
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red)' }} disabled={busy || j.writable === false} title={roTitle(j)} onClick={() => del(j.id)}>삭제</button>
               </div></td>
             </tr>
           ))}</tbody></STable></div>

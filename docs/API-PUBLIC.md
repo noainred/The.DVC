@@ -323,9 +323,12 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 분류 `capacity` · **전체 범위 키만** · 배열
 
-필드: `deviceId` `name` `usedBytes` `totalBytes` `observedDays` `growth` `unknownUsed` `resolutionBytes` `excludedFromTotals`
+필드: `deviceId` `name` `usedBytes` `totalBytes` `observedDays` `growth` `growthSpanDays` `unknownUsed` `resolutionBytes` `excludedFromTotals`
 
 `growth` 는 기간별 증가 **바이트**입니다: `{ "1d": 123456, "7d": null, "30d": null }`
+
+`growthSpanDays`(v2.733): 그 증가량의 **실제 비교 구간(일)** 입니다: `{ "1d": 1, "7d": 7, "30d": 365 }`. 요청한 날짜에 수집이 없으면
+그 이전 가장 가까운 날과 비교하므로 요청 기간보다 길 수 있습니다. 증가량이 `null` 인 칸은 `null` 입니다.
 
 `excludedFromTotals`(v2.682): 이 장비가 **합계 기준**에서 빠졌는지 — `"retired"`(등록 해제된 장비) · `"stale"`(마지막 관측이
 오래된 장비) · `null`(합계에 든다). 빠진 장비도 **행은 그대로** 실립니다(그 장비 기준 증가량은 유효합니다).
@@ -337,10 +340,20 @@ ISO 문자열이 섞여 나오지 않습니다.
     "periods": ["1d", "7d", "30d"], "periodsDropped": 0,
     "unknownUsedCount": 0, "unknownUsedRows": 0, "countsBasis": "totals",
     "staleCount": 0, "retiredCount": 0,
+    "maxSpanDays": { "1d": 1, "7d": 7, "30d": 33 },
+    "inexactCount": { "1d": 0, "7d": 0, "30d": 1 },
+    "spanNote": "요청한 날짜에 수집이 없으면 더 이른 날과 비교합니다 — growthSpanDays 가 maxSpanDays 를 넘는 칸은 요청 기간보다 긴 구간의 증가이므로 기간 합계에 더하지 마세요(포탈 화면 합계는 뺍니다).",
     "note": "기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다."
   }
 }
 ```
+
+> ⚠⚠ (v2.733) **장비 행의 `growth` 를 그대로 더해 기간 합계를 만들지 마세요.** 요청한 날짜에 수집이 없던 장비는 더 이른 날과
+> 비교하므로, 예컨대 1년 전 1회 관측 뒤 수집이 끊겼다가 최근에만 수집된 장비의 `growth["30d"]` 는 **1년치 증가**입니다
+> (`growthSpanDays["30d"]: 365`). 포탈 화면의 합계는 실제 구간이 **요청 기간 × 1.1(내림)** — `meta.maxSpanDays` — 를 넘는 칸을
+> 합계에서 빼고 그 수를 밝힙니다. `meta.inexactCount` 가 합계 기준(`countsBasis: "totals"`)에서 그렇게 뺀 장비 수입니다(최신 관측이
+> 늦은 장비·`excludedFromTotals` 장비는 세지 않습니다). 같은 기준으로 더하려면 `excludedFromTotals === null` 이고
+> `growthSpanDays[기간] <= maxSpanDays[기간]` 인 칸만 더하세요. 한계 안이어도 요청보다 긴 구간(예: 30일 요청에 33일)은 그만큼 길게 잰 값입니다.
 
 > ⚠ (v2.682) **meta 의 개수는 '합계 기준'(`countsBasis: "totals"`)** 입니다. `unknownUsedCount` 는 `excludedFromTotals` 가 `null` 인
 > 행 중 사용량을 못 읽은 수이고, 행의 `unknownUsed: true` 전체 개수는 `unknownUsedRows` 입니다(둘이 다를 수 있습니다).

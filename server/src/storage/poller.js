@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { isAuthFailure, markAuthStopped, clearAuthStop, authStopFor } from './authGuard.js';
 import { credFingerprintParts } from '../util/credFingerprint.js';
 import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
-import { putSnapshot } from './store.js';
+import { putSnapshot, flushSnapshotsNow, snapshotStoreStatus } from './store.js';
 import { emptySnapshot } from './types.js';
 import * as isilon from './collectors/isilon.js';
 import * as powerstore from './collectors/powerstore.js'; // v2.309
@@ -192,16 +192,47 @@ export async function pollStorageOnce({ demoOnly = false } = {}) {
     let ok = 0, fail = 0;
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).
     let authStopped = 0;
+    let deviceErrors = 0;
     await poolRun(runDevs, 3, async (d) => {
-      const r = await collectOne(d, { periodic: true });
+      // v2.733(감사 C4-03): 장비 하나의 예상치 못한 예외가 **주기 전체를 끊지 않게** 여기서 받는다. 예전에는 poolRun 이 첫
+      //   rejection 으로 주기를 거부해 남은 장비는 시도조차 안 됐고(_busy 가 풀린 뒤에도 남은 워커는 계속 돌았다) 폴러 상태가
+      //   갱신되지 않았으며 adaptiveTimer 가 그 오류를 로그 없이 삼켰다(재현: 스냅샷 쓰기 ENOSPC → 17대 중 3대만 시도·콘솔 0줄).
+      //   그 장비는 실패로 세고(deviceErrors 로 따로 밝힌다) 콘솔에 남긴다 — 무음 금지.
+      let r;
+      try { r = await collectOne(d, { periodic: true }); }
+      catch (e) {
+        deviceErrors++;
+        r = false;
+        noteDeviceError(d, e);
+      }
       // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
       // 새 장애처럼 보인다 — 별도로 센다.
       if (r === null) authStopped++;
       else if (r) ok++; else fail++;
     });
-    _last = { at: Date.now(), collected: ok, failed: fail, authStopped };
-    return { ok, fail, authStopped, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
-  } finally { _busy = false; }
+    _last = { at: Date.now(), collected: ok, failed: fail, authStopped, ...(deviceErrors ? { deviceErrors } : {}) };
+    return { ok, fail, authStopped, ...(deviceErrors ? { deviceErrors } : {}), ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
+  } finally {
+    // v2.733(감사 C4-03): 장비마다 파일 전체를 다시 쓰지 않고 **주기 끝에 한 번** 쓴다(store.js 머리말 — SAN v2.732 B6-02 와 같은 구조).
+    //   flushSnapshotsNow 는 던지지 않는다 — 쓰기 실패는 store 가 콘솔·상태(snapshotSave)에 남기고 다음 기회에 다시 쓴다.
+    flushSnapshotsNow();
+    _busy = false;
+  }
+}
+
+/** 장비 처리 중 예상치 못한 예외 — 콘솔에 남긴다(같은 장비·같은 사유는 10분에 한 번). 상태에는 개수만(원문에 주소가 들 수 있다). */
+const DEVICE_ERROR_WARN_MS = 600_000;
+const _devErrWarned = new Map(); // deviceId → { sig, at }
+function noteDeviceError(dev, e) {
+  const sig = String(e?.code || e?.message || e).slice(0, 200);
+  const id = String(dev?.id || '');
+  const prev = _devErrWarned.get(id);
+  const now = Date.now();
+  if (prev && prev.sig === sig && now - prev.at < DEVICE_ERROR_WARN_MS) return;
+  _devErrWarned.delete(id);
+  _devErrWarned.set(id, { sig, at: now });
+  while (_devErrWarned.size > 1_000) _devErrWarned.delete(_devErrWarned.keys().next().value);
+  console.warn(`[storage] 장비 처리 중 예외(${id}): ${e?.message || e} — 이 장비만 실패로 세고 주기는 계속합니다`);
 }
 
 /**
@@ -210,11 +241,13 @@ export async function pollStorageOnce({ demoOnly = false } = {}) {
  *   PDU 와 같은 규약. 예전 주석은 '1대 한정이라 안전' 이라 적었지만 같은 어레이에 세션이 2개 열리고(Unity 는 세션당 최대 150초),
  *   늦게 끝난 옛 결과가 최신 스냅샷을 덮고, 먼저 끝난 쪽이 in-flight 를 지워 화면 '진행중' 에서 사라졌다(재현: 동시 요청 2개).
  */
-export async function collectDeviceNow(id) {
+export async function collectDeviceNow(id, { flush = true } = {}) {
   const dev = getDeviceWithSecret(id);
   if (!dev) throw new Error('장비를 찾을 수 없습니다.');
   if (_inFlight.has(dev.id)) return false;
-  await collectOne(dev);
+  // v2.733(감사 C4-03): 단건은 끝나면 바로 쓴다(주기 끝 flush 를 기다리지 않게 — SAN v2.732 와 같다).
+  //   `flush:false` 는 여러 장비를 차례로 수집하는 호출부(엣지 재수집 요청 묶음)가 묶음 끝에 flushSnapshotsNow 를 한 번 부를 때 쓴다.
+  try { await collectOne(dev); } finally { if (flush) flushSnapshotsNow(); }
   return true;
 }
 
@@ -268,6 +301,7 @@ export function startStoragePoller() {
   _timer = startAdaptiveTimer(pollMs, () => pollStorageOnce(), { firstDelayMs: 15_000, name: '장비 수집' });
 }
 export function storagePollerStatus() {
+  // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).
   return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()],
-    intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo() };
+    intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo(), snapshotSave: snapshotStoreStatus() };
 }

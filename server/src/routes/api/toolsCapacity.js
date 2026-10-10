@@ -5,10 +5,11 @@ import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields } 
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
-import { store, usageReadable } from '../../store.js';
+import { store, usageReadable, hostCapacityKnown } from '../../store.js'; // v2.733(C2-06): 용량 판정도 store 하나
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
 import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
+import { createVcAuthGate, vcAuthStopOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
 import { buildWasteSheets, reportTargets, reportFileName, exportZipName } from '../../tools/wasteExport.js'; // v2.497: 낭비 리소스 엑셀 내보내기
@@ -75,9 +76,14 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   const key = (h) => `${h.vcenterId}|${h.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
-    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
-    c.hosts++; c.cores += h.cpuCores || 0; c.cpuTotalMhz += h.cpuTotalMhz || 0;
-    c.memTotalGB += (h.memTotalMB || 0) / 1024;
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    c.hosts++;
+    // v2.733(점검 3회차 C2-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)는 용량 합에 0 으로
+    //   넣지 않고 센다(capacityUnknown). 예전에는 그 법인이 코어 0 · vCPU:코어 0 · RAM 오버커밋 0% 로 보였다.
+    if (hostCapacityKnown(h)) {
+      c.cores += h.cpuCores; c.cpuTotalMhz += h.cpuTotalMhz;
+      c.memTotalGB += h.memTotalMB / 1024;
+    } else c.capUnknown++;
     // v2.606(감사 WEB2606-02): 사용량·사용률은 사용량을 읽을 수 있는 호스트만(용량 합계는 전부) — store.usageReadable(v2.594)
     // 과 같은 기준. 끊긴 호스트의 총량을 분모에 넣으면 사용률이 그만큼 낮아 보인다.
     if (usageReadable(h)) {
@@ -93,26 +99,41 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     c.vcpuAll += v.cpuCount || 0;
     if (on) { c.vcpuOn += v.cpuCount || 0; c.ramOnGB += (v.memMB || 0) / 1024; c.vmsOn++; }
   }
-  const clusters = [...byCluster.values()].map((c) => ({
-    vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
-    cores: c.cores, memTotalGB: Math.round(c.memTotalGB),
-    vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
-    vcpuPerCore: c.cores ? r1(c.vcpuOn / c.cores) : 0,
-    ramOvercommitPct: c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
-    cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
-    memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
-    hostsUsageExcluded: c.excluded,
-    ramHeadroomGB: Math.round(c.memTotalGB - c.ramOnGB),
-  })).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct);
-  const sum = (f) => clusters.reduce((a, x) => a + f(x), 0);
+  // v2.733(C2-06): 용량을 못 읽은 호스트가 섞인 클러스터의 총량·비율·여유는 **부분 합**이다 — VM 할당은 그 호스트들의 몫까지 들어 있어
+  //   분모만 빠진 비율은 틀린 값이다. 그 칸은 null('—')이고 capacityUnknown 으로 밝힌다(전부 못 읽었으면 코어·메모리 총량도 null).
+  const clusters = [...byCluster.values()].map((c) => {
+    const capOk = c.capUnknown === 0;
+    const allUnknown = c.capUnknown === c.hosts;
+    return {
+      vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
+      cores: allUnknown ? null : c.cores, memTotalGB: allUnknown ? null : Math.round(c.memTotalGB),
+      vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
+      vcpuPerCore: !capOk ? null : c.cores ? r1(c.vcpuOn / c.cores) : 0,
+      ramOvercommitPct: !capOk ? null : c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
+      cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
+      memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
+      hostsUsageExcluded: c.excluded,
+      capacityUnknown: c.capUnknown,
+      ramHeadroomGB: capOk ? Math.round(c.memTotalGB - c.ramOnGB) : null,
+    };
+  }).sort((a, b) => (b.ramOvercommitPct ?? -1) - (a.ramOvercommitPct ?? -1)); // null(모름)은 뒤로
+  const sum = (f) => clusters.reduce((a, x) => a + (f(x) || 0), 0);
+  // 합계의 비율·여유는 **용량을 다 읽은 클러스터끼리만** 낸다(분자·분모가 같은 집합). 코어·메모리 총량은 읽은 값의 합이고
+  //   뺀 호스트 수를 capacityUnknown 으로 함께 싣는다 — 전부 못 읽었으면 null(0 코어라는 거짓 금지).
+  const known = clusters.filter((c) => c.capacityUnknown === 0);
+  const sumK = (f) => known.reduce((a, x) => a + (f(x) || 0), 0);
+  const capacityUnknown = sum((c) => c.capacityUnknown);
+  const hostsTotal = sum((c) => c.hosts);
+  const allCapUnknown = hostsTotal > 0 && capacityUnknown === hostsTotal;
   return {
     scope: vcId || 'all',
     clusters,
     totals: {
-      clusters: clusters.length, hosts: sum((c) => c.hosts), hostsUsageExcluded: sum((c) => c.hostsUsageExcluded), cores: sum((c) => c.cores),
-      memTotalGB: sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
-      vcpuPerCore: sum((c) => c.cores) ? r1(sum((c) => c.vcpuAllocated) / sum((c) => c.cores)) : 0,
-      ramHeadroomGB: sum((c) => c.ramHeadroomGB),
+      clusters: clusters.length, hosts: hostsTotal, hostsUsageExcluded: sum((c) => c.hostsUsageExcluded),
+      capacityUnknown, cores: allCapUnknown ? null : sum((c) => c.cores),
+      memTotalGB: allCapUnknown ? null : sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
+      vcpuPerCore: sumK((c) => c.cores) ? r1(sumK((c) => c.vcpuAllocated) / sumK((c) => c.cores)) : (capacityUnknown ? null : 0),
+      ramHeadroomGB: known.length || !capacityUnknown ? sumK((c) => c.ramHeadroomGB) : null,
     },
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
@@ -340,6 +361,9 @@ api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
     else need.push(v);
   }
   const put = (id, u) => { usage[id] = u; usageCache.set(`${id}|${days}`, { at: now, u }); };
+  // v2.733(C3-01): 인증 정지로 조회하지 않은 vCenter → 사유. 그 VM 은 null(비움)이고 **캐시하지 않는다** — 비밀번호를 고치면 곧바로
+  //   다시 조회하게(정지 판정은 매번 파일 조회 1회라 비용이 없다). 화면이 '사용률 0%' 가 아니라 사유를 말한다.
+  let authStopped = {};
   if (need.length) {
     if (snap.source === 'mock') {
       // 데모(mock): 실데이터가 없으므로 스냅샷 순간값 주변으로 **결정적** 합성값을 만든다.
@@ -365,25 +389,25 @@ api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
       }
       const end = now;
       const start = now - days * 86_400_000;
+      const gate = createVcAuthGate();   // v2.733(C3-01): 정지면 로그인 0 · 거부는 주 폴러와 같은 기록에
       await eachLimited([...groups.entries()], 4, async ([vcId, list]) => {
         const vc = cfgs.find((x) => x.id === vcId);
         if (!vc) { for (const v of list) put(v.id, null); return; }
         // vm.id = `${vc.id}:${moref}` 이고 vc.id 자체에 콜론이 있을 수 있다 → split 대신 길이로 자른다
         // (dsBrowse.js·spark 와 같은 패턴. split 이면 moref 가 깨져 그 vCenter 전체가 조용히 빈다).
         const refOf = (v) => v.id.slice(String(v.vcenterId || '').length + 1);
-        try {
-          const r = await fetchVmsUsageBatch(vc, list.map(refOf), interval, { start, end });
-          for (const v of list) put(v.id, r.usage.get(refOf(v)) || null);
-        } catch {
-          for (const v of list) put(v.id, null); // 이 vCenter 만 실패(권한·사이트 위임 수집 등) — 트리는 계속 그린다
-        }
+        const r = await gate.run(vc, () => fetchVmsUsageBatch(vc, list.map(refOf), interval, { start, end }));
+        if (r.stopped) { for (const v of list) usage[v.id] = null; return; } // 캐시하지 않는다(위 주석)
+        if (r.error) { for (const v of list) put(v.id, null); return; } // 이 vCenter 만 실패(권한·사이트 위임 수집 등) — 트리는 계속 그린다
+        for (const v of list) put(v.id, r.value.usage.get(refOf(v)) || null);
       });
+      authStopped = gate.stopped();
     }
   }
   if (usageCache.size > 8000) {
     for (const [k, e] of usageCache) if (now - e.at > USAGE_TTL_MS) usageCache.delete(k);
   }
-  res.json({ ...base, truncated, synthesized: snap.source === 'mock', source: snap.source || '', usage });
+  res.json({ ...base, truncated, synthesized: snap.source === 'mock', source: snap.source || '', usage, authStopped });
 });
 
 /**
@@ -719,7 +743,18 @@ const USAGE_RANGES = {
   '365d': { ms: 365 * 86_400_000, bucket: 86_400_000 },
 };
 
+// v2.733(C3-01): 호스트·클러스터 범위(scope=host|cluster)는 vCenter 에 로그인해 **호스트별 성능**을 빌려온다 — 형제
+//   `/hosts/:id/metrics`(vmMetrics.js)와 같은 `inv.hosts` 게이트다. 범위 없는 vCenter 전체 추이는 저장 시계열(로그인 없음)이고
+//   `/vcenters`·`/overview` 와 같은 대시보드 수준 집계라 예전처럼 둔다(Platform 탭은 dashboard 권한이다).
+//   미들웨어로 걸지 않고 핸들러 맨 앞에서 같은 게이트 함수를 부른다 — 조건부 게이트라 라우트 인자에 두면 문서 생성기가 뜻을 모른다.
+const usageHostPerm = requirePerm('inv.hosts');
+
 api.get('/vcenters/:id/usage-history', async (req, res) => {
+  if (/^(host|cluster):/.test(String(req.query.scope || '').trim())) {
+    let permOk = false;
+    usageHostPerm(req, res, () => { permOk = true; });
+    if (!permOk) return;   // 403 은 게이트가 이미 보냈다(requiredPerm 포함)
+  }
   const vcId = String(req.params.id || '');
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -769,6 +804,10 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
     }
     const vc = loadVcenterConfig().vcenters.find((x) => x.id === vcId);
     if (!vc) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: 'vCenter 설정 없음(위임 수집 vCenter 는 중앙에서 성능 조회 불가)' });
+    // v2.733(C3-01): 화면이 추이 탭·범위 선택마다 자동으로 부르는 경로다 — 주 폴러가 인증 실패로 멈춘 vCenter 에는 로그인하지 않는다.
+    //   예전 실패 응답과 같은 모양(200 + 빈 점 + reason)에 `authStopped` 표지를 싣는다(0 으로 채우지 않는다 — 점이 없다).
+    const stopNow = vcAuthStopOf(vc);
+    if (stopNow) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: stopNow.reason, authStopped: authStopView(stopNow) });
     try {
       const refOf = (h) => h.id.slice(String(h.vcenterId || '').length + 1); // vc.id 에 콜론이 있을 수 있어 split 금지
       const r = await fetchHostsPerfSeries(vc, targets.map(refOf), interval, { start: since, end: Date.now() });
@@ -789,7 +828,9 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
       });
     } catch (e) {
       // 조회 실패는 500 이 아니라 빈 점 + reason — 화면이 '데이터 없음' 과 '조회 실패' 를 구분해 안내한다.
-      return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: `vCenter 성능 조회 실패: ${e?.message || e}` });
+      // v2.733(C3-01): 자격증명 거부면 주 폴러와 같은 기록에 올리고 표지를 싣는다(다음 조회부터 로그인하지 않는다).
+      const stop = noteVcAuthFailure(vc, e);
+      return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: stop ? stop.reason : `vCenter 성능 조회 실패: ${e?.message || e}`, ...(stop ? { authStopped: authStopView(stop) } : {}) });
     }
   }
 
@@ -1015,6 +1056,7 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
   const now = Date.now();
   const series = {};
   const need = [];
+  let authStopped = {};   // v2.733(C3-01): 인증 정지로 조회하지 않은 vCenter → {since, at, attempts, reason}
   for (const v of targets) {
     const ck = `${v.id}|${type}`;
     const hit = sparkCache.get(ck);
@@ -1035,6 +1077,11 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
       }
     } else {
       const cfgs = loadVcenterConfig().vcenters;
+      // v2.733(점검 3회차 C3-01): 화면이 보이는 행 전부를 **자동으로** 부르는 경로이고 `fetchVmMetric` 은 호출마다 로그인한다.
+      //   주 폴러가 인증 실패로 멈춘 vCenter 에는 로그인하지 않고(그 VM 은 null + authStopped), 정지 전 첫 거부도 vCenter 당 1회로
+      //   묶어 같은 기록에 올린다(gate — 첫 시도 결과를 본 뒤 나머지를 시작한다). 예전에는 300행이면 실패 로그인 300회였다.
+      //   ⚠ 남긴 것(정직): 자격증명이 맞을 때는 여전히 VM 마다 로그인한다 — vCenter 별 로그인 1회 배치는 soapClient 변경이 필요한 별건.
+      const gate = createVcAuthGate();
       await eachLimited(need, 6, async (v) => {
         const vc = cfgs.find((x) => x.id === v.vcenterId);
         if (!vc) { series[v.id] = null; return; }
@@ -1042,23 +1089,21 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
         // vcenterId 길이만큼 잘라낸다(dsBrowse.js 와 동일 패턴). split 이면 moref 가 깨져
         // fetchVmMetric 이 조용히 실패해 그 vCenter 스파크라인이 전부 빈다.
         const moref = v.id.slice(String(v.vcenterId || '').length + 1);
-        try {
-          // interval 'week' = 1800초(30분) 해상도. 7일 ≈ 336점 → 스파크라인에 충분.
-          const m = await fetchVmMetric(vc, moref, type, 'week');
-          const pts = (m?.points || []).filter((p) => p && p.v != null).map((p) => ({ t: p.t, v: p.v }));
-          series[v.id] = pts.length ? pts : null;
-          sparkCache.set(`${v.id}|${type}`, { at: now, points: series[v.id] });
-        } catch {
-          series[v.id] = null; // 이 VM 만 실패(권한·엣지 수집·전원 OFF 등) — 표는 계속 그린다
-        }
+        // interval 'week' = 1800초(30분) 해상도. 7일 ≈ 336점 → 스파크라인에 충분.
+        const r = await gate.run(vc, () => fetchVmMetric(vc, moref, type, 'week'));
+        if (r.error || r.skipped) { series[v.id] = null; return; } // 이 VM 만 실패(권한·엣지 수집·전원 OFF 등) — 표는 계속 그린다. 정지·실패는 캐시하지 않는다
+        const pts = (r.value?.points || []).filter((p) => p && p.v != null).map((p) => ({ t: p.t, v: p.v }));
+        series[v.id] = pts.length ? pts : null;
+        sparkCache.set(`${v.id}|${type}`, { at: now, points: series[v.id] });
       });
+      authStopped = gate.stopped();
     }
   }
   // 캐시 크기 상한 — 오래된 항목 정리(무한 증가 방지).
   if (sparkCache.size > 4000) {
     for (const [k, e] of sparkCache) if (now - e.at > SPARK_TTL_MS) sparkCache.delete(k);
   }
-  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, capped, skipped, synthesized: snap.source === 'mock', series });
+  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, capped, skipped, synthesized: snap.source === 'mock', series, authStopped });
 });
 
 /**
@@ -1110,9 +1155,12 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
   } else {
     const vc = loadVcenterConfig().vcenters.find((x) => x.id === vm.vcenterId);
     if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+    // v2.733(C3-01): 주 폴러가 인증 실패로 멈춘 vCenter 에는 로그인하지 않는다 — 409(재시도 대상이 아니다. 예전 502 는 웹이 2회
+    //   재시도해 한 번 누르면 실패 로그인 3회였다). 사람이 비밀번호를 고치면 자격증명 해시가 바뀌어 곧바로 다시 조회한다(authGuard 규칙 2).
+    if (respondIfVcAuthStopped(req, res, vc)) return;
     const moref = vm.id.slice(String(vm.vcenterId || '').length + 1);   // vc.id 에 콜론이 있을 수 있어 split 금지
     try { fetched = await fetchVmRightsizeSeries(vc, moref, interval, { start, end }); }
-    catch (e) { return res.status(502).json({ ok: false, reason: `vCenter 성능 조회 실패: ${e.message}` }); }
+    catch (e) { return respondVcError(res, vc, e, { prefix: 'vCenter 성능 조회 실패: ' }); }   // 거부면 같은 기록 + 409, 그 밖은 502
   }
   const report = analyzeRightsize({
     vm, hostMhzPerCore, intervalSec: fetched.intervalSec, days, series: fetched.series,
@@ -1225,23 +1273,31 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
       }
     } else {
       const cfgs = loadVcenterConfig().vcenters;
+      // v2.733(점검 3회차 C3-01): VM 마다 day·week 두 번 로그인하는 경로다(한 번 클릭에 최대 80회). 주 폴러가 인증 실패로 멈춘 vCenter 는
+      //   로그인하지 않고, 정지 전이라도 **vCenter 단위로 첫 거부에서 끊는다**(gate — 첫 시도 결과를 본 뒤 나머지를 시작). 조회하지 않은 VM 의
+      //   평균·유휴 판정은 null(지어내지 않는다)이고 응답 authStopped·avgNotQueried 로 밝힌다.
+      const gate = createVcAuthGate();
+      const avg = (m) => { const pts = (m?.points || []).map((p) => p.v).filter((x) => x != null); return pts.length ? round1(pts.reduce((a, x) => a + x, 0) / pts.length) : null; };
+      let notQueried = 0;
       await eachLimited(targets, 6, async (it) => {
         const vc = cfgs.find((x) => x.id === it.vcenterId);
         if (!vc) return;
         const moref = it.id.slice(String(it.vcenterId || '').length + 1);   // 콜론 포함 vc.id 안전
-        try {
-          const [day, week] = await Promise.all([
-            fetchVmMetric(vc, moref, 'cpu', 'day').catch(() => null),
-            fetchVmMetric(vc, moref, 'cpu', 'week').catch(() => null),
-          ]);
-          const avg = (m) => { const pts = (m?.points || []).map((p) => p.v).filter((x) => x != null); return pts.length ? round1(pts.reduce((a, x) => a + x, 0) / pts.length) : null; };
-          it.avgDayCpu = avg(day); it.avgWeekCpu = avg(week);
-        } catch { /* per-VM best effort */ }
+        const [day, week] = await Promise.all([
+          gate.run(vc, () => fetchVmMetric(vc, moref, 'cpu', 'day')),
+          gate.run(vc, () => fetchVmMetric(vc, moref, 'cpu', 'week')),
+        ]);
+        if (day.stopped || week.stopped) it.authStopped = true;
+        if (day.skipped && week.skipped) notQueried += 1;
+        it.avgDayCpu = day.value ? avg(day.value) : null; it.avgWeekCpu = week.value ? avg(week.value) : null; // per-VM best effort
       });
+      result.authStopped = gate.stopped();
+      result.avgNotQueried = notQueried;
     }
     for (const it of targets) {
       const a = it.avgWeekCpu ?? it.avgDayCpu;
-      it.idle = it.powerState === 'POWERED_ON' && a != null && a <= threshold;
+      // v2.733(C3-01): 인증 정지로 평균을 못 읽은 VM 은 '유휴 아님(false)' 이 아니라 판정 불가(null)다.
+      it.idle = it.authStopped && a == null ? null : (it.powerState === 'POWERED_ON' && a != null && a <= threshold);
     }
     result.idleCount = targets.filter((x) => x.idle).length;
     result.idleThreshold = threshold;

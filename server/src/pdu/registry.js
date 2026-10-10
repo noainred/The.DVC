@@ -49,9 +49,11 @@ function load() {
   return _cache;
 }
 
+// v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** 바꾼다 — 예전에는 먼저 바꿔, 등록 쓰기가 실패해 오류 응답이 나간 뒤에도
+//   메모리에는 장비가 있어 /pdu-config 로 엣지가 받아 비밀번호로 수집을 시작했고 재시작하면 사라졌다(삭제 실패면 반대로 되살아났다).
 function save(devices) {
-  _cache = { devices };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ devices }), null, 2), { mode: 0o600 });
+  _cache = { devices };
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 

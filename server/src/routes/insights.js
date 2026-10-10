@@ -6,14 +6,15 @@
 import { pageArgs } from '../util/pageArgs.js';
 import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
-import { store } from '../store.js';
+import { store, usageReadable } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { userHasPermission } from '../auth/permissions.js';
 // scope 강제 헬퍼(v2.288, 확정 버그 재발 방지): 조회 라우트는 사용자 scope 로 좁힌 스냅샷을 빌더에
 // 넘기고, 캐시 키에 scope 서명을 섞어 스코프가 다른 계정이 같은 캐시를 공유하지 못하게 한다.
 // (routes/api/reports.js 와 동일 패턴 — 그쪽은 memoJson, 여기선 snapMemo 캐시.)
 import { scopeSlice, scopeKey } from './api/shared.js';
-import { allMeasuredPower } from '../idrac/service.js';
+import { allMeasuredPower, vcPowerSkippedOf } from '../idrac/service.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js'; // v2.733(C2-02): 지표 샘플러와 같은 판정
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
@@ -88,6 +89,18 @@ export function maskFleetPayload(p, match) {
   };
 }
 
+/**
+ * v2.733(점검 3회차 C2-02): vCenter 추정 전력의 판정 입력 — 스냅샷(범위 조각)의 vCenter 상태(metrics/unreadVcenters.js — 지표 샘플러와
+ *   같은 판정)와 호스트 연결 상태(store.usageReadable). allMeasuredPower 가 그 호스트의 vCenter 추정 전력을 넣지 않는다.
+ */
+function vcPowerSkipOf(slice) {
+  return { unread: unreadVcenterReasons(slice), hostReadable: usageReadable };
+}
+/** 응답에 싣는 '뺀 것' 요약 — vCenter 추정 전력을 끈 설정이면 null(뺀 것이 아니라 쓰지 않는다). */
+function vcPowerSkippedReport(slice, vcSkip) {
+  return loadPowerSettings().includeVcenterPower === false ? null : vcPowerSkippedOf(slice.hosts, vcSkip);
+}
+
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (req, res) => {
   try {
@@ -101,9 +114,11 @@ insightsRouter.get('/finops', async (req, res) => {
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}|vc:${String(req.query.vcenterId || '')}`;
     const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 '지금 값' 이 아니다 — 합산에서 빼고 개수로 밝힌다.
+      const vcSkip = vcPowerSkipOf(scoped);
+      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
-      return computeFinOps(scoped, measured);
+      return { ...computeFinOps(scoped, measured), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
     else sendCached(req, res, `${key}|masked`, maskFinopsPayload(payload, insightsMatcher(snap)));
@@ -127,9 +142,10 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}|${scopeKey(req.user, snap)}`;
     const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      const vcSkip = vcPowerSkipOf(scoped); // v2.733(C2-02) — /finops 와 같은 판정
+      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
-      return computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters });
+      return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
     else sendCached(req, res, `${key}|masked`, maskPowerBreakdownPayload(payload, insightsMatcher(snap)));

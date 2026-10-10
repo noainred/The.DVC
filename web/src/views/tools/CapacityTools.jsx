@@ -15,6 +15,9 @@ import { reclaimStorage, AGE_BUCKETS, ageBucketOf, ageCounts, corpOffShare, size
 // v2.578 D1·D3·D4: 기준선(언제부터의 자료인가)·해상도 인과·절단 사실 — 판정과 문구를 한 모듈이 소유한다.
 import { sinceNote, bucketAvgLabel, resolutionNote, truncationNote } from '../trendMeta.js';
 import { samplerWithheldNote } from '../samplerWithheldText.js'; // v2.628(LEFT2628-01)
+import { capacityUnknownNote, ratioText } from '../readGapText.js'; // v2.733(C2-06): 용량을 못 읽은 호스트(REST 폴백)
+import BoldText from '../../components/boldText.jsx';
+import { authStopNote, authStopCell } from '../vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않은 vCenter
 
 
 /** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
@@ -79,10 +82,11 @@ export function Capacity({ scope }) {
     { key: 'vcenterId', label: 'vCenter', render: (c) => <span className="muted">{c.vcenterId}</span> },
     { key: 'hosts', label: '호스트', align: 'right' },
     { key: 'vmsOn', label: 'VM(On)', align: 'right', render: (c) => `${c.vmsOn}/${c.vms}` },
-    { key: 'cores', label: '물리코어', align: 'right' },
+    // v2.733(C2-06): 용량을 못 읽은 호스트가 섞인 클러스터는 서버가 null 을 준다 — 0:1·0%(초록)로 그리지 않는다.
+    { key: 'cores', label: '물리코어', align: 'right', render: (c) => (c.cores == null ? '—' : c.cores) },
     { key: 'vcpuAllocated', label: '할당 vCPU', align: 'right' },
-    { key: 'vcpuPerCore', label: 'vCPU:코어', align: 'right', render: (c) => <span className={`badge ${c.vcpuPerCore >= 4 ? 'red' : c.vcpuPerCore >= 3 ? 'amber' : 'green'}`}>{c.vcpuPerCore}:1</span> },
-    { key: 'ramOvercommitPct', label: 'RAM 오버커밋', align: 'right', render: (c) => <span className={`badge ${c.ramOvercommitPct >= 100 ? 'red' : c.ramOvercommitPct >= 85 ? 'amber' : 'green'}`}>{c.ramOvercommitPct}%</span> },
+    { key: 'vcpuPerCore', label: 'vCPU:코어', align: 'right', render: (c) => (c.vcpuPerCore == null ? <span className="muted" title={capacityUnknownNote(c.capacityUnknown) || ''}>—</span> : <span className={`badge ${c.vcpuPerCore >= 4 ? 'red' : c.vcpuPerCore >= 3 ? 'amber' : 'green'}`}>{ratioText(c.vcpuPerCore)}</span>) },
+    { key: 'ramOvercommitPct', label: 'RAM 오버커밋', align: 'right', render: (c) => (c.ramOvercommitPct == null ? <span className="muted" title={capacityUnknownNote(c.capacityUnknown) || ''}>—</span> : <span className={`badge ${c.ramOvercommitPct >= 100 ? 'red' : c.ramOvercommitPct >= 85 ? 'amber' : 'green'}`}>{c.ramOvercommitPct}%</span>) },
     { key: 'cpuUsedPct', label: 'CPU 사용', render: (c) => <UsageCell pct={c.cpuUsedPct} /> },
     { key: 'memUsedPct', label: '메모리 사용', render: (c) => <UsageCell pct={c.memUsedPct} /> },
     { key: 'ramHeadroomGB', label: 'RAM 여유', align: 'right', render: (c) => tb(c.ramHeadroomGB) },
@@ -92,11 +96,12 @@ export function Capacity({ scope }) {
       {tabs}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="클러스터" value={t.clusters} meta={`호스트 ${t.hosts}`} />
-        <Card label="물리코어 / 할당 vCPU" value={`${t.cores} / ${t.vcpuAllocated}`} meta={`${t.vcpuPerCore}:1 평균`} accent={t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
+        <Card label="물리코어 / 할당 vCPU" value={`${t.cores == null ? '—' : t.cores} / ${t.vcpuAllocated}`} meta={`${ratioText(t.vcpuPerCore)} 평균`} accent={t.vcpuPerCore != null && t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
         <Card label="메모리 / 할당" value={`${tb(t.memTotalGB)} / ${tb(t.ramAllocatedGB)}`} />
-        <Card label="RAM 여유(헤드룸)" value={tb(t.ramHeadroomGB)} accent={t.ramHeadroomGB <= 0 ? 'var(--red)' : 'var(--green)'} />
+        <Card label="RAM 여유(헤드룸)" value={tb(t.ramHeadroomGB)} accent={t.ramHeadroomGB == null ? undefined : t.ramHeadroomGB <= 0 ? 'var(--red)' : 'var(--green)'} />
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>오버커밋: vCPU:코어 ≥4 또는 RAM ≥100%면 과밀(빨강). RAM 여유 = 물리RAM − 할당(전원 On).</div>
+      {capacityUnknownNote(t.capacityUnknown) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ {capacityUnknownNote(t.capacityUnknown)} 합계의 vCPU:코어·RAM 여유는 용량을 다 읽은 클러스터만으로 계산했습니다.</div>}
       <DataTable columns={cols} rows={data.clusters} initialSort={{ key: 'ramOvercommitPct', dir: 'desc' }} />
     </>
   );
@@ -111,7 +116,12 @@ const sparkAvg = (pts) => (pts && pts.length ? Math.round((pts.reduce((a, p) => 
  * recharts 를 행마다 마운트하면 수십 개 차트로 렌더가 무거워지므로 순수 SVG path 를 쓴다.
  * 값이 %(0~100) 라 y 축을 0~100 으로 고정해 행 간 높이를 비교 가능하게 한다.
  */
-function Sparkline({ points, color = '#fbbf24', width = 132, height = 26, requested = false }) {
+function Sparkline({ points, color = '#fbbf24', width = 132, height = 26, requested = false, stop = null }) {
+  // v2.733(C3-01): 그 vCenter 가 인증 실패로 멈춰 서버가 조회하지 않았으면 '—'(이력 없음)가 아니라 그 사실을 말한다.
+  if (stop && requested && points == null) {
+    const c = authStopCell(stop);
+    return <span className="muted" style={{ fontSize: 11, color: 'var(--amber)' }} title={c.title}>{c.text}</span>;
+  }
   // v2.502: '아직 순서가 안 온 것'(…)과 '조회했는데 없는 것'(—)을 구분한다. 예전에는 둘 다
   // undefined 여서 표 아래쪽 행이 영원히 '…' 로 남았고, 사용자는 고장인지 대기인지 알 수 없었다.
   const state = sparkCellState(points, requested);
@@ -151,11 +161,13 @@ function Sparkline({ points, color = '#fbbf24', width = 132, height = 26, reques
 function SparkNote({ spark }) {
   const progress = sparkProgressText(spark.progress || {});
   const cap = sparkCapText(spark.totalRows);
-  if (!progress && !cap) return null;
+  const stopped = authStopNote(spark.stops);   // v2.733(C3-01)
+  if (!progress && !cap && !stopped) return null;
   return (
     <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
       {progress && <div>※ {progress}</div>}
       {cap && <div>※ {cap}</div>}
+      {stopped && <div style={{ color: 'var(--amber)' }}>※ <BoldText text={stopped} /></div>}
     </div>
   );
 }
@@ -165,13 +177,14 @@ function useSparklines(rows, type, enabled) {
   const [info, setInfo] = useState(null);    // { synthesized, maxVms, capped, skipped }
   const [asked, setAsked] = useState(() => new Set()); // 서버에 이미 물어본 id(대기와 '없음' 구분용)
   const [done, setDone] = useState(0);       // 진행 표시
+  const [stops, setStops] = useState({});    // v2.733(C3-01): 인증 정지로 서버가 조회하지 않은 vCenter → {attempts, …}
   const all = Array.isArray(rows) ? rows.map((r) => r.id).filter(Boolean) : [];
   const ids = all.slice(0, SPARK_ROW_CAP);
   const key = ids.join(',');
   useEffect(() => {
-    if (!enabled || !key) { setMap({}); setInfo(null); setAsked(new Set()); setDone(0); return undefined; }
+    if (!enabled || !key) { setMap({}); setInfo(null); setAsked(new Set()); setDone(0); setStops({}); return undefined; }
     let dead = false;
-    setMap({}); setAsked(new Set()); setDone(0);
+    setMap({}); setAsked(new Set()); setDone(0); setStops({});
     (async () => {
       const list = key.split(',');
       // 첫 배치는 서버 상한을 모르므로 보수적으로 시작하고, 응답의 maxVms 로 이후 배치를 맞춘다
@@ -191,6 +204,7 @@ function useSparklines(rows, type, enabled) {
           const got = r.series || {};
           skipped += Number(r.skipped) || 0;
           setMap((m) => ({ ...m, ...got }));
+          if (r.authStopped && typeof r.authStopped === 'object' && Object.keys(r.authStopped).length) setStops((p) => ({ ...p, ...r.authStopped }));
           setAsked((prev) => { const n = new Set(prev); for (const id of batch) n.add(id); return n; });
           setInfo({ synthesized: r.synthesized, maxVms: r.maxVms, capped: !!r.capped, skipped });
         } catch {
@@ -205,7 +219,7 @@ function useSparklines(rows, type, enabled) {
     })();
     return () => { dead = true; };
   }, [key, type, enabled]);
-  return { map, info, asked, progress: { done, total: ids.length, skipped: info?.skipped || 0 }, totalRows: all.length };
+  return { map, info, asked, stops, progress: { done, total: ids.length, skipped: info?.skipped || 0 }, totalRows: all.length };
 }
 
 /**
@@ -586,7 +600,7 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           { key: 'cpuUsagePct', label: '사용률', align: 'right', render: (v) => `${v.cpuUsagePct}%` },
           { key: 'cpuSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.cpuSavingPct == null ? '—' : <b>{v.cpuSavingPct}%</b>) },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
-          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} requested={spark.asked.has(v.id)} /> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} requested={spark.asked.has(v.id)} stop={spark.stops[v.vcenterId]} /> },
           { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="기간별 추이·p95·CPU Ready·권장 vCPU 와 참고 문서">📊 리포트</button> },
         ]} />
         <SparkNote spark={spark} />
@@ -607,7 +621,7 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           { key: 'memSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.memSavingPct == null ? '—' : <b>{v.memSavingPct}%</b>) },
           { key: 'guestOS', label: 'Guest OS' },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
-          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" requested={spark.asked.has(v.id)} /> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" requested={spark.asked.has(v.id)} stop={spark.stops[v.vcenterId]} /> },
           { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="Active·Consumed·벌룬·스왑 추이와 권장 메모리, 참고 문서">📊 리포트</button> },
         ]} />
         <SparkNote spark={spark} />

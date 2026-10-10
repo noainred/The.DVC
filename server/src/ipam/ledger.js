@@ -31,10 +31,15 @@ function putGenerationCache(map, key, value) {
   map.set(key, value);
   if (map.size > MAX_CACHE_ENTRIES) map.delete(map.keys().next().value);
 }
+// v2.733(C6-01): 원장을 실제로 새로 만든 횟수(캐시 적중 제외) — 서브넷 목록 메모가 폴링마다 원장을 다시 만들지 않는지 테스트가 본다.
+let _rowBuilds = 0;
 /** 테스트·진단용 — 캐시 항목 수와 세대 수. */
 export function _ledgerCacheStats() {
   const gens = (m) => new Set([...m.keys()].map(generationOf)).size;
-  return { rows: _ipamCache.size, rowsGenerations: gens(_ipamCache), sheets: _sheetCache.size, sheetsGenerations: gens(_sheetCache) };
+  return {
+    rows: _ipamCache.size, rowsGenerations: gens(_ipamCache), sheets: _sheetCache.size, sheetsGenerations: gens(_sheetCache),
+    subnets: _subnetMemo.size, builds: _rowBuilds,
+  };
 }
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
@@ -111,6 +116,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   const _ck = _ipamKey(snap, vcenterId, allowed);
   const _hit = _ipamCache.get(_ck);
   if (_hit) return _hit;
+  _rowBuilds += 1;
   const it = ipamRowsGen(snap, vcenterId, allowed, scanResultList());
   let step = it.next();
   while (!step.done) step = it.next();
@@ -140,6 +146,7 @@ export async function buildIpamRowsAsync(snap, vcenterId, allowed = null, opts =
   const done = (reason) => { stats.yields = maybeYield.count(); stats.aborted = reason; return null; };
   const scanList = await scanResultListAsync(maybeYield, isCancelled);
   if (!scanList) return done('cancelled');
+  _rowBuilds += 1;
   const it = ipamRowsGen(snap, vcenterId, allowed, scanList);
   let step = it.next();
   while (!step.done) {
@@ -512,8 +519,57 @@ function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null }
   return sheets;
 }
 
-export function listSubnets(snap, vcenterId, allowed = null) {
-  return buildSubnetSheets(snap, { vcenterId, allowed }).map((s) => ({ subnet: s.subnet, base: s.base, used: s.used }));
+/*
+ * v2.733(점검 3회차 C6-01 — 재현): `/tools/ipam/subnets`(V4·관제 콘솔 네트워크 60초 폴링)는 서브넷·base·used 세 값만 쓰는데
+ *   예전에는 ① 원장 캐시 키가 스냅샷 세대라 live 에서 입력이 그대로면(v2.619 — store 가 원장 재구성을 건너뛴다) 새 세대의 캐시가
+ *   언제나 비어 **폴링마다 원장 전체를 동기로 다시 만들고** ② /24 마다 256행 시트를 조립했다(스캔 0 · VM 6,004 에서 125~185ms,
+ *   스캔 5만이면 700~800ms 동안 포탈 전체가 멈췄다). 이제 ① 세대 대신 **원장 입력 지문**(store.ledgerInputSignatureOf — 호출부가 넘긴다)
+ *   + vCenter·범위·관리 리비전·데이터센터 귀속으로 기억하고 ② 시트 없이 원장 행에서 /24 별 used 를 직접 센다. 결과는 예전
+ *   `buildSubnetSheets(...).map(subnet·base·used)` 와 같다(테스트가 비정규 끝 조각 IP 를 넣어 대조한다):
+ *   · 서브넷 = ipNum 이 있는 행의 `ip.split('.')` 앞 세 조각 · 순서 = 처음 나온 순서를 baseNum 으로 안정 정렬
+ *   · used = 그 /24 에서 `${base}.${i}`(i = 1..255 — .0 은 네트워크 주소라 세지 않고 .255 는 센다)와 **글자 그대로 같은** 행 IP 의 고유 개수.
+ *     시트가 `byIp.get(\`${base}.${i}\`)` 로 찾았으므로 끝 조각이 비정규(예 '05')인 IP 는 세지 않는다 — 그 규칙을 그대로 둔다.
+ *   입력 지문이 모르는 입력이 생겨도 SUBNET_MEMO_MAX_AGE_MS 마다 한 번은 다시 센다(store.js LEDGER_FULL_CHECK_MS 와 같은 안전망).
+ *   입력 지문을 넘기지 않으면 예전처럼 스냅샷 세대로 기억한다(결과는 같다).
+ */
+const LAST_OCTETS = new Set(Array.from({ length: 255 }, (_, k) => String(k + 1))); // '1'..'255' — 시트의 `${base}.${i}` 와 같은 글자
+const SUBNET_MEMO_MAX_AGE_MS = 10 * 60_000;
+const _subnetMemo = new Map(); // key -> { at, list }
+const subnetBaseNum = (b) => { const p = b.split('.').map(Number); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8); };
+
+/** 원장 행 → [{subnet, base, used}] — 시트 조립 없이(순수). 결과는 buildSubnetSheets 의 같은 세 값과 같다. */
+export function subnetsFromRows(rows) {
+  const byBase = new Map(); // base -> Set(끝 조각 — '1'..'255' 중 실제로 있는 것)
+  for (const r of rows || []) {
+    if (r.ipNum == null) continue;
+    const p = r.ip.split('.');
+    const base = `${p[0]}.${p[1]}.${p[2]}`;
+    let set = byBase.get(base);
+    if (!set) { set = new Set(); byBase.set(base, set); }
+    // r.ip = base + '.' + 나머지(ipNum 이 있으면 조각이 4개다). 나머지가 '1'..'255' 와 글자 그대로 같을 때만 시트가 그 행을 찾는다.
+    const last = r.ip.slice(base.length + 1);
+    if (r.ip.startsWith(`${base}.`) && LAST_OCTETS.has(last)) set.add(last);
+  }
+  return [...byBase.keys()].sort((a, b) => subnetBaseNum(a) - subnetBaseNum(b))
+    .map((base) => ({ subnet: `${base}.0/24`, base, used: byBase.get(base).size }));
+}
+
+/**
+ * /24 서브넷 목록(서브넷·base·used).
+ * @param {object} [opts]
+ * @param {string} [opts.inputSig] 원장 입력 지문(store.ledgerInputSignatureOf(snap)) — 있으면 세대 대신 이것으로 기억한다
+ * @param {number} [opts.now] 테스트용 시각
+ */
+export function listSubnets(snap, vcenterId, allowed = null, opts = {}) {
+  vcenterId = vcenterId || '';
+  const now = Number.isFinite(opts?.now) ? opts.now : Date.now();
+  const head = opts?.inputSig ? `i${opts.inputSig}` : `g${snap?.generatedAt || ''}`;
+  const ck = `${head}|${vcenterId}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
+  const hit = _subnetMemo.get(ck);
+  if (hit && now - hit.at < SUBNET_MEMO_MAX_AGE_MS && now >= hit.at) return hit.list.map((s) => ({ ...s }));
+  const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows);
+  putGenerationCache(_subnetMemo, ck, { at: now, list });
+  return list.map((s) => ({ ...s }));
 }
 
 /**

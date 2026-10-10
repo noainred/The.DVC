@@ -50,10 +50,19 @@ class NsxStore {
     const dataSource = getDataSource();
     const managers = loadRegistry();
 
-    // Mock mode (or no managers registered yet) → synthesize a snapshot so the
-    // dashboard is populated without a real NSX Manager.
-    if (dataSource === 'mock' || managers.length === 0) {
+    // Mock mode → synthesize a snapshot so the dashboard is populated without a real NSX Manager.
+    // v2.733(점검 3회차 C2-01): 합성은 **mock 모드에서만** 한다(루트 CLAUDE.md v2.708 데모 규칙). 예전 조건
+    //   `dataSource === 'mock' || managers.length === 0` 은 live·auto 에서도 등록이 0개면 데모 매니저 3대·세그먼트 51·DFW 규칙 88 을
+    //   source='live' 로 실어, NSX 를 쓰지 않는 운영 포탈의 개요·NSX 화면·백업 내보내기·서비스 점검('정상 · 매니저 3')이 없는 장비를
+    //   실값처럼 보였다(재현). 그 탓에 서비스 점검 'NSX 매니저 미등록'(off)과 화면 빈 상태 문구가 도달 불가였다.
+    //   live·auto + 등록 0 은 빈 스냅샷이다 — 응답 모양(managers [] · rollup 필드)은 그대로.
+    if (dataSource === 'mock') {
       this.snapshot = rollup(merge(generateNsxSnapshot(managers), [], dataSource));
+      return;
+    }
+    if (managers.length === 0) {
+      this.cache.clear(); this.last.clear(); // 전부 지운 뒤 남은 매니저 수집 기록이 다음 등록에 섞이지 않게
+      this.snapshot = rollup(merge([], [], dataSource));
       return;
     }
 

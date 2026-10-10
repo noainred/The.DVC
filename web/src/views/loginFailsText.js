@@ -6,6 +6,7 @@
  * 숫자(상한·기간)는 서버가 준 값만 쓴다(문구에 박지 않는다 — v2.509 규약). 백틱·별표 금지(BoldText 규약).
  */
 import { numOrNull } from '../numOrNull.js';
+import { notCollectedNote, notCollectedItems } from './eventCoverageText.js'; // v2.733(C1-01)
 
 const nf = new Intl.NumberFormat('ko-KR');
 const num = numOrNull;   // 읽지 못한 값은 0 이 아니라 null(웹 numOrNull 하나 — v2.618 ARCH-6 사본 금지)
@@ -48,3 +49,22 @@ export function analyzedAtText(generatedAt, nowMs = Date.now()) {
 
 /** 분석 결과를 다시 부르는 간격 — 무거운 전 범위 분석이라 상태(30초)보다 길게 둔다. */
 export const ANALYSIS_REFRESH_MS = 5 * 60_000;
+
+/**
+ * v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중) 안내. 서버(security/loginFails.js)는
+ * 그 vCenter 의 옛 실패를 집계에서 빼고 notCollected[{vcenterId, why, oldFails}] 로 싣는다 — 그 vCenter 의 로그인 실패는 이 분석·감시가
+ * 보지 못한다('0건' 이 아니다). oldFails 는 기간 안에 남아 있던 옛 실패 수(증분 주기에는 모른다 = null). 없으면 ''.
+ */
+export function notCollectedLoginNote(notCollected) {
+  const items = notCollectedItems(notCollected);
+  const base = notCollectedNote(items, { tail: '그 vCenter 의 로그인 실패는 이 분석과 주기 감시(알림)가 보지 못합니다(‘실패 0건’ 이 아닙니다)' });
+  if (!base) return '';
+  const old = items.reduce((a, x) => { const n = num(x.oldFails); return n == null ? a : (a ?? 0) + n; }, null);
+  return old ? `${base} 기간 안에 남아 있던 그 vCenter 의 옛 실패 ${nf.format(old)}건은 집계에서 뺐습니다.` : base;
+}
+
+/** KPI 칸 값 — 서버가 null(읽지 않음)을 주면 '—'(0 이 아니다). */
+export function kpiValueText(v) {
+  const n = num(v);
+  return n == null ? '—' : nf.format(n);
+}

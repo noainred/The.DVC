@@ -90,9 +90,11 @@ export default function AnalyzeTab() {
             <span className="muted" style={{ fontSize: 11 }}>점검명</span>
             <input className="input" value={form.test} onChange={(e) => setForm({ ...form, test: e.target.value })} placeholder="정확 일치" />
           </label>
+          {/* v2.733(C5-04): 전역 .input 의 min-width 220px 이 이 110px 칸을 넘어 '조회' 버튼과 겹치고(1280px) 페이지를 밀어냈다(1440px 15px).
+              이 칸만 최소폭을 풀고 라벨 폭을 채운다(v2.636 IPAM 과 같은 원인·같은 해법). */}
           <label className="flex col" style={{ gap: 4, width: 110 }}>
             <span className="muted" style={{ fontSize: 11 }}>유형</span>
-            <input className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} placeholder="ping/tcp…" />
+            <input className="input" style={{ minWidth: 0, width: '100%' }} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} placeholder="ping/tcp…" />
           </label>
           <button className="login-btn" disabled={busy} onClick={run}>{busy ? '집계 중…' : '조회'}</button>
         </div>

@@ -64,27 +64,44 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   };
 
   // ④ 클러스터 N+1 (가장 큰 호스트 1대 장애 시 잔여 용량으로 현재 사용량 수용 가능?)
+  // v2.733(점검 3회차 C2-04 — 재현): ① 유지보수(MAINTENANCE) 호스트는 VM 을 받을 수 없다 — 사용률(usageReadable)에는 읽힌 값으로 남기되
+  //   '장애 후 잔여 용량' 에서는 뺀다(3대 중 1대 유지보수: 예전 80%·여유 → 실제 160%·위험). 그 호스트가 아직 들고 있는 부하는 남은 호스트가
+  //   받아야 하므로 사용량에는 넣는다. vSphere HA 수용 제어도 유지보수 호스트를 용량에 넣지 않는다.
+  //   ② 클러스터가 없는 독립 호스트(SOAP 'standalone', REST 폴백은 소속 미상 null)는 서로 장애를 받아 줄 수 없다(HA 없음) — 한 그룹으로
+  //   묶어 '여유' 라 말하지 않는다. 그룹 행은 남기되(호스트 수·현재 사용률) N+1 은 판정하지 않는다(n1Ok null · standalone true).
+  const isStandalone = (c) => !c || c === 'standalone';
   const cmap = new Map();
   for (const h of hosts) {
     const k = `${h.vcenterId}|${h.cluster || 'standalone'}`;
-    const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, readable: 0, excluded: 0, cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, maxCpu: 0, maxMem: 0 };
+    const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', standalone: isStandalone(h.cluster), hosts: 0, readable: 0, excluded: 0, maintenance: 0, clusterUnknown: 0,
+      cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, active: 0, actCpu: 0, actMem: 0, maxCpu: 0, maxMem: 0 };
     g.hosts++;
+    if (!h.cluster) g.clusterUnknown++;   // 빈 값 = 소속을 모른다(REST 폴백) — '독립' 으로 단정하지 않고 센다
     cmap.set(k, g);
     // v2.606(감사 WEB2606-02): 연결 끊긴·무응답 호스트는 사용량을 읽지 못했고(SOAP 이 0 을 싣는다) 부하를 받아 줄 수도
     // 없다 — '장애 후 잔여' 용량에 넣으면 N+1 이 여유라고 거짓 판정한다. 판정은 store.usageReadable 하나(v2.594).
     if (!usageReadable(h)) { g.excluded++; continue; }
     g.readable++; g.cpuMhz += h.cpuTotalMhz || 0; g.cpuUsed += h.cpuUsageMhz || 0; g.memMB += h.memTotalMB || 0; g.memUsed += h.memUsageMB || 0;
+    if (h.connectionState === 'MAINTENANCE') { g.maintenance++; continue; }   // ① 사용량은 넣고 받아 줄 용량에서는 뺀다
+    g.active++; g.actCpu += h.cpuTotalMhz || 0; g.actMem += h.memTotalMB || 0;
     g.maxCpu = Math.max(g.maxCpu, h.cpuTotalMhz || 0); g.maxMem = Math.max(g.maxMem, h.memTotalMB || 0);
   }
   const clusters = [...cmap.values()].map((g) => {
-    const remCpu = g.cpuMhz - g.maxCpu, remMem = g.memMB - g.maxMem;
-    const cpuOkPct = remCpu > 0 ? r0((g.cpuUsed / remCpu) * 100) : 999;
-    const memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
-    const n1Ok = g.readable >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
-    return { vcenterId: g.vcenterId, cluster: g.cluster, hosts: g.hosts, hostsUsageExcluded: g.excluded, n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
+    let cpuOkPct = null, memOkPct = null, n1Ok = null;
+    if (!g.standalone) {
+      const remCpu = g.actCpu - g.maxCpu, remMem = g.actMem - g.maxMem;
+      cpuOkPct = remCpu > 0 ? r0((g.cpuUsed / remCpu) * 100) : 999;
+      memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
+      n1Ok = g.active >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
+    }
+    return { vcenterId: g.vcenterId, cluster: g.cluster, standalone: g.standalone, hosts: g.hosts, hostsUsageExcluded: g.excluded, maintenance: g.maintenance, clusterUnknown: g.clusterUnknown,
+      n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
       // 읽을 수 있는 호스트가 없으면 사용률은 null('—') — 0% 는 '부하 없음' 이라는 거짓이다.
       cpuUsagePct: g.cpuMhz ? r0((g.cpuUsed / g.cpuMhz) * 100) : null, memUsagePct: g.memMB ? r0((g.memUsed / g.memMB) * 100) : null };
-  }).sort((a, b) => (a.n1Ok === b.n1Ok ? b.cpuAfterFailPct - a.cpuAfterFailPct : a.n1Ok ? 1 : -1));
+  });
+  // 위험(false) → 여유(true) → 판정 안 함(null). 같은 등급은 장애 후 CPU 높은 순.
+  const n1Rank = (v) => (v === false ? 0 : v === true ? 1 : 2);
+  clusters.sort((a, b) => (n1Rank(a.n1Ok) - n1Rank(b.n1Ok)) || ((b.cpuAfterFailPct ?? -1) - (a.cpuAfterFailPct ?? -1)));
 
   // ⑧ 알람 핫스팟
   const bySev = { critical: 0, warning: 0, info: 0 };

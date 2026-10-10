@@ -17,7 +17,7 @@
  *    NUL 바이트로 들어가 파일이 'data' 로 분류되는 사고가 있었다(루트 CLAUDE.md 주의 항목).
  */
 
-import { usageReadable } from '../store.js'; // v2.606 WEB2606-02: 사용률 판정은 store 하나(v2.594)
+import { usageReadable, hostCapacityKnown } from '../store.js'; // v2.606 WEB2606-02: 사용률 판정은 store 하나(v2.594) · v2.733(C2-06) 용량 판정도
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 1000) / 10 : null);
@@ -89,7 +89,7 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
   const rowName = normalize ? stripSitePrefix : nameOf;
   const vcs = (slice.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
   const allowed = new Set(vcs.map((v) => v.id));
-  const mkAcc = () => ({ hosts: 0, excluded: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuReadMhz: 0, memTotalMB: 0, memUsedMB: 0, memReadMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0 });
+  const mkAcc = () => ({ hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuReadMhz: 0, memTotalMB: 0, memUsedMB: 0, memReadMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0 });
   const rows = new Map();     // 행 -> Map<vcId, acc>
   const totals = new Map();   // 행 -> acc(전 vCenter 합)
   const origNames = new Map(); // 행 -> Set<원래 이름>(정규화했을 때 무엇이 합쳐졌는지 밝힌다)
@@ -101,9 +101,13 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
     note(row, nameOf(h.cluster));
     for (const a of [cellOf(rows, row, h.vcenterId, mkAcc), totalOf(totals, row, mkAcc)]) {
       a.hosts += 1;
-      a.cores += num(h.cpuCores);
-      a.cpuTotalMhz += num(h.cpuTotalMhz);
-      a.memTotalMB += num(h.memTotalMB);
+      // v2.733(점검 3회차 C2-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)는 용량 합에
+      //   0 으로 넣지 않고 센다. 넣으면 그 셀의 vCPU:코어·메모리 과할당이 분모만 빠져 부풀거나(부분) '총량 0' 이 된다.
+      if (hostCapacityKnown(h)) {
+        a.cores += num(h.cpuCores);
+        a.cpuTotalMhz += num(h.cpuTotalMhz);
+        a.memTotalMB += num(h.memTotalMB);
+      } else a.capUnknown += 1;
       // v2.606(감사 WEB2606-02): 연결 끊긴·무응답 호스트는 사용량을 읽지 못했다(SOAP 이 0 을 싣는다) — 사용률의 분자·분모
       // 둘 다에서 빼고(용량 합계에는 남긴다) 뺀 대수를 셀에 싣는다. 넣으면 80% 클러스터가 40% 로 보였다(재현).
       if (usageReadable(h)) {
@@ -123,18 +127,22 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
     }
   }
 
+  // v2.733(C2-06): 용량을 못 읽은 호스트가 하나라도 있으면 그 셀의 총량·과할당 비율은 **부분 합**이다 — 0·부푼 비율을 쓰지 않고
+  //   null('—')로 두고 개수(capacityUnknown)를 싣는다. VM 할당은 그 호스트들의 몫까지 들어 있어 분모만 빠진 비율은 틀린 값이다.
+  const capOk = (a) => a.capUnknown === 0;
   const shape = (a) => ({
     cpuUsagePct: pct(a.cpuUsedMhz, a.cpuReadMhz),
     memUsagePct: pct(a.memUsedMB, a.memReadMB),
     // 지표가 아니라 설명용 — 있을 때만 싣는다(셀 키 = 지표 키 계약. DATASTORE usageUnknown 과 같은 방식).
     ...(a.excluded ? { hostsUsageExcluded: a.excluded } : {}),
-    vcpuPerCore: a.cores > 0 ? r1(a.vcpuOn / a.cores) : null,
-    memOvercommitPct: a.memTotalMB > 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
+    ...(a.capUnknown ? { capacityUnknown: a.capUnknown } : {}),
+    vcpuPerCore: capOk(a) && a.cores > 0 ? r1(a.vcpuOn / a.cores) : null,
+    memOvercommitPct: capOk(a) && a.memTotalMB > 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
     hosts: a.hosts,
     vms: a.vms,
     vmsOn: a.vmsOn,
-    cpuTotalGhz: r1(a.cpuTotalMhz / 1000),
-    memTotalGB: Math.round(a.memTotalMB / 1024),
+    cpuTotalGhz: capOk(a) ? r1(a.cpuTotalMhz / 1000) : null,
+    memTotalGB: capOk(a) ? Math.round(a.memTotalMB / 1024) : null,
   });
 
   return buildRows({ rows, totals, vcs, shape, mkAcc, maxRows, sortBy: (t) => t.vms, origNames });

@@ -53,11 +53,22 @@ function scopedVcQuery(req, res) {
   res.status(400).json({ ok: false, reason: '범위 제한 계정은 vCenter 를 하나 지정해야 합니다 — 전체 합계에는 범위 밖 법인이 섞입니다.', scoped: true });
   return undefined;
 }
-/** 게스트 조사 잡이 요청자의 쓰기 범위 안인가(vcenterId 비어 있는 잡은 범위 밖으로 본다). */
-function guestScanInScope(user, vcenterId) {
-  const w = writeScopedVcenterIds(user, store.get());
-  return !w || (!!vcenterId && w.has(String(vcenterId)));
+/**
+ * v2.733(점검 3회차 C3-02a): 게스트 조사 잡 접근 판정 — 0(허용) · 404(조회 범위 밖 — 존재 은닉) · 403(조회는 되는데 쓰기 범위 밖).
+ * 예전에는 라우트의 바깥 조건이 `scopedVcenterIds`(조회 범위)라 '조회 무제한 + writeVcenters 지정' 계정이 쓰기 범위 검사를 통째로
+ * 건너뛰어, 수정 권한이 없는 vCenter 게스트에 로그인·명령을 실행하는 잡을 저장·실행했다(형제 /guest/add-user·/deep-search/probe 는
+ * 쓰기 범위다 — 게스트 명령 실행 = 상태 변경 등급). 응답 규약은 server/CLAUDE.md v2.369(조회 밖 404 · 쓰기 밖 403).
+ */
+function guestScanAccess(user, vcenterId) {
+  const snap = store.get();
+  const id = String(vcenterId || '');
+  const read = scopedVcenterIds(user, snap);
+  if (read && (!id || !read.has(id))) return 404;
+  const write = writeScopedVcenterIds(user, snap);
+  if (write && (!id || !write.has(id))) return 403;
+  return 0;
 }
+const GUEST_SCAN_READONLY = '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다(게스트 조사 작업은 게스트 로그인·명령 실행이라 쓰기 범위가 필요합니다).';
 
 /**
  * v2.629 AUTHZ2629-05: vCenter 로그 보관 상태를 범위 계정에 맞게 좁힌다(형제 /admin/status 는 v2.611 에 범위 필터).
@@ -236,7 +247,13 @@ adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res)
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return;   // v2.607 AUTHZ2607-06
-  try { res.json(await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 })); }
+  try {
+    const r = await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 });
+    // v2.733(점검 3회차 C1-01): 수집하지 않는 vCenter 목록은 범위 안 것만(범위 계정은 vCenter 하나를 고르므로 보통 그 하나뿐이다 — 심층 방어).
+    const allowed = scopedVcenterIds(req.user, store.get());
+    if (allowed && Array.isArray(r?.notCollected)) r.notCollected = r.notCollected.filter((x) => allowed.has(String(x?.vcenterId)));
+    res.json(r);
+  }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -313,27 +330,39 @@ adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { i
 adminRouter.get('/security/net-issues', adminOnly, (req, res) => { const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return; try { res.json(analyzeNetIssues({ vcenterId, days: Number(req.query.days) || 7 })); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 조사 스케줄(로그인 실패 / 네트워크 이슈) — vCenter별·OS별·주기.
-// v2.607 AUTHZ2607-06: 범위 계정은 자기 쓰기 범위 vCenter 의 잡만 보고·만들고·지우고·실행한다(그 밖은 404 — 존재 은닉).
+// v2.607 AUTHZ2607-06: 범위 계정은 자기 쓰기 범위 vCenter 의 잡만 만들고·지우고·실행한다.
+// v2.733(C3-02a): 바깥 판정이 조회 범위라 '조회 무제한 + writeVcenters' 계정이 검사를 건너뛰던 것을 고쳤다 — 판정은 guestScanAccess 하나
+//   (조회 밖 404 · 쓰기 밖 403). GET 은 조회 범위로 보여 주고 쓰기 밖 잡에는 writable:false 를 단다(형제 GET /vm/:id/hardware 와 같다 —
+//   결과 분석 GET /security/net-issues 도 조회 범위다). 전체 범위 계정의 응답 모양은 예전 그대로.
 adminRouter.get('/security/guest-scans', adminOnly, (req, res) => {
   const all = listGuestScans();
-  if (!scopedVcenterIds(req.user, store.get())) return res.json({ jobs: all });
-  const jobs = all.filter((j) => guestScanInScope(req.user, j.vcenterId));
-  res.json({ jobs, scoped: true, omittedOutOfScope: all.length - jobs.length });
+  const snap = store.get();
+  const read = scopedVcenterIds(req.user, snap);
+  const write = writeScopedVcenterIds(req.user, snap);
+  if (!read && !write) return res.json({ jobs: all });
+  const jobs = all
+    .filter((j) => !read || (!!j.vcenterId && read.has(String(j.vcenterId))))
+    .map((j) => ({ ...j, writable: !write || (!!j.vcenterId && write.has(String(j.vcenterId))) }));
+  res.json({ jobs, scoped: !!read, writeScoped: !!write, omittedOutOfScope: all.length - jobs.length, readOnlyJobs: jobs.filter((j) => !j.writable).length });
 });
 adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
   const b = req.body || {};
-  if (scopedVcenterIds(req.user, store.get())) {
-    const prev = b.id ? listGuestScans().find((j) => j.id === String(b.id)) : null;
-    if (prev && !guestScanInScope(req.user, prev.vcenterId)) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
-    if (!guestScanInScope(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
+  const prev = b.id ? listGuestScans().find((j) => j.id === String(b.id)) : null;
+  if (prev) {
+    const code = guestScanAccess(req.user, prev.vcenterId);
+    if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : '작업을 찾을 수 없습니다.' });
   }
+  const code = guestScanAccess(req.user, b.vcenterId);
+  if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
   res.json(saveGuestScan(b));
 });
 function denyGuestScanOutOfScope(req, res) {
-  if (!scopedVcenterIds(req.user, store.get())) return false;
+  const snap = store.get();
+  if (!scopedVcenterIds(req.user, snap) && !writeScopedVcenterIds(req.user, snap)) return false;
   const j = listGuestScans().find((x) => x.id === String(req.params.id));
-  if (j && guestScanInScope(req.user, j.vcenterId)) return false;
-  res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
+  const code = j ? guestScanAccess(req.user, j.vcenterId) : 404;
+  if (!code) return false;
+  res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : '작업을 찾을 수 없습니다.' });
   return true;
 }
 adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; res.json({ ok: removeGuestScan(req.params.id) }); });

@@ -74,6 +74,10 @@ let timer = null;
 let lastRun = null;
 let lastSummary = null;
 let lastIncomplete = null;   // v2.682 R3E-02 — 마지막 주기가 일부 조각을 못 읽었으면 그 사실
+// v2.733(점검 3회차 C1-01): 마지막 주기에 '이 포탈이 지금 이벤트를 수집하지 않아' 감시하지 못한 vCenter(엣지 위임·비활성·점검중).
+//   그 vCenter 의 로그인 실패는 이 모니터가 알리지 못한다 — 조용히 빼지 않고 상태에 남긴다(null = 아직 분석 전).
+let lastNotMonitored = null;
+let lastNotMonitoredSig = '';
 const alerted = new Map(); // key -> lastAlertTs (쿨다운)
 const COOLDOWN = 60 * 60_000;
 
@@ -101,6 +105,13 @@ async function runOnce() {
     // v2.673: 주기 감시는 증분이다(직전 2시간만 다시 · 6시간마다 전 범위) — 15분마다 7일치를 다시 훑지 않는다(security/loginFails.js).
     const r = await analyzeLoginFails({ days: s.days, threshold: s.threshold, windowMin: s.windowMin }, { incremental: true });
     lastRun = Date.now();
+    lastNotMonitored = Array.isArray(r.notCollected) ? r.notCollected.map((x) => ({ vcenterId: x.vcenterId, why: x.why })) : [];
+    // 콘솔에는 목록이 바뀔 때만 한 줄(15분마다 같은 줄을 쌓지 않는다).
+    const nmSig = lastNotMonitored.map((x) => `${x.vcenterId}:${x.why}`).join(',');
+    if (nmSig !== lastNotMonitoredSig) {
+      lastNotMonitoredSig = nmSig;
+      if (lastNotMonitored.length) console.log(`[loginmon] 이 포탈이 지금 이벤트를 수집하지 않는 vCenter ${lastNotMonitored.length}곳은 감시하지 않습니다(엣지 위임·비활성·점검중): ${lastNotMonitored.slice(0, 5).map((x) => `${x.vcenterId}(${x.why})`).join(', ')}${lastNotMonitored.length > 5 ? ' …' : ''}`);
+    }
     // v2.682(감사 R3E-02): vCenter 이벤트를 일부 못 읽은 주기는 요약을 덮지 않는다 — '실패 0건' 이라는 거짓 요약 대신
     //   직전 요약을 두고 사유를 따로 남긴다. 찾은 활성 공격은 실재하므로 알림은 그대로 낸다.
     if (r.incomplete) {
@@ -141,5 +152,5 @@ export function startLoginMonitor() {
   console.log('[loginmon] 로그인 실패 모니터 시작');
 }
 
-export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, lastIncomplete, alertedActive: alerted.size }; }
+export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, lastIncomplete, notMonitored: lastNotMonitored, alertedActive: alerted.size }; }
 export { runOnce as runLoginAnalysisNow };

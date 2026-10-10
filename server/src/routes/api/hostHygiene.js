@@ -18,6 +18,7 @@ import { config } from '../../config.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
 import { getLogsDb } from '../../logs/db.js';
+import { eventNotCollectedMap } from '../../logs/coverage.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(사유)
 import { loadLogSettings } from '../../logs/settings.js';
 
 const toolsPerm = requirePerm('tools');
@@ -62,7 +63,10 @@ export function registerHostHygiene(api) {
     const truncated = got.length > READ_MAX;
     const events = truncated ? got.slice(0, READ_MAX) : got;
     const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
-    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
+    // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter(위임·비활성·점검중)는 '이벤트 없음' 행에 사유를 싣는다(reboots.js) —
+    //   옛 이벤트가 남아 있어도 지금 상태를 그것으로 판정하지 않는다.
+    const ncMap = eventNotCollectedMap();
+    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, why: ncMap.get(id) || null }]));
     const s = loadLogSettings();
     return {
       ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null, readFrom }),

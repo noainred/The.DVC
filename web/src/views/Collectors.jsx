@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
+import { readFailText, agentTokSummary } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -33,6 +34,7 @@ export default function Collectors() {
   const [central, setCentral] = useState(null);
   const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
   const [ingest, setIngest] = useState(null); // 에이전트별 수신 트래픽 진단
+  const [ingestErr, setIngestErr] = useState(null); // v2.733(C5-02): 수신 통계 조회 실패(직전 값은 지우지 않는다 — 15초 폴링)
   const [showToken, setShowToken] = useState(false); // 토큰 입력칸 표시/가리기
   const [pwForm, setPwForm] = useState(null);   // 엣지 비번 일괄 변경 폼 | null
   const [pwResult, setPwResult] = useState(null); // 일괄 변경 결과 { total, succeeded, results, central }
@@ -46,12 +48,18 @@ export default function Collectors() {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
     catch (e) { setError(e.message); }
   };
-  const loadIngest = () => fetchJson('/admin/central/ingest-stats').then(setIngest).catch(() => {});
+  const loadIngest = () => fetchJson('/admin/central/ingest-stats')
+    .then((r) => { setIngest(r); setIngestErr(null); })
+    .catch((e) => setIngestErr(e || new Error('수신 통계 조회 실패')));
   // 엣지별 개별 central 토큰 — 공유 토큰 1개의 광역 스코프를 좁힌다(발급/회수/이관 현황).
   const [agentTok, setAgentTok] = useState(null);   // { tokens[], auth{} }
+  const [agentTokErr, setAgentTokErr] = useState(null); // v2.733(C5-02): 조회 실패 — 예전에는 null 로 비워 '(0개 발급)' 이라 했다
   const [newTok, setNewTok] = useState(null);       // 발급 직후 1회 표시되는 평문 토큰
   const [tokAgent, setTokAgent] = useState('');
-  const loadAgentTok = () => fetchJson('/admin/central/agent-tokens').then(setAgentTok).catch(() => setAgentTok(null));
+  // v2.733(C5-02): 실패면 직전 현황을 지우지 않고 사유를 말한다(agentTokSummary).
+  const loadAgentTok = () => fetchJson('/admin/central/agent-tokens')
+    .then((r) => { setAgentTok(r); setAgentTokErr(null); })
+    .catch((e) => setAgentTokErr(e || new Error('개별 토큰 조회 실패')));
   const issueTok = async () => {
     const name = tokAgent.trim();
     if (!name) { setBanner({ ok: false, text: '토큰을 발급할 엣지(에이전트) 이름을 입력하세요.' }); return; }
@@ -327,7 +335,7 @@ export default function Collectors() {
         </div>
       )}
 
-      <IngestStats data={ingest} onReset={resetIngest} />
+      <IngestStats data={ingest} err={ingestErr} onRetry={loadIngest} onReset={resetIngest} />
 
       {/* S-09: 평문 HTTP 수집 서버·이 포탈의 TLS 리스너·사설 CA·거부된 자기등록 */}
       <TransportPanel transport={data.transport} onApprove={openAddPrefill} />
@@ -335,9 +343,14 @@ export default function Collectors() {
       {/* 엣지별 개별 central 토큰 — 공유 토큰 1개면 엣지 1대 침해로 전 사이트 자격증명이 노출된다. */}
       <details className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-          🔑 엣지별 개별 central 토큰 ({(agentTok?.tokens || []).length}개 발급
-          {agentTok?.auth?.uses ? ` · 공유 토큰 사용 ${agentTok.auth.uses}회` : ''})
+          🔑 엣지별 개별 central 토큰 ({agentTokSummary(agentTok, agentTokErr)})
         </summary>
+        {agentTokErr && (
+          <div className="banner warn" style={{ marginTop: 8 }}>
+            {readFailText('개별 토큰 발급 현황', agentTokErr, { notMeaning: '발급된 토큰이 없다는 뜻이 아닙니다', stale: !!agentTok })}
+            <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={loadAgentTok}>다시 읽기</button>
+          </div>
+        )}
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.8, marginTop: 8 }}>
           공유 <code>CENTRAL_TOKEN</code> 하나만 쓰면, 엣지 1대가 침해되거나 토큰이 유출될 때 <b>다른 모든 사이트</b>의
           iDRAC 비밀번호·게스트 계정·사용자 해시를 <code>?agent=</code> 이름만 바꿔 전부 인출할 수 있습니다.
@@ -796,7 +809,7 @@ function DiagModal({ entry, onClose, onEdit }) {
 // ---- 에이전트 수신 트래픽 진단 ---------------------------------------------
 // 누가(어느 에이전트) 무엇을(엔드포인트·페이로드) 얼마나(와이어 바이트·빈도) 중앙에 보내는지.
 // iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때, 원인이 '큰 페이로드'인지 '잦은 push'인지 짚어낸다.
-function IngestStats({ data, onReset }) {
+function IngestStats({ data, err = null, onRetry, onReset }) {
   // ⚠ 훅은 조기 return 위에(React #310 — v2.202 실제 사고). 이 컴포넌트에는 조기 return 이
   //   없지만 규약을 지켜 맨 위에 둔다.
   const [invDiag, setInvDiag] = useState(null);   // v2.560 — '빈 인벤토리'·MOCK 배지 클릭 대상
@@ -826,8 +839,15 @@ function IngestStats({ data, onReset }) {
         에이전트→중앙 push의 <b>와이어 바이트</b>(압축 포함)와 페이로드 규모(vCenter·호스트·VM)·push 빈도를 집계합니다.
         트래픽은 <b>호스트 수가 아니라 VM 수·페이로드 크기 × push 빈도</b>에 비례합니다. 한 에이전트가 유독 높으면 아래에서 원인(큰 페이로드 vs 잦은 push)을 확인하세요.
       </div>
+      {/* v2.733(C5-02): 조회 실패를 '아직 push 가 없습니다' 로 그리지 않는다 — 직전 값이 있으면 그대로 두고 그 사실을 말한다. */}
+      {err && (
+        <div className="banner warn" style={{ marginBottom: 8 }}>
+          {readFailText('수신 통계', err, { notMeaning: '수신된 push 가 없다는 뜻이 아닙니다', stale: !!data })}
+          {onRetry && <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={onRetry}>다시 읽기</button>}
+        </div>
+      )}
       {rows.length === 0 ? (
-        <div className="muted" style={{ fontSize: 12 }}>아직 수신된 push가 없습니다(사이트 위임 에이전트가 push하면 집계됩니다).</div>
+        data ? <div className="muted" style={{ fontSize: 12 }}>아직 수신된 push가 없습니다(사이트 위임 에이전트가 push하면 집계됩니다).</div> : null
       ) : (
         <div className="table-wrap">
           <STable>

@@ -1,5 +1,6 @@
 import { blankOr } from './blankOr.js';
 import { scopeSaveSuffix } from './scopeSaveText.js';
+import { scopeSavedText } from './scopeSaveMsg.js'; // v2.733(C5-03): 범위 계정의 전역 값 미적용(ignoredGlobal)을 말한다
 import { samplerWithheldNote } from './samplerWithheldText.js'; // v2.628(LEFT2628-01)
 import { rollupBackfillNote } from './rollupBackfillText.js'; // v2.675 옛 원본 → 시간당 롤업 이전 상태
 import React, { useEffect, useRef, useState } from 'react';
@@ -79,7 +80,8 @@ export default function MetricsSettings() {
       setRetentionDays(r.settings.retentionDays ?? '');
       setRawRetentionDays(r.settings.rawRetentionDays ?? '');
       setGpuSec(r.settings.gpuUtilIntervalSec ?? '');
-      setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
+      // v2.733(C5-03): 범위 계정이면 서버가 전역 주기·보존일을 적용하지 않는다(ignoredGlobal) — '즉시 적용' 이라 말하지 않는다.
+      setMsg(scopeSavedText(r, '저장되었습니다.', ' 새 주기가 즉시 적용됩니다.').text);
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };

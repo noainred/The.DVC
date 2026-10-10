@@ -8,6 +8,7 @@ import { isLoginFailRow } from '../logs/loginFailPattern.js';
 import { createYielder } from '../util/timeSlice.js';
 import { getStoredFails } from './loginStore.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { eventNotCollectedMap, notCollectedList } from '../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 
 const DAY = 86_400_000;
 const IPV4 = /(?:\d{1,3}\.){3}\d{1,3}/;
@@ -42,7 +43,7 @@ const inc = { key: '', fails: [], upTo: 0, fullAt: 0 };
 export function _resetLoginFailIncForTest() { inc.key = ''; inc.fails = []; inc.upTo = 0; inc.fullAt = 0; }
 
 /** [from, ∞) 를 최근 1시간 조각부터 거슬러 훑어 실패를 모은다(최신순). scan 을 채운다. */
-async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan }) {
+async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan, exclude = null, excluded = null }) {
   const seen = new Set();
   const out = [];
   // 첫 조각은 위쪽이 열려 있다 — vCenter 시계가 포탈보다 앞서 '미래 시각' 으로 찍힌 실패도 빠뜨리지 않게(예전 쿼리와 같다).
@@ -60,6 +61,8 @@ async function scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, sc
     for (const e of rows) {
       const id = `${e.vcenterId}|${e.ts}|${e.type}|${e.user}`;
       if (seen.has(id) || !isLoginFail(e)) continue;
+      // v2.733(C1-01): 지금 수집하지 않는 vCenter 의 옛 실패는 세지 않는다(그 vCenter 별 개수만 남긴다 — 집계에 섞으면 '감시 중' 처럼 보인다).
+      if (exclude && exclude.has(String(e.vcenterId))) { seen.add(id); if (excluded) excluded.set(String(e.vcenterId), (excluded.get(String(e.vcenterId)) || 0) + 1); continue; }
       if (out.length >= rowsMax) { scan.truncated = true; break; }
       seen.add(id);
       out.push({ ts: e.ts, source: e.vcenterId, kind: 'vcenter', user: (e.user || '').trim() || '(unknown)', ip: srcIp(e), type: e.type, message: e.message });
@@ -95,6 +98,13 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
   const vcenterId = opts?.vcenterId || '';
   const { days, threshold, windowMin } = clampLoginFailParams(opts);
   const db = deps.db || await getLogsDb();
+  // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중 — v2.732 B4-01).
+  //   그 vCenter 를 골랐으면 vCenter 이벤트를 훑지 않는다(summary.vcenter = null — '실패 0건' 이 아니다). 전체 보기는 그 vCenter 의 옛 실패를
+  //   집계에서 빼고 notCollected[{vcenterId, why, oldFails}] 로 밝힌다(oldFails — 기간 안 뺀 실패 수, 증분 주기에는 모른다 = null).
+  const nc = deps.notCollected instanceof Map ? deps.notCollected : eventNotCollectedMap();
+  const vcSkipped = !!vcenterId && nc.has(String(vcenterId));
+  const exclude = !vcenterId && nc.size ? new Set(nc.keys()) : null;
+  const excluded = exclude ? new Map() : null;
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const since = now - Math.max(1, days) * DAY;
   const rowsMax = Number.isFinite(deps.rowsMax) && deps.rowsMax > 0 ? deps.rowsMax : LOGIN_FAIL_ROWS_MAX;
@@ -104,20 +114,23 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
   // vCenter 이벤트에서 로그인 실패 후보를 좁은 조건 하나로, 최근 1시간 조각부터 거슬러 가져와 정규식으로 분류.
   // v2.675: rowsMax·days 를 싣는다 — 화면이 '최근 N건까지만 셌다' 를 숫자를 박지 않고 말한다.
   const scan = { chunks: 0, candidates: 0, failedChunks: 0, error: null, truncated: false, ms: 0, source: 'candidates', mode: 'full', from: since, rowsMax, days: Math.max(1, days) };
-  const read = typeof db.loginFailCandidates === 'function' ? db.loginFailCandidates : null;
-  if (!read) scan.source = 'unavailable';   // 구버전 db 객체 — 네 단어 전 범위 검색(정지 원인)으로 되돌리지 않는다
-  const key = `${vcenterId || ''}|${Math.max(1, days)}`;
+  const read0 = typeof db.loginFailCandidates === 'function' ? db.loginFailCandidates : null;
+  if (!read0) scan.source = 'unavailable';   // 구버전 db 객체 — 네 단어 전 범위 검색(정지 원인)으로 되돌리지 않는다
+  else if (vcSkipped) scan.source = 'not-collected';
+  const read = vcSkipped ? null : read0;
+  // 증분 키에 '수집하지 않는 vCenter' 집합을 넣는다 — 그 집합이 바뀌면(위임 해제 등) 직전 결과에 빠진 실패가 있으므로 처음부터 다시 훑는다.
+  const key = `${vcenterId || ''}|${Math.max(1, days)}|${exclude ? [...exclude].sort().join(',') : ''}`;
   const canInc = !!deps.incremental && read && inc.key === key && inc.upTo > since && now - inc.fullAt < LOGIN_FAIL_FULL_EVERY_MS;
   let vcFails;
   if (canInc) {
     const from = Math.max(since, inc.upTo - LOGIN_FAIL_OVERLAP_MS);
-    const fresh = await scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan });
+    const fresh = await scanVcFails({ read, vcenterId, from, now, rowsMax, maybeYield, scan, exclude, excluded: null });
     // [from, ∞) 는 방금 다시 훑은 값으로 바꾸고, 그 이전은 직전 결과에서 기간 안의 것만 이어 붙인다(ts 로 갈라 겹치지 않는다).
     vcFails = [...fresh, ...inc.fails.filter((f) => f.ts >= since && f.ts < from)];
     if (vcFails.length > rowsMax) { vcFails = vcFails.slice(0, rowsMax); scan.truncated = true; }
     scan.mode = 'incremental'; scan.from = from;
   } else {
-    vcFails = await scanVcFails({ read, vcenterId, from: since, now, rowsMax, maybeYield, scan });
+    vcFails = await scanVcFails({ read, vcenterId, from: since, now, rowsMax, maybeYield, scan, exclude, excluded });
     if (deps.incremental && !scan.failedChunks) inc.fullAt = now;
   }
   // v2.682(감사 R3E-02): 일부 조각을 못 읽었으면 그 결과를 다음 증분의 기준으로 삼지 않는다(upTo 를 전진시키면 못 읽은 구간이
@@ -175,7 +188,7 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
   return {
     config: { days, threshold, windowMin, vcenterId: vcenterId || '' },
     summary: {
-      total: all.length, vcenter: vcFails.length, portal: portalFails.length, guest: guestFails.length,
+      total: all.length, vcenter: vcSkipped ? null : vcFails.length, portal: portalFails.length, guest: guestFails.length,
       users: byUser.size, ips: byIp.size,
       offenders: offenders.length, active: offenders.filter((o) => o.active).length,
     },
@@ -185,6 +198,10 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
     recent: all.slice(0, 100),
     // v2.682(감사 R3E-02): vCenter 이벤트 일부를 못 읽었다 — 합계는 '실패 0건' 이 아니라 '확인 불가가 섞인 하한' 이다.
     incomplete,
+    // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter — 그 vCenter 의 로그인 실패는 이 분석이 감시하지 않는다.
+    notCollected: vcSkipped
+      ? notCollectedList(nc, { only: [String(vcenterId)] }).map((x) => ({ ...x, oldFails: null }))
+      : exclude ? notCollectedList(nc).map((x) => ({ ...x, oldFails: scan.mode === 'full' ? (excluded.get(x.vcenterId) || 0) : null })) : [],
     scan,   // v2.673: 훑은 조각 수·후보 수·상한으로 잘렸는지·소요(정직 — 잘렸으면 화면이 '최근 N건까지' 라고 말할 수 있다)
     generatedAt: Date.now(),
   };

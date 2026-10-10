@@ -5,6 +5,7 @@ import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
+import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -24,6 +25,24 @@ const fmtMB = (b) => (b == null ? '—' : b < 1048576 ? `${Math.round(b / 1024)}
 const SEV = { error: ['위험', 'red'], warning: ['경고', 'amber'], info: ['정보', 'gray'] };
 
 /** 설정 → vCenter 로그 보관 — 보관 정책 + 장기 보관된 이벤트 뷰어. */
+/**
+ * v2.733(점검 3회차 C1-01): 수집 상태 줄 — 범위 계정은 서버가 전 vCenter 합계(collected)를 null 로 준다('0건' 이 아니라 '—').
+ */
+export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
+  if (!lastRun) return '아직 수집 안 함';
+  if (lastRun.skipped) return `최근 확인 ${fmt(lastRun.at)} · 수집 꺼짐`;
+  const n = lastRun.collected;
+  return `최근 수집 ${fmt(lastRun.at)} · ${Number.isFinite(n) ? `${n.toLocaleString()}건` : '—'}`;
+}
+
+/** v2.733(C1-01): 로그 폴러가 이번 주기에 건너뛴 vCenter(엣지 위임·비활성·점검중) — 범위 계정에서 뺀 개수도 말한다. 없으면 ''. */
+export function vcLogNotCollectedText(lastRun) {
+  const base = notCollectedNote(lastRun?.notCollected, { tail: '이 포탈은 그 vCenter 에 로그인하지 않아 이벤트가 쌓이지 않습니다(엣지 위임 vCenter 의 로그는 아래 조회가 엣지에서 가져옵니다)' });
+  const omitted = Number(lastRun?.notCollectedOmitted);
+  const omitTxt = Number.isFinite(omitted) && omitted > 0 ? ` 범위 밖 ${omitted.toLocaleString()}곳은 표시하지 않았습니다.` : '';
+  return base ? `${base}${omitTxt}` : '';
+}
+
 export default function VcenterLogs() {
   const [st, setSt] = useState(null);
   const [s, setS] = useState(null);
@@ -77,8 +96,9 @@ export default function VcenterLogs() {
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
           <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={save}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'collect'} onClick={collect}>{busy === 'collect' ? '수집 중…' : '⟳ 지금 수집'}</button>
-          <span className="muted" style={{ fontSize: 12 }}>{st.lastRun ? `최근 수집 ${fmtTime(st.lastRun.at)} · ${st.lastRun.collected ?? 0}건` : '아직 수집 안 함'}{msg ? ` · ${msg}` : ''}</span>
+          <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>
+        {vcLogNotCollectedText(st.lastRun) && <div className="muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{vcLogNotCollectedText(st.lastRun)}</div>}
         {(st.store?.vcenters || []).length > 0 && (
           <div className="flex gap wrap" style={{ marginTop: 10 }}>
             {st.store.vcenters.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 11 }} title={`최근 ${fmtTime(v.lastTs)}`}>{v.vcenterId}: {fmtNum(v.count)}</span>)}

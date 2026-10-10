@@ -14,6 +14,7 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
+import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeLifecycle, kindOfLife } from '../../vmlife/analyze.js';
 import { LIFE_TYPES, parseDetail } from '../../vmchanges/eventDetail.js';
 
@@ -38,9 +39,13 @@ async function load(req, snap) {
   const truncated = rows.length > LIFE_READ_MAX;
   if (truncated) rows.length = LIFE_READ_MAX;
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null }));
+  // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 항목에 notCollected(사유)를 싣는다 —
+  //   lastTs 가 남아 있어도(수집을 멈추기 전 이벤트) '없음' 이 아니라 '지금 수집하지 않는다' 다. 목록(notCollected)은 범위로 이미 거른 ids 기준.
+  const nc = eventNotCollectedMap();
+  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+  const notCollected = notCollectedList(nc, { only: ids, names: vcName });
   const s = loadLogSettings();
-  return { rows, truncated, days, since, vcName, ids, coverage, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
+  return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
 }
 
 /** 지금 인벤토리의 VM 이름(vCenter 별) — 이벤트의 VM 이 지금도 있는지 이름으로만 본다. 첫 수집 중이면 모른다(null). */
@@ -62,7 +67,7 @@ export function registerVmLifecycle(api) {
     const L = await load(req, snap);
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
-      vcenters: L.coverage, logs: L.settings,
+      vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
       life: analyzeLifecycle(L.rows, { days: L.days, vcName: L.vcName, q: qStr(req.query.q, 128), kind: qStr(req.query.kind, 16), liveNames: liveNamesOf(snap, L.ids) }),
       initial: snap.initial === true,
     };

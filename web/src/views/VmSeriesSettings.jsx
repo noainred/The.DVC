@@ -17,7 +17,7 @@ import { fmtBytes, intervalWarning, thresholdText, scopeSummaryText, lastRunText
 import BoldText from '../components/boldText.jsx';
 import { vcAuthSkipNote } from './authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 import { requireChanged } from './changeResult.js';
-import { pendingStaleTargets, staleTargetChips, staleChipLabel, removeStaleTarget, staleNote, staleKeptSuffix } from './staleSettingIds.js'; // v2.732 B5-02
+import { pendingStaleTargets, staleTargetChips, staleChipLabel, removeStaleTarget, staleNote, staleKeptSuffix, pendingStaleUnknown, staleUnknownNote } from './staleSettingIds.js'; // v2.732 B5-02 · v2.733 C1-03
 
 const EMPTY_T = () => ({ clusters: [], folders: [], hosts: [], vms: [] });
 
@@ -186,6 +186,9 @@ export default function VmSeriesSettings() {
   const countSel = (t) => (!t ? 0 : t.all ? null : (t.clusters?.length || 0) + (t.folders?.length || 0) + (t.hosts?.length || 0) + (t.vms?.length || 0));
   // v2.732(B5-02): 저장돼 있지만 지금 스냅샷에 없는 대상(삭제된 vCenter·VM·호스트) — 트리는 스냅샷에 있는 것만 그리므로 여기서만 해제할 수 있다.
   const staleChips = staleTargetChips(pendingStaleTargets(d.staleTargets, targets));
+  // v2.733(C1-03): 인벤토리를 못 읽은 vCenter(재시작 직후·첫 수집 중·연결 실패·점검중·비활성)의 선택은 서버가 판정하지 않는다 — 칩 대신 말한다.
+  const vcNameById = new Map((d.vcenters || []).map((v) => [v.id, v.name]));
+  const unknownNote = staleUnknownNote(pendingStaleUnknown(d.staleUnknown, targets), (id) => vcNameById.get(id));
 
   return (
     <div>
@@ -238,6 +241,11 @@ export default function VmSeriesSettings() {
                   onClick={() => setTargets((cur) => removeStaleTarget(cur, c.vcId, c.kind, c.id))}>{staleChipLabel(c)} ✕</button>
               ))}
             </div>
+          </div>
+        )}
+        {unknownNote && (
+          <div className="muted" style={{ margin: '4px 0 10px', padding: 10, border: '1px dashed var(--border)', borderRadius: 6, fontSize: 12, whiteSpace: 'normal', lineHeight: 1.55, overflowWrap: 'anywhere' }}>
+            <BoldText text={unknownNote} />
           </div>
         )}
 

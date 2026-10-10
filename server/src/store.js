@@ -5,7 +5,8 @@ import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진�
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter, vcAuthGuard, isVcAuthError } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
-import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower, vcPowerKey } from './idrac/service.js';
+import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower, vcPowerKey, vcPowerSkipReason, vcPowerSkippedOf } from './idrac/service.js';
+import { unreadVcenterReasons } from './metrics/unreadVcenters.js'; // v2.733(C2-02): 지표 샘플러와 같은 판정(순수 leaf — sampler 는 store 를 import 해 여기서 쓸 수 없다)
 import { filterMeasuredByMapping, loadPowerSettings } from './idrac/powerSettings.js';
 import { applyFleetAssign } from './insights/fleetAssign.js';
 import { getDb as getPowerDb } from './idrac/db.js';
@@ -121,6 +122,21 @@ export function ledgerInputSignature(snap, revKey = ipamRevKey()) {
   for (const x of hosts) h.update([x?.name, x?.vcenterId, x?.powerState, x?.version, x?.cluster].map(f).join('|') + ';');
   return h.digest('hex');
 }
+/*
+ * v2.733(점검 3회차 C6-01): 스냅샷 객체 → 그 스냅샷의 원장 입력 지문(관리 리비전별 한 번). syncLedger 가 매 갱신 계산한 값을
+ *   `/tools/ipam/subnets`(60초 폴링)가 다시 쓴다 — 서브넷 목록은 세대가 아니라 이 지문으로 기억한다(ipam/ledger.js listSubnets).
+ *   스냅샷은 게시 뒤 바꾸지 않으므로 같은 객체·같은 리비전이면 값이 같다. WeakMap 이라 옛 세대 스냅샷과 함께 사라진다.
+ */
+const _inputSigOf = new WeakMap(); // snap -> { rev, sig }
+export function ledgerInputSignatureOf(snap) {
+  const rev = ipamRevKey();
+  if (!snap || typeof snap !== 'object') return ledgerInputSignature(snap, rev);
+  const hit = _inputSigOf.get(snap);
+  if (hit && hit.rev === rev) return hit.sig;
+  const sig = ledgerInputSignature(snap, rev);
+  _inputSigOf.set(snap, { rev, sig });
+  return sig;
+}
 
 // 입력 지문이 같아도 이 간격마다 한 번은 원장을 전량 다시 만들어 서명과 비교한다(지문이 모르는 입력이 생겼을 때의 안전망).
 const LEDGER_FULL_CHECK_MS = clampIntervalMs(process.env.LEDGER_FULL_CHECK_MS, 10 * 60_000, 60_000);
@@ -149,7 +165,10 @@ function idracRegisteredCount() {
  */
 // vCenter 호스트 전력 시계열 적재(throttled prune 포함). 설정 off면 건너뜀.
 let _vcPersistTicks = 0;
-async function persistVcenterPower(snap) {
+// v2.733(점검 3회차 C2-02): skip = { unread, hostReadable } — 읽지 못한 vCenter(LASTGOOD 이월·낡은 위임·점검중)·끊긴 호스트의
+//   powerWatts 는 몇 시간 전 값이다. ts=now 로 적재하면 장애 구간이 그 값의 평탄선으로 전력 DB·power_hourly 에 남는다
+//   (v2.620 SRV2620-03 지표 샘플러와 같은 판정 — idrac/service.js vcPowerSkipReason). 결측은 결측으로 남긴다.
+async function persistVcenterPower(snap, skip = {}) {
   try {
     if (loadPowerSettings().includeVcenterPower === false) return;
     const ts = Date.now();
@@ -158,6 +177,7 @@ async function persistVcenterPower(snap) {
       const w = Number(h.powerWatts);
       if (!Number.isFinite(w) || w <= 0) continue;
       if (h.powerSource === 'idrac') continue; // iDRAC 전용 소스가 별도 저장하므로 제외
+      if (vcPowerSkipReason(h, skip)) continue;
       samples.push({ serverId: vcPowerKey(h.vcenterId, h.name), watts: Math.round(w), ts });
     }
     if (!samples.length) return;
@@ -178,8 +198,10 @@ async function persistVcenterPower(snap) {
   } catch { /* best effort — 전력 적재 실패는 수집을 막지 않음 */ }
 }
 
-async function overlayIdracPower(snap) {
+export async function overlayIdracPower(snap) {
   try {
+    // v2.733(C2-02): 적재·합산에서 뺄 vCenter 추정 전력의 판정 입력 — 지표 샘플러와 같은 vCenter 판정 + 사용률과 같은 호스트 판정.
+    const vcSkip = { unread: unreadVcenterReasons(snap), hostReadable: usageReadable };
     const byName = await latestPowerByHostName();
     const byTag = await latestPowerByServiceTag();
     for (const h of snap.hosts) {
@@ -193,13 +215,13 @@ async function overlayIdracPower(snap) {
 
     // vCenter PerformanceManager로 수집한 ESXi 호스트 전력을 시계열 DB에 적재(대시보드 24h 피크/평균·추세용).
     // iDRAC으로 이미 덮어쓴 호스트(powerSource='idrac')는 제외(중복 저장 방지). 트랜잭션 배치로 비차단.
-    await persistVcenterPower(snap);
+    await persistVcenterPower(snap, vcSkip);
 
     // 전체 측정 전력(iDRAC/OME/원격/vCenter, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
     // 우선순위: 서버에 명시 지정된 vcenterId → 호스트명 → 서비스태그 → (미매핑).
     // 설정 시 vCenter 미매핑(귀속 안 됨) 측정 전력을 총합/보고/롤업에서 제외.
     // vcenterFirst: 매칭된 Dell 호스트는 vCenter 추정 전력으로, iDRAC은 베어메탈만 — 호스트 전력에 iDRAC을 섞지 않는다.
-    const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true })), snap);
+    const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true, ...vcSkip })), snap);
     const idx = buildHostIndex(snap.hosts);
     const validVcIds = new Set(snap.vcenters.map((v) => v.id));
     const byVc = new Map();
@@ -214,7 +236,8 @@ async function overlayIdracPower(snap) {
       byVc.set(vcId, (byVc.get(vcId) || 0) + w);
       countByVc.set(vcId, (countByVc.get(vcId) || 0) + 1);
     }
-    snap.measuredPower = { totalWatts: Math.round(totalW), servers: count, byVc: Object.fromEntries(byVc), countByVc: Object.fromEntries(countByVc) };
+    snap.measuredPower = { totalWatts: Math.round(totalW), servers: count, byVc: Object.fromEntries(byVc), countByVc: Object.fromEntries(countByVc),
+      vcPowerSkipped: loadPowerSettings().includeVcenterPower === false ? null : vcPowerSkippedOf(snap.hosts, vcSkip) }; // v2.733(C2-02): 합산에서 뺀 vCenter 추정 전력(대수·사유)
   } catch { /* power overlay is best-effort */ }
   return snap;
 }
@@ -492,7 +515,7 @@ class Store {
       //   ledgerInputSignature 머리말). 30초마다 84~162ms 이벤트 루프를 막던 것(buildIpamRows·서명·행 GC)의 대부분이다.
       //   입력 지문이 모르는 입력이 생겨도 LEDGER_FULL_CHECK_MS 마다 한 번은 전량을 다시 만들어 서명과 비교한다.
       const now = Date.now();
-      const inSig = ledgerInputSignature(this.snapshot);
+      const inSig = ledgerInputSignatureOf(this.snapshot); // v2.733 C6-01: 같은 값을 서브넷 목록 라우트가 다시 쓴다(스냅샷 객체별 기억)
       const fullDue = now - (this._ledgerFullAt || 0) >= LEDGER_FULL_CHECK_MS;
       if (inSig === this._lastLedgerInputSig && !fullDue) {
         this.ledgerInputSkips = (this.ledgerInputSkips || 0) + 1;
@@ -717,13 +740,23 @@ export function scopedRollups(snap, allowed) {
 export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.connectionState !== 'NOT_RESPONDING';
 
 /**
+ * v2.733(점검 3회차 C2-06): 호스트 용량(코어·CPU 총량·메모리 총량)을 읽었는가. REST 폴백 vCenter(vcenter/restClient.js — 목록 API 에
+ *   하드웨어 요약이 없다)의 호스트는 세 필드가 **없다**. 예전에는 `|| 0` 으로 더해져 그 법인 코어 0 · vCPU:코어 0 · 오버커밋 0% 라는
+ *   거짓이 됐다. 용량 합계·과할당 비율은 이것이 참인 호스트만 쓰고, 거짓인 호스트는 개수로 밝힌다(hostsCapacityUnknown·capacityUnknown).
+ *   SOAP 경로는 세 필드를 항상 수로 싣는다(soapClient num() — 0 일 수는 있다) — 동작 변화는 '못 읽은' 호스트에만 있다.
+ */
+export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v));
+
+/**
  * v2.599 RECENT2599-03: 데이터스토어 사용량을 읽었는가 — usedGB·freeGB 가 둘 다 null 이면 못 읽은 것이다
  * (v2.598 부터 SOAP 경로도 freeSpace 가 없으면 null 을 낸다). vmtrack diffDatastores 와 같은 규칙.
  */
 export const dsUsageReadable = (d) => d.usedGB != null || d.freeGB != null;
 export const dsUsedOf = (d) => (d.usedGB != null ? d.usedGB : Math.max(0, (d.capacityGB || 0) - d.freeGB));
 /** v2.622(감사 RECENT-02): '사용량 미상' 으로 세는 DS — 롤업 datastoresUsageUnknown 과 같은 기준(일일 헬스체크가 공유한다). */
-export const dsUsageUnknownOf = (d) => !!d && !dsUsageReadable(d) && (d.capacityGB || 0) > 0;
+// v2.733(C2-06): REST 폴백이 용량 자체를 못 읽은 DS 는 capacityGB 가 **명시적 null** 이다 — 그것도 '사용량 미상' 으로 센다(조용히 빠지지 않게).
+//   (undefined 는 예전처럼 0 으로 본다 — 용량 필드를 싣지 않는 옛 스냅샷·픽스처의 뜻을 바꾸지 않는다.)
+export const dsUsageUnknownOf = (d) => !!d && !dsUsageReadable(d) && (d.capacityGB === null || (d.capacityGB || 0) > 0);
 
 /**
  * v2.732(점검 2회차 B2-01): 담당 엣지의 push 가 SITE_STALE_MS 를 넘긴 위임(site) vCenter — **status 와 무관**하게 센다.
@@ -748,17 +781,23 @@ function rollupsOf(snap, { scoped = false } = {}) {
 
   // 전역 카운터 단일 루프(v2.343 #10): 종전엔 filter/sum 으로 호스트 8회·VM 2회·알람 2회·DS 2회
   // 전체 재순회했다(6.5천 객체 × ~12패스, 매 30초). 값은 종전과 동일 — 패스 수만 통합.
-  const hc = { connected: 0, maintenance: 0, disconnected: 0, cores: 0, cpuT: 0, cpuU: 0, memT: 0, memU: 0, cpuTR: 0, memTR: 0, powerW: 0, powerReporting: 0 };
+  const hc = { connected: 0, maintenance: 0, disconnected: 0, cores: 0, cpuT: 0, cpuU: 0, memT: 0, memU: 0, cpuTR: 0, memTR: 0, powerW: 0, powerReporting: 0, capUnknown: 0 };
+  // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 측정 전력이 없을 때의 폴백 합계에도 넣지 않는다(overlayIdracPower 와 같은 판정).
+  const vcOn = loadPowerSettings().includeVcenterPower !== false;
+  const vcSkip = { unread: unreadVcenterReasons(snap), hostReadable: usageReadable };
   for (const h of snap.hosts) {
     if (h.connectionState === 'CONNECTED') hc.connected++;
     else if (h.connectionState === 'MAINTENANCE') hc.maintenance++;
     else if (h.connectionState === 'DISCONNECTED') hc.disconnected++;
+    // v2.733(C2-06): 용량 합계는 **읽은 필드만** 더한다(없는 필드는 0 이 아니라 빠진 것 — 수치는 예전 `|| 0` 과 같다) ·
+    //   세 필드 중 하나라도 못 읽은 호스트(REST 폴백)는 hostsCapacityUnknown 으로 센다(조용히 빠지지 않게).
     hc.cores += h.cpuCores || 0;
     hc.cpuT += h.cpuTotalMhz || 0; hc.memT += h.memTotalMB || 0;
     if (usageReadable(h)) { hc.cpuU += h.cpuUsageMhz || 0; hc.memU += h.memUsageMB || 0; hc.cpuTR += h.cpuTotalMhz || 0; hc.memTR += h.memTotalMB || 0; }
-    hc.powerW += h.powerWatts || 0;
-    if (h.powerWatts > 0) hc.powerReporting++;
+    if (!hostCapacityKnown(h)) hc.capUnknown++;
+    if (h.powerWatts > 0 && !vcPowerSkipReason(h, vcSkip)) { hc.powerW += h.powerWatts; hc.powerReporting++; }
   }
+  const vcPowerSkipped = vcOn ? vcPowerSkippedOf(snap.hosts, vcSkip) : null;
   let vmsOn = 0, templates = 0;
   for (const v of snap.vms) { if (v.powerState === 'POWERED_ON') vmsOn++; if (v.template) templates++; }
   let alCrit = 0, alWarn = 0;
@@ -769,7 +808,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
   // v2.599 RECENT2599-03: 사용량을 못 읽은 DS 는 용량·사용량 **양쪽에서** 뺀다(부분 합 = 거짓 하락). 개수는 datastoresUsageUnknown.
   let storCapGB = 0, storUsedGB = 0, dsUsageUnknown = 0;
   for (const d of snap.datastores) {
-    if (!dsUsageReadable(d)) { if ((d.capacityGB || 0) > 0) dsUsageUnknown++; continue; }
+    if (!dsUsageReadable(d)) { if (dsUsageUnknownOf(d)) dsUsageUnknown++; continue; }
     storCapGB += d.capacityGB || 0; storUsedGB += dsUsedOf(d);
   }
   const cpuTotalMhz = hc.cpuT, cpuUsedMhz = hc.cpuU, memTotalMB = hc.memT, memUsedMB = hc.memU;
@@ -806,6 +845,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
     memUsagePct: pctOrNull(memUsedMB, hc.memTR),
     // v2.595(감사 R2595-04·05): 사용률에서 뺀 호스트 수·그 기준 용량 — 화면이 used/total 과 % 의 차이를 설명한다.
     hostsUsageExcluded: snap.hosts.length - snap.hosts.filter(usageReadable).length,
+    // v2.733(C2-06): 코어·CPU·메모리 총량을 못 읽은 호스트 수(REST 폴백) — 위 총량 합계에서 빠졌다.
+    hostsCapacityUnknown: hc.capUnknown,
     cpuTotalReadableGhz: round(hc.cpuTR / 1000, 1),
     memTotalReadableGB: round(hc.memTR / 1024, 0),
     storageTotalTB: round(storCapGB / 1024, 1),
@@ -824,6 +865,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
     // 등록된 Dell iDRAC 서버 수(OME 자동발견 엔트리 제외) — '전력 보고 중' 수량과 비교용.
     powerRegistered: scoped ? null : idracRegisteredCount(), // 전 함대 등록 수 — 범위 계정에는 주지 않는다
     powerUnmappedKw: scoped ? null : round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
+    // v2.733(C2-02): 지금 값이 아니라서 합산에서 뺀 vCenter 추정 전력(읽지 못한 vCenter·끊긴 호스트) — { hosts, vcenters, byReason } · 끔이면 null.
+    vcPowerSkipped,
   };
 
   // 성능: 호스트/VM/DS/알람을 vCenter별로 '한 번만' 그룹핑한 뒤 조회한다. 이전에는
@@ -852,6 +895,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
       const d = pick(dsByVc, ids);
       const a = pick(alarmsByVc, ids);
       const hR = h.filter(usageReadable);   // v2.594: 사용량·사용률은 사용량을 읽을 수 있는 호스트만(용량 합계는 전부)
+      const capUnknown = h.length - h.filter(hostCapacityKnown).length; // v2.733(C2-06): 용량을 못 읽은 호스트(sum 은 없는 값을 0 으로 건너뛴다)
       const cpuT = sum(h, (x) => x.cpuTotalMhz), cpuU = sum(hR, (x) => x.cpuUsageMhz);
       const memT = sum(h, (x) => x.memTotalMB), memU = sum(hR, (x) => x.memUsageMB);
       const cpuTR = sum(hR, (x) => x.cpuTotalMhz), memTR = sum(hR, (x) => x.memTotalMB);
@@ -867,6 +911,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
         cpuUsagePct: pctOrNull(cpuU, cpuTR),
         memUsagePct: pctOrNull(memU, memTR),
         hostsUsageExcluded: h.length - hR.length,
+        hostsCapacityUnknown: capUnknown,
         storageUsagePct: pctOrNull(stU, stC),   // v2.600 LO2600-01 — 사용량을 읽은 DS 가 없으면 0% 가 아니라 모른다(null)
         storageTotalTB: round(stC / 1024, 1),
         // 사용량/전체 병기용(v2.232) — %만으로는 규모가 안 보인다(카드에서 "63% · 69/110 TB" 표기).
@@ -875,7 +920,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
         memUsedGB: Math.round(memU / 1024),
         memTotalGB: Math.round(memT / 1024),
         storageUsedTB: round(stU / 1024, 1),
-        datastoresUsageUnknown: d.filter((x) => !dsUsageReadable(x) && (x.capacityGB || 0) > 0).length,
+        datastoresUsageUnknown: d.filter(dsUsageUnknownOf).length,   // v2.733(C2-06): 판정 한 벌(용량 null 포함)
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
         // 측정 전력을 vCenter 귀속 기준으로 합산(명시 지정·이름·태그). 호스트 미매핑 서버도 그 vCenter에 포함.

@@ -1,3 +1,5 @@
+import { notCollectedWhyText } from './eventCoverageText.js'; // v2.733(C1-01)
+
 /**
  * 백업 없음 리포트 — 버린 패턴 안내(v2.607, 감사 WEB2607-07). 서버(reports/unprotected.js)는 상한(개수·길이)을 넘은
  * 패턴을 버리고 `config.patternsOmitted` 로 밝힌다. 전부 버려지면 **기본 패턴으로 판정**한다 — 입력칸에는 사용자
@@ -33,5 +35,8 @@ export function undeterminedNote(summary) {
   const parts = Object.entries(by).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${UNDETERMINED_REASON[k] || k} ${v}대`);
   const vcs = Array.isArray(s.noEventVcenters) ? s.noEventVcenters.filter((x) => typeof x === 'string') : [];
   const vcTxt = vcs.length ? ` 해당 vCenter: ${vcs.slice(0, 8).join(', ')}${vcs.length > 8 ? ` 외 ${vcs.length - 8}곳` : ''}.` : '';
-  return `가동 VM ${n}대는 백업 이벤트를 확인할 근거가 없어 판정하지 않았습니다(미보호로 세지 않음 — 보호됐다는 뜻도 아닙니다). 사유: ${parts.join(' · ') || '미상'}.${vcTxt}`;
+  // v2.733(점검 3회차 C1-01): 지금 수집하지 않아 판정하지 않은 vCenter — 사유(엣지 위임·비활성·점검중)와 함께 밝힌다(서버 notCollectedVcenters).
+  const nc = Array.isArray(s.notCollectedVcenters) ? s.notCollectedVcenters.filter((x) => x && typeof x.vcenterId === 'string') : [];
+  const ncTxt = nc.length ? ` 지금 수집하지 않는 vCenter: ${nc.slice(0, 8).map((x) => `${x.vcenterId}(${x.why ? notCollectedWhyText(x.why) : '사유 미상'})`).join(', ')}${nc.length > 8 ? ` 외 ${nc.length - 8}곳` : ''}.` : '';
+  return `가동 VM ${n}대는 백업 이벤트를 확인할 근거가 없어 판정하지 않았습니다(미보호로 세지 않음 — 보호됐다는 뜻도 아닙니다). 사유: ${parts.join(' · ') || '미상'}.${vcTxt}${ncTxt}`;
 }

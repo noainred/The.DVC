@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
 import { STable } from '../components/STable.jsx';
-import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS } from './loginFailsText.js';
+import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS, notCollectedLoginNote, kpiValueText } from './loginFailsText.js';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -72,17 +72,19 @@ export default function LoginFails() {
         // v2.675: 무엇을 얼마나 훑었는지·잘렸는지·언제 분석한 값인지 — 잘렸는데 '총 실패' 가 전부인 것처럼 보이지 않게(v2.673 남은 일).
         const sn = scanNote(d.scan);
         const at = analyzedAtText(d.generatedAt);
-        if (!sn.text && !sn.warn && !at) return null;
+        const nc = notCollectedLoginNote(d.notCollected);   // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter — 감시 밖
+        if (!sn.text && !sn.warn && !at && !nc) return null;
         return (
           <div style={{ marginBottom: 8, fontSize: 12 }}>
             {(at || sn.text) && <div className="muted">{[at, sn.text].filter(Boolean).join(' · ')}</div>}
             {sn.warn && <div className="banner" style={{ marginTop: 4 }}>⚠ {sn.warn}</div>}
+            {nc && <div className="banner" style={{ marginTop: 4, whiteSpace: 'normal' }}>{nc}</div>}
           </div>
         );
       })()}
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         {[['총 실패', sm.total], ['vCenter', sm.vcenter], ['포탈', sm.portal], ['관련 계정', sm.users], ['관련 IP', sm.ips], ['브루트포스', sm.offenders, sm.offenders ? '#f59e0b' : ''], ['활성 공격', sm.active, sm.active ? '#ef4444' : '#22c55e']].map(([l, v, c]) => (
-          <div key={l} className="card" style={{ padding: '10px 14px', minWidth: 96 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c || 'inherit' }}>{v}</div></div>
+          <div key={l} className="card" style={{ padding: '10px 14px', minWidth: 96 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c || 'inherit' }}>{kpiValueText(v)}</div></div>
         ))}
       </div>
 

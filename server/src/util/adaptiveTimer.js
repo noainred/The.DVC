@@ -15,8 +15,14 @@
  *                   **이미 무장된 타이머를 즉시 재무장**한다(없으면 60분 주기에서 최대
  *                   1시간 뒤에야 새 주기가 먹는다).
  */
+import { createChangeLogger } from './logThrottle.js'; // v2.733(감사 C4-03): fn 실패 로그 — 같은 오류 반복을 줄인다
+
 export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', subscribe = null } = {}) {
   let timer = null;
+  // v2.733(감사 C4-03): fn 이 던진 오류를 **로그 없이** 삼키지 않는다 — 스토리지 폴러가 스냅샷 쓰기 ENOSPC 로 매 주기 던지는데
+  //   콘솔에 아무것도 남지 않아 수집이 왜 멈췄는지 알 수 없었다. 같은 오류는 1시간에 한 번만 적는다(타이머 동작은 그대로 —
+  //   다음 주기로 재무장한다). 폴러는 여전히 자기 오류를 스스로 다뤄야 한다 — 이 줄은 마지막 안전망이다.
+  const shouldLogFail = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
   let stopped = false;
   let lastRunAt = Date.now();
   // v2.598 T2598-04: 실행 중에 주기 변경 알림이 오면 예전엔 즉시 재무장해 **진행 중인 fn 과 겹쳐 두 번째 fn 이
@@ -52,7 +58,11 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   const tick = async () => {
     lastRunAt = Date.now();
     inFlight = true;
-    try { await fn(); } catch { /* 폴러는 자기 오류를 삼킨다(기존 .catch(()=>{}) 와 동일) */ }
+    try { await fn(); } catch (e) {
+      // 폴러는 자기 오류를 삼킨다(기존 .catch(()=>{}) 와 동일) — 다만 무음은 아니다(위 v2.733 주석).
+      const msg = String(e?.message || e);
+      try { if (shouldLogFail('fn', msg)) console.warn(`[adaptive-timer] ${name || '(이름 없음)'} 실행 실패: ${msg} — 다음 주기에 다시 실행합니다(같은 오류는 1시간에 한 번만 적습니다)`); } catch { /* 로그가 타이머를 멈추지 않게 */ }
+    }
     finally { inFlight = false; }
     if (!stopped) arm(safeMs());
   };

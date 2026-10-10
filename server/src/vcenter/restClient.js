@@ -5,6 +5,7 @@ import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { deviceTlsConnect } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { createAuthGuard } from '../util/authGuard.js';
 import { effectiveRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한(2^31ms 이상이면 1ms 로 abort)
+import { numOrNull } from '../util/numOrNull.js'; // v2.733(C2-06): REST 폴백 용량 결측은 null
 
 /**
  * vCenter 주기 수집의 **인증 실패 정지** 저장소(v2.590 — 감사 F1, 계정 잠금 경로).
@@ -262,6 +263,12 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
     const restUnknown = [];
     if (hosts.some((h) => !h.cluster)) restUnknown.push('cluster');
     if (!vmHostKnown) restUnknown.push('vmPlacement');
+    // v2.733(점검 3회차 C2-06): REST 호스트 목록(Summary)에는 하드웨어 요약이 없다 — 코어·CPU 총량·메모리 총량을 **모른다**.
+    //   예전에는 필드가 없어 소비처의 `|| 0` 이 0 으로 더해 그 법인 코어 0 · vCPU:코어 0 · 오버커밋 0% 가 됐다. null 로 두고 표지를 싣는다
+    //   (용량 합계는 store.hostCapacityKnown 이 참인 호스트만 — 소비처가 capacityUnknown 으로 센다).
+    if (hosts.length) restUnknown.push('hostCapacity');
+    // 데이터스토어 용량(capacity)은 접근 불가 DS 등에서 빠질 수 있다 — 그때 capacityGB 는 0 이 아니라 null 이다(아래).
+    if (datastores.some((d) => numOrNull(d.capacity) == null)) restUnknown.push('dsCapacity');
     restUnknown.push('alarms');
 
     return {
@@ -283,6 +290,7 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
         connectionState: (h.connection_state || '').toUpperCase() || 'CONNECTED',
         powerState: h.power_state,
         vmCount: vmHostKnown ? (vmCountByHost[h.host] || 0) : null,
+        cpuCores: null, cpuTotalMhz: null, memTotalMB: null,   // v2.733(C2-06): REST 목록에 없다 — 0 이 아니라 모른다(restUnknown 'hostCapacity')
       })),
       vms: vms.map((m) => ({
         id: `${vc.id}:${m.vm}`,
@@ -296,10 +304,12 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
         // 사용량/사용률은 '바이트' 기준으로 먼저 계산한 뒤 GB로 반올림한다 — capacity·free를 각각
         // GB로 반올림한 뒤 빼면 반올림 오차가 usedGB/usagePct에 누적된다.
         // v2.597(감사 C2597-08): free_space 가 없으면 사용량을 계산하지 않는다 — 0 으로 두면 사용률 100% 라는 거짓이 된다.
-        const capBytes = d.capacity || 0;
-        const freeBytes = d.free_space == null ? null : Number(d.free_space);
-        const usedBytes = freeBytes == null || !Number.isFinite(freeBytes) ? null : Math.max(0, capBytes - freeBytes);
-        const capacityGB = Math.round(capBytes / 1024 ** 3);
+        // v2.733(C2-06): capacity 가 없으면 용량도 0 이 아니라 **모른다**(null) — 용량을 모르면 사용량·여유도 판정하지 않는다
+        //   (예전 `d.capacity || 0` 은 '0 GB 데이터스토어' 를 만들고 그 DS 를 사용량 미상에서도 빠뜨렸다 — store.dsUsageUnknownOf).
+        const capBytes = numOrNull(d.capacity);
+        const freeBytes = capBytes == null ? null : numOrNull(d.free_space);
+        const usedBytes = freeBytes == null ? null : Math.max(0, capBytes - freeBytes);
+        const capacityGB = capBytes == null ? null : Math.round(capBytes / 1024 ** 3);
         const freeGB = usedBytes == null ? null : Math.round(freeBytes / 1024 ** 3);
         const usedGB = usedBytes == null ? null : Math.round(usedBytes / 1024 ** 3);
         return {
@@ -310,7 +320,7 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
           capacityGB,
           freeGB,
           usedGB,
-          usagePct: capBytes > 0 && usedBytes != null ? Math.round((usedBytes / capBytes) * 100) : null,
+          usagePct: capBytes > 0 && usedBytes != null ? Math.round((usedBytes / capBytes) * 100) : null, // capBytes null 이면 null > 0 이 거짓
           accessible: typeof d.accessible === 'boolean' ? d.accessible : true, // REST 목록에 있으면 그 값(없으면 예전대로)
         };
       }),

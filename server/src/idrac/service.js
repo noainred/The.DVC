@@ -17,6 +17,46 @@ export function vcPowerKey(vcenterId, hostName) {
   return `vc:${String(vcenterId || '').trim().toLowerCase()}:${String(hostName || '').trim().toLowerCase()}`;
 }
 
+/**
+ * v2.733(점검 3회차 C2-02): vCenter 추정 전력(host.powerWatts)을 **'지금 값' 으로 쓰지 않을** 호스트의 사유(순수).
+ *   스냅샷은 읽지 못한 vCenter(연결 실패 이월 LASTGOOD · 위임 push 낡음 · 점검중)의 호스트를 직전 값 그대로 서빙한다.
+ *   그 powerWatts 를 ts=now 로 적재·합산하면 장애 구간에 몇 시간 전 값이 '측정 전력' 의 평탄선·합계가 된다
+ *   (v2.620 SRV2620-03 지표 샘플러 · v2.583 #30 엣지 전력 신선도 컷의 vCenter 추정 전력 누락).
+ *   · `unread` — `metrics/unreadVcenters.js unreadVcenterReasons(snap)` 결과(판정은 그 함수 하나 — 여기서 복제하지 않는다).
+ *   · `hostReadable` — `store.usageReadable`(끊긴·무응답 호스트의 센서 값은 마지막 값이다). 이 모듈은 store 를 import 할 수 없어
+ *     (store → idrac/service — 순환) 호출부가 넘긴다.
+ * @returns {'maintenance'|'unreachable'|'stale'|'host-unread'|null}
+ */
+export function vcPowerSkipReason(h, { unread = null, hostReadable = null } = {}) {
+  if (!h || typeof h !== 'object') return null;
+  const r = unread && typeof unread.get === 'function' ? unread.get(String(h.vcenterId ?? '')) : null;
+  if (r) return r;
+  if (typeof hostReadable === 'function' && !hostReadable(h)) return 'host-unread';
+  return null;
+}
+
+/**
+ * v2.733(C2-02): 적재·합산에서 뺀 vCenter 추정 전력 — **전력 값이 있는 호스트만** 센다(값이 없던 호스트는 뺀 것이 아니다).
+ *   화면·응답이 '측정 대수에서 빠진 것' 을 말하게 한다(조용히 줄이면 '전력 감소' 로 읽힌다). 와트는 싣지 않는다 — 지금 값이 아니다.
+ * @returns {{ hosts:number, vcenters:number, byReason:Record<string,number> }}
+ */
+export function vcPowerSkippedOf(hosts, opts = {}) {
+  const out = { hosts: 0, vcenters: 0, byReason: {} };
+  const vcs = new Set();
+  for (const h of Array.isArray(hosts) ? hosts : []) {
+    if (!h || typeof h !== 'object') continue;
+    const w = Number(h.powerWatts);
+    if (!Number.isFinite(w) || w <= 0) continue;
+    const r = vcPowerSkipReason(h, opts);
+    if (!r) continue;
+    out.hosts += 1;
+    out.byReason[r] = (out.byReason[r] || 0) + 1;
+    vcs.add(String(h.vcenterId ?? ''));
+  }
+  out.vcenters = vcs.size;
+  return out;
+}
+
 // 서버의 모델/서비스태그를 인벤토리(Redfish)·레지스트리에서 최선의 값으로 해석.
 function serverIdentity(serverId, entry) {
   const inv = getInventory(serverId);
@@ -105,7 +145,9 @@ export async function latestPowerByHostName() {
  * 매핑 여부와 무관하게 집계된다. 각 항목의 host는 매핑 기준 이름(인벤토리 매칭 시도용).
  * 반환 [{ serverId, serverName, watts, ts, host, source }].
  */
-export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}) {
+// v2.733(C2-02): unread·hostReadable 을 주면 읽지 못한 vCenter·호스트의 vCenter 추정 전력을 넣지 않는다(vcPowerSkipReason).
+//   주지 않으면 예전 그대로다(호출부가 스냅샷으로 판정 입력을 넘긴다 — store.js·routes/insights.js·overviewCards·fleetInventory).
+export async function allMeasuredPower({ hosts = [], vcenterFirst = false, unread = null, hostReadable = null } = {}) {
   const db = await getDb();
   const latest = db.latestAll(); // Map<serverId,{watts,ts}>
   const out = [];
@@ -197,6 +239,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
     for (const h of (hosts || [])) {
       const w = Number(h.powerWatts);
       if (!Number.isFinite(w) || w <= 0) continue;
+      if (vcPowerSkipReason(h, { unread, hostReadable })) continue; // v2.733(C2-02): 지금 값이 아니다(위 함수 주석)
       const name = norm(h.name);
       const id = vcPowerKey(h.vcenterId, h.name);
       const hostNames = [name, norm(h.serviceTag)].filter(Boolean);

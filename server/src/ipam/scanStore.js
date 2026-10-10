@@ -21,6 +21,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
 import { registerStateFile } from '../util/stateFiles.js';
+import { capStr } from '../util/capStr.js'; // v2.733: 엣지가 보낸 미완료 사유를 평탄화해 상주시킨다
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -435,6 +436,13 @@ function cleanAliveHost(h) {
 //   집합' 을 매번 26만 개를 훑어 모으던 것을(실측 약 150ms) 적재·정리 시점에 유지한다. 갱신 지점은 셋뿐이다 — 로드 정제·
 //   mergeScanResults(새 IP·에이전트 교체)·pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
 const _agentCount = new Map();
+// v2.733(점검 3회차 C6-02 — 재현): 결과의 lastSeen 최댓값. scanInfo()(IP 스캔 '상태'·'설정' 화면이 **2초마다** 부른다)가 이 값 하나를 위해
+//   결과 전량(상한 262,144)을 Object.values 로 훑었다(20만 p50 약 200ms). 적재·정리 시점에 유지한다 — 갱신 지점은 _agentCount 와 같다:
+//   로드 정제 · mergeScanResults(새 IP·덮어쓰기·부분 결과의 마지막 확인 전진) · pruneScanResults(남은 항목으로 다시 계산 — 관리 IP 는 오래돼도 남으므로
+//   '지운 것이 최댓값이면 0' 은 틀린다). ⚠ scanRev() 로 기억하면 틀린다 — lastSeen 만 전진한 보고는 scanRev 를 올리지 않는다.
+//   비교는 예전 훑기와 같은 `(lastSeen || 0) > 현재` 다(값이 같다 — 테스트가 옛 훑기와 대조한다). results 를 다른 곳에서 고치면 여기도 함께.
+let _maxSeen = 0;
+function noteSeen(v) { const x = v || 0; if (x > _maxSeen) _maxSeen = x; }
 function bumpAgent(agent, d) {
   const k = agent || LOCAL;
   const n = (_agentCount.get(k) || 0) + d;
@@ -447,6 +455,7 @@ function cleanStoredResults(raw) {
     if (!r || typeof r !== 'object' || !isIpv4(ip)) continue;
     out[ip] = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
     bumpAgent(out[ip].agent, 1);
+    noteSeen(out[ip].lastSeen); // v2.733 C6-02
   }
   return out;
 }
@@ -512,8 +521,15 @@ export function scanResultAgents() { return [..._agentCount.keys()]; }
 
 const sameList = (a, b) => { const x = a || [], y = b || []; return x.length === y.length && x.every((v, i) => v === y[i]); };
 
-/** @returns {{merged:number, capped:number}} 병합한 IP 수 · 전체 상한(MAX_SCAN_IPS)으로 받지 않은 새 IP 수 */
-export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.seenOnly] v2.733(C1-02): **부분 결과**(시한에 걸린 스캔이 그때까지 찾은 생존 IP) — 이미 있는 IP 는 마지막 확인
+ *   시각만 갱신한다(포트·서비스·호스트명·소유 에이전트는 완료된 스캔이 정한다 — 부분 결과에는 호스트명이 없다). 새 IP 는 그대로 넣는다
+ *   (관측이다). 해제 판정 근거(완료 여부)는 이것이 아니라 recordAgentReport/recordAgentIncomplete 가 정한다.
+ * @returns {{merged:number, capped:number}} 병합한 IP 수 · 전체 상한(MAX_SCAN_IPS)으로 받지 않은 새 IP 수
+ */
+export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {}) {
+  const seenOnly = opts?.seenOnly === true;
   let changed = false;
   let resContent = false; let resWritten = false; // v2.731 A6-01: 결과 파일을 쓸 일이 있는가 · 그것이 내용 변화인가(lastSeen 만이면 긴 디바운스)
   let n = 0; let merged = 0; let capped = 0; const histCappedBefore = _histCapped;
@@ -527,6 +543,12 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
     if (!prev && _resultCount >= MAX_SCAN_IPS) { capped++; continue; }
     if (!prev) _resultCount++;
     merged++;
+    if (seenOnly && prev) {
+      // v2.733 C1-02: 부분 결과 — 마지막 확인 시각만. 소유 에이전트도 바꾸지 않는다(이력 항목의 것을 그대로 넘긴다).
+      if (ts > (prev.lastSeen || 0)) { prev.lastSeen = ts; resWritten = true; noteSeen(ts); }
+      recordSeen(h, ts, history[h.ip]?.agent || prev.agent || agent);
+      continue;
+    }
     // 분산 멀티에이전트: 더 오래된(stale) 보고가 최신 관측을 덮어쓰지 않게 한다.
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
@@ -534,6 +556,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
       || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
     results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    noteSeen(ts); // v2.733 C6-02
     resWritten = true;
     recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
   }
@@ -591,10 +614,53 @@ function recordSeen(h, ts, agent) {
   }
 }
 
+/*
+ * v2.733(점검 3회차 C1-02 — v2.732 B4-02 가 만든 회귀): 해제 판정은 '마지막으로 본 시각' 만 봤다. 그런데 v2.732 부터 시한(SCAN_DEADLINE)을
+ *   넘긴 스캔은 결과를 하나도 남기지 않아, 스캔이 매번 시한에 걸리는 대역은 **살아 있는 IP 가 3시간 뒤 전부 해제(down)** 로 바뀌었다(재현).
+ *   보지 못한 것(관측 부재)을 '없어졌다'(부재의 관측)로 세면 안 된다 — 이제 소유 에이전트의 **완료된** 스캔이 해제 기준 시간 안에 없으면
+ *   down 전환을 **보류**한다. 사유: `scan-incomplete`(마지막 시도가 미완료 — recordAgentIncomplete) / `no-recent-scan`(완료 보고가 기준 안에
+ *   없다 — 스캔이 꺼졌거나 엣지가 보고하지 못한다).
+ *   · 보류에는 시한이 있다(v2.601 '보류에는 반드시 시한'): 마지막 확인 + 기준 + max(기준, 24시간)이 지나면 down 으로 바꾸되 이벤트에
+ *     `unverified:true` 와 사유를 남긴다(완료 스캔이 확인한 해제가 아니다). 영원히 보류하면 진짜 반납된 IP 를 영영 해제하지 못한다.
+ *   · 완료된 스캔이 기준 안에 있으면 예전과 같다(그 스캔이 그 IP 를 보지 못했다 = 부재의 관측).
+ *   · 보류 개수·사유·시한은 releaseHoldStatus() → 스캔 상태 응답(scanStatus().releaseHold) → 화면(IpamScanStatus.jsx)이 말한다.
+ */
+/** 보류 시한에 더하는 최소 여유(24시간) — 시한 = 기준 + max(기준, 이 값). */
+export const RELEASE_HOLD_MIN_EXTRA_MS = 24 * 3_600_000;
+/** 해제 기준(idleMs)에 대한 보류 시한(ms) — 마지막 확인으로부터 이만큼 지나면 보류를 풀고 '미확인 해제' 로 기록한다. */
+export function releaseHoldLimitMs(idleMs) {
+  const n = Number(idleMs);
+  return Number.isFinite(n) && n > 0 ? n + Math.max(n, RELEASE_HOLD_MIN_EXTRA_MS) : RELEASE_HOLD_MIN_EXTRA_MS;
+}
+const _holds = new Map();   // 에이전트 → 마지막 판정의 보류 요약(전체 sweep 은 통째로, { agent } sweep 은 그 에이전트만 바꾼다)
+let _holdSweepAt = null;
+let _expiredTotal = 0;      // 보류 시한이 지나 '미확인 해제' 로 바꾼 IP 수(프로세스 시작 이후 누적)
+let _lastExpiredAt = null;
+const _holdLogged = new Map(); // 에이전트 → 마지막으로 콘솔에 알린 보류 사유(같은 상태를 10분마다 다시 적지 않게)
+
+/** 보고 기록 하나(정확히 같은 이름 → 대소문자만 다른 이름). 자기 속성만 본다. */
+function reportOf(agent) {
+  const name = String(agent || LOCAL);
+  if (Object.prototype.hasOwnProperty.call(reports, name)) return reports[name];
+  return agentValueOf(reports, name);
+}
+/** 그 에이전트의 마지막 완료 스캔 시각 · 그보다 새(또는 같은) 미완료 기록. */
+function completionOf(agent) {
+  const rep = reportOf(agent);
+  if (!rep || typeof rep !== 'object') return { completedAt: null, incomplete: null };
+  const at = numOrNull(rep.at);
+  const completedAt = at != null && at > 0 ? at : null;
+  const inc = rep.incomplete && typeof rep.incomplete === 'object' ? rep.incomplete : null;
+  const incAt = numOrNull(inc?.at);
+  const newer = inc && incAt != null && (completedAt == null || incAt >= completedAt);
+  return { completedAt, incomplete: newer ? inc : null };
+}
+
 /**
  * 일정 시간(idleMs) 이상 응답이 없던 'up' IP를 '해제(down)'로 마킹한다.
  * opts.agent를 주면 그 에이전트가 마지막으로 보고한 IP만 대상으로 한다 — 중앙이 직접 스캔한
  * 로컬 대역만 down 처리하고, 원격 사이트 에이전트 소유 IP를 중앙 스캔이 오탐 down하지 않게 한다.
+ * v2.733: 소유 에이전트의 완료된 스캔이 기준 안에 없으면 보류한다(위 머리말). 반환값은 예전처럼 바뀐 항목 수다(보류는 세지 않는다).
  */
 export function sweepReleases(idleMs, opts = {}) {
   const now = typeof opts === 'number' ? opts : (opts.now || Date.now());
@@ -605,20 +671,84 @@ export function sweepReleases(idleMs, opts = {}) {
   if ((!idleMs || idleMs <= 0) && !byAgent) return 0;
   let changed = 0;
   const isManaged = managedChecker(); // 루프 시작 시 1회 구성(O(N) 유지)
+  const verdicts = new Map(); // 에이전트 → completionOf(한 sweep 에 에이전트당 1회 — O(N) 유지)
+  const agg = new Map();      // 에이전트 → 이번 판정의 보류 요약
   for (const e of Object.values(history)) {
-    const owned = onlyAgent === undefined || (e.agent || LOCAL) === onlyAgent;
-    const eff = byAgent ? (byAgent.get(e.agent || LOCAL) ?? idleMs) : idleMs;
+    const ag = e.agent || LOCAL;
+    const owned = onlyAgent === undefined || ag === onlyAgent;
+    const eff = byAgent ? (byAgent.get(ag) ?? idleMs) : idleMs;
     if (owned && e.status === 'up' && eff > 0 && (e.lastSeen || 0) < now - eff) {
-      e.status = 'down';
-      pushEvent(e, { ts: now, type: 'down' });
-      changed++;
+      let v = verdicts.get(ag);
+      if (!v) { v = completionOf(ag); verdicts.set(ag, v); }
+      if (v.completedAt != null && v.completedAt >= now - eff) {
+        // 기준 안에 완료된 스캔이 있다 — 그 스캔이 이 IP 를 보지 못했다(예전과 같은 해제).
+        e.status = 'down';
+        pushEvent(e, { ts: now, type: 'down' });
+        changed++;
+      } else {
+        const reason = v.incomplete ? 'scan-incomplete' : 'no-recent-scan';
+        const limit = releaseHoldLimitMs(eff);
+        const seen = e.lastSeen || 0;
+        let a = agg.get(ag);
+        if (!a) {
+          a = { agent: ag, held: 0, expired: 0, reason, idleMs: eff, holdLimitMs: limit, oldestSeen: null, lastCompletedAt: v.completedAt,
+            incomplete: v.incomplete ? { at: numOrNull(v.incomplete.at), since: numOrNull(v.incomplete.since), streak: numOrNull(v.incomplete.streak), code: String(v.incomplete.code || ''), reason: String(v.incomplete.reason || '') } : null };
+          agg.set(ag, a);
+        }
+        if (seen >= now - limit) {
+          a.held++;
+          if (a.oldestSeen == null || seen < a.oldestSeen) a.oldestSeen = seen;
+        } else {
+          // 보류 시한이 지났다 — 해제하되 완료 스캔이 확인한 해제가 아니라는 사실을 남긴다.
+          e.status = 'down';
+          pushEvent(e, { ts: now, type: 'down', unverified: true, reason });
+          changed++;
+          a.expired++;
+        }
+      }
     }
     // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지). 단, 운영자가 관리(override/대역정책)하는
     // IP는 사용 추이를 계속 보존한다(관리 대상의 이력 손실 방지).
     if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS && !isManaged(e.ip)) { delete history[e.ip]; _histCount--; changed++; }
   }
   if (changed) { histDirty = true; persistHist(); scanRevN++; }
+  recordHolds(agg, onlyAgent, now);
   return changed;
+}
+
+/** 이번 판정의 보류 요약을 상태에 반영하고, 새로 생긴 보류·시한 만료를 콘솔에 한 번 알린다(무음 실패 금지 — 같은 상태는 다시 적지 않는다). */
+function recordHolds(agg, onlyAgent, now) {
+  if (onlyAgent !== undefined) _holds.delete(onlyAgent); else _holds.clear();
+  for (const a of agg.values()) {
+    const base = a.oldestSeen;
+    _holds.set(a.agent, {
+      agent: a.agent, held: a.held, expired: a.expired, reason: a.reason, idleMs: a.idleMs, holdLimitMs: a.holdLimitMs,
+      heldSince: base == null ? null : base + a.idleMs, holdUntil: base == null ? null : base + a.holdLimitMs,
+      lastCompletedAt: a.lastCompletedAt, incomplete: a.incomplete,
+    });
+    if (a.expired) {
+      _expiredTotal += a.expired; _lastExpiredAt = now;
+      console.warn(`[ipam] 해제 판정 보류 시한이 지나 ${a.agent} 의 IP ${a.expired}개를 '미확인 해제' 로 기록했습니다(사유 ${a.reason} — 완료된 스캔이 확인한 해제가 아닙니다)`);
+    }
+    const key = a.held ? a.reason : '';
+    if (a.held && _holdLogged.get(a.agent) !== key) {
+      console.warn(`[ipam] 해제 판정 보류 — ${a.agent} 의 IP ${a.held}개(사유 ${a.reason}: ${a.reason === 'scan-incomplete' ? '마지막 스캔이 미완료' : '해제 기준 시간 안에 완료된 스캔 보고가 없음'}) · 보류 시한 ${Math.round(a.holdLimitMs / 3_600_000)}시간`);
+    }
+    _holdLogged.set(a.agent, key);
+  }
+  for (const k of [..._holdLogged.keys()]) if (!_holds.has(k) && (onlyAgent === undefined || k === onlyAgent)) _holdLogged.delete(k);
+  _holdSweepAt = now;
+}
+
+/**
+ * v2.733: 해제 판정 보류 현황(스캔 상태 응답 · 화면). held = 지금 보류 중인 IP 수, expired = 보류 시한이 지나 '미확인 해제' 로 바꾼 누적 수(프로세스 시작 이후).
+ * @returns {{at:number|null, held:number, byReason:object, expired:number, lastExpiredAt:number|null, minExtraMs:number, agents:object[]}}
+ */
+export function releaseHoldStatus() {
+  const agents = [..._holds.values()].sort((a, b) => String(a.agent).localeCompare(String(b.agent)));
+  let held = 0; const byReason = {};
+  for (const a of agents) { held += a.held; if (a.held) byReason[a.reason] = (byReason[a.reason] || 0) + a.held; }
+  return { at: _holdSweepAt, held, byReason, expired: _expiredTotal, lastExpiredAt: _lastExpiredAt, minExtraMs: RELEASE_HOLD_MIN_EXTRA_MS, agents };
 }
 
 function persistHist() {
@@ -666,17 +796,21 @@ export function pruneScanResults(retentionDays) {
   let changed = false;
   const isManaged = managedChecker();
   // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
-  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
+  let maxLeft = 0; // v2.733 C6-02: 남은 항목의 lastSeen 최댓값(같은 훑기에서)
+  for (const [ip, r] of Object.entries(results)) {
+    if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
+    else if ((r.lastSeen || 0) > maxLeft) maxLeft = r.lastSeen || 0;
+  }
+  _maxSeen = maxLeft;
   if (changed) { scheduleWrite(RES); scanRevN++; }
 }
 
 export function scanInfo() {
-  // v2.639 I2: 정렬(scanResultList) 없이 — 에이전트별 개수는 _agentCount, 마지막 관측은 한 번 훑는다(값은 예전과 같다).
+  // v2.639 I2: 정렬(scanResultList) 없이 — 에이전트별 개수는 _agentCount(값은 예전과 같다).
   const byAgent = {};
   for (const [a, n] of _agentCount) byAgent[a] = n;
-  let lastSeen = 0;
-  for (const r of Object.values(results)) if ((r.lastSeen || 0) > lastSeen) lastSeen = r.lastSeen || 0;
-  return { count: _resultCount, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: lastSeen || null, byAgent };
+  // v2.733 C6-02: 마지막 관측은 적재·정리 때 유지한 값이다(위 _maxSeen 머리말) — 요청마다 결과 전량을 훑지 않는다.
+  return { count: _resultCount, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: _maxSeen || null, byAgent };
 }
 
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------
@@ -690,6 +824,32 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
   reports[name] = { at: Date.now(), scanned, alive };
   scheduleWrite(REP); // 디바운스 원자 기록(에이전트 보고 핫패스 비차단)
   recordRun({ agent: name, scanned, alive, durationMs }); // 완료된 스캔 이력에 추가
+}
+
+/**
+ * v2.733(C1-02): 스캔 미완료(시한 초과·실패) 기록. 마지막 **완료** 시각(at)·스캔/응답 수는 그대로 두고 `incomplete` 만 갱신한다 —
+ *   다음 완료 보고(recordAgentReport)가 기록을 통째로 바꿔 이 표지를 지운다. 완료된 스캔 이력(recordRun)에는 넣지 않는다.
+ *   since = 연속 미완료가 시작된 시각, streak = 연속 횟수. 엣지가 보낸 값도 들어오므로 글자·수치를 좁힌다.
+ * @returns {object|null} 기록한 incomplete(이름이 쓸 수 없는 값이면 null)
+ */
+export function recordAgentIncomplete(agent, { code = 'error', reason = '', durationMs = null, partial = null, done = null, total = null, at = null } = {}) {
+  const name = String(agent || LOCAL);
+  if (name === '__proto__') return null; // 평범한 객체 맵 — 프로토타입을 바꾸지 않게
+  const prev = Object.prototype.hasOwnProperty.call(reports, name) && reports[name] && typeof reports[name] === 'object' ? reports[name] : null;
+  const prevInc = prev?.incomplete && typeof prev.incomplete === 'object' ? prev.incomplete : null;
+  const t = numOrNull(at) ?? Date.now();
+  const c = typeof code === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(code) ? code : 'error';
+  const inc = {
+    at: t,
+    since: numOrNull(prevInc?.since) ?? t,
+    streak: (numOrNull(prevInc?.streak) ?? 0) + 1,
+    code: c,
+    reason: typeof reason === 'string' ? capStr(reason.slice(0, 300).replace(CTRL_RE, ' '), 300) : '', // 평탄화 — 큰 본문을 붙잡지 않게(v2.607 TIM2607-01)
+    durationMs: numOrNull(durationMs), partial: numOrNull(partial), done: numOrNull(done), total: numOrNull(total),
+  };
+  reports[name] = { at: numOrNull(prev?.at), scanned: numOrNull(prev?.scanned), alive: numOrNull(prev?.alive), incomplete: inc };
+  scheduleWrite(REP);
+  return inc;
 }
 
 export function getAgentReports() { return reports; }

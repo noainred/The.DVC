@@ -66,9 +66,9 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/admin/deep-search/probe': 'writeScopedVcenterIds — 대상 vCenter 쓰기 범위 판정(v2.606)',
   'PUT /api/admin/security/login-fails/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/security/login-fails/run': 'denyScopedRun — 범위 계정 403(v2.606)',
-  'PUT /api/admin/security/guest-scans': 'scopedVcenterIds — 예약의 vCenter 를 범위로 판정',
-  'DELETE /api/admin/security/guest-scans/:id': 'denyGuestScanOutOfScope — 범위 밖 예약 404',
-  'POST /api/admin/security/guest-scans/:id/run': 'denyGuestScanOutOfScope — 범위 밖 예약 404',
+  'PUT /api/admin/security/guest-scans': 'guestScanAccess — 예약 vCenter 쓰기 범위(조회 밖 404 · 쓰기 밖 403, v2.733 C3-02a)',
+  'DELETE /api/admin/security/guest-scans/:id': 'denyGuestScanOutOfScope — 쓰기 범위 판정(조회 밖 404 · 쓰기 밖 403, v2.733)',
+  'POST /api/admin/security/guest-scans/:id/run': 'denyGuestScanOutOfScope — 쓰기 범위 판정(조회 밖 404 · 쓰기 밖 403, v2.733)',
   // routes/admin/centralIpam.js
   'PUT /api/admin/ipam/settings': 'mergeScoped — 범위 밖 키 보존 병합(v2.605 AUTHZ2605-01)',
   'PUT /api/admin/ipam/vc-ranges': 'vcRangeWritable — 범위 밖 vCenter 404(v2.607 AUTHZ2607-04)',

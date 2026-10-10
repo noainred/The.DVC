@@ -127,8 +127,11 @@ export function loadTopologyRaw() { return structuredClone(loadRaw()); }
 /** 비밀 제거본(has* 플래그) — 화면/내보내기용. */
 export function loadTopology() { return redactTopology(loadRaw()); }
 export function saveTopology(input = {}) {
-  _cache = normalizeTopology(input, loadRaw());
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ..._cache }), null, 2), { mode: 0o600 });
+  // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 SSH 비밀 포함 토폴로지가 메모리에
+  //   남아 점검·렌더·적용이 그 값을 썼다. 정규화가 붙인 비열거 필드(secretsDropped 등)는 next 에 붙어 있어 _cache = next 로 그대로 넘어간다.
+  const next = normalizeTopology(input, loadRaw());
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ...next }), null, 2), { mode: 0o600 });
+  _cache = next;
   try { fs.chmodSync(FILE(), 0o600); } catch { /* 신규 생성 외 덮어쓰기에도 0600 */ }
   const out = loadTopology();
   // v2.606 WEB2606-10: 정규화가 버린 것을 호출부(라우트)가 응답에 실을 수 있게 비열거로 넘긴다.

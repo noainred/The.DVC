@@ -71,11 +71,14 @@ function intervalMs() {
 /** 주기 변경(웹 설정) — ms 단위(0=주기 끔). 저장 후 타이머 즉시 재적용. */
 export function setIdracScanIntervalMs(ms) {
   const v = clampScanIntervalMs(ms);
-  settingsCache = { ...(loadScanSettingsFile() || {}), intervalMs: v };
+  // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, '저장 실패' 응답인데 상태 화면 주기는 새 값이고
+  //   타이머는 옛 값(재무장 생략)이었다(재시작하면 옛 값).
+  const next = { ...(loadScanSettingsFile() || {}), intervalMs: v };
   try {
     fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-    atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(settingsCache, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  settingsCache = next;
   rescheduleIdracScanPoller();
   return { ok: true, intervalMs: v };
 }

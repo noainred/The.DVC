@@ -14,6 +14,8 @@
  *     이것을 숨기면 '31일 증가량' 이 '30일 증가량' 으로 보고된다.
  *  ③ **합계는 기준선이 있는 장비만 더하고, 뺀 장비 수를 밝힌다**(`missing`). 일부만 더한 값을
  *     '전체' 라고 말하는 것이 이 기능이 만들 수 있는 최악의 거짓이다.
+ *     v2.733(C2-03): 기준선이 있어도 실제 구간이 요청 기간보다 크게 길면(GROWTH_SPAN_TOLERANCE 밖) 합계에서 빼고
+ *     `inexact` 로 센다 — 장비 행의 정직한 `exact:false` 를 합계가 무시하고 더하면 1개월 합계에 1년치가 섞인다.
  *  ④ **감소(−)를 0 으로 깎지 않는다.** 데이터 삭제·풀 축소는 실제로 일어나고, 그것을 숨기면
  *     증가 추세가 실제보다 커 보인다.
  *  ⑤ **소진 예상일은 '증가 중이고 전체 용량을 아는' 장비에만** 낸다. 그 밖에는 `null` 이다
@@ -41,7 +43,43 @@ export const DEFAULT_PERIODS = Object.freeze([
  */
 export const GROWTH_STALE_DAYS = 7;
 
-const MAX_PERIODS = 12;          // 표 열 수 상한 — 넘치면 화면이 가로로 깨진다
+/**
+ * v2.733(C2-03): 합계에 넣는 비교 구간의 상한 — **요청 일수 × 1.1(내림)**.
+ *
+ *   장비 행은 요청한 날짜에 수집이 없으면 그 이전 가장 가까운 날과 비교하고 `exact:false`·실제 `spanDays` 를 밝힌다(규칙 ②).
+ *   그 값을 합계에 그대로 더하면 '1개월 증가' 합계에 1년치 증가가 섞인다(재현: 30일 합계 322TB, 정답 약 30TB · partial:false).
+ *   그래서 실제 구간이 이 한계를 넘는 장비는 **합계에서 빼고 `inexact` 로 센다**(장비 행에는 값이 그대로 있다 — 조용히 빼지 않는다).
+ *
+ *   1.1 인 이유 — 증가가 고르다고 보면 구간 S 일의 증가는 요청 N 일 증가의 S/N 배다. '1개월(30일)' 이라는 이름 자체가 달력의 한 달
+ *   (28~31일, −7%~+3%)과 그만큼 어긋나므로, 10% 이내의 구간 차이는 보고서 독자가 이미 받아들이는 오차와 같은 크기다. 그보다 길면
+ *   그 장비가 합계를 과장하는 몫이 이름의 오차보다 커진다. 그 결과 1일·1주는 **하루 공백도 뺀다**(1일→2일은 2배, 7일→8일은 +14%)
+ *   — 그 날 수집이 실제로 없었다는 뜻이므로 '일부만 합산' 으로 말하는 것이 맞다. 1개월은 사흘(33일)까지, 1년은 36일(401일)까지 더한다.
+ *   한계 안이지만 요청보다 긴 구간으로 더한 장비는 `widened` 로 센다(합계 칸 설명이 말한다).
+ *   ⚠ 웹 `views/tools/storageGrowthText.js` 에 같은 상수·함수가 있다(번들 경계) — 테스트가 두 벌을 대조한다. 한쪽만 바꾸지 말 것.
+ */
+export const GROWTH_SPAN_TOLERANCE = 1.1;
+
+/** 그 기간 합계에 넣을 수 있는 가장 긴 실제 구간(일). 기간이 1일 미만·숫자가 아니면 null. */
+export function maxSpanDaysFor(days) {
+  const d = numOrNull(days);
+  if (d == null || d < 1) return null;
+  // 부동소수 보정(30 × 1.1 = 33.000000000000004) — 경계 값이 실행 환경마다 갈리지 않게 정수로 내린다.
+  return Math.floor(d * GROWTH_SPAN_TOLERANCE + 1e-9);
+}
+
+/**
+ * 장비 한 칸을 그 기간 합계에 더할 수 있는가 — 'in'(요청 구간 그대로) | 'widened'(한계 안의 더 긴 구간) | 'inexact'(한계 밖 — 합계에서 뺀다).
+ * 실제 구간(spanDays)을 모르면 판정하지 않는다('in') — 지어내지 않는다(구버전 응답 호환).
+ */
+function spanClassOf(g, days) {
+  const span = numOrNull(g?.spanDays);
+  const lim = maxSpanDaysFor(days);
+  if (span == null || lim == null) return 'in';
+  if (span > lim) return 'inexact';
+  return span > days ? 'widened' : 'in';
+}
+
+const MAX_PERIODS = 12;         // 표 열 수 상한 — 넘치면 화면이 가로로 깨진다
 const MAX_PERIOD_DAYS = 3650;    // 10년. 보존 상한(5년)보다 크게 두어 사용자가 물어볼 수는 있게 한다
 
 /**
@@ -217,7 +255,10 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
 
 /**
  * 합계 행(규칙 ③) — 기준선이 있는 장비만 더하고 **뺀 장비 수를 밝힌다**.
- * `measured` 는 그 기간에 실제로 더해진 장비 수, `missing` 은 기준선이 없어 못 더한 수다.
+ * `measured` 는 그 기간에 실제로 더해진 장비 수, `missing` 은 못 더한 수 전체다(measured + missing = 합계 기준 장비 수).
+ * 못 더한 사유 중 `lagging`(최신 관측이 늦음)·`inexact`(v2.733 — 실제 구간이 요청 기간의 GROWTH_SPAN_TOLERANCE 배 초과)는
+ * 따로 센다. 나머지는 기준선(또는 사용량) 없음이다. `widened` 는 한계 안이지만 요청보다 긴 구간으로 **더한** 장비 수다.
+ * ⚠ 웹 `aggregateGrowth` 가 같은 규칙을 다시 구현한다(필터 뒤 부분집합) — 바꾸면 양쪽을 같이(테스트가 대조한다).
  */
 export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROWTH_STALE_DAYS } = {}) {
   // v2.681(R2D-03): 퇴역(등록부에 없음)·장기 미관측(stale) 장비의 마지막 값은 '지금' 이 아니다 — 합계에서 빼고 센다.
@@ -234,13 +275,22 @@ export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROW
   const totalBytesMeasured = sumOrNull(devices.filter((d) => d.usedBytes != null).map((d) => d.totalBytes));
   const growth = {};
   for (const p of periods) {
-    let sum = 0; let measured = 0; let missing = 0; let lagging = 0;
+    let sum = 0; let measured = 0; let missing = 0; let lagging = 0; let inexact = 0; let widened = 0;
+    let perDay = 0; let perDayN = 0;
     for (const d of devices) {
       const g = d.growth[p.key];
       // v2.681(R2D-03): 최신 관측이 어제보다 오래된 장비의 증가량은 '이 기간' 이 아니라 그 장비의 옛 날짜 기준이다 —
       //   오늘 기준 함대 증가량에 더하지 않는다(못 더한 수로 센다). 하루 차이는 오늘 행이 아직 없는 정상 상태다.
       if (asOf != null && asOf - d.latestDay > 1) { missing += 1; lagging += 1; continue; }
-      if (g && g.bytes != null) { sum += g.bytes; measured += 1; } else missing += 1;
+      if (!g || g.bytes == null) { missing += 1; continue; }
+      // v2.733(C2-03): 실제 비교 구간이 요청 기간보다 크게 길면(GROWTH_SPAN_TOLERANCE 밖) 이 기간 합계에 넣지 않는다 —
+      //   못 더한 수(missing)로 세고 그 사유를 inexact 로 밝힌다(lagging 과 같은 모양).
+      const cls = spanClassOf(g, p.days);
+      if (cls === 'inexact') { missing += 1; inexact += 1; continue; }
+      if (cls === 'widened') widened += 1;
+      sum += g.bytes; measured += 1;
+      const pd = numOrNull(g.perDayBytes);
+      if (pd != null) { perDay += pd; perDayN += 1; }
     }
     growth[p.key] = {
       bytes: measured ? sum : null,
@@ -248,8 +298,14 @@ export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROW
       missing,
       // 일부만 더했으면 '전체' 라고 말하지 못하게 화면이 쓸 플래그.
       partial: measured > 0 && missing > 0,
-      perDayBytes: measured && p.days > 0 ? sum / p.days : null,
+      // v2.733(C2-03): 하루 증가량은 **장비별 perDayBytes 의 합**이다 — 합계 ÷ 요청 일수는 더 긴 구간으로 비교한 장비(widened)를
+      //   부풀린다. 더한 장비 중 하루 증가량을 모르는 장비가 있으면 부분 합을 내지 않고 null 이다.
+      perDayBytes: measured && perDayN === measured ? perDay : null,
+      // 이 기간 합계에 넣을 수 있는 가장 긴 실제 구간(일) — 화면·공개 API 가 기준을 말할 때 쓴다(숫자를 박지 않게).
+      maxSpanDays: maxSpanDaysFor(p.days),
       ...(lagging ? { lagging } : {}),
+      ...(inexact ? { inexact } : {}),
+      ...(widened ? { widened } : {}),
     };
   }
   return {

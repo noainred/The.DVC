@@ -16,6 +16,8 @@ import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
 import { applyDrafts } from './blankKeep.js';
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.611: 계정명 변경 시 폐기된 비밀번호 안내
+import BoldText from '../components/boldText.jsx'; // v2.733(C4-01): 위임·비활성 안내의 **강조**
+import { readFailText } from './readFailText.js'; // v2.733(C5-02): vCenter 목록 조회 실패를 '등록된 vCenter 가 없습니다' 로 그리지 않는다
 
 // v2.601(감사 RECENT2601-05): 숫자 칸의 저장값 변환(하한·초→ms). 입력 중에는 원문(초안)만 들고 있고
 // 저장할 때 한 번만 적용한다 — 입력 중에 걸면 칸을 비울 수 없고 하한이 중간 입력을 망가뜨린다.
@@ -41,6 +43,39 @@ export function gpuTargetGate({ deployAgent = '', formFor = null, loadErr = null
 }
 
 /**
+ * v2.733(점검 3회차 C4-01): '이 포탈(로컬 수집)' 대상에서 이 노드가 **직접 수집하지 않는** vCenter 를 말한다(순수).
+ * 판정 순서는 서버 vcenter/collectTarget.js directCollectSkipReason 과 같다(비활성 → 점검중 → 엣지 위임). 예전에는 엣지 위임(site)
+ * vCenter 가 구분 없이 나열돼 여기서 켜면 중앙이 그 vCenter 에 직접 로그인했다 — 이제 서버가 건너뛰고, 화면이 그 사실을 말한다.
+ * 원격 엣지 배포 대상(deployAgent)을 편집 중이면 null(그 엣지의 판정은 엣지 자신의 등록부가 한다).
+ * @returns {null|{kind:'disabled'|'maintenance'|'site', text:string}}
+ */
+export function gpuVcTargetNote(vc, deployAgent = '') {
+  if (deployAgent || !vc || typeof vc !== 'object') return null;
+  if (vc.enabled === false) return { kind: 'disabled', text: '**비활성 vCenter** — 수집하지 않습니다. 이 포탈 설정은 쓰이지 않습니다.' };
+  if (vc.maintenance) return { kind: 'maintenance', text: '**점검중** — 수집을 멈췄습니다(로그인하지 않음). 점검이 끝나면 다시 수집합니다.' };
+  if (vc.collectMode === 'site') {
+    const agent = String(vc.remoteAgent || '').trim();
+    return {
+      kind: 'site',
+      text: agent
+        ? `**엣지가 수집** — 엣지 위임(${agent}) vCenter 입니다. 이 포탈 설정은 쓰이지 않습니다(이 포탈은 로그인하지 않음). 위 설정 대상에서 그 엣지(**${agent}**)를 골라 설정하세요.`
+        : '**엣지가 수집** — 엣지 위임 vCenter 입니다(담당 엣지 미지정). 이 포탈 설정은 쓰이지 않습니다(이 포탈은 로그인하지 않음).',
+    };
+  }
+  return null;
+}
+
+/** v2.733(C4-01): 마지막 수집에서 로그인하지 않고 건너뛴 vCenter 개수(서버 lastRun.skippedCounts) — 없으면 null. */
+export function gpuSkippedNote(last) {
+  const c = last && typeof last.skippedCounts === 'object' && last.skippedCounts ? last.skippedCounts : null;
+  if (!c) return null;
+  const parts = [['site', '엣지 위임'], ['disabled', '비활성'], ['maintenance', '점검중']]
+    .map(([k, label]) => { const n = Number(c[k]); return Number.isFinite(n) && n > 0 ? `${label} **${n}**곳` : null; })
+    .filter(Boolean);
+  return parts.length ? `건너뜀(로그인하지 않음): ${parts.join(' · ')}` : null;
+}
+
+/**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
  * VM에 VMware Tools 게스트 작업으로 nvidia-smi를 실행해 사용률을 가져온다.
  * 법인 공용 계정 + VM별 개별 계정(다른 비밀번호)을 모두 지원하며, 로그인/데이터 읽기
@@ -49,6 +84,11 @@ export function gpuTargetGate({ deployAgent = '', formFor = null, loadErr = null
 export default function GpuGuestSettings() {
   const [data, setData] = useState(null);   // { settings, status }
   const [vcs, setVcs] = useState([]);       // [{id,name,...}]
+  // v2.733(C5-02): vCenter 목록 조회 실패 — 예전에는 catch 가 빈 목록으로 바꿔 '등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.'(틀린 조치)를 그렸다.
+  //   실패면 직전에 읽은 목록을 그대로 쓴다(30초 폴링이 한 번 실패해도 표가 사라지지 않게).
+  const [vcsErr, setVcsErr] = useState(null);
+  const [vcsLoaded, setVcsLoaded] = useState(false);
+  const vcsRef = useRef([]);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);   // local editable copy (전역 + 공용 계정)
   const [formFor, setFormFor] = useState(null); // v2.622(감사 WEB-01): 폼을 채운 대상('' = 로컬)
@@ -69,17 +109,20 @@ export default function GpuGuestSettings() {
     const mySeq = force ? ++seqRef.current : seqRef.current;
     const stale = () => agent !== targetRef.current || mySeq !== seqRef.current;
     try {
-      const [d, v] = await Promise.all([
+      const [d, vr] = await Promise.all([
         fetchJson(settingsUrl(agent)),
-        fetchJson('/admin/vcenters').catch(() => ({ vcenters: [] })),
+        fetchJson('/admin/vcenters').then((v) => ({ ok: true, list: Array.isArray(v?.vcenters) ? v.vcenters : [] }), (e) => ({ ok: false, err: e })),
       ]);
       if (stale()) return;
       // 로컬: { settings, status } · 배포: { assigned, settings } (미지정이면 settings=null)
       const settings = agent ? (d.settings || { vcenters: {} }) : d.settings;
       setData(agent ? { settings, status: {}, deploy: true, assigned: !!d.assigned } : d);
-      setVcs(v.vcenters || []);
+      // v2.733(C5-02): vCenter 목록 실패는 직전 목록을 쓰고 사유를 따로 든다(빈 목록으로 바꾸지 않는다).
+      const list = vr.ok ? vr.list : vcsRef.current;
+      if (vr.ok) { vcsRef.current = list; setVcs(list); setVcsLoaded(true); setVcsErr(null); }
+      else setVcsErr(vr.err || new Error('vCenter 목록 조회 실패'));
       // 대상 전환(force) 시 폼을 새로 채움. 로컬 30초 폴링은 최초 1회만(미저장 입력 보존).
-      setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, v.vcenters || []) : cur));
+      setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, list) : cur));
       if (force) setDrafts({});
       setFormFor(agent);
       setError(null);
@@ -231,12 +274,18 @@ export default function GpuGuestSettings() {
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
         <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>법인(vCenter)별 모니터링 + 공용 계정</b>
-          <span className="muted" style={{ fontSize: 12 }}>선택됨 {monitoredCount} / {vcs.length}</span>
+          <span className="muted" style={{ fontSize: 12 }}>선택됨 {monitoredCount} / {vcsLoaded ? vcs.length : '—'}</span>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           여기 계정은 그 법인 VM에 <b>공용(기본)</b>으로 쓰입니다. <b>Linux/Windows를 구분</b>해 입력하면 게스트 OS에 맞는 계정으로 수집합니다(Windows 칸 비우면 Linux 계정으로 폴백). VM마다 계정이 다르면 아래 <b>VM별 계정</b>에서 개별 지정하세요(개별이 공용보다 우선).
         </div>
-        {vcs.length === 0 ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : (
+        {vcsErr && (
+          <div className="banner warn" style={{ marginBottom: 8 }}>
+            {readFailText('vCenter 목록', vcsErr, { notMeaning: '등록된 vCenter 가 없다는 뜻이 아닙니다', stale: vcsLoaded })}
+            <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={() => load(deployAgent, false)}>다시 읽기</button>
+          </div>
+        )}
+        {vcs.length === 0 ? (vcsLoaded ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : null) : (
           <div style={{ overflowX: 'auto' }}>
             <STable className="data-table" style={{ width: '100%' }}>
               <thead><tr>
@@ -250,10 +299,14 @@ export default function GpuGuestSettings() {
               <tbody>
                 {vcs.map((vc) => {
                   const v = form.vcenters[vc.id] || { enabled: false, username: '', password: '', hasPassword: false, winUsername: '', winPassword: '', hasWinPassword: false };
+                  // v2.733(C4-01): 이 노드가 직접 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 그 사실을 말한다 — 켜도 서버가 로그인하지 않는다.
+                  //   체크는 막지 않는다(이미 켜 둔 항목을 끌 수 있어야 한다).
+                  const note = gpuVcTargetNote(vc, deployAgent);
                   return (
                     <tr key={vc.id}>
                       <td><input type="checkbox" checked={!!v.enabled} onChange={(e) => setVc(vc.id, { enabled: e.target.checked })} /></td>
-                      <td><b>{vc.name || vc.id}</b><div className="muted" style={{ fontSize: 11 }}>{vc.location?.region || vc.location?.country || vc.id}</div></td>
+                      <td style={note ? { whiteSpace: 'normal', minWidth: 220, maxWidth: 360 } : undefined}><b>{vc.name || vc.id}</b><div className="muted" style={{ fontSize: 11 }}>{vc.location?.region || vc.location?.country || vc.id}</div>
+                        {note && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber,#f59e0b)' }}><BoldText text={note.text} /></div>}</td>
                       <td><input className="input" style={{ width: 140 }} placeholder="root" value={v.username}
                         onChange={(e) => setVc(vc.id, { username: e.target.value })} /></td>
                       <td><input className="input" type="password" style={{ width: 140 }}
@@ -301,10 +354,15 @@ export default function GpuGuestSettings() {
             <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at, { dash: '없음' })}</b></span>
             {last && (last.skipped
               ? <span className="muted">({last.skipped})</span>
-              : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
+              : status.fleetCountsHidden
+                // v2.733: 수집 개수는 전 함대 집계라 범위 계정 응답에 싣지 않는다(서버 scopeGpuGuestStatus) — 0 으로 보이지 않게 그 사실을 말한다.
+                ? <span className="muted">[{last.mode}] 수집 개수는 전 법인 집계라 표시하지 않습니다</span>
+                : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts ?? '—'}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms ?? '—'}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
             {/* v2.590: 인증 실패로 주기 수집을 멈춘 VM·vCenter 수(조용한 정지 금지 — 상세는 GPU 게스트 수집 진단) */}
             {last && last.authStoppedVms > 0 && <span className="badge red" title="게스트 계정 인증 실패로 이 VM들의 주기 수집을 멈췄습니다(반복 로그인은 계정을 잠급니다). 계정을 고치면 자동으로 다시 시작합니다 — 대상 VM은 설정 › GPU 게스트 수집 진단에서 확인하세요.">인증 실패 정지 VM {last.authStoppedVms}대</span>}
             {last && Array.isArray(last.vcAuthStopped) && last.vcAuthStopped.length > 0 && <span className="badge red" title={`vCenter 계정 인증 실패로 멈춘 vCenter: ${last.vcAuthStopped.join(', ')} — 설정 › vCenter 에서 계정을 고치면 자동으로 다시 시작합니다.`}>vCenter 인증 실패 정지 {last.vcAuthStopped.length}곳</span>}
+            {/* v2.733(C4-01): 이 노드가 직접 수집하지 않아 로그인하지 않고 건너뛴 vCenter(엣지 위임·비활성·점검중) — 조용히 빼지 않는다 */}
+            {gpuSkippedNote(last) && <span className="muted" title="엣지 위임 vCenter 는 그 엣지가 수집합니다(설정 대상에서 그 엣지를 골라 설정). 비활성·점검중 vCenter 는 수집하지 않습니다."><BoldText text={gpuSkippedNote(last)} /></span>}
           </div>
         </div>
       )}

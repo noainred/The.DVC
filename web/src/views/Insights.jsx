@@ -10,7 +10,8 @@ import {
 // 표시 포맷터는 util/fmt.js 로 통합(v2.319 모듈화 #9 — 본문 동일 이동, 기능 무변)
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
-import { forecastPctText, forecastLimitKind } from './forecastRowText.js';
+import { vcPowerSkippedNote } from './readGapText.js'; // v2.733(C2-02): 지금 값이 아니라 뺀 vCenter 추정 전력
+import { forecastPctText, forecastLimitKind, forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
 
@@ -68,6 +69,7 @@ function FinOps() {
   return (
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 서버 {d.measuredHosts}대(인벤토리 {d.totalHosts}호스트).{d.unmappedServers > 0 ? ` · ⚠ 미매핑 ${d.unmappedServers}대(${fmtW(d.unmappedWatts)})는 '(미매핑)'으로 집계 — ESXi 호스트명과 매핑하면 vCenter별로 귀속됩니다.` : ''}</p>
+      {vcPowerSkippedNote(d.vcPowerSkipped) && <p className="muted" style={{ fontSize: 12, marginTop: 0, color: 'var(--amber)' }}>⚠ {vcPowerSkippedNote(d.vcPowerSkipped)}</p>}
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Kpi label="현재 소비전력" value={fmtW(d.totals.watts)} sub={`설비 포함 ${fmtW(d.totals.facilityWatts)}`} />
         <Kpi label="월 에너지" value={fmtWh(d.totals.kwhMonth)} sub={`연 ${fmtWh(d.totals.kwhYear)}`} />
@@ -191,7 +193,7 @@ function Forecast() {
         if (k === 'stable') return '안정';
         return <span className={`badge ${x.daysToLimit <= 14 ? 'red' : x.daysToLimit <= 30 ? 'amber' : 'gray'}`}>{x.daysToLimit}일</span>;
       })()}</td>
-      <td className="muted" style={{ fontSize: 12 }}>{x.etaTs ? fmtDate(x.etaTs) : '—'}</td>
+      <td className="muted" style={{ fontSize: 12 }}>{x.etaTs ? fmtDate(x.etaTs) : '—'}{forecastStaleText(x, d?.generatedAt) && <div style={{ color: 'var(--amber)', fontSize: 11 }} title={FORECAST_STALE_TITLE}>{forecastStaleText(x, d?.generatedAt)}</div>}</td>
     </tr>
   );
   return (
@@ -233,7 +235,7 @@ function Forecast() {
           <div className="table-wrap"><STable><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>현재</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
             <tbody>{d.gpu.map((g) => (
               <tr key={g.vcenterId}><td><b>{g.vcenterId}</b></td><td style={{ textAlign: 'right' }}>{g.current}%</td><td style={{ textAlign: 'right' }}>{g.slopePerDay > 0 ? '+' : ''}{g.slopePerDay}%/일</td>
-                <td style={{ textAlign: 'right' }}>{g.daysToLimit == null ? '안정' : <span className="badge amber">{g.daysToLimit}일</span>}</td><td className="muted">{g.etaTs ? fmtDate(g.etaTs) : '—'}</td></tr>
+                <td style={{ textAlign: 'right' }}>{g.daysToLimit == null ? '안정' : <span className="badge amber">{g.daysToLimit}일</span>}</td><td className="muted">{g.etaTs ? fmtDate(g.etaTs) : '—'}{forecastStaleText(g, d?.generatedAt) && <div style={{ color: 'var(--amber)', fontSize: 11 }} title={FORECAST_STALE_TITLE}>{forecastStaleText(g, d?.generatedAt)}</div>}</td></tr>
             ))}</tbody></STable></div>
         </div>
       )}

@@ -12,6 +12,30 @@
  *  ③ **단위는 사용자가 고른다**(사용자 요청 "1기가 단위/1TB 단위로 구분") — 자동 축약은
  *     기본값일 뿐이고, GB/TB 를 고르면 **전 칸이 같은 단위**여서 눈으로 세로 비교가 된다.
  */
+import { numOrNull } from '../../numOrNull.js';
+
+/**
+ * v2.733(C2-03): 합계에 넣는 비교 구간의 상한 — 요청 일수 × 1.1(내림). 근거는 서버 `storage/growth.js GROWTH_SPAN_TOLERANCE`
+ * 머리말에 있다(이름 '1개월' 자체가 달력과 ±10% 안에서 어긋난다 — 그보다 긴 구간의 증가는 합계를 과장한다).
+ * ⚠ 서버와 **같은 값·같은 함수**여야 한다(번들 경계라 두 벌) — `server/test/audit2733e_growthSpan.test.js` 가 대조한다.
+ */
+export const GROWTH_SPAN_TOLERANCE = 1.1;
+
+/** 그 기간 합계에 넣을 수 있는 가장 긴 실제 구간(일). 기간이 1일 미만·숫자가 아니면 null(서버 maxSpanDaysFor 와 같다). */
+export function maxSpanDaysFor(days) {
+  const d = numOrNull(days);
+  if (d == null || d < 1) return null;
+  return Math.floor(d * GROWTH_SPAN_TOLERANCE + 1e-9);
+}
+
+/** 'in' | 'widened'(한계 안의 더 긴 구간) | 'inexact'(한계 밖 — 합계에서 뺀다). 실제 구간을 모르면 판정하지 않는다('in'). */
+function spanClassOf(g, days) {
+  const span = numOrNull(g?.spanDays);
+  const lim = maxSpanDaysFor(days);
+  if (span == null || lim == null) return 'in';
+  if (span > lim) return 'inexact';
+  return span > days ? 'widened' : 'in';
+}
 
 /** 단위 선택지 — 화면 토글이 이 표로 그려진다(숫자를 화면에 박지 않는다). */
 export const GROWTH_UNITS = Object.freeze([
@@ -122,14 +146,42 @@ export function approxFootnote(devices) {
 
 /**
  * 합계 칸 — 일부만 더했으면 **반드시 그 사실을 말한다**(growth.js 규칙 ③의 화면 쪽 짝).
+ * v2.733(C2-03): 못 더한 사유를 나눠 말한다 — 기준선 없음 / 최신 관측이 늦음(lagging) / 실제 구간이 요청 기간보다
+ *   크게 김(inexact). 사유를 하나('기준선 없음')로 덮으면 조치가 다른 장비를 같은 것으로 읽게 된다.
  */
 export function totalCell(t, unitKey = 'auto') {
   const base = growthCell(t, unitKey);
   if (!t) return base;
   const notes = [];
-  if (t.partial) notes.push(`${t.measured}대만 합산했습니다 — ${t.missing}대는 이 기간의 기준선이 없어 뺐습니다(전체 합이 아닙니다).`);
-  else if (t.missing > 0 && !t.measured) notes.push(`${t.missing}대 모두 이 기간의 기준선이 없습니다.`);
+  const cnt = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : 0; };
+  const lag = cnt(t.lagging); const inex = cnt(t.inexact); const wid = cnt(t.widened);
+  const noBase = Math.max(0, cnt(t.missing) - lag - inex);
+  const lim = numOrNull(t.maxSpanDays);
+  const why = [];
+  if (noBase) why.push(`${noBase}대는 이 기간의 기준선이 없어`);
+  if (lag) why.push(`${lag}대는 최신 관측이 기준일보다 늦어`);
+  if (inex) why.push(`${inex}대는 요청한 날짜에 수집이 없어 실제 비교 구간이 ${lim != null ? `${lim}일을` : `요청 기간의 ${GROWTH_SPAN_TOLERANCE}배를`} 넘어`);
+  if (t.partial) notes.push(`${t.measured}대만 합산했습니다 — ${why.join(', ')} 뺐습니다(전체 합이 아닙니다).`);
+  else if (t.missing > 0 && !t.measured) notes.push(`${t.missing}대 모두 합산하지 못했습니다 — ${why.join(', ')} 뺐습니다.`);
+  if (inex) notes.push('뺀 장비의 칸에는 그 장비의 값이 그대로 있습니다(더 긴 구간의 증가량이라 이 기간 합계에 넣지 않았습니다).');
+  if (wid) notes.push(`${wid}대는 요청한 날짜에 수집이 없어 조금 더 긴 구간(최대 ${lim != null ? `${lim}일` : `요청 기간의 ${GROWTH_SPAN_TOLERANCE}배`})으로 비교한 값을 더했습니다.`);
   return { ...base, partial: !!t.partial, title: [base.title, ...notes].filter(Boolean).join(' · ') };
+}
+
+/**
+ * v2.733(C2-03): 합계 각주 1줄 — 합계가 무엇을 빼는지 기간별 한계와 함께 말한다(숫자를 박지 않고 기간에서 계산한다).
+ * @param {object[]} periods 화면 기간(`{key, days, label}`)
+ * @returns {string|null}
+ */
+export function spanToleranceNote(periods) {
+  const rows = (periods || []).map((p) => ({ p, lim: maxSpanDaysFor(p?.days) })).filter((x) => x.lim != null);
+  if (!rows.length) return null;
+  const name = (p) => p.label || `${p.days}일`;
+  const loose = rows.filter((x) => x.lim > Number(x.p.days)).slice(0, 3).map((x) => `${name(x.p)} → ${x.lim}일`);
+  const strict = rows.filter((x) => x.lim === Number(x.p.days)).map((x) => name(x.p));
+  let t = `요청한 날짜에 수집이 없어 더 이른 날과 비교한 장비는, 실제 비교 구간이 요청 기간의 **${GROWTH_SPAN_TOLERANCE}배**를 넘으면${loose.length ? `(${loose.join(' · ')} 초과)` : ''} 그 기간 **합계에서 뺍니다**`;
+  if (strict.length) t += ` — ${strict.join('·')} 기간은 하루만 비어도 뺍니다`;
+  return `${t}. 그 장비 칸의 값은 그대로 두고, 합계 칸에 뺀 대수를 적습니다.`;
 }
 
 /** 소진 예상 문구 — 근거 기간을 반드시 함께 적는다(1일 추세로 5년을 예측하지 않게). */
@@ -265,13 +317,30 @@ export function aggregateGrowth(devices, periods, { asOfDay = null } = {}) {
   };
   const growth = {};
   for (const p of periods || []) {
-    let sum = 0; let measured = 0; let missing = 0; let lagging = 0;
+    let sum = 0; let measured = 0; let missing = 0; let lagging = 0; let inexact = 0; let widened = 0;
+    let perDay = 0; let perDayN = 0;
     for (const d of list) {
       if (isLagging(d)) { missing += 1; lagging += 1; continue; }
-      const b = d.growth?.[p.key]?.bytes;
-      if (b != null && Number.isFinite(Number(b))) { sum += Number(b); measured += 1; } else missing += 1;
+      const g = d.growth?.[p.key];
+      const b = numOrNull(g?.bytes);
+      if (b == null) { missing += 1; continue; }
+      // v2.733(C2-03 — 서버 totalsOf 와 같은 규칙): 실제 비교 구간이 요청 기간의 1.1배를 넘으면 이 기간 합계에 넣지 않고 inexact 로 센다.
+      const cls = spanClassOf(g, p.days);
+      if (cls === 'inexact') { missing += 1; inexact += 1; continue; }
+      if (cls === 'widened') widened += 1;
+      sum += b; measured += 1;
+      const pd = numOrNull(g?.perDayBytes);
+      if (pd != null) { perDay += pd; perDayN += 1; }
     }
-    growth[p.key] = { bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0, ...(lagging ? { lagging } : {}) };
+    growth[p.key] = {
+      bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0,
+      // 하루 증가량 = 장비별 perDayBytes 의 합(합계 ÷ 요청 일수 아님) — 모르는 장비가 섞이면 부분 합을 내지 않는다.
+      perDayBytes: measured && perDayN === measured ? perDay : null,
+      maxSpanDays: maxSpanDaysFor(p.days),
+      ...(lagging ? { lagging } : {}),
+      ...(inexact ? { inexact } : {}),
+      ...(widened ? { widened } : {}),
+    };
   }
   return {
     devices: list.length,

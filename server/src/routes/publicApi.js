@@ -395,6 +395,40 @@ function excludedFromTotalsOf(d) { return d.retired ? 'retired' : (d.stale ? 'st
  * unknownUsed:true 개수와 다를 수 있다(제외 장비도 행에는 있다). 행 기준 개수는 unknownUsedRows 로 따로 싣는다.
  * v2.681: staleCount·retiredCount = 합계 기준에서 빠진 장비 수(장기 미관측 / 등록 해제). 장비 행은 그대로 실린다.
  */
+/**
+ * v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 growthMatrix meta 로 넘긴다.
+ * (v2.733: 라우트 본문에서 헬퍼로 뺐다 — 본문이 길어지면 scripts/api-doc.mjs 가 인자 목록을 읽지 못한다.)
+ */
+async function storageApproxMeta() {
+  const meta = new Map();
+  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
+  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
+    const id = s2?.deviceId || s2?.id;
+    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
+  }
+  return meta;
+}
+/**
+ * v2.733(C2-03): 장비 행의 기간별 **실제 비교 구간(일)** — 요청한 날짜에 수집이 없으면 더 이른 날과 비교하므로 요청 기간보다 길 수 있다.
+ * 증가량이 null 인 칸은 null(비교하지 않았다). 이 값이 meta.maxSpanDays 를 넘는 칸은 요청 기간보다 크게 긴 증가라 포탈 합계에서 뺀다.
+ */
+function growthSpanDaysOf(d, periods) {
+  return Object.fromEntries(periods.map((p) => {
+    const g = d.growth?.[p.key];
+    return [p.key, g?.bytes == null ? null : (g.spanDays ?? null)];
+  }));
+}
+/**
+ * v2.733(C2-03): 합계 기준(countsBasis 'totals')의 구간 판정 — maxSpanDays(기간별 한계) · inexactCount(한계를 넘어 합계에서 뺀 장비 수).
+ * 공개 API 는 합계를 싣지 않으므로, 상대 포탈이 행을 더할 때 같은 기준을 쓸 수 있게 한계와 개수를 밝힌다.
+ */
+function storageGrowthSpanMeta(m, periods) {
+  return {
+    maxSpanDays: Object.fromEntries(periods.map((p) => [p.key, m.totals?.growth?.[p.key]?.maxSpanDays ?? null])),
+    inexactCount: Object.fromEntries(periods.map((p) => [p.key, m.totals?.growth ? (m.totals.growth[p.key]?.inexact ?? 0) : null])),
+    spanNote: '요청한 날짜에 수집이 없으면 더 이른 날과 비교합니다 — growthSpanDays 가 maxSpanDays 를 넘는 칸은 요청 기간보다 긴 구간의 증가이므로 기간 합계에 더하지 마세요(포탈 화면 합계는 뺍니다).',
+  };
+}
 function storageGrowthCounts(out, m, knownIds) {
   return {
     unknownUsedCount: m.totals?.unknownUsed ?? null,
@@ -417,13 +451,7 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
    */
   const { periods, dropped } = g.normalizePeriods([1, 7, 30]);
   const rows = await db.dailySeries(null, 0);
-  // v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 meta 로 넘긴다.
-  const meta = new Map();
-  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
-  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
-    const id = s2?.deviceId || s2?.id;
-    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
-  }
+  const meta = await storageApproxMeta();
   // v2.681(R2D-03): 내부 화면과 같은 기준 — 오늘 기준(asOfDay)으로 장기 미관측 장비를 가르고, 등록부를 읽을 수 있으면
   //   등록 해제 장비를 '퇴역' 으로 가른다(합계용 — 장비 행은 그대로 싣는다). 등록부를 못 읽으면 퇴역 판정은 하지 않는다.
   const knownIds = await storageKnownIds();
@@ -439,6 +467,7 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     observedDays: d.observedDays,
     // 기간별 증가 바이트만 — 내부 growth 객체를 그대로 싣지 않는다(내부 필드가 새지 않게).
     growth: Object.fromEntries(periods.map((p) => [p.key, d.growth?.[p.key]?.bytes ?? null])),
+    growthSpanDays: growthSpanDaysOf(d, periods),
     unknownUsed: d.usedBytes == null,
     // v2.604: 반올림 표기 용량이면 그 해상도(바이트) — 이보다 작은 증가는 0 이 아니라 '보이지 않는 것'. 정확하면 null.
     resolutionBytes: d.capacityApprox?.resolutionBytes ?? null,
@@ -450,6 +479,7 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     approxCount: m.totals?.approxDevices ?? 0,
     ...(hide ? { namesHidden } : {}),
     ...storageGrowthCounts(out, m, knownIds),
+    ...storageGrowthSpanMeta(m, periods),
     note: '기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다.',
   });
 }));

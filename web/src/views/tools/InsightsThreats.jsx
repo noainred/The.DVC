@@ -6,6 +6,46 @@ import { STable } from '../../components/STable.jsx';
 import { reclaimBasisNote } from '../toolsReportText.js';
 
 
+/**
+ * v2.733(점검 3회차 C2-04): N+1 판정 칸 — 서버 n1Ok 는 true(여유) / false(위험) / **null(판정 대상 아님)** 셋이다.
+ * null 은 클러스터가 없는 독립 호스트 그룹(HA 가 없어 서로 장애를 받아 줄 수 없다) — 예전 화면은 거짓이면 '위험' 으로 칠해 null 도 위험이었다.
+ */
+export const n1RiskCount = (cl) => (Array.isArray(cl) ? cl.filter((c) => c && c.n1Ok === false).length : 0);
+const afterFailCell = (v) => (v == null || v > 200 ? '—' : <UsageCell pct={Math.min(v, 100)} />);
+
+/** 클러스터 N+1 표 — 유지보수 호스트·독립 호스트·끊긴 호스트를 말한다(서버 toolsAnalytics.js ④ 와 같은 뜻). */
+export function N1Table({ cl }) {
+  const rows = Array.isArray(cl) ? cl : [];
+  return (
+    <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+      <div className="muted" style={{ fontSize: 12, margin: '0 0 8px', whiteSpace: 'normal', lineHeight: 1.55 }}>
+        호스트 1대(가장 큰 호스트) 장애 시 남은 호스트로 현재 사용량을 수용할 수 있는지. 90% 초과·받아 줄 호스트가 1대 이하면 위험.
+        {' '}<b>유지보수 호스트</b>는 VM 을 받을 수 없어 남은 용량에서 뺍니다(아직 들고 있는 부하는 남은 호스트가 받는 것으로 셉니다).
+        {' '}클러스터가 없는 <b>독립 호스트</b>는 HA 가 없어 N+1 을 판정하지 않습니다(—).
+      </div>
+      <STable minWidth={760} wrap={false}><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
+        <tbody>
+          {rows.map((c) => (
+            <tr key={`${c.vcenterId}:${c.cluster}`} style={{ background: c.n1Ok === false ? 'rgba(239,68,68,.10)' : undefined }}>
+              <td className="muted">{c.vcenterId}</td>
+              <td>{c.standalone ? <span title="클러스터에 속하지 않은 호스트들 — 한 클러스터가 아니다">독립 호스트(클러스터 없음)</span> : <b>{c.cluster}</b>}
+                {c.clusterUnknown > 0 && <div className="muted" style={{ fontSize: 11 }}>소속을 읽지 못한 호스트 {c.clusterUnknown}대 포함</div>}</td>
+              <td style={{ textAlign: 'right' }} data-sort={c.hosts}>{c.hosts}
+                {c.maintenance > 0 && <div className="muted" style={{ fontSize: 11 }}>유지보수 {c.maintenance}대 제외</div>}
+                {c.hostsUsageExcluded > 0 && <div className="muted" style={{ fontSize: 11 }}>연결 끊김 {c.hostsUsageExcluded}대 제외</div>}</td>
+              <td><UsageCell pct={c.cpuUsagePct} /></td><td><UsageCell pct={c.memUsagePct} /></td>
+              <td data-sort={c.cpuAfterFailPct ?? ''}>{afterFailCell(c.cpuAfterFailPct)}</td>
+              <td data-sort={c.memAfterFailPct ?? ''}>{afterFailCell(c.memAfterFailPct)}</td>
+              <td>{c.n1Ok === true ? <span className="badge green">여유</span>
+                : c.n1Ok === false ? <span className="badge red">위험</span>
+                  : <span className="muted" title="판정 대상 아님 — 클러스터가 없는 독립 호스트는 HA 가 없어 서로 장애를 받아 줄 수 없습니다">— 판정 안 함</span>}</td>
+            </tr>
+          ))}
+        </tbody></STable>
+    </div>
+  );
+}
+
 /** 운영 인사이트 — 라이트사이징 · 클러스터 N+1 · 알람 핫스팟 · GPU 유휴 (기존 스냅샷 기반). */
 export function Insights({ scope }) {
   const { loading, data, error } = useTool('/tools/insights', scope ? { vcenterId: scope } : {});
@@ -13,7 +53,9 @@ export function Insights({ scope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const rs = data.rightsizing, cl = data.clusters || [], ah = data.alarmHotspot, gw = data.gpuWaste;
-  const n1Bad = cl.filter((c) => !c.n1Ok).length;
+  const n1Bad = n1RiskCount(cl);
+  const n1Judged = cl.filter((c) => !c.standalone).length;
+  const standaloneHosts = cl.filter((c) => c.standalone).reduce((a, c) => a + (c.hosts || 0), 0);
   const SECS = [
     ['rightsizing', `♻ VM 라이트사이징`],
     ['n1', `🛡 클러스터 N+1 (위험 ${n1Bad})`],
@@ -43,7 +85,7 @@ export function Insights({ scope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="유휴 VM" value={rs.idleCount} accent="var(--amber)" meta="전원 ON·CPU<5%·MEM<20%" />
         <Card label="회수 가능(추정)" value={`${rs.reclaimableVcpu} vCPU`} meta={reclaimBasisNote(rs)} />
-        <Card label="N+1 위험 클러스터" value={n1Bad} accent={n1Bad ? 'var(--red)' : 'var(--green)'} meta={`전체 ${cl.length} 클러스터`} />
+        <Card label="N+1 위험 클러스터" value={n1Bad} accent={n1Bad ? 'var(--red)' : 'var(--green)'} meta={`전체 ${n1Judged} 클러스터${standaloneHosts ? ` · 독립 호스트 ${standaloneHosts}대 판정 제외` : ''}`} />
         <Card label="유휴 GPU" value={gw.idleGpus} accent="var(--amber)" meta={`GPU 호스트 ${gw.totalGpuHosts} · 미보고 ${gw.unreporting}`} />
         <Card label="알람" value={ah.total} accent={ah.bySeverity.critical ? 'var(--red)' : 'var(--text)'} meta={`위험 ${ah.bySeverity.critical || 0} · 경고 ${ah.bySeverity.warning || 0}`} />
       </div>
@@ -59,23 +101,7 @@ export function Insights({ scope }) {
           <div className="section-title" style={{ fontSize: 14, marginTop: 14 }}>과소(증설 필요) VM ({rs.undersizedCount})</div>{vmRows(rs.undersized)}
         </>
       )}
-      {sec === 'n1' && (
-        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
-          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>호스트 1대(가장 큰 호스트) 장애 시 잔여 용량으로 현재 사용량을 수용할 수 있는지. 90% 초과·단일 호스트면 위험.</div>
-          <STable><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
-            <tbody>
-              {cl.map((c) => (
-                <tr key={`${c.vcenterId}:${c.cluster}`} style={{ background: c.n1Ok ? undefined : 'rgba(239,68,68,.10)' }}>
-                  <td className="muted">{c.vcenterId}</td><td><b>{c.cluster}</b></td><td style={{ textAlign: 'right' }}>{c.hosts}</td>
-                  <td><UsageCell pct={c.cpuUsagePct} /></td><td><UsageCell pct={c.memUsagePct} /></td>
-                  <td>{c.cpuAfterFailPct > 200 ? '—' : <UsageCell pct={Math.min(c.cpuAfterFailPct, 100)} />}</td>
-                  <td>{c.memAfterFailPct > 200 ? '—' : <UsageCell pct={Math.min(c.memAfterFailPct, 100)} />}</td>
-                  <td>{c.n1Ok ? <span className="badge green">여유</span> : <span className="badge red">위험</span>}</td>
-                </tr>
-              ))}
-            </tbody></STable>
-        </div>
-      )}
+      {sec === 'n1' && <N1Table cl={cl} />}
       {sec === 'alarms' && (
         <div className="grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14 }}>
           <div><div className="section-title" style={{ fontSize: 14 }}>알람 많은 엔티티</div>

@@ -93,8 +93,12 @@ export function loadGrowthSettings() {
 /** 저장 → 즉시 DB 에 반영. prune 은 여기서 돌리지 않는다(호출부 결정 — 위 머리말 참조). */
 export function saveGrowthSettings(input) {
   const { values, issues } = normalizeGrowthSettings(input);
-  _cache = { ..._cache, ...values };
-  atomicWriteFileSync(FILE(), JSON.stringify(_cache, null, 2), { mode: 0o600 });
+  // v2.733(점검 3회차 C4-04): 캐시·DB 반영은 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 실패한 값이 출처 'saved' 로
+  //   보였다(재시작하면 옛 값). 저장 전에 한 번 읽어 둔다(_cache 가 비어 있으면 다른 저장값을 빠뜨린 채 덮어쓰지 않게).
+  loadGrowthSettings();
+  const next = { ...(_cache || {}), ...values };
+  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _cache = next;
   applyGrowthSettings();
   return { values: loadGrowthSettings(), issues };
 }

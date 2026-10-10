@@ -61,6 +61,46 @@ export function staleTargetChips(pending) {
   return out;
 }
 
+/**
+ * v2.733(점검 3회차 C1-03): 서버 staleUnknown 사유 코드 → 짧은 문구. 서버 `routes/api/vmSeries.js INVENTORY_UNREAD_REASONS` 와 1:1
+ * (웹 테스트가 서버 소스의 그 줄을 읽어 대조한다 — 한쪽만 늘면 화면이 '수집 상태 미상' 으로 뭉갠다).
+ */
+export const STALE_UNKNOWN_REASON = Object.freeze({
+  initial: '재시작 직후 첫 수집 전',
+  pending: '첫 수집 중',
+  unreachable: '연결 실패 · 이어 쓸 직전 수집 없음',
+  maintenance: '점검중 · 직전 수집 없음',
+  disabled: '비활성 · 수집하지 않음',
+});
+
+/**
+ * 서버가 '인벤토리를 못 읽어 판정하지 않은' vCenter(staleUnknown) 중 **지금 targets 에 선택이 남아 있는 것**만 — 그 vCenter 를
+ * 빼거나 '전체' 로 바꾸면 사라진다. 개수는 지금 선택 기준(그 vCenter 의 선택은 전부 판정하지 않았다).
+ * 반환 [{ vcId, reason, hosts, vms }].
+ */
+export function pendingStaleUnknown(staleUnknown, targets) {
+  const out = [];
+  const tg = targets && typeof targets === 'object' ? targets : {};
+  for (const [vcId, e] of Object.entries(staleUnknown && typeof staleUnknown === 'object' ? staleUnknown : {})) {
+    const t = tg[vcId];
+    if (!t || typeof t !== 'object' || t.all) continue;
+    const hosts = asList(t.hosts).length; const vms = asList(t.vms).length;
+    if (!hosts && !vms) continue;
+    out.push({ vcId, reason: String(e?.reason || ''), hosts, vms });
+  }
+  return out;
+}
+
+/** 칩 대신 말하는 한 단락 — '수집 전이라 판정하지 않음'. nameOf(vcId) → 표시 이름. 앞 10곳만 이름을 적고 나머지는 개수. */
+export function staleUnknownNote(list, nameOf = (id) => id) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) return '';
+  const shown = arr.slice(0, 10).map((e) => `‘${nameOf(e.vcId) || e.vcId}’(${STALE_UNKNOWN_REASON[e.reason] || '수집 상태 미상'} · 호스트 ${e.hosts} · VM ${e.vms})`);
+  const more = arr.length > 10 ? ` 외 ${arr.length - 10}곳` : '';
+  return `인벤토리를 아직 읽지 못한 vCenter **${arr.length}곳**의 선택 대상은 **수집 전이라 판정하지 않았습니다** — ‘목록에 없음’ 이 아니니 지우지 마세요. `
+    + `그 vCenter 의 인벤토리를 읽으면 다시 판정합니다: ${shown.join(', ')}${more}.`;
+}
+
 /** 낡은 대상 개수 = 칩 개수. */
 export const staleTargetCount = (pending) => staleTargetChips(pending).length;
 

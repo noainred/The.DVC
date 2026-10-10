@@ -7,7 +7,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor, approxFootnote,
-  growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
+  growthPct, growthPctText, aggregateGrowth, historyResetNote, spanToleranceNote } from './storageGrowthText.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-02
@@ -155,7 +155,7 @@ export default function StorageGrowthTool() {
 
       {/* 합계가 '전체' 가 아닐 때는 반드시 먼저 말한다 — 임원 보고에서 가장 위험한 거짓이다. */}
       {cols.some((p) => t.growth?.[p.key]?.partial) && (
-        <Note tone="warn" text={`**합계가 전 장비 기준이 아닙니다.** 기간별로 기준선(비교 시작일)이 없는 장비는 그 열의 합계에서 빠졌습니다 — 각 칸에 마우스를 올리면 몇 대를 더했는지 나옵니다. 관측이 그 기간만큼 쌓이면 자동으로 포함됩니다.`} />
+        <Note tone="warn" text={`**합계가 전 장비 기준이 아닙니다.** 기간별로 기준선(비교 시작일)이 없거나, 최신 관측이 늦었거나, 실제 비교 구간이 요청 기간보다 크게 긴 장비는 그 열의 합계에서 빠졌습니다 — 각 칸에 마우스를 올리면 몇 대를 왜 뺐는지 나옵니다. 관측이 그 기간만큼 쌓이면 자동으로 포함됩니다.`} />
       )}
       {addressHiddenNote(d) && <Note text={addressHiddenNote(d)} />}
       {t.excludedStale > 0 && (
@@ -298,6 +298,8 @@ export default function StorageGrowthTool() {
           {miss && <li><BoldText text={miss.text} />{miss.names?.length ? <> <span style={{ opacity: 0.8 }}>({miss.names.join(', ')}{miss.omitted ? ` 외 ${miss.omitted}대` : ''})</span></> : null}</li>}
           <li><BoldText text={`증가량은 **하루 1행으로 요약한 값**(그 날의 마지막 관측)을 비교합니다 — 하루 안의 등락은 보이지 않습니다.`} /></li>
           <li><BoldText text={`요청한 날짜에 수집이 없으면 **그 이전 가장 가까운 날**과 비교하고, 그 칸의 설명에 실제 구간을 적습니다.`} /></li>
+          {/* v2.733(C2-03): 합계 각주 — 실제 구간이 요청 기간보다 크게 긴 장비를 합계에서 뺀다는 사실과 기간별 한계(문구·한계는 storageGrowthText 가 소유). */}
+          {spanToleranceNote(cols) && <li><BoldText text={spanToleranceNote(cols)} /></li>}
           <li><BoldText text={`소진 예상은 **그 추세가 그대로 이어진다고 가정한 산술 계산**이며 예측이 아닙니다. 근거로 쓴 기간을 칸 설명에 적었습니다.`} /></li>
           <li>
             원시 표본은 {d.retention?.rawKeepDays}일, 일 단위 요약은 {d.retention?.dailyKeepDays}일 보관합니다

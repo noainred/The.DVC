@@ -6,7 +6,8 @@
  * collectSource 가 'site' 로 덮이므로 원래 값은 `collectMethod` 로 보존된다(store.js).
  * 경보를 **조회하지 않았으므로** alarms:[] 는 '경보 0건' 이 아니다 — 초록 0 으로 칠하거나 합계에 0 으로 더하지 않는다.
  */
-const UNKNOWN_LABEL = { cluster: '클러스터', vmPlacement: 'VM 배치(호스트별 VM)', alarms: '경보' };
+// v2.733(C2-06): 호스트 용량(코어·CPU·메모리 총량)·데이터스토어 용량도 REST 목록에 없거나 빠질 수 있다(server vcenter/restClient.js).
+const UNKNOWN_LABEL = { cluster: '클러스터', vmPlacement: 'VM 배치(호스트별 VM)', alarms: '경보', hostCapacity: '호스트 용량(코어·CPU·메모리)', dsCapacity: '데이터스토어 용량' };
 
 export function isRestFallback(site) {
   if (!site || typeof site !== 'object') return false;

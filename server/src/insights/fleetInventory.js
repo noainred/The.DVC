@@ -25,7 +25,9 @@
 
 import { config } from '../config.js';
 import { buildHostIndex } from '../idrac/attribution.js';
-import { allMeasuredPower } from '../idrac/service.js';
+import { allMeasuredPower, vcPowerSkipReason, vcPowerSkippedOf } from '../idrac/service.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js'; // v2.733(C2-02): 지표 샘플러와 같은 vCenter 판정
+import { usageReadable } from '../store.js';                         // v2.733(C2-02): 사용률과 같은 호스트 판정
 import { loadRegistry, matchKeys } from '../idrac/registry.js';
 import { allOmeDevices, dbKey } from '../idrac/omeCache.js';
 import { getInventory } from '../idrac/invCache.js';
@@ -195,6 +197,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       // v2.625: 받치는 iDRAC 등록 id — 사용률 수집(bmusage)이 ESXi 호스트의 iDRAC 을 찾는 연결 고리.
       //   받침이 없거나 엣지 보고분(serverByTag 에서 제외)이면 빈 값이고, 그 호스트는 iDRAC 경로가 없다.
       idracServerId: backed ? (m.serverId || '') : '',
+      // v2.733(C2-02): vCenter 추정 전력을 지금 값으로 쓰지 않은 사유(getFleetInventory 가 비운 호스트만 — 없으면 싣지 않는다).
+      ...(h.powerUnread ? { powerUnread: h.powerUnread } : {}),
     });
   }
 
@@ -263,8 +267,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
  * allMeasuredPower(전력 보고분) + 레지스트리/OME에 등록됐지만 현재 전력 샘플이 없는 서버(watts=null).
  * extras끼리도 dedup(seenTag/seenHost를 갱신). OME 서버는 소속 OME 연결의 법인(vcenterId)을 상속(자동 추론).
  */
-async function buildServerUniverse(hosts) {
-  const measured = await allMeasuredPower({ hosts });
+async function buildServerUniverse(hosts, vcSkip = {}) {
+  const measured = await allMeasuredPower({ hosts, ...vcSkip }); // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 넣지 않는다
   const registry = loadRegistry();      // 1회만 읽는다(과거 3회 중복 I/O 제거)
   const omeDevices = allOmeDevices();    // 1회만 순회
   const seenTag = new Set(measured.map((s) => norm(s.serviceTag)).filter(Boolean));
@@ -353,7 +357,16 @@ function instanceMode() {
 
 /** 스냅샷 기준 통합 인벤토리 산출(라우트에서 호출). */
 export async function getFleetInventory(snap) {
-  const servers = await buildServerUniverse(snap?.hosts || []);
+  // v2.733(점검 3회차 C2-02): 읽지 못한 vCenter(연결 실패 이월·낡은 위임·점검중)·끊긴 호스트의 powerWatts 는 몇 시간 전 값이다 —
+  //   측정 전력 목록에서 빼고(allMeasuredPower), 분류 입력 호스트의 전력도 비워(null — 0 이 아니다) 화면이 '지금 W' 로 보이지 않게 한다.
+  //   분류(가상화/베어메탈 판정)는 바꾸지 않는다 — 전력 칸만 비운다. 뺀 대수는 summary.vcPowerSkipped 로 밝힌다.
+  const vcSkip = { unread: unreadVcenterReasons(snap), hostReadable: usageReadable };
+  const hostsIn = snap?.hosts || [];
+  const hosts = hostsIn.map((h) => {
+    const r = h && (h.powerWatts != null || h.vcPowerWatts != null) ? vcPowerSkipReason(h, vcSkip) : null;
+    return r ? { ...h, powerWatts: null, vcPowerWatts: null, powerUnread: r } : h;
+  });
+  const servers = await buildServerUniverse(hostsIn, vcSkip);
   // 중앙(엣지가 아닌)일 때만 엣지 push 베어메탈을 병합 — 자가 병합 방지(한 노드가 양쪽 설정인 경우).
   if (config.central?.token && !config.agent?.centralUrl) {
     try {
@@ -372,9 +385,10 @@ export async function getFleetInventory(snap) {
     } catch { /* 엣지 데이터 없음 무시 */ }
   }
   const result = classifyFleet({
-    hosts: snap?.hosts || [], vcenters: snap?.vcenters || [], servers,
+    hosts, vcenters: snap?.vcenters || [], servers,
     tags: loadFleetTags(), assign: loadFleetAssign(),
   });
+  result.summary.vcPowerSkipped = vcPowerSkippedOf(hostsIn, vcSkip); // v2.733(C2-02)
   const edgeAgents = new Set(result.bareMetal.filter((b) => b.remoteAgent).map((b) => b.remoteAgent));
   result.summary.edgeReported = result.bareMetal.filter((b) => b.remoteAgent).length;
   result.summary.edgeAgents = edgeAgents.size;

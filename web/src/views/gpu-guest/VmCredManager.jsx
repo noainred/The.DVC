@@ -8,6 +8,8 @@ import { fetchJson, putJson, postJson } from '../../api.js';
 import { VmLink } from '../../components/ui.jsx';
 import { fmtAgo } from '../../util/fmt.js'; // v2.613 DEPS2613-11: 코어는 util/fmt, 결측 표기('없음')만 이 화면 계약
 import { droppedSecretNote } from '../droppedSecretText.js'; // v2.611: VM 계정명 변경 시 폐기된 비밀번호 안내
+import { changeFailText } from '../changeResult.js'; // v2.733(C5-01): putJson 은 400 본문을 돌려준다 — 실패를 성공으로 읽지 않는다
+import { scopeSaveSuffix } from '../scopeSaveText.js'; // v2.733(C5-01): 범위 계정이 보낸 전역 값(collectMethod) 미적용 안내
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 
@@ -29,6 +31,33 @@ function SortTh({ k, sort, onSort, children }) {
  */
 export function vmCredRowsMatch({ selVc = '', deployAgent = '', rowsFor = null } = {}) {
   return !!(rowsFor && selVc && rowsFor.vcId === selVc && (rowsFor.agent || '') === (deployAgent || ''));
+}
+
+/**
+ * v2.733(점검 3회차 C5-01): 'VM별 계정 저장' 응답 → 결과 문장(순수).
+ * 예전에는 ① putJson 이 400 을 던지지 않고 본문을 돌려주는데 `ok` 를 보지 않아, 서버가 고정 IP 를 거부(400 `{ok:false, reason, rejected}`)해도
+ * 성공 경로를 탔고 곧바로 목록을 다시 읽어 **고른 IP·입력한 계정·비밀번호가 아무 말 없이 사라졌다** ② 성공 문구·비밀번호 폐기 안내가
+ * 다시 읽기(loadVms 의 setMsg(null))에 지워져 화면에 한 번도 남지 않았다. 실패면 ok:false 와 사유(거부된 IP 포함)를 돌려주고
+ * 호출부는 **다시 읽지 않는다**(입력 유지). 범위 계정이 보낸 수집 방식 변경(collectMethod)은 서버가 적용하지 않으므로(ignoredGlobal)
+ * 'auto 로 바꿔 켰습니다' 라고 말하지 않는다(bumped:false).
+ * @returns {{ ok: boolean, bumped: boolean, text: string }}
+ */
+export function vmCredSaveOutcome(saved, { deployAgent = '', bumpToAuto = false } = {}) {
+  const why = changeFailText(saved);
+  if (why != null) {
+    const ips = Array.isArray(saved?.rejected) ? saved.rejected.map((x) => (x && typeof x.ip === 'string' ? x.ip : '')).filter(Boolean) : [];
+    const ipText = ips.length ? ` (거부된 IP: ${ips.slice(0, 5).join(', ')}${ips.length > 5 ? ` 외 ${ips.length - 5}개` : ''})` : '';
+    return { ok: false, bumped: false, text: `오류: VM별 계정을 저장하지 못했습니다 — ${why}${ipText} 입력한 값은 그대로 두었습니다(아무것도 저장하지 않았습니다).` };
+  }
+  const ignored = Array.isArray(saved?.ignoredGlobal) ? saved.ignoredGlobal : [];
+  const bumped = !!bumpToAuto && !deployAgent && !ignored.includes('collectMethod');
+  const drop = droppedSecretNote(saved);
+  const base = deployAgent
+    ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.`
+    : (bumped
+      ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
+      : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)');
+  return { ok: true, bumped, text: `${base}${drop ? ` ${drop}` : ''}${scopeSaveSuffix(saved)}` };
 }
 
 /** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄).
@@ -62,13 +91,15 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
   });
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [logLines]);
 
-  const loadVms = async (vcId) => {
+  // v2.733(C5-01): savedMsg — 저장 직후의 다시 읽기. 저장 결과 문구를 지우지 않고(예전 setMsg(null) 이 성공·비밀번호 폐기 안내를
+  //   즉시 지웠다), 다시 읽기가 실패하면 그 문구 뒤에 덧붙인다(저장 성공 사실이 오류에 가려지지 않게).
+  const loadVms = async (vcId, { savedMsg = null } = {}) => {
     // v2.622(감사 WEB-04): 요청 세대 — 늦게 온 이전 vCenter·배포 대상 응답은 버린다.
     const mySeq = ++loadSeq.current;
     const agent = deployAgent;
     const stale = () => mySeq !== loadSeq.current || vcId !== selRef.current || agent !== agentRef.current;
     if (!vcId) { setRows(null); setRowsFor(null); setLoading(false); return; }
-    setLoading(true); setMsg(null);
+    setLoading(true); setMsg(savedMsg);
     try {
       const r = await fetchJson(`/admin/gpu-guest/vms?vcenterId=${encodeURIComponent(vcId)}${agent ? `&agent=${encodeURIComponent(agent)}` : ''}`);
       if (stale()) return;
@@ -87,7 +118,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
     } catch (e) {
       if (stale()) return;
       // v2.622(감사 WEB-04): 조회 실패는 '없음' 이 아니다 — 행을 비우고(null) 오류만 말한다.
-      setMsg(`오류: VM 목록을 불러오지 못했습니다 — ${e.message}`); setRows(null); setRowsFor(null);
+      setMsg(savedMsg ? `${savedMsg} — 단, VM 목록을 다시 불러오지 못했습니다: ${e.message}` : `오류: VM 목록을 불러오지 못했습니다 — ${e.message}`); setRows(null); setRowsFor(null);
     }
     finally { if (!stale()) setLoading(false); }
   };
@@ -184,13 +215,12 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
         vcenters: { [selVc]: { vms, vmIps } },
         ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
       });
-      setMsg(deployAgent
-        ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.` + (droppedSecretNote(saved) ? ` ${droppedSecretNote(saved)}` : '')
-        : (bumpToAuto
-          ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
-          : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)') + (droppedSecretNote(saved) ? ` ${droppedSecretNote(saved)}` : ''));
-      if (bumpToAuto) onSavedShared?.();
-      await loadVms(selVc);
+      // v2.733(C5-01): 서버가 거부하면(400 — 고정 IP 가 보고된 IP 가 아님 등) 사유를 말하고 **다시 읽지 않는다** — 입력을 지우지 않는다.
+      const out = vmCredSaveOutcome(saved, { deployAgent, bumpToAuto });
+      if (!out.ok) { setMsg(out.text); return; }
+      if (out.bumped) onSavedShared?.();
+      // 성공 문구는 다시 읽기 뒤에도 남는다(savedMsg — 예전에는 loadVms 가 지웠다).
+      await loadVms(selVc, { savedMsg: out.text });
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -253,6 +283,8 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
 
       {!selVc && <div className="muted" style={{ fontSize: 13 }}>법인을 선택하면 그 법인에서 <b>GPU(패스쓰루·vGPU)</b>를 쓰는 VM 목록을 불러옵니다.</div>}
       {selVc && rows && rows.length === 0 && !loading && <div className="muted" style={{ fontSize: 13 }}>이 법인에 GPU 할당 VM이 없습니다.</div>}
+      {/* v2.733(C5-01): 행이 없을 때(조회 실패·0대)도 결과 문구를 보인다 — 예전에는 행 영역 안에서만 그려져 '목록을 불러오지 못했습니다' 가 보이지 않았다. */}
+      {selVc && !(rows && rows.length > 0) && !loading && msg && <div style={{ fontSize: 13, marginTop: 6, color: /^오류/.test(msg) ? 'var(--red)' : 'var(--text-dim)' }}>{msg}</div>}
 
       {selVc && rows && rows.length > 0 && (
         <>
@@ -367,7 +399,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                 테스트 중 {testProg.done}/{testProg.total} ({testProg.total ? Math.round((testProg.done / testProg.total) * 100) : 0}%) — 끝나는 대로 표시됩니다
               </span>
             )}
-            {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+            {msg && <span className="muted" style={{ fontSize: 13, ...(/^오류/.test(msg) ? { color: 'var(--red)' } : {}) }}>{msg}</span>}
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             도달 불가/느린 VM은 한 대당 수십 초가 걸릴 수 있어, 작은 묶음으로 나눠 끝나는 대로 행을 갱신합니다(전체가 멈추지 않음). 한 대만 빠르게 보려면 행의 “테스트”를 누르세요.

@@ -13,6 +13,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../storage/registry.js';
 import { dropSnapshot } from '../storage/store.js';
 import { collectDeviceNow } from '../storage/poller.js';
+import { flushSnapshotsNow } from '../storage/store.js'; // v2.733(C4-03): 재수집 묶음 끝에 한 번 쓴다
 import { pushStorageNow } from '../storage/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../storage/intervals.js';
 
@@ -84,9 +85,12 @@ async function _pullStorageConfigNow() {
       console.log(`[storage-config] 중앙 재수집 요청 ${wants.length}건 수신 — 즉시 수집`);
       for (const id of wants) {
         // v2.591 L1: false = 이미 수집 중(주기 수집) — 그 결과가 곧 push 되므로 새 세션을 열지 않는다.
-        try { if (await collectDeviceNow(String(id))) collected++; else console.log(`[storage-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); }
+        // v2.733(C4-03): 장비마다 스냅샷 파일을 쓰지 않는다 — 묶음 끝에 한 번(아래 finally).
+        try { if (await collectDeviceNow(String(id), { flush: false })) collected++; else console.log(`[storage-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); }
         catch (e) { console.warn(`[storage-config] 재수집 실패(${id}): ${e.message}`); } // 실패 스냅샷도 push 로 전달됨
       }
+      // v2.733(C4-03): 묶음 끝에 스냅샷 파일을 한 번 쓴다 — flushSnapshotsNow 는 던지지 않는다(실패는 store 가 콘솔·상태에 남긴다).
+      try { flushSnapshotsNow(); } catch { /* store 가 남긴다 */ }
       // v2.612 EDGE2612-02: 반환값을 본다 — pushStorageNow 는 실패를 {ok:false} 로 돌려주고(던지지 않는다) 상태 전용 push 실패는
       //   statusSent:false 다. 예전에는 무시해 '지금 수집' 결과가 중앙에 닿지 않아도 흔적이 없었다. withheld(보류)는 실패가 아니다.
       try {

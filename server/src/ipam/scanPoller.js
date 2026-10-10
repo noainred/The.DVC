@@ -4,8 +4,8 @@
  * 한 번에 한 스캔만 실행(중복 방지), 실패는 격리, 이벤트 루프 비차단.
  */
 
-import { runScan } from './scanRunner.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, listScanAgents, LOCAL } from './scanStore.js';
+import { runScan, SCAN_DEADLINE_CODE } from './scanRunner.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
@@ -66,8 +66,23 @@ async function runScanOnce({ manual = false } = {}) {
     recordScanLog({ event: 'finish', trigger, ranges: ranges.length, scanned, alive: alive.length, durationMs: lastRun.durationMs });
     return { ok: true, ...lastRun };
   } catch (e) {
-    lastRun = { at: Date.now(), error: e.message, manual };
-    recordScanLog({ event: 'fail', trigger, ranges: ranges.length, durationMs: Date.now() - started, message: e?.message || String(e) });
+    // v2.733(점검 3회차 C1-02 — v2.732 B4-02 가 만든 회귀): 시한 초과·실패한 스캔은 결과를 남기지 않아 해제 판정이 살아 있는 IP 를
+    //   down 으로 바꿨다. ① 워커가 시한 전에 찾은 생존 IP(부분 결과)로 **마지막 확인 시각만** 갱신하고 ② 이 포탈의 '스캔 미완료' 를
+    //   기록한다 — 해제 판정(sweepReleases)은 완료된 스캔이 해제 기준 시간 안에 올 때까지 보류한다. 같은 스캔을 메인에서 다시 돌리지 않는다.
+    const durationMs = Date.now() - started;
+    const code = e?.code === SCAN_DEADLINE_CODE ? SCAN_DEADLINE_CODE : 'error';
+    const partial = Array.isArray(e?.partialAlive) ? e.partialAlive : [];
+    let partialAlive = 0;
+    if (partial.length) {
+      try { partialAlive = mergeScanResults(partial, Date.now(), LOCAL, { seenOnly: true }).merged; }
+      catch (me) { console.warn(`[ipscan] 부분 결과 병합 실패: ${me?.message || me}`); }
+    }
+    const done = Number.isFinite(e?.progress?.done) ? e.progress.done : null;
+    const total = Number.isFinite(e?.progress?.total) ? e.progress.total : null;
+    recordAgentIncomplete(LOCAL, { code, reason: e?.message || String(e), durationMs, partial: partialAlive, done, total });
+    lastRun = { at: Date.now(), error: e.message, manual, incomplete: true, code, durationMs, partialAlive, ...(done != null ? { done, total } : {}) };
+    recordScanLog({ event: 'fail', trigger, ranges: ranges.length, durationMs, scanned: done, alive: partialAlive,
+      message: `${e?.message || String(e)} — 스캔 미완료로 기록${done != null && total != null ? `(${done}/${total} 스캔)` : ''} · 시한 전에 찾은 생존 IP ${partialAlive}개는 마지막 확인 시각만 갱신 · 해제(down) 판정은 완료된 스캔이 올 때까지 보류` });
     return { ok: false, reason: e.message };
   } finally { running = false; progress = null; }
 }
@@ -92,7 +107,8 @@ export function scanStatus() {
   const vcN = enabledVcRanges().length;
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
   // 폴러는 __local__ enabled이거나 enabled인 vCenter 대역이 있으면 실제로 돈다 → enabled를 그 기준으로 노출.
-  return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
+  // v2.733: releaseHold — 해제 판정 보류 현황(완료된 스캔이 기준 안에 없는 에이전트의 IP 를 down 으로 바꾸지 않은 것).
+  return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null, releaseHold: releaseHoldStatus() };
 }
 
 export function rescheduleScanPoller() {

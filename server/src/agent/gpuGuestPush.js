@@ -47,7 +47,8 @@ export function gpuGuestPushWithhold(lastRun, since, now, maxMs = GPU_GUEST_PUSH
   const s = since || now;
   const out = { withhold: now - s <= maxMs, since: s };
   // v2.607(EDGE2607-03): 개수(unread)와 **어느 vCenter 인지**(unreadIds, 앞 10개)를 함께 돌려준다.
-  const unreadIds = list.slice(0, 10).map((x) => String(x ?? '').slice(0, 128));
+  // v2.733: 원소는 { vcId, reason } 객체다(gpu/poller.js) — String(객체) 는 '[object Object]' 라 보류 문구가 어느 vCenter 인지 말하지 못했다.
+  const unreadIds = list.slice(0, 10).map((x) => String((x && typeof x === 'object' ? x.vcId : x) ?? '').slice(0, 128));
   return lastRun ? { ...out, reason: 'unread-vcenters', unread, unreadIds } : out;
 }
 /** 테스트 전용 — 게스트 폴러 상태 주입/복원. */

@@ -108,7 +108,9 @@ export const ENDPOINTS = Object.freeze([
     summary: '스토리지 증가량 — 기준선이 없으면 null(추정으로 메우지 않는다)',
     // v2.604: resolutionBytes — 반올림 표기 용량 장비의 해상도(정확하면 null).
     // v2.682(R3A-07): excludedFromTotals — 'retired'|'stale'|null(meta 합계 기준에서 빠졌는가).
-    fields: ['deviceId', 'name', 'usedBytes', 'totalBytes', 'observedDays', 'growth', 'unknownUsed', 'resolutionBytes', 'excludedFromTotals'],
+    // v2.733(C2-03): growthSpanDays — 기간별 실제 비교 구간(일). meta.maxSpanDays 를 넘는 칸은 요청 기간보다 긴 증가라
+    //   포탈 합계에서 뺀다(그 수는 meta.inexactCount) — 행을 더하는 상대 포탈이 같은 기준을 쓸 수 있게.
+    fields: ['deviceId', 'name', 'usedBytes', 'totalBytes', 'observedDays', 'growth', 'growthSpanDays', 'unknownUsed', 'resolutionBytes', 'excludedFromTotals'],
   },
   {
     path: '/faults/alarms', group: 'faults', method: 'GET', scoped: true,
