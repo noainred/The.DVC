@@ -10,7 +10,7 @@ import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import crypto from 'node:crypto';
 import { snapMemo, sendCached } from '../../util/snapCache.js';   // v2.731(A6-05): 목록 응답 기억 — 내용 지문 키
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus, maskedNameLabel, scrubStringsDeep } from '../../auth/addressMask.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus, maskedNameLabel, scrubStringsDeep, snapAddressList } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -254,16 +254,23 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
   // v2.605 AUTHZ2605-04: sections(섹션별 오류 문구)는 목록과 같은 maskSnapAddress 를 거친다 — 스냅샷에 host 가
   //   없는 엣지 사본도 등록부 주소로 가린다.
   const regHost = listDevices().find((d) => d.id === req.params.id)?.host || '';
-  const shownSections = isAdminReq(req) ? (snap.sections || {}) : (maskSnapAddress({ ...snap, sections: snap.sections || {} }, regHost).sections || {});
+  const admin = isAdminReq(req);
+  // v2.732(감사 B3-02): extra 도 목록과 같은 maskSnapAddress 를 거친다 — 예전에는 `extra: snap.extra` 원본이라 `addressHidden:true` 를
+  //   말하면서 SSH 계정명(extra.credFp.user)과 패브릭 구성원 관리 IP(extra.fabricMembers.switches[].enetIp·fcIp)를 줬다(목록은 비운다).
+  //   RASLog 본문·점검 근거 같은 자유 문자열은 이 스냅샷이 아는 주소(등록부 host·스냅샷 host·구성원 IP)로 한 번 더 훑는다.
+  //   ⚠ 정직 기록: 처음 보는 IP(예: RASLog 의 클라이언트 주소)는 알려진 주소가 아니라 가리지 못한다.
+  const masked = admin ? null : maskSnapAddress({ ...snap, sections: snap.sections || {}, extra: snap.extra || {} }, regHost);
+  const shownSections = admin ? (snap.sections || {}) : (masked.sections || {});
+  const shownExtra = admin ? (snap.extra || {}) : scrubStringsDeep(masked.extra || {}, snapAddressList(snap, regHost));
   res.json({
-    ok: true, deviceId: snap.deviceId, name: (!isAdminReq(req) && snap.host && snap.name === snap.host) ? maskedNameLabel(snap) : snap.name, model: snap.model, fabricOs: snap.fabricOs,
+    ok: true, deviceId: snap.deviceId, name: admin ? snap.name : masked.name, model: snap.model, fabricOs: snap.fabricOs,
     collectedAt: snap.collectedAt, source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
     // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 관리 주소를 비운다.
-    host: isAdminReq(req) ? (snap.host || '') : '', ...(isAdminReq(req) ? {} : { addressHidden: true }), agent: snap.agent || '',
+    host: admin ? (snap.host || '') : '', ...(admin ? {} : { addressHidden: true }), agent: snap.agent || '',
     serial: snap.serial || '', wwn: snap.wwn || '', domainId: snap.domainId ?? null,
     switchState: snap.switchState || '', health: snap.health || null,
     fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
-    ports: snap.ports || { list: [] }, sections: shownSections, extra: snap.extra || {},
+    ports: snap.ports || { list: [] }, sections: shownSections, extra: shownExtra,
   });
 });
 

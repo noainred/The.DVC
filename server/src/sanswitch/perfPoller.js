@@ -73,6 +73,10 @@ async function collectOne(dev) {
   const r = (isMockMode() && isSanDemoId(full.id || dev.id))
     ? await (async () => {
       const { store } = await import('../store.js');
+      // v2.732(감사 B6-06): 장비마다 매크로태스크 양보 — 데모 분기에는 I/O 가 없어(perfDb 핸들도 이미 열려 있다) 풀 전체가
+      //   마이크로태스크로만 이어졌고, 작업 로그(activityLog)의 묶음 해제도 그 체인 안에서 돌아 260대가 한 덩어리 436ms 였다.
+      //   기본 수집 폴러(poller.js — v2.731 A6-07)와 같은 방식이다. live 경로는 SSH I/O 가 이미 양보한다.
+      await new Promise((r) => { setImmediate(r); });
       const ports = sanDemoPortBps(sanDemoLayoutFor(full, store.get()), Date.now());
       const total = Object.values(ports).reduce((a, b) => a + b, 0);
       return { parsed: { ports, total, samples: 1 } };

@@ -10,7 +10,7 @@
  */
 import { config, clampIntervalMs } from '../config.js';
 import { devicesForThisNode, getDeviceWithSecret, registryLoadError, listDevices, seedDemoDevices } from './registry.js';
-import { putSnapshot, getSnapshot } from './store.js';
+import { putSnapshot, getSnapshot, flushSnapshotsNow, snapshotStoreStatus } from './store.js';
 import { recordActivity } from './activityLog.js';
 import { emptySnapshot } from './types.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -186,7 +186,11 @@ export async function pollSanSwitchOnce({ manual = false, demoOnly = false } = {
     });
     _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
     return { ok: true, ..._last };
-  } finally { _busy = false; }
+  } finally {
+    // v2.732(감사 B6-02): 장비마다 파일 전체를 다시 쓰지 않고 **주기 끝에 한 번** 쓴다(store.js 머리말). 실패는 store 가 콘솔·상태에 남긴다.
+    flushSnapshotsNow();
+    _busy = false;
+  }
 }
 
 /**
@@ -202,7 +206,7 @@ export async function collectDeviceNow(id, { demoOnly = false } = {}) {
   // 폴러와 가드를 공유한다(CLAUDE.md '수동 실행 API 도 같은 가드') — 같은 스위치에 SSH 세션이 겹치면
   // in-flight 상태가 먼저 끝난 쪽에 지워지고 처리량 델타 간격이 흐트러진다.
   if (_inFlight.has(dev.id)) return false;
-  await collectOne(dev);
+  try { await collectOne(dev); } finally { flushSnapshotsNow(); }   // v2.732(B6-02): 단건은 끝나면 바로 쓴다(주기 끝 flush 를 기다리지 않게)
   return true;
 }
 
@@ -302,5 +306,5 @@ export function startSanSwitchPoller() {
 }
 
 export function sanSwitchPollerStatus() {
-  return { ..._last, intervalMs: pollMs(), busy: _busy, inFlight: [..._inFlight.values()], concurrency: CONCURRENCY, ...(isMockMode() ? { demo: true } : {}) };
+  return { ..._last, intervalMs: pollMs(), busy: _busy, inFlight: [..._inFlight.values()], concurrency: CONCURRENCY, snapshotSave: snapshotStoreStatus(), ...(isMockMode() ? { demo: true } : {}) };
 }

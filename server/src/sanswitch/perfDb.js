@@ -24,7 +24,7 @@ import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { isDemoPerfQuery, demoStorageMulti, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
+import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
 import { createYielder } from '../util/timeSlice.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 import { G15, G1H, alignDown, alignUp, snapBucketMs, rollupGranularity, planSegments, rollupChunkBuckets } from './perfRollup.js';   // v2.728 SAN 2차
 const lockRetry = createLockRetry();
@@ -668,11 +668,13 @@ export function rangeOf({ hours = 24, from = null, to = null, points = 120 } = {
  * @returns { buckets:[ts...], series:[{port, name, speed, avg[], max}], bucketMs }
  */
 export async function portSeries(deviceId, { hours = 24, ports = null, points = 120, from = null, to = null, signal = null } = {}) {
-  if (isDemoPerfQuery(isMockMode(), [deviceId])) {
-    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
-    return demoPortSeries(String(deviceId), await demoMeta([deviceId]), { since, until, bucketMs, ports });
-  }
-  return heavyQuery(qkey('port', { deviceId: String(deviceId), hours, ports, points, from, to }), async (ctx) => {
+  // v2.732(감사 B6-07): 데모 수식도 같은 기억·합류·줄을 탄다(키는 'demo-' 접두 — mock↔live 전환 뒤 실제 조회 결과와 섞이지 않게).
+  const demo = isDemoPerfQuery(isMockMode(), [deviceId]);
+  return heavyQuery(qkey(demo ? 'demo-port' : 'port', { deviceId: String(deviceId), hours, ports, points, from, to }), async (ctx) => {
+    if (demo) {
+      const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+      return demoPortSeries(String(deviceId), await demoMeta([deviceId]), { since, until, bucketMs, ports });
+    }
     const db = await open();
     if (!db) return { buckets: [], series: [], bucketMs: 0, unavailable: true };
     const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
@@ -710,11 +712,13 @@ function shape(db, deviceId, rows, bucketMs, since) {
  */
 export async function storageSeries(deviceId, opt = {}) {
   const { hours = 24, points = 120, from = null, to = null, signal = null } = opt;
-  if (isDemoPerfQuery(isMockMode(), [deviceId])) {
-    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
-    return demoStorageOne(await demoMeta([deviceId]), { since, until, bucketMs, storageKey });
-  }
-  return heavyQuery(qkey('storage', { deviceId: String(deviceId), hours, points, from, to }), (ctx) => storageSeriesInner(deviceId, { hours, points, from, to, ctx }), { lane: 'single', signal });
+  const demo = isDemoPerfQuery(isMockMode(), [deviceId]);   // v2.732(B6-07): 데모도 기억·합류(키 이름을 나눈다)
+  return heavyQuery(qkey(demo ? 'demo-storage' : 'storage', { deviceId: String(deviceId), hours, points, from, to }),
+    (ctx) => (demo ? demoStorageOneFor(deviceId, { hours, points, from, to }) : storageSeriesInner(deviceId, { hours, points, from, to, ctx })), { lane: 'single', signal });
+}
+async function demoStorageOneFor(deviceId, { hours, points, from, to }) {
+  const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+  return demoStorageOne(await demoMeta([deviceId]), { since, until, bucketMs, storageKey });
 }
 async function storageSeriesInner(deviceId, { hours = 24, points = 120, from = null, to = null, ctx = null } = {}) {
   const db = await open();
@@ -786,11 +790,19 @@ export function storageKey(name) {
  */
 export async function storageSeriesMulti(deviceIds = [], opt = {}) {
   const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, signal = null } = opt;
+  const keyOpts = { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null };
   if (isDemoPerfQuery(isMockMode(), deviceIds)) {
-    const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
-    return demoStorageMulti(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs() });
+    // v2.732(감사 B6-07): 데모 수식은 기억·합류 없이 60초 폴링마다 다시 계산했다(데모 260대 1회 약 430ms — 결과는 같은 조건이면 같다).
+    //   live 와 같은 heavyQuery(기억 TTL = 수집 주기·같은 줄·감시)를 타고, 계산은 시간 기준으로 양보하며 취소 확인을 한다.
+    //   키는 'demo-multi' — mock→live 전환 직후 기억한 데모 결과가 실제 조회 자리에 나가지 않게 이름을 나눈다.
+    return heavyQuery(qkey('demo-multi', keyOpts), async (ctx) => {
+      const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+      const yielder = createYielder(15);
+      return demoStorageMultiAsync(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs() },
+        async () => { checkCancel(ctx); await yielder(); });
+    }, { lane: 'multi', signal });
   }
-  const key = qkey('multi', { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null });
+  const key = qkey('multi', keyOpts);
   return heavyQuery(key, (ctx) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, ctx }), { lane: 'multi', signal });
 }
 async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, ctx = null } = {}) {
