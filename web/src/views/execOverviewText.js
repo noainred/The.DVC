@@ -126,11 +126,14 @@ export function siteRowsExec(sites) {
     const cpu = ok ? n(m.cpuUsagePct) : null; const mem = ok ? n(m.memUsagePct) : null; const sto = ok ? n(m.storageUsagePct) : null;
     const vals = [cpu, mem, sto].filter((v) => v != null);
     const worst = vals.length ? Math.max(...vals) : null;
-    const dot = s.status === 'maintenance' ? 'info' : !ok ? 'none' : usageTone(worst) === 'none' ? 'ok' : usageTone(worst);
+    // v2.732(점검 2회차 B2-01 후속, 그룹 i3): 낡은 값(위임 엣지 push 정지 · 연결 실패 이월 — corpSiteStatus.stale)은 정상 초록으로 칠하지 않는다.
+    //   지금 값이 아니므로 최소 '주의'(호박색)이고, 마지막 값이 이미 위험이면 위험 그대로다(판정은 corpSiteStatus 하나 — 복제 금지).
+    const tone = usageTone(worst);
+    const dot = s.status === 'maintenance' ? 'info' : !ok ? 'none' : st.stale ? (tone === 'bad' ? 'bad' : 'warn') : tone === 'none' ? 'ok' : tone;
     return {
       id: s.id, city: s.location?.city || s.name || s.id, name: s.name || s.id,
       sub: [s.location?.country, s.id, s.status === 'maintenance' ? '점검 중' : ''].filter(Boolean).join(' · '),
-      mark: st.mark, markTitle: st.title, countable: ok,
+      mark: st.mark, markTitle: st.title, countable: ok, stale: st.stale === true,
       vms: ok ? (Number(m.vms) || 0) : null, cpu, mem, sto, worst, dot,
     };
   });

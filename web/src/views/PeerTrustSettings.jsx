@@ -28,6 +28,34 @@ import {
  */
 const BASE = '/admin/security/peer-trust';
 
+/**
+ * v2.732(점검 2회차 B4-03 후속, 그룹 i3): 장비 신뢰 파일을 못 읽었을 때의 배너 문구(순수 — 렌더 테스트가 고정한다).
+ * 서버(security/peerTrust.js failClosed)의 loadError 는 `{ code:'corrupt'|'unreadable', detail?, preserved?, writeBlocked? }` 다.
+ * 예전 문구는 언제나 '손상 원본은 보존했습니다' 였다 — 그런데 ① 'unreadable'(EACCES 등)은 손상이 아니라 권한·소유자 문제일 수 있고
+ * ② 원본을 옮기지 못하면(writeBlocked) 보존한 것이 아니라 **저장을 멈춘 것**이다(관리 동작이 409 로 거절된다). 둘을 나눠 말하고,
+ * 보존본 이름을 받았을 때만 '보존했다' 고 말한다(받지 못했으면 단정하지 않는다). 앞부분 '…읽지 못했습니다(code · detail)' 는 그대로다.
+ */
+export function peerLoadErrorText(le) {
+  if (!le || typeof le !== 'object') return '';
+  const code = String(le.code || '');
+  const detail = le.detail ? ` · ${le.detail}` : '';
+  const head = `장비 신뢰 파일을 읽지 못했습니다(${code || '사유 미상'}${detail})`;
+  const why = code === 'corrupt' ? ' — 내용이 손상돼 해석하지 못했습니다.'
+    : code === 'unreadable' ? ' — 파일을 열지 못했습니다(**손상이 아니라** 파일 권한·소유자 문제일 수 있습니다).'
+      : '.';
+  const closed = ' 승인 목록이 없으므로 SSH·TLS 모두 **승인된 지문만 허용**으로 닫았습니다.';
+  const preserved = typeof le.preserved === 'string' && le.preserved.trim() ? le.preserved.trim() : '';
+  let tail;
+  if (le.writeBlocked === true) {
+    tail = ' **원본을 옮기지 못해 저장을 멈췄습니다** — 원본을 덮지 않으려고 승인·거부·삭제·정책 변경을 거절합니다. 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요.';
+  } else if (preserved) {
+    tail = ` ${code === 'corrupt' ? '손상 원본' : '읽지 못한 원본'}은 ‘${preserved}’ 로 보존했습니다(같은 설정 폴더).`;
+  } else {
+    tail = ' 원본 보존본의 이름을 받지 못했습니다 — 설정 폴더의 ‘peer-trust.json.corrupt.*’ 파일을 확인하세요.';
+  }
+  return `${head}${why}${closed}${tail}`;
+}
+
 function Badge({ tone, children, title }) {
   return <span className={`badge ${tone || 'gray'}`} title={title} style={{ whiteSpace: 'nowrap' }}>{children}</span>;
 }
@@ -187,7 +215,7 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
 
       {st.loadError && (
         <div className="banner bad" style={{ whiteSpace: 'normal' }}>
-          장비 신뢰 파일을 읽지 못했습니다({st.loadError.code}{st.loadError.detail ? ` · ${st.loadError.detail}` : ''}) — 승인 목록이 없으므로 SSH·TLS 모두 승인된 지문만 허용으로 닫았습니다. 손상 원본은 보존했습니다.
+          <BoldText text={peerLoadErrorText(st.loadError)} />
         </div>
       )}
 

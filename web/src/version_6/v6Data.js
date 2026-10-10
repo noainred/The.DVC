@@ -106,8 +106,10 @@ export function siteCards(sites) {
       hosts: ok ? r.hosts : null,
       vms: ok ? r.vms : null,
       vmsOn: ok ? r.vmsOn : null,
-      countable: ok, mark: st.mark, markTitle: st.title,
-      tone: off ? 'off' : ok ? pctTone(r.worst) : 'none',
+      countable: ok, mark: st.mark, markTitle: st.title, stale: st.stale === true,
+      // v2.732(점검 2회차 B2-01 후속, 그룹 i3): 낡은 값(corpSiteStatus.stale — 위임 엣지 push 정지 · 연결 실패 이월)은 정상(초록)이 아니다 —
+      //   지금 값이 아니므로 최소 '주의', 마지막 값이 이미 위험이면 위험 그대로(판정은 corpSiteStatus 하나 — 복제 금지).
+      tone: off ? 'off' : !ok ? 'none' : st.stale ? (pctTone(r.worst) === 'crit' ? 'crit' : 'warn') : pctTone(r.worst),
       alarms: !ok || r.alarmsUnknown ? null : (r.alarmsCritical || 0) + (r.alarmsWarning || 0),
       bars,
     };

@@ -7,6 +7,8 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import { licenseScopeNote, licenseDupNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
 import { HorizonServerManager } from '../HorizonAdmin.jsx'; // v2.685: Horizon 연결 서버 등록(설정 메뉴와 공용)
+import BoldText from '../../components/boldText.jsx';
+import { numOrNull } from '../../numOrNull.js';
 
 
 export function Solutions() {
@@ -113,12 +115,31 @@ export function Licenses({ scope }) {
 function isSoon(d) { if (!d) return false; const t = Date.parse(d); return t && t - Date.now() < 90 * 86400000; }
 
 /**
+ * v2.732(점검 2회차 B3-01 후속, 그룹 i3): 데모 계정이 사람이 등록한 Horizon 커넥션 서버에 접속하지 않은 사실(`demoSkipped`)은
+ * **수집 실패가 아니다** — 서버(routes/api/toolsInfo.js)는 호환을 위해 그 안내를 collectionErrors 에도 한 줄 넣는데, 화면이 그것을
+ * '⚠ 일부 수집 실패:' 줄에 섞으면 머리말과 내용이 어긋난다(사용자는 멀쩡한 커넥션 서버를 의심한다). 그 줄을 빼고 별도 안내로 말한다.
+ * 그 줄은 서버 문구의 머리(DEMO_SKIP_PREFIX)로 알아본다 — 웹 테스트가 서버 소스와 대조한다. demoSkipped 가 없는(구버전 서버·데모 아님)
+ * 응답은 예전 그대로다. 반환 `{ failures: string[], demoNote: string }`.
+ */
+export const DEMO_SKIP_PREFIX = 'Horizon: 데모 계정은';
+export function licenseNotices(data) {
+  const errs = Array.isArray(data?.collectionErrors) ? data.collectionErrors.map((e) => String(e ?? '')) : [];
+  const skipped = numOrNull(data?.demoSkipped);
+  const failures = skipped == null ? errs : errs.filter((e) => !e.startsWith(DEMO_SKIP_PREFIX));
+  const demoNote = skipped != null && skipped > 0
+    ? `**데모 계정**이라 사람이 등록한 Horizon 커넥션 서버 ${skipped}대에는 접속하지 않았습니다(실제 로그인 방지) — 그 서버의 라이선스는 이 목록에 없습니다. 수집 실패가 아닙니다.`
+    : '';
+  return { failures, demoNote };
+}
+
+/**
  * 라이선스 만료일 확인 — vCenter LicenseManager(ESXi·vCenter·vSAN·VCF/VVF 등 등록 전 제품)
  * + NSX Manager + Horizon Connection Server(등록 시 REST 직수집)의 유효/만료 날짜 통합.
  * 만료(빨강)/90일 임박(노랑)/정상/영구 분류 + 제품군 필터 + CSV. 관리자는 Horizon 서버 등록 가능.
  */
-export function LicenseExpiry({ scope, isAdmin }) {
-  const [data, setData] = useState(null);
+export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
+  // initialData 는 렌더 스모크 테스트용(서버 없이 계약 모양 응답으로 그린다) — 화면은 넘기지 않는다(마운트 때 읽는다).
+  const [data, setData] = useState(initialData);
   const [err, setErr] = useState(null);
   const [statusSel, setStatusSel] = useState('');
   const [familySel, setFamilySel] = useState('');
@@ -143,6 +164,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const statusLabel = Object.fromEntries(STATUS.map(([k, l]) => [k, l]));
   const statusColor = Object.fromEntries(STATUS.map(([k, , c]) => [k, c]));
   const rows = (data.items || []).filter((i) => (!statusSel || i.status === statusSel) && (!familySel || i.family === familySel));
+  const notices = licenseNotices(data);
 
   const dday = (i) => (i.daysLeft == null ? '' : i.daysLeft < 0 ? `D+${-i.daysLeft}` : `D-${i.daysLeft}`);
   const cols = [
@@ -176,10 +198,14 @@ export function LicenseExpiry({ scope, isAdmin }) {
         <div className="muted" style={{ marginBottom: 10, fontSize: 12 }}>ⓘ {licenseScopeNote(data)}</div>
       )}
 
-      {(data.collectionErrors || []).length > 0 && (
+      {notices.failures.length > 0 && (
         <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'rgba(251,191,36,.1)', color: 'var(--amber)' }}>
-          ⚠ 일부 수집 실패: {data.collectionErrors.join(' · ')}
+          ⚠ 일부 수집 실패: {notices.failures.join(' · ')}
         </div>
+      )}
+      {/* v2.732(그룹 i3): 데모 계정의 '접속 안 함' 은 실패가 아니다 — 별도 안내(회색) */}
+      {notices.demoNote && (
+        <div className="muted" style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal' }}>ⓘ <BoldText text={notices.demoNote} /></div>
       )}
 
       <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>

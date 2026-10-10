@@ -44,6 +44,26 @@ export function peerTarget(body = {}) {
 }
 
 const actor = (req) => req.user?.username || 'unknown';
+
+/**
+ * v2.732(점검 2회차 B4-03 후속, 그룹 i3): peer-trust.json 을 읽지 못했고 원본도 옮기지 못하면 security/peerTrust.js 가 관리자 동작을
+ * **메모리를 바꾸기 전에** status 409 · code 'peer-trust-unwritable' 로 던진다. 라우트가 잡지 않으면 전역 오류 처리기(index.js)가 그것을
+ * 사유 없는 `{ok:false, error:'bad request'}` 로 바꿔 화면이 '처리하지 못했습니다' 만 말했다(권한 확인·재시작이라는 조치를 잃는다).
+ * 그 오류만 409 + reason + code 로 답하고, 다른 오류는 예전처럼 다시 던진다(전역 처리기가 받는다). 처리했으면 true.
+ */
+const UNWRITABLE = 'peer-trust-unwritable';
+function sendUnwritable(res, e) {
+  if (e?.code !== UNWRITABLE) return false;
+  res.status(409).json({ ok: false, reason: String(e.message || '장비 신뢰 파일에 쓸 수 없어 저장하지 않습니다.'), code: UNWRITABLE });
+  return true;
+}
+/** 관리 동작 하나를 실행한다 — 쓸 수 없음은 409 로 답하고 undefined 를, 그 밖은 결과를 돌려준다(다른 오류는 그대로 던진다). */
+function runOrUnwritable(res, fn) {
+  try { return fn(); } catch (e) {
+    if (sendUnwritable(res, e)) return undefined;
+    throw e;
+  }
+}
 const audit = (req, action, target, detail) => {
   try { logAudit({ user: actor(req), action, target, detail, ip: clientIp(req) }); } catch { /* 감사 실패가 결과를 바꾸지 않는다 */ }
 };
@@ -73,7 +93,8 @@ export function registerPeerTrust(adminRouter) {
     }
     if (b.replace != null && typeof b.replace !== 'boolean') return res.status(400).json({ ok: false, reason: 'replace 는 true/false 입니다.', field: 'replace' });
     const replace = b.replace === true;
-    const r = approvePeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req), note: typeof b.note === 'string' ? b.note : '', replace });
+    const r = runOrUnwritable(res, () => approvePeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req), note: typeof b.note === 'string' ? b.note : '', replace }));
+    if (r === undefined) return undefined;
     if (!r.ok) {
       const reason = r.error === 'nothing-to-approve' ? '승인할 지문이 없습니다(관찰·대기 지문이 없으면 지문을 직접 입력하세요).'
         : r.error === 'trusted-full' ? `이 장비에는 승인 지문이 이미 ${r.max}개입니다(상한) — 쓰지 않는 지문을 거부(회수)한 뒤 다시 승인하거나 교체 승인을 쓰세요.`
@@ -93,7 +114,8 @@ export function registerPeerTrust(adminRouter) {
     const t = peerTarget(b);
     if (t.error) return res.status(400).json({ ok: false, reason: t.error, field: t.field });
     if (b.fp != null && b.fp !== '' && !normalizeFingerprint(t.kind, b.fp)) return res.status(400).json({ ok: false, reason: '지문 형식이 올바르지 않습니다.', field: 'fp' });
-    const r = rejectPeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req) });
+    const r = runOrUnwritable(res, () => rejectPeer(t.kind, t.host, t.port, b.fp || null, { by: actor(req) }));
+    if (r === undefined) return undefined;
     if (!r.ok) return res.status(400).json({ ok: false, reason: '거부할 지문이 없습니다.', code: r.error });
     audit(req, '장비 신뢰 지문 거부', `${t.kind} ${t.host}:${t.port}`, r.revoked ? `${r.fp} (신뢰 목록에서 회수 — 남은 신뢰 지문 ${r.trustedCount}개)` : r.fp);
     res.json({ ok: true, ...r, status: peerTrustStatus() });
@@ -102,7 +124,8 @@ export function registerPeerTrust(adminRouter) {
   adminRouter.post('/security/peer-trust/remove', adminOnly, fleetOnly, (req, res) => {
     const t = peerTarget(req.body || {});
     if (t.error) return res.status(400).json({ ok: false, reason: t.error, field: t.field });
-    const r = removePeer(t.kind, t.host, t.port);
+    const r = runOrUnwritable(res, () => removePeer(t.kind, t.host, t.port));
+    if (r === undefined) return undefined;
     if (!r.ok) return res.status(404).json({ ok: false, reason: '그 장비 항목이 없습니다.' });
     audit(req, '장비 신뢰 항목 삭제', `${t.kind} ${t.host}:${t.port}`, '다음 연결은 처음 보는 장비로 판정');
     res.json({ ok: true, ...r, status: peerTrustStatus() });
@@ -115,7 +138,8 @@ export function registerPeerTrust(adminRouter) {
     if (b.confirmVerified !== true) {
       return res.status(400).json({ ok: false, reason: '관찰 지문을 확인했다는 확인(confirmVerified)이 필요합니다.', field: 'confirmVerified' });
     }
-    const r = approveAllObserved(kind, { by: actor(req) });
+    const r = runOrUnwritable(res, () => approveAllObserved(kind, { by: actor(req) }));
+    if (r === undefined) return undefined;
     audit(req, '장비 신뢰 관찰 지문 일괄 승인', kind, `${r.approved}건`);
     res.json({ ok: true, ...r, status: peerTrustStatus() });
   });
@@ -124,7 +148,8 @@ export function registerPeerTrust(adminRouter) {
     const b = req.body || {};
     const kind = String(b.kind ?? '');
     const mode = String(b.mode ?? '');
-    const r = setPeerPolicy(kind, mode, { by: actor(req) });
+    const r = runOrUnwritable(res, () => setPeerPolicy(kind, mode, { by: actor(req) }));
+    if (r === undefined) return undefined;
     if (!r.ok) {
       const reason = r.error === 'env-forced' ? `환경변수 ${r.envKey} 가 정책을 정하고 있어 화면에서 바꿀 수 없습니다.`
         : r.error === 'unknown-kind' ? '종류(kind)가 올바르지 않습니다.' : `정책은 ${PEER_MODES.join('·')} 중 하나여야 합니다.`;

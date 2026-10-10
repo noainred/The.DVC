@@ -3,6 +3,7 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import { alertsLockReason, channelUrlField, withoutHiddenUrls } from './alertChannelUrlText.js'; // v2.732(그룹 i3): 범위 계정 URL 가림·저장 잠금
 
 const RULE_LABEL = {
   criticalAlarms: '위험(critical) 알람 발생',
@@ -13,9 +14,9 @@ const RULE_LABEL = {
   vcpuPerCore: '클러스터 vCPU:코어 ≥',
 };
 
-/** 설정 → 알림: 임계치/조건 규칙 + Slack/Webhook 통지 채널. */
-export default function Alerts2() {
-  const [d, setD] = useState(null);
+/** 설정 → 알림: 임계치/조건 규칙 + Slack/Webhook 통지 채널. initialData 는 렌더 스모크 테스트용(화면은 넘기지 않는다 — 마운트 때 읽는다). */
+export default function Alerts2({ initialData = null } = {}) {
+  const [d, setD] = useState(initialData);
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const load = () => fetchJson('/admin/alerts').then((r) => { setD(r); setError(null); }).catch((e) => setError(e.message));
@@ -35,21 +36,27 @@ export default function Alerts2() {
     cooldownMin: blankOr(cfg.cooldownMin),
     intervalSec: blankOr(cfg.intervalSec),
   });
-  const save = async () => { const r = await putJson('/admin/alerts', toBody(c)).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.error || '저장 실패'); };
-  const test = async () => { const r = await postJson('/admin/alerts/test', {}).catch((e) => ({ ok: false, results: [e.message] })); flash(r.ok, `테스트 발송: ${(r.results || []).join(', ') || '활성 채널 없음'}`); };
+  // v2.732(그룹 i3): 범위 계정은 웹훅 URL 이 가려져 오고(B3-03) 저장·테스트 발송이 403 이다 — 버튼을 잠그고 사유를 미리 말한다.
+  //   저장 본문에서는 가린 채널의 url 을 뺀다(빈 값을 보내면 서버가 주소를 지운다 — 심층 방어).
+  const lock = alertsLockReason(c, d);
+  const save = async () => { if (lock) return; const r = await putJson('/admin/alerts', toBody(withoutHiddenUrls(c))).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.reason || r.error || '저장 실패'); };
+  const test = async () => { if (lock) return; const r = await postJson('/admin/alerts/test', {}).catch((e) => ({ ok: false, results: [e.message] })); flash(r.ok, `테스트 발송: ${(r.results || []).join(', ') || '활성 채널 없음'}`); };
+  const slackUrl = channelUrlField(c.channels.slack, 'https://hooks.slack.com/services/...');
+  const hookUrl = channelUrlField(c.channels.webhook, 'https://your-endpoint/alerts');
 
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0' }}>알림 / 임계치</div>
       {msg && <div style={{ marginBottom: 10, padding: '9px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.t}</div>}
+      {lock && <div className="banner" data-alert-lock="" style={{ marginBottom: 10, whiteSpace: 'normal' }}>{lock} 이 계정에는 웹훅 주소를 보이지 않습니다 — ‘설정됨(가림)’ 은 주소가 저장돼 있다는 뜻입니다.</div>}
 
       <div className="card" style={{ marginBottom: 12 }}>
         <b style={{ fontSize: 14 }}>통지 채널</b>
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={!!c.channels.slack.enabled} onChange={(e) => setCh('slack', 'enabled', e.target.checked)} /> Slack 사용</label>
-          <label style={{ gridColumn: '1 / -1' }}>Slack Incoming Webhook URL<input className="input" value={c.channels.slack.url} onChange={(e) => setCh('slack', 'url', e.target.value)} placeholder="https://hooks.slack.com/services/..." /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Slack Incoming Webhook URL<input className="input" value={slackUrl.value} disabled={slackUrl.disabled} title={slackUrl.title} onChange={(e) => setCh('slack', 'url', e.target.value)} placeholder={slackUrl.placeholder} /></label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={!!c.channels.webhook.enabled} onChange={(e) => setCh('webhook', 'enabled', e.target.checked)} /> Webhook 사용</label>
-          <label style={{ gridColumn: '1 / -1' }}>Webhook URL (JSON POST)<input className="input" value={c.channels.webhook.url} onChange={(e) => setCh('webhook', 'url', e.target.value)} placeholder="https://your-endpoint/alerts" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Webhook URL (JSON POST)<input className="input" value={hookUrl.value} disabled={hookUrl.disabled} title={hookUrl.title} onChange={(e) => setCh('webhook', 'url', e.target.value)} placeholder={hookUrl.placeholder} /></label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={!!c.channels.email?.enabled} onChange={(e) => setCh('email', 'enabled', e.target.checked)} /> 메일 사용</label>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.7 }}>
@@ -57,8 +64,8 @@ export default function Alerts2() {
           그 화면에서 <b>메일 발송 사용</b>과 <b>'알림' 종류</b>가 함께 켜져 있어야 실제로 나갑니다.
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
-          <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={test}>테스트 발송</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+          <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={test} disabled={!!lock} title={lock || undefined}>테스트 발송</button>
         </div>
       </div>
 
@@ -79,7 +86,7 @@ export default function Alerts2() {
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'flex-end' }}>
           <label style={{ fontSize: 12 }}>재통지 쿨다운(분)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.cooldownMin} onChange={(e) => setD({ ...d, config: { ...c, cooldownMin: e.target.value } })} /></label>
           <label style={{ fontSize: 12 }}>평가 주기(초)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.intervalSec} onChange={(e) => setD({ ...d, config: { ...c, intervalSec: e.target.value } })} /></label>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
           <span className="muted" style={{ fontSize: 11 }}>저장하면 바로 적용됩니다(재시작 불필요). 빈 칸은 이전 값을 유지합니다.</span>
         </div>
       </div>
