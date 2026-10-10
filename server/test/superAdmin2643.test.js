@@ -34,8 +34,9 @@ function run(script, { matrix = null, users = null } = {}) {
   return JSON.parse(line.slice(2));
 }
 
-/** CSV·파일 가져오기/내보내기 경로 판정(테스트 소유 — 새 경로가 생기면 게이트가 붙었는지 여기서 걸린다). */
-const CSV_RE = /(\.csv|\.txt|\.xlsx|csv-schema|\/import|export|sample|\/tools\/cvp\/bulk\/)/i;
+/** CSV·파일 가져오기/내보내기 경로 판정(테스트 소유 — 새 경로가 생기면 게이트가 붙었는지 여기서 걸린다).
+ *  v2.732(점검 2회차 B3-05): 파일 내보내기는 형식과 무관하다 — 끝이 .json 인 다운로드 경로(gpu.json)도 포함한다. */
+const CSV_RE = /(\.csv|\.txt|\.xlsx|\.json$|csv-schema|\/import|export|sample|\/tools\/cvp\/bulk\/)/i;
 /** 이름은 걸리지만 CSV 파일 입출력이 아닌 것 — 사유와 함께. */
 const NOT_CSV = {
   '/tools/link-check/samples': '통신 점검 원시 표본 조회(화면 표) — 파일 입출력이 아니다',
@@ -74,6 +75,7 @@ test('★ CSV·파일 가져오기/내보내기 라우트는 전부 data.csv 권
     // 대량 등록 **실행**(파일이 아닌 화면 선택·배포)은 대상이 아니다.
     && !/agent-deploy\/bulk|\/tools\/ipam\/bulk$|\/idrac\/bulk-add|assign-bulk|targets\/bulk$|edge-users-bulk|bulk-auto-register/.test(r.path));
   assert.ok(csv.length >= 80, `대상 경로가 너무 적습니다(${csv.length}) — 판정식이 깨졌나?`);
+  assert.ok(csv.some((r) => r.path === '/api/tools/gpu.json'), 'JSON 파일 내보내기(gpu.json)도 판정 대상이어야 한다(v2.732 B3-05)');
   const missing = csv.filter((r) => !r.gates.some((g) => g.kind === 'perm' && g.arg.includes('data.csv')));
   assert.deepEqual(missing.map((r) => `${r.method} ${r.path}`), [], 'data.csv 게이트가 없는 CSV 경로');
 });

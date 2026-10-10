@@ -75,7 +75,11 @@ export function registerVmTags(api) {
       missing: tags ? pol.requiredCategories.filter((c) => !present.has(c.toLowerCase())) : null, template: !!vm.template });
   });
 
-  api.get('/tools/vm-tags/policy', toolsPerm, (_req, res) => { res.json({ ok: true, policy: loadTagPolicy() }); });
+  // v2.732(점검 2회차 B3-07): updatedBy 는 계정명이다 — 범위 계정에는 null(형제 vm-hygiene v2.721 B2-02 와 같은 규칙). 전체 범위는 그대로.
+  api.get('/tools/vm-tags/policy', toolsPerm, (req, res) => {
+    const pol = loadTagPolicy();
+    res.json({ ok: true, policy: scopedVcenterIds(req.user, store.get()) ? { ...pol, updatedBy: null } : pol });
+  });
   api.put('/tools/vm-tags/policy', adminOnly, fleetOnly, (req, res) => {
     const r = saveTagPolicy(req.body || {}, req.user?.username || '');
     if (!r.ok) return res.status(r.code === 'stale' ? 409 : 400).json(r);

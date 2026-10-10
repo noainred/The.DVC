@@ -25,9 +25,12 @@ const csvPerm = requireCsvPerm('data.csv');
  * v2.604 AUTHZ-2604-05: 범위 제한 admin 에게 범위 밖 vCenter 의 발생 중·최근 알림(제목에 VM·호스트·DS 이름)을 주지 않는다 —
  *   같은 파일의 /os-scan(v2.599 AUTHZ-2599-05)·/tools/report/alerts 와 같은 기준. 귀속을 알 수 없는 항목
  *   (예: 해소 기록의 host:·ds: 키)은 **빼고 개수를 밝힌다**(범위 밖일 수 있다 — 추측으로 넣지 않는다).
- *   ⚠ 정직 기록: 전역 채널 설정(config — 웹훅 URL·vCenter별 임계)은 그대로 준다. 저장(PUT)이 전역이라 범위를
- *   나눌 축이 없고, 가리면 이 화면의 설정 폼이 빈 값으로 덮어쓴다 — 정책 결정 사항이다.
+ *   ⚠ 정직 기록: 전역 채널 설정(config — vCenter별 임계 등)은 그대로 준다(저장이 전역이라 범위로 나눌 축이 없다).
  *   v2.622(감사 SEC-01): 그 저장(PUT)과 테스트 발송은 이제 전체 범위 계정만이다(아래 fleetOnly).
+ *   v2.732(점검 2회차 B3-03): 그래서 v2.604 가 웹훅 URL 을 그대로 준 근거('가리면 폼이 빈 값으로 덮어쓴다')는 범위 관리자에게는
+ *   사라졌다 — 범위 관리자는 저장할 수 없다. Slack·Teams·웹훅 URL 은 그 자체가 **쓰기 자격증명**(운영 채널에 가짜 알림을 보낸다)이라
+ *   범위 계정에는 `url:''` + `hasUrl`·`urlHidden` 만 준다(형제 /tools/report/alerts 는 처음부터 '설정 여부만' 이다). 전체 범위 admin 은
+ *   편집 폼에 원문이 필요하므로 그대로다.
  */
 export function alertVcenterOf(a, allowed) {
   if (!a || typeof a !== 'object') return null;
@@ -45,12 +48,24 @@ export function alertVcenterOf(a, allowed) {
   }
   return null;
 }
+/** v2.732 B3-03: 채널 설정의 URL(웹훅 = 쓰기 자격증명)을 비우고 '설정돼 있는가' 만 남긴다. 다른 필드(enabled 등)는 그대로. */
+export function hideChannelUrls(config) {
+  if (!config || typeof config !== 'object' || !config.channels || typeof config.channels !== 'object') return config;
+  const channels = {};
+  for (const [k, ch] of Object.entries(config.channels)) {
+    if (ch && typeof ch === 'object' && Object.hasOwn(ch, 'url')) {
+      const has = typeof ch.url === 'string' ? ch.url.trim() !== '' : !!ch.url;
+      channels[k] = { ...ch, url: '', hasUrl: has, urlHidden: true };
+    } else channels[k] = ch;
+  }
+  return { ...config, channels, urlsHidden: true };
+}
 export function scopeAlertStatus(st, allowed) {
   if (!allowed || !st) return st;
   const keep = (a) => { const vc = alertVcenterOf(a, allowed); return !!vc && allowed.has(vc); };
   const firing = (st.firing || []).filter(keep);
   const recent = (st.recent || []).filter(keep);
-  return { ...st, firing, recent, scoped: true,
+  return { ...st, config: hideChannelUrls(st.config), firing, recent, scoped: true,
     omittedOutOfScope: { firing: (st.firing || []).length - firing.length, recent: (st.recent || []).length - recent.length } };
 }
 

@@ -39,7 +39,15 @@ test('① 보안·비밀 조회(/api/tools 아래)도 거부 (R1-08)', () => {
 });
 
 // 실제 장비·네트워크에 접속하는 함수(라우트 핸들러에서 부르면 '실접속 GET').
-const LIVE_CALLEES = ['probeRelayPath', 'fetchIdracInventory', 'fetchIdracSensors', 'probeGpuTelemetry', 'getNetworkCheck', 'tcpProbeMany', 'tcpProbe('];
+const LIVE_CALLEES = ['probeRelayPath', 'fetchIdracInventory', 'fetchIdracSensors', 'probeGpuTelemetry', 'getNetworkCheck', 'tcpProbeMany', 'tcpProbe(',
+  'collectHorizonLicenses', 'fetchHorizonLicenses'];
+/*
+ * v2.732(점검 2회차 B3-01): 함수 **안에** 데모 계정 필터(`demoOnly`)가 있는 실접속 함수 — 라우트가 그 호출에 `demoOnly: isDemoGuest(req.user)` 를
+ * 넘기면 경로 전체를 거부하는 대신 허용한다(같은 화면의 데모 데이터는 보여야 한다 — v2.720 R1-03 '수집형 실행은 demoOnly' 의 GET 판).
+ * 인자를 빼면 그 GET 은 다시 '열린 실접속 GET' 으로 잡힌다. 실제로 접속하지 않는지는 audit2732h ① 이 가짜 커넥션 서버로 확인한다.
+ */
+const DEMO_ONLY_CALLEES = ['collectHorizonLicenses'];
+const demoOnlyCallRe = (c) => new RegExp(`${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\(\\s*\\{[^}]*\\bdemoOnly:\\s*isDemoGuest\\(req\\.user\\)`);
 
 /** 라우트 파일에서 '실접속 함수를 부르는 GET 선언' → [{ lit, query }]. 질의 조건(req.query.X === '1')이 그 앞에 있으면 함께. */
 function liveGetDecls() {
@@ -54,11 +62,14 @@ function liveGetDecls() {
     decls.forEach((d, i) => {
       if (d.method !== 'get') return;
       const body = src.slice(d.at, i + 1 < decls.length ? decls[i + 1].at : src.length);
-      const callee = LIVE_CALLEES.find((c) => body.includes(c));
-      if (!callee) return;
+      const callees = LIVE_CALLEES.filter((c) => body.includes(c));
+      if (!callees.length) return;
+      const callee = callees[0];
       const ci = body.indexOf(callee);
       const qm = body.slice(0, ci).match(/req\.query\.(\w+)\s*===\s*'([^']+)'/);
-      out.push({ file: path.relative(SRC, f), lit: d.lit, query: qm ? [qm[1], qm[2]] : null });
+      // 호출한 실접속 함수가 **전부** 함수 안 데모 필터를 갖고 그 인자를 넘길 때만 '거부 대신 필터' 로 인정한다.
+      const demoGuarded = callees.every((c) => DEMO_ONLY_CALLEES.includes(c) && demoOnlyCallRe(c).test(body));
+      out.push({ file: path.relative(SRC, f), lit: d.lit, query: qm ? [qm[1], qm[2]] : null, demoGuarded, callees });
     });
   }
   return out;
@@ -99,12 +110,17 @@ test('② 라우터 스택: LIVE_GET_DENY 는 실재 GET 이고, 실접속 함�
   const decls = liveGetDecls();
   // 감사 시점에 확인한 다섯 곳은 반드시 잡혀야 한다(스윕 자체가 무력해지지 않게).
   assert.ok(decls.length >= 5, JSON.stringify(decls));
+  // v2.732 B3-01: 라이선스 만료 조회(Horizon 실로그인)도 스윕이 보고, 데모 필터 인자를 넘기는 것으로 판정된다.
+  const lic = decls.find((d) => d.lit === '/tools/license-expiry');
+  assert.ok(lic, `라이선스 만료 GET 을 실접속 GET 으로 못 찾았다: ${JSON.stringify(decls)}`);
+  assert.equal(lic.demoGuarded, true, `라이선스 만료 GET 이 demoOnly: isDemoGuest(req.user) 를 넘기지 않는다: ${JSON.stringify(lic)}`);
   for (const d of decls) {
     const full = gets.filter((g) => g.endsWith(d.lit));
     assert.ok(full.length, `${d.file} 의 GET ${d.lit} 를 라우터 스택에서 못 찾았다`);
+    if (d.demoGuarded) continue;   // 경로는 열려 있고 함수 안 필터가 사람이 등록한 장비 접속을 막는다(audit2732h ①)
     for (const g of full) {
       const u = toUrl(g, d.query);
-      assert.ok(demoGuestDenial('GET', u), `데모 계정에 열린 실접속 GET: ${u} (${d.file})`);
+      assert.ok(demoGuestDenial('GET', u), `데모 계정에 열린 실접속 GET: ${u} (${d.file} — ${d.callees.join(',')})`);
     }
   }
 });

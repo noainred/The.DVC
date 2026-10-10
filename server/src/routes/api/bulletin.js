@@ -7,6 +7,9 @@
  *  · 게시판 조회: 로그인 사용자 전부.
  *  · 게시판 글·댓글 쓰기: admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)'). 수정·삭제는 작성자 본인 또는 관리자.
  *    상단 고정은 관리자만. 데모 계정은 authMiddleware 의 demoGuest 판정이 쓰기를 막는다(SAFE_ACTIONS 밖).
+ *    v2.732(점검 2회차 B3-06): 여기서 '관리자' 는 **전체 범위 관리자**다 — 범위 관리자는 '관리자' 가 아니라 '범위 계정' 이다(v2.612).
+ *    게시판은 전 법인 공용이라 남의 글 수정·삭제·고정(중재)은 공지 쓰기·'지금 다시 저장' 과 같은 전체 범위 기준이고, 범위 관리자는 자기 글·
+ *    댓글만 고친다. 표시 플래그(isAdmin·canEdit)와 서버 판정이 같은 함수(isBoardModerator)를 쓴다 — 누르면 403 이 되는 버튼을 보이지 않는다.
  *  · 답글(v2.723): 댓글 쓰기 본문의 `parentId`. 공감(v2.723): `POST …/like`·`POST …/comments/:cid/like` 본문 `{on:true|false}` —
  *    상태 변경이라 쓰기 권한(admin·operator)과 같다. 공감한 사람 이름 목록 전체는 응답에 싣지 않는다(개수·내 공감·앞 30명).
  * 게시판은 vCenter 축이 없는 포탈 공용 게시판이라 범위 계정도 같은 글을 본다.
@@ -52,6 +55,15 @@ const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isD
 const ID_RE = /^[a-f0-9]{16}$/;
 /** '지금 다시 저장' 을 누를 수 있는가 — 관리자(데모 계정 제외) + 전체 범위(라우트 게이트와 같은 판정). */
 const canRetryPersist = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+/**
+ * v2.732(점검 2회차 B3-06): 게시판·공지의 관리자 권한(남의 글 수정·삭제·상단 고정 · 공지 편집 표시) — 관리자(데모 계정 제외) + 전체 범위.
+ * 범위 관리자의 판정만 바뀐다(자기 글은 작성자 규칙으로 그대로). 저장 상태 상세(persist.error 등)는 예전대로 isAdmin 이다
+ * (포탈 공용 저장소 하나의 상태 — 법인 축 데이터·계정명이 없다, 리뷰 I-05).
+ */
+const isBoardModerator = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+const SCOPED_MOD_NOTE = '범위 관리자는 게시판 관리 권한(다른 사람의 글·댓글 수정·삭제·상단 고정)이 없습니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다';
+/** 범위 관리자가 관리자 권한을 기대하고 403 을 받으면 왜인지 함께 말한다(작성자 본인 규칙 문구만으로는 '나는 관리자인데' 가 된다). */
+const scopedAdminReject = (req) => isAdmin(req) && !isBoardModerator(req);
 
 /**
  * 리뷰 I-05 — 쓰기 직후의 저장 상태. 저장소 쓰기는 동기라 호출 직후의 순번이 곧 이 변경의 순번이다.
@@ -69,8 +81,11 @@ async function persistView(req, kind, { wait = true } = {}) {
 }
 
 /** 저장소 오류(status 가 붙은 것)를 응답으로 — 그 밖은 전역 처리기로. `e.extra`(v2.727 board-full 의 bytes·max)는 그대로 싣는다. */
-function fail(res, e, next) {
-  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
+function fail(res, e, next, req = null) {
+  if (e && Number.isInteger(e.status)) {
+    const reason = e.status === 403 && req && scopedAdminReject(req) ? `${e.message} — ${SCOPED_MOD_NOTE}` : e.message;
+    return res.status(e.status).json({ ok: false, reason, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
+  }
   return next(e);
 }
 const badId = (res) => res.status(404).json({ ok: false, reason: '없는 항목입니다' });
@@ -87,7 +102,7 @@ export function registerBulletin(api) {
   });
   api.get('/notices', (req, res) => {
     const admin = isAdmin(req);
-    res.json({ ok: true, notices: listNotices({ by: admin }), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: admin, persist: bulletinHealth({ admin }).notices });
+    res.json({ ok: true, notices: listNotices({ by: admin }), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: isBoardModerator(req), persist: bulletinHealth({ admin }).notices });
   });
   api.post('/notices', adminOnly, noticeFleetOnly, async (req, res, next) => {
     try {
@@ -117,7 +132,7 @@ export function registerBulletin(api) {
   api.get('/board/posts', (req, res) => {
     const { offset, limit } = pageArgs(req.query, { def: 50, max: 200 });
     const q = typeof req.query.q === 'string' ? req.query.q : '';
-    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: canWrite(req), isAdmin: isAdmin(req), me: userOf(req), persist: bulletinHealth({ admin: isAdmin(req) }).board });
+    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: canWrite(req), isAdmin: isBoardModerator(req), me: userOf(req), persist: bulletinHealth({ admin: isAdmin(req) }).board });
   });
   api.get('/board/posts/:id', (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
@@ -125,7 +140,7 @@ export function registerBulletin(api) {
   });
   api.post('/board/posts', writers, async (req, res, next) => {
     try {
-      const p = createPost(req.body, userOf(req), { isAdmin: isAdmin(req) });
+      const p = createPost(req.body, userOf(req), { isAdmin: isBoardModerator(req) });
       audit(req, 'board.post.create', p.id, p.title);
       res.json({ ok: true, post: p, persist: await persistView(req, 'board') });
     } catch (e) { fail(res, e, next); }
@@ -133,18 +148,18 @@ export function registerBulletin(api) {
   api.put('/board/posts/:id', writers, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {
-      const p = updatePost(req.params.id, req.body || {}, userOf(req), { isAdmin: isAdmin(req) });
+      const p = updatePost(req.params.id, req.body || {}, userOf(req), { isAdmin: isBoardModerator(req) });
       audit(req, 'board.post.update', p.id, p.title);
       res.json({ ok: true, post: p, persist: await persistView(req, 'board') });
-    } catch (e) { fail(res, e, next); }
+    } catch (e) { fail(res, e, next, req); }
   });
   api.delete('/board/posts/:id', writers, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {
-      const p = deletePost(req.params.id, userOf(req), { isAdmin: isAdmin(req) });
+      const p = deletePost(req.params.id, userOf(req), { isAdmin: isBoardModerator(req) });
       audit(req, 'board.post.delete', p.id, `${p.title} (작성자 ${p.author})`);
       res.json({ ok: true, persist: await persistView(req, 'board') });
-    } catch (e) { fail(res, e, next); }
+    } catch (e) { fail(res, e, next, req); }
   });
   api.post('/board/posts/:id/comments', writers, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
@@ -170,10 +185,10 @@ export function registerBulletin(api) {
   api.delete('/board/posts/:id/comments/:cid', writers, async (req, res, next) => {
     if (!ID_RE.test(req.params.id) || !ID_RE.test(req.params.cid)) return badId(res);
     try {
-      const { comment: c, kept } = deleteComment(req.params.id, req.params.cid, userOf(req), { isAdmin: isAdmin(req) });
+      const { comment: c, kept } = deleteComment(req.params.id, req.params.cid, userOf(req), { isAdmin: isBoardModerator(req) });
       audit(req, 'board.comment.delete', `${req.params.id}/${c.id}`, `작성자 ${c.author}${kept ? ' · 답글이 있어 자리를 남김' : ''}`);
       res.json({ ok: true, kept, persist: await persistView(req, 'board') });
-    } catch (e) { fail(res, e, next); }
+    } catch (e) { fail(res, e, next, req); }
   });
 
   /* 저장 상태(리뷰 I-05) */

@@ -449,7 +449,9 @@ api.get('/tools/gpu', requirePerm('tools'), (req, res) => {
 });
 
 // GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
-api.get('/tools/gpu.json', requirePerm('tools'), (req, res) => {
+// v2.732(점검 2회차 B3-05): 파일 내보내기는 형식과 무관하게 data.csv 권한(v2.643 규약) — 형제 gpu.csv·gpu/export.json 과 같은 게이트.
+//   같은 데이터는 화면 조회(/tools/gpu)로 이미 보이므로 기밀성 영향은 없고, '파일 내보내기 = 관리자 이상' 규약의 대칭이다.
+api.get('/tools/gpu.json', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = maskGpuInventoryForUser(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)), isAdminReq(req));
   const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
