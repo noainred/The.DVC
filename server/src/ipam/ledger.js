@@ -5,12 +5,13 @@
 
 import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
 import { getAnnotations, annotationsRev } from './annotations.js';
-import { scanResultList, getIpHistoryMap, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
+import { scanResultList, scanResultListAsync, ipHistoryEntry, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 import { ipToNum } from '../util/ipv4.js';
 import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
 import { datacenterOfVcenter } from '../datacenter/store.js';
+import { createYielder } from '../util/timeSlice.js';
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -67,12 +68,95 @@ export function parseOs(guestOS) {
   return { osName: s, osVersion: '' };
 }
 
+/*
+ * v2.731(점검 A6-02 — 재현): 원장 재구성 비용은 v2.638 이 스캔 행을 넣은 뒤로 **스캔 IP 수에 비례**한다(목 VM 6,004 + 스캔 5만 =
+ *   365~437ms, 스캔 20만 = 2~2.9초 — store.refresh 안에서 동기). 계산은 생성기(`ipamRowsGen`) 하나이고 두 판이 그것을 돌린다:
+ *   동기판 `buildIpamRows` 는 끝까지 돌리고(라우트·서브넷 대장 — 예전과 같다), 양보판 `buildIpamRowsAsync` 는 양보 지점마다
+ *   시간을 보고(util/timeSlice.js) 이벤트 루프에 양보한다(store.syncLedger 가 큰 원장에서 쓴다). **같은 코드**라 입력이 그대로면
+ *   결과가 같다(테스트가 깊은 비교로 대조). 행 정렬도 조각 정렬 + 안정 병합이다(Array.prototype.sort 는 안정 정렬이라 결과가 하나다).
+ *   이력은 맵 전체를 복사하지 않고 행마다 `ipHistoryEntry(ip)` 로 본다(20만 IP 복사 300~540ms 를 없앴다).
+ */
+const YIELD_MASK = 255; // 루프 256회마다 양보 지점 — 양보할지는 구동기(createYielder)가 시간으로 정한다
+const SORT_CHUNK = 8192;
+const byIpNum = (a, b) => (a.ipNum ?? Infinity) - (b.ipNum ?? Infinity);
+
+/** 안정 정렬 — 조각마다 Array.prototype.sort(안정) 후 인접 조각을 안정 병합한다(같은 키·NaN 비교는 왼쪽 먼저). 결과는 한 번 정렬과 같다. */
+function* stableSortGen(arr, cmp) {
+  if (arr.length <= SORT_CHUNK) return arr.slice().sort(cmp);
+  let runs = [];
+  for (let i = 0; i < arr.length; i += SORT_CHUNK) { runs.push(arr.slice(i, i + SORT_CHUNK).sort(cmp)); yield; }
+  while (runs.length > 1) {
+    const next = [];
+    for (let i = 0; i < runs.length; i += 2) {
+      if (i + 1 >= runs.length) { next.push(runs[i]); continue; }
+      const a = runs[i]; const b = runs[i + 1]; const m = new Array(a.length + b.length);
+      let x = 0; let y = 0; let k = 0;
+      while (x < a.length && y < b.length) {
+        m[k++] = cmp(a[x], b[y]) > 0 ? b[y++] : a[x++];
+        if ((k & 4095) === 0) yield;
+      }
+      while (x < a.length) m[k++] = a[x++];
+      while (y < b.length) m[k++] = b[y++];
+      next.push(m);
+      yield;
+    }
+    runs = next;
+  }
+  return runs[0];
+}
+
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
 export function buildIpamRows(snap, vcenterId, allowed = null) {
   vcenterId = vcenterId || ''; // undefined/null → '' 정규화(스코프·정책 매칭·캐시키 일관)
   const _ck = _ipamKey(snap, vcenterId, allowed);
   const _hit = _ipamCache.get(_ck);
   if (_hit) return _hit;
+  const it = ipamRowsGen(snap, vcenterId, allowed, scanResultList());
+  let step = it.next();
+  while (!step.done) step = it.next();
+  const out = step.value;
+  putGenerationCache(_ipamCache, _ck, out);
+  return out;
+}
+
+/**
+ * v2.731(점검 A6-02): `buildIpamRows` 의 양보판 — 결과는 같고, 계산 도중 `sliceMs` 마다 이벤트 루프에 양보한다.
+ * @param {object} [opts]
+ * @param {number} [opts.sliceMs=10] 이만큼 연속으로 돌았으면 양보
+ * @param {() => boolean} [opts.isCancelled] 참이면 중간에 멈춘다(더 새 동기화가 시작됐다)
+ * @param {object} [opts.stats] 채워 준다 — { yields, aborted: null|'cancelled'|'changed' }
+ * @returns {Promise<object|null>} null = 취소됐거나 계산 도중 관리 입력(설정·주석·스캔·override·정책 리비전 또는 데이터센터 귀속)이
+ *   바뀌었다(섞인 결과를 내지 않는다 — 호출부가 다음 주기에 다시 만든다). 캐시에 넣는 것은 끝까지 온전히 만든 결과뿐이다.
+ */
+export async function buildIpamRowsAsync(snap, vcenterId, allowed = null, opts = {}) {
+  vcenterId = vcenterId || '';
+  const stats = opts.stats && typeof opts.stats === 'object' ? opts.stats : {};
+  stats.yields = 0; stats.aborted = null;
+  const isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
+  const ck = _ipamKey(snap, vcenterId, allowed);
+  const hit = _ipamCache.get(ck);
+  if (hit) return hit;
+  const maybeYield = createYielder(Number.isFinite(opts.sliceMs) && opts.sliceMs > 0 ? opts.sliceMs : 10);
+  const done = (reason) => { stats.yields = maybeYield.count(); stats.aborted = reason; return null; };
+  const scanList = await scanResultListAsync(maybeYield, isCancelled);
+  if (!scanList) return done('cancelled');
+  const it = ipamRowsGen(snap, vcenterId, allowed, scanList);
+  let step = it.next();
+  while (!step.done) {
+    if ((await maybeYield()) && isCancelled()) { it.return(); return done('cancelled'); }
+    step = it.next();
+  }
+  stats.yields = maybeYield.count();
+  if (isCancelled()) return done('cancelled');
+  if (_ipamKey(snap, vcenterId, allowed) !== ck) return done('changed');
+  const again = _ipamCache.get(ck); // 그 사이 동기판이 같은 입력으로 이미 만들었다 — 한 벌만 남긴다
+  if (again) return again;
+  putGenerationCache(_ipamCache, ck, step.value);
+  return step.value;
+}
+
+function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
+  let tick = 0;
   let vms = snap.vms || [];
   let hosts = snap.hosts || [];
   // 사용자 scope(보안 경계)를 요청 vcenterId(뷰 필터)보다 먼저 강제. allowed=null 이면 무제한(기존).
@@ -105,12 +189,13 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   const osMemo = new Map();
   const parseOsMemo = (g) => { const k = String(g || ''); let v = osMemo.get(k); if (!v) { v = parseOs(k); osMemo.set(k, v); } return v; };
   // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
-  // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용)
-  const scanList = scanResultList();
-  const scanIpSet = new Set(scanList.map((s) => s.ip));
+  // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용 — 호출부가 넘긴다)
+  const scanIpSet = new Set();
+  for (const s of scanList) { scanIpSet.add(s.ip); if ((++tick & YIELD_MASK) === 0) yield; }
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
+    if ((++tick & YIELD_MASK) === 0) yield;
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) {
       const n = ipToNum(ip);
@@ -126,6 +211,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     }
   }
   for (const h of hosts) {
+    if ((++tick & YIELD_MASK) === 0) yield;
     const n = ipToNum(h.name);
     if (n == null) continue; // host registered by FQDN → no mgmt IP
     if (ignoredAt(h.name, n, h.vcenterId)) continue;
@@ -142,30 +228,33 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   // 스캔 결과는 특정 vCenter에 속하지 않으므로 vCenter 스코프와 무관하게 '항상' 표시한다.
   // '이미 vCenter가 아는 IP' 판정은 스코프된 rows가 아니라 '전체' vCenter IP 기준으로 한다
   // (스코프를 걸면 다른 vCenter의 IP가 known에서 빠져 스캔으로 오인되는 문제 방지).
-  const histMap = getIpHistoryMap();
+  // v2.731: 이력은 행마다 본다(ipHistoryEntry — 맵 전체 복사 없음).
   // 스캔 발견물은 vCenter 귀속(vcenterId)이 없어 scope 로 판정할 수 없다 → 범위 제한 계정에는
   // 병합하지 않는다(전 사이트 네트워크 스캔 노출 차단). 무제한 계정만 스캔 행을 합친다.
   if (!allowed) {
     const known = new Set();
     for (const vm of uniVms) {
+      if ((++tick & YIELD_MASK) === 0) yield;
       const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
       for (const ip of ips) known.add(ip);
     }
-    for (const h of uniHosts) if (ipToNum(h.name) != null) known.add(h.name);
-    const seen = new Set(rows.map((r) => r.ip));
+    for (const h of uniHosts) { if ((++tick & YIELD_MASK) === 0) yield; if (ipToNum(h.name) != null) known.add(h.name); }
+    const seen = new Set();
+    for (const r of rows) seen.add(r.ip);
     // v2.638: 스캔한 에이전트의 데이터센터에 귀속한다(수동 지정 > 자동 — ipam/scanDatacenter.js). 귀속을 판정하지 못한 행은
     //   예전처럼 어느 데이터센터에도 두지 않는다(지어내지 않는다). vCenter 를 고른 조회에서는 **다른 데이터센터에 귀속된** 스캔 행을
     //   빼고, 귀속 없는 행과 그 vCenter 의 데이터센터 행만 보인다. 그 vCenter 에 DataCenter 할당이 없으면 판단할 근거가 없으므로 예전 그대로다.
     const dcMap = currentScanDatacenters(snap.vcenters).map;
     const viewDc = vcenterId ? datacenterOfVcenter(vcenterId) : '';
     for (const sc of scanList) {
+      if ((++tick & YIELD_MASK) === 0) yield;
       const n = ipToNum(sc.ip);
       if (ignoredAt(sc.ip, n, '') || known.has(sc.ip) || seen.has(sc.ip) || n == null) continue;
       const agent = sc.agent || SCAN_LOCAL;
       const dc = dcMap.get(String(agent).toLowerCase()) || null;
       if (viewDc && dc?.datacenterId && dc.datacenterId !== viewDc) continue;
       seen.add(sc.ip);
-      const hist = histMap[sc.ip];
+      const hist = ipHistoryEntry(sc.ip);
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
       rows.push({
@@ -182,7 +271,8 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   }
   // VM/호스트 IP에도 스캔 이력이 있으면 사용 추이를 붙인다(있을 때만).
   for (const r of rows) {
-    const h = histMap[r.ip];
+    if ((++tick & YIELD_MASK) === 0) yield;
+    const h = ipHistoryEntry(r.ip);
     if (h && r.firstSeen == null) { r.firstSeen = h.firstSeen; r.lastSeen = r.lastSeen || h.lastSeen; r.usageStatus = h.status; }
   }
 
@@ -190,8 +280,10 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   // 운영자가 IP 단위로 부여한 관리 상태(담당자/라벨/디바이스종류/예약 등)를 행에 입힌다.
   // override만 있고 vCenter/스캔 어디에도 없는 IP는 'manual' 행으로 추가해(예약/계획 IP) 함께 관리.
   const overrides = getOverrides();
-  const seenAll = new Set(rows.map((r) => r.ip));
+  const seenAll = new Set();
+  for (const r of rows) seenAll.add(r.ip);
   for (const [ip, ov] of Object.entries(overrides)) {
+    if ((++tick & YIELD_MASK) === 0) yield;
     if (seenAll.has(ip) || ipToNum(ip) == null) continue;
     if (allowed && ov.claimedVcenterId && !allowed.has(ov.claimedVcenterId)) continue; // 범위 밖 vCenter 귀속 예약 제외
     // 범위 제한 계정에는 vCenter 미귀속(claimedVcenterId 없는) 수동 예약 IP 를 노출하지 않는다
@@ -211,6 +303,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   // 주장하면 conflict. (스코프 뷰에서도 충돌을 놓치지 않게 full snapshot으로 계산)
   const vcByIp = new Map();
   for (const vm of uniVms) {   // 유니버스: 무제한=전체, 범위제한=허용 vCenter(범위 밖 conflict 유출 차단)
+    if ((++tick & YIELD_MASK) === 0) yield;
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) { if (!vcByIp.has(ip)) vcByIp.set(ip, new Set()); if (vm.vcenterId) vcByIp.get(ip).add(vm.vcenterId); }
   }
@@ -221,6 +314,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   // 예: 정책이 /24를 'dhcp'로 두고, 그 안 한 IP에 owner만 override → 결과 status='dhcp'(정책 보충)+owner=override값.
   const applied = [];
   for (const r of rows) {
+    if ((++tick & YIELD_MASK) === 0) yield;
     const ov = overrides[r.ip];
     if (ov && ov.status === 'ignored') continue;        // 게이트: override 명시 숨김(최우선)
     const rp = findPolicy(r.ipNum, vcenterId);           // 적용 대역 정책(없으면 null)
@@ -259,62 +353,65 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     else r.reconcile = reconcileOf(r.discovery);
     applied.push(r);
   }
-  // v2.603(감사 CEN2603-03): push(...applied) 는 원소 수만큼 인자를 만든다 — 약 13만 행을 넘으면 RangeError(Maximum call stack
-  //   size exceeded)로 원장 계산 전체가 던졌다(/api/tools/ipam 500 · ipam.db 동기화 정지). 원소 수와 무관한 반복으로 옮긴다.
-  rows.length = 0;
-  for (const r of applied) rows.push(r);
 
   // 중복 여부는 '가시 행'(ignored 게이트로 숨겨진 행 제외) 기준으로 재계산한다 — 원본 count는
   // 숨김 이전 값이라, 한쪽이 정책/override로 숨겨지면 살아남은 유일 행이 duplicate로 오표시됐다.
   const visCount = new Map();
-  for (const r of rows) visCount.set(r.ip, (visCount.get(r.ip) || 0) + 1);
-  for (const r of rows) r.duplicate = (visCount.get(r.ip) || 0) > 1;
-  rows.sort((a, b) => (a.ipNum ?? Infinity) - (b.ipNum ?? Infinity));
+  for (const r of applied) { if ((++tick & YIELD_MASK) === 0) yield; visCount.set(r.ip, (visCount.get(r.ip) || 0) + 1); }
+  for (const r of applied) { if ((++tick & YIELD_MASK) === 0) yield; r.duplicate = (visCount.get(r.ip) || 0) > 1; }
+  // v2.603(감사 CEN2603-03): push(...applied) 같은 전개는 원소 수만큼 인자를 만든다 — 약 13만 행을 넘으면 RangeError. 정렬은 새 배열을 만든다.
+  // v2.731: 조각 정렬 + 안정 병합(stableSortGen) — 예전 rows.sort(같은 비교)와 결과가 같다.
+  const sorted = yield* stableSortGen(applied, byIpNum);
 
   const byVc = {};
-  for (const r of rows) byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
   // v2.638: 스캔으로만 확인된 IP 의 데이터센터별 개수(귀속 없음은 datacenterId '').
   const scanDc = new Map();
-  for (const r of rows) {
-    if (r.ownerType !== 'scanned') continue;
-    const k = r.datacenterId || '';
-    const e = scanDc.get(k) || { datacenterId: k, datacenterName: r.datacenterName || '', count: 0 };
-    e.count += 1; scanDc.set(k, e);
-  }
   // reconcile(출처 대조) 분포 + 관리상태 분포 + 관리 방식(override/정책/자동) 분포 — 대시보드 요약 카드용.
   const reconCounts = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0 };
   const mgmtCounts = {};
   const appliedCounts = { override: 0, 'range-policy': 0, auto: 0 };
   let managedN = 0; let reservedExpiredN = 0; let reservedSoonN = 0;
-  for (const r of rows) {
+  let multiHomedN = 0; let publicN = 0; let privateN = 0;
+  for (const r of sorted) {
+    if ((++tick & YIELD_MASK) === 0) yield;
+    byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
+    if (r.ownerType === 'scanned') {
+      const k = r.datacenterId || '';
+      const e = scanDc.get(k) || { datacenterId: k, datacenterName: r.datacenterName || '', count: 0 };
+      e.count += 1; scanDc.set(k, e);
+    }
     if (reconCounts[r.reconcile] !== undefined) reconCounts[r.reconcile]++;
     if (r.managed) managedN++;
     if (r.mgmtStatus) mgmtCounts[r.mgmtStatus] = (mgmtCounts[r.mgmtStatus] || 0) + 1;
     if (appliedCounts[r.appliedBy] !== undefined) appliedCounts[r.appliedBy]++;
     if (r.reservedExpired) reservedExpiredN++;
     if (r.reservedExpiringSoon) reservedSoonN++;
+    if (r.multiHomed) multiHomedN++;
+    if (r.scope === 'public') publicN++;
+    else if (r.scope === 'private') privateN++;
   }
+  let dupIps = 0;
+  for (const c of visCount.values()) if (c > 1) dupIps++;
   const out = {
-    total: rows.length,
-    multiHomed: rows.filter((r) => r.multiHomed).length,
+    total: sorted.length,
+    multiHomed: multiHomedN,
     // 요약도 행 플래그와 같은 '가시 행' 기준(visCount) — 숨김 이전 count를 쓰면 표에는 중복 0인데
     // 카드에는 중복 N으로 남아 집계-표 불일치가 생긴다.
-    duplicateIps: [...visCount.values()].filter((c) => c > 1).length,
-    publicIps: rows.filter((r) => r.scope === 'public').length,
-    privateIps: rows.filter((r) => r.scope === 'private').length,
+    duplicateIps: dupIps,
+    publicIps: publicN,
+    privateIps: privateN,
     conflicts: reconCounts.conflict,
     reconcile: reconCounts,
     managed: managedN,
-    unmanaged: rows.length - managedN,
+    unmanaged: sorted.length - managedN,
     reservedExpired: reservedExpiredN,
     reservedExpiringSoon: reservedSoonN,
     mgmtStatus: mgmtCounts,
     appliedBy: appliedCounts,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     scanByDatacenter: [...scanDc.values()].sort((a, b) => b.count - a.count),
-    rows,
+    rows: sorted,
   };
-  putGenerationCache(_ipamCache, _ck, out);
   return out;
 }
 

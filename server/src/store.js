@@ -13,7 +13,9 @@ import { loadRegistry as loadIdracRegistry } from './idrac/registry.js';
 import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
-import { buildIpamRows, ipamRevKey } from './ipam/ledger.js';
+import { buildIpamRows, buildIpamRowsAsync, ipamRevKey } from './ipam/ledger.js';
+import { scanResultCount } from './ipam/scanStore.js'; // v2.731 A6-02: 원장 규모(동기/양보 경로 선택)
+import { createYielder } from './util/timeSlice.js';
 import { syncLedger } from './ipam/db.js';
 import { getInventory, pruneInventory } from './central/inventory.js';
 import { isStopped } from './security/emergencyStop.js';
@@ -57,22 +59,35 @@ const collectPool = poolSettled;
 // ⚠ v2.590 RT-1: 예전에는 필드마다 문자 단위 JS 루프로 djb2 를 돌려 운영 규모(8천 행)에서 매 폴링(30초) 43ms+ 를
 //   메인 스레드에서 썼다(내용이 그대로여도 — '변화 없음' 판정 비용이 매 틱 전량). 행 문자열을 만들어 네이티브 sha1 에
 //   넣는다(실측 43.3ms → 13.3ms). 비교 대상 컬럼은 **그대로**다 — 줄이면 외부 ipam.db 가 stale 로 남는다(아래 주석).
+const sigField = (v) => (v == null ? '' : String(v));
+// db.js toRecord가 ipam.db에 쓰는 '모든' 식별/귀속/관리 컬럼을 지문에 포함한다(타임스탬프
+// firstSeen/lastSeen/updatedAt만 제외). 이전엔 7개 필드만 해시해, label·owner·deviceType·
+// vcenter·host·guestOS·os·cluster·scope·multiHomed 등만 바뀌면 재기록이 스킵되어 외부
+// ipam.db가 stale로 남던 버그가 있었다.
+const ledgerRowLine = (r) => [
+  r.ip, r.ipNum, r.vcenterId, r.vcenterName, r.ownerType, r.serverType, r.ownerName,
+  r.powerState, r.guestOS, r.osName, r.osVersion, r.hostName, r.cluster, r.scope,
+  r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
+  r.discovery, r.reconcile, r.mgmtStatus, r.owner_, r.label, r.deviceType, r.usageStatus,
+  r.appliedBy, r.rangePolicySpec,
+].map(sigField).join('|') + ';';
 export function ledgerSignature(rows) {
   const h = crypto.createHash('sha1');
-  const f = (v) => (v == null ? '' : String(v));
   h.update(String(rows.length));
-  // db.js toRecord가 ipam.db에 쓰는 '모든' 식별/귀속/관리 컬럼을 지문에 포함한다(타임스탬프
-  // firstSeen/lastSeen/updatedAt만 제외). 이전엔 7개 필드만 해시해, label·owner·deviceType·
-  // vcenter·host·guestOS·os·cluster·scope·multiHomed 등만 바뀌면 재기록이 스킵되어 외부
-  // ipam.db가 stale로 남던 버그가 있었다.
-  for (const r of rows) {
-    h.update([
-      r.ip, r.ipNum, r.vcenterId, r.vcenterName, r.ownerType, r.serverType, r.ownerName,
-      r.powerState, r.guestOS, r.osName, r.osVersion, r.hostName, r.cluster, r.scope,
-      r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
-      r.discovery, r.reconcile, r.mgmtStatus, r.owner_, r.label, r.deviceType, r.usageStatus,
-      r.appliedBy, r.rangePolicySpec,
-    ].map(f).join('|') + ';');
+  for (const r of rows) h.update(ledgerRowLine(r));
+  return h.digest('hex');
+}
+/**
+ * v2.731(점검 A6-02): `ledgerSignature` 의 양보판 — 같은 줄을 같은 순서로 해시에 넣으므로 결과가 같다(테스트가 대조).
+ * @returns {Promise<string|null>} null = 취소(더 새 동기화가 시작됐다)
+ */
+export async function ledgerSignatureAsync(rows, { sliceMs = 10, isCancelled = () => false } = {}) {
+  const h = crypto.createHash('sha1');
+  h.update(String(rows.length));
+  const maybeYield = createYielder(sliceMs);
+  for (let i = 0; i < rows.length; i++) {
+    h.update(ledgerRowLine(rows[i]));
+    if ((i & 1023) === 1023 && (await maybeYield()) && isCancelled()) return null;
   }
   return h.digest('hex');
 }
@@ -109,6 +124,18 @@ export function ledgerInputSignature(snap, revKey = ipamRevKey()) {
 
 // 입력 지문이 같아도 이 간격마다 한 번은 원장을 전량 다시 만들어 서명과 비교한다(지문이 모르는 입력이 생겼을 때의 안전망).
 const LEDGER_FULL_CHECK_MS = clampIntervalMs(process.env.LEDGER_FULL_CHECK_MS, 10 * 60_000, 60_000);
+/*
+ * v2.731(점검 A6-02 — 재현): 원장 재구성(buildIpamRows)과 행 서명은 원장 행 수에 비례하는 **동기** 작업이고 store.refresh 안에서
+ *   돈다 — 스캔 결과 5만 IP 면 365~437ms, 20만이면 2~2.9초 동안 포탈 전체가 멈췄다(엣지 보고가 내용을 바꿀 때마다 + 10분 전량 확인).
+ *   원장 항목(VM + 호스트 + 스캔 결과)이 이 수 이상이면 양보판(buildIpamRowsAsync · ledgerSignatureAsync — 결과는 동기판과 같다)으로
+ *   만들고, 그보다 작으면 예전처럼 동기다(수 ms — 기억 갱신이 호출 안에서 끝나는 예전 동작 그대로).
+ *   양보판은 더 새 호출(seq)이 시작되면 멈추고, 계산 도중 관리 입력(설정·주석·스캔·override·정책)이 바뀌면 결과를 버린다(섞인 원장을
+ *   쓰지 않는다 — 입력 지문이 달라졌으므로 다음 주기가 다시 만든다). 쓰기·기억 규칙(v2.619·v2.620)은 두 경로가 `_commitLedger` 하나를 쓴다.
+ */
+let _ledgerAsyncMin = 2_000;
+const LEDGER_CHANGED_STREAK_MAX = 3; // 양보 경로가 입력 변경으로 연달아 이만큼 버려지면 다음 한 번은 동기로 만든다
+/** 테스트 전용 — 양보 경로로 가는 원장 규모의 하한을 바꾼다(인자 없이 부르면 기본값). */
+export function _setLedgerAsyncMinForTest(n) { _ledgerAsyncMin = Number.isFinite(n) && n >= 0 ? n : 2_000; }
 
 // 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
 function idracRegisteredCount() {
@@ -473,29 +500,56 @@ class Store {
       }
       this._ledgerFullAt = now;
       const seq = (this._ledgerSeq = (this._ledgerSeq || 0) + 1);
-      const { rows } = buildIpamRows(this.snapshot);
-      const sig = ledgerSignature(rows);
-      if (sig === this._lastLedgerSig) { this._lastLedgerInputSig = inSig; return; } // 내용 변동 없음 → 쓰기 생략
-      // v2.620(RECENT2620-01 — v2.619 가 만든 회귀): 쓰기를 내보내는 순간 ipam.db 내용은 '미정' 이다. 기억을 비우지 않으면
-      //   쓰기 B 가 진행 중일 때 내용이 A 로 되돌아간 호출이 위 분기(sig === 옛 A)로 생략되고, B 는 seq 가 맞지 않아 기억을
-      //   갱신하지 못해 DB 에 B 가 남은 채 입력 지문 생략·전량 확인까지 전부 '같다' 고 판단했다(대역 정책 저장 직후 삭제로 재현).
-      //   쓰기는 워커 한 줄로 순서대로 끝나므로 마지막(seq 가 현재인) 성공만 기억을 다시 세운다.
-      this._lastLedgerSig = null; this._lastLedgerInputSig = null;
-      // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
-      // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다. 입력 지문도 같은 규칙이다 —
-      // 실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 없어진다. 늦게 끝난 옛 쓰기는 새 쓰기의 기억을 덮지 않는다(seq).
-      syncLedger(rows).then((ok) => {
-        if (ok) {
-          if (seq === this._ledgerSeq) { this._lastLedgerSig = sig; this._lastLedgerInputSig = inSig; }
-          this._noteLedger(true, null, rows.length);
-        }
-        else this._noteLedger(false, { stage: 'write', message: 'ipam.db 쓰기 실패(사유는 [ipam] 로그)' }, rows.length);
-      }, (e) => this._noteLedger(false, { stage: 'write', message: String(e?.message || e) }, rows.length));
+      const snap = this.snapshot;
+      const size = (Array.isArray(snap?.vms) ? snap.vms.length : 0) + (Array.isArray(snap?.hosts) ? snap.hosts.length : 0) + scanResultCount();
+      const st = this.ledgerAsync || (this.ledgerAsync = { builds: 0, cancelled: 0, changed: 0, changedStreak: 0, syncFallbacks: 0, last: null });
+      // 양보 경로가 '입력이 도중에 바뀜' 으로 연달아 버려지면(관리 입력이 계산 시간보다 자주 바뀐다) 이번에는 예전처럼 동기로 만든다 — 진행 보장.
+      const starving = st.changedStreak >= LEDGER_CHANGED_STREAK_MAX;
+      if (size < _ledgerAsyncMin || starving) {
+        if (starving) { st.syncFallbacks += 1; st.changedStreak = 0; }
+        const { rows } = buildIpamRows(snap);
+        this._commitLedger(seq, inSig, rows, ledgerSignature(rows));
+        return;
+      }
+      // v2.731 A6-02: 큰 원장은 양보 경로(위 머리말). 실패는 build 단계로 남긴다(무음 실패 금지 — v2.603).
+      const isStale = () => seq !== this._ledgerSeq;
+      const t0 = Date.now();
+      st.builds += 1;
+      (async () => {
+        const stats = {};
+        const out = await buildIpamRowsAsync(snap, '', null, { isCancelled: isStale, stats });
+        const sig = out ? await ledgerSignatureAsync(out.rows, { isCancelled: isStale }) : null;
+        const result = out == null ? (stats.aborted || 'cancelled') : (sig == null || isStale() ? 'cancelled' : 'ok');
+        if (result === 'cancelled') st.cancelled += 1;
+        else if (result === 'changed') { st.changed += 1; st.changedStreak += 1; } else st.changedStreak = 0;
+        st.last = { at: Date.now(), ms: Date.now() - t0, rows: out ? out.rows.length : null, yields: stats.yields ?? null, result };
+        if (result === 'ok') this._commitLedger(seq, inSig, out.rows, sig);
+      })().catch((e) => this._noteLedger(false, { stage: 'build', message: String(e?.message || e) }, null));
     } catch (e) {
       // v2.603(감사 CEN2603-03 후속): 예전에는 `catch { /* best effort */ }` 라 원장 계산이 던지면(예: 전개 push RangeError)
       //   ipam.db 동기화가 **로그 한 줄 없이** 멈췄다. 상태에 남기고(storeStatus().ledgerSync) 콘솔에도 적는다(같은 사유는 1시간에 1줄).
       this._noteLedger(false, { stage: 'build', message: String(e?.message || e) }, null);
     }
+  }
+
+  /** 원장 행과 서명으로 쓰기를 내보내거나(내용이 바뀌었으면) 생략한다 — 동기·양보 두 경로가 이것 하나를 쓴다(v2.731). */
+  _commitLedger(seq, inSig, rows, sig) {
+    if (sig === this._lastLedgerSig) { this._lastLedgerInputSig = inSig; return; } // 내용 변동 없음 → 쓰기 생략
+    // v2.620(RECENT2620-01 — v2.619 가 만든 회귀): 쓰기를 내보내는 순간 ipam.db 내용은 '미정' 이다. 기억을 비우지 않으면
+    //   쓰기 B 가 진행 중일 때 내용이 A 로 되돌아간 호출이 위 분기(sig === 옛 A)로 생략되고, B 는 seq 가 맞지 않아 기억을
+    //   갱신하지 못해 DB 에 B 가 남은 채 입력 지문 생략·전량 확인까지 전부 '같다' 고 판단했다(대역 정책 저장 직후 삭제로 재현).
+    //   쓰기는 워커 한 줄로 순서대로 끝나므로 마지막(seq 가 현재인) 성공만 기억을 다시 세운다.
+    this._lastLedgerSig = null; this._lastLedgerInputSig = null;
+    // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
+    // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다. 입력 지문도 같은 규칙이다 —
+    // 실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 없어진다. 늦게 끝난 옛 쓰기는 새 쓰기의 기억을 덮지 않는다(seq).
+    syncLedger(rows).then((ok) => {
+      if (ok) {
+        if (seq === this._ledgerSeq) { this._lastLedgerSig = sig; this._lastLedgerInputSig = inSig; }
+        this._noteLedger(true, null, rows.length);
+      }
+      else this._noteLedger(false, { stage: 'write', message: 'ipam.db 쓰기 실패(사유는 [ipam] 로그)' }, rows.length);
+    }, (e) => this._noteLedger(false, { stage: 'write', message: String(e?.message || e) }, rows.length));
   }
 
   /** 원장 동기화 결과 기록 + 스로틀 경고(v2.603). */
@@ -879,6 +933,7 @@ export function storeStatus() {
     lastError: store.lastError || null,
     ledgerSync: store.ledgerSync || null, // v2.603: IP 원장(ipam.db) 마지막 동기화 결과(실패 사유·연속 횟수)
     ledgerInputSkips: store.ledgerInputSkips || 0, // v2.619 PERF-1: 입력 지문이 같아 원장 재구성을 건너뛴 틱 수(프로세스 수명)
+    ledgerAsync: store.ledgerAsync || null, // v2.731 A6-02: 큰 원장의 양보 경로 — 시작·취소(더 새 동기화)·입력 변경으로 버림 횟수와 마지막 결과
     dsCfg: dsCfgStatus(), // v2.700: 데이터스토어 운영 속성 캐시
     clusterCfg: clusterCfgStatus(), // v2.701: 클러스터 HA·DRS 캐시
     hostCfg: hostCfgStatus(), // v2.699: 호스트 구성 캐시(vCenter 별 개수·마지막 갱신·오류)

@@ -1075,6 +1075,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **목록 응답은 요약만, 응답 기억 키는 입력 내용 지문**(A6-05 — SAN 목록이 스위치마다 조닝 전체를 싣고 요청마다 재직렬화: 260대 11.55MB → 0.68MB.
       스냅샷 세대 키(memoJson)면 '지금 수집' 직후 옛 값을 준다) · **`power_hourly` 서버별 요약은 `statsSinceAsync`**(A6-03 — GROUP BY server_id 는 보존기간 전체,
       30일 최장 멈춤 1.2초 → 18ms) · 메모리 추세 `metaRange`(A6-04).
+    · ⚠ **디바운스는 '버스트를 묶는 것' 이지 '블로킹 제거' 가 아니다**(A6-01 — IP 스캔 결과 저장): 큰 맵 저장은 조각 직렬화 + 비동기 tmp→fsync→rename, 종료 flush 는 동기,
+      동기 flush 가 진행 중 비동기 쓰기를 대체할 때 tmp 지우기 + 세대 검사(각각 단독으로도 막는 이중 방어). 스캔 결과·이력 파일은 한 줄 JSON 이다.
+    · ⚠⚠ **IP 원장 계산은 생성기 `ipam/ledger.js ipamRowsGen` 하나를 동기판(`buildIpamRows`)·양보판(`buildIpamRowsAsync`)이 같이 돈다**(A6-02) — 원장 행을 고칠 때 그것만 고칠 것.
+      store 는 원장 항목 2,000 이상이면 양보판이고, 더 새 호출이 오면 옛 계산을 취소, 도중 입력이 바뀌면 버리고, 3번 연달아 버려지면 한 번 동기(진행 보장). 쓰기·기억은
+      `_commitLedger` 하나(v2.619 입력 지문·v2.620 ABA 규칙 그대로). 남은 정지는 `ipam/db.js` 레코드 변환·전송(다음 회차 후보).
+    · 테스트에서 수만 행 객체를 `assert.equal`/`deepStrictEqual` 의 actual 로 넘기지 말 것 — 실패 시 보고기가 직렬화하다 프로세스가 메모리로 죽는다(G5a 변이 검증에서 SIGKILL).
+      `util.isDeepStrictEqual` + `assert.ok` 로.
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
