@@ -7,6 +7,7 @@ import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import { vcPowerSkippedNote } from '../readGapText.js'; // v2.733(C2-02)
 
 
 /** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
@@ -59,6 +60,7 @@ export function PowerMap({ scope }) {
         <Card label="법인 매핑" value={`${data.mappedServers} / ${data.totalServers}`} accent={data.unmappedServers ? 'var(--red)' : 'var(--green)'}
           meta={data.unmappedServers ? `미매핑 ${data.unmappedServers}대(${fmtWatts(data.unmappedWatts)})` : '전부 vCenter 매핑됨'} />
       </div>
+      {vcPowerSkippedNote(data.vcPowerSkipped) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ {vcPowerSkippedNote(data.vcPowerSkipped)}</div>}
       {data.unmappedServers > 0 && (
         <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--amber)' }}>
           <div style={{ fontSize: 13 }}>⚠ {data.unmappedServers}대({fmtWatts(data.unmappedWatts)})는 ESXi 호스트와 매핑되지 않아 <b>'(미매핑)'</b>으로 집계됩니다. 측정 전력 합계에는 포함됩니다.</div>

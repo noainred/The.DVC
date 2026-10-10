@@ -10,6 +10,9 @@
  *  · v2.721(감사 B1-04): 이벤트 읽기가 상한에서 잘렸으면(최신부터 읽으므로 readFrom 보다 오래된 이벤트가 입력에 없다)
  *    판정 창(부팅 전 24시간)이 readFrom 이하로 걸친 부팅은 근거가 빠졌을 수 있다 — 유지보수 근거가 보이지 않으면
  *    'unknown'·'unexpected' 로 단정하지 않고 'no-events' + readCut 으로 둔다(유지보수 근거가 보이면 그대로 planned).
+ *  · v2.733(점검 3회차 C1-01): coverageOf 가 why(이 포탈이 **지금** 그 vCenter 이벤트를 수집하지 않는 사유 — logs/coverage.js)를 주면
+ *    'no-events' 행에 notCollected(사유)를 싣고 counts 밖에서 noEventsNotCollected 로 센다 — '수집 실패·보관 기간 밖' 이 아니라
+ *    '지금 수집하지 않는다' 가 원인이다(엣지 위임·비활성·점검중). 분류 자체는 바꾸지 않는다.
  */
 const H = 3_600_000;
 export const PLANNED_WINDOW_MS = 24 * H;
@@ -31,7 +34,7 @@ export function analyzeReboots(hosts, events, { now = Date.now(), days = 30, vcN
   }
   const rows = [];
   const counts = { unexpected: 0, unknown: 0, 'no-events': 0, planned: 0 };
-  let bootUnknown = 0; let readCut = 0;
+  let bootUnknown = 0; let readCut = 0; let noEventsNotCollected = 0;
   const cutAt = Number.isFinite(readFrom) ? readFrom : null;
   for (const h of hosts || []) {
     if (h.connectionState === 'DISCONNECTED') continue;
@@ -52,14 +55,17 @@ export function analyzeReboots(hosts, events, { now = Date.now(), days = 30, vcN
     else if (lost) kind = 'unexpected';
     else kind = covered ? 'unknown' : 'no-events';
     counts[kind] += 1;
+    const ncWhy = kind === 'no-events' && typeof cov?.why === 'string' && cov.why ? cov.why : null;
+    if (ncWhy) noEventsNotCollected += 1;
     rows.push({
       id: h.id, name: h.name, vcenterId: h.vcenterId, vcenterName: vcName.get(h.vcenterId) || h.vcenterId, cluster: h.cluster || '',
       bootTime: boot, kind, readCut: !maint && cut,
       evidence: maint ? { type: maint.type, ts: maint.ts, user: maint.user || '' } : lost ? { type: lost.type, ts: lost.ts } : null,
       inMaintenanceNow: h.connectionState === 'MAINTENANCE',
+      ...(ncWhy ? { notCollected: ncWhy } : {}),
     });
   }
   const order = Object.fromEntries(REBOOT_KINDS.map((k, i) => [k, i]));
   rows.sort((a, b) => order[a.kind] - order[b.kind] || b.bootTime - a.bootTime);
-  return { days, since, counts, bootUnknown, readCut, rows: rows.slice(0, 500), omitted: Math.max(0, rows.length - 500) };
+  return { days, since, counts, bootUnknown, readCut, noEventsNotCollected, rows: rows.slice(0, 500), omitted: Math.max(0, rows.length - 500) };
 }

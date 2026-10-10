@@ -11,6 +11,11 @@
  *    같은 스캔을 메인 프로세스에서 시한 없이 처음부터 다시 돌렸다(재현: 데드라인 60초 + 인라인 75초 = 135초, 그동안
  *    TCP 소켓·ping 자식·역DNS 부하가 v2.363 이 떼어낸 메인 포탈로 돌아온다). 데드라인 오류에 code SCAN_DEADLINE 을 붙이고
  *    그 오류는 그대로 던진다 — 호출부(scanPoller·agent/ipScanWorker)가 이미 실패를 lastRun·스캔 로그·엣지 상태에 남긴다.
+ *  - v2.733(점검 3회차 C1-02 — 위 v2.732 수정이 만든 회귀): 데드라인 오류가 **아무 결과도 남기지 않아** 해제 판정이 그 대역의
+ *    살아 있는 IP 를 down 으로 바꿨다. 메인 재실행은 되살리지 않는다(그것이 v2.732 가 고친 결함이다). 대신 ① 워커가 1단계에서
+ *    찾은 생존 IP 를 미리 보내고('alive' 메시지 — scanWorker.js) 데드라인 오류에 `partialAlive`·`progress` 로 싣는다(부모는 마지막
+ *    확인 시각만 갱신한다 — 해제 판정 근거로 쓰지 않는다) ② 호출부가 그 에이전트의 '스캔 미완료' 를 기록하고 해제 판정은 완료된
+ *    스캔이 올 때까지 보류한다(scanStore.recordAgentIncomplete·sweepReleases).
  */
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +32,8 @@ const DEADLINE_MS = scanDeadlineMs(process.env.IPAM_SCAN_DEADLINE_MS);
 
 /** 데드라인 초과 오류의 표지(v2.732 B4-02) — 이 오류는 인라인으로 다시 돌리지 않는다. */
 export const SCAN_DEADLINE_CODE = 'SCAN_DEADLINE';
+/** v2.733: 데드라인 오류에 실어 보내는 부분 결과의 상한(scanStore MAX_MERGE 와 같은 값 — 한 번에 병합하는 상한). */
+export const PARTIAL_ALIVE_MAX = 20_000;
 
 /**
  * 워커 경로 실패를 같은 프로세스에서 다시 돌려도 되는가(순수).
@@ -75,6 +82,8 @@ function runInWorker(job, onProgress, deadlineMs) {
     try { child = fork(WORKER, [], { windowsHide: true }); }
     catch (e) { return reject(e); }
     let settled = false;
+    const partial = new Map(); // v2.733: ip → 행(워커가 미리 보낸 1단계 생존 IP) — 데드라인 오류에만 싣는다
+    let lastProgress = null;
     const finish = (fn, arg) => {
       if (settled) return; settled = true;
       clearTimeout(timer);
@@ -88,13 +97,22 @@ function runInWorker(job, onProgress, deadlineMs) {
       try { child.kill('SIGKILL'); } catch { /* */ }
       const err = new Error(`스캔 데드라인(${Math.round(deadlineMs / 1000)}s) 초과 — 자식 종료`);
       err.code = SCAN_DEADLINE_CODE;
+      err.partialAlive = [...partial.values()];   // v2.733: 시한 전에 찾은 생존 IP(호스트명 없음) — 비어 있을 수 있다
+      err.progress = lastProgress;                 // { done, total, alive } | null — 어디까지 스캔했는가(화면·로그)
       finish(reject, err);
     }, deadlineMs);
     timer.unref?.();
 
     child.on('message', (m) => {
       if (!m) return;
-      if (m.type === 'progress') { try { onProgress?.(m.done, m.total, m.alive); } catch { /* */ } return; }
+      if (m.type === 'progress') { lastProgress = { done: m.done, total: m.total, alive: m.alive }; try { onProgress?.(m.done, m.total, m.alive); } catch { /* */ } return; }
+      if (m.type === 'alive') {
+        for (const r of Array.isArray(m.rows) ? m.rows : []) {
+          if (partial.size >= PARTIAL_ALIVE_MAX) break;
+          if (r && typeof r.ip === 'string' && !partial.has(r.ip)) partial.set(r.ip, r);
+        }
+        return;
+      }
       if (m.type === 'done') return finish(resolve, { scanned: m.scanned, alive: m.alive || [], viaWorker: true });
       if (m.type === 'error') return finish(reject, new Error(m.message || '워커 오류'));
     });

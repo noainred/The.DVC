@@ -15,6 +15,7 @@ import { reclaimStorage, AGE_BUCKETS, ageBucketOf, ageCounts, corpOffShare, size
 // v2.578 D1·D3·D4: 기준선(언제부터의 자료인가)·해상도 인과·절단 사실 — 판정과 문구를 한 모듈이 소유한다.
 import { sinceNote, bucketAvgLabel, resolutionNote, truncationNote } from '../trendMeta.js';
 import { samplerWithheldNote } from '../samplerWithheldText.js'; // v2.628(LEFT2628-01)
+import { capacityUnknownNote, ratioText } from '../readGapText.js'; // v2.733(C2-06): 용량을 못 읽은 호스트(REST 폴백)
 
 
 /** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
@@ -79,10 +80,11 @@ export function Capacity({ scope }) {
     { key: 'vcenterId', label: 'vCenter', render: (c) => <span className="muted">{c.vcenterId}</span> },
     { key: 'hosts', label: '호스트', align: 'right' },
     { key: 'vmsOn', label: 'VM(On)', align: 'right', render: (c) => `${c.vmsOn}/${c.vms}` },
-    { key: 'cores', label: '물리코어', align: 'right' },
+    // v2.733(C2-06): 용량을 못 읽은 호스트가 섞인 클러스터는 서버가 null 을 준다 — 0:1·0%(초록)로 그리지 않는다.
+    { key: 'cores', label: '물리코어', align: 'right', render: (c) => (c.cores == null ? '—' : c.cores) },
     { key: 'vcpuAllocated', label: '할당 vCPU', align: 'right' },
-    { key: 'vcpuPerCore', label: 'vCPU:코어', align: 'right', render: (c) => <span className={`badge ${c.vcpuPerCore >= 4 ? 'red' : c.vcpuPerCore >= 3 ? 'amber' : 'green'}`}>{c.vcpuPerCore}:1</span> },
-    { key: 'ramOvercommitPct', label: 'RAM 오버커밋', align: 'right', render: (c) => <span className={`badge ${c.ramOvercommitPct >= 100 ? 'red' : c.ramOvercommitPct >= 85 ? 'amber' : 'green'}`}>{c.ramOvercommitPct}%</span> },
+    { key: 'vcpuPerCore', label: 'vCPU:코어', align: 'right', render: (c) => (c.vcpuPerCore == null ? <span className="muted" title={capacityUnknownNote(c.capacityUnknown) || ''}>—</span> : <span className={`badge ${c.vcpuPerCore >= 4 ? 'red' : c.vcpuPerCore >= 3 ? 'amber' : 'green'}`}>{ratioText(c.vcpuPerCore)}</span>) },
+    { key: 'ramOvercommitPct', label: 'RAM 오버커밋', align: 'right', render: (c) => (c.ramOvercommitPct == null ? <span className="muted" title={capacityUnknownNote(c.capacityUnknown) || ''}>—</span> : <span className={`badge ${c.ramOvercommitPct >= 100 ? 'red' : c.ramOvercommitPct >= 85 ? 'amber' : 'green'}`}>{c.ramOvercommitPct}%</span>) },
     { key: 'cpuUsedPct', label: 'CPU 사용', render: (c) => <UsageCell pct={c.cpuUsedPct} /> },
     { key: 'memUsedPct', label: '메모리 사용', render: (c) => <UsageCell pct={c.memUsedPct} /> },
     { key: 'ramHeadroomGB', label: 'RAM 여유', align: 'right', render: (c) => tb(c.ramHeadroomGB) },
@@ -92,11 +94,12 @@ export function Capacity({ scope }) {
       {tabs}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="클러스터" value={t.clusters} meta={`호스트 ${t.hosts}`} />
-        <Card label="물리코어 / 할당 vCPU" value={`${t.cores} / ${t.vcpuAllocated}`} meta={`${t.vcpuPerCore}:1 평균`} accent={t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
+        <Card label="물리코어 / 할당 vCPU" value={`${t.cores == null ? '—' : t.cores} / ${t.vcpuAllocated}`} meta={`${ratioText(t.vcpuPerCore)} 평균`} accent={t.vcpuPerCore != null && t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
         <Card label="메모리 / 할당" value={`${tb(t.memTotalGB)} / ${tb(t.ramAllocatedGB)}`} />
-        <Card label="RAM 여유(헤드룸)" value={tb(t.ramHeadroomGB)} accent={t.ramHeadroomGB <= 0 ? 'var(--red)' : 'var(--green)'} />
+        <Card label="RAM 여유(헤드룸)" value={tb(t.ramHeadroomGB)} accent={t.ramHeadroomGB == null ? undefined : t.ramHeadroomGB <= 0 ? 'var(--red)' : 'var(--green)'} />
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>오버커밋: vCPU:코어 ≥4 또는 RAM ≥100%면 과밀(빨강). RAM 여유 = 물리RAM − 할당(전원 On).</div>
+      {capacityUnknownNote(t.capacityUnknown) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ {capacityUnknownNote(t.capacityUnknown)} 합계의 vCPU:코어·RAM 여유는 용량을 다 읽은 클러스터만으로 계산했습니다.</div>}
       <DataTable columns={cols} rows={data.clusters} initialSort={{ key: 'ramOvercommitPct', dir: 'desc' }} />
     </>
   );

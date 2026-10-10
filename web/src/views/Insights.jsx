@@ -10,6 +10,7 @@ import {
 // 표시 포맷터는 util/fmt.js 로 통합(v2.319 모듈화 #9 — 본문 동일 이동, 기능 무변)
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
+import { vcPowerSkippedNote } from './readGapText.js'; // v2.733(C2-02): 지금 값이 아니라 뺀 vCenter 추정 전력
 import { forecastPctText, forecastLimitKind } from './forecastRowText.js';
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
@@ -68,6 +69,7 @@ function FinOps() {
   return (
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 서버 {d.measuredHosts}대(인벤토리 {d.totalHosts}호스트).{d.unmappedServers > 0 ? ` · ⚠ 미매핑 ${d.unmappedServers}대(${fmtW(d.unmappedWatts)})는 '(미매핑)'으로 집계 — ESXi 호스트명과 매핑하면 vCenter별로 귀속됩니다.` : ''}</p>
+      {vcPowerSkippedNote(d.vcPowerSkipped) && <p className="muted" style={{ fontSize: 12, marginTop: 0, color: 'var(--amber)' }}>⚠ {vcPowerSkippedNote(d.vcPowerSkipped)}</p>}
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Kpi label="현재 소비전력" value={fmtW(d.totals.watts)} sub={`설비 포함 ${fmtW(d.totals.facilityWatts)}`} />
         <Kpi label="월 에너지" value={fmtWh(d.totals.kwhMonth)} sub={`연 ${fmtWh(d.totals.kwhYear)}`} />

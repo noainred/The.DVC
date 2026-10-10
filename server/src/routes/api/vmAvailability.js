@@ -15,6 +15,7 @@ import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { analyzeAvailability, TAIL_TOLERANCE_MS } from '../../availability/analyze.js';
 import { logCollectOkAt } from '../../logs/poller.js'; // v2.731(A2-01): vCenter 별 마지막 이벤트 수집 성공 시각 — 측정 끝의 근거
+import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { AVAIL_TYPES, LIFE_TYPES } from '../../vmchanges/eventDetail.js';
 
 const toolsPerm = requirePerm('tools');
@@ -69,7 +70,10 @@ async function run(req, snap) {
   const readFrom = truncated && rows.length ? rows[rows.length - 1].ts : null;
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
   // v2.731(A2-01): okAt — 로그 폴러가 남긴 그 vCenter 의 마지막 수집 성공(이벤트가 온전한 시각). 측정 끝을 정한다.
-  const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, okAt: logCollectOkAt(id) }]));
+  // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter 는 why(사유)를 싣는다 — 측정 끝을 마지막 이벤트 시각으로 자르고
+  //   (허용치 없이 — 그 뒤를 받을 일이 없다는 것을 안다) 화면이 '수집 실패' 가 아니라 '지금 수집하지 않음' 이라 말한다.
+  const nc = eventNotCollectedMap();
+  const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, okAt: logCollectOkAt(id), why: nc.get(id) || null }]));
   const s = loadLogSettings();
   const tailToleranceMs = tailToleranceOf(s);
   const r = analyzeAvailability(rows, scoped.vms, {
@@ -77,7 +81,7 @@ async function run(req, snap) {
     q: qStr(req.query.q, 128), onlyBelow: req.query.below === '1', readFrom, tailToleranceMs,
   });
   // 잘렸으면 '가장 최근 N건' 만 본 것이다 — v2.719(B1-01): 그 경계(readFrom) 이후만 쟀고 화면이 그 사실을 말한다.
-  return { ...r, truncated, readMax: AVAIL_READ_MAX, tailToleranceMs, logs: { enabled: s.enabled, retentionDays: s.retentionDays, minSeverity: s.minSeverity } };
+  return { ...r, truncated, readMax: AVAIL_READ_MAX, tailToleranceMs, notCollected: notCollectedList(nc, { only: ids, names: vcName }), logs: { enabled: s.enabled, retentionDays: s.retentionDays, minSeverity: s.minSeverity } };
 }
 
 export function registerVmAvailability(api) {

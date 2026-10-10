@@ -5,7 +5,7 @@ import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields } 
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
-import { store, usageReadable } from '../../store.js';
+import { store, usageReadable, hostCapacityKnown } from '../../store.js'; // v2.733(C2-06): 용량 판정도 store 하나
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
 import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
@@ -75,9 +75,14 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   const key = (h) => `${h.vcenterId}|${h.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
-    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
-    c.hosts++; c.cores += h.cpuCores || 0; c.cpuTotalMhz += h.cpuTotalMhz || 0;
-    c.memTotalGB += (h.memTotalMB || 0) / 1024;
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    c.hosts++;
+    // v2.733(점검 3회차 C2-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)는 용량 합에 0 으로
+    //   넣지 않고 센다(capacityUnknown). 예전에는 그 법인이 코어 0 · vCPU:코어 0 · RAM 오버커밋 0% 로 보였다.
+    if (hostCapacityKnown(h)) {
+      c.cores += h.cpuCores; c.cpuTotalMhz += h.cpuTotalMhz;
+      c.memTotalGB += h.memTotalMB / 1024;
+    } else c.capUnknown++;
     // v2.606(감사 WEB2606-02): 사용량·사용률은 사용량을 읽을 수 있는 호스트만(용량 합계는 전부) — store.usageReadable(v2.594)
     // 과 같은 기준. 끊긴 호스트의 총량을 분모에 넣으면 사용률이 그만큼 낮아 보인다.
     if (usageReadable(h)) {
@@ -93,26 +98,41 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     c.vcpuAll += v.cpuCount || 0;
     if (on) { c.vcpuOn += v.cpuCount || 0; c.ramOnGB += (v.memMB || 0) / 1024; c.vmsOn++; }
   }
-  const clusters = [...byCluster.values()].map((c) => ({
-    vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
-    cores: c.cores, memTotalGB: Math.round(c.memTotalGB),
-    vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
-    vcpuPerCore: c.cores ? r1(c.vcpuOn / c.cores) : 0,
-    ramOvercommitPct: c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
-    cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
-    memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
-    hostsUsageExcluded: c.excluded,
-    ramHeadroomGB: Math.round(c.memTotalGB - c.ramOnGB),
-  })).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct);
-  const sum = (f) => clusters.reduce((a, x) => a + f(x), 0);
+  // v2.733(C2-06): 용량을 못 읽은 호스트가 섞인 클러스터의 총량·비율·여유는 **부분 합**이다 — VM 할당은 그 호스트들의 몫까지 들어 있어
+  //   분모만 빠진 비율은 틀린 값이다. 그 칸은 null('—')이고 capacityUnknown 으로 밝힌다(전부 못 읽었으면 코어·메모리 총량도 null).
+  const clusters = [...byCluster.values()].map((c) => {
+    const capOk = c.capUnknown === 0;
+    const allUnknown = c.capUnknown === c.hosts;
+    return {
+      vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
+      cores: allUnknown ? null : c.cores, memTotalGB: allUnknown ? null : Math.round(c.memTotalGB),
+      vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
+      vcpuPerCore: !capOk ? null : c.cores ? r1(c.vcpuOn / c.cores) : 0,
+      ramOvercommitPct: !capOk ? null : c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
+      cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
+      memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
+      hostsUsageExcluded: c.excluded,
+      capacityUnknown: c.capUnknown,
+      ramHeadroomGB: capOk ? Math.round(c.memTotalGB - c.ramOnGB) : null,
+    };
+  }).sort((a, b) => (b.ramOvercommitPct ?? -1) - (a.ramOvercommitPct ?? -1)); // null(모름)은 뒤로
+  const sum = (f) => clusters.reduce((a, x) => a + (f(x) || 0), 0);
+  // 합계의 비율·여유는 **용량을 다 읽은 클러스터끼리만** 낸다(분자·분모가 같은 집합). 코어·메모리 총량은 읽은 값의 합이고
+  //   뺀 호스트 수를 capacityUnknown 으로 함께 싣는다 — 전부 못 읽었으면 null(0 코어라는 거짓 금지).
+  const known = clusters.filter((c) => c.capacityUnknown === 0);
+  const sumK = (f) => known.reduce((a, x) => a + (f(x) || 0), 0);
+  const capacityUnknown = sum((c) => c.capacityUnknown);
+  const hostsTotal = sum((c) => c.hosts);
+  const allCapUnknown = hostsTotal > 0 && capacityUnknown === hostsTotal;
   return {
     scope: vcId || 'all',
     clusters,
     totals: {
-      clusters: clusters.length, hosts: sum((c) => c.hosts), hostsUsageExcluded: sum((c) => c.hostsUsageExcluded), cores: sum((c) => c.cores),
-      memTotalGB: sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
-      vcpuPerCore: sum((c) => c.cores) ? r1(sum((c) => c.vcpuAllocated) / sum((c) => c.cores)) : 0,
-      ramHeadroomGB: sum((c) => c.ramHeadroomGB),
+      clusters: clusters.length, hosts: hostsTotal, hostsUsageExcluded: sum((c) => c.hostsUsageExcluded),
+      capacityUnknown, cores: allCapUnknown ? null : sum((c) => c.cores),
+      memTotalGB: allCapUnknown ? null : sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
+      vcpuPerCore: sumK((c) => c.cores) ? r1(sumK((c) => c.vcpuAllocated) / sumK((c) => c.cores)) : (capacityUnknown ? null : 0),
+      ramHeadroomGB: known.length || !capacityUnknown ? sumK((c) => c.ramHeadroomGB) : null,
     },
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));

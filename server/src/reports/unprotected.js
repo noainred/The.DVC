@@ -91,7 +91,11 @@ export function computeUnprotected(vms, rows, opts = {}) {
   const covered = opts.coveredVcenterIds == null ? null
     : new Set([...(opts.coveredVcenterIds instanceof Set ? opts.coveredVcenterIds : opts.coveredVcenterIds)].map(String));
   //   · opts.notCollectedVcenterIds(v2.732) — 이 포탈이 지금 직접 수집하지 않는 vCenter. 창 안에 옛 이벤트가 있어도 판정 불가('not-collected').
-  const notCollected = opts.notCollectedVcenterIds == null ? null : new Set([...opts.notCollectedVcenterIds].map(String));
+  //     v2.733(C1-01): Map(id → 사유)도 받는다(logs/coverage.js eventNotCollectedMap) — 사유는 summary.notCollectedVcenters 에 싣는다.
+  const ncWhy = opts.notCollectedVcenterIds instanceof Map
+    ? new Map([...opts.notCollectedVcenterIds].map(([k, v]) => [String(k), v == null ? null : String(v)])) : null;
+  const notCollected = opts.notCollectedVcenterIds == null ? null
+    : ncWhy ? new Set(ncWhy.keys()) : new Set([...opts.notCollectedVcenterIds].map(String));
   const undeterminedList = [];
   const undeterminedByReason = {};
   const unprotectedList = [];
@@ -116,6 +120,11 @@ export function computeUnprotected(vms, rows, opts = {}) {
   undeterminedList.sort(byStorageDesc);
   const noEventVcenters = covered
     ? [...new Set(undeterminedList.filter((x) => x.reason === 'no-events').map((x) => String(x.vcenterId)))] : [];
+  // v2.733(C1-01): 지금 수집하지 않아 판정하지 않은 vCenter 별 개수·사유(사유를 모르면 null — Set 으로 받은 경우).
+  const ncCount = new Map();
+  for (const x of undeterminedList) if (x.reason === 'not-collected') ncCount.set(String(x.vcenterId), (ncCount.get(String(x.vcenterId)) || 0) + 1);
+  const notCollectedVcenters = [...ncCount].map(([vcenterId, vms]) => ({ vcenterId, why: ncWhy ? (ncWhy.get(vcenterId) ?? null) : null, vms }))
+    .sort((a, b) => b.vms - a.vms || (a.vcenterId < b.vcenterId ? -1 : 1));
   unprotectedList.sort(byStorageDesc);
   protectedList.sort((a, b) => b.lastBackupTs - a.lastBackupTs);
 
@@ -136,6 +145,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
       undeterminedCount: undeterminedList.length,        // v2.622(DATA-05): 이벤트 미수집으로 판정하지 않은 가동 VM 수
       undeterminedByReason,                              // { 'log-collection-off' | 'severity-filter' | 'no-events': N }
       noEventVcenters,                                   // 조회 창 안 이벤트가 0건이라 판정하지 않은 vCenter id
+      notCollectedVcenters,                              // v2.733: 지금 수집하지 않아 판정하지 않은 vCenter {vcenterId, why, vms}
       coverageKnown: covered != null || ls != null,      // 호출자가 커버리지 근거를 줬는가(false 면 예전 판정 그대로)
     },
     unprotected: unprotectedList.slice(0, 1000),

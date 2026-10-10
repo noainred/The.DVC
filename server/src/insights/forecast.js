@@ -6,6 +6,7 @@
  */
 
 import { getMetricsDb } from '../metrics/db.js';
+import { loadMetricsSettings } from '../metrics/settings.js';
 import { createYielder } from '../util/timeSlice.js';
 
 // 최소제곱 선형회귀. points=[{x(ms), y}] → { slopePerDay, intercept, r2 }.
@@ -42,6 +43,11 @@ export async function forecastCapacity(snap, opts = {}) {
   const maybeYield = createYielder(15);   // 시간 기준 양보(개수 기준은 한 건이 느리면 못 막는다)
   const minR2 = opts.minR2 != null ? Number(opts.minR2) : 0.3;
   const now = Date.now();
+  // v2.733(점검 3회차 C2-07): 마지막 점의 신선도 경계. 수집이 이어지면 마지막 버킷의 시작은 지금에서 한 버킷(표본 주기가 버킷보다
+  //   길면 한 주기) 안이다 — 수집·롤업 지연 여유로 두 칸을 더 둔 ×3(저장소의 '주기 × 3' 신선도 규약과 같은 배수). 넘으면 stale.
+  let sampleMs = 60_000;
+  try { const s = Number(loadMetricsSettings()?.sampleIntervalMs); if (Number.isFinite(s) && s > 0) sampleMs = s; } catch { /* 설정을 못 읽으면 기본 1분 */ }
+  const staleAfterMs = Math.max(bucketMs, sampleMs) * 3;
 
   const vcFilter = opts.vcenterId ? String(opts.vcenterId) : '';
   // 사용자 scope 허용 vCenter 집합(v2.288, 확정 버그: GPU 예측 scope 우회). null=무제한.
@@ -64,12 +70,18 @@ export async function forecastCapacity(snap, opts = {}) {
     const lr = linreg(pts);
     if (!lr || lr.r2 < minR2) return null;
     const current = pts[pts.length - 1].y;
+    // v2.733(C2-07 — 재현: 같은 추세에서 5일 전 멈춘 DS 가 41일, 신선한 DS 가 36일): current 는 **마지막 점의 값**이므로 남은 기간도
+    //   마지막 점 시각(lastTs — 그 버킷의 시작)에서 센다. 예전처럼 지금부터 세면 수집이 멈춘 동안의 증가가 빠져 남은 시간을 더 길게
+    //   말한다(위험한 방향). daysToLimit 은 화면 계약대로 '지금부터 N일' 이고, 추세상 이미 지났으면 0(음수 아님). 버킷 시작 기준이라
+    //   신선한 DS 의 ETA 는 예전보다 최대 반 버킷 이르다(안전한 쪽).
+    const lastTs = pts[pts.length - 1].x;
+    const stale = now - lastTs > staleAfterMs;
     let daysToLimit = null, etaTs = null;
     if (lr.slopePerDay > 0 && cap > current) {
-      daysToLimit = (cap - current) / lr.slopePerDay;
-      etaTs = now + daysToLimit * DAY;
+      etaTs = lastTs + ((cap - current) / lr.slopePerDay) * DAY;
+      daysToLimit = Math.max(0, Math.round((etaTs - now) / DAY));
     }
-    return { current: Number(current.toFixed(1)), slopePerDay: Number(lr.slopePerDay.toFixed(2)), r2: Number(lr.r2.toFixed(2)), daysToLimit: daysToLimit == null ? null : Math.round(daysToLimit), etaTs };
+    return { current: Number(current.toFixed(1)), slopePerDay: Number(lr.slopePerDay.toFixed(2)), r2: Number(lr.r2.toFixed(2)), daysToLimit, etaTs, lastTs, stale };
   };
 
   // 데이터스토어 포화 예측
@@ -97,7 +109,7 @@ export async function forecastCapacity(snap, opts = {}) {
   gpu.sort((a, b) => (a.daysToLimit ?? 1e9) - (b.daysToLimit ?? 1e9));
 
   return {
-    config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '', source: readRollup ? 'rollup' : 'unavailable' },
+    config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '', source: readRollup ? 'rollup' : 'unavailable', staleAfterMs },
     scannedDatastores: dsCap.size,
     datastores: datastores.slice(0, 100),
     gpu: gpu.slice(0, 100),

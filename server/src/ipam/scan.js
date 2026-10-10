@@ -212,9 +212,10 @@ async function reverseMany(ips, limit = 16) {
  *   1) 전 IP TCP 프로브(동시성 제한) → 열린 포트로 생존 판정.
  *   2) 포트가 전부 닫힌 IP만 ping(fping 배치 우선 / 폴백 capped per-IP) — 방화벽 서버 갭 보강.
  * 마지막에 생존 IP만 역DNS. onProgress(done,total,alive) 는 1단계(TCP) 기준으로 보고.
+ * onTcpAlive(row) 는 1단계에서 열린 포트를 찾을 때마다 부른다(v2.733 — 시한 초과 시 부분 결과. hostname 은 빈 값).
  * 반환·항목 형태는 이전과 동일: { scanned, alive:[{ip,openPorts,services,hostname}] }.
  */
-export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, ping = true, onAlive, onProgress } = {}) {
+export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, ping = true, onAlive, onTcpAlive, onProgress } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
@@ -227,7 +228,12 @@ export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 1
   // v2.575 IMP-08: 동시성 풀 단일 소스. `tcpPortsOf` 의 실패는 이미 `.catch` 로 삼킨다.
   await poolRun(ips, concurrency, async (ip) => {
     const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
-    if (open.length) tcp.set(ip, open);
+    if (open.length) {
+      tcp.set(ip, open);
+      // v2.733(점검 3회차 C1-02): 1단계에서 찾은 생존 IP 를 바로 알린다 — 워커가 시한에 걸려 죽어도 부모가 '부분 결과' 로
+      //   마지막 확인 시각을 갱신할 수 있게(호스트명은 아직 없다 — 역DNS 는 마지막 단계다). 콜백 오류가 스캔을 깨지 않게.
+      try { onTcpAlive?.({ ip, openPorts: open, services: open.map(portService), hostname: '' }); } catch { /* 부분 결과는 보조 */ }
+    }
     done++;
     onProgress?.(done, total, tcp.size);
   });

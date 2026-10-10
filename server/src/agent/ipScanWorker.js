@@ -9,9 +9,10 @@
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { runScan } from '../ipam/scanRunner.js';
+import { runScan, SCAN_DEADLINE_CODE } from '../ipam/scanRunner.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { centralStatusOnlySupport } from './centralStatusOnly.js'; // v2.733: 중앙 버전 확인(health-probe — 1시간 캐시) 공용
 
 let timer = null;
 let last = null;
@@ -58,6 +59,40 @@ function headers() {
   return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
+/*
+ * v2.733(점검 3회차 C1-02 — v2.732 B4-02 가 만든 회귀): 스캔이 시한(SCAN_DEADLINE)·실패로 끝나면 예전에는 중앙에 **아무것도** 보내지 않았다.
+ *   중앙의 해제 판정은 '마지막으로 본 시각' 만 봐서 이 엣지 대역의 살아 있는 IP 를 3시간 뒤 down 으로 바꿨다. 이제 기존 결과 보고
+ *   (/api/central/ip-scan-result)에 `incomplete:{code, reason, total}` 를 **더해** 알리고, 시한 전에 찾은 생존 IP(부분 결과)를 alive 로 싣는다.
+ *   중앙은 그것을 완료로 기록하지 않고(마지막 확인 시각만 갱신) 이 엣지의 해제 판정을 보류한다.
+ *   ⚠ 구버전 중앙(< IPSCAN_INCOMPLETE_MIN_CENTRAL)은 incomplete 를 모르고 그 보고를 **완료된 스캔** 으로 기록한다(화면이 '정상' 이라 말한다) —
+ *   그래서 health-probe 로 버전을 먼저 보고, 모르거나 낮으면 보내지 않고 사유만 남긴다(예전과 같은 동작 — 중앙 쪽 보류는 'no-recent-scan' 이 덮는다).
+ *   재전송하지 않는다(retries 0 — 중복이면 연속 횟수가 부풀고, 못 보내도 중앙은 완료 보고 부재로 보류한다).
+ */
+/** `/ip-scan-result` 의 incomplete 필드를 아는 첫 중앙 버전. */
+export const IPSCAN_INCOMPLETE_MIN_CENTRAL = '2.733.0';
+const REPORT_ALIVE_MAX = 8000; // 중앙 수신 상한과 같은 값(routes/central.js — 넘치면 중앙이 omitted 로 밝힌다)
+async function reportScanIncomplete(err, durationMs) {
+  const partial = Array.isArray(err?.partialAlive) ? err.partialAlive.slice(0, REPORT_ALIVE_MAX) : [];
+  const cap = await centralStatusOnlySupport({ minVersion: IPSCAN_INCOMPLETE_MIN_CENTRAL });
+  if (!cap.ok) return { sent: false, reason: cap.reason, ...(cap.version ? { centralVersion: cap.version } : {}), partial: partial.length };
+  const done = Number.isFinite(err?.progress?.done) ? err.progress.done : null;
+  const total = Number.isFinite(err?.progress?.total) ? err.progress.total : null;
+  try {
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
+      method: 'POST', headers: headers(), timeoutMs: 30_000, retries: 0,
+      body: JSON.stringify({
+        agent: config.agent.name, alive: partial, scanned: done, durationMs,
+        incomplete: { code: err?.code === SCAN_DEADLINE_CODE ? SCAN_DEADLINE_CODE : 'error', reason: String(err?.message || err).slice(0, 300), total },
+      }),
+    });
+    if (!res.ok) return { sent: false, reason: `result ${res.status}`, partial: partial.length };
+    const drop = ipScanDropOf(await readCentralReply(res));
+    return { sent: true, partial: partial.length, ...(drop ? { centralDropped: drop } : {}) };
+  } catch (e) {
+    return { sent: false, reason: String(e?.message || e).slice(0, 160), partial: partial.length };
+  }
+}
+
 /**
  * 배정을 읽고 스캔·보고한다. 직접 호출(테스트·수동)은 언제나 스캔한다. 타이머는 `{dueOnly:true}` — 마지막 스캔 뒤 주기가 지나지
  * 않았으면 배정만 다시 읽고(주기 반영) 스캔하지 않는다. `now` 는 시각 판정용(테스트 주입).
@@ -94,12 +129,19 @@ export async function runIpScanAgentOnce(...args) {
     //   (기준을 '성공' 으로만 두면 배정 재확인 간격마다 대역 전체를 다시 스캔해 실패 상황의 부하가 몇 배가 된다).
     let scanOut;
     phase = 'scan';
+    const scanStarted = Date.now();
+    let scanErr = null;
     try {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
       });
-    } finally { _lastScanAt = Date.now(); }
+    } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); }
+    if (scanErr) {
+      // v2.733 C1-02: 실패를 중앙에 '스캔 미완료' 로 알린다(부분 결과 포함 — 위 reportScanIncomplete). 기록은 아래 catch 가 상태·콘솔에 남긴다.
+      if (scanErr && typeof scanErr === 'object') scanErr.incompleteReport = await reportScanIncomplete(scanErr, _lastScanAt - scanStarted);
+      throw scanErr;
+    }
     const { alive, scanned } = scanOut;
     phase = 'report';
     const rRes = await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
@@ -119,9 +161,11 @@ export async function runIpScanAgentOnce(...args) {
     // v2.583 감사 #34: 무음 실패 금지(v2.549·v2.561 규약) — 상태에 남기고(엣지 로그 표에 등재) 콘솔에도 적는다.
     const msg = String(e?.message || e);
     streak = (last?.error ? streak : 0) + 1;
-    last = { at: Date.now(), error: msg, kind: /\b403\b/.test(msg) ? 'auth' : /\b413\b/.test(msg) ? 'too-large' : 'error', streak, phase };
+    const inc = e && typeof e === 'object' ? e.incompleteReport : null; // v2.733: 스캔 미완료를 중앙에 알렸는가
+    last = { at: Date.now(), error: msg, kind: /\b403\b/.test(msg) ? 'auth' : /\b413\b/.test(msg) ? 'too-large' : 'error', streak, phase,
+      ...(e?.code === SCAN_DEADLINE_CODE ? { code: SCAN_DEADLINE_CODE } : {}), ...(inc ? { incompleteReport: inc } : {}) };
     if (phase !== 'assignment') _lastScanRecord = last;
-    console.warn(`[ipscan-agent] 실패(연속 ${streak}회): ${msg}`);
+    console.warn(`[ipscan-agent] 실패(연속 ${streak}회): ${msg}${inc ? (inc.sent ? ` — 중앙에 스캔 미완료로 보고(생존 IP ${inc.partial}개 포함)` : ` — 중앙에 미완료 보고를 보내지 않음(${inc.reason})`) : ''}`);
     return last;
   }
   finally { running = false; }

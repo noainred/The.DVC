@@ -21,6 +21,9 @@
  *    지금과의 차이가 허용치(tailToleranceMs — 수집 주기 기준) 안이면 예전처럼 '지금' 이다. 잘린 vCenter 의 VM 은 그 시각까지만
  *    재고(그때까지 이벤트가 온전하므로 그 시각의 전원 상태는 이벤트로 안다) 개수를 staleTail 로 밝힌다. 끝이 기간 시작보다
  *    이르면 측정 구간이 없다 — 판정하지 않고 stoppedEarly 로 센다(시계 어긋남이 아니다).
+ *  · v2.733(점검 3회차 C1-01): coverageOf 가 why(이 포탈이 **지금** 그 vCenter 이벤트를 수집하지 않는 사유 — 엣지 위임·비활성·점검중,
+ *    logs/coverage.js)를 주면 측정 끝은 허용치 없이 마지막으로 받은 이벤트 시각이다(그 뒤를 받을 일이 없다는 것을 안다 — 남은 옛 이벤트로
+ *    지금까지를 가동으로 세지 않는다). 그 vCenter 들은 cov.notCollectedVcenters·notCollectedVms 로 따로 세고 vcenters[].notCollected 로 싣는다.
  */
 import { AVAIL_TYPES } from '../vmchanges/eventDetail.js';
 
@@ -78,7 +81,8 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
   // v2.719: readCut(상한으로 앞이 잘려 짧게 잰 VM) · missedOff(끔 이벤트 누락 — 판정 보류) · clockSkew(측정 구간 0 이하 — 판정 보류)
   // v2.731(A2-01): staleTail(수집이 멈춰 측정 끝을 자른 VM — 측정됨) · stoppedEarly(수집이 측정 시작 전에 멈춰 측정 구간이 없는 VM — 판정 안 함)
   const cov = { vms: 0, measured: 0, noEvents: 0, partialWindow: 0, inconsistent: 0, missedOff: 0, offAll: 0, clockSkew: 0, readCut: 0, belowTarget: 0,
-    staleTail: 0, stoppedEarly: 0, tailVcenters: 0, tailMaxAgeMs: null, tailFromLastEvent: 0 };
+    staleTail: 0, stoppedEarly: 0, tailVcenters: 0, tailMaxAgeMs: null, tailFromLastEvent: 0,
+    notCollectedVcenters: 0, notCollectedVms: 0, tailNotCollected: 0 };
   const perVc = new Map();
   const out = [];
   const seen = new Set();
@@ -89,12 +93,15 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
     seen.add(k);
     cov.vms += 1;
     const c = coverageOf(v.vcenterId);
-    const vc = perVc.get(v.vcenterId) || { vcenterId: v.vcenterId, name: vcName.get(v.vcenterId) || v.vcenterId, vms: 0, measured: 0, below: 0, downMs: 0, spanMs: 0, min: null, noEvents: 0, from: null, tail: null, stoppedEarly: 0, staleTail: 0 };
+    const vc = perVc.get(v.vcenterId) || { vcenterId: v.vcenterId, name: vcName.get(v.vcenterId) || v.vcenterId, vms: 0, measured: 0, below: 0, downMs: 0, spanMs: 0, min: null, noEvents: 0, from: null, tail: null, stoppedEarly: 0, staleTail: 0,
+      why: typeof c?.why === 'string' && c.why ? c.why : null };
     perVc.set(v.vcenterId, vc);
     vc.vms += 1;
+    if (vc.why) cov.notCollectedVms += 1;
     if (!c || !Number.isFinite(c.lastTs) || !c.lastTs) { cov.noEvents += 1; vc.noEvents += 1; continue; }
     // v2.731(A2-01): 측정 끝 — 그 vCenter 의 이벤트가 온전한 마지막 시각(vCenter 마다 한 번).
-    if (!vc.tail) vc.tail = measureEndOf(c, now, tailToleranceMs);
+    // v2.733(C1-01): 지금 수집하지 않는 vCenter 는 허용치 0 — 마지막으로 받은 이벤트 시각에서 끊는다.
+    if (!vc.tail) vc.tail = measureEndOf(c, now, vc.why ? 0 : tailToleranceMs);
     const end = vc.tail.end;
     const tailCut = vc.tail.cut;
     const born = (byVm.get(k) || []).filter((e) => BORN.has(e.type) && e.ts <= end).reduce((m, e) => Math.max(m, e.ts), 0);
@@ -168,9 +175,12 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
   // v2.731(A2-01): 측정 끝을 잘라 잰 VM 이 있는 vCenter — 개수·가장 오래 멈춘 시간·그중 수집 성공 기록이 없어 마지막 이벤트 시각을 쓴 곳.
   //   (측정 구간이 아예 없는 vCenter 는 stoppedEarly 가 따로 말한다)
   for (const x of perVc.values()) {
+    if (x.why) cov.notCollectedVcenters += 1;
     if (!x.tail?.cut || !x.staleTail) continue;
     cov.tailVcenters += 1;
-    if (x.tail.source === 'last-event') cov.tailFromLastEvent += 1;
+    if (x.why) cov.tailNotCollected += 1;
+    // v2.733: 지금 수집하지 않는 vCenter 는 '수집 성공 기록이 없다(재시작 직후·계속 실패)' 가 아니다 — tailNotCollected 가 따로 말한다.
+    if (x.tail.source === 'last-event' && !x.why) cov.tailFromLastEvent += 1;
     const age = now - x.tail.end;
     if (cov.tailMaxAgeMs == null || age > cov.tailMaxAgeMs) cov.tailMaxAgeMs = age;
   }
@@ -180,6 +190,7 @@ export function analyzeAvailability(rows, vms, { days = 30, now = Date.now(), ta
     availability: x.spanMs > 0 ? pctOf(x.downMs, x.spanMs) : null, min: x.min, windowFrom: x.from,
     // v2.731(A2-01): 측정 끝 — 잘렸으면 그 시각(아니면 null = 지금), 근거('collect' 수집 성공 · 'last-event' 마지막 이벤트 · null 판정 안 함)
     tailCut: !!x.tail?.cut, measuredUntil: x.tail?.cut ? x.tail.end : null, untilSource: x.tail?.source ?? null, stoppedEarly: x.stoppedEarly,
+    notCollected: x.why,   // v2.733: 이 포탈이 지금 이 vCenter 이벤트를 수집하지 않는 사유(아니면 null)
   })).sort((a, b) => (a.availability ?? 101) - (b.availability ?? 101));
   let dAll = 0; let sAll = 0;
   for (const x of perVc.values()) { dAll += x.downMs; sAll += x.spanMs; }

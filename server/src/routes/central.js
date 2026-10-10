@@ -73,7 +73,7 @@ import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
-import { loadScanSettings, mergeScanResults, recordAgentReport, scanSettingsLoadError } from '../ipam/scanStore.js';
+import { loadScanSettings, mergeScanResults, recordAgentReport, recordAgentIncomplete, scanSettingsLoadError } from '../ipam/scanStore.js';
 import { recordScanLog } from '../ipam/scanLog.js'; // v2.636: 엣지 스캔 보고·거부를 실행 로그에
 import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: 엣지가 잰 통신 링크 결과 수신
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
@@ -2239,9 +2239,16 @@ centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }
   // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.
   const validAlive = alive.filter((h) => h && ipToNum(h.ip) != null);
   const dropped = alive.length - validAlive.length;
-  const mr = validAlive.length ? mergeScanResults(validAlive, Date.now(), agent) : { merged: 0, capped: 0 };
+  // v2.733(점검 3회차 C1-02): `incomplete` 가 있으면 엣지 스캔이 시한·실패로 끝난 **미완료 보고**다(2.733 엣지가 2.733 이상 중앙에만 보낸다).
+  //   alive 는 시한 전에 찾은 부분 결과 — 마지막 확인 시각만 갱신하고(seenOnly), 완료로 기록하지 않는다(recordAgentReport·완료 이력 X).
+  //   대신 그 엣지의 '스캔 미완료' 를 남겨 해제 판정(sweepReleases)이 그 엣지 IP 의 down 전환을 보류한다. 필드가 없으면 예전 계약 그대로.
+  const inc = b.incomplete && typeof b.incomplete === 'object' && !Array.isArray(b.incomplete) ? b.incomplete : null;
+  const mr = validAlive.length ? mergeScanResults(validAlive, Date.now(), agent, inc ? { seenOnly: true } : undefined) : { merged: 0, capped: 0 };
   const capped = mr?.capped || 0;
-  recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
+  if (inc) {
+    recordAgentIncomplete(agent, { code: typeof inc.code === 'string' ? inc.code : 'error', reason: typeof inc.reason === 'string' ? inc.reason : '',
+      durationMs: b.durationMs, partial: validAlive.length - capped, done: b.scanned, total: inc.total });
+  } else recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
   {
     // v2.636: 엣지 보고를 실행 로그에 — 받지 않은 개수(범위 밖·형식 오류·상한)를 사유와 함께 남긴다(조용한 드롭 금지).
     const outOfRange = Array.isArray(b.alive) ? Math.max(0, Math.min(b.alive.length, 8000) - alive.length) : 0;
@@ -2250,11 +2257,18 @@ centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }
     if (dropped) notes.push(`형식 오류 ${dropped}개 제외`);
     if (capped) notes.push(`저장 상한으로 새 IP ${capped}개 미반영`);
     if (aliveOmitted) notes.push(`보고 상한(8000) 초과 ${aliveOmitted}개 미수신`);
-    recordScanLog({ event: 'report', agent, scanned: b.scanned, alive: validAlive.length, durationMs: b.durationMs,
-      dropped: outOfRange + dropped + aliveOmitted, message: notes.join(' · ') });
+    if (inc) {
+      const why = typeof inc.reason === 'string' && inc.reason ? inc.reason.slice(0, 160) : (typeof inc.code === 'string' ? inc.code.slice(0, 32) : '사유 없음');
+      recordScanLog({ event: 'fail', trigger: 'edge', agent, scanned: b.scanned, alive: validAlive.length, durationMs: b.durationMs,
+        dropped: outOfRange + dropped + aliveOmitted,
+        message: [`엣지 스캔 미완료 보고 — ${why}`, `시한 전에 찾은 생존 IP ${validAlive.length - capped}개는 마지막 확인 시각만 갱신 · 해제(down) 판정은 완료된 스캔이 올 때까지 보류`, ...notes].join(' · ') });
+    } else {
+      recordScanLog({ event: 'report', agent, scanned: b.scanned, alive: validAlive.length, durationMs: b.durationMs,
+        dropped: outOfRange + dropped + aliveOmitted, message: notes.join(' · ') });
+    }
   }
   // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
-  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}), ...(aliveOmitted ? { omitted: aliveOmitted } : {}) });
+  res.json({ ok: true, merged: validAlive.length - capped, ...(inc ? { incomplete: true } : {}), ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}), ...(aliveOmitted ? { omitted: aliveOmitted } : {}) });
 });
 
 /*

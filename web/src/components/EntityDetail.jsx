@@ -34,7 +34,7 @@ import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives
 import { STable } from './STable.jsx';
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
-import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText } from '../views/vmchanges/vmChangesText.js'; // v2.702
+import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
@@ -793,9 +793,13 @@ function VmChangesSection({ vm }) {
       {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : '이동·변경 이력을 불러오지 못했습니다.'}</div>
         : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
         : d.logs?.enabled === false ? <div className="muted" style={{ fontSize: 12 }}>vCenter 이벤트 수집이 꺼져 있어 이력을 보여 줄 수 없습니다(설정 › vCenter 로그).</div>
+        // v2.733(C1-01): 이 VM 의 vCenter 를 이 포탈이 지금 이벤트로 수집하지 않으면(엣지 위임·비활성·점검중) '변경 없음' 이라 말하지 않는다.
+        : vmHistoryNotCollectedText(d) && items.length === 0 ? <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{vmHistoryNotCollectedText(d)}</div>
         : !d.lastTs ? <div className="muted" style={{ fontSize: 12 }}>이 VM 의 vCenter 에서 받은 이벤트가 아직 없습니다 — '이동 없음' 이 아닙니다.</div>
         : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.</div>
         : (
+          <>
+          {vmHistoryNotCollectedText(d) && <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 4 }}>{vmHistoryNotCollectedText(d)}</div>}
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
             {items.map((x, i) => (
               <li key={`${x.ts}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0, fontSize: 12, whiteSpace: 'normal', flexWrap: 'wrap' }}>
@@ -812,6 +816,7 @@ function VmChangesSection({ vm }) {
               </li>
             ))}
           </ul>
+          </>
         )}
       <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>VM 이름으로 찾습니다(같은 vCenter 의 동명 VM 은 구분하지 못합니다) · 전체 목록은 특수 기능 'VM 이동·구성 변경 이력' 에서 봅니다.</div>
     </div>

@@ -18,6 +18,38 @@ import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 import { vmVgpuAllocGB } from './vgpuProfile.js'; // v2.650: 데모 VRAM 용량(vGPU 는 프로파일 크기)
+import { directCollectSkipReason, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.733(C4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
+import { createChangeLogger } from '../util/logThrottle.js';
+
+/*
+ * v2.733(점검 3회차 C4-01): **이 노드가 직접 로그인해 수집하는 vCenter 에만** 게스트 GPU 를 수집한다.
+ *   예전에는 설정에서 켠 vCenter 를 등록부 collectMode 와 무관하게 전부 돌았다 — 엣지 위임(site) vCenter 의 스냅샷 항목은
+ *   엣지가 보낸 status('connected')를 그대로 가지므로(엣지 push 가 멈춰 stale 이어도) inventoryUnreadReason 을 통과했고,
+ *   중앙이 그 vCenter 에 매 주기 SOAP 로그인 + GPU VM 마다 게스트 계정 로그인을 했다(재현: 10초 주기 2회 → Login 2회).
+ *   같은 vCenter 를 그 엣지의 배포 설정으로도 켜 두면 vCenter 세션·게스트 로그인이 두 배(잠금 위험도 두 배)이고 같은 VM 값을
+ *   중앙(agent '')과 엣지가 번갈아 쓴다. 판정은 v2.732 B4-01 의 vcenter/collectTarget.js 하나(로그·게스트 디스크·OS 판별과 같다).
+ *   ⚠ 판정 입력은 **이 노드의 등록부**다 — 엣지에서 돌면 엣지 자신의 vcenters.json(직접 수집 항목)이라 그대로 수집한다.
+ *   건너뛴 것은 조용히 빼지 않는다 — 진단(stage)·lastRun.skippedVcenters·skippedCounts·콘솔(사유가 바뀔 때만)에 남긴다.
+ *   ⚠ site 는 unreadVcenters 에 **넣지 않는다** — '지금 못 읽었다' 가 아니라 '이 노드의 몫이 아니다' 이고, 넣으면 엣지 push 보류
+ *   (gpuGuestPushWithhold)가 영구 사유로 재시작마다 걸린다. 비활성·점검중은 예전처럼 unread 다(예전에도 스냅샷 status
+ *   'disabled'·'maintenance' 로 inventoryUnreadReason 이 unread 로 셌다 — push 보류 동작을 바꾸지 않는다).
+ */
+const SKIP_STAGE = Object.freeze({
+  site: '엣지 위임 — 담당 엣지가 수집합니다(이 노드는 로그인하지 않음)',
+  disabled: '비활성 vCenter — 수집하지 않음(로그인하지 않음)',
+  maintenance: '점검중 vCenter — 수집 일시 중단(로그인하지 않음)',
+  invalid: '등록 항목을 읽지 못함 — 수집하지 않음',
+});
+/** 건너뛴 vCenter 의 진단 항목(순수 — 로그인 0). @returns {{diag:object, unread:string}} unread '' = push 보류 사유 아님 */
+export function skippedVcenterDiag(vc, why, now = Date.now()) {
+  const vcId = String(vc?.id ?? '');
+  const agent = why === 'site' ? String(vc?.remoteAgent || '').slice(0, 128) : '';
+  const diag = { vcId, at: now, stage: SKIP_STAGE[why] || SKIP_STAGE.invalid, counts: {}, results: [], error: null, skipped: why, ...(why === 'site' ? { remoteAgent: agent || null } : {}) };
+  const unread = why === 'site' ? '' : why === 'disabled' ? '비활성 vCenter(직접 수집 대상 아님)' : why === 'maintenance' ? '점검중 vCenter(수집 일시 중단)' : '등록 항목 오류';
+  if (unread) diag.unread = true;
+  return { diag, unread };
+}
+const _skipLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 4 });
 
 let timer = null;
 let lastRun = null;
@@ -282,6 +314,8 @@ async function pollOnce() {
     // v2.606(EDGE2606-01): 이번 폴에서 **읽지 못한** vCenter(인벤토리 미수집·인증 정지·로그인 실패·미등록·예외).
     //   엣지 push 보류(gpuGuestPushWithhold)가 이것을 보고 '전부 읽은 폴' 에만 중앙 목록을 교체한다.
     const unreadVcenters = [];
+    // v2.733(C4-01): 직접 수집 대상이 아니라 로그인하지 않은 vCenter({vcId, why, remoteAgent?}) — 조용히 빼지 않는다.
+    const skippedVcenters = [];
 
     await poolSettled(enabledIds, Math.min(4, enabledIds.length), async (vcId) => {
       try {
@@ -290,6 +324,15 @@ async function pollOnce() {
         else {
           const vc = reg.find((x) => x.id === vcId);
           if (!vc) { unreadVcenters.push({ vcId, reason: 'vCenter 미등록' }); diags.push({ vcId, at: Date.now(), stage: 'vCenter 미등록(vcenters.json)', counts: {}, results: [], error: '이 agent의 vcenters.json에 해당 id가 없음' }); return; }
+          // v2.733(C4-01): site·비활성·점검중은 로그인 전에 거른다(인벤토리 판정·인증 정지보다 먼저 — 등록부가 진실의 원천).
+          const why = directCollectSkipReason(vc);
+          if (why) {
+            const sk = skippedVcenterDiag(vc, why);
+            skippedVcenters.push({ vcId, why, ...(why === 'site' ? { remoteAgent: sk.diag.remoteAgent } : {}) });
+            if (sk.unread) unreadVcenters.push({ vcId, reason: sk.unread });
+            diags.push(sk.diag);
+            return;
+          }
           result = await pollLive(snap, vc, s);
         }
         if (result.unread) unreadVcenters.push({ vcId, reason: String(result.unread) });
@@ -304,10 +347,20 @@ async function pollOnce() {
     // v2.590: 인증 실패로 주기 수집이 멈춘 VM·vCenter 수를 함께 싣는다(설정 화면이 '멈췄다' 를 말한다).
     const authStoppedVms = diags.reduce((a, d) => a + (d.authStoppedVms || 0), 0);
     const vcAuthStopped = diags.filter((d) => d.authStopped).map((d) => d.vcId);
-    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}), unreadVcenters };
+    // v2.733(C4-01): 건너뛴 vCenter 는 개수·사유를 상태에 싣고, 콘솔에는 그 집합이 바뀔 때(또는 10분에 한 번)만 남긴다.
+    skippedVcenters.sort((a, b) => String(a.vcId).localeCompare(String(b.vcId)));
+    const skippedCounts = skippedCountsOf(skippedVcenters.map((x) => ({ why: x.why })));
+    if (skippedVcenters.length) {
+      const line = skippedVcenters.map((x) => `${x.vcId}(${x.why === 'site' ? `엣지 위임 → ${x.remoteAgent || '담당 엣지 미지정'}` : x.why === 'disabled' ? '비활성' : x.why === 'maintenance' ? '점검중' : x.why})`).join(', ');
+      if (_skipLog('skipped', line)) console.log(`[gpu-guest] 직접 수집 대상이 아닌 vCenter ${skippedVcenters.length}곳은 로그인하지 않습니다: ${line}`);
+    }
+    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}), unreadVcenters, skippedVcenters: skippedVcenters.slice(0, 64), skippedCounts };
     lastDiag = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: diags };
   } finally { running = false; }
 }
+
+/** 한 주기 실행(타이머와 같은 재진입 가드를 공유한다 — 진행 중이면 그대로 돌아간다). v2.733: 테스트·수동 확인용. */
+export function pollGpuGuestOnce() { return pollOnce(); }
 
 export function gpuGuestStatus() {
   const s = loadGpuGuestSettings();

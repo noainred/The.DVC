@@ -31,7 +31,7 @@ export default function Compute({ global: g, ov, sitesAll, scope, polls, phase, 
         {/* v2.631(감사 WEB2631-06): '물리 서버' 를 ESXi 호스트 수로 대체하지 않는다 — v2.621 WEB-08 과 같은 판정(physicalServersKpi). */}
         <Kpi label="물리 서버" value={fmtInt(physKpi.value)} accent="#1a2130" meta={g ? [phys?.servers > 0 ? 'iDRAC 인식' : physKpi.note, `ESXi ${fmtInt(g.hosts)}`, `정상 ${fmtInt(g.hostsConnected)}`, `끊김 ${fmtInt(g.hostsDisconnected)}`].filter(Boolean).join(' · ') : waitText} />
         <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#16a34a" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : waitText} />
-        <Kpi label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#d97706" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore} · RAM 여유 ${fmtInt(cap.data.totals?.ramHeadroomGB)} GB` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />
+        <Kpi label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#d97706" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore ?? '—'} · RAM 여유 ${cap.data.totals?.ramHeadroomGB == null ? '—' : `${fmtInt(cap.data.totals.ramHeadroomGB)} GB`}` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />
         <Kpi label="GPU" value={ov ? `${fmtInt(ov.gpuCards)}장` : '—'} accent="#7c3aed" meta={ov ? `GPU VM ${fmtInt(ov.gpuVms)} · 활용 ${ov.gpuUtilHosts ? `${ov.gpuUtilPct}%` : '보고 없음'}` : waitText} />
       </div>
 
@@ -69,7 +69,7 @@ export default function Compute({ global: g, ov, sitesAll, scope, polls, phase, 
                   <div className="v3-row" key={c.key}>
                     <div className="v3-grow">
                       <div className="v3-row-title">{c.name} <span className="v3-faint" style={{ fontWeight: 400 }}>· {c.vcenterId}</span></div>
-                      <div className="v3-row-meta">{c.hosts} 호스트 · VM {fmtInt(c.vms)} (구동 {fmtInt(c.vmsOn)}) · vCPU/코어 {c.vcpuPerCore} · RAM 오버커밋 {fmtPct(c.ramOvercommitPct)}</div>
+                      <div className="v3-row-meta">{c.hosts} 호스트 · VM {fmtInt(c.vms)} (구동 {fmtInt(c.vmsOn)}) · vCPU/코어 {c.vcpuPerCore ?? '—'} · RAM 오버커밋 {fmtPct(c.ramOvercommitPct)}</div>
                     </div>
                     <span className="v3-num" style={{ fontSize: 12.5, fontWeight: 700, color: textColor(c.load) }}>{fmtPct(c.load)}</span>
                   </div>

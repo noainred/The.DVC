@@ -5,6 +5,7 @@ import { ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH 인증 실패로 주기 실행을 멈춘 쪽
 import { requireChanged } from './changeResult.js'; // v2.732 B5-04: 실패 본문(200 {ok:false})을 성공으로 읽지 않는다
+import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
 
 /**
  * v2.732(점검 2회차 B5-04): 연속 모니터링 '+ 모니터 추가' 를 보일지 — 목록 조회가 **권한 거부(403)** 면 저장도 같은 403 이다
@@ -302,6 +303,26 @@ function Capture() {
   );
 }
 
+/**
+ * v2.733(점검 3회차 C1-01): 로그 이슈 분석 요약 줄 — 지금 이벤트를 수집하지 않는 vCenter 를 고르면 서버가 수치를 null 로 준다('0' 이 아니다).
+ * 값이 없으면 '—'(단위·괄호 안 평균도 그 자리에 '—').
+ */
+export function logIssueSummaryText(sm) {
+  const v = (x) => (x == null || x === '' || !Number.isFinite(Number(x)) ? '—' : String(x));
+  const s = sm && typeof sm === 'object' ? sm : {};
+  return `오류 ${v(s.errors)} · 경고 ${v(s.warnings)} · 시간당 최대 ${v(s.peakPerHour)}(평균 ${v(s.avgPerHour)})`;
+}
+
+/** v2.733(C1-01): 전체 보기에서 뺀 vCenter 안내 — 뺀 오류·경고 수를 함께. 없으면 ''. */
+export function logIssueExcludedNote(d) {
+  const base = notCollectedNote(d?.notCollected, { what: '이벤트', tail: '분석에서 뺐습니다(‘특이 패턴 없음’ 에 섞지 않습니다)' });
+  if (!base) return '';
+  const ex = d?.excluded;
+  const n = (x) => (Number.isFinite(Number(x)) ? Number(x).toLocaleString() : null);
+  const extra = ex && (n(ex.errors) != null || n(ex.warnings) != null) ? ` 기간 안에 남아 있던 그 vCenter 의 옛 오류 ${n(ex.errors) ?? '—'} · 경고 ${n(ex.warnings) ?? '—'}건은 합계에서 뺐습니다.` : '';
+  return `${base}${extra}`;
+}
+
 function LogIssues() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [vc, setVc] = useState('');
@@ -323,8 +344,9 @@ function LogIssues() {
       </div>
       {err ? <ErrorBox message={err} /> : !d ? <div className="muted">분석 중…</div> : (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>오류 {d.summary.errors} · 경고 {d.summary.warnings} · 시간당 최대 {d.summary.peakPerHour}(평균 {d.summary.avgPerHour})</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{logIssueSummaryText(d.summary)}</div>
           {d.patterns.map((p, i) => <Issue key={i} it={p} />)}
+          {!vc && logIssueExcludedNote(d) && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{logIssueExcludedNote(d)}</div>}
           <div className="flex gap wrap" style={{ marginTop: 10 }}>
             <div style={{ flex: '1 1 280px' }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>오류 유형 Top</div>

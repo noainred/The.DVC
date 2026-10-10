@@ -15,6 +15,7 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
+import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeMoves, analyzeChanges, vmHistory } from '../../vmchanges/analyze.js';
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES } from '../../vmchanges/eventDetail.js';
 
@@ -42,8 +43,12 @@ async function load(req, snap) {
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const s = loadLogSettings();
   // 수집 범위 — vCenter 마다 마지막으로 받은 이벤트 시각(없으면 그 vCenter 의 이벤트는 이 포탈에 없다).
-  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null }));
-  return { rows, truncated, days, since, vcName, ids, coverage, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
+  // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 항목에 notCollected(사유)를 싣는다 —
+  //   lastTs 가 남아 있어도(수집을 멈추기 전 이벤트) '없음' 이 아니라 '지금 수집하지 않는다' 다. 목록(notCollected)은 범위로 이미 거른 ids 기준.
+  const nc = eventNotCollectedMap();
+  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+  const notCollected = notCollectedList(nc, { only: ids, names: vcName });
+  return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
 }
 
 export function registerVmChanges(api) {
@@ -53,7 +58,7 @@ export function registerVmChanges(api) {
     const kind = qStr(req.query.kind, 16);
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: READ_MAX,
-      vcenters: L.coverage, logs: L.settings,
+      vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
       moves: analyzeMoves(L.rows, { days: L.days, vcName: L.vcName, q }),
       changes: analyzeChanges(L.rows, { vcName: L.vcName, q, kind }),
       initial: snap.initial === true,
@@ -69,7 +74,9 @@ export function registerVmChanges(api) {
       const db = await getLogsDb();
       const days = Math.min(90, daysOf(req.query.days || 30));
       const rows = db.trackedEvents({ vcenterIds: [vm.vcenterId], since: Date.now() - days * DAY, entity: vm.name, types: [...MOVE_TYPES, ...RECONFIG_TYPES] }, 200);
-      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: db.lastTs(vm.vcenterId) || null });
+      // v2.733(C1-01): 이 VM 의 vCenter 를 이 포탈이 지금 이벤트로 수집하지 않으면 그 사유(아니면 null) — 화면이 '변경 없음' 대신 말한다.
+      const notCollected = eventNotCollectedMap().get(String(vm.vcenterId)) || null;
+      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: db.lastTs(vm.vcenterId) || null, notCollected });
     } catch (e) {
       if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
     }

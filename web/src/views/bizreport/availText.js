@@ -1,4 +1,5 @@
 // v2.707(C6) — VM 가용성(SLA) 문구. 판정은 서버 availability/analyze.js. 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석).
+import { notCollectedNote } from '../eventCoverageText.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 /** 가동률 표시 — 값이 없으면 '—'(단위를 붙이지 않는다). 99.9 처럼 소수 셋째 자리까지. */
 export function pctText(v) {
   if (v == null || v === '') return '—';
@@ -29,6 +30,10 @@ export function coverageNote(data) {
   if (data.logs && data.logs.enabled === false) return 'vCenter 이벤트 수집이 꺼져 있습니다(설정 › vCenter 로그 보관) — 가동률을 잴 수 없습니다.';
   const c = data.coverage || {};
   const parts = [];
+  // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중) — 수집 실패가 아니라 원래 받지 않는다.
+  //   서버가 측정 끝을 마지막으로 받은 이벤트 시각에서 끊었다(그 뒤를 가동으로 세지 않았다). 아래 '수집이 멈춘 vCenter' 문장의 원인과 다르다.
+  const nc = notCollectedNote(data.notCollected, { what: '전원', tail: `그 vCenter 의 VM ${Number(c.notCollectedVms || 0).toLocaleString()}대는 마지막으로 받은 이벤트 시각까지만 쟀고(받은 적이 없으면 판정하지 않음) 그 뒤의 정지는 알 수 없습니다(가동 100% 가 아닙니다)` });
+  if (nc) parts.push(nc.replace(/\.$/, ''));
   if (c.noEvents) parts.push(`이벤트를 받은 적 없는 vCenter 의 VM ${c.noEvents.toLocaleString()}대는 판정하지 않았습니다(가동 100% 가 아닙니다)`);
   if (c.partialWindow) parts.push(`이벤트 수집 시작이 기간 시작보다 늦은 VM ${c.partialWindow.toLocaleString()}대는 수집 시작부터만 쟀습니다`);
   if (c.inconsistent) parts.push(`전원 켬 이벤트를 놓친 VM ${c.inconsistent.toLocaleString()}대는 정지 시간을 알 수 없어 뺐습니다`);
@@ -37,8 +42,10 @@ export function coverageNote(data) {
   // v2.731(점검 r1 A2-01): 이벤트 수집이 멈춘 vCenter 는 멈춘 시각까지만 쟀다 — 수집하지 못한 꼬리를 '정지 없음 = 가동' 으로 세지 않았다.
   if (c.staleTail) {
     const age = Number.isFinite(c.tailMaxAgeMs) && c.tailMaxAgeMs > 0 ? `(가장 오래된 곳은 ${downText(c.tailMaxAgeMs)} 전)` : '';
+    // v2.733(C1-01): 서버는 지금 수집하지 않는 vCenter 를 tailFromLastEvent 에서 빼고 tailNotCollected 로 따로 센다 — 원인을 섞지 않는다.
     const src = c.tailFromLastEvent ? ` — 그중 ${Number(c.tailFromLastEvent).toLocaleString()}곳은 수집 성공 기록이 없어(포탈 재시작 직후이거나 수집이 계속 실패하는 중) 마지막으로 받은 이벤트 시각을 썼습니다` : '';
-    parts.push(`이벤트 수집이 멈춘 vCenter ${Number(c.tailVcenters || 0).toLocaleString()}곳의 VM ${c.staleTail.toLocaleString()}대는 수집이 멈춘 시각까지만 쟀습니다${age} — 그 뒤의 정지는 알 수 없습니다(전원 기록이 없는 VM 은 지금 전원 상태가 측정 구간 내내 이어졌다고 봤습니다)${src}`);
+    const ncTail = c.tailNotCollected ? ` — 그중 ${Number(c.tailNotCollected).toLocaleString()}곳은 이 포탈이 지금 이벤트를 수집하지 않는 vCenter 입니다(위 문장)` : '';
+    parts.push(`이벤트 수집이 멈춘 vCenter ${Number(c.tailVcenters || 0).toLocaleString()}곳의 VM ${c.staleTail.toLocaleString()}대는 수집이 멈춘 시각까지만 쟀습니다${age} — 그 뒤의 정지는 알 수 없습니다(전원 기록이 없는 VM 은 지금 전원 상태가 측정 구간 내내 이어졌다고 봤습니다)${src}${ncTail}`);
   }
   if (c.stoppedEarly) parts.push(`이벤트 수집이 측정 기간 시작 전에 멈춘 vCenter 의 VM ${c.stoppedEarly.toLocaleString()}대는 판정하지 않았습니다(가동 100% 가 아닙니다)`);
   if (c.offAll) parts.push(`기간 내내 꺼져 있던 VM ${c.offAll.toLocaleString()}대는 서비스 중이 아니라 따로 셌습니다`);
