@@ -5,7 +5,57 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { numOrNull } from '../../numOrNull.js';
 import { agentLabel, fmtDt, fmtDur, Frame } from './ipamShared.jsx';
+
+/*
+ * v2.733(점검 3회차 C1-02): 스캔이 시한을 넘기거나 실패하면 서버가 그 에이전트의 '스캔 미완료' 를 기록하고(reports[이름].incomplete),
+ *   해제(down) 판정은 완료된 스캔이 해제 기준 시간 안에 올 때까지 보류한다(status.releaseHold). 이 두 줄이 그 사실을 짧게 말한다 —
+ *   말하지 않으면 사용자는 '스캔 실패' 와 'IP 가 그대로 사용 중' 을 이어 보지 못한다. 판정은 서버가 했다(여기서는 문장만).
+ */
+const HOLD_REASON_TEXT = { 'scan-incomplete': '마지막 스캔 미완료', 'no-recent-scan': '완료 보고 없음' };
+const LIST_MAX = 8;
+
+/** 스캔 미완료 줄(이 포탈 + 엣지) — 마지막 완료보다 새 미완료 기록만. 모르는 값은 '—'. */
+export function scanIncompleteLines(reports) {
+  const rows = [];
+  for (const [name, rep] of Object.entries(reports && typeof reports === 'object' ? reports : {})) {
+    const inc = rep?.incomplete;
+    if (!inc || typeof inc !== 'object') continue;
+    const at = numOrNull(inc.at); const doneAt = numOrNull(rep.at);
+    if (at == null || (doneAt != null && doneAt > at)) continue;
+    rows.push({ name, at, doneAt, inc });
+  }
+  rows.sort((a, b) => b.at - a.at);
+  const out = rows.slice(0, LIST_MAX).map(({ name, at, doneAt, inc }) => {
+    const why = inc.code === 'SCAN_DEADLINE' ? '시한 초과' : '실패';
+    const d = numOrNull(inc.done); const t = numOrNull(inc.total); const p = numOrNull(inc.partial); const k = numOrNull(inc.streak);
+    const bits = [why, d != null && t != null ? `${d.toLocaleString()}/${t.toLocaleString()} 스캔` : '', p != null ? `생존 ${p.toLocaleString()}개만 확인` : '', k != null && k > 1 ? `연속 ${k}회` : ''].filter(Boolean);
+    return `**${agentLabel(name)}** 스캔 미완료(${bits.join(' · ')}) · ${fmtDt(at)} · 마지막 완료 ${doneAt != null && doneAt > 0 ? fmtDt(doneAt) : '—'}`;
+  });
+  if (rows.length > LIST_MAX) out.push(`외 ${rows.length - LIST_MAX}곳`);
+  return out;
+}
+
+/** 해제 판정 보류 줄 — 보류 개수·에이전트별 사유·보류 시한 · 시한이 지나 미확인 해제로 기록한 개수. */
+export function releaseHoldLines(h) {
+  if (!h || typeof h !== 'object') return [];
+  const out = [];
+  const held = numOrNull(h.held);
+  if (held != null && held > 0) {
+    out.push(`**해제 판정 보류 ${held.toLocaleString()}개** — 완료된 스캔이 해제 기준 시간 안에 없어 사용 중 상태를 유지합니다(보지 못한 것을 반납으로 세지 않습니다)`);
+    const agents = (Array.isArray(h.agents) ? h.agents : []).filter((a) => numOrNull(a?.held) > 0);
+    for (const a of agents.slice(0, LIST_MAX)) {
+      const until = numOrNull(a.holdUntil);
+      out.push(`${agentLabel(a.agent)}: ${numOrNull(a.held).toLocaleString()}개 · ${HOLD_REASON_TEXT[a.reason] || '사유 미상'} · 보류 시한 ${until != null ? fmtDt(until) : '—'}(지나면 미확인 해제로 기록)`);
+    }
+    if (agents.length > LIST_MAX) out.push(`외 ${agents.length - LIST_MAX}곳`);
+  }
+  const expired = numOrNull(h.expired);
+  if (expired != null && expired > 0) out.push(`보류 시한이 지나 **미확인 해제**로 기록한 IP ${expired.toLocaleString()}개(서버 시작 이후)`);
+  return out;
+}
 
 /** 진행 중 스캔 진행률 막대(스캔한 IP 수 / 전체 + %). progress 없으면 렌더 안 함. */
 export function ScanProgressBar({ progress }) {
@@ -74,6 +124,15 @@ export function ScanStatusModal({ onClose, asPage = false }) {
               <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>최근(포탈): {st.lastRun.scanned}개 중 {st.lastRun.alive}개 응답 · {fmtDur(st.lastRun.durationMs)} · {fmtDt(st.lastRun.at)}</div>
             )}
           </div>
+          {(() => {
+            // v2.733 C1-02: 스캔 미완료 · 해제 판정 보류 — 있을 때만(없으면 아무것도 그리지 않는다).
+            const lines = [...scanIncompleteLines(d.reports), ...releaseHoldLines(st?.releaseHold)];
+            return lines.length > 0 && (
+              <div className="banner warn" style={{ marginBottom: 14, whiteSpace: 'normal', fontSize: 12 }}>
+                {lines.map((t, i) => <div key={i}><BoldText text={t} /></div>)}
+              </div>
+            );
+          })()}
 
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>완료된 스캔 이력 (최근 {runs.length}건 · 포탈/에이전트 통합)</div>
           <ScanRunsTable runs={runs} />

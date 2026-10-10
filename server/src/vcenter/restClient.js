@@ -320,7 +320,7 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
           capacityGB,
           freeGB,
           usedGB,
-          usagePct: capBytes != null && capBytes > 0 && usedBytes != null ? Math.round((usedBytes / capBytes) * 100) : null,
+          usagePct: capBytes > 0 && usedBytes != null ? Math.round((usedBytes / capBytes) * 100) : null, // capBytes null 이면 null > 0 이 거짓
           accessible: typeof d.accessible === 'boolean' ? d.accessible : true, // REST 목록에 있으면 그 값(없으면 예전대로)
         };
       }),

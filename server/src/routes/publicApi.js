@@ -396,6 +396,19 @@ function excludedFromTotalsOf(d) { return d.retired ? 'retired' : (d.stale ? 'st
  * v2.681: staleCount·retiredCount = 합계 기준에서 빠진 장비 수(장기 미관측 / 등록 해제). 장비 행은 그대로 실린다.
  */
 /**
+ * v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 growthMatrix meta 로 넘긴다.
+ * (v2.733: 라우트 본문에서 헬퍼로 뺐다 — 본문이 길어지면 scripts/api-doc.mjs 가 인자 목록을 읽지 못한다.)
+ */
+async function storageApproxMeta() {
+  const meta = new Map();
+  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
+  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
+    const id = s2?.deviceId || s2?.id;
+    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
+  }
+  return meta;
+}
+/**
  * v2.733(C2-03): 장비 행의 기간별 **실제 비교 구간(일)** — 요청한 날짜에 수집이 없으면 더 이른 날과 비교하므로 요청 기간보다 길 수 있다.
  * 증가량이 null 인 칸은 null(비교하지 않았다). 이 값이 meta.maxSpanDays 를 넘는 칸은 요청 기간보다 크게 긴 증가라 포탈 합계에서 뺀다.
  */
@@ -438,13 +451,7 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
    */
   const { periods, dropped } = g.normalizePeriods([1, 7, 30]);
   const rows = await db.dailySeries(null, 0);
-  // v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 meta 로 넘긴다.
-  const meta = new Map();
-  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
-  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
-    const id = s2?.deviceId || s2?.id;
-    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
-  }
+  const meta = await storageApproxMeta();
   // v2.681(R2D-03): 내부 화면과 같은 기준 — 오늘 기준(asOfDay)으로 장기 미관측 장비를 가르고, 등록부를 읽을 수 있으면
   //   등록 해제 장비를 '퇴역' 으로 가른다(합계용 — 장비 행은 그대로 싣는다). 등록부를 못 읽으면 퇴역 판정은 하지 않는다.
   const knownIds = await storageKnownIds();
@@ -460,7 +467,6 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     observedDays: d.observedDays,
     // 기간별 증가 바이트만 — 내부 growth 객체를 그대로 싣지 않는다(내부 필드가 새지 않게).
     growth: Object.fromEntries(periods.map((p) => [p.key, d.growth?.[p.key]?.bytes ?? null])),
-    // v2.733(C2-03): 그 증가량의 실제 비교 구간(일) — 요청 기간보다 길 수 있다(meta.maxSpanDays 참조).
     growthSpanDays: growthSpanDaysOf(d, periods),
     unknownUsed: d.usedBytes == null,
     // v2.604: 반올림 표기 용량이면 그 해상도(바이트) — 이보다 작은 증가는 0 이 아니라 '보이지 않는 것'. 정확하면 null.

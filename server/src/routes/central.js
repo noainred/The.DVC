@@ -2258,7 +2258,7 @@ centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }
     if (capped) notes.push(`저장 상한으로 새 IP ${capped}개 미반영`);
     if (aliveOmitted) notes.push(`보고 상한(8000) 초과 ${aliveOmitted}개 미수신`);
     if (inc) {
-      const why = typeof inc.reason === 'string' && inc.reason ? inc.reason.slice(0, 160) : (typeof inc.code === 'string' ? inc.code.slice(0, 32) : '사유 없음');
+      const why = capStr(inc.reason, 160) || capStr(inc.code, 32) || '사유 없음'; // 평탄화 — 실행 로그 링버퍼가 요청 본문을 붙잡지 않게
       recordScanLog({ event: 'fail', trigger: 'edge', agent, scanned: b.scanned, alive: validAlive.length, durationMs: b.durationMs,
         dropped: outOfRange + dropped + aliveOmitted,
         message: [`엣지 스캔 미완료 보고 — ${why}`, `시한 전에 찾은 생존 IP ${validAlive.length - capped}개는 마지막 확인 시각만 갱신 · 해제(down) 판정은 완료된 스캔이 올 때까지 보류`, ...notes].join(' · ') });

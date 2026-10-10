@@ -208,7 +208,7 @@ test('COL2606-05: vCenter REST 폴백은 모르는 필드를 null 로 두고 저
       assert.equal(s.hosts[0].vmCount, null, 'VM 배치를 모르면 0 이 아니다');
       assert.equal(s.vcenter.collectSource, 'rest');
       assert.equal(s.vcenter.alarmsUnknown, true);
-      assert.deepEqual(s.vcenter.restUnknown, ['cluster', 'vmPlacement', 'alarms']);
+      assert.deepEqual(s.vcenter.restUnknown, ['cluster', 'vmPlacement', 'hostCapacity', 'alarms']); // v2.733(C2-06): 호스트 용량도 REST 목록에 없다
       assert.ok(Array.isArray(s.alarms), '소비처 호환 — 배열은 유지');
     } finally { config.vcSoapMetrics = prev; }
   } finally { srv.close(); }

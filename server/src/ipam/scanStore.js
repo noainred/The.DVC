@@ -21,6 +21,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
 import { registerStateFile } from '../util/stateFiles.js';
+import { capStr } from '../util/capStr.js'; // v2.733: 엣지가 보낸 미완료 사유를 평탄화해 상주시킨다
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -830,7 +831,7 @@ export function recordAgentIncomplete(agent, { code = 'error', reason = '', dura
     since: numOrNull(prevInc?.since) ?? t,
     streak: (numOrNull(prevInc?.streak) ?? 0) + 1,
     code: c,
-    reason: typeof reason === 'string' ? reason.replace(CTRL_RE, ' ').slice(0, 300) : '',
+    reason: typeof reason === 'string' ? capStr(reason.slice(0, 300).replace(CTRL_RE, ' '), 300) : '', // 평탄화 — 큰 본문을 붙잡지 않게(v2.607 TIM2607-01)
     durationMs: numOrNull(durationMs), partial: numOrNull(partial), done: numOrNull(done), total: numOrNull(total),
   };
   reports[name] = { at: numOrNull(prev?.at), scanned: numOrNull(prev?.scanned), alive: numOrNull(prev?.alive), incomplete: inc };

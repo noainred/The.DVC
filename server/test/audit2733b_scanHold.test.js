@@ -197,8 +197,9 @@ test('⑤ 중앙 수신(/api/central/ip-scan-result): incomplete 보고는 완�
   try {
     const now = Date.now();
     ss.mergeScanResults([{ ip: '10.79.0.9', openPorts: [22], services: ['SSH'] }], now - 4 * H, 'edge-c');
+    ss.mergeScanResults([{ ip: '10.79.0.7', openPorts: [22, 443], services: ['SSH', 'HTTPS'], hostname: 'h7' }], now - 4 * H, 'edge-c');
     const runsBefore = ss.getScanRuns(200).filter((x) => x.agent === 'edge-c').length;
-    const r = await quiet(() => post({ agent: 'edge-c', scanned: 40, alive: [{ ip: '10.79.0.5', openPorts: [22], services: ['SSH'] }], incomplete: { code: 'SCAN_DEADLINE', reason: '스캔 데드라인(1200s) 초과 — 자식 종료', total: 254 } }));
+    const r = await quiet(() => post({ agent: 'edge-c', scanned: 40, alive: [{ ip: '10.79.0.5', openPorts: [22], services: ['SSH'] }, { ip: '10.79.0.7', openPorts: [22], services: ['SSH'], hostname: '' }], incomplete: { code: 'SCAN_DEADLINE', reason: '스캔 데드라인(1200s) 초과 — 자식 종료', total: 254 } }));
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.incomplete, true, JSON.stringify(r.body));
     const rep = ss.getAgentReports()['edge-c'];
@@ -206,6 +207,12 @@ test('⑤ 중앙 수신(/api/central/ip-scan-result): incomplete 보고는 완�
     assert.equal(rep.at ?? null, null, '미완료 보고를 완료 시각으로 기록했다');
     assert.equal(ss.getScanRuns(200).filter((x) => x.agent === 'edge-c').length, runsBefore, '미완료 보고를 완료된 스캔 이력에 넣었다');
     assert.ok(ss.getScanResults()['10.79.0.5'], '부분 결과(생존 IP)를 받지 않았다');
+    // 부분 결과는 이미 있는 IP 의 '마지막 확인' 만 갱신한다 — 호스트명(부분 결과엔 없다)·포트를 지우지 않는다
+    const r7 = ss.getScanResults()['10.79.0.7'];
+    assert.equal(r7.hostname, 'h7', '부분 결과가 호스트명을 지웠다');
+    assert.deepEqual(r7.openPorts, [22, 443], '부분 결과가 포트 목록을 바꿨다');
+    assert.ok(r7.lastSeen >= now, '부분 결과가 마지막 확인 시각을 갱신하지 않았다');
+    assert.ok(ss.getIpHistory('10.79.0.7').lastSeen >= now);
     // 그 엣지의 IP 는 해제 판정에서 보류
     ss.sweepReleases(3 * H, { idleMsByAgent: new Map([['edge-c', 3 * H]]), now });
     assert.equal(ss.getIpHistory('10.79.0.9').status, 'up');

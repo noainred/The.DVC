@@ -119,6 +119,9 @@ async function powerTotal() {
   const dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || String(d.id)]));
   const errors = {};
   let servers = []; let network = []; let storage = [];
+  // v2.733(C2-02): 읽지 못한 vCenter 의 vCenter 추정 전력 판정 입력(unread·hostReadable)은 여기서 넘기지 않는다 — buildPowerTotal 이
+  //   source 'vcenter' 항목을 **전부** 합계에서 빼고 excludedVcenter 로 세므로(v2.664) 합계는 같고, 넘기면 그 '뺀 개수' 만 줄어
+  //   화면 'vCenter 추정 N대는 뺐습니다' 가 과소가 된다. vCenter 추정 전력을 합계에 넣게 바꾸면 그때 store.js 처럼 넘길 것.
   try { servers = await allMeasuredPower({ hosts: snap.hosts || [] }); } catch (e) { errors.servers = e?.message || String(e); }
   try { network = (await cvpItems()).rows; } catch (e) { errors.network = e?.message || String(e); }
   try { storage = storageItems(); } catch (e) { errors.storage = e?.message || String(e); }
