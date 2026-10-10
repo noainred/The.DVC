@@ -246,7 +246,8 @@ test('⑦ 통신 점검(linkcheck) SSH 협상: 거부하지 않고 관찰만 —
   const r2 = await stepSsh('127.0.0.1', s.port, { timeoutMs: 8_000, host: 'Probe-Host.' });
   assert.equal(r2.hostKey.trust, 'approved');
   // 승인된 키와 다르면 '변경' 을 경고한다(수집 연결은 거부될 것이라는 사실).
-  pt.approvePeer('ssh', 'probe-host', s.port, 'SHA256:' + 'Q'.repeat(43), { by: 'test' });
+  // v2.731(A1-01): 승인은 기본이 '추가' 라 교체는 replace 로 명시한다(그래야 지금 키가 신뢰 목록에서 빠진다).
+  pt.approvePeer('ssh', 'probe-host', s.port, 'SHA256:' + 'Q'.repeat(43), { by: 'test', replace: true });
   const r3 = await stepSsh('127.0.0.1', s.port, { timeoutMs: 8_000, host: 'probe-host' });
   assert.equal(r3.hostKey.trust, 'changed');
   assert.match(r3.note, /수집 연결은 거부됩니다/);

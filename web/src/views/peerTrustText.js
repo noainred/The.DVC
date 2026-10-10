@@ -7,6 +7,10 @@
  *  · 관찰(observed)은 '정상' 이 아니라 **미승인**이다(업그레이드 직후 끊기지 않게 임시로 통과시키는 것뿐) — 초록으로 칠하지 않는다.
  *  · 승인은 관리자가 지문을 **장비 콘솔 등 별도 경로로 대조**한 뒤에만 — 확인 문구가 그 사실을 묻는다.
  *  · 값이 없으면 '—'(빈 지문을 지어내지 않는다). 문구에 백틱을 쓰지 않는다(BoldText 는 굵게만 해석).
+ *  · v2.731(A1-01): 한 장비(주소·포트)에 신뢰 지문이 여럿일 수 있다(로드밸런서·라운드로빈 뒤 서버마다 다른 인증서·호스트키).
+ *    승인은 **추가**(기존 지문을 계속 신뢰)가 기본이고 **교체 승인**은 키를 바꾼 경우다. 개별 지문은 회수(거부)한다.
+ *    목록은 서버 listPeers 의 trustedList(구버전 응답은 trusted 하나)다.
+ *  · v2.731(A1-02): 장비 신뢰는 포탈(중앙·엣지)마다 따로다 — 엣지가 접속하는 장비는 그 엣지 포탈에서 승인한다(nodeNoteText).
  */
 import { unitText } from './unitText.js';
 
@@ -41,15 +45,36 @@ export function stateTone(peer) {
   return 'gray';
 }
 
-/** 상태 칸 문구 — 대기면 사유를 붙인다. */
+/** 신뢰 지문 목록 — 서버 trustedList(전부), 없으면(구버전 응답) trusted 하나. 객체가 아닌 원소·지문 없는 원소는 뺀다. */
+export function trustedListOf(peer) {
+  const raw = Array.isArray(peer?.trustedList) ? peer.trustedList : (peer?.trusted ? [peer.trusted] : []);
+  return raw.filter((t) => t && typeof t === 'object' && t.fp);
+}
+
+/** 상태 칸 문구 — 대기면 사유를 붙이고, 신뢰 지문이 둘 이상이면 개수를 붙인다. */
 export function stateText(peer) {
   const st = peer?.state || 'none';
   const base = STATE_LABEL[st] || STATE_LABEL.none;
+  const n = trustedListOf(peer).length;
+  const multi = n > 1 ? ` · 지문 ${n}개` : '';
   if (st === 'pending') {
     const r = PENDING_REASON_TEXT[peer?.pending?.reason] || '';
-    return r ? `${base} · ${r}` : base;
+    return `${r ? `${base} · ${r}` : base}${multi}`;
   }
-  return base;
+  return `${base}${multi}`;
+}
+
+/**
+ * 행의 승인 대상과 버튼 — { candidate, others, mode }.
+ *   candidate: 대기 지문, 없으면 관찰(미승인) 지문, 없으면 ''
+ *   others: candidate 를 뺀 신뢰 지문 수
+ *   mode: 'single'(버튼 '승인') | 'add-or-replace'(이미 신뢰 지문이 있음 — '추가 승인'·'교체 승인')
+ */
+export function approveChoice(peer) {
+  const list = trustedListOf(peer);
+  const candidate = peer?.pending?.fp || list.find((t) => t.state === 'observed')?.fp || '';
+  const others = list.filter((t) => t.fp !== candidate).length;
+  return { candidate, others, mode: candidate && others > 0 ? 'add-or-replace' : 'single' };
 }
 
 const ORDER = { 'pending-changed': 0, pending: 1, observed: 2, rejected: 3, approved: 4, none: 5 };
@@ -69,7 +94,7 @@ export function filterPeers(peers = [], { kind = 'all', state = 'all', q = '' } 
   return sortPeers(peers).filter((p) => (kind === 'all' || p.kind === kind)
     && (state === 'all' || p.state === state)
     && (!needle || `${p.host}:${p.port}`.toLowerCase().includes(needle)
-      || String(p.trusted?.fp || '').toLowerCase().includes(needle)
+      || trustedListOf(p).some((t) => String(t.fp).toLowerCase().includes(needle))
       || String(p.pending?.fp || '').toLowerCase().includes(needle)));
 }
 
@@ -94,20 +119,70 @@ export function countsText(counts = {}) {
   return parts.join(' · ');
 }
 
-/** 승인 확인 문구(window.confirm) — 별도 경로 대조를 묻는다. 대기 지문과 다른 값을 미리 등록하면 그 사실을 함께 말한다. */
-export function approveConfirmText(peer, fp) {
+/**
+ * 승인 확인 문구(window.confirm) — 별도 경로 대조를 묻는다. 대기 지문과 다른 값을 미리 등록하면 그 사실을 함께 말한다.
+ * replace: true = 교체 승인(이 지문만 남긴다), false = 추가 승인(기존 신뢰 지문을 계속 신뢰). 기존 지문이 있을 때만 그 차이를 말한다.
+ */
+export function approveConfirmText(peer, fp, { replace = false } = {}) {
   const label = KIND_LABEL[peer?.kind] || peer?.kind || '';
-  const presented = peer?.pending?.fp || peer?.trusted?.fp || '';
+  const list = trustedListOf(peer);
+  const presented = peer?.pending?.fp || list[0]?.fp || '';
+  const others = list.filter((t) => t.fp !== fp).length;
   const lines = [
     `${label} ${peer?.host}:${peer?.port}`,
-    `승인할 지문: ${fp || '—'}`,
+    `${replace ? '교체 승인할' : '승인할'} 지문: ${fp || '—'}`,
     '',
     '이 지문을 장비 콘솔·관리 화면 등 **이 포탈이 아닌 경로**로 직접 확인했습니까?',
     '포탈 화면에 보이는 값만 보고 승인하면, 가로챈 서버의 키를 신뢰하게 될 수 있습니다.',
   ];
-  if (peer?.pending?.reason === 'changed') lines.push('', '⚠ 이 장비의 지문이 바뀌었습니다 — 장비 교체·키 재생성이 실제로 있었는지 먼저 확인하세요.');
-  if (presented && fp && presented !== fp) lines.push('', '※ 장비가 마지막으로 내민 지문과 다른 값입니다(교체 예정 장비를 미리 등록하는 경우).');
+  if (peer?.pending?.reason === 'changed') lines.push('', '⚠ 이 장비의 지문이 바뀌었습니다 — 장비 교체·키 재생성이 실제로 있었는지, 또는 같은 주소 뒤의 다른 서버(로드밸런서)인지 먼저 확인하세요.');
+  if (others > 0 && replace) {
+    lines.push('', `**교체 승인** — 지금 신뢰하는 지문 ${others}개를 더는 신뢰하지 않습니다(이 지문 하나만 남습니다). 같은 주소 뒤에 다른 서버가 있다면 그 서버 연결은 거부됩니다.`);
+  } else if (others > 0) {
+    lines.push('', `**추가 승인** — 이 장비에서 이미 신뢰하는 지문 ${others}개도 계속 신뢰합니다(같은 주소 뒤에 서버가 여럿인 로드밸런서·라운드로빈). 장비 키를 바꾼 것이라면 교체 승인을 쓰거나 옛 지문을 회수하세요.`);
+  }
+  if (presented && fp && presented !== fp && !list.some((t) => t.fp === fp)) lines.push('', '※ 장비가 마지막으로 내민 지문과 다른 값입니다(교체 예정 장비를 미리 등록하는 경우).');
   return lines.join('\n').replace(/\*\*/g, '');
+}
+
+/** 승인 성공 문구 — 서버 응답(trustedCount·already)으로 말한다(추측하지 않는다). */
+export function approveOkText(peer, r = {}, { replace = false } = {}) {
+  const where = `${peer?.host}:${peer?.port}`;
+  if (replace) return `${where} 지문을 교체 승인했습니다 — 다음 연결부터 이 지문만 신뢰합니다.`;
+  if (r.already) return `${where} — 이미 승인된 지문입니다.`;
+  const n = Number(r.trustedCount);
+  if (Number.isFinite(n) && n > 1) return `${where} 지문을 추가 승인했습니다 — 이 장비의 신뢰 지문 ${n}개를 모두 신뢰합니다.`;
+  return `${where} 지문을 승인했습니다 — 다음 연결부터 이 지문을 신뢰합니다.`;
+}
+
+/** 승인 지문 회수 확인 — 같은 장비의 다른 신뢰 지문은 그대로라는 사실과, 남는 지문이 없을 때의 결과를 말한다. */
+export function revokeConfirmText(peer, fp) {
+  const label = KIND_LABEL[peer?.kind] || peer?.kind || '';
+  const rest = trustedListOf(peer).filter((t) => t.fp !== fp).length;
+  const after = rest > 0
+    ? `이 장비의 다른 신뢰 지문 ${rest}개는 그대로 신뢰합니다.`
+    : '이 장비에 신뢰 지문이 더 없습니다 — 승인된 지문만 허용 정책이면 다음 연결은 승인 전까지 거부되고, 관찰 정책이면 처음 보는 장비처럼 다음 지문을 관찰합니다.';
+  return `${label} ${peer?.host}:${peer?.port}\n회수할 지문: ${fp || '—'}\n\n이 지문의 승인을 회수하고 거부 목록에 넣습니다(다시 승인하기 전까지 이 지문으로는 연결하지 않습니다). ${after}`;
+}
+
+/** 여러 지문 안내(화면 머리말 한 줄) — 상한은 서버 값(trustedMax)이 있을 때만 적는다. */
+export function multiFpNote(max) {
+  const n = Number(max);
+  const cap = Number.isInteger(n) && n > 0 ? `(장비당 최대 ${n}개)` : '';
+  return `같은 주소 뒤에 서버가 여럿(로드밸런서·라운드로빈)이면 서버마다 지문이 다릅니다 — 각 지문을 확인해 **추가 승인**하세요${cap}. 장비 키를 바꾼 경우에는 **교체 승인**을 쓰거나 옛 지문을 회수합니다.`;
+}
+
+/**
+ * 이 포탈이 중앙인가 엣지인가(서버 GET 의 node) — 장비 신뢰는 포탈마다 따로 기록한다(v2.731 A1-02).
+ * node 가 없으면(구버전 서버) '' — 지어내지 않는다.
+ */
+export function nodeNoteText(node) {
+  if (!node || typeof node !== 'object') return '';
+  if (node.edge) {
+    const who = node.name ? `엣지 ‘${node.name}’` : '엣지';
+    return `이 포탈은 **${who}** 입니다 — 여기서 승인한 지문은 이 엣지가 접속하는 장비에만 적용됩니다(중앙 포탈과 공유하지 않습니다). 중앙 화면에 보이는 이 엣지 장비의 거부는 여기서 승인합니다.`;
+  }
+  return '엣지가 접속하는 장비(위임 수집)는 이 목록에 나타나지 않습니다 — 그 장비의 거부 문구가 말하는 **엣지 포탈의 설정 › 장비 신뢰**에서 승인하세요(장비 신뢰는 포탈마다 따로 기록합니다).';
 }
 
 export function bulkConfirmText(kind, n) {

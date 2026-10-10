@@ -24,7 +24,7 @@ import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
 import { bmcLabel } from '../tools/serverVendorText.js';
 // v2.728: 부품 상태·링크·파트 장애 연결 문구(판정은 서버 — 여기는 색·문구만).
-import { partStatusBadge, linkBadge, portSpeedText, partsHeadline, failedKindsNote, statusMissingNote, partFaultNote } from './hwStatusText.js';
+import { partStatusBadge, linkBadge, portSpeedText, partsHeadline, failedKindsNote, statusMissingNote, partFaultNote, PART_STATE_TEXT } from './hwStatusText.js';
 import BoldText from '../../components/boldText.jsx';
 import { holdText } from '../tools/partFaultText.js';
 
@@ -163,6 +163,50 @@ function PartsSummary({ resp }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// v2.731 A2-02 — 하위 시스템 롤업 배지. 스토리지·PSU 는 서버(idrac/invView.js partHealthRollup)가 원소 partState 로 다시 만든
+//   `healthParts` 를 읽는다 — 예전 롤업은 상태를 못 읽은 부품을 초록 'OK', Critical 을 호박색 'Warning' 으로 접어 같은 탭의 부품 표와
+//   반대를 말했다. 확인 불가는 회색(정상도 장애도 아니다), 원소가 없거나 빈 슬롯뿐이면 배지를 만들지 않는다.
+//   전체·CPU·메모리는 장비가 보고한 Status.Health 원문 그대로다(예전과 같다).
+const ROLLUP_TONE = Object.freeze({ ok: 'green', warn: 'amber', fault: 'red', unknown: 'gray' });
+const ROLLUP_TEXT = Object.freeze({ ok: 'OK', warn: 'Warning', fault: 'Critical', unknown: '확인 불가' });
+const ROLLUP_PART = Object.freeze({ psu: 'PSU', storage: '디스크' });
+const ROLLUP_COUNT_ORDER = ['fault', 'warn', 'ok', 'unknown', 'absent'];
+
+export function HealthRollupBadges({ inv }) {
+  if (!inv || typeof inv !== 'object') return null;
+  const h = inv.health && typeof inv.health === 'object' ? inv.health : {};
+  const hp = inv.healthParts && typeof inv.healthParts === 'object' ? inv.healthParts : {};
+  const raw = (k, v) => (typeof v === 'string' && v
+    ? <span key={k} className={`badge ${/ok/i.test(v) ? 'green' : /warn/i.test(v) ? 'amber' : 'red'}`}>{k}: {v}</span>
+    : null);
+  const rolled = (k, key) => {
+    const p = hp[key];
+    if (!p || typeof p !== 'object') return raw(k, h[key]); // 판정이 실리지 않은 응답(부품 배열 없음)은 저장 글자 그대로
+    if (!Object.hasOwn(ROLLUP_TONE, p.state || '')) return null;
+    const c = p.counts && typeof p.counts === 'object' ? p.counts : {};
+    const cnt = (x) => (typeof c[x] === 'number' && c[x] > 0 ? c[x] : 0);
+    const total = ROLLUP_COUNT_ORDER.reduce((s, x) => s + cnt(x), 0);
+    const breakdown = ROLLUP_COUNT_ORDER.filter((x) => cnt(x) > 0).map((x) => `${PART_STATE_TEXT[x]} ${cnt(x)}`).join(' · ');
+    const tail = p.state === 'unknown'
+      ? ' — 상태를 읽지 못한 부품이 있어 정상이라 말하지 않습니다(장애라는 뜻도 아닙니다)'
+      : (cnt('unknown') > 0 ? ` — 상태를 읽지 못한 ${cnt('unknown')}개는 정상이라는 뜻이 아닙니다` : '');
+    return (
+      <span key={k} className={`badge ${ROLLUP_TONE[p.state]}`} title={`${ROLLUP_PART[key]} ${total}개 — ${breakdown || '—'}${tail}`}>
+        {k}: {ROLLUP_TEXT[p.state]}
+      </span>
+    );
+  };
+  return (
+    <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+      {raw('전체', h.overall)}
+      {raw('CPU', h.processor)}
+      {raw('메모리', h.memory)}
+      {rolled('스토리지', 'storage')}
+      {rolled('PSU', 'psu')}
     </div>
   );
 }
@@ -354,11 +398,7 @@ export function IdracDetailModal({ server, onClose }) {
           invErr ? <ErrorBox message={invErr} /> : !inv ? <Loading /> : (
             <div>
               <PartsSummary resp={invResp} />
-              <div className="flex gap wrap" style={{ marginBottom: 12 }}>
-                {Object.entries({ 전체: inv.health?.overall, CPU: inv.health?.processor, 메모리: inv.health?.memory, 스토리지: inv.health?.storage, PSU: inv.health?.psu }).map(([k, v]) => v ? (
-                  <span key={k} className={`badge ${/ok/i.test(v) ? 'green' : /warn/i.test(v) ? 'amber' : 'red'}`}>{k}: {v}</span>
-                ) : null)}
-              </div>
+              <HealthRollupBadges inv={inv} />
               <div className="spec-grid" style={{ marginBottom: 14 }}>
                 <div><span className="muted">iDRAC 펌웨어</span><div><b>{inv.idrac?.firmwareVersion || '—'}</b> {inv.idrac?.model && <span className="muted">({inv.idrac.model})</span>}</div></div>
                 <div><span className="muted">BIOS 버전</span><div><b>{inv.bios?.version || inv.system?.biosVersion || '—'}</b></div></div>

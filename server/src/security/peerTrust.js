@@ -22,6 +22,14 @@
  * 손상 파일은 preserveCorrupt 로 보존하고 **두 종류 모두 enforce 로 닫는다**(승인 목록을 잃은 채 observe 로 열면
  * 그 사이 공격자 키가 '관찰' 로 들어온다). 상태의 `loadError` 가 그 사실을 말한다.
  *
+ * 다중 지문(v2.731 A1-01): 같은 주소(host:port) 뒤에 서버가 여럿인 장비(로드밸런서·DNS 라운드로빈 — 서버마다 자체서명 인증서·
+ * 호스트키)는 정상적으로 여러 지문을 낸다. 그래서 항목은 신뢰 지문 **목록**(상한 TRUSTED_MAX)을 갖고 승인은 **추가**다(교체는 명시 옵션
+ * replace). 개별 지문은 거부(회수)로 뺀다. observe 의 '처음 보는 장비' 는 여전히 '신뢰 지문이 하나도 없는 항목' 이다 — 지문이 있는 장비가
+ * 다른 지문을 내면 정책과 무관하게 거부하고, 관리자가 승인하면 그 지문이 목록에 더해진다(보안 유지).
+ * 저장 형식: 첫 지문은 예전과 같은 자리(`trusted` 객체)에, 나머지는 `trustedMore` 배열에 둔다 — 이전 판본으로 되돌려 설치해도
+ * 첫 지문은 그대로 읽힌다(나머지만 빠진다). 옛 파일(trusted 객체 1개)은 그대로 읽는다. ⚠ `trusted` 를 배열로 바꾸지 말 것 — 되돌림
+ * 설치가 모든 장비를 '지문 변경' 으로 거부한다.
+ *
  * 호스트 정규화: 소문자 · 끝 점 제거 · IPv6 대괄호 제거·표준형. IPv4 는 정규형만 숫자로 다루고 비정규 표기(선행 0)는
  * 글자 그대로 별개 키다(실제 접속은 그것을 8진수로 해석한다 — normalizePeerHost 주석). 이름과 IP 는 같은 장비여도
  * 다른 키다(포탈은 둘이 같은지 모른다 — 지어내지 않는다). 주소·포트가 바뀌면 기존 지문을 승계하지 않는다.
@@ -33,6 +41,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { strictIpv4Num, numToIp } from '../util/ipv4.js';
 import { registerExitFlush } from '../util/exitFlush.js';
+import { pushAll } from '../util/pushAll.js';
 import { logAudit } from '../audit.js';
 
 export const PEER_KINDS = Object.freeze(['ssh', 'tls']);
@@ -41,6 +50,8 @@ const DEFAULT_PORT = { ssh: 22, tls: 443 };
 const ENV_KEY = { ssh: 'SSH_HOSTKEY_POLICY', tls: 'TLS_PEER_POLICY' };
 const MAX_ENTRIES = 20000;
 const HISTORY_MAX = 8;
+/** 한 장비(주소·포트)에 둘 수 있는 신뢰 지문 수 — 로드밸런서 뒤 서버 수로 충분한 값. 넘기면 승인이 거부된다(오래된 것을 조용히 지우지 않는다). */
+export const TRUSTED_MAX = 8;
 // 이 기능 이전부터 쓰던 설치인지 판단하는 장비 등록부(하나라도 내용이 있으면 '기존 현장').
 const EXISTING_MARKERS = [
   'vcenters.json', 'storage-devices.json', 'sanswitch-devices.json', 'pdu-devices.json', 'cvp-servers.json',
@@ -57,6 +68,9 @@ const FILE = () => path.join(config.configDir, 'peer-trust.json');
 let _st = null;          // { v, policy:{ssh,tls}, origin:{ssh,tls}, entries: Map<key, entry> }
 let _loadError = null;
 let _dirty = false;
+let _saveTimer = null;   // 처음 보는 장비 기록의 디바운스 저장(A6-06)
+/** 처음 보는 장비(관찰·승인 대기) 기록을 묶어 쓰는 지연(ms). 관리자 동작·바뀐 지문은 즉시 쓴다. */
+const SAVE_DEBOUNCE_MS = 2000;
 
 function emptyState() {
   return { v: 1, policy: {}, origin: {}, entries: new Map() };
@@ -118,17 +132,79 @@ function existingInstall() {
 
 function entryToJson(e) {
   const o = { kind: e.kind, host: e.host, port: e.port };
-  for (const k of ['trusted', 'pending', 'rejected', 'firstSeen', 'lastSeen', 'lastSeenCount', 'note', 'history']) {
+  for (const k of ['trusted', 'trustedMore', 'pending', 'rejected', 'firstSeen', 'lastSeen', 'lastSeenCount', 'note', 'history']) {
     if (e[k] != null) o[k] = e[k];
   }
   return o;
 }
 
+/** 항목의 신뢰 지문 목록(사본 배열) — 첫 자리는 `trusted`(옛 판본이 읽는 자리), 나머지는 `trustedMore`. */
+function trustedOf(e) {
+  const out = [];
+  if (e?.trusted && typeof e.trusted === 'object' && !Array.isArray(e.trusted)) out.push(e.trusted);
+  if (Array.isArray(e?.trustedMore)) for (const t of e.trustedMore) if (t && typeof t === 'object') out.push(t);
+  return out;
+}
+
+/** 목록을 저장 자리로 되돌린다(빈 목록이면 trusted=null). */
+function setTrusted(e, list) {
+  const l = (Array.isArray(list) ? list : []).filter((t) => t && typeof t === 'object');
+  e.trusted = l[0] || null;
+  if (l.length > 1) e.trustedMore = l.slice(1); else delete e.trustedMore;
+}
+
+/**
+ * 파일에서 읽은 신뢰 지문 정리 — trusted 가 객체(옛 형식)·배열(손으로 고친 파일) 어느 쪽이어도 받고, 지문 모양이 틀린 것·중복은 버린다.
+ * 상한을 넘긴 꼬리는 버리고 그 사실을 콘솔에 남긴다(손으로 고친 파일에서만 생긴다).
+ */
+function sanitizeTrustedList(kind, e) {
+  const raw = [];
+  if (Array.isArray(e?.trusted)) pushAll(raw, e.trusted); else if (e?.trusted) raw.push(e.trusted);
+  if (Array.isArray(e?.trustedMore)) pushAll(raw, e.trustedMore);
+  const seen = new Set();
+  const out = [];
+  let dropped = 0;
+  for (const t of raw) {
+    if (!t || typeof t !== 'object') continue;
+    const fp = normalizeFingerprint(kind, t.fp);
+    if (!fp || seen.has(fp)) continue;
+    seen.add(fp);
+    if (out.length >= TRUSTED_MAX) { dropped++; continue; }
+    out.push({ ...t, fp, state: t.state === 'approved' ? 'approved' : 'observed' });
+  }
+  if (dropped) console.warn(`[peerTrust] ${kind} ${e?.host}:${e?.port} 신뢰 지문이 상한(${TRUSTED_MAX})을 넘어 ${dropped}개를 읽지 않았습니다.`);
+  return out;
+}
+
 function persist() {
   const st = load();
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   const obj = { v: 1, policy: st.policy, origin: st.origin, entries: [...st.entries.values()].map(entryToJson) };
   atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 1), { mode: 0o600 });
   _dirty = false;
+}
+
+/**
+ * 처음 보는 장비 기록(관찰 'observed-new' · 새 승인 대기 'unknown' · enforce 전환 뒤 'not-approved')은 **묶어서** 쓴다(v2.731 A6-06).
+ * 연결 핫패스(TLS 핸드셰이크 직후·SSH hostVerifier)에서 장비마다 파일 전체를 직렬화·fsync 하면 업그레이드·새 설치 직후 첫 수집 주기가
+ * 장비 수만큼 전체 쓰기를 한다(재현 1,100대 누적 약 4.9초 · 호출당 최대 25ms — 항목이 늘수록 한 번이 길다).
+ * 바뀐 지문('changed' — 보안 사건, 감사 로그와 함께)과 관리자 동작(승인·거부·삭제·정책)은 **즉시** persist 한다.
+ * 종료 시에는 exitFlush 가 동기로 쓴다(initPeerTrust 가 등록 — 여기서도 등록해 init 없이 쓰는 경로를 덮는다).
+ * 정직 기록: SIGKILL·정전이면 지연 창(SAVE_DEBOUNCE_MS)의 '처음 본' 기록을 잃는다 — 다음 연결이 다시 처음 보는 장비로 판정한다
+ * (관찰 정책이면 다시 관찰, 승인 정책이면 다시 대기 — 신뢰가 넓어지지는 않는다).
+ */
+function persistSoon() {
+  _dirty = true;
+  try { registerExitFlush('peer-trust', () => { if (_dirty) persist(); }); } catch { /* */ }
+  if (_saveTimer) return;
+  _saveTimer = setTimeout(() => { _saveTimer = null; if (_dirty) persistSafe(); }, SAVE_DEBOUNCE_MS);
+  _saveTimer.unref?.(); // 종료는 exitFlush 가 맡는다 — 이 타이머가 프로세스를 붙잡지 않게
+}
+
+/** 미뤄 둔 기록을 지금 쓴다(동기 — 테스트·종료 경로). 쓸 것이 없으면 아무것도 하지 않는다. */
+export function flushPeerTrust() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  if (_dirty && _st) persistSafe();
 }
 
 function decideDefaults(st) {
@@ -167,7 +243,9 @@ function load() {
       if (!e || typeof e !== 'object' || !PEER_KINDS.includes(e.kind)) continue;
       const key = peerKey(e.kind, e.host, e.port);
       const { seenCount, ...rest } = e; // 옛 이름(seenCount) → lastSeenCount(실행 필드 — 백업 지문 제외)
-      st.entries.set(key, { ...rest, ...(rest.lastSeenCount == null && seenCount != null ? { lastSeenCount: seenCount } : {}), host: normalizePeerHost(e.host), port: normPort(e.kind, e.port) });
+      const ent = { ...rest, ...(rest.lastSeenCount == null && seenCount != null ? { lastSeenCount: seenCount } : {}), host: normalizePeerHost(e.host), port: normPort(e.kind, e.port) };
+      setTrusted(ent, sanitizeTrustedList(e.kind, e)); // 옛 형식(trusted 객체 1개)·새 형식(+trustedMore) 둘 다
+      st.entries.set(key, ent);
     }
   }
   const missing = PEER_KINDS.some((k) => !PEER_MODES.includes(st.policy[k]));
@@ -212,7 +290,7 @@ function pushHistory(e, ev) {
 function capEntries(st) {
   if (st.entries.size <= MAX_ENTRIES) return;
   // 승인되지 않은 오래된 항목부터 버린다(승인 지문은 지우지 않는다).
-  const victims = [...st.entries.entries()].filter(([, e]) => !e.trusted || e.trusted.state !== 'approved')
+  const victims = [...st.entries.entries()].filter(([, e]) => !trustedOf(e).some((t) => t.state === 'approved'))
     .sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0));
   for (const [k] of victims) { if (st.entries.size <= MAX_ENTRIES) break; st.entries.delete(k); }
 }
@@ -242,36 +320,41 @@ export function checkPeer(kind, host, port, fp, meta = {}) {
   const m = pickMeta(meta);
   const rejectedFps = Array.isArray(e.rejected) ? e.rejected : [];
   if (rejectedFps.some((r) => r.fp === nfp)) { _dirty = true; return { ok: false, reason: 'rejected', mode, key }; }
-  const t = e.trusted;
-  if (t && t.fp === nfp) {
+  const list = trustedOf(e);
+  const t = list.find((x) => x.fp === nfp);
+  if (t) {
     if (t.state === 'approved') { _dirty = true; return { ok: true, reason: 'approved', mode, key }; }
     if (mode === 'observe') { _dirty = true; return { ok: true, reason: 'observed', mode, key }; }
     // enforce 로 바뀐 뒤의 관찰 지문 — 승인 전에는 통과시키지 않는다.
+    const had = e.pending && e.pending.fp === nfp;
     setPending(e, nfp, 'not-approved', m, now);
-    persistSafe();
+    if (had) _dirty = true; else persistSoon(); // 정책 전환 직후 장비마다 전체 쓰기를 하지 않게(A6-06)
     return { ok: false, reason: 'not-approved', mode, key };
   }
-  if (!t && mode === 'observe') {
-    e.trusted = { fp: nfp, state: 'observed', at: now, ...m };
+  // observe 의 '처음 보는 장비' 는 신뢰 지문이 하나도 없는 항목뿐이다 — 지문이 있는 장비의 다른 지문(두 번째 서버·교체·가로채기)은
+  // 정책과 무관하게 거부하고 관리자 승인(추가)을 기다린다(v2.731 A1-01 — 승인하면 목록에 더해져 둘 다 통과한다).
+  if (!list.length && mode === 'observe') {
+    setTrusted(e, [{ fp: nfp, state: 'observed', at: now, ...m }]);
     e.pending = null;
     pushHistory(e, { at: now, ev: 'observed', fp: nfp });
     capEntries(st);
-    persistSafe();
+    persistSoon(); // 처음 보는 장비 — 묶어서 쓴다(A6-06)
     console.warn(`[peerTrust] ${kind} ${e.host}:${e.port} 지문을 처음 관찰했습니다(미승인 · observe 모드) ${nfp}`);
     return { ok: true, reason: 'observed-new', mode, key };
   }
-  const reason = t ? 'changed' : 'unknown';
+  const reason = list.length ? 'changed' : 'unknown';
   const already = e.pending && e.pending.fp === nfp;
   setPending(e, nfp, reason, m, now);
   if (isNew) capEntries(st);
   if (!already) {
-    persistSafe();
+    // 바뀐 지문은 보안 사건이라 즉시 쓴다(감사 로그와 같은 순간). 처음 보는 장비(unknown)는 묶어서 쓴다(A6-06).
+    if (reason === 'changed') persistSafe(); else persistSoon();
     console.warn(`[peerTrust] ${kind} ${e.host}:${e.port} ${reason === 'changed' ? '지문이 바뀌었습니다' : '승인되지 않은 지문입니다'} — 연결을 거부했습니다(관리자 승인 필요) ${nfp}`);
     // 그룹 H(S-01 '키 교체 감사'): 승인(또는 관찰)된 지문과 다른 지문은 보안 사건이다 — 감사 로그에도 남긴다(대기 지문마다 1회).
     //   처음 보는 장비(unknown)는 운영 사건이라 이력·콘솔에만 둔다(새 설치에서 장비마다 감사 줄이 쌓이지 않게).
     if (reason === 'changed') {
       try {
-        logAudit({ user: 'system', action: '장비 키 변경 감지(연결 거부)', target: `${kind} ${e.host}:${e.port}`, detail: `신뢰 ${t.fp}(${t.state}) → 제시 ${nfp}` });
+        logAudit({ user: 'system', action: '장비 키 변경 감지(연결 거부)', target: `${kind} ${e.host}:${e.port}`, detail: `신뢰 ${list.map((x) => `${x.fp}(${x.state})`).join(', ')} → 제시 ${nfp}` });
       } catch { /* 감사 기록 실패가 판정을 바꾸지 않는다 */ }
     }
   } else _dirty = true;
@@ -282,7 +365,7 @@ export function checkPeer(kind, host, port, fp, meta = {}) {
  * **읽기 전용** 판정(그룹 H) — 상태를 바꾸지 않고 '지금 연결하면 어떻게 되는가' 만 말한다. 통신 점검(linkcheck)처럼
  * 인증 없이 키만 보고 끊는 경로가 쓴다: 그 경로가 checkPeer 를 부르면 5분 주기 점검이 IP 키로 '관찰' 항목을 쌓고
  * (수집기는 이름으로 접속한다) observe 모드의 TOFU 를 점검이 대신 해 버린다.
- * 반환 { state, wouldPass, mode, key, trustedFp }
+ * 반환 { state, wouldPass, mode, key, trustedFp, trustedFps }  (trustedFp = 첫 신뢰 지문 — 예전 호출부 호환, trustedFps = 전부)
  *   state: 'approved' | 'observed' | 'changed' | 'pending' | 'rejected' | 'unknown' | 'bad-fingerprint'
  */
 export function peekPeer(kind, host, port, fp) {
@@ -290,18 +373,22 @@ export function peekPeer(kind, host, port, fp) {
   const nfp = normalizeFingerprint(kind, fp);
   const key = peerKey(kind, host, port);
   const { mode } = getPeerPolicy(kind);
-  if (!nfp) return { state: 'bad-fingerprint', wouldPass: false, mode, key, trustedFp: null };
+  if (!nfp) return { state: 'bad-fingerprint', wouldPass: false, mode, key, trustedFp: null, trustedFps: [] };
   const e = load().entries.get(key);
-  const trustedFp = e?.trusted?.fp || null;
-  if (!e) return { state: 'unknown', wouldPass: mode === 'observe', mode, key, trustedFp };
-  if ((Array.isArray(e.rejected) ? e.rejected : []).some((r) => r.fp === nfp)) return { state: 'rejected', wouldPass: false, mode, key, trustedFp };
-  if (e.trusted && e.trusted.fp === nfp) {
-    const st = e.trusted.state === 'approved' ? 'approved' : 'observed';
-    return { state: st, wouldPass: st === 'approved' || mode === 'observe', mode, key, trustedFp };
+  const list = trustedOf(e);
+  const trustedFps = list.map((x) => x.fp);
+  const trustedFp = trustedFps[0] || null;
+  const out = (state, wouldPass) => ({ state, wouldPass, mode, key, trustedFp, trustedFps });
+  if (!e) return out('unknown', mode === 'observe');
+  if ((Array.isArray(e.rejected) ? e.rejected : []).some((r) => r.fp === nfp)) return out('rejected', false);
+  const t = list.find((x) => x.fp === nfp);
+  if (t) {
+    const st = t.state === 'approved' ? 'approved' : 'observed';
+    return out(st, st === 'approved' || mode === 'observe');
   }
-  if (e.trusted) return { state: 'changed', wouldPass: false, mode, key, trustedFp };
-  if (e.pending && e.pending.fp === nfp) return { state: 'pending', wouldPass: mode === 'observe', mode, key, trustedFp };
-  return { state: 'unknown', wouldPass: mode === 'observe', mode, key, trustedFp };
+  if (list.length) return out('changed', false);
+  if (e.pending && e.pending.fp === nfp) return out('pending', mode === 'observe');
+  return out('unknown', mode === 'observe');
 }
 
 function setPending(e, fp, reason, meta, now) {
@@ -326,31 +413,60 @@ function persistSafe() {
 /**
  * 승인 — fp 를 주면 그 지문을 승인한다(관리자가 별도 채널로 확인한 지문). 생략하면 대기 지문을, 대기가 없으면 관찰 지문을 승인.
  * 주어진 fp 가 대기·관찰 지문과 다르면 그대로 승인하되(장비 교체 전에 미리 등록) 응답의 `matchedPresented:false` 로 밝힌다.
+ *
+ * v2.731(A1-01): 승인은 **추가**다 — 이미 승인·관찰된 다른 지문을 지우지 않는다(로드밸런서 뒤 서버마다 지문이 다르다).
+ *   `replace:true` 면 교체(키 교체) — 그 지문 하나만 남기고 나머지는 신뢰하지 않는다(거부 목록에는 넣지 않는다 — 다시 보이면 '바뀐 지문').
+ *   목록이 TRUSTED_MAX 에 찼는데 새 지문을 더하면 `trusted-full` — 오래된 지문을 조용히 지우지 않는다(지울 지문은 관리자가 거부로 회수한다).
+ * 반환: { ok, key, fp, matchedPresented, trustedCount, added, already, replaced[] }
  */
-export function approvePeer(kind, host, port, fp, { by = '', note = '' } = {}) {
+export function approvePeer(kind, host, port, fp, { by = '', note = '', replace = false } = {}) {
   if (!PEER_KINDS.includes(kind)) return { ok: false, error: 'unknown-kind' };
   const st = load();
   const key = peerKey(kind, host, port);
   const [, h, p] = key.split('|');
   if (!h) return { ok: false, error: 'bad-host' };
   const e = st.entries.get(key) || { kind, host: h, port: Number(p), firstSeen: Date.now() };
-  const nfp = fp ? normalizeFingerprint(kind, fp) : (e.pending?.fp || e.trusted?.fp || '');
+  const list = trustedOf(e);
+  const nfp = fp ? normalizeFingerprint(kind, fp)
+    : (e.pending?.fp || list.find((t) => t.state === 'observed')?.fp || list[0]?.fp || '');
   if (!nfp) return { ok: false, error: fp ? 'bad-fingerprint' : 'nothing-to-approve' };
-  const presented = e.pending?.fp || e.trusted?.fp || null;
+  const presented = e.pending?.fp || list[0]?.fp || null;
   const now = Date.now();
-  const meta = e.pending?.fp === nfp ? pickMeta(e.pending) : e.trusted?.fp === nfp ? pickMeta(e.trusted) : {};
-  const prevFp = e.trusted?.fp && e.trusted.fp !== nfp ? e.trusted.fp : (e.trusted?.prevFp || null);
-  e.trusted = { fp: nfp, state: 'approved', at: now, by: String(by || '').slice(0, 64), ...(prevFp ? { prevFp } : {}), ...meta };
+  const who = String(by || '').slice(0, 64);
+  const existing = list.find((t) => t.fp === nfp) || null;
+  const meta = e.pending?.fp === nfp ? pickMeta(e.pending) : existing ? pickMeta(existing) : {};
+  let next;
+  let replaced = [];
+  let already = false;
+  if (replace) {
+    replaced = list.map((t) => t.fp).filter((x) => x !== nfp);
+    const prevFp = replaced[0] || existing?.prevFp || null;
+    next = [{ fp: nfp, state: 'approved', at: now, by: who, ...(prevFp ? { prevFp } : {}), ...meta }];
+  } else if (existing) {
+    already = existing.state === 'approved';
+    next = list.map((t) => (t.fp === nfp && !already ? { ...t, state: 'approved', at: now, by: who, ...meta } : t));
+  } else {
+    if (list.length >= TRUSTED_MAX) return { ok: false, error: 'trusted-full', max: TRUSTED_MAX, key, trustedCount: list.length };
+    next = [...list, { fp: nfp, state: 'approved', at: now, by: who, ...meta }];
+  }
+  setTrusted(e, next);
   if (e.pending?.fp === nfp) e.pending = null;
   if (Array.isArray(e.rejected)) e.rejected = e.rejected.filter((r) => r.fp !== nfp);
   if (note) e.note = String(note).slice(0, 200);
-  pushHistory(e, { at: now, ev: 'approved', fp: nfp, by: String(by || '').slice(0, 64) });
+  pushHistory(e, { at: now, ev: replace ? 'approved-replace' : 'approved', fp: nfp, by: who, ...(replaced.length ? { replaced: replaced.slice(0, TRUSTED_MAX) } : {}) });
   st.entries.set(key, e);
   persist();
-  return { ok: true, key, fp: nfp, matchedPresented: presented == null ? null : presented === nfp };
+  return {
+    ok: true, key, fp: nfp,
+    matchedPresented: presented == null ? null : (e.pending?.fp === nfp || presented === nfp || !!existing),
+    trustedCount: next.length, added: !existing, already, replaced,
+  };
 }
 
-/** 거부 — 대기(또는 주어진) 지문을 거부 목록에 넣는다. 거부된 지문은 정책과 무관하게 통과하지 못한다. */
+/**
+ * 거부 — 대기(또는 주어진) 지문을 거부 목록에 넣는다. 거부된 지문은 정책과 무관하게 통과하지 못한다.
+ * 신뢰 목록에 있던 지문이면 **그 지문만** 회수한다(같은 주소의 다른 승인 지문은 그대로 — v2.731 A1-01). 응답 `revoked` 가 그 사실을 말한다.
+ */
 export function rejectPeer(kind, host, port, fp, { by = '' } = {}) {
   if (!PEER_KINDS.includes(kind)) return { ok: false, error: 'unknown-kind' };
   const st = load();
@@ -361,10 +477,12 @@ export function rejectPeer(kind, host, port, fp, { by = '' } = {}) {
   const now = Date.now();
   e.rejected = [...(Array.isArray(e.rejected) ? e.rejected : []).filter((r) => r.fp !== nfp), { fp: nfp, at: now, by: String(by || '').slice(0, 64) }].slice(-HISTORY_MAX);
   if (e.pending?.fp === nfp) e.pending = null;
-  if (e.trusted?.fp === nfp) e.trusted = null;
-  pushHistory(e, { at: now, ev: 'rejected', fp: nfp, by: String(by || '').slice(0, 64) });
+  const list = trustedOf(e);
+  const revoked = list.some((t) => t.fp === nfp);
+  if (revoked) setTrusted(e, list.filter((t) => t.fp !== nfp));
+  pushHistory(e, { at: now, ev: revoked ? 'revoked' : 'rejected', fp: nfp, by: String(by || '').slice(0, 64) });
   persist();
-  return { ok: true, key, fp: nfp };
+  return { ok: true, key, fp: nfp, revoked, trustedCount: trustedOf(e).length };
 }
 
 /** 항목 삭제(장비 폐기 등). 다음 연결은 처음 보는 장비로 판정된다. */
@@ -382,24 +500,43 @@ export function approveAllObserved(kind, { by = '' } = {}) {
   const st = load();
   const now = Date.now();
   let n = 0;
+  const who = String(by || '').slice(0, 64);
   for (const e of st.entries.values()) {
-    if (e.kind !== kind || e.trusted?.state !== 'observed') continue;
-    e.trusted = { ...e.trusted, state: 'approved', at: now, by: String(by || '').slice(0, 64), bulk: true };
-    pushHistory(e, { at: now, ev: 'approved-bulk', fp: e.trusted.fp, by: String(by || '').slice(0, 64) });
-    n++;
+    if (e.kind !== kind) continue;
+    const list = trustedOf(e);
+    if (!list.some((t) => t.state === 'observed')) continue;
+    setTrusted(e, list.map((t) => {
+      if (t.state !== 'observed') return t;
+      pushHistory(e, { at: now, ev: 'approved-bulk', fp: t.fp, by: who });
+      n++;
+      return { ...t, state: 'approved', at: now, by: who, bulk: true };
+    }));
   }
   if (n) persist();
   return { ok: true, approved: n };
 }
 
-/** 화면용 목록(사본). 상태: approved · observed · pending(대기 지문 있음) · rejected-only. */
+/**
+ * 항목 상태(화면·개수 공용): pending(대기 지문 있음) > observed(미승인 관찰 지문이 하나라도) > approved > rejected-only > none.
+ * 승인 지문이 여럿이어도 관찰(미승인) 지문이 남아 있으면 '관찰' 이다 — 초록으로 칠하지 않는다.
+ */
+function entryState(e) {
+  if (e.pending) return 'pending';
+  const list = trustedOf(e);
+  if (list.some((t) => t.state === 'observed')) return 'observed';
+  if (list.some((t) => t.state === 'approved')) return 'approved';
+  return Array.isArray(e.rejected) && e.rejected.length ? 'rejected' : 'none';
+}
+
+/** 화면용 목록(사본). `trustedList` = 신뢰 지문 전부(첫 자리 = `trusted`). */
 export function listPeers({ kind } = {}) {
   const st = load();
   return [...st.entries.values()]
     .filter((e) => !kind || e.kind === kind)
     .map((e) => ({
       ...entryToJson(e),
-      state: e.pending ? 'pending' : e.trusted?.state || (Array.isArray(e.rejected) && e.rejected.length ? 'rejected' : 'none'),
+      trustedList: trustedOf(e).map((t) => ({ ...t })),
+      state: entryState(e),
     }))
     .sort((a, b) => (a.kind === b.kind ? (a.host < b.host ? -1 : a.host > b.host ? 1 : a.port - b.port) : a.kind < b.kind ? -1 : 1));
 }
@@ -411,8 +548,10 @@ export function peerTrustStatus() {
     const c = { approved: 0, observed: 0, pending: 0, pendingChanged: 0, rejected: 0 };
     for (const e of st.entries.values()) {
       if (e.kind !== kind) continue;
-      if (e.trusted?.state === 'approved') c.approved++;
-      else if (e.trusted?.state === 'observed') c.observed++;
+      // 장비(항목) 단위 — 미승인 관찰 지문이 하나라도 있으면 '관찰', 아니면 승인 지문이 있으면 '승인'(목록 상태와 같은 우선순위).
+      const tl = trustedOf(e);
+      if (tl.some((t) => t.state === 'observed')) c.observed++;
+      else if (tl.some((t) => t.state === 'approved')) c.approved++;
       if (e.pending) { c.pending++; if (e.pending.reason === 'changed') c.pendingChanged++; }
       if (Array.isArray(e.rejected) && e.rejected.length) c.rejected++;
     }
@@ -421,5 +560,45 @@ export function peerTrustStatus() {
   return out;
 }
 
+/*
+ * ── 승인 노드(v2.731 A1-02) ──────────────────────────────────────────────────────────────────────────────
+ * peer-trust.json 은 노드(중앙·엣지)마다 따로이고 노드 사이에 승인·보고 경로가 없다. 엣지가 접속하는 장비의 거부 문구는
+ * 엣지에서 만들어져 스냅샷 오류로 중앙 화면에 그대로 실리는데, 예전 문구는 '설정 › 장비 신뢰에서 승인' 만 말해서 중앙 관리자가
+ * 중앙 화면을 열면 그 장비가 없었다. 거부 문구(proxy/sshExec.js·security/tlsTrust.js)가 이 함수로 '어느 노드에서 승인하는가' 를 싣는다.
+ * 엣지 판정 = CENTRAL_URL 설정(config.agent.centralUrl — 중앙으로 push·pull 하는 노드). 이름 = config.agent.name(AGENT_NAME·호스트명).
+ * ⚠ 이름에 인증 실패 판정 낱말(401·403·404·인증·auth·permission·invalid·incorrect·login)이 있으면 **이름을 싣지 않는다** —
+ *   SSH 문구에 호스트명을 넣지 않는 것과 같은 이유(sshExec 머리말: 문구 판정 \b403\b 등이 수집을 '인증 정지' 시킬 수 있다.
+ *   authGuard 는 표지를 먼저 보지만 redfish·errors 처럼 문구만 보는 판정이 남아 있다). 제어 문자는 지우고 64자로 자른다.
+ */
+const RISKY_NODE_NAME_RE = /\b40[134]\b|인증|auth|permission|invalid|incorrect|login/i;
+
+/** 이 노드가 엣지인가와 문구에 실을 수 있는 이름. 이름을 실을 수 없으면 name:null(지어내지 않는다). */
+export function peerApproveNode() {
+  const edge = !!String(config.agent?.centralUrl || '').trim();
+  if (!edge) return { edge: false, name: null };
+  let n = String(config.agent?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  if (n.length > 64) n = `${n.slice(0, 64)}…`;
+  return { edge: true, name: n && !RISKY_NODE_NAME_RE.test(n) ? n : null };
+}
+
+/**
+ * 거부 문구용 — { edge, name, text, note }.
+ *   text: '이 포탈의 설정 › 장비 신뢰(…)' 또는 '엣지 ‘X’ 포탈의 설정 › 장비 신뢰(…)'
+ *   note: 엣지면 '중앙 포탈에서는 승인할 수 없습니다' 를 포함한 한 문장, 중앙이면 ''
+ * ⚠ 문구에 '설정 › 장비 신뢰' 를 유지할 것(테스트·화면 안내가 그 글자로 찾는다). 표지 문자열은 호출부가 붙인다.
+ */
+export function peerApproveWhere() {
+  const n = peerApproveNode();
+  if (!n.edge) return { ...n, text: '이 포탈의 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)', note: '' };
+  return {
+    ...n,
+    text: `엣지 ${n.name ? `‘${n.name}’ ` : ''}포탈의 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)`,
+    note: '이 장비는 그 엣지가 접속하므로 중앙 포탈에서는 승인할 수 없습니다',
+  };
+}
+
 /** 테스트 전용 — 메모리 상태를 버린다(다음 호출이 파일을 다시 읽는다). */
-export function _resetPeerTrustForTest() { _st = null; _loadError = null; _dirty = false; }
+export function _resetPeerTrustForTest() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  _st = null; _loadError = null; _dirty = false;
+}

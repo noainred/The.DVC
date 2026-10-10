@@ -324,6 +324,17 @@ export function remoteSessionStatus() {
   };
 }
 
+/**
+ * v2.731(A5-02·A1-03): 호스트키 거부의 닫힘 사유 — 'host-key-<판정 사유>'(unknown·changed·rejected·not-approved·bad-fingerprint·internal).
+ * 닫힘 코드는 4403 그대로다(권한·범위·매핑과 같은 코드) — 웹(remote/sshSend.js remoteCloseReasonText)이 이 사유로 문구를 고른다.
+ * 예전 'host key not trusted' 는 웹이 4403 기본 문구('권한·범위가 바뀌어')로 덮어 사용자가 엉뚱한 원인(권한)을 의심했다.
+ * 사유 문자열은 영문 소문자·하이픈만 싣는다(장비가 내민 값이 섞이지 않게).
+ */
+export function hostKeyCloseReason(r) {
+  const why = String(r?.reason || '').toLowerCase().replace(/[^a-z-]/g, '').slice(0, 40);
+  return `host-key-${why || 'unknown'}`;
+}
+
 /** WS close 사유는 UTF-8 123바이트가 상한이다 — 넘으면 ws 가 RangeError 를 던진다(한글 41자 정도). 글자 경계에서 자른다. */
 export function safeWsClose(ws, code, reason = '') {
   let r = String(reason || '');
@@ -479,7 +490,8 @@ function handleConnection(ws, user, opts = {}) {
       if (!m || m.protocol !== 'ssh') { send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }); return closeAll(4404, 'mapping not found'); }
       // v2.322: 소유·scope 재검사(범위 밖/타인 매핑을 mappingId 추측으로 여는 것 차단).
       const issue = mappingAccessIssue(user, m);
-      if (issue) { send({ type: 'status', text: issue }); return closeAll(4403, 'forbidden'); }
+      // v2.731(A5-02·A1-03): 닫힘 사유는 원인을 가르는 코드다 — 'forbidden' 하나로는 웹이 권한·매핑·호스트키를 구분하지 못했다.
+      if (issue) { send({ type: 'status', text: issue }); return closeAll(4403, 'mapping-denied'); }
       if (!counted && activeSessions >= MAX_SESSIONS) {
         send({ type: 'status', text: `동시 원격 세션 한도(${MAX_SESSIONS})를 초과했습니다. 사용하지 않는 세션을 닫고 잠시 후 다시 시도하세요.` });
         return closeAll(4429, 'too many sessions');
@@ -548,7 +560,7 @@ function handleConnection(ws, user, opts = {}) {
         if (hk && !hk.ok) {
           // 호스트키 거부 — 인증 실패가 아니다(비밀번호는 보내지 않았다). 조치는 관리자 지문 승인이다.
           send({ type: 'status', text: sshHostKeyError(hk).message.replace(/\s*\[SSH_HOSTKEY_UNTRUSTED\]$/, '') });
-          return closeAll(4403, 'host key not trusted');
+          return closeAll(4403, hostKeyCloseReason(hk));
         }
         const hint = /All configured authentication methods failed|authentication/i.test(err.message)
           ? ' — 아이디/비밀번호를 확인하세요. (계정이 맞다면 대상 서버가 비밀번호 로그인을 막아둔 경우일 수 있습니다)'

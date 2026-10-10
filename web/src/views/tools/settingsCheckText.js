@@ -107,7 +107,7 @@ export function remedyText(finding = {}, ctx = {}) {
     case 'cert-expired':
       return { title: `인증서가 ${Math.abs(Number(f.days) || 0)}일 전에 만료됐습니다`, detail: t(f.subject) ? `주체 ${t(f.subject)}` : '', action: '즉시 갱신하세요.' };
     case 'cert-untrusted':
-      return { title: '인증서를 신뢰할 수 없습니다(자체서명 등)', detail: `${t(f.authError)}${t(f.issuer) ? ` · 발급 ${t(f.issuer)}` : ''} — 이 포탈은 검증을 끄고 접속하므로 **동작에는 문제가 없습니다**.`, action: '' };
+      return { title: '인증서를 신뢰할 수 없습니다(자체서명 등)', detail: `${t(f.authError)}${t(f.issuer) ? ` · 발급 ${t(f.issuer)}` : ''} — 이 점검은 연결만 보고 신뢰 판정은 하지 않습니다. 실제 수집은 장비 TLS 면 설정 › 장비 신뢰(승인 지문·사설 CA), 중앙↔엣지면 WAN 신뢰(사설 CA)로 판정합니다.`, action: '' };
     case 'ssh-banner':
       return { title: 'SSH 서버 정보', detail: t(f.banner), action: '' };
     case 'smtp-no-starttls':

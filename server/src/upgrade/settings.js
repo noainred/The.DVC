@@ -10,6 +10,8 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
+import { accessMoved, secretProvided } from '../util/secretCarry.js';
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
 
 // Persisted in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to survive upgrades).
@@ -48,8 +50,26 @@ function coerce(field, v) {
   return typeof v === 'string' ? v.trim() : v;
 }
 
+/** 원격 소스 주소 비교용 — 앞뒤 공백·끝 '/' 만 다른 주소는 같은 접속처다(대소문자는 accessMoved 가 무시한다). */
+const remoteBaseKey = (v) => trimTrailingSlashes(String(v ?? '').trim());
+
+/**
+ * v2.731(점검 A3-01 ①): 이 저장이 원격 소스 주소(remoteBase)를 바꾸는데 새 토큰을 주지 않았는가 — 그러면 지금 쓰는 토큰
+ * (저장값이든 env UPGRADE_TOKEN 이든)을 새 주소로 승계하지 않는다(server/CLAUDE.md '접속처가 바뀌면 저장 비밀을 승계하지 않는다'
+ * — util/secretCarry.js). 예전에는 토큰 칸을 비우고 주소만 바꿔 저장하면 다음 확인(주기 tick 포함)이 그 주소의 versions.json
+ * 요청에 `Authorization: Bearer <토큰>` 을 실었다(재현). 비교 기준은 **지금 유효한 주소**(env 위에 저장값을 덮은 것)다.
+ * 순수 — prevEffective 는 loadSettings() 의 값.
+ */
+export function upgradeTokenDropped(prevEffective, partial) {
+  if (!partial || partial.remoteBase === undefined) return false;          // 주소를 건드리지 않은 저장
+  if (secretProvided(partial.token)) return false;                         // 새 토큰을 함께 줬다
+  if (!(prevEffective && prevEffective.token)) return false;               // 버릴 토큰이 없다(거짓 안내 금지)
+  return accessMoved({ remoteBase: remoteBaseKey(prevEffective.remoteBase) }, { remoteBase: remoteBaseKey(partial.remoteBase) }, ['remoteBase']);
+}
+
 /** Persist a partial update and return the new effective settings. */
 export function saveSettings(partial) {
+  const prevEffective = loadSettings();
   const next = readFile();
   for (const f of FIELDS) {
     if (partial[f] !== undefined) {
@@ -58,6 +78,10 @@ export function saveSettings(partial) {
       next[f] = coerce(f, partial[f]);
     }
   }
+  // v2.731(A3-01 ①): 주소가 바뀌었는데 새 토큰이 없으면 토큰을 버린다. ⚠ 키를 delete 하면 loadSettings 가 env
+  //   UPGRADE_TOKEN 을 다시 깔아 같은 토큰이 새 주소로 나간다 — 저장값 '' (명시적 '토큰 없음')으로 env 를 덮는다.
+  //   빈 문자열은 '기존 유지' 규칙(위 continue)을 타지 않는다 — 그 규칙은 요청 본문에만 적용된다.
+  if (upgradeTokenDropped(prevEffective, partial)) next.token = '';
   if (Array.isArray(partial.edges)) next.edges = partial.edges;
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   return loadSettings();

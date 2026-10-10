@@ -237,9 +237,11 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
           setMsg(`저장됨 · 자동 스캔이 꺼져 있습니다('주기적으로 스캔' 체크 후 저장하거나 '지금 스캔(포탈)'을 누르세요).`);
         }
       } else {
-        // 원격 에이전트는 중앙에서 즉시 실행 불가 — 다음 주기에 스스로 읽어가 스캔.
+        // 원격 에이전트는 중앙에서 즉시 실행 불가 — 스스로 읽어가 스캔.
+        // v2.731(점검 A4-03): 에이전트(2.731 이상)는 이 주기를 따른다 — 설정은 주기보다 길지 않은 간격으로 다시 읽고, 스캔은 마지막
+        //   스캔 뒤 주기가 지났을 때 한다. 예전 문구('주기 N분마다 읽어가 스캔')는 엣지가 env 주기로만 돌던 동안 사실이 아니었다.
         setMsg(cfg.enabled
-          ? `저장됨 · '${agent}' 에이전트가 주기 ${mins}분마다 이 설정을 읽어가 스캔합니다. 다음 스캔: 최대 ${mins}분 이내(에이전트 다음 주기). 중앙에서 즉시 실행은 불가합니다.`
+          ? `저장됨 · '${agent}' 에이전트가 이 설정을 다시 읽으면(주기보다 길지 않은 간격으로 확인) 마지막 스캔 뒤 ${mins}분마다 스캔합니다. 2.731 이전 에이전트는 이 주기 대신 자기 설정(‘AGENT_SCAN_INTERVAL_MS’)의 주기로 스캔합니다. 중앙에서 즉시 실행은 불가합니다.`
           : `저장됨 · '${agent}' 자동 스캔이 꺼져 있습니다('주기적으로 스캔' 체크 후 저장하세요).`);
       }
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
@@ -480,7 +482,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
       )}
 
-      {!isLocal && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>※ 이 설정은 <b>{agent}</b> 에이전트(<code>AGENT_NAME={agent}</code>, <code>CENTRAL_URL</code> 설정 필요)가 다음 주기에 읽어가 자기 사이트에서 스캔하고 결과를 포탈로 보고합니다. '지금 스캔'은 이 포탈에서 직접 스캔할 때만 동작합니다.</div>}
+      {!isLocal && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>※ 이 설정은 <b>{agent}</b> 에이전트(<code>AGENT_NAME={agent}</code>, <code>CENTRAL_URL</code> 설정 필요)가 이 설정을 읽어가 여기의 주기로 자기 사이트에서 스캔하고 결과를 포탈로 보고합니다(2.731 이전 에이전트는 자기 ‘AGENT_SCAN_INTERVAL_MS’ 주기). '지금 스캔'은 이 포탈에서 직접 스캔할 때만 동작합니다.</div>}
 
       {/* 등록된 에이전트 없음 안내 */}
       {agents.filter((a) => a !== LOCAL_AGENT).length === 0 && (

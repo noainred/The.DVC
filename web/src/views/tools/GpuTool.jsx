@@ -476,25 +476,49 @@ function GpuCollectCheckModal({ data, onClose }) {
   );
 }
 
+/**
+ * 내보내기 창의 '수집 시작' 줄(v2.731 점검 A5-07). 예전에는 이력 정보 조회가 실패하면 { collectedSince:null, sampleCount:0 } 을
+ * 지어내 '아직 수집된 GPU 사용률 이력이 없습니다' 라고 말했다(이력이 있는데도 내보내기를 포기하게 만든다). 실패는 실패로 말한다.
+ *   meta: null(조회 중) · { failed:true, reason } · 서버 응답 { collectedSince, latestAt, sampleCount }
+ *   반환: { since: 한 줄, detail: 보조 줄 | null, tone: 'ok'|'warn' }
+ */
+export function exportMetaText(meta, fmtTs = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : null), now = Date.now()) {
+  if (!meta) return { since: '확인 중…', detail: null, tone: 'ok' };
+  if (meta.failed) {
+    return {
+      since: `수집 이력 정보를 읽지 못했습니다${meta.reason ? ` — ${meta.reason}` : ''}`,
+      detail: '이력이 없다는 뜻이 아닙니다. 내보내기는 그대로 시도할 수 있습니다(이력이 없으면 빈 파일이 됩니다).',
+      tone: 'warn',
+    };
+  }
+  if (!meta.collectedSince) return { since: '아직 수집된 GPU 사용률 이력이 없습니다(샘플러가 한 주기 이상 돌면 생성됩니다)', detail: null, tone: 'ok' };
+  const days = Math.max(1, Math.round((now - meta.collectedSince) / 86_400_000));
+  const n = meta.sampleCount == null ? '—' : (meta.sampleCount?.toLocaleString?.() ?? String(meta.sampleCount));
+  return {
+    since: `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`,
+    detail: `총 ${days}일 누적 · 샘플 ${n}개${meta.latestAt ? ` · 마지막 ${fmtTs(meta.latestAt)}` : ''}`,
+    tone: 'ok',
+  };
+}
+
 /** GPU 데이터 내보내기 — 수집 시작 일시 안내 + 전체/기간 선택 + CSV/JSON. */
-function GpuExportModal({ scope, onClose, onSnapshot }) {
-  const [meta, setMeta] = useState(null);   // { collectedSince, latestAt, sampleCount }
+export function GpuExportModal({ scope, onClose, onSnapshot }) {
+  const [meta, setMeta] = useState(null);   // { collectedSince, latestAt, sampleCount } | { failed, reason }
   const [range, setRange] = useState('all'); // all | days
   const [days, setDays] = useState(30);
   const [vc, setVc] = useState(scope || ''); // 내보낼 vCenter(빈값=전체)
   const [vcs, setVcs] = useState([]);
+  const [vcsErr, setVcsErr] = useState(''); // v2.731(점검 1회차): 목록 조회 실패를 '선택지 없음' 으로 숨기지 않는다
   const [dlMsg, setDlMsg] = useState('');
-  useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/vcenters').then((d) => { setVcs(d || []); setVcsErr(''); }).catch((e) => setVcsErr(e?.message || String(e))); }, []);
   const runMeta = useLatest();   // v2.447: 세대 가드(감사 B16)
   useEffect(() => {
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
-    runMeta(fetchJson(`/tools/gpu/series-meta${q}`), setMeta, () => setMeta({ collectedSince: null, sampleCount: 0 }));
+    // 실패를 '이력 0건' 으로 지어내지 않는다(A5-07) — 서버도 DB 오류를 200 + 0건 대신 503 + 사유로 준다.
+    setMeta(null);
+    runMeta(fetchJson(`/tools/gpu/series-meta${q}`), setMeta, (e) => setMeta({ failed: true, reason: e?.message || String(e) }));
   }, [vc, runMeta]);
-  const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : null);
-  const sinceTxt = meta && meta.collectedSince
-    ? `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`
-    : (meta ? '아직 수집된 GPU 사용률 이력이 없습니다(샘플러가 한 주기 이상 돌면 생성됩니다)' : '확인 중…');
-  const daysSince = meta && meta.collectedSince ? Math.max(1, Math.round((Date.now() - meta.collectedSince) / 86_400_000)) : null;
+  const metaTxt = exportMetaText(meta);
   // v2.602(감사 WEB2602-01): 내려받기 실패(409 동시 내보내기·403)를 파일로 저장하지 않고 여기 말한다(스냅샷 경로 포함).
   const guarded = async (fn) => { setDlMsg(''); try { await fn(); } catch (e) { setDlMsg(downloadFailText(e)); } };
   const download = (fmt) => guarded(async () => {
@@ -508,11 +532,9 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
   return (
     <Modal title="GPU 데이터 내보내기" onClose={onClose} width={560}>
       <div className="card" style={{ padding: 12, marginBottom: 14, borderLeft: '3px solid var(--accent,#2563eb)' }}>
-        <div style={{ fontSize: 13 }}>📅 <b>수집 시작</b>: {sinceTxt}</div>
-        {meta && meta.collectedSince && (
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            총 {daysSince}일 누적 · 샘플 {meta.sampleCount?.toLocaleString?.() ?? meta.sampleCount}개{meta.latestAt ? ` · 마지막 ${fmtTs(meta.latestAt)}` : ''}
-          </div>
+        <div style={{ fontSize: 13, color: metaTxt.tone === 'warn' ? 'var(--amber)' : undefined, whiteSpace: 'normal' }}>📅 <b>수집 시작</b>: {metaTxt.since}</div>
+        {metaTxt.detail && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'normal' }}>{metaTxt.detail}</div>
         )}
       </div>
 
@@ -521,6 +543,7 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
         <option value="">전체 vCenter</option>
         {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
       </Select>
+      {vcsErr && <div className="muted" style={{ fontSize: 12, marginTop: -8, marginBottom: 12, whiteSpace: 'normal', color: 'var(--amber)' }}>vCenter 목록을 읽지 못했습니다 — 지금은 전체 vCenter 로만 내보낼 수 있습니다({vcsErr}).</div>}
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>내보낼 범위</div>
       <label className="flex gap" style={{ alignItems: 'center', marginBottom: 6, cursor: 'pointer' }}>

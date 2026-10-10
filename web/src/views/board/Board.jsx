@@ -52,28 +52,51 @@ export default function Board() {
 
 /* ───────────── 저장 상태(리뷰 I-05) ───────────── */
 
+/** 저장 상태 조회가 연속으로 실패했을 때 다시 읽기 간격의 상한(점검 A5-06). */
+export const PERSIST_RETRY_MAX_MS = 5 * 60_000;
+/** 연속 실패 fails(1 이상)번 뒤 다시 읽을 때까지 — PERSIST_POLL_MS 에서 두 배씩, 상한 PERSIST_RETRY_MAX_MS. */
+export function persistRetryDelay(fails) {
+  const n = Math.max(1, Math.min(Math.floor(Number(fails)) || 1, 16));
+  return Math.min(PERSIST_POLL_MS * 2 ** (n - 1), PERSIST_RETRY_MAX_MS);
+}
+/**
+ * 다음 저장 상태 조회까지 ms — null 이면 다시 읽지 않는다(점검 A5-06).
+ * 예전에는 조회가 한 번 실패하면 data 가 그대로라 재조회 효과가 다시 돌지 않아 사슬이 끊겼다 — 저장이 끝나도
+ * '저장 대기' 경고가 남았다. 실패는 연속 실패 수로 세어 백오프로 다시 읽는다.
+ *  · 직전 상태가 '미저장'(pending·failed)이면 실패해도 다시 읽는다(경고가 맞는지 확인해야 한다).
+ *  · 직전 상태를 한 번도 못 읽었더라도 저장되지 않은 쓰기 응답(tick > 0)을 봤으면 다시 읽는다.
+ *  · 실패가 없으면 예전 규칙 그대로 — 미저장인 동안만 PERSIST_POLL_MS 마다.
+ */
+export function persistNextDelay({ stores, fails = 0, tick = 0 } = {}) {
+  const pending = needsPersistPoll(stores);
+  if (fails > 0 && (pending || tick > 0)) return persistRetryDelay(fails);
+  return pending ? PERSIST_POLL_MS : null;
+}
+
 /**
  * 게시판·공지 저장소의 '저장 대기/실패' 경고. 저장 안 된 변경이 있는 동안만 PERSIST_POLL_MS 마다 다시 읽고, 저장되면 멈추고 사라진다.
  * 상태를 못 읽으면 직전 상태를 그대로 둔다(경고를 조용히 지우지 않는다). 관리자 상세·‘지금 다시 저장’ 은 서버가 관리자에게만 싣는다.
  */
-function PersistBanner({ tick }) {
+export function PersistBanner({ tick }) {
   const [data, setData] = useState(null);
+  const [fails, setFails] = useState(0); // 저장 상태 조회 연속 실패 수(점검 A5-06 — 실패해도 다시 읽는 사슬을 이어 간다)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null); // { text, ok } — 마지막 '지금 다시 저장' 결과
   const latest = useLatest();
   const load = useCallback(() => {
     const k = latest.next();
     fetchJson('/board/persist')
-      .then((r) => { if (latest.isLatest(k)) setData(r); })
-      .catch(() => { /* 저장 상태를 못 읽으면 직전 경고를 그대로 둔다 — 게시판 자체 오류는 아래 화면이 말한다 */ });
+      .then((r) => { if (latest.isLatest(k)) { setData(r); setFails(0); } })
+      // 저장 상태를 못 읽으면 직전 경고를 그대로 두고(조용히 지우지 않는다) 실패 수를 올린다 — 아래 효과가 백오프로 다시 읽는다.
+      .catch(() => { if (latest.isLatest(k)) setFails((n) => n + 1); });
   }, [latest]);
   useEffect(() => { load(); }, [load, tick]);
-  const polling = needsPersistPoll(data?.stores);
+  const delay = persistNextDelay({ stores: data?.stores, fails, tick });
   useEffect(() => {
-    if (!polling) return undefined;
-    const t = setTimeout(load, PERSIST_POLL_MS);
+    if (delay == null) return undefined;
+    const t = setTimeout(load, delay);
     return () => clearTimeout(t);
-  }, [polling, data, load]);
+  }, [delay, data, fails, load]);
 
   const retry = async () => {
     setBusy(true); setMsg(null);
@@ -84,12 +107,16 @@ function PersistBanner({ tick }) {
       setMsg({ text: retryResultText(r), ok: !!r?.ok && tried.every((x) => x.state === 'saved') });
     } catch (e) { setMsg({ text: retryResultText({ ok: false, reason: e.message }), ok: false }); } finally { setBusy(false); }
   };
-  return <PersistBannerView data={data} busy={busy} msg={msg} onRetry={retry} />;
+  return <PersistBannerView data={data} busy={busy} msg={msg} onRetry={retry} readFail={fails > 0 && delay != null ? { fails, nextMs: delay } : null} />;
 }
 
 /** 표시만(상태 없음 — 렌더 테스트가 이것을 그린다). data = GET /board/persist 응답, msg = { text, ok } 마지막 다시 저장 결과. */
-export function PersistBannerView({ data, busy = false, msg = null, onRetry, now }) {
+export function PersistBannerView({ data, busy = false, msg = null, onRetry, now, readFail = null }) {
   const warnings = persistWarnings(data?.stores, now != null ? { now } : undefined);
+  // 점검 A5-06: 경고를 띄운 채 상태 조회가 실패하고 있으면 그 사실을 말한다 — 아래 경고는 마지막으로 읽은 상태다.
+  const failNote = readFail && warnings.length
+    ? `저장 상태를 다시 읽지 못했습니다(연속 ${readFail.fails}회) — 아래 경고는 마지막으로 읽은 상태이고, ${Math.max(1, Math.round(readFail.nextMs / 1000))}초 뒤 다시 확인합니다.`
+    : null;
   // 다시 저장 결과 — 성공 문구만 경고가 사라진 뒤에도 남긴다(실패 문구가 초록으로 남으면 거짓이 된다).
   if (!warnings.length) return msg?.ok ? <div className="banner ok" style={{ marginBottom: 10 }}>{msg.text}</div> : null;
   const failed = warnings.some((w) => w.tone === 'bad');
@@ -101,6 +128,7 @@ export function PersistBannerView({ data, busy = false, msg = null, onRetry, now
           {w.lines.map((ln, i) => <div key={i} style={{ fontSize: 12.5, marginTop: 2 }}>{ln}</div>)}
         </div>
       ))}
+      {failNote && <div className="muted" style={{ fontSize: 12, marginBottom: 6, whiteSpace: 'normal' }}>{failNote}</div>}
       {failed && data?.admin && (
         <div className="flex" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn" disabled={busy || !data.canRetry} onClick={onRetry}

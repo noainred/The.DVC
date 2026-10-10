@@ -13,7 +13,8 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
-import { analyzeAvailability } from '../../availability/analyze.js';
+import { analyzeAvailability, TAIL_TOLERANCE_MS } from '../../availability/analyze.js';
+import { logCollectOkAt } from '../../logs/poller.js'; // v2.731(A2-01): vCenter 별 마지막 이벤트 수집 성공 시각 — 측정 끝의 근거
 import { AVAIL_TYPES, LIFE_TYPES } from '../../vmchanges/eventDetail.js';
 
 const toolsPerm = requirePerm('tools');
@@ -43,6 +44,16 @@ function runShared(req, snap) {
 }
 export function _resetVmAvailabilityMemoForTest() { _runMemo.clear(); }
 
+/**
+ * v2.731(A2-01): 측정 끝을 자르지 않는 허용치 — 로그 수집 주기 × 3 과 1시간 중 큰 것(순수).
+ * 한두 주기 실패는 정상 범위로 보고, 그보다 오래 수집이 멈춘 vCenter 만 끝을 자른다. 주기를 못 읽으면 기본 10분으로 본다.
+ */
+export function tailToleranceOf(settings) {
+  const min = numOrNull(settings?.pollIntervalMin);
+  const pollMs = (min != null && min > 0 ? min : 10) * 60_000;
+  return Math.max(TAIL_TOLERANCE_MS, pollMs * 3);
+}
+
 async function run(req, snap) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const ids = (scoped.vcenters || []).map((v) => v.id);
@@ -57,14 +68,16 @@ async function run(req, snap) {
   // v2.719(감사 B1-01): 최신 먼저 읽어 잘렸으므로 남은 가장 오래된 시각 이전은 모른다 — 그 시각부터만 잰다.
   const readFrom = truncated && rows.length ? rows[rows.length - 1].ts : null;
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null }]));
+  // v2.731(A2-01): okAt — 로그 폴러가 남긴 그 vCenter 의 마지막 수집 성공(이벤트가 온전한 시각). 측정 끝을 정한다.
+  const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, okAt: logCollectOkAt(id) }]));
+  const s = loadLogSettings();
+  const tailToleranceMs = tailToleranceOf(s);
   const r = analyzeAvailability(rows, scoped.vms, {
     days, now, target: targetOf(req.query.target), vcName, coverageOf: (id) => cov.get(id) || null,
-    q: qStr(req.query.q, 128), onlyBelow: req.query.below === '1', readFrom,
+    q: qStr(req.query.q, 128), onlyBelow: req.query.below === '1', readFrom, tailToleranceMs,
   });
-  const s = loadLogSettings();
   // 잘렸으면 '가장 최근 N건' 만 본 것이다 — v2.719(B1-01): 그 경계(readFrom) 이후만 쟀고 화면이 그 사실을 말한다.
-  return { ...r, truncated, readMax: AVAIL_READ_MAX, logs: { enabled: s.enabled, retentionDays: s.retentionDays, minSeverity: s.minSeverity } };
+  return { ...r, truncated, readMax: AVAIL_READ_MAX, tailToleranceMs, logs: { enabled: s.enabled, retentionDays: s.retentionDays, minSeverity: s.minSeverity } };
 }
 
 export function registerVmAvailability(api) {
@@ -76,10 +89,11 @@ export function registerVmAvailability(api) {
     try {
       const r = await runShared(req, store.get());
       const pct = (x) => (x == null ? '' : String(x));
-      const lines = [CSV_BOM + csvLine(['VM', 'vCenter', '클러스터', '가동률(%)', '사람이 끈 정지 제외(%)', '정지 시간(분)', '전원 끔 횟수', '사람이 끈 횟수', '게스트 재부팅', '재설정', 'HA 재시작', '전원 켜기 실패', '측정 시작(UTC)', '측정 구간 짧음'])];
+      // v2.731(A2-01): 측정 끝 — 이벤트 수집이 멈춰 잘린 VM 은 그 시각까지만 쟀다(꼬리를 가동으로 세지 않았다).
+      const lines = [CSV_BOM + csvLine(['VM', 'vCenter', '클러스터', '가동률(%)', '사람이 끈 정지 제외(%)', '정지 시간(분)', '전원 끔 횟수', '사람이 끈 횟수', '게스트 재부팅', '재설정', 'HA 재시작', '전원 켜기 실패', '측정 시작(UTC)', '측정 구간 짧음', '측정 끝(UTC)', '수집 멈춤으로 끝 잘림'])];
       for (const v of r.vms) {
         lines.push(csvLine([v.name, v.vcenterName, v.cluster, pct(v.availability), pct(v.unplanned), Math.round(v.downMs / 60_000), v.offs, v.userOffs, v.reboots, v.resets, v.ha, v.failed,
-          new Date(v.windowFrom).toISOString(), v.partial ? 'Y' : '']));
+          new Date(v.windowFrom).toISOString(), v.partial ? 'Y' : '', Number.isFinite(v.windowTo) ? new Date(v.windowTo).toISOString() : '', v.tailCut ? 'Y' : '']));
       }
       logAudit({ user: req.user?.username, action: 'vm-availability.csv', target: 'vm-availability', detail: `${lines.length - 1} rows · ${r.days}d`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

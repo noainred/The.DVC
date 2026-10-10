@@ -9,6 +9,7 @@ import {
   KIND_LABEL, KINDS, MODE_LABEL, STATE_LABEL, stateTone, stateText, filterPeers, policyNote, countsText,
   approveConfirmText, bulkConfirmText, rejectConfirmText, policyConfirmText, certMetaText, whenText, manualIssue,
   tlsReasonText, rejectApprovable, caBundleView, subsystemModesText, tlsCountsText, exceptionBannerText, rejectAsPeer,
+  trustedListOf, approveChoice, approveOkText, revokeConfirmText, multiFpNote, nodeNoteText,
 } from './peerTrustText.js';
 
 /**
@@ -18,6 +19,9 @@ import {
  * 서버(security/peerTrust.js)가 장비마다 신뢰 지문을 들고 연결이 내민 지문과 대조하고, 이 화면은 그 지문을 관리자가
  * **장비 콘솔 등 별도 경로로 확인한 뒤** 승인·거부·삭제하는 곳이다. TLS 탭은 그룹 I(security/tlsTrust.js)의 상태 —
  * 사설 CA 번들·수집기별 모드·예외·최근 거부 — 를 함께 보여 준다(읽기만, 최근 거부 행에서 바로 승인).
+ *
+ * v2.731(A1-01): 한 장비에 신뢰 지문이 여럿일 수 있다(로드밸런서 뒤 서버마다 다른 키) — 신뢰 지문 칸은 목록이고 승인은 '추가'가 기본,
+ * 기존 지문이 있으면 '추가 승인'·'교체 승인' 을 나눠 보이며 지문마다 '회수'(거부) 버튼이 있다. (A1-02) 이 포탈이 중앙인지 엣지인지 말한다.
  *
  * 원칙: 바뀐 지문(대기·changed)이 맨 위이고 빨강 · 관찰은 초록이 아니다(미승인) · 값이 없으면 '—' · 폴링하지 않는다
  * (마운트 1회 + 새로고침 버튼 — 장비 접속이 없는 조회지만 같은 화면을 오래 열어 두는 일이 많다) · 표는 STable(정렬·최소폭).
@@ -41,6 +45,29 @@ function FpCell({ v, kind }) {
     <div style={{ minWidth: 0 }}>
       <Fp fp={v.fp} />
       {meta && <div className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{meta}</div>}
+    </div>
+  );
+}
+
+/** 신뢰 지문 칸 — 지문마다 상태(승인·관찰)·승인자·시각과 '회수' 버튼(승인된 지문). 비어 있으면 '—'. */
+function TrustedCell({ peer, busy, onRevoke }) {
+  const list = trustedListOf(peer);
+  if (!list.length) return <span className="muted">—</span>;
+  return (
+    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+      {list.map((t) => (
+        <div key={t.fp} style={{ minWidth: 0 }}>
+          <FpCell v={t} kind={peer.kind} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11 }}>
+            <Badge tone={t.state === 'approved' ? 'green' : 'amber'}>{t.state === 'approved' ? STATE_LABEL.approved : STATE_LABEL.observed}</Badge>
+            {t.state === 'approved' && t.by && <span className="muted">승인 {t.by} · {whenText(t.at)}</span>}
+            {t.state === 'approved' && (
+              <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onRevoke(peer, t.fp)}
+                title="이 지문의 승인을 회수하고 거부 목록에 넣습니다 — 같은 장비의 다른 신뢰 지문은 그대로입니다">회수</button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -83,24 +110,37 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
   const counts = k.counts || {};
   const tls = data.tls || null;
 
-  /** 변경 공통 — 서버 사유(400·409 본문)를 그대로 말하고, 성공하면 다시 읽는다. */
+  /** 변경 공통 — 서버 사유(400·409 본문)를 그대로 말하고, 성공하면 다시 읽는다. okText 는 문자열 또는 (응답) => 문자열. */
   const act = async (key, fn, okText) => {
     setBusy(key);
     setMsg(null);
     try {
       const r = await fn();
       if (r && r.ok === false) setMsg({ tone: 'bad', text: r.reason || '처리하지 못했습니다.' });
-      else { setMsg({ tone: 'ok', text: okText }); await load(); }
+      else { setMsg({ tone: 'ok', text: typeof okText === 'function' ? okText(r || {}) : okText }); await load(); }
     } catch (e) {
       setMsg({ tone: 'bad', text: String(e?.message || e) });
     } finally { setBusy(''); }
   };
 
-  const approve = (peer, fp) => {
-    if (!window.confirm(approveConfirmText(peer, fp))) return;
+  /** 승인 — replace:false(기본)는 추가 승인(기존 신뢰 지문 유지), true 는 교체 승인(이 지문만 남긴다). */
+  const approve = (peer, fp, replace = false) => {
+    if (!window.confirm(approveConfirmText(peer, fp, { replace }))) return;
     act(`a|${peer.kind}|${peer.host}|${peer.port}`,
-      () => sendJson(`${BASE}/approve`, 'POST', { kind: peer.kind, host: peer.host, port: peer.port, fp, confirmVerified: true }),
-      `${peer.host}:${peer.port} 지문을 승인했습니다 — 다음 연결부터 이 지문만 신뢰합니다.`);
+      () => sendJson(`${BASE}/approve`, 'POST', { kind: peer.kind, host: peer.host, port: peer.port, fp, confirmVerified: true, ...(replace ? { replace: true } : {}) }),
+      (r) => approveOkText(peer, r, { replace }));
+  };
+  const revoke = (peer, fp) => {
+    if (!window.confirm(revokeConfirmText(peer, fp))) return;
+    act(`v|${peer.kind}|${peer.host}|${peer.port}`,
+      () => sendJson(`${BASE}/reject`, 'POST', { kind: peer.kind, host: peer.host, port: peer.port, fp }),
+      `${peer.host}:${peer.port} 지문의 승인을 회수했습니다(거부 목록에 넣었습니다).`);
+  };
+  /** 같은 장비의 기존 항목(신뢰 지문 목록을 확인 문구에 쓰려고) — 호스트는 서버와 같이 소문자·끝 점 제거로 맞춘다. */
+  const findPeer = (k, host, port) => {
+    let h = String(host || '').trim().toLowerCase().slice(0, 255);
+    while (h.endsWith('.')) h = h.slice(0, -1);
+    return (data.peers || []).find((p) => p.kind === k && p.host === h && p.port === Number(port)) || null;
   };
   const reject = (peer, fp) => {
     if (!window.confirm(rejectConfirmText(peer, fp))) return;
@@ -128,7 +168,7 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
     const err = manualIssue({ kind, ...manual });
     if (err) { setMsg({ tone: 'bad', text: err }); return; }
     const peer = { kind, host: manual.host.trim(), port: Number(manual.port) };
-    const existing = (data.peers || []).find((p) => p.kind === kind && p.host === peer.host.toLowerCase() && p.port === peer.port);
+    const existing = findPeer(kind, peer.host, peer.port);
     approve(existing || peer, manual.fp.trim());
   };
 
@@ -140,6 +180,10 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
         포탈은 등록 장비에 비밀번호를 실어 접속합니다. 장비가 내민 SSH 호스트키·TLS 인증서 지문이 승인된 값과 다르면 <b>비밀번호를 보내기 전에</b> 연결을 끊습니다.
         지문은 반드시 장비 콘솔·관리 화면 등 이 포탈이 아닌 경로로 대조한 뒤 승인하세요.
       </div>
+      <div className="muted" style={{ whiteSpace: 'normal' }}><BoldText text={multiFpNote(data.trustedMax)} /></div>
+      {nodeNoteText(data.node) && (
+        <div className="banner" style={{ whiteSpace: 'normal' }}><BoldText text={nodeNoteText(data.node)} /></div>
+      )}
 
       {st.loadError && (
         <div className="banner bad" style={{ whiteSpace: 'normal' }}>
@@ -181,7 +225,14 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
         </div>
       </div>
 
-      {kind === 'tls' && <TlsPanel tls={tls} tlsError={data.tlsError} busy={busy} onApprove={(r) => approve(rejectAsPeer(r), r.fingerprint)} subLabel={subLabel} />}
+      {kind === 'tls' && (
+        <TlsPanel tls={tls} tlsError={data.tlsError} busy={busy} subLabel={subLabel}
+          onApprove={(r) => {
+            // 같은 장비의 기존 신뢰 지문을 확인 문구가 말하게(추가 승인 — 기존 지문은 그대로) 기존 항목의 목록을 붙인다.
+            const ex = findPeer('tls', r.host, r.port);
+            approve({ ...rejectAsPeer(r), ...(ex ? { trustedList: trustedListOf(ex) } : {}) }, r.fingerprint);
+          }} />
+      )}
 
       <div className="card" style={{ padding: 12, display: 'grid', gap: 8, minWidth: 0 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -200,13 +251,13 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
         ) : (
           <STable minWidth={960}>
             <thead>
-              <tr><th>상태</th><th>장비</th><th>신뢰 지문</th><th>대기 지문(장비가 내민 값)</th><th>확인</th><th data-nosort>작업</th></tr>
+              <tr><th>상태</th><th>장비</th><th>신뢰 지문(여럿일 수 있음)</th><th>대기 지문(장비가 내민 값)</th><th>확인</th><th data-nosort>작업</th></tr>
             </thead>
             <tbody>
               {peers.map((p) => {
                 const key = `${p.kind}|${p.host}|${p.port}`;
                 const changed = p.state === 'pending' && p.pending?.reason === 'changed';
-                const candidate = p.pending?.fp || (p.trusted?.state === 'observed' ? p.trusted.fp : '');
+                const { candidate, mode: choice } = approveChoice(p);
                 return (
                   <tr key={key} style={changed ? { background: 'rgba(239,68,68,.08)' } : undefined}>
                     <td data-sort={changed ? 0 : p.state === 'pending' ? 1 : p.state === 'observed' ? 2 : p.state === 'rejected' ? 3 : 4}>
@@ -216,9 +267,8 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
                       <code>{p.host}:{p.port}</code>
                       {p.note && <div className="muted" style={{ fontSize: 11 }}>{p.note}</div>}
                     </td>
-                    <td style={{ whiteSpace: 'normal', maxWidth: 300 }}>
-                      <FpCell v={p.trusted} kind={p.kind} />
-                      {p.trusted?.state === 'approved' && p.trusted?.by && <div className="muted" style={{ fontSize: 11 }}>승인 {p.trusted.by} · {whenText(p.trusted.at)}</div>}
+                    <td style={{ whiteSpace: 'normal', maxWidth: 320 }}>
+                      <TrustedCell peer={p} busy={!!busy} onRevoke={revoke} />
                     </td>
                     <td style={{ whiteSpace: 'normal', maxWidth: 300 }}>
                       <FpCell v={p.pending} kind={p.kind} />
@@ -230,8 +280,16 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {candidate && (
+                        {candidate && choice === 'single' && (
                           <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => approve(p, candidate)}>승인</button>
+                        )}
+                        {candidate && choice === 'add-or-replace' && (
+                          <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => approve(p, candidate)}
+                            title="기존 신뢰 지문도 계속 신뢰합니다(같은 주소 뒤 여러 서버 — 로드밸런서)">추가 승인</button>
+                        )}
+                        {candidate && choice === 'add-or-replace' && (
+                          <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => approve(p, candidate, true)}
+                            title="이 지문 하나만 남기고 기존 신뢰 지문은 더는 신뢰하지 않습니다(장비 키 교체)">교체 승인</button>
                         )}
                         {candidate && (
                           <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => reject(p, candidate)}>거부</button>

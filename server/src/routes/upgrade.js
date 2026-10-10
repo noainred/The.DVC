@@ -9,6 +9,7 @@ import { upgradeManager } from '../upgrade/manager.js';
 import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
+import { loadSettings as loadUpgradeSettings, upgradeTokenDropped } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -190,7 +191,17 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
   const allowed = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply'];
   const partial = {};
   for (const k of allowed) if (b[k] !== undefined) partial[k] = b[k];
-  res.json({ ok: true, settings: upgradeManager.updateSettings(partial) });
+  // v2.731(점검 A3-01 ①): 원격 소스 주소가 바뀌었는데 새 토큰이 없으면 저장이 토큰을 버린다(upgrade/settings.js) — 그 사실을
+  //   응답에 싣는다(v2.607 droppedSecrets 규약 — 화면이 '저장됨' 만 말하면 사설 레포 확인이 다음 주기부터 조용히 실패한다).
+  const dropped = upgradeTokenDropped(loadUpgradeSettings(), partial);
+  const settings = upgradeManager.updateSettings(partial);
+  res.json({
+    ok: true, settings,
+    ...(dropped ? {
+      droppedSecrets: ['token'],
+      skipped: [{ field: 'token', reason: '원격 소스 주소가 바뀌어 저장된 토큰(사설 레포·미러)을 폐기했습니다 — 새 주소에 보낼 토큰을 다시 입력하세요(그 전까지 원격 확인은 토큰 없이 요청합니다).' }],
+    } : {}),
+  });
 });
 
 // Edge endpoint: accept a tar.gz bundle pushed by the portal and self-install.

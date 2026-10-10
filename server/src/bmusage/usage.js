@@ -19,7 +19,7 @@
  *   말해야 한다(v2.517 규약: '기다리면 되는지' 를 말한다).
  *   Windows 경로는 `Win32_PerfFormattedData_*` 가 순간값이라 첫 주기부터 나온다 — 그 차이도 밝힌다.
  */
-import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict } from './rates.js';
+import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, MAX_SPAN_MS } from './rates.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const n = numOrNull;   // v2.561: 공용 판정
@@ -73,10 +73,17 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     const c = os.counters || {};
     const pc = prev?.counters || null;
     const pAt = n(prev?.at);
-    // CPU — jiffies 누적의 차이.
-    const cpu = cpuPctFromJiffies(pc?.cpu, c.cpu);
+    // CPU — jiffies 누적의 차이. v2.731 A2-04: 표본 간격도 넘긴다(디스크·네트워크와 같은 경계 — 긴 공백의 평균을 이번 주기 값으로 쓰지 않는다).
+    const cpu = cpuPctFromJiffies(pc?.cpu, c.cpu, pAt, now);
     if (cpu != null) { out.cpu_pct = cpu; srcOf.cpu = 'os'; }
     else if (pc == null) notes.push('첫 수집이라 CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다(누적 카운터의 차이가 필요합니다).');
+    if (pc != null && !spanOk(pAt, now)) {
+      // 조용히 비우지 않는다 — 왜 이번 주기 누적 카운터 값이 없는지 말한다(다음 주기부터 이 표본이 새 기준이다).
+      const gapMs = pAt != null ? now - pAt : null;
+      notes.push(gapMs != null && gapMs > MAX_SPAN_MS
+        ? `직전 표본이 ${Math.round(gapMs / 60_000)}분 전이라(${MAX_SPAN_MS / 60_000}분 초과) OS 누적 카운터 사용률(CPU·디스크 I/O·네트워크·HBA)은 이번 주기 비웠습니다(긴 공백의 평균을 지금 값으로 쓰지 않습니다 — 다음 주기부터 나옵니다).`
+        : '직전 표본과의 간격이 비정상이라(시각 없음·역행·너무 짧음) OS 누적 카운터 사용률(CPU·디스크 I/O·네트워크·HBA)은 이번 주기 비웠습니다(다음 주기부터 나옵니다).');
+    }
     // 메모리 — 순간값이라 첫 주기부터 나온다.
     if (n(os.mem?.usedPct) != null) { out.mem_pct = n(os.mem.usedPct); srcOf.mem = 'os'; }
     // 디스크 busy — io_ticks 증가 / 경과.

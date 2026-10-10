@@ -87,10 +87,44 @@ export function loadWanCa(env = process.env) {
 const WAN_CA = loadWanCa();
 if (WAN_CA.error) console.warn(`[wan] ⚠ ${WAN_CA.error} — 기본 신뢰 목록만 씁니다(사설 CA 로 발급된 중앙·엣지 인증서는 검증에 실패합니다).`);
 else if (WAN_CA.count) console.log(`[wan] 사설 CA ${WAN_CA.count}개를 중앙↔엣지 TLS 신뢰 목록에 더했습니다(${WAN_CA.file}).`);
-const WAN_CA_OPT = WAN_CA.ca ? { ca: WAN_CA.ca } : {};
+/*
+ * v2.731(G2b A4-01): `ca` 배열이 아니라 **미리 만든 SecureContext 하나**를 넘긴다. `ca` 옵션을 주면 tls.connect 가 연결마다
+ *   기본 목록(약 150~300개) + 사설 CA 를 다시 파싱해 새 컨텍스트를 만든다 — 실측 연결당 약 23ms **동기**(이벤트 루프 정지),
+ *   미리 만든 컨텍스트는 0.3ms. 이제 이 신뢰를 통신 점검(요청마다 새 Agent)·업그레이드 다운로드도 쓰므로 그 비용이 곱해진다.
+ *   의미는 같다(같은 CA 목록). 만들지 못하면(이론상 — 인증서는 위에서 하나씩 읽었다) 사설 CA 없이 기본 신뢰만 쓴다(fail-closed).
+ */
+let WAN_CA_CTX_ERROR = null;
+let WAN_SECURE_CTX = null;
+if (WAN_CA.ca) {
+  try { WAN_SECURE_CTX = tls.createSecureContext({ ca: WAN_CA.ca }); } catch (e) {
+    WAN_CA_CTX_ERROR = `WAN_TLS_CA_FILE(${WAN_CA.file}) 로 TLS 신뢰 목록을 만들지 못했습니다 — ${String(e?.message || e).slice(0, 200)}`;
+    console.warn(`[wan] ⚠ ${WAN_CA_CTX_ERROR} — 기본 신뢰 목록만 씁니다.`);
+  }
+}
+const WAN_CA_OPT = WAN_SECURE_CTX ? { secureContext: WAN_SECURE_CTX } : {};
+/**
+ * 중앙↔엣지 TLS 연결 옵션 — **사설 CA 신뢰의 단일 출처**(v2.731 G2b A4-01).
+ *
+ * v2.730 S-09 는 `WAN_TLS_CA_FILE` 을 이 파일의 두 디스패처에만 붙였다. 그런데 중앙↔엣지 구간에서 **자체 Agent 를
+ * 만드는 경로**가 둘 더 있었다 — 통신 점검 `linkcheck/checks.js stepHttp`(수집 토큰·중앙 토큰을 싣는 링크)와
+ * 업그레이드 `upgrade/upgradeAgent.js`(엣지 번들 push · 엣지가 중앙 /dl 을 받는 다운로드). 둘 다 기본 신뢰 목록만 써서
+ * 사설 CA 로 발급한 정상 엣지·중앙을 'TLS 실패' 로 거부했고, 운영자에게 남은 길은 검증 해제(WAN_TLS_INSECURE·
+ * UPGRADE_TLS_INSECURE)뿐이었다 — S-09 가 막으려던 바로 그 상태.
+ *
+ * 새 중앙↔엣지 클라이언트가 자체 Agent 를 만들면 connect 에 이 값을 펼친다(사본을 만들지 말 것 — 파일을 두 번 읽으면
+ * 상태 보고와 실제 신뢰가 갈라진다). ⚠ 장비 TLS(vCenter·iDRAC…)는 `security/tlsTrust.js` 다 — 섞지 말 것.
+ * 신뢰 목록은 기본 목록을 **앞에 붙인** 것이라(loadWanCa) GitHub 등 공인 인증서 검증은 그대로다. 사설 CA 가 있으면
+ * `secureContext`(미리 만든 하나 — 위 주석), 없으면 아무것도 싣지 않는다(Node 기본 신뢰).
+ * @param {{verify?: boolean}} [o]  검증 여부 — 기본은 WAN_TLS_VERIFY. 호출자가 자기 정책을 갖고 있으면 그 값을 준다
+ *                                  (upgradeAgent 의 UPGRADE_TLS_INSECURE).
+ * @returns {{rejectUnauthorized: boolean, secureContext?: import('node:tls').SecureContext}}
+ */
+export function wanTlsConnectOptions({ verify = WAN_TLS_VERIFY } = {}) {
+  return { rejectUnauthorized: verify !== false, ...WAN_CA_OPT };
+}
 /** 중앙↔엣지 TLS 신뢰 상태(진단·자체점검용 — CA 원문은 싣지 않는다). */
 export function wanTlsStatus() {
-  return { verify: WAN_TLS_VERIFY, caFile: WAN_CA.file, caCount: WAN_CA.count, caSubjects: WAN_CA.subjects.slice(0, 10), caError: WAN_CA.error };
+  return { verify: WAN_TLS_VERIFY, caFile: WAN_CA.file, caCount: WAN_CA_CTX_ERROR ? 0 : WAN_CA.count, caSubjects: WAN_CA.subjects.slice(0, 10), caError: WAN_CA.error || WAN_CA_CTX_ERROR };
 }
 // v2.506(감사 S1 #2): 기본 디스패처에 DNS 리바인딩 차단 lookup 을 단다. 이 에이전트를 쓰는
 // 전 호출부(수집 서버 연결 테스트·동기화 등 dispatcher 미지정 경로 전부)가 한 번에 보호된다.
@@ -98,7 +132,7 @@ export function wanTlsStatus() {
 // 막으므로, GitHub 업그레이드 다운로드·중앙↔엣지 같은 정상 흐름에는 영향이 없다
 // (루프백을 치는 resilientFetch 호출부가 없음을 grep 으로 확인했다).
 const wanAgent = new Agent({
-  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup, ...WAN_CA_OPT },
+  connect: { ...wanTlsConnectOptions(), lookup: ssrfLookup },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
@@ -115,7 +149,7 @@ const wanAgent = new Agent({
 export const UNDICI_DEFAULT_IO_TIMEOUT_MS = 300_000;
 const LONG_IO_TIMEOUT_MS = 1_800_000 + 60_000;
 const wanLongAgent = new Agent({
-  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup, ...WAN_CA_OPT },
+  connect: { ...wanTlsConnectOptions(), lookup: ssrfLookup },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,

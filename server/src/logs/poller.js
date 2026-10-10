@@ -24,6 +24,32 @@ let running = false;
 let tick = 0; // prune/용량점검 스로틀용(매 폴 DELETE 스캔 방지)
 const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
 
+/*
+ * v2.731(점검 r1 A2-01): vCenter 별 '이벤트가 온전한 마지막 시각' — VM 가용성(availability/analyze.js)의 측정 끝 근거.
+ * 이 기록이 없으면 가용성은 측정 끝을 언제나 '지금' 으로 둬서, 수집이 멈춘 vCenter 의 꼬리(수집하지 못한 구간)를 '정지 없음 = 가동' 으로 셌다.
+ * 마지막 이벤트 시각(db.lastTs)으로는 대신할 수 없다 — 최소 심각도가 info 가 아니면 조용한 vCenter 는 수집이 정상이어도 이벤트가 오래 없다.
+ *  · 적재까지 성공한 수집만 기록한다(데드라인·접속 실패·적재 실패는 기록을 바꾸지 않는다 — 멈춘 수집이 '방금 성공' 으로 보이면 안 된다).
+ *  · 상한(maxPerPoll)에 걸렸으면 그 뒤 이벤트는 아직 안 읽었다 — 수집 시작 시각이 아니라 마지막으로 읽은 이벤트 시각까지만 온전하다
+ *    (이벤트는 오래된 것부터 읽는다 — collectVCenterEvents).
+ *  · 인메모리다 — 재시작 직후에는 기록이 없고 가용성은 마지막 이벤트 시각으로 대신한다(그 사실을 화면이 말한다).
+ *    재시작 사이에 쌓인 이벤트는 다음 수집이 lastTs 부터 다시 읽으므로 그 틈은 실제로 아직 수집 전이다.
+ */
+const _collectOk = new Map();   // vcenterId → { at, capped, events }
+/** 수집 결과로 '이벤트가 온전한 시각' 을 계산한다(순수). events = 원시 이벤트(심각도 거르기 전), max = 한 번에 읽는 상한. */
+export function eventsCompleteUntil(events, { startedAt, max = Infinity } = {}) {
+  const list = Array.isArray(events) ? events : [];
+  let maxTs = null;
+  for (const e of list) { const t = Number(e?.ts); if (Number.isFinite(t) && (maxTs == null || t > maxTs)) maxTs = t; }
+  const capped = Number.isFinite(max) && max > 0 && list.length >= max;
+  if (capped) return { at: maxTs, capped: true };
+  // 상한 밖 — 수집을 시작한 시각까지 온전하다. vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각까지.
+  return { at: Math.max(Number(startedAt) || 0, maxTs ?? 0) || null, capped: false };
+}
+/** 그 vCenter 의 마지막 수집 성공 기록 — { at, capped, events } 또는 null. */
+export function logCollectOk(vcenterId) { const r = _collectOk.get(String(vcenterId ?? '')); return r ? { ...r } : null; }
+/** 그 vCenter 의 이벤트가 온전한 마지막 시각(ms) 또는 null(기록 없음). */
+export function logCollectOkAt(vcenterId) { return _collectOk.get(String(vcenterId ?? ''))?.at ?? null; }
+
 const MOCK_TYPES = [
   ['UserLoginSessionEvent', 'info', (u, e) => `User ${u} logged in`],
   ['VmPoweredOnEvent', 'info', (u, e) => `${e} is powered on`],
@@ -142,6 +168,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
     await poolRun(vcs, LOG_CONCURRENCY, async (vc) => {
       if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
       try {
+        const startedAt = Date.now();   // v2.731(A2-01): 이 수집이 온전하게 덮는 끝(상한에 걸리지 않으면)
         const last = db.lastTs(vc.id);
         // 첫 수집은 최근 7일. v2.710: 데모(mock)는 91일 — VM 가용성(7·30·90일 보기)이 합성 이벤트 7일치만으로
         //   전 VM 을 '수집 시작부터만 잼(일부 기간)' 으로 내던 공백. 이벤트 수도 기간에 비례(7일마다 25건).
@@ -153,10 +180,16 @@ export async function pollLogsOnce({ manual = false } = {}) {
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
           .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message, detail: e.detail ?? null }));
-        if (rows.length) perVc.push(rows);
+        // v2.731(A2-01): 적재할 행이 0개여도 '수집은 성공' 이다 — 성공 시각 기록을 위해 항상 넘긴다.
+        const done = eventsCompleteUntil(events, { startedAt, max: mock ? Infinity : s.maxPerPoll });
+        perVc.push({ vcId: String(vc.id), rows, done, events: events.length });
       } catch (e) { console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`); }
     });
-    for (const rows of perVc) { db.insertMany(rows); collected += rows.length; }
+    for (const { vcId, rows, done, events } of perVc) {
+      if (rows.length) { db.insertMany(rows); collected += rows.length; }
+      // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 vCenter 이후는 기록되지 않는다 — 온전하지 않다).
+      if (done.at != null) _collectOk.set(vcId, { at: done.at, capped: done.capped, events });
+    }
     // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
     // ⚠ v2.503: `tick++ % N === 0` 은 tick 초기값이 0 이라 **첫 폴에서 즉시 참**이었다 —
     // metrics/sampler.js 가 금지한 v2.453 패턴과 같다(보존기간을 365→90일로 줄이고 재시작하면

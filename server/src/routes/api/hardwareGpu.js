@@ -485,7 +485,17 @@ api.get('/tools/gpu/series-meta', requirePerm('tools'), async (req, res) => {
       return { collectedSince: r.firstTs, latestAt: r.lastTs, sampleCount };
     });
     res.json(payload);
-  } catch { res.json({ collectedSince: null, latestAt: null, sampleCount: 0 }); }
+  } catch (e) {
+    // v2.731(점검 A5-07): DB 오류를 200 + '0건' 으로 위장하지 않는다 — 내보내기 창이 '아직 수집된 이력이 없습니다' 라고
+    //   말해 이력이 있는데도 사용자가 내보내기를 포기했다. 실패는 503 + 고정 사유(원문에는 DB 파일 경로가 들어갈 수 있어
+    //   콘솔에만 남긴다 — tools 권한은 operator 도 갖는다). 수치는 모르는 것이므로 0 이 아니라 null 이다.
+    console.warn(`[gpu] series-meta 조회 실패: ${e?.message || e}`);
+    res.status(503).json({
+      ok: false, error: 'unavailable', code: 'metrics-db-unavailable',
+      reason: 'GPU 사용률 이력 DB 를 읽지 못했습니다 — 잠시 뒤 다시 열어 보세요(서버 로그에 원인이 남습니다).',
+      collectedSince: null, latestAt: null, sampleCount: null,
+    });
+  }
 });
 api.get('/tools/gpu/export.csv', csvPerm, requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'csv'));
 api.get('/tools/gpu/export.json', csvPerm, requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'json'));

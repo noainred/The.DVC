@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson, usePolling, downloadFile, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
+import { requireChanged } from './changeResult.js';
 import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -36,7 +37,8 @@ export default function VcenterLogs() {
   if (err) return <ErrorBox message={err} />;
   if (!st || !s) return <Loading />;
 
-  const save = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/vclogs/settings', s); setS(r); setMsg('저장됨'); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
+  // v2.731(A5-01): putJson 은 400(저장 경로 검사 실패 {ok:false,reason})을 던지지 않는다 — 판정 없이 setS(r) 하면 설정 폼이 오류 객체가 되고 '저장됨' 이 떴다.
+  const save = async () => { setBusy('save'); setMsg(null); try { const r = requireChanged(await putJson('/admin/vclogs/settings', s)); setS(r); setMsg('저장됨'); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
   const collect = async () => { setBusy('collect'); setMsg(null); try { const r = await postJson('/admin/vclogs/collect', {}); setMsg(`수집 완료: ${r.collected ?? 0}건`); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
 
   return (

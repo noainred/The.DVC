@@ -38,6 +38,8 @@ import SensorDetailView from './SensorDetailView.jsx';
 
 const KIND_KO = { physical: '물리', virtual: '가상화' };
 // v2.659: '센서 상세' — iDRAC 전 센서(임계값·상태)·전산실 흡기·CPU/GPU 온도·CPU 사용률(SensorDetailView).
+// v2.731(A2-03): 서버 unreadVcenterReasons 의 사유 코드(metrics/sampler.js)
+const STALE_REASON_KO = { maintenance: '점검중', unreachable: '연결 실패', stale: '위임 수집 낡음' };
 const VIEWS = [['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['sensor', '센서 상세']];
 const VIEW_TITLE = { server: '서버별', host: 'ESXi 호스트별', cluster: '클러스터별', vc: '법인별' };
 const HEAT_TITLE = { server: '서버 히트맵', host: 'ESXi 호스트 히트맵', cluster: '클러스터 히트맵', vc: '법인 히트맵' };
@@ -114,6 +116,8 @@ export default function ServerTempBoard({ scope }) {
         .map((h) => ({
           key: h.id, name: h.name, dc: h.vcenterId || '', cluster: h.cluster || '',
           curC: h.curC, avg5C: h.avg5C, maxC: h.tempMaxC, level: 'host', sparkSource: 'host',
+          // v2.731(점검 1회차 A2-03): 읽히지 않는 vCenter 의 호스트 값은 마지막 수집 값이다 — 서버가 집계에서 뺐고 행에는 표지를 단다.
+          stale: !!h.stale, staleReason: h.staleReason || '',
         }));
     }
     const list = view === 'cluster' ? clusters : vcenters;
@@ -185,7 +189,7 @@ export default function ServerTempBoard({ scope }) {
       return order.map((k) => ({
         key: k, name: nameOf(k), items: hosts.filter((h) => h.vcenterId === k),
         valOf: (h) => h.curC, idOf: (h) => h.id,
-        titleOf: (h) => `${h.name} · ${h.cluster || '클러스터 없음'} · ${cRaw(h.curC)}`,
+        titleOf: (h) => `${h.name} · ${h.cluster || '클러스터 없음'} · ${cRaw(h.curC)}${h.stale ? ' · 오래된 값(지금 온도가 아님)' : ''}`,
       })).filter((g) => g.items.length);
     }
     if (view === 'cluster') {
@@ -229,7 +233,9 @@ export default function ServerTempBoard({ scope }) {
     { key: 'maxC', label: '최고 ℃', align: 'right', render: (r) => <PeakCell v={r.maxC} /> },
     { key: 'spark', label: '24시간 추이', align: 'right', sortValue: (r) => r.curC, render: sparkCell },
   ] : view === 'host' ? [
-    { key: 'name', label: '호스트', render: nameCell },
+    { key: 'name', label: '호스트', render: (r) => (r.stale
+      ? <>{nameCell(r)} <span className="muted" style={{ fontSize: 11 }} title={`이 호스트의 vCenter 를 지금 읽지 못해(${STALE_REASON_KO[r.staleReason] || r.staleReason || '사유 미상'}) 마지막 수집 값입니다. 요약·클러스터·법인 집계에서 뺐습니다.`}>오래됨</span></>
+      : nameCell(r)) },
     { key: 'dc', label: '법인', render: (r) => dim(r.dc) },
     { key: 'cluster', label: '클러스터', render: (r) => dim(r.cluster) },
     { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <HeatCell v={r.curC} bold dense={dense} /> },
@@ -391,7 +397,7 @@ export default function ServerTempBoard({ scope }) {
       {/* 5. 표 */}
       <Section
         title={VIEW_TITLE[view]}
-        sub={`${int(tableRows.length)}${view === 'server' || view === 'host' ? '대' : '개'}${sel ? ` · 법인 ${selName}` : ''}`}
+        sub={`${int(tableRows.length)}${view === 'server' || view === 'host' ? '대' : '개'}${sel ? ` · 법인 ${selName}` : ''}${view === 'host' && data.staleHosts ? ` · 오래된 값 ${int(data.staleHosts)}대(집계 제외)` : ''}`}
         right={view === 'server' ? (
           <Segment
             items={[['all', `전체 ${int(srvAll.length)}`], ['physical', `물리 ${int(S.physical?.servers)}`], ['virtual', `가상화 ${int(S.virtual?.servers)}`]]}

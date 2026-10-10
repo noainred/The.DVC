@@ -83,9 +83,12 @@ export function normPort(p) {
 }
 
 /**
- * 입력(초안) → 정규화된 설정 + 오류 목록. portalPort 는 항상 web.ports 에 포함(포탈 자기 잠금 방지).
+ * 입력(초안) → 정규화된 설정 + 오류 목록. 포탈 포트는 항상 web.ports 에 포함(포탈 자기 잠금 방지).
+ * v2.731(G2b A4-02): `portalPorts`(실제로 듣는 포탈 포트 **전부** — util/httpsServer.js listeningPortalPorts)를 받는다.
+ *   TLS_PORT ≠ PORT 로 HTTPS 만 열면 실제 포탈 포트는 PORT 가 아니다 — 하나(config.port)만 넣으면 허용목록이 실제 포트를
+ *   덮지 못해 그 포트가 모든 출처에 열린 채 남는다. HTTP·HTTPS 를 함께 열면 둘 다다. `portalPort`(하나)는 예전 호출 호환.
  */
-export function normalizeSettings(input = {}, { portalPort = 4000 } = {}) {
+export function normalizeSettings(input = {}, { portalPort = 4000, portalPorts = null } = {}) {
   const errors = [];
   const ssh = input.ssh || {}; const web = input.web || {}; const fw = input.firewall || {};
   const sshAllow = normList(ssh.allow); const webAllow = normList(web.allow);
@@ -95,7 +98,8 @@ export function normalizeSettings(input = {}, { portalPort = 4000 } = {}) {
   const webMode = MODES_WEB.includes(web.mode) ? web.mode : 'open';
   if (sshMode === 'allowlist' && !sshAllow.list.length) errors.push('SSH 허용목록 모드인데 허용 주소가 없습니다(전부 차단하려면 "차단" 모드를 쓰세요).');
   if (webMode === 'allowlist' && !webAllow.list.length) errors.push('웹 허용목록 모드인데 허용 주소가 없습니다 — 적용하면 포탈 접속이 전부 막힙니다.');
-  const ports = uniq([String(Number(portalPort) || 4000), ...(Array.isArray(web.ports) ? web.ports : []).map(normPort).filter(Boolean)]);
+  const portal = (Array.isArray(portalPorts) && portalPorts.length ? portalPorts : [portalPort]).map(normPort).filter((p) => p && !p.includes('-'));
+  const ports = uniq([...(portal.length ? portal : ['4000']), ...(Array.isArray(web.ports) ? web.ports : []).map(normPort).filter(Boolean)]);
   const extra = [];
   for (const [i, r] of (Array.isArray(fw.extra) ? fw.extra : []).entries()) {
     const port = normPort(r?.port);

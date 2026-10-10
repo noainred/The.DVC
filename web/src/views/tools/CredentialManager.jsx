@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { resultSummary, ago } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
@@ -96,10 +97,11 @@ function CredForm({ form, agents, onClose, onSaved }) {
   const submit = async () => {
     setErr(''); setBusy(true);
     try {
-      if (f._delete) { await delJson(`/tools/credentials/${encodeURIComponent(f.id)}?otp=${encodeURIComponent(otp)}`); onSaved(); return; }
+      if (f._delete) { requireChanged(await delJson(`/tools/credentials/${encodeURIComponent(f.id)}?otp=${encodeURIComponent(otp)}`)); onSaved(); return; }
       const body = { name: f.name, kind: f.kind, username: f.username, hosts: f.hosts, agents: f.agents, note: f.note, otp,
         ...(f.kind === 'password' ? { password: f.password } : { privateKey: f.privateKey, passphrase: f.passphrase }) };
-      if (f.id) await putJson(`/tools/credentials/${encodeURIComponent(f.id)}`, body); else await postJson('/tools/credentials', body);
+      // v2.731(A5-01): 수정 PUT 의 400(검증·암호화 정책 잠금)은 던지지 않고 본문으로 온다 — 판정 없이 onSaved 하면 거부된 수정에 창이 닫혔다.
+      if (f.id) requireChanged(await putJson(`/tools/credentials/${encodeURIComponent(f.id)}`, body)); else await postJson('/tools/credentials', body);
       onSaved();
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };

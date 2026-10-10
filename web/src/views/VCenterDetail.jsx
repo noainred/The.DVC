@@ -47,6 +47,24 @@ const STORAGE_BADGE = { local: 'green', san: 'blue', nas: 'amber', vsan: 'purple
 
 /** vSphere-client-like inventory view for a single vCenter. */
 
+/**
+ * usePolling 결과 → 표 자리의 상태(v2.731 점검 A5-04). 예전에는 data 만 읽고 loading·error 를 버려, 조회 중·실패·403 이
+ * '데이터스토어 없음'·'네트워크 없음'·'0 VM' 으로 그려졌다(없음과 못 읽음이 같은 모양). 데이터가 실제로 온 뒤에만 '없음' 을 말한다.
+ *   { state: 'ok' }                      — data 가 있다(이후 폴링 오류는 직전 데이터를 그대로 보인다 — 고RTT 깜빡임 방지 규약)
+ *   { state: 'error', error }            — data 없이 실패. error 는 403 이면 HttpError(ErrorBox 가 권한 안내로 바꾼다), 그 밖은 문구
+ *   { state: 'loading' }                 — 아직 첫 응답 전
+ */
+export function pollPart(p) {
+  if (p?.data) return { state: 'ok' };
+  if (p?.error || p?.errorInfo) return { state: 'error', error: p.errorInfo || p.error };
+  return { state: 'loading' };
+}
+/** 데이터가 오기 전 표 자리 — 실패면 ErrorBox(403 → 권한 안내 자동), 아니면 '불러오는 중'. */
+function gateEl(part, what) {
+  if (part.state === 'error') return <div style={{ margin: '8px 0' }}><ErrorBox error={part.error} /></div>;
+  return <Loading label={what} />;
+}
+
 // 사용량/할당량 추이 기간 프리셋(서버 USAGE_RANGES 와 키가 일치해야 한다).
 const TREND_RANGES = [
   ['1h', '1시간'], ['6h', '6시간'], ['12h', '12시간'], ['24h', '24시간'],
@@ -270,16 +288,27 @@ export default function VCenterDetail({ site, onBack }) {
   const usageRef = useRef({});
   const usageMaxRef = useRef(60); // 서버가 알려준 요청당 상한(첫 응답에서 갱신)
 
-  const { data: hostsD } = usePolling('/hosts', { vcenterId }, 20_000);
+  const hostsP = usePolling('/hosts', { vcenterId }, 20_000);
+  const hostsD = hostsP.data;
   // VM 복제(백업) 잡 대상 vmId 집합(v2.299) — 트리 VM 행에 'Clone' 배지 표시(사용자 요구).
   // 60초 폴링(잡 등록은 드묾), scope 제한 계정은 서버가 빈 목록을 준다.
   // v2.631(감사 WEB2631-12): 도구 권한이 없으면 부르지 않는다 — viewer(기본 tools 없음)가 상세를 열 때마다 403 을 만들었다
   //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
   const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
-  const { data: vmsD } = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
-  const { data: dsD } = usePolling('/datastores', { vcenterId }, 30_000);
-  const { data: netD } = usePolling('/networks', { vcenterId }, 30_000);
+  const vmsP = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
+  const dsP = usePolling('/datastores', { vcenterId }, 30_000);
+  const netP = usePolling('/networks', { vcenterId }, 30_000);
+  const vmsD = vmsP.data;
+  const dsD = dsP.data;
+  const netD = netP.data;
+  // v2.731(점검 A5-04): 표 자리마다 '받았다 · 못 받았다 · 받는 중' 을 따로 든다 — 못 받은 것을 '없음·0' 으로 그리지 않는다.
+  const hostsPart = pollPart(hostsP);
+  const vmsPart = pollPart(vmsP);
+  const dsPart = pollPart(dsP);
+  const netPart = pollPart(netP);
+  const hostsOk = hostsPart.state === 'ok';
+  const vmsOk = vmsPart.state === 'ok';
 
   // v2.492: useMemo 로 정체성을 안정화한다 — 매 렌더 새 배열이면 이 값을 deps 로 쓰는 모든 useMemo
   // (가상화율·폴더트리·검색·사용률 대상 수집)가 폴링 틱마다 전부 재계산된다(eslint 경고의 실체).
@@ -451,12 +480,13 @@ export default function VCenterDetail({ site, onBack }) {
           </div>
           <StateBadge state={site.status} />
         </div>
-        <div className="flex gap" style={{ fontSize: 12, alignItems: 'center' }}>
-          <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{m.hosts ?? hosts.length}</b></span>
+        {/* v2.731: 400px 에서 이 줄이 페이지를 236px 밀어냈다(기존 결함 — A/B 확인) — 줄바꿈을 허용한다. */}
+        <div className="flex gap" style={{ fontSize: 12, alignItems: 'center', flexWrap: 'wrap', rowGap: 6 }}>
+          <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{m.hosts ?? (hostsOk ? hosts.length : '—')}</b></span>
           {/* VM 수(v2.336): 'Off VM 포함' 해제 시 켜진 VM 만 센다. 체크 시엔 서버 집계(m.vms)가
               정확한 소스(응답 상한 무관). CPU/메모리 %는 호스트 실사용률이라 전원 필터와 무관. */}
           <span className="muted" title={inclPoweredOff ? 'VM 전체(꺼진 VM 포함)' : '켜진(Power On) VM 만 — Off VM 포함 해제 상태'}>
-            VM <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? (m.vms ?? vms.length) : visibleVms.length}</b>
+            VM <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? (m.vms ?? (vmsOk ? vms.length : '—')) : (vmsOk ? visibleVms.length : '—')}</b>
             {!inclPoweredOff && <span style={{ color: 'var(--green)', fontSize: 11 }}> On</span>}
           </span>
           <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
@@ -501,7 +531,7 @@ export default function VCenterDetail({ site, onBack }) {
 
       {(view === 'hosts' || view === 'vms') && (
         <>
-          <div className="flex gap" style={{ alignItems: 'center', margin: '10px 0' }}>
+          <div className="flex gap" style={{ alignItems: 'center', margin: '10px 0', flexWrap: 'wrap', rowGap: 6 }}>
             <SearchBox value={q} onChange={setQ} placeholder={view === 'hosts' ? '🔍 호스트·VM 검색 — 여러 단어는 공백 구분(각 단어 포함 항목 모두 표시, OR)' : '🔍 VM 검색 — 여러 단어는 공백 구분(예: "NTP WA" → NTP 포함 + WA 포함 모두)'}
               style={{ flex: 1, maxWidth: 420 }} />
             {/* 메모 포함(v2.293) — vSphere VM 메모(annotation)도 검색 대상에 넣는다. 메모로만 걸린
@@ -528,8 +558,8 @@ export default function VCenterDetail({ site, onBack }) {
                   title="모든 클러스터·호스트를 트리 펼침 없이 한 표로 봅니다(현재 'Off VM 포함' 설정이 가상화율에 반영됩니다)">
                   📋 전체 현황
                 </button>
-                {canCsv() && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={exportOverviewCsv}
-                  title="모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다">
+                {canCsv() && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={exportOverviewCsv} disabled={!hostsOk || !vmsOk}
+                  title={hostsOk && vmsOk ? '모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다' : '호스트·VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
                   ⤓ CSV
                 </button>}
               </span>
@@ -559,7 +589,8 @@ export default function VCenterDetail({ site, onBack }) {
             </span>
           </div>
           )}
-          {view === 'hosts' && overview && (
+          {view === 'hosts' && overview && !(hostsOk && vmsOk) && gateEl(hostsOk ? vmsPart : hostsPart, hostsOk ? 'VM 목록' : '호스트 목록')}
+          {view === 'hosts' && overview && hostsOk && vmsOk && (
             <>
               <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
                 모든 클러스터·호스트 <b style={{ color: 'var(--text)' }}>{overviewRows.length.toLocaleString()}</b>행
@@ -586,7 +617,7 @@ export default function VCenterDetail({ site, onBack }) {
       {view === 'storage' && (
         <div className="flex gap wrap" style={{ alignItems: 'center', margin: '10px 0' }}>
           {STORAGE_KINDS.map((s) => {
-            const n = s.k ? (dsCounts[s.k] || 0) : datastores.length;
+            const n = dsPart.state !== 'ok' ? '—' : (s.k ? (dsCounts[s.k] || 0) : datastores.length);
             return (
               <button key={s.k || 'all'} className={dsKind === s.k ? 'login-btn' : 'tab'}
                 style={{ flex: 'none', padding: '6px 11px' }} onClick={() => setDsKind(s.k)}>
@@ -599,6 +630,9 @@ export default function VCenterDetail({ site, onBack }) {
 
       <div className="vcd-tree card">
         {(view === 'hosts' || view === 'vms') && query && (() => {
+          // 목록을 받기 전에는 '일치하는 항목이 없습니다' 라고 말하지 않는다(A5-04).
+          if (view === 'hosts' && !hostsOk) return gateEl(hostsPart, '호스트 목록');
+          if (!vmsOk) return gateEl(vmsPart, 'VM 목록');
           const hm = view === 'hosts' ? hostMatches : [];
           const empty = hm.length === 0 && matches.length === 0;
           return (
@@ -624,7 +658,10 @@ export default function VCenterDetail({ site, onBack }) {
           );
         })()}
 
-        {view === 'hosts' && !query && !overview && (() => { const dc = virtSum(hosts); return (
+        {view === 'hosts' && !query && !overview && !hostsOk && gateEl(hostsPart, '호스트 목록')}
+        {/* 호스트는 받았는데 VM 목록을 아직·못 받았으면 그 사실을 트리 위에 말한다 — 호스트 아래 VM 이 비어 보이는 이유. */}
+        {view === 'hosts' && !query && !overview && hostsOk && !vmsOk && gateEl(vmsPart, 'VM 목록')}
+        {view === 'hosts' && !query && !overview && hostsOk && (() => { const dc = virtSum(hosts); return (
           <Node label={`🗄️ ${site.name}`} defaultOpen
             sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트 · VM {dc.vmc}</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
               tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={dc.alloc} base={dc.cores} kind="cpu" /><VirtBadge alloc={dc.memAlloc} base={dc.memPhys} kind="mem" /></span>} />}>
@@ -654,13 +691,15 @@ export default function VCenterDetail({ site, onBack }) {
           </Node>
           ); })()}
 
-        {view === 'vms' && !query && (
+        {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
+        {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
             <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
-        {view === 'storage' && (
+        {view === 'storage' && dsPart.state !== 'ok' && gateEl(dsPart, '데이터스토어')}
+        {view === 'storage' && dsPart.state === 'ok' && (
           <DataTable
             columns={[
               { key: 'name', label: '데이터스토어', render: (d) => <button className="cell-link" onClick={() => setSel({ type: 'datastore', item: d })}>💾 {d.name}</button> },
@@ -678,7 +717,8 @@ export default function VCenterDetail({ site, onBack }) {
             emptyText={dsKind ? `${STORAGE_LABEL[dsKind]} 데이터스토어 없음` : '데이터스토어 없음'} />
         )}
 
-        {view === 'network' && (
+        {view === 'network' && netPart.state !== 'ok' && gateEl(netPart, '네트워크')}
+        {view === 'network' && netPart.state === 'ok' && (
           <DataTable
             columns={[
               { key: 'name', label: '네트워크', render: (n) => <b>🌐 {n.name}</b> },

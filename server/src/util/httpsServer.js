@@ -150,6 +150,34 @@ export function advertisedListen(fallbackPort) {
   return { scheme: 'http', port: _state.httpPort || portOf(fallbackPort) || 4000, insecure: true };
 }
 
+/**
+ * 이 포탈이 **실제로 듣는 포탈 포트 전부**(v2.731 G2b A4-02) — 호스트 접근 제어(방화벽 허용목록·자기 잠금 검사)와
+ * svcmon 엣지 진단처럼 '포탈 포트' 를 쓰는 곳은 `config.port` 가 아니라 이 값을 쓴다.
+ *
+ * 왜: `TLS_PORT` 를 PORT 와 다르게 주면 그 포트에 HTTPS **만** 열고 PORT 는 듣지 않는다(TLS_HTTP_ALSO 가 없을 때 —
+ * INSTALL.md 전환 절차의 최종 상태). 그런데 호스트 접근은 `config.port` 만 관리 대상에 넣어, 허용목록을 적용해도 실제
+ * 포탈 포트(4443/tcp)는 **모든 출처에 열린 채** 남았다(화면은 '허용목록 적용' — 접근 제어 우회).
+ *
+ * 순서: TLS 포트가 먼저(광고 포트 — `advertisedListen` 과 같다), TLS_HTTP_ALSO 면 평문 포트도.
+ * 리스너를 아직 만들지 않았으면(기동 순서·도구·테스트) **env 로 같은 판정**을 한다 — config.port 로 단정하지 않는다.
+ * env 설정이 틀렸으면(createPortalServers 가 기동을 멈출 설정) 평문 포트 하나다.
+ * @param {number} [fallbackPort]  평문 포트(= config.port)
+ * @param {{env?: object}} [o]
+ * @returns {number[]}
+ */
+export function listeningPortalPorts(fallbackPort, { env = process.env } = {}) {
+  const plain = portOf(fallbackPort) || 4000;
+  if (_state.created) {
+    const out = [];
+    if (_state.tls && _state.tlsPort) out.push(_state.tlsPort);
+    if (_state.httpPort) out.push(_state.httpPort);
+    return out.length ? [...new Set(out)] : [plain];
+  }
+  const cfg = tlsListenConfig(env, { port: plain });
+  if (!cfg.enabled) return [cfg.httpPort || plain];
+  return [...new Set([cfg.tlsPort, ...(cfg.httpAlso && cfg.httpPort ? [cfg.httpPort] : [])])];
+}
+
 /** 테스트 전용 — 상태를 처음으로 되돌린다. */
 export function _resetHttpsServerState() {
   _state = { configured: false, tls: false, tlsPort: null, httpPort: null, httpAlso: false, listening: { tls: false, http: false },
@@ -180,6 +208,7 @@ export function createPortalServers(app, { port, env = process.env, log = consol
     servers.push({ server: http.createServer(app), scheme: 'http', port: cfg.httpPort });
   }
   _state = {
+    created: true, // v2.731 A4-02: listeningPortalPorts 가 env 대신 이 상태를 쓴다
     configured: cfg.enabled,
     tls: cfg.enabled,
     tlsPort: cfg.enabled ? cfg.tlsPort : null,

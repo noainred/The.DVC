@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
+// v2.731(A5-01): putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 성공 문구 전에 판정한다.
+import { requireChanged } from '../changeResult.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
@@ -290,27 +292,28 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
   const [remote, setRemote] = useState({ longpollMs: group.remote?.longpollMs || '', testConcurrency: group.remote?.testConcurrency || '', disabledTests: (group.remote?.disabledTests || []).join(',') });
   const saveAccess = async () => {
     setErr(''); setMsg('');
-    try { const r = await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/access`, { allowedIps: ips, comment }); setMsg(`접속 허용 IP 저장: ${r.allowedIps.join(', ') || '(제한 없음)'}`); }
+    try { const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/access`, { allowedIps: ips, comment })); setMsg(`접속 허용 IP 저장: ${(r.allowedIps || []).join(', ') || '(제한 없음)'}`); }
     catch (e) { setErr(e.message); }
   };
   const saveRemote = async () => {
     setErr(''); setMsg('');
-    try { const r = await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/remote`, remote); setMsg(`원격 관리 설정 저장: ${JSON.stringify(r)} — RMA_REMOTE_MANAGE=true 인 인스턴스만 반영`); }
+    try { const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/remote`, remote)); setMsg(`원격 관리 설정 저장: ${JSON.stringify(r)} — RMA_REMOTE_MANAGE=true 인 인스턴스만 반영`); }
     catch (e) { setErr(e.message); }
   };
   const pol = (group.instances || []).find((i) => i.policy)?.policy;
   const save = async () => {
     setErr(''); setMsg('');
     try {
-      if (group.global) { await putJson('/tools/rma/settings', { defaultMode: mode }); setMsg('전역 기본 분배 방식을 저장했습니다.'); return; }
-      const r = await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/mode`, { mode, primary });
+      if (group.global) { requireChanged(await putJson('/tools/rma/settings', { defaultMode: mode })); setMsg('전역 기본 분배 방식을 저장했습니다.'); return; }
+      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/mode`, { mode, primary }));
       setMsg(`저장됨: ${modeLabel(r.mode, modes)}${r.primary ? ` · 주 ${r.primary}` : ''}`);
     } catch (e) { setErr(e.message); }
   };
   const savePw = async (clear) => {
     setErr(''); setMsg('');
     try {
-      const r = await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw });
+      // v2.731(A5-01): 400(제어 문자·256자 초과·암호화 정책 잠금)을 성공으로 읽으면 hasPassword 가 없어 '해제했습니다' 라는 반대 방향의 거짓이 됐다.
+      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw }));
       setMsg(r.hasPassword ? '비밀번호를 등록했습니다 — 이후 명령은 서명되어 전송됩니다(엣지 RMA_PASSWORD 와 같아야 합니다).' : '비밀번호를 해제했습니다(무서명).');
       setPw('');
     } catch (e) { setErr(e.message); }
@@ -403,13 +406,13 @@ function ScheduleTab({ groups, tests, schedules }) {
     const t = testOf(form.test);
     const issue = argsIssue(t, form.args);
     if (issue) { setErr(issue); return; }
-    try { await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec) }); setForm(null); setTick((x) => x + 1); }
+    try { requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec) })); setForm(null); setTick((x) => x + 1); }
     catch (e) { setErr(e.message); }
   };
   const remove = async (row) => {
     if (!window.confirm(`점검 '${row.name || row.test}' 을 삭제할까요?`)) return;
-    try { await delJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule/${encodeURIComponent(row.id)}`); setTick((x) => x + 1); }
-    catch (e) { setErr(e.message); }
+    try { requireChanged(await delJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule/${encodeURIComponent(row.id)}`), '삭제할 점검을 찾지 못했습니다(이미 삭제됐을 수 있습니다).'); setTick((x) => x + 1); }
+    catch (e) { setErr(e.message); setTick((x) => x + 1); }
   };
   const tform = form ? testOf(form.test) : null;
   const creds = useCredentials(agent);

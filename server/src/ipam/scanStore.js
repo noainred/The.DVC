@@ -89,26 +89,165 @@ export function writeDebounceMsFromEnv(raw) {
   return Math.min(600_000, clampIntervalMs(raw == null || String(raw).trim() === '' ? NaN : Number(raw), 1500, 100));
 }
 const WRITE_DEBOUNCE_MS = writeDebounceMsFromEnv(process.env.IPAM_WRITE_DEBOUNCE_MS);
-const _stores = new Map(); // file -> { getData, dirty, timer }
+/*
+ * v2.731(점검 A6-01 — 재현): 위 머리말의 '동기 블로킹 제거' 는 사실이 아니었다. 디바운스는 버스트를 한 번으로 묶을 뿐이고 그 한 번이
+ *   **결과 맵 전체 + 이력 맵 전체**를 들여쓰기 JSON 으로 메인 스레드에서 직렬화하고 fsync 했다 — 엣지 보고 1건(1/28)마다
+ *   5만 IP 에서 336~480ms(이벤트 5개면 640~1,005ms), 설계 상한(26만 IP) 근처면 수 초 동안 포탈 전체가 멈췄다.
+ *   이제 ① 들여쓰기를 뺀다 ② 결과·이력(IP 키 맵)은 항목을 조각으로 직렬화해 파일에 이어 쓰고 조각 사이에서 양보한다(시간 기준 —
+ *   `WRITE_SLICE_MS`) ③ tmp → fsync → rename 을 **비동기**로 한다(진행 중 쓰기는 파일마다 1건 — 그 사이 바뀐 것은 dirty 로 다음 회차)
+ *   ④ 종료 flush(`flushAllNow`)는 예전처럼 **동기**다(exit 훅에서 비동기는 실행되지 않는다 — util/exitFlush.js). 동기 flush 가
+ *   진행 중 비동기 쓰기를 대체하면(세대 `gen`) 그 쓰기는 rename 하지 않는다 — 옛 본문이 새 본문을 덮지 않게(bulletin/store.js 와 같은 규칙).
+ *   ⑤ lastSeen 만 바뀐 보고는 더 긴 디바운스(`SEEN_ONLY_DEBOUNCE_MS`)로 묶는다 — 그 값은 재시작 때 해제(down) 판정의 기준인데
+ *   판정 임계는 최소 3시간(scanPoller releaseIdleMs)이라 몇 분 늦게 쓰여도 판정이 바뀌지 않는다. 내용 변화(새 IP·포트·서비스·
+ *   호스트명·에이전트·up/down 전이)는 예전 디바운스 그대로다.
+ *   조각 직렬화 결과는 변경이 없으면 `JSON.stringify(맵)` 과 **바이트 단위로 같다**(키 순서 동일 — 테스트가 고정). 쓰는 도중 바뀐 항목은
+ *   그때 값으로 쓰이고(항목 하나는 한 번에 직렬화된다) dirty 가 다음 쓰기를 예약한다.
+ */
+const SEEN_ONLY_DEBOUNCE_MS = Math.min(600_000, Math.max(WRITE_DEBOUNCE_MS, 300_000));
+const WRITE_SLICE_MS = 8;              // 조각 하나를 만드는 데 쓰는 최대 시간(이만큼 돌았으면 파일로 내보내며 양보한다)
+const WRITE_CHUNK_CHARS = 256 * 1024;  // 조각 하나의 최대 길이(문자)
+const TMP_TAG = '.atmp-';              // 비동기 쓰기 임시 파일 표지(동기 원자 쓰기의 '.tmp-' 와 겹치지 않게)
+const SUPERSEDED = Symbol('superseded'); // 동기 flush 가 진행 중 비동기 쓰기를 대체했다
+let _tmpSeq = 0;
+const _stores = new Map(); // file -> { getData, map, dirty, urgent, timer, due, writing, gen, tmp, inflight, writes, failures, lastError, lastWriteAt, lastWriteMs }
 
-function registerStore(file, getData) { _stores.set(file, { getData, dirty: false, timer: null }); }
-function scheduleWrite(file) {
+/** @param {boolean} map 최상위가 IP 키 맵(결과·이력)이면 true — 항목 조각 직렬화 대상 */
+function registerStore(file, getData, map = false) {
+  _stores.set(file, { getData, map, dirty: false, urgent: false, timer: null, due: 0, writing: false, gen: 0, tmp: null, inflight: null, writes: 0, failures: 0, lastError: null, lastWriteAt: null, lastWriteMs: null });
+}
+/**
+ * @param {string} file
+ * @param {boolean} [seenOnly] lastSeen 만 바뀐 변경 — 긴 디바운스로 묶는다(내용 변경이 하나라도 오면 짧은 디바운스로 당긴다)
+ */
+function scheduleWrite(file, seenOnly = false) {
   const st = _stores.get(file);
   if (!st) return;
   st.dirty = true;
-  if (st.timer) return; // 이미 예약됨 → 버스트를 1회로 합침
-  st.timer = setTimeout(() => { st.timer = null; flushStore(file); }, WRITE_DEBOUNCE_MS);
+  if (!seenOnly) st.urgent = true;
+  if (st.writing) return; // 진행 중인 쓰기가 끝나면 dirty 를 보고 다시 예약한다(늦게 끝난 옛 본문이 새 본문을 덮지 않게 — 파일마다 1건)
+  const delay = st.urgent ? WRITE_DEBOUNCE_MS : SEEN_ONLY_DEBOUNCE_MS;
+  const due = Date.now() + delay;
+  if (st.timer) { if (due >= st.due) return; clearTimeout(st.timer); } // 이미 예약됨 → 버스트를 1회로 합침(더 이른 예약만 당긴다)
+  st.due = due;
+  st.timer = setTimeout(() => { st.timer = null; st.due = 0; startWrite(file); }, delay);
   st.timer.unref?.();
 }
+
+/** 문자열을 끝까지 쓴다 — FileHandle.write 는 한 번에 다 썼다고 보장하지 않는다(util/atomicWrite.js writeAll 과 같은 규칙). */
+async function writeAllAsync(fh, str) {
+  const buf = Buffer.from(str, 'utf8');
+  let off = 0;
+  while (off < buf.length) {
+    const { bytesWritten } = await fh.write(buf, off, buf.length - off);
+    if (!(bytesWritten > 0)) throw new Error(`쓰기가 진행되지 않습니다(${off}/${buf.length}바이트)`);
+    off += bytesWritten;
+  }
+}
+
+/** 조각 직렬화 — 최상위 맵의 항목을 `JSON.stringify(맵)` 과 같은 모양으로 이어 쓰며 시간 기준으로 양보한다. */
+async function writeMapChunks(fh, data, st, gen) {
+  const keys = Object.keys(data); // 시작 시점의 키 — 이후 조각마다 그때 값을 읽는다(지운 키는 건너뛴다 · 새 키는 dirty 가 다음 회차에 쓴다)
+  const own = Object.prototype.hasOwnProperty;
+  let buf = '{'; let first = true; let started = performance.now();
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (!own.call(data, k)) continue;
+    const s = JSON.stringify(data[k]);
+    if (s === undefined) continue; // JSON.stringify(맵) 도 이 항목을 뺀다
+    buf += (first ? '' : ',') + JSON.stringify(k) + ':' + s;
+    first = false;
+    if (buf.length >= WRITE_CHUNK_CHARS || performance.now() - started >= WRITE_SLICE_MS) {
+      await writeAllAsync(fh, buf); // 파일 쓰기(스레드풀)를 기다리는 동안 이벤트 루프가 다른 일을 한다 — 이것이 양보다
+      buf = '';
+      if (gen !== st.gen) throw SUPERSEDED;
+      started = performance.now();
+    }
+  }
+  await writeAllAsync(fh, `${buf}}`);
+}
+
+function startWrite(file) {
+  const st = _stores.get(file);
+  if (!st || !st.dirty || st.writing) return;
+  st.dirty = false; st.urgent = false; st.writing = true;
+  const gen = ++st.gen;
+  const dir = path.dirname(file);
+  const tmp = path.join(dir, `.${path.basename(file)}${TMP_TAG}${process.pid}-${++_tmpSeq}`);
+  st.tmp = tmp;
+  const t0 = performance.now();
+  st.inflight = (async () => {
+    let fh = null; let failed = false;
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      fh = await fs.promises.open(tmp, 'w', 0o600);
+      if (st.map) await writeMapChunks(fh, st.getData(), st, gen);
+      else await writeAllAsync(fh, JSON.stringify(st.getData())); // 보고 기록·실행 이력 — 작다(수십~200 항목)
+      await fh.sync();
+      await fh.close(); fh = null;
+      if (gen !== st.gen) throw SUPERSEDED;
+      await fs.promises.chmod(tmp, 0o600).catch(() => {});
+      await fs.promises.rename(tmp, file);
+      try { const d = await fs.promises.open(dir, 'r'); try { await d.sync(); } finally { await d.close(); } } catch { /* 디렉터리 fsync 미지원 */ }
+      if (gen === st.gen) { st.writes += 1; st.lastWriteAt = Date.now(); st.lastWriteMs = Math.round(performance.now() - t0); st.lastError = null; }
+    } catch (e) {
+      if (fh) await fh.close().catch(() => {});
+      await fs.promises.unlink(tmp).catch(() => {});
+      // 동기 flush 가 대체했다(그 flush 가 tmp 를 지워 rename 이 ENOENT 가 되기도 한다) — 실패로 세지 않는다.
+      if (e !== SUPERSEDED && gen === st.gen) {
+        failed = true;
+        st.dirty = true; st.failures += 1; st.lastError = { at: Date.now(), code: e?.code || 'error' }; // 원문(임시 파일 절대 경로)은 상태에 싣지 않는다 — 콘솔에만
+        console.warn(`[ipam] 저장 실패(${path.basename(file)}): ${e?.message || e}`);
+      }
+    } finally {
+      st.writing = false; st.tmp = null; st.inflight = null;
+      // 쓰는 동안 바뀐 것은 한 번 더(예전과 같은 디바운스). 실패한 것은 예전처럼 다음 변경·종료 flush 가 다시 쓴다(실패 재시도 루프를 만들지 않는다 — 큰 맵을 1.5초마다 다시 직렬화하지 않게).
+      if (st.dirty && !failed) scheduleWrite(file, !st.urgent);
+    }
+  })();
+}
+
+/** 동기 원자 쓰기(종료 flush·테스트). 진행 중인 비동기 쓰기를 대체한다. */
 function flushStore(file) {
   const st = _stores.get(file);
-  if (!st || !st.dirty) return;
-  st.dirty = false;
-  try { atomicWriteFileSync(file, JSON.stringify(st.getData(), null, 2), { mode: 0o600 }); }
-  catch (e) { st.dirty = true; console.warn(`[ipam] 저장 실패(${path.basename(file)}): ${e.message}`); }
+  if (!st || (!st.dirty && !st.writing)) return;
+  if (st.timer) { clearTimeout(st.timer); st.timer = null; st.due = 0; }
+  st.gen += 1; // 진행 중인 비동기 쓰기를 무효화한다(그 쓰기는 rename 하지 않는다)
+  // 진행 중인 비동기 쓰기의 tmp 를 먼저 지운다 — 아직 커널에 닿지 않은 rename 은 ENOENT 로 실패하고(대체됨), 이미 끝난 rename 은
+  //   아래 동기 쓰기가 덮는다(rename(2) 는 원자라 둘 중 하나다). bulletin/store.js flushSync 와 같은 규칙.
+  if (st.writing && st.tmp) { try { fs.unlinkSync(st.tmp); } catch { /* 이미 rename 됐거나 아직 만들어지지 않았다 */ } }
+  st.dirty = false; st.urgent = false;
+  try { atomicWriteFileSync(file, JSON.stringify(st.getData()), { mode: 0o600 }); st.writes += 1; st.lastWriteAt = Date.now(); st.lastError = null; }
+  catch (e) { st.dirty = true; st.failures += 1; st.lastError = { at: Date.now(), code: e?.code || 'error' }; console.warn(`[ipam] 저장 실패(${path.basename(file)}): ${e.message}`); }
 }
 /** 모든 dirty 저장소를 즉시 동기 기록(프로세스 종료 직전 데이터 보존용). */
-export function flushAllNow() { for (const file of _stores.keys()) { const st = _stores.get(file); if (st?.timer) { clearTimeout(st.timer); st.timer = null; } flushStore(file); } }
+export function flushAllNow() { for (const file of _stores.keys()) flushStore(file); }
+/**
+ * 예약된 쓰기를 기다리지 않고 지금 비동기로 쓰고, 진행 중인 쓰기가 전부 끝날 때까지 기다린다(테스트·측정용 — 운영 경로는 디바운스가 쓴다).
+ * @returns {Promise<void>}
+ */
+export async function flushScanStoreAsync() {
+  for (let round = 0; round < 10; round++) {
+    let busy = false;
+    for (const [file, st] of _stores) {
+      if (st.timer) { clearTimeout(st.timer); st.timer = null; st.due = 0; }
+      if (st.dirty && !st.writing) startWrite(file);
+      if (st.inflight) { busy = true; await st.inflight; }
+    }
+    if (!busy && [..._stores.values()].every((s) => !s.dirty || s.lastError)) return;
+  }
+}
+/** 파일별 쓰기 상태(진단·테스트) — 경로는 싣지 않는다(파일 이름만). */
+export function scanStoreWriteStatus() {
+  const out = {};
+  for (const [file, st] of _stores) out[path.basename(file)] = { dirty: st.dirty, writing: st.writing, pending: !!st.timer, writes: st.writes, failures: st.failures, lastWriteAt: st.lastWriteAt, lastWriteMs: st.lastWriteMs, lastError: st.lastError };
+  return out;
+}
+// 이전 프로세스가 비동기 쓰기 도중 끝나 남긴 임시 파일을 치운다(이 모듈의 표지가 붙은 것만).
+try {
+  for (const n of fs.readdirSync(config.configDir)) {
+    if (/^\.ipam-scan-(results|history|agents|runs)\.json\.atmp-/.test(n)) { try { fs.unlinkSync(path.join(config.configDir, n)); } catch { /* */ } }
+  }
+} catch { /* 설정 디렉터리가 아직 없다 */ }
 let _exitHooked = false;
 function ensureExitFlush() {
   if (_exitHooked) return; _exitHooked = true;
@@ -313,13 +452,61 @@ function cleanStoredResults(raw) {
 }
 let results = cleanStoredResults(readJson(RES, {}));
 _resultCount = Object.keys(results).length;
-registerStore(RES, () => results);
+registerStore(RES, () => results, true);
 ensureExitFlush();
 
 let scanRevN = 0; // 스캔 결과/이력 변경 리비전(대장 캐시 무효화 키)
 export function scanRev() { return scanRevN; }
 export function getScanResults() { return results; }
-export function scanResultList() { return Object.values(results).sort((a, b) => (a.ip < b.ip ? -1 : 1)); }
+const cmpScanIp = (a, b) => (a.ip < b.ip ? -1 : 1);
+export function scanResultList() { return Object.values(results).sort(cmpScanIp); }
+/** 스캔 결과 IP 수(세지 않는다 — 적재·정리 때 유지하는 값). v2.731: 원장 동기화가 동기/양보 경로를 고를 때 쓴다. */
+export function scanResultCount() { return _resultCount; }
+/**
+ * v2.731(점검 A6-02): `scanResultList()` 와 **같은 순서**를 시간 기준으로 양보하며 만든다 — 26만 개를 한 번에 정렬하면
+ *   그 한 번이 수백 ms 다(20만 개 270~330ms 실측). 조각(8,192개)마다 정렬하고 인접 조각끼리 병합한다. 결과 객체의 ip 는 키라
+ *   유일하므로 정렬 결과가 하나뿐이다 — 조각 정렬 + 병합과 한 번 정렬의 결과가 같다(테스트가 대조한다).
+ *   목록은 시작 시점의 키로 만들고 값은 읽는 순간의 객체다(양보 사이 바뀐 내용은 scanRev 가 오르므로 호출부가 결과를 버린다 —
+ *   ledger.js buildIpamRowsAsync. lastSeen 만 바뀐 객체는 더 새 값으로 들어간다).
+ * @param {() => Promise<boolean>} maybeYield util/timeSlice.js createYielder
+ * @param {() => boolean} [isCancelled] 참이면 중간에 멈추고 null
+ * @returns {Promise<object[]|null>}
+ */
+export async function scanResultListAsync(maybeYield, isCancelled = () => false) {
+  // Object.values(결과) 한 번은 20만 개에서 130~144ms 다(Object.keys 는 약 50ms) — 키만 한 번에 받고 값은 조각마다 읽는다.
+  //   그 사이 바뀐 항목은 그때 객체(지운 키는 건너뛴다) — 변경이 없으면 Object.values 와 같은 목록이다.
+  const keys = Object.keys(results);
+  const vals = [];
+  for (let i = 0; i < keys.length; i++) {
+    const v = results[keys[i]];
+    if (v) vals.push(v);
+    if ((i & 4095) === 4095 && (await maybeYield()) && isCancelled()) return null;
+  }
+  const CH = 8192;
+  let runs = [];
+  for (let i = 0; i < vals.length; i += CH) {
+    runs.push(vals.slice(i, i + CH).sort(cmpScanIp));
+    if ((await maybeYield()) && isCancelled()) return null;
+  }
+  while (runs.length > 1) {
+    const next = [];
+    for (let i = 0; i < runs.length; i += 2) {
+      if (i + 1 >= runs.length) { next.push(runs[i]); continue; }
+      const a = runs[i]; const b = runs[i + 1]; const m = new Array(a.length + b.length);
+      let x = 0; let y = 0; let k = 0;
+      while (x < a.length && y < b.length) {
+        m[k++] = cmpScanIp(a[x], b[y]) > 0 ? b[y++] : a[x++]; // 같은 키는 없다(ip = 키) — 그래도 왼쪽을 먼저(안정)
+        if ((k & 4095) === 0 && (await maybeYield()) && isCancelled()) return null;
+      }
+      while (x < a.length) m[k++] = a[x++];
+      while (y < b.length) m[k++] = b[y++];
+      next.push(m);
+      if ((await maybeYield()) && isCancelled()) return null;
+    }
+    runs = next;
+  }
+  return runs[0] || [];
+}
 /** 스캔 결과에 나오는 에이전트 이름 목록(정렬 없음 · O(에이전트 수)). 결과가 0건인 이름은 없다. */
 export function scanResultAgents() { return [..._agentCount.keys()]; }
 
@@ -328,6 +515,7 @@ const sameList = (a, b) => { const x = a || [], y = b || []; return x.length ===
 /** @returns {{merged:number, capped:number}} 병합한 IP 수 · 전체 상한(MAX_SCAN_IPS)으로 받지 않은 새 IP 수 */
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
   let changed = false;
+  let resContent = false; let resWritten = false; // v2.731 A6-01: 결과 파일을 쓸 일이 있는가 · 그것이 내용 변화인가(lastSeen 만이면 긴 디바운스)
   let n = 0; let merged = 0; let capped = 0; const histCappedBefore = _histCapped;
   for (const raw of alive) {
     if (n++ >= MAX_MERGE) break;                 // 대량 주입 상한
@@ -343,13 +531,15 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
     if (!prev || !sameList(prev.openPorts, h.openPorts) || !sameList(prev.services, h.services)
-      || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) changed = true;
+      || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
     results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    resWritten = true;
     recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
   }
   if (histDirty) changed = true; // up/down 전이·신규 이력도 대장(usageStatus/firstSeen)에 영향
-  scheduleWrite(RES);   // 디바운스 원자 기록(동기 블로킹 제거)
+  // v2.731 A6-01: 결과가 바뀌지 않은 보고(살아 있는 IP 0개·전부 더 오래된 보고)는 쓰지 않는다. lastSeen 만 바뀌었으면 긴 디바운스.
+  if (resWritten) scheduleWrite(RES, !resContent);   // 디바운스 + 비동기 조각 쓰기(위 '디바운스 원자적 쓰기' 머리말)
   persistHist();
   if (changed) scanRevN++;
   if (_histCapped > histCappedBefore) console.warn(`[ipam] IP 사용 이력 상한(${MAX_HIST_IPS}개) — 새 이력 ${_histCapped - histCappedBefore}개를 만들지 않았습니다(스캔 결과는 받았습니다)`);
@@ -370,7 +560,7 @@ _histCount = Object.keys(history).length;
 // 겸용(과거)이면 lastSeen 전진마다 scanRev 가 올라 매 스캔 전 대장이 재계산된다(불필요한 부하 회귀).
 let histDirty = false;
 let histPersistDirty = false;
-registerStore(HIST, () => history);
+registerStore(HIST, () => history, true);
 
 function pushEvent(entry, ev) {
   entry.events.push(ev);
@@ -433,13 +623,25 @@ export function sweepReleases(idleMs, opts = {}) {
 
 function persistHist() {
   if (!histDirty && !histPersistDirty) return; // ledger 변화 또는 lastSeen 전진 중 하나라도 있으면 기록
+  const seenOnly = !histDirty; // v2.731 A6-01: lastSeen 전진만이면 긴 디바운스(재시작 해제 판정 임계는 최소 3시간)
   histDirty = false;
   histPersistDirty = false;
-  scheduleWrite(HIST); // 디바운스 원자 기록
+  scheduleWrite(HIST, seenOnly); // 디바운스 + 비동기 조각 쓰기
 }
 
 /** 한 IP의 사용 이력(없으면 null). */
 export function getIpHistory(ip) { return history[ip] || null; }
+
+/**
+ * v2.731(점검 A6-02): 한 IP 의 이력 항목(살아 있는 객체 — 읽기 전용으로 쓸 것) 또는 null. 원장(ledger.js)이 행마다 이것을 본다 —
+ *   예전에는 재구성마다 `getIpHistoryMap()` 으로 이력 맵 **전체**를 복사했다(20만 IP 300~540ms). 자기 속성만 본다(IP 가 아닌
+ *   문자열 'constructor' 등이 Object.prototype 값을 이력으로 읽지 않게).
+ */
+export function ipHistoryEntry(ip) {
+  if (typeof ip !== 'string' || !Object.prototype.hasOwnProperty.call(history, ip)) return null;
+  const e = history[ip];
+  return e && typeof e === 'object' ? e : null;
+}
 
 /** ip → { firstSeen, lastSeen, status } 요약 맵(대장 주석용). */
 export function getIpHistoryMap() {

@@ -53,6 +53,9 @@
   URL 이 바뀌면 예외를 승계하지 않는다. 스킴 없는 주소는 https. 포탈 직접 TLS 는 `util/httpsServer.js`(TLS_CERT_FILE·TLS_KEY_FILE, 설정이 틀리면 fail-closed —
   평문으로 내려가지 않는다), 사설 CA 는 `WAN_TLS_CA_FILE`(기본 신뢰 저장소에 덧붙인다 — 대체하지 않는다). `resilientFetch` 는 https→http 리다이렉트를 따라가지 않는다.
   광고 URL 은 TLS 리스닝일 때만 https(`advertisedListen` — 지어내지 않는다). 회귀 `test/rvJ_s09Transport.test.js`.
+  ⚠ v2.731(점검 1회차 A4-01): 중앙↔엣지 클라이언트가 자체 undici Agent 를 만들면(통신 점검 stepHttp·엣지 업그레이드 push·업그레이드 원격 받기)
+  `resilientFetch.wanTlsConnectOptions()` 를 **통째로** 펼친다 — 검증 여부만 가져오면 사설 CA(`WAN_TLS_CA_FILE`) 엣지를 거짓 'tls-fail' 로 기록한다.
+  사설 CA 는 미리 만든 SecureContext 로 싣는다(ca 배열은 연결마다 약 23~28ms 동기 파싱). 사본을 만들지 말 것. 회귀 `test/audit2731g2b.test.js`.
 - **상태변경 라우트 RBAC**: `/api` 의 POST/PUT/PATCH/DELETE에는 `requireRole('admin','operator')`를 붙인다(읽기성 POST 제외). WS SSH/RDP 게이트웨이도 역할을 검사한다.
   - ✅ **수정됨(v2.313)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)에 `requirePerm('remote.access')`
     추가 + 소유자 없는 매핑은 admin 전용으로 보정(과거 `m.owner && …` 단락으로 소유자 없는 레거시 매핑을
@@ -291,8 +294,11 @@
   기동 시 `resumeHostAccessPending` 이 기한을 이어받는다(index.js stagger). 이 타이머·복구를 없애면 잘못 적용한 규칙이
   영구히 남아 관리자가 잠긴다. 중간 명령 실패 시에도 즉시 `--reload`(반쯤 적용된 상태 금지).
 - **자기 잠금 방지 검사는 서버(`render.planCommands`)가 강제**한다 — 웹 허용목록에 요청자 IP(`clientIp(req)`) 미포함,
-  포탈 포트(`config.port`) 누락(정규화가 항상 포함), 존 target `ACCEPT`, 추가 규칙의 포탈 포트 전체 drop/reject 는 오류로
+  포탈 포트 누락(정규화가 항상 포함), 존 target `ACCEPT`, 추가 규칙의 포탈 포트 전체 drop/reject 는 오류로
   실행을 막는다. 화면 검증만으로 대체하지 말 것. 웹 모드에는 '차단' 이 없다.
+  ⚠ v2.731(점검 1회차 A4-03): '포탈 포트' 는 `config.port` 가 아니라 `util/httpsServer.js listeningPortalPorts()` — **실제로 듣는 포트 전부**다
+  (TLS_PORT 만 열면 그 포트, TLS_HTTP_ALSO 면 둘 다). config.port 만 보면 TLS 전용 구성에서 허용목록이 정작 쓰는 4443 을 빼고 닫았다.
+  상태 응답 `portalPorts` 를 화면이 말한다. svcmon·selfRegister 처럼 '남에게 알리는 포트' 는 `advertisedListen` 이다(둘을 섞지 말 것).
 - **sshd 서비스 중지/재개는 확정 단계에서만**(`confirmHostAccess`) 실행한다 — 런타임 실험 중 SSH 세션을 끊지 않기 위해.
   포탈이 중지한 경우만 `applied.sshdStopped=true` 로 기록해 되돌릴 때 재시작한다(사람이 내린 sshd 는 건드리지 않음).
 - **권한 경계**: 적용·확정은 `adminOnly + requireSettingsOwner + 본인 OTP(verifyUserOtp)`. OTP 미등록 계정은 403(needEnroll).
@@ -844,10 +850,17 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
     설정 전수 점검은 등록 호스트 이름을 넘긴다(`stepSsh(…, { host })` — IP 로만 찾으면 이름으로 승인한 키가 '미등록' 이 된다).
   · 관리 API `/api/admin/security/peer-trust*` 6개는 adminOnly + fleetOnly(정책 변경은 + requireSettingsOwner), 승인은 본문 `confirmVerified:true` 필수 · 전부 감사 로그.
     화면 설정 › 보안 › 장비 신뢰(`PeerTrustSettings.jsx`, 키 `peer-trust`) — 폴링 없음.
+  · ⚠⚠ v2.731(점검 1회차 A1-01): 한 항목은 신뢰 지문 **목록**이다(상한 8 — 넘으면 400 `trusted-full`). 승인은 **추가**가 기본이고 교체는 `replace:true` 일 때만,
+    거부로 지문 하나만 회수한다. 이중화 SP·VIP 뒤 장비는 연결마다 다른 인증서·호스트키를 보여 하나만 기억하면 observe 에서도 번갈아 거부됐다. 저장은 첫 지문을
+    예전 자리 `trusted`(객체), 나머지를 `trustedMore` 에 둔다 — **`trusted` 를 배열로 바꾸지 말 것**(이전 버전으로 되돌려 설치하면 전 장비가 거부된다).
+    거부 문구는 승인할 노드를 말한다(`peerApproveWhere` — 엣지 이름은 401·403·인증·auth 같은 판정 낱말이 없을 때만 싣는다. 표지 문자열은 그대로).
+    처음 보는 장비 기록(관찰·새 대기)은 2초 묶음 저장 + exitFlush, 바뀐 지문·관리자 동작은 즉시 저장.
 - **열린 원격 콘솔도 세션 폐기를 따른다**(`proxy/sshGateway.js` 원격 세션 레지스트리 — SSH·RDP 공용, S-04): 업그레이드 때 한 번만 보던 토큰을
   ① 폐기 이벤트(`onSessionRevoked` — 로그아웃·삭제·강등·비번 변경·sid 교체) ② 토큰 exp 시각 타이머 ③ `REMOTE_REVALIDATE_MS`(기본 30초) 재검증으로 다시 본다.
   재검증은 **업그레이드 게이트와 같은 함수** `remoteUserIssue(resolveTokenUser(token))` + 계정 동일성 + 매핑 소유·범위다(판정을 둘로 두지 말 것).
   닫힘 코드 4401(무효)·4403(권한·범위·호스트키)·4404(매핑 없음)·4429(동시 세션 초과) — 웹 `remote/sshSend.js sshCloseReasonText` 와 1:1(웹 테스트가 서버 소스에서 코드를 뽑아 대조).
+  · ⚠ v2.731(A5-02): 4403 은 여러 원인이 함께 쓰는 코드다 — **닫힘 사유(reason)가 원인 코드**(`host-key-<판정 사유>`·`mapping-gone`·`mapping-changed`·
+    `mapping-denied`·remoteUserIssue 코드)이고 웹 `remoteCloseReasonText` 와 1:1(웹 테스트가 서버 소스에서 뽑아 대조). 새 닫힘 사유를 만들면 그 표에도.
   · 세션 연장: SSH `{type:'token', token}` → `{type:'token-ack', ok, code}` · RDP `dvc-token` Guacamole 명령(guacd 로 넘기지 않는다) — **같은 계정·같은 sid·지금 권한**일
     때만 교체. 웹은 `remote/tokenRenew.js`(SessionExpiryGuard 가 `/auth/extend` 성공 뒤 알린다) — 이 배선을 지우면 연장해도 옛 만료 시각에 콘솔이 닫힌다.
   · 콘솔 입력(SSH data · RDP key/mouse/touch)은 활동이다 — 연결마다 1분 1회 `touchSessionActivity`. RDP 를 닫을 때는 **guacd 소켓을 먼저 destroy**.

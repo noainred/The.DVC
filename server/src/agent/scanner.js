@@ -69,6 +69,13 @@ export async function runAgentScan() {
       return last;
     }
     if (!a?.assigned) { last = { at: Date.now(), agent: config.agent.name, assigned: false, reason: 'unassigned' }; return last; }
+    // v2.731(점검 1회차 A3-01 후속): 중앙이 접속처(대역·계정) 변경으로 비밀번호를 폐기한 할당은 비밀번호가 빈 채로 내려온다.
+    //   빈 비밀번호로 대역 전체에 로그인하면 iDRAC 마다 인증 실패가 쌓인다(계정 잠금 위험) — 스캔하지 않고 사유를 남긴다.
+    if (!a.password) {
+      last = { at: Date.now(), agent: config.agent.name, assigned: true, reason: 'no-password' };
+      if (_logUnreadable('no-password', a.username || '')) console.warn('[agent] 중앙 iDRAC 스캔 할당에 비밀번호가 없어 스캔하지 않습니다 — 중앙 IP 스캔 할당 화면에서 비밀번호를 다시 입력하세요.');
+      return last;
+    }
 
     // v2.591(감사 F3): 이 경로는 타이머만 부른다(수동 진입점 없음 — grep 확인) → 주기 스캔 규칙을 적용한다.
     //   직전 인증 실패 IP·주 폴러가 같은 계정으로 이미 멈춘 등록 서버는 건너뛰고 개수를 `last` 에 남긴다.

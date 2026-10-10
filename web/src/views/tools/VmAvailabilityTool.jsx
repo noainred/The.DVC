@@ -8,7 +8,7 @@ import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
-import { pctText, downText, allowedDownMin, TARGETS, coverageNote, METHOD_NOTE, bornWindowText } from '../bizreport/availText.js';
+import { pctText, downText, allowedDownMin, TARGETS, coverageNote, METHOD_NOTE, bornWindowText, tailCutText } from '../bizreport/availText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
 
@@ -121,7 +121,7 @@ export default function VmAvailabilityTool({ scope }) {
             <tbody>
               {vms.map((v) => (
                 <tr key={`${v.vcenterId}:${v.id}`}>
-                  <td><VmLink name={v.name} vcenterId={v.vcenterId} />{v.partial && <div className="muted" style={{ fontSize: 11 }} title="이벤트 수집 시작부터만 쟀습니다">측정 구간 짧음</div>}{v.bornInWindow && <div className="muted" style={{ fontSize: 11 }}>{bornWindowText(v)}</div>}</td>
+                  <td><VmLink name={v.name} vcenterId={v.vcenterId} />{v.partial && <div className="muted" style={{ fontSize: 11 }} title="이벤트 수집 시작부터만 쟀습니다">측정 구간 짧음</div>}{v.bornInWindow && <div className="muted" style={{ fontSize: 11 }}>{bornWindowText(v)}</div>}{v.tailCut && <div className="muted" style={{ fontSize: 11 }} title="이 vCenter 의 이벤트 수집이 멈춰 그 뒤의 정지는 알 수 없습니다">{tailCutText(v)}</div>}</td>
                   <td>{v.vcenterName}<div className="muted" style={{ fontSize: 11 }}>{v.cluster}</div></td>
                   <td data-sort={v.availability}>{v.below ? <span className="badge red">{pctText(v.availability)}</span> : pctText(v.availability)}</td>
                   <td data-sort={v.unplanned}>{pctText(v.unplanned)}</td>

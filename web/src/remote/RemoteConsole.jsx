@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
 import { getToken, postJson } from '../api.js';
-import { sshDataFrames, sshCloseReasonText } from './sshSend.js';
+import { sshDataFrames, sshCloseReasonText, remoteCloseReasonText } from './sshSend.js';
 import { onTokenRenewed, tokenAckText } from './tokenRenew.js';
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -20,7 +20,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   const roRef = useRef(null);
   const phaseRef = useRef('form');
   const [creds, setCreds] = useState(initialCreds && initialCreds.username ? initialCreds : { username: '', password: '' });
-  const [phase, setPhaseState] = useState('form'); // form | connecting | live | error
+  const [phase, setPhaseState] = useState('form'); // form | connecting | live | error | closed(사유 없는 정상 종료 — v2.731)
   const [status, setStatus] = useState('');
   const [ticks, setTicks] = useState(0);
   const [formErr, setFormErr] = useState(''); // 폼 상단 안내(인증 실패 사유 등)
@@ -98,11 +98,16 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
       };
       ws.onerror = () => { if (phaseRef.current !== 'live') { setPhase('error'); setStatus('WebSocket 연결 실패 — 포탈/프록시 경로 또는 인증을 확인하세요.'); } stopTimer(); };
       // v2.632(AX1-2632-07): 닫힘 코드가 사유를 말하면(1009 = 프레임 상한 초과) 그것을 함께 보인다 — 사유 없는 '[연결 종료]' 금지.
+      // v2.731(A5-02·A1-03): 서버가 보낸 사유(ev.reason)가 먼저다 — 4403 은 권한·매핑 삭제·대상 변경·호스트키 거부가 함께 쓰는 코드라
+      //   코드 문구만 쓰면 호스트키 거부를 '권한·범위가 바뀌어' 로 덮었다.
       ws.onclose = (ev) => {
-        const why = sshCloseReasonText(ev?.code);
+        const why = remoteCloseReasonText(ev?.reason) || sshCloseReasonText(ev?.code);
         term.write(`\r\n\x1b[31m[연결 종료]${why ? ` ${why}` : ''}\x1b[0m\r\n`);
         if (why) setStatus(why);
-        if (phaseRef.current !== 'live') { setPhase('error'); setStatus((x) => why || x || '연결이 종료되었습니다.'); }
+        // v2.731(A1-03): 열린 세션이 닫히면(매핑 삭제·대상 변경·권한·유휴 등) 상태줄이 '● 연결됨' 으로 남지 않게 한다 —
+        //   사유가 있으면 오류(사유 표시), 사유 없는 정상 종료(exit 등)는 '연결 종료'.
+        if (phaseRef.current === 'live') { setPhase(why ? 'error' : 'closed'); if (!why) setStatus('연결이 종료되었습니다.'); }
+        else { setPhase('error'); setStatus((x) => why || x || '연결이 종료되었습니다.'); }
         stopTimer();
       };
       // v2.632(AX1-2632-07): 붙여넣기 전량을 한 프레임으로 보내면 256KB 상한(서버 1009)에 걸려 세션이 끊긴다 — 조각으로 나눠 보낸다.
@@ -131,10 +136,11 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 10, boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', borderRadius: 8, fontSize: 13,
-        background: phase === 'live' ? 'rgba(34,197,94,.12)' : phase === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(59,130,246,.12)',
-        color: phase === 'live' ? '#4ade80' : phase === 'error' ? '#f87171' : '#93c5fd' }}>
+        background: phase === 'live' ? 'rgba(34,197,94,.12)' : phase === 'error' ? 'rgba(239,68,68,.12)' : phase === 'closed' ? 'rgba(148,163,184,.12)' : 'rgba(59,130,246,.12)',
+        color: phase === 'live' ? '#4ade80' : phase === 'error' ? '#f87171' : phase === 'closed' ? '#cbd5e1' : '#93c5fd' }}>
         {phase === 'connecting' && <><span style={{ fontFamily: 'monospace' }}>{SPIN[ticks % SPIN.length]}</span><span>{status}</span><span className="muted" style={{ marginLeft: 'auto' }}>{elapsed}s</span></>}
         {phase === 'live' && <span>● 연결됨</span>}
+        {phase === 'closed' && <span>■ {status}</span>}
         {phase === 'error' && <><span>⚠ {status}</span>
           <button className="logout-btn" style={{ padding: '4px 12px', marginLeft: 'auto' }} onClick={() => { setCreds((c) => ({ ...c, password: '' })); setFormErr(status || ''); setPhase('form'); }}>🔑 자격증명 입력</button>
           <button className="logout-btn" style={{ padding: '4px 12px' }} onClick={connect}>재시도</button></>}
@@ -186,6 +192,9 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
     const client = new Guacamole.Client(tunnel);
     clientRef.current = client;
     tunnelRef.current = tunnel;
+    // v2.731(A5-02·A1-03): 서버가 연결을 닫은 사유(매핑 삭제·대상 변경·권한·세션 폐기)를 보인다 — Guacamole 터널은 WebSocket 닫힘 사유를
+    //   상태 메시지로 넘기는데 Client 는 그것을 onerror 로 올리지 않아 화면이 아무 말 없이 멈춰 있었다. 모르는 사유는 건드리지 않는다.
+    tunnel.onerror = (st) => { const t = remoteCloseReasonText(st?.message); if (t) setStatus(t); };
     setTimeout(() => {
       elRef.current.appendChild(client.getDisplay().getElement());
       client.onstatechange = (s) => setStatus(['초기화', '연결 중', '대기', '연결됨', '연결 종료', '오류'][s] || String(s));

@@ -204,6 +204,7 @@
 | [AUDIT-2026-10-07b.md](AUDIT-2026-10-07b.md) | 감사 기록 — 2026-10-07 (v2.720, 코드 리뷰·버그·안정화 2회차) |
 | [AUDIT-2026-10-08.md](AUDIT-2026-10-08.md) | 감사 기록 — 2026-10-08 (v2.721, 코드 리뷰·버그·안정화 3회차) |
 | [AUDIT-2026-10-08b.md](AUDIT-2026-10-08b.md) | v2.727 버그 점검 — 6축 조사 · 반증 · 5그룹 수정 (2026-10-08 ~ 10-09) |
+| [AUDIT-2026-10-10.md](AUDIT-2026-10-10.md) | v2.731 점검 1회차 — 6축 분석 · 반증 · 9그룹 수정 (2026-10-10) |
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 (Capacity Advisor) |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | 설정·데이터 파일 레퍼런스 (자동 생성) |
 | [CVP.md](CVP.md) | Arista CloudVision(CVP) 네트워크 스위치 수집 (v2.608) |
@@ -233,5 +234,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 93개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 94개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->
