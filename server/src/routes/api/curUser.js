@@ -44,6 +44,16 @@ function scopeFilter(req, snap) {
   return (id) => !allowed || allowed.has(String(id));
 }
 
+/**
+ * v2.732(점검 2회차 B5-02): 저장돼 있지만 지금 vCenter 목록에 없는 키(삭제된 vCenter · mock→live 전환 · 아직 수집 목록에 없음).
+ * 화면이 '목록에 없는 vCenter' 로 그려 사람이 해제하게 한다 — 예전에는 칩이 없어 지울 수도, PUT 이 400 이라 저장할 수도 없었다.
+ * 범위 계정에는 그 계정이 보는 맵(이미 범위로 거른 것)의 키만 넘긴다.
+ */
+const staleVcKeys = (map, snap) => {
+  const known = new Set((snap.vcenters || []).map((v) => v.id));
+  return Object.keys(map && typeof map === 'object' ? map : {}).filter((id) => !known.has(id));
+};
+
 api.get('/tools/curuser', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const ok = scopeFilter(req, snap);
@@ -161,8 +171,10 @@ api.get('/tools/curuser/settings', requirePerm('tools'), async (req, res) => {
   };
   for (const t of scope.targets) bump(t.vcenterId, 'targets');
   for (const t of scope.skipped) bump(t.vcenterId, 'skipped');
+  const visibleVc = Object.fromEntries(Object.entries(s.vcenters || {}).filter(([id]) => ok(id)));
   res.json({
-    settings: { ...s, vcenters: Object.fromEntries(Object.entries(s.vcenters || {}).filter(([id]) => ok(id))) },
+    settings: { ...s, vcenters: visibleVc },
+    staleIds: staleVcKeys(visibleVc, snap),
     limits: LIMITS, vcenters,
     folders: [...folders.values()].filter((f) => f.windows > 0).sort((a, b) => b.windows - a.windows).slice(0, 500),
     resolved: [...resolved.values()],
@@ -180,13 +192,17 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   const validVc = new Set((snap.vcenters || []).map((v) => v.id));
+  const before = loadCurUser();
   if (b.vcenters !== undefined) {
     if (!b.vcenters || typeof b.vcenters !== 'object' || Array.isArray(b.vcenters)) return res.status(400).json({ ok: false, reason: 'vcenters 는 객체여야 합니다.' });
     // 유령 id 저장 방지 — 저장해 두면 설정 화면이 없는 법인을 계속 보여준다.
-    const bad = Object.keys(b.vcenters).filter((id) => !validVc.has(id));
+    // v2.732(B5-02): 거부는 **새로 들어온** 모르는 id 만이다. 이미 저장돼 있던 id(그 vCenter 가 삭제됐거나 스냅샷에 아직 없음)까지
+    //   거부하면 vCenter 하나를 지우는 것만으로 이 설정을 영영 저장할 수 없었다(GET 값을 그대로 PUT 해도 400). 그 id 는 통과·보존하고
+    //   응답의 staleIds 로 밝힌다 — 조용히 버리지 않는다(스냅샷이 잠시 그 vCenter 를 갖지 않는 순간의 자동 제거는 설정 소실이다).
+    const prevIds = new Set(Object.keys(before.vcenters || {}));
+    const bad = Object.keys(b.vcenters).filter((id) => !validVc.has(id) && !prevIds.has(id));
     if (bad.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${bad.slice(0, 5).join(', ')}` });
   }
-  const before = loadCurUser();
   // v2.605 AUTHZ2605-01: 범위 제한 admin 이 GET 으로 받은(범위로 걸러진) vcenters 를 되돌려 보내면
   //   다른 법인의 폴더 설정이 통째로 지워졌다 — 범위 밖 키는 직전 값을 보존한다.
   const allowed = scopedVcenterIds(req.user, snap);
@@ -207,7 +223,7 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   });
   // PUT 응답도 GET 과 같은 필터(범위 밖 vCenter 설정을 되돌려 주지 않는다).
   const safeNext = allowed ? { ...next, vcenters: filterScopedMap(next.vcenters, allowed) } : next;
-  res.json({ ok: true, settings: safeNext, limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
+  res.json({ ok: true, settings: safeNext, staleIds: staleVcKeys(safeNext.vcenters, snap), limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /**

@@ -7,6 +7,9 @@ import { fetchJson, putJson } from '../api.js';
 import { fmtAgo, fmtBytes } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { requireChanged } from './changeResult.js';
+import { staleIdsOf, staleNote, staleKeptSuffix } from './staleSettingIds.js'; // v2.732 B5-02
 
 // Common presets for the temperature/metrics sampling interval.
 const PRESETS = [
@@ -217,14 +220,15 @@ export function VmPerfTrackingSettings() {
 
   const toggle = (id) => setIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
+  // v2.732(B5-02): putJson 은 400 을 던지지 않고 본문을 돌려준다 — 예전에는 400(낡은 vCenter id 거부)을 '저장되었습니다.' 로 읽었다.
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/tools/waste/settings', {
+      const r = requireChanged(await putJson('/tools/waste/settings', {
         enabled, retentionDays: blankOr(days), vcenterIds: ids, trackTotal,   // v2.596: 빈 칸은 미지정(0=무제한으로 둔갑 금지)
-      });
+      }));
       const dropped = (r.dropped || []).length;
-      setMsg(`저장되었습니다.${dropped ? ` 제외된 ${dropped}개 vCenter 의 데이터를 삭제해 용량을 회수했습니다.` : ''}${scopeSaveSuffix(r)}`);
+      setMsg(`저장되었습니다.${dropped ? ` 제외된 ${dropped}개 vCenter 의 데이터를 삭제해 용량을 회수했습니다.` : ''}${staleKeptSuffix(r)}${scopeSaveSuffix(r)}`);
       await load();
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
@@ -233,6 +237,10 @@ export function VmPerfTrackingSettings() {
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const usage = d.usage || [];
+  // 저장돼 있지만 지금 목록에 없는 vCenter — 칩으로 그려 사람이 해제하게 한다(예전에는 '2개 선택' 인데 칩은 1개라 지울 수 없었다).
+  //   불러온 시점의 목록을 칩으로 두고(해제해도 칩이 남아 되돌릴 수 있다 — 저장하면 데이터 파일이 지워지므로), 개수는 지금 선택 기준.
+  const loadedStale = staleIdsOf(d.settings?.vcenterIds, d.vcenters || []);
+  const staleIds = staleIdsOf(ids, d.vcenters || []);
 
   return (
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
@@ -259,8 +267,13 @@ export function VmPerfTrackingSettings() {
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-        수집 대상 vCenter — <b>아무것도 선택하지 않으면 전체</b>가 대상입니다. ({ids.length ? `${ids.length}개 선택` : '전체'})
+        수집 대상 vCenter — <b>아무것도 선택하지 않으면 전체</b>가 대상입니다. ({ids.length ? `${ids.length}개 선택${staleIds.length ? ` · 그중 목록에 없음 ${staleIds.length}` : ''}` : '전체'})
       </div>
+      {staleIds.length > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 6, color: 'var(--amber)', whiteSpace: 'normal', lineHeight: 1.55 }}>
+          <BoldText text={staleNote(staleIds.length, { drop: true })} />
+        </div>
+      )}
       <div className="flex gap wrap" style={{ gap: 8, marginBottom: 12 }}>
         {(d.vcenters || []).map((v) => {
           const on = ids.includes(v.id);
@@ -274,7 +287,23 @@ export function VmPerfTrackingSettings() {
             </button>
           );
         })}
-        {(d.vcenters || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>표시할 vCenter 가 없습니다.</span>}
+        {loadedStale.map((id) => {
+          const u = usage.find((x) => x.vcenterId === id);
+          const on = ids.includes(id);
+          return (
+            <button key={`stale:${id}`} className={on ? 'login-btn' : 'logout-btn'}
+              style={{ flex: 'none', padding: '6px 12px', fontSize: 12, outline: '1px dashed var(--amber)', outlineOffset: 1 }}
+              title={on
+                ? `목록에 없는 vCenter(삭제됐거나 아직 수집 목록에 없음) — 누르면 대상에서 뺍니다. 빼고 저장하면 그 vCenter 의 저장된 데이터${u ? `(${fmtBytes(u.bytes)})` : ''} 파일도 삭제됩니다(복구 불가).`
+                : ids.length
+                  ? '대상에서 뺐습니다 — 저장하면 그 vCenter 의 저장된 데이터 파일이 삭제됩니다. 다시 누르면 되돌립니다.'
+                  : '대상에서 뺐습니다 — 선택이 비어 전체 vCenter 가 대상이 됩니다(이때는 데이터 파일을 지우지 않습니다). 다시 누르면 되돌립니다.'}
+              onClick={() => toggle(id)}>
+              {id} <span style={{ marginLeft: 4 }}>{on ? '· 목록에 없음 ✕' : ids.length ? '· 해제됨(저장 시 데이터 삭제) ↺' : '· 해제됨 ↺'}</span>
+            </button>
+          );
+        })}
+        {(d.vcenters || []).length === 0 && !loadedStale.length && <span className="muted" style={{ fontSize: 12 }}>표시할 vCenter 가 없습니다.</span>}
       </div>
 
       {usage.length > 0 && (

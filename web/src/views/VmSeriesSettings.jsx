@@ -16,6 +16,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes, intervalWarning, thresholdText, scopeSummaryText, lastRunText } from './vmSeriesText.js';
 import BoldText from '../components/boldText.jsx';
 import { vcAuthSkipNote } from './authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
+import { requireChanged } from './changeResult.js';
+import { pendingStaleTargets, staleTargetChips, staleChipLabel, removeStaleTarget, staleNote, staleKeptSuffix } from './staleSettingIds.js'; // v2.732 B5-02
 
 const EMPTY_T = () => ({ clusters: [], folders: [], hosts: [], vms: [] });
 
@@ -151,9 +153,9 @@ export default function VmSeriesSettings() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/tools/vmseries/settings', { enabled, intervalMin: blankOr(intervalMin), retentionDays: blankOr(retentionDays), thresholds: { cpuPct: blankOr(thr.cpuPct), memPct: blankOr(thr.memPct), readyPct: blankOr(thr.readyPct) }, scope, targets, dropExcluded });
-      if (r && r.ok === false) throw new Error(r.reason || '저장 실패');
-      setMsg(`저장되었습니다.${(r.dropped || []).length ? ` 제외된 ${r.dropped.length}개 vCenter 의 DB 파일을 삭제했습니다.` : ''} 주기·범위 변경은 다음 틱부터 즉시 반영됩니다.${scopeSaveSuffix(r)}`);
+      // v2.732(B5-02): 실패 본문(400·409 — {ok:false,reason}·{error}) 판정은 requireChanged 하나.
+      const r = requireChanged(await putJson('/tools/vmseries/settings', { enabled, intervalMin: blankOr(intervalMin), retentionDays: blankOr(retentionDays), thresholds: { cpuPct: blankOr(thr.cpuPct), memPct: blankOr(thr.memPct), readyPct: blankOr(thr.readyPct) }, scope, targets, dropExcluded }));
+      setMsg(`저장되었습니다.${(r.dropped || []).length ? ` 제외된 ${r.dropped.length}개 vCenter 의 DB 파일을 삭제했습니다.` : ''} 주기·범위 변경은 다음 틱부터 즉시 반영됩니다.${staleKeptSuffix(r, { unit: '대상', count: '개' })}${scopeSaveSuffix(r)}`);
       await load();
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
@@ -182,6 +184,8 @@ export default function VmSeriesSettings() {
   const setVcMode = (id, all) => setTargets((cur) => ({ ...cur, [id]: all ? { all: true } : EMPTY_T() }));
   const setT = (id) => (fn) => setTargets((cur) => ({ ...cur, [id]: typeof fn === 'function' ? fn(cur[id] || EMPTY_T()) : fn }));
   const countSel = (t) => (!t ? 0 : t.all ? null : (t.clusters?.length || 0) + (t.folders?.length || 0) + (t.hosts?.length || 0) + (t.vms?.length || 0));
+  // v2.732(B5-02): 저장돼 있지만 지금 스냅샷에 없는 대상(삭제된 vCenter·VM·호스트) — 트리는 스냅샷에 있는 것만 그리므로 여기서만 해제할 수 있다.
+  const staleChips = staleTargetChips(pendingStaleTargets(d.staleTargets, targets));
 
   return (
     <div>
@@ -221,6 +225,21 @@ export default function VmSeriesSettings() {
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', fontSize: 13 }}><input type="radio" checked={scope === 'selected'} onChange={() => setScope('selected')} /> 특정 vCenter 선택</label>
           <span className="muted" style={{ fontSize: 12 }}>{scopeSummaryText({ scope }, scope === 'all' ? d.resolved : (d.resolved || []).filter((r) => targets[r.vcenterId]))}</span>
         </div>
+
+        {staleChips.length > 0 && (
+          <div style={{ margin: '4px 0 10px', padding: 10, border: '1px dashed var(--amber)', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--amber)', whiteSpace: 'normal', lineHeight: 1.55 }}>
+              <BoldText text={`${staleNote(staleChips.length, { unit: '대상', count: '개' })}${scope === 'all' ? ' 지금은 **모든 vCenter** 범위라 이 선택은 수집에 쓰이지 않습니다.' : ''}`} />
+            </div>
+            <div className="flex gap wrap" style={{ gap: 6, marginTop: 6 }}>
+              {staleChips.map((c) => (
+                <button key={`${c.vcId}|${c.kind}|${c.id}`} className="tab" style={{ padding: '2px 8px', fontSize: 11.5, whiteSpace: 'normal', maxWidth: '100%', overflowWrap: 'anywhere' }}
+                  title="이 대상을 설정에서 뺍니다(저장해야 반영됩니다)"
+                  onClick={() => setTargets((cur) => removeStaleTarget(cur, c.vcId, c.kind, c.id))}>{staleChipLabel(c)} ✕</button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {scope === 'selected' && (
           <div style={{ marginBottom: 12 }}>

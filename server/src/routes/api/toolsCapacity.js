@@ -856,6 +856,12 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
   });
 });
 
+/** v2.732(B5-02): 저장된 대상 id 중 지금 vCenter 목록에 없는 것(호출부가 이미 범위로 거른 목록을 넘긴다). */
+const vmperfStaleIds = (ids, snap) => {
+  const known = new Set((snap.vcenters || []).map((v) => v.id));
+  return (Array.isArray(ids) ? ids : []).map(String).filter((id) => !known.has(id));
+};
+
 /**
  * VM 성능 트래킹 설정(v2.376) — 보존기간 + 대상 vCenter 선택 + 디스크 사용 현황.
  * 6,000 VM 규모에서 이 계열은 용량이 빠르게 늘어(실측 행당 ~308B) 운영자가 통제해야 한다.
@@ -878,6 +884,8 @@ api.get('/tools/waste/settings', requirePerm('tools'), (req, res) => {
   const safeSettings = allowed ? { ...s, vcenterIds: (s.vcenterIds || []).filter((id) => allowed.has(id)) } : s;
   res.json({
     settings: safeSettings, limits: VMPERF_LIMITS, vcenters, usage,
+    // v2.732(B5-02): 저장돼 있지만 지금 목록에 없는 vCenter — 화면이 칩으로 그려 사람이 해제하게 한다(이미 범위로 거른 목록 기준).
+    staleIds: vmperfStaleIds(safeSettings.vcenterIds, snap),
     totalBytes: usage.reduce((a, u) => a + u.bytes, 0),
   });
 });
@@ -886,13 +894,18 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   const validIds = new Set((snap.vcenters || []).map((v) => v.id));
+  const before = loadVmperfSettings();
   // 유령 vCenter id 를 저장하지 않는다(설정 파일 오염 방지). 빈 배열 = 전체 대상.
+  // v2.732(B5-02): 거부는 **새로 들어온** 모르는 id 만이다. 이미 저장돼 있던 id(삭제된 vCenter · 스냅샷에 아직 없음)까지 거부하면
+  //   vCenter 하나를 지우는 것만으로 이 설정을 영영 저장할 수 없었다(화면은 400 본문을 '저장되었습니다' 로 읽었다). 그 id 는 통과·보존하고
+  //   staleIds 로 밝힌다. ⚠ 조용히 걸러 저장하지 말 것 — 아래 정리가 대상에서 빠진 vCenter 의 DB 파일을 지우므로, 스냅샷이 잠시 그 vCenter 를
+  //   갖지 않는 순간(기동 직후 · mock↔live 전환)의 자동 제거는 이력의 복구 불가 삭제다. 사용자가 **명시적으로 뺄 때만** 지운다(예전 의미).
   if (b.vcenterIds !== undefined) {
     if (!Array.isArray(b.vcenterIds)) return res.status(400).json({ ok: false, reason: 'vcenterIds 는 배열이어야 합니다.' });
-    const bad = b.vcenterIds.filter((x) => !validIds.has(String(x)));
+    const prevIds = new Set((before.vcenterIds || []).map(String));
+    const bad = b.vcenterIds.filter((x) => !validIds.has(String(x)) && !prevIds.has(String(x)));
     if (bad.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${bad.slice(0, 5).join(', ')}` });
   }
-  const before = loadVmperfSettings();
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 걸러 준 목록을 되돌려 보낸다 — 그것을 전체 목록으로
   //   저장하면 다른 법인이 대상에서 빠지고 그 DB 파일까지 지워졌다. 범위 밖 id 는 직전 값을 보존하고,
   //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
@@ -935,7 +948,7 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   });
   // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
   const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
-  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
+  res.json({ ok: true, settings: safeNext, staleIds: vmperfStaleIds(safeNext.vcenterIds, snap), dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */
