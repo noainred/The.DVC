@@ -10,6 +10,23 @@ import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.j
 import { STable } from '../../components/STable.jsx';
 import { describeScanRun, scanLastRunSummary, scanFormCredsState } from './scanRunText.js';
 import { missingChoice, choiceLoadNote } from './scanRangeFormText.js'; // v2.629 WEB2629-02
+import { changeFailText } from '../changeResult.js'; // v2.732 B5-03: 400 본문을 '저장됨' 으로 읽지 않는다
+
+/** 주기 스캔 간격 상한(시간) — 서버 PUT /admin/idrac/scan-ranges/interval 의 0~720 과 같은 값(서버가 집행한다). */
+export const IDRAC_SCAN_INTERVAL_MAX_H = 720;
+
+/**
+ * v2.732(점검 2회차 B5-03): 주기 저장 응답 → 화면 문구. putJson 은 400 을 던지지 않고 본문 {ok:false, reason} 을 돌려준다 —
+ * 예전에는 그 본문을 성공으로 읽어 1000 을 넣으면 서버는 거부했는데 화면은 '주기 1000시간으로 저장됨' 이라 말했다(재현).
+ * 반환 { ok, text } — ok:false 면 편집을 유지하고 사유를 보인다.
+ */
+export function intervalSaveText(r, hours) {
+  const why = changeFailText(r);
+  if (why != null) return { ok: false, text: `저장하지 못했습니다 — ${why}` };
+  // 서버가 하한(10분) 등으로 클램프할 수 있으므로 실제 적용된 값으로 안내한다.
+  const appliedH = Number.isFinite(r?.intervalMs) ? Math.round(r.intervalMs / 3600000 * 10) / 10 : hours;
+  return { ok: true, text: appliedH === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${appliedH}시간으로 저장됨${appliedH !== hours ? ` (입력 ${hours} → 하한/상한 적용)` : ''}` };
+}
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
@@ -80,12 +97,12 @@ export function IdracScanRanges({ loadError = null, choiceErrors = null, data, v
   const saveInterval = async () => {
     // v2.600 LO2600-05: 빈 칸은 저장하지 않는다 — Number('')===0 이라 빈 칸이 '0=주기 끔' 으로 저장됐다(명시적 0 만 끔).
     const hours = blankOr(ivEdit);
-    if (hours === undefined || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요. 주기 스캔을 끄려면 0 을 입력합니다.'); return; }
+    // v2.732 B5-03: <input max> 는 타이핑을 막지 않는다 — 상한도 화면에서 먼저 막는다(서버도 400 으로 집행).
+    if (hours === undefined || hours < 0 || hours > IDRAC_SCAN_INTERVAL_MAX_H) { setIvMsg(`0~${IDRAC_SCAN_INTERVAL_MAX_H} 사이 숫자(시간)를 입력하세요. 주기 스캔을 끄려면 0 을 입력합니다.`); return; }
     try {
-      const r = await putJson('/admin/idrac/scan-ranges/interval', { hours });
-      // 서버가 하한(10분) 등으로 클램프할 수 있으므로 실제 적용된 값으로 안내한다.
-      const appliedH = Number.isFinite(r?.intervalMs) ? Math.round(r.intervalMs / 3600000 * 10) / 10 : hours;
-      setIvMsg(appliedH === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${appliedH}시간으로 저장됨${appliedH !== hours ? ` (입력 ${hours} → 하한/상한 적용)` : ''}`);
+      const res = intervalSaveText(await putJson('/admin/idrac/scan-ranges/interval', { hours }), hours);
+      setIvMsg(res.text);
+      if (!res.ok) return; // 거부된 값으로 편집을 닫지 않는다 — 고쳐서 다시 저장할 수 있게
       setIvEdit(null);
       onReload?.(); // 버튼 라벨('주기 N시간')을 즉시 갱신 — 폴링 전까지 이전 값이 남아 저장 실패로 오인 방지
       setTimeout(() => setIvMsg(null), 4000);

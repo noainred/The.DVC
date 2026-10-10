@@ -29,6 +29,7 @@ import { localReportFor, topSpikers } from '../../vmseries/query.js';
 import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
 import { mockLocalReport } from '../../vmseries/mock.js';
 import { memoJson, scopeKey } from './shared.js';
+import { pushAll } from '../../util/pushAll.js';
 /**
  * v2.595(감사 AUTHZ-2595-02): push 상태도 범위로 거른다 — status 만 거르고 push.last 로 범위 밖 vCenter id·오류 문구·
  * centralUrl 이 나갔다(v2.574 SEC-07 과 같은 우회). 범위 계정은 자기 범위 vCenter 의 마지막 보고만, centralUrl·오류 원문은 admin 만.
@@ -82,6 +83,29 @@ export function scopeVmSeriesStatus(st, allowed) {
   };
 }
 
+/**
+ * v2.732(점검 2회차 B5-02): 저장된 targets 중 지금 스냅샷에 없는 것 — vCenter 키 · 호스트 id · VM id.
+ * 화면은 스냅샷에 있는 것만 트리로 그리므로(삭제된 VM 은 체크박스가 없다) 이 목록이 사람이 낡은 대상을 해제할 유일한 길이다.
+ * 클러스터·폴더는 이름 문자열이라(서버도 형식만 검사) 대상이 아니다. 호출부가 범위로 거른 targets 를 넘긴다.
+ *  반환 { staleIds: string[](평탄), staleTargets: { [vcId]: { vcenter: bool, hosts: [], vms: [] } } }
+ */
+export function vmSeriesStaleOf(targets, snap) {
+  const vcs = new Set((snap?.vcenters || []).map((v) => v.id));
+  const hostIds = new Set((snap?.hosts || []).map((h) => h.id));
+  const vmIds = new Set((snap?.vms || []).map((v) => v.id));
+  const staleIds = []; const staleTargets = {};
+  for (const [id, t] of Object.entries(targets && typeof targets === 'object' ? targets : {})) {
+    const gone = !vcs.has(id);
+    const list = (k, known) => (t && !t.all && Array.isArray(t[k]) ? t[k].map(String).filter((x) => !known.has(x)) : []);
+    const hosts = list('hosts', hostIds); const vms = list('vms', vmIds);
+    if (!gone && !hosts.length && !vms.length) continue;
+    staleTargets[id] = { vcenter: gone, hosts, vms };
+    if (gone) staleIds.push(id);
+    pushAll(staleIds, hosts); pushAll(staleIds, vms);   // v2.603 규약 — 인벤토리 규모 배열에 스프레드 push 금지
+  }
+  return { staleIds, staleTargets };
+}
+
 export function registerVmSeries(api) {
 
 api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
@@ -95,7 +119,7 @@ api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
   const resolved = summarizeScope(snap, s).filter((r) => !allowed || allowed.has(r.vcenterId));
   const safeTargets = Object.fromEntries(Object.entries(s.targets || {}).filter(([id]) => !allowed || allowed.has(id)));
   res.json({
-    settings: { ...s, targets: safeTargets }, limits: VMSERIES_LIMITS, vcenters, resolved, usage,
+    settings: { ...s, targets: safeTargets }, ...vmSeriesStaleOf(safeTargets, snap), limits: VMSERIES_LIMITS, vcenters, resolved, usage,
     totalBytes: usage.reduce((a, u) => a + u.bytes, 0), freeBytes: vmSeriesFreeBytes(),
     // ⚠ v2.574 SEC-07 — `status` 도 거른다. 옆 필드들만 거르고 이것을 그대로 두면 우회로가 남는다.
     status: scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: scopeVmSeriesPush(vmSeriesPushStatus(), allowed, req.user), mock: snap.source === 'mock',
@@ -106,21 +130,29 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   const validVc = new Set((snap.vcenters || []).map((v) => v.id));
+  const before = loadVmSeriesSettings();
   if (b.targets !== undefined) {
     if (!b.targets || typeof b.targets !== 'object' || Array.isArray(b.targets)) return res.status(400).json({ ok: false, reason: 'targets 는 객체여야 합니다.' });
-    const badVc = Object.keys(b.targets).filter((id) => !validVc.has(id));
+    // v2.732(B5-02): 유령 id 거부는 **새로 들어온** 모르는 id 만이다. 이미 저장돼 있던 vCenter 키·그 vCenter 아래에 저장돼 있던 호스트·VM id 는
+    //   (삭제됐거나 스냅샷에 아직 없어도) 통과·보존하고 staleIds·staleTargets 로 밝힌다. 예전에는 기존 대상 전부를 스냅샷과 대조해 VM 하나만 지워져도
+    //   이 설정을 영영 저장할 수 없었다(화면 트리는 스냅샷 VM 만 그려 그 id 를 해제할 수도 없었다). 조용히 걸러 저장하지 않는다.
+    const prevT = before.targets && typeof before.targets === 'object' ? before.targets : {};
+    const badVc = Object.keys(b.targets).filter((id) => !validVc.has(id) && !Object.hasOwn(prevT, id));
     if (badVc.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${badVc.slice(0, 5).join(', ')}` });
     // 유령 id 저장 방지 — 호스트/VM id 는 스냅샷에 실재해야 한다(클러스터·폴더 이름은 문자열이라 형식만).
     const hostIds = new Set((snap.hosts || []).map((h) => h.id)); const vmIds = new Set((snap.vms || []).map((v) => v.id));
+    const arr = (v) => (Array.isArray(v) ? v : []);   // 배열이 아니면 저장 정규화(coerceTargets)가 [] 로 읽는다 — 여기서 .filter 로 던지지 않게
     for (const [id, t] of Object.entries(b.targets)) {
       if (!t || typeof t !== 'object') return res.status(400).json({ ok: false, reason: `targets[${id}] 형식 오류` });
       if (t.all === true) continue;
-      const badH = (t.hosts || []).filter((x) => !hostIds.has(String(x)));
-      const badV = (t.vms || []).filter((x) => !vmIds.has(String(x)));
+      // '그 vCenter 아래에 이미 저장돼 있던 것' 만 낡은 id 로 통과한다 — 다른 vCenter 키로 옮겨 넣은 id 는 새 id 다.
+      const pt = Object.hasOwn(prevT, id) && prevT[id] && !prevT[id].all ? prevT[id] : null;
+      const prevH = new Set(arr(pt?.hosts).map(String)); const prevV = new Set(arr(pt?.vms).map(String));
+      const badH = arr(t.hosts).filter((x) => !hostIds.has(String(x)) && !prevH.has(String(x)));
+      const badV = arr(t.vms).filter((x) => !vmIds.has(String(x)) && !prevV.has(String(x)));
       if (badH.length || badV.length) return res.status(400).json({ ok: false, reason: `스냅샷에 없는 대상: ${[...badH, ...badV].slice(0, 5).join(', ')}` });
     }
   }
-  const before = loadVmSeriesSettings();
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 거른 targets 를 되돌려 보낸다 — 전체로 저장하면 다른
   //   법인이 수집 범위에서 빠졌다. 범위 밖 targets 는 직전 값을 보존하고, 전 법인에 걸친 scope('all'↔
   //   'selected')는 바꾸지 않으며, 범위 밖 DB 는 dropExcluded 로도 지우지 않는다.
@@ -151,7 +183,7 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     ip: req.ip || '',
   });
   const safeNext = allowed ? { ...next, targets: filterScopedMap(next.targets, allowed) } : next;
-  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
+  res.json({ ok: true, settings: safeNext, ...vmSeriesStaleOf(safeNext.targets, snap), dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /** 범위 선택 트리 데이터 — 한 vCenter 의 클러스터/호스트/폴더/VM(전원 상태 포함, 꺼진 VM 은 표시만). */

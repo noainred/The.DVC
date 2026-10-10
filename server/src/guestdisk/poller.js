@@ -13,6 +13,7 @@ import { prune, getDb, lastCollectTs } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { loadVcenterConfig } from '../config.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { directCollectSkipReason } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { authStopView } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js'; // v2.708
 
@@ -49,13 +50,25 @@ export async function runGuestDiskNow(trigger = 'manual') {
     // site 모드(엣지 위임) vCenter 는 중앙이 직접 SOAP 를 못 건다 — 라이브 조회하면 매번
     // 실패/타임아웃해 오류만 쌓인다. 그런 vCenter 의 게스트 디스크는 엣지가 /central/guest-disk 로
     // push 한다(agent/guestDiskPush.js). 여기서는 중앙이 직접 수집하는 vCenter 만 조회한다.
-    const direct = allVcs.filter((v) => v.collectSource !== 'site').map((v) => v.id);
-    const siteDelegated = allVcs.length - direct.length;
     // v2.591(감사 F1): 인벤토리 수집(store)과 같은 vCenter 계정이다 — 그 계정이 인증 실패로 멈춰 있으면 주기 수집은
     //   로그인하지 않는다(읽기 전용 조회 — 해제는 주 폴러·연결 테스트만). 수동 실행은 막지 않는다. 건너뛴 vCenter 는
     //   `authStopped` 로 결과에 싣는다(조용히 빼지 않는다).
     let regById = new Map();
     try { regById = new Map((loadVcenterConfig().vcenters || []).map((v) => [v.id, v])); } catch { /* 등록부 없음 — 판정 불가, 그대로 진행 */ }
+    // v2.732(점검 2회차 B4-01): 점검중(maintenance)·비활성 vCenter 도 직접 수집 대상이 아니다(store.js 주 폴러와 같은 판정 —
+    //   vcenter/collectTarget.js). 예전에는 스냅샷의 collectSource 로 site 만 걸러, 점검중 vCenter 는 스냅샷에 남은 직전 VM(lastGood)
+    //   때문에 매 주기(수동 포함) 로그인했다. 등록부에 없는 vCenter(목 데이터 등)는 예전 판정(스냅샷 site 만 제외) 그대로다.
+    //   건너뛴 것은 notCollected 로 결과에 싣는다(조용한 제외 금지). site 는 예전처럼 siteDelegated 개수로 센다.
+    const notCollected = [];
+    let siteDelegated = 0;
+    const direct = [];
+    for (const v of allVcs) {
+      const reg = regById.get(v.id);
+      const why = v.collectSource === 'site' ? 'site' : (reg ? directCollectSkipReason(reg) : null);
+      if (why === 'site') { siteDelegated += 1; continue; }
+      if (why) { notCollected.push({ vcenterId: v.id, why }); continue; }
+      direct.push(v.id);
+    }
     const authStopped = [];
     const vcs = direct.filter((id) => {
       if (trigger === 'manual') return true;
@@ -66,10 +79,11 @@ export async function runGuestDiskNow(trigger = 'manual') {
     });
     if (!vcs.length) {
       lastRunTs = Date.now();
-      lastResult = { at: lastRunTs, trigger, vcenters: 0, siteDelegated, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, ms: Date.now() - started, errors: [], ...(authStopped.length ? { authStopped } : {}) };
+      lastResult = { at: lastRunTs, trigger, vcenters: 0, siteDelegated, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, ms: Date.now() - started, errors: [], ...(authStopped.length ? { authStopped } : {}), ...(notCollected.length ? { notCollected } : {}) };
+      const skipNote = notCollected.length ? ` · 비활성·점검중 ${notCollected.length}곳은 수집하지 않습니다` : '';
       const note = authStopped.length
-        ? `인증 실패로 주기 수집이 멈춘 vCenter ${authStopped.length}곳을 건너뛰었습니다.`
-        : `중앙 직접 수집 vCenter 없음 — site 위임 ${siteDelegated}개는 엣지 push 로 수신합니다.`;
+        ? `인증 실패로 주기 수집이 멈춘 vCenter ${authStopped.length}곳을 건너뛰었습니다.${skipNote}`
+        : `중앙 직접 수집 vCenter 없음 — site 위임 ${siteDelegated}개는 엣지 push 로 수신합니다.${skipNote}`;
       return { ok: true, ...lastResult, note };
     }
     let vms = 0; let vmSeriesRows = 0; let partSeriesRows = 0; let partsUnknown = 0; const errors = [];
@@ -97,7 +111,7 @@ export async function runGuestDiskNow(trigger = 'manual') {
     await prune(s.retentionDays);
     lastRunTs = Date.now();
     lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}),
-      ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
+      ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}), ...(notCollected.length ? { notCollected } : {}) };
     return { ok: true, ...lastResult };
   } finally {
     running = false;

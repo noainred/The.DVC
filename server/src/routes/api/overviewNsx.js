@@ -2,7 +2,7 @@
 import { requirePerm } from '../../auth/auth.js'; // v2.536: inv.nsx 서버 집행(그전까지 탭 표시 조건일 뿐이었다)
 import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { store, scopedRollups } from '../../store.js';
+import { store, scopedRollups, siteInventoryStale } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
@@ -160,6 +160,9 @@ api.get('/health', (req, res) => {
     vcentersMaintenance: byStatus('maintenance'),
     // v2.617: 비활성(설정에서 꺼 둔) vCenter — 수집하지 않으므로 '첫 수집 중' 도 '연결 실패' 도 아니다. 화면이 분모에서 뺀다.
     vcentersDisabled: byStatus('disabled'),
+    // v2.732(점검 2회차 B2-01): 담당 엣지의 push 가 낡은 위임 vCenter 수 — status 와 무관(연결 수는 그대로 둔다 — 헤더 계약).
+    //   롤업 vcentersStale · 공개 API /inventory/collection stale 과 같은 판정(store.siteInventoryStale).
+    vcentersStale: vcs.filter(siteInventoryStale).length,
     hosts: g.hosts || 0,
     vms: g.vms || 0,
     vmsPoweredOn: g.vmsPoweredOn || 0,

@@ -9,6 +9,7 @@ import { blankOr } from './blankOr.js';
 import { countsAtNote, rowsText, rollupStatusText } from './sanPerfDbText.js';
 import { trackFetch, freshState, freshNote } from './tools/sanFreshText.js'; // 검토 I-04: 상태 갱신 실패를 숨기지 않는다
 import { FreshNote } from './tools/SanFreshNote.jsx';
+import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
 
 const POLL_MS = 20_000;   // 상태(보관 현황·수집 상태) 갱신 주기
 
@@ -44,7 +45,9 @@ export default function SanSwitchPerf() {
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const save = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await putJson('/tools/sanswitch/perf/settings', form); setData(r); setForm(r.settings); setMsg('저장되었습니다.'); }
+    // v2.732(점검 2회차 B5-03): 저장 실패(400 {ok:false, reason})를 그대로 setData 하면 settings 가 없어 폼이 Loading 으로
+    //   사라졌다가 다음 폴링 뒤 '저장되었습니다.' 가 남았다. 판정한 뒤에만 화면 상태를 바꾼다.
+    try { const r = requireChanged(await putJson('/tools/sanswitch/perf/settings', form)); setData(r); setForm(r.settings); setMsg('저장되었습니다.'); }
     catch (e) { setMsg(`저장 실패: ${e.message}`); }
     finally { setBusy(false); }
   };

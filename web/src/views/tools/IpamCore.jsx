@@ -16,6 +16,7 @@ import { dirtyKeys, dirtyPages, onDraftChange } from './ipamDraft.js';
 import { IpamScanLog } from './IpamScanLog.jsx';
 import { IpamCsv } from './IpamCsv.jsx';
 import { reservedUntilText } from './ipamReserveText.js';
+import { dbCountText, dbMetaText } from './ipamDbInfoText.js'; // v2.732: count:null(범위 계정·못 읽음)에서 죽지 않게
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -257,7 +258,7 @@ function Ipam({ scope, onScope }) {
           <Card label="예약 만료/임박" value={recon.reserved} accent={recon.reserved ? 'var(--amber,#f59e0b)' : undefined}
             meta={reconFilter === 'reserved' ? '예약 만료/임박만 ✓' : (recon.reserved ? '클릭: 예약 정리 대상' : '14일 내 만료 예약 없음')}
             active={reconFilter === 'reserved'} onClick={() => toggleRecon('reserved')} />
-          {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
+          {db && <Card label="공유 DB 레코드" value={dbCountText(db)} meta={dbMetaText(db)} />}
         </div>
       ) : (
         <div className="card muted" style={{ padding: 12, marginBottom: 14, fontSize: 13 }}>

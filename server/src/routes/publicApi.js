@@ -18,7 +18,7 @@
  */
 
 import express from 'express';
-import { store, dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../store.js';
+import { store, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, siteInventoryStale, vcAlarmsUnknown } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { config } from '../config.js';
 import { apiKeyAuth } from '../publicapi/auth.js';
@@ -229,19 +229,44 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
   return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt) });
 }));
 
+/**
+ * v2.732(점검 2회차 B2-01): vCenter 행의 수집 시각 — **실제로 그 값을 받은 시각**이고 지어내지 않는다.
+ *  · 위임(site) vCenter → 담당 엣지의 push 를 중앙이 받은 시각(`receivedAt`). 아직 받은 적 없으면 null.
+ *  · 접속 실패로 마지막 정상 값을 이월 중인 직접 수집 vCenter → 그 정상 수집 시각(`staleSince`).
+ *  · 그 밖(직접 수집 정상) → 예전처럼 스냅샷 시각.
+ * 예전에는 vCenter 객체에 **없는 필드**(`collectedAt` — 수집기 grep 0건)를 읽어 언제나 스냅샷 시각이었고, 담당 엣지가
+ * 3일 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔다(문서는 'generatedAt 과 collectedAt 의 차이가 데이터의 나이' 라고 안내한다).
+ * ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js`) — msOrNull 로 epoch ms 로 통일한다.
+ */
+function vcCollectedAtOf(v, snap) {
+  if (v?.collectSource === 'site') return msOrNull(v.receivedAt);
+  if (v?.stale === true && v.staleSince != null) return msOrNull(v.staleSince);
+  return msOrNull(v?.collectedAt ?? snap.generatedAt);
+}
+
 v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   const rows = (snap.vcenters || []).filter((v) => inScope(v.id)).map((v) => {
     const cnt = (arr, k) => (arr || []).reduce((a, x) => a + (x[k] === v.id ? 1 : 0), 0);
     return {
       id: v.id, name: v.name, status: v.status || null, version: v.version || null,
       hosts: cnt(snap.hosts, 'vcenterId'), vms: cnt(snap.vms, 'vcenterId'),
-      datastores: cnt(snap.datastores, 'vcenterId'), alarms: cnt(snap.alarms, 'vcenterId'),
-      // ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js:402`) — epoch ms 로 통일한다.
-      collectedAt: msOrNull(v.collectedAt ?? snap.generatedAt),
+      datastores: cnt(snap.datastores, 'vcenterId'),
+      // v2.732(B2-05): 경보를 조회하지 않은 vCenter(REST 폴백)의 0 건은 '0 건' 이 아니라 '모른다' — null.
+      //   내부 알림 엔진·일일 헬스체크·웹 카드와 같은 판정(store.vcAlarmsUnknown). 개수는 meta.alarmsUnknownCount.
+      alarms: vcAlarmsUnknown(v) ? null : cnt(snap.alarms, 'vcenterId'),
+      collectedAt: vcCollectedAtOf(v, snap),
+      // v2.732(B2-01): 이 행의 값이 낡았는가 — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter(status 는 엣지가 마지막으로
+      //   보낸 값 그대로) 또는 접속 실패로 마지막 정상 값을 이월 중인 vCenter(status unreachable).
+      stale: v.stale === true,
     };
   });
   const c = capped(rows);
-  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta });
+  const staleCount = rows.filter((r) => r.stale).length;
+  const alarmsUnknownCount = rows.filter((r) => r.alarms == null).length;
+  return envelope(res, apiPath, projectAll(c.rows, fields), {
+    ...scopeMeta, ...c.meta, staleCount, alarmsUnknownCount,
+    note: 'stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다).',
+  });
 }));
 
 v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
@@ -261,13 +286,17 @@ v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, i
     pending: by('pending'),
     unreachable: by('unreachable'),
     maintenance: by('maintenance'),
+    // v2.732(B2-01): 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 수 — 위 상태 개수와 **겹치는 별도 축**이다(대개 connected 로
+    //   함께 세어진다). 내부 /health vcentersStale 과 같은 판정(store.siteInventoryStale). 직접 수집의 접속 실패 이월은 unreachable 로 센다.
+    stale: vcs.filter(siteInventoryStale).length,
     generatedAt: msOrNull(snap.generatedAt),
     source: snap.source || null,
     intervalMs: numOrNull(config.pollIntervalMs),
   };
   return envelope(res, apiPath, project(row, fields), {
     ...scopeMeta,
-    note: 'pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다.',
+    note: 'pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다. '
+      + 'stale 은 담당 엣지의 보고가 끊겨 마지막으로 받은 값을 보여 주는 위임 vCenter 수입니다(상태 개수와 겹칩니다).',
   });
 }));
 
@@ -303,8 +332,19 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fiel
   const hide = !isAdminReq(req);
   const maskName = hide ? await storageNameMasker() : () => null;
   let namesHidden = 0;
+  let capacityUnread = 0;
   const rows = latestByDevice([localSnapshots() || [], edgeStorageSnapshots() || []]).map((s2) => {
-    const total = numOrNull(s2.capacity?.totalBytes); const used = numOrNull(s2.capacity?.usedBytes);
+    /*
+     * v2.732(점검 2회차 B2-04): 수집 실패 스냅샷(emptySnapshot 그대로 — capacity 0/0)과 용량 섹션이 없는 장비(VPLEX 등)의 0 은
+     *   '0 바이트' 가 아니라 **못 읽음** 이다. 예전에는 totalBytes:0 · usedBytes:0 · usedUnknown:false 로 나가 외부 포탈이 그 장비를
+     *   '용량 0 · 사용 0(읽음)' 으로 적재했다. 내부 Overview(`overviewCards.js storageCapacityTotals`)와 **같은 판정** —
+     *   `!(total > 0) || ok === false` 면 용량·사용량·사용률을 null 로 두고 usedUnknown:true. 개수는 meta.capacityUnreadCount.
+     */
+    const total0 = numOrNull(s2.capacity?.totalBytes);
+    const capRead = total0 != null && total0 > 0 && s2.ok !== false;
+    if (!capRead) capacityUnread += 1;
+    const total = capRead ? total0 : null;
+    const used = capRead ? numOrNull(s2.capacity?.usedBytes) : null;
     const name0 = s2.name || s2.deviceId;
     const masked = maskName({ deviceId: s2.deviceId, type: s2.type, name: name0 });
     if (masked) namesHidden += 1;
@@ -322,11 +362,16 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fiel
   const unknown = c.rows.filter((r) => r.usedUnknown).length;
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta, usedUnknownCount: unknown,
+    // v2.732(B2-04): 용량 자체를 읽지 못한 장비 수(수집 실패·용량 섹션 없음) — usedUnknownCount 에 포함된다.
+    capacityUnreadCount: capacityUnread,
     // v2.604 AUTHZ-2604-01: 관리 주소와 같은 이름을 가린 개수 — 조용히 바꾸지 않는다.
     ...(hide ? { namesHidden } : {}),
-    note: unknown
+    note: (unknown
       ? `사용량을 읽지 못한 장비 ${unknown}대는 usedBytes 가 null 입니다 — 0 으로 채우지 않았습니다.`
-      : '사용량을 읽지 못한 장비는 usedBytes 가 null 로 나갑니다(0 으로 채우지 않습니다).',
+      : '사용량을 읽지 못한 장비는 usedBytes 가 null 로 나갑니다(0 으로 채우지 않습니다).')
+      + (capacityUnread
+        ? ` 그중 용량을 읽지 못한 장비 ${capacityUnread}대(수집 실패·용량 미수집)는 totalBytes 도 null 입니다.`
+        : ''),
   });
 }));
 
@@ -420,9 +465,19 @@ v1.get('/faults/alarms', guarded('/faults/alarms', ({ res, snap, inScope, fields
     muted: a.muted === true,
   }));
   const c = capped(rows);
+  /*
+   * v2.732(점검 2회차 B2-05): 경보를 **조회하지 않은** vCenter(REST 폴백) — 그 vCenter 의 행이 없는 것은 '경보 0 건' 이 아니다.
+   *   예전에는 meta 가 그 사실을 말하지 않아 외부 포탈이 그 법인을 '경보 없음' 으로 표시했다. 범위 안 vCenter 만 센다.
+   */
+  const unknownVcIds = (snap.vcenters || []).filter((v) => inScope(v.id) && vcAlarmsUnknown(v)).map((v) => String(v.id));
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...scopeMeta, ...c.meta, mutedCount: c.rows.filter((r) => r.muted).length,
-    note: '음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다.',
+    alarmsUnknownVcenters: unknownVcIds.length,
+    alarmsUnknownVcenterIds: unknownVcIds,
+    note: '음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다.'
+      + (unknownVcIds.length
+        ? ` 경보를 조회하지 않은 vCenter ${unknownVcIds.length}곳(REST 폴백 수집)은 목록에 없습니다 — 0 건이 아니라 모르는 것입니다(alarmsUnknownVcenterIds).`
+        : ''),
   });
 }));
 

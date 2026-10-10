@@ -90,6 +90,8 @@ export function computeUnprotected(vms, rows, opts = {}) {
     : ls && ls.minSeverity && ls.minSeverity !== 'info' ? 'severity-filter' : null;
   const covered = opts.coveredVcenterIds == null ? null
     : new Set([...(opts.coveredVcenterIds instanceof Set ? opts.coveredVcenterIds : opts.coveredVcenterIds)].map(String));
+  //   · opts.notCollectedVcenterIds(v2.732) — 이 포탈이 지금 직접 수집하지 않는 vCenter. 창 안에 옛 이벤트가 있어도 판정 불가('not-collected').
+  const notCollected = opts.notCollectedVcenterIds == null ? null : new Set([...opts.notCollectedVcenterIds].map(String));
   const undeterminedList = [];
   const undeterminedByReason = {};
   const unprotectedList = [];
@@ -102,7 +104,9 @@ export function computeUnprotected(vms, rows, opts = {}) {
       guestOS: v.guestOS || '', storageGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(0 GB 아님)
     };
     if (hit) { protectedList.push({ ...item, lastBackupTs: hit.ts, backupUser: hit.user }); continue; }
-    const why = logBlocked || (covered && !covered.has(String(v.vcenterId)) ? 'no-events' : null);
+    // v2.732(B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 남은 옛 이벤트로 판정하지 않는다 — 'not-collected'.
+    const why = logBlocked || (notCollected && notCollected.has(String(v.vcenterId)) ? 'not-collected'
+      : (covered && !covered.has(String(v.vcenterId)) ? 'no-events' : null));
     if (why) {
       undeterminedByReason[why] = (undeterminedByReason[why] || 0) + 1;
       undeterminedList.push({ ...item, reason: why });

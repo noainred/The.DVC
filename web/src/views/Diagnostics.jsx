@@ -3,6 +3,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import Select from '../components/Select.jsx';
+import { numOrNull } from '../numOrNull.js';
 
 const LEVEL_COLOR = { error: '#f87171', warn: '#fbbf24', info: '#93c5fd' };
 
@@ -25,6 +26,22 @@ const fmtMemTick = (ts, win) => {
   if (win === '7d' || win === '30d') return `${d.getMonth() + 1}.${d.getDate()} ${String(d.getHours()).padStart(2, '0')}시`;
   return d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 };
+
+/**
+ * 메모리 추적 표본 요약 한 줄(v2.732 감사 B1-02). 서버(memtrack.js memMeta)는 v2.731 A6-04 부터 표본 수를 **세지 않는다**
+ * (`count: null` — 화면 경로에서 COUNT 금지). 예전 `count || 0` 은 표본이 수십만 건이어도 언제나 '표본 0건' 이라고 말했다.
+ * count 를 모르면 표본 수 조각을 빼고 수집 개시만 말한다 — 숫자로 받은 값(옛 서버의 meta())만 '표본 N건' 이다.
+ * @param {{count?:number|null, firstTs?:number|null}|null|undefined} meta
+ * @returns {string} 비어 있을 수 있다(아무것도 모르면 말하지 않는다 — 빈 차트 안내가 따로 있다)
+ */
+export function memMetaText(meta) {
+  const parts = [];
+  const count = numOrNull(meta?.count);
+  if (count != null) parts.push(`표본 ${count.toLocaleString()}건`);
+  const first = numOrNull(meta?.firstTs);
+  if (first != null) parts.push(`수집 개시 ${new Date(first).toLocaleDateString('ko-KR')}`);
+  return parts.join(' · ');
+}
 
 // 추세 한 줄 표기: +2.1MB/일 (r²=0.82, 3.2일 관측)
 const fmtTrend = (t) => {
@@ -191,10 +208,7 @@ export default function Diagnostics() {
                 {vb.icon} {verdict?.text || '판정 대기'}
               </span>
               <div className="flex gap" style={{ alignItems: 'center' }}>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  표본 {(mem.meta?.count || 0).toLocaleString()}건
-                  {mem.meta?.firstTs ? ` · 수집 개시 ${new Date(mem.meta.firstTs).toLocaleDateString('ko-KR')}` : ''}
-                </span>
+                <span className="muted" style={{ fontSize: 12 }}>{memMetaText(mem.meta)}</span>
                 <Select sort={false} className="select select-sm" value={memWin} onChange={(e) => setMemWin(e.target.value)}>
                   <option value="6h">최근 6시간</option>
                   <option value="24h">최근 24시간</option>

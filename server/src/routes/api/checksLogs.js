@@ -21,6 +21,29 @@ import zlib from 'node:zlib';
 import { todayStamp } from "../../util/dayKey.js";
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
+// v2.732(B4-01): /tools/vclogs/sources — 담당 엣지를 모르는 site vCenter 의 표지(이름을 지어내지 않는다). 아래 라우트 주석 참조.
+export const SITE_AGENT_UNKNOWN_LABEL = '(담당 엣지 미확인)';
+/**
+ * v2.732(B4-01): 로그 출처 분류(순수) — 등록부 vCenter 중 직접 수집(비활성·점검중 포함)은 local, 엣지 위임(collectMode 'site')은 remote.
+ * observed = 관측된 vCenter → 엣지(위임 인벤토리·GPU 게스트 진단 — 예전과 같은 원천). site 의 담당 엣지는 등록부 remoteAgent 가 먼저다
+ * (관측값보다 설정이 정확하다 — v2.542 배지 규약과 같은 판단). 셋 다 모르면 표지 + agentUnknown(연합 조회는 vCenter id 로 동작한다).
+ * 등록부에 없고 관측만 된 vCenter 는 예전처럼 remote. 범위 판정(inScope)은 호출부가 넘긴다.
+ */
+export function classifyLogSources(registry, observed, inScope = () => true) {
+  const t = (x) => (typeof x === 'string' ? x.trim() : '');
+  const reg = (Array.isArray(registry) ? registry : []).filter((v) => v && v.id && inScope(v.id));
+  const localIds = new Set(reg.filter((v) => v.collectMode !== 'site').map((v) => v.id));
+  const agentOf = new Map(observed instanceof Map ? observed : []);
+  const unknown = new Set();
+  for (const v of reg) {
+    if (v.collectMode !== 'site') continue;
+    const a = t(v.remoteAgent) || t(agentOf.get(v.id));
+    if (a) agentOf.set(v.id, a); else { agentOf.set(v.id, SITE_AGENT_UNKNOWN_LABEL); unknown.add(v.id); }
+  }
+  const remote = [];
+  for (const [vcenterId, agent] of agentOf) if (!localIds.has(vcenterId)) remote.push({ vcenterId, agent, ...(unknown.has(vcenterId) ? { agentUnknown: true } : {}) });
+  return { local: [...localIds], remote };
+}
 
 
 // vClogs scope: 사용자 scope 를 f.vcenterIds 화이트리스트로 강제하고, meta 도 범위 내 vCenter 만 남긴다.
@@ -215,10 +238,17 @@ api.get('/tools/vmware-config', requirePerm('tools'), async (req, res) => {
 //   예외 없이' · '귀속 없는/범위 밖 데이터 미노출' 불변조건.
 // ⚠ `allowed === null` 은 '제한 없음(전체)' 이다 — 빈 집합으로 읽으면 전체 범위 계정이
 //   아무것도 못 본다(`auth/scope.js:16-26`).
+//
+// ⚠⚠ v2.732(점검 2회차 B4-01): **엣지 위임(collectMode 'site') vCenter 는 local 이 아니라 remote 다.** 로그 폴러는 이제 site vCenter 에
+//   로그인하지 않는다(엣지가 수집·보관한다 — logs/poller.js · vcenter/collectTarget.js). 예전에는 등록부의 vCenter 를 전부 local 로 분류해
+//   화면이 '중앙이 직접 로그인해 쌓은 값' 을 읽었다 — 폴러만 고치면 site 로그가 화면에서 **조용히 멈춘다**. 그래서 site 는 연합 조회
+//   (/tools/vclogs/federate — vCenter id 로 그 vCenter 를 수집하는 엣지가 답한다)로 넘긴다. 담당 엣지 이름은 등록부 remoteAgent →
+//   (위임 인벤토리 · GPU 게스트 진단 — 예전과 같은 관측값) 순서이고, 셋 다 모르면 이름을 지어내지 않고 `agentUnknown:true` 와 '(담당 엣지 미확인)' 표지를 싣는다
+//   (연합 조회는 이름이 아니라 vCenter id 로 동작한다 — 표지는 화면 배지용이다). 비활성·점검중(직접 수집)은 local 그대로(이미 쌓인 이력 조회).
+//   이미 중앙에 쌓여 있던 site vCenter 의 옛 로그는 vCenter 를 고르지 않은 '전체' 조회에서 계속 보인다(지우지 않는다).
 api.get('/tools/vclogs/sources', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const inScope = (id) => allowed == null || allowed.has(id);
-  const localIds = new Set((loadVcenterConfig().vcenters || []).map((v) => v.id).filter(inScope));
   const vcAgent = new Map();
   for (const inv of listInventory()) if (inv.agent && inScope(inv.vcenterId)) vcAgent.set(inv.vcenterId, inv.agent);
   for (const a of getAllGpuGuestDiag()) {
@@ -226,9 +256,7 @@ api.get('/tools/vclogs/sources', requirePerm('tools'), (req, res) => {
     if (!a || !a.agent || !Array.isArray(a.vcenters)) continue;
     for (const vc of a.vcenters) if (vc && vc.vcId && inScope(vc.vcId)) vcAgent.set(vc.vcId, a.agent);
   }
-  const remote = [];
-  for (const [vcenterId, agent] of vcAgent) if (!localIds.has(vcenterId)) remote.push({ vcenterId, agent });
-  res.json({ local: [...localIds], remote });
+  res.json(classifyLogSources(loadVcenterConfig().vcenters || [], vcAgent, inScope));
 });
 
 // v2.630 SEC2630-02: 연합 조회 입력 상한과 '이 포탈이 아는 vCenter' 집합.

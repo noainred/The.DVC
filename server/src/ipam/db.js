@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { COLUMNS, toRecord } from './record.js';
 import { createLockRetry, openSqlite, withOpenCleanup } from '../util/sqliteOpen.js';
 import { createChangeLogger } from '../util/logThrottle.js';
+import { createYielder } from '../util/timeSlice.js';
 const saveWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
 
 const DB_PATH = config.ipam.dbPath;
@@ -26,6 +27,19 @@ let ready = null;
 const MIN_OFFLOAD_ROWS = Number(process.env.IPAM_WRITE_MIN_ROWS || 500);
 // 0 이면 오프로딩 완전 비활성(항상 인라인).
 const OFFLOAD_ENABLED = process.env.IPAM_WRITE_WORKER !== '0';
+
+// v2.732(점검 2회차 B6-04 — v2.731 이 남긴 후보): 워커로 보낼 레코드 변환(toRecord — 행마다 Date→ISO 2회)과 구조화 복제를 **한 동기
+//   구간**에서 하던 것을 조각으로 나눈다. 재현(실제 syncLedger → 실제 워커): 5만 행 120.7ms · 20만 행 1,133ms 메인 정지. 조각 + 시간 기준
+//   양보면 5만 행 최장 약 7ms. 이 크기 이하는 예전처럼 한 메시지다(조각을 나눌 이득이 없다).
+//   ⚠ 워커는 조각을 **메모리에만** 모으고 commit 메시지에서만 BEGIN·DELETE·INSERT·COMMIT 한다 — 첫 조각에서 트랜잭션을 열면
+//     메인이 양보하며 조각을 다 보낼 때까지 잠금을 쥐어 외부 리더(DELETE 저널 공유 파일)를 막는다. 트랜잭션 길이는 예전과 같다.
+export const LEDGER_CHUNK_ROWS = 2000;
+const LEDGER_SLICE_MS = 4;
+// 동기화를 직렬화했으므로(아래 syncLedger) '워커가 영원히 답하지 않으면' 뒤 동기화가 전부 멈춘다 — 답 시한을 둔다. 넘기면 워커를 끝내고
+//   인라인 적재로 바꾼다(죽은 워커와 같은 처리). 20만 행 적재는 수 초이고 잠금 대기(busy_timeout)는 3초라 2분은 넉넉하다.
+let _writeReplyDeadlineMs = 120_000;
+/** 테스트 전용 — 운영 경로는 쓰지 않는다. */
+export function _setWriteReplyDeadlineForTest(ms) { _writeReplyDeadlineMs = Number.isFinite(ms) && ms > 0 ? ms : 120_000; }
 
 // v2.603(감사 DB2603-01): 뒤늦게 추가된 열. 예전에는 열마다 `try { ALTER } catch { /* already present */ }` 로 **모든** 오류를
 //   '이미 있음' 으로 삼켜, 외부 리더가 잠금을 쥔 순간(SQLITE_BUSY)에 ALTER 가 실패하면 열이 없는 채로 INSERT prepare 가
@@ -120,14 +134,20 @@ let writeWorkerBroken = false;
 let writeSeq = 0;
 const writePending = new Map();
 
+// 테스트 전용 — 답하지 않는 가짜 워커로 답 시한 경로를 확인한다(운영 경로는 쓰지 않는다).
+let _writeWorkerUrl = new URL('./writeWorker.js', import.meta.url);
+export function _setWriteWorkerUrlForTest(url) { _writeWorkerUrl = url || new URL('./writeWorker.js', import.meta.url); }
+
 function spawnWriteWorker() {
-  const worker = new Worker(new URL('./writeWorker.js', import.meta.url), {
+  const worker = new Worker(_writeWorkerUrl, {
     workerData: { dbPath: DB_PATH },
   });
   worker.on('message', (msg) => {
     const task = writePending.get(msg.id);
     if (!task) return;
     writePending.delete(msg.id);
+    // v2.732 B6-04: 워커가 끝나지 않은 옛 조각 스트림을 버렸다(직렬화 아래에서는 생기지 않아야 한다) — 조용히 넘기지 않는다.
+    if (msg.staleDropped) console.warn(`[ipam] 쓰기 워커가 끝나지 않은 원장 조각 스트림 ${msg.staleDropped}개를 버렸습니다(이번 쓰기는 온전합니다).`);
     if (msg.ok) task.resolve(true);
     else task.reject(new Error(msg.error || 'ipam write worker 실패'));
     if (!writePending.size) worker.unref();      // 유휴 워커가 프로세스 종료를 막지 않게
@@ -155,16 +175,46 @@ async function syncViaWorker(rows, updatedAt) {
     console.warn(`[ipam] 쓰기 워커 생성 실패(${err.message}) — 인라인 적재를 사용합니다.`);
     return false;
   }
+  const worker = writeWorker;
   const id = ++writeSeq;
   const done = new Promise((resolve, reject) => writePending.set(id, { resolve, reject }));
-  writeWorker.ref();
+  worker.ref();
+  let streaming = false;
   try {
-    // v2.594(감사 PERF-2594-01): 행 객체 전체를 구조화 복제하면 워커가 쓰지 않는 키까지 복사한다(원장이 바뀐 틱마다
-    //   메인 스레드 약 30ms). 워커가 쓰는 레코드 배열(컬럼 순서 값)만 보낸다 — toRecord 는 두 쪽이 같은 모듈을 쓴다.
-    writeWorker.postMessage({ id, records: rows.map((r) => toRecord(r, updatedAt)) });
-    return await done;
+    if (rows.length <= LEDGER_CHUNK_ROWS) {
+      // v2.594(감사 PERF-2594-01): 행 객체 전체를 구조화 복제하면 워커가 쓰지 않는 키까지 복사한다(원장이 바뀐 틱마다
+      //   메인 스레드 약 30ms). 워커가 쓰는 레코드 배열(컬럼 순서 값)만 보낸다 — toRecord 는 두 쪽이 같은 모듈을 쓴다.
+      worker.postMessage({ id, records: rows.map((r) => toRecord(r, updatedAt)) });
+    } else {
+      // v2.732 B6-04: 조각 변환 + 조각 메시지 + 시간 기준 양보. 워커가 죽으면(onDown 이 대기 작업을 false 로 푼다) 남은 조각을 보내지
+      //   않고 인라인으로 돌아간다. 조각 순서는 postMessage 순서 그대로다(같은 포트 · 한 스트림씩 — syncLedger 가 직렬화한다).
+      streaming = true;
+      const maybeYield = createYielder(LEDGER_SLICE_MS);
+      for (let i = 0; i < rows.length && writePending.has(id); i += LEDGER_CHUNK_ROWS) {
+        const end = Math.min(rows.length, i + LEDGER_CHUNK_ROWS);
+        const chunk = new Array(end - i);
+        for (let j = i; j < end; j++) chunk[j - i] = toRecord(rows[j], updatedAt);
+        worker.postMessage({ id, chunk });
+        await maybeYield();
+      }
+      if (writePending.has(id)) worker.postMessage({ id, commit: true, total: rows.length });
+    }
+    let timer = null;
+    const TIMEOUT = Symbol('timeout');
+    const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMEOUT), _writeReplyDeadlineMs); });
+    const r = await Promise.race([done, deadline]).finally(() => clearTimeout(timer));
+    if (r !== TIMEOUT) return r;
+    // 시한 초과 — 대기를 풀고 워커를 끝낸다(진행 중 트랜잭션은 SQLite 가 되돌린다). 이후는 인라인 적재다(워커 사망과 같은 처리).
+    writePending.delete(id);
+    writeWorkerBroken = true;
+    if (writeWorker === worker) writeWorker = null;
+    console.warn(`[ipam] 쓰기 워커가 ${Math.round(_writeReplyDeadlineMs / 1000)}초 안에 답하지 않아 종료하고 인라인 적재로 바꿉니다.`);
+    try { worker.terminate(); } catch { /* 이미 종료 */ }
+    return false;
   } catch (err) {
     writePending.delete(id);
+    // 보내다 만 조각은 워커가 버리게 한다(트랜잭션은 commit 에서만 열리므로 DB 는 그대로다).
+    if (streaming) { try { worker.postMessage({ id, abort: true }); } catch { /* 워커 종료 */ } }
     console.warn(`[ipam] 워커 적재 실패(${err.message}) — 인라인으로 다시 시도합니다.`);
     return false;
   }
@@ -211,8 +261,23 @@ async function getImpl() {
   return impl;
 }
 
+/**
+ * v2.732(점검 2회차 B6-04): 원장 동기화는 **한 번에 하나씩, 부른 순서대로** 끝난다. 조각 전송은 양보하므로 그 사이 새 동기화가 시작될 수
+ * 있다 — 직렬화하지 않으면 ① 두 스트림이 섞이거나 ② 작은 나중 동기화(인라인 또는 한 메시지)가 큰 앞 동기화보다 먼저 커밋해 **DB 에 옛
+ * 내용이 남는다**(v2.620 RECENT2620-01 이 고친 결함의 재발 — store._commitLedger 의 seq 규칙은 '쓰기는 순서대로 끝난다' 에 기댄다).
+ * 직렬화는 워커·인라인 두 경로를 함께 덮는다(예전에도 큰 워커 쓰기가 진행 중일 때 작은 인라인 쓰기가 끼어들 수 있었다). 취소는 없다 —
+ * 모든 호출이 예전처럼 쓰여지고 각자 성공/실패를 돌려준다(취소를 '실패' 로 보고하는 오보가 생기지 않게).
+ */
+let _syncChain = Promise.resolve();
+
 /** Replace the entire shared ledger with the given rows. Best-effort. 성공 여부를 반환한다. */
-export async function syncLedger(rows) {
+export function syncLedger(rows) {
+  const run = _syncChain.then(() => syncLedgerNow(rows));
+  _syncChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function syncLedgerNow(rows) {
   try {
     const i = await getImpl();
     // sync 는 워커 오프로딩 시 Promise 를 돌려준다 — await 하지 않으면 실패가

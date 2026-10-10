@@ -11,6 +11,18 @@
  */
 import { authStopInfo } from './tools/storageAuthText.js';
 import { numOrNull } from '../numOrNull.js';
+import { agoText } from './tools/relTime.js';
+
+/**
+ * v2.732(점검 2회차 B2-01): 낡은 값의 '마지막 수신' 문구 — 위임 vCenter 는 담당 엣지의 보고를 중앙이 받은 시각(receivedAt),
+ * 접속 실패 이월은 마지막 정상 수집 시각(staleSince). 모르면 null(시각을 지어내지 않는다 — 1970년·'0초 전' 금지).
+ * vcCardState·corpSiteStatus 가 같이 쓴다(문구가 두 화면에서 갈라지지 않게).
+ */
+export function staleSinceText(s, now = Date.now()) {
+  const at = numOrNull(s?.receivedAt) ?? numOrNull(s?.staleSince);
+  const t = at != null && at > 0 ? agoText(at, now, { dash: null }) : null;
+  return t || null;
+}
 
 export function vcCardState(s = {}, now = Date.now()) {
   const st = String(s?.status || '');
@@ -28,6 +40,16 @@ export function vcCardState(s = {}, now = Date.now()) {
   }
   const m = s?.metrics || {};
   const hasMetrics = Number(m.hosts) > 0 || Number(m.vms) > 0;
+  // v2.732(점검 2회차 B2-01): 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 는 서버가 status 를 엣지가 마지막으로 보낸 값
+  //   ('connected') 그대로 두고 stale 만 붙인다(헤더 N/M 계약). status 만 보면 며칠 전 값이 정상 초록 카드로 보였다 —
+  //   값은 보여 주되(숨기면 마지막 값도 모른다) 호박색으로 '낡은 값 · 마지막 수신 N 전' 을 말한다.
+  if (st === 'connected' && s?.stale === true) {
+    const since = staleSinceText(s, now);
+    return {
+      showMetrics: true, tone: 'warn', stale: true,
+      text: `**낡은 값** — ${since ? `담당 엣지의 마지막 수신이 ${since}입니다` : '마지막 수신 시각을 모릅니다'}. 그 뒤로 인벤토리를 받지 못했습니다 — 아래 값은 지금 값이 아닙니다(엣지의 수집·통신 상태를 확인하세요).`,
+    };
+  }
   if (st === 'connected') return { showMetrics: true, tone: 'ok', text: '' };
   if (st === 'maintenance') {
     return { showMetrics: hasMetrics, tone: 'warn', text: hasMetrics ? '점검 모드(관리자 지정) — 아래 값은 마지막으로 수집한 인벤토리입니다.' : '점검 모드(관리자 지정) — 수집한 인벤토리가 없습니다.' };

@@ -4,6 +4,16 @@ import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH 인증 실패로 주기 실행을 멈춘 쪽
+import { requireChanged } from './changeResult.js'; // v2.732 B5-04: 실패 본문(200 {ok:false})을 성공으로 읽지 않는다
+
+/**
+ * v2.732(점검 2회차 B5-04): 연속 모니터링 '+ 모니터 추가' 를 보일지 — 목록 조회가 **권한 거부(403)** 면 저장도 같은 403 이다
+ * (목록·저장 둘 다 adminOnly + fleetOnly). 예전에는 버튼을 그대로 두어, 비밀번호까지 입력한 뒤 저장하면 창이 말없이 닫혔다.
+ * 다른 실패(시한·5xx)는 버튼을 숨기지 않는다(일시 오류일 수 있다 — 저장 실패는 창 안에서 말한다).
+ */
+export function canAddMonitor(loadErr) {
+  return !(loadErr && loadErr.status === 403);
+}
 
 const DOT = { ok: '#22c55e', warning: '#f59e0b', error: '#ef4444' };
 const SevDot = ({ s }) => <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: DOT[s] || '#64748b', marginRight: 7 }} />;
@@ -22,13 +32,15 @@ function History() {
   const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
   const load = () => fetchJson('/admin/net/history').then((r) => { setLoadErr(null); setD(r.captures || []); }).catch((e) => { setLoadErr(e); setD([]); });
   useEffect(() => { load(); }, []);
-  const view = async (id) => { try { setSel(await fetchJson(`/admin/net/history/${id}`)); } catch { /* */ } };
+  const [viewErr, setViewErr] = useState(null); // v2.732 B5-04: 상세 조회 실패를 삼키지 않는다(누르면 아무 일도 없던 것)
+  const view = async (id) => { setViewErr(null); try { setSel(await fetchJson(`/admin/net/history/${id}`)); } catch (e) { setViewErr(e); } };
   return (
     <div className="card" style={{ padding: 14 }}>
       <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>캡처 이력</div>
         <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={load}>⟳</button>
       </div>
+      {viewErr && <ErrorBox error={viewErr} />}
       {!d ? <div className="muted">불러오는 중…</div> : loadErr ? <ErrorBox error={loadErr} /> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 캡처가 없습니다.</div> : (
         <div className="table-wrap" style={{ maxHeight: '54vh' }}>
           <STable><thead><tr><th>시각</th><th>구분</th><th>모드</th><th>A ↔ B</th><th>결과</th><th>진단</th></tr></thead>
@@ -65,17 +77,31 @@ function Monitors() {
   const load = () => { if (denied.current) return; fetchJson('/admin/net/monitors').then((r) => { setLoadErr(null); setD(r.monitors || []); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e); setD([]); }); };
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
   const blank = { name: '', mode: 'dual', intervalMin: 10, seconds: 10, maxPackets: 1000, iface: 'any', useSudo: true, enabled: true, hostA: { host: '', port: 22, username: 'root', password: '' }, hostB: { host: '', port: 22, username: 'root', password: '' }, peer: '' };
-  const save = async () => { try { await putJson('/admin/net/monitors', form); } catch (e) { /* */ } setForm(null); load(); };
-  const run = async (id) => { try { await postJson(`/admin/net/monitors/${id}/run`, {}); } catch { /* */ } load(); };
-  const del = async (id) => { try { await delJson(`/admin/net/monitors/${id}`); } catch { /* */ } load(); };
-  const toggle = async (m) => { try { await putJson('/admin/net/monitors', { id: m.id, name: m.name, mode: m.mode, intervalMin: m.intervalMin, seconds: m.seconds, maxPackets: m.maxPackets, iface: m.iface, hostA: { host: m.hostA }, peer: m.hostB, enabled: !m.enabled }); } catch { /* */ } load(); };
+  // v2.732(점검 2회차 B5-04): 네 동작의 catch 가 전부 비어 있어 실패가 화면에 남지 않았다 — 저장은 실패해도 창을 닫아
+  //   입력한 비밀번호가 사라졌다. 저장 실패는 창 안에(formErr — 입력 유지), 표 동작 실패는 표 위에(actErr) 사유를 말한다.
+  //   '지금' 실행은 진행 중이면 200 {ok:false, reason:'이미 실행 중입니다.'} 라 requireChanged 로 판정한다.
+  const [actErr, setActErr] = useState(null);
+  const [formErr, setFormErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const openForm = (f) => { setFormErr(null); setForm(f); };
+  const save = async () => {
+    setSaving(true); setFormErr(null);
+    try { requireChanged(await putJson('/admin/net/monitors', form)); setForm(null); setActErr(null); load(); }
+    catch (e) { setFormErr(e); }
+    finally { setSaving(false); }
+  };
+  const act = async (fn) => { setActErr(null); try { requireChanged(await fn()); } catch (e) { setActErr(e); } load(); };
+  const run = (id) => act(() => postJson(`/admin/net/monitors/${id}/run`, {}));
+  const del = (id) => act(() => delJson(`/admin/net/monitors/${id}`));
+  const toggle = (m) => act(() => putJson('/admin/net/monitors', { id: m.id, name: m.name, mode: m.mode, intervalMin: m.intervalMin, seconds: m.seconds, maxPackets: m.maxPackets, iface: m.iface, hostA: { host: m.hostA }, peer: m.hostB, enabled: !m.enabled }));
   return (
     <div className="card" style={{ padding: 14 }}>
       <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>연속 모니터링 (주기 캡처 + 이슈 알림)</div>
-        <button className="login-btn" style={{ padding: '6px 12px' }} onClick={() => setForm(blank)}>+ 모니터 추가</button>
+        {canAddMonitor(loadErr) && <button className="login-btn" style={{ padding: '6px 12px' }} onClick={() => openForm(blank)}>+ 모니터 추가</button>}
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 손실/미수신 등 이슈가 감지되면 알림(설정 › 알림 채널)을 보냅니다.</p>
+      {actErr && <ErrorBox error={actErr} />}
       {!d ? <div className="muted">불러오는 중…</div> : loadErr ? <ErrorBox error={loadErr} /> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 모니터가 없습니다.</div> : (
         <div className="table-wrap"><STable><thead><tr><th>이름</th><th>모드</th><th>A ↔ B</th><th>주기</th><th>최근</th><th>상태</th><th>작업</th></tr></thead>
           <tbody>{d.map((m) => (
@@ -108,7 +134,8 @@ function Monitors() {
             {form.mode === 'dual'
               ? <div className="flex gap"><input className="input" placeholder="B 호스트" value={form.hostB.host} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, host: e.target.value } })} /><input className="input" style={{ width: 100 }} placeholder="사용자" value={form.hostB.username} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, username: e.target.value } })} /><input className="input" type="password" style={{ width: 120 }} placeholder="비번" value={form.hostB.password} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, password: e.target.value } })} /></div>
               : <input className="input" placeholder="B 대상 IP" value={form.peer} onChange={(e) => setForm({ ...form, peer: e.target.value })} />}
-            <button className="login-btn" style={{ padding: '8px 16px' }} onClick={save}>저장</button>
+            {formErr && <ErrorBox error={formErr} />}
+            <button className="login-btn" style={{ padding: '8px 16px' }} disabled={saving} onClick={save}>{saving ? '저장 중…' : '저장'}</button>
           </div>
         </Modal>
       )}

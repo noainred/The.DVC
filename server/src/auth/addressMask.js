@@ -246,7 +246,41 @@ export function maskSnapAddress(s, hostHint = '') {
   }
   const fp = out.extra?.credFp;
   if (fp && typeof fp === 'object') out.extra = { ...out.extra, credFp: { ...fp, user: '' } };
+  // v2.732(감사 B3-02): SAN 스위치 `fabricshow` 파서(fosParse.parseFabricShow)가 만든 **패브릭 구성원의 관리·FC IP**
+  //   (`extra.fabricMembers.switches[].enetIp·fcIp`)도 가린다 — 구조화 필드라 위 '정직 기록'(CLI 원문 한계)에 해당하지 않는다.
+  //   포트 상세가 extra 를 통째로 실어 `addressHidden:true` 옆에서 자기·이웃 스위치 IP 가 샜다. 이름이 주소인 구성원은 라벨로.
+  const fm = out.extra?.fabricMembers;
+  if (fm && typeof fm === 'object' && !Array.isArray(fm) && Array.isArray(fm.switches)) {
+    const ipLike = (v) => typeof v === 'string' && v !== '' && (isIP(v.trim()) !== 0 || v.trim() === host);
+    out.extra = {
+      ...out.extra,
+      fabricMembers: {
+        ...fm,
+        switches: fm.switches.map((m) => {
+          if (!m || typeof m !== 'object' || Array.isArray(m)) return m;
+          const x = { ...m };
+          if (typeof x.enetIp === 'string' && x.enetIp !== '') x.enetIp = '';
+          if (typeof x.fcIp === 'string' && x.fcIp !== '') x.fcIp = '';
+          if (ipLike(x.name)) x.name = maskedAddressName(x.name);
+          return x;
+        }),
+      },
+    };
+  }
   return out;
+}
+
+/**
+ * v2.732(감사 B3-02): 스냅샷이 아는 관리 주소 목록 — 등록부 host + 스냅샷 host + SAN 패브릭 구성원의 enetIp·fcIp.
+ * 자유 문자열(RASLog 본문·점검 근거 등)을 `scrubStringsDeep` 으로 훑을 때 쓴다(알려진 주소만 가린다 — 처음 보는 IP 는 남는다).
+ */
+export function snapAddressList(s, hostHint = '') {
+  const out = [];
+  const add = (v) => { if (typeof v === 'string' && v.trim()) out.push(v.trim()); };
+  add(hostHint); add(s?.host);
+  const sw = s?.extra?.fabricMembers?.switches;
+  if (Array.isArray(sw)) for (const m of sw) { if (m && typeof m === 'object') { add(m.enetIp); add(m.fcIp); } }
+  return [...new Set(out)];
 }
 
 /**

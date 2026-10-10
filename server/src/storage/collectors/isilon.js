@@ -19,8 +19,8 @@ import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
-import { powerResult, powerProbe } from '../power.js';
-import { pickIsiPowerKey, keyNamesOfRest, isiPowerFromStats, cachedIsiPowerKey, rememberIsiPowerKey } from './isilonPower.js';
+import { powerProbe } from '../power.js';
+import { pickIsiPowerKey, keyNamesOfRest, isiPowerFromStats, isiPowerResult, cachedIsiPowerKey, rememberIsiPowerKey } from './isilonPower.js';
 
 /** 초당 바이트 → 초당 비트(v2.599 C2599-01). null·비유한값은 null(0 으로 채우면 '트래픽 없음' 거짓). */
 export function bytesRateToBps(v) {
@@ -203,8 +203,11 @@ export function normalizeIsilon(device, raw) {
   return snap;
 }
 
-/** OneFS REST 전원(v2.667) — 통계 키 탐색(6시간 캐시) → 그 키 하나의 현재값을 노드별로 합산. */
-async function collectIsilonRestPower(device, extra) {
+/**
+ * OneFS REST 전원(v2.667) — 통계 키 탐색(6시간 캐시) → 그 키 하나의 현재값을 노드별로 합산.
+ * v2.732(B2-07): `expectedNodes`(cluster/nodes 로 읽은 노드 수)보다 적게 읽었거나 값 없는 노드 행이 있으면 부분 합(partial)으로 싣는다.
+ */
+async function collectIsilonRestPower(device, extra, { expectedNodes = null } = {}) {
   const source = 'OneFS statistics(전원 키 탐색)';
   try {
     let c = cachedIsiPowerKey(device.host);
@@ -215,8 +218,8 @@ async function collectIsilonRestPower(device, extra) {
     }
     if (!c?.key) { extra.powerProbe = powerProbe('no-field', { source, detail: '통계 키 목록에 전원 키가 없습니다' }); return; }
     const st = await get(device, `/platform/1/statistics/current?key=${encodeURIComponent(c.key)}&devid=all`);
-    const p = isiPowerFromStats(st, c.key);
-    const r = p ? powerResult({ watts: p.watts, source: `OneFS statistics ${c.key}`, basis: 'input', scope: p.nodes ? 'node' : 'system', parts: p.parts, keys: [c.key] }) : null;
+    const p = isiPowerFromStats(st, c.key, { expectedNodes });
+    const r = isiPowerResult(p, c.key, `OneFS statistics ${c.key}`);
     if (r) extra.power = r;
     else extra.powerProbe = powerProbe('no-field', { source, detail: `${c.key} 값을 읽지 못했습니다`, seenKeys: c.seen });
   } catch (e) {
@@ -263,7 +266,8 @@ export async function collect(device, { signal = null } = {}) {
   await trySection('events', () => getAny(device, ['/platform/3/event/eventgroup-occurrences?resolved=false&limit=1', '/platform/1/event/events?resolved=false&limit=1']));
   const out = normalizeIsilon(device, raw);
   // v2.667 — 전원(부가 정보 — 실패해도 섹션 오류로 만들지 않는다).
-  await collectIsilonRestPower(device, out.extra);
+  // v2.732(B2-07): 노드 목록을 읽었을 때만 그 수로 대조한다(못 읽었으면 0 — 대조하지 않는다).
+  await collectIsilonRestPower(device, out.extra, { expectedNodes: raw.nodes ? out.nodes?.count : null });
   // normalize 가 만든 sections 위에, 시도 단계에서 기록한 오류 문구를 보존(덮어쓰기 방지).
   for (const [k, v] of Object.entries(snap.sections)) if (String(v).startsWith('오류')) out.sections[k] = v;
   if (!out.ok && !out.error) out.error = out.sections.config !== 'ok' ? String(out.sections.config) : '수집 실패(섹션 오류 참조)';

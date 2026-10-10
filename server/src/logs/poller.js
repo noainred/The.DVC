@@ -7,7 +7,9 @@ import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { poolRun } from '../util/pool.js';   // v2.447: vCenter 병렬 수집(감사 T2) · v2.579: routes 의존 제거
 import { store } from '../store.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
-import { vcAuthGuard } from '../vcenter/restClient.js';
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
+import { createYielder } from '../util/timeSlice.js';
 import { getLogsDb } from './db.js';
 import { loadLogSettings } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
@@ -155,9 +157,17 @@ export async function pollLogsOnce({ manual = false } = {}) {
     const db = await getLogsDb();
     const mock = config.dataSource === 'mock';
     const minRank = SEV_RANK[s.minSeverity] || 0;
-    const vcs = mock ? (store.get().vcenters || []).map((v) => ({ id: v.id, name: v.name })) : (loadVcenterConfig().vcenters || []);
+    // v2.732(점검 2회차 B4-01): live 대상은 **직접 수집 vCenter 만**이다 — 관리자가 끈(enabled:false)·점검중(maintenance)·엣지 위임
+    //   (collectMode 'site') vCenter 는 로그인하지 않는다(store.js 주 폴러·vmseries·curuser 와 같은 판정 — vcenter/collectTarget.js 하나).
+    //   예전에는 등록부 전량이라 그 셋에 10분마다 로그인했고(재현: 3주기 × 계정 3개 = 9회), 주 폴러가 그 셋을 수집하지 않으므로 인증 정지
+    //   기록도 생기지 않아 비밀번호가 틀린 구간에 실패 로그인이 쌓였다. site 의 로그는 엣지가 보관하고 화면은 연합 조회로 본다
+    //   (/tools/vclogs/sources 가 site 를 remote 로 분류한다). 수동 실행도 이 셋은 건너뛴다(store 의 '지금 수집' 과 같다).
+    //   건너뛴 vCenter 는 lastRun.notCollected 로 밝힌다(조용한 제외 금지).
+    const split = mock ? { targets: (store.get().vcenters || []).map((v) => ({ id: v.id, name: v.name })), skipped: [] } : splitDirectCollectTargets(loadVcenterConfig().vcenters || []);
+    const vcs = split.targets;
     let collected = 0;
     const authStopped = [];   // v2.590: 이번 주기에 인증 실패 정지로 건너뛴 vCenter — 조용히 빼지 않고 밝힌다
+    const authRejected = [];  // v2.732(B4-01): 이번 주기에 로그인이 거부된 vCenter — 주 폴러와 같은 정지 기록에 올렸다
     // v2.447(감사 T2): vCenter 를 **병렬 + per-vCenter 데드라인**으로 수집한다.
     // 예전에는 순차 await 라 vCenter 당 왕복 5회 이상(login→createCollector→readNext…→destroy→logout)이
     // 그대로 더해졌다 — 28곳 중 폴란드·미 동부처럼 RTT 800ms 를 넘는 곳이 섞이면 한 주기가 10초를
@@ -183,10 +193,27 @@ export async function pollLogsOnce({ manual = false } = {}) {
         // v2.731(A2-01): 적재할 행이 0개여도 '수집은 성공' 이다 — 성공 시각 기록을 위해 항상 넘긴다.
         const done = eventsCompleteUntil(events, { startedAt, max: mock ? Infinity : s.maxPerPoll });
         perVc.push({ vcId: String(vc.id), rows, done, events: events.length });
-      } catch (e) { console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`); }
+      } catch (e) {
+        console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`);
+        // v2.732(B4-01): 로그인 거부(InvalidLogin 등)면 주 폴러와 **같은 정지 기록**에 올린다(v2.591 보조 수집기 규약 — 이 폴러만 빠져 있었다).
+        //   다음 주기는 authStopFor 가 건너뛴다. 수동 실행의 거부도 올린다(시도 횟수가 정직해지게 — guestdisk 와 같다). mock 은 제외.
+        if (!mock && isVcAuthError(e)) {
+          const rec = vcAuthGuard.markAuthStopped(vc.id, vc, e.message);
+          authRejected.push({ vcenterId: String(vc.id), attempts: rec?.attempts ?? null });
+        }
+      }
     });
+    // v2.732(점검 2회차 B6-01): 적재는 vCenter 사이·조각 사이에서 이벤트 루프에 양보한다 — 예전에는 28곳 × 최대 5,000행을 양보 없이
+    //   이어 붙여 따라잡기 주기마다 약 2.4초 멈췄다(재현). 조각은 ts 가 바뀌는 안전 지점에서만 자른다(logs/db.js tsSafeChunks).
+    //   같은 연결의 동시 write 는 여전히 없다(running 재진입 가드 · 양보는 COMMIT 뒤).
+    const maybeYield = createYielder(15);
     for (const { vcId, rows, done, events } of perVc) {
-      if (rows.length) { db.insertMany(rows); collected += rows.length; }
+      await maybeYield();
+      if (rows.length) {
+        if (typeof db.insertManyAsync === 'function') await db.insertManyAsync(rows);
+        else db.insertMany(rows);
+        collected += rows.length;
+      }
       // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 vCenter 이후는 기록되지 않는다 — 온전하지 않다).
       if (done.at != null) _collectOk.set(vcId, { at: done.at, capped: done.capped, events });
     }
@@ -234,7 +261,8 @@ export async function pollLogsOnce({ manual = false } = {}) {
         if (dropped) { db.vacuum(); console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`); }
       }
     }
-    lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}) };
+    lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}),
+      ...(split.skipped.length ? { notCollected: split.skipped } : {}) };
     if (collected) console.log(`[vclogs] ${collected}건 장기 보관`);
     return lastRun;
   } finally { running = false; }

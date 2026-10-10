@@ -6,7 +6,8 @@
  * 서로 다른 전원 키를 더하지 않는다(합계 키와 PSU 키가 같이 있으면 이중 계수). 탐색 결과는 장비별로 6시간 캐시한다 —
  * 키 목록은 수천 줄이라 매 주기 받으면 그 자체가 부하다. 못 찾은 것도 캐시한다(없는 키를 매 주기 찾지 않게).
  */
-import { wattsOf } from '../power.js';
+import { wattsOf, powerResult } from '../power.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 export const ISI_POWER_KEY_TTL_MS = 6 * 3_600_000;
 const _keyCache = new Map();   // host → { key: string|null, seen: string[], at }
@@ -50,13 +51,21 @@ function valueWatts(v) {
 }
 
 /**
- * 통계 응답 → { watts, nodes, parts } | null(순수). REST(`{stats:[{key,devid,value}]}`)·SSH JSON 둘 다 받는다.
+ * 통계 응답 → { watts, nodes, parts, missing? } | null(순수). REST(`{stats:[{key,devid,value}]}`)·SSH JSON 둘 다 받는다.
  * 노드 행(devid ≥ 1)이 있으면 노드 합, 없고 클러스터 행(devid 0)만 있으면 그것을 쓴다(둘을 더하지 않는다).
+ *
+ * v2.732(점검 2회차 B2-07): 노드 합이 **일부 노드만** 더한 값이면 그 사실을 `missing`(못 읽은 노드 수)으로 밝힌다 —
+ *   예전에는 키가 맞는데 값을 못 읽은 노드 행(`value:null` + error)을 조용히 건너뛰어 6노드 중 4노드 합을 '측정' 으로 냈다
+ *   (v2.682 R3D-03 partial 경로를 Isilon 만 쓰지 않았다). 못 읽은 노드 = 키가 맞는 노드 행 중 값이 없는 것 + (선택)
+ *   `expectedNodes`(클러스터 노드 수 — 수집기가 아는 경우)보다 응답 노드가 적은 차이. 클러스터 행만 쓰는 경우는 그대로(전체 값).
+ *   ⚠ 실패 노드 행의 실제 모양은 실장비로 확인하지 못했다(정직 기록) — 키가 없는 행은 지어내 세지 않는다(노드 수 대조가 받는다).
+ *   missing 은 0 이면 싣지 않는다(예전 응답 모양 유지).
  */
-export function isiPowerFromStats(body, key) {
+export function isiPowerFromStats(body, key, { expectedNodes = null } = {}) {
   const list = Array.isArray(body) ? body : Array.isArray(body?.stats) ? body.stats : null;
   if (!list || !key) return null;
   const node = new Map(); let cluster = null;
+  const nodeMiss = new Set(); // 키가 맞는데 값을 못 읽은 노드(devid)
   for (const r of list) {
     if (!r || typeof r !== 'object') continue;
     let v; let dev;
@@ -64,17 +73,31 @@ export function isiPowerFromStats(body, key) {
     else if (Object.hasOwn(r, key)) { v = r[key]; dev = r.node ?? r.Node ?? r.devid; }
     else continue;
     const got = valueWatts(v);
-    if (!got) continue;
     const d = String(dev ?? '').toLowerCase();
-    if (d === '0' || d === 'cluster' || d === '') cluster = got;
+    const isCluster = d === '0' || d === 'cluster' || d === '';
+    if (!got) { if (!isCluster) nodeMiss.add(d); continue; }
+    if (isCluster) cluster = got;
     else if (!node.has(d)) node.set(d, got);
   }
   if (node.size) {
     let w = 0; let parts = 0;
     for (const g of node.values()) { w += g.w; parts += g.n; }
-    return { watts: Math.round(w), nodes: node.size, parts };
+    let missing = 0;
+    for (const d of nodeMiss) if (!node.has(d)) missing += 1;
+    const exp = numOrNull(expectedNodes);
+    if (exp != null && exp > 0) missing += Math.max(0, Math.floor(exp) - node.size - missing);
+    return { watts: Math.round(w), nodes: node.size, parts, ...(missing > 0 ? { missing } : {}) };
   }
   return cluster ? { watts: Math.round(cluster.w), nodes: null, parts: cluster.n } : null;
+}
+
+/**
+ * isiPowerFromStats 결과 → 수집기가 싣는 읽음 결과(REST·SSH 공용 — 한 벌). 일부 노드만 읽었으면 powerResult 가
+ * `partial:true` + `missing` 을 붙인다(power/total.js 가 '측정' 이 아니라 '일부 부품만 읽음' 으로 센다 — v2.682 R3D-03).
+ */
+export function isiPowerResult(p, key, source) {
+  if (!p) return null;
+  return powerResult({ watts: p.watts, source, basis: 'input', scope: p.nodes ? 'node' : 'system', parts: p.parts, keys: [key], missing: p.missing ?? null });
 }
 
 export function cachedIsiPowerKey(host, now = Date.now()) {

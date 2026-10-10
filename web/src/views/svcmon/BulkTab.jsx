@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
+import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 400 본문을 성공으로 읽지 않는다
 import PreviewTable from './PreviewTable.jsx';
 import TemplateTab from './TemplateTab.jsx';
 import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
@@ -157,7 +158,9 @@ export default function BulkTab({ canEdit, prefill }) {
   const syncEdge = async (agent) => {
     setBusy(`sync:${agent}`); setErr('');
     try {
-      await putJson(`/svcmon/assign/${encodeURIComponent(agent)}`, { byAgent: true });
+      // v2.732(점검 2회차 B5-03): 400(엣지·대상 상한 초과·저장 실패)은 본문 {error} 로 온다 — 예전에는 그것을 성공으로 읽어
+      //   '✓' 와 함께 버튼을 잠갔다(다시 누를 수도 없었다). requireChanged 가 사유를 던져 아래 catch 가 말한다.
+      requireChanged(await putJson(`/svcmon/assign/${encodeURIComponent(agent)}`, { byAgent: true }));
       setSyncedEdges((cur) => cur.map((e) => (e.agent === agent ? { ...e, state: 'done' } : e)));
     } catch (e) { setErr(`엣지 '${agent}' 배정 실패: ${e.message}`); } finally { setBusy(''); }
   };

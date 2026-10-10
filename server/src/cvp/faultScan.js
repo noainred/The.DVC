@@ -16,7 +16,8 @@ import { deadlineMs } from '../util/deadline.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { loadSettings } from './settings.js';
-import { listServers, agentKeyEq } from './registry.js';
+import { listServers } from './registry.js';
+import { rowOwnerOf } from './overview.js'; // v2.732: '등록부 담당과 맞는 행' 판정은 한 벌(CVP 라우트·Overview 카드와 같은 함수)
 import * as db from './db.js';
 import { observeDevice, transition, devIdOf } from './faults.js';
 import { notifyFaultTransition } from './faultNotify.js';
@@ -31,19 +32,13 @@ let _last = null;
 let _timer = null;
 let _pending = 0;
 
-/** 등록부 기준으로 '이 행을 판정하는가'. */
-function rowOwnedByRegistry(row, byId) {
-  const srv = byId.get(String(row.cvpId));
-  if (!srv) return false;
-  const owner = String(srv.agent ?? '').trim();
-  return owner ? agentKeyEq(row.agent, owner) : String(row.agent ?? '') === '';
-}
 
 async function runInner({ now, reason, notify, send }) {
   const t0 = Date.now();
   const settings = loadSettings();
   const servers = listServers();
   const byId = new Map(servers.map((s) => [String(s.id), s]));
+  const ownsRow = rowOwnerOf(servers);
   const nameOf = (cvpId) => String(byId.get(String(cvpId))?.name || '');
   // v2.708: 데모(mock) 모드에서는 주기 판정이 알림을 보내지 않는다 — 합성 장애가 설정된 실제 채널로 나가지 않게(명시적 notify 는 그대로).
   const doNotify = typeof notify === 'boolean' ? notify : (settings.faultAlerts === true && !isMockMode());
@@ -63,7 +58,7 @@ async function runInner({ now, reason, notify, send }) {
   const observedByDevice = new Map();
   let skippedUnregistered = 0;
   for (const row of devRes.rows) {
-    if (!rowOwnedByRegistry(row, byId)) { skippedUnregistered++; continue; }
+    if (!ownsRow(row)) { skippedUnregistered++; continue; }
     const devId = devIdOf({ agent: row.agent, cvpId: row.cvpId, deviceKey: row.key });
     const ob = observeDevice({ ...row, ports: row.portsRead ? (portsBy.get(devId) || []) : null }, { intervalMs: settings.intervalMs, now });
     observedByDevice.set(devId, { ...ob, agent: row.agent, cvpId: row.cvpId, deviceKey: row.key, deviceName: row.hostname || row.key, cvpName: nameOf(row.cvpId) });

@@ -6,12 +6,40 @@ import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../compone
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 // v2.671: VM 이름 검색 결과를 누르면 여는 상세 — 목록 화면이 그 청크를 받지 않게 열 때만 받는다.
 const EntityDetail = lazy(() => import('../components/EntityDetail.jsx').then((m) => ({ default: m.EntityDetail })));
-import { vcCardState, storageBarInfo } from './vcCardText.js';
+import { vcCardState, storageBarInfo, staleSinceText } from './vcCardText.js';
 import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
+
+/**
+ * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
+ * 'connected' 그대로 두고 `stale` 만 붙인다(헤더 N/M 계약 — 리드 결정). 카드 본문·바로가기 점은 vcCardState 로 이미 호박색인데 카드 머리의
+ * 상태 배지만 초록 'Connected' 로 남아 한 카드가 정상과 낡음을 동시에 말했다. 판정은 vcCardState().stale 하나다(복제 금지).
+ */
+export function VcStateBadge({ s, cs = null, now = Date.now() }) {
+  const st = cs || vcCardState(s, now);
+  if (st.stale) {
+    const since = staleSinceText(s, now);
+    return (
+      <span className="badge amber" data-vc-stale=""
+        title={`상태 ‘${s?.status || '—'}’ 는 담당 엣지가 마지막으로 보낸 값입니다 — ${since ? `마지막 수신 ${since}` : '마지막 수신 시각을 모릅니다'}(지금 값이 아닙니다)`}>낡은 값</span>
+    );
+  }
+  return <StateBadge state={s?.status} />;
+}
+
+/** 상단 KPI '전체 vCenter' 의 메타 — 연결됨 수는 그대로(헤더 N/M 계약)이고 그중 낡은 값 개수를 함께 말한다. `{ text, title }`. */
+export function vcCountMeta(sites, now = Date.now()) {
+  const list = Array.isArray(sites) ? sites : [];
+  const connected = list.filter((s) => s?.status === 'connected').length;
+  const stale = list.filter((s) => vcCardState(s, now).stale).length;
+  return {
+    text: `연결됨 ${connected}${stale ? `(낡은 값 ${stale} 포함)` : ''} · 불가 ${list.length - connected}`,
+    title: stale ? '낡은 값 — 위임 vCenter 의 담당 엣지가 인벤토리를 보내지 않아 마지막으로 받은 값을 보이는 중입니다(상태는 엣지가 마지막으로 보낸 값)' : undefined,
+  };
+}
 
 /**
  * 전체 vCenter VM 이름 조회(v2.671, 사용자 요청 "이 화면의 검색에서 전체 vcenter 를 검색해서 vm 이름으로 조회").
@@ -186,7 +214,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       .filter(Boolean).join(' ').toLowerCase();
     return keywords.every((kw) => hay.includes(kw));
   });
-  const connected = sites.filter((s) => s.status === 'connected').length;
+  const countMeta = vcCountMeta(sites); // v2.732(그룹 i3): 연결됨 수 + 그중 낡은 값
   const totalHosts = sites.reduce((a, s) => a + (s.metrics?.hosts || 0), 0);
   const totalVms = sites.reduce((a, s) => a + (s.metrics?.vms || 0), 0);
   // 다빈치/IRS 분류(사용자 요구): vCenter 이름에 'IRS'(단어, 대소문자 무시 — 예: AZ-IRS·GM1-IRS)가
@@ -206,7 +234,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
     <>
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
       <div className="kpis" style={{ marginBottom: 18 }}>
-        <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta">연결됨 {connected} · 불가 {sites.length - connected}</div></div>
+        <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta" title={countMeta.title}>{countMeta.text}</div></div>
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div><div className="meta">다빈치 {davinciHosts.toLocaleString()}개 · IRS {irsHosts.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div><div className="meta">다빈치 {davinciVms.toLocaleString()}개 · IRS {irsVms.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div>{alarmSum.unknown > 0 && <div className="meta" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 0건이 아닙니다">경보 미조회 vCenter {alarmSum.unknown}개 제외</div>}</div>
@@ -255,7 +283,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                 </div>
                 <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   {restFallbackBadge(s) && <span className="badge amber" title={restFallbackBadge(s).title}>{restFallbackBadge(s).label}</span>}
-                  <StateBadge state={s.status} />
+                  <VcStateBadge s={s} cs={cs} />
                 </div>
               </div>
 

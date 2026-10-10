@@ -190,8 +190,11 @@ export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
     issues.push(...r.issues.map((s) => `[${name || '중앙'}] ${s}`));
     if (Object.keys(r.values).length) a[String(name)] = r.values; // 빈 항목은 저장하지 않는다(파일이 유령 키로 붇지 않게)
   }
-  _db = { global: g.values, agents: a };
-  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ..._db }, null, 2), { mode: 0o600 });
+  // v2.732(점검 2회차 B5-03): 캐시는 **디스크 쓰기 성공 뒤에만** 바꾼다 — 예전에는 먼저 바꿔, 쓰기 실패(라우트 400) 뒤에도
+  //   메모리는 새 주기로 배포·적용하고 재시작하면 옛 값으로 돌아갔다.
+  const next = { global: g.values, agents: a };
+  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _db = next;
   _loadErr.ok();
   return { ok: true, config: loadIntervalConfig(), issues };
 }

@@ -16,6 +16,7 @@ import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScanInfo, osSummary, pruneMissing } from './osStore.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { splitDirectCollectTargets, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
 import { authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
@@ -56,6 +57,7 @@ export function loadOsScanSettings() {
     concurrency: clamp(p.concurrency, 1, 16, DEFAULTS.concurrency),
     lastRun: p.lastRun || null, lastFound: p.lastFound ?? null, lastErr: p.lastErr || '',
     lastAuth: (p.lastAuth && typeof p.lastAuth === 'object' && !Array.isArray(p.lastAuth)) ? p.lastAuth : null,
+    lastSkipped: Array.isArray(p.lastSkipped) ? p.lastSkipped : null,   // v2.732(B4-01): 직접 수집 대상이 아니라 스캔하지 않은 vCenter
   };
   return cache;
 }
@@ -71,7 +73,7 @@ export function saveOsScanSettings(body = {}) {
     maxVms: body.maxVms !== undefined ? clamp(body.maxVms, 1, 5000, cur.maxVms) : cur.maxVms,
     rescanDays: body.rescanDays !== undefined ? clamp(body.rescanDays, 0, 3650, cur.rescanDays) : cur.rescanDays,
     concurrency: body.concurrency !== undefined ? clamp(body.concurrency, 1, 16, cur.concurrency) : cur.concurrency,
-    lastRun: cur.lastRun, lastFound: cur.lastFound, lastErr: cur.lastErr, lastAuth: cur.lastAuth,
+    lastRun: cur.lastRun, lastFound: cur.lastFound, lastErr: cur.lastErr, lastAuth: cur.lastAuth, lastSkipped: cur.lastSkipped,
   };
   write(next);
   return loadOsScanSettings();
@@ -212,8 +214,21 @@ async function runOsScanNowInner(scopeVcId, manual) {
   const s = loadOsScanSettings();
   if (isMockMode()) return runDemoOsScan(scopeVcId || (s.scope && s.scope !== 'all' ? s.scope : ''), s);
   const scope = scopeVcId || (s.scope && s.scope !== 'all' ? s.scope : '');
-  const vcs = (loadVcenterConfig().vcenters || []).filter((v) => !scope || v.id === scope);
-  if (!vcs.length) { write({ ...rawSettings(), lastRun: Date.now(), lastErr: 'live vCenter 설정 없음' }); return { ok: false, reason: 'live vCenter 설정 없음(데모/미구성)' }; }
+  const reg = (loadVcenterConfig().vcenters || []).filter((v) => !scope || v.id === scope);
+  if (!reg.length) { write({ ...rawSettings(), lastRun: Date.now(), lastErr: 'live vCenter 설정 없음' }); return { ok: false, reason: 'live vCenter 설정 없음(데모/미구성)' }; }
+  // v2.732(점검 2회차 B4-01): 직접 수집 vCenter 만 스캔한다 — 비활성·점검중·엣지 위임(site)에는 로그인하지 않는다(store.js 주 폴러와 같은
+  //   판정 — vcenter/collectTarget.js). 예전에는 등록부 전량이라, 대상 VM 을 스냅샷에서 고르므로 엣지가 push 한 site VM·점검중 vCenter 에
+  //   남은 직전 VM(lastGood) 때문에 중앙이 그 vCenter 에 게스트 조사 로그인을 했다. 수동 실행도 같다(store 의 '지금 수집' 과 같다).
+  //   건너뛴 vCenter 는 결과·상태(lastSkipped)에 이유와 함께 싣는다(조용한 제외 금지).
+  const { targets: vcs, skipped: notCollected } = splitDirectCollectTargets(reg);
+  if (notCollected.length) {
+    const c = skippedCountsOf(notCollected);
+    console.log(`[osscan] 직접 수집 대상이 아닌 vCenter ${notCollected.length}곳은 스캔하지 않습니다(${Object.entries(c).map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  }
+  if (!vcs.length) {
+    write({ ...rawSettings(), lastRun: Date.now(), lastFound: null, lastErr: '', lastAuth: null, lastSkipped: notCollected });
+    return { ok: false, reason: '스캔할 수 있는 vCenter 가 없습니다 — 비활성·점검중·엣지 위임(엣지가 수집) vCenter 는 이 포탈이 로그인하지 않습니다.', notCollected };
+  }
   let total = 0; const allErrs = [];
   // v2.591: 인증 정지 사실을 상태에 남긴다(화면이 말한다 — 조용한 정지 금지).
   const lastAuth = { at: Date.now(), manual, vcStopped: [], vmStopped: 0, vmSkipped: 0, breakerTripped: [], breakerSkipped: 0 };
@@ -231,13 +246,13 @@ async function runOsScanNowInner(scopeVcId, manual) {
   // 삭제된 VM 정리
   try { const ids = new Set((store.get().vms || []).map((v) => v.id)); pruneMissing(ids); } catch { /* */ }
   const anyAuth = lastAuth.vcStopped.length || lastAuth.vmStopped || lastAuth.vmSkipped || lastAuth.breakerTripped.length || lastAuth.breakerSkipped;
-  write({ ...rawSettings(), lastRun: Date.now(), lastFound: total, lastErr: allErrs.slice(0, 5).join(' · '), lastAuth: anyAuth ? lastAuth : null });
-  return { ok: true, found: total, summary: osSummary(), ...(anyAuth ? { auth: lastAuth } : {}) };
+  write({ ...rawSettings(), lastRun: Date.now(), lastFound: total, lastErr: allErrs.slice(0, 5).join(' · '), lastAuth: anyAuth ? lastAuth : null, lastSkipped: notCollected.length ? notCollected : null });
+  return { ok: true, found: total, summary: osSummary(), ...(anyAuth ? { auth: lastAuth } : {}), ...(notCollected.length ? { notCollected } : {}) };
 }
 
 function rawSettings() { const s = loadOsScanSettings(); return { enabled: s.enabled, intervalMin: s.intervalMin, scope: s.scope, maxVms: s.maxVms, rescanDays: s.rescanDays, concurrency: s.concurrency }; }
 
-export function osScanStatus() { const s = loadOsScanSettings(); return { settings: rawSettings(), lastRun: s.lastRun, lastFound: s.lastFound, lastErr: s.lastErr, lastAuth: s.lastAuth || null, summary: osSummary(), ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
+export function osScanStatus() { const s = loadOsScanSettings(); return { settings: rawSettings(), lastRun: s.lastRun, lastFound: s.lastFound, lastErr: s.lastErr, lastAuth: s.lastAuth || null, lastSkipped: s.lastSkipped || null, summary: osSummary(), ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
 
 let timer = null;
 let running = false; // 재진입 방지 — 긴 스캔이 다음 tick과 겹쳐 SSH/SOAP 세션 폭증하는 것을 막는다.

@@ -89,8 +89,11 @@ const _listeners = new Set();
 export function onPerfSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /* 리스너 실패가 저장을 막지 않는다 */ } } }
 export function savePerfSettings(input = {}) {
-  _cache = normalizePerfSettings(keepPrevBlankNumbers(input, loadPerfSettings()));
-  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  // v2.732(점검 2회차 B5-03): 캐시는 **디스크 쓰기 성공 뒤에만** 바꾼다(insights/fleetAssign.js 와 같은 규약). 예전에는 캐시를 먼저
+  //   바꿔, 쓰기가 실패해 라우트가 400 을 준 뒤에도 메모리는 새 값으로 수집했고 재시작하면 옛 값으로 돌아갔다(화면과 실제가 어긋남).
+  const next = normalizePerfSettings(keepPrevBlankNumbers(input, loadPerfSettings()));
+  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _cache = next;
   _loadErr.ok();
   notifyChange();
   return { ..._cache };

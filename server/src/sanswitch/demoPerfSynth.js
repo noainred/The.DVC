@@ -74,12 +74,15 @@ function seriesOf(base, seed, buckets) {
   return { sum, peak };
 }
 
-/**
- * storageSeriesMulti 와 같은 모양. metaRows: [{device_id, port, attached_name}] · storageKey: 이름 → 스토리지 키.
+/*
+ * v2.732(감사 B6-07): 계산 본체는 생성기 하나다 — 동기판(demoStorageMulti)과 양보판(demoStorageMultiAsync)이 **같은 코드**를 돈다
+ *   (결과가 갈라지지 않게 — v2.731 ipam ledger 와 같은 방식). 생성기는 포트 행 256개마다·시리즈 하나마다 한 번 멈추고, 양보판은 그때
+ *   호출자가 준 onYield(시간 기준 양보·취소 확인)를 부른다. 데모 260대(시리즈 수천 × 버킷 97)는 한 덩어리 약 430ms 였다(verify-B6).
  */
-export function demoStorageMulti(metaRows, { since, until, bucketMs, groupOf = null, storageKey, carryMs = null }) {
+function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, storageKey, carryMs = null }) {
   const buckets = demoBuckets(since, until, bucketMs);
   const byGroup = new Map();
+  let n = 0;
   for (const m of metaRows) {
     const st = storageKey(m.attached_name);
     const g = groupOf ? (groupOf.get(String(m.device_id)) ?? '') : null;
@@ -88,6 +91,7 @@ export function demoStorageMulti(metaRows, { since, until, bucketMs, groupOf = n
     const s = byGroup.get(gk);
     s.ports.push({ deviceId: String(m.device_id), port: Number(m.port) });
     s.base += portBase(m.device_id, m.port, m.attached_name);
+    if ((++n & 255) === 0) yield;
   }
   const series = [];
   for (const [gk, s] of byGroup) {
@@ -96,9 +100,28 @@ export function demoStorageMulti(metaRows, { since, until, bucketMs, groupOf = n
       key: s.key, group: s.group, ports: s.ports, deviceIds: [...new Set(s.ports.map((p) => p.deviceId))], sum, peak,
       ...totals(sum, peak), partial: [], partialBuckets: 0, carriedCells: 0,
     });
+    yield;
   }
   series.sort((a, b) => b.avgTotal - a.avgTotal);
   return { buckets, bucketMs, since, until, series, carryMs, demo: true };
+}
+
+/**
+ * storageSeriesMulti 와 같은 모양. metaRows: [{device_id, port, attached_name}] · storageKey: 이름 → 스토리지 키.
+ */
+export function demoStorageMulti(metaRows, opts) {
+  const it = storageMultiSteps(metaRows, opts);
+  for (;;) { const r = it.next(); if (r.done) return r.value; }
+}
+
+/** 같은 계산의 양보판 — 생성기가 멈출 때마다 `onYield()`(시간 기준 양보·취소 확인 — 던지면 멈춘다)를 기다린다. 결과는 동기판과 같다. */
+export async function demoStorageMultiAsync(metaRows, opts, onYield = null) {
+  const it = storageMultiSteps(metaRows, opts);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    if (onYield) await onYield();
+  }
 }
 
 /** storageSeries(장비 하나) 와 같은 모양. */

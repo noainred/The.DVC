@@ -306,13 +306,16 @@ export default function SvcMonitor() {
   };
   const deleteFolderAt = async (p) => {
     try {
-      await postJson('/svcmon/folders/delete', { kind: mode, path: p });
+      // v2.732(점검 2회차 B5-01): postJson 은 409(하위 대상 있음)를 던지지 않고 본문 {error,count} 를 돌려준다 —
+      //   반환값을 버리면 폴더가 그대로인데 아무 안내가 없고, 아래 강제 삭제 확인은 영영 도달하지 않았다.
+      //   requireChanged 가 그 본문을 사유('폴더에 대상 N개가 있습니다…')로 던지므로 catch 의 확인 흐름이 그대로 동작한다.
+      requireChanged(await postJson('/svcmon/folders/delete', { kind: mode, path: p }));
       if (sel === p || sel.startsWith(`${p}\\`)) setSel('');
       refresh();
     } catch (e) {
       // 409 = 하위 대상 존재 → 강제 삭제 확인
       if (/대상 \d+개/.test(e.message || '') && window.confirm(`${e.message}\n\n하위 대상까지 모두 삭제할까요?`)) {
-        try { await postJson('/svcmon/folders/delete', { kind: mode, path: p, force: true }); setSel(''); refresh(); }
+        try { requireChanged(await postJson('/svcmon/folders/delete', { kind: mode, path: p, force: true })); setSel(''); refresh(); }
         catch (e2) { window.alert(e2.message); }
       } else window.alert(e.message);
     }

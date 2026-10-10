@@ -7,6 +7,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { scopeSlice, memoJson, scopeKey } from './shared.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { capStr } from '../../util/capStr.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -33,7 +34,12 @@ export function registerCostShowback(api) {
     ...run(req, snap), initial: snap.initial === true, generatedAt: snap.generatedAt || null,
   }), { extraKey: `${scopeKey(req.user, store.get())}|${loadCostSettings().rev}` }));
 
-  api.get('/tools/cost-showback/settings', toolsPerm, (_req, res) => res.json({ ok: true, settings: loadCostSettings() }));
+  // v2.732(점검 2회차 B3-07): updatedBy 는 계정명이다 — 범위 계정에는 null(형제 vm-hygiene v2.721 B2-02 와 같은 규칙).
+  //   저장은 어차피 전체 범위 전용이다. 전체 범위 응답은 그대로(v2.721 결정 — 전체 범위 operator 에게까지 가릴지는 정책 판단).
+  api.get('/tools/cost-showback/settings', toolsPerm, (req, res) => {
+    const s = loadCostSettings();
+    res.json({ ok: true, settings: scopedVcenterIds(req.user, store.get()) ? { ...s, updatedBy: null } : s });
+  });
 
   api.put('/tools/cost-showback/settings', adminOnly, fleetOnly, (req, res) => {
     try {

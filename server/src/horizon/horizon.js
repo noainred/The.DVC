@@ -275,12 +275,21 @@ export function invalidateHorizonLicenseCache(id) { if (id) cache.delete(String(
 /** 테스트 전용 — 캐시 항목(ttl·kind) 확인. */
 export function _horizonLicenseCacheEntry(id) { return cache.get(id) || null; }
 
-/** 등록된 모든(활성) Horizon 서버의 라이선스 행 취합 — 오래된 항목만 병렬 갱신. */
-export async function collectHorizonLicenses({ force = false } = {}) {
+/**
+ * 등록된 모든(활성) Horizon 서버의 라이선스 행 취합 — 오래된 항목만 병렬 갱신.
+ *
+ * v2.732(점검 2회차 B3-01): `demoOnly` — 데모 계정(mock 모드의 내장 데모, 요청 문맥 admin)의 조회는 **데모(`mock-`) 서버만** 다룬다.
+ *   사람이 등록한 커넥션 서버에는 접속하지 않고(저장 AD 계정으로 `/rest/login` 금지 — v2.719 R1-02·v2.720 R1-03 '데모 계정은 실제 장비에
+ *   닿지 않는다'), 캐시도 건드리지 않으며, **다른 사람이 받아 둔 그 서버의 결과(행·오류 원문)도 싣지 않는다** — 건너뛴 대수는 `demoSkipped`
+ *   로 밝힌다(조용한 생략 금지). 일반 admin 은 예전 그대로(mock 모드에서도 사람이 등록한 서버를 실제로 조회 — v2.708 설계).
+ */
+export async function collectHorizonLicenses({ force = false, demoOnly = false } = {}) {
   // v2.708: 데모 등록(`mock-`)은 mock 에서만 대상이고 합성 라이선스를 쓴다(접속하지 않는다) — live 에서는 빠진다.
   const mock = isMockMode();
   if (mock) await ensureDemoHorizonSeed({ loadHorizon, upsertHorizon });   // 등록부가 비어 있을 때만 데모 커넥션 서버 2대(프로세스당 1회)
-  const servers = loadHorizon().filter((s) => s.enabled !== false && (mock || !isDemoEntryId(s.id)));
+  const eligible = loadHorizon().filter((s) => s.enabled !== false && (mock || !isDemoEntryId(s.id)));
+  const servers = demoOnly ? eligible.filter((s) => mock && isDemoEntryId(s.id)) : eligible;
+  const demoSkipped = eligible.length - servers.length;
   const now = Date.now();
   await Promise.all(servers.map(async (s) => {
     const c = cache.get(s.id);
@@ -305,7 +314,7 @@ export async function collectHorizonLicenses({ force = false } = {}) {
     if (c.error) errors.push({ id: s.id, name: s.name, reason: c.error, kind: c.kind || 'error', csVersion: c.csVersion || null, checkedAt: c.at, carried, lastOkAt: c.lastOkAt || null });
     for (const l of c.licenses || []) rows.push({ server: s, lic: l, stale: !!c.error, lastOkAt: c.lastOkAt || null });
   }
-  return { rows, errors, servers: servers.length };
+  return { rows, errors, servers: servers.length, ...(demoOnly ? { demoSkipped } : {}) };
 }
 
 /**

@@ -14,6 +14,7 @@ import { STable } from '../components/STable.jsx';
 import { dayStamp } from '../dayStamp.js';
 import { dailyReportFailNote } from './dailyReportText.js';
 import { alertChannelsBody } from './alertChannelsBody.js';
+import { alertsLockReason, channelUrlField, withoutHiddenUrls } from './alertChannelUrlText.js'; // v2.732(그룹 i3): 범위 계정 URL 가림·저장 잠금
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
 import { numOrNull } from '../numOrNull.js'; // v2.727(C-01)
@@ -371,23 +372,31 @@ export function CapacityForecast({ scope }) {
 }
 
 /* ── ⑦ 알림 채널·이력 ──────────────────────────────────────────────── */
-export function AlertChannels({ isAdmin }) {
-  const [cfg, setCfg] = useState(null);   // 관리자 전체 설정(URL 포함)
+export function AlertChannels({ isAdmin, initialData = null, initialCfg = null }) {
+  // initialData·initialCfg 는 렌더 스모크 테스트용(서버 없이 계약 모양 응답으로 그린다) — 화면은 넘기지 않는다(마운트 때 읽는다).
+  const [cfg, setCfg] = useState(initialCfg);   // 관리자 전체 설정(URL 포함 — 범위 계정이면 서버가 URL 을 가려 보낸다)
   const [cfgErr, setCfgErr] = useState(null); // v2.612 WEB2612-08
   const [msg, setMsg] = useState('');
-  const { data, error, loading } = usePolling('/tools/report/alerts', {}, 15_000);
+  const polled = usePolling('/tools/report/alerts', {}, 15_000);
+  const data = polled.data ?? initialData;
+  const { error, loading } = polled;
   useEffect(() => {
     if (!isAdmin) return;
     fetchJson('/admin/alerts').then((r) => { setCfg(r.config); setCfgErr(null); }).catch((e) => setCfgErr(e));
   }, [isAdmin]);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
+  // v2.732(그룹 i3): 범위 계정은 웹훅 URL 이 가려져 오고(B3-03) 저장·테스트 발송이 403 이다 — 버튼을 잠그고 사유를 미리 말한다.
+  //   저장 본문에서는 가린 채널의 url 을 뺀다(빈 값을 보내면 서버가 주소를 지운다 — 심층 방어).
+  const lock = cfg ? alertsLockReason(cfg) : '';
   const save = async () => {
+    if (lock) return;
     setMsg('저장 중…');
-    try { const r = await putJson('/admin/alerts', alertChannelsBody(cfg)); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
+    try { const r = await putJson('/admin/alerts', alertChannelsBody(withoutHiddenUrls(cfg))); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
     catch (e) { setMsg(`실패: ${e.message}`); }
   };
   const test = async () => {
+    if (lock) return;
     setMsg('테스트 발송 중…');
     try { const r = await postJson('/admin/alerts/test', {}); setMsg(`결과: ${(r.results || []).join(', ') || '활성 채널 없음'}`); }
     catch (e) { setMsg(`실패: ${e.message}`); }
@@ -408,26 +417,30 @@ export function AlertChannels({ isAdmin }) {
       {isAdmin && cfg && (
         <div className="card" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 13 }}>채널 설정 (관리자)</b>
-          {['slack', 'teams', 'webhook'].map((k) => (
-            <div key={k} className="flex wrap gap" style={{ alignItems: 'center', marginTop: 8 }}>
-              <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, width: 170 }}>
-                <input type="checkbox" checked={!!cfg.channels?.[k]?.enabled}
-                  onChange={(e) => setCfg({ ...cfg, channels: { ...cfg.channels, [k]: { ...cfg.channels?.[k], enabled: e.target.checked } } })} />
-                {CH_LABEL[k]}
-              </label>
-              <input className="input" style={{ flex: 1, minWidth: 280 }} placeholder={`${CH_LABEL[k]} incoming webhook URL`}
-                value={cfg.channels?.[k]?.url || ''}
-                onChange={(e) => setCfg({ ...cfg, channels: { ...cfg.channels, [k]: { ...cfg.channels?.[k], url: e.target.value } } })} />
-            </div>
-          ))}
+          {lock && <div className="muted" data-alert-lock="" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{lock} 웹훅 주소는 가렸습니다 — ‘설정됨(가림)’ 은 주소가 저장돼 있다는 뜻입니다.</div>}
+          {['slack', 'teams', 'webhook'].map((k) => {
+            const uf = channelUrlField(cfg.channels?.[k], `${CH_LABEL[k]} incoming webhook URL`);
+            return (
+              <div key={k} className="flex wrap gap" style={{ alignItems: 'center', marginTop: 8 }}>
+                <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, width: 170 }}>
+                  <input type="checkbox" checked={!!cfg.channels?.[k]?.enabled}
+                    onChange={(e) => setCfg({ ...cfg, channels: { ...cfg.channels, [k]: { ...cfg.channels?.[k], enabled: e.target.checked } } })} />
+                  {CH_LABEL[k]}
+                </label>
+                <input className="input" style={{ flex: 1, minWidth: 280 }} placeholder={uf.placeholder} disabled={uf.disabled} title={uf.title}
+                  value={uf.value}
+                  onChange={(e) => setCfg({ ...cfg, channels: { ...cfg.channels, [k]: { ...cfg.channels?.[k], url: e.target.value } } })} />
+              </div>
+            );
+          })}
           <div className="flex wrap gap" style={{ alignItems: 'center', marginTop: 10 }}>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
               <span className="muted">중복 억제 창(분)</span>
               <input className="input" type="number" min="0" style={{ width: 80 }} value={cfg.suppressWindowMin ?? 5}
                 onChange={(e) => setCfg({ ...cfg, suppressWindowMin: e.target.value })} /* v2.607 WEB2607-04: 원문 유지, 전송 때 blankOr */ />
             </label>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
-            <button className="logout-btn" onClick={test}>테스트 발송</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+            <button className="logout-btn" onClick={test} disabled={!!lock} title={lock || undefined}>테스트 발송</button>
             {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
           </div>
         </div>

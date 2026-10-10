@@ -38,6 +38,41 @@ export const COUNT_CAP = 10_000;
 const capOf = (cap) => { const n = Math.trunc(Number(cap)); return Number.isFinite(n) && n >= 1 ? Math.min(n, 1_000_000) : COUNT_CAP; };
 /** v2.607 DB2607-03: LIKE 패턴 이스케이프(\ % _) — ESCAPE '\' 와 짝이다. */
 export const likeEscape = (q) => String(q).replace(/[\\%_]/g, (c) => `\\${c}`);
+/**
+ * v2.732(점검 2회차 B6-01): 적재를 조각 트랜잭션으로 나눌 때의 **안전한 자르기 지점**(순수 — 테스트가 성질을 고정한다).
+ *
+ * 왜 아무 데서나 자르면 안 되나: 조각 하나를 COMMIT 한 직후 프로세스가 죽으면, 다음 수집은 `sinceTs = MAX(ts)+1` 부터 읽는다
+ * (logs/poller.js — db.lastTs). 그때 아직 적재하지 못한 행 중 ts 가 그 MAX 이하인 것(같은 ts 묶음의 나머지·순서가 어긋난 행)은
+ * **영영 건너뛴다**. 그래서 자르는 지점은 '앞에서 이미 넣은 행의 최대 ts < 남은 행의 최소 ts' 를 만족하는 곳뿐이다.
+ * 행 순서는 바꾸지 않는다(INSERT OR IGNORE 의 첫 행 우선·같은 ts 안의 rowid 순서가 한 트랜잭션 판과 같아야 한다).
+ * 그런 지점이 없으면(같은 ts 가 끝까지 이어지거나 순서가 뒤섞였으면) 한 조각 = 예전 한 트랜잭션이다. ts 를 숫자로 읽지 못한 행이
+ * 있으면 그 행을 넘어서는 자르지 않는다(판정 불가 — 안전한 쪽).
+ * @param {{ts:any}[]} rows
+ * @param {number} chunkRows 조각의 최소 행 수(이만큼 모은 뒤 첫 안전 지점에서 자른다)
+ * @returns {[number, number][]} [시작, 끝) 구간들 — 이어 붙이면 원래 배열 전체
+ */
+export function tsSafeChunks(rows, chunkRows = 1000) {
+  const n = Array.isArray(rows) ? rows.length : 0;
+  const lim = Math.trunc(Number(chunkRows));
+  const per = Number.isFinite(lim) && lim >= 1 ? lim : 1000;
+  if (n <= per) return n ? [[0, n]] : [];
+  const tsOf = (r) => { const t = r?.ts == null || r?.ts === '' ? NaN : Number(r.ts); return Number.isFinite(t) ? t : null; };
+  // 남은 행의 최소 ts(뒤에서부터) — 숫자가 아닌 ts 가 있으면 -Infinity(그 앞에서는 자르지 않는다)
+  const sufMin = new Array(n + 1);
+  sufMin[n] = Infinity;
+  for (let i = n - 1; i >= 0; i--) { const t = tsOf(rows[i]); sufMin[i] = t == null ? -Infinity : Math.min(t, sufMin[i + 1]); }
+  const out = [];
+  let start = 0;
+  let preMax = -Infinity;   // 지금까지 넣은(앞) 행 전체의 최대 ts — 숫자가 아니면 +Infinity(그 뒤로는 자르지 않는다)
+  for (let i = 0; i < n; i++) {
+    const t = tsOf(rows[i]);
+    preMax = t == null ? Infinity : Math.max(preMax, t);
+    if (i + 1 - start >= per && i + 1 < n && preMax < sufMin[i + 1]) { out.push([start, i + 1]); start = i + 1; }
+  }
+  out.push([start, n]);
+  return out;
+}
+
 let impl = null;
 let ready = null;
 /** v2.632(A6-2632-02): 키셋 커서 검증 — 숫자가 아니면 커서 없음으로 두지 않고 던진다(조용히 처음부터 다시 내보내면 중복이다). */
@@ -148,9 +183,36 @@ function initSqlite() {
       if (typeof f.entity === 'string' && f.entity) { w.push('entity=?'); p.push(f.entity); }
       return { w, p };
     }
+    // 행 [a, b) 를 한 트랜잭션으로(동기) — insertMany(한 번에 전부)와 insertManyAsync(조각)가 같은 본문을 쓴다.
+    const insertRange = (rows, a, b) => {
+      db.exec('BEGIN');
+      try {
+        for (let i = a; i < b; i++) { const r = rows[i]; ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null); }
+        db.exec('COMMIT');
+      } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+    };
     const api = {
       kind: 'sqlite',
-      insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
+      insertMany: (rows) => insertRange(rows, 0, rows.length),
+      /**
+       * v2.732(점검 2회차 B6-01): insertMany 와 같은 결과를 **조각 트랜잭션 + 조각 사이 시간 기준 양보**로 적재한다.
+       * 예전 폴러는 vCenter 마다 한 트랜잭션(최대 5,000행 — 설정 상한 5만)을 양보 없이 이어 붙여, 첫 수집·긴 정지 뒤 따라잡기에서
+       * 28곳 × 5,000행이 한 번에 약 2.4초 이벤트 루프를 멈췄다(재현). 조각은 tsSafeChunks 의 안전 지점에서만 자른다(그 함수 머리말 —
+       * 조각 COMMIT 뒤 크래시해도 다음 수집이 같은 ts 묶음의 나머지를 건너뛰지 않게). 양보는 COMMIT 뒤에만 한다(v2.611 — 트랜잭션을
+       * 연 채 양보하면 같은 연결의 다른 BEGIN 이 실패한다). 조각 하나가 실패하면 그 조각만 되돌리고 던진다 — 앞 조각은 이미 들어가
+       * 있고, 안전 지점이라 다음 수집이 나머지를 다시 읽는다.
+       * @returns {Promise<{chunks:number}>}
+       */
+      insertManyAsync: async (rows, { chunkRows = 1000, yieldMs = 15 } = {}) => {
+        const list = Array.isArray(rows) ? rows : [];
+        const parts = tsSafeChunks(list, chunkRows);
+        const maybeYield = createYielder(yieldMs);
+        for (let k = 0; k < parts.length; k++) {
+          if (k) await maybeYield();
+          insertRange(list, parts[k][0], parts[k][1]);
+        }
+        return { chunks: parts.length };
+      },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
       firstTs: (vc) => { const v = firstTsStmt.get(vc)?.mn; return Number.isFinite(Number(v)) && v != null ? Number(v) : 0; },
       lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
@@ -244,6 +306,42 @@ function initSqlite() {
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
+      /**
+       * v2.732(점검 2회차 B6-03): query(f, limit, 0) 과 **같은 결과**(최신 먼저 · `ts DESC, rowid DESC` · 상한 limit)를 **시간 조각**으로
+       *   나눠 읽는다 — trackedEventsAsync·opsEventsAsync(v2.719·v2.727)와 같은 골격. 미보호 VM 리포트는 검색어(4열 LIKE)로 조회 창 전체를
+       *   한 문장으로 훑어(합성 7일 80만 행 · 431ms, 범위 계정 693ms 정지 — 재현) 60초 폴링·사용자마다 다시 돌았다.
+       *   최신 조각부터 거꾸로 읽고 조각 사이 시간 기준 양보(createYielder), 상한에 닿으면 멈춘다. 조각은 ts 로 겹치지 않으므로 순서·내용은
+       *   한 문장 판과 같다(테스트가 deepStrictEqual 로 대조). 맨 위 조각은 위가 열려 있다(until 이 없으면 — vCenter 시계가 앞선 이벤트도
+       *   한 문장 판처럼 포함). since 가 없으면(창 하한 없음) 한 문장 판 그대로.
+       */
+      queryAsync: async (f = {}, limit = 200, { sliceMs = 3_600_000, now = Date.now(), yieldMs = 15 } = {}) => {
+        const since = Number(f.since);
+        if (!f.since || !Number.isFinite(since) || since <= 0) return api.query(f, limit, 0);
+        const lim = clampPage(limit, 0)[0];
+        const until = Number(f.until);
+        const hasUntil = !!f.until && Number.isFinite(until);
+        const top = hasUntil ? until : (Number.isFinite(Number(now)) ? Number(now) : Date.now());
+        // 조각 수 상한(2,000) — 창이 길면 조각을 넓힌다(조각은 겹치지 않으므로 결과는 같다. 5년 창이 1시간 조각 4만 개가 되지 않게).
+        const base = Number.isFinite(sliceMs) && sliceMs >= 60_000 ? sliceMs : 3_600_000;
+        const step = Math.max(base, Math.ceil((top - since) / 2000));
+        const { where, params } = filterSql({ ...f, since: 0, until: 0 });   // 시각 조건만 빼고 같은 WHERE(검색어·심각도·범위)
+        const w = (extra) => (where ? `${where} AND ${extra}` : `WHERE ${extra}`);
+        const sel = 'SELECT vcenterId,ts,severity,type,user,entity,message FROM events';
+        const topSt = db.prepare(`${sel} ${w(hasUntil ? 'ts>=? AND ts<=?' : 'ts>=?')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const lowSt = db.prepare(`${sel} ${w('ts>=? AND ts<?')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const maybeYield = createYielder(yieldMs);
+        const out = [];
+        let lo = Math.max(since, top - step);
+        for (const r of topSt.all(...params, lo, ...(hasUntil ? [until] : []), lim)) out.push(r);
+        let hiExcl = lo;
+        while (out.length < lim && hiExcl > since) {
+          await maybeYield();
+          lo = Math.max(since, hiExcl - step);
+          for (const r of lowSt.all(...params, lo, hiExcl, lim - out.length)) out.push(r);
+          hiExcl = lo;
+        }
+        return out.length > lim ? out.slice(0, lim) : out;
+      },
       /**
        * v2.673(운영 장애): 로그인 실패 **후보**만 — 검색어(q)를 쓰지 않고 logs/loginFailPattern.js 의 좁은 조건 하나로 범위를 1회 훑는다.
        * 예전 분석은 이 범위를 단어 4개로 4번 훑었다(드문 단어는 매번 전 범위). 최종 판정은 호출부가 정규식으로 다시 한다.
@@ -364,6 +462,8 @@ function initJson() {
     trackedEventsAsync: async (f = {}, limit = 5000) => api.trackedEvents(f, limit),   // v2.727(F-01): SQLite 판과 같은 API
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
+    queryAsync: async (f = {}, limit = 200) => api.query(f, limit, 0),   // v2.732(B6-03): SQLite 판과 같은 API
+    insertManyAsync: async (recs) => { api.insertMany(recs); return { chunks: 1 }; },   // v2.732(B6-01): SQLite 판과 같은 API
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
     loginFailCandidates: (f = {}, limit = 5000) => rows.filter((r) => match(r, { ...f, q: '' }) && isLoginFailRow(r)).sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0]),
     queryPage: (f = {}, limit = 200, cursor = null) => {

@@ -1082,6 +1082,33 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `_commitLedger` 하나(v2.619 입력 지문·v2.620 ABA 규칙 그대로). 남은 정지는 `ipam/db.js` 레코드 변환·전송(다음 회차 후보).
     · 테스트에서 수만 행 객체를 `assert.equal`/`deepStrictEqual` 의 actual 로 넘기지 말 것 — 실패 시 보고기가 직렬화하다 프로세스가 메모리로 죽는다(G5a 변이 검증에서 SIGKILL).
       `util.isDeepStrictEqual` + `assert.ok` 로.
+  - ⚠⚠ **v2.732 — 점검 2회차(6축 분석 → 반증 → 11그룹 수정) 확정분**(같은 요청의 2회차. 상세 `docs/AUDIT-2026-10-10b.md`,
+    회귀 `server/test/audit2732*` + 웹 `audit2732*` — 그룹별 변이 검증):
+    · ⚠⚠ **v2.731 이 만든 회귀(B1-01)**: 누적 카운터 간격 한계를 60분으로 고정하자 주기 60분 이상 베어메탈의 CPU 가 매 주기 비었다 —
+      한계는 `bmusage/rates.js spanLimitMs`(max(60분, 주기 × 3 + 직전 실행 소요 + 지연))이고 모든 누적 지표가 같은 한계다. **간격 상한을 새로 넣으면 수집 주기 설정의 최댓값과 비교할 것.**
+    · **낡은 위임 vCenter 판정은 `store.siteInventoryStale` 하나**(B2-01 — v2.570 이 '확정 결함 ①' 로 적고 화면만 만든 것): 롤업·`/health` 의 `vcentersStale`,
+      vCenter 카드·법인 표·경영 보기·V6·Platform 의 '낡은 값' 표시, 공개 API 행 `collectedAt`(실제 받은 시각)+`stale`. 연결 수(N/M)는 바꾸지 않았다(구버전 화면 계약).
+      경보 미조회는 `store.vcAlarmsUnknown`(healthReport·alerts 통일은 남은 일).
+    · **CVP 장비 담당은 `cvp/overview.js rowOwnerOf(servers)` 하나**(B2-02) — 라우트·Overview 카드·장애 판정(faultScan)이 같은 판정. 전력·GBIC 탭은 `faults.partsFresh` 로
+      낡은 장비를 합계에서 빼고 사유별로 센다(B2-03 — `docs/CVP.md` §18).
+    · ⚠⚠ **'직접 수집 대상' 판정은 `vcenter/collectTarget.js directCollectSkipReason` 하나**(B4-01): 비활성·점검중·site(엣지 위임)는 중앙이 로그인하지 않는다 —
+      vCenter 로그·게스트 디스크·OS 판별이 같은 판정을 쓰고 거부는 `vcAuthGuard` 정지로 기록한다. ⚠ **동작 변화**: 중앙은 site vCenter 이벤트를 모으지 않는다(엣지가 올리는 경로 없음).
+      미보호 VM 리포트는 `not-collected` 로 따로 세고, vCenter 로그 검색은 site 를 연합 조회(remote)로 읽는다(`classifyLogSources`). 다른 이벤트 리포트의 표시는 3회차 회귀 축.
+      로그 DB 적재·리포트 조회는 `insertManyAsync`(시각 경계 조각 + COMMIT 뒤 양보)·`queryAsync`(1시간 조각) — 결과는 예전 경로와 같다(테스트 대조).
+    · **IP 원장**(B4-02·B6-04): 워커 시한 실패(`SCAN_DEADLINE`)는 메인에서 다시 돌리지 않는다 · 쓰기 전송은 2,000행 조각 · 워커는 commit 메시지에서만 트랜잭션 · 동기화는 직렬.
+      범위 계정의 IP DB 정보는 `count:null` + `fleetCountsHidden` — 웹은 `ipamDbInfoText.dbCountText`(null 이면 '—'. `count.toLocaleString()` 크래시를 리드가 잡았다).
+    · **장비 신뢰 파일을 못 읽으면 닫는 쪽**(B4-03, `security/peerTrust.js`): 원본 보존 + enforce(load-error), 보존 불가면 쓰기 차단 + 관리 동작 409. `.corrupt.*` 만 남은 재시작도 enforce.
+      엣지 인벤토리의 미래 `collectedAt` 은 받은 시각으로 자르고 원본은 `edgeCollectedAt`(v2.630 규약의 remoteInventory 누락) · Isilon 전력 부분 합은 `isiPowerResult`.
+    · **SAN 스냅샷은 주기 끝 한 번 기록**(B6-02, `sanswitch/store.js` + 30초 안전 타이머 + 종료 flush) · 데모 사용량도 `heavyQuery` 키(demo-*)로 · 포트 상세의 패브릭 스위치 IP·계정은 `addressMask` 로 가린다.
+    · **권한·노출**(B3-01·03·05·06·07): 데모 계정의 Horizon 라이선스 조회는 `demoOnly`(접속 0 · `demoSkipped`) · 범위 계정에 웹훅 URL 원문·`updatedBy` 를 싣지 않는다 ·
+      게시판 남의 글 관리 = `isBoardModerator`(admin + 전체 범위) · `/tools/gpu.json` 은 `csvPerm`.
+    · ⚠⚠ **설정 PUT 의 '모르는 id 거부' 는 새로 들어온 id 만**(B5-02): 이미 저장돼 있던 낡은 id(삭제된 vCenter·VM·호스트)는 통과·보존하고 GET·PUT 응답 `staleIds`(vmseries 는 `staleTargets`)로 밝힌다.
+      조용히 걸러 저장하면 vmperf 는 그 vCenter 의 DB 파일을 지운다. 화면은 `views/staleSettingIds.js` 로 '목록에 없음' 칩을 그려 사람이 뺀다. 실패 응답이면 편집값을 유지한다(`settingsSaveOutcome`).
+    · **웹 SSH 콘솔**(B5-07): 새 시도 전 `remote/sshConsoleState.js releaseConsole`(옛 소켓 핸들러를 먼저 떼고 닫는다) · 모든 핸들러가 '이 시도의 소켓' 확인 · 빈 비밀번호는 접속하지 않는다(`canConnect`).
+    · **화면 실패 정직성**(B5-01·03~06·08): `postJson` 반환도 `requireChanged`(409·ok:false 를 성공으로 읽던 것) · 설정 캐시는 **디스크 쓰기 성공 뒤에** 갱신(SAN 사용량·스토리지 주기) ·
+      조회 실패를 '없음'·'미지정' 으로 보이지 않는다. `audit2727e` 허용 목록에서 고친 6파일을 뺐다(늘리지 말 것).
+    · 남긴 것(3회차 후보): storage/store.js 전체 재기록 · sanSwitchConfigPull 장비마다 쓰기 · gpu/poller.js 가 site·비활성·점검중을 거르지 않음 · iDRAC 스캔 주기 쓰기 전 캐시 ·
+      `DELETE /perf/hangs` 실패에도 감사 · 전력 합계 네트워크 6시간 기준 vs CVP partsFresh · 게이트웨이 빈 비밀번호 서버측 거부 · 데모 계정의 관리 IP 조회(정책).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):

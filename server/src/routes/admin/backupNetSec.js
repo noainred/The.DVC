@@ -89,6 +89,12 @@ export function scopeVcLogStatus(st, allowed) {
       lr.authStopped = st.lastRun.authStopped.filter((id) => allowed.has(id));
       lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
     }
+    // v2.732(점검 2회차 B4-01 후속): 수집하지 않은 vCenter·이번 주기 로그인 거부 목록도 범위 안 것만(전 법인 vCenter id·사유는 범위 밖 정보다)
+    for (const k of ['notCollected', 'authRejected']) {
+      if (!Array.isArray(st.lastRun[k])) continue;
+      lr[k] = st.lastRun[k].filter((x) => x && allowed.has(String(x.vcenterId)));
+      lr[`${k}Omitted`] = st.lastRun[k].length - lr[k].length;
+    }
     out.lastRun = lr;
   }
   if ('dbPath' in out) out.dbPath = null;

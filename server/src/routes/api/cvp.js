@@ -27,7 +27,7 @@ import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
-import { buildCvpOverview, corpResolver, freshnessBounds, deviceHealth, RECENT_EVENTS_MAX } from '../../cvp/overview.js'; // v2.645
+import { buildCvpOverview, corpResolver, freshnessBounds, deviceHealth, RECENT_EVENTS_MAX, rowOwnerOf } from '../../cvp/overview.js'; // v2.645 · v2.732(B2-02): 담당 판정 공용
 import { partsFresh } from '../../cvp/faults.js'; // v2.720(감사 B1-02): KPI 도 Overview·장애 판정과 같은 부품 신선도
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
@@ -101,6 +101,19 @@ export function cvpDeviceConfirm(d, { now = Date.now(), intervalMs, partsEveryMs
 }
 
 /**
+ * v2.732(감사 B2-03): 부품(PSU·트랜시버) 값을 '지금 값' 으로 쓸 수 없는 이유 — 없으면 null. 판정은 cvpDeviceConfirm 하나를 쓴다
+ *   (장비 KPI·Overview·장애 판정과 같은 신선도 — partsFresh). 장비 수집 자체가 낡았거나 스트리밍이 아니거나 텔레메트리를 못 읽었으면
+ *   그 사유(never·stale·not-streaming·telemetry-failed), 장비는 지금 값인데 부품 목록만 낡았으면 'parts-stale'.
+ *   소비전력·GBIC 광신호 화면은 이 장비를 합계·판정 KPI 에서 빼고 사유별 개수로 밝힌다(행은 남기고 표지).
+ */
+export const CVP_STALE_REASONS = Object.freeze(['parts-stale', 'stale', 'never', 'not-streaming', 'telemetry-failed']);
+export function cvpPartsStaleReason(d, opts = {}) {
+  const c = cvpDeviceConfirm(d, opts);
+  return c.unconfirmed || (c.partsStale ? 'parts-stale' : null);
+}
+function emptyStaleBy() { return Object.fromEntries(CVP_STALE_REASONS.map((k) => [k, 0])); }
+
+/**
  * @param {object[]} rows DB 장비 행
  * @param {{now?:number, intervalMs?:number, partsEveryMs?:number}} [opts] v2.720(감사 B1-02): 주면 확인 불가 장비를 합산에서 빼고
  *   `unconfirmed`·`unconfirmedBy` 로 따로 센다(라우트는 언제나 준다). 주지 않으면 예전 합산(신선도 판정 없음 — 순수 합산 시험용).
@@ -165,12 +178,10 @@ function maskPeers(peers, admin) {
   return peers.map((p) => (p && typeof p === 'object' ? { ...p, peer: '' } : p));
 }
 
-/** 등록부 담당과 맞는 행만(엣지가 바뀌었는데 옛 엣지 행이 남은 경우를 거짓으로 섞지 않게). */
-function rowBelongs(row, servers) {
-  const srv = servers.find((s) => s.id === row.cvpId);
-  if (!srv) return false;
-  return String(srv.agent || '').trim() ? agentKeyEq(row.agent, srv.agent) : row.agent === cdb.LOCAL_AGENT;
-}
+/*
+ * 등록부 담당과 맞는 행만(엣지가 바뀌었는데 옛 엣지 행이 남은 경우를 거짓으로 섞지 않게) — v2.732(감사 B2-02): 판정은
+ *   cvp/overview.js rowBelongs·rowOwnerOf 하나다(Overview 카드·전체 소비 전력이 같은 함수를 쓴다 — 이 파일에 사본을 두지 말 것).
+ */
 
 function publicDevice(d, admin, confirm = null) {
   return {
@@ -242,7 +253,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
   const settings = loadSettings();
   const servers = listServers();
   const { rows, unavailable } = await cdb.listDeviceRows();
-  const mine = rows.filter((r) => rowBelongs(r, servers));
+  const mine = rows.filter(rowOwnerOf(servers));
   const totals = cvpTotals(mine, { now: Date.now(), intervalMs: settings.intervalMs }); // v2.720(감사 B1-02)
   const poller = cvpPollerStatus();
   const hosts = servers.map((s) => s.host);
@@ -272,7 +283,7 @@ api.get('/tools/cvp/devices', toolsPerm, fullScopeOnly, async (req, res) => {
   const q = capStr(typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '', 128);
   const servers = listServers();
   const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
-  let list = rows.filter((r) => rowBelongs(r, servers));
+  let list = rows.filter(rowOwnerOf(servers));
   if (q) list = list.filter((d) => [d.hostname, d.model, d.serial, d.eosVersion, d.key, ...(admin ? [d.mgmtIp] : [])].some((x) => String(x || '').toLowerCase().includes(q)));
   const omitted = Math.max(0, list.length - DEVICE_LIST_MAX);
   // v2.645: 법인(= 그 CVP 서버에 지정한 DataCenter) — 화면의 법인·모델 칩이 쓴다. 지정이 없으면 corpId '' ('법인 미지정').
@@ -295,8 +306,8 @@ api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
   const servers = listServers();
   const hosts = servers.map((s) => s.host);
   const { rows, unavailable } = await cdb.listDeviceRows();
-  const devices = rows.filter((r) => rowBelongs(r, servers));
-  const own = (x) => rowBelongs({ cvpId: x.cvpId, agent: x.agent }, servers);
+  const own = rowOwnerOf(servers);
+  const devices = rows.filter(own);
   const { staleMs } = freshnessBounds(settings.intervalMs);
   const [faults, traffic, events, faultEvents, usage] = await Promise.all([
     cdb.listOpenFaults().catch(() => ({ rows: [], unavailable: true })),
@@ -428,7 +439,7 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
   const hosts = servers.map((x) => x.host);
   // 등록부 담당과 맞는 행만(옛 담당 엣지의 이벤트를 섞지 않는다 — rowBelongs 와 같은 규칙).
   const byId = new Map(servers.map((x) => [x.id, x]));
-  const own = (e) => { const srv = byId.get(e.cvpId); return !!srv && (String(srv.agent || '').trim() ? agentKeyEq(e.agent, srv.agent) : e.agent === cdb.LOCAL_AGENT); };
+  const own = rowOwnerOf(servers); // v2.732(B2-02): 판정은 cvp/overview.js 하나
   // v2.643: 장비 식별자(시리얼·장비 키) → 호스트명·장비 키(상세 열기용). 등록부 담당 행만 쓴다(rowBelongs 와 같은 규칙).
   //   못 찾으면 원문 식별자를 그대로 둔다(호스트명을 지어내지 않는다 — refs 에 hostname 이 없다).
   const idx = new Map();
@@ -470,10 +481,33 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
   const corpOf = corpResolver(servers, dcList());
   const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
   const s = loadSettings();
-  const counts = { xcvr: 0, present: 0, absent: 0, withDom: 0, noDom: 0, judged: 0, ok: 0, warn: 0, fault: 0, notLinked: 0, devicesNoXcvrRead: 0 };
+  // v2.732(감사 B2-03): staleDevices·staleXcvr·staleBy = 부품 값이 지금 값이 아니어서 판정 KPI 에서 뺀 장비·트랜시버(나머지 칸은 지금 값만 센다).
+  const counts = { xcvr: 0, present: 0, absent: 0, withDom: 0, noDom: 0, judged: 0, ok: 0, warn: 0, fault: 0, notLinked: 0, devicesNoXcvrRead: 0,
+    staleDevices: 0, staleXcvr: 0, staleBy: emptyStaleBy() };
   const list = [];
-  for (const d of rows.filter((r) => rowBelongs(r, servers))) {
+  const confOpts = { now: Date.now(), intervalMs: s.intervalMs };
+  for (const d of rows.filter(rowOwnerOf(servers))) {
     const parts = Array.isArray(d.partsList) ? d.partsList.filter((p) => p && p.kind === 'xcvr') : null;
+    // v2.732(감사 B2-03): 수집이 낡았거나 부품 목록이 낡은 장비의 광량 판정은 '지금 장애' 가 아니다 — 판정 KPI 에서 빼고 행은 표지와 함께 남긴다
+    //   (장애 판정 faults.observeDevice 도 같은 partsFresh 로 보류한다). 직전 판정은 lastRxState 로만 싣는다.
+    const staleReason = cvpPartsStaleReason(d, confOpts);
+    if (staleReason) {
+      counts.staleDevices++; counts.staleBy[staleReason] = (counts.staleBy[staleReason] || 0) + 1;
+      for (const p of parts || []) {
+        counts.staleXcvr++;
+        const o = p.optic && typeof p.optic === 'object' ? p.optic : null;
+        if (p.state === 'absent' || (!p.dom && !o)) continue;
+        const c = corpOf(d.cvpId);
+        list.push({
+          cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
+          intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
+          temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
+          linked: o ? o.linked : null, judged: false, rxState: null, lastRxState: o?.judged ? (o.rxState || null) : null, basis: null, partsAt: d.partsAt,
+          stale: true, staleReason,
+        });
+      }
+      continue;
+    }
     if (!parts) { counts.devicesNoXcvrRead++; continue; }
     for (const p of parts) {
       counts.xcvr++;
@@ -489,7 +523,7 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
         cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
         intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
         temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
-        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt,
+        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
       });
     }
   }
@@ -515,18 +549,34 @@ api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
   if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
   const corpOf = corpResolver(servers, dcList());
   const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
-  const totals = { devices: 0, read: 0, partial: 0, watts: 0, capW: 0, capDevices: 0, unread: { partsNotRead: 0, noPsu: 0, noPowerField: 0 }, basis: { input: 0, output: 0, mixed: 0 } };
+  // v2.732(감사 B2-03): stale·staleBy = 부품(PSU) 값이 지금 값이 아니어서 합계에서 뺀 장비. 항등식 devices = read + stale + Σunread.
+  const totals = { devices: 0, read: 0, partial: 0, watts: 0, capW: 0, capDevices: 0, unread: { partsNotRead: 0, noPsu: 0, noPowerField: 0 }, basis: { input: 0, output: 0, mixed: 0 },
+    stale: 0, staleBy: emptyStaleBy() };
   const corps = new Map(); const models = new Map(); const devices = [];
-  for (const d of rows.filter((r) => rowBelongs(r, servers))) {
+  const confOpts = { now: Date.now(), intervalMs: loadSettings().intervalMs };
+  for (const d of rows.filter(rowOwnerOf(servers))) {
     totals.devices++;
     const c = corpOf(d.cvpId);
-    if (!corps.has(c.corpId)) corps.set(c.corpId, { corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { missing: true } : {}), devices: 0, read: 0, partial: 0, watts: 0 });
+    if (!corps.has(c.corpId)) corps.set(c.corpId, { corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { missing: true } : {}), devices: 0, read: 0, partial: 0, watts: 0, stale: 0 });
     const cr = corps.get(c.corpId); cr.devices++;
     const model = String(d.model || '');
-    if (!models.has(model)) models.set(model, { model, devices: 0, read: 0, watts: 0 });
+    if (!models.has(model)) models.set(model, { model, devices: 0, read: 0, watts: 0, stale: 0 });
     const mr = models.get(model); mr.devices++;
     const parts = Array.isArray(d.partsList) ? d.partsList : null;
     const pw = cvpDevicePower(parts);
+    // v2.732(감사 B2-03): 며칠 전 PSU 값을 지금 소비전력으로 더하지 않는다 — 장비 KPI·Overview·장애 판정과 같은 신선도(partsFresh).
+    //   행은 남기되 소비전력 칸은 비우고(watts null) 직전 값은 lastWatts 로만 싣는다.
+    const staleReason = cvpPartsStaleReason(d, confOpts);
+    if (staleReason) {
+      totals.stale++; totals.staleBy[staleReason] = (totals.staleBy[staleReason] || 0) + 1;
+      cr.stale++; mr.stale++;
+      devices.push({
+        cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+        watts: null, lastWatts: pw ? pw.watts : null, psus: pw ? pw.psus : null, psuRead: pw ? pw.read : null, partial: !!pw?.partial, basis: pw?.basis || null, capW: pw?.capW ?? null, partsAt: d.partsAt,
+        stale: true, staleReason,
+      });
+      continue;
+    }
     if (!pw) {
       const psus = parts ? parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent').length : 0;
       totals.unread[!parts ? 'partsNotRead' : psus === 0 ? 'noPsu' : 'noPowerField']++;
@@ -540,6 +590,7 @@ api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
     devices.push({
       cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', model: d.model || '', corpId: c.corpId, corpName: c.corpName,
       watts: pw ? pw.watts : null, psus: pw ? pw.psus : null, psuRead: pw ? pw.read : null, partial: !!pw?.partial, basis: pw?.basis || null, capW: pw?.capW ?? null, partsAt: d.partsAt,
+      stale: false,
     });
   }
   devices.sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
@@ -549,8 +600,14 @@ api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
   res.json({ totals, corps: corpList, models: modelList, devices: devices.slice(0, LIMIT), ...(devices.length > LIMIT ? { omitted: devices.length - LIMIT, limit: LIMIT } : {}) });
 });
 
-/** 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다). */
+/**
+ * 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다).
+ * v2.732(감사 B3-04): 포트 설명(desc)은 사람이 입력하는 자유 문자열이라 피어 IP·관리 URL 이 흔하다 — 비-admin(operator 는 tools 를
+ *   기본 보유)에는 장비 상세(maskDevicePorts — v2.682 R3S-06)와 **같은 가림**(maskErrText — 등록 주소 + 일반 IPv4·URL)을 쓰고
+ *   `addressHidden` 으로 밝힌다. 예전에는 같은 설명이 장비 상세에서는 가려지고 이 화면에서는 원문으로 나갔다(형제 비대칭).
+ */
 api.get('/tools/cvp/port-usage', toolsPerm, fullScopeOnly, async (req, res) => {
+  const admin = isAdminReq(req);
   const servers = listServers();
   const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
   if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
@@ -558,11 +615,12 @@ api.get('/tools/cvp/port-usage', toolsPerm, fullScopeOnly, async (req, res) => {
   // 처리량이 '지금 값' 인지 — 수집 주기의 3배(최소 15분)보다 오래되면 순위에서 뺀다.
   const staleMs = Math.max(15 * 60_000, s.intervalMs * 3);
   const byId = new Map(servers.map((x) => [x.id, x]));
-  const own = (p) => { const srv = byId.get(p.cvpId); return !!srv && (String(srv.agent || '').trim() ? agentKeyEq(p.agent, srv.agent) : p.agent === cdb.LOCAL_AGENT); };
+  const own = rowOwnerOf(servers); // v2.732(B2-02): 판정은 cvp/overview.js 하나
   const r = await cdb.portUsage({ cvpId, limit: Math.floor(Number(req.query.limit)) || 200, minUtil: Number(req.query.minUtil) || 0, staleMs, keep: own });
   if (r.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  const ports = r.ports.map((p) => ({ ...p, cvpName: byId.get(p.cvpId)?.name || p.cvpId }));
-  res.json({ ports, counts: r.counts, staleMs, intervalMs: s.intervalMs, highPct: SYS_HIGH_PCT, ...(r.omitted ? { omitted: r.omitted, limit: r.limit } : {}) });
+  const hosts = servers.map((x) => x.host);
+  const ports = r.ports.map((p) => ({ ...p, cvpName: byId.get(p.cvpId)?.name || p.cvpId, ...(admin ? {} : { desc: maskErrText(p.desc, hosts) }) }));
+  res.json({ ports, counts: r.counts, staleMs, intervalMs: s.intervalMs, highPct: SYS_HIGH_PCT, ...(r.omitted ? { omitted: r.omitted, limit: r.limit } : {}), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /** v2.640 ③: 판정 상태 → 화면 모양(주소 없음). */
@@ -658,7 +716,7 @@ api.get('/tools/cvp/devices.csv', csvPerm, toolsPerm, fullScopeOnly, async (req,
   const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
   const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
   if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  let list = rows.filter((r) => rowBelongs(r, servers));
+  let list = rows.filter(rowOwnerOf(servers));
   if (q) list = list.filter((d) => [d.hostname, d.model, d.serial, d.eosVersion, d.key, ...(admin ? [d.mgmtIp] : [])].some((x) => String(x || '').toLowerCase().includes(q)));
   const n = (v) => (v == null ? '' : v);
   const head = ['호스트명', '모델', '시리얼', '관리 주소', 'EOS', '스트리밍', '파트 정상', '파트 주의', '파트 장애', '파트 미확인', '빈 슬롯', '포트 up', '포트 down', '포트 전체', 'BGP established', 'BGP down', 'BGP 피어', 'CVP', '엣지', '수집 시각', '텔레메트리'];

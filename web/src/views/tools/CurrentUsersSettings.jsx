@@ -21,6 +21,7 @@ import BoldText from '../../components/boldText.jsx';
 import { blankOr } from '../blankOr.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { intervalText } from './curUserText.js';
+import { staleIdsOf, withoutKey, staleNote, settingsSaveOutcome } from '../staleSettingIds.js'; // v2.732 B5-02
 
 const MIN = 60_000;
 
@@ -87,18 +88,24 @@ export function CurrentUsersSettings({ onSaved }) {
     setVc(id, { folders: list });
   };
 
+  // v2.732(B5-02): sendJson 은 400 을 던지지 않고 본문을 돌려준다 — 예전에는 그 본문의 r.settings(undefined)로 상태를 덮어
+  //   창이 '불러오는 중…' 에서 멈췄고, '저장했습니다' 는 Loading 뒤라 보이지도 않았다. 판정은 settingsSaveOutcome 하나(실패면 편집값 유지).
   const save = async () => {
     if (busy) return;
     setBusy(true); setMsg('');
     try {
       const r = await sendJson('/tools/curuser/settings', 'PUT', s);
-      setS(r.settings); setMsg(`저장했습니다.${scopeSaveSuffix(r)}`);
-      onSaved?.();
+      const o = settingsSaveOutcome(s, r);
+      setS(o.settings); setMsg(o.ok ? `${o.msg}${scopeSaveSuffix(r)}` : o.msg);
+      if (o.ok) onSaved?.();
     } catch (e) { setMsg(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };
 
-  const enabledVc = Object.entries(s.vcenters || {}).filter(([, v]) => v.enabled && (v.folders || []).length).map(([id]) => id);
+  // 저장돼 있지만 지금 vCenter 목록에 없는 키(삭제된 vCenter 등) — 표에 따로 그려 사람이 해제하게 한다.
+  const staleIds = staleIdsOf(Object.keys(s.vcenters || {}), vcenters);
+  const staleSet = new Set(staleIds);
+  const enabledVc = Object.entries(s.vcenters || {}).filter(([id, v]) => !staleSet.has(id) && v.enabled && (v.folders || []).length).map(([id]) => id);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, minWidth: 0 }}>
@@ -132,6 +139,11 @@ export function CurrentUsersSettings({ onSaved }) {
 
       <div>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>법인별 수집</div>
+        {staleIds.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--amber)', whiteSpace: 'normal', lineHeight: 1.55, marginBottom: 6 }}>
+            <BoldText text={staleNote(staleIds.length)} />
+          </div>
+        )}
         <div className="table-wrap">
         <STable className="v3-table">
           <thead><tr><th>법인</th><th data-nosort>수집</th><th data-nosort>하위 폴더 포함</th><th>지정 폴더</th><th>현재 대상</th><th>대상 아님</th></tr></thead>
@@ -149,7 +161,23 @@ export function CurrentUsersSettings({ onSaved }) {
                 </tr>
               );
             })}
-            {!vcenters.length && <tr><td colSpan={6} style={{ color: 'var(--text-faint)' }}>표시할 법인이 없습니다.</td></tr>}
+            {staleIds.map((id) => {
+              const c = vcOf(id);
+              return (
+                <tr key={`stale:${id}`}>
+                  <td>{id} <span className="badge amber" title="삭제됐거나 아직 수집 목록에 없는 vCenter 입니다. 저장해도 그대로 남습니다.">목록에 없음</span></td>
+                  <td>{c.enabled ? '켜짐' : '꺼짐'}</td>
+                  <td>—</td>
+                  <td data-sort={String((c.folders || []).length)}>{(c.folders || []).length}개</td>
+                  <td colSpan={2}>
+                    <button className="tab" style={{ padding: '2px 10px', fontSize: 12 }} disabled={!isAdmin}
+                      title="이 vCenter 의 설정을 뺍니다(저장해야 반영됩니다)"
+                      onClick={() => setS({ ...s, vcenters: withoutKey(s.vcenters, id) })}>✕ 설정에서 빼기</button>
+                  </td>
+                </tr>
+              );
+            })}
+            {!vcenters.length && !staleIds.length && <tr><td colSpan={6} style={{ color: 'var(--text-faint)' }}>표시할 법인이 없습니다.</td></tr>}
           </tbody>
         </STable>
         </div>
@@ -191,7 +219,7 @@ export function CurrentUsersSettings({ onSaved }) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button className="login-btn" onClick={save} disabled={!isAdmin || busy}>{busy ? '저장 중…' : '저장'}</button>
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{msg}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>수집 대상 법인 {enabledVc.length}곳</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>수집 대상 법인 {enabledVc.length}곳{staleIds.length ? ` · 목록에 없는 vCenter ${staleIds.length}곳 제외` : ''}</span>
       </div>
     </div>
   );

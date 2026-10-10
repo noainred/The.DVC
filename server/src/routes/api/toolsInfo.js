@@ -17,6 +17,7 @@ import { dayKey, localStamp } from "../../util/dayKey.js";
 import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -218,9 +219,16 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   }
   // Horizon Connection Server 직수집(등록된 서버가 있을 때만) — vCenter 스코프와 무관.
   if (!scoped && allowed) omittedOutOfScope.horizon = listHorizon().length > 0;
+  let demoSkipped;
   if (!scoped && !allowed) {
     try {
-      const hz = await collectHorizonLicenses();
+      // v2.732(점검 2회차 B3-01): 데모 계정의 GET 이 사람이 등록한 커넥션 서버에 저장 AD 계정으로 로그인하지 않게 —
+      //   데모(mock-) 서버만 다루고 건너뛴 대수를 밝힌다(v2.720 R1-03 '수집형 실행은 demoOnly' 의 GET 판).
+      const hz = await collectHorizonLicenses({ demoOnly: isDemoGuest(req.user) });
+      if (hz.demoSkipped != null) {
+        demoSkipped = hz.demoSkipped;
+        if (demoSkipped > 0) collectionErrors.push(`Horizon: 데모 계정은 사람이 등록한 커넥션 서버 ${demoSkipped}대에 접속하지 않습니다(실제 로그인 방지) — 그 서버의 라이선스는 이 목록에 없습니다`);
+      }
       for (const { server: s, lic: l, stale, lastOkAt } of hz.rows) {
         const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
         items.push({
@@ -249,6 +257,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
     // 범위 계정에는 Horizon 등록 대수도 함대 정보라 싣지 않는다(null = 알려주지 않음, 0 과 다르다).
     horizonServers: allowed ? null : listHorizon().length,
     scoped: !!allowed, omittedOutOfScope,
+    ...(demoSkipped != null ? { demoSkipped } : {}),
     generatedAt: snap.generatedAt,
   });
 });

@@ -5,7 +5,8 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { agoText, countText } from './cvpText.js';
 import { corpLabel } from './cvpOverviewText.js';
-import { POWER_NOTE, wattText, powerKpis, basisText, powerEmptyNote } from './cvpPowerText.js';
+import { POWER_NOTE, wattText, powerKpis, basisText, powerEmptyNote, powerRowNote } from './cvpPowerText.js';
+import { numOrNull } from '../../numOrNull.js';
 import Select from '../../components/Select.jsx';
 
 /**
@@ -14,9 +15,10 @@ import Select from '../../components/Select.jsx';
  */
 const NOTE = { fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 };
 
-export default function CvpPowerView({ servers = [], onOpen }) {
+export default function CvpPowerView({ servers = [], onOpen, initialData = null }) {
+  // initialData 는 렌더 스모크 테스트용(서버 없이 계약 모양 응답으로 그린다) — 화면은 넘기지 않는다(마운트 때 읽는다).
   const [cvpId, setCvpId] = useState('');
-  const [r, setR] = useState(null);
+  const [r, setR] = useState(initialData);
   const [err, setErr] = useState(null);
   const [reload, setReload] = useState(0);
   useEffect(() => {
@@ -65,7 +67,10 @@ export default function CvpPowerView({ servers = [], onOpen }) {
                       <td><b>{corpLabel(c)}</b></td>
                       <td className="right" data-sort={c.read ? c.watts : ''}>{c.read ? wattText(c.watts) : '—'}</td>
                       <td style={{ minWidth: 140 }}><div style={{ height: 6, borderRadius: 3, background: 'var(--border)' }}><div style={{ height: 6, borderRadius: 3, width: maxCorp && c.read ? `${(c.watts / maxCorp) * 100}%` : '0%', background: 'var(--accent)' }} /></div></td>
-                      <td className="right" data-sort={c.read}>{countText(c.read)} / {countText(c.devices)}</td>
+                      <td className="right" data-sort={c.read}>{countText(c.read)} / {countText(c.devices)}
+                        {/* v2.732(그룹 i3): 서버 B2-03 — 부품 값이 오래된 장비는 합계에서 뺐다(읽은 장비 칸의 빈 자리를 설명한다) */}
+                        {(numOrNull(c.stale) ?? 0) > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>오래된 값 {countText(c.stale)}대 제외</div>}
+                      </td>
                       <td className="right" data-sort={c.partial}>{countText(c.partial)}</td>
                     </tr>
                   ))}
@@ -99,7 +104,10 @@ export default function CvpPowerView({ servers = [], onOpen }) {
                     <td><button type="button" onClick={() => onOpen?.({ cvpId: d.cvpId, key: d.key, hostname: d.hostname })}
                       style={{ background: 'none', border: 0, padding: 0, color: 'inherit', cursor: 'pointer', fontWeight: 600, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{d.hostname || d.key}</button></td>
                     <td style={{ fontSize: 12 }}>{d.model || '—'}</td>
-                    <td className="right" data-sort={d.watts ?? ''}><b>{wattText(d.watts)}</b></td>
+                    <td className="right" data-sort={d.watts ?? ''}><b>{wattText(d.watts)}</b>
+                      {/* v2.732(그룹 i3): 서버 B2-03 — 지금 값이 아닌 장비는 소비전력 칸이 비어 있다. 왜 '—' 인지(사유·직전 값·합계 제외)를 행이 말한다 */}
+                      {powerRowNote(d) && <div data-power-row-note="" style={{ fontSize: 11, color: 'var(--amber)', whiteSpace: 'normal', fontWeight: 400 }}>{powerRowNote(d)}</div>}
+                    </td>
                     <td className="right" style={{ color: d.partial ? 'var(--amber)' : undefined }}>{d.psus == null ? '—' : `${countText(d.psuRead)} / ${countText(d.psus)}`}</td>
                     <td style={{ fontSize: 12 }}>{basisText(d.basis)}</td>
                     <td className="right" data-sort={d.capW ?? ''}>{wattText(d.capW)}</td>

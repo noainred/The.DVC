@@ -1,14 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { usePolling, fetchJson, postJson, delJson, hasRole } from '../api.js';
 import { DataTable, SeverityBadge, Loading, ErrorBox, EntityDetail, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { requireChanged } from './changeResult.js'; // v2.732 B5-08: 실패 본문을 성공으로 읽지 않는다
 
 const ENDPOINT = { vm: '/vms', host: '/hosts', datastore: '/datastores' };
+const MUTE_POLL_MS = 30_000;
+
+/**
+ * v2.732(점검 2회차 B5-08): 무시 규칙 목록 상태 → 버튼·창 문구(순수 — 테스트가 고정한다).
+ * 예전에는 `muteData?.mutes || []` 라 읽기 전·조회 실패·재조회(파라미터를 바꿔 usePolling 이 data 를 비우던 것)에서
+ * 버튼이 **'무시 규칙 0개'**, 창이 **'무시 규칙이 없습니다.'** 라 말했다 — 0개가 아니라 모르는 것이다.
+ * kind: 'loading'(아직 못 읽음) · 'error'(읽지 못함 — 직전 목록도 없음) · 'ok'(stale=true 면 마지막 갱신 실패 · 직전 목록 표시 중).
+ */
+export function muteListState(muteData, loadErr) {
+  const list = muteData && Array.isArray(muteData.mutes) ? muteData.mutes : null;
+  if (list) return { kind: 'ok', mutes: list, stale: !!loadErr, label: `🔕 무시 규칙 ${list.length}개${loadErr ? ' (갱신 실패)' : ''}` };
+  if (loadErr) return { kind: 'error', mutes: [], stale: false, label: '🔕 무시 규칙 (읽지 못함)' };
+  return { kind: 'loading', mutes: [], stale: false, label: '🔕 무시 규칙 …' };
+}
 
 export default function Alarms({ filters }) {
   const { data, error, loading } = usePolling('/alarms', filters, 15_000);
-  const [muteRev, setMuteRev] = useState(0); // 해제 후 즉시 재조회용(파라미터 변경으로 refetch)
-  const { data: muteData } = usePolling('/alarm-mutes', { _r: muteRev }, 30_000);
+  // v2.732 B5-08: 무시 규칙은 로컬 상태로 읽는다 — 다시 읽는 동안 **직전 목록을 남긴다**(usePolling 은 파라미터가 바뀌면 data 를 비워
+  //   해제할 때마다 '없습니다' 로 깜빡였다). 조회 실패는 삼키지 않고(muteLoadErr) 403 이면 폴링을 멈춘다(같은 거부 반복 금지).
+  const [muteData, setMuteData] = useState(null);
+  const [muteLoadErr, setMuteLoadErr] = useState(null);
+  const muteGen = useRef(0);
+  const muteDenied = useRef(false);
+  const loadMutes = useCallback(() => {
+    if (muteDenied.current) return Promise.resolve();
+    const g = ++muteGen.current;
+    return fetchJson('/alarm-mutes')
+      .then((r) => { if (g === muteGen.current) { setMuteData(r); setMuteLoadErr(null); } })
+      .catch((e) => { if (g === muteGen.current) { if (e?.status === 403) muteDenied.current = true; setMuteLoadErr(e); } });
+  }, []);
+  useEffect(() => {
+    loadMutes();
+    const t = setInterval(loadMutes, MUTE_POLL_MS);
+    return () => { clearInterval(t); muteGen.current += 1; };
+  }, [loadMutes]);
   const [detail, setDetail] = useState(null);
   const [muteFor, setMuteFor] = useState(null);  // alarm being muted
   const [showMutes, setShowMutes] = useState(false);
@@ -32,15 +63,17 @@ export default function Alarms({ filters }) {
   const mute = async (scope) => {
     setBusy(true); setMuteErr(null);
     try {
-      await postJson('/alarm-mutes', { message: muteFor.message, entityType: muteFor.entityType, vcenterId: muteFor.vcenterId, scope });
+      requireChanged(await postJson('/alarm-mutes', { message: muteFor.message, entityType: muteFor.entityType, vcenterId: muteFor.vcenterId, scope }));
       setMuteFor(null);
+      loadMutes(); // 등록한 규칙이 다음 폴링(최대 30초)까지 목록에서 빠져 있지 않게
     } catch (e) { setMuteErr(`무시 등록 실패: ${e.message}`); } finally { setBusy(false); }
   };
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
   const rows = data?.items || [];
-  const mutes = muteData?.mutes || [];
+  const ml = muteListState(muteData, muteLoadErr);
+  const mutes = ml.mutes;
 
   const sevRank = { critical: 3, warning: 2, info: 1 };
   const columns = [
@@ -61,7 +94,7 @@ export default function Alarms({ filters }) {
           총 <b style={{ color: 'var(--text)' }}>{data.total.toLocaleString()}</b>개 알람 · 위험 {rows.filter((a) => a.severity === 'critical').length} · 경고 {rows.filter((a) => a.severity === 'warning').length}
           {Object.keys(filters || {}).length > 0 && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
         </div>
-        <button className="tab" onClick={() => setShowMutes(true)}>🔕 무시 규칙 {mutes.length}개</button>
+        <button className="tab" onClick={() => setShowMutes(true)}>{ml.label}</button>
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'severity', dir: 'desc' }} emptyText="활성 알람이 없습니다." />
 
@@ -88,7 +121,11 @@ export default function Alarms({ filters }) {
       {showMutes && (
         <Modal title="알람 무시 규칙" onClose={() => setShowMutes(false)} width={620}>
           {muteErr && <div className="error-box" style={{ marginBottom: 8 }}>해제 실패: {muteErr}</div>}
-          {mutes.length === 0 ? <div className="muted" style={{ padding: 12 }}>무시 규칙이 없습니다.</div> : (
+          {ml.kind === 'error' && <ErrorBox error={muteLoadErr} />}
+          {ml.stale && <div className="badge red" style={{ marginBottom: 8, whiteSpace: 'normal' }}>목록 갱신 실패 — 직전에 읽은 목록을 보여 줍니다.</div>}
+          {ml.kind === 'loading' ? <div className="muted" style={{ padding: 12 }}>불러오는 중…</div>
+            : ml.kind === 'error' ? null
+              : mutes.length === 0 ? <div className="muted" style={{ padding: 12 }}>무시 규칙이 없습니다.</div> : (
             <div className="table-wrap">
               <STable>
                 <thead><tr><th>대상유형</th><th>메시지 패턴</th><th>범위</th><th className="right">해제</th></tr></thead>
@@ -98,7 +135,7 @@ export default function Alarms({ filters }) {
                       <td><span className="badge gray">{m.entityType || '전체'}</span></td>
                       <td><b>{m.template}</b><div className="muted" style={{ fontSize: 11 }}>예: {m.sample}</div></td>
                       <td className="muted">{m.vcenterId || '전체'}</td>
-                      <td className="right">{canManage && <button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { setMuteErr(null); try { await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`); setMuteRev((x) => x + 1); } catch (e) { setMuteErr(e.message); } }}>해제</button>}</td>
+                      <td className="right">{canManage && <button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { setMuteErr(null); try { requireChanged(await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`)); loadMutes(); } catch (e) { setMuteErr(e.message); } }}>해제</button>}</td>
                     </tr>
                   ))}
                 </tbody>

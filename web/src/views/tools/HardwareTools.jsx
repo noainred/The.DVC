@@ -523,7 +523,9 @@ function PartsInventory({ vc, onServer }) {
         {(data.missing || []).length > 0 && <span title={(data.missing || []).slice(0, 30).map((m) => m.name).join(', ')}> (목록은 마우스 오버)</span>}
         {' '}— 파트 {rows.length}종 · 행을 클릭하면 장착 서버가 보입니다. 인벤토리는 30분 주기 수집이며 세대/라이선스에 따라 일부 항목이 비어 있을 수 있습니다.
       </div>
-      <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+      {/* v2.732(점검 2회차 B5-06): minWidth 를 주면 STable 이 가로 스크롤 래퍼까지 만든다 — 없으면 쉼표로만 이어진 Dell 부품 이름
+          ('PWR SPLY,1400W,RDNT,LTON 1400W' — 줄바꿈 지점 없음)이 400px 에서 페이지를 395px 밀어냈다(재현). */}
+      <STable minWidth={640} className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr><th>분류</th>{th('label', '파트(모델)')}<th>상세</th>{th('count', '수량')}{th('serverCount', '서버 수')}</tr></thead>
         <tbody>
           {rows.map((b) => (
@@ -604,8 +606,10 @@ function ServerAnalysisView({ bm = false }) {
   const [dcs, setDcs] = useState([]); // 등록된 DataCenter(법인)
   const [assign, setAssign] = useState({}); // vCenter → DataCenter 할당
   const [dcErr, setDcErr] = useState(null); // v2.613 WEB2613-02: 법인 목록(관리자 전용) 조회 실패 — 1차 박스가 그 사실을 말한다
+  // v2.732(점검 2회차 B5-05): vCenter 목록 조회가 두 경로 다 실패하면 2차 박스의 vCenter 선택지가 말없이 사라졌다 — 그 사실을 말한다.
+  const [vcErr, setVcErr] = useState(null);
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
-  useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
+  useEffect(() => { fetchJson('/vcenters').then((d) => { setVcs(d || []); setVcErr(null); }).catch(() => fetchJson('/admin/vcenters').then((d) => { setVcs(d.vcenters || []); setVcErr(null); }).catch((e) => setVcErr(e))); }, []);
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   // v2.621(감사 WEB-04): 벤더·원격 여부를 상세에도 넘긴다(상세 제목을 벤더에 맞출 근거 — serverVendorText.bmcLabel).
   // v2.622(감사 RECENT-04): 온도·GPU·펌웨어 행은 vendor 가 없다 — id 로 서버 목록에서 찾고, 모르면 'BMC'.
@@ -647,7 +651,7 @@ function ServerAnalysisView({ bm = false }) {
             <span className="muted">구분</span>
             <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }} disabled={bm}
               title={bm ? '서버 › 물리 서버 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › 서버 분석에서 고릅니다.' : undefined}>
-              <option value="">{dc ? '전체 (법인 모든 장비)' : '전체'}</option>
+              <option value="">{vcErr ? '전체 (vCenter 목록을 읽지 못함)' : dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
                   {dcVcs.map((v) => <option key={v.id} value={`vc:${v.id}`}>{v.name || v.id}</option>)}
