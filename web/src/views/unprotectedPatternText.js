@@ -17,6 +17,7 @@ const UNDETERMINED_REASON = {
   'log-collection-off': '이 포탈의 vCenter 로그 수집이 꺼져 있음',
   'severity-filter': '로그 최소 심각도가 info 보다 높아 스냅샷 이벤트를 저장하지 않음',
   'no-events': '조회 기간에 저장된 이벤트가 0건인 vCenter(엣지 위임·수집 실패)',
+  'not-collected': '이 포탈이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임) — 남은 옛 이벤트로는 판정하지 않음',
 };
 
 /**

@@ -19,6 +19,8 @@ import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
+import { loadRegistry as listVcenterRegistry } from '../../vcenter/registry.js';
+import { directCollectSkipReason } from '../../vcenter/collectTarget.js'; // v2.732: 직접 수집 대상 판정 한 벌(로그 폴러와 같다)
 
 /**
  * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
@@ -211,10 +213,16 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     // v2.622(감사 DATA-05): 조회 창 안에 이벤트(종류 무관)가 1건이라도 저장된 vCenter 만 '판정 가능' 이다 — 엣지 위임·
     //   수집 실패로 이벤트가 없는 vCenter 의 VM 을 미보호로 세면 거짓 백업 공백이다. (vcenterId, ts) 인덱스 LIMIT 2 조회라 가볍다.
     const coveredVcenterIds = new Set();
+    // v2.732(점검 2회차 B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 창 안에 옛 이벤트가 남아 있어도
+    //   '판정 가능' 이 아니다 — 수집을 멈춘 뒤의 스냅샷 이벤트가 없으므로 그 VM 을 미보호로 세면 거짓 백업 공백이다(로그 폴러가 2.732 부터 그 셋을 건너뛴다).
+    const regById = new Map((listVcenterRegistry() || []).map((v) => [String(v.id), v]));
+    const notCollectedVcenterIds = new Set();
     for (const vc of scoped.vcenters || []) {
+      const reg = regById.get(String(vc.id));
+      if (reg && directCollectSkipReason(reg)) { notCollectedVcenterIds.add(String(vc.id)); continue; }
       if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
     }
-    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, logSettings: loadLogSettings(), coveredVcenterIds });
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

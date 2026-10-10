@@ -226,7 +226,7 @@ function scopedOsScanStatus(req) {
   const st = osScanStatus();
   const allowed = scopedVcenterIds(req.user, store.get());
   if (!allowed) return st;
-  return { ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, scoped: true, fleetRunHidden: true };
+  return { ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, lastSkipped: null, scoped: true, fleetRunHidden: true }; // v2.732: lastSkipped 는 전 vCenter 목록
 }
 adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus(req)));
 // v2.606 AUTHZ2606-06: 스캔 설정은 전역이다 — 범위 admin 이 켠 주기 스캔은 전 vCenter 게스트에 로그인한다(v2.599 가 수동
