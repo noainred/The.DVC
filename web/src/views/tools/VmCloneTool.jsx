@@ -16,6 +16,25 @@ import { cloneRunMark } from '../authSkipText.js'; // v2.591(감사 F1): 인증 
  */
 const MODE_LABEL = { manual: '수동만', daily: '매일', interval: '간격' };
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
+import { requireChanged } from '../changeResult.js'; // v2.732 B5-03 계열: 삭제 실패 본문을 성공으로 읽지 않는다
+
+/**
+ * v2.732(점검 2회차 B5-05): 잡 추가 폼의 선택 목록(vCenter·VM·데이터스토어) 상태 → 'VM 검색·선택' 라벨.
+ * 예전에는 조회가 실패하면 `catch → setVms([])` 라 일시 장애가 그대로 **'0대 중 · 일치 VM 없음'** 으로 굳었다(재현).
+ * state: 'idle'(vCenter 미선택) · 'loading' · 'ok' · 'error'. total 은 /vms 응답의 전체 개수(상한 5,000 으로 잘렸으면 밝힌다).
+ */
+export function vmPickLabel({ state, count, total } = {}) {
+  if (state === 'loading') return 'VM 검색·선택 (불러오는 중…)';
+  if (state === 'error') return 'VM 검색·선택 — VM 목록을 읽지 못했습니다';
+  const n = Number.isFinite(count) ? count : 0;
+  if (Number.isFinite(total) && total > n) return `VM 검색·선택 (전체 ${total}대 중 앞 ${n}대 — 이름순)`;
+  return `VM 검색·선택 (${n}대 중)`;
+}
+/** 목록 조회 실패 문구 — 사유를 그대로 말한다('0개' 로 보이지 않게). */
+export function listFailText(what, err) {
+  const why = (err && (err.message || String(err))) || '사유 미상';
+  return `${what} 목록을 읽지 못했습니다(${why}) — 비어 있다는 뜻이 아닙니다.`;
+}
 
 export default function VmCloneTool() {
   const [d, setD] = useState(null);          // { jobs, status, mounts }
@@ -39,7 +58,7 @@ export default function VmCloneTool() {
   const remove = async (j) => {
     if (!window.confirm(`'${j.vmName}' 복제 잡을 삭제할까요?\n(만들어 둔 클론/NFS 사본은 지우지 않습니다 — 잡 정의만 삭제)`)) return;
     setBusy(true); setMsg(null);
-    try { await delJson(`/tools/vm-clone/jobs/${encodeURIComponent(j.id)}`); await load(); }
+    try { requireChanged(await delJson(`/tools/vm-clone/jobs/${encodeURIComponent(j.id)}`)); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
 
@@ -111,19 +130,28 @@ function JobForm({ d, form, setForm, onSaved }) {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  useEffect(() => { fetchJson('/vcenters').then((r) => setVcs(r || [])).catch(() => {}); }, []);
+  // v2.732(점검 2회차 B5-05): 세 목록의 조회 상태 — 실패를 빈 목록으로 삼키지 않는다(사유 + 다시 시도).
+  const [vcErr, setVcErr] = useState(null);
+  const [vmList, setVmList] = useState({ state: 'idle', total: null, err: null });
+  const [dsErr, setDsErr] = useState(null);
+  const [retry, setRetry] = useState(0);
+  const loadVcs = () => { setVcErr(null); fetchJson('/vcenters').then((r) => setVcs(r || [])).catch((e) => setVcErr(e)); };
+  useEffect(() => { loadVcs(); }, []);
   // vCenter 를 고르면 그 vCenter 의 VM(선택용)·데이터스토어(대상용) 로드.
   // 세대(genRef) 가드 — 고RTT 에서 이전 vCenter 응답이 늦게 와 지금 고른 vCenter 의 VM/DS 를
   // 덮어쓰면, 복제 잡이 엉뚱한 VM/데이터스토어를 대상으로 만들어질 수 있다. 늦은 응답은 버린다.
   const loadGen = useRef(0);
   useEffect(() => {
-    if (!form.vcenterId) { setVms([]); setDss([]); return; }
     const gen = ++loadGen.current;
+    setVms([]); setDss([]); setDsErr(null);
+    if (!form.vcenterId) { setVmList({ state: 'idle', total: null, err: null }); return; }
+    setVmList({ state: 'loading', total: null, err: null });
     fetchJson('/vms', { vcenterId: form.vcenterId, limit: 5000, sortBy: 'name', order: 'asc' })
-      .then((r) => { if (gen === loadGen.current) setVms(r.items || []); }).catch(() => { if (gen === loadGen.current) setVms([]); });
+      .then((r) => { if (gen === loadGen.current) { const items = r.items || []; setVms(items); setVmList({ state: 'ok', total: Number.isFinite(r.total) ? r.total : items.length, err: null }); } })
+      .catch((e) => { if (gen === loadGen.current) setVmList({ state: 'error', total: null, err: e }); });
     fetchJson('/datastores', { vcenterId: form.vcenterId })
-      .then((r) => { if (gen === loadGen.current) setDss(r.items || []); }).catch(() => { if (gen === loadGen.current) setDss([]); });
-  }, [form.vcenterId]);
+      .then((r) => { if (gen === loadGen.current) setDss(r.items || []); }).catch((e) => { if (gen === loadGen.current) setDsErr(e); });
+  }, [form.vcenterId, retry]);
 
   const ql = q.trim().toLowerCase();
   const filtered = useMemo(() => (ql ? vms.filter((v) => v.name.toLowerCase().includes(ql)) : vms).slice(0, 50), [vms, ql]);
@@ -147,14 +175,14 @@ function JobForm({ d, form, setForm, onSaved }) {
         <label style={{ fontSize: 12 }}>vCenter<br />
           <Select className="select" value={form.vcenterId} disabled={!!form.id}
             onChange={(e) => setForm({ ...form, vcenterId: e.target.value, vmId: '', vmName: '', dest: { ...form.dest, datastoreName: '' } })}>
-            <option value="">(선택)</option>
+            <option value="">{vcErr ? '(vCenter 목록을 읽지 못함)' : '(선택)'}</option>
             {vcs.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
           </Select>
         </label>
         {form.vcenterId && !form.id && (
-          <label style={{ fontSize: 12, flex: '1 1 260px' }}>VM 검색·선택 ({vms.length}대 중)<br />
+          <label style={{ fontSize: 12, flex: '1 1 260px' }}>{vmPickLabel({ state: vmList.state, count: vms.length, total: vmList.total })}<br />
             <SearchBox value={q} onChange={setQ} placeholder="VM 이름 검색" style={{ width: '100%' }} />
-            {ql && !sel && (
+            {ql && !sel && vmList.state === 'ok' && (
               <div className="card" style={{ maxHeight: 160, overflow: 'auto', marginTop: 4, padding: 6 }}>
                 {filtered.map((v) => (
                   <div key={v.id} className="vcd-link" style={{ padding: '3px 6px', cursor: 'pointer', fontSize: 12.5 }}
@@ -180,7 +208,7 @@ function JobForm({ d, form, setForm, onSaved }) {
         {form.dest.type === 'datastore' ? (
           <label style={{ fontSize: 12 }}>대상 데이터스토어<br />
             <Select className="select" value={form.dest.datastoreName || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, datastoreName: e.target.value } })}>
-              <option value="">(선택)</option>
+              <option value="">{dsErr ? '(데이터스토어 목록을 읽지 못함)' : '(선택)'}</option>
               {dss.map((ds) => <option key={ds.id} value={ds.name}>{dsOptionLabel(ds)}</option>)}
             </Select>
           </label>
@@ -215,6 +243,16 @@ function JobForm({ d, form, setForm, onSaved }) {
         </label>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !form.vmId} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
       </div>
+      {/* v2.732 B5-05: 선택 목록을 못 읽었으면 '없다' 가 아니라 '못 읽었다' 고 말하고 다시 시도하게 한다 */}
+      {(vcErr || vmList.state === 'error' || dsErr) && (
+        <div style={{ color: 'var(--amber)', fontSize: 12.5, marginTop: 8, lineHeight: 1.6 }}>
+          {vcErr && <div>⚠ {listFailText('vCenter', vcErr)}</div>}
+          {vmList.state === 'error' && <div>⚠ {listFailText('VM', vmList.err)}</div>}
+          {dsErr && <div>⚠ {listFailText('데이터스토어', dsErr)}</div>}
+          <button className="logout-btn" style={{ padding: '3px 10px', fontSize: 12, marginTop: 4 }}
+            onClick={() => { if (vcErr) loadVcs(); setRetry((x) => x + 1); }}>다시 시도</button>
+        </div>
+      )}
       {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
     </div>
   );

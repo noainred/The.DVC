@@ -175,7 +175,8 @@ insightsRouter.get('/fleet', async (req, res) => {
 insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, (req, res) => {
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
-  res.json(r);
+  // v2.732(점검 2회차 B5-03): 실패(입력 거부·디스크 쓰기 실패)를 200 {ok:false} 로 주던 것 — 형제 /fleet/assign 처럼 400.
+  res.status(r.ok ? 200 : 400).json(r);
 });
 // 베어메탈 서버의 소속 법인(vCenter) 등록/해제(관리자). body: { serverId, serviceTag, key, vcenterId }.
 // iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고(권위 소스),
@@ -240,7 +241,17 @@ insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, re
     }
   }
   if (regTargets.length) assignVcenter({ ids: regTargets, vcenterId });           // 레지스트리 1 read+1 write
-  if (assignEntries.length || staleClears.length) setFleetAssignMany([...assignEntries, ...staleClears], validIds); // fleet-assign 1 write
+  // v2.732(점검 2회차 B5-03): fleet-assign 쓰기 실패({ok:false})를 버리고 언제나 {ok:true, assigned} 를 줬다 — 화면은
+  //   '일괄 등록 완료' 라 말하는데 소속은 저장되지 않았다. 실패는 실패로 응답하고, 이미 반영된 레지스트리 몫은 밝힌다.
+  const fr = (assignEntries.length || staleClears.length) ? setFleetAssignMany([...assignEntries, ...staleClears], validIds) : { ok: true }; // fleet-assign 1 write
+  if (fr && fr.ok === false) {
+    logAudit({ user: req.user?.username, action: '플릿 법인 일괄 귀속 실패', target: vcenterId || '(해제)', detail: `레지스트리 ${regTargets.length}대 반영 · 소속 ${assignEntries.length}대 저장 실패: ${String(fr.reason || '').slice(0, 200)}`, ip: req.ip || '' });
+    return res.status(500).json({
+      ok: false,
+      reason: `소속 저장 실패(${fr.reason || '사유 미상'}) — iDRAC 등록 서버 ${regTargets.length}대는 반영됐고, 그 밖의 ${assignEntries.length}대는 저장되지 않았습니다.`,
+      registryAssigned: regTargets.length, notSaved: assignEntries.length, total: items.length,
+    });
+  }
   const assigned = regTargets.length + assignEntries.length;
   logAudit({ user: req.user?.username, action: '플릿 법인 일괄 귀속', target: vcenterId || '(해제)', detail: `${assigned}/${items.length}대 (레지스트리 ${regTargets.length} · 소속 ${assignEntries.length})`, ip: req.ip || '' });
   res.json({ ok: true, assigned, total: items.length, errors: [] });

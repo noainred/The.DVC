@@ -8,6 +8,20 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import { fleetPartialsNote } from '../fleetPartialText.js'; // v2.607 LEFT2607-02
+import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
+
+/**
+ * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
+ * 예전에는 400 본문 {ok:false, reason} 을 그대로 읽어 'undefined/undefined대 일괄 등록 완료' 라고 말했다.
+ * 숫자를 못 읽으면 숫자를 지어내지 않는다.
+ */
+export function bulkAssignDoneText(r) {
+  const ok = requireChanged(r);
+  const n = (v) => (Number.isFinite(v) ? v : null);
+  const a = n(ok?.assigned); const t = n(ok?.total);
+  if (a == null || t == null) return '일괄 등록 요청을 서버가 받았습니다(처리 대수는 응답에 없습니다).';
+  return `${a}/${t}대 일괄 등록 완료`;
+}
 
 
 /** Generic on-demand fetch hook (runs when params change). */
@@ -76,14 +90,15 @@ export function FleetInventory({ isAdmin }) {
     const key = tagKeyOf(row);
     if (!key) { setErr('이 항목은 식별 키가 없어 분류를 바꿀 수 없습니다(서비스태그/호스트명 필요).'); return; }
     setBusy(rowKey(row));
-    try { await putJson('/insights/fleet/tag', { key, tag }); await load(); }
+    // v2.732 B5-03: 이 라우트는 예전에 실패를 200 {ok:false} 로 줬고 화면은 다시 읽기만 했다(바뀌지 않은 분류가 조용히 남았다).
+    try { requireChanged(await putJson('/insights/fleet/tag', { key, tag })); await load(); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
   // 베어메탈 행의 소속 법인(vCenter) 등록/해제. tagKey를 함께 보내 백엔드 저장 키를 일치시킨다.
   const setVc = async (row, vcenterId) => {
     setBusy(rowKey(row));
-    try { await putJson('/insights/fleet/assign', { serverId: row.serverId, serviceTag: row.serviceTag, key: tagKeyOf(row), vcenterId }); await load(); }
+    try { requireChanged(await putJson('/insights/fleet/assign', { serverId: row.serverId, serviceTag: row.serviceTag, key: tagKeyOf(row), vcenterId })); await load(); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
@@ -127,11 +142,11 @@ export function FleetInventory({ isAdmin }) {
     setBusy('__bulk__');
     setNotice('');
     try {
-      const r = await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc });
+      const done = bulkAssignDoneText(await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc }));
       setSel(new Set());
       await load();
       setErr(null);
-      setNotice(`${r.assigned}/${r.total}대 일괄 등록 완료`);
+      setNotice(done);
     } catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };

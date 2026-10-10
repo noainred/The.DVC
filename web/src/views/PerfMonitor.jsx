@@ -9,6 +9,17 @@ import {
 } from './perfMonitorText.js';
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
+import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 실패 본문을 성공으로 읽지 않는다
+
+/**
+ * v2.732(점검 2회차 B5-03): hang 로그 비우기 응답 → 화면 문구. 서버 clearHangs 는 삭제 실패를 **200** {ok:false, reason} 으로
+ * 준다 — 예전 화면은 반환값을 버려 지우지 못했는데도 '비웠습니다' 라 말했다. 실패면 사유를 던진다(requireChanged).
+ * deferred:true(쓰는 중이던 줄이 있어 그 쓰기가 끝나면 한 번 더 지운다 — v2.560)도 숨기지 않는다.
+ */
+export function clearHangsText(r) {
+  const ok = requireChanged(r);
+  return `hang 로그 파일을 비웠습니다${ok?.deferred ? ' — 기록 중이던 줄이 있어 그 쓰기가 끝나는 즉시 한 번 더 지웁니다' : ''}(메모리 기록은 프로세스 재시작까지 남습니다).`;
+}
 
 /**
  * 설정 › 서버 성능 측정(v2.498) — 사용자 요청: "'불러오는 중…' 이 3분 이상 지속될 때가 있다.
@@ -78,7 +89,7 @@ export default function PerfMonitor() {
       // 즉시 지워진다(적대적 리뷰 지적). 서버도 빈 값을 무시하도록 함께 고쳤다.
       const body = { enabled: !!form.enabled };
       for (const k of NUMERIC) if (String(form[k] ?? '').trim() !== '') body[k] = form[k];
-      const r = await putJson('/admin/perf/settings', body);
+      const r = requireChanged(await putJson('/admin/perf/settings', body));
       setForm({ ...r.settings });
       setMsg({ ok: true, text: `저장됨 — 다음 요청·다음 창부터 적용${r.pruned?.trimmed ? ` (보존일 정리 ${r.pruned.trimmed}줄)` : ''}` });
       load();
@@ -96,7 +107,7 @@ export default function PerfMonitor() {
   };
   const clearFile = async () => {
     setBusy('clear'); setMsg(null);
-    try { await delJson('/admin/perf/hangs'); setHangFile(null); setMsg({ ok: true, text: 'hang 로그 파일을 비웠습니다(메모리 기록은 프로세스 재시작까지 남습니다).' }); load(); }
+    try { const text = clearHangsText(await delJson('/admin/perf/hangs')); setHangFile(null); setMsg({ ok: true, text }); load(); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
 

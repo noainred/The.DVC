@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
+import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
 
 /**
  * 스토리지 수집 주기(중앙 → 엣지 배포, v2.409 — 사용자 요구
@@ -86,7 +87,9 @@ export default function StorageIntervals() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/tools/storage/intervals', toBody(globalForm, agentForms));
+      // v2.732(점검 2회차 B5-03): 400 {ok:false, reason}(디스크 쓰기 실패)을 성공으로 읽으면 '저장되었습니다' 와 함께
+      //   fill 이 옛 config 로 폼을 되돌렸다(입력이 사라진다). 판정한 뒤에만 폼을 바꾼다 — 실패면 입력을 그대로 둔다.
+      const r = requireChanged(await putJson('/tools/storage/intervals', toBody(globalForm, agentForms)));
       setData((p) => ({ ...p, ...r }));
       fill({ ...data, ...r });
       setMsg((r.issues?.length ? `저장됨(보정 ${r.issues.length}건: ${r.issues.join(' / ')}). ` : '저장되었습니다. ') + (r.note || ''));
