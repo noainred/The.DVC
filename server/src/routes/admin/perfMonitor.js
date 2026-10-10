@@ -60,6 +60,12 @@ export function registerPerfMonitor(adminRouter) {
   adminRouter.delete('/perf/hangs', adminOnly, fullScopeOnly, (req, res) => {
     const st = hangLogStatus();
     const r = clearHangs();
+    // v2.733(점검 3회차 C4-05): 삭제가 실패하면(clearHangs {ok:false}) 500 + 감사 '삭제 실패'(사유) — 예전에는 결과와 무관하게
+    //   200 과 감사 '삭제' 를 남겨, 사용자명·IP·UA 가 담긴 파일이 그대로인데 감사 기록은 지워졌다고 말했다.
+    if (r?.ok === false) {
+      logAudit({ user: req.user?.username, action: '서버 성능 hang 로그 삭제 실패', detail: `bytes=${st.bytes ?? 0} · ${String(r.reason || '').slice(0, 200)}`, ip: req.ip || '' });
+      return res.status(500).json(r);
+    }
     logAudit({ user: req.user?.username, action: '서버 성능 hang 로그 삭제', detail: `bytes=${st.bytes ?? 0}`, ip: req.ip || '' });
     res.json(r);
   });

@@ -198,7 +198,7 @@ export async function pollSanSwitchOnce({ manual = false, demoOnly = false } = {
  * v2.720(감사 B2-01): `demoOnly` 면 데모(mock-) 장비가 아닐 때 접속하지 않고 `{skipped, demoOnly, reason}` 을 돌려준다(참 값 —
  *   호출부는 false(수집 중)와 구분해 읽는다).
  */
-export async function collectDeviceNow(id, { demoOnly = false } = {}) {
+export async function collectDeviceNow(id, { demoOnly = false, flush = true } = {}) {
   const dev = devicesForThisNode().find((d) => d.id === id) || getDeviceWithSecret(id);
   if (!dev) throw new Error('이 노드가 수집하는 장비가 아닙니다.');
   if (demoOnly && !isSanDemoId(dev.id)) return { ok: false, skipped: true, demoOnly: true, reason: DEMO_ONLY_REASON };
@@ -206,7 +206,9 @@ export async function collectDeviceNow(id, { demoOnly = false } = {}) {
   // 폴러와 가드를 공유한다(CLAUDE.md '수동 실행 API 도 같은 가드') — 같은 스위치에 SSH 세션이 겹치면
   // in-flight 상태가 먼저 끝난 쪽에 지워지고 처리량 델타 간격이 흐트러진다.
   if (_inFlight.has(dev.id)) return false;
-  try { await collectOne(dev); } finally { flushSnapshotsNow(); }   // v2.732(B6-02): 단건은 끝나면 바로 쓴다(주기 끝 flush 를 기다리지 않게)
+  // v2.732(B6-02): 단건은 끝나면 바로 쓴다(주기 끝 flush 를 기다리지 않게). v2.733(C4-02): 여러 대를 차례로 수집하는 엣지 재수집
+  //   묶음(agent/sanSwitchConfigPull.js)은 `flush:false` 로 부르고 묶음 끝에 한 번 쓴다 — 예전에는 이 인자가 없어 넘겨도 무시됐다.
+  try { await collectOne(dev); } finally { if (flush) flushSnapshotsNow(); }
   return true;
 }
 

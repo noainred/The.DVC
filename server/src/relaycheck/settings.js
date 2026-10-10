@@ -92,8 +92,10 @@ export function saveSettings(input = {}) {
     for (const k of Object.keys(LIMITS)) { const n = numOrNull(input[k]); if (n == null || n <= 0) merged[k] = cur[k]; }
     input = merged;
   }
-  _cache = normalizeSettings(input);
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  // v2.733(점검 3회차 C4-04): 캐시·리스너는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 점검이 새 설정으로 돌았다.
+  const next = normalizeSettings(input);
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _cache = next;
   notifyChange();
   return loadSettings();
 }

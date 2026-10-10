@@ -5,7 +5,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, getVmConsole } from '../../vcenter/soapClient.js';
-import { vcAuthGuard, isVcAuthError } from '../../vcenter/restClient.js';
+import { respondIfVcAuthStopped, respondVcError } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 판정을 공용 헬퍼로
 import { isAdminReq } from '../../auth/addressMask.js';
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 moref 추출
 
@@ -15,22 +15,12 @@ import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론
  * · 정지 중이면 로그인하지 않고 **409 + authStopped** 로 답한다(화면이 자동 갱신을 멈추고 사유를 말한다).
  * · 사람이 누른 새로고침(`manual=1`)은 막지 않는다(authGuard 규칙 3 — 고친 뒤 확인할 길).
  * · 로그인 거부면 주 폴러와 **같은 기록**에 시도를 올린다(화면의 시도 횟수가 정직해지게). 해제는 주 폴러·연결 테스트만.
+ * v2.733(점검 3회차 C3-01): 판정이 형제 주문형 성능 경로 다섯 곳과 같아야 해서 `vcenter/authStopGate.js` 로 올렸다
+ *   (응답 모양·문구는 그대로다 — authStop2591 F6 이 고정한다).
  * @returns {boolean} 응답을 보냈으면 true
  */
-function metricAuthStopped(req, res, vc) {
-  if (req.query.manual === '1') return false;
-  const st = vcAuthGuard.peekAuthStop(vc);
-  if (!st) return false;
-  res.status(409).json({ ok: false, authStopped: true, since: st.since, at: st.at, attempts: st.attempts, reason: `vCenter 인증 실패로 멈춰 있어 조회하지 않았습니다(실패 ${st.attempts}회). 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다.` });
-  return true;
-}
-function metricError(res, vc, err) {
-  if (isVcAuthError(err)) {
-    const rec = vcAuthGuard.markAuthStopped(vc.id, vc, err.message);
-    return res.status(409).json({ ok: false, authStopped: true, since: rec.since, at: rec.at, attempts: rec.attempts, reason: `vCenter 인증 실패 — ${err.message}` });
-  }
-  return res.status(502).json({ ok: false, reason: err.message });
-}
+const metricAuthStopped = (req, res, vc) => respondIfVcAuthStopped(req, res, vc, { allowManual: true });
+const metricError = (res, vc, err) => respondVcError(res, vc, err);
 
 
 const METRIC_TYPES = ['cpu', 'mem', 'disk', 'net'];

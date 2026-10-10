@@ -94,8 +94,11 @@ function notify() { for (const cb of _listeners) { try { cb(); } catch { /* 리�
 
 export function saveSettings(patch = {}) {
   const cur = loadSettings();
-  _cache = mergeSettings(cur, patch);
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  // v2.733(점검 3회차 C4-04): 캐시·리스너는 **디스크 쓰기 성공 뒤에만**(v2.732 B5-03 과 같은 규약) — 예전에는 먼저 바꿔, 저장 실패 응답 뒤에도
+  //   메모리 값이 /cvp-config 로 엣지에 배포·적용되고 재시작하면 옛 값으로 돌아갔다.
+  const next = mergeSettings(cur, patch);
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _cache = next;
   _loadErr.ok();
   if (JSON.stringify(cur) !== JSON.stringify(_cache)) notify();
   return { ..._cache };
@@ -111,8 +114,9 @@ export function applyCentralSettings(remote) {
   const cur = loadSettings();
   const next = normalizeSettings({ ...cur, ...remote });
   if (JSON.stringify(next) === JSON.stringify(cur)) return false;
+  // v2.733(C4-04): 쓰기 성공 뒤에 캐시 — 실패하면 캐시가 옛 값이라 다음 pull 이 '같다' 로 건너뛰지 않고 다시 쓴다.
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
   _cache = next;
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
   _loadErr.ok();
   notify();
   return true;

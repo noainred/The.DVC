@@ -26,6 +26,7 @@ import { serverTrendRows } from '../idrac/serverTrendSeries.js'; // v2.660: iDRA
 
 let timer = null;
 import { pushAll } from '../util/pushAll.js';
+import { unreadVcenterReasons } from './unreadVcenters.js'; // v2.733(C2-02): 판정 본체(순수 leaf) — 아래에서 재수출
 import { demoVmperfBackfill } from '../mock/demo/vmperf.js'; // v2.718: 데모(mock) 과거 90일 백필(한 번)
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
@@ -57,26 +58,12 @@ export function staleVcenterIds(snap) {
 }
 
 /**
- * v2.621(감사 RECENT-03 — 재현: maintenance vCenter 가 제외되지 않았다): '지금 값' 으로 적재하지 않는 vCenter 와 그 사유(순수).
- *   · `maintenance` — 점검중. store.js 가 직전 캐시를 **기한 없이** 이어 서빙하고 stale 표시도 붙이지 않는다(점검이 며칠이면
- *     며칠 동안 같은 값의 평탄선이 ts=now 로 쌓였다). 엣지 agent/inventoryPush.js UNREAD_STATUSES 가 이미 '못 읽은 상태' 로 본다.
- *   · `unreachable` — 수집 실패 이월(LASTGOOD) 또는 최소 항목.
- *   · `stale` — 위임(site) push 가 낡았다(상태는 엣지가 준 값 그대로라 stale 표시로만 안다).
- *   ⚠ `pending`(첫 수집 중)은 넣지 않는다 — 적재할 데이터가 없어 호스트 제외 효과가 없고, 넣으면 영영 push 가 오지 않는 site
- *     vCenter 하나가 전체('') VM 합계를 **영원히** 막는다(v2.594 vmtrack 은 30분 시한을 두고 판단했다 — 같은 판단이 필요하면 별건).
- * @returns {Map<string,'maintenance'|'unreachable'|'stale'>}
+ * v2.621(감사 RECENT-03): '지금 값' 으로 적재하지 않는 vCenter 와 그 사유(순수). v2.733(C2-02): 판정 본체는 import 가 없는
+ *   `metrics/unreadVcenters.js` 로 옮겼다 — 전력 적재(store.js)·전력 합산(idrac/service.js)도 같은 판정이 필요한데 그 둘은
+ *   sampler 를 import 할 수 없다(순환). 여기서는 재수출만 한다(사본 금지 — `export { x } from` 은 이 모듈 스코프에 이름을 만들지
+ *   않으므로 import + export 로 둔다, v2.575 규약).
  */
-export function unreadVcenterReasons(snap) {
-  const out = new Map();
-  for (const vc of snap?.vcenters || []) {
-    if (!vc || vc.id == null) continue;
-    const reason = (vc.status === 'maintenance' || vc.maintenance === true) ? 'maintenance'
-      : vc.status === 'unreachable' ? 'unreachable'
-        : vc.stale === true ? 'stale' : null;
-    if (reason) out.set(String(vc.id), reason);
-  }
-  return out;
-}
+export { unreadVcenterReasons };
 
 /**
  * VM 할당 vs 실사용 집계 행 생성(v2.374) — vCenter 별 + 전체('').

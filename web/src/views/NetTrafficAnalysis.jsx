@@ -5,6 +5,7 @@ import { ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH 인증 실패로 주기 실행을 멈춘 쪽
 import { requireChanged } from './changeResult.js'; // v2.732 B5-04: 실패 본문(200 {ok:false})을 성공으로 읽지 않는다
+import { numOrNull } from '../numOrNull.js';
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
 
 /**
@@ -318,8 +319,9 @@ export function logIssueExcludedNote(d) {
   const base = notCollectedNote(d?.notCollected, { what: '이벤트', tail: '분석에서 뺐습니다(‘특이 패턴 없음’ 에 섞지 않습니다)' });
   if (!base) return '';
   const ex = d?.excluded;
-  const n = (x) => (Number.isFinite(Number(x)) ? Number(x).toLocaleString() : null);
-  const extra = ex && (n(ex.errors) != null || n(ex.warnings) != null) ? ` 기간 안에 남아 있던 그 vCenter 의 옛 오류 ${n(ex.errors) ?? '—'} · 경고 ${n(ex.warnings) ?? '—'}건은 합계에서 뺐습니다.` : '';
+  // Number(null) === 0 — 못 센 개수를 '0건' 으로 말하지 않는다(numOrNull). 값이 없으면 단위 없이 '—'(v2.575 BUG-20).
+  const cnt = (x) => { const v = numOrNull(x); return v == null ? '—' : `${v.toLocaleString()}건`; };
+  const extra = ex && (numOrNull(ex.errors) != null || numOrNull(ex.warnings) != null) ? ` 기간 안에 남아 있던 그 vCenter 의 옛 오류 ${cnt(ex.errors)} · 경고 ${cnt(ex.warnings)}은 합계에서 뺐습니다.` : '';
   return `${base}${extra}`;
 }
 

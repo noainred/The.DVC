@@ -56,7 +56,7 @@ describe('화면별 — 0건·정상 대신 말한다', () => {
     expect(logIssueSummaryText({ errors: 4, warnings: 0, peakPerHour: 4, avgPerHour: 4 })).toBe('오류 4 · 경고 0 · 시간당 최대 4(평균 4)');
     const n = logIssueExcludedNote({ notCollected: NC, excluded: { errors: 7, warnings: 7 } });
     expect(n).toContain('분석에서 뺐습니다');
-    expect(n).toContain('옛 오류 7 · 경고 7건');
+    expect(n).toContain('옛 오류 7건 · 경고 7건');
     expect(logIssueExcludedNote({ notCollected: [] })).toBe('');
   });
   it('구성 변경 이력: 고른 vCenter 가 NC 면 그 한 문장·빈 표 문구가 바뀐다 · 직접 수집은 예전 문구', () => {

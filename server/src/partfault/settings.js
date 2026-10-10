@@ -61,9 +61,12 @@ export function loadPartFaultSettings() {
   return _cache;
 }
 
+// v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** 바꾼다(v2.732 B5-03 sanswitch/perfSettings.js 와 같은 규약). 예전에는 먼저
+//   바꿔, 쓰기가 실패해 화면이 오류를 받은 뒤에도 메모리는 켜짐이라 중앙 판정·알림이 돌고 /partfault-config 로 전 엣지가 켰다 —
+//   재시작하면 꺼짐으로 되돌아갔다. 엣지 applyCentral 도 같은 persist 라, 실패하면 다음 pull 이 '이미 같다' 로 건너뛰지 않고 다시 쓴다.
 function persist(next) {
-  _cache = next;
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _cache = next;
   _loadErr.ok();
   return next;
 }
@@ -83,8 +86,12 @@ export function savePartFaultSettings(patch = {}) {
     next.edges = edges;
   }
   // v2.613 PERSIST2613-06: 빈 칸·비숫자는 미지정(이전 값 유지) — Number('')===0 이 하한으로 올라가 보존일이 줄어드는 사고를 막는다(v2.583·v2.596).
-  if (Object.hasOwn(patch, 'retentionDays') && numOrNull(patch.retentionDays) != null) { next.retentionDays = clampSetting(patch.retentionDays, RETENTION_LIMITS); _retentionFromFile = true; }
-  return persist(next);
+  //   v2.733(C4-04): '파일에 보존일이 있다'(출처 settings) 표시도 쓰기 성공 뒤에 세운다 — 실패한 저장이 출처를 바꾸면 안 된다.
+  const retentionSaved = Object.hasOwn(patch, 'retentionDays') && numOrNull(patch.retentionDays) != null;
+  if (retentionSaved) next.retentionDays = clampSetting(patch.retentionDays, RETENTION_LIMITS);
+  const out = persist(next);
+  if (retentionSaved) _retentionFromFile = true;
+  return out;
 }
 
 /** 엣지: 중앙이 내려준 값 반영. 바뀌었을 때만 true. */

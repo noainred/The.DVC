@@ -123,8 +123,11 @@ export function load() {
 
 export function save(input = {}) {
   const before = _cache ? JSON.stringify(_cache) : null;
-  _cache = normalize(keepPrevBlankNumbers(input, load()));
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  // v2.733(점검 3회차 C4-04): 캐시·리스너는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 응답 뒤에도 메모리 값이
+  //   /curuser-config 로 엣지에 배포되고 폴러가 그 주기로 재무장했다(재시작하면 옛 값). 엣지 applyCentral 도 이 save 를 지난다.
+  const next = normalize(keepPrevBlankNumbers(input, load()));
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _cache = next;
   _loadErr.ok();
   if (before !== JSON.stringify(_cache)) for (const cb of listeners) { try { cb(); } catch { /* 격리 */ } }
   return load();

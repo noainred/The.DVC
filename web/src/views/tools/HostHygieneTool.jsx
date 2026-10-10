@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import { HOST_CFG_TEXT, DRIFT_LABEL, SEV_LABEL, SEV_BADGE, REBOOT_KIND, codeChips, findingDetail, coverageText, coverageNote } from '../hostcfg/hostCfgText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices, selectionKey, keyedResult } from './vcChoices.js';
+import { notCollectedWhyText } from '../eventCoverageText.js'; // v2.733(C1-01): 이벤트를 지금 수집하지 않는 vCenter 사유
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -96,6 +97,7 @@ function RebootPanel({ vcId }) {
         ))}
       </div>
       {d.truncated && <div className="banner" style={{ marginBottom: 6 }}>운영 이벤트가 읽기 상한({Number(d.readLimit || 0).toLocaleString()}건)에서 잘렸습니다{d.readCut > 0 ? ` — 근거 구간이 잘린 부팅 ${d.readCut}대는 '이벤트 없음' 으로 두고 판정하지 않았습니다` : ''}. 기간을 줄이거나 vCenter 를 골라 보세요.</div>}
+      {d.noEventsNotCollected > 0 && <div className="banner" style={{ marginBottom: 6 }}>'판정 불가' 중 {d.noEventsNotCollected}대는 이 포탈이 지금 그 vCenter 이벤트를 수집하지 않습니다(엣지 위임·비활성·점검중) — 수집 실패가 아니라 수집 대상이 아닌 것입니다.</div>}
       {d.logs?.enabled === false && <div className="banner" style={{ marginBottom: 6 }}>vCenter 이벤트 수집이 꺼져 있어(설정 › vCenter 로그 보관) 계획/예기치 않음을 가를 수 없습니다 — 전부 '판정 불가' 로 보입니다.</div>}
       {rows.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>{total === 0 ? `최근 ${days}일 안에 재부팅한 호스트가 없습니다(부팅 시각을 읽은 호스트 기준).` : '조건에 맞는 호스트가 없습니다.'}</div>
@@ -111,7 +113,7 @@ function RebootPanel({ vcId }) {
                   <td className="muted" style={{ fontSize: 12 }}>{r.vcenterName}</td>
                   <td className="muted" style={{ fontSize: 12 }}>{r.cluster}</td>
                   <td data-sort={r.bootTime} style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{new Date(r.bootTime).toLocaleString('ko-KR')}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}><span className={`badge ${k.tone}`} title={k.note}>{k.label}</span></td>
+                  <td style={{ whiteSpace: 'nowrap' }}><span className={`badge ${k.tone}`} title={k.note}>{k.label}</span>{r.notCollected && <div className="muted" style={{ fontSize: 11 }}>지금 수집 안 함 · {notCollectedWhyText(r.notCollected)}</div>}</td>
                   <td style={{ fontSize: 12, whiteSpace: 'normal' }}>
                     {r.evidence ? `${r.evidence.type === 'HostConnectionLostEvent' ? '연결 끊김' : r.evidence.type === 'HostShutdownEvent' ? '종료 요청' : '유지보수 모드'} ${new Date(r.evidence.ts).toLocaleString('ko-KR')}${r.evidence.user ? ` · ${r.evidence.user}` : ''}` : '—'}
                   </td>

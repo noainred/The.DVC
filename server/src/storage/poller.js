@@ -303,5 +303,5 @@ export function startStoragePoller() {
 export function storagePollerStatus() {
   // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).
   return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()],
-    intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo() };
+    intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo(), snapshotSave: snapshotStoreStatus() };
 }
