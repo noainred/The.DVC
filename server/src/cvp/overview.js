@@ -19,11 +19,35 @@
  */
 import { partsSummary, bgpSummary } from './parse.js';
 import { TELEMETRY_OK, partsFresh } from './faults.js';
+import { agentKeyEq } from './registry.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const UNASSIGNED_CORP = '';
 export const TOP_DEVICES_PER_CORP = 5;
 export const RECENT_EVENTS_MAX = 10;
+
+/**
+ * v2.732(감사 B2-02): '등록부 담당과 맞는 행만' 판정 — CVP 라우트 전부와 Overview 카드·전체 소비 전력이 **이 함수 하나**를 쓴다.
+ *   device_latest 의 기본키에 agent 축이 있어 담당을 바꾸면 옛 담당 행이 남는다(옛 엣지가 다시 push 하지 않으면 영구). 예전에는
+ *   routes/api/cvp.js 안에만 있어 overviewCards 의 cvpItems 가 이 판정 없이 cvpId 만 걸러 같은 스위치를 두 번 셌다.
+ *   담당이 있으면 행 agent 와 대소문자 무시 일치(registry.agentKeyEq — 저장·조회와 같은 정규화), 미지정(빈 값·공백)이면 중앙 행
+ *   (cvp/db.js LOCAL_AGENT === '' — db 를 import 하지 않으려고 값으로 비교한다. 테스트가 두 값이 같음을 고정한다).
+ * @param {object[]} servers  CVP 등록부
+ * @returns {(row:{cvpId:string, agent:string})=>boolean}
+ */
+export function rowOwnerOf(servers) {
+  const byId = new Map();
+  for (const s of Array.isArray(servers) ? servers : []) if (s && typeof s === 'object') byId.set(String(s.id), s);
+  return (row) => {
+    if (!row || typeof row !== 'object') return false;
+    const srv = byId.get(String(row.cvpId));
+    if (!srv) return false;
+    const owner = String(srv.agent ?? '').trim();
+    return owner ? agentKeyEq(row.agent, owner) : String(row.agent ?? '') === '';
+  };
+}
+/** 행 하나 판정(목록을 거를 때는 rowOwnerOf 로 술어를 한 번 만들 것 — 등록부 색인을 행마다 다시 만들지 않게). */
+export function rowBelongs(row, servers) { return rowOwnerOf(servers)(row); }
 
 /** 신선도 경계(ms). fresh = 주기 ×2(최소 10분), stale = 주기 ×3(최소 30분) — 포트 사용량 화면의 낡음 기준과 같은 계열. */
 export function freshnessBounds(intervalMs) {

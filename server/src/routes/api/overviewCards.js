@@ -97,15 +97,20 @@ function storageItems() {
   return listStorageDevices().map((d) => ({ ...d, snap: byId.get(d.id) || null }));
 }
 
+/**
+ * CVP 장비 행 — Overview '네트워크 장비' 수와 전체 소비 전력(네트워크)이 같이 쓴다.
+ * v2.732(감사 B2-02): **등록부 담당과 맞는 행만**(cvp/overview.js rowOwnerOf — CVP 화면 전부와 같은 함수). 예전에는 cvpId 만 걸러,
+ *   담당을 바꾼 CVP 의 옛 담당 행(옛 엣지가 죽어 다시 push 하지 않으면 영구)까지 세어 같은 스위치를 두 번 셌다(장비 수·소비 전력 2배).
+ */
 async function cvpItems() {
   const { listDeviceRows } = await import('../../cvp/db.js');
   const { listServers } = await import('../../cvp/registry.js');
-  const { corpResolver } = await import('../../cvp/overview.js');
+  const { corpResolver, rowOwnerOf } = await import('../../cvp/overview.js');
   const servers = listServers();
-  const ids = new Set(servers.map((s) => String(s.id)));
+  const own = rowOwnerOf(servers);
   const corp = corpResolver(servers, listDatacenters());
   const r = await listDeviceRows({});
-  return { unavailable: !!r.unavailable, rows: (r.rows || []).filter((d) => ids.has(String(d.cvpId))).map((d) => ({ ...d, corp: corp(d.cvpId) })), servers: servers.length };
+  return { unavailable: !!r.unavailable, rows: (r.rows || []).filter(own).map((d) => ({ ...d, corp: corp(d.cvpId) })), servers: servers.length };
 }
 
 async function powerTotal() {
