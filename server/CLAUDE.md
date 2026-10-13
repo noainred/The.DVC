@@ -88,6 +88,8 @@
   - ✅ **2026-10-09 S-10 — 위 두 줄의 '별건' 은 Ed25519 서명 manifest 로 해결했다**(`upgrade/signature.js decideSignature` 하나). 그리고 v2.591 이 '원격 다운로드는
     건전하다' 고 적은 것도 정정한다 — versions.json 의 sha 는 번들과 **같은 채널**(롤링 릴리스·사내 미러)에서 오므로 미러·배포 토큰을 가진 쪽이 둘을 함께 바꿀 수 있다
     (재현). sha256 은 전송 손상만 잡고, 배포자 확인은 미리 고정한 공개키로 한 서명 검증이 한다. 같은 채널에서 온 SHA·탈취 가능한 전송 토큰 HMAC 을 배포자 서명으로 오인하지 말 것.
+    ⚠ v2.735.1(사용자 결정 — 서명 키 등록 전 게시): 신뢰 키가 **하나도 설정되지 않은** 설치본은 env 없이 warn 이다(`signatureCore.resolvePolicy`·`trustUnconfigured`).
+    키 항목(회수 포함)·호스트 파일·키 파일 오류 중 하나라도 있으면 require 다 — '아무것도 믿지 않음' 을 '설정 안 됨' 으로 약하게 읽지 말 것. 틀린 서명은 여전히 거부.
   - **연결 테스트는 저장 비밀번호를 물려받을 때 host/url 도 저장값으로 고정**(v2.480): vCenter·NSX·Horizon·iDRAC `testConnection`/`testServer`·수집 서버 `/collectors/test`·SMTP·PDU·베어메탈·GPU 게스트 테스트 전부 `{...saved, ...body}` 병합에서 host/url/ip 를 요청값으로 두면 저장 비밀번호가 공격자 호스트로 평문 전송된다(uagmon M3 클래스). 새 "저장 항목 테스트" 를 만들 때 같은 규칙.
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.

@@ -15,6 +15,9 @@
  *
  * ── 정책 ──────────────────────────────────────────────────────────────────────────────────────────────
  *  기본 `require`(서명 필수): 확인할 수 없으면(신뢰 키 없음·manifest 없음·모르는 키) **설치하지 않고** 사유를 남긴다.
+ *  ⚠ v2.735.1(사용자 결정 — 서명 키 등록 전 게시): 신뢰 키가 **아직 하나도 설정되지 않은** 설치본(저장소·호스트 어디에도
+ *    키 항목이 없고 호스트 파일도 없음)은 env 가 없을 때 `warn` 이다(`signatureCore.resolvePolicy` — CI 와 같은 규칙).
+ *    키가 들어간 릴리스를 설치하면 그 설치본은 저절로 require 가 된다. env `UPGRADE_SIGNATURE_POLICY=require` 면 언제나 필수.
  *  호스트 비상 탈출구는 env `UPGRADE_SIGNATURE_POLICY=warn` 뿐이다(portal.env — 웹 화면에서 바꾸는 경로를 두지 않는다).
  *  warn 이어도 **확인했더니 틀린 것**(서명 불일치·회수 키·버전/파일/크기/sha 불일치·형식 오류)은 거부한다 —
  *  탈출구는 '서명이 없는 소스' 를 위한 것이다. warn 으로 진행하면 콘솔·상태·화면에 경고를 남긴다.
@@ -27,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import {
   parseKeysDoc, mergeTrust, verifyEnvelopeText, matchArtifact, sha256Hex, strictBase64,
-  CANNOT_VERIFY, MANIFEST_MAX_BYTES, manifestNameFor,
+  CANNOT_VERIFY, MANIFEST_MAX_BYTES, manifestNameFor, resolvePolicy, trustUnconfigured,
 } from './signatureCore.js';
 
 export const REPO_KEYS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-signing-keys.json');
@@ -40,13 +43,17 @@ export const MANIFEST_HEADER_MAX = 12288;
 const KEYS_FILE_MAX = 262144;
 const DOC = 'docs/RELEASE-SIGNING.md';
 
-/** 정책 — env 만 본다. 빈 값·require 는 require, warn 은 warn, 그 밖은 require + invalid 표시. */
-export function signaturePolicy(env = process.env) {
-  const given = env.UPGRADE_SIGNATURE_POLICY;
-  const raw = String(env.UPGRADE_SIGNATURE_POLICY || 'require').trim().toLowerCase();
-  if (raw === 'warn') return { policy: 'warn', source: 'env' };
-  if (raw === 'require' || raw === 'required') return { policy: 'require', source: given ? 'env' : 'default' };
-  return { policy: 'require', source: 'env', invalid: raw.slice(0, 40) };
+/**
+ * 정책 — env 가 있으면 그 값(warn | require, 그 밖은 require + invalid). 없으면 신뢰 키 설정 여부로 정한다:
+ * 키가 하나도 설정되지 않은 설치본은 warn(source 'unconfigured'), 그 밖은 require(source 'default').
+ * `trust` 를 넘기지 않으면 지금 키 파일을 읽어 판단한다(loadTrust — 작은 파일 두 개).
+ */
+export function signaturePolicy(env = process.env, trust) {
+  const v = env.UPGRADE_SIGNATURE_POLICY;
+  if (v != null && v !== '') return resolvePolicy(v);
+  let t = trust;
+  if (t === undefined) { try { t = loadTrust(); } catch { t = null; } }
+  return resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent: !!t?.sources?.host?.present }) });
 }
 
 function readKeysFile(file, label, { checkPerms = false } = {}) {
@@ -130,8 +137,8 @@ function guidance(code) {
  * @returns {{ok:boolean, verified:boolean, warned?:boolean, code?:string, reason?:string, keyId?:string, version?:string, policy:string, where:string, at:number}}
  */
 export function decideSignature(o = {}) {
-  const pol = o.policy ? { policy: o.policy } : signaturePolicy();
   const trust = o.trust || loadTrust();
+  const pol = o.policy ? { policy: o.policy, source: 'arg' } : signaturePolicy(process.env, trust);
   const sha = o.sha256 ? String(o.sha256).toLowerCase() : (o.bytes ? sha256Hex(o.bytes) : '');
   const size = Number.isFinite(o.size) ? o.size : (o.bytes ? o.bytes.length : undefined);
   let r;
@@ -155,8 +162,11 @@ export function decideSignature(o = {}) {
   let out;
   if (r.ok) out = { ok: true, verified: true, keyId: r.keyId, version: r.version, ...base };
   else if (CANNOT_VERIFY.has(r.code) && pol.policy === 'warn') {
-    out = { ok: true, verified: false, warned: true, code: r.code, reason: `서명을 확인하지 못했지만 UPGRADE_SIGNATURE_POLICY=warn 이라 진행합니다 — ${r.reason}`, keyId: r.keyId || null, version: r.version || null, ...base };
-    console.warn(`[upgrade] ⚠ 서명 미확인 설치 허용(UPGRADE_SIGNATURE_POLICY=warn, ${base.where}): ${r.reason}`);
+    const why = pol.source === 'unconfigured'
+      ? '이 설치본에 서명 공개키가 아직 설정되지 않아(키 등록 전 릴리스) 경고 후 진행합니다'
+      : 'UPGRADE_SIGNATURE_POLICY=warn 이라 진행합니다';
+    out = { ok: true, verified: false, warned: true, code: r.code, reason: `서명을 확인하지 못했지만 ${why} — ${r.reason}`, keyId: r.keyId || null, version: r.version || null, policySource: pol.source || null, ...base };
+    console.warn(`[upgrade] ⚠ 서명 미확인 설치 허용(${pol.source === 'unconfigured' ? '서명 키 미설정' : 'UPGRADE_SIGNATURE_POLICY=warn'}, ${base.where}): ${r.reason}`);
   } else {
     out = { ok: false, verified: false, code: r.code, reason: `서명 검증 실패 — ${r.reason}.${guidance(r.code)}`, keyId: r.keyId || null, version: r.version || null, ...base };
     console.warn(`[upgrade] 서명 검증 실패(${base.where}, ${r.code}): ${r.reason}`);
@@ -170,11 +180,12 @@ export const signatureSummary = (d) => (d ? { verified: !!d.verified, warned: !!
 
 /** 상태 — 업그레이드 화면이 '신뢰 키 수 · 마지막 검증 결과 · 정책' 을 보여 준다(공개키 id 만 — 비밀 없음). */
 export function signatureStatus() {
-  const pol = signaturePolicy();
   const t = loadTrust();
+  const pol = signaturePolicy(process.env, t);
   const activeIds = [...t.byId.values()].filter((k) => !k.revoked && k.publicKey).map((k) => k.keyId);
   return {
     policy: pol.policy, policySource: pol.source, policyInvalid: pol.invalid || null,
+    unconfigured: pol.source === 'unconfigured',
     trustedKeys: t.activeCount, revokedKeys: t.revokedCount, keyIds: activeIds.slice(0, 8),
     ready: !t.fatal && t.activeCount > 0,
     fatal: t.fatal, errors: t.errors.slice(0, 5),

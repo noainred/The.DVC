@@ -1049,8 +1049,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **I-07·S-01·S-04·S-02** — `server/CLAUDE.md` 의 같은 날짜 절(장비 신뢰·WS 폐기·백프레셔). **S-03·S-05·S-06·S-08** — 세션·AD(`server/CLAUDE.md`).
     · **I-08·S-10 업그레이드 설치 경로는 전부 `upgrade/signature.js decideSignature` 하나**(Ed25519 manifest — 원격·감시 폴더·push 엣지/수집기·패키지 받기·중앙 /dl·오프라인
       verifyCli·install.sh·배포 deploy.js). 신뢰 키 = 저장소 `release-signing-keys.json` + 호스트 `release-signing-keys.conf`(회수는 어느 출처든 이긴다) · 기본 require ·
-      탈출구는 portal.env `UPGRADE_SIGNATURE_POLICY=warn` 뿐이고 '틀린 서명' 은 warn 이어도 거부 · **CI 는 공개키 목록이 비면 게시 전에 실패한다 — 그 점검을 지우지 말 것**(개인키는
+      탈출구는 portal.env `UPGRADE_SIGNATURE_POLICY=warn` 뿐이고 '틀린 서명' 은 warn 이어도 거부 · **CI 사전 점검(`release-sign.mjs --check`)을 지우지 말 것**(개인키는
       CI 비밀에만). 백업 복원은 보안 스위치(`envRedact.HOST_PINNED_ENV`)를 현재 호스트 값으로 고정한다(번들이 정책을 약화하지 못하게). 절차 `docs/RELEASE-SIGNING.md`.
+      ⚠⚠ **v2.735.1(사용자 결정 '이번만 서명 없이 게시')**: 신뢰 키가 **하나도 설정되지 않은** 설치본(저장소·호스트 어디에도 키 항목 없음 · 호스트 파일 없음 · 키 파일 오류 없음)은
+      env 가 없으면 **warn**(`signatureCore.resolvePolicy`·`trustUnconfigured` 한 벌 — 런타임·CI·오프라인 `verifyCli --policy` 가 같이 쓴다). 키가 든 릴리스를 설치하면 저절로 require.
+      CI 는 공개키 목록이 완전히 비어 있고 비밀도 없을 때만 서명 없이 통과(`signed=false` → 서명 생략 · `REQUIRE_MANIFEST=0`)하고 한쪽만 설정되면 실패다. 이 허용은 위 규칙이
+      warn 을 돌려줄 때만 성립한다 — 규칙을 '항상 require' 로 되돌리면 CI 도 막는다(그 버전 설치 현장이 다음 버전을 영원히 못 받는 사고 방지). 화면·자가진단은 '키 미설정' 을
+      관리자가 끈 warn 과 구분해 말한다(조치가 '키 등록' 이다). ⚠ 이 기간은 배포자 확인이 빠진다 — 키 등록(`docs/RELEASE-SIGNING.md` 6절)이 남은 일이다. 회귀 `rvK_releaseSigning.test.js`.
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):

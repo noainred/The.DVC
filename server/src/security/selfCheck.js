@@ -343,12 +343,16 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
     id: 'upgrade-signing',
     group: '통신·실행',
     title: '업그레이드 서명 검증 준비',
-    status: sigErr ? 'unknown' : sig.policy === 'warn' ? 'risk' : sig.ready ? 'ok' : 'warn',
+    // v2.735.1: 키가 아직 하나도 설정되지 않은 설치본(unconfigured)은 env 없이도 warn 이다 — 관리자가 일부러 끈 것(env warn = risk)과
+    //   구분해 warn 으로 둔다. 조치는 '키 등록'(env 줄을 지우라는 안내는 틀린 조언이 된다 — 지울 줄이 없다).
+    status: sigErr ? 'unknown' : sig.policy === 'warn' ? (sig.unconfigured ? 'warn' : 'risk') : sig.ready ? 'ok' : 'warn',
     detail: sigErr ? `서명 상태를 읽지 못했다: ${sigErr}`
       : `정책 ${sig.policy}(${sig.policySource}) · 신뢰 공개키 ${sig.trustedKeys}개 · 회수 ${sig.revokedKeys}개${sig.fatal ? ` · 키 파일 오류: ${String(sig.fatal).slice(0, 120)}` : ''}`
+        + (sig.unconfigured ? ' — 서명 공개키가 아직 설정되지 않은 설치본이라 서명 없는 번들을 경고 후 설치한다(배포자 확인이 빠진다).' : '')
         + (!sig.ready && sig.policy !== 'warn' ? ' — 신뢰 키가 없어 서명 필수 정책에서 업그레이드 번들을 설치하지 않는다.' : ''),
     evidence: 'server/src/upgrade/release-signing-keys.json · CONFIG_DIR/release-signing-keys.conf · portal.env UPGRADE_SIGNATURE_POLICY',
-    howto: sig && sig.policy === 'warn' ? 'portal.env 의 UPGRADE_SIGNATURE_POLICY=warn 을 지우고 재시작한다.'
+    howto: sig && sig.unconfigured ? 'docs/RELEASE-SIGNING.md 절차로 서명 키를 만들고 공개키가 들어간 릴리스를 설치한다(설치하면 서명 필수로 바뀐다).'
+      : sig && sig.policy === 'warn' ? 'portal.env 의 UPGRADE_SIGNATURE_POLICY=warn 을 지우고 재시작한다.'
       : sig && !sig.ready ? 'docs/RELEASE-SIGNING.md 절차로 서명 키를 만들고 공개키를 등록한다(새 릴리스에 포함되거나 호스트 파일로).' : '',
   });
 

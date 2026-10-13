@@ -53,6 +53,35 @@ export const MANIFEST_NAME_RE = /^vmware-portal-(\d{1,9}\.\d{1,9}\.\d{1,9})\.man
  */
 export const CANNOT_VERIFY = Object.freeze(new Set(['no-trusted-keys', 'trust-unreadable', 'manifest-missing', 'manifest-unavailable', 'unknown-key']));
 
+/**
+ * 신뢰 키가 **아직 하나도 설정되지 않은** 설치본인가(v2.735.1 — 사용자 결정 '서명 키 등록 전 게시').
+ * 저장소·호스트 어디에도 키 항목(회수 포함)이 없고, 호스트 파일도 없고, 키 파일을 못 읽은 것(fatal)도 아닐 때만 참이다.
+ * ⚠ 키가 하나라도 있거나(회수된 것까지) 호스트 파일이 있으면 거짓이다 — 관리자가 '아무것도 믿지 않음' 을 고른 상태를
+ *   '설정 안 됨' 으로 읽어 정책을 약하게 만들면 안 된다.
+ */
+export function trustUnconfigured(trust, { hostPresent = false } = {}) {
+  if (!trust || trust.fatal || hostPresent) return false;
+  return !(trust.byId && trust.byId.size > 0) && !(trust.activeCount > 0) && !(trust.revokedCount > 0);
+}
+
+/**
+ * 정책 해석 — 런타임(signature.js)과 CI 사전 점검(scripts/release-sign.mjs)이 **같은 규칙**을 쓴다.
+ *  · env `UPGRADE_SIGNATURE_POLICY` 가 주어지면 그 값(warn | require, 모르는 값은 require + invalid — 조용한 약화 금지)
+ *  · 주어지지 않으면: 신뢰 키가 설정되지 않은 설치본(`unconfigured`)은 **warn**(서명 없는 릴리스를 경고 후 설치),
+ *    그 밖은 **require**. 키가 들어간 릴리스를 설치하는 순간 그 설치본은 저절로 require 가 된다(되돌리는 릴리스가 따로 필요 없다).
+ * ⚠ CI 는 이 함수가 'unconfigured → warn' 을 돌려줄 때만 서명 없는 게시를 허용한다 — 이 기본값을 require 로 되돌리면
+ *   CI 도 다시 공개키 없는 게시를 막는다(서명 없이 게시한 버전이 다음 버전을 영원히 받지 못하는 사고 방지).
+ */
+export function resolvePolicy(envValue, { unconfigured = false } = {}) {
+  if (envValue == null || envValue === '') {
+    return unconfigured ? { policy: 'warn', source: 'unconfigured' } : { policy: 'require', source: 'default' };
+  }
+  const raw = String(envValue).trim().toLowerCase();
+  if (raw === 'warn') return { policy: 'warn', source: 'env' };
+  if (raw === 'require' || raw === 'required') return { policy: 'require', source: 'env' };
+  return { policy: 'require', source: 'env', invalid: raw.slice(0, 40) };
+}
+
 /** 엄격한 base64 해석 — 다시 인코딩해 같을 때만(느슨한 Buffer.from 은 쓰레기 문자를 건너뛴다). */
 export function strictBase64(s, maxLen = 1 << 20) {
   if (typeof s !== 'string' || !s || s.length > maxLen || s.length % 4 !== 0 || !B64_RE.test(s)) return null;

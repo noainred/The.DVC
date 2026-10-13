@@ -9,6 +9,10 @@
  *
  *   node verifyCli.js --file <패키지> --manifest <vmware-portal-<버전>.manifest.json> [--version X.Y.Z] [--json]
  *   종료 코드: 0 = 서명 확인(또는 warn 정책으로 허용) · 1 = 확인했더니 틀림(거부) · 2 = 확인할 수 없음(정책 require) · 3 = 사용법 오류
+ *   node verifyCli.js --policy
+ *       이 설치본의 정책만 한 줄로 출력한다(`policy=<warn|require> source=<env|default|unconfigured>`) — 종료 코드 0.
+ *       install.sh(release-verify-lib.sh)가 manifest 없는 패키지를 만났을 때 '서명 키가 아직 설정되지 않은 설치본' 인지 묻는다
+ *       (v2.735.1). 이 인자를 모르는 옛 도구는 사용법 오류(3)를 돌려주고, 확인 함수는 그것을 '필수' 로 읽는다.
  *
  * 개인키를 읽지 않는다. 파일은 스트림으로 해시한다(설치 패키지는 수백 MB 다).
  */
@@ -25,6 +29,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') o.json = true;
+    else if (a === '--policy') o.policy = true;
     else if (a === '--file' || a === '--manifest' || a === '--version' || a === '--kind') { o[a.slice(2)] = argv[i + 1]; i++; }
     else if (a === '-h' || a === '--help') o.help = true;
     else o.unknown = a;
@@ -45,6 +50,11 @@ export async function runVerify(argv, { log = console.log } = {}) {
   const o = parseArgs(argv);
   const usage = '사용법: verifyCli.js --file <패키지 파일> --manifest <vmware-portal-<버전>.manifest.json> [--version X.Y.Z] [--json]';
   if (o.help) { log(usage); return 0; }
+  if (o.policy && !o.unknown && !o.file && !o.manifest) {
+    const p = signaturePolicy();
+    log(`policy=${p.policy} source=${p.source}${p.invalid ? ` invalid=${p.invalid}` : ''}`);
+    return 0;
+  }
   if (o.unknown || !o.file || !o.manifest) { log(o.unknown ? `알 수 없는 인자: ${o.unknown}` : usage); return 3; }
   let st;
   try { st = fs.statSync(o.file); } catch { log(`파일이 없습니다: ${o.file}`); return 3; }
@@ -57,7 +67,7 @@ export async function runVerify(argv, { log = console.log } = {}) {
   const code = d.ok ? 0 : (CANNOT_VERIFY.has(d.code) ? 2 : 1);
   if (o.json) log(JSON.stringify({ ok: d.ok, verified: d.verified, warned: !!d.warned, code: d.code || null, keyId: d.keyId || null, version: d.version || null, policy: d.policy, reason: d.reason || '', file: name, sha256, size, exit: code }));
   else if (d.verified) log(`✓ 서명 확인: ${name} — 버전 ${d.version} · 키 ${d.keyId} · sha256 ${sha256.slice(0, 16)}…`);
-  else if (d.ok) log(`⚠ 서명을 확인하지 못했지만 정책(${signaturePolicy().policy})이 허용합니다: ${d.reason}`);
+  else if (d.ok) log(`⚠ 서명을 확인하지 못했지만 정책(${d.policy})이 허용합니다: ${d.reason}`);
   else log(`✗ ${d.reason}`);
   return code;
 }

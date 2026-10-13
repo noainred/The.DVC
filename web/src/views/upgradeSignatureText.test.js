@@ -19,6 +19,13 @@ describe('정책 문구', () => {
     expect(inv.text).toContain('필수');
     expect(policyText(null).tone).toBe('muted');
   });
+  it('v2.735.1 — 키가 아직 설정되지 않은 설치본의 warn 은 관리자가 끈 것과 다르게 말한다(조치가 다르다)', () => {
+    const u = policyText({ policy: 'warn', policySource: 'unconfigured', unconfigured: true });
+    expect(u.tone).toBe('warn');
+    expect(u.text).toContain('아직 설정되지 않은');
+    expect(u.text).not.toContain('portal.env');
+    expect(policyText({ policy: 'warn', policySource: 'env' }).text).toContain('portal.env');
+  });
 });
 
 describe('신뢰 공개키 문구', () => {
