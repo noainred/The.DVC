@@ -3510,6 +3510,34 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       pull·push 는 '이름 미검증' 이고 일부 push 가 실제로 거부되어 빨간 선이 됐다(제품 동작 그대로). 실엣지 28곳
       규모(세로 약 2,000px)는 보지 못했다.
 
+  - ⚠⚠ **법인 간 전송 속도(v2.735) — 측정은 중앙만 하고, 엣지는 같은 수집 URL·토큰의 상대일 뿐이다**
+    (`server/src/xferspeed/`{settings,serve,probe,db,analyze,poller}.js + `routes/api/xferSpeed.js` + `routes/collector.js /xfer-test` +
+    웹 `views/tools/XferSpeedTool.jsx`·`xferSpeedText.js`·`xferSpeed.css`, 사용자 요청 "main 과 edge 사이 30분에 1번 10MB 전송해서 법인간 속도 기록 · DB 히스토리 ·
+    특수기능 · 클로드 디자인". 회귀 `server/test/xferSpeed2735.test.js`(실제 엣지 라우트 · 실제 api 라우터 — 변이 9/9) + 웹 `xferSpeedText.test.js`):
+    · **기본 꺼짐(opt-in)** — 켜면 회선을 실제로 쓴다(28곳 × 10MiB × 2방향 × 48회 ≈ 메인 하루 26.3GiB). 산수는 서버 `trafficOf` 가 하고 화면은 그 값만 쓴다.
+      꺼져 있어도 '지금 측정'(수동)은 1회 잰다 — 재진입 가드는 주기와 공유한다. 엣지 노드(CENTRAL_URL 있음)에서는 폴러가 돌지 않는다.
+    · 엣지 `/api/collector/xfer-test` — GET = 무작위 N 바이트(엣지 → 메인), POST = 받은 바이트를 세고 버림 + `recvMs`(엣지 시계 하나로 잰 수신 구간).
+      **무작위 데이터**(0 이면 WAN 가속기가 압축해 속도가 부풀려진다) · `crypto.randomBytes` 비동기 · 상한 `XFER_TEST_MAX_BYTES`(64MB)·동시 2(429) ·
+      토큰 확인은 본문을 읽기 전 · 거절은 `Connection: close`(받지 않을 본문을 흘려받지 않는다) · `XFER_TEST_ENABLED=false` 는 404 + 사유(구버전 HTML 404 와 `kindFor404` 로 갈린다).
+    · 측정기(`probe.js`): 재시도 0 · 대상·토큰은 등록부에서만 · `withOutboundTag` · 속도 = 받는 쪽 구간(↓ 응답 머리 → 마지막 바이트, ↑ 엣지 recvMs).
+      ⚠ 엣지 앞 프록시가 업로드 본문을 모았다 넘기면 recvMs 가 LAN 구간이 된다 — recvMs < 전체의 25% 이고 전체 > 1초면 중앙 전체 시간으로 계산하고 `basis:'sender-total'` 로 밝힌다.
+      실패 종류 `XFER_FAIL_KINDS` 10종 ↔ 웹 `FAIL_TEXT` 1:1(서버 테스트 ⑧ 대조) — 받기 시작한 뒤 끊기면 'unreachable' 이 아니라 'short'.
+    · DB `xfer-speed.db`: 원시(기본 180일) + 일 요약(5년) + 최신 표(`xfer_latest` — GROUP BY MAX 금지) · `INSERT OR IGNORE`+changes(재적재 이중 계수 금지) ·
+      최신은 더 늦은 ts 만 · **실패 행의 속도는 NULL**(0 아님) · 청크 prune + 진행 공유.
+    · 판정(`analyze.js` — 웹은 다시 판정하지 않는다): 상태 6종 · 측정 없음·오래됨(`staleMsOf` — 간격 실행이면 `max(간격×3, 2시간)`, 예약만이면
+      `max(예약 최대 간격×1.5, 2시간)`, 반복 일정이 없으면 판정 안 함)은 회색 · '느림' 은 **그 법인 자신의 7일 중앙값** 대비
+      (`slowPct` 기본 70, 성공 표본 6개 미만이면 판정 안 함 — `no-baseline`/`partial-baseline`) · 히트맵 칸 = 그 시간 평균 ÷ 그 법인 중앙값(포탈 시각) · 빈 칸은 null.
+    · 주기 예산: 주기의 80% 를 넘기면 새 엣지를 시작하지 않고 `notTried` 로 밝힌다 · 순서는 오래 안 잰 엣지 먼저. 권한 adminOnly + fullScopeOnly, CSV 는 + `data.csv`.
+    · **실행 일정(같은 릴리스 사용자 요청 "원하는 시간에 실행/반복/주간/월간 · 30분/1시간 등 간격")은 `xferspeed/schedule.js` 하나**(순수 — 웹 `xferSpeedText.js` 는
+      같은 계산의 사본이고 `server/test/xferSchedule2735.test.js` ⑧ 이 임의 입력으로 대조한다 — 변이 9/9): 간격 실행(`intervalOn` · 10분~7일)과 예약(once·daily·weekly·
+      monthly · 최대 20 · 포탈 시각 KST)을 **함께** 쓴다. 폴러는 30초 틱(`tickXferSchedule`)이 판정하고, 간격은 **마지막 측정 시작**(예약 실행 포함)부터 다시 센다.
+      ⚠ 예약의 `since` 는 서버가 만들기·정의 변경·다시 켬 때 찍는다 — 그 이전 시각은 소급 실행하지 않는다. 지난 회차는 30분(`GRACE_MS`) 안이면 실행, 넘으면
+      **몰아서 돌리지 않고** '놓침'(down 포탈 꺼짐 · busy 다른 측정 중 · off 자동 측정 꺼짐 · late)으로 상태 파일 `xfer-speed-schedule-state.json`(상태 — 백업 감시 제외,
+      지운 예약은 정리)에 남긴다. 그 달에 없는 날(31일)은 그 달 마지막 날. 예약 실행 예산은 60분(간격 실행은 간격의 80%) · 잘못된 예약은 400 `field:'schedules'` +
+      `예약 N: 사유`. 화면의 다음 실행·놓침 표시는 서버 `status.next`·`schedules[].last` 를 쓴다.
+    · 데모: mock + 데모 엣지만 합성(14일 백필 1회 — 데모 엣지 등록 전이면 표지를 세우지 않는다). 사람이 등록한 엣지는 mock 에서도 실제로 잰다.
+    · 상단(사이드바) 메뉴에는 넣지 않았다 — 그 표는 사용자가 정한 구성이다(`topMenu.test.js`). 특수 기능·V4/V5/V6 트리·toolcats 에는 있다.
+    · ⚠ 정직 기록: 실제 원격 법인 회선으로는 재 보지 못했다(같은 프로세스 안 엣지 라우트·가짜 서버로 확인).
   - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
     5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
     웹 `components/errorBoxProps.test.js`):

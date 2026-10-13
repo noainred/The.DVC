@@ -45,7 +45,8 @@ const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
-const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));         // 통신 지도(중앙↔엣지 라디얼, v2.584)
+const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));
+const XferSpeedTool = React.lazy(() => import('./tools/XferSpeedTool.jsx'));   // 법인 간 전송 속도(v2.735)         // 통신 지도(중앙↔엣지 라디얼, v2.584)
 const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
@@ -623,6 +624,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}
       {tool === 'comm-map' && <CommMap />}
+      {tool === 'xfer-speed' && <XferSpeedTool />}
       {tool === 'data-flow' && <DataFlow />}
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}

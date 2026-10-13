@@ -154,6 +154,7 @@ export const BIG_JSON_SMALL = Object.freeze({
   'collector:/idrac-scan': '스캔 요청 — 대역 문자열',
   'collector:/bmstor-collect': '수집 요청 — 대상 id',
   'collector:/upgrade': '본문 파서가 express.raw(번들 바이너리) — JSON 한도와 무관',
+  'collector:/xfer-test': '전송 속도 측정 — 본문을 파서 없이 스트림으로 세고 버린다(octet-stream · XFER_TEST_MAX_BYTES 상한) — JSON 한도와 무관',
 });
 
 /** util/ 이 바깥을 향해도 되는 예외 — arch2579.test.js 의 UTIL_ALLOW 와 같은 값·같은 사유. */

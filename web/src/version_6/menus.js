@@ -80,7 +80,7 @@ export const MENUS = Object.freeze([
     { name: '계정', items: ['credentials'] }] },
   { id: 'platform', code: 'PLATFORM', label: '플랫폼 관리', desc: 'vCenter 연결·포탈 설정·엣지 통신', groups: [
     { name: 'vCenter · 포탈', items: ['vcenters', 'board', 'settings', 'upgrade', 'portaldb', 'mail-diag'] },
-    { name: '엣지 통신', items: ['link-check', 'comm-map', 'data-flow', 'device-flow', 'portal-check', 'edge-log'] },
+    { name: '엣지 통신', items: ['link-check', 'comm-map', 'xfer-speed', 'data-flow', 'device-flow', 'portal-check', 'edge-log'] },
     { name: '바로가기', items: ['service-hub'] }] },
 ]);
 

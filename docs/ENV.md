@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **640개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **643개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-13)
@@ -52,7 +52,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (189)
+## 공통 (192)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -245,6 +245,9 @@
 | `VMSERIES_MIN_FREE_GB` | `5` |  | vmseries/poller.js |
 | `VMSERIES_READY_PCT` |  |  | vmseries/settings.js |
 | `VMSERIES_RETENTION_DAYS` |  |  | vmseries/settings.js |
+| `XFER_SPEED_ENABLED` | `''` |  | xferspeed/settings.js |
+| `XFER_TEST_ENABLED` | `''` |  | xferspeed/serve.js |
+| `XFER_TEST_MAX_BYTES` | `67108864` |  | xferspeed/serve.js |
 
 ## 로그 (2)
 
@@ -824,4 +827,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 640
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 643

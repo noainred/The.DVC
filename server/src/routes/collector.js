@@ -145,6 +145,28 @@ collectorRouter.get('/token-check', async (req, res) => {
   }
 });
 
+/**
+ * 법인 간 전송 속도 측정 상대(v2.735 — 사용자 요청 "main 서버와 edge 포탈간에 30분에 1번씩 10MB 파일을 전송해서
+ * 법인간 전송 속도를 테스트"). GET = 엣지 → 메인(무작위 N 바이트를 흘린다), POST = 메인 → 엣지(받은 바이트를 세고 버린다).
+ *
+ * `/edge-log`·`/bm-usage` 와 **같은 url·같은 토큰**이라 새 네트워크 허용이 필요 없다. 측정은 중앙이 주도한다
+ * (`xferspeed/poller.js`). ⚠ 토큰 검사는 **본문을 읽기 전에** 한다 — 미인증 요청이 수십 MB 를 흘리게 두지 않는다
+ * (`/upgrade` 와 같은 순서). 본문 파서(express.json)는 octet-stream 을 건드리지 않는다.
+ * 현장에서 끄려면 `XFER_TEST_ENABLED=false`(404 + 사유 — 중앙이 '엣지에서 꺼짐' 으로 말한다).
+ */
+collectorRouter.get('/xfer-test', async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'xfer-test'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'xfer-test'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  const { serveXferDownload } = await import('../xferspeed/serve.js');
+  return serveXferDownload(req, res);
+});
+collectorRouter.post('/xfer-test', async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'xfer-test'); res.set('Connection', 'close'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'xfer-test'); res.set('Connection', 'close'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  const { receiveXferUpload } = await import('../xferspeed/serve.js');
+  return receiveXferUpload(req, res);
+});
+
 // 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).
 // COLLECTOR_TOKEN 가드 — 토큰을 가진 중앙만 호출 가능. 비밀번호는 로그/감사에 남기지 않는다.
 collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res) => {

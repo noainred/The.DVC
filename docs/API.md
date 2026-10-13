@@ -22,18 +22,18 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **972개** |
+| 엔드포인트 | **980개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 100개 |
-| GET | 526개 |
-| POST | 296개 |
-| PUT | 96개 |
+| 라우트 파일 | 101개 |
+| GET | 531개 |
+| POST | 298개 |
+| PUT | 97개 |
 | PATCH | 2개 |
 | DELETE | 52개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
-| [`/api/collector`](#apicollector) | 9 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
+| [`/api/collector`](#apicollector) | 11 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
 | [`/api/capacity`](#apicapacity) | 3 | 리소스 적정성 진단. 라우터가 스스로 `adminOnly` 를 건다. |
 | [`/api/insights`](#apiinsights) | 16 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
 | [`/api/central`](#apicentral) | 52 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 434 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 440 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -57,14 +57,16 @@
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | GET | `/bm-usage` | — | [server/src/routes/collector.js:107](../server/src/routes/collector.js#L107) |
-| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:205](../server/src/routes/collector.js#L205) |
+| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:227](../server/src/routes/collector.js#L227) |
 | GET | `/edge-log` | — | [server/src/routes/collector.js:78](../server/src/routes/collector.js#L78) |
 | GET | `/export` | — | [server/src/routes/collector.js:42](../server/src/routes/collector.js#L42) |
-| POST | `/idrac-scan` | `express.json` | [server/src/routes/collector.js:170](../server/src/routes/collector.js#L170) |
+| POST | `/idrac-scan` | `express.json` | [server/src/routes/collector.js:192](../server/src/routes/collector.js#L192) |
 | GET | `/ping` | — | [server/src/routes/collector.js:59](../server/src/routes/collector.js#L59) |
-| POST | `/set-password` | `express.json` | [server/src/routes/collector.js:150](../server/src/routes/collector.js#L150) |
+| POST | `/set-password` | `express.json` | [server/src/routes/collector.js:172](../server/src/routes/collector.js#L172) |
 | GET | `/token-check` | — | [server/src/routes/collector.js:135](../server/src/routes/collector.js#L135) |
-| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:225](../server/src/routes/collector.js#L225) |
+| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:247](../server/src/routes/collector.js#L247) |
+| GET | `/xfer-test` | — | [server/src/routes/collector.js:157](../server/src/routes/collector.js#L157) |
+| POST | `/xfer-test` | — | [server/src/routes/collector.js:163](../server/src/routes/collector.js#L163) |
 
 ## `/api/capacity`
 
@@ -1108,6 +1110,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/waste/settings` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:934](../server/src/routes/api/toolsCapacity.js#L934) |
 | DELETE | `/tools/waste/settings/data` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:996](../server/src/routes/api/toolsCapacity.js#L996) |
 | POST | `/tools/waste/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1033](../server/src/routes/api/toolsCapacity.js#L1033) |
+| GET | `/tools/xfer-speed` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:77](../server/src/routes/api/xferSpeed.js#L77) |
+| GET | `/tools/xfer-speed/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:199](../server/src/routes/api/xferSpeed.js#L199) |
+| GET | `/tools/xfer-speed/heat` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:113](../server/src/routes/api/xferSpeed.js#L113) |
+| GET | `/tools/xfer-speed/history` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:120](../server/src/routes/api/xferSpeed.js#L120) |
+| POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:167](../server/src/routes/api/xferSpeed.js#L167) |
+| PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:185](../server/src/routes/api/xferSpeed.js#L185) |
 | GET | `/top` | — | [server/src/routes/api/inventory.js:486](../server/src/routes/api/inventory.js#L486) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:312](../server/src/routes/api/toolsInfo.js#L312) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:314](../server/src/routes/api/toolsInfo.js#L314) |
@@ -1144,7 +1152,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 215 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 221 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 193 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 52 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `csvPerm` | 37 | **CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403. |
