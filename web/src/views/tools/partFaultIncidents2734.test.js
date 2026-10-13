@@ -5,9 +5,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   INCIDENT_END_TEXT, INCIDENT_PERIODS, periodLabel, durationText, incidentStateText, incidentStartText, incidentEndText,
-  incidentStateRank, incidentSummaryText, incidentScanNote, KINDS_NOTE, kindChips, openKindCounts, filterIncidents, incidentRespFor,
+  incidentStateRank, incidentSummaryText, incidentScanNote, KINDS_NOTE, kindChips, openKindCounts, filterIncidents, incidentRespFor, shortStamp,
 } from './partFaultText.js';
 import { INCIDENT_END } from '../../../../server/src/partfault/incidents.js';
 
@@ -37,6 +38,16 @@ describe('durationText — 값이 없으면 —(0 으로 보이지 않는다)', 
     expect(durationText(3 * 3_600_000 + 12 * 60_000)).toBe('3시간 12분');
     expect(durationText(2 * 86_400_000 + 4 * 3_600_000)).toBe('2일 4시간');
     expect(durationText(5 * 86_400_000)).toBe('5일');
+  });
+  it('진행 중은 …째 로 말한다(방금 시작은 따로)', () => {
+    expect(durationText(30_000, { ongoing: true })).toBe('방금 시작');
+    expect(durationText(3 * 3_600_000, { ongoing: true })).toBe('3시간째');
+    expect(durationText(null, { ongoing: true })).toBe('—');
+  });
+  it('짧은 시각 — 결측은 —', () => {
+    expect(shortStamp(null)).toBe('—');
+    expect(shortStamp(0)).toBe('—');
+    expect(shortStamp(new Date(2026, 9, 13, 9, 5).getTime())).toBe('2026-10-13 09:05');
   });
 });
 
@@ -119,7 +130,7 @@ describe('종류 칩·필터', () => {
 });
 
 describe('화면 소스', () => {
-  const src = fs.readFileSync(path.join(__dirname, 'PartFaults.jsx'), 'utf8');
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'PartFaults.jsx'), 'utf8');
   it('탭 넷이 해시 valid 에 있다(주소로 바로 열린다)', () => {
     expect(src).toMatch(/valid: \['open', 'incidents', 'kinds', 'events'\]/);
   });

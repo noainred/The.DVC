@@ -489,10 +489,14 @@ export function periodLabel(days) {
   return Number(days) === 0 ? '전체(보존 기간)' : `최근 ${Number(days)}일`;
 }
 
-/** 지속 시간(ms) → '3시간 12분' 등. 값이 없으면 '—'(0 으로 보이지 않는다 — Number(null)===0 함정). */
-export function durationText(ms) {
+/**
+ * 지속 시간(ms) → '3시간 12분' 등. 값이 없으면 '—'(0 으로 보이지 않는다 — Number(null)===0 함정).
+ * `ongoing` 이면 지금도 이어지는 길이라 '…째' 로 말한다('1분 미만+' 처럼 읽히지 않게).
+ */
+export function durationText(ms, { ongoing = false } = {}) {
   if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '—';
   const m = Math.floor(Number(ms) / 60_000);
+  if (ongoing) return m < 1 ? '방금 시작' : `${durationText(ms)}째`;
   if (m < 1) return '1분 미만';
   const d = Math.floor(m / 1440); const h = Math.floor((m % 1440) / 60); const mm = m % 60;
   if (d > 0) return h ? `${d}일 ${h}시간` : `${d}일`;
@@ -501,6 +505,14 @@ export function durationText(ms) {
 }
 
 const stamp = (ts) => (ts ? new Date(Number(ts)).toLocaleString('ko-KR') : '—');
+const pad2 = (v) => String(v).padStart(2, '0');
+/** 표 칸용 짧은 시각 'YYYY-MM-DD HH:mm'(브라우저 시각). 전체 문구는 title 로 남긴다. 값이 없으면 '—'. */
+export function shortStamp(ts) {
+  if (ts == null || ts === '' || !Number.isFinite(Number(ts)) || Number(ts) <= 0) return '—';
+  const d = new Date(Number(ts));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+export const fullStamp = stamp;
 
 /** 상태 칸 — 진행 중이면 지금 상태, 끝났으면 종료 사유. tone 은 toneVar 키. */
 export function incidentStateText(inc, labels = {}) {
@@ -517,14 +529,14 @@ export function incidentStateText(inc, labels = {}) {
 export function incidentStartText(inc) {
   if (!inc) return { text: '—', note: '' };
   if (inc.openedAt == null) return { text: '시작 시각 모름', note: '보존 기간 밖이거나 조회 상한으로 시작 기록을 찾지 못했습니다' };
-  return { text: stamp(inc.openedAt), note: inc.startedBefore ? '기간 이전에 시작' : '' };
+  return { text: shortStamp(inc.openedAt), note: inc.startedBefore ? '기간 이전에 시작' : '', title: stamp(inc.openedAt) };
 }
 
 /** 종료 칸 — 진행 중 · 끝난 시각 · 모름. */
 export function incidentEndText(inc) {
   if (!inc) return '—';
   if (inc.ongoing) return '진행 중';
-  return inc.closedAt ? stamp(inc.closedAt) : '모름';
+  return inc.closedAt ? shortStamp(inc.closedAt) : '모름';
 }
 
 /** 정렬 값 — 진행 중 이상 > 진행 중 주의 > 끝남. 숫자가 작을수록 앞이다. */

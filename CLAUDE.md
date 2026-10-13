@@ -289,6 +289,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · ⚠ **테스트 시각 결함을 이 릴리스에서 두 번 밟았다**: `mergeEdgeReports` 는 보고 시각을 `Date.now()` 로 찍는데
         테스트가 `NOW`(정시 −30분, 최대 90분 전) + 4h 를 '오래됨' 으로 썼다 — 실제 나이는 2.5~3.5h 라 **시각에 따라**
         3h 경계를 넘거나 못 넘겼다(v2.517 규약의 변형). 기준은 **모듈이 찍은 `edgeReport(agent).at`** 이어야 한다.
+    - **v2.734 장애별·종류별 탭** — 묶기·집계는 `partfault/incidents.js` 하나(`GET /tools/part-faults/incidents?days=&kind=`, 웹 문구 `partFaultText.js`).
+      진행 중은 `part_state` 가 진실 · 시작을 못 찾으면 '모름' · 해소 없는 끝은 '종료 기록 없음' · 키 변경은 한 건 · 종류별은 필터 전 전체 기준 · 기록 없는 종류를 0건으로 싣지 않는다.
+      이벤트는 최신부터 조각 + 양보 + 상한(넘으면 coveredSince). 회귀 `server/test/partFaultIncidents2734.test.js` + 웹 `partFaultIncidents2734.test.js`.
   - ⚠⚠ **베어메탈 사용률 — 대상은 `classifyFleet().bareMetal` 하나이고, 한 경로로는 다섯 지표를 다
     못 얻는다**(`bmusage/` + 웹 `views/tools/BmUsage.jsx`·`bmUsageText.js`, v2.550 — 사용자 요청
     "여기에 분류된 서버들만 CPU memory disk Network HBA 사용율을 수집하고 싶어" + 서버 분석 ›

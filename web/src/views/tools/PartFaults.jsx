@@ -34,6 +34,7 @@ import {
   retentionText,
   INCIDENT_PERIODS, periodLabel, durationText, incidentStateText, incidentStartText, incidentEndText, incidentStateRank,
   incidentSummaryText, incidentScanNote, KINDS_NOTE, kindChips, openKindCounts, filterIncidents, incidentRespFor,
+  shortStamp, fullStamp,
 } from './partFaultText.js';
 import Select from '../../components/Select.jsx';
 
@@ -403,10 +404,10 @@ export function PartFaults() {
                       ) },
                       { key: 'openedAt', label: '시작', sortValue: (i) => i.openedAt, render: (i) => {
                         const st = incidentStartText(i);
-                        return <div style={{ whiteSpace: 'nowrap' }} title={st.note}>{st.text}{st.note && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{st.note}</div>}</div>;
+                        return <div style={{ whiteSpace: 'nowrap' }} title={st.title || st.note}>{st.text}{st.note && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{st.note}</div>}</div>;
                       } },
-                      { key: 'closedAt', label: '종료', sortValue: (i) => (i.ongoing ? Number.MAX_SAFE_INTEGER : i.closedAt), render: (i) => <span style={{ whiteSpace: 'nowrap' }}>{incidentEndText(i)}</span> },
-                      { key: 'durationMs', label: '지속', align: 'right', render: (i) => <span style={{ whiteSpace: 'nowrap' }} title={i.ongoing ? '지금까지' : ''}>{durationText(i.durationMs)}{i.ongoing && i.durationMs != null ? '+' : ''}</span> },
+                      { key: 'closedAt', label: '종료', sortValue: (i) => (i.ongoing ? Number.MAX_SAFE_INTEGER : i.closedAt), render: (i) => <span style={{ whiteSpace: 'nowrap' }} title={i.closedAt ? fullStamp(i.closedAt) : undefined}>{incidentEndText(i)}</span> },
+                      { key: 'durationMs', label: '지속', align: 'right', render: (i) => <span style={{ whiteSpace: 'nowrap' }} title={i.ongoing ? '지금까지 이어진 길이' : ''}>{durationText(i.durationMs, { ongoing: i.ongoing })}</span> },
                       { key: 'peak', label: '최악 상태', sortValue: (i) => (i.peak === 'fault' ? 0 : i.peak === 'warn' ? 1 : 2), render: (i) => (
                         <span style={{ color: stateColor(labels.tone?.[i.peak]), whiteSpace: 'nowrap' }}>{labels.state?.[i.peak] || '—'}</span>
                       ) },
@@ -486,13 +487,14 @@ export function PartFaults() {
 function IncidentTimeline({ inc, labels }) {
   const hold = inc.ongoing ? holdText(inc.holdReason) : '';
   return (
-    <div style={{ padding: '8px 16px 12px', display: 'grid', gap: 4, fontSize: 12, whiteSpace: 'normal' }}>
+    // 좁은 화면에서 표가 가로로 스크롤돼도 타임라인은 보이는 자리에 남는다(sticky) — 400px 에서 펼친 칸이 빈 것처럼 보였다.
+    <div style={{ padding: '8px 16px 12px', display: 'grid', gap: 4, fontSize: 12, whiteSpace: 'normal', position: 'sticky', left: 0, maxWidth: 'min(900px, calc(100vw - 64px))' }}>
       {inc.migratedFrom && <div style={{ color: 'var(--text-faint)' }}>식별 키 변경으로 이어진 장애입니다(옛 키 {inc.migratedFrom}) — 한 건으로 합쳐 보입니다.</div>}
       {inc.openedAt == null && <div style={{ color: 'var(--amber)' }}>시작 기록을 찾지 못했습니다 — 보존 기간 밖이거나 조회 상한에 걸렸습니다. 아래는 기간 안에서 본 사건만입니다.</div>}
       {inc.events.length === 0 && <div style={{ color: 'var(--text-faint)' }}>이 기간에는 상태 변화가 없었습니다 — 기간 이전에 열려 지금까지 같은 상태입니다.</div>}
       {inc.events.map((e, n) => (
         <div key={`${e.at}:${n}`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-          <span style={{ color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{new Date(e.at).toLocaleString('ko-KR')}</span>
+          <span style={{ color: 'var(--text-faint)', whiteSpace: 'nowrap' }} title={fullStamp(e.at)}>{shortStamp(e.at)}</span>
           <span><BoldText text={eventText(e, labels)} /></span>
           {e.rawState && <code style={{ fontSize: 11 }}>{e.rawState}</code>}
         </div>
@@ -512,10 +514,11 @@ function KindsTable({ resp, labels, onPick }) {
     return <div style={{ padding: 16, color: 'var(--text-faint)' }}>{periodLabel(resp.days)} 동안 기록된 장애가 없습니다 — 이력은 상태가 바뀐 순간만 남깁니다.</div>;
   }
   return (
-    <STable minWidth={980}>
+    <STable minWidth={900}>
       <thead><tr>
-        <th>종류</th><th>장애 수</th><th>기간 중 새로 발생</th><th>이전부터 이어짐</th><th>지금 열림</th><th>최악이 이상</th>
-        <th>영향 장비</th><th>반복 부품</th><th>평균 지속(해소된 것)</th><th>마지막 발생</th><th data-nosort></th>
+        <th>종류</th><th>장애 수</th><th title="기간 안에 새로 시작한 장애 · 괄호는 기간 이전부터 이어진 장애">새로 발생</th><th>지금 열림</th>
+        <th title="가장 나빴던 상태가 '이상' 이었던 장애 수">최악이 이상</th><th>영향 장비</th><th title="기간 중 같은 부품에서 2번 이상 난 부품 수">반복 부품</th>
+        <th title="정상 복귀·부품 제거로 끝난 장애만">평균 지속</th><th>마지막 발생</th><th data-nosort></th>
       </tr></thead>
       <tbody>
         {kinds.map((k) => (
@@ -527,8 +530,7 @@ function KindsTable({ resp, labels, onPick }) {
                 <span className="pf-kind-bar" aria-hidden="true"><span style={{ width: `${Math.round((k.incidents / max) * 100)}%` }} /></span>
               </div>
             </td>
-            <td data-sort={k.started}>{k.started}</td>
-            <td data-sort={k.carried}>{k.carried || '—'}</td>
+            <td data-sort={k.started} style={{ whiteSpace: 'nowrap' }}>{k.started}{k.carried ? <span style={{ fontSize: 11, color: 'var(--text-faint)' }} title="기간 이전부터 이어진 장애"> (+이어짐 {k.carried})</span> : ''}</td>
             <td data-sort={k.ongoing} style={{ whiteSpace: 'nowrap' }}>
               {k.ongoing ? <span>{k.ongoing}{k.ongoingFault ? <span style={{ color: 'var(--red)' }}> · 이상 {k.ongoingFault}</span> : ''}{k.ongoingWarn ? <span style={{ color: 'var(--amber)' }}> · 주의 {k.ongoingWarn}</span> : ''}</span> : '—'}
             </td>
@@ -538,7 +540,7 @@ function KindsTable({ resp, labels, onPick }) {
             <td data-sort={k.avgDurationMs ?? ''} style={{ whiteSpace: 'nowrap' }} title={k.durationSamples ? `해소된 장애 ${k.durationSamples}건 기준` : '정상 복귀·부품 제거로 끝난 장애가 없습니다'}>
               {durationText(k.avgDurationMs)}{k.durationSamples ? <span style={{ fontSize: 11, color: 'var(--text-faint)' }}> ({k.durationSamples}건)</span> : ''}
             </td>
-            <td data-sort={k.lastStartedAt ?? ''} style={{ whiteSpace: 'nowrap' }}>{k.lastStartedAt ? new Date(k.lastStartedAt).toLocaleString('ko-KR') : '—'}</td>
+            <td data-sort={k.lastStartedAt ?? ''} style={{ whiteSpace: 'nowrap' }} title={k.lastStartedAt ? fullStamp(k.lastStartedAt) : '기간 안에 새로 시작한 장애가 없습니다'}>{shortStamp(k.lastStartedAt)}</td>
             <td><button className="btn btn-sm" onClick={() => onPick(k.kind)}>장애 보기</button></td>
           </tr>
         ))}
