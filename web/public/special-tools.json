@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-06T00:35:32.101Z",
-  "count": 107,
+  "generatedAt": "2026-10-13T01:41:09.390Z",
+  "count": 108,
   "tools": [
     {
       "k": "service-hub",
@@ -124,6 +124,14 @@
     },
     {
       "k": "comm-map",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "xfer-speed",
       "adminOnly": true,
       "perm": null,
       "external": null,

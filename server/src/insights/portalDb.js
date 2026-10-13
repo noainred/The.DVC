@@ -91,6 +91,7 @@ const PURPOSES = {
   'portal-db-size-history.json': '포탈 DB 크기 표본(이 화면의 증가량·용량 예측용 — 10분 표본 + 일 표본 400일, v2.674)',
   'bmstor-history.db': '베어메탈 스토리지 디스크 사용량 12시간 이력 — 서버·그룹·합계(v2.635)',
   'vm-dns.db': 'VM DNS 서버 설정 변경 이력 — VM 별 최신값 + 바뀐 것만(v2.696)',
+  'xfer-speed.db': '법인 간 전송 속도 측정 이력 — 엣지·방향별 원시 + 일 요약 + 최신값(v2.735)',
   // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
   'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',
   'sanswitch-devices.json': 'SAN 스위치 등록부(호스트·계정·담당 엣지 — 비밀번호 봉인)',
@@ -106,6 +107,7 @@ const PURPOSES = {
   'bmusage-distribute.json': '베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지, 중앙 — v2.627)',
   'bmusage-central.json': '엣지가 받은 베어메탈 사용률 설정 중앙 배포 사본(상태 — 원본은 중앙, v2.627)',
   'linkcheck-settings.json': '통신 점검 설정(켜짐·주기·단계별 시한·엣지 짝·보존일, v2.552)',
+  'xfer-speed-settings.json': '법인 간 전송 속도 측정 설정(켜짐·간격 실행·예약 실행·크기·동시성·시한·느려짐 기준·제외 엣지·보존일, v2.735)',
   'partfault-settings.json': '물리 파트 장애 기능 스위치(중앙·엣지별) + 이력 보존일(v2.548 · v2.613)',
   'storage-intervals.json': '스토리지 수집 주기 중앙 배포값(엣지별 지정 키만, v2.409)',
   // ── v2.613 PERSIST2613-02: 백업이 '상태·캐시' 로 분류하는 파일(backup/service.js RUNTIME_STATE_NAMES) 전부에 용도를 적는다 —

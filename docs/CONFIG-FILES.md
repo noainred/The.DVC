@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **198개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **201개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-13)
@@ -216,6 +216,9 @@
 | `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
+| `xfer-speed-schedule-state.json` | 설정 | 법인 간 전송 속도 예약 실행 처리 기록(상태, v2.735) | ✅ | ✅ | ✅ | xferspeed/poller.js |
+| `xfer-speed-settings.json` | 설정 | 법인 간 전송 속도 측정 설정(v2.735 — 자동 측정 켬·간격 실행·예약 실행·제외 엣지) | ✅ | ✅ | ✅ | xferspeed/settings.js |
+| `xfer-speed.db` | DB | 법인 간 전송 속도 기록 DB(v2.735). 파일: `<dbDir>/xfer-speed.db` |  |  | ✅ | xferspeed/db.js |
 
 ## 주의가 필요한 파일
 
@@ -229,6 +232,8 @@
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다
+- **`xfer-speed-settings.json`** — 중앙 전용(엣지로 배포하지 않는다). 손상이면 보존하고 기본값(꺼짐)으로 읽는다
+- **`xfer-speed-schedule-state.json`** — 상태 파일(백업 감시 제외). 지우면 지난 예약 시각을 다시 판정한다 — 유예(30분) 안의 시각은 한 번 더 실행될 수 있다
 - **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다
 - **`bmusage-central.json`** — 중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다
 - **`settings-owners.txt`** — username 기준. 표시이름 승계 불가
