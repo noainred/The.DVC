@@ -465,3 +465,155 @@ export function retentionText(db) {
   if (Number(d) === 0) return ` · 이력 전부 보관${src}`;
   return ` · 이력 보존 ${Number(d)}일${src}`;
 }
+
+/* ───────────────── v2.734 장애별(장애 1건 = 1행)·종류별 보기 ─────────────────
+ * 사용자 요청 "장애별로 볼 수 있는 기능 · 지금까지 발생한 장애 종류(디스크, CPU, memory, NIC, GPU 등)를 종류별로" +
+ * 선택 "발생 1건 = 1행". 묶기·집계는 서버(`server/src/partfault/incidents.js`)가 하고, 여기서는 문구만 만든다.
+ */
+
+/**
+ * 종료 사유 문구 — 서버 `INCIDENT_END` 키와 **1:1**(테스트가 대조한다). 키를 더하면 여기도 더할 것.
+ * 정상 복귀가 아닌 종료(수동 닫음·제거·키 변경·기록 없음)를 '해소' 한 문구로 덮지 않는다 — 조치가 다르다.
+ */
+export const INCIDENT_END_TEXT = Object.freeze({
+  ok: { label: '정상 복귀', tone: 'green', title: '장비가 그 부품을 다시 정상으로 보고했습니다.' },
+  removed: { label: '부품 제거', tone: 'amber', title: '부품이 보이지 않게 됐습니다(빈 슬롯) — 교체 중일 수 있습니다. 고쳐졌다는 뜻은 아닙니다.' },
+  manual: { label: '수동 닫음', tone: 'gray', title: '관리자가 사유를 적어 닫았습니다(재배정·등록 삭제 등) — 장비가 고쳐졌다는 뜻이 아닙니다.' },
+  migrated: { label: '식별 키 변경', tone: 'gray', title: '장비 식별 키가 바뀌어 새 행으로 옮겨졌습니다 — 고쳐졌다는 뜻이 아닙니다.' },
+  unknown: { label: '종료 기록 없음', tone: 'gray', title: '해소 기록 없이 끝났습니다(이력 초기화·정리 등) — 언제 끝났는지 모릅니다.' },
+});
+
+/** 기간 선택지(일). `0` = 전체(보존 기간 전부) — 서버 `parseDays` 와 같은 뜻. */
+export const INCIDENT_PERIODS = Object.freeze([7, 30, 90, 365, 0]);
+export function periodLabel(days) {
+  return Number(days) === 0 ? '전체(보존 기간)' : `최근 ${Number(days)}일`;
+}
+
+/**
+ * 지속 시간(ms) → '3시간 12분' 등. 값이 없으면 '—'(0 으로 보이지 않는다 — Number(null)===0 함정).
+ * `ongoing` 이면 지금도 이어지는 길이라 '…째' 로 말한다('1분 미만+' 처럼 읽히지 않게).
+ */
+export function durationText(ms, { ongoing = false } = {}) {
+  if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '—';
+  const m = Math.floor(Number(ms) / 60_000);
+  if (ongoing) return m < 1 ? '방금 시작' : `${durationText(ms)}째`;
+  if (m < 1) return '1분 미만';
+  const d = Math.floor(m / 1440); const h = Math.floor((m % 1440) / 60); const mm = m % 60;
+  if (d > 0) return h ? `${d}일 ${h}시간` : `${d}일`;
+  if (h > 0) return mm ? `${h}시간 ${mm}분` : `${h}시간`;
+  return `${mm}분`;
+}
+
+const stamp = (ts) => (ts ? new Date(Number(ts)).toLocaleString('ko-KR') : '—');
+const pad2 = (v) => String(v).padStart(2, '0');
+/** 표 칸용 짧은 시각 'YYYY-MM-DD HH:mm'(브라우저 시각). 전체 문구는 title 로 남긴다. 값이 없으면 '—'. */
+export function shortStamp(ts) {
+  if (ts == null || ts === '' || !Number.isFinite(Number(ts)) || Number(ts) <= 0) return '—';
+  const d = new Date(Number(ts));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+export const fullStamp = stamp;
+
+/** 상태 칸 — 진행 중이면 지금 상태, 끝났으면 종료 사유. tone 은 toneVar 키. */
+export function incidentStateText(inc, labels = {}) {
+  if (!inc) return { text: '—', tone: 'gray', title: '' };
+  if (inc.ongoing) {
+    const st = labels.state?.[inc.state] || inc.state || '?';
+    return { text: `진행 중 — ${st}`, tone: inc.state === 'fault' ? 'red' : inc.state === 'warn' ? 'amber' : 'gray', title: '지금도 열려 있는 장애입니다.' };
+  }
+  const e = INCIDENT_END_TEXT[inc.endReason] || INCIDENT_END_TEXT.unknown;
+  return { text: `끝남 — ${e.label}`, tone: e.tone, title: e.title };
+}
+
+/** 시작 칸 — 모르면 모른다고 말한다. 기간 이전에 시작한 것은 그렇게 표시한다. */
+export function incidentStartText(inc) {
+  if (!inc) return { text: '—', note: '' };
+  if (inc.openedAt == null) return { text: '시작 시각 모름', note: '보존 기간 밖이거나 조회 상한으로 시작 기록을 찾지 못했습니다' };
+  return { text: shortStamp(inc.openedAt), note: inc.startedBefore ? '기간 이전에 시작' : '', title: stamp(inc.openedAt) };
+}
+
+/** 종료 칸 — 진행 중 · 끝난 시각 · 모름. */
+export function incidentEndText(inc) {
+  if (!inc) return '—';
+  if (inc.ongoing) return '진행 중';
+  return inc.closedAt ? shortStamp(inc.closedAt) : '모름';
+}
+
+/** 정렬 값 — 진행 중 이상 > 진행 중 주의 > 끝남. 숫자가 작을수록 앞이다. */
+export function incidentStateRank(inc) {
+  if (!inc) return 9;
+  if (inc.ongoing) return inc.state === 'fault' ? 0 : inc.state === 'warn' ? 1 : 2;
+  return 3;
+}
+
+/** 목록 위 한 줄 요약 — 서버 totals(기간 전체 기준)와 실제로 보이는 목록 수를 함께. */
+export function incidentSummaryText(r) {
+  const t = r?.totals;
+  if (!t) return '';
+  const bits = [`${periodLabel(r.days)} 장애 **${t.incidents}건**`];
+  if (t.ongoing) bits.push(`진행 중 ${t.ongoing}건`);
+  bits.push(`장비 ${t.devices}대`, `종류 ${t.kinds}가지`);
+  if (r.kind) bits.push(`이 중 고른 종류 ${r.total}건`);
+  if (r.omitted) bits.push(`**목록 상한(${r.limit}건)으로 ${r.omitted}건은 싣지 않았습니다 — 종류·기간으로 좁혀 보세요**`);
+  return bits.join(' · ');
+}
+
+/**
+ * 읽은 범위 안내 — **조용한 상한 금지**. 이벤트가 많아 오래된 쪽을 못 읽었으면 실제로 읽은 시작을 말하고,
+ * 시작 시각을 찾지 못한 장애가 상한 때문이면 그 개수를 말한다.
+ */
+export function incidentScanNote(scan) {
+  if (!scan) return '';
+  const bits = [];
+  if (scan.truncated) bits.push(`이력이 많아 최근 ${num(scan.read).toLocaleString()}건만 읽었습니다 — 실제로 본 기간은 **${stamp(scan.coveredSince)} 부터**입니다(그 이전 장애는 이 목록에 없습니다)`);
+  if (num(scan.lookupCapped)) bits.push(`시작 시각을 찾지 못한 장애 ${num(scan.lookupCapped)}건(조회 상한)`);
+  if (num(scan.endUnknown)) bits.push(`해소 기록 없이 끝난 장애 ${num(scan.endUnknown)}건 — '종료 기록 없음' 으로 표시합니다`);
+  if (num(scan.merged)) bits.push(`식별 키 변경으로 이어진 장애 ${num(scan.merged)}건은 한 건으로 합쳤습니다`);
+  return bits.join(' · ');
+}
+
+/** 종류별 표 아래 안내 — 표에 없는 종류를 '0건' 으로 읽지 않게. */
+export const KINDS_NOTE = '기록이 있는 종류만 표시합니다. 표에 없는 종류는 이 기간에 장애가 없었거나, 그 종류를 수집하지 않는 장비일 수 있습니다 — **0건이라는 뜻이 아닙니다**. 평균 지속 시간은 정상 복귀·부품 제거로 끝난 장애만으로 냅니다(수동 닫음은 고친 시각이 아니고, 시작을 모르면 길이를 모릅니다).';
+
+/**
+ * 종류 칩 목록 — '전체' 칩 + 개수가 있는 종류(많은 순). 개수는 **필터와 무관한 기간 전체** 기준이다
+ * (고른 종류만 남기면 다른 종류로 돌아갈 칩이 사라진다).
+ * @param {Array<{kind:string, n:number}>|Array<{kind:string, incidents:number}>} rows
+ */
+export function kindChips(rows, labels = {}) {
+  const list = (Array.isArray(rows) ? rows : [])
+    .map((r) => ({ kind: String(r?.kind || 'other'), n: Number(r?.n ?? r?.incidents) || 0 }))
+    .filter((r) => r.n > 0);
+  list.sort((a, b) => b.n - a.n || a.kind.localeCompare(b.kind));
+  const total = list.reduce((s, r) => s + r.n, 0);
+  return [{ kind: '', label: '전체', n: total }, ...list.map((r) => ({ kind: r.kind, label: labels.kind?.[r.kind] || r.kind, n: r.n }))];
+}
+
+/** 열린 장애 목록의 종류별 개수(열린 장애 탭 칩용). */
+export function openKindCounts(open = []) {
+  const m = new Map();
+  for (const p of Array.isArray(open) ? open : []) {
+    const k = String(p?.kind || 'other');
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  return [...m.entries()].map(([kind, n]) => ({ kind, n }));
+}
+
+/** 장애별 목록 검색 — 장비·부품·원문·수집 주체. 공백으로 나눈 낱말 전부를 포함해야 한다. */
+export function filterIncidents(list, q = '', { repeatOnly = false } = {}) {
+  const terms = String(q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return (Array.isArray(list) ? list : []).filter((i) => {
+    if (repeatOnly && !(Number(i?.occurrences) >= 2)) return false;
+    if (!terms.length) return true;
+    const hay = `${i.deviceName} ${i.deviceId} ${i.label} ${i.rawState} ${i.agent} ${i.kind}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+/** 응답이 지금 선택(기간·종류)과 같은가 — 늦게 온 이전 선택의 응답을 그리지 않는다(v2.689 규약). */
+export function incidentRespFor(resp, { days, kind = '' } = {}) {
+  if (!resp || resp.error) return resp || null;
+  if (Number(resp.days) !== Number(days)) return null;
+  if (String(resp.kind || '') !== String(kind || '')) return null;
+  return resp;
+}

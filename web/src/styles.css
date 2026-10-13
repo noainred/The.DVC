@@ -1844,3 +1844,12 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .logout-btn.gpu-check-on { border-color: var(--amber); color: #fde68a; }
 .gpu-why-banner.ok { border-color: var(--border); background: transparent; color: var(--text-dim); }
 .gpu-why-banner.ok .dot { background: var(--green); }
+
+/* v2.734 파트 장애 — 종류 칩 · 장애별 표 최소폭 · 종류별 막대 */
+.pf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-chip { height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pf-chip b { color: var(--text); font-weight: 600; margin-left: 2px; }
+.pf-chip.on { border-color: var(--accent); color: var(--text); background: rgba(56, 132, 255, .14); }
+.pf-inc-table { min-width: 1040px; }
+.pf-kind-bar { flex: 1; min-width: 60px; height: 6px; border-radius: 3px; background: rgba(148, 163, 184, .18); overflow: hidden; display: inline-block; }
+.pf-kind-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }

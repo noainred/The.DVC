@@ -199,6 +199,15 @@ function prepare(db) {
     stats: db.prepare('SELECT COUNT(*) AS rows, MIN(at) AS mn, MAX(at) AS mx FROM part_event'),
     stateStats: db.prepare('SELECT COUNT(*) AS n FROM part_state'),
     metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
+    // v2.734 장애별·종류별 보기 — 기간 이벤트를 최신부터 조각으로 읽는다. (at, id) 행 값 비교는 ix_event_at 범위 탐색 그대로다
+    //   (인덱스 항목은 rowid 를 끝 열로 가지므로 ORDER BY at DESC, id DESC 에 정렬 단계가 없다 — EXPLAIN 으로 확인, 테스트 고정).
+    incFirst: db.prepare('SELECT * FROM part_event WHERE at>=? ORDER BY at DESC, id DESC LIMIT ?'),
+    incNext: db.prepare('SELECT * FROM part_event WHERE at>=? AND (at, id) < (?, ?) ORDER BY at DESC, id DESC LIMIT ?'),
+    // 기간 이전에 열린 장애의 시작 — 그 키의 직전 '열림' 하나(ix_event_key 선탐색).
+    openBefore: db.prepare("SELECT at, state FROM part_event WHERE agent=? AND part_key=? AND event='open' AND at<? ORDER BY at DESC, id DESC LIMIT 1"),
+    // 결과 기억 키 — MIN·MAX 는 단독 문장으로(v2.550.3: 집계 둘을 한 문장에 두면 인덱스를 통째로 훑는다).
+    idMax: db.prepare('SELECT MAX(id) AS m FROM part_event'),
+    idMin: db.prepare('SELECT MIN(id) AS m FROM part_event'),
   };
 }
 
@@ -381,6 +390,56 @@ export async function recentEvents({ sinceMs = 30 * 86_400_000, limit = 500, par
     kind: r.kind, label: r.label, keyKind: r.key_kind, event: r.event, state: r.state,
     prevState: r.prev_state, rawState: r.raw_state, closeReason: r.close_reason, agent: r.agent,
   }));
+}
+
+const evRow = (r) => ({
+  id: r.id, at: r.at, partKey: r.part_key, scope: r.scope, deviceId: r.device_id,
+  deviceKey: r.device_key, deviceKeyKind: r.device_key_kind, deviceName: r.device_name,
+  kind: r.kind, label: r.label, keyKind: r.key_kind, event: r.event, state: r.state,
+  prevState: r.prev_state, rawState: r.raw_state, closeReason: r.close_reason, agent: r.agent,
+});
+
+/**
+ * 장애별·종류별 보기의 입력(v2.734). 기간 이벤트를 **최신부터** `chunk` 줄씩 읽고 조각 사이에 양보한 뒤(요청 경로의 동기 SQL 을
+ * 행 수에 비례해 한 번에 돌리지 않는다 — v2.672·v2.693 규약) **시간 오름차순**으로 돌려준다. 상한(`maxEvents`)에 걸리면 오래된 쪽이
+ * 빠지므로 `coveredSince`(실제로 읽은 가장 이른 시각)를 함께 준다 — 화면이 '읽은 기간' 을 말한다(조용한 상한 금지).
+ * `startLookup` 은 기간 이전 '열림' 이벤트를 인덱스로 찾는다(incidents.js 가 상한 안에서만 부른다).
+ * @returns {Promise<{available:boolean, events:Array, openRows:Array, startLookup:Function|null, truncated:boolean, coveredSince:number|null, read:number, error?:string}>}
+ */
+export async function incidentInputs({ sinceAbs = 0, maxEvents = 100_000, chunk = 5_000, yielder = null } = {}) {
+  const h = await open();
+  if (!h) return { available: false, events: [], openRows: [], startLookup: null, truncated: false, coveredSince: null, read: 0,
+    error: initError ? String(initError.message || initError).slice(0, 200) : lockRetry.note() };
+  const since = Math.max(0, Math.trunc(Number(sinceAbs) || 0));
+  const cap = Math.max(1, Math.trunc(Number(maxEvents) || 100_000));
+  const size = Math.max(100, Math.min(20_000, Math.trunc(Number(chunk) || 5_000)));
+  const desc = [];
+  let truncated = false;
+  let rows = h.st.incFirst.all(since, Math.min(size, cap + 1));
+  for (;;) {
+    for (const r of rows) {
+      if (desc.length >= cap) { truncated = true; break; }
+      desc.push(evRow(r));
+    }
+    if (truncated || rows.length < size) break;
+    const last = rows[rows.length - 1];
+    if (yielder) await yielder();
+    rows = h.st.incNext.all(since, last.at, last.id, Math.min(size, cap - desc.length + 1));
+  }
+  desc.reverse();
+  const openRows = h.st.openAll.all().map(rowToPart);
+  const startLookup = (agent, partKey, beforeAt) => {
+    const r = h.st.openBefore.get(String(agent || ''), String(partKey || ''), Math.trunc(Number(beforeAt) || 0));
+    return r ? { at: r.at, state: r.state } : null;
+  };
+  return { available: true, events: desc, openRows, startLookup, truncated, coveredSince: truncated ? (desc[0]?.at ?? null) : null, read: desc.length };
+}
+
+/** 결과 기억 키 — 이벤트가 쌓이거나(MAX) 정리되면(MIN) 바뀐다. 열린 장애 수는 진행 중 판정이 바뀌는 근거라 함께 싣는다. */
+export async function incidentMarks() {
+  const h = await open();
+  if (!h) return null;
+  return { min: h.st.idMin.get()?.m ?? null, max: h.st.idMax.get()?.m ?? null, open: h.st.stateStats.get()?.n ?? null };
 }
 
 export function _resetForTest() {

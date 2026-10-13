@@ -26,7 +26,9 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
   KEY_KIND_LABEL, KEY_KIND_NOTE, DEVICE_KEY_KIND_LABEL, DEVICE_KEY_KIND_NOTE, HOLD_REASON, PUSH_PROTOCOL } from '../../partfault/types.js';
-import { openFaults, recentEvents, partFaultDbStatus, resetInfo } from '../../partfault/db.js';
+import { openFaults, recentEvents, partFaultDbStatus, resetInfo, incidentInputs, incidentMarks } from '../../partfault/db.js';
+import { buildIncidents, summarizeKinds } from '../../partfault/incidents.js';   // v2.734 장애별·종류별
+import { createYielder } from '../../util/timeSlice.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
 import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent } from '../../partfault/settings.js';
@@ -200,6 +202,74 @@ export function maskPartRow(r, match, hosts = []) {
   return out;
 }
 
+/**
+ * 조회 기간(일) — `0` 은 **전체(보존 기간 전부)** 다(v2.734). 빈 값·숫자 아님은 기본 30일, 그 밖은 [1, 3650].
+ * ⚠ `Number('0') || 30` 처럼 쓰면 '전체' 가 30일로 둔갑한다 — 0 을 먼저 본다.
+ */
+export function parseDays(v, def = 30) {
+  const s = String(v ?? '').trim();
+  if (s === '0') return 0;
+  const n = Math.trunc(Number(s));
+  if (!s || !Number.isFinite(n) || n <= 0) return def;
+  return Math.min(3650, n);
+}
+
+/** 장애별 목록 상한 — 종류별 집계는 상한 **전** 전체로 낸다(잘린 목록으로 세면 부분 합이다). */
+export const INCIDENT_LIST_MAX = 2_000;
+/** 기간 이벤트 읽기 상한 — 넘으면 오래된 쪽이 빠지고 응답 scan.coveredSince 가 실제로 읽은 시작을 말한다. */
+export const INCIDENT_EVENT_READ_MAX = Math.max(1_000, Math.trunc(Number(process.env.PARTFAULT_INCIDENT_EVENT_MAX) || 100_000));
+const INCIDENT_MEMO_MS = 30_000;
+const _incMemo = new Map();   // days → { key, at, value } | { key, promise }
+
+/**
+ * 장애별·종류별 계산(v2.734). 같은 기간·같은 DB 상태(이벤트 MIN/MAX id·열린 장애 수)면 30초 동안 결과를 재사용하고, 진행 중인 같은 계산에 합류한다.
+ * 이벤트는 조각으로 읽고 양보한다 — 요청 경로에서 행 수에 비례하는 동기 작업을 한 번에 돌리지 않는다.
+ */
+export async function computeIncidents(days, { now = Date.now() } = {}) {
+  const marks = await incidentMarks().catch(() => null);
+  const key = `${days}|${marks?.min ?? ''}|${marks?.max ?? ''}|${marks?.open ?? ''}`;
+  const hit = _incMemo.get(days);
+  if (hit && hit.key === key) {
+    if (hit.promise) return hit.promise;
+    if (now - hit.at < INCIDENT_MEMO_MS) return hit.value;
+  }
+  const promise = (async () => {
+    const t0 = Date.now();
+    const since = days === 0 ? 0 : now - days * 86_400_000;
+    const yielder = createYielder(15);
+    const inp = await incidentInputs({ sinceAbs: since, maxEvents: INCIDENT_EVENT_READ_MAX, yielder });
+    if (!inp.available) return { available: false, error: inp.error || '', since, days };
+    await yielder();
+    const { incidents, stats } = buildIncidents({ events: inp.events, openRows: inp.openRows, since, now, startLookup: inp.startLookup });
+    await yielder();
+    const sum = summarizeKinds(incidents, { since });
+    return {
+      available: true, since, days, now, incidents, ...sum,
+      scan: { read: inp.read, truncated: inp.truncated, coveredSince: inp.coveredSince, maxEvents: INCIDENT_EVENT_READ_MAX, ...stats, ms: Date.now() - t0 },
+    };
+  })();
+  _incMemo.set(days, { key, promise });
+  try {
+    const value = await promise;
+    _incMemo.set(days, { key, at: Date.now(), value });
+    return value;
+  } catch (e) { _incMemo.delete(days); throw e; }
+}
+export function _resetIncidentMemoForTest() { _incMemo.clear(); }
+
+/**
+ * 장애 한 건을 가린다(비-admin, 순수, 원본 불변) — 행은 `maskPartRow` 와 같은 규칙, 타임라인의 원문 상태도 같은 치환기를 거친다.
+ * 식별(id)·옛 키(migratedFrom)도 가린 partKey 로 다시 만든다 — 원문 IP 가 행 키로 새지 않게.
+ */
+export function maskIncident(inc, match, hosts = []) {
+  if (!inc || typeof inc !== 'object') return inc;
+  const m = maskPartRow(inc, match, hosts);
+  m.id = `${m.agent || ''}|${m.partKey}|${inc.openedAt ?? 'x'}|${inc.closedAt ?? 'open'}`;
+  if (inc.migratedFrom) m.migratedFrom = maskPartRow({ partKey: inc.migratedFrom, deviceId: inc.deviceId, deviceKey: inc.deviceKey }, match, hosts).partKey;
+  m.events = (inc.events || []).map((e) => ({ ...e, rawState: maskPartRow({ rawState: e.rawState }, match, hosts).rawState }));
+  return m;
+}
+
 export function registerPartFaults(api) {
 
 /** 열린 장애 + 판정 재료. 화면의 주 조회. */
@@ -236,7 +306,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
 
 /** 전이 이력(열림/변화/해소). **전이만** 기록되므로 그대로 시간순 목록이다. */
 api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) => {
-  const days = Math.min(730, Math.max(1, Number(req.query.days) || 30));
+  // v2.734: days=0 = 전체(보존 기간 전부). 예전 상한 730일은 보존일 상한(3650)보다 짧아 그 이전 이력을 볼 길이 없었다.
+  const days = parseDays(req.query.days);
   // v2.607 DB2607-04: 정수화·하한 — limit=1.5 가 REAL 로 바인딩돼 'datatype mismatch' 가 났고 아래 .catch 가 빈 이력으로 삼켰다.
   const { limit } = pageArgs(req.query, { def: 500, max: 2_000 });
   let partKey = t(req.query.partKey);
@@ -255,13 +326,45 @@ api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) 
   }
   // v2.607 DB2607-04: 조회 실패를 빈 배열로 삼키면 화면이 '전이 이력 없음' 이라 말한다 — 사유를 응답에 싣는다.
   let eventsError = null;
-  const events0 = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' })
+  const events0 = await recentEvents({ sinceMs: days === 0 ? Date.now() : days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' })
     .catch((e) => { eventsError = String(e?.message || e).slice(0, 200); return []; });
   const events = isAdmin ? events0 : events0.map((e) => maskPartRow(e, match, hosts));
   res.json({ ok: true, events, days, limit, labels: LABELS, truncated: events.length >= limit,
     ...(eventsError ? { eventsError } : {}),
     ...(isAdmin ? {} : { addressHidden: true }),
     db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin') });
+});
+
+/**
+ * 장애별·종류별(v2.734) — 같은 부품의 '열림 → (변화) → 해소' 를 **장애 1건 = 1행** 으로 묶은 목록과 부품 종류별 집계.
+ * 사용자 요청 "장애별로 볼 수 있는 기능 · 지금까지 발생한 장애 종류(디스크, CPU, memory, NIC, GPU 등)를 종류별로".
+ * `?days=0` 은 전체(보존 기간). `?kind=` 는 목록만 거른다 — 종류별 집계(`kinds`)는 언제나 기간 전체 기준이다
+ * (고른 종류만 남기면 다른 종류로 돌아갈 칩 개수가 사라진다). 목록은 상한(INCIDENT_LIST_MAX)으로 자르고 뺀 개수를 밝힌다.
+ */
+api.get('/tools/part-faults/incidents', toolsPerm, fullScopeOnly, async (req, res) => {
+  const days = parseDays(req.query.days);
+  const kind = t(req.query.kind);
+  const isAdmin = isAdminReq(req);
+  let r;
+  try { r = await computeIncidents(days); } catch (e) {
+    return res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
+  }
+  const db = dbView(await partFaultDbStatus().catch(() => null), isAdmin);
+  if (!r.available) return res.json({ ok: true, available: false, reason: r.error || 'DB 사용 불가', days, since: r.since, incidents: [], kinds: [], totals: null, db, labels: LABELS });
+  const filtered = kind ? r.incidents.filter((i) => i.kind === kind) : r.incidents;
+  let shown = filtered.slice(0, INCIDENT_LIST_MAX);
+  if (!isAdmin) {
+    const hosts = await partFaultHosts();
+    const match = addressMatcher(hosts);
+    shown = shown.map((i) => maskIncident(i, match, hosts));
+  }
+  res.json({
+    ok: true, available: true, days, since: r.since, now: r.now, kind: kind || null,
+    incidents: shown, total: filtered.length, omitted: Math.max(0, filtered.length - shown.length), limit: INCIDENT_LIST_MAX,
+    kinds: r.kinds, totals: r.totals, scan: r.scan,
+    ...(isAdmin ? {} : { addressHidden: true }),
+    labels: LABELS, db,
+  });
 });
 
 /**

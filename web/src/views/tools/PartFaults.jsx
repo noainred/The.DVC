@@ -15,11 +15,15 @@
  *  4. 판정·문구는 `partFaultText.js`(순수, vitest 고정)가 소유한다. 이 파일은 조립만 한다.
  *
  * ⚠ 폴링하지 않는다 — 점검 자체가 주기적이고 이 화면은 그 결과(DB)를 읽을 뿐이다. 마운트 1회 + 버튼.
+ *
+ * v2.734 — 탭 넷: 열린 장애 · **장애별**(장애 1건 = 1행, 열림→해소를 한 행으로) · **종류별**(디스크·CPU·메모리·NIC·GPU …
+ * 종류마다 발생·진행 중·영향 장비·평균 지속) · 이력(전이 사건 순). 묶기·집계는 서버(`partfault/incidents.js`),
+ * 문구는 `partFaultText.js` 가 소유한다. 종류 칩을 누르면 장애별 목록이 그 종류로 좁혀진다.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브탭을 URL 에 싣는다
-import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
+import { Loading, ErrorBox, SearchBox, Kpi, DataTable } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import {
@@ -28,6 +32,9 @@ import {
   historyEmptyText, kpiValue, kpiAccent,
   EDGE_KIND_LABEL, EDGE_KIND_TONE,
   retentionText,
+  INCIDENT_PERIODS, periodLabel, durationText, incidentStateText, incidentStartText, incidentEndText, incidentStateRank,
+  incidentSummaryText, incidentScanNote, KINDS_NOTE, kindChips, openKindCounts, filterIncidents, incidentRespFor,
+  shortStamp, fullStamp,
 } from './partFaultText.js';
 import Select from '../../components/Select.jsx';
 
@@ -43,8 +50,14 @@ export function PartFaults() {
   const [msg, setMsg] = useState('');
   const [q, setQ] = useState('');
   // v2.613(CATALOG2613-06): 열린 장애/이력 탭을 해시(#/tools/part-faults/<tab>)에 싣는다(v2.438 규약).
-  const [tab, setTab] = useHashTab({ base: ['tools', 'part-faults'], valid: ['open', 'events'], fallback: 'open' });
+  const [tab, setTab] = useHashTab({ base: ['tools', 'part-faults'], valid: ['open', 'incidents', 'kinds', 'events'], fallback: 'open' });
   const [days, setDays] = useState(30);
+  // v2.734 장애별·종류별 — 고른 종류(''=전체)·응답(요청 키와 함께)·펼친 장애·반복 부품만
+  const [kindSel, setKindSel] = useState('');
+  const [inc, setInc] = useState(null);
+  const [incOpen, setIncOpen] = useState(null);
+  const [repeatOnly, setRepeatOnly] = useState(false);
+  const [incQ, setIncQ] = useState('');
   const [showEdges, setShowEdges] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -67,17 +80,35 @@ export function PartFaults() {
     return () => { active = false; };
   }, [tab, days]);
 
-  const labels = data?.labels || {};
-  const open = data?.open || [];
+  // v2.734: 장애별·종류별 — 종류 필터는 서버가 목록에만 건다(종류별 집계는 언제나 기간 전체). 늦게 온 이전 선택 응답은 그리지 않는다.
+  const incKind = tab === 'incidents' ? kindSel : '';
+  useEffect(() => {
+    if (tab !== 'incidents' && tab !== 'kinds') return undefined;
+    let active = true;
+    setIncOpen(null);
+    fetchJson('/tools/part-faults/incidents', { days, ...(incKind ? { kind: incKind } : {}) })
+      .then((r) => { if (active) setInc(r); })
+      .catch((e) => { if (active) setInc({ error: e.message, days, kind: incKind }); });
+    return () => { active = false; };
+  }, [tab, days, incKind]);
+  const incResp = incidentRespFor(inc, { days, kind: incKind });
+
+  // v2.734: 매 렌더 새 객체가 되지 않게 묶는다(아래 useMemo 들의 의존성 — 칩·필터가 렌더마다 다시 계산되지 않게).
+  const labels = useMemo(() => data?.labels || {}, [data]);
+  const open = useMemo(() => data?.open || [], [data]);
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return open;
-    const terms = needle.split(/\s+/);
+    const terms = needle ? needle.split(/\s+/) : [];
     return open.filter((p) => {
+      if (kindSel && (p.kind || 'other') !== kindSel) return false;
+      if (!terms.length) return true;
       const hay = `${p.deviceName} ${p.deviceId} ${p.deviceKey} ${p.label} ${p.detail} ${p.rawState} ${p.agent}`.toLowerCase();
       return terms.every((t) => hay.includes(t));
     });
-  }, [open, q]);
+  }, [open, q, kindSel]);
+  const openChips = useMemo(() => kindChips(openKindCounts(open), labels), [open, labels]);
+  const incRows = useMemo(() => filterIncidents(incResp?.incidents, incQ, { repeatOnly }), [incResp, incQ, repeatOnly]);
+  const incChips = useMemo(() => kindChips(incResp?.kinds || [], incResp?.labels || labels), [incResp, labels]);
   // 표 아래 각주 — 표시된 행에 해당하는 식별 안내만 1회씩(행마다 반복하면 400px 에서 셀이 세로로 길어진다)
   const footnotes = useMemo(() => tableFootnotes(rows, labels), [rows, labels]);
 
@@ -245,14 +276,39 @@ export function PartFaults() {
         <>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className={`btn${tab === 'open' ? ' active' : ''}`} onClick={() => setTab('open')}>열린 장애 {open.length}</button>
-            <button className={`btn${tab === 'events' ? ' active' : ''}`} onClick={() => setTab('events')}>이력</button>
+            <button className={`btn${tab === 'incidents' ? ' active' : ''}`} onClick={() => setTab('incidents')} title="같은 부품의 발생→해소를 한 행으로 묶어 봅니다">장애별</button>
+            <button className={`btn${tab === 'kinds' ? ' active' : ''}`} onClick={() => setTab('kinds')} title="디스크·CPU·메모리·NIC·GPU 등 부품 종류별로 봅니다">종류별</button>
+            <button className={`btn${tab === 'events' ? ' active' : ''}`} onClick={() => setTab('events')} title="상태가 바뀐 순간(발생·변화·해소)을 시간 순으로 봅니다">이력</button>
             {tab === 'open' && <SearchBox value={q} onChange={setQ} placeholder="장비·부품·원문 상태·법인 검색" />}
-            {tab === 'events' && (
+            {tab === 'incidents' && <SearchBox value={incQ} onChange={setIncQ} placeholder="장비·부품·원문 상태·법인 검색" />}
+            {tab !== 'open' && (
               <Select sort={false} className="input" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-                {[7, 30, 90, 365].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
+                {INCIDENT_PERIODS.map((d) => <option key={d} value={d}>{periodLabel(d)}</option>)}
               </Select>
             )}
+            {tab === 'incidents' && (
+              <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }} title="기간 중 같은 부품에서 2번 이상 난 장애만 봅니다(흔들리는 부품 찾기)">
+                <input type="checkbox" checked={repeatOnly} onChange={(e) => setRepeatOnly(e.target.checked)} /> 반복 부품만
+              </label>
+            )}
           </div>
+
+          {/* v2.734 종류 칩 — 열린 장애는 열린 목록 기준, 장애별은 기간 전체 기준(필터와 무관하게 세어 다른 종류로 돌아갈 수 있게). */}
+          {(tab === 'open' || tab === 'incidents') && (tab === 'open' ? openChips : incChips).length > 1 && (
+            <div className="pf-chips" role="group" aria-label="부품 종류">
+              {(tab === 'open' ? openChips : incChips).map((c) => (
+                <button key={c.kind || 'all'} type="button" className={`pf-chip${kindSel === c.kind ? ' on' : ''}`} aria-pressed={kindSel === c.kind}
+                  onClick={() => setKindSel(c.kind)}>
+                  {c.label} <b>{c.n}</b>
+                </button>
+              ))}
+              {kindSel && !(tab === 'open' ? openChips : incChips).some((c) => c.kind === kindSel) && (
+                <button type="button" className="pf-chip on" onClick={() => setKindSel('')} title="고른 종류가 이 목록에 없습니다 — 누르면 전체로 돌아갑니다">
+                  {labels.kind?.[kindSel] || kindSel} <b>0</b> ✕
+                </button>
+              )}
+            </div>
+          )}
 
           {tab === 'open' && (
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
@@ -308,6 +364,89 @@ export function PartFaults() {
             </div>
           )}
 
+          {tab === 'incidents' && (
+            <div className="card" style={{ padding: 0, minWidth: 0 }}>
+              {!incResp && <Loading />}
+              {incResp?.error && <ErrorBox error={incResp.error} />}
+              {incResp && !incResp.error && incResp.available === false && (
+                <div style={{ padding: 12, color: 'var(--amber)' }}>장애 이력 DB 를 열 수 없습니다 — {incResp.reason || '사유 미상'}</div>
+              )}
+              {incResp?.available && (
+                <>
+                  <div style={{ padding: '8px 12px', fontSize: 12, display: 'grid', gap: 4 }}>
+                    <div><BoldText text={incidentSummaryText(incResp)} /></div>
+                    {incidentScanNote(incResp.scan) && <div style={{ color: 'var(--amber)' }}><BoldText text={incidentScanNote(incResp.scan)} /></div>}
+                    {(incQ || repeatOnly) && <div style={{ color: 'var(--text-faint)' }}>검색·반복 부품 조건으로 {incRows.length}건 표시</div>}
+                  </div>
+                  <DataTable className="pf-inc-table" maxHeight="70vh" limit={500}
+                    initialSort={{ key: 'state', dir: 'asc' }}
+                    emptyText={incResp.total ? '검색 조건에 맞는 장애가 없습니다.' : `${periodLabel(days)} 동안 기록된 장애가 없습니다 — 이력은 상태가 바뀐 순간만 남깁니다(위 점검 안내를 함께 읽어 주세요).`}
+                    footer={incRows.length > 500 ? <div style={{ padding: 8, fontSize: 12, color: 'var(--amber)' }}>정렬한 뒤 앞 500건만 그렸습니다 — {incRows.length - 500}건은 검색·종류로 좁혀 보세요.</div> : null}
+                    expandedKey={incOpen}
+                    renderExpanded={(i) => <IncidentTimeline inc={i} labels={incResp.labels || labels} />}
+                    rows={incRows}
+                    columns={[
+                      { key: 'state', label: '상태', sortValue: (i) => incidentStateRank(i) * 1e13 - (i.latestAt || 0), render: (i) => {
+                        const st = incidentStateText(i, incResp.labels || labels);
+                        return <span title={st.title} style={{ color: stateColor(st.tone), fontWeight: 700, whiteSpace: 'nowrap' }}>{st.text}</span>;
+                      } },
+                      { key: 'deviceName', label: '장비', sortValue: (i) => i.deviceName || i.deviceId, render: (i) => (
+                        <div style={{ maxWidth: 200, whiteSpace: 'normal' }}>
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} title={i.deviceId}>{i.deviceName || i.deviceId}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{labels.scope?.[i.scope] || i.scope}</div>
+                        </div>
+                      ) },
+                      { key: 'label', label: '부품', sortValue: (i) => `${i.kind}|${i.label}`, render: (i) => (
+                        <div style={{ maxWidth: 220, whiteSpace: 'normal' }}>
+                          <div>{i.label || '—'}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{labels.kind?.[i.kind] || i.kind}</div>
+                        </div>
+                      ) },
+                      { key: 'openedAt', label: '시작', sortValue: (i) => i.openedAt, render: (i) => {
+                        const st = incidentStartText(i);
+                        return <div style={{ whiteSpace: 'nowrap' }} title={st.title || st.note}>{st.text}{st.note && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{st.note}</div>}</div>;
+                      } },
+                      { key: 'closedAt', label: '종료', sortValue: (i) => (i.ongoing ? Number.MAX_SAFE_INTEGER : i.closedAt), render: (i) => <span style={{ whiteSpace: 'nowrap' }} title={i.closedAt ? fullStamp(i.closedAt) : undefined}>{incidentEndText(i)}</span> },
+                      { key: 'durationMs', label: '지속', align: 'right', render: (i) => <span style={{ whiteSpace: 'nowrap' }} title={i.ongoing ? '지금까지 이어진 길이' : ''}>{durationText(i.durationMs, { ongoing: i.ongoing })}</span> },
+                      { key: 'peak', label: '최악 상태', sortValue: (i) => (i.peak === 'fault' ? 0 : i.peak === 'warn' ? 1 : 2), render: (i) => (
+                        <span style={{ color: stateColor(labels.tone?.[i.peak]), whiteSpace: 'nowrap' }}>{labels.state?.[i.peak] || '—'}</span>
+                      ) },
+                      { key: 'occurrences', label: '반복', align: 'right', render: (i) => (
+                        <span style={{ color: i.occurrences >= 2 ? 'var(--amber)' : undefined, whiteSpace: 'nowrap' }} title="기간 중 같은 부품에서 난 장애 수">{i.occurrences}회</span>
+                      ) },
+                      { key: 'agent', label: '수집', sortValue: (i) => i.agent || '', render: (i) => <span style={{ whiteSpace: 'nowrap' }}>{i.agent || '중앙'}</span> },
+                      { key: '_x', label: '', sortValue: () => 0, render: (i) => (
+                        <button className="btn btn-sm" aria-expanded={incOpen === i.id} onClick={() => setIncOpen((v) => (v === i.id ? null : i.id))}>
+                          {incOpen === i.id ? '접기' : `타임라인 ${i.events.length + (i.eventsOmitted || 0)}`}
+                        </button>
+                      ) },
+                    ]}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'kinds' && (
+            <div className="card" style={{ padding: 0, minWidth: 0 }}>
+              {!incResp && <Loading />}
+              {incResp?.error && <ErrorBox error={incResp.error} />}
+              {incResp && !incResp.error && incResp.available === false && (
+                <div style={{ padding: 12, color: 'var(--amber)' }}>장애 이력 DB 를 열 수 없습니다 — {incResp.reason || '사유 미상'}</div>
+              )}
+              {incResp?.available && (
+                <>
+                  <div style={{ padding: '8px 12px', fontSize: 12, display: 'grid', gap: 4 }}>
+                    <div><BoldText text={incidentSummaryText(incResp)} /></div>
+                    {incidentScanNote(incResp.scan) && <div style={{ color: 'var(--amber)' }}><BoldText text={incidentScanNote(incResp.scan)} /></div>}
+                  </div>
+                  <KindsTable resp={incResp} labels={incResp.labels || labels} onPick={(k) => { setKindSel(k); setTab('incidents'); }} />
+                  <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-faint)' }}><BoldText text={KINDS_NOTE} /></div>
+                </>
+              )}
+            </div>
+          )}
+
           {tab === 'events' && (
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
               {!events && <Loading />}
@@ -341,6 +480,72 @@ export function PartFaults() {
         </>
       )}
     </div>
+  );
+}
+
+/** 장애 한 건의 타임라인(펼침). 원문 상태·보류 사유·식별 키 변경·잘린 개수를 함께 말한다. */
+function IncidentTimeline({ inc, labels }) {
+  const hold = inc.ongoing ? holdText(inc.holdReason) : '';
+  return (
+    // 좁은 화면에서 표가 가로로 스크롤돼도 타임라인은 보이는 자리에 남는다(sticky) — 400px 에서 펼친 칸이 빈 것처럼 보였다.
+    <div style={{ padding: '8px 16px 12px', display: 'grid', gap: 4, fontSize: 12, whiteSpace: 'normal', position: 'sticky', left: 0, maxWidth: 'min(900px, calc(100vw - 64px))' }}>
+      {inc.migratedFrom && <div style={{ color: 'var(--text-faint)' }}>식별 키 변경으로 이어진 장애입니다(옛 키 {inc.migratedFrom}) — 한 건으로 합쳐 보입니다.</div>}
+      {inc.openedAt == null && <div style={{ color: 'var(--amber)' }}>시작 기록을 찾지 못했습니다 — 보존 기간 밖이거나 조회 상한에 걸렸습니다. 아래는 기간 안에서 본 사건만입니다.</div>}
+      {inc.events.length === 0 && <div style={{ color: 'var(--text-faint)' }}>이 기간에는 상태 변화가 없었습니다 — 기간 이전에 열려 지금까지 같은 상태입니다.</div>}
+      {inc.events.map((e, n) => (
+        <div key={`${e.at}:${n}`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          <span style={{ color: 'var(--text-faint)', whiteSpace: 'nowrap' }} title={fullStamp(e.at)}>{shortStamp(e.at)}</span>
+          <span><BoldText text={eventText(e, labels)} /></span>
+          {e.rawState && <code style={{ fontSize: 11 }}>{e.rawState}</code>}
+        </div>
+      ))}
+      {inc.eventsOmitted > 0 && <div style={{ color: 'var(--amber)' }}>사건이 많아 앞 {inc.events.length}건만 실었습니다 — {inc.eventsOmitted}건은 '이력' 탭에서 보세요.</div>}
+      {inc.ongoing && inc.rawState && <div>지금 장비 보고 원문: <code style={{ fontSize: 11 }}>{inc.rawState}</code></div>}
+      {hold && <div style={{ color: 'var(--amber)' }}><BoldText text={hold} /></div>}
+    </div>
+  );
+}
+
+/** 종류별 표 — 행을 누르면 장애별 목록이 그 종류로 좁혀진다. 막대는 기간 장애 수의 상대 크기다. */
+function KindsTable({ resp, labels, onPick }) {
+  const kinds = resp.kinds || [];
+  const max = Math.max(1, ...kinds.map((k) => k.incidents || 0));
+  if (!kinds.length) {
+    return <div style={{ padding: 16, color: 'var(--text-faint)' }}>{periodLabel(resp.days)} 동안 기록된 장애가 없습니다 — 이력은 상태가 바뀐 순간만 남깁니다.</div>;
+  }
+  return (
+    <STable minWidth={900}>
+      <thead><tr>
+        <th>종류</th><th>장애 수</th><th title="기간 안에 새로 시작한 장애 · 괄호는 기간 이전부터 이어진 장애">새로 발생</th><th>지금 열림</th>
+        <th title="가장 나빴던 상태가 '이상' 이었던 장애 수">최악이 이상</th><th>영향 장비</th><th title="기간 중 같은 부품에서 2번 이상 난 부품 수">반복 부품</th>
+        <th title="정상 복귀·부품 제거로 끝난 장애만">평균 지속</th><th>마지막 발생</th><th data-nosort></th>
+      </tr></thead>
+      <tbody>
+        {kinds.map((k) => (
+          <tr key={k.kind}>
+            <td style={{ whiteSpace: 'nowrap' }}><b>{labels.kind?.[k.kind] || k.kind}</b></td>
+            <td data-sort={k.incidents} style={{ minWidth: 120 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ minWidth: 28, textAlign: 'right' }}>{k.incidents}</span>
+                <span className="pf-kind-bar" aria-hidden="true"><span style={{ width: `${Math.round((k.incidents / max) * 100)}%` }} /></span>
+              </div>
+            </td>
+            <td data-sort={k.started} style={{ whiteSpace: 'nowrap' }}>{k.started}{k.carried ? <span style={{ fontSize: 11, color: 'var(--text-faint)' }} title="기간 이전부터 이어진 장애"> (+이어짐 {k.carried})</span> : ''}</td>
+            <td data-sort={k.ongoing} style={{ whiteSpace: 'nowrap' }}>
+              {k.ongoing ? <span>{k.ongoing}{k.ongoingFault ? <span style={{ color: 'var(--red)' }}> · 이상 {k.ongoingFault}</span> : ''}{k.ongoingWarn ? <span style={{ color: 'var(--amber)' }}> · 주의 {k.ongoingWarn}</span> : ''}</span> : '—'}
+            </td>
+            <td data-sort={k.peakFault}>{k.peakFault || '—'}</td>
+            <td data-sort={k.devices}>{k.devices}</td>
+            <td data-sort={k.repeatParts} style={{ color: k.repeatParts ? 'var(--amber)' : undefined }}>{k.repeatParts || '—'}</td>
+            <td data-sort={k.avgDurationMs ?? ''} style={{ whiteSpace: 'nowrap' }} title={k.durationSamples ? `해소된 장애 ${k.durationSamples}건 기준` : '정상 복귀·부품 제거로 끝난 장애가 없습니다'}>
+              {durationText(k.avgDurationMs)}{k.durationSamples ? <span style={{ fontSize: 11, color: 'var(--text-faint)' }}> ({k.durationSamples}건)</span> : ''}
+            </td>
+            <td data-sort={k.lastStartedAt ?? ''} style={{ whiteSpace: 'nowrap' }} title={k.lastStartedAt ? fullStamp(k.lastStartedAt) : '기간 안에 새로 시작한 장애가 없습니다'}>{shortStamp(k.lastStartedAt)}</td>
+            <td><button className="btn btn-sm" onClick={() => onPick(k.kind)}>장애 보기</button></td>
+          </tr>
+        ))}
+      </tbody>
+    </STable>
   );
 }
 
