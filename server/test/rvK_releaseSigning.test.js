@@ -128,8 +128,20 @@ test('S-10 ① 코어 — 정상 검증 · payload 변조 · 모르는 키 · �
   // 정책 — 모르는 값은 require
   assert.equal(sigmod.signaturePolicy({ UPGRADE_SIGNATURE_POLICY: 'off' }).policy, 'require');
   assert.equal(sigmod.signaturePolicy({ UPGRADE_SIGNATURE_POLICY: 'off' }).invalid, 'off');
-  assert.equal(sigmod.signaturePolicy({}).policy, 'require');
   assert.equal(sigmod.signaturePolicy({ UPGRADE_SIGNATURE_POLICY: 'warn' }).policy, 'warn');
+  // v2.735.1: env 가 없으면 신뢰 키 설정 여부로 정한다 — 키가 하나도 없는 설치본은 warn(unconfigured), 하나라도 있으면 require
+  const empty = core.mergeTrust([core.parseKeysDoc({ keys: [] })]);
+  const withKey = core.mergeTrust([core.parseKeysDoc({ keys: [keyEntry(K1)] })]);
+  const revokedOnly = core.mergeTrust([core.parseKeysDoc({ revoked: [kid(K1)] })]);
+  assert.deepEqual(sigmod.signaturePolicy({}, empty), { policy: 'warn', source: 'unconfigured' });
+  assert.deepEqual(sigmod.signaturePolicy({}, withKey), { policy: 'require', source: 'default' });
+  assert.equal(sigmod.signaturePolicy({}, revokedOnly).policy, 'require', '회수 목록만 있어도 설정된 것이다 — 약하게 읽지 않는다');
+  assert.equal(sigmod.signaturePolicy({}, { ...empty, fatal: '못 읽음' }).policy, 'require', '키 파일을 못 읽으면 필수');
+  assert.equal(sigmod.signaturePolicy({}, { ...empty, sources: { host: { present: true } } }).policy, 'require', '호스트 파일이 있으면 필수');
+  assert.equal(sigmod.signaturePolicy({ UPGRADE_SIGNATURE_POLICY: 'require' }, empty).policy, 'require', 'env require 는 언제나 필수');
+  assert.equal(sigmod.signaturePolicy({ UPGRADE_SIGNATURE_POLICY: 'off' }, empty).policy, 'require', '모르는 값은 키가 없어도 필수');
+  assert.equal(core.trustUnconfigured(empty), true);
+  assert.equal(core.trustUnconfigured(withKey), false);
 });
 
 test('S-10 ② 원격 — 정상 서명이면 설치되고 manifest 가 번들 옆에 저장된다', async () => {
@@ -184,9 +196,11 @@ test('S-10 ② 원격 — manifest 변조·미서명·모르는 키·회수 키�
     { label: '모르는 키', manifest: signFor(K3, '9.9.2', [b]), code: 'unknown-key', trust: () => setHostTrust([K1]) },
     { label: '회수 키', manifest: good, code: 'revoked-key', trust: () => setHostTrust([K1], [kid(K1)]) },
     { label: '다른 버전 manifest 재사용', manifest: other, code: 'version-mismatch', trust: () => setHostTrust([K1]) },
-    { label: '신뢰 키 0개', manifest: good, code: 'no-trusted-keys', trust: () => clearHostTrust() },
+    // v2.735.1: 키가 하나도 없는 설치본은 env 가 없으면 warn 이다 — '0개 거부' 는 env require 일 때의 동작이다(아래 별도 테스트가 warn 을 본다)
+    { label: '신뢰 키 0개(env require)', manifest: good, code: 'no-trusted-keys', trust: () => { clearHostTrust(); process.env.UPGRADE_SIGNATURE_POLICY = 'require'; } },
   ];
   for (const c of cases) {
+    delete process.env.UPGRADE_SIGNATURE_POLICY;
     c.trust();
     const files = { 'versions.json': versionsFor('9.9.2', b), [b.name]: b.bytes };
     if (c.manifest) files['vmware-portal-9.9.2.manifest.json'] = c.manifest;
@@ -198,7 +212,44 @@ test('S-10 ② 원격 — manifest 변조·미서명·모르는 키·회수 키�
     assert.equal(installedVersion(inst), '9.0.0', `${c.label}: 설치 경로 그대로`);
     assert.equal(hits.includes(b.name), false, `${c.label}: 서명을 확인할 수 없으면 번들을 받지 않는다`);
   }
+  delete process.env.UPGRADE_SIGNATURE_POLICY;
   setHostTrust([K1]);
+});
+
+test('S-10 v2.735.1 — 서명 키가 하나도 설정되지 않은 설치본은 서명 없는 릴리스를 경고 후 설치한다(틀린 것은 여전히 거부)', async () => {
+  clearHostTrust();
+  delete process.env.UPGRADE_SIGNATURE_POLICY;
+  try {
+    // 서명 없는 원격 릴리스(manifest 404) → 경고 후 설치 · 사유가 '키 미설정' 을 말한다
+    const b = makeBundle('9.9.6');
+    const { base } = await remoteSource({ 'versions.json': versionsFor('9.9.6', b), [b.name]: b.bytes });
+    const inst = freshInstall('unconf');
+    const r = await upg.upgradeFromRemote(base, inst, '9.0.0', path.join(CFG, 'dl-unconf'), { timeout: 10_000, pkgName: 'vmware-portal' });
+    assert.equal(r.ok, true, r.reason);
+    assert.equal(r.signature.verified, false);
+    assert.equal(r.signature.warned, true);
+    assert.equal(installedVersion(inst), '9.9.6');
+    const st = sigmod.signatureStatus();
+    assert.equal(st.policy, 'warn');
+    assert.equal(st.policySource, 'unconfigured');
+    assert.equal(st.unconfigured, true);
+    assert.match(String(st.last.reason), /아직 설정되지 않아/);
+    // 키가 없어도 '확인했더니 틀림' 은 거부한다 — 번들 안의 버전이 요청과 다르면 형식·내용 검사에서 걸린다
+    const b2 = makeBundle('9.9.7');
+    const watch = fs.mkdtempSync(path.join(CFG, 'w-unconf-'));
+    fs.copyFileSync(b2.path, path.join(watch, b2.name));
+    fs.writeFileSync(path.join(watch, 'vmware-portal-9.9.7.manifest.json'), '{"format":"vmware-portal-release-manifest","v":1,"alg":"ed25519"}');
+    const bad = upg.upgradeFromArchive(path.join(watch, b2.name), freshInstall('unconf-bad'), '9.0.0', 'vmware-portal');
+    assert.equal(bad.ok, false, '형식이 틀린 manifest 는 키가 없어도 거부');
+    assert.equal(bad.signature?.code, 'manifest-malformed');
+    // 저장소 키 파일에 키가 하나라도 들어오면(키가 든 릴리스를 설치) 저절로 필수가 된다
+    const keysFile = path.join(fs.mkdtempSync(path.join(CFG, 'unconf-keys-')), 'release-signing-keys.json');
+    fs.writeFileSync(keysFile, JSON.stringify({ format: core.KEYS_FORMAT, schema: 1, keys: [keyEntry(K1)] }));
+    const t = sigmod.loadTrust({ repoFile: keysFile });
+    const d = sigmod.decideSignature({ manifestText: null, bytes: b.bytes, name: b.name, kind: 'bundle', expectVersion: '9.9.6', where: 'watch', trust: t });
+    assert.equal(d.ok, false, '키가 생기면 서명 없는 번들은 설치하지 않는다');
+    assert.equal(d.policy, 'require');
+  } finally { setHostTrust([K1]); }
 });
 
 test('S-10 정책 — warn 은 "서명 없음" 만 경고 후 허용하고, 틀린 서명은 여전히 거부한다', async () => {
@@ -421,6 +472,20 @@ test('S-10 ⑧ 오프라인 — verifyCli(같은 판정) 종료 코드 0/1/2 와
   assert.equal(bad.status, 1, `변조 패키지면 설치를 멈춘다: ${bad.stdout}${bad.stderr}`);
   const missing = run('', path.join(work, 'none.json'), '0');
   assert.equal(missing.status, 1, '기존 설치본이 있으면 manifest 없이 진행하지 않는다');
+  // v2.735.1: 기존 설치본에 서명 키가 하나도 설정되지 않았으면(키 등록 전 릴리스) 그 설치본의 도구가 warn 이라 말하고 설치를 계속한다
+  clearHostTrust();
+  try {
+    const pol = spawnSync(process.execPath, [path.join(ROOT, 'server/src/upgrade/verifyCli.js'), '--policy'], { encoding: 'utf8', env: { ...process.env, CONFIG_DIR: CFG, UPGRADE_SIGNATURE_POLICY: '' } });
+    assert.equal(pol.status, 0);
+    assert.match(pol.stdout, /^policy=warn source=unconfigured/);
+    const unconf = run('', path.join(work, 'none.json'), '0');
+    assert.equal(unconf.status, 0, unconf.stdout + unconf.stderr);
+    assert.match(unconf.stdout, /서명 공개키가 아직 설정되지 않아/);
+    // portal.env 에 require 를 적은 현장은 키가 없어도 멈춘다
+    fs.writeFileSync(path.join(CFG, 'portal.env'), 'UPGRADE_SIGNATURE_POLICY=require\n');
+    const req = run('', path.join(work, 'none.json'), '0');
+    assert.equal(req.status, 1, 'env require 면 manifest 없이 진행하지 않는다');
+  } finally { try { fs.rmSync(path.join(CFG, 'portal.env')); } catch { /* */ } setHostTrust([K1]); }
   const skipped = run(evil, man, '1');
   assert.equal(skipped.status, 0);
   assert.match(skipped.stdout, /skip-signature-check/);
@@ -465,6 +530,21 @@ test('S-10 ⑨ 서명 키는 manifest·로그·서버 코드·패키지에 들�
   assert.match(c3.stderr, /목록에 없습니다/);
   const c4 = spawnSync(process.execPath, [script, '--check', '--keys', keysFile], { encoding: 'utf8', env: { ...env0, RELEASE_SIGNING_KEY: Buffer.from(pem).toString('base64') } });
   assert.equal(c4.status, 0, c4.stderr);
+  // v2.735.1: 공개키 목록이 완전히 비어 있고 비밀도 없으면 서명 없이 통과(signed=false) — 한쪽만 설정되면 여전히 실패(c1·c2)
+  const ghOut = path.join(work, 'gh-output.txt');
+  const c5 = spawnSync(process.execPath, [script, '--check', '--keys', emptyKeys], { encoding: 'utf8', env: { ...env0, GITHUB_OUTPUT: ghOut } });
+  assert.equal(c5.status, 0, c5.stderr);
+  assert.match(c5.stdout, /서명 없이 게시합니다/);
+  assert.match(fs.readFileSync(ghOut, 'utf8'), /^signed=false$/m);
+  const c6 = spawnSync(process.execPath, [script, '--check', '--keys', keysFile], { encoding: 'utf8', env: { ...env0, RELEASE_SIGNING_KEY: pem, GITHUB_OUTPUT: ghOut } });
+  assert.equal(c6.status, 0, c6.stderr);
+  assert.match(fs.readFileSync(ghOut, 'utf8'), /^signed=true$/m);
+  const revokedOnlyKeys = path.join(work, 'revoked-only.json');
+  fs.writeFileSync(revokedOnlyKeys, JSON.stringify({ format: core.KEYS_FORMAT, schema: 1, keys: [], revoked: [kid(K1)] }));
+  const c7 = spawnSync(process.execPath, [script, '--check', '--keys', revokedOnlyKeys], { encoding: 'utf8', env: env0 });
+  assert.equal(c7.status, 1, '회수 목록만 있어도 설정된 것 — 서명 없이 게시하지 않는다');
+  assert.equal(sign.unsignedAllowed({ env: env0, keysFile: emptyKeys }).ok, true);
+  assert.equal(sign.unsignedAllowed({ env: { ...env0, RELEASE_SIGNING_KEY: pem }, keysFile: emptyKeys }).ok, false);
   // 서명 — 출력·manifest 에 개인키가 없다
   const s = spawnSync(process.execPath, [script, '--version', v, '--dist', dist, '--keys', keysFile], { encoding: 'utf8', env: { ...env0, RELEASE_SIGNING_KEY: pem } });
   assert.equal(s.status, 0, s.stderr);
@@ -493,6 +573,8 @@ test('S-10 ⑨ 서명 키는 manifest·로그·서버 코드·패키지에 들�
   assert.equal((yml.match(/secrets\.RELEASE_SIGNING_KEY/g) || []).length, 2);
   assert.ok(yml.indexOf('release-sign.mjs --check') < yml.indexOf('build-package.sh'), '사전 점검이 빌드보다 앞');
   assert.ok(yml.indexOf('release-sign.mjs --version') < yml.indexOf('update-versions.mjs'), 'versions.json 전에 서명');
-  assert.match(yml, /REQUIRE_MANIFEST: '1'/);
+  // v2.735.1: 서명 단계는 사전 점검이 signed=true 일 때만, REQUIRE_MANIFEST 는 signed=false 일 때만 0
+  assert.match(yml, /if: steps\.sigpre\.outputs\.signed == 'true'/);
+  assert.match(yml, /REQUIRE_MANIFEST: \$\{\{ steps\.sigpre\.outputs\.signed == 'false' && '0' \|\| '1' \}\}/);
   assert.doesNotMatch(yml, /continue-on-error:\s*true[\s\S]{0,200}release-sign/);
 });

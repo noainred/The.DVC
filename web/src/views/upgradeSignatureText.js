@@ -31,6 +31,10 @@ export function policyText(sig) {
   if (sig.policyInvalid) {
     return { text: `서명 필수 — 설정값 ‘${sig.policyInvalid}’ 를 알 수 없어 필수로 봅니다`, tone: 'warn' };
   }
+  if (sig.policy === 'warn' && (sig.unconfigured || sig.policySource === 'unconfigured')) {
+    // v2.735.1: 서명 공개키가 아직 설정되지 않은 설치본 — 관리자가 끈 것이 아니라 키 등록 전 상태다(조치가 다르다).
+    return { text: '경고만(서명 공개키가 아직 설정되지 않은 설치본 — 키가 들어간 릴리스를 설치하면 서명 필수로 바뀝니다)', tone: 'warn' };
+  }
   if (sig.policy === 'warn') {
     return { text: '경고만(서명이 없거나 확인할 수 없는 번들도 설치합니다 — 호스트 portal.env 설정)', tone: 'bad' };
   }

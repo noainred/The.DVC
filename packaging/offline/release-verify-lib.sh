@@ -31,7 +31,21 @@ verify_release_package() {
     fi
   fi
 
+  local pol=""
+  pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+
   if [[ -z "$pkg" || -z "$man" || ! -f "$pkg" || ! -f "$man" ]]; then
+    # v2.735.1: 기존 설치본에 서명 공개키가 아직 하나도 설정되지 않았으면(키 등록 전 릴리스) 그 설치본의 정책이 warn 이다 —
+    #   그 도구에 직접 묻는다(--policy). 이 인자를 모르는 옛 도구는 3 을 돌려주고, 그때는 예전처럼 '필수' 로 본다.
+    if [[ "$trust" == "existing" && "$skip" != "1" ]]; then
+      local polout=""
+      polout="$(CONFIG_DIR="$cdir" UPGRADE_SIGNATURE_POLICY="$pol" "$node" "$js" --policy 2>/dev/null || true)"
+      if [[ "$polout" == "policy=warn source=unconfigured"* ]]; then
+        echo "⚠ 서명 manifest 를 찾지 못했지만 기존 설치본에 서명 공개키가 아직 설정되지 않아(키 등록 전 릴리스) 경고 후 설치를 계속합니다."
+        echo "  배포자 확인이 빠진 설치입니다 — 서명 키가 등록된 릴리스부터 확인이 다시 필수가 됩니다(docs/RELEASE-SIGNING.md)."
+        return 0
+      fi
+    fi
     if [[ "$trust" == "existing" && "$skip" != "1" ]]; then
       echo "✗ 업그레이드 설치는 서명 확인이 필요합니다 — 패키지 파일과 서명 manifest 를 찾지 못했습니다." >&2
       echo "  패키지 파일 : ${pkg:-(없음)}  (기본: 압축을 푼 폴더 옆의 $base.tar.gz)" >&2
@@ -47,8 +61,6 @@ verify_release_package() {
     return 0
   fi
 
-  local pol=""
-  pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
   local rc=0
   echo "==> 패키지 서명 확인($([[ "$trust" == "existing" ]] && echo '기존 설치본의 도구·신뢰 키' || echo '패키지 안의 도구 — 무결성만'))"
   CONFIG_DIR="$cdir" UPGRADE_SIGNATURE_POLICY="$pol" "$node" "$js" --file "$pkg" --manifest "$man" --version "$ver" || rc=$?

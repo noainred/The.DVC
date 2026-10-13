@@ -397,7 +397,7 @@
 | `NOTIFY_SOCKET` |  |  | upgrade/upgrade.js |
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
-| `UPGRADE_SIGNATURE_POLICY` | `'require'` |  | upgrade/signature.js |
+| `UPGRADE_SIGNATURE_POLICY` |  |  | upgrade/signature.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 

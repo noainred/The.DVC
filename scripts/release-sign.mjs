@@ -5,6 +5,10 @@
  *   node scripts/release-sign.mjs --check
  *       게시 전 사전 점검 — ① 저장소 공개키 목록(server/src/upgrade/release-signing-keys.json)에 쓸 수 있는 키가 있는가
  *       ② 비밀 RELEASE_SIGNING_KEY 가 있는가 ③ 그 개인키의 keyId 가 목록에 있고 회수되지 않았는가. 하나라도 아니면 종료 코드 1.
+ *       ⚠ v2.735.1(사용자 결정 '서명 키 등록 전 게시'): 공개키 목록이 **완전히 비어 있고**(회수 포함 0개) 비밀도 **없고**,
+ *       이 저장소의 정책 규칙(signatureCore.resolvePolicy)이 '키가 설정되지 않은 설치본은 warn' 일 때만 **서명 없는 게시**를
+ *       허용한다(종료 코드 0 + 경고, GITHUB_OUTPUT 에 signed=false). 그 버전을 설치한 현장은 정책이 warn 이라 다음 버전을 계속
+ *       받을 수 있고, 키가 들어간 릴리스를 설치하면 저절로 require 가 된다. 한쪽만 설정된 상태(비밀만 있음·키만 있음)는 실패다.
  *   node scripts/release-sign.mjs --version <X.Y.Z> --dist <dir> [--out <file>] [--keys <keys.json>]
  *       dist 안의 그 버전 산출물(.tar.gz/.zip)을 해시해 manifest 를 만들고 서명한 뒤, **같은 검증 코드**
  *       (server/src/upgrade/signatureCore.js)로 다시 검증한다. 필수 4종(번들·el9·cent9·windows)이 없으면 실패.
@@ -20,6 +24,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   parseKeysDoc, mergeTrust, keyIdOf, buildManifest, signManifest, serializeEnvelope, verifyEnvelopeText, matchArtifact, manifestNameFor, VERSION_RE,
+  resolvePolicy, trustUnconfigured,
 } from '../server/src/upgrade/signatureCore.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,6 +58,21 @@ export function loadRepoTrust(file = DEFAULT_KEYS_FILE) {
   const p = parseKeysDoc(doc, 'repo');
   const t = mergeTrust([p]);
   return { trust: t, errors: p.errors };
+}
+
+/**
+ * 서명 없는 게시가 허용되는가 — 키 목록이 완전히 비어 있고(오류도 없음) 비밀이 없고, 이 저장소의 정책 규칙이
+ * '키가 설정되지 않은 설치본은 warn' 일 때만. 정책 규칙을 require 로 되돌리면 이 함수도 거짓이 된다(그 버전을 설치한
+ * 현장이 다음 버전을 받지 못하게 되므로 게시를 막는다).
+ */
+export function unsignedAllowed({ env = process.env, keysFile = DEFAULT_KEYS_FILE } = {}) {
+  const { trust, errors } = loadRepoTrust(keysFile);
+  if (errors.length) return { ok: false, reason: '공개키 목록에 형식 오류가 있습니다' };
+  if (String(env.RELEASE_SIGNING_KEY || '').trim()) return { ok: false, reason: '비밀 RELEASE_SIGNING_KEY 가 있습니다 — 서명해야 합니다' };
+  if (!trustUnconfigured(trust)) return { ok: false, reason: '공개키 목록에 키 항목이 있습니다 — 서명해야 합니다' };
+  const pol = resolvePolicy(undefined, { unconfigured: true });
+  if (pol.policy !== 'warn') return { ok: false, reason: '이 저장소의 정책 규칙이 키 미설정 설치본에도 서명을 요구합니다' };
+  return { ok: true };
 }
 
 /** 사전 점검 — 게시 전에 실패해야 할 조건을 모두 본다. */
@@ -129,8 +149,19 @@ if (isMain) {
     if (o.unknown) throw new Error(`알 수 없는 인자: ${o.unknown}`);
     const keysFile = o.keys ? path.resolve(o.keys) : DEFAULT_KEYS_FILE;
     if (o.check) {
+      const out = (line) => { if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${line}\n`); };
       const r = preflight({ keysFile });
-      if (!r.ok) { for (const p of r.problems) console.error(`::error::${p}`); process.exit(1); }
+      if (!r.ok) {
+        const u = unsignedAllowed({ keysFile });
+        if (u.ok) {
+          console.log(`::warning::서명 없이 게시합니다 — 저장소 공개키 목록이 비어 있고 비밀 RELEASE_SIGNING_KEY 도 없습니다. 이 버전을 설치한 현장은 정책이 warn(키 미설정)이라 다음 버전을 계속 받습니다. 서명을 시작하려면 ${DOC} 절차로 키를 등록하세요.`);
+          out('signed=false');
+          process.exit(0);
+        }
+        for (const p of r.problems) console.error(`::error::${p}`);
+        process.exit(1);
+      }
+      out('signed=true');
       console.log(`릴리스 서명 사전 점검 통과 — 서명 키 ${r.keyId} · 신뢰 공개키 ${r.activeKeys}개`);
     } else {
       if (!o.version || !o.dist) throw new Error('사용법: release-sign.mjs --check | --version <X.Y.Z> --dist <dir> [--out <file>] [--keys <file>]');

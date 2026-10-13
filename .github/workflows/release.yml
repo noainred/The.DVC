@@ -60,7 +60,11 @@ jobs:
       #   ⚠ 이 점검을 지우거나 continue-on-error 로 바꾸지 말 것 — 공개키 목록이 빈 채로 게시된 버전은 '서명 필수'
       #     기본값 때문에 **다음 버전을 영원히 받지 못한다**(그 현장은 수동 재설치로만 복구된다). 절차: docs/RELEASE-SIGNING.md
       #   비밀은 이 단계와 서명 단계에만 넘긴다(잡 전체 env 에 두지 않는다 — 빌드·테스트 단계가 읽을 수 없게).
+      #   ⚠ v2.735.1(사용자 결정 '서명 키 등록 전 게시'): 공개키 목록이 완전히 비어 있고 비밀도 없을 때만 서명 없이 통과한다
+      #     (signed=false + 경고). 그 판단은 스크립트가 저장소의 정책 규칙(signatureCore.resolvePolicy — 키 미설정 설치본은 warn)을
+      #     직접 확인해서 한다 — 그 규칙을 require 로 되돌리면 이 점검도 다시 공개키 없는 게시를 막는다. 한쪽만 설정되면 실패다.
       - name: Check release signing prerequisites (key secret + trusted public keys)
+        id: sigpre
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: node scripts/release-sign.mjs --check
@@ -170,6 +174,7 @@ jobs:
       #   스크립트가 만든 직후 수신측과 **같은 검증 코드**(server/src/upgrade/signatureCore.js)로 다시 검증한다.
       #   개인키는 출력·저장하지 않는다. manifest(vmware-portal-<버전>.manifest.json)는 아래 업로드 단계가 함께 올린다.
       - name: Sign release manifest
+        if: steps.sigpre.outputs.signed == 'true'
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: node scripts/release-sign.mjs --version "${{ steps.ver.outputs.version }}" --dist dist-offline
@@ -222,7 +227,9 @@ jobs:
       - name: Build versions.json
         env:
           VERSIONS_KEEP: '15'
-          REQUIRE_MANIFEST: '1'   # v2.730(S-10): 서명 manifest 없는 버전을 versions.json 에 올리지 않는다
+          # v2.730(S-10): 서명 manifest 없는 버전을 versions.json 에 올리지 않는다. v2.735.1: 사전 점검이 서명 없는 게시를
+          #   허용한 경우(signed=false — 키 미설정)에만 0. 그 밖에는 언제나 1 이다.
+          REQUIRE_MANIFEST: ${{ steps.sigpre.outputs.signed == 'false' && '0' || '1' }}
         run: node packaging/release/update-versions.mjs "${{ steps.ver.outputs.version }}" dist-offline prev/versions.json dist-offline/versions.json
 
       # 롤링 릴리스는 자산 1000개 상한이 있다. 오래된 버전 자산을 먼저 정리해 업로드 실패(422)를 막는다.
