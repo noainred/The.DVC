@@ -50,6 +50,10 @@ async function device(handler = null, cert = 'self-a', port = 0) {
   srv.keepAliveTimeout = 1;
   await new Promise((r) => srv.listen(port, '127.0.0.1', r));
   const p = srv.address().port;
+  // ⚠ 모든 가짜 장비가 같은 인증서(self-a)를 쓴다 — 운영체제가 앞 테스트에서 승인한 포트 번호를 다시 배정하면 그 장비는
+  //   처음부터 '승인된 지문' 이라 승인 전 시나리오가 깨진다(2026-10-13 release CI 실패를 포트를 강제로 겹쳐 그대로 재현했다).
+  //   새로 받은 포트의 이전 기록은 지운다 — 이 테스트가 보려는 것은 '처음 보는 장비' 다.
+  if (!port && PT) PT.removePeer('tls', '127.0.0.1', p);
   return {
     port: p, base: `https://127.0.0.1:${p}`, got,
     creds: () => got.filter((g) => g.auth || /SECRET-PW/.test(g.body)),
