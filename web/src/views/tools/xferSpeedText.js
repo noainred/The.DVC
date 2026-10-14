@@ -319,6 +319,9 @@ export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT
   };
 }
 
+/** '지연' 칸 설명 — 방향마다 재는 방법이 다르다(서버 `analyze.latencyMsOf` 와 같은 정의). */
+export const LATENCY_NOTE = '지연 = 데이터가 흐르기 전·후의 연결 + 왕복 — ↓ 는 요청 → 응답 머리, ↑ 은 전체 − 엣지 수신 구간(응답 머리는 업로드가 끝나야 오기 때문). 보내는 쪽 전체 시간 기준(*)이면 구하지 않습니다.';
+
 /** 상세 통계 칸 — 값이 없으면 '—'. */
 export function statCells(stats) {
   const s = stats || {};
@@ -329,7 +332,7 @@ export function statCells(stats) {
     cell('하위 10%', (x) => mbpsText(x?.p10)),
     cell('최저 · 최고', (x) => (x?.min == null ? '—' : `${mbpsText(x.min, { unit: false })} · ${mbpsText(x.max, { unit: false })}`)),
     cell('성공률', (x) => (numOrNull(x?.okRate) == null ? '—' : `${x.okRate}% (${x.ok}/${x.n})`)),
-    cell('응답 시작(중앙값)', (x) => (numOrNull(x?.ttfbMedian) == null ? '—' : `${x.ttfbMedian}ms`)),
+    cell('지연(중앙값)', (x) => (numOrNull(x?.ttfbMedian) == null ? '—' : `${x.ttfbMedian}ms`)),
   ];
 }
 

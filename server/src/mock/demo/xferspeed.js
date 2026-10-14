@@ -35,12 +35,12 @@ export function demoXferResult(col, dir, { ts = Date.now(), bytes = 10 * 1_048_5
   const fail = !!e?.degraded && r('f') < 0.06;
   let mbps = baseMbps(e) * (dir === 'up' ? 0.62 : 1) * (1 - busy) * (0.86 + r('n') * 0.24) * (degradedNow ? 0.48 : 1);
   mbps = Math.round(mbps * 100) / 100;
-  const ttfbMs = dir === 'down' ? Math.round(rtt * 2.2 + r('t') * rtt * 0.4) : null;
+  const ttfbMs = Math.round(rtt * 2.2 + r('t') * rtt * 0.4);   // ↑ 도 '전체 − 수신 구간' 의 연결·왕복(probe.js 와 같은 뜻)
   const base = { dir, ts, want: bytes, ttfbMs, basis: 'receiver', demo: true };
   if (fail) {
     const got = Math.round(bytes * (0.2 + r('g') * 0.5));
     return { ...base, ok: false, bytes: got, mbps: null, xferMs: null, totalMs: 120_000, kind: 'timeout', error: `시한(120초) 초과 — 시한 안에 ${(got / 1_048_576).toFixed(1)}MB / ${(bytes / 1_048_576).toFixed(1)}MB 만 받았습니다(데모)` };
   }
   const xferMs = Math.max(1, Math.round((bytes * 8) / (mbps * 1e6) * 1000 * 10) / 10);
-  return { ...base, ok: true, bytes, mbps, xferMs, totalMs: Math.round(xferMs + (ttfbMs ?? rtt * 3)), kind: null, error: '' };
+  return { ...base, ok: true, bytes, mbps, xferMs, totalMs: Math.round(xferMs + ttfbMs), kind: null, error: '' };
 }

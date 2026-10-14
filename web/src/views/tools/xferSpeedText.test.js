@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   STATE_TEXT, FAIL_TEXT, REASON_TEXT, mbpsText, logWidth, spanText, bytesText, clockText, vsBadge, rowReasonText,
-  sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote, chartModel, statCells, settingsPatch, SETTING_FIELDS,
+  sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote, chartModel, statCells, settingsPatch, SETTING_FIELDS, LATENCY_NOTE,
   intervalText, scheduleText, checkScheduleForm, scheduleForSave, newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText,
   planSummary, countText, MISSED_TEXT, INTERVAL_PRESETS,
 } from './xferSpeedText.js';
@@ -118,6 +118,16 @@ describe('xferSpeedText — 그림', () => {
     expect(c[1].down).toBe('—');
     expect(c[0].up).toBe('—');
     expect(c[4].down).toBe('50% (1/2)');
+  });
+  it('statCells — 지연(중앙값)은 ↑ 도 같은 칸 · 설명 문구에 백틱 없음(v2.735.2)', () => {
+    const c = statCells({ down: { ttfbMedian: 80 }, up: { ttfbMedian: 83 } });
+    const lat = c.find((x) => x.label === '지연(중앙값)');
+    expect(lat).toBeTruthy();
+    expect(lat.down).toBe('80ms');
+    expect(lat.up).toBe('83ms');
+    expect(c.some((x) => x.label.includes('응답 시작'))).toBe(false);
+    expect(LATENCY_NOTE).toMatch(/전체 − 엣지 수신 구간/);
+    expect(LATENCY_NOTE).not.toMatch(/`/);
   });
 });
 

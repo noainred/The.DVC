@@ -7,6 +7,9 @@
  *  · ↑ 메인 → 엣지(`up`): 중앙이 POST 로 무작위 N 바이트를 보낸다. **받는 쪽(엣지)** 이 첫 데이터부터 마지막 데이터까지
  *    받은 시간(`recvMs`)을 응답에 싣는다 = `xferMs`. 시계 하나로만 재므로 두 노드의 시계 차이가 끼지 않는다.
  *  · `mbps` = 받은 바이트 × 8 ÷ xferMs. 두 방향 모두 '받는 쪽에서 본 전송 구간' 이라 같은 뜻이다.
+ *  · `ttfbMs`(화면 '지연') — ↓ 는 요청 → 응답 머리, ↑ 은 **전체 − 엣지 수신 구간**(응답 머리는 업로드가 끝나야 오므로 ↑ 에서
+ *    '응답 시작' 은 뜻이 없다 — 2.735.1 까지 늘 비어 있었다). 둘 다 '데이터가 흐르기 전·후의 연결 + 왕복' 이다.
+ *    보내는 쪽 전체 시간 기준(`sender-total`)이면 수신 구간이 LAN 구간이라 구하지 않는다(null).
  *  · ⚠ 엣지 앞에 **요청 본문을 통째로 모았다가 넘기는 프록시**(nginx proxy_request_buffering 등)가 있으면 엣지가 보는 수신
  *    구간이 LAN 구간이 되어 ↑ 값이 부풀려진다. recvMs 가 중앙 전체 시간의 25% 미만이고 전체가 1초를 넘으면 그 경우로 보고
  *    **중앙 전체 시간**으로 계산하고 `basis:'sender-total'` 로 밝힌다(조용히 고르지 않는다).
@@ -154,6 +157,7 @@ export async function measureUp(col, { bytes, timeoutMs, fetchImpl = resilientFe
     const buffered = recv == null || recv <= 0 || (row.totalMs > 1000 && recv < row.totalMs * 0.25);
     row.xferMs = r1(buffered ? Math.max(1, row.totalMs) : recv);
     row.basis = buffered ? 'sender-total' : 'receiver';
+    row.ttfbMs = buffered ? null : Math.max(0, Math.round(row.totalMs - row.xferMs));
     row.mbps = mbpsOf(got, row.xferMs);
     row.ok = row.mbps != null;
     if (!row.ok) { row.kind = 'bad-body'; row.error = '전송 시간을 잴 수 없습니다.'; }

@@ -29,6 +29,7 @@ export function bytesRateToBps(v) {
 import { numOrNull } from '../../util/numOrNull.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
+import { isiNodeHwFromRest } from './isilonHw.js';
 
 // Isilon 전용 로컬 TLS 디스패처(다른 fetch 에 주입 금지). 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다 —
 // 미설정 = CA 체인 또는 장비별 승인 지문 · STORAGE_TLS_VERIFY=true 엄격 · =false 명시적 예외(restCommon.js 와 같은 env).
@@ -81,6 +82,7 @@ export function normalizeIsilon(device, raw) {
     snap.name = raw.config.name || device.name;
     snap.version = raw.config.onefs_version?.release || raw.config.onefs_version?.version || '';
     snap.serial = raw.config.guid || '';
+    if (snap.serial) snap.extra.serialKind = 'guid';   // v2.735.2 — 화면이 'GUID' 라고 부른다(장비 시리얼이 아니다)
     snap.sections.config = 'ok';
   }
   if (raw.stats) {
@@ -148,8 +150,13 @@ export function normalizeIsilon(device, raw) {
       //   다를 수 있다(노드 교체 뒤). lnn 으로 찾으면 다른 노드의 값이 오류 없이 붙는다. id 로 조인하고,
       //   id 가 없는 응답에서만 lnn 으로 찾는다(표시 id 는 예전처럼 lnn). ⚠ 실장비 devid≠lnn 응답은 확인하지 못했다.
       const st = (n.id != null ? perNode.get(n.id) : perNode.get(lnn)) || {};
+      // v2.735.2 — 노드 시리얼·제품명(이미 받은 /cluster/nodes 응답의 hardware 하위 — 왕복 0). 없으면 키를 만들지 않는다.
+      const hw = isiNodeHwFromRest(n);
       return {
         id: lnn,
+        ...(hw.serial ? { serial: hw.serial } : {}),
+        ...(hw.chassisSerial && hw.chassisSerial !== hw.serial ? { chassisSerial: hw.chassisSerial } : {}),
+        ...(hw.model ? { model: hw.model } : {}),
         ip: String(n.ip || n.ip_address || (Array.isArray(n.ip_addresses) ? n.ip_addresses[0] : '') || n.ext_ip || ''),
         health: healthOf(n),
         // v2.599(감사 C2599-01): node.net.ext.bytes.*.rate 는 **초당 바이트(B/s)** 인데 칸 이름·화면(bps())·SSH 경로
@@ -163,6 +170,13 @@ export function normalizeIsilon(device, raw) {
         ssd: mkPool(st['node.ifs.ssd.bytes.total'] || 0, has(st, 'node.ifs.ssd.bytes.used') ? st['node.ifs.ssd.bytes.used'] : null),
       };
     });
+    // v2.735.2 — 시리얼을 몇 대 읽었는지 밝힌다(못 읽은 노드는 '—' — 지어내지 않는다).
+    {
+      const read = snap.nodes.list.filter((x) => x.serial).length;
+      const source = 'REST /platform/N/cluster/nodes (hardware)';
+      snap.extra.nodeSerials = { source, read, total: snap.nodes.list.length, at: null, cached: false };
+      if (!read && snap.nodes.list.length) snap.extra.nodeSerialProbe = { source, reason: 'no-field', detail: '노드 응답에 hardware.serial_number 가 없습니다' };
+    }
     snap.sections.nodes = 'ok';
   }
   if (raw.users) {
