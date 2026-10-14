@@ -1055,7 +1055,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       env 가 없으면 **warn**(`signatureCore.resolvePolicy`·`trustUnconfigured` 한 벌 — 런타임·CI·오프라인 `verifyCli --policy` 가 같이 쓴다). 키가 든 릴리스를 설치하면 저절로 require.
       CI 는 공개키 목록이 완전히 비어 있고 비밀도 없을 때만 서명 없이 통과(`signed=false` → 서명 생략 · `REQUIRE_MANIFEST=0`)하고 한쪽만 설정되면 실패다. 이 허용은 위 규칙이
       warn 을 돌려줄 때만 성립한다 — 규칙을 '항상 require' 로 되돌리면 CI 도 막는다(그 버전 설치 현장이 다음 버전을 영원히 못 받는 사고 방지). 화면·자가진단은 '키 미설정' 을
-      관리자가 끈 warn 과 구분해 말한다(조치가 '키 등록' 이다). ⚠ 이 기간은 배포자 확인이 빠진다 — 키 등록(`docs/RELEASE-SIGNING.md` 6절)이 남은 일이다. 회귀 `rvK_releaseSigning.test.js`.
+      관리자가 끈 warn 과 구분해 말한다(조치가 '키 등록' 이다). ✅ v2.735.2 에 공개키 `ed25519:d8a83ad56120662d` 를 등록했다(첫 서명 릴리스 — 그 전 버전은 경고 후 설치, 설치 뒤 서명 필수). 회귀 `rvK_releaseSigning.test.js`.
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):
