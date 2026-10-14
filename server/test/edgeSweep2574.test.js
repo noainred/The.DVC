@@ -155,7 +155,8 @@ describe('IMP-06 — push/pull 진입 함수를 실제로 호출한다(v2.566 TD
     'agent/pingWorker.js::runPingWorkerOnce', 'agent/sanSwitchConfigPull.js::pullSanSwitchConfigNow', 'agent/storageConfigPull.js::pullStorageConfigNow',
     'agent/svcmonConfigPull.js::pullSvcmonConfigNow', 'agent/svcmonPush.js::pushSvcmonNow', 'agent/usersConfigPull.js::pullUsersConfigNow',
     'agent/vmSeriesConfigPull.js::pullVmSeriesConfigNow',
-    'cvp/push.js::pushCvpNow', 'pdu/push.js::pushPduNow', 'sanswitch/perfPush.js::pushPerfNow', 'sanswitch/push.js::pushSanSwitchNow', 'storage/push.js::pushStorageNow',
+    'agent/isiduConfigPull.js::pullIsiduConfigNow', // v2.736 — 호출 테스트는 isidu2736.test.js(실제 centralRouter)
+    'cvp/push.js::pushCvpNow', 'isidu/push.js::pushIsiduNow', 'pdu/push.js::pushPduNow', 'sanswitch/perfPush.js::pushPerfNow', 'sanswitch/push.js::pushSanSwitchNow', 'storage/push.js::pushStorageNow',
   ];
   test('★ 진입 함수 목록은 열거된 기대 목록과 같다(새 push/pull 을 만들면 여기에 더하고 호출 테스트를 함께 쓴다)', () => {
     const found = [];

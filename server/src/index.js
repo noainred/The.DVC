@@ -139,6 +139,9 @@ import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
+import { startIsiduPoller } from './isidu/poller.js';           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
+import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
+import { startIsiduConfigPull } from './agent/isiduConfigPull.js'; // 〃 중앙→엣지 대상 pull(비밀 없음)
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
@@ -365,6 +368,7 @@ app.use('/api/central/sanswitch-perf', BIG_JSON);
 app.use('/api/central/sanswitch-test-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
+app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
@@ -577,6 +581,7 @@ const stagger = [
   startBmUsagePoller,
   startLinkCheckPoller,
   startLinkCheckWorker,
+  startIsiduPoller, startIsiduPush, startIsiduConfigPull, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
 ];
 /*

@@ -49,6 +49,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'central-agent-cvp.json', 'cvp-push.json',
   'ipam-vcrange-migration.json', // v2.691: vCenter 별 스캔 대역 → 에이전트 1회 이전 기록(ipam/vcRangeMigrate.js 도 스스로 등록한다)
   'ipam-scan-agents.json', // v2.674: 에이전트별 마지막 스캔 보고 — 엣지 보고마다 갱신되는 상태(ipam/scanStore.js 도 스스로 등록한다)
+  'isidu-edge-targets.json', 'isidu-push.json', // v2.736: 엣지가 받은 아이실론 디렉터리 사용량 대상 사본 · 엣지 push 커서(각 모듈도 스스로 등록한다)
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.

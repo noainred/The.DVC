@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **201개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **207개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-13)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-14)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -117,6 +117,11 @@
 | `ipam-settings.json` | 설정 | IPMS settings — IP ranges to hide from the IP ledger. Supports a global | ✅ | ✅ |  | ipam/settings.js |
 | `ipam-vcenter-ranges.json` | 설정 | vCenter별 IP 스캔 대역 저장소 — 각 vCenter(법인/사이트)에 귀속된 스캔 대역을 저장하고, | ✅ | ✅ | ✅ | ipam/rangeStore.js, ipam/vcRangeMigrate.js |
 | `ipam.db` | DB | IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일) |  |  |  | config.js |
+| `isidu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | isidu/collect.js |
+| `isidu-edge-targets.json` | 설정 | 엣지가 받은 아이실론 디렉터리 사용량 대상 사본(상태, v2.736) | ✅ | ✅ | ✅ | isidu/settings.js |
+| `isidu-push.json` | 설정 | 아이실론 디렉터리 사용량 엣지 push 커서(상태, v2.736) | ✅ |  | ✅ | isidu/push.js |
+| `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
+| `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
@@ -182,6 +187,7 @@
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | isidu/sshKey.js |
 | `storage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | storage/activityLog.js |
 | `storage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | storage/authGuard.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
@@ -232,6 +238,10 @@
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다
+- **`isidu-settings.json`** — 손상이면 보존하고 엣지 설정 pull 에 503 으로 답한다(엣지 사본을 지우지 않는다). 서비스 점검에서 기본값으로 확정할 수 있다
+- **`isidu-edge-targets.json`** — 상태 파일(백업 감시 제외). 지우면 다음 설정 pull(5분)까지 그 엣지의 조사가 멈춘다
+- **`isidu-push.json`** — 지우면 처음부터 다시 보낸다 — 중앙이 같은 대상·시각을 한 번만 넣으므로 중복되지 않는다
+- **`ssh`** — ⚠ 비밀(개인키). 백업에 들어가지 않는다(확장자 화이트리스트 밖). 지우면 다음 조사 때 새 키가 생기고 아이실론 authorized_keys 에 공개키를 다시 넣어야 한다
 - **`xfer-speed-settings.json`** — 중앙 전용(엣지로 배포하지 않는다). 손상이면 보존하고 기본값(꺼짐)으로 읽는다
 - **`xfer-speed-schedule-state.json`** — 상태 파일(백업 감시 제외). 지우면 지난 예약 시각을 다시 판정한다 — 유예(30분) 안의 시각은 한 번 더 실행될 수 있다
 - **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다

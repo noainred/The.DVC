@@ -1,0 +1,259 @@
+/**
+ * routes/api/isilonDirUsage.js — 특수 기능 '아이실론 디렉터리 사용량'(v2.736).
+ *
+ * 사용자 요청(2026-10-14): "특수기능에 내가 지정한 아이실론의 특정 디렉터리 하위의 모든 폴더의 크기를 조사해서 Top 10 …
+ *   ssh admin@<아이실론> 'du -A -h -d 1 "/ifs/data/workspace/users/"' … ssh password-less … 각각의 edge 가 속한 동일한 법인의
+ *   아이실론 장비의 특정 디렉터리 용량도 … /ifs/data/workspace/users/aaa 는 사용자명 aaa … DB 에 저장해서 주기적으로 트래킹".
+ *
+ * ── 권한: adminOnly + fullScopeOnly ─────────────────────────────────────────
+ * 응답에 사용자 이름(= 폴더 이름)별 사용량, 아이실론 주소·SSH 계정, 노드의 SSH 공개키가 들어간다. 사용자별 사용량은 개인 정보에
+ * 가깝고 operator 는 `tools` 를 기본 보유하므로 관리자만 본다. 아이실론은 vCenter 귀속이 없어 범위 계정에 나눌 축이 없다 → 403
+ * (스토리지 모니터링과 같은 기준). CSV 는 + `data.csv`.
+ *
+ * ── 이 라우트가 하지 않는 것 ────────────────────────────────────────────────
+ *  · 조회는 DB·등록부만 읽는다 — 장비 왕복 0. 조사(du)는 폴러가 주기로, 또는 '지금 수집' 으로만 한다.
+ *  · 비밀을 응답에 싣지 않는다(공개키는 비밀이 아니다 — 아이실론의 authorized_keys 에 넣을 값이다).
+ *  · '연결 시험' 은 경로 확인(ls -d)만 한다 — du 를 돌리지 않는다(수십 분 걸린다). 엣지 담당 대상은 중앙에서 시험할 수 없다.
+ */
+import { requireRole, requirePerm } from '../../auth/auth.js';
+import { logAudit } from '../../audit.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
+import { knownAgentNames } from '../../central/knownAgents.js';
+import { listDatacenters } from '../../datacenter/store.js';
+import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
+import { ssrfBlockReason } from '../../collector/registry.js';
+import { listDevices, registryLoadError as storageRegistryLoadError } from '../../storage/registry.js';
+import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { fileStamp, localStamp } from '../../util/dayKey.js';
+import { withSsh, withDeadline } from '../../proxy/sshExec.js';
+import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from '../../isidu/settings.js';
+import { SIZE_MODES, duCommand, normPath } from '../../isidu/parse.js';
+import { keyInfo, publicKeyView, ensureKey, keyDir, KEY_FILE_NAME } from '../../isidu/sshKey.js';
+import { credsFor, authGuard, authStopOf, FAIL_KINDS } from '../../isidu/collect.js';
+import { isiduPollerStatus, runNow, FAIL_RETRY_MS } from '../../isidu/poller.js';
+import { requestIsiduCollect, isiduRequestState, recentIsiduDrops } from '../../isidu/collectRequests.js';
+import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
+import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX } from '../../isidu/report.js';
+import { HISTORY_AGENT } from '../../isidu/targets.js';
+import * as db from '../../isidu/db.js';
+import { isMockMode } from '../../mock/demo/flags.js';
+import { ensureIsiduDemo } from '../../mock/demo/isidu.js';
+
+const adminOnly = requireRole('admin');
+const csvPerm = requirePerm('data.csv');
+const fullScopeOnly = fullScopeOnlyWith('아이실론 디렉터리 사용량은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 아이실론은 vCenter 에 귀속되지 않습니다.');
+const t = (v) => String(v ?? '').trim();
+const lo = (v) => t(v).toLowerCase();
+
+function dcList() {
+  try { return listDatacenters().map((d) => ({ id: String(d.id), name: String(d.name || d.id) })); } catch { return []; }
+}
+
+/** 화면 표에 실을 대상 — 등록부 반영 + 법인 이름 + 최신 상태. */
+async function targetRows() {
+  const devices = listDevices();
+  const dcs = new Map(dcList().map((d) => [d.id, d.name]));
+  const latest = await db.latestAll();
+  const byId = new Map((latest || []).filter((r) => r.agent === HISTORY_AGENT).map((r) => [r.targetId, r]));
+  const pollerRunning = new Map(isiduPollerStatus().running.map((r) => [r.targetId, r]));
+  const edges = new Map(allIsiduEdgeStatus().map((e) => [lo(e.agent), e]));
+  return Promise.all(loadSettings().targets.map(async (tg) => {
+    const r = resolveTarget(tg, { devices });
+    const l = byId.get(r.id) || null;
+    const ag = t(r.agent);
+    const edge = ag ? edges.get(lo(ag)) || null : null;
+    const edgeRunning = edge?.status?.poller?.running?.find((x) => x.targetId === r.id) || null;
+    return {
+      id: r.id, label: r.label || '', path: r.path, sizeMode: r.sizeMode, intervalHours: r.intervalHours, timeoutMin: r.timeoutMin, topN: r.topN,
+      enabled: r.enabled !== false, auth: r.auth, port: r.port, username: r.username || '',
+      deviceId: r.deviceId || '', deviceName: r.deviceName || '', host: r.host || '', agent: ag,
+      datacenterId: r.datacenterId || '', corp: r.datacenterId ? (dcs.get(r.datacenterId) || r.datacenterId) : '',
+      issue: r.issue || null, deviceDisabled: !!r.deviceDisabled,
+      okScan: l?.okScan ? { id: l.okScan.id, ts: l.okScan.ts, durationMs: l.okScan.durationMs, count: l.okScan.count, total: l.okScan.total, sumBytes: l.okScan.sumBytes, errLines: l.okScan.errLines || 0, node: l.okScan.node || '' } : null,
+      lastTry: l?.lastTry ? { id: l.lastTry.id, ts: l.lastTry.ts, ok: l.lastTry.ok, kind: l.lastTry.kind, error: l.lastTry.error, durationMs: l.lastTry.durationMs, node: l.lastTry.node || '', trig: l.lastTry.trig } : null,
+      failStreak: l?.failStreak || 0,
+      running: ag ? (edgeRunning ? { since: edgeRunning.since, trigger: edgeRunning.trigger, reportedAt: edge.at } : null) : (pollerRunning.get(r.id) || null),
+      request: ag ? isiduRequestState(r.id) : null,
+      // 엣지 담당 대상의 인증 정지는 엣지에 있다 — 중앙은 그 엣지의 마지막 시도 결과(kind 'auth')로만 안다.
+      authStopped: ag ? null : await authStopOf(r),
+    };
+  }));
+}
+
+/** 엣지별 상태(공개키 — 관리자가 그 법인 아이실론에 등록할 값). */
+function edgeViews() {
+  return allIsiduEdgeStatus().map((e) => ({
+    agent: e.agent, at: e.at, lastPush: e.lastPush || null,
+    key: e.status?.key || null, targets: e.status?.targets ?? null, version: e.status?.version || null,
+    poller: e.status?.poller ? { lastTick: e.status.poller.lastTick, running: e.status.poller.running?.length || 0, lastError: e.status.poller.lastError } : null,
+  }));
+}
+
+function settingsCtx() {
+  return { devices: listDevices(), agents: knownAgentNames(), dcs: dcList(), pickAgent, pickDatacenter, ssrfBlockReason };
+}
+
+function pickTarget(id) {
+  const tg = loadSettings().targets.find((x) => x.id === t(id));
+  return tg ? resolveTarget(tg, { devices: listDevices() }) : null;
+}
+
+export function registerIsilonDirUsage(api) {
+
+/** 메인 — 대상 목록·최신 상태·노드 키·엣지 키·폴러 상태. */
+api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (_req, res) => {
+  const now = Date.now();
+  // 데모(mock): 첫 화면이 폴러의 첫 틱(기동 90초 뒤)을 기다리지 않게 — 한 번만 돈다(이후 즉시 반환).
+  if (isMockMode()) { try { await ensureIsiduDemo(); } catch { /* 데모 실패는 화면을 막지 않는다 */ } }
+  res.json({
+    ok: true, now,
+    settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryLoadError(),
+    targets: await targetRows(),
+    key: publicKeyView(keyInfo()), keyFile: `${keyDir()}/${KEY_FILE_NAME}`,
+    edges: edgeViews(),
+    poller: isiduPollerStatus(),
+    drops: recentIsiduDrops(),
+    failKinds: FAIL_KINDS, failRetryMs: FAIL_RETRY_MS,
+    retentionDays: loadSettings().retentionDays,
+    db: await db.dbStats(),
+  });
+});
+
+/** 보고서 — KPI · Top N · 7일 증가 상위 · 신규·사라진 폴더 일부. */
+api.get('/tools/isilon-dirusage/report', adminOnly, fullScopeOnly, async (req, res) => {
+  const tg = pickTarget(req.query.target);
+  if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
+  const rep = await buildReport(tg.id, { topN: tg.topN });
+  res.json({ ok: true, target: { id: tg.id, label: tg.label || '', path: tg.path, sizeMode: tg.sizeMode, topN: tg.topN, intervalHours: tg.intervalHours }, ...rep });
+});
+
+/** 전체 사용자 — 검색·필터(신규/사라짐/증가/감소)·정렬·페이지. */
+api.get('/tools/isilon-dirusage/users', adminOnly, fullScopeOnly, async (req, res) => {
+  const tg = pickTarget(req.query.target);
+  if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
+  const r = await listUsers(tg.id, {
+    q: t(req.query.q).slice(0, 100), filter: t(req.query.filter), sort: t(req.query.sort), dir: t(req.query.dir),
+    offset: req.query.offset, limit: req.query.limit, spark: req.query.spark !== '0',
+  });
+  res.json({ ok: true, limitMax: USERS_LIMIT_MAX, ...r });
+});
+
+/** 추이 — 디렉터리 전체 또는 사용자 하나. */
+api.get('/tools/isilon-dirusage/trend', adminOnly, fullScopeOnly, async (req, res) => {
+  const tg = pickTarget(req.query.target);
+  if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
+  const name = t(req.query.name);
+  if (name && (name.includes('/') || name.length > 512)) return res.status(400).json({ ok: false, reason: '폴더 이름 형식이 잘못됐습니다.' });
+  const r = await trend(tg.id, { name, days: Number(req.query.days) });
+  res.json({ ok: true, daysAllowed: TREND_DAYS, ...r });
+});
+
+/** CSV — 최신 스캔의 전체 사용자(사라진 폴더 포함). */
+api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, async (req, res) => {
+  const tg = pickTarget(req.query.target);
+  if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
+  const r = await allRows(tg.id);
+  if (r.state !== 'ok') return res.status(409).json({ ok: false, reason: r.state === 'db-unavailable' ? 'DB 를 쓸 수 없습니다.' : '아직 성공한 조사가 없습니다.' });
+  const head = ['순위', '사용자(폴더)', '크기(바이트)', '표기 해상도(바이트)', '비중(%)', '7일 변화(바이트)', '7일 변화 해상도 안', '30일 변화(바이트)', '상태'];
+  const lines = [csvLine(head)];
+  for (const row of r.rows) {
+    const status = row.new7 === true ? '신규(7일)' : (row.d7 && !row.d7.withinRes ? (row.d7.bytes > 0 ? '증가' : '감소') : '');
+    lines.push(csvLine([row.rank, row.name, row.bytes, row.res, row.share == null ? '' : (row.share * 100).toFixed(2),
+      row.d7 ? row.d7.bytes : '', row.d7 ? (row.d7.withinRes ? 'Y' : 'N') : '', row.d30 ? row.d30.bytes : '', status]));
+  }
+  for (const row of r.removed7) lines.push(csvLine(['', row.name, row.bytes, row.res, '', '', '', '', '사라짐(7일 전 크기)']));
+  const stamp = fileStamp();
+  const safe = String(tg.label || tg.id).replace(/[^\w.-]+/g, '_').slice(0, 40) || 'target';
+  logAudit({ user: req.user?.username, action: 'isidu.export', target: tg.id, detail: `rows=${r.rows.length} removed=${r.removed7.length}`, ip: req.ip });
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="isilon-dirusage-${safe}-${stamp}.csv"`);
+  res.set('Cache-Control', 'no-store');
+  res.send(CSV_BOM + lines.join('\r\n') + '\r\n' + csvLine([`# 조사 시각 ${localStamp(r.scan.ts)} · 경로 ${r.scan.path || tg.path} · 표기 ${r.scan.sizeMode === 'k' ? '-k(KB 정확)' : '-h(반올림)'}${r.scan.errLines ? ` · 권한 오류 ${r.scan.errLines}줄(일부 크기가 작을 수 있음)` : ''}`]) + '\r\n');
+});
+
+/** 설정 조회 — 대상·보존일 + 고를 목록(아이실론·엣지·DataCenter) + 이 노드의 키. */
+api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (_req, res) => {
+  const devices = listDevices().filter((d) => d.type === 'isilon').map((d) => ({ id: d.id, name: d.name || d.host, host: d.host, agent: d.agent || '', datacenterId: d.datacenterId || '', enabled: d.enabled !== false, username: d.username || '' }));
+  res.json({
+    ok: true, settings: loadSettings(), loadError: isiduSettingsLoadError(),
+    choices: { devices, agents: knownAgentNames(), datacenters: dcList() },
+    ranges: RANGES, authModes: AUTH_MODES, sizeModes: SIZE_MODES, maxTargets: MAX_TARGETS,
+    key: publicKeyView(keyInfo()),
+  });
+});
+
+/** 설정 저장 — 전체 목록 교체(같은 id 의 숫자 빈 칸은 이전 값 유지). */
+api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) => {
+  if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 저장하세요(덮어쓰면 기존 대상이 사라집니다).' });
+  const r = saveSettings(req.body || {}, settingsCtx());
+  if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null, index: r.index ?? null });
+  logAudit({ user: req.user?.username, action: 'isidu.settings', target: 'isidu-settings.json', detail: `targets=${r.settings.targets.length} retention=${r.settings.retentionDays}`, ip: req.ip });
+  res.json({ ok: true, settings: r.settings });
+});
+
+/** 지금 수집 — 중앙 담당은 바로 시작, 엣지 담당은 요청을 남긴다(엣지가 다음 설정 pull 에 가져간다). 기다리지 않는다. */
+api.post('/tools/isilon-dirusage/run', adminOnly, fullScopeOnly, async (req, res) => {
+  const want = Array.isArray(req.body?.ids) ? req.body.ids.map(t).filter(Boolean).slice(0, MAX_TARGETS) : null;
+  const devices = listDevices();
+  const all = loadSettings().targets.map((x) => resolveTarget(x, { devices }));
+  const pick = want ? all.filter((x) => want.includes(x.id)) : all.filter((x) => x.enabled !== false);
+  const notFound = want ? want.filter((id) => !all.some((x) => x.id === id)) : [];
+  const issues = []; const local = []; const requested = []; const duplicate = [];
+  for (const r of pick) {
+    if (r.issue) { issues.push({ id: r.id, issue: r.issue }); continue; }
+    if (t(r.agent)) {
+      const q = requestIsiduCollect(r.id, r.agent);
+      (q.duplicate ? duplicate : requested).push({ id: r.id, agent: r.agent });
+    } else local.push(r.id);
+  }
+  const lr = local.length ? await runNow(local, { trigger: 'manual' }) : { started: [], busy: [], notHere: [] };
+  logAudit({ user: req.user?.username, action: 'isidu.run', target: want ? want.join(',').slice(0, 200) : '(전체)', detail: `started=${lr.started.length} requested=${requested.length}`, ip: req.ip });
+  res.status(202).json({ ok: true, started: lr.started, busy: lr.busy, notHere: lr.notHere, requested, duplicate, issues, notFound });
+});
+
+/**
+ * 연결 시험 — 경로가 있는지만 본다(`ls -d`). 본문의 대상(저장 전)도 시험할 수 있다 — 같은 정규화를 거친다.
+ * 등록부 계정 인증이면 주소는 등록부 값만 쓴다(본문 주소로 장비 비밀번호를 보내지 않는다 — v2.480).
+ */
+api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, res) => {
+  const cur = loadSettings().targets;
+  const prev = req.body?.id ? cur.find((x) => x.id === t(req.body.id)) || null : null;
+  const n = normalizeTarget(req.body || {}, prev, settingsCtx());
+  if (n.error) return res.status(400).json({ ok: false, reason: n.error, field: n.field || null });
+  const r = resolveTarget(n.target, { devices: listDevices() });
+  if (r.issue) return res.status(409).json({ ok: false, reason: r.issue === 'device-missing' ? '스토리지 등록부에 그 아이실론이 없습니다.' : '고른 장비가 아이실론이 아닙니다.' });
+  if (t(r.agent)) {
+    return res.status(409).json({ ok: false, edge: true, agent: r.agent,
+      reason: `이 대상은 엣지 ‘${r.agent}’ 가 조사합니다 — 중앙에서는 그 아이실론에 닿지 않을 수 있어 시험하지 않습니다. 저장한 뒤 '지금 수집' 으로 확인하세요(결과가 이 화면에 올라옵니다).` });
+  }
+  if (String(r.id).startsWith('mock-')) return res.json({ ok: true, demo: true, ms: 0, out: `${normPath(r.path)} (데모 — 접속하지 않았습니다)` });
+  const c = await credsFor(r);
+  if (c.error) return res.status(409).json({ ok: false, kind: c.kind, reason: c.error });
+  const started = Date.now();
+  try {
+    const x = await withDeadline(40_000, (signal) => withSsh({ ...c.creds, signal }, (sh) => sh.exec(`ls -d '${normPath(r.path)}'`, 30_000)), '연결 시험 시한 초과');
+    const out = String(x?.stdout || '').trim().split('\n')[0].slice(0, 300);
+    const err = String(x?.stderr || '').trim().split('\n')[0].slice(0, 300);
+    const ok = x?.code === 0 && out.length > 0;
+    if (ok && prev) authGuard.clearAuthStop(prev.id);   // 저장된 대상의 시험이 성공하면 인증 정지를 푼다(v2.590 규약)
+    logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: ok ? 'ok' : `code=${x?.code}`, ip: req.ip });
+    res.json({ ok, ms: Date.now() - started, out, err, code: x?.code ?? null, command: duCommand(r.path, r.sizeMode),
+      ...(ok ? {} : { reason: err || `종료코드 ${x?.code} — 경로가 없거나 그 계정에 읽기 권한이 없습니다` }) });
+  } catch (e) {
+    logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: `fail: ${String(e.message).slice(0, 120)}`, ip: req.ip });
+    res.json({ ok: false, ms: Date.now() - started, reason: e.message });
+  }
+});
+
+/** 이 노드(중앙)의 SSH 키 만들기 — 없을 때만. 공개키를 돌려준다(아이실론 authorized_keys 에 넣을 값). */
+api.post('/tools/isilon-dirusage/key', adminOnly, fullScopeOnly, (req, res) => {
+  try {
+    const r = ensureKey();
+    if (r.created) logAudit({ user: req.user?.username, action: 'isidu.key.create', target: KEY_FILE_NAME, detail: `fp=${r.info?.fingerprint || ''}`, ip: req.ip });
+    res.json({ ok: true, created: !!r.created, key: publicKeyView(keyInfo({ fresh: true })) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: `SSH 키를 만들지 못했습니다: ${e.message}` });
+  }
+});
+
+}
