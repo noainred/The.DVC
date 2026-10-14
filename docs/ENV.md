@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **648개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **649개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-14)
@@ -577,7 +577,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (53)
+## 중앙(위임 수집) (54)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -618,6 +618,7 @@
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
 | `INGEST_REJECT_KEEP` | `50` |  | central/ingestReject.js |
 | `INGEST_REJECT_MAX_AGENTS` | `500` |  | central/ingestReject.js |
+| `ISIDU_EDGE_NUDGE_TIMEOUT_MS` |  |  | central/isiduRemote.js |
 | `LINKCHECK_REPORT_LINK_MAX` | `500` |  | central/linkCheckEdge.js |
 | `LINKCHECK_REPORT_STALE_MS` | `3` |  | central/linkCheckEdge.js |
 | `PARTFAULT_EDGE_DEVICE_PART_MAX` | `2000` |  | central/partFaultEdge.js |
@@ -832,4 +833,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 648
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 649

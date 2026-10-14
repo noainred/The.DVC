@@ -11,6 +11,7 @@
  */
 import { numOrNull } from '../../numOrNull.js';
 import { agoText } from './relTime.js';
+import { unitText } from '../unitText.js';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -370,7 +371,7 @@ export function keyRows(targets, mainKey, edges) {
 
 /** '지금 수집' 응답(202) → 한 줄. */
 /**
- * 메인 → 엣지 직접 요청(원격 실행·원격 연결 시험)의 실패 종류 — 서버 `central/edgePull.js EDGE_PULL_KINDS` + 'edge-pull'
+ * 메인 → 엣지 직접 요청(원격 실행·원격 연결 시험)의 실패 종류 — 서버 `central/edgePull.js EDGE_PULL_KINDS` + 'edge-pull'·'demo-edge'
  * (`central/isiduRemote.js` 가 더하는 것)와 1:1(테스트가 서버 소스와 대조한다). iDRAC PUSH 스캔과 같은 길이다.
  */
 export const EDGE_CALL_TEXT = Object.freeze({
@@ -385,6 +386,7 @@ export const EDGE_CALL_TEXT = Object.freeze({
   http: '엣지가 오류로 답했습니다.',
   'bad-body': '엣지 응답 형식이 다릅니다(엣지 포탈이 아닌 서버에 닿았을 수 있습니다).',
   'edge-pull': '엣지가 메인의 설정을 받지 못했습니다 — 엣지 → 메인 통신(CENTRAL_URL·CENTRAL_TOKEN)을 확인하세요.',
+  'demo-edge': '데모 엣지입니다 — 데모 모드는 실제 엣지에 접속하지 않습니다(데모 대상은 메인에서만 조사됩니다).',
 });
 export const edgeCallText = (kind) => EDGE_CALL_TEXT[kind] || (kind ? `엣지 요청 실패(${kind})` : '엣지 요청 실패');
 
@@ -403,7 +405,7 @@ export function nudgeLines(r) {
 export function testResultText(r) {
   if (!r) return null;
   const where = r.via === 'edge' ? `엣지 ‘${r.node || '?'}’ 에서` : '메인에서';
-  if (r.ok) return { tone: 'ok', text: `성공 — ${r.out || ''}${r.demo ? '' : ` (${where} · ${numOrNull(r.ms) ?? '—'}ms)`}` };
+  if (r.ok) return { tone: 'ok', text: `성공 — ${r.out || ''}${r.demo ? '' : ` (${where} · ${unitText(numOrNull(r.ms), 'ms')})`}` };
   if (r.via === 'edge' && r.kind && EDGE_CALL_TEXT[r.kind]) return { tone: 'bad', text: `엣지 ‘${r.node || '?'}’ 에 시험을 보내지 못했습니다 — ${edgeCallText(r.kind)}${r.kind === 'http' && r.reason ? ` (${String(r.reason).slice(0, 120)})` : ''}` };
   const fk = r.failKind || r.kind;
   const fix = fk && FAIL_TEXT[fk] ? ` — ${FAIL_TEXT[fk].fix}` : '';
@@ -509,7 +511,8 @@ export function deviceAuthIssue(f, dev) {
   if (!f?.deviceId || f.auth !== 'device' || f.runVia !== 'node') return null;
   const a = String(f.agent || '').trim().toLowerCase();
   if (!a || !dev || a === String(dev.agent || '').trim().toLowerCase()) return null;
-  return `엣지 ‘${f.agent}’ 의 스토리지 등록부에는 이 장비 계정이 없습니다 — SSH 키 인증으로 바꾸거나 실행 노드를 장비 담당 노드(${dev.agent ? `엣지 ‘${dev.agent}’` : '메인'})나 메인으로 두세요.`;
+  const where = dev.agent ? `장비 담당 노드(엣지 ‘${dev.agent}’)나 메인` : '메인';
+  return `엣지 ‘${f.agent}’ 의 스토리지 등록부에는 이 장비 계정이 없습니다 — SSH 키 인증으로 바꾸거나 실행 노드를 ${where}으로 두세요.`;
 }
 
 /** 폼의 장비 선택지 라벨. */

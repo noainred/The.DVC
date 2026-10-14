@@ -26,9 +26,10 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto' }}>
-          <b style={{ fontSize: 15 }}>{title}</b>
-          <button className="logout-btn" onClick={onClose}>닫기</button>
+        <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto', gap: 10 }}>
+          <b style={{ fontSize: 15, minWidth: 0 }}>{title}</b>
+          {/* v2.736: 긴 제목이 좁은 화면에서 버튼을 눌러 '닫/기' 두 줄로 쪼개지 않게 — 버튼은 줄어들지 않는다 */}
+          <button className="logout-btn" onClick={onClose} style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}>닫기</button>
         </div>
         <div style={bodyScroll
           ? { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4, marginRight: -4 }

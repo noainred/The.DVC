@@ -3568,6 +3568,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       건진다(`applyUnitySerialFallback` — 명령 추가 없음). XtremIO 는 serial 계열 키 우선 → 옛 `sys-psnt-part-number` 마지막 후보, SSH 의 'Index'(클러스터 번호) 폴백은 지웠다.
     · 사유 코드(`serialProbe`·`nodeSerialProbe` reason: budget·parse·empty·exec·no-field·no-match·not-in-output·not-run)는 웹 `SERIAL_REASON_TEXT` 와 1:1(웹 테스트가 수집기 소스에서 뽑아 대조).
     · ⚠ 정직 기록: 세 장비의 실제 출력(isi_hw_status 키·OneFS hardware 필드·Unity 시리얼 줄·XMS 시리얼 키)은 본 적이 없다 — 첫 실수집의 '미확인' 툴팁(seenKeys)으로 좁힐 것.
+  - ⚠⚠ **아이실론 디렉터리 사용량(v2.736) — du 출력은 반올림 값이고, 엣지 원격 실행은 '알림' 이지 '명령 전달' 이 아니다**
+    (`server/src/isidu/`{parse,settings,targets,collect,collectRequests,db,report,poller,push,sshKey,edgeOps}.js + `central/isiduRemote.js` + `agent/isiduConfigPull.js` +
+    `routes/api/isilonDirUsage.js` + `routes/collector.js /isidu-run·/isidu-test` + 웹 `views/tools/IsilonDirUsageTool.jsx`·`IsiduSettings.jsx`·`isiduText.js`, 도구 키 `isilon-dirusage`.
+    사용자 요청: 지정 디렉터리 하위 폴더 크기 Top 10 · `du -A -h -d 1` · 비밀번호 없는 SSH · 각 엣지가 자기 법인 아이실론 · DB 추이 + "명령어를 특정 엣지에서, iDRAC 처럼 원격 실행" + "10분이 넘게 걸릴 때도 있어".
+    회귀 `server/test/isidu2736.test.js`(실제 centralRouter·collectorRouter·가짜 아이실론 SSH — 변이 8/8) + 웹 `isiduText.test.js`(서버 판정과 대조)):
+    · `-h` 값은 1024 단위 반올림 — 행마다 해상도(`res`)를 싣고 두 관측 차이가 해상도 안이면 `withinRes`(변화라 단정하지 않는다). 루트 합계 줄은 순위에서 빼고 '전체' 로, `du:` 줄은 `errLines`(그 스캔 크기는 하한).
+      7일 변화는 7일 이전 성공 스캔이 있을 때만(관측 부족이면 null + 사유).
+    · 이력 키 `agent` 는 언제나 `''`(HISTORY_AGENT) — 대상 id 는 중앙이 발급해 함대에서 하나이고 담당 노드가 바뀌어도 추이가 이어진다. 누가 조사했는지는 `node` 열.
+    · 실행 노드: 등록부 아이실론은 기본 장비 담당 노드를 따르고 `runVia:'node'` 로 메인·특정 엣지를 지정한다. ⚠ 장비 계정 인증(`auth:'device'`)은 장비 담당 노드나 메인에서만 —
+      다른 엣지의 스토리지 등록부에는 그 계정이 없다(서버 `normalizeTarget` 400 + 웹 `deviceAuthIssue` 경고, 문구 한 벌).
+    · 원격 실행: 메인 → `POST {엣지}/api/collector/isidu-run`(같은 url·`COLLECTOR_TOKEN` — 새 네트워크 허용 없음). **본문에 대상·명령을 싣지 않는다** — 엣지는 중앙 설정 pull 을 지금 다시 하고
+      claim→ack 큐의 요청만 시작한다(진행 중 pull 이 있으면 끝난 뒤 한 번 더). 전달 실패해도 요청은 큐에 남아 다음 pull(5분)이 가져간다. 판정 사다리는 `central/edgePull.js pullFromEdge` 하나
+      (POST·jsonBody·`missing401`=401 은 구버전) · **재시도 0** · 데모 엣지는 `demo-edge`(collector 꺼짐과 구분). 연결 시험은 `isidu-test` 로 비밀 없는 대상 사본을 보내 엣지가 `cleanEdgeTarget` 으로
+      다시 검증하고 `ls -d` 만 한다(동시 2, 429). 웹 `EDGE_CALL_TEXT` 키 = 서버 `EDGE_PULL_KINDS` + edge-pull·demo-edge(테스트 대조) — 종류를 늘리면 둘 다.
+    · 시한: 대상당 1~120분(기본 30). SSH exec 상한은 30분이 기본이고 `{long:true}` 일 때만 2시간(`EXEC_LONG_MAX_MS`) — 다른 수집기에 long 을 붙이지 말 것. 세션 시한 = min(2시간, 명령 + 30초),
+      명령 = min(명령, 세션 − 15초)(`sessionPlanOf` — 세션이 명령보다 먼저 끊으면 결과가 버려진다). 큐 시한은 대상 최대 시한 + 60초(`perItemMs`).
+    · 키는 `CONFIG_DIR/ssh`(서비스 계정은 홈이 없다) · 없으면 ECDSA P-256 SEC1 PEM 생성(ed25519 생성기 금지 — v2.590) · 개인키는 응답에 싣지 않는다 · 인증 거부는 주기 수집 정지(`isidu-auth-stops.json`).
+    · 권한 adminOnly + fullScopeOnly(CSV + data.csv) · 데모는 `mock-` 대상만 합성(장비·엣지 접속 0). 엣지 원격 요청 상태는 엣지 로그 표 `pull.isiduRemote`.
+    · ⚠ 정직 기록: 실제 OneFS 출력은 사용자 스크린샷 형식만 봤다(파서는 그 형식 + -k). 실제 원격 엣지·아이실론으로는 확인하지 못했다(같은 프로세스의 엣지 라우트·가짜 SSH 서버).
   - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
     5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
     웹 `components/errorBoxProps.test.js`):

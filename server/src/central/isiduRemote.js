@@ -14,12 +14,15 @@
  */
 import { pullFromEdge } from './edgePull.js';
 import { reqTimeoutMs } from '../util/envTimeout.js';
+import { capStr } from '../util/capStr.js';
 
 export const MIN_ISIDU_EDGE_VERSION = '2.736.0';
 const NUDGE_TIMEOUT_MS = reqTimeoutMs(process.env.ISIDU_EDGE_NUDGE_TIMEOUT_MS, 30_000, { max: 120_000 });
 const TEST_TIMEOUT_MS = 75_000;   // 엣지 시험 세션 시한(60초) + 왕복 여유
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+/** 데모(mock) 엣지는 접속하지 않는다 — edgePull 의 '데모 엣지입니다' 를 collector 꺼짐(disabled)과 구분한다(조치가 다르다). */
+const demoKind = (r) => (r.kind === 'disabled' && /^데모 엣지/.test(String(r.reason || '')) ? 'demo-edge' : r.kind);
 
 /**
  * 엣지에 '지금 설정을 다시 받아 요청을 시작하라' 를 전한다. 반환 `{ ok, kind?, reason?, ms, runRequested?, note? }`.
@@ -32,9 +35,9 @@ export async function nudgeIsiduEdge(agent, { fetchImpl } = {}) {
     bodyOk: (b) => isObj(b) && typeof b.ok === 'boolean',
     ...(fetchImpl ? { fetchImpl } : {}),
   });
-  if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason || '', ms: r.ms };
+  if (!r.ok) return { ok: false, kind: demoKind(r), reason: r.reason || '', ms: r.ms };
   const b = r.body;
-  if (b.ok === false) return { ok: false, kind: 'edge-pull', reason: String(b.reason || '엣지가 중앙 설정을 받지 못했습니다').slice(0, 300), ms: r.ms };
+  if (b.ok === false) return { ok: false, kind: 'edge-pull', reason: capStr(typeof b.reason === 'string' && b.reason ? b.reason : '엣지가 중앙 설정을 받지 못했습니다', 300), ms: r.ms };
   return { ok: true, ms: r.ms, runRequested: Number.isFinite(b.runRequested) ? b.runRequested : null, started: Array.isArray(b.started) ? b.started.length : null };
 }
 
@@ -48,9 +51,9 @@ export async function testIsiduOnEdge(agent, target, { fetchImpl } = {}) {
     bodyOk: (b) => isObj(b) && typeof b.ok === 'boolean',
     ...(fetchImpl ? { fetchImpl } : {}),
   });
-  if (!r.ok) return { ok: false, via: 'edge', node: agent, kind: r.kind, reason: r.reason || '', ms: r.ms };
+  if (!r.ok) return { ok: false, via: 'edge', node: agent, kind: demoKind(r), reason: r.reason || '', ms: r.ms };
   const b = r.body;
-  const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const s = (v, n) => (typeof v === 'string' ? capStr(v, n) : '');
   return {
     ok: b.ok === true, via: 'edge', node: s(b.node, 64) || agent, ms: Number.isFinite(b.ms) ? b.ms : r.ms,
     out: s(b.out, 300), err: s(b.err, 300), code: Number.isFinite(b.code) ? b.code : null, command: s(b.command, 1200),

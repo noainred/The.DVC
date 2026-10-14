@@ -76,6 +76,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.sanswitch', label: 'SAN 스위치 설정', group: 'pull', mod: '../agent/sanSwitchConfigPull.js', fn: 'sanSwitchConfigPullStatus' },
   { key: 'pull.cvp', label: 'CVP 설정', group: 'pull', mod: '../agent/cvpConfigPull.js', fn: 'cvpConfigPullStatus' },
   { key: 'pull.isidu', label: '아이실론 디렉터리 사용량 대상', group: 'pull', mod: '../agent/isiduConfigPull.js', fn: 'isiduConfigPullStatus' }, // v2.736
+  { key: 'pull.isiduRemote', label: '아이실론 du 원격 요청(메인 → 이 엣지)', group: 'pull', mod: '../isidu/edgeOps.js', fn: 'isiduEdgeOpsStatus' }, // v2.736 — 메인이 바로 실행·연결 시험을 시킨 마지막 기록
   { key: 'pull.pdu', label: 'PDU 설정', group: 'pull', mod: '../agent/pduConfigPull.js', fn: 'pduConfigPullStatus' },
   { key: 'pull.gpuGuest', label: 'GPU 게스트 설정', group: 'pull', mod: '../agent/gpuGuestConfigPull.js', fn: 'gpuGuestConfigPullStatus' },
   { key: 'pull.svcmon', label: 'svcmon 설정', group: 'pull', mod: '../agent/svcmonConfigPull.js', fn: 'svcmonConfigPullStatus' },

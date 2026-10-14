@@ -223,14 +223,15 @@ describe('설정 폼', () => {
 });
 
 describe('v2.736 엣지 원격 실행·실행 노드', () => {
-  it('EDGE_CALL_TEXT 키 = 서버 EDGE_PULL_KINDS + isiduRemote 의 edge-pull', () => {
+  it('EDGE_CALL_TEXT 키 = 서버 EDGE_PULL_KINDS + isiduRemote 의 edge-pull·demo-edge', () => {
     const src = fs.readFileSync(path.join(SERVER, 'central/edgePull.js'), 'utf8');
     const m = /EDGE_PULL_KINDS\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/.exec(src);
     expect(m).toBeTruthy();
     const kinds = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
     const remote = fs.readFileSync(path.join(SERVER, 'central/isiduRemote.js'), 'utf8');
-    expect(remote).toContain("kind: 'edge-pull'");
-    expect(Object.keys(EDGE_CALL_TEXT).sort()).toEqual([...kinds, 'edge-pull'].sort());
+    const extra = [...new Set([...remote.matchAll(/'((?:edge-pull|demo-edge))'/g)].map((x) => x[1]))];
+    expect(extra.sort()).toEqual(['demo-edge', 'edge-pull']);
+    expect(Object.keys(EDGE_CALL_TEXT).sort()).toEqual([...kinds, ...extra].sort());
   });
   it('지금 수집 — 엣지별로 바로 전달했는지, 못 했으면 왜와 다음 pull 에 가져간다는 사실을 말한다', () => {
     const r = { ok: true, started: [], requested: [{ id: 'a', agent: 'e1' }, { id: 'b', agent: 'e2' }], nudged: [{ agent: 'e1', ok: true, started: 1 }, { agent: 'e2', ok: false, kind: 'old-version' }] };

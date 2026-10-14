@@ -235,6 +235,10 @@ api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, re
   if (n.error) return res.status(400).json({ ok: false, reason: n.error, field: n.field || null });
   const r = resolveTarget(n.target, { devices: listDevices() });
   if (r.issue) return res.status(409).json({ ok: false, reason: r.issue === 'device-missing' ? '스토리지 등록부에 그 아이실론이 없습니다.' : '고른 장비가 아이실론이 아닙니다.' });
+  // 데모(mock) 대상은 어느 노드로 지정돼 있어도 접속하지 않는다(데모 엣지는 실제로 없다).
+  if (String(r.id || '').startsWith('mock-') && isMockMode()) {
+    return res.json({ ok: true, demo: true, ms: 0, out: `${r.path} (데모 — 접속하지 않았습니다)`, command: duCommand(r.path, r.sizeMode), via: t(r.agent) ? 'edge' : 'main', node: t(r.agent) });
+  }
   if (t(r.agent)) {
     // v2.736: 엣지 담당 대상은 **그 엣지가** 시험한다(메인이 엣지의 수집 서버 URL 로 요청 — iDRAC PUSH 스캔과 같은 길).
     // 보내는 것은 비밀 없는 대상 사본(edgeTargetView)뿐이다 — 엣지는 자기 키·자기 스토리지 등록부로 접속한다.

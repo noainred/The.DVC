@@ -22,18 +22,18 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **992개** |
+| 엔드포인트 | **994개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 102개 |
 | GET | 538개 |
-| POST | 302개 |
+| POST | 304개 |
 | PUT | 98개 |
 | PATCH | 2개 |
 | DELETE | 52개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
-| [`/api/collector`](#apicollector) | 11 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
+| [`/api/collector`](#apicollector) | 13 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
 | [`/api/capacity`](#apicapacity) | 3 | 리소스 적정성 진단. 라우터가 스스로 `adminOnly` 를 건다. |
 | [`/api/insights`](#apiinsights) | 16 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
 | [`/api/central`](#apicentral) | 54 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
@@ -56,17 +56,19 @@
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/bm-usage` | — | [server/src/routes/collector.js:107](../server/src/routes/collector.js#L107) |
-| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:227](../server/src/routes/collector.js#L227) |
-| GET | `/edge-log` | — | [server/src/routes/collector.js:78](../server/src/routes/collector.js#L78) |
-| GET | `/export` | — | [server/src/routes/collector.js:42](../server/src/routes/collector.js#L42) |
-| POST | `/idrac-scan` | `express.json` | [server/src/routes/collector.js:192](../server/src/routes/collector.js#L192) |
-| GET | `/ping` | — | [server/src/routes/collector.js:59](../server/src/routes/collector.js#L59) |
-| POST | `/set-password` | `express.json` | [server/src/routes/collector.js:172](../server/src/routes/collector.js#L172) |
-| GET | `/token-check` | — | [server/src/routes/collector.js:135](../server/src/routes/collector.js#L135) |
-| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:247](../server/src/routes/collector.js#L247) |
-| GET | `/xfer-test` | — | [server/src/routes/collector.js:157](../server/src/routes/collector.js#L157) |
-| POST | `/xfer-test` | — | [server/src/routes/collector.js:163](../server/src/routes/collector.js#L163) |
+| GET | `/bm-usage` | — | [server/src/routes/collector.js:108](../server/src/routes/collector.js#L108) |
+| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:243](../server/src/routes/collector.js#L243) |
+| GET | `/edge-log` | — | [server/src/routes/collector.js:79](../server/src/routes/collector.js#L79) |
+| GET | `/export` | — | [server/src/routes/collector.js:43](../server/src/routes/collector.js#L43) |
+| POST | `/idrac-scan` | `express.json` | [server/src/routes/collector.js:193](../server/src/routes/collector.js#L193) |
+| POST | `/isidu-run` | `express.json` | [server/src/routes/collector.js:227](../server/src/routes/collector.js#L227) |
+| POST | `/isidu-test` | `express.json` | [server/src/routes/collector.js:232](../server/src/routes/collector.js#L232) |
+| GET | `/ping` | — | [server/src/routes/collector.js:60](../server/src/routes/collector.js#L60) |
+| POST | `/set-password` | `express.json` | [server/src/routes/collector.js:173](../server/src/routes/collector.js#L173) |
+| GET | `/token-check` | — | [server/src/routes/collector.js:136](../server/src/routes/collector.js#L136) |
+| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:263](../server/src/routes/collector.js#L263) |
+| GET | `/xfer-test` | — | [server/src/routes/collector.js:158](../server/src/routes/collector.js#L158) |
+| POST | `/xfer-test` | — | [server/src/routes/collector.js:164](../server/src/routes/collector.js#L164) |
 
 ## `/api/capacity`
 
@@ -889,16 +891,16 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/ipam/subnets` | 권한 `tools` | [server/src/routes/api/ipamExport.js:161](../server/src/routes/api/ipamExport.js#L161) |
 | GET | `/tools/ipam/vc-ranges` | 권한 `tools` | [server/src/routes/api/ipamExport.js:180](../server/src/routes/api/ipamExport.js#L180) |
 | GET | `/tools/ipam/vc-ranges.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/ipamExport.js:202](../server/src/routes/api/ipamExport.js#L202) |
-| GET | `/tools/isilon-dirusage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:104](../server/src/routes/api/isilonDirUsage.js#L104) |
-| GET | `/tools/isilon-dirusage/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:152](../server/src/routes/api/isilonDirUsage.js#L152) |
-| POST | `/tools/isilon-dirusage/key` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:249](../server/src/routes/api/isilonDirUsage.js#L249) |
-| GET | `/tools/isilon-dirusage/report` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:123](../server/src/routes/api/isilonDirUsage.js#L123) |
-| POST | `/tools/isilon-dirusage/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:195](../server/src/routes/api/isilonDirUsage.js#L195) |
-| GET | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:175](../server/src/routes/api/isilonDirUsage.js#L175) |
-| PUT | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:186](../server/src/routes/api/isilonDirUsage.js#L186) |
-| POST | `/tools/isilon-dirusage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:218](../server/src/routes/api/isilonDirUsage.js#L218) |
-| GET | `/tools/isilon-dirusage/trend` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:142](../server/src/routes/api/isilonDirUsage.js#L142) |
-| GET | `/tools/isilon-dirusage/users` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:131](../server/src/routes/api/isilonDirUsage.js#L131) |
+| GET | `/tools/isilon-dirusage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:109](../server/src/routes/api/isilonDirUsage.js#L109) |
+| GET | `/tools/isilon-dirusage/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:157](../server/src/routes/api/isilonDirUsage.js#L157) |
+| POST | `/tools/isilon-dirusage/key` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:260](../server/src/routes/api/isilonDirUsage.js#L260) |
+| GET | `/tools/isilon-dirusage/report` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:128](../server/src/routes/api/isilonDirUsage.js#L128) |
+| POST | `/tools/isilon-dirusage/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:204](../server/src/routes/api/isilonDirUsage.js#L204) |
+| GET | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:180](../server/src/routes/api/isilonDirUsage.js#L180) |
+| PUT | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:191](../server/src/routes/api/isilonDirUsage.js#L191) |
+| POST | `/tools/isilon-dirusage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:231](../server/src/routes/api/isilonDirUsage.js#L231) |
+| GET | `/tools/isilon-dirusage/trend` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:147](../server/src/routes/api/isilonDirUsage.js#L147) |
+| GET | `/tools/isilon-dirusage/users` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:136](../server/src/routes/api/isilonDirUsage.js#L136) |
 | GET | `/tools/license-expiry` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:162](../server/src/routes/api/toolsInfo.js#L162) |
 | GET | `/tools/licenses` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:112](../server/src/routes/api/toolsInfo.js#L112) |
 | GET | `/tools/link-check` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:53](../server/src/routes/api/linkCheck.js#L53) |
@@ -1173,6 +1175,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `fullScopeOnlyWith` | 8 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
+| `express.json` | 5 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `requireEnrolled` | 4 | OTP **강제 등록 미완료 세션을 차단**한다(v2.206). 부트스트랩 admin 이 등록 전에 API 를 쓰지 못하게 하는 게이트로, 대부분의 `/api/*` 는 마운트에서 이미 걸린다 — 여기 보이는 것은 `/api/auth` 안의 admin 라우트처럼 **라우터가 따로 건** 경우다. |
 | `fleetFullScopeOnly` | 4 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |
 | `fleetWideOnly` | 3 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
@@ -1182,7 +1185,6 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `menuFleetOnly` | 3 | **전체 범위 계정만**(v2.726 — 좌측 메뉴 배포. 전 사용자 화면을 바꾼다). 범위 제한 계정은 403. |
 | `requireSuperAdmin` | 3 | **super_admin 전용**(v2.726 — 좌측 메뉴를 전체 사용자에게 배포·철회). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`. |
 | `adFleetOnly` | 3 | **전체 범위 계정만**(v2.628 SEC2628-04 — AD 설정 조회·저장·연결 테스트. AD 는 전 사용자 공통 인증 소스다). 범위 제한 계정은 403. |
-| `express.json` | 3 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
 | `express.raw` | 2 | 원시 바디 버퍼(업그레이드 번들 등). ⚠ 게이트가 아니다 — 인증을 이 앞에 두어 미인증 요청이 대용량 바디를 적재하지 못하게 한다. |

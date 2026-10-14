@@ -8,13 +8,16 @@
  *  · 상태 보관은 인메모리(엣지 수 상한) — 진실의 원천은 DB 다. 공개키는 비밀이 아니므로 화면이 보여 준다(엣지 법인 아이실론에 등록할 값).
  */
 import { MAX_ENTRIES } from '../isidu/parse.js';
+import { capStr } from '../util/capStr.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { setIsiduBaseResolver } from '../isidu/collectRequests.js';
 
 const FUTURE_SKEW_MS = 5 * 60_000;
 const AGENT_MAX = 256;
 const SCANS_PER_POST = 50;
-const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
-const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null));
+// 상주 저장소에 들어가는 문자열은 capStr(자르고 평탄화 — v2.607 TIM2607-01: slice 는 원문을 붙잡는다). 문자열만 받는다.
+const str = (v, max) => (typeof v === 'string' ? capStr(v, max) : '');
+const num = numOrNull; // 숫자·숫자 문자열만, 그 밖은 null(util/numOrNull — 사본을 두지 않는다)
 
 /**
  * 본문 → 정제된 스캔 목록. owned: 이 엣지에 배정된 대상 id 집합.
@@ -52,7 +55,7 @@ export function sanitizeIsiduScans(body, owned, now = Date.now()) {
       path: str(raw.path, 1024), host: str(raw.host, 256), sizeMode: raw.sizeMode === 'k' ? 'k' : 'h',
       durationMs: num(raw.durationMs), total, sumBytes: num(raw.sumBytes), sumRes: num(raw.sumRes), count: ok ? entries.length : null,
       skipped: num(raw.skipped), errLines: num(raw.errLines),
-      errSample: Array.isArray(raw.errSample) ? raw.errSample.filter((x) => typeof x === 'string').slice(0, 5).map((x) => x.slice(0, 200)) : [],
+      errSample: Array.isArray(raw.errSample) ? raw.errSample.filter((x) => typeof x === 'string').slice(0, 5).map((x) => capStr(x, 200)) : [],
       truncated: raw.truncated === true, kind: str(raw.kind, 32), error: str(raw.error, 600), trig: str(raw.trig, 16),
       edgeScanId: num(raw.id ?? raw.edgeScanId), entries,
     });

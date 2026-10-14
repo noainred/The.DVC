@@ -21,6 +21,7 @@ import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.612 
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { getCollectorDenyStats, _resetCollectorDenyStats, logCollectorDeny } from '../collector/denyLog.js'; // v2.579
+import { edgeIsiduNudge, edgeIsiduTest } from '../isidu/edgeOps.js'; // v2.736 — 정적 import(엣지 로그 표가 부팅 모듈만 읽는다)
 
 export const collectorRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -226,13 +227,11 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
 collectorRouter.post('/isidu-run', express.json({ limit: '4kb' }), async (req, res) => {
   if (!config.collector.token) { logCollectorDeny(req, 'isidu-run'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
   if (!checkToken(req)) { logCollectorDeny(req, 'isidu-run'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
-  const { edgeIsiduNudge } = await import('../isidu/edgeOps.js');
   res.json(await edgeIsiduNudge());
 });
 collectorRouter.post('/isidu-test', express.json({ limit: '16kb' }), async (req, res) => {
   if (!config.collector.token) { logCollectorDeny(req, 'isidu-test'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
   if (!checkToken(req)) { logCollectorDeny(req, 'isidu-test'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
-  const { edgeIsiduTest } = await import('../isidu/edgeOps.js');
   const r = await edgeIsiduTest(req.body || {});
   res.status(r.status).json(r.body);
 });

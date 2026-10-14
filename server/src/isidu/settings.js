@@ -166,7 +166,8 @@ export function normalizeTarget(input, prev, ctx) {
       if (ag.error) return { error: ag.error, field: 'agent' };
       out.agent = ag.value;
       if (out.auth === 'device' && dev && out.agent && lo(out.agent) !== lo(dev.agent)) {
-        return { error: `'스토리지 등록부 계정' 인증은 장비 담당 노드(${dev.agent ? `엣지 ‘${dev.agent}’` : '메인'})나 메인에서 실행할 때만 쓸 수 있습니다 — 엣지 ‘${out.agent}’ 의 스토리지 등록부에는 그 장비 계정이 없습니다. SSH 키 인증으로 바꾸거나 실행 노드를 장비 담당 노드로 두세요.`, field: 'auth' };
+        const where = dev.agent ? `장비 담당 노드(엣지 ‘${dev.agent}’)나 메인` : '메인';
+        return { error: `'스토리지 등록부 계정' 인증은 ${where}에서 실행할 때만 쓸 수 있습니다 — 엣지 ‘${out.agent}’ 의 스토리지 등록부에는 그 장비 계정이 없습니다. SSH 키 인증으로 바꾸거나 실행 노드를 ${where}으로 두세요.`, field: 'auth' };
       }
     }
   } else {
