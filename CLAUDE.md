@@ -3543,6 +3543,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 데모: mock + 데모 엣지만 합성(14일 백필 1회 — 데모 엣지 등록 전이면 표지를 세우지 않는다). 사람이 등록한 엣지는 mock 에서도 실제로 잰다.
     · 상단(사이드바) 메뉴에는 넣지 않았다 — 그 표는 사용자가 정한 구성이다(`topMenu.test.js`). 특수 기능·V4/V5/V6 트리·toolcats 에는 있다.
     · ⚠ 정직 기록: 실제 원격 법인 회선으로는 재 보지 못했다(같은 프로세스 안 엣지 라우트·가짜 서버로 확인).
+    · **v2.735.2 — ↑ 행의 '지연'(옛 '응답 시작')은 `analyze.latencyMsOf` 하나**(사용자 신고 "응답 시작이 안 되는 부분"): ↑ 는 업로드를 다 보낸 뒤에야
+      응답 머리가 와서 ttfb 가 뜻이 없어 늘 '—' 였다. ↑ = 전체 − 엣지 수신 구간(receiver 기준만), sender-total(*)·실패·음수는 null. 측정기가 저장하고
+      옛 행은 읽을 때 같은 식으로 구한다(통계·기록·CSV '지연(ms)' 가 같은 함수). ↓ 는 저장된 ttfb 만 — 전체 − 전송으로 지어내지 않는다. 회귀 `xferLatency2735_2`.
+      법인 상세의 기본 기간은 24시간(`xferSpeedText.DEFAULT_PERIOD_DAYS` — 기간 목록 안의 값). 서버 `/history` 의 days 기본값(7)은 그대로다.
+  - ⚠⚠ **스토리지 시리얼(v2.735.2) — 못 읽으면 사유를 싣고, 화면 문구는 `web/src/views/tools/storageSerialText.js` 하나**(사용자 요청 PowerScale·Unity·XtremIO 시리얼 표시.
+    회귀 `server/test/storageSerial2735_2.test.js` + 웹 `storageSerialText.test.js` — 변이 6/6):
+    · PowerScale 노드 시리얼은 `storage/collectors/isilonHw.js` — SSH `isi_for_array -s isi_hw_status -i`(줄 접두 '<클러스터>-<LNN>:' 이 `isi status` 의 클러스터 이름과 같을 때만 · 선형 파싱),
+      장비당 성공 6시간 캐시 · 실패 1시간 뒤 재시도(직전 성공값 유지) · 세션 시작 100초가 지났으면 시작하지 않는다(장비 시한 180초 안). REST 는 노드 응답 `hardware`(왕복 0).
+      ⚠ 엣지 노드 목록 정제 `central/edgeRecord.js NODE_STR_KEYS` 에 serial·chassisSerial 을 넣었다 — **노드에 새 필드를 더하면 이 목록에도**(빠지면 위임 장비에서만 조용히 사라진다).
+    · 장비 시리얼의 뜻은 `extra.serialKind`(guid = OneFS REST config.guid — 장비 시리얼이 아니다 · psnt · serial)가 말하고 화면 라벨이 따른다. Unity SSH 는 버전 후보 표본에서 시리얼을
+      건진다(`applyUnitySerialFallback` — 명령 추가 없음). XtremIO 는 serial 계열 키 우선 → 옛 `sys-psnt-part-number` 마지막 후보, SSH 의 'Index'(클러스터 번호) 폴백은 지웠다.
+    · 사유 코드(`serialProbe`·`nodeSerialProbe` reason: budget·parse·empty·exec·no-field·no-match·not-in-output·not-run)는 웹 `SERIAL_REASON_TEXT` 와 1:1(웹 테스트가 수집기 소스에서 뽑아 대조).
+    · ⚠ 정직 기록: 세 장비의 실제 출력(isi_hw_status 키·OneFS hardware 필드·Unity 시리얼 줄·XMS 시리얼 키)은 본 적이 없다 — 첫 실수집의 '미확인' 툴팁(seenKeys)으로 좁힐 것.
   - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
     5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
     웹 `components/errorBoxProps.test.js`):
