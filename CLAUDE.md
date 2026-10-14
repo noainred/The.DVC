@@ -3547,6 +3547,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       응답 머리가 와서 ttfb 가 뜻이 없어 늘 '—' 였다. ↑ = 전체 − 엣지 수신 구간(receiver 기준만), sender-total(*)·실패·음수는 null. 측정기가 저장하고
       옛 행은 읽을 때 같은 식으로 구한다(통계·기록·CSV '지연(ms)' 가 같은 함수). ↓ 는 저장된 ttfb 만 — 전체 − 전송으로 지어내지 않는다. 회귀 `xferLatency2735_2`.
       법인 상세의 기본 기간은 24시간(`xferSpeedText.DEFAULT_PERIOD_DAYS` — 기간 목록 안의 값). 서버 `/history` 의 days 기본값(7)은 그대로다.
+    · **v2.735.3 — 이전 구간·마우스 오버·리뷰 확정분**(사용자 요청 "이전 단위를 볼 수 있게" + iDRAC 추이 같은 ◀▶ · "마우스 오버로 시간·전송량" · "버그 찾아서 수정".
+      회귀 `server/test/xferWindow2735_3`·`xferReview2735_3`(실제 api 라우터) + 웹 `xferSpeedText.test.js` — 변이 서버 4/4 · 웹 4/4):
+      · `/history?end=` 는 창 [end − days, end] 이고 지금보다 뒤·숫자 아님은 '지금 창'(past:false). 일 요약 창은 **(시작일, 끝 날]** — 이웃한 두 창이 같은 날을 두 번 그리지 않는다.
+        통계·측정 기록(끝 이전 14일)·CSV(`end`)가 같은 창을 따른다. 응답 `start`·`end`·`past`·`oldest{sampleTs,day}`·`retention` — 화면은 `maxBackOf` 로 갈 수 있는 칸 수를 정한다.
+        스크롤 기준 끝은 스크롤을 시작할 때 한 번 잡는다(매번 Date.now() 면 칸이 밀린다 — v2.666 iDRAC 와 같은 규칙) · 과거 구간은 폴링하지 않는다 · 실패는 그 구간 키로만 보인다.
+      · 마우스 오버 판정은 `hoverAt` 하나 — 가장 가까운 측정(허용 = 선 끊김 간격의 절반) · 다른 방향은 `PAIR_MS`(15분) 안의 같은 회차만(일 요약은 같은 날) ·
+        좌우 여백은 축 끝으로 본다(400px 에서 여백이 차트의 수 % 라 끝 점을 못 골랐다). 점 필드 `bytes`·`latMs` 는 `seriesOf` 가 싣는다(못 읽으면 null).
+      · ⚠ 선 끊김 간격을 숫자로 박지 말 것 — `cadenceOf`(연속 간격의 **아래쪽** 중앙값) × 2.5, 최소 75분. 고정 75분이면 2시간 간격 법인의 차트가 통째로 비었다. 홀로 있는 점은 `singles` 로 그린다.
+        일 요약 점은 **포탈 시각 정오**(`Date.parse(day+'T12:00:00Z') − offMs`), 눈금은 포탈 시각 경계.
+      · 상한에 걸린 조회는 **가장 최근 행을 남긴다**(DESC LIMIT 후 뒤집기) · 요청보다 많은 바이트는 bad-body · 엣지 `COLLECTOR_TOKEN` 없음은 `collector-off`(서버 `XFER_FAIL_KINDS` ↔ 웹 `FAIL_TEXT` 1:1) ·
+        잴 엣지가 0곳이면 `/run` 409 `noTargets` + 사유 · 보존 정리는 30초 틱에서 6시간마다(`PRUNE_EVERY_MS` · 첫 틱 제외 · 측정이 꺼져 있어도).
+      · 남긴 것: 오래됨 사유 코드(XS-12). 실제 원격 회선으로는 확인하지 못했다(목업·테스트 라우터).
   - ⚠⚠ **스토리지 시리얼(v2.735.2) — 못 읽으면 사유를 싣고, 화면 문구는 `web/src/views/tools/storageSerialText.js` 하나**(사용자 요청 PowerScale·Unity·XtremIO 시리얼 표시.
     회귀 `server/test/storageSerial2735_2.test.js` + 웹 `storageSerialText.test.js` — 변이 6/6):
     · PowerScale 노드 시리얼은 `storage/collectors/isilonHw.js` — SSH `isi_for_array -s isi_hw_status -i`(줄 접두 '<클러스터>-<LNN>:' 이 `isi status` 의 클러스터 이름과 같을 때만 · 선형 파싱),

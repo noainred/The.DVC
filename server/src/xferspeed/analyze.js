@@ -257,7 +257,8 @@ export function heatOf(samples = [], { offsetMin = DAY_OFFSET_MIN } = {}) {
 export function seriesOf(rows = []) {
   const down = []; const up = [];
   for (const r of rows) {
-    const p = { ts: numOrNull(r.ts), mbps: Number(r.ok) === 1 ? numOrNull(r.mbps) : null, ok: Number(r.ok) === 1, kind: r.kind || null };
+    // bytes·지연은 차트 마우스 오버 표시용(v2.735.3) — 못 읽은 값은 null(0 아님).
+    const p = { ts: numOrNull(r.ts), mbps: Number(r.ok) === 1 ? numOrNull(r.mbps) : null, ok: Number(r.ok) === 1, kind: r.kind || null, bytes: numOrNull(r.bytes), latMs: latencyMsOf(r) };
     if (r.dir === 'down') down.push(p); else if (r.dir === 'up') up.push(p);
   }
   return { down, up };

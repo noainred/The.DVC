@@ -1110,12 +1110,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/waste/settings` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:934](../server/src/routes/api/toolsCapacity.js#L934) |
 | DELETE | `/tools/waste/settings/data` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:996](../server/src/routes/api/toolsCapacity.js#L996) |
 | POST | `/tools/waste/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1033](../server/src/routes/api/toolsCapacity.js#L1033) |
-| GET | `/tools/xfer-speed` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:77](../server/src/routes/api/xferSpeed.js#L77) |
-| GET | `/tools/xfer-speed/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:199](../server/src/routes/api/xferSpeed.js#L199) |
-| GET | `/tools/xfer-speed/heat` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:113](../server/src/routes/api/xferSpeed.js#L113) |
-| GET | `/tools/xfer-speed/history` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:120](../server/src/routes/api/xferSpeed.js#L120) |
-| POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:167](../server/src/routes/api/xferSpeed.js#L167) |
-| PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:185](../server/src/routes/api/xferSpeed.js#L185) |
+| GET | `/tools/xfer-speed` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:84](../server/src/routes/api/xferSpeed.js#L84) |
+| GET | `/tools/xfer-speed/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:224](../server/src/routes/api/xferSpeed.js#L224) |
+| GET | `/tools/xfer-speed/heat` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:120](../server/src/routes/api/xferSpeed.js#L120) |
+| GET | `/tools/xfer-speed/history` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:131](../server/src/routes/api/xferSpeed.js#L131) |
+| POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:185](../server/src/routes/api/xferSpeed.js#L185) |
+| PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:210](../server/src/routes/api/xferSpeed.js#L210) |
 | GET | `/top` | — | [server/src/routes/api/inventory.js:486](../server/src/routes/api/inventory.js#L486) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:312](../server/src/routes/api/toolsInfo.js#L312) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:314](../server/src/routes/api/toolsInfo.js#L314) |

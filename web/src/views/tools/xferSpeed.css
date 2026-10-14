@@ -108,8 +108,22 @@
 .xs .xs-stat { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .xs .xs-stat span:first-child { font-size: 12px; color: var(--text-dim); }
 .xs .xs-stat b { font-family: var(--mono); font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.xs .xs-chartwrap { width: 100%; min-width: 0; }
-.xs .xs-chartwrap svg { display: block; width: 100%; height: auto; }
+.xs .xs-chartwrap { width: 100%; min-width: 0; position: relative; }
+.xs .xs-chartwrap svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+/* v2.735.3 마우스 오버 표시 — 차트 위 작은 상자(오른쪽 끝 근처면 왼쪽으로 펼친다) */
+.xs .xs-tip { position: absolute; top: 8px; transform: translateX(12px); min-width: 180px; max-width: min(340px, 80vw); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: rgba(11, 18, 32, .94); box-shadow: 0 6px 18px rgba(0,0,0,.35); pointer-events: none; z-index: 2; font-size: 12px; line-height: 1.55; }
+.xs .xs-tip.left { transform: translateX(calc(-100% - 12px)); }
+.xs .xs-tip-head { font-family: var(--mono); color: var(--text); font-weight: 600; margin-bottom: 2px; white-space: nowrap; }
+.xs .xs-tip-line { display: flex; gap: 6px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.xs .xs-tip-line span:last-child { overflow-wrap: anywhere; }
+/* v2.735.3 이전 구간 스크롤 */
+.xs .xs-winscroll { margin-top: 10px; min-width: 0; }
+.xs .xs-winrow { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.xs .xs-winrow input[type=range] { flex: 1 1 160px; min-width: 0; accent-color: #3b82f6; }
+.xs .xs-btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.xs .xs-wintext { margin-top: 4px; text-align: center; font-variant-numeric: tabular-nums; }
+.xs .xs-linkbtn { border: 0; background: none; padding: 0; color: #93c5fd; font: inherit; font-size: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.xs .xs-pastbadge { margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid #a16207; color: #fbbf24; font-size: 11px; font-weight: 600; vertical-align: middle; }
 
 /* 설정 */
 .xs-set { display: flex; flex-direction: column; gap: 14px; }

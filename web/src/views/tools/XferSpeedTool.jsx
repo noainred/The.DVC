@@ -24,6 +24,7 @@ import {
   DIR_TEXT, DIR_COLOR, DIR_TEXT_COLOR, STATE_TEXT, FAIL_TEXT, BASIS_TEXT, mbpsText, logWidth, spanText, bytesText, clockText,
   vsBadge, rowReasonText, sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote,
   chartModel, statCells, PERIODS, DEFAULT_PERIOD_DAYS, SETTING_FIELDS, rangeHint, settingsPatch,
+  hoverAt, maxBackOf, windowEndOf, windowLabel, windowRangeText,
   SCHEDULE_KINDS, SCHEDULE_KIND_TEXT, WEEKDAYS, INTERVAL_PRESETS, intervalText, scheduleText, checkScheduleForm,
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
 } from './xferSpeedText.js';
@@ -54,25 +55,30 @@ function useMainData() {
   const [failedAt, setFailedAt] = useState(null);
   const runningRef = useRef(false);
   const tickRef = useRef(null);
-  const load = useCallback(async () => {
+  // 세대 번호(v2.735.3) — '새로고침' 이 진행 중인 조회 위에 새 루프를 열면 예전엔 두 루프가 각자 타이머를 걸어 폴링이 늘어났고,
+  // 늦게 온 옛 응답이 새 응답을 덮었다. 지금 세대의 응답만 반영하고 지금 세대만 타이머를 다시 건다.
+  const genRef = useRef(0);
+  const load = useCallback(async (gen) => {
     try {
       const d = await fetchJson('/tools/xfer-speed');
+      if (gen !== genRef.current) return;
       setData(d); setError(null); setFailedAt(null);
       runningRef.current = !!d?.status?.running;
     } catch (e) {
+      if (gen !== genRef.current) return;
       setError(e); setFailedAt((x) => x || Date.now());
     }
   }, []);
   useEffect(() => {
     let alive = true; let timer = null;
-    const loop = async () => {
-      if (!alive) return;
-      if (typeof document === 'undefined' || !document.hidden) await load();
-      if (alive) timer = setTimeout(loop, runningRef.current ? 4_000 : 30_000);
+    const loop = async (gen) => {
+      if (!alive || gen !== genRef.current) return;
+      if (typeof document === 'undefined' || !document.hidden) await load(gen);
+      if (alive && gen === genRef.current) timer = setTimeout(() => loop(gen), runningRef.current ? 4_000 : 30_000);
     };
-    tickRef.current = () => { if (timer) clearTimeout(timer); loop(); };
-    loop();
-    return () => { alive = false; if (timer) clearTimeout(timer); };
+    tickRef.current = () => { if (timer) clearTimeout(timer); loop(++genRef.current); };
+    loop(++genRef.current);
+    return () => { alive = false; genRef.current += 1; if (timer) clearTimeout(timer); };
   }, [load]);
   return { data, error, failedAt, refresh: () => tickRef.current?.() };
 }
@@ -93,7 +99,9 @@ function Spark({ row, now }) {
   const max = vals.length ? Math.max(...vals) : 1;
   const d = sparkPath(row.down?.spark, { from, to: now, max });
   const u = sparkPath(row.up?.spark, { from, to: now, max });
-  if (!d && !u) return <span className="xs-note">{vals.length ? '측정 1회' : '—'}</span>;
+  // 선을 그을 수 없을 때 실제 측정 횟수를 말한다(v2.735.3 — 예전엔 몇 번이든 '측정 1회' 였다).
+  const n = Math.max((row.down?.spark || []).filter((p) => p[1] != null).length, (row.up?.spark || []).filter((p) => p[1] != null).length);
+  if (!d && !u) return <span className="xs-note">{n ? `측정 ${n}회` : '—'}</span>;
   return (
     <svg width="150" height="34" viewBox="0 0 150 34" aria-label="최근 24시간 속도" role="img">
       {d ? <path d={d} fill="none" stroke={DIR_COLOR.down} strokeWidth="1.6" strokeLinejoin="round" /> : null}
@@ -116,7 +124,7 @@ function BarLine({ dir, lat }) {
   );
 }
 
-function EdgeRow({ r, now, slowPct, minEdgeVersion, onOpen }) {
+function EdgeRow({ r, now, slowPct, minEdgeVersion, onOpen, offsetMin }) {
   const st = STATE_TEXT[r.state] || STATE_TEXT['no-data'];
   const has = !!(r.down?.latest || r.up?.latest);
   const vs = vsBadge(r, slowPct);
@@ -143,12 +151,12 @@ function EdgeRow({ r, now, slowPct, minEdgeVersion, onOpen }) {
       </div>
       <Spark row={r} now={now} />
       <div><span className={`xs-badge ${vs.tone}`} title={vs.title || ''}>{vs.text}</span></div>
-      <span className="xs-age" title={r.newestTs ? clockText(r.newestTs) : ''}>{r.newestTs ? agoText(r.newestTs, now) : '—'}</span>
+      <span className="xs-age" title={r.newestTs ? clockText(r.newestTs, offsetMin) : ''}>{r.newestTs ? agoText(r.newestTs, now) : '—'}</span>
     </div>
   );
 }
 
-function Heatmap({ rows, nameOf }) {
+function Heatmap({ rows, nameOf, truncated, onReload }) {
   const [dir, setDir] = useState('down');
   const list = (rows || []).filter((h) => h.dir === dir);
   return (
@@ -160,7 +168,8 @@ function Heatmap({ rows, nameOf }) {
           <button type="button" className={dir === 'up' ? 'on' : ''} onClick={() => setDir('up')}>↑ 메인→엣지</button>
         </div>
       </div>
-      <div className="xs-note">최근 14일 · 한국 시각 · 칸 색은 그 법인 평소(기간 중앙값) 대비 — 법인끼리의 절대 속도 비교가 아닙니다</div>
+      <div className="xs-note">최근 14일 · 포탈 시각 · 칸 색은 그 법인 평소(기간 중앙값) 대비 — 법인끼리의 절대 속도 비교가 아닙니다{truncated ? ' · 측정이 많아 상한을 넘은 오래된 측정은 빼고 그렸습니다' : ''}
+        {onReload ? <> · <button type="button" className="xs-linkbtn" onClick={onReload}>새로고침</button></> : null}</div>
       {list.length ? (
         <div className="xs-heat">
           <div className="xs-heatrow hours"><span />{Array.from({ length: 24 }, (_, h) => <span key={h}>{h % 3 === 0 ? String(h).padStart(2, '0') : ''}</span>)}</div>
@@ -404,8 +413,8 @@ function Main({ onOpen }) {
 
       <div className="xs-kpis">
         <Kpi label="측정한 법인" value={measured} unit={`/ ${k.total ?? 0}곳`} sub={noData ? `${noData}곳 측정 없음·오래됨${k.excluded ? ` · 제외 ${k.excluded}곳` : ''}` : (k.excluded ? `제외 ${k.excluded}곳` : '최근 측정이 있는 법인')} />
-        <Kpi label="↓ 엣지 → 메인 중앙값" value={mbpsText(k.downMedian, { unit: false })} unit={k.downMedian == null ? '' : 'Mbps'} sub="각 법인 마지막 성공 측정의 중앙값" color={DIR_TEXT_COLOR.down} />
-        <Kpi label="↑ 메인 → 엣지 중앙값" value={mbpsText(k.upMedian, { unit: false })} unit={k.upMedian == null ? '' : 'Mbps'} sub="각 법인 마지막 성공 측정의 중앙값" color={DIR_TEXT_COLOR.up} />
+        <Kpi label="↓ 엣지 → 메인 중앙값" value={mbpsText(k.downMedian, { unit: false })} unit={k.downMedian == null ? '' : 'Mbps'} sub="마지막 측정이 성공한 법인들의 중앙값" color={DIR_TEXT_COLOR.down} />
+        <Kpi label="↑ 메인 → 엣지 중앙값" value={mbpsText(k.upMedian, { unit: false })} unit={k.upMedian == null ? '' : 'Mbps'} sub="마지막 측정이 성공한 법인들의 중앙값" color={DIR_TEXT_COLOR.up} />
         <Kpi label="가장 느린 법인" value={slowest ? mbpsText(slowest.mbps, { unit: false }) : '—'} unit={slowest ? 'Mbps' : ''} sub={slowest ? `${slowest.name} · ${DIR_TEXT[slowest.dir]}` : '측정 없음'} />
         <Kpi label="실패 · 평소보다 느림" value={`${k.fail ?? 0} · ${k.slow ?? 0}`} unit="곳" sub={`평소 = 그 법인의 7일 중앙값 · 느림 기준 ${s.slowPct}% 미만`} color={(k.fail || k.slow) ? '#fca5a5' : undefined} />
       </div>
@@ -437,18 +446,18 @@ function Main({ onOpen }) {
                   <span>평소 대비</span>
                   <span style={{ textAlign: 'right' }}>마지막 측정</span>
                 </div>
-                {rows.map((r) => <EdgeRow key={r.id} r={r} now={now} slowPct={s.slowPct} minEdgeVersion={data.minEdgeVersion} onOpen={onOpen} />)}
+                {rows.map((r) => <EdgeRow key={r.id} r={r} now={now} slowPct={s.slowPct} minEdgeVersion={data.minEdgeVersion} onOpen={onOpen} offsetMin={data.offsetMin} />)}
               </div>
             </div>
           ) : <div className="xs-note" style={{ padding: 16 }}>등록된 수집 서버(엣지)가 없습니다 — 설정 › 수집 서버에서 엣지를 등록하면 여기에 나옵니다.</div>}
           <div className="xs-foot">
-            <span>{rows.length}곳 · 오래됨 기준 {spanText(data.staleMs)} 넘게 측정 없음</span>
+            <span>{rows.length}곳 · {data.staleMs == null ? '반복 측정 일정이 없어 오래됨을 판정하지 않습니다' : `오래됨 기준 ${spanText(data.staleMs)} 넘게 측정 없음`}{data.recentTruncated ? ' · 최근 7일 측정이 상한을 넘어 오래된 측정은 평소 대비·스파크라인 계산에서 뺐습니다' : ''}</span>
             <span>Mbps = 받은 바이트 × 8 ÷ 받는 쪽에서 첫 바이트부터 마지막 바이트까지 걸린 시간</span>
           </div>
         </section>
 
         <aside className="xs-aside">
-          {heat ? <Heatmap rows={heat.rows} nameOf={nameOf} /> : heatErr ? <section className="xs-card"><h3>시간대별 속도</h3><div className="xs-note">히트맵을 불러오지 못했습니다 — {String(heatErr?.message || heatErr)}</div></section> : <section className="xs-card"><h3>시간대별 속도</h3><Loading /></section>}
+          {heat ? <Heatmap rows={heat.rows} nameOf={nameOf} truncated={!!heat.truncated} onReload={loadHeat} /> : heatErr ? <section className="xs-card"><h3>시간대별 속도</h3><div className="xs-note">히트맵을 불러오지 못했습니다 — {String(heatErr?.message || heatErr)}</div></section> : <section className="xs-card"><h3>시간대별 속도</h3><Loading /></section>}
 
           <section className="xs-card">
             <h3>최근 실패</h3>
@@ -492,16 +501,26 @@ function useWidth(ref) {
 
 function Chart({ hist }) {
   const wrap = useRef(null);
+  const svgRef = useRef(null);
   const w = useWidth(wrap);
   const h = w < 600 ? 220 : 280;
+  const [hoverPx, setHoverPx] = useState(null);
   const m = chartModel(hist, { w, h, now: Date.now() });
   if (!m) return null;
   const empty = !m.points.down && !m.points.up;
   const bd = m.baseline('down'); const bu = m.baseline('up');
+  // v2.735.3: 마우스 오버 — 화면 좌표를 viewBox 좌표로 바꿔 가장 가까운 측정을 보인다(판정·문구는 hoverAt).
+  const hv = hoverPx == null ? null : hoverAt(m, hoverPx, hist.offsetMin);
+  const onMove = (e) => {
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r || !r.width) return;
+    setHoverPx(((e.clientX - r.left) / r.width) * m.w);
+  };
+  const tipLeftPct = hv ? (hv.x / m.w) * 100 : 0;
   return (
     <div className="xs-chartwrap" ref={wrap}>
       {empty ? <div className="xs-note" style={{ padding: '30px 0', textAlign: 'center' }}>이 기간에 성공한 측정이 없습니다.</div> : (
-        <svg viewBox={`0 0 ${m.w} ${m.h}`} role="img" aria-label="전송 속도 추이">
+        <svg ref={svgRef} viewBox={`0 0 ${m.w} ${m.h}`} role="img" aria-label="전송 속도 추이" onPointerMove={onMove} onPointerLeave={() => setHoverPx(null)}>
           {m.grid.map((g) => (
             <g key={g.y}>
               <line x1={m.padL} x2={m.w - m.padR} y1={g.y} y2={g.y} stroke="#1f2a40" />
@@ -519,37 +538,102 @@ function Chart({ hist }) {
           {bu != null ? <line x1={m.padL} x2={m.w - m.padR} y1={bu} y2={bu} stroke={DIR_COLOR.up} strokeDasharray="4 4" opacity=".5" /> : null}
           {m.down ? <path d={m.down} fill="none" stroke={DIR_COLOR.down} strokeWidth="1.8" strokeLinejoin="round" /> : null}
           {m.up ? <path d={m.up} fill="none" stroke={DIR_COLOR.up} strokeWidth="1.8" strokeLinejoin="round" /> : null}
+          {/* 앞뒤 측정과 이어지지 못한 점 — 선 대신 점으로(v2.735.3) */}
+          {['down', 'up'].flatMap((dir) => (m.singles?.[dir] || []).map((p) => <circle key={`${dir}${p.x}`} cx={p.x} cy={p.y} r="2.6" fill={DIR_COLOR[dir]} />))}
           {m.fails.map((f) => <text key={`${f.dir}${f.ts}`} x={f.x} y={f.y} fill="#ef4444" fontSize="12" textAnchor="middle" fontWeight="700"><title>{`${DIR_TEXT[f.dir]} 실패 · ${clockText(f.ts, hist.offsetMin)}`}</title>✕</text>)}
+          {hv ? (
+            <g pointerEvents="none">
+              <line x1={hv.x} x2={hv.x} y1={m.padT} y2={m.h - m.padB} stroke="#8b9bb4" strokeDasharray="3 3" />
+              {hv.dots.map((d) => <circle key={d.dir} cx={d.x} cy={d.y} r="4" fill={DIR_COLOR[d.dir]} stroke="#0b1220" strokeWidth="1.5" />)}
+            </g>
+          ) : null}
+          {/* 차트 영역 전체에서 마우스를 받는다(선 위가 아니어도) — 투명 사각형 */}
+          <rect x={m.padL} y={m.padT} width={Math.max(0, m.w - m.padL - m.padR)} height={Math.max(0, m.h - m.padT - m.padB)} fill="transparent" />
         </svg>
       )}
+      {hv ? (
+        <div className={`xs-tip${tipLeftPct > 62 ? ' left' : ''}`} style={{ left: `${tipLeftPct}%` }} role="status">
+          <div className="xs-tip-head">{hv.head}</div>
+          {hv.lines.map((l) => (
+            <div key={l.dir} className="xs-tip-line">
+              <span style={{ color: DIR_TEXT_COLOR[l.dir] }}>{l.dir === 'down' ? '↓' : '↑'}</span>
+              <span style={{ color: l.ok === false ? '#fca5a5' : l.ok == null ? 'var(--text-faint)' : 'var(--text)' }}>{l.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * v2.735.3 차트 아래 '이전 구간' 스크롤 — ◀ 이전 · 슬라이더(오른쪽 끝 = 최근) · 다음 ▶ · 최신. iDRAC 통합 추이(v2.666)와 같은 모양.
+ * 기록이 없어 갈 곳이 없으면(maxBack 0) 그리지 않는다. 슬라이더는 놓을 때만 조회한다(끄는 동안 수십 번 조회하지 않게).
+ */
+function WindowScroll({ hist, days, back, dragBack, anchor, onDrag, onGo }) {
+  if (hist.days !== days) return null;
+  const a = anchor ?? hist.end;
+  const maxB = maxBackOf(hist, a);
+  if (!maxB) return null;
+  const cur = Math.min(maxB, dragBack ?? back);
+  const lbl = PERIODS.find((p) => p.days === days)?.label || `${days}일`;
+  const { end } = windowEndOf(a, cur, days, maxB);
+  return (
+    <div className="xs-winscroll">
+      <div className="xs-winrow">
+        <button type="button" className="xs-btn sm" disabled={cur >= maxB} onClick={() => onGo(cur + 1, maxB)}>◀ 이전 {lbl}</button>
+        <input type="range" min={0} max={maxB} step={1} value={maxB - cur} aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)"
+          onChange={(e) => onDrag(maxB - Number(e.target.value))}
+          onPointerUp={(e) => onGo(maxB - Number(e.currentTarget.value), maxB)}
+          onKeyUp={(e) => onGo(maxB - Number(e.currentTarget.value), maxB)} />
+        <button type="button" className="xs-btn sm" disabled={cur <= 0} onClick={() => onGo(cur - 1, maxB)}>다음 {lbl} ▶</button>
+        <button type="button" className={`xs-btn sm${cur === 0 ? ' primary' : ''}`} disabled={cur === 0} onClick={() => onGo(0, maxB)}>최신</button>
+      </div>
+      <div className="xs-note xs-wintext">
+        {windowLabel(cur, days)} · {windowRangeText(end, days, hist.offsetMin)}{cur > 0 ? ' · 과거 구간은 자동 갱신하지 않습니다' : ''}{dragBack != null ? ' · 놓으면 조회합니다' : ''}
+      </div>
     </div>
   );
 }
 
 function Detail({ agent, onBack }) {
   const [days, setDays] = useState(DEFAULT_PERIOD_DAYS);
+  // v2.735.3 '이전 구간' — back 칸 과거(0 = 최근). anchor = 스크롤을 시작할 때의 창 끝(한 번만 잡는다). dragBack = 슬라이더를 끄는 중.
+  //   법인·기간마다 따로 둔다(key) — 바꾸면 곧바로 최근 구간이다(effect 로 되돌리면 옛 back 으로 한 번 더 조회한다).
+  const key = `${agent}|${days}`;
+  const [scroll, setScroll] = useState({ key, back: 0, anchor: null });
+  const [dragBack, setDragBack] = useState(null);
+  const back = scroll.key === key ? scroll.back : 0;
+  const anchor = scroll.key === key ? scroll.anchor : null;
   const [hist, setHist] = useState(null);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState('');
   const seq = useRef(0);
+  const past = back > 0 && anchor != null;
+  const end = past ? windowEndOf(anchor, back, days).end : null;
+  // 실패한 요청의 키 — 그 구간을 못 불러왔으면 '불러오는 중' 대신 실패와 다시 시도를 보인다(v2.735.3: 과거 구간은 자동 재시도가 없다).
+  const reqKey = `${agent}|${days}|${end ?? ''}`;
+  const [errKey, setErrKey] = useState(null);
   const load = useCallback(async () => {
     const my = ++seq.current;
+    const key = `${agent}|${days}|${end ?? ''}`;
     try {
-      const d = await fetchJson('/tools/xfer-speed/history', { agent, days });
-      if (my === seq.current) { setHist(d); setErr(null); }
-    } catch (e) { if (my === seq.current) setErr(e); }
-  }, [agent, days]);
+      const d = await fetchJson('/tools/xfer-speed/history', end == null ? { agent, days } : { agent, days, end });
+      if (my === seq.current) { setHist(d); setErr(null); setErrKey(null); }
+    } catch (e) { if (my === seq.current) { setErr(e); setErrKey(key); } }
+  }, [agent, days, end]);
   useEffect(() => {
     setHist((h) => (h && h.agent?.toLowerCase() === agent.toLowerCase() ? h : null));
     let alive = true; let timer = null;
     const loop = async () => {
       if (!alive) return;
       if (typeof document === 'undefined' || !document.hidden) await load();
-      if (alive) timer = setTimeout(loop, 60_000);
+      // 과거 구간은 바뀌지 않는다 — 1분 갱신은 최근 구간만(v2.735.3).
+      if (alive && end == null) timer = setTimeout(loop, 60_000);
     };
     loop();
     return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [load, agent]);
+  }, [load, agent, end]);
   const runOne = async () => {
     setMsg('');
     try {
@@ -558,7 +642,8 @@ function Detail({ agent, onBack }) {
     } catch (e) { setMsg(e?.message || String(e)); }
   };
   const csv = async () => {
-    try { await downloadFile(`/tools/xfer-speed/export.csv?days=${Math.min(730, days)}&agent=${encodeURIComponent(agent)}`); } catch (e) { setMsg(e?.message || String(e)); }
+    // 보고 있는 구간을 내보낸다(v2.735.3 — 과거 구간이면 end).
+    try { await downloadFile(`/tools/xfer-speed/export.csv?days=${Math.min(730, days)}&agent=${encodeURIComponent(agent)}${end != null ? `&end=${end}` : ''}`); } catch (e) { setMsg(e?.message || String(e)); }
   };
   if (!hist && err) return <div className="xs"><button type="button" className="xs-back" onClick={onBack}>← 법인별 전송 속도</button><ErrorBox error={err} /></div>;
   if (!hist) return <div className="xs"><button type="button" className="xs-back" onClick={onBack}>← 법인별 전송 속도</button><Loading /></div>;
@@ -580,9 +665,12 @@ function Detail({ agent, onBack }) {
           {shown.registered ? <button type="button" className="xs-btn primary" onClick={runOne}>이 법인만 지금 측정</button> : null}
         </div>
       </div>
-      {err ? <div className="xs-banner amber">최근 조회가 실패해 직전 값을 보여 줍니다 — {String(err?.message || err)}</div> : null}
+      {err && errKey === reqKey && (hist.days !== days || (end == null ? !!hist.past : hist.end !== end))
+        ? <div className="xs-banner amber">이 구간을 불러오지 못했습니다 — {String(err?.message || err)} · <button type="button" className="xs-linkbtn" onClick={load}>다시 시도</button></div>
+        : err ? <div className="xs-banner amber">최근 조회가 실패해 직전 값을 보여 줍니다 — {String(err?.message || err)}</div> : null}
       {msg ? <div className="xs-banner">{msg}</div> : null}
-      {hist.days !== days ? <div className="xs-note">불러오는 중… (아래는 {hist.days}일 기준)</div> : null}
+      {(hist.days !== days || (end == null ? !!hist.past : hist.end !== end)) && errKey !== reqKey
+        ? <div className="xs-note">불러오는 중… (아래는 {windowRangeText(hist.end, hist.days, hist.offsetMin) || `${hist.days}일 기준`})</div> : null}
       <div className="xs-stats">
         {cells.map((c) => (
           <div key={c.label} className="xs-stat">
@@ -594,7 +682,7 @@ function Detail({ agent, onBack }) {
       </div>
       <section className="xs-card">
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-          <h3>{PERIODS.find((p) => p.days === shown.days)?.label || `${shown.days}일`} 추이</h3>
+          <h3>{PERIODS.find((p) => p.days === shown.days)?.label || `${shown.days}일`} 추이{shown.past ? <span className="xs-pastbadge">과거 구간</span> : null}</h3>
           <div className="xs-legend">
             <span><i style={{ background: DIR_COLOR.down, height: 2 }} />↓ 엣지 → 메인</span>
             <span><i style={{ background: DIR_COLOR.up, height: 2 }} />↑ 메인 → 엣지</span>
@@ -607,9 +695,18 @@ function Detail({ agent, onBack }) {
             : `${shown.rawMaxDays}일보다 긴 기간은 하루 요약(성공 측정의 하루 평균·최저·최고)으로 그립니다 — 분위수는 만들 수 없어 '—' 입니다`}
         </div>
         <Chart hist={shown} />
+        <WindowScroll hist={shown} days={days} back={back} dragBack={dragBack} anchor={anchor}
+          onDrag={setDragBack}
+          onGo={(b, maxB) => {
+            const nb = Math.max(0, Math.min(maxB, b));
+            setDragBack(null);
+            // 기준 끝은 처음 스크롤할 때의 '지금 보이는 창의 끝' 하나 — 이후 칸은 거기에 이어 붙인다.
+            setScroll(nb === 0 ? { key, back: 0, anchor: null }
+              : { key, back: nb, anchor: anchor ?? (Number.isFinite(shown.end) && !shown.past ? shown.end : Date.now()) });
+          }} />
       </section>
       <section className="xs-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="xs-sechead"><h3>측정 기록</h3><span className="xs-note">최근 {shown.log.length}건(14일 안) · 시각은 포탈 시각</span></div>
+        <div className="xs-sechead"><h3>측정 기록</h3><span className="xs-note">{shown.past ? `${clockText(shown.end, shown.offsetMin)} 이전` : '최근'} {shown.log.length}건(14일 안) · 시각은 포탈 시각</span></div>
         {shown.log.length ? (
           <STable minWidth={760}>
             <thead><tr><th>시각</th><th>방향</th><th>속도</th><th title={LATENCY_NOTE}>지연</th><th>전송</th><th>전체</th><th>바이트</th><th>결과</th></tr></thead>
@@ -628,7 +725,7 @@ function Detail({ agent, onBack }) {
               ))}
             </tbody>
           </STable>
-        ) : <div className="xs-note" style={{ padding: 16 }}>최근 14일 측정 기록이 없습니다.</div>}
+        ) : <div className="xs-note" style={{ padding: 16 }}>{shown.past ? `${clockText(shown.end, shown.offsetMin)} 이전 14일` : '최근 14일'} 측정 기록이 없습니다.</div>}
         {shown.log.length ? <div className="xs-note" style={{ padding: '8px 16px 0', whiteSpace: 'normal' }}>{LATENCY_NOTE}</div> : null}
         {shown.log.some((l) => l.basis === 'sender-total') ? <div className="xs-note" style={{ padding: '8px 16px 12px' }}>* {BASIS_TEXT['sender-total']}</div> : null}
       </section>

@@ -45,6 +45,7 @@ export const FAIL_TEXT = Object.freeze({
   timeout: { label: '시한 초과', fix: '회선이 시한 안에 다 보내지 못했습니다. 회선 상태를 보거나 설정에서 시한을 늘리세요.' },
   unreachable: { label: '연결 실패', fix: '메인에서 이 엣지의 포탈 포트에 닿지 않습니다. 엣지 서비스·방화벽·경로를 확인하세요.' },
   auth: { label: '토큰 거부', fix: '중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 이 다릅니다. 포탈 점검 › 토큰 점검으로 대조하세요.' },
+  'collector-off': { label: '엣지 수집 경로 꺼짐', fix: '그 엣지의 portal.env 에 COLLECTOR_TOKEN 이 없어 수집 경로(/api/collector) 전체가 꺼져 있습니다. 토큰을 넣고 중앙 수집 서버 등록값과 맞추세요.' },
   disabled: { label: '엣지에서 꺼짐', fix: '그 엣지의 portal.env 에서 XFER_TEST_ENABLED=false 로 측정을 껐습니다. 의도한 것이면 설정에서 이 법인을 빼세요.' },
   'old-version': { label: '엣지 구버전', fix: '그 엣지에 측정 경로가 없습니다. 엣지를 업그레이드해야 잴 수 있습니다(다시 눌러도 같습니다).' },
   busy: { label: '엣지 바쁨', fix: '엣지가 다른 측정을 처리 중이었습니다. 다음 주기에 다시 잽니다.' },
@@ -162,9 +163,11 @@ export function sortRows(rows = [], mode = 'slow') {
  * 스파크라인 경로 — 점([ts, mbps|null])을 시간 축에 놓고, 실패(null)·간격이 `gapMs` 를 넘는 곳은 선을 끊는다.
  * 점이 1개뿐이면 선을 만들지 않는다(추세가 있는 것처럼 보인다). 세로 축은 그 행의 두 방향 최대에 맞춘다.
  */
-export function sparkPath(points = [], { w = 150, h = 34, from, to, max, gapMs = 90 * 60_000, pad = 2 } = {}) {
+export function sparkPath(points = [], { w = 150, h = 34, from, to, max, gapMs = null, pad = 2 } = {}) {
   const pts = (points || []).filter((p) => Array.isArray(p) && numOrNull(p[0]) != null);
   if (!pts.length || from == null || to == null || to <= from) return '';
+  // 끊는 간격 = 데이터의 측정 주기 × 2.5(하한 90분) — 30분 주기를 박아 두면 2시간 주기에서 선이 사라졌다(v2.735.3).
+  if (gapMs == null) gapMs = Math.max(90 * 60_000, (cadenceOf(pts.map((p) => ({ ts: numOrNull(p[0]) }))) ?? 0) * 2.5);
   const top = numOrNull(max) && max > 0 ? max * 1.1 : Math.max(1, ...pts.map((p) => numOrNull(p[1]) || 0)) * 1.1;
   let d = ''; let prevTs = null; let run = 0; let open = false;
   const segs = [];
@@ -266,12 +269,27 @@ export function lastRunNote(last) {
 }
 
 /** 차트 모델(상세) — 원시(raw) 또는 일 요약(daily). 실패는 ✕ 표시, 간격이 크면 선을 끊는다. */
+/** 연속한 점 간격의 중앙값(양수만, ms) — 측정 주기를 데이터에서 읽는다. 점이 2개 미만이면 null. */
+export function cadenceOf(list = []) {
+  const ts = (list || []).map((p) => numOrNull(p?.ts)).filter((v) => v != null).sort((a, b) => a - b);
+  const ds = [];
+  for (let i = 1; i < ts.length; i += 1) { const d = ts[i] - ts[i - 1]; if (d > 0) ds.push(d); }
+  if (!ds.length) return null;
+  ds.sort((a, b) => a - b);
+  return ds[Math.floor((ds.length - 1) / 2)];   // 아래쪽 중앙값 — 빠진 측정이 만든 긴 간격이 주기로 읽히지 않게
+}
+
 export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT = 12, padB = 26, now = Date.now() } = {}) {
   if (!hist?.series) return null;
   const daily = hist.source === 'daily';
   const span = Math.max(1, numOrNull(hist.days) ?? 7) * 86_400_000;
-  const to = now; const from = now - span;
-  const pt = (p) => (daily ? { ts: Date.parse(`${p.day}T12:00:00Z`), v: numOrNull(p.avg), lo: numOrNull(p.min), hi: numOrNull(p.max), fail: (numOrNull(p.n) ?? 0) > (numOrNull(p.okN) ?? 0) } : { ts: numOrNull(p.ts), v: numOrNull(p.mbps), fail: !p.ok });
+  // 축 = 서버가 준 창(v2.735.3 '이전 구간' — end 가 있으면 그 창). 구버전 응답(end 없음)은 예전처럼 지금 기준.
+  const to = numOrNull(hist.end) ?? now; const from = to - span;
+  const offMs = (numOrNull(hist.offsetMin) ?? 540) * 60_000;
+  // 일 요약 점은 그날의 포탈 시각 정오(v2.735.3 — 예전 'T12:00Z' 는 KST 21:00 이라 축 끝을 넘어 찍혔다).
+  const pt = (p) => (daily
+    ? { ts: Date.parse(`${p.day}T12:00:00Z`) - offMs, day: p.day, v: numOrNull(p.avg), lo: numOrNull(p.min), hi: numOrNull(p.max), n: numOrNull(p.n), okN: numOrNull(p.okN), fail: (numOrNull(p.n) ?? 0) > (numOrNull(p.okN) ?? 0) }
+    : { ts: numOrNull(p.ts), v: numOrNull(p.mbps), fail: !p.ok, kind: p.kind || null, bytes: numOrNull(p.bytes), latMs: numOrNull(p.latMs) });
   const down = (hist.series.down || []).map(pt).filter((p) => p.ts != null);
   const up = (hist.series.up || []).map(pt).filter((p) => p.ts != null);
   const vals = [...down, ...up].flatMap((p) => [p.v, p.hi]).filter((v) => v != null);
@@ -279,14 +297,20 @@ export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT
   const iw = w - padL - padR; const ih = h - padT - padB;
   const x = (ts) => padL + ((ts - from) / (to - from)) * iw;
   const y = (v) => padT + ih - (v / top) * ih;
-  const gapMs = daily ? 1.5 * 86_400_000 : 2.5 * 30 * 60_000;
-  const path = (list) => {
-    let d = ''; let prev = null; let open = false;
+  // 선을 끊는 간격 — 원시는 데이터의 측정 주기 × 2.5(하한 75분). 30분을 박아 두면 2시간·하루 주기에서 점이 하나도 이어지지 않아
+  // 빈 차트가 됐다(v2.735.3). 일 요약은 1.5일. 이어지지 못한 점(앞뒤 모두 끊김)은 따로 점으로 그린다(singles).
+  const cad = cadenceOf(down) ?? cadenceOf(up);
+  const gapMs = daily ? 1.5 * 86_400_000 : Math.max(75 * 60_000, (cad ?? 0) * 2.5);
+  const singles = { down: [], up: [] };
+  const path = (list, dir) => {
+    let d = ''; let prev = null; let run = [];
+    const close = () => { if (run.length === 1) singles[dir].push({ x: x(run[0].ts), y: y(run[0].v) }); run = []; };
     for (const p of list) {
-      if (p.v == null || (prev != null && p.ts - prev > gapMs)) open = false;
-      if (p.v != null) { d += `${open ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.v).toFixed(1)} `; open = true; }
+      if (p.v == null || (prev != null && p.ts - prev > gapMs)) close();
+      if (p.v != null) { d += `${run.length ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.v).toFixed(1)} `; run.push(p); }
       prev = p.ts;
     }
+    close();
     return d.trim();
   };
   const fails = (list, dir) => list.filter((p) => p.fail && !daily).map((p) => ({ x: x(p.ts), y: padT + 10, dir, ts: p.ts }));
@@ -297,8 +321,10 @@ export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT
   });
   const dayMs = 86_400_000;
   const stepDays = span <= 2 * dayMs ? 0.25 : span <= 8 * dayMs ? 1 : span <= 32 * dayMs ? 7 : span <= 200 * dayMs ? 30 : 90;
+  // 눈금은 포탈 시각 경계(v2.735.3 — UTC 자정에 맞추면 KST 09:00 이 '날짜 눈금' 이 됐다).
+  const stepMs = stepDays * dayMs;
   const xt = [];
-  for (let t = Math.ceil(from / (stepDays * dayMs)) * stepDays * dayMs; t <= to; t += stepDays * dayMs) xt.push({ x: x(t), ts: t });
+  for (let t = Math.ceil((from + offMs) / stepMs) * stepMs - offMs; t <= to; t += stepMs) xt.push({ x: x(t), ts: t });
   const band = daily ? ['down', 'up'].map((dir) => {
     const list = dir === 'down' ? down : up;
     const pts = list.filter((p) => p.lo != null && p.hi != null);
@@ -308,8 +334,9 @@ export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT
     return { dir, d: `M${upper.join(' L')} L${lower.join(' L')} Z` };
   }).filter(Boolean) : [];
   return {
-    w, h, padL, padR, padT, padB, from, to, daily,
-    down: path(down), up: path(up), band,
+    w, h, padL, padR, padT, padB, from, to, daily, gapMs,
+    pts: { down: down.map((p) => ({ ...p, x: x(p.ts), y: p.v == null ? null : y(p.v) })), up: up.map((p) => ({ ...p, x: x(p.ts), y: p.v == null ? null : y(p.v) })) },
+    down: path(down, 'down'), up: path(up, 'up'), singles, band,
     fails: [...fails(down, 'down'), ...fails(up, 'up')],
     grid, xticks: xt, points: { down: down.filter((p) => p.v != null).length, up: up.filter((p) => p.v != null).length },
     baseline: (dir) => {
@@ -317,6 +344,91 @@ export function chartModel(hist, { w = 1000, h = 260, padL = 52, padR = 12, padT
       return m == null ? null : y(m);
     },
   };
+}
+
+/**
+ * 차트 마우스 오버(v2.735.3 사용자 요청 "마우스를 차트에 오버하면 시간과 전송량"). 순수 — 화면 좌표 px(차트 viewBox 단위) → 표시할 내용.
+ * 방향마다 그 시각에 가장 가까운 측정 하나를 고른다(허용 거리 = 선을 끊는 간격의 절반 — 측정이 없던 구간에서는 아무것도 고르지 않는다).
+ * 두 방향은 같은 회차라도 몇 초 차이로 잰다 — 머리 시각은 더 가까운 쪽이고, 다른 쪽 시각이 1분 넘게 다르면 그 줄에 따로 적는다.
+ * 실패는 '실패 — 사유', 일 요약은 '평균 (최저 · 최고) · 성공 n/N'. 값이 없으면 지어내지 않는다.
+ */
+const PAIR_MS = 15 * 60_000;
+export function hoverAt(m, px, offsetMin = 540) {
+  if (!m?.pts) return null;
+  const iw = m.w - m.padL - m.padR;
+  if (!(iw > 0) || !Number.isFinite(px) || px < 0 || px > m.w) return null;
+  // 좌우 여백(축 글자 자리)에 있으면 축 끝으로 본다 — 좁은 화면에서 여백이 차트의 몇 % 라 끝 점을 고르기 어려웠다(v2.735.3 400px 확인).
+  const cx = Math.min(m.w - m.padR, Math.max(m.padL, px));
+  const ts = m.from + ((cx - m.padL) / iw) * (m.to - m.from);
+  const tol = m.gapMs / 2;
+  const near = (list, at, lim = tol) => {
+    let best = null;
+    for (const p of list || []) {
+      const d = Math.abs(p.ts - at);
+      if (d <= lim && (!best || d < best.d)) best = { p, d };
+    }
+    return best;
+  };
+  const nd0 = near(m.pts.down, ts); const nu0 = near(m.pts.up, ts);
+  if (!nd0 && !nu0) return null;
+  const main = !nu0 || (nd0 && nd0.d <= nu0.d) ? nd0.p : nu0.p;
+  // 다른 방향은 '같은 회차' 만 — 한 회차의 ↓·↑ 는 몇 초~몇 분 차이로 잰다. 멀리 떨어진 다른 회차를 같은 시각인 척 짝짓지 않는다.
+  const pairTol = m.daily ? tol : PAIR_MS;
+  const nd = main === nd0?.p ? nd0 : near(m.pts.down, main.ts, pairTol);
+  const nu = main === nu0?.p ? nu0 : near(m.pts.up, main.ts, pairTol);
+  const line = (dir, hit) => {
+    if (!hit) return { dir, text: '측정 없음', ok: null };
+    const p = hit.p;
+    if (m.daily) {
+      if (p.v == null) return { dir, text: `성공 측정 없음${p.n ? ` · 실패 ${p.n}회` : ''}`, ok: false };
+      const range = p.lo != null && p.hi != null ? ` (최저 ${mbpsText(p.lo, { unit: false })} · 최고 ${mbpsText(p.hi, { unit: false })})` : '';
+      return { dir, text: `평균 ${mbpsText(p.v)}${range} · 성공 ${countText(p.okN)}/${countText(p.n)}`, ok: true };
+    }
+    const at = Math.abs(p.ts - main.ts) >= 60_000 ? ` · ${clockText(p.ts, offsetMin, { date: false })}` : '';
+    if (p.fail) return { dir, text: `실패 — ${FAIL_TEXT[p.kind]?.label || '사유 미상'}${at}`, ok: false };
+    const extra = [p.bytes != null ? bytesText(p.bytes) : '', p.latMs != null ? `지연 ${p.latMs}ms` : ''].filter(Boolean).join(' · ');
+    return { dir, text: `${mbpsText(p.v)}${extra ? ` · ${extra}` : ''}${at}`, ok: true };
+  };
+  return {
+    x: main.x, ts: main.ts,
+    head: m.daily ? `${main.day || clockText(main.ts, offsetMin).slice(0, 10)} 하루 요약` : clockText(main.ts, offsetMin),
+    lines: [line('down', nd), line('up', nu)],
+    dots: [nd, nu].filter((h) => h && h.p.y != null).map((h) => ({ dir: h.p === nd?.p ? 'down' : 'up', x: h.p.x, y: h.p.y })),
+  };
+}
+
+/*
+ * '이전 구간' 보기(v2.735.3 사용자 요청 "각 시간 단위의 이전 단위를 볼 수 있는 기능" — iDRAC 통합 추이(v2.666)와 같은 모양).
+ * 같은 길이(days)의 창을 back 칸만큼 과거로 옮긴다. 기준 끝(anchor)은 스크롤을 시작할 때 한 번 잡는다 — 매번 지금으로 다시 잡으면
+ * 1분 갱신 사이에 창이 밀려 같은 칸이 다른 구간이 된다. back=0 은 예전 그대로 '최근 구간'(1분마다 갱신)이다.
+ */
+/** 몇 칸까지 과거로 갈 수 있나 — 그 보기가 읽는 표(원시 / 일 요약)의 가장 오래된 기록이 들어가는 칸까지. 기록이 없으면 0(스크롤을 숨긴다). */
+export function maxBackOf(hist, anchorEnd) {
+  const days = numOrNull(hist?.days); const end = numOrNull(anchorEnd);
+  if (!(days > 0) || end == null) return 0;
+  const span = days * 86_400_000;
+  const off = numOrNull(hist?.offsetMin) ?? 540;
+  const raw = days <= (numOrNull(hist?.rawMaxDays) ?? 31);
+  const oldest = raw ? numOrNull(hist?.oldest?.sampleTs)
+    : (typeof hist?.oldest?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hist.oldest.day) ? Date.parse(`${hist.oldest.day}T00:00:00Z`) - off * 60_000 : null);
+  if (oldest == null || !(end > oldest)) return 0;
+  return Math.max(0, Math.min(Math.floor(3650 / days), Math.ceil((end - oldest) / span) - 1));
+}
+/** back 칸 과거 창의 끝(ms) — back 은 [0, maxBack] 로 자른다. */
+export function windowEndOf(anchorEnd, back, days, maxBack = Infinity) {
+  const b = Math.max(0, Math.min(Number.isFinite(maxBack) ? maxBack : Infinity, Math.floor(Number(back) || 0)));
+  return { end: Number(anchorEnd) - b * days * 86_400_000, back: b };
+}
+/** 스크롤 위치 문구 — '최근 구간' 또는 'N칸 전 (단위)'. */
+export function windowLabel(back, days) {
+  if (!back) return '최근 구간';
+  const lbl = PERIODS.find((p) => p.days === days)?.label || `${days}일`;
+  return `${Number(back).toLocaleString()}칸 전 (${lbl} 단위)`;
+}
+/** 창 시각 범위 문구 — 시작 ~ 끝(포탈 시각). */
+export function windowRangeText(end, days, offsetMin = 540) {
+  const e = numOrNull(end); if (e == null || !(days > 0)) return '';
+  return `${clockText(e - days * 86_400_000, offsetMin)} ~ ${clockText(e, offsetMin)}`;
 }
 
 /** '지연' 칸 설명 — 방향마다 재는 방법이 다르다(서버 `analyze.latencyMsOf` 와 같은 정의). */

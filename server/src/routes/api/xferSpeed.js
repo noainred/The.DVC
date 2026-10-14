@@ -25,7 +25,7 @@ import { fileStamp, localStamp, dayKey, DAY_OFFSET_MIN } from '../../util/dayKey
 import { numOrNull } from '../../util/numOrNull.js';
 import { loadXferSpeedSettings, saveXferSpeedSettings, xferSpeedEnabled, xferSettingsLoadError, DEFAULTS, RANGES } from '../../xferspeed/settings.js';
 import { xferSpeedStatus, xferTargets, startXferRun } from '../../xferspeed/poller.js';
-import { latestAll, samplesSince, recentFailures, dailyOf, exportRows, dbStatus } from '../../xferspeed/db.js';
+import { latestAll, samplesSince, recentFailures, dailyOf, oldestOf, exportRows, dbStatus } from '../../xferspeed/db.js';
 import { edgeRows, kpisOf, trafficOf, heatOf, seriesOf, dailySeriesOf, statsOf, staleMsOf, latencyMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
 import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js';
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
@@ -64,6 +64,13 @@ async function resolveAgent(name) {
   for (const r of await latestAll()) if (t(r.agent).toLowerCase() === k) return { id: t(r.agent), col: null };
   return null;
 }
+
+/** '지금 측정' 을 시작하지 못한 대상의 사유 — poller.xferTargets 의 reason 코드와 1:1. */
+const RUN_SKIP_TEXT = Object.freeze({
+  'disabled-central': '설정 › 수집 서버에서 이 엣지가 꺼져 있습니다',
+  'no-url': '수집 서버에 URL 이 없습니다',
+  excluded: '전송 속도 설정에서 측정 대상에서 뺐습니다',
+});
 
 const daysArg = (v, def, max) => {
   const n = numOrNull(v);
@@ -116,22 +123,30 @@ api.get('/tools/xfer-speed/heat', adminOnly, fullScopeOnly, async (req, res) => 
   res.json({ ok: true, days, offsetMin: DAY_OFFSET_MIN, rows: heatOf(r.rows), truncated: r.truncated });
 });
 
-/** 한 엣지의 추이 — 31일 이하는 원시(30분 1점), 넘으면 일 요약. 측정 기록(최근 40건)은 언제나 원시. */
+/**
+ * 한 엣지의 추이 — 31일 이하는 원시(30분 1점), 넘으면 일 요약. 측정 기록(최근 40건)은 언제나 원시.
+ * v2.735.3 '이전 구간' 보기: `end`(ms)를 주면 [end − days, end] 창을 준다(지금보다 뒤는 지금으로 자른다). 없으면 예전처럼 '지금까지'.
+ * 일 요약은 창 시작일을 빼고 끝 날까지(`days` 개 날짜) — 이웃한 두 창이 경계 날을 두 번 그리지 않게.
+ */
 api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) => {
   const a = await resolveAgent(req.query.agent);
   if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
   const days = daysArg(req.query.days, 7, HISTORY_MAX_DAYS);
   const now = Date.now();
-  const since = now - days * DAY;
+  const wantEnd = numOrNull(req.query.end);
+  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
+  const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 예전처럼 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
+  const until = past ? end : null;
+  const since = end - days * DAY;
   let source; let series; let stats; let truncated = false;
   if (days <= RAW_MAX_DAYS) {
-    const r = await samplesSince(since, { agent: a.id, limit: 100_000 });
+    const r = await samplesSince(since, { agent: a.id, limit: 100_000, until });
     truncated = r.truncated;
     source = 'raw';
     series = seriesOf(r.rows);
     stats = { down: statsOf(r.rows.filter((x) => x.dir === 'down')), up: statsOf(r.rows.filter((x) => x.dir === 'up')) };
   } else {
-    const d = await dailyOf(a.id, dayKey(since));
+    const d = await dailyOf(a.id, dayKey(since + DAY), past ? dayKey(end) : '');
     source = 'daily';
     series = dailySeriesOf(d);
     const agg = (dir) => {
@@ -150,7 +165,7 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
     };
     stats = { down: agg('down'), up: agg('up') };
   }
-  const logR = await samplesSince(now - 14 * DAY, { agent: a.id, limit: 100_000 });
+  const logR = await samplesSince(end - 14 * DAY, { agent: a.id, limit: 100_000, until });
   const log = logR.rows.slice(-40).reverse().map((x) => ({
     ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
     ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
@@ -160,6 +175,9 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
   res.json({
     ok: true, agent: a.id, name: t(col?.name) || a.id, datacenter: t(col?.datacenter), origin: col ? originOf(col) : null, registered: !!col,
     days, source, rawMaxDays: RAW_MAX_DAYS, series, stats, log, truncated, offsetMin: DAY_OFFSET_MIN,
+    start: since, end, now, past,
+    oldest: await oldestOf(a.id),
+    retention: (({ sampleRetentionDays, dailyRetentionDays }) => ({ sampleDays: numOrNull(sampleRetentionDays), dailyDays: numOrNull(dailyRetentionDays) }))(loadXferSpeedSettings()),
   });
 });
 
@@ -171,6 +189,13 @@ api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, async (req, res) => 
     const a = await resolveAgent(want);
     if (!a?.col) return res.status(404).json({ ok: false, reason: '수집 서버 등록부에 없는 엣지입니다.' });
     only = a.id;
+  }
+  // v2.735.3: 잴 엣지가 0곳이면 시작하지 않고 이유를 말한다 — 예전엔 202 + '1분 안에 나옵니다' 라고 해 놓고 아무것도 나오지 않았다.
+  const { targets, skipped } = xferTargets(loadCollectors(), loadXferSpeedSettings(), { only });
+  if (!targets.length) {
+    const why = skipped.map((x) => RUN_SKIP_TEXT[x.reason] || x.reason);
+    return res.status(409).json({ ok: false, noTargets: true, skipped: skipped.slice(0, 20),
+      reason: only ? `이 엣지는 지금 잴 수 없습니다 — ${why[0] || '대상이 아닙니다'}.` : `잴 엣지가 없습니다${why.length ? ` — ${[...new Set(why)].join(' · ')}` : ' — 설정 › 수집 서버에 엣지를 등록하세요'}.` });
   }
   const r = startXferRun({ only });
   if (!r.ok) {
@@ -204,7 +229,11 @@ api.get('/tools/xfer-speed/export.csv', adminOnly, fullScopeOnly, csvPerm, async
     if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
     agent = a.id;
   }
-  const r = await exportRows(Date.now() - days * DAY, { agent });
+  // v2.735.3: 상세가 '이전 구간' 을 보고 있으면 그 창을 내보낸다(end — 지금보다 뒤는 지금).
+  const now = Date.now();
+  const wantEnd = numOrNull(req.query.end);
+  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
+  const r = await exportRows(end - days * DAY, { agent, until: end < now ? end : null });
   const head = ['시각(포탈)', '엣지', '방향', '결과', '속도(Mbps)', '바이트', '전송(ms)', '전체(ms)', '지연(ms)', '계산 기준', '실패 종류', '사유', '실행'];
   const lines = [CSV_BOM + csvLine(head)];
   for (const x of r.rows) {
@@ -214,7 +243,7 @@ api.get('/tools/xfer-speed/export.csv', adminOnly, fullScopeOnly, csvPerm, async
       x.basis || '', x.kind || '', x.err || '', x.trig || '',
     ]));
   }
-  if (r.truncated) lines.push(csvLine([`(상한 ${r.rows.length}행에서 잘랐습니다 — 기간을 줄이세요)`]));
+  if (r.truncated) lines.push(csvLine([`(상한 ${r.rows.length}행 — 가장 최근 행만 담았고 더 오래된 행은 뺐습니다. 기간을 줄이세요)`]));
   logAudit({ user: req.user?.username, action: 'xfer-speed.csv', target: agent || '(전체)', detail: `${days}일 ${r.rows.length}행${r.truncated ? ' (잘림)' : ''}`, ip: req.ip });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="xfer-speed-${fileStamp()}.csv"`);
