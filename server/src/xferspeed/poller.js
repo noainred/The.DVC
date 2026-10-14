@@ -75,7 +75,21 @@ let running = false;
 let _last = null;
 let _progress = null;
 let _timer = null;
-let _tick = 0;
+
+/*
+ * 보존 정리 — 시간 기준(v2.735.3). 예전엔 '측정 12회마다' 라 하루 1회 예약이면 12일마다, 자동 측정을 끄면 영영 돌지 않았다.
+ * 30초 틱에서 6시간마다 — 첫 틱은 기준만 잡고 정리하지 않는다(v2.453 — 보존일을 줄이고 재시작한 순간 차액을 한 번에 지우지 않게).
+ * 측정이 꺼져 있어도 돈다(쌓인 이력의 보존일은 설정대로 지켜야 한다). 기다리지 않는다(청크 정리 — db.pruneXferSpeed).
+ */
+export const PRUNE_EVERY_MS = 6 * 3_600_000;
+let _lastPruneAt = null;
+function maybePrune(s, now) {
+  if (_lastPruneAt == null) { _lastPruneAt = now; return; }
+  if (now - _lastPruneAt < PRUNE_EVERY_MS) return;
+  _lastPruneAt = now;
+  pruneXferSpeed({ sampleDays: s.sampleRetentionDays, dailyDays: s.dailyRetentionDays })
+    .catch((e) => console.warn(`[xferspeed] 보존 정리 실패: ${String(e?.message || e).slice(0, 200)}`));
+}
 let _lastRunAt = null;          // 마지막 실행 시작(간격 판정) — 첫 틱에 DB 의 마지막 측정 시각으로 채운다
 let _lastRunKnown = false;
 const _spans = [];              // 최근 실행 구간 { start, end } — 놓친 예약이 '측정이 길어져서' 인지 판단
@@ -189,7 +203,6 @@ export async function runXferCycle({ trigger = 'timer', only = '', scheduleIds =
     });
     if (notTried.length) console.warn(`[xferspeed] 주기 예산(${Math.round(budgetMs / 60_000)}분)을 넘겨 ${notTried.length}곳은 이번 주기에 재지 못했습니다 — 다음 주기에 먼저 잽니다: ${notTried.slice(0, 10).join(', ')}${notTried.length > 10 ? ' …' : ''}`);
     if (dbErrors) console.warn(`[xferspeed] 측정 ${dbErrors}건을 DB 에 쓰지 못했습니다: ${lastDbError}`);
-    if ((++_tick % 12) === 0) await pruneXferSpeed({ sampleDays: s.sampleRetentionDays, dailyDays: s.dailyRetentionDays });
     _last = {
       at: startedAt, finishedAt: Date.now(), ms: Date.now() - startedAt, trigger, only: t(only) || null,
       ...(scheduleIds.length ? { scheduleIds: [...scheduleIds] } : {}),
@@ -223,6 +236,7 @@ async function lastMeasuredAt() {
 export async function tickXferSchedule({ now = Date.now() } = {}) {
   if (isEdgeNode()) return { skipped: 'edge-node' };
   const s = loadXferSpeedSettings();
+  maybePrune(s, now);
   const enabled = xferSpeedEnabled(s);
   if (!_lastRunKnown) { _lastRunAt = await lastMeasuredAt(); _lastRunKnown = true; }
   if (running) return { skipped: 'running' };
@@ -289,4 +303,4 @@ export function startXferSpeedPoller() {
 }
 
 export function stopXferSpeedPoller() { _timer?.stop?.(); _timer = null; }
-export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _tick = 0; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; }
+export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _lastPruneAt = null; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; }

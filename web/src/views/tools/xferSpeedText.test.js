@@ -7,6 +7,7 @@ import {
   sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote, chartModel, statCells, settingsPatch, SETTING_FIELDS, LATENCY_NOTE,
   intervalText, scheduleText, checkScheduleForm, scheduleForSave, newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText,
   planSummary, countText, MISSED_TEXT, INTERVAL_PRESETS, PERIODS, DEFAULT_PERIOD_DAYS,
+  hoverAt, maxBackOf, windowEndOf, windowLabel, windowRangeText, cadenceOf,
 } from './xferSpeedText.js';
 
 const HOUR = 3_600_000;
@@ -139,6 +140,171 @@ describe('xferSpeedText — 기본 기간(v2.735.2)', () => {
     const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
     expect(src).toMatch(/useState\(DEFAULT_PERIOD_DAYS\)/);
     expect(src).not.toMatch(/const \[days, setDays\] = useState\(\d+\)/);
+  });
+});
+
+describe('xferSpeedText — 이전 구간 보기(v2.735.3)', () => {
+  const DAY = 24 * HOUR;
+  // 정시에서 떨어뜨린 고정 시각(KST 2026-10-14 13:30).
+  const END = Date.UTC(2026, 9, 14, 4, 30);
+  it('windowEndOf — back 칸만큼 같은 길이로 과거, 범위로 자른다', () => {
+    expect(windowEndOf(END, 0, 1).end).toBe(END);
+    expect(windowEndOf(END, 3, 1).end).toBe(END - 3 * DAY);
+    expect(windowEndOf(END, 2, 7).end).toBe(END - 14 * DAY);
+    expect(windowEndOf(END, 9, 1, 4)).toEqual({ end: END - 4 * DAY, back: 4 });
+    expect(windowEndOf(END, -2, 1).back).toBe(0);
+    expect(windowEndOf(END, 'x', 1).back).toBe(0);
+  });
+  it('maxBackOf — 원시 보기는 가장 오래된 원시 표본, 일 요약 보기는 가장 오래된 날까지', () => {
+    const hist = { days: 1, rawMaxDays: 31, offsetMin: 540, oldest: { sampleTs: END - 2.5 * DAY, day: '2026-01-01' } };
+    // 창 끝 − 0.5일 이 표본이 들어가는 마지막 칸 = 2칸 전([END−3d, END−2d])
+    expect(maxBackOf(hist, END)).toBe(2);
+    expect(maxBackOf({ ...hist, oldest: { sampleTs: END - 0.5 * DAY } }, END)).toBe(0, '첫 창 안에만 기록이 있으면 갈 곳이 없다');
+    expect(maxBackOf({ ...hist, oldest: { sampleTs: null } }, END)).toBe(0);
+    expect(maxBackOf({ ...hist, oldest: null }, END)).toBe(0);
+    expect(maxBackOf({ ...hist, oldest: { sampleTs: END + DAY } }, END)).toBe(0);
+    // 90일 보기는 일 요약 — 2026-01-01(KST 자정) 까지
+    const d90 = { days: 90, rawMaxDays: 31, offsetMin: 540, oldest: { sampleTs: END - DAY, day: '2026-01-01' } };
+    const oldMs = Date.parse('2026-01-01T00:00:00Z') - 540 * 60_000;
+    expect(maxBackOf(d90, END)).toBe(Math.ceil((END - oldMs) / (90 * DAY)) - 1);
+    expect(maxBackOf({ ...d90, oldest: { day: '2026-1-1' } }, END)).toBe(0, '형식이 틀린 날짜는 기록 없음으로');
+    expect(maxBackOf({ days: 1, oldest: { sampleTs: END - 100000 * DAY } }, END)).toBe(3650, '상한');
+  });
+  it('windowLabel · windowRangeText', () => {
+    expect(windowLabel(0, 1)).toBe('최근 구간');
+    expect(windowLabel(3, 1)).toBe('3칸 전 (24시간 단위)');
+    expect(windowLabel(2, 7)).toBe('2칸 전 (7일 단위)');
+    expect(windowRangeText(END, 1, 540)).toBe(`${clockText(END - DAY, 540)} ~ ${clockText(END, 540)}`);
+    expect(windowRangeText(null, 1)).toBe('');
+  });
+  it('chartModel — 축은 서버가 준 창(end)을 따른다', () => {
+    const hist = { days: 1, end: END - 5 * DAY, source: 'raw', series: { down: [{ ts: END - 5.5 * DAY, mbps: 20, ok: true }], up: [] }, stats: {} };
+    const m = chartModel(hist, { w: 1000, h: 260, now: END });
+    expect(m.to).toBe(END - 5 * DAY);
+    expect(m.from).toBe(END - 6 * DAY);
+    expect(m.pts.down[0].x).toBeCloseTo(m.padL + (m.w - m.padL - m.padR) / 2, 0);
+    const legacy = chartModel({ ...hist, end: undefined }, { now: END });
+    expect(legacy.to).toBe(END, 'end 가 없는 구버전 응답은 지금 기준');
+  });
+});
+
+describe('xferSpeedText — 차트 마우스 오버(v2.735.3)', () => {
+  const END = Date.UTC(2026, 9, 14, 4, 30);
+  const hist = {
+    days: 1, end: END, source: 'raw', offsetMin: 540, stats: {},
+    series: {
+      down: [
+        { ts: END - 10 * HOUR, mbps: 28.8, ok: true, bytes: 10_485_760, latMs: 449 },
+        { ts: END - 4 * HOUR, mbps: null, ok: false, kind: 'timeout', bytes: null, latMs: null },
+      ],
+      up: [{ ts: END - 10 * HOUR + 30_000, mbps: 23.1, ok: true, bytes: 10_485_760, latMs: 246 }],
+    },
+  };
+  const m = chartModel(hist, { w: 1000, h: 260, now: END });
+  const pxOf = (ts) => m.padL + ((ts - m.from) / (m.to - m.from)) * (m.w - m.padL - m.padR);
+  it('가장 가까운 측정 — 시각·두 방향 속도·바이트·지연', () => {
+    const hv = hoverAt(m, pxOf(END - 10 * HOUR + 60_000), 540);
+    expect(hv.head).toBe(clockText(END - 10 * HOUR + 30_000, 540));
+    const [d, u] = hv.lines;
+    expect(d.dir).toBe('down');
+    expect(d.text).toContain('28.8 Mbps');
+    expect(d.text).toContain(bytesText(10_485_760));
+    expect(d.text).toContain('지연 449ms');
+    expect(u.text).toContain('23.1 Mbps');
+    expect(hv.dots).toHaveLength(2);
+  });
+  it('실패는 실패 사유 · 다른 방향은 측정 없음 · 측정이 없던 곳은 null', () => {
+    const hv = hoverAt(m, pxOf(END - 4 * HOUR), 540);
+    expect(hv.lines[0].text).toContain('실패');
+    expect(hv.lines[0].text).toContain(FAIL_TEXT.timeout.label);
+    expect(hv.lines[0].ok).toBe(false);
+    expect(hv.lines[1]).toEqual({ dir: 'up', text: '측정 없음', ok: null });
+    expect(hv.dots).toHaveLength(0, '실패 점에는 값 동그라미를 찍지 않는다');
+    expect(hoverAt(m, pxOf(END - 20 * HOUR), 540)).toBeNull();
+    expect(hoverAt(m, 2, 540)).toBeNull('왼쪽 여백 = 축 시작 — 그 근처에 측정이 없으면 null');
+    expect(hoverAt(m, m.w + 5, 540)).toBeNull('차트 밖');
+    expect(hoverAt(null, 100)).toBeNull();
+  });
+  it('좌우 여백에 마우스가 있으면 축 끝으로 본다 — 좁은 화면에서 끝 점을 고를 수 있게', () => {
+    const eh = { days: 1, end: END, offsetMin: 540, stats: {},
+      series: { down: [{ ts: END - 5 * 60_000, mbps: 41, ok: true, bytes: 10_485_760, latMs: 30 }], up: [] } };
+    const em = chartModel(eh, { w: 318, h: 220, now: END });
+    const hv = hoverAt(em, em.w - em.padR / 2, 540);
+    expect(hv).not.toBeNull();
+    expect(hv.lines[0].text).toContain('41.0 Mbps');
+  });
+  it('일 요약 — 평균(최저·최고)·성공 횟수, 값을 지어내지 않는다', () => {
+    const dh = { days: 90, end: END, source: 'daily', offsetMin: 540, stats: {},
+      series: { down: [{ day: '2026-10-10', n: 48, okN: 47, avg: 22.5, min: 5.47, max: 34.8 }], up: [{ day: '2026-10-10', n: 48, okN: 0, avg: null, min: null, max: null }] } };
+    const dm = chartModel(dh, { w: 1000, h: 260, now: END });
+    const ts = Date.parse('2026-10-10T12:00:00Z') - 540 * 60_000;   // 포탈 시각 정오
+    const px = dm.padL + ((ts - dm.from) / (dm.to - dm.from)) * (dm.w - dm.padL - dm.padR);
+    const hv = hoverAt(dm, px, 540);
+    expect(hv.head).toBe('2026-10-10 하루 요약');
+    expect(hv.lines[0].text).toBe('평균 22.5 Mbps (최저 5.47 · 최고 34.8) · 성공 47/48');
+    expect(hv.lines[1].text).toBe('성공 측정 없음 · 실패 48회');
+  });
+  it('화면 — 과거 구간은 1분 갱신을 하지 않고, 스크롤·오버를 그린다', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
+    expect(src).toMatch(/if \(alive && end == null\) timer = setTimeout\(loop, 60_000\)/);
+    expect(src).toMatch(/<WindowScroll /);
+    expect(src).toMatch(/hoverAt\(m, hoverPx/);
+    expect(src).toMatch(/const key = `\$\{agent\}\|\$\{days\}`/);
+  });
+});
+
+describe('xferSpeedText — 리뷰 확정분(v2.735.3)', () => {
+  const END = Date.UTC(2026, 9, 14, 4, 30);
+  const series = (stepMs, n, base = END - 23 * HOUR) => Array.from({ length: n }, (_, i) => ({ ts: base + i * stepMs, mbps: 100 + i, ok: true }));
+  it('cadenceOf — 연속 점 간격의 중앙값', () => {
+    expect(cadenceOf([{ ts: 0 }, { ts: 10 }, { ts: 20 }, { ts: 100 }])).toBe(10);
+    expect(cadenceOf([{ ts: 0 }, { ts: 10 }, { ts: 200 }])).toBe(10, '짝수 개면 아래쪽 중앙값');
+    expect(cadenceOf([{ ts: 5 }])).toBeNull();
+    expect(cadenceOf([])).toBeNull();
+  });
+  it('XS-01 측정 간격이 2시간·3시간이어도 선을 긋는다 — 끊는 간격은 데이터 주기에서', () => {
+    for (const stepH of [2, 3]) {
+      const m = chartModel({ days: 1, end: END, source: 'raw', stats: {}, series: { down: series(stepH * HOUR, Math.floor(22 / stepH)), up: [] } }, { now: END });
+      expect(m.down).toContain('L');
+      expect(m.singles.down).toHaveLength(0);
+    }
+    // 30분 주기 + 측정이 빠진 4시간 구멍은 여전히 끊는다
+    const pts = [...series(30 * 60_000, 6), ...series(30 * 60_000, 6, END - 8 * HOUR)];
+    const m2 = chartModel({ days: 1, end: END, source: 'raw', stats: {}, series: { down: pts, up: [] } }, { now: END });
+    expect((m2.down.match(/M/g) || []).length).toBe(2);
+  });
+  it('XS-01 이어지지 못한 점은 점으로(singles)', () => {
+    const pts = [{ ts: END - 20 * HOUR, mbps: 50, ok: true }, { ts: END - 19.5 * HOUR, mbps: 60, ok: true }, { ts: END - 2 * HOUR, mbps: 70, ok: true }];
+    const m = chartModel({ days: 1, end: END, source: 'raw', stats: {}, series: { down: pts, up: [] } }, { now: END });
+    expect(m.singles.down).toHaveLength(1);
+  });
+  it('XS-01 스파크라인 — 2시간 주기도 선', () => {
+    const pts = Array.from({ length: 10 }, (_, i) => [END - 22 * HOUR + i * 2 * HOUR, 100 + i]);
+    expect(sparkPath(pts, { from: END - 24 * HOUR, to: END })).toContain('L');
+  });
+  it('XS-02 눈금은 포탈 시각 경계 — 7일 보기 날짜 눈금이 00:00(KST)', () => {
+    const m = chartModel({ days: 7, end: END, source: 'raw', offsetMin: 540, stats: {}, series: { down: series(HOUR, 3), up: [] } }, { now: END });
+    expect(m.xticks.length).toBeGreaterThan(5);
+    for (const t of m.xticks) expect(clockText(t.ts, 540)).toMatch(/ 00:00$/);
+    const d1 = chartModel({ days: 1, end: END, source: 'raw', offsetMin: 540, stats: {}, series: { down: series(HOUR, 3), up: [] } }, { now: END });
+    for (const t of d1.xticks) expect(clockText(t.ts, 540)).toMatch(/ (00|06|12|18):00$/);
+  });
+  it('XS-09 일 요약 점은 그날 포탈 정오 — 축 끝을 넘지 않는다', () => {
+    const day = '2026-10-14';
+    const m = chartModel({ days: 90, end: END, source: 'daily', offsetMin: 540, stats: {}, series: { down: [{ day, n: 1, okN: 1, avg: 1, min: 1, max: 1 }], up: [] } }, { now: END });
+    expect(clockText(m.pts.down[0].ts, 540)).toBe('10-14 12:00');
+  });
+  it('XS-03 엣지 수집 경로 꺼짐 문구가 있다', () => {
+    expect(FAIL_TEXT['collector-off'].fix).toContain('COLLECTOR_TOKEN');
+  });
+  it('화면 — 메인 폴링은 세대 번호로 하나만, 상세 CSV 는 보고 있는 구간', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
+    expect(src).toMatch(/if \(alive && gen === genRef\.current\) timer = setTimeout/);
+    expect(src).toMatch(/export\.csv\?days=\$\{Math\.min\(730, days\)\}&agent=\$\{encodeURIComponent\(agent\)\}\$\{end != null/);
+    expect(src).toMatch(/측정 \$\{n\}회/);
+    expect(src).not.toMatch(/한국 시각/);
   });
 });
 

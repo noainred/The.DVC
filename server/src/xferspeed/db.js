@@ -159,17 +159,28 @@ export async function latestAll() {
   try { return db.prepare('SELECT * FROM xfer_latest').all(); } catch { return []; }
 }
 
-/** 기간 안의 원시 행(가벼운 열만) — 화면 요약(7일 기준선·24시간 스파크라인·시간대 히트맵)이 쓴다. */
-export async function samplesSince(sinceTs, { agent = '', limit = 200_000 } = {}) {
+/**
+ * 기간 안의 원시 행(가벼운 열만) — 화면 요약(7일 기준선·24시간 스파크라인·시간대 히트맵)이 쓴다.
+ * `until`(포함, ms)을 주면 그 시각까지만 — 법인 상세의 '이전 구간' 보기(v2.735.3). 없으면 예전처럼 끝이 열려 있다.
+ */
+export async function samplesSince(sinceTs, { agent = '', limit = 200_000, until = null } = {}) {
   const db = await getDb();
   if (!db) return { rows: [], truncated: false, available: false };
   const lim = Math.max(1, Math.min(500_000, Math.floor(n(limit) ?? 200_000)));
+  const to = n(until);
   try {
     const rows = agent
-      ? db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, bytes, basis, kind, err FROM xfer_sample WHERE agent = ? AND ts >= ? ORDER BY ts LIMIT ?').all(agent, sinceTs, lim + 1)
-      : db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, basis FROM xfer_sample WHERE ts >= ? ORDER BY ts LIMIT ?').all(sinceTs, lim + 1);
+      ? (to == null
+        ? db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, bytes, basis, kind, err FROM xfer_sample WHERE agent = ? AND ts >= ? ORDER BY ts DESC LIMIT ?').all(agent, sinceTs, lim + 1)
+        : db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, bytes, basis, kind, err FROM xfer_sample WHERE agent = ? AND ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?').all(agent, sinceTs, to, lim + 1))
+      : (to == null
+        ? db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, basis FROM xfer_sample WHERE ts >= ? ORDER BY ts DESC LIMIT ?').all(sinceTs, lim + 1)
+        : db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, basis FROM xfer_sample WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?').all(sinceTs, to, lim + 1));
+    // 상한에 걸리면 **오래된 쪽**을 버린다(v2.735.3 — 예전엔 ORDER BY ts LIMIT 이라 가장 최근 행이 빠졌다). 돌려줄 때는 시각 순.
     const truncated = rows.length > lim;
-    return { rows: truncated ? rows.slice(0, lim) : rows, truncated, available: true };
+    const kept = truncated ? rows.slice(0, lim) : rows;
+    kept.reverse();
+    return { rows: kept, truncated, available: true };
   } catch (e) { return { rows: [], truncated: false, available: true, error: String(e?.message || e).slice(0, 200) }; }
 }
 
@@ -183,25 +194,47 @@ export async function recentFailures(sinceTs, limit = 12) {
   } catch { return []; }
 }
 
-/** 한 엣지의 일 요약(장기 보기). `sinceDay` 는 'YYYY-MM-DD'. */
-export async function dailyOf(agent, sinceDay) {
+/** 한 엣지의 일 요약(장기 보기). `sinceDay`·`untilDay`(포함) 는 'YYYY-MM-DD'. untilDay 가 없으면 끝이 열려 있다. */
+export async function dailyOf(agent, sinceDay, untilDay = '') {
   const db = await getDb();
   if (!db) return [];
   try {
-    return db.prepare('SELECT agent, dir, day, n, ok_n, mbps_sum, mbps_min, mbps_max, ttfb_sum, ttfb_n FROM xfer_daily WHERE agent = ? AND day >= ? ORDER BY day')
-      .all(agent, sinceDay);
+    return untilDay
+      ? db.prepare('SELECT agent, dir, day, n, ok_n, mbps_sum, mbps_min, mbps_max, ttfb_sum, ttfb_n FROM xfer_daily WHERE agent = ? AND day >= ? AND day <= ? ORDER BY day')
+        .all(agent, sinceDay, untilDay)
+      : db.prepare('SELECT agent, dir, day, n, ok_n, mbps_sum, mbps_min, mbps_max, ttfb_sum, ttfb_n FROM xfer_daily WHERE agent = ? AND day >= ? ORDER BY day')
+        .all(agent, sinceDay);
   } catch { return []; }
 }
 
-/** CSV 내보내기용 — 기간 안 원시 행 전체 열(상한). */
-export async function exportRows(sinceTs, { agent = '', limit = 200_000 } = {}) {
+/**
+ * 한 엣지의 가장 오래된 기록 — 원시 표본 시각(ms)과 일 요약 날짜. '이전 구간' 을 어디까지 갈 수 있는지 화면이 정한다(v2.735.3).
+ * PK (agent, dir, ts)·(agent, dir, day) 의 앞부분으로 찾으므로 방향마다 단독 MIN 문장 하나씩(v2.550.3 — 집계 둘을 한 문장에 두지 않는다).
+ * 못 읽으면 null(기록 없음과 같게 다룬다 — 화면은 스크롤을 숨긴다).
+ */
+export async function oldestOf(agent) {
+  const db = await getDb();
+  if (!db || !agent) return { sampleTs: null, day: null };
+  try {
+    const mins = (sql) => ['down', 'up'].map((d) => db.prepare(sql).get(agent, d)?.v ?? null).filter((v) => v != null);
+    const ts = mins('SELECT MIN(ts) v FROM xfer_sample WHERE agent = ? AND dir = ?');
+    const days = mins('SELECT MIN(day) v FROM xfer_daily WHERE agent = ? AND dir = ?');
+    return { sampleTs: ts.length ? Math.min(...ts.map(Number)) : null, day: days.length ? days.sort()[0] : null };
+  } catch { return { sampleTs: null, day: null }; }
+}
+
+/** CSV 내보내기용 — 기간 안 원시 행 전체 열(상한 — 넘으면 가장 최근 행을 남긴다). `until`(포함)이 있으면 그 시각까지(v2.735.3 이전 구간). */
+export async function exportRows(sinceTs, { agent = '', limit = 200_000, until = null } = {}) {
   const db = await getDb();
   if (!db) return { rows: [], truncated: false };
   const lim = Math.max(1, Math.min(500_000, Math.floor(n(limit) ?? 200_000)));
+  const to = n(until);
   try {
-    const sql = `SELECT agent, dir, ts, ok, bytes, mbps, xfer_ms, total_ms, ttfb_ms, basis, kind, err, trig FROM xfer_sample WHERE ts >= ? ${agent ? 'AND agent = ?' : ''} ORDER BY ts LIMIT ?`;
-    const rows = agent ? db.prepare(sql).all(sinceTs, agent, lim + 1) : db.prepare(sql).all(sinceTs, lim + 1);
-    return { rows: rows.slice(0, lim), truncated: rows.length > lim };
+    const sql = `SELECT agent, dir, ts, ok, bytes, mbps, xfer_ms, total_ms, ttfb_ms, basis, kind, err, trig FROM xfer_sample WHERE ts >= ? ${to != null ? 'AND ts <= ?' : ''} ${agent ? 'AND agent = ?' : ''} ORDER BY ts DESC LIMIT ?`;
+    const args = [sinceTs, ...(to != null ? [to] : []), ...(agent ? [agent] : []), lim + 1];
+    const rows = db.prepare(sql).all(...args);
+    const kept = rows.slice(0, lim).reverse();
+    return { rows: kept, truncated: rows.length > lim };
   } catch { return { rows: [], truncated: false }; }
 }
 

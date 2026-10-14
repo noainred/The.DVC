@@ -35,7 +35,7 @@ export const MIN_XFER_EDGE_VERSION = '2.735.0';
 
 /** 실패 종류 — 웹 `xferSpeedText.FAIL_TEXT` 와 1:1(테스트가 대조한다). */
 export const XFER_FAIL_KINDS = Object.freeze([
-  'no-url', 'timeout', 'unreachable', 'auth', 'disabled', 'old-version', 'busy', 'http', 'short', 'bad-body',
+  'no-url', 'timeout', 'unreachable', 'auth', 'collector-off', 'disabled', 'old-version', 'busy', 'http', 'short', 'bad-body',
 ]);
 
 export const DIRS = Object.freeze(['down', 'up']);
@@ -67,6 +67,8 @@ async function statusFail(res) {
   const why = body && typeof body === 'object' ? strOf(body.reason, 300) : '';
   if (res.status === 401 || res.status === 403) return { kind: 'auth', error: '수집 토큰이 거부됐습니다 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요.' };
   if (res.status === 404) {
+    // v2.735.3: 엣지에 COLLECTOR_TOKEN 이 없으면 수집 경로 전체가 404 + 사유다 — 'XFER_TEST_ENABLED 로 껐다' 와 조치가 다르다(토큰을 넣는다).
+    if (/COLLECTOR_TOKEN/.test(why)) return { kind: 'collector-off', error: why };
     const k = kindFor404(body, { path: '/api/collector/xfer-test', minVersion: MIN_XFER_EDGE_VERSION, what: '전송 속도를 잴' });
     return { kind: k.kind, error: k.reason };
   }
@@ -112,6 +114,8 @@ export async function measureDown(col, { bytes, timeoutMs, fetchImpl = resilient
     row.totalMs = Math.round(tEnd - t0);
     row.bytes = got;
     if (got < bytes) return { ...row, kind: 'short', error: `받은 바이트가 모자랍니다(${mb(got)} / ${mb(bytes)}) — 전송 중 끊겼습니다.` };
+    // 엣지는 요청한 크기만 보낸다 — 더 많으면 엣지가 아닌 서버다(그 값으로 속도를 계산하면 기준선이 오염된다, v2.735.3).
+    if (got > bytes) return { ...row, kind: 'bad-body', error: `요청한 크기보다 많이 받았습니다(${mb(got)} > ${mb(bytes)}) — 엣지가 아닌 서버에 닿았을 수 있습니다.` };
     row.xferMs = r1(Math.max(1, tEnd - tHead));
     row.mbps = mbpsOf(got, row.xferMs);
     row.basis = 'receiver';
@@ -153,6 +157,8 @@ export async function measureUp(col, { bytes, timeoutMs, fetchImpl = resilientFe
     const got = numOrNull(j.bytes);
     row.bytes = got;
     if (got == null || got < bytes) return { ...row, kind: 'short', error: `엣지가 받은 바이트가 모자랍니다(${got == null ? '?' : mb(got)} / ${mb(bytes)}) — 전송 중 끊겼습니다.` };
+    // 정상 엣지는 넘치면 413 을 준다 — 받은 바이트가 보낸 것보다 크다는 보고는 믿지 않는다(v2.735.3).
+    if (got > bytes) return { ...row, kind: 'bad-body', error: `엣지가 보낸 것보다 많이 받았다고 보고했습니다(${mb(got)} > ${mb(bytes)}) — 엣지가 아닌 서버에 닿았을 수 있습니다.` };
     const recv = numOrNull(j.recvMs);
     const buffered = recv == null || recv <= 0 || (row.totalMs > 1000 && recv < row.totalMs * 0.25);
     row.xferMs = r1(buffered ? Math.max(1, row.totalMs) : recv);
