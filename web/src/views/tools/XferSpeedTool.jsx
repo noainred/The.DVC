@@ -23,7 +23,7 @@ import { agoText } from './relTime.js';
 import {
   DIR_TEXT, DIR_COLOR, DIR_TEXT_COLOR, STATE_TEXT, FAIL_TEXT, BASIS_TEXT, mbpsText, logWidth, spanText, bytesText, clockText,
   vsBadge, rowReasonText, sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote,
-  chartModel, statCells, PERIODS, SETTING_FIELDS, rangeHint, settingsPatch,
+  chartModel, statCells, PERIODS, DEFAULT_PERIOD_DAYS, SETTING_FIELDS, rangeHint, settingsPatch,
   SCHEDULE_KINDS, SCHEDULE_KIND_TEXT, WEEKDAYS, INTERVAL_PRESETS, intervalText, scheduleText, checkScheduleForm,
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
 } from './xferSpeedText.js';
@@ -527,7 +527,7 @@ function Chart({ hist }) {
 }
 
 function Detail({ agent, onBack }) {
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(DEFAULT_PERIOD_DAYS);
   const [hist, setHist] = useState(null);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState('');

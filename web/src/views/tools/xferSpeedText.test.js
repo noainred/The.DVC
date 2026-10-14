@@ -6,7 +6,7 @@ import {
   STATE_TEXT, FAIL_TEXT, REASON_TEXT, mbpsText, logWidth, spanText, bytesText, clockText, vsBadge, rowReasonText,
   sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote, chartModel, statCells, settingsPatch, SETTING_FIELDS, LATENCY_NOTE,
   intervalText, scheduleText, checkScheduleForm, scheduleForSave, newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText,
-  planSummary, countText, MISSED_TEXT, INTERVAL_PRESETS,
+  planSummary, countText, MISSED_TEXT, INTERVAL_PRESETS, PERIODS, DEFAULT_PERIOD_DAYS,
 } from './xferSpeedText.js';
 
 const HOUR = 3_600_000;
@@ -128,6 +128,17 @@ describe('xferSpeedText — 그림', () => {
     expect(c.some((x) => x.label.includes('응답 시작'))).toBe(false);
     expect(LATENCY_NOTE).toMatch(/전체 − 엣지 수신 구간/);
     expect(LATENCY_NOTE).not.toMatch(/`/);
+  });
+});
+
+describe('xferSpeedText — 기본 기간(v2.735.2)', () => {
+  it('법인 상세는 24시간으로 열린다 — 기간 버튼에 있는 값이고 화면이 그 상수를 쓴다', () => {
+    expect(DEFAULT_PERIOD_DAYS).toBe(1);
+    expect(PERIODS.find((p) => p.days === DEFAULT_PERIOD_DAYS)?.label).toBe('24시간');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
+    expect(src).toMatch(/useState\(DEFAULT_PERIOD_DAYS\)/);
+    expect(src).not.toMatch(/const \[days, setDays\] = useState\(\d+\)/);
   });
 });
 

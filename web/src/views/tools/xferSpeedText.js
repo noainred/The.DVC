@@ -339,6 +339,8 @@ export function statCells(stats) {
 export const PERIODS = Object.freeze([
   { days: 1, label: '24시간' }, { days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 90, label: '90일' }, { days: 365, label: '1년' },
 ]);
+/** 법인 상세를 열 때의 기본 기간 — 24시간(v2.735.2 사용자 요청 "기본 보기를 24시간으로"). PERIODS 안의 값이어야 한다. */
+export const DEFAULT_PERIOD_DAYS = 1;
 
 /** 설정 폼 — 화면 단위(분·MB·초·일) ↔ 서버(ms). 빈 칸은 보내지 않는다(서버도 '미지정' 으로 버린다). */
 export const SETTING_FIELDS = Object.freeze([
