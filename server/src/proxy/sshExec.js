@@ -16,13 +16,19 @@ import { checkPeer, peerApproveWhere } from '../security/peerTrust.js';
 const SSH_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_000);
 const SSH_EXEC_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
 /**
+ * v2.736: 스스로 끝나는데 **오래 걸리는** 명령(아이실론 `du` — 사용자 보고 "원격으로 돌리는데 10분이 넘게 걸릴 때도 있어")만
+ * `{ long: true }` 로 상한을 2시간까지 연다. 기본 관문(30분)은 그대로다 — 다른 호출부의 env 값이 넓어지지 않게.
+ * 2시간은 `util/deadline.js DEADLINE_MAX_MS` 와 같은 값이다(세션 시한이 명령 시한보다 짧으면 명령 결과가 버려진다).
+ */
+export const EXEC_LONG_MAX_MS = 7_200_000;
+/**
  * v2.606(TIM2606-03): 호출자가 넘긴 명령 시한의 **단일 관문**. v2.605 는 이 모듈의 env 만 좁혔는데 호출자
  * (SANSW_CLI_TIMEOUT_MS·STORAGE_CLI_TIMEOUT_MS …)가 2^31 초과·NaN 을 넘기면 `Math.max(1000, v)` 가 그대로
  * setTimeout 으로 가 1ms 에 '타임아웃' 이 됐다. 호출자 env 를 전부 쫓지 않아도 여기서 [1초, 30분] 에 가둔다
  * (숫자 아님·0 이하는 SSH_EXEC_TIMEOUT_MS).
  */
-export function execTimeoutMs(v) {
-  return reqTimeoutMs(v, SSH_EXEC_TIMEOUT_MS, { max: 1_800_000 });
+export function execTimeoutMs(v, { long = false } = {}) {
+  return reqTimeoutMs(v, SSH_EXEC_TIMEOUT_MS, { max: long ? EXEC_LONG_MAX_MS : 1_800_000 });
 }
 
 /**
@@ -217,8 +223,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
 const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
-function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS) {
-  const timeoutMs = execTimeoutMs(rawTimeoutMs);
+function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
+  const timeoutMs = execTimeoutMs(rawTimeoutMs, opts);
   return new Promise((resolve, reject) => {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
@@ -691,7 +697,7 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     // timeoutMs 는 선택 — 생략하면 exec 의 기본값(SSH_EXEC_TIMEOUT_MS 또는 60s). 원격에서
     // `timeout <N> tcpdump` 처럼 **의도적으로 오래 도는** 명령은 반드시 명시해야 한다(과거
     // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
-    exec: async (cmd, timeoutMs) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs)) : exec(conn, cmd, timeoutMs)); log.push(r); return r; },
+    exec: async (cmd, timeoutMs, opts) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs, opts)) : exec(conn, cmd, timeoutMs, opts)); log.push(r); return r; },
     // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
     execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
     // 페이저로 멈추는 명령(errshow 등) — 프롬프트에 자동 응답해 끝까지 받는다(상한·시한 있음).

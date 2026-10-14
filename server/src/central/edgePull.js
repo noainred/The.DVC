@@ -80,12 +80,18 @@ export function kindFor404(body, { path = '', minVersion = '', what = '' } = {})
  * @param {string} [o.what]       404 구버전 문구용 — '로그를 읽을' 처럼 '… 수 있습니다' 앞 구절
  * @param {string} [o.label]      readJsonCapped 오류 문구 라벨
  * @param {string} [o.authReason] 401/403 사유 문구(모듈마다 조금 다른 문장을 유지)
+ * @param {string} [o.method='GET'] v2.736: 'POST' 면 `jsonBody` 를 JSON 으로 싣는다(아이실론 du 원격 실행·연결 시험 — iDRAC PUSH 스캔과 같은 길).
+ *   ⚠ POST 는 호출부가 retries 0 을 줄 것 — 엣지 동작 요청을 재전송하면 같은 일을 두 번 한다(v2.612 EDGE2612-01).
+ * @param {object} [o.jsonBody]
+ * @param {boolean} [o.missing401=false] v2.736: 401 을 '구버전(경로 없음)' 으로 읽는다. 엣지의 collector 라우터에 없는 경로는 사용자 인증
+ *   미들웨어로 떨어져 401 이 된다(v2.440 실측 — 토큰이 틀리면 collector 라우터가 403 을 준다). 기존 GET 호출부의 판정은 그대로 둔다.
  * @returns {Promise<{ok:boolean, kind?:string, reason?:string, ms:number, body?:object, col:object|null, fetched:boolean}>}
  */
 export async function pullFromEdge(agent, path, {
   timeoutMs = 20_000, retries = 1, fetchImpl = resilientFetch, bodyOk = defaultBodyOk,
   minVersion = '', what = '읽을', label = '엣지 응답',
   authReason = '수집 서버 토큰 불일치 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요(다시 눌러도 같습니다).',
+  method = 'GET', jsonBody = undefined, missing401 = false,
 } = {}) {
   const t0 = Date.now();
   const col = await findCollector(agent);
@@ -105,8 +111,10 @@ export async function pullFromEdge(agent, path, {
 
   let res;
   try {
+    const post = method === 'POST';
     res = await withOutboundTag(col.id || col.name || agent, () => fetchImpl(url, {
-      headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
+      ...(post ? { method: 'POST', body: JSON.stringify(jsonBody ?? {}) } : {}),
+      headers: { Accept: 'application/json', ...(post ? { 'Content-Type': 'application/json' } : {}), ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
       timeoutMs, retries,
     }));
   } catch (e) {
@@ -120,6 +128,7 @@ export async function pullFromEdge(agent, path, {
   try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, label); } catch { body = null; } // v2.583: 크기 상한
 
   const fail = (kind, reason) => ({ ok: false, kind, reason, ms, body, col, fetched: true });
+  if (res.status === 401 && missing401) return fail('old-version', `이 엣지에 ${pathOnly} 가 없습니다 — v${minVersion} 이상으로 업그레이드해야 ${what} 수 있습니다.`);
   if (res.status === 401 || res.status === 403) return fail('auth', authReason);
   if (res.status === 404) { const k = kindFor404(body, { path: pathOnly, minVersion, what }); return fail(k.kind, k.reason); }
   const bodyWhy = isObj(body) ? strOf(body.reason, 300) : '';

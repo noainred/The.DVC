@@ -153,6 +153,8 @@ export const BIG_JSON_SMALL = Object.freeze({
   'collector:/set-password': '계정 비밀번호 한 건',
   'collector:/idrac-scan': '스캔 요청 — 대역 문자열',
   'collector:/bmstor-collect': '수집 요청 — 대상 id',
+  'collector:/isidu-run': '아이실론 du 원격 실행 요청 — 본문 없음(라우트 파서 4KB 상한)',
+  'collector:/isidu-test': '아이실론 du 연결 시험 — 대상 하나(비밀 없음 · 라우트 파서 16KB 상한)',
   'collector:/upgrade': '본문 파서가 express.raw(번들 바이너리) — JSON 한도와 무관',
   'collector:/xfer-test': '전송 속도 측정 — 본문을 파서 없이 스트림으로 세고 버린다(octet-stream · XFER_TEST_MAX_BYTES 상한) — JSON 한도와 무관',
 });

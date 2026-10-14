@@ -219,6 +219,10 @@ test('③ 기억은 입력이 바뀌면 버려진다 — 관리 입력(override�
   ov.clearOverride('10.254.0.3');
 
   // 안전망 — 같은 지문이라도 10분이 지나면 다시 센다(지문이 모르는 입력이 생겼을 때 store 의 LEDGER_FULL_CHECK_MS 와 같은 성격)
+  // ⚠ v2.736: 데이터센터 판정 기억(scanDatacenterSource, 10초)은 위 mergeScanResults(새 에이전트 edge-b) **이전**에 만들어졌을 수 있다.
+  //   그 기억이 두 호출 사이에 만료되면 새 판정(edge-b 포함)으로 기억 키가 바뀌어 다시 센다 — 제품은 옳고 테스트가 시각에 기대고 있었다
+  //   (전량 실행 부하에서 2회 연속 재현, 10.1초 대기를 넣으면 매번 재현). 여기서 비워 지금 입력으로 고정한다(입력이 그대로면 만료돼도 같은 판정).
+  (await import('../src/ipam/scanDatacenterSource.js')).invalidateScanDatacenters();
   const sig = st.ledgerInputSignatureOf(next);
   const T = Date.now();
   led.listSubnets(next, '', null, { inputSig: sig, now: T });

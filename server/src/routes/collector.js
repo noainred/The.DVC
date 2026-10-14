@@ -21,6 +21,7 @@ import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.612 
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { getCollectorDenyStats, _resetCollectorDenyStats, logCollectorDeny } from '../collector/denyLog.js'; // v2.579
+import { edgeIsiduNudge, edgeIsiduTest } from '../isidu/edgeOps.js'; // v2.736 — 정적 import(엣지 로그 표가 부팅 모듈만 읽는다)
 
 export const collectorRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -218,6 +219,21 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   } finally { releaseScan(); }
+});
+
+// v2.736 아이실론 디렉터리 사용량 — 메인이 이 엣지에 du 를 '바로' 시키는 길(iDRAC PUSH 스캔과 같은 url·토큰).
+//   isidu-run : 중앙 설정을 지금 다시 받아 '지금 수집' 요청을 시작한다(본문의 대상 id 를 믿지 않는다 — 중앙 큐가 정한다).
+//   isidu-test: 메인이 보낸 대상(비밀 없음)을 다시 검증하고 이 엣지의 키·등록부로 `ls -d` 만 한다(du 는 돌리지 않는다).
+collectorRouter.post('/isidu-run', express.json({ limit: '4kb' }), async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'isidu-run'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'isidu-run'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  res.json(await edgeIsiduNudge());
+});
+collectorRouter.post('/isidu-test', express.json({ limit: '16kb' }), async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'isidu-test'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'isidu-test'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  const r = await edgeIsiduTest(req.body || {});
+  res.status(r.status).json(r.body);
 });
 
 let bmstorPushRunning = false; // v2.612 EDGE2612-01: /bmstor-collect 단일 비행

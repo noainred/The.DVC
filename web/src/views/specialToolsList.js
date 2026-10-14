@@ -128,6 +128,7 @@ export const TOOLS = [
   { k: 'portaldb', icon: '🗄️', label: '포탈 DB', desc: '사용 중 모든 DB/데이터 파일의 경로·파일명·용도·크기·증가 추이', adminOnly: true },
   { k: 'mail-diag', icon: '✉️', label: '메일 진단', desc: 'SMTP 서버 설정 + 테스트 발송 · 연결/STARTTLS/인증/수신자까지 단계별 대화 로그로 실패 지점 확인(비밀번호는 가려짐)', adminOnly: true },
   { k: 'dir-usage', icon: '📁', label: '폴더 사용량 Top-N', desc: '엣지에 마운트된 공유 폴더의 하위 폴더(=사용자)별 사용량 Top N · 직전 대비 증감 · 주기 수집 결과와 메일 발송 이력', adminOnly: true },
+  { k: 'isilon-dirusage', icon: '🗂️', label: '아이실론 디렉터리 사용량', desc: '지정한 아이실론(PowerScale) 디렉터리 바로 아래 폴더(= 사용자)의 크기를 du 로 조사해 Top 10 · 7일·30일 변화 · 신규·사라진 폴더 · 사용자별 추이를 본다. 비밀번호 없이 SSH 키로 접속하고, 엣지 법인의 아이실론은 그 엣지가 조사해 결과를 메인으로 올린다. 결과는 DB 에 쌓여 주기적으로 추적된다(-h 반올림 값은 오차 안의 흔들림을 변화로 세지 않는다)', aka: ['isidu', 'isilon du', 'powerscale du', '아이실론 du', '디렉터리 사용량', '디렉토리 사용량', '폴더 크기', '사용자 홈', 'home 사용량', 'du -h', 'Top 10', '사용자별 용량'], adminOnly: true },
   { k: 'diskadd', icon: '🧩', label: '디스크 추가 자동화', desc: 'VM 디스크 추가 할당 자동화 (준비 중)', disabled: true, comingSoon: true },
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },

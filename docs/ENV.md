@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **643개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **649개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-13)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-14)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -52,7 +52,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (192)
+## 공통 (196)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -153,6 +153,10 @@
 | `IDRAC_SCAN_INTERVAL_MS` |  |  | config.js |
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
 | `IPAM_DB_PATH` |  |  | config.js |
+| `ISIDU_CONCURRENCY` | `2` |  | isidu/poller.js |
+| `ISIDU_PUSH_MS` | `600000` |  | isidu/push.js |
+| `ISIDU_PUSH_ROWS` | `60000` |  | isidu/push.js |
+| `ISIDU_SSH_KEY` | `''` |  | isidu/sshKey.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
 | `LEDGER_FULL_CHECK_MS` |  |  | store.js |
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
@@ -401,7 +405,7 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (41)
+## 엣지 에이전트 (42)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -434,6 +438,7 @@
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
 | `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
+| `ISIDU_CONFIG_PULL_MS` | `300000` |  | agent/isiduConfigPull.js |
 | `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_FAIL_BACKOFF_MS` |  |  | agent/svcmonConfigPull.js |
@@ -572,7 +577,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (53)
+## 중앙(위임 수집) (54)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -613,6 +618,7 @@
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
 | `INGEST_REJECT_KEEP` | `50` |  | central/ingestReject.js |
 | `INGEST_REJECT_MAX_AGENTS` | `500` |  | central/ingestReject.js |
+| `ISIDU_EDGE_NUDGE_TIMEOUT_MS` |  |  | central/isiduRemote.js |
 | `LINKCHECK_REPORT_LINK_MAX` | `500` |  | central/linkCheckEdge.js |
 | `LINKCHECK_REPORT_STALE_MS` | `3` |  | central/linkCheckEdge.js |
 | `PARTFAULT_EDGE_DEVICE_PART_MAX` | `2000` |  | central/partFaultEdge.js |
@@ -827,4 +833,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 643
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 649

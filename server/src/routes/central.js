@@ -2047,6 +2047,62 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
 });
 
+// ── 아이실론 디렉터리 사용량 위임(v2.736) — 엣지가 속한 법인의 아이실론을 그 엣지가 SSH 로 조사한다 ────────────────
+// GET /api/central/isidu-config?agent=<이름> — 이 엣지 몫 대상(주소·경로·주기 — **비밀 없음**: 접속은 엣지 자신의 SSH 키 또는
+// 엣지 스토리지 등록부 계정) + '지금 수집' 요청(claim→ack). 등록부·설정을 못 읽으면 503(엣지는 직전 사본을 유지 — v2.612·v2.631).
+centralRouter.get('/isidu-config', requireCentral(), async (req, res) => {
+  const agent = strAgent(req.query.agent) || strAgent(req.get('X-Agent-Name'));
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const T = await import('../isidu/targets.js');
+  if (registryUnreadable(res, T.storageRegistryLoadError, '스토리지')) return;
+  const S = await import('../isidu/settings.js');
+  if (settingsUnreadable(res, S.isiduSettingsLoadError, '아이실론 디렉터리 사용량')) return;
+  const { takeIsiduRequests } = await import('../isidu/collectRequests.js');
+  const targets = T.targetsForAgent(agent).map(S.edgeTargetView);
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, agent, targets, retentionDays: S.loadSettings().retentionDays, runNow: takeIsiduRequests(agent) });
+});
+
+/**
+ * POST /api/central/isidu-data — 엣지가 조사한 결과(스캔 + 폴더 전체) 수신(v2.736).
+ *  · 저장 이름은 인증된 agent(개별 토큰이면 바인딩 이름). 대상은 **그 엣지에 배정된 것만** 받는다(남의 대상 id 는 버리고 개수를 밝힌다).
+ *  · 상태(엣지 SSH 공개키·폴러)는 등록부를 쓰지 않으므로 먼저 받는다 — 키는 화면이 보여 줘야 관리자가 아이실론에 등록한다.
+ *  · 스캔이 있는데 등록부·설정·DB 를 못 쓰면 503(엣지는 커서를 전진하지 않고 다시 보낸다 — v2.611·v2.620 규약).
+ */
+centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
+  const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (!authAgent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const E = await import('../central/isiduEdge.js');
+  const hasScans = Array.isArray(req.body?.scans) && req.body.scans.length > 0;
+  E.saveIsiduEdgeStatus(authAgent, req.body?.status, { at: Date.now(), scans: hasScans ? Math.min(req.body.scans.length, 999) : 0 });
+  if (!hasScans) return res.json({ ok: true, saved: { inserted: 0, duplicates: 0 } });
+  const T = await import('../isidu/targets.js');
+  if (registryUnreadable(res, T.storageRegistryLoadError, '스토리지')) { console.warn('[central] isidu-data: 중앙 스토리지 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
+  const S = await import('../isidu/settings.js');
+  if (settingsUnreadable(res, S.isiduSettingsLoadError, '아이실론 디렉터리 사용량')) return;
+  const list = T.resolvedTargets();
+  const owned = T.ownedTargetIds(authAgent, list);
+  const node = canonicalAgent(authAgent, list.filter((r) => owned.has(r.id)).map((r) => r.agent));
+  const clean = E.sanitizeIsiduScans(req.body, owned);
+  if (clean.dropped.notOwned) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 배정되지 않은 대상의 결과 ${clean.dropped.notOwned}건 거절`);
+  const db = await import('../isidu/db.js');
+  const { ackIsiduCollect } = await import('../isidu/collectRequests.js');
+  const saved = { inserted: 0, duplicates: 0, failed: 0 };
+  if (clean.scans.length && !(await db.available())) {
+    return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
+  }
+  for (const sc of clean.scans) {
+    const r = await db.insertScan({ ...sc, agent: T.HISTORY_AGENT, node });
+    if (!r.ok) { saved.failed++; console.warn(`[central] isidu-data: 적재 실패(${String(node).slice(0, 64)} · ${sc.targetId}): ${r.error}`); continue; }
+    if (r.duplicate) saved.duplicates++; else saved.inserted++;
+    const edgeTs = sc.edgeTs ?? sc.ts;
+    E.noteIsiduScanTs(sc.targetId, edgeTs);
+    ackIsiduCollect(sc.targetId, edgeTs);
+  }
+  if (saved.failed) return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })) });
+  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
+});
+
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', requireCentral(), (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();

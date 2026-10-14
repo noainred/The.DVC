@@ -55,6 +55,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.sanswitchPerf', label: 'SAN 포트 사용량', group: 'push', mod: '../sanswitch/perfPush.js', fn: 'sanSwitchPerfPushStatus' },
   { key: 'push.cvp', label: 'CVP 네트워크 스위치', group: 'push', mod: '../cvp/push.js', fn: 'cvpPushStatus' },
   { key: 'push.pdu', label: 'PDU', group: 'push', mod: '../pdu/push.js', fn: 'pduPushStatus' },
+  { key: 'push.isidu', label: '아이실론 디렉터리 사용량', group: 'push', mod: '../isidu/push.js', fn: 'isiduPushStatus' }, // v2.736
   { key: 'push.partFault', label: '파트 장애', group: 'push', mod: '../partfault/push.js', fn: 'partFaultPushStatus' },
   /*
    * ⚠ v2.554 에 추가 — v2.552 가 이 워커를 만들면서 **이 표에 넣지 않았다**. 그래서 엣지가
@@ -74,6 +75,8 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.storage', label: '스토리지 설정', group: 'pull', mod: '../agent/storageConfigPull.js', fn: 'storageConfigPullStatus' },
   { key: 'pull.sanswitch', label: 'SAN 스위치 설정', group: 'pull', mod: '../agent/sanSwitchConfigPull.js', fn: 'sanSwitchConfigPullStatus' },
   { key: 'pull.cvp', label: 'CVP 설정', group: 'pull', mod: '../agent/cvpConfigPull.js', fn: 'cvpConfigPullStatus' },
+  { key: 'pull.isidu', label: '아이실론 디렉터리 사용량 대상', group: 'pull', mod: '../agent/isiduConfigPull.js', fn: 'isiduConfigPullStatus' }, // v2.736
+  { key: 'pull.isiduRemote', label: '아이실론 du 원격 요청(메인 → 이 엣지)', group: 'pull', mod: '../isidu/edgeOps.js', fn: 'isiduEdgeOpsStatus' }, // v2.736 — 메인이 바로 실행·연결 시험을 시킨 마지막 기록
   { key: 'pull.pdu', label: 'PDU 설정', group: 'pull', mod: '../agent/pduConfigPull.js', fn: 'pduConfigPullStatus' },
   { key: 'pull.gpuGuest', label: 'GPU 게스트 설정', group: 'pull', mod: '../agent/gpuGuestConfigPull.js', fn: 'gpuGuestConfigPullStatus' },
   { key: 'pull.svcmon', label: 'svcmon 설정', group: 'pull', mod: '../agent/svcmonConfigPull.js', fn: 'svcmonConfigPullStatus' },
@@ -95,6 +98,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
+  { key: 'collect.isidu', label: '아이실론 디렉터리 사용량 조사', group: 'collect', mod: '../isidu/poller.js', fn: 'isiduPollerStatus' }, // v2.736 — 중앙·엣지 공용(자기 몫 대상만)
   { key: 'collect.pdu', label: 'PDU 수집', group: 'collect', mod: '../pdu/poller.js', fn: 'pduPollerStatus' },
   { key: 'collect.curUser', label: '현재 사용자 수집', group: 'collect', mod: '../curuser/poller.js', fn: 'curUserPollerStatus' },
   { key: 'collect.horizon', label: 'Horizon 세션 수집', group: 'collect', mod: '../horizon/sessionPoller.js', fn: 'hzSessionPollerStatus' },
