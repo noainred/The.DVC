@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
-import { policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10
+import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 
 // 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
@@ -15,8 +15,9 @@ const baseKey = (v) => {
 
 function Row({ label, children }) {
   return (
-    <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)' }}>
-      <span className="muted">{label}</span>
+    <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 12 }}>
+      {/* 라벨은 줄바꿈하지 않는다 — 400px 에서 값이 길면 '정/책'·'마지막/검증' 처럼 글자 단위로 쪼개졌다(v2.736.1 스크린샷 판독) */}
+      <span className="muted" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{label}</span>
       <span style={{ textAlign: 'right' }}>{children}</span>
     </div>
   );
@@ -31,6 +32,8 @@ function SignatureCard({ sig }) {
   const pol = policyText(sig);
   const trust = trustText(sig);
   const last = lastVerifyText(sig);
+  const recent = recentVerifyList(sig);
+  const logIssue = logIssueText(sig);
   const counts = countsText(sig);
   return (
     <div className="card" style={{ marginBottom: 16, minWidth: 0 }}>
@@ -43,6 +46,15 @@ function SignatureCard({ sig }) {
       {last.detail && (
         <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal', wordBreak: 'break-word' }}>{last.detail}</div>
       )}
+      {recent.length > 1 && (
+        <details style={{ marginTop: 6, fontSize: 11.5 }}>
+          <summary className="muted" style={{ cursor: 'pointer' }}>최근 검증 기록 {recent.length}건</summary>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {recent.map((r) => <li key={r.key} style={{ color: TONE_COLOR[r.tone] || 'inherit', whiteSpace: 'normal' }}>{r.text}</li>)}
+          </ul>
+        </details>
+      )}
+      {logIssue && <div style={{ marginTop: 4, fontSize: 11.5, color: TONE_COLOR.warn, whiteSpace: 'normal' }}>{logIssue}</div>}
       {counts && <div className="muted" style={{ marginTop: 4, fontSize: 11.5 }}>{counts}</div>}
       <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal' }}>
         서명 정책은 화면에서 바꿀 수 없습니다 — 호스트의 portal.env 와 docs/RELEASE-SIGNING.md 를 보세요.

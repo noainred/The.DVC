@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **207개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **208개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-14)
@@ -204,6 +204,7 @@
 | `tool-categories.json` | 설정 | 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). | ✅ | ✅ | ✅ | toolcats/settings.js |
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
+| `upgrade-signature-log.json` | 설정 | 업그레이드 번들 서명 검증 기록(최근 10건, 상태, v2.736.1) | ✅ | ✅ | ✅ | upgrade/signature.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
@@ -236,6 +237,7 @@
 - **`peer-trust.json`** — 종류(ssh/tls)·호스트·포트마다 승인·관찰·거부 지문과 정책(enforce/observe)을 담는다. 손상이면 보존 후 두 종류 모두 enforce 로 닫는다 — 지우면 승인 기록이 사라져 새 설치처럼 엄격 모드로 시작한다(장비마다 다시 승인)
 - **`tls-ca-bundle.pem`** — 비밀이 아니다. 백업 확장자 화이트리스트 밖이라 백업에 들어가지 않는다 — 복원 뒤 다시 둘 것. 개인키를 넣지 말 것(인증서가 아닌 블록은 세어 경고한다)
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
+- **`upgrade-signature-log.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다(오프라인 확인 도구는 쓰지 않는다). 업그레이드 재시작 뒤에도 '마지막 검증' 을 보이기 위한 것 — 지우면 그 표시가 다음 검증까지 비고, 설치 판정에는 영향이 없다
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다
 - **`isidu-settings.json`** — 손상이면 보존하고 엣지 설정 pull 에 503 으로 답한다(엣지 사본을 지우지 않는다). 서비스 점검에서 기본값으로 확정할 수 있다

@@ -43,7 +43,8 @@ import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
-import { setShutdownHandler } from './upgrade/upgrade.js';   // v2.604 TIM2604-01: 업그레이드 재시작도 정상 종료 경로로
+import { setShutdownHandler } from './upgrade/upgrade.js';
+import { enableSignatureLog } from './upgrade/signature.js';   // v2.736.1: 서명 검증 기록(마지막 검증)을 재시작 뒤에도 보인다   // v2.604 TIM2604-01: 업그레이드 재시작도 정상 종료 경로로
 import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
@@ -538,6 +539,7 @@ try { startLogAnalysis(); } catch { /* 로그 분석 누적(v2.583) — 실패�
 startStallWatch();     // v2.617: 워커 스레드가 메인 루프 멈춤을 감시(STALL_WATCH=0 이면 끔)
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
+try { enableSignatureLog(); } catch (e) { console.warn(`[upgrade] 서명 검증 기록을 읽지 못했습니다(${e?.message || e})`); } // v2.736.1: 재시작을 넘어 남긴다
 upgradeManager.start();
 const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록

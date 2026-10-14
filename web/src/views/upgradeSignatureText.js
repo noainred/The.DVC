@@ -57,16 +57,51 @@ export function trustText(sig) {
   return { text: `${n}개${revoked}`, tone: 'ok' };
 }
 
-/** 마지막 검증 결과 한 줄 — { text, tone, detail } (detail 은 사유 원문 — 펼쳐 볼 때만) */
+/**
+ * 검증 기록이 없을 때의 안내(v2.736.1). 예전 문구 '아직 검증한 번들이 없습니다' 는 기록이 메모리에만 있어 업그레이드 재시작마다
+ * 지워진 결과였는데, 사람은 '이 포탈이 서명을 확인한 적이 없다' 로 읽었다(지금 실행 중인 버전은 설치 때 확인을 통과했다).
+ * 기록은 이제 재시작을 넘어 남지만, 언제 남는지와 남지 않는 경우를 함께 말한다.
+ */
+export const NO_RECORD_DETAIL = '이 포탈이 업그레이드 번들을 받을 때(원격 다운로드·감시 폴더·중앙에서 받은 번들)와 엣지용 번들을 준비할 때 남깁니다. '
+  + '설치 패키지(install.sh)로 설치했다면 설치할 때 따로 확인했고 여기에는 남지 않습니다. 2.736.1 보다 이전 버전은 이 기록을 재시작 뒤까지 남기지 않았습니다.';
+
+const verdictOf = (l) => (l.verified ? { word: '확인됨', tone: 'ok' } : l.ok && l.warned ? { word: '확인 못 함(정책상 허용)', tone: 'warn' } : { word: '거부', tone: 'bad' });
+
+/** 마지막 검증 결과 한 줄 — { text, tone, detail } (detail 은 키·사유 — 표 아래 작은 글씨) */
 export function lastVerifyText(sig, now = Date.now()) {
   const l = sig && sig.last;
-  if (!l || typeof l !== 'object') return { text: '아직 검증한 번들이 없습니다', tone: 'muted', detail: '' };
+  if (!l || typeof l !== 'object') {
+    // 서버가 기록 상태(log)를 보내지 않으면 예전 서버다 — 예전 문구 그대로(지어내지 않는다).
+    if (!sig || !sig.log) return { text: '아직 검증한 번들이 없습니다', tone: 'muted', detail: '' };
+    return { text: '검증 기록 없음', tone: 'muted', detail: NO_RECORD_DETAIL };
+  }
   const when = agoText(l.at, now);
   const where = whereText(l.where);
   const ver = l.version ? ` · v${l.version}` : '';
-  if (l.verified) return { text: `확인됨${ver} · ${where} · ${when}`, tone: 'ok', detail: l.keyId ? `키 ${l.keyId}` : '' };
-  if (l.ok && l.warned) return { text: `확인 못 함(정책상 허용)${ver} · ${where} · ${when}`, tone: 'warn', detail: String(l.reason || '') };
-  return { text: `거부${ver} · ${where} · ${when}`, tone: 'bad', detail: String(l.reason || '') };
+  const v = verdictOf(l);
+  // 지금 실행 중인 버전이라는 표시는 확인된 기록에만 붙인다(거부·미확인 기록에 붙이면 '이 버전이 거부됐다' 로 읽힌다).
+  const running = l.verified && l.version && sig.currentVersion && l.version === sig.currentVersion ? ' · 지금 실행 중인 버전' : '';
+  const parts = [];
+  if (l.verified) { if (l.keyId) parts.push(`키 ${l.keyId}`); } else if (l.reason) parts.push(String(l.reason));
+  if (l.beforeStart) parts.push('포탈이 재시작되기 전에 남긴 기록입니다');
+  return { text: `${v.word}${ver} · ${where} · ${when}${running}`, tone: v.tone, detail: parts.join(' · ') };
+}
+
+/** 최근 검증 기록(최신 먼저) — [{ key, text, tone }]. 2건 이상일 때만 화면이 펼침 목록으로 보인다. */
+export function recentVerifyList(sig, now = Date.now()) {
+  const list = sig && Array.isArray(sig.recent) ? sig.recent : [];
+  return list.filter((e) => e && typeof e === 'object').map((e, i) => {
+    const v = verdictOf(e);
+    const ver = e.version ? ` · v${e.version}` : '';
+    return { key: `${e.at}-${i}`, text: `${agoText(e.at, now)} · ${v.word}${ver} · ${whereText(e.where)}`, tone: v.tone };
+  });
+}
+
+/** 기록 파일 문제 한 줄 — 없으면 ''. */
+export function logIssueText(sig) {
+  const lg = sig && sig.log;
+  if (!lg || !lg.error) return '';
+  return `검증 기록: ${lg.error}${lg.corruptKept ? `(원본은 ${lg.corruptKept} 로 보존)` : ''}`;
 }
 
 /** 누적 개수 — '확인 N · 경고 허용 N · 거부 N'. 모두 0 이면 빈 문자열. */
