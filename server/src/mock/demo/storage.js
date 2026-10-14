@@ -163,11 +163,20 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
     if (spec.type === 'isilon') {
       node.hdd = { totalBytes: Math.round(per * 0.92), usedBytes: Math.round(per * 0.92 * used / total), pct: r2(used / total * 100) };
       node.ssd = { totalBytes: Math.round(per * 0.08), usedBytes: Math.round(per * 0.08 * 0.42), pct: 42 };
+      // v2.735.2 — 노드 시리얼(합성). 마지막 노드는 읽지 못한 경우를 보이려고 비워 둔다(실제 수집기와 같은 모양).
+      if (i < spec.nodes - 1) { node.serial = `DEMOSN${String(h).slice(0, 4)}${String(i + 1).padStart(3, '0')}`; node.model = 'H500-4U-Single-128GB-2x25GE SFP+-120TB-3200GB SSD'; }
+      if (i < spec.nodes - 1 && i % 4 < 2) node.chassisSerial = `DEMOCH${String(h).slice(0, 4)}${Math.floor(i / 4) + 1}`;
     } else node.name = nodeName(i);
     return node;
   });
   snap.nodes = { count: spec.nodes, unhealthy: bad.size, unknown: 0, list };
   snap.sections.nodes = 'ok';
+  // v2.735.2 — 시리얼 표시 계약(storageSerialText.js): 출처 종류와 노드 시리얼 근거.
+  snap.extra.serialKind = spec.type === 'isilon' ? 'guid' : spec.type === 'xtremio' ? 'psnt' : 'serial';
+  if (spec.type === 'isilon') {
+    snap.extra.nodeSerials = { source: (dev.collectMethod || spec.method) === 'ssh' ? 'isi_for_array -s isi_hw_status -i' : 'REST /platform/N/cluster/nodes (hardware)',
+      read: list.filter((n) => n.serial).length, total: list.length, at: t, cached: false };
+  }
   snap.accounts = [{ name: 'root', enabled: true }, { name: 'admin', enabled: true, role: 'SecurityAdmin' }, { name: 'monitor', enabled: true, role: 'ReadOnly' }];
   snap.sections.accounts = 'ok';
   snap.alerts = { unresolved: bad.size ? 2 + (h % 3) : h % 3 };

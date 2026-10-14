@@ -33,6 +33,7 @@ import { hasNodeFault, faultKpi, faultRows, faultNodeRows, faultKpiMeta, faultKp
 import { versionCellInfo } from './storageVersionText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
 import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
+import { serialHeader, showNodeSerialCol, nodeSerialTitle, nodeSerialNote } from './storageSerialText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -1002,6 +1003,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
     io: nodeList.some((n) => n.inBps != null || n.outBps != null),
     hdd: nodeList.some((n) => n.hdd),
     ssd: nodeList.some((n) => n.ssd || n.l3Bytes > 0),
+    serial: showNodeSerialCol(nodeList, ex),   // v2.735.2 — PowerScale 노드 시리얼
   };
   // VPLEX/Metro Node — 자체 용량 없음(가상화 계층 — 미디어/추이 숨김).
   // ⚠ v2.526: 예전에는 `!!ex.capacityNote` **존재만** 봤다. 다른 수집기가 같은 키에 '용량을 이렇게
@@ -1053,7 +1055,14 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 {ex.versionSource ? <span style={{ fontSize: 11, marginLeft: 4 }}>({ex.versionSource})</span> : null}
               </span>
             )}
-            {s.serial && <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial}</b></span>}
+            {(() => {
+              // v2.735.2 — 라벨은 출처의 뜻(GUID·PSNT·시리얼)을 따르고, 못 읽었으면 '미확인' + 사유(title).
+              const sh = serialHeader(s);
+              if (!sh) return null;
+              return sh.missing
+                ? <span className="muted" title={sh.title}>{sh.label} <b style={{ color: 'var(--text-dim)' }}>미확인</b> <span style={{ fontSize: 11, cursor: 'help' }}>ⓘ</span></span>
+                : <span className="muted" title={sh.title || undefined}>{sh.label} <b style={{ color: 'var(--text)', fontFamily: 'ui-monospace, monospace' }}>{sh.value}</b></span>;
+            })()}
             {ex.model && <span className="muted">모델 <b style={{ color: 'var(--text)' }}>{ex.model}</b></span>}
             {ex.ucode && <span className="muted">ucode <b style={{ color: 'var(--text)' }}>{ex.ucode}</b></span>}
             {ex.state && <span className="muted">상태 <b style={{ color: 'var(--text)' }}>{ex.state}</b></span>}
@@ -1171,6 +1180,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                     <th style={{ textAlign: 'right', width: 40 }}>ID</th>
                     {ncol.name && <th>이름</th>}
                     <th>IP</th>
+                    {ncol.serial && <th>시리얼</th>}
                     <th style={{ width: 56 }}>상태</th>
                     {ncol.ext && <th style={{ width: 44 }}>Ext</th>}
                     {ncol.io && <th style={{ textAlign: 'right', width: 84 }}>In(bps)</th>}
@@ -1184,6 +1194,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                         <td style={{ textAlign: 'right' }}>{n.id}</td>
                         {ncol.name && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
+                        {ncol.serial && <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }} title={nodeSerialTitle(n) || undefined}>{n.serial || <span className="muted">—</span>}</td>}
                         <td><span className={`badge ${/ok|healthy|up|green/.test(n.health) ? 'green' : n.health === 'unknown' ? 'gray' : 'red'}`}>{n.health === 'unknown' ? '?' : n.health.toUpperCase()}</span></td>
                         {ncol.ext && <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>}
                         {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>}
@@ -1196,6 +1207,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                   </tbody>
                 </STable>
               </div>
+              {ncol.serial && nodeSerialNote(ex, nodeList.length) ? <div className="muted" style={{ fontSize: 12, margin: '-6px 0 12px', whiteSpace: 'normal' }}>{nodeSerialNote(ex, nodeList.length)}</div> : null}
             </>
           )}
 

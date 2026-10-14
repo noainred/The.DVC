@@ -54,6 +54,7 @@ export function normalizeUnity(device, raw) {
   if (sys) {
     snap.name = sys.name || device.name;
     snap.serial = sys.serialNumber || '';
+    if (snap.serial) snap.extra.serialKind = 'serial';   // v2.735.2 — 화면 라벨 '시리얼'
     snap.extra.model = sys.model || '';
     snap.sections.config = 'ok';
   }

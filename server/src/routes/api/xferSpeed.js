@@ -26,7 +26,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { loadXferSpeedSettings, saveXferSpeedSettings, xferSpeedEnabled, xferSettingsLoadError, DEFAULTS, RANGES } from '../../xferspeed/settings.js';
 import { xferSpeedStatus, xferTargets, startXferRun } from '../../xferspeed/poller.js';
 import { latestAll, samplesSince, recentFailures, dailyOf, exportRows, dbStatus } from '../../xferspeed/db.js';
-import { edgeRows, kpisOf, trafficOf, heatOf, seriesOf, dailySeriesOf, statsOf, staleMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
+import { edgeRows, kpisOf, trafficOf, heatOf, seriesOf, dailySeriesOf, statsOf, staleMsOf, latencyMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
 import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js';
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
 
@@ -153,7 +153,7 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
   const logR = await samplesSince(now - 14 * DAY, { agent: a.id, limit: 100_000 });
   const log = logR.rows.slice(-40).reverse().map((x) => ({
     ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
-    ttfbMs: numOrNull(x.ttfb_ms), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
+    ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
     basis: x.basis || null, kind: x.kind || null, error: x.err || '',
   }));
   const col = a.col;
@@ -205,12 +205,12 @@ api.get('/tools/xfer-speed/export.csv', adminOnly, fullScopeOnly, csvPerm, async
     agent = a.id;
   }
   const r = await exportRows(Date.now() - days * DAY, { agent });
-  const head = ['시각(포탈)', '엣지', '방향', '결과', '속도(Mbps)', '바이트', '전송(ms)', '전체(ms)', '응답 시작(ms)', '계산 기준', '실패 종류', '사유', '실행'];
+  const head = ['시각(포탈)', '엣지', '방향', '결과', '속도(Mbps)', '바이트', '전송(ms)', '전체(ms)', '지연(ms)', '계산 기준', '실패 종류', '사유', '실행'];
   const lines = [CSV_BOM + csvLine(head)];
   for (const x of r.rows) {
     lines.push(csvLine([
       localStamp(x.ts), x.agent, x.dir === 'down' ? '엣지→메인' : '메인→엣지', Number(x.ok) === 1 ? '성공' : '실패',
-      Number(x.ok) === 1 ? x.mbps : '', x.bytes ?? '', x.xfer_ms ?? '', x.total_ms ?? '', x.ttfb_ms ?? '',
+      Number(x.ok) === 1 ? x.mbps : '', x.bytes ?? '', x.xfer_ms ?? '', x.total_ms ?? '', latencyMsOf(x) ?? '',
       x.basis || '', x.kind || '', x.err || '', x.trig || '',
     ]));
   }

@@ -36,6 +36,24 @@ export function quantile(sorted, q) {
 }
 const round2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
+/**
+ * 지연(연결 + 왕복, ms) — 측정 행 하나(DB 행·화면 행 모두).
+ *  · ↓ 엣지 → 메인: 저장된 `ttfb`(요청 → 응답 머리).
+ *  · ↑ 메인 → 엣지: 응답 머리는 업로드가 끝나야 오므로 `ttfb` 가 뜻이 없다 — **전체 − 엣지 수신 구간**(받는 쪽 기준일 때만)이
+ *    같은 뜻(데이터가 흐르기 전·후의 연결·왕복)이다. 2.735.2 이전 ↑ 행은 `ttfb` 가 비어 있으므로 읽을 때 같은 식으로 구한다.
+ *    보내는 쪽 전체 시간 기준(`sender-total` — 버퍼링 프록시)이면 수신 구간이 LAN 구간이라 구하지 않는다(null).
+ */
+export function latencyMsOf(r) {
+  const tb = numOrNull(r?.ttfb_ms ?? r?.ttfbMs);
+  if (tb != null && tb >= 0) return Math.round(tb);
+  if (r?.dir !== 'up' || r?.basis !== 'receiver') return null;
+  const total = numOrNull(r?.total_ms ?? r?.totalMs);
+  const xfer = numOrNull(r?.xfer_ms ?? r?.xferMs);
+  if (total == null || xfer == null) return null;
+  const d = Math.round(total - xfer);
+  return d >= 0 ? d : null;
+}
+
 /** 측정 행 묶음 → 통계(성공 측정만 속도 통계에, 성공률은 전부). */
 export function statsOf(rows = []) {
   const okVals = [];
@@ -46,8 +64,8 @@ export function statsOf(rows = []) {
     if (Number(r?.ok) === 1 || r?.ok === true) {
       const v = numOrNull(r.mbps);
       if (v != null && v > 0) { okVals.push(v); ok += 1; }
-      const tb = numOrNull(r.ttfb_ms ?? r.ttfbMs);
-      if (tb != null && tb >= 0) ttfb.push(tb);
+      const tb = latencyMsOf(r);
+      if (tb != null) ttfb.push(tb);
     }
   }
   okVals.sort((a, b) => a - b);
@@ -82,7 +100,7 @@ function latestView(r) {
   return {
     ts: numOrNull(r.ts), ok: Number(r.ok) === 1,
     mbps: Number(r.ok) === 1 ? numOrNull(r.mbps) : null,
-    ttfbMs: numOrNull(r.ttfb_ms), totalMs: numOrNull(r.total_ms), xferMs: numOrNull(r.xfer_ms), bytes: numOrNull(r.bytes),
+    ttfbMs: latencyMsOf(r), totalMs: numOrNull(r.total_ms), xferMs: numOrNull(r.xfer_ms), bytes: numOrNull(r.bytes),
     basis: r.basis || null, kind: r.kind || null, error: r.err || '',
     failStreak: numOrNull(r.fail_streak) ?? 0, lastOkTs: numOrNull(r.last_ok_ts), lastOkMbps: numOrNull(r.last_ok_mbps),
   };

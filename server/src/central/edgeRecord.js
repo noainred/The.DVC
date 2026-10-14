@@ -49,7 +49,7 @@ export const NUMERIC_PATHS = Object.freeze([
  * 스토리지 노드 목록 원소의 **아는 필드**(v2.615 SF-R1-03). 글자 필드는 글자로, 숫자 필드는 `numOrNull`,
  * 미디어(hdd·ssd)는 객체이거나 null. 그 밖의 키는 담지 않는다(v2.598 CENTRAL '아는 필드만' 규약).
  */
-export const NODE_STR_KEYS = Object.freeze(['id', 'name', 'ip', 'health', 'ext', 'model', 'lnn']);
+export const NODE_STR_KEYS = Object.freeze(['id', 'name', 'ip', 'health', 'ext', 'model', 'lnn', 'serial', 'chassisSerial']);   // v2.735.2 시리얼
 export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes']);
 export const NODE_MEDIA_KEYS = Object.freeze(['hdd', 'ssd']);
 export const NODE_LIST_MAX = 64;

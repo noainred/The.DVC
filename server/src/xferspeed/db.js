@@ -167,7 +167,7 @@ export async function samplesSince(sinceTs, { agent = '', limit = 200_000 } = {}
   try {
     const rows = agent
       ? db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, bytes, basis, kind, err FROM xfer_sample WHERE agent = ? AND ts >= ? ORDER BY ts LIMIT ?').all(agent, sinceTs, lim + 1)
-      : db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms FROM xfer_sample WHERE ts >= ? ORDER BY ts LIMIT ?').all(sinceTs, lim + 1);
+      : db.prepare('SELECT agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, basis FROM xfer_sample WHERE ts >= ? ORDER BY ts LIMIT ?').all(sinceTs, lim + 1);
     const truncated = rows.length > lim;
     return { rows: truncated ? rows.slice(0, lim) : rows, truncated, available: true };
   } catch (e) { return { rows: [], truncated: false, available: true, error: String(e?.message || e).slice(0, 200) }; }

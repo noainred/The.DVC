@@ -72,7 +72,10 @@ export function normalizeXtremioSsh(device, out) {
   const c0 = clusters[0];
   if (c0) {
     snap.name = pick(c0, 'Name', 'Cluster-Name') || device.name;
-    snap.serial = pick(c0, 'PSNT', 'Cluster-PSNT', 'Index') || '';
+    // v2.735.2 — 'Index'(클러스터 번호)는 시리얼이 아니다 — 예전에는 PSNT 열이 없으면 '1' 같은 번호를 시리얼로 보였다.
+    snap.serial = pick(c0, 'PSNT', 'Cluster-PSNT', 'Serial-Number', 'PSNT-Serial-Number') || '';
+    if (snap.serial) snap.extra.serialKind = 'psnt';
+    else snap.extra.serialProbe = { reason: 'no-field', detail: 'show-clusters 출력에 PSNT 열이 없습니다', seenKeys: Object.keys(c0).slice(0, 30) };
     snap.version = pick(c0, 'SW-Version', 'Version') || '';
     snap.sections.config = 'ok';
   }

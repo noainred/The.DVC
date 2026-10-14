@@ -24,6 +24,20 @@ const KB = 1024; // XMS 공간 값 단위(KB) → 바이트 환산 계수
 /** 목록 응답에서 이름 배열 추출 — v3 는 {clusters:[{name,href}]} 형태(타입별 키가 다름). */
 const namesOf = (resp, key) => (resp?.[key] || []).map((e) => e.name).filter(Boolean);
 
+/** 시리얼 후보(앞에서부터) — 이름이 확인된 것은 없다(XMS REST 문서 지식). `sys-psnt-part-number` 는 v2.310 부터 쓰던 이름이라 남긴다. */
+export const XTREMIO_SERIAL_KEYS = Object.freeze([
+  'sys-psnt-serial-number', 'psnt-serial-number', 'sys-serial-number', 'serial-number', 'psnt', 'sys-psnt', 'sys-psnt-part-number',
+]);
+/** 클러스터 객체 → { value, key, seenKeys, keyCount }. 후보에 없으면 이름에 psnt·serial 이 든 키(부품번호 제외)를 본다. */
+export function pickXtremioSerial(c) {
+  const obj = c && typeof c === 'object' ? c : {};
+  const ok = (v) => (typeof v === 'string' || typeof v === 'number') && String(v).trim() && !/^(n\/a|none|unknown|-+)$/i.test(String(v).trim());
+  for (const k of XTREMIO_SERIAL_KEYS) if (Object.hasOwn(obj, k) && ok(obj[k])) return { value: String(obj[k]).trim().slice(0, 128), key: k, seenKeys: [], keyCount: 0 };
+  const keys = Object.keys(obj);
+  for (const k of keys) if (/psnt|serial/i.test(k) && !/part/i.test(k) && ok(obj[k])) return { value: String(obj[k]).trim().slice(0, 128), key: k, seenKeys: [], keyCount: 0 };
+  return { value: '', key: null, seenKeys: keys.filter((k) => /psnt|serial|sn$|guid|^sys-id|brick/i.test(k)).slice(0, 30), keyCount: keys.length };
+}
+
 /**
  * 원시 응답 → 정규화(순수 — storageMon.test.js 픽스처 고정).
  * raw: { clusters: [content...], controllers: [{name,health}...], users: [...], alertCount: n|null }
@@ -36,7 +50,12 @@ export function normalizeXtremio(device, raw) {
     const c0 = cls[0];
     // 다중 클러스터면 이름에 개수 병기(어느 클러스터인지 오해 방지 — 상세는 pools 에서).
     snap.name = cls.length === 1 ? (c0.name || device.name) : `${c0.name || device.name} 외 ${cls.length - 1}`;
-    snap.serial = c0['sys-psnt-part-number'] || c0['sys-serial-number'] || '';
+    // v2.735.2 — 시리얼(PSNT) 필드 이름을 굳히지 않는다(사용자 신고: 6.4 XMS 에서 시리얼이 안 보였다 — 예전 두 이름이 응답에 없었다).
+    //   어느 필드에서 읽었는지 serialKey 로, 못 읽었으면 응답에 있던 비슷한 키를 serialProbe 로 밝힌다(지어내지 않는다).
+    const ser = pickXtremioSerial(c0);
+    snap.serial = ser.value;
+    if (ser.value) { snap.extra.serialKey = ser.key; snap.extra.serialKind = /psnt/i.test(ser.key) ? 'psnt' : 'serial'; }
+    else snap.extra.serialProbe = { reason: 'no-field', detail: '클러스터 응답에 시리얼(PSNT) 필드가 없습니다', seenKeys: ser.seenKeys, keyCount: ser.keyCount };
     snap.version = c0['sys-sw-version'] || '';
     snap.extra.healthState = c0['sys-health-state'] || '';
     snap.extra.dataReduction = c0['data-reduction-ratio-text'] || (c0['data-reduction-ratio'] ? `${c0['data-reduction-ratio']}:1` : '');

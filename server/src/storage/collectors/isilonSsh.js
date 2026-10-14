@@ -19,6 +19,7 @@ import { withSsh } from '../../proxy/sshExec.js';
 import { powerProbe } from '../power.js';
 import { pickIsiPowerKey, keyNamesOfText, isiPowerFromStats, isiPowerResult, cachedIsiPowerKey, rememberIsiPowerKey, ISI_POWER_KEYS_CMD, isiPowerQueryCmd } from './isilonPower.js';
 import { sshFailureSnapshot } from './cliSsh.js';
+import { readIsiHwSsh, applyIsiNodeHw, ISI_HW_CMD } from './isilonHw.js'; // v2.735.2 — 노드별 시리얼(6시간 캐시)
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { DEFAULT_PERIODS } from '../growth.js';
@@ -382,6 +383,7 @@ export async function collectViaSsh(device) {
     const r = await withSsh(
       { host: device.host, port: Number(device.sshPort) || 22, username: device.username, password: device.password || '', signal: device._signal },
       async (sh) => {
+        const sessionStartedAt = Date.now();
         const status = await sh.exec('isi status'); // 핵심 — 실패하면 아래 catch 로(수집 실패)
         // v2.732(B2-07): 노드 수(전원 부분 합 대조용)를 위해 여기서 해석한다 — 아래에서 다시 해석하지 않는다.
         const parsedStatus = parseIsiStatus(status.stdout || '');
@@ -392,7 +394,9 @@ export async function collectViaSsh(device) {
         const stats = await sh.exec(ISI_STATS_CMD, 20_000).catch(() => ({ stdout: '' }));
         // v2.667 — 전원(best-effort): 키 탐색(6시간 캐시) → 그 키 하나의 현재값. 못 읽으면 사유만 남긴다.
         const power = await readIsiPowerSsh(sh, device.host, { expectedNodes: parsedStatus.nodes.length || null });
-        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', stats: stats.stdout || '', power };
+        // v2.735.2 — 노드별 시리얼·제품명(best-effort · 맨 뒤 · 6시간 캐시 · 세션 예산을 넘겼으면 시작하지 않는다).
+        const hw = parsedStatus.nodes.length ? await readIsiHwSsh(sh, device, { sessionStartedAt, clusterName: parsedStatus.name }) : null;
+        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', stats: stats.stdout || '', power, hw };
       },
     );
     const parsed = r.parsedStatus || parseIsiStatus(r.status);
@@ -402,6 +406,7 @@ export async function collectViaSsh(device) {
     const snap = normalizeIsiStatus(device, parsed, { version, users, exact: parseIsiStatsBytes(r.stats) });
     markMixedBasis(snap, device.id);
     if (r.power?.power) snap.extra.power = r.power.power; else if (r.power?.probe) snap.extra.powerProbe = r.power.probe;
+    applyIsiNodeHw(snap, r.hw, { source: ISI_HW_CMD });
     if (!users) snap.sections.accounts = r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     return snap;
   } catch (e) {

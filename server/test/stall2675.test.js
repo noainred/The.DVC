@@ -178,6 +178,11 @@ function hourlyFromRaw(rows) {
   return m;
 }
 
+// 디스크 여유 가드를 시험하지 않는 호출은 실제 디스크와 무관해야 한다 — 기본값은 이 호스트의 statfs 를 읽어,
+// 여유가 하한(기본 5GB)보다 작은 개발 컨테이너에서 '백필' 시험이 disk-low 로 실패했다(v2.735.2 verify 에서 실제로 겪었다).
+// null = '여유를 모른다' 이고 가드는 막지 않는다(⑤ 가 그 규칙을 따로 고정한다).
+const ANY_DISK = Object.freeze({ freeBytes: () => null });
+
 test('④ 롤업 백필 — 집계 정확 · 중간에 멈춰도 이어진다 · minTs · 멱등 · 완료 표지 · 이후 history() 는 롤업', async () => {
   const db = await getMetricsDb();
   const BF = await import('../src/metrics/rollupBackfill.js');
@@ -227,7 +232,7 @@ test('④ 롤업 백필 — 집계 정확 · 중간에 멈춰도 이어진다 ·
     let probes = 0; let stop = false;
     const probe = () => { probes++; if (!stop) setImmediate(probe); };
     setImmediate(probe);
-    const st = await BF.runRollupBackfill({ db, workMs: 0.001, restMs: 0, nowTs: NOW, chunkHours: 24 });
+    const st = await BF.runRollupBackfill({ db, workMs: 0.001, restMs: 0, nowTs: NOW, chunkHours: 24, ...ANY_DISK });
     stop = true;
     assert.equal(st.state, 'done', JSON.stringify(st));
     assert.ok(st.keysFilled >= 2 && st.rows > 0 && st.hours > 0, JSON.stringify(st));
@@ -253,12 +258,12 @@ test('④ 롤업 백필 — 집계 정확 · 중간에 멈춰도 이어진다 ·
     const marker = db.metaValue(BF.BACKFILL_MARKER);
     assert.ok(marker && marker.doneAt && marker.keysFilled === st.keysFilled, JSON.stringify(marker));
     BF._resetRollupBackfillForTest();
-    const again = await BF.runRollupBackfill({ db, nowTs: NOW });
+    const again = await BF.runRollupBackfill({ db, nowTs: NOW, ...ANY_DISK });
     assert.equal(again.state, 'done'); assert.equal(again.steps, 0, '완료 표지가 있는데 다시 훑었다');
     // 멱등 — 강제로 다시 훑어도 아무것도 바뀌지 않는다
     const before = raw.prepare('SELECT COUNT(*) AS n, SUM(n) AS s FROM samples_hourly WHERE metric=?').get(M);
     BF._resetRollupBackfillForTest();
-    const forced = await BF.runRollupBackfill({ db, nowTs: NOW, force: true, workMs: 1e9 });
+    const forced = await BF.runRollupBackfill({ db, nowTs: NOW, force: true, workMs: 1e9, ...ANY_DISK });
     assert.equal(forced.state, 'done'); assert.equal(forced.rows, 0); assert.equal(forced.hours, 0);
     assert.deepEqual(raw.prepare('SELECT COUNT(*) AS n, SUM(n) AS s FROM samples_hourly WHERE metric=?').get(M), before);
   } finally { raw.close(); BF._resetRollupBackfillForTest(); }
@@ -291,7 +296,7 @@ test('⑤ 백필 — 디스크 여유 가드(표지 없이 멈춘다) · 빈 env
       return calls % 2 ? { done: false, rows: 10, hours: 1 } : { done: true, rows: 0, hours: 0 };
     },
   };
-  const st3 = await BF.runRollupBackfill({ db: fake, workMs: 1e9 });
+  const st3 = await BF.runRollupBackfill({ db: fake, workMs: 1e9, ...ANY_DISK });
   assert.equal(st3.state, 'done', JSON.stringify(st3));
   assert.equal(st3.stuckKeys, 1); assert.equal(st3.keysDone, 2); assert.ok(calls < 10);
 

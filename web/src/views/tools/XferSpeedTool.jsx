@@ -23,9 +23,9 @@ import { agoText } from './relTime.js';
 import {
   DIR_TEXT, DIR_COLOR, DIR_TEXT_COLOR, STATE_TEXT, FAIL_TEXT, BASIS_TEXT, mbpsText, logWidth, spanText, bytesText, clockText,
   vsBadge, rowReasonText, sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote,
-  chartModel, statCells, PERIODS, SETTING_FIELDS, rangeHint, settingsPatch,
+  chartModel, statCells, PERIODS, DEFAULT_PERIOD_DAYS, SETTING_FIELDS, rangeHint, settingsPatch,
   SCHEDULE_KINDS, SCHEDULE_KIND_TEXT, WEEKDAYS, INTERVAL_PRESETS, intervalText, scheduleText, checkScheduleForm,
-  newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary,
+  newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
 } from './xferSpeedText.js';
 import './xferSpeed.css';
 
@@ -527,7 +527,7 @@ function Chart({ hist }) {
 }
 
 function Detail({ agent, onBack }) {
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(DEFAULT_PERIOD_DAYS);
   const [hist, setHist] = useState(null);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState('');
@@ -612,7 +612,7 @@ function Detail({ agent, onBack }) {
         <div className="xs-sechead"><h3>측정 기록</h3><span className="xs-note">최근 {shown.log.length}건(14일 안) · 시각은 포탈 시각</span></div>
         {shown.log.length ? (
           <STable minWidth={760}>
-            <thead><tr><th>시각</th><th>방향</th><th>속도</th><th>응답 시작</th><th>전송</th><th>전체</th><th>바이트</th><th>결과</th></tr></thead>
+            <thead><tr><th>시각</th><th>방향</th><th>속도</th><th title={LATENCY_NOTE}>지연</th><th>전송</th><th>전체</th><th>바이트</th><th>결과</th></tr></thead>
             <tbody>
               {shown.log.map((l) => (
                 <tr key={`${l.dir}${l.ts}`}>
@@ -629,6 +629,7 @@ function Detail({ agent, onBack }) {
             </tbody>
           </STable>
         ) : <div className="xs-note" style={{ padding: 16 }}>최근 14일 측정 기록이 없습니다.</div>}
+        {shown.log.length ? <div className="xs-note" style={{ padding: '8px 16px 0', whiteSpace: 'normal' }}>{LATENCY_NOTE}</div> : null}
         {shown.log.some((l) => l.basis === 'sender-total') ? <div className="xs-note" style={{ padding: '8px 16px 12px' }}>* {BASIS_TEXT['sender-total']}</div> : null}
       </section>
       {!canCsv() ? <div className="xs-note">{CSV_DENIED_NOTE}</div> : null}

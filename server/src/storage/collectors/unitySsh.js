@@ -114,6 +114,28 @@ export const SPECS = [
     cmds: ['svc_diag -s spinfo'] },
 ];
 
+/**
+ * v2.735.2 — 시리얼을 버전 후보 원문에서 건진다(사용자 신고: 모델·버전은 나오는데 시리얼이 없다). 버전 후보는 '버전' 을 읽은
+ *   첫 후보에서 끝나므로(accept), 시리얼을 주는 앞 후보(`uemcli /sys/general show -detail` 의 Product serial number 등)가
+ *   버전이 없다는 이유로 버려졌을 수 있다. 원문 표본에서 읽고 어느 명령에서 읽었는지 밝힌다. 못 읽으면 사유를 남긴다(순수).
+ */
+export function applyUnitySerialFallback(snap, raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  if (!snap.serial) {
+    for (const x of list) {
+      if (x?.key !== 'version' || !x.sample) continue;
+      const text = stripUemcliBanner(String(x.sample));
+      const v = mergeVersionInfo(versionFromSvcDiag(text), versionFromUemcli(parseUemcli(text)));
+      if (v.serial) { snap.serial = v.serial; snap.extra.serialSource = x.cmd; break; }
+    }
+  }
+  if (snap.serial) { snap.extra.serialKind = 'serial'; return snap; }
+  const tried = list.filter((x) => x?.key === 'version').map((x) => x.cmd);
+  snap.extra.serialProbe = { reason: tried.length ? 'not-in-output' : 'not-run',
+    detail: tried.length ? `버전 명령 출력(${tried.join(' · ')})에서 시리얼 줄을 찾지 못했습니다` : '버전 명령을 실행하지 못했습니다(세션 예산·오류)' };
+  return snap;
+}
+
 /** 이 수집 방식으로는 알 수 없는 섹션 — '오류' 가 아니라 '미수집' 이다. */
 const NOT_COLLECTED = '미수집(이 수집 방식에서는 조회하지 않습니다)';
 
@@ -365,6 +387,7 @@ export async function collectViaSsh(device) {
         if (v.model) { snap.extra.model = v.model; snap.extra.modelSource = x.cmd; break; }
       }
     }
+    applyUnitySerialFallback(snap, raw);   // v2.735.2 — 시리얼도 버전 후보 원문에서 건진다(함수 머리말)
     return snap;
   } catch (e) {
     return sshFailureSnapshot(device, e, raw);
