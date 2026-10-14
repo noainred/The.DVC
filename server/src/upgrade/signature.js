@@ -34,6 +34,12 @@ import {
 } from './signatureCore.js';
 
 export const REPO_KEYS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-signing-keys.json');
+let _repoKeysFile = REPO_KEYS_FILE;
+/**
+ * 테스트 전용 — 저장소 키 파일 경로를 바꾼다. 운영 코드는 부르지 않고 env 로도 열지 않는다(신뢰 목록을 바꾸는 길을 늘리지 않는다).
+ * v2.735.2 에 실제 저장소 목록에 키가 들어가 '키 미설정 설치본' 을 테스트가 따로 만들어야 했다.
+ */
+export function _setRepoKeysFileForTest(file) { _repoKeysFile = file || REPO_KEYS_FILE; }
 export const HOST_KEYS_NAME = 'release-signing-keys.conf';
 export const hostKeysFile = (configDir = config.configDir) => path.join(configDir, HOST_KEYS_NAME);
 /** push 요청 헤더 — manifest 봉투(JSON)의 base64. */
@@ -70,7 +76,7 @@ function readKeysFile(file, label, { checkPerms = false } = {}) {
  * 신뢰 키를 읽는다. 파일이 작아 매번 읽는다(검증은 드물다). 호스트 파일이 **있는데** 못 읽으면 회수 목록을 알 수 없으므로
  * `fatal` 을 세워 검증을 진행하지 않는다(fail-closed). 저장소 파일을 못 읽어도 fatal.
  */
-export function loadTrust({ repoFile = REPO_KEYS_FILE, hostFile = hostKeysFile() } = {}) {
+export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile() } = {}) {
   const sources = {
     repo: { file: 'server/src/upgrade/release-signing-keys.json', ok: false, count: 0, error: null },
     host: { file: path.basename(hostFile), present: false, ok: true, count: 0, revoked: 0, error: null },

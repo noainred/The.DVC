@@ -38,6 +38,11 @@ delete process.env.UPGRADE_WATCH_DIR;
 
 const core = await import('../src/upgrade/signatureCore.js');
 const sigmod = await import('../src/upgrade/signature.js');
+// v2.735.2: 실제 저장소 공개키 목록에 키가 들어갔다 — 이 파일의 시나리오(신뢰는 호스트 파일로 · '키 미설정 설치본')는
+// 저장소 목록이 빈 설치본을 전제하므로 그 목록을 빈 파일로 둔다(테스트 전용 경로 — 운영 판정 코드는 그대로).
+const EMPTY_REPO_KEYS = path.join(CFG, 'repo-release-signing-keys.json');
+fs.writeFileSync(EMPTY_REPO_KEYS, JSON.stringify({ format: 'vmware-portal-release-keys', schema: 1, keys: [], revoked: [] }));
+sigmod._setRepoKeysFileForTest(EMPTY_REPO_KEYS);
 const upg = await import('../src/upgrade/upgrade.js');
 
 const servers = [];
@@ -460,7 +465,11 @@ test('S-10 ⑧ 오프라인 — verifyCli(같은 판정) 종료 코드 0/1/2 와
   fs.mkdirSync(path.join(prefix, 'runtime/node/bin'), { recursive: true });
   fs.symlinkSync(process.execPath, path.join(prefix, 'runtime/node/bin/node'));
   fs.mkdirSync(path.join(prefix, 'app/server'), { recursive: true });
-  fs.symlinkSync(path.join(ROOT, 'server/src'), path.join(prefix, 'app/server/src'));
+  // 기존 설치본 = 이 저장소 코드의 사본 + 빈 저장소 공개키 목록(v2.735.2 에 실제 목록에 키가 들어갔다 — 심볼릭 링크면
+  // import.meta.url 이 실제 경로로 풀려 실제 목록을 읽는다). 패키지는 저장소 node_modules 를 그대로 쓴다.
+  fs.cpSync(path.join(ROOT, 'server/src'), path.join(prefix, 'app/server/src'), { recursive: true });
+  fs.copyFileSync(EMPTY_REPO_KEYS, path.join(prefix, 'app/server/src/upgrade/release-signing-keys.json'));
+  fs.symlinkSync(path.join(ROOT, 'server/node_modules'), path.join(prefix, 'app/server/node_modules'));
   const sdir = path.join(work, pkgName);
   fs.mkdirSync(sdir);
   const lib = path.join(ROOT, 'packaging/offline/release-verify-lib.sh');
@@ -475,7 +484,7 @@ test('S-10 ⑧ 오프라인 — verifyCli(같은 판정) 종료 코드 0/1/2 와
   // v2.735.1: 기존 설치본에 서명 키가 하나도 설정되지 않았으면(키 등록 전 릴리스) 그 설치본의 도구가 warn 이라 말하고 설치를 계속한다
   clearHostTrust();
   try {
-    const pol = spawnSync(process.execPath, [path.join(ROOT, 'server/src/upgrade/verifyCli.js'), '--policy'], { encoding: 'utf8', env: { ...process.env, CONFIG_DIR: CFG, UPGRADE_SIGNATURE_POLICY: '' } });
+    const pol = spawnSync(process.execPath, [path.join(prefix, 'app/server/src/upgrade/verifyCli.js'), '--policy'], { encoding: 'utf8', env: { ...process.env, CONFIG_DIR: CFG, UPGRADE_SIGNATURE_POLICY: '' } });
     assert.equal(pol.status, 0);
     assert.match(pol.stdout, /^policy=warn source=unconfigured/);
     const unconf = run('', path.join(work, 'none.json'), '0');
@@ -560,6 +569,10 @@ test('S-10 ⑨ 서명 키는 manifest·로그·서버 코드·패키지에 들�
   const repoKeys = fs.readFileSync(path.join(ROOT, 'server/src/upgrade/release-signing-keys.json'), 'utf8');
   assert.doesNotMatch(repoKeys, /PRIVATE|BEGIN/);
   for (const k of JSON.parse(repoKeys).keys) assert.ok(core.publicKeyFromBase64(k.publicKey), '공개키(SPKI)만');
+  // v2.735.2: 서명을 시작했다 — 목록의 키는 자기 keyId 와 맞아야 한다(틀리면 CI 사전 점검이 비밀 키를 못 찾고, 현장은 '모르는 키' 로 거부한다)
+  const repoDoc = JSON.parse(repoKeys);
+  assert.ok(repoDoc.keys.some((k) => !k.revoked), '서명 시작 뒤에는 쓸 수 있는 공개키가 있어야 한다');
+  for (const k of repoDoc.keys) assert.equal(core.keyIdOf(core.publicKeyFromBase64(k.publicKey)), k.keyId, `keyId 불일치: ${k.keyId}`);
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
   for (const f of walk(path.join(ROOT, 'server/src')).filter((x) => x.endsWith('.js'))) {
     const t = fs.readFileSync(f, 'utf8');
