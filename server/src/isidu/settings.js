@@ -10,6 +10,9 @@
  *     (사본을 저장하지 않는다 — 등록부에서 담당 엣지를 바꾸면 그대로 따라간다). 사용자 요청 "각각의 edge 가 속한 동일한 법인의
  *     아이실론 장비" 가 이 형태다.
  *  ② 직접 입력(host): 주소·실행 노드·법인을 이 설정이 가진다. 실행 노드·법인은 기존 목록에서만 고른다(cvp/formChoices — 오타 방지).
+ *  ③ v2.736 실행 노드 지정(runVia:'node'): 등록부 아이실론이어도 **다른 노드(메인 또는 특정 엣지)에서** 명령을 실행하게 한다
+ *     (사용자 요청 "명령어를 특정 엣지 서버에서 실행하는 기능 … idrac 조사하는 것처럼 원격에서"). 기본은 장비 담당 노드를 따른다.
+ *     ⚠ 등록부 계정 인증은 장비 담당 노드나 메인에서만 — 다른 엣지의 스토리지 등록부에는 그 장비(계정)가 없다.
  *
  * ── 지키는 것 ────────────────────────────────────────────────────────────────
  *  · 경로는 `/ifs` 아래 절대 경로만, 작은따옴표·역슬래시·$·백틱·제어 문자·`.`/`..` 조각 금지(원격 셸에 작은따옴표로 감싸 넣는다).
@@ -33,7 +36,8 @@ const EDGE_FILE = () => path.join(config.configDir, 'isidu-edge-targets.json'); 
 export const MAX_TARGETS = 100;
 export const RANGES = Object.freeze({
   intervalHours: { min: 1, max: 720, def: 24 },
-  timeoutMin: { min: 1, max: 30, def: 30 },
+  // v2.736: 상한 120분 — 사용자 보고 "원격으로 돌리는데 10분이 넘게 걸릴 때도 있어". 명령 시한은 sshExec 의 긴 명령 관문(2시간)이 받는다.
+  timeoutMin: { min: 1, max: 120, def: 30 },
   topN: { min: 5, max: 50, def: 10 },
   port: { min: 1, max: 65535, def: 22 },
   retentionDays: { min: 30, max: 3650, def: 400 },
@@ -42,6 +46,7 @@ export const AUTH_MODES = Object.freeze(['key', 'device']);
 const RE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,253}$/;
 const RE_USER = /^[A-Za-z0-9._@\\-]{1,64}$/;
+const lo = (v) => String(v ?? '').trim().toLowerCase();
 
 export const DEFAULTS = Object.freeze({ targets: [], retentionDays: RANGES.retentionDays.def });
 
@@ -68,6 +73,20 @@ function numField(v, range, prev) {
   const p = numOrNull(prev);
   if (n == null) return p != null ? p : range.def;
   return Math.max(range.min, Math.min(range.max, Math.round(n)));
+}
+
+/**
+ * 대상의 명령 시한(ms) — 설정 범위로 자른다(빈 값·숫자 아님은 기본 30분). 수집기·연결 시험·'지금 수집' 큐 시한이 같은 값을 쓴다.
+ * 세션 시한은 이 값 + 30초이고 `util/deadline.js` 상한(2시간)에 걸리면 명령 시한을 15초 줄인다(세션이 먼저 끊기면 결과가 버려진다).
+ */
+export function timeoutMsOf(t) {
+  return numField(t?.timeoutMin, RANGES.timeoutMin, null) * 60_000;
+}
+export const SESSION_MAX_MS = 7_200_000;   // util/deadline.js DEADLINE_MAX_MS 와 같은 값
+export function sessionPlanOf(t) {
+  const cmd = timeoutMsOf(t);
+  const session = Math.min(SESSION_MAX_MS, cmd + 30_000);
+  return { cmdMs: Math.min(cmd, session - 15_000), sessionMs: session };
 }
 
 const loadErr = makeSettingsLoadError(FILE, { label: '아이실론 디렉터리 사용량 설정', confirm: () => { saveSettingsRaw({ ...DEFAULTS, targets: [] }); } });
@@ -140,6 +159,16 @@ export function normalizeTarget(input, prev, ctx) {
     // 계정: 비우면 등록부 계정(키 인증이면 그 계정 이름으로 키 로그인). 입력하면 그 계정.
     if (user && !RE_USER.test(user)) return { error: '계정 이름 형식이 잘못됐습니다.', field: 'username' };
     out.username = user;
+    // 실행 노드 — 'device'(장비 담당 노드를 따른다, 기본) | 'node'(agent 로 고른 노드. '' = 메인).
+    out.runVia = t.runVia === 'node' ? 'node' : 'device';
+    if (out.runVia === 'node') {
+      const ag = ctx.pickAgent(t.agent, ctx.agents || [], prev?.agent || '');
+      if (ag.error) return { error: ag.error, field: 'agent' };
+      out.agent = ag.value;
+      if (out.auth === 'device' && dev && out.agent && lo(out.agent) !== lo(dev.agent)) {
+        return { error: `'스토리지 등록부 계정' 인증은 장비 담당 노드(${dev.agent ? `엣지 ‘${dev.agent}’` : '메인'})나 메인에서 실행할 때만 쓸 수 있습니다 — 엣지 ‘${out.agent}’ 의 스토리지 등록부에는 그 장비 계정이 없습니다. SSH 키 인증으로 바꾸거나 실행 노드를 장비 담당 노드로 두세요.`, field: 'auth' };
+      }
+    }
   } else {
     if (out.auth === 'device') return { error: "'스토리지 등록부 계정' 인증은 등록부의 아이실론을 골랐을 때만 쓸 수 있습니다.", field: 'auth' };
     const host = String(t.host || '').trim();
@@ -188,15 +217,17 @@ export function resolveTarget(t, ctx = {}) {
   if (!t) return null;
   if (t.deviceId) {
     const dev = (ctx.devices || []).find((d) => d && String(d.id) === String(t.deviceId));
-    if (!dev) return { ...t, host: '', agent: '', datacenterId: '', deviceName: '', issue: 'device-missing' };
-    if (dev.type !== 'isilon') return { ...t, host: dev.host || '', agent: dev.agent || '', datacenterId: dev.datacenterId || '', deviceName: dev.name || '', issue: 'device-not-isilon' };
+    if (!dev) return { ...t, host: '', agent: t.runVia === 'node' ? String(t.agent || '') : '', datacenterId: '', deviceName: '', issue: 'device-missing' };
+    if (dev.type !== 'isilon') return { ...t, host: dev.host || '', agent: t.runVia === 'node' ? String(t.agent || '') : (dev.agent || ''), datacenterId: dev.datacenterId || '', deviceName: dev.name || '', issue: 'device-not-isilon' };
+    const override = t.runVia === 'node';
     return {
-      ...t, host: String(dev.host || ''), agent: String(dev.agent || ''), datacenterId: String(dev.datacenterId || ''),
+      ...t, host: String(dev.host || ''), agent: override ? String(t.agent || '') : String(dev.agent || ''),
+      deviceAgent: String(dev.agent || ''), agentSource: override ? 'override' : 'device', datacenterId: String(dev.datacenterId || ''),
       deviceName: String(dev.name || ''), username: t.username || String(dev.username || ''),
       ...(dev.enabled === false ? { deviceDisabled: true } : {}),
     };
   }
-  return { ...t, deviceName: '' };
+  return { ...t, deviceName: '', agentSource: 'direct' };
 }
 
 /** 엣지로 내려보낼 모양(비밀 없음). */
@@ -222,6 +253,21 @@ export function edgeTargets() {
 }
 
 /**
+ * 중앙이 보낸 대상 하나를 엣지에서 다시 검증·정리한다(형식이 틀리면 null). 사본 적용과 원격 연결 시험이 같은 함수를 쓴다 —
+ * 중앙이 보낸 값도 원격 셸에 들어가므로 경로·주소·계정 판정을 엣지에서도 한다.
+ */
+export function cleanEdgeTarget(t) {
+  if (!t || typeof t !== 'object' || !RE_ID.test(String(t.id || '')) || pathIssue(t.path) || !RE_HOST.test(String(t.host || '')) || !RE_USER.test(String(t.username || ''))) return null;
+  return {
+    id: String(t.id), label: String(t.label || '').slice(0, 80), host: String(t.host), port: numField(t.port, RANGES.port, 22),
+    username: String(t.username), auth: AUTH_MODES.includes(t.auth) ? t.auth : 'key', deviceId: String(t.deviceId || '').slice(0, 64),
+    path: normPath(String(t.path)), sizeMode: SIZE_MODES.includes(t.sizeMode) ? t.sizeMode : 'h',
+    intervalHours: numField(t.intervalHours, RANGES.intervalHours, null), timeoutMin: numField(t.timeoutMin, RANGES.timeoutMin, null),
+    topN: numField(t.topN, RANGES.topN, null), enabled: t.enabled !== false,
+  };
+}
+
+/**
  * 중앙 사본 적용(엣지). 받은 대상은 다시 검증한다(중앙이 보낸 값도 원격 셸에 들어간다 — 경로·주소 판정을 엣지에서도 한다).
  * @returns {{applied:boolean, count:number, rejected:number, removed:string[]}}
  */
@@ -229,14 +275,8 @@ export function applyEdgeTargets(list, retentionDays) {
   const prev = edgeTargets();
   const clean = []; let rejected = 0;
   for (const t of (Array.isArray(list) ? list : []).slice(0, MAX_TARGETS)) {
-    if (!t || typeof t !== 'object' || !RE_ID.test(String(t.id || '')) || pathIssue(t.path) || !RE_HOST.test(String(t.host || '')) || !RE_USER.test(String(t.username || ''))) { rejected++; continue; }
-    clean.push({
-      id: String(t.id), label: String(t.label || '').slice(0, 80), host: String(t.host), port: numField(t.port, RANGES.port, 22),
-      username: String(t.username), auth: AUTH_MODES.includes(t.auth) ? t.auth : 'key', deviceId: String(t.deviceId || '').slice(0, 64),
-      path: normPath(String(t.path)), sizeMode: SIZE_MODES.includes(t.sizeMode) ? t.sizeMode : 'h',
-      intervalHours: numField(t.intervalHours, RANGES.intervalHours, null), timeoutMin: numField(t.timeoutMin, RANGES.timeoutMin, null),
-      topN: numField(t.topN, RANGES.topN, null), enabled: t.enabled !== false,
-    });
+    const c = cleanEdgeTarget(t);
+    if (c) clean.push(c); else rejected++;
   }
   const next = { at: Date.now(), targets: clean, retentionDays: numField(retentionDays, RANGES.retentionDays, prev.retentionDays) };
   const sig = (v) => JSON.stringify([v.targets, v.retentionDays]);

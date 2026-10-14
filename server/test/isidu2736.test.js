@@ -22,6 +22,7 @@ process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.CENTRAL_TOKEN = 'ctok-2736';
 process.env.SSH_HOSTKEY_POLICY = 'observe'; // 호스트키가 주제가 아니다(가짜 SSH 장비)
 process.env.ISIDU_SSH_KEY = '';
+process.env.COLLECTOR_TOKEN = 'coltok-2736'; // ⑨ — 같은 프로세스가 엣지의 collector 라우트도 맡는다
 
 const GIB = 1024 ** 3;
 const ROOT = '/ifs/data/workspace/users';
@@ -104,6 +105,29 @@ test('② 설정 — 아이실론이 아닌 장비·목록에 없는 엣지·등
   assert.equal(ok.target.datacenterId, 'dc-1', 'DataCenter 는 표시명으로 와도 id 로');
   assert.equal(ok.target.intervalHours, 6, '빈 칸은 이전 값(Number(\'\')===0 이 하한 1 로 승격되지 않게)');
   assert.equal(ok.target.path, ROOT);
+});
+
+test('② 실행 노드 지정(runVia) — 등록부 아이실론을 다른 엣지에서 실행 · 등록부 계정은 장비 담당 노드·메인에서만 · 시한 상한 120분', () => {
+  const devs = [{ id: 'd-isi', type: 'isilon', host: '10.0.0.5', agent: 'edge-a' }];
+  const ctx = ctxWith(devs, ['edge-a', 'edge-b']);
+  const bad = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'device', runVia: 'node', agent: 'edge-b' }, null, ctx);
+  assert.equal(bad.field, 'auth', '다른 엣지의 스토리지 등록부에는 그 장비 계정이 없다');
+  const toMain = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'device', runVia: 'node', agent: '' }, null, ctx);
+  assert.ok(toMain.target, '메인은 등록부 전체를 가진다');
+  const ok = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'key', runVia: 'node', agent: 'EDGE-B', timeoutMin: 999 }, null, ctx);
+  assert.equal(ok.target.agent, 'edge-b');
+  assert.equal(ok.target.timeoutMin, 120, '시한 상한 120분');
+  const r = S.resolveTarget(ok.target, { devices: devs });
+  assert.equal(r.agent, 'edge-b');
+  assert.equal(r.agentSource, 'override');
+  assert.equal(r.deviceAgent, 'edge-a');
+  const follow = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'key', runVia: 'device', agent: 'edge-b' }, null, ctx);
+  assert.equal(follow.target.agent, undefined, "'장비 담당 노드' 면 고른 엣지를 저장하지 않는다");
+  assert.equal(S.resolveTarget(follow.target, { devices: devs }).agent, 'edge-a');
+  assert.equal(S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, runVia: 'node', agent: 'nope' }, null, ctx).field, 'agent');
+  const plan = S.sessionPlanOf({ timeoutMin: 120 });
+  assert.ok(plan.sessionMs <= 7_200_000 && plan.cmdMs < plan.sessionMs, '세션 시한(2시간 상한)이 명령 시한보다 길다 — 세션이 먼저 끊기면 결과가 버려진다');
+  assert.equal(S.sessionPlanOf({ timeoutMin: '' }).cmdMs, 30 * 60_000, '빈 값은 기본 30분');
 });
 
 /* ═══════════════════════════ ③ DB + 보고서 ═══════════════════════════ */
@@ -427,7 +451,7 @@ test('⑦ 권한 — 관리자 + 전체 범위만(operator 403 · 범위 관리�
   assert.ok(!r.text.includes('secret-pw'));
 });
 
-test('⑦ 보고서·사용자·추이·CSV · 저장 검증(400 field) · 엣지 대상 연결 시험은 409 · 지금 수집은 엣지에 요청을 남긴다', async () => {
+test('⑦ 보고서·사용자·추이·CSV · 저장 검증(400 field) · 엣지 대상 연결 시험은 그 엣지로 · 지금 수집은 엣지에 요청을 남긴다', async () => {
   const rep = await call(ADMIN, 'GET', `/tools/isilon-dirusage/report?target=${edgeTargetId}`);
   assert.equal(rep.status, 200, rep.text);
   assert.equal(rep.body.state, 'ok');
@@ -445,12 +469,17 @@ test('⑦ 보고서·사용자·추이·CSV · 저장 검증(400 field) · 엣�
   assert.equal(bad.status, 400);
   assert.equal(bad.body.field, 'path');
   assert.equal((await call(OPER, 'PUT', '/tools/isilon-dirusage/settings', { targets: [] })).status, 403);
+  // v2.736: 엣지 담당 대상의 연결 시험은 그 엣지로 보낸다 — 여기서는 edge-a 가 수집 서버로 등록되지 않아 '등록부에 없음' 을 말한다(⑨ 가 성공 경로).
   const tst = await call(ADMIN, 'POST', '/tools/isilon-dirusage/test', { id: edgeTargetId, ...cur.targets[0] });
-  assert.equal(tst.status, 409);
-  assert.equal(tst.body.edge, true);
+  assert.equal(tst.status, 200, tst.text);
+  assert.equal(tst.body.via, 'edge');
+  assert.equal(tst.body.ok, false);
+  assert.equal(tst.body.kind, 'not-registered');
   const run = await call(ADMIN, 'POST', '/tools/isilon-dirusage/run', { ids: [edgeTargetId] });
   assert.equal(run.status, 202);
   assert.deepEqual(run.body.requested.map((x) => x.id), [edgeTargetId]);
+  assert.equal(run.body.nudged.length, 1);
+  assert.equal(run.body.nudged[0].kind, 'not-registered', '바로 알리지 못해도 요청은 큐에 남는다(아래 설정 pull 이 가져간다)');
   const cfg = await (await cget('/isidu-config?agent=edge-a')).json();
   assert.deepEqual(cfg.runNow, [edgeTargetId], '엣지가 다음 설정 pull 에 요청을 가져간다');
 });
@@ -485,4 +514,75 @@ test('⑧ pullIsiduConfigNow — 중앙 배정 대상을 엣지 사본에 적용
     S._resetForTest();
     Object.assign(config.agent, keep);
   }
+});
+
+/* ═══════════════════════════ ⑨ 엣지 원격 실행·연결 시험(실제 collector 라우트) ═══════════════════════════ */
+
+test('⑨ 지금 수집 → 그 엣지에 바로 알림(설정을 다시 받아 du 시작) · 연결 시험은 그 엣지가 · 구버전·불통은 kind 로', async () => {
+  const express = (await import('express')).default;
+  const { collectorRouter } = await import('../src/routes/collector.js');
+  const edgeApp = express();
+  edgeApp.use('/api/collector', collectorRouter);
+  edgeApp.use('/api', (_req, res) => res.status(401).json({ error: 'unauthorized' })); // 경로 없음 → 사용자 인증 미들웨어(401)
+  const es = await new Promise((r) => { const s = edgeApp.listen(0, '127.0.0.1', () => r(s)); });
+  closers.push(() => new Promise((r) => { es.closeAllConnections?.(); es.close(() => r()); }));
+  const old = express(); old.use((_req, res) => res.status(401).json({ error: 'unauthorized' }));
+  const os2 = await new Promise((r) => { const s = old.listen(0, '127.0.0.1', () => r(s)); });
+  closers.push(() => new Promise((r) => { os2.closeAllConnections?.(); os2.close(() => r()); }));
+
+  const reg = await import('../src/collector/registry.js');
+  assert.equal(reg.addCollector({ id: 'edge-a', name: 'edge-a', url: `http://127.0.0.1:${es.address().port}`, token: 'coltok-2736' }).ok, true);
+  assert.equal(reg.addCollector({ id: 'edge-old', name: 'edge-old', url: `http://127.0.0.1:${os2.address().port}`, token: 'coltok-2736' }).ok, true);
+  assert.equal(reg.addCollector({ id: 'edge-down', name: 'edge-down', url: 'http://127.0.0.1:1', token: 'coltok-2736' }).ok, true);
+
+  // edge-a 가 조사할 직접 입력 대상 — 가짜 아이실론(이 프로세스의 키를 허용)
+  const K = await import('../src/isidu/sshKey.js');
+  const out = [`5.0G\t${ROOT}/remote.one`, `6.0G\t${ROOT}`].join('\n') + '\n';
+  const fk = await fakeIsilon({ output: out });
+  fk.allow(K.publicKeyView().publicKey);
+  const cur = S.loadSettings().targets;
+  const storage = await import('../src/storage/registry.js');
+  const sv = S.saveSettings({ targets: [...cur, { id: 'tgt-remote', label: '원격', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', agent: 'edge-a', path: ROOT }] },
+    { devices: storage.listDevices(), agents: ['edge-a'], dcs: [], pickAgent, pickDatacenter, ssrfBlockReason: () => null });
+  assert.equal(sv.ok, true, sv.error);
+
+  const keep = { ...config.agent };
+  const quiet = console.warn; console.warn = () => {};
+  try {
+    config.agent.centralUrl = `http://127.0.0.1:${centralPort}`;
+    config.agent.centralToken = 'ctok-2736';
+    config.agent.name = 'edge-a';
+    const run = await call(ADMIN, 'POST', '/tools/isilon-dirusage/run', { ids: ['tgt-remote'] });
+    assert.equal(run.status, 202, run.text);
+    const n = run.body.nudged.find((x) => x.agent === 'edge-a');
+    assert.equal(n.ok, true, JSON.stringify(n));
+    assert.equal(n.started, 1, '엣지가 설정을 다시 받아 **요청된** 수집만 바로 시작했다(엣지의 다른 대상은 건드리지 않는다)');
+    const P2 = await import('../src/isidu/poller.js');
+    await P2.waitIdle();
+    assert.ok(fk.st.commands.includes(`du -A -h -d 1 '${ROOT}'`), '엣지가 du 를 실제로 실행했다');
+
+    const tst = await call(ADMIN, 'POST', '/tools/isilon-dirusage/test', { id: 'tgt-remote', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', agent: 'edge-a', path: ROOT });
+    assert.equal(tst.status, 200, tst.text);
+    assert.equal(tst.body.via, 'edge');
+    assert.equal(tst.body.node, 'edge-a');
+    assert.equal(tst.body.ok, true, tst.text);
+    assert.ok(fk.st.commands.includes(`ls -d '${ROOT}'`), '연결 시험은 그 엣지에서 ls -d 만 한다');
+
+    // 다른 설정 pull 이 진행 중이면(요청이 큐에 들어가기 전에 시작했을 수 있다) 끝난 뒤 한 번 더 받는다.
+    const pull = await import('../src/agent/isiduConfigPull.js');
+    const EO = await import('../src/isidu/edgeOps.js');
+    const p1 = pull.pullIsiduConfigNow();
+    const n2 = await EO.edgeIsiduNudge();
+    await p1;
+    assert.equal(n2.ok, true, JSON.stringify(n2));
+
+    const R2 = await import('../src/central/isiduRemote.js');
+    assert.equal((await R2.nudgeIsiduEdge('edge-old')).kind, 'old-version', '경로가 없는 구버전 엣지(401)는 토큰 문제가 아니라 버전 문제다');
+    assert.equal((await R2.nudgeIsiduEdge('edge-down')).kind, 'unreachable');
+    assert.equal((await R2.nudgeIsiduEdge('edge-none')).kind, 'not-registered');
+    const bad = await fetch(`http://127.0.0.1:${es.address().port}/api/collector/isidu-run`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Collector-Token': 'wrong' }, body: '{}' });
+    assert.equal(bad.status, 403, '토큰이 틀리면 엣지가 거부한다');
+    const badT = await fetch(`http://127.0.0.1:${es.address().port}/api/collector/isidu-test`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Collector-Token': 'coltok-2736' }, body: JSON.stringify({ target: { id: 'x', host: '127.0.0.1', username: 'admin', path: "/ifs/a'; id" } }) });
+    assert.equal(badT.status, 400, '엣지도 경로를 다시 검증한다(메인이 보낸 값도 원격 셸에 들어간다)');
+  } finally { console.warn = quiet; Object.assign(config.agent, keep); }
 });

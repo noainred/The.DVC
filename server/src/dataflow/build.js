@@ -44,7 +44,7 @@ export const CATS = Object.freeze([
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
   // v2.736: 아이실론 디렉터리 사용량(엣지가 그 법인 아이실론에 SSH 로 du — 대상 pull · 결과 push)도 스토리지 칸이다.
-  { id: 'storage', label: '스토리지', test: /^central:\/(storage-(data|config)|bmstor-(jobs|result)|isidu-(data|config))$|^collector:\/bmstor-collect$/ },
+  { id: 'storage', label: '스토리지', test: /^central:\/(storage-(data|config)|bmstor-(jobs|result)|isidu-(data|config))$|^collector:\/(bmstor-collect|isidu-(run|test))$/ },
   // v2.608: Arista CloudVision(CVP) 도 같은 '스위치' 칸에 둔다(웹 CAT_COLOR 에 새 칸을 만들지 않으려고 — 라벨이 그 사실을 말한다).
   { id: 'san', label: 'SAN·네트워크 스위치', test: /^central:\/(sanswitch-(data|config|perf|test-result)|cvp-(data|config))$/ },
   // v2.735: 법인 간 전송 속도 측정(중앙이 엣지와 10MB 를 주고받는다)도 회선 감시라 이 칸이다.

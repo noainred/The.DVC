@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-13T01:41:09.390Z",
-  "count": 108,
+  "generatedAt": "2026-10-14T11:21:43.914Z",
+  "count": 109,
   "tools": [
     {
       "k": "service-hub",
@@ -796,6 +796,14 @@
     },
     {
       "k": "dir-usage",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "isilon-dirusage",
       "adminOnly": true,
       "perm": null,
       "external": null,

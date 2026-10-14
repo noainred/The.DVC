@@ -13,7 +13,8 @@
  * ── 이 라우트가 하지 않는 것 ────────────────────────────────────────────────
  *  · 조회는 DB·등록부만 읽는다 — 장비 왕복 0. 조사(du)는 폴러가 주기로, 또는 '지금 수집' 으로만 한다.
  *  · 비밀을 응답에 싣지 않는다(공개키는 비밀이 아니다 — 아이실론의 authorized_keys 에 넣을 값이다).
- *  · '연결 시험' 은 경로 확인(ls -d)만 한다 — du 를 돌리지 않는다(수십 분 걸린다). 엣지 담당 대상은 중앙에서 시험할 수 없다.
+ *  · '연결 시험' 은 경로 확인(ls -d)만 한다 — du 를 돌리지 않는다(수십 분 걸린다). 엣지 담당 대상은 **그 엣지가** 시험한다(v2.736 —
+ *    메인이 엣지의 수집 서버 URL 로 직접 요청, iDRAC PUSH 스캔과 같은 길. `central/isiduRemote.js`).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
@@ -25,15 +26,17 @@ import { ssrfBlockReason } from '../../collector/registry.js';
 import { listDevices, registryLoadError as storageRegistryLoadError } from '../../storage/registry.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
-import { withSsh, withDeadline } from '../../proxy/sshExec.js';
 import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from '../../isidu/settings.js';
-import { SIZE_MODES, duCommand, normPath } from '../../isidu/parse.js';
+import { SIZE_MODES, duCommand } from '../../isidu/parse.js';
 import { keyInfo, publicKeyView, ensureKey, keyDir, KEY_FILE_NAME } from '../../isidu/sshKey.js';
-import { credsFor, authGuard, authStopOf, FAIL_KINDS } from '../../isidu/collect.js';
+import { authGuard, authStopOf, FAIL_KINDS, testTargetPath } from '../../isidu/collect.js';
 import { isiduPollerStatus, runNow, FAIL_RETRY_MS } from '../../isidu/poller.js';
 import { requestIsiduCollect, isiduRequestState, recentIsiduDrops } from '../../isidu/collectRequests.js';
 import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
 import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX } from '../../isidu/report.js';
+import { nudgeIsiduEdge, testIsiduOnEdge, MIN_ISIDU_EDGE_VERSION } from '../../central/isiduRemote.js';
+import { edgeTargetView } from '../../isidu/settings.js';
+import { poolSettled } from '../../util/pool.js';
 import { HISTORY_AGENT } from '../../isidu/targets.js';
 import * as db from '../../isidu/db.js';
 import { isMockMode } from '../../mock/demo/flags.js';
@@ -67,6 +70,8 @@ async function targetRows() {
       id: r.id, label: r.label || '', path: r.path, sizeMode: r.sizeMode, intervalHours: r.intervalHours, timeoutMin: r.timeoutMin, topN: r.topN,
       enabled: r.enabled !== false, auth: r.auth, port: r.port, username: r.username || '',
       deviceId: r.deviceId || '', deviceName: r.deviceName || '', host: r.host || '', agent: ag,
+      // v2.736: 실행 노드의 근거 — 'device'(장비 담당 노드) · 'override'(실행 노드 지정) · 'direct'(직접 입력 대상의 노드).
+      agentSource: r.agentSource || 'direct', runVia: r.runVia || (r.deviceId ? 'device' : ''), deviceAgent: r.deviceAgent ?? null,
       datacenterId: r.datacenterId || '', corp: r.datacenterId ? (dcs.get(r.datacenterId) || r.datacenterId) : '',
       issue: r.issue || null, deviceDisabled: !!r.deviceDisabled,
       okScan: l?.okScan ? { id: l.okScan.id, ts: l.okScan.ts, durationMs: l.okScan.durationMs, count: l.okScan.count, total: l.okScan.total, sumBytes: l.okScan.sumBytes, errLines: l.okScan.errLines || 0, node: l.okScan.node || '' } : null,
@@ -191,7 +196,11 @@ api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) 
   res.json({ ok: true, settings: r.settings });
 });
 
-/** 지금 수집 — 중앙 담당은 바로 시작, 엣지 담당은 요청을 남긴다(엣지가 다음 설정 pull 에 가져간다). 기다리지 않는다. */
+/**
+ * 지금 수집 — 중앙 담당은 바로 시작, 엣지 담당은 요청을 큐에 남기고 **그 엣지에 바로 알린다**(v2.736 — 엣지가 설정을 지금 다시 받아
+ * 요청을 꺼낸다). 알림이 실패해도 요청은 큐에 남아 엣지의 다음 설정 pull(기본 5분)이 가져간다 — 응답 `nudged` 가 엣지마다 그 결과를 말한다.
+ * du 결과는 기다리지 않는다(수십 분).
+ */
 api.post('/tools/isilon-dirusage/run', adminOnly, fullScopeOnly, async (req, res) => {
   const want = Array.isArray(req.body?.ids) ? req.body.ids.map(t).filter(Boolean).slice(0, MAX_TARGETS) : null;
   const devices = listDevices();
@@ -207,8 +216,12 @@ api.post('/tools/isilon-dirusage/run', adminOnly, fullScopeOnly, async (req, res
     } else local.push(r.id);
   }
   const lr = local.length ? await runNow(local, { trigger: 'manual' }) : { started: [], busy: [], notHere: [] };
-  logAudit({ user: req.user?.username, action: 'isidu.run', target: want ? want.join(',').slice(0, 200) : '(전체)', detail: `started=${lr.started.length} requested=${requested.length}`, ip: req.ip });
-  res.status(202).json({ ok: true, started: lr.started, busy: lr.busy, notHere: lr.notHere, requested, duplicate, issues, notFound });
+  // 요청을 넣은 엣지마다 한 번씩(대소문자 무시) — 같은 엣지의 대상이 여럿이어도 알림은 하나다. 동시 4, 재시도 없음.
+  const agents = [...new Map([...requested, ...duplicate].map((x) => [lo(x.agent), x.agent])).values()];
+  const nudged = (await poolSettled(agents, 4, (agent) => nudgeIsiduEdge(agent)))
+    .map((x, i) => ({ agent: agents[i], ...(x.status === 'fulfilled' ? x.value : { ok: false, kind: 'unreachable', reason: String(x.reason?.message || x.reason).slice(0, 300) }) }));
+  logAudit({ user: req.user?.username, action: 'isidu.run', target: want ? want.join(',').slice(0, 200) : '(전체)', detail: `started=${lr.started.length} requested=${requested.length} nudged=${nudged.filter((x) => x.ok).length}/${nudged.length}`, ip: req.ip });
+  res.status(202).json({ ok: true, started: lr.started, busy: lr.busy, notHere: lr.notHere, requested, duplicate, issues, notFound, nudged, minEdgeVersion: MIN_ISIDU_EDGE_VERSION });
 });
 
 /**
@@ -223,26 +236,20 @@ api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, re
   const r = resolveTarget(n.target, { devices: listDevices() });
   if (r.issue) return res.status(409).json({ ok: false, reason: r.issue === 'device-missing' ? '스토리지 등록부에 그 아이실론이 없습니다.' : '고른 장비가 아이실론이 아닙니다.' });
   if (t(r.agent)) {
-    return res.status(409).json({ ok: false, edge: true, agent: r.agent,
-      reason: `이 대상은 엣지 ‘${r.agent}’ 가 조사합니다 — 중앙에서는 그 아이실론에 닿지 않을 수 있어 시험하지 않습니다. 저장한 뒤 '지금 수집' 으로 확인하세요(결과가 이 화면에 올라옵니다).` });
+    // v2.736: 엣지 담당 대상은 **그 엣지가** 시험한다(메인이 엣지의 수집 서버 URL 로 요청 — iDRAC PUSH 스캔과 같은 길).
+    // 보내는 것은 비밀 없는 대상 사본(edgeTargetView)뿐이다 — 엣지는 자기 키·자기 스토리지 등록부로 접속한다.
+    const x = await testIsiduOnEdge(r.agent, edgeTargetView(r));
+    logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port} via ${r.agent}`, detail: x.ok ? 'ok' : `fail: ${String(x.reason || x.kind || '').slice(0, 120)}`, ip: req.ip });
+    return res.json({ ...x, command: x.command || duCommand(r.path, r.sizeMode) });
   }
-  if (String(r.id).startsWith('mock-')) return res.json({ ok: true, demo: true, ms: 0, out: `${normPath(r.path)} (데모 — 접속하지 않았습니다)` });
-  const c = await credsFor(r);
-  if (c.error) return res.status(409).json({ ok: false, kind: c.kind, reason: c.error });
-  const started = Date.now();
-  try {
-    const x = await withDeadline(40_000, (signal) => withSsh({ ...c.creds, signal }, (sh) => sh.exec(`ls -d '${normPath(r.path)}'`, 30_000)), '연결 시험 시한 초과');
-    const out = String(x?.stdout || '').trim().split('\n')[0].slice(0, 300);
-    const err = String(x?.stderr || '').trim().split('\n')[0].slice(0, 300);
-    const ok = x?.code === 0 && out.length > 0;
-    if (ok && prev) authGuard.clearAuthStop(prev.id);   // 저장된 대상의 시험이 성공하면 인증 정지를 푼다(v2.590 규약)
-    logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: ok ? 'ok' : `code=${x?.code}`, ip: req.ip });
-    res.json({ ok, ms: Date.now() - started, out, err, code: x?.code ?? null, command: duCommand(r.path, r.sizeMode),
-      ...(ok ? {} : { reason: err || `종료코드 ${x?.code} — 경로가 없거나 그 계정에 읽기 권한이 없습니다` }) });
-  } catch (e) {
-    logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: `fail: ${String(e.message).slice(0, 120)}`, ip: req.ip });
-    res.json({ ok: false, ms: Date.now() - started, reason: e.message });
+  const x = await testTargetPath(r, { clearStopId: prev ? prev.id : '' });   // 저장된 대상의 시험이 성공하면 인증 정지를 푼다(v2.590 규약)
+  if (x.demo) return res.json({ ...x, via: 'main', node: '' });
+  if (x.attempted === false) {
+    // 접속 정보를 만들지 못했다(키 없음·등록부에 장비 없음) — 접속은 시도하지 않았다.
+    return res.status(409).json({ ok: false, via: 'main', node: '', kind: x.kind, reason: x.reason });
   }
+  logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: x.ok ? 'ok' : `fail: ${String(x.reason || '').slice(0, 120)}`, ip: req.ip });
+  res.json({ ...x, via: 'main', node: '' });
 });
 
 /** 이 노드(중앙)의 SSH 키 만들기 — 없을 때만. 공개키를 돌려준다(아이실론 authorized_keys 에 넣을 값). */

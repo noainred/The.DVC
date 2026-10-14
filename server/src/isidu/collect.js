@@ -3,7 +3,7 @@
  *
  * ── 지키는 것 ────────────────────────────────────────────────────────────────
  *  · 접속은 `proxy/sshExec.js withSsh` 하나 — 호스트키 확인(장비 신뢰, S-01)이 인증 **전에** 걸린다. ssh2 를 직접 열지 않는다.
- *  · 시한은 세션을 실제로 끊는다(`withDeadline` + signal — v2.417). 명령 시한은 대상 설정(최대 30분 — sshExec 관문과 같은 상한).
+ *  · 시한은 세션을 실제로 끊는다(`withDeadline` + signal — v2.417). 명령 시한은 대상 설정(최대 120분 — sshExec 긴 명령 관문 `{ long: true }`).
  *  · 인증 거부는 **주기 수집을 멈춘다**(util/authGuard — 계정 잠금 방지). 키나 계정이 바뀌면 자동 재개, 수동 실행은 막지 않는다.
  *    호스트키 거부는 인증 실패가 아니다(`isSshAuthError` 가 가른다 — 승인하면 바로 붙어야 한다).
  *  · du 는 권한 오류가 있어도 종료코드 1 로 끝나며 나머지 결과를 낸다 — 해석된 폴더가 있으면 성공으로 적고 오류 줄 수를 함께 남긴다
@@ -14,6 +14,7 @@ import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
 import { parseDuOutput, duCommand, totalsOf } from './parse.js';
 import { privateKeyForConnect, keyInfo, ensureKey } from './sshKey.js';
 import { isMockMode } from '../mock/demo/flags.js';
+import { sessionPlanOf } from './settings.js';
 
 export const authGuard = createAuthGuard({ file: 'isidu-auth-stops.json' });
 
@@ -91,10 +92,10 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false } 
       const stop = authGuard.authStopFor(c.credId);
       if (stop) return fail('auth', `인증 거부로 주기 수집을 멈췄습니다(${new Date(stop.since).toISOString()} 이후 ${stop.attempts}회) — 키·계정이 바뀌면 자동으로 다시 시도합니다. '지금 수집' 은 막지 않습니다`, { authStopped: true });
     }
-    const timeoutMs = Math.max(60_000, Math.min(30, Number(t.timeoutMin) || 30) * 60_000);
+    const plan = sessionPlanOf(t);
     try {
-      const r = await withDeadline(timeoutMs + 30_000, (signal) => withSsh({ ...c.creds, signal }, async (api) => {
-        const x = await api.exec(duCommand(t.path, t.sizeMode), timeoutMs);
+      const r = await withDeadline(plan.sessionMs, (signal) => withSsh({ ...c.creds, signal }, async (api) => {
+        const x = await api.exec(duCommand(t.path, t.sizeMode), plan.cmdMs, { long: true });
         return { x };
       }), 'du 시한 초과');
       stdout = r.x?.stdout || ''; stderr = r.x?.stderr || ''; code = r.x?.code ?? null;
@@ -117,4 +118,33 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false } 
     skipped: parsed.skipped, errLines: parsed.errLines, errSample: parsed.errSample, truncated: parsed.truncated,
     entries: parsed.entries,
   };
+}
+
+/**
+ * 연결 시험 — 경로가 있는지만 본다(`ls -d`, du 는 돌리지 않는다). 메인 라우트와 엣지 원격 시험(`/api/collector/isidu-test`)이 같은 함수를 쓴다.
+ * 이 노드의 키·등록부로 접속한다(엣지면 엣지의 키 — 메인이 대신 접속하지 않는다).
+ * @param {object} r  실행 정보(resolveTarget 결과 또는 cleanEdgeTarget 결과)
+ * @param {{clearStopId?:string}} [o]  성공하면 이 id 의 인증 정지를 푼다(저장된 대상일 때만 — v2.590 규약)
+ * @returns {Promise<{ok:boolean, ms:number, out?:string, err?:string, code?:number|null, command:string, reason?:string, kind?:string, demo?:boolean, keyCreated?:boolean, attempted?:false}>}
+ *   `attempted:false` = 접속 정보를 만들지 못해 접속을 시도하지 않았다(키 없음·등록부에 장비 없음).
+ */
+export async function testTargetPath(r, { clearStopId = '' } = {}) {
+  const command = duCommand(r.path, r.sizeMode);
+  if (String(r.id || '').startsWith('mock-') && isMockMode()) return { ok: true, demo: true, ms: 0, out: `${r.path} (데모 — 접속하지 않았습니다)`, command };
+  const c = await credsFor(r);
+  if (c.error) return { ok: false, ms: 0, kind: c.kind, reason: c.error, command, attempted: false };
+  const started = Date.now();
+  try {
+    const x = await withDeadline(40_000, (signal) => withSsh({ ...c.creds, signal }, (sh) => sh.exec(`ls -d '${r.path}'`, 30_000)), '연결 시험 시한 초과');
+    const out = String(x?.stdout || '').trim().split('\n')[0].slice(0, 300);
+    const err = String(x?.stderr || '').trim().split('\n')[0].slice(0, 300);
+    const ok = x?.code === 0 && out.length > 0;
+    if (ok && clearStopId) authGuard.clearAuthStop(clearStopId);
+    return { ok, ms: Date.now() - started, out, err, code: x?.code ?? null, command, ...(c.keyCreated ? { keyCreated: true } : {}),
+      ...(ok ? {} : { reason: err || `종료코드 ${x?.code} — 경로가 없거나 그 계정에 읽기 권한이 없습니다` }) };
+  } catch (e) {
+    const kind = classify(e);
+    return { ok: false, ms: Date.now() - started, kind, command, ...(c.keyCreated ? { keyCreated: true } : {}),
+      reason: kind === 'hostkey' ? `${e.message} — 설정 › 보안 › 장비 신뢰에서 이 아이실론의 호스트키 지문을 확인하고 승인하세요` : e.message };
+  }
 }

@@ -25,7 +25,7 @@ const _log = createChangeLogger({ windowMs: 10 * 60_000 });
 let _timer = null; let _last = null; let running = false; let _lastSig = '';
 
 export async function pullIsiduConfigNow() {
-  if (running) return { ok: false, reason: '이전 pull 진행 중(겹침 방지)' };
+  if (running) return { ok: false, busy: true, reason: '이전 pull 진행 중(겹침 방지)' };
   running = true;
   try { return await _pull(); } finally { running = false; }
 }
@@ -61,13 +61,17 @@ async function _pull() {
       if (keyCreated) import('../isidu/push.js').then((m) => m.pushIsiduNow()).catch(() => {});
     }
     const wants = Array.isArray(body?.runNow) ? body.runNow.filter((x) => typeof x === 'string').slice(0, 5) : [];
+    let started = null;
     if (wants.length) {
-      runNow(wants, { trigger: 'central' }).then((r) => {
+      // runNow 는 시작만 하고 기다리지 않는다(du 는 수십 분) — 시작한 id 만 받아 둔다(원격 실행 응답이 그것을 말한다).
+      try {
+        const r = await runNow(wants, { trigger: 'central' });
+        started = r.started;
         if (r.notHere.length) console.warn(`[isidu-config] 중앙 요청 수집 중 이 엣지에 없는 대상 ${r.notHere.length}개 — 대상 사본이 아직 갱신되지 않았을 수 있습니다`);
-      }).catch((e) => console.warn(`[isidu-config] 중앙 요청 수집 실패: ${e.message}`));
+      } catch (e) { console.warn(`[isidu-config] 중앙 요청 수집 실패: ${e.message}`); }
     }
     _last = { at: Date.now(), ok: true, count: targets.length, ...(applied ? { applied: applied.applied, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }), ...(keyCreated ? { keyCreated: true } : {}), runRequested: wants.length };
-    return { ok: true, count: targets.length, runRequested: wants.length };
+    return { ok: true, count: targets.length, runRequested: wants.length, started: started || [] };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };
     if (_log('pull', e.message)) console.warn(`[isidu-config] 중앙 대상 pull 실패: ${e.message}`);
