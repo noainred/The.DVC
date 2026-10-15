@@ -123,6 +123,9 @@ describe('v2.736.1 — 검증 기록이 재시작을 넘어 남는다', () => {
     expect(v.detail).toBe(NO_RECORD_DETAIL);
     expect(v.detail).toContain('install.sh');
     expect(v.detail).toContain('2.736.1');
+    // 적대적 리뷰 확인분: install.sh 는 신규 설치·manifest 없음 등에서 확인을 건너뛴다 — '확인했다' 고 단정하지 않는다
+    expect(v.detail).toContain('건너뛸 수');
+    expect(v.detail).not.toMatch(/따로 확인했/);
   });
   it('서버가 기록 상태를 보내지 않으면(예전 서버) 예전 문구 그대로', () => {
     expect(lastVerifyText({ last: null }).text).toBe('아직 검증한 번들이 없습니다');

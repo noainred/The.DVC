@@ -117,6 +117,20 @@ test('③ 재시작 전 기록은 beforeStart · 최신 먼저 · 최대 SIG_LOG
   assert.ok(sig.signatureStatus().recent.length <= 5, '화면에는 최근 5건만');
 });
 
+test('③-b 다시 읽을 때 쓴 순서를 지킨다 — 그사이 시계가 뒤로 맞춰져도 재시작 전후 마지막이 같다', () => {
+  restart();
+  try { fs.rmSync(LOG()); } catch { /* */ }
+  sig.enableSignatureLog({ configDir: CFG });
+  const now = Date.now();
+  // 먼저 기록한 거부(60초 전) → 시계가 뒤로 1시간 조정된 뒤 기록한 확인(벽시계로는 더 이른 시각)
+  sig.recordVerification({ at: now - 60_000, where: 'push-edge', ok: false, verified: false, version: '2.736.9', policy: 'require' });
+  sig.recordVerification({ at: now - 3_600_000, where: 'remote', ok: true, verified: true, version: '2.737.0', policy: 'require' });
+  assert.equal(sig.signatureStatus().last.version, '2.737.0', '재시작 전 마지막');
+  restart();
+  sig.enableSignatureLog({ configDir: CFG });
+  assert.equal(sig.signatureStatus().last.version, '2.737.0', '재시작 뒤에도 같은 기록이 마지막이다(시각으로 다시 정렬하지 않는다)');
+});
+
 test('④ 손상 파일은 보존 후 새로 시작하고, 그 사실을 상태에 싣는다', () => {
   restart();
   for (const f of fs.readdirSync(CFG)) if (f.includes('.corrupt.')) fs.rmSync(path.join(CFG, f));

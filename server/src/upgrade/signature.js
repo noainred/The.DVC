@@ -115,7 +115,8 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile() 
  * 사용자 신고(2.736.0 업그레이드 화면 캡처): '마지막 검증 — 아직 검증한 번들이 없습니다'. 기록이 프로세스 메모리에만 있었는데
  * 업그레이드는 새 번들을 확인한 **직후 재시작**하므로 그 기록은 재시작과 함께 사라졌고, 평소의 '업데이트 확인' 은 새 버전이
  * 없으면 검증하지 않아 다시 채워지지도 않았다. 그래서 운영 포탈에서 이 줄은 사실상 언제나 비어 '검증한 적이 없다' 로 읽혔다
- * (지금 실행 중인 버전은 설치 때 확인을 통과했다 — 서명 필수 정책에서 통과하지 못한 번들은 설치되지 않는다).
+ * (앱 안 업그레이드로 설치한 버전이면 설치 때 확인을 거쳤다 — 서명 필수 정책에서는 통과하지 못한 번들을 설치하지 않는다.
+ *  install.sh 설치의 확인 결과는 그 설치 로그에만 있고, 신규 설치 등은 확인을 건너뛴다 — release-verify-lib.sh).
  * 이제 최근 기록(최신 먼저, SIG_LOG_MAX 개)을 상태 파일에 남긴다. 규칙:
  *  - 파일에 쓰는 것은 서버 프로세스가 `enableSignatureLog()` 를 부른 뒤뿐이다 — 오프라인 확인 도구(verifyCli — install.sh 가
  *    root 로 부를 수 있다)와 테스트가 import 만으로 CONFIG_DIR 에 쓰지 않게(root 소유 파일이 남으면 서비스 계정이 못 고친다).
@@ -159,7 +160,8 @@ function readSigLog(file) {
     const kept = preserveCorrupt(file, 'upgrade-signature-log');
     return { recent: [], error: '검증 기록 파일이 손상되어 새로 시작했습니다', corruptKept: kept ? path.basename(kept) : null };
   }
-  const recent = doc.recent.map(sanitizeSigEntry).filter(Boolean).sort((a, b) => b.at - a.at).slice(0, SIG_LOG_MAX);
+  // 쓴 순서(최신 먼저)를 그대로 쓴다 — 벽시계 at 으로 다시 정렬하면 그사이 시계가 뒤로 맞춰진 경우 재시작 뒤 '마지막' 이 바뀐다.
+  const recent = doc.recent.map(sanitizeSigEntry).filter(Boolean).slice(0, SIG_LOG_MAX);
   return { recent };
 }
 
@@ -171,8 +173,7 @@ export function enableSignatureLog({ configDir = config.configDir } = {}) {
   const file = sigLogFile(configDir);
   const r = readSigLog(file);
   const seen = new Set(_recent.map((e) => `${e.at}|${e.where}|${e.name || ''}`));
-  const merged = [..._recent, ...r.recent.filter((e) => !seen.has(`${e.at}|${e.where}|${e.name || ''}`))];
-  _recent = merged.sort((a, b) => b.at - a.at).slice(0, SIG_LOG_MAX);
+  _recent = [..._recent, ...r.recent.filter((e) => !seen.has(`${e.at}|${e.where}|${e.name || ''}`))].slice(0, SIG_LOG_MAX);
   _log = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, loadedCount: r.recent.length };
   if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
   return { loaded: r.recent.length, error: r.error || null };

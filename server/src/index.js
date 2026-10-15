@@ -43,8 +43,8 @@ import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
-import { setShutdownHandler } from './upgrade/upgrade.js';
-import { enableSignatureLog } from './upgrade/signature.js';   // v2.736.1: 서명 검증 기록(마지막 검증)을 재시작 뒤에도 보인다   // v2.604 TIM2604-01: 업그레이드 재시작도 정상 종료 경로로
+import { setShutdownHandler } from './upgrade/upgrade.js';   // v2.604 TIM2604-01: 업그레이드 재시작도 정상 종료 경로로
+import { enableSignatureLog } from './upgrade/signature.js';   // v2.736.1: 서명 검증 기록(마지막 검증)을 재시작 뒤에도 보인다
 import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
