@@ -48,9 +48,12 @@ export function attemptTimeoutMs(totalMs) {
  * 헤더 대기 = 저장소가 아직 응답을 시작하지 않음(사내 미러가 원본을 받아 오는 중일 수 있다) · 본문 = 회선이 느리거나 전송이 멈춤).
  * 앞머리 `<what> 을 전체 시한(N초) 안에 다 받지 못해 중단했습니다` 는 그대로 둔다(기존 화면·로그가 그 문구로 찾는다).
  */
-export function metaTimeoutReason(what, { totalMs, attemptMs, attempts, phase }) {
+export function metaTimeoutReason(what, { totalMs, attemptMs, attempts, phase, hedgeMs = 0 }) {
   const head = `${what} 을 전체 시한(${Math.round(totalMs / 1000)}초) 안에 다 받지 못해 중단했습니다`;
-  const tries = `시도 ${Math.max(1, attempts || 1)}번 · 시도당 최대 ${Math.round(attemptMs / 1000)}초`;
+  // v2.740.1: 함께 보내기(hedgedFetch)면 시도마다 시한이 따로 없다 — 앞 시도를 끊지 않고 다음 시도를 같이 보낸 사실을 말한다.
+  const tries = hedgeMs > 0
+    ? `시도 ${Math.max(1, attempts || 1)}번 · 앞 시도가 ${Math.round(hedgeMs / 1000)}초 안에 응답하지 않으면 끊지 않고 다음 시도를 함께 보냄`
+    : `시도 ${Math.max(1, attempts || 1)}번 · 시도당 최대 ${Math.round(attemptMs / 1000)}초`;
   if (phase === 'body') {
     return `${head} — 응답은 시작했지만 본문을 끝까지 받지 못했습니다(${tries}). 회선이 느리거나 저장소가 전송을 멈췄습니다.`;
   }

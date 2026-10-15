@@ -101,7 +101,7 @@ test('⑤ 끝내 응답이 없으면 — 앞머리는 그대로, 헤더 대기·
   assert.equal(doc, null);
   assert.match(err, /^versions\.json 을 전체 시한\(6초\) 안에 다 받지 못해 중단했습니다/, '기존 화면·로그가 찾는 앞머리');
   assert.match(err, /응답\(헤더\)을 시작하지 않았습니다/);
-  assert.match(err, /시도 [12]번/);
+  assert.match(err, /시도 [1-3]번/);   // v2.741: 함께 보내기면 시한 안에 2~3번이 나갈 수 있다
   assert.match(err, /UPGRADE_CHECK_TIMEOUT_MS/);
   assert.ok(n >= 1);
 });
