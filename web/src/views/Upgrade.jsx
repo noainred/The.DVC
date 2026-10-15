@@ -5,7 +5,7 @@ import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.
 import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
-import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel } from './upgradeAutoText.js';
+import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
 
 // 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
 const baseKey = (v) => {
@@ -326,11 +326,16 @@ export default function Upgrade() {
             {busy === 'check' ? '확인 중…' : '새 버전 확인'}
           </button>
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px', background: newer ? 'linear-gradient(135deg,var(--green),#16a34a)' : undefined }}
-            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }))}>
+            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => {
+              // v2.737: 수동 적용은 실행 중 스캔을 기다리지 않는다 — 끊긴다는 사실을 먼저 말한다(재시작 뒤 자동 재개).
+              const warn = runningScanWarning(status);
+              if (warn && !window.confirm(warn)) return;
+              run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }));
+            }}>
             {busy === 'apply' ? '적용 중…' : '업그레이드 적용 + 재시작'}
           </button>
           <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy}
-            onClick={() => run('restart', () => postJson('/upgrade/restart'))}>
+            onClick={() => { const warn = runningScanWarning(status); if (warn && !window.confirm(warn)) return; run('restart', () => postJson('/upgrade/restart')); }}>
             {busy === 'restart' ? '재시작 중…' : '프로세스 재시작'}
           </button>
         </div>

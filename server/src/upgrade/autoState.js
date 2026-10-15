@@ -30,10 +30,11 @@ export const AUTO_CODES = Object.freeze([
   'no-install-dir',  // 설치 경로 없음 — 적용할 수 없다
   'check-failed',    // 마지막 확인이 실패했다(사유 동봉)
   'apply-failed',    // 마지막 적용이 실패했다(사유 동봉)
+  'deferred-scans',  // v2.737: 새 버전을 찾았지만 실행 중인 스캔이 끝나기를 기다리는 중(상한 UPGRADE_SCAN_DEFER_MAX_MS — 넘으면 적용)
 ]);
 export const AUTO_STATES = Object.freeze(['on', 'check-only', 'manual', 'off', 'blocked']);
 /** 백그라운드 확인 한 번의 결과 — 웹 `TICK_TEXT` 의 키와 1:1. */
-export const TICK_OUTCOMES = Object.freeze(['up-to-date', 'available', 'applying', 'applied', 'apply-failed', 'check-failed', 'no-source', 'error']);
+export const TICK_OUTCOMES = Object.freeze(['up-to-date', 'available', 'applying', 'applied', 'apply-failed', 'check-failed', 'no-source', 'error', 'deferred']);
 
 const VER_RE = /^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/;
 const ver = (v) => (typeof v === 'string' && VER_RE.test(v.trim()) ? v.trim().replace(/^v/i, '') : null);
@@ -181,7 +182,7 @@ export function failureMoot(lastResult, lastTick, currentVersion) {
  * @param {number} o.now
  * @returns {{state:string, issues:{code:string, reason?:string, at?:number, version?:string}[], intervalMs:number, nextCheckAt:number|null, armed:boolean}}
  */
-export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, currentVersion = null, now = Date.now() } = {}) {
+export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, currentVersion = null, deferral = null, now = Date.now() } = {}) {
   const s = settings || {};
   const ms = num(intervalMs) ?? 0;
   const issues = [];
@@ -203,6 +204,10 @@ export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null
     issues.push({ code: 'check-failed', reason: lastTick.reason, at: lastTick.at });
   }
 
+  // v2.737: 실행 중 스캔이 끝나기를 기다리는 중 — 언제부터·언제까지(상한)·무엇을.
+  const d = sanitizeDeferral(deferral);
+  if (d) issues.push({ code: 'deferred-scans', at: d.since, until: d.until, version: d.latest || undefined, scans: d.scans.length, reason: d.scans.slice(0, 3).map((x) => x.label || x.kind).join(', ') || null });
+
   let state;
   if (!hasSource || (s.autoApply && !s.installDir && ms > 0)) state = 'blocked';
   else if (ms <= 0) state = 'manual';
@@ -210,4 +215,14 @@ export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null
   else state = 'on';
   const armed = ts(armedAt) != null && ms > 0;
   return { state, issues, intervalMs: ms, armed, nextCheckAt: armed ? nextCheckAt({ armedAt, intervalMs: ms, now }) : null };
+}
+
+/** 업그레이드 대기 기록 정제(v2.737) — 화면 응답·판정 공용. 대기 중이 아니면 null. */
+export function sanitizeDeferral(d) {
+  if (!d || typeof d !== 'object') return null;
+  const since = ts(d.since);
+  if (since == null) return null;
+  const scans = Array.isArray(d.scans) ? d.scans.filter((x) => x && typeof x === 'object').slice(0, 20)
+    .map((x) => ({ kind: txt(x.kind, 32) || '', label: txt(x.label, 120) || '', since: ts(x.since) })) : [];
+  return { since, until: ts(d.until), latest: ver(d.latest), scans };
 }

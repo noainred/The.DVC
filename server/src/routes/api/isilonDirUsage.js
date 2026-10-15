@@ -58,7 +58,11 @@ async function targetRows() {
   const dcs = new Map(dcList().map((d) => [d.id, d.name]));
   const latest = await db.latestAll();
   const byId = new Map((latest || []).filter((r) => r.agent === HISTORY_AGENT).map((r) => [r.targetId, r]));
-  const pollerRunning = new Map(isiduPollerStatus().running.map((r) => [r.targetId, r]));
+  const ps = isiduPollerStatus();
+  const pollerRunning = new Map(ps.running.map((r) => [r.targetId, r]));
+  const pollerInterrupted = new Map((ps.interrupted || []).map((r) => [r.targetId, r]));     // v2.737: 재시작으로 중단 · 재개 대기
+  const pollerResumes = new Map();
+  for (const r of ps.resumes || []) if (!pollerResumes.has(r.targetId)) pollerResumes.set(r.targetId, r);
   const edges = new Map(allIsiduEdgeStatus().map((e) => [lo(e.agent), e]));
   return Promise.all(loadSettings().targets.map(async (tg) => {
     const r = resolveTarget(tg, { devices });
@@ -66,6 +70,8 @@ async function targetRows() {
     const ag = t(r.agent);
     const edge = ag ? edges.get(lo(ag)) || null : null;
     const edgeRunning = edge?.status?.poller?.running?.find((x) => x.targetId === r.id) || null;
+    const edgeInterrupted = edge?.status?.poller?.interrupted?.find((x) => x.targetId === r.id) || null;
+    const edgeResume = edge?.status?.poller?.resumes?.find((x) => x.targetId === r.id) || null;
     return {
       id: r.id, label: r.label || '', path: r.path, sizeMode: r.sizeMode, intervalHours: r.intervalHours, timeoutMin: r.timeoutMin, topN: r.topN,
       enabled: r.enabled !== false, auth: r.auth, port: r.port, username: r.username || '',
@@ -79,6 +85,9 @@ async function targetRows() {
       failStreak: l?.failStreak || 0,
       running: ag ? (edgeRunning ? { since: edgeRunning.since, trigger: edgeRunning.trigger, reportedAt: edge.at } : null) : (pollerRunning.get(r.id) || null),
       request: ag ? isiduRequestState(r.id) : null,
+      // v2.737: 업그레이드·재시작으로 끝나지 못한 조사(재개 대기)와 마지막 자동 재개 결과 — 엣지 담당은 그 엣지의 보고.
+      interrupted: ag ? edgeInterrupted : (pollerInterrupted.get(r.id) || null),
+      lastResume: ag ? edgeResume : (pollerResumes.get(r.id) || null),
       // 엣지 담당 대상의 인증 정지는 엣지에 있다 — 중앙은 그 엣지의 마지막 시도 결과(kind 'auth')로만 안다.
       authStopped: ag ? null : await authStopOf(r),
     };

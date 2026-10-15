@@ -13,6 +13,9 @@ import { runScan, SCAN_DEADLINE_CODE } from '../ipam/scanRunner.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 import { centralStatusOnlySupport } from './centralStatusOnly.js'; // v2.733: 중앙 버전 확인(health-probe — 1시간 캐시) 공용
+// v2.737: 재시작으로 중단된 스캔 기록·재개. ⚠ 별칭으로 가져온다 — 아래 함수 안에 시작 시각 지역 변수 scanStarted 가 있어
+//   같은 이름으로 가져오면 그 지역 const 가 함수를 가려 TDZ ReferenceError 가 된다(v2.566 perfPush 와 같은 결함 — 전량 테스트가 잡았다).
+import { scanStarted as journalScanStarted, scanFinished as journalScanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js';
 
 let timer = null;
 let last = null;
@@ -99,7 +102,7 @@ async function reportScanIncomplete(err, durationMs) {
  */
 export async function runIpScanAgentOnce(...args) {
   // 인자는 rest 로 받는다 — edgeSweep2574 IMP-06 이 진입 함수를 '인자 없음 또는 ...rest' 모양으로 열거한다.
-  const { dueOnly = false, now = null } = (args[0] && typeof args[0] === 'object') ? args[0] : {};
+  const { dueOnly = false, now = null, resumeOf = null } = (args[0] && typeof args[0] === 'object') ? args[0] : {};
   if (!config.agent.centralUrl) return null;
   if (running) return last; // 이전 주기 진행 중이면 이번 틱 건너뜀
   running = true;
@@ -131,12 +134,14 @@ export async function runIpScanAgentOnce(...args) {
     phase = 'scan';
     const scanStarted = Date.now();
     let scanErr = null;
+    // v2.737: 실행 중 스캔 기록 — 업그레이드·재시작으로 끊기면 다음 기동이 '중단됨' 으로 기록한다(기동 40초 뒤 스캔이 다시 돈다 — 그 시작이 대기를 덮는다).
+    journalScanStarted('ipscan-agent', 'scan', { label: `IP 스캔(대역 ${Array.isArray(a.ranges) ? a.ranges.length : 0}개)`, trigger: resumeOf ? 'resume' : dueOnly ? 'periodic' : 'manual', resumeOf });
     try {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
       });
-    } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); }
+    } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); journalScanFinished('ipscan-agent', 'scan'); }
     if (scanErr) {
       // v2.733 C1-02: 실패를 중앙에 '스캔 미완료' 로 알린다(부분 결과 포함 — 위 reportScanIncomplete). 기록은 아래 catch 가 상태·콘솔에 남긴다.
       if (scanErr && typeof scanErr === 'object') scanErr.incompleteReport = await reportScanIncomplete(scanErr, _lastScanAt - scanStarted);
@@ -173,6 +178,16 @@ export async function runIpScanAgentOnce(...args) {
 
 let streak = 0;
 
+/** v2.737: 재시작으로 중단된 엣지 IP 스캔의 재개 — 기동 40초 뒤 스캔이 이미 다시 돌았으면 covered. */
+export async function resumeIpScanAgent(entry) {
+  if (!config.agent.centralUrl) return { outcome: 'skipped', note: 'CENTRAL_URL 이 없어 엣지 스캔을 하지 않습니다' };
+  if (running) return { outcome: 'covered', note: '이미 다시 스캔 중입니다' };
+  if (_lastScanAt != null && _lastScanAt >= (entry.detectedAt || 0)) return { outcome: 'covered', note: '재시작 뒤 스캔이 이미 끝났습니다' };
+  runIpScanAgentOnce({ resumeOf: entry }).catch(() => {});
+  return { outcome: 'started', note: '중앙 배정을 다시 읽고 스캔을 처음부터 다시 시작했습니다' };
+}
+registerScanResumer('ipscan-agent', resumeIpScanAgent);
+
 /** 테스트 전용 — 모듈 상태(주기·마지막 스캔·기록)를 처음으로 되돌린다. */
 export function _resetIpScanAgentForTest() {
   _centralIntervalMs = null; _lastScanAt = null; _lastCheckAt = null; _lastScanRecord = null; last = null; streak = 0;
@@ -191,6 +206,7 @@ export function ipScanAgentStatus() {
     enabled: !!config.agent.centralUrl, running, intervalMs: ipScanIntervalMs(),
     intervalSource: _centralIntervalMs != null ? 'central' : 'env', envIntervalMs: config.agent.scanIntervalMs,
     lastCheckAt: _lastCheckAt, lastScanAt: _lastScanAt, last,
+    journal: (() => { const j = journalFor('ipscan-agent'); return { interrupted: j.interrupted, recent: j.recent.slice(0, 5) }; })(), // v2.737
   };
 }
 

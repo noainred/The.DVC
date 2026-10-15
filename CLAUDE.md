@@ -3607,6 +3607,30 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 키는 `CONFIG_DIR/ssh`(서비스 계정은 홈이 없다) · 없으면 ECDSA P-256 SEC1 PEM 생성(ed25519 생성기 금지 — v2.590) · 개인키는 응답에 싣지 않는다 · 인증 거부는 주기 수집 정지(`isidu-auth-stops.json`).
     · 권한 adminOnly + fullScopeOnly(CSV + data.csv) · 데모는 `mock-` 대상만 합성(장비·엣지 접속 0). 엣지 원격 요청 상태는 엣지 로그 표 `pull.isiduRemote`.
     · ⚠ 정직 기록: 실제 OneFS 출력은 사용자 스크린샷 형식만 봤다(파서는 그 형식 + -k). 실제 원격 엣지·아이실론으로는 확인하지 못했다(같은 프로세스의 엣지 라우트·가짜 SSH 서버).
+  - ⚠⚠ **v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나**
+    (사용자 신고 "업그레이드 되면 scan 하던게 중단되는 버그" · 선택 ①+②+③ · 전체 검증. `util/scanJournal.js` + `isidu/detach.js` + 재개 함수 3곳
+    (`isidu/poller.js resumeIsidu`·`idrac/scanPoller.js resumeIdracScan`·`ipam/scanPoller.js resumeIpScan`) + `upgrade/manager.js` 대기 + 웹
+    `isiduText.js`·`upgradeAutoText.js`·`ipamScanLogText.js`. 회귀 `server/test/scanResume2737.test.js`(13) + `scanRestart2737.test.js`(실제 포탈 프로세스 SIGTERM → 재기동) —
+    변이 13/13):
+    · 스캔 시작 = `scanStarted(kind, key, {meta})` 가 `scan-journal.json`(상태 파일)에 **동기로** 적고, 끝 = `scanFinished` 가 지운다. 재시작으로 남은 항목은 모듈 로드 때
+      '중단됨' 이고 기동 뒤 `SCAN_RESUME_DELAY_MS`(기본 2분, [10초, 30분])에 그 kind 의 `registerScanResumer` 함수가 판정한다(started·covered·gone·skipped·busy).
+      재개 사슬 최대 2번(`RESUME_LIMIT`) · busy 는 5분 × 12번 · 48시간 넘은 기록은 expired · `SCAN_RESUME=0` 은 기록만. **meta 에 비밀을 넣지 말 것**(식별자만, 8KB 상한).
+      ⚠ 종료 경로(gracefulExit)가 기록을 지우면 이 기능이 통째로 죽는다 — 테스트가 SIGTERM 뒤 기록이 남아 있는지 본다. **새 장시간 스캔도 이 기록을 쓸 것**(kind 를 늘리면
+      웹 `SCAN_KIND_TEXT` 에도 — 웹 테스트가 서버 소스의 kind 리터럴과 대조한다).
+    · iDRAC 대역 스캔은 `coversPending:false` + `meta.ids`(남은 대역) — 재개는 **아직 결과가 없는 대역만**. 엣지 위임 iDRAC 잡은 비밀번호를 기록할 수 없어 재개 대상이 아니다.
+    · ⚠⚠ **아이실론 du 는 장비에서 분리 실행한다**(`detach`, 대상별 기본 켬): nohup 으로 띄워 SSH 세션과 떼고 작업 id 를 기록에 남긴다. 다시 뜬 포탈은 **같은 작업에 붙어**
+      결과만 받는다(du 를 새로 돌리지 않는다 — 통합 테스트가 du 실행 횟수 1 을 고정). 작업 디렉터리 `/tmp/dvc-isidu-$(id -u)`(umask 077) · 표지 DVC-STARTED/DONE/RUNNING/GONE/NONE/NODIR ·
+      상태 확인 3초 → 15초 백오프 · 포탈 시한에 걸리면 장비의 du 를 멈춘다(`killCommand`) · 받은 뒤 지우고, 2일 지난 작업 파일은 다음 실행이 지운다 · nohup·/tmp 를 못 쓰면 세션에 묶은 예전 실행 + 사유.
+      ⚠⚠ **`&` 는 그 자체가 명령 끝이다 — 뒤에 `; ` 를 붙이면 `&;` 로 sh 문법 오류다**(초판이 그랬고 **실제 셸로 돌린 테스트만** 잡았다 — 문자열 단위 테스트는 통과했다).
+      줄바꿈으로 잇지 않는 것은 csh 로그인 셸이 따옴표 안 줄바꿈을 거부해서다. **원격에 보내는 셸 명령은 실제 sh 로 한 번 돌려 보는 테스트를 둘 것.**
+    · ② 자동 업그레이드는 이 노드에서 스캔이 도는 동안 적용을 미룬다(`scanDeferMaxMs` — `UPGRADE_SCAN_DEFER_MAX_MS` 기본 2시간 · 0 = 기다리지 않음 · 상한 12시간 · 1분마다 다시 본다).
+      tick outcome `deferred` ↔ 웹 `AUTO_CODES 'deferred-scans'`. 상한을 넘기면 적용한다(끊긴 스캔은 ①이 잇는다). 수동 적용은 막지 않고 화면이 도는 스캔을 먼저 경고한다.
+      ⚠ 중앙 → 엣지 번들 push 는 기다리지 않는다(받은 즉시 설치 디렉터리를 바꾼다 — 정직 기록).
+    · 아이실론 디렉터리 사용량 첫 화면은 '법인별 현황' 이고 대상 화면 위 '← 법인별 현황' 으로 돌아간다(같은 릴리스 사용자 요청). 합계는 성공한 수집이 있는 대상만이고 문구가 말한다.
+    · ⚠ **가져온 함수 이름을 같은 함수의 지역 `const` 로 가리지 말 것**(이 릴리스에 실제로 밟았다): 엣지 IP 스캔(`agent/ipScanWorker.js`)에 `scanStarted` 를 가져왔는데
+      그 함수에 시작 시각 `const scanStarted = Date.now()` 가 있어 호출이 TDZ 로 던졌다 — 내 재개 테스트는 중앙 경로만 돌려 놓쳤고 전량 테스트(`audit2607e`)가 잡았다.
+      별칭으로 가져오고, `sanPerfPush2566` 스윕을 **일반 선언까지** 넓혔다(예전엔 구조분해만 봤다 — 변이로 확인).
+    · ⚠ 정직 기록: 실제 OneFS 에서 분리 실행 명령(nohup·kill -0·find -mtime)을 확인하지 못했다(POSIX sh + FreeBSD 기본 도구만 쓴다 · 검증은 이 컨테이너의 sh 와 가짜 SSH 서버).
   - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
     5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
     웹 `components/errorBoxProps.test.js`):

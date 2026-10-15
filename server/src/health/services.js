@@ -70,6 +70,7 @@ import * as m_certMonitor from '../security/certMonitor.js';
 import * as m_relayCheckPoller from '../relaycheck/poller.js';
 import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
+import { scanJournalStatus } from '../util/scanJournal.js';   // v2.737: 재시작으로 중단된 스캔 기록·재개
 import { bigJsonStats } from '../util/bigJsonGate.js';
 import { listSettingsLoadErrors } from '../util/settingsLoadError.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
@@ -245,6 +246,20 @@ export function getServiceCheck(opts = {}) {
       ? (opts.isAdmin ? ` · 멈춘 지점 ${l.frames[0]}` : ' · 멈춘 지점은 관리자에게만 표시')
       : (l.error ? ' · 스택 없음(GC·네이티브 호출 가능성)' : '');
     return { status: recent ? 'warn' : 'ok', detail: `멈춤 ${w.stalls}회 · 최근 ${Math.round((Date.now() - l.at) / MIN)}분 전 ${dur}${where}${heap} — journal 의 [stallwatch] 줄에 전체 스택`, at: l.at };
+  }));
+
+  // v2.737: 업그레이드·재시작으로 끝나지 못한 스캔과 자동 재개 결과(util/scanJournal.js). 재개를 기다리는 것·그만둔 것이 있으면 주의.
+  checks.push(wrap('scan-journal', '재시작으로 중단된 스캔 · 자동 재개', () => {
+    const j = scanJournalStatus();
+    const bad = j.recent.filter((h) => ['limit', 'gave-up', 'error', 'no-resumer'].includes(h.outcome) && Date.now() - (h.at || 0) < 24 * 60 * MIN);
+    const resumed = j.recent.filter((h) => (h.outcome === 'resumed' || h.outcome === 'covered') && Date.now() - (h.at || 0) < 24 * 60 * MIN).length;
+    const parts = [`지금 실행 중 ${j.running.length}개`];
+    if (j.interrupted.length) parts.push(`재개 대기 ${j.interrupted.length}개(${j.resumeEnabled ? '자동 재개 예정' : 'SCAN_RESUME=0 — 기록만'})`);
+    if (resumed) parts.push(`24시간 안 재개 ${resumed}건`);
+    if (bad.length) parts.push(`재개하지 못함 ${bad.length}건(${bad[0].outcome}${bad[0].note ? ` — ${bad[0].note}` : ''})`);
+    if (j.lastWriteError) parts.push(`기록 쓰기 실패: ${j.lastWriteError.message}`);
+    const status = bad.length || j.lastWriteError ? 'warn' : j.interrupted.length ? 'warn' : 'ok';
+    return { status, detail: parts.join(' · '), at: Date.now() };
   }));
 
   // v2.618(ARCH-4): 큰 본문 동시 해석 상한(util/bigJsonGate.js)이 몇 건을 503 으로 돌려보냈는지 — 예전엔 콘솔 1분 1줄뿐이었다.

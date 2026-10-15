@@ -45,7 +45,7 @@ export function statusBody() {
   const p = isiduPollerStatus();
   return {
     key: publicKeyView(),
-    poller: { lastTick: p.lastTick, concurrency: p.concurrency, running: p.running, lastError: p.lastError },
+    poller: { lastTick: p.lastTick, concurrency: p.concurrency, running: p.running, lastError: p.lastError, interrupted: p.interrupted || [], resumes: p.resumes || [] }, // v2.737: 재개 대기·결과
     targets: edgeTargets().targets.length,
     version: config.currentVersion?.() || null,
   };

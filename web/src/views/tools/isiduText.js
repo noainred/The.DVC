@@ -324,6 +324,15 @@ export function targetStatus(t, now = Date.now()) {
     const since = numOrNull(t.running.since);
     return { key: 'running', text: '조사 중', tone: 'run', detail: `${since ? `${agoText(since, now).replace(' 전', '')}째` : ''} du 실행 중${t.agent ? `(엣지 보고 ${agoText(t.running.reportedAt, now)})` : ''}` };
   }
+  // v2.737: 업그레이드·재시작으로 끊긴 조사 — 실행 중 스캔 기록이 기동 2분 뒤 다시 시작한다(분리 실행 중이던 du 면 그 결과를 이어 받는다).
+  if (t.interrupted) {
+    const it = t.interrupted;
+    // nextAt 은 미래 시각이다(다른 조사 때문에 미뤄졌을 때만 있다) — agoText 는 과거만 받으므로 분으로 직접 센다.
+    const ahead = numOrNull(it.nextAt) != null ? Math.max(1, Math.round((it.nextAt - now) / 60_000)) : null;
+    const when = ahead != null ? `약 ${ahead}분 뒤` : '곧';
+    return { key: 'interrupted', text: '재시작으로 중단 · 자동 재개 대기', tone: 'run',
+      detail: `업그레이드·재시작으로 조사가 끊겼습니다(${agoText(it.since, now)} 시작). ${when} 자동으로 다시 시작합니다${numOrNull(it.resumes) ? `(재개 ${it.resumes}회째)` : ''}. 장비에서 분리 실행 중이던 du 는 새로 돌리지 않고 결과를 이어 받습니다.` };
+  }
   if (t.request) return { key: 'requested', text: t.request.state === 'taken' ? '엣지가 실행 중' : '요청 대기', tone: 'run', detail: t.request.state === 'taken' ? '엣지가 요청을 가져갔습니다 — 결과가 오면 갱신됩니다.' : '엣지가 다음 설정 pull 에 가져갑니다.' };
   if (t.authStopped) return { key: 'auth-stopped', text: '인증 정지', tone: 'bad', detail: FAIL_TEXT.auth.fix };
   const ok = t.okScan; const lt = t.lastTry;
@@ -455,7 +464,7 @@ export const INTERVAL_CHOICES = Object.freeze([6, 12, 24, 48, 168]);
 export const TIMEOUT_CHOICES = Object.freeze([10, 20, 30, 60, 90, 120]);
 
 export function blankTarget() {
-  return { id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 30, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device' };
+  return { id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 30, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true };
 }
 
 /** 서버 설정의 대상 → 폼(숫자는 그대로, 없으면 빈 칸). */
@@ -468,6 +477,7 @@ export function formFromTarget(t) {
     auth: t.auth === 'device' ? 'device' : 'key', path: t.path || '', sizeMode: t.sizeMode === 'k' ? 'k' : 'h',
     intervalHours: keep(t.intervalHours), timeoutMin: keep(t.timeoutMin), topN: keep(t.topN), enabled: t.enabled !== false,
     agent: t.agent || '', datacenterId: t.datacenterId || '', runVia: t.runVia === 'node' ? 'node' : 'device',
+    detach: t.detach !== false, // v2.737 — 옛 저장값(필드 없음)은 켬
   };
 }
 
@@ -476,7 +486,7 @@ export function formFromTarget(t) {
  * 등록부 장비를 고르면 주소·엣지·DataCenter 는 등록부가 정하므로 싣지 않는다.
  */
 export function targetBody(f) {
-  const out = { label: String(f.label || '').trim(), path: String(f.path || '').trim(), sizeMode: f.sizeMode === 'k' ? 'k' : 'h', auth: f.auth === 'device' ? 'device' : 'key', enabled: f.enabled !== false };
+  const out = { label: String(f.label || '').trim(), path: String(f.path || '').trim(), sizeMode: f.sizeMode === 'k' ? 'k' : 'h', auth: f.auth === 'device' ? 'device' : 'key', enabled: f.enabled !== false, detach: f.detach !== false };
   if (f.id) out.id = f.id;
   for (const k of ['port', 'intervalHours', 'timeoutMin', 'topN']) {
     const n = numOrNull(f[k]);
@@ -533,3 +543,95 @@ export function targetChip(t) {
     label: t.label || t.deviceName || t.host || t.id,
   };
 }
+
+/* ─────────────── 법인별 현황(첫 화면, v2.737) ─────────────── */
+
+const _corpColl = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
+const STATUS_RANK = { bad: 0, warn: 1, run: 2, muted: 3, ok: 4 };
+
+/**
+ * 대상 하나의 디렉터리 크기(바이트) — 서버 `isidu/report.js denomOf` 와 같은 규칙(du 합계 줄 → 폴더 합). 성공한 수집이 없거나 못 읽었으면 null.
+ * @param {object} t 목록 응답의 대상(okScan 포함)
+ */
+export function targetBytesOf(t) {
+  const s = t?.okScan;
+  const tb = numOrNull(s?.total?.bytes);
+  if (tb != null && tb > 0) return tb;
+  const sb = numOrNull(s?.sumBytes);
+  return sb != null && sb > 0 ? sb : null;
+}
+
+/**
+ * 법인별 현황(순수) — 대상을 법인으로 묶는다(v2.737, 사용자 요청 "법인의 사용자 용량을 본 후에 초기화면으로 돌아가는 버튼 · 법인별 현황 보는 초기화면").
+ *  · 법인 = 대상의 법인(t.corp → datacenterId). 없으면 '법인 미지정' 묶음이고 맨 뒤다.
+ *  · 합계(사용자 폴더 수·크기)는 **성공한 수집이 있는 대상만** 더하고 뺀 개수(unmeasured)를 함께 준다 — 부분 합을 전체라 말하지 않는다.
+ *  · 법인 순서는 이름 순(숫자 인식), 묶음 안 대상은 크기 큰 순(모르는 것은 뒤). 묶음의 대표 상태는 가장 나쁜 것.
+ * @returns {{groups:{corp:string, label:string, items:object[], users:number|null, bytes:number|null, measured:number, unmeasured:number, worst:string}[], totals:{corps:number, targets:number, measured:number, unmeasured:number, users:number|null, bytes:number|null}}}
+ */
+export function corpOverview(targets, now = Date.now()) {
+  const list = Array.isArray(targets) ? targets.filter((t) => t && typeof t === 'object') : [];
+  const by = new Map();
+  for (const t of list) {
+    const corp = String(t.corp || t.datacenterId || '').trim();
+    if (!by.has(corp)) by.set(corp, { corp, label: corp || '법인 미지정', items: [], users: 0, bytes: 0, measured: 0, unmeasured: 0, worst: 'ok' });
+    const g = by.get(corp);
+    const st = targetStatus(t, now);
+    const bytes = targetBytesOf(t);
+    const users = numOrNull(t.okScan?.count);
+    g.items.push({ t, st, bytes, users });
+    if (bytes != null) { g.measured++; g.bytes += bytes; g.users += users ?? 0; } else g.unmeasured++;
+    if ((STATUS_RANK[st.tone] ?? 3) < (STATUS_RANK[g.worst] ?? 3)) g.worst = st.tone;
+  }
+  const groups = [...by.values()].map((g) => ({
+    ...g,
+    users: g.measured ? g.users : null,
+    bytes: g.measured ? g.bytes : null,
+    items: g.items.sort((a, b) => (b.bytes ?? -1) - (a.bytes ?? -1) || _corpColl.compare(String(a.t.label || a.t.id), String(b.t.label || b.t.id))),
+  })).sort((a, b) => (a.corp ? 0 : 1) - (b.corp ? 0 : 1) || _corpColl.compare(a.label, b.label));
+  const measured = groups.reduce((s, g) => s + g.measured, 0);
+  return {
+    groups,
+    totals: {
+      corps: groups.filter((g) => g.corp).length, targets: list.length, measured, unmeasured: list.length - measured,
+      users: measured ? groups.reduce((s, g) => s + (g.users || 0), 0) : null,
+      bytes: measured ? groups.reduce((s, g) => s + (g.bytes || 0), 0) : null,
+    },
+  };
+}
+
+/** 첫 화면 머리 문구 — 부분 합이면 그 사실을 말한다. */
+export function overviewNote(totals) {
+  if (!totals || !totals.targets) return '';
+  const head = `법인 ${countText(totals.corps)}곳 · 대상 ${countText(totals.targets)}개`;
+  if (!totals.measured) return `${head} — 아직 성공한 수집이 없어 합계를 낼 수 없습니다.`;
+  return totals.unmeasured
+    ? `${head} — 합계는 성공한 수집이 있는 대상 ${countText(totals.measured)}개 기준입니다(수집 결과가 없는 ${countText(totals.unmeasured)}개는 뺐습니다).`
+    : `${head} — 법인이나 대상을 누르면 사용자별 용량을 봅니다.`;
+}
+
+/* ─────────────── 자동 재개 결과(v2.737) ─────────────── */
+
+/** 서버 util/scanJournal 의 재개 결과 코드 → 문구. 'resumed'·'covered' 는 정상이라 따로 말하지 않는다(대상 상태가 말한다). */
+export const RESUME_OUTCOME_TEXT = Object.freeze({
+  resumed: '자동으로 다시 시작했습니다',
+  covered: '재개를 기다리는 동안 다른 경로로 다시 시작됐습니다',
+  gone: '대상이 이 노드에서 사라져 다시 시작하지 않았습니다',
+  skipped: '꺼져 있어 다시 시작하지 않았습니다',
+  limit: '자동 재개를 상한(2회)까지 했습니다 — 재시작이 반복되는 원인을 확인하세요',
+  expired: '시작한 지 48시간이 넘어 다시 시작하지 않았습니다',
+  'gave-up': '다른 조사가 계속 진행 중이라 기다리다 그만뒀습니다',
+  'no-resumer': '이 노드에서 다시 시작할 수 없습니다',
+  error: '자동 재개 중 오류가 났습니다',
+});
+const RESUME_QUIET = new Set(['resumed', 'covered']);
+
+/** 마지막 재개 결과 안내(주의할 결과만) — 없으면 ''. */
+export function resumeNote(r, now = Date.now()) {
+  if (!r || !r.outcome || RESUME_QUIET.has(r.outcome)) return '';
+  const head = RESUME_OUTCOME_TEXT[r.outcome] || `자동 재개 결과: ${r.outcome}`;
+  return `재시작으로 중단된 조사 — ${head}(${agoText(r.at, now)})${r.note ? ` · ${String(r.note).slice(0, 200)}` : ''}`;
+}
+
+/** 수집 방식 문구 — 마지막 성공 수집이 분리 실행이었는지(장비 쪽 기록). */
+export const TRIGGER_TEXT = Object.freeze({ schedule: '주기', manual: '수동', central: '메인 요청', resume: '자동 재개' });
+export const triggerText = (t) => TRIGGER_TEXT[t] || (t ? String(t) : '—');

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AUTO_TEXT, STATE_TEXT, TICK_TEXT, APPLYING_NOW, SOURCE_TEXT, autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, intervalText, inText, restoredNote,
-  remoteSourceLabel,
+  remoteSourceLabel, runningScanWarning, SCAN_KIND_TEXT,
 } from './upgradeAutoText.js';
 import { NO_RECORD_DETAIL } from './upgradeSignatureText.js';
 
@@ -197,5 +197,38 @@ describe('패키지 저장소 조회(/admin/packages) 요청 시한', () => {
     const m = /fetchJson\('\/admin\/packages',\s*\{\},\s*undefined,\s*\{\s*timeoutMs:\s*([\d_]+),\s*retries:\s*0\s*\}\)/.exec(src);
     expect(m).not.toBeNull();
     expect(Number(m[1].replace(/_/g, ''))).toBeGreaterThan(120_000);
+  });
+});
+
+describe('v2.737 실행 중 스캔 — 자동 적용 대기 · 수동 적용 경고', () => {
+  it('대기 중이면 무엇을 기다리고 늦어도 언제 적용하는지 말한다', () => {
+    const until = NOW + 90 * 60_000;
+    const r = autoSummary({ enabled: true, autoApply: true, installDir: '/opt/x', remoteConfigured: true,
+      auto: { state: 'on', intervalMs: 3_600_000, armed: true, nextCheckAt: NOW + 60_000, issues: [{ code: 'deferred-scans', at: NOW - 60_000, until, scans: 2, reason: '아이실론 조사, IP 스캔' }] },
+      lastTick: { at: NOW - 60_000, outcome: 'deferred', latest: '2.737.0', reason: '실행 중 스캔 2개' } }, NOW);
+    const line = r.lines.find((l) => l.code === 'deferred-scans');
+    expect(line.title).toMatch(/실행 중인 스캔이 끝나기를 기다리고/);
+    expect(line.fix).toMatch(/^늦어도 /);
+    expect(line.reason).toBe('아이실론 조사, IP 스캔');
+    expect(r.tickTone).toBe('warn');
+    expect(TICK_TEXT.deferred).toMatch(/기다리는 중/);
+  });
+  it('수동 적용 전 경고 — 도는 스캔이 없으면 null · 있으면 종류·이름·시작 시각과 "재시작 뒤 자동 재개" 를 말한다', () => {
+    expect(runningScanWarning({ runningScans: [] })).toBe(null);
+    expect(runningScanWarning(null)).toBe(null);
+    const w = runningScanWarning({ runningScans: [{ kind: 'isidu', label: '사용자 폴더', since: NOW - 10 * 60_000 }, { kind: 'idrac-scan', label: '전체 3개 대역' }] }, NOW);
+    expect(w).toMatch(/지금 스캔 2개가 돌고 있습니다/);
+    expect(w).toMatch(/아이실론 디렉터리 사용량 ‘사용자 폴더’\(10분 전 시작\)/);
+    expect(w).toMatch(/iDRAC 대역 스캔 ‘전체 3개 대역’/);
+    expect(w).toMatch(/재시작 뒤 자동으로 다시 시작합니다/);
+    expect(w.includes('`')).toBe(false);
+  });
+  it('스캔 종류 이름은 서버가 기록하는 종류와 1:1', () => {
+    const kinds = new Set();
+    for (const f of ['isidu/poller.js', 'idrac/scanPoller.js', 'ipam/scanPoller.js', 'agent/ipScanWorker.js']) {
+      const src = fs.readFileSync(path.resolve(HERE, '../../../server/src', f), 'utf8');
+      for (const m of src.matchAll(/(?:const (?:KIND|JKIND) = |(?:journalScanStarted|scanStarted)\()'([a-z-]+)'/g)) kinds.add(m[1]);
+    }
+    expect([...kinds].sort()).toEqual(Object.keys(SCAN_KIND_TEXT).sort());
   });
 });

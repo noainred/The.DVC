@@ -140,7 +140,8 @@ import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
-import { startIsiduPoller } from './isidu/poller.js';           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
+import { startIsiduPoller } from './isidu/poller.js';
+import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
 import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
 import { startIsiduConfigPull } from './agent/isiduConfigPull.js'; // 〃 중앙→엣지 대상 pull(비밀 없음)
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
@@ -594,6 +595,8 @@ const stagger = [
  */
 const STAGGER_STEP_MS = Math.min(1500, Math.floor(60_000 / Math.max(1, stagger.length)));
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * STAGGER_STEP_MS).unref?.());
+// v2.737: 이전 프로세스가 끝내지 못한 스캔(아이실론 du·iDRAC 대역·IP 대역)을 재개 — 재개 함수는 각 폴러 모듈이 import 될 때 등록한다.
+try { scheduleScanResumes(); } catch (e) { console.warn(`[scan-journal] 재개 예약 실패: ${e?.message || e}`); }
 
 // 2026-10-09 검토 S-09: 리스너는 util/httpsServer.js 가 만든다 — TLS_CERT_FILE·TLS_KEY_FILE 을 주면 HTTPS(opt-in),
 // 없으면 예전과 같은 평문 HTTP. 설정이 틀리면 평문으로 내려가지 않고 기동을 멈춘다(fail-closed).

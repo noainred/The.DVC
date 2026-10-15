@@ -20,8 +20,24 @@ import { resolveBundleBytes } from './bundleSource.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { loadCollectors } from '../collector/registry.js';
 // v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
-import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus } from './autoState.js';
+import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus, sanitizeDeferral } from './autoState.js';
 import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
+import { runningScans } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다
+import { numOrNull } from '../util/numOrNull.js';
+
+/**
+ * v2.737(사용자 신고 "업그레이드되면 scan 하던 게 중단된다"): 자동 적용은 이 노드에서 **실행 중인 스캔**(아이실론 du·iDRAC 대역·IP 대역 —
+ *   util/scanJournal)이 끝날 때까지 기다린다. 상한(기본 2시간)을 넘기면 적용한다 — 끝나지 않는 스캔이 업그레이드를 영원히 막지 않게.
+ *   기다리는 동안 1분마다 다시 보고, 스캔이 끝나면 곧바로 적용한다(다음 확인 주기까지 미루지 않는다). 0 이면 기다리지 않는다.
+ *   ⚠ 수동 '업그레이드 적용' 은 기다리지 않는다(화면이 실행 중 스캔을 먼저 경고한다). 중앙이 보낸 번들 push 도 기다리지 않는다 —
+ *   그 경로는 받은 즉시 설치 디렉터리를 바꾸므로 재시작만 미루면 옛 프로세스가 새 파일을 읽게 된다. 끊긴 스캔은 자동 재개가 잇는다.
+ */
+export function scanDeferMaxMs(v = process.env.UPGRADE_SCAN_DEFER_MAX_MS) {
+  const n = numOrNull(v);
+  if (n == null || n < 0) return 7_200_000;
+  return Math.min(12 * 3_600_000, Math.round(n));
+}
+const DEFER_RECHECK_MS = 60_000;
 
 
 const originOf = (u) => { try { return new URL(String(u)).origin; } catch { return ''; } }; // 경로·쿼리에 비밀이 실릴 수 있어 origin 만
@@ -46,6 +62,8 @@ export class UpgradeManager {
     this.armedAt = null;        // v2.736.2: 백그라운드 타이머를 무장한 시각(다음 확인 시각 계산 — setInterval 과 같은 규칙)
     this.armedMs = 0;
     this.persist = { enabled: false, file: null, error: null, corruptKept: null, restored: false };
+    this.deferral = null;       // v2.737: { since, until, latest, scans } — 실행 중 스캔이 끝나기를 기다리는 중
+    this.deferTimer = null;
   }
 
   // v2.736.2: 적용 결과는 routes(엣지·수집기 push 수신)도 대입한다 — 대입하면 파일에도 남는다.
@@ -95,8 +113,11 @@ export class UpgradeManager {
       auto: autoUpgradeState({
         settings: s, intervalMs: this.timer ? this.armedMs : 0, armedAt: this.timer ? this.armedAt : null,
         lastCheck: sanitizeCheck(this.lastCheck), lastResult: sanitizeResult(this.#lastResult), lastTick: sanitizeTick(this.lastTick),
-        currentVersion: currentVersion(), now: Date.now(),
+        currentVersion: currentVersion(), deferral: this.deferral, now: Date.now(),
       }),
+      // v2.737: 화면이 수동 적용 전에 '지금 스캔 N개가 끊긴다' 를 경고하고, 대기 중이면 무엇을 기다리는지 말한다.
+      runningScans: runningScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger })),
+      deferral: sanitizeDeferral(this.deferral), scanDeferMaxMs: scanDeferMaxMs(),
       ticking: this.#ticking,
       applying: !!this._applying,
       persist: { enabled: !!this.persist?.enabled, error: this.persist?.error || null, corruptKept: this.persist?.corruptKept || null },
@@ -208,7 +229,60 @@ export class UpgradeManager {
     return results;
   }
 
+  /** v2.737: 대기를 끝낸다(적용·설정 변경). */
+  #clearDeferral() {
+    if (this.deferTimer) { clearInterval(this.deferTimer); this.deferTimer = null; }
+    this.deferral = null;
+  }
+
+  /**
+   * v2.737: 자동 적용 직전 — 실행 중 스캔이 있으면 기다릴지 정한다(순수에 가깝다 — 상태만 갱신).
+   * @returns {{wait:boolean, forced:boolean, scans:object[]}}
+   */
+  #deferDecision(latest, now = Date.now()) {
+    const max = scanDeferMaxMs();
+    const scans = runningScans();
+    if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans }; }
+    if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
+    this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));
+    if (now >= this.deferral.until) return { wait: false, forced: true, scans };
+    if (!this.deferTimer) {
+      this.deferTimer = setInterval(() => { this.#deferTick().catch((e) => console.warn(`[upgrade] 대기 확인 실패: ${e?.message || e}`)); }, DEFER_RECHECK_MS);
+      this.deferTimer.unref?.();
+    }
+    return { wait: true, forced: false, scans };
+  }
+
+  /** v2.737: 대기 중 1분마다 — 스캔이 끝났거나 상한을 넘겼으면 곧바로 적용한다. */
+  async #deferTick() {
+    if (!this.deferral) { this.#clearDeferral(); return; }
+    if (!this.settings.enabled || !this.settings.autoApply) { this.#clearDeferral(); return; }
+    if (this.#ticking || this._applying) return;
+    const latest = this.deferral.latest;
+    const d = this.#deferDecision(latest);
+    if (d.wait) return;
+    const waited = Date.now() - (this.deferral?.since || Date.now());
+    const note = d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — 끊긴 스캔은 자동 재개가 잇습니다` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`;
+    this.#clearDeferral();
+    this.#ticking = true;
+    const at = Date.now();
+    let rec = { at, outcome: 'error' };
+    try {
+      console.log(`[upgrade] ${note}`);
+      this.lastTick = { at, outcome: 'applying', latest, reason: note }; this.#save();
+      const r = await this.apply({ source: 'auto', restart: true, trigger: 'auto' });
+      rec = r.ok ? { at, outcome: 'applied', latest, version: r.version || null, reason: note } : { at, outcome: 'apply-failed', latest, reason: r.reason || null };
+    } catch (e) {
+      rec = { at, outcome: 'error', reason: String(e?.message || e).slice(0, 300) };
+    } finally {
+      this.lastTick = { ...rec, finishedAt: Date.now() };
+      this.#save();
+      this.#ticking = false;
+    }
+  }
+
   #restartTimer() {
+    this.#clearDeferral();
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     this.armedAt = null; this.armedMs = 0;
     const s = this.settings;
@@ -239,16 +313,24 @@ export class UpgradeManager {
     this.#ticking = true;
     const at = Date.now();
     let rec = { at, outcome: 'error' };
+    let dd = null;
     try {
       const check = await this.check({ trigger: 'auto' });
       const latest = check.remote?.latest || check.watch?.version || null;
       const newer = check.watch?.available || check.remote?.available;
+      if (!newer || !this.settings.autoApply) this.#clearDeferral(); // v2.737: 받을 것이 없어졌거나 자동 적용을 껐으면 대기도 끝
       // v2.736.2(리뷰 F3): 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이라 기록하지 않는다.
       if (!check.remote && !check.watch) rec = { at, outcome: 'no-source' };
       else if (check.remote && check.remote.ok === false && !check.watch?.available) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
       else if (!newer) rec = { at, outcome: 'up-to-date', latest };
       else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
-      else {
+      else if ((dd = this.#deferDecision(latest)).wait) {
+        // v2.737: 실행 중 스캔이 끝날 때까지(상한 안에서) 기다린다 — 1분마다 다시 보고 끝나면 곧바로 적용한다(#deferTick).
+        const scans = this.deferral?.scans || [];
+        rec = { at, outcome: 'deferred', latest, reason: `실행 중 스캔 ${scans.length}개(${scans.slice(0, 3).map((x) => x.label || x.kind).join(', ')})가 끝나면 적용합니다 — 늦어도 ${new Date(this.deferral.until).toISOString()}` };
+      } else {
+        if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(끊긴 스캔은 자동 재개가 잇습니다)`);
+        this.#clearDeferral();
         console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
         // 적용 도중 프로세스가 끝나면(강제 종료 등) 결과가 남지 않는다 — '적용 시작' 을 먼저 남긴다(새 프로세스가 되살린다).
         this.lastTick = { at, outcome: 'applying', latest }; this.#save();

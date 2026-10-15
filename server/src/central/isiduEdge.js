@@ -79,6 +79,11 @@ export function sanitizeIsiduStatus(st) {
       lastTick: num(poller.lastTick), concurrency: num(poller.concurrency),
       running: Array.isArray(poller.running) ? poller.running.filter((r) => r && typeof r === 'object').slice(0, 20).map((r) => ({ targetId: str(r.targetId, 64), since: num(r.since), trigger: str(r.trigger, 16) })) : [],
       lastError: poller.lastError && typeof poller.lastError === 'object' ? { at: num(poller.lastError.at), message: str(poller.lastError.message, 300) } : null,
+      // v2.737: 재시작으로 중단된 조사(재개 대기) · 최근 재개 결과 — 엣지가 재시작 뒤 이어서 돌리는지를 메인 화면이 말한다.
+      interrupted: Array.isArray(poller.interrupted) ? poller.interrupted.filter((r) => r && typeof r === 'object').slice(0, 20)
+        .map((r) => ({ targetId: str(r.targetId, 64), since: num(r.since), detectedAt: num(r.detectedAt), nextAt: num(r.nextAt), resumes: num(r.resumes) })) : [],
+      resumes: Array.isArray(poller.resumes) ? poller.resumes.filter((r) => r && typeof r === 'object').slice(0, 10)
+        .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), outcome: str(r.outcome, 16), note: str(r.note, 300), resumes: num(r.resumes) })) : [],
     } : null,
     targets: num(s.targets),
     version: str(s.version, 32) || null,

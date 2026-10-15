@@ -11,6 +11,9 @@
  *  · 수동 실행('지금 수집')은 같은 진행 중 표지를 공유한다(같은 대상에 du 두 개를 겹쳐 돌리지 않는다).
  *  · 보존 정리는 6시간마다(첫 틱 제외 — v2.453).
  *  · 데모(mock-) 대상은 mock 모드에서만 돈다 — live 에서는 건너뛰고 그 개수를 상태에 남긴다(v2.719).
+ *  · v2.737: 조사를 시작하면 실행 중 스캔 기록(util/scanJournal)에 남긴다 — 업그레이드·재시작으로 끝나지 못하면 다음 기동 2분 뒤 자동으로
+ *    다시 시작한다(재개 상한 2회). 장비에서 분리 실행 중이던 du 가 있으면(collect.js) 새로 돌리지 않고 **그 작업에 붙어 결과를 받는다**.
+ *    재개 대기 중인 대상은 주기 틱이 먼저 새로 시작하지 않는다(같은 장비에 du 두 개를 겹치지 않게 — 최대 2시간).
  */
 import { config } from '../config.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -18,12 +21,15 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { loadSettings, resolveTarget, edgeTargets } from './settings.js';
 import { collectTarget } from './collect.js';
 import * as db from './db.js';
+import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor } from '../util/scanJournal.js';
 
 export const TICK_MS = 60_000;
 export const FAIL_RETRY_MS = 3_600_000;
 const PRUNE_EVERY_MS = 6 * 3_600_000;
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.ISIDU_CONCURRENCY) || 2));
 const RECENT_MAX = 60;
+const KIND = 'isidu';
+const PENDING_HOLD_MS = 2 * 3_600_000; // 재개 대기 대상을 틱이 건너뛰는 최대 시간(재개가 어떤 이유로 끝나지 않아도 주기가 영원히 막히지 않게)
 
 const _inflight = new Map();   // targetId → { since, trigger, promise }
 const _lastTry = new Map();    // targetId → { ts, ok }
@@ -75,17 +81,29 @@ async function seedLastTry() {
   _seeded = true;
 }
 
-function runOne(t, trigger, manual) {
+function runOne(t, trigger, manual, { resumeOf = null } = {}) {
   const cur = _inflight.get(t.id);
   if (cur) return cur.promise;
+  // 재개 대기 항목이 있으면(재시작 전에 돌던 조사) 그 작업을 잇는다 — 사람이 먼저 '지금 수집' 을 눌러도 같다.
+  const prior = resumeOf || pendingResumeOf(KIND, t.id);
+  const attach = prior?.meta?.jobId && (!prior.meta.jobHost || prior.meta.jobHost === t.host) ? String(prior.meta.jobId) : null;
+  scanStarted(KIND, t.id, {
+    label: t.label || t.id, trigger, resumeOf: prior,
+    ...(prior && !resumeOf ? { resumeNote: `${manual ? '수동 실행' : '주기 실행'}이 재시작 전 조사를 이어 받았습니다` } : {}),
+    meta: { manual: !!manual, ...(attach ? { jobId: attach, jobHost: t.host || '' } : {}) },
+  });
   const promise = (async () => {
     try {
-      const rec = await collectTarget(t, { trigger, manual });
+      const rec = await collectTarget(t, {
+        trigger, manual, attachJob: attach,
+        onJob: (job) => { try { scanProgress(KIND, t.id, { jobId: job.id, jobHost: t.host || '' }); } catch { /* 기록 실패는 조사를 막지 않는다 */ } },
+      });
       const saved = await db.insertScan(rec);
       if (!saved.ok) note('error', `${t.label || t.id}: 결과를 저장하지 못했습니다 — ${saved.error}`);
       _lastTry.set(t.id, { ts: rec.ts, ok: rec.ok });
-      if (rec.ok) note('info', `${t.label || t.id}: 폴더 ${rec.count.toLocaleString()}개 조사 (${Math.round(rec.durationMs / 1000)}초)${rec.errLines ? ` · 권한 오류 ${rec.errLines}줄` : ''}`);
-      else note('error', `${t.label || t.id}: ${rec.error}`);
+      const how = rec.attached ? ' · 재시작 전 장비에서 돌던 du 결과를 이어 받음' : rec.runMode === 'attached-fallback' ? ` · 분리 실행 불가로 직접 실행(${rec.detachFallback || '사유 없음'})` : '';
+      if (rec.ok) note('info', `${t.label || t.id}: 폴더 ${rec.count.toLocaleString()}개 조사 (${Math.round(rec.durationMs / 1000)}초)${rec.errLines ? ` · 권한 오류 ${rec.errLines}줄` : ''}${how}${prior ? ' · 자동 재개' : ''}`);
+      else note('error', `${t.label || t.id}: ${rec.error}${prior ? ' (자동 재개)' : ''}`);
       if (saved.ok && _afterScan) { try { _afterScan(); } catch { /* push 예약 실패는 다음 주기 */ } }
       return { ok: rec.ok, saved: saved.ok, kind: rec.kind || null, error: rec.error || null };
     } catch (e) {
@@ -94,11 +112,30 @@ function runOne(t, trigger, manual) {
       return { ok: false, error: e.message };
     } finally {
       _inflight.delete(t.id);
+      scanFinished(KIND, t.id);
     }
   })();
   _inflight.set(t.id, { since: Date.now(), trigger, promise });
   return promise;
 }
+
+/**
+ * 재시작으로 중단된 조사의 재개(util/scanJournal 이 기동 2분 뒤 부른다).
+ * 결과: started · covered(이미 다시 조사 중) · gone(대상이 이 노드 목록에 없다) · skipped(꺼짐·데모) · busy(동시 실행 상한 — 5분 뒤 다시).
+ */
+export async function resumeIsidu(entry) {
+  const all = await targetsForThisNode();
+  const t = all.find((x) => x.id === entry.key);
+  if (!t) return { outcome: 'gone', note: '대상이 이 노드의 목록에서 사라졌습니다(삭제·실행 노드 변경)' };
+  if (String(t.id).startsWith('mock-') && !isMockMode()) return { outcome: 'skipped', note: '데모 대상(live 모드)' };
+  if (t.deviceDisabled) return { outcome: 'skipped', note: '스토리지 등록부에서 장비가 비활성입니다' };
+  if (t.enabled === false && !entry.meta?.manual) return { outcome: 'skipped', note: '대상의 주기 수집이 꺼져 있습니다' };
+  if (_inflight.has(t.id)) return { outcome: 'covered', note: '이미 다시 조사 중입니다' };
+  if (!entry.meta?.jobId && _inflight.size >= CONCURRENCY) return { outcome: 'busy', note: `동시 실행 상한(${CONCURRENCY}) — 다른 조사가 끝나면 시작합니다` };
+  runOne(t, 'resume', false, { resumeOf: entry });
+  return { outcome: 'started', note: entry.meta?.jobId ? '장비에서 돌던 du 작업에 다시 붙었습니다' : '조사를 처음부터 다시 시작했습니다' };
+}
+registerScanResumer(KIND, resumeIsidu);
 
 async function tick() {
   if (_ticking) return;
@@ -115,6 +152,8 @@ async function tick() {
     for (const t of all) {
       if (String(t.id).startsWith('mock-') && !isMockMode()) { demoSkipped++; continue; }
       if (_inflight.has(t.id)) continue;
+      const pend = pendingResumeOf(KIND, t.id);
+      if (pend && Date.now() - (pend.detectedAt || 0) < PENDING_HOLD_MS) continue; // 재개가 맡는다(재시작 전 du 를 잇는다)
       if (isDue(t, _lastTry.get(t.id))) due.push(t);
     }
     _demoSkipped = demoSkipped;
@@ -161,6 +200,11 @@ export function isiduPollerStatus() {
     role: isEdge() ? 'edge' : 'central',
     tickMs: TICK_MS, concurrency: CONCURRENCY, lastTick: _lastTick, lastError: _lastError,
     running: [..._inflight.entries()].map(([id, v]) => ({ targetId: id, since: v.since, trigger: v.trigger })),
+    // v2.737: 재시작으로 중단돼 재개를 기다리는 조사 · 최근 재개 결과(util/scanJournal).
+    ...(() => { const j = journalFor(KIND); return {
+      interrupted: j.interrupted.map((x) => ({ targetId: x.key, since: x.since, detectedAt: x.detectedAt, nextAt: x.nextAt, resumes: x.resumes })),
+      resumes: j.recent.map((x) => ({ targetId: x.key, at: x.at, outcome: x.outcome, note: x.note, resumes: x.resumes })),
+    }; })(),
     ...(_demoSkipped ? { demoSkipped: _demoSkipped } : {}),
     recent: _recent.slice(0, 30),
   };

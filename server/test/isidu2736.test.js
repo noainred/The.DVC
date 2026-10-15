@@ -266,7 +266,8 @@ test('④ 가짜 아이실론에 키로 접속해 du 를 실제로 돌리고 해
   const out = [`73G\t${ROOT}/alpha.kim`, `3.9G\t${ROOT}/beta.lee`, `961K\t${ROOT}/gamma.park`, `77G\t${ROOT}`].join('\n') + '\n';
   const fk = await fakeIsilon({ output: out, stderr: `du: ${ROOT}/x: Permission denied\n`, code: 1 });
   fk.allow(K.publicKeyView().publicKey);
-  const t = { id: 'tgt-ssh', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', path: `${ROOT}/`, sizeMode: 'h', timeoutMin: 1 };
+  // v2.737: 분리 실행(기본)은 isidu2737 이 실제 셸로 시험한다 — 여기는 세션에 묶은 실행(detach:false)의 명령 모양을 고정한다.
+  const t = { id: 'tgt-ssh', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', path: `${ROOT}/`, sizeMode: 'h', timeoutMin: 1, detach: false };
   const rec = await C.collectTarget(t, { trigger: 'manual', manual: true });
   assert.equal(rec.ok, true, rec.error);
   assert.equal(rec.count, 3);
