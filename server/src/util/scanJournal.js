@@ -171,6 +171,19 @@ export function runningScans() {
   return [..._active.values()].map((e) => ({ kind: e.kind, key: e.key, label: e.label, trigger: e.trigger, since: e.since, resumes: e.resumes }));
 }
 
+/**
+ * v2.740 A-04: 지금 도는 스캔이 재시작으로 끊기면 자동 재개가 실제로 이어 주는가(문구용 — 단정하지 않게).
+ * 재개가 꺼져 있거나(SCAN_RESUME=0) 이미 재개 상한에 닿은 스캔이 있으면 그 사실을 말한다.
+ * @param {{resumes?:number}[]} scans runningScans() 결과
+ */
+export function resumeOutlookText(scans) {
+  const list = Array.isArray(scans) ? scans : [];
+  if (!resumeEnabled()) return '자동 재개가 꺼져 있어(SCAN_RESUME=0) 끊긴 스캔은 다음 주기나 수동 실행으로 다시 돕니다';
+  const atLimit = list.filter((x) => (Number(x?.resumes) || 0) >= RESUME_LIMIT).length;
+  if (atLimit) return `끊긴 스캔은 자동 재개가 잇습니다(단 ${atLimit}개는 재개 상한 ${RESUME_LIMIT}번에 닿아 다음 주기나 수동 실행으로 다시 돕니다)`;
+  return '끊긴 스캔은 자동 재개가 잇습니다';
+}
+
 /** 재개 대기 중인 항목인가(주기 틱이 그 대상을 먼저 새로 시작하지 않게 — 원격 du 를 이어 받아야 하는 경우). */
 export function isResumePending(kind, key) {
   return _interrupted.some((x) => x.kind === kind && x.key === key && x.state === 'pending');

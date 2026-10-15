@@ -10,12 +10,19 @@
  *  · 같은 스캔 조합의 계산은 기억한다(최신 스캔 id 가 바뀌면 새로 — 폴링 화면이 매번 수천 행을 다시 비교하지 않게).
  */
 import * as db from './db.js';
-import { deltaOf, sortBySize } from './parse.js';
+import { deltaOf, sortBySize, nameCompare } from './parse.js';
+import { createYielder } from '../util/timeSlice.js';
 import { HISTORY_AGENT } from './targets.js';
 
 const DAY = 86_400_000;
 const CACHE_MAX = 8;
+// v2.740 E-08: 기억은 시간으로도 버린다 — 폴더 5만 개 대상 8개분(rows·removed7 전체)이 힙 약 119MB 를 상주시켰다(실측).
+// 화면을 닫은 뒤에도 남아 있을 이유가 없다. 같은 스캔 조합을 다시 열면 새로 계산한다.
+export const CACHE_TTL_MS = 10 * 60_000;
 const _cache = new Map(); // key → { at, value }
+function sweepExpired(map, now = Date.now()) {
+  for (const [k, v] of map) if (now - (v?.at ?? 0) > CACHE_TTL_MS) map.delete(k);
+}
 
 /** 그 스캔의 비중 분모 — 루트 합계 우선, 없으면 폴더 합. */
 function denomOf(scan) {
@@ -41,6 +48,7 @@ function baseInfo(base, okScan) {
  * @returns {Promise<null|{latest, okScan, base7, base30, rows:object[], removed7:object[], denom:number|null}>}
  */
 async function comparison(targetId) {
+  sweepExpired(_cache);
   const latest = await db.latestOf(HISTORY_AGENT, targetId);
   if (latest == null) return { unavailable: true };
   const okScan = latest.okScan;
@@ -52,11 +60,17 @@ async function comparison(targetId) {
   const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}|${base30?.id ?? '-'}`;
   const hit = _cache.get(key);
   if (hit) { _cache.delete(key); _cache.set(key, hit); return { ...hit.value, latest }; }
+  // v2.740 E-03: 세 스캔을 읽고 정렬하는 사이에 시간 기준으로 양보한다(폴더 5만 개 콜드 계산이 0.7~1초 동안 포탈을 멈췄다).
+  const yieldIf = createYielder(15);
   const cur = await db.entriesOf(okScan.id);
+  await yieldIf();
   const b7 = base7 ? await db.entriesOf(base7.id) : null;
+  await yieldIf();
   const b30 = base30 ? await db.entriesOf(base30.id) : null;
+  await yieldIf();
   const denom = denomOf(okScan);
   const rows = sortBySize([...cur.entries()].map(([name, v]) => ({ name, bytes: v.bytes, res: v.res })));
+  await yieldIf();
   rows.forEach((r, i) => {
     r.rank = i + 1;
     r.share = denom ? r.bytes / denom : null;
@@ -69,7 +83,7 @@ async function comparison(targetId) {
     r.new30 = b30 ? !b30.has(r.name) : null;
   });
   const removed7 = b7 ? sortBySize([...b7.entries()].filter(([name]) => !cur.has(name)).map(([name, v]) => ({ name, bytes: v.bytes, res: v.res }))) : null;
-  const value = { okScan, base7, base30, rows, removed7, denom };
+  const value = { okScan, base7, base30, rows, removed7, denom, sorted: new Map() };
   _cache.set(key, { at: Date.now(), value });
   while (_cache.size > CACHE_MAX) _cache.delete(_cache.keys().next().value);
   return { ...value, latest };
@@ -161,19 +175,27 @@ export async function listUsers(targetId, { q = '', filter = 'all', sort = 'size
     else if (f === 'grow') list = list.filter((r) => r.d7 && r.d7.bytes > 0 && !r.d7.withinRes);
     else if (f === 'shrink') list = list.filter((r) => r.d7 && r.d7.bytes < 0 && !r.d7.withinRes);
   }
-  if (needle) list = list.filter((r) => r.name.toLowerCase().includes(needle));
   const val = (r) => (srt === 'name' ? r.name : srt === 'd7' ? r.d7?.bytes : srt === 'd30' ? r.d30?.bytes : r.bytes);
   if (srt !== 'size' || asc || f === 'removed') {
-    list = [...list].sort((a, b) => {
-      const va = val(a); const vb = val(b);
-      // 값이 없는 행은 방향과 무관하게 뒤로(STable 규약과 같다).
-      if (va == null && vb == null) return a.name.localeCompare(b.name);
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      const d = srt === 'name' ? String(va).localeCompare(String(vb)) : va - vb;
-      return (asc ? d : -d) || a.name.localeCompare(b.name);
-    });
+    // v2.740 E-09: 정렬 결과를 비교 묶음에 기억한다(검색어를 칠 때마다 전 폴더를 다시 정렬했다 — 5만 개 46~87ms).
+    // 정렬은 검색 필터 **앞**에서 한다(필터는 순서를 바꾸지 않으므로 결과가 같다). 변형은 묶음당 4개까지.
+    const sk = `${f}|${srt}|${asc ? 'a' : 'd'}`;
+    let sortedList = c.sorted?.get(sk);
+    if (!sortedList) {
+      sortedList = [...list].sort((a, b) => {
+        const va = val(a); const vb = val(b);
+        // 값이 없는 행은 방향과 무관하게 뒤로(STable 규약과 같다).
+        if (va == null && vb == null) return nameCompare(a.name, b.name);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        const d = srt === 'name' ? nameCompare(va, vb) : va - vb;
+        return (asc ? d : -d) || nameCompare(a.name, b.name);
+      });
+      if (c.sorted) { c.sorted.set(sk, sortedList); while (c.sorted.size > 4) c.sorted.delete(c.sorted.keys().next().value); }
+    }
+    list = sortedList;
   }
+  if (needle) list = list.filter((r) => r.name.toLowerCase().includes(needle));
   const total = list.length;
   const off = Math.max(0, Math.min(total, Math.floor(Number(offset) || 0)));
   const lim = Math.max(1, Math.min(USERS_LIMIT_MAX, Math.floor(Number(limit) || 200)));
@@ -248,8 +270,9 @@ async function overviewOf(targetId) {
   if (!okScan) return { id: targetId, state: latest.lastTry ? 'failed-only' : 'no-data' };
   const base7 = await db.okScanAtOrBefore(HISTORY_AGENT, targetId, okScan.ts - 7 * DAY);
   const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}`;
+  sweepExpired(_ovCache);
   const hit = _ovCache.get(key);
-  if (hit) { _ovCache.delete(key); _ovCache.set(key, hit); return hit; }
+  if (hit) { _ovCache.delete(key); _ovCache.set(key, hit); return hit.value; }
   const top = (await db.topEntriesOf(okScan.id, OVERVIEW_POOL)) || [];
   const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
   const denom = denomOf(okScan);
@@ -267,7 +290,7 @@ async function overviewOf(targetId) {
       return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 ? !b7.has(r.name) : null };
     }),
   };
-  _ovCache.set(key, value);
+  _ovCache.set(key, { at: Date.now(), value });
   while (_ovCache.size > OV_CACHE_MAX) _ovCache.delete(_ovCache.keys().next().value);
   return value;
 }
@@ -278,10 +301,14 @@ async function overviewOf(targetId) {
  */
 export async function buildOverview(targetIds) {
   const out = [];
+  // v2.740 E-05: 대상 사이에 시간 기준으로 양보한다(대상 100개 콜드 계산이 0.13~0.9초 동안 쉬지 않고 돌았다 — 재시작 뒤 첫 진입은 전부 콜드).
+  const yieldIf = createYielder(15);
   for (const id of Array.isArray(targetIds) ? targetIds : []) {
     try { out.push(await overviewOf(String(id))); } catch (e) { out.push({ id: String(id), state: 'error', error: String(e?.message || e).slice(0, 200) }); }
+    await yieldIf();
   }
   return out;
 }
 
 export function _resetForTest() { _cache.clear(); _ovCache.clear(); }
+export function _cacheSizes() { return { report: _cache.size, overview: _ovCache.size }; }

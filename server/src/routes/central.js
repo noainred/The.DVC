@@ -2098,9 +2098,11 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
     if (r.duplicate) saved.duplicates++; else saved.inserted++;
     // v2.738 결과 메일 — 새로 적재한 것만(재전송 중복은 보내지 않는다). 기다리지 않는다(응답을 늦추지 않게 — notify 는 던지지 않는다).
     if (!r.duplicate) notifyIsidu({ targetId: sc.targetId, scanId: r.id, ok: sc.ok === true, ts: sc.ts });
-    const edgeTs = sc.edgeTs ?? sc.ts;
-    E.noteIsiduScanTs(sc.targetId, edgeTs);
-    ackIsiduCollect(sc.targetId, edgeTs);
+    // v2.740 A-02: 기준선·완료 판정은 **잘라 둔 시각(sc.ts)** 이다. 미래 시각(엣지 시계가 앞으로 튐)을 그대로 넣으면 기준선(최댓값)이
+    // 미래에 굳어, 시계가 돌아온 뒤의 정상 결과가 '더 새 수집' 이 아니게 되어 '지금 수집' 요청이 결과 없이 폐기됐다(재현).
+    // 시계 차이가 허용 범위(5분) 안이면 sc.ts 가 곧 엣지 시각이라 v2.591 '엣지 시계끼리 비교' 는 그대로다.
+    E.noteIsiduScanTs(sc.targetId, sc.ts);
+    ackIsiduCollect(sc.targetId, sc.ts);
   }
   if (saved.failed) return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })) });
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
