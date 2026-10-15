@@ -112,24 +112,25 @@ test('poller I8(c): 진행 중에 대상이 추가되면(again) 끝난 뒤 한 �
   assert.equal(calls.length, n + 2);
 });
 
-test('auth I8(d): 실패 기록은 마지막 실패 15분 뒤 정리 · 잠금 중에는 정리하지 않는다', () => {
+// v2.740(F-11): login 은 비동기(scrypt 대조)다 — await 한다.
+test('auth I8(d): 실패 기록은 마지막 실패 15분 뒤 정리 · 잠금 중에는 정리하지 않는다', async () => {
   let now = 1_000_000;
   const auth = new Auth({ required: true, passwordHash: 'x'.repeat(64), now: () => now });
-  auth.login('10.0.0.1', 'bad');
+  await auth.login('10.0.0.1', 'bad');
   assert.equal(auth.fails.size, 1);
   now += FAIL_TTL_MS + 1;
-  auth.login('10.0.0.2', 'bad'); // 다른 IP 로그인이 정리를 돌린다
+  await auth.login('10.0.0.2', 'bad'); // 다른 IP 로그인이 정리를 돌린다
   assert.equal(auth.fails.has('10.0.0.1'), false, '15분 지난 기록은 지워진다');
   assert.equal(auth.fails.has('10.0.0.2'), true);
   // 잠금 — 5회
-  for (let i = 0; i < 5; i++) auth.login('10.0.0.3', 'bad');
+  for (let i = 0; i < 5; i++) await auth.login('10.0.0.3', 'bad');
   assert.ok(auth.fails.get('10.0.0.3').lockedUntil > now);
-  const r = auth.login('10.0.0.3', 'bad');
+  const r = await auth.login('10.0.0.3', 'bad');
   assert.match(r.error, /잠겼습니다/);
   now += 4 * 60 * 1000; // 잠금 5분 안 — 정리 대상이 아니다
   auth.pruneFails();
   assert.equal(auth.fails.has('10.0.0.3'), true);
-  assert.match(auth.login('10.0.0.3', 'bad').error, /잠겼습니다/);
+  assert.match((await auth.login('10.0.0.3', 'bad')).error, /잠겼습니다/);
   now += FAIL_TTL_MS + 60 * 1000;
   auth.pruneFails();
   assert.equal(auth.fails.has('10.0.0.3'), false);

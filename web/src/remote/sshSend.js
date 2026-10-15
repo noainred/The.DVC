@@ -57,6 +57,8 @@ const REMOTE_CLOSE_REASON_TEXT = new Map([
   ['revalidate-error', '서버가 이 연결의 권한을 다시 확인하지 못해 연결을 닫았습니다. 잠시 뒤 다시 접속하세요.'],
   ['session-invalid', '로그인 세션이 만료되었거나 로그아웃되어 서버가 연결을 닫았습니다. 다시 로그인한 뒤 접속하세요.'],
   ['revoked', '로그인 세션이 폐기되어(로그아웃·계정 변경 등) 서버가 연결을 닫았습니다. 다시 로그인한 뒤 접속하세요.'],
+  // v2.740(감사 F-10): 서버가 빈 비밀번호 auth 프레임을 대상에 접속하기 전에 거부한다(server/src/proxy/sshGateway.js closeAll(4400, 'empty-password')).
+  ['empty-password', '비밀번호가 비어 있어 서버가 대상에 접속하지 않고 연결을 닫았습니다(대상 서버로는 아무것도 보내지 않았습니다). 비밀번호를 입력한 뒤 다시 접속하세요.'],
 ]);
 /** 다른 표기의 사유(2.730 이하 서버의 'host key not trusted'·'forbidden' · 접속 시점 매핑 없음) — 같은 뜻의 코드로 읽는다. */
 const CLOSE_REASON_ALIAS = new Map([
@@ -90,6 +92,7 @@ export function sshCloseReasonText(code) {
   if (code === 4009) return '받지 못한 출력이 너무 많이 쌓여 서버가 연결을 닫았습니다(대량 출력 — 다시 접속해 출력을 나눠 보세요).';
   if (code === 4000) return '입력이 없는 시간이 길어 서버가 세션을 닫았습니다(유휴 종료). 다시 접속하세요.';
   if (code === 4404) return '이 원격 접속 매핑을 찾을 수 없어 서버가 연결을 닫았습니다(삭제되었거나 바뀌었습니다).';
+  if (code === 4400) return '비밀번호가 비어 있어 서버가 대상에 접속하지 않고 연결을 닫았습니다. 비밀번호를 입력한 뒤 다시 접속하세요.';
   if (code === 4429) return '동시에 열 수 있는 원격 콘솔 수를 넘었습니다 — 다른 콘솔을 닫고 다시 접속하세요.';
   return null;
 }

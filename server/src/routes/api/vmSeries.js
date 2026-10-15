@@ -24,7 +24,7 @@ import { loadVmSeriesSettings, saveVmSeriesSettings, VMSERIES_LIMITS } from '../
 import { summarizeScope, normFolder } from '../../vmseries/scope.js';
 import { vmSeriesDiskUsage, dropVmSeriesDb, vmSeriesDbStats, vmSeriesMeta, vmSeriesFreeBytes } from '../../vmseries/db.js';
 import { dbFileName } from '../../metrics/vmperfDb.js';
-import { vmSeriesPollerStatus, runVmSeriesNow } from '../../vmseries/poller.js';
+import { vmSeriesPollerStatus, runVmSeriesNow, noteVmSeriesRetentionChange } from '../../vmseries/poller.js';
 import { localReportFor, topSpikers } from '../../vmseries/query.js';
 import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
 import { mockLocalReport } from '../../vmseries/mock.js';
@@ -62,7 +62,9 @@ const morefOf = (id, vcId) => String(id || '').slice(String(vcId || '').length +
 export function scopeVmSeriesStatus(st, allowed) {
   if (!st || typeof st !== 'object') return st;
   if (!allowed) return st;
-  const { lastResult, ...rest } = st;
+  const { lastResult, lastPrune: lp, ...rest } = st;
+  // v2.740(F-07): 보존 정리 기록의 파일 수·삭제 행 수·실패 목록(vcenterId)은 전 법인 집계다 — 범위 계정에는 시각·사유·보존일만.
+  rest.lastPrune = lp && typeof lp === 'object' ? { at: lp.at ?? null, reason: lp.reason ?? null, days: lp.days ?? null, scoped: true } : (lp ?? null);
   if (!lastResult) return { ...rest, lastResult: null, scoped: true };
   const keep = (x) => x && allowed.has(String(x.vcenterId));
   const errors = (lastResult.errors || []).filter(keep);
@@ -210,6 +212,9 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     delete patch.scope;
   }
   const next = saveVmSeriesSettings(patch);
+  // v2.740(감사 F-07): 보존일을 줄였으면 곧바로 한 번 정리한다(백그라운드 — 청크 + 양보, 기다리지 않는다). 예전에는 수집을 끝까지 돈
+  //   실행 12번에 1번만 정리해, 디스크 여유 부족으로 수집이 멈춘 상태에서는 보존일을 줄여도 공간이 비지 않았다.
+  const pruneScheduled = !!noteVmSeriesRetentionChange(before.retentionDays, next.retentionDays);
   // 선택 범위에서 빠진 vCenter 의 DB 파일 삭제(용량 즉시 회수) — 요청이 명시할 때만(dropExcluded).
   const dropped = [];
   if (b.dropExcluded === true && next.scope === 'selected') {
@@ -227,7 +232,7 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     ip: req.ip || '',
   });
   const safeNext = allowed ? { ...next, targets: filterScopedMap(next.targets, allowed) } : next;
-  res.json({ ok: true, settings: safeNext, ...vmSeriesStaleOf(safeNext.targets, snap), dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
+  res.json({ ok: true, settings: safeNext, ...vmSeriesStaleOf(safeNext.targets, snap), dropped, ...(pruneScheduled ? { pruneScheduled: true } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /** 범위 선택 트리 데이터 — 한 vCenter 의 클러스터/호스트/폴더/VM(전원 상태 포함, 꺼진 VM 은 표시만). */

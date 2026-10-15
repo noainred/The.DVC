@@ -492,6 +492,13 @@ function handleConnection(ws, user, opts = {}) {
       const issue = mappingAccessIssue(user, m);
       // v2.731(A5-02·A1-03): 닫힘 사유는 원인을 가르는 코드다 — 'forbidden' 하나로는 웹이 권한·매핑·호스트키를 구분하지 못했다.
       if (issue) { send({ type: 'status', text: issue }); return closeAll(4403, 'mapping-denied'); }
+      // v2.740(감사 F-10): 빈 비밀번호(또는 문자열 아님)는 대상에 접속하지 않는다 — ssh2 는 문자열이면 '' 도 password 인증을 시도해
+      //   대상 계정의 로그인 실패(잠금 카운터)에 쌓인다. 웹은 v2.732 canConnect 로 막지만 구버전 탭·직접 WS 클라이언트는 서버만 막을 수 있다.
+      //   SSH 클라이언트를 만들기 전·세션을 세기 전에 닫는다. 닫힘 사유는 웹 remote/sshSend.js remoteCloseReasonText 표와 1:1.
+      if (typeof msg.password !== 'string' || msg.password === '') {
+        send({ type: 'status', text: '비밀번호가 비어 있어 대상 서버에 접속하지 않았습니다. 비밀번호를 입력한 뒤 다시 접속하세요.' });
+        return closeAll(4400, 'empty-password');
+      }
       if (!counted && activeSessions >= MAX_SESSIONS) {
         send({ type: 'status', text: `동시 원격 세션 한도(${MAX_SESSIONS})를 초과했습니다. 사용하지 않는 세션을 닫고 잠시 후 다시 시도하세요.` });
         return closeAll(4429, 'too many sessions');
