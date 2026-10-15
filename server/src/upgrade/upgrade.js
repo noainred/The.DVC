@@ -29,6 +29,7 @@ import {
 } from './signature.js';
 import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
 import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets, META_FETCH_TIMEOUT_MS, attemptTimeoutMs, metaTimeoutReason } from './versionsDoc.js';
+import { hedgedFetch, META_HEDGE_MS } from './hedgedFetch.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -421,13 +422,15 @@ export async function fetchRemoteVersions(base, { token, timeout = META_FETCH_TI
   //   써서 첫 응답이 10초를 넘기면 재시도 없이 실패했다(versionsDoc.js META_FETCH_TIMEOUT_MS 머리말).
   const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || META_FETCH_TIMEOUT_MS));
   const attemptMs = Math.min(totalMs, attemptTimeoutMs(totalMs));
+  const hedgeMs = META_HEDGE_MS;
   const dl = deadlineSignal(totalMs);
   let attempts = 1;
   let phase = 'headers';
   try {
-    const res = await resilientFetch(url, {
-      dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: attemptMs, retries: 2, signal: dl.signal,
-      onRetry: () => { attempts += 1; },
+    // v2.740.1: 앞 시도가 늦으면 끊지 않고 다음 시도를 함께 보낸다(hedgedFetch.js 머리말 — 첫 응답이 늦는 사내 저장소에서 확인이 20초 걸리던 것).
+    const { res } = await hedgedFetch(url, {
+      dispatcher: upgradeAgent, headers: authHeaders(url, token), totalMs, attemptMs, hedgeMs, signal: dl.signal,
+      onAttempt: (n) => { attempts = n; },
     });
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return [null, `versions.json HTTP ${res.status}`]; }
     phase = 'body';
@@ -437,7 +440,7 @@ export async function fetchRemoteVersions(base, { token, timeout = META_FETCH_TI
     return [v.doc, null];
   } catch (err) {
     // 전체 시한 · 마지막 시도의 시도 시한(TimeoutError) 둘 다 '시한 초과' 다 — 후자를 '접속 실패' 로 말하면 원인을 흐린다.
-    if (dl.aborted() || isTimeoutErr(err)) return [null, metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase })];
+    if (dl.aborted() || isTimeoutErr(err)) return [null, metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase, hedgeMs })];
     if (err instanceof SyntaxError) return [null, 'versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)'];
     const msg = scrubUrlSecrets(err?.message || err, secrets);
     if (/상한/.test(msg)) return [null, `versions.json 이 크기 상한을 넘어 받지 않았습니다 — ${msg}`];
@@ -501,20 +504,21 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = ME
 export async function fetchManifestText(url, { token, timeout = META_FETCH_TIMEOUT_MS } = {}) {
   const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || META_FETCH_TIMEOUT_MS));
   const attemptMs = Math.min(totalMs, attemptTimeoutMs(totalMs));   // v2.736.3: versions.json 과 같은 규칙(시도별 시한 + 재시도)
+  const hedgeMs = META_HEDGE_MS;                                     // v2.740.1: 함께 보내기 — versions.json 과 같은 규칙
   const dl = deadlineSignal(totalMs);
   let attempts = 1;
   let phase = 'headers';
   try {
-    const res = await resilientFetch(url, {
-      dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: attemptMs, retries: 2, signal: dl.signal,
-      onRetry: () => { attempts += 1; },
+    const { res } = await hedgedFetch(url, {
+      dispatcher: upgradeAgent, headers: authHeaders(url, token), totalMs, attemptMs, hedgeMs, signal: dl.signal,
+      onAttempt: (n) => { attempts = n; },
     });
     if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true, reason: `원격 소스에 서명 manifest 가 없습니다(404 · ${safeUrlText(url)})` }; }
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
     phase = 'body';
     return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
   } catch (err) {
-    if (dl.aborted() || isTimeoutErr(err)) return { text: null, reason: metaTimeoutReason('서명 manifest', { totalMs, attemptMs, attempts, phase }) };
+    if (dl.aborted() || isTimeoutErr(err)) return { text: null, reason: metaTimeoutReason('서명 manifest', { totalMs, attemptMs, attempts, phase, hedgeMs }) };
     // 상한(64KB)을 넘는 manifest 는 '받지 못함' 이 아니라 **형식 오류**다(정책과 무관하게 거부).
     if (/상한/.test(String(err?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
     return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(err?.message || err, token ? [token] : [])}` };

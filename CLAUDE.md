@@ -1076,6 +1076,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       하나(헤더 대기 / 본문 수신 · 시도 횟수 · 앞머리 문구 불변). 화면 원격 행 라벨은 `upgradeAutoText.remoteSourceLabel`(GitHub 주소만 '원격(GitHub)').
       **전체 시한 신호를 새로 걸 때 `timeoutMs` 를 같은 값으로 두지 말 것**(회귀 `upgradeCheckTimeout2736_3` ⑧ 이 소스로 고정 · 변이 4/4).
       ⚠ 이 수정이 없는 v2.735.3~v2.736.2 포탈은 원격 확인이 같은 이유로 막힐 수 있다 — 감시 폴더에 번들 + 같은 버전 manifest 를 함께 넣으면 원격 확인 없이 설치된다.
+      ⚠⚠ v2.740.1(사용자 신고 "업데이트를 하면 랙이 걸려 · 이전에는 안 그랬어" — 캡처 `upgrade › check · 19초`): **시도마다 끊고 기다리면 첫 응답만 늦는 저장소에서 그 시도 시한을 통째로 기다린다**
+      (재현 — 첫 응답 25초 가짜 저장소 20.5초 · 모든 응답 25초 저장소는 60초 뒤 실패). 메타데이터(versions.json·manifest) 받기는 `upgrade/hedgedFetch.js` 하나 — 앞 시도가
+      `UPGRADE_CHECK_HEDGE_MS`(기본 3초 · 0 = 예전처럼 순서대로) 안에 응답하지 않으면 **끊지 않고** 다음 시도를 함께 보내고 먼저 온 응답을 쓴다(최대 3번 · 나머지는 끊는다 ·
+      재시도 대상 상태·일시 오류는 400·800ms 뒤 다음 시도 · 일시 오류가 아닌 실패는 다시 보내지 않는다). 측정 3.1초 · 25초. **번들·설치 패키지 다운로드에는 쓰지 말 것**(큰 파일을 두세 번 받는다 —
+      회귀 `upgradeHedge2740_1` ⑪ 이 소스로 고정). 시간을 다루는 재시도를 새로 만들 때 '다음 시도를 언제 보내는가' 와 '앞 시도를 끊는가' 를 따로 정할 것.
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):

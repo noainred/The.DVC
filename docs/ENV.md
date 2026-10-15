@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **653개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **654개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-15)
@@ -395,13 +395,14 @@
 |---|---|---|---|
 | `NFS_MOUNT_BASE` | `'/mnt/portal-nfs'` |  | system/nfsMounts.js |
 
-## 업그레이드 (9)
+## 업그레이드 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `INVOCATION_ID` |  |  | upgrade/upgrade.js |
 | `NOTIFY_SOCKET` |  |  | upgrade/upgrade.js |
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
+| `UPGRADE_CHECK_HEDGE_MS` | `3000` | ✅ | upgrade/hedgedFetch.js |
 | `UPGRADE_CHECK_TIMEOUT_MS` | `60000` |  | upgrade/versionsDoc.js |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_SCAN_DEFER_MAX_MS` |  |  | upgrade/manager.js |
@@ -837,4 +838,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 653
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 654

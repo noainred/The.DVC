@@ -17,6 +17,7 @@ import { readBytesCapped } from '../util/readBytesCapped.js';
 import { readJsonCapped } from '../util/readCapped.js';
 // v2.730(검토 I-08·S-10): 메타데이터 형식·상한 + 배포자 서명(원격 다운로드 경로 — 여기 받은 파일은 /dl 로 엣지에 나가고 설치에 쓰인다)
 import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets, META_FETCH_TIMEOUT_MS, attemptTimeoutMs, metaTimeoutReason } from './versionsDoc.js';
+import { hedgedFetch, META_HEDGE_MS } from './hedgedFetch.js';
 import { decideSignature, signatureSummary } from './signature.js';
 import { fetchManifestText } from './upgrade.js'; // v2.740(B-11): manifest 받기는 업그레이드 경로와 한 벌
 import { MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
@@ -40,12 +41,14 @@ export async function fetchRemoteVersions(baseUrl) {
   //   v2.736.3: 시한은 업그레이드 확인과 같은 값(META_FETCH_TIMEOUT_MS)이고 시도마다 그 1/3 로 재시도한다.
   const totalMs = META_FETCH_TIMEOUT_MS;
   const attemptMs = attemptTimeoutMs(totalMs);
+  const hedgeMs = META_HEDGE_MS;
   const dl = deadlineSignal(totalMs);
   let attempts = 1;
   let phase = 'headers';
   try {
     // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
-    const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: attemptMs, retries: 2, signal: dl.signal, onRetry: () => { attempts += 1; } });
+    //   v2.740.1: 업그레이드 확인과 같은 함께 보내기(hedgedFetch.js) — 앞 시도가 늦으면 끊지 않고 다음 시도를 같이 보낸다.
+    const { res } = await hedgedFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, totalMs, attemptMs, hedgeMs, signal: dl.signal, onAttempt: (n) => { attempts = n; } });
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`versions.json HTTP ${res.status}`); }
     phase = 'body';
     // v2.632(감사 AX3-06): 저장소 응답은 상한까지만 읽는다(외부 응답 .json() 금지 — v2.604 규약).
@@ -54,7 +57,7 @@ export async function fetchRemoteVersions(baseUrl) {
     if (!v.ok) throw new Error(v.reason);
     return v.doc;
   } catch (e) {
-    if (dl.aborted() || e?.name === 'TimeoutError') throw new Error(metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase }));
+    if (dl.aborted() || e?.name === 'TimeoutError') throw new Error(metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase, hedgeMs }));
     if (e instanceof SyntaxError) throw new Error('versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)');
     throw new Error(scrubUrlSecrets(e?.message || e));
   } finally { dl.clear(); }
