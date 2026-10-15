@@ -207,3 +207,40 @@ test('⑦ 엣지·수집기 push 수신 결과도 기록한다 · 서버 시작�
   assert.match(mgr, /start\(\)\s*\{\s*this\.enablePersistence\(\)/, 'start() 가 기록을 켠다(서버 프로세스만)');
   assert.match(mgr, /set lastResult\(v\)\s*\{[^}]*#save\(\)/, '대입하면 파일에도 남는다');
 });
+
+test('⑧ 리뷰 확정분 — 지난 실패는 지금 사유가 아니다 · 확인할 곳이 없으면 최신이라 기록하지 않는다', async () => {
+  const on = { ...base, pollIntervalMs: 3_600_000 };
+  // F1: 엣지가 원격으로 먼저 올라간 뒤 중앙 push 로 같은 번들을 받으면 'not newer' — 설치할 것이 없었던 것이지 실패가 아니다.
+  const notNewer = { at: NOW - 60_000, source: 'collector-push', ok: false, reason: 'not newer (2.736.2 <= 2.736.2)', version: '2.736.2' };
+  assert.equal(auto.failureMoot(notNewer, null, '2.736.2'), true, '대상 버전이 지금 버전이면 지난 일이다');
+  let st = auto.autoUpgradeState({ settings: on, intervalMs: 3_600_000, armedAt: NOW, lastResult: auto.sanitizeResult(notNewer), currentVersion: '2.736.2', now: NOW });
+  assert.equal(codes(st).includes('apply-failed'), false);
+  const upg = stripComments(fs.readFileSync(path.join(HERE, '..', 'src', 'upgrade', 'upgrade.js'), 'utf8'));
+  assert.match(upg, /reason: `not newer \([^`]*\)`, version: vstr\(newV\), upToDate: true/, "설치 함수 자체도 '설치할 것 없음' 을 upToDate 로 밝힌다");
+  // F2: 실패 뒤 다른 경로로 그 버전을 설치했다(재시작 후 되살린 기록) — 대상 버전 2.736.2 == 지금 버전.
+  const failed = { at: NOW - 3 * 86_400_000, ok: false, reason: 'download HTTP 404', check: { latest: '2.736.2' } };
+  const restored = auto.restoreStatus({ lastResult: failed }, '2.736.2').lastResult;
+  st = auto.autoUpgradeState({ settings: on, intervalMs: 3_600_000, armedAt: NOW, lastResult: restored, currentVersion: '2.736.2', now: NOW });
+  assert.equal(codes(st).includes('apply-failed'), false, '이미 설치된 버전의 지난 실패를 말하지 않는다');
+  // F2: 대상이 아직 새 버전이면 실패는 지금 사유다(지우지 않는다)
+  st = auto.autoUpgradeState({ settings: on, intervalMs: 3_600_000, armedAt: NOW, lastResult: restored, currentVersion: '2.736.1', now: NOW });
+  assert.equal(codes(st).includes('apply-failed'), true);
+  // F2: 그 뒤의 자동 확인이 '최신' 이었다(versions.json 되돌림) — 지난 실패
+  const later = { at: NOW - 3_600_000, outcome: 'up-to-date', latest: '2.736.1' };
+  st = auto.autoUpgradeState({ settings: on, intervalMs: 3_600_000, armedAt: NOW, lastResult: restored, lastTick: later, currentVersion: '2.736.1', now: NOW });
+  assert.equal(codes(st).includes('apply-failed'), false);
+  // 대상 버전을 모르면 버전으로는 지우지 않는다(지어내지 않는다)
+  assert.equal(auto.failureMoot({ at: NOW, ok: false, reason: 'x' }, null, '2.736.2'), false);
+  assert.equal(auto.failureMoot({ at: NOW, ok: true }, null, '2.736.2'), false);
+  // 실제 매니저 status() 가 지금 버전을 넘긴다
+  const m = makeManager({ ...on, pollIntervalMs: 0 });
+  m.lastResult = { at: NOW, ok: false, reason: `not newer (${currentVersion()} <= ${currentVersion()})`, version: currentVersion() };
+  assert.equal(codes(m.status().auto).includes('apply-failed'), false, 'status() 가 currentVersion 을 판정에 넘긴다');
+
+  // F3: 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이 아니라 'no-source'
+  const n = makeManager({ enabled: true, watchDir: '', remoteBase: '', installDir: '/tmp/x', autoApply: true, pollIntervalMs: 0 });
+  await n.tick();
+  assert.equal(n.lastTick.outcome, 'no-source');
+  assert.ok(auto.TICK_OUTCOMES.includes('no-source'));
+  assert.equal(auto.sanitizeTick(n.lastTick).outcome, 'no-source', "정제가 'error' 로 바꾸지 않는다");
+});

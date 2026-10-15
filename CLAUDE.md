@@ -1065,7 +1065,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       AUTO_TEXT` 1:1 — 웹 테스트가 서버 소스와 대조) · 다음 확인 = 무장 시각 + 주기의 배수(모르면 null) · 백그라운드 확인 결과 `lastTick`. 확인·적용·자동 확인 기록은
       `upgrade-status.json`(statusStore.js — 서버 `start()` 만 쓴다 · 동기 원자 0600 · 아는 필드만 · 주소 계정·쿼리 제거 · 손상 보존)에 남고, 되살린 '새 버전 있음' 은 **지금 버전
       기준으로 다시 계산**한다(설치는 언제나 새로 받은 정보로만). `lastResult` 는 setter 라 routes 의 대입도 파일에 남는다. '새 버전 확인' 결과가 늘 '실패' 로 보이던 것
-      (확인 응답에 ok 없음)은 `actionMsg` 하나가 고친다. 회귀 `upgradeAuto2736_2` + 웹 `upgradeAutoText.test.js`(변이 12/12).
+      (확인 응답에 ok 없음)은 `actionMsg` 하나가 고친다. 회귀 `upgradeAuto2736_2` + 웹 `upgradeAutoText.test.js`(변이 12/12 + 리뷰분 11/11).
+      ⚠ 같은 릴리스 리뷰 확정분: 'not newer'(같은 번들 push)는 `upToDate:true` · 대상 버전이 이미 설치됐거나 그 뒤 자동 확인이 '최신' 이면 지난 실패(`failureMoot` — status() 가
+      currentVersion 을 넘긴다) · 소스가 없으면 tick outcome `no-source`('최신' 금지) · 'applying' 의 '프로세스가 끝났다' 는 **재시작 전 기록일 때만**(지금이면 적용 중) ·
+      확인·적용 버튼은 **저장된** enabled 기준. **기록을 파일에 남기기 시작하면 그 기록이 '지금 사유' 인지 판정하는 조건을 함께 둘 것** — 영속화가 실패를 원인보다 오래 살게 한다.
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):

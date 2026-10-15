@@ -309,7 +309,8 @@ function applyIfNewer(members, installDir, currentVersion, { allowSame = false, 
   const cur = parseVersion(currentVersion) || [0, 0, 0];
   const c = cmpVersionTuple(newV, cur);
   if (c < 0 || (c === 0 && !allowSame)) {
-    return { ok: false, reason: `not newer (${vstr(newV)} <= ${vstr(cur)})`, version: vstr(newV) };
+    // v2.736.2(리뷰 F1): '설치할 것이 없음' 은 실패가 아니다 — upToDate 로 밝힌다(엣지가 원격으로 먼저 올라간 뒤 중앙 push 로 같은 번들을 받는 경우).
+    return { ok: false, reason: `not newer (${vstr(newV)} <= ${vstr(cur)})`, version: vstr(newV), upToDate: true };
   }
   try {
     const backup = applyPackage(members, installDir);

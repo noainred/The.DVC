@@ -33,7 +33,7 @@ export const AUTO_CODES = Object.freeze([
 ]);
 export const AUTO_STATES = Object.freeze(['on', 'check-only', 'manual', 'off', 'blocked']);
 /** 백그라운드 확인 한 번의 결과 — 웹 `TICK_TEXT` 의 키와 1:1. */
-export const TICK_OUTCOMES = Object.freeze(['up-to-date', 'available', 'applying', 'applied', 'apply-failed', 'check-failed', 'error']);
+export const TICK_OUTCOMES = Object.freeze(['up-to-date', 'available', 'applying', 'applied', 'apply-failed', 'check-failed', 'no-source', 'error']);
 
 const VER_RE = /^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/;
 const ver = (v) => (typeof v === 'string' && VER_RE.test(v.trim()) ? v.trim().replace(/^v/i, '') : null);
@@ -157,16 +157,31 @@ export function nextCheckAt({ armedAt, intervalMs, now }) {
 }
 
 /**
+ * 실패한 적용 기록이 더는 지금 사유가 아닌가(리뷰 F1·F2 — 기록을 파일에 남기면서 실패가 그 조건보다 오래 살게 됐다).
+ *  ① 그 적용의 대상 버전(version · check.latest)이 지금 버전보다 새롭지 않다 — 이미 설치됐다(다른 경로로 설치·같은 번들 push).
+ *  ② 그 뒤의 백그라운드 확인이 '최신' 이었다 — 받을 새 버전이 없다(versions.json 되돌림 등).
+ * 대상 버전을 모르면 ① 로 지우지 않는다(지어내지 않는다).
+ */
+export function failureMoot(lastResult, lastTick, currentVersion) {
+  if (!lastResult || lastResult.ok !== false) return false;
+  const target = ver(lastResult.version) || ver(lastResult.check?.latest);
+  if (target && ver(currentVersion)) { const c = cmpVersion(target, currentVersion); if (c != null && c <= 0) return true; }
+  if (lastTick && lastTick.outcome === 'up-to-date' && ts(lastTick.at) != null && ts(lastResult.at) != null && lastTick.at > lastResult.at) return true;
+  return false;
+}
+
+/**
  * 자동 업그레이드 상태 판정.
  * @param {object} o
  * @param {object} o.settings 유효 설정(enabled·autoApply·pollIntervalMs·installDir·remoteBase·watchDir)
  * @param {number} o.intervalMs 실제로 무장한 주기(clampPollMs 결과 — 0 이면 끔)
  * @param {number|null} o.armedAt 타이머를 무장한 시각(무장하지 않았으면 null)
  * @param {object|null} o.lastCheck · o.lastResult · o.lastTick 정제된 기록
+ * @param {string|null} o.currentVersion 지금 실행 중인 버전 — 실패한 적용의 대상이 이미 설치돼 있으면 그 실패는 지난 일이다(리뷰 F1·F2)
  * @param {number} o.now
  * @returns {{state:string, issues:{code:string, reason?:string, at?:number, version?:string}[], intervalMs:number, nextCheckAt:number|null, armed:boolean}}
  */
-export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, now = Date.now() } = {}) {
+export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, currentVersion = null, now = Date.now() } = {}) {
   const s = settings || {};
   const ms = num(intervalMs) ?? 0;
   const issues = [];
@@ -181,8 +196,8 @@ export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null
   // 마지막 확인 실패 — 백그라운드든 수동이든 가장 최근 확인 기준(원격 오류만 사유가 있다).
   const remoteErr = lastCheck?.remote && lastCheck.remote.ok === false ? lastCheck.remote.error : null;
   if (remoteErr) issues.push({ code: 'check-failed', reason: remoteErr, at: lastCheck.at });
-  // 마지막 적용 실패 — '이미 최신' 은 실패가 아니다.
-  if (lastResult && lastResult.ok === false && !lastResult.upToDate) {
+  // 마지막 적용 실패 — '이미 최신' 은 실패가 아니다. 지난 실패도 지금 사유가 아니다(failureMoot).
+  if (lastResult && lastResult.ok === false && !lastResult.upToDate && !failureMoot(lastResult, lastTick, currentVersion)) {
     issues.push({ code: 'apply-failed', reason: lastResult.reason || null, at: lastResult.at, ...(lastResult.version ? { version: lastResult.version } : {}) });
   } else if (lastTick && lastTick.outcome === 'error' && lastTick.reason) {
     issues.push({ code: 'check-failed', reason: lastTick.reason, at: lastTick.at });

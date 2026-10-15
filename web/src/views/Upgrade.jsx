@@ -185,6 +185,10 @@ export default function Upgrade() {
   const tokenWillDrop = !!status.hasToken && !form.token && baseKey(form.remoteBase) !== baseKey(status.remoteBase);
   const result = status.lastResult;
   const newer = check && (check.watch?.available || check.remote?.available);
+  // v2.736.2: 확인·적용은 저장된 '자동 업그레이드 사용' 을 따른다(서버 판정과 같은 값) — 체크만 바꾼 상태면 저장하라고 말한다.
+  const savedEnabled = !!status.enabled;
+  const lockTitle = savedEnabled ? undefined
+    : form.enabled ? '설정을 저장한 뒤에 쓸 수 있습니다(저장된 설정에서는 자동 업그레이드 사용이 꺼져 있습니다)' : '자동 업그레이드 사용이 꺼져 있습니다';
 
   return (
     <>
@@ -316,12 +320,13 @@ export default function Upgrade() {
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
             {busy === 'save' ? '저장 중…' : '설정 저장'}
           </button>
-          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !form.enabled}
+          {/* v2.736.2(리뷰 UPG-UI-05): 잠금은 **저장된** 설정 기준이다 — 서버는 저장값으로 판정한다(체크만 하고 누르면 409). */}
+          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !savedEnabled} title={lockTitle}
             onClick={() => run('check', () => postJson('/upgrade/check'))}>
             {busy === 'check' ? '확인 중…' : '새 버전 확인'}
           </button>
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px', background: newer ? 'linear-gradient(135deg,var(--green),#16a34a)' : undefined }}
-            disabled={busy || !form.enabled || !newer} onClick={() => run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }))}>
+            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }))}>
             {busy === 'apply' ? '적용 중…' : '업그레이드 적용 + 재시작'}
           </button>
           <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy}

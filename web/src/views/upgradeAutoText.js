@@ -13,12 +13,13 @@ import { numOrNull } from '../numOrNull.js';
 
 /** 사유 코드 → 제목·조치. 서버 AUTO_CODES 와 1:1. */
 export const AUTO_TEXT = {
-  disabled: { title: '자동 업그레이드 사용이 꺼져 있습니다', fix: '아래 ‘자동 업그레이드 사용’ 을 켜고 설정을 저장하세요. 꺼져 있으면 확인·적용 버튼도 잠깁니다.' },
+  disabled: { title: '자동 업그레이드 사용이 꺼져 있습니다', fix: '아래 ‘자동 업그레이드 사용’ 을 켜고 설정을 저장하세요. 저장하기 전에는 확인·적용 버튼이 잠겨 있습니다.' },
   'no-source': { title: '확인할 곳이 없습니다(원격 소스·감시 폴더 둘 다 비어 있음)', fix: '원격 소스 URL 이나 감시 폴더 중 하나를 입력하세요.' },
   'no-interval': { title: '확인 주기가 0분(끔)이라 자동 확인을 하지 않습니다 — 자동 적용도 일어나지 않습니다', fix: '확인 주기(분)에 0 보다 큰 값(예: 60)을 넣고 설정을 저장하세요. 지금 바로 받으려면 ‘새 버전 확인’ → ‘업그레이드 적용 + 재시작’ 을 누르세요.' },
   'no-auto-apply': { title: '자동 적용이 꺼져 있어 새 버전을 찾아도 적용하지 않습니다', fix: '‘새 버전 발견 시 자동 적용 + 재시작’ 을 켜거나, 새 버전이 보이면 ‘업그레이드 적용 + 재시작’ 을 누르세요.' },
   'no-install-dir': { title: '설치 경로(installDir)가 없어 적용할 수 없습니다', fix: '‘서버에서 자동 감지’ 로 설치 경로를 채운 뒤 설정을 저장하세요.' },
-  'check-failed': { title: '마지막 확인이 실패했습니다', fix: '사유를 보고 원격 소스 주소·네트워크(프록시·방화벽)를 확인하세요. 다음 확인 주기에 다시 시도합니다.' },
+  // 다시 시도 안내는 autoSummary 가 주기를 보고 붙인다(주기 0 이면 '다음 주기' 가 없다 — 리뷰 UPG-UI-03).
+  'check-failed': { title: '마지막 확인이 실패했습니다', fix: '사유를 보고 원격 소스 주소·네트워크(프록시·방화벽)를 확인하세요.' },
   'apply-failed': { title: '마지막 적용이 실패했습니다', fix: '사유를 확인하세요. 같은 사유가 반복되면 자동 적용은 매 주기 같은 곳에서 멈춥니다.' },
 };
 
@@ -35,12 +36,22 @@ export const STATE_TEXT = {
 export const TICK_TEXT = {
   'up-to-date': '최신 — 받을 새 버전이 없었습니다',
   available: '새 버전을 찾았지만 자동 적용이 꺼져 있어 적용하지 않았습니다',
+  // 재시작 전 기록일 때만 이 문장이다 — 지금 프로세스의 기록이면 아직 적용 중이다(APPLYING_NOW, 리뷰 UPG-UI-01).
   applying: '적용을 시작했지만 결과가 기록되기 전에 프로세스가 끝났습니다',
   applied: '새 버전을 적용했습니다',
   'apply-failed': '새 버전을 찾았지만 적용하지 못했습니다',
   'check-failed': '확인하지 못했습니다',
+  'no-source': '확인할 곳이 없어 아무것도 확인하지 않았습니다(원격 소스·감시 폴더 미설정)',
   error: '확인 중 오류가 났습니다',
 };
+/** 지금 프로세스가 적용 중일 때(lastTick.outcome 'applying' + 재시작 전 기록이 아님). */
+export const APPLYING_NOW = '새 버전을 적용하는 중입니다 — 다운로드·엣지 배포가 끝나면 재시작합니다';
+
+/** 적용 결과의 source 코드 → 이름(리뷰 UPG-UI-06 — 화면 버튼은 source 'auto' 를 보내 '화면에서 실행 · auto' 가 모순처럼 보였다). */
+export const SOURCE_TEXT = {
+  auto: '소스 자동 선택', watch: '감시 폴더', remote: '원격 소스', 'edge-push': '중앙에서 받은 번들', 'collector-push': '수집기로 받은 번들',
+};
+const sourceText = (v) => (v ? SOURCE_TEXT[v] || String(v) : null);
 
 /** 화면 버튼 동작 → 이름. */
 export const ACTION_LABEL = { save: '설정 저장', check: '새 버전 확인', apply: '업그레이드 적용', restart: '프로세스 재시작' };
@@ -94,26 +105,36 @@ export function autoSummary(status, now = Date.now()) {
   const a = status && status.auto;
   if (!a || typeof a !== 'object' || !STATE_TEXT[a.state]) return null;
   const st = STATE_TEXT[a.state];
+  const periodic = a.state !== 'off' && numOrNull(a.intervalMs) > 0;
   const lines = (Array.isArray(a.issues) ? a.issues : []).map((i) => {
     const t = AUTO_TEXT[i?.code] || { title: `알 수 없는 사유(${String(i?.code || '—')})`, fix: '' };
-    return { code: String(i?.code || ''), title: t.title, fix: t.fix, reason: i?.reason ? String(i.reason) : null, when: i?.at ? agoText(i.at, now) : null };
+    let fix = t.fix;
+    if (i?.code === 'check-failed') {
+      fix += periodic ? ' 다음 확인 주기에 다시 시도합니다.' : ' 자동 확인을 하지 않는 설정이라, 고친 뒤 ‘새 버전 확인’ 을 눌러 다시 확인하세요.';
+    }
+    return { code: String(i?.code || ''), title: t.title, fix, reason: i?.reason ? String(i.reason) : null, when: i?.at ? agoText(i.at, now) : null };
   });
+  const noSource = lines.some((l) => l.code === 'no-source');
   const failing = lines.some((l) => l.code === 'check-failed' || l.code === 'apply-failed');
   const tone = st.tone === 'ok' && failing ? 'warn' : st.tone;
   let next;
   if (a.state === 'off') next = '자동 확인을 하지 않습니다(꺼짐)';
   else if (!(numOrNull(a.intervalMs) > 0)) next = '자동 확인을 하지 않습니다(확인 주기 0분)';
+  else if (status.applying) next = '지금 새 버전을 적용하는 중입니다';
   else if (status.ticking) next = '지금 확인 중입니다';
+  else if (noSource) next = '확인할 곳이 없어 자동 확인이 아무것도 확인하지 않습니다(원격 소스·감시 폴더 미설정)';
   else if (numOrNull(a.nextCheckAt) != null) next = `${clock(a.nextCheckAt)} (${inText(a.nextCheckAt, now)}) · ${intervalText(a.intervalMs)} 주기`;
   else next = '예정 시각을 알 수 없습니다(타이머가 무장되지 않았습니다 — 설정을 다시 저장해 보세요)';
   const tk = status.lastTick;
   let tick = null; let tickTone = 'muted';
   if (tk && typeof tk === 'object' && numOrNull(tk.at) != null) {
-    const base = TICK_TEXT[tk.outcome] || TICK_TEXT.error;
+    const inProgress = tk.outcome === 'applying' && !tk.restored;
+    const base = inProgress ? APPLYING_NOW : (TICK_TEXT[tk.outcome] || TICK_TEXT.error);
     const ver = tk.latest ? ` (최신 v${tk.latest})` : '';
     const why = tk.reason ? ` — ${tk.reason}` : '';
     tick = `${clock(tk.at)} (${agoText(tk.at, now)}) · ${base}${ver}${why}${tk.restored ? ' · 재시작 전 기록' : ''}`;
-    tickTone = tk.outcome === 'applied' || tk.outcome === 'up-to-date' ? 'ok' : tk.outcome === 'available' ? 'warn' : 'bad';
+    tickTone = tk.outcome === 'applied' || tk.outcome === 'up-to-date' ? 'ok'
+      : inProgress ? 'muted' : tk.outcome === 'available' || tk.outcome === 'no-source' ? 'warn' : 'bad';
   }
   return { label: st.label, tone, lines, next, tick, tickTone };
 }
@@ -131,7 +152,7 @@ export function resultSummary(r) {
   if (!r || typeof r !== 'object') return null;
   const when = clock(r.at);
   const who = triggerText(r.trigger);
-  const src = r.source ? ` · ${r.source}` : '';
+  const src = sourceText(r.source) ? ` · ${sourceText(r.source)}` : '';
   const tail = `${who ? ` · ${who}` : ''}${src}${r.restored ? ' · 재시작 전 기록' : ''}`;
   if (r.ok) return { text: `${when} · 성공 — v${r.from || '?'} → v${r.version || '?'}${r.restarting ? ' · 재시작' : ''}${tail}`, tone: 'ok' };
   if (r.upToDate) return { text: `${when} · 이미 최신${tail}`, tone: 'muted' };
@@ -152,6 +173,8 @@ export function actionMsg(action, r) {
     return { label, ok: true, text: `최신입니다${x.remote?.latest ? ` (v${x.remote.latest})` : ''}` };
   }
   if (action === 'check' && x.ok === undefined) return { label, ok: false, text: '확인할 곳이 없습니다(원격 소스·감시 폴더 미설정)' };
+  // 409 — 저장된 설정에서 '자동 업그레이드 사용' 이 꺼져 있다(체크만 하고 저장하지 않은 경우. 리뷰 UPG-UI-05).
+  if (x.ok === false && x.reason === 'auto-upgrade disabled') return { label, ok: false, text: `${AUTO_TEXT.disabled.title} — ${AUTO_TEXT.disabled.fix}` };
   if (x.ok && x.note) return { label, ok: true, warn: true, text: x.note };
   if (x.ok) {
     const v = x.version ? ` — v${x.from || '?'} → v${x.version}` : '';

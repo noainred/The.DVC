@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AUTO_TEXT, STATE_TEXT, TICK_TEXT, autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, intervalText, inText, restoredNote,
+  AUTO_TEXT, STATE_TEXT, TICK_TEXT, APPLYING_NOW, SOURCE_TEXT, autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, intervalText, inText, restoredNote,
 } from './upgradeAutoText.js';
 import { NO_RECORD_DETAIL } from './upgradeSignatureText.js';
 
@@ -25,7 +25,7 @@ describe('서버 코드 ↔ 화면 문구 1:1', () => {
     expect(Object.keys(TICK_TEXT).sort()).toEqual(listOf('TICK_OUTCOMES').sort());
   });
   it('문구에 백틱·별표 강조가 없다(BoldText 가 글자로 그린다)', () => {
-    const all = JSON.stringify({ AUTO_TEXT, STATE_TEXT, TICK_TEXT, NO_RECORD_DETAIL });
+    const all = JSON.stringify({ AUTO_TEXT, STATE_TEXT, TICK_TEXT, APPLYING_NOW, SOURCE_TEXT, NO_RECORD_DETAIL });
     expect(all.includes('`')).toBe(false);
     expect(all.includes('**')).toBe(false);
   });
@@ -114,8 +114,56 @@ describe('적용 결과 요약 · 주기·남은 시간 문구', () => {
     expect(inText(NOW + 65 * 60_000, NOW)).toBe('1시간 5분 뒤');
     expect(inText(null, NOW)).toBe(null);
   });
-  it('서명 칸의 기록 없음 안내가 원인(시도하지 않음)을 먼저 말한다', () => {
-    expect(NO_RECORD_DETAIL).toMatch(/^서명 확인은 업그레이드를 시도할 때 합니다/);
-    expect(NO_RECORD_DETAIL).toMatch(/자동 업그레이드 동작/);
+  it('서명 칸의 기록 없음 안내 — 서명이 막은 것이 아니라 서명 단계까지 간 번들이 없다 · 앞 단계에서 멈출 수 있다(리뷰 UPG-UI-04)', () => {
+    expect(NO_RECORD_DETAIL).toMatch(/^서명 확인은 받은 번들을 설치하기 직전에 합니다/);
+    expect(NO_RECORD_DETAIL).toMatch(/서명 확인 단계까지 간 번들이 아직 없다/);
+    expect(NO_RECORD_DETAIL).toMatch(/앞 단계\(버전 확인·다운로드 주소·설치 경로\)에서 멈추면/);
+    expect(NO_RECORD_DETAIL).toMatch(/최근 적용 결과/);
+    expect(NO_RECORD_DETAIL).not.toMatch(/아직 업그레이드를 시도하지 않은 것입니다/);
+  });
+});
+
+describe('리뷰 확정분(v2.736.2)', () => {
+  const on = (extra = {}) => ({ enabled: true, autoApply: true, auto: { state: 'on', intervalMs: 3_600_000, nextCheckAt: NOW + 60_000, issues: [] }, ...extra });
+  it("UPG-UI-01 지금 적용 중이면 '프로세스가 끝났다' 고 말하지 않는다 · 재시작 전 기록일 때만 그 문장", () => {
+    const live = autoSummary(on({ ticking: true, applying: true, lastTick: { at: NOW - 120_000, outcome: 'applying', latest: '2.737.0' } }), NOW);
+    expect(live.tick).toMatch(new RegExp(APPLYING_NOW));
+    expect(live.tick).not.toMatch(/프로세스가 끝났습니다/);
+    expect(live.tickTone).toBe('muted');
+    expect(live.next).toBe('지금 새 버전을 적용하는 중입니다');
+    const dead = autoSummary(on({ lastTick: { at: NOW - 3_600_000, outcome: 'applying', latest: '2.737.0', restored: true } }), NOW);
+    expect(dead.tick).toMatch(/프로세스가 끝났습니다/);
+    expect(dead.tickTone).toBe('bad');
+  });
+  it("UPG-UI-02 확인할 곳이 없으면 '최신' 이 아니라 아무것도 확인하지 않았다고 · 다음 확인도 그렇게", () => {
+    const s = { enabled: true, autoApply: true, auto: { state: 'blocked', intervalMs: 3_600_000, nextCheckAt: NOW + 60_000, issues: [{ code: 'no-source' }] },
+      lastTick: { at: NOW - 60_000, outcome: 'no-source' } };
+    const a = autoSummary(s, NOW);
+    expect(a.tick).toMatch(/확인할 곳이 없어 아무것도 확인하지 않았습니다/);
+    expect(a.tick).not.toMatch(/최신/);
+    expect(a.tickTone).toBe('warn');
+    expect(a.next).toMatch(/확인할 곳이 없어/);
+  });
+  it("UPG-UI-03 주기 0 이면 '다음 확인 주기에 다시 시도' 라 하지 않는다", () => {
+    const issues = [{ code: 'no-interval' }, { code: 'check-failed', reason: 'HTTP 404', at: NOW - 60_000 }];
+    const manual = autoSummary({ enabled: true, auto: { state: 'manual', intervalMs: 0, nextCheckAt: null, issues } }, NOW);
+    const cf = manual.lines.find((l) => l.code === 'check-failed');
+    expect(cf.fix).not.toMatch(/다음 확인 주기/);
+    expect(cf.fix).toMatch(/새 버전 확인/);
+    const periodic = autoSummary({ enabled: true, auto: { state: 'on', intervalMs: 3_600_000, nextCheckAt: NOW + 1, issues: [{ code: 'check-failed', reason: 'x' }] } }, NOW);
+    expect(periodic.lines[0].fix).toMatch(/다음 확인 주기에 다시 시도합니다/);
+  });
+  it('UPG-UI-05 저장 전에 누른 409(자동 업그레이드 꺼짐)를 영문 원문 대신 조치로 말한다', () => {
+    const m = actionMsg('check', { ok: false, reason: 'auto-upgrade disabled' });
+    expect(m.ok).toBe(false);
+    expect(m.text).toMatch(/설정을 저장하세요/);
+    expect(m.text).not.toMatch(/auto-upgrade disabled/);
+  });
+  it('UPG-UI-06 적용 결과의 source 를 한글 이름으로 — 화면 실행 + auto 가 모순처럼 보이지 않게', () => {
+    const t = resultSummary({ at: NOW, ok: true, from: '2.736.2', version: '2.737.0', source: 'auto', trigger: 'manual' }).text;
+    expect(t).toMatch(/화면에서 실행 · 소스 자동 선택/);
+    expect(t).not.toMatch(/ · auto(\b|$)/);
+    expect(resultSummary({ at: NOW, ok: false, upToDate: true, source: 'collector-push' }).text).toMatch(/수집기로 받은 번들/);
+    expect(resultSummary({ at: NOW, ok: false, reason: 'x', source: 'zzz' }).text).toMatch(/ · zzz/); // 모르는 코드는 그대로(지어내지 않는다)
   });
 });

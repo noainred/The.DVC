@@ -95,7 +95,7 @@ export class UpgradeManager {
       auto: autoUpgradeState({
         settings: s, intervalMs: this.timer ? this.armedMs : 0, armedAt: this.timer ? this.armedAt : null,
         lastCheck: sanitizeCheck(this.lastCheck), lastResult: sanitizeResult(this.#lastResult), lastTick: sanitizeTick(this.lastTick),
-        now: Date.now(),
+        currentVersion: currentVersion(), now: Date.now(),
       }),
       ticking: this.#ticking,
       applying: !!this._applying,
@@ -243,7 +243,9 @@ export class UpgradeManager {
       const check = await this.check({ trigger: 'auto' });
       const latest = check.remote?.latest || check.watch?.version || null;
       const newer = check.watch?.available || check.remote?.available;
-      if (check.remote && check.remote.ok === false && !check.watch?.available) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
+      // v2.736.2(리뷰 F3): 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이라 기록하지 않는다.
+      if (!check.remote && !check.watch) rec = { at, outcome: 'no-source' };
+      else if (check.remote && check.remote.ok === false && !check.watch?.available) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
       else if (!newer) rec = { at, outcome: 'up-to-date', latest };
       else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
       else {
