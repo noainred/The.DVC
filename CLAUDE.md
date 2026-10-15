@@ -192,7 +192,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       됐다. **F3** 문서는 opt-in 인데 엣지 push 가 `PARTFAULT_ENABLED` 를 안 봤다. **F4** `extract/storage.js` 의
       fru 리더가 **존재한 적 없는 자료구조**(평면 맵)를 읽어, 실제 `svcDiag.parseSpinfo` 집계 객체가 오면 없는 부품
       8개를 지어냈다. 또 v2.547 문서가 "중앙이 remoteInventory 를 판정하면 두 번 열린다" 라고 적은 것은 **이유가
-      틀렸다** — 진짜 이유는 `collector/agent.js:47-57 compactInv` 가 부품 health·serial·locator 를 **전부 빼서**
+      틀렸다** — 진짜 이유는 `collector/agent.js:47-57 compactInv`(지금은 `collector/compactInv.js`) 가 그때는 부품 health·serial·locator 를 **전부 빼서**
       중앙에는 판정할 데이터 자체가 없다는 것이다. 결론이 맞아도 근거가 틀리면 다음 사람이 잘못 판단한다.
     - **상태는 다섯이다** — `ok`/`warn`/`fault`/**`unknown`(못 읽음)**/**`absent`(빈 슬롯)**. 뒤 둘을 정상에도
       장애에도 넣지 않는다(v2.526 Unity SPA DIMM 24칸 중 `REMOVED` 12칸 실측 — 고장으로 세면 정상 장비에 장애 12건).
@@ -1141,7 +1141,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **화면 실패 정직성**(B5-01·03~06·08): `postJson` 반환도 `requireChanged`(409·ok:false 를 성공으로 읽던 것) · 설정 캐시는 **디스크 쓰기 성공 뒤에** 갱신(SAN 사용량·스토리지 주기) ·
       조회 실패를 '없음'·'미지정' 으로 보이지 않는다. `audit2727e` 허용 목록에서 고친 6파일을 뺐다(늘리지 말 것).
     · 남긴 것(3회차 후보): ✅ storage/store.js 전체 재기록·sanSwitchConfigPull 장비마다 쓰기·gpu/poller.js 필터·iDRAC 스캔 주기 쓰기 전 캐시·`DELETE /perf/hangs` 실패 감사는
-      v2.733 C4-01~C4-05 에 고쳤다(v2.741 LEFT-10 정정). 남은 것: 전력 합계 네트워크 6시간 기준 vs CVP partsFresh · 게이트웨이 빈 비밀번호 서버측 거부 · 데모 계정의 관리 IP 조회(정책).
+      v2.733 C4-01~C4-05 에 고쳤다(v2.741 LEFT-10 정정). ✅ 전력 합계 네트워크 기준(v2.740 F-03 `power/total.js cvpPartsStaleReason`·`staleBy`)·게이트웨이 빈 비밀번호 서버측 거부(v2.740 F-10 `proxy/sshGateway.js`)도 고쳤다(v2.742 LEFT-03 정정). 남은 것: 데모 계정의 관리 IP 조회(정책).
   - ⚠⚠ **v2.733 — 점검 3회차(6축 분석 → 반증 → 11그룹 수정) 확정분**(같은 요청의 3회차. 상세 `docs/AUDIT-2026-10-10c.md`,
     회귀 `server/test/audit2733*` + 웹 `audit2733*` — 그룹별 변이 검증):
     · ⚠⚠ **수집을 멈춘 대상은 그 데이터를 쓰는 리포트 전부가 '0건' 이 아니라 '수집하지 않음' 으로 말한다**(C1-01 — v2.732 B4-01 의 파급): 판정은 `logs/coverage.js
@@ -1181,7 +1181,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       거부(400)면 다시 읽지 않아 입력을 남긴다(판정 `vmCredSaveOutcome`).
     · 범위 관리자에게 GPU 게스트 수집 상태(lastRun·overlay)는 실행 시각과 허용 vCenter 목록만(`scopeGpuGuestStatus` — v2.629 A6-04 와 같은 기준).
     · 남긴 것(4회차 첫 후보): docs/AUDIT-2026-10-10c.md '다음 회차 후보' · 정책 판단 3건(C3-02b·c·d — 원격 터널·GPU 게스트 시험·수집 데이터 삭제의 쓰기 범위) ·
-      스파크라인은 자격증명이 맞으면 여전히 VM 마다 로그인한다(vCenter 별 1회 배치는 soapClient 변경 — 다음 후보).
+      ✅ 스파크라인의 VM 마다 로그인은 v2.741 LEFT-03 에 vCenter 당 1회 묶음 조회로 고쳤다(`soapClient.js fetchVmsPerfSeries` — v2.742 LEFT-03 정정).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
@@ -1434,7 +1434,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       정한 공유 토큰이면 그 해시로 **오프라인 사전 공격**이 성립한다. 나가는 것은 `sha256:xxxxxxxx
       (len=N)` 8자 지문 + 앞뒤공백 플래그뿐이고, 비교는 서버 안에서 `sameToken()`(전체 해시)이 한다.
       8자(32비트)는 충돌하므로 문구도 **'다르면 확실히 다르고, 같으면 가능성이 높다'** 까지만 쓴다
-      (v2.528 `credFingerprint` 와 같은 한계). 엣지 거부 기록(`routes/collector.js authDeny.recent[].fp`)과
+      (v2.528 `credFingerprint` 와 같은 한계). 엣지 거부 기록(`collector/denyLog.js` 의 recent 링 — v2.579 에 `routes/collector.js` 에서 옮겼다)과
       **같은 표기**여야 눈으로 대조된다 — 그래서 `tokenFp` 를 이 모듈로 승격했다(두 벌 금지).
     - ⚠⚠ **토큰 값을 trim 하지 말 것**(v2.560 자체 검증에서 잡은 결함): 초판 `edgeReport.js` 가
       `COLLECTOR_TOKEN=' tok '`(12자·공백 있음)을 `len:10 · space:false` 로 보고했다 — **오류 없이
@@ -1456,7 +1456,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       다른 이름이면 **토큰 뒤바뀜**, 403 이면 **확실히 다름**, `tokenMode:'shared'` 면 공유 토큰이다.
       ⚠ 표적을 인벤토리·설정 pull 같은 무거운 경로로 바꾸지 말 것(점검이 곧 부하가 된다).
     - ⚠ **배포 대상 토큰으로 엣지를 찔러보지 않는다**(사용자 선택). 틀린 토큰 시도는 그 엣지의
-      거부 링버퍼(20건 — `routes/collector.js denyRecent`)를 채워 **실제 침입 흔적을 밀어낸다**.
+      거부 링버퍼(20건 — `collector/denyLog.js denyRecent`)를 채워 **실제 침입 흔적을 밀어낸다**.
       그 축은 저장값끼리 대조한다(`sameToken`). 배포 대상 이름 필드는 **`agentName`**
       (`agent/deployRegistry.js:24-25`) — `name` 으로 읽으면 전 항목이 host 로 떨어져 등록부와
       **영원히 짝이 맞지 않고** '배포 대상 없음' 이라는 거짓이 된다.
@@ -2025,7 +2025,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       로 **없는 장비가 있는 것처럼** 보였다. `recordsFor(text, expect)` 가 CSV·Key=Value 를 **기대 필드
       적중 수로 채점**하고, **기대 필드가 하나도 없는 레코드는 버린다**. 둘 다 0점이면 빈 배열이다.
     - **명령은 항목마다 후보 체인**이고 `core`(용량·상태)와 `deep`(구성 상세)로 나뉜다.
-      `UNITY_SSH_DEEP=0` 으로 deep 을 끌 수 있고 **끄면 화면이 밝힌다**(`extra.deepSkipped`).
+      (⚠ v2.542 재작성으로 core/deep 2단·`UNITY_SSH_DEEP`·`extra.deepSkipped` 는 없어졌다 — 아래 v2.542 항목. 기록으로만 남긴다.)
       **쓰인 명령(`usedCmds`)과 실행되지 않은 명령(`missingCmds`)을 둘 다 표시할 것** — 구성 정보가
       비어 있는 이유를 사용자가 알아야 한다.
     - ⚠ **실장비 출력을 일부만 확인했다**(정직 기록): v2.525 시점에는 전혀 확인하지 못했고, v2.526 에
@@ -2061,7 +2061,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       '읽지 못한 것' 이다. 넷(`ok`/`empty`/`unknown`/`fault`)을 각각 세고 화면이 각각 밝힌다.
     - **`temp: 21` 은 상태가 아니라 수치**(DPE 온도)이고 **`ps0: OK 330` 의 330 은 입력 전력(W)** 이다
       (`Input Power : 330 Watts` 와 교차 확인). 그래도 단정하지 않고 **두 출처를 나란히 싣는다**.
-    - **구성 정보는 긴 주기로만 수집한다**(`CONFIG_EVERY_MS` 기본 6시간, `UNITY_CONFIG_EVERY_MS`) —
+    - (⚠ v2.542 에 없어진 규칙 — `CONFIG_EVERY_MS`·`UNITY_CONFIG_EVERY_MS`·`extra.configAt` 은 지금 코드에 없다. 기록으로만 남긴다.) **구성 정보는 긴 주기로만 수집한다** —
       매 주기 20여 개 SSH 명령을 돌리면 장비와 회선을 붙잡는다. 용량·상태(`when:'always'`)는 매 주기다.
       화면은 **`extra.configAt` 으로 언제 수집한 구성인지 밝힌다**(낡은 값을 지금 값인 척하지 않는다).
     - ⚠ **`extra.capacityNote` 라는 키를 재사용하지 말 것**(v2.526 에 Chromium 판독으로 발견한 실제
@@ -2809,7 +2809,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
   - **SQLite PRAGMA**: idrac/metrics/logs DB는 `WAL + synchronous=NORMAL + busy_timeout=3000`(단건 insert 5ms→0.01ms 실측). **ipam.db만 예외** — 외부 프로그램이 직접 읽는 공유 파일이라 저널 기본(DELETE) 유지 + busy_timeout만. WAL 전환 금지(외부 리더의 -wal/-shm 호환 미확인).
   - **전력 latest 인메모리 캐시**(`idrac/db.js withLatestCache`): latestAll(GROUP BY MAX)은 테이블 풀스캔이라(90일 수렴 시 수억 행) 매 30초 3회 호출이 초 단위 블로킹이었음. 기동 시 1회 시드 후 쓰기 경로에서 O(1) 갱신 — **getDb() 래퍼를 우회한 직접 쓰기 금지**(캐시가 낡음). 전력 대시보드 24h 집계는 `power_hourly` 롤업이 담당한다(`idrac/db.js`) — v2.503 정정: 여기 적혀 있던 `idrac/service.js aggCache` 60초 캐시는 **v2.292 에 삭제됐다**(코드 주석이 직접 그렇게 밝히고 있는데 이 문서만 낡아 있었다).
-  - **대량 export 청크 패턴**(`routes/api.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
+  - **대량 export 청크 패턴**(`routes/api/hardwareGpu.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
   - **웹 폴링 뷰 오류 처리**: 데이터 보유 중 일시 폴링 오류 1회로 화면 전체를 ErrorBox로 갈아치우지 않는다 — `if (error && !data)`일 때만 전체 오류, 그 외엔 배너(고RTT에서 대시보드 깜빡임 방지). 스코프(파라미터) 변경 시 usePolling이 직전 데이터를 비워 이전 스코프 데이터 표시를 막는다.
   - **대량 SQLite 쓰기 오프로딩**(`ipam/writeWorker.js`, v2.215): 레저 동기화는 DELETE+수천 행
     INSERT 다. 트랜잭션으로 fsync 는 1회지만 **바인딩·INSERT 자체가 동기 CPU** 라 5,850 VM 규모에서
@@ -4210,7 +4210,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠⚠ **이름으로 찾는 설정은 저장·조회 둘 다 `util/agentKey.js`**(RECENT2604-01 — **v2.603 이 만든 회귀**): 배정은 쿼리 이름, 결과는 토큰
       이름으로 대소문자 구분 조회해 스캔 결과가 전량 409. 새 거부(409·403)를 넣으면 **정상 경로가 같은 키로 찾는지**부터 볼 것.
     - **외부 응답은 `.json()`·`.text()` 를 그대로 쓰지 않는다**(CEN2604-01 high·CEN2604-02) — `readJsonCapped`·`readBodyPrefix`. 두 소스
-      스윕 테스트가 고정한다(허용 목록 사유 포함). 경로를 변수로 조립하는 호출은 스윕이 못 본다(upgrade.js 엣지 push — 다음 후보).
+      스윕 테스트가 고정한다(허용 목록 사유 포함). 경로를 변수로 조립하는 호출은 스윕이 못 본다(✅ upgrade.js 엣지 push·`collector/upgradePush.js` 는 이미 `readJsonCapped` 를 쓴다 — v2.742 LEFT-03 정정).
     - **자기등록은 검증이 아니다**(CEN2604-04): 공유 토큰 자기등록 이름을 '아는 엣지' 로 세면 v2.601 미검증 상한이 우회된다.
     - **비밀 가림 정규식은 `_PASS`·`_PWD`·`_CREDS` 까지**(SEC2604-01 — `util/envRedact.js`, 밑줄 접두만). 파일별 추가 봉인 필드는
       `secretVault FILE_EXTRA_SECRET_FIELDS`(alerts.json 의 url — 전역 SECRET_FIELDS 에 url 을 넣으면 접속 주소까지 봉인된다).
@@ -4652,7 +4652,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 수집 서버로 등록되지 않은 폴 전용 엣지는 버전이 늘 미상이라 iLO 전용 대역이 계속 보류된다(정직 기록 — 사유 문구가 말한다).
     - **HPE 서비스태그는 SerialNumber**(COL2611-01, `redfish.js systemServiceTag`): `SKU||SerialNumber` 는 HPE 에서 모델 공통 부품번호라
       같은 모델 서버가 dedup·전력 합계에서 한 대로 합쳐졌다. 이미 SKU 로 등록된 항목은 인벤토리 갱신 때 `correctHpeServiceTag` 가 **1회 교정** —
-      ⚠ 그 결과 파트 장애·bmusage 키가 바뀌어 열린 장애가 한 번 새로 열릴 수 있다('키 기준 변경' 배지는 만들지 않았다 — 남은 일).
+      ⚠ 그 결과 파트 장애·bmusage 키가 바뀌어 열린 장애가 한 번 새로 열릴 수 있다(✅ v2.612 에 `key-migrated` 로 옮기고 화면이 '식별 키 변경' 배지로 보인다 — `partfault/incidents.js`·`partFaultText.js`, v2.742 LEFT-03 정정).
       HPE 팬 `ReadingUnits:'Percent'` 는 rpm 이 아니라 `pct`, Absent 온도 센서는 건너뛴다.
     - ⚠⚠ **범위 admin 의 쓰기 — 이번엔 '등록부 파일 11개' 전체였다**(AUTHZ2611-01·02·03·04, LEFT2611-02·03·07): v2.607 fleetWideOnly 를
       `/vcenters/import {mode:'replace'}` 가 그대로 우회했다(검증 중 신규 발견). 각 파일 상단 `const fleetOnly = fullScopeOnlyWith('<사유>')`.
@@ -4680,7 +4680,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       수집 서버 URL 끝 슬래시 정리 선형화(`util/trimSlashes.js`) · 중앙→엣지 호출 태그 5곳.
     - ⚠ **속도 절대값 테스트는 CPU 에 따라 깨진다**: `audit2606g` 의 '옛 정규식 > 150ms' 가 이 컨테이너에서 110ms 로 나와 전량 테스트가
       실패했다 — `tOld > 40 && tOld > tNew × 5`(상대 비율)로 바꿨다. **ReDoS 회귀 테스트는 비율로 쓸 것.**
-    - 남긴 것: 파트 장애 키 변경 배지(COL-01) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
+    - 남긴 것: ✅ 파트 장애 키 변경 배지(COL-01 — v2.612 `key-migrated`) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
       `/idrac/:id/gpu-probe` GET 로그인 · 실장비(iLO·CVP·구버전 엣지) 미확인 — 전부 가짜 서버·합성 입력 재현이다.
   - ⚠⚠ **v2.612 — 20차 점검 확정분**(사용자 요청 "코드 리뷰 보안 패치, 성능 개선 등" · 선택 10축 병렬 + 반증 · 전체 검증.
     확정·부분 확정 약 45건, 반증 7건. 회귀 `test/audit2612{a..e}.test.js` + 웹 `audit2612f.test.js` 외. 상세 `docs/AUDIT-2026-09-25b.md`):
@@ -5091,7 +5091,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `first=true` 로 prune 생략. `update-versions.mjs` 도 손상 목록은 중단. **이 두 보호를 `\|\| true` 로 되돌리지 말 것.**
     - ⚠⚠ **`/capacity` 요약은 시간 기준 양보 + stale-while-revalidate**(`capacity/evaluate.js`): 호스트×임계 지표 동기 SQL 이 700호스트 합성에서
       3,316ms 정지(최장 30ms 로) — v2.672 '양보는 시간 기준' 규약의 누락 지점. TTL 뒤에는 옛 값을 바로 주고 뒤에서 1건만 재계산하므로 응답
-      `summaryRefreshing`·`summaryAt` 이 그 사실을 말한다(화면 표시는 아직 — 남은 일).
+      `summaryRefreshing`·`summaryAt` 이 그 사실을 말한다(✅ 화면은 `CapacityAdvisor.jsx summaryCalcNote` 가 그린다 — v2.742 LEFT-03 정정).
     - ⚠⚠ **세션 연장 상한은 `lt`(원래 로그인 시각) 기준**(`auth/auth.js signToken` · `routes/auth.js /extend`): `iat` 는 연장마다 새로 찍혀
       `sessionMaxHours` 가 밀렸다(연쇄 연장 = 무기한). `lt` 는 토큰에 서명돼 승계되고 구버전 토큰만 iat 폴백. `/extend` 에 `requireEnrolled`.
     - **로그인 감사·활성 세션·실패 분석의 IP 는 `clientIp(req)`** — XFF 원문은 판정에 쓰지 않고 `xff` 필드(64자)로만 남긴다(형제 `auditMiddleware` 는 이미

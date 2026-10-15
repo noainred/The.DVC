@@ -748,7 +748,7 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   정지면 로그인 0(여러 대상 경로는 그 vCenter 만 null + 응답 `authStopped`, 단건은 409) · 거부는 같은 기록 · 여러 대상은 `createVcAuthGate()` 로
   **vCenter 당 첫 시도 결과를 본 뒤** 나머지를 시작한다(동시에 시작하면 틀린 비밀번호가 대상 수만큼 로그인한다 — 재현 112회 → 0).
   정지 VM 의 유휴 판정은 null(판정 불가). 정지 null 은 응답 캐시에 넣지 않는다. **새 주문형 성능 경로도 이 헬퍼로.**
-  남은 것: 자격증명이 맞으면 스파크라인은 VM 마다 로그인한다(vCenter 별 1회 배치는 soapClient 변경 — 다음 후보).
+  ✅ 스파크라인의 VM 마다 로그인은 v2.741 LEFT-03 에 vCenter 당 1회 묶음 조회로 고쳤다(`soapClient.js fetchVmsPerfSeries` — v2.742 LEFT-03 정정).
   · iDRAC **대역 스캔**(`idrac/scanAuth.js`, 정지 파일 `idrac-scan-auth-stops.json` — 주 폴러와 분리)은 주기 스캔만 건너뛰고
     건너뛴 개수를 밝힌다. ⚠ 건너뛴 IP 가 있으면 **replace 를 merge 로 낮춘다**(중앙·엣지 둘 다) — 건너뛴 등록 서버가 지워지지 않게.
   · SMTP 535/534 는 출처에서 인증 실패로 못 박는다(`mail-auth-stops.json`). 정지 중 자동 발송은 건너뛰고 이력에 사유,
