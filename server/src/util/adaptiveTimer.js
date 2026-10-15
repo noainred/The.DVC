@@ -16,6 +16,7 @@
  *                   1시간 뒤에야 새 주기가 먹는다).
  */
 import { createChangeLogger } from './logThrottle.js'; // v2.733(감사 C4-03): fn 실패 로그 — 같은 오류 반복을 줄인다
+import { numOrNull } from './numOrNull.js';
 
 export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', subscribe = null } = {}) {
   let timer = null;
@@ -71,7 +72,7 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
     finally { inFlight = false; lastEndAt = Date.now(); }
     if (!stopped) {
       const ms = safeMs();
-      armedMs = Number.isFinite(Number(ms)) ? Number(ms) : null;
+      armedMs = numOrNull(ms);   // 못 읽은 주기(null·빈 값)를 0 으로 기억하지 않는다
       arm(ms);
     }
   };
@@ -81,10 +82,10 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   const off = subscribe ? subscribe(() => {
     if (stopped || inFlight) return;   // 실행 중이면 종료 시 tick 이 새 주기로 재무장한다
     const ms = safeMs();
-    const n = Number(ms);
-    if (armedMs != null && Number.isFinite(n) && n === armedMs) return;
-    armedMs = Number.isFinite(n) ? n : null;
-    const next = Number.isFinite(n) ? n - (Date.now() - lastEndAt) : ms; // 못 읽으면 arm 이 60초로
+    const n = numOrNull(ms);
+    if (armedMs != null && n != null && n === armedMs) return;
+    armedMs = n;
+    const next = n != null ? n - (Date.now() - lastEndAt) : ms; // 못 읽으면 arm 이 60초로
     if (name) console.log(`[adaptive-timer] ${name} 타이머 재무장: ${Math.round(Math.max(1_000, next) / 1000)}초 후`);
     arm(next);
   }) : null;

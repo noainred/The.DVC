@@ -19,7 +19,7 @@ import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
-import { partsSummary, bgpSummary, devicePower as cvpDevicePower } from '../../cvp/parse.js'; // v2.647: devicePower
+import { partsSummary, bgpSummary, devicePower as cvpDevicePower, powerSupplies } from '../../cvp/parse.js'; // v2.647: devicePower · v2.741 DEV-03: powerSupplies
 import { edgeCvpStatuses, edgeCvpSummary, edgeVersionOf, classifyCvpEdge, MIN_CVP_EDGE_VERSION } from '../../central/cvpEdge.js';
 import { allCollectorStatus } from '../../collector/state.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 import { requestCvpCollect, hasPendingCvpRequest, recentCvpCollectDrops } from '../../cvp/collectRequests.js';
@@ -561,7 +561,8 @@ api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
       continue;
     }
     if (!pw) {
-      const psus = parts ? parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent').length : 0;
+      // v2.741(감사 DEV-03): 슬롯 전원 항목만 있는 장비는 'PSU 없음' 이다 — 합산(devicePower)과 같은 PSU 목록으로 가른다.
+      const psus = parts ? powerSupplies(parts).length : 0;
       totals.unread[!parts ? 'partsNotRead' : psus === 0 ? 'noPsu' : 'noPowerField']++;
     } else {
       totals.read++; totals.watts += pw.watts; totals.basis[pw.basis]++;

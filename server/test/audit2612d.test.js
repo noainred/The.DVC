@@ -211,7 +211,9 @@ test('EDGE2612-02: 재수집 push 의 {ok:false} 반환도 pushError 로 남긴�
   assert.match(pdu, /const pr = await pushPduNow\(\);\s*if \(pr && pr\.ok === false\) \{ pushError =/);
   const st = stripComments(read('agent/storageConfigPull.js'));
   assert.match(st, /const pr = await pushStorageNow\(\);\s*if \(pr && pr\.ok === false\) pushError =/);
-  assert.match(st, /_last = \{[^\n]*pushError/);
+  // v2.741(LEFT-02): 재수집은 pull 밖의 작업이라 결과(push 실패 포함)는 _collectRun 에 남고 상태가 싣는다.
+  assert.match(st, /_collectRun = \{[\s\S]{0,300}pushError/);
+  assert.match(st, /_collectRun\?\.pushError \? \{ pushError: _collectRun\.pushError \}/);
 });
 
 test('EDGE2612-02: 실제 호출 — 중앙이 push 를 거절하면 pdu pull 상태에 pushError', async () => {
@@ -229,6 +231,7 @@ test('EDGE2612-02: 실제 호출 — 중앙이 push 를 거절하면 pdu pull �
   try {
     const r = await pull.pullPduConfigNow();
     assert.equal(r.ok, true, JSON.stringify(r));
+    await pull.pduCollectJobSettled();   // v2.741(LEFT-02): 재수집·push 는 pull 밖에서 돈다
     // 위임 0대 → 빈 목록 push 를 중앙이 403 으로 거절한다 — pushPduNow 는 던지지 않고 {ok:false} 를 돌려준다.
     const st = pull.pduConfigPullStatus();
     assert.ok(st.pushError, `재수집 push 가 거절됐는데 pushError 가 비었다 — ${JSON.stringify(st)}`);

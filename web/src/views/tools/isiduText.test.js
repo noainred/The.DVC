@@ -336,7 +336,8 @@ describe('v2.737 재시작으로 끊긴 조사 — 상태·재개 결과 문구'
     expect(resumeNote({ outcome: 'zzz', at: NOW }, NOW)).toMatch(/자동 재개 결과: zzz/);
     expect(resumeNote(null)).toBe('');
     const src = fs.readFileSync(path.join(SERVER, 'util/scanJournal.js'), 'utf8');
-    const used = new Set([...src.matchAll(/done\('([a-z-]+)'/g), ...src.matchAll(/'(resumed|covered)'/g)].map((m) => m[1]));
+    const used = new Set([...src.matchAll(/done\('([a-z-]+)'/g), ...src.matchAll(/pushHistory\([^,]+,\s*'([a-z-]+)'/g), ...src.matchAll(/'(resumed|covered)'/g)].map((m) => m[1]));
+    expect(used.has('superseded'), 'v2.741 TIMING-04 — pushHistory 로 남기는 결과도 대조한다').toBe(true);
     for (const o of ['started', 'busy']) used.delete(o);
     for (const o of used) expect(RESUME_OUTCOME_TEXT[o], `서버 결과 ${o} 의 문구`).toBeTruthy();
     expect(triggerText('resume')).toBe('자동 재개');

@@ -95,7 +95,7 @@ let _xlsxWorkerUrl = new URL('./excelWorker.js', import.meta.url);
 /** 테스트 전용 — 띄우지 못하는·답하지 않는 가짜 워커로 실패 경로를 확인한다(운영 경로는 쓰지 않는다). */
 export function _setXlsxWorkerUrlForTest(url) { _xlsxWorkerUrl = url || new URL('./excelWorker.js', import.meta.url); }
 
-const xlsxWorkerEnabled = () => String(process.env.IPAM_XLSX_WORKER ?? '').trim() !== '0';
+const xlsxWorkerEnabled = () => String(process.env.IPAM_XLSX_WORKER ?? '1').trim() !== '0';
 
 function codedError(code, message) { const e = new Error(message); e.code = code; return e; }
 
@@ -121,7 +121,7 @@ export async function renderIpamWorkbook(sheets, opts = {}) {
   const signal = opts.signal || null;
   if (signal?.aborted) throw codedError('aborted', '요청이 끊겨 엑셀 생성을 멈췄습니다.');
   if (!xlsxWorkerEnabled()) return { buffer: await renderInline(list, created), mode: 'inline', reason: 'disabled', sheets: list.length };
-  const timeoutMs = deadlineMs(opts.timeoutMs ?? process.env.IPAM_XLSX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const timeoutMs = deadlineMs(opts.timeoutMs ?? process.env.IPAM_XLSX_TIMEOUT_MS ?? 600_000, DEFAULT_TIMEOUT_MS);
   let worker;
   try {
     worker = new Worker(_xlsxWorkerUrl);

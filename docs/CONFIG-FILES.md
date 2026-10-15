@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **211개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **212개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-15)
@@ -117,6 +117,7 @@
 | `ipam-settings.json` | 설정 | IPMS settings — IP ranges to hide from the IP ledger. Supports a global | ✅ | ✅ |  | ipam/settings.js |
 | `ipam-vcenter-ranges.json` | 설정 | vCenter별 IP 스캔 대역 저장소 — 각 vCenter(법인/사이트)에 귀속된 스캔 대역을 저장하고, | ✅ | ✅ | ✅ | ipam/rangeStore.js, ipam/vcRangeMigrate.js |
 | `ipam.db` | DB | IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일) |  |  |  | config.js |
+| `ipscan-agent-state.json` | 설정 | 엣지 IP 스캔 워커의 마지막 스캔 시각(상태, v2.741 — 재시작 뒤에도 주기를 이어 센다) | ✅ | ✅ | ✅ | agent/ipScanWorker.js |
 | `isidu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | isidu/collect.js |
 | `isidu-edge-targets.json` | 설정 | 엣지가 받은 아이실론 디렉터리 사용량 대상 사본(상태, v2.736) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu-mail-state.json` | 설정 | 아이실론 디렉터리 사용량 결과 메일 기록(상태, v2.738) | ✅ | ✅ | ✅ | isidu/notify.js |
@@ -212,7 +213,7 @@
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |
-| `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 |  |  | ✅ | logs/db.js |
+| `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
 | `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, ipam/scanDatacenterSource.js 외 2 |
@@ -253,6 +254,7 @@
 - **`xfer-speed-settings.json`** — 중앙 전용(엣지로 배포하지 않는다). 손상이면 보존하고 기본값(꺼짐)으로 읽는다
 - **`xfer-speed-schedule-state.json`** — 상태 파일(백업 감시 제외). 지우면 지난 예약 시각을 다시 판정한다 — 유예(30분) 안의 시각은 한 번 더 실행될 수 있다
 - **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다
+- **`ipscan-agent-state.json`** — 상태 파일(백업 감시 제외). 지우면 다음 기동의 첫 확인이 주기와 무관하게 한 번 다시 스캔한다
 - **`bmusage-central.json`** — 중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다
 - **`settings-owners.txt`** — username 기준. 표시이름 승계 불가
 - **`vcenters.json`** — ⚠ 지우면 수집 대상이 사라진다. v2.444 부터 예제 폴백 없음

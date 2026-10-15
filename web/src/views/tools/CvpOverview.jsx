@@ -5,7 +5,7 @@ import { STable } from '../../components/STable.jsx';
 import { agoText, spanText, countText, bpsText, faultEventText, faultKindLabel } from './cvpText.js';
 import {
   HEALTH_KEYS, HEALTH_LABEL, HEALTH_COLOR, CORP_NOTE, TRAFFIC_NOTE,
-  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionList, freshnessRows, trafficRows, modelTableRows, corpLabel,
+  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionList, freshnessRows, trafficRows, trafficTotalsText, modelTableRows, corpLabel,
 } from './cvpOverviewText.js';
 
 /**
@@ -222,11 +222,13 @@ export function CvpTrafficView({ ov, err, onOpenDevice, onCorp }) {
   if (!ov) return <Loading />;
   const rows = trafficRows(ov.corps);
   const t = ov.traffic || {};
+  // v2.741(감사 LEFT-04): 전부 못 읽은 방향은 '—', 일부만 못 읽었으면 부분 합이라는 사실을 meta 로(법인 행과 같은 판정 — trafficTotalsText).
+  const tt = trafficTotalsText(t);
   return (
     <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
       <div className="kpis">
-        <div className="kpi"><div className="label">전체 수신</div><div className="value">{t.portsMeasured > 0 ? bpsText(t.inBps) : '—'}</div></div>
-        <div className="kpi"><div className="label">전체 송신</div><div className="value">{t.portsMeasured > 0 ? bpsText(t.outBps) : '—'}</div></div>
+        <div className="kpi"><div className="label">전체 수신</div><div className="value" style={tt.inNote ? { color: 'var(--amber)' } : undefined}>{tt.inText}</div>{tt.inNote ? <div className="meta">{tt.inNote}</div> : null}</div>
+        <div className="kpi"><div className="label">전체 송신</div><div className="value" style={tt.outNote ? { color: 'var(--amber)' } : undefined}>{tt.outText}</div>{tt.outNote ? <div className="meta">{tt.outNote}</div> : null}</div>
         <div className="kpi"><div className="label">측정 포트</div><div className="value">{countText(t.portsMeasured)}</div><div className="meta">처리량 없음 {countText(t.portsUnmeasured)}개 제외</div></div>
         <div className="kpi"><div className="label">측정 장비</div><div className="value">{countText(t.devicesMeasured)}</div><div className="meta">미측정 {countText(t.devicesUnmeasured)}대</div></div>
       </div>
@@ -248,7 +250,7 @@ export function CvpTrafficView({ ov, err, onOpenDevice, onCorp }) {
                     {r.top.length === 0 ? '—' : r.top.map((d) => (
                       <button key={`${d.cvpId}|${d.key}`} type="button" onClick={() => onOpenDevice?.({ cvpId: d.cvpId, key: d.key, hostname: d.hostname, tab: 'ports' })}
                         style={{ ...LINK, color: 'inherit', marginRight: 10, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>
-                        {d.hostname} {bpsText((d.inBps || 0) + (d.outBps || 0))}
+                        {d.hostname} {bpsText(d.inBps == null && d.outBps == null ? null : (d.inBps ?? 0) + (d.outBps ?? 0))}
                       </button>
                     ))}
                   </td>

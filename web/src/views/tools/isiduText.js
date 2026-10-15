@@ -688,6 +688,8 @@ export const RESUME_OUTCOME_TEXT = Object.freeze({
   'gave-up': '다른 조사가 계속 진행 중이라 기다리다 그만뒀습니다',
   'no-resumer': '이 노드에서 다시 시작할 수 없습니다',
   error: '자동 재개 중 오류가 났습니다',
+  // v2.741(감사 TIMING-04): 같은 대상의 재개 대기 항목이 상한(4개)을 넘어 가장 오래된 것을 내려놓았다 — 다음 주기·수동 실행은 그대로다.
+  superseded: '같은 대상의 재개 대기가 상한을 넘어 오래된 것은 다시 시작하지 않았습니다(다음 주기·수동 실행은 그대로)',
 });
 const RESUME_QUIET = new Set(['resumed', 'covered']);
 

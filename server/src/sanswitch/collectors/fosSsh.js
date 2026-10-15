@@ -70,7 +70,7 @@ export const DEADLINE_MARGIN_MS = 15_000;
 /** 남은 예산이 이보다 적으면 새 명령을 시작하지 않는다(시작해 놓고 잘리면 결과가 버려진다). 명령 시한이 짧게 설정된 현장에서도 비율을 지킨다. */
 export const MIN_SLICE_MS = Math.min(5_000, Math.max(250, Math.floor(CMD_TIMEOUT_MS / 4)));
 export const SESSION_BUDGET_MS = Math.max(MIN_SLICE_MS * 2, Math.min(
-  reqTimeoutMs(process.env.SANSW_CLI_SESSION_BUDGET_MS, 100_000, { min: 5_000, max: 1_800_000 }),
+  reqTimeoutMs(process.env.SANSW_CLI_SESSION_BUDGET_MS ?? 100_000, 100_000, { min: 5_000, max: 1_800_000 }),
   DEVICE_TIMEOUT_MS - DEADLINE_MARGIN_MS));
 /** 예산 때문에 시작하지 않은 항목의 사유 — Unity(cliSsh)와 같은 문구(같은 뜻을 두 갈래로 말하지 않는다). */
 export const BUDGET_SKIP_REASON = '수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다(다음 주기에 시도).';

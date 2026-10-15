@@ -17,6 +17,7 @@ import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
+import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
@@ -264,14 +265,10 @@ adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
 });
 adminRouter.get('/os-scan/results.csv', csvPerm, adminOnly, (req, res) => {
   const { rows } = scopedOsRows(req);
-  const esc = (v) => {
-    let s = String(v ?? '');
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;        // 스프레드시트 수식 인젝션 무력화(=,+,-,@ 로 시작)
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; // 단독 CR도 quoting
-  };
+  // v2.741(WEB-02 후속): 수식 가드·인용은 util/csv.js csvLine 한 벌(사본을 두면 규칙이 갈라진다 — 세 벌 대조 테스트 audit2741j).
   const head = ['vm', 'vcenter', 'cluster', 'host', 'esxi_guest_os', 'real_os', 'real_version', 'family', 'kernel', 'mismatch', 'scanned_at', 'error'];
   const lines = [head.join(',')];
-  for (const r of rows) lines.push([r.vmName, r.vcenterId, r.cluster, r.host, r.esxiGuestOS, r.os, r.osVersion, r.family, r.kernel, r.mismatch ? 'Y' : 'N', new Date(r.at).toISOString(), r.error].map(esc).join(','));
+  for (const r of rows) lines.push(csvLine([r.vmName, r.vcenterId, r.cluster, r.host, r.esxiGuestOS, r.os, r.osVersion, r.family, r.kernel, r.mismatch ? 'Y' : 'N', new Date(r.at).toISOString(), r.error]));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="real-os-${todayStamp()}.csv"`);
   res.send('﻿' + lines.join('\r\n'));

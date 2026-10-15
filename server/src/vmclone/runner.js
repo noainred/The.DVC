@@ -132,11 +132,11 @@ export function cleanupPartialNfs(job, st) {
     const mount = getMount(job.dest.mountId);
     const mp = mount ? mountPointOf(mount.id) : null;
     if (!mp || !mountedSet().has(mp)) return ' · 중단된 NFS 백업 폴더는 마운트가 없어 확인하지 못했습니다';
-    const dir = path.resolve(st.destDir);
-    if (!dir.startsWith(path.resolve(mp) + path.sep) || !/^\d{8}-\d{4}$/.test(path.basename(dir))) return ' · 중단된 NFS 백업 폴더가 마운트 지점 밖이라 건드리지 않았습니다';
-    if (!fs.existsSync(dir) || fs.existsSync(path.join(dir, 'manifest.json'))) return ''; // 없거나 끝까지 받은 백업 — 그대로 둔다
-    fs.rmSync(dir, { recursive: true, force: true });
-    return ` · 중단된 NFS 백업의 불완전 폴더 ${path.basename(dir)} 를 지웠습니다(manifest 없음)`;
+    const bakDir = path.resolve(st.destDir);   // ⚠ 변수 이름을 dir 로 두지 말 것 — scripts/config-doc.mjs 가 dir 기준 경로 조립을 CONFIG_DIR 파일로 읽는다
+    if (!bakDir.startsWith(path.resolve(mp) + path.sep) || !/^\d{8}-\d{4}$/.test(path.basename(bakDir))) return ' · 중단된 NFS 백업 폴더가 마운트 지점 밖이라 건드리지 않았습니다';
+    if (!fs.existsSync(bakDir) || fs.existsSync(path.join(bakDir, 'manifest.json'))) return ''; // 없거나 끝까지 받은 백업 — 그대로 둔다
+    fs.rmSync(bakDir, { recursive: true, force: true });
+    return ` · 중단된 NFS 백업의 불완전 폴더 ${path.basename(bakDir)} 를 지웠습니다(manifest 없음)`;
   } catch (e) { return ` · 중단된 NFS 백업 폴더를 정리하지 못했습니다(${e?.message || e})`; }
 }
 

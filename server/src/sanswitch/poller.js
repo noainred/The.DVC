@@ -245,7 +245,10 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, trace =
       return done({ ok: true, snap: summary(snap), cliRaw: [], phase: 'done' });
     }
     const wrapped = (m, lv) => { if (/세션 준비 완료/.test(String(m))) phase = 'exec'; else if (/핸드셰이크 완료/.test(String(m))) phase = 'ssh-auth'; say(m, lv); };
-    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal, trace: wrapped, verbose }), '테스트 타임아웃');
+    // v2.741(감사 DEV-02 후속): 세션 예산은 테스트 시한보다 짧아야 한다 — 기본 예산(100초)이 테스트 시한(60초)보다 길면 예산 가드가
+    //   발동하기 전에 시한이 먼저 던져 모은 출력이 통째로 버려진다. 남는 10초는 세션 정리·요약 몫이다.
+    const budgetMs = Math.max(5_000, timeoutMs - 10_000);
+    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal, trace: wrapped, verbose, budgetMs }), '테스트 타임아웃');
     say(`완료 — 이름 ${snap.name || '—'} 모델 ${snap.model || '—'} FOS ${snap.fabricOs || '—'} 포트 ${snap.ports?.online ?? '—'}/${snap.ports?.licensed ?? '—'} (${Date.now() - t0}ms)`);
     return done({ ok: true, snap: summary(snap), cliRaw: raw, phase: 'done' });
   } catch (e) {

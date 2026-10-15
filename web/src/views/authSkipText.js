@@ -90,6 +90,8 @@ export function netmonStopBadge(authStopped, now = Date.now()) {
  */
 export function cloneRunMark(lastRun) {
   if (!lastRun) return { icon: '', tone: 'green' };
+  // v2.741(감사 TIMING-01): 재시작으로 끊긴 실행의 스냅샷 정리를 6시간 동안 못 해 포기했으면 사람이 지워야 한다 — 일시 보류(⏸)가 아니다.
+  if (lastRun.skipped === 'restart-cleanup-gave-up') return { icon: '⚠', tone: 'red' };
   if (lastRun.skipped) return { icon: '⏸', tone: 'amber' };
   return lastRun.ok ? { icon: '✅', tone: 'green' } : { icon: '⛔', tone: 'red' };
 }

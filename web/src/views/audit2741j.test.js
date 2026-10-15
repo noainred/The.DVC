@@ -254,10 +254,11 @@ describe('WEB-01 화면 — Platform KPI 와 개요 차트가 그 판정을 쓴�
 
 // ── WEB-02 ──────────────────────────────────────────────────────────────────
 describe('WEB-02 CSV 수식 가드 — 유한 숫자·순수 숫자 문자열은 가드하지 않는다', () => {
-  it('음수·부호·소수·지수는 숫자 그대로(엑셀이 숫자로 읽는다)', () => {
+  it('음수·소수·지수는 숫자 그대로(엑셀이 숫자로 읽는다) — + 로 시작하는 문자열은 가드', () => {
     expect(guardCell(-12.5)).toBe('-12.5');
     expect(guardCell('-12.5')).toBe('-12.5');
-    expect(guardCell('+3')).toBe('+3');
+    expect(guardCell('+3')).toBe("'+3"); // '+' 로 시작하는 숫자열은 가드(+82… 전화번호 보호)
+    expect(guardCell('+821012345678')).toBe("'+821012345678");
     expect(guardCell('-7')).toBe('-7');
     expect(guardCell('1e-3')).toBe('1e-3');
     expect(guardCell(0)).toBe('0');

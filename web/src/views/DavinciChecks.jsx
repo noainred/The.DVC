@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, usePolling, downloadFile, postJson, hasRole } from '../api.js';
+import { fetchJson, usePolling, downloadFile, postJson, hasRole, canCsv } from '../api.js';
 import { confirmPrompt, resultText, canConfirm } from './settingsFileConfirmText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes, fmtAgo } from '../util/fmt.js';
@@ -157,7 +157,10 @@ export function VmwareConfigBackup() {
           <option value="">전체 사이트</option>
           {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </Select>
-        <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'dl'} onClick={download}>{busy === 'dl' ? '내보내는 중…' : '⬇ 구성 백업 다운로드 (.json.gz)'}</button>
+        {/* v2.741(감사 AUTHZ-02): 서버가 download=1 에 data.csv 권한을 요구한다 — 권한이 없으면 버튼을 숨기고 그 사실을 말한다. */}
+        {canCsv()
+          ? <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'dl'} onClick={download}>{busy === 'dl' ? '내보내는 중…' : '⬇ 구성 백업 다운로드 (.json.gz)'}</button>
+          : <span className="muted" style={{ fontSize: 12 }}>구성 백업 다운로드는 내보내기 권한(data.csv)이 있는 계정만 할 수 있습니다</span>}
         {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>

@@ -9,6 +9,8 @@
 const REASON_LABEL = { maintenance: '점검중', unreachable: '수집 실패', stale: '위임 보고 낡음' };
 
 const cnt = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+/** v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 켜진 VM 수 { cpu, mem } — 둘 다 0 이면 null. */
+const usageUnknown = (v) => { const c = cnt(v?.cpu); const m = cnt(v?.mem); return c || m ? { cpu: c, mem: m } : null; };
 
 /** lastRun(원본) 또는 sampler 요약을 같은 모양으로 맞춘다. */
 export function normalizeWithheld(x) {
@@ -19,6 +21,7 @@ export function normalizeWithheld(x) {
       totalWithheld: !!x.totalWithheld, totalPartial: !!x.totalPartial,
       maintenanceExcluded: cnt(x.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
       dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),   // v2.727(C-01)
+      vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                   // v2.741(VC-02)
     };
   }
   const ss = x.staleSkipped || {}; const vs = x.vmperfStale || {};
@@ -27,6 +30,7 @@ export function normalizeWithheld(x) {
     totalWithheld: !!vs.totalWithheld, totalPartial: !!vs.totalPartial,
     maintenanceExcluded: cnt(vs.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
     dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),     // v2.727(C-01)
+    vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                     // v2.741(VC-02)
   };
 }
 
@@ -53,5 +57,10 @@ export function samplerWithheldNote(x, { totalView = true } = {}) {
   // v2.727(C-01): 결측을 0 으로 채우지 않고 뺀 사실 — 추이의 마지막 점이 '못 읽은 장비를 뺀 값' 임을 말한다.
   if (n.vmStorageUnknown) out.push(`스토리지 용량을 읽지 못한 VM ${n.vmStorageUnknown}대는 VM 디스크 계열(할당·커밋·정지·스냅샷)에서 뺐습니다 — 0 으로 채우지 않았습니다`);
   if (n.dsUsedUnknown) out.push(`사용량을 읽지 못한 데이터스토어 ${n.dsUsedUnknown}개는 용량·사용 계열에서 뺐습니다`);
+  // v2.741(VC-02): REST 폴백 vCenter 처럼 VM 사용률을 주지 않는 경로 — 사용 0(유휴)으로 쌓지 않고 뺐다.
+  if (n.vmUsageUnknown) {
+    const p = [n.vmUsageUnknown.cpu ? `CPU ${n.vmUsageUnknown.cpu}대` : '', n.vmUsageUnknown.mem ? `메모리 ${n.vmUsageUnknown.mem}대` : ''].filter(Boolean).join(' · ');
+    out.push(`사용률을 읽지 못한 켜진 VM(${p})은 할당·사용 계열에서 뺐습니다 — 사용 0(유휴)으로 채우지 않았습니다`);
+  }
   return out.length ? `${out.join('. ')}.` : null;
 }

@@ -19,7 +19,8 @@ test('WEB-02 유한 숫자·순수 숫자 문자열은 가드하지 않는다', 
   assert.equal(guardCell(-12.5), '-12.5');
   assert.equal(guardCell(-7), '-7');
   assert.equal(guardCell('-12.5'), '-12.5');
-  assert.equal(guardCell('+3'), '+3');
+  assert.equal(guardCell('+3'), "'+3", "'+' 로 시작하는 숫자열은 가드한다(+82… 전화번호가 숫자로 바뀌지 않게)");
+  assert.equal(guardCell('+821012345678'), "'+821012345678");
   assert.equal(guardCell('-1e-3'), '-1e-3');
   assert.equal(guardCell(0), '0');
   assert.equal(csvLine(['a', -7.5, '-3', 12]), 'a,-7.5,-3,12');
