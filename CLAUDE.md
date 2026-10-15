@@ -1059,6 +1059,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ v2.736.1(사용자 캡처 '마지막 검증 — 아직 검증한 번들이 없습니다'): 검증 기록이 메모리에만 있어 업그레이드 재시작마다 지워졌다 — 이제 최근 10건을 상태 파일
       `upgrade-signature-log.json`(동기 원자 쓰기 0600 · 아는 필드만 · 손상 보존)에 남긴다. **파일에 쓰는 것은 index.js 가 `enableSignatureLog()` 를 부른 서버 프로세스뿐** —
       verifyCli(install.sh 가 root 로 부를 수 있다)는 쓰지 않는다. 누적 개수는 여전히 '프로세스 시작 뒤'. '지금 실행 중인 버전' 표지는 확인된 기록에만. 회귀 `upgradeSigLog2736_1`(변이 10/10).
+      ⚠⚠ v2.736.2(사용자 신고 "아직도 자동 업그레이드가 안 되고 같은 메시지 · 서명 필수"): **'마지막 검증 없음' 은 서명이 막은 것이 아니라 시도하지 않은 것**이다
+      (decideSignature 는 성공·실패 모두 기록한다 — 게시된 2.736.1 은 실제 코드로 서명 필수에서 통과·설치를 확인했다). 시도하지 않는 이유(확인 주기 0분 = 중앙 기본값 ·
+      자동 적용 꺼짐 · 설치 경로 없음 · 확인 실패)를 화면이 말하지 않았다. 판정은 `upgrade/autoState.js autoUpgradeState` 하나(코드 `AUTO_CODES` ↔ 웹 `upgradeAutoText.js
+      AUTO_TEXT` 1:1 — 웹 테스트가 서버 소스와 대조) · 다음 확인 = 무장 시각 + 주기의 배수(모르면 null) · 백그라운드 확인 결과 `lastTick`. 확인·적용·자동 확인 기록은
+      `upgrade-status.json`(statusStore.js — 서버 `start()` 만 쓴다 · 동기 원자 0600 · 아는 필드만 · 주소 계정·쿼리 제거 · 손상 보존)에 남고, 되살린 '새 버전 있음' 은 **지금 버전
+      기준으로 다시 계산**한다(설치는 언제나 새로 받은 정보로만). `lastResult` 는 setter 라 routes 의 대입도 파일에 남는다. '새 버전 확인' 결과가 늘 '실패' 로 보이던 것
+      (확인 응답에 ok 없음)은 `actionMsg` 하나가 고친다. 회귀 `upgradeAuto2736_2` + 웹 `upgradeAutoText.test.js`(변이 12/12).
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):
