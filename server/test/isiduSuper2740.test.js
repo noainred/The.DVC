@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import express from 'express';
+import { stripComments } from './_stripComments.js';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'isiduSuper2740-'));
 // 인증을 켠다 — 꺼져 있으면 requireRole 이 익명 역할(admin)로 통과시켜 운영자 검사가 무의미하다(v2.633 기록).
@@ -108,7 +109,7 @@ test('④ 운영자·범위 관리자는 슈퍼 관리자 판정에 닿기 전�
 test('⑤ requireSuperAdmin 은 auth/roles.js 하나 — 게이트 표지가 있고 userMenu 는 사본을 두지 않는다', () => {
   assert.equal(typeof roles.requireSuperAdmin, 'function');
   assert.equal(roles.requireSuperAdmin.gate?.kind, 'superAdmin', '아키텍처 점검이 게이트 종류를 읽는다');
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const strip = stripComments;   // 2줄 정규식 사본 금지(TESTDOC2613-08 — 줄 주석 안의 슬래시+별이 코드를 지운다)
   const um = strip(fs.readFileSync(new URL('../src/routes/api/userMenu.js', import.meta.url), 'utf8'));
   assert.doesNotMatch(um, /function\s+requireSuperAdmin\s*\(/, 'userMenu.js 에 판정 사본이 남아 있다');
   assert.match(um, /import\s*\{[^}]*\brequireSuperAdmin\b[^}]*\}\s*from\s*'\.\.\/\.\.\/auth\/roles\.js'/);
