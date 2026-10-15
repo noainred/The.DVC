@@ -102,7 +102,7 @@ export function sanitizeResult(r) {
   if (at == null) return null;
   const out = {
     at, source: txt(r.source, 40), trigger: trig(r.trigger), ok: bool(r.ok), reason: txt(r.reason, 800),
-    code: txt(r.code, 60), version: ver(r.version), from: ver(r.from), backup: txt(r.backup, 400),
+    code: txt(r.code, 60), version: ver(r.version), target: ver(r.target), from: ver(r.from), backup: txt(r.backup, 400),
     appliedArchive: txt(r.appliedArchive, 400), restarting: bool(r.restarting) || undefined,
     downloaded: num(r.downloaded), upToDate: bool(r.upToDate) || undefined,
   };
@@ -159,13 +159,15 @@ export function nextCheckAt({ armedAt, intervalMs, now }) {
 
 /**
  * 실패한 적용 기록이 더는 지금 사유가 아닌가(리뷰 F1·F2 — 기록을 파일에 남기면서 실패가 그 조건보다 오래 살게 됐다).
- *  ① 그 적용의 대상 버전(version · check.latest)이 지금 버전보다 새롭지 않다 — 이미 설치됐다(다른 경로로 설치·같은 번들 push).
+ *  ① 그 적용의 대상 버전(target · version · check.latest)이 지금 버전보다 새롭지 않다 — 이미 설치됐다(다른 경로로 설치·같은 번들 push).
  *  ② 그 뒤의 백그라운드 확인이 '최신' 이었다 — 받을 새 버전이 없다(versions.json 되돌림 등).
  * 대상 버전을 모르면 ① 로 지우지 않는다(지어내지 않는다).
+ * ⚠ v2.740(감사 B-10): `target`(설치하려던 버전 — 서명된 버전·감시 폴더 번들 버전)이 있으면 그것이 먼저다. 내용 버전 불일치
+ *   실패의 `version` 은 번들 **내용**의 버전이라, 이름만 새 버전인 옛 번들(내용 = 지금 버전)이 매 주기 실패해도 ① 로 숨었다.
  */
 export function failureMoot(lastResult, lastTick, currentVersion) {
   if (!lastResult || lastResult.ok !== false) return false;
-  const target = ver(lastResult.version) || ver(lastResult.check?.latest);
+  const target = ver(lastResult.target) || ver(lastResult.version) || ver(lastResult.check?.latest);
   if (target && ver(currentVersion)) { const c = cmpVersion(target, currentVersion); if (c != null && c <= 0) return true; }
   if (lastTick && lastTick.outcome === 'up-to-date' && ts(lastTick.at) != null && ts(lastResult.at) != null && lastTick.at > lastResult.at) return true;
   return false;

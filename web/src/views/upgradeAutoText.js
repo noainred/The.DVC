@@ -180,6 +180,12 @@ export function actionMsg(action, r) {
   if (action === 'check' && x.ok === undefined) return { label, ok: false, text: '확인할 곳이 없습니다(원격 소스·감시 폴더 미설정)' };
   // 409 — 저장된 설정에서 '자동 업그레이드 사용' 이 꺼져 있다(체크만 하고 저장하지 않은 경우. 리뷰 UPG-UI-05).
   if (x.ok === false && x.reason === 'auto-upgrade disabled') return { label, ok: false, text: `${AUTO_TEXT.disabled.title} — ${AUTO_TEXT.disabled.fix}` };
+  // v2.740(감사 D-08): 서버는 '이미 최신' 을 ok:false + upToDate:true 로 준다(원격 'already up to date' · 같은 번들 'not newer').
+  //   실패로 그리면 영문 원문이 빨간 '실패' 로 떴다 — 설치할 것이 없었던 것이지 실패가 아니다(resultSummary 와 같은 판정).
+  if (x.upToDate === true) {
+    const v = x.version || x.check?.latest || null;
+    return { label, ok: true, text: `이미 최신입니다 — 설치할 새 버전이 없습니다${v ? ` (v${v})` : ''}` };
+  }
   if (x.ok && x.note) return { label, ok: true, warn: true, text: x.note };
   if (x.ok) {
     const v = x.version ? ` — v${x.from || '?'} → v${x.version}` : '';

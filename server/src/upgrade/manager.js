@@ -16,14 +16,16 @@ import {
 } from './upgrade.js';
 import { signatureStatus } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
 import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 직전 정상 확인 결과 유지 계약
-import { resolveBundleBytes } from './bundleSource.js';
+import { resolveBundleBytes, bundleFromArchive, lastBundleReject } from './bundleSource.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { loadCollectors } from '../collector/registry.js';
 // v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
 import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus, sanitizeDeferral } from './autoState.js';
 import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
-import { runningScans } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다
+import { runningScans, resumeOutlookText } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다
 import { numOrNull } from '../util/numOrNull.js';
+import { localStamp } from '../util/dayKey.js';       // v2.740(B-08): 사람이 읽는 시각은 포탈 시각
+import { cmpVersion } from '../util/cmpVersion.js';
 
 /**
  * v2.737(사용자 신고 "업그레이드되면 scan 하던 게 중단된다"): 자동 적용은 이 노드에서 **실행 중인 스캔**(아이실론 du·iDRAC 대역·IP 대역 —
@@ -50,6 +52,33 @@ export function summarizeEdgePush(results) {
   const failed = list.filter((r) => r.ok !== true).slice(0, 20)
     .map((r) => ({ edge: originOf(r.edge), status: Number.isFinite(r.status) ? r.status : null, reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '' }));
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, failed };
+}
+
+/** 두 출처(원격 latest · 감시 폴더 버전) 중 큰 버전 — 비교할 수 없는 값은 건너뛴다(v2.740 B-02 ③). */
+function newestVersion(...vs) {
+  let best = null;
+  for (const v of vs) { if (!v) continue; if (best == null || (cmpVersion(v, best) ?? 0) > 0) best = v; }
+  return best;
+}
+
+/**
+ * v2.740(감사 B-02): 감시 폴더 번들을 거부한 뒤 원격도 실패(또는 '이미 최신')하면 감시 폴더 사유를 결과에 남긴다.
+ * 예전에는 원격 결과로 통째로 덮어 감시 폴더 거부(서명 manifest 없음 등)가 기록·화면 어디에도 없었고, 원격이 '최신' 이면
+ * upToDate 로 기록돼 매 주기 같은 거부가 반복되는데도 화면은 정상으로 보였다. 대상 버전(target)은 감시 폴더 번들 버전이다.
+ */
+export function withWatchFailure(watch, remote) {
+  const rem = !remote ? '시도하지 않음'
+    : remote.upToDate ? `새 버전 없음${remote.check?.latest ? `(최신 v${remote.check.latest})` : ''}`
+      : (remote.reason || '실패');
+  const out = {
+    ok: false,
+    reason: `감시 폴더 번들 v${watch.version} 을 적용하지 못했습니다 — ${watch.res.reason || '사유 없음'} · 원격 소스: ${rem}`,
+    target: watch.version,
+  };
+  if (watch.res.code) out.code = watch.res.code;
+  if (watch.res.signature) out.signature = watch.res.signature;
+  if (remote?.check) out.check = remote.check;
+  return out;
 }
 
 export class UpgradeManager {
@@ -180,12 +209,17 @@ export class UpgradeManager {
       if (r.ok && r.checkpointed?.length) console.log(`[upgrade] 라이브 SQLite 체크포인트 완료(복사 정합성): ${r.checkpointed.join(', ')}`);
     } catch { /* never block upgrade */ }
 
+    let watchFail = null; // v2.740(B-02): 감시 폴더 번들을 거부한 사유 — 원격 결과로 덮지 않는다
     if ((source === 'auto' || source === 'watch') && s.watchDir) {
       const found = findNewerArchive(s.watchDir, cur);
-      if (found) res = upgradeFromArchive(found.path, s.installDir, cur, s.packageName);
+      if (found) {
+        res = upgradeFromArchive(found.path, s.installDir, cur, s.packageName);
+        if (!res.ok && !res.upToDate) { if (!res.target) res.target = vstr(found.version); watchFail = { version: vstr(found.version), res }; }
+      }
     }
     if (!res?.ok && (source === 'auto' || source === 'remote') && s.remoteBase) {
-      res = await upgradeFromRemote(s.remoteBase, s.installDir, cur, s.downloadDir, { token: s.token, pkgName: s.packageName });
+      const r = await upgradeFromRemote(s.remoteBase, s.installDir, cur, s.downloadDir, { token: s.token, pkgName: s.packageName });
+      res = (watchFail && !r.ok) ? withWatchFailure(watchFail, r) : r;
     }
     if (!res) res = { ok: false, reason: '적용할 업그레이드 소스가 없습니다 (감시 폴더/원격 미설정).' };
 
@@ -196,7 +230,9 @@ export class UpgradeManager {
       //   흔적이 없었다(형제 pushToCollectors 는 '성공 n/m' 을 찍는다). 요약을 lastResult 에 싣고 콘솔에도 남긴다(pushToEdges 안).
       const edgePush = await this.pushToEdges(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 엣지 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
       if (Array.isArray(edgePush) && edgePush.length) { this.#lastResult.edgePush = summarizeEdgePush(edgePush); this.#save(); }
-      await this.pushToCollectors().catch(() => {});
+      // v2.740(B-03): 수집기에도 **방금 적용한 번들**을 민다(엣지 push 와 같은 대상) — 예전에는 resolveBundleBytes 를 다시 불러
+      //   감시 폴더의 옛 번들을 고르거나(그 manifest 가 없으면) 조용히 생략했다.
+      await this.pushToCollectors(res.appliedArchive).catch(() => {});
       if (restart) setTimeout(() => restartProcess(), 250);
     }
     return res;
@@ -206,10 +242,13 @@ export class UpgradeManager {
    * After a successful self-upgrade, push the same bundle to every registered
    * collector agent so all datacenters stay on the same version automatically.
    */
-  async pushToCollectors() {
+  async pushToCollectors(archivePath) {
     if (!loadCollectors().some((c) => c.enabled !== false)) return [];
-    const bundle = await resolveBundleBytes(this.settings);
-    if (!bundle) return [];
+    const bundle = archivePath ? bundleFromArchive(archivePath) : await resolveBundleBytes(this.settings);
+    if (!bundle) {
+      if (archivePath) console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 생략 — 적용한 번들을 다시 확인하지 못했습니다: ${lastBundleReject() || '사유 없음'}`);
+      return [];
+    }
     const results = await pushUpgradeToCollectors(bundle.bytes, { manifest: bundle.manifest || null }); // v2.730(S-10): 서명 manifest 를 함께
     const ok = results.filter((r) => r.ok).length;
     if (results.length) console.log(`[upgrade] 수집 에이전트 업그레이드 푸시: ${ok}/${results.length} 성공`);
@@ -259,10 +298,12 @@ export class UpgradeManager {
     if (!this.settings.enabled || !this.settings.autoApply) { this.#clearDeferral(); return; }
     if (this.#ticking || this._applying) return;
     const latest = this.deferral.latest;
+    // v2.740(B-07): 대기 시작 시각은 판정 **전에** 잡는다 — #deferDecision 이 스캔이 끝났으면 대기를 지워, 그 뒤에 읽으면 언제나 '0분 기다림' 이었다.
+    const since = this.deferral.since;
     const d = this.#deferDecision(latest);
     if (d.wait) return;
-    const waited = Date.now() - (this.deferral?.since || Date.now());
-    const note = d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — 끊긴 스캔은 자동 재개가 잇습니다` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`;
+    const waited = Date.now() - (since || Date.now());
+    const note = d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — ${resumeOutlookText(d.scans)}` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`;
     this.#clearDeferral();
     this.#ticking = true;
     const at = Date.now();
@@ -316,7 +357,8 @@ export class UpgradeManager {
     let dd = null;
     try {
       const check = await this.check({ trigger: 'auto' });
-      const latest = check.remote?.latest || check.watch?.version || null;
+      // v2.740(B-02 ③): 두 출처 중 큰 버전 — 예전에는 원격 값을 먼저 써서 감시 폴더에만 있는 더 새 버전을 기록하지 않았다.
+      const latest = newestVersion(check.remote?.latest, check.watch?.available ? check.watch.version : null);
       const newer = check.watch?.available || check.remote?.available;
       if (!newer || !this.settings.autoApply) this.#clearDeferral(); // v2.737: 받을 것이 없어졌거나 자동 적용을 껐으면 대기도 끝
       // v2.736.2(리뷰 F3): 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이라 기록하지 않는다.
@@ -327,9 +369,9 @@ export class UpgradeManager {
       else if ((dd = this.#deferDecision(latest)).wait) {
         // v2.737: 실행 중 스캔이 끝날 때까지(상한 안에서) 기다린다 — 1분마다 다시 보고 끝나면 곧바로 적용한다(#deferTick).
         const scans = this.deferral?.scans || [];
-        rec = { at, outcome: 'deferred', latest, reason: `실행 중 스캔 ${scans.length}개(${scans.slice(0, 3).map((x) => x.label || x.kind).join(', ')})가 끝나면 적용합니다 — 늦어도 ${new Date(this.deferral.until).toISOString()}` };
+        rec = { at, outcome: 'deferred', latest, reason: `실행 중 스캔 ${scans.length}개(${scans.slice(0, 3).map((x) => x.label || x.kind).join(', ')})가 끝나면 적용합니다 — 늦어도 ${localStamp(this.deferral.until)}` }; // v2.740(B-08): UTC ISO 가 아니라 포탈 시각
       } else {
-        if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(끊긴 스캔은 자동 재개가 잇습니다)`);
+        if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(${resumeOutlookText(dd.scans)})`);
         this.#clearDeferral();
         console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
         // 적용 도중 프로세스가 끝나면(강제 종료 등) 결과가 남지 않는다 — '적용 시작' 을 먼저 남긴다(새 프로세스가 되살린다).

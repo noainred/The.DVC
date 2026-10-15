@@ -304,7 +304,9 @@ function applyIfNewer(members, installDir, currentVersion, { allowSame = false, 
   // v2.730(S-10): 서명된 버전과 번들 안의 버전이 같아야 한다(서명 항목은 바이트를 묶지만, 그 바이트가 다른 버전을 담고 있으면
   //   이름표와 내용이 어긋난 릴리스다 — 설치하지 않는다).
   if (signedVersion && vstr(newV) !== signedVersion) {
-    return { ok: false, code: 'content-version-mismatch', reason: `번들 안의 버전(${vstr(newV)})이 서명된 manifest 버전(${signedVersion})과 다릅니다 — 설치를 거부합니다`, version: vstr(newV) };
+    // v2.740(감사 B-10): version 은 번들 **내용**의 버전이다 — 설치하려던 대상(서명된 버전)은 target 으로 따로 싣는다.
+    //   failureMoot 가 version 을 대상으로 읽으면 내용이 지금 버전인 옛 번들(이름만 새 버전)의 실패를 '이미 설치된 지난 일' 로 숨겼다.
+    return { ok: false, code: 'content-version-mismatch', reason: `번들 안의 버전(${vstr(newV)})이 서명된 manifest 버전(${signedVersion})과 다릅니다 — 설치를 거부합니다`, version: vstr(newV), target: signedVersion };
   }
   const cur = parseVersion(currentVersion) || [0, 0, 0];
   const c = cmpVersionTuple(newV, cur);

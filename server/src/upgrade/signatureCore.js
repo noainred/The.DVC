@@ -58,9 +58,13 @@ export const CANNOT_VERIFY = Object.freeze(new Set(['no-trusted-keys', 'trust-un
  * 저장소·호스트 어디에도 키 항목(회수 포함)이 없고, 호스트 파일도 없고, 키 파일을 못 읽은 것(fatal)도 아닐 때만 참이다.
  * ⚠ 키가 하나라도 있거나(회수된 것까지) 호스트 파일이 있으면 거짓이다 — 관리자가 '아무것도 믿지 않음' 을 고른 상태를
  *   '설정 안 됨' 으로 읽어 정책을 약하게 만들면 안 된다.
+ * ⚠ v2.740(감사 B-05 — 재현): **키 파일에 형식 오류가 하나라도 있으면** 거짓이다. 예전에는 errors 를 보지 않아 공개키 길이·keyId
+ *   오타로 항목이 전부 버려지면(유효 키 0 · 회수 0) '설정 안 됨' → warn 으로 서명 없는 번들을 설치했다. CI(release-sign.mjs
+ *   unsignedAllowed)는 같은 상태를 이미 '형식 오류 — 게시 불가' 로 보므로 런타임과 판정이 갈렸다. 이제 둘 다 require 쪽이다.
  */
 export function trustUnconfigured(trust, { hostPresent = false } = {}) {
   if (!trust || trust.fatal || hostPresent) return false;
+  if (Array.isArray(trust.errors) && trust.errors.length > 0) return false;
   return !(trust.byId && trust.byId.size > 0) && !(trust.activeCount > 0) && !(trust.revokedCount > 0);
 }
 
