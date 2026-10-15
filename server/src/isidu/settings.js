@@ -18,6 +18,9 @@
  *  · 경로는 `/ifs` 아래 절대 경로만, 작은따옴표·역슬래시·$·백틱·제어 문자·`.`/`..` 조각 금지(원격 셸에 작은따옴표로 감싸 넣는다).
  *  · 숫자 칸의 빈 값은 '미지정' — 이전 값을 유지한다(v2.596 규약. `Number('')===0` 이 하한으로 승격되는 사고 방지).
  *  · 손상 파일은 보존하고(preserveCorrupt) 로드 오류를 세운다 — 설정 pull 이 503 으로 답해 엣지 사본을 지우지 않게(v2.631).
+ *  · v2.738 결과 메일: 공통 수신자(`mail.commonTo`)와 대상별 `mail`(to·excludeCommon·onlyOnChange·onFailure). 규칙은 `mailRules.js`.
+ *    형식이 틀린 주소는 저장하지 않고 400 으로 거부한다. **엣지로 내려가지 않는다**(edgeTargetView·cleanEdgeTarget 이 싣지 않는다 —
+ *    메일은 중앙만 보낸다. 주소 목록을 28곳에 퍼뜨리지 않는다).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +31,7 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { normPath, SIZE_MODES } from './parse.js';
+import { normalizeTargetMail, normalizeCommonMail, isEmail } from './mailRules.js';
 
 const FILE = () => path.join(config.configDir, 'isidu-settings.json');
 registerStateFile('isidu-edge-targets.json');
@@ -48,7 +52,11 @@ const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,253}$/;
 const RE_USER = /^[A-Za-z0-9._@\\-]{1,64}$/;
 const lo = (v) => String(v ?? '').trim().toLowerCase();
 
-export const DEFAULTS = Object.freeze({ targets: [], retentionDays: RANGES.retentionDays.def });
+export const DEFAULTS = Object.freeze({ targets: [], retentionDays: RANGES.retentionDays.def, mail: Object.freeze({ commonTo: Object.freeze([]) }) });
+/** 빈 설정 값(공유 참조를 남기지 않게 매번 새로 만든다). */
+const emptyValue = () => ({ targets: [], retentionDays: RANGES.retentionDays.def, mail: { commonTo: [] } });
+/** 저장된 공통 메일 설정 정리(옛 파일은 필드가 없다 · 형식이 틀린 주소는 버린다 — 저장 경로가 이미 거부하므로 손으로 고친 파일뿐). */
+const commonMailOf = (m) => ({ commonTo: (Array.isArray(m?.commonTo) ? m.commonTo : []).filter(isEmail).slice(0, 50) });
 
 /**
  * 조사 경로 판정(순수). 문제가 없으면 null, 있으면 사유 문장.
@@ -89,7 +97,7 @@ export function sessionPlanOf(t) {
   return { cmdMs: Math.min(cmd, session - 15_000), sessionMs: session };
 }
 
-const loadErr = makeSettingsLoadError(FILE, { label: '아이실론 디렉터리 사용량 설정', confirm: () => { saveSettingsRaw({ ...DEFAULTS, targets: [] }); } });
+const loadErr = makeSettingsLoadError(FILE, { label: '아이실론 디렉터리 사용량 설정', confirm: () => { saveSettingsRaw(emptyValue()); } });
 export function isiduSettingsLoadError() { load(); return loadErr.get(); }
 
 let _cache = null; // { mtime, size, value }
@@ -97,25 +105,28 @@ let _cache = null; // { mtime, size, value }
 function load() {
   let st = null;
   try { st = fs.statSync(FILE()); } catch { st = null; }
-  if (!st) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: { ...DEFAULTS, targets: [] } }; return _cache.value; }
+  if (!st) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: emptyValue() }; return _cache.value; }
   if (_cache && _cache.mtime === st.mtimeMs && _cache.size === st.size) return _cache.value;
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
     const targets = (Array.isArray(raw.targets) ? raw.targets : []).filter((t) => t && typeof t === 'object' && RE_ID.test(String(t.id || ''))).slice(0, MAX_TARGETS);
-    const value = { targets, retentionDays: numField(raw.retentionDays, RANGES.retentionDays, null) };
+    const value = { targets, retentionDays: numField(raw.retentionDays, RANGES.retentionDays, null), mail: commonMailOf(raw.mail) };
     loadErr.ok();
     _cache = { mtime: st.mtimeMs, size: st.size, value };
     return value;
   } catch (e) {
     preserveCorrupt(FILE(), e?.message);
     loadErr.corrupt(e);
-    _cache = { mtime: 0, size: -1, value: { ...DEFAULTS, targets: [] } };
+    _cache = { mtime: 0, size: -1, value: emptyValue() };
     return _cache.value;
   }
 }
 
-export function loadSettings() { const v = load(); return { ...v, targets: v.targets.map((t) => ({ ...t })) }; }
+export function loadSettings() {
+  const v = load();
+  return { ...v, targets: v.targets.map((t) => ({ ...t, ...(t.mail && typeof t.mail === 'object' ? { mail: { ...t.mail, to: Array.isArray(t.mail.to) ? [...t.mail.to] : [] } } : {}) })), mail: { commonTo: [...(v.mail?.commonTo || [])] } };
+}
 
 function saveSettingsRaw(v) {
   atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2), { mode: 0o600 });
@@ -151,6 +162,11 @@ export function normalizeTarget(input, prev, ctx) {
     // v2.737: 장비에서 분리 실행(nohup — 포탈이 재시작해도 du 가 계속 돌고 결과를 이어 받는다). 기본 켬 · false 만 끔.
     detach: t.detach !== false,
   };
+  // v2.738 결과 메일 — 요청에 mail 이 없으면 이전 값 유지(옛 화면·다른 경로의 저장이 지우지 않게).
+  const m = normalizeTargetMail(t.mail, prev?.mail ?? null);
+  if (m.error) return { error: m.error, field: m.field };
+  // 아무것도 고르지 않았으면 저장하지 않는다(파일을 작게 — 없는 것과 같은 뜻).
+  if (m.mail.to.length || m.mail.excludeCommon || m.mail.onlyOnChange || m.mail.onFailure) out.mail = m.mail;
   const user = String(t.username ?? prev?.username ?? '').trim();
   const deviceId = String(t.deviceId || '').trim();
   if (deviceId) {
@@ -206,7 +222,9 @@ export function saveSettings(input, ctx) {
     ids.add(r.target.id);
     out.push(r.target);
   }
-  const value = { targets: out, retentionDays: numField(input?.retentionDays, RANGES.retentionDays, cur.retentionDays) };
+  const cm = normalizeCommonMail(input?.mail, cur.mail);
+  if (cm.error) return { ok: false, error: cm.error, field: cm.field };
+  const value = { targets: out, retentionDays: numField(input?.retentionDays, RANGES.retentionDays, cur.retentionDays), mail: cm.mail };
   saveSettingsRaw(value);
   return { ok: true, settings: loadSettings() };
 }

@@ -22,6 +22,7 @@ import { loadSettings, resolveTarget, edgeTargets } from './settings.js';
 import { collectTarget } from './collect.js';
 import * as db from './db.js';
 import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor } from '../util/scanJournal.js';
+import { notifyScanStored } from './notify.js';
 
 export const TICK_MS = 60_000;
 export const FAIL_RETRY_MS = 3_600_000;
@@ -105,6 +106,8 @@ function runOne(t, trigger, manual, { resumeOf = null } = {}) {
       if (rec.ok) note('info', `${t.label || t.id}: 폴더 ${rec.count.toLocaleString()}개 조사 (${Math.round(rec.durationMs / 1000)}초)${rec.errLines ? ` · 권한 오류 ${rec.errLines}줄` : ''}${how}${prior ? ' · 자동 재개' : ''}`);
       else note('error', `${t.label || t.id}: ${rec.error}${prior ? ' (자동 재개)' : ''}`);
       if (saved.ok && _afterScan) { try { _afterScan(); } catch { /* push 예약 실패는 다음 주기 */ } }
+      // v2.738 결과 메일 — 중앙이 직접 조사한 결과만 여기서(엣지 결과는 중앙이 받을 때). 기다리지 않는다(발송이 조사를 막지 않게 — 실패는 notify 가 기록한다).
+      if (saved.ok && !saved.duplicate && !isEdge()) notifyScanStored({ targetId: t.id, scanId: saved.id, ok: rec.ok, ts: rec.ts });
       return { ok: rec.ok, saved: saved.ok, kind: rec.kind || null, error: rec.error || null };
     } catch (e) {
       note('error', `${t.label || t.id}: 실행 오류 — ${e.message}`);

@@ -52,6 +52,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'upgrade-status.json', // v2.736.2: 업그레이드 확인·적용·자동 확인 기록(upgrade/statusStore.js 도 스스로 등록한다)
   'isidu-edge-targets.json', 'isidu-push.json', // v2.736: 엣지가 받은 아이실론 디렉터리 사용량 대상 사본 · 엣지 push 커서(각 모듈도 스스로 등록한다)
   'scan-journal.json', // v2.737: 실행 중 스캔 기록(재시작 뒤 자동 재개 — util/scanJournal.js 도 스스로 등록한다)
+  'isidu-mail-state.json', // v2.738: 아이실론 디렉터리 사용량 결과 메일의 대상별 마지막 발송 기록(isidu/notify.js 도 스스로 등록한다)
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.

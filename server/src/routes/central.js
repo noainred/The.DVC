@@ -2087,6 +2087,7 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   if (clean.dropped.notOwned) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 배정되지 않은 대상의 결과 ${clean.dropped.notOwned}건 거절`);
   const db = await import('../isidu/db.js');
   const { ackIsiduCollect } = await import('../isidu/collectRequests.js');
+  const { notifyScanStored: notifyIsidu } = await import('../isidu/notify.js');
   const saved = { inserted: 0, duplicates: 0, failed: 0 };
   if (clean.scans.length && !(await db.available())) {
     return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
@@ -2095,6 +2096,8 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
     const r = await db.insertScan({ ...sc, agent: T.HISTORY_AGENT, node });
     if (!r.ok) { saved.failed++; console.warn(`[central] isidu-data: 적재 실패(${String(node).slice(0, 64)} · ${sc.targetId}): ${r.error}`); continue; }
     if (r.duplicate) saved.duplicates++; else saved.inserted++;
+    // v2.738 결과 메일 — 새로 적재한 것만(재전송 중복은 보내지 않는다). 기다리지 않는다(응답을 늦추지 않게 — notify 는 던지지 않는다).
+    if (!r.duplicate) notifyIsidu({ targetId: sc.targetId, scanId: r.id, ok: sc.ok === true, ts: sc.ts });
     const edgeTs = sc.edgeTs ?? sc.ts;
     E.noteIsiduScanTs(sc.targetId, edgeTs);
     ackIsiduCollect(sc.targetId, edgeTs);
