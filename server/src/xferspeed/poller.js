@@ -33,8 +33,9 @@ import { demoXferResult } from '../mock/demo/xferspeed.js';
 import { loadXferSpeedSettings, xferSpeedEnabled, onXferSpeedSettingsChange, isExcluded } from './settings.js';
 import { measureDown, measureUp } from './probe.js';
 import { insertSamples, pruneXferSpeed, latestAll } from './db.js';
-import { planTick, nextRunOf, nextOccurrence, GRACE_MS } from './schedule.js';
+import { planTick, nextRunOf, nextOccurrence, rebaseClock, effectiveSince, GRACE_MS, CLOCK_TOL_MS } from './schedule.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 
 /** 판정 틱 — 예약 시각의 정밀도이기도 하다(최대 이만큼 늦게 시작한다). */
 export const TICK_MS = 30_000;
@@ -46,26 +47,73 @@ const BOOT_AT = Date.now();
 registerStateFile('xfer-speed-schedule-state.json');
 const STATE_FILE = () => path.join(config.configDir, 'xfer-speed-schedule-state.json');
 
-/** 예약 처리 기록 — { [일정 id]: { lastAt, result:'ran'|'missed', reason?, at } }. 손상이면 보존하고 새로 시작한다. */
-export function loadScheduleState() {
+/*
+ * 예약 처리 기록 — { [일정 id]: { lastAt, result:'ran'|'missed', reason?, at, (sinceFrom, sinceCap, clockFrom) } }.
+ * ⚠⚠ v2.740(감사 B-04 — 재현): 예전에는 매 틱 파일에서만 다시 읽어, 쓰기가 실패하면(디스크 가득·읽기 전용) 다음 30초 틱이 같은 예약을
+ *   '아직 안 함' 으로 보고 유예 30분 동안 매 틱 다시 쟀다(6틱 6회 실측). 이제 **메모리가 1차**이고 파일은 재시작 대비 사본이다 —
+ *   읽을 때 둘을 합치고(일정마다 lastAt 이 늦은 쪽), 쓰기에 실패하면 다음 틱에 다시 쓴다(`_schedDirty`).
+ * ⚠ v2.740(감사 B-12): 파일을 못 읽은 것(EMFILE·EACCES·EIO 같은 일시 오류)은 손상이 아니다 — 원본을 옮기지 않는다.
+ *   손상(JSON 해석 실패·모양이 아님)일 때만 보존하고 새로 시작한다.
+ */
+let _schedMem = null;      // 메모리 사본(1차). null = 이 프로세스가 아직 기록을 갖고 있지 않다
+let _schedDirty = false;   // 마지막 쓰기가 실패했다 — 다음 틱에 다시 쓴다
+const _warnOnce = createChangeLogger({ windowMs: 10 * 60_000 });
+
+/** 파일 읽기 — `{ state, readError }`. readError 는 '못 읽음(일시 오류)' 이고 손상이 아니다. */
+function readScheduleFile() {
+  let text;
+  try { text = fs.readFileSync(STATE_FILE(), 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') return { state: {}, readError: null };
+    return { state: {}, readError: e };
+  }
   try {
-    const j = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
-    const m = j && typeof j === 'object' && !Array.isArray(j) && j.schedules && typeof j.schedules === 'object' ? j.schedules : {};
+    const j = JSON.parse(text);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    const m = j.schedules && typeof j.schedules === 'object' && !Array.isArray(j.schedules) ? j.schedules : {};
     const out = {};
     for (const [id, v] of Object.entries(m)) if (v && typeof v === 'object' && Number.isFinite(Number(v.lastAt))) out[id] = v;
-    return out;
-  } catch (e) {
-    if (e?.code !== 'ENOENT') { try { preserveCorrupt(STATE_FILE()); } catch { /* best effort */ } }
-    return {};
+    return { state: out, readError: null };
+  } catch {
+    try { preserveCorrupt(STATE_FILE()); } catch { /* best effort */ }
+    return { state: {}, readError: null };
   }
 }
-function saveScheduleState(state, settings) {
+
+/** 파일 기록과 메모리 기록 합치기(순수) — 일정마다 lastAt 이 늦은 쪽. 시계 보정으로 내린 메모리 기록(clockFrom)은 그 미래 값을 이긴다. */
+export function mergeScheduleState(disk = {}, mem = null) {
+  const out = { ...(disk || {}) };
+  for (const [id, v] of Object.entries(mem || {})) {
+    const d = out[id];
+    const vl = Number(v?.lastAt) || 0; const dl = Number(d?.lastAt) || 0;
+    if (!d || vl >= dl || (v?.clockFrom != null && Number(v.clockFrom) === dl)) out[id] = v;
+  }
+  return out;
+}
+
+/** 지금 쓰는 예약 처리 기록 — 메모리 우선 + 파일 병합. */
+export function loadScheduleState() {
+  return mergeScheduleState(readScheduleFile().state, _schedMem);
+}
+
+function keepIds(state, settings) {
   const keep = new Set((settings?.schedules || []).map((x) => x.id));
   const out = {};
   for (const [id, v] of Object.entries(state || {})) if (keep.has(id)) out[id] = v;   // 지운 일정의 기록은 버린다
-  try { atomicWriteFileSync(STATE_FILE(), `${JSON.stringify({ v: 1, schedules: out }, null, 2)}\n`, { mode: 0o600 }); }
-  catch (e) { console.warn(`[xferspeed] 예약 처리 기록을 쓰지 못했습니다(재시작하면 같은 시각을 다시 볼 수 있습니다): ${e?.message || e}`); }
+  return out;
 }
+/** @returns {boolean} 파일에 썼는가 */
+function saveScheduleState(state) {
+  try { atomicWriteFileSync(STATE_FILE(), `${JSON.stringify({ v: 1, schedules: state }, null, 2)}\n`, { mode: 0o600 }); return true; }
+  catch (e) {
+    const msg = String(e?.message || e).slice(0, 200);
+    if (_warnOnce('save', msg)) {
+      console.warn(`[xferspeed] 예약 처리 기록을 파일에 쓰지 못했습니다 — 이 프로세스에서는 처리한 회차를 메모리에 두어 다시 재지 않지만, 쓰기가 되기 전에 포탈을 재시작하면 유예(${Math.round(GRACE_MS / 60_000)}분) 안의 같은 회차를 한 번 더 잴 수 있습니다. 다음 틱에 다시 씁니다: ${msg}`);
+    }
+    return false;
+  }
+}
+/** 처리 기록에 시계 보정(sinceFrom·sinceCap)을 이어 둔다 — 실행·놓침 기록이 그 보정을 지우면 미래 since 가 다시 예약을 막는다. */
+const keepCap = (r) => (r && r.sinceCap != null ? { sinceFrom: r.sinceFrom, sinceCap: r.sinceCap } : {});
 
 const isEdgeNode = () => !!String(config.agent?.centralUrl || '').trim();
 const t = (v) => String(v ?? '').trim();
@@ -109,7 +157,7 @@ export function xferSpeedStatus(now = Date.now()) {
     lastRunAt: _lastRunAt, graceMs: GRACE_MS, tickMs: TICK_MS, offsetMin: DAY_OFFSET_MIN, next,
     schedules: s.schedules.map((x) => {
       const rec = state[x.id] || null;
-      const after = Math.max(now - 1, Number(x.since) || 0, Number(rec?.lastAt) || 0);
+      const after = Math.max(now - 1, effectiveSince(x, rec), Number(rec?.lastAt) || 0);
       return { id: x.id, next: x.enabled ? nextOccurrence(x, after) : null, last: rec };
     }),
     progress: _progress ? { ..._progress, current: [..._progress.current] } : null,
@@ -222,7 +270,10 @@ export async function runXferCycle({ trigger = 'timer', only = '', scheduleIds =
   }
 }
 
-/** DB 의 마지막 측정 시각(간격 판정의 출발점 — 재시작 뒤 곧바로 한 주기를 더 돌지 않게). 없으면 null(곧 실행). */
+/**
+ * DB 의 마지막 측정 시각(간격 판정의 출발점 — 재시작 뒤 곧바로 한 주기를 더 돌지 않게). 없으면 null(곧 실행).
+ * 지금보다 뒤(시계가 뒤로 감)인 값은 틱이 지금으로 잘라 쓴다(v2.740 B-09 — 아래 tickXferSchedule, 한 곳에서만 자른다).
+ */
 async function lastMeasuredAt() {
   let m = null;
   for (const r of await latestAll()) { const ts = Number(r?.ts); if (Number.isFinite(ts) && (m == null || ts > m)) m = ts; }
@@ -239,17 +290,41 @@ export async function tickXferSchedule({ now = Date.now() } = {}) {
   maybePrune(s, now);
   const enabled = xferSpeedEnabled(s);
   if (!_lastRunKnown) { _lastRunAt = await lastMeasuredAt(); _lastRunKnown = true; }
+  // v2.740(감사 B-09): 마지막 실행(DB 의 마지막 측정 · 이 프로세스가 기억한 실행)이 지금보다 뒤면(시계가 뒤로 감) 지금으로 내린다 —
+  //   그대로 쓰면 그 미래 시각 + 간격까지 측정이 서지 않았다(재현: 6시간 뒤 시각이면 6.5시간 동안 측정 0).
+  if (_lastRunAt != null && _lastRunAt > now + CLOCK_TOL_MS) {
+    if (_warnOnce('clock-run', String(_lastRunAt))) console.warn(`[xferspeed] 마지막 측정 시각이 지금보다 ${Math.round((_lastRunAt - now) / 60_000)}분 뒤입니다 — 서버 시계가 뒤로 바뀐 것으로 보고 간격을 지금부터 다시 셉니다.`);
+    _lastRunAt = now;
+  }
   if (running) return { skipped: 'running' };
-  const state = loadScheduleState();
-  const plan = planTick({ settings: s, state, now, lastRunAt: _lastRunAt, bootAt: BOOT_AT, enabled, wasBusy });
-  // 지운 일정의 기록이 남아 있으면 정리한다(saveScheduleState 가 현재 일정만 남긴다).
+  const { state: disk, readError } = readScheduleFile();
+  // 파일을 못 읽었고(일시 오류) 메모리에도 기록이 없으면 이번 틱은 예약을 판정하지 않는다 — 기록 없이 판정하면 이미 잰 회차를 다시 잴 수 있다.
+  const blind = !!readError && _schedMem == null;
+  if (readError && _warnOnce('read', String(readError?.code || readError?.message || readError))) {
+    console.warn(`[xferspeed] 예약 처리 기록 파일을 읽지 못했습니다(${readError?.code || readError?.message || readError}) — 손상이 아니라 파일은 그대로 둡니다. ${blind ? '이 프로세스의 기록도 없어 이번 틱은 예약을 판정하지 않습니다(간격 실행은 그대로).' : '이 프로세스의 기록으로 판정합니다.'}`);
+  }
+  let state = mergeScheduleState(disk, _schedMem);
+  // 지운 일정의 기록이 남아 있으면 정리한다(현재 일정만 남긴다).
   const ids = new Set(s.schedules.map((x) => x.id));
   let changed = Object.keys(state).some((id) => !ids.has(id));
-  for (const m of plan.missed) { state[m.id] = { lastAt: m.occ, result: 'missed', reason: m.reason, at: now }; changed = true; }
+  if (!blind) {
+    const rb = rebaseClock({ settings: s, state, now });
+    if (rb.rebased.length) {
+      state = rb.state; changed = true;
+      console.warn(`[xferspeed] 예약 ${rb.rebased.length}건의 기록 시각이 지금보다 뒤입니다 — 서버 시계가 뒤로 바뀐 것으로 보고 지금으로 다시 잡았습니다(지금 이전 회차는 다시 재지 않습니다): ${rb.rebased.map((r) => `${r.id}(${r.field})`).join(', ')}`);
+    }
+  }
+  const plan = planTick({ settings: blind ? { ...s, schedules: [] } : s, state, now, lastRunAt: _lastRunAt, bootAt: BOOT_AT, enabled, wasBusy });
+  for (const m of plan.missed) { state[m.id] = { ...keepCap(state[m.id]), lastAt: m.occ, result: 'missed', reason: m.reason, at: now }; changed = true; }
   const loud = plan.missed.filter((m) => m.reason !== 'off');
   if (loud.length) console.warn(`[xferspeed] 예약 측정 ${loud.length}건을 놓쳤습니다(유예 ${Math.round(GRACE_MS / 60_000)}분 초과 — 몰아서 실행하지 않습니다): ${loud.map((m) => `${m.id}(${m.reason})`).join(', ')}`);
-  if (plan.run) for (const f of plan.fire) { state[f.id] = { lastAt: f.occ, result: 'ran', at: now }; changed = true; }
-  if (changed) saveScheduleState(state, s);
+  if (plan.run) for (const f of plan.fire) { state[f.id] = { ...keepCap(state[f.id]), lastAt: f.occ, result: 'ran', at: now }; changed = true; }
+  if (!blind) {
+    // 메모리가 1차 — 파일 쓰기가 실패해도 같은 프로세스는 같은 회차를 다시 재지 않는다(B-04).
+    const kept = keepIds(state, s);
+    _schedMem = kept;
+    if (changed || _schedDirty) _schedDirty = !saveScheduleState(kept);
+  }
   if (!plan.run) return { plan };
   const trigger = plan.fire.length ? 'schedule' : 'timer';
   const promise = runXferCycle({ trigger, scheduleIds: plan.fire.map((f) => f.id) });
@@ -303,4 +378,4 @@ export function startXferSpeedPoller() {
 }
 
 export function stopXferSpeedPoller() { _timer?.stop?.(); _timer = null; }
-export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _lastPruneAt = null; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; }
+export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _lastPruneAt = null; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; _schedMem = null; _schedDirty = false; }

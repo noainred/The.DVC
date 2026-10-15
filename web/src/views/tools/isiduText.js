@@ -59,9 +59,11 @@ export function signedBytes(b) {
  * @param opts  isNew(서버 new7/new30 — true 면 '신규'), removed(사라진 폴더 행), hasBase(기준 스캔이 있는가)
  * @returns {{text:string, tone:'up'|'down'|'flat'|'new'|'gone'|'none', title:string}}
  */
-export function deltaView(d, { isNew = null, removed = false, hasBase = true } = {}) {
+export function deltaView(d, { isNew = null, removed = false, hasBase = true, unread = false } = {}) {
   if (removed) return { text: '사라짐', tone: 'gone', title: '기준 수집에는 있었는데 지금은 없는 폴더입니다(크기는 그때 값).' };
   if (isNew === true) return { text: '신규', tone: 'new', title: '기준 수집에는 없던 폴더입니다.' };
+  // v2.740 D-02: 개요(7일 변화를 싣는 응답)를 받지 못했으면 '관측이 짧다' 가 아니라 '모른다' 다.
+  if (!d && unread) return { text: '—', tone: 'none', title: '개요를 읽지 못해 7일 변화를 모릅니다(관측 기간이 짧다는 뜻이 아닙니다).' };
   if (!d) return { text: '—', tone: 'none', title: hasBase ? '비교할 값이 없습니다.' : '비교할 이전 수집이 아직 없습니다(관측 기간이 짧습니다).' };
   const b = numOrNull(d.bytes);
   if (b == null) return { text: '—', tone: 'none', title: '비교할 값이 없습니다.' };
@@ -456,6 +458,61 @@ export function usersFootNote(res, shownCount) {
   if (!total) return '조건에 맞는 폴더가 없습니다.';
   const rest = Math.max(0, total - to);
   return `${countText(total)}개 중 ${countText(from)}–${countText(to)}${rest ? ` · 나머지 ${countText(rest)}개는 다음 쪽이나 검색으로 엽니다` : ''}.`;
+}
+
+/* ─────────────── 조회 상태(v2.740 감사 D — 훅의 판정을 여기 둔다) ─────────────── */
+
+/**
+ * 키 단위 조회 상태(useKeyed). data 는 **그 data 를 받은 키(dataKey)** 와 함께 둔다.
+ * ⚠ D-01: 예전에는 실패가 key 만 새 키로 바꾸고 data 를 그대로 둬서, 대상 A 를 보다 B 로 바꿨는데 B 가 실패하면 **A 의 보고서가
+ *   B 이름 아래 오류 없이** 보였다. 이제 data 는 dataKey === key 일 때만 돌려준다 — 같은 키를 다시 읽다 실패하면 직전 값은 남는다.
+ */
+export const KEYED_EMPTY = Object.freeze({ key: null, dataKey: null, data: null, error: null, loading: false });
+export const keyedStart = (s) => ({ ...(s || KEYED_EMPTY), loading: true });
+export const keyedOk = (s, key, data) => ({ key, dataKey: key, data, error: null, loading: false });
+export const keyedFail = (s, key, error) => ({ ...(s || KEYED_EMPTY), key, error, loading: false });
+/** 지금 키(key)로 화면이 쓸 값. 다른 키의 상태면 '불러오는 중'. */
+export function keyedView(s, key) {
+  const st = s || KEYED_EMPTY;
+  if (!key) return { key: null, data: null, error: null, loading: false };
+  if (st.key !== key) return { key, data: null, error: null, loading: true };
+  return { key, data: st.dataKey === key ? st.data : null, error: st.error || null, loading: !!st.loading };
+}
+
+/**
+ * 다시 물어도 결과가 같은 실패인가 — 403(권한 없음 · 정책 거부)·404(이 서버에 기능 없음 — 구버전). 이 둘이면 자동 폴링·재시도를 멈춘다
+ * (v2.621 규칙 '403 은 다시 물어도 같다' · usePolling 의 403 중단과 같은 판단). 사람이 누르는 새로고침은 막지 않는다.
+ */
+export const pollStopped = (e) => !!e && (e.status === 403 || e.status === 404);
+
+/** 목록 폴링 다음 간격(ms) — 조사 중이면 8초, 아니면 30초. 다시 물어도 같은 실패(403·404)면 null(멈춤). D-05. */
+export function listPollDelay(err, busy) {
+  if (pollStopped(err)) return null;
+  return busy ? 8_000 : 30_000;
+}
+
+/** 목록을 새로 읽지 못했을 때 배너(직전 값을 보이는 중). 멈췄으면 그 사실과 이유를 말한다. */
+export function listStaleText({ error, failedAt, stopped } = {}, now = Date.now()) {
+  if (!error) return '';
+  const since = numOrNull(failedAt) != null ? `(${agoText(failedAt, now)}부터)` : '';
+  const why = error.status === 403 ? '권한이 없어(403)' : error.status === 404 ? '이 서버에 이 기능이 없어(404 — 구버전일 수 있습니다)' : '';
+  const head = `목록을 새로 읽지 못했습니다${since} — 아래는 직전에 받은 값입니다.`;
+  const tail = stopped ? ` ${why || '다시 물어도 같은 결과라'} 자동 새로고침을 멈췄습니다. ‘다시 읽기’ 를 누르면 한 번 더 묻습니다.` : '';
+  return `${head}${tail} ${String(error?.message || error)}`;
+}
+
+/**
+ * 머리의 'CSV 내보내기' 버튼 — 대상 화면에서만 보인다(서브메뉴에는 내보낼 대상이 없다). 잠긴 이유를 나눠 말한다. D-10.
+ * ⚠ 예전에는 서브메뉴에서도 보이고 '성공한 수집이 있어야 내보낼 수 있습니다' 라고 말해, 수집이 실패한 줄로 읽혔다.
+ */
+export function csvButtonState({ tid, rep } = {}) {
+  if (!tid) return { show: false, disabled: true, title: '' };
+  const R = rep?.data && rep.data.state ? rep.data : null;
+  if (R && R.state === 'ok') return { show: true, disabled: false, title: '전체 사용자 CSV' };
+  if (!R && rep?.error) return { show: true, disabled: true, title: '보고서를 읽지 못해 내보낼 수 없습니다' };
+  if (!R) return { show: true, disabled: true, title: '보고서를 불러오는 중입니다' };
+  if (R.state === 'db-unavailable') return { show: true, disabled: true, title: '이 노드에서 디렉터리 사용량 DB 를 쓸 수 없어 내보낼 수 없습니다' };
+  return { show: true, disabled: true, title: '성공한 수집이 있어야 내보낼 수 있습니다' };
 }
 
 /* ─────────────── 설정 폼 ─────────────── */

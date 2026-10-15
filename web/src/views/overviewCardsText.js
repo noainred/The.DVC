@@ -2,6 +2,8 @@
  * overviewCardsText.js — Overview 카드 8장 · 전체 소비 전력 문구(v2.664, 순수 — vitest).
  * 값이 없으면 단위 없는 '—' 다(0 kW·0 TB 는 '없다' 는 거짓 — unitText 규약). 백틱·별표 금지(BoldText 규약).
  */
+import { staleByText } from './tools/cvpPowerText.js';
+
 const nf = new Intl.NumberFormat('ko-KR');
 export const countText = (n) => (n == null || !Number.isFinite(Number(n)) ? '—' : nf.format(Number(n)));
 /** W → kW(10 kW 미만은 소수 1자리). */
@@ -162,7 +164,11 @@ export function powerCatNote(cat, x) {
   // v2.682 R3D-03: 스토리지도 일부 부품(PSU·노드)만 읽은 장비가 있다 — 측정 대수에서 빼고 따로 말한다.
   if (cat === 'storage' && x.partial) miss.push(`일부 부품만 읽음 ${x.partial}(합계가 실제보다 작음)`);
   if (x.unread) miss.push(`못 읽음 ${x.unread}`);
-  if (x.stale) miss.push(`오래된 값 ${x.stale}`);
+  if (x.stale) {
+    // v2.740(감사 F-03): 네트워크는 CVP 전력 탭과 같은 판정이라 '지금 값이 아닌' 사유를 함께 말한다(서버 network.staleBy).
+    const why = cat === 'network' ? staleByText(x.staleBy) : '';
+    miss.push(`오래된 값 ${x.stale}${why ? `(${why})` : ''}`);
+  }
   if (x.noTime) miss.push(`수집 시각 없음 ${x.noTime}`);   // v2.727(감사 C-06)
   if (cat === 'storage' && x.unsupported) miss.push(`수집 경로 없음 ${x.unsupported}`);
   if (cat === 'network' && x.outputOnly) miss.push(`출력 전력만 ${x.outputOnly}`);
@@ -191,5 +197,5 @@ export const POWER_FOOTNOTE = [
   '서버는 iDRAC(OME·엣지 포함) 실측 최신값입니다. vCenter 가 추정한 호스트 전력은 넣지 않습니다.',
   '네트워크는 CVP 가 읽은 전원공급장치(PSU) 입력 전력 합입니다. 입력이 없고 출력만 있으면 출력을 씁니다(효율 손실만큼 작게 보입니다). 필드 이름은 실장비로 확인하지 못한 추정입니다.',
   '스토리지는 수집기가 읽은 전력입니다 — Unity SSH(svc_diag 전원공급장치 입력 · DPE 만, 확장 DAE 제외) · Unity REST(시스템 현재 전력) · PowerStore·XtremIO(전원공급장치) · Isilon(통계 전원 키 · 노드 합) · PowerMax/VMAX(어레이 상세 응답). Unity SSH 외의 필드 이름은 실장비로 확인하지 못한 추정이라, 못 읽은 장비는 아래 표에 사유와 응답에 있던 키를 보여 줍니다. VPLEX 와 일부 SSH 수집 방식은 전력 수집 경로가 없습니다.',
-  '못 읽은 장비는 0 W 로 채우지 않고 개수만 밝힙니다. 6시간보다 오래된 네트워크·스토리지 값은 현재값이 아니라 뺍니다.',
+  '못 읽은 장비는 0 W 로 채우지 않고 개수만 밝힙니다. 네트워크는 CVP 화면과 같은 기준으로 지금 값이 아닌 장비(수집 기록 없음·수집 오래됨·스트리밍 아님·텔레메트리 실패·부품 목록 오래됨)를, 스토리지는 6시간보다 오래된 값을 빼고 개수만 밝힙니다.',
 ];

@@ -247,7 +247,7 @@ describe('xferSpeedText — 차트 마우스 오버(v2.735.3)', () => {
   it('화면 — 과거 구간은 1분 갱신을 하지 않고, 스크롤·오버를 그린다', () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
-    expect(src).toMatch(/if \(alive && end == null\) timer = setTimeout\(loop, 60_000\)/);
+    expect(src).toMatch(/if \(alive && end == null && !shouldStopPolling\(e\)\) timer = setTimeout\(loop, 60_000\)/);   // v2.740 D-05: 403·404 면 멈춘다
     expect(src).toMatch(/<WindowScroll /);
     expect(src).toMatch(/hoverAt\(m, hoverPx/);
     expect(src).toMatch(/const key = `\$\{agent\}\|\$\{days\}`/);
@@ -301,7 +301,7 @@ describe('xferSpeedText — 리뷰 확정분(v2.735.3)', () => {
   it('화면 — 메인 폴링은 세대 번호로 하나만, 상세 CSV 는 보고 있는 구간', () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
-    expect(src).toMatch(/if \(alive && gen === genRef\.current\) timer = setTimeout/);
+    expect(src).toMatch(/if \(alive && gen === genRef\.current && !stopRef\.current\) timer = setTimeout/);   // v2.740 D-05: 403·404 면 멈춘다
     expect(src).toMatch(/export\.csv\?days=\$\{Math\.min\(730, days\)\}&agent=\$\{encodeURIComponent\(agent\)\}\$\{end != null/);
     expect(src).toMatch(/측정 \$\{n\}회/);
     expect(src).not.toMatch(/한국 시각/);
@@ -405,5 +405,56 @@ describe('xferSpeedText — 실행 일정(간격 · 예약)', () => {
     expect(settingsPatch({ ...base, intervalOn: false }, saved)).toEqual({ intervalOn: false });
     const p = settingsPatch({ ...base, schedules: [...base.schedules, { id: '', kind: 'weekly', time: '18:00', days: [2], enabled: true }] }, saved);
     expect(p.schedules).toEqual([{ id: 's-1', kind: 'daily', time: '09:00', enabled: true }, { kind: 'weekly', time: '18:00', days: [2], enabled: true }]);
+  });
+});
+
+describe('xferSpeedText — v2.740 감사(B-09·D-03·D-04·D-05·D-07)', () => {
+  it('D-03 숫자가 아닌 칸은 저장하지 않고 칸 이름과 함께 말한다(예전엔 조용히 버리고 창을 닫았다)', async () => {
+    const { settingsIssues, NO_CHANGE_TEXT, XFER_RANGES } = await import('./xferSpeedText.js');
+    const a = settingsIssues({ intervalMs: '60분' });
+    expect(a.map((x) => x.key)).toEqual(['intervalMs']);
+    expect(a[0].label).toBe('측정 주기');
+    expect(a[0].reason).toMatch(/숫자만/);
+    expect(settingsIssues({ sizeMB: '1,000' }).map((x) => x.key)).toEqual(['sizeMB']);
+    expect(settingsIssues({ sizeMB: '1e1' }).map((x) => x.key)).toEqual(['sizeMB'], '지수 표기도 숫자 칸 입력이 아니다');
+    expect(settingsIssues({ intervalMs: '', sizeMB: '  ' })).toEqual([], '빈 칸은 그대로 둔다(문제 아님)');
+    expect(settingsIssues({ intervalMs: '30', sizeMB: '10', timeoutMs: '120', concurrency: '1', slowPct: '70', sampleRetentionDays: '180', dailyRetentionDays: '1825' })).toEqual([]);
+    expect(NO_CHANGE_TEXT).toMatch(/바뀐 값이 없습니다/);
+    expect(Object.keys(XFER_RANGES).sort()).toEqual(SETTING_FIELDS.map((f) => f.key).sort(), '폼 칸 = 범위 키');
+  });
+  it('D-04 범위 밖은 화면 단위로 막는다(경계는 받는다)', async () => {
+    const { settingsIssues } = await import('./xferSpeedText.js');
+    const big = settingsIssues({ sizeMB: '200' });
+    expect(big[0].reason).toMatch(/1~50MB/);
+    expect(settingsIssues({ sizeMB: '50' })).toEqual([]);
+    expect(settingsIssues({ concurrency: '10' }).map((x) => x.key)).toEqual(['concurrency']);
+    expect(settingsIssues({ intervalMs: '9' }).map((x) => x.key)).toEqual(['intervalMs'], '10분 미만');
+    expect(settingsIssues({ intervalMs: '10' })).toEqual([]);
+    expect(settingsIssues({ intervalMs: '10081' }).map((x) => x.key)).toEqual(['intervalMs'], '7일 초과');
+    expect(settingsIssues({ sizeMB: '60' }, { sizeMB: { min: 1, max: 100 } })).toEqual([], '서버가 준 범위를 먼저 쓴다');
+  });
+  it('D-05 403·404 는 다시 물어도 같다 — 폴링 루프를 멈춘다(그 밖의 실패는 계속)', async () => {
+    const { shouldStopPolling } = await import('./xferSpeedText.js');
+    expect(shouldStopPolling({ status: 403 })).toBe(true);
+    expect(shouldStopPolling({ status: 404 })).toBe(true);
+    expect(shouldStopPolling({ status: 500 })).toBe(false);
+    expect(shouldStopPolling(new Error('timeout'))).toBe(false);
+    expect(shouldStopPolling(null)).toBe(false);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'XferSpeedTool.jsx'), 'utf8');
+    expect((src.match(/shouldStopPolling\(/g) || []).length).toBeGreaterThanOrEqual(2, '메인·상세 두 루프');
+    expect(src).not.toMatch(/if \(!Object\.keys\(patch\)\.length\) \{ onClose\(\); return; \}/, '바뀐 것이 없다고 아무 말 없이 닫지 않는다');
+    expect(src).toMatch(/settingsIssues\(form/);
+  });
+  it('D-07 다시 읽기 실패는 직전 값 위에 한 줄로 말한다', async () => {
+    const { heatReloadNote } = await import('./xferSpeedText.js');
+    expect(heatReloadNote(null)).toBe('');
+    expect(heatReloadNote(new Error('HTTP 500'))).toMatch(/다시 읽지 못했습니다 — 직전에 받은 값.*HTTP 500/);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'XferSpeedTool.jsx'), 'utf8');
+    expect(src).toMatch(/reloadNote=\{heatReloadNote\(heatErr\)\}/);
+  });
+  it('B-09 시계 어긋남 사유·놓침 사유 문구', async () => {
+    const { REASON_TEXT: R, MISSED_TEXT: M } = await import('./xferSpeedText.js');
+    expect(R['clock-skew']).toMatch(/지금보다 앞서/);
+    expect(M.clock).toMatch(/시계/);
   });
 });

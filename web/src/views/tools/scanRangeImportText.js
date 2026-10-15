@@ -158,32 +158,94 @@ export function partialIgnoreText(row, sources) {
 // ---- v2.692: ② 에이전트별 대역·보고 현황(두 표를 합친 것) -----------------------------------------
 /** 보고가 이보다 오래되면 '보고 늦음'(예전 보고 현황 표와 같은 90분). */
 export const REPORT_STALE_MS = 90 * 60_000;
-export const REPORT_STATE_TEXT = { ok: '정상', late: '보고 늦음', off: '꺼짐', waiting: '대기', none: '보고 없음' };
+/*
+ * v2.740(감사 F-01): 상태는 일곱이다. 예전에는 `at` 이 90분 안이면 무조건 'ok' 라, 이 포탈 행은 폴러 lastRun 이
+ *   실패(`{at, error, incomplete, code}`)·건너뜀(`{at, skipped}`)이어도 매 주기 초록 '정상' 이었고, 엣지 행은
+ *   `reports[name].incomplete`(v2.733 C1-02 recordAgentIncomplete)를 읽지 않아 계속 시한에 걸리는 엣지가 마지막 완료 뒤
+ *   90분 동안 '정상', 그 뒤엔 사유 없이 '보고 늦음' 이었다. 미완료 스캔은 해제(down) 판정을 보류시키는 실제 상태다 —
+ *   '정상' 으로 칠하면 '미확인 해제' 로 가는 중인 에이전트를 화면이 초록으로 말한다.
+ *   ⚠ 상태를 늘리면 TEXT·TITLE·TONE 세 표와 reportKpis 칸을 함께(테스트가 1:1·항등식을 고정한다).
+ */
+export const REPORT_STATE_TEXT = { ok: '정상', late: '보고 늦음', fail: '미완료', skip: '건너뜀', off: '꺼짐', waiting: '대기', none: '보고 없음' };
 export const REPORT_STATE_TITLE = {
-  ok: '마지막 보고가 90분 안입니다.',
+  ok: '마지막 보고가 90분 안이고, 그 뒤에 끝나지 못한 스캔이 없습니다.',
   late: '마지막 보고가 90분을 넘었습니다 — 그 에이전트(엣지)의 상태·로그를 확인하세요.',
+  fail: '마지막 스캔이 끝나지 못했습니다(시한 초과·실패) — 해제(down) 판정은 완료된 스캔이 올 때까지 보류됩니다. 대역 크기·시한·동시성과 그 에이전트의 스캔 로그를 확인하세요.',
+  skip: '마지막 주기가 스캔하지 않고 건너뛰었습니다 — 건너뛴 주기는 보고로 세지 않습니다(마지막 보고는 그 전 완료 시각입니다).',
   off: '주기 스캔이 꺼져 있어 보고가 없는 것이 정상입니다.',
   waiting: '아직 보고가 없습니다 — 엣지가 설정을 읽어 가 첫 스캔을 마치면 채워집니다(대역이 없으면 스캔하지 않습니다).',
   none: '보고 기록이 없습니다.',
 };
+/** 상태 → 배지 톤. 초록은 'ok' 하나뿐이다(확인 못 한 것·실패를 초록으로 칠하지 않는다). */
+export const REPORT_STATE_TONE = { ok: 'green', late: 'amber', fail: 'red', skip: 'gray', off: 'gray', waiting: 'gray', none: 'gray' };
+
+const posTs = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
 
 /**
  * 에이전트 한 곳의 보고 상태. 꺼짐·대기를 '늦음' 으로 세지 않는다(기다리면 되거나 의도된 상태다).
- * @param {{enabled:boolean, at:number|null, ranges:number}} a
+ * 판정 순서: 꺼짐 → 미완료(마지막 완료보다 같거나 늦은 실패 — 서버 scanStore completionOf 와 같은 규칙)
+ *   → 건너뜀(마지막 완료보다 늦은 건너뜀) → 예전 판정(보고 없음·대기 / 늦음 / 정상).
+ * @param {{enabled:boolean, at:number|null, ranges:number, failAt?:number|null, skipAt?:number|null}} a
  */
-export function reportState({ enabled, at, ranges }, now = Date.now()) {
+export function reportState({ enabled, at, ranges, failAt = null, skipAt = null }, now = Date.now()) {
   if (enabled === false) return 'off';
-  if (at == null || !Number.isFinite(at) || at <= 0) return ranges > 0 ? 'waiting' : 'none';
-  return now - at > REPORT_STALE_MS ? 'late' : 'ok';
+  const a = posTs(at); const f = posTs(failAt); const s = posTs(skipAt);
+  if (f != null && (a == null || f >= a)) return 'fail';
+  if (s != null && (a == null || s > a)) return 'skip';
+  if (a == null) return ranges > 0 ? 'waiting' : 'none';
+  return now - a > REPORT_STALE_MS ? 'late' : 'ok';
+}
+
+const FAIL_CODE_TEXT = { SCAN_DEADLINE: '시한 초과', error: '스캔 실패' };
+const failCodeText = (code) => FAIL_CODE_TEXT[code] || (code ? String(code) : '스캔 실패');
+
+/** 표의 상태 칸 아래 짧은 표지(긴 설명은 title — v2.509 규약). 해당 없으면 null. */
+export function reportStateNote(x) {
+  if (!x) return null;
+  if (x.state === 'fail') {
+    const streak = posTs(x.fail?.streak);
+    return `${failCodeText(x.fail?.code)}${streak && streak > 1 ? ` · 연속 ${streak}회` : ''}`;
+  }
+  if (x.state === 'skip') return x.skipReason ? `건너뜀: ${x.skipReason}` : '건너뜀';
+  return null;
+}
+
+/** 상태 칸 title 용 상세 — 상태 설명 + (미완료) 사유·진행·시각 / (건너뜀) 사유. */
+export function reportStateDetail(x) {
+  if (!x) return '';
+  const head = REPORT_STATE_TITLE[x.state] || '';
+  if (x.state === 'fail') {
+    const f = x.fail || {};
+    const bits = [failCodeText(f.code)];
+    const streak = posTs(f.streak);
+    if (streak) bits.push(`연속 ${streak}회`);
+    const done = f.done; const total = f.total;
+    if (done != null && total != null && Number.isFinite(Number(done)) && Number.isFinite(Number(total))) bits.push(`${Number(done).toLocaleString()}/${Number(total).toLocaleString()} 스캔`);
+    if (f.reason) bits.push(String(f.reason).slice(0, 200));
+    return `${head} (${bits.join(' · ')})`;
+  }
+  if (x.state === 'skip' && x.skipReason) return `${head} (사유: ${x.skipReason})`;
+  return head;
+}
+
+/** 서버 incomplete 기록(엣지 보고 · 이 포탈 recordAgentIncomplete) → 행의 실패 정보. 모양이 틀리면 null. */
+function failOf(inc) {
+  if (!inc || typeof inc !== 'object') return null;
+  const at = posTs(inc.at);
+  if (at == null) return null;
+  return { at, code: typeof inc.code === 'string' ? inc.code : '', reason: typeof inc.reason === 'string' ? inc.reason : '',
+    streak: posTs(inc.streak), done: inc.done ?? null, total: inc.total ?? null };
 }
 
 /**
  * ① 표 응답(rows·agents) + 보고 기록 → 에이전트별 한 행. 이 포탈(__local__)의 보고는 폴러 lastRun 으로 본다(엣지 보고 기록에 없다).
- * @returns {Array<{name, enabled, datacenterName, lines, invalid, ips, at, scanned, alive, state}>}
+ * v2.740(F-01): `at` 은 **마지막 완료** 시각이다 — 실패·건너뜀 시도 시각으로 덮지 않는다(그러면 실패가 '방금 보고' 로 보인다).
+ *   실패는 `failAt`·`fail`, 건너뜀은 `skipAt`·`skipReason` 으로 따로 싣고 상태 판정이 그것을 본다.
+ * @returns {Array<{name, enabled, datacenterName, lines, invalid, ips, at, scanned, alive, failAt, fail, skipAt, skipReason, state}>}
  */
 export function agentReportRows({ agents = [], rows = [], reports = {}, localLast = null, now = Date.now() } = {}) {
   const by = new Map();
-  const get = (name) => { const k = String(name).toLowerCase(); if (!by.has(k)) by.set(k, { name, enabled: true, datacenterName: '', lines: 0, invalid: 0, ips: 0, at: null, scanned: null, alive: null }); return by.get(k); };
+  const get = (name) => { const k = String(name).toLowerCase(); if (!by.has(k)) by.set(k, { name, enabled: true, datacenterName: '', lines: 0, invalid: 0, ips: 0, at: null, scanned: null, alive: null, failAt: null, fail: null, skipAt: null, skipReason: '' }); return by.get(k); };
   for (const a of agents) if (a?.name) get(a.name).enabled = a.enabled !== false;
   for (const r of rows) {
     if (!r?.agent) continue;
@@ -192,21 +254,41 @@ export function agentReportRows({ agents = [], rows = [], reports = {}, localLas
     if (r.datacenterName && !x.datacenterName) x.datacenterName = r.datacenterName;
   }
   for (const [name, rep] of Object.entries(reports || {})) {
-    if (!rep) continue;
+    if (!rep || typeof rep !== 'object') continue;
     const x = get(name);
-    x.at = Number.isFinite(rep.at) ? rep.at : null; x.scanned = rep.scanned ?? null; x.alive = rep.alive ?? null;
+    x.at = posTs(rep.at); x.scanned = rep.scanned ?? null; x.alive = rep.alive ?? null;
+    const f = failOf(rep.incomplete);
+    if (f) { x.fail = f; x.failAt = f.at; }
   }
-  if (localLast && Number.isFinite(localLast.at)) { const x = get('__local__'); if (!x.at || localLast.at > x.at) { x.at = localLast.at; x.scanned = localLast.scanned ?? null; x.alive = localLast.alive ?? null; } }
-  return [...by.values()].map((x) => ({ ...x, state: reportState({ enabled: x.enabled, at: x.at, ranges: x.lines }, now) }))
+  if (localLast && posTs(localLast.at) != null) {
+    const x = get('__local__');
+    const t = posTs(localLast.at);
+    if (localLast.error || localLast.incomplete) {
+      // 실패한 실행 — 완료 시각·응답 수는 그대로 둔다(부분 결과 partialAlive 는 응답 수가 아니다). 연속 횟수는 서버 기록에서.
+      if (x.failAt == null || t >= x.failAt) {
+        x.fail = { at: t, code: typeof localLast.code === 'string' ? localLast.code : (x.fail?.code || ''),
+          reason: typeof localLast.error === 'string' ? localLast.error : (x.fail?.reason || ''),
+          streak: x.fail?.streak ?? null, done: localLast.done ?? x.fail?.done ?? null, total: localLast.total ?? x.fail?.total ?? null };
+        x.failAt = t;
+      }
+    } else if (localLast.skipped) {
+      if (x.skipAt == null || t >= x.skipAt) { x.skipAt = t; x.skipReason = String(localLast.skipped).slice(0, 80); }
+    } else if (!x.at || t > x.at) { x.at = t; x.scanned = localLast.scanned ?? null; x.alive = localLast.alive ?? null; }
+  }
+  return [...by.values()].map((x) => ({ ...x, state: reportState({ enabled: x.enabled, at: x.at, ranges: x.lines, failAt: x.failAt, skipAt: x.skipAt }, now) }))
     .sort((a, b) => (a.name === '__local__' ? -1 : b.name === '__local__' ? 1 : String(a.name).localeCompare(String(b.name))));
 }
 
-/** KPI — 겹치지 않는 칸(정상·늦음·꺼짐·대기/없음) + 응답 IP 합(모르는 값은 더하지 않는다). */
+/**
+ * KPI — 겹치지 않는 칸: 합계 = 정상 + 늦음 + 미완료 + 꺼짐 + 대기(대기·건너뜀·보고 없음). `skip` 은 대기 칸 안의 부분 개수다.
+ * 응답 IP 합은 완료 보고만 더한다(모르는 값은 더하지 않는다).
+ */
 export function reportKpis(list) {
-  const k = { total: 0, ok: 0, late: 0, off: 0, waiting: 0, alive: 0, aliveKnown: 0 };
+  const k = { total: 0, ok: 0, late: 0, fail: 0, off: 0, waiting: 0, skip: 0, alive: 0, aliveKnown: 0 };
   for (const x of list || []) {
     k.total += 1;
-    if (x.state === 'ok') k.ok += 1; else if (x.state === 'late') k.late += 1; else if (x.state === 'off') k.off += 1; else k.waiting += 1;
+    if (x.state === 'ok') k.ok += 1; else if (x.state === 'late') k.late += 1; else if (x.state === 'fail') k.fail += 1; else if (x.state === 'off') k.off += 1;
+    else { k.waiting += 1; if (x.state === 'skip') k.skip += 1; }
     if (x.alive != null && Number.isFinite(Number(x.alive))) { k.alive += Number(x.alive); k.aliveKnown += 1; }
   }
   return k;

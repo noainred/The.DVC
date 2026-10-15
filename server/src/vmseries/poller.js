@@ -11,7 +11,11 @@
  *  - site 위임·mock vCenter 는 건너뛴다(중앙은 직접 SOAP 불가 — 엣지가 push).
  *  - 디스크 여유 가드(VMSERIES_MIN_FREE_GB 기본 5): 부족하면 이번 주기 저장을 건너뛰고 상태에 남긴다 —
  *    포탈 디스크를 채워 다른 DB(ipam·metrics)까지 죽이지 않는다.
- *  - prune 스로틀: `(++tick % N) === 0` — 기동 첫 틱을 피한다(v2.453 규칙).
+ *  - 보존 정리(v2.740 감사 F-07)는 **수집과 분리**한다 — 타이머 틱마다(꺼짐·디스크 가드·수집 실패와 무관) 마지막 정리 뒤 10시간이
+ *    지났으면 백그라운드로 돈다. 기동 첫 틱은 피한다(v2.453 규칙 — 보존일을 줄이고 재시작한 직후 첫 틱이 그 차액을 한 번에 지우지 않게).
+ *    보존일을 줄인 저장 직후에는 한 번 곧바로 돈다(noteVmSeriesRetentionChange — 설정 라우트·엣지 설정 pull 공용).
+ *    예전에는 수집을 끝까지 돈 실행 12번에 1번뿐이라 디스크 여유 부족(가드가 수집 전에 return)·꺼짐·10시간보다 잦은 재시작에서
+ *    영영 돌지 않았다 — 화면은 '보존일을 줄이세요' 라고 하는데 줄여도 공간이 비지 않았다.
  *
  * 정직 규약: 한 주기 실패 = 그 vCenter 의 그 구간은 **영구 소실**이다(ESXi 버퍼 60분). 상태 API 가
  * 실패 목록을 그대로 내보내고, 화면의 커버리지가 그 구멍을 '스파이크 0' 이 아니라 '미측정' 으로 그린다.
@@ -39,18 +43,86 @@ import { packMoments } from './spikes.js';
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
 // v2.589: 빈 값·'abc' 가 Number() 로 0·NaN 이 되어 디스크 가드가 꺼졌다 — 못 읽으면 기본 5GB(명시적 0 만 '끔').
 const MIN_FREE_BYTES = Math.max(0, numOrNull(process.env.VMSERIES_MIN_FREE_GB) ?? 5) * 1024 ** 3;
-const PRUNE_EVERY_RUNS = 12;                 // 50분 × 12 ≈ 10시간
+const PRUNE_EVERY_MS = 10 * 3_600_000;       // 보존 정리 간격(예전 '50분 주기 × 12회' 와 같은 10시간 — 이제 시각 기준)
 const FIRST_DELAY_MS = Number(process.env.VMSERIES_FIRST_DELAY_MS) || 180_000; // 첫 인벤토리 수집이 자리잡은 뒤
 
 let running = false;
-let tick = 0;
+let pruneTicks = 0;        // 시간 기준 정리의 타이머 틱 수 — 첫 틱(기동 직후)은 정리하지 않는다
+let lastPruneAt = 0;       // 마지막 정리를 **끝낸** 시각(메모리 — 재시작하면 첫 틱 다음 틱에 다시 돈다)
+let pruneFlight = null;    // 진행 중인 전체 정리(겹치지 않게 공유)
+let pruneAgain = null;     // 진행 중에 보존일이 줄었다 — 끝난 뒤 새 보존일로 한 번 더(사유)
+let pruneFlightDays = null; // 진행 중인 정리가 쓰는 보존일
+let lastPrune = null;      // { at, reason, days, files, deleted, errors, ms }
 let lastResult = null;   // { at, trigger, vcenters, vms, hosts, samples, moments, spikeRows, errors, skipped, ms, paused }
 let lastRunTs = 0;
 let timer = null;
 
 export function vmSeriesPollerStatus() {
   const s = loadVmSeriesSettings();
-  return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES };
+  return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES,
+    lastPrune, pruning: !!pruneFlight, pruneEveryMs: PRUNE_EVERY_MS };
+}
+
+/**
+ * 보존 정리 1회 — 이 노드의 스파이크 DB 파일 전부(엣지 push 로 받은 site vCenter 파일 포함). 진행 중이면 그 약속을 공유한다
+ * (파일별 진행 공유는 pruneVmSeries 의 createPruneFlight 가 하고, 여기서는 '전체 한 바퀴' 가 겹치지 않게 한다). 던지지 않는다.
+ * 보존일 0 = 무제한이라 아무것도 지우지 않는다. 진행 중에 보존일을 줄인 요청(retention-changed)이 오면 공유만 하지 않고 끝난 뒤
+ * 한 번 더 돈다 — 공유만 하면 새 보존일이 다음 정리(10시간 뒤)까지 집행되지 않는다(chunkedPrune createPruneFlight 와 같은 규칙).
+ */
+export function runVmSeriesPrune(reason = 'manual') {
+  if (pruneFlight) {
+    if (reason === 'retention-changed' && loadVmSeriesSettings().retentionDays !== pruneFlightDays) pruneAgain = reason;
+    return pruneFlight;
+  }
+  const started = Date.now();
+  const days = loadVmSeriesSettings().retentionDays;
+  pruneFlightDays = days;
+  pruneFlight = (async () => {
+    let deleted = 0; let files = 0; const errors = [];
+    if (days > 0) {
+      for (const u of vmSeriesDiskUsage()) {
+        files += 1;
+        try { deleted += (await pruneVmSeries(u.vcenterId, days)) || 0; }
+        catch (e) { errors.push({ vcenterId: u.vcenterId, error: String(e?.message || e).slice(0, 200) }); }
+      }
+    }
+    lastPruneAt = Date.now();
+    lastPrune = { at: lastPruneAt, reason, days, files, deleted, errors, ms: lastPruneAt - started };
+    if (deleted > 0 || errors.length) console.log(`[vmseries] 보존 정리(${reason}) — 보존 ${days}일 · 파일 ${files}개 · 삭제 ${deleted}행${errors.length ? ` · 실패 ${errors.length}` : ''}`);
+    return lastPrune;
+  })().catch((e) => {
+    lastPrune = { at: Date.now(), reason, error: String(e?.message || e).slice(0, 200) };
+    console.warn(`[vmseries] 보존 정리 실패(${reason}): ${lastPrune.error}`);
+    return lastPrune;
+  }).finally(() => {
+    pruneFlight = null;
+    if (pruneAgain) { const r = pruneAgain; pruneAgain = null; runVmSeriesPrune(r); }
+  });
+  return pruneFlight;
+}
+
+/**
+ * 타이머 틱의 시간 기준 정리(수집 꺼짐·디스크 가드·수집 실패와 무관). 정리를 시작했으면 그 약속, 아니면 null.
+ * 기동 첫 틱은 건너뛴다(v2.453) · 진행 중이면 null(겹치지 않는다) · 마지막 정리 뒤 PRUNE_EVERY_MS 가 지났거나 이번 기동에서 한 번도
+ * 정리하지 않았으면 시작한다.
+ */
+export function vmSeriesScheduledPrune(now = Date.now()) {
+  pruneTicks += 1;
+  if (pruneTicks === 1 || pruneFlight) return null;
+  if (lastPruneAt && now - lastPruneAt < PRUNE_EVERY_MS) return null;
+  return runVmSeriesPrune('schedule');
+}
+
+/**
+ * 보존일이 줄었으면(또는 무제한 → 제한) 곧바로 한 번 정리한다 — 설정 라우트가 저장 뒤 부르고, 그 밖의 저장(엣지 설정 pull 등)은
+ * startVmSeriesPoller 가 건 설정 리스너가 부른다. 둘이 겹쳐도 같은 정리를 공유한다(보존일이 같으면 다시 돌지 않는다).
+ * 기다리지 않는 백그라운드 작업이다(청크 + 양보). 정리가 돌거나 돌 예정이면 그 약속, 아니면 null.
+ */
+export function noteVmSeriesRetentionChange(prevDays, nextDays) {
+  const p = numOrNull(prevDays); const n = numOrNull(nextDays);
+  if (n == null || n <= 0) return null;
+  if (p != null && p > 0 && n >= p) return null;
+  return runVmSeriesPrune('retention-changed');
 }
 
 // v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
@@ -170,10 +242,7 @@ export async function runVmSeriesNow(trigger = 'manual') {
       if (r.value.skipped) { skipped.push({ vcenterId: vc.id, why: r.value.skipped }); return; }
       vms += r.value.vms; hosts += r.value.hosts; samples += r.value.samples; moments += r.value.moments; spikeRows += r.value.spikeRows;
     });
-    // prune — 기동 첫 틱을 피한다. push 로 받는 site vCenter 파일까지 전부(usage 기준) 정리한다.
-    if ((++tick % PRUNE_EVERY_RUNS) === 0 && settings.retentionDays > 0) {
-      for (const u of vmSeriesDiskUsage()) { try { await pruneVmSeries(u.vcenterId, settings.retentionDays); } catch { /* */ } }
-    }
+    // 보존 정리는 여기서 하지 않는다(v2.740 F-07) — 타이머 틱의 vmSeriesScheduledPrune 이 수집과 무관하게 돈다.
     lastRunTs = Date.now();
     lastResult = { at: lastRunTs, trigger, vcenters: vcs.length - skipped.filter((s) => s.why === 'no-targets').length, vms, hosts, samples, moments, spikeRows, errors, skipped, per, ms: Date.now() - started, freeBytes: free };
     return { ok: errors.length === 0, ...lastResult };
@@ -186,7 +255,14 @@ export async function runVmSeriesNow(trigger = 'manual') {
 export function startVmSeriesPoller() {
   if (timer) return;
   const getMs = () => Math.max(60_000, loadVmSeriesSettings().intervalMin * 60_000);
+  // v2.740(F-07): 보존일이 줄어든 저장(엣지 설정 pull 포함)을 곧바로 집행한다 — 라우트도 직접 부르지만 정리는 공유된다.
+  let knownRetention = loadVmSeriesSettings().retentionDays;
+  onVmSeriesSettingsChange((eff) => {
+    const prev = knownRetention; knownRetention = eff?.retentionDays;
+    noteVmSeriesRetentionChange(prev, knownRetention);
+  });
   timer = startAdaptiveTimer(getMs, async () => {
+    vmSeriesScheduledPrune();                    // 보존 정리 — 꺼짐·디스크 가드·재진입과 무관(기다리지 않는다)
     if (running) return;                         // 재진입 가드
     if (!demoOn(loadVmSeriesSettings().enabled)) return; // opt-in — 꺼져 있으면 틱만 돈다(데모는 켜진 것처럼 — v2.708)
     try { await runVmSeriesNow('auto'); } catch (e) { console.warn(`[vmseries] 폴러 틱 오류: ${e.message}`); }

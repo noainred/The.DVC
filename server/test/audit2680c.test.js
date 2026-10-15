@@ -94,8 +94,9 @@ test('② A-05 CVP PSU 일부만 읽음 → partial, 빈 슬롯은 PSU 아님', 
   const absent = cvpDevicePower({ partsList: [{ kind: 'psu', power: { inW: 400 } }, { kind: 'psu', state: 'absent' }] });
   assert.equal(absent.psus, 1); assert.equal(absent.partial, undefined, '빈 슬롯은 못 읽은 PSU 가 아니다');
   const r = buildPowerTotal({ now: NOW, network: [
-    { cvpId: 'c', key: 'a', hostname: 'sw-half', partsAt: NOW, partsList: [{ kind: 'psu', power: { inW: 400 } }, { kind: 'psu', power: {} }] },
-    { cvpId: 'c', key: 'b', hostname: 'sw-full', partsAt: NOW, partsList: [{ kind: 'psu', power: { inW: 300 } }] },
+    // v2.740(F-03): 네트워크는 CVP 전력 탭과 같은 판정 — DB 행처럼 collectedAt 이 있어야 '지금 값' 이다(없으면 never).
+    { cvpId: 'c', key: 'a', hostname: 'sw-half', collectedAt: NOW, partsAt: NOW, partsList: [{ kind: 'psu', power: { inW: 400 } }, { kind: 'psu', power: {} }] },
+    { cvpId: 'c', key: 'b', hostname: 'sw-full', collectedAt: NOW, partsAt: NOW, partsList: [{ kind: 'psu', power: { inW: 300 } }] },
   ] });
   assert.equal(r.network.measured, 1, '일부만 읽은 장비는 측정으로 세지 않는다');
   assert.equal(r.network.partial, 1);

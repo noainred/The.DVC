@@ -28,6 +28,8 @@ export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 let _currentUser = null;
 export const setCurrentUser = (u) => { _currentUser = (u && typeof u === 'object') ? u : null; };
 export const getCurrentUser = () => _currentUser;
+/** v2.740: 이 사용자가 슈퍼 관리자인가 — **표시 게이팅**(서버 `requireSuperAdmin` 이 집행한다). 모르면 false. */
+export const isSuperAdminUser = () => _currentUser?.superAdmin === true;
 /**
  * 현재 사용자의 역할이 주어진 것 중 하나인가(v2.613 WEB2613-01).
  *

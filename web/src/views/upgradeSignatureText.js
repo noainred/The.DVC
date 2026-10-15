@@ -50,11 +50,15 @@ export function trustText(sig) {
   if (n == null) return { text: '—', tone: 'muted' };
   const rv = numOrNull(sig.revokedKeys);
   const revoked = rv > 0 ? ` · 회수 ${rv}개` : '';
+  // v2.740(감사 B-05): 키 파일 형식 오류(서버가 버린 항목)를 말한다 — 유효 키가 0개인 이유가 '설정 안 됨' 이 아니라 형식 오류일 수 있다
+  //   (서버는 이제 그 상태를 서명 필수로 본다). 첫 오류만 싣는다(서버가 최대 5건을 보낸다).
+  const errs = Array.isArray(sig.errors) ? sig.errors.filter((e) => typeof e === 'string' && e) : [];
+  const errText = errs.length ? ` · 키 파일 형식 오류 ${errs.length}건(${errs[0].slice(0, 160)})` : '';
   if (n === 0) {
     const tail = sig.policy === 'warn' ? '확인하지 못한 채 경고만 남깁니다' : '어떤 번들도 설치하지 않습니다';
-    return { text: `0개${revoked} — 서명을 확인할 수 없어 ${tail}`, tone: sig.policy === 'warn' ? 'warn' : 'bad' };
+    return { text: `0개${revoked}${errText} — 서명을 확인할 수 없어 ${tail}`, tone: sig.policy === 'warn' ? 'warn' : 'bad' };
   }
-  return { text: `${n}개${revoked}`, tone: 'ok' };
+  return { text: `${n}개${revoked}${errText}`, tone: errs.length ? 'warn' : 'ok' };
 }
 
 /**

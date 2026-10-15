@@ -125,7 +125,9 @@ describe('종류 칩·필터', () => {
     expect(incidentRespFor(r, { days: 7, kind: 'disk' })).toBe(null);
     expect(incidentRespFor(r, { days: 30, kind: '' })).toBe(null);
     expect(incidentRespFor({ days: 0, kind: null }, { days: 0, kind: '' })).toEqual({ days: 0, kind: null });
-    expect(incidentRespFor({ error: 'x' }, { days: 30 })).toEqual({ error: 'x' });
+    // v2.740 D-06: 오류도 선택과 대조한다(화면 catch 가 days·kind 를 싣는다) — 예전 단언은 '오류는 대조 없이 통과' 였다(의도한 변경).
+    expect(incidentRespFor({ error: 'x', days: 30, kind: '' }, { days: 30 })).toEqual({ error: 'x', days: 30, kind: '' });
+    expect(incidentRespFor({ error: 'x', days: 7, kind: '' }, { days: 30 })).toBe(null);
   });
 });
 

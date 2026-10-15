@@ -196,7 +196,11 @@ function prepare(db) {
     events: db.prepare('SELECT * FROM part_event WHERE at>=? ORDER BY at DESC LIMIT ?'),
     eventsOfPart: db.prepare('SELECT * FROM part_event WHERE agent=? AND part_key=? ORDER BY at DESC LIMIT ?'),
     prune: db.prepare('DELETE FROM part_event WHERE at < ?'),
-    stats: db.prepare('SELECT COUNT(*) AS rows, MIN(at) AS mn, MAX(at) AS mx FROM part_event'),
+    // v2.740(감사 E-11): COUNT·MIN·MAX 를 한 문장에 두면 인덱스를 통째로 훑는다(v2.550.3 — 100만 행 61~77ms). MIN·MAX 는 단독 문장,
+    //   행 수는 짧게 기억한다(아래 eventRowsCached — 적재·정리 때 버린다).
+    evCount: db.prepare('SELECT COUNT(*) AS n FROM part_event'),
+    evMinAt: db.prepare('SELECT MIN(at) AS v FROM part_event'),
+    evMaxAt: db.prepare('SELECT MAX(at) AS v FROM part_event'),
     stateStats: db.prepare('SELECT COUNT(*) AS n FROM part_state'),
     metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
     // v2.734 장애별·종류별 보기 — 기간 이벤트를 최신부터 조각으로 읽는다. (at, id) 행 값 비교는 ix_event_at 범위 탐색 그대로다
@@ -252,15 +256,27 @@ export async function resetInfo() {
   return h ? readReset(h) : null;
 }
 
+/** 이벤트 행 수 기억 시간 — 진단·참고값이라 초 단위로 정확할 이유가 없다(v2.550.3). 캐시임을 숨기지 않는다(`rowsAt`). */
+export const EVENT_COUNT_TTL_MS = 60_000;
+let _evCount = null;   // { n, at }
+function eventRowsCached(h, now = Date.now()) {
+  if (_evCount && now - _evCount.at < EVENT_COUNT_TTL_MS && now >= _evCount.at) return _evCount;
+  _evCount = { n: h.st.evCount.get()?.n ?? null, at: now };
+  return _evCount;
+}
+
 export async function partFaultDbStatus() {
   const h = await open();
+  const c = h ? eventRowsCached(h) : null;
   return {
     available: !!h, path: h ? h.path : DB_PATH(), retentionDays: retention().days, retentionSource: retention().source,
     schemaVersion: h ? h.schemaVersion : null,
     reset: h ? readReset(h) : null,
     error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
     openParts: h ? (h.st.stateStats.get()?.n ?? null) : null,
-    ...(h ? h.st.stats.get() : { rows: null, mn: null, mx: null }),
+    rows: c ? c.n : null, rowsAt: c ? c.at : null,
+    mn: h ? (h.st.evMinAt.get()?.v ?? null) : null,
+    mx: h ? (h.st.evMaxAt.get()?.v ?? null) : null,
   };
 }
 
@@ -334,6 +350,7 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
     return { saved: false, opened: 0, closed: 0, changed: 0, reason: String(e.message || e).slice(0, 200) };
   }
+  _evCount = null;   // 행 수가 바뀌었다 — 방금 넣은 값이 안 보이면 '저장이 안 됐나' 로 읽힌다(v2.550.3)
   // prune 스로틀 — `(++tick % N) === 0`(v2.453 규칙: 기동 첫 틱에 즉시 참이 되면 안 된다).
   if ((++_pruneTick % 20) === 0) {
     const { days } = retention();
@@ -445,5 +462,5 @@ export async function incidentMarks() {
 export function _resetForTest() {
   lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; _pruneTick = 0;
+  x = null; ready = null; initError = null; _pruneTick = 0; _evCount = null;
 }

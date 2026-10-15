@@ -26,6 +26,8 @@ export const DETACH_BASE = '/tmp/dvc-isidu';
 export const JOB_RE = /^[A-Za-z0-9_-]{1,80}$/;
 export const POLL_MIN_MS = 3_000;
 export const POLL_MAX_MS = 15_000;
+/** v2.740 A-03: 상태 출력을 연속으로 못 읽으면 실패로 끊는 횟수. */
+export const UNKNOWN_MAX = 3;
 
 /** 작은따옴표 인용(POSIX). */
 export const shq = (s) => `'${String(s).replace(/'/g, `'"'"'`)}'`;
@@ -129,12 +131,21 @@ export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = nul
   }
   let delay = pollMinMs;
   let rc = null;
+  let unknownRun = 0;
   try {
     for (;;) {
       const st = parseStatus((await api.exec(statusCommand(jobId), 20_000)).stdout);
       if (st.state === 'done') { rc = st.rc; break; }
       if (st.state === 'gone') throw new Error('장비에서 du 작업이 결과 없이 끝났습니다(장비 재시작·강제 종료 가능성)');
       if (st.state === 'none') throw new Error('장비에서 du 작업 파일을 찾지 못했습니다(/tmp 정리 가능성)');
+      // v2.740 A-03: 상태 명령은 표지 넷 중 하나를 반드시 찍는다 — 연속으로 못 읽으면 셸·출력이 깨진 것이다.
+      // 예전에는 시한(최대 3시간)까지 '진행 중' 으로 매달렸다. 장비의 작업은 멈추고 원문을 사유로 남긴다.
+      if (st.state === 'unknown') {
+        if (++unknownRun >= UNKNOWN_MAX) {
+          await api.exec(killCommand(jobId), 20_000).catch(() => {});
+          throw new Error(`du 작업 상태를 ${UNKNOWN_MAX}번 연속 읽지 못했습니다 — 장비의 du 작업을 멈췄습니다(상태 출력: ${st.raw || '빈 출력'})`);
+        }
+      } else unknownRun = 0;
       if (now() + delay > deadline) {
         await api.exec(killCommand(jobId), 20_000).catch(() => {});
         throw new Error(`du 시한 초과(${Math.round((deadline - started) / 60_000)}분) — 장비의 du 작업을 멈췄습니다`);

@@ -63,25 +63,32 @@ describe('서버 계약 대조', () => {
     const p = src('isidu/poller.js');
     expect(p).toMatch(/const wait = last\.ok \? iv : Math\.min\(iv, FAIL_RETRY_MS\);/);
   });
-  it('Top 10 순서 = 서버 parse.sortBySize(크기 내림차순 → 이름 localeCompare)', () => {
-    expect(src('isidu/parse.js')).toMatch(/\(b\.bytes - a\.bytes\) \|\| String\(a\.name\)\.localeCompare\(String\(b\.name\)\)/);
+  it('Top 10 순서 = 서버 parse.sortBySize(크기 내림차순 → 이름 순 — 인자 없는 Intl.Collator = 인자 없는 localeCompare 와 같은 순서)', () => {
+    // v2.740 E-03: 서버가 성능 때문에 localeCompare 를 재사용 Collator 로 바꿨다(인자 없는 생성 — 같은 순서). 웹 crossTop 은 localeCompare 그대로다.
+    const p = src('isidu/parse.js');
+    expect(p).toMatch(/sort\(bySizeThenName\)/);
+    expect(p).toMatch(/const NAME_COLLATOR = new Intl\.Collator\(\);/);
+    expect(p).toMatch(/\(b\.bytes - a\.bytes\) \|\| NAME_COLLATOR\.compare\(String\(a\.name\), String\(b\.name\)\)/);
   });
 });
 
 describe('서브메뉴 주소', () => {
-  it('네 페이지 + 대상 화면 · 모르는 조각은 서머리', () => {
-    expect(SUBVIEW_KEYS).toEqual(['summary', 'corps', 'status', 'top10']);
-    expect(viewOfSegs(['tools', 'isilon-dirusage'])).toEqual({ view: 'summary', targetId: '' });
+  // v2.740(사용자 요청): 서머리 탭을 없애고 법인 현황 → 전 법인 Top 10 → 수집 상태 순서. 첫 화면·모르는 조각·옛 서머리 주소는 법인 현황.
+  it('세 페이지(법인 현황·Top 10·수집 상태 순서) + 대상 화면 · 모르는 조각과 옛 서머리 주소는 법인 현황', () => {
+    expect(SUBVIEW_KEYS).toEqual(['corps', 'top10', 'status']);
+    expect(viewOfSegs(['tools', 'isilon-dirusage'])).toEqual({ view: 'corps', targetId: '' });
     expect(viewOfSegs(['tools', 'isilon-dirusage', 'status'])).toEqual({ view: 'status', targetId: '' });
-    expect(viewOfSegs(['tools', 'isilon-dirusage', 'nope'])).toEqual({ view: 'summary', targetId: '' });
+    expect(viewOfSegs(['tools', 'isilon-dirusage', 'nope'])).toEqual({ view: 'corps', targetId: '' });
+    expect(viewOfSegs(['tools', 'isilon-dirusage', 'summary'])).toEqual({ view: 'corps', targetId: '' });
     expect(viewOfSegs(['tools', 'isilon-dirusage', 't', 'a%2Fb'])).toEqual({ view: 'target', targetId: 'a/b' });
     expect(viewOfSegs(['tools', 'other'])).toBe(null);
   });
   it('주소 왕복', () => {
     for (const k of SUBVIEW_KEYS) expect(viewOfSegs(hashOfView(k).slice(2).split('/'))).toEqual({ view: k, targetId: '' });
     expect(hashOfView('target', 'a/b')).toBe('#/tools/isilon-dirusage/t/a%2Fb');
-    expect(hashOfView('target', '')).toBe('#/tools/isilon-dirusage/summary');
-    expect(hashOfView('엉뚱')).toBe('#/tools/isilon-dirusage/summary');
+    expect(hashOfView('target', '')).toBe('#/tools/isilon-dirusage/corps');
+    expect(hashOfView('엉뚱')).toBe('#/tools/isilon-dirusage/corps');
+    expect(hashOfView('summary')).toBe('#/tools/isilon-dirusage/corps');
   });
 });
 

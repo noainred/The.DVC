@@ -14,11 +14,12 @@ import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { readBytesCapped } from '../util/readBytesCapped.js';
-import { readJsonCapped, readTextCapped } from '../util/readCapped.js';
+import { readJsonCapped } from '../util/readCapped.js';
 // v2.730(검토 I-08·S-10): 메타데이터 형식·상한 + 배포자 서명(원격 다운로드 경로 — 여기 받은 파일은 /dl 로 엣지에 나가고 설치에 쓰인다)
 import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets, META_FETCH_TIMEOUT_MS, attemptTimeoutMs, metaTimeoutReason } from './versionsDoc.js';
 import { decideSignature, signatureSummary } from './signature.js';
-import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
+import { fetchManifestText } from './upgrade.js'; // v2.740(B-11): manifest 받기는 업그레이드 경로와 한 벌
+import { MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
 
 // v2.607 SEC2607-06: 설치 패키지 다운로드의 바이트 상한 — 예전엔 상한 자체가 없어 원격 소스(사내 미러·중간자)가
 //   거대 본문을 주면 sha256 검증 전에 전량을 메모리에 받았다. 오프라인 설치 패키지(노드 런타임 포함)는 수백 MB 라
@@ -59,20 +60,12 @@ export async function fetchRemoteVersions(baseUrl) {
   } finally { dl.clear(); }
 }
 
-/** 원격 manifest(상한 64KB·전체 시한 META_FETCH_TIMEOUT_MS — v2.736.3 전엔 30초). 404 → missing, 그 밖 실패 → reason, 상한 초과 → malformed. */
-async function fetchPackageManifest(url) {
-  const dl = deadlineSignal(META_FETCH_TIMEOUT_MS);
-  try {
-    const res = await resilientFetch(url, { dispatcher: upgradeAgent, timeoutMs: attemptTimeoutMs(META_FETCH_TIMEOUT_MS), retries: 2, signal: dl.signal });
-    if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true }; }
-    if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
-    return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
-  } catch (e) {
-    if (dl.aborted() || e?.name === 'TimeoutError') return { text: null, reason: `서명 manifest 를 시한(${Math.round(META_FETCH_TIMEOUT_MS / 1000)}초) 안에 받지 못했습니다` };
-    if (/상한/.test(String(e?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
-    return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(e?.message || e)}` };
-  } finally { dl.clear(); }
-}
+/**
+ * 원격 manifest(상한 64KB·전체 시한 META_FETCH_TIMEOUT_MS). 404 → missing, 그 밖 실패 → reason, 상한 초과 → malformed.
+ * v2.740(감사 B-11): 업그레이드 경로와 **같은 함수**(upgrade.js fetchManifestText)를 쓴다 — 예전 사본은 시한 사유를 자기 문구로 만들어
+ *   '헤더를 기다리다 / 본문을 받다가' 와 시도 횟수를 말하지 않았다(v2.736.3 은 그 사유를 metaTimeoutReason 하나로 맞췄다고 기록했다).
+ */
+const fetchPackageManifest = (url) => fetchManifestText(url);
 
 export function listLocalPackages(dir = getPackageDir()) {
   try {

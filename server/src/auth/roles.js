@@ -29,3 +29,14 @@ export function authzRole(role) { return role === SUPER_ADMIN ? 'admin' : role; 
 
 /** 사용자(요청 문맥 req.user 또는 저장 레코드)가 super_admin 인가. */
 export function isSuperAdmin(u) { return !!u && (u.superAdmin === true || u.role === SUPER_ADMIN); }
+
+/**
+ * super_admin 전용 라우트 게이트 — `req.user.superAdmin`(저장 역할 super_admin 을 접은 표지)만 통과. 역할 admin 은 403 `super-admin-only`.
+ * v2.726 메뉴 배포(userMenu.js)에 있던 것을 v2.740 아이실론 수집 대상 설정이 함께 쓰게 여기로 옮겼다(사본을 두지 않는다).
+ * `gate` 표지는 아키텍처 점검(archScan)이 라우트 게이트를 읽는 데 쓴다.
+ */
+export function requireSuperAdmin(req, res, next) {
+  if (isSuperAdmin(req.user)) return next();
+  return res.status(403).json({ error: 'forbidden', reason: 'super-admin-only', requiredRole: ['super_admin'] });   // v2.740: 배열(requireRole 과 같은 계약 — 화면 권한 안내가 읽는다)
+}
+requireSuperAdmin.gate = Object.freeze({ kind: 'superAdmin' });

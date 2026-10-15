@@ -72,7 +72,15 @@ if (!isLoopback && !passwordHash) {
 먼저 설정하세요:  node server.js --set-password <8자 이상 비밀번호>`);
   process.exit(1);
 }
-const auth = new Auth({ required: !isLoopback, passwordHash });
+// v2.740(감사 F-11): 설정 파일의 옛 sha256 해시로 로그인에 성공하면 scrypt 형식으로 바꿔 다시 저장한다.
+//   환경변수 비밀번호(UAGMON_PASSWORD)는 기동 때 새 형식으로 만들므로 다시 저장할 일이 없다(파일에 쓰지 않는다).
+//   저장이 실패해도 메모리 값은 새 형식으로 둔다(같은 비밀번호로 통한다) — 다음 저장(대상 추가 등)이 파일에 넣는다.
+const onRehash = envPw ? null : (h) => {
+  store.settings.passwordHash = h;
+  store.save();
+  console.log('접속 비밀번호 해시를 새 형식(scrypt)으로 다시 저장했습니다.');
+};
+const auth = new Auth({ required: !isLoopback, passwordHash, onRehash });
 
 /* --------------------------------- 폴러 --------------------------------- */
 // 재진입 가드 + 대상 변경 직후 재실행 예약 + 삭제된 대상 결과 버림 — lib/poller.js.
@@ -186,7 +194,7 @@ async function handle(req, res) {
   if (p === '/api/login' && req.method === 'POST') {
     const body = await readBody(req);
     if (!body) return json(res, 400, { ok: false, error: '잘못된 요청 본문' });
-    const r = auth.login(req.socket.remoteAddress || '?', String(body.password || ''));
+    const r = await auth.login(req.socket.remoteAddress || '?', String(body.password || ''));
     return json(res, r.ok ? 200 : 401, r);
   }
 

@@ -44,7 +44,7 @@ export function PartFaults() {
   // ⚠ 훅은 전부 조기 return 위에(루트 CLAUDE.md — 조기 반환 뒤 훅 추가는 React #310 크래시).
   const [data, setData] = useState(null);
   const [events, setEvents] = useState(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -64,8 +64,8 @@ export function PartFaults() {
   const load = React.useCallback(() => {
     setLoading(true);
     return fetchJson('/tools/part-faults')
-      .then((d) => { setData(d); setError(''); })
-      .catch((e) => setError(e.message))
+      .then((d) => { setData(d); setError(null); })
+      .catch((e) => setError(e))   // v2.740 D-06: 오류 객체 그대로 — 403 이면 ErrorBox 가 권한 안내를 그린다(문자열이면 일반 오류가 된다)
       .finally(() => setLoading(false));
   }, []);
 
@@ -76,7 +76,7 @@ export function PartFaults() {
     let active = true;
     fetchJson('/tools/part-faults/events', { days })
       .then((r) => { if (active) setEvents(r); })
-      .catch((e) => { if (active) setEvents({ error: e.message }); });
+      .catch((e) => { if (active) setEvents({ error: e }); });
     return () => { active = false; };
   }, [tab, days]);
 
@@ -88,7 +88,7 @@ export function PartFaults() {
     setIncOpen(null);
     fetchJson('/tools/part-faults/incidents', { days, ...(incKind ? { kind: incKind } : {}) })
       .then((r) => { if (active) setInc(r); })
-      .catch((e) => { if (active) setInc({ error: e.message, days, kind: incKind }); });
+      .catch((e) => { if (active) setInc({ error: e, days, kind: incKind }); });   // 오류도 선택과 대조한다(incidentRespFor)
     return () => { active = false; };
   }, [tab, days, incKind]);
   const incResp = incidentRespFor(inc, { days, kind: incKind });
@@ -174,7 +174,7 @@ export function PartFaults() {
   }
 
   if (loading && !data) return <Loading />;
-  if (error && !data) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox error={error} />;
 
   const poller = data?.poller;
   const db = data?.db;
@@ -182,7 +182,7 @@ export function PartFaults() {
 
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-      {error && <div className="banner warn">갱신 실패 — {error}</div>}
+      {error && <div className="banner warn">갱신 실패 — {String(error?.message || error)}</div>}
 
       {/* ① 이 목록을 믿어도 되는가 — 가장 위. */}
       <div className="card" style={{ padding: 12, borderLeft: `3px solid ${stateColor(isEdge ? (pn?.tone || 'muted') : diag.tone)}` }}>
@@ -450,7 +450,7 @@ export function PartFaults() {
           {tab === 'events' && (
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
               {!events && <Loading />}
-              {events?.error && <ErrorBox message={events.error} />}
+              {events?.error && <ErrorBox error={events.error} />}
               {events?.events && (
                 <>
                   {events.truncated && <div style={{ padding: 8, color: 'var(--amber)', fontSize: 12 }}>상한({events.limit}건)으로 잘렸습니다 — 더 이전 이력은 기간을 좁혀 보세요.</div>}

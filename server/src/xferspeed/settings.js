@@ -111,26 +111,55 @@ export function normalizeStoredSchedules(list) {
 }
 
 let _loadError = null;
+/** 마지막으로 온전히 읽은 설정(v2.740 B-12) — 일시 읽기 오류 동안 이것으로 동작한다(꺼짐으로 떨어지지 않게). */
+let _lastGood = null;
+/** 마지막 로드가 일시 읽기 오류였고 쓸 직전 값도 없었다 — 이 상태에서 저장하면 기본값 위에 덮어써 원본을 지운다(저장 거절). */
+let _unreadable = null;
+const _warned = new Map();
+function warnOnce(key, msg) {
+  const now = Date.now();
+  const prev = _warned.get(key);
+  if (prev && prev.msg === msg && now - prev.at < 10 * 60_000) return;
+  _warned.set(key, { msg, at: now });
+  console.warn(msg);
+}
 /** 마지막 로드의 손상 사유(없으면 null) — 화면이 '설정 파일을 못 읽어 기본값(꺼짐)으로 동작' 을 말한다. */
 export function xferSettingsLoadError() { loadXferSpeedSettings(); return _loadError; }
 
 export function loadXferSpeedSettings() {
+  let text;
+  try { text = fs.readFileSync(FILE(), 'utf8'); } catch (e) {
+    if (e?.code !== 'ENOENT') {
+      /*
+       * ⚠ v2.740(감사 B-12): 파일을 **못 읽은 것**(EMFILE·EACCES·EIO 같은 일시 오류)은 손상이 아니다. 예전에는 이것도 손상으로 보고
+       *   원본을 `.corrupt.*` 로 옮겨, fd 가 잠깐 바닥난 순간 한 번에 측정 설정(켜짐·예약)이 기본값(꺼짐)이 됐고 다음 저장이 그것을 굳혔다.
+       *   이제 원본은 그대로 두고, 직전에 읽은 값으로 동작한다(없으면 기본값 + 사유 + 저장 거절).
+       */
+      const code = String(e?.code || e?.message || e).slice(0, 60);
+      warnOnce('read', `[xferspeed] 설정 파일을 읽지 못했습니다(${code}) — 손상이 아니라 파일은 그대로 둡니다. ${_lastGood ? '직전에 읽은 설정으로 동작합니다.' : '직전 값이 없어 기본값(자동 측정 꺼짐)으로 동작하고 저장을 막습니다.'}`);
+      if (_lastGood) { _unreadable = null; return normalizeSettings(_lastGood); }   // 사본 — 호출부가 고쳐도 직전 값이 바뀌지 않게
+      _unreadable = code;
+      _loadError = { at: Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 파일은 그대로 두었고 다음 읽기에서 다시 시도합니다`, transient: true };
+      return normalizeSettings({});
+    }
+    _unreadable = null;
+    // 손상본을 옆으로 치운 뒤(재시작 포함)에는 '파일 없음' 이 된다 — 그때도 '못 읽었다' 를 계속 말한다(v2.612 규약).
+    // 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
+    const why = corruptOnlyReason(FILE());
+    _loadError = why ? { at: Date.now(), reason: why.replace('등록부 파일', '설정 파일') } : null;
+    return normalizeSettings({});
+  }
+  _unreadable = null;
   try {
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const j = JSON.parse(text);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _loadError = null;
-    return normalizeSettings(j);
+    _lastGood = normalizeSettings(j);
+    return normalizeSettings(_lastGood);
   } catch (e) {
-    if (e?.code !== 'ENOENT') {
-      // 손상은 보존한다 — 다음 저장이 온전했던 원본을 덮어쓰지 않게(v2.190 규약). 기본값은 꺼짐이라 안전한 쪽이다.
-      _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) };
-      try { preserveCorrupt(FILE()); } catch { /* 보존 실패는 best effort */ }
-    } else {
-      // 손상본을 옆으로 치운 뒤(재시작 포함)에는 '파일 없음' 이 된다 — 그때도 '못 읽었다' 를 계속 말한다(v2.612 규약).
-      // 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
-      const why = corruptOnlyReason(FILE());
-      _loadError = why ? { at: Date.now(), reason: why.replace('등록부 파일', '설정 파일') } : null;
-    }
+    // 손상은 보존한다 — 다음 저장이 온전했던 원본을 덮어쓰지 않게(v2.190 규약). 기본값은 꺼짐이라 안전한 쪽이다.
+    _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) };
+    try { preserveCorrupt(FILE()); } catch { /* 보존 실패는 best effort */ }
     return normalizeSettings({});
   }
 }
@@ -144,14 +173,43 @@ export function onXferSpeedSettingsChange(fn) {
 }
 
 const NUMERIC_KEYS = Object.keys(RANGES);
+/** 범위 오류 문구용 — 화면 단위(분·초 등). 웹 `xferSpeedText.SETTING_FIELDS` 와 같은 이름·단위다. */
+const RANGE_TEXT = Object.freeze({
+  intervalMs: { label: '측정 주기', unit: '분', div: 60_000 },
+  sizeMB: { label: '보낼 크기', unit: 'MB', div: 1 },
+  timeoutMs: { label: '한 방향 시한', unit: '초', div: 1000 },
+  concurrency: { label: '동시에 잴 법인 수', unit: '곳', div: 1 },
+  slowPct: { label: '느려짐 기준', unit: '%', div: 1 },
+  sampleRetentionDays: { label: '측정 기록 보관', unit: '일', div: 1 },
+  dailyRetentionDays: { label: '일 요약 보관', unit: '일', div: 1 },
+});
+
 /**
  * 저장 — 보낸 칸만 바꾼다. 숫자 칸이 비었으면(빈 문자열·null·숫자 아님) 이전 값을 유지한다.
+ * ⚠ v2.740(감사 D-04): 범위 밖 숫자는 **잘라서 저장하지 않고 거절**한다(`code:'bad-range'` · `field` — 라우트 400).
+ *   예전엔 크기 200MB 를 넣으면 '저장했습니다' 가 뜨고 실제로는 50MB 로 잰다 — 사용자는 200MB 기준 속도로 읽었다(isidu 일괄 변경과 같은 규칙).
+ * ⚠ 설정을 일시 오류로 못 읽었고 직전 값도 없으면 저장을 거절한다(`code:'settings-unreadable'` — 라우트 503) — 기본값 위에 덮어쓰면 원본이 지워진다.
  * @returns {object} 저장된 설정
  */
 export function saveXferSpeedSettings(body = {}) {
   const cur = loadXferSpeedSettings();
+  if (_unreadable) {
+    const e = new Error(`설정 파일을 읽지 못해(${_unreadable}) 저장하지 않았습니다 — 지금 저장하면 기본값 위에 덮어써 원래 설정이 지워집니다. 잠시 뒤 다시 시도하세요.`);
+    e.code = 'settings-unreadable'; throw e;
+  }
   const b = { ...(body && typeof body === 'object' && !Array.isArray(body) ? body : {}) };
-  for (const k of NUMERIC_KEYS) if (k in b && numOrNull(b[k]) == null) delete b[k];
+  for (const k of NUMERIC_KEYS) {
+    if (!(k in b)) continue;
+    const v = numOrNull(b[k]);
+    if (v == null) { delete b[k]; continue; }
+    const r = RANGES[k]; const x = Math.round(v);
+    if (x < r.min || x > r.max) {
+      const f = RANGE_TEXT[k] || { label: k, unit: '', div: 1 };
+      const show = (n) => `${Math.round((n / f.div) * 100) / 100}${f.unit}`;
+      const e = new Error(`${f.label}: ${show(r.min)}~${show(r.max)} 사이여야 합니다(입력 ${show(v)}) — 저장하지 않았습니다.`);
+      e.code = 'bad-range'; e.field = k; e.range = { min: r.min, max: r.max }; throw e;
+    }
+  }
   if ('enabled' in b && typeof b.enabled !== 'boolean') delete b.enabled;
   if ('excluded' in b && !Array.isArray(b.excluded)) delete b.excluded;
   if ('intervalOn' in b && typeof b.intervalOn !== 'boolean') delete b.intervalOn;
@@ -167,7 +225,7 @@ export function saveXferSpeedSettings(body = {}) {
   }
   const next = normalizeSettings({ ...cur, ...b });
   atomicWriteFileSync(FILE(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  _loadError = null;
+  _loadError = null; _lastGood = next;
   for (const fn of _listeners) { try { fn(next); } catch { /* 리스너 오류가 저장을 되돌리지 않게 */ } }
   return next;
 }
@@ -185,3 +243,6 @@ export function isExcluded(s, ...names) {
   const set = new Set((s?.excluded || []).map((x) => String(x).toLowerCase()));
   return names.some((n) => n != null && set.has(String(n).trim().toLowerCase()));
 }
+
+/** 테스트용 — 직전 값·일시 오류 기억을 비운다(B-12 경로를 처음부터 재현하려고). */
+export function _resetXferSettingsForTest() { _lastGood = null; _unreadable = null; _loadError = null; _warned.clear(); }

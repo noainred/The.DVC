@@ -71,7 +71,10 @@ export function bulkPatchFrom(s) {
       if (f.kind === 'num' && (n < f.min || n > f.max)) { issues.push({ key: f.key, text: `${f.label}: ${f.min}~${f.max} 사이여야 합니다.` }); continue; }
       patch[f.key] = n; continue;
     }
-    patch[f.key] = String(v).trim();
+    // v2.740 D-11: 빈 값 검사는 trim 뒤에 한다 — 공백만 넣은 칸은 '그대로' 다(예전에는 username:'' 이 실려 미리보기가 '계정 ‘’' 이라 말했다).
+    const sv = String(v).trim();
+    if (!sv) continue;
+    patch[f.key] = sv;
   }
   if (st.mailMode) {
     if (st.mailMode === 'clear') patch.mailTo = { mode: 'clear' };

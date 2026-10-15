@@ -27,8 +27,9 @@ import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
-import { buildCvpOverview, corpResolver, freshnessBounds, deviceHealth, RECENT_EVENTS_MAX, rowOwnerOf } from '../../cvp/overview.js'; // v2.645 · v2.732(B2-02): 담당 판정 공용
-import { partsFresh } from '../../cvp/faults.js'; // v2.720(감사 B1-02): KPI 도 Overview·장애 판정과 같은 부품 신선도
+import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, rowOwnerOf } from '../../cvp/overview.js'; // v2.645 · v2.732(B2-02): 담당 판정 공용
+// v2.740(감사 F-03): '지금 값' 판정(장비 확인 불가 + 부품 낡음)은 cvp/confirm.js 하나 — 전체 소비 전력(power/total.js)도 같은 함수를 쓴다.
+import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -87,30 +88,12 @@ export function pickEdgeStatus(list, srv) {
  *   예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
  */
 /**
- * v2.720(감사 B1-02): 장비 한 대를 KPI 에 '지금 값' 으로 셀 수 있는가 — 판정은 Overview 의 `deviceHealth` 하나를 쓴다(복제 금지).
- *   마지막 수집이 낡았거나(stale·never) 스트리밍이 아니거나 텔레메트리를 못 읽은 장비는 `unconfirmed`(사유)이고, 그 장비에 남은
- *   부품·BGP·포트·CPU 값(며칠 전 장애·과부하일 수 있다)은 합산하지 않는다. 'unread'(아무것도 못 읽음)는 지금 수집은 된 것이라
- *   예전처럼 항목별 '못 읽음' 칸이 센다. 부품 목록만 낡은 장비는 `partsStale` — 부품만 빼고 나머지는 센다(Overview 와 같다).
+ * v2.720(감사 B1-02)·v2.732(감사 B2-03): 장비 KPI 의 확인 불가 판정(cvpDeviceConfirm)과 부품 값의 '지금 값이 아닌 이유'(cvpPartsStaleReason)는
+ *   v2.740(감사 F-03)에 cvp/confirm.js 로 올렸다 — 전체 소비 전력(power/total.js)이 같은 함수를 쓴다. 여기서는 가져다 쓰고 예전 이름으로 다시 내보낸다.
+ * CVP_STALE_REASONS 는 그 함수가 내는 사유 코드 목록이고 웹 문구 표(cvpPowerText.js CVP_STALE_REASON_TEXT)와 1:1 이다(웹 테스트가 이 소스를 읽어 대조한다).
  */
-export function cvpDeviceConfirm(d, { now = Date.now(), intervalMs, partsEveryMs } = {}) {
-  const dev = d && typeof d === 'object' ? d : {};
-  const h = deviceHealth(dev, { now, staleMs: freshnessBounds(intervalMs).staleMs, intervalMs, partsEveryMs });
-  const unconfirmed = h.state === 'unknown' && h.reasons[0] !== 'unread' ? h.reasons[0] : null;
-  const partsStale = !unconfirmed && Array.isArray(dev.partsList) && !partsFresh(dev, { intervalMs, partsEveryMs, now });
-  return { unconfirmed, partsStale };
-}
-
-/**
- * v2.732(감사 B2-03): 부품(PSU·트랜시버) 값을 '지금 값' 으로 쓸 수 없는 이유 — 없으면 null. 판정은 cvpDeviceConfirm 하나를 쓴다
- *   (장비 KPI·Overview·장애 판정과 같은 신선도 — partsFresh). 장비 수집 자체가 낡았거나 스트리밍이 아니거나 텔레메트리를 못 읽었으면
- *   그 사유(never·stale·not-streaming·telemetry-failed), 장비는 지금 값인데 부품 목록만 낡았으면 'parts-stale'.
- *   소비전력·GBIC 광신호 화면은 이 장비를 합계·판정 KPI 에서 빼고 사유별 개수로 밝힌다(행은 남기고 표지).
- */
+export { cvpDeviceConfirm, cvpPartsStaleReason };
 export const CVP_STALE_REASONS = Object.freeze(['parts-stale', 'stale', 'never', 'not-streaming', 'telemetry-failed']);
-export function cvpPartsStaleReason(d, opts = {}) {
-  const c = cvpDeviceConfirm(d, opts);
-  return c.unconfirmed || (c.partsStale ? 'parts-stale' : null);
-}
 function emptyStaleBy() { return Object.fromEntries(CVP_STALE_REASONS.map((k) => [k, 0])); }
 
 /**

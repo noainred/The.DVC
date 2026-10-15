@@ -117,7 +117,7 @@ test('③ 배포 게이트 — viewer·operator·역할 admin·범위 제한 sup
   }
   const adm = await call('adm', 'POST', '/user-menu/distribute', { mode: 'keep' });
   assert.equal(adm.j.reason, 'super-admin-only');
-  assert.equal(adm.j.requiredRole, 'super_admin');
+  assert.deepEqual(adm.j.requiredRole, ['super_admin']);   // v2.740: requireRole 과 같은 배열 계약(화면 권한 안내가 읽는다)
   const ss = await call('ssup', 'POST', '/user-menu/distribute', { mode: 'keep' });
   assert.equal(ss.s, 403, '범위 제한 super_admin 은 fleet 게이트에 걸린다');
   // 내 메뉴 없이 배포 → 400

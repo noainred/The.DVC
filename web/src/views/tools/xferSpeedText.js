@@ -37,6 +37,8 @@ export const REASON_TEXT = Object.freeze({
   'below-baseline': '평소(최근 7일 중앙값)보다 느립니다.',
   'no-baseline': '평소 속도를 정할 측정이 아직 모자랍니다 — 느려짐은 판정하지 않았습니다.',
   'partial-baseline': '한쪽 방향은 평소 속도를 정할 측정이 모자라 그 방향은 느려짐을 판정하지 않았습니다.',
+  // v2.740 B-09: 마지막 측정 시각이 지금보다 앞선다 — 정상으로 칠하지 않는다(시계를 되돌리면 '나이' 가 음수라 오래됨에도 걸리지 않았다).
+  'clock-skew': '마지막 측정 시각이 지금보다 앞서 있습니다 — 포탈 시계가 뒤로 바뀐 것 같습니다. 이 값을 지금 값으로 보지 마세요(다음 측정이 바꿉니다).',
 });
 
 /** 실패 종류 — 서버 probe.XFER_FAIL_KINDS 와 1:1(조치가 다르므로 한 문구로 덮지 않는다). */
@@ -465,6 +467,58 @@ export const SETTING_FIELDS = Object.freeze([
   { key: 'dailyRetentionDays', label: '일 요약 보관', unit: '일', toUi: (v) => v, toSrv: (v) => v, hint: '하루 평균·최저·최고' },
 ]);
 
+/**
+ * 서버 `xferspeed/settings.js RANGES` 사본(v2.740 D-04) — 저장 전에 미리 막는다. 서버 테스트가 두 값을 대조한다(번들 경계라 두 벌).
+ * 화면은 응답의 `ranges` 가 있으면 그것을 먼저 쓴다.
+ */
+export const XFER_RANGES = Object.freeze({
+  intervalMs: { min: 10 * 60_000, max: 7 * 24 * 3_600_000 },
+  sizeMB: { min: 1, max: 50 },
+  concurrency: { min: 1, max: 4 },
+  timeoutMs: { min: 15_000, max: 600_000 },
+  slowPct: { min: 10, max: 95 },
+  sampleRetentionDays: { min: 30, max: 730 },
+  dailyRetentionDays: { min: 90, max: 3650 },
+});
+
+const PLAIN_NUM_RE = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * 저장 전 검사(v2.740 D-03·D-04) — 숫자가 아닌 칸('60분'·'1,000')과 범위 밖 칸을 모은다. 빈 배열이면 저장해도 된다.
+ * 빈 칸은 '그대로 둔다' 라 문제가 아니다. 예전엔 숫자가 아닌 칸을 조용히 버려 다른 칸이 같으면 창이 아무 말 없이 닫혔고,
+ * 범위 밖 값은 서버가 잘라 저장한 뒤 '저장했습니다' 라 말했다.
+ * @returns {{key:string, label:string, reason:string}[]}
+ */
+export function settingsIssues(form, ranges = XFER_RANGES) {
+  const out = [];
+  for (const f of SETTING_FIELDS) {
+    const raw = form?.[f.key];
+    if (raw == null || String(raw).trim() === '') continue;
+    const txt = String(raw).trim();
+    if (!PLAIN_NUM_RE.test(txt)) { out.push({ key: f.key, label: f.label, reason: `숫자만 입력하세요(단위 ${f.unit} · 입력 ‘${txt}’)` }); continue; }
+    const r = ranges?.[f.key];
+    if (!r) continue;
+    const v = Math.round(f.toSrv(Number(txt)));
+    if (v < r.min || v > r.max) out.push({ key: f.key, label: f.label, reason: `${f.toUi(r.min)}~${f.toUi(r.max)}${f.unit} 사이여야 합니다(입력 ${txt}${f.unit})` });
+  }
+  return out;
+}
+/** 저장할 바뀐 값이 없을 때의 한 줄(창을 아무 말 없이 닫지 않는다). */
+export const NO_CHANGE_TEXT = '바뀐 값이 없습니다 — 저장하지 않았습니다.';
+
+/** 손으로 만든 폴링 루프의 다음 틱을 걸지 않을 오류인가(v2.740 D-05) — 403(권한)·404(경로 없음)는 다시 물어도 같다. */
+export function shouldStopPolling(err) {
+  const st = Number(err?.status);
+  return st === 403 || st === 404;
+}
+
+/** 히트맵을 다시 읽다 실패했는데 직전 값이 있을 때의 한 줄(v2.740 D-07) — 직전 값을 지우지 않고 실패를 말한다. */
+export function heatReloadNote(err) {
+  if (!err) return '';
+  const msg = String(err?.message || err || '').slice(0, 160);
+  return `다시 읽지 못했습니다 — 직전에 받은 값을 보여 줍니다${msg ? ` (${msg})` : ''}.`;
+}
+
 export function rangeHint(f, ranges) {
   const r = ranges?.[f.key];
   if (!r) return f.hint;
@@ -510,6 +564,7 @@ export const MISSED_TEXT = Object.freeze({
   busy: '이전 측정이 길어졌습니다',
   off: '자동 측정이 꺼져 있었습니다',
   late: '시각이 지난 뒤에 확인했습니다',
+  clock: '포탈 시계가 뒤로 바뀌어 처리 기록을 지금으로 다시 잡았습니다',
 });
 /** 간격 빠른 선택(분). 직접 입력도 된다(범위는 서버가 준다). */
 export const INTERVAL_PRESETS = Object.freeze([30, 60, 120, 180, 360, 720, 1440]);

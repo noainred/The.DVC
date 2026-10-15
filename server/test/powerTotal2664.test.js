@@ -10,7 +10,7 @@ process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'false';
 process.env.DATA_SOURCE = 'mock';
 
-const { buildPowerTotal, cvpDevicePower, NET_STALE_MS } = await import('../src/power/total.js');
+const { buildPowerTotal, cvpDevicePower } = await import('../src/power/total.js');
 const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 30 * 60_000;
 
 test('① CVP 장비 전력 — PSU 입력 합, 입력이 없으면 출력(basis 표시), 못 읽으면 null', () => {
@@ -31,9 +31,11 @@ test('② 합산 — vCenter 추정 제외 · 미측정/낡음/경로 없음을 
       { serverId: 's3', serverName: 'd', watts: null, source: 'idrac' },
     ],
     network: [
-      { cvpId: 'c', key: 'n1', hostname: 'sw1', partsAt: NOW - 60_000, partsList: [{ kind: 'psu', power: { inW: 200 } }], corp: { corpId: 'HG' } },
-      { cvpId: 'c', key: 'n2', hostname: 'sw2', partsAt: NOW - NET_STALE_MS - 1, partsList: [{ kind: 'psu', power: { inW: 200 } }], corp: { corpId: 'HG' } },
-      { cvpId: 'c', key: 'n3', hostname: 'sw3', partsAt: NOW, partsList: [], corp: { corpId: 'NJ' } },
+      // v2.740(F-03): 네트워크는 CVP 전력 탭과 같은 판정(cvp/confirm.js) — DB 행처럼 collectedAt 이 있어야 '지금 값' 이다.
+      //   sw2 는 부품 목록이 2시간 전(기본 경계 30분 × 3 + 5분 × 3 = 1.75시간 밖) → parts-stale. 예전 6시간 경계(NET_STALE_MS)는 없어졌다.
+      { cvpId: 'c', key: 'n1', hostname: 'sw1', collectedAt: NOW - 60_000, partsAt: NOW - 60_000, partsList: [{ kind: 'psu', power: { inW: 200 } }], corp: { corpId: 'HG' } },
+      { cvpId: 'c', key: 'n2', hostname: 'sw2', collectedAt: NOW - 60_000, partsAt: NOW - 2 * 3_600_000, partsList: [{ kind: 'psu', power: { inW: 200 } }], corp: { corpId: 'HG' } },
+      { cvpId: 'c', key: 'n3', hostname: 'sw3', collectedAt: NOW - 60_000, partsAt: NOW, partsList: [], corp: { corpId: 'NJ' } },
     ],
     storage: [
       { id: 'u1', name: 'unity', type: 'unity480', collectMethod: 'ssh', datacenterId: 'NJ', snap: { extra: { power: { watts: 660, at: NOW } } } },

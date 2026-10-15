@@ -33,6 +33,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { DEADLINE_LONG_MAX_MS } from '../util/deadline.js';
 import { normPath, SIZE_MODES } from './parse.js';
 import { normalizeTargetMail, normalizeCommonMail, isEmail } from './mailRules.js';
+import { ssrfBlockReason } from '../util/ssrfBlock.js';
 
 const FILE = () => path.join(config.configDir, 'isidu-settings.json');
 registerStateFile('isidu-edge-targets.json');
@@ -326,6 +327,8 @@ export function edgeTargets() {
  */
 export function cleanEdgeTarget(t) {
   if (!t || typeof t !== 'object' || !RE_ID.test(String(t.id || '')) || pathIssue(t.path) || !RE_HOST.test(String(t.host || '')) || !RE_USER.test(String(t.username || ''))) return null;
+  // v2.740 C-01: 메인 normalizeTarget 과 같은 SSRF 판정(링크로컬·메타데이터·루프백·우회 표기). 엣지 /isidu-test 는 이 함수만 지나 SSH 접속을 시도한다.
+  if (ssrfBlockReason(String(t.host))) return null;
   return {
     id: String(t.id), label: String(t.label || '').slice(0, 80), host: String(t.host), port: numField(t.port, RANGES.port, 22),
     username: String(t.username), auth: AUTH_MODES.includes(t.auth) ? t.auth : 'key', deviceId: String(t.deviceId || '').slice(0, 64),

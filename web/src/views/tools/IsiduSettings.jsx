@@ -14,6 +14,8 @@
  *    (형식이 틀리면 400 이 칸을 짚는다) — 화면은 입력 중 미리 알려 줄 뿐이다. 메일은 메인만 보낸다(엣지로 주소를 내려보내지 않는다).
  *  · v2.739 '일괄 변경' 탭(IsiduBulk) — 등록된 대상을 골라 설정 항목을 한꺼번에 바꾸고 지금 수집·연결 시험·메일·빼기를 한꺼번에 한다.
  *    개별 편집에 저장하지 않은 변경이 있으면 일괄 적용을 잠근다(적용이 목록을 새로 읽어 그 변경을 지우기 때문이다).
+ *  · v2.740: 이 화면은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(IsiduSettingsPage, `page`)에 산다 — 슈퍼 관리자 전용(서버 requireSuperAdmin).
+ *    `page` 면 창(Modal)이 아니라 페이지로 그리고 '닫기' 버튼을 두지 않는다(onClose 가 없다).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
@@ -53,7 +55,7 @@ function KeyBox({ k, agent, reportedAt, onCreate, creating }) {
   );
 }
 
-export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = null, focusId = '', rows = [], initialTab = 'edit' }) {
+export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = null, focusId = '', rows = [], initialTab = 'edit', page = false }) {
   const [mtab, setMtab] = useState(initialTab === 'bulk' ? 'bulk' : 'edit');
   const [srv, setSrv] = useState(null);
   const [loadErr, setLoadErr] = useState(null);
@@ -185,8 +187,10 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
     onSaved?.();
   };
 
-  return (
-    <Modal title="수집 대상 설정 — 아이실론 디렉터리 사용량" onClose={onClose} width={860}>
+  // v2.740: 설정 메뉴 안의 페이지면 창이 아니라 본문에 그린다(닫기 없음).
+  //   ⚠ 감싸는 쪽을 렌더 안에서 컴포넌트로 만들지 말 것 — 렌더마다 새 컴포넌트가 되어 입력 칸이 매 글자마다 다시 마운트된다(포커스를 잃는다).
+  const body = (
+    <>
       {loadErr ? <ErrorBox error={loadErr} /> : null}
       {!srv && !loadErr ? <Loading /> : null}
       {srv ? (
@@ -398,16 +402,19 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
           {msg ? <div className={`result ${msg.tone}`}>{msg.text}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
             {dirty ? <span className="hint" style={{ marginRight: 'auto' }}>저장하지 않은 변경이 있습니다.</span> : null}
-            <button type="button" className="btn2" onClick={onClose}>닫기</button>
+            {onClose ? <button type="button" className="btn2" onClick={onClose}>닫기</button> : null}
             <button type="button" className="btn2 primary" onClick={save} disabled={locked || saving}>{saving ? '저장 중…' : '저장'}</button>
           </div>
-          </>) : (
+          </>) : onClose ? (
             <div className="row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
               <button type="button" className="btn2" onClick={onClose}>닫기</button>
             </div>
-          )}
+          ) : null}
         </div>
       ) : null}
-    </Modal>
+    </>
   );
+  return page
+    ? <section className="isd isd-settings-page" aria-label="아이실론 디렉터리 사용량 수집 대상 설정">{body}</section>
+    : <Modal title="수집 대상 설정 — 아이실론 디렉터리 사용량" onClose={onClose} width={860}>{body}</Modal>;
 }

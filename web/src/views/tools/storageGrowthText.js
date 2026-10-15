@@ -161,7 +161,7 @@ export function totalCell(t, unitKey = 'auto') {
   if (noBase) why.push(`${noBase}대는 이 기간의 기준선이 없어`);
   if (lag) why.push(`${lag}대는 최신 관측이 기준일보다 늦어`);
   if (inex) why.push(`${inex}대는 요청한 날짜에 수집이 없어 실제 비교 구간이 ${lim != null ? `${lim}일을` : `요청 기간의 ${GROWTH_SPAN_TOLERANCE}배를`} 넘어`);
-  if (t.partial) notes.push(`${t.measured}대만 합산했습니다 — ${why.join(', ')} 뺐습니다(전체 합이 아닙니다).`);
+  if (t.partial) notes.push(`${t.measured}대만 합산했습니다 — ${why.join(', ')} 뺐습니다(전체 합이 아닙니다). 증가율(%)은 합산한 ${t.measured}대의 기준일 사용량 대비입니다.`);
   else if (t.missing > 0 && !t.measured) notes.push(`${t.missing}대 모두 합산하지 못했습니다 — ${why.join(', ')} 뺐습니다.`);
   if (inex) notes.push('뺀 장비의 칸에는 그 장비의 값이 그대로 있습니다(더 긴 구간의 증가량이라 이 기간 합계에 넣지 않았습니다).');
   if (wid) notes.push(`${wid}대는 요청한 날짜에 수집이 없어 조금 더 긴 구간(최대 ${lim != null ? `${lim}일` : `요청 기간의 ${GROWTH_SPAN_TOLERANCE}배`})으로 비교한 값을 더했습니다.`);
@@ -280,6 +280,18 @@ export function growthPct(g, latestUsedBytes) {
   return Math.round((Number(g.bytes) / base) * 1000) / 10;
 }
 
+/**
+ * v2.740(감사 F-02): 합계·그룹 행의 증가율 — 분모는 **그 기간 합계에 실제로 더한 장비**의 기준일 사용량이다
+ *   (`aggregateGrowth` 가 기간마다 싣는 `usedMeasured` − 증가량). 예전에는 `growthPct(g, t.usedBytes)` 로 사용량을 읽은
+ *   **모든** 장비의 사용량을 분모에 넣어, 기준선이 없거나(새로 등록) lagging·inexact 로 뺀 장비가 섞이면 증가율이 과소였다
+ *   (재현: A 100TB +10TB · 기준선 없는 B 900TB → '+1.0%', 측정 장비 기준 +11.1%). 오류 없이 틀린 값이라 화면은 정상처럼 보인다.
+ *   `usedMeasured` 가 없으면(구버전 집계·사용량을 모르는 측정 장비) **null** 이다 — 추측하지 않는다.
+ */
+export function aggregateGrowthPct(g) {
+  if (!g || g.usedMeasured == null) return null;
+  return growthPct(g, g.usedMeasured);
+}
+
 /** 증가율 표시 문자열(부호 포함). 값이 없으면 null — 호출부가 줄을 아예 그리지 않는다. */
 export function growthPctText(pct) {
   if (pct == null) return null;
@@ -318,7 +330,7 @@ export function aggregateGrowth(devices, periods, { asOfDay = null } = {}) {
   const growth = {};
   for (const p of periods || []) {
     let sum = 0; let measured = 0; let missing = 0; let lagging = 0; let inexact = 0; let widened = 0;
-    let perDay = 0; let perDayN = 0;
+    let perDay = 0; let perDayN = 0; let used = 0; let usedN = 0;
     for (const d of list) {
       if (isLagging(d)) { missing += 1; lagging += 1; continue; }
       const g = d.growth?.[p.key];
@@ -331,9 +343,14 @@ export function aggregateGrowth(devices, periods, { asOfDay = null } = {}) {
       sum += b; measured += 1;
       const pd = numOrNull(g?.perDayBytes);
       if (pd != null) { perDay += pd; perDayN += 1; }
+      const ub = numOrNull(d.usedBytes);
+      if (ub != null) { used += ub; usedN += 1; }
     }
     growth[p.key] = {
       bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0,
+      // v2.740(F-02): 그 기간 합계에 더한 장비의 '지금' 사용량 합 — 증가율 분모(aggregateGrowthPct). 더한 장비 중 사용량을 모르는
+      //   장비가 있으면 null(부분 분모로 비율을 만들지 않는다 — perDayBytes 와 같은 규칙). 서버 totalsOf 와 같다(테스트 대조).
+      usedMeasured: measured && usedN === measured ? used : null,
       // 하루 증가량 = 장비별 perDayBytes 의 합(합계 ÷ 요청 일수 아님) — 모르는 장비가 섞이면 부분 합을 내지 않는다.
       perDayBytes: measured && perDayN === measured ? perDay : null,
       maxSpanDays: maxSpanDaysFor(p.days),

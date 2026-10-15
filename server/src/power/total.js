@@ -15,11 +15,15 @@
  *    (`unreadBy`) 세고, 경로가 없는 조합(VPLEX·SSH 수집 방식 일부)은 `unsupported`(+`unsupportedBy`) 로 센다.
  *    ⚠ Unity SSH 외의 전원 필드는 실장비 미확인 — 못 읽은 장비는 응답에 있던 키(seenKeys)를 `issues` 로 싣는다.
  *  · 오래된 값은 '현재' 가 아니다 — 경계(ms)를 넘긴 장비는 `stale` 로 빼고 개수를 밝힌다.
+ *    ⚠ v2.740(감사 F-03): 네트워크는 **CVP 전력 탭과 같은 판정**(cvp/confirm.js cvpPartsStaleReason)이다 — 장비 확인 불가(never·stale·
+ *    not-streaming·telemetry-failed)와 부품 목록 낡음(parts-stale)을 빼고 사유별로 센다(`staleBy`). 예전 6시간 경계(NET_STALE_MS)는
+ *    부품 조회가 2~6시간 멈춘 스위치를 이 합계에는 넣고 CVP 전력 탭에서는 뺐다(같은 장비 전력이 두 화면에서 다른 숫자). 경계 입력은
+ *    호출자가 `cvpOpts` 로 주고, 없으면 CVP 화면과 같은 CVP 설정(수집 주기)을 읽는다 — 이 경우에만 순수하지 않다(설정 파일 캐시 읽기).
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { powerPathOf, noPathReason } from '../storage/power.js';
+import { cvpPartsStaleReason, cvpConfirmOpts } from '../cvp/confirm.js';
 
-export const NET_STALE_MS = 6 * 3_600_000;      // CVP 부품(PSU)은 부품 주기로 읽는다 — 6시간을 넘으면 현재값이 아니다
 export const STORAGE_STALE_MS = 6 * 3_600_000;  // 스토리지 기본 수집 주기 1시간 — 6배
 export const UNASSIGNED = '';
 export const ISSUE_MAX = 200;   // 못 읽은 장비 목록 상한 — 넘친 개수는 issuesOmitted 로 밝힌다
@@ -60,8 +64,9 @@ export function cvpDevicePower(d) {
  * @param {number} [i.itemMax]  목록 상한(카테고리별)
  * @param {number|null} [i.serversRegistered]  v2.680 A-06: 서버 분석 등록(활성 · OME 콘솔 제외 · 엣지 보고분 포함) 대수 — 분모.
  *   주지 않으면(null) 분모를 모른다고 밝힌다(devices·unread 가 null — 예전 응답 모양 호환).
+ * @param {{intervalMs?:number, partsEveryMs?:number}} [i.cvpOpts]  v2.740(F-03): CVP 신선도 경계 입력. 없으면 CVP 설정을 읽는다(CVP 화면과 같은 값).
  */
-export function buildPowerTotal({ servers = [], network = [], storage = [], dcOfVc = () => '', dcName = new Map(), now = Date.now(), itemMax = 200, serversRegistered = null } = {}) {
+export function buildPowerTotal({ servers = [], network = [], storage = [], dcOfVc = () => '', dcName = new Map(), now = Date.now(), itemMax = 200, serversRegistered = null, cvpOpts = null } = {}) {
   const corps = new Map();
   const corpOf = (id) => {
     const k = String(id || UNASSIGNED);
@@ -95,17 +100,20 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
 
   // ② 네트워크 — CVP PSU.
   // v2.680 A-05: partial = 장착 PSU 중 일부만 읽은 장비(전력은 더하되 '측정' 이 아니다 — 합계가 실제보다 작다는 뜻).
-  // v2.727(감사 C-06): noTime = 값은 읽었는데 시각(partsAt·collectedAt)이 둘 다 없는 장비 — '오래됨(stale)' 이 아니라 '언제 값인지 모름' 이다.
-  //   합계에서 빼는 것은 같다(지금 값인지 알 수 없다). 조치가 다르다(수집기 시각 필드 결함 vs 주기 지연).
-  const net = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unread: 0, stale: 0, noTime: 0, outputOnly: 0, items: [] };
+  // v2.740(감사 F-03): 지금 값인지는 CVP 전력 탭과 **같은 함수**(cvpPartsStaleReason)로 판정하고 같은 순서로 센다 — 낡은 장비는 PSU 값이
+  //   없어도 '못 읽음' 이 아니라 '낡음' 이다(CVP 탭이 그렇게 센다). 사유별 개수는 staleBy(0 인 사유는 싣지 않는다 — 사유 목록은
+  //   routes/api/cvp.js CVP_STALE_REASONS). 항등식 devices = measured + partial + unread + stale.
+  //   v2.727(C-06)의 noTime(시각 둘 다 없음)은 CVP 판정에서 'never'(수집 기록 없음)다 — 네트워크에는 noTime 을 따로 싣지 않는다.
+  const net = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unread: 0, stale: 0, staleBy: {}, outputOnly: 0, items: [] };
+  const confOpts = { ...(cvpOpts && typeof cvpOpts === 'object' ? cvpOpts : cvpConfirmOpts({ now })), now };
   for (const d of network || []) {
     if (!d) continue;
     net.devices += 1;
+    const why = cvpPartsStaleReason(d, confOpts);
+    if (why) { net.stale += 1; net.staleBy[why] = (net.staleBy[why] || 0) + 1; continue; }
     const at = numOrNull(d.partsAt) ?? numOrNull(d.collectedAt);
     const p = cvpDevicePower(d);
     if (p.watts == null) { net.unread += 1; continue; }
-    if (at == null) { net.noTime += 1; continue; }
-    if (now - at > NET_STALE_MS) { net.stale += 1; continue; }
     if (p.basis === 'output') net.outputOnly += 1;
     net.watts += p.watts; add('network', d.corp?.corpId || '', p.watts);
     if (p.partial) { net.partial += 1; net.partialWatts += p.watts; } else net.measured += 1;

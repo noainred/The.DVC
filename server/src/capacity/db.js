@@ -76,6 +76,11 @@ function initSqlite() {
     //   청크 사이 양보(util/chunkedPrune.js) — idx_cap_ts·idx_cap_hourly_h 가 서브쿼리의 풀스캔을 막는다.
     const pruneRawChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
     const pruneHourChunk = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
+    // v2.740(감사 F-08): 호스트 표는 upsert 만 있어 퇴역 호스트(엣지 철거·이름 변경)가 영구히 '무보고 N일 전' 행으로 남고, 요약 계산
+    //   (호스트 × 임계 지표 windowStats)도 그 행을 매번 돌았다. 마지막 보고가 롤업 보존일보다 오래된 호스트는 시계열이 이미 전부
+    //   지워졌으므로(h ≤ lastTs < hourCut) 보여 줄 데이터가 없는 행이다 — 지운다. 다시 보고하면 다시 생긴다.
+    //   호스트 수(중앙 + 엣지) 규모라 보통 한 청크지만 정리 규약(한 방 DELETE 금지 — audit2603c 스윕)은 그대로 따른다.
+    const pruneHostsChunk = db.prepare('DELETE FROM hosts WHERE rowid IN (SELECT rowid FROM hosts WHERE lastTs < ? LIMIT ?)');
     // 정리끼리는 겹치지 않는다(키 = 원본 경계 — 경계가 더 늦으면 끝난 뒤 한 번 더). 호출부(sampler)는 기다리지 않는다.
     const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });
 
@@ -143,7 +148,7 @@ function initSqlite() {
         return hourBucket.all(b, b, metric, k, Math.floor(sinceTs / HOUR) * HOUR, limit).reverse()
           .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max) }));
       },
-      /** Promise<{deleted, hourDeleted, done}> — 청크 사이에 양보한다. 실패는 여기서 남긴다(호출부는 기다리지 않는다). */
+      /** Promise<{deleted, hourDeleted, hostsDeleted, done}> — 청크 사이에 양보한다. 실패는 여기서 남긴다(호출부는 기다리지 않는다). */
       prune: (now) => {
         const rawCut = Number(now) - config.capacity.rawRetentionHours * HOUR;
         const hourCut = Number(now) - config.capacity.rollupRetentionDays * 24 * HOUR;
@@ -151,12 +156,15 @@ function initSqlite() {
         return pruneFlight.run(rawCut, async () => {
           const r = await chunkedDelete(pruneRawChunk, [rawCut], { label: 'capacity.samples' })
             .catch((e) => { console.warn(`[capacity] 원본 prune 실패: ${e?.message || e}`); return { deleted: 0, done: false }; });
-          let hourDeleted = 0; let hourDone = true;
+          let hourDeleted = 0; let hourDone = true; let hostsDeleted = 0;
           if (Number.isFinite(hourCut)) {
             try { const h = await chunkedDelete(pruneHourChunk, [hourCut], { label: 'capacity.samples_hourly' }); hourDeleted = h.deleted; hourDone = h.done; }
             catch (e) { console.warn(`[capacity] 롤업 prune 실패: ${e?.message || e}`); hourDone = false; }
+            try { hostsDeleted = (await chunkedDelete(pruneHostsChunk, [hourCut], { label: 'capacity.hosts' })).deleted; }
+            catch (e) { console.warn(`[capacity] 호스트 표 prune 실패: ${e?.message || e}`); }
+            if (hostsDeleted > 0) console.log(`[capacity] 롤업 보존일(${config.capacity.rollupRetentionDays}일)보다 오래 보고하지 않은 호스트 ${hostsDeleted}개를 목록에서 뺐습니다`);
           }
-          return { deleted: r.deleted, hourDeleted, done: r.done && hourDone };
+          return { deleted: r.deleted, hourDeleted, hostsDeleted, done: r.done && hourDone };
         });
       },
     };
@@ -200,7 +208,11 @@ function initMemory() {
       const floor = now - config.capacity.rawRetentionHours * HOUR;
       let i = 0;
       while (i < rows.length && rows.length > 0) { if (rows[i].ts < floor) rows.splice(i, 1); else i += 1; }
-      return Promise.resolve({ deleted: 0, hourDeleted: 0, done: true });
+      // v2.740(F-08): sqlite 와 같은 기준 — 롤업 보존일보다 오래 보고하지 않은 호스트는 목록에서 뺀다.
+      const hostCut = now - config.capacity.rollupRetentionDays * 24 * HOUR;
+      let hostsDeleted = 0;
+      for (const [k, h] of hosts) if (h.lastTs < hostCut) { hosts.delete(k); hostsDeleted += 1; }
+      return Promise.resolve({ deleted: 0, hourDeleted: 0, hostsDeleted, done: true });
     },
   };
 }

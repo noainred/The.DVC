@@ -29,8 +29,12 @@ export async function credsFor(t) {
     const dev = t.deviceId ? getDeviceWithSecret(t.deviceId) : null;
     if (!dev) return { kind: 'device-missing', error: '이 노드의 스토리지 등록부에 그 아이실론이 없습니다(엣지면 스토리지 설정을 아직 받지 못했을 수 있습니다)' };
     if (dev.type !== 'isilon') return { kind: 'device-not-isilon', error: '고른 장비가 아이실론이 아닙니다' };
+    // v2.740 A-01: 저장된 장비 비밀번호는 **등록부의 그 장비 주소로만** 보낸다(접속처 고정 — server/CLAUDE.md H-2·v2.503 S-2).
+    // 예전 `t.host || dev.host` 는 엣지 /isidu-test 본문의 host 를 믿어, 다른 주소로 그 비밀번호가 SSH 인증으로 나갔다(재현).
+    const host = String(dev.host || '').trim();
+    if (!host) return { kind: 'device-missing', error: '등록부의 그 아이실론에 주소가 없습니다' };
     const username = t.username || dev.username || '';
-    return { creds: { host: t.host || dev.host, port: t.port || 22, username, password: String(dev.password || '') }, credId: { id: t.id, username, password: String(dev.password || '') } };
+    return { creds: { host, port: t.port || 22, username, password: String(dev.password || '') }, credId: { id: t.id, username, password: String(dev.password || '') } };
   }
   let pem = privateKeyForConnect();
   let created = false;

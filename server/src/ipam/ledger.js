@@ -33,12 +33,13 @@ function putGenerationCache(map, key, value) {
 }
 // v2.733(C6-01): 원장을 실제로 새로 만든 횟수(캐시 적중 제외) — 서브넷 목록 메모가 폴링마다 원장을 다시 만들지 않는지 테스트가 본다.
 let _rowBuilds = 0;
+let _rowBuildsSync = 0; let _rowBuildsAsync = 0; // v2.740(F-06): 동기·양보 재구성 횟수 — 라우트가 동기로 만들지 않는지 테스트가 본다
 /** 테스트·진단용 — 캐시 항목 수와 세대 수. */
 export function _ledgerCacheStats() {
   const gens = (m) => new Set([...m.keys()].map(generationOf)).size;
   return {
     rows: _ipamCache.size, rowsGenerations: gens(_ipamCache), sheets: _sheetCache.size, sheetsGenerations: gens(_sheetCache),
-    subnets: _subnetMemo.size, builds: _rowBuilds,
+    subnets: _subnetMemo.size, builds: _rowBuilds, syncBuilds: _rowBuildsSync, asyncBuilds: _rowBuildsAsync, inflight: _ipamInflight.size,
   };
 }
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
@@ -116,13 +117,53 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   const _ck = _ipamKey(snap, vcenterId, allowed);
   const _hit = _ipamCache.get(_ck);
   if (_hit) return _hit;
-  _rowBuilds += 1;
+  _rowBuilds += 1; _rowBuildsSync += 1;
   const it = ipamRowsGen(snap, vcenterId, allowed, scanResultList());
   let step = it.next();
   while (!step.done) step = it.next();
-  const out = step.value;
+  const out = tagLedger(step.value, _ck);
   putGenerationCache(_ipamCache, _ck, out);
   return out;
+}
+
+/*
+ * v2.740(감사 F-06 — 재현): `/tools/ipam`·`/sheet`·엑셀·CSV 는 원장을 스냅샷 세대 키로 찾는다. v2.619 입력 지문 생략으로 store 가 원장을
+ *   다시 만들지 않은 세대에는 캐시가 비어 있어, 그 세대의 첫 요청이 원장을 **동기로** 다시 만들었다(합성 VM 4만 대 실측:
+ *   IPMS 검색 `?q=` 1건이 이벤트 루프를 260~400ms, `/sheet` 250~500ms 멈췄다 — 검색어마다 URL 이 달라 세대마다 되풀이).
+ *   서브넷 목록(v2.733 C6-01)처럼 입력 지문 키로 바꾸지 않은 이유: 이 응답들은 원장 행의 `owner`(스냅샷 VM·호스트 객체 — 호스트
+ *   CPU·메모리, VM 메모 등 입력 지문 밖의 값)와 시각 판정(예약 만료 임박)을 싣는다. 지문 키로 옛 세대 행을 다시 쓰면 그 값이 낡는다.
+ *   그래서 결과(세대 키·행 내용)는 그대로 두고 **계산을 양보판으로** 돌린다: 같은 키의 진행 중 계산은 공유하고(검색어마다 URL 이 달라
+ *   memoJson 합류가 안 된다), 계산 도중 관리 입력이 바뀌면 한 번 더 양보판으로, 그래도 바뀌면 동기로 끝낸다(진행 보장 — store 와 같은 규칙).
+ *   `shouldCache()` 가 거짓이면(그 사이 새 스냅샷 세대가 게시됨) 결과를 캐시에 넣지 않는다 — 옛 세대 결과가 새 세대 항목을 밀어내지 않게.
+ */
+const LEDGER_KEY = Symbol('ipamLedgerKey');
+/** 원장 결과에 만든 키를 비열거 속성으로 붙인다 — buildSubnetSheets 가 넘겨받은 원장이 지금 입력의 것인지 확인한다(JSON 에 실리지 않는다). */
+function tagLedger(out, key) {
+  if (out && typeof out === 'object' && out[LEDGER_KEY] !== key) Object.defineProperty(out, LEDGER_KEY, { value: key, enumerable: false, configurable: true });
+  return out;
+}
+const _ipamInflight = new Map(); // key -> Promise(원장)
+/**
+ * 라우트용 원장 — 결과는 `buildIpamRows(snap, vcenterId, allowed)` 와 같고, 캐시에 없으면 양보하며 만든다(같은 키는 한 번만 계산).
+ * @param {object} [opts]
+ * @param {() => boolean} [opts.shouldCache] 거짓이면 결과를 캐시에 넣지 않는다(새 세대가 게시됐다)
+ * @param {number} [opts.sliceMs]
+ */
+export async function buildIpamRowsShared(snap, vcenterId, allowed = null, opts = {}) {
+  vcenterId = vcenterId || '';
+  const ck = _ipamKey(snap, vcenterId, allowed);
+  const hit = _ipamCache.get(ck);
+  if (hit) return hit;
+  let p = _ipamInflight.get(ck);
+  if (!p) {
+    const o = { shouldCache: opts.shouldCache, ...(Number.isFinite(opts.sliceMs) ? { sliceMs: opts.sliceMs } : {}) };
+    p = (async () => (await buildIpamRowsAsync(snap, vcenterId, allowed, o))
+      || (await buildIpamRowsAsync(snap, vcenterId, allowed, o))
+      || buildIpamRows(snap, vcenterId, allowed))();
+    _ipamInflight.set(ck, p);
+    p.finally(() => { if (_ipamInflight.get(ck) === p) _ipamInflight.delete(ck); }).catch(() => {});
+  }
+  return p;
 }
 
 /**
@@ -131,6 +172,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
  * @param {number} [opts.sliceMs=10] 이만큼 연속으로 돌았으면 양보
  * @param {() => boolean} [opts.isCancelled] 참이면 중간에 멈춘다(더 새 동기화가 시작됐다)
  * @param {object} [opts.stats] 채워 준다 — { yields, aborted: null|'cancelled'|'changed' }
+ * @param {() => boolean} [opts.shouldCache] v2.740: 끝난 뒤 거짓이면 결과를 돌려주되 캐시에 넣지 않는다
  * @returns {Promise<object|null>} null = 취소됐거나 계산 도중 관리 입력(설정·주석·스캔·override·정책 리비전 또는 데이터센터 귀속)이
  *   바뀌었다(섞인 결과를 내지 않는다 — 호출부가 다음 주기에 다시 만든다). 캐시에 넣는 것은 끝까지 온전히 만든 결과뿐이다.
  */
@@ -146,7 +188,7 @@ export async function buildIpamRowsAsync(snap, vcenterId, allowed = null, opts =
   const done = (reason) => { stats.yields = maybeYield.count(); stats.aborted = reason; return null; };
   const scanList = await scanResultListAsync(maybeYield, isCancelled);
   if (!scanList) return done('cancelled');
-  _rowBuilds += 1;
+  _rowBuilds += 1; _rowBuildsAsync += 1;
   const it = ipamRowsGen(snap, vcenterId, allowed, scanList);
   let step = it.next();
   while (!step.done) {
@@ -158,8 +200,11 @@ export async function buildIpamRowsAsync(snap, vcenterId, allowed = null, opts =
   if (_ipamKey(snap, vcenterId, allowed) !== ck) return done('changed');
   const again = _ipamCache.get(ck); // 그 사이 동기판이 같은 입력으로 이미 만들었다 — 한 벌만 남긴다
   if (again) return again;
-  putGenerationCache(_ipamCache, ck, step.value);
-  return step.value;
+  const out = tagLedger(step.value, ck);
+  // v2.740(F-06): 라우트 계산이 끝나기 전에 새 스냅샷 세대가 게시됐으면 캐시에 넣지 않는다(옛 세대가 새 세대 항목을 지우지 않게).
+  if (typeof opts.shouldCache === 'function' && !opts.shouldCache()) return out;
+  putGenerationCache(_ipamCache, ck, out);
+  return out;
 }
 
 function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
@@ -431,18 +476,25 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
 // 반복되던 것을 리비전 키로 1회화. 키는 rows 메모와 동일한 _ipamKey(스냅샷·설정·주석·스캔·
 // override·정책 rev 포함) + onlyBase — 시트가 직접 읽는 annotations/policies 변경도 rev 로 무효화된다.
 const _sheetCache = new Map();
-export function buildSubnetSheets(snap, { vcenterId, onlyBase, allowed = null } = {}) {
-  const ck = `${_ipamKey(snap, vcenterId, allowed)}|b:${onlyBase || ''}`;
+/**
+ * @param {object} [o.ledger] v2.740(F-06): 라우트가 `buildIpamRowsShared` 로 미리 만든 원장 — **지금 입력의 키로 만든 것일 때만** 쓴다
+ *   (계산 도중 리비전이 바뀌었으면 무시하고 예전처럼 buildIpamRows 로 만든다 — 섞인 시트를 만들지 않는다).
+ * @param {boolean} [o.cache=true] v2.740: 거짓이면 시트를 캐시에 넣지 않는다(라우트가 기다리는 사이 새 세대가 게시됐다 — 옛 세대가 새 세대를 밀어내지 않게)
+ */
+export function buildSubnetSheets(snap, { vcenterId, onlyBase, allowed = null, ledger = null, cache = true } = {}) {
+  const rowsKey = _ipamKey(snap, vcenterId || '', allowed);
+  const ck = `${rowsKey}|b:${onlyBase || ''}`;
   const hit = _sheetCache.get(ck);
   if (hit) return hit;
-  const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed });
-  putGenerationCache(_sheetCache, ck, sheets);
+  const pre = ledger && ledger[LEDGER_KEY] === rowsKey ? ledger : null;
+  const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed, ledger: pre });
+  if (cache !== false) putGenerationCache(_sheetCache, ck, sheets);
   return sheets;
 }
 
-function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null } = {}) {
+function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null, ledger = null } = {}) {
   const scopeVc = vcenterId || ''; // 아래 셀 루프에서 vcenterId가 가려지므로(shadow) 정책 매칭용으로 보존(정규화)
-  const { rows } = buildIpamRows(snap, vcenterId, allowed);
+  const { rows } = ledger || buildIpamRows(snap, vcenterId, allowed);
   const byIp = new Map();
   const bases = new Set();
   const basePrefix = onlyBase ? `${onlyBase}.` : null; // 단일 시트 요청은 그 /24만 인덱싱

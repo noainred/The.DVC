@@ -236,8 +236,14 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
 async function changeVsPrevious(id, report, topN) {
   const prev = await db.okScanBefore(HISTORY_AGENT, id, report.scan.ts);
   if (!prev) return changeSummary(null, null, topN);
-  const entries = await db.entriesOf(prev.id);
+  // v2.740 E-03: 직전 스캔의 폴더 전체(최대 5만 행)를 읽지 않는다 — 비교에 필요한 것은 직전 상위 N 개와 지금 상위 폴더의 직전 크기뿐이다.
+  // changeSummary 는 받은 맵에서 직전 상위 N 을 다시 고르는데, 진짜 상위 N 을 포함한 부분 집합이면 같은 N 개가 나온다(정렬 기준이 같다).
   const cur = { rows: (report.top || []).map((r) => ({ name: r.name, bytes: r.bytes, res: r.res })), total: totalOf(report.scan) };
+  const n = Math.max(1, Math.round(Number(topN) || 10));
+  const prevTop = (await db.topEntriesOf(prev.id, n)) || [];
+  const entries = new Map(prevTop.map((r) => [r.name, { bytes: r.bytes, res: r.res }]));
+  const curNames = cur.rows.slice(0, n).map((r) => r.name).filter((x) => !entries.has(x));
+  for (const [k, v] of ((await db.entriesByNames(prev.id, curNames)) || new Map())) entries.set(k, v);
   return changeSummary(cur, { entries, total: totalOf(prev) }, topN);
 }
 function totalOf(scan) {

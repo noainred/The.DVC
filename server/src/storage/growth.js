@@ -276,7 +276,7 @@ export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROW
   const growth = {};
   for (const p of periods) {
     let sum = 0; let measured = 0; let missing = 0; let lagging = 0; let inexact = 0; let widened = 0;
-    let perDay = 0; let perDayN = 0;
+    let perDay = 0; let perDayN = 0; let used = 0; let usedN = 0;
     for (const d of devices) {
       const g = d.growth[p.key];
       // v2.681(R2D-03): 최신 관측이 어제보다 오래된 장비의 증가량은 '이 기간' 이 아니라 그 장비의 옛 날짜 기준이다 —
@@ -291,6 +291,8 @@ export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROW
       sum += g.bytes; measured += 1;
       const pd = numOrNull(g.perDayBytes);
       if (pd != null) { perDay += pd; perDayN += 1; }
+      const ub = numOrNull(d.usedBytes);
+      if (ub != null) { used += ub; usedN += 1; }
     }
     growth[p.key] = {
       bytes: measured ? sum : null,
@@ -301,6 +303,10 @@ export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROW
       // v2.733(C2-03): 하루 증가량은 **장비별 perDayBytes 의 합**이다 — 합계 ÷ 요청 일수는 더 긴 구간으로 비교한 장비(widened)를
       //   부풀린다. 더한 장비 중 하루 증가량을 모르는 장비가 있으면 부분 합을 내지 않고 null 이다.
       perDayBytes: measured && perDayN === measured ? perDay : null,
+      // v2.740(감사 F-02): 이 기간 합계에 **더한 장비**의 지금 사용량 합 — 증가율(%)의 분모는 이것 − bytes(= 그 장비들의 기준일
+      //   사용량)이다. 전 장비 사용량(usedBytes)을 쓰면 기준선이 없거나 뺀 장비의 사용량이 분모에 들어가 증가율이 과소다.
+      //   더한 장비 중 사용량을 모르는 장비가 있으면 null(부분 분모 금지). 웹 aggregateGrowth 와 같은 규칙이다(테스트 대조).
+      usedMeasured: measured && usedN === measured ? used : null,
       // 이 기간 합계에 넣을 수 있는 가장 긴 실제 구간(일) — 화면·공개 API 가 기준을 말할 때 쓴다(숫자를 박지 않게).
       maxSpanDays: maxSpanDaysFor(p.days),
       ...(lagging ? { lagging } : {}),

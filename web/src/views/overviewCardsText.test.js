@@ -45,3 +45,21 @@ describe('v2.727 전력 noTime', () => {
     expect(m).toMatch(/시각 없음 1/); expect(m).toMatch(/읽은 장비만의 합/);
   });
 });
+
+// v2.740(감사 F-03): 네트워크 전력은 CVP 전력 탭과 같은 판정 — '오래된 값' 에 사유(staleBy)를 붙이고, 각주가 6시간 기준을 네트워크에 적용한다고 말하지 않는다.
+describe('v2.740 F-03 네트워크 전력 오래된 값 사유', () => {
+  it('network.staleBy 를 사유 문구로 붙인다(스토리지는 붙이지 않는다)', () => {
+    const n = powerCatNote('network', { measured: 1, devices: 3, stale: 2, staleBy: { never: 1, 'parts-stale': 1 } });
+    expect(n).toContain('오래된 값 2(');
+    expect(n).toContain('수집 기록 없음 1');
+    expect(n).toContain('부품 목록 오래됨 1');
+    const s = powerCatNote('storage', { measured: 1, devices: 2, stale: 1, staleBy: { never: 1 } });
+    expect(s).toContain('오래된 값 1');
+    expect(s).not.toContain('수집 기록 없음');
+  });
+  it('각주가 네트워크에 6시간 기준을 말하지 않는다', () => {
+    const last = T.POWER_FOOTNOTE[T.POWER_FOOTNOTE.length - 1];
+    expect(last).not.toMatch(/6시간보다 오래된 네트워크/);
+    expect(last).toContain('CVP 화면과 같은 기준');
+  });
+});

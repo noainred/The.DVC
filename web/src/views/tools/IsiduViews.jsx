@@ -1,5 +1,6 @@
 /**
- * '아이실론 디렉터리 사용량' 서브메뉴 4페이지(v2.739) — 서머리 · 법인 현황 · 수집 상태 · 전 법인 Top 10.
+ * '아이실론 디렉터리 사용량' 서브메뉴(v2.739) — 법인 현황 · 전 법인 Top 10 · 수집 상태.
+ *  · v2.740(사용자 요청): 서머리 탭을 없앴다(첫 화면은 법인 현황). 수집 대상 설정은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)으로 옮겼다.
  * 배치는 승인된 시안(Claude Design '아이실론 디렉터리 사용량 서브메뉴 시안' 4장)을 따른다. 계산은 isiduOverviewText.js(순수)가 한다.
  *  · 대상 목록(상태·법인·장비)은 메인 목록 응답, 7일 변화·30일 추이·상위 폴더는 개요 응답(`/tools/isilon-dirusage/overview`)이다.
  *  · 개요를 아직 못 받았으면 그 칸만 '불러오는 중' 이고, 받지 못했으면 그 사실을 말한다(0 으로 채우지 않는다).
@@ -12,11 +13,12 @@ import {
   bytesText, deltaView, shareText, countText, nodeText, everyText, durationText, targetStatus, targetChip, keyStatus, keyRows, triggerText, failTitle, targetMailLine, tailPath,
 } from './isiduText.js';
 import {
-  STATUS_GROUPS, statusCounts, summaryModel, crossTop, corpChoices, corpCards, CORP_SORTS, miniLine, nextRunOf, aheadText, attemptText,
+  STATUS_GROUPS, statusCounts, crossTop, corpChoices, corpCards, CORP_SORTS, miniLine, nextRunOf, aheadText, attemptText,
+  ovStatus, ovBanner, topEmptyText, cardOvText, corpChipView, noResultCount, OV_UNREAD,
 } from './isiduOverviewText.js';
 
-function Delta({ d, isNew = null, hasBase = true }) {
-  const v = deltaView(d, { isNew, hasBase });
+function Delta({ d, isNew = null, hasBase = true, unread = false }) {
+  const v = deltaView(d, { isNew, hasBase, unread });
   return <span className={`isd-delta t-${v.tone}`} title={v.title || undefined}>{v.text}</span>;
 }
 
@@ -31,94 +33,18 @@ function Progress({ prog }) {
   );
 }
 
+/** 개요를 못 읽었거나(직전 값도 없음) 새로 못 읽었으면(직전 값 표시 중) 그 사실을 말한다 — 판정·문구는 ovBanner(v2.740 D-02). */
 function OvState({ ov }) {
-  if (ov.error && !ov.data) return <div className="isd-banner amber">7일 변화·추이·상위 폴더를 읽지 못했습니다 — {String(ov.error?.message || ov.error)} 대상 목록은 그대로 보입니다.</div>;
-  return null;
-}
-
-/* ═══════════════ ① 서머리 ═══════════════ */
-
-export function SummaryView({ targets, ov, ovById, now, openView, openTarget }) {
-  const m = useMemo(() => summaryModel(targets, ovById, now), [targets, ovById, now]);
-  const top5 = useMemo(() => crossTop(targets, ovById, { n: 5 }), [targets, ovById]);
-  const T = m.totals;
-  const d7 = deltaView(T.delta7 == null ? null : { bytes: T.delta7, withinRes: T.delta7Within }, { hasBase: T.delta7 != null });
-  const unreadCorps = m.corps.filter((c) => c.bytes == null).map((c) => c.label);
-  return (
-    <>
-      <OvState ov={ov} />
-      <div className="isd-kpis">
-        <div className="isd-kpi"><div className="isd-kpi-label">법인 · 대상</div><div className="isd-kpi-val">{countText(T.corps)} <small className="isd-kpi-small">· {countText(T.targets)}</small></div><div className="isd-kpi-sub">결과 있음 {countText(T.measured)} · 결과 없음 {countText(T.unmeasured)}</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">사용자 폴더 합</div><div className="isd-kpi-val">{countText(T.users)}</div><div className="isd-kpi-sub">결과 있는 대상 {countText(T.measured)}개 기준</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">디렉터리 크기 합</div><div className="isd-kpi-val">{bytesText(T.bytes)}</div><div className="isd-kpi-sub">{T.unmeasured ? `결과 없는 ${countText(T.unmeasured)}개${unreadCorps.length ? `(${unreadCorps.slice(0, 4).join(' · ')}${unreadCorps.length > 4 ? ' …' : ''})` : ''} 제외` : '모든 대상 포함'}</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">7일 변화 합</div><div className={`isd-kpi-val t-${d7.tone}`}>{T.delta7 == null ? '—' : d7.text}</div><div className="isd-kpi-sub">{!ov.data ? '불러오는 중…' : T.delta7 == null ? '7일 전 수집이 있는 대상이 없습니다' : `7일 전 수집이 있는 대상 ${countText(T.delta7Targets)}개 기준${T.delta7WithinCount ? ` · 반올림 해상도 안의 차이 ${countText(T.delta7WithinCount)}개는 0 으로 셉니다` : ''}`}</div></div>
-      </div>
-
-      <div className="isd-split">
-        <section className="isd-card isd-grow3" aria-label="법인별 용량">
-          <div className="isd-cardhead"><h3>법인별 용량</h3><button type="button" className="isd-link" onClick={() => openView('corps')}>법인 현황에서 보기 →</button></div>
-          {m.corps.map((c) => (
-            <button key={c.corp || '(none)'} type="button" className="isd-corprow" onClick={() => openView('corps')}>
-              <span className="nm"><span className={`isd-dot ${c.worst}`} aria-hidden="true" />{c.label}</span>
-              <span className="mid">
-                {c.bytes != null ? <span className="isd-bar thin" aria-hidden="true"><div className="hi" style={{ width: `${c.share > 0 ? Math.max(1, Math.round(c.share * 100)) : 0}%` }} /></span> : null}
-                <span className="sub">{c.bytes != null
-                  ? `대상 ${countText(c.targets)} · 사용자 ${countText(c.users)} · ${agoText(c.lastOk, now)}${c.errLines ? ` · 권한 오류 ${countText(c.errLines)}줄` : ''}${c.unread.length ? ` · 결과 없는 대상 ${c.unread.length}개` : ''}`
-                  : `아직 성공한 수집 없음 · ${c.unread[0]?.st?.text || '수집 전'}`}</span>
-              </span>
-              <span className="isd-size">{bytesText(c.bytes)}</span>
-              <Delta d={c.delta7 == null ? null : { bytes: c.delta7, withinRes: c.delta7Within }} hasBase={c.delta7 != null} />
-            </button>
-          ))}
-          <div className="isd-note">막대 = 디렉터리 크기 합 대비 비중 · 변화 = 7일 전 수집 대비(7일 전 수집이 있는 대상만 더하고, -h 반올림 해상도 안의 차이는 0 으로 셉니다) · 결과 없는 법인은 막대 없이 사유를 적습니다.</div>
-        </section>
-
-        <section className="isd-card isd-grow2" aria-label="수집 상태 요약">
-          <div className="isd-cardhead"><h3>수집 상태</h3><button type="button" className="isd-link" onClick={() => openView('status')}>수집 상태 자세히 →</button></div>
-          <div className="isd-tiles">
-            {STATUS_GROUPS.map(([k, label]) => (
-              <button key={k} type="button" className={`isd-tile ${k}`} onClick={() => openView('status', k)}><span>{label}</span><b>{countText(m.counts[k])}</b></button>
-            ))}
-          </div>
-          {m.watch.length ? m.watch.slice(0, 5).map(({ t, st, prog }) => (
-            <div key={t.id} className="isd-watch">
-              <span className="nm">{targetChip(t).corp || '—'}</span>
-              <span className="body">
-                <span className="row1"><Tag st={st} /><span>{prog ? attemptText(t, now).text : (t.lastTry ? `마지막 시도 ${agoText(t.lastTry.ts, now)}` : '시도 기록 없음')}</span></span>
-                <span className="isd-note">{t.label || targetChip(t).device}{st.detail ? ` · ${st.detail}` : ''}</span>
-                <Progress prog={prog} />
-              </span>
-            </div>
-          )) : <div className="isd-note">모든 대상이 정상입니다.</div>}
-          {m.watch.length > 5 ? <button type="button" className="isd-link" onClick={() => openView('status')}>외 {m.watch.length - 5}개 — 수집 상태에서 보기 →</button> : null}
-        </section>
-      </div>
-
-      <section className="isd-card" aria-label="전 법인 사용량 상위 5">
-        <div className="isd-cardhead"><h3>전 법인 사용량 상위 5</h3><button type="button" className="isd-link" onClick={() => openView('top10')}>Top 10 전체 보기 →</button></div>
-        {!ov.data && !ov.error ? <div className="isd-note">불러오는 중…</div> : top5.top.length ? (
-          <div className="isd-top5">
-            {top5.top.map((u) => (
-              <button key={u.key} type="button" className="isd-top5card" onClick={() => openTarget(u.targetId)} title={`${u.corpLabel} · ${u.device} · ${u.path}`}>
-                <span className="row1"><span className="isd-mono">#{u.rank}</span><span className="isd-tag muted">{u.corpLabel}</span></span>
-                <b>{u.name}</b>
-                <span className="row1"><span className="isd-size big">{bytesText(u.bytes)}</span><Delta d={u.d7} isNew={u.new7} hasBase={u.hasBase} /></span>
-              </button>
-            ))}
-          </div>
-        ) : <div className="isd-note">성공한 수집이 있는 대상이 없습니다.</div>}
-        <div className="isd-note">각 대상의 최신 성공 수집 기준입니다 — 대상마다 수집 시각이 다릅니다{top5.oldestTs ? `(가장 오래된 값 ${agoText(top5.oldestTs, now)})` : ''}.{top5.excluded.length ? ` 결과 없는 대상 ${top5.excluded.length}개는 빠져 있습니다.` : ''}</div>
-      </section>
-    </>
-  );
+  const b = ovBanner(ov);
+  return b ? <div className={`isd-banner ${b.tone}`}>{b.text}</div> : null;
 }
 
 /* ═══════════════ ② 법인 현황 ═══════════════ */
 
-function MiniLine({ points }) {
+function MiniLine({ points, ovSt }) {
   const W = 240; const H = 44;
   const g = miniLine(points, W, H);
-  if (!g.d && !g.dots.length) return <div className="isd-note">30일 추이 없음</div>;
+  if (!g.d && !g.dots.length) return <div className="isd-note">{cardOvText('trend', ovSt)}</div>;
   return (
     <svg className="isd-mini" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
       {g.d ? <path d={g.d} fill="none" stroke="#2dd4bf" strokeWidth="1.8" vectorEffect="non-scaling-stroke" /> : null}
@@ -131,7 +57,9 @@ function MiniLine({ points }) {
 export function CorpsView({ targets, ov, ovById, now, openTarget }) {
   const [mode, setMode] = useState('card');
   const [sort, setSort] = useState('size');
-  const cards = useMemo(() => corpCards(targets, ovById, now, sort), [targets, ovById, now, sort]);
+  const ovSt = ovStatus(ov);
+  const unread = ovSt === 'unread';
+  const cards = useMemo(() => corpCards(targets, ovById, now, sort, { unread }), [targets, ovById, now, sort, unread]);
   return (
     <>
       <OvState ov={ov} />
@@ -158,15 +86,15 @@ export function CorpsView({ targets, ov, ovById, now, openTarget }) {
                   <div className="stats">
                     <span><small>사용자 폴더</small>{countText(c.users)}</span>
                     <span><small>크기</small>{bytesText(c.bytes)}</span>
-                    <span><small>7일 변화</small><Delta d={c.d7} hasBase={c.hasBase} /></span>
+                    <span><small>7일 변화</small><Delta d={c.d7} hasBase={c.hasBase} unread={c.ovUnread} /></span>
                     <span><small>마지막 성공</small>{agoText(c.okTs, now)}</span>
                   </div>
-                  <MiniLine points={c.points} />
+                  <MiniLine points={c.points} ovSt={ovSt} />
                   {c.top3.length ? (
                     <ol className="top3">
                       {c.top3.map((u) => <li key={u.name}><span className="nm">{u.name}</span><span className="isd-mono">{bytesText(u.bytes)}</span><Delta d={u.d7} isNew={u.new7} hasBase={c.hasBase} /></li>)}
                     </ol>
-                  ) : <div className="isd-note">{ov.data ? '상위 폴더 없음' : '상위 폴더 불러오는 중…'}</div>}
+                  ) : <div className="isd-note">{cardOvText('top3', ovSt)}</div>}
                 </>
               ) : (
                 <div className="isd-empty"><b>{c.st.text}</b>{c.st.detail ? <div className="isd-note">{c.st.detail}</div> : null}{c.prog ? <Progress prog={c.prog} /> : null}</div>
@@ -188,7 +116,7 @@ export function CorpsView({ targets, ov, ovById, now, openTarget }) {
                   <td><span className={`isd-node${c.t.agent ? ' edge' : ''}`}>{c.chip.node}</span></td>
                   <td className="isd-mono" style={{ textAlign: 'right' }} data-sort={c.users ?? ''}>{countText(c.users)}</td>
                   <td className="isd-mono" style={{ textAlign: 'right' }} data-sort={c.bytes ?? ''}>{bytesText(c.bytes)}</td>
-                  <td style={{ textAlign: 'right' }} data-sort={c.d7?.bytes ?? ''}><Delta d={c.d7} hasBase={c.hasBase} /></td>
+                  <td style={{ textAlign: 'right' }} data-sort={c.d7?.bytes ?? ''}><Delta d={c.d7} hasBase={c.hasBase} unread={c.ovUnread} /></td>
                   <td data-sort={c.okTs ?? ''}>{agoText(c.okTs, now)}</td>
                   <td><Tag st={c.st} /></td>
                 </tr>
@@ -225,7 +153,8 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
             <button key={k} type="button" className={`isd-fchip${filter === k ? ' on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} disabled={!counts[k]}><span className={`isd-dot ${k}`} aria-hidden="true" /> {label} {countText(counts[k])}</button>
           ))}
         </div>
-        <div className="isd-actions"><button type="button" className="isd-btn" onClick={openBulk} title="여러 대상의 주기·시한·켜기 등을 한꺼번에 바꾸거나, 한꺼번에 수집·시험합니다">일괄 변경 · 일괄 수집</button></div>
+        {/* v2.740: 일괄 변경·일괄 수집은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)으로 옮겼다 — 슈퍼 관리자에게만 그 화면으로 가는 길을 보인다. */}
+        {openBulk ? <div className="isd-actions"><button type="button" className="isd-btn" onClick={openBulk} title="설정 › 수집 서버 › 아이실론 디렉터리 사용량 › 일괄 변경으로 이동합니다(슈퍼 관리자 전용)">일괄 변경 · 일괄 수집(설정)</button></div> : null}
       </div>
 
       <section className="isd-card" aria-label="대상별 수집 상태">
@@ -332,8 +261,11 @@ function spanText(r, now) {
 
 export function Top10View({ targets, ov, ovById, now, openTarget }) {
   const [pick, setPick] = useState(() => new Set());
-  const choices = useMemo(() => corpChoices(targets, ovById), [targets, ovById]);
-  const r = useMemo(() => crossTop(targets, ovById, { corps: pick, n: 10 }), [targets, ovById, pick]);
+  const ovSt = ovStatus(ov);
+  const unread = ovSt === 'unread';
+  const choices = useMemo(() => corpChoices(targets, ovById, { unread }), [targets, ovById, unread]);
+  const r = useMemo(() => crossTop(targets, ovById, { corps: pick, n: 10, unread }), [targets, ovById, pick, unread]);
+  const noResult = noResultCount(r);
   const max = r.top[0]?.bytes || 0;
   const toggle = (c) => setPick((cur) => { const n = new Set(cur); if (n.has(c)) n.delete(c); else n.add(c); return n; });
   return (
@@ -341,19 +273,22 @@ export function Top10View({ targets, ov, ovById, now, openTarget }) {
       <OvState ov={ov} />
       <div className="isd-tools" role="group" aria-label="법인 고르기">
         <button type="button" className={`isd-fchip${pick.size ? '' : ' on'}`} aria-pressed={!pick.size} onClick={() => setPick(new Set())}>전 법인</button>
-        {choices.map((c) => (
-          <button key={c.corp || '(none)'} type="button" className={`isd-fchip${pick.has(c.corp) ? ' on' : ''}`} aria-pressed={pick.has(c.corp)} onClick={() => toggle(c.corp)} disabled={!c.withData}
-            title={!c.withData ? '이 법인은 아직 성공한 수집이 없습니다' : `대상 ${c.targets}개`}>{c.label}{!c.withData ? ' · 결과 없음' : ''}</button>
-        ))}
+        {choices.map((c) => {
+          const cv = corpChipView(c);
+          return (
+            <button key={c.corp || '(none)'} type="button" className={`isd-fchip${pick.has(c.corp) ? ' on' : ''}`} aria-pressed={pick.has(c.corp)} onClick={() => toggle(c.corp)} disabled={cv.disabled}
+              title={cv.title}>{c.label}{cv.suffix}</button>
+          );
+        })}
       </div>
       <div className="isd-kpis">
         <div className="isd-kpi"><div className="isd-kpi-label">Top 10 합</div><div className="isd-kpi-val">{bytesText(r.sum)}</div><div className="isd-kpi-sub">{r.top.length ? `${countText(r.top.length)}개 폴더` : '—'}</div></div>
         <div className="isd-kpi"><div className="isd-kpi-label">기준 크기 대비 비중</div><div className="isd-kpi-val">{shareText(r.share)}</div><div className="isd-kpi-sub">기준 = 고른 대상의 디렉터리 크기 합 {bytesText(r.base)}</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">기준 대상</div><div className="isd-kpi-val">{countText(r.included.length)}</div><div className="isd-kpi-sub">{r.excluded.length ? `결과 없는 ${countText(r.excluded.length)}개 제외` : '고른 법인의 모든 대상'}{r.oldestTs ? ` · 가장 오래된 수집 ${agoText(r.oldestTs, now)}` : ''}</div></div>
+        <div className="isd-kpi"><div className="isd-kpi-label">기준 대상</div><div className="isd-kpi-val">{countText(r.included.length)}</div><div className="isd-kpi-sub">{unread ? OV_UNREAD : noResult ? `결과 없는 ${countText(noResult)}개 제외` : r.excluded.length ? `개요를 받는 중인 ${countText(r.excluded.length)}개 제외` : '고른 법인의 모든 대상'}{r.oldestTs ? ` · 가장 오래된 수집 ${agoText(r.oldestTs, now)}` : ''}</div></div>
       </div>
       <section className="isd-card" aria-label="전 법인 사용량 Top 10">
         <div className="isd-cardhead"><h3>{pick.size ? `${[...pick].map((c) => c || '법인 미지정').join(' · ')} 사용량 Top 10` : '전 법인 사용량 Top 10'}</h3><div className="isd-note">막대 = 그 대상 디렉터리 대비 비중 · 변화 = 그 대상의 7일 전 수집 대비</div></div>
-        {!ov.data && !ov.error ? <div className="isd-note">불러오는 중…</div> : r.top.length ? (
+        {!r.top.length ? <div className="isd-note">{topEmptyText(ovSt, { picked: pick.size > 0 })}</div> : (
           <STable className="v3-table" minWidth={940}>
             <thead><tr><th>순위</th><th>사용자 폴더</th><th>법인 · 장비</th><th style={{ textAlign: 'right' }}>크기</th><th>그 대상 디렉터리 대비</th><th style={{ textAlign: 'right' }}>7일 변화</th><th>수집 시각</th></tr></thead>
             <tbody>
@@ -370,8 +305,8 @@ export function Top10View({ targets, ov, ovById, now, openTarget }) {
               ))}
             </tbody>
           </STable>
-        ) : <div className="isd-note">{pick.size ? '고른 법인에 성공한 수집이 있는 대상이 없습니다.' : '성공한 수집이 있는 대상이 없습니다.'}</div>}
-        <div className="isd-note">대상마다 수집 시각이 다릅니다{spanText(r, now)} — 한 순간의 순위가 아닙니다.{r.approx ? ' -h 표기는 반올림 값이라 크기가 같아 보이는 폴더의 순서는 정확하지 않을 수 있습니다.' : ''}{r.excluded.length ? ` 결과 없는 대상 ${r.excluded.length}개는 빠져 있습니다.` : ''}</div>
+        )}
+        <div className="isd-note">대상마다 수집 시각이 다릅니다{spanText(r, now)} — 한 순간의 순위가 아닙니다.{r.approx ? ' -h 표기는 반올림 값이라 크기가 같아 보이는 폴더의 순서는 정확하지 않을 수 있습니다.' : ''}{noResult ? ` 결과 없는 대상 ${noResult}개는 빠져 있습니다.` : ''}</div>
       </section>
     </>
   );

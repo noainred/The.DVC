@@ -169,17 +169,19 @@ test('C-05 vSAN — enabled + membershipList 0개는 members null(판정 보류)
 });
 
 /* ── C-06 ──────────────────────────────────────────────────────────────────── */
-test('C-06 전력 합산 — 시각이 둘 다 없는 장비는 stale 이 아니라 noTime(합계 제외는 같다) · 웹 사유 문구 1:1', async () => {
+// v2.740(감사 F-03): 네트워크는 CVP 전력 탭과 같은 판정(cvp/confirm.js)이 됐다 — 수집 시각이 없는 장비는 noTime 이 아니라
+//   staleBy.never(수집 기록 없음), 부품 목록이 낡은 장비는 staleBy['parts-stale'] 다. noTime 구분은 스토리지에 남는다.
+test('C-06 전력 합산 — 시각이 둘 다 없는 스토리지 장비는 stale 이 아니라 noTime · 네트워크는 CVP 판정 사유 · 웹 사유 문구 1:1', async () => {
   const { buildPowerTotal } = await import('../src/power/total.js');
   const NOW = 1_800_000_000_000;
   const psu = (w) => ({ kind: 'psu', state: 'ok', power: { inW: w } });
   const r = buildPowerTotal({
     now: NOW,
     network: [
-      { cvpId: 'c', key: 'n1', partsList: [psu(100)], partsAt: null, collectedAt: null },           // 시각 없음
-      { cvpId: 'c', key: 'n2', partsList: [psu(100)], partsAt: NOW - 7 * H },                     // 오래됨
-      { cvpId: 'c', key: 'n3', partsList: [psu(100)], partsAt: NOW - 60_000 },                    // 정상
-      { cvpId: 'c', key: 'n4', partsList: [] },                                                   // 못 읽음
+      { cvpId: 'c', key: 'n1', partsList: [psu(100)], partsAt: null, collectedAt: null },                        // 시각 없음 → never
+      { cvpId: 'c', key: 'n2', partsList: [psu(100)], partsAt: NOW - 7 * H, collectedAt: NOW - 60_000 },        // 부품 오래됨 → parts-stale
+      { cvpId: 'c', key: 'n3', partsList: [psu(100)], partsAt: NOW - 60_000, collectedAt: NOW - 60_000 },       // 정상
+      { cvpId: 'c', key: 'n4', partsList: [], collectedAt: NOW - 60_000 },                                      // 못 읽음
     ],
     storage: [
       { id: 's1', type: 'powerstore', snap: { ok: true, extra: { power: { watts: 500, source: 'PowerStore' } } } },                 // 시각 없음(at·collectedAt 둘 다)
@@ -187,7 +189,8 @@ test('C-06 전력 합산 — 시각이 둘 다 없는 장비는 stale 이 아니
       { id: 's3', type: 'powerstore', snap: { ok: true, collectedAt: NOW - 60_000, extra: { power: { watts: 500 } } } },           // 정상
     ],
   });
-  assert.equal(r.network.noTime, 1); assert.equal(r.network.stale, 1); assert.equal(r.network.unread, 1); assert.equal(r.network.measured, 1);
+  assert.equal(r.network.noTime, undefined); assert.equal(r.network.stale, 2); assert.deepEqual(r.network.staleBy, { never: 1, 'parts-stale': 1 });
+  assert.equal(r.network.unread, 1); assert.equal(r.network.measured, 1);
   assert.equal(r.network.watts, 100, '시각 없는 값은 합계에 넣지 않는다');
   assert.equal(r.storage.noTime, 1); assert.equal(r.storage.stale, 1); assert.equal(r.storage.measured, 1); assert.equal(r.storage.watts, 500);
   const i1 = r.storage.issues.find((x) => x.id === 's1'); assert.equal(i1.state, 'no-time'); assert.equal(i1.reason, 'no-time'); assert.equal(i1.ts, null);

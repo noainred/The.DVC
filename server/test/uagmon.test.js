@@ -146,12 +146,13 @@ test('Store: 손상된 설정 파일은 .corrupt 보존 후 빈 값으로 시작
 
 /* ------------------------------ Auth ------------------------------ */
 
-test('Auth: IP별 실패 잠금 + Bearer 토큰 검증, 로컬 모드는 전부 통과', () => {
+test('Auth: IP별 실패 잠금 + Bearer 토큰 검증, 로컬 모드는 전부 통과', async () => {
   const a = new Auth({ required: true, passwordHash: hashPassword('secret-pw') });
   // 다른 IP 의 실패가 내 IP 를 잠그지 않는다(출발지별 카운터).
-  for (let i = 0; i < 5; i++) assert.equal(a.login('1.1.1.1', 'wrong').ok, false);
-  assert.match(a.login('1.1.1.1', 'secret-pw').error || '', /잠겼습니다/, '잠긴 IP 는 정답도 거부');
-  const r = a.login('2.2.2.2', 'secret-pw');
+  // v2.740(F-11): login 은 비동기다(스레드 풀 scrypt) — 결과를 기다린다(판정 내용은 그대로).
+  for (let i = 0; i < 5; i++) assert.equal((await a.login('1.1.1.1', 'wrong')).ok, false);
+  assert.match((await a.login('1.1.1.1', 'secret-pw')).error || '', /잠겼습니다/, '잠긴 IP 는 정답도 거부');
+  const r = await a.login('2.2.2.2', 'secret-pw');
   assert.equal(r.ok, true, '다른 IP 는 정상 로그인');
   assert.equal(a.check(`Bearer ${r.token}`), true);
   assert.equal(a.check('Bearer deadbeef'), false);

@@ -22,7 +22,7 @@ export const PERM_LABEL = {
   backup: '백업·복원',
   audit: '감사 로그',
 };
-export const ROLE_LABEL = { admin: '관리자(admin)', operator: '운영자(operator)', viewer: '조회자(viewer)' };
+export const ROLE_LABEL = { super_admin: '슈퍼 관리자(super_admin)', admin: '관리자(admin)', operator: '운영자(operator)', viewer: '조회자(viewer)' };
 
 export const permName = (k) => PERM_LABEL[k] || String(k);
 export const roleName = (r) => ROLE_LABEL[r] || String(r);

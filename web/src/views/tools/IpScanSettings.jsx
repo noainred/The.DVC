@@ -20,7 +20,7 @@ import { ScanRangeImportModal } from './ScanRangeImportModal.jsx'; // v2.691
 import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
 import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
-import { REPORT_STATE_TEXT, REPORT_STATE_TITLE, agentReportRows, reportKpis, agentDeleteConfirmText, agentDeleteResultText } from './scanRangeImportText.js';
+import { REPORT_STATE_TEXT, REPORT_STATE_TONE, agentReportRows, reportKpis, reportStateNote, reportStateDetail, agentDeleteConfirmText, agentDeleteResultText } from './scanRangeImportText.js';
 import { clearDraft } from './ipamDraft.js'; // v2.694: 지운 에이전트의 편집 초안이 옛 대역을 되살리지 않게
 import BoldText from '../../components/boldText.jsx';
 import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
@@ -348,8 +348,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
             <div className="kpi"><div className="label">에이전트</div><div className="value">{kpi.total}</div></div>
             <div className="kpi"><div className="label">정상 보고</div><div className="value" style={{ color: kpi.ok ? 'var(--green)' : undefined }}>{kpi.ok}</div></div>
             <div className="kpi"><div className="label">보고 늦음</div><div className="value" style={{ color: kpi.late ? 'var(--amber)' : undefined }}>{kpi.late}</div></div>
+            {/* v2.740(F-01): 실패·시한 초과(미완료)는 '정상' 이 아니다 — 겹치지 않는 칸(합계 = 정상 + 늦음 + 미완료 + 꺼짐 + 대기) */}
+            <div className="kpi"><div className="label">미완료(실패·시한)</div><div className="value" style={{ color: kpi.fail ? 'var(--red)' : undefined }}>{kpi.fail}</div></div>
             <div className="kpi"><div className="label">꺼짐</div><div className="value">{kpi.off}</div></div>
-            <div className="kpi"><div className="label">대기·보고 없음</div><div className="value">{kpi.waiting}</div></div>
+            <div className="kpi"><div className="label">대기·건너뜀·보고 없음</div><div className="value">{kpi.waiting}</div></div>
             <div className="kpi"><div className="label">응답한 IP(합)</div><div className="value">{kpi.aliveKnown ? kpi.alive.toLocaleString() : '—'}</div></div>
           </div>
           {delMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: delMsg.ok ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{delMsg.text}</div>}
@@ -380,7 +382,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
                   <td style={{ textAlign: 'right' }} data-sort={x.lines}>{x.lines} / {x.ips.toLocaleString()}{x.invalid ? <span style={{ color: 'var(--red)' }} title="형식 오류 줄 — IP 수에 넣지 않았습니다"> · 오류 {x.invalid}</span> : null}</td>
                   <td className="muted" style={{ fontSize: 12 }} data-sort={x.at ?? ''}>{x.at ? fmtDt(x.at) : '보고 없음'}</td>
                   <td style={{ textAlign: 'right' }} data-sort={x.alive ?? ''}>{x.scanned == null ? '—' : `${Number(x.scanned).toLocaleString()} / `}{x.scanned == null ? '' : <b>{x.alive == null ? '—' : Number(x.alive).toLocaleString()}</b>}</td>
-                  <td data-sort={x.state}><span className={`badge ${x.state === 'ok' ? 'green' : x.state === 'late' ? 'amber' : 'gray'}`} title={REPORT_STATE_TITLE[x.state]}>{REPORT_STATE_TEXT[x.state]}</span></td>
+                  <td data-sort={x.state} title={reportStateDetail(x)}>
+                    <span className={`badge ${REPORT_STATE_TONE[x.state] || 'gray'}`}>{REPORT_STATE_TEXT[x.state]}</span>
+                    {reportStateNote(x) && <div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{reportStateNote(x)}</div>}
+                  </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => openEditor(x.name)}>설정 편집</button>{' '}
                     <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { setAgentFilter(x.name); setSub('ranges'); }}>대역 보기</button>{' '}
@@ -393,7 +398,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
             </tbody>
           </STable>
           {reportList.length === 0 && <div className="muted" style={{ marginTop: 6 }}>{rangesErr ? `에이전트 목록을 읽지 못했습니다(${rangesErr}).` : '등록된 에이전트가 없습니다.'}</div>}
-          <div className="muted" style={{ fontSize: 11, margin: '6px 0 14px' }}>보고 상태는 꺼짐·대기를 ‘늦음’ 과 따로 셉니다. 이 포탈에서 직접 스캔한 결과는 마지막 실행으로 봅니다.</div>
+          <div className="muted" style={{ fontSize: 11, margin: '6px 0 14px' }}>보고 상태는 꺼짐·대기를 ‘늦음’ 과 따로 셉니다. 끝나지 못한 스캔(실패·시한 초과)은 ‘미완료’ 이고 해제 판정이 보류됩니다. 건너뛴 주기는 보고로 세지 않습니다 — ‘마지막 보고’ 는 마지막으로 끝까지 마친 스캔입니다.</div>
 
           <div ref={editorRef} className="card" style={{ padding: 14, minWidth: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 10 }}>설정 편집 — {agentName(agent)}</div>

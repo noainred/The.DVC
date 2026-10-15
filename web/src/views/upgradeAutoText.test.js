@@ -7,7 +7,7 @@ import {
   AUTO_TEXT, STATE_TEXT, TICK_TEXT, APPLYING_NOW, SOURCE_TEXT, autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, intervalText, inText, restoredNote,
   remoteSourceLabel, runningScanWarning, SCAN_KIND_TEXT,
 } from './upgradeAutoText.js';
-import { NO_RECORD_DETAIL } from './upgradeSignatureText.js';
+import { NO_RECORD_DETAIL, trustText } from './upgradeSignatureText.js';
 
 const NOW = Date.UTC(2026, 9, 15, 2, 30, 0);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -230,5 +230,44 @@ describe('v2.737 실행 중 스캔 — 자동 적용 대기 · 수동 적용 경
       for (const m of src.matchAll(/(?:const (?:KIND|JKIND) = |(?:journalScanStarted|scanStarted)\()'([a-z-]+)'/g)) kinds.add(m[1]);
     }
     expect([...kinds].sort()).toEqual(Object.keys(SCAN_KIND_TEXT).sort());
+  });
+});
+
+// v2.740(감사 D-08): 서버는 '이미 최신' 을 ok:false + upToDate:true 로 준다(upgrade.js — 원격 'already up to date' · 같은 번들 'not newer').
+//   actionMsg 가 upToDate 를 보지 않아 영문 원문이 빨간 실패로 떴다(같은 파일 resultSummary 는 '이미 최신' 으로 그렸다).
+describe('v2.740 D-08 — 이미 최신은 실패가 아니다', () => {
+  it('원격 already up to date · 같은 번들 not newer — 두 서버 응답 모양', () => {
+    const a = actionMsg('apply', { ok: false, reason: 'already up to date (2.739.0)', check: { latest: '2.739.0' }, upToDate: true });
+    expect(a.ok).toBe(true);
+    expect(a.warn).toBeFalsy();
+    expect(a.text).toMatch(/이미 최신/);
+    expect(a.text).toMatch(/v2\.739\.0/);
+    expect(a.text).not.toMatch(/already up to date/);
+    const b = actionMsg('apply', { ok: false, reason: 'not newer (2.739.0 <= 2.739.0)', version: '2.739.0', upToDate: true });
+    expect(b.ok).toBe(true);
+    expect(b.text).toMatch(/이미 최신/);
+    expect(b.text).not.toMatch(/not newer/);
+    // 진짜 실패는 그대로 실패
+    expect(actionMsg('apply', { ok: false, reason: '서명 검증 실패' })).toMatchObject({ ok: false, text: '서명 검증 실패' });
+    expect(resultSummary({ at: NOW, ok: false, upToDate: true }).text).toMatch(/이미 최신/);
+  });
+});
+
+// v2.740(감사 B-05): 키 파일 형식 오류가 있으면 서버는 '키 미설정' warn 이 아니라 require 로 본다 — 화면이 그 원인(형식 오류)을 말한다.
+describe('v2.740 B-05 — 신뢰 키 파일 형식 오류를 말한다', () => {
+  it('유효 키 0 + 형식 오류 → 0개가 \'설정 안 됨\' 이 아니라 형식 오류 때문임을 말한다', () => {
+    const t = trustText({ trustedKeys: 0, revokedKeys: 0, policy: 'require', errors: ['repo: keys[0] 공개키를 읽지 못했습니다(Ed25519 SPKI DER base64 가 아님)'] });
+    expect(t.tone).toBe('bad');
+    expect(t.text).toMatch(/형식 오류 1건/);
+    expect(t.text).toMatch(/공개키를 읽지 못했습니다/);
+    expect(t.text).toMatch(/설치하지 않습니다/);
+    expect(t.text.includes('`')).toBe(false);
+  });
+  it('유효 키가 있어도 형식 오류가 있으면 함께 말한다(톤 warn) · 오류가 없으면 예전 문구 그대로', () => {
+    const t = trustText({ trustedKeys: 1, revokedKeys: 0, policy: 'require', errors: ['host: revoked 항목 형식이 틀렸습니다'] });
+    expect(t.tone).toBe('warn');
+    expect(t.text).toMatch(/^1개/);
+    expect(t.text).toMatch(/형식 오류 1건/);
+    expect(trustText({ trustedKeys: 2, revokedKeys: 1, policy: 'require', errors: [] }).text).toBe('2개 · 회수 1개');
   });
 });

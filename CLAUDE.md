@@ -5116,6 +5116,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **UAG Monitor 1.2**(`horizon-uag-monitor/CLAUDE.md` v1.2 절) — Windows 화면 미확인.
     - 남은 후보(다음 점검 첫 후보): `capacity hosts` 표 영구 잔존 · REST 폴백 `d.capacity||0` · NDJSON 폴백 직접 쓰기 3곳 · prune 틱 카운터 · `install.sh --user` ·
       hostAccess 변경 라우트 5개 전체 범위 게이트 · 웹 `Diagnostics.jsx` memtrack 403 무음 · uagmon 비밀번호 무염 SHA-256 · Electron 버전 고정.
+  - ⚠⚠ **v2.740 — 아이실론: 서머리 삭제(탭 = 법인 현황 → 전 법인 Top 10 → 수집 상태) · 수집 대상 설정은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)**
+    (사용자 요청. 웹 `isiduSettingsLink.js`(주소·안내 문구 한 벌)·`IsiduSettingsPage.jsx`(IsiduSettings 를 `page` 로) · `Settings.jsx superOnly`+`visibleSubs` · 서버 `auth/roles.js requireSuperAdmin`.
+    회귀 `server/test/isiduSuper2740.test.js`(실제 api 라우터·인증 켬) + 웹 `isiduSettingsMove2740.test.js`):
+    · 메뉴 숨김은 표시 게이팅이다 — **서버 설정 API 6경로(settings GET/PUT·bulk·test·mail-now·key)가 `requireSuperAdmin`** 이고 결과 화면·`/run`·보고서·CSV 는 관리자 그대로.
+      거부는 403 `super-admin-only` + `requiredRole: ['super_admin']`(**배열** — api.js HttpError 가 배열만 읽어 권한 안내를 만든다). 판정은 roles.js 하나(userMenu 사본은 지웠다).
+    · 인증을 끈 목 서버의 익명 사용자는 슈퍼 관리자가 아니다 — 아이실론 설정이 필요한 실제 프로세스 테스트는 settings 모듈로 미리 써 둔다(`scanRestart2737`).
+    · 같은 릴리스의 점검(6축 → 6그룹)은 `docs/AUDIT-2026-10-15.md`. 동작 변화: 전송 속도 설정 범위 밖 숫자 400 · 키 파일 형식 오류만 있으면 서명 필수 · 전체 소비 전력 `network.noTime` 제거(`staleBy`).
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면

@@ -24,18 +24,13 @@ export const LINE_MAX = 4096;
 const UNITS = Object.freeze({ B: 0, K: 1, M: 2, G: 3, T: 4, P: 5, E: 6 });
 export const SIZE_MODES = Object.freeze(['h', 'k']);
 
-/** 끝 슬래시를 떼고 연속 슬래시를 하나로(선형). '/' 하나는 그대로. */
+/** 끝 슬래시를 떼고 연속 슬래시를 하나로(선형). '/' 하나는 그대로.
+ * v2.740 E-10: 글자마다 이어 붙이던 것(5만 줄 해석에 130~160ms)을 정규식 한 번으로 — `/\/{2,}/g` 는 한 글자 반복이라 되돌아감이 없다(선형). */
 export function normPath(p) {
-  let s = String(p ?? '');
-  let out = '';
-  let prevSlash = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === '/') { if (prevSlash) continue; prevSlash = true; } else prevSlash = false;
-    out += c;
-  }
-  while (out.length > 1 && out.endsWith('/')) out = out.slice(0, -1);
-  return out;
+  let out = String(p ?? '').replace(/\/{2,}/g, '/');
+  let end = out.length;
+  while (end > 1 && out.charCodeAt(end - 1) === 47) end--;
+  return end === out.length ? out : out.slice(0, end);
 }
 
 /**
@@ -133,8 +128,15 @@ export function parseDuOutput(stdout, root, { mode = 'h', stderr = '' } = {}) {
 
 /** 크기 내림차순(같으면 이름 오름차순 — 매번 같은 순서). 원본을 바꾸지 않는다. */
 export function sortBySize(entries) {
-  return [...(Array.isArray(entries) ? entries : [])].sort((a, b) => (b.bytes - a.bytes) || String(a.name).localeCompare(String(b.name)));
+  return [...(Array.isArray(entries) ? entries : [])].sort(bySizeThenName);
 }
+/**
+ * v2.740 E-03: 이름 비교는 재사용 Collator — `a.localeCompare(b)`(인자 없음)와 같은 순서다(명세상 같은 기본 로캘·옵션, 20만 쌍 대조 0건 불일치)
+ * 인데 호출마다 옵션을 다시 해석하지 않는다(v2.503 sortableText 와 같은 판단). 보고서·개요·Top 10 의 순서가 이 비교 하나를 쓴다.
+ */
+const NAME_COLLATOR = new Intl.Collator();
+export const nameCompare = (a, b) => NAME_COLLATOR.compare(String(a), String(b));
+export const bySizeThenName = (a, b) => (b.bytes - a.bytes) || NAME_COLLATOR.compare(String(a.name), String(b.name));
 
 /**
  * 두 관측의 차이. 두 해상도의 반을 더한 것보다 작으면 '해상도 안'(withinRes) — 반올림 값끼리의 차이는 그만큼 흔들린다.

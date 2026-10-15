@@ -7,7 +7,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor, approxFootnote,
-  growthPct, growthPctText, aggregateGrowth, historyResetNote, spanToleranceNote } from './storageGrowthText.js';
+  growthPct, growthPctText, aggregateGrowth, aggregateGrowthPct, historyResetNote, spanToleranceNote } from './storageGrowthText.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-02
@@ -263,7 +263,8 @@ export default function StorageGrowthTool() {
                       // 합계 행도 **장비 행과 같은 2줄**이다 — 한 줄만 다르면 사용자가 '합계에는
                       // 퍼센트가 없다' 고 읽는다(v2.532 Chromium 판독에서 빠져 있는 것을 발견).
                       const c = totalCell(t.growth?.[p.key], unit);
-                      const pctText = growthPctText(growthPct(t.growth?.[p.key], t.usedBytes));
+                      // v2.740(F-02): 분모는 그 기간 합계에 더한 장비의 사용량이다(전 장비 사용량 t.usedBytes 가 아니다).
+                      const pctText = growthPctText(aggregateGrowthPct(t.growth?.[p.key]));
                       return (
                         <td key={p.key} className="right" title={c.title} data-sort={String(t.growth?.[p.key]?.bytes ?? '')}
                           style={{ color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>
@@ -404,7 +405,7 @@ function GroupRow({ g, cols, unit, asOfDay }) {
       </td>
       {cols.map((p) => {
         const c = totalCell(a.growth?.[p.key], unit);
-        const pctText = growthPctText(growthPct(a.growth?.[p.key], a.usedBytes));
+        const pctText = growthPctText(aggregateGrowthPct(a.growth?.[p.key])); // v2.740(F-02): 측정 장비 기준 분모
         return (
           <td key={p.key} className="right" title={c.title} data-sort={String(a.growth?.[p.key]?.bytes ?? '')}
             style={{ color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>

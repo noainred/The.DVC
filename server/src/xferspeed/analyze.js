@@ -11,10 +11,13 @@
  *  · 결측은 null 이다 — 실패 측정의 속도를 0 으로 세지 않는다(평균·중앙값 분모에 넣지 않는다).
  *  · 시간대 히트맵의 칸은 '그 법인 평소 대비' 비율이다(절대 색이면 빠른 법인만 밝고 나머지는 전부 어둡다).
  *    하루 경계·시각은 포탈 시각(`util/dayKey.js` 오프셋 — 기본 한국 시각).
+ *  · ⚠ v2.740 B-09: 마지막 측정이 **지금보다 앞선 시각**(시계를 되돌린 뒤 · `CLOCK_TOL_MS` 넘게)이면 `stale` + `clock-skew` 다.
+ *    `now - newest` 가 음수라 오래됨 판정을 통과해 측정이 멈춘 몇 시간 동안 '정상' 이라 말하던 것을 고쳤다.
+ *  · v2.740 E-02·E-04: `edgeRows`·`heatOf` 는 생성기 하나(`*Gen`)를 동기판·양보판(`*Async`)이 같이 돈다 — 결과는 같다(테스트 대조).
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
-import { cadenceMs, runsPerDay } from './schedule.js';
+import { cadenceMs, runsPerDay, CLOCK_TOL_MS } from './schedule.js';
 
 export const STATES = Object.freeze(['ok', 'slow', 'fail', 'stale', 'no-data', 'excluded']);
 export const MIN_BASELINE = 6;
@@ -115,7 +118,21 @@ function latestView(r) {
  * @param {object} p.settings    정규화된 설정(intervalMs·slowPct·excluded)
  * @param {number} [p.now]
  */
-export function edgeRows({ collectors = [], latest = [], recent = [], settings = {}, now = Date.now(), originOf = null } = {}) {
+/** 생성기를 끝까지 동기로 돈다(양보 지점은 무시). */
+function runSync(it) { let r = it.next(); while (!r.done) r = it.next(); return r.value; }
+/** 생성기를 돌며 `yield` 마다 시간 기준 양보(`util/timeSlice.js createYielder`)를 준다. */
+async function runAsync(it, yielder) {
+  let r = it.next();
+  while (!r.done) { if (yielder) await yielder(); r = it.next(); }
+  return r.value;
+}
+const STEP = 2000;
+
+export function edgeRows(p = {}) { return runSync(edgeRowsGen(p)); }
+/** 양보판 — 결과는 `edgeRows` 와 같다. */
+export function edgeRowsAsync(p = {}, { yielder = null } = {}) { return runAsync(edgeRowsGen(p), yielder); }
+
+function* edgeRowsGen({ collectors = [], latest = [], recent = [], settings = {}, now = Date.now(), originOf = null } = {}) {
   const staleMs = staleMsOf(settings, { now });
   const slowPct = numOrNull(settings.slowPct) ?? 70;
   const excl = new Set((settings.excluded || []).map(lc));
@@ -124,7 +141,9 @@ export function edgeRows({ collectors = [], latest = [], recent = [], settings =
   const recentBy = new Map();
   const sparkFrom = now - SPARK_HOURS * HOUR;
   const baseFrom = now - BASELINE_DAYS * DAY;
+  let i = 0;
   for (const r of recent) {
+    if ((++i % STEP) === 0) yield;
     const ts = numOrNull(r.ts);
     if (ts == null || ts < baseFrom) continue;
     const k = `${lc(r.agent)}|${r.dir}`;
@@ -146,6 +165,7 @@ export function edgeRows({ collectors = [], latest = [], recent = [], settings =
 
   const rows = [];
   for (const [k, e] of known) {
+    yield;
     const dirs = {};
     for (const dir of ['down', 'up']) {
       const lat = latestView(latestBy.get(`${k}|${dir}`));
@@ -164,6 +184,8 @@ export function edgeRows({ collectors = [], latest = [], recent = [], settings =
     let state; let reason = '';
     if (excl.has(k) || excl.has(lc(e.name))) { state = 'excluded'; reason = 'excluded'; }
     else if (!lats.length) { state = 'no-data'; reason = !e.registered ? 'unregistered' : !e.enabled ? 'disabled-central' : !e.hasUrl ? 'no-url' : 'never'; }
+    // v2.740 B-09: 마지막 측정이 지금보다 앞서 있다 — 시계를 되돌렸다. 나이가 음수라 아래 오래됨 판정을 통과하므로 먼저 본다.
+    else if (newest != null && newest > now + CLOCK_TOL_MS) { state = 'stale'; reason = 'clock-skew'; }
     else if (newest != null && staleMs != null && now - newest > staleMs) { state = 'stale'; reason = !e.registered ? 'unregistered' : 'old'; }
     else if (lats.some((l) => !l.ok)) { state = 'fail'; reason = (lats.find((l) => !l.ok)?.kind) || 'http'; }   // 사유 = 실패 종류(XFER_FAIL_KINDS)
     else if (vsPct != null && vsPct < slowPct) { state = 'slow'; reason = 'below-baseline'; }
@@ -227,9 +249,15 @@ export function localHour(ts, offsetMin = DAY_OFFSET_MIN) {
  * 시간대 히트맵 — 엣지 × 24시간(포탈 시각) × 방향. 칸 값 = 그 시간 성공 측정 평균 ÷ 그 엣지 기간 중앙값.
  * 측정이 없는 칸은 null(빈 칸 — 0 이 아니다).
  */
-export function heatOf(samples = [], { offsetMin = DAY_OFFSET_MIN } = {}) {
+export function heatOf(samples = [], o = {}) { return runSync(heatGen(samples, o)); }
+/** 양보판 — 결과는 `heatOf` 와 같다. */
+export function heatOfAsync(samples = [], o = {}, { yielder = null } = {}) { return runAsync(heatGen(samples, o), yielder); }
+
+function* heatGen(samples = [], { offsetMin = DAY_OFFSET_MIN } = {}) {
   const by = new Map();
+  let i = 0;
   for (const r of samples) {
+    if ((++i % STEP) === 0) yield;
     if (!(Number(r?.ok) === 1)) continue;
     const v = numOrNull(r.mbps);
     const ts = numOrNull(r.ts);
@@ -243,6 +271,7 @@ export function heatOf(samples = [], { offsetMin = DAY_OFFSET_MIN } = {}) {
   }
   const out = [];
   for (const e of by.values()) {
+    yield;
     e.all.sort((a, b) => a - b);
     const med = quantile(e.all, 0.5);
     out.push({
