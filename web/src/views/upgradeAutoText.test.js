@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AUTO_TEXT, STATE_TEXT, TICK_TEXT, APPLYING_NOW, SOURCE_TEXT, autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, intervalText, inText, restoredNote,
+  remoteSourceLabel,
 } from './upgradeAutoText.js';
 import { NO_RECORD_DETAIL } from './upgradeSignatureText.js';
 
@@ -165,5 +166,36 @@ describe('리뷰 확정분(v2.736.2)', () => {
     expect(t).not.toMatch(/ · auto(\b|$)/);
     expect(resultSummary({ at: NOW, ok: false, upToDate: true, source: 'collector-push' }).text).toMatch(/수집기로 받은 번들/);
     expect(resultSummary({ at: NOW, ok: false, reason: 'x', source: 'zzz' }).text).toMatch(/ · zzz/); // 모르는 코드는 그대로(지어내지 않는다)
+  });
+});
+
+// v2.736.3 — 사내 미러(Nexus 등) 주소인데 '원격(GitHub) 오류' 라고 적혀 원인을 GitHub 로 오해하게 했다(사용자 캡처).
+describe('remoteSourceLabel — 확인 결과 원격 행 라벨', () => {
+  it('GitHub 주소만 원격(GitHub) 이다', () => {
+    expect(remoteSourceLabel('https://github.com/noainred/The.DVC/releases/download/downloads/versions.json')).toBe('원격(GitHub)');
+    expect(remoteSourceLabel('https://api.github.com/repos/o/r/contents/dl/versions.json')).toBe('원격(GitHub)');
+  });
+  it('사내 미러·모르는 주소는 GitHub 라고 지어내지 않는다', () => {
+    expect(remoteSourceLabel('http://repository.example.local:8081/repository/manager-upgrade/versions.json')).toBe('원격 소스');
+    expect(remoteSourceLabel('https://github.com.evil.example/versions.json')).toBe('원격 소스');
+    expect(remoteSourceLabel('')).toBe('원격 소스');
+    expect(remoteSourceLabel(undefined)).toBe('원격 소스');
+    expect(remoteSourceLabel('not a url')).toBe('원격 소스');
+  });
+  it('업그레이드 화면은 이 함수로 라벨을 정한다(고정 문자열 원격(GitHub) 금지)', () => {
+    const src = fs.readFileSync(path.join(HERE, 'Upgrade.jsx'), 'utf8');
+    expect(src).toMatch(/label=\{remoteSourceLabel\(check\.remote\.source\)\}/);
+    expect(src).not.toMatch(/label="원격\(GitHub\)"/);
+  });
+});
+
+// v2.736.3 — 서버가 저장소 versions.json 을 최대 UPGRADE_CHECK_TIMEOUT_MS(상한 120초) 기다리므로, 그것을 부르는 GET 은
+//   기본 시한 20초 × 재시도로 같은 조회를 겹쳐 보내면 안 된다.
+describe('패키지 저장소 조회(/admin/packages) 요청 시한', () => {
+  it('120초보다 길고 재시도하지 않는다', () => {
+    const src = fs.readFileSync(path.join(HERE, 'AgentDeploy.jsx'), 'utf8');
+    const m = /fetchJson\('\/admin\/packages',\s*\{\},\s*undefined,\s*\{\s*timeoutMs:\s*([\d_]+),\s*retries:\s*0\s*\}\)/.exec(src);
+    expect(m).not.toBeNull();
+    expect(Number(m[1].replace(/_/g, ''))).toBeGreaterThan(120_000);
   });
 });

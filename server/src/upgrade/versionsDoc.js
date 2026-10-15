@@ -24,6 +24,40 @@ export const VERSIONS_MAX_BYTES = (() => {
   const n = numOrNull(process.env.UPGRADE_VERSIONS_MAX_BYTES) ?? 1048576;
   return Math.min(16777216, Math.max(4096, Math.floor(n > 0 ? n : 1048576)));
 })();
+/**
+ * 업그레이드 메타데이터(versions.json · 서명 manifest) 받기 **전체 시한**(재시도·본문 읽기 포함).
+ * v2.736.3: v2.730(I-08)이 전체 시한을 **10초 하나**로 묶은 뒤, 사내 미러(Nexus 등 — 원본을 받아 오는 동안 첫 응답이 늦다)에서
+ *   첫 응답이 10초를 넘기면 **재시도 없이** 확인이 실패했다(사용자 신고 v2.735.3 '전체 시한(10초) 안에 다 받지 못해 중단' ·
+ *   재현: 첫 응답 12초 서버에서 새 코드는 10.0초에 실패·요청 1번, v2.729 방식은 두 번째 시도로 10.7초에 성공).
+ *   v2.729 까지는 시도마다 10초 × 3번이라 최장 약 31초를 기다렸다. 이제 전체 60초 안에서 시도마다 그 1/3(20초)로 재시도한다.
+ *   빈 값·비숫자 = 기본값, [5초, 120초]로 가둔다(웹 '새 버전 확인' 요청 시한 180초 안에 들어가야 한다).
+ */
+export const META_FETCH_TIMEOUT_MS = (() => {
+  const n = numOrNull(process.env.UPGRADE_CHECK_TIMEOUT_MS) ?? 60000;
+  return Math.min(120_000, Math.max(5_000, Math.floor(n > 0 ? n : 60000)));
+})();
+/** 시도 횟수(첫 시도 + 재시도 2회) — resilientFetch `retries: 2` 와 짝이다. */
+export const META_FETCH_ATTEMPTS = 3;
+/** 전체 시한 → 시도별 시한. 시도 3번이 전체 시한 안에 들어가게 1/3(하한 5초 — 그보다 짧으면 정상 미러도 끊는다). */
+export function attemptTimeoutMs(totalMs) {
+  const t = Number(totalMs) > 0 ? Number(totalMs) : META_FETCH_TIMEOUT_MS;
+  return Math.max(5_000, Math.ceil(t / META_FETCH_ATTEMPTS));
+}
+/**
+ * 시한 초과 사유 — 어디서 멈췄는지(응답 헤더를 기다리다 / 본문을 받다가)와 시도 횟수를 밝힌다(조치가 다르다:
+ * 헤더 대기 = 저장소가 아직 응답을 시작하지 않음(사내 미러가 원본을 받아 오는 중일 수 있다) · 본문 = 회선이 느리거나 전송이 멈춤).
+ * 앞머리 `<what> 을 전체 시한(N초) 안에 다 받지 못해 중단했습니다` 는 그대로 둔다(기존 화면·로그가 그 문구로 찾는다).
+ */
+export function metaTimeoutReason(what, { totalMs, attemptMs, attempts, phase }) {
+  const head = `${what} 을 전체 시한(${Math.round(totalMs / 1000)}초) 안에 다 받지 못해 중단했습니다`;
+  const tries = `시도 ${Math.max(1, attempts || 1)}번 · 시도당 최대 ${Math.round(attemptMs / 1000)}초`;
+  if (phase === 'body') {
+    return `${head} — 응답은 시작했지만 본문을 끝까지 받지 못했습니다(${tries}). 회선이 느리거나 저장소가 전송을 멈췄습니다.`;
+  }
+  return `${head} — 저장소가 응답(헤더)을 시작하지 않았습니다(${tries}). 사내 미러(Nexus 등)가 원본에서 받아 오는 중이면 첫 요청이 오래 걸릴 수 있습니다 — `
+    + `잠시 뒤 '새 버전 확인' 을 다시 누르거나 portal.env 의 UPGRADE_CHECK_TIMEOUT_MS(밀리초 · 최대 120000)를 늘리세요.`;
+}
+
 /** versions[] 항목 수 상한 — 공식 릴리스는 15개(VERSIONS_KEEP)만 싣는다. */
 export const VERSIONS_MAX_ENTRIES = 200;
 /** 문자열 필드 길이 상한(파일 이름·버전·해시). */

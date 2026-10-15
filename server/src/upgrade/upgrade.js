@@ -28,7 +28,7 @@ import {
   decideSignature, signatureSummary, manifestPathForArchive, archiveVersionOf, readManifestFile, encodeManifestHeader, MANIFEST_HEADER,
 } from './signature.js';
 import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
-import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets } from './versionsDoc.js';
+import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets, META_FETCH_TIMEOUT_MS, attemptTimeoutMs, metaTimeoutReason } from './versionsDoc.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -412,20 +412,30 @@ function authHeaders(url, token) {
  *   중에** 걸고(Content-Length 가 없거나 거짓이어도 스트림 실측) ③ 항목 수·문자열·필드 타입을 검사해 **선언한 필드만**
  *   돌려준다(versionsDoc.js). 사유 문구에서 주소의 계정·비밀번호·쿼리·토큰을 지운다.
  */
-export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}) {
+export async function fetchRemoteVersions(base, { token, timeout = META_FETCH_TIMEOUT_MS } = {}) {
   const url = joinUrl(base, 'versions.json');
   const secrets = token ? [token] : [];
-  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || 10_000));
+  // v2.736.3: 전체 시한(기본 60초) 안에서 **시도마다** 그 1/3 로 재시도한다 — 예전(v2.730~)에는 전체 시한 10초를 시도 시한으로도
+  //   써서 첫 응답이 10초를 넘기면 재시도 없이 실패했다(versionsDoc.js META_FETCH_TIMEOUT_MS 머리말).
+  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || META_FETCH_TIMEOUT_MS));
+  const attemptMs = Math.min(totalMs, attemptTimeoutMs(totalMs));
   const dl = deadlineSignal(totalMs);
+  let attempts = 1;
+  let phase = 'headers';
   try {
-    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: totalMs, retries: 2, signal: dl.signal });
+    const res = await resilientFetch(url, {
+      dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: attemptMs, retries: 2, signal: dl.signal,
+      onRetry: () => { attempts += 1; },
+    });
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return [null, `versions.json HTTP ${res.status}`]; }
+    phase = 'body';
     const raw = await readJsonCapped(res, VERSIONS_MAX_BYTES, 'versions.json');
     const v = validateVersionsDoc(raw);
     if (!v.ok) return [null, v.reason];
     return [v.doc, null];
   } catch (err) {
-    if (dl.aborted()) return [null, `versions.json 을 전체 시한(${Math.round(totalMs / 1000)}초) 안에 다 받지 못해 중단했습니다`];
+    // 전체 시한 · 마지막 시도의 시도 시한(TimeoutError) 둘 다 '시한 초과' 다 — 후자를 '접속 실패' 로 말하면 원인을 흐린다.
+    if (dl.aborted() || isTimeoutErr(err)) return [null, metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase })];
     if (err instanceof SyntaxError) return [null, 'versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)'];
     const msg = scrubUrlSecrets(err?.message || err, secrets);
     if (/상한/.test(msg)) return [null, `versions.json 이 크기 상한을 넘어 받지 않았습니다 — ${msg}`];
@@ -439,6 +449,13 @@ export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}
   } finally { dl.clear(); }
 }
 
+/** fetch 시도 시한(AbortSignal.timeout) 초과 — 이름·코드로 본다(문구는 런타임마다 다르다). */
+function isTimeoutErr(err) {
+  const n = String(err?.name || ''), c = String(err?.code || err?.cause?.code || '');
+  return n === 'TimeoutError' || c === 'ETIMEOUT_TOTAL' || c === 'UND_ERR_HEADERS_TIMEOUT' || c === 'UND_ERR_BODY_TIMEOUT'
+    || String(err?.cause?.name || '') === 'TimeoutError';
+}
+
 /** latest 항목의 manifest 파일 이름 — 항목에 적힌 이름이 규칙(같은 버전)에 맞으면 그것, 아니면 규칙 이름. */
 function manifestNameOf(entry, latest) {
   const ver = String(latest || '').replace(/^v/, '');
@@ -449,7 +466,7 @@ function manifestNameOf(entry, latest) {
 }
 
 /** Check remote for a newer version (no download). */
-export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10_000 } = {}) {
+export async function checkRemote(baseUrl, currentVersion, { token, timeout = META_FETCH_TIMEOUT_MS } = {}) {
   const base = resolveBase(baseUrl, token);
   const [data, err] = await fetchRemoteVersions(base, { token, timeout });
   const cur = parseVersion(currentVersion) || [0, 0, 0];
@@ -479,16 +496,23 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
  * 원격 manifest 를 받는다(상한 64KB · 전체 시한). 404 는 `missing`(소스에 서명이 없다), 그 밖의 실패는 `reason`
  * (받지 못했다 — '없음' 과 구분한다). 사유에 주소의 계정·쿼리를 싣지 않는다.
  */
-export async function fetchManifestText(url, { token, timeout = 30_000 } = {}) {
-  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || 30_000));
+export async function fetchManifestText(url, { token, timeout = META_FETCH_TIMEOUT_MS } = {}) {
+  const totalMs = Math.max(500, Math.min(120_000, Number(timeout) || META_FETCH_TIMEOUT_MS));
+  const attemptMs = Math.min(totalMs, attemptTimeoutMs(totalMs));   // v2.736.3: versions.json 과 같은 규칙(시도별 시한 + 재시도)
   const dl = deadlineSignal(totalMs);
+  let attempts = 1;
+  let phase = 'headers';
   try {
-    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: totalMs, retries: 2, signal: dl.signal });
+    const res = await resilientFetch(url, {
+      dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: attemptMs, retries: 2, signal: dl.signal,
+      onRetry: () => { attempts += 1; },
+    });
     if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true, reason: `원격 소스에 서명 manifest 가 없습니다(404 · ${safeUrlText(url)})` }; }
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
+    phase = 'body';
     return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
   } catch (err) {
-    if (dl.aborted()) return { text: null, reason: `서명 manifest 를 전체 시한(${Math.round(totalMs / 1000)}초) 안에 받지 못했습니다` };
+    if (dl.aborted() || isTimeoutErr(err)) return { text: null, reason: metaTimeoutReason('서명 manifest', { totalMs, attemptMs, attempts, phase }) };
     // 상한(64KB)을 넘는 manifest 는 '받지 못함' 이 아니라 **형식 오류**다(정책과 무관하게 거부).
     if (/상한/.test(String(err?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
     return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(err?.message || err, token ? [token] : [])}` };
@@ -550,7 +574,7 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     let unavailable;
     let malformed;
     if (manText === undefined && manifestUrl) {
-      const m = await fetchManifestText(manifestUrl, { token, timeout: Math.min(Number(timeout) || 30_000, 30_000) });
+      const m = await fetchManifestText(manifestUrl, { token, timeout: Math.min(Number(timeout) || META_FETCH_TIMEOUT_MS, META_FETCH_TIMEOUT_MS) });
       manText = m.text; unavailable = m.missing ? undefined : m.reason; malformed = m.malformed;
     }
     const sig = decideSignature({
@@ -571,14 +595,15 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
 
 /** Check remote, download the newest, and install it (restart left to caller). */
 export async function upgradeFromRemote(baseUrl, installDir, currentVersion, destDir, { token, timeout = 120_000, pkgName, trust } = {}) {
-  const info = await checkRemote(baseUrl, currentVersion, { token, timeout: Math.min(timeout, 15_000) });
+  // v2.736.3: 설치 경로의 확인도 화면 확인과 같은 시한이다(예전 15초 상한 — 느린 사내 미러에서 '확인' 은 되는데 '적용' 만 실패했다).
+  const info = await checkRemote(baseUrl, currentVersion, { token, timeout: Math.min(timeout, META_FETCH_TIMEOUT_MS) });
   if (!info.ok) return { ok: false, reason: info.error || 'version check failed', check: info };
   if (!info.available) return { ok: false, reason: `already up to date (${info.latest})`, check: info, upToDate: true };
   if (!info.downloadUrl) return { ok: false, reason: 'no download URL found', check: info };
 
   // v2.730(S-10): 서명 manifest 를 **번들보다 먼저** 받아 확인한다 — 서명을 확인할 수 없는 릴리스면 큰 번들을 받지 않는다
   //   (자동 적용이 확인 주기마다 수백 MB 를 받았다 버리는 일을 막는다). 받은 뒤 바이트로 한 번 더(크기·sha) 확인한다.
-  const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token, timeout: Math.min(timeout, 30_000) }) : { text: null, missing: true };
+  const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token, timeout: Math.min(timeout, META_FETCH_TIMEOUT_MS) }) : { text: null, missing: true };
   const pre = decideSignature({
     manifestText: man.text, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'remote-preflight', trust,
     unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,

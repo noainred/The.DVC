@@ -1069,6 +1069,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 같은 릴리스 리뷰 확정분: 'not newer'(같은 번들 push)는 `upToDate:true` · 대상 버전이 이미 설치됐거나 그 뒤 자동 확인이 '최신' 이면 지난 실패(`failureMoot` — status() 가
       currentVersion 을 넘긴다) · 소스가 없으면 tick outcome `no-source`('최신' 금지) · 'applying' 의 '프로세스가 끝났다' 는 **재시작 전 기록일 때만**(지금이면 적용 중) ·
       확인·적용 버튼은 **저장된** enabled 기준. **기록을 파일에 남기기 시작하면 그 기록이 '지금 사유' 인지 판정하는 조건을 함께 둘 것** — 영속화가 실패를 원인보다 오래 살게 한다.
+      ⚠⚠ v2.736.3(사용자 신고 v2.735.3 · 사내 미러 '전체 시한(10초) 안에 다 받지 못해 중단'): **전체 시한을 시도 시한으로도 쓰면 재시도가 없다** — v2.730 I-08 이
+      versions.json 받기를 전체 10초로 묶으며 `timeoutMs` 에도 같은 10초를 넣어, 첫 응답이 10초를 넘는 미러(원본을 받아 오는 Nexus 등)에서 요청 1번으로 실패했다(재현 —
+      v2.729 는 시도 10초 × 3번이라 두 번째 시도로 받았다). 이제 `versionsDoc.js META_FETCH_TIMEOUT_MS`(기본 60초 · env `UPGRADE_CHECK_TIMEOUT_MS` · [5초, 120초]) 안에서
+      시도마다 `attemptTimeoutMs`(1/3, 하한 5초) — versions.json·서명 manifest·패키지 받기·번들 출처·설치 경로 확인(예전 15초 상한)이 같은 값이다. 사유는 `metaTimeoutReason`
+      하나(헤더 대기 / 본문 수신 · 시도 횟수 · 앞머리 문구 불변). 화면 원격 행 라벨은 `upgradeAutoText.remoteSourceLabel`(GitHub 주소만 '원격(GitHub)').
+      **전체 시한 신호를 새로 걸 때 `timeoutMs` 를 같은 값으로 두지 말 것**(회귀 `upgradeCheckTimeout2736_3` ⑧ 이 소스로 고정 · 변이 4/4).
+      ⚠ 이 수정이 없는 v2.735.3~v2.736.2 포탈은 원격 확인이 같은 이유로 막힐 수 있다 — 감시 폴더에 번들 + 같은 버전 manifest 를 함께 넣으면 원격 확인 없이 설치된다.
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):
