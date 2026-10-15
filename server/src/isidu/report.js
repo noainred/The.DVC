@@ -25,6 +25,12 @@ function denomOf(scan) {
   return Number.isFinite(s) && s > 0 ? s : null;
 }
 
+/** 디렉터리 전체 크기의 변화(기준 스캔 대비) — 기준이 없으면 null. 보고서와 개요가 같은 계산을 쓴다. */
+function totalDeltaOf(okScan, base) {
+  if (!base) return null;
+  return deltaOf({ bytes: denomOf(okScan), res: okScan.total?.res ?? okScan.sumRes ?? 1 }, { bytes: denomOf(base), res: base.total?.res ?? base.sumRes ?? 1 });
+}
+
 function baseInfo(base, okScan) {
   if (!base) return null;
   return { scanId: base.id, ts: base.ts, spanDays: Math.round(((okScan.ts - base.ts) / DAY) * 10) / 10, errLines: base.errLines || 0 };
@@ -100,8 +106,8 @@ export async function buildReport(targetId, { topN = 10 } = {}) {
   const sinceSpark = okScan.ts - 30 * DAY;
   const sp = await sparksFor(targetId, [...new Set([...top, ...growth].map((r) => r.name))], sinceSpark);
   const sparkOf = (name) => sp.series.get(name) || null;
-  const totalDelta7 = base7 ? deltaOf({ bytes: denom, res: okScan.total?.res ?? okScan.sumRes ?? 1 }, { bytes: denomOf(base7), res: base7.total?.res ?? base7.sumRes ?? 1 }) : null;
-  const totalDelta30 = base30 ? deltaOf({ bytes: denom, res: okScan.total?.res ?? okScan.sumRes ?? 1 }, { bytes: denomOf(base30), res: base30.total?.res ?? base30.sumRes ?? 1 }) : null;
+  const totalDelta7 = totalDeltaOf(okScan, base7);
+  const totalDelta30 = totalDeltaOf(okScan, base30);
   const lastTry = latest.lastTry && latest.lastTry.id !== okScan.id ? latest.lastTry : null;
   return {
     state: 'ok',
@@ -211,4 +217,71 @@ export async function trend(targetId, { name = '', days = 30 } = {}) {
   return { state: 'ok', name: '', days: d, points, failures };
 }
 
-export function _resetForTest() { _cache.clear(); }
+/* ─────────────── v2.739 개요(서머리 · 법인 현황 · 전 법인 Top 10) ─────────────── */
+
+/** 대상마다 싣는 상위 폴더 수 — 전 법인 Top 10 은 대상별 상위 10 의 합집합에서 고른다(어떤 법인 조합의 상위 10 도 그 대상들의 상위 10 안에 있다). */
+export const OVERVIEW_POOL = 10;
+/** 30일 추이 점 상한(카드의 작은 선 — 마지막 점은 항상 포함). */
+export const OVERVIEW_POINTS = 30;
+const OV_CACHE_MAX = 200;
+const _ovCache = new Map(); // `${targetId}|${okScanId}|${base7Id}` → value
+
+/** 점 줄이기(순수) — 고르게 뽑되 첫·마지막 점은 남긴다. */
+export function thinPoints(points, max = OVERVIEW_POINTS) {
+  const list = Array.isArray(points) ? points : [];
+  const cap = Math.max(2, Math.round(Number(max) || OVERVIEW_POINTS));
+  if (list.length <= cap) return list;
+  const step = (list.length - 1) / (cap - 1);
+  const out = [];
+  for (let i = 0; i < cap; i++) out.push(list[Math.round(i * step)]);
+  return out;
+}
+
+/**
+ * 대상 하나의 개요 — 최신 성공 스캔의 크기·폴더 수, 전체 크기의 7일 변화, 30일 추이(전체 크기), 상위 폴더 OVERVIEW_POOL 개(7일 변화 포함).
+ * 장비 접속 없음. 같은 스캔 조합은 기억한다.
+ */
+async function overviewOf(targetId) {
+  const latest = await db.latestOf(HISTORY_AGENT, targetId);
+  if (latest == null) return { id: targetId, state: 'db-unavailable' };
+  const okScan = latest.okScan;
+  if (!okScan) return { id: targetId, state: latest.lastTry ? 'failed-only' : 'no-data' };
+  const base7 = await db.okScanAtOrBefore(HISTORY_AGENT, targetId, okScan.ts - 7 * DAY);
+  const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}`;
+  const hit = _ovCache.get(key);
+  if (hit) { _ovCache.delete(key); _ovCache.set(key, hit); return hit; }
+  const top = (await db.topEntriesOf(okScan.id, OVERVIEW_POOL)) || [];
+  const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
+  const denom = denomOf(okScan);
+  const scans = (await db.scansIn(HISTORY_AGENT, targetId, okScan.ts - 30 * DAY, 5000)) || [];
+  const points = thinPoints(scans.filter((sc) => sc.ok).map((sc) => ({ ts: sc.ts, bytes: denomOf(sc), partial: (sc.errLines || 0) > 0 })));
+  const value = {
+    id: targetId, state: 'ok',
+    scan: { id: okScan.id, ts: okScan.ts, count: okScan.count, denom, errLines: okScan.errLines || 0, sizeMode: okScan.sizeMode, path: okScan.path, durationMs: okScan.durationMs },
+    base7: baseInfo(base7, okScan),
+    totalDelta7: totalDeltaOf(okScan, base7),
+    points,
+    top: top.map((r) => {
+      const p = b7 ? b7.get(r.name) : undefined;
+      // 기준이 없으면 증감·신규를 판정하지 않는다(null) — 보고서와 같은 규칙.
+      return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 ? !b7.has(r.name) : null };
+    }),
+  };
+  _ovCache.set(key, value);
+  while (_ovCache.size > OV_CACHE_MAX) _ovCache.delete(_ovCache.keys().next().value);
+  return value;
+}
+
+/**
+ * 여러 대상의 개요(설정 순서). 대상 하나의 실패가 다른 대상을 막지 않는다(그 대상만 state 'error').
+ * @param {string[]} targetIds
+ */
+export async function buildOverview(targetIds) {
+  const out = [];
+  for (const id of Array.isArray(targetIds) ? targetIds : []) {
+    try { out.push(await overviewOf(String(id))); } catch (e) { out.push({ id: String(id), state: 'error', error: String(e?.message || e).slice(0, 200) }); }
+  }
+  return out;
+}
+
+export function _resetForTest() { _cache.clear(); _ovCache.clear(); }

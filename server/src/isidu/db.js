@@ -258,6 +258,48 @@ export async function seriesOfNames(agent, targetId, names, sinceTs, maxPoints =
   return { ts: scans.map((sc) => sc.ts), series };
 }
 
+/**
+ * v2.739 개요·전 법인 Top 10 — 스캔의 큰 폴더 상위 n 개. 순서는 parse.sortBySize(크기 내림차순 → 이름 localeCompare)와 같아야 한다
+ * (보고서의 순위와 어긋나지 않게). SQL 의 이름 정렬은 바이트 순이라, n 번째 크기 이상인 행을 **같은 크기까지 전부** 받아 JS 에서 정렬한다
+ * (-h 표기는 같은 크기가 흔하다 — 경계에서 SQL 이 고른 10개가 보고서의 10개와 달라진다).
+ * @returns {Promise<{name:string, bytes:number, res:number, rank:number}[]|null>}
+ */
+export async function topEntriesOf(scanId, n = 10) {
+  const db = await getDb();
+  if (!db) return null;
+  if (scanId == null) return [];
+  const lim = Math.max(1, Math.min(50, Math.round(Number(n) || 10)));
+  const cut = db.prepare('SELECT bytes FROM isidu_entry WHERE scan_id=? ORDER BY bytes DESC LIMIT 1 OFFSET ?').get(Number(scanId), lim - 1);
+  const rows = cut
+    ? db.prepare('SELECT name, bytes, res FROM isidu_entry WHERE scan_id=? AND bytes>=?').all(Number(scanId), cut.bytes)
+    : db.prepare('SELECT name, bytes, res FROM isidu_entry WHERE scan_id=?').all(Number(scanId));
+  rows.sort((a, b) => (b.bytes - a.bytes) || String(a.name).localeCompare(String(b.name)));
+  return rows.slice(0, lim).map((r, i) => ({ name: r.name, bytes: r.bytes, res: r.res, rank: i + 1 }));
+}
+
+/** 그 스캔에서 고른 이름들의 크기 → Map(name → {bytes,res}). 이름마다 PK 선탐색 — 그 스캔에 없는 이름은 Map 에 없다. */
+export async function entriesByNames(scanId, names) {
+  const db = await getDb();
+  if (!db) return null;
+  const m = new Map();
+  if (scanId == null) return m;
+  const one = db.prepare('SELECT bytes, res FROM isidu_entry WHERE scan_id=? AND name=?');
+  for (const name of names || []) {
+    if (typeof name !== 'string' || m.has(name)) continue;
+    const r = one.get(Number(scanId), name);
+    if (r) m.set(name, { bytes: r.bytes, res: r.res });
+  }
+  return m;
+}
+
+/** v2.739 수집 상태 — 최근 스캔(전 대상, 최신부터, 성공·실패 모두). ts 인덱스를 거꾸로 읽는다. */
+export async function recentScans(agent, limit = 30) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT * FROM isidu_scan WHERE agent=? AND complete=1 ORDER BY ts DESC LIMIT ?')
+    .all(String(agent ?? ''), Math.max(1, Math.min(500, Math.round(Number(limit) || 30)))).map(scanRow);
+}
+
 /** 엣지 push 용 — 로컬(agent '') 스캔 중 id 가 cursor 보다 큰 것(오래된 것부터). */
 export async function localScansAfter(cursor, limit = 20) {
   const db = await getDb();

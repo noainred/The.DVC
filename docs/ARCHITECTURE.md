@@ -112,7 +112,7 @@
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 5 | 829 | `inventory/osScanner.js` (3) | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. |
 | `ipam/` | 29 | 5,273 | `ipam/scanStore.js` (7) | IP 스캔 설정(에이전트별) + 결과 저장소. |
-| `isidu/` | 14 | 2,393 | `isidu/poller.js` (4) | isidu/poller.js — 아이실론 디렉터리 사용량 주기 실행(v2.736). 중앙·엣지 공용: 각 노드는 **자기 몫 대상**만 돈다. |
+| `isidu/` | 15 | 2,747 | `isidu/poller.js` (4) | isidu/poller.js — 아이실론 디렉터리 사용량 주기 실행(v2.736). 중앙·엣지 공용: 각 노드는 **자기 몫 대상**만 돈다. |
 | `linkcheck/` | 12 | 2,652 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 563 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,034 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
@@ -131,13 +131,13 @@
 | `portalcheck/` | 7 | 2,296 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `power/` | 1 | 172 | `power/total.js` (1) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
 | `provision/` | 6 | 865 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
-| `proxy/` | 10 | 2,383 | `proxy/sshExec.js` (25) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
+| `proxy/` | 10 | 2,384 | `proxy/sshExec.js` (25) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
 | `publicapi/` | 5 | 758 | `publicapi/allowlist.js` (2) | 외부 공개 API 의 허용 목록 카탈로그 (v2.562) — **순수 모듈**. 판정은 이 파일 하나가 소유한다. |
 | `relaycheck/` | 5 | 475 | `relaycheck/poller.js` (4) | relaycheck/poller.js — HAProxy 경로 주기 점검(v2.429). CLAUDE.md 폴러 규약: 재진입 가드 + 동시 점검 제한 + 대상당 타임아웃 + |
 | `relaytopo/` | 4 | 680 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 895 | `reports/dailyReport.js` (3) | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 |
 | `rma/` | 14 | 2,615 | `rma/jobs.js` (7) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 110 | 29,795 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 110 | 29,854 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 29 | 7,076 | `sanswitch/registry.js` (7) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 1 | 152 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 19 | 4,533 | `security/secretVault.js` (28) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -149,7 +149,7 @@
 | `tools/` | 16 | 3,035 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
 | `upgrade/` | 15 | 2,861 | `upgrade/manager.js` (6) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
 | `usermenu/` | 1 | 355 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
-| `util/` | 75 | 7,187 | `util/numOrNull.js` (133) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
+| `util/` | 75 | 7,193 | `util/numOrNull.js` (134) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
 | `vcenter/` | 14 | 4,443 | `vcenter/registry.js` (20) | vCenter registry — read/write the managed list of vCenters in |
 | `vmcfg/` | 3 | 408 | `vmcfg/cache.js` (3) | VM 구성 속성 캐시(B10, v2.697) — vCenter 별 · VM moref 별. 인메모리(재시작하면 비고 몇 주기에 걸쳐 다시 찬다 — |
 | `vmchanges/` | 2 | 272 | `vmchanges/eventDetail.js` (8) | VM 이동 이력(A7)·구성 변경(A8) — 이벤트 본문에서 화면이 쓰는 몇 필드만 뽑는다(v2.702, 순수). |
@@ -161,7 +161,7 @@
 | `vmtrack/` | 4 | 1,380 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 | `xferspeed/` | 7 | 1,642 | `xferspeed/poller.js` (3) | xferspeed/poller.js — 법인 간 전송 속도 측정 폴러(v2.735, **중앙 전용**). |
 
-디렉터리 84개 · 파일 908개 · 188,056줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 84개 · 파일 909개 · 188,476줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

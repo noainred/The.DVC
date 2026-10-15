@@ -25,7 +25,7 @@ export const FAIL_TEXT = Object.freeze({
   'device-not-isilon': { title: '아이실론이 아님', fix: '고른 장비의 종류가 아이실론(PowerScale)이 아닙니다 — 대상 설정에서 장비를 다시 고르세요.' },
   auth: { title: '인증 거부', fix: '아이실론이 키(또는 계정)를 받지 않았습니다. 키 인증이면 아래 공개키가 그 계정의 authorized_keys 에 있는지 확인하세요. 주기 수집은 계정 잠금을 막으려 멈췄고, 키·계정이 바뀌면 자동으로 다시 시도합니다.' },
   hostkey: { title: '호스트키 미확인', fix: '처음 보는(또는 바뀐) SSH 호스트키라 접속하지 않았습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인하고 승인하세요.' },
-  timeout: { title: '시한 초과', fix: 'du 가 시한 안에 끝나지 않았습니다 — 폴더가 매우 크면 시한을 늘리거나(최대 120분) 더 아래 경로로 나눠 등록하세요.' },
+  timeout: { title: '시한 초과', fix: 'du 가 시한 안에 끝나지 않았습니다 — 폴더가 매우 크면 시한을 늘리거나(최대 180분 — 설정의 일괄 변경으로 한꺼번에 바꿀 수 있습니다) 더 아래 경로로 나눠 등록하세요.' },
   unreachable: { title: '연결 실패', fix: '그 노드에서 아이실론 SSH(22번) 에 닿지 않습니다 — 주소·방화벽·회선을 확인하세요(엣지 담당이면 그 엣지에서).' },
   exec: { title: '명령 실패', fix: 'du 가 결과 없이 끝났습니다 — 경로가 있는지, 그 계정에 읽기 권한이 있는지 확인하세요(연결 시험으로 경로를 확인할 수 있습니다).' },
   parse: { title: '출력 해석 실패', fix: 'du 출력에서 폴더를 하나도 읽지 못했습니다 — 경로가 비어 있거나 명령이 다른 출력을 냈습니다. 오류 원문을 확인하세요.' },
@@ -341,7 +341,7 @@ export function targetStatus(t, now = Date.now()) {
   }
   if (!ok) return { key: 'never', text: '수집 전', tone: 'muted', detail: t.agent ? `엣지 ‘${t.agent}’ 가 첫 수집 결과를 아직 올리지 않았습니다.` : '첫 수집이 아직 없습니다 — 지금 수집을 누르거나 다음 주기를 기다리세요.' };
   const every = (numOrNull(t.intervalHours) || 24) * HOUR;
-  const staleMs = every * 2 + (numOrNull(t.timeoutMin) || 30) * MIN + HOUR;
+  const staleMs = every * 2 + (numOrNull(t.timeoutMin) || 120) * MIN + HOUR;   // v2.739: 시한 기본 120분
   if (now - ok.ts > staleMs) return { key: 'stale', text: '보고 늦음', tone: 'warn', detail: `마지막 성공이 ${agoText(ok.ts, now)}입니다(주기 ${everyText(t.intervalHours)}).${t.agent ? ` 엣지 ‘${t.agent}’ 의 상태를 엣지 로그에서 확인하세요.` : ''}` };
   if (ok.errLines > 0) return { key: 'ok-partial', text: '정상(권한 오류 일부)', tone: 'warn', detail: `권한 오류 ${countText(ok.errLines)}줄 — 일부 폴더 크기가 작을 수 있습니다.` };
   return { key: 'ok', text: '정상', tone: 'ok', detail: '' };
@@ -461,11 +461,12 @@ export function usersFootNote(res, shownCount) {
 /* ─────────────── 설정 폼 ─────────────── */
 
 export const INTERVAL_CHOICES = Object.freeze([6, 12, 24, 48, 168]);
-export const TIMEOUT_CHOICES = Object.freeze([10, 20, 30, 60, 90, 120]);
+/** 시한(분) 선택지 — v2.739: 기본 120분 · 최대 180분(서버 RANGES.timeoutMin 과 같은 상한 — 테스트가 대조한다). */
+export const TIMEOUT_CHOICES = Object.freeze([10, 20, 30, 60, 90, 120, 150, 180]);
 
 export function blankTarget() {
   return {
-    id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 30, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true,
+    id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 120, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true,
     // v2.738 결과 메일 — 주소는 줄바꿈으로 받는다(쉼표·세미콜론도 서버가 나눈다).
     mailTo: '', mailExcludeCommon: false, mailOnlyOnChange: false, mailOnFailure: false,
   };

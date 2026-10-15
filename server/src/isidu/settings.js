@@ -30,6 +30,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { DEADLINE_LONG_MAX_MS } from '../util/deadline.js';
 import { normPath, SIZE_MODES } from './parse.js';
 import { normalizeTargetMail, normalizeCommonMail, isEmail } from './mailRules.js';
 
@@ -40,8 +41,9 @@ const EDGE_FILE = () => path.join(config.configDir, 'isidu-edge-targets.json'); 
 export const MAX_TARGETS = 100;
 export const RANGES = Object.freeze({
   intervalHours: { min: 1, max: 720, def: 24 },
-  // v2.736: 상한 120분 — 사용자 보고 "원격으로 돌리는데 10분이 넘게 걸릴 때도 있어". 명령 시한은 sshExec 의 긴 명령 관문(2시간)이 받는다.
-  timeoutMin: { min: 1, max: 120, def: 30 },
+  // v2.736: 상한 120분 — 사용자 보고 "원격으로 돌리는데 10분이 넘게 걸릴 때도 있어". 명령 시한은 sshExec 의 긴 명령 관문이 받는다(v2.739 부터 상한 180분 · 관문 3시간).
+  // v2.739: 기본값 30분 → 120분(사용자 요청 "스캔 대기 시간을 기본으로 2시간"). 예전 기본값으로 저장된 대상은 load 가 한 번 옮긴다(migrateTimeoutDefault).
+  timeoutMin: { min: 1, max: 180, def: 120 },   // v2.739: 기본 2시간 · 최대 3시간(사용자 요청)
   topN: { min: 5, max: 50, def: 10 },
   port: { min: 1, max: 65535, def: 22 },
   retentionDays: { min: 30, max: 3650, def: 400 },
@@ -84,13 +86,13 @@ function numField(v, range, prev) {
 }
 
 /**
- * 대상의 명령 시한(ms) — 설정 범위로 자른다(빈 값·숫자 아님은 기본 30분). 수집기·연결 시험·'지금 수집' 큐 시한이 같은 값을 쓴다.
- * 세션 시한은 이 값 + 30초이고 `util/deadline.js` 상한(2시간)에 걸리면 명령 시한을 15초 줄인다(세션이 먼저 끊기면 결과가 버려진다).
+ * 대상의 명령 시한(ms) — 설정 범위로 자른다(빈 값·숫자 아님은 기본값 — v2.739 부터 120분). 수집기·연결 시험·'지금 수집' 큐 시한이 같은 값을 쓴다.
+ * 세션 시한은 이 값 + 30초이고 `util/deadline.js` 긴 작업 상한(3시간 — v2.739)에 걸리면 명령 시한을 15초 줄인다(세션이 먼저 끊기면 결과가 버려진다).
  */
 export function timeoutMsOf(t) {
   return numField(t?.timeoutMin, RANGES.timeoutMin, null) * 60_000;
 }
-export const SESSION_MAX_MS = 7_200_000;   // util/deadline.js DEADLINE_MAX_MS 와 같은 값
+export const SESSION_MAX_MS = DEADLINE_LONG_MAX_MS;   // v2.739: 3시간 — util/deadline.js 긴 작업 상한과 같은 값(collect 가 withDeadline(…, { long: true }))
 export function sessionPlanOf(t) {
   const cmd = timeoutMsOf(t);
   const session = Math.min(SESSION_MAX_MS, cmd + 30_000);
@@ -102,18 +104,61 @@ export function isiduSettingsLoadError() { load(); return loadErr.get(); }
 
 let _cache = null; // { mtime, size, value }
 
+/** v2.739: 시한 기본값 이전을 이미 했다는 표지(파일 최상위 키)와 예전 기본값. */
+export const TIMEOUT_MARK = 'timeoutDefaultMin';
+export const OLD_TIMEOUT_DEF = 30;
+/**
+ * v2.739 시한 기본값 이전(순수) — 파일에 표지(TIMEOUT_MARK)가 없으면(2.738 이하가 쓴 파일) 시한이 **예전 기본값 30분**인 대상만 120분으로 옮긴다
+ * (사용자 선택 — 30분이 아닌 값으로 직접 정한 대상은 그대로). 표지가 있으면 아무것도 바꾸지 않는다 — 저장은 언제나 표지를 싣으므로,
+ * 이전 뒤에 사람이 다시 30분으로 고친 값을 다음 읽기가 120분으로 되돌리지 않는다.
+ * @param {object} raw 파일에서 읽은 객체
+ * @returns {{raw:object, moved:number, needWrite:boolean}}
+ */
+export function migrateTimeoutDefault(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { raw, moved: 0, needWrite: false };
+  if (numOrNull(raw[TIMEOUT_MARK]) != null) return { raw, moved: 0, needWrite: false };
+  let moved = 0;
+  const targets = (Array.isArray(raw.targets) ? raw.targets : []).map((t) => {
+    if (!t || typeof t !== 'object' || numOrNull(t.timeoutMin) !== OLD_TIMEOUT_DEF) return t;
+    moved++;
+    return { ...t, timeoutMin: RANGES.timeoutMin.def };
+  });
+  return { raw: { ...raw, ...(Array.isArray(raw.targets) ? { targets } : {}), [TIMEOUT_MARK]: RANGES.timeoutMin.def }, moved, needWrite: true };
+}
+
 function load() {
   let st = null;
   try { st = fs.statSync(FILE()); } catch { st = null; }
   if (!st) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: emptyValue() }; return _cache.value; }
   if (_cache && _cache.mtime === st.mtimeMs && _cache.size === st.size) return _cache.value;
+  let raw;
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
+  } catch (e) {
+    preserveCorrupt(FILE(), e?.message);
+    loadErr.corrupt(e);
+    _cache = { mtime: 0, size: -1, value: emptyValue() };
+    return _cache.value;
+  }
+  // v2.739 시한 기본값 이전 — 쓰기 실패는 손상이 아니다(다음 읽기가 다시 시도한다 · 이번 읽기는 옮긴 값으로 동작한다).
+  const mg = migrateTimeoutDefault(raw);
+  if (mg.needWrite) {
+    raw = mg.raw;
+    try {
+      atomicWriteFileSync(FILE(), JSON.stringify(raw, null, 2), { mode: 0o600 });
+      try { st = fs.statSync(FILE()); } catch { /* 다음 읽기가 다시 본다 */ }
+      if (mg.moved) console.log(`[isidu] 시한 기본값 변경(30분 → ${RANGES.timeoutMin.def}분): 예전 기본값 30분이던 대상 ${mg.moved}개를 옮겼습니다.`);
+    } catch (e) {
+      console.warn(`[isidu] 시한 기본값 이전을 파일에 쓰지 못했습니다(이번에는 메모리에서만 적용 — 다음 읽기가 다시 시도합니다): ${e?.message || e}`);
+      st = null;
+    }
+  }
+  try {
     const targets = (Array.isArray(raw.targets) ? raw.targets : []).filter((t) => t && typeof t === 'object' && RE_ID.test(String(t.id || ''))).slice(0, MAX_TARGETS);
     const value = { targets, retentionDays: numField(raw.retentionDays, RANGES.retentionDays, null), mail: commonMailOf(raw.mail) };
     loadErr.ok();
-    _cache = { mtime: st.mtimeMs, size: st.size, value };
+    _cache = st ? { mtime: st.mtimeMs, size: st.size, value } : { mtime: 0, size: -1, value };
     return value;
   } catch (e) {
     preserveCorrupt(FILE(), e?.message);
@@ -129,7 +174,8 @@ export function loadSettings() {
 }
 
 function saveSettingsRaw(v) {
-  atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2), { mode: 0o600 });
+  // v2.739: 표지를 언제나 싣는다 — 없으면 다음 읽기가 이전을 다시 돌려 사람이 정한 30분을 120분으로 바꾼다.
+  atomicWriteFileSync(FILE(), JSON.stringify({ ...v, [TIMEOUT_MARK]: RANGES.timeoutMin.def }, null, 2), { mode: 0o600 });
   _cache = null;
   loadErr.ok();
 }

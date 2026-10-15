@@ -107,7 +107,7 @@ test('② 설정 — 아이실론이 아닌 장비·목록에 없는 엣지·등
   assert.equal(ok.target.path, ROOT);
 });
 
-test('② 실행 노드 지정(runVia) — 등록부 아이실론을 다른 엣지에서 실행 · 등록부 계정은 장비 담당 노드·메인에서만 · 시한 상한 120분', () => {
+test('② 실행 노드 지정(runVia) — 등록부 아이실론을 다른 엣지에서 실행 · 등록부 계정은 장비 담당 노드·메인에서만 · 시한 상한 180분(v2.739)', () => {
   const devs = [{ id: 'd-isi', type: 'isilon', host: '10.0.0.5', agent: 'edge-a' }];
   const ctx = ctxWith(devs, ['edge-a', 'edge-b']);
   const bad = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'device', runVia: 'node', agent: 'edge-b' }, null, ctx);
@@ -116,7 +116,7 @@ test('② 실행 노드 지정(runVia) — 등록부 아이실론을 다른 엣�
   assert.ok(toMain.target, '메인은 등록부 전체를 가진다');
   const ok = S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, auth: 'key', runVia: 'node', agent: 'EDGE-B', timeoutMin: 999 }, null, ctx);
   assert.equal(ok.target.agent, 'edge-b');
-  assert.equal(ok.target.timeoutMin, 120, '시한 상한 120분');
+  assert.equal(ok.target.timeoutMin, 180, '시한 상한 180분(v2.739 — 예전 120분)');
   const r = S.resolveTarget(ok.target, { devices: devs });
   assert.equal(r.agent, 'edge-b');
   assert.equal(r.agentSource, 'override');
@@ -126,8 +126,10 @@ test('② 실행 노드 지정(runVia) — 등록부 아이실론을 다른 엣�
   assert.equal(S.resolveTarget(follow.target, { devices: devs }).agent, 'edge-a');
   assert.equal(S.normalizeTarget({ deviceId: 'd-isi', path: ROOT, runVia: 'node', agent: 'nope' }, null, ctx).field, 'agent');
   const plan = S.sessionPlanOf({ timeoutMin: 120 });
-  assert.ok(plan.sessionMs <= 7_200_000 && plan.cmdMs < plan.sessionMs, '세션 시한(2시간 상한)이 명령 시한보다 길다 — 세션이 먼저 끊기면 결과가 버려진다');
-  assert.equal(S.sessionPlanOf({ timeoutMin: '' }).cmdMs, 30 * 60_000, '빈 값은 기본 30분');
+  assert.ok(plan.sessionMs <= 10_800_000 && plan.cmdMs < plan.sessionMs, '세션 시한(3시간 상한)이 명령 시한보다 길다 — 세션이 먼저 끊기면 결과가 버려진다');
+  // v2.739: 기본값 120분 · 세션 상한 3시간 — 120분이면 세션(120분 + 30초)이 상한에 걸리지 않아 명령 시한은 그대로 120분이다.
+  assert.equal(S.sessionPlanOf({ timeoutMin: '' }).cmdMs, 7_200_000, '빈 값은 기본 120분');
+  assert.equal(S.sessionPlanOf({ timeoutMin: 180 }).cmdMs, 10_800_000 - 15_000, '180분이면 세션 상한 3시간에 걸려 명령 시한은 15초 짧다');
 });
 
 /* ═══════════════════════════ ③ DB + 보고서 ═══════════════════════════ */

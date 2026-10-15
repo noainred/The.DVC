@@ -122,7 +122,7 @@ export async function ensureIsiduDemo({ now = Date.now(), days = 60 } = {}) {
         if (have.length) {
           const { pickAgent, pickDatacenter } = await import('../../cvp/formChoices.js');
           const r = S.saveSettings({
-            targets: have.map((d) => ({ id: d.id, label: d.label, deviceId: d.deviceId, path: d.path, sizeMode: d.sizeMode, intervalHours: 24, topN: 10, timeoutMin: 30, auth: 'key', username: 'root' })),
+            targets: have.map((d) => ({ id: d.id, label: d.label, deviceId: d.deviceId, path: d.path, sizeMode: d.sizeMode, intervalHours: 24, topN: 10, timeoutMin: 120, auth: 'key', username: 'root' })),
             retentionDays: 400,
           }, { devices, agents: [], dcs: [], pickAgent, pickDatacenter, ssrfBlockReason: () => null });
           if (r.ok) out.seeded = have.length; else out.seedError = r.error;

@@ -2,7 +2,7 @@
  * isidu/collectRequests.js — 엣지가 조사하는 아이실론 대상의 '지금 수집' 요청 큐(v2.736). 코어는 util/collectRequestQueue.js(claim→ack).
  * 중앙은 엣지에 명령을 밀어넣을 수 없다(pull 구조) — 요청을 큐에 두고 엣지가 `/api/central/isidu-config` 로 인출한다.
  * 완료는 그 대상의 **새 스캔**(엣지 시각이 인출 때 기준선보다 새 값)이 push 로 도착했을 때다.
- * 결과 시한 = 대상 시한(최대 120분 — 인출 시점 설정의 가장 긴 값) + 여유 — du 는 오래 걸린다.
+ * 결과 시한 = 대상 시한(최대 180분 — v2.739 · 인출 시점 설정의 가장 긴 값) + 여유 — du 는 오래 걸린다.
  */
 import { createCollectRequestQueue } from '../util/collectRequestQueue.js';
 import { loadSettings, timeoutMsOf } from './settings.js';
