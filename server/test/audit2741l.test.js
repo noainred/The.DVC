@@ -359,3 +359,13 @@ test('INJPKG-01 install.sh 는 앱 트리를 가리키는 /usr/local/bin 링크�
   const lib = rd('packaging/offline/release-verify-lib.sh').replace(/^\s*#.*$/gm, '');
   assert.ok(lib.indexOf('vp_anchor_ok "$tools"') < lib.indexOf('node="$old_node"'), 'root 소유 사본을 옛 앱 트리 도구보다 먼저 고른다');
 });
+
+test('INJPKG-01 ④ 권한 내림은 root 로 실행할 때만 — root 가 아니면 넘을 경계가 없고 setpriv 가 실패한다(v2.741 CI)', () => {
+  const src = rd('packaging/offline/release-verify-lib.sh');
+  const fn = src.slice(src.indexOf('verify_release_package() {'));
+  assert.ok(fn.length > 100, 'verify_release_package 본문을 찾지 못했다');
+  // 옛 설치본 도구를 소유 계정으로 낮추는 판정은 root 일 때만 — 아니면 runas_uid 가 비어 그 도구를 지금 계정으로 바로 실행한다.
+  assert.match(fn, /if \[\[ "\$\(id -u\)" == 0 && "\$ou" != 0 \]\]; then\s*\n\s*runas_uid="\$ou"/);
+  // root 가 아닌 실행은 portal.env 정책을 그대로 읽는다(root 소유 파일만 받는 규칙은 root 확인에만).
+  assert.match(fn, /if \[\[ -n "\$runas_uid" \|\| "\$\(id -u\)" != 0 \]\]; then/);
+});

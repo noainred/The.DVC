@@ -188,8 +188,10 @@ verify_release_package() {
     node="$old_node"; js="$old_js"; trust="existing"
     # root 소유 사본이 아직 없는 설치본(v2.741 이전) — 앱 트리의 도구는 서비스 계정이 쓸 수 있으므로 root 로 실행하지 않고
     #   그 파일의 소유자 권한으로 실행한다(서비스 계정이 변조했다면 이 확인을 믿을 수 없다 — 그 사실을 말한다).
+    #   ⚠ 권한을 내리는 것은 **root 로 실행할 때만**이다 — root 가 아니면 넘을 권한 경계가 없고(지금 계정이 이미 그 권한이다)
+    #     setpriv·runuser 는 다른 계정으로 바꿀 수 없어 확인이 통째로 실패한다(v2.741 CI — uid 1001 에서 setgroups 거부).
     local ou; ou="$(stat -c %u -- "$old_js" 2>/dev/null || echo 0)"
-    if [[ "$ou" != 0 ]]; then
+    if [[ "$(id -u)" == 0 && "$ou" != 0 ]]; then
       runas_uid="$ou"; runas_gid="$(stat -c %g -- "$old_js" 2>/dev/null || echo "$ou")"
       echo "⚠ 기존 설치본에 root 소유 서명 확인 도구가 없습니다(v2.741 이전) — 이번 확인은 기존 설치본의 도구를 그 소유 계정(uid $ou) 권한으로 실행합니다."
       echo "  그 계정이 변조됐다면 이 확인을 믿을 수 없습니다. 이번 설치가 root 소유 확인 도구($tools)를 만듭니다."
@@ -204,8 +206,9 @@ verify_release_package() {
 
   local pol="${UPGRADE_SIGNATURE_POLICY:-}"
   if [[ -z "$pol" ]]; then
-    if [[ -n "$runas_uid" ]]; then
+    if [[ -n "$runas_uid" || "$(id -u)" != 0 ]]; then
       # 소유 계정 권한으로 도는 옛 도구는 예전처럼 portal.env 정책을 따른다(그 도구 자체가 그 계정의 신뢰 수준이다).
+      #   root 가 아닌 실행도 같다 — 넘는 권한 경계가 없으므로 root 소유 파일만 받는 규칙이 지킬 것이 없다.
       pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
     else
       pol="$(vp_root_env_policy "$cdir")"   # root 로 도는 확인 — root 소유 portal.env 의 정책만 받는다
