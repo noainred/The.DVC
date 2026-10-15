@@ -10,6 +10,8 @@
  *  · 연결 시험은 경로 확인(ls -d)만 한다 — du 는 수십 분 걸릴 수 있어 돌리지 않는다. 엣지 담당 대상은 **그 엣지가** 시험한다
  *    (v2.736 — 메인이 엣지에 요청, iDRAC PUSH 스캔과 같은 길).
  *  · v2.736 실행 노드: 등록부 장비도 '장비 담당 노드 따름' 대신 메인·특정 엣지를 고를 수 있다(등록부 계정 인증은 담당 노드·메인에서만).
+ *  · v2.738 결과 메일: 공통 수신자(모든 대상) + 대상별 수신자(여러 명) · 변화 없으면 생략 · 실패 알림(6시간에 한 번). 주소 판정은 서버가 한다
+ *    (형식이 틀리면 400 이 칸을 짚는다) — 화면은 입력 중 미리 알려 줄 뿐이다. 메일은 메인만 보낸다(엣지로 주소를 내려보내지 않는다).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
@@ -19,6 +21,7 @@ import { requireChanged } from '../changeResult.js';
 import {
   blankTarget, formFromTarget, targetBody, pathHint, commandText, deviceLabel, keyStatus, INTERVAL_CHOICES, TIMEOUT_CHOICES, everyText,
   RUN_FOLLOW, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, testResultText,
+  recipientPreview, recipientPreviewText, mailInputIssue, mailReadyText, mailStateText,
 } from './isiduText.js';
 
 function KeyBox({ k, agent, reportedAt, onCreate, creating }) {
@@ -52,6 +55,8 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
   const [loadErr, setLoadErr] = useState(null);
   const [forms, setForms] = useState([]);
   const [retention, setRetention] = useState('');
+  const [commonTo, setCommonTo] = useState('');   // v2.738 공통 수신자(줄바꿈)
+  const [mailing, setMailing] = useState(null);    // { idx, running, result }
   const [sel, setSel] = useState(0);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -68,6 +73,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
       const list = (d.settings?.targets || []).map(formFromTarget);
       setForms(list);
       setRetention(d.settings?.retentionDays ?? '');
+      setCommonTo((d.settings?.mail?.commonTo || []).join('\n'));
       const i = list.findIndex((f) => f.id === focusId);
       setSel(i >= 0 ? i : 0);
     }, (e) => { if (alive) setLoadErr(e); });
@@ -103,27 +109,43 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
     if (!f) return;
     setTest({ idx: sel, running: true, result: null });
     try {
-      const r = await postJson('/tools/isilon-dirusage/test', targetBody(f));
+      // 메일 칸은 연결 시험과 무관하다 — 빼고 보낸다(주소 오타가 시험을 막지 않게. 서버는 없으면 저장값을 쓴다).
+      const { mail: _mail, ...body } = targetBody(f);
+      const r = await postJson('/tools/isilon-dirusage/test', body);
       setTest({ idx: sel, running: false, result: r });
     } catch (e) {
       setTest({ idx: sel, running: false, result: { ok: false, reason: e?.message || String(e) } });
     }
   };
 
+  // 결과 메일 지금 보내기 — **저장된** 받는 사람에게 보낸다(저장 안 한 입력은 쓰지 않는다 — 화면이 그 사실을 말한다).
+  const sendNow = async () => {
+    if (!f?.id) return;
+    setMailing({ idx: sel, running: true, result: null });
+    try {
+      const r = await postJson('/tools/isilon-dirusage/mail-now', { id: f.id });
+      setMailing({ idx: sel, running: false, result: r });
+    } catch (e) {
+      setMailing({ idx: sel, running: false, result: { ok: false, reason: e?.message || String(e) } });
+    }
+  };
+
   const save = async () => {
     setSaving(true); setMsg(null); setBad(null);
     try {
-      const body = { targets: forms.map(targetBody) };
+      const body = { targets: forms.map(targetBody), mail: { commonTo } };
       const n = Number(retention);
       if (String(retention).trim() !== '' && Number.isFinite(n)) body.retentionDays = n;
       const r = await putJson('/tools/isilon-dirusage/settings', body);
       if (r?.ok === false) {
         if (Number.isInteger(r.index)) { setSel(r.index); setBad({ index: r.index, field: r.field || null }); }
+        else if (r.field === 'mail.commonTo') setBad({ index: -1, field: 'mail.commonTo' });
         throw new Error(r.reason || '저장하지 못했습니다.');
       }
       requireChanged(r);
       setForms((r.settings?.targets || []).map(formFromTarget));
       setRetention(r.settings?.retentionDays ?? retention);
+      setCommonTo((r.settings?.mail?.commonTo || []).join('\n'));
       setMsg({ tone: 'ok', text: `저장했습니다(대상 ${r.settings?.targets?.length ?? forms.length}개). 엣지 담당 대상은 그 엣지가 다음 설정 pull 에 받습니다.` });
       onSaved?.();
     } catch (e) {
@@ -135,6 +157,12 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
   const intervals = [...new Set([...INTERVAL_CHOICES, ...(f && f.intervalHours !== '' ? [Number(f.intervalHours)] : [])])].filter(Number.isFinite).sort((a, b) => a - b);
   const timeouts = [...new Set([...TIMEOUT_CHOICES, ...(f && f.timeoutMin !== '' ? [Number(f.timeoutMin)] : [])])].filter(Number.isFinite).sort((a, b) => a - b);
   const tr = test && test.idx === sel ? test : null;
+  const mr = mailing && mailing.idx === sel ? mailing : null;
+  const commonIssue = mailInputIssue(commonTo);
+  const targetMailIssue = f ? mailInputIssue(f.mailTo) : null;
+  const preview = f ? recipientPreview(commonTo, f) : null;
+  const readyNote = mailReadyText(srv?.mailReady);
+  const failHours = srv?.mailLimits?.failAlertHours ?? 6;
 
   return (
     <Modal title="수집 대상 설정 — 아이실론 디렉터리 사용량" onClose={onClose} width={860}>
@@ -293,6 +321,25 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
               </div>
               {f.detach !== false ? <div className="hint">분리 실행: 아이실론의 /tmp/dvc-isidu-‘계정 uid’ 에 작업 파일(du 출력·종료코드)을 두고, 결과를 받으면 지웁니다. 받지 못한 작업 파일은 다음 실행이 2일 지난 것을 지웁니다. nohup·/tmp 를 쓸 수 없으면 예전처럼 세션에 묶어 실행합니다.</div> : <div className="hint">분리 실행을 끄면 du 가 SSH 세션에 묶입니다 — 포탈이 업그레이드·재시작하면 그 조사는 처음부터 다시 돕니다(자동 재개).</div>}
 
+              <fieldset>
+                <legend>결과 메일</legend>
+                <label className="fld">이 대상의 받는 사람(여러 명 — 한 줄에 하나)
+                  <textarea className={`mono${targetMailIssue || badField('mail.to') ? ' bad' : ''}`} rows={3} value={f.mailTo} onChange={(e) => set({ mailTo: e.target.value })} disabled={locked} placeholder={'owner@corp.example\nteam@corp.example'} aria-invalid={!!targetMailIssue || badField('mail.to') || undefined} />
+                  {targetMailIssue ? <span className="hint bad" role="alert">{targetMailIssue}</span> : null}
+                </label>
+                <label className="radio"><input type="checkbox" checked={f.mailExcludeCommon} onChange={(e) => set({ mailExcludeCommon: e.target.checked })} disabled={locked} /> <span>공통 받는 사람에게는 보내지 않기(이 대상의 받는 사람에게만)</span></label>
+                <label className="radio"><input type="checkbox" checked={f.mailOnlyOnChange} onChange={(e) => set({ mailOnlyOnChange: e.target.checked })} disabled={locked} /> <span>변화 없으면 보내지 않기 — 직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 건너뜁니다</span></label>
+                <label className="radio"><input type="checkbox" checked={f.mailOnFailure} onChange={(e) => set({ mailOnFailure: e.target.checked })} disabled={locked} /> <span>조사가 실패하면 알리기({failHours}시간에 한 번까지)</span></label>
+                <div className="hint">{recipientPreviewText(preview)} · 조사가 성공할 때마다 보냅니다(메인이 보냅니다 — 엣지 담당 대상도 결과가 메인에 들어오면 보냅니다).</div>
+                {readyNote ? <div className="hint bad">{readyNote}</div> : null}
+                <div className="row">
+                  <button type="button" className="btn2" onClick={sendNow} disabled={locked || !f.id || (mr && mr.running)} title={f.id ? '저장된 받는 사람에게 마지막 성공 결과를 지금 보냅니다' : '저장한 뒤에 보낼 수 있습니다'}>{mr && mr.running ? '보내는 중…' : '마지막 결과 지금 보내기'}</button>
+                  {mr && mr.result ? (() => { const v = (mr.result.at ? mailStateText(mr.result) : null) || { tone: mr.result.ok ? 'ok' : 'bad', text: mr.result.reason || (mr.result.ok ? '보냈습니다' : '보내지 못했습니다') }; return <span className={`result ${v.tone === 'muted' ? '' : v.tone}`}>{v.text}</span>; })() : (
+                    <span className="hint">{f.id ? '저장된 받는 사람에게 보냅니다(지금 고친 내용은 저장한 뒤에 반영됩니다).' : '새 대상은 저장한 뒤에 보낼 수 있습니다.'}</span>
+                  )}
+                </div>
+              </fieldset>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div className="hint">실행할 명령</div>
                 <div className="cmd">{commandText({ username: f.username || dev?.username || '', host: f.deviceId ? (dev?.host || '') : f.host, port: f.port, path: f.path, sizeMode: f.sizeMode })}</div>
@@ -314,6 +361,11 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
               <span className="hint">비우면 지금 값을 유지합니다. 대상마다 마지막 성공 수집은 기간이 지나도 남깁니다.</span>
             </label>
           </div>
+
+          <label className="fld">결과 메일 — 공통 받는 사람(모든 대상 · 한 줄에 하나)
+            <textarea className={`mono${commonIssue || (bad && bad.field === 'mail.commonTo') ? ' bad' : ''}`} rows={3} value={commonTo} onChange={(e) => { setCommonTo(e.target.value); setBad(null); setMsg(null); }} disabled={locked} placeholder="storage-team@corp.example" aria-invalid={!!commonIssue || undefined} />
+            <span className={`hint${commonIssue ? ' bad' : ''}`}>{commonIssue || "대상마다 '공통 받는 사람에게는 보내지 않기' 를 고를 수 있습니다. 같은 주소는 한 번만 보냅니다. 메일 서버와 '아이실론 디렉터리 사용량' 종류는 설정 › 메일 발송에서 켭니다."}</span>
+          </label>
 
           {msg ? <div className={`result ${msg.tone}`}>{msg.text}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>

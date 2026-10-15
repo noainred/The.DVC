@@ -41,6 +41,8 @@ import { HISTORY_AGENT } from '../../isidu/targets.js';
 import * as db from '../../isidu/db.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureIsiduDemo } from '../../mock/demo/isidu.js';
+import { isiduMailReady, isiduMailStateOf, sendLatestNow } from '../../isidu/notify.js';
+import { targetMailOf, mailRecipients, MAIL_LIST_MAX, FAIL_ALERT_MIN_MS } from '../../isidu/mailRules.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -64,7 +66,9 @@ async function targetRows() {
   const pollerResumes = new Map();
   for (const r of ps.resumes || []) if (!pollerResumes.has(r.targetId)) pollerResumes.set(r.targetId, r);
   const edges = new Map(allIsiduEdgeStatus().map((e) => [lo(e.agent), e]));
-  return Promise.all(loadSettings().targets.map(async (tg) => {
+  const st = loadSettings();
+  const commonTo = st.mail?.commonTo || [];
+  return Promise.all(st.targets.map(async (tg) => {
     const r = resolveTarget(tg, { devices });
     const l = byId.get(r.id) || null;
     const ag = t(r.agent);
@@ -90,6 +94,9 @@ async function targetRows() {
       lastResume: ag ? edgeResume : (pollerResumes.get(r.id) || null),
       // 엣지 담당 대상의 인증 정지는 엣지에 있다 — 중앙은 그 엣지의 마지막 시도 결과(kind 'auth')로만 안다.
       authStopped: ag ? null : await authStopOf(r),
+      // v2.738 결과 메일 — 이 표는 주소를 싣지 않는다(개수·선택만). 주소는 설정 조회에만 있다.
+      mail: (() => { const tm = targetMailOf(tg); const rc = mailRecipients(commonTo, tm); return { recipients: rc.to.length, onlyOnChange: tm.onlyOnChange, onFailure: tm.onFailure, excludeCommon: tm.excludeCommon }; })(),
+      lastMail: isiduMailStateOf(r.id),
     };
   }));
 }
@@ -193,6 +200,8 @@ api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (_req, res)
     choices: { devices, agents: knownAgentNames(), datacenters: dcList() },
     ranges: RANGES, authModes: AUTH_MODES, sizeModes: SIZE_MODES, maxTargets: MAX_TARGETS,
     key: publicKeyView(keyInfo()),
+    // v2.738: 결과 메일을 지금 보낼 수 있는가(전역 메일·SMTP·종류 켜짐) + 입력 상한.
+    mailReady: isiduMailReady(), mailLimits: { listMax: MAIL_LIST_MAX, failAlertHours: Math.round(FAIL_ALERT_MIN_MS / 3_600_000) },
   });
 });
 
@@ -201,7 +210,8 @@ api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) 
   if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 저장하세요(덮어쓰면 기존 대상이 사라집니다).' });
   const r = saveSettings(req.body || {}, settingsCtx());
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null, index: r.index ?? null });
-  logAudit({ user: req.user?.username, action: 'isidu.settings', target: 'isidu-settings.json', detail: `targets=${r.settings.targets.length} retention=${r.settings.retentionDays}`, ip: req.ip });
+  const mailTargets = r.settings.targets.filter((x) => targetMailOf(x).to.length).length;
+  logAudit({ user: req.user?.username, action: 'isidu.settings', target: 'isidu-settings.json', detail: `targets=${r.settings.targets.length} retention=${r.settings.retentionDays} mailCommon=${r.settings.mail?.commonTo?.length || 0} mailTargets=${mailTargets}`, ip: req.ip });
   res.json({ ok: true, settings: r.settings });
 });
 
@@ -263,6 +273,20 @@ api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, re
   }
   logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port}`, detail: x.ok ? 'ok' : `fail: ${String(x.reason || '').slice(0, 120)}`, ip: req.ip });
   res.json({ ...x, via: 'main', node: '' });
+});
+
+/**
+ * 결과 메일 지금 보내기(v2.738) — 그 대상의 마지막 성공 결과를 그 대상의 받는 사람(공통 ∪ 대상별)에게 보낸다.
+ * '변화 없으면 생략' 은 보지 않는다(사람이 누른 것이다). 데모 대상은 보내지 않는다. 주소는 응답·감사에 싣지 않는다(개수만).
+ */
+api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, async (req, res) => {
+  const id = t(req.body?.id);
+  if (!id || !loadSettings().targets.some((x) => x.id === id)) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
+  const r = await sendLatestNow(id, req.user?.username || 'admin');
+  logAudit({ user: req.user?.username, action: 'isidu.mail', target: id, detail: `${r.state}${r.to != null ? ` to=${r.to}` : ''}${r.reason ? ` · ${String(r.reason).slice(0, 120)}` : ''}`, ip: req.ip });
+  if (r.ok) return res.json(r);
+  // 보내지 못한 것은 409(본문이 사유를 말한다) — 5xx 로 주면 재시도하는 호출부가 같은 메일을 두 번 보낼 수 있다.
+  res.status(r.state === 'gone' ? 404 : 409).json(r);
 });
 
 /** 이 노드(중앙)의 SSH 키 만들기 — 없을 때만. 공개키를 돌려준다(아이실론 authorized_keys 에 넣을 값). */

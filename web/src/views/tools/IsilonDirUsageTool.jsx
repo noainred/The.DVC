@@ -23,7 +23,7 @@ import { collectDropNote } from './collectDropText.js';
 import {
   FAIL_TEXT, failTitle, bytesText, deltaView, shareText, countText, nodeText, everyText, durationText, tailPath,
   sparkPath, trendModel, trendNotes, baseNote, scanNotes, kpiCards, targetStatus, keyStatus, keyRows, runResultText, nudgeLines,
-  USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, corpOverview, overviewNote, resumeNote,
+  USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, corpOverview, overviewNote, resumeNote, targetMailLine,
 } from './isiduText.js';
 import IsiduSettings from './IsiduSettings.jsx';
 import './isidu.css';
@@ -319,6 +319,7 @@ export default function IsilonDirUsageTool() {
         <>
           {st && st.tone !== 'ok' ? <div className={`isd-banner ${st.tone === 'bad' ? 'red' : st.tone === 'warn' ? 'amber' : st.tone === 'run' ? 'teal' : ''}`}><b>{st.text}</b>{st.detail ? ` — ${st.detail}` : ''}</div> : null}
           {resumeNote(target.lastResume, now) ? <div className="isd-banner amber">{resumeNote(target.lastResume, now)}</div> : null}
+          {(() => { const ml = targetMailLine(target, now); return ml ? <div className={`isd-note${ml.tone === 'bad' ? ' bad' : ''}`}>{ml.text}</div> : null; })()}
 
           {rep.error && !R ? <ErrorBox error={rep.error} /> : null}
           {!R && !rep.error ? <Loading /> : null}

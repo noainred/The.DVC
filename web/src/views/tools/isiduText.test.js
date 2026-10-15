@@ -12,6 +12,7 @@ import {
   runResultText, usersFootNote, blankTarget, formFromTarget, targetBody, tailPath,
   EDGE_CALL_TEXT, nudgeLines, testResultText, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, RUN_FOLLOW, TIMEOUT_CHOICES,
   RESUME_OUTCOME_TEXT, resumeNote, triggerText,
+  parseMailInput, recipientPreview, recipientPreviewText, mailInputIssue, mailReadyText, mailStateText, targetMailLine, MAIL_LIST_MAX,
 } from './isiduText.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -345,5 +346,68 @@ describe('v2.737 재시작으로 끊긴 조사 — 상태·재개 결과 문구'
     expect(formFromTarget({ id: 'a', path: '/ifs/x' }).detach).toBe(true);
     expect(formFromTarget({ id: 'a', path: '/ifs/x', detach: false }).detach).toBe(false);
     expect(targetBody({ ...blankTarget(), detach: false }).detach).toBe(false);
+  });
+});
+
+describe('v2.738 결과 메일 — 화면 미리보기는 서버 규칙과 같다', () => {
+  const INPUTS = [
+    'a@corp.local, B@corp.local;\nb@CORP.local  c@x.co\nnot-mail\nd@corp',
+    ['x@corp.local', 'X@CORP.local', '  y@corp.local  '],
+    '', null, undefined, 'a"b@corp.local', 'a@b.c\r\nBcc: z@evil', '@corp.local', 'a@-corp.local',
+    Array.from({ length: 55 }, (_, i) => `u${i}@corp.local`).join('\n'),
+  ];
+  it('주소 나누기·형식·중복·상한 — 서버 normalizeMailList 와 같은 결과', async () => {
+    const R = await import('../../../../server/src/isidu/mailRules.js');
+    for (const v of INPUTS) expect(parseMailInput(v)).toEqual(R.normalizeMailList(v));
+    expect(MAIL_LIST_MAX).toBe(R.MAIL_LIST_MAX);
+  });
+  it('받는 사람 미리보기 — 서버 mailRecipients 와 같은 개수(공통 빼기 포함)', async () => {
+    const R = await import('../../../../server/src/isidu/mailRules.js');
+    const cases = [
+      ['ops@corp.local\nLead@corp.local', { mailTo: 'lead@corp.local\nowner@corp.local' }],
+      ['ops@corp.local', { mailTo: 'owner@corp.local', mailExcludeCommon: true }],
+      ['', { mailTo: '' }],
+    ];
+    for (const [common, f] of cases) {
+      const p = recipientPreview(common, f);
+      const srv = R.mailRecipients(R.normalizeMailList(common).list, { to: R.normalizeMailList(f.mailTo).list, excludeCommon: !!f.mailExcludeCommon });
+      expect(p.count).toBe(srv.to.length);
+      expect(p.dupes).toBe(srv.dupes);
+    }
+    expect(recipientPreviewText(recipientPreview('', { mailTo: '' }))).toMatch(/받는 사람이 없습니다/);
+    expect(recipientPreviewText(recipientPreview('a@corp.local', { mailTo: 'A@corp.local' }))).toMatch(/1명.*같은 주소 1개는 한 번만/);
+  });
+  it('형식 오류 안내 · 메일 준비 상태 · 마지막 결과 문구', () => {
+    expect(mailInputIssue('ok@corp.local\nbad')).toMatch(/bad.*저장하지 않습니다/);
+    expect(mailInputIssue('ok@corp.local')).toBe(null);
+    expect(mailReadyText({ ok: true })).toBe(null);
+    expect(mailReadyText({ ok: false, reason: "'아이실론 디렉터리 사용량' 메일이 꺼져 있습니다." })).toMatch(/꺼져 있습니다.*결과는 그대로 쌓이고/);
+    const now = Date.now();
+    expect(mailStateText({ state: 'sent', kind: 'result', at: now - 120_000, to: 3, accepted: 3 }, now).tone).toBe('ok');
+    expect(mailStateText({ state: 'skipped', kind: 'result', at: now, reason: '변화 없으면 생략' }, now).text).toMatch(/보내지 않음 — 변화 없으면 생략/);
+    expect(mailStateText({ state: 'failed', kind: 'failure', at: now, reason: 'SMTP 오류' }, now)).toMatchObject({ tone: 'bad' });
+    expect(mailStateText(null)).toBe(null);
+  });
+  it('폼 ↔ 저장 본문 — 메일 칸을 싣고, 옛 저장값(mail 없음)은 빈 칸', () => {
+    const f = formFromTarget({ id: 't1', path: '/ifs/a', mail: { to: ['a@corp.local', 'b@corp.local'], onlyOnChange: true, onFailure: true } });
+    expect(f.mailTo).toBe('a@corp.local\nb@corp.local');
+    expect(targetBody(f).mail).toEqual({ to: 'a@corp.local\nb@corp.local', excludeCommon: false, onlyOnChange: true, onFailure: true });
+    const old = formFromTarget({ id: 't2', path: '/ifs/b' });
+    expect(old).toMatchObject({ mailTo: '', mailExcludeCommon: false, mailOnlyOnChange: false, mailOnFailure: false });
+    expect(blankTarget().mailTo).toBe('');
+  });
+  it('저장 본문의 메일 칸을 서버 정규화가 받는다(잘못된 주소는 칸을 짚어 거부)', async () => {
+    const R = await import('../../../../server/src/isidu/mailRules.js');
+    const ok = R.normalizeTargetMail(targetBody(formFromTarget({ id: 't', path: '/ifs/a', mail: { to: ['a@corp.local'] } })).mail, null);
+    expect(ok.mail.to).toEqual(['a@corp.local']);
+    const bad = R.normalizeTargetMail(targetBody({ ...blankTarget(), mailTo: 'nope' }).mail, null);
+    expect(bad.field).toBe('mail.to');
+  });
+  it('대상 화면 한 줄 — 메일을 고르지 않은 대상은 말하지 않고, 고른 대상은 선택과 마지막 결과를 말한다', () => {
+    const now = Date.now();
+    expect(targetMailLine({ mail: { recipients: 0 } }, now)).toBe(null);
+    expect(targetMailLine({ mail: { recipients: 2, onlyOnChange: true, onFailure: true } }, now).text).toMatch(/받는 사람 2명 · 변화 없으면 생략 · 실패 알림 · 아직 보낸 적 없음/);
+    const l = targetMailLine({ mail: { recipients: 1 }, lastMail: { state: 'failed', kind: 'result', at: now, reason: 'SMTP 오류' } }, now);
+    expect(l.tone).toBe('bad'); expect(l.text).toMatch(/보내지 못함 — SMTP 오류/);
   });
 });

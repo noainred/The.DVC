@@ -464,7 +464,11 @@ export const INTERVAL_CHOICES = Object.freeze([6, 12, 24, 48, 168]);
 export const TIMEOUT_CHOICES = Object.freeze([10, 20, 30, 60, 90, 120]);
 
 export function blankTarget() {
-  return { id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 30, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true };
+  return {
+    id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 30, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true,
+    // v2.738 결과 메일 — 주소는 줄바꿈으로 받는다(쉼표·세미콜론도 서버가 나눈다).
+    mailTo: '', mailExcludeCommon: false, mailOnlyOnChange: false, mailOnFailure: false,
+  };
 }
 
 /** 서버 설정의 대상 → 폼(숫자는 그대로, 없으면 빈 칸). */
@@ -478,6 +482,8 @@ export function formFromTarget(t) {
     intervalHours: keep(t.intervalHours), timeoutMin: keep(t.timeoutMin), topN: keep(t.topN), enabled: t.enabled !== false,
     agent: t.agent || '', datacenterId: t.datacenterId || '', runVia: t.runVia === 'node' ? 'node' : 'device',
     detach: t.detach !== false, // v2.737 — 옛 저장값(필드 없음)은 켬
+    mailTo: Array.isArray(t.mail?.to) ? t.mail.to.join('\n') : '', mailExcludeCommon: t.mail?.excludeCommon === true,
+    mailOnlyOnChange: t.mail?.onlyOnChange === true, mailOnFailure: t.mail?.onFailure === true,
   };
 }
 
@@ -488,6 +494,8 @@ export function formFromTarget(t) {
 export function targetBody(f) {
   const out = { label: String(f.label || '').trim(), path: String(f.path || '').trim(), sizeMode: f.sizeMode === 'k' ? 'k' : 'h', auth: f.auth === 'device' ? 'device' : 'key', enabled: f.enabled !== false, detach: f.detach !== false };
   if (f.id) out.id = f.id;
+  // v2.738 결과 메일 — 주소 판정은 서버가 한다(형식이 틀리면 400 · 칸을 짚는다). 화면은 입력 중 미리 알려 줄 뿐이다.
+  out.mail = { to: String(f.mailTo || ''), excludeCommon: f.mailExcludeCommon === true, onlyOnChange: f.mailOnlyOnChange === true, onFailure: f.mailOnFailure === true };
   for (const k of ['port', 'intervalHours', 'timeoutMin', 'topN']) {
     const n = numOrNull(f[k]);
     if (n != null) out[k] = n;
@@ -635,3 +643,82 @@ export function resumeNote(r, now = Date.now()) {
 /** 수집 방식 문구 — 마지막 성공 수집이 분리 실행이었는지(장비 쪽 기록). */
 export const TRIGGER_TEXT = Object.freeze({ schedule: '주기', manual: '수동', central: '메인 요청', resume: '자동 재개' });
 export const triggerText = (t) => TRIGGER_TEXT[t] || (t ? String(t) : '—');
+
+// ── v2.738 결과 메일 ─────────────────────────────────────────────────────────
+// 판정은 서버(isidu/mailRules.js)가 한다 — 여기는 입력 칸 미리보기(형식 오류·받는 사람 수)만. 서버 규칙과 같은 정규식을 쓰고
+// 테스트가 같은 입력으로 대조한다(번들 경계라 두 벌).
+export const MAIL_LIST_MAX = 50;
+const EMAIL_RE = /^[A-Za-z0-9.!#$%&*+/=?^_{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$/;
+export const isEmail = (s) => typeof s === 'string' && s.length <= 254 && EMAIL_RE.test(s);
+
+/** 입력 칸 → { list, invalid, dupes, over } — 서버 normalizeMailList 와 같은 규칙. */
+export function parseMailInput(v) {
+  const raw = Array.isArray(v) ? v.flatMap((x) => String(x ?? '').split(/[\s,;]+/)) : String(v ?? '').split(/[\s,;]+/);
+  const list = []; const invalid = []; const seen = new Set(); let dupes = 0; let over = 0;
+  for (const p0 of raw) {
+    const p = p0.trim();
+    if (!p) continue;
+    if (!isEmail(p)) { if (invalid.length < 20) invalid.push(p.slice(0, 80)); continue; }
+    const k = p.toLowerCase();
+    if (seen.has(k)) { dupes++; continue; }
+    if (list.length >= MAIL_LIST_MAX) { over++; continue; }
+    seen.add(k); list.push(p);
+  }
+  return { list, invalid, dupes, over };
+}
+
+/** 받는 사람 미리보기(공통 ∪ 대상별 — 서버 mailRecipients 와 같은 규칙). */
+export function recipientPreview(commonText, f) {
+  const common = f?.mailExcludeCommon ? [] : parseMailInput(commonText).list;
+  const own = parseMailInput(f?.mailTo).list;
+  const seen = new Set(); let n = 0; let dupes = 0;
+  for (const a of [...common, ...own]) { const k = a.toLowerCase(); if (seen.has(k)) { dupes++; continue; } seen.add(k); n++; }
+  return { count: n, fromCommon: common.length, fromTarget: own.length, dupes };
+}
+
+export function recipientPreviewText(p) {
+  if (!p || !p.count) return '받는 사람이 없습니다 — 이 대상은 결과 메일을 보내지 않습니다.';
+  const parts = [`공통 ${p.fromCommon}명`, `이 대상 ${p.fromTarget}명`];
+  return `받는 사람 ${p.count}명(${parts.join(' + ')}${p.dupes ? ` — 같은 주소 ${p.dupes}개는 한 번만` : ''})`;
+}
+
+/** 입력 칸의 형식 오류 안내(없으면 null). */
+export function mailInputIssue(text) {
+  const n = parseMailInput(text);
+  if (n.invalid.length) return `주소 형식이 잘못됐습니다: ${n.invalid.slice(0, 3).join(', ')}${n.invalid.length > 3 ? ` 외 ${n.invalid.length - 3}개` : ''} — 저장하지 않습니다.`;
+  if (n.over) return `${MAIL_LIST_MAX}명까지입니다(${n.over}명 초과).`;
+  return null;
+}
+
+/** 메일 준비 상태(서버 mailReady) → 안내. ok 면 null. */
+export function mailReadyText(r) {
+  if (!r || r.ok) return null;
+  return `메일을 보낼 수 없는 상태입니다 — ${r.reason || '메일 설정을 확인하세요'} 결과는 그대로 쌓이고 메일만 나가지 않습니다.`;
+}
+
+export const MAIL_STATE_TEXT = Object.freeze({ sent: '보냄', skipped: '보내지 않음', failed: '보내지 못함' });
+
+/** 마지막 메일 결과 → { tone, text }(없으면 null). 주소는 서버가 싣지 않는다(개수만). */
+export function mailStateText(last, now = Date.now()) {
+  if (!last || !last.state) return null;
+  const when = agoText(last.at, now) || '';
+  const what = last.kind === 'failure' ? '실패 알림' : '결과 메일';
+  if (last.state === 'sent') return { tone: 'ok', text: `${what} ${when} 보냄 · ${countText(last.accepted ?? last.to)}명${last.manual ? ' (수동)' : ''}` };
+  if (last.state === 'skipped') return { tone: 'muted', text: `${what} ${when} 보내지 않음 — ${last.reason || '사유 없음'}` };
+  return { tone: 'bad', text: `${what} ${when} 보내지 못함 — ${last.reason || '사유 없음'}` };
+}
+
+/**
+ * 대상 화면의 '결과 메일' 한 줄(메인 목록 응답 — 주소 없이 개수·선택·마지막 결과만). 메일을 고르지 않은 대상은 null(말할 것이 없다).
+ * 마지막 결과가 있으면 그것을 붙인다 — 보냈는지·왜 건너뛰었는지를 화면이 말한다.
+ */
+export function targetMailLine(t, now = Date.now()) {
+  const m = t?.mail;
+  const last = t?.lastMail ? mailStateText(t.lastMail, now) : null;
+  if (!m || !(m.recipients > 0)) return last ? { tone: last.tone, text: `결과 메일: 받는 사람이 없습니다(지금은 보내지 않습니다) · 마지막 — ${last.text}` } : null;
+  const opts = [`받는 사람 ${countText(m.recipients)}명`];
+  if (m.onlyOnChange) opts.push('변화 없으면 생략');
+  if (m.onFailure) opts.push('실패 알림');
+  const text = `결과 메일: ${opts.join(' · ')}${last ? ` · 마지막 — ${last.text}` : ' · 아직 보낸 적 없음'}`;
+  return { tone: last ? last.tone : 'muted', text };
+}
