@@ -137,7 +137,7 @@ test('⚠ push 실패를 조용히 삼키지 않는다 — 콘솔에 남긴다',
   } finally { console.warn = orig; _resetForTest(); }
 });
 
-test('⚠ import 된 이름을 같은 파일에서 const 구조분해로 재선언하지 않는다 (TDZ 전수 스윕)', () => {
+test('⚠ import 된 이름을 같은 파일에서 const 구조분해·일반 선언으로 재선언하지 않는다 (TDZ 전수 스윕)', () => {
   const files = [];
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -166,6 +166,11 @@ test('⚠ import 된 이름을 같은 파일에서 const 구조분해로 재선�
         const n = (raw.includes(':') ? raw.split(':')[1] : raw).split('=')[0].trim();
         if (imported.has(n)) hits.push(`${path.relative(SRC, f)}: '${n}'`);
       }
+    }
+    // v2.737: 구조분해가 아닌 일반 선언도 본다 — agent/ipScanWorker.js 가 가져온 함수 scanStarted 를 같은 함수의
+    //   `const scanStarted = Date.now()` 로 가려 그 줄 위의 호출이 TDZ 로 던졌다(전량 테스트 audit2607e 가 잡았다 — 이 스윕은 놓쳤다).
+    for (const m of code.matchAll(/\b(const|let)\s+([A-Za-z_$][\w$]*)\s*=/g)) {
+      if (imported.has(m[2])) hits.push(`${path.relative(SRC, f)}: '${m[2]}'(일반 선언)`);
     }
   }
   assert.deepEqual(hits, [],

@@ -34,8 +34,9 @@ import { numOrNull } from '../util/numOrNull.js';
 export const SCAN_LOG_FILE_NAME = 'ipam-scan-log.json';
 registerStateFile(SCAN_LOG_FILE_NAME);
 const FILE = () => path.join(config.configDir, 'ipam-scan-log.json'); // 리터럴 — scripts/config-doc.mjs 가 이 형태만 읽는다(SCAN_LOG_FILE_NAME 과 같은 값)
-export const SCAN_LOG_EVENTS = Object.freeze(['start', 'finish', 'fail', 'skip', 'busy', 'report', 'reject', 'settings']);
-const LEVEL_OF = Object.freeze({ start: 'info', finish: 'info', report: 'info', settings: 'info', skip: 'warn', busy: 'warn', reject: 'warn', fail: 'error' });
+// v2.737: interrupted(업그레이드·재시작으로 끝나지 못함 — 다음 기동이 기록) · resume(자동 재개로 다시 시작).
+export const SCAN_LOG_EVENTS = Object.freeze(['start', 'finish', 'fail', 'skip', 'busy', 'report', 'reject', 'settings', 'interrupted', 'resume']);
+const LEVEL_OF = Object.freeze({ start: 'info', finish: 'info', report: 'info', settings: 'info', resume: 'info', skip: 'warn', busy: 'warn', reject: 'warn', interrupted: 'warn', fail: 'error' });
 // v2.639: 바깥 호출부 0건(listScanLog 응답의 `max` 로만 나간다) — 모듈 내부 상수(export 를 뗐다).
 const SCAN_LOG_MAX = (() => {
   const n = numOrNull(process.env.IPAM_SCAN_LOG_MAX);

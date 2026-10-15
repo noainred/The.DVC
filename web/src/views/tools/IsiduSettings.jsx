@@ -287,7 +287,11 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
                 <label className="fld">주기 수집
                   <span className="radio"><input type="checkbox" checked={f.enabled !== false} onChange={(e) => set({ enabled: e.target.checked })} disabled={locked} /> 켜기</span>
                 </label>
+                <label className="fld" title="du 를 아이실론에서 nohup 으로 띄워 SSH 세션과 뗍니다 — 포탈이 업그레이드·재시작해도 du 가 계속 돌고, 다시 뜬 포탈이 그 결과를 이어 받습니다. 장비의 /tmp/dvc-isidu-<uid> 에 작업 파일을 두고 결과를 받으면 지웁니다.">장비에서 분리 실행
+                  <span className="radio"><input type="checkbox" checked={f.detach !== false} onChange={(e) => set({ detach: e.target.checked })} disabled={locked} /> 재시작해도 계속</span>
+                </label>
               </div>
+              {f.detach !== false ? <div className="hint">분리 실행: 아이실론의 /tmp/dvc-isidu-‘계정 uid’ 에 작업 파일(du 출력·종료코드)을 두고, 결과를 받으면 지웁니다. 받지 못한 작업 파일은 다음 실행이 2일 지난 것을 지웁니다. nohup·/tmp 를 쓸 수 없으면 예전처럼 세션에 묶어 실행합니다.</div> : <div className="hint">분리 실행을 끄면 du 가 SSH 세션에 묶입니다 — 포탈이 업그레이드·재시작하면 그 조사는 처음부터 다시 돕니다(자동 재개).</div>}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div className="hint">실행할 명령</div>

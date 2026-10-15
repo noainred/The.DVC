@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **209개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **210개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-15)
@@ -181,6 +181,7 @@
 | `sanswitch-perf-push.json` | 설정 | 엣지 → 중앙 포트 사용량(portperfshow) 시계열 중계(v2.423, 사용자 요구 '연결은 됐는데 데이터 | ✅ |  | ✅ | sanswitch/perfPush.js |
 | `sanswitch-perf-settings.json` | 설정 | 포트 사용량(portperfshow) 수집 설정(v2.411, 사용자 요구 | ✅ | ✅ | ✅ | sanswitch/perfSettings.js |
 | `sanswitch-perf.db` | DB | SAN 스위치 포트 처리량(누적 카운터 델타) |  |  | ✅ | sanswitch/perfDb.js |
+| `scan-journal.json` | 설정 | 실행 중 스캔 기록 + 재시작 뒤 자동 재개(상태, v2.737) | ✅ | ✅ | ✅ | util/scanJournal.js |
 | `secrets-key` | 디렉터리 | 자격증명 봉인 키(암호화 모드) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
@@ -238,6 +239,7 @@
 - **`peer-trust.json`** — 종류(ssh/tls)·호스트·포트마다 승인·관찰·거부 지문과 정책(enforce/observe)을 담는다. 손상이면 보존 후 두 종류 모두 enforce 로 닫는다 — 지우면 승인 기록이 사라져 새 설치처럼 엄격 모드로 시작한다(장비마다 다시 승인)
 - **`tls-ca-bundle.pem`** — 비밀이 아니다. 백업 확장자 화이트리스트 밖이라 백업에 들어가지 않는다 — 복원 뒤 다시 둘 것. 개인키를 넣지 말 것(인증서가 아닌 블록은 세어 경고한다)
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
+- **`scan-journal.json`** — 상태 파일(백업 감시 제외). 아이실론 du·iDRAC 대역·IP 스캔이 시작할 때 적고 끝나면 지운다 — 업그레이드·재시작으로 남은 항목은 다음 기동 2분 뒤(SCAN_RESUME_DELAY_MS) 자동으로 다시 시작한다(사슬마다 최대 2번). 비밀은 적지 않는다(대상 id·대역 id·원격 작업 id). 지우면 끊긴 스캔이 다음 주기까지 다시 돌지 않을 뿐 다른 영향은 없다
 - **`upgrade-status.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다. 자동 업그레이드로 재시작한 뒤에도 업그레이드 화면이 '언제 무엇을 했는지' 를 보이기 위한 것 — 지우면 그 표시가 다음 확인까지 비고, 업그레이드 동작에는 영향이 없다
 - **`upgrade-signature-log.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다(오프라인 확인 도구는 쓰지 않는다). 업그레이드 재시작 뒤에도 '마지막 검증' 을 보이기 위한 것 — 지우면 그 표시가 다음 검증까지 비고, 설치 판정에는 영향이 없다
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다

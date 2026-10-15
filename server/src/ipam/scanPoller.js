@@ -8,7 +8,8 @@ import { runScan, SCAN_DEADLINE_CODE } from './scanRunner.js';
 import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 import { recordScanLog } from './scanLog.js';
-import { scheduleVcRangeMigration } from './vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
+import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
+import { scanStarted, scanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 // v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
@@ -26,8 +27,8 @@ let lastRun = null;
 let progress = null; // 실행 중 진행률: { total, done, alive, startedAt }
 
 // v2.639: 바깥 호출부 0건(라우트는 startScan 을 쓴다) — 모듈 내부 함수(export 를 뗐다).
-async function runScanOnce({ manual = false } = {}) {
-  const trigger = manual ? 'manual' : 'periodic';
+async function runScanOnce({ manual = false, resumeOf = null } = {}) {
+  const trigger = resumeOf ? 'resume' : manual ? 'manual' : 'periodic';
   if (running) {
     if (manual) recordScanLog({ event: 'busy', trigger, message: '이미 스캔 중이라 새로 시작하지 않았습니다.' });
     return { ok: false, reason: '이미 스캔 중입니다.' };
@@ -48,6 +49,9 @@ async function runScanOnce({ manual = false } = {}) {
   running = true;
   const started = Date.now();
   progress = { total: 0, done: 0, alive: 0, startedAt: started };
+  // v2.737: 실행 중 스캔 기록 — 업그레이드·재시작으로 끊기면 다음 기동이 '중단됨' 으로 기록하고 다시 시작한다(재개 상한 2회).
+  scanStarted('ipscan', 'local', { label: `IP 스캔(대역 ${ranges.length}개)`, trigger, resumeOf, meta: { manual: !!manual, ranges: ranges.length } });
+  if (resumeOf) recordScanLog({ event: 'resume', trigger, message: `재시작으로 중단된 스캔을 다시 시작합니다(${new Date(resumeOf.since || started).toISOString()} 시작분 · 재개 ${(resumeOf.resumes || 0) + 1}회째).` });
   recordScanLog({ event: 'start', trigger, at: started, ranges: ranges.length, rangesSample: ranges.slice(0, 5),
     message: `대역 ${ranges.length}개 · 포트 ${(s.ports || []).length}개 · 동시 ${s.concurrency} · 시한 ${s.timeoutMs}ms${s.ping ? ' · ICMP 병행' : ''}` });
   try {
@@ -84,8 +88,23 @@ async function runScanOnce({ manual = false } = {}) {
     recordScanLog({ event: 'fail', trigger, ranges: ranges.length, durationMs, scanned: done, alive: partialAlive,
       message: `${e?.message || String(e)} — 스캔 미완료로 기록${done != null && total != null ? `(${done}/${total} 스캔)` : ''} · 시한 전에 찾은 생존 IP ${partialAlive}개는 마지막 확인 시각만 갱신 · 해제(down) 판정은 완료된 스캔이 올 때까지 보류` });
     return { ok: false, reason: e.message };
-  } finally { running = false; progress = null; }
+  } finally { running = false; progress = null; scanFinished('ipscan', 'local'); }
 }
+
+/**
+ * v2.737: 재시작으로 중단된 스캔의 재개(util/scanJournal). 기동 30초 뒤의 주기 스캔이 이미 다시 돌았으면(그 시작이 대기 항목을 덮는다) 여기
+ * 오지 않는다. 주기가 꺼져 있어 수동 스캔만 끊긴 경우가 여기다.
+ */
+export async function resumeIpScan(entry) {
+  if (running) return { outcome: 'covered', note: '이미 다시 스캔 중입니다' };
+  if (lastRun && !lastRun.skipped && (lastRun.at || 0) >= (entry.detectedAt || 0)) return { outcome: 'covered', note: '재시작 뒤 스캔이 이미 끝났습니다' };
+  const s = loadScanSettings();
+  if (!effectiveRanges(s).length) return { outcome: 'gone', note: '스캔할 대역이 없습니다' };
+  if (!entry.meta?.manual && !s.enabled && !enabledVcRanges().length) return { outcome: 'skipped', note: '주기 스캔이 꺼져 있습니다' };
+  runScanOnce({ manual: !!entry.meta?.manual, resumeOf: entry }).catch((e) => console.error('[ipscan] 자동 재개 실패:', e.message));
+  return { outcome: 'started', note: '중단된 IP 스캔을 처음부터 다시 시작했습니다(대역 전체)' };
+}
+registerScanResumer('ipscan', resumeIpScan);
 
 /** 비동기로 스캔 시작(요청은 즉시 반환, 창을 닫아도 백그라운드에서 계속 실행). */
 export function startScan({ manual = true } = {}) {
@@ -108,7 +127,9 @@ export function scanStatus() {
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
   // 폴러는 __local__ enabled이거나 enabled인 vCenter 대역이 있으면 실제로 돈다 → enabled를 그 기준으로 노출.
   // v2.733: releaseHold — 해제 판정 보류 현황(완료된 스캔이 기준 안에 없는 에이전트의 IP 를 down 으로 바꾸지 않은 것).
-  return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null, releaseHold: releaseHoldStatus() };
+  const j = journalFor('ipscan'); // v2.737: 재시작으로 중단된 스캔(재개 대기)·최근 재개 결과
+  return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null, releaseHold: releaseHoldStatus(),
+    journal: { interrupted: j.interrupted, recent: j.recent.slice(0, 5), resumeLimit: j.resumeLimit } };
 }
 
 export function rescheduleScanPoller() {
@@ -121,6 +142,13 @@ export function rescheduleScanPoller() {
 
 export function startIpScanPoller() {
   const s = loadScanSettings();
+  // v2.737: 이전 프로세스가 끝내지 못한 스캔을 로그에 남긴다(조용히 사라지지 않게) — 재개는 기동 30초 뒤 주기 스캔 또는 scanJournal 이 한다.
+  try {
+    for (const x of journalFor('ipscan').interrupted) {
+      recordScanLog({ event: 'interrupted', trigger: x.trigger || '', at: x.detectedAt,
+        message: `업그레이드·재시작으로 끝나지 못한 스캔이 있습니다(${new Date(x.since || x.detectedAt).toISOString()} 시작) — ${s.enabled || enabledVcRanges().length ? '곧 다시 스캔합니다' : '수동 스캔이었으므로 자동 재개가 다시 시작합니다'}.` });
+    }
+  } catch (e) { console.warn(`[ipscan] 중단 기록 실패: ${e.message}`); }
   // 첫 스캔은 부팅 30초 후(다른 수집과 겹치지 않게), 이후 주기 반복.
   setTimeout(() => runScanOnce().catch((e) => console.error('[ipscan] 실패:', e.message)), 30_000).unref?.();
   // v2.591 L9: 기동 스태거 전 reschedule 이 먼저 왔으면 그 interval 을 지운다(IP 스캔 주기가 두 벌이 되지 않게).

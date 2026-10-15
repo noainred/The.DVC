@@ -148,6 +148,8 @@ export function normalizeTarget(input, prev, ctx) {
     port: numField(t.port, RANGES.port, prev?.port),
     enabled: t.enabled !== false,
     auth: AUTH_MODES.includes(t.auth) ? t.auth : 'key',
+    // v2.737: 장비에서 분리 실행(nohup — 포탈이 재시작해도 du 가 계속 돌고 결과를 이어 받는다). 기본 켬 · false 만 끔.
+    detach: t.detach !== false,
   };
   const user = String(t.username ?? prev?.username ?? '').trim();
   const deviceId = String(t.deviceId || '').trim();
@@ -238,6 +240,7 @@ export function edgeTargetView(r) {
     // 등록부에서 장비를 비활성으로 두면 엣지도 주기 조사를 하지 않는다('지금 수집' 도 엣지 쪽 runNow 는 사본의 enabled 를 보지 않는다 —
     // 사람이 누른 것이다).
     path: r.path, sizeMode: r.sizeMode, intervalHours: r.intervalHours, timeoutMin: r.timeoutMin, topN: r.topN, enabled: r.enabled !== false && !r.deviceDisabled,
+    detach: r.detach !== false, // v2.737
   };
 }
 
@@ -265,6 +268,7 @@ export function cleanEdgeTarget(t) {
     path: normPath(String(t.path)), sizeMode: SIZE_MODES.includes(t.sizeMode) ? t.sizeMode : 'h',
     intervalHours: numField(t.intervalHours, RANGES.intervalHours, null), timeoutMin: numField(t.timeoutMin, RANGES.timeoutMin, null),
     topN: numField(t.topN, RANGES.topN, null), enabled: t.enabled !== false,
+    detach: t.detach !== false, // v2.737 — 구버전 중앙은 이 필드를 보내지 않는다(없으면 켬)
   };
 }
 

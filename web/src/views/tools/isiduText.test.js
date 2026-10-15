@@ -11,6 +11,7 @@ import {
   sparkPath, trendModel, trendNotes, cadenceOf, baseNote, scanNotes, kpiCards, targetStatus, keyStatus, keyRows,
   runResultText, usersFootNote, blankTarget, formFromTarget, targetBody, tailPath,
   EDGE_CALL_TEXT, nudgeLines, testResultText, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, RUN_FOLLOW, TIMEOUT_CHOICES,
+  RESUME_OUTCOME_TEXT, resumeNote, triggerText,
 } from './isiduText.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -281,5 +282,68 @@ describe('v2.736 엣지 원격 실행·실행 노드', () => {
     const { RANGES } = await import('../../../../server/src/isidu/settings.js');
     expect(Math.max(...TIMEOUT_CHOICES)).toBe(RANGES.timeoutMin.max);
     expect(formFromTarget({ id: 't', deviceId: 'd', runVia: 'node', agent: 'e2' })).toMatchObject({ runVia: 'node', agent: 'e2' });
+  });
+});
+
+describe('v2.737 법인별 현황(첫 화면)', async () => {
+  const { corpOverview, overviewNote, targetBytesOf } = await import('./isiduText.js');
+  const NOW = 1_800_000_000_000;
+  const ok = (bytes, count, extra = {}) => ({ okScan: { id: 1, ts: NOW - 3_600_000, total: { bytes, res: 1 }, sumBytes: bytes, count, errLines: 0 }, lastTry: { id: 1, ts: NOW - 3_600_000, ok: true }, intervalHours: 24, ...extra });
+  it('법인으로 묶고 합계는 성공한 수집이 있는 대상만 더한다', () => {
+    const r = corpOverview([
+      { id: 'a', label: 'A', corp: 'Seoul', ...ok(100, 3) },
+      { id: 'b', label: 'B', corp: 'Seoul', ...ok(300, 5) },
+      { id: 'c', label: 'C', corp: 'Busan', intervalHours: 24 },
+      { id: 'd', label: 'D', ...ok(50, 1) },
+    ], NOW);
+    expect(r.groups.map((g) => g.label)).toEqual(['Busan', 'Seoul', '법인 미지정']);
+    const seoul = r.groups[1];
+    expect(seoul.bytes).toBe(400); expect(seoul.users).toBe(8); expect(seoul.items.map((x) => x.t.id)).toEqual(['b', 'a']);
+    expect(r.groups[0].bytes).toBe(null); expect(r.groups[0].unmeasured).toBe(1);
+    expect(r.totals).toMatchObject({ corps: 2, targets: 4, measured: 3, unmeasured: 1, users: 9, bytes: 450 });
+    expect(overviewNote(r.totals)).toMatch(/성공한 수집이 있는 대상 3개 기준/);
+  });
+  it('크기는 du 합계 줄 → 폴더 합 순서이고 모르면 null(0 아님)', () => {
+    expect(targetBytesOf({ okScan: { total: null, sumBytes: 70 } })).toBe(70);
+    expect(targetBytesOf({ okScan: { total: { bytes: 0 }, sumBytes: 0 } })).toBe(null);
+    expect(targetBytesOf({})).toBe(null);
+    expect(corpOverview([], NOW).totals.users).toBe(null);
+    expect(overviewNote(corpOverview([{ id: 'x', corp: 'K' }], NOW).totals)).toMatch(/합계를 낼 수 없습니다/);
+  });
+  it('묶음 대표 상태는 가장 나쁜 것', () => {
+    const r = corpOverview([{ id: 'a', corp: 'K', ...ok(1, 1) }, { id: 'b', corp: 'K', issue: 'device-missing' }], NOW);
+    expect(r.groups[0].worst).toBe('bad');
+  });
+});
+
+describe('v2.737 재시작으로 끊긴 조사 — 상태·재개 결과 문구', () => {
+  const NOW = Date.UTC(2026, 9, 15, 3, 0, 0);
+  it('재개 대기 중인 대상은 "재시작으로 중단" 이고 언제 다시 시작하는지 말한다(미래 시각은 분으로)', () => {
+    const st = targetStatus({ id: 'a', interrupted: { since: NOW - 30 * 60_000, detectedAt: NOW - 60_000, nextAt: null, resumes: 0 } }, NOW);
+    expect(st.key).toBe('interrupted');
+    expect(st.detail).toMatch(/곧 자동으로 다시 시작합니다/);
+    expect(st.detail).toMatch(/분리 실행 중이던 du 는 새로 돌리지 않고 결과를 이어 받습니다/);
+    const later = targetStatus({ id: 'a', interrupted: { since: NOW - HOUR, nextAt: NOW + 5 * 60_000, resumes: 1 } }, NOW);
+    expect(later.detail).toMatch(/약 5분 뒤 자동으로 다시 시작합니다\(재개 1회째\)/);
+    // 조사 중이면 그것이 먼저(재개가 이미 시작됐다)
+    expect(targetStatus({ id: 'a', running: { since: NOW - 1000, trigger: 'resume' }, interrupted: { since: NOW - HOUR } }, NOW).key).toBe('running');
+  });
+  it('재개 결과 — 정상(resumed·covered)은 말하지 않고, 멈춘 이유는 말한다 · 서버 결과 코드와 1:1', () => {
+    expect(resumeNote({ outcome: 'resumed', at: NOW - 1000 }, NOW)).toBe('');
+    expect(resumeNote({ outcome: 'covered', at: NOW - 1000 }, NOW)).toBe('');
+    expect(resumeNote({ outcome: 'limit', at: NOW - 60_000, note: 'x' }, NOW)).toMatch(/상한\(2회\)/);
+    expect(resumeNote({ outcome: 'zzz', at: NOW }, NOW)).toMatch(/자동 재개 결과: zzz/);
+    expect(resumeNote(null)).toBe('');
+    const src = fs.readFileSync(path.join(SERVER, 'util/scanJournal.js'), 'utf8');
+    const used = new Set([...src.matchAll(/done\('([a-z-]+)'/g), ...src.matchAll(/'(resumed|covered)'/g)].map((m) => m[1]));
+    for (const o of ['started', 'busy']) used.delete(o);
+    for (const o of used) expect(RESUME_OUTCOME_TEXT[o], `서버 결과 ${o} 의 문구`).toBeTruthy();
+    expect(triggerText('resume')).toBe('자동 재개');
+  });
+  it('분리 실행 설정 — 기본 켬 · 옛 저장값(필드 없음)도 켬 · 끈 값은 그대로 보낸다', () => {
+    expect(blankTarget().detach).toBe(true);
+    expect(formFromTarget({ id: 'a', path: '/ifs/x' }).detach).toBe(true);
+    expect(formFromTarget({ id: 'a', path: '/ifs/x', detach: false }).detach).toBe(false);
+    expect(targetBody({ ...blankTarget(), detach: false }).detach).toBe(false);
   });
 });

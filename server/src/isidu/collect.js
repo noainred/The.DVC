@@ -15,6 +15,7 @@ import { parseDuOutput, duCommand, totalsOf } from './parse.js';
 import { privateKeyForConnect, keyInfo, ensureKey } from './sshKey.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { sessionPlanOf } from './settings.js';
+import { runDetached, killCommand, JOB_RE } from './detach.js';
 
 export const authGuard = createAuthGuard({ file: 'isidu-auth-stops.json' });
 
@@ -64,24 +65,35 @@ function classify(e) {
   const msg = String(e?.message || e || '');
   if (isSshHostKeyError(e)) return 'hostkey';
   if (isSshAuthError(e) || isAuthFailureText(msg)) return 'auth';
-  if (/타임아웃|timeout|timed out/i.test(msg)) return 'timeout';
+  if (/타임아웃|timeout|timed out|시한 초과/i.test(msg)) return 'timeout';
   if (/출력 상한/.test(msg)) return 'output-cap';
   if (/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|ECONNRESET|닫혔습니다|connect/i.test(msg)) return 'unreachable';
   return 'exec';
 }
 
+/** 시한에 걸린 분리 실행 작업을 멈춘다(짧은 새 세션 — 원래 세션은 시한으로 이미 끊겼다). 실패해도 다음 실행이 2일 지난 파일을 지운다. */
+async function killRemoteJob(creds, jobId) {
+  if (!jobId || !JOB_RE.test(String(jobId))) return false;
+  try {
+    await withDeadline(30_000, (signal) => withSsh({ ...creds, signal }, (api) => api.exec(killCommand(jobId), 20_000)), '작업 정지 시한 초과');
+    return true;
+  } catch { return false; }
+}
+
 /**
  * 대상 하나 조사. 결과는 db.insertScan 모양(entries 포함).
  * @param {object} t  실행 정보(resolveTarget 결과 또는 엣지 사본)
- * @param {{trigger?:string, manual?:boolean, now?:()=>number}} [opts]
+ * @param {{trigger?:string, manual?:boolean, attachJob?:string|null, onJob?:Function}} [opts]
+ *   v2.737: t.detach !== false 면 장비에서 분리 실행한다(isidu/detach.js) — attachJob 은 재시작 전에 띄운 작업 id(같은 작업에 다시 붙는다),
+ *   onJob 은 새 작업을 띄운 직후 불린다(실행 중 스캔 기록에 작업 id 를 남긴다).
  */
-export async function collectTarget(t, { trigger = 'schedule', manual = false } = {}) {
+export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null } = {}) {
   const started = Date.now();
   const base = { agent: '', targetId: t.id, path: t.path, host: t.host, sizeMode: t.sizeMode || 'h', trig: trigger };
   const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - started, ...extra });
   if (t.issue) return fail(t.issue, t.issue === 'device-missing' ? '스토리지 등록부에서 그 아이실론이 사라졌습니다' : '고른 장비가 아이실론이 아닙니다');
 
-  let stdout = ''; let stderr = ''; let code = null;
+  let stdout = ''; let stderr = ''; let code = null; let runInfo = {};
   if (String(t.id).startsWith('mock-') && isMockMode()) {
     const { demoDuOutput } = await import('../mock/demo/isidu.js');
     ({ stdout, stderr, code } = demoDuOutput(t, started));
@@ -93,16 +105,28 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false } 
       if (stop) return fail('auth', `인증 거부로 주기 수집을 멈췄습니다(${new Date(stop.since).toISOString()} 이후 ${stop.attempts}회) — 키·계정이 바뀌면 자동으로 다시 시도합니다. '지금 수집' 은 막지 않습니다`, { authStopped: true });
     }
     const plan = sessionPlanOf(t);
+    const detach = t.detach !== false;
+    let jobRef = attachJob || null;
     try {
       const r = await withDeadline(plan.sessionMs, (signal) => withSsh({ ...c.creds, signal }, async (api) => {
+        if (detach) {
+          return runDetached(api, t, { cmdMs: plan.cmdMs, attachJob, signal, started,
+            onJob: (job) => { jobRef = job.id; try { onJob?.(job); } catch { /* */ } } });
+        }
         const x = await api.exec(duCommand(t.path, t.sizeMode), plan.cmdMs, { long: true });
-        return { x };
+        return { x, mode: 'attached' };
       }), 'du 시한 초과');
       stdout = r.x?.stdout || ''; stderr = r.x?.stderr || ''; code = r.x?.code ?? null;
+      runInfo = { runMode: r.mode || 'attached', ...(r.attached ? { attached: true } : {}), ...(r.detachFallback ? { detachFallback: r.detachFallback } : {}) };
     } catch (e) {
       const kind = classify(e);
       if (kind === 'auth') authGuard.markAuthStopped(c.credId.id, c.credId, e.message);
-      return fail(kind, kind === 'hostkey' ? `${e.message} — 설정 › 보안 › 장비 신뢰에서 이 아이실론의 호스트키 지문을 확인하고 승인하세요` : e.message);
+      // 포탈 쪽 시한(세션 시한)에 걸리면 장비의 du 를 멈춘다 — 재시작으로 끝날 때는 여기 오지 않는다(그때는 이어 받는다).
+      const jid = e?.jobId || jobRef;
+      let killed = null;
+      if (detach && kind === 'timeout' && jid && !/장비의 du 작업을 멈췄습니다/.test(String(e?.message || ''))) killed = await killRemoteJob(c.creds, jid);
+      const tail = killed === true ? ' — 장비의 du 작업을 멈췄습니다' : killed === false ? ' — 장비의 du 작업을 멈추지 못했습니다(다음 실행이 2일 지난 작업 파일을 지웁니다)' : '';
+      return fail(kind, kind === 'hostkey' ? `${e.message} — 설정 › 보안 › 장비 신뢰에서 이 아이실론의 호스트키 지문을 확인하고 승인하세요` : `${e.message}${tail}`, detach ? { runMode: 'detached' } : {});
     }
     authGuard.clearAuthStop(t.id);
   }
@@ -116,7 +140,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false } 
     ...base, ts: Date.now(), ok: true, durationMs: Date.now() - started,
     total: parsed.total, sumBytes: tot.sumBytes, sumRes: tot.sumRes, count: parsed.entries.length,
     skipped: parsed.skipped, errLines: parsed.errLines, errSample: parsed.errSample, truncated: parsed.truncated,
-    entries: parsed.entries,
+    entries: parsed.entries, ...runInfo,
   };
 }
 

@@ -12,12 +12,14 @@ export const EVENT_TEXT = Object.freeze({
   report: '엣지 보고',
   reject: '보고 거부',
   settings: '설정 변경',
+  interrupted: '재시작으로 중단', // v2.737
+  resume: '자동 재개',
 });
 const LEVEL_TEXT = Object.freeze({ info: ['정보', 'gray'], warn: ['주의', 'amber'], error: ['오류', 'red'] });
 
 export function eventText(e) { return EVENT_TEXT[e] || String(e || '—'); }
 export function levelBadge(l) { return LEVEL_TEXT[l] || ['—', 'gray']; }
-export function triggerText(t) { return t === 'manual' ? '수동' : t === 'periodic' ? '주기' : t ? String(t) : '—'; }
+export function triggerText(t) { return t === 'manual' ? '수동' : t === 'periodic' ? '주기' : t === 'resume' ? '자동 재개' : t ? String(t) : '—'; }
 export function agentText(a) { return !a || a === '__local__' ? '이 포탈' : String(a); }
 
 /** 스캔/응답 칸 — 못 읽은 값(null)은 0 이 아니라 '—'. */

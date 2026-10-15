@@ -27,6 +27,9 @@ import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracSc
 import { pushIdracScan, iloEdgeGate, edgeVersionOf } from '../central/idracScanPush.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { makeScanAuthPolicy } from './scanAuth.js';
+import { scanStarted, scanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js';
+
+const JKIND = 'idrac-scan';
 
 let timer = null;      // 주기 타이머(setTimeout 체인 — 32비트 한계 초과 주기 지원)
 let bootTimer = null;  // 부팅 60초 첫 스캔 타이머(주기 변경/끔 시 함께 취소)
@@ -170,7 +173,14 @@ export async function runIdracScanOnce(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
   if (isStopped()) return { ok: false, reason: '긴급중단 중' };
   let entries = enabledScanRanges();
-  if (opts.id) {
+  if (Array.isArray(opts.ids) && opts.ids.length) {
+    // v2.737: 재시작으로 중단된 사이클의 **남은 대역만**(자동 재개). 수동 사이클이었으면 꺼진 대역도(그때 그랬다), 주기면 켜진 것만.
+    const want = new Set(opts.ids.map(String));
+    entries = opts.manual
+      ? [...want].map((id) => getScanRangeRaw(id)).filter((raw) => raw && (raw.ranges || []).length && scanEntryReady(raw)).map((raw) => scanEntryRuntime(raw.id, raw))
+      : entries.filter((e) => want.has(String(e.id || '')));
+    if (!entries.length) return { ok: false, reason: '재개할 대역이 없습니다(삭제·꺼짐·계정 없음).' };
+  } else if (opts.id) {
     // 수동 단건(엔트리 하나): enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
     const raw = getScanRangeRaw(opts.id);
     // v2.610: 계정은 iDRAC 또는 HPE iLO 중 하나만 있어도 된다(둘 다 없을 때만 거절).
@@ -191,6 +201,14 @@ export async function runIdracScanOnce(opts = {}) {
   running = true;
   runningKind = opts.manual ? 'manual' : 'periodic';
   const started = Date.now();
+  // v2.737: 실행 중 스캔 기록 — 재시작으로 끊기면 다음 기동이 **아직 결과가 없는 대역**(lastRun.at < 이 시작)만 다시 돈다.
+  //   같은 키('cycle')로 범위가 다른 실행(단건·법인·전체)이 오므로 대기 항목을 덮지 않는다(coversPending:false — 재개 함수가 남은 대역을 판정).
+  //   비밀은 적지 않는다(대역 id 만).
+  scanStarted(JKIND, 'cycle', {
+    label: opts.id ? `대역 ${opts.id}` : opts.datacenterId ? `법인 ${opts.datacenterId}` : `전체 ${entries.length}개 대역`,
+    trigger: opts.resumeOf ? 'resume' : (opts.manual ? 'manual' : 'periodic'), resumeOf: opts.resumeOf || null, coversPending: false,
+    meta: { ids: entries.map((e) => String(e.id || '')).filter(Boolean).slice(0, 500), manual: !!opts.manual },
+  });
   const results = [];
   let foundTotal = 0, registeredTotal = 0, delegatedTotal = 0, heldTotal = 0; const errors = [];
   try {
@@ -264,8 +282,40 @@ export async function runIdracScanOnce(opts = {}) {
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };
-  } finally { running = false; runningKind = null; progress = null; stopRequested = false; }
+  } finally { running = false; runningKind = null; progress = null; stopRequested = false; scanFinished(JKIND, 'cycle'); }
 }
+
+/**
+ * v2.737: 재시작으로 중단된 스캔 사이클의 재개(util/scanJournal 이 기동 2분 뒤 부른다).
+ * 남은 대역 = 기록된 대역 중 **그 사이클 시작 뒤에 결과가 없는 것**(recordScanRangeRun 의 lastRun.at < since). 그 사이 다른 실행(주기·수동)이
+ * 그 대역을 끝냈으면 빠진다. 진행 중인 스캔이 있으면 busy(5분 뒤 다시 본다), 남은 것이 없으면 covered.
+ */
+export async function resumeIdracScan(entry) {
+  if (!config.idrac.enabled) return { outcome: 'skipped', note: 'iDRAC 수집이 꺼져 있습니다(IDRAC_ENABLED=false)' };
+  if (isStopped()) return { outcome: 'busy', note: '긴급중단 중 — 풀리면 다시 봅니다' };
+  if (running) return { outcome: 'busy', note: scanBusyReason(runningKind) };
+  const ids = Array.isArray(entry?.meta?.ids) ? entry.meta.ids.map(String) : [];
+  if (!ids.length) return { outcome: 'gone', note: '기록에 대역 목록이 없습니다' };
+  const since = Number(entry.since) || 0;
+  const remaining = [];
+  let gone = 0;
+  for (const id of ids) {
+    const raw = getScanRangeRaw(id);
+    if (!raw) { gone++; continue; }
+    const at = Number(raw.lastRun?.at) || 0;
+    if (at >= since) continue; // 중단 전에 끝났거나 그 뒤 다른 실행이 끝냈다
+    remaining.push(id);
+  }
+  if (!remaining.length) return { outcome: 'covered', note: `남은 대역이 없습니다(중단 전에 끝났거나 그 뒤 다시 스캔됨${gone ? ` · 삭제된 대역 ${gone}개` : ''})` };
+  const ready = remaining.filter((id) => { const raw = getScanRangeRaw(id); return raw && (raw.ranges || []).length && scanEntryReady(raw) && (entry.meta?.manual || raw.enabled !== false); });
+  if (!ready.length) return { outcome: 'skipped', note: `남은 대역 ${remaining.length}개가 꺼졌거나 계정이 없습니다` };
+  runIdracScanOnce({ ids: ready, manual: !!entry.meta?.manual, resumeOf: entry }).then(
+    (r) => { if (r && r.ok === false && r.reason) console.warn(`[idrac-scan] 자동 재개 미실행: ${r.reason}`); },
+    (e) => console.error('[idrac-scan] 자동 재개 실패:', e.message),
+  );
+  return { outcome: 'started', note: `남은 대역 ${ready.length}개(전체 ${ids.length}개 중)를 다시 스캔합니다${gone ? ` · 삭제된 대역 ${gone}개 제외` : ''}` };
+}
+registerScanResumer(JKIND, resumeIdracScan);
 
 /** 스캔 잠금 사유 문구 — 진행 중인 쪽이 무엇인지 밝힌다(조치가 다르다: 주기는 기다리면 끝나고, 임시 스캔은 다른 관리자가 돌리는 것). */
 export function scanBusyReason(kind = runningKind) {
@@ -320,6 +370,8 @@ export function idracScanStatus() {
     intervalMs: intervalMs(),
     running, runningKind, lastRun,
     progress: progress ? { ...progress, pct } : null,
+    // v2.737: 재시작으로 중단된 사이클(재개 대기) · 최근 재개 결과.
+    journal: (() => { const j = journalFor(JKIND); return { interrupted: j.interrupted, recent: j.recent.slice(0, 5), resumeLimit: j.resumeLimit }; })(),
   };
 }
 

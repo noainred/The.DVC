@@ -21,6 +21,8 @@ export const AUTO_TEXT = {
   // 다시 시도 안내는 autoSummary 가 주기를 보고 붙인다(주기 0 이면 '다음 주기' 가 없다 — 리뷰 UPG-UI-03).
   'check-failed': { title: '마지막 확인이 실패했습니다', fix: '사유를 보고 원격 소스 주소·네트워크(프록시·방화벽)를 확인하세요.' },
   'apply-failed': { title: '마지막 적용이 실패했습니다', fix: '사유를 확인하세요. 같은 사유가 반복되면 자동 적용은 매 주기 같은 곳에서 멈춥니다.' },
+  // v2.737: 실행 중 스캔(아이실론 du·iDRAC 대역·IP 대역)이 끝나면 적용한다 — 1분마다 다시 본다.
+  'deferred-scans': { title: '새 버전을 찾았지만 실행 중인 스캔이 끝나기를 기다리고 있습니다', fix: '스캔이 끝나면 곧바로 적용하고 재시작합니다. 대기 상한을 넘기면 그대로 적용하고, 끊긴 스캔은 재시작 뒤 자동으로 다시 시작합니다. 바로 적용하려면 ‘업그레이드 적용 + 재시작’ 을 누르세요.' },
 };
 
 /** 상태 → 이름·톤. 서버 AUTO_STATES 와 1:1. */
@@ -43,6 +45,7 @@ export const TICK_TEXT = {
   'check-failed': '확인하지 못했습니다',
   'no-source': '확인할 곳이 없어 아무것도 확인하지 않았습니다(원격 소스·감시 폴더 미설정)',
   error: '확인 중 오류가 났습니다',
+  deferred: '새 버전을 찾았지만 실행 중인 스캔이 끝나기를 기다리는 중입니다', // v2.737
 };
 /** 지금 프로세스가 적용 중일 때(lastTick.outcome 'applying' + 재시작 전 기록이 아님). */
 export const APPLYING_NOW = '새 버전을 적용하는 중입니다 — 다운로드·엣지 배포가 끝나면 재시작합니다';
@@ -112,6 +115,7 @@ export function autoSummary(status, now = Date.now()) {
     if (i?.code === 'check-failed') {
       fix += periodic ? ' 다음 확인 주기에 다시 시도합니다.' : ' 자동 확인을 하지 않는 설정이라, 고친 뒤 ‘새 버전 확인’ 을 눌러 다시 확인하세요.';
     }
+    if (i?.code === 'deferred-scans' && numOrNull(i.until) != null) fix = `늦어도 ${clock(i.until)} (${inText(i.until, now)})에는 적용합니다. ${fix}`;
     return { code: String(i?.code || ''), title: t.title, fix, reason: i?.reason ? String(i.reason) : null, when: i?.at ? agoText(i.at, now) : null };
   });
   const noSource = lines.some((l) => l.code === 'no-source');
@@ -134,6 +138,7 @@ export function autoSummary(status, now = Date.now()) {
     const why = tk.reason ? ` — ${tk.reason}` : '';
     tick = `${clock(tk.at)} (${agoText(tk.at, now)}) · ${base}${ver}${why}${tk.restored ? ' · 재시작 전 기록' : ''}`;
     tickTone = tk.outcome === 'applied' || tk.outcome === 'up-to-date' ? 'ok'
+      : tk.outcome === 'deferred' ? 'warn'
       : inProgress ? 'muted' : tk.outcome === 'available' || tk.outcome === 'no-source' ? 'warn' : 'bad';
   }
   return { label: st.label, tone, lines, next, tick, tickTone };
@@ -195,4 +200,18 @@ export function remoteSourceLabel(source) {
   if (!host) return '원격 소스';
   if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com')) return '원격(GitHub)';
   return '원격 소스';
+}
+
+/** v2.737: 실행 중 스캔 종류 → 이름(서버 util/scanJournal 의 kind). */
+export const SCAN_KIND_TEXT = { isidu: '아이실론 디렉터리 사용량', 'idrac-scan': 'iDRAC 대역 스캔', ipscan: 'IP 스캔', 'ipscan-agent': 'IP 스캔(엣지)' };
+
+/**
+ * v2.737: 수동 적용 전 경고 — 지금 이 노드에서 도는 스캔이 있으면 그 목록을 말한다(없으면 null). 수동 적용은 기다리지 않는다.
+ * @returns {null|string}
+ */
+export function runningScanWarning(status, now = Date.now()) {
+  const list = Array.isArray(status?.runningScans) ? status.runningScans : [];
+  if (!list.length) return null;
+  const names = list.slice(0, 5).map((x) => `${SCAN_KIND_TEXT[x?.kind] || x?.kind || '스캔'}${x?.label ? ` ‘${x.label}’` : ''}${numOrNull(x?.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
+  return `지금 스캔 ${list.length}개가 돌고 있습니다 — ${names.join(', ')}${list.length > 5 ? ' …' : ''}. 지금 적용하면 재시작으로 끊기고, 재시작 뒤 자동으로 다시 시작합니다(아이실론 분리 실행 du 는 결과를 이어 받습니다). 계속할까요?`;
 }

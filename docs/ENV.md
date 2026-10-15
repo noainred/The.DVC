@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **650개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **653개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-15)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (35)
+## 공용 유틸 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -36,6 +36,8 @@
 | `PORTAL_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
 | `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
+| `SCAN_RESUME` | `''` |  | util/scanJournal.js |
+| `SCAN_RESUME_DELAY_MS` |  |  | util/scanJournal.js |
 | `SNAP_CACHE_PER_NAME` | `32` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
@@ -393,7 +395,7 @@
 |---|---|---|---|
 | `NFS_MOUNT_BASE` | `'/mnt/portal-nfs'` |  | system/nfsMounts.js |
 
-## 업그레이드 (8)
+## 업그레이드 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -402,6 +404,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_CHECK_TIMEOUT_MS` | `60000` |  | upgrade/versionsDoc.js |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
+| `UPGRADE_SCAN_DEFER_MAX_MS` |  |  | upgrade/manager.js |
 | `UPGRADE_SIGNATURE_POLICY` |  |  | upgrade/signature.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
@@ -834,4 +837,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 650
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 653
