@@ -12,12 +12,18 @@
  */
 export const DEADLINE_MIN_MS = 1_000;
 export const DEADLINE_MAX_MS = 7_200_000;
+/**
+ * v2.739: 스스로 끝나는데 **오래 걸리는** 작업(아이실론 du — 사용자 요청 "대기 시간을 최대 3시간까지")만 `{ long: true }` 로 상한을 3시간까지 연다.
+ * 기본 관문(2시간)은 그대로다 — 다른 호출부의 env 값이 넓어지지 않게. `proxy/sshExec.js EXEC_LONG_MAX_MS` 와 같은 값이어야 한다
+ * (세션 시한이 명령 시한보다 짧으면 명령 결과가 버려진다 — 테스트가 두 값을 대조한다).
+ */
+export const DEADLINE_LONG_MAX_MS = 10_800_000;
 export const DEADLINE_DEFAULT_MS = 60_000;
 
-export function deadlineMs(v, def = DEADLINE_DEFAULT_MS) {
+export function deadlineMs(v, def = DEADLINE_DEFAULT_MS, { long = false } = {}) {
   const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
   if (!Number.isFinite(n) || n <= 0) return def;
-  return Math.min(DEADLINE_MAX_MS, Math.max(DEADLINE_MIN_MS, Math.round(n)));
+  return Math.min(long ? DEADLINE_LONG_MAX_MS : DEADLINE_MAX_MS, Math.max(DEADLINE_MIN_MS, Math.round(n)));
 }
 
 /**
@@ -25,8 +31,8 @@ export function deadlineMs(v, def = DEADLINE_DEFAULT_MS) {
  * 지나면 abort 한다(withSsh 가 세션을 끊는다). 결과만 포기하는 Promise.race 대신 이걸 쓸 것.
  * 기한이 지나 fn 이 던지면 `${label}(N초)` 로 바꿔 던진다(N 은 좁힌 뒤의 값 — 실제로 기다린 시간).
  */
-export async function withDeadline(ms, fn, label = '타임아웃') {
-  const eff = deadlineMs(ms);
+export async function withDeadline(ms, fn, label = '타임아웃', { long = false } = {}) {
+  const eff = deadlineMs(ms, DEADLINE_DEFAULT_MS, { long });
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), eff); // unref 하지 않는다 — 대기 중인 수집을 반드시 끊어야 한다
   try { return await fn(ac.signal); }

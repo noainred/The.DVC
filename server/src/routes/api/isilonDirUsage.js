@@ -33,7 +33,7 @@ import { authGuard, authStopOf, FAIL_KINDS, testTargetPath } from '../../isidu/c
 import { isiduPollerStatus, runNow, FAIL_RETRY_MS } from '../../isidu/poller.js';
 import { requestIsiduCollect, isiduRequestState, recentIsiduDrops } from '../../isidu/collectRequests.js';
 import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
-import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX } from '../../isidu/report.js';
+import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX, buildOverview, OVERVIEW_POOL } from '../../isidu/report.js';
 import { nudgeIsiduEdge, testIsiduOnEdge, MIN_ISIDU_EDGE_VERSION } from '../../central/isiduRemote.js';
 import { edgeTargetView } from '../../isidu/settings.js';
 import { poolSettled } from '../../util/pool.js';
@@ -43,6 +43,7 @@ import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureIsiduDemo } from '../../mock/demo/isidu.js';
 import { isiduMailReady, isiduMailStateOf, sendLatestNow } from '../../isidu/notify.js';
 import { targetMailOf, mailRecipients, MAIL_LIST_MAX, FAIL_ALERT_MIN_MS } from '../../isidu/mailRules.js';
+import { normalizeBulkPatch, applyBulk, removeTargets, bulkIdsOf, settingsRev, BULK_KEYS, NOT_APPLIED_CODES } from '../../isidu/bulk.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -140,6 +141,25 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (_req, res) =>
   });
 });
 
+/**
+ * v2.739 개요 — 서브메뉴(서머리 · 법인 현황 · 전 법인 Top 10 · 수집 상태)가 쓰는 대상별 요약 + 최근 실행 기록.
+ * 대상마다 전체 크기의 7일 변화·30일 추이·상위 폴더 OVERVIEW_POOL 개(7일 변화 포함)를 싣는다. 전 법인 Top 10 은 화면이 이 합집합에서 고른다.
+ * DB 만 읽는다(장비 왕복 0). 대상 목록(상태·법인)은 `GET /tools/isilon-dirusage` 가 준다 — 여기서 다시 싣지 않는다.
+ */
+api.get('/tools/isilon-dirusage/overview', adminOnly, fullScopeOnly, async (_req, res) => {
+  const ids = loadSettings().targets.map((x) => x.id);
+  const known = new Set(ids);
+  const [targets, recent] = await Promise.all([buildOverview(ids), db.recentScans(HISTORY_AGENT, 80)]);
+  res.json({
+    ok: true, now: Date.now(), pool: OVERVIEW_POOL, targets,
+    recentUnavailable: recent == null,
+    recent: (recent || []).filter((r) => known.has(r.targetId)).slice(0, 20).map((r) => ({
+      targetId: r.targetId, ts: r.ts, ok: r.ok, kind: r.kind || '', error: r.error ? String(r.error).slice(0, 200) : '',
+      durationMs: r.durationMs, count: r.count, errLines: r.errLines || 0, node: r.node || '', trig: r.trig || '',
+    })),
+  });
+});
+
 /** 보고서 — KPI · Top N · 7일 증가 상위 · 신규·사라진 폴더 일부. */
 api.get('/tools/isilon-dirusage/report', adminOnly, fullScopeOnly, async (req, res) => {
   const tg = pickTarget(req.query.target);
@@ -197,6 +217,8 @@ api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (_req, res)
   const devices = listDevices().filter((d) => d.type === 'isilon').map((d) => ({ id: d.id, name: d.name || d.host, host: d.host, agent: d.agent || '', datacenterId: d.datacenterId || '', enabled: d.enabled !== false, username: d.username || '' }));
   res.json({
     ok: true, settings: loadSettings(), loadError: isiduSettingsLoadError(),
+    rev: settingsRev(loadSettings().targets),   // v2.739 일괄 변경 — 화면이 읽은 판(그 뒤 다른 사람이 바꿨으면 일괄 적용이 409)
+    bulkKeys: BULK_KEYS,
     choices: { devices, agents: knownAgentNames(), datacenters: dcList() },
     ranges: RANGES, authModes: AUTH_MODES, sizeModes: SIZE_MODES, maxTargets: MAX_TARGETS,
     key: publicKeyView(keyInfo()),
@@ -212,7 +234,44 @@ api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) 
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null, index: r.index ?? null });
   const mailTargets = r.settings.targets.filter((x) => targetMailOf(x).to.length).length;
   logAudit({ user: req.user?.username, action: 'isidu.settings', target: 'isidu-settings.json', detail: `targets=${r.settings.targets.length} retention=${r.settings.retentionDays} mailCommon=${r.settings.mail?.commonTo?.length || 0} mailTargets=${mailTargets}`, ip: req.ip });
-  res.json({ ok: true, settings: r.settings });
+  res.json({ ok: true, settings: r.settings, rev: settingsRev(r.settings.targets) });
+});
+
+/**
+ * 일괄 변경(v2.739) — 고른 대상의 설정 항목을 한꺼번에 바꾸거나(patch) 목록에서 뺀다(remove).
+ *  · dryRun:true 면 저장하지 않고 결과만 준다(화면의 미리보기 — 판정은 여기 하나).
+ *  · rev(설정을 읽은 판)가 지금과 다르면 409 — 그 사이 다른 사람이 바꾼 값을 덮지 않는다.
+ *  · 대상마다 개별 저장과 같은 정규화를 거친다. 맞지 않는 항목은 그 대상에서만 빼고(notApplied), 거절된 대상은 그대로 둔다(skipped).
+ *  · 바뀐 대상이 0 이면 저장하지 않는다(파일·백업 변경 감시를 건드리지 않게).
+ */
+api.post('/tools/isilon-dirusage/bulk', adminOnly, fullScopeOnly, (req, res) => {
+  if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 바꾸세요.' });
+  const body = req.body || {};
+  const ids = bulkIdsOf(body.ids);
+  if (!ids || !ids.length) return res.status(400).json({ ok: false, reason: '바꿀 대상을 하나 이상 고르세요.', field: 'ids' });
+  const cur = loadSettings();
+  const rev = settingsRev(cur.targets);
+  if (body.rev != null && t(body.rev) !== rev) return res.status(409).json({ ok: false, reason: '설정을 읽은 뒤 다른 곳에서 바뀌었습니다 — 다시 읽은 뒤 적용하세요.', code: 'rev-changed', rev });
+  const dryRun = body.dryRun === true;
+  let next; let result;
+  if (body.remove === true) {
+    const r = removeTargets(cur.targets, ids);
+    next = r.targets;
+    result = { mode: 'remove', removed: r.removed, notFound: r.notFound };
+  } else {
+    const p = normalizeBulkPatch(body.patch);
+    if (p.error) return res.status(400).json({ ok: false, reason: p.error, field: p.field || null });
+    const r = applyBulk(cur.targets, ids, p.patch, settingsCtx());
+    next = r.targets;
+    result = { mode: 'patch', patch: p.patch, changed: r.changed, unchanged: r.unchanged, skipped: r.skipped, notApplied: r.notApplied, notFound: r.notFound, notAppliedCodes: NOT_APPLIED_CODES };
+  }
+  const touched = result.mode === 'remove' ? result.removed.length : result.changed.length;
+  if (dryRun || !touched) return res.json({ ok: true, dryRun, saved: false, rev, ...result });
+  const s = saveSettings({ targets: next, retentionDays: cur.retentionDays }, settingsCtx());
+  if (!s.ok) return res.status(400).json({ ok: false, reason: s.error, field: s.field || null, index: s.index ?? null });
+  const what = result.mode === 'remove' ? `remove=${result.removed.length}` : `keys=${Object.keys(result.patch).join(',')} changed=${result.changed.length} skipped=${result.skipped.length}`;
+  logAudit({ user: req.user?.username, action: 'isidu.bulk', target: ids.join(',').slice(0, 200), detail: what.slice(0, 300), ip: req.ip });
+  res.json({ ok: true, dryRun: false, saved: true, settings: s.settings, rev: settingsRev(s.settings.targets), ...result });
 });
 
 /**

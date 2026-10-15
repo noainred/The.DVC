@@ -12,12 +12,15 @@
  *  · v2.736 실행 노드: 등록부 장비도 '장비 담당 노드 따름' 대신 메인·특정 엣지를 고를 수 있다(등록부 계정 인증은 담당 노드·메인에서만).
  *  · v2.738 결과 메일: 공통 수신자(모든 대상) + 대상별 수신자(여러 명) · 변화 없으면 생략 · 실패 알림(6시간에 한 번). 주소 판정은 서버가 한다
  *    (형식이 틀리면 400 이 칸을 짚는다) — 화면은 입력 중 미리 알려 줄 뿐이다. 메일은 메인만 보낸다(엣지로 주소를 내려보내지 않는다).
+ *  · v2.739 '일괄 변경' 탭(IsiduBulk) — 등록된 대상을 골라 설정 항목을 한꺼번에 바꾸고 지금 수집·연결 시험·메일·빼기를 한꺼번에 한다.
+ *    개별 편집에 저장하지 않은 변경이 있으면 일괄 적용을 잠근다(적용이 목록을 새로 읽어 그 변경을 지우기 때문이다).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
+import IsiduBulk from './IsiduBulk.jsx';
 import {
   blankTarget, formFromTarget, targetBody, pathHint, commandText, deviceLabel, keyStatus, INTERVAL_CHOICES, TIMEOUT_CHOICES, everyText,
   RUN_FOLLOW, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, testResultText,
@@ -50,7 +53,8 @@ function KeyBox({ k, agent, reportedAt, onCreate, creating }) {
   );
 }
 
-export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = null, focusId = '' }) {
+export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = null, focusId = '', rows = [], initialTab = 'edit' }) {
+  const [mtab, setMtab] = useState(initialTab === 'bulk' ? 'bulk' : 'edit');
   const [srv, setSrv] = useState(null);
   const [loadErr, setLoadErr] = useState(null);
   const [forms, setForms] = useState([]);
@@ -143,6 +147,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
         throw new Error(r.reason || '저장하지 못했습니다.');
       }
       requireChanged(r);
+      setSrv((cur) => (cur ? { ...cur, settings: r.settings, rev: r.rev ?? cur.rev } : cur));
       setForms((r.settings?.targets || []).map(formFromTarget));
       setRetention(r.settings?.retentionDays ?? retention);
       setCommonTo((r.settings?.mail?.commonTo || []).join('\n'));
@@ -163,6 +168,22 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
   const preview = f ? recipientPreview(commonTo, f) : null;
   const readyNote = mailReadyText(srv?.mailReady);
   const failHours = srv?.mailLimits?.failAlertHours ?? 6;
+  // 저장하지 않은 변경(개별 편집) — 일괄 적용이 목록을 새로 읽어 그 변경을 지우지 않게 일괄 탭이 이 값을 본다.
+  const dirty = useMemo(() => {
+    if (!srv) return false;
+    const savedT = (srv.settings?.targets || []).map(formFromTarget).map(targetBody);
+    if (JSON.stringify(savedT) !== JSON.stringify(forms.map(targetBody))) return true;
+    if (String(srv.settings?.retentionDays ?? '') !== String(retention ?? '')) return true;
+    return (srv.settings?.mail?.commonTo || []).join('\n') !== commonTo;
+  }, [srv, forms, retention, commonTo]);
+  const onBulkApplied = (r) => {
+    setSrv((cur) => (cur ? { ...cur, settings: r.settings, rev: r.rev } : cur));
+    const list = (r.settings?.targets || []).map(formFromTarget);
+    setForms(list);
+    setSel((i) => Math.max(0, Math.min(i, list.length - 1)));
+    setBad(null); setMsg(null);
+    onSaved?.();
+  };
 
   return (
     <Modal title="수집 대상 설정 — 아이실론 디렉터리 사용량" onClose={onClose} width={860}>
@@ -171,6 +192,13 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
       {srv ? (
         <div className="isd-form">
           {srv.loadError ? <div className="result bad">저장된 설정 파일을 읽지 못했습니다 — 저장하면 기존 대상이 사라질 수 있어 편집을 잠갔습니다. 설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요.</div> : null}
+
+          <div className="isd-mtabs" role="tablist" aria-label="설정 보기">
+            <button type="button" role="tab" aria-selected={mtab === 'edit'} className={mtab === 'edit' ? 'on' : ''} onClick={() => setMtab('edit')}>개별 편집</button>
+            <button type="button" role="tab" aria-selected={mtab === 'bulk'} className={mtab === 'bulk' ? 'on' : ''} onClick={() => setMtab('bulk')}>일괄 변경{forms.length ? ` (${forms.length})` : ''}</button>
+          </div>
+          {mtab === 'bulk' ? <IsiduBulk srv={srv} rows={rows} dirty={dirty} locked={locked} onApplied={onBulkApplied} /> : null}
+          {mtab === 'edit' ? (<>
 
           <div className="tlist" role="list" aria-label="대상 목록">
             {forms.map((x, i) => (
@@ -304,7 +332,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
                 <label className="fld">시한
                   <Select value={f.timeoutMin === '' ? '' : String(f.timeoutMin)} onChange={(e) => set({ timeoutMin: e.target.value })} disabled={locked} sort={false}>
                     {f.timeoutMin === '' ? <option value="">(기본값)</option> : null}
-                    {timeouts.map((m) => <option key={m} value={String(m)}>{m}분</option>)}
+                    {timeouts.map((m) => <option key={m} value={String(m)}>{m}분{m === 120 ? ' (기본)' : ''}</option>)}
                   </Select>
                 </label>
               </div>
@@ -343,7 +371,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div className="hint">실행할 명령</div>
                 <div className="cmd">{commandText({ username: f.username || dev?.username || '', host: f.deviceId ? (dev?.host || '') : f.host, port: f.port, path: f.path, sizeMode: f.sizeMode })}</div>
-                <div className="hint">큰 디렉터리는 du 가 오래 걸리고(10분 이상도 흔합니다 — 시한은 최대 120분) 아이실론에 읽기 부하를 줍니다. 처음에는 긴 주기(하루마다)로 시작하세요.</div>
+                <div className="hint">큰 디렉터리는 du 가 오래 걸리고(10분 이상도 흔합니다 — 시한은 기본 2시간 · 최대 3시간) 아이실론에 읽기 부하를 줍니다. 처음에는 긴 주기(하루마다)로 시작하세요.</div>
               </div>
 
               <div className="row">
@@ -369,9 +397,15 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
 
           {msg ? <div className={`result ${msg.tone}`}>{msg.text}</div> : null}
           <div className="row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
+            {dirty ? <span className="hint" style={{ marginRight: 'auto' }}>저장하지 않은 변경이 있습니다.</span> : null}
             <button type="button" className="btn2" onClick={onClose}>닫기</button>
             <button type="button" className="btn2 primary" onClick={save} disabled={locked || saving}>{saving ? '저장 중…' : '저장'}</button>
           </div>
+          </>) : (
+            <div className="row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
+              <button type="button" className="btn2" onClick={onClose}>닫기</button>
+            </div>
+          )}
         </div>
       ) : null}
     </Modal>

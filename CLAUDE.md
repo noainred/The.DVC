@@ -3602,7 +3602,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       claim→ack 큐의 요청만 시작한다(진행 중 pull 이 있으면 끝난 뒤 한 번 더). 전달 실패해도 요청은 큐에 남아 다음 pull(5분)이 가져간다. 판정 사다리는 `central/edgePull.js pullFromEdge` 하나
       (POST·jsonBody·`missing401`=401 은 구버전) · **재시도 0** · 데모 엣지는 `demo-edge`(collector 꺼짐과 구분). 연결 시험은 `isidu-test` 로 비밀 없는 대상 사본을 보내 엣지가 `cleanEdgeTarget` 으로
       다시 검증하고 `ls -d` 만 한다(동시 2, 429). 웹 `EDGE_CALL_TEXT` 키 = 서버 `EDGE_PULL_KINDS` + edge-pull·demo-edge(테스트 대조) — 종류를 늘리면 둘 다.
-    · 시한: 대상당 1~120분(기본 30). SSH exec 상한은 30분이 기본이고 `{long:true}` 일 때만 2시간(`EXEC_LONG_MAX_MS`) — 다른 수집기에 long 을 붙이지 말 것. 세션 시한 = min(2시간, 명령 + 30초),
+    · 시한: 대상당 1~180분(기본 120 — v2.739 에 30→120, 상한 120→180). SSH exec 상한은 30분이 기본이고 `{long:true}` 일 때만 3시간(`EXEC_LONG_MAX_MS`) — 다른 수집기에 long 을 붙이지 말 것. 세션 시한 = min(3시간, 명령 + 30초),
       명령 = min(명령, 세션 − 15초)(`sessionPlanOf` — 세션이 명령보다 먼저 끊으면 결과가 버려진다). 큐 시한은 대상 최대 시한 + 60초(`perItemMs`).
     · 키는 `CONFIG_DIR/ssh`(서비스 계정은 홈이 없다) · 없으면 ECDSA P-256 SEC1 PEM 생성(ed25519 생성기 금지 — v2.590) · 개인키는 응답에 싣지 않는다 · 인증 거부는 주기 수집 정지(`isidu-auth-stops.json`).
     · 권한 adminOnly + fullScopeOnly(CSV + data.csv) · 데모는 `mock-` 대상만 합성(장비·엣지 접속 0). 엣지 원격 요청 상태는 엣지 로그 표 `pull.isiduRemote`.
@@ -3648,6 +3648,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 메인 목록 응답(`targetRows`)은 주소를 싣지 않는다(개수·선택·마지막 결과만 — 테스트 고정). 주소는 설정 조회에만. 상태 파일에도 주소를 적지 않는다(개수만).
     · `mail-now` 실패는 409(본문 사유) — 5xx 로 주면 재시도하는 호출부가 같은 메일을 두 번 보낼 수 있다.
     · ⚠ 정직 기록: 실제 사내 메일 서버로는 보내 보지 못했다(가짜 SMTP). Chromium 은 목업(메일 꺼짐 상태)으로 설정 창·대상 화면 1440/400 을 봤다(넘침 0).
+  - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개 · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
+    (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
+    "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".
+    서버 `isidu/bulk.js`·`report.js overviewOf/buildOverview`·`db.js topEntriesOf` + `GET /tools/isilon-dirusage/overview`·`POST /tools/isilon-dirusage/bulk` +
+    웹 `IsiduViews.jsx`·`IsiduBulk.jsx`·`isiduOverviewText.js`·`isiduBulkText.js`. 회귀 `server/test/isiduOverview2739.test.js`(변이 9/9) + 웹 `isiduOverview2739.test.js`(변이 8/8)):
+    · 주소 `#/tools/isilon-dirusage/<summary|corps|status|top10>` · 대상 화면은 `t/<id>` 그대로. 판정은 `isiduText.targetStatus` 하나(서브메뉴가 다시 판정하지 않는다).
+    · 개요 응답은 대상마다 최신 성공 스캔 · 7일 전 기준 · 30일 점 · 상위 10(`OVERVIEW_POOL`)이다. **전 법인 Top 10 은 대상별 상위 10 의 합집합**에서 고른다(고른 법인들의
+      상위 10 은 언제나 그 안에 있다). 순서는 `parse.sortBySize` 와 같고 `topEntriesOf` 는 컷 크기와 같은 행을 전부 읽는다(동률 순서가 DB 순서에 기대지 않게).
+      대상마다 수집 시각이 다르다는 사실을 화면이 말한다.
+    · ⚠ **7일 변화 합은 -h 해상도 판정을 따른다** — 대상의 `totalDelta7.withinRes` 가 참이면 합계에서 0 으로 센다(카드는 '변화 없음' 인데 서머리가 반올림 한 칸 −102 GB 를
+      변화로 말하던 것을 Chromium 판독에서 잡았다). 전부 해상도 안이면 합도 '변화 없음'. 7일 전 기준이 없는 대상은 더하지 않는다.
+    · 일괄 변경: 판정은 서버(`applyBulk` — 대상마다 저장값 위에 바꿀 항목만 얹고 **`normalizeTarget` 그대로**). 화면은 미리보기(dryRun) → 확인 → 저장. 판(rev = targets JSON sha1 앞 16자)이
+      다르면 409 `rev-changed`. 대상에 맞지 않는 항목은 그 대상에서만 빼고 사유 코드(`NOT_APPLIED_CODES` ↔ 웹 `NOT_APPLIED_TEXT`, 테스트 대조), 정규화가 거절한 대상은 바꾸지 않는다(skipped).
+      **범위 밖 숫자는 400(자르지 않는다)** · 빈 값 = '그대로' · 바뀐 것이 없으면 저장하지 않는다. 항목 키는 서버 `BULK_KEYS` ↔ 웹 `BULK_FIELD_KEYS`(테스트 대조) — **설정 항목을 늘리면 둘 다**.
+      일괄 수집은 `/run` ids, 연결 시험·메일은 **차례로 하나씩**(동시 접속·재시도 없음). 개별 편집 창에 저장 안 한 변경이 있으면 일괄 탭이 막는다(덮어쓰지 않게).
+    · 시한: `RANGES.timeoutMin` 1~180 · 기본 120. 3시간은 **du 경로만** 쓰는 `deadlineMs/withDeadline(…, {long:true})`(`DEADLINE_LONG_MAX_MS`) — 다른 호출부의 2시간 상한은 그대로다.
+      옛 기본값 이전: 파일에 표지(`timeoutDefaultMin`)가 없을 때 **정확히 30분인 대상만** 120분으로(한 번). 저장할 때마다 표지를 쓰므로 그 뒤 사람이 고른 30분은 다시 옮기지 않는다.
+    · ⚠ 정직 기록: Chromium 은 목업(데모 대상 3개 · 전부 정상)으로 네 페이지·대상 화면·일괄 변경(미리보기→저장)을 1440/400 에서 봤다. 실패·진행 중 대상이 섞인 화면과
+      엣지 담당 대상의 일괄 변경은 단위 테스트로만 확인했다. 실제 아이실론에서 3시간 du 는 돌려 보지 못했다.
   - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
     5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
     웹 `components/errorBoxProps.test.js`):

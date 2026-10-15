@@ -11,6 +11,9 @@
  *  · 조회는 DB·등록부만 읽어 장비 왕복이 0 이다. du 는 폴러가 주기로, 또는 '지금 수집' 으로만 돈다(수십 분 걸릴 수 있다 — 기다리지 않는다).
  *  · 폴링이 실패해도 직전 값을 지우지 않는다(v2.729 I-04). 다른 대상의 늦은 응답은 버린다(요청 키 대조).
  *  · 대상 선택은 주소 `#/tools/isilon-dirusage/t/<id>` — 새로고침·공유해도 같은 대상이 열린다.
+ *  · v2.739 서브메뉴(사용자 요청 "법인 상황이 세로로 나와서 보기 불편해 … 서머리 · 법인 현황 · 수집 상태 · 모든 법인의 사용량 Top 10"):
+ *    주소 `#/tools/isilon-dirusage/<summary|corps|status|top10>`, 첫 화면은 서머리. 화면은 IsiduViews.jsx, 계산은 isiduOverviewText.js.
+ *    7일 변화·30일 추이·상위 폴더는 `/overview` 하나로 받고 최신 성공·시도 기록이 바뀔 때만 다시 읽는다(폴링하지 않는다).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
@@ -21,10 +24,12 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import { agoText } from './relTime.js';
 import { collectDropNote } from './collectDropText.js';
 import {
-  FAIL_TEXT, failTitle, bytesText, deltaView, shareText, countText, nodeText, everyText, durationText, tailPath,
-  sparkPath, trendModel, trendNotes, baseNote, scanNotes, kpiCards, targetStatus, keyStatus, keyRows, runResultText, nudgeLines,
-  USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, corpOverview, overviewNote, resumeNote, targetMailLine,
+  FAIL_TEXT, failTitle, bytesText, deltaView, shareText, countText, nodeText, everyText, tailPath,
+  sparkPath, trendModel, trendNotes, baseNote, scanNotes, kpiCards, targetStatus, runResultText, nudgeLines,
+  USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, resumeNote, targetMailLine,
 } from './isiduText.js';
+import { SUBVIEWS, viewOfSegs, hashOfView, overviewIndex, statusCounts } from './isiduOverviewText.js';
+import { SummaryView, CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
 import IsiduSettings from './IsiduSettings.jsx';
 import './isidu.css';
 
@@ -32,19 +37,35 @@ const BASE = ['tools', 'isilon-dirusage'];
 const TREND_DAYS = [7, 30, 90, 365];
 const DAY_LABEL = { 7: '7일', 30: '30일', 90: '90일', 365: '1년' };
 
-function useHashTarget() {
-  const read = () => {
-    const s = hashSegments(typeof window === 'undefined' ? '' : window.location.hash);
-    return s[0] === BASE[0] && s[1] === BASE[1] && s[2] === 't' && s[3] ? decodeURIComponent(s[3]) : '';
-  };
-  const [id, setId] = useState(read);
+/** 주소 → { view, targetId }. 대상 화면은 `t/<id>`, 그 밖은 서브메뉴(없으면 서머리). */
+function useHashView() {
+  const read = () => viewOfSegs(hashSegments(typeof window === 'undefined' ? '' : window.location.hash), BASE) || { view: 'summary', targetId: '' };
+  const [st, setSt] = useState(read);
   useEffect(() => {
-    const on = () => setId(read());
+    const on = () => setSt(read());
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  const open = useCallback((tid) => { window.location.hash = `#/${BASE.join('/')}${tid ? `/t/${encodeURIComponent(tid)}` : ''}`; }, []);
-  return [id, open];
+  const go = useCallback((view, tid = '') => { window.location.hash = hashOfView(view, tid, BASE); }, []);
+  return [st, go];
+}
+
+/**
+ * 개요(7일 변화·30일 추이·상위 폴더·최근 실행 기록) — 최신 성공·시도 기록이 바뀔 때만 다시 읽는다. 다시 읽는 동안 직전 값을 지우지 않는다
+ * (같은 대상 목록의 이전 값이다 — 다른 대상의 값을 섞지 않는다). 실패해도 직전 값을 남기고 오류를 함께 준다.
+ */
+function useOverview(sig, enabled) {
+  const [st, setSt] = useState({ data: null, error: null, sig: null });
+  useEffect(() => {
+    if (!enabled || sig == null) return undefined;
+    let alive = true;
+    fetchJson('/tools/isilon-dirusage/overview').then(
+      (d) => { if (alive) setSt({ data: d, error: null, sig }); },
+      (e) => { if (alive) setSt((x) => ({ ...x, error: e, sig })); },
+    );
+    return () => { alive = false; };
+  }, [sig, enabled]);
+  return st;
 }
 
 /** 목록 폴링 — 조사 중이면 8초, 아니면 30초. 실패해도 직전 값을 지우지 않는다. */
@@ -150,59 +171,15 @@ function SortTh({ label, by, sort, onSort, right = false, plain = false }) {
   );
 }
 
-/**
- * 첫 화면 '법인별 현황'(v2.737) — 대상을 법인으로 묶어 사용자 폴더 수·크기·상태를 보이고, 누르면 그 대상(사용자별 용량)을 연다.
- * 계산은 isiduText.js corpOverview(순수)가 한다. 합계는 성공한 수집이 있는 대상만이고 그 사실을 문구가 말한다.
- */
-function CorpOverview({ targets, now, onOpen, missing }) {
-  const ov = useMemo(() => corpOverview(targets, now), [targets, now]);
-  const T = ov.totals;
-  return (
-    <section className="isd-card" aria-label="법인별 현황">
-      <div className="isd-cardhead">
-        <h3>법인별 현황</h3>
-        <div className="isd-note">{overviewNote(T)}</div>
-      </div>
-      {missing ? <div className="isd-banner amber">주소의 대상 ‘{missing}’ 을 찾지 못했습니다 — 삭제됐거나 이 노드의 대상 목록에 없습니다. 아래에서 다시 고르세요.</div> : null}
-      <div className="isd-ovkpis">
-        <div className="isd-kpi"><div className="isd-kpi-label">법인</div><div className="isd-kpi-val">{countText(T.corps)}</div><div className="isd-kpi-sub">대상 {countText(T.targets)}개</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">사용자 폴더 합</div><div className="isd-kpi-val">{countText(T.users)}</div><div className="isd-kpi-sub">수집 결과가 있는 대상 {countText(T.measured)}개</div></div>
-        <div className="isd-kpi"><div className="isd-kpi-label">디렉터리 크기 합</div><div className="isd-kpi-val">{bytesText(T.bytes)}</div><div className="isd-kpi-sub">{T.unmeasured ? `결과 없음 ${countText(T.unmeasured)}개 제외` : '모든 대상 포함'}</div></div>
-      </div>
-      {ov.groups.map((g) => (
-        <div key={g.corp || '(none)'} className="isd-ovgroup">
-          <div className="isd-ovhead">
-            <span className={`isd-dot ${g.worst}`} aria-hidden="true" />
-            <b>{g.label}</b>
-            <span className="isd-note">대상 {countText(g.items.length)}개 · 사용자 폴더 {countText(g.users)} · {bytesText(g.bytes)}{g.unmeasured ? ` · 결과 없음 ${countText(g.unmeasured)}개` : ''}</span>
-          </div>
-          <div className="isd-ovgrid">
-            {g.items.map(({ t, st, bytes, users }) => {
-              const c = targetChip(t);
-              return (
-                <button key={t.id} type="button" className="isd-ovcard" onClick={() => onOpen(t.id)} title={st.detail || undefined}>
-                  <span className="top"><span className={`isd-dot ${st.tone}`} aria-hidden="true" /><b>{t.label || c.device}</b><span className={`isd-tag ${st.tone}`}>{st.text}</span></span>
-                  <span className="dev">{c.device} · <span className={`isd-node${t.agent ? ' edge' : ''}`}>{c.node}</span></span>
-                  <span className="path isd-mono">{c.path}</span>
-                  <span className="nums"><span><small>사용자 폴더</small>{countText(users)}</span><span><small>크기</small>{bytesText(bytes)}</span><span><small>마지막 성공</small>{agoText(t.okScan?.ts, now)}</span></span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function StatusTag({ st }) {
-  return <span className={`isd-tag ${st.tone}`} title={st.detail || undefined}>{st.text}</span>;
-}
-
 export default function IsilonDirUsageTool() {
   const { data, error, failedAt, reload } = useMain();
-  const [hashId, openTarget] = useHashTarget();
+  const [hv, go] = useHashView();
+  const hashId = hv.view === 'target' ? hv.targetId : '';
+  const openTarget = useCallback((id) => go(id ? 'target' : 'summary', id), [go]);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const openView = useCallback((v, filter) => { if (v === 'status') setStatusFilter(filter || 'all'); go(v); }, [go]);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('edit');
   const [runMsg, setRunMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [trendName, setTrendName] = useState('');
@@ -215,8 +192,12 @@ export default function IsilonDirUsageTool() {
   const now = data?.now || Date.now();
 
   const targets = data?.targets || [];
-  // v2.737: 주소에 대상이 없으면 첫 화면은 '법인별 현황' 이다(예전에는 첫 대상이 바로 열려 법인별로 돌아갈 화면이 없었다 — 사용자 요청).
+  // v2.739: 주소에 대상이 없으면 서브메뉴(기본 서머리)다. 대상 화면에서 '← 법인 현황' 으로 돌아간다.
   const target = targets.find((t) => t.id === hashId) || null;
+  const view = target ? 'target' : (hv.view === 'target' ? 'summary' : hv.view);
+  const ovSig = targets.map((t) => `${t.id}:${t.okScan?.id ?? ''}:${t.lastTry?.id ?? ''}`).join(',');
+  const ov = useOverview(data ? ovSig : null, view !== 'target');
+  const ovById = useMemo(() => overviewIndex(ov.data), [ov.data]);
   const missingTarget = !!hashId && !target && targets.length > 0;
   const tid = target?.id || '';
   const okId = target?.okScan?.id ?? '';
@@ -253,7 +234,9 @@ export default function IsilonDirUsageTool() {
   const R = rep.data && rep.data.state ? rep.data : null;
   const st = target ? targetStatus(target, now) : null;
   const drops = collectDropNote(data.drops, (id) => targets.find((t) => t.id === id)?.label || id, now);
-  const keys = keyRows(targets, data.key, data.edges);
+  const sc = statusCounts(targets, now);
+  const navCount = { corps: new Set(targets.map((t) => String(t.corp || t.datacenterId || ''))).size, status: sc.warn + sc.bad };
+  const openSettings = (tab = 'edit') => { setSettingsTab(tab); setShowSettings(true); };
   const topMax = R?.top?.[0]?.bytes || 0;
   const trendTitle = trendName ? `${trendName} 추이` : '디렉터리 전체 추이';
   const trendCur = tr.data?.points?.length ? tr.data.points[tr.data.points.length - 1] : null;
@@ -267,8 +250,8 @@ export default function IsilonDirUsageTool() {
         </div>
         <div className="isd-actions">
           {canCsv() ? <button type="button" className="isd-btn" onClick={exportCsv} disabled={!R || R.state !== 'ok'} title={!R || R.state !== 'ok' ? '성공한 수집이 있어야 내보낼 수 있습니다' : '전체 사용자 CSV'}>CSV 내보내기</button> : null}
-          <button type="button" className="isd-btn" onClick={() => setShowSettings(true)}>수집 대상 설정</button>
-          <button type="button" className="isd-btn primary" onClick={() => runNow(tid ? [tid] : null)} disabled={busy || !tid} title={tid ? undefined : '법인(대상)을 고른 뒤 누르세요 — 전 대상을 한꺼번에 돌리지 않습니다(아래 수집 상태 표의 ‘수집’ 으로도 돌릴 수 있습니다)'}>{busy ? '요청 중…' : '지금 수집'}</button>
+          <button type="button" className="isd-btn" onClick={() => openSettings('edit')}>수집 대상 설정</button>
+          <button type="button" className="isd-btn primary" onClick={() => (tid ? runNow([tid]) : openSettings('bulk'))} disabled={busy} title={tid ? undefined : '여러 대상을 골라 한꺼번에 수집합니다(설정 › 일괄 변경). 수집 상태 표의 ‘수집’ 으로 하나씩도 돌릴 수 있습니다'}>{busy ? '요청 중…' : tid ? '지금 수집' : '지금 수집(대상 고르기)'}</button>
         </div>
       </div>
 
@@ -284,16 +267,29 @@ export default function IsilonDirUsageTool() {
       {drops ? <div className="isd-banner amber"><BoldText text={drops} /></div> : null}
       {!canCsv() ? <div className="isd-note">{CSV_DENIED_NOTE}</div> : null}
 
+      {targets.length ? (
+        <nav className="isd-subnav" aria-label="아이실론 디렉터리 사용량 하위 메뉴">
+          {SUBVIEWS.map(([k, label]) => (
+            <button key={k} type="button" className={view === k ? 'on' : ''} aria-current={view === k ? 'page' : undefined} onClick={() => openView(k)}>
+              {label}
+              {k === 'corps' ? <span className="cnt">{countText(navCount.corps)}</span> : null}
+              {k === 'status' && navCount.status ? <span className="cnt warn">주의 {countText(navCount.status)}</span> : null}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      {missingTarget ? <div className="isd-banner amber">주소의 대상 ‘{hashId}’ 을 찾지 못했습니다 — 삭제됐거나 이 노드의 대상 목록에 없습니다. 법인 현황에서 다시 고르세요.</div> : null}
+
       {!targets.length ? (
         <div className="isd-card">
           <h3>수집 대상이 없습니다</h3>
           <div className="isd-note">‘수집 대상 설정’ 에서 아이실론(스토리지 등록부)과 조사할 디렉터리(예: /ifs/data/workspace/users)를 고르세요. 엣지 법인의 아이실론은 그 엣지가 SSH 로 접속해 조사하고 결과를 메인으로 올립니다.</div>
-          <div><button type="button" className="isd-btn primary" onClick={() => setShowSettings(true)}>수집 대상 설정</button></div>
+          <div><button type="button" className="isd-btn primary" onClick={() => openSettings('edit')}>수집 대상 설정</button></div>
         </div>
       ) : target ? (
         <>
           <div className="isd-backrow">
-            <button type="button" className="isd-btn small" onClick={() => openTarget('')}>← 법인별 현황</button>
+            <button type="button" className="isd-btn small" onClick={() => openView('corps')}>← 법인 현황</button>
             <span className="isd-note">{targetChip(target).corp ? `${targetChip(target).corp} · ` : ''}{target.label || targetChip(target).label}</span>
           </div>
           <div className="isd-targets" role="tablist" aria-label="수집 대상">
@@ -311,8 +307,14 @@ export default function IsilonDirUsageTool() {
             })}
           </div>
         </>
+      ) : view === 'corps' ? (
+        <CorpsView targets={targets} ov={ov} ovById={ovById} now={now} openTarget={openTarget} />
+      ) : view === 'status' ? (
+        <StatusView targets={targets} data={data} ov={ov} now={now} runNow={runNow} busy={busy} openTarget={openTarget} openBulk={() => openSettings('bulk')} filter={statusFilter} setFilter={setStatusFilter} />
+      ) : view === 'top10' ? (
+        <Top10View targets={targets} ov={ov} ovById={ovById} now={now} openTarget={openTarget} />
       ) : (
-        <CorpOverview targets={targets} now={now} onOpen={openTarget} missing={missingTarget ? hashId : ''} />
+        <SummaryView targets={targets} ov={ov} ovById={ovById} now={now} openView={openView} openTarget={openTarget} />
       )}
 
       {target ? (
@@ -464,61 +466,8 @@ export default function IsilonDirUsageTool() {
         </>
       ) : null}
 
-      <section className="isd-card" aria-label="SSH 키">
-        <div className="isd-cardhead">
-          <h3>SSH 키 — 아이실론에 등록할 공개키</h3>
-          <div className="isd-note">키 인증 대상은 조사하는 노드(메인 또는 그 법인 엣지)의 서비스 계정 키로 접속합니다. 아래 공개키를 그 아이실론 계정의 authorized_keys 에 넣어 두세요. 비밀키는 화면에 나오지 않습니다.</div>
-        </div>
-        <STable className="v3-table" minWidth={760}>
-          <thead><tr><th>노드</th><th>키</th><th>공개키</th><th>대상</th></tr></thead>
-          <tbody>
-            {keys.map((k) => {
-              const ks = k.agent && !k.key ? { text: k.reportedAt ? '키 정보 없음' : '엣지 보고 없음', tone: 'muted' } : keyStatus(k.key);
-              return (
-                <tr key={k.node}>
-                  <td><span className={`isd-node${k.agent ? ' edge' : ''}`}>{k.node}</span></td>
-                  <td><span className={`isd-tag ${ks.tone}`}>{ks.text}</span>{k.key?.fingerprint ? <div className="isd-note isd-mono">{k.key.type} · {k.key.fingerprint}</div> : null}{k.key?.error ? <div className="isd-note">{String(k.key.error)}</div> : null}</td>
-                  <td style={{ maxWidth: 420 }}>{k.key?.publicKey ? <div className="isd-key">{k.key.publicKey}</div> : <span className="isd-note">{k.agent ? '엣지가 대상을 받고 키를 만든 뒤 다음 push(최대 10분)에 올라옵니다.' : '설정 창에서 ‘키 만들기’ 를 누르세요.'}</span>}</td>
-                  <td className="isd-note">{k.targets.length ? k.targets.join(', ') : '키 인증 대상 없음'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </STable>
-      </section>
-
-      {targets.length ? (
-        <section className="isd-card" aria-label="수집 상태">
-          <div className="isd-cardhead">
-            <h3>수집 상태</h3>
-            <div className="isd-note">각 노드가 자기 법인 아이실론에 SSH 로 접속해 du 를 돌리고, 엣지 결과는 메인으로 올라옵니다(엣지 push 10분마다).</div>
-          </div>
-          <STable className="v3-table" minWidth={980}>
-            <thead><tr><th>대상</th><th>조사 노드</th><th>아이실론</th><th>경로</th><th>주기</th><th>마지막 성공</th><th>소요</th><th>결과</th><th data-nosort>지금</th></tr></thead>
-            <tbody>
-              {targets.map((t) => {
-                const s = targetStatus(t, now);
-                return (
-                  <tr key={t.id}>
-                    <td><button type="button" className="isd-namebtn" onClick={() => openTarget(t.id)}>{t.label || t.id}</button></td>
-                    <td><span className={`isd-node${t.agent ? ' edge' : ''}`} title={t.agentSource === 'override' ? `실행 노드 지정(장비 담당: ${nodeText(t.deviceAgent || '')})` : undefined}>{nodeText(t.agent)}{t.agentSource === 'override' ? ' · 지정' : ''}</span></td>
-                    <td>{t.deviceName || t.host || '—'}{t.corp ? <div className="isd-note">{t.corp}</div> : null}</td>
-                    <td className="isd-mono" style={{ overflowWrap: 'anywhere' }}>{t.path}</td>
-                    <td>{everyText(t.intervalHours)}</td>
-                    <td data-sort={t.okScan?.ts ?? ''}>{agoText(t.okScan?.ts, now)}</td>
-                    <td>{durationText(t.okScan?.durationMs)}</td>
-                    <td><StatusTag st={s} />{s.detail && s.tone !== 'ok' ? <div className="isd-note" style={{ maxWidth: 360, minWidth: 220, whiteSpace: 'normal' }}>{s.detail}</div> : null}</td>
-                    <td><button type="button" className="isd-btn small" disabled={busy || !!t.issue} onClick={() => runNow([t.id])}>수집</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </STable>
-        </section>
-      ) : null}
-
       {showSettings ? (
-        <IsiduSettings onClose={() => setShowSettings(false)} onSaved={() => { reload(); }} edges={data.edges} mainKey={data.key} focusId={tid} />
+        <IsiduSettings onClose={() => setShowSettings(false)} onSaved={() => { reload(); }} edges={data.edges} mainKey={data.key} focusId={tid} rows={targets} initialTab={settingsTab} />
       ) : null}
     </div>
   );

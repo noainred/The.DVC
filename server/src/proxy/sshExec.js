@@ -17,10 +17,11 @@ const SSH_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_0
 const SSH_EXEC_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
 /**
  * v2.736: 스스로 끝나는데 **오래 걸리는** 명령(아이실론 `du` — 사용자 보고 "원격으로 돌리는데 10분이 넘게 걸릴 때도 있어")만
- * `{ long: true }` 로 상한을 2시간까지 연다. 기본 관문(30분)은 그대로다 — 다른 호출부의 env 값이 넓어지지 않게.
- * 2시간은 `util/deadline.js DEADLINE_MAX_MS` 와 같은 값이다(세션 시한이 명령 시한보다 짧으면 명령 결과가 버려진다).
+ * `{ long: true }` 로 상한을 연다. 기본 관문(30분)은 그대로다 — 다른 호출부의 env 값이 넓어지지 않게.
+ * v2.739: 2시간 → 3시간(사용자 요청 "대기 시간을 최대 3시간까지"). `util/deadline.js DEADLINE_LONG_MAX_MS` 와 같은 값이다
+ * (세션 시한이 명령 시한보다 짧으면 명령 결과가 버려진다 — 세션 쪽도 `withDeadline(…, { long: true })` 로 연다).
  */
-export const EXEC_LONG_MAX_MS = 7_200_000;
+export const EXEC_LONG_MAX_MS = 10_800_000;
 /**
  * v2.606(TIM2606-03): 호출자가 넘긴 명령 시한의 **단일 관문**. v2.605 는 이 모듈의 env 만 좁혔는데 호출자
  * (SANSW_CLI_TIMEOUT_MS·STORAGE_CLI_TIMEOUT_MS …)가 2^31 초과·NaN 을 넘기면 `Math.max(1000, v)` 가 그대로

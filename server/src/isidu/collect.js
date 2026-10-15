@@ -3,7 +3,7 @@
  *
  * ── 지키는 것 ────────────────────────────────────────────────────────────────
  *  · 접속은 `proxy/sshExec.js withSsh` 하나 — 호스트키 확인(장비 신뢰, S-01)이 인증 **전에** 걸린다. ssh2 를 직접 열지 않는다.
- *  · 시한은 세션을 실제로 끊는다(`withDeadline` + signal — v2.417). 명령 시한은 대상 설정(최대 120분 — sshExec 긴 명령 관문 `{ long: true }`).
+ *  · 시한은 세션을 실제로 끊는다(`withDeadline` + signal — v2.417). 명령 시한은 대상 설정(최대 180분 — v2.739, sshExec 긴 명령 관문 `{ long: true }`).
  *  · 인증 거부는 **주기 수집을 멈춘다**(util/authGuard — 계정 잠금 방지). 키나 계정이 바뀌면 자동 재개, 수동 실행은 막지 않는다.
  *    호스트키 거부는 인증 실패가 아니다(`isSshAuthError` 가 가른다 — 승인하면 바로 붙어야 한다).
  *  · du 는 권한 오류가 있어도 종료코드 1 로 끝나며 나머지 결과를 낸다 — 해석된 폴더가 있으면 성공으로 적고 오류 줄 수를 함께 남긴다
@@ -115,7 +115,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
         }
         const x = await api.exec(duCommand(t.path, t.sizeMode), plan.cmdMs, { long: true });
         return { x, mode: 'attached' };
-      }), 'du 시한 초과');
+      }), 'du 시한 초과', { long: true });   // v2.739: 세션 시한도 긴 작업 상한(3시간)까지 연다 — 명령 시한(EXEC_LONG_MAX_MS)과 같은 값
       stdout = r.x?.stdout || ''; stderr = r.x?.stderr || ''; code = r.x?.code ?? null;
       runInfo = { runMode: r.mode || 'attached', ...(r.attached ? { attached: true } : {}), ...(r.detachFallback ? { detachFallback: r.detachFallback } : {}) };
     } catch (e) {
