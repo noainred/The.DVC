@@ -272,7 +272,7 @@ async function call(method, url, body) {
   const { api } = await import('../src/routes/api.js');
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => { req.user = { username: 'root', role: 'admin', scope: {} }; next(); });
+  app.use((req, _res, next) => { req.user = { username: 'root', role: 'admin', superAdmin: true, scope: {} }; next(); });
   app.use('/api', api);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(500).json({ error: String(err?.message || err) }));

@@ -438,7 +438,7 @@ async function call(user, method, url, body) {
     return { status: res.status, body: json, text, headers: res.headers };
   } finally { srv.close(); }
 }
-const ADMIN = { username: 'root', role: 'admin', scope: {} };
+const ADMIN = { username: 'root', role: 'admin', superAdmin: true, scope: {} };   // v2.740: 수집 대상 설정은 슈퍼 관리자 전용
 const OPER = { username: 'op', role: 'operator', scope: {} };
 const SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: ['vc-x'] } };
 

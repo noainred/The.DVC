@@ -15,7 +15,7 @@
  *   viewer 응답에 관리자 계정명을 실을 이유가 없다(v2.500 L-2 계정 열거 단서). 필드를 생략하고 화면은 '슈퍼 관리자' 로 말한다.
  */
 import { requireRole, listUsers } from '../../auth/auth.js';
-import { isSuperAdmin } from '../../auth/roles.js';
+import { isSuperAdmin, requireSuperAdmin } from '../../auth/roles.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.727(감사 A-10·B-04)
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -27,11 +27,6 @@ import {
 
 const adminOnly = requireRole('admin');
 const menuFleetOnly = fullScopeOnlyWith('메뉴 배포는 전 사용자 화면을 바꾸므로 전체 범위(vCenter 제한 없는) 슈퍼 관리자만 할 수 있습니다.');
-/** super_admin 전용 게이트 — `req.user.superAdmin`(저장 역할 super_admin 을 접은 표지)만 통과. 역할 admin 은 403 `super-admin-only`. */
-function requireSuperAdmin(req, res, next) {
-  if (isSuperAdmin(req.user)) return next();
-  return res.status(403).json({ error: 'forbidden', reason: 'super-admin-only', requiredRole: 'super_admin' });
-}
 
 const userOf = (req) => req.user?.username || 'anonymous';
 /** 배포자·보관자 계정명을 응답에 실어도 되는 요청인가(v2.727 A-10) — admin 역할 + 데모 계정 아님. */

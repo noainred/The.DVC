@@ -166,7 +166,8 @@ describe('D-02 개요를 읽지 못한 것을 수집 없음·관측 짧음·불�
   });
   it('하위 화면이 판정 함수를 쓰고 예전 하드코딩 문구를 남기지 않는다', () => {
     const v = code('IsiduViews.jsx');
-    for (const f of ['ovStatus(', 'ovBanner(', 'summaryDelta7Sub(', 'topEmptyText(', 'corpChipView(', 'cardOvText(', 'noResultCount(']) expect(v.includes(f), f).toBe(true);
+    // v2.740: 서머리 탭을 없앴다(사용자 요청) — summaryDelta7Sub 를 쓰던 화면이 없다. 함수 자체는 순수 판정으로 남는다(위 단위 테스트).
+    for (const f of ['ovStatus(', 'ovBanner(', 'topEmptyText(', 'corpChipView(', 'cardOvText(', 'noResultCount(']) expect(v.includes(f), f).toBe(true);
     expect(v.includes("!ov.data ? '불러오는 중…'")).toBe(false);
     expect(v.includes('disabled={!c.withData}')).toBe(false);
     expect(v.includes("'상위 폴더 불러오는 중…'")).toBe(false);

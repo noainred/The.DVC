@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 
@@ -108,14 +108,22 @@ after(async () => {
 
 test('재시작으로 끊긴 아이실론 조사 — 다음 기동이 장비에서 돌던 같은 du 작업에 다시 붙어 결과를 받는다(du 1번)', { timeout: 150_000 }, async () => {
   const fk = await fakeIsilon();
+  // v2.740: 수집 대상 설정 API 는 슈퍼 관리자 전용이고 인증을 끈 포탈의 익명 사용자는 슈퍼 관리자가 아니다 —
+  //   기동 전에 같은 저장 함수(saveSettings — 같은 정규화)로 설정 파일을 써 둔다.
+  const body = { targets: [{ id: 'tgt-rs', label: '재시작 시험', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', path: ROOT, sizeMode: 'h', timeoutMin: 10, intervalHours: 24 }] };
+  const seed = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const S = await import(${JSON.stringify(path.join(SERVER, 'src/isidu/settings.js'))});
+    const R = await import(${JSON.stringify(path.join(SERVER, 'src/collector/registry.js'))});
+    const F = await import(${JSON.stringify(path.join(SERVER, 'src/cvp/formChoices.js'))});
+    const r = S.saveSettings(${JSON.stringify(body)}, { devices: [], agents: [], dcs: [], pickAgent: F.pickAgent, pickDatacenter: F.pickDatacenter, ssrfBlockReason: R.ssrfBlockReason });
+    if (!r.ok) { console.error(JSON.stringify(r)); process.exit(1); }
+  `], { cwd: SERVER, env: { ...process.env, CONFIG_DIR: DIR, SSRF_ALLOW_LOOPBACK: 'true' }, encoding: 'utf8' });
+  assert.equal(seed.status, 0, seed.stderr || seed.stdout);
   const portA = await freePort();
   const A = startPortal(portA, 'A');
   await waitFor(async () => (await api(portA, '/health')).ok, 40_000, '포탈 A 기동');
-
-  const put = await api(portA, '/tools/isilon-dirusage/settings', { method: 'PUT', body: JSON.stringify({
-    targets: [{ id: 'tgt-rs', label: '재시작 시험', host: '127.0.0.1', port: fk.port, username: 'admin', auth: 'key', path: ROOT, sizeMode: 'h', timeoutMin: 10, intervalHours: 24 }],
-  }) });
-  assert.equal(put.status, 200, await put.text());
+  const denied = await api(portA, '/tools/isilon-dirusage/settings');
+  assert.equal(denied.status, 403, '인증을 끈 익명 관리자는 슈퍼 관리자가 아니다 — 설정 API 는 403');
   const run = await api(portA, '/tools/isilon-dirusage/run', { method: 'POST', body: JSON.stringify({ ids: ['tgt-rs'] }) });
   assert.equal(run.status, 202);
   assert.deepEqual((await run.json()).started, ['tgt-rs']);

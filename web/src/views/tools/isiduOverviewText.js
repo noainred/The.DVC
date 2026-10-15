@@ -21,10 +21,13 @@ const MIN = 60_000;
 const HOUR = 3_600_000;
 
 /** 서브메뉴 — 주소 `#/tools/isilon-dirusage/<키>`. 대상 화면은 `t/<id>` 그대로다. */
+// v2.740(사용자 요청 "서머리를 없애고, 법인 현황을 첫 탭으로 … 전 법인 Top 10 을 두번째 … 수집 상태를 3번째"): 서머리 탭은 없다.
+//   첫 화면은 법인 현황이고, 옛 주소 `…/summary` 도 법인 현황으로 연다(북마크가 빈 화면이 되지 않게).
 export const SUBVIEWS = Object.freeze([
-  ['summary', '서머리'], ['corps', '법인 현황'], ['status', '수집 상태'], ['top10', '전 법인 Top 10'],
+  ['corps', '법인 현황'], ['top10', '전 법인 Top 10'], ['status', '수집 상태'],
 ]);
 export const SUBVIEW_KEYS = Object.freeze(SUBVIEWS.map(([k]) => k));
+export const DEFAULT_SUBVIEW = 'corps';
 
 /**
  * 주소 조각 → 화면. segs = hashSegments(hash). 이 도구 주소가 아니면 null.
@@ -34,13 +37,13 @@ export function viewOfSegs(segs, base = ['tools', 'isilon-dirusage']) {
   const s = Array.isArray(segs) ? segs : [];
   if (s[0] !== base[0] || s[1] !== base[1]) return null;
   if (s[2] === 't') return { view: 'target', targetId: s[3] ? decodeURIComponent(s[3]) : '' };
-  return { view: SUBVIEW_KEYS.includes(s[2]) ? s[2] : 'summary', targetId: '' };
+  return { view: SUBVIEW_KEYS.includes(s[2]) ? s[2] : DEFAULT_SUBVIEW, targetId: '' };
 }
 
 /** 화면 → 주소. */
 export function hashOfView(view, targetId = '', base = ['tools', 'isilon-dirusage']) {
   if (view === 'target' && targetId) return `#/${base.join('/')}/t/${encodeURIComponent(targetId)}`;
-  return `#/${base.join('/')}/${SUBVIEW_KEYS.includes(view) ? view : 'summary'}`;
+  return `#/${base.join('/')}/${SUBVIEW_KEYS.includes(view) ? view : DEFAULT_SUBVIEW}`;
 }
 
 /** 상태 묶음(수집 상태 칸 · 필터 칩). targetStatus 의 tone 으로 묶는다 — 합 = 대상 수. */

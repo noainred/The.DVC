@@ -1,5 +1,6 @@
 import React, { useEffect, lazy, Suspense } from 'react';
 import { Loading } from '../components/ui.jsx';
+import { isSuperAdminUser } from '../api.js';
 // v2.580(튜닝): 설정 하위 화면 42개가 **한 청크(605KB)** 로 묶여 있었다 — 어느 탭을 열든 전부 받는다.
 // 큰 화면 12개(Collectors 1,012줄 …)를 lazy 로 떼어 탭을 열 때만 받는다. `SUB` 표·키·URL 은 그대로다.
 import { useHashTab } from '../hooks/useHashTab.js';
@@ -48,6 +49,7 @@ const Upgrade = lazy(() => import('./Upgrade.jsx'));
 const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장비 신뢰(SSH 호스트키·TLS 인증서 승인) — 2026-10-09 검토 S-01·S-02
 import About from './About.jsx';
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
+const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -65,6 +67,9 @@ const SUB = [
   { k: 'power-off-check', label: '전원 꺼짐 점검', C: PowerOffCheckSettings, group: 'collect' },
   { k: 'vmseries', label: 'VM 실시간 스파이크 수집', C: VmSeriesSettings, group: 'collect' },
   { k: 'sansw-perf', label: 'SAN 스위치 포트 사용량', C: SanSwitchPerf, group: 'collect' },
+  // v2.740(사용자 요청 "수집 대상 설정은 설정 메뉴로 이동해서 일반 사용자, 관리자는 못 보게"): 특수 기능 화면 안에 있던 수집 대상 설정.
+  //   superOnly — 슈퍼 관리자에게만 메뉴가 보인다(표시 게이팅). 서버 설정 API 는 requireSuperAdmin 이 집행한다.
+  { k: 'isilon-dirusage', label: '아이실론 디렉터리 사용량', C: IsiduSettingsPage, group: 'collect', superOnly: true },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
@@ -117,7 +122,9 @@ const GROUPS = {
   security: { label: '🛡️ Security', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)·장비 신뢰(SSH 호스트키·TLS 인증서)를 한 곳에서.' },
   log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그를 한 곳에서.' },
 };
-const groupChildren = (g) => SUB.filter((s) => s.group === g);
+/** 이 사용자에게 보이는 하위 항목(v2.740 — superOnly 는 슈퍼 관리자에게만). 주소로 직접 들어오면 그 화면이 권한 안내를 그린다. */
+const visibleSubs = () => SUB.filter((s) => !s.superOnly || isSuperAdminUser());
+const groupChildren = (g) => visibleSubs().filter((s) => s.group === g);
 
 const DEFAULT_SUB = 'vcenter-admin';
 const SUB_KEYS = SUB.map((s) => s.k);
@@ -150,7 +157,7 @@ export default function Settings({ initialSub }) {
   // 상단 1단 탭: 그룹에 속하지 않은 항목 + 각 그룹 대표 버튼(순서 유지).
   const topItems = [];
   const seen = new Set();
-  for (const s of SUB) {
+  for (const s of visibleSubs()) {
     if (s.group) { if (!seen.has(s.group)) { seen.add(s.group); topItems.push({ type: 'group', key: s.group, label: GROUPS[s.group].label }); } }
     else topItems.push({ type: 'leaf', key: s.k, label: s.label });
   }

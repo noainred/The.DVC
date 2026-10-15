@@ -12,11 +12,14 @@
  *  · 폴링이 실패해도 직전 값을 지우지 않는다(v2.729 I-04). 다른 대상의 늦은 응답은 버린다(요청 키 대조).
  *  · 대상 선택은 주소 `#/tools/isilon-dirusage/t/<id>` — 새로고침·공유해도 같은 대상이 열린다.
  *  · v2.739 서브메뉴(사용자 요청 "법인 상황이 세로로 나와서 보기 불편해 … 서머리 · 법인 현황 · 수집 상태 · 모든 법인의 사용량 Top 10"):
- *    주소 `#/tools/isilon-dirusage/<summary|corps|status|top10>`, 첫 화면은 서머리. 화면은 IsiduViews.jsx, 계산은 isiduOverviewText.js.
+ *    주소 `#/tools/isilon-dirusage/<corps|top10|status>`, 첫 화면은 법인 현황. 화면은 IsiduViews.jsx, 계산은 isiduOverviewText.js.
+ *  · v2.740(사용자 요청 "서머리를 없애고 … 수집 대상 설정은 설정 메뉴로 이동해서 일반 사용자, 관리자는 못 보게"): 서머리 탭 삭제(옛 주소는
+ *    법인 현황으로), 탭 순서 법인 현황 → 전 법인 Top 10 → 수집 상태. 수집 대상 설정(개별 편집·일괄 변경·연결 시험·메일·SSH 키)은 이 화면에서
+ *    빼고 설정 › 수집 서버 › 아이실론 디렉터리 사용량(IsiduSettingsPage — 슈퍼 관리자 전용, 서버 `requireSuperAdmin` 이 집행)으로 옮겼다.
  *    7일 변화·30일 추이·상위 폴더는 `/overview` 하나로 받고 최신 성공·시도 기록이 바뀔 때만 다시 읽는다(폴링하지 않는다).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
+import { fetchJson, postJson, downloadFile, canCsv, CSV_DENIED_NOTE, isSuperAdminUser } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -29,18 +32,18 @@ import {
   USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, resumeNote, targetMailLine,
   KEYED_EMPTY, keyedStart, keyedOk, keyedFail, keyedView, listPollDelay, listStaleText, csvButtonState,
 } from './isiduText.js';
-import { SUBVIEWS, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay } from './isiduOverviewText.js';
-import { SummaryView, CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
-import IsiduSettings from './IsiduSettings.jsx';
+import { SUBVIEWS, DEFAULT_SUBVIEW, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay } from './isiduOverviewText.js';
+import { CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
+import { ISIDU_SETTINGS_HASH, ISIDU_SETTINGS_BULK_HASH, ISIDU_SETTINGS_PLACE } from './isiduSettingsLink.js';
 import './isidu.css';
 
 const BASE = ['tools', 'isilon-dirusage'];
 const TREND_DAYS = [7, 30, 90, 365];
 const DAY_LABEL = { 7: '7일', 30: '30일', 90: '90일', 365: '1년' };
 
-/** 주소 → { view, targetId }. 대상 화면은 `t/<id>`, 그 밖은 서브메뉴(없으면 서머리). */
+/** 주소 → { view, targetId }. 대상 화면은 `t/<id>`, 그 밖은 서브메뉴(없거나 옛 서머리 주소면 법인 현황). */
 function useHashView() {
-  const read = () => viewOfSegs(hashSegments(typeof window === 'undefined' ? '' : window.location.hash), BASE) || { view: 'summary', targetId: '' };
+  const read = () => viewOfSegs(hashSegments(typeof window === 'undefined' ? '' : window.location.hash), BASE) || { view: DEFAULT_SUBVIEW, targetId: '' };
   const [st, setSt] = useState(read);
   useEffect(() => {
     const on = () => setSt(read());
@@ -200,11 +203,9 @@ export default function IsilonDirUsageTool() {
   const { data, error, failedAt, stopped, reload } = useMain();
   const [hv, go] = useHashView();
   const hashId = hv.view === 'target' ? hv.targetId : '';
-  const openTarget = useCallback((id) => go(id ? 'target' : 'summary', id), [go]);
+  const openTarget = useCallback((id) => go(id ? 'target' : DEFAULT_SUBVIEW, id), [go]);
   const [statusFilter, setStatusFilter] = useState('all');
   const openView = useCallback((v, filter) => { if (v === 'status') setStatusFilter(filter || 'all'); go(v); }, [go]);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState('edit');
   const [runMsg, setRunMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [trendName, setTrendName] = useState('');
@@ -217,9 +218,9 @@ export default function IsilonDirUsageTool() {
   const now = data?.now || Date.now();
 
   const targets = data?.targets || [];
-  // v2.739: 주소에 대상이 없으면 서브메뉴(기본 서머리)다. 대상 화면에서 '← 법인 현황' 으로 돌아간다.
+  // v2.739: 주소에 대상이 없으면 서브메뉴(기본 법인 현황 — v2.740)다. 대상 화면에서 '← 법인 현황' 으로 돌아간다.
   const target = targets.find((t) => t.id === hashId) || null;
-  const view = target ? 'target' : (hv.view === 'target' ? 'summary' : hv.view);
+  const view = target ? 'target' : (hv.view === 'target' ? DEFAULT_SUBVIEW : hv.view);
   const ovSig = targets.map((t) => `${t.id}:${t.okScan?.id ?? ''}:${t.lastTry?.id ?? ''}`).join(',');
   const ov = useOverview(data ? ovSig : null, view !== 'target');
   const ovById = useMemo(() => overviewIndex(ov.data), [ov.data]);
@@ -262,7 +263,7 @@ export default function IsilonDirUsageTool() {
   const drops = collectDropNote(data.drops, (id) => targets.find((t) => t.id === id)?.label || id, now);
   const sc = statusCounts(targets, now);
   const navCount = { corps: new Set(targets.map((t) => String(t.corp || t.datacenterId || ''))).size, status: sc.warn + sc.bad };
-  const openSettings = (tab = 'edit') => { setSettingsTab(tab); setShowSettings(true); };
+  const superAdmin = isSuperAdminUser();   // 표시 게이팅 — 설정 API 는 서버가 슈퍼 관리자만 받는다
   const topMax = R?.top?.[0]?.bytes || 0;
   const trendTitle = trendName ? `${trendName} 추이` : '디렉터리 전체 추이';
   const trendCur = tr.data?.points?.length ? tr.data.points[tr.data.points.length - 1] : null;
@@ -276,8 +277,9 @@ export default function IsilonDirUsageTool() {
         </div>
         <div className="isd-actions">
           {canCsv() && csv.show ? <button type="button" className="isd-btn" onClick={exportCsv} disabled={csv.disabled} title={csv.title}>CSV 내보내기</button> : null}
-          <button type="button" className="isd-btn" onClick={() => openSettings('edit')}>수집 대상 설정</button>
-          <button type="button" className="isd-btn primary" onClick={() => (tid ? runNow([tid]) : openSettings('bulk'))} disabled={busy} title={tid ? undefined : '여러 대상을 골라 한꺼번에 수집합니다(설정 › 일괄 변경). 수집 상태 표의 ‘수집’ 으로 하나씩도 돌릴 수 있습니다'}>{busy ? '요청 중…' : tid ? '지금 수집' : '지금 수집(대상 고르기)'}</button>
+          {/* v2.740: '수집 대상 설정' 버튼은 설정 메뉴로 옮겼다. 대상 화면이 아니면 '지금 수집' 은 수집 상태 탭(대상마다 '수집')으로 데려간다. */}
+          {tid ? <button type="button" className="isd-btn primary" onClick={() => runNow([tid])} disabled={busy}>{busy ? '요청 중…' : '지금 수집'}</button>
+            : view !== 'status' && targets.length ? <button type="button" className="isd-btn primary" onClick={() => openView('status')} title="수집 상태 탭에서 대상마다 ‘수집’ 을 누릅니다">지금 수집(수집 상태로)</button> : null}
         </div>
       </div>
 
@@ -314,8 +316,8 @@ export default function IsilonDirUsageTool() {
       {!targets.length ? (
         <div className="isd-card">
           <h3>수집 대상이 없습니다</h3>
-          <div className="isd-note">‘수집 대상 설정’ 에서 아이실론(스토리지 등록부)과 조사할 디렉터리(예: /ifs/data/workspace/users)를 고르세요. 엣지 법인의 아이실론은 그 엣지가 SSH 로 접속해 조사하고 결과를 메인으로 올립니다.</div>
-          <div><button type="button" className="isd-btn primary" onClick={() => openSettings('edit')}>수집 대상 설정</button></div>
+          <div className="isd-note">{ISIDU_SETTINGS_PLACE} 에서 아이실론(스토리지 등록부)과 조사할 디렉터리(예: /ifs/data/workspace/users)를 고릅니다. 엣지 법인의 아이실론은 그 엣지가 SSH 로 접속해 조사하고 결과를 메인으로 올립니다.{superAdmin ? '' : ' 이 설정은 슈퍼 관리자만 볼 수 있습니다 — 슈퍼 관리자에게 대상 등록을 요청하세요.'}</div>
+          {superAdmin ? <div><a className="isd-btn primary" href={ISIDU_SETTINGS_HASH}>수집 대상 설정 열기</a></div> : null}
         </div>
       ) : target ? (
         <>
@@ -341,11 +343,9 @@ export default function IsilonDirUsageTool() {
       ) : view === 'corps' ? (
         <CorpsView targets={targets} ov={ov} ovById={ovById} now={now} openTarget={openTarget} />
       ) : view === 'status' ? (
-        <StatusView targets={targets} data={data} ov={ov} now={now} runNow={runNow} busy={busy} openTarget={openTarget} openBulk={() => openSettings('bulk')} filter={statusFilter} setFilter={setStatusFilter} />
-      ) : view === 'top10' ? (
-        <Top10View targets={targets} ov={ov} ovById={ovById} now={now} openTarget={openTarget} />
+        <StatusView targets={targets} data={data} ov={ov} now={now} runNow={runNow} busy={busy} openTarget={openTarget} openBulk={superAdmin ? () => { window.location.hash = ISIDU_SETTINGS_BULK_HASH; } : null} filter={statusFilter} setFilter={setStatusFilter} />
       ) : (
-        <SummaryView targets={targets} ov={ov} ovById={ovById} now={now} openView={openView} openTarget={openTarget} />
+        <Top10View targets={targets} ov={ov} ovById={ovById} now={now} openTarget={openTarget} />
       )}
 
       {target ? (
@@ -497,9 +497,6 @@ export default function IsilonDirUsageTool() {
         </>
       ) : null}
 
-      {showSettings ? (
-        <IsiduSettings onClose={() => setShowSettings(false)} onSaved={() => { reload(); }} edges={data.edges} mainKey={data.key} focusId={tid} rows={targets} initialTab={settingsTab} />
-      ) : null}
     </div>
   );
 }

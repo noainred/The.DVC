@@ -17,6 +17,7 @@
  *    메인이 엣지의 수집 서버 URL 로 직접 요청, iDRAC PUSH 스캔과 같은 길. `central/isiduRemote.js`).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { requireSuperAdmin } from '../../auth/roles.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -213,7 +214,7 @@ api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, 
 });
 
 /** 설정 조회 — 대상·보존일 + 고를 목록(아이실론·엣지·DataCenter) + 이 노드의 키. */
-api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, requireSuperAdmin, (_req, res) => {
   const devices = listDevices().filter((d) => d.type === 'isilon').map((d) => ({ id: d.id, name: d.name || d.host, host: d.host, agent: d.agent || '', datacenterId: d.datacenterId || '', enabled: d.enabled !== false, username: d.username || '' }));
   res.json({
     ok: true, settings: loadSettings(), loadError: isiduSettingsLoadError(),
@@ -228,7 +229,7 @@ api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (_req, res)
 });
 
 /** 설정 저장 — 전체 목록 교체(같은 id 의 숫자 빈 칸은 이전 값 유지). */
-api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) => {
+api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => {
   if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 저장하세요(덮어쓰면 기존 대상이 사라집니다).' });
   const r = saveSettings(req.body || {}, settingsCtx());
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null, index: r.index ?? null });
@@ -244,7 +245,7 @@ api.put('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, (req, res) 
  *  · 대상마다 개별 저장과 같은 정규화를 거친다. 맞지 않는 항목은 그 대상에서만 빼고(notApplied), 거절된 대상은 그대로 둔다(skipped).
  *  · 바뀐 대상이 0 이면 저장하지 않는다(파일·백업 변경 감시를 건드리지 않게).
  */
-api.post('/tools/isilon-dirusage/bulk', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/isilon-dirusage/bulk', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => {
   if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 바꾸세요.' });
   const body = req.body || {};
   const ids = bulkIdsOf(body.ids);
@@ -306,7 +307,7 @@ api.post('/tools/isilon-dirusage/run', adminOnly, fullScopeOnly, async (req, res
  * 연결 시험 — 경로가 있는지만 본다(`ls -d`). 본문의 대상(저장 전)도 시험할 수 있다 — 같은 정규화를 거친다.
  * 등록부 계정 인증이면 주소는 등록부 값만 쓴다(본문 주소로 장비 비밀번호를 보내지 않는다 — v2.480).
  */
-api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, requireSuperAdmin, async (req, res) => {
   const cur = loadSettings().targets;
   const prev = req.body?.id ? cur.find((x) => x.id === t(req.body.id)) || null : null;
   const n = normalizeTarget(req.body || {}, prev, settingsCtx());
@@ -338,7 +339,7 @@ api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, async (req, re
  * 결과 메일 지금 보내기(v2.738) — 그 대상의 마지막 성공 결과를 그 대상의 받는 사람(공통 ∪ 대상별)에게 보낸다.
  * '변화 없으면 생략' 은 보지 않는다(사람이 누른 것이다). 데모 대상은 보내지 않는다. 주소는 응답·감사에 싣지 않는다(개수만).
  */
-api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, requireSuperAdmin, async (req, res) => {
   const id = t(req.body?.id);
   if (!id || !loadSettings().targets.some((x) => x.id === id)) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
   const r = await sendLatestNow(id, req.user?.username || 'admin');
@@ -349,7 +350,7 @@ api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, async (req
 });
 
 /** 이 노드(중앙)의 SSH 키 만들기 — 없을 때만. 공개키를 돌려준다(아이실론 authorized_keys 에 넣을 값). */
-api.post('/tools/isilon-dirusage/key', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/isilon-dirusage/key', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => {
   try {
     const r = ensureKey();
     if (r.created) logAudit({ user: req.user?.username, action: 'isidu.key.create', target: KEY_FILE_NAME, detail: `fp=${r.info?.fingerprint || ''}`, ip: req.ip });
