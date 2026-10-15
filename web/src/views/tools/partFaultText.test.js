@@ -487,3 +487,29 @@ describe('v2.613 PERSIST2613-06 retentionText — 0 일(env 전부 보관)은 �
     expect(retentionText(null)).toBe('');
   });
 });
+
+describe('v2.740 D-06 — 장애별 응답 대조 · 오류 객체', () => {
+  it('오류도 기간·종류를 대조한다 — 선택을 바꾼 직후 이전 선택의 오류를 새 선택 아래 그리지 않는다', async () => {
+    const { incidentRespFor } = await import('./partFaultText.js');
+    const err = { error: new Error('x'), days: 30, kind: 'disk' };
+    expect(incidentRespFor(err, { days: 30, kind: 'disk' })).toBe(err);
+    expect(incidentRespFor(err, { days: 7, kind: 'disk' })).toBe(null);
+    expect(incidentRespFor(err, { days: 30, kind: 'psu' })).toBe(null);
+  });
+  it('DB 를 못 연 응답에 종류가 없으면(2.740 이전 서버) 종류 대조를 건너뛴다 — 영원히 불러오는 중이 되지 않게', async () => {
+    const { incidentRespFor } = await import('./partFaultText.js');
+    const legacy = { ok: true, available: false, reason: 'DB 사용 불가', days: 7, incidents: [] };
+    expect(incidentRespFor(legacy, { days: 7, kind: 'disk' })).toBe(legacy);
+    expect(incidentRespFor(legacy, { days: 30, kind: 'disk' })).toBe(null, '기간은 여전히 대조');
+    const now = { ...legacy, kind: 'disk' };
+    expect(incidentRespFor(now, { days: 7, kind: 'disk' })).toBe(now);
+    expect(incidentRespFor({ ...legacy, kind: 'psu' }, { days: 7, kind: 'disk' })).toBe(null, '종류를 실었으면 대조');
+  });
+  it('화면 catch 는 오류 객체를 넣는다(문자열이면 ErrorBox 가 403 권한 안내를 그리지 못한다)', () => {
+    const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'PartFaults.jsx'), 'utf8');
+    expect(src).not.toMatch(/setInc\(\{\s*error:\s*e\.message/);
+    expect(src).not.toMatch(/setEvents\(\{\s*error:\s*e\.message/);
+    expect(src).toMatch(/setInc\(\{\s*error:\s*e,\s*days,\s*kind:\s*incKind\s*\}\)/);
+    expect(src).not.toMatch(/<ErrorBox message=\{events\.error\}/);
+  });
+});

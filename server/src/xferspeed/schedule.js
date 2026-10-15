@@ -22,8 +22,10 @@ import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 export const SCHEDULE_KINDS = Object.freeze(['once', 'daily', 'weekly', 'monthly']);
 export const SCHEDULE_MAX = 20;
 export const GRACE_MS = 30 * 60_000;
-/** 놓침 사유 — 웹 `xferSpeedText.MISSED_TEXT` 와 1:1(테스트 대조). */
-export const MISSED_REASONS = Object.freeze(['down', 'busy', 'off', 'late']);
+/** 놓침 사유 — 웹 `xferSpeedText.MISSED_TEXT` 와 1:1(테스트 대조). `clock` = 시계가 뒤로 가 기록을 지금으로 다시 잡음(v2.740 B-09). */
+export const MISSED_REASONS = Object.freeze(['down', 'busy', 'off', 'late', 'clock']);
+/** 이만큼 넘게 지금보다 뒤인 기록은 '시계가 뒤로 간 흔적' 으로 본다(같은 프로세스가 Date.now() 로 쓴 값이라 정상이면 미래일 수 없다). */
+export const CLOCK_TOL_MS = 2 * 60_000;
 
 const DAY = 86_400_000;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -175,6 +177,44 @@ export function checkSchedules(list, { prev = [], now = Date.now(), newId } = {}
 }
 
 /**
+ * 그 일정의 실제 `since` — 시계가 뒤로 가서 since 가 미래였던 것을 지금으로 다시 잡았으면(`rebaseClock` 이 기록에 남긴
+ * `sinceFrom`·`sinceCap`) **그 since 값일 때만** 잡은 값을 쓴다. 일정을 다시 고치면 since 가 바뀌므로 옛 보정은 저절로 빠진다.
+ */
+export function effectiveSince(s, rec) {
+  const since = Number(s?.since) || 0;
+  const cap = Number(rec?.sinceCap);
+  if (since > 0 && Number.isFinite(cap) && cap > 0 && Number(rec?.sinceFrom) === since) return Math.min(since, cap);
+  return since;
+}
+
+/**
+ * 시계가 뒤로 간 흔적 보정(순수, v2.740 감사 B-09 — 재현). 처리 기록(`lastAt`)이나 일정의 `since` 가 지금보다 `tolMs` 넘게 뒤면,
+ * 그 시각까지 예약이 한 번도 서지 않는다(NTP 보정으로 몇 시간 뒤로 가면 그 몇 시간 동안 측정이 없다). 그런 기록은 믿지 않고
+ * **지금으로** 다시 잡는다 — 지금 이전 시각은 처리한 것으로 보고(소급 실행하지 않는다) 그 뒤 시각부터 예정대로 돈다.
+ * since 는 설정 파일을 고치지 않고 기록에 `sinceFrom`(원래 since)·`sinceCap`(잡은 시각)으로 남긴다(설정 파일을 배경 틱이 쓰지 않게).
+ * @returns {{state:object, rebased:{id:string, from:number, field:'lastAt'|'since'}[]}}
+ */
+export function rebaseClock({ settings = {}, state = {}, now = Date.now(), tolMs = CLOCK_TOL_MS } = {}) {
+  const out = { ...(state || {}) };
+  const rebased = [];
+  for (const s of Array.isArray(settings.schedules) ? settings.schedules : []) {
+    if (!s?.id) continue;
+    const rec = out[s.id] || null;
+    const last = Number(rec?.lastAt);
+    const since = effectiveSince(s, rec);
+    const lastFuture = Number.isFinite(last) && last > now + tolMs;
+    const sinceFuture = since > now + tolMs;
+    if (!lastFuture && !sinceFuture) continue;
+    const next = { ...(rec || {}), lastAt: lastFuture ? now : Math.max(Number.isFinite(last) ? last : 0, now), result: 'missed', reason: 'clock', at: now };
+    if (lastFuture) next.clockFrom = last;
+    if (sinceFuture) { next.sinceFrom = Number(s.since); next.sinceCap = now; }
+    out[s.id] = next;
+    rebased.push({ id: s.id, from: lastFuture ? last : since, field: lastFuture ? 'lastAt' : 'since' });
+  }
+  return { state: out, rebased };
+}
+
+/**
  * 한 틱의 판정(순수).
  * @param {object} a
  * @param {object} a.settings   정리된 설정(intervalOn·intervalMs·schedules)
@@ -192,7 +232,7 @@ export function planTick({ settings = {}, state = {}, now = Date.now(), lastRunA
     if (!s?.enabled || !s.id) continue;
     const occ = prevOccurrence(s, now, offsetMin);
     if (occ == null) continue;
-    const base = Math.max(Number(s.since) || 0, Number(state?.[s.id]?.lastAt) || 0);
+    const base = Math.max(effectiveSince(s, state?.[s.id]), Number(state?.[s.id]?.lastAt) || 0);
     if (occ <= base) continue;
     if (!enabled) { missed.push({ id: s.id, occ, reason: 'off' }); continue; }
     if (now - occ <= GRACE_MS) { fire.push({ id: s.id, occ }); continue; }
@@ -212,7 +252,7 @@ export function nextRunOf({ settings = {}, state = {}, now = Date.now(), lastRun
   if (settings.intervalOn !== false && Number.isFinite(iv) && iv > 0) cands.push({ at: lastRunAt == null ? now : Number(lastRunAt) + iv, kind: 'interval', id: null });
   for (const s of Array.isArray(settings.schedules) ? settings.schedules : []) {
     if (!s?.enabled) continue;
-    const after = Math.max(now - 1, Number(s.since) || 0, Number(state?.[s.id]?.lastAt) || 0);
+    const after = Math.max(now - 1, effectiveSince(s, state?.[s.id]), Number(state?.[s.id]?.lastAt) || 0);
     const at = nextOccurrence(s, after, offsetMin);
     if (at != null) cands.push({ at, kind: 'schedule', id: s.id });
   }

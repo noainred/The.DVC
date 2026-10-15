@@ -610,10 +610,16 @@ export function filterIncidents(list, q = '', { repeatOnly = false } = {}) {
   });
 }
 
-/** 응답이 지금 선택(기간·종류)과 같은가 — 늦게 온 이전 선택의 응답을 그리지 않는다(v2.689 규약). */
+/**
+ * 응답이 지금 선택(기간·종류)과 같은가 — 늦게 온 이전 선택의 응답을 그리지 않는다(v2.689 규약).
+ * v2.740 D-06: ① 오류도 대조한다(화면의 catch 가 요청한 기간·종류를 싣는다) — 예전엔 오류를 대조 없이 통과시켜 선택을 바꾼 직후
+ *   이전 선택의 오류가 새 선택 아래 보였다. ② DB 를 못 연 응답(`available:false`)에 종류가 없으면(2.740 이전 서버) 종류 대조를 건너뛴다 —
+ *   종류를 고른 상태에서 그 응답이 null 이 되어 탭이 영원히 '불러오는 중' 이었다.
+ */
 export function incidentRespFor(resp, { days, kind = '' } = {}) {
-  if (!resp || resp.error) return resp || null;
+  if (!resp) return null;
   if (Number(resp.days) !== Number(days)) return null;
+  if (resp.available === false && !resp.error && resp.kind == null) return resp;
   if (String(resp.kind || '') !== String(kind || '')) return null;
   return resp;
 }

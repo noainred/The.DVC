@@ -189,7 +189,9 @@ test('⑥ 설정 저장 — 잘못된 일정 거절 · id·since 부여 · 간�
   assert.ok(s.schedules[0].since > 0);
   const again = settings.saveXferSpeedSettings({ schedules: [{ ...s.schedules[0] }] });
   assert.equal(again.schedules[0].since, s.schedules[0].since, '그대로 다시 저장하면 since 유지');
-  assert.equal(settings.saveXferSpeedSettings({ intervalMs: 8 * DAY }).intervalMs, 7 * DAY, '상한 7일');
+  // v2.740(감사 D-04): 범위 밖 숫자는 잘라 저장하지 않고 거절한다(예전 단언은 '상한 7일로 잘림' 이었다 — 의도한 동작 변경).
+  assert.throws(() => settings.saveXferSpeedSettings({ intervalMs: 8 * DAY }), (e) => e.code === 'bad-range' && e.field === 'intervalMs', '상한 7일 — 넘으면 거절');
+  assert.equal(settings.loadXferSpeedSettings().intervalMs, 7 * DAY, '거절된 저장은 값을 바꾸지 않는다');
   assert.equal(settings.saveXferSpeedSettings({ intervalOn: 'no' }).intervalOn, false, '불리언이 아니면 이전 값 유지');
   // 손으로 고친 파일의 잘못된 일정은 실행하지 않는다
   fs.writeFileSync(path.join(TMP, 'xfer-speed-settings.json'), JSON.stringify({ enabled: true, schedules: [{ kind: 'daily', time: '25:00' }, { kind: 'daily', time: '05:00' }] }));

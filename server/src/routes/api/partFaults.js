@@ -27,7 +27,7 @@ import { logAudit } from '../../audit.js';
 import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
   KEY_KIND_LABEL, KEY_KIND_NOTE, DEVICE_KEY_KIND_LABEL, DEVICE_KEY_KIND_NOTE, HOLD_REASON, PUSH_PROTOCOL } from '../../partfault/types.js';
 import { openFaults, recentEvents, partFaultDbStatus, resetInfo, incidentInputs, incidentMarks } from '../../partfault/db.js';
-import { buildIncidents, summarizeKinds } from '../../partfault/incidents.js';   // v2.734 장애별·종류별
+import { buildIncidentsAsync, summarizeKindsAsync } from '../../partfault/incidents.js';   // v2.734 장애별·종류별(v2.740 E-06: 양보판)
 import { createYielder } from '../../util/timeSlice.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
@@ -240,9 +240,10 @@ export async function computeIncidents(days, { now = Date.now() } = {}) {
     const inp = await incidentInputs({ sinceAbs: since, maxEvents: INCIDENT_EVENT_READ_MAX, yielder });
     if (!inp.available) return { available: false, error: inp.error || '', since, days };
     await yielder();
-    const { incidents, stats } = buildIncidents({ events: inp.events, openRows: inp.openRows, since, now, startLookup: inp.startLookup });
+    // v2.740(감사 E-06): 이벤트 10만 건에서 묶기·집계가 0.5~0.75초 동기로 돌았다 — 같은 생성기의 양보판(결과는 동기판과 같다).
+    const { incidents, stats } = await buildIncidentsAsync({ events: inp.events, openRows: inp.openRows, since, now, startLookup: inp.startLookup }, { yielder });
     await yielder();
-    const sum = summarizeKinds(incidents, { since });
+    const sum = await summarizeKindsAsync(incidents, { since }, { yielder });
     return {
       available: true, since, days, now, incidents, ...sum,
       scan: { read: inp.read, truncated: inp.truncated, coveredSince: inp.coveredSince, maxEvents: INCIDENT_EVENT_READ_MAX, ...stats, ms: Date.now() - t0 },
@@ -350,7 +351,8 @@ api.get('/tools/part-faults/incidents', toolsPerm, fullScopeOnly, async (req, re
     return res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
   }
   const db = dbView(await partFaultDbStatus().catch(() => null), isAdmin);
-  if (!r.available) return res.json({ ok: true, available: false, reason: r.error || 'DB 사용 불가', days, since: r.since, incidents: [], kinds: [], totals: null, db, labels: LABELS });
+  // v2.740(감사 D-06): 화면이 응답을 지금 선택(기간·종류)과 대조한다 — 이 응답에도 kind 를 싣는다(없으면 종류를 고른 화면이 영원히 '불러오는 중').
+  if (!r.available) return res.json({ ok: true, available: false, reason: r.error || 'DB 사용 불가', days, kind: kind || null, since: r.since, incidents: [], kinds: [], totals: null, db, labels: LABELS });
   const filtered = kind ? r.incidents.filter((i) => i.kind === kind) : r.incidents;
   let shown = filtered.slice(0, INCIDENT_LIST_MAX);
   if (!isAdmin) {

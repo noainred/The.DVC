@@ -19,6 +19,12 @@
  *  · 평균 지속 시간은 **정상 복귀·부품 제거로 끝난 장애만**으로 낸다(수동 닫음은 고친 시각이 아니고, 시작을 모르면 길이를 모른다).
  *
  * ⚠ 입력 이벤트는 **시간 오름차순**(같은 시각이면 id 오름차순)이어야 한다 — db.js `incidentEvents` 가 그렇게 준다.
+ * ⚠⚠ v2.740(감사 B-01 — 재현): 실제 DB(`db.js applyTransition`)는 한 전이의 이벤트를 **열림 → 변화 → 닫힘** 순서로 쓴다 —
+ *   키 변경이면 새 키 '열림' 이 옛 키 '닫힘(key-migrated)' 보다 **먼저**(낮은 id) 온다. 예전 묶기는 닫힘을 먼저 만나야 이어받아
+ *   실제 순서에서는 한 번도 합치지 못했다(같은 장애가 2건). 그래서 같은 시각 묶음 안에서 key-migrated 닫힘을 앞으로 옮긴 뒤 훑는다
+ *   (`migrationFirst` — 다른 순서는 그대로). 손으로 만든 이벤트 배열이 아니라 **applyTransition 출력**으로 테스트를 고정했다.
+ * ⚠ v2.740(감사 E-06): 이벤트 10만 건에서 묶기·집계가 0.5~0.75초 동기로 돌았다 — 같은 생성기(`incidentsGen`·`kindsGen`)를 동기판과
+ *   양보판(`buildIncidentsAsync`·`summarizeKindsAsync`)이 함께 돈다(결과는 같다 — 테스트 대조). 요청 경로는 양보판을 쓴다.
  */
 
 const t = (v) => String(v ?? '').trim();
@@ -74,6 +80,51 @@ function refreshInfo(inc, ev) {
 }
 
 const slotOf = (o, at) => `${t(o.agent)}|${t(o.deviceId)}|${t(o.scope)}|${t(o.kind)}|${t(o.label)}|${at}`;
+const isMigratedClose = (ev) => ev?.event === 'close' && ev?.closeReason === 'key-migrated';
+
+/** 생성기 양보 간격(반복 횟수) — 양보판은 이때마다 시간 기준 양보기(createYielder)를 부른다. */
+const STEP = 2_000;
+
+/**
+ * 같은 시각 묶음 안에서 key-migrated 닫힘을 앞으로 옮긴다(안정 — 그 밖의 순서는 그대로, v2.740 B-01).
+ * 시각 오름차순 입력을 한 번 훑는 O(n) 이다. 옮길 것이 없으면 입력 배열 그대로를 돌려준다.
+ */
+function* migrationFirstGen(list) {
+  let need = false;
+  for (let i = 1; i < list.length; i += 1) {
+    if (isMigratedClose(list[i]) && !isMigratedClose(list[i - 1]) && Number(list[i - 1]?.at) === Number(list[i]?.at)) { need = true; break; }
+    if ((i % STEP) === 0) yield;
+  }
+  if (!need) return list;
+  const out = [];
+  let i = 0; let groups = 0;
+  while (i < list.length) {
+    const at = Number(list[i]?.at);
+    let j = i;
+    while (j < list.length && Number(list[j]?.at) === at) j += 1;
+    if (j - i > 1) {
+      for (let k = i; k < j; k += 1) if (isMigratedClose(list[k])) out.push(list[k]);
+      for (let k = i; k < j; k += 1) if (!isMigratedClose(list[k])) out.push(list[k]);
+    } else out.push(list[i]);
+    i = j;
+    if ((++groups % STEP) === 0) yield;
+  }
+  return out;
+}
+
+function runSync(it) {
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+async function runAsync(it, yielder) {
+  let r = it.next();
+  while (!r.done) {
+    if (typeof yielder === 'function') await yielder();
+    r = it.next();
+  }
+  return r.value;
+}
 
 /**
  * @param {object} p
@@ -86,13 +137,21 @@ const slotOf = (o, at) => `${t(o.agent)}|${t(o.deviceId)}|${t(o.scope)}|${t(o.ki
  * @param {number} [p.lookupMax=1000] 조회 상한 — 넘친 장애는 '시작 시각 모름'(개수는 stats 로 밝힌다)
  * @returns {{incidents:Array, stats:{lookups:number, lookupCapped:number, merged:number, endUnknown:number}}}
  */
-export function buildIncidents({ events = [], openRows = [], since = 0, now = Date.now(), startLookup = null, lookupMax = 1000 } = {}) {
+export function buildIncidents(p = {}) { return runSync(incidentsGen(p)); }
+
+/** 양보판 — 결과는 `buildIncidents` 와 같다(같은 생성기). `yielder` 는 `util/timeSlice.js createYielder` 결과. */
+export function buildIncidentsAsync(p = {}, { yielder = null } = {}) { return runAsync(incidentsGen(p), yielder); }
+
+function* incidentsGen({ events = [], openRows = [], since = 0, now = Date.now(), startLookup = null, lookupMax = 1000 } = {}) {
   const cur = new Map();
   const out = [];
   const migratedPending = new Map();   // slot|at → 옛 키 장애(같은 시각 같은 자리의 새 키 '열림' 이 이어받는다)
   const stats = { lookups: 0, lookupCapped: 0, merged: 0, endUnknown: 0 };
+  const list = yield* migrationFirstGen(Array.isArray(events) ? events : []);
 
-  for (const ev of Array.isArray(events) ? events : []) {
+  let step = 0;
+  for (const ev of list) {
+    if ((++step % STEP) === 0) yield;
     if (!ev || typeof ev !== 'object' || !t(ev.partKey)) continue;
     const k = keyOf(ev);
     const at = Number(ev.at);
@@ -109,6 +168,7 @@ export function buildIncidents({ events = [], openRows = [], since = 0, now = Da
       if (old) {
         // 같은 장애가 새 키로 옮겨졌다 — 시작·타임라인·최악 상태를 이어받고 옛 묶음은 목록에서 뺀다.
         inc.openedAt = old.openedAt; inc.startedBefore = old.startedBefore; inc.startUnknown = old.startUnknown;
+        if (old._firstAt != null) inc._firstAt = old._firstAt;   // 기간 이전 시작 — 시작 조회는 옛 키·옛 첫 이벤트로(아래)
         inc.events = old.events.slice(); inc.eventsOmitted = old.eventsOmitted; inc.peak = old.peak;
         inc.migratedFrom = old.partKey; old._merged = true; stats.merged += 1;
         migratedPending.delete(slotOf(ev, at));
@@ -143,6 +203,7 @@ export function buildIncidents({ events = [], openRows = [], since = 0, now = Da
     }
   }
 
+  yield;
   // 지금 열린 장애 — part_state 가 진실의 원천이다.
   const openBy = new Map();
   for (const r of Array.isArray(openRows) ? openRows : []) if (r && t(r.partKey)) openBy.set(keyOf(r), r);
@@ -173,29 +234,41 @@ export function buildIncidents({ events = [], openRows = [], since = 0, now = Da
   }
 
   // 시작 시각을 모르는 묶음 — 인덱스로 이전 '열림' 을 찾는다(상한 안에서).
+  step = 0;
   for (const inc of out) {
+    if ((++step % STEP) === 0) yield;
     if (inc._merged || inc.openedAt != null) continue;
     if (!inc.startedBefore) { inc.startUnknown = true; continue; }
     if (typeof startLookup !== 'function') { inc.startUnknown = true; continue; }
     if (stats.lookups >= lookupMax) { inc.startUnknown = true; stats.lookupCapped += 1; continue; }
     stats.lookups += 1;
     let hit = null;
-    try { hit = startLookup(inc.agent, inc.partKey, inc._firstAt ?? (inc.closedAt ?? now)); } catch { hit = null; }
+    // 키가 바뀐 장애의 시작은 옛 키의 '열림' 이다(새 키에는 그 이전 기록이 없다).
+    try { hit = startLookup(inc.agent, inc.migratedFrom || inc.partKey, inc._firstAt ?? (inc.closedAt ?? now)); } catch { hit = null; }
     const at = Number(hit?.at);
-    if (hit && Number.isFinite(at)) { inc.openedAt = at; inc.peak = worse(inc.peak, hit.state); } else inc.startUnknown = true;
+    if (hit && Number.isFinite(at)) {
+      inc.openedAt = at; inc.peak = worse(inc.peak, hit.state);
+      // v2.740(감사 B-06): 첫 이벤트가 변화·해소라 '기간 이전 시작' 으로 두었어도, 읽은 범위가 상한으로 잘렸으면 찾은 열림이
+      //   기간 **안**일 수 있다 — 다른 두 경로(열린 장애 행)와 같은 식으로 다시 판정한다(새로 시작이 이월로 세지 않게).
+      inc.startedBefore = since > 0 && at < since;
+    } else inc.startUnknown = true;
   }
 
   const incidents = out.filter((i) => !i._merged);
+  yield;
   // 같은 부품의 기간 중 발생 횟수(반복 장애 — 흔들리는 부품을 찾는 근거)
   const occ = new Map();
   for (const i of incidents) occ.set(keyOf(i), (occ.get(keyOf(i)) || 0) + 1);
+  step = 0;
   for (const i of incidents) {
+    if ((++step % STEP) === 0) yield;
     i.occurrences = occ.get(keyOf(i)) || 1;
     i.durationMs = i.openedAt != null ? Math.max(0, (i.closedAt ?? now) - i.openedAt) : null;
     i.latestAt = Math.max(i.closedAt || 0, i.openedAt || 0, i.lastSeenAt || 0, ...i.events.map((e) => e.at || 0)) || null;
     i.id = `${keyOf(i)}|${i.openedAt ?? 'x'}|${i.closedAt ?? 'open'}`;
     delete i._firstAt; delete i._merged;
   }
+  yield;
   incidents.sort((a, b) => (Number(b.ongoing) - Number(a.ongoing))
     || ((RANK[b.ongoing ? b.state : null] || 0) - (RANK[a.ongoing ? a.state : null] || 0))
     || ((b.latestAt || 0) - (a.latestAt || 0)));
@@ -208,10 +281,17 @@ export function buildIncidents({ events = [], openRows = [], since = 0, now = Da
  * @param {Array} incidents `buildIncidents().incidents`
  * @param {{since?:number}} [o]
  */
-export function summarizeKinds(incidents = [], { since = 0 } = {}) {
+export function summarizeKinds(incidents = [], o = {}) { return runSync(kindsGen(incidents, o)); }
+
+/** 양보판 — 결과는 `summarizeKinds` 와 같다(같은 생성기). */
+export function summarizeKindsAsync(incidents = [], o = {}, { yielder = null } = {}) { return runAsync(kindsGen(incidents, o), yielder); }
+
+function* kindsGen(incidents = [], { since = 0 } = {}) {
   const by = new Map();
   const devicesAll = new Set();
+  let step = 0;
   for (const i of Array.isArray(incidents) ? incidents : []) {
+    if ((++step % STEP) === 0) yield;
     const k = t(i.kind) || 'other';
     let s = by.get(k);
     if (!s) {

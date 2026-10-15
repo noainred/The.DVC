@@ -24,6 +24,7 @@ import {
   DIR_TEXT, DIR_COLOR, DIR_TEXT_COLOR, STATE_TEXT, FAIL_TEXT, BASIS_TEXT, mbpsText, logWidth, spanText, bytesText, clockText,
   vsBadge, rowReasonText, sortRows, sparkPath, heatColor, heatTitle, trafficLines, statusLine, lastRunNote,
   chartModel, statCells, PERIODS, DEFAULT_PERIOD_DAYS, SETTING_FIELDS, rangeHint, settingsPatch,
+  settingsIssues, NO_CHANGE_TEXT, shouldStopPolling, heatReloadNote,
   hoverAt, maxBackOf, windowEndOf, windowLabel, windowRangeText,
   SCHEDULE_KINDS, SCHEDULE_KIND_TEXT, WEEKDAYS, INTERVAL_PRESETS, intervalText, scheduleText, checkScheduleForm,
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
@@ -48,12 +49,16 @@ function useHashEdge() {
   return [edge, open];
 }
 
-/** 메인 응답 폴링 — 측정 중에는 4초, 아니면 30초. 실패해도 직전 값을 지우지 않는다. */
+/**
+ * 메인 응답 폴링 — 측정 중에는 4초, 아니면 30초. 실패해도 직전 값을 지우지 않는다.
+ * v2.740 D-05: 403(권한)·404(경로 없음)는 다시 물어도 같다 — 다음 틱을 걸지 않는다('새로고침' 은 그대로 다시 묻는다).
+ */
 function useMainData() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [failedAt, setFailedAt] = useState(null);
   const runningRef = useRef(false);
+  const stopRef = useRef(false);
   const tickRef = useRef(null);
   // 세대 번호(v2.735.3) — '새로고침' 이 진행 중인 조회 위에 새 루프를 열면 예전엔 두 루프가 각자 타이머를 걸어 폴링이 늘어났고,
   // 늦게 온 옛 응답이 새 응답을 덮었다. 지금 세대의 응답만 반영하고 지금 세대만 타이머를 다시 건다.
@@ -64,9 +69,11 @@ function useMainData() {
       if (gen !== genRef.current) return;
       setData(d); setError(null); setFailedAt(null);
       runningRef.current = !!d?.status?.running;
+      stopRef.current = false;
     } catch (e) {
       if (gen !== genRef.current) return;
       setError(e); setFailedAt((x) => x || Date.now());
+      stopRef.current = shouldStopPolling(e);
     }
   }, []);
   useEffect(() => {
@@ -74,7 +81,7 @@ function useMainData() {
     const loop = async (gen) => {
       if (!alive || gen !== genRef.current) return;
       if (typeof document === 'undefined' || !document.hidden) await load(gen);
-      if (alive && gen === genRef.current) timer = setTimeout(() => loop(gen), runningRef.current ? 4_000 : 30_000);
+      if (alive && gen === genRef.current && !stopRef.current) timer = setTimeout(() => loop(gen), runningRef.current ? 4_000 : 30_000);
     };
     tickRef.current = () => { if (timer) clearTimeout(timer); loop(++genRef.current); };
     loop(++genRef.current);
@@ -151,12 +158,12 @@ function EdgeRow({ r, now, slowPct, minEdgeVersion, onOpen, offsetMin }) {
       </div>
       <Spark row={r} now={now} />
       <div><span className={`xs-badge ${vs.tone}`} title={vs.title || ''}>{vs.text}</span></div>
-      <span className="xs-age" title={r.newestTs ? clockText(r.newestTs, offsetMin) : ''}>{r.newestTs ? agoText(r.newestTs, now) : '—'}</span>
+      <span className="xs-age" title={r.newestTs ? clockText(r.newestTs, offsetMin) : ''}>{r.newestTs ? agoText(r.newestTs, now, r.reason === 'clock-skew' ? { future: '시계 어긋남' } : {}) : '—'}</span>
     </div>
   );
 }
 
-function Heatmap({ rows, nameOf, truncated, onReload }) {
+function Heatmap({ rows, nameOf, truncated, onReload, reloadNote = '' }) {
   const [dir, setDir] = useState('down');
   const list = (rows || []).filter((h) => h.dir === dir);
   return (
@@ -170,6 +177,7 @@ function Heatmap({ rows, nameOf, truncated, onReload }) {
       </div>
       <div className="xs-note">최근 14일 · 포탈 시각 · 칸 색은 그 법인 평소(기간 중앙값) 대비 — 법인끼리의 절대 속도 비교가 아닙니다{truncated ? ' · 측정이 많아 상한을 넘은 오래된 측정은 빼고 그렸습니다' : ''}
         {onReload ? <> · <button type="button" className="xs-linkbtn" onClick={onReload}>새로고침</button></> : null}</div>
+      {reloadNote ? <div className="xs-note" role="status" style={{ color: 'var(--amber, #f59e0b)' }}>{reloadNote}</div> : null}
       {list.length ? (
         <div className="xs-heat">
           <div className="xs-heatrow hours"><span />{Array.from({ length: 24 }, (_, h) => <span key={h}>{h % 3 === 0 ? String(h).padStart(2, '0') : ''}</span>)}</div>
@@ -206,6 +214,7 @@ function SettingsModal({ data, onClose, onSaved }) {
   const stateById = new Map((data.status?.schedules || []).map((x) => [x.id, x]));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [note, setNote] = useState('');
   const exSet = new Set(form.excluded.map((x) => x.toLowerCase()));
   const edges = (data.rows || []).filter((r) => r.registered);
   const toggleEdge = (id) => setForm((f) => {
@@ -215,10 +224,13 @@ function SettingsModal({ data, onClose, onSaved }) {
   const save = async () => {
     const bad = form.schedules.map((x, i) => [i, checkScheduleForm(x)]).find(([, why]) => why);
     if (bad) { setErr(`예약 ${bad[0] + 1}: ${bad[1]}`); return; }
-    setBusy(true); setErr('');
+    // v2.740 D-03·D-04: 숫자가 아닌 칸·범위 밖 칸은 저장하지 않고 칸 이름과 함께 말한다(예전엔 조용히 버리거나 서버가 잘랐다).
+    const issues = settingsIssues(form, data.ranges || undefined);
+    if (issues.length) { setNote(''); setErr(issues.map((x) => `${x.label}: ${x.reason}`).join(' · ')); return; }
+    setBusy(true); setErr(''); setNote('');
     try {
       const patch = settingsPatch(form, s);
-      if (!Object.keys(patch).length) { onClose(); return; }
+      if (!Object.keys(patch).length) { setNote(NO_CHANGE_TEXT); return; }   // 아무 말 없이 닫지 않는다
       requireChanged(await putJson('/tools/xfer-speed/settings', patch));
       onSaved();
     } catch (e) { setErr(e?.message || String(e)); } finally { setBusy(false); }
@@ -336,7 +348,7 @@ function SettingsModal({ data, onClose, onSaved }) {
           ) : <div className="xs-note">등록된 수집 서버(엣지)가 없습니다 — 설정 › 수집 서버에서 등록하세요.</div>}
         </div>
         <div className="xs-setfoot">
-          {err ? <span className="xs-err">{err}</span> : null}
+          {err ? <span className="xs-err">{err}</span> : note ? <span className="xs-note">{note}</span> : null}
           <button type="button" className="xs-btn" onClick={onClose} disabled={busy}>취소</button>
           <button type="button" className="xs-btn primary" onClick={save} disabled={busy}>{busy ? '저장 중…' : '저장'}</button>
         </div>
@@ -457,7 +469,7 @@ function Main({ onOpen }) {
         </section>
 
         <aside className="xs-aside">
-          {heat ? <Heatmap rows={heat.rows} nameOf={nameOf} truncated={!!heat.truncated} onReload={loadHeat} /> : heatErr ? <section className="xs-card"><h3>시간대별 속도</h3><div className="xs-note">히트맵을 불러오지 못했습니다 — {String(heatErr?.message || heatErr)}</div></section> : <section className="xs-card"><h3>시간대별 속도</h3><Loading /></section>}
+          {heat ? <Heatmap rows={heat.rows} nameOf={nameOf} truncated={!!heat.truncated} onReload={loadHeat} reloadNote={heatReloadNote(heatErr)} /> : heatErr ? <section className="xs-card"><h3>시간대별 속도</h3><div className="xs-note">히트맵을 불러오지 못했습니다 — {String(heatErr?.message || heatErr)}</div></section> : <section className="xs-card"><h3>시간대별 속도</h3><Loading /></section>}
 
           <section className="xs-card">
             <h3>최근 실패</h3>
@@ -620,16 +632,18 @@ function Detail({ agent, onBack }) {
     try {
       const d = await fetchJson('/tools/xfer-speed/history', end == null ? { agent, days } : { agent, days, end });
       if (my === seq.current) { setHist(d); setErr(null); setErrKey(null); }
-    } catch (e) { if (my === seq.current) { setErr(e); setErrKey(key); } }
+      return null;
+    } catch (e) { if (my === seq.current) { setErr(e); setErrKey(key); } return e; }
   }, [agent, days, end]);
   useEffect(() => {
     setHist((h) => (h && h.agent?.toLowerCase() === agent.toLowerCase() ? h : null));
     let alive = true; let timer = null;
     const loop = async () => {
       if (!alive) return;
-      if (typeof document === 'undefined' || !document.hidden) await load();
+      const e = (typeof document === 'undefined' || !document.hidden) ? await load() : null;
       // 과거 구간은 바뀌지 않는다 — 1분 갱신은 최근 구간만(v2.735.3).
-      if (alive && end == null) timer = setTimeout(loop, 60_000);
+      // v2.740 D-05: 403(권한)·404(엣지·경로 없음)는 다시 물어도 같다 — 다음 틱을 걸지 않는다.
+      if (alive && end == null && !shouldStopPolling(e)) timer = setTimeout(loop, 60_000);
     };
     loop();
     return () => { alive = false; if (timer) clearTimeout(timer); };

@@ -17,6 +17,12 @@
  *  · MIN/MAX 는 단독 문장으로(한 문장에 둘이면 인덱스를 통째로 훑는다 — v2.550.3).
  *  · 하루 경계는 포탈 시각(`util/dayKey.js` — 기본 한국 시각).
  *  · 못 읽은 값은 NULL 이다 — 실패 행의 mbps 를 0 으로 채우지 않는다(0 은 '트래픽 없음' 이라는 거짓).
+ *  · v2.740 B-09: 최신 표에 **지금보다 앞선 시각**(시계를 되돌리기 전 측정)이 남아 있으면 새 측정이 그것을 바꾼다 —
+ *    '더 늦은 ts 일 때만' 규칙만 두면 시계가 따라잡을 때까지(수 시간) 최신 표가 굳는다.
+ *  · v2.740 B-13: 최신 표는 **일 요약 보존일**로 정리한다(원시 보존일이 아니다) — 원시 보존일로 지우면 오래 꺼 둔 엣지가
+ *    '한 번도 재지 않았다' 로 보이고, 일 요약(5년)에는 기록이 남아 화면끼리 어긋난다.
+ *  · v2.740 E-01·E-02·E-04: 넓은 기간 읽기는 조각(`readDescChunked`) + 시간 기준 양보 — 한 문장 판과 결과가 같다(테스트 대조).
+ *    `dataMark()` 는 기억 키(적재·정리 세대 + MAX(rowid) — O(1))다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +39,10 @@ const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN };
 
 let _db = null; let _tried = false; let _opening = null;
+/** 쓰기 세대 — 적재·정리가 실제로 행을 바꾸면 오른다(화면 기억 키 — v2.740 E-02·E-04). */
+let _rev = 0;
+/** 최신 표의 '지금보다 앞선 시각' 허용폭 — 넘으면 시계를 되돌린 흔적으로 보고 새 측정으로 바꾼다(schedule.js CLOCK_TOL_MS 와 같은 값). */
+export const LATEST_FUTURE_TOL_MS = 2 * 60_000;
 
 async function getDb() {
   if (_db) return _db;
@@ -126,7 +136,8 @@ export async function insertSamples(rows = []) {
       fail_streak = CASE WHEN excluded.ok = 1 THEN 0 ELSE xfer_latest.fail_streak + 1 END,
       last_ok_ts = CASE WHEN excluded.ok = 1 THEN excluded.ts ELSE xfer_latest.last_ok_ts END,
       last_ok_mbps = CASE WHEN excluded.ok = 1 THEN excluded.mbps ELSE xfer_latest.last_ok_mbps END
-    WHERE excluded.ts > xfer_latest.ts`);
+    WHERE excluded.ts > xfer_latest.ts OR xfer_latest.ts > ?`);
+  const futureCut = Date.now() + LATEST_FUTURE_TOL_MS;
   let inserted = 0; let duplicates = 0;
   try {
     db.exec('BEGIN');
@@ -142,9 +153,10 @@ export async function insertSamples(rows = []) {
       inserted += 1;
       daily.run(agent, r.dir, dayKey(ts), ok, mbps ?? 0, mbps, mbps, ok && ttfb != null ? ttfb : 0, ok && ttfb != null ? 1 : 0, ts);
       latest.run(agent, r.dir, ts, ok, iOr(r.bytes), mbps, n(r.xferMs), iOr(r.totalMs), ttfb,
-        s(r.basis, 20), ok ? null : s(r.kind || 'http', 20), ok ? null : s(r.error, 400), ok ? 0 : 1, ok ? ts : null, ok ? mbps : null);
+        s(r.basis, 20), ok ? null : s(r.kind || 'http', 20), ok ? null : s(r.error, 400), ok ? 0 : 1, ok ? ts : null, ok ? mbps : null, futureCut);
     }
     db.exec('COMMIT');
+    if (inserted) _rev += 1;
     return { ok: true, inserted, duplicates };
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* 이미 끝남 */ }
@@ -223,19 +235,107 @@ export async function oldestOf(agent) {
   } catch { return { sampleTs: null, day: null }; }
 }
 
-/** CSV 내보내기용 — 기간 안 원시 행 전체 열(상한 — 넘으면 가장 최근 행을 남긴다). `until`(포함)이 있으면 그 시각까지(v2.735.3 이전 구간). */
-export async function exportRows(sinceTs, { agent = '', limit = 200_000, until = null } = {}) {
+const SAMPLE_COLS_ALL = 'agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, basis';
+const SAMPLE_COLS_AGENT = 'agent, dir, ts, ok, mbps, ttfb_ms, xfer_ms, total_ms, bytes, basis, kind, err';
+const EXPORT_COLS = 'agent, dir, ts, ok, bytes, mbps, xfer_ms, total_ms, ttfb_ms, basis, kind, err, trig';
+export const READ_CHUNK = 2000;
+
+/**
+ * 기간 안 원시 행을 **최근 → 과거** 조각으로 읽는다(v2.740 E-01·E-02·E-04). 조각 사이에 `yielder` 로 양보한다.
+ * 돌려주는 순서·내용은 한 문장 판(`… ORDER BY ts DESC LIMIT want`)과 같다:
+ *  · 전체: ts 색인 — 같은 ts 는 rowid 내림차순(색인 순서). 조각 경계에 걸친 마지막 ts 의 행은 떼어 내고 그 ts 를 통째로 읽는다
+ *    (같은 ts 는 엣지 수 × 2 행이 상한 — PK 가 (agent, dir, ts) 다).
+ *  · 한 엣지: 방향마다 PK 범위(정렬 없이) 두 줄을 ts 내림차순으로 합친다(같은 ts 는 down 먼저 — 한 문장 판은 이 순서를 정하지 않는다).
+ * @returns {Promise<Array>} 최대 want 행
+ */
+async function readDescChunked(db, { cols, sinceTs, until = null, agent = '', want, chunk = READ_CHUNK, yielder = null }) {
+  const out = [];
+  const step = Math.max(2, Math.floor(n(chunk) ?? READ_CHUNK));
+  const pace = async () => { if (yielder) await yielder(); };
+  if (!agent) {
+    const qOpen = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE ts >= ? ORDER BY ts DESC, rowid DESC LIMIT ?`);
+    const qTo = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE ts >= ? AND ts <= ? ORDER BY ts DESC, rowid DESC LIMIT ?`);
+    const qLt = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE ts >= ? AND ts < ? ORDER BY ts DESC, rowid DESC LIMIT ?`);
+    const qEq = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE ts = ? ORDER BY rowid DESC`);
+    let cursor = null;   // 다음 조각의 ts 상한(미포함). 첫 조각은 until(포함) 또는 열림.
+    while (out.length < want) {
+      const rows = cursor != null ? qLt.all(sinceTs, cursor, step) : (until != null ? qTo.all(sinceTs, until, step) : qOpen.all(sinceTs, step));
+      if (rows.length < step) { for (const r of rows) out.push(r); break; }
+      const T = rows[rows.length - 1].ts;
+      let k = rows.length;
+      while (k > 0 && rows[k - 1].ts === T) k -= 1;
+      for (let i = 0; i < k; i += 1) out.push(rows[i]);
+      for (const r of qEq.all(T)) out.push(r);
+      cursor = T;
+      await pace();
+    }
+    return out.length > want ? out.slice(0, want) : out;
+  }
+  const qA = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE agent = ? AND dir = ? AND ts >= ? ORDER BY ts DESC LIMIT ?`);
+  const qAto = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE agent = ? AND dir = ? AND ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?`);
+  const qAlt = db.prepare(`SELECT ${cols} FROM xfer_sample WHERE agent = ? AND dir = ? AND ts >= ? AND ts < ? ORDER BY ts DESC LIMIT ?`);
+  const streams = ['down', 'up'].map((dir) => ({ dir, buf: [], pos: 0, cursor: null, first: true, done: false }));
+  const refill = (st) => {
+    const rows = st.first
+      ? (until != null ? qAto.all(agent, st.dir, sinceTs, until, step) : qA.all(agent, st.dir, sinceTs, step))
+      : qAlt.all(agent, st.dir, sinceTs, st.cursor, step);
+    st.first = false;
+    st.buf = rows; st.pos = 0;
+    if (rows.length < step) st.done = true;
+    if (rows.length) st.cursor = rows[rows.length - 1].ts;   // (agent, dir, ts) 가 PK — 같은 방향에서 ts 는 겹치지 않는다
+  };
+  while (out.length < want) {
+    let refilled = false;
+    for (const st of streams) if (st.pos >= st.buf.length && !st.done) { refill(st); refilled = true; }
+    let best = null;
+    for (const st of streams) {
+      if (st.pos >= st.buf.length) continue;
+      if (!best || st.buf[st.pos].ts > best.buf[best.pos].ts) best = st;
+    }
+    if (!best) break;
+    out.push(best.buf[best.pos]); best.pos += 1;
+    if (refilled) await pace();
+  }
+  return out;
+}
+
+/**
+ * `samplesSince` 의 조각판(v2.740 E-02·E-04) — 같은 열·같은 결과, 조각 사이에 양보. 화면 요약·히트맵이 쓴다.
+ * @returns {Promise<{rows:Array, truncated:boolean, available:boolean, error?:string}>}
+ */
+export async function samplesSinceChunked(sinceTs, { agent = '', limit = 200_000, until = null, yielder = null, chunk = READ_CHUNK } = {}) {
+  const db = await getDb();
+  if (!db) return { rows: [], truncated: false, available: false };
+  const lim = Math.max(1, Math.min(500_000, Math.floor(n(limit) ?? 200_000)));
+  try {
+    const rows = await readDescChunked(db, { cols: agent ? SAMPLE_COLS_AGENT : SAMPLE_COLS_ALL, sinceTs, until: n(until), agent, want: lim + 1, chunk, yielder });
+    const truncated = rows.length > lim;
+    const kept = truncated ? rows.slice(0, lim) : rows;
+    kept.reverse();
+    return { rows: kept, truncated, available: true };
+  } catch (e) { return { rows: [], truncated: false, available: true, error: String(e?.message || e).slice(0, 200) }; }
+}
+
+/**
+ * CSV 내보내기용 — 기간 안 원시 행 전체 열(상한 — 넘으면 가장 최근 행을 남긴다). `until`(포함)이 있으면 그 시각까지(v2.735.3 이전 구간).
+ * v2.740 E-01: 조각으로 읽고 사이에 양보한다(예전 한 문장 판은 20만 행에 1.5~2초 동안 포탈 전체를 멈췄다). 결과는 같다(테스트 대조).
+ */
+export async function exportRows(sinceTs, { agent = '', limit = 200_000, until = null, yielder = null, chunk = READ_CHUNK } = {}) {
   const db = await getDb();
   if (!db) return { rows: [], truncated: false };
   const lim = Math.max(1, Math.min(500_000, Math.floor(n(limit) ?? 200_000)));
-  const to = n(until);
   try {
-    const sql = `SELECT agent, dir, ts, ok, bytes, mbps, xfer_ms, total_ms, ttfb_ms, basis, kind, err, trig FROM xfer_sample WHERE ts >= ? ${to != null ? 'AND ts <= ?' : ''} ${agent ? 'AND agent = ?' : ''} ORDER BY ts DESC LIMIT ?`;
-    const args = [sinceTs, ...(to != null ? [to] : []), ...(agent ? [agent] : []), lim + 1];
-    const rows = db.prepare(sql).all(...args);
+    const rows = await readDescChunked(db, { cols: EXPORT_COLS, sinceTs, until: n(until), agent, want: lim + 1, chunk, yielder });
     const kept = rows.slice(0, lim).reverse();
     return { rows: kept, truncated: rows.length > lim };
   } catch { return { rows: [], truncated: false }; }
+}
+
+/** 화면 기억 키 — 쓰기 세대 + 원시 MAX(rowid)(O(1)). DB 를 못 열면 null(기억하지 않는다). */
+export async function dataMark() {
+  const db = await getDb();
+  if (!db) return null;
+  try { return `${_rev}|${db.prepare('SELECT MAX(rowid) v FROM xfer_sample').get()?.v ?? 0}`; } catch { return null; }
 }
 
 /** DB 상태 — 행 수는 세지 않는다(rowid 끝값 어림 — v2.728 규약). MIN/MAX 는 단독 문장. */
@@ -266,8 +366,10 @@ export async function pruneXferSpeed({ sampleDays = 180, dailyDays = 365 * 5, no
       const latest = db.prepare('DELETE FROM xfer_latest WHERE rowid IN (SELECT rowid FROM xfer_latest WHERE ts < ? LIMIT ?)');
       const daily = db.prepare('DELETE FROM xfer_daily WHERE rowid IN (SELECT rowid FROM xfer_daily WHERE day < ? LIMIT ?)');
       const a = await chunkedDelete(sample, [now - sd * 86_400_000], { label: 'xferspeed.xfer_sample' });
-      const l = await chunkedDelete(latest, [now - sd * 86_400_000], { label: 'xferspeed.xfer_latest' });
+      // v2.740 B-13: 최신 표는 일 요약 보존일로 — 원시 보존일로 지우면 오래 꺼 둔 엣지가 '한 번도 재지 않았다' 가 된다.
+      const l = await chunkedDelete(latest, [now - dd * 86_400_000], { label: 'xferspeed.xfer_latest' });
       const c = await chunkedDelete(daily, [dayKey(now - dd * 86_400_000)], { label: 'xferspeed.xfer_daily' });
+      if (a.deleted || l.deleted || c.deleted) _rev += 1;
       return { ok: true, sample: a.deleted, latest: l.deleted, daily: c.deleted, done: a.done && l.done && c.done };
     } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
   });
@@ -277,5 +379,6 @@ export function _resetForTest() {
   lockRetry.ok();
   try { _db?.close(); } catch { /* */ }
   _db = null; _tried = false; _opening = null;
+  _rev += 1;
   _pruneFlight.reset();
 }
