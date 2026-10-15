@@ -63,8 +63,12 @@ describe('서버 계약 대조', () => {
     const p = src('isidu/poller.js');
     expect(p).toMatch(/const wait = last\.ok \? iv : Math\.min\(iv, FAIL_RETRY_MS\);/);
   });
-  it('Top 10 순서 = 서버 parse.sortBySize(크기 내림차순 → 이름 localeCompare)', () => {
-    expect(src('isidu/parse.js')).toMatch(/\(b\.bytes - a\.bytes\) \|\| String\(a\.name\)\.localeCompare\(String\(b\.name\)\)/);
+  it('Top 10 순서 = 서버 parse.sortBySize(크기 내림차순 → 이름 순 — 인자 없는 Intl.Collator = 인자 없는 localeCompare 와 같은 순서)', () => {
+    // v2.740 E-03: 서버가 성능 때문에 localeCompare 를 재사용 Collator 로 바꿨다(인자 없는 생성 — 같은 순서). 웹 crossTop 은 localeCompare 그대로다.
+    const p = src('isidu/parse.js');
+    expect(p).toMatch(/sort\(bySizeThenName\)/);
+    expect(p).toMatch(/const NAME_COLLATOR = new Intl\.Collator\(\);/);
+    expect(p).toMatch(/\(b\.bytes - a\.bytes\) \|\| NAME_COLLATOR\.compare\(String\(a\.name\), String\(b\.name\)\)/);
   });
 });
 

@@ -1036,12 +1036,15 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
       {!s ? <div className="muted" style={{ padding: 8 }}>아직 수집된 스냅샷이 없습니다(첫 수집 주기 대기).</div> : (
         <>
           {/* 헤더 — 수집 방식/타입이 제공하는 항목만(v2.325). 빈 값은 '—' 대신 칩 자체를 숨긴다
-              (예: SSH 는 시리얼/GUID 미제공 → 칩 없음). 수집 방식 배지로 어떤 UI 인지 명확히. */}
+              (예: Isilon SSH 는 장비 GUID 가 없다 → 칩 없음. 노드 시리얼은 v2.735.2 부터 isi_hw_status 로 읽어 노드 표에 싣는다).
+              수집 방식 배지로 어떤 UI 인지 명확히. */}
           <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10, alignItems: 'center' }}>
             {/* ⚠ v2.542: 이 배지는 **이 화면의 값을 어떤 방식으로 받았는지**다(아래 패널 구성도 그
                 기준으로 갈린다 — 있는 데이터가 그 방식으로 받은 것이므로 바꾸면 빈 칸만 늘어난다).
                 등록값이 이미 다른 방식으로 바뀌어 있으면 그 사실을 옆에 밝힌다. */}
-            <span className={`badge ${method === 'ssh' ? 'blue' : 'gray'}`} title={method === 'ssh' ? 'SSH(isi status 파싱) 수집 — 시리얼/GUID 미제공, 클러스터 헬스·감축비·이벤트·잡 제공' : 'REST API 수집'}>{method.toUpperCase()} 수집</span>
+            {/* v2.740 D-09: 예전 title '시리얼/GUID 미제공' 은 v2.735.2(isi_hw_status 로 노드 시리얼 수집) 이후 사실이 아니었고, Isilon 문구가
+                다른 타입의 SSH 수집에도 붙었다. 장비 시리얼 칩은 storageSerialText.serialHeader 가, 노드 시리얼 사유는 노드 표 각주가 말한다. */}
+            <span className={`badge ${method === 'ssh' ? 'blue' : 'gray'}`} title={method !== 'ssh' ? 'REST API 수집' : r.type === 'isilon' ? 'SSH(isi status · isi_hw_status 파싱) 수집 — 장비 GUID 는 없음(REST 수집만 줍니다) · 노드 시리얼은 isi_hw_status(6시간마다 다시 읽음) · 클러스터 헬스·감축비·이벤트·잡 제공' : 'SSH(CLI) 수집'}>{method.toUpperCase()} 수집</span>
             {(() => {
               const mv = collectMethodView({ registered: r.collectMethod, lastUsed: ex.collectMethod, hasSnap: !!s, agent: r.agent });
               return mv.pending ? <span className="badge amber" style={{ marginLeft: 4 }} title={mv.pending.title}>등록 {mv.label} · 적용 대기</span> : null;

@@ -27,8 +27,9 @@ import {
   FAIL_TEXT, failTitle, bytesText, deltaView, shareText, countText, nodeText, everyText, tailPath,
   sparkPath, trendModel, trendNotes, baseNote, scanNotes, kpiCards, targetStatus, runResultText, nudgeLines,
   USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, resumeNote, targetMailLine,
+  KEYED_EMPTY, keyedStart, keyedOk, keyedFail, keyedView, listPollDelay, listStaleText, csvButtonState,
 } from './isiduText.js';
-import { SUBVIEWS, viewOfSegs, hashOfView, overviewIndex, statusCounts } from './isiduOverviewText.js';
+import { SUBVIEWS, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay } from './isiduOverviewText.js';
 import { SummaryView, CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
 import IsiduSettings from './IsiduSettings.jsx';
 import './isidu.css';
@@ -53,26 +54,42 @@ function useHashView() {
 /**
  * 개요(7일 변화·30일 추이·상위 폴더·최근 실행 기록) — 최신 성공·시도 기록이 바뀔 때만 다시 읽는다. 다시 읽는 동안 직전 값을 지우지 않는다
  * (같은 대상 목록의 이전 값이다 — 다른 대상의 값을 섞지 않는다). 실패해도 직전 값을 남기고 오류를 함께 준다.
+ * v2.740 D-02: 실패하면 백오프(ovRetryDelay — 15초 → 30초 → 60초)로 다시 묻는다. 예전에는 대상 목록이 바뀔 때까지 다시 묻지 않아,
+ *   한 번의 시한 초과가 하위 화면 전체를 '수집 없음' 처럼 보이게 했다. 403·404 는 다시 물어도 같으므로 멈춘다.
  */
 function useOverview(sig, enabled) {
   const [st, setSt] = useState({ data: null, error: null, sig: null });
+  const [tick, setTick] = useState(0);
+  const failsRef = useRef(0);
+  const sigRef = useRef(null);
   useEffect(() => {
     if (!enabled || sig == null) return undefined;
-    let alive = true;
+    if (sigRef.current !== sig) { sigRef.current = sig; failsRef.current = 0; }
+    let alive = true; let timer = null;
     fetchJson('/tools/isilon-dirusage/overview').then(
-      (d) => { if (alive) setSt({ data: d, error: null, sig }); },
-      (e) => { if (alive) setSt((x) => ({ ...x, error: e, sig })); },
+      (d) => { if (!alive) return; failsRef.current = 0; setSt({ data: d, error: null, sig }); },
+      (e) => {
+        if (!alive) return;
+        setSt((x) => ({ ...x, error: e, sig }));
+        const wait = ovRetryDelay(e, failsRef.current);
+        failsRef.current += 1;
+        if (wait != null) timer = setTimeout(() => { if (alive) setTick((n) => n + 1); }, wait);
+      },
     );
-    return () => { alive = false; };
-  }, [sig, enabled]);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [sig, enabled, tick]);
   return st;
 }
 
-/** 목록 폴링 — 조사 중이면 8초, 아니면 30초. 실패해도 직전 값을 지우지 않는다. */
+/**
+ * 목록 폴링 — 조사 중이면 8초, 아니면 30초. 실패해도 직전 값을 지우지 않는다.
+ * v2.740 D-05: 403(권한 없음)·404(구버전 서버)는 다시 물어도 같다 — 재무장하지 않고 stopped 를 세운다(listPollDelay). '다시 읽기'(reload)는 그대로 된다.
+ */
 function useMain() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [failedAt, setFailedAt] = useState(null);
+  const [stopped, setStopped] = useState(false);
   const busyRef = useRef(false);
   const genRef = useRef(0);
   const kickRef = useRef(() => {});
@@ -80,42 +97,50 @@ function useMain() {
     let alive = true; let timer = null;
     const loop = async (gen) => {
       if (!alive || gen !== genRef.current) return;
+      let lastErr = null;
       if (typeof document === 'undefined' || !document.hidden) {
         try {
           const d = await fetchJson('/tools/isilon-dirusage');
           if (!alive || gen !== genRef.current) return;
-          setData(d); setError(null); setFailedAt(null);
+          setData(d); setError(null); setFailedAt(null); setStopped(false);
           busyRef.current = (d?.targets || []).some((t) => t.running || t.request);
         } catch (e) {
           if (!alive || gen !== genRef.current) return;
+          lastErr = e;
           setError(e); setFailedAt((x) => x || Date.now());
         }
       }
-      if (alive && gen === genRef.current) timer = setTimeout(() => loop(gen), busyRef.current ? 8_000 : 30_000);
+      if (!alive || gen !== genRef.current) return;
+      const wait = listPollDelay(lastErr, busyRef.current);
+      if (wait == null) { setStopped(true); return; }
+      timer = setTimeout(() => loop(gen), wait);
     };
     kickRef.current = () => { if (timer) clearTimeout(timer); loop(++genRef.current); };
     loop(++genRef.current);
     return () => { alive = false; if (timer) clearTimeout(timer); };
   }, []);
   const reload = useCallback(() => kickRef.current(), []);
-  return { data, error, failedAt, reload };
+  return { data, error, failedAt, stopped, reload };
 }
 
-/** 키가 같을 때만 결과를 쓰는 조회(늦게 온 다른 대상의 응답을 버린다). */
+/**
+ * 키가 같을 때만 결과를 쓰는 조회(늦게 온 다른 대상의 응답을 버린다). 상태 전이·판정은 isiduText 의 keyed* (순수 — 테스트가 고정한다).
+ * v2.740 D-01: data 는 그것을 받은 키(dataKey)일 때만 돌려준다 — 대상 B 의 실패가 대상 A 의 보고서를 B 이름 아래 남기지 않는다.
+ */
 function useKeyed(path, params, key) {
-  const [st, setSt] = useState({ key: null, data: null, error: null, loading: false });
+  const [st, setSt] = useState(KEYED_EMPTY);
   useEffect(() => {
-    if (!key) { setSt({ key: null, data: null, error: null, loading: false }); return undefined; }
+    if (!key) { setSt(KEYED_EMPTY); return undefined; }
     let alive = true;
-    setSt((s) => ({ ...s, loading: true }));
+    setSt((s) => keyedStart(s));
     fetchJson(path, params).then(
-      (d) => { if (alive) setSt({ key, data: d, error: null, loading: false }); },
-      (e) => { if (alive) setSt((s) => ({ ...s, key, error: e, loading: false })); },
+      (d) => { if (alive) setSt((s) => keyedOk(s, key, d)); },
+      (e) => { if (alive) setSt((s) => keyedFail(s, key, e)); },
     );
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return st.key === key ? st : { key, data: null, error: st.error && st.key === key ? st.error : null, loading: true };
+  return keyedView(st, key);
 }
 
 function Spark({ values }) {
@@ -172,7 +197,7 @@ function SortTh({ label, by, sort, onSort, right = false, plain = false }) {
 }
 
 export default function IsilonDirUsageTool() {
-  const { data, error, failedAt, reload } = useMain();
+  const { data, error, failedAt, stopped, reload } = useMain();
   const [hv, go] = useHashView();
   const hashId = hv.view === 'target' ? hv.targetId : '';
   const openTarget = useCallback((id) => go(id ? 'target' : 'summary', id), [go]);
@@ -232,6 +257,7 @@ export default function IsilonDirUsageTool() {
   if (!data) return <Loading />;
 
   const R = rep.data && rep.data.state ? rep.data : null;
+  const csv = csvButtonState({ tid, rep });
   const st = target ? targetStatus(target, now) : null;
   const drops = collectDropNote(data.drops, (id) => targets.find((t) => t.id === id)?.label || id, now);
   const sc = statusCounts(targets, now);
@@ -249,13 +275,18 @@ export default function IsilonDirUsageTool() {
           <div className="isd-sub">지정한 디렉터리 바로 아래 폴더 하나 = 사용자 하나 · <span className="isd-mono">du -A -h -d 1</span> · SSH 키 인증(비밀번호 없음) · 결과는 DB 에 쌓여 추이를 봅니다</div>
         </div>
         <div className="isd-actions">
-          {canCsv() ? <button type="button" className="isd-btn" onClick={exportCsv} disabled={!R || R.state !== 'ok'} title={!R || R.state !== 'ok' ? '성공한 수집이 있어야 내보낼 수 있습니다' : '전체 사용자 CSV'}>CSV 내보내기</button> : null}
+          {canCsv() && csv.show ? <button type="button" className="isd-btn" onClick={exportCsv} disabled={csv.disabled} title={csv.title}>CSV 내보내기</button> : null}
           <button type="button" className="isd-btn" onClick={() => openSettings('edit')}>수집 대상 설정</button>
           <button type="button" className="isd-btn primary" onClick={() => (tid ? runNow([tid]) : openSettings('bulk'))} disabled={busy} title={tid ? undefined : '여러 대상을 골라 한꺼번에 수집합니다(설정 › 일괄 변경). 수집 상태 표의 ‘수집’ 으로 하나씩도 돌릴 수 있습니다'}>{busy ? '요청 중…' : tid ? '지금 수집' : '지금 수집(대상 고르기)'}</button>
         </div>
       </div>
 
-      {error ? <div className="isd-banner amber">목록을 새로 읽지 못했습니다({agoText(failedAt, Date.now())}부터) — 아래는 직전에 받은 값입니다. {String(error?.message || error)}</div> : null}
+      {error ? (
+        <div className="isd-banner amber">
+          {listStaleText({ error, failedAt, stopped }, Date.now())}
+          {stopped ? <> <button type="button" className="isd-btn small" onClick={reload}>다시 읽기</button></> : null}
+        </div>
+      ) : null}
       {data.settingsLoadError ? <div className="isd-banner red">설정 파일을 읽지 못했습니다 — 저장하면 기존 대상이 사라질 수 있어 저장을 막았습니다. 설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요. ({String(data.settingsLoadError)})</div> : null}
       {data.storageRegistryError ? <div className="isd-banner red">스토리지 등록부를 읽지 못해 장비 주소·담당 노드를 알 수 없습니다 — 설정 › 스토리지를 확인하세요.</div> : null}
       {runMsg ? (

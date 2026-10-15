@@ -14,7 +14,7 @@
  *  · 못 읽은 값은 null(화면 '—'). 0 으로 채우지 않는다.
  */
 import { numOrNull } from '../../numOrNull.js';
-import { targetStatus, targetBytesOf, corpOverview, targetChip } from './isiduText.js';
+import { targetStatus, targetBytesOf, corpOverview, targetChip, pollStopped, countText } from './isiduText.js';
 import { agoText } from './relTime.js';
 
 const MIN = 60_000;
@@ -88,6 +88,65 @@ export function nextRunOf(t, failRetryMs = HOUR, now = Date.now()) {
   return at <= now ? 'soon' : at;
 }
 
+/* ─────────────── 개요 응답 상태(v2.740 감사 D-02) ───────────────
+ * 개요(`/overview`)를 받지 못한 것을 '수집 없음' · '관측 짧음' · '불러오는 중' 으로 말하지 않는다. 대상 목록(상태·크기 합)은 목록 응답이라
+ * 그대로 보이고, 7일 변화·30일 추이·상위 폴더 칸만 '개요를 읽지 못했습니다' 로 말한다. 실패하면 백오프로 다시 묻는다(403·404 는 멈춘다). */
+
+/** 개요를 못 받은 칸의 공통 문구. */
+export const OV_UNREAD = '개요를 읽지 못했습니다';
+
+/** useOverview 결과 → 'ok'(받음) · 'stale'(직전 값 — 새로 못 읽음) · 'loading'(받는 중) · 'unread'(받지 못함). */
+export function ovStatus(ov) {
+  if (ov && ov.data) return ov.error ? 'stale' : 'ok';
+  return ov && ov.error ? 'unread' : 'loading';
+}
+
+/** 실패 뒤 다시 묻는 간격(ms) — 15초 → 30초 → 60초(그 뒤 60초). */
+export const OV_RETRY_MS = Object.freeze([15_000, 30_000, 60_000]);
+
+/** n 번째(0부터) 연속 실패 뒤 다시 물을 간격. 다시 물어도 같은 실패(403·404)면 null. */
+export function ovRetryDelay(err, fails = 0) {
+  if (pollStopped(err)) return null;
+  const n = Math.max(0, Math.floor(numOrNull(fails) ?? 0));
+  return OV_RETRY_MS[Math.min(n, OV_RETRY_MS.length - 1)];
+}
+
+/** 서브메뉴 위 배너 — 못 읽음 · 직전 값. 받았거나 받는 중이면 null. */
+export function ovBanner(ov) {
+  const st = ovStatus(ov);
+  if (st !== 'unread' && st !== 'stale') return null;
+  const e = ov.error;
+  const msg = String(e?.message || e);
+  const retry = ovRetryDelay(e) != null
+    ? '잠시 뒤 다시 시도합니다.'
+    : `${e?.status === 403 ? '권한이 없어(403)' : '이 서버에 개요 기능이 없어(404 — 구버전일 수 있습니다)'} 다시 시도하지 않습니다.`;
+  if (st === 'unread') return { tone: 'amber', text: `7일 변화·추이·상위 폴더를 읽지 못했습니다 — ${msg} 대상 목록은 그대로 보입니다. ${retry}` };
+  return { tone: 'amber', text: `7일 변화·추이·상위 폴더를 새로 읽지 못했습니다 — 아래는 직전에 받은 값입니다. ${retry} (${msg})` };
+}
+
+/** 서머리 '7일 변화 합' 부제. */
+export function summaryDelta7Sub(T, ovSt) {
+  if (ovSt === 'loading') return '불러오는 중…';
+  if (ovSt === 'unread') return `${OV_UNREAD} — 7일 변화를 모릅니다`;
+  if (!T || T.delta7 == null) return '7일 전 수집이 있는 대상이 없습니다';
+  return `7일 전 수집이 있는 대상 ${countText(T.delta7Targets)}개 기준${T.delta7WithinCount ? ` · 반올림 해상도 안의 차이 ${countText(T.delta7WithinCount)}개는 0 으로 셉니다` : ''}`;
+}
+
+/** 전 법인 상위(서머리 5 · Top 10) 표가 비었을 때 문구. */
+export function topEmptyText(ovSt, { picked = false } = {}) {
+  if (ovSt === 'loading') return '불러오는 중…';
+  if (ovSt === 'unread') return `${OV_UNREAD} — 순위를 만들지 못했습니다(수집이 없다는 뜻이 아닙니다).`;
+  return picked ? '고른 법인에 성공한 수집이 있는 대상이 없습니다.' : '성공한 수집이 있는 대상이 없습니다.';
+}
+
+/** 법인 현황 카드의 상위 폴더(top3)·30일 추이(trend) 칸이 비었을 때 문구. */
+export function cardOvText(kind, ovSt) {
+  const what = kind === 'trend' ? '30일 추이' : '상위 폴더';
+  if (ovSt === 'loading') return `${what} 불러오는 중…`;
+  if (ovSt === 'unread') return `${what}를 읽지 못했습니다(개요 조회 실패)`;
+  return `${what} 없음`;
+}
+
 /** 대상 개요 행을 id 로. */
 export function overviewIndex(ov) {
   const m = new Map();
@@ -143,7 +202,7 @@ export function summaryModel(targets, ovById = new Map(), now = Date.now()) {
  * @param ovById overviewIndex 결과
  * @param opts.corps 고른 법인 이름 Set(비어 있으면 전부) · opts.n 몇 개
  */
-export function crossTop(targets, ovById = new Map(), { corps = null, n = 10 } = {}) {
+export function crossTop(targets, ovById = new Map(), { corps = null, n = 10, unread = false } = {}) {
   const pick = corps && corps.size ? corps : null;
   const rows = []; const included = []; const excluded = [];
   let base = 0;
@@ -152,7 +211,8 @@ export function crossTop(targets, ovById = new Map(), { corps = null, n = 10 } =
     const corp = String(t.corp || t.datacenterId || '').trim();
     if (pick && !pick.has(corp || '')) continue;
     const ov = ovById.get(t.id);
-    if (!ov || ov.state !== 'ok') { excluded.push({ id: t.id, corp, state: ov?.state || 'loading' }); continue; }
+    // 개요를 받지 못했으면(unread) 그 대상은 '결과 없음' 이 아니라 '개요 못 읽음' 이다(D-02).
+    if (!ov || ov.state !== 'ok') { excluded.push({ id: t.id, corp, state: ov?.state || (unread ? 'overview-unread' : 'loading') }); continue; }
     included.push(t.id);
     const denom = numOrNull(ov.scan?.denom);
     if (denom != null) base += denom;
@@ -178,18 +238,30 @@ export function crossTop(targets, ovById = new Map(), { corps = null, n = 10 } =
   };
 }
 
-/** 고를 수 있는 법인(전 법인 Top 10 칩) — 결과가 없는 법인은 고를 수 없음 표시. */
-export function corpChoices(targets, ovById = new Map()) {
+/** 상위 표에서 빠진 대상 중 '결과 없음'(개요는 받았는데 성공한 수집이 없음)만 센다 — 개요 못 읽음·받는 중은 세지 않는다. */
+export function noResultCount(r) {
+  return (r?.excluded || []).filter((x) => x && x.state !== 'overview-unread' && x.state !== 'loading').length;
+}
+
+/** 고를 수 있는 법인(전 법인 Top 10 칩) — 결과가 없는 법인은 고를 수 없음 표시. 개요를 못 읽었으면(unread) 결과 유무를 모른다(unknown). */
+export function corpChoices(targets, ovById = new Map(), { unread = false } = {}) {
   const m = new Map();
   for (const t of Array.isArray(targets) ? targets : []) {
     if (!t) continue;
     const corp = String(t.corp || t.datacenterId || '').trim();
-    if (!m.has(corp)) m.set(corp, { corp, label: corp || '법인 미지정', targets: 0, withData: 0 });
+    if (!m.has(corp)) m.set(corp, { corp, label: corp || '법인 미지정', targets: 0, withData: 0, unknown: !!unread });
     const g = m.get(corp);
     g.targets++;
     if (ovById.get(t.id)?.state === 'ok') g.withData++;
   }
   return [...m.values()].sort((a, b) => (a.corp ? 0 : 1) - (b.corp ? 0 : 1) || a.label.localeCompare(b.label, 'ko', { numeric: true }));
+}
+
+/** 법인 칩 표시 — 결과 없음은 잠근다. 개요를 못 읽어 모르는 칩은 잠그지 않는다(고르면 표가 '개요를 읽지 못했습니다' 라 말한다). */
+export function corpChipView(c) {
+  if (c?.unknown) return { disabled: false, suffix: '', title: `${OV_UNREAD} — 이 법인의 결과 유무를 모릅니다(대상 ${c.targets}개)` };
+  if (!c?.withData) return { disabled: true, suffix: ' · 결과 없음', title: '이 법인은 아직 성공한 수집이 없습니다' };
+  return { disabled: false, suffix: '', title: `대상 ${c.targets}개` };
 }
 
 /** 법인 현황 정렬. */
@@ -199,11 +271,12 @@ export const CORP_SORTS = Object.freeze([['size', '크기 큰 순'], ['d7', '7�
  * 법인 현황 카드(순수) — 대상 하나 = 카드 하나.
  * @returns {{t, st, chip, users, bytes, d7, hasBase, okTs, points, top3, prog}[]}
  */
-export function corpCards(targets, ovById = new Map(), now = Date.now(), sort = 'size') {
+export function corpCards(targets, ovById = new Map(), now = Date.now(), sort = 'size', { unread = false } = {}) {
   const cards = (Array.isArray(targets) ? targets : []).filter(Boolean).map((t) => {
     const ov = ovById.get(t.id);
     const ok = ov?.state === 'ok';
     return {
+      ovUnread: !!unread && !ov,
       t, st: targetStatus(t, now), chip: targetChip(t),
       corp: String(t.corp || t.datacenterId || '').trim(),
       users: numOrNull(t.okScan?.count), bytes: targetBytesOf(t),
