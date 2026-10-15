@@ -349,6 +349,7 @@ vp_link() {
   if [[ -n "$TOOLS_DIR" && -f "$target" && -x "$target" ]]; then
     ln -sfn "$target" "$link" 2>/dev/null && echo "==> $4: $1 (→ $target · root 소유 사본)"
   fi
+  return 0   # best-effort — 링크 실패로 설치를 멈추지 않는다(set -e)
 }
 # OTP 콘솔 등록 도구 — admin/operator 는 OTP 전용이라 첫 관리자 등록·잠금 복구에 이 도구가 필요하다.
 if [[ -x "$APP_DST/otp-enroll.sh" ]]; then vp_link vmware-portal-otp vmware-portal-otp "OTP 등록 도구"; fi

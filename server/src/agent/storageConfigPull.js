@@ -76,7 +76,7 @@ async function runCollectJob() {
         try {
           // v2.591 L1: false = 이미 수집 중(주기 수집) — 그 결과가 곧 push 되므로 새 세션을 열지 않는다.
           // v2.733(C4-03): 장비마다 스냅샷 파일을 쓰지 않는다 — 묶음 끝에 한 번(아래).
-          if (await collectDeviceNow(id, { flush: false })) collected++;
+          if (await collectDeviceNow(String(id), { flush: false })) collected++;
           else { busy++; console.log(`[storage-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); }
           if (!getDeviceWithSecret(id)) { try { dropSnapshot(id); } catch { /* */ } }
         } catch (e) { failed++; console.warn(`[storage-config] 재수집 실패(${id}): ${e.message}`); } // 실패 스냅샷도 push 로 전달됨

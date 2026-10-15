@@ -11,6 +11,7 @@
  */
 
 import fs from 'node:fs';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // v2.741(LEFT-13): NDJSON 폴백 재기록은 tmp → rename
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
@@ -217,6 +218,7 @@ function initJson() {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let rows = [];
   try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) rows.push(JSON.parse(l)); } } catch { /* */ }
+  const rewrite = () => { try { atomicWriteFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch (e) { console.warn(`[ping] NDJSON 폴백 재기록 실패(메모리는 정리됨 — 다음 정리 때 다시 씁니다): ${e.message}`); } };
   return {
     kind: 'json',
     insertMany: (recs) => { const lines = recs.map((r) => ({ g: r.target, t: r.ts, v: r.rtt == null ? null : r.rtt, o: r.ok ? 1 : 0 })); rows.push(...lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
@@ -234,10 +236,11 @@ function initJson() {
       }));
     },
     meta: (target) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.g === target) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
-    prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
+    // v2.741(감사 LEFT-13): 재기록은 원자적으로(tmp → fsync → rename) — writeFileSync 는 먼저 0바이트로 자르므로 그 사이 종료면 이력을 잃는다.
+    prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; rewrite(); } },
     historyHourly: () => null,   // 폴백은 롤업이 없다 — 호출부가 history 로 떨어진다
     rollupState: () => ({ ready: false }),
-    dropTarget: async (target, untilTs = null) => { const n = rows.filter((r) => r.g !== target || (untilTs != null && r.t > untilTs)); const deleted = rows.length - n.length; if (deleted) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } return { deleted, done: true, chunks: 1 }; },
+    dropTarget: async (target, untilTs = null) => { const n = rows.filter((r) => r.g !== target || (untilTs != null && r.t > untilTs)); const deleted = rows.length - n.length; if (deleted) { rows = n; rewrite(); } return { deleted, done: true, chunks: 1 }; },
   };
 }
 

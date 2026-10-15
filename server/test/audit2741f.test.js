@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741f-'));
@@ -146,7 +146,9 @@ test('DEV-02 ① SAN: 느린 명령이 장비 시한을 넘게 쌓여도 세션�
 });
 
 test('DEV-02 ①-b SAN: 예산 끝 무렵에 시작한 명령은 남은 시간만 기다린다(명령 시한 그대로 기다리면 예산을 넘긴다)', async () => {
-  const fos = await import(new URL('sanswitch/collectors/fosSsh.js', SRC));
+  // ⚠ 이 파일의 축척(명령 시한 1초)에서는 남은 시간으로 줄인 시한이 1초 아래가 되는데, sshExec 가 exec 시한을 1초 아래로
+  //   내리지 않는다(execTimeoutMs 하한). 그래서 줄인 효과가 보이지 않는다 — 명령 시한 4초인 자식 프로세스에서 잰다.
+  //   자식은 동기 실행(execFileSync)이면 가짜 서버(이 프로세스)가 멈추므로 비동기로 띄운다.
   const srv = await fakeSsh((c) => {
     if (c === 'echo $PATH') return '/fabos/bin\n';
     if (c.startsWith('ls ')) return SAN_CMDS.split(' ').join('\n') + '\n';
@@ -154,13 +156,23 @@ test('DEV-02 ①-b SAN: 예산 끝 무렵에 시작한 명령은 남은 시간�
     return c === 'switchshow' ? SWITCHSHOW : `${c} output\n`;
   });
   try {
-    const dev = { id: 'sw-slice', type: 'brocade', host: '127.0.0.1', sshPort: srv.port, username: 'admin', password: 'x' };
-    const BUDGET = 1_600;   // cfgshow(1초) 뒤 errdump 는 남은 약 0.4초만 기다려야 한다 — 1초를 다 기다리면 예산을 0.5초 넘긴다
-    const t0 = Date.now();
-    const snap = await fos.collect(dev, { budgetMs: BUDGET });
-    const ms = Date.now() - t0;
-    assert.equal(snap.name, 'sw-demo');
-    assert.ok(ms < BUDGET + 350, `세션이 예산(${BUDGET}ms)을 크게 넘겼다: ${ms}ms`);
+    const BUDGET = 3_000;   // 앞 명령 약 1.2초 → cfgshow 는 남은 약 1.8초만 기다려야 한다. 명령 시한(4초)을 다 기다리면 약 5초.
+    const childDir = fs.mkdtempSync(path.join(TMP, 'slice-'));
+    const env = { ...process.env, CONFIG_DIR: childDir, SANSW_CLI_TIMEOUT_MS: '4000' };
+    delete env.SSH_EXEC_TIMEOUT_MS;
+    const code = `const fos = await import(${JSON.stringify(new URL('sanswitch/collectors/fosSsh.js', SRC).href)});
+const dev = { id: 'sw-slice', type: 'brocade', host: '127.0.0.1', sshPort: ${srv.port}, username: 'admin', password: 'x' };
+const t0 = Date.now();
+const snap = await fos.collect(dev, { budgetMs: ${BUDGET} });
+console.log(JSON.stringify({ ms: Date.now() - t0, name: snap.name, cmd: fos.CMD_TIMEOUT_MS, slice: fos.MIN_SLICE_MS, skipped: snap.extra?.cliSkippedKeys || [] }));`;
+    const out = await new Promise((resolve, reject) => execFile(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8', timeout: 30_000 },
+      (err, stdout, stderr) => (err ? reject(new Error(`${err.message}\n${stderr}`)) : resolve(stdout))));
+    const r = JSON.parse(out.trim().split('\n').pop());
+    assert.equal(r.cmd, 4_000); assert.equal(r.slice, 1_000);
+    assert.equal(r.name, 'sw-demo');
+    assert.ok(srv.seen.includes('cfgshow'), `cfgshow 가 시작되지 않았다(앞 명령이 예산을 다 썼다 — 이 검증이 무의미하다): ${JSON.stringify(srv.seen)}`);
+    assert.ok(r.ms < BUDGET + 1_000, `세션이 예산(${BUDGET}ms)을 크게 넘겼다 — 남은 시간이 아니라 명령 시한을 기다렸다: ${r.ms}ms`);
+    assert.ok(r.skipped.includes('lsanshow'), JSON.stringify(r.skipped));
   } finally { await srv.close(); }
 });
 
