@@ -1056,6 +1056,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       CI 는 공개키 목록이 완전히 비어 있고 비밀도 없을 때만 서명 없이 통과(`signed=false` → 서명 생략 · `REQUIRE_MANIFEST=0`)하고 한쪽만 설정되면 실패다. 이 허용은 위 규칙이
       warn 을 돌려줄 때만 성립한다 — 규칙을 '항상 require' 로 되돌리면 CI 도 막는다(그 버전 설치 현장이 다음 버전을 영원히 못 받는 사고 방지). 화면·자가진단은 '키 미설정' 을
       관리자가 끈 warn 과 구분해 말한다(조치가 '키 등록' 이다). ✅ v2.735.2 에 공개키 `ed25519:d8a83ad56120662d` 를 등록했다(첫 서명 릴리스 — 그 전 버전은 경고 후 설치, 설치 뒤 서명 필수). 회귀 `rvK_releaseSigning.test.js`.
+      ⚠ v2.736.1(사용자 캡처 '마지막 검증 — 아직 검증한 번들이 없습니다'): 검증 기록이 메모리에만 있어 업그레이드 재시작마다 지워졌다 — 이제 최근 10건을 상태 파일
+      `upgrade-signature-log.json`(동기 원자 쓰기 0600 · 아는 필드만 · 손상 보존)에 남긴다. **파일에 쓰는 것은 index.js 가 `enableSignatureLog()` 를 부른 서버 프로세스뿐** —
+      verifyCli(install.sh 가 root 로 부를 수 있다)는 쓰지 않는다. 누적 개수는 여전히 '프로세스 시작 뒤'. '지금 실행 중인 버전' 표지는 확인된 기록에만. 회귀 `upgradeSigLog2736_1`(변이 10/10).
     · **I-09 '버튼으로 여러 번 조회하는' 화면은 최신 요청만 반영**(`createHistLoader` — abort·요청 키, Horizon 추이) · **I-10 `downloadFile` 류에는 `/api` 뒤 경로**(`/api/api/…` 금지 — 스윕).
     · **S-07 암호화 정책 손상·유실 시 평문 저장 금지** — `server/CLAUDE.md` secretVault 절.
     · **S-09 중앙↔엣지 URL 은 HTTPS 기본, 평문 HTTP 는 승인된 예외만**(`collector/transportPolicy.js evaluateCollectorUrl` 하나 — 화면·CSV·자기등록·배포 자동등록·배포 대상 동기화):

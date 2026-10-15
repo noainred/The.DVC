@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, whereText, WHERE_LABEL,
+  recentVerifyList, logIssueText, NO_RECORD_DETAIL,
 } from './upgradeSignatureText.js';
 
 const NOW = 1_800_000_000_000;
@@ -110,5 +111,64 @@ describe('서버 where 값과 대조', () => {
     const s = fs.readFileSync(fileURLToPath(new URL('./upgradeSignatureText.js', import.meta.url)), 'utf8');
     const strings = [...s.matchAll(/'([^'\n]*)'/g)].map((m) => m[1]).join('\n');
     expect(strings.includes('`')).toBe(false);
+  });
+});
+
+describe('v2.736.1 — 검증 기록이 재시작을 넘어 남는다', () => {
+  const LOG = { enabled: true, error: null, corruptKept: null };
+  it("기록이 없으면 '검증한 적이 없다' 로 읽히지 않게 말한다 — 언제 남는지·install.sh·이전 버전을 함께", () => {
+    const v = lastVerifyText({ last: null, log: LOG });
+    expect(v.text).toBe('검증 기록 없음');
+    expect(v.text).not.toContain('아직');
+    expect(v.detail).toBe(NO_RECORD_DETAIL);
+    expect(v.detail).toContain('install.sh');
+    expect(v.detail).toContain('2.736.1');
+    // 적대적 리뷰 확인분: install.sh 는 신규 설치·manifest 없음 등에서 확인을 건너뛴다 — '확인했다' 고 단정하지 않는다
+    expect(v.detail).toContain('건너뛸 수');
+    expect(v.detail).not.toMatch(/따로 확인했/);
+  });
+  it('서버가 기록 상태를 보내지 않으면(예전 서버) 예전 문구 그대로', () => {
+    expect(lastVerifyText({ last: null }).text).toBe('아직 검증한 번들이 없습니다');
+  });
+  it('확인된 기록이 지금 실행 중인 버전이면 그렇게 말하고, 재시작 전 기록임을 밝힌다', () => {
+    const at = NOW - 3 * 3_600_000;
+    const v = lastVerifyText({ currentVersion: '2.736.1', log: LOG, last: { at, where: 'remote', ok: true, verified: true, version: '2.736.1', keyId: 'ed25519:d8a83ad56120662d', beforeStart: true } }, NOW);
+    expect(v.tone).toBe('ok');
+    expect(v.text).toBe('확인됨 · v2.736.1 · 원격 다운로드 · 3시간 전 · 지금 실행 중인 버전');
+    expect(v.detail).toContain('ed25519:d8a83ad56120662d');
+    expect(v.detail).toContain('재시작되기 전');
+  });
+  it("거부·미확인 기록에는 '지금 실행 중인 버전' 을 붙이지 않는다(그 버전이 거부된 것으로 읽힌다)", () => {
+    const r = lastVerifyText({ currentVersion: '2.736.1', log: LOG, last: { at: NOW, where: 'push-edge', ok: false, verified: false, version: '2.736.1', reason: '해시 불일치' } }, NOW);
+    expect(r.tone).toBe('bad');
+    expect(r.text).not.toContain('실행 중');
+    expect(r.detail).toContain('해시 불일치');
+    const w = lastVerifyText({ currentVersion: '2.736.1', log: LOG, last: { at: NOW, where: 'watch', ok: true, verified: false, warned: true, version: '2.736.1' } }, NOW);
+    expect(w.text).not.toContain('실행 중');
+    const other = lastVerifyText({ currentVersion: '2.736.1', log: LOG, last: { at: NOW, where: 'remote', ok: true, verified: true, version: '2.737.0' } }, NOW);
+    expect(other.text).not.toContain('실행 중');
+    expect(other.detail).not.toContain('재시작');
+  });
+  it('최근 기록 목록 — 최신 먼저, 판정별 색', () => {
+    const list = recentVerifyList({ recent: [
+      { at: NOW - 60_000, where: 'remote', ok: true, verified: true, version: '2.736.1' },
+      { at: NOW - 120_000, where: 'push-edge', ok: false, verified: false, version: '2.736.0' },
+      null,
+    ] }, NOW);
+    expect(list).toHaveLength(2);
+    expect(list[0].text).toBe('1분 전 · 확인됨 · v2.736.1 · 원격 다운로드');
+    expect(list[1].tone).toBe('bad');
+    expect(recentVerifyList({})).toEqual([]);
+  });
+  it('기록 파일 문제를 말한다 — 없으면 빈 문자열', () => {
+    expect(logIssueText({ log: LOG })).toBe('');
+    const t = logIssueText({ log: { enabled: true, error: '검증 기록 파일이 손상되어 새로 시작했습니다', corruptKept: 'upgrade-signature-log.json.corrupt.1' } });
+    expect(t).toContain('손상');
+    expect(t).toContain('.corrupt.1');
+  });
+  it('문구에 백틱·별표 강조가 없다(BoldText 규약)', () => {
+    for (const s of [NO_RECORD_DETAIL, logIssueText({ log: { error: 'x', corruptKept: 'y' } })]) {
+      expect(s).not.toMatch(/`|\*\*/);
+    }
   });
 });

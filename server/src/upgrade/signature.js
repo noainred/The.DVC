@@ -27,7 +27,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from '../config.js';
+import { config, currentVersion } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js';
 import {
   parseKeysDoc, mergeTrust, verifyEnvelopeText, matchArtifact, sha256Hex, strictBase64,
   CANNOT_VERIFY, MANIFEST_MAX_BYTES, manifestNameFor, resolvePolicy, trustUnconfigured,
@@ -109,14 +111,99 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile() 
   return { ...t, sources, fatal };
 }
 
-let _last = null;
+/* ── 검증 기록(v2.736.1) ─────────────────────────────────────────────────────────────────────────────────
+ * 사용자 신고(2.736.0 업그레이드 화면 캡처): '마지막 검증 — 아직 검증한 번들이 없습니다'. 기록이 프로세스 메모리에만 있었는데
+ * 업그레이드는 새 번들을 확인한 **직후 재시작**하므로 그 기록은 재시작과 함께 사라졌고, 평소의 '업데이트 확인' 은 새 버전이
+ * 없으면 검증하지 않아 다시 채워지지도 않았다. 그래서 운영 포탈에서 이 줄은 사실상 언제나 비어 '검증한 적이 없다' 로 읽혔다
+ * (앱 안 업그레이드로 설치한 버전이면 설치 때 확인을 거쳤다 — 서명 필수 정책에서는 통과하지 못한 번들을 설치하지 않는다.
+ *  install.sh 설치의 확인 결과는 그 설치 로그에만 있고, 신규 설치 등은 확인을 건너뛴다 — release-verify-lib.sh).
+ * 이제 최근 기록(최신 먼저, SIG_LOG_MAX 개)을 상태 파일에 남긴다. 규칙:
+ *  - 파일에 쓰는 것은 서버 프로세스가 `enableSignatureLog()` 를 부른 뒤뿐이다 — 오프라인 확인 도구(verifyCli — install.sh 가
+ *    root 로 부를 수 있다)와 테스트가 import 만으로 CONFIG_DIR 에 쓰지 않게(root 소유 파일이 남으면 서비스 계정이 못 고친다).
+ *  - 쓰기는 동기 원자 쓰기다 — 업그레이드는 검증 직후 재시작하므로 디바운스하면 그 기록이 사라진다(검증은 드물다: 설치 1회에 2~3번).
+ *  - 쓰기 실패는 판정을 바꾸지 않는다(콘솔과 상태 `log.error` 에만). 손상 파일은 보존(.corrupt.<ts>) 후 새로 시작한다.
+ *  - 아는 필드만 담고 글자 길이를 자른다 — 읽을 때도 같은 정제를 한다(손으로 고친 파일이 화면을 깨지 않게).
+ *  - 누적 개수(counts)는 예전처럼 이 프로세스 시작 뒤만 센다(화면 문구가 '프로세스 시작 뒤' 라고 말한다).
+ */
+registerStateFile('upgrade-signature-log.json');
+export const SIG_LOG_MAX = 10;
+export const sigLogFile = (configDir = config.configDir) => path.join(configDir, 'upgrade-signature-log.json');
+const PROCESS_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+let _recent = [];
 let _counts = { verified: 0, warned: 0, rejected: 0 };
+let _log = { enabled: false, file: null, error: null, corruptKept: null, loadedCount: 0 };
+
+const VERSION_TEXT_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+const capText = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
+/** 기록 한 줄 정제(쓰기·읽기 공용) — 아는 필드만. 시각이 숫자가 아니면 버린다(null). */
+export function sanitizeSigEntry(d) {
+  if (!d || typeof d !== 'object') return null;
+  const at = Number(d.at);
+  if (!Number.isFinite(at) || at <= 0) return null;
+  const ver = typeof d.version === 'string' && VERSION_TEXT_RE.test(d.version) ? d.version : null;
+  const av = typeof d.appVersion === 'string' && VERSION_TEXT_RE.test(d.appVersion) ? d.appVersion : null;
+  return {
+    at, where: capText(d.where, 40) || 'unknown', ok: d.ok === true, verified: d.verified === true, warned: d.warned === true,
+    code: capText(d.code, 60), reason: capText(d.reason, 400) || '', keyId: capText(d.keyId, 80), version: ver,
+    name: capText(d.name, 200), policy: d.policy === 'warn' || d.policy === 'require' ? d.policy : null, appVersion: av,
+  };
+}
+function readSigLog(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') return { recent: [] };
+    return { recent: [], error: `검증 기록 파일을 읽지 못했습니다(${String(e?.code || e?.message || e).slice(0, 80)})` };
+  }
+  let doc;
+  try { doc = JSON.parse(text); } catch { doc = undefined; }
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.recent)) {
+    const kept = preserveCorrupt(file, 'upgrade-signature-log');
+    return { recent: [], error: '검증 기록 파일이 손상되어 새로 시작했습니다', corruptKept: kept ? path.basename(kept) : null };
+  }
+  // 쓴 순서(최신 먼저)를 그대로 쓴다 — 벽시계 at 으로 다시 정렬하면 그사이 시계가 뒤로 맞춰진 경우 재시작 뒤 '마지막' 이 바뀐다.
+  const recent = doc.recent.map(sanitizeSigEntry).filter(Boolean).slice(0, SIG_LOG_MAX);
+  return { recent };
+}
+
+/**
+ * 서버 프로세스가 기동 때 한 번 부른다(index.js). 파일의 기록을 읽어 메모리 앞에 둔다 — 이 호출 전에 이미 생긴 메모리 기록이
+ * 있으면(기동 중 검증) 그것이 더 최신이므로 앞에 둔다. 다시 불러도 안전하다(같은 파일이면 다시 읽기만 한다).
+ */
+export function enableSignatureLog({ configDir = config.configDir } = {}) {
+  const file = sigLogFile(configDir);
+  const r = readSigLog(file);
+  const seen = new Set(_recent.map((e) => `${e.at}|${e.where}|${e.name || ''}`));
+  _recent = [..._recent, ...r.recent.filter((e) => !seen.has(`${e.at}|${e.where}|${e.name || ''}`))].slice(0, SIG_LOG_MAX);
+  _log = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, loadedCount: r.recent.length };
+  if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
+  return { loaded: r.recent.length, error: r.error || null };
+}
+
+function writeSigLog() {
+  if (!_log.enabled || !_log.file) return;
+  try {
+    atomicWriteFileSync(_log.file, JSON.stringify({ v: 1, recent: _recent }), { mode: 0o600 });
+    _log.error = null;
+  } catch (e) {
+    _log.error = `검증 기록을 파일에 남기지 못했습니다(${String(e?.code || e?.message || e).slice(0, 80)}) — 재시작하면 이번 기록은 사라집니다`;
+    console.warn(`[upgrade] ${_log.error}`);
+  }
+}
+
 export function recordVerification(d) {
-  _last = { at: d.at, where: d.where, ok: d.ok, verified: d.verified, warned: !!d.warned, code: d.code || null,
-    reason: d.reason ? String(d.reason).slice(0, 400) : '', keyId: d.keyId || null, version: d.version || null, name: d.name || null, policy: d.policy };
+  let appVersion = null;
+  try { appVersion = currentVersion(); } catch { /* 버전을 못 읽어도 기록은 남긴다 */ }
+  const e = sanitizeSigEntry({ ...d, appVersion });
+  if (e) {
+    _recent = [e, ..._recent].slice(0, SIG_LOG_MAX);
+    writeSigLog();
+  }
   if (d.verified) _counts.verified += 1; else if (d.ok) _counts.warned += 1; else _counts.rejected += 1;
 }
-export function _resetSignatureStatusForTest() { _last = null; _counts = { verified: 0, warned: 0, rejected: 0 }; }
+export function _resetSignatureStatusForTest() {
+  _recent = []; _counts = { verified: 0, warned: 0, rejected: 0 };
+  _log = { enabled: false, file: null, error: null, corruptKept: null, loadedCount: 0 };
+}
 
 function guidance(code) {
   if (code === 'no-trusted-keys') return ` 이 설치본에 신뢰 공개키가 없습니다 — 공개키가 들어간 릴리스로 업그레이드하거나 호스트 파일 ${HOST_KEYS_NAME} 에 키를 두세요(${DOC}).`;
@@ -196,7 +283,13 @@ export function signatureStatus() {
     ready: !t.fatal && t.activeCount > 0,
     fatal: t.fatal, errors: t.errors.slice(0, 5),
     sources: t.sources,
-    last: _last, counts: { ..._counts },
+    // v2.736.1: 기록은 재시작을 넘어 남는다 — beforeStart 는 '이 프로세스가 시작되기 전(대개 업그레이드 직전)에 남긴 기록' 이다.
+    last: _recent[0] ? { ..._recent[0], beforeStart: _recent[0].at < PROCESS_STARTED_AT } : null,
+    recent: _recent.slice(0, 5).map((e) => ({ ...e, beforeStart: e.at < PROCESS_STARTED_AT })),
+    counts: { ..._counts },
+    currentVersion: (() => { try { return currentVersion(); } catch { return null; } })(),
+    processStartedAt: PROCESS_STARTED_AT,
+    log: { enabled: _log.enabled, error: _log.error, corruptKept: _log.corruptKept },
   };
 }
 
