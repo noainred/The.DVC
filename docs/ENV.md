@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **649개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **650개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-14)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-15)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -393,13 +393,14 @@
 |---|---|---|---|
 | `NFS_MOUNT_BASE` | `'/mnt/portal-nfs'` |  | system/nfsMounts.js |
 
-## 업그레이드 (7)
+## 업그레이드 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `INVOCATION_ID` |  |  | upgrade/upgrade.js |
 | `NOTIFY_SOCKET` |  |  | upgrade/upgrade.js |
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
+| `UPGRADE_CHECK_TIMEOUT_MS` | `60000` |  | upgrade/versionsDoc.js |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_SIGNATURE_POLICY` |  |  | upgrade/signature.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
@@ -833,4 +834,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 649
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 84 / 650

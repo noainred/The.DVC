@@ -16,7 +16,7 @@ import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { readBytesCapped } from '../util/readBytesCapped.js';
 import { readJsonCapped, readTextCapped } from '../util/readCapped.js';
 // v2.730(검토 I-08·S-10): 메타데이터 형식·상한 + 배포자 서명(원격 다운로드 경로 — 여기 받은 파일은 /dl 로 엣지에 나가고 설치에 쓰인다)
-import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets } from './versionsDoc.js';
+import { VERSIONS_MAX_BYTES, validateVersionsDoc, deadlineSignal, scrubUrlSecrets, META_FETCH_TIMEOUT_MS, attemptTimeoutMs, metaTimeoutReason } from './versionsDoc.js';
 import { decideSignature, signatureSummary } from './signature.js';
 import { MANIFEST_MAX_BYTES, MANIFEST_NAME_RE, manifestNameFor } from './signatureCore.js';
 
@@ -34,35 +34,41 @@ export async function fetchRemoteVersions(baseUrl) {
   // 메타데이터는 차단, 사내 RFC1918·공개 미러는 허용(업그레이드 remoteBase 와 동일 정책).
   const block = await ssrfBlockReasonResolved(`${trim(base)}/versions.json`);
   if (block) throw new Error(`패키지 저장소 주소가 차단되었습니다: ${block}`);
-  // v2.730(검토 I-08): fetch·본문 읽기를 한 전체 시한(20초)으로 묶고, 상한(VERSIONS_MAX_BYTES — 업그레이드 확인과 같은 값)과
+  // v2.730(검토 I-08): fetch·본문 읽기를 한 전체 시한으로 묶고, 상한(VERSIONS_MAX_BYTES — 업그레이드 확인과 같은 값)과
   //   형식(항목 수·문자열·필드 타입)을 upgrade.js 와 **같은 함수**로 검사한다. 선언하지 않은 필드는 버린다.
-  const dl = deadlineSignal(20000);
+  //   v2.736.3: 시한은 업그레이드 확인과 같은 값(META_FETCH_TIMEOUT_MS)이고 시도마다 그 1/3 로 재시도한다.
+  const totalMs = META_FETCH_TIMEOUT_MS;
+  const attemptMs = attemptTimeoutMs(totalMs);
+  const dl = deadlineSignal(totalMs);
+  let attempts = 1;
+  let phase = 'headers';
   try {
     // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
-    const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2, signal: dl.signal });
+    const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: attemptMs, retries: 2, signal: dl.signal, onRetry: () => { attempts += 1; } });
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`versions.json HTTP ${res.status}`); }
+    phase = 'body';
     // v2.632(감사 AX3-06): 저장소 응답은 상한까지만 읽는다(외부 응답 .json() 금지 — v2.604 규약).
     const raw = await readJsonCapped(res, VERSIONS_MAX_BYTES, 'versions.json');
     const v = validateVersionsDoc(raw);
     if (!v.ok) throw new Error(v.reason);
     return v.doc;
   } catch (e) {
-    if (dl.aborted()) throw new Error('versions.json 을 전체 시한(20초) 안에 다 받지 못해 중단했습니다');
+    if (dl.aborted() || e?.name === 'TimeoutError') throw new Error(metaTimeoutReason('versions.json', { totalMs, attemptMs, attempts, phase }));
     if (e instanceof SyntaxError) throw new Error('versions.json 형식 오류 — JSON 이 아닙니다(잘렸거나 손상됐습니다)');
     throw new Error(scrubUrlSecrets(e?.message || e));
   } finally { dl.clear(); }
 }
 
-/** 원격 manifest(상한 64KB·전체 시한 30초). 404 → missing, 그 밖 실패 → reason, 상한 초과 → malformed. */
+/** 원격 manifest(상한 64KB·전체 시한 META_FETCH_TIMEOUT_MS — v2.736.3 전엔 30초). 404 → missing, 그 밖 실패 → reason, 상한 초과 → malformed. */
 async function fetchPackageManifest(url) {
-  const dl = deadlineSignal(30000);
+  const dl = deadlineSignal(META_FETCH_TIMEOUT_MS);
   try {
-    const res = await resilientFetch(url, { dispatcher: upgradeAgent, timeoutMs: 30000, retries: 2, signal: dl.signal });
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, timeoutMs: attemptTimeoutMs(META_FETCH_TIMEOUT_MS), retries: 2, signal: dl.signal });
     if (res.status === 404) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, missing: true }; }
     if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { text: null, reason: `서명 manifest 를 받지 못했습니다(HTTP ${res.status})` }; }
     return { text: await readTextCapped(res, MANIFEST_MAX_BYTES + 1, 'manifest') };
   } catch (e) {
-    if (dl.aborted()) return { text: null, reason: '서명 manifest 를 시한(30초) 안에 받지 못했습니다' };
+    if (dl.aborted() || e?.name === 'TimeoutError') return { text: null, reason: `서명 manifest 를 시한(${Math.round(META_FETCH_TIMEOUT_MS / 1000)}초) 안에 받지 못했습니다` };
     if (/상한/.test(String(e?.message || ''))) return { text: null, malformed: `manifest 가 상한(${MANIFEST_MAX_BYTES}바이트)보다 큽니다` };
     return { text: null, reason: `서명 manifest 를 받지 못했습니다: ${scrubUrlSecrets(e?.message || e)}` };
   } finally { dl.clear(); }

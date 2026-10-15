@@ -46,7 +46,8 @@ export default function AgentDeploy() {
     .catch((e) => setInstallerErr(e || new Error('설치 패키지 조회 실패')));
   // v2.621(감사 WEB-07): 폼은 웹 지정값만 채운다(기본값은 placeholder) — 유효값으로 채워 두 칸을 다 보내면 저장 경로만
   //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
-  const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
+  // v2.736.3: 서버가 저장소 versions.json 을 최대 60초(UPGRADE_CHECK_TIMEOUT_MS) 기다린다 — 기본 GET 시한 20초 × 재시도면 그 사이 같은 조회가 3번 겹친다.
+  const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
   const savePkgCfg = async () => {
     const r = await putJson('/admin/packages/settings', pkgSavePayload(pkgCfg)).catch((e) => ({ ok: false, reason: e.message }));
     setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });

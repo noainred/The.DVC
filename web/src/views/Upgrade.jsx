@@ -5,7 +5,7 @@ import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.
 import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
-import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText } from './upgradeAutoText.js';
+import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel } from './upgradeAutoText.js';
 
 // 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
 const baseKey = (v) => {
@@ -229,9 +229,9 @@ export default function Upgrade() {
               {check.watch && <Row label="감시 폴더">{check.watch.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
                 : <span className="muted">최신</span>}</Row>}
-              {check.remote && <Row label="원격(GitHub)">{check.remote.available
+              {check.remote && <Row label={remoteSourceLabel(check.remote.source)}>{check.remote.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
-                : <span className="muted">{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
+                : <span className="muted" style={{ whiteSpace: 'normal' }}>{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
               {/* v2.730 I-08: 원격 확인이 실패했을 때 직전 정상 확인(참고용 — 설치에는 쓰지 않는다). */}
               {check.remote && remoteLastGoodText(check.remote) && (
                 <div className="muted" style={{ fontSize: 11.5, padding: '4px 0', whiteSpace: 'normal' }}>{remoteLastGoodText(check.remote)}</div>

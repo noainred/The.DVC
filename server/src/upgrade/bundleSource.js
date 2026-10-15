@@ -74,7 +74,7 @@ export async function resolveBundleBytes(settings) {
 
   // 2) download the latest from the remote source
   if (s.remoteBase) {
-    const info = await checkRemote(s.remoteBase, '0.0.0', { token: s.token, timeout: 15_000 });
+    const info = await checkRemote(s.remoteBase, '0.0.0', { token: s.token }); // v2.736.3: 화면 확인과 같은 시한(META_FETCH_TIMEOUT_MS)
     if (info.ok && info.downloadUrl) {
       const res = await resilientFetch(info.downloadUrl, {
         dispatcher: upgradeAgent,
@@ -89,7 +89,7 @@ export async function resolveBundleBytes(settings) {
         // 무결성 검증(checkRemote가 versions.json에서 읽어온 sha256과 대조). 실패면 번들 없음으로 취급.
         if (!verifyBundleSha(bytes, info.sha256)) return null;
         // v2.730(S-10): sha 는 같은 채널(versions.json)이다 — 배포자 서명을 확인한 뒤에만 수집기로 민다.
-        const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token: s.token, timeout: 30_000 }) : { text: null, missing: true };
+        const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token: s.token }) : { text: null, missing: true };
         const sig = decideSignature({
           manifestText: man.text, bytes, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'bundle-source',
           unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,

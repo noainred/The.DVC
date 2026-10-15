@@ -182,3 +182,17 @@ export function actionMsg(action, r) {
   }
   return { label, ok: false, text: x.reason || '실패' };
 }
+
+/**
+ * v2.736.3: 확인 결과 '원격' 행의 라벨 — 예전에는 언제나 '원격(GitHub)' 이라 사내 미러(Nexus 등)를 쓰는 현장에서 오류 원인을
+ *   GitHub 로 오해하게 했다(사용자 캡처: 사내 저장소 주소인데 '원격(GitHub) 오류'). 확인 결과의 `source`(계정·쿼리를 뗀 주소)로 정한다.
+ *   GitHub 가 아니면 '원격 소스' 다(주소는 설정 칸에 이미 보인다 — 라벨은 줄바꿈하지 않아 긴 호스트 이름이 400px 에서 값 칸을 밀어낸다).
+ *   주소를 못 읽어도 '원격 소스' 다(GitHub 라고 지어내지 않는다).
+ */
+export function remoteSourceLabel(source) {
+  let host = '';
+  try { host = new URL(String(source || '')).hostname.toLowerCase(); } catch { host = ''; }
+  if (!host) return '원격 소스';
+  if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com')) return '원격(GitHub)';
+  return '원격 소스';
+}
