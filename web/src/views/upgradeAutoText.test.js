@@ -227,7 +227,7 @@ describe('v2.737 실행 중 스캔 — 자동 적용 대기 · 수동 적용 경
     const kinds = new Set();
     for (const f of ['isidu/poller.js', 'idrac/scanPoller.js', 'ipam/scanPoller.js', 'agent/ipScanWorker.js']) {
       const src = fs.readFileSync(path.resolve(HERE, '../../../server/src', f), 'utf8');
-      for (const m of src.matchAll(/(?:const (?:KIND|JKIND) = |scanStarted\()'([a-z-]+)'/g)) kinds.add(m[1]);
+      for (const m of src.matchAll(/(?:const (?:KIND|JKIND) = |(?:journalScanStarted|scanStarted)\()'([a-z-]+)'/g)) kinds.add(m[1]);
     }
     expect([...kinds].sort()).toEqual(Object.keys(SCAN_KIND_TEXT).sort());
   });
