@@ -492,13 +492,58 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase, allowed = null, l
   return sheets;
 }
 
-function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null, ledger = null } = {}) {
+/*
+ * v2.741(감사 LEFT-01 — 재현): 엑셀 내보내기(`/tools/ipam.xlsx`)는 원장을 양보판으로 만든 뒤(v2.740 F-06) 시트 조립을 **동기로** 했다
+ *   (합성 /24 400개 · VM 5만 행: 약 350ms 동안 포탈 전체가 멈췄다). 계산은 생성기(`subnetSheetsGen`) 하나이고 두 판이 그것을 돈다 —
+ *   동기판(`buildSubnetSheets` — /sheet 단일 /24·옛 호출)은 끝까지 한 번에, 양보판(`buildSubnetSheetsAsync`)은 `sliceMs` 마다 양보한다.
+ *   결과는 같다(테스트가 같은 입력으로 대조한다). 원장 계산의 ipamRowsGen 과 같은 모양이다 — 시트 조립을 고칠 때 생성기 하나만 고칠 것.
+ */
+/**
+ * 양보판 시트 조립 — 결과는 `buildSubnetSheets(snap, opts)` 와 같다.
+ * @param {object} [opts] buildSubnetSheets 와 같은 인자 +
+ * @param {() => boolean} [opts.shouldCache] 끝난 뒤 거짓이면 결과를 돌려주되 캐시에 넣지 않는다(그 사이 새 스냅샷 세대가 게시됐다)
+ * @param {number} [opts.sliceMs=10] 이만큼 연속으로 돌았으면 양보
+ * @param {object} [opts.stats] 채워 준다 — { yields }
+ */
+export async function buildSubnetSheetsAsync(snap, { vcenterId, onlyBase, allowed = null, ledger = null, cache = true, shouldCache, sliceMs, stats } = {}) {
+  const st = stats && typeof stats === 'object' ? stats : {};
+  st.yields = 0;
+  const rowsKey = _ipamKey(snap, vcenterId || '', allowed);
+  const ck = `${rowsKey}|b:${onlyBase || ''}`;
+  const hit = _sheetCache.get(ck);
+  if (hit) return hit;
+  const okCache = () => cache !== false && (typeof shouldCache !== 'function' || shouldCache());
+  // 넘겨받은 원장이 지금 입력의 것이 아니면(계산 도중 관리 입력이 바뀌었다) 동기 buildIpamRows 대신 양보판으로 다시 만든다.
+  const led = ledger && ledger[LEDGER_KEY] === rowsKey ? ledger
+    : await buildIpamRowsShared(snap, vcenterId || '', allowed, typeof shouldCache === 'function' ? { shouldCache } : {});
+  const maybeYield = createYielder(Number.isFinite(sliceMs) && sliceMs > 0 ? sliceMs : 10);
+  const it = subnetSheetsGen(snap, { vcenterId, onlyBase, allowed, ledger: led });
+  let step = it.next();
+  while (!step.done) { await maybeYield(); step = it.next(); }
+  st.yields = maybeYield.count();
+  const again = _sheetCache.get(ck); // 그 사이 동기판이 같은 입력으로 이미 만들었다 — 한 벌만 남긴다
+  if (again) return again;
+  if (okCache()) putGenerationCache(_sheetCache, ck, step.value);
+  return step.value;
+}
+
+function buildSubnetSheetsUncached(snap, opts = {}) {
+  const it = subnetSheetsGen(snap, opts);
+  let step = it.next();
+  while (!step.done) step = it.next();
+  return step.value;
+}
+
+/** 시트 조립 생성기 — 행 색인 2,048행마다·시트마다 yield 한다(양보 지점일 뿐 결과에는 영향이 없다). 반환값 = 시트 배열. */
+function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = null } = {}) {
   const scopeVc = vcenterId || ''; // 아래 셀 루프에서 vcenterId가 가려지므로(shadow) 정책 매칭용으로 보존(정규화)
   const { rows } = ledger || buildIpamRows(snap, vcenterId, allowed);
   const byIp = new Map();
   const bases = new Set();
   const basePrefix = onlyBase ? `${onlyBase}.` : null; // 단일 시트 요청은 그 /24만 인덱싱
+  let tick = 0;
   for (const r of rows) {
+    if ((++tick & 2047) === 0) yield;
     if (r.ipNum == null) continue;
     if (basePrefix && !r.ip.startsWith(basePrefix)) continue;
     const p = r.ip.split('.');
@@ -512,7 +557,9 @@ function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null, 
 
   const annotations = getAnnotations();
   const allPolicies = getPolicies().filter((p) => p.enabled !== false);
-  const sheets = sortedBases.map((base) => {
+  const sheets = [];
+  for (const base of sortedBases) {
+    yield;
     const sheetRows = [];
     let used = 0;
     // 이 /24를 (일부라도) 덮는 정책 목록 — 시트 헤더 표시 + 빈 셀 오버레이용.
@@ -563,11 +610,11 @@ function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null, 
       const ann = annotations[ip];
       sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
-    return {
+    sheets.push({
       subnet: `${base}.0/24`, base, used, rows: sheetRows,
       policies: sheetPolicies.map((p) => ({ id: p.id, spec: p.spec, status: p.status, label: p.label, priority: p.priority })),
-    };
-  });
+    });
+  }
   return sheets;
 }
 

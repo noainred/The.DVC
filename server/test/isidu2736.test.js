@@ -360,7 +360,7 @@ test('⑤ isidu-data — 배정된 대상만 적재 · 남의 대상·형식 오
   assert.equal(b.dropped.notOwned, 1, '남의 대상 id 는 버린다');
   assert.equal(b.dropped.bad, 1);
   assert.equal(b.dropped.entries, 1, "이름에 '/' 가 든 폴더는 버린다");
-  assert.equal(b.dropped.futureClamped, 1);
+  assert.equal(b.clamped, 1, 'v2.741 EDGE-01 — 잘라서 받은 것은 거절(dropped)이 아니라 clamped 로 따로 밝힌다');
   const lat = await db.latestOf('', edgeTargetId);
   assert.equal(lat.okScan.node, 'edge-a', '누가 조사했는지 남긴다');
   assert.ok(lat.lastTry.ts <= Date.now(), '미래 시각은 수신 시각으로 자른다');

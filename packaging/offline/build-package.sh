@@ -113,11 +113,12 @@ cp -r "$REPO_ROOT/server/config" "$APP/server/config"
 # 보안(L-9, 2026-09-12): 빌드 호스트의 '런타임' config(개발 중 생성된 DB·시크릿·수집 설정)가
 # 패키지에 섞여 나가지 않게, 스테이징 복사본에서 예제(*.example.json)를 제외한 config 산출물을 지운다.
 # 실 설정은 설치 시 CONFIG_DIR(/etc/vmware-portal)에서 읽으므로 패키지에는 예제만 있으면 된다.
+# v2.741(감사 INJPKG-05): 거부 목록이 아니라 **허용 목록**이다 — 예제(*.example.json)만 남기고 나머지(점 파일·하위 폴더·
+#   원자 쓰기 임시 파일 .*.tmp-*·*.bak·*.conf·rma-*.env·이름 없는 새 확장자)는 전부 지운다. 거부 목록은 나열하지 않은 확장자를
+#   그대로 실었다. 저장소에 추적되는 server/config 파일은 *.example.json 뿐이다(test/audit2741l.test.js 가 git ls-files 로 고정).
+#   두 빌드(offline·Windows)의 식은 같아야 한다(test/audit2597.test.js 가 대조).
 find "$APP/server/config" -mindepth 1 -maxdepth 1 \
-  \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.ndjson' \
-     -o -name 'ipam-scan.json' -o -name 'portal.env' -o -name 'secrets-key' -o -name 'auth-secret' \
-     -o -name '*.txt' -o -name '*.corrupt.*' -o -type d \
-     -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
+  ! -name '*.example.json' -exec rm -rf {} + 2>/dev/null || true
 # v2.597(감사 DEPS2597-01): Windows 빌드(v2.591 P2)와 같은 식 — initial-admin-password.txt·*.corrupt.*·backups/ 등
 #   하위 폴더가 남지 않게. 두 빌드의 find 식은 같아야 한다(test/audit2597.test.js 가 대조).
 cp "$REPO_ROOT/server/package.json" "$REPO_ROOT/server/package-lock.json" "$APP/server/"

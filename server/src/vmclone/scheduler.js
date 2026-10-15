@@ -8,7 +8,7 @@
  *  - 수동 실행(runNow API)도 runner.enqueueRun 하나를 공유 — 스케줄과 수동이 같은 직렬 큐.
  */
 
-import { listJobs, isDue } from './store.js';
+import { listJobs, isDue, recoveryDue, markInterruptedRuns } from './store.js';
 import { enqueueRun, runnerStatus } from './runner.js';
 import { ensureVmCloneDemo, isVmCloneDemoJob } from '../mock/demo/vmclone.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.717: 데모(mock) 잡 시드(비어 있을 때만)
@@ -20,14 +20,22 @@ let _lastTick = 0;
 let _demoSkipped = { lastCount: 0, total: 0, at: null, reason: '' };
 let _demoWarned = false;
 
-/** 만기 잡을 실행할 것 / 건너뛸 데모 잡으로 나눈다(순수 — mock 판정은 인자로). */
+/**
+ * 만기 잡을 실행할 것 / 건너뛸 데모 잡으로 나눈다(순수 — mock 판정은 인자로).
+ * v2.741(감사 TIMING-01): 재시작으로 중단된 실행이 남은 잡(store.recoveryDue)도 실행한다 — 실행기가 새 스냅샷을 만들기 전에 남은 스냅샷을
+ *   지우고 다시 실행한다. 그런 잡은 `resume` 에 id 를 담는다(정규 스케줄 만기가 함께면 정규 실행이다 — 재실행 상한을 적용하지 않는다).
+ */
 export function dueJobsOf(jobs, now, { mock = isMockMode() } = {}) {
-  const run = [], skipped = [];
+  const run = [], skipped = [], resume = [];
   for (const j of jobs || []) {
-    if (!isDue(j, now)) continue;
-    if (!mock && isVmCloneDemoJob(j)) skipped.push(j); else run.push(j);
+    const due = isDue(j, now);
+    const rec = !due && recoveryDue(j, now);
+    if (!due && !rec) continue;
+    if (!mock && isVmCloneDemoJob(j)) { skipped.push(j); continue; }
+    run.push(j);
+    if (rec) resume.push(j.id);
   }
-  return { run, skipped };
+  return { run, skipped, resume };
 }
 
 function tick() {
@@ -37,8 +45,8 @@ function tick() {
   try {
     const now = Date.now();
     _lastTick = now;
-    const { run, skipped } = dueJobsOf(listJobs(), now);
-    for (const j of run) enqueueRun(j.id, 'schedule');
+    const { run, skipped, resume } = dueJobsOf(listJobs(), now);
+    for (const j of run) enqueueRun(j.id, resume.includes(j.id) ? 'resume' : 'schedule');
     if (skipped.length) {
       if (!_demoWarned) { _demoWarned = true; console.warn(`[vmclone] 데이터 소스가 live 라 데모 복제 잡 ${skipped.length}개를 실행하지 않습니다 — 필요 없으면 VM 복제 화면에서 삭제하세요.`); }
       _demoSkipped = { lastCount: skipped.length, total: _demoSkipped.total + skipped.length, at: now, reason: 'live 모드 — 데모 잡은 실행하지 않습니다' };
@@ -48,6 +56,11 @@ function tick() {
 
 export function startVmCloneScheduler() {
   if (_timer) return;
+  // v2.741(감사 TIMING-01): 이전 프로세스(업그레이드·재시작 전)가 끝내지 못한 실행을 lastRun 에 남긴다 — 첫 틱(60초)이 남은 스냅샷을 정리하고 다시 실행한다.
+  try {
+    const n = markInterruptedRuns();
+    if (n) console.warn(`[vmclone] 재시작으로 중단된 복제 실행 ${n}개 — 켜져 있는 잡은 다음 확인(약 1분 뒤)에 남은 스냅샷을 정리하고 다시 실행합니다(꺼진 잡은 수동 실행 때 정리)`);
+  } catch (e) { console.warn(`[vmclone] 중단된 실행 확인 실패: ${e?.message || e}`); }
   _timer = setInterval(tick, 60_000);
   setTimeout(() => ensureVmCloneDemo().catch(() => null), 30_000).unref?.(); // 데모: 첫 틱(60초)을 기다리지 않게
   _timer.unref?.(); // 테스트/종료 시 프로세스를 붙잡지 않게

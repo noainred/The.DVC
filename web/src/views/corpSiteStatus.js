@@ -43,8 +43,78 @@ export function corpSiteStatus(s, now = Date.now()) {
   return { countable: false, mark: '연결 실패', title: '이 vCenter 에 연결할 수 없습니다 — 호스트·VM 수를 모릅니다(0대가 아닙니다)' };
 }
 
+/** 부분 합 표지 — 세지 못한 개수가 있으면 '최소 · 미수집 N곳 제외', 없으면 null(KPI 메타·합계 행이 같은 문구를 쓴다). */
+export function partialNote(missing) {
+  const n = Number(missing) || 0;
+  return n > 0 ? `최소 · 미수집 ${n}곳 제외` : null;
+}
+
 /** 합계 행의 부분 합 표기 — 세지 못한 행이 있으면 개수를 밝힌다(조용한 제외 금지). */
 export function corpTotalLabel(rows) {
   const miss = (Array.isArray(rows) ? rows : []).filter((r) => r && r.countable === false).length;
-  return miss > 0 ? `합계(최소 · 미수집 ${miss}곳 제외)` : '합계';
+  const note = partialNote(miss);
+  return note ? `합계(${note})` : '합계';
+}
+
+/** 부분 합 표지의 title — 왜 빠졌는지(0 으로 더하지 않았다)를 말한다. title 속성이라 `**` 를 쓰지 않는다. */
+export const PARTIAL_TITLE = '첫 수집 중·비활성·연결 실패 vCenter 는 호스트·VM 수를 모릅니다 — 0 으로 더하지 않고 합계에서 뺐습니다';
+
+/**
+ * v2.741(WEB-01): Platform '전체 호스트·전체 VM' KPI 의 합계 — 셀 수 있는 vCenter(corpSiteStatus().countable)만 더한다.
+ * 롤업은 첫 수집 중·비활성·이월 값 없는 연결 실패 vCenter 에 hosts:0·vms:0 을 주므로 그대로 더하면 부분 합을 합계처럼 보인다.
+ * 하나도 셀 수 없으면(전부 미수집) 값은 null('—') — 0 은 '없다' 는 거짓이다. 등록 0개면 0 그대로다(셀 것이 없는 것이다).
+ * `isIrs` 는 화면의 다빈치/IRS 분류 규칙(이름 판정)을 그대로 받는다 — 규칙을 여기에 복제하지 않는다.
+ */
+export function countableTotals(sites, { isIrs = () => false, now = Date.now() } = {}) {
+  const list = Array.isArray(sites) ? sites : [];
+  const t = { hosts: 0, vms: 0, irsHosts: 0, irsVms: 0, counted: 0, missing: 0 };
+  for (const s of list) {
+    if (!s || !corpSiteStatus(s, now).countable) { t.missing += 1; continue; }
+    const h = Number(s.metrics?.hosts) || 0;
+    const v = Number(s.metrics?.vms) || 0;
+    t.counted += 1; t.hosts += h; t.vms += v;
+    if (isIrs(s)) { t.irsHosts += h; t.irsVms += v; }
+  }
+  const none = t.counted === 0 && t.missing > 0;
+  return {
+    hosts: none ? null : t.hosts,
+    vms: none ? null : t.vms,
+    irsHosts: none ? null : t.irsHosts,
+    irsVms: none ? null : t.irsVms,
+    davinciHosts: none ? null : t.hosts - t.irsHosts,
+    davinciVms: none ? null : t.vms - t.irsVms,
+    counted: t.counted,
+    missing: t.missing,
+    note: partialNote(t.missing),
+  };
+}
+
+/**
+ * v2.741(WEB-01): 개요 '법인별 VM 분포' 막대·'리전별 워크로드 비중' 파이의 값 — 셀 수 없는 vCenter 는 null 이다
+ * (막대 없음 — 0 막대는 'VM 이 없다' 는 거짓). 파이는 셀 수 있는 vCenter 만 더하고 뺀 곳 수를 밝힌다.
+ * `groupOf` 는 화면의 리전 묶음(execOverviewText.chartGroup)을 그대로 받는다.
+ */
+export function corpVmChart(sites, { groupOf = () => 'Unknown', now = Date.now() } = {}) {
+  const list = Array.isArray(sites) ? sites : [];
+  let missing = 0;
+  const groups = {};
+  const bars = list.map((s) => {
+    const ok = !!s && corpSiteStatus(s, now).countable;
+    if (!ok) missing += 1;
+    else {
+      const k = groupOf(s);
+      groups[k] = (groups[k] || 0) + (Number(s.metrics?.vms) || 0);
+    }
+    return {
+      name: s?.id || s?.name,
+      VM: ok ? (Number(s.metrics?.vms) || 0) : null,
+      On: ok ? (Number(s.metrics?.vmsPoweredOn) || 0) : null,
+      uncounted: !ok,
+    };
+  });
+  return {
+    bars, groups, missing,
+    note: missing > 0 ? `미수집 ${missing}곳은 막대를 그리지 않았습니다(0대가 아닙니다)` : null,
+    pieNote: missing > 0 ? `미수집 ${missing}곳의 VM 은 비중에서 뺐습니다(수를 모릅니다)` : null,
+  };
 }

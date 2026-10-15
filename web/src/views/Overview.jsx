@@ -11,7 +11,7 @@ import { vcStatusMeta } from '../console/consoleData.js'; // v2.618 ARCH-1
 import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
 import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.631(감사 WEB2631-02)
-import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
+import { corpSiteStatus, corpVmChart } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03) · v2.741(WEB-01) 차트도 같은 판정
 import { countText, capText, cardMeta, firstCollectNotice, powerTotalKw, gpuCardValue } from './overviewCardsText.js'; // v2.664 카드 8장 · v2.675 첫 수집 안내
 
 import { chartGroup, REGION_ORDER } from './execOverviewText.js'; // v2.670 리전 차트 묶음(region-chart-change.md)
@@ -59,18 +59,16 @@ export default function Overview({ onSelectSite, onGotoTab, modeToggle = null })
   const fmt = (n) => n?.toLocaleString('en-US');
 
   // VM 분포 by 법인(vCenter)
-  const corpVmData = sites.map((s) => ({
-    name: s.id || s.name,
-    VM: s.metrics?.vms || 0,
-    On: s.metrics?.vmsPoweredOn || 0,
-  }));
+  // v2.741(WEB-01): 첫 수집 중·비활성·연결 실패 vCenter 는 막대를 그리지 않는다(값 null) — 롤업의 vms:0 을 0 막대로 그리면
+  //   'VM 이 없다' 는 거짓이다. 판정은 법인 표와 같은 corpSiteStatus(countable) 하나다. 리전 파이도 같은 기준으로 센다.
+  const vmChart = corpVmChart(sites, { groupOf: chartGroup });
+  const corpVmData = vmChart.bars;
   const capacityData = [
     { name: 'CPU', used: cpuPct },
     { name: 'Memory', used: memPct },
     { name: 'Storage', used: stoPct },
   ];
-  const grp = {};
-  sites.forEach((s) => { const k = chartGroup(s); grp[k] = (grp[k] || 0) + (s.metrics?.vms || 0); });
+  const grp = vmChart.groups;
   const osPie = [...REGION_ORDER, ...Object.keys(grp).filter((k) => !REGION_ORDER.includes(k))]
     .filter((k) => grp[k] > 0)
     .map((k) => ({ name: k, value: grp[k], fill: REGION_COLORS[k] || '#64748b' }));
@@ -232,12 +230,15 @@ export default function Overview({ onSelectSite, onGotoTab, modeToggle = null })
               <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
               <XAxis dataKey="name" stroke="#8b9bb4" fontSize={10} interval={0} angle={-30} textAnchor="end" height={60} />
               <YAxis stroke="#8b9bb4" fontSize={12} />
-              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} />
+              {/* filterNull=false — 미수집(null) 항목도 툴팁에 남겨 '0대' 가 아니라 '미수집' 이라고 말한다(기본값은 null 항목을 지운다). */}
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }}
+                filterNull={false} formatter={(v) => (v == null ? '미수집(0대가 아님)' : v)} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="VM" fill="#334b7a" radius={[4, 4, 0, 0]} />
               <Bar dataKey="On" fill="#3b82f6" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          {vmChart.note && <div className="muted" data-partial-note="" style={{ fontSize: 11.5, marginTop: 4 }}>{vmChart.note}</div>}
         </div>
 
         <div className="card">
@@ -289,6 +290,7 @@ export default function Overview({ onSelectSite, onGotoTab, modeToggle = null })
               <Legend wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
+          {vmChart.pieNote && <div className="muted" data-partial-note="" style={{ fontSize: 11.5, marginTop: 4 }}>{vmChart.pieNote}</div>}
         </div>
       </div>
     </div>

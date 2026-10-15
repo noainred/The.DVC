@@ -61,17 +61,18 @@ async function _pull() {
       if (keyCreated) import('../isidu/push.js').then((m) => m.pushIsiduNow()).catch(() => {});
     }
     const wants = Array.isArray(body?.runNow) ? body.runNow.filter((x) => typeof x === 'string').slice(0, 5) : [];
-    let started = null;
+    let started = null; let queued = null;
     if (wants.length) {
       // runNow 는 시작만 하고 기다리지 않는다(du 는 수십 분) — 시작한 id 만 받아 둔다(원격 실행 응답이 그것을 말한다).
+      // v2.741 TIMING-02: 동시 실행 상한을 넘는 요청은 엣지 대기열(queued)에 들어가 앞 조사가 끝나면 차례로 시작한다.
       try {
         const r = await runNow(wants, { trigger: 'central' });
-        started = r.started;
+        started = r.started; queued = r.queued || [];
         if (r.notHere.length) console.warn(`[isidu-config] 중앙 요청 수집 중 이 엣지에 없는 대상 ${r.notHere.length}개 — 대상 사본이 아직 갱신되지 않았을 수 있습니다`);
       } catch (e) { console.warn(`[isidu-config] 중앙 요청 수집 실패: ${e.message}`); }
     }
-    _last = { at: Date.now(), ok: true, count: targets.length, ...(applied ? { applied: applied.applied, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }), ...(keyCreated ? { keyCreated: true } : {}), runRequested: wants.length };
-    return { ok: true, count: targets.length, runRequested: wants.length, started: started || [] };
+    _last = { at: Date.now(), ok: true, count: targets.length, ...(applied ? { applied: applied.applied, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }), ...(keyCreated ? { keyCreated: true } : {}), runRequested: wants.length, ...(queued?.length ? { runQueued: queued.length } : {}) };
+    return { ok: true, count: targets.length, runRequested: wants.length, started: started || [], queued: queued || [] };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };
     if (_log('pull', e.message)) console.warn(`[isidu-config] 중앙 대상 pull 실패: ${e.message}`);

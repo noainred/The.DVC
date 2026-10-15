@@ -193,7 +193,7 @@ test('C3-01 ② 정지 전 첫 거부: 한 요청에서 vCenter 당 실패 로�
 test('C3-01 ③ 자격증명 거부가 아닌 실패는 멈추지 않는다 · 섞인 요청은 정지 vCenter 만 비운다', async () => {
   let r = await call('g', 'POST', '/api/tools/waste/spark', { vmIds: vmIds('vc-g'), type: 'mem' });
   assert.equal(r.status, 200);
-  assert.equal(r.logins, N, `로그인은 통하고 성능 조회만 실패 — VM 마다 시도는 예전대로: ${r.logins}`);
+  assert.equal(r.logins, 1, `로그인은 통하고 성능 조회만 실패 — v2.741 LEFT-03 부터 vCenter 당 로그인 1회: ${r.logins}`);
   assert.deepEqual(r.j.authStopped || {}, {}, '정지로 기록하지 않는다');
   assert.equal(attempts('vc-g'), null);
 

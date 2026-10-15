@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **654개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **658개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-15)
@@ -348,7 +348,7 @@
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
 
-## 수집 서버 (7)
+## 수집 서버 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -359,6 +359,7 @@
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` |  |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
+| `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
 ## 스토리지 수집 (24)
 
@@ -368,11 +369,11 @@
 | `STORAGE_AREAS_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_AREAS_TIMEOUT_MS` | `300000` |  | storage/poller.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
-| `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
+| `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js, storage/collectors/isilonSsh.js |
 | `STORAGE_CLI_TIMEOUT_MS` |  |  | storage/collectors/cliSsh.js |
 | `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
-| `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/poller.js |
+| `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/collectors/isilonSsh.js 외 1 |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
@@ -739,7 +740,7 @@
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
 | `VC_TLS_REJECT_UNAUTHORIZED` |  | ✅ | config.js, idrac/ome.js 외 3 |
 
-## IP 관리 (10)
+## IP 관리 (12)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -753,6 +754,8 @@
 | `IPAM_WRITE_DEBOUNCE_MS` |  |  | ipam/scanStore.js |
 | `IPAM_WRITE_MIN_ROWS` | `500` |  | ipam/db.js |
 | `IPAM_WRITE_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/db.js |
+| `IPAM_XLSX_TIMEOUT_MS` | `600000` |  | ipam/excel.js |
+| `IPAM_XLSX_WORKER` | `'1'` |  | ipam/excel.js |
 
 ## LLM (4)
 
@@ -785,7 +788,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (33)
+## SAN 스위치 (34)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -794,9 +797,10 @@
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
 | `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
+| `SANSW_CLI_SESSION_BUDGET_MS` | `100000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_TIMEOUT_MS` |  |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CONCURRENCY` | `4` |  | sanswitch/poller.js |
-| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectRequests.js, sanswitch/poller.js |
+| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectRequests.js, sanswitch/collectors/fosSsh.js 외 1 |
 | `SANSW_HTTP_TIMEOUT_MS` |  |  | sanswitch/collectors/fosRest.js |
 | `SANSW_PERF_ACTIVITY_MAX` | `500` |  | sanswitch/perfActivityLog.js |
 | `SANSW_PERF_CONCURRENCY` | `2` |  | sanswitch/perfPoller.js |
@@ -838,4 +842,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 654
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 658

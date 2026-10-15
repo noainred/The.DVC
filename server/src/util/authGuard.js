@@ -64,10 +64,23 @@ export function isPeerRejectText(...texts) {
   return texts.some((t) => { const s = String(t || ''); return PEER_REJECT_MARKERS.some((m) => s.includes(m)); });
 }
 
+/**
+ * v2.741(감사 DEV-01): 숫자 401·403 은 **HTTP 상태 문맥이 붙어 있을 때만** 인증 실패다.
+ * 예전 `\b401\b|\b403\b` 는 숫자만 보고 문맥을 보지 않았다. 그런데 오류 문구에는 장비 주소와 명령 경로가 그대로 실린다 —
+ * `storage/collectors/netError.js describeFetchError` 는 모든 갈래에 `<host>:<port>` 를 붙이고, ssh2 의 이름 해석 실패는
+ * 호스트명을 싣고, 아이실론 du 시한 문구는 조사 경로를 싣는다. 그래서 호스트명 `unity-401.corp` 의 DNS 실패·시한 초과,
+ * 포트 401 의 연결 거부, 경로 `/ifs/data/proj-401` 의 du 시한이 전부 '인증 실패' 가 되어 **주기 수집이 영구 정지**됐다
+ * (규칙 4 위반 — 재현: 실제 PowerStore REST·Unity SSH·isidu 연결 시험). 그래서 숫자 앞뒤의 문맥을 요구한다.
+ * 받아들이는 꼴(이 저장소의 생산자가 실제로 쓰는 것): `HTTP 401` · `HTTP/1.1 403` · `401 Unauthorized` · `403 Forbidden` ·
+ * `status 401` · `status code: 403` · `-> 401`(Redfish·OME). 한국어 문구는 `인증 실패(401)` 처럼 낱말이 먼저 판정한다.
+ * ⚠ 문맥 앞뒤에 하이픈·점을 허용하지 말 것 — `unity-401`·`http-401.corp` 같은 호스트명이 다시 걸린다.
+ */
+const AUTH_STATUS_RE = /\bHTTP(?:\s+|\s*\/\s*\d(?:\.\d)?\s+)40[13]\b|\b40[13]\s+(?:Unauthorized|Forbidden|Authorization\s+Required)\b|\bstatus(?:\s*code)?(?:\s*[:=]\s*|\s+)40[13]\b|(?:->|→)\s*40[13]\b/i;
+const AUTH_WORD_RE = /인증 실패|authentication (?:\w+\s+){0,3}fail|client-authentication|permission denied|invalid (?:user|password|credential)|auth(?:entication)? (?:rejected|denied)/i;
+
 export function isAuthFailureText(...texts) {
   if (isPeerRejectText(...texts)) return false;
-  return texts.some((t) => /인증 실패|\b401\b|\b403\b|authentication (?:\w+\s+){0,3}fail|client-authentication|permission denied|invalid (?:user|password|credential)|auth(?:entication)? (?:rejected|denied)/i
-    .test(String(t || '')));
+  return texts.some((t) => { const s = String(t || ''); return AUTH_WORD_RE.test(s) || AUTH_STATUS_RE.test(s); });
 }
 
 /** 자격증명 지문 해시 — 바뀌면 자동 재개의 신호다(평문 미포함 — credFingerprint 규약). */

@@ -10,6 +10,7 @@ const clampPage = (l, o) => {
   return [Number.isFinite(li) && li > 0 ? Math.min(li, 50_000) : 200, Number.isFinite(oi) && oi > 0 ? Math.min(oi, Number.MAX_SAFE_INTEGER) : 0];
 };
 import fs from 'node:fs';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // v2.741(LEFT-13): NDJSON 폴백 재기록은 tmp → rename
 import path from 'node:path';
 import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
@@ -132,6 +133,13 @@ function initSqlite() {
     // v2.606(DB2606-01): MIN·MAX 를 한 쿼리에 두면 aggregate 2개라 인덱스를 통째로 훑는다(v2.550.3) — 단독으로 나눈다.
     const minTsStmt = db.prepare('SELECT MIN(ts) mn FROM events');
     const maxTsStmt = db.prepare('SELECT MAX(ts) mx FROM events');
+    // v2.741(DB-01): 검색 개수를 rowid 구간 조각으로 셀 때의 끝점 — 단독 aggregate(rowid 끝점 조회).
+    const minRowidStmt = db.prepare('SELECT MIN(rowid) m FROM events');
+    const maxRowidStmt = db.prepare('SELECT MAX(rowid) m FROM events');
+    // v2.741(DB-03): 사용 중 크기 판정 — 헤더 필드라 즉시 읽힌다.
+    const pageCountStmt = db.prepare('PRAGMA page_count');
+    const freelistStmt = db.prepare('PRAGMA freelist_count');
+    const pageSizeStmt = db.prepare('PRAGMA page_size');
     const rowCountStmt = db.prepare('SELECT COUNT(*) n FROM events');
     let metaCache = null;                       // { at, v } — 아래 meta() 주석 참조(v2.503)
     const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
@@ -343,6 +351,102 @@ function initSqlite() {
         return out.length > lim ? out.slice(0, lim) : out;
       },
       /**
+       * v2.741(감사 DB-01): 로그 화면 검색(검색어·심각도) — `query(f, limit, offset)` + `countCapped(f, cap)` 와 **같은 결과**
+       *   ({rows, total, capped})를 **조각 + 조각 사이 시간 기준 양보**로 만든다.
+       *   예전 라우트는 상한 COUNT 와 정렬 조회 두 문장을 기간 하한 없이 차례로 동기 실행했다 — 일치하는 행이 없는 검색어 한 번이
+       *   합성 180만 행에서 이벤트 루프를 7.3초 멈췄다(재현 — 무일치면 상한 COUNT 도 정렬 조회도 끝까지 훑는다).
+       *   ① 개수: 기간 하한이 없으면(또는 하한이 표의 첫 시각 이하면) **rowid 구간**(NOT INDEXED — 표를 순서대로 읽는다) 조각으로 상한까지
+       *      센다. 기간 하한이 있으면 그 기간만 ts 조각으로 센다(인덱스 범위 — 기간 밖은 읽지 않는다).
+       *   ② 행: ts 조각을 최신부터 거꾸로 읽는다 — 조각마다 상한 COUNT 로 OFFSET 을 건너뛰고, **보여 줄 행이 있는 조각에서만** 행을 읽는다.
+       *      정확한 개수를 알면(상한 미만) 그만큼 지나간 뒤 멈추고, 개수가 OFFSET 이하이면 행 조회를 하지 않는다(무일치 검색은 한 번만 훑는다).
+       *   조각은 겹치지 않고 최신부터 읽으므로 순서(ts DESC, rowid DESC)·내용은 한 문장 판과 같다(테스트가 대조). 맨 위 ts 조각은 위가
+       *   열려 있다(until 이 없으면 — vCenter 시계가 앞선 이벤트도 한 문장 판처럼 포함). ts 조각 수는 2,000 을 넘지 않게 넓힌다(queryAsync 규칙).
+       *   ⚠ 조각 사이에 수집이 행을 더하면 한 문장 판(스냅샷 하나)과 달리 조각마다 그 순간의 행을 읽는다 — OFFSET 페이징이 원래 요청마다
+       *   그런 것과 같은 수준이다.
+       * @returns {Promise<{rows:object[], total:number, capped:boolean, slices:number}>}
+       */
+      searchAsync: async (f = {}, limit = 200, offset = 0, { cap = COUNT_CAP, sliceMs = 3_600_000, rowidChunk = 20_000, now = Date.now(), yieldMs = 15 } = {}) => {
+        const [lim, off] = clampPage(limit, offset);
+        const c = capOf(cap);
+        const since = Number(f.since); const until = Number(f.until);
+        const sinceOn = !!f.since; const untilOn = !!f.until;
+        // 숫자가 아닌 기간 값(Infinity 등)은 조각을 만들 수 없다 — 한 문장 판 그대로(같은 뜻).
+        if ((sinceOn && !Number.isFinite(since)) || (untilOn && !Number.isFinite(until))) {
+          const cnt = api.countCapped(f, c);
+          return { rows: api.query(f, lim, off), total: cnt.total, capped: cnt.capped, slices: 0 };
+        }
+        const empty = { rows: [], total: 0, capped: false, slices: 0 };
+        if (Array.isArray(f.vcenterIds) && !f.vcenterIds.length) return empty;   // 범위 화이트리스트가 비었다 = 결과 없음(filterSql 의 1=0)
+        const mn = minTsStmt.get()?.mn;
+        if (mn == null) return empty;                                             // 빈 표
+        const windowed = sinceOn && since > Number(mn);                           // 기간 하한이 표의 일부만 덮는다
+        const lo0 = windowed ? since : Number(mn);
+        const top = untilOn ? until : (Number.isFinite(Number(now)) ? Number(now) : Date.now());
+        const base = Number.isFinite(sliceMs) && sliceMs >= 60_000 ? sliceMs : 3_600_000;
+        const step = Math.max(base, Math.ceil((top - lo0) / 2000));
+        const maybeYield = createYielder(yieldMs);
+        let total = 0; let capped = false; let slices = 0;
+        const addCount = (n) => { if (capped) return; total += n; if (total > c) { capped = true; total = c; } };
+        // ① 개수 — 기간 하한이 없으면 rowid 구간 조각(표를 순서대로). NOT INDEXED: 단일 vCenter 조건이 (vcenterId,ts) 인덱스로
+        //    조각마다 그 vCenter 행 전체를 다시 훑지 않게(rowid 조회는 NOT INDEXED 에서도 쓴다 — 테스트가 계획을 고정).
+        if (!windowed) {
+          const { where: fw, params: fp } = filterSql(f);
+          const cw = fw ? `${fw} AND rowid > ? AND rowid <= ?` : 'WHERE rowid > ? AND rowid <= ?';
+          const cntSt = db.prepare(`SELECT COUNT(*) n FROM (SELECT 1 FROM events NOT INDEXED ${cw} LIMIT ?)`);
+          const r0 = Number(minRowidStmt.get()?.m); const r1 = Number(maxRowidStmt.get()?.m);
+          const chunk = Number.isFinite(rowidChunk) && rowidChunk >= 1000 ? Math.trunc(rowidChunk) : 20_000;
+          if (Number.isFinite(r0) && Number.isFinite(r1)) {
+            for (let a = r0 - 1; a < r1 && !capped; a += chunk) {
+              if (slices) await maybeYield();
+              slices++;
+              addCount(Number(cntSt.get(...fp, a, Math.min(r1, a + chunk), c + 1 - total)?.n || 0));
+            }
+          }
+          if (!capped && total <= off) return { rows: [], total, capped, slices };   // 보여 줄 행이 없다 — 행 조회를 하지 않는다
+        }
+        // ② 행(기간 하한이 있으면 개수도 같은 조각에서) — ts 조각을 최신부터.
+        const { where, params } = filterSql({ ...f, since: 0, until: 0 });      // 시각 조건만 빼고 같은 WHERE(검색어·심각도·범위)
+        const w = (extra) => (where ? `${where} AND ${extra}` : `WHERE ${extra}`);
+        const topCond = untilOn ? 'ts>=? AND ts<=?' : 'ts>=?';
+        const lowCond = 'ts>=? AND ts<?';
+        const cntTop = db.prepare(`SELECT COUNT(*) n FROM (SELECT 1 FROM events ${w(topCond)} LIMIT ?)`);
+        const cntLow = db.prepare(`SELECT COUNT(*) n FROM (SELECT 1 FROM events ${w(lowCond)} LIMIT ?)`);
+        const sel = 'SELECT vcenterId,ts,severity,type,user,entity,message FROM events';
+        const rowTop = db.prepare(`${sel} ${w(topCond)} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`);
+        const rowLow = db.prepare(`${sel} ${w(lowCond)} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`);
+        const exactKnown = () => !windowed && !capped;                           // ①에서 정확한 개수를 알았다
+        const rows = [];
+        let need = lim; let skip = off; let seen = 0;
+        // 한 조각: [a, b) — 맨 위 조각은 b 가 없다(위가 열림 · until 이 있으면 ts<=until).
+        const runSlice = (isTop, a, b) => {
+          slices++;
+          // 이 조각에서 세어야 할 상한 — 전체 상한 판정(c+1 까지 — 기간 하한이 있을 때만)과 OFFSET 건너뛰기(skip+need) 중 큰 쪽.
+          const L = Math.max(windowed && !capped ? c + 1 - total : 0, need > 0 ? skip + need : 0);
+          if (L <= 0) return;
+          const bounds = isTop ? (untilOn ? [a, until] : [a]) : [a, b];
+          const n = Number((isTop ? cntTop : cntLow).get(...params, ...bounds, L)?.n || 0);
+          if (windowed) addCount(n);
+          if (need > 0) {
+            // n <= skip 이면 n < L(=skip+need 이상)이라 정확한 개수다 — 조각 통째로 건너뛴다.
+            if (n <= skip) { skip -= n; seen += n; return; }
+            const got = (isTop ? rowTop : rowLow).all(...params, ...bounds, need, skip);
+            for (const r of got) rows.push(r);
+            seen += skip + got.length; need -= got.length; skip = 0;
+          }
+        };
+        const more = () => (windowed ? (need > 0 || !capped) : (need > 0 && !(exactKnown() && seen >= total)));
+        let lo = Math.max(lo0, top - step);
+        runSlice(true, lo, null);
+        let hiExcl = lo;
+        while (hiExcl > lo0 && more()) {
+          await maybeYield();
+          lo = Math.max(lo0, hiExcl - step);
+          runSlice(false, lo, hiExcl);
+          hiExcl = lo;
+        }
+        return { rows, total, capped, slices };
+      },
+      /**
        * v2.673(운영 장애): 로그인 실패 **후보**만 — 검색어(q)를 쓰지 않고 logs/loginFailPattern.js 의 좁은 조건 하나로 범위를 1회 훑는다.
        * 예전 분석은 이 범위를 단어 4개로 4번 훑었다(드문 단어는 매번 전 범위). 최종 판정은 호출부가 정규식으로 다시 한다.
        */
@@ -416,6 +520,25 @@ function initSqlite() {
       sizeBytes: () => { let n = 0; for (const f of [DB_PATH, `${DB_PATH}-wal`]) { try { n += fs.statSync(f).size; } catch { /* 없으면 0 */ } } return n; },
       // v2.601(DB2601-03): 한 번에 지우는 양을 청크 크기로 묶는다 — 예전에는 전체 행의 10% 를 한 문장으로 지웠다(수십만 행 동기).
       pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.min(PRUNE_CHUNK_ROWS, Math.max(1, n))); metaCache = null; return Number(r?.changes || 0); },
+      /**
+       * v2.741(감사 DB-03): **사용 중 크기** — (page_count − freelist_count) × page_size. 용량 상한은 이것으로 판정한다.
+       *   지운 행의 페이지는 freelist 로 돌아가 다음 INSERT 가 다시 쓰므로, 이 값이 상한 아래면 파일은 그 이상 커지지 않는다.
+       *   예전에는 파일 크기(sizeBytes)로 판정해 삭제만으로는 줄지 않았고, 그래서 상한에 닿을 때마다 VACUUM(파일 전체 재작성 —
+       *   합성 534MB 에서 수 초 동기 정지)을 돌렸다. 이 값은 헤더 두 필드라 즉시 읽힌다. WAL 은 넣지 않는다(체크포인트 전 사본이고
+       *   자동 체크포인트가 재사용한다 — 넣으면 WAL 크기만큼 로그를 더 지운다). 못 읽으면 파일 크기(예전 판정).
+       */
+      usedBytes: () => {
+        try {
+          const pc = Number(pageCountStmt.get()?.page_count); const fl = Number(freelistStmt.get()?.freelist_count); const ps = Number(pageSizeStmt.get()?.page_size);
+          if (Number.isFinite(pc) && Number.isFinite(fl) && Number.isFinite(ps) && ps > 0) return Math.max(0, pc - fl) * ps;
+        } catch { /* 아래 */ }
+        return api.sizeBytes();
+      },
+      /** v2.741(DB-03): 파일 안의 빈 페이지(다시 쓰일 자리) 바이트 — 화면이 '파일은 줄지 않는다' 를 말할 때 쓴다. 못 읽으면 null. */
+      freeBytes: () => {
+        try { const fl = Number(freelistStmt.get()?.freelist_count); const ps = Number(pageSizeStmt.get()?.page_size); return Number.isFinite(fl) && Number.isFinite(ps) ? fl * ps : null; } catch { return null; }
+      },
+      // 수동 정리용으로만 남긴다 — 폴러의 용량 상한 처리는 v2.741(DB-03)부터 VACUUM 을 부르지 않는다(usedBytes 판정).
       vacuum: () => { try { db.exec('VACUUM'); db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { /* */ } },
       path: DB_PATH,
       close: () => { try { db.close(); } catch { /* */ } },
@@ -463,6 +586,8 @@ function initJson() {
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     queryAsync: async (f = {}, limit = 200) => api.query(f, limit, 0),   // v2.732(B6-03): SQLite 판과 같은 API
+    // v2.741(DB-01): SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에 거른다.
+    searchAsync: async (f = {}, limit = 200, offset = 0, { cap = COUNT_CAP } = {}) => { const cnt = api.countCapped(f, cap); return { rows: api.query(f, limit, offset), total: cnt.total, capped: cnt.capped, slices: 0 }; },
     insertManyAsync: async (recs) => { api.insertMany(recs); return { chunks: 1 }; },   // v2.732(B6-01): SQLite 판과 같은 API
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
     loginFailCandidates: (f = {}, limit = 5000) => rows.filter((r) => match(r, { ...f, q: '' }) && isLoginFailRow(r)).sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0]),
@@ -478,13 +603,16 @@ function initJson() {
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
     prune: (beforeTs) => { const before = rows.length; rows = rows.filter((r) => r.ts >= beforeTs); const removed = before - rows.length; if (removed) rewrite(); return removed; },
     sizeBytes: () => { try { return fs.statSync(file).size; } catch { return 0; } },
+    usedBytes: () => api.sizeBytes(),   // v2.741(DB-03): 폴백은 재기록으로 파일이 곧 줄어든다 — 파일 크기가 곧 사용 중 크기
+    freeBytes: () => 0,
     pruneOldest: (n) => { const sorted = [...rows].sort((a, b) => a.ts - b.ts); const cut = new Set(sorted.slice(0, Math.max(1, n))); const before = rows.length; rows = rows.filter((r) => !cut.has(r)); const removed = before - rows.length; if (removed) rewrite(); return removed; },
     vacuum: () => {},
     path: file,
     close: () => {},
   };
   return api;
-  function rewrite() { try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } }
+  // v2.741(감사 LEFT-13): 재기록은 원자적으로(tmp → fsync → rename) — writeFileSync 는 먼저 0바이트로 자르므로 그 사이 종료(업그레이드 재시작)면 로그 이력을 잃는다.
+  function rewrite() { try { atomicWriteFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch (e) { console.warn(`[vclogs] NDJSON 폴백 재기록 실패(메모리는 정리됨 — 다음 정리 때 다시 씁니다): ${e.message}`); } }
 }
 
 export async function getLogsDb() {

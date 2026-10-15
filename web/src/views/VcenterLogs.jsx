@@ -43,6 +43,41 @@ export function vcLogNotCollectedText(lastRun) {
   return base ? `${base}${omitTxt}` : '';
 }
 
+/**
+ * v2.741(감사 DB-01): 로그 조회 기간. 예전 화면은 기간을 보내지 않아 검색어·심각도 조회가 보관분 전체(기본 365일)를 훑었다
+ * (합성 180만 행에서 무일치 검색 한 번이 포탈 전체를 7초 넘게 멈췄다). 기본은 최근 7일이고 사용자가 넓힐 수 있다.
+ * 'all' 은 전체 보관분이다 — 서버가 조각으로 나눠 읽어 멈추지는 않지만 오래 걸릴 수 있다.
+ */
+export const VCLOG_PERIODS = [
+  { key: '1d', days: 1, label: '최근 24시간' },
+  { key: '7d', days: 7, label: '최근 7일' },
+  { key: '30d', days: 30, label: '최근 30일' },
+  { key: '90d', days: 90, label: '최근 90일' },
+  { key: 'all', days: null, label: '전체 보관분' },
+];
+export const VCLOG_DEFAULT_PERIOD = '7d';
+/** 기간 키 → since(ms). 'all' 은 0(기간 하한 없음). 모르는 키는 기본 기간으로 본다 — 하한 없음으로 넓히지 않는다. */
+export function vcLogSinceOf(key, now = Date.now()) {
+  const p = VCLOG_PERIODS.find((x) => x.key === key) || VCLOG_PERIODS.find((x) => x.key === VCLOG_DEFAULT_PERIOD);
+  return p.days == null ? 0 : now - p.days * 86_400_000;
+}
+/** 빈 표 문구 — 기간을 좁혀 본 것이면 '없다' 가 아니라 '이 기간에 없다' 고 말한다. */
+export function vcLogEmptyText(key) {
+  const p = VCLOG_PERIODS.find((x) => x.key === key);
+  if (!p || p.days == null) return '보관된 로그가 없습니다.';
+  return `${p.label} 안에 맞는 로그가 없습니다 — 기간을 넓혀 보세요.`;
+}
+/**
+ * v2.741(감사 DB-03): 보관 크기 문구 — 용량 제한은 **사용 중 크기**로 판정하고 지운 자리는 새 로그가 다시 쓰므로 파일은 줄지 않는다.
+ * 사용 중 크기를 모르면(구버전 서버) 파일 크기만.
+ */
+export function vcLogSizeText(st, fmt) {
+  const file = fmt(st?.dbSizeBytes);
+  if (!Number.isFinite(st?.dbUsedBytes)) return file;
+  const free = Number.isFinite(st?.dbFreeBytes) && st.dbFreeBytes > 0 ? ` · 빈 공간 ${fmt(st.dbFreeBytes)}(새 로그가 다시 씁니다)` : '';
+  return `사용 중 ${fmt(st.dbUsedBytes)} · 파일 ${file}${free}`;
+}
+
 export default function VcenterLogs() {
   const [st, setSt] = useState(null);
   const [s, setS] = useState(null);
@@ -66,7 +101,7 @@ export default function VcenterLogs() {
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         vCenter는 이벤트를 단기간만 보관합니다. 포탈이 주기적으로 수집해 <b>장기 보관</b>합니다.
         데이터는 <b>중앙 집중 저장이 아니라, 이 포탈(해당 지역 엣지)에 로컬 보관</b>됩니다 — 각 지역 로그는 그 지역 엣지 포탈에서 보세요.
-        <br />현재 보관 <b>{fmtNum(st.store?.count)}</b>건 · {st.dbKind === 'sqlite' ? 'SQLite' : 'NDJSON'} · {fmtMB(st.dbSizeBytes)}
+        <br />현재 보관 <b>{fmtNum(st.store?.count)}</b>건 · {st.dbKind === 'sqlite' ? 'SQLite' : 'NDJSON'} · {vcLogSizeText(st, fmtMB)}
         {st.store?.firstTs && ` · ${fmtTime(st.store.firstTs)} ~ ${fmtTime(st.store.lastTs)}`}
         {st.dbPath && <><br /><span style={{ fontSize: 11 }}>경로: <code>{st.dbPath}</code></span></>}
       </p>
@@ -82,7 +117,7 @@ export default function VcenterLogs() {
           <span className="muted" style={{ marginLeft: 8 }}><b>보관 기간</b></span>
           <input className="input" type="number" min="0" style={{ width: 90 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: e.target.value })} /> <span className="muted">일 (0=무제한)</span>
           <span className="muted" style={{ marginLeft: 8 }}><b>용량 제한</b></span>
-          <input className="input" type="number" min="0" style={{ width: 90 }} value={s.maxSizeMB} onChange={(e) => setS({ ...s, maxSizeMB: e.target.value })} /> <span className="muted">MB (0=무제한)</span>
+          <input className="input" type="number" min="0" style={{ width: 90 }} value={s.maxSizeMB} onChange={(e) => setS({ ...s, maxSizeMB: e.target.value })} /> <span className="muted" title="DB 의 사용 중 크기로 판정합니다. 넘으면 오래된 로그부터 지우고, 지운 자리는 새 로그가 다시 씁니다(파일 크기는 줄지 않습니다).">MB (0=무제한 · 사용 중 크기 기준)</span>
           <span className="muted" style={{ marginLeft: 8 }}>최소 심각도</span>
           <Select sort={false} className="select" value={s.minSeverity} onChange={(e) => setS({ ...s, minSeverity: e.target.value })}>
             <option value="info">정보 이상(전체)</option><option value="warning">경고 이상</option><option value="error">위험만</option>
@@ -114,6 +149,8 @@ export default function VcenterLogs() {
 function LogViewer() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [f, setF] = useState({ vcenterId: '', severity: '', q: '' });
+  const [period, setPeriod] = useState(VCLOG_DEFAULT_PERIOD);   // v2.741(DB-01): 기본 최근 7일
+  const sinceRef = useRef(0);   // 첫 페이지를 읽은 순간의 since — '더 보기'·CSV 가 같은 기간을 쓴다(밀리지 않게)
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalInfo, setTotalInfo] = useState({ totalCapped: false, totalCap: null, lastBatch: 0 }); // v2.607: 상한 COUNT 표시·더 보기 판정
@@ -139,7 +176,8 @@ function LogViewer() {
     const gen = ++fedGen.current;
     setMode('edge'); setLoading(true); setRows([]); setFedNote('');
     try {
-      const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT });
+      sinceRef.current = vcLogSinceOf(period);
+      const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT, ...(sinceRef.current ? { since: sinceRef.current } : {}) });
       let last = 'pending';
       for (let i = 0; i < 9; i++) {
         await new Promise((r) => setTimeout(r, 1500));
@@ -159,7 +197,9 @@ function LogViewer() {
     const gen = ++fedGen.current; // 진행 중이던 연합 폴링 무효화 + 이 로컬 조회의 세대
     setMode('local'); setLoading(true); setFedNote('');
     const off = reset ? 0 : offset;
+    if (reset) sinceRef.current = vcLogSinceOf(period);
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
+    if (sinceRef.current) qs.set('since', String(sinceRef.current));
     if (f.vcenterId) qs.set('vcenterId', f.vcenterId);
     if (f.severity) qs.set('severity', f.severity);
     if (f.q) qs.set('q', f.q);
@@ -169,10 +209,11 @@ function LogViewer() {
       setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
     }).catch(() => {}).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
-  useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, sources]);
+  useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, period, sources]);
 
   const exportCsv = async () => {
     const qs = new URLSearchParams();
+    if (sinceRef.current) qs.set('since', String(sinceRef.current));   // v2.741(DB-01): 화면에 보이는 기간과 같은 범위를 내보낸다
     if (f.vcenterId) qs.set('vcenterId', f.vcenterId);
     if (f.severity) qs.set('severity', f.severity);
     if (f.q) qs.set('q', f.q);
@@ -192,6 +233,9 @@ function LogViewer() {
           <Select sort={false} className="select" value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value })}>
             <option value="">전체 심각도</option><option value="error">위험</option><option value="warning">경고</option><option value="info">정보</option>
           </Select>
+          <Select sort={false} className="select" value={period} onChange={(e) => setPeriod(e.target.value)} title="조회 기간 — 넓을수록 검색이 오래 걸립니다">
+            {VCLOG_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </Select>
           <input className="input" placeholder="메시지/엔티티/사용자 검색…" style={{ width: 220 }} value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && load(true)} />
           <button className="tab" style={{ padding: '6px 12px' }} onClick={() => load(true)}>검색</button>
         </div>
@@ -205,7 +249,7 @@ function LogViewer() {
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
         <STable><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
           <tbody>
-            {rows.length === 0 && !loading && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>보관된 로그가 없습니다.</td></tr>}
+            {rows.length === 0 && !loading && <tr><td colSpan={7} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{vcLogEmptyText(period)}</td></tr>}
             {rows.map((r, i) => {
               const [lbl, cls] = SEV[r.severity] || ['정보', 'gray'];
               return (

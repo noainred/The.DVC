@@ -533,32 +533,55 @@ export const PSU_POWER_FIELDS = Object.freeze({
   capW: ['capacity', 'maxPower', 'powerCapacity', 'ratedPower'],
 });
 const PSU_POWER_KEYS = [...PSU_POWER_FIELDS.inW, ...PSU_POWER_FIELDS.outW];
+/** PSU 한 대 전력 값의 유효 범위(W) — 파서·엣지 수신 정제(central/cvpEdge.js)·장비 합산이 같은 경계를 쓴다. 밖이면 못 읽은 값이다. */
+export const PSU_W_MAX = 100_000;
+const psuW = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n < PSU_W_MAX ? n : null; };
 export function psuPower(flat) {
   const out = {};
   for (const [k, names] of Object.entries(PSU_POWER_FIELDS)) {
-    const v = numOrNull(unwrap(pick(flat, names)));
-    if (v != null && v >= 0 && v < 100_000) out[k] = v;
+    const v = psuW(unwrap(pick(flat, names)));
+    if (v != null) out[k] = v;
   }
   return out.inW != null || out.outW != null ? { inW: out.inW ?? null, outW: out.outW ?? null, capW: out.capW ?? null } : null;
 }
 
 /**
+ * v2.741(감사 DEV-03): 슬롯 전원 항목인가 — v2.648 judgeSlotPower 가 role 'slot-power' 를 붙이는 바로 그 항목(이름에 Linecard·Fabric·
+ *   Supervisor N 조각이 있는 psu)이다. faultKey 를 지키려고 kind 는 psu 그대로 두었으므로 **전력 합산은 이 판정으로 뺀다**. role 이 없는
+ *   옛 저장값(v2.648 이전 수집)도 이름으로 가른다 — 화면이 '슬롯 전원(카드)' 으로 표시하는 집합과 같다(slotOfPart).
+ */
+export function isSlotPowerPart(p) {
+  return !!(p && p.kind === 'psu' && (p.role === 'slot-power' || slotOfPart(p)));
+}
+/** 소비전력에 세는 PSU — 장착됨(absent 아님) + 슬롯 전원이 아님. CVP 전력 탭의 '못 읽음' 사유 분류도 이 목록을 써야 같은 기준이다. */
+export function powerSupplies(parts) {
+  return (Array.isArray(parts) ? parts : []).filter((p) => p && p.kind === 'psu' && p.state !== 'absent' && !isSlotPowerPart(p));
+}
+
+/**
  * 장비 한 대의 소비전력(W) — 장착된 PSU 의 입력 전력 합(입력을 모르면 출력으로 대신하고 basis 로 밝힌다).
  * PSU 를 못 읽었으면 null · 전력 값이 있는 PSU 가 하나도 없으면 null(0W 가 아니다) · 일부 PSU 만 값이 있으면 partial.
+ * v2.741(감사 LEFT-05): **장비 전력 계산은 이 함수 한 벌**이다 — CVP 전력 탭(routes/api/cvp.js)과 Overview·특수 기능 '전체 소비 전력'
+ *   (power/total.js cvpDevicePower)이 같은 함수를 쓴다. 반올림하지 않는다(합계를 먼저 더하고 표시 단계에서만 반올림 — 장비마다 반올림해
+ *   더하면 두 화면의 합계가 갈라진다). 값의 유효 범위는 PSU_W_MAX(파서·엣지 정제와 같은 경계).
+ * v2.741(감사 DEV-03): 슬롯 전원 항목(isSlotPowerPart)은 PSU 로 세지 않는다 — 예전에는 모듈형 섀시가 정상 PSU 를 다 읽어도 늘 partial
+ *   이었고, 슬롯 항목에 power 값이 있으면 카드 전력을 PSU 입력 합에 또 더했다(이중 계수). 뺀 개수는 `slotEntries`(0 이면 필드 없음 —
+ *   예전 응답 모양 그대로).
  */
 export function devicePower(parts) {
   if (!Array.isArray(parts)) return null;
-  const psus = parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent');
+  const psus = powerSupplies(parts);
+  const slots = parts.filter((p) => p && p.state !== 'absent' && isSlotPowerPart(p)).length;
   if (!psus.length) return null;
   let sum = 0; let n = 0; let usedOut = 0; let cap = 0; let capN = 0;
   for (const p of psus) {
     const pw = p.power && typeof p.power === 'object' ? p.power : null;
-    const inW = numOrNull(pw?.inW); const outW = numOrNull(pw?.outW);
+    const inW = psuW(pw?.inW); const outW = psuW(pw?.outW);
     if (inW != null) { sum += inW; n++; } else if (outW != null) { sum += outW; n++; usedOut++; }
-    const c = numOrNull(pw?.capW); if (c != null) { cap += c; capN++; }
+    const c = psuW(pw?.capW); if (c != null) { cap += c; capN++; }
   }
   if (!n) return null;
-  return { watts: sum, psus: psus.length, read: n, partial: n < psus.length, basis: usedOut === 0 ? 'input' : usedOut === n ? 'output' : 'mixed', capW: capN === psus.length ? cap : null };
+  return { watts: sum, psus: psus.length, read: n, partial: n < psus.length, basis: usedOut === 0 ? 'input' : usedOut === n ? 'output' : 'mixed', capW: capN === psus.length ? cap : null, ...(slots ? { slotEntries: slots } : {}) };
 }
 
 /*

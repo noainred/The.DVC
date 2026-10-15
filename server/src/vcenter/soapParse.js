@@ -20,6 +20,20 @@ export function xmlUnescape(s) {
 const SNAP_FILE_TYPES = new Set(['snapshotData', 'snapshotMemory', 'snapshotList']);
 const SNAP_DELTA_RE = /-\d{6}(?:-(?:delta|sesparse))?\.vmdk$/i;
 
+// v2.741(감사 VC-01): 'layoutEx.file' 속성의 값은 ArrayOfVirtualMachineFileLayoutExFileInfo 이고, vim25 직렬화에서 배열 원소
+//   이름은 **타입 이름**(<VirtualMachineFileLayoutExFileInfo>)이다 — 이 저장소의 다른 배열 파서(<HostGraphicsInfo>·<Extension>·
+//   <LicenseManagerLicenseInfo>)가 이미 따르는 규칙이다. 예전 split('<file>') 은 그 원소를 하나도 찾지 못해 스냅샷 크기 0 ·
+//   유령 스냅샷 0(모름이 아니라 '없음') · 고아 VMDK 소유 집합 0(살아 있는 VM 의 디스크가 후보로 나온다)이었다(재현).
+//   'layoutEx' 객체 전체를 받으면 원소가 속성 이름(<file>)으로 오므로 둘 다 받는다(parseServiceTag 의 이중 수용과 같은 판단 —
+//   호환을 깨지 않는다). 세 소비처(snapshotInfo 두 루프 · parseLayoutFilePaths)가 이 함수 하나를 쓴다(경계 판정을 복제하지 말 것).
+//   ⚠ 실 vCenter 응답 캡처로 확인하지는 못했다(정직 기록) — 두 모양을 다 받으므로 어느 쪽이 와도 읽는다.
+const LAYOUT_FILE_SPLIT_RE = /<(?:VirtualMachineFileLayoutExFileInfo|file)(?=[\s>])/;
+/** layoutEx.file XML → 파일 블록 문자열 배열(블록마다 <name>·<type>·<size>·<uniqueSize> 를 담는다). */
+export function layoutFileBlocks(xml) {
+  if (!xml) return [];
+  return String(xml).split(LAYOUT_FILE_SPLIT_RE).slice(1);
+}
+
 /**
  * VM 'snapshot'(VirtualMachineSnapshotInfo) + 'layoutEx.file' XML → 스냅샷 요약.
  * 개수·근사 크기에 더해 생성일(가장 오래된/최신)과 이름 목록을 파싱한다 — 커뮤니티 표준
@@ -39,7 +53,7 @@ export function snapshotInfo(snapXml, layoutXml) {
     // snapshotList=.vmsd)이거나, 파일 이름이 델타 체인 형식(`-NNNNNN.vmdk` · `-NNNNNN-delta.vmdk` ·
     // `-NNNNNN-sesparse.vmdk`)이면 더한다. 크기는 uniqueSize(다른 VM 과 공유하지 않는 바이트)가 있으면
     // 그것을 쓴다 — 링크드 클론이 공유하는 부모 체인을 이 VM 의 회수 가능 용량으로 세지 않게.
-    for (const blk of layoutXml.split('<file>').slice(1)) {
+    for (const blk of layoutFileBlocks(layoutXml)) {
       const type = /<type>([^<]+)<\/type>/.exec(blk)?.[1];
       const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
       const unique = /<uniqueSize>(\d+)<\/uniqueSize>/.exec(blk)?.[1];
@@ -71,7 +85,7 @@ export function snapshotInfo(snapXml, layoutXml) {
   let orphanDeltaBytes = null;
   if (snapshotCount === 0 && layoutXml) {
     orphanDeltaBytes = 0;
-    for (const blk of layoutXml.split('<file>').slice(1)) {
+    for (const blk of layoutFileBlocks(layoutXml)) {
       const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
       if (!SNAP_DELTA_RE.test(name)) continue;
       const unique = /<uniqueSize>(\d+)<\/uniqueSize>/.exec(blk)?.[1];
@@ -230,7 +244,8 @@ export function parseDsSearchResults(xml, cap = Infinity) {
 /**
  * `layoutEx.file`(ArrayOfVirtualMachineFileLayoutExFileInfo) XML → 그 VM 이 소유한 **전 파일 경로**.
  *
- * v2.505 고아 VMDK 탐지의 소유 집합 소스다. `<file>` 블록의 `<name>` 이 `[ds] folder/file` 형태로
+ * v2.505 고아 VMDK 탐지의 소유 집합 소스다. 파일 원소(`<VirtualMachineFileLayoutExFileInfo>` — 옛 `<file>` 모양도 받는다,
+ * v2.741 VC-01 · layoutFileBlocks)의 `<name>` 이 `[ds] folder/file` 형태로
  * vmx·vmdk 디스크립터·flat/delta 익스텐트·vswp·vmsn·nvram·로그를 **전부** 담는다.
  * 소유 집합은 크게 잡는 쪽이 안전하므로 유형을 가리지 않고 전부 넣는다 — 빠뜨리면 쓰고 있는
  * 디스크가 고아로 보고된다(그 판정으로 사람이 파일을 지운다).
@@ -238,7 +253,7 @@ export function parseDsSearchResults(xml, cap = Infinity) {
 export function parseLayoutFilePaths(xml) {
   const out = [];
   if (!xml) return out;
-  for (const blk of String(xml).split('<file>').slice(1)) {
+  for (const blk of layoutFileBlocks(xml)) {
     const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1];
     if (name) out.push(xmlUnescape(name));
   }

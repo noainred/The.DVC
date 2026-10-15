@@ -17,7 +17,7 @@
  */
 
 import {
-  listTargetsCopy, listFolders, getSort, totalTests, flushStore, TEST_TYPES, KINDS,
+  listTargets, listFolders, getSort, totalTests, flushStore, TEST_TYPES, KINDS,
 } from '../../svcmon/store.js';
 import { testState, emptySummary } from '../../svcmon/status.js';
 import { edgeSummary, edgeSummaryWithAssigned, edgeTotals } from '../../central/svcmonEdge.js';
@@ -51,7 +51,10 @@ svcmonRouter.get('/state', (req, res) => {
   const scope = typeof req.query.path === 'string' ? req.query.path : '';
   const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 300));
 
-  const all = listTargetsCopy();
+  // v2.741(LEFT-06): 원본 배열을 **읽기만** 한다(listTargets — 폴러와 같은 읽기 전용 규약). 예전 listTargetsCopy() 는 전 대상·전 점검을
+  //   깊이 복사한 뒤 요약·필터·slice 를 했는데, 응답에 싣는 행은 아래 slice 뒤에서 어차피 {...t, tests: map} 으로 다시 만든다(이중 복사).
+  //   V4·관제 콘솔이 limit=1 로 30초마다 부르는 요약 조회에도 같은 비용이 들었다. ⚠ 아래에서 t·x 를 고치지 말 것 — 저장소 원본이다.
+  const all = listTargets();
   const now = Date.now();
   // 요약은 항상 전체(또는 kind 전체) 기준 — 화면 상단 KPI 가 페이징에 흔들리지 않게.
   // pending/stale 을 disabled 와 **합치지 않는다**(감시 공백이 의도적 중지로 위장된다).
@@ -102,7 +105,7 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
     // v2.598(감사 AUTHZ-2598-04 후속): 로그 라이터 실패 원문(fs 오류 — 경로를 담는다)은 admin 만(logs.js logStatusFor 와 같은 기준).
     //   ⚠ pollerStats() 안에도 같은 log 가 들어 있다 — 두 곳 다 가린다(한쪽만 가리면 형제 필드가 우회로다).
     poller: { ...pollerStats(), log: logStatsFor(req.user) }, log: logStatsFor(req.user),
-    targets: listTargetsCopy().length, tests: totalTests(),
+    targets: listTargets().length, tests: totalTests(), // v2.741(LEFT-06): 개수만 — 복사하지 않는다
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
     edges: redactEdgeSummary(edgeSummaryWithAssigned(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),
   });

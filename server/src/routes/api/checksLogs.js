@@ -186,14 +186,20 @@ api.get('/tools/network-check', requirePerm('tools'), async (req, res) => {
 // 사이트 VMware 솔루션 구성 백업 — 수집 구성 스냅샷. ?vcenterId=로 사이트 한정, ?download=1로 gzip 파일.
 // v2.322 보안 감사(HIGH): 범위 제한 계정은 허용 vCenter(및 귀속 NSX 매니저)로만 — 과거 이 라우트만
 // scope 를 안 걸어 범위 밖 전 함대 ESXi 관리 IP·전 VM IP/메모·NSX DFW 규칙이 gzip 으로 새었다.
-api.get('/tools/vmware-config', requirePerm('tools'), async (req, res) => {
+// v2.741(감사 AUTHZ-02): `?download=1`(gzip JSON 첨부 파일)은 **파일 내보내기**다 — v2.732 B3-05 규약('파일 내보내기는 형식과 무관하게
+//   data.csv 권한')대로 csvPerm 을 건다. 예전에는 requirePerm('tools') 만 봐서 data.csv 를 끈 admin·operator 도 전 함대 구성 파일을
+//   받았다(gpu.json·gpu.csv 는 403 인데 이것만 200). 같은 내용의 JSON 조회(download 없음)는 화면 조회라 그대로 tools 만 본다
+//   (같은 데이터는 화면에 이미 보인다 — B3-05 와 같은 '내보내기 통제의 대칭' 이다). 판정 조건은 핸들러의 분기와 글자 그대로 같아야 한다.
+const vmwareConfigDownload = (req) => req.query.download === '1';
+const csvPermIfDownload = (req, res, next) => (vmwareConfigDownload(req) ? csvPerm(req, res, next) : next());
+api.get('/tools/vmware-config', requirePerm('tools'), csvPermIfDownload, async (req, res) => {
   try {
     const allowed = scopedVcenterIds(req.user, store.get());
     const reqVc = req.query.vcenterId ? String(req.query.vcenterId) : null;
     // 범위 밖 vCenter 를 명시 요청하면 존재를 흘리지 않게 404(형제 vclogs/federate 패턴).
     if (reqVc && allowed && !allowed.has(reqVc)) return res.status(404).json({ error: 'not found' });
     const data = buildVmwareConfigExport({ vcenterId: reqVc, allowed });
-    if (req.query.download === '1') {
+    if (vmwareConfigDownload(req)) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       // v2.594(감사 SEC-2594-04): scope 는 요청 vcenterId 원문이다 — 따옴표·CRLF·비ASCII 가 헤더에 그대로 들어가
       //   filename 매개변수 주입 또는 500(잘못된 헤더 문자)이 됐다. 파일명에는 안전한 문자만 남긴다.
@@ -317,10 +323,22 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
     // v2.607 DB2607-02: 검색어·심각도 필터는 인덱스 밖이라 정확 COUNT 가 페이지마다 events 전체를 동기로 훑었다
     // (100만 행 q 무일치 약 0.3초 + 정렬 조회). 필터가 있으면 상한 COUNT 로 세고 닿았으면 totalCapped 로 밝힌다
     // (total 은 '적어도 이만큼'). 무필터·vCenter·기간만이면 예전대로 정확 COUNT(인덱스로 싸다).
+    // v2.741(감사 DB-01 — 재현): 그 상한 COUNT 와 정렬 조회는 기간 하한 없이 **두 문장이 차례로 동기**였다 — 일치하는 행이 없는
+    //   검색어 한 번이 합성 180만 행에서 이벤트 루프를 7.3초 멈췄다(범위 계정도 같다). 필터 조회는 db.searchAsync(같은 결과 ·
+    //   rowid·시간 조각 + 양보 · 무일치면 한 번만 훑는다)로 읽는다. 화면은 기본 기간(최근 7일)을 since 로 보낸다(web/src/views/VcenterLogs.jsx).
     const filtered = !!(f.q || f.severity);
-    const counted = filtered && typeof db.countCapped === 'function' ? db.countCapped(f) : { total: db.count(f), capped: false };
+    let counted; let rows;
+    if (filtered && typeof db.searchAsync === 'function') {
+      const r = await db.searchAsync(f, limit, offset);
+      counted = { total: r.total, capped: r.capped }; rows = r.rows;
+    } else {
+      counted = filtered && typeof db.countCapped === 'function' ? db.countCapped(f) : { total: db.count(f), capped: false };
+      rows = db.query(f, limit, offset);
+    }
+    if (res.headersSent || res.destroyed) return undefined;
     res.json({ total: counted.total, totalCapped: counted.capped, ...(counted.capped ? { totalCap: counted.total } : {}),
-      rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
+      rows, meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
+    return undefined;
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, res) => {

@@ -2093,9 +2093,12 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
     return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   for (const sc of clean.scans) {
+    // v2.741 EDGE-01: sc.srcTs(엣지 원본 시각)로 재전송 중복을 거른다 — 잘라 둔 시각(sc.ts)은 받을 때마다 다른 '지금' 이다.
     const r = await db.insertScan({ ...sc, agent: T.HISTORY_AGENT, node });
     if (!r.ok) { saved.failed++; console.warn(`[central] isidu-data: 적재 실패(${String(node).slice(0, 64)} · ${sc.targetId}): ${r.error}`); continue; }
     if (r.duplicate) saved.duplicates++; else saved.inserted++;
+    // 실제로 적힌(재전송이면 처음 적은) 시각 — 기준선·완료 판정이 재전송마다 새 '지금' 으로 밀리지 않게.
+    if (Number.isFinite(r.ts)) sc.ts = r.ts;
     // v2.738 결과 메일 — 새로 적재한 것만(재전송 중복은 보내지 않는다). 기다리지 않는다(응답을 늦추지 않게 — notify 는 던지지 않는다).
     if (!r.duplicate) notifyIsidu({ targetId: sc.targetId, scanId: r.id, ok: sc.ok === true, ts: sc.ts });
     // v2.740 A-02: 기준선·완료 판정은 **잘라 둔 시각(sc.ts)** 이다. 미래 시각(엣지 시계가 앞으로 튐)을 그대로 넣으면 기준선(최댓값)이
@@ -2104,8 +2107,11 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
     E.noteIsiduScanTs(sc.targetId, sc.ts);
     ackIsiduCollect(sc.targetId, sc.ts);
   }
-  if (saved.failed) return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })) });
-  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
+  // 시각을 잘라 받은 스캔(clamped)은 거절이 아니다 — rejected 합계에 넣지 않고 따로 밝힌다(엣지 시계가 앞서 있다는 진단).
+  const clampedPart = clean.clamped ? { clamped: clean.clamped } : {};
+  if (saved.failed) return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
+  if (clean.clamped && E.clampWarnDue(node)) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 엣지 시계가 중앙보다 5분 넘게 앞서 결과 ${clean.clamped}건의 시각을 수신 시각으로 잘랐습니다(원본 시각으로 중복을 거릅니다)`);
+  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
 });
 
 // GET /api/central/users-config?agent=<이름>

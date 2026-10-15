@@ -15,7 +15,12 @@ import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT26
 import { centralStatusOnlySupport } from './centralStatusOnly.js'; // v2.733: 중앙 버전 확인(health-probe — 1시간 캐시) 공용
 // v2.737: 재시작으로 중단된 스캔 기록·재개. ⚠ 별칭으로 가져온다 — 아래 함수 안에 시작 시각 지역 변수 scanStarted 가 있어
 //   같은 이름으로 가져오면 그 지역 const 가 함수를 가려 TDZ ReferenceError 가 된다(v2.566 perfPush 와 같은 결함 — 전량 테스트가 잡았다).
-import { scanStarted as journalScanStarted, scanFinished as journalScanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js';
+import { scanStarted as journalScanStarted, scanFinished as journalScanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 let timer = null;
 let last = null;
@@ -35,9 +40,44 @@ export const IPSCAN_ASSIGN_RECHECK_MS = 15 * 60_000;
 const INTERVAL_MIN_MS = 60_000;
 const INTERVAL_MAX_MS = 7 * 86_400_000;
 let _centralIntervalMs = null; // 마지막 배정 응답의 intervalMs(클램프) — null = env 기본값
-let _lastScanAt = null;        // 마지막으로 스캔을 시도해 끝낸 시각(성패 무관 — 주기 기준)
+let _lastScanAt = null;        // 마지막으로 스캔을 시도해 끝낸 시각(성패 무관 — 주기 기준) — v2.741: 파일에 남겨 재시작 뒤에도 이어 쓴다(아래)
 let _lastCheckAt = null;       // 마지막 배정 조회 시각(스캔하지 않은 확인 포함)
 let _lastScanRecord = null;    // 마지막 스캔 시도의 기록(성공·스캔/보고 실패) — 주기 전 확인이 성공하면 '배정 조회 실패' 기록 대신 이것으로 돌아간다
+
+/*
+ * v2.741(감사 TIMING-06): _lastScanAt 이 메모리에만 있어 재시작 직후 null 이었고, 그래서 dueOnly 판정을 건너뛰어 기동 40초 뒤 첫 확인이
+ *   **주기와 무관하게** 대역 전체를 다시 스캔·보고했다(재현: 0.5초 전에 스캔했어도 새 프로세스의 첫 틱이 다시 스캔). 28곳이 함께 업그레이드되면
+ *   그만큼의 전체 스캔이 한꺼번에 나간다. 마지막 스캔 시각을 상태 파일에 남기고 기동 때 되살린다(형제 iDRAC 스캔의 lastScanCycleAt 과 같은 판단).
+ *   · 쓰기는 스캔이 끝날 때 한 번(주기마다 1회 — 작다). 실패해도 스캔은 막지 않는다(경고 1회 — 다음 재시작이 예전처럼 스캔할 뿐).
+ *   · 되살린 값이 지금보다 1분 넘게 미래면 버린다(시계가 뒤로 갔다 — 그 값을 믿으면 스캔이 그만큼 멈춘다).
+ *   · 재시작으로 끊긴 스캔이 재개를 기다리면(v2.737 scanJournal) 주기와 무관하게 스캔한다(재개 유지 — 그 시작이 대기 항목을 덮는다).
+ */
+registerStateFile('ipscan-agent-state.json');
+const STATE_FILE = () => path.join(config.configDir, 'ipscan-agent-state.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
+let _stateWarned = false;
+let _lastScanRestored = null;   // 기동 때 되살린 마지막 스캔 시각(상태 화면용 — 없으면 null)
+function loadLastScanAt(now = Date.now()) {
+  try {
+    const j = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    const at = numOrNull(j?.lastScanAt);
+    if (at == null || at <= 0 || at > now + 60_000) return null;
+    return at;
+  } catch (e) {
+    // 없음 — 처음 기동(예전처럼 첫 확인에서 스캔한다). 손상 — 원본을 옆에 남기고(arch2582 규약) 같은 동작으로 간다.
+    if (e?.code !== 'ENOENT') { try { preserveCorrupt(STATE_FILE(), e?.message); } catch { /* 보존 실패가 기동을 막지 않게 */ } }
+    return null;
+  }
+}
+function saveLastScanAt(at) {
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE()), { recursive: true });
+    atomicWriteFileSync(STATE_FILE(), JSON.stringify({ v: 1, lastScanAt: at }), { mode: 0o600 });
+  } catch (e) {
+    if (!_stateWarned) { _stateWarned = true; console.warn(`[ipscan-agent] 마지막 스캔 시각을 저장하지 못했습니다(${e?.message || e}) — 재시작하면 주기와 무관하게 한 번 다시 스캔합니다`); }
+  }
+}
+_lastScanAt = loadLastScanAt();
+_lastScanRestored = _lastScanAt;
 
 /** 배정 응답의 intervalMs → 쓸 값(ms) 또는 null(없음·숫자 아님 → env 기본값). 0 이하도 '없음' 이다(0 = 끔 계약이 없다). */
 function centralIntervalOf(v) {
@@ -121,7 +161,7 @@ export async function runIpScanAgentOnce(...args) {
     if (!a?.assigned) { _centralIntervalMs = null; last = { at: Date.now(), assigned: false }; return last; }
     _centralIntervalMs = centralIntervalOf(a.intervalMs);
     const t = Number.isFinite(now) ? now : Date.now();
-    if (dueOnly && _lastScanAt != null && t - _lastScanAt < ipScanIntervalMs()) {
+    if (dueOnly && _lastScanAt != null && t - _lastScanAt < ipScanIntervalMs() && !isResumePending('ipscan-agent', 'scan')) {
       // 아직 주기 전 — 배정(주기)만 반영. 직전 '배정 조회' 실패는 이번 조회가 성공했으므로 남겨 두지 않고 마지막 스캔 시도의
       // 기록으로 돌아간다(그 시각이 '마지막 실행' 이다). 스캔·결과 보고 실패 기록은 다음 스캔까지 그대로 둔다(숨기지 않는다).
       if (last?.error && last.phase === 'assignment' && _lastScanRecord) last = _lastScanRecord;
@@ -141,7 +181,7 @@ export async function runIpScanAgentOnce(...args) {
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
       });
-    } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); journalScanFinished('ipscan-agent', 'scan'); }
+    } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); saveLastScanAt(_lastScanAt); journalScanFinished('ipscan-agent', 'scan'); }
     if (scanErr) {
       // v2.733 C1-02: 실패를 중앙에 '스캔 미완료' 로 알린다(부분 결과 포함 — 위 reportScanIncomplete). 기록은 아래 catch 가 상태·콘솔에 남긴다.
       if (scanErr && typeof scanErr === 'object') scanErr.incompleteReport = await reportScanIncomplete(scanErr, _lastScanAt - scanStarted);
@@ -188,9 +228,15 @@ export async function resumeIpScanAgent(entry) {
 }
 registerScanResumer('ipscan-agent', resumeIpScanAgent);
 
-/** 테스트 전용 — 모듈 상태(주기·마지막 스캔·기록)를 처음으로 되돌린다. */
+/** 테스트 전용 — 모듈 상태(주기·마지막 스캔·기록)를 처음으로 되돌린다(상태 파일도 지운다 — 다음 기동 흉내가 깨끗하게). */
 export function _resetIpScanAgentForTest() {
-  _centralIntervalMs = null; _lastScanAt = null; _lastCheckAt = null; _lastScanRecord = null; last = null; streak = 0;
+  _centralIntervalMs = null; _lastScanAt = null; _lastCheckAt = null; _lastScanRecord = null; last = null; streak = 0; _lastScanRestored = null;
+  try { fs.rmSync(STATE_FILE(), { force: true }); } catch { /* */ }
+}
+/** 테스트 전용 — 새 기동 흉내: 메모리를 비우고 상태 파일에서 마지막 스캔 시각을 다시 읽는다. */
+export function _reloadIpScanAgentForTest(now = Date.now()) {
+  _centralIntervalMs = null; _lastCheckAt = null; _lastScanRecord = null; last = null; streak = 0;
+  _lastScanAt = loadLastScanAt(now); _lastScanRestored = _lastScanAt;
 }
 
 /** ip-scan-result 응답 → 거절 요약(순수). capped(전체 상한)·omitted(절단)는 '상한 초과로 제외', dropped(형식 오류)는 '거부'. */
@@ -205,7 +251,7 @@ export function ipScanAgentStatus() {
   return {
     enabled: !!config.agent.centralUrl, running, intervalMs: ipScanIntervalMs(),
     intervalSource: _centralIntervalMs != null ? 'central' : 'env', envIntervalMs: config.agent.scanIntervalMs,
-    lastCheckAt: _lastCheckAt, lastScanAt: _lastScanAt, last,
+    lastCheckAt: _lastCheckAt, lastScanAt: _lastScanAt, lastScanRestored: _lastScanRestored, last,
     journal: (() => { const j = journalFor('ipscan-agent'); return { interrupted: j.interrupted, recent: j.recent.slice(0, 5) }; })(), // v2.737
   };
 }

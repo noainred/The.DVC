@@ -59,6 +59,33 @@ function denyTargetOutOfScope(req, res) {
 }
 const SCOPE_DENY_REASON = '범위 제한 계정은 자기 범위 안의 vCenter·리전만 가진 범위 계정만 만들거나 바꿀 수 있습니다(범위 해제·범위 밖 vCenter 추가 불가) — 전체 범위(vCenter 제한 없는) 계정이 해야 합니다.';
 
+/*
+ * v2.741 AUTHZ-01 — 사용자별 도구 재정의(`matrix.users`)도 **목록(`GET /users`)과 같은 경계**로 거른다.
+ * 예전에는 `GET /permissions` 가 `loadMatrix()` 를, `PUT /user-tools/:username` 성공 응답이 `userToolOverrides()` 를
+ * 통째로 실어, 범위 계정이 단건 PUT 에서는 404(존재 은닉)를 받는 범위 밖 계정의 **이름·허용/차단 도구·설정자(by)**를
+ * 형제 응답에서 그대로 봤다(재현: 범위 admin 의 두 응답에 범위 밖 operator 이름이 실렸다). 규칙:
+ *   · 범위 계정에게는 `scopeWithinActor` 를 통과한 **존재하는 계정**의 항목만 준다(파일에만 남은 유령 항목도 뺀다).
+ *     뺀 개수는 `omittedOutOfScope` 로 밝힌다(조용한 축소 금지).
+ *   · 설정자(by)는 그 범위 계정이 목록에서 볼 수 있는 계정일 때만 남긴다 — 전체 범위 admin 이름을 흘리지 않게.
+ *     가린 개수는 `byHidden`. 시각(at)은 남긴다(화면이 '시각만' 으로 그린다 — userToolText.overrideByText).
+ *   · 전체 범위 계정은 예전 그대로 전량. PUT /permissions 는 범위 계정 403 이라 걸러 받은 값의 저장 왕복으로
+ *     다른 계정 항목이 지워질 길이 없다(v2.605 범위 병합 사고와 무관).
+ */
+function overridesForActor(users, actor, snap) {
+  const all = users && typeof users === 'object' ? users : {};
+  if (!scopedVcenterIds(actor, snap)) return { users: all, scoped: false };
+  const visible = new Set(listUsers().filter((u) => scopeWithinActor(u.scope, actor, snap)).map((u) => u.username));
+  const out = {};
+  let omitted = 0; let byHidden = 0;
+  for (const [name, entry] of Object.entries(all)) {
+    if (!visible.has(name)) { omitted += 1; continue; }
+    const e = entry && typeof entry === 'object' ? { ...entry } : entry;
+    if (e && typeof e === 'object' && e.by && !visible.has(String(e.by))) { delete e.by; byHidden += 1; }
+    out[name] = e;
+  }
+  return { users: out, scoped: true, omitted, byHidden };
+}
+
 export function registerUsers(adminRouter) {
 
 // --- User management (admin) ---
@@ -105,10 +132,13 @@ adminRouter.delete('/users/:username', adminOnly, (req, res) => {
 // --- 기능 권한 매트릭스(역할 × 권한) — 관리자가 화면에서 켜고 끈다 ---
 // admin 은 항상 전체(매트릭스로 낮출 수 없음). operator/viewer 행만 편집 가능.
 adminRouter.get('/permissions', adminOnly, (_req, res) => {
+  const m = loadMatrix();
+  const ov = overridesForActor(m.users, _req.user, store.get());   // v2.741 AUTHZ-01 — 범위 밖 계정 항목을 싣지 않는다
   res.json({
     catalog: PERMISSION_CATALOG,
     roles: ROLES,
-    matrix: { admin: rolePermissions('admin'), ...loadMatrix() },
+    matrix: { admin: rolePermissions('admin'), ...m, users: ov.users },
+    ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}),
     // v2.643: admin 행에서 끌 수 있는 키(CSV)와 그것을 바꿀 수 있는가(super_admin 만). super_admin 은 항상 전체.
     adminToggleKeys: ADMIN_TOGGLE_KEYS,
     canEditAdminRow: actorIsSuperAdmin(_req.user || null),
@@ -158,7 +188,10 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
       : (r.reason || ''),
     ip: req.ip || '',
   });
-  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, entry: r.entry, effective: eff, users: userToolOverrides() } : r);
+  if (!r.ok) return res.status(400).json(r);
+  // v2.741 AUTHZ-01: 성공 응답의 전체 목록도 GET /permissions 와 같은 경계(범위 밖 계정 항목·설정자 미노출).
+  const ov = overridesForActor(userToolOverrides(), req.user, store.get());
+  res.json({ ok: true, entry: r.entry, effective: eff, users: ov.users, ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}) });
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01

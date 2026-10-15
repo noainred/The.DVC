@@ -10,6 +10,8 @@ import { VimSoapClient, runGuestScript } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { ipToNum } from '../util/ipv4.js';
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
+import { directCollectSkipReason } from '../vcenter/collectTarget.js';
+import { vcAuthStopOf, noteVcAuthFailure, authStopView } from '../vcenter/authStopGate.js';
 
 /**
  * v2.629(감사 AUTHZ2629-01): 검색어 소문자화는 **루프 밖에서 1회**. 예전 `has()` 는 VM 마다·필드마다 검색어를 다시
@@ -116,8 +118,29 @@ function probeScript(probe, isWindows) {
 }
 
 /**
+ * v2.741 VC-05 — 직접 수집 대상이 아닌 vCenter 의 사유 문구(collectTarget.DIRECT_SKIP_REASONS 와 1:1).
+ * 화면(DeepSearch.jsx)은 errors[].error 를 그대로 보여 주므로 사람이 읽는 문장이다.
+ */
+export const PROBE_SKIP_TEXT = Object.freeze({
+  disabled: '비활성 vCenter — 이 포탈이 로그인하지 않습니다',
+  maintenance: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다',
+  site: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 로그인하지 않습니다',
+  invalid: 'vCenter 설정 형식이 올바르지 않습니다',
+});
+
+/**
  * 게스트 탐침 — candidates(스냅샷 1차 통과 VM)를 vCenter별로 묶어 로그인 후 스크립트 실행.
- * probe: { type:'gpuDriver'|'process', pattern? }. 반환 { matched[], checked, errors[] }.
+ * probe: { type:'gpuDriver'|'process', pattern? }. 반환 { matched[], checked, errors[], notCollected[], authStopped{} }.
+ *
+ * v2.741 VC-05 — 형제 OS 판별 스캐너(inventory/osScanner.js, v2.732 B4-01)와 같은 vCenter 경계:
+ *   · 비활성·점검중·엣지 위임(site) vCenter 에는 로그인하지 않는다(`directCollectSkipReason` 하나 — 주 폴러와 같은 판정).
+ *     후보를 스냅샷에서 고르므로 엣지가 push 한 site VM·점검중 vCenter 의 직전 VM(lastGood)이 섞여 중앙이 그 vCenter 에
+ *     게스트 명령 로그인을 하던 것이다. 건너뛴 vCenter 는 조용히 빼지 않고 `notCollected[{vcenterId, why, vms}]` 와
+ *     errors 에 사유 문장으로 싣는다(화면은 errors 를 보여 준다).
+ *   · vCenter 로그인 거부는 주 폴러와 **같은 인증 정지 기록**에 올린다(noteVcAuthFailure) — 결과 `authStopped[vcId]`.
+ *   · ⚠ 인증 정지 중인 vCenter 도 **시도는 한다** — 사람이 누른 수동 실행이다(authGuard 규칙 3 · osScanner 수동 실행과 같다.
+ *     검증자 판단: '수동 실행은 막지 않는다'). 대신 실패 문구가 정지 중이었다는 사실을 말한다.
+ *   · 게스트 계정 거부는 vCenter 거부가 아니다(isVcAuthError 가 guestAuth 를 제외) — 이 기록에 올리지 않는다.
  */
 export async function guestProbe(candidates, probe, { guestUser = '', guestPass = '', maxVms = 100, concurrency = 4 } = {}) {
   const eligible = candidates.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING').slice(0, maxVms);
@@ -126,13 +149,30 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
   const gset = loadGpuGuestSettings();
   const cfgVcs = loadVcenterConfig().vcenters || [];
   const matched = []; const errors = []; let checked = 0;
+  const notCollected = []; const authStopped = {};
 
   for (const [vcId, vms] of byVc) {
     const vc = cfgVcs.find((x) => x.id === vcId);
     if (!vc) { errors.push({ vcenterId: vcId, error: 'vCenter 설정 없음(live 필요)' }); continue; }
+    const why = directCollectSkipReason(vc);
+    if (why) {
+      notCollected.push({ vcenterId: vcId, why, vms: vms.length });
+      errors.push({ vcenterId: vcId, why, error: `${PROBE_SKIP_TEXT[why] || why} — 후보 ${vms.length}대는 탐침하지 않았습니다` });
+      continue;
+    }
+    const stoppedBefore = vcAuthStopOf(vc);   // 읽기 전용 — 막지 않는다(수동 실행). 실패 문구에만 쓴다.
     const c = new VimSoapClient(vc);
     try {
-      await c.login();
+      try { await c.login(); }
+      catch (e) {
+        const info = noteVcAuthFailure(vc, e);   // 자격증명 거부만 기록한다(시한·연결 실패는 null — authGuard 규칙 4)
+        if (info) authStopped[vcId] = authStopView(info);
+        const hint = info
+          ? `${stoppedBefore ? ' — 인증 실패로 주기 수집이 이미 멈춰 있던 vCenter 입니다(수동 실행이라 1회 시도)' : ''} · 인증 실패 기록 ${info.attempts}회`
+          : '';
+        errors.push({ vcenterId: vcId, error: `로그인 실패: ${e.message}${hint}` });
+        continue;   // finally 가 logout 을 정리한다
+      }
       await poolRun(vms, concurrency, async (v) => {
         const isWindows = /windows/i.test(v.guestOS || '');
         const creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcId, v.id, isWindows);
@@ -144,8 +184,8 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
           if (/(^|\n)MATCH(\n|$)/.test(r.stdout)) matched.push({ ...v, evidence: r.stdout.replace(/^MATCH\n?/, '').trim().slice(0, 300) });
         } catch (e) { errors.push({ vm: v.name, error: String(e.message).slice(0, 120) }); }
       });
-    } catch (e) { errors.push({ vcenterId: vcId, error: `로그인 실패: ${e.message}` }); }
+    } catch (e) { errors.push({ vcenterId: vcId, error: `탐침 실패: ${e.message}` }); }   // 로그인 실패는 위에서 따로 싣는다
     finally { await c.logout().catch(() => {}); }
   }
-  return { matched, checked, errors };
+  return { matched, checked, errors, notCollected, authStopped };
 }

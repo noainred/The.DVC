@@ -11,6 +11,19 @@ import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { requireChanged } from './changeResult.js';
 import { staleIdsOf, staleNote, staleKeptSuffix } from './staleSettingIds.js'; // v2.732 B5-02
+import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
+
+/**
+ * v2.741(WEB-04): VM 성능 트래킹 설정의 조회 실패 표시. 저장 뒤 다시 읽기(await load())가 실패하면 예전에는 `if (err)` 가
+ * 카드 전체를 ErrorBox 로 바꿔 **방금 '저장되었습니다' 문구와 폼이 사라졌다**. 첫 조회 실패(직전 값 없음)만 카드 전체 오류이고,
+ * 그 밖에는 직전 값을 두고 한 줄로 말한다(같은 파일의 MetricsSettings 는 이미 `error && !data` 다).
+ * 반환: { full: 카드 전체 오류인가, banner: 배너 문구 | null }
+ */
+export function vmPerfReloadView(d, err) {
+  if (err == null || err === '') return { full: false, banner: null };
+  if (d == null) return { full: true, banner: null };
+  return { full: false, banner: readFailText('VM 성능 트래킹 설정', err, { notMeaning: '아래는 직전에 읽은 값입니다', stale: true }) };
+}
 
 // Common presets for the temperature/metrics sampling interval.
 const PRESETS = [
@@ -216,7 +229,7 @@ export function VmPerfTrackingSettings() {
       setDays(r.settings.retentionDays);
       setIds(r.settings.vcenterIds || []);
       setTrackTotal(r.settings.trackTotal !== false);
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e); } // 객체 그대로 — 403 은 권한 안내로(ErrorBox·readFailText 가 같은 정규화를 쓴다)
   };
   useEffect(() => { load(); }, []);
 
@@ -236,7 +249,8 @@ export function VmPerfTrackingSettings() {
     finally { setBusy(false); }
   };
 
-  if (err) return <ErrorBox message={err} />;
+  const reload = vmPerfReloadView(d, err);
+  if (reload.full) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const usage = d.usage || [];
   // 저장돼 있지만 지금 목록에 없는 vCenter — 칩으로 그려 사람이 해제하게 한다(예전에는 '2개 선택' 인데 칩은 1개라 지울 수 없었다).
@@ -250,6 +264,7 @@ export function VmPerfTrackingSettings() {
         <b style={{ fontSize: 14 }}>VM 성능 트래킹 (Optimization · 할당 vs 사용)</b>
         <span className="muted" style={{ fontSize: 12 }}>총 사용량 <b style={{ color: 'var(--text)' }}>{fmtBytes(d.totalBytes)}</b></span>
       </div>
+      {reload.banner && <div data-reload-fail="" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)', whiteSpace: 'normal' }}>{reload.banner}</div>}
       <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
         Optimization › 사용 추이 차트의 원본 데이터입니다. vCenter 별로 <b>독립 DB</b>에 저장되어, 대상에서 빼면 파일을 삭제해 <b>용량이 즉시 회수</b>됩니다.
         <br />용량 감각(실측): 6,000 VM · 1시간 간격이면 <b>90일 ≈ 7.4GB</b> · <b>1년 ≈ 30GB</b>. 필요한 vCenter 만 선택하는 것을 권합니다.

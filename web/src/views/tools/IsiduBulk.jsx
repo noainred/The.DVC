@@ -8,6 +8,7 @@
  */
 import React, { useMemo, useRef, useState } from 'react';
 import { postJson } from '../../api.js';
+import { runQueueNote } from './isiduOverviewText.js';
 import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import {
@@ -100,7 +101,7 @@ export default function IsiduBulk({ srv, rows = [], dirty = false, locked = fals
     try {
       const r = await postJson('/tools/isilon-dirusage/run', { ids });
       const lines = r?.ok === false ? [] : nudgeLines(r);
-      setRunMsg({ tone: r?.ok === false ? 'bad' : (lines.some((x) => !x.ok) ? 'warn' : 'ok'), text: r?.ok === false ? (r.reason || '요청하지 못했습니다.') : runResultText(r), lines });
+      setRunMsg({ tone: r?.ok === false ? 'bad' : (lines.some((x) => !x.ok) ? 'warn' : 'ok'), text: r?.ok === false ? (r.reason || '요청하지 못했습니다.') : [runResultText(r), runQueueNote(r)].filter(Boolean).join(' '), lines });   // v2.741 TIMING-02: 대기열에 넣은 대상도 말한다
     } catch (e) { setRunMsg({ tone: 'bad', text: e?.message || String(e), lines: [] }); } finally { setWorking(false); }
   };
   /** 차례로 — 연결 시험(저장값으로) · 결과 메일(저장된 받는 사람에게). */

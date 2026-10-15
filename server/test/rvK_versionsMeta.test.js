@@ -215,12 +215,16 @@ test('I-08 ⑩ 직전 정상 확인 결과 유지 계약 — 실패한 확인은
 });
 
 test('I-08 ⑪ 전체 시한은 재시도·Retry-After 대기까지 묶는다(건별 시한만으로는 3배 이상 늘어난다)', async () => {
+  // v2.741(감사 RECENT-04): Retry-After(5초)가 남은 전체 시한(1초)보다 길면 기다리지 않고 받은 응답으로 결론을 낸다 —
+  //   예전에는 시한까지 재시도하다 '전체 시한' 으로 끝났다. 묶임(전체 시한 안에 끝난다)은 그대로이고 사유가 'HTTP 503' 이 됐다
+  //   (저장소가 실제로 한 말을 시한 초과로 바꾸지 않는다 — audit2741a RECENT-04 와 같은 판정).
   let hits = 0;
   const base = await serve((_q, r) => { hits += 1; r.statusCode = 503; r.setHeader('retry-after', '5'); r.end('busy'); });
   const t0 = Date.now();
   const [data, err] = await upg.fetchRemoteVersions(base, { timeout: 1000 });
   const ms = Date.now() - t0;
   assert.equal(data, null);
-  assert.match(String(err), /전체 시한/, String(err));
+  assert.match(String(err), /HTTP 503/, String(err));
+  assert.equal(hits, 1, '과부하라고 말한 저장소에 시한 안에 못 끝날 재시도를 보내지 않는다');
   assert.ok(ms < 4_000, `전체 시한(1초) 근처에서 끝나야 한다(${ms}ms, 요청 ${hits}회)`);
 });

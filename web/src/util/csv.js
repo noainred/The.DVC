@@ -5,9 +5,21 @@
 // PowerMap/HardwareTools/LicenseTools/ToolsReports/vcdOverview)는 이 가드가 없어, VM 이름 등
 // 사용자 영향 텍스트에 `=HYPERLINK(...)` 같은 값이 있으면 열람자 PC 에서 수식이 실행될 수 있었다.
 
-/** 셀 값을 수식 가드만 적용해 돌려준다(따옴표로 항상 감싸는 기존 내보내기용). */
+// 순수 숫자(부호·소수·지수만) — 엑셀이 숫자로 읽을 뿐 수식으로 실행하지 않는다(v2.741 WEB-02).
+// 서버 server/src/util/csv.js·pyportal hub/csvio.py 와 같은 규칙이어야 한다(테스트가 세 벌을 대조).
+// '+' 로 시작하는 숫자열(+8210… 국제 전화번호 같은 식별자)은 가드한다 — 엑셀이 숫자로 바꿔 '+' 와
+// 앞자리를 잃는다. 음수만 풀어 준다(정렬·합계에 들어가야 하는 것은 음수다).
+const PLAIN_NUMBER_RE = /^-?\d+(\.\d+)?(e[-+]?\d+)?$/i;
+
+/**
+ * 셀 값을 수식 가드만 적용해 돌려준다(따옴표로 항상 감싸는 기존 내보내기용).
+ * ⚠ 유한 숫자와 순수 숫자 문자열(`-12.5`·`1e-3`)은 가드하지 않는다(`+3` 처럼 '+' 로 시작하는 것은 가드) — 예전엔 음수에도
+ * 작은따옴표가 붙어 엑셀에서 텍스트가 되어 정렬·합계에서 빠졌다. `-2+3`·`=…`·`@…` 는 계속 가드한다.
+ */
 export function guardCell(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   const s = v === null || v === undefined ? '' : String(v);
+  if (PLAIN_NUMBER_RE.test(s)) return s;
   return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
 }
 

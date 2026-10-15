@@ -366,7 +366,10 @@ test('★ P2: Windows 빌드는 빌드 머신의 런타임 config(auth-secret·D
   const zip = sh.indexOf('zip -qr');
   assert.ok(cp > 0 && clean > cp && clean < zip, 'config 복사 뒤·zip 앞에 정리가 있어야 한다');
   const block = sh.slice(clean, sh.indexOf('\n', sh.indexOf('-exec rm', clean)));
-  for (const k of ["'auth-secret'", "'*.db'", "'*.ndjson'", "'secrets-key'", "! -name '*.example.json'"]) assert.ok(block.includes(k), `정리 대상에 ${k} 가 없다`);
+  // v2.741(INJPKG-05): 나열한 이름(auth-secret·*.db·*.ndjson·secrets-key)만 지우던 거부 목록 → 예제만 남기는 허용 목록.
+  //   그 이름들은 이제 '예제가 아니므로' 지워진다(test/audit2741l.test.js 가 실제 find 로 확인한다).
+  assert.ok(block.includes("! -name '*.example.json'"), '예제만 남기는 허용 목록이어야 한다');
+  assert.ok(!/-o -name/.test(block), '거부 목록(-o -name …) 으로 되돌리지 말 것');
 });
 
 test('★ P5: 오프라인 패키지가 OTP 콘솔 래퍼(otp-enroll.sh)를 담는다', () => {

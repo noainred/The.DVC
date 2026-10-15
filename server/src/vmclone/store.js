@@ -30,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { portalParts, portalMs } from '../util/dayKey.js';
+import { portalParts, portalMs, localStamp } from '../util/dayKey.js';
 
 const FILE = path.join(config.configDir, 'vm-clone.json');
 const MAX_JOBS = 200;
@@ -123,6 +123,88 @@ export function deleteJob(id) {
   db.jobs.splice(i, 1);
   persist();
   return true;
+}
+
+/*
+ * ── v2.741(감사 TIMING-01) 실행 중 기록 ────────────────────────────────────────
+ * 실행 상태(runner 의 _running)는 메모리에만 있어, 스냅샷을 만든 뒤 업그레이드·재시작이 오면 finally 의 스냅샷 삭제가 불리지 않았다.
+ * 원본 VM 에 portal-clone-* 스냅샷이 남았고, lastRun 은 어제 기록 그대로라 재기동 1분 뒤 같은 잡이 다시 돌아 **스냅샷을 겹쳐** 만들었다.
+ *  · 실행을 시작하면 잡에 `running`(스냅샷 이름·ref·클론 이름·NFS 폴더·시작 시각·이 프로세스 표지)을 **동기로** 남기고, 끝나면 지운다.
+ *  · 기록의 `boot` 가 이 프로세스의 BOOT_ID 와 다르면 '이전 프로세스가 끝내지 못한 실행' 이다. 기동 때 lastRun 에 그 사실을 남기고
+ *    (markInterruptedRuns), 다음 실행이 **새 스냅샷을 만들기 전에** 남은 스냅샷을 지운다(runner). 못 지우면 새 스냅샷을 만들지 않고
+ *    RECOVER_RETRY_MS 뒤 다시 시도하며, RECOVER_GIVE_UP_MS 가 지나면 수동 삭제를 안내하고 기록을 내린다(보류에는 시한).
+ *  · 다시 실행은 사슬마다 RESUME_LIMIT 번까지 · 시작한 지 RESUME_EXPIRE_MS 가 지난 실행은 정리만 한다(util/scanJournal 과 같은 값).
+ */
+export const BOOT_ID = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+export const RECOVER_RETRY_MS = 10 * 60_000;
+export const RECOVER_GIVE_UP_MS = 6 * 3_600_000;   // 클론 태스크 시한(4시간) + 스냅샷 병합 여유
+export const RESUME_LIMIT = 2;
+export const RESUME_EXPIRE_MS = 48 * 3_600_000;
+
+const RUN_STR_KEYS = ['trigger', 'vmRef', 'snapName', 'snapRef', 'cloneName', 'destDir', 'phase', 'lastError'];
+const RUN_NUM_KEYS = ['at', 'resumes', 'detectedAt', 'tries', 'nextAt'];
+function cleanRunning(rec) {
+  const out = {};
+  for (const k of RUN_STR_KEYS) if (typeof rec?.[k] === 'string' && rec[k]) out[k] = rec[k].slice(0, k === 'destDir' ? 1024 : 300);
+  for (const k of RUN_NUM_KEYS) { const n = Number(rec?.[k]); if (rec?.[k] != null && rec[k] !== '' && Number.isFinite(n)) out[k] = n; }
+  if (typeof rec?.boot === 'string') out.boot = rec.boot.slice(0, 80);
+  return out;
+}
+
+/** 실행 시작 기록(runner 전용) — 이 프로세스 표지와 시작 시각을 붙여 동기로 쓴다. */
+export function setRunning(id, rec = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j) return;
+  j.running = cleanRunning({ ...rec, at: Date.now(), boot: BOOT_ID });
+  persist();
+}
+/** 실행 기록 갱신(스냅샷 ref·단계 등). 기본은 이 프로세스의 기록만 — anyBoot 면 이전 프로세스의 기록도(정리 재시도 표지). */
+export function patchRunning(id, patch = {}, { anyBoot = false } = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j?.running || (!anyBoot && j.running.boot !== BOOT_ID)) return;
+  j.running = cleanRunning({ ...j.running, ...patch, boot: j.running.boot });
+  persist();
+}
+/** 실행 기록 지우기. 기본은 이 프로세스의 기록만(이전 프로세스의 기록은 정리가 끝났을 때만 anyBoot 로 지운다). */
+export function clearRunning(id, { anyBoot = false } = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j?.running || (!anyBoot && j.running.boot !== BOOT_ID)) return;
+  delete j.running;
+  persist();
+}
+/** 이전 프로세스가 끝내지 못한 실행 기록(없으면 null). */
+export function interruptedRunOf(job) {
+  const r = job?.running;
+  return r && typeof r === 'object' && r.boot !== BOOT_ID ? r : null;
+}
+/** 남은 스냅샷 정리(와 다시 실행)를 지금 시도할 차례인가 — 켜진 잡 · 이전 프로세스의 기록 · 재시도 시각 도래. */
+export function recoveryDue(job, now = Date.now()) {
+  const r = interruptedRunOf(job);
+  if (!r || !job.enabled) return false;
+  return !(Number(r.nextAt) > now);
+}
+
+/**
+ * 기동 때 1회(scheduler) — 이전 프로세스가 끝내지 못한 실행을 lastRun 에 '재시작으로 중단' 으로 남긴다(화면이 말하게).
+ * 이미 남긴 기록(detectedAt)은 다시 덮지 않는다(재시도 결과를 지우지 않게). @returns 새로 찾은 개수
+ */
+export function markInterruptedRuns(now = Date.now()) {
+  const db = load();
+  let n = 0;
+  for (const j of db.jobs) {
+    const r = interruptedRunOf(j);
+    if (!r || r.detectedAt) continue;
+    r.detectedAt = now;
+    const snap = r.snapName ? `스냅샷 ‘${r.snapName}’` : '스냅샷';
+    const next = !j.enabled ? `잡이 꺼져 있어 다시 켜면 남은 ${snap} 을 정리합니다`
+      : (r.resumes || 0) >= RESUME_LIMIT || (r.at && now - r.at > RESUME_EXPIRE_MS)
+        ? `곧 남은 ${snap} 을 정리합니다(다시 실행은 하지 않습니다 — 자동 재실행 상한·시한)`
+        : `곧 남은 ${snap} 을 정리한 뒤 다시 실행합니다`;
+    j.lastRun = { at: now, ok: false, skipped: 'restart-interrupted', detail: `업그레이드·서비스 재시작으로 실행이 중단됐습니다(${(r.at && localStamp(r.at)) || '시작 시각 모름'} 시작) — ${next}.`.slice(0, 400), ms: 0 };
+    n++;
+  }
+  if (n) persist();
+  return n;
 }
 
 /** 실행 결과 반영(runner 전용) — clones 원장 갱신 + lastRun. */

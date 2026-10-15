@@ -13,7 +13,10 @@
  *
  * ── 규칙(이 저장소가 실측으로 배운 것) ─────────────────────────────────────────
  *  · open 은 진행 중인 시도를 공유하고 잠금은 래치하지 않는다(`createLockRetry` — v2.597) · busy_timeout 먼저 · 0600(`openSqlite`).
- *  · 같은 (agent, 대상, 시각) 재적재는 무시한다(엣지 재전송 멱등). 폴더 적재는 5,000행마다 COMMIT 뒤 양보(v2.611 — 트랜잭션을 연 채
+ *  · 같은 (agent, 대상, 시각) 재적재는 무시한다(엣지 재전송 멱등). v2.741 EDGE-01: 엣지 결과는 **엣지 원본 시각**(`edge_ts` — 수신이 자른
+ *    시각이 아니다)으로 먼저 중복을 본다 — 시계가 앞선 엣지의 스캔은 받을 때마다 다른 '지금' 으로 잘려 (agent, 대상, 시각) 로는 걸러지지 않았다.
+ *    잘라 둔 시각이 다른 엣지 스캔과 겹치면 바로 앞(과거)의 빈 칸을 쓴다(덮거나 '중복' 으로 버리지 않는다).
+ *    폴더 적재는 5,000행마다 COMMIT 뒤 양보(v2.611 — 트랜잭션을 연 채
  *    양보하지 않는다). 다 넣은 뒤에야 `complete=1` 과 최신 표를 바꾼다 — 중간에 끊긴 스캔은 조회되지 않고, 재전송이 다시 채운다.
  *  · 보존 정리는 스캔 단위로 끊어서 하고 대상별 마지막 성공 스캔은 지우지 않는다(지우면 '지금 크기' 가 사라진다).
  *  · 못 읽은 값은 NULL(0 은 '빈 폴더' 라는 거짓).
@@ -55,7 +58,7 @@ async function openDb() {
         path TEXT, host TEXT, size_mode TEXT, duration_ms INTEGER,
         total_bytes INTEGER, total_res INTEGER, sum_bytes INTEGER, sum_res INTEGER, count INTEGER,
         skipped INTEGER, err_lines INTEGER, err_sample TEXT, truncated INTEGER,
-        kind TEXT, err TEXT, trig TEXT, edge_scan_id INTEGER, node TEXT,
+        kind TEXT, err TEXT, trig TEXT, edge_scan_id INTEGER, node TEXT, edge_ts INTEGER,
         UNIQUE (agent, target_id, ts)
       );
       CREATE INDEX IF NOT EXISTS idx_isidu_scan_ts ON isidu_scan(ts);
@@ -70,6 +73,12 @@ async function openDb() {
         PRIMARY KEY (agent, target_id)
       );
     `);
+    // v2.741 EDGE-01: 엣지 원본 시각 열 — 옛 DB 는 없는 열만 더한다(table_info 로 확인 · 'duplicate column name' 만 삼킨다 — v2.603 DB2603-01).
+    if (!conn.prepare('PRAGMA table_info(isidu_scan)').all().some((r) => r.name === 'edge_ts')) {
+      try { conn.exec('ALTER TABLE isidu_scan ADD COLUMN edge_ts INTEGER'); }
+      catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+    }
+    conn.exec('CREATE INDEX IF NOT EXISTS idx_isidu_scan_edge ON isidu_scan(agent, target_id, edge_ts) WHERE edge_ts IS NOT NULL');
     _db = conn;
   } catch (e) {
     try { conn?.close(); } catch { /* 이미 닫힘 */ }
@@ -97,9 +106,11 @@ function serial(fn) { const p = _wq.then(fn, fn); _wq = p.catch(() => {}); retur
 
 /**
  * 스캔 1건 적재(폴더 포함). 같은 (agent, 대상, ts) 가 이미 온전히 있으면 duplicate.
- * @param {object} rec { agent, targetId, ts, ok, path, host, sizeMode, durationMs, total:{bytes,res}|null, sumBytes, sumRes, count,
- *                       skipped, errLines, errSample[], truncated, kind, error, trig, edgeScanId, entries:[{name,bytes,res}] }
- * @returns {Promise<{ok:boolean, id?:number, duplicate?:boolean, error?:string}>}
+ * v2.741 EDGE-01: `srcTs`(엣지 원본 시각)가 있으면 (agent, 대상, 실행 노드, 원본 시각) 으로 먼저 찾는다 — 같은 엣지 스캔의 재전송은 처음 적은
+ * 행 하나다. 그 시각 칸에 다른 엣지 스캔이 있으면 바로 앞의 빈 칸(1ms 씩)에 적는다.
+ * @param {object} rec { agent, targetId, ts, srcTs?, ok, path, host, sizeMode, durationMs, total:{bytes,res}|null, sumBytes, sumRes, count,
+ *                       skipped, errLines, errSample[], truncated, kind, error, trig, edgeScanId, node?, entries:[{name,bytes,res}] }
+ * @returns {Promise<{ok:boolean, id?:number, ts?:number, duplicate?:boolean, error?:string}>}  ts = 실제로 적은(또는 이미 있던) 시각
  */
 export function insertScan(rec) { return serial(() => insertScanInner(rec)); }
 async function insertScanInner(rec) {
@@ -107,29 +118,51 @@ async function insertScanInner(rec) {
   if (!db) return { ok: false, error: lockRetry.note() || 'DB 를 열지 못했습니다' };
   const agent = String(rec?.agent ?? '').slice(0, 128);
   const targetId = String(rec?.targetId ?? '').slice(0, 64);
-  const ts = iOr(rec?.ts);
+  let ts = iOr(rec?.ts);
   if (!targetId || ts == null) return { ok: false, error: '대상·시각이 없습니다' };
+  const srcTs = iOr(rec?.srcTs);
+  const node = s(rec?.node, 128);
   const ok = rec.ok === true ? 1 : 0;
   const entries = ok && Array.isArray(rec.entries) ? rec.entries : [];
   let id = null;
   try {
     db.exec('BEGIN');
-    const prev = db.prepare('SELECT id, complete FROM isidu_scan WHERE agent=? AND target_id=? AND ts=?').get(agent, targetId, ts);
-    if (prev && prev.complete) { db.exec('COMMIT'); return { ok: true, id: prev.id, duplicate: true }; }
+    let prev = null;
+    if (srcTs != null) {
+      // 같은 엣지 스캔의 재전송 — 처음 적은 행(그때 잘라 둔 시각)을 그대로 쓴다.
+      prev = db.prepare(`SELECT id, complete, ts FROM isidu_scan WHERE agent=? AND target_id=? AND edge_ts=? AND IFNULL(node, '')=?
+        ORDER BY id LIMIT 1`).get(agent, targetId, srcTs, node ?? '');
+      if (prev) ts = prev.ts;
+    }
+    if (!prev) {
+      const atTs = db.prepare('SELECT id, complete, edge_ts FROM isidu_scan WHERE agent=? AND target_id=? AND ts=?');
+      prev = atTs.get(agent, targetId, ts);
+      // 같은 스캔: 원본 시각이 같거나, 원본 시각 기록이 없는 옛 행인데 시각이 원본과 같다(잘리지 않은 재전송).
+      const sameScan = (p) => srcTs == null || p.edge_ts === srcTs || (p.edge_ts == null && ts === srcTs);
+      if (prev && !sameScan(prev)) {
+        // 그 시각 칸은 다른 스캔이다(잘라 둔 시각이 겹쳤다) — 바로 앞의 빈 칸을 찾는다. 덮거나 '중복' 으로 버리지 않는다.
+        let k = 0;
+        do { ts -= 1; prev = atTs.get(agent, targetId, ts); } while (prev && ++k < 1000);
+        if (prev) { db.exec('ROLLBACK'); return { ok: false, error: '같은 시각대에 스캔이 너무 많아 빈 칸을 찾지 못했습니다' }; }
+      } else if (prev && srcTs != null && prev.edge_ts == null) {
+        db.prepare('UPDATE isidu_scan SET edge_ts=? WHERE id=?').run(srcTs, prev.id); // 옛 행에 원본 시각을 적어 다음 재전송부터 원본으로 찾는다
+      }
+    }
+    if (prev && prev.complete) { db.exec('COMMIT'); return { ok: true, id: prev.id, ts, duplicate: true }; }
     if (prev) { // 중간에 끊긴 적재 — 폴더를 지우고 다시 넣는다
       db.prepare('DELETE FROM isidu_entry WHERE scan_id=?').run(prev.id);
       id = prev.id;
     } else {
       const r = db.prepare(`INSERT INTO isidu_scan
         (agent, target_id, ts, ok, complete, path, host, size_mode, duration_ms, total_bytes, total_res, sum_bytes, sum_res, count,
-         skipped, err_lines, err_sample, truncated, kind, err, trig, edge_scan_id, node)
-        VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+         skipped, err_lines, err_sample, truncated, kind, err, trig, edge_scan_id, node, edge_ts)
+        VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         agent, targetId, ts, ok, s(rec.path, 1024), s(rec.host, 256), s(rec.sizeMode, 4), iOr(rec.durationMs),
         ok ? iOr(rec.total?.bytes) : null, ok ? iOr(rec.total?.res) : null,
         ok ? iOr(rec.sumBytes) : null, ok ? iOr(rec.sumRes) : null, ok ? iOr(rec.count) : null,
         iOr(rec.skipped), iOr(rec.errLines), Array.isArray(rec.errSample) && rec.errSample.length ? JSON.stringify(rec.errSample.slice(0, 5).map((x) => String(x).slice(0, 200))) : null,
         rec.truncated ? 1 : 0, ok ? null : s(rec.kind || 'error', 32), ok ? null : s(rec.error, 600), s(rec.trig, 16), iOr(rec.edgeScanId),
-        s(rec.node, 128));
+        node, srcTs);
       id = Number(r.lastInsertRowid);
     }
     const insE = db.prepare('INSERT OR IGNORE INTO isidu_entry (scan_id, name, bytes, res) VALUES (?,?,?,?)');
@@ -151,7 +184,7 @@ async function insertScanInner(rec) {
         try_ts = MAX(IFNULL(isidu_latest.try_ts, 0), excluded.try_ts)`).run(
       agent, targetId, ok ? id : null, ok ? ts : null, id, ts, ok ? 0 : 1);
     db.exec('COMMIT');
-    return { ok: true, id, duplicate: false };
+    return { ok: true, id, ts, duplicate: false };
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* 열린 트랜잭션 없음 */ }
     return { ok: false, error: e.message };

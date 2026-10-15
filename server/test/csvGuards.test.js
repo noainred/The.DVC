@@ -36,7 +36,7 @@ test('BOM 을 제거한다 — 남으면 첫 헤더 셀 매칭이 조용히 실�
 });
 
 test('수식가드/역가드는 쌍이다 — 왕복해도 값이 자라지 않는다', () => {
-  for (const v of ['=cmd|calc', '+1', '-2', '@SUM(A1)', '\tx']) {
+  for (const v of ['=cmd|calc', '+1', '+1+1', '-2+3', '@SUM(A1)', '\tx']) {
     const g = guardCell(v);
     assert.equal(g[0], "'");
     assert.equal(unguardCell(g), v);

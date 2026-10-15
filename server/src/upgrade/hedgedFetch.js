@@ -14,8 +14,12 @@
  *  · 첫 시도를 보내고 `hedgeMs`(기본 3초 · env `UPGRADE_CHECK_HEDGE_MS`) 안에 응답(헤더)이 없으면 다음 시도를 **같이** 보낸다.
  *    최대 `maxAttempts`(3)번. 앞 시도는 끊지 않는다 — 모든 요청이 느린 저장소라면 그 앞 시도가 가장 먼저 끝난다.
  *  · 먼저 온 응답(재시도 대상 상태가 아닌 것)을 쓰고 나머지 시도는 끊는다.
- *  · 시도가 일시 오류(연결 거부·시한·재설정)나 재시도 대상 상태(408·425·429·5xx)로 끝나면 다음 시도를 짧은 대기 뒤 곧바로 보낸다
- *    (예전 재시도와 같은 400ms·800ms). 일시 오류가 아닌 실패(차단 대역·인증서 거부·리다이렉트 거부)는 다시 보내지 않고 그대로 던진다.
+ *  · 시도가 일시 오류(연결 거부·시한·재설정)나 재시도 대상 상태(408·425·429·5xx)로 끝나면 다음 시도를 짧은 대기(400ms·800ms) 뒤 곧바로 보낸다.
+ *    일시 오류가 아닌 실패(차단 대역·인증서 거부·리다이렉트 거부)는 다시 보내지 않고 그대로 던진다.
+ *  · v2.741(감사 RECENT-04): 429·503 이 `Retry-After`(초)를 주면 예전 재시도(resilientFetch — v2.617 ARCH-2)와 같은 규칙으로 그만큼 기다린다
+ *    (`retryDelayMs` — 상한 30초 · 0~50% 흔들림). 그 응답을 받은 뒤에는 함께 보내기를 멈추고 순서대로(시도마다 `attemptMs` 시한) 보낸다 —
+ *    과부하라고 말한 저장소에 같은 요청을 겹쳐 보내지 않게. 기다릴 시간이 전체 시한의 남은 시간보다 길면 기다리지 않고 그 응답으로
+ *    결론을 낸다(호출부가 'HTTP 503' 이라고 말한다 — 시한 초과로 바꾸지 않는다).
  *  · 모든 시도가 끝났는데 쓸 응답이 없으면 마지막 재시도 대상 응답(호출부가 'HTTP 503' 처럼 상태로 말하게)을, 그것도 없으면 마지막 오류를 돌려준다.
  *  · 전체 시한(`signal`)이 끝나면 모든 시도를 끊는다 — 호출부가 `deadlineSignal` 로 시한 사유를 만든다(versionsDoc.js metaTimeoutReason).
  *  · `hedgeMs = 0` 이면 예전처럼 순서대로 보낸다(시도마다 `attemptMs` 시한) — 동시 요청을 싫어하는 저장소를 위한 탈출구.
@@ -24,7 +28,7 @@
  * 작은 메타데이터(versions.json · manifest — 수 KB)에만 쓴다. **번들·설치 패키지(수백 MB) 다운로드에는 쓰지 말 것** — 같은 큰 파일을
  * 두세 번 받게 된다. 같은 요청을 최대 3번 보내는 것은 예전 재시도(최대 3번)와 같은 상한이다.
  */
-import { resilientFetch, _internals as rfInternals } from '../util/resilientFetch.js';
+import { resilientFetch, retryDelayMs, _internals as rfInternals } from '../util/resilientFetch.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 /** 다음 시도를 함께 보내기까지 기다리는 시간 — 빈 값·비숫자 = 기본 3초, 0 이하 = 끔(순서대로), [1초, 30초]. */
@@ -69,6 +73,10 @@ export function hedgedFetch(url, {
     let lastErr = null;
     let lastRetryable = null;
     const hedging = hedgeMs > 0;
+    let throttled = false;      // v2.741(RECENT-04): 429·503 을 받았다 — 더는 함께 보내지 않는다
+    let noMore = false;         // v2.741: Retry-After 가 남은 시한보다 길다 — 새 시도를 보내지 않고 진행 중 시도·받은 응답으로 결론
+    const startedAt = Date.now();
+    const budgetMs = Number.isFinite(Number(totalMs)) && Number(totalMs) > 0 ? Number(totalMs) : null;
 
     const stop = () => { done = true; clearTimeout(timer); signal?.removeEventListener?.('abort', onAbort); };
     const abortAll = (keep) => { for (const c of ctrls) if (c !== keep) { try { c.abort(); } catch { /* */ } } };
@@ -80,10 +88,21 @@ export function hedgedFetch(url, {
     signal?.addEventListener?.('abort', onAbort, { once: true });
 
     const schedule = (ms) => { clearTimeout(timer); timer = setTimeout(launch, ms); };
-    /** 한 시도가 쓸 응답 없이 끝났다 — 남은 시도가 있으면 곧 다음을, 없고 진행 중인 시도도 없으면 결론을 낸다. */
-    const settleFailure = () => {
+    /**
+     * 한 시도가 쓸 응답 없이 끝났다 — 남은 시도가 있으면 곧 다음을, 없고 진행 중인 시도도 없으면 결론을 낸다.
+     * @param {Response|null} res 재시도 대상 응답(있으면 429·503 의 Retry-After 를 본다 — v2.741 RECENT-04)
+     */
+    const settleFailure = (res = null) => {
       failures += 1;
-      if (launched < maxAttempts) { schedule(400 * 2 ** (failures - 1)); return; }
+      const base = 400 * 2 ** (failures - 1);
+      let wait = base;
+      if (res && (res.status === 429 || res.status === 503)) {
+        throttled = true;   // 과부하라고 말한 저장소 — 이제부터 함께 보내지 않는다(아래 launch 의 schedule(hedgeMs) 도 막는다)
+        wait = retryDelayMs(res.status, res.headers?.get?.('retry-after'), base);
+        // 기다릴 시간이 전체 시한의 남은 시간보다 길면 다음 시도는 시한에 끊길 뿐이다 — 보내지 않고 받은 응답으로 결론(호출부가 상태로 말한다).
+        if (wait > base && budgetMs != null && Date.now() - startedAt + wait >= budgetMs) { noMore = true; clearTimeout(timer); }
+      }
+      if (!noMore && launched < maxAttempts) { schedule(wait); return; }
       if (running > 0) return;   // 앞서 보낸 시도가 아직 기다리는 중 — 그 결과를 본다
       stop();
       if (lastRetryable) resolve({ res: lastRetryable, attempts: launched });
@@ -91,19 +110,20 @@ export function hedgedFetch(url, {
     };
 
     function launch() {
-      if (done || launched >= maxAttempts) return;
+      if (done || noMore || launched >= maxAttempts) return;
       launched += 1; running += 1;
       onAttempt?.(launched);
       const ctrl = new AbortController();
       ctrls.add(ctrl);
       const sig = signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal;
-      const t = hedging ? totalMs : (attemptMs || totalMs);
+      // 함께 보내는 동안은 앞 시도를 끊지 않으므로 시한은 전체 시한 — 429·503 뒤(순서대로)에는 시도마다 시한(예전 재시도와 같다).
+      const t = (hedging && !throttled) ? totalMs : (attemptMs || totalMs);
       fetchImpl(url, { dispatcher, headers, timeoutMs: t, retries: 0, signal: sig }).then((res) => {
         running -= 1; ctrls.delete(ctrl);
         if (done) { cancelBody(res); return; }
         if (RETRYABLE.has(res.status)) {
           cancelBody(lastRetryable); lastRetryable = res;
-          settleFailure();
+          settleFailure(res);
           return;
         }
         stop(); abortAll(ctrl); cancelBody(lastRetryable);
@@ -120,7 +140,7 @@ export function hedgedFetch(url, {
         }
         settleFailure();
       });
-      if (hedging && launched < maxAttempts) schedule(hedgeMs);
+      if (hedging && !throttled && launched < maxAttempts) schedule(hedgeMs);
     }
 
     launch();

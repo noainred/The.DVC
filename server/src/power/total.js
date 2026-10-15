@@ -23,6 +23,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { powerPathOf, noPathReason } from '../storage/power.js';
 import { cvpPartsStaleReason, cvpConfirmOpts } from '../cvp/confirm.js';
+import { devicePower, powerSupplies } from '../cvp/parse.js'; // v2.741(감사 LEFT-05): CVP 장비 전력 계산은 parse.devicePower 한 벌
 
 export const STORAGE_STALE_MS = 6 * 3_600_000;  // 스토리지 기본 수집 주기 1시간 — 6배
 export const UNASSIGNED = '';
@@ -31,26 +32,26 @@ export const ISSUE_MAX = 200;   // 못 읽은 장비 목록 상한 — 넘친 �
 const w0 = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n < 1_000_000 ? n : null; };
 
 /**
- * CVP 장비 1대 → { watts, basis:'input'|'output'|null, psus, read, partial? } (순수 — partial 은 일부만 읽었을 때만 true 로 싣는다).
- * v2.680 A-05: 빈 슬롯(state 'absent')은 PSU 로 세지 않는다. 장착된 PSU 중 일부만 읽었으면 `partial:true` 다 —
- *   예전에는 psus 와 read 를 비교하지 않아 PSU 2개 중 1개만 읽은 스위치가 절반 전력으로 '측정' 에 들어갔다(부분 합을 합계라 말함).
+ * CVP 장비 1대 — 계산은 cvp/parse.js devicePower 한 벌(v2.741 감사 LEFT-05 — 예전에는 이 파일에 사본이 있어 장비마다 반올림한 값을
+ *   더했고, CVP 전력 탭(반올림 없이 합산)과 같은 장비 집합의 합계가 달랐다). watts 는 **반올림하지 않은 값**이다 — 합계에 쓴다.
+ * v2.680 A-05: 빈 슬롯(state 'absent')은 PSU 로 세지 않는다. 장착된 PSU 중 일부만 읽었으면 `partial:true` 다.
+ * v2.741(감사 DEV-03): 슬롯 전원(ecb › Linecard N)은 PSU 가 아니다(parse.isSlotPowerPart) — 뺀 개수는 slotEntries.
  */
-export function cvpDevicePower(d) {
+function cvpPowerRaw(d) {
   const parts = Array.isArray(d?.partsList) ? d.partsList : null;
   if (!parts) return { watts: null, basis: null, psus: 0, read: 0 };
-  let inSum = 0; let inN = 0; let outSum = 0; let outN = 0; let psus = 0;
-  for (const p of parts) {
-    if (!p || p.kind !== 'psu') continue;
-    if (p.state === 'absent') continue;
-    psus += 1;
-    const i = w0(p.power?.inW); const o = w0(p.power?.outW);
-    if (i != null) { inSum += i; inN += 1; } else if (o != null) { outSum += o; outN += 1; }
-  }
-  const read = inN + outN;
-  const pf = read > 0 && read < psus ? { partial: true } : {};   // 온전하면 필드를 싣지 않는다(예전 응답 모양 그대로)
-  if (inN) return { watts: Math.round(inSum + outSum), basis: outN ? 'mixed' : 'input', psus, read, ...pf };
-  if (outN) return { watts: Math.round(outSum), basis: 'output', psus, read, ...pf };
-  return { watts: null, basis: null, psus, read: 0 };
+  const p = devicePower(parts);
+  if (!p) return { watts: null, basis: null, psus: powerSupplies(parts).length, read: 0 };
+  // 온전하면 partial·slotEntries 필드를 싣지 않는다(예전 응답 모양 그대로)
+  return { watts: p.watts, basis: p.basis, psus: p.psus, read: p.read, ...(p.partial ? { partial: true } : {}), ...(p.slotEntries ? { slotEntries: p.slotEntries } : {}) };
+}
+/**
+ * CVP 장비 1대 → { watts, basis:'input'|'output'|'mixed'|null, psus, read, partial?, slotEntries? } — **표시용**(watts 를 반올림한다).
+ * 합계는 cvpPowerRaw 로 더한 뒤 표시 단계에서만 반올림한다(buildPowerTotal).
+ */
+export function cvpDevicePower(d) {
+  const p = cvpPowerRaw(d);
+  return p.watts == null ? p : { ...p, watts: Math.round(p.watts) };
 }
 
 /**
@@ -112,12 +113,12 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     const why = cvpPartsStaleReason(d, confOpts);
     if (why) { net.stale += 1; net.staleBy[why] = (net.staleBy[why] || 0) + 1; continue; }
     const at = numOrNull(d.partsAt) ?? numOrNull(d.collectedAt);
-    const p = cvpDevicePower(d);
+    const p = cvpPowerRaw(d);   // v2.741(LEFT-05): 반올림하지 않은 값으로 더한다(CVP 전력 탭과 같은 합) — 장비 행은 표시용으로 반올림
     if (p.watts == null) { net.unread += 1; continue; }
     if (p.basis === 'output') net.outputOnly += 1;
     net.watts += p.watts; add('network', d.corp?.corpId || '', p.watts);
     if (p.partial) { net.partial += 1; net.partialWatts += p.watts; } else net.measured += 1;
-    net.items.push({ id: `${d.cvpId}/${d.key}`, name: d.hostname || d.key, model: d.model || '', watts: p.watts, basis: p.basis, psus: p.psus, read: p.read, ...(p.partial ? { partial: true } : {}), corpId: d.corp?.corpId || '', ts: at });
+    net.items.push({ id: `${d.cvpId}/${d.key}`, name: d.hostname || d.key, model: d.model || '', watts: Math.round(p.watts), basis: p.basis, psus: p.psus, read: p.read, ...(p.partial ? { partial: true } : {}), ...(p.slotEntries ? { slotEntries: p.slotEntries } : {}), corpId: d.corp?.corpId || '', ts: at });
   }
 
   // ③ 스토리지 — 수집기가 실은 extra.power(v2.667: 못 읽은 사유를 extra.powerProbe 로 받는다).
@@ -174,6 +175,6 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
   const byCorp = [...corps.values()].map((c) => ({ ...c, servers: Math.round(c.servers), network: Math.round(c.network), storage: Math.round(c.storage), total: Math.round(c.total) }))
     .sort((a, b) => b.total - a.total);
   const s = trim(srv); const n = trim(net); const t = trim(sto);
-  t.partialWatts = Math.round(t.partialWatts);
+  n.partialWatts = Math.round(n.partialWatts); t.partialWatts = Math.round(t.partialWatts);
   return { totalWatts: s.watts + n.watts + t.watts, servers: s, network: n, storage: t, byCorp, at: now };
 }

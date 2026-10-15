@@ -164,7 +164,7 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
           <tbody>
             {rows.map(({ t, st }) => {
               const at = attemptText(t, now);
-              const next = nextRunOf(t, data.failRetryMs, now);
+              const next = nextRunOf(t, data.failRetryMs, now, data.failLongMs);   // v2.741 DEV-05: 서버 값과 묶는다(없으면 같은 상수)
               const ml = targetMailLine(t, now);
               return (
                 <tr key={t.id}>

@@ -31,7 +31,7 @@ import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANG
 import { SIZE_MODES, duCommand } from '../../isidu/parse.js';
 import { keyInfo, publicKeyView, ensureKey, keyDir, KEY_FILE_NAME } from '../../isidu/sshKey.js';
 import { authGuard, authStopOf, FAIL_KINDS, testTargetPath } from '../../isidu/collect.js';
-import { isiduPollerStatus, runNow, FAIL_RETRY_MS } from '../../isidu/poller.js';
+import { isiduPollerStatus, runNow, FAIL_RETRY_MS, LONG_FAIL_MS } from '../../isidu/poller.js';
 import { requestIsiduCollect, isiduRequestState, recentIsiduDrops } from '../../isidu/collectRequests.js';
 import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
 import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX, buildOverview, OVERVIEW_POOL } from '../../isidu/report.js';
@@ -64,6 +64,7 @@ async function targetRows() {
   const byId = new Map((latest || []).filter((r) => r.agent === HISTORY_AGENT).map((r) => [r.targetId, r]));
   const ps = isiduPollerStatus();
   const pollerRunning = new Map(ps.running.map((r) => [r.targetId, r]));
+  const pollerQueued = new Map((ps.queued || []).map((r) => [r.targetId, r]));               // v2.741 TIMING-02: 동시 실행 상한에 걸려 기다리는 '지금 수집'
   const pollerInterrupted = new Map((ps.interrupted || []).map((r) => [r.targetId, r]));     // v2.737: 재시작으로 중단 · 재개 대기
   const pollerResumes = new Map();
   for (const r of ps.resumes || []) if (!pollerResumes.has(r.targetId)) pollerResumes.set(r.targetId, r);
@@ -90,6 +91,7 @@ async function targetRows() {
       lastTry: l?.lastTry ? { id: l.lastTry.id, ts: l.lastTry.ts, ok: l.lastTry.ok, kind: l.lastTry.kind, error: l.lastTry.error, durationMs: l.lastTry.durationMs, node: l.lastTry.node || '', trig: l.lastTry.trig } : null,
       failStreak: l?.failStreak || 0,
       running: ag ? (edgeRunning ? { since: edgeRunning.since, trigger: edgeRunning.trigger, reportedAt: edge.at } : null) : (pollerRunning.get(r.id) || null),
+      queued: ag ? null : (pollerQueued.get(r.id) || null),
       request: ag ? isiduRequestState(r.id) : null,
       // v2.737: 업그레이드·재시작으로 끝나지 못한 조사(재개 대기)와 마지막 자동 재개 결과 — 엣지 담당은 그 엣지의 보고.
       interrupted: ag ? edgeInterrupted : (pollerInterrupted.get(r.id) || null),
@@ -136,7 +138,8 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (_req, res) =>
     edges: edgeViews(),
     poller: isiduPollerStatus(),
     drops: recentIsiduDrops(),
-    failKinds: FAIL_KINDS, failRetryMs: FAIL_RETRY_MS,
+    // v2.741 DEV-05: failLongMs 이상 돈 실패는 1시간이 아니라 주기만큼 쉰다(화면 '다음 시도' 계산 — isiduOverviewText.nextRunOf).
+    failKinds: FAIL_KINDS, failRetryMs: FAIL_RETRY_MS, failLongMs: LONG_FAIL_MS,
     retentionDays: loadSettings().retentionDays,
     db: await db.dbStats(),
   });
@@ -294,13 +297,14 @@ api.post('/tools/isilon-dirusage/run', adminOnly, fullScopeOnly, async (req, res
       (q.duplicate ? duplicate : requested).push({ id: r.id, agent: r.agent });
     } else local.push(r.id);
   }
-  const lr = local.length ? await runNow(local, { trigger: 'manual' }) : { started: [], busy: [], notHere: [] };
+  // v2.741 TIMING-02: 동시 실행 상한(ISIDU_CONCURRENCY)을 넘는 대상은 대기열(queued)에 들어가 앞 조사가 끝나면 차례로 시작한다.
+  const lr = local.length ? await runNow(local, { trigger: 'manual' }) : { started: [], queued: [], busy: [], notHere: [], concurrency: null };
   // 요청을 넣은 엣지마다 한 번씩(대소문자 무시) — 같은 엣지의 대상이 여럿이어도 알림은 하나다. 동시 4, 재시도 없음.
   const agents = [...new Map([...requested, ...duplicate].map((x) => [lo(x.agent), x.agent])).values()];
   const nudged = (await poolSettled(agents, 4, (agent) => nudgeIsiduEdge(agent)))
     .map((x, i) => ({ agent: agents[i], ...(x.status === 'fulfilled' ? x.value : { ok: false, kind: 'unreachable', reason: String(x.reason?.message || x.reason).slice(0, 300) }) }));
-  logAudit({ user: req.user?.username, action: 'isidu.run', target: want ? want.join(',').slice(0, 200) : '(전체)', detail: `started=${lr.started.length} requested=${requested.length} nudged=${nudged.filter((x) => x.ok).length}/${nudged.length}`, ip: req.ip });
-  res.status(202).json({ ok: true, started: lr.started, busy: lr.busy, notHere: lr.notHere, requested, duplicate, issues, notFound, nudged, minEdgeVersion: MIN_ISIDU_EDGE_VERSION });
+  logAudit({ user: req.user?.username, action: 'isidu.run', target: want ? want.join(',').slice(0, 200) : '(전체)', detail: `started=${lr.started.length} queued=${(lr.queued || []).length} requested=${requested.length} nudged=${nudged.filter((x) => x.ok).length}/${nudged.length}`, ip: req.ip });
+  res.status(202).json({ ok: true, started: lr.started, queued: lr.queued || [], concurrency: lr.concurrency ?? null, busy: lr.busy, notHere: lr.notHere, requested, duplicate, issues, notFound, nudged, minEdgeVersion: MIN_ISIDU_EDGE_VERSION });
 });
 
 /**

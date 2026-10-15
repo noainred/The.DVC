@@ -158,10 +158,12 @@ test('EDGE2602-05: PDU 지금 수집이 실패해도 결과(실패 스냅샷)를
   config.agent.centralToken = 'tok';
   config.agent.name = 'edge-d';
   try {
-    const { pullPduConfigNow } = await import('../src/agent/pduConfigPull.js');
+    const { pullPduConfigNow, pduCollectJobSettled, pduConfigPullStatus } = await import('../src/agent/pduConfigPull.js');
     const res = await pullPduConfigNow();
     assert.equal(res.ok, true, JSON.stringify(res));
-    assert.equal(res.collected, 0);          // 수집은 실패했다(닫힌 포트)
+    // v2.741(LEFT-02): pull 은 재수집을 기다리지 않는다 — 작업이 끝난 뒤 결과를 본다.
+    await pduCollectJobSettled();
+    assert.equal(pduConfigPullStatus().collectRun.collected, 0);          // 수집은 실패했다(닫힌 포트)
     assert.ok(posts.some((u) => u.startsWith('/api/central/pdu-data')), `push 없음: ${JSON.stringify(posts)}`);
   } finally { Object.assign(config.agent, prev); srv.close(); }
 });

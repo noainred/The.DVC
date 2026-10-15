@@ -65,15 +65,26 @@ export async function authStopOf(t) {
   return authGuard.peekAuthStop(credId);
 }
 
-function classify(e) {
+/**
+ * 실패 종류 판정(v2.741 DEV-01 — 순서가 계약이다).
+ *  ① 호스트키 거부 ② 구조 표지로 확인한 SSH 인증 거부(ssh2 `err.level` — 문구가 아니다)
+ *  ③ 시한·출력 상한 ④ 이름 해석·연결 거부(로그인 시도가 장비에 닿지 않았다) ⑤ 그 밖의 인증 문구 ⑥ 그 밖의 연결 끊김.
+ * 시한·출력 상한 문구에는 **명령(경로)** 이 실리고(`SSH exec 타임아웃(7200s): du … '/ifs/x-403'`), DNS 실패 문구에는 **호스트 이름**이 실린다 —
+ * 문구 판정(`isAuthFailureText` 의 401·403)을 먼저 보면 경로·이름 속 '-403' 이 인증 거부가 되어 주기 수집이 **영구 정지**됐다(재현).
+ * 실제 인증 거부는 ②가 먼저 잡으므로 ③·④를 앞으로 옮겨도 놓치지 않는다.
+ */
+export function classifyCollectError(e) {
   const msg = String(e?.message || e || '');
   if (isSshHostKeyError(e)) return 'hostkey';
-  if (isSshAuthError(e) || isAuthFailureText(msg)) return 'auth';
+  if (isSshAuthError(e)) return 'auth';
   if (/타임아웃|timeout|timed out|시한 초과/i.test(msg)) return 'timeout';
   if (/출력 상한/.test(msg)) return 'output-cap';
-  if (/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|ECONNRESET|닫혔습니다|connect/i.test(msg)) return 'unreachable';
+  if (/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN/.test(msg)) return 'unreachable';
+  if (isAuthFailureText(msg)) return 'auth';
+  if (/ECONNRESET|닫혔습니다|connect/i.test(msg)) return 'unreachable';
   return 'exec';
 }
+const classify = classifyCollectError;
 
 /** 시한에 걸린 분리 실행 작업을 멈춘다(짧은 새 세션 — 원래 세션은 시한으로 이미 끊겼다). 실패해도 다음 실행이 2일 지난 파일을 지운다. */
 async function killRemoteJob(creds, jobId) {

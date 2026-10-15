@@ -879,3 +879,17 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - **웹 SSH 출력은 백프레셔를 건다**(I-07): `ws.bufferedAmount ≥ high(1MB)` 면 SSH 스트림을 pause(ssh2 창 흐름 제어로 대상 쓰기가 막힌다), `≤ low(256KB)` 면 resume.
   멈춘 채 60초면 4008, 대기열이 8MB 를 넘으면(pause 를 듣지 않는 스트림) 4009. 계정당 동시 세션 `REMOTE_MAX_SESSIONS_PER_USER`(기본 20, 0=끔). UTF-8 은 `StringDecoder`
   로 잇는다. 최악 메모리 ≈ 세션당 3MB × 전체 상한 80. 회귀 `test/rvH_*.test.js`(변이 44/46 — 남은 2종은 동등 변이).
+
+## 2026-10-15 v2.741 점검 — 수집기 라우터 순서·인증 실패 판정·SSH 세션 예산 — 되돌리지 말 것 (docs/AUDIT-2026-10-15b.md)
+
+- **수집기 라우터(`/api/collector`)는 전역 `express.json` 보다 먼저 마운트한다**(index.js 주석, EDGE-02): 전역 파서가 먼저 돌면 라우트별 한도
+  (`set-password`·`isidu-run` 4KB · `isidu-test` 16KB)가 적용되지 않고 1MB 로 본문을 다 읽은 뒤에야 토큰을 본다. 본문 파서를 쓰는 라우트는
+  `tokenFirst(name)`(토큰·비활성 판정 — 토큰 없으면 403, 수집 토큰 미설정 404)를 **파서 앞에** 둔다. ⚠ 새 JSON POST 를 더하면 `tokenFirst` 와 라우트 파서를 함께 붙일 것
+  (전역 파서에 기대는 경로가 이 라우터에는 없다 — `/xfer-test` 는 스트림, `/upgrade` 는 raw). 게이트 이름은 `scripts/api-doc.mjs GUARD_NOTE` 에 등록돼 있다.
+- **인증 실패 판정에서 숫자 401/403 은 HTTP 문맥일 때만**(`util/authGuard.js isAuthFailureText`, DEV-01): `HTTP 401`·`HTTP/1.1 401`·`401 Unauthorized`·`403 Forbidden`·
+  `status: 401`·`-> 401` 꼴만. 호스트명(`array-403`)·경로·포트 속 숫자가 주기 수집을 인증 정지시키던 것. 낱말 규칙(인증 실패·authentication … fail·permission denied)은 그대로다.
+  ⚠ 저장소의 생산자 문구는 전부 'HTTP 401'·'-> 401'·'인증 실패(401)' 꼴이라 계속 정지 대상이다(테스트가 고정). **새 수집기의 401 문구도 이 꼴로 만들 것.**
+  ⚠ REST 수집기 여러 곳의 `/401/.test(e.message)` 재던짐(섹션 중단만 일으킨다)은 남았다 — 다음 점검 후보.
+- **SSH 세션 예산은 SAN·Isilon 수집기에도 있다**(DEV-02 — v2.528 Unity 규약의 형제): SAN `fosSsh` 기본 100초(`SANSW_CLI_SESSION_BUDGET_MS`, 장비 시한 − 15초로 묶음) ·
+  Isilon SSH 150초. 필수 항목은 예산을 무시하고, 그 밖은 남은 시간이 조각(5초) 미만이면 시작하지 않고 사유를 남긴다(`extra.cliSkipped`·`cliSkippedKeys`/`cliSkippedCmds`).
+  **예산 < 장비 시한** 산수를 `audit2741f` 가 고정한다. 바깥 시한이 짧은 호출부(SAN 연결 테스트 60초)는 `budgetMs` 를 넘긴다(`timeoutMs − 10초`).

@@ -18,7 +18,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
 import { CANDIDATES } from '../cvp/client.js';
-import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES } from '../cvp/parse.js';
+import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX } from '../cvp/parse.js';
 import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
@@ -41,7 +41,7 @@ function opticOf(p) {
   }
   if (p && p.power && typeof p.power === 'object') {
     const pw = {};
-    for (const k of ['inW', 'outW', 'capW']) { const v = numOrNull(p.power[k]); pw[k] = v != null && v >= 0 && v < 100_000 ? v : null; }
+    for (const k of ['inW', 'outW', 'capW']) { const v = numOrNull(p.power[k]); pw[k] = v != null && v >= 0 && v < PSU_W_MAX ? v : null; }
     if (pw.inW != null || pw.outW != null) out.power = pw;
   }
   if (p && p.media != null) { const m = sOrNull(p.media, 48); if (m) out.media = m; } // v2.649: 트랜시버 종류

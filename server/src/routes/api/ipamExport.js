@@ -10,7 +10,7 @@ import { guardCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
-import { buildIpamRowsShared, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
+import { buildIpamRowsShared, buildSubnetSheets, buildSubnetSheetsAsync, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
 import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
@@ -27,7 +27,7 @@ import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findP
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
-import { buildWorkbook } from '../../ipam/excel.js';
+import { renderIpamWorkbook } from '../../ipam/excel.js'; // v2.741 LEFT-01: 조립·직렬화는 워커 스레드에서
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -467,24 +467,33 @@ api.delete('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res
  * 형제 라우트 `/tools/waste/export` 는 v2.500 부터 같은 가드를 갖고 있었는데 여기만 빠져 있었다.
  * **이 가드를 지우지 말 것.** 새 내보내기 라우트도 `acquireExport` 를 쓴다.
  */
+// v2.741(감사 LEFT-01 — 재현): 원장(v2.740)만 양보판이고 시트 조립·워크북 직렬화는 동기라, 내보내기 1건이 시트 수에 비례해 포탈 전체를
+//   수 초 멈췄다(합성 /24 400개 6초대). 이제 시트는 양보판(buildSubnetSheetsAsync — 결과 같음)으로 만들고, 워크북 조립·직렬화는 워커 스레드
+//   (renderIpamWorkbook — 결과 파일 같음)에서 한다. 받을 사람이 떠나면(연결 끊김) 워커를 끝낸다. 동시 1건 가드는 그대로다.
 api.get('/tools/ipam.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
   res.locals.perfExpectSlow = true; // 수십 초가 정상인 내보내기(v2.498 계측이 '느린 요청' 으로 세지 않게)
   const lock = acquireExport('ipam.xlsx', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
   try {
     const snap = store.get();
     const allowed = scopedVcenterIds(req.user, snap);
-    const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 원장은 양보판(시트 조립·워크북은 여전히 동기 — 감사 기록)
-    const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed, ledger, cache: store.get() === snap });
-    const wb = await buildWorkbook(sheets);
+    const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 원장은 양보판
+    // 시트도 양보판 — 기다리는 사이 새 세대가 게시됐으면 캐시에 넣지 않는다(옛 세대가 새 세대 항목을 지우지 않게).
+    const sheets = await buildSubnetSheetsAsync(snap, { vcenterId: req.query.vcenterId, allowed, ledger, cache: store.get() === snap, shouldCache: () => store.get() === snap });
+    if (ac.signal.aborted) return; // 받을 사람이 떠났다 — 워커를 띄우지 않는다(소켓은 이미 닫혔다)
+    const out = await renderIpamWorkbook(sheets, { signal: ac.signal });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${todayStamp()}.xlsx"`);
     res.setHeader('Cache-Control', 'no-store');
-    await wb.xlsx.write(res);
-    res.end();
+    res.setHeader('X-Ipam-Xlsx-Mode', out.mode); // worker | inline(워커를 띄우지 못했다 — 콘솔에 사유)
+    res.setHeader('Content-Length', String(out.buffer.length));
+    res.end(out.buffer);
   } catch (err) {
+    if (err?.code === 'aborted' || ac.signal.aborted) return; // 연결이 끊겼다 — 응답할 곳이 없다
     // 헤더를 이미 보냈으면 상태코드를 바꿀 수 없다 — 스트림만 끊는다.
-    if (!res.headersSent) res.status(500).json({ error: err.message });
+    if (!res.headersSent) res.status(500).json({ error: err.message, code: err.code || null });
     else res.end();
   } finally { lock.release(); }
 });

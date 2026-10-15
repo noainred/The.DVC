@@ -200,7 +200,8 @@ test('DEPS2597-01 — offline·Windows 빌드의 config 정리 find 식이 같�
   const b = findExpr('packaging/windows/build-collector-win.sh');
   assert.ok(a && b);
   assert.equal(a, b);
-  assert.match(a, /-name '\*\.txt'/);
+  // v2.741(INJPKG-05): 거부 목록(*.txt 등 나열)이 아니라 허용 목록 — 예제만 남긴다.
+  assert.match(a, /^! -name '\*\.example\.json'\s*$/);
 });
 test('DEPS2597-02 — 저장소 루트 config/ 는 무시되고 추적되지 않는다', () => {
   const tracked = execFileSync('git', ['ls-files', 'config/'], { cwd: REPO, encoding: 'utf8' }).trim();

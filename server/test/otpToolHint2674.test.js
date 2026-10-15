@@ -51,7 +51,8 @@ test('② 해제 뒤 재시작을 안내하고 서비스 이름은 래퍼가 넘
 
 test('③ 래퍼는 두 exec 경로 모두 SERVICE_NAME·OTP_ENROLL_CMD 를 넘긴다', () => {
   const src = fs.readFileSync(WRAPPER, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-  const execs = src.split('\n').filter((l) => /^\s*exec\b/.test(l));
+  // v2.741(INJPKG-01): root 소유 래퍼로 넘기는 exec("$ROOT_TOOL")가 하나 더 있다 — 도구(node)를 실행하는 exec 만 센다.
+  const execs = src.split('\n').filter((l) => /^\s*exec\b.*"\$TOOL"/.test(l));
   assert.equal(execs.length, 2, '래퍼의 exec 줄은 둘(강등 실행·직접 실행)');
   for (const l of execs) {
     assert.match(l, /SERVICE_NAME="\$SERVICE_NAME"/, l);

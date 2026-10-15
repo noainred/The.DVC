@@ -6,6 +6,19 @@ import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, 
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
+import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
+
+/**
+ * v2.741(WEB-04): 상태 조회 실패의 표시. 확인·적용·설정 저장 뒤 다시 읽기(await load())가 실패하면 예전에는
+ * `if (error)` 가 화면 전체를 ErrorBox 로 바꿔 **방금 받은 결과 문구와 상태 표·폼이 사라졌다**(5xx·네트워크 실패는 ServiceDown —
+ * 네트워크 실패면 페이지 자동 새로고침까지). 첫 조회 실패(직전 상태 없음)만 화면 전체 오류이고, 그 밖에는 직전 값을 두고 배너로 말한다.
+ * 반환: { full: 화면 전체 오류인가, banner: 배너 문구 | null }
+ */
+export function upgradeReloadView(status, error) {
+  if (error == null || error === '') return { full: false, banner: null };
+  if (status == null) return { full: true, banner: null };
+  return { full: false, banner: readFailText('업그레이드 상태', error, { notMeaning: '아래는 직전에 읽은 값입니다', stale: true }) };
+}
 
 // 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
 const baseKey = (v) => {
@@ -124,7 +137,7 @@ export default function Upgrade() {
       setForm((f) => f || blankForm(s));
       setPollInit((p) => (p == null ? pollMinutesOf(s.pollIntervalMs) : p));
       setError(null);
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e); } // 객체 그대로 — 403 은 권한 안내로(ErrorBox·readFailText 가 같은 정규화를 쓴다)
   };
   useEffect(() => { load(); }, []);
 
@@ -174,7 +187,8 @@ export default function Upgrade() {
     finally { setBusy(null); }
   };
 
-  if (error) return <ErrorBox message={error} />;
+  const reload = upgradeReloadView(status, error);
+  if (reload.full) return <ErrorBox message={error} />;
   if (!status || !form) return <Loading />;
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -193,6 +207,7 @@ export default function Upgrade() {
   return (
     <>
       <div className="section-title">시스템 자동 업그레이드 (관리자)</div>
+      {reload.banner && <div className="card" data-reload-fail="" style={{ marginBottom: 10, padding: '8px 12px', color: 'var(--amber)', fontSize: 12, whiteSpace: 'normal' }}>{reload.banner}</div>}
 
       {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 맨 위에 먼저 말한다. */}
       <AutoCard status={status} />

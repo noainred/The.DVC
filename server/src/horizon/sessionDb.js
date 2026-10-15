@@ -23,6 +23,7 @@ import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { dayKey, DAY_MS } from '../util/dayKey.js';
+import { createYielder } from '../util/timeSlice.js';
 
 const DB_PATH = () => process.env.HZSESS_DB_PATH
   || path.join(config.dbDir || config.configDir, 'horizon-sessions.db');
@@ -353,29 +354,110 @@ export async function hzSeriesRange(serverId, fromTs, toTs) {
   };
 }
 
+/*
+ * v2.741(DB-02): 앱별 사용 누적 조회를 **날 경계 조각(3일)**으로 나눠 묻고 조각 사이에 시간 기준으로 양보한다.
+ *  예전에는 GROUP BY·COUNT(DISTINCT) 문장 셋을 92일 전체에 한 번씩, 양보 없이 연달아 실행했다 — 이 모듈 머리말의 산정
+ *  (2,000명 × 3 서비스, 하루 6천 행)이면 55만 행이라 1.1~1.8초 동기 정지였다(재현). 조각은 **겹치지 않는 날 범위**라
+ *  · 쌍(사용자×서비스): COUNT(DISTINCT day)·SUM 은 더하고 MIN·MAX 는 다시 MIN·MAX 한다(MAX(text) 는 SQLite 와 같은 바이트 순서)
+ *  · 날짜별 고유 수: 날 하나는 한 조각에만 있으므로 이어 붙이면 된다 · 사용자별 일수: 더한다
+ *  결과(순서 포함)는 예전 한 문장과 같다(테스트가 같은 DB 에서 대조한다). 쌍·사용자별 일수의 순서는 SQLite 의 GROUP BY 출력
+ *  (키의 바이트 순서)과 같게 다시 정렬한다 — 보고서(appUsageReport)의 표시 이름·동률 순서가 입력 순서에 기대기 때문이다.
+ *  ⚠ 한 조각(하루) 문장 하나는 여전히 동기다 — 양보는 '사이' 에서만 가능하다(util/timeSlice.js 머리말).
+ */
+// 조각 크기 = 3일(실측 — 55만 행 합성 DB, 같은 92일 조회): 1일 조각은 총 4.6~5.3초 · 최장 멈춤 79~129ms, 3일 조각은 총 1.9~2.7초 ·
+//   최장 멈춤 78~119ms, 7일 조각은 총 2.0초 · 최장 멈춤 137~199ms, 예전 한 문장은 총 1.3~1.4초 · 최장 멈춤 1.3~1.4초.
+//   하루짜리 문장은 그 날 행이 적어도 고정 비용(약 20ms — 비커버링 색인 조회)이 있어 조각이 잘수록 총 시간이 는다.
+//   ⚠ 총 시간은 예전보다 길다(응답은 늦고 포탈은 멈추지 않는다) — 그 교환이 이 수정의 내용이다.
+const USAGE_CHUNK_DAYS = 3;
+const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** 'YYYY-MM-DD' 날 경계 조각 — 형식이 아니거나 거꾸로면 null(호출부가 한 문장으로 묻는다 — 예전 동작). */
+function dayChunks(a, b, step = USAGE_CHUNK_DAYS) {
+  const ma = DAY_RE.exec(a); const mb = DAY_RE.exec(b);
+  if (!ma || !mb || a > b) return null;
+  const t0 = Date.UTC(+ma[1], +ma[2] - 1, +ma[3]); const t1 = Date.UTC(+mb[1], +mb[2] - 1, +mb[3]);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+  const iso = (t) => new Date(t).toISOString().slice(0, 10);
+  if (iso(t0) !== a || iso(t1) !== b) return null;   // 2026-02-31 같은 날은 조각 계산을 믿지 않는다
+  const out = [];
+  for (let t = t0; t <= t1; t += step * DAY_MS) out.push([iso(t), iso(Math.min(t1, t + (step - 1) * DAY_MS))]);
+  return out;
+}
+/** SQLite BINARY 정렬(= UTF-8 바이트 순서 = 코드 포인트 순서)과 같은 문자열 비교. JS 의 < 는 UTF-16 단위라 대리 쌍에서 다르다. */
+function cmpBin(x, y) {
+  const n = Math.min(x.length, y.length);
+  for (let i = 0; i < n; i++) {
+    const a = x.charCodeAt(i); const b = y.charCodeAt(i);
+    if (a === b) continue;
+    const sa = a >= 0xd800 && a <= 0xdfff; const sb = b >= 0xd800 && b <= 0xdfff;
+    if (sa !== sb) return sa ? 1 : -1;   // 대리 쌍(U+10000 이상)이 BMP 의 어느 글자보다 크다
+    return a < b ? -1 : 1;
+  }
+  return x.length - y.length;
+}
+/** SQLite MAX() 와 같은 규칙(NULL 무시 · 숫자 < 글자 · 글자는 바이트 순서). */
+function sqlMax(a, b) {
+  if (a === b) return a;   // 같은 값이 대부분이다(이름은 날마다 거의 같다) — 비교 루프를 건너뛴다
+  if (a == null) return b; if (b == null) return a;
+  const ta = typeof a === 'string'; const tb = typeof b === 'string';
+  if (ta !== tb) return ta ? a : b;
+  if (ta) return cmpBin(a, b) >= 0 ? a : b;
+  return a >= b ? a : b;
+}
+let _usageRangeStats = { runs: 0, lastMs: null, lastChunks: 0, lastYields: 0 };
+
 /**
  * v2.684 앱별 사용 누적 조회 — 기간(포탈 날짜 'YYYY-MM-DD' 양끝 포함) · 서버('' = 전체).
  * 반환은 쌍(사용자×서비스) 행 + 날짜별 고유 수 + 날짜별 수집 횟수. 사용자·서비스 집계는 순수 모듈이 한다
  * (`appUsageReport.js`) — SQL 은 기간 안의 행을 묶기만 한다.
+ * v2.741(DB-02): 날 조각 + 시간 기준 양보(위 머리말). `sliceMs` 는 양보 간격(테스트가 줄인다).
  */
-export async function hzUsageRange({ fromDay, toDay, serverId = '' } = {}) {
+export async function hzUsageRange({ fromDay, toDay, serverId = '', sliceMs = 15 } = {}) {
   const h = await open();
   if (!h) return { available: false, pairs: [], daily: [], userDays: [], cover: [], firstDay: null };
+  const t0 = Date.now();
   const a = String(fromDay); const b = String(toDay);
   const sid = String(serverId || '');
-  const pairs = (sid ? h.st.usagePairsOne.all(a, b, sid) : h.st.usagePairsAll.all(a, b)).map((r) => ({
-    userKey: r.user_key, serviceKey: r.service_key, user: r.user_name, service: r.service_name, kind: r.kind, basis: r.basis,
-    days: Number(r.days) || 0, firstTs: nOrNull(r.first_ts), lastTs: nOrNull(r.last_ts),
-    samples: Number(r.samples) || 0, connectedSamples: Number(r.connected_samples) || 0,
-  }));
-  const daily = (sid ? h.st.usageDailyOne.all(a, b, sid) : h.st.usageDailyAll.all(a, b))
-    .map((r) => ({ day: r.day, users: Number(r.users) || 0, services: Number(r.services) || 0 }));
-  const userDays = (sid ? h.st.userDaysOne.all(a, b, sid) : h.st.userDaysAll.all(a, b))
-    .map((r) => ({ userKey: r.user_key, days: Number(r.days) || 0 }));
+  const q = (one, all, x, y) => (sid ? one.all(x, y, sid) : all.all(x, y));
+  const chunks = dayChunks(a, b) || [[a, b]];
+  const maybeYield = createYielder(sliceMs);
+  const pairMap = new Map();   // user_key \0 service_key → 합친 행
+  const userMap = new Map();   // user_key → 일수 합
+  const dailyRows = [];
+  for (const [x, y] of chunks) {
+    for (const r of q(h.st.usagePairsOne, h.st.usagePairsAll, x, y)) {
+      const k = `${r.user_key}\u0000${r.service_key}`;
+      const p = pairMap.get(k);
+      if (!p) { pairMap.set(k, { ...r }); continue; }
+      p.user_name = sqlMax(p.user_name, r.user_name); p.service_name = sqlMax(p.service_name, r.service_name);
+      p.kind = sqlMax(p.kind, r.kind); p.basis = sqlMax(p.basis, r.basis);
+      p.days = (Number(p.days) || 0) + (Number(r.days) || 0);
+      p.first_ts = p.first_ts == null ? r.first_ts : (r.first_ts == null ? p.first_ts : Math.min(p.first_ts, r.first_ts));
+      p.last_ts = sqlMax(p.last_ts, r.last_ts);
+      p.samples = (Number(p.samples) || 0) + (Number(r.samples) || 0);
+      p.connected_samples = (Number(p.connected_samples) || 0) + (Number(r.connected_samples) || 0);
+    }
+    await maybeYield();
+    for (const r of q(h.st.usageDailyOne, h.st.usageDailyAll, x, y)) dailyRows.push(r);
+    for (const r of q(h.st.userDaysOne, h.st.userDaysAll, x, y)) userMap.set(r.user_key, (userMap.get(r.user_key) || 0) + (Number(r.days) || 0));
+    await maybeYield();
+  }
+  const pairs = [...pairMap.values()]
+    .sort((p1, p2) => cmpBin(p1.user_key, p2.user_key) || cmpBin(p1.service_key, p2.service_key))
+    .map((r) => ({
+      userKey: r.user_key, serviceKey: r.service_key, user: r.user_name, service: r.service_name, kind: r.kind, basis: r.basis,
+      days: Number(r.days) || 0, firstTs: nOrNull(r.first_ts), lastTs: nOrNull(r.last_ts),
+      samples: Number(r.samples) || 0, connectedSamples: Number(r.connected_samples) || 0,
+    }));
+  const daily = dailyRows.map((r) => ({ day: r.day, users: Number(r.users) || 0, services: Number(r.services) || 0 }));
+  const userDays = [...userMap.entries()].sort((e1, e2) => cmpBin(e1[0], e2[0])).map(([userKey, days]) => ({ userKey, days }));
+  // 수집 횟수는 (날 × 서버) 행이라 작다 — 한 문장이다.
   const cover = h.st.coverAll.all(a, b).filter((r) => !sid || r.server_id === sid)
     .map((r) => ({ day: r.day, serverId: r.server_id, cycles: Number(r.cycles) || 0, okCycles: Number(r.ok_cycles) || 0 }));
+  _usageRangeStats = { runs: _usageRangeStats.runs + 1, lastMs: Date.now() - t0, lastChunks: chunks.length, lastYields: maybeYield.count() };
   return { available: true, pairs, daily, userDays, cover, firstDay: h.st.usageMinDay.get()?.d || null };
 }
+/** v2.741(DB-02): 조회 계측 — 몇 번 계산했는가(라우트 합류·기억이 실제로 계산을 줄이는지 테스트·진단이 본다). */
+export function hzUsageRangeStats() { return { ..._usageRangeStats }; }
 
 /** 앱별 사용 누적 prune — 일 단위(보존일 0 이하 = 무제한). 청크 + 양보. */
 const _usagePruneFlight = createPruneFlight();

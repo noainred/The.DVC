@@ -98,17 +98,42 @@ function maskHzPoller(poller, hosts) {
  */
 const USAGE_MAX_DAYS = 92;
 const clampUsageDays = (v) => Math.max(1, Math.min(USAGE_MAX_DAYS, Math.round(Number(v) || 7)));
-const _usageCache = new Map();   // key -> { at, body }
+const _usageCache = new Map();   // key -> { at, latestTs, body }
+/*
+ * v2.741(DB-02): 기간 조회 결과(range)도 기억하고 **같은 조건의 동시 요청은 진행 중 계산에 합류**한다 — 화면(/usage)과
+ *  CSV(/usage.csv)가 한 계산을 쓴다. 예전 CSV 는 기억 없이 매번 92일 집계를 다시 돌렸고, 동시에 들어온 두 요청은 각자 계산했다.
+ *  키의 latestTs(최신 수집 시각)가 바뀌면 그 사이 DB 가 바뀐 것이다 — 새 세대를 넣을 때 **옛 세대 항목을 버린다**(세대 키 캐시는
+ *  상한에 밀릴 때까지 다시 쓰이지 않는 옛 값을 들고 있지 않는다 — CLAUDE.md v2.580 TUNE-B/C). 못 쓴 결과(DB 없음)·실패는 기억하지 않는다.
+ */
+const USAGE_RANGE_MEMO_MAX = 8;
+const _rangeMemo = new Map();    // key -> { latestTs, p: Promise<range> }
+function dropOtherGenerations(map, latestTs) {
+  for (const [k, v] of map) if (v.latestTs !== latestTs) map.delete(k);
+}
+function usageRangeShared({ fromDay, toDay, serverId, latestTs }) {
+  const key = `${fromDay}|${toDay}|${serverId}|${latestTs}`;
+  const hit = _rangeMemo.get(key);
+  if (hit) return hit.p;
+  dropOtherGenerations(_rangeMemo, latestTs);
+  const p = hzUsageRange({ fromDay, toDay, serverId });
+  const ent = { latestTs, p };
+  _rangeMemo.set(key, ent);
+  const forget = () => { if (_rangeMemo.get(key) === ent) _rangeMemo.delete(key); };
+  p.then((r) => { if (!r?.available) forget(); }, forget);
+  while (_rangeMemo.size > USAGE_RANGE_MEMO_MAX) _rangeMemo.delete(_rangeMemo.keys().next().value);
+  return p;
+}
+const latestTsOf = (latest) => (latest.length ? Math.max(...latest.map((r) => Number(r.ts) || 0)) : 0);
 
 async function usageReport({ days, serverId }) {
   const s = loadHzSettings();
   const latest = await hzLatestRecords();
-  const latestTs = latest.length ? Math.max(...latest.map((r) => Number(r.ts) || 0)) : 0;
+  const latestTs = latestTsOf(latest);
   const { fromDay, toDay } = dayRange(days);
   const key = `${days}|${serverId}|${latestTs}|${toDay}`;
   const hit = _usageCache.get(key);
   if (hit) return hit.body;
-  const range = await hzUsageRange({ fromDay, toDay, serverId });
+  const range = await usageRangeShared({ fromDay, toDay, serverId, latestTs });
   const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && (!serverId || r.serverId === serverId));
   const report = buildUsageReport(range, {
     fromDay, toDay, intervalMs: s.intervalMs,
@@ -124,8 +149,12 @@ async function usageReport({ days, serverId }) {
     settings: { enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), intervalMs: s.intervalMs, usageRetentionDays: s.usageRetentionDays, showNamesInList: s.showNamesInList },
     maxDays: USAGE_MAX_DAYS,
   };
-  _usageCache.set(key, { at: Date.now(), body });
-  while (_usageCache.size > 16) _usageCache.delete(_usageCache.keys().next().value);
+  // v2.741(DB-02): 못 쓴 결과는 기억하지 않는다(DB 가 곧 열릴 수 있다) · 새 세대를 넣을 때 옛 세대 항목을 버린다.
+  if (range.available) {
+    dropOtherGenerations(_usageCache, latestTs);
+    _usageCache.set(key, { at: Date.now(), latestTs, body });
+    while (_usageCache.size > 16) _usageCache.delete(_usageCache.keys().next().value);
+  }
   return body;
 }
 
@@ -151,7 +180,8 @@ api.get('/tools/horizon-sessions/usage.csv', requirePerm('data.csv'), async (req
   const days = clampUsageDays(req.query.days);
   const serverId = String(req.query.serverId || '').slice(0, 128);
   const { fromDay, toDay } = dayRange(days);
-  const range = await hzUsageRange({ fromDay, toDay, serverId });
+  // v2.741(DB-02): 화면과 같은 기억·합류를 거친다 — 예전에는 CSV 마다 92일 집계를 새로 돌렸다.
+  const range = await usageRangeShared({ fromDay, toDay, serverId, latestTs: latestTsOf(await hzLatestRecords()) });
   if (!range.available) return res.status(503).json({ ok: false, reason: 'Horizon 세션 DB 를 쓸 수 없습니다.' });
   const lines = [csvLine(['사용자', '서비스', '종류', '해석 근거', '사용 일수', '처음 관측', '마지막 관측', '관측 횟수', '접속 중 관측 횟수'])];
   const rows = [...range.pairs].sort((a, b) => String(a.user).localeCompare(String(b.user), 'ko') || b.days - a.days);
