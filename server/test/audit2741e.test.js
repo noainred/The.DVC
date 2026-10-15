@@ -106,7 +106,7 @@ registerChecksLogs(api);
 app.use('/api', api);
 const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
 const BASE = `http://127.0.0.1:${srv.address().port}`;
-test.after(() => { srv.closeAllConnections?.(); srv.close(); });
+test.after(() => { srv.closeAllConnections?.(); srv.close(); try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* */ } });
 const get = async (u, p) => { const r = await fetch(BASE + p, { headers: { 'x-u': u } }); const buf = Buffer.from(await r.arrayBuffer()); return { status: r.status, type: r.headers.get('content-type') || '', disp: r.headers.get('content-disposition') || '', buf }; };
 const json = (x) => JSON.parse(x.buf.toString('utf8'));
 
@@ -240,4 +240,5 @@ test('LEFT-13 NDJSON 폴백 재기록은 원자적 교체다 — logs·metrics·
     assert.equal(out[k], true, `${k}: 재기록이 같은 파일을 0바이트로 자르고 덮어쓰면 안 된다(tmp → rename 으로 inode 가 바뀐다)`);
   }
   assert.equal(out.logsLeft, 2); assert.equal(out.metricsLeft, 1); assert.equal(out.pingLeft, 1); assert.equal(out.idracLeft, 1);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
 });

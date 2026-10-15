@@ -355,7 +355,7 @@ export async function hzSeriesRange(serverId, fromTs, toTs) {
 }
 
 /*
- * v2.741(DB-02): 앱별 사용 누적 조회를 **날 조각**으로 나눠 묻고 조각 사이에 시간 기준으로 양보한다.
+ * v2.741(DB-02): 앱별 사용 누적 조회를 **날 경계 조각(3일)**으로 나눠 묻고 조각 사이에 시간 기준으로 양보한다.
  *  예전에는 GROUP BY·COUNT(DISTINCT) 문장 셋을 92일 전체에 한 번씩, 양보 없이 연달아 실행했다 — 이 모듈 머리말의 산정
  *  (2,000명 × 3 서비스, 하루 6천 행)이면 55만 행이라 1.1~1.8초 동기 정지였다(재현). 조각은 **겹치지 않는 날 범위**라
  *  · 쌍(사용자×서비스): COUNT(DISTINCT day)·SUM 은 더하고 MIN·MAX 는 다시 MIN·MAX 한다(MAX(text) 는 SQLite 와 같은 바이트 순서)
@@ -364,7 +364,11 @@ export async function hzSeriesRange(serverId, fromTs, toTs) {
  *  (키의 바이트 순서)과 같게 다시 정렬한다 — 보고서(appUsageReport)의 표시 이름·동률 순서가 입력 순서에 기대기 때문이다.
  *  ⚠ 한 조각(하루) 문장 하나는 여전히 동기다 — 양보는 '사이' 에서만 가능하다(util/timeSlice.js 머리말).
  */
-const USAGE_CHUNK_DAYS = 1;
+// 조각 크기 = 3일(실측 — 55만 행 합성 DB, 같은 92일 조회): 1일 조각은 총 4.6~5.3초 · 최장 멈춤 79~129ms, 3일 조각은 총 1.9~2.7초 ·
+//   최장 멈춤 78~119ms, 7일 조각은 총 2.0초 · 최장 멈춤 137~199ms, 예전 한 문장은 총 1.3~1.4초 · 최장 멈춤 1.3~1.4초.
+//   하루짜리 문장은 그 날 행이 적어도 고정 비용(약 20ms — 비커버링 색인 조회)이 있어 조각이 잘수록 총 시간이 는다.
+//   ⚠ 총 시간은 예전보다 길다(응답은 늦고 포탈은 멈추지 않는다) — 그 교환이 이 수정의 내용이다.
+const USAGE_CHUNK_DAYS = 3;
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** 'YYYY-MM-DD' 날 경계 조각 — 형식이 아니거나 거꾸로면 null(호출부가 한 문장으로 묻는다 — 예전 동작). */
 function dayChunks(a, b, step = USAGE_CHUNK_DAYS) {
@@ -392,6 +396,7 @@ function cmpBin(x, y) {
 }
 /** SQLite MAX() 와 같은 규칙(NULL 무시 · 숫자 < 글자 · 글자는 바이트 순서). */
 function sqlMax(a, b) {
+  if (a === b) return a;   // 같은 값이 대부분이다(이름은 날마다 거의 같다) — 비교 루프를 건너뛴다
   if (a == null) return b; if (b == null) return a;
   const ta = typeof a === 'string'; const tb = typeof b === 'string';
   if (ta !== tb) return ta ? a : b;

@@ -330,9 +330,10 @@ test('DB-02 ② 집계는 조각 사이에서 이벤트 루프에 양보한다(s
   const r = await sdb.hzUsageRange({ fromDay: dayStr(T0), toDay: dayStr(T0 + 11 * DAY), sliceMs: 0.000001 });
   stop = true;
   assert.equal(r.available, true);
-  assert.ok(ticks >= 5, `12일 조회가 한 번도(또는 거의) 양보하지 않았다(프로브 ${ticks}회)`);
+  assert.ok(ticks >= 3, `12일 조회가 한 번도(또는 거의) 양보하지 않았다(프로브 ${ticks}회)`);
   const st = sdb.hzUsageRangeStats?.();
-  assert.ok(st && st.lastChunks === 12, `날 조각 수: ${JSON.stringify(st)}`);
+  assert.ok(st && st.lastChunks > 1, `날 조각 수: ${JSON.stringify(st)}`);
+  assert.ok(st.lastYields >= 2, `양보 횟수: ${JSON.stringify(st)}`);
 });
 
 test('DB-02 ③ 화면(/usage)과 CSV(/usage.csv)의 같은 조건 요청은 한 계산을 쓴다 · 반복 CSV 는 다시 계산하지 않는다', async () => {
