@@ -10,7 +10,7 @@ import { guardCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
-import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
+import { buildIpamRowsShared, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
 import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
@@ -96,6 +96,16 @@ function bulkIpList(ips) {
   return (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
 }
 
+/**
+ * v2.740(감사 F-06 — 재현): 라우트의 원장 — 결과는 `buildIpamRows` 와 같고(같은 생성기·같은 세대 키), 캐시에 없으면 **양보하며** 만든다.
+ *   입력 지문 생략(v2.619)으로 store 가 원장을 만들지 않은 세대의 첫 요청이 동기 재구성으로 포탈을 멈추던 것(합성 VM 4만: 검색 1건
+ *   260~400ms · 시트 250~500ms 정지). 계산이 끝나기 전에 새 스냅샷이 게시되면 그 결과는 캐시에 넣지 않는다(옛 세대가 새 세대를 밀어내지 않게).
+ *   세대 키를 입력 지문 키로 바꾸지 않은 이유는 ledger.js buildIpamRowsShared 머리말(행의 owner·예약 만료 판정이 지문 밖이다).
+ */
+function routeLedger(snap, vcenterId, allowed) {
+  return buildIpamRowsShared(snap, vcenterId, allowed, { shouldCache: () => store.get() === snap });
+}
+
 export function registerIpamExport(api) {
 
 // Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM
@@ -115,8 +125,8 @@ export function registerIpamExport(api) {
  *  ?q= : IP 부분 문자열 필터(v2.582 TUNE-2). IPMS 검색(IpmsMatches)이 검색어마다 전량을 받아 브라우저에서
  *  거르던 것을 서버가 거른다 — 응답이 5.3MB 에서 수 KB 가 된다. 상한(2,000행)은 밝힌다(`truncated`).
  */
-api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', (snap) => {
-  const data = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
+api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', async (snap) => {
+  const data = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
   let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r));
   const q = String(req.query.q || '').trim().toLowerCase();
   let truncated = false; let matched = null;
@@ -150,9 +160,11 @@ api.get('/tools/vm-export.csv', csvPerm, requirePerm('tools'), async (req, res) 
 });
 
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
-api.get('/tools/ipam/insights', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/insights', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
-  res.json(buildIpamInsights(snap, req.query.vcenterId || '', scopedVcenterIds(req.user, snap)));
+  const allowed = scopedVcenterIds(req.user, snap);
+  await routeLedger(snap, req.query.vcenterId || '', allowed); // v2.740 F-06: 원장을 양보판으로 먼저 데운다(아래 집계가 캐시를 쓴다)
+  res.json(buildIpamInsights(snap, req.query.vcenterId || '', allowed));
 });
 
 // Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
@@ -162,9 +174,11 @@ api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap), { inputSig: ledgerInputSignatureOf(snap) }) });
 });
-api.get('/tools/ipam/sheet', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
-  const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed: scopedVcenterIds(req.user, snap) });
+  const allowed = scopedVcenterIds(req.user, snap);
+  const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 양보판 원장을 시트에 넘긴다(지금 입력의 것일 때만 쓰인다)
+  const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed, ledger, cache: store.get() === snap });
   res.json(sheets[0] || { subnet: '', rows: [] });
 });
 
@@ -211,11 +225,13 @@ api.get('/tools/ipam/vc-ranges.csv', csvPerm, requirePerm('tools'), (req, res) =
 });
 
 // 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
-api.get('/tools/ipam/netmap', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/netmap', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  await routeLedger(snap, req.query.vcenterId || '', allowed); // v2.740 F-06: 원장을 양보판으로 먼저 데운다(netmap 이 같은 키로 읽는다)
   res.json(buildNetmap(snap, {
     vcenterId: req.query.vcenterId || '', base: req.query.base || '',
-    days: req.query.days, buckets: req.query.buckets, allowed: scopedVcenterIds(req.user, snap),
+    days: req.query.days, buckets: req.query.buckets, allowed,
   }));
 });
 
@@ -457,7 +473,9 @@ api.get('/tools/ipam.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
   if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {
     const snap = store.get();
-    const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed: scopedVcenterIds(req.user, snap) });
+    const allowed = scopedVcenterIds(req.user, snap);
+    const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 원장은 양보판(시트 조립·워크북은 여전히 동기 — 감사 기록)
+    const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed, ledger, cache: store.get() === snap });
     const wb = await buildWorkbook(sheets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${todayStamp()}.xlsx"`);
@@ -472,9 +490,9 @@ api.get('/tools/ipam.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
 });
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
-api.get('/tools/ipam.csv', csvPerm, requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam.csv', csvPerm, requirePerm('tools'), async (req, res) => {
   const snap = store.get();
-  const { rows } = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
+  const { rows } = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
     'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'applied_by', 'range_policy_spec', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
   const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)

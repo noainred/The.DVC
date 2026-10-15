@@ -43,6 +43,32 @@ export function memMetaText(meta) {
   return parts.join(' · ');
 }
 
+/**
+ * v2.740(감사 F-09): 메모리 추적 폴링 한 번. 예전에는 `/admin/memtrack` 실패를 `catch {}` 로 삼켜 범위 관리자(fleetOnly 403)에게
+ *   '메모리 추적 데이터를 불러오는 중…' 이 **영원히** 보였고 403 인데 60초마다 계속 물었다(v2.398·v2.621 '403 은 폴링을 멈추고 권한 안내').
+ *   이제 실패를 onError 로 넘기고(화면이 데이터가 없을 때 ErrorBox 로 말한다), 403 이면 onStop 으로 폴링을 멈춘다.
+ *   일시 오류는 직전 데이터를 지우지 않는다(폴링 뷰 원칙 — 호출부가 데이터가 있으면 짧은 안내만 한다). 성공하면 오류를 지운다.
+ */
+export function createMemPoller({ fetchMem, onData, onError, onStop, isActive = () => true }) {
+  return async () => {
+    try {
+      const r = await fetchMem();
+      if (!isActive()) return;
+      onData(r); onError(null);
+    } catch (e) {
+      if (!isActive()) return;
+      onError(e || new Error('메모리 추적 데이터를 읽지 못했습니다'));
+      if (e?.status === 403) onStop();
+    }
+  };
+}
+
+/** 메모리 추적 데이터가 아직 없을 때 — 오류가 있으면 그 사유(403 은 권한 안내), 없으면 불러오는 중. */
+export function MemPlaceholder({ err }) {
+  if (err) return <ErrorBox error={err} />;
+  return <div className="muted" style={{ fontSize: 13 }}>메모리 추적 데이터를 불러오는 중…</div>;
+}
+
 // 추세 한 줄 표기: +2.1MB/일 (r²=0.82, 3.2일 관측)
 const fmtTrend = (t) => {
   if (!t) return '표본 부족';
@@ -127,16 +153,20 @@ export default function Diagnostics() {
 
   // 서버 메모리(누수 추적) 폴링 — 60초. 창 변경 시 즉시 재조회. 훅은 조기 return 위에(React #310).
   const [mem, setMem] = useState(null);
+  const [memErr, setMemErr] = useState(null);
   const [memWin, setMemWin] = useState('24h');
   useEffect(() => {
     let on = true;
-    const tick = async () => {
-      try { const r = await fetchJson('/admin/memtrack', { window: memWin }); if (on) setMem(r); }
-      catch { /* 일시 폴링 오류는 직전 데이터 유지(CLAUDE.md 폴링 뷰 원칙) */ }
-    };
+    let t = null;
+    // v2.740(F-09): 실패를 삼키지 않는다 — 403 이면 폴링을 멈추고 권한 안내, 일시 오류는 직전 데이터를 유지한다.
+    const tick = createMemPoller({
+      fetchMem: () => fetchJson('/admin/memtrack', { window: memWin }),
+      onData: setMem, onError: setMemErr, onStop: () => { if (t) clearInterval(t); t = null; },
+      isActive: () => on,
+    });
+    t = setInterval(tick, 60_000);
     tick();
-    const t = setInterval(tick, 60_000);
-    return () => { on = false; clearInterval(t); };
+    return () => { on = false; if (t) clearInterval(t); };
   }, [memWin]);
 
   if (error && !status) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 라이브 로그 콘솔까지 갈아치우지 않음(CLAUDE.md)
@@ -200,9 +230,10 @@ export default function Diagnostics() {
       <div className="section-title">서버 메모리 (누수 추적)</div>
       <div className="card" style={{ marginBottom: 16 }}>
         {!mem ? (
-          <div className="muted" style={{ fontSize: 13 }}>메모리 추적 데이터를 불러오는 중…</div>
+          <MemPlaceholder err={memErr} />
         ) : (
           <>
+            {memErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>최근 조회에 실패해 직전 데이터를 표시합니다{memErr?.status === 403 ? ' — 권한이 없어 자동 갱신을 멈췄습니다' : ''}.</div>}
             <div className="flex between wrap gap" style={{ marginBottom: 10 }}>
               <span className={vb.cls} style={{ fontSize: 13, padding: '6px 12px' }} title={verdict?.text || ''}>
                 {vb.icon} {verdict?.text || '판정 대기'}
