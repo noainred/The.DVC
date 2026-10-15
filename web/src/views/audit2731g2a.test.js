@@ -17,7 +17,10 @@ describe('A3-01 ① 업그레이드 설정 — 토큰 폐기 안내', () => {
     const s = src('Upgrade.jsx');
     expect(s).toMatch(/import \{ droppedSecretNote \} from '\.\/droppedSecretText\.js'/);
     expect(s).toMatch(/note: droppedSecretNote\(r\)/);
-    expect(s).toMatch(/msg\.r\.ok && msg\.r\.note \? msg\.r\.note/);
+    // v2.736.2: 문구 판정은 actionMsg 하나로 옮겼다(note 가 있으면 성공이어도 호박색 경고 + 그 문구).
+    expect(s).toMatch(/actionMsg\(msg\.action, msg\.r\)/);
+    expect(s).toMatch(/const good = m\.ok && !m\.warn/);
+    expect(src('upgradeAutoText.js')).toMatch(/if \(x\.ok && x\.note\) return \{ label, ok: true, warn: true, text: x\.note \}/);
     // 400 본문의 reason 도 싣는다(putJson 은 400 을 던지지 않는다) — 예전에는 '실패' 한 단어였다.
     expect(s).toMatch(/reason: r\.reason/);
   });

@@ -284,6 +284,8 @@ collectorRouter.post('/upgrade',
     // v2.730(검토 S-10): 배포자 서명 — 이 수집기가 가진 신뢰 공개키로 설치 전에 검증한다(force 재설치도 같다).
     const result = upgradeFromBundleBytes(req.body, installDir, currentVersion(), upgradeManager.settings.packageName,
       { allowSame: force, manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector' });
+    // v2.736.2: 업그레이드 화면 '최근 적용 결과' 에 남긴다(파일에도 — 재시작 뒤 이 엣지가 업그레이드됐는지 보이게).
+    upgradeManager.lastResult = { at: Date.now(), source: 'collector-push', ...result };
     res.json(result);
     if (result.ok && String(req.query.restart) === 'true') setTimeout(() => restartProcess(), 250);
   });

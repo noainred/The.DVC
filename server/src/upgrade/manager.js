@@ -19,6 +19,9 @@ import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 
 import { resolveBundleBytes } from './bundleSource.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { loadCollectors } from '../collector/registry.js';
+// v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
+import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus } from './autoState.js';
+import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
 
 
 const originOf = (u) => { try { return new URL(String(u)).origin; } catch { return ''; } }; // 경로·쿼리에 비밀이 실릴 수 있어 origin 만
@@ -33,12 +36,43 @@ export function summarizeEdgePush(results) {
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, failed };
 }
 
-class UpgradeManager {
+export class UpgradeManager {
   constructor() {
     this.settings = loadSettings();
     this.lastCheck = null;
-    this.lastResult = null;
+    this.#lastResult = null;
+    this.lastTick = null;       // v2.736.2: 백그라운드 확인 한 번의 결과(언제·무엇을 했나)
     this.timer = null;
+    this.armedAt = null;        // v2.736.2: 백그라운드 타이머를 무장한 시각(다음 확인 시각 계산 — setInterval 과 같은 규칙)
+    this.armedMs = 0;
+    this.persist = { enabled: false, file: null, error: null, corruptKept: null, restored: false };
+  }
+
+  // v2.736.2: 적용 결과는 routes(엣지·수집기 push 수신)도 대입한다 — 대입하면 파일에도 남는다.
+  #lastResult = null;
+  get lastResult() { return this.#lastResult; }
+  set lastResult(v) { this.#lastResult = v || null; this.#save(); }
+
+  /**
+   * v2.736.2: 기록을 파일에 남기기 시작한다(서버 프로세스만 — start() 가 부른다). 재시작 전 기록을 되살린다 —
+   * 이 프로세스가 이미 만든 기록이 있으면 그것이 더 최신이므로 덮지 않는다.
+   */
+  enablePersistence(file = upgradeStatusFile()) {
+    const r = readUpgradeStatus(file);
+    const prev = restoreStatus(r.doc, currentVersion());
+    if (!this.lastCheck && prev.lastCheck) this.lastCheck = prev.lastCheck;
+    if (!this.#lastResult && prev.lastResult) this.#lastResult = prev.lastResult;
+    if (!this.lastTick && prev.lastTick) this.lastTick = prev.lastTick;
+    this.persist = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, restored: !!(prev.lastCheck || prev.lastResult || prev.lastTick) };
+    if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
+    return this.persist;
+  }
+
+  #save() {
+    if (!this.persist?.enabled || !this.persist.file) return;
+    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick });
+    if (err && err !== this.persist.error) console.warn(`[upgrade] ${err}`);
+    this.persist.error = err;
   }
 
   get enabled() {
@@ -53,8 +87,19 @@ class UpgradeManager {
       remoteConfigured: Boolean(s.remoteBase),
       // v2.730(I-08): 주소의 계정·비밀번호·쿼리(토큰)는 화면에 싣지 않는다.
       remoteVersionsUrl: s.remoteBase ? safeUrlText(`${s.remoteBase.replace(/\/+$/, '')}/versions.json`) : null,
-      lastCheck: this.lastCheck,
-      lastResult: this.lastResult,
+      // v2.736.2: 기록은 정제해 싣는다(아는 필드만 · 주소의 계정·쿼리 제거 — 예전에는 적용 결과의 check.downloadUrl 이 그대로 나갔다).
+      lastCheck: sanitizeCheck(this.lastCheck),
+      lastResult: sanitizeResult(this.#lastResult),
+      lastTick: sanitizeTick(this.lastTick),
+      // v2.736.2: '자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가' — 판정은 autoState.js 하나.
+      auto: autoUpgradeState({
+        settings: s, intervalMs: this.timer ? this.armedMs : 0, armedAt: this.timer ? this.armedAt : null,
+        lastCheck: sanitizeCheck(this.lastCheck), lastResult: sanitizeResult(this.#lastResult), lastTick: sanitizeTick(this.lastTick),
+        currentVersion: currentVersion(), now: Date.now(),
+      }),
+      ticking: this.#ticking,
+      applying: !!this._applying,
+      persist: { enabled: !!this.persist?.enabled, error: this.persist?.error || null, corruptKept: this.persist?.corruptKept || null },
       signature: (() => { try { return signatureStatus(); } catch (e) { return { error: String(e?.message || e).slice(0, 200) }; } })(),
     };
   }
@@ -66,11 +111,11 @@ class UpgradeManager {
     return this.status();
   }
 
-  /** Check both sources for an available newer version (no install). */
-  async check() {
+  /** Check both sources for an available newer version (no install). trigger: 'auto'(백그라운드) | 'manual'(화면 버튼). */
+  async check({ trigger = 'manual' } = {}) {
     const s = this.settings;
     const cur = currentVersion();
-    const result = { at: Date.now(), current: cur };
+    const result = { at: Date.now(), current: cur, trigger };
 
     if (s.watchDir) {
       const found = findNewerArchive(s.watchDir, cur);
@@ -82,22 +127,28 @@ class UpgradeManager {
       result.remote = rememberRemoteCheck(this, await checkRemote(s.remoteBase, cur, { token: s.token }));
     }
     this.lastCheck = result;
+    this.#save();
     return result;
   }
 
   /** Install the newest available bundle. source: 'auto' | 'watch' | 'remote'. */
-  async apply({ source = 'auto', restart = false } = {}) {
+  async apply({ source = 'auto', restart = false, trigger = 'manual' } = {}) {
     // single-flight — 적용 후 엣지/수집기 푸시(타깃당 최대 600s)가 끝나기 전에 다음 tick이나
     // 수동 apply가 겹치면 같은 installDir에 renameSync 스왑이 경합해 설치가 깨질 수 있다.
     if (this._applying) return { ok: false, reason: '업그레이드 적용이 이미 진행 중입니다.' };
     this._applying = true;
-    try { return await this.#applyInner({ source, restart }); }
+    try { return await this.#applyInner({ source, restart, trigger }); }
     finally { this._applying = false; }
   }
 
-  async #applyInner({ source, restart }) {
+  async #applyInner({ source, restart, trigger }) {
     const s = this.settings;
-    if (!s.installDir) return { ok: false, reason: '설치 경로(installDir)가 설정되지 않아 적용할 수 없습니다.' };
+    if (!s.installDir) {
+      // v2.736.2: 이 실패도 기록한다 — 예전에는 lastResult 를 남기지 않아 자동 적용이 매 주기 여기서 멈춰도 화면에 흔적이 없었다.
+      const r0 = { ok: false, code: 'no-install-dir', reason: '설치 경로(installDir)가 설정되지 않아 적용할 수 없습니다.' };
+      this.lastResult = { at: Date.now(), source, trigger, ...r0 };
+      return r0;
+    }
     const cur = currentVersion();
     let res = null;
 
@@ -117,14 +168,15 @@ class UpgradeManager {
     }
     if (!res) res = { ok: false, reason: '적용할 업그레이드 소스가 없습니다 (감시 폴더/원격 미설정).' };
 
-    this.lastResult = { at: Date.now(), source, ...res };
+    if (res.ok && restart) res.restarting = true; // 재시작 직전에 기록이 파일에 남도록 먼저 표시한다
+    this.lastResult = { at: Date.now(), source, trigger, ...res };
     if (res.ok) {
       // v2.605(감사 LEFT2605-04): 엣지 push 결과를 버리지 않는다 — 예전에는 .catch(() => {}) 로 통째로 버려 실패한 엣지가 구버전으로 남아도
       //   흔적이 없었다(형제 pushToCollectors 는 '성공 n/m' 을 찍는다). 요약을 lastResult 에 싣고 콘솔에도 남긴다(pushToEdges 안).
       const edgePush = await this.pushToEdges(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 엣지 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
-      if (Array.isArray(edgePush) && edgePush.length) this.lastResult.edgePush = summarizeEdgePush(edgePush);
+      if (Array.isArray(edgePush) && edgePush.length) { this.#lastResult.edgePush = summarizeEdgePush(edgePush); this.#save(); }
       await this.pushToCollectors().catch(() => {});
-      if (restart) { setTimeout(() => restartProcess(), 250); res.restarting = true; }
+      if (restart) setTimeout(() => restartProcess(), 250);
     }
     return res;
   }
@@ -158,17 +210,20 @@ class UpgradeManager {
 
   #restartTimer() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.armedAt = null; this.armedMs = 0;
     const s = this.settings;
     // v2.591 L3: env·옛 파일의 값도 같은 범위로(저장 시 클램프만으로는 env 기본값이 새지 않는다).
     const ms = clampPollMs(s.pollIntervalMs);
     if (s.enabled && ms > 0) {
       this.timer = setInterval(() => this.tick().catch((e) => console.error('[upgrade] tick error:', e.message)), ms);
       this.timer.unref?.();
+      this.armedAt = Date.now(); this.armedMs = ms;
       this.tick().catch(() => {});
     }
   }
 
   start() {
+    this.enablePersistence();
     const s = this.settings;
     if (s.enabled) {
       console.log(`  ▸ auto-upgrade: enabled (watch=${s.watchDir || '-'}, remote=${s.remoteBase ? 'yes' : 'no'}, autoApply=${s.autoApply})`);
@@ -178,17 +233,36 @@ class UpgradeManager {
 
   // v2.591 L3: 재진입 가드 — 확인이 주기를 넘기면(고RTT 원격 소스) 겹쳐 실행되고, autoApply 면 apply() 가 겹칠 수 있다.
   #ticking = false;
+  // v2.736.2: 한 번의 결과를 lastTick 에 남긴다(언제·무엇을 했나 — 화면이 '자동 확인이 돌고 있는가' 를 말한다).
   async tick() {
     if (this.#ticking) return;
     this.#ticking = true;
+    const at = Date.now();
+    let rec = { at, outcome: 'error' };
     try {
-      const check = await this.check();
+      const check = await this.check({ trigger: 'auto' });
+      const latest = check.remote?.latest || check.watch?.version || null;
       const newer = check.watch?.available || check.remote?.available;
-      if (newer && this.settings.autoApply) {
+      // v2.736.2(리뷰 F3): 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이라 기록하지 않는다.
+      if (!check.remote && !check.watch) rec = { at, outcome: 'no-source' };
+      else if (check.remote && check.remote.ok === false && !check.watch?.available) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
+      else if (!newer) rec = { at, outcome: 'up-to-date', latest };
+      else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
+      else {
         console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
-        await this.apply({ source: 'auto', restart: true });
+        // 적용 도중 프로세스가 끝나면(강제 종료 등) 결과가 남지 않는다 — '적용 시작' 을 먼저 남긴다(새 프로세스가 되살린다).
+        this.lastTick = { at, outcome: 'applying', latest }; this.#save();
+        const r = await this.apply({ source: 'auto', restart: true, trigger: 'auto' });
+        rec = r.ok ? { at, outcome: 'applied', latest, version: r.version || null } : { at, outcome: 'apply-failed', latest, reason: r.reason || null };
       }
-    } finally { this.#ticking = false; }
+    } catch (e) {
+      rec = { at, outcome: 'error', reason: String(e?.message || e).slice(0, 300) };
+      throw e;
+    } finally {
+      this.lastTick = { ...rec, finishedAt: Date.now() };
+      this.#save();
+      this.#ticking = false;
+    }
   }
 }
 

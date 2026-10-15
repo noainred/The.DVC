@@ -4,6 +4,8 @@ import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
 import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
+// v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
+import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText } from './upgradeAutoText.js';
 
 // 원격 소스 주소 비교(서버 upgrade/settings.js 와 같은 규칙 — 앞뒤 공백·끝 '/'·대소문자만 다른 주소는 같은 접속처).
 const baseKey = (v) => {
@@ -59,6 +61,38 @@ function SignatureCard({ sig }) {
       <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal' }}>
         서명 정책은 화면에서 바꿀 수 없습니다 — 호스트의 portal.env 와 docs/RELEASE-SIGNING.md 를 보세요.
       </div>
+    </div>
+  );
+}
+
+/** 자동 업그레이드 동작 — 상태 · 안 되는 이유와 조치 · 다음 확인 시각 · 마지막 자동 확인(v2.736.2). 서버가 auto 를 보내지 않으면 그리지 않는다. */
+function AutoCard({ status }) {
+  const a = autoSummary(status);
+  if (!a) return null;
+  return (
+    <div className="card" style={{ marginBottom: 16, minWidth: 0 }}>
+      <b>자동 업그레이드 동작</b>
+      <div style={{ marginTop: 10 }}>
+        <Row label="상태"><span style={{ color: TONE_COLOR[a.tone] || 'inherit', fontWeight: 600, whiteSpace: 'normal' }}>{a.label}</span></Row>
+        <Row label="다음 자동 확인"><span style={{ whiteSpace: 'normal' }}>{a.next}</span></Row>
+        <Row label="마지막 자동 확인">
+          {a.tick
+            ? <span style={{ color: TONE_COLOR[a.tickTone] || 'inherit', whiteSpace: 'normal' }}>{a.tick}</span>
+            : <span className="muted" style={{ whiteSpace: 'normal' }}>{noTickText(status)}</span>}
+        </Row>
+      </div>
+      {a.lines.length > 0 && (
+        <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
+          {a.lines.map((l) => (
+            <li key={l.code} style={{ whiteSpace: 'normal', wordBreak: 'break-word', marginBottom: 4 }}>
+              <span style={{ color: l.code === 'check-failed' || l.code === 'apply-failed' ? TONE_COLOR.bad : TONE_COLOR.warn }}>{l.title}</span>
+              {l.reason && <span className="muted"> — {l.reason}{l.when ? ` (${l.when})` : ''}</span>}
+              {l.fix && <div className="muted" style={{ fontSize: 11.5 }}>{l.fix}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {status.persist?.error && <div style={{ marginTop: 6, fontSize: 11.5, color: TONE_COLOR.warn, whiteSpace: 'normal' }}>{status.persist.error}</div>}
     </div>
   );
 }
@@ -151,10 +185,17 @@ export default function Upgrade() {
   const tokenWillDrop = !!status.hasToken && !form.token && baseKey(form.remoteBase) !== baseKey(status.remoteBase);
   const result = status.lastResult;
   const newer = check && (check.watch?.available || check.remote?.available);
+  // v2.736.2: 확인·적용은 저장된 '자동 업그레이드 사용' 을 따른다(서버 판정과 같은 값) — 체크만 바꾼 상태면 저장하라고 말한다.
+  const savedEnabled = !!status.enabled;
+  const lockTitle = savedEnabled ? undefined
+    : form.enabled ? '설정을 저장한 뒤에 쓸 수 있습니다(저장된 설정에서는 자동 업그레이드 사용이 꺼져 있습니다)' : '자동 업그레이드 사용이 꺼져 있습니다';
 
   return (
     <>
       <div className="section-title">시스템 자동 업그레이드 (관리자)</div>
+
+      {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 맨 위에 먼저 말한다. */}
+      <AutoCard status={status} />
 
       {/* 현재 상태 + 최근 확인 결과 — 화면 최상단(설정 위)에 먼저 보여준다. */}
       <div className="grid cols-2" style={{ marginBottom: 16 }}>
@@ -170,7 +211,7 @@ export default function Upgrade() {
                 : <span className="muted">미설정</span>}
             </Row>
             <Row label="감시 폴더">{status.watchDir || <span className="muted">미설정</span>}</Row>
-            <Row label="자동 적용">{status.autoApply ? '예' : '아니오'}{status.pollIntervalMs ? ` · ${Math.round(status.pollIntervalMs / 60000)}분 주기` : ''}</Row>
+            <Row label="자동 적용"><span style={{ whiteSpace: 'normal' }}>{autoApplyRowText(status)}</span></Row>
           </div>
         </div>
 
@@ -179,7 +220,12 @@ export default function Upgrade() {
           {!check && <div className="muted" style={{ padding: 12 }}>아직 확인하지 않았습니다.</div>}
           {check && (
             <div style={{ marginTop: 10 }}>
-              <Row label="확인 시각">{new Date(check.at).toLocaleString('ko-KR')}</Row>
+              <Row label="확인 시각">
+                <span style={{ whiteSpace: 'normal' }}>{new Date(check.at).toLocaleString('ko-KR')}
+                  {triggerText(check.trigger) && <span className="muted"> · {triggerText(check.trigger)}</span>}
+                  {restoredNote(check) && <span className="badge gray" style={{ marginLeft: 6 }}>{restoredNote(check)}</span>}
+                </span>
+              </Row>
               {check.watch && <Row label="감시 폴더">{check.watch.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
                 : <span className="muted">최신</span>}</Row>}
@@ -274,12 +320,13 @@ export default function Upgrade() {
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
             {busy === 'save' ? '저장 중…' : '설정 저장'}
           </button>
-          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !form.enabled}
+          {/* v2.736.2(리뷰 UPG-UI-05): 잠금은 **저장된** 설정 기준이다 — 서버는 저장값으로 판정한다(체크만 하고 누르면 409). */}
+          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !savedEnabled} title={lockTitle}
             onClick={() => run('check', () => postJson('/upgrade/check'))}>
             {busy === 'check' ? '확인 중…' : '새 버전 확인'}
           </button>
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px', background: newer ? 'linear-gradient(135deg,var(--green),#16a34a)' : undefined }}
-            disabled={busy || !form.enabled || !newer} onClick={() => run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }))}>
+            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }))}>
             {busy === 'apply' ? '적용 중…' : '업그레이드 적용 + 재시작'}
           </button>
           <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy}
@@ -288,20 +335,28 @@ export default function Upgrade() {
           </button>
         </div>
 
-        {msg && (
-          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
-            background: msg.r.ok && !msg.r.note ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
-            color: msg.r.ok && !msg.r.note ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
-            <b>{msg.action}</b> · {msg.r.ok && msg.r.note ? msg.r.note : msg.r.ok
-              ? `성공${msg.r.version ? ` — v${msg.r.from || '?'} → v${msg.r.version}` : ''}${msg.r.backup ? ` (백업: ${msg.r.backup})` : ''}${msg.r.restarting ? ' · 재시작 중' : ''}`
-              : (msg.r.reason || '실패')}
-          </div>
-        )}
+        {/* v2.736.2: 문구는 actionMsg 하나 — 예전에는 '새 버전 확인' 응답에 ok 가 없어 확인이 성공해도 '실패' 로 보였다. */}
+        {msg && (() => {
+          const m = actionMsg(msg.action, msg.r);
+          const good = m.ok && !m.warn;
+          return (
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, whiteSpace: 'normal', wordBreak: 'break-word',
+              background: good ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
+              color: good ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
+              <b>{m.label}</b> · {m.text}
+            </div>
+          );
+        })()}
       </div>
 
       {result && (
         <div className="card" style={{ marginTop: 16 }}>
           <b>최근 적용 결과</b>
+          {resultSummary(result) && (
+            <div style={{ marginTop: 8, fontSize: 13, whiteSpace: 'normal', wordBreak: 'break-word', color: TONE_COLOR[resultSummary(result).tone] || 'inherit' }}>
+              {resultSummary(result).text}
+            </div>
+          )}
           <pre style={{ marginTop: 10, fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
             {JSON.stringify(result, null, 2)}
           </pre>
