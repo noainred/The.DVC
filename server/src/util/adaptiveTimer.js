@@ -24,7 +24,13 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   //   다음 주기로 재무장한다). 폴러는 여전히 자기 오류를 스스로 다뤄야 한다 — 이 줄은 마지막 안전망이다.
   const shouldLogFail = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
   let stopped = false;
-  let lastRunAt = Date.now();
+  // v2.741(감사 TIMING-05): 변경 알림의 재무장 기준은 **마지막 실행이 끝난 시각**이다(머리말의 '이전 실행 종료 기준' 약속).
+  //   예전에는 실행 **시작** 시각(lastRunAt)으로 남은 시간을 셌다 — 2.5초 걸린 실행 직후 같은 주기(3초)로 알림이 오면
+  //   3 − 2.6 = 0.4초가 남은 것으로 보고 하한 1초 뒤에 다시 돌았다(알림 없는 대조군은 3초). bmusage 처럼 어떤 필드를 저장해도
+  //   알리는 설정에서 실제로 닿는다. 첫 실행 전에는 타이머를 만든 시각이 기준이다(예전과 같다).
+  let lastEndAt = Date.now();
+  // 지금 무장된 주기(getMs 값) — 알림이 와도 값이 그대로면 재무장하지 않는다(남은 시간을 다시 셀 이유가 없다). 첫 실행 전은 null.
+  let armedMs = null;
   // v2.598 T2598-04: 실행 중에 주기 변경 알림이 오면 예전엔 즉시 재무장해 **진행 중인 fn 과 겹쳐 두 번째 fn 이
   // 돌 수 있었다**(실측: 4초 걸리는 작업 중 주기를 2초로 바꾸면 동시 실행 2). 호출부 폴러가 전부 재진입 가드를
   // 가져 피해는 없었지만, 이 유틸의 약속('틱이 겹쳐 쌓이지 않는다')이 깨져 있었다. 실행 중에는 재무장하지 않고
@@ -56,23 +62,29 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
     timer.unref?.();
   };
   const tick = async () => {
-    lastRunAt = Date.now();
     inFlight = true;
     try { await fn(); } catch (e) {
       // 폴러는 자기 오류를 삼킨다(기존 .catch(()=>{}) 와 동일) — 다만 무음은 아니다(위 v2.733 주석).
       const msg = String(e?.message || e);
       try { if (shouldLogFail('fn', msg)) console.warn(`[adaptive-timer] ${name || '(이름 없음)'} 실행 실패: ${msg} — 다음 주기에 다시 실행합니다(같은 오류는 1시간에 한 번만 적습니다)`); } catch { /* 로그가 타이머를 멈추지 않게 */ }
     }
-    finally { inFlight = false; }
-    if (!stopped) arm(safeMs());
+    finally { inFlight = false; lastEndAt = Date.now(); }
+    if (!stopped) {
+      const ms = safeMs();
+      armedMs = Number.isFinite(Number(ms)) ? Number(ms) : null;
+      arm(ms);
+    }
   };
   arm(firstDelayMs);
-  // 주기 변경 시 재무장 — 이미 흘린 시간을 빼고 다시 잡는다(주기를 늘렸다고 방금 돈 작업을
-  // 또 돌리지 않고, 줄였다면 남은 시간이 음수가 되어 바로 다음 틱으로 간다).
+  // 주기 변경 시 재무장 — 마지막 실행 종료 뒤 이미 흘린 시간을 빼고 다시 잡는다(주기를 늘렸다고 방금 돈 작업을
+  // 또 돌리지 않고, 줄였다면 남은 시간이 음수가 되어 바로 다음 틱으로 간다). 주기가 그대로면 아무것도 하지 않는다.
   const off = subscribe ? subscribe(() => {
     if (stopped || inFlight) return;   // 실행 중이면 종료 시 tick 이 새 주기로 재무장한다
     const ms = safeMs();
-    const next = Number.isFinite(Number(ms)) ? Number(ms) - (Date.now() - lastRunAt) : ms; // 못 읽으면 arm 이 60초로
+    const n = Number(ms);
+    if (armedMs != null && Number.isFinite(n) && n === armedMs) return;
+    armedMs = Number.isFinite(n) ? n : null;
+    const next = Number.isFinite(n) ? n - (Date.now() - lastEndAt) : ms; // 못 읽으면 arm 이 60초로
     if (name) console.log(`[adaptive-timer] ${name} 타이머 재무장: ${Math.round(Math.max(1_000, next) / 1000)}초 후`);
     arm(next);
   }) : null;

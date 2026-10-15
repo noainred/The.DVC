@@ -310,10 +310,18 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
   deleteGuestFile(c, fileManager, vmRef, auth, outFile);
   deleteGuestFile(c, fileManager, vmRef, auth, errFile);
   const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];
-  // stderr를 읽었으면 그게 진짜 원인. 못 읽었고(.err도 404) .out도 404였으면 회수단계 문제를 명시.
+  /*
+   * v2.741(감사 DEV-04): stdout 을 **받았는데** CSV 가 아니면(드라이버 실패 문장 — 'NVIDIA-SMI has failed …'·
+   * 'Failed to initialize NVML: Driver/library version mismatch'·'No devices were found') 그 첫 줄이 원인이다. 예전에는
+   * stderr 가 비면 '출력이 비어 있음(stdout 없음)' 이라 말했다 — **비어 있지 않은 stdout 을 '없다' 고 보고**한 것이고
+   * 조치(드라이버 점검)가 아니라 nvidia-smi 경로를 의심하게 만들었다. SSH 경로(sshCollect.js)는 같은 경우 원문을 싣는다.
+   */
+  const stdoutLine = outRes.error ? '' : String(outRes.text || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || '';
+  // stderr를 읽었으면 그게 진짜 원인. 없으면 CSV 가 아닌 stdout. 둘 다 못 읽었고(.err도 404) .out도 404였으면 회수단계 문제를 명시.
   const reason = stderrLine ? `게스트 오류: ${stderrLine.slice(0, 180)}`
-    : reachable ? `회수 실패(.out/.err 모두 HTTP404 — 파일 비었거나 ESXi가 티켓 거부) · stdout: ${outRes.error}`
-      : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
+    : stdoutLine ? `nvidia-smi 가 GPU 값 대신 다음을 출력함(드라이버·장치 확인): ${stdoutLine.slice(0, 180)}`
+      : reachable ? `회수 실패(.out/.err 모두 HTTP404 — 파일 비었거나 ESXi가 티켓 거부) · stdout: ${outRes.error}`
+        : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
   const e = new Error(reason); e.guestDiag = true; throw e;
 }
 

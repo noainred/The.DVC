@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import csv
 import io
+import math
+import re
 
 # 내보내기 열 순서 = 가져오기가 기대하는 헤더. 사용자가 열을 지우거나 순서를 바꿔도
 # 헤더 이름으로 찾으므로 동작한다(헤더가 아예 없으면 이 순서로 간주).
@@ -30,9 +32,23 @@ MAX_ROWS = 2000          # 한 번에 받아들일 최대 행(메모리·처리�
 MAX_CELL = 2048
 
 
+# 순수 숫자(부호·소수·지수만) — 엑셀이 숫자로 읽을 뿐 수식으로 실행하지 않는다.
+# 포탈 web/src/util/csv.js·server/src/util/csv.js guardCell 과 같은 규칙(v2.741 WEB-02).
+# [0-9] 로 쓴다 — 파이썬 \d 는 유니코드 숫자(전각 등)까지 받아 JS 판정과 갈라진다.
+_PLAIN_NUMBER_RE = re.compile(r"[-+]?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?")
+
+
 def _guard(value) -> str:
-    """엑셀 수식으로 실행될 수 있는 셀 앞에 작은따옴표를 붙인다."""
+    """엑셀 수식으로 실행될 수 있는 셀 앞에 작은따옴표를 붙인다.
+
+    유한 숫자와 순수 숫자 문자열(-12.5 · +3 · 1e-3)은 가드하지 않는다 — 음수에 작은따옴표를
+    붙이면 엑셀에서 텍스트가 되어 정렬·합계에서 빠진다. "-2+3"·"=..."·"@..." 는 계속 가드한다.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return str(value)
     text = "" if value is None else str(value)
+    if _PLAIN_NUMBER_RE.fullmatch(text):
+        return text
     if text.startswith(_FORMULA_PREFIXES):
         return "'" + text
     return text

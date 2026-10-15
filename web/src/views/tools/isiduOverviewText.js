@@ -36,7 +36,12 @@ export const DEFAULT_SUBVIEW = 'corps';
 export function viewOfSegs(segs, base = ['tools', 'isilon-dirusage']) {
   const s = Array.isArray(segs) ? segs : [];
   if (s[0] !== base[0] || s[1] !== base[1]) return null;
-  if (s[2] === 't') return { view: 'target', targetId: s[3] ? decodeURIComponent(s[3]) : '' };
+  if (s[2] === 't') {
+    if (!s[3]) return { view: 'target', targetId: '' };
+    // v2.741 RECENT-02: 잘못된 % 조각(손으로 고쳤거나 잘린 링크 — `#/…/t/%`)은 decodeURIComponent 가 URIError 를 던진다.
+    // 렌더 중(useState 초기화)에 던지면 특수 기능 탭 전체가 오류 화면이 되므로, 다른 잘못된 조각처럼 첫 화면(법인 현황)으로 연다.
+    try { return { view: 'target', targetId: decodeURIComponent(s[3]) }; } catch { return { view: DEFAULT_SUBVIEW, targetId: '' }; }
+  }
   return { view: SUBVIEW_KEYS.includes(s[2]) ? s[2] : DEFAULT_SUBVIEW, targetId: '' };
 }
 
@@ -76,19 +81,42 @@ export function progressOf(t, now = Date.now()) {
   return { since, elapsedMs, limitMs, pct: Math.max(0, Math.min(1, elapsedMs / limitMs)), over: elapsedMs > limitMs };
 }
 
+/** v2.741 DEV-05: 이만큼 넘게 돈 실패는 1시간이 아니라 주기만큼 쉰다 — 서버 poller.LONG_FAIL_MS 와 같은 값(목록 응답 failLongMs). */
+export const LONG_FAIL_MS = 30 * MIN;
+
+/** 오래 돈 실패인가(서버 poller.isLongFailure 와 같은 판정 — 소요 시간을 모르면 아니다). */
+export function isLongFailure(lt, longFailMs = LONG_FAIL_MS) {
+  if (!lt || lt.ok) return false;
+  const d = numOrNull(lt.durationMs);
+  return d != null && d >= (numOrNull(longFailMs) || LONG_FAIL_MS);
+}
+
 /**
- * 다음 주기 수집 예상 시각(서버 poller.isDue 와 같은 규칙 — 성공 뒤는 주기, 실패 뒤는 min(주기, 재시도 간격)).
- * 꺼짐·장비 비활성·조사 중이면 null. 기록이 없으면 'soon'(다음 틱). 엣지 담당은 그 엣지의 폴러가 같은 규칙으로 돈다 — 추정이다.
+ * 다음 주기 수집 예상 시각(서버 poller.isDue 와 같은 규칙 — 성공 뒤는 주기, 실패 뒤는 min(주기, 재시도 간격),
+ * v2.741 DEV-05: 오래 돈 실패(시한·출력 상한에 걸린 du) 뒤는 주기).
+ * 꺼짐·장비 비활성·조사 중이면 null. 기록이 없거나 '지금 수집' 대기열에 있으면 'soon'. 엣지 담당은 그 엣지의 폴러가 같은 규칙으로 돈다 — 추정이다.
  * @returns {number|'soon'|null}
  */
-export function nextRunOf(t, failRetryMs = HOUR, now = Date.now()) {
+export function nextRunOf(t, failRetryMs = HOUR, now = Date.now(), longFailMs = LONG_FAIL_MS) {
   if (!t || t.enabled === false || t.deviceDisabled || t.issue || t.running) return null;
+  if (t.queued) return 'soon';
   const lt = t.lastTry;
   if (!lt || numOrNull(lt.ts) == null) return 'soon';
   const iv = Math.max(1, numOrNull(t.intervalHours) || 24) * HOUR;
-  const wait = lt.ok ? iv : Math.min(iv, numOrNull(failRetryMs) || HOUR);
+  const wait = lt.ok || isLongFailure(lt, longFailMs) ? iv : Math.min(iv, numOrNull(failRetryMs) || HOUR);
   const at = lt.ts + wait;
   return at <= now ? 'soon' : at;
+}
+
+/**
+ * v2.741 TIMING-02: '지금 수집' 응답에서 동시 실행 상한 때문에 바로 시작하지 않은 대상 — 조용히 빼지 않는다.
+ * 없으면 ''.
+ */
+export function runQueueNote(r) {
+  const n = Array.isArray(r?.queued) ? r.queued.length : 0;
+  if (!n) return '';
+  const c = numOrNull(r?.concurrency);
+  return `동시 실행 상한${c ? `(${c}개)` : ''} 때문에 ${n}개는 대기열에 넣었습니다 — 앞 조사가 끝나면 차례로 시작합니다(장비에 du 를 한꺼번에 돌리지 않습니다).`;
 }
 
 /* ─────────────── 개요 응답 상태(v2.740 감사 D-02) ───────────────
@@ -335,7 +363,8 @@ export function attemptText(t, now = Date.now()) {
     const lim = Math.round(p.limitMs / MIN);
     return { text: `${min < 60 ? `${min}분` : `${Math.floor(min / 60)}시간 ${min % 60}분`}째 · 시한 ${lim}분`, prog: p };
   }
+  if (t?.queued) return { text: `대기 중 · 동시 실행 상한(앞 조사가 끝나면 시작)${numOrNull(t.queued.since) != null ? ` · ${agoText(t.queued.since, now)} 요청` : ''}`, prog: null };
   const lt = t?.lastTry;
   if (!lt || numOrNull(lt.ts) == null) return { text: '시도 기록 없음', prog: null };
-  return { text: `${lt.ok ? '성공' : '실패'} · ${agoText(lt.ts, now)}`, prog: null };
+  return { text: `${lt.ok ? '성공' : '실패'} · ${agoText(lt.ts, now)}${isLongFailure(lt) ? ' · 오래 걸린 실패라 주기 뒤에 다시 시도' : ''}`, prog: null };
 }

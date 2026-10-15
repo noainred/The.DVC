@@ -71,11 +71,12 @@ cp -r "$REPO_ROOT/server/config" "$APP/server/config"
 # (테스트·개발 중 생긴 auth-secret·DB·감사 로그·내부 IP 가 담긴 수집 설정)를 공개 릴리스 자산에 싣지 않는다.
 # v2.590 의 Windows zip 에는 CI 머신의 auth-secret·audit.ndjson·ping-targets.json 이 실제로 들어 있었다 —
 # CONFIG_DIR 없이 앱 폴더에서 실행하면 그 공개 서명키로 세션 토큰을 위조할 수 있다. 예제만 남긴다.
+# v2.741(감사 INJPKG-05): 거부 목록이 아니라 **허용 목록**이다 — 예제(*.example.json)만 남기고 나머지(점 파일·하위 폴더·
+#   원자 쓰기 임시 파일 .*.tmp-*·*.bak·*.conf·rma-*.env·이름 없는 새 확장자)는 전부 지운다. 거부 목록은 나열하지 않은 확장자를
+#   그대로 실었다. 저장소에 추적되는 server/config 파일은 *.example.json 뿐이다(test/audit2741l.test.js 가 git ls-files 로 고정).
+#   두 빌드(offline·Windows)의 식은 같아야 한다(test/audit2597.test.js 가 대조).
 find "$APP/server/config" -mindepth 1 -maxdepth 1 \
-  \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.ndjson' \
-     -o -name 'ipam-scan.json' -o -name 'portal.env' -o -name 'secrets-key' -o -name 'auth-secret' \
-     -o -name '*.txt' -o -name '*.corrupt.*' -o -type d \
-     -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
+  ! -name '*.example.json' -exec rm -rf {} + 2>/dev/null || true
 cp "$REPO_ROOT/server/package.json" "$APP/server/"
 [[ -d "$REPO_ROOT/server/node_modules" ]] || { echo "server/node_modules 필요 ('npm run install:all')" >&2; exit 1; }
 cp -a "$REPO_ROOT/server/node_modules" "$APP/server/node_modules"

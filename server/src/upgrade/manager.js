@@ -17,12 +17,15 @@ import {
 import { signatureStatus } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
 import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 직전 정상 확인 결과 유지 계약
 import { resolveBundleBytes, bundleFromArchive, lastBundleReject } from './bundleSource.js';
-import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
+import { pushUpgradeToCollectors, pushConcurrencyOf } from '../collector/upgradePush.js'; // v2.741(TIMING-07): push 동시 개수(엣지 push 도 같은 값)
 import { loadCollectors } from '../collector/registry.js';
 // v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
 import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus, sanitizeDeferral } from './autoState.js';
 import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
 import { runningScans, resumeOutlookText } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다
+import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
+import { getJob as vmcloneJob } from '../vmclone/store.js';
+import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { localStamp } from '../util/dayKey.js';       // v2.740(B-08): 사람이 읽는 시각은 포탈 시각
 import { cmpVersion } from '../util/cmpVersion.js';
@@ -40,6 +43,38 @@ export function scanDeferMaxMs(v = process.env.UPGRADE_SCAN_DEFER_MAX_MS) {
   return Math.min(12 * 3_600_000, Math.round(n));
 }
 const DEFER_RECHECK_MS = 60_000;
+
+/**
+ * v2.741(감사 TIMING-01 ③): 자동 적용이 기다리는 **실행 중 VM 복제 잡**(vmclone/runner.js — 스캔 기록 밖이다).
+ *   복제 도중 재시작이 오면 원본 VM 에 임시 스냅샷(portal-clone-*)이 남고 그 잡을 이어 받는 경로가 없다 — 그래서 스캔처럼 끝나기를 기다린다
+ *   (상한은 스캔과 같은 UPGRADE_SCAN_DEFER_MAX_MS). 대기열에만 있는 잡은 아직 아무것도 건드리지 않았으므로 기다리지 않는다.
+ * @returns {{kind:'vm-clone', key:string, label:string, since:number|null, phase:string, resumable:false}[]}
+ */
+export function runningVmClones() {
+  let st = null;
+  try { st = vmcloneRunnerStatus(); } catch { return []; }
+  const r = st?.running;
+  if (!r || !r.jobId) return [];
+  let name = '';
+  try { name = String(vmcloneJob(r.jobId)?.vmName || ''); } catch { name = ''; }
+  return [{ kind: 'vm-clone', key: String(r.jobId), label: `VM 복제 ${name || r.jobId}`.slice(0, 120), since: numOrNull(r.startedAt), phase: String(r.phase || '').slice(0, 120), resumable: false }];
+}
+
+/** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제는 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
+const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => x.kind !== 'vm-clone');
+function cloneOutlookText(blocking) {
+  const n = (Array.isArray(blocking) ? blocking : []).filter((x) => x.kind === 'vm-clone').length;
+  return n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '';
+}
+const joinOutlook = (...parts) => parts.filter(Boolean).join(' · ');
+
+/** 기다리지 않은 분리 실행 du 가 있으면 그 사실을 적는다(조용히 끊지 않는다) — 없으면 ''. */
+function detachedNote(detached) {
+  const n = Array.isArray(detached) ? detached.length : 0;
+  if (!n) return '';
+  const names = detached.slice(0, 3).map((x) => x.label || x.kind).filter(Boolean).join(', ');
+  return ` · 장비에서 분리 실행 중인 스캔 ${n}개${names ? `(${names}${n > 3 ? ' …' : ''})` : ''}는 기다리지 않습니다(재시작 뒤 같은 작업에 다시 붙어 결과를 받습니다)`;
+}
 
 
 const originOf = (u) => { try { return new URL(String(u)).origin; } catch { return ''; } }; // 경로·쿼리에 비밀이 실릴 수 있어 origin 만
@@ -145,7 +180,10 @@ export class UpgradeManager {
         currentVersion: currentVersion(), deferral: this.deferral, now: Date.now(),
       }),
       // v2.737: 화면이 수동 적용 전에 '지금 스캔 N개가 끊긴다' 를 경고하고, 대기 중이면 무엇을 기다리는지 말한다.
-      runningScans: runningScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger })),
+      // v2.741(TIMING-03): resumable — 재시작 뒤 같은 작업에 다시 붙는 스캔(아이실론 분리 실행 du). 자동 적용은 그 스캔을 기다리지 않는다.
+      runningScans: runningScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger, resumable: !!x.resumable })),
+      // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡 — 수동 적용 전 경고와 자동 적용 대기가 함께 본다.
+      runningClones: runningVmClones().map((x) => ({ kind: x.kind, label: x.label, since: x.since, phase: x.phase })),
       deferral: sanitizeDeferral(this.deferral), scanDeferMaxMs: scanDeferMaxMs(),
       ticking: this.#ticking,
       applying: !!this._applying,
@@ -261,7 +299,12 @@ export class UpgradeManager {
     let bundle = archivePath;
     if (!bundle && s.watchDir) bundle = findNewerArchive(s.watchDir, '0.0.0')?.path;
     if (!bundle) return [];
-    const results = await Promise.all(s.edges.map((e) => pushBundleToEdge(e, bundle)));
+    // v2.741(감사 TIMING-07): 동시 개수 상한(UPGRADE_PUSH_CONCURRENCY, 기본 4) — 예전 Promise.all 은 모든 엣지에 번들(수십 MB)을 한꺼번에
+    //   올려 업링크를 나눠 쓰다 개별 업로드가 시한(EDGE_PUSH_TIMEOUT_MS)을 넘길 수 있었고, 엣지마다 번들을 따로 읽어 메모리에 동시에 올렸다.
+    //   결과 배열 모양·순서는 예전 그대로이고, 던진 항목(번들 파일 읽기 실패 등)은 그 엣지만 실패로 남긴다(예전에는 전체가 거부됐다).
+    const settled = await poolSettled(s.edges, pushConcurrencyOf(), (e) => pushBundleToEdge(e, bundle));
+    const results = settled.map((r, i) => (r.status === 'fulfilled' ? r.value
+      : { edge: s.edges[i]?.url, ok: false, status: null, reason: String(r.reason?.message || r.reason || '푸시 실패').slice(0, 300) }));
     const sum = summarizeEdgePush(results);
     if (results.length) console.log(`[upgrade] 엣지 업그레이드 푸시: ${sum.ok}/${sum.total} 성공`);
     for (const f of sum.failed) console.warn(`[upgrade] 엣지 업그레이드 푸시 실패 ${f.edge}: ${f.reason}`);
@@ -280,16 +323,21 @@ export class UpgradeManager {
    */
   #deferDecision(latest, now = Date.now()) {
     const max = scanDeferMaxMs();
-    const scans = runningScans();
-    if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans }; }
+    const all = runningScans();
+    // v2.741(감사 TIMING-03): 재시작 뒤 같은 작업에 다시 붙는 스캔(아이실론 분리 실행 du — scanJournal resumable)은 기다리지 않는다 —
+    //   재시작이 와도 장비의 du 는 계속 돌고 다음 기동이 결과만 받는다. 예전에는 그것까지 '스캔 1개' 로 세어 거의 늘 상한까지 미뤘다.
+    const detached = all.filter((x) => x.resumable);
+    // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
+    const scans = [...all.filter((x) => !x.resumable), ...runningVmClones()];
+    if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));
-    if (now >= this.deferral.until) return { wait: false, forced: true, scans };
+    if (now >= this.deferral.until) return { wait: false, forced: true, scans, detached };
     if (!this.deferTimer) {
       this.deferTimer = setInterval(() => { this.#deferTick().catch((e) => console.warn(`[upgrade] 대기 확인 실패: ${e?.message || e}`)); }, DEFER_RECHECK_MS);
       this.deferTimer.unref?.();
     }
-    return { wait: true, forced: false, scans };
+    return { wait: true, forced: false, scans, detached };
   }
 
   /** v2.737: 대기 중 1분마다 — 스캔이 끝났거나 상한을 넘겼으면 곧바로 적용한다. */
@@ -303,7 +351,7 @@ export class UpgradeManager {
     const d = this.#deferDecision(latest);
     if (d.wait) return;
     const waited = Date.now() - (since || Date.now());
-    const note = d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — ${resumeOutlookText(d.scans)}` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`;
+    const note = `${d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — ${joinOutlook(scansOnly(d.scans).length ? resumeOutlookText(scansOnly(d.scans)) : '', cloneOutlookText(d.scans))}` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`}${detachedNote(d.detached)}`;
     this.#clearDeferral();
     this.#ticking = true;
     const at = Date.now();
@@ -360,10 +408,14 @@ export class UpgradeManager {
       // v2.740(B-02 ③): 두 출처 중 큰 버전 — 예전에는 원격 값을 먼저 써서 감시 폴더에만 있는 더 새 버전을 기록하지 않았다.
       const latest = newestVersion(check.remote?.latest, check.watch?.available ? check.watch.version : null);
       const newer = check.watch?.available || check.remote?.available;
-      if (!newer || !this.settings.autoApply) this.#clearDeferral(); // v2.737: 받을 것이 없어졌거나 자동 적용을 껐으면 대기도 끝
+      // v2.741(감사 RECENT-01): '확인하지 못했다' 는 '받을 것이 없다' 가 아니다 — 원격 확인 실패(available 은 rememberRemoteCheck 가
+      //   false 로 둔다)는 대기 기록(since·until)과 1분 재확인을 그대로 둔다. 예전에는 실패 한 번이 대기를 지워 다음 성공 확인에서
+      //   상한('늦어도 X')이 새로 시작됐다. 판정은 아래 'check-failed' 와 같은 조건이다.
+      const checkFailed = !!(check.remote && check.remote.ok === false && !check.watch?.available);
+      if (!this.settings.autoApply || (!newer && !checkFailed)) this.#clearDeferral(); // v2.737: 받을 것이 없어졌거나 자동 적용을 껐으면 대기도 끝
       // v2.736.2(리뷰 F3): 원격 소스·감시 폴더가 둘 다 없으면 아무것도 확인하지 않았다 — '최신' 이라 기록하지 않는다.
       if (!check.remote && !check.watch) rec = { at, outcome: 'no-source' };
-      else if (check.remote && check.remote.ok === false && !check.watch?.available) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
+      else if (checkFailed) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
       else if (!newer) rec = { at, outcome: 'up-to-date', latest };
       else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
       else if ((dd = this.#deferDecision(latest)).wait) {
@@ -371,13 +423,15 @@ export class UpgradeManager {
         const scans = this.deferral?.scans || [];
         rec = { at, outcome: 'deferred', latest, reason: `실행 중 스캔 ${scans.length}개(${scans.slice(0, 3).map((x) => x.label || x.kind).join(', ')})가 끝나면 적용합니다 — 늦어도 ${localStamp(this.deferral.until)}` }; // v2.740(B-08): UTC ISO 가 아니라 포탈 시각
       } else {
-        if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(${resumeOutlookText(dd.scans)})`);
+        if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(${joinOutlook(scansOnly(dd.scans).length ? resumeOutlookText(scansOnly(dd.scans)) : '', cloneOutlookText(dd.scans))})`);
         this.#clearDeferral();
-        console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
+        // v2.741(TIMING-03): 기다리지 않은 분리 실행 du 가 있으면 그 사실을 기록에 남긴다(조용히 끊지 않는다).
+        const dnote = detachedNote(dd?.detached).replace(/^ · /, '');
+        console.log(`[upgrade] 새 버전 감지 — 적용 후 재시작합니다${dnote ? ` — ${dnote}` : ''}`);
         // 적용 도중 프로세스가 끝나면(강제 종료 등) 결과가 남지 않는다 — '적용 시작' 을 먼저 남긴다(새 프로세스가 되살린다).
-        this.lastTick = { at, outcome: 'applying', latest }; this.#save();
+        this.lastTick = { at, outcome: 'applying', latest, ...(dnote ? { reason: dnote } : {}) }; this.#save();
         const r = await this.apply({ source: 'auto', restart: true, trigger: 'auto' });
-        rec = r.ok ? { at, outcome: 'applied', latest, version: r.version || null } : { at, outcome: 'apply-failed', latest, reason: r.reason || null };
+        rec = r.ok ? { at, outcome: 'applied', latest, version: r.version || null, ...(dnote ? { reason: dnote } : {}) } : { at, outcome: 'apply-failed', latest, reason: r.reason || null };
       }
     } catch (e) {
       rec = { at, outcome: 'error', reason: String(e?.message || e).slice(0, 300) };

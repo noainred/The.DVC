@@ -18,6 +18,8 @@ const DAY = 86_400_000;
 const CACHE_MAX = 8;
 // v2.740 E-08: 기억은 시간으로도 버린다 — 폴더 5만 개 대상 8개분(rows·removed7 전체)이 힙 약 119MB 를 상주시켰다(실측).
 // 화면을 닫은 뒤에도 남아 있을 이유가 없다. 같은 스캔 조합을 다시 열면 새로 계산한다.
+// v2.741 RECENT-03: TTL 은 **마지막 사용** 기준이다 — 적중하면 at 을 지금으로 바꾼다. 생성 시각 기준이면 보고 있는 화면도 생성 10분 뒤
+// 첫 조작(검색·정렬·쪽)이 콜드 재계산(폴더 5만 개 0.7~1초)과 정렬 기억 소실을 겪었다.
 export const CACHE_TTL_MS = 10 * 60_000;
 const _cache = new Map(); // key → { at, value }
 function sweepExpired(map, now = Date.now()) {
@@ -59,7 +61,7 @@ async function comparison(targetId) {
   ]);
   const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}|${base30?.id ?? '-'}`;
   const hit = _cache.get(key);
-  if (hit) { _cache.delete(key); _cache.set(key, hit); return { ...hit.value, latest }; }
+  if (hit) { hit.at = Date.now(); _cache.delete(key); _cache.set(key, hit); return { ...hit.value, latest }; }
   // v2.740 E-03: 세 스캔을 읽고 정렬하는 사이에 시간 기준으로 양보한다(폴더 5만 개 콜드 계산이 0.7~1초 동안 포탈을 멈췄다).
   const yieldIf = createYielder(15);
   const cur = await db.entriesOf(okScan.id);
@@ -272,7 +274,7 @@ async function overviewOf(targetId) {
   const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}`;
   sweepExpired(_ovCache);
   const hit = _ovCache.get(key);
-  if (hit) { _ovCache.delete(key); _ovCache.set(key, hit); return hit.value; }
+  if (hit) { hit.at = Date.now(); _ovCache.delete(key); _ovCache.set(key, hit); return hit.value; }
   const top = (await db.topEntriesOf(okScan.id, OVERVIEW_POOL)) || [];
   const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
   const denom = denomOf(okScan);

@@ -6,6 +6,7 @@ import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { unitText } from './unitText.js'; // v2.611 WEB2611-09: 결측이면 단위 없이 '—'('-%' 금지)
 import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { readFailText } from './readFailText.js'; // v2.741(LEFT-11): vCenter 목록 조회 실패를 삼키지 않는다
 
 // v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다 — 결측 표기('없음')만 이 화면 계약.
 
@@ -134,6 +135,11 @@ const STAGES = [
   ['6 중앙 표시', '중앙 오버레이 → GPU 인벤토리(게스트 배지)', '수신 vms>0인데 화면 X = vCenter id 불일치(중앙↔agent)'],
 ];
 
+/** v2.741(LEFT-11): vCenter 목록 조회 실패 문구 — 드롭다운이 줄어든 이유를 말한다(403 은 권한 문장 — readFailText 규약). */
+export function vcListFailText(err) {
+  return readFailText('vCenter 목록', err, { notMeaning: '진단 데이터가 있는 vCenter 만 id 로 보입니다(등록된 vCenter 가 없다는 뜻이 아닙니다)' });
+}
+
 /** 설정 → GPU 게스트 수집 진단 — 어느 단계에서 막혔는지 + 트러블슈팅 가이드. */
 export default function GpuGuestDiag() {
   const [data, setData] = useState(null);
@@ -142,10 +148,12 @@ export default function GpuGuestDiag() {
   const [vcFilter, setVcFilter] = useState('');   // '' = 전체 vCenter
   const [failOnly, setFailOnly] = useState(false); // 실패한 VM만 보기
   const [vcs, setVcs] = useState([]);              // 등록된 전체 vCenter(표시 순서)
+  // v2.741(LEFT-11): 목록 조회 실패를 삼키면 드롭다운이 진단 데이터에 있는 id 만으로 조용히 줄었다(이름 대신 id · 순서 상실) — 실패를 들고 말한다.
+  const [vcsErr, setVcsErr] = useState(null);
   const load = () => fetchJson('/admin/gpu-guest/diag').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => {
     load();
-    fetchJson('/vcenters').then((d) => setVcs(Array.isArray(d) ? d : (d?.vcenters || []))).catch(() => {});
+    fetchJson('/vcenters').then((d) => { setVcs(Array.isArray(d) ? d : (d?.vcenters || [])); setVcsErr(null); }).catch((e) => setVcsErr(e));
     const t = setInterval(load, 15_000); return () => clearInterval(t);
   }, []);
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않음(CLAUDE.md)
@@ -188,6 +196,7 @@ export default function GpuGuestDiag() {
         </label>
         {vcFilter && <button className="tab" style={{ padding: '4px 10px' }} onClick={() => setVcFilter('')}>필터 해제</button>}
       </div>
+      {vcsErr && <div className="muted" data-read-fail="" style={{ fontSize: 12, marginTop: -4, marginBottom: 10, color: 'var(--amber)', whiteSpace: 'normal' }}>{vcListFailText(vcsErr)}</div>}
 
       {blocks.length === 0
         ? <div className="card" style={{ padding: 16 }}><span className="muted">{vcFilter

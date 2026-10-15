@@ -226,8 +226,35 @@ test('공유 데이터스토어 경고는 항상 존재한다(오삭제를 막�
  */
 import { parseLayoutFilePaths, parseDsSearchResults } from '../src/vcenter/soapParse.js';
 
-test('통합 — layoutEx.file XML 과 브라우저 XML 을 대조하면 소유 디스크가 걸러진다', () => {
-  // vCenter 가 실제로 주는 형태: layoutEx 는 `[ds] folder/file`, 브라우저는 folderPath + path 분리.
+// v2.741(감사 VC-01): 'layoutEx.file' 속성 값은 ArrayOfVirtualMachineFileLayoutExFileInfo 이고 vim25 직렬화의 배열 원소 이름은
+//   **타입 이름**이다. 이 파일의 예전 픽스처는 실제로 오지 않는 `<file>` 모양만 썼고, 그래서 파서가 실제 모양에서 소유 집합 0 을
+//   내는 결함(살아 있는 VM 의 디스크가 고아 후보로 나온다)을 고정한 채 통과했다. 이제 두 모양을 다 돌린다 — 옛 모양은 'layoutEx'
+//   객체 전체를 받을 때의 원소 이름(속성 이름)이라 호환으로 남긴다.
+const LAYOUT_FIXTURE = [
+  [0, '[ds1] vm-live/vm-live.vmx', 'config', 3134],
+  [1, '[ds1] vm-live/vm-live.vmdk', 'diskDescriptor', 569],
+  [2, '[ds1] vm-live/vm-live-flat.vmdk', 'diskExtent', 42949672960],
+  [3, '[ds1] vm-live/vmware.log', 'log', 102400],
+];
+const layoutXmlOf = (tag) => LAYOUT_FIXTURE
+  .map(([k, name, type, size]) => `<${tag}><key>${k}</key><name>${name}</name><type>${type}</type><size>${size}</size></${tag}>`).join('\n');
+
+test('통합(실제 vim25 ArrayOf 모양) — <VirtualMachineFileLayoutExFileInfo> 원소에서 소유 경로를 읽어 소유 디스크를 거른다', () => {
+  // vCenter 가 'layoutEx.file' 경로로 주는 실제 형태(ArrayOf — 원소 = 타입 이름). 소유 집합이 0 이면 vm-live 디스크가 후보로 나온다.
+  const owned = ownedPathSet([parseLayoutFilePaths(`<val xsi:type="ArrayOfVirtualMachineFileLayoutExFileInfo">${layoutXmlOf('VirtualMachineFileLayoutExFileInfo')}</val>`)]);
+  assert.equal(owned.size, 4, 'ArrayOf 모양에서도 layoutEx 의 파일 4개가 모두 소유로 들어가야 한다');
+  const { files } = parseDsSearchResults(`
+    <HostDatastoreBrowserSearchResults>
+      <folderPath>[ds1] vm-live</folderPath>
+      <file xsi:type="VmDiskFileInfo"><path>vm-live.vmdk</path><fileSize>569</fileSize><modification>2026-09-01T00:00:00Z</modification></file>
+      <file xsi:type="VmDiskFileInfo"><path>vm-live-flat.vmdk</path><fileSize>42949672960</fileSize><modification>2026-09-01T00:00:00Z</modification></file>
+    </HostDatastoreBrowserSearchResults>`);
+  const r = findOrphanDisks(files, owned, { now: Date.parse('2026-09-13T00:00:00Z') });
+  assert.equal(r.disks.length, 0, `살아 있는 VM 의 디스크를 후보로 내지 않는다: ${JSON.stringify(r.disks.map((d) => d.name))}`);
+});
+
+test('통합(구 모양 호환 <file>) — layoutEx.file XML 과 브라우저 XML 을 대조하면 소유 디스크가 걸러진다', () => {
+  // 옛 픽스처 모양(원소 = 속성 이름 <file>) — 'layoutEx' 객체 전체를 받을 때의 모양. 브라우저는 folderPath + path 분리.
   const layoutXml = `
     <file><key>0</key><name>[ds1] vm-live/vm-live.vmx</name><type>config</type><size>3134</size></file>
     <file><key>1</key><name>[ds1] vm-live/vm-live.vmdk</name><type>diskDescriptor</type><size>569</size></file>

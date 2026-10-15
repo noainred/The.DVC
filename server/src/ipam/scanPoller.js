@@ -5,11 +5,12 @@
  */
 
 import { runScan, SCAN_DEADLINE_CODE } from './scanRunner.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, getAgentReports, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
-import { scanStarted, scanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
+import { scanStarted, scanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
+import { numOrNull } from '../util/numOrNull.js';
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 // v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
@@ -129,8 +130,28 @@ export function scanStatus() {
   // v2.733: releaseHold — 해제 판정 보류 현황(완료된 스캔이 기준 안에 없는 에이전트의 IP 를 down 으로 바꾸지 않은 것).
   const j = journalFor('ipscan'); // v2.737: 재시작으로 중단된 스캔(재개 대기)·최근 재개 결과
   return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null, releaseHold: releaseHoldStatus(),
+    ...(firstScanPlan ? { firstScan: { ...firstScanPlan } } : {}), // v2.741: 기동 뒤 첫 스캔 예정(마지막 완료 스캔이 주기 안이면 미룬다)
     journal: { interrupted: j.interrupted, recent: j.recent.slice(0, 5), resumeLimit: j.resumeLimit } };
 }
+
+/*
+ * v2.741(감사 TIMING-06): 기동 뒤 첫 주기 스캔은 **마지막 완료 스캔 + 주기** 에 맞춘다. 예전에는 기동 30초 뒤 언제나 대역 전체를 다시
+ *   스캔했다 — 업그레이드·재시작마다(주기를 길게 둔 현장일수록) 주기와 무관한 전체 스캔이 한 번 더 나갔다(형제 iDRAC 스캔은 이미
+ *   lastScanCycleAt 로 '재시작이 스캔을 앞당기지 않게' 고쳤다 — 비대칭). 기준은 scanStore 에 영속된 이 포탈(LOCAL)의 마지막 **완료** 시각
+ *   (reports[LOCAL].at — 미완료 기록은 이 값을 바꾸지 않는다)이다.
+ *   · 재시작으로 끊긴 스캔이 재개를 기다리면(v2.737 scanJournal) 예전처럼 30초 뒤 시작한다 — 그 시작이 대기 항목을 덮는다(재개 유지).
+ *   · 완료 기록이 없으면(처음 · 계속 실패) 30초 뒤. 주기를 넘길 수는 없다(시계가 뒤로 간 경우도 최대 한 주기).
+ */
+export const FIRST_SCAN_MIN_DELAY_MS = 30_000;
+/** 기동 뒤 첫 주기 스캔까지의 지연(순수 — 테스트 고정). */
+export function firstScanDelayMs({ intervalMs, lastDoneAt = null, pendingResume = false, now = Date.now() } = {}) {
+  const iv = numOrNull(intervalMs);
+  const last = numOrNull(lastDoneAt);
+  if (pendingResume || iv == null || iv <= 0 || last == null || last <= 0) return FIRST_SCAN_MIN_DELAY_MS;
+  return Math.max(FIRST_SCAN_MIN_DELAY_MS, Math.min(iv, last + iv - now));
+}
+let firstTimer = null;
+let firstScanPlan = null; // { at, delayMs, reason } — 상태 화면이 '왜 지금 스캔하지 않는가' 를 말하게
 
 export function rescheduleScanPoller() {
   if (timer) clearInterval(timer);
@@ -149,13 +170,25 @@ export function startIpScanPoller() {
         message: `업그레이드·재시작으로 끝나지 못한 스캔이 있습니다(${new Date(x.since || x.detectedAt).toISOString()} 시작) — ${s.enabled || enabledVcRanges().length ? '곧 다시 스캔합니다' : '수동 스캔이었으므로 자동 재개가 다시 시작합니다'}.` });
     }
   } catch (e) { console.warn(`[ipscan] 중단 기록 실패: ${e.message}`); }
-  // 첫 스캔은 부팅 30초 후(다른 수집과 겹치지 않게), 이후 주기 반복.
-  setTimeout(() => runScanOnce().catch((e) => console.error('[ipscan] 실패:', e.message)), 30_000).unref?.();
+  // 첫 스캔은 '마지막 완료 + 주기'(최소 부팅 30초 뒤 — 다른 수집과 겹치지 않게), 이후 주기 반복(v2.741 TIMING-06 — 위 firstScanDelayMs).
+  //   주기 setInterval 은 첫 스캔 때 건다 — 기동 시각에 걸면 첫 스캔을 미룬 만큼 두 스캔이 바짝 붙는다.
+  const lastDoneAt = numOrNull(getAgentReports()?.[LOCAL]?.at);
+  const pendingResume = isResumePending('ipscan', 'local');
+  const delayMs = firstScanDelayMs({ intervalMs: s.intervalMs, lastDoneAt, pendingResume });
+  firstScanPlan = { at: Date.now() + delayMs, delayMs, reason: pendingResume ? 'resume-pending' : delayMs > FIRST_SCAN_MIN_DELAY_MS ? 'recent-scan' : 'boot', lastDoneAt };
   // v2.591 L9: 기동 스태거 전 reschedule 이 먼저 왔으면 그 interval 을 지운다(IP 스캔 주기가 두 벌이 되지 않게).
-  if (timer) clearInterval(timer);
+  if (timer) { clearInterval(timer); timer = null; }
   if (releaseTimer) clearInterval(releaseTimer);
-  timer = setInterval(() => runScanOnce().catch(() => {}), s.intervalMs);
-  timer.unref?.();
+  if (firstTimer) clearTimeout(firstTimer);
+  firstTimer = setTimeout(() => {
+    firstTimer = null; firstScanPlan = null;
+    runScanOnce().catch((e) => console.error('[ipscan] 실패:', e.message));
+    if (timer) clearInterval(timer);
+    timer = setInterval(() => runScanOnce().catch(() => {}), loadScanSettings().intervalMs);
+    timer.unref?.();
+  }, delayMs);
+  firstTimer.unref?.();
+  if (firstScanPlan.reason === 'recent-scan') console.log(`[ipscan] 마지막 완료 스캔(${new Date(lastDoneAt).toISOString()})이 주기 안이라 첫 스캔을 ${Math.round(delayMs / 60_000)}분 뒤로 미룹니다(재시작이 스캔을 앞당기지 않게)`);
   // 분산 에이전트가 중앙으로 보고하는 경우 로컬 스캔이 꺼져 있어도 '해제' 전이는 기록해야 하므로
   // 별도 주기(10분)로 미응답 IP를 마킹한다(중앙/로컬 공통).
   releaseTimer = setInterval(() => {

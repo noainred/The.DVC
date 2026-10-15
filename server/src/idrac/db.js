@@ -9,6 +9,7 @@
  */
 
 import fs from 'node:fs';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // v2.741(LEFT-13): NDJSON 폴백 재기록은 tmp → rename
 import { shouldStore, policyFromEnv } from '../metrics/deadband.js';
 import { stepBuckets, STEP_SLACK_MS } from '../metrics/db.js'; // v2.660: 기간 조회 step 채움(순수 함수)   // v2.451: 변화분만 저장
 import path from 'node:path';
@@ -303,7 +304,8 @@ function initJsonFallback() {
       try { const r = JSON.parse(line); if (r && r.s) rows.push(r); } catch { /* skip */ }
     }
   }
-  const rewrite = () => { try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ } };
+  // v2.741(감사 LEFT-13): 재기록은 원자적으로(tmp → fsync → rename) — writeFileSync 는 먼저 0바이트로 자르므로 그 사이 종료(업그레이드 재시작)면 전력 이력을 잃는다.
+  const rewrite = () => { try { atomicWriteFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch (e) { console.warn(`[idrac] NDJSON 폴백 재기록 실패(메모리는 정리됨 — 다음 정리 때 다시 씁니다): ${e.message}`); } };
   // 상한 초과 시 오래된 앞부분을 10% 잘라 파일 재기록(잦은 재기록 방지 위해 여유분을 남긴다).
   const capRows = () => { if (rows.length > MAX_ROWS) { rows = rows.slice(rows.length - Math.floor(MAX_ROWS * 0.9)); rewrite(); } };
   return {
@@ -395,7 +397,7 @@ function initJsonFallback() {
       const next = rows.filter((r) => r.t >= beforeTs);
       if (next.length !== rows.length) {
         rows = next;
-        try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ }
+        rewrite();
       }
     },
   };

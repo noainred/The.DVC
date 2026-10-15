@@ -217,7 +217,17 @@ export const SCAN_KIND_TEXT = { isidu: '아이실론 디렉터리 사용량', 'i
  */
 export function runningScanWarning(status, now = Date.now()) {
   const list = Array.isArray(status?.runningScans) ? status.runningScans : [];
-  if (!list.length) return null;
-  const names = list.slice(0, 5).map((x) => `${SCAN_KIND_TEXT[x?.kind] || x?.kind || '스캔'}${x?.label ? ` ‘${x.label}’` : ''}${numOrNull(x?.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
-  return `지금 스캔 ${list.length}개가 돌고 있습니다 — ${names.join(', ')}${list.length > 5 ? ' …' : ''}. 지금 적용하면 재시작으로 끊기고, 재시작 뒤 자동으로 다시 시작합니다(아이실론 분리 실행 du 는 결과를 이어 받습니다). 계속할까요?`;
+  // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡(서버 status.runningClones) — 스캔과 달리 재시작 뒤 이어 받는 경로가 없다.
+  const clones = Array.isArray(status?.runningClones) ? status.runningClones.filter((x) => x && typeof x === 'object') : [];
+  if (!list.length && !clones.length) return null;
+  const parts = [];
+  if (list.length) {
+    const names = list.slice(0, 5).map((x) => `${SCAN_KIND_TEXT[x?.kind] || x?.kind || '스캔'}${x?.label ? ` ‘${x.label}’` : ''}${numOrNull(x?.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
+    parts.push(`지금 스캔 ${list.length}개가 돌고 있습니다 — ${names.join(', ')}${list.length > 5 ? ' …' : ''}. 지금 적용하면 재시작으로 끊기고, 재시작 뒤 자동으로 다시 시작합니다(아이실론 분리 실행 du 는 결과를 이어 받습니다).`);
+  }
+  if (clones.length) {
+    const names = clones.slice(0, 5).map((x) => `${x.label ? `‘${x.label}’` : 'VM 복제'}${x.phase ? ` · ${x.phase}` : ''}${numOrNull(x.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
+    parts.push(`지금 VM 복제 ${clones.length}개가 돌고 있습니다 — ${names.join(', ')}. 지금 적용하면 복제가 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요.`);
+  }
+  return `${parts.join(' ')} 계속할까요?`;
 }

@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import { usePolling } from '../api.js';
 import { fmtAgo } from '../util/fmt.js';
+import { agoText } from './tools/relTime.js';
 import { Loading, ErrorBox, Kpi, usageColor } from '../components/ui.jsx';
 
 /**
@@ -51,6 +52,24 @@ function fmtVal(v, unit) {
 
 // v2.613 DEPS2613-11: fmtAgo 는 util/fmt(relTime 코어) 하나다 — 이 화면만 90초/5400초 임계를 쓰던 근거가 없었다.
 
+/**
+ * v2.741(LEFT-09): 호스트 목록 판정 배지의 계산 시각. 서버 `/capacity/summary` 는 판정을 최대 summaryTtlMs 동안 캐시하고,
+ * TTL 이 지나면 옛 값을 바로 준 뒤 뒤에서 다시 계산한다(summaryRefreshing — v2.689 G2 B2). 응답이 그 사실을 싣는데
+ * 화면이 읽지 않아, 옛 판정이 지금 판정처럼 보였다. 계산 시각을 모르면(구버전 서버 · 아직 계산 전) 말하지 않는다(null).
+ * 아래 상세(`/capacity/host`)는 호스트를 고를 때마다 새로 계산하므로 캐시가 아니다 — title 이 그 차이를 말한다.
+ * 반환: { text, title } | null — title 은 일반 글자(title 속성)라 `**` 를 쓰지 않는다.
+ */
+export function summaryCalcNote(summary, now = Date.now()) {
+  const at = Number(summary?.summaryAt);
+  if (summary?.summaryAt == null || !Number.isFinite(at) || at <= 0) return null;
+  const ttl = Number(summary?.summaryTtlMs);
+  const ttlText = Number.isFinite(ttl) && ttl > 0 ? `최대 ${Math.round(ttl / 1000)}초` : '잠시';
+  return {
+    text: `호스트 판정 계산 ${agoText(at, now)}${summary.summaryRefreshing ? ' · 지금 다시 계산 중' : ''}`,
+    title: `위 호스트 배지의 판정은 ${ttlText} 동안 재사용하는 계산 결과입니다 — 시간이 지나면 직전 값을 먼저 보이고 뒤에서 다시 계산합니다. 아래 상세는 호스트를 고를 때마다 새로 계산합니다.`,
+  };
+}
+
 export default function CapacityAdvisor() {
   const [hostKey, setHostKey] = useState('local');
   const [win, setWin] = useState('day');
@@ -64,6 +83,7 @@ export default function CapacityAdvisor() {
   if (!summary) return <Loading />;
 
   const hosts = summary.hosts || [];
+  const calcNote = summaryCalcNote(summary);
   const cur = hosts.find((h) => h.k === hostKey) || null;
   const winData = host?.windows?.[win];
   const chartMeta = (summary.collectors || []).find((c) => c.key === chartMetric);
@@ -99,6 +119,9 @@ export default function CapacityAdvisor() {
             ))}
           </div>
         </div>
+        {calcNote && hosts.length > 0 && (
+          <div className="muted" data-summary-calc="" style={{ fontSize: 11.5, marginTop: 6 }} title={calcNote.title}>{calcNote.text}</div>
+        )}
         {cur?.meta && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             {cur.meta.hostname} · {cur.meta.platform} · CPU {cur.meta.cores}코어 · 메모리 {cur.meta.totalMemMB ? `${Math.round(cur.meta.totalMemMB / 1024)}GB` : '—'}

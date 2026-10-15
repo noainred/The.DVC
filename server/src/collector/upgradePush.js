@@ -16,6 +16,21 @@ import { dispatcherFor } from '../util/resilientFetch.js';
 import { recordOutbound } from '../util/outboundStats.js'; // v2.587 — 전역 fetch 경로라 직접 기록(데이터 흐름 지도) // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
 // v2.730(검토 S-10): 서명 manifest 를 헤더로 싣는다 — 수집기는 자기 신뢰 공개키로 설치 전에 검증한다.
 import { encodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js';
+import { poolSettled } from '../util/pool.js';
+import { numOrNull } from '../util/numOrNull.js';
+
+/**
+ * v2.741(감사 TIMING-07 — docs/AUDIT-2026-09-11c B3·T1 이 '확인' 으로 남겨 둔 것): 업그레이드 번들 push 동시 개수.
+ *   예전에는 Promise.all 로 모든 수집 서버·엣지에 수십 MB 번들을 한꺼번에 올렸다 — 업링크를 나눠 쓰다 개별 업로드가 시한
+ *   (EDGE_PUSH_TIMEOUT_MS, 기본 600초)을 넘길 수 있고, 그러면 함대 버전이 섞인다. 빈 값·숫자 아님 = 기본 4, 1 미만 = 1(순서대로), 상한 32.
+ */
+export function pushConcurrencyOf(v = process.env.UPGRADE_PUSH_CONCURRENCY) {
+  const n = numOrNull(v);
+  if (n == null) return 4;
+  if (n < 1) return 1;
+  return Math.min(32, Math.floor(n));
+}
+export const UPGRADE_PUSH_CONCURRENCY = pushConcurrencyOf(numOrNull(process.env.UPGRADE_PUSH_CONCURRENCY) ?? 4);   // 같은 판정 — 기본값을 문서 생성기가 읽게 한 줄로(실행 시점에는 pushConcurrencyOf() 를 다시 읽는다)
 
 // 실패 HTTP 상태를 사람이 이해할 원인으로 분류(엣지별로 '무엇을 점검할지' 바로 알려주기 위함).
 export function httpFailHint(status) {
@@ -78,13 +93,15 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
  * Push to all enabled collectors (or a subset of ids). Records the outcome in
  * each collector's status so the admin UI can show upgrade results.
  */
-export async function pushUpgradeToCollectors(bytes, { ids = null, force = false, manifest = null } = {}) {
+export async function pushUpgradeToCollectors(bytes, { ids = null, force = false, manifest = null, concurrency = pushConcurrencyOf() } = {}) {
   const list = loadCollectors().filter((c) => c.enabled !== false && c.url && (!ids || ids.includes(c.id)));
-  const results = await Promise.all(list.map(async (c) => {
+  // v2.741(TIMING-07): 동시 개수 상한 안에서 차례로 — 결과 순서·모양은 예전(Promise.all)과 같다. 한 수집 서버의 예외가 나머지 결과를 버리지 않는다.
+  const settled = await poolSettled(list, concurrency, async (c) => {
     const r = await pushBundleToCollector(c, bytes, { force, manifest });
     const prev = getCollectorStatus(c.id) || {};
     setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error } });
     return r;
-  }));
-  return results;
+  });
+  return settled.map((s, i) => (s.status === 'fulfilled' ? s.value
+    : { id: list[i].id, name: list[i].name, ok: false, reason: String(s.reason?.message || s.reason || '푸시 실패').slice(0, 300) }));
 }

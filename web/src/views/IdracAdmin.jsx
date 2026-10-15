@@ -46,7 +46,6 @@ export default function IdracAdmin() {
   const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
-  const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
   const [datacenters, setDatacenters] = useState([]);     // DataCenter(법인) 목록(스캔 소속 선택용)
   const [choiceErr, setChoiceErr] = useState({ agents: null, datacenters: null }); // v2.629 WEB2629-02: 편집 폼 선택 목록 조회 실패
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
@@ -82,7 +81,8 @@ export default function IdracAdmin() {
     // v2.629 WEB2629-02: 목록 조회 실패를 삼키면 편집 폼이 빈 목록을 보여 저장된 엣지·법인이 첫 옵션처럼 보였다 — 실패를 폼에 알린다.
     fetchJson('/admin/idrac/scan-agents').then((d) => { setAgents(d); setChoiceErr((x) => ({ ...x, agents: null })); })
       .catch((e) => setChoiceErr((x) => ({ ...x, agents: e?.message || String(e) })));
-    fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
+    // v2.741(LEFT-11): 예전의 /admin/vcenters(실패하면 /vcenters 까지) 조회는 지웠다 — 받은 목록을 스캔 현황·스캔 대역이 쓰지 않았다
+    //   (실패도 삼켰다). 진입할 때마다 불필요한 요청 1~2회였다. 스캔 소속은 DataCenter 목록이 정한다.
     fetchJson('/admin/datacenters').then((d) => { setDatacenters(d.datacenters || []); setChoiceErr((x) => ({ ...x, datacenters: null })); })
       .catch((e) => setChoiceErr((x) => ({ ...x, datacenters: e?.message || String(e) })));
     loadScanRanges();
@@ -233,7 +233,7 @@ export default function IdracAdmin() {
       {/* v2.621(감사 RECENT-08): 볼 수 없거나 못 읽은 현황을 '진행 중인 스캔이 없습니다' 로 보이지 않는다(권한 없음 / 조회 실패를 나눠 말한다). */}
       {sjView.mode === 'jobs' && sjView.note && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>{sjView.note}</div>}
       {sjView.mode === 'jobs' ? (
-        <IdracScanJobs data={scanJobs} vcenters={vcenters} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
+        <IdracScanJobs data={scanJobs} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
       ) : sjView.mode === 'loading' ? (
         <div className="card" style={{ marginBottom: 12, padding: '10px 13px' }}><Loading label="스캔 현황" /></div>
       ) : (
@@ -247,7 +247,7 @@ export default function IdracAdmin() {
       {srLoadErr && <ErrorBox error={srLoadErr} />}
       <IdracScanRanges
         loadError={srLoadErr} choiceErrors={choiceErr}
-        data={scanRanges} vcenters={vcenters} datacenters={datacenters} agents={agents} busy={busy}
+        data={scanRanges} datacenters={datacenters} agents={agents} busy={busy}
         form={srForm} setForm={setSrForm} msg={srMsg} setMsg={setSrMsg}
         onNew={srOpenNew} onEdit={srEdit} onSave={srSave} onDelete={srDelete} onScan={srScanNow}
         onReload={loadScanRanges}

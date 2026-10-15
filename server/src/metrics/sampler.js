@@ -117,6 +117,15 @@ export function vmAllocRows(snap, settings) {
   //   ⚠ 보고된 0 은 값이다 — numOrNull 은 0 을 지키고 null·''·NaN 만 결측으로 본다.
   let vmStorageUnknown = 0;
   const vmStorageUnknownBy = { committed: 0, uncommitted: 0 };
+  // v2.741(감사 VC-02 — 재현 r2_memused.mjs: REST 폴백 vCenter 의 켜진 VM 2대 → vm_mem_alloc_mb 24576 · vm_mem_used_mb **0**):
+  //   REST 폴백(restClient.js)이 만드는 VM 에는 cpuUsagePct·memUsagePct 가 **없고**, 그 vCenter 는 status 'connected' 라
+  //   unreadVcenterReasons 가 거르지 않는다. 예전 `Number(v.memUsagePct) || 0` 은 할당은 더하고 사용은 0 을 더해 사용 계열이
+  //   못 읽은 VM 만큼 **조용히 작게** 쌓였다(되돌릴 수 없다 — v2.727 C-01 디스크 계열과 같은 유형의 형제 누락).
+  //   사용률을 모르는 VM 은 **그 지표의 할당·사용 둘 다에서 뺀다**(분자·분모가 같은 VM 집합이어야 '사용 ÷ 할당' 이 뜻을 갖는다).
+  //   뺀 개수를 vmUsageUnknown{cpu,mem} 으로 세어 lastRun 에 싣는다. ⚠ 보고된 0 은 값이다(numOrNull 은 0 을 지킨다).
+  //   ⚠ 계열 전체를 보류하지 않는다 — REST 폴백 vCenter 하나가 그 계열을 영원히 비운다(v2.682 R3A-03 교훈). 메모리 할당 계열은
+  //   이제 '사용률을 읽은 켜진 VM' 의 합이다 — 그 vCenter 가 REST 폴백인 동안 메모리 행은 만들어지지 않는다(전부 모름이면 할당 0).
+  const vmUsageUnknown = { cpu: 0, mem: 0 };
   for (const v of snap.vms || []) {
     if (v.template) continue;
     if (!fresh(v.vcenterId)) continue;
@@ -143,18 +152,23 @@ export function vmAllocRows(snap, settings) {
     }
     if (v.powerState !== 'POWERED_ON') continue;
     const memMB = Number(v.memMB) || 0;
-    const memPct = Number(v.memUsagePct) || 0;
+    const memPct = numOrNull(v.memUsagePct);   // v2.741(VC-02): 모르면 null — 0 으로 채우지 않는다
     const vcpu = Number(v.cpuCount) || 0;
-    const cpuPct = Number(v.cpuUsagePct) || 0;
+    const cpuPct = numOrNull(v.cpuUsagePct);
     const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 설정(v2.376): 대상 vCenter 만 수집. vcenterIds 가 비어 있으면 전체가 대상이다.
     if (!vmperfTracks(v.vcenterId, settings)) continue;
+    const cpuCounted = !!(mhzPerCore && vcpu > 0);  // 호스트 MHz 를 모르는 VM 은 예전부터 CPU 집계 밖(추정 금지)
+    if (memMB > 0 && memPct == null) vmUsageUnknown.mem += 1;
+    if (cpuCounted && cpuPct == null) vmUsageUnknown.cpu += 1;
     const targets = settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId];
     for (const id of targets) {                    // vCenter별 (+ 선택 시 전체 합계)
       const e = bucket(id);
-      e.memAlloc += memMB;
-      e.memUsed += memMB * (memPct / 100);
-      if (mhzPerCore && vcpu > 0) {
+      if (memPct != null) {
+        e.memAlloc += memMB;
+        e.memUsed += memMB * (memPct / 100);
+      }
+      if (cpuCounted && cpuPct != null) {
         const alloc = vcpu * mhzPerCore;
         e.cpuAlloc += alloc;
         e.cpuUsed += alloc * (cpuPct / 100);
@@ -213,6 +227,7 @@ export function vmAllocRows(snap, settings) {
   out.dsUsedUnknown = dsUsedUnknown;             // 사용량을 못 읽어 디스크 합계에서 뺀 DS 수(lastRun 에 싣는다)
   out.vmStorageUnknown = vmStorageUnknown;       // v2.727(C-01): 스토리지를 못 읽어 VM 디스크 계열에서 뺐거나(committed) 부분 합으로 만든(uncommitted) VM 수
   out.vmStorageUnknownBy = vmStorageUnknownBy;   //   { committed, uncommitted } — 조치가 다르다(전자는 계열에서 빠짐 · 후자는 prov 만 하한)
+  out.vmUsageUnknown = vmUsageUnknown;           // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 켜진 VM 수 { cpu, mem }
   out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수(점검중 제외)
   out.maintenanceExcluded = maintenanceTracked;   // v2.622(RECENT-01): 점검중이라 행을 빼고 전체 합계에서도 빠진 대상 vCenter 수
   out.totalWithheld = false;
@@ -226,6 +241,7 @@ async function sampleOnceInner() {
   let gpuMemPartialHosts = 0; // v2.681 R2D-06 — 게스트 GPU 메모리 합이 부분 합이라 게스트 값을 적재하지 않은 호스트 수
   let dsUsedUnknown = 0; // v2.598 RECENT2598-03 — vmAllocRows 가 센 '사용량 미상으로 뺀 DS' 수
   let vmStorageUnknown = 0; let vmStorageUnknownBy = null; // v2.727(C-01) — vmAllocRows 가 센 '스토리지 미상 VM' 수·사유
+  let vmUsageUnknown = null; // v2.741(VC-02) — vmAllocRows 가 센 '사용률 미상으로 CPU·메모리 계열에서 뺀 VM' 수 { cpu, mem }
   const snap = store.get();
   const db = await getMetricsDb();
   const ts = Date.now();
@@ -364,6 +380,8 @@ async function sampleOnceInner() {
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
       vmStorageUnknown = vmperfByVc.vmStorageUnknown || 0;
       vmStorageUnknownBy = vmStorageUnknown ? { ...vmperfByVc.vmStorageUnknownBy } : null;
+      const vu = vmperfByVc.vmUsageUnknown;
+      vmUsageUnknown = vu && (vu.cpu || vu.mem) ? { cpu: vu.cpu || 0, mem: vu.mem || 0 } : null;
       if (vmperfByVc.staleVcenters || vmperfByVc.maintenanceExcluded) {
         vmperfStale = {
           vcenters: vmperfByVc.staleVcenters || 0, totalWithheld: !!vmperfByVc.totalWithheld,
@@ -449,6 +467,8 @@ async function sampleOnceInner() {
     at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}), ...(gpuMemPartialHosts ? { gpuMemPartialHosts } : {}),
     // v2.727(C-01): DS 와 같은 자리 — 스토리지를 못 읽어 VM 디스크 계열에서 뺀 VM 수(0 이면 싣지 않는다).
     ...(vmStorageUnknown ? { vmStorageUnknown, vmStorageUnknownBy } : {}),
+    // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 계열에서 뺀 켜진 VM 수(REST 폴백 vCenter 등 — 0 이면 싣지 않는다).
+    ...(vmUsageUnknown ? { vmUsageUnknown } : {}),
     // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
     ...(staleSkipped.vcenters ? { staleSkipped } : {}),
     ...(vmperfStale ? { vmperfStale } : {}),
@@ -483,8 +503,12 @@ export function samplerWithheldOf(lastRun) {
     dsUsedUnknown: _num(lastRun.dsUsedUnknown) || 0,
     vmStorageUnknown: _num(lastRun.vmStorageUnknown) || 0,
   };
+  // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 VM 수(0 으로 채우지 않았다) — 있을 때만 싣는다(기존 요약 모양 유지).
+  const vuCpu = _num(lastRun.vmUsageUnknown?.cpu) || 0;
+  const vuMem = _num(lastRun.vmUsageUnknown?.mem) || 0;
+  if (vuCpu || vuMem) out.vmUsageUnknown = { cpu: vuCpu, mem: vuMem };
   if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped
-    && !out.dsUsedUnknown && !out.vmStorageUnknown) return null;
+    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown) return null;
   return out;
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);

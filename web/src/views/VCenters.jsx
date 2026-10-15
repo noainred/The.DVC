@@ -12,6 +12,7 @@ import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
+import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -215,17 +216,14 @@ export default function VCenters({ onSelectSite, resetSignal }) {
     return keywords.every((kw) => hay.includes(kw));
   });
   const countMeta = vcCountMeta(sites); // v2.732(그룹 i3): 연결됨 수 + 그중 낡은 값
-  const totalHosts = sites.reduce((a, s) => a + (s.metrics?.hosts || 0), 0);
-  const totalVms = sites.reduce((a, s) => a + (s.metrics?.vms || 0), 0);
   // 다빈치/IRS 분류(사용자 요구): vCenter 이름에 'IRS'(단어, 대소문자 무시 — 예: AZ-IRS·GM1-IRS)가
   // 들어가면 IRS, 나머지(AZ·GM1 등)는 다빈치. 하이픈은 단어 경계라 '-IRS' 접미가 매칭된다.
-  // VM(v2.323)·호스트(v2.324) 두 KPI 가 같은 규칙을 쓰므로 지표별 합산 헬퍼로 공용화.
+  // VM(v2.323)·호스트(v2.324) 두 KPI 가 같은 규칙을 쓴다.
   const isIrs = (s) => /\birs\b/i.test(s.name || '');
-  const irsSum = (metric) => sites.reduce((a, s) => a + (isIrs(s) ? (s.metrics?.[metric] || 0) : 0), 0);
-  const irsVms = irsSum('vms');
-  const davinciVms = totalVms - irsVms;
-  const irsHosts = irsSum('hosts');
-  const davinciHosts = totalHosts - irsHosts;
+  // v2.741(WEB-01): 첫 수집 중·비활성·연결 실패 vCenter 의 hosts:0·vms:0 을 더하지 않는다(법인 표와 같은 corpSiteStatus 판정).
+  //   뺀 곳이 있으면 KPI 가 '최소 · 미수집 N곳 제외' 를 말한다 — 부분 합을 합계처럼 보이지 않게.
+  const tot = countableTotals(sites, { isIrs });
+  const num = (v) => (v == null ? '—' : v.toLocaleString());
   // v2.607 WEB2607-06: REST 폴백 vCenter 는 경보를 조회하지 않았다 — 합계에서 빼고 개수를 밝힌다.
   const alarmSum = alarmTotals(sites);
   const totalAlarms = alarmSum.total;
@@ -235,8 +233,8 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
       <div className="kpis" style={{ marginBottom: 18 }}>
         <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta" title={countMeta.title}>{countMeta.text}</div></div>
-        <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div><div className="meta">다빈치 {davinciHosts.toLocaleString()}개 · IRS {irsHosts.toLocaleString()}개</div></div>
-        <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div><div className="meta">다빈치 {davinciVms.toLocaleString()}개 · IRS {irsVms.toLocaleString()}개</div></div>
+        <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{num(tot.hosts)}</div><div className="meta">다빈치 {num(tot.davinciHosts)}개 · IRS {num(tot.irsHosts)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
+        <div className="card kpi"><div className="label">전체 VM</div><div className="value">{num(tot.vms)}</div><div className="meta">다빈치 {num(tot.davinciVms)}개 · IRS {num(tot.irsVms)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
         <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div>{alarmSum.unknown > 0 && <div className="meta" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 0건이 아닙니다">경보 미조회 vCenter {alarmSum.unknown}개 제외</div>}</div>
         <TrendKpis />
       </div>

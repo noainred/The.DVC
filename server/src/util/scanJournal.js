@@ -18,6 +18,11 @@
  *  · 결과는 최근 50건 이력으로 남기고 각 기능 상태(`journalFor(kind)`)가 화면에 싣는다 — 조용히 다시 돌리지 않는다.
  *  · 쓰기 실패는 스캔을 막지 않는다(콘솔 경고 + 상태의 lastWriteError). 손상 파일은 보존하고 새로 시작한다(재생성 가능한 상태).
  *  · `runningScans()` 는 자동 업그레이드가 '지금 스캔 중인가' 를 볼 때 쓴다(upgrade/manager.js — 끝날 때까지 적용을 미룬다).
+ *    v2.741(TIMING-03): 항목마다 `resumable` 을 싣는다 — meta.jobId(장비에서 분리 실행 중인 작업 id — 지금은 아이실론 du 만)가 있고
+ *    자동 재개가 켜져 있으며 재개 상한 전이면, 재시작이 와도 다음 기동이 **같은 작업에 다시 붙어** 결과만 받는다. 업그레이드는 그 스캔을 기다리지 않는다.
+ *  · v2.741(TIMING-04): 같은 키에 대기 항목이 여럿일 수 있다(iDRAC 'cycle' 처럼 coversPending:false 인 기능 — 범위가 다른 실행이 같은 키로 온다).
+ *    기동 때 같은 키라고 하나를 버리지 않는다(예전에는 다음 실행의 기록이 앞 대기 항목을 이력도 없이 지웠다). 키마다 최근 `PER_KEY_MAX` 개만 남기고
+ *    넘친 것은 이력에 'superseded' 로 남긴다. 재개 실행(resumeOf)은 **자기 항목만** 지운다 — 다른 대기 항목은 그 뒤 자기 차례에 판정한다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +39,7 @@ export const BUSY_RETRY_MS = 5 * 60_000;
 export const BUSY_RETRY_MAX = 12;
 export const EXPIRE_MS = 48 * 3_600_000;
 const HISTORY_MAX = 50;
+export const PER_KEY_MAX = 4;   // v2.741(TIMING-04): 같은 키의 대기 항목 상한(재시작이 반복돼도 끝없이 쌓이지 않게)
 const META_MAX_BYTES = 8 * 1024;
 const KIND_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
@@ -46,6 +52,8 @@ export function resumeDelayMs(v = process.env.SCAN_RESUME_DELAY_MS) {
 export const resumeEnabled = () => String(process.env.SCAN_RESUME ?? '').trim() !== '0';
 
 const keyOf = (kind, key) => `${kind}:${key}`;
+/** 같은 실행 기록인가 — 같은 키 + 같은 시작 시각(재개 함수가 받는 항목은 사본이라 객체로 비교할 수 없다). */
+const sameRun = (x, y) => !!x && !!y && x.kind === y.kind && x.key === y.key && (numOrNull(x.since) ?? 0) === (numOrNull(y.since) ?? 0);
 const now = () => Date.now();
 const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : v == null ? '' : String(v).slice(0, n));
 
@@ -107,23 +115,33 @@ function loadOnce() {
   if (!doc || typeof doc !== 'object') return;
   const carried = Array.isArray(doc.interrupted) ? doc.interrupted.filter((x) => x && x.state === 'pending') : [];
   const fresh = Object.values(doc.active && typeof doc.active === 'object' ? doc.active : {});
+  _history = Array.isArray(doc.history) ? doc.history.filter((x) => x && typeof x === 'object').slice(0, HISTORY_MAX) : [];
+  // v2.741(TIMING-04): 같은 **실행**(같은 키·같은 시작 시각)만 하나로 친다 — 같은 키라도 시작 시각이 다르면 다른 실행이다.
+  //   예전에는 키만 보고 버려, iDRAC 'cycle' 의 대기 항목(예: 수동 실행이 남긴 대역)이 다음 주기 스캔이 또 재시작에 걸리면 이력 없이 사라졌다.
   const seen = new Set();
   const out = [];
   for (const raw of [...fresh, ...carried]) {
     const e = normEntry(raw);
     if (!e) continue;
-    const k = keyOf(e.kind, e.key);
-    if (seen.has(k)) continue;
-    seen.add(k);
+    const id = `${keyOf(e.kind, e.key)}@${e.since}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
     out.push({ ...e, detectedAt: numOrNull(raw.detectedAt) ?? _bootAt, state: 'pending', tries: numOrNull(raw.tries) ?? 0, nextAt: null });
   }
-  _interrupted = out;
-  _history = Array.isArray(doc.history) ? doc.history.filter((x) => x && typeof x === 'object').slice(0, HISTORY_MAX) : [];
-  _loadInfo = { at: _bootAt, found: fresh.length, error: null, corruptKept: null };
-  if (fresh.length) {
-    console.warn(`[scan-journal] 재시작으로 중단된 스캔 ${fresh.length}개를 찾았습니다 — ${out.slice(0, 5).map((x) => `${x.kind}:${x.label || x.key}`).join(', ')}${out.length > 5 ? ' …' : ''}`);
-    write();
+  // 키마다 최근 PER_KEY_MAX 개만 — 넘친 것은 조용히 버리지 않고 이력에 남긴다.
+  const perKey = new Map();
+  for (const x of out) { const k = keyOf(x.kind, x.key); if (!perKey.has(k)) perKey.set(k, []); perKey.get(k).push(x); }
+  const drop = new Set();
+  for (const list of perKey.values()) {
+    if (list.length <= PER_KEY_MAX) continue;
+    for (const x of [...list].sort((a, b) => b.since - a.since).slice(PER_KEY_MAX)) drop.add(x);
   }
+  for (const x of drop) pushHistory(x, 'superseded', `같은 대상의 재개 대기 항목이 ${PER_KEY_MAX}개를 넘어 가장 오래된 것을 다시 시작하지 않습니다(다음 주기·수동 실행은 그대로 동작합니다)`);
+  _interrupted = out.filter((x) => !drop.has(x));
+  _loadInfo = { at: _bootAt, found: fresh.length, error: null, corruptKept: null };
+  if (fresh.length) console.warn(`[scan-journal] 재시작으로 중단된 스캔 ${fresh.length}개를 찾았습니다 — ${_interrupted.slice(0, 5).map((x) => `${x.kind}:${x.label || x.key}`).join(', ')}${_interrupted.length > 5 ? ' …' : ''}`);
+  if (drop.size) console.warn(`[scan-journal] 같은 대상의 재개 대기 항목이 상한(${PER_KEY_MAX}개)을 넘어 오래된 ${drop.size}개를 이력으로 옮겼습니다`);
+  if (fresh.length || drop.size) write();
 }
 loadOnce();
 
@@ -142,10 +160,14 @@ export function scanStarted(kind, key, { label = '', trigger = '', meta = {}, re
   if (!e) return;
   _active.set(keyOf(kind, key), e);
   // 같은 대상의 '중단됨' 대기 항목은 이 시작이 대신한다(주기 스캔이 먼저 돌았다 — 재개가 두 번째 스캔을 열지 않게).
+  // v2.741(TIMING-04): coversPending:false 인 기능(iDRAC — 같은 키로 범위가 다른 실행)의 재개는 **자기 항목만** 지운다.
+  //   예전에는 같은 키의 다른 대기 항목까지 'resumed' 로 지워, 그 항목의 남은 대역을 다시 돌리지 않고도 이력은 '다시 시작했다' 고 말했다.
   const k = keyOf(kind, key);
   if (resumeOf || coversPending) {
     _interrupted = _interrupted.filter((x) => {
       if (keyOf(x.kind, x.key) !== k) return true;
+      const self = !!resumeOf && sameRun(x, resumeOf);
+      if (!self && !coversPending) return true;
       pushHistory(x, resumeOf ? 'resumed' : 'covered', resumeOf ? (resumeNote || '자동으로 다시 시작했습니다') : '재개를 기다리는 동안 다른 경로(주기·수동)로 다시 시작됐습니다');
       return false;
     });
@@ -166,9 +188,18 @@ export function scanFinished(kind, key) {
   if (_active.delete(keyOf(kind, key))) write();
 }
 
-/** 이 프로세스가 지금 돌리는 스캔(자동 업그레이드 대기·상태 화면). */
+/**
+ * 재시작이 와도 다음 기동이 **같은 작업에 다시 붙어** 결과만 받는 스캔인가(v2.741 TIMING-03).
+ * meta.jobId = 장비에서 분리 실행 중인 작업 id(아이실론 du — isidu/detach.js). 자동 재개가 꺼져 있거나(SCAN_RESUME=0)
+ * 재개 상한에 닿았으면 다음 기동이 그 작업을 이어 받지 않으므로 거짓이다(끊기면 결과를 잃는다).
+ */
+function resumableEntry(e) {
+  return !!(e?.meta && typeof e.meta.jobId === 'string' && e.meta.jobId) && resumeEnabled() && (numOrNull(e.resumes) ?? 0) < RESUME_LIMIT;
+}
+
+/** 이 프로세스가 지금 돌리는 스캔(자동 업그레이드 대기·상태 화면). `resumable` — 재시작 뒤 같은 작업에 다시 붙는가(위). */
 export function runningScans() {
-  return [..._active.values()].map((e) => ({ kind: e.kind, key: e.key, label: e.label, trigger: e.trigger, since: e.since, resumes: e.resumes }));
+  return [..._active.values()].map((e) => ({ kind: e.kind, key: e.key, label: e.label, trigger: e.trigger, since: e.since, resumes: e.resumes, resumable: resumableEntry(e) }));
 }
 
 /**
@@ -234,7 +265,7 @@ export async function processScanResumes({ at = now() } = {}) {
         // 기능이 scanStarted(resumeOf) 로 이미 'resumed' 를 남겼으면 대기 목록에서 빠져 있다 — 그 이력에 기능의 설명(남은 대역 수 등)을 붙인다.
         if (_interrupted.includes(x)) done('resumed', r?.note || '자동으로 다시 시작했습니다');
         else if (r?.note) {
-          const h = _history.find((y) => y.kind === x.kind && y.key === x.key && y.outcome === 'resumed');
+          const h = _history.find((y) => y.outcome === 'resumed' && sameRun(y, x));   // v2.741: 같은 키의 다른 대기 항목 이력에 붙이지 않게
           if (h) { h.note = str(r.note, 300); changed = true; }
         }
         continue;

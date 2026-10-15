@@ -49,11 +49,58 @@ done
 if ! [[ "$PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$PORT < 1 || 10#$PORT > 65535 )); then
   echo "--port 는 1~65535 의 숫자여야 합니다: '$PORT'" >&2; exit 1
 fi
-if ! [[ "$PREFIX" =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ "$PREFIX" =~ (^|/)\.\.(/|$) ]]; then
-  echo "--prefix 는 영문·숫자·. _ - / 만 쓴 절대 경로여야 합니다('..' 불가): '$PREFIX'" >&2; exit 1
-fi
+# v2.741(감사 INJPKG-03): 문자 검사만으로는 /usr·/etc·/var/lib·// 같은 시스템 경로가 통과해 아래 `chown -R 서비스계정`
+#   (uninstall 의 `rm -rf`)으로 이어졌다. 정규화(연속 슬래시·끝 슬래시) 뒤 시스템 경로 자체와 그 바로 아래(/usr/local·/var/lib·
+#   /home/<사용자> 등)를 거부하고, 이미 있는 폴더는 이 포탈의 설치본(app·runtime)이거나 비어 있을 때만 받는다.
+#   ⚠ uninstall.sh 의 vp_check_prefix 와 같은 규칙이다(test/audit2741l.test.js 가 두 함수를 같은 입력으로 대조한다).
+vp_check_prefix() {
+  local p="$1" top rest
+  if ! [[ "$p" =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ "$p" =~ (^|/)\.\.(/|$) ]]; then
+    echo "--prefix 는 영문·숫자·. _ - / 만 쓴 절대 경로여야 합니다('..' 불가): '$1'" >&2; return 1
+  fi
+  while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
+  while [[ "$p" == */ && "$p" != / ]]; do p="${p%/}"; done
+  if [[ "$p" =~ (^|/)\.(/|$) ]]; then echo "--prefix 에 '.' 경로 조각을 쓸 수 없습니다: '$1'" >&2; return 1; fi
+  top="${p#/}"; top="${top%%/*}"; rest="${p#/"$top"}"
+  case "$top" in
+    ''|bin|boot|dev|etc|lib|lib32|lib64|libx32|proc|root|run|sbin|sys|usr|var|home|opt|srv|tmp|mnt|media|snap|lost+found)
+      ;;
+    *) VP_PREFIX="$p"; return 0 ;;
+  esac
+  # 시스템 최상위 폴더 자체는 언제나 거부, 그 아래는 폴더마다 다르다.
+  if [[ -z "$rest" ]]; then echo "--prefix 로 시스템 폴더 자체('$p')를 쓸 수 없습니다 — 그 아래 전용 폴더(예: /opt/vmware-portal)를 지정하세요." >&2; return 1; fi
+  case "$top" in
+    bin|boot|dev|etc|lib|lib32|lib64|libx32|proc|root|run|sbin|sys|snap|lost+found)
+      echo "--prefix 로 시스템 폴더('/$top') 아래를 쓸 수 없습니다: '$p'" >&2; return 1 ;;
+    usr|var|home)
+      # /usr/local·/usr/lib·/var/lib·/var/log·/home/<사용자> 처럼 바로 아래 폴더는 다른 프로그램·사용자가 함께 쓴다.
+      if [[ "${rest#/}" != */* ]]; then echo "--prefix 로 공용 폴더('$p')를 쓸 수 없습니다 — 그 아래 전용 폴더(예: $p/vmware-portal)를 지정하세요." >&2; return 1; fi ;;
+  esac
+  VP_PREFIX="$p"; return 0
+}
+# vp_prefix_dir_ok <prefix> — 이미 있는 폴더는 이 포탈의 설치본(app·runtime·이전 백업)이거나 비어 있을 때만(lost+found 만 있는 마운트 지점 포함).
+#   다른 프로그램의 폴더를 서비스 계정 소유로 바꾸지 않게 한다(chown -R).
+vp_prefix_dir_ok() {
+  local p="$1" e n=0
+  [[ -e "$p" ]] || return 0
+  [[ -d "$p" && ! -L "$p" ]] || { echo "--prefix '$p' 는 폴더가 아닙니다(또는 심볼릭 링크)." >&2; return 1; }
+  [[ -d "$p/app" || -d "$p/runtime" ]] && return 0
+  for e in "$p"/* "$p"/.[!.]*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    case "${e##*/}" in lost+found|app.bak.*|app.new.*) ;; *) n=$((n + 1)) ;; esac
+  done
+  if (( n > 0 )); then
+    echo "--prefix '$p' 는 이미 다른 파일이 든 폴더입니다(포탈 설치본 app/·runtime/ 이 없음) — 서비스 계정 소유로 바꾸지 않도록 멈춥니다. 빈 전용 폴더를 지정하세요." >&2
+    return 1
+  fi
+  return 0
+}
+VP_PREFIX=""
+vp_check_prefix "$PREFIX" || exit 1
+PREFIX="$VP_PREFIX"
 
 [[ $EUID -eq 0 ]] || { echo "이 스크립트는 root 권한으로 실행해야 합니다 (sudo)." >&2; exit 1; }
+vp_prefix_dir_ok "$PREFIX" || exit 1
 
 # 패키지 구조 확인 — 실패 시 '무엇이 없는지'와 '가장 흔한 원인'까지 알려준다.
 # 이 오류의 대부분은 (1) 설치 패키지가 아닌 업그레이드 번들/소스를 받았거나
@@ -164,9 +211,21 @@ for f in vcenters.json users.json upgrade.json; do
 done
 
 # 5) Permissions -------------------------------------------------------------
+# v2.741(감사 INJPKG-01): 호스트 신뢰 키 파일(release-signing-keys.conf)은 root 로 도는 서명 확인이 root 소유일 때만 읽는다
+#   (signature.js). root 가 둔 파일을 아래 chown -R 이 서비스 계정 소유로 바꾸지 않게 소유자를 되돌린다. 서비스 계정 소유인
+#   예전 파일은 바꾸지 않는다(내용을 이 설치가 보증할 수 없다) — 확인한 뒤 root 로 바꾸라고 알린다.
+HOSTKEYS="$CONFIG_DIR/release-signing-keys.conf"
+HOSTKEYS_ROOT=0
+if [[ -f "$HOSTKEYS" && ! -L "$HOSTKEYS" && "$(stat -c %u -- "$HOSTKEYS" 2>/dev/null)" == 0 ]]; then HOSTKEYS_ROOT=1; fi
 chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"
 chmod 0750 "$CONFIG_DIR"
+if [[ $HOSTKEYS_ROOT -eq 1 ]]; then
+  chown 0:0 -- "$HOSTKEYS" && chmod go-w -- "$HOSTKEYS" && chmod o+r -- "$HOSTKEYS"
+elif [[ -e "$HOSTKEYS" || -L "$HOSTKEYS" ]]; then
+  echo "⚠ $HOSTKEYS 는 root 소유가 아닙니다 — root 로 실행하는 서명 확인(install.sh·vmware-portal-verify)은 이 파일을 읽지 않습니다."
+  echo "  내용을 확인한 뒤: sudo chown root:root '$HOSTKEYS' && sudo chmod 644 '$HOSTKEYS'"
+fi
 
 # SELinux 라벨 처리(best-effort — 어떤 실패도 설치를 막지 않는다)
 # ① 영구 규칙: 사용자 지정 --prefix 가 /opt·/usr 밖이면(/data·/srv·/home 등) 그 경로의
@@ -262,23 +321,41 @@ if grep -qE '^RMA_ENABLED=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then
   done
 fi
 
-# 6-1) OTP 콘솔 등록 도구 바로가기 -------------------------------------------
-# admin/operator 는 OTP 전용이라 첫 관리자 등록·잠금 복구에 이 도구가 필요하다.
-# 긴 경로를 외우지 않도록 /usr/local/bin 에 링크를 건다(best-effort).
-if [[ -x "$APP_DST/otp-enroll.sh" ]]; then
-  ln -sf "$APP_DST/otp-enroll.sh" /usr/local/bin/vmware-portal-otp 2>/dev/null \
-    && echo "==> OTP 등록 도구: vmware-portal-otp (→ $APP_DST/otp-enroll.sh)"
+# 6-1) root 로 부르는 콘솔 도구 — 앱 트리 밖 root 소유 사본(v2.741 감사 INJPKG-01) ------------------------
+# 예전에는 /usr/local/bin/vmware-portal-{otp,verify,users} 가 앱 트리의 .sh 를 가리키는 링크였다. 앱 트리는 서비스 계정이
+#   쓸 수 있으므로(chown -R · 유닛 ReadWritePaths) 서비스 계정 권한을 얻은 공격자가 그 파일을 고치면 다음 `sudo vmware-portal-…`
+#   가 root 로 그 코드를 실행했다. 이제 root 소유 래퍼(release-verify-lib.sh vp_install_root_tools)를 가리킨다 —
+#   otp·users 는 앱 트리를 읽기 전에 서비스 계정으로 권한을 내리고, verify 는 방금 확인한 패키지로 만든 root 소유 사본만 쓴다.
+TOOLS_DIR=""
+TOOLS_RC=2
+if declare -F vp_install_root_tools >/dev/null; then
+  TOOLS_DIR="$(vp_root_tools_dir "$PREFIX")"
+  TOOLS_RC=0
+  vp_install_root_tools "$PREFIX" "$SCRIPT_DIR" "$SERVICE_USER" "$SERVICE_NAME" "$CONFIG_DIR" || TOOLS_RC=$?
+  if [[ $TOOLS_RC -eq 1 ]]; then
+    echo "⚠ root 소유 서명 확인 사본을 만들지 못했습니다($TOOLS_DIR/verify) — vmware-portal-verify 를 걸지 않습니다. 다음 install.sh 가 다시 만듭니다."
+  elif [[ $TOOLS_RC -ne 0 ]]; then
+    echo "⚠ root 소유 콘솔 도구 폴더를 만들지 못했습니다($TOOLS_DIR) — 콘솔 도구 바로가기를 걸지 않습니다."
+  fi
 fi
-# 6-1-1) 릴리스 서명 확인 도구(v2.730 검토 S-10) — 다음 오프라인 업그레이드 전에 이 설치본(신뢰 기준)으로 새 패키지를 확인한다.
-if [[ -x "$APP_DST/release-verify.sh" ]]; then
-  ln -sf "$APP_DST/release-verify.sh" /usr/local/bin/vmware-portal-verify 2>/dev/null \
-    && echo "==> 패키지 서명 확인 도구: vmware-portal-verify (→ $APP_DST/release-verify.sh)"
-fi
-# 6-2) 계정 관리 콘솔 메뉴(v2.723) — 계정 생성·편집·비밀번호·계정별 로그인 방식·OTP·삭제.
-if [[ -x "$APP_DST/user-admin.sh" ]]; then
-  ln -sf "$APP_DST/user-admin.sh" /usr/local/bin/vmware-portal-users 2>/dev/null \
-    && echo "==> 계정 관리 메뉴: vmware-portal-users (→ $APP_DST/user-admin.sh)"
-fi
+# vp_link <링크 이름> <root 래퍼 이름> <앱 트리 도구(있을 때만)> <설명>
+vp_link() {
+  local link="/usr/local/bin/$1" target="$TOOLS_DIR/$2" cur
+  # 이 설치본의 예전 링크(앱 트리를 가리킴)는 어떤 경우에도 남기지 않는다 — 그것이 root 상승 경로다.
+  if [[ -L "$link" ]]; then
+    cur="$(readlink "$link")"
+    if [[ "$cur" == "$APP_DST/"* ]]; then rm -f -- "$link"; fi
+  fi
+  if [[ -n "$TOOLS_DIR" && -f "$target" && -x "$target" ]]; then
+    ln -sfn "$target" "$link" 2>/dev/null && echo "==> $4: $1 (→ $target · root 소유 사본)"
+  fi
+}
+# OTP 콘솔 등록 도구 — admin/operator 는 OTP 전용이라 첫 관리자 등록·잠금 복구에 이 도구가 필요하다.
+if [[ -x "$APP_DST/otp-enroll.sh" ]]; then vp_link vmware-portal-otp vmware-portal-otp "OTP 등록 도구"; fi
+# 릴리스 서명 확인 도구(v2.730 검토 S-10) — 다음 오프라인 업그레이드 전에 이 설치본(신뢰 기준)으로 새 패키지를 확인한다.
+if [[ -x "$APP_DST/release-verify.sh" ]]; then vp_link vmware-portal-verify vmware-portal-verify "패키지 서명 확인 도구"; fi
+# 계정 관리 콘솔 메뉴(v2.723) — 계정 생성·편집·비밀번호·계정별 로그인 방식·OTP·삭제. (/usr/local/bin/vmware-portal-users)
+if [[ -x "$APP_DST/user-admin.sh" ]]; then vp_link vmware-portal-users vmware-portal-users "계정 관리 메뉴"; fi
 
 # 7) firewalld (optional, best-effort) ---------------------------------------
 if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then

@@ -5,7 +5,7 @@
 import { config } from '../config.js';
 import { poolSettled } from '../util/pool.js';
 import { HOST_CFG_PATHS, HOST_LOCKDOWN_PATH, HOST_VSAN_PATHS, HOST_MP_PATH, HOST_NET_PATHS, ADV_OPTIONS, parseHostCfgProps, parseOptionValue, parseCertInfo, applyAdvanced } from './parse.js';
-import { pickDue, put, prune, setStatus, statusOf, noteTransientFail, HOST_FAIL_MAX } from './cache.js';
+import { pickDue, put, prune, setStatus, statusOf, noteTransientFail, HOST_FAIL_MAX, get, failOf } from './cache.js';
 
 export const HOST_CFG_BUDGET_MS = 15_000;
 // v2.721(감사 R1-01): 시작한 호스트의 상한 — 예산 끝(그 호스트가 예산 뒤에 시작했으면 시작 시각) + 유예.
@@ -15,12 +15,51 @@ export const HOST_CFG_BUDGET_MS = 15_000;
 //   유예는 수집 여유보다 짧아야 한다(같거나 길면 데드라인이 먼저 끊는다). 예산 초과만으로 결과를 버리지는 않는다 —
 //   유예 안에 다 읽으면 그대로 쓴다. 유예를 넘기거나 예산을 넘긴 채 abort 로 끊긴 호스트만 시한 실패로 센다.
 export const HOST_OVERRUN_GRACE_MS = 10_000;
+// field — 그 묶음이 채우는 hcfg 필드(parseHostCfgProps). v2.741(VC-04): 묶음을 못 읽은 주기에 직전 값을 이어 싣는 데 쓴다.
 const OPTIONAL_GROUPS = [
-  { flag: 'noLockdownPath', label: '잠금 모드', paths: [HOST_LOCKDOWN_PATH], chunk: 100 },
-  { flag: 'noVsanPath', label: 'vSAN 런타임', paths: HOST_VSAN_PATHS, chunk: 100 },
-  { flag: 'noMultipathPath', label: '멀티패스', paths: [HOST_MP_PATH], chunk: 10 },
-  { flag: 'noNetPath', label: '가상 스위치·포트그룹', paths: HOST_NET_PATHS, chunk: 20 }, // v2.701(A10) — 포트그룹이 많으면 응답이 커서 20대씩
+  { flag: 'noLockdownPath', label: '잠금 모드', paths: [HOST_LOCKDOWN_PATH], chunk: 100, field: 'lockdown' },
+  { flag: 'noVsanPath', label: 'vSAN 런타임', paths: HOST_VSAN_PATHS, chunk: 100, field: 'vsan' },
+  { flag: 'noMultipathPath', label: '멀티패스', paths: [HOST_MP_PATH], chunk: 10, field: 'mp' },
+  { flag: 'noNetPath', label: '가상 스위치·포트그룹', paths: HOST_NET_PATHS, chunk: 20, field: 'net' }, // v2.701(A10) — 포트그룹이 많으면 응답이 커서 20대씩
 ];
+// v2.741(감사 VC-04 — 재현 r5_hostcfg.mjs: 첫 일괄 조회가 예산을 넘긴 주기에 선택 묶음 넷을 하나도 묻지 않고 그 호스트를
+//   put(at=now) 해 직전 멀티패스·vSAN·잠금·네트워크 값이 전부 null 로 덮였고, 상태는 fetched:1('다 읽음'), 갱신 주기(6시간) 동안 다시
+//   고르지 않았다). 선택 묶음을 **예산 초과·일시 실패**로 못 읽은 주기에는
+//   ① 그 묶음의 필드를 직전 캐시 값으로 이어 싣고(덮어 지우지 않는다 — 못 읽은 것은 '없음' 이 아니다)
+//   ② 그 호스트를 '묶음 재시도' 로 기록해 갱신 주기보다 일찍(10분 → 20분 → …, 갱신 주기 상한) 다시 고르며
+//   ③ 상태에 groupsSkipped{묶음: 호스트 수}·carried 를 싣는다(조용히 '다 읽음' 이라 말하지 않는다).
+//   경로 오류(InvalidProperty — 그 버전에 없는 경로)는 예전대로 그 묶음만 '모름'(null)이고 다시 묻지 않는다 — 결함이 아니라 사실이다.
+//   ⚠ 이어 실은 값의 시각은 호스트 at(이번 주기)과 같아 보인다 — 직전 값이라는 표지는 hcfg 에 없다(엣지 정제·화면 모양을 바꾸지 않으려고).
+//   그래서 ② 로 곧 다시 읽게 한다. 예산이 계속 모자라는 vCenter 에서는 그 묶음이 새로 채워지지 않을 수 있다 — 상태가 그 사실을 말한다.
+const _groupGaps = new Map(); // vcId -> Map(ref -> { count, retryAt })
+export const GROUP_RETRY_BASE_MS = 10 * 60_000;
+function noteGroupGap(vcId, ref, { now, periodMs }) {
+  let m = _groupGaps.get(vcId);
+  if (!m) { m = new Map(); _groupGaps.set(vcId, m); }
+  const count = (m.get(ref)?.count || 0) + 1;
+  const wait = Math.min(Math.max(GROUP_RETRY_BASE_MS, Number(periodMs) || 0), GROUP_RETRY_BASE_MS * 2 ** (count - 1));
+  m.set(ref, { count, retryAt: now + wait });
+}
+function clearGroupGap(vcId, ref) { _groupGaps.get(vcId)?.delete(ref); }
+/** 묶음 재시도 시각이 된 호스트(이번에 읽을 수 있고 · 시한 실패로 쉬는 중이 아니고 · 이미 고른 것이 아닌 것). */
+function dueGroupGaps(vcId, hostRefs, picked, { now, max }) {
+  const m = _groupGaps.get(vcId);
+  if (!m || !m.size || max <= 0) return [];
+  const live = new Set(hostRefs);
+  const have = new Set(picked);
+  const out = [];
+  for (const [ref, g] of [...m].sort((a, b) => a[1].retryAt - b[1].retryAt)) {
+    if (out.length >= max) break;
+    if (!live.has(ref) || have.has(ref) || g.retryAt > now) continue;
+    if ((failOf(vcId, ref)?.retryAt || 0) > now) continue; // 요청 시한으로 쉬는 중(v2.720 R1-02)이면 그 규칙이 먼저다
+    out.push(ref);
+  }
+  return out;
+}
+/** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js syncVcConfigCaches 가 부를 수 있게 export). */
+export function dropHostCfgGaps(vcId) { _groupGaps.delete(vcId); }
+export function groupGapOf(vcId, ref) { return _groupGaps.get(vcId)?.get(ref) || null; }
+export function _resetHostCfgGaps() { _groupGaps.clear(); }
 const CONCURRENCY = 4;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const isPathErr = (m) => /InvalidProperty|InvalidArgument/i.test(m);
@@ -62,10 +101,16 @@ async function queryAcceptance(c, imgRef) {
  */
 export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budgetMs = HOST_CFG_BUDGET_MS, settings = config, allRefs = hostRefs, signal = null, overrunGraceMs = HOST_OVERRUN_GRACE_MS } = {}) {
   if (!settings.hostCfgScan) return { skipped: 'off' };
-  prune(vcId, new Set(allRefs)); // 인벤토리에서 사라진 호스트만 — 연결이 끊긴 호스트의 직전 값은 남긴다
+  const allSet = new Set(allRefs);
+  prune(vcId, allSet); // 인벤토리에서 사라진 호스트만 — 연결이 끊긴 호스트의 직전 값은 남긴다
+  const gm = _groupGaps.get(vcId);
+  if (gm) for (const ref of gm.keys()) if (!allSet.has(ref)) gm.delete(ref); // v2.741(VC-04): 사라진 호스트의 묶음 재시도 기록도
   const st = statusOf(vcId) || {};
   if (st.backoffUntil > now) return { skipped: 'backoff' };
   const due = pickDue(vcId, hostRefs, { now, periodMs: settings.hostCfgRefreshMs, max: settings.hostCfgPerCycle });
+  // v2.741(VC-04): 직전 주기에 선택 묶음을 못 읽은 호스트를 남은 자리만큼 다시 고른다(갱신 주기를 기다리지 않는다).
+  const gapRetry = dueGroupGaps(vcId, hostRefs, due, { now, max: Math.max(0, (Number(settings.hostCfgPerCycle) || 0) - due.length) });
+  for (const ref of gapRetry) due.push(ref);
   if (!due.length) return { due: 0 };
   const budgetEnd = Date.now() + budgetMs;
   try {
@@ -73,8 +118,10 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
     const props = new Map(objs.map((o) => [o.ref, o.props]));
     // 선택 경로 묶음 — 버전에 따라 없는 경로(InvalidProperty)는 그 묶음만 '모름' 이고 그 vCenter 는 다시 묻지 않는다.
     //   lockdownMode(6.0+) · vSAN(5.5+) · 멀티패스(응답이 커서 10대씩).
+    const gapGroups = []; // v2.741(VC-04): 이번 주기에 예산·일시 실패로 못 읽은 선택 묶음(경로 오류는 아니다)
     for (const g of OPTIONAL_GROUPS) {
-      if (st[g.flag] || Date.now() >= budgetEnd) continue;
+      if (st[g.flag]) continue;
+      if (Date.now() >= budgetEnd) { gapGroups.push(g); continue; }
       try {
         for (const o of await c.retrieveManyObjectProps('HostSystem', due, g.paths, g.chunk)) {
           const p = props.get(o.ref); if (p) for (const k of g.paths) p[k] = o.props[k];
@@ -82,7 +129,7 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       } catch (err) {
         const m = String(err?.message || err);
         if (isPathErr(m)) setStatus(vcId, { [g.flag]: true });
-        else console.warn(`[hostcfg] ${vcId} ${g.label} 읽기 실패: ${m.slice(0, 200)}`);
+        else { gapGroups.push(g); console.warn(`[hostcfg] ${vcId} ${g.label} 읽기 실패: ${m.slice(0, 200)}`); }
       }
     }
     const certRefs = [...props.values()].map((p) => p['configManager.certificateManager']).filter((x) => typeof x === 'string' && x);
@@ -104,6 +151,7 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
       } catch (err) { console.warn(`[hostcfg] ${vcId} 진단 파티션을 읽지 못했습니다: ${String(err?.message || err).slice(0, 200)}`); }
     }
     let fetched = 0; let cut = 0; let transient = 0; let backoff = 0; let gaveUp = 0; let started = 0; let capped = 0;
+    let carried = 0; const groupsSkipped = {}; // v2.741(VC-04)
     await poolSettled(due, CONCURRENCY, async (ref) => {
       const p = props.get(ref);
       if (!p) return; // 그사이 사라진 호스트
@@ -150,14 +198,26 @@ export async function refreshHostCfg(c, vcId, hostRefs, { now = Date.now(), budg
         if (f.count < HOST_FAIL_MAX) { transient += 1; backoff += 1; return; }
         gaveUp += 1;
       }
+      // v2.741(VC-04): 못 읽은 선택 묶음은 직전 캐시 값으로 이어 싣고(null 로 덮지 않는다) 그 호스트를 일찍 다시 고른다.
+      if (gapGroups.length) {
+        const prev = get(vcId, ref);
+        for (const g of gapGroups) {
+          groupsSkipped[g.label] = (groupsSkipped[g.label] || 0) + 1;
+          if (prev && prev[g.field] != null) { h[g.field] = prev[g.field]; carried += 1; }
+        }
+        noteGroupGap(vcId, ref, { now, periodMs: settings.hostCfgRefreshMs });
+      } else clearGroupGap(vcId, ref);
       put(vcId, ref, h);
       fetched += 1;
     });
-    setStatus(vcId, { at: now, error: null, fetched, cut, transient, backoff, gaveUp, capped, due: due.length });
+    const skippedAny = Object.keys(groupsSkipped).length > 0;
+    setStatus(vcId, { at: now, error: null, fetched, cut, transient, backoff, gaveUp, capped, due: due.length,
+      groupsSkipped: skippedAny ? groupsSkipped : null, carried, gapRetry: gapRetry.length });
+    if (skippedAny) console.warn(`[hostcfg] ${vcId} 선택 묶음(${Object.keys(groupsSkipped).join('·')})을 이번 주기에 읽지 못해 직전 값을 이어 실었습니다(${carried}건 · 그 호스트는 갱신 주기보다 일찍 다시 읽습니다)`);
     if (transient) console.warn(`[hostcfg] ${vcId} 호스트 ${transient}대는 중단·시한으로 다 읽지 못해 캐시하지 않았습니다(직전 값 유지 · 그중 요청 시한 ${backoff}대는 쉬었다가 다시 시도)`);
     if (gaveUp) console.warn(`[hostcfg] ${vcId} 호스트 ${gaveUp}대는 ${HOST_FAIL_MAX}회 연속 요청 시한이라 읽은 만큼(못 읽은 값은 비움)으로 기록했습니다`);
     if (capped) console.warn(`[hostcfg] ${vcId} 호스트 ${capped}대는 예산 + 유예(${Math.round(overrunGraceMs / 1000)}초)를 넘겨 중간에 멈췄습니다(시한 실패로 기록 — 쉬었다가 다시 시도)`);
-    return { due: due.length, fetched, cut, transient, backoff, gaveUp, capped };
+    return { due: due.length, fetched, cut, transient, backoff, gaveUp, capped, groupsSkipped: skippedAny ? groupsSkipped : null, carried, gapRetry: gapRetry.length };
   } catch (err) {
     const msg = String(err?.message || err).slice(0, 300);
     // v2.721(감사 S1-03): 첫 일괄 조회(또는 그 뒤 조회)가 요청 시한에 걸렸으면 이번에 고른 호스트들을 쉬게 한다 —

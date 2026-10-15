@@ -24,6 +24,7 @@ let timer = null;
 let lastRun = null;
 let running = false;
 let tick = 0; // prune/용량점검 스로틀용(매 폴 DELETE 스캔 방지)
+let lastCap = null; // v2.741(DB-03): 마지막 용량 상한 처리 결과 — 상태 화면이 '사용 중 크기 기준' 을 말한다
 const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
 
 /*
@@ -229,16 +230,21 @@ export async function pollLogsOnce({ manual = false } = {}) {
         const r = typeof db.pruneAsync === 'function' ? await db.pruneAsync(before) : { deleted: db.prune(before), done: true };
         if (r.deleted) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${r.deleted}건 정리${r.done === false ? ' — 상한에 걸려 다음 주기에 계속' : ''}`);
       }
-      // 용량 제한: DB가 maxSizeMB를 넘으면 오래된 것부터 삭제. VACUUM(전체 재작성, 동기)은
-      // 삭제 루프 '밖'에서 1회만 — 루프 안에서 매 회 VACUUM하면 이벤트 루프가 초~분 단위로 멈춘다.
+      // 용량 제한: DB 의 **사용 중 크기**가 maxSizeMB 를 넘으면 오래된 것부터 삭제.
+      // ⚠⚠ v2.741(감사 DB-03 — 재현): 예전에는 파일 크기(sizeBytes, +wal)로 판정해 삭제만으로는 줄지 않았고, 그래서 상한에 닿을
+      //   때마다 루프 밖에서 VACUUM(파일 전체 재작성, 동기)을 돌렸다 — 상한에 닿은 포탈은 prune 주기마다 수 초씩 멈췄다(합성 534MB 실측).
+      //   이제 (page_count − freelist_count) × page_size 로 판정한다(db.usedBytes). 지운 페이지는 다음 INSERT 가 다시 쓰므로 파일은
+      //   최고 수위 근처에 머물고 더 커지지 않는다 — VACUUM 이 필요 없다. 대가(정직 기록): 상한을 낮춰도 파일은 줄어들지 않는다
+      //   (빈 공간은 freeBytes 로 화면이 말한다).
       if (s.maxSizeMB > 0) {
         const limit = s.maxSizeMB * 1024 * 1024;
-        let size = db.sizeBytes(), guard = 0, dropped = 0;
+        const usedOf = () => (typeof db.usedBytes === 'function' ? db.usedBytes() : db.sizeBytes());
+        let size = usedOf(), guard = 0, dropped = 0, stuck = false;
         // ⚠ v2.503: 행 수는 **루프 밖에서 1회만** 센다. 예전에는 매 반복 `db.meta().count` 를 불렀는데
         // meta() 는 COUNT/MIN/MAX + `GROUP BY vcenterId` 로 **풀스캔 2회**다 — 상한 50회 × 2 = 최악
         // 100회 전체 스캔이 한 틱 안에서 동기로 돌았다(삭제 자체의 스캔은 별도). 삭제한 만큼 빼가며
-        // 추정하면 되고(바로 아래 `size` 가 이미 같은 방식이다), 카운트가 조금 낡아도 영향은
-        // '이번 회차에 지우는 행 수' 뿐이다. 행 수만 필요하므로 GROUP BY 가 없는 `rowCount()` 를 쓴다.
+        // 추정하면 되고, 카운트가 조금 낡아도 영향은 '이번 회차에 지우는 행 수' 뿐이다.
+        // 행 수만 필요하므로 GROUP BY 가 없는 `rowCount()` 를 쓴다.
         let cnt = typeof db.rowCount === 'function' ? db.rowCount() : db.meta().count;
         while (size > limit && guard++ < 50) {
           if (cnt <= 0) break;
@@ -253,12 +259,16 @@ export async function pollLogsOnce({ manual = false } = {}) {
             await new Promise((res) => setImmediate(res));
           }
           if (!n) break;
-          dropped += n; cnt -= n; size -= n * 220; // 행당 대략치로 추정(매 회 statSync/ VACUUM 회피)
+          dropped += n; cnt -= n;
+          // v2.741(DB-03): 사용 중 크기를 다시 잰다(헤더 필드 — 즉시). 지웠는데 줄지 않았으면 더 지워도 같다 — 조용히 전부 지우지 않고
+          //   멈춘 뒤 사유를 남긴다(다음 prune 주기가 다시 본다).
+          const next = usedOf();
+          if (!(next < size)) { stuck = true; break; }
+          size = next;
         }
-        // VACUUM 은 파일 전체 재작성(동기)이다. 그래도 부르는 이유: 삭제만으로는 파일 크기가 줄지
-        // 않아 `sizeBytes()` 기준 루프가 다음 주기에도 계속 참이 되어 **로그를 전부 지운다**.
-        // 루프 '밖에서 1회' 규약은 유지한다.
-        if (dropped) { db.vacuum(); console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`); }
+        if (dropped) console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리(사용 중 ${(size / 1048576).toFixed(0)}MB — 지운 자리는 새 로그가 다시 씁니다)`);
+        if (stuck) console.warn(`[vclogs] 용량 제한(${s.maxSizeMB}MB): 오래된 로그를 지웠지만 사용 중 크기가 줄지 않았습니다 — 이번 주기는 여기서 멈춥니다(다음 정리 주기에 다시 봅니다)`);
+        lastCap = { at: Date.now(), limitBytes: limit, usedBytes: size, dropped, stuck };
       }
     }
     lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}),
@@ -289,5 +299,9 @@ export function rescheduleLogPoller() { schedule(); }
 
 export async function logStatus() {
   const db = await getLogsDb();
-  return { settings: loadLogSettings(), lastRun, store: db.meta(), dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes() };
+  // v2.741(DB-03): 파일 크기와 함께 사용 중 크기·빈 공간을 싣는다 — 용량 상한은 사용 중 크기로 판정하고 파일은 줄어들지 않는다.
+  const used = typeof db.usedBytes === 'function' ? db.usedBytes() : null;
+  const free = typeof db.freeBytes === 'function' ? db.freeBytes() : null;
+  return { settings: loadLogSettings(), lastRun, store: db.meta(), dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes(),
+    dbUsedBytes: Number.isFinite(used) ? used : null, dbFreeBytes: Number.isFinite(free) ? free : null, ...(lastCap ? { lastCap } : {}) };
 }

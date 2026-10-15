@@ -8,7 +8,7 @@ import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보�
 import { store, usageReadable, hostCapacityKnown } from '../../store.js'; // v2.733(C2-06): 용량 판정도 store 하나
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
-import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchVmsPerfSeries, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
 import { createVcAuthGate, vcAuthStopOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
@@ -1015,14 +1015,14 @@ api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
  * 그리기 위한 데이터. 낭비 리소스 표는 후보가 수천 개라 한 번에 다 조회하면 안 되므로
  * **화면에 보이는 행만** 프론트가 vmId 배열로 요청한다(POST body).
  *
- * 데이터 출처: vCenter 가 자체 보관하는 성능 히스토리(fetchVmMetric, interval='week' =
- * 30분 해상도). **우리 시계열 DB 에 VM 별 행을 쌓지 않는다** — 5,850 VM × 시간당 1행이면
+ * 데이터 출처: vCenter 가 자체 보관하는 성능 히스토리(fetchVmsPerfSeries — v2.741 LEFT-03 부터 vCenter 별 로그인 1회 배치,
+ * 예전 fetchVmMetric 단건과 같은 카운터·interval='week'(30분 해상도)·점 변환). **우리 시계열 DB 에 VM 별 행을 쌓지 않는다** — 5,850 VM × 시간당 1행이면
  * 연 5천만 행이라 감당이 안 되기 때문(sampler vmAllocRows 주석과 같은 이유). vCenter 에
  * 이미 있는 데이터를 필요할 때만 빌려온다.
  *
  * 폭주 방지(28 vCenter·고RTT 환경 필수):
  *  - 요청당 VM 상한 MAX_VMS(기본 24) — 초과분은 잘라내고 truncated 로 알린다.
- *  - vCenter SOAP 동시성 6(eachLimited) — vm-finder 의 평균 조회와 같은 상한.
+ *  - vCenter 동시성 6(eachLimited) — vCenter 하나는 로그인 1회 + 청크 QueryPerf(v2.741 LEFT-03).
  *  - 결과 5분 캐시(sparkCache) — 스크롤/재렌더로 같은 VM 을 반복 조회하지 않게.
  *  - per-VM best effort: 한 VM 실패가 전체를 깨지 않고 그 행만 points=null.
  */
@@ -1077,24 +1077,35 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
       }
     } else {
       const cfgs = loadVcenterConfig().vcenters;
-      // v2.733(점검 3회차 C3-01): 화면이 보이는 행 전부를 **자동으로** 부르는 경로이고 `fetchVmMetric` 은 호출마다 로그인한다.
-      //   주 폴러가 인증 실패로 멈춘 vCenter 에는 로그인하지 않고(그 VM 은 null + authStopped), 정지 전 첫 거부도 vCenter 당 1회로
-      //   묶어 같은 기록에 올린다(gate — 첫 시도 결과를 본 뒤 나머지를 시작한다). 예전에는 300행이면 실패 로그인 300회였다.
-      //   ⚠ 남긴 것(정직): 자격증명이 맞을 때는 여전히 VM 마다 로그인한다 — vCenter 별 로그인 1회 배치는 soapClient 변경이 필요한 별건.
-      const gate = createVcAuthGate();
-      await eachLimited(need, 6, async (v) => {
+      // v2.733(점검 3회차 C3-01): 화면이 보이는 행 전부를 **자동으로** 부르는 경로다. 주 폴러가 인증 실패로 멈춘 vCenter 에는
+      //   로그인하지 않고(그 VM 은 null + authStopped), 첫 거부는 같은 기록에 올린다(gate).
+      // v2.741(감사 LEFT-03): 자격증명이 맞을 때도 **vCenter 별 로그인 1회**다 — 예전 fetchVmMetric 은 VM 마다 새 세션
+      //   (login → 카탈로그 → QueryPerf → logout)이라 고RTT vCenter 에서 24행이면 왕복 70여 회였다. vCenter 로 묶어
+      //   fetchVmsPerfSeries(청크 QueryPerf — 단건 경로와 같은 카운터·interval·점 변환) 한 번을 gate 로 돌린다.
+      //   한 VM 의 실패(삭제된 VM 등)는 그 VM 만 null 이고 캐시하지 않는다 — 예전 단건 경로와 같은 규칙.
+      const byVc = new Map(); // vcenterId -> { vc, items: [{ v, moref }] }
+      for (const v of need) {
         const vc = cfgs.find((x) => x.id === v.vcenterId);
-        if (!vc) { series[v.id] = null; return; }
+        if (!vc) { series[v.id] = null; continue; }
         // vm.id = `${vc.id}:${moref}` 인데 vc.id 자체에 콜론이 있을 수 있다 → split 대신
         // vcenterId 길이만큼 잘라낸다(dsBrowse.js 와 동일 패턴). split 이면 moref 가 깨져
-        // fetchVmMetric 이 조용히 실패해 그 vCenter 스파크라인이 전부 빈다.
+        // 그 vCenter 스파크라인이 전부 조용히 빈다.
         const moref = v.id.slice(String(v.vcenterId || '').length + 1);
+        let g = byVc.get(vc.id);
+        if (!g) { g = { vc, items: [] }; byVc.set(vc.id, g); }
+        g.items.push({ v, moref });
+      }
+      const gate = createVcAuthGate();
+      await eachLimited([...byVc.values()], 6, async ({ vc, items }) => {
         // interval 'week' = 1800초(30분) 해상도. 7일 ≈ 336점 → 스파크라인에 충분.
-        const r = await gate.run(vc, () => fetchVmMetric(vc, moref, type, 'week'));
-        if (r.error || r.skipped) { series[v.id] = null; return; } // 이 VM 만 실패(권한·엣지 수집·전원 OFF 등) — 표는 계속 그린다. 정지·실패는 캐시하지 않는다
-        const pts = (r.value?.points || []).filter((p) => p && p.v != null).map((p) => ({ t: p.t, v: p.v }));
-        series[v.id] = pts.length ? pts : null;
-        sparkCache.set(`${v.id}|${type}`, { at: now, points: series[v.id] });
+        const r = await gate.run(vc, () => fetchVmsPerfSeries(vc, items.map((x) => x.moref), type, 'week'));
+        for (const { v, moref } of items) {
+          // 이 vCenter 전체 실패(정지·권한·엣지 수집·카운터 없음) 또는 이 VM 만 실패 — 표는 계속 그린다. 실패는 캐시하지 않는다
+          if (r.error || r.skipped || r.value?.errors?.has(moref)) { series[v.id] = null; continue; }
+          const pts = (r.value?.points?.get(moref) || []).filter((p) => p && p.v != null).map((p) => ({ t: p.t, v: p.v }));
+          series[v.id] = pts.length ? pts : null;
+          sparkCache.set(`${v.id}|${type}`, { at: now, points: series[v.id] });
+        }
       });
       authStopped = gate.stopped();
     }

@@ -1472,6 +1472,75 @@ export async function fetchHostsPerfSeries(vc, morefs, interval, { start, end, c
   }
 }
 
+/**
+ * VM 여러 대의 사용률 **시계열**(v2.741 감사 LEFT-03) — 회수 대상(Optimization) 스파크라인용. fetchHostsPerfSeries 와 같은 모양:
+ * 로그인 1회 · 청크당 QueryPerf 1회(queryEntitiesPerfBatch) · 청크 사이 양보.
+ *
+ * 왜: `/tools/waste/spark` 는 보이는 행마다 fetchVmMetric(= 새 클라이언트 → login → 카탈로그 → QueryPerf → logout)을 불러
+ * **자격증명이 맞으면 VM 마다 로그인**했다(라우트 주석이 v2.733 에 미해결로 적어 둔 것). 고RTT(800ms+) vCenter 에서 24행이면
+ * 왕복 70여 회다. 점 변환은 단건 경로와 **같은 함수**(entityMetricPoints — -1 → null)이고 interval·카운터도 같다 —
+ * 결과가 단건 경로와 같아야 한다(테스트가 가짜 vCenter 로 대조한다).
+ *
+ * 한 청크의 QueryPerf 가 실패하면(삭제된 VM 하나가 ManagedObjectNotFound 로 그 요청을 통째로 실패시킨다) **같은 세션에서** 그
+ * 청크의 VM 을 하나씩 다시 묻는다 — 예전 단건 경로처럼 '그 VM 만 실패'. 자격증명 거부(authFailed)는 그대로 던진다(호출자의
+ * 인증 정지 기록이 받는다). 카운터가 없으면 전 VM 이 실패다(errors 에 사유).
+ *
+ * 반환 { points: Map<moref, [{t,v}]>, errors: Map<moref, string>, counter, unit, intervalSec }.
+ * points 에 없는 moref 는 그 VM 의 값이 오지 않은 것이다(빈 배열과 같다 — 호출자가 null 로 다룬다).
+ */
+export async function fetchVmsPerfSeries(vc, morefs, type, interval, { start, end, chunkSize = 20 } = {}) {
+  const cfg = PERF_COUNTERS[type];
+  if (!cfg) throw new Error(`지원하지 않는 지표: ${type}`);
+  const intervalId = PERF_INTERVALS[interval] || 20;
+  const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+  const points = new Map();
+  const errors = new Map();
+  const base = { points, errors, counter: cfg.key, unit: cfg.unit, intervalSec: intervalId };
+  if (!refs.length) return base;
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const counterId = map.get(cfg.key);
+    if (!counterId) throw new Error(`vCenter에 카운터가 없습니다: ${cfg.key}`);
+    // 단건 경로(fetchEntityMetric)와 같은 질의 — 기간을 주면 startTime/endTime, 아니면 그 interval 의 이동 창(realtime 만 최근 180표본).
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const maxSample = (!startTime && interval === 'realtime') ? 180 : 0;
+    const q = (chunk) => c.queryEntitiesPerfBatch('VirtualMachine', [counterId], chunk, intervalId, { startTime, endTime, maxSample });
+    const put = (byRef, chunk) => {
+      for (const ref of chunk) {
+        const raw = byRef.get(ref)?.get(String(counterId));
+        if (raw) points.set(ref, entityMetricPoints(raw, cfg.div));
+      }
+    };
+    const size = Math.max(1, Math.min(60, Number(chunkSize) || 20));
+    for (let i = 0; i < refs.length; i += size) {
+      const chunk = refs.slice(i, i + size);
+      try {
+        put(await q(chunk), chunk);
+      } catch (err) {
+        if (err?.authFailed) throw err;
+        const msg = String(err?.message || err).slice(0, 300);
+        // 시한·중단은 VM 탓이 아니다 — 하나씩 다시 물으면 청크 크기만큼 시한을 더 기다린다(그 청크는 실패로 남긴다).
+        const slow = err?.name === 'TimeoutError' || err?.name === 'AbortError' || /aborted|timed? ?out|timeout/i.test(msg);
+        if (chunk.length === 1 || slow) { for (const ref of chunk) errors.set(ref, msg); continue; }
+        // 그 청크만 하나씩(같은 세션) — 한 VM 의 실패가 다른 VM 을 비우지 않게.
+        for (const ref of chunk) {
+          try { put(await q([ref]), [ref]); } catch (e1) {
+            if (e1?.authFailed) throw e1;
+            errors.set(ref, String(e1?.message || e1).slice(0, 300));
+          }
+        }
+      }
+      if (i + size < refs.length) await new Promise((r) => setImmediate(r));
+    }
+    return base;
+  } finally {
+    await c.logout();
+  }
+}
+
 /** Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result. */
 export async function upgradeVmTools(vc, morefs) {
   const c = new VimSoapClient(vc);

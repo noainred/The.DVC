@@ -72,12 +72,14 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.logQuery', label: '엣지 로그 연합 조회', group: 'push', mod: '../agent/logQueryWorker.js', fn: 'logQueryWorkerStatus' },
 
   // ── 중앙 → 엣지(설정 수신) ──────────────────────────────────────────────────
+  // v2.741(LEFT-02): 스토리지·PDU·SAN 설정 pull 상태에는 '지금 수집' 작업(collectJob 진행 · collectRun 마지막 결과)이 함께 실린다 —
+  //   pull 이 수집을 기다리지 않게 된 뒤로 수집 결과는 이 두 필드만 말한다(별도 행을 두지 않는다 — 같은 모듈의 같은 상태).
   { key: 'pull.storage', label: '스토리지 설정', group: 'pull', mod: '../agent/storageConfigPull.js', fn: 'storageConfigPullStatus' },
   { key: 'pull.sanswitch', label: 'SAN 스위치 설정', group: 'pull', mod: '../agent/sanSwitchConfigPull.js', fn: 'sanSwitchConfigPullStatus' },
   { key: 'pull.cvp', label: 'CVP 설정', group: 'pull', mod: '../agent/cvpConfigPull.js', fn: 'cvpConfigPullStatus' },
   { key: 'pull.isidu', label: '아이실론 디렉터리 사용량 대상', group: 'pull', mod: '../agent/isiduConfigPull.js', fn: 'isiduConfigPullStatus' }, // v2.736
   { key: 'pull.isiduRemote', label: '아이실론 du 원격 요청(메인 → 이 엣지)', group: 'pull', mod: '../isidu/edgeOps.js', fn: 'isiduEdgeOpsStatus' }, // v2.736 — 메인이 바로 실행·연결 시험을 시킨 마지막 기록
-  { key: 'pull.pdu', label: 'PDU 설정', group: 'pull', mod: '../agent/pduConfigPull.js', fn: 'pduConfigPullStatus' },
+  { key: 'pull.pdu', label: 'PDU 설정', group: 'pull', mod: '../agent/pduConfigPull.js', fn: 'pduConfigPullStatus' }, // v2.741(LEFT-02)
   { key: 'pull.gpuGuest', label: 'GPU 게스트 설정', group: 'pull', mod: '../agent/gpuGuestConfigPull.js', fn: 'gpuGuestConfigPullStatus' },
   { key: 'pull.svcmon', label: 'svcmon 설정', group: 'pull', mod: '../agent/svcmonConfigPull.js', fn: 'svcmonConfigPullStatus' },
   { key: 'pull.curUser', label: '현재 사용자 설정', group: 'pull', mod: '../agent/curUserConfigPull.js', fn: 'curUserConfigPullStatus' },

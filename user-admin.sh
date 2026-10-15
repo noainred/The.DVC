@@ -2,9 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # 계정 관리 콘솔 메뉴 래퍼(v2.723) — 계정 생성·편집·비밀번호·계정별 로그인 방식·OTP·삭제.
 #
-#   sudo /opt/vmware-portal/app/user-admin.sh          # 메뉴
-#   sudo /opt/vmware-portal/app/user-admin.sh --list   # 목록만
-#   (오프라인 설치본은 install.sh 가 /usr/local/bin/vmware-portal-users 링크를 건다)
+#   sudo vmware-portal-users          # 메뉴(오프라인 설치본 — install.sh 가 만든 root 소유 래퍼)
+#   sudo vmware-portal-users --list   # 목록만
+#
+# ⚠ v2.741(감사 INJPKG-01): 이 파일은 앱 트리 안에 있어 서비스 계정이 고칠 수 있다 — `sudo <앱 경로>/user-admin.sh` 처럼 root 로
+#   직접 실행하지 말 것(서비스 계정 권한을 얻은 공격자의 코드가 root 로 돈다). root 소유 래퍼(vmware-portal-users)는 이 파일을
+#   읽기 전에 서비스 계정으로 권한을 내리고 VP_LAUNCHER=1 을 넘긴다 — 그때 '지금 재시작'(종료코드 10)은 래퍼가 root 로 한다.
 #
 # otp-enroll.sh 와 같은 일을 처리한다:
 #   · 번들 Node 런타임 경로 탐색(시스템 node 폴백)
@@ -41,8 +44,14 @@ if [[ ! -x "$NODE" ]]; then
 fi
 
 RUN_USER=""; CAN_RESTART=0
+# root 소유 래퍼가 서비스 계정으로 낮춰 부른 경우 — 재시작은 그 래퍼가 한다(종료코드 10 을 그대로 돌려준다).
+[[ "${VP_LAUNCHER:-}" == 1 ]] && CAN_RESTART=1
 if [[ "$(id -u)" -eq 0 ]]; then
   CAN_RESTART=1
+  ROOT_TOOL="${VP_ROOT_TOOLS_BASE:-/usr/local/libexec/vmware-portal}$PREFIX/vmware-portal-users"
+  if [[ -z "${VP_LAUNCHER:-}" && -f "$ROOT_TOOL" && ! -L "$ROOT_TOOL" && "$(stat -c %u "$ROOT_TOOL" 2>/dev/null)" == 0 ]]; then
+    exec "$ROOT_TOOL" "$@"   # 변조되지 않은 이 파일이 할 수 있는 안내 — 보안은 root 소유 래퍼가 맡는다
+  fi
   RUN_USER="$(systemctl show -p User --value "$SERVICE_NAME" 2>/dev/null || true)"
   [[ -z "$RUN_USER" || "$RUN_USER" == "root" ]] && RUN_USER="$(stat -c '%U' "$CONFIG_DIR" 2>/dev/null || echo '')"
   [[ "$RUN_USER" == "root" ]] && RUN_USER=""
@@ -66,7 +75,8 @@ else
 fi
 rc=$?
 if [[ $rc -eq 10 ]]; then
-  if [[ $CAN_RESTART -eq 1 ]]; then
+  if [[ "${VP_LAUNCHER:-}" == 1 && "$(id -u)" -ne 0 ]]; then exit 10; fi   # root 소유 래퍼가 재시작한다
+  if [[ $CAN_RESTART -eq 1 && "$(id -u)" -eq 0 ]]; then
     echo "==> ${SERVICE_NAME} 재시작 중…"
     if systemctl restart "$SERVICE_NAME"; then echo "==> 재시작했습니다."; exit 0; fi
     echo "✖ 재시작에 실패했습니다 — sudo systemctl status ${SERVICE_NAME} 로 확인하세요." >&2; exit 1

@@ -32,7 +32,7 @@ import {
   USER_FILTERS, PAGE_SIZE, usersFootNote, targetChip, resumeNote, targetMailLine,
   KEYED_EMPTY, keyedStart, keyedOk, keyedFail, keyedView, listPollDelay, listStaleText, csvButtonState,
 } from './isiduText.js';
-import { SUBVIEWS, DEFAULT_SUBVIEW, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay } from './isiduOverviewText.js';
+import { SUBVIEWS, DEFAULT_SUBVIEW, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay, runQueueNote } from './isiduOverviewText.js';
 import { CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
 import { ISIDU_SETTINGS_HASH, ISIDU_SETTINGS_BULK_HASH, ISIDU_SETTINGS_PLACE } from './isiduSettingsLink.js';
 import './isidu.css';
@@ -245,7 +245,9 @@ export default function IsilonDirUsageTool() {
     try {
       const r = await postJson('/tools/isilon-dirusage/run', ids ? { ids } : {});
       const lines = r?.ok === false ? [] : nudgeLines(r);
-      setRunMsg({ tone: r?.ok === false ? 'red' : (lines.some((x) => !x.ok) ? 'amber' : 'teal'), text: r?.ok === false ? (r.reason || '요청하지 못했습니다.') : runResultText(r), lines });
+      // v2.741 TIMING-02: 동시 실행 상한 때문에 대기열에 넣은 대상도 말한다(조용히 빼지 않는다).
+      const qNote = r?.ok === false ? '' : runQueueNote(r);
+      setRunMsg({ tone: r?.ok === false ? 'red' : (lines.some((x) => !x.ok) ? 'amber' : 'teal'), text: r?.ok === false ? (r.reason || '요청하지 못했습니다.') : `${runResultText(r)}${qNote ? ` ${qNote}` : ''}`, lines });
       reload();
     } catch (e) { setRunMsg({ tone: 'red', text: e?.message || String(e) }); } finally { setBusy(false); }
   };

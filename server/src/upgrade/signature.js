@@ -64,24 +64,44 @@ export function signaturePolicy(env = process.env, trust) {
   return resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent: !!t?.sources?.host?.present }) });
 }
 
-function readKeysFile(file, label, { checkPerms = false } = {}) {
-  const st = fs.statSync(file);
-  if (!st.isFile()) throw Object.assign(new Error(`${label}이(가) 파일이 아닙니다`), { code: 'ENOTFILE' });
-  if (st.size > KEYS_FILE_MAX) throw Object.assign(new Error(`${label}이(가) 너무 큽니다(${st.size}바이트)`), { code: 'ETOOBIG' });
-  if (checkPerms && process.platform !== 'win32' && (st.mode & 0o022) !== 0) {
-    throw Object.assign(new Error(`${label}의 권한이 너무 넓습니다(그룹·기타 쓰기 가능 — chmod 600 또는 640)`), { code: 'EPERMS' });
+/**
+ * 지금 프로세스가 root 인가(v2.741 감사 INJPKG-01). root 로 도는 확인(install.sh·vmware-portal-verify)이 서비스 계정이 쓸 수 있는
+ * 호스트 키 파일을 신뢰 기준으로 읽으면, 서비스 계정 권한을 얻은 공격자가 자기 키를 넣어 오프라인 서명 확인을 통과시킨다
+ * (install.sh 가 CONFIG_DIR 를 chown -R 서비스 계정으로 바꾼다). 그래서 root 일 때는 uid 0 소유 파일만 받는다.
+ */
+export const runningAsRoot = () => process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0;
+let _hostNotRootWarned = false;
+
+function readKeysFile(file, label, { checkPerms = false, rootOwnedOnly = false } = {}) {
+  const C = fs.constants;
+  // 연 파일(fd)로 판정하고 읽는다 — 소유자·종류 확인과 읽기 사이에 파일이 바뀌어도 확인한 그 파일만 읽는다.
+  //   O_NONBLOCK: FIFO 로 바꿔치기돼도 열기에서 멈추지 않는다(아래 isFile 검사가 거부). O_NOFOLLOW: root 판정 대상은 링크를 따라가지 않는다.
+  const flags = C.O_RDONLY | (C.O_NONBLOCK || 0) | (rootOwnedOnly ? (C.O_NOFOLLOW || 0) : 0);
+  let fd;
+  try { fd = fs.openSync(file, flags); } catch (e) {
+    if (rootOwnedOnly && e?.code === 'ELOOP') throw Object.assign(new Error(`${label}이(가) 심볼릭 링크입니다`), { code: 'ENOTROOT' });
+    throw e;
   }
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw Object.assign(new Error(`${label}이(가) 파일이 아닙니다`), { code: 'ENOTFILE' });
+    if (rootOwnedOnly && st.uid !== 0) throw Object.assign(new Error(`${label}이(가) root 소유가 아닙니다(uid ${st.uid})`), { code: 'ENOTROOT' });
+    if (st.size > KEYS_FILE_MAX) throw Object.assign(new Error(`${label}이(가) 너무 큽니다(${st.size}바이트)`), { code: 'ETOOBIG' });
+    if (checkPerms && process.platform !== 'win32' && (st.mode & 0o022) !== 0) {
+      throw Object.assign(new Error(`${label}의 권한이 너무 넓습니다(그룹·기타 쓰기 가능 — chmod 600 또는 640)`), { code: 'EPERMS' });
+    }
+    return JSON.parse(fs.readFileSync(fd, 'utf8'));
+  } finally { try { fs.closeSync(fd); } catch { /* 이미 닫힘 */ } }
 }
 
 /**
  * 신뢰 키를 읽는다. 파일이 작아 매번 읽는다(검증은 드물다). 호스트 파일이 **있는데** 못 읽으면 회수 목록을 알 수 없으므로
  * `fatal` 을 세워 검증을 진행하지 않는다(fail-closed). 저장소 파일을 못 읽어도 fatal.
  */
-export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile() } = {}) {
+export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(), rootOwnedOnly = runningAsRoot() } = {}) {
   const sources = {
     repo: { file: 'server/src/upgrade/release-signing-keys.json', ok: false, count: 0, error: null },
-    host: { file: path.basename(hostFile), present: false, ok: true, count: 0, revoked: 0, error: null },
+    host: { file: path.basename(hostFile), present: false, ok: true, count: 0, revoked: 0, error: null, ignored: null },
   };
   const parsed = [];
   let fatal = null;
@@ -98,17 +118,32 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile() 
   if (present) {
     sources.host.present = true;
     try {
-      const p = parseKeysDoc(readKeysFile(hostFile, `호스트 신뢰 키 파일(${HOST_KEYS_NAME})`, { checkPerms: true }), 'host');
+      const p = parseKeysDoc(readKeysFile(hostFile, `호스트 신뢰 키 파일(${HOST_KEYS_NAME})`, { checkPerms: true, rootOwnedOnly }), 'host');
       parsed.push(p);
       sources.host.count = p.keys.length; sources.host.revoked = p.revokedIds.size;
     } catch (e) {
+      if (e?.code === 'ENOTROOT') {
+        // root 로 도는 확인 — 서비스 계정이 쓸 수 있는 파일의 키·회수 목록을 받지 않는다(무시하고 알린다). 파일이 있다는
+        //   사실(present)은 그대로 두어 정책은 '키 미설정' 으로 약해지지 않는다(require 쪽).
+        sources.host.ignored = 'not-root-owned';
+        sources.host.error = String(e?.message || e).slice(0, 200);
+        if (!_hostNotRootWarned) {
+          _hostNotRootWarned = true;
+          console.warn(`⚠ ${sources.host.error} — root 로 실행하는 서명 확인은 이 파일을 읽지 않습니다(서비스 계정이 쓸 수 있는 파일을 신뢰 기준으로 쓰지 않는다). `
+            + `내용을 확인한 뒤 root:root 소유·chmod 644 로 두세요(${DOC}).`);
+        }
+        return finish();
+      }
       sources.host.ok = false;
       sources.host.error = String(e?.message || e?.code || e).slice(0, 200);
       fatal = fatal || `호스트 신뢰 키 파일을 읽지 못했습니다 — 회수 목록을 알 수 없어 검증을 진행하지 않습니다(${sources.host.error})`;
     }
   }
-  const t = mergeTrust(parsed);
-  return { ...t, sources, fatal };
+  return finish();
+  function finish() {
+    const t = mergeTrust(parsed);
+    return { ...t, sources, fatal };
+  }
 }
 
 /* ── 검증 기록(v2.736.1) ─────────────────────────────────────────────────────────────────────────────────

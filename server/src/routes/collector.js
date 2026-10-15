@@ -36,6 +36,23 @@ function checkToken(req) {
   return tokenMatches(token, config.collector.token);
 }
 
+/*
+ * v2.741(EDGE-02): JSON 본문을 받는 POST 는 **토큰을 먼저 보고 그 뒤에** 본문을 읽는다(`/upgrade` 와 같은 순서).
+ *  예전에는 index.js 의 전역 `express.json({limit:'1mb'})` 가 이 라우터 마운트보다 앞에 있어, 토큰 없는 요청도 1MB 까지
+ *  읽고 JSON.parse 했고 각 라우트에 적힌 `express.json({limit:'4kb'…})` 는 **한 번도 적용되지 않았다**(body-parser 는
+ *  req._body 가 이미 참이면 건너뛴다). 이제 index.js 가 이 라우터를 전역 파서보다 **먼저** 마운트하고, 라우트마다
+ *  tokenFirst → 라우트 파서 순서다. 이 라우터에서 전역 파서에 기대던 경로는 없다(POST 전부가 자기 파서를 갖는다 —
+ *  /xfer-test 는 스트림, /upgrade 는 raw). ⚠ 새 JSON POST 를 더하면 tokenFirst 와 라우트 파서를 **함께** 붙일 것 —
+ *  없으면 req.body 가 비어 있다.
+ */
+function tokenFirst(name) {
+  return (req, res, next) => {
+    if (!config.collector.token) { logCollectorDeny(req, name); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+    if (!checkToken(req)) { logCollectorDeny(req, name); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+    next();
+  };
+}
+
 // 인증 거부 기록은 v2.579 에 `collector/denyLog.js` 로 옮겼다(ARCH-03 — collector/agent 가 이 라우트
 // 파일을 import 하던 순환 제거). 테스트 하니스가 이 파일에서 두 이름을 가져가므로 재수출한다.
 export { getCollectorDenyStats, _resetCollectorDenyStats };
@@ -170,9 +187,7 @@ collectorRouter.post('/xfer-test', async (req, res) => {
 
 // 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).
 // COLLECTOR_TOKEN 가드 — 토큰을 가진 중앙만 호출 가능. 비밀번호는 로그/감사에 남기지 않는다.
-collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res) => {
-  if (!config.collector.token) { logCollectorDeny(req, 'set-password'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
-  if (!checkToken(req)) { logCollectorDeny(req, 'set-password'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+collectorRouter.post('/set-password', tokenFirst('set-password'), express.json({ limit: '4kb' }), (req, res) => {
   const username = String(req.body?.username || 'admin').trim();
   // ⚠ trusted 를 넘기지 않는다(6차 재감사). `trusted` 는 credentialGuardDenied 를 **첫 줄에서
   // 무조건 통과**시키는 로컬 콘솔 전용 플래그다. 여기에 붙이면 원격(중앙)에서 임의 계정명을
@@ -190,9 +205,9 @@ collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res)
 // 중앙→엣지 직접(PUSH) iDRAC 스캔 — 엣지가 중앙으로 폴링하지 않아도, 중앙이 이 엣지의
 // COLLECTOR_TOKEN으로 직접 스캔을 시키고 결과를 동기로 받는다(엣지 CENTRAL_URL 미설정에도 동작).
 // 엣지가 현지에서 Redfish 스캔 → (noRegister 아니면) 현지 등록 → 요약 반환.
-collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req, res) => {
-  if (!config.collector.token) { logCollectorDeny(req, 'idrac-scan'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
-  if (!checkToken(req)) { logCollectorDeny(req, 'idrac-scan'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+// v2.741(EDGE-02): 한도는 **1mb** 다 — 예전 선언(256kb)은 적용된 적이 없고 실제로는 전역 1mb 였다. ips 는 사람이 붙여넣은 IP
+//   목록(관리 화면 /idrac/scan)일 수 있어 256kb 로 줄이면 지금 동작하는 요청이 413 이 된다(줄이지 않았다).
+collectorRouter.post('/idrac-scan', tokenFirst('idrac-scan'), express.json({ limit: '1mb' }), async (req, res) => {
   const b = req.body || {};
   const ips = b.ips; const username = String(b.username || '').trim(); const password = b.password;
   // v2.610: HPE iLO 계정(선택) — 아는 두 필드만 받는다. iLO 계정만 있는 대역(Dell 계정 없음)도 허용한다.
@@ -224,14 +239,10 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
 // v2.736 아이실론 디렉터리 사용량 — 메인이 이 엣지에 du 를 '바로' 시키는 길(iDRAC PUSH 스캔과 같은 url·토큰).
 //   isidu-run : 중앙 설정을 지금 다시 받아 '지금 수집' 요청을 시작한다(본문의 대상 id 를 믿지 않는다 — 중앙 큐가 정한다).
 //   isidu-test: 메인이 보낸 대상(비밀 없음)을 다시 검증하고 이 엣지의 키·등록부로 `ls -d` 만 한다(du 는 돌리지 않는다).
-collectorRouter.post('/isidu-run', express.json({ limit: '4kb' }), async (req, res) => {
-  if (!config.collector.token) { logCollectorDeny(req, 'isidu-run'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
-  if (!checkToken(req)) { logCollectorDeny(req, 'isidu-run'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+collectorRouter.post('/isidu-run', tokenFirst('isidu-run'), express.json({ limit: '4kb' }), async (req, res) => {
   res.json(await edgeIsiduNudge());
 });
-collectorRouter.post('/isidu-test', express.json({ limit: '16kb' }), async (req, res) => {
-  if (!config.collector.token) { logCollectorDeny(req, 'isidu-test'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
-  if (!checkToken(req)) { logCollectorDeny(req, 'isidu-test'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+collectorRouter.post('/isidu-test', tokenFirst('isidu-test'), express.json({ limit: '16kb' }), async (req, res) => {
   const r = await edgeIsiduTest(req.body || {});
   res.status(r.status).json(r.body);
 });
@@ -240,19 +251,25 @@ let bmstorPushRunning = false; // v2.612 EDGE2612-01: /bmstor-collect 단일 비
 // 베어메탈 스토리지 위임 수집(v2.340) — 중앙이 엣지에 서버 목록(SSH 자격증명+마운트)을 보내면
 // 엣지가 현지에서 df 수집 후 동기 반환한다(idrac-scan PUSH 와 같은 토큰 게이트/흐름).
 // 자격증명은 저장하지 않고 이 요청 처리에만 사용, 응답·로그에 비밀번호를 남기지 않는다.
-collectorRouter.post('/bmstor-collect', express.json({ limit: '512kb' }), async (req, res) => {
-  if (!config.collector.token) { logCollectorDeny(req, 'bmstor-collect'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
-  if (!checkToken(req)) { logCollectorDeny(req, 'bmstor-collect'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
-  const servers = Array.isArray(req.body?.servers) ? req.body.servers : [];
-  if (!servers.length) return res.status(400).json({ ok: false, reason: 'servers 배열이 필요합니다.' });
+// v2.741(EDGE-02): 한도는 **1mb** 다 — 예전 선언(512kb)은 적용된 적이 없고 실제로는 전역 1mb 였다(서버 200대 × 마운트 64개면
+//   512kb 를 넘을 수 있어 줄이지 않았다).
+collectorRouter.post('/bmstor-collect', tokenFirst('bmstor-collect'), express.json({ limit: '1mb' }), async (req, res) => {
+  const raw = Array.isArray(req.body?.servers) ? req.body.servers : [];
+  // v2.741(EDGE-03): 원소는 **객체만** 받는다 — null·문자열 원소 하나가 collectMany 의 list[i].id 에서 던져 요청 전체가 500 이 되고
+  //   같은 요청의 다른 서버 결과까지 잃었다. 뺀 개수는 응답 `dropped` 로 밝힌다(조용한 생략 금지 — 다른 수신 경로와 같은 규칙).
+  const servers = raw.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+  const dropped = raw.length - servers.length;
+  if (!servers.length) {
+    return res.status(400).json({ ok: false, reason: dropped ? `servers 원소가 객체가 아닙니다(${dropped}개를 받지 않았습니다).` : 'servers 배열이 필요합니다.', ...(dropped ? { dropped } : {}) });
+  }
   if (servers.length > 200) return res.status(400).json({ ok: false, reason: '한 번에 최대 200대까지입니다.' });
   // v2.612 EDGE2612-01: 한 번에 하나 — 중앙이 시한 뒤 다시 보낸 요청이 앞 수집과 겹쳐 같은 서버에 SSH 세션을 두 벌 열지 않게.
   if (bmstorPushRunning) return res.status(409).json({ ok: false, busy: true, reason: '이전 위임 수집이 아직 진행 중입니다 — 끝난 뒤 다시 시도하세요.' });
   bmstorPushRunning = true;
   try {
     const results = await bmstorCollectMany(servers);
-    logAudit({ user: 'central-portal', action: '중앙 PUSH 베어메탈 스토리지 수집', detail: `서버 ${servers.length} · 성공 ${results.filter((r) => r.ok).length}`, ip: req.ip || '' });
-    res.json({ ok: true, results });
+    logAudit({ user: 'central-portal', action: '중앙 PUSH 베어메탈 스토리지 수집', detail: `서버 ${servers.length} · 성공 ${results.filter((r) => r.ok).length}${dropped ? ` · 형식 오류로 뺀 원소 ${dropped}` : ''}`, ip: req.ip || '' });
+    res.json({ ok: true, results, ...(dropped ? { dropped } : {}) });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   } finally { bmstorPushRunning = false; }

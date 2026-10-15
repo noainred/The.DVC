@@ -44,7 +44,36 @@ function approxFields(approx) {
 }
 
 const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
-const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
+export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
+
+/*
+ * ── 세션 예산(v2.741 감사 DEV-02 — v2.528 Unity 와 같은 유형의 재발) ─────────────────────────────────
+ * 이 세션은 18개 항목(후보 포함 최대 21회 exec)을 명령당 45초로 돌린다. 폴러의 장비 시한(`sanswitch/poller.js
+ * DEVICE_TIMEOUT_MS`, 기본 120초)은 그 합보다 한참 작다 — 느린 명령 셋(고RTT 의 errshow 페이저·디렉터의
+ * `sfpshow -all`·대형 패브릭 cfgshow)이 시한까지 가면 `withDeadline` 이 세션을 끊고, 폴러의 catch 가 빈 스냅샷으로
+ * 바꿔 **이미 받은 switchshow·porterrshow 까지 통째로 버린다**(직전 정상 스냅샷도 덮인다). 그래서 세션이 스스로
+ * 남은 시간을 보고, 모자라면 새 명령을 **시작하지 않고** 여기까지의 결과를 돌려준다(`storage/collectors/cliSsh.js
+ * runCliSession` 과 같은 방식). 건너뛴 항목은 사유와 함께 `errors`(→ sections)·`extra.cliSkipped`(개수)·`cliSkippedKeys` 에 남긴다(조용한 생략 금지).
+ *  · 필수 항목(switchshow)은 예산을 무시한다 — 그것이 없으면 스냅샷 자체가 무의미하다(그래서 맨 앞이다).
+ *  · 월간 점검용 느린 명령(errdump/errshow·bottleneckmon)과 ISL·LSAN 은 맨 뒤다 — 예산이 모자라면 그것부터 빠진다.
+ *  · 예산은 **장비 시한보다 반드시 작아야 한다**(같거나 크면 이 가드가 발동하기 전에 폴러가 먼저 던진다) —
+ *    그래서 장비 시한 env 를 함께 읽어 `min(예산, 장비 시한 − 여유)` 로 묶는다(`test/audit2741f.test.js` 가 산수를 고정한다).
+ */
+/**
+ * 폴러의 장비 시한 — `sanswitch/poller.js` 와 **같은 env·같은 결과**(빈 값·0·숫자 아님 → 120초, 그 밖은 하한 30초)여야 한다.
+ * 예산을 그보다 작게 묶는 데만 쓴다. 폴러를 import 하면 순환이라(폴러가 이 파일을 import 한다) 식을 옮겨 둔다.
+ */
+const envMsOrNull = (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
+export const DEVICE_TIMEOUT_MS = Math.max(30_000, envMsOrNull(process.env.SANSW_DEVICE_TIMEOUT_MS) ?? 120_000);
+/** 장비 시한과 예산 사이 여유 — 마지막 명령의 채널 열기 왕복(고RTT 800ms+)·세션 종료가 이 안에 들어간다. */
+export const DEADLINE_MARGIN_MS = 15_000;
+/** 남은 예산이 이보다 적으면 새 명령을 시작하지 않는다(시작해 놓고 잘리면 결과가 버려진다). 명령 시한이 짧게 설정된 현장에서도 비율을 지킨다. */
+export const MIN_SLICE_MS = Math.min(5_000, Math.max(250, Math.floor(CMD_TIMEOUT_MS / 4)));
+export const SESSION_BUDGET_MS = Math.max(MIN_SLICE_MS * 2, Math.min(
+  reqTimeoutMs(process.env.SANSW_CLI_SESSION_BUDGET_MS, 100_000, { min: 5_000, max: 1_800_000 }),
+  DEVICE_TIMEOUT_MS - DEADLINE_MARGIN_MS));
+/** 예산 때문에 시작하지 않은 항목의 사유 — Unity(cliSsh)와 같은 문구(같은 뜻을 두 갈래로 말하지 않는다). */
+export const BUDGET_SKIP_REASON = '수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다(다음 주기에 시도).';
 
 /**
  * 명령 명세. required 인 것이 실패하면 전체 수집 실패.
@@ -183,14 +212,19 @@ function specs(vfId) {
   ];
 }
 
-async function runSession(device, signal, { trace = null, verbose = false } = {}) {
+async function runSession(device, signal, { trace = null, verbose = false, budgetMs = SESSION_BUDGET_MS } = {}) {
   const creds = {
     host: device.host, port: Number(device.sshPort) || 22,
     username: device.username, password: device.password || '', signal,
     trace, verbose, // 연결 테스트 추적(v2.421) — 폴러는 넘기지 않는다(null)
   };
+  // v2.741(DEV-02): 예산 시계는 **접속 전**에 시작한다 — 장비 시한도 핸드셰이크를 포함해 세기 때문이다(cliSsh 와 같다).
+  const budget = Number.isFinite(Number(budgetMs)) && Number(budgetMs) > 0 ? Number(budgetMs) : SESSION_BUDGET_MS;
+  const startedAt = Date.now();
+  const leftMs = () => budget - (Date.now() - startedAt);
   return withSsh(creds, async (sh) => {
     const out = {}; const raw = []; const errors = {}; let countersAt = null;
+    const skipped = [];   // 예산이 모자라 **시작조차 하지 않은** 항목 — 반드시 밝힌다
     // 이 스위치가 실제로 가진 명령 집합을 먼저 조사한다(경로 추측 금지 — 위 머리말).
     trace?.('명령 가용성 조사(echo $PATH; ls) — 캐시 6시간');
     const caps = await probeCommands(sh, capsKeyOf(device));
@@ -211,13 +245,25 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
         if (spec.required) throw new Error(`${spec.key}: ${why}`);
         continue;
       }
+      // ── 세션 예산(v2.741 DEV-02) — 필수가 아니면 남은 시간이 모자랄 때 시작하지 않는다 ──
+      if (!spec.required && leftMs() < MIN_SLICE_MS) {
+        skipped.push(spec.key);
+        errors[spec.key] = BUDGET_SKIP_REASON;
+        raw.push({ key: spec.key, cmd: avail.map((k) => k.cmd).join(' | '), ok: false, skipped: 'budget', sample: `${BUDGET_SKIP_REASON} — 세션 예산 ${Math.round(budget / 1000)}초` });
+        trace?.(`${spec.key}: ${BUDGET_SKIP_REASON}`, 'warn');
+        continue;
+      }
       let lastErr = null; let done = false;
-      for (const k of avail) {
+      for (const [ci, k] of avail.entries()) {
+        // 후보를 넘어갈 때도 예산을 본다 — 앞 후보가 시한까지 매달렸으면 뒤 후보를 시작하지 않는다.
+        if (ci > 0 && !spec.required && leftMs() < MIN_SLICE_MS) { lastErr = new Error(BUDGET_SKIP_REASON); break; }
         try {
+          // 남은 예산 안에서만 기다린다(필수 항목은 제 시한 그대로) — 한 명령이 장비 시한을 넘겨 앞 결과까지 버려지지 않게.
+          const slice = spec.required ? CMD_TIMEOUT_MS : Math.max(MIN_SLICE_MS, Math.min(CMD_TIMEOUT_MS, leftMs()));
           // 페이저로 멈추는 명령은 자동 응답 경로로(일반 exec 은 시한까지 매달린 뒤 출력을 버린다).
           const r = k.paged
-            ? await sh.execPaged(k.cmd, { timeoutMs: CMD_TIMEOUT_MS })
-            : await sh.exec(k.cmd, CMD_TIMEOUT_MS);
+            ? await sh.execPaged(k.cmd, { timeoutMs: slice })
+            : await sh.exec(k.cmd, slice);
           const stdout = String(r.stdout || '');
           const stderr = String(r.stderr || '');
           // FOS 는 오류를 exit 0 + 본문/stderr 문구로 내는 경우가 흔하다. 'command not found' 는
@@ -244,7 +290,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
         if (spec.required) throw new Error(`${spec.key}: ${errors[spec.key]}`);
       }
     }
-    return { out, raw, errors, usedCmds, countersAt };
+    return { out, raw, errors, usedCmds, countersAt, skipped, elapsedMs: Date.now() - startedAt, budgetMs: budget };
   });
 }
 
@@ -391,10 +437,17 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { co
   return snap;
 }
 
-/** 수집 진입점. raw(명령 원문)는 연결 테스트에서만 쓰고 스냅샷에는 넣지 않는다(대역폭). */
-export async function collect(device, { withRaw = false, signal, trace = null, verbose = false } = {}) {
-  const r = await runSession(device, signal, { trace, verbose });
+/**
+ * 수집 진입점. raw(명령 원문)는 연결 테스트에서만 쓰고 스냅샷에는 넣지 않는다(대역폭).
+ * `budgetMs` — 세션 예산(기본 `SESSION_BUDGET_MS`). 바깥 시한이 장비 시한보다 짧은 호출부(연결 테스트 60초)는
+ *   그 시한보다 작은 값을 넘겨야 같은 보호를 받는다.
+ */
+export async function collect(device, { withRaw = false, signal, trace = null, verbose = false, budgetMs = SESSION_BUDGET_MS } = {}) {
+  const r = await runSession(device, signal, { trace, verbose, budgetMs });
   trace?.(`출력 해석: 성공 섹션 ${Object.keys(r.out).length}개, 실패 ${Object.keys(r.errors).length}개${Object.keys(r.errors).length ? ` (${Object.keys(r.errors).join(', ')})` : ''}`);
   const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {}, { countersAt: r.countersAt ?? null });
+  // v2.741(DEV-02): 예산으로 건너뛴 항목은 '명령이 없는 장비' 와 조치가 다르다 — 개수·이름을 스냅샷에 싣는다.
+  //   `cliSkipped` 는 스토리지 Unity(unitySsh)와 같은 뜻·같은 모양(개수)이고, 무엇을 뺐는지는 `cliSkippedKeys` 가 말한다.
+  if (r.skipped?.length) snap.extra = { ...(snap.extra || {}), cliSkipped: r.skipped.length, cliSkippedKeys: r.skipped.slice(), cliBudgetMs: r.budgetMs };
   return withRaw ? { snap, raw: r.raw } : snap;
 }

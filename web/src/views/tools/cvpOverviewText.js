@@ -172,23 +172,44 @@ export function freshnessRows(freshness) {
   };
 }
 
-/** 법인별 트래픽 행 — 합(수신+송신) 큰 순. 측정 포트가 0 인 법인의 합은 '—'(0 bps 가 아니다). */
+/**
+ * v2.741(감사 LEFT-04): 한 방향(수신·송신)의 합 — 측정 포트가 없거나 측정 장비 **전부**에서 그 방향을 못 읽었으면 null('—').
+ *   서버(cvp/overview.js)는 v2.720 B1-06 부터 방향별 결측을 inUnread·outUnread 로 세는데 화면이 그 필드를 읽지 않아 '수신 0 bps'(트래픽 없음
+ *   이라는 거짓)가 나갔다. v2.741 서버는 그 방향을 null 로 싣지만 구버전 서버는 0 을 보낸다 — 개수로 다시 판정해 두 경우를 같게 보인다.
+ */
+function dirBps(t, key, unreadKey) {
+  const measured = numOrNull(t.portsMeasured) ?? 0;
+  if (!(measured > 0)) return null;
+  const dev = numOrNull(t.devicesMeasured);
+  const unread = numOrNull(t[unreadKey]) ?? 0;
+  if (dev != null && dev > 0 && unread >= dev) return null;
+  return numOrNull(t[key]);
+}
+const unreadNote = (t, unreadKey, label) => {
+  const n = numOrNull(t?.[unreadKey]) ?? 0;
+  return n > 0 ? `${label} 못 읽은 장비 ${countText(n)}대(합에서 빠짐)` : '';
+};
+
+/** 법인별 트래픽 행 — 합(수신+송신) 큰 순. 측정 포트가 0 인 법인의 합은 '—'(0 bps 가 아니다). 방향을 못 읽은 장비가 있으면 부분 합(partial)이다. */
 export function trafficRows(corps) {
   const rows = (Array.isArray(corps) ? corps : []).filter((c) => c && typeof c === 'object').map((c) => {
     const t = c.traffic || {};
     const measured = numOrNull(t.portsMeasured) ?? 0;
-    const inB = measured > 0 ? numOrNull(t.inBps) : null;
-    const outB = measured > 0 ? numOrNull(t.outBps) : null;
+    const inB = dirBps(t, 'inBps', 'inUnread');
+    const outB = dirBps(t, 'outBps', 'outUnread');
     const sum = inB == null && outB == null ? null : (inB ?? 0) + (outB ?? 0);
     const unmeasured = numOrNull(t.portsUnmeasured) ?? 0;
+    const inNote = unreadNote(t, 'inUnread', '수신'); const outNote = unreadNote(t, 'outUnread', '송신');
     const notes = [];
     if (measured > 0) notes.push(`측정 포트 ${countText(measured)}개`);
     if (unmeasured > 0) notes.push(`처리량 없음 ${countText(unmeasured)}개 제외`);
     if (numOrNull(t.devicesUnmeasured) > 0) notes.push(`장비 ${countText(t.devicesUnmeasured)}대 미측정`);
+    if (inNote) notes.push(inNote);
+    if (outNote) notes.push(outNote);
     return {
       corpId: c.corpId ?? '', name: corpLabel(c), inBps: inB, outBps: outB, sum,
       inText: bpsText(inB), outText: bpsText(outB), sumText: bpsText(sum),
-      note: notes.join(' · ') || '측정된 포트 없음', partial: unmeasured > 0,
+      note: notes.join(' · ') || '측정된 포트 없음', partial: unmeasured > 0 || !!inNote || !!outNote,
       top: Array.isArray(t.top) ? t.top : [],
     };
   });
@@ -196,6 +217,16 @@ export function trafficRows(corps) {
   const max = Math.max(0, ...rows.map((r) => r.sum ?? 0));
   for (const r of rows) r.pct = max > 0 && r.sum != null ? `${(r.sum / max) * 100}%` : '0%';
   return rows;
+}
+
+/**
+ * v2.741(감사 LEFT-04): 트래픽 화면 KPI '전체 수신·송신' — 법인 행과 같은 판정(전부 못 읽은 방향은 '—', 일부만 못 읽었으면 그 사실을 note 로).
+ * @param {object} t  overview 응답의 traffic(전체 합)
+ */
+export function trafficTotalsText(t) {
+  const x = t && typeof t === 'object' ? t : {};
+  const inB = dirBps(x, 'inBps', 'inUnread'); const outB = dirBps(x, 'outBps', 'outUnread');
+  return { inBps: inB, outBps: outB, inText: bpsText(inB), outText: bpsText(outB), inNote: unreadNote(x, 'inUnread', '수신'), outNote: unreadNote(x, 'outUnread', '송신') };
 }
 
 /**

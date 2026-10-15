@@ -234,6 +234,16 @@ export function buildCvpOverview(i = {}) {
     list.sort((a, b) => ((b.inBps ?? 0) + (b.outBps ?? 0)) - ((a.inBps ?? 0) + (a.outBps ?? 0)));
     corps.get(cid).traffic.top = list.slice(0, TOP_DEVICES_PER_CORP);
   }
+  // v2.741(감사 LEFT-04): 측정 장비 **전부**에서 한 방향을 못 읽었으면 그 방향의 합은 0 이 아니라 null(모름)이다 — 예전에는 초기값 0 이
+  //   그대로 남아 화면이 '수신 0 bps'(트래픽 없음이라는 거짓)를 말했다. 일부만 못 읽었으면 읽은 장비의 합(부분 합)을 두고 inUnread·
+  //   outUnread 로 센다(화면이 부분 합이라 말한다 — cvpOverviewText.trafficRows). 측정 장비가 0 이면 예전 그대로(화면이 portsMeasured 로 '—').
+  const directionUnknown = (t) => {
+    if (!(t.devicesMeasured > 0)) return;
+    if ((t.inUnread || 0) >= t.devicesMeasured) t.inBps = null;
+    if ((t.outUnread || 0) >= t.devicesMeasured) t.outBps = null;
+  };
+  for (const c of corps.values()) directionUnknown(c.traffic);
+  directionUnknown(tTotals);
 
   // 이벤트(기간 안 심각도별)
   const evTotals = { critical: 0, error: 0, warning: 0 };

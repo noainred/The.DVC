@@ -401,9 +401,13 @@ app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
 // 실제 클라이언트가 되어 레이트리밋 버킷·감사 IP·수집 인증 거부 로그가 프록시 IP 로 뭉치지 않는다. 프록시가 없으면 절대 켜지 말 것
 // (아무 클라이언트나 X-Forwarded-For 로 IP 를 속인다). HAProxy 는 http 모드에서 `option forwardfor` 필요.
 if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+// v2.741(EDGE-02): 수집기 라우터는 전역 JSON 파서보다 **먼저** 마운트한다 — 그래야 라우트별 한도(set-password 4kb·isidu-run 4kb·
+//   isidu-test 16kb 등)가 실제로 적용되고 토큰 검사가 본문 파싱보다 앞선다(routes/collector.js tokenFirst). 예전에는 전역 1MB 파서가
+//   먼저 돌아 토큰 없는 요청도 1MB 까지 읽고 파싱했으며 라우트에 적힌 한도는 한 번도 적용되지 않았다. 이 라우터의 POST 는 전부
+//   자기 파서를 갖는다(전역 파서에 기대는 경로 없음). ⚠ 이 줄을 아래로 되돌리지 말 것.
+app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use(express.json({ limit: '1mb' }));
 
-app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
 /*
  * 외부 포탈용 공개 조회 API(v2.562) — **키 기반**이라 사용자 세션 미들웨어를 타지 않는다
