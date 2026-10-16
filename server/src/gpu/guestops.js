@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
 import { readTextCapped } from '../util/readCapped.js';
+import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js'; // v2.742(INJPKG-08): 게스트 파일 전송은 리다이렉트를 따라가지 않는다
 
 // mig.mode.current(Enabled/Disabled/N/A)를 5번째 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
 // 문자열 컬럼이므로 파서에서 원본 문자열로 별도 처리(숫자 변환 금지).
@@ -125,6 +126,19 @@ function authXml(creds) {
 // 깨지지 않게 정규식으로 스킴 다음 호스트만 바꾼다('*' 호스트도 포함).
 const swapHost = (u, host) => u.replace(/^(https?:\/\/)[^/]+/, `$1${host}`);
 
+/*
+ * v2.742(INJPKG-08): 게스트 파일 전송(GET 다운로드·PUT 업로드)은 리다이렉트를 따라가지 않는다(v2.620 SEC2620-01 규약의 형제 누락).
+ *   전역 fetch 기본값 redirect:'follow' 는 307/308 에 **PUT 본문(addGuestUser 의 평문 비밀번호 파일)** 을 Location 으로 그대로 다시
+ *   보내고, IP 리터럴 대상은 SSRF lookup 도 타지 않는다. ESXi 전송 URL 은 리다이렉트할 이유가 없으므로 3xx 는 그 후보의 실패다
+ *   (다음 후보로 넘어간다 — 사유는 시도 기록에 남는다). 본문은 버려 연결을 돌려준다.
+ */
+async function refuseTransferRedirect(res) {
+  const st = Number(res?.status);
+  if (!(st >= 300 && st < 400)) return;
+  try { await res.body?.cancel?.(); } catch { /* */ }
+  refuseRedirect(res, 'ESXi(게스트 파일 전송)');
+}
+
 /**
  * 게스트 결과 파일 본문 상한(v2.603 감사 SEC2603-06). nvidia-smi 출력은 수 KB 인데 예전에는 `res.text()` 로 **상한 없이**
  * 읽어, 게스트가 만든(또는 바꿔치기한) 큰 파일이 중앙 메모리로 통째로 들어올 수 있었다. `GPU_GUEST_FILE_MAX_BYTES`.
@@ -199,7 +213,8 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
     const isOrig = cand === url;
     const t0 = Date.now();
     try {
-      const res = await fetch(cand, { dispatcher: vcDispatcher, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(cand, { dispatcher: vcDispatcher, redirect: NO_REDIRECT, signal: AbortSignal.timeout(timeoutMs) });
+      await refuseTransferRedirect(res);
       if (res.ok) {
         console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
         tlog(tr, `  ✓ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
@@ -443,7 +458,8 @@ async function writeGuestFile(c, fileManager, vmRef, auth, guestPath, content, {
   const tries = [];
   for (const cand of candidateUrls(c, url, preferHosts)) {
     try {
-      const res = await fetch(cand, { method: 'PUT', body: content, dispatcher: vcDispatcher, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes) }, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(cand, { method: 'PUT', body: content, dispatcher: vcDispatcher, redirect: NO_REDIRECT, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes) }, signal: AbortSignal.timeout(timeoutMs) });
+      await refuseTransferRedirect(res);
       if (res.ok) return { ok: true };
       tries.push(`HTTP${res.status}`);
     } catch (e) { tries.push(String(e.message).slice(0, 50)); }

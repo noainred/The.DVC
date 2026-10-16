@@ -62,6 +62,7 @@ describe('CATALOG2613-01: 카탈로그 플래그는 주 API 게이트(docs/API.m
     serveranalysis: 'GET /api/admin/idrac',
     'nic-speed': 'GET /api/admin/idrac/nic-speed',
     'nic-models': 'GET /api/admin/idrac/nic-models',
+    'net-traffic': 'GET /api/admin/net/agents', // v2.742(WEB-04) — 캡처·이력·모니터 탭 API 전부 adminOnly + fleetOnly
   };
   for (const [k, ep] of Object.entries(ADMIN_MAIN_API)) {
     it(`${k}: 주 API ${ep} 가 역할 admin 이면 카탈로그도 adminOnly`, () => {
@@ -86,6 +87,93 @@ describe('CATALOG2613-01: 카탈로그 플래그는 주 API 게이트(docs/API.m
   it('perm 값은 전부 기존 권한 키 형식이고 insights-hub 와 같은 키를 쓴다', () => {
     const perms = new Set(TOOLS.filter((t) => t.perm).map((t) => t.perm));
     expect([...perms].sort()).toEqual(['dashboard', 'insights', 'inv.nsx', 'svcmon']);
+  });
+});
+
+// ── v2.742(WEB-04) 카탈로그 전체 대조 ───────────────────────────────────────────
+/**
+ * 위의 명시 목록(ADMIN_MAIN_API)은 '알고 있는 도구' 만 본다 — net-traffic 이 그 목록 밖이라 v2.741 까지 operator 에게 열려
+ * 있었다(열면 캡처 폼까지 채운 뒤 403). 그래서 서버의 선언(auth/toolAccess.js TOOL_ENFORCEMENT_NOTES — 'other-router' 도구마다
+ * 주 API 와 그 게이트를 적은 표)을 **카탈로그 전체**와 대조한다: 첫 경로의 게이트가 adminOnly 면 카탈로그도 adminOnly,
+ * requirePerm/insights 권한이면 카탈로그는 같은 perm(또는 더 좁은 adminOnly). 선언에 새 도구를 적으면 이 테스트가 자동으로 본다.
+ */
+function serverEnforcementNotes() {
+  const src = read('server/src/auth/toolAccess.js');
+  const body = src.match(/export const TOOL_ENFORCEMENT_NOTES = Object\.freeze\(\{([\s\S]*?)\n\}\);/);
+  expect(body, 'TOOL_ENFORCEMENT_NOTES 를 읽지 못했다 — 형식이 바뀌면 이 테스트를 먼저 고칠 것').toBeTruthy();
+  const out = [];
+  const re = /^\s*'?([a-z0-9-]+)'?:\s*\[(ENFORCE_[A-Z_]+),\s*("|')(.*)\3\],?\s*(\/\/.*)?$/gm;
+  let m;
+  while ((m = re.exec(body[1]))) out.push({ k: m[1], kind: m[2], why: m[4] });
+  return out;
+}
+/** 문장의 첫 괄호(짝 맞춤) 안 글자와 그 앞 경로. */
+function firstGate(why) {
+  const at = why.indexOf('(');
+  if (at < 0) return null;
+  let depth = 0;
+  for (let i = at; i < why.length; i++) {
+    if (why[i] === '(') depth += 1;
+    else if (why[i] === ')') { depth -= 1; if (depth === 0) return { path: why.slice(0, at).split('·').pop().trim(), gate: why.slice(at + 1, i) }; }
+  }
+  return null;
+}
+// 의도적으로 카탈로그 표시를 넓게 둔 도구 — 사유는 실제 코드로 확인한 것만.
+const CATALOG_GATE_EXCEPTIONS = {
+  shutdown: 'v2.590 W2 — operator 에게도 카드를 열어 두고 화면이 권한 문구를 확정해 말한다(위 테스트가 따로 고정)',
+};
+
+describe('v2.742 WEB-04: 카탈로그 adminOnly·perm 은 서버 선언(toolAccess)의 주 API 게이트와 전체 대조로 맞는다', () => {
+  const notes = serverEnforcementNotes();
+  const byKey = new Map(TOOLS.map((t) => [t.k, t]));
+  const { gates } = apiDocGates();
+  const other = notes.filter((n) => n.kind === 'ENFORCE_OTHER_ROUTER');
+  it('선언을 읽었다(other-router 도구가 15개 이상)', () => {
+    expect(other.length).toBeGreaterThanOrEqual(15);
+    expect(other.some((n) => n.k === 'net-traffic')).toBe(true);
+  });
+  it('첫 게이트가 adminOnly 인 도구는 카탈로그도 adminOnly(예외는 사유와 함께)', () => {
+    const bad = [];
+    for (const n of other) {
+      const g = firstGate(n.why);
+      if (!g || !/\badminOnly\b/.test(g.gate) || /requirePerm|권한/.test(g.gate)) continue;
+      if (CATALOG_GATE_EXCEPTIONS[n.k]) continue;
+      const t = byKey.get(n.k);
+      if (!t) continue;                                    // 카탈로그에 없는 선언 — toolCoverage 테스트(서버)가 다룬다
+      if (t.adminOnly !== true) bad.push(`${n.k} — 선언 '${n.why}' 인데 카탈로그에 adminOnly:true 가 없다`);
+    }
+    expect(bad).toEqual([]);
+  });
+  it('첫 게이트가 requirePerm/insights 권한인 도구는 카탈로그가 같은 perm 이거나 더 좁은 adminOnly', () => {
+    const bad = [];
+    for (const n of other) {
+      const g = firstGate(n.why);
+      if (!g) continue;
+      const perm = g.gate.match(/requirePerm\('([^']+)'\)/)?.[1] || (/insights 권한/.test(g.gate) ? 'insights' : null);
+      if (!perm) continue;
+      const t = byKey.get(n.k);
+      if (!t) continue;
+      if (t.perm !== perm && t.adminOnly !== true) bad.push(`${n.k} — 주 API 가 ${perm} 권한인데 카탈로그 perm=${t.perm || '(없음)'}`);
+    }
+    expect(bad).toEqual([]);
+  });
+  it('선언의 첫 경로가 와일드카드 없는 GET 이면 docs/API.md 의 게이트도 역할 admin 이다(선언이 사실인지)', () => {
+    const bad = [];
+    for (const n of other) {
+      const g = firstGate(n.why);
+      if (!g || !/\badminOnly\b/.test(g.gate) || /requirePerm|권한/.test(g.gate)) continue;
+      if (!/^\/api\/[\w/-]+$/.test(g.path)) continue;    // 와일드카드·설명 문장은 건너뛴다
+      const gate = gates.get(`GET ${g.path}`);
+      if (gate == null) continue;                          // GET 이 없는 경로(POST 전용 등)
+      if (!/역할 `admin`/.test(gate)) bad.push(`${n.k} — ${g.path} 게이트 '${gate}'`);
+    }
+    expect(bad).toEqual([]);
+  });
+  it('예외 목록의 키는 실제 카탈로그·선언에 있다(유령 예외 금지)', () => {
+    for (const k of Object.keys(CATALOG_GATE_EXCEPTIONS)) {
+      expect(byKey.has(k), k).toBe(true);
+      expect(notes.some((n) => n.k === k), k).toBe(true);
+    }
   });
 });
 

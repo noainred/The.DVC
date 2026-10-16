@@ -195,3 +195,72 @@ describe('스윕 — await delJson/putJson/patchJson/sendJson 의 반환값을 �
     expect(probe("x.then(() => putJson('/x'))")).toBe(0); // 한계 — await 가 아닌 모양은 보지 않는다
   });
 });
+
+describe('스윕 — 반환값을 받아 놓고 ok·requireChanged 를 보지 않는 sendJson 계열(v2.742 WEB-02 유형)', () => {
+  // 위 스윕은 '반환값을 버린 호출' 만 센다. v2.742 감사(WEB-02)에서 메일 설정 2화면·폴더 사용량 설정이 `const r = await sendJson(…)` 로
+  // **받기는 했지만** r.ok 를 보지 않고 '저장되었습니다' 를 썼다(서버는 400 {ok:false, reason} 으로 저장을 거부했다 — 메일 쪽은 입력한
+  // 비밀번호 칸까지 비웠다). 그 모양을 센다: `const|let X = await (put|patch|del|send)Json(` 뒤 같은 함수 안에서 X 의 .ok/.error,
+  // requireChanged·changeFailText 같은 판정 함수(이름에 Outcome·FailText·Changed·Verdict), 또는 !X 를 보지 않는 것.
+  // ⚠ 허용 목록은 v2.742 조사 시점의 잔존 그대로다 — 감사 WEB 축이 서버 라우트와 대조해 '언제나 ok 이거나 오류를 던진다' 고 본 것이고
+  //   이 그룹이 하나씩 다시 확인하지는 않았다(정직 기록). 고쳤으면 여기서 줄일 것(개수가 글자 그대로 같아야 한다).
+  //   한계: 검사 창은 그 줄부터 25줄 · 같은 이름 재선언 · 다음 async 처리기 시작 전까지다. postJson 은 보지 않는다(409 만 던지지 않고
+  //   호출부가 100곳이 넘는다 — WEB-03 두 곳은 audit2742l 이 따로 고정한다).
+  const ALLOW2 = {
+    'views/AnomalyDetection.jsx': 1, 'views/GpuGuestSettings.jsx': 1, 'views/GpuSettings.jsx': 1, 'views/Insights.jsx': 1,
+    'views/LoginFails.jsx': 1, 'views/MetricsSettings.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
+    'views/ToolsReports.jsx': 1, 'views/tools/BmUsage.jsx': 2, 'views/tools/CvpTool.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,
+    'views/tools/LinkCheck.jsx': 1,
+  };
+  const walk2 = (d, out = []) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk2(p, out); else if (/\.(js|jsx)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  /** 한 파일(주석 제거 후 줄 배열)에서 확인 없이 쓰인 할당 수. */
+  const uncheckedIn = (lines) => {
+    let n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const re = /\b(?:const|let)\s+(\w+)\s*=\s*await\s+(?:delJson|putJson|patchJson|sendJson)\s*\(/g; let m;
+      while ((m = re.exec(lines[i]))) {
+        const name = m[1];
+        let end = Math.min(lines.length, i + 25);
+        for (let j = i + 1; j < end; j++) {
+          if (new RegExp(`\\b(?:const|let)\\s+${name}\\s*=`).test(lines[j]) || /^\s{0,4}(?:const|let)\s+\w+\s*=\s*async\b|^\s{0,4}(?:async\s+)?function\b/.test(lines[j])) { end = j; break; }
+        }
+        const win = lines.slice(i, end).join('\n').slice(m.index + m[0].length);
+        const checked = new RegExp(`\\b${name}\\??\\.(ok|error)\\b|\\b\\w*(?:Outcome|FailText|Changed|Verdict)\\w*\\([^)]*\\b${name}\\b|!\\s*${name}\\b`).test(win);
+        if (!checked) n += 1;
+      }
+    }
+    return n;
+  };
+  const found2 = {};
+  for (const f of walk2(WEB_SRC)) {
+    const rel = path.relative(WEB_SRC, f).split(path.sep).join('/');
+    if (/\.test\.(js|jsx)$/.test(rel) || rel === 'api.js' || rel.startsWith('test/')) continue;
+    const n = uncheckedIn(stripComments(fs.readFileSync(f, 'utf8')).split('\n'));
+    if (n) found2[rel] = n;
+  }
+  it('검출 결과가 허용 목록과 글자 그대로 같다(새 호출 0 · 고친 것은 목록에서 뺄 것)', () => {
+    expect(found2).toEqual(ALLOW2);
+  });
+  it('WEB-02 세 화면은 0 이고 허용 목록에도 없다(되돌리면 여기서 잡힌다)', () => {
+    for (const k of ['views/MailSettings.jsx', 'views/tools/MailDiag.jsx', 'views/DirUsageSettings.jsx']) {
+      expect(found2[k], k).toBeUndefined();
+      expect(ALLOW2[k], k).toBeUndefined();
+    }
+  });
+  it('검출기 자체 검증 — 판정하는 모양은 세지 않고 받기만 한 모양은 센다', () => {
+    const p = (t) => uncheckedIn(t.split('\n'));
+    expect(p("const r = await sendJson('/x', 'PUT', b);\nsetMsg('저장되었습니다.');")).toBe(1);
+    expect(p("const r = await putJson('/x', b);\nif (r?.ok === false) setMsg(r.reason);")).toBe(0);
+    expect(p("const r = requireChanged(await putJson('/x', b));")).toBe(0);
+    expect(p("const r = await sendJson('/x', 'PUT', s);\nconst o = settingsSaveOutcome(s, r);")).toBe(0);
+    expect(p("const r = await putJson('/x', b);\nconst why = changeFailText(r);")).toBe(0);
+    expect(p("const r = await putJson('/x', b); setCfg(r);")).toBe(1);       // 상태로 넣기만 하는 것은 판정이 아니다
+    // 다음 처리기의 같은 이름 r 을 이 호출의 판정으로 읽지 않는다(창이 재선언에서 멈춘다)
+    expect(p("const r = await putJson('/x', b);\nsetMsg('ok');\nconst r = await postJson('/y');\nsetMsg(r.ok ? 'a' : 'b');")).toBe(1);
+  });
+});

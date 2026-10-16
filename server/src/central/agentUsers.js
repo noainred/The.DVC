@@ -34,9 +34,42 @@ let byAgent = Object.create(null); // agent -> { at, users: [...] }
 //   답해 엣지가 관리 계정(managed)을 전부 지우지 않게. 다음 저장이 성공하면 풀린다.
 let _loadError = null;
 export function registryLoadError() { return _loadError; }
+/**
+ * v2.742(LEFT-01 — 재현): 대소문자만 다른 중복 키를 하나로 합친다(순수). 예전 쓰기(upsertAgentUser·removeAgentUser)는 읽기와 달리
+ *   **글자 그대로** 키를 써서, 'edge-a' 에 배포된 사용자를 'Edge-A' 이름으로 추가하면 그 사용자 하나만 든 **새 목록**이 생겼다 — 'Edge-A'
+ *   엣지는 그 목록을 받아(정확히 같은 키가 먼저다) 나머지 관리 계정(managed)을 지웠고, 'Edge-A' 이름의 삭제는 '없는 agent' 로 실패했다.
+ *   이제 쓰기도 기존 키에 쓰고, 이미 생긴 중복은 로드 때 **가장 최근(at) 키**로 합친다 — 사용자는 합집합이고 같은 ID 는 최근 목록이 이긴다
+ *   (어느 쪽 목록에서도 사람이 지운 적 없는 계정을 엣지에서 지우지 않게). 합친 사실은 콘솔에 남긴다. 파일은 다음 저장 때 다시 쓰인다.
+ * @returns {{ map: object, merged: Array<{kept:string, dropped:string[]}> }}
+ */
+export function foldCaseDuplicateAgentUsers(map) {
+  const src = map && typeof map === 'object' ? map : {};
+  const groups = new Map();
+  for (const k of Object.keys(src)) {
+    const lo = k.toLowerCase(); // agentKeyOf 와 같은 비교(소문자)
+    if (!groups.has(lo)) groups.set(lo, []);
+    groups.get(lo).push(k);
+  }
+  const out = Object.create(null);
+  const merged = [];
+  for (const keys of groups.values()) {
+    if (keys.length === 1) { out[keys[0]] = src[keys[0]]; continue; }
+    const at = (k) => Number(src[k]?.at) || 0;
+    const sorted = [...keys].sort((x, y) => at(y) - at(x) || (x < y ? -1 : x > y ? 1 : 0));
+    const byName = new Map();
+    // 오래된 것부터 넣고 최근 것이 덮는다 — 같은 ID 면 최근 목록의 값.
+    for (const k of [...sorted].reverse()) for (const u of (Array.isArray(src[k]?.users) ? src[k].users : [])) if (u && u.username) byName.set(u.username, u);
+    out[sorted[0]] = { at: at(sorted[0]), users: [...byName.values()] };
+    merged.push({ kept: sorted[0], dropped: sorted.slice(1) });
+  }
+  return { map: out, merged };
+}
 try {
-  if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
-  else {
+  if (fs.existsSync(FILE)) {
+    const folded = foldCaseDuplicateAgentUsers(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+    byAgent = Object.assign(Object.create(null), folded.map);
+    for (const m of folded.merged) console.warn(`[central] central-agent-users.json: 대소문자만 다른 엣지 이름 ${[m.kept, ...m.dropped].join(', ')} 의 배포 사용자를 ${m.kept} 하나로 합쳤습니다(사용자 합집합 · 같은 ID 는 최근 목록). 배포 사용자 화면에서 확인하세요.`);
+  } else {
     const base = path.basename(FILE) + '.corrupt.';
     const hit = fs.readdirSync(path.dirname(FILE)).filter((n) => n.startsWith(base)).sort().pop();
     if (hit) _loadError = { at: Date.now(), reason: `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` };
@@ -86,7 +119,9 @@ export function upsertAgentUser(agent, { username, name, role = 'viewer', passwo
     if (typeof password !== 'string') return { ok: false, reason: '비밀번호 형식 오류' };
     if (password.length < 8 || password.length > 128) return { ok: false, reason: '비밀번호는 8~128자여야 합니다.' };
   }
-  const entry = byAgent[a] || { at: 0, users: [] };
+  // v2.742(LEFT-01): 읽기(getAgentUsers)와 같은 규칙으로 기존 키에 쓴다 — 대소문자만 다른 이름이 새 목록을 만들지 않게.
+  const k = agentKeyOf(byAgent, a) ?? a;
+  const entry = byAgent[k] || { at: 0, users: [] };
   const users = entry.users || [];
   const cur = users.find((u) => u.username === username);
   if (cur) {
@@ -97,14 +132,16 @@ export function upsertAgentUser(agent, { username, name, role = 'viewer', passwo
     if (password) u.passwordHash = hashPassword(password);
     users.push(u);
   }
-  byAgent[a] = { at: Date.now(), users };
+  byAgent[k] = { at: Date.now(), users };
   persist();
   return { ok: true };
 }
 
 /** 여러 대상(엣지들 또는 '*')에 같은 사용자를 한 번에 배포. 반환 { ok, applied:[], failed:[] }. */
 export function upsertAgentUsersBulk(targets, spec) {
-  const list = Array.isArray(targets) ? [...new Set(targets.map(cleanAgent).filter(Boolean))] : [];
+  // v2.742(LEFT-01): 대소문자만 다른 대상은 같은 엣지다 — 처음 나온 표기 하나로 줄인다(두 번 '적용됨' 으로 보고하지 않게).
+  const seen = new Set();
+  const list = Array.isArray(targets) ? targets.map(cleanAgent).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase())) : [];
   if (!list.length) return { ok: false, reason: '대상이 없습니다.' };
   const applied = []; const failed = [];
   for (const t of list) {
@@ -117,7 +154,8 @@ export function upsertAgentUsersBulk(targets, spec) {
 /** 사용자 제거(다음 pull에 엣지에서도 삭제됨). */
 export function removeAgentUser(agent, username) {
   const a = cleanAgent(agent);
-  const entry = byAgent[a];
+  const k = a ? agentKeyOf(byAgent, a) : null; // v2.742(LEFT-01): 'Edge-A' 로도 'edge-a' 목록에서 지운다
+  const entry = k != null ? byAgent[k] : null;
   if (!entry) return { ok: false, reason: '없는 agent' };
   const before = (entry.users || []).length;
   entry.users = (entry.users || []).filter((u) => u.username !== String(username || '').trim());

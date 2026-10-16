@@ -135,8 +135,11 @@ export const CATALOG_RULES = [
     meaning: "결과 파일 다운로드 후보 호스트에 HTTP 응답조차 받지 못했습니다(시한 초과·연결 거부). 같은 호스트가 반복되면 이 수집 노드에서 그 ESXi 의 443 포트에 닿지 않습니다.",
     action: "반복되는 호스트(엔티티)를 확인해 수집 노드 → ESXi 관리 IP 443 방화벽을 여세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
+  // v2.742(INJPKG-06): 예전 re "(?<!✗.*)(\\S+) 수집 실패: " 는 길이 제한 없는 뒤보기라 위치마다 줄 앞까지 거꾸로 훑어 줄 길이에
+  //   대해 O(n²) 였다. 같은 뜻(그 줄에서 토큰 앞에 ✗ 가 없음 · 가장 왼쪽 토큰)을 줄 머리에 고정한 앞쪽 접두로 바꿨다 — 캡처(그룹 1)는
+  //   예전과 같고 시작 위치 하나만 시도한다. 줄바꿈 뒤 줄도 예전처럼 본다(. 이 줄바꿈을 넘지 않던 것과 같은 경계).
   C({ id: "gpu-guest-vc-collect-fail", tag: "gpu-guest", severity: "medium", category: "stability", entity: 1, entityLabel: "vCenter id",
-    re: "(?<!✗.*)(\\S+) 수집 실패: ",
+    re: "^(?:[^\\n\\r\\u2028\\u2029]*[\\n\\r\\u2028\\u2029])*?[^✗\\n\\r\\u2028\\u2029]*?(\\S+) 수집 실패: ",
     src: "server/src/gpu/poller.js", probe: "수집 실패:",
     sample: "[gpu-guest] vc-a 수집 실패: Cannot read properties of undefined (reading 'hosts')",
     title: "그 vCenter 의 GPU 게스트 수집 한 주기가 VM 별 처리 밖에서 예외로 끝났습니다",

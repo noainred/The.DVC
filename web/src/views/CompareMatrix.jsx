@@ -9,6 +9,7 @@ import {
   cellText, cellColor, metricStats, sortRows, vcenterRows, truncatedNote, cellTitle, sparsityNote,
 } from './compareMatrixText.js';
 import Select from '../components/Select.jsx';
+import { hostCapShort, hostCapFootnote, hostCapTotal, HOST_CAP_METRICS } from './hostCapacityText.js'; // v2.742(LEFT-06)
 
 /**
  * CompareMatrix.jsx — 비교 매트릭스 모달(v2.499).
@@ -127,8 +128,15 @@ export default function CompareMatrix({ onClose, initialAxis = 'cluster' }) {
     const value = cell ? cell[mk] : null;
     const stats = perRowStats ? metricStats([row], mk) : tableStats;
     const color = cellColor(value, mt, stats);
-    return { value, mt, color, title: cellTitle({ rowName: row.name, vcName: (built.vcenters.find((v) => v.id === vcId) || {}).name || vcId, metric: mt, value, cell }) };
+    const title = cellTitle({ rowName: row.name, vcName: (built.vcenters.find((v) => v.id === vcId) || {}).name || vcId, metric: mt, value, cell });
+    // v2.742(LEFT-06): vCenter 축의 CPU·메모리 총량은 용량을 못 읽은 호스트(REST 폴백)를 뺀 부분 합이다 — 칸에 ' *' 표지,
+    //   툴팁에 개수, 이유는 위 설명에 한 번. (클러스터 축은 서버 응답의 capacityUnknown 을 cellTitle 이 이미 말한다.)
+    const capN = axis === 'vcenter' && HOST_CAP_METRICS.includes(mk) && value != null
+      ? (vcList || []).find((v) => v.id === vcId)?.metrics?.hostsCapacityUnknown : null;
+    const capShort = hostCapShort(capN);
+    return { value, mt, color, capMark: !!capShort, title: capShort ? `${title}\n${capShort}` : title };
   };
+  const capFoot = axis === 'vcenter' ? hostCapFootnote(hostCapTotal(vcList)) : null;
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -162,6 +170,7 @@ export default function CompareMatrix({ onClose, initialAxis = 'cluster' }) {
           {axis !== 'vcenter' && <> 셀 색은 <b>이 표 안에서의 상대 위치</b>이며 사용률 지표는 90%↑ 빨강·75%↑ 주황을 함께 적용합니다.
             그 vCenter 에 그 {axisLabel} 이 없으면 <b>—</b> 로 두고 0 으로 채우지 않습니다.</>}
           {axis === 'vcenter' && <> 행마다 지표가 다르므로 색은 <b>그 행 안에서의</b> 상대 위치입니다. 규모 지표(호스트·VM·총량·전력)는 색을 칠하지 않습니다.</>}
+          {capFoot && <span data-hostcap-note=""> * {capFoot}</span>}
           {note && <> {note}</>}
           {srv?.source === 'mock' && <> · 데모(mock) 데이터입니다.</>}
         </div>
@@ -208,7 +217,7 @@ export default function CompareMatrix({ onClose, initialAxis = 'cluster' }) {
                       return (
                         <td key={v.id} title={c.title}
                           style={{ textAlign: 'right', background: c.color ? HEAT[c.color] : undefined, color: c.color ? TEXT[c.color] : undefined, fontWeight: c.color === 'red' ? 700 : 500, whiteSpace: 'nowrap' }}>
-                          {cellText(c.value, c.mt)}
+                          {cellText(c.value, c.mt)}{c.capMark ? ' *' : ''}
                         </td>
                       );
                     })}

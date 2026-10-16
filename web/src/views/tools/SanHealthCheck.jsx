@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { hostText } from './addressHiddenText.js'; // v2.599: 비-admin 에는 관리 주소가 가려져 온다 — 빈 칸 대신 '—'
 import { fetchJson, postJson, delJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js'; // v2.742(WEB-03): postJson 은 409 를 던지지 않는다
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { STATUS_LABEL, STATUS_MARK, stageLabel, stamp, deviceVerdict, allSummaryText,
@@ -328,7 +329,9 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
   const saveBaseline = async () => {
     if (!window.confirm('현재 수집된 포트 에러 카운터를 이번 달 기준선으로 저장할까요?\n\n· 스위치의 카운터는 건드리지 않습니다(portstatsclear 를 실행하지 않습니다).\n· 다음 점검부터 이 시점 이후 신규 에러만 가려서 보여줍니다.')) return;
     setBusy(true); setMsg('');
-    try { const r = await postJson(`/tools/sanswitch/devices/${deviceId}/err-baseline`, {});
+    // v2.742(WEB-03): 마지막 수집이 실패한 스냅샷이면 서버가 409 {ok:false, reason} 을 준다 — postJson 은 409 를 던지지 않으므로
+    //   requireChanged 로 거부를 실패로 바꾼다(예전에는 '기준선 저장 완료 — 포트 0개' 라고 말했다. 저장되지 않았다).
+    try { const r = requireChanged(await postJson(`/tools/sanswitch/devices/${deviceId}/err-baseline`, {}));
       setMsg(`기준선 저장 완료 — 포트 ${r.baseline?.portCount ?? 0}개`); await load(); }
     catch (e) { setMsg(`기준선 저장 실패: ${e.message}`); }
     finally { setBusy(false); }

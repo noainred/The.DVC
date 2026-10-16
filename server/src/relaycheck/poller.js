@@ -9,7 +9,7 @@ import { loadCollectors } from '../collector/registry.js';
 import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로지(v2.431) — 입력한 사이트도 점검 대상
 import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { notify } from '../alerts.js';
+import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
 import { demoRelayCheck, isDemoHost } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 호스트는 접속하지 않고 합성
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)

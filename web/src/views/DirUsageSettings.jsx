@@ -3,6 +3,7 @@ import { fetchJson, postJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import { requireChanged } from './changeResult.js'; // v2.742(WEB-02): 400 본문을 '저장되었습니다' 로 읽지 않는다
 import Select from '../components/Select.jsx';
 
 /**
@@ -76,7 +77,9 @@ export default function DirUsageSettings() {
         retentionDays: blankOr(retentionDays),
         mail: { ...mail, to: splitAddr(mail.to), cc: splitAddr(mail.cc) },
       };
-      const r = await sendJson('/admin/dir-usage', 'PUT', body);
+      // v2.742(WEB-02): 경로 없는 대상 등으로 서버가 400 {ok:false, reason} 을 주면 requireChanged 가 던진다 — 예전에는
+      //   그 본문을 받고도 '저장되었습니다' 라고 말했다(저장되지 않았다). 편집 중인 대상 목록은 그대로 남는다.
+      const r = requireChanged(await sendJson('/admin/dir-usage', 'PUT', body));
       const sentDays = body.retentionDays;
       const keptDays = r?.settings?.retentionDays;
       // 0 이하는 서버가 '미지정' 으로 보고 기존 값을 유지한다(v2.605) — 조용히 무시하지 않고 말한다.

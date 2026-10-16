@@ -54,7 +54,18 @@ export const SERVICE_DOWN_TEXT = {
  * @returns {{title, sub, act, esc, autoReconnect:boolean}}
  */
 export function headlineFor(kind) {
-  if (kind === 'network' || kind === 'timeout') {
+  // v2.742(WEB-01): 시한 초과는 '연결 자체가 끊긴 것' 이 아닐 수 있다 — 서버는 살아 있는데 그 요청 하나가 늦은 경우가 흔하다.
+  //   그래서 헤드라인을 '응답 지연' 으로 따로 두고(재시작 가능성은 함께 말한다), 서버 확인 결과(reconnectStatusText)가 뒤를 잇는다.
+  if (kind === 'timeout') {
+    return {
+      title: '응답이 늦어지고 있습니다(재시작 중일 수 있습니다)',
+      sub: '요청이 제한 시간 안에 끝나지 않았습니다. 포탈이 업데이트 후 재시작 중이거나, 그 요청이 오래 걸리는 중일 수 있습니다. 서버가 응답하는지 확인하고 있습니다.',
+      act: '서버 응답을 확인하고 있습니다 — 재시작 중이었다면 준비되는 대로 자동으로 다시 연결합니다.',
+      esc: '1~2분 넘게 계속되면 관리자에게 문의해 주세요.',
+      autoReconnect: true,
+    };
+  }
+  if (kind === 'network') {
     return {
       title: '업데이트 후 재시작 중입니다',
       sub: '새 버전을 적용하고 서비스를 다시 시작하는 중입니다. 데이터는 안전하며, 준비되면 이 화면이 자동으로 다시 연결합니다.',
@@ -64,6 +75,59 @@ export function headlineFor(kind) {
     };
   }
   return { ...SERVICE_DOWN_TEXT, autoReconnect: false };
+}
+
+/**
+ * v2.742(WEB-01): 자동 재연결 확인 요청의 결과 분류(순수).
+ *
+ * 확인 요청은 '포탈 프로세스가 HTTP 로 답하는가' 만 본다. 401·403 도 **서버가 응답한 것**이다 — 토큰이 없거나 만료됐을 뿐
+ * 포탈은 살아 있다. 예전에는 토큰 없이 /api/health 를 묻고 `res.ok` 만 살았다고 봐서, 인증을 켠 포탈(기본값)에서는 확인 요청이
+ * 언제나 401 이라 서버가 살아나도 재연결이 끝나지 않았다. 502·503·504 는 앞단 프록시가 포탈에 닿지 못한 것(재시작 중)이고,
+ * 500 은 포탈이 오류를 낸 것이라 '준비됨' 으로 보지 않는다(새로고침해도 같은 오류다). 연결 실패·시한은 down.
+ * @param {{status?:number|null, error?:unknown}} r
+ * @returns {'alive'|'down'}
+ */
+export const PROBE_ALIVE_STATUSES = Object.freeze([401, 403]);
+export function probeOutcome(r = {}) {
+  if (r?.error) return 'down';
+  const st = Number(r?.status);
+  if (!Number.isFinite(st) || st <= 0) return 'down';
+  if (st >= 200 && st < 300) return 'alive';
+  if (PROBE_ALIVE_STATUSES.includes(st)) return 'alive';
+  return 'down';
+}
+
+/** 재연결 상태의 시작값 — phase: 'probing'(확인 중) | 'reload'(새로고침할 차례) | 'alive'(처음부터 살아 있었음). */
+export const RECONNECT_INITIAL = Object.freeze({ phase: 'probing', sawDown: false, probes: 0 });
+
+/**
+ * v2.742(WEB-01): 확인 결과 한 번을 받아 다음 상태를 정한다(순수 — 화면 컴포넌트는 이것만 따른다).
+ * 새로고침은 **확인 요청이 한 번 이상 연결 불가로 실패했다가 응답으로 바뀔 때만** 한다. 처음부터 살아 있었으면(그 요청 하나만
+ * 실패했거나 늦었던 것) 새로고침하지 않고 'alive' 로 멈춘다 — 예전에는 인증을 끈 포탈에서 확인 요청이 늘 200 이라
+ * 엔드포인트 하나가 실패하기만 해도 마운트하자마자 새로고침했고, 같은 실패가 나면 새로고침이 반복됐다.
+ * 'reload'·'alive' 는 끝 상태다(다시 바뀌지 않는다).
+ */
+export function reconnectStep(state, outcome) {
+  const s = state && typeof state === 'object' ? state : RECONNECT_INITIAL;
+  if (s.phase !== 'probing') return s;
+  const probes = (s.probes || 0) + 1;
+  if (outcome === 'down') return { phase: 'probing', sawDown: true, probes };
+  if (outcome === 'alive') return { phase: s.sawDown ? 'reload' : 'alive', sawDown: !!s.sawDown, probes };
+  return { ...s, probes };
+}
+
+/**
+ * 재연결 표시 줄 문구(순수). probing 은 경과 초와 함께, alive 는 '서버는 응답한다 — 다시 시도' 를 말한다.
+ * @returns {{text:string, spinning:boolean}}
+ */
+export function reconnectStatusText(state, elapsedSec = 0) {
+  const phase = state?.phase || 'probing';
+  if (phase === 'alive') {
+    return { spinning: false, text: '서버는 응답하고 있습니다 — 이 요청만 실패했거나 늦었습니다. 아래 다시 시도를 눌러 주세요.' };
+  }
+  if (phase === 'reload') return { spinning: true, text: '서버가 다시 응답합니다 — 화면을 새로 불러옵니다.' };
+  const sec = Number.isFinite(Number(elapsedSec)) ? Math.max(0, Math.floor(Number(elapsedSec))) : 0;
+  return { spinning: true, text: state?.sawDown ? `자동 재연결 시도 중 · ${sec}초 경과` : `서버 응답 확인 중 · ${sec}초 경과` };
 }
 
 const KIND_LABEL = {

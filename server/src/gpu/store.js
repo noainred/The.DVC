@@ -8,6 +8,7 @@ let byHost = new Map(); // hostId -> { utilPct, at, source:'guest' }
 let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalMB, tempC, gpus, at, host, vcenterId }
 
 import { numOrNull } from '../util/numOrNull.js';
+import { loadGpuGuestSettings } from './settings.js'; // v2.742(VC-01): 독립 GC 가 실행할 때 폴 주기를 읽는다
 
 /**
  * v2.600(CEN2600-01 2차 방어): 사용률은 0~100 유한수만 싣는다. 예전에는 원소 값을 그대로 저장해 객체 하나가 지표 샘플러의
@@ -99,6 +100,27 @@ export function _resetGuestGpuForTest() { byHost.clear(); byVm.clear(); }
 // 독립 GC — 로컬 GPU 폴러가 꺼진 중앙(오버레이가 POST /api/central/gpu-guest-data 로만 들어오는)
 // 배치에서는 poller의 pruneGuestGpu가 실행되지 않아 삭제된 VM의 stale 항목이 영구 누적된다.
 // 폴러 상태와 무관하게 오래된 항목을 만료시켜 byVm/byHost Map의 무한 증가를 막는다.
-const GC_TTL_MS = Number(process.env.GUEST_GPU_TTL_MS) || 30 * 60_000; // 30분 무갱신 시 만료
-const _gcTimer = setInterval(() => { try { pruneGuestGpu(GC_TTL_MS); } catch { /* best effort */ } }, 5 * 60_000);
+/*
+ * v2.742(VC-01 — 재현): 예전 TTL 은 모듈 로드 때 굳힌 **30분 고정**이었다. 그런데 폴 주기는 설정에서 최대 24시간까지 허용된다
+ *   (settings.js — 10초~86,400초). 주기를 60분으로 두면 수집 35분 뒤 독립 GC 가 오버레이를 비워, 다음 수집까지 호스트 요약의
+ *   사용률·온도·메모리가 null 이 되고 원인 판정은 근거 없는 'unknown(완료)' 가 됐다(값은 멀쩡히 수집되고 있는데 화면이 비었다).
+ *   폴러 자신의 정리(poller.js — 주기 × 3 + 30초)·지표 샘플러의 신선도(sampler.js — 주기 × 3)와도 어긋났다.
+ *   이제 GC 가 **돌 때마다 설정을 읽어** max(기본 30분, 주기 × 3 + 30초) 로 정한다(주기를 바꾸면 다음 GC 부터 바로 먹는다 —
+ *   v2.409 '주기를 모듈 로드 때 굳히지 말 것' 규약). 설정을 못 읽으면 기본값만 쓴다(넓히지 않는다 — 추측 금지).
+ */
+export const GUEST_GPU_TTL_BASE_MS = envInt(process.env.GUEST_GPU_TTL_MS, 30 * 60_000); // 30분 무갱신 시 만료(하한)
+/** 독립 GC 의 만료 시간(순수) — max(기본, 폴 주기 × 3 + 30초). 주기를 모르면 기본값. */
+export function guestGpuTtlMs(pollIntervalMs, baseMs = GUEST_GPU_TTL_BASE_MS) {
+  const p = numOrNull(pollIntervalMs);
+  return Math.max(baseMs, p != null && p > 0 ? p * 3 + 30_000 : 0);
+}
+/** 독립 GC 한 번 — 실행할 때 설정을 읽는다. 반환: 이번에 쓴 TTL(ms). */
+export function runGuestGpuGc() {
+  let poll = null;
+  try { poll = loadGpuGuestSettings()?.pollIntervalMs ?? null; } catch { poll = null; }
+  const ttl = guestGpuTtlMs(poll);
+  pruneGuestGpu(ttl);
+  return ttl;
+}
+const _gcTimer = setInterval(() => { try { runGuestGpuGc(); } catch { /* best effort */ } }, 5 * 60_000);
 _gcTimer.unref?.();

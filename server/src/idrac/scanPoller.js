@@ -148,7 +148,9 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (partial) console.warn(`[idrac-scan] ${e.datacenterId}: 부분 결과라 법인 교체(replace-datacenter) 대신 병합(merge)으로 등록합니다 — ${partialReasons.join(' · ')}`);
   if (r.found.length) {
-    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo });
+    // v2.742(감사 DEV-01): 엔트리 id·대역을 넘긴다 — 교체(replace-datacenter)는 **이 엔트리가 등록한 서버만** 지운다(같은 법인의 다른
+    //   서비스 엔트리 등록·수동 등록은 남긴다). 예전에는 법인 전체를 지워 엔트리 둘이 서로의 등록을 매 주기 지웠다.
+    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo, scanRangeId: e.id || '', scanRanges: e.ranges });
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
   }
   // v2.591(감사 C5): 무응답·인증실패·소요를 싣는다 — 위임 회신(central/idracScanJobs.js)과 같은 모양. 예전에는 빠져

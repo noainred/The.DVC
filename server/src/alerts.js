@@ -345,6 +345,65 @@ export function shouldSuppress(sentMap, key, now, windowMs) {
 }
 const _sentAt = new Map(); // key -> lastSentTs (전역 억제 창)
 
+/*
+ * v2.742(감사 TIMING-01 — 재현): **발송 대기열 — 한 번에 하나씩 보낸다.**
+ *   예전 엔진은 발생한 알림마다 notify() 를 await 없이 띄웠다. 데이터스토어 40개가 한 틱에 임계를 넘으면 SMTP 로그인이
+ *   40개 동시에 나갔고, 메일 인증 정지(mail/service.js — v2.591 F4)는 첫 535 응답이 돌아온 **뒤에야** 세워져 나머지가 전부
+ *   검사를 통과했다(재현: 잘못된 SMTP 비밀번호로 한 틱에 로그인 40회 — 계정 잠금 경로). 웹훅도 같은 순간 동시 40 POST 였다.
+ *   partfault/notify.js 가 v2.547 에 적어 둔 '그 실수를 반복하지 않는다' 의 엔진판이다.
+ *   · 엔진과 결과를 기다리지 않는 호출부(relaycheck·로그인 실패 감시·게스트 조사·RMA 점검)는 이 대기열로 보낸다.
+ *     결과를 기다리는 호출부(partfault·PDU·CVP·bmusage·svcmon)는 이미 하나씩 보내므로 notify() 를 그대로 부른다
+ *     (대기열 뒤에 줄 세우면 그 폴러가 남의 발송 시간만큼 멈춘다).
+ *   · 상한(NOTIFY_QUEUE_MAX)을 넘으면 버리지 않고 'queue-full' 로 답한다 — 엔진은 그것을 실패로 보고 짧게 다시 시도하고,
+ *     버린 개수는 alertStatus().queue 와 콘솔이 말한다(조용한 상한 금지).
+ */
+export const NOTIFY_QUEUE_MAX = 1000;
+const _nq = [];
+let _nqDrain = null;
+const _nqStats = { done: 0, dropped: 0, lastDropAt: 0, maxPending: 0 };
+async function drainNotifyQueue() {
+  while (_nq.length) {
+    const it = _nq.shift();
+    let res;
+    try { res = await notify(it.alert, it.cfg); } catch (e) { res = [`queue:err ${String(e?.message || e).slice(0, 120)}`]; }
+    _nqStats.done += 1;
+    try { it.resolve(res); } catch { /* */ }
+  }
+}
+/** 대기열로 발송 — 결과(채널별 문자열 배열)는 실제로 보낸 뒤에 돌려준다. 던지지 않는다. */
+export function enqueueNotify(alert, cfg) {
+  return new Promise((resolve) => {
+    if (_nq.length >= NOTIFY_QUEUE_MAX) {
+      _nqStats.dropped += 1;
+      const now = Date.now();
+      if (now - _nqStats.lastDropAt > 60_000) console.warn(`[alerts] 발송 대기열이 가득 찼습니다(${NOTIFY_QUEUE_MAX}건) — '${String(alert?.key || '')}' 를 이번에는 보내지 않습니다(누적 ${_nqStats.dropped}건)`);
+      _nqStats.lastDropAt = now;
+      resolve(['queue-full']);
+      return;
+    }
+    _nq.push({ alert, cfg, resolve });
+    _nqStats.maxPending = Math.max(_nqStats.maxPending, _nq.length);
+    if (!_nqDrain) _nqDrain = drainNotifyQueue().finally(() => { _nqDrain = null; });
+  });
+}
+export function notifyQueueStatus() { return { pending: _nq.length, sending: !!_nqDrain, ..._nqStats, max: NOTIFY_QUEUE_MAX }; }
+/** 테스트용 — 대기열이 빌 때까지 기다린다. */
+export async function _drainNotifyQueueForTest() { while (_nqDrain) await _nqDrain; }
+
+/**
+ * 발송 결과 판정(순수) — 'delivered'(한 채널이라도 받았다) · 'failed'(받은 채널 없이 오류가 있었다) · 'skipped'(정책으로 보내지
+ * 않았다 — 억제·메일 꺼짐·속도 제한·인증 정지 등). 엔진은 failed 만 짧게 다시 시도한다. skipped 를 실패로 세면 인증 정지된 메일이
+ * 5분마다 '재시도' 기록을 쌓고, 억제된 것을 다시 보내려 든다.
+ */
+export function deliveryOutcome(res) {
+  const lines = Array.isArray(res) ? res.map((x) => String(x)) : [];
+  if (!lines.length) return 'skipped';
+  if (lines.some((l) => /^[a-z]+:(2\d\d|ok)\b/i.test(l))) return 'delivered';
+  if (lines.includes('queue-full')) return 'failed';
+  if (lines.some((l) => /^[a-z]+:err\b/i.test(l) || /^[a-z]+:\d{3}\b/i.test(l))) return 'failed';
+  return 'skipped';
+}
+
 export async function notify(alert, cfg = loadAlertConfig()) {
   const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
   const windowMs = Math.max(0, cfg.suppressWindowMin ?? 5) * 60_000;
@@ -421,14 +480,25 @@ const firing = new Map();   // key -> { alert, since, lastNotified }
  */
 const STATE_FILE = path.join(config.configDir, 'alerts-state.json');
 const STATE_MAX = 5000;
-let _restored = null;   // key -> { since, lastNotified } (첫 평가에서 소비)
+/*
+ * v2.742(감사 TIMING-02 — 재현): 이 맵은 **해소된 키의 발송 시각**도 들고 있는다(`resolvedAt` 표지). 예전에는 해소 루프가
+ *   firing 항목과 함께 lastNotified 를 버려, 임계 경계에서 오르내리는 지표(90%↔89%)가 쿨다운(60분)이 아니라 전역 억제 창
+ *   (5분)마다 다시 발송됐다(재현: 120분 동안 메일 24통). 이제 해소돼도 **쿨다운이 남은 동안** 발송 시각을 기억해, 그 안에 다시
+ *   발생하면 이어받는다(발생 시각은 새로 — 새 발생이다). 채널에는 '해소' 를 보내지 않으므로 받는 쪽에서 보면 계속 발생 중인 것과
+ *   같다. 쿨다운이 지난 항목은 아래 refreshState 의 정리 루프가 버린다(재시작 복원 항목과 같은 규칙).
+ */
+let _restored = null;   // key -> { since, lastNotified, resolvedAt?, retries? } (첫 평가에서 소비 · 해소 기억)
 function loadAlertState() {
   if (_restored) return _restored;
   _restored = new Map();
   try {
     const j = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     for (const [k, v] of Object.entries(j?.firing || {})) {
-      if (v && Number.isFinite(v.since)) _restored.set(k, { since: v.since, lastNotified: Number(v.lastNotified) || 0 });
+      if (v && Number.isFinite(v.since)) {
+        const e = { since: v.since, lastNotified: Number(v.lastNotified) || 0 };
+        if (Number.isFinite(v.resolvedAt)) e.resolvedAt = v.resolvedAt;
+        _restored.set(k, e);
+      }
     }
   } catch (e) {
     if (e?.code !== 'ENOENT') { preserveCorrupt(STATE_FILE, e.message); console.warn(`[alerts] 상태 파일 손상(${e.message}) — 보존 후 빈 상태로 시작`); }
@@ -441,7 +511,10 @@ function writeAlertStateNow() {
   const out = {};
   let n = 0;
   for (const [k, st] of firing) { if (n++ >= STATE_MAX) break; out[k] = { since: st.since, lastNotified: st.lastNotified || 0 }; }
-  for (const [k, r] of (_restored || new Map())) { if (n++ >= STATE_MAX) break; if (!out[k]) out[k] = { since: r.since, lastNotified: r.lastNotified || 0 }; }
+  for (const [k, r] of (_restored || new Map())) {
+    if (n++ >= STATE_MAX) break;
+    if (!out[k]) out[k] = { since: r.since, lastNotified: r.lastNotified || 0, ...(Number.isFinite(r.resolvedAt) ? { resolvedAt: r.resolvedAt } : {}) };
+  }
   try { atomicWriteFileSync(STATE_FILE, JSON.stringify({ version: 1, at: Date.now(), firing: out })); } catch (e) { console.warn(`[alerts] 상태 저장 실패: ${e.message}`); }
 }
 function saveAlertStateSoon() {
@@ -457,6 +530,49 @@ let timer = null;
 let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다운 감지용)
 
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
+
+/**
+ * v2.742(감사 TIMING-01): 발송이 **실패**하면(받은 채널 없이 오류) 쿨다운(기본 60분)을 다 기다리지 않고 짧게 다시 시도한다.
+ *   예전에는 보내기 전에 lastNotified 를 찍어 웹훅 한 번의 일시 오류로 그 알림이 한 시간 동안 사라졌다.
+ *   · 재시도는 키마다 RETRY_DELAYS_MS 길이(2번)까지 — 그 뒤는 예전처럼 쿨다운이다. 메일 인증 실패는 첫 거부에서 메일 쪽 정지가
+ *     세워지고 다음 시도는 로그인 없이 'email:skip' 으로 끝나므로(skipped — 재시도하지 않음) 재시도가 계정 잠금을 만들지 않는다.
+ *     인증 실패로 분류되지 않는 메일 오류도 시도 횟수 기반 속도 제한(mail rateLimitPerHour)과 2번 상한에 묶인다.
+ *   · 간격은 전역 억제 창보다 길게 — 같으면 재시도가 억제돼 'suppressed'(skipped)로 끝나 버린다.
+ *   · 정책상 보내지 않은 것(억제·메일 꺼짐·속도 제한·인증 정지)은 실패가 아니다 — 재시도하지 않는다(예전과 같다).
+ */
+export const RETRY_DELAYS_MS = Object.freeze([5 * 60_000, 15 * 60_000]);
+/** 다음 재시도까지의 간격(순수) — 없으면 null(쿨다운을 따른다). */
+export function retryDelayMs(attempt, cooldownMs, suppressMs = 0) {
+  const base = RETRY_DELAYS_MS[attempt];
+  if (base == null) return null;
+  const d = Math.max(base, (Number(suppressMs) || 0) + 1000);
+  return d >= cooldownMs ? null : d;
+}
+/** 발송 결과를 그 키의 기록에 반영한다. 기록이 바뀌었으면 true. */
+function noteSendOutcome(key, sentMark, res, cfg) {
+  // 지금 그 키를 들고 있는 기록에 반영한다 — 발생 중이면 firing, 발송 중에 해소됐으면 해소 기억(_restored), 해소 뒤 다시
+  //   발생했으면 발송 시각을 이어받은 새 firing 항목이다. 그 사이 다시 보냈으면(발송 시각이 다르면) 건드리지 않는다.
+  const cur = [firing.get(key), _restored && _restored.get(key)].find((x) => x && x.lastNotified === sentMark);
+  return cur ? applyOutcome(cur, res, cfg) : false;
+}
+function applyOutcome(cur, res, cfg) {
+  const outcome = deliveryOutcome(res);
+  if (outcome === 'delivered') { if (cur.retries) { cur.retries = 0; return true; } return false; }
+  if (outcome !== 'failed') return false;
+  const cooldownMs = (cfg?.cooldownMin || 60) * 60_000;
+  const d = retryDelayMs(cur.retries || 0, cooldownMs, Math.max(0, cfg?.suppressWindowMin ?? 5) * 60_000);
+  if (d == null) return false;
+  // 기준은 '보낸 시각' 이 아니라 '결과를 받은 시각' 이다 — 대기열에서 기다린 시간만큼 억제 창이 늦게 시작한다.
+  cur.lastNotified = Date.now() + d - cooldownMs;
+  cur.retries = (cur.retries || 0) + 1;
+  return true;
+}
+/** v2.742(TIMING-02): 끝난(해소·판정 보류 만료) 키의 발송 시각을 쿨다운이 남은 동안 기억한다. */
+function rememberEnded(restored, key, st, now, cooldownMs) {
+  const ln = Number(st?.lastNotified) || 0;
+  if (ln <= 0 || now - ln >= cooldownMs) return;
+  restored.set(key, { since: st.since, lastNotified: ln, resolvedAt: now, retries: st.retries || 0 });
+}
 
 let _ticking = false;   // v2.595: 재진입 가드(짧은 주기에서 평가가 겹치지 않게 — 폴러 규약)
 async function tick() {
@@ -498,16 +614,25 @@ async function refreshState(cfg, sendEnabled) {
     seen.add(a.key);
     const prev = firing.get(a.key);
     if (!prev) {
-      const r = restored.get(a.key);   // 재시작 전에 이미 발생·발송된 알림이면 그 시각을 이어받는다
-      firing.set(a.key, { alert: a, since: r ? r.since : now, lastNotified: r ? r.lastNotified : 0 });
+      // 재시작 전에 이미 발생·발송된 알림이면 그 시각을 이어받는다. v2.742(TIMING-02): 쿨다운 안에 해소됐다가 다시 발생한 키는
+      //   발송 시각만 이어받는다(발생 시각은 지금 — 새 발생이다).
+      const kept = restored.get(a.key);
+      const r = kept && Number.isFinite(kept.resolvedAt) ? { ...kept, since: now } : kept;
+      firing.set(a.key, { alert: a, since: r ? r.since : now, lastNotified: r ? r.lastNotified : 0, retries: r?.retries || 0 });
       changed = true;
     }
     const st = firing.get(a.key);
     st.alert = a;
-    if (sendEnabled && now - (st.lastNotified || 0) >= cooldownMs) {
+    // v2.742(TIMING-01): 대기열로 보낸다(한 번에 하나). 보내는 중인 키는 다시 넣지 않는다.
+    if (sendEnabled && !st.sending && now - (st.lastNotified || 0) >= cooldownMs) {
       st.lastNotified = now;
+      st.sending = true;
       changed = true;
-      notify(a, cfg).then((res) => { pushRecent({ at: new Date().toISOString(), ...a, channels: res }); }).catch(() => {});
+      const sentMark = now;
+      enqueueNotify(a, cfg).then((res) => {
+        pushRecent({ at: new Date().toISOString(), ...a, channels: res });
+        if (noteSendOutcome(a.key, sentMark, res, cfg)) saveAlertStateSoon();
+      }).catch(() => {}).finally(() => { st.sending = false; });
     }
   }
   // resolve
@@ -520,9 +645,10 @@ async function refreshState(cfg, sendEnabled) {
     if (held.has(key) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
-      firing.delete(key); changed = true; continue;
+      firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true; continue;
     }
-    firing.delete(key); changed = true; pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
+    firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
+    pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
   }
   // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라
   // 첫 평가에서 비우면 수집이 끝난 뒤 전부 다시 발송된다. 쿨다운이 지난 항목은 어차피 재발송 대상이라 버린다.
@@ -539,6 +665,7 @@ export function alertStatus() {
     firing: [...firing.values()].map((s) => ({ ...s.alert, since: new Date(s.since).toISOString() })),
     recent: recent.slice(0, 100),
     engineOn: !!timer,
+    queue: notifyQueueStatus(), // v2.742(TIMING-01): 발송 대기열(보내는 중·대기·가득 차 보내지 못한 수)
   };
 }
 

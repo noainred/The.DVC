@@ -16,6 +16,7 @@ import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
 import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
+import { requireChanged } from '../changeResult.js'; // v2.742(WEB-03): 200 {ok:false} 를 성공으로 읽지 않는다
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -103,7 +104,9 @@ export default function PduTool() {
   };
   const collectAll = async () => {
     setBusy(true);
-    try { const r = await postJson('/tools/pdu/collect-all', {}); setMsg({ ok: true, text: `수집 ${r.collected ?? 0} / 실패 ${r.failed ?? 0}${r.authStopped ? ` / 인증 실패 정지 ${r.authStopped}` : ''}` }); await load(); }
+    // v2.742(WEB-03): 주기 수집과 겹치면 서버가 200 {ok:false, reason:'이미 수집 중입니다.', running:true} 를 준다 — requireChanged 가
+    //   그 사유로 던져 실패 톤으로 보인다(예전에는 '수집 0 / 실패 0' 이라는 성공 문구였다).
+    try { const r = requireChanged(await postJson('/tools/pdu/collect-all', {})); setMsg({ ok: true, text: `수집 ${r.collected ?? 0} / 실패 ${r.failed ?? 0}${r.authStopped ? ` / 인증 실패 정지 ${r.authStopped}` : ''}` }); await load(); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
 

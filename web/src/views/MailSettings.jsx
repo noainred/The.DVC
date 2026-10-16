@@ -5,6 +5,7 @@ import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { blankOr } from './blankOr.js'; // v2.598 L2598-03: 빈 숫자 칸은 보내지 않는다
 import { mailAuthStopText } from './authSkipText.js'; // v2.591(감사 F4): SMTP 인증 실패로 자동 발송을 멈춘 사실
+import { requireChanged } from './changeResult.js'; // v2.742(WEB-02): 400 본문을 '저장되었습니다' 로 읽지 않는다
 
 /**
  * 설정 › 메일 발송(v2.454, admin 조회 / 저장·테스트는 설정 소유자).
@@ -57,12 +58,15 @@ export default function MailSettings() {
     try {
       const outKinds = {};
       for (const [id, v] of Object.entries(kinds)) outKinds[id] = { enabled: v.enabled, to: split(v.to), cc: split(v.cc) };
-      const r = await sendJson('/admin/mail', 'PUT', {
+      // v2.742(WEB-02): sendJson 은 400 을 던지지 않고 본문을 돌려준다 — 서버가 거부(SMTP 주소 없음·모르는 종류)하면
+      //   requireChanged 가 사유로 던지고 catch 가 '오류: …' 를 쓴다. 성공 문구와 비밀번호 칸 비우기는 그 뒤에만 온다
+      //   (거부됐는데 입력한 비밀번호를 지우면 다시 입력해야 한다).
+      const r = requireChanged(await sendJson('/admin/mail', 'PUT', {
         enabled, defaultTo: split(defaultTo), kinds: outKinds,
         // v2.598 L2598-03: `Number('') || 0` 은 한도 0(=제한 없음)이었다 — 빈 칸은 보내지 않는다(서버가 이전 값 유지).
         rateLimitPerHour: blankOr(rateLimit),
         smtp: { ...smtp, port: blankOr(smtp.port), timeoutMs: blankOr(smtp.timeoutMs), password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
-      });
+      }));
       setMsg('저장되었습니다.');
       setSmtp((s) => ({ ...s, password: '' }));
       if (r?.settings) {

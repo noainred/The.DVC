@@ -20,6 +20,16 @@ import { cmpVersion } from '../util/cmpVersion.js';
 export const GUEST_TEMP_MIN_EDGE = '2.650.0';
 /** 엣지 진단 보고가 이보다 오래되면 '멈춤' 으로 본다(엣지 push 주기 60초의 30배). */
 export const EDGE_REPORT_STALE_MS = 30 * 60_000;
+/**
+ * v2.742(VC-01): '멈춤' 경계를 그 엣지의 보고 주기에 맞춰 넓힌다(순수) — max(30분, 주기 × 3 + 30초).
+ *   엣지 진단은 GPU 폴 주기가 아니라 엣지 push 주기(AGENT_INVENTORY_INTERVAL_MS, 기본 60초 · 상한 없음)마다 오므로, 그 주기를
+ *   30분 넘게 둔 엣지는 정상인데도 고정 30분 경계에서 'edge-stale' 로 보였다. 주기를 모르면(지금 엣지는 보고하지 않는다) 30분 그대로다
+ *   — 넓히지 않는다(추측 금지). 호출부가 ctx.reportIntervalMs(또는 report.intervalMs)로 주기를 넘기면 그 값을 쓴다.
+ */
+export function edgeReportStaleMs(intervalMs) {
+  const n = Number.isFinite(intervalMs) ? intervalMs : (typeof intervalMs === 'string' && intervalMs.trim() !== '' ? Number(intervalMs) : NaN);
+  return Math.max(EDGE_REPORT_STALE_MS, Number.isFinite(n) && n > 0 ? n * 3 + 30_000 : 0);
+}
 
 export const GUEST_WHY_CODES = ['edge-no-report', 'edge-stale', 'edge-no-config', 'not-enabled', 'no-creds', 'collect-failed', 'edge-old', 'partial', 'unknown'];
 
@@ -27,7 +37,7 @@ const FAIL_STAGES = /로그인 실패|인증 실패|예외|미등록|인벤토�
 
 /**
  * @param {object} s summarizeHostGpu 결과(vmsOn·vmsRead·vmsUnread·tempC·memUsedMB)
- * @param {object|null} ctx 이 호스트 vCenter 의 수집 문맥 {mode:'site'|'direct', agent, edgeVersion, report:{receivedAt}|null,
+ * @param {object|null} ctx 이 호스트 vCenter 의 수집 문맥 {mode:'site'|'direct', agent, edgeVersion, report:{receivedAt, intervalMs?}|null, reportIntervalMs?,
  *   diagVc:{stage,error,counts,results}|null, enabled:boolean|null}
  * @returns {{code:string, detail?:string, agent?:string}|null}
  */
@@ -45,7 +55,7 @@ export function guestWhyOf(s, ctx, { now = Date.now() } = {}) {
   // 한 대도 못 읽었다 — 어디서 막혔는가
   if (c.mode === 'site') {
     if (!agent || !c.report) return out('edge-no-report');
-    if (c.report.receivedAt && now - c.report.receivedAt > EDGE_REPORT_STALE_MS) return out('edge-stale', String(Math.round((now - c.report.receivedAt) / 60_000)));
+    if (c.report.receivedAt && now - c.report.receivedAt > edgeReportStaleMs(c.reportIntervalMs ?? c.report.intervalMs)) return out('edge-stale', String(Math.round((now - c.report.receivedAt) / 60_000)));
     if (!c.diagVc) return out('edge-no-config');
   } else if (c.enabled === false) {
     return out('not-enabled');
