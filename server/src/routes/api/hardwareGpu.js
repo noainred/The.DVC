@@ -66,6 +66,9 @@ export function gatherGuestWhyCtx(snap) {
       const agent = agentOf.get(id) || '';
       const report = agent ? reports.get(agent.toLowerCase()) || null : null;
       ctx = { mode: 'site', agent, edgeVersion: agent ? verOf(agent) : null, report,
+        // v2.742(VC-01 후속): 엣지가 보고한 push 주기(중앙 gpuGuestDiag.js 가 정제) — 낡음 경계(guestWhy.edgeReportStaleMs)가 쓴다.
+        //   구버전 엣지(필드 없음)는 null 이고 기본 30분 그대로다.
+        reportIntervalMs: report?.intervalMs ?? null,
         diagVc: report ? (report.vcenters || []).find((x) => String(x?.vcId) === id) || null : null };
     } else {
       // v2.653: 데모(mock)는 설정과 무관하게 전 법인을 합성 수집한다(gpu/poller.js demoAll) — '수집 꺼짐' 이라 말하면 거짓이다.

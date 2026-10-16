@@ -759,6 +759,14 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       if (v == null) dropped.coerced += 1; o.perfc = v;
     }
     if (Object.hasOwn(o, 'dsUuid') && o.dsUuid != null && !(typeof o.dsUuid === 'string' && /^[\w.:-]{1,64}$/.test(o.dsUuid))) { o.dsUuid = null; dropped.coerced += 1; }
+    // v2.742(VC-05 후속): 호스트·VM 의 소속 클러스터 moref(clusterRef)와 vSphere 데이터센터 이름(vcDatacenter) — 수집기(soapClient)는
+    //   글자 또는 null 만 싣는다. clusterRef 는 moref 꼴(64자) 글자만, vcDatacenter 는 글자만(128자로 자른다) — 객체·배열·숫자·형식 밖은
+    //   null(모름). 클러스터 묶음 키(clustercfg/analyze.js refOf)는 글자만 쓰므로 null 은 그 vCenter 를 예전 이름 키로 떨어뜨린다.
+    if (Object.hasOwn(o, 'clusterRef') && o.clusterRef != null && !(typeof o.clusterRef === 'string' && /^[\w.:-]{1,64}$/.test(o.clusterRef))) { o.clusterRef = null; dropped.coerced += 1; }
+    if (Object.hasOwn(o, 'vcDatacenter') && o.vcDatacenter != null) {
+      if (typeof o.vcDatacenter === 'string') { if (o.vcDatacenter.length > 128) dropped.coerced += 1; o.vcDatacenter = capStr(o.vcDatacenter, 128); }
+      else { o.vcDatacenter = null; dropped.coerced += 1; }
+    }
     out.push(o);
   }
   return out;

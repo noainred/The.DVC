@@ -1,7 +1,7 @@
 /**
  * v2.628(감사 LEFT2628-01): 성능 샘플러가 가장 최근 주기에 **적재하지 않은 것** 을 한 줄로 말한다(순수).
  *
- * 서버 lastRun(v2.620 staleSkipped · v2.622 vmperfStale·vmStatsSkipped)과 /tools/waste/history 의 `sampler`
+ * 서버 lastRun(v2.620 staleSkipped · v2.622 vmperfStale·vmStatsSkipped · v2.742 tempHostsDisconnected)과 /tools/waste/history 의 `sampler`
  * (같은 값의 개수 요약 — 전체 범위 계정에만 온다)를 둘 다 받는다. 예전에는 이 값을 어느 화면도 읽지 않아
  * 추이의 마지막 전체 합계 점이 '적재 보류' 인지 '점검중 vCenter 를 뺀 부분 합' 인지 알 수 없었다.
  * 제외가 없으면 null(빈 줄을 만들지 않는다). 문구에 백틱·별표를 쓰지 않는다(평문으로 그린다).
@@ -22,6 +22,7 @@ export function normalizeWithheld(x) {
       maintenanceExcluded: cnt(x.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
       dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),   // v2.727(C-01)
       vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                   // v2.741(VC-02)
+      tempHostsDisconnected: cnt(x.tempHostsDisconnected),                              // v2.742(VC-02) — 요약이 싣지 않으면 0(말하지 않는다)
     };
   }
   const ss = x.staleSkipped || {}; const vs = x.vmperfStale || {};
@@ -31,6 +32,7 @@ export function normalizeWithheld(x) {
     maintenanceExcluded: cnt(vs.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
     dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),     // v2.727(C-01)
     vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                     // v2.741(VC-02)
+    tempHostsDisconnected: cnt(x.tempHostsDisconnected),                                // v2.742(VC-02) — 0 이면 서버가 키를 싣지 않는다
   };
 }
 
@@ -62,5 +64,7 @@ export function samplerWithheldNote(x, { totalView = true } = {}) {
     const p = [n.vmUsageUnknown.cpu ? `CPU ${n.vmUsageUnknown.cpu}대` : '', n.vmUsageUnknown.mem ? `메모리 ${n.vmUsageUnknown.mem}대` : ''].filter(Boolean).join(' · ');
     out.push(`사용률을 읽지 못한 켜진 VM(${p})은 할당·사용 계열에서 뺐습니다 — 사용 0(유휴)으로 채우지 않았습니다`);
   }
+  // v2.742(VC-02): 연결이 끊긴 호스트의 센서 값은 vCenter 가 마지막으로 받은 값이라 지금 온도가 아니다 — 온도 계열에 넣지 않았다.
+  if (n.tempHostsDisconnected) out.push(`연결이 끊긴 호스트 ${n.tempHostsDisconnected}대의 온도는 적재하지 않았습니다(마지막으로 받은 값이라 지금 온도가 아닙니다) — 호스트·클러스터·vCenter 온도 추이에서 빠졌습니다`);
   return out.length ? `${out.join('. ')}.` : null;
 }

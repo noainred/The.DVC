@@ -37,7 +37,7 @@ import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindi
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
-import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText } from '../views/clustercfg/clusterCfgText.js'; // v2.701
+import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
 
 function DRow({ label, children, full = false, nowrap = false }) {
   return (
@@ -684,16 +684,17 @@ function ClusterCfgSection({ item, isVm }) {
   const cluster = item?.cluster;
   const [st, setSt] = useState({ data: null, error: null });
   useEffect(() => {
-    if (!allowed || !item?.vcenterId || !cluster || cluster === 'standalone') return undefined;
+    // v2.742(감사 VC-05): 같은 이름 클러스터가 다른 데이터센터에 있을 수 있다 — 호스트는 hostId, VM 은 vmId(+ 아는 clusterRef)를 넘겨 서버가 ref 로 고르게 한다.
+    const params = allowed ? clusterOfParams(item, isVm) : null;
+    if (!params) return undefined;
     let active = true;
     setSt({ data: null, error: null });
-    const params = { vcenterId: item.vcenterId, cluster };
-    if (isVm && item.id) params.vmId = item.id;
     fetchJson('/tools/cluster-check/of', params)
       .then((d) => { if (active) setSt({ data: d, error: null }); })
       .catch((e) => { if (active) setSt({ data: null, error: e }); });
     return () => { active = false; };
-  }, [allowed, item?.vcenterId, item?.id, cluster, isVm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 조회 인자는 아래 값들로만 정해진다(item 객체는 폴링마다 새로 온다)
+  }, [allowed, item?.vcenterId, item?.id, cluster, item?.clusterRef, isVm]);
   if (!allowed || !cluster || cluster === 'standalone') return null;
   const d = st.data;
   return (
@@ -701,7 +702,7 @@ function ClusterCfgSection({ item, isVm }) {
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>클러스터 — {cluster}{d?.findings?.length ? ` · 확인할 항목 ${d.findings.length}` : ''}</div>
       {st.error ? <div className="muted" style={{ fontSize: 12 }}>클러스터 구성을 불러오지 못했습니다.</div>
         : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
-        : !d.cluster ? <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>이 클러스터의 HA·DRS 구성을 아직 읽지 않았습니다 — 수집 서버가 주기적으로 읽습니다(엣지가 수집하는 vCenter 는 엣지 업그레이드 뒤에 채워집니다).</div>
+        : !d.cluster ? <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{clusterMissLine(d)}</div>
         : (
           <>
             {d.findings?.length > 0 && (

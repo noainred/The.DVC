@@ -99,6 +99,19 @@ export function truncationText(z) {
   return parts.join(' ');
 }
 
+/**
+ * v2.742(감사 DEV-04) — peer zone 과 그림에서 뺀 속성 멤버. 서버 graph(`buildZoneGraph`)의 peerZones·propertyMembers 를 말한다.
+ * 속성 멤버(00: 로 시작하는 값)는 장비 WWN 이 아니라 peer zone 속성 값이라 끝점으로 그리지 않는다 — 조용히 빼지 않는다.
+ * 둘 다 0·없음(구버전 서버)이면 빈 문자열.
+ */
+export function peerZoneText(g) {
+  const pz = Number.isInteger(g?.peerZones) && g.peerZones > 0 ? g.peerZones : 0;
+  const pm = Number.isInteger(g?.propertyMembers) && g.propertyMembers > 0 ? g.propertyMembers : 0;
+  if (!pz && !pm) return '';
+  const head = pz ? `peer zone ${pz}개` : 'peer zone';
+  return pm ? `${head} · 속성 멤버 ${pm}개(장비가 아닌 zone 속성 값이라 그림에서 제외)` : head;
+}
+
 /** 판정 근거 요약 — 확정/추정/미판정 개수. 사용자가 그림을 얼마나 믿을지 정할 근거. */
 export function confidenceSummary(nodes = []) {
   const c = { confirmed: 0, inferred: 0, guess: 0, none: 0 };

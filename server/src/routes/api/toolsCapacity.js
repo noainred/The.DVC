@@ -8,6 +8,7 @@ import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보�
 import { store, usageReadable, hostCapacityKnown } from '../../store.js'; // v2.733(C2-06): 용량 판정도 store 하나
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
+import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { fetchVmMetric, fetchVmsPerfSeries, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
 import { createVcAuthGate, vcAuthStopOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
@@ -1827,6 +1828,9 @@ api.get('/tools/orphan-vmdk', requirePerm('tools'), async (req, res) => {
   try {
     res.json({ ok: true, ...(await scanOrphanDisks(dsId, { recentHours })) });
   } catch (e) {
+    // v2.742(VC-03 후속): 비활성·점검중·엣지 위임·인증 정지로 로그인하지 않았으면 409 + 사유 필드(skipReason·authStopped).
+    //   502 로 바꿔 보내면 웹이 재시도해 같은 막힘을 세 번 보고하고, 무엇이 막았는지도 사라진다(형제 /datastores/:id/browse 와 같은 규칙).
+    if (e.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });
     res.status(e.status === 404 ? 404 : 502).json({ ok: false, reason: e.message });
   }
 });

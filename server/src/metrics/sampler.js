@@ -513,8 +513,11 @@ export function samplerWithheldOf(lastRun) {
   const vuCpu = _num(lastRun.vmUsageUnknown?.cpu) || 0;
   const vuMem = _num(lastRun.vmUsageUnknown?.mem) || 0;
   if (vuCpu || vuMem) out.vmUsageUnknown = { cpu: vuCpu, mem: vuMem };
+  // v2.742(VC-02 후속): 연결 끊긴 호스트라 온도 계열(temp_host·클러스터·vCenter 집계)에서 뺀 호스트 수 — 있을 때만 싣는다(기존 요약 모양 유지).
+  const thd = _num(lastRun.tempHostsDisconnected) || 0;
+  if (thd > 0) out.tempHostsDisconnected = thd;
   if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped
-    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown) return null;
+    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown && !out.tempHostsDisconnected) return null;
   return out;
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
