@@ -673,6 +673,47 @@ export function sanitizeVcLocation(v) {
   return { value: out, coerced };
 }
 
+/*
+ * v2.742(감사 VC-07): 엣지가 올린 vcenter.licenses·solutions 를 좁힌다. 예전에는 그대로 저장해 `solutions:'x'` 하나로
+ *   /tools/solutions 가 전 법인 500(sols.filter is not a function)이 됐고, `licenses:'ab'` 는 /tools/licenses 에 글자 단위 항목
+ *   ({0:'a'})·'(이름 없음)' 만료 행을 만들었다(v2.598·v2.599 '엣지 원소는 아는 필드만' 규약의 누락).
+ *   규칙: 배열만(아니면 null = 모름 — 0개라 지어내지 않는다) · 평범한 객체 원소만 · 아는 필드만(soapClient retrieveLicenses·
+ *   retrieveExtensions 의 모양) · 글자는 상한으로 자르고 수는 numOrNull · 개수 상한은 수집기와 같은 200·300.
+ *   버린 원소·필드 개수는 dropped 로 밝힌다(조용한 상한 금지). null·키 없음은 그대로 둔다(수집기가 '조회 실패' 를 null 로 실을 수 있다).
+ */
+const VC_LICENSE_STR = { name: 256, key: 64, edition: 128, costUnit: 32, product: 256, productVersion: 64, expires: 64 };
+const VC_LICENSE_NUM = ['total', 'used'];
+const VC_SOLUTION_STR = { key: 256, version: 128, company: 256, label: 256 };
+export const VC_LICENSES_MAX = 200;
+export const VC_SOLUTIONS_MAX = 300;
+function sanitizeVcObjList(v, { strKeys, numKeys = [], max, required = null }) {
+  if (!Array.isArray(v)) return { value: null, dropped: 1 };
+  const out = []; let dropped = Math.max(0, v.length - max);
+  for (const x of v.slice(0, max)) {
+    if (!isPlainObj(x)) { dropped += 1; continue; }
+    const o = {};
+    for (const [k, lim] of Object.entries(strKeys)) {
+      if (!Object.hasOwn(x, k) || x[k] == null) continue;
+      if (typeof x[k] === 'string' || (typeof x[k] === 'number' && Number.isFinite(x[k]))) o[k] = capStr(String(x[k]), lim);
+      else dropped += 1;
+    }
+    for (const k of numKeys) {
+      if (!Object.hasOwn(x, k) || x[k] == null) { if (Object.hasOwn(x, k)) o[k] = null; continue; }
+      const n = typeof x[k] === 'number' || typeof x[k] === 'string' ? numOrNull(x[k]) : null;
+      if (n == null) dropped += 1;
+      o[k] = n;
+    }
+    if (required && !o[required]) { dropped += 1; continue; } // 식별 필드가 없는 원소는 화면이 묶을 수 없다
+    if (!Object.keys(o).length) { dropped += 1; continue; }   // 아는 필드가 하나도 없으면 빈 행('(이름 없음)')이 된다 — 버린다
+    out.push(o);
+  }
+  return { value: out, dropped };
+}
+/** @returns {{ value: object[]|null, dropped: number }} */
+export function sanitizeVcLicenses(v) { return sanitizeVcObjList(v, { strKeys: VC_LICENSE_STR, numKeys: VC_LICENSE_NUM, max: VC_LICENSES_MAX }); }
+/** @returns {{ value: object[]|null, dropped: number }} — key 가 없는 원소는 버린다(수집기도 key 없는 확장은 싣지 않는다). */
+export function sanitizeVcSolutions(v) { return sanitizeVcObjList(v, { strKeys: VC_SOLUTION_STR, max: VC_SOLUTIONS_MAX, required: 'key' }); }
+
 export function sanitizeInventoryList(list, vcId, max, dropped) {
   const out = [];
   // v2.727(감사 D-04): 상한(max)으로 넘친 원소 수를 센다 — 예전 `slice(0, max)` 는 셋째 원소가 어디에도 남지 않았다(조용한 상한 금지).
@@ -718,6 +759,14 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       if (v == null) dropped.coerced += 1; o.perfc = v;
     }
     if (Object.hasOwn(o, 'dsUuid') && o.dsUuid != null && !(typeof o.dsUuid === 'string' && /^[\w.:-]{1,64}$/.test(o.dsUuid))) { o.dsUuid = null; dropped.coerced += 1; }
+    // v2.742(VC-05 후속): 호스트·VM 의 소속 클러스터 moref(clusterRef)와 vSphere 데이터센터 이름(vcDatacenter) — 수집기(soapClient)는
+    //   글자 또는 null 만 싣는다. clusterRef 는 moref 꼴(64자) 글자만, vcDatacenter 는 글자만(128자로 자른다) — 객체·배열·숫자·형식 밖은
+    //   null(모름). 클러스터 묶음 키(clustercfg/analyze.js refOf)는 글자만 쓰므로 null 은 그 vCenter 를 예전 이름 키로 떨어뜨린다.
+    if (Object.hasOwn(o, 'clusterRef') && o.clusterRef != null && !(typeof o.clusterRef === 'string' && /^[\w.:-]{1,64}$/.test(o.clusterRef))) { o.clusterRef = null; dropped.coerced += 1; }
+    if (Object.hasOwn(o, 'vcDatacenter') && o.vcDatacenter != null) {
+      if (typeof o.vcDatacenter === 'string') { if (o.vcDatacenter.length > 128) dropped.coerced += 1; o.vcDatacenter = capStr(o.vcDatacenter, 128); }
+      else { o.vcDatacenter = null; dropped.coerced += 1; }
+    }
     out.push(o);
   }
   return out;
@@ -810,6 +859,19 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     if (ti.dropped) dropped.coerced += ti.dropped;
     vcenter.tagInv = ti.value;
   }
+  // v2.742(감사 VC-07): 라이선스·설치 솔루션 — 배열·객체 원소·아는 필드·상한만. 뺀 개수는 dropped.vcLicenses·vcSolutions(0 이면 키 없음 — 예전 모양).
+  for (const [k, fn, dk] of [['licenses', sanitizeVcLicenses, 'vcLicenses'], ['solutions', sanitizeVcSolutions, 'vcSolutions']]) {
+    // 조회 실패 사유(`licensesError`·`solutionsError` — corelicense/analyze.js vcListUnread 가 읽는다)도 글자만·상한으로.
+    const ek = `${k}Error`;
+    if (Object.hasOwn(vcenter, ek)) {
+      if (typeof vcenter[ek] === 'string') vcenter[ek] = capStr(vcenter[ek], 300);
+      else { if (vcenter[ek] != null) dropped[dk] = (dropped[dk] || 0) + 1; delete vcenter[ek]; }
+    }
+    if (!Object.hasOwn(vcenter, k) || vcenter[k] == null) continue;
+    const r = fn(vcenter[k]);
+    vcenter[k] = r.value;
+    if (r.dropped) dropped[dk] = (dropped[dk] || 0) + r.dropped;
+  }
   const slice = {
     vcenter,
     hosts: sanitizeInventoryList(b.hosts, vcId, 50_000, dropped),
@@ -820,6 +882,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   };
   const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId + (dropped.overCount || 0); // v2.727(D-04): 상한 넘침도 '뺀 것' 이다
   if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId}${dropped.overCount ? ` · 상한 초과 ${dropped.overCount}` : ''})`);
+  if (dropped.vcLicenses || dropped.vcSolutions) console.warn(`[central] inventory: agent=${agent} vc=${vcId} vCenter 라이선스 ${dropped.vcLicenses || 0}건 · 솔루션 ${dropped.vcSolutions || 0}건을 모양이 달라 뺐습니다(배열 아님·객체 아닌 원소·모르는 형식의 필드·상한 초과)`);
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
@@ -827,7 +890,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     networks: slice.networks.length, alarms: slice.alarms.length, gzip: (req.get('content-encoding') || '').includes('gzip'),
   };
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length,
-    ...(droppedN || dropped.coerced ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}), ...(saved.held ? { held: true } : {}) });
+    ...(droppedN || dropped.coerced || dropped.vcLicenses || dropped.vcSolutions ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}), ...(saved.held ? { held: true } : {}) });
 });
 
 // 사이트 위임 게스트 디스크 수신(v2.466) — 엣지가 로컬 vCenter 의 guest.disk 를 수집해 push.
@@ -1336,6 +1399,18 @@ centralRouter.get('/gpu-guest-config', requireCentral(), (req, res) => {
 // 중앙→엣지 배포 사용자(pull): 엣지가 자기 이름으로 '중앙이 지정한 사용자 목록'을 가져가 로컬
 // users.json에 managed로 반영. 비밀번호 해시 포함(엣지가 로그인 검증에 사용) → 토큰 필수.
 /**
+ * v2.742(감사 EDGE-03): **지속형 503**(등록부·설정 파일을 못 읽음 · 중앙 DB 를 쓸 수 없음)에는 Retry-After 를 싣는다.
+ *   이 상태는 400·800ms 뒤에도 그대로다(isidu/db.js 등은 열기 실패를 래치한다) — 그런데 Retry-After 가 없어 엣지 resilientFetch 가
+ *   같은 큰 본문을 400·800ms 간격으로 두 번 더 올렸다. 헤더가 있으면 재시도가 그 간격(상한 30초 — resilientFetch.retryDelayMs)을 따른다.
+ *   ⚠ bigJsonGate 의 503(큰 본문 해석 혼잡)은 **일시 상태**라 따로 짧은 Retry-After 를 싣는다 — 이 헬퍼를 거기에 쓰지 말 것.
+ *   값은 '다음 주기쯤 다시' 라는 뜻의 60초다(엣지 push·pull 주기는 1~10분). 큰 본문 push(isidu·edge-log-result)는 503 을 호출 안에서
+ *   아예 다시 보내지 않는다(엣지 쪽 규칙 — 다음 주기 재전송에 맡긴다).
+ */
+export const PERSISTENT_503_RETRY_AFTER_SEC = 60;
+const PERSISTENT_503_HEADERS = Object.freeze({ 'Retry-After': String(PERSISTENT_503_RETRY_AFTER_SEC), 'Cache-Control': 'no-store' });
+function persistent503(res) { return res.status(503).set(PERSISTENT_503_HEADERS); }
+
+/**
  * v2.612 LEFT2612-01: 중앙 등록부를 읽지 못했으면(손상 → 보존) 설정 pull 에 **503** 으로 답한다. 빈 목록을 ok:true 로
  *   내려보내면 엣지가 장비 목록·스냅샷·관리 계정을 통째로 지웠다. 엣지 pull 은 비-2xx 를 실패로 보고 직전 목록을 유지한다.
  *   ⚠ 재수집 요청 큐(take*)를 꺼내기 **전에** 본다 — 꺼낸 뒤 503 이면 요청이 사라진다.
@@ -1344,8 +1419,7 @@ function registryUnreadable(res, errOf, what) {
   let e = null;
   try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
   if (!e) return false;
-  res.set('Cache-Control', 'no-store');
-  res.status(503).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
   return true;
 }
 
@@ -1364,8 +1438,7 @@ function settingsUnreadable(res, errOf, what) {
   if (settingsUnreadableLog(what, String(e.reason || ''))) {
     console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에 503 으로 답합니다(엣지는 직전 설정 유지): ${String(e.reason || '사유 미상').slice(0, 200)}`);
   }
-  res.set('Cache-Control', 'no-store');
-  res.status(503).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
+  persistent503(res).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
   return true;
 }
 
@@ -1765,7 +1838,7 @@ centralRouter.post('/sanswitch-perf', requireCentral(), async (req, res) => {
    *   상태(하트비트)는 위에서 이미 저장했다 — 상태만 온 요청(표본 0)은 200 그대로(화면 진단이 살아 있게).
    */
   if (r.unavailable && (rows.length || meta.length)) {
-    return res.status(503).json({ ok: false, dbUnavailable: true, statusSaved, reason: '중앙 SAN 포트 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [sanswitch-perf-db] 줄 참조)' });
+    return persistent503(res).json({ ok: false, dbUnavailable: true, statusSaved, reason: '중앙 SAN 포트 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [sanswitch-perf-db] 줄 참조)' });
   }
   res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved,
     ...(statusRefused ? { statusRefused: true } : {}), ...(!statusAllowed && req.body?.status ? { statusIgnored: 'no-delegated-devices' } : {}) });
@@ -2038,7 +2111,7 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
    *   레코드가 다시 오지 않았다(조용한 소실). 청크 0 의 상태는 위에서 이미 저장했다 — 화면은 '엣지 수집 상태' 를 계속 말한다.
    */
   if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length || clean.devSamples.length || clean.eventsByCvp.size)) {
-    return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
+    return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   // v2.640(③ 장애 전이): 엣지 보고가 적재됐으면 중앙의 전이 판정을 예약한다(디바운스 — 엣지 여럿의 push 를 한 번으로 모은다).
   if (clean.devicesByCvp.size || clean.touch.length || chunk === 0) {
@@ -2090,7 +2163,7 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   const { notifyScanStored: notifyIsidu } = await import('../isidu/notify.js');
   const saved = { inserted: 0, duplicates: 0, failed: 0 };
   if (clean.scans.length && !(await db.available())) {
-    return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
+    return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   for (const sc of clean.scans) {
     // v2.741 EDGE-01: sc.srcTs(엣지 원본 시각)로 재전송 중복을 거른다 — 잘라 둔 시각(sc.ts)은 받을 때마다 다른 '지금' 이다.
@@ -2109,7 +2182,7 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   }
   // 시각을 잘라 받은 스캔(clamped)은 거절이 아니다 — rejected 합계에 넣지 않고 따로 밝힌다(엣지 시계가 앞서 있다는 진단).
   const clampedPart = clean.clamped ? { clamped: clean.clamped } : {};
-  if (saved.failed) return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
+  if (saved.failed) return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
   if (clean.clamped && E.clampWarnDue(node)) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 엣지 시계가 중앙보다 5분 넘게 앞서 결과 ${clean.clamped}건의 시각을 수신 시각으로 잘랐습니다(원본 시각으로 중복을 거릅니다)`);
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
 });
@@ -2375,7 +2448,7 @@ centralRouter.post('/link-check', requireCentral(), async (req, res) => {
   try {
     const out = await putEdgeLinkReport(req.centralAuth.agent, req.body || {});
     // v2.681(R2F-03): DB 를 못 쓰면 200 이 아니라 503(엣지가 '저장됨' 이라 적지 않게 — v2.611 규약).
-    if (out?.dbUnavailable) return res.status(503).json(out);
+    if (out?.dbUnavailable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out); // v2.742(EDGE-03): 지속형 503 머리 — persistent503 과 같다(audit2681b 가 이 모양을 고정한다)
     res.json(out);
   } catch (e) {
     res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

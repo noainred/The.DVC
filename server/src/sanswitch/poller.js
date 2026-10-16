@@ -24,6 +24,7 @@ import { precheckTarget } from './precheck.js';
 import { isMockMode } from '../mock/demo/flags.js';   // v2.708 데모(mock) — live 동작은 바꾸지 않는다
 import { DEMO_ONLY_REASON } from '../auth/demoGuest.js'; // v2.720(감사 B2-01)
 import { isSanDemoId, sanDemoLayoutFor, buildSanDemoSnapshot, ensureSanDemo, sanDemoDone } from '../mock/demo/sanswitch.js';
+import { setRateCadence, lastRateResult } from './rates.js';   // v2.742 DEV-06: 처리량 간격 상한을 주기에 맞춘다
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
@@ -88,6 +89,18 @@ function collectorFor(device) {
   return device.collectMethod === 'rest' ? fosRest.collect : fosSsh.collect;
 }
 
+/**
+ * v2.742(DEV-06): 처리량을 계산하지 않았으면 **왜** 인지 스냅샷에 싣는다(first | gap-too-short | gap-too-long + 상한) — 화면이 사유별로
+ * 말한다(예전에는 사유와 무관하게 '두 번째 수집부터 표시'). 이번 수집이 남긴 결과일 때만(부른 시각 ≥ 시작) — 수집이 실패해
+ * applyRates 까지 가지 않았으면 직전 주기의 사유를 붙이지 않는다.
+ */
+export function attachRateReason(snap, deviceId, startedAt) {
+  if (!snap?.ok || !snap.extra || snap.extra.rateReady !== false) return snap;
+  const rr = lastRateResult(deviceId);
+  if (rr && rr.calledAt >= startedAt && !rr.computed) snap.extra = { ...snap.extra, rateReason: rr.reason, rateMaxGapSec: rr.maxGapSec };
+  return snap;
+}
+
 async function collectOne(dev, { periodic = false } = {}) {
   // v2.590: **주기 수집만** 인증 실패 정지 장비를 건너뛴다(null = 정지 — 실패로 세지 않는다). 작업 로그에도
   // 남기지 않는다 — 정지 중에는 이벤트가 아니다(상한을 비이벤트로 소진한다 — Horizon v2.535 와 같은 판단).
@@ -97,6 +110,8 @@ async function collectOne(dev, { periodic = false } = {}) {
     if (stop) { noteAuthStopped(full0, stop); return null; }
   }
   const startedAt = Date.now();
+  // v2.742(DEV-06): 처리량 간격 상한 = max(2시간, 주기 × 3 + 직전 주기 소요) — 주기를 2시간 넘게 둔 현장에서 처리량이 영원히 비지 않게.
+  setRateCadence({ intervalMs: pollMs(), runMs: _last.durationMs || 0 });
   _inFlight.set(dev.id, { id: dev.id, name: dev.name || dev.id, at: startedAt });
   try {
     const full = getDeviceWithSecret(dev.id) || dev;
@@ -129,6 +144,7 @@ async function collectOne(dev, { periodic = false } = {}) {
     }
     snap.collectedAt = Date.now();
     snap.durationMs = snap.collectedAt - startedAt;
+    attachRateReason(snap, full.id || dev.id, startedAt);
     // v2.590: 자격증명 거부면 주기 수집을 멈추고 그 사실을 스냅샷에 싣는다(조용히 멈추지 않는다).
     if (authErr) {
       const rec = sanAuthGuard.markAuthStopped(full.id || dev.id, full, snap.error);

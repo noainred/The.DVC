@@ -12,7 +12,7 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../compo
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
-  RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta, perfPartialNote, perfPartialMark } from './sanSwitchPorts.js';
+  RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta, perfPartialNote, perfPartialMark, rateNotReadyText, fruText } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
@@ -612,8 +612,8 @@ function DeviceInfo({ d }) {
     ['Fabric 이름', d.extra?.fabricName],
     ['팹 스위치 수', d.fabric?.switches || null], // SSH 수집은 팹 정보를 채우지 않아 0 — 0대는 있을 수 없으므로 숨긴다
     ['활성 Zone 설정', d.zoning?.effectiveConfig],
-    ['팬', h.fans ? (h.fans.ok == null ? `${h.fans.total}개` : `${h.fans.ok}/${h.fans.total} 정상`) : ''],
-    ['전원공급장치', h.psus ? (h.psus.ok == null ? `${h.psus.total}개` : `${h.psus.ok}/${h.psus.total} 정상`) : ''],
+    ['팬', fruText(h.fans)],             // v2.742 DEV-02 — 빈 슬롯은 장착 수와 따로
+    ['전원공급장치', fruText(h.psus)],
     ['소비전력(PSU 합)', powerText(h)], // v2.601 COL-2601-06 — 일부 PSU 값이 없으면 부분 합임을 밝힌다
     ['SFP 최고 온도', h.tempC != null ? `${h.tempC} ℃` : ''],
     ['가동(Time Awake)', d.extra?.awakeDays != null ? `${d.extra.awakeDays}일` : ''],
@@ -1377,7 +1377,7 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
               );
             })()}
             {d.extra?.rateReady === false && (
-              <div style={{ marginTop: 4 }}>처리량은 두 번째 수집부터 표시됩니다(누적 카운터의 차이로 계산 — 첫 수집은 비교 대상이 없습니다).</div>
+              <div style={{ marginTop: 4 }}>{rateNotReadyText(d.extra)}</div>
             )}
           </div>
 

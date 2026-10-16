@@ -257,7 +257,11 @@ async function sampleOnceInner() {
   let vmperfStale = null;
 
   // Host temperature (only hosts that report a sensor reading).
-  const hostsWithTemp = freshHosts.filter((h) => h.tempC != null);
+  // v2.742(VC-02): 연결이 끊긴 호스트(DISCONNECTED·NOT_RESPONDING — store.usageReadable)의 센서 값은 vCenter 가 마지막으로 받은
+  //   값이라 지금 온도가 아니다 — temp_host 와 클러스터·vCenter 평균에 넣지 않는다(바로 아래 host_cpu_pct·전력 host-unread 와 같은 판정).
+  //   뺀 호스트 수는 lastRun.tempHostsDisconnected 로 밝힌다(조용한 제외 금지 · 0 이면 싣지 않는다).
+  const hostsWithTemp = freshHosts.filter((h) => h.tempC != null && usageReadable(h));
+  const tempHostsDisconnected = freshHosts.filter((h) => h.tempC != null && !usageReadable(h)).length;
   const byCluster = new Map();
   const byVc = new Map();
   for (const h of hostsWithTemp) {
@@ -465,6 +469,8 @@ async function sampleOnceInner() {
   }
   lastRun = {
     at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}), ...(gpuMemPartialHosts ? { gpuMemPartialHosts } : {}),
+    // v2.742(VC-02): 센서 값은 있지만 호스트 연결이 끊겨 온도 계열에 넣지 않은 호스트 수(0 이면 싣지 않는다).
+    ...(tempHostsDisconnected ? { tempHostsDisconnected } : {}),
     // v2.727(C-01): DS 와 같은 자리 — 스토리지를 못 읽어 VM 디스크 계열에서 뺀 VM 수(0 이면 싣지 않는다).
     ...(vmStorageUnknown ? { vmStorageUnknown, vmStorageUnknownBy } : {}),
     // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 계열에서 뺀 켜진 VM 수(REST 폴백 vCenter 등 — 0 이면 싣지 않는다).
@@ -507,8 +513,11 @@ export function samplerWithheldOf(lastRun) {
   const vuCpu = _num(lastRun.vmUsageUnknown?.cpu) || 0;
   const vuMem = _num(lastRun.vmUsageUnknown?.mem) || 0;
   if (vuCpu || vuMem) out.vmUsageUnknown = { cpu: vuCpu, mem: vuMem };
+  // v2.742(VC-02 후속): 연결 끊긴 호스트라 온도 계열(temp_host·클러스터·vCenter 집계)에서 뺀 호스트 수 — 있을 때만 싣는다(기존 요약 모양 유지).
+  const thd = _num(lastRun.tempHostsDisconnected) || 0;
+  if (thd > 0) out.tempHostsDisconnected = thd;
   if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped
-    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown) return null;
+    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown && !out.tempHostsDisconnected) return null;
   return out;
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);

@@ -5,7 +5,7 @@ import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth
 import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../../store.js';
 import { numOrNull } from '../../util/numOrNull.js';
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
-import { browseDatastore } from '../../vcenter/dsBrowse.js';
+import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
@@ -459,7 +459,11 @@ api.get('/datastores/:id/browse', invDs, async (req, res) => {
   if (!ds || !inUserScope(req.user, snap, ds.vcenterId)) return res.status(404).json({ error: '데이터스토어를 찾을 수 없습니다.' });
   try {
     res.json(await browseDatastore(id));
-  } catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message }); }
+  } catch (e) {
+    // v2.742(감사 VC-03): 비활성·점검중·엣지 위임·인증 정지로 로그인하지 않았으면 409 + 사유(502 는 웹이 재시도한다).
+    if (e.status === 409) return res.status(409).json({ error: e.message, ...onDemandErrorFields(e) });
+    res.status(e.status === 404 ? 404 : 502).json({ error: e.message });
+  }
 });
 
 api.get('/networks', invNet, (req, res) => memoJson(req, res, 'inv:networks', (snap) => {

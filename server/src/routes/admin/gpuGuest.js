@@ -97,6 +97,22 @@ export function scopeGpuGuestStatus(status, allowed, settings) {
   return { ...status, monitored, lastRun, overlay: null, fleetCountsHidden: true };
 }
 
+/**
+ * v2.742(LEFT-01): 후보 이름은 **대소문자를 무시하고** 하나로 합친다 — 예전에는 대소문자를 구분하는 Set 이라 등록부의 'Edge-A' 와 배포
+ *   저장 키 'edge-a' 가 두 줄로 보였고, 배포가 없는 줄을 고르면 저장이 새 사본을 만들었다(지금은 저장이 기존 키에 쓰지만, 같은 엣지를 두 줄로
+ *   보이는 것 자체가 혼란이다). 표기는 저장된 키 → 수집 서버 이름 → push 이력 순(먼저 본 것)이다. 순수 함수 — 테스트가 직접 부른다.
+ * @param {string[][]} sources 우선순위 순서의 이름 목록들
+ * @returns {Map<string,string>} 소문자 → 표기
+ */
+export function caseFoldNames(sources) {
+  const out = new Map();
+  for (const list of sources || []) for (const raw of list || []) {
+    const n = String(raw ?? '').trim();
+    if (n && !out.has(n.toLowerCase())) out.set(n.toLowerCase(), n);
+  }
+  return out;
+}
+
 export function registerGpuGuest(adminRouter) {
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
@@ -221,12 +237,17 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
 // 원격 엣지(agent) 앞으로 GPU 게스트 수집 설정을 지정 → 엣지가 pull해 로컬 적용.
 // 배포 대상 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 배포 지정된 것).
 adminRouter.get('/gpu-guest/deploy/agents', adminOnly, fleetReadOnly, (_req, res) => {
-  const assigned = new Map(listAssignedGpuGuestAgents().map((a) => [a.agent, a]));
-  const names = new Set();
-  for (const c of listCollectors()) if (c.name) names.add(c.name); // 수집 서버(원격) 이름 = agent 이름
-  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent); // gpu-guest 수집을 push한 엣지
-  for (const a of assigned.keys()) names.add(a);
-  const agents = [...names].sort().map((agent) => ({ agent, ...(assigned.get(agent) || { at: 0, vcenters: 0, vmCreds: 0, vmIps: 0, enabled: false, assigned: false }), assigned: assigned.has(agent) }));
+  const assignedList = listAssignedGpuGuestAgents();
+  const assigned = new Map(assignedList.map((a) => [a.agent.toLowerCase(), a]));
+  const names = caseFoldNames([
+    assignedList.map((a) => a.agent),
+    listCollectors().map((c) => c.name), // 수집 서버(원격) 이름 = agent 이름
+    getAllGpuGuestDiag().map((x) => x.agent), // gpu-guest 수집을 push한 엣지
+  ]);
+  const agents = [...names.values()].sort().map((agent) => {
+    const a = assigned.get(agent.toLowerCase());
+    return { ...(a || { at: 0, vcenters: 0, vmCreds: 0, vmIps: 0, enabled: false }), agent, assigned: !!a }; // 배정됐으면 표기 = 저장 키(첫 출처)
+  });
   res.json({ agents });
 });
 // 특정 엣지 앞 배포 설정 조회(비밀번호 가림).
@@ -246,12 +267,14 @@ adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => 
 // 원격 엣지 포탈에 접속(설정 열람 등)할 수 있는 사용자를 중앙에서 지정 → 엣지가 pull해 반영.
 // 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 사용자 배포된 것).
 adminRouter.get('/edge-users/agents', adminOnly, fleetReadOnly, (_req, res) => {
-  const withUsers = new Map(listAgentUserAgents().map((a) => [a.agent, a]));
-  const names = new Set();
-  for (const c of listCollectors()) if (c.name) names.add(c.name);
-  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent);
-  for (const a of withUsers.keys()) if (a !== GLOBAL_AGENT) names.add(a); // '*'(글로벌)은 개별 목록서 제외
-  const agents = [...names].sort().map((agent) => ({ agent, users: withUsers.get(agent)?.users || 0, at: withUsers.get(agent)?.at || 0 }));
+  const withUsersList = listAgentUserAgents();
+  const withUsers = new Map(withUsersList.map((a) => [a.agent.toLowerCase(), a])); // v2.742(LEFT-01): 대소문자 무시
+  const names = caseFoldNames([
+    withUsersList.map((a) => a.agent).filter((a) => a !== GLOBAL_AGENT), // '*'(글로벌)은 개별 목록서 제외
+    listCollectors().map((c) => c.name),
+    getAllGpuGuestDiag().map((x) => x.agent),
+  ]);
+  const agents = [...names.values()].sort().map((agent) => ({ agent, users: withUsers.get(agent.toLowerCase())?.users || 0, at: withUsers.get(agent.toLowerCase())?.at || 0 }));
   const g = withUsers.get(GLOBAL_AGENT);
   res.json({ agents, global: { users: g?.users || 0, at: g?.at || 0 } }); // global = 모든 엣지(전체) 배포 목록
 });

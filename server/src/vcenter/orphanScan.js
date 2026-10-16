@@ -21,7 +21,7 @@
 
 import { VimSoapClient } from './soapClient.js';
 import { parseMorefs, parseLayoutFilePaths } from './soapParse.js';
-import { browseDatastore } from './dsBrowse.js';
+import { browseDatastore, onDemandLogin } from './dsBrowse.js';   // v2.742(VC-03): 주문형 로그인 문
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import { ownedPathSet, findOrphanDisks, confidenceOf, SHARED_DS_WARNING } from '../tools/orphanVmdk.js';
@@ -69,8 +69,10 @@ async function scanFresh(dsId, { recentHours = 24 } = {}) {
   const vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
   if (!vcCfg) throw new Error('vCenter 접속 정보가 없습니다 — 엣지 수집(site) vCenter 는 중앙에서 직접 조회할 수 없습니다.');
 
+  // v2.742(감사 VC-03): 파일 목록이 60초 캐시에서 왔더라도 이 로그인 앞에서 다시 본다 — 그 사이 비활성·점검중·인증 정지가
+  //   되었을 수 있다(정지 중 로그인 0 · 거부는 주 폴러와 같은 정지 기록 · 409).
   const c = new VimSoapClient(vcCfg);
-  await c.login();
+  await onDemandLogin(c, vcCfg);
   let vmRefs = [];
   let pathLists = [];
   let vmsWithLayout = 0;

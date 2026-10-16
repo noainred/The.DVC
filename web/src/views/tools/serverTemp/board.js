@@ -332,3 +332,29 @@ export function histCutNote(hist) {
   }
   return `요청한 기간을 다 담지 못했습니다${limTxt}. 집계 단위를 넓히면 전체 기간이 보입니다.`;
 }
+
+/* ── 오래된 값의 사유(v2.731 A2-03 · v2.742 VC-02) ───────────────────────────── */
+
+/**
+ * 서버가 행에 싣는 staleReason 코드 → 짧은 이름. 앞 셋은 vCenter 를 지금 읽지 못한 사유(metrics/sampler.js
+ * unreadVcenterReasons), 'host-disconnected' 는 vCenter 는 읽히는데 그 ESXi 호스트만 끊긴 경우(서버 tools/serverTemp.js
+ * HOST_DISCONNECTED — store.usageReadable 이 거짓)다. 모르는 코드는 원문을 그대로 보인다(지어내지 않는다).
+ */
+export const STALE_REASON_KO = Object.freeze({ maintenance: '점검중', unreachable: '연결 실패', stale: '위임 수집 낡음', 'host-disconnected': '호스트 연결 끊김' });
+
+/** 오래된 행의 툴팁 — 끊긴 호스트와 읽히지 않는 vCenter 는 조치가 달라 문장을 나눈다. */
+export function staleRowTitle(r) {
+  if (r?.staleReason === 'host-disconnected') {
+    return '이 ESXi 호스트의 연결이 끊겨(연결 끊김·응답 없음) vCenter 가 마지막으로 받은 센서 값입니다. 지금 온도가 아니라 요약·클러스터·법인 집계에서 뺐습니다.';
+  }
+  const why = STALE_REASON_KO[r?.staleReason] || r?.staleReason || '사유 미상';
+  return `이 호스트의 vCenter 를 지금 읽지 못해(${why}) 마지막 수집 값입니다. 요약·클러스터·법인 집계에서 뺐습니다.`;
+}
+
+/** ESXi 호스트별 표 머리의 '오래된 값' 조각 — 그중 연결 끊김 수를 따로 말한다. 없으면 ''. */
+export function staleHostsNote(data) {
+  const n = Number.isFinite(data?.staleHosts) ? data.staleHosts : 0;
+  if (n <= 0) return '';
+  const d = Number.isFinite(data?.disconnectedHosts) ? data.disconnectedHosts : 0;
+  return ` · 오래된 값 ${n.toLocaleString()}대(집계 제외${d > 0 ? ` · 그중 호스트 연결 끊김 ${d.toLocaleString()}대` : ''})`;
+}

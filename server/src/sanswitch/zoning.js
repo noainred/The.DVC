@@ -61,8 +61,17 @@ export function normWwn(s) {
   return null;
 }
 
+/**
+ * FOS peer zone 의 **속성 멤버**인가(v2.742 DEV-04). peer zone 은 첫 멤버로 `00:02:00:00:00:03:xx:yy` 같은 WWN 모양의
+ * 값을 둔다 — 장비가 아니라 'peer zone 표지' 다. 첫 바이트 00 은 유효한 NAA 형식이 아니므로(NAA 1·2·5·6·C …) WWN 끝점으로
+ * 읽지 않는다. 예전에는 끝점으로 읽어 **모든 peer zone 이 그 값 하나로 한 연결 요소가 됐고**, 홀수 사이클이 생겨 끝점
+ * 전부가 middle 로 그려졌다. ⚠ 정직 기록: cfgshow 에 속성 멤버가 이 표기로 나오는지 실장비로 확인하지 못했다(합성 입력 재현).
+ */
+export const isPropertyMember = (s) => { const w = normWwn(s); return !!w && w.startsWith('00:'); };
+
 export const memberKind = (s) => {
   const t = String(s || '').trim();
+  if (isPropertyMember(t)) return 'property';
   if (normWwn(t)) return 'wwn';
   if (DP_RE.test(t)) return 'domainPort';
   if (NAME_RE.test(t)) return 'alias';
@@ -155,8 +164,11 @@ export function resolveZones(parsed, { activeCfg = '' } = {}) {
   }
   const expand = (list) => {
     const members = []; const wwns = new Set(); const unresolved = [];
+    let properties = 0;
     for (const raw of list || []) {
       const kind = memberKind(raw);
+      // v2.742(DEV-04): peer zone 속성 멤버 — 끝점이 아니다. 개수만 싣는다(조용히 빼지 않는다).
+      if (kind === 'property') { members.push({ raw, kind, wwn: null, alias: '' }); properties++; continue; }
       if (kind === 'wwn') { const w = normWwn(raw); members.push({ raw, kind, wwn: w, alias: '' }); wwns.add(w); continue; }
       if (kind === 'alias' && aliasWwn.has(raw)) {
         for (const w of aliasWwn.get(raw)) { members.push({ raw, kind: 'alias', wwn: w, alias: raw }); wwns.add(w); }
@@ -166,7 +178,7 @@ export function resolveZones(parsed, { activeCfg = '' } = {}) {
       members.push({ raw, kind, wwn: null, alias: kind === 'alias' ? raw : '' });
       unresolved.push(raw);
     }
-    return { members, wwns: [...wwns], unresolved };
+    return { members, wwns: [...wwns], unresolved, ...(properties ? { peer: true, properties } : {}) };
   };
 
   const effZones = parsed?.effective?.zones || {};
@@ -222,6 +234,24 @@ export function naaClass(wwn) {
 }
 
 /**
+ * zone 안에서 서로 통신하는 쌍(간선)(v2.742 DEV-04). 보통 zone 은 **모든 쌍**이다. peer zone 은 **principal ↔ peer 쌍만**이다 —
+ * peer 끼리(이니시에이터끼리) 간선을 넣으면 다중 이니시에이터 삼각형이 생겨 전부 middle 이 된다. principal 을 아는 것은 REST 경로
+ * (`principal-entry-name`)뿐이다 — SSH(cfgshow)에는 그 구분이 없어 peer zone 이어도 예전처럼 모든 쌍이다(정직 기록).
+ * @returns {Array<[string,string]>}
+ */
+export function zonePairs(z) {
+  const w = Array.isArray(z?.wwns) ? z.wwns : [];
+  const pr = new Set((Array.isArray(z?.principals) ? z.principals : []).map((x) => normWwn(x)).filter((x) => x && w.includes(x)));
+  const out = [];
+  if (pr.size && pr.size < w.length) {
+    for (const a of w) if (pr.has(a)) for (const b of w) if (!pr.has(b)) out.push([a, b]);
+    return out;
+  }
+  for (let i = 0; i < w.length; i++) for (let j = i + 1; j < w.length; j++) out.push([w[i], w[j]]);
+  return out;
+}
+
+/**
  * zone 그래프를 2-색칠해 양쪽을 자동 분리한다(연결 요소별).
  * @returns Map<wwn, { comp:number, color:0|1|null, conflict:boolean }>
  *   conflict=true 는 홀수 사이클 — 같은 색끼리 zone 된 것으로, 가상화 계층이거나 설정 오류다.
@@ -230,7 +260,8 @@ export function twoColor(zones) {
   const adj = new Map();
   const add = (a, b) => { if (!adj.has(a)) adj.set(a, new Set()); adj.get(a).add(b); };
   for (const z of zones) {
-    for (const a of z.wwns) { if (!adj.has(a)) adj.set(a, new Set()); for (const b of z.wwns) if (a !== b) add(a, b); }
+    for (const a of z.wwns) if (!adj.has(a)) adj.set(a, new Set());
+    for (const [a, b] of zonePairs(z)) { add(a, b); add(b, a); }
   }
   const out = new Map();
   let comp = 0;
@@ -317,7 +348,7 @@ export function buildZoneGraph(zones, ctx = {}) {
   for (const z of zones) {
     const w = z.wwns;
     for (const a of w) degree.set(a, (degree.get(a) || 0) + 1);
-    for (let i = 0; i < w.length; i++) for (let j = i + 1; j < w.length; j++) links.push({ a: w[i], b: w[j], zone: z.name });
+    for (const [a, b] of zonePairs(z)) links.push({ a, b, zone: z.name });   // v2.742(DEV-04): peer zone 은 principal↔peer 만
   }
   const aliasOf = {};
   for (const z of zones) for (const m of z.members) if (m.wwn && m.alias && !aliasOf[m.wwn]) aliasOf[m.wwn] = m.alias;
@@ -345,6 +376,9 @@ export function buildZoneGraph(zones, ctx = {}) {
     nodes, links, columns,
     zonesTotal: zones.length,
     unresolvedTotal: zones.reduce((a, z) => a + z.unresolved.length, 0),
+    // v2.742(DEV-04): peer zone 수와 끝점에서 뺀 속성 멤버 수 — 그림에서 빠진 것을 밝힌다.
+    peerZones: zones.filter((z) => z.peer).length,
+    propertyMembers: zones.reduce((a, z) => a + (Number(z.properties) || 0), 0),
   };
 }
 
@@ -388,10 +422,13 @@ export function zoneFindings(zones, graph, ctx = {}) {
   for (const z of zones) {
     // ⚠ `members`(원문 표기)만 세면, 호출자가 WWN 목록만 넘긴 zone 이 '멤버 0개' 로 오판된다.
     //   둘 중 큰 쪽을 멤버 수로 본다(테스트에서 실제로 걸린 결함).
-    const total = Math.max((z.members || []).length, (z.wwns || []).length);
+    // v2.742(DEV-04): peer zone 속성 멤버는 통신 상대가 아니다 — 멤버 수에서 뺀다.
+    const realMembers = (z.members || []).filter((m) => m?.kind !== 'property').length;
+    const total = Math.max(realMembers, (z.wwns || []).length);
     if (total < 2) { out.push({ zone: z.name, kind: 'single-member', severity: 'warn', text: `멤버가 ${total}개 — 통신 상대가 없습니다.` }); continue; }
     const inits = z.wwns.filter((w) => byWwn.get(w)?.side === 'initiator');
-    if (inits.length > 1) out.push({ zone: z.name, kind: 'multi-initiator', severity: 'warn', text: `이니시에이터로 판정된 멤버가 ${inits.length}개 — single-initiator 규약에서 벗어납니다(판정은 추정이니 확인 필요).` });
+    // peer zone 은 설계상 이니시에이터가 여럿이다(principal 하나 ↔ peer 여럿) — single-initiator 규약 위반으로 세지 않는다.
+    if (inits.length > 1 && !z.peer) out.push({ zone: z.name, kind: 'multi-initiator', severity: 'warn', text: `이니시에이터로 판정된 멤버가 ${inits.length}개 — single-initiator 규약에서 벗어납니다(판정은 추정이니 확인 필요).` });
     if (z.unresolved.length) out.push({ zone: z.name, kind: 'unresolved', severity: 'info', text: `미해석 멤버 ${z.unresolved.length}개: ${z.unresolved.slice(0, 3).join(', ')}${z.unresolved.length > 3 ? ' …' : ''} (별칭 정의가 출력에 없거나 Domain,Port 표기)` });
     if (logged.size) {
       const off = z.wwns.filter((w) => !logged.has(w));
@@ -424,6 +461,9 @@ export function compactZoning(parsed, resolved, { limits = ZONE_LIMITS } = {}) {
     // 해석된 WWN 우선, 미해석 멤버(Domain,Port·정의 없는 별칭)도 원문 그대로 남긴다.
     members: [...z.wwns, ...z.unresolved].slice(0, limits.membersPerZone),
     aliasOf: Object.fromEntries(z.members.filter((m) => m.wwn && m.alias).map((m) => [m.wwn, m.alias])),
+    // v2.742(DEV-04): peer zone 표지 — 속성 멤버는 members 에 싣지 않고 개수만.
+    ...(z.peer ? { peer: true, properties: z.properties || 0 } : {}),
+    ...(Array.isArray(z.principals) && z.principals.length ? { principals: z.principals.slice(0, limits.membersPerZone) } : {}),
   }));
   const aliasEntries = Object.entries(parsed?.defined?.aliases || {}).slice(0, limits.aliases);
   return {
@@ -446,12 +486,18 @@ export function compactZoning(parsed, resolved, { limits = ZONE_LIMITS } = {}) {
 export function zonesFromCompact(z) {
   return (z?.zones || []).map((row) => {
     const wwns = []; const unresolved = []; const members = [];
+    let properties = Number(row.properties) || 0;
     for (const raw of row.members || []) {
+      // v2.742(DEV-04): 구버전 수집기·엣지는 속성 멤버를 WWN 으로 실어 보냈다 — 읽을 때도 끝점에서 뺀다(옛 스냅샷도 고쳐진다).
+      if (isPropertyMember(raw)) { properties++; members.push({ raw, kind: 'property', wwn: null, alias: '' }); continue; }
       const w = normWwn(raw);
       if (w) { wwns.push(w); members.push({ raw, kind: 'wwn', wwn: w, alias: row.aliasOf?.[w] || '' }); }
       else { unresolved.push(raw); members.push({ raw, kind: memberKind(raw), wwn: null, alias: memberKind(raw) === 'alias' ? raw : '' }); }
     }
-    return { name: row.name, members, wwns: [...new Set(wwns)], unresolved };
+    const principals = Array.isArray(row.principals) ? [...new Set(row.principals.map((x) => normWwn(x)).filter(Boolean))] : [];
+    const peer = !!row.peer || properties > 0 || principals.length > 0;
+    return { name: row.name, members, wwns: [...new Set(wwns)], unresolved,
+      ...(peer ? { peer: true, properties } : {}), ...(principals.length ? { principals } : {}) };
   });
 }
 
@@ -472,6 +518,8 @@ export function zoneSummary(parsed, resolved, graph) {
     unknown: graph.nodes.filter((n) => n.side === 'unknown').length,
     links: graph.links.length,
     unresolved: graph.unresolvedTotal,
+    peerZones: graph.peerZones || 0,             // v2.742(DEV-04)
+    propertyMembers: graph.propertyMembers || 0, // 끝점에서 뺀 peer zone 속성 멤버 수
     truncated: !!parsed?.truncated,
   };
 }

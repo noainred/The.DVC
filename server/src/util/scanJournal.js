@@ -23,6 +23,13 @@
  *  · v2.741(TIMING-04): 같은 키에 대기 항목이 여럿일 수 있다(iDRAC 'cycle' 처럼 coversPending:false 인 기능 — 범위가 다른 실행이 같은 키로 온다).
  *    기동 때 같은 키라고 하나를 버리지 않는다(예전에는 다음 실행의 기록이 앞 대기 항목을 이력도 없이 지웠다). 키마다 최근 `PER_KEY_MAX` 개만 남기고
  *    넘친 것은 이력에 'superseded' 로 남긴다. 재개 실행(resumeOf)은 **자기 항목만** 지운다 — 다른 대기 항목은 그 뒤 자기 차례에 판정한다.
+ *  · v2.742(감사 RECENT-02·EDGE-02): **아직 시작하지 않은 대기 요청**(동시 실행 상한에 걸린 '지금 수집' — 지금은 아이실론만)도 남긴다
+ *    (`scanQueued`/`scanDequeued`, 파일의 `queued`). v2.741 TIMING-02 가 만든 대기열은 메모리에만 있어 재시작·자동 업그레이드가 오면
+ *    대기 요청이 **기록도 없이** 사라졌다(실행 중인 것만 '중단됨' 으로 남았다). 대기 요청은 '중단됨' 이 아니다 — 시작한 적이 없으므로
+ *    재개 횟수·재개 함수와 무관하고, 기동 때 그대로 남아 있다가 기능이 자기 대기열에 다시 넣는다(`queuedOf`). 대기 시한(`until`)이 지난 것과
+ *    재개가 꺼진(SCAN_RESUME=0) 기동에서는 다시 넣지 않고 이력에 사유를 남긴다(조용히 버리지 않는다). 같은 키로 스캔이 시작되면 대기 기록은
+ *    그 시작이 대신한다. `queuedScans()` 의 `resumable` = 기록이 실제로 파일에 남았고(마지막 쓰기 성공) 재개가 켜져 있음 — 자동 업그레이드는
+ *    그런 대기 요청을 기다리지 않는다(재시작 뒤 대기열로 돌아온다). 그렇지 않으면 기다린다(재시작이 그 요청을 지운다).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -68,6 +75,7 @@ function cleanMeta(meta) {
 }
 
 const _active = new Map();     // key -> entry (이 프로세스가 지금 돌리는 것)
+const _queued = new Map();     // key -> { kind, key, label, trigger, since, until, meta } — 아직 시작하지 않은 대기 요청(v2.742 RECENT-02)
 let _interrupted = [];         // 이전 프로세스가 끝내지 못한 것 — { ...entry, detectedAt, state:'pending', tries, nextAt }
 let _history = [];             // 재개 결과
 const _resumers = new Map();   // kind -> async (entry) => { outcome, note }
@@ -78,7 +86,7 @@ let _processing = false;
 let _bootAt = now();
 
 function write() {
-  const doc = { v: 1, savedAt: now(), active: Object.fromEntries(_active), interrupted: _interrupted, history: _history };
+  const doc = { v: 1, savedAt: now(), active: Object.fromEntries(_active), interrupted: _interrupted, history: _history, queued: [..._queued.values()] };
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     atomicWriteFileSync(FILE(), JSON.stringify(doc), { mode: 0o600 });
@@ -97,6 +105,13 @@ function normEntry(e) {
     since: numOrNull(e.since) ?? 0, resumes: Math.max(0, Math.min(99, numOrNull(e.resumes) ?? 0)),
     meta: cleanMeta(e.meta), pid: numOrNull(e.pid),
   };
+}
+
+/** 대기 요청 정규화(v2.742) — 대기 시한(until)을 모르면 null(시한 판정은 기능이 since 로 다시 한다). */
+function normQueued(e) {
+  const b = normEntry(e);
+  if (!b) return null;
+  return { kind: b.kind, key: b.key, label: b.label, trigger: b.trigger, since: b.since, until: numOrNull(e.until), meta: b.meta };
 }
 
 /** 기동 시 1회 — 파일의 active 를 '재시작으로 중단됨' 으로 옮긴다. 이전 기동이 재개하지 못한 pending 도 이어 받는다. */
@@ -138,10 +153,24 @@ function loadOnce() {
   }
   for (const x of drop) pushHistory(x, 'superseded', `같은 대상의 재개 대기 항목이 ${PER_KEY_MAX}개를 넘어 가장 오래된 것을 다시 시작하지 않습니다(다음 주기·수동 실행은 그대로 동작합니다)`);
   _interrupted = out.filter((x) => !drop.has(x));
+  // v2.742(RECENT-02): 시작하지 못한 대기 요청 — 그대로 남겨 두고 기능이 자기 대기열에 다시 넣는다(queuedOf).
+  //   대기 시한이 지난 것·재개가 꺼진 기동은 다시 넣지 않고 이력에 사유를 남긴다(조용한 소실 금지).
+  const qdrop = [];
+  for (const raw of Array.isArray(doc.queued) ? doc.queued : []) {
+    const q = normQueued(raw);
+    if (!q) continue;
+    const k = keyOf(q.kind, q.key);
+    if (_queued.has(k)) continue;
+    if (q.until != null && _bootAt > q.until) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'expired', "재시작 전 '지금 수집' 대기 요청이 대기 시한을 넘겨 다시 넣지 않았습니다 — 다시 누르세요"); qdrop.push(q); continue; }
+    if (!resumeEnabled()) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'skipped', "SCAN_RESUME=0 — 재시작 전 '지금 수집' 대기 요청을 다시 넣지 않았습니다(다시 누르세요)"); qdrop.push(q); continue; }
+    _queued.set(k, q);
+  }
+  if (_queued.size) console.warn(`[scan-journal] 재시작 전 시작하지 못한 '지금 수집' 대기 요청 ${_queued.size}개를 찾았습니다 — 그 기능의 대기열에 다시 넣습니다`);
+  if (qdrop.length) console.warn(`[scan-journal] 재시작 전 대기 요청 ${qdrop.length}개는 다시 넣지 않았습니다(대기 시한 초과·SCAN_RESUME=0 — 이력 참조)`);
   _loadInfo = { at: _bootAt, found: fresh.length, error: null, corruptKept: null };
   if (fresh.length) console.warn(`[scan-journal] 재시작으로 중단된 스캔 ${fresh.length}개를 찾았습니다 — ${_interrupted.slice(0, 5).map((x) => `${x.kind}:${x.label || x.key}`).join(', ')}${_interrupted.length > 5 ? ' …' : ''}`);
   if (drop.size) console.warn(`[scan-journal] 같은 대상의 재개 대기 항목이 상한(${PER_KEY_MAX}개)을 넘어 오래된 ${drop.size}개를 이력으로 옮겼습니다`);
-  if (fresh.length || drop.size) write();
+  if (fresh.length || drop.size || qdrop.length) write();
 }
 loadOnce();
 
@@ -159,6 +188,7 @@ export function scanStarted(kind, key, { label = '', trigger = '', meta = {}, re
   const e = normEntry({ kind, key, label, trigger, since: now(), resumes: resumeOf ? (numOrNull(resumeOf.resumes) ?? 0) + 1 : 0, meta, pid: process.pid });
   if (!e) return;
   _active.set(keyOf(kind, key), e);
+  _queued.delete(keyOf(kind, key)); // v2.742(RECENT-02): 같은 대상의 대기 요청은 이 시작이 대신한다(같은 쓰기에 함께 남는다)
   // 같은 대상의 '중단됨' 대기 항목은 이 시작이 대신한다(주기 스캔이 먼저 돌았다 — 재개가 두 번째 스캔을 열지 않게).
   // v2.741(TIMING-04): coversPending:false 인 기능(iDRAC — 같은 키로 범위가 다른 실행)의 재개는 **자기 항목만** 지운다.
   //   예전에는 같은 키의 다른 대기 항목까지 'resumed' 로 지워, 그 항목의 남은 대역을 다시 돌리지 않고도 이력은 '다시 시작했다' 고 말했다.
@@ -186,6 +216,40 @@ export function scanProgress(kind, key, patch = {}, { durable = true } = {}) {
 /** 스캔 끝(성공·실패 모두) — 기록을 지운다. */
 export function scanFinished(kind, key) {
   if (_active.delete(keyOf(kind, key))) write();
+}
+
+/**
+ * v2.742(RECENT-02): 아직 시작하지 않은 대기 요청을 남긴다(동기 — 곧바로 재시작이 와도 남게).
+ * @param {{label?:string, trigger?:string, since?:number, holdMs?:number, meta?:object}} [o] holdMs = 대기 시한(since 부터) — 지나면 기동 때 다시 넣지 않는다
+ */
+export function scanQueued(kind, key, { label = '', trigger = '', since = null, holdMs = null, meta = {} } = {}) {
+  if (!KIND_RE.test(String(kind || '')) || !key) return;
+  const at = numOrNull(since) ?? now();
+  const hold = numOrNull(holdMs);
+  const q = normQueued({ kind, key, label, trigger, since: at, until: hold != null && hold > 0 ? at + hold : null, meta });
+  if (!q) return;
+  _queued.set(keyOf(kind, key), q);
+  write();
+}
+
+/** v2.742: 대기 요청 기록을 지운다(시작·시한 초과·대상 없음 — 사유는 기능이 자기 기록에 남긴다). */
+export function scanDequeued(kind, key) {
+  if (_queued.delete(keyOf(kind, key))) write();
+}
+
+/** v2.742: 한 기능의 대기 요청(복사본, 먼저 넣은 것부터) — 기능이 기동 때 자기 대기열에 다시 넣는다. */
+export function queuedOf(kind) {
+  return [..._queued.values()].filter((x) => x.kind === kind).sort((a, b) => a.since - b.since).map((x) => structuredClone(x));
+}
+
+/**
+ * v2.742: 대기 요청 목록(자동 업그레이드 대기·상태 화면). 대기 시한이 지난 것은 뺀다(기능이 정리하지 못해도 업그레이드를 막지 않게).
+ * `resumable` — 기록이 파일에 남아 있고(마지막 쓰기 성공) 재개가 켜져 있어 재시작 뒤 대기열로 돌아오는가.
+ */
+export function queuedScans(at = now()) {
+  const durable = !_lastWriteError && resumeEnabled();
+  return [..._queued.values()].filter((x) => x.until == null || at <= x.until)
+    .map((x) => ({ kind: x.kind, key: x.key, label: x.label, trigger: x.trigger, since: x.since, until: x.until, queued: true, resumable: durable }));
 }
 
 /**
@@ -305,6 +369,7 @@ export function journalFor(kind) {
     running: runningScans().filter((x) => x.kind === kind),
     interrupted: _interrupted.filter((x) => x.kind === kind).map(view),
     recent: _history.filter((x) => x.kind === kind).slice(0, 10),
+    queued: queuedScans().filter((x) => x.kind === kind),   // v2.742: 아직 시작하지 않은 대기 요청(재시작에도 남는다)
     resumeLimit: RESUME_LIMIT,
   };
 }
@@ -313,18 +378,18 @@ export function journalFor(kind) {
 export function scanJournalStatus() {
   return {
     bootAt: _bootAt, load: _loadInfo, resumeEnabled: resumeEnabled(), resumeDelayMs: resumeDelayMs(), resumeLimit: RESUME_LIMIT,
-    running: runningScans(), interrupted: _interrupted.map(view), recent: _history.slice(0, 20), lastWriteError: _lastWriteError,
+    running: runningScans(), interrupted: _interrupted.map(view), queued: queuedScans(), recent: _history.slice(0, 20), lastWriteError: _lastWriteError,
   };
 }
 
 /** 테스트 전용 — 파일을 다시 읽는다(새 기동 흉내). 등록된 재개 함수는 그대로 둔다. */
 export function _reloadForTest() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
-  _active.clear(); _interrupted = []; _history = []; _lastWriteError = null; _processing = false;
+  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _lastWriteError = null; _processing = false;
   loadOnce();
 }
 export function _resetForTest() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
-  _active.clear(); _interrupted = []; _history = []; _resumers.clear(); _lastWriteError = null; _processing = false;
+  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _resumers.clear(); _lastWriteError = null; _processing = false;
   try { fs.rmSync(FILE(), { force: true }); } catch { /* */ }
 }

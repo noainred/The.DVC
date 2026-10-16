@@ -6,6 +6,8 @@ import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
 import { visibleNsxManagers } from '../../nsx/scope.js';
 import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
+import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
+import { isAdminReq } from '../../auth/addressMask.js';
 
 export function registerVcTools(api) {
 
@@ -76,7 +78,11 @@ api.get('/tools/solutions', requirePerm('tools'), (req, res) => {
   const corpOfMgr = (m) => (m.vcenterId && corpByVcId.get(m.vcenterId)) || m.region || m.location?.region || '(법인 미지정)';
 
   const items = vcs.map((vc) => {
-    const sols = vc.solutions || [];
+    // v2.742(감사 VC-06): 조회 실패·아직 읽지 않음은 '확장 솔루션 없음' 이 아니라 확인 불가다 — solutionsUnread 로 밝힌다(사유 원문은 admin 만).
+    //   원소는 객체만(엣지가 보낸 모양이 문자열이어도 sols.filter 가 던지지 않게 — VC-07 소비처 쪽 방어).
+    const sols = vcListItems(vc, 'solutions');
+    const su = vcListUnread(vc, 'solutions');
+    const solutionsUnread = su ? { why: su.why, text: LIST_UNREAD_TEXT[su.why] || su.why, ...(isAdminReq(req) && su.error ? { error: su.error } : {}) } : null;
     const hosts = (snap.hosts || []).filter((h) => h.vcenterId === vc.id);
     const esxiMap = new Map();
     for (const h of hosts) {
@@ -92,6 +98,7 @@ api.get('/tools/solutions', requirePerm('tools'), (req, res) => {
       esxi: [...esxiMap.entries()].map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
       nsxManagers: siteNsx.map((m) => ({ name: m.name, version: m.version || '', status: m.status, host: m.host, region: m.region || m.location?.region || '' })),
       solutions: sols,
+      solutionsUnread,
       nsx: sols.filter((s) => /nsx/i.test(s.key) || /nsx/i.test(s.label)), // vCenter 확장에 등록된 NSX(참고)
     };
   });
@@ -116,6 +123,7 @@ api.get('/tools/solutions', requirePerm('tools'), (req, res) => {
     esxiVersions: dist((snap.hosts || []).filter((h) => !allowed || allowed.has(h.vcenterId)).map((h) => `${h.version || 'unknown'}${h.build ? ` (b${h.build})` : ''}`)), // ESXi 버전 분포(호스트 수)
     nsxVersions,                                                                            // NSX Manager 버전 분포(매니저 수·설치 법인) — 실수집
     nsxManagerCount: mgrs.length,
+    solutionsUnread: items.filter((it) => it.solutionsUnread).length,   // v2.742(VC-06): 확장 목록을 읽지 못한 vCenter 수
   });
 });
 

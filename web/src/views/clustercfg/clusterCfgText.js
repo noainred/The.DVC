@@ -100,3 +100,74 @@ export function ageText(at, now = Date.now()) {
   const m = Math.max(0, Math.round((now - at) / 60_000));
   return m < 60 ? `${m}분 전에 읽은 값` : `${Math.round(m / 60)}시간 전에 읽은 값`;
 }
+
+/*
+ * v2.742(감사 VC-05) — 같은 vCenter 안에 같은 이름 클러스터가 둘 이상일 수 있다(vSphere 이름은 데이터센터 안에서만 유일).
+ *   서버 행은 ref(클러스터 moref)·vcDatacenter(데이터센터 이름)·sameName(같은 이름 행 수)을 싣는다.
+ */
+// 행의 클러스터 moref — 점검 표(/tools/cluster-check)는 ref, N+1 표(/tools/insights clusters)는 clusterRef 로 싣는다.
+const refOfRow = (r) => (typeof r?.ref === 'string' && r.ref ? r.ref : typeof r?.clusterRef === 'string' && r.clusterRef ? r.clusterRef : null);
+/** 표의 행 키 — ref 가 있으면 ref, 없으면(구버전 엣지 스냅샷) 예전 이름 키. ref 가 없는 같은 이름 구성 행(이름 겹침)은 순번을 붙인다. */
+export function clusterRowKey(r, i) {
+  if (!r) return '';
+  const ref = refOfRow(r);
+  if (ref) return `${r.vcenterId}|r:${ref}`;
+  const base = `${r.vcenterId}|${r.name ?? r.cluster ?? ''}`;
+  // ref 를 싣지 않은 옛 구성이 같은 이름으로 둘 이상이면(nameCollision) 이름 키가 겹친다 — 표 위치로 가른다.
+  return r.nameCollision > 1 && Number.isInteger(i) ? `${base}#${i}` : base;
+}
+/** 클러스터 이름 표시 — 같은 이름이 둘 이상일 때만 데이터센터(모르면 ref)를 붙인다. */
+export function clusterNameLabel(r) {
+  const name = r?.name ?? r?.cluster ?? '';
+  if (!r || !(r.sameName > 1)) return String(name);
+  if (r.vcDatacenter) return `${name} · ${r.vcDatacenter}`;
+  const ref = refOfRow(r);
+  if (ref) return `${name} (${ref})`;
+  return `${name} (같은 이름 ${r.sameName}개 — 구분 불가)`;
+}
+/**
+ * 점검 표 머리 안내 — 이름 키로 묶은 vCenter(호스트가 클러스터 식별자를 싣지 않는 구버전 엣지 보고·REST 폴백 수집)에서
+ * 같은 이름 구성이 둘 이상이라 호스트를 어느 클러스터에도 붙이지 않은 수(coverage.hostsAmbiguous). 0·없음이면 null.
+ */
+export function hostsAmbiguousNote(c) {
+  const n = c?.hostsAmbiguous;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null;
+  return `같은 이름의 클러스터가 둘 이상인데 호스트가 클러스터 식별자를 싣지 않아(구버전 엣지 보고·REST 폴백 수집) 호스트 ${n.toLocaleString()}대를 어느 클러스터에도 붙이지 않았습니다 — 그 행의 호스트 칸은 0 이 아니라 모름(—)이고 호스트 기반 판정(EVC 혼재·유효 호스트)은 빠졌습니다. 그 vCenter 를 수집하는 노드를 업그레이드하면 구분됩니다.`;
+}
+/**
+ * 상세 창(VM·호스트)이 /tools/cluster-check/of 에 넘길 조회 인자 — 서버 라우트가 읽는 쿼리 이름(vcenterId·cluster·vmId·hostId·clusterRef)과 1:1.
+ * 같은 이름 클러스터가 여러 데이터센터에 있을 수 있어 호스트는 hostId, VM 은 vmId 를 함께 넘긴다(서버가 그 ref 로 고른다).
+ * 넘길 것이 없으면(클러스터 없음·standalone) null.
+ */
+export function clusterOfParams(item, isVm) {
+  if (!item?.vcenterId || !item?.cluster || item.cluster === 'standalone') return null;
+  const params = { vcenterId: item.vcenterId, cluster: item.cluster };
+  if (isVm && item.id) params.vmId = item.id;
+  if (!isVm && item.id) params.hostId = item.id;
+  if (typeof item.clusterRef === 'string' && item.clusterRef) params.clusterRef = item.clusterRef;
+  return params;
+}
+/** 상세 창 '클러스터 구성' 칸의 빈 사유 — 서버 clusterOf 의 reason 과 1:1. */
+export const CLUSTER_MISS_TEXT = Object.freeze({
+  standalone: '클러스터에 속하지 않은 호스트입니다',
+  'not-collected': '이 클러스터의 구성을 아직 읽지 않았습니다',
+  ambiguous: '같은 이름의 클러스터가 여러 데이터센터에 있어 어느 것인지 정하지 못했습니다 — 클러스터 HA·DRS 점검 화면에서 데이터센터로 구분해 보세요',
+});
+export function clusterMissText(d) {
+  if (!d || d.cluster) return null;
+  if (d.reason === 'ambiguous') return `${CLUSTER_MISS_TEXT.ambiguous}${d.candidates ? `(후보 ${d.candidates}개)` : ''}`;
+  return CLUSTER_MISS_TEXT[d.reason] || CLUSTER_MISS_TEXT['not-collected'];
+}
+/** 상세 창 한 줄 — clusterMissText 에 '아직 안 읽음' 일 때만 기다리면 채워진다는 안내를 붙인다(이름 겹침은 기다려도 바뀌지 않는다). */
+export function clusterMissLine(d) {
+  const t = clusterMissText(d);
+  if (!t) return null;
+  const waiting = d.reason !== 'ambiguous' && d.reason !== 'standalone';
+  return waiting ? `${t} — 수집 서버가 주기적으로 읽습니다(엣지가 수집하는 vCenter 는 엣지 업그레이드 뒤에 채워집니다).` : `${t}.`;
+}
+/** 표의 호스트 칸 — 이름 겹침으로 호스트를 붙이지 못한 행(hosts null)은 0 이 아니라 '—'. */
+export function clusterHostsText(r) {
+  if (!r) return '—';
+  if (r.hosts == null) return r.hostsAmbiguous ? `— (같은 이름 클러스터 호스트 ${r.hostsAmbiguous}대 구분 불가)` : '—';
+  return String(r.hosts);
+}

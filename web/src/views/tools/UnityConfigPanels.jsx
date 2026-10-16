@@ -12,9 +12,13 @@
  * 4. **못 읽은 명령을 숨기지 않는다**(`missingCmds`) — '이 장비에 없는 명령' 인지 사용자가 알아야
  *    구성 정보가 비어 있는 이유를 안다.
  * 5. **무엇으로 읽었는지 밝힌다**(`usedCmds`) — 명령 후보 체인이라 버전마다 쓰인 명령이 다르다.
- * 6. (v2.526) **구성 정보는 긴 주기로만 수집한다**(기본 6시간) — 매 주기 20여 개 명령을 SSH 로
- *    돌리면 장비와 회선을 붙잡는다. 그래서 화면은 **언제 수집한 구성인지**(`configAt`)를 반드시
- *    적는다. 낡은 값을 지금 값인 척하지 않는 것이 이 표시의 목적이다.
+ * 6. (v2.742 LEFT-04 정리) v2.526 의 '구성 2단 수집 + 6시간 캐시'(`configAt`·`configEveryMs`·`configRound`)와
+ *    `UNITY_SSH_DEEP=0`(`deepSkipped`)·`hwNote` 는 v2.542 재작성으로 수집기에서 사라졌다 — 서버가 보내지 않는
+ *    필드를 읽는 분기를 지웠다(없는 env 를 안내하던 문구 포함). 2.542 이전 엣지의 낡은 스냅샷이 오면 그 줄만
+ *    보이지 않을 뿐 나머지 값은 그대로 그린다.
+ *    `power` 는 v2.667 부터 전 장비 공용 모양(`{watts, read, supplies:개수}`)이라 이 패널이 읽는 옛 svc_diag 모양
+ *    (`supplies` 배열·`totalWatts`)이 아니다 — 옛 모양일 때만 이 패널의 값으로 본다(공용 모양 하나로 빈
+ *    '장비 구성 정보' 머리만 그려지던 것). 공용 전력은 '전체 소비 전력' 화면이 보여 준다.
  * 7. (v2.526) **빈 슬롯(`empty`)을 고장으로 세지 않는다** — `svc_diag -s spinfo` 의 FRU 트리는
  *    비어 있는 DIMM/디스크 슬롯을 `REMOVED` 로 보고한다(실측: SPA 의 정상 DIMM 12개 × 8GB =
  *    96GB 가 로그인 배너와 일치했다). 빈 슬롯을 고장으로 세면 정상 장비가 전부 '이상' 이 된다.
@@ -53,10 +57,11 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
   const missing = ex.missingCmds || null;
   // v2.526: `svc_diag -s spinfo` 계열 — Unisphere 계정 없이 SSH 만으로 읽히는 FRU 상태·부품·전원.
   const spHw = ex.hw || null;
-  const power = ex.power || null;
+  // v2.742(LEFT-04): 옛 svc_diag 모양만(위 머리말 6) — 공용 전력 모양은 이 패널의 값이 아니다.
+  const power = ex.power && (Array.isArray(ex.power.supplies) || ex.power.totalWatts != null) ? ex.power : null;
   const quota = ex.quota || null;
   const has = hw || ports || prov || disks || lic || spHw || power || quota || ex.software?.length;
-  if (!has && !missing && !ex.deepSkipped) return null;
+  if (!has && !missing) return null;
 
   return (
     <div style={{ marginTop: 10 }}>
@@ -81,21 +86,6 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
         {power?.totalWatts != null && <span>입력 전력 <b style={{ color: 'var(--text)' }}>{power.totalWatts}W</b>{spHw?.dpeTempC != null ? ` · DPE ${spHw.dpeTempC}℃` : ''}</span>}
       </div>
 
-      {/* v2.526: 구성은 긴 주기(기본 6시간)로만 수집한다 — **언제 수집한 값인지** 밝히지 않으면
-          낡은 구성을 지금 값으로 오해한다. 주기 숫자는 서버가 준 값(`configEveryMs`)만 쓴다. */}
-      {ex.configAt && (
-        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-          구성 수집 시각 <b style={{ color: 'var(--text)' }}>{new Date(ex.configAt).toLocaleString('ko-KR')}</b>
-          {ex.configEveryMs ? ` · 약 ${Math.round(ex.configEveryMs / 60000)}분마다 갱신` : ''}
-          {ex.configRound ? ' · 이번 주기에 갱신됨' : ' · 직전 수집분을 재사용(용량·상태는 매 주기 갱신)'}
-        </div>
-      )}
-      {ex.hwNote && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>⚠ {ex.hwNote}</div>}
-      {ex.deepSkipped && (
-        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-          ℹ 구성 상세 수집이 꺼져 있습니다(<code>UNITY_SSH_DEEP=0</code>) — 용량·상태만 수집합니다.
-        </div>
-      )}
       {/*
         * ⚠ v2.546 — 제외된 풀 고지는 `usageTrust` **한 곳**이 문구를 만든다(목록 배지와 같은 소유자).
         *   예전에는 여기서 `poolsUnreadable` 만 자체 문구로 적어, '사용량만 못 읽은 풀'

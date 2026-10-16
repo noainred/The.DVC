@@ -9,6 +9,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import {
   CLUSTER_TEXT, SEV_LABEL, SEV_BADGE, RULE_TYPE_LABEL, codeChips, findingDetail, coverageText, coverageNote, haText, drsText, evcText,
+  clusterRowKey, clusterNameLabel, clusterHostsText, hostsAmbiguousNote,
 } from '../clustercfg/clusterCfgText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
@@ -38,6 +39,46 @@ function RulesCell({ row }) {
       {row.rules.length > 6 && <span className="muted" style={{ fontSize: 12 }}>외 {row.rules.length - 6}개</span>}
       {more > 0 && <span className="muted" style={{ fontSize: 12 }} title="규칙 목록은 클러스터당 50개까지 싣습니다">· 목록 밖 {more}개</span>}
     </div>
+  );
+}
+
+/**
+ * 점검 표 — 렌더 스모크 테스트가 직접 그린다. v2.742(감사 VC-05): 같은 vCenter 안 같은 이름 클러스터(다른 데이터센터)는
+ * 서버가 따로 싣는다 — 행 키·이름·호스트 칸은 clusterCfgText 헬퍼 하나(이름 키로 쓰면 React 중복 키가 된다).
+ */
+export function ClusterRowsTable({ rows }) {
+  return (
+    <STable minWidth={1100}>
+      <thead><tr><th>클러스터</th><th>vCenter</th><th>호스트</th><th>vSphere HA</th><th>DRS</th><th>EVC</th><th>선호도 규칙</th><th>판정</th></tr></thead>
+      <tbody>
+        {rows.map((r, ri) => (
+          <tr key={clusterRowKey(r, ri)}>
+            <td style={{ minWidth: 140 }}><b>{clusterNameLabel(r)}</b>
+              {r.nameCollision > 1 && <span className="muted" style={{ fontSize: 11, display: 'block', whiteSpace: 'normal' }}>같은 이름 구성 {r.nameCollision}개 — 호스트를 붙이지 않음</span>}</td>
+            <td className="muted" style={{ fontSize: 12 }}>{r.vcenterName}</td>
+            <td data-sort={r.hosts ?? ''} style={{ whiteSpace: 'normal' }}>
+              {r.numHosts != null && r.numEffectiveHosts != null && r.numEffectiveHosts < r.numHosts ? `${r.numEffectiveHosts} / ${r.numHosts}` : clusterHostsText(r)}
+              {r.hostsDisconnected > 0 && <span className="muted" style={{ fontSize: 11, display: 'block' }}>끊김 {r.hostsDisconnected}</span>}
+            </td>
+            <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{r.collected ? haText(r.ha) : <span className="muted">아직 안 읽음</span>}</td>
+            <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{r.collected ? drsText(r.drs) : '—'}</td>
+            <td style={{ fontSize: 12 }}>{r.collected ? evcText(r.evc) : '—'}</td>
+            <td style={{ whiteSpace: 'normal', minWidth: 180 }}><RulesCell row={r} /></td>
+            <td data-sort={r.sev ? { crit: 0, warn: 1, info: 2 }[r.sev] : 9} style={{ whiteSpace: 'normal' }}>
+              {r.findings.length === 0 ? <span className="muted" style={{ fontSize: 12 }}>{r.collected ? '확인할 항목 없음' : '판정 안 함'}</span> : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {r.findings.map((f, i) => (
+                    <span key={`${f.code}-${i}`} className={`badge ${SEV_BADGE[f.sev]}`} title={[CLUSTER_TEXT[f.code]?.fix, findingDetail(f)].filter(Boolean).join(' · ')} style={{ whiteSpace: 'nowrap' }}>
+                      {CLUSTER_TEXT[f.code]?.title || f.code}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </STable>
   );
 }
 
@@ -105,6 +146,7 @@ export default function ClusterCheckTool({ scope }) {
         {cov?.cfg > 0 && ` · HA 켜짐 ${t.haOn ?? 0} / 꺼짐 ${t.haOff ?? 0} · DRS 켜짐 ${t.drsOn ?? 0} / 꺼짐 ${t.drsOff ?? 0} · 규칙 ${t.rules ?? 0}개(위반 ${t.rulesViolated ?? 0})`}
       </div>
       {note && <div className="banner" style={{ marginBottom: 8 }}>{note}</div>}
+      {hostsAmbiguousNote(cov) && <div className="banner" style={{ marginBottom: 8, whiteSpace: 'normal' }}>{hostsAmbiguousNote(cov)}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
@@ -136,36 +178,7 @@ export default function ClusterCheckTool({ scope }) {
             {cov?.clusters === 0 ? '클러스터가 없습니다.' : (code || sev || qApplied) ? '조건에 맞는 클러스터가 없습니다.' : '표시할 클러스터가 없습니다.'}
           </div>
         ) : (
-          <STable minWidth={1100}>
-            <thead><tr><th>클러스터</th><th>vCenter</th><th>호스트</th><th>vSphere HA</th><th>DRS</th><th>EVC</th><th>선호도 규칙</th><th>판정</th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.vcenterId}|${r.name}`}>
-                  <td style={{ minWidth: 140 }}><b>{r.name}</b></td>
-                  <td className="muted" style={{ fontSize: 12 }}>{r.vcenterName}</td>
-                  <td data-sort={r.hosts}>
-                    {r.numHosts != null && r.numEffectiveHosts != null && r.numEffectiveHosts < r.numHosts ? `${r.numEffectiveHosts} / ${r.numHosts}` : r.hosts}
-                    {r.hostsDisconnected > 0 && <span className="muted" style={{ fontSize: 11, display: 'block' }}>끊김 {r.hostsDisconnected}</span>}
-                  </td>
-                  <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{r.collected ? haText(r.ha) : <span className="muted">아직 안 읽음</span>}</td>
-                  <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{r.collected ? drsText(r.drs) : '—'}</td>
-                  <td style={{ fontSize: 12 }}>{r.collected ? evcText(r.evc) : '—'}</td>
-                  <td style={{ whiteSpace: 'normal', minWidth: 180 }}><RulesCell row={r} /></td>
-                  <td data-sort={r.sev ? { crit: 0, warn: 1, info: 2 }[r.sev] : 9} style={{ whiteSpace: 'normal' }}>
-                    {r.findings.length === 0 ? <span className="muted" style={{ fontSize: 12 }}>{r.collected ? '확인할 항목 없음' : '판정 안 함'}</span> : (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {r.findings.map((f, i) => (
-                          <span key={`${f.code}-${i}`} className={`badge ${SEV_BADGE[f.sev]}`} title={[CLUSTER_TEXT[f.code]?.fix, findingDetail(f)].filter(Boolean).join(' · ')} style={{ whiteSpace: 'nowrap' }}>
-                            {CLUSTER_TEXT[f.code]?.title || f.code}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
+          <ClusterRowsTable rows={rows} />
         )}
       </div>
       {data.omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>심각도 순 상위 {rows.length.toLocaleString()}개만 표시했습니다 — {data.omitted.toLocaleString()}개는 조건으로 좁혀 보세요.</div>}

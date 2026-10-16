@@ -15,7 +15,7 @@ import { scanGuestLoginFails } from './guestLoginScan.js';
 import { scanGuestNetCounters } from './guestNetScan.js';
 import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
-import { notify } from '../alerts.js';
+import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';

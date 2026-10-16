@@ -5,7 +5,7 @@
  * ⚠ 실장비 검증 전: 경로·필드는 Unisphere REST 문서 지식 기반 — 섹션별 오류 문구로 드러남.
  */
 import { emptySnapshot } from '../types.js';
-import { makeGetter } from './restCommon.js';
+import { makeGetter, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { healthWord } from '../healthWord.js';
 import { powerResult, powerProbe, applyScannedPower } from '../power.js';
@@ -130,7 +130,7 @@ export async function collect(device, { signal = null } = {}) {
   const sect = { system: 'config', cap: 'capacity', sps: 'nodes', users: 'accounts', alerts: 'alerts' };
   const step = async (key, fn) => {
     try { raw[key] = await fn(); }
-    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (isCredReject(e)) throw e; }
   };
   try {
     await step('system', () => get('/api/types/system/instances?fields=name,model,serialNumber'));
@@ -142,7 +142,7 @@ export async function collect(device, { signal = null } = {}) {
     await step('alerts', () => get(`/api/types/alert/instances?fields=id&filter=state ne 2&per_page=${UNITY_ALERT_PER_PAGE}`));
     // v2.667 — 전원. 다른 섹션과 따로 조회한다(필드가 없는 버전이 오류를 내도 system 조회를 깨지 않게).
     try { raw.power = await get(UNITY_POWER_PATH); }
-    catch (e) { if (/401/.test(e.message)) throw e; raw.powerErr = String(e.message || e).slice(0, 200); }
+    catch (e) { if (isCredReject(e)) throw e; raw.powerErr = String(e.message || e).slice(0, 200); }
   } catch (e) {
     const out = normalizeUnity(device, raw);
     out.error = e.message;

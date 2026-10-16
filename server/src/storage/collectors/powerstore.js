@@ -5,7 +5,7 @@
  * ⚠ 실장비 검증 전: 경로·필드는 PowerStore REST 문서 지식 기반 — 섹션별 오류 문구로 드러남.
  */
 import { emptySnapshot } from '../types.js';
-import { makeGetter, makeRawGetter, makePoster, tryAny } from './restCommon.js';
+import { makeGetter, makeRawGetter, makePoster, tryAny, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { healthWord } from '../healthWord.js'; // v2.599(감사 C2599-06) — 상태 판정 단일 소스
 // v2.599(감사 C2599-02·03): 점 선택·미해결 판정은 powerstoreCore.js 로 옮겼다 — SSH 수집기(powerstoreSsh.js)가 같은 코어를
@@ -250,6 +250,9 @@ export async function fetchSpaceMetrics({ post, csrf, get, rawGet = null, entity
         if (n) lastPts = pts;
         break; // 응답은 왔으나 값 없음 → 다음 구간
       } catch (e) {
+        // v2.742(감사 DEV-03): 자격증명 거부는 구간·토큰을 바꿔 다시 보내지 않는다(같은 계정으로 로그인 실패만 쌓인다 — 계정 잠금).
+        //   예전엔 맨 끝의 묶음 오류 문구에 '401' 이 남아 수집기가 문구로 알아챘는데, 판정이 표지(isCredReject)로 바뀌어 여기서 던진다.
+        if (isCredReject(e)) throw e;
         lastErr = e;
         tried.push(`generate ${interval}: ${e.message}`);
         // CSRF 토큰 거부 → login_session 에서 토큰을 받아 1회 재시도
@@ -258,7 +261,7 @@ export async function fetchSpaceMetrics({ post, csrf, get, rawGet = null, entity
             const r = await rawGet('/api/rest/login_session');
             const t = r.headers.get('DELL-EMC-TOKEN') || r.headers.get('dell-emc-token') || null;
             if (t && t !== token) { token = t; tried.push('login_session 에서 CSRF 토큰 재확보'); continue; }
-          } catch (e2) { tried.push(`login_session: ${e2.message}`); }
+          } catch (e2) { if (isCredReject(e2)) throw e2; tried.push(`login_session: ${e2.message}`); }
         }
         break;
       }
@@ -272,7 +275,7 @@ export async function fetchSpaceMetrics({ post, csrf, get, rawGet = null, entity
     ]);
     tried.push(`GET ${entity}: ${Array.isArray(pts) ? pts.length : 1}점`);
     if (accept(pts) || !lastPts) return { points: pts, debug: { source: 'get', interval: null, tried } };
-  } catch (e) { tried.push(`GET ${entity}: ${e.message}`); if (!lastErr) lastErr = e; }
+  } catch (e) { if (isCredReject(e)) throw e; tried.push(`GET ${entity}: ${e.message}`); if (!lastErr) lastErr = e; }
   if (lastPts) return { points: lastPts, debug: { source: 'generate', interval: null, tried } }; // 값 없는 점이라도 돌려 정직 표기(normalize 가 오류로 남김)
   throw new Error(`${lastErr ? lastErr.message : '공간 지표 없음'} [시도: ${tried.join(' · ')}]`);
 }
@@ -294,7 +297,7 @@ export async function collect(device, { signal = null } = {}) {
     // 취소(signal)면 남은 단계를 시도하지 않는다 — 연결 테스트 타임아웃 뒤 20여 회의 요청이 이어지지 않게(v2.421).
     if (signal?.aborted) throw new Error('수집 취소(타임아웃)');
     try { raw[key] = await fn(); }
-    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (/401/.test(e.message) || signal?.aborted) throw e; }
+    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (isCredReject(e) || signal?.aborted) throw e; }
   };
   let csrf = null;
   try {
@@ -345,7 +348,7 @@ export async function collect(device, { signal = null } = {}) {
         raw.alertsTruncated = Array.isArray(r) && r.length >= ALERT_LIMIT; // v2.599 C2599-08
         return r;
       } catch (e) {
-        if (/401/.test(e.message) || signal?.aborted) throw e;
+        if (isCredReject(e) || signal?.aborted) throw e;
         const all = await get(`/api/rest/alert?select=id,severity,state,is_acknowledged&limit=${ALERT_LIMIT}`);
         raw.alertsTruncated = Array.isArray(all) && all.length >= ALERT_LIMIT; // v2.599 C2599-08(해제분 포함 상한)
         raw.alertsNote = `state 필터 미지원(${String(e.message).slice(0, 80)}) — 전체를 받아 미해결만 집계`;
@@ -369,7 +372,7 @@ export async function collect(device, { signal = null } = {}) {
     // v2.667 — 전원. 하드웨어 목록과 따로 조회한다(extra_details 는 크고, 이 필터를 받지 않는 버전이 오류를 내도 목록을 깨지 않게).
     if (!signal?.aborted) {
       try { raw.psus = await get(POWERSTORE_POWER_PATH); }
-      catch (e) { if (/401/.test(e.message) || signal?.aborted) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
+      catch (e) { if (isCredReject(e) || signal?.aborted) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
     }
     await listStep('volumes', '/api/rest/volume?select=id,size,state', LIMIT);
     await listStep('hosts', '/api/rest/host?select=id', 1000);

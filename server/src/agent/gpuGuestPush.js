@@ -90,7 +90,12 @@ async function _pushGpuGuestNow() {
   }
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
   const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, host: v.host, vcenterId: v.vcenterId }));
-  const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
+  // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시).
+  // v2.742(VC-01 후속): 이 엣지의 push 주기(intervalMs)를 함께 싣는다 — 중앙 GPU 원인 판정(gpu/guestWhy.js edgeReportStaleMs)이
+  //   보고 수신 시각의 낡음 경계를 그 주기 × 3 + 30초(최소 30분)로 잡는다. 진단이 없는 주기(첫 폴 전)에는 예전처럼 싣지 않는다
+  //   (중앙은 diag 가 없으면 보관하지 않는다 — 빈 진단으로 '설정 없음' 이라 말하지 않게). 구버전 중앙은 모르는 필드를 버린다.
+  const rawDiag = getGpuGuestDiag();
+  const diag = rawDiag && typeof rawDiag === 'object' && !Array.isArray(rawDiag) ? { ...rawDiag, intervalMs: gpuGuestPushIntervalMs() } : rawDiag;
   // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {
     const json = Buffer.from(JSON.stringify({ agent: config.agent.name, hosts, vms, diag }));
@@ -122,10 +127,13 @@ export function gpuGuestPushStatus() {
   return { enabled: !!(config.agent.centralUrl && config.agent.centralToken), centralUrl: config.agent.centralUrl, last };
 }
 
+/** 이 엣지의 GPU 게스트 push 주기(ms) — 타이머와 진단의 intervalMs 가 같은 값을 쓴다(한 벌). */
+export function gpuGuestPushIntervalMs() { return Math.max(30_000, config.agent.inventoryIntervalMs || 60_000); }
+
 export function startGpuGuestPush() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return;
   // 게스트 수집(첫 폴)이 끝난 뒤 보내도록 35초 지연 후 시작, 이후 주기 반복.
-  const intervalMs = Math.max(30_000, config.agent.inventoryIntervalMs || 60_000);
+  const intervalMs = gpuGuestPushIntervalMs();
   setTimeout(() => pushGpuGuestNow().catch((e) => console.error('[gpu-guest-push] 실패:', e.message)), 35_000).unref?.();
   timer = setInterval(() => pushGpuGuestNow().catch(() => {}), intervalMs);
   timer.unref?.();

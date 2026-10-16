@@ -22,7 +22,8 @@ import { loadCollectors } from '../collector/registry.js';
 // v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
 import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus, sanitizeDeferral } from './autoState.js';
 import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
-import { runningScans, resumeOutlookText } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다
+import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다 · v2.742: 대기 요청
+import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
 import { poolSettled } from '../util/pool.js';
@@ -60,13 +61,37 @@ export function runningVmClones() {
   return [{ kind: 'vm-clone', key: String(r.jobId), label: `VM 복제 ${name || r.jobId}`.slice(0, 120), since: numOrNull(r.startedAt), phase: String(r.phase || '').slice(0, 120), resumable: false }];
 }
 
-/** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제는 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
-const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => x.kind !== 'vm-clone');
-function cloneOutlookText(blocking) {
-  const n = (Array.isArray(blocking) ? blocking : []).filter((x) => x.kind === 'vm-clone').length;
-  return n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '';
+/**
+ * v2.742(감사 TIMING-04): 자동 적용이 기다리는 **진행 중인 에이전트 대량 배포**(agent/bulkDeploy.js — 스캔 기록 밖이다).
+ *   실행 상태가 메모리에만 있고 노드마다 원격 install.sh 를 동기로 돌려, 재시작이 오면 진행 기록이 사라지고 설치가 중간에 끊긴 노드가 남을 수 있다
+ *   (이어 받는 경로가 없다). 상한은 스캔과 같은 UPGRADE_SCAN_DEFER_MAX_MS 다.
+ */
+export function runningBulkDeploys() {
+  try { return bulkDeployRuns(); } catch { return []; }
 }
-const joinOutlook = (...parts) => parts.filter(Boolean).join(' · ');
+/**
+ * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).
+ *   기록이 파일에 남은(resumable) 대기 요청은 재시작 뒤 그 기능의 대기열로 돌아오므로 기다리지 않는다(분리 실행 du 와 같은 판단 — TIMING-03).
+ *   기록을 쓰지 못했거나 재개가 꺼진(SCAN_RESUME=0) 기동이면 재시작이 그 요청을 지우므로 기다린다.
+ */
+function queuedEntries(list) { return (Array.isArray(list) ? list : []).filter((x) => x && x.queued); }
+const queuedLabel = (x) => `'지금 수집' 대기 ${x.label || x.key || x.kind}`.slice(0, 120);
+
+/** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제·대량 배포·기록 못 한 대기 요청은 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
+const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy']);
+const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => !NON_SCAN_KINDS.has(x.kind) && !x.queued);
+function cloneOutlookText(blocking) {
+  const list = Array.isArray(blocking) ? blocking : [];
+  const n = list.filter((x) => x.kind === 'vm-clone').length;
+  const d = list.filter((x) => x.kind === 'bulk-deploy').length;
+  const q = queuedEntries(list).length;
+  return joinOutlook(
+    n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '',
+    d ? `에이전트 대량 배포 ${d}건은 중간에 끊깁니다 — 설치가 끝나지 않은 노드가 남았는지 배포 화면에서 확인하고 다시 실행하세요` : '',
+    q ? `'지금 수집' 대기 요청 ${q}개는 기록을 남기지 못해 재시작 뒤 다시 돌지 않습니다 — 다시 누르세요` : '',
+  );
+}
+function joinOutlook(...parts) { return parts.filter(Boolean).join(' · '); }
 
 /** 기다리지 않은 분리 실행 du 가 있으면 그 사실을 적는다(조용히 끊지 않는다) — 없으면 ''. */
 function detachedNote(detached) {
@@ -74,6 +99,13 @@ function detachedNote(detached) {
   if (!n) return '';
   const names = detached.slice(0, 3).map((x) => x.label || x.kind).filter(Boolean).join(', ');
   return ` · 장비에서 분리 실행 중인 스캔 ${n}개${names ? `(${names}${n > 3 ? ' …' : ''})` : ''}는 기다리지 않습니다(재시작 뒤 같은 작업에 다시 붙어 결과를 받습니다)`;
+}
+/** v2.742(RECENT-02): 기다리지 않은(기록이 남은) 대기 요청이 있으면 그 사실을 적는다 — 없으면 ''. */
+function queuedNote(kept) {
+  const n = Array.isArray(kept) ? kept.length : 0;
+  if (!n) return '';
+  const names = kept.slice(0, 3).map((x) => x.label || x.key).filter(Boolean).join(', ');
+  return ` · 시작을 기다리는 '지금 수집' ${n}개${names ? `(${names}${n > 3 ? ' …' : ''})` : ''}는 기다리지 않습니다(재시작 뒤 대기열로 돌아와 차례로 시작합니다)`;
 }
 
 
@@ -184,6 +216,10 @@ export class UpgradeManager {
       runningScans: runningScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger, resumable: !!x.resumable })),
       // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡 — 수동 적용 전 경고와 자동 적용 대기가 함께 본다.
       runningClones: runningVmClones().map((x) => ({ kind: x.kind, label: x.label, since: x.since, phase: x.phase })),
+      // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포 — 수동 적용 전 경고와 자동 적용 대기가 함께 본다.
+      runningDeploys: runningBulkDeploys().map((x) => ({ kind: x.kind, label: x.label, since: x.since })),
+      // v2.742(RECENT-02): 시작을 기다리는 '지금 수집' — resumable 이면 재시작 뒤 대기열로 돌아온다(아니면 재시작이 지운다).
+      queuedScans: queuedScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger, resumable: !!x.resumable })),
       deferral: sanitizeDeferral(this.deferral), scanDeferMaxMs: scanDeferMaxMs(),
       ticking: this.#ticking,
       applying: !!this._applying,
@@ -327,17 +363,22 @@ export class UpgradeManager {
     // v2.741(감사 TIMING-03): 재시작 뒤 같은 작업에 다시 붙는 스캔(아이실론 분리 실행 du — scanJournal resumable)은 기다리지 않는다 —
     //   재시작이 와도 장비의 du 는 계속 돌고 다음 기동이 결과만 받는다. 예전에는 그것까지 '스캔 1개' 로 세어 거의 늘 상한까지 미뤘다.
     const detached = all.filter((x) => x.resumable);
+    // v2.742(감사 RECENT-02): 시작하지 못한 '지금 수집' 대기 요청 — 기록이 남은 것은 재시작 뒤 대기열로 돌아오므로 기다리지 않고(queuedKept),
+    //   기록을 못 남긴 것(쓰기 실패·SCAN_RESUME=0)은 재시작이 지우므로 기다린다.
+    const queued = queuedScans();
+    const queuedKept = queued.filter((x) => x.resumable);
     // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
-    const scans = [...all.filter((x) => !x.resumable), ...runningVmClones()];
-    if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached }; }
+    // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(재시작이 원격 설치를 중간에 끊는다 — 이어 받는 경로가 없다).
+    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys()];
+    if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached, queuedKept }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));
-    if (now >= this.deferral.until) return { wait: false, forced: true, scans, detached };
+    if (now >= this.deferral.until) return { wait: false, forced: true, scans, detached, queuedKept };
     if (!this.deferTimer) {
       this.deferTimer = setInterval(() => { this.#deferTick().catch((e) => console.warn(`[upgrade] 대기 확인 실패: ${e?.message || e}`)); }, DEFER_RECHECK_MS);
       this.deferTimer.unref?.();
     }
-    return { wait: true, forced: false, scans, detached };
+    return { wait: true, forced: false, scans, detached, queuedKept };
   }
 
   /** v2.737: 대기 중 1분마다 — 스캔이 끝났거나 상한을 넘겼으면 곧바로 적용한다. */
@@ -351,7 +392,7 @@ export class UpgradeManager {
     const d = this.#deferDecision(latest);
     if (d.wait) return;
     const waited = Date.now() - (since || Date.now());
-    const note = `${d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — ${joinOutlook(scansOnly(d.scans).length ? resumeOutlookText(scansOnly(d.scans)) : '', cloneOutlookText(d.scans))}` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`}${detachedNote(d.detached)}`;
+    const note = `${d.forced ? `실행 중 스캔 ${d.scans.length}개가 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다 — ${joinOutlook(scansOnly(d.scans).length ? resumeOutlookText(scansOnly(d.scans)) : '', cloneOutlookText(d.scans))}` : `실행 중이던 스캔이 끝나 적용합니다(${Math.round(waited / 60_000)}분 기다림)`}${detachedNote(d.detached)}${queuedNote(d.queuedKept)}`;
     this.#clearDeferral();
     this.#ticking = true;
     const at = Date.now();
@@ -426,7 +467,7 @@ export class UpgradeManager {
         if (dd?.forced) console.warn(`[upgrade] 실행 중 스캔 ${dd.scans.length}개 — 대기 상한(${Math.round(scanDeferMaxMs() / 60_000)}분)을 넘겨 적용합니다(${joinOutlook(scansOnly(dd.scans).length ? resumeOutlookText(scansOnly(dd.scans)) : '', cloneOutlookText(dd.scans))})`);
         this.#clearDeferral();
         // v2.741(TIMING-03): 기다리지 않은 분리 실행 du 가 있으면 그 사실을 기록에 남긴다(조용히 끊지 않는다).
-        const dnote = detachedNote(dd?.detached).replace(/^ · /, '');
+        const dnote = `${detachedNote(dd?.detached)}${queuedNote(dd?.queuedKept)}`.replace(/^ · /, '');
         console.log(`[upgrade] 새 버전 감지 — 적용 후 재시작합니다${dnote ? ` — ${dnote}` : ''}`);
         // 적용 도중 프로세스가 끝나면(강제 종료 등) 결과가 남지 않는다 — '적용 시작' 을 먼저 남긴다(새 프로세스가 되살린다).
         this.lastTick = { at, outcome: 'applying', latest, ...(dnote ? { reason: dnote } : {}) }; this.#save();

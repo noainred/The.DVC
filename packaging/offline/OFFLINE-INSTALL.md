@@ -58,6 +58,11 @@ cd vmware-portal-offline-<버전>-el9-x64
 sudo ./install.sh --port 4000
 ```
 
+- 서비스 계정은 기본 `vmportal` 이고 `--user <계정>` 으로 바꿀 수 있다. 계정 이름은 `^[a-z_][a-z0-9_-]{0,31}$` 형식만 받는다
+  (점·대문자·공백은 거부). 이미 있는 **사람 계정**을 지정하지 말 것 — 설치가 그 계정에 포탈 파일 소유권과 sudoers 규칙을 준다.
+- v2.742 이후 패키지는 tar 안의 파일 소유자가 `0:0`(root)이다. 그 이전 패키지를 root 로 풀면 빌드 머신의 uid 가 그대로
+  붙을 수 있다 — `tar --no-same-owner -xzf …` 로 풀면 안전하다.
+
 설치가 끝나면:
 
 - 서비스: `vmware-portal` (systemd, 부팅 시 자동 시작)
@@ -100,6 +105,26 @@ visudo -f /etc/sudoers.d/vmware-portal-hostaccess
 ```
 
 `uninstall.sh` 가 함께 제거한다. 설계·잠금 방지·오픈소스 권고는 `docs/HOST-ACCESS.md`.
+
+### RMA sudoers 확장 (v2.742)
+
+`install.sh` 는 `portal.env` 의 `RMA_SERVICE_UNITS`(서비스 제어 허용 유닛)·`RMA_ALLOW_REBOOT` 로 `/etc/sudoers.d/vmware-portal-rma`
+를 넓힌다. 그런데 `portal.env` 는 서비스 계정이 쓸 수 있는 파일이라, v2.742 부터는 **`portal.env` 가 root 소유이고 그룹·기타
+쓰기 권한이 없을 때만** 이 두 값으로 sudoers 를 넓힌다. 그렇지 않으면 이미 설치돼 있던 같은 규칙만 유지하고(새로 넓히지 않는다)
+무시한 항목을 경고로 알린다. 넓혀야 하면 root 가 값을 확인한 뒤:
+
+```bash
+sudo chown root:root /etc/vmware-portal/portal.env && sudo chmod go-w /etc/vmware-portal/portal.env
+sudo ./install.sh --port 4000      # 이 실행이 sudoers 를 넓힌 뒤 portal.env 소유권을 다시 서비스 계정으로 돌린다
+```
+
+원격 RMA 배포(설정 › RMA 배포)는 root 로 sudoers 를 직접 쓰므로 이 제한과 무관하다.
+
+### 서명 확인용 호스트 신뢰 키 (v2.742)
+
+`/etc/vmware-portal/release-signing-keys.conf`(선택)는 **`root:root` · `chmod 644`** 로 둔다(포탈도 읽어야 한다). root 로 도는 확인은
+root 소유일 때만 이 파일의 키 추가를 받고, 서비스 계정 소유면 회수 항목만 합친다. install.sh 는 root 소유 파일의 사본을
+`/usr/local/libexec/vmware-portal<설치경로>/trust/` 에 남긴다. 절차는 `docs/RELEASE-SIGNING.md` 8절.
 
 ## 운영 명령
 
@@ -185,4 +210,7 @@ sudo rm -rf /opt/vmware-portal/app.bak.*    # 정상 동작 확인 후
 ```bash
 sudo ./uninstall.sh            # 앱/런타임/서비스 제거 (설정 유지)
 sudo ./uninstall.sh --purge    # 설정과 사용자까지 완전 제거
+sudo ./uninstall.sh --purge --user ops_portal   # 설치 때 --user 로 바꾼 계정이면 같은 이름을 준다
 ```
+
+`--user` 는 설치와 같은 형식 검사를 한다. `--purge` 는 uid 0 계정(서비스를 root 로 돌린 설치)을 지우지 않는다.

@@ -11,12 +11,13 @@ import { saveLogSettings } from '../../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../../logs/poller.js';
 import { resetLogsDb } from '../../logs/db.js';
 import { runTrafficCapture, runDualCapture, runPcapCapture } from '../../net/tcpdump.js';
-import { analyzeLogsForIssues } from '../../net/logIssues.js';
+import { analyzeLogsForIssuesMemo } from '../../net/logIssues.js';   // v2.742(DB-02): 같은 조건은 짧게 기억
 import { enqueueCapture, getCaptureResult } from '../../central/captureJobs.js';
 import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../../net/captureHistory.js';
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../net/monitor.js';
 import { addUsersToVms } from '../../guest/accountService.js';
+import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { denyScopedRun } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
@@ -248,11 +249,13 @@ adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res)
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return;   // v2.607 AUTHZ2607-06
   try {
-    const r = await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 });
+    // v2.742(감사 DB-02): 같은 조건은 짧게 기억하고 진행 중이면 합류한다(analyzeLogsForIssuesMemo — 기간 전체를 매번 훑지 않게).
+    //   기간은 함수가 [1, 366]일로 자른다(API 로 임의 기간을 줄 수 있다).
+    const r = await analyzeLogsForIssuesMemo({ vcenterId, days: req.query.days });
     // v2.733(점검 3회차 C1-01): 수집하지 않는 vCenter 목록은 범위 안 것만(범위 계정은 vCenter 하나를 고르므로 보통 그 하나뿐이다 — 심층 방어).
+    //   ⚠ 기억한 결과는 다른 요청과 공유한다 — 고치지 않고 사본에 건다.
     const allowed = scopedVcenterIds(req.user, store.get());
-    if (allowed && Array.isArray(r?.notCollected)) r.notCollected = r.notCollected.filter((x) => allowed.has(String(x?.vcenterId)));
-    res.json(r);
+    res.json(allowed && Array.isArray(r?.notCollected) ? { ...r, notCollected: r.notCollected.filter((x) => allowed.has(String(x?.vcenterId))) } : r);
   }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -277,6 +280,9 @@ adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
     res.json(r);
   } catch (e) {
     logAudit({ user: req.user?.username, action: '게스트 계정 추가 실패', target: String(b.vcenterId || ''), detail: `${what} · ${String(e?.message || e).slice(0, 200)}` });
+    // v2.742(VC-03 후속): 비활성·점검중·엣지 위임 vCenter(로그인 0회)와 인증 정지 기록에 올린 로그인 거부는 409 + 사유 필드
+    //   (skipReason·authStopped) — 400 으로 뭉개면 화면이 '입력이 틀렸다' 로 읽고 무엇이 막았는지 사라진다. 입력 오류는 400 그대로.
+    if (e?.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });
     res.status(400).json({ ok: false, reason: e.message });
   }
 });

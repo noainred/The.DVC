@@ -122,7 +122,9 @@ export const TOOLS = [
   //         화면 전체가 403 이 된다(상단 'Monitoring' 탭과 같은 경계를 여기서도 유지).
   { k: 'svcmon-config', icon: '⚙️', label: 'Monitoring 설정', desc: 'Monitoring 대상·점검 항목을 CSV 로 가져오기/내보내기 (샘플 제공) · 대량 자동등록 · 점검 템플릿', perm: 'svcmon' },
   { k: 'net-check', icon: '📡', label: '글로벌 네트워크 점검', desc: '전세계 vCenter·NSX 제어플레인 도달성·RTT + 네트워크 객체 요약' },
-  { k: 'net-traffic', icon: '🔬', label: '네트워크 트래픽 분석', desc: '두 서버 간 tcpdump 캡처·분석(핸드셰이크·재전송·RST) + 로그 자체 장애 탐지' },
+  // v2.742(WEB-04): 캡처·이력·연속 모니터 탭의 API 가 전부 /api/admin/net/*(adminOnly + fleetOnly)다 — 표시가 열려 있으면 operator 가
+  //   입력 폼까지 채운 뒤 403 을 받았다(CATALOG2613-01 의 누락). toolAccess.js 선언과 카탈로그를 audit2613a 가 전체 대조한다.
+  { k: 'net-traffic', icon: '🔬', label: '네트워크 트래픽 분석', desc: '두 서버 간 tcpdump 캡처·분석(핸드셰이크·재전송·RST) + 로그 자체 장애 탐지', adminOnly: true },
   { k: 'vmware-backup', icon: '🗃️', label: 'VMware 구성 백업', desc: '사이트의 수집 구성(호스트·VM·DS·네트워크·NSX) 스냅샷 내보내기' },
   { k: 'roomtemp', icon: '🌡️', label: '법인 전산실 운영 온도', desc: '모든 법인의 흡기(Inlet)·배기(Exhaust)·CPU 온도 범위를 카드로 한 페이지 종합 · ASHRAE 권장 대역(18~27℃) 대비 상태 · 배기−흡기 ΔT · 서버별 상세', adminOnly: true },
   { k: 'portaldb', icon: '🗄️', label: '포탈 DB', desc: '사용 중 모든 DB/데이터 파일의 경로·파일명·용도·크기·증가 추이', adminOnly: true },

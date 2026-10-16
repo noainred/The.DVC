@@ -16,6 +16,7 @@ import { usePolling, can, toolAllowed } from '../../api.js';
 import { TOOLS } from '../../views/specialToolsList.js';
 import { Panel, Bar, PctCell, Badge, Empty, PollState, Kpi, Spark } from '../ui.jsx';
 import { storageUsageUnknownNote, physicalServersKpi } from '../../views/vcCardText.js'; // v2.621(감사 WEB-03·08)
+import { hostCapShort, hostCapFootnote } from '../../views/hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
 import { attentionList, regionCounts, siteMarkers, REGION_COLORS, DOMAIN_LABEL, domainOf, ageText, fmtInt, fmtPct, textColor, levelBar, rowMatches, alarmCountColor, SEV_COLOR, WARN_PCT, CRIT_PCT } from '../data.js';
 
 export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, scope, go, goAnywhere, polls, mode, spec, phase, phaseText, health }) {
@@ -135,8 +136,9 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
             {g && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
                 {[
-                  ['CPU', `${fmtInt(g.cpuCores)} cores (ESXi)${phys?.cores ? ` · 물리 ${fmtInt(phys.cores)}` : ''}`, g.cpuUsagePct],
-                  ['메모리', `${fmtInt(g.memTotalGB)} GB (ESXi)${phys?.memGB ? ` · 물리 ${fmtInt(phys.memGB)} GB` : ''}`, g.memUsagePct],
+                  // v2.742(LEFT-06): 용량을 못 읽은 호스트(REST 폴백)는 서버가 코어·메모리 총량에서 뺐다 — 짧은 표지를 붙이고 이유는 아래 각주 한 번.
+                  ['CPU', [`${fmtInt(g.cpuCores)} cores (ESXi)${phys?.cores ? ` · 물리 ${fmtInt(phys.cores)}` : ''}`, hostCapShort(g.hostsCapacityUnknown)].filter(Boolean).join(' · '), g.cpuUsagePct],
+                  ['메모리', [`${fmtInt(g.memTotalGB)} GB (ESXi)${phys?.memGB ? ` · 물리 ${fmtInt(phys.memGB)} GB` : ''}`, hostCapShort(g.hostsCapacityUnknown)].filter(Boolean).join(' · '), g.memUsagePct],
                   ['스토리지', [`${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, storageUsageUnknownNote(g)].filter(Boolean).join(' · '), g.storageUsagePct], // v2.621(감사 WEB-03)
                 ].map(([label, meta, pct]) => (
                   <div key={label}>
@@ -155,7 +157,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
                   <span style={{ flex: 1 }} />
                   <span className="v3-num" style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309' }}>{g.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'}</span>
                 </div>
-                <div className="v3-note">세로선은 주의 {WARN_PCT}% · 위험 {CRIT_PCT}%. 사용률은 vCenter(ESXi) 실측이며 계약 전력은 수집 항목이 아니라 전력은 비율 없이 측정 합계만 표시합니다.</div>
+                <div className="v3-note">세로선은 주의 {WARN_PCT}% · 위험 {CRIT_PCT}%. 사용률은 vCenter(ESXi) 실측이며 계약 전력은 수집 항목이 아니라 전력은 비율 없이 측정 합계만 표시합니다.{hostCapFootnote(g.hostsCapacityUnknown) ? ` ${hostCapFootnote(g.hostsCapacityUnknown)}` : ''}</div>
               </div>
             )}
           </PollState>

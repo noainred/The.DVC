@@ -15,6 +15,7 @@
 
 import { enabledAreas, ONEFS_AREAS } from './onefsCatalog.js';
 import { get } from './collectors/isilon.js';
+import { isCredReject } from './collectors/restCommon.js';
 import { saveAreaResults } from './db.js';
 // v2.730(검토 I-03): 요약 한 줄의 모양·멈춘 사유 문구·연속 실패 상한은 순수 모듈 하나가 소유한다(데모 합성과 공유).
 import { TRANSPORT_FAIL_LIMIT, triedAreaEntry, notTriedAreaEntry, disabledAreaEntry, areaTotals } from './onefsAreaSummary.js';
@@ -67,7 +68,8 @@ export async function collectAreasOnce(device, { signal, get: getEndpoint = get 
         results.push({ area: area.key, endpoint: ep, ok: false, error: msg });
         failCnt++;
         if (!firstErr) firstErr = msg;
-        if (/401|인증 실패/.test(msg)) { authDead = true; stopHere = 'auth'; break; } // 잠금 예방 — 즉시 중단
+        // v2.742 GI2 리드: 자격증명 거부 판정은 restCommon.isCredReject 하나 — 문구의 '401' 부분 일치는 호스트명(isi-401:8080)·본문으로도 맞는다.
+        if (isCredReject(e)) { authDead = true; stopHere = 'auth'; break; } // 잠금 예방 — 즉시 중단
         // HTTP 상태를 받은 실패(404 등 — 버전별 경로 차이)는 장비가 살아 있다는 뜻이라 세지 않는다.
         if (/^HTTP \d+/.test(msg)) transportFails = 0;
         else if (++transportFails >= TRANSPORT_FAIL_LIMIT) { stopHere = 'transport'; break; }

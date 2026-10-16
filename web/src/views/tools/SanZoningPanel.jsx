@@ -24,7 +24,7 @@ import BoldText from '../../components/boldText.jsx';   // 순수 모듈 문구�
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import {
   shortLabel, SIDE_LABEL, CONFIDENCE_LABEL, sourceText, truncationText, confidenceSummary,
-  layoutGraph, layoutMatrix, cellColor, matchNode, SEVERITY_BADGE, labelMap, MATRIX_DEFAULTS,
+  layoutGraph, layoutMatrix, cellColor, matchNode, SEVERITY_BADGE, labelMap, MATRIX_DEFAULTS, peerZoneText,
 } from './sanZoningView.js';
 
 const SIDE_COLOR = { initiator: '#60a5fa', target: '#4ade80', middle: '#a855f7', unknown: '#94a3b8' };
@@ -227,6 +227,7 @@ export default function SanZoningPanel({ deviceId }) {
         {trunc && <><br /><span style={{ color: 'var(--amber,#fbbf24)' }}>⚠ {trunc}</span></>}
         {conf.text && <><br /><BoldText text={conf.text} /></>}
         {d.graph.unresolvedTotal > 0 && <><br />미해석 멤버 {d.graph.unresolvedTotal}개 — 별칭 정의가 출력에 없거나 Domain,Port 표기입니다(그림에서 빠집니다).</>}
+        {peerZoneText(d.graph) && <><br />{peerZoneText(d.graph)}</>}
       </div>
 
       {view === 'map'

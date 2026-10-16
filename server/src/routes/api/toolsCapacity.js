@@ -8,6 +8,7 @@ import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보�
 import { store, usageReadable, hostCapacityKnown } from '../../store.js'; // v2.733(C2-06): 용량 판정도 store 하나
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
+import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { fetchVmMetric, fetchVmsPerfSeries, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
 import { createVcAuthGate, vcAuthStopOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
@@ -15,7 +16,7 @@ import { analyzeRightsize } from '../../tools/rightsize.js';
 import { buildWasteSheets, reportTargets, reportFileName, exportZipName } from '../../tools/wasteExport.js'; // v2.497: 낭비 리소스 엑셀 내보내기
 import { sheetsToWorkbook } from '../../tools/wasteExportXlsx.js';
 import { renderRightsizeHtml } from '../../tools/rightsizeHtml.js';
-import { zipMany } from '../../util/zip.js';
+import { zipManyAsync } from '../../util/zip.js'; // v2.742(LEFT-05·DB-05): 내보내기 zip 은 비동기판(결과 바이트는 zipMany 와 같다)
 import { withJob, withJobSync } from '../../perf/monitor.js'; // v2.498: 루프 정체가 관측되면 '그때 이 작업이 돌았다' 를 남긴다
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
@@ -23,7 +24,7 @@ import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffP
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
 // v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, 5분 평균 창 적응.
-import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback, maskIdracTempRows } from '../../tools/serverTemp.js';
+import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback, maskIdracTempRows, HOST_DISCONNECTED } from '../../tools/serverTemp.js';
 import { isAdminReq, resolveMaskedToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { analysisServersWithRemote } from '../admin/shared.js';
 import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
@@ -519,11 +520,13 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
     const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
     const sheets = buildWasteSheets({ waste, offSince, reports, scopeLabel: vcId || 'all', cluster: group.cluster, folder: group.folder, days, full, generatedAt: t0, reportNote, nameFilter: q });
     const wb = await sheetsToWorkbook(sheets);
-    // xlsx 직렬화·zip deflate 는 쪼갤 수 없는 동기 구간이다(exceljs·zlib 동기 API) — 작업 이름을
-    // 달아 루프 정체가 관측되면 설정 › 서버 성능 측정의 hang 기록에서 원인이 바로 보이게 한다.
+    // xlsx 직렬화는 쪼갤 수 없는 동기 구간이다(exceljs) — 작업 이름을 달아 루프 정체가 관측되면 설정 › 서버 성능 측정의 hang 기록에서
+    // 원인이 바로 보이게 한다. ⚠ 정직 기록: full=1 의 큰 워크북에서는 이 구간이 수백 ms 멈춘다(워커로 옮기는 것은 남은 일 — ipam/excelWorker.js 패턴).
     const xlsx = await withJob('waste.export.xlsx', async () => Buffer.from(await wb.xlsx.writeBuffer()));
     const zipName = exportZipName({ scope: vcId || 'all', cluster: group.cluster, folder: group.folder, at: t0 });
-    const zip = await withJob('waste.export.zip', async () => zipMany([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]));
+    // v2.742(감사 LEFT-05·DB-05): zip 압축은 항목마다 deflateRawSync 를 양보 없이 불러 메인 스레드를 멈췄다(리포트 200건 0.19초 · 상한 1000건
+    //   0.88초). 비동기판(zlib.deflateRaw — 스레드 풀)으로 바꿨다 — 결과 바이트는 같다(테스트 대조). 동시 1건 가드(acquireExport)는 그대로다.
+    const zip = await withJob('waste.export.zip', () => zipManyAsync([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]));
     logAudit({ user: req.user?.username, action: '낭비 리소스 엑셀 내보내기', target: vcId || 'all',
       detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'application/zip');
@@ -1329,7 +1332,9 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
    * (LASTGOOD_HOLD·위임 캐시가 서빙한다). 지표 샘플러는 같은 판정(unreadVcenterReasons)으로 적재에서 빼는데 이 화면은
    * 그 값을 '현재 온도' 로 요약·법인 표·클러스터/vCenter 집계에 넣었다. 행은 남기되 오래됨(사유)으로 표시하고 집계에서 뺀다. */
   const unread = unreadVcenterReasons(snap);
-  const staleWhy = (h) => unread.get(String(h.vcenterId ?? '')) || null;
+  // v2.742(VC-02): vCenter 는 읽히는데 그 호스트만 끊긴(DISCONNECTED·NOT_RESPONDING) 경우도 같다 — 센서 값은 vCenter 가 마지막으로 받은
+  //   것이라 지금 온도가 아니다. 판정은 store.usageReadable 하나(전력 host-unread·CPU 와 같은 기준 — 복제하지 않는다). vCenter 사유가 먼저.
+  const staleWhy = (h) => unread.get(String(h.vcenterId ?? '')) || (usageReadable(h) ? null : HOST_DISCONNECTED);
   /* ── 최근 평균 창(v2.512 수정) ──────────────────────────────────────────────
    * 예전에는 창이 **고정 5분**이었다. 온도 샘플러 주기는 설정에서 최대 24시간까지 올릴 수 있어
    * (metrics/settings.js MAX_INTERVAL_MS), 주기가 5분을 넘는 현장에서는 그 창에 표본이 하나도
@@ -1389,6 +1394,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
       maxAgeMs: DEFAULT_MAX_AGE_MS,
       localCycle: sensorPollCycle(),   // v2.634: 폴 주기가 길면 신선도 경계를 넓힌다
       unreadVcenters: unread,          // v2.731(A2-03): 읽히지 않는 vCenter 의 ESXi 대체 행은 오래됨
+      hostReadable: usageReadable,     // v2.742(VC-02): 연결이 끊긴 호스트의 ESXi 대체 행도 오래됨(사유 host-disconnected)
     });
     idrac = { enabled: true, ...rep, reason: rep.counts.idrac ? '' : 'iDRAC 센서를 보고한 서버가 없습니다(등록·자격증명·수집 주기를 확인하세요).' };
     // 데모(mock): iDRAC 등록이 없어 물리 서버가 0 이면 화면의 물리/가상화 분리를 확인할 수 없다.
@@ -1409,7 +1415,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
       });
       const mrep = buildServerTempReport({
         idracServers: fake, hosts, latestOf: (s) => s.sensors,
-        dcName: (id) => dcNames.get(String(id)) || id, maxAgeMs: 0, unreadVcenters: unread,
+        dcName: (id) => dcNames.get(String(id)) || id, maxAgeMs: 0, unreadVcenters: unread, hostReadable: usageReadable,
       });
       idrac = { enabled: true, ...mrep, reason: '', synthesized: true };
     }
@@ -1429,7 +1435,9 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     ...(isAdminReq(req) ? {} : { addressHidden: true }),
     reportingHosts: hosts.length,
     // v2.731(A2-03): 그중 읽히지 않는 vCenter 의 호스트(값이 오래됨 — 집계에서 뺐다)
+    // v2.742(VC-02): 연결이 끊긴 호스트도 오래됨에 들어가고, 그 수를 따로 밝힌다('연결 끊김 N대').
     staleHosts: hosts.filter((h) => staleWhy(h)).length,
+    disconnectedHosts: hosts.filter((h) => staleWhy(h) === HOST_DISCONNECTED).length,
     totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
     // 평균 창 — 화면이 '5분 평균' 대신 실제 창을 라벨로 쓴다.
     avgWindowMs: windowMs, avgWindowLabel: avgWindowLabel(windowMs),
@@ -1820,6 +1828,9 @@ api.get('/tools/orphan-vmdk', requirePerm('tools'), async (req, res) => {
   try {
     res.json({ ok: true, ...(await scanOrphanDisks(dsId, { recentHours })) });
   } catch (e) {
+    // v2.742(VC-03 후속): 비활성·점검중·엣지 위임·인증 정지로 로그인하지 않았으면 409 + 사유 필드(skipReason·authStopped).
+    //   502 로 바꿔 보내면 웹이 재시도해 같은 막힘을 세 번 보고하고, 무엇이 막았는지도 사라진다(형제 /datastores/:id/browse 와 같은 규칙).
+    if (e.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });
     res.status(e.status === 404 ? 404 : 502).json({ ok: false, reason: e.message });
   }
 });

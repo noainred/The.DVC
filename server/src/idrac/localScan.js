@@ -34,7 +34,8 @@ export async function runLocalIdracScan({ ips, username, password, ilo = null, n
   const effectiveMode = partial ? 'merge' : reqMode;
   // noRegister면 스캔만(중앙 UI에서 확인 후 별도 '등록'). 그 외엔 자동등록(autoRegister 켜진 경우).
   if (!noRegister && config.agent.autoRegister && scan.found.length) {
-    const rr = registerScanned(scan.found, username, password, effectiveMode, vcenterId || '', datacenterId || '', { ilo });
+    // v2.742(감사 DEV-01): 엔트리 id(rangeId)·스캔한 대역(ips)을 넘긴다 — 교체는 그 엔트리 등록만 지운다(중앙 scanPoller 와 같은 규칙).
+    const rr = registerScanned(scan.found, username, password, effectiveMode, vcenterId || '', datacenterId || '', { ilo, scanRangeId: rangeId, scanRanges: ips });
     if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
   }
   return { ...scan, registered, modeDowngraded: partial && effectiveMode !== reqMode, ...(partial ? { modeDowngradedReason: partialReasons.join(' · ') } : {}), durationMs: Date.now() - started };

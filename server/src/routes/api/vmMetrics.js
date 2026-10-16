@@ -8,6 +8,8 @@ import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, getVmConsole } from '..
 import { respondIfVcAuthStopped, respondVcError } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 판정을 공용 헬퍼로
 import { isAdminReq } from '../../auth/addressMask.js';
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 moref 추출
+import { idracScopeOf, idracInScope } from '../admin/idracCore.js'; // v2.742 AUTHZ-01: iDRAC 서버 범위 판정 한 벌(v2.629 AUTHZ2629-03)
+import { loadCollectors } from '../../collector/registry.js';
 
 /**
  * 성능 모달의 **실시간 자동 갱신(20초)** 이 vCenter 인증 실패 정지를 따른다(v2.591 — 감사 F6).
@@ -170,6 +172,38 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
   }
 });
 
+const lcTrim = (v) => String(v ?? '').trim().toLowerCase();
+/**
+ * v2.742(감사 AUTHZ-01): 그 호스트의 vCenter 를 수집하는 엣지(수집 서버 id, 소문자) — 등록부 remoteAgent(site) + 스냅샷 collectedBy.
+ * 이름이 수집 서버의 표시 이름이면 id 로 접는다(엣지의 키는 수집 서버 id). 직접 수집 vCenter 면 빈 집합(엣지 항목을 받지 않는다).
+ */
+function hostCollectorIds(snap, vcenterId) {
+  const vid = String(vcenterId || '');
+  const reg = (loadVcenterConfig().vcenters || []).find((v) => String(v?.id) === vid);
+  const sv = (snap?.vcenters || []).find((v) => String(v?.id) === vid);
+  const names = [];
+  if (reg && String(reg.collectMode || '') === 'site' && reg.remoteAgent) names.push(reg.remoteAgent);
+  if (sv && sv.collectSource === 'site' && sv.collectedBy) names.push(sv.collectedBy);
+  const out = new Set();
+  let collectors = [];
+  try { collectors = loadCollectors() || []; } catch { collectors = []; }
+  for (const n of names) {
+    const k = lcTrim(n);
+    if (!k) continue;
+    out.add(k);
+    for (const c of collectors) if (lcTrim(c?.id) === k || lcTrim(c?.name) === k) out.add(lcTrim(c.id));
+  }
+  return out;
+}
+function hostPowerScope(req, snap, host) {
+  const sc = idracScopeOf(req);
+  const owners = hostCollectorIds(snap, host?.vcenterId);
+  return {
+    accept: (s) => idracInScope(sc, s),
+    acceptRemote: (r) => owners.has(lcTrim(r?.collectorId)),
+  };
+}
+
 // Real iDRAC power for one host (current + history). Used by the host detail
 // popup. ?name=<esxi host name>&hours=24
 // v2.313 보안 감사 반영: 형제 단건 라우트(/hosts/:id/metrics·/vms/:id/console)는 inUserScope
@@ -180,9 +214,14 @@ api.get('/idrac/host-power', requirePerm('inv.hosts'), async (req, res) => {
   const name = req.query.name;
   if (!name) return res.status(400).json({ matched: false, reason: 'name이 필요합니다.' });
   const snap = store.get();
-  const host = (snap.hosts || []).find((h) => h.name === String(name));
+  // v2.742(감사 AUTHZ-01): 범위 계정은 **범위 안의** 같은 이름 호스트를 고른다 — 예전에는 이름이 같은 첫 호스트(다른 법인일 수 있다)의
+  //   vCenter 하나만 보고 판정해, 범위 밖 호스트가 배열 앞에 있으면 자기 호스트도 404 였다. 전체 범위 계정은 예전 그대로(첫 일치).
+  const allowedVcs = scopedVcenterIds(req.user, snap);
+  const host = allowedVcs
+    ? (snap.hosts || []).find((h) => h.name === String(name) && inUserScope(req.user, snap, h.vcenterId))
+    : (snap.hosts || []).find((h) => h.name === String(name));
   // 범위 제한 계정: 매칭 호스트가 없거나(그 이름이 스냅샷에 없음) 범위 밖이면 404(존재 은닉).
-  if (scopedVcenterIds(req.user, snap) && !(host && inUserScope(req.user, snap, host.vcenterId))) {
+  if (allowedVcs && !host) {
     return res.status(404).json({ matched: false, reason: '호스트를 찾을 수 없습니다.' });
   }
   try {
@@ -193,7 +232,9 @@ api.get('/idrac/host-power', requirePerm('inv.hosts'), async (req, res) => {
     // 전력·하드웨어 인벤토리 조회 차단). 전체 범위 계정은 기존 동작(요청 태그 허용) 유지.
     const scoped = !!scopedVcenterIds(req.user, snap);
     const serviceTag = scoped ? (host?.serviceTag ? String(host.serviceTag) : '') : (req.query.serviceTag ? String(req.query.serviceTag) : '');
-    const r = await hostPower(String(name), { hours, serviceTag });
+    // v2.742(감사 AUTHZ-01): 범위 계정이면 찾은 iDRAC·OME 서버의 귀속을 다시 본다(서버 분석과 같은 판정 — idracInScope, 귀속 없음은
+    //   미노출). 엣지 보고 전력은 **그 호스트를 수집한 엣지**의 항목만 쓴다. 맞는 서버가 없으면 matched:false(존재 은닉).
+    const r = await hostPower(String(name), { hours, serviceTag, ...(scoped ? hostPowerScope(req, snap, host) : {}) });
     res.json(isAdminReq(req) ? r : maskHostPower(r));
   } catch (err) {
     res.status(500).json({ matched: false, reason: err.message });

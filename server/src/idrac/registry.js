@@ -38,6 +38,45 @@ function dropDerivedCaches(ids) {
 
 const FILE = path.join(config.configDir, 'idrac.json');
 
+/** v2.742(감사 DEV-01): 스캔 엔트리 id 정규화 — 글자 128자, 제어 문자가 있으면 버린다(빈 문자열 = 표지 없음). */
+function cleanScanRangeId(v) {
+  const s = String(v ?? '').trim();
+  if (!s || s.length > 128 || [...s].some((c) => c.charCodeAt(0) < 32)) return '';
+  return s;
+}
+
+/** 등록 host('https://10.0.0.5' 등)의 주소 부분. 못 읽으면 ''. */
+function hostAddrOf(host) {
+  const h = String(host || '').trim();
+  if (!h) return '';
+  try { return new URL(/^https?:\/\//i.test(h) ? h : `https://${h}`).hostname.replace(/^\[|\]$/g, ''); }
+  catch { return ''; }
+}
+
+/**
+ * v2.742(감사 DEV-01): 스캔 '교체'(replace-datacenter)가 지울 수 있는 기존 항목 판정 — **그 스캔 엔트리가 등록한 서버만**.
+ *   한 법인에 서비스별 스캔 엔트리를 여럿 두는 것이 설계인데(scanRanges.js 머리말), 예전 교체는 법인 전체를 지워 같은 법인의 다른
+ *   엔트리가 등록한 서버(자격증명·인벤토리·센서 시계열 포함)를 매 주기 지웠다. 이제 지우는 것은
+ *   ① 같은 엔트리 id 표지(scanRangeId)가 붙은 항목 ② 표지가 없는 옛 스캔 등록 항목 중 **주소가 그 엔트리 대역 안**에 있는 것뿐이다.
+ *   ②의 '옛 스캔 등록' 은 registerScanned 가 늘 만들던 모양(id == 접속 주소)으로 가린다 — id 를 사람이 정한 수동 등록과
+ *   다른 엔트리 표지가 붙은 항목·OME 연결은 남긴다. 대역을 모르면(ranges 없음) ②는 아무것도 지우지 않는다(추측하지 않는다).
+ * @returns {(s:object) => boolean}
+ */
+export function makeScanReplaceScope({ scanRangeId = '', ranges = null } = {}) {
+  const rid = cleanScanRangeId(scanRangeId);
+  const text = Array.isArray(ranges) ? ranges.filter(Boolean).join('\n') : String(ranges || '');
+  let ipSet = null;
+  if (text.trim()) { try { ipSet = new Set(expandIpList(text).ips); } catch { ipSet = null; } }
+  return (s) => {
+    if (!s || s.type === 'ome') return false;
+    const tag = cleanScanRangeId(s.scanRangeId);
+    if (tag) return !!rid && tag === rid;
+    if (!ipSet || !ipSet.size) return false;
+    const addr = hostAddrOf(s.host);
+    return !!addr && String(s.id) === addr && ipSet.has(addr);
+  };
+}
+
 // copy-on-read 캐시 — 분석 라우트들이 요청 하나에서 loadRegistry()를 여러 번 부르며 매번
 // readFileSync+JSON.parse(수백~수천 엔트리)를 반복했다. mtime/size 가 같으면 파싱을 건너뛰고
 // '구조 복사본'을 돌려준다(호출부는 지금처럼 자유롭게 수정→save 가능 — 공유 객체 아님).
@@ -141,6 +180,11 @@ function normalize(body, existing = null) {
   //   그래서 이 값이 사라지면(가져오기 replace) 그 판단이 조용히 Dell 쪽으로 돌아간다 — CSV 가져오기도 vendor 열을 받는다.
   const vendor = normVendor(body.vendor !== undefined ? body.vendor : e.vendor);
   if (vendor) entry.vendor = vendor;
+  // v2.742(감사 DEV-01): 이 서버를 등록한 **스캔 엔트리 id**(idrac-scan-ranges.json 의 엔트리 키) — 'replace-datacenter' 교체가
+  //   법인 전체가 아니라 그 엔트리가 등록한 서버만 지우게 하는 표지다. 없으면(수동 등록·구버전 스캔 등록) 필드를 만들지 않는다
+  //   (예전 항목의 파일 모양을 바꾸지 않는다). 수동 편집·병합 가져오기는 저장값을 이어받는다.
+  const scanRangeId = cleanScanRangeId(body.scanRangeId !== undefined ? body.scanRangeId : e.scanRangeId);
+  if (scanRangeId) entry.scanRangeId = scanRangeId;
 
   // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — **접속처가 바뀌면 저장 비밀을 승계하지 않는다.**
   // 판정은 `util/secretCarry.js` 하나로 한다(각자 구현하면 다음 스토어에서 또 빠진다 — v2.500 H1/H2/H4).
@@ -188,7 +232,7 @@ export function removeServer(id) {
  * Import a list of servers. `mode` 'merge' (default) upserts by id; 'replace'
  * swaps the whole registry. Returns { ok, mode, added, updated, skipped[], total }.
  */
-export function importServers(incoming, mode = 'merge') {
+export function importServers(incoming, mode = 'merge', { replaceScope = null } = {}) {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'servers 배열을 찾을 수 없습니다.' };
   const existing = loadRegistry();
   // mode:
@@ -199,6 +243,7 @@ export function importServers(incoming, mode = 'merge') {
   // 먼저 incoming을 검증해 '유효 항목'만 추린다(검증 실패 항목은 skip).
   const skipped = [];
   const valid = [];
+  let scopeKept = null; // v2.742: replace-datacenter + replaceScope 일 때 범위 밖이라 남긴 같은 법인 항목 수
   for (const raw of incoming) {
     const base = mode === 'replace' ? null : existing.find((s) => s.id === raw?.id);
     const [entry, err] = normalize(raw || {}, base);
@@ -216,7 +261,12 @@ export function importServers(incoming, mode = 'merge') {
     // incoming에 등장한 법인(DataCenter)의 기존 항목만 삭제 후 교체(다른 법인은 유지).
     // 유효 incoming이 0건이면 기존을 지우지 않음(블립으로 인한 대량 삭제 방지).
     const dcs = new Set(valid.map((e) => String(e.datacenterId || '').trim()).filter(Boolean));
-    result = dcs.size ? existing.filter((s) => !dcs.has(String(s.datacenterId || '').trim())) : [...existing];
+    // v2.742(감사 DEV-01): replaceScope(스캔 등록 경로가 준다)가 있으면 그 법인 안에서도 **범위 안 항목만** 지운다 —
+    //   같은 법인의 다른 스캔 엔트리 등록·수동 등록을 남긴다. 없으면(직접 가져오기) 예전처럼 법인 전체를 교체한다.
+    const scoped = typeof replaceScope === 'function';
+    const drop = (s) => dcs.has(String(s.datacenterId || '').trim()) && (!scoped || replaceScope(s));
+    result = dcs.size ? existing.filter((s) => !drop(s)) : [...existing];
+    if (scoped && dcs.size) scopeKept = existing.filter((s) => dcs.has(String(s.datacenterId || '').trim()) && !replaceScope(s)).length;
   } else result = [...existing];
   // 안전장치: 'replace'인데 유효 incoming이 0건이면 전체 삭제하지 않는다(빈/전부무효 CSV로
   // 등록 서버·자격증명이 소실되는 사고 방지). replace-vcenter/datacenter는 위에서 이미 0건 가드됨.
@@ -233,7 +283,7 @@ export function importServers(incoming, mode = 'merge') {
   const keptIds = new Set(result.map((s) => s.id));
   const droppedIds = existing.filter((s) => !keptIds.has(s.id)).map((s) => s.id);
   if (droppedIds.length) dropDerivedCaches(droppedIds);
-  return { ok: true, mode, added, updated, skipped, total: result.length };
+  return { ok: true, mode, added, updated, skipped, total: result.length, ...(scopeKept != null ? { removed: droppedIds.length, scopeKept } : {}) };
 }
 
 /**
@@ -273,7 +323,7 @@ export function bulkAddByIps(body) {
  * (ip, serviceTag, hostName, model); the shared username/password are applied
  * to all. hostNames includes the discovered hostname + IP for auto-matching.
  */
-export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '', { ilo = null } = {}) {
+export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '', { ilo = null, scanRangeId = '', scanRanges = null } = {}) {
   if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
   // v2.610: HPE iLO 로 발견된 항목은 **iLO 계정**으로 등록한다(Dell 계정을 붙이면 폴러가 매 주기 iLO 에 실패 로그인한다).
   //   계정이 없는 벤더의 항목은 등록하지 않고 개수를 밝힌다(skippedNoCreds).
@@ -285,6 +335,7 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
   if (!usable.length) return { ok: false, reason: 'username/password가 필요합니다.', skippedNoCreds };
   const vc = String(vcenterId || '').trim();
   const dc = String(datacenterId || '').trim();
+  const rid = cleanScanRangeId(scanRangeId);
   const servers = usable.map((f) => ({
     id: f.ip,
     // 표시 이름은 hostname으로 통일한다: iDRAC이 보고한 HostName이 있으면 그걸 쓰고,
@@ -299,9 +350,13 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
     hostNames: [f.hostName, f.ip].filter(Boolean),
     vcenterId: vc,
     datacenterId: dc, // 법인(DataCenter) 스캔으로 발견 → 그 법인에 귀속(법인 DB)
+    // v2.742(감사 DEV-01): 어느 스캔 엔트리가 등록했는지 — 교체(replace-datacenter)가 그 엔트리의 등록만 지우게 한다.
+    ...(rid ? { scanRangeId: rid } : {}),
     enabled: true,
   }));
-  const r = importServers(servers, mode);
+  // v2.742(감사 DEV-01): 스캔 등록의 replace-datacenter 는 **언제나** 범위를 준다 — 엔트리 id·대역을 모르는 호출(구버전 중앙의 잡 등)이면
+  //   범위가 비어 아무것도 지우지 않는다(= 병합). 법인 전체 교체로 떨어지지 않게 한다.
+  const r = importServers(servers, mode, mode === 'replace-datacenter' ? { replaceScope: makeScanReplaceScope({ scanRangeId: rid, ranges: scanRanges }) } : {});
   return skippedNoCreds ? { ...r, skippedNoCreds } : r;
 }
 

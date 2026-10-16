@@ -47,6 +47,8 @@ export function vcLogNotCollectedText(lastRun) {
  * v2.741(감사 DB-01): 로그 조회 기간. 예전 화면은 기간을 보내지 않아 검색어·심각도 조회가 보관분 전체(기본 365일)를 훑었다
  * (합성 180만 행에서 무일치 검색 한 번이 포탈 전체를 7초 넘게 멈췄다). 기본은 최근 7일이고 사용자가 넓힐 수 있다.
  * 'all' 은 전체 보관분이다 — 서버가 조각으로 나눠 읽어 멈추지는 않지만 오래 걸릴 수 있다.
+ * ⚠ v2.742(감사 DB-01): 엣지 보관 vCenter(연합 조회)는 엣지가 같은 조각 읽기를 한다 — 엣지가 2.742 이상일 때만이다(그 전 엣지는 검색어·심각도
+ *   조회를 한 문장 COUNT·조회로 돌려 '전체 보관분' 이면 엣지 포탈이 멈출 수 있다). CSV 내보내기도 v2.742(DB-03)부터 조각으로 읽는다.
  */
 export const VCLOG_PERIODS = [
   { key: '1d', days: 1, label: '최근 24시간' },
@@ -184,7 +186,8 @@ function LogViewer() {
         if (gen !== fedGen.current) return; // 다른 조회로 대체됨 → 이 루프 폐기
         const d = await fetchJson(`/tools/vclogs/federate?reqId=${encodeURIComponent(reqId)}`);
         if (gen !== fedGen.current) return;
-        if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setTotalInfo({ totalCapped: false, totalCap: null, lastBatch: (d.rows || []).length }); setLoading(false); return; }
+        // v2.742(감사 DB-01): 엣지도 검색어·심각도 조회의 건수를 상한까지만 센다 — totalCapped 가 오면 'N건 이상' 으로 말한다(구버전 엣지·중앙은 필드가 없다 = 정확한 수).
+        if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setTotalInfo({ totalCapped: d.totalCapped === true, totalCap: Number.isFinite(d.totalCap) ? d.totalCap : null, lastBatch: (d.rows || []).length }); setLoading(false); return; }
         if (d.state === 'expired') { setFedNote(fedExpiredText(d.why)); setLoading(false); return; }
         last = d.state;
       }

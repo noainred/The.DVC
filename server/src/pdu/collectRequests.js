@@ -17,6 +17,7 @@
  */
 
 import { createCollectRequestQueue } from '../util/collectRequestQueue.js';
+import { PDU_DEVICE_TIMEOUT_MS } from './collectors/apcSsh.js';
 
 // v2.590 P16: 인출 즉시 지우던 one-shot 을 claim→ack 로 바꿨다(코어 util/collectRequestQueue.js 머리말 참조).
 // 엣지가 인출한 뒤에도 그 장비의 새 수집 결과가 올 때까지 '요청 대기' 가 유지되고, 결과가 없으면 한 번 재인출한다.
@@ -24,7 +25,8 @@ const TTL_MS = 15 * 60_000;
 // v2.591: 엣지는 pull 당 20대만 처리한다(`agent/*ConfigPull.js slice(0,20)`) — 그만큼만 인출하고,
 // 결과 시한은 인출 대수 × 장비 시한(엣지가 순차 수집 후 한 번에 push 한다)을 더해 잡는다. 기준선은 보관 중인 엣지 스냅샷에서.
 export const TAKE_MAX = 20;
-const PER_ITEM_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
+// 장비 시한은 수집기가 소유한다(v2.742 DEV-05 — 폴러·큐가 같은 값을 쓴다. 식을 사본으로 두지 말 것).
+const PER_ITEM_MS = PDU_DEVICE_TIMEOUT_MS;
 let _baseOf = null;
 /** 엣지 수신 모듈이 등록한다 — deviceId → 보관 중인 엣지 스냅샷의 collectedAt(엣지 시계 값). 순환 import 를 피하려는 등록식. */
 export function setCollectBaseResolver(fn) { _baseOf = typeof fn === 'function' ? fn : null; }

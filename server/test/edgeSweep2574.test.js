@@ -61,6 +61,7 @@ describe('IMP-07 — edgelog/spec.js 표가 실재하고 빠짐이 없다', () =
       ['relaycheck/poller.js', '역할별 축약(relayCheckView)을 거쳐야 한다 — spec.js 머리말'],
       // v2.727(감사 D-02): `mail/service.js` 는 '중앙 전용' 이 아니었다(엣지도 alerts.js 로 메일을 보낸다) — spec 에 service.mail 로 등재해 여기서 뺐다.
       ['collector/state.js', '중앙 전용'], ['partfault/poller.js', '중앙 전용(전이·DB·알림)'],
+      ['isidu/digest.js', '중앙 전용(v2.742 종합 메일 — 엣지는 틱을 돌리지 않는다. 상태는 설정 › 수집 서버 › 아이실론 › 종합 메일이 말한다)'],
       ['cvp/faultScan.js', '중앙 전용(CVP 장애 전이·DB·알림, v2.640) — health/services.js CENTRAL_ONLY_SPEC 에 등재'],
       ['xferspeed/poller.js', '중앙 전용(법인 간 전송 속도 측정 — 중앙이 엣지와 10MB 를 주고받는다, v2.735) — health/services.js CENTRAL_ONLY_SPEC 에 등재'],
       ['central/svcmonSilence.js', '중앙 전용(엣지 무보고 감시) — 엣지에서 읽으면 늘 비어 있다'],

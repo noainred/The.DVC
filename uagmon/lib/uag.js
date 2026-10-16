@@ -164,10 +164,18 @@ function xmlToDoc(xml) {
     if (v !== undefined) doc[t] = v;
   }
   doc.edgeServiceSessionStats = [];
-  const re = /<edgeServiceSessionStats>([\s\S]*?)<\/edgeServiceSessionStats>/g;
-  let m;
-  while ((m = re.exec(xml)) !== null) {
-    const block = m[1];
+  // v2.742(INJPKG-05): 예전 /<edgeServiceSessionStats>([\s\S]*?)<\/edgeServiceSessionStats>/g 는 닫는 태그가 없으면 여는 태그마다
+  //   본문 끝까지 훑어 O(n²) 였다(2MB 상한 응답 하나로 이벤트 루프 수 초 정지 — UAG 응답은 외부 입력이다). indexOf 로 선형으로 찾는다.
+  //   결과는 예전 정규식과 같다 — 첫 여는 태그 뒤 첫 닫는 태그까지가 한 블록이고, 닫는 태그가 없으면 그 뒤에는 블록이 없다.
+  const OPEN = '<edgeServiceSessionStats>';
+  const CLOSE = '</edgeServiceSessionStats>';
+  for (let pos = 0; ;) {
+    const s = xml.indexOf(OPEN, pos);
+    if (s < 0) break;
+    const e = xml.indexOf(CLOSE, s + OPEN.length);
+    if (e < 0) break;
+    const block = xml.slice(s + OPEN.length, e);
+    pos = e + CLOSE.length;
     doc.edgeServiceSessionStats.push({
       identifier: tagValue(block, 'identifier'),
       edgeServiceStatus: tagValue(block, 'edgeServiceStatus') ?? tagValue(block, 'status'),

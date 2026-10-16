@@ -80,7 +80,7 @@ test('④ 분석 — 미수집 클러스터는 판정 없이 센다 · vCenter �
   const vcs = [{ id: 'vc:a', name: 'VC A', clusterCfg: [cfg] }, { id: 'vc-b', name: 'VC B' }];
   const hosts = [{ vcenterId: 'vc:a', cluster: 'CL1' }, { vcenterId: 'vc:a', cluster: 'cl1' }, { vcenterId: 'vc-b', cluster: 'X' }, { vcenterId: 'vc-b', cluster: 'standalone' }];
   const r = analyzeClusters(vcs, hosts);
-  assert.deepEqual(r.coverage, { clusters: 2, cfg: 1, notCollected: 1 });
+  assert.deepEqual(r.coverage, { clusters: 2, cfg: 1, notCollected: 1, hostsAmbiguous: 0 } /* v2.742 GE1: 이름이 겹쳐 호스트를 붙이지 못한 수 */);
   const x = r.rows.find((z) => z.name === 'X');
   assert.equal(x.collected, false); assert.deepEqual(x.findings, []); assert.equal(x.sev, null);
   const a = r.rows.find((z) => z.name === 'CL1');

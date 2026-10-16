@@ -33,6 +33,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { DEADLINE_LONG_MAX_MS } from '../util/deadline.js';
 import { normPath, SIZE_MODES } from './parse.js';
 import { normalizeTargetMail, normalizeCommonMail, isEmail } from './mailRules.js';
+import { digestOf, normalizeDigest } from './digestRules.js';
 import { ssrfBlockReason } from '../util/ssrfBlock.js';
 
 const FILE = () => path.join(config.configDir, 'isidu-settings.json');
@@ -57,9 +58,13 @@ const lo = (v) => String(v ?? '').trim().toLowerCase();
 
 export const DEFAULTS = Object.freeze({ targets: [], retentionDays: RANGES.retentionDays.def, mail: Object.freeze({ commonTo: Object.freeze([]) }) });
 /** 빈 설정 값(공유 참조를 남기지 않게 매번 새로 만든다). */
-const emptyValue = () => ({ targets: [], retentionDays: RANGES.retentionDays.def, mail: { commonTo: [] } });
-/** 저장된 공통 메일 설정 정리(옛 파일은 필드가 없다 · 형식이 틀린 주소는 버린다 — 저장 경로가 이미 거부하므로 손으로 고친 파일뿐). */
-const commonMailOf = (m) => ({ commonTo: (Array.isArray(m?.commonTo) ? m.commonTo : []).filter(isEmail).slice(0, 50) });
+const emptyValue = () => ({ targets: [], retentionDays: RANGES.retentionDays.def, mail: { commonTo: [], digest: digestOf(null) } });
+/**
+ * 저장된 공통 메일 설정 정리(옛 파일은 필드가 없다 · 형식이 틀린 주소는 버린다 — 저장 경로가 이미 거부하므로 손으로 고친 파일뿐).
+ * v2.742: 종합 메일 설정(`digest`)도 여기 산다 — 정리는 `digestRules.digestOf` 하나다.
+ */
+const commonMailOf = (m) => ({ commonTo: (Array.isArray(m?.commonTo) ? m.commonTo : []).filter(isEmail).slice(0, 50), digest: digestOf(m?.digest) });
+const cloneDigest = (d) => { const g = digestOf(d); return { ...g, days: [...g.days], to: [...g.to] }; };
 
 /**
  * 조사 경로 판정(순수). 문제가 없으면 null, 있으면 사유 문장.
@@ -171,7 +176,7 @@ function load() {
 
 export function loadSettings() {
   const v = load();
-  return { ...v, targets: v.targets.map((t) => ({ ...t, ...(t.mail && typeof t.mail === 'object' ? { mail: { ...t.mail, to: Array.isArray(t.mail.to) ? [...t.mail.to] : [] } } : {}) })), mail: { commonTo: [...(v.mail?.commonTo || [])] } };
+  return { ...v, targets: v.targets.map((t) => ({ ...t, ...(t.mail && typeof t.mail === 'object' ? { mail: { ...t.mail, to: Array.isArray(t.mail.to) ? [...t.mail.to] : [] } } : {}) })), mail: { commonTo: [...(v.mail?.commonTo || [])], digest: cloneDigest(v.mail?.digest) } };
 }
 
 function saveSettingsRaw(v) {
@@ -271,9 +276,24 @@ export function saveSettings(input, ctx) {
   }
   const cm = normalizeCommonMail(input?.mail, cur.mail);
   if (cm.error) return { ok: false, error: cm.error, field: cm.field };
-  const value = { targets: out, retentionDays: numField(input?.retentionDays, RANGES.retentionDays, cur.retentionDays), mail: cm.mail };
+  // v2.742: 종합 메일 설정은 이 저장이 바꾸지 않는다(전용 저장 saveDigestSettings — 대상 목록 저장이 그 값을 지우지 않게).
+  const value = { targets: out, retentionDays: numField(input?.retentionDays, RANGES.retentionDays, cur.retentionDays), mail: { ...cm.mail, digest: cloneDigest(cur.mail?.digest) } };
   saveSettingsRaw(value);
   return { ok: true, settings: loadSettings() };
+}
+
+/**
+ * 종합 메일 설정만 저장(v2.742) — 대상 목록·보존일·공통 수신자는 그대로 둔다. 파일을 읽지 못한 상태면 저장하지 않는다
+ * (빈 값 위에 쓰면 기존 대상이 사라진다 — 라우트가 409 로 말한다).
+ * @returns {{ok:true, digest:object}|{ok:false, error:string, field?:string}}
+ */
+export function saveDigestSettings(input, now = Date.now()) {
+  const cur = load();
+  if (loadErr.get()) return { ok: false, error: '저장된 설정 파일을 읽지 못해 저장하지 않았습니다.', field: 'digest', unreadable: true };
+  const r = normalizeDigest(input, cur.mail?.digest || null, now);
+  if (r.error) return { ok: false, error: r.error, field: r.field };
+  saveSettingsRaw({ ...cur, mail: { commonTo: [...(cur.mail?.commonTo || [])], digest: r.digest } });
+  return { ok: true, digest: cloneDigest(loadSettings().mail.digest) };
 }
 
 /**

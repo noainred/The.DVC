@@ -47,7 +47,18 @@ export function hygieneFindings(vm, s, now = Date.now()) {
     const gb = Number.isFinite(vm.snapshotSizeGB) ? vm.snapshotSizeGB : null;
     if (gb != null && gb > s.snapSizeGB) add('snap-size', { gb, limit: s.snapSizeGB });
   }
-  if (cnt === 0 && Number.isFinite(vm.orphanDeltaGB) && vm.orphanDeltaGB > 0) add('snap-orphan-delta', { gb: vm.orphanDeltaGB });
+  // v2.742(감사 RECENT-03·VC-09): 유령 스냅샷 후보의 근거는 '스냅샷 0개 + 파일 이름이 델타 꼴(-NNNNNN[-delta|-sesparse].vmdk)' 하나뿐이다.
+  //   v2.741 VC-01 로 layoutEx 파싱이 처음 실장비에서 동작하게 되면서 이 판정이 처음 켜졌는데, 링크드·인스턴트 클론처럼 자기 디스크가
+  //   그 이름 꼴인 정상 VM 을 오탐할 수 있다(실장비 미확인 — 추정). 그래서 같은 VM 의 vCenter '통합 필요'(cfg.consolidationNeeded)가
+  //   true 일 때만 주의(warn)로 두고, 그 밖(false·아직 안 읽음)은 참고(info)로 낮춘다 — **빼지 않는다**(통합 필요 false 인 진짜 유령
+  //   델타도 있을 수 있다). 근거는 facts.basis('consolidation'|'name-rule')·consolidationNeeded(true|false|null)로 싣고 화면이 말한다.
+  //   ⚠ 디스크 백킹의 parent 는 B10 장치 수집(vmcfg/parse.js)이 읽지 않아 근거로 쓰지 않는다(지어내지 않는다).
+  if (cnt === 0 && Number.isFinite(vm.orphanDeltaGB) && vm.orphanDeltaGB > 0) {
+    const cn = vm.cfg && typeof vm.cfg === 'object' && typeof vm.cfg.consolidationNeeded === 'boolean' ? vm.cfg.consolidationNeeded : null;
+    const corroborated = cn === true;
+    out.push({ code: 'snap-orphan-delta', sev: corroborated ? HYGIENE_CODES['snap-orphan-delta'] : 'info',
+      facts: { gb: vm.orphanDeltaGB, basis: corroborated ? 'consolidation' : 'name-rule', consolidationNeeded: cn } });
+  }
   const on = vm.powerState === 'POWERED_ON';
   if (on && vm.toolsVersionStatus === 'guestToolsNotInstalled') add('tools-missing');
   const boot = vm.cfg?.bootTime;
@@ -123,14 +134,19 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
   return out;
 }
 
-/** 알림 요약(스냅샷 정책·유령 스냅샷만 — 하루 한 번). 반환 null 이면 보낼 것이 없다. */
+/**
+ * 알림 요약(스냅샷 정책·유령 스냅샷만 — 하루 한 번). 반환 null 이면 보낼 것이 없다.
+ * v2.742(RECENT-03): 유령 스냅샷 후보는 **주의(통합 필요가 함께 표시된 것)만** 알린다 — 이름 규칙만 맞는 참고 후보는 화면에만 보인다
+ *   (링크드 클론 등 오탐 가능성이 있는 후보로 매일 알림을 보내지 않는다).
+ */
 export function snapshotPolicySummary(result, limit = 30) {
   const codes = ['snap-age', 'snap-count', 'snap-size', 'snap-orphan-delta'];
+  const alerting = (f) => codes.includes(f.code) && !(f.code === 'snap-orphan-delta' && f.sev === 'info');
   const src = Array.isArray(result.allRows) ? result.allRows : result.rows;   // v2.719(B1-05): 상한 전 전체
-  const hits = src.filter((r) => r.findings.some((f) => codes.includes(f.code)));
+  const hits = src.filter((r) => r.findings.some(alerting));
   if (!hits.length) return null;
   const lines = hits.slice(0, limit).map((r) => {
-    const parts = r.findings.filter((f) => codes.includes(f.code)).map((f) => (
+    const parts = r.findings.filter(alerting).map((f) => (
       f.code === 'snap-age' ? `${f.facts.days}일` : f.code === 'snap-count' ? `${f.facts.count}개` : f.code === 'snap-size' ? `${f.facts.gb}GB` : `유령 델타 ${f.facts.gb}GB`));
     return `- ${r.name} (${r.vcenterName}) — ${parts.join(' · ')}`;
   });

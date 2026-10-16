@@ -192,7 +192,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       됐다. **F3** 문서는 opt-in 인데 엣지 push 가 `PARTFAULT_ENABLED` 를 안 봤다. **F4** `extract/storage.js` 의
       fru 리더가 **존재한 적 없는 자료구조**(평면 맵)를 읽어, 실제 `svcDiag.parseSpinfo` 집계 객체가 오면 없는 부품
       8개를 지어냈다. 또 v2.547 문서가 "중앙이 remoteInventory 를 판정하면 두 번 열린다" 라고 적은 것은 **이유가
-      틀렸다** — 진짜 이유는 `collector/agent.js:47-57 compactInv` 가 부품 health·serial·locator 를 **전부 빼서**
+      틀렸다** — 진짜 이유는 `collector/agent.js:47-57 compactInv`(지금은 `collector/compactInv.js`) 가 그때는 부품 health·serial·locator 를 **전부 빼서**
       중앙에는 판정할 데이터 자체가 없다는 것이다. 결론이 맞아도 근거가 틀리면 다음 사람이 잘못 판단한다.
     - **상태는 다섯이다** — `ok`/`warn`/`fault`/**`unknown`(못 읽음)**/**`absent`(빈 슬롯)**. 뒤 둘을 정상에도
       장애에도 넣지 않는다(v2.526 Unity SPA DIMM 24칸 중 `REMOVED` 12칸 실측 — 고장으로 세면 정상 장비에 장애 12건).
@@ -1141,7 +1141,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **화면 실패 정직성**(B5-01·03~06·08): `postJson` 반환도 `requireChanged`(409·ok:false 를 성공으로 읽던 것) · 설정 캐시는 **디스크 쓰기 성공 뒤에** 갱신(SAN 사용량·스토리지 주기) ·
       조회 실패를 '없음'·'미지정' 으로 보이지 않는다. `audit2727e` 허용 목록에서 고친 6파일을 뺐다(늘리지 말 것).
     · 남긴 것(3회차 후보): ✅ storage/store.js 전체 재기록·sanSwitchConfigPull 장비마다 쓰기·gpu/poller.js 필터·iDRAC 스캔 주기 쓰기 전 캐시·`DELETE /perf/hangs` 실패 감사는
-      v2.733 C4-01~C4-05 에 고쳤다(v2.741 LEFT-10 정정). 남은 것: 전력 합계 네트워크 6시간 기준 vs CVP partsFresh · 게이트웨이 빈 비밀번호 서버측 거부 · 데모 계정의 관리 IP 조회(정책).
+      v2.733 C4-01~C4-05 에 고쳤다(v2.741 LEFT-10 정정). ✅ 전력 합계 네트워크 기준(v2.740 F-03 `power/total.js cvpPartsStaleReason`·`staleBy`)·게이트웨이 빈 비밀번호 서버측 거부(v2.740 F-10 `proxy/sshGateway.js`)도 고쳤다(v2.742 LEFT-03 정정). 남은 것: 데모 계정의 관리 IP 조회(정책).
   - ⚠⚠ **v2.733 — 점검 3회차(6축 분석 → 반증 → 11그룹 수정) 확정분**(같은 요청의 3회차. 상세 `docs/AUDIT-2026-10-10c.md`,
     회귀 `server/test/audit2733*` + 웹 `audit2733*` — 그룹별 변이 검증):
     · ⚠⚠ **수집을 멈춘 대상은 그 데이터를 쓰는 리포트 전부가 '0건' 이 아니라 '수집하지 않음' 으로 말한다**(C1-01 — v2.732 B4-01 의 파급): 판정은 `logs/coverage.js
@@ -1181,7 +1181,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       거부(400)면 다시 읽지 않아 입력을 남긴다(판정 `vmCredSaveOutcome`).
     · 범위 관리자에게 GPU 게스트 수집 상태(lastRun·overlay)는 실행 시각과 허용 vCenter 목록만(`scopeGpuGuestStatus` — v2.629 A6-04 와 같은 기준).
     · 남긴 것(4회차 첫 후보): docs/AUDIT-2026-10-10c.md '다음 회차 후보' · 정책 판단 3건(C3-02b·c·d — 원격 터널·GPU 게스트 시험·수집 데이터 삭제의 쓰기 범위) ·
-      스파크라인은 자격증명이 맞으면 여전히 VM 마다 로그인한다(vCenter 별 1회 배치는 soapClient 변경 — 다음 후보).
+      ✅ 스파크라인의 VM 마다 로그인은 v2.741 LEFT-03 에 vCenter 당 1회 묶음 조회로 고쳤다(`soapClient.js fetchVmsPerfSeries` — v2.742 LEFT-03 정정).
   - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
     (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
     사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
@@ -1434,7 +1434,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       정한 공유 토큰이면 그 해시로 **오프라인 사전 공격**이 성립한다. 나가는 것은 `sha256:xxxxxxxx
       (len=N)` 8자 지문 + 앞뒤공백 플래그뿐이고, 비교는 서버 안에서 `sameToken()`(전체 해시)이 한다.
       8자(32비트)는 충돌하므로 문구도 **'다르면 확실히 다르고, 같으면 가능성이 높다'** 까지만 쓴다
-      (v2.528 `credFingerprint` 와 같은 한계). 엣지 거부 기록(`routes/collector.js authDeny.recent[].fp`)과
+      (v2.528 `credFingerprint` 와 같은 한계). 엣지 거부 기록(`collector/denyLog.js` 의 recent 링 — v2.579 에 `routes/collector.js` 에서 옮겼다)과
       **같은 표기**여야 눈으로 대조된다 — 그래서 `tokenFp` 를 이 모듈로 승격했다(두 벌 금지).
     - ⚠⚠ **토큰 값을 trim 하지 말 것**(v2.560 자체 검증에서 잡은 결함): 초판 `edgeReport.js` 가
       `COLLECTOR_TOKEN=' tok '`(12자·공백 있음)을 `len:10 · space:false` 로 보고했다 — **오류 없이
@@ -1456,7 +1456,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       다른 이름이면 **토큰 뒤바뀜**, 403 이면 **확실히 다름**, `tokenMode:'shared'` 면 공유 토큰이다.
       ⚠ 표적을 인벤토리·설정 pull 같은 무거운 경로로 바꾸지 말 것(점검이 곧 부하가 된다).
     - ⚠ **배포 대상 토큰으로 엣지를 찔러보지 않는다**(사용자 선택). 틀린 토큰 시도는 그 엣지의
-      거부 링버퍼(20건 — `routes/collector.js denyRecent`)를 채워 **실제 침입 흔적을 밀어낸다**.
+      거부 링버퍼(20건 — `collector/denyLog.js denyRecent`)를 채워 **실제 침입 흔적을 밀어낸다**.
       그 축은 저장값끼리 대조한다(`sameToken`). 배포 대상 이름 필드는 **`agentName`**
       (`agent/deployRegistry.js:24-25`) — `name` 으로 읽으면 전 항목이 host 로 떨어져 등록부와
       **영원히 짝이 맞지 않고** '배포 대상 없음' 이라는 거짓이 된다.
@@ -2025,7 +2025,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       로 **없는 장비가 있는 것처럼** 보였다. `recordsFor(text, expect)` 가 CSV·Key=Value 를 **기대 필드
       적중 수로 채점**하고, **기대 필드가 하나도 없는 레코드는 버린다**. 둘 다 0점이면 빈 배열이다.
     - **명령은 항목마다 후보 체인**이고 `core`(용량·상태)와 `deep`(구성 상세)로 나뉜다.
-      `UNITY_SSH_DEEP=0` 으로 deep 을 끌 수 있고 **끄면 화면이 밝힌다**(`extra.deepSkipped`).
+      (⚠ v2.542 재작성으로 core/deep 2단·`UNITY_SSH_DEEP`·`extra.deepSkipped` 는 없어졌다 — 아래 v2.542 항목. 기록으로만 남긴다.)
       **쓰인 명령(`usedCmds`)과 실행되지 않은 명령(`missingCmds`)을 둘 다 표시할 것** — 구성 정보가
       비어 있는 이유를 사용자가 알아야 한다.
     - ⚠ **실장비 출력을 일부만 확인했다**(정직 기록): v2.525 시점에는 전혀 확인하지 못했고, v2.526 에
@@ -2061,7 +2061,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       '읽지 못한 것' 이다. 넷(`ok`/`empty`/`unknown`/`fault`)을 각각 세고 화면이 각각 밝힌다.
     - **`temp: 21` 은 상태가 아니라 수치**(DPE 온도)이고 **`ps0: OK 330` 의 330 은 입력 전력(W)** 이다
       (`Input Power : 330 Watts` 와 교차 확인). 그래도 단정하지 않고 **두 출처를 나란히 싣는다**.
-    - **구성 정보는 긴 주기로만 수집한다**(`CONFIG_EVERY_MS` 기본 6시간, `UNITY_CONFIG_EVERY_MS`) —
+    - (⚠ v2.542 에 없어진 규칙 — `CONFIG_EVERY_MS`·`UNITY_CONFIG_EVERY_MS`·`extra.configAt` 은 지금 코드에 없다. 기록으로만 남긴다.) **구성 정보는 긴 주기로만 수집한다** —
       매 주기 20여 개 SSH 명령을 돌리면 장비와 회선을 붙잡는다. 용량·상태(`when:'always'`)는 매 주기다.
       화면은 **`extra.configAt` 으로 언제 수집한 구성인지 밝힌다**(낡은 값을 지금 값인 척하지 않는다).
     - ⚠ **`extra.capacityNote` 라는 키를 재사용하지 말 것**(v2.526 에 Chromium 판독으로 발견한 실제
@@ -2809,7 +2809,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
   - **SQLite PRAGMA**: idrac/metrics/logs DB는 `WAL + synchronous=NORMAL + busy_timeout=3000`(단건 insert 5ms→0.01ms 실측). **ipam.db만 예외** — 외부 프로그램이 직접 읽는 공유 파일이라 저널 기본(DELETE) 유지 + busy_timeout만. WAL 전환 금지(외부 리더의 -wal/-shm 호환 미확인).
   - **전력 latest 인메모리 캐시**(`idrac/db.js withLatestCache`): latestAll(GROUP BY MAX)은 테이블 풀스캔이라(90일 수렴 시 수억 행) 매 30초 3회 호출이 초 단위 블로킹이었음. 기동 시 1회 시드 후 쓰기 경로에서 O(1) 갱신 — **getDb() 래퍼를 우회한 직접 쓰기 금지**(캐시가 낡음). 전력 대시보드 24h 집계는 `power_hourly` 롤업이 담당한다(`idrac/db.js`) — v2.503 정정: 여기 적혀 있던 `idrac/service.js aggCache` 60초 캐시는 **v2.292 에 삭제됐다**(코드 주석이 직접 그렇게 밝히고 있는데 이 문서만 낡아 있었다).
-  - **대량 export 청크 패턴**(`routes/api.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
+  - **대량 export 청크 패턴**(`routes/api/hardwareGpu.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
   - **웹 폴링 뷰 오류 처리**: 데이터 보유 중 일시 폴링 오류 1회로 화면 전체를 ErrorBox로 갈아치우지 않는다 — `if (error && !data)`일 때만 전체 오류, 그 외엔 배너(고RTT에서 대시보드 깜빡임 방지). 스코프(파라미터) 변경 시 usePolling이 직전 데이터를 비워 이전 스코프 데이터 표시를 막는다.
   - **대량 SQLite 쓰기 오프로딩**(`ipam/writeWorker.js`, v2.215): 레저 동기화는 DELETE+수천 행
     INSERT 다. 트랜잭션으로 fsync 는 1회지만 **바인딩·INSERT 자체가 동기 CPU** 라 5,850 VM 규모에서
@@ -3653,6 +3653,33 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 메인 목록 응답(`targetRows`)은 주소를 싣지 않는다(개수·선택·마지막 결과만 — 테스트 고정). 주소는 설정 조회에만. 상태 파일에도 주소를 적지 않는다(개수만).
     · `mail-now` 실패는 409(본문 사유) — 5xx 로 주면 재시도하는 호출부가 같은 메일을 두 번 보낼 수 있다.
     · ⚠ 정직 기록: 실제 사내 메일 서버로는 보내 보지 못했다(가짜 SMTP). Chromium 은 목업(메일 꺼짐 상태)으로 설정 창·대상 화면 1440/400 을 봤다(넘침 0).
+  - ⚠⚠ **v2.742 — 아이실론 종합 메일(정한 요일·시각에 전 법인 결과 한 통). 규칙은 `isidu/digestRules.js`(순수), 발송·일정·기록은 `isidu/digest.js`, 본문은 `isidu/mailHtml.js` 하나**
+    (사용자 요청 + Claude Design 시안 ① 본문 · ② 설정 · ③④ 대상별 결과·실패 메일 새 템플릿 승인. 선택: v2.742 에 함께 · 전체 검증 · 시안 그대로.
+    회귀 `server/test/isiduDigest2742.test.js`(가짜 SMTP · 실제 api 라우터 · 틱·재시작·놓침 — 변이 12종 중 11종, 남은 1종은 개요 조회 대상 필터 = 결과가 같은 동등 변이) +
+    웹 `isiduDigestText.test.js`(서버 모듈과 같은 입력 대조)):
+    · **중앙만 보낸다** — 엣지는 틱도 돌지 않는다(`digestTick`·`sendDigest` 가 'edge'). 장비에 접속하지 않고 DB 의 마지막 성공 조사로 만든다(조사를 새로 돌리지 않는다).
+      목록 행은 메인 목록 응답과 **같은** `isidu/rows.js targetRows`(라우트에서 옮겼다 — 두 벌이면 화면과 메일의 상태가 갈라진다), 법인 이름은 `isidu/corpName.js`.
+    · 일정은 `xferspeed/schedule.js` 의 매주 일정 계산을 그대로 쓴다(포탈 시각 KST). '지금 이전의 가장 최근 회차' 하나만 본다 — 처리 기록(lastSlot)·since 보다 뒤이고
+      30분(`GRACE_MS`) 안이면 보내고, 넘으면 **몰아서 보내지 않고** 놓침(down 포탈 꺼짐 · late · clock 시계 되감김 → 기록을 지금으로)으로 남긴다.
+      ⚠⚠ **lastSlot 은 보내기 전에 상태 파일에 남긴다** — 보내는 중 재시작해도 같은 회차를 두 번 보내지 않는다(대신 그 회차는 못 보냈을 수 있다 — 정직 기록).
+      `since` 는 서버가 정한다(켜거나 요일·시각을 바꾼 시각) — 저장하자마자 오늘 지난 회차를 소급 발송하지 않는다.
+    · 받는 사람 = 통합 관리자(메일 설정 `defaultTo`, includeAdmin) ∪ 추가 주소, 대소문자 무시 한 번. 발송은 `sendPortalMail({kind:'isidu', to, by})` — 정기는 'system',
+      '지금 한 번 보내기' 는 사람 이름(수동 — SMTP 인증 정지 중에도 시도)이고 '새 조사 없으면 생략' 을 보지 않으며 회차 기록을 건드리지 않는다.
+    · 본문 모델(`buildDigestModel`): 대상 상태는 웹 `isiduText.targetStatus` 와 **같은 key·tone**(`statusOfRow` — 웹 테스트가 16개 입력으로 대조) · 합계는 성공한 수집이 있는 대상만 ·
+      7일 변화는 7일 이전 기준이 있는 대상만, 반올림 범위 안은 0 · 실패·보고 늦음은 '직전 성공 값' 표지 · 데모(mock-)는 실제 메일에서 빼고 미리보기에만 넣는다.
+      실패 종류 제목(`FAIL_TITLE`)은 웹 `FAIL_TEXT[].title` 과 같은 글자 — **실패 종류를 늘리면 둘 다**. 생략·놓침 코드(`DIGEST_SKIP_CODES`·`DIGEST_MISSED_REASONS`)는 웹
+      `isiduDigestText.SKIP_TEXT`·`MISSED_TEXT` 와 1:1(웹 테스트가 서버 소스의 code 리터럴까지 대조).
+    · 설정은 `isidu-settings.json` 의 `mail.digest` 이고 **전용 저장**(`saveDigestSettings` · `PUT /tools/isilon-dirusage/digest`)이다 — 대상 목록 저장(`saveSettings`)은 그 값을
+      그대로 옮기고, 종합 메일 저장은 대상 목록을 건드리지 않는다(서로 지우지 않는다 — 테스트 고정). 설정 파일을 못 읽으면 저장 409. 형식 오류는 400(field digest.days·time·topN·to).
+    · 라우트 4개(GET·PUT digest · POST send-now(실패 409 — 재시도로 두 번 보내지 않게) · POST preview(보내지 않음))는 adminOnly + fullScopeOnly + **requireSuperAdmin**(수집 대상 설정과 같은 기준).
+      조회 응답의 `adminTo` 는 화면이 저장 전 입력으로 받는 사람 수(겹침 포함)를 세는 데 쓴다 — **상태(status)·기록·상태 파일에는 주소를 싣지 않는다**(개수만, 테스트 고정).
+    · 상태 파일 `isidu-digest-state.json`(registerStateFile · 원자 0600 · 손상 보존 · 기록 20건). `startIsiduDigest` 30초 틱(index.js). edgeSweep `EXCLUDED` 에 '중앙 전용' 사유.
+    · 화면: 설정 › 수집 서버 › 아이실론 디렉터리 사용량 › **종합 메일** 탭(`#/settings/isilon-dirusage/digest` · `IsiduDigestSettings.jsx` · 판정·문구 `isiduDigestText.js`). 탭을 처음 열 때
+      만들고 오가도 유지한다(저장하지 않은 입력이 탭 전환으로 사라지지 않게). '지금 한 번 보내기' 는 바뀐 칸이 있으면 잠근다(저장된 설정으로 보낸다). 미리보기는 `sandbox` iframe(srcDoc).
+    · 메일 HTML 은 표 레이아웃 · 인라인 스타일 · 모든 값 이스케이프(`mailHtml.esc`) · 포탈 링크 없음(주소 설정이 없다 — 메뉴 경로를 글로 적는다). **메뉴 이름을 바꾸면 본문 안내도**(웹 테스트가 '› 종합 메일' 을 대조).
+      ⚠ 카드 묶음은 `font-size:0;line-height:0` 래퍼 안의 inline-block 이다 — **안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면 라벨과 값이 겹친다**(Chromium 판독에서 발견).
+      좁은 폭은 `<style>` @media(520px 이하 여백 축소 — Outlook 데스크톱은 무시한다)로 400·360px 넘침 0. 테스트 ⑤ 가 두 규칙을 고정한다(변이 2/2).
+    · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 등 메일 클라이언트에서의 모양은 확인하지 못했다(가짜 SMTP · Chromium 미리보기).
   - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개 · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
     (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
     "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".
@@ -4210,7 +4237,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠⚠ **이름으로 찾는 설정은 저장·조회 둘 다 `util/agentKey.js`**(RECENT2604-01 — **v2.603 이 만든 회귀**): 배정은 쿼리 이름, 결과는 토큰
       이름으로 대소문자 구분 조회해 스캔 결과가 전량 409. 새 거부(409·403)를 넣으면 **정상 경로가 같은 키로 찾는지**부터 볼 것.
     - **외부 응답은 `.json()`·`.text()` 를 그대로 쓰지 않는다**(CEN2604-01 high·CEN2604-02) — `readJsonCapped`·`readBodyPrefix`. 두 소스
-      스윕 테스트가 고정한다(허용 목록 사유 포함). 경로를 변수로 조립하는 호출은 스윕이 못 본다(upgrade.js 엣지 push — 다음 후보).
+      스윕 테스트가 고정한다(허용 목록 사유 포함). 경로를 변수로 조립하는 호출은 스윕이 못 본다(✅ upgrade.js 엣지 push·`collector/upgradePush.js` 는 이미 `readJsonCapped` 를 쓴다 — v2.742 LEFT-03 정정).
     - **자기등록은 검증이 아니다**(CEN2604-04): 공유 토큰 자기등록 이름을 '아는 엣지' 로 세면 v2.601 미검증 상한이 우회된다.
     - **비밀 가림 정규식은 `_PASS`·`_PWD`·`_CREDS` 까지**(SEC2604-01 — `util/envRedact.js`, 밑줄 접두만). 파일별 추가 봉인 필드는
       `secretVault FILE_EXTRA_SECRET_FIELDS`(alerts.json 의 url — 전역 SECRET_FIELDS 에 url 을 넣으면 접속 주소까지 봉인된다).
@@ -4652,7 +4679,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 수집 서버로 등록되지 않은 폴 전용 엣지는 버전이 늘 미상이라 iLO 전용 대역이 계속 보류된다(정직 기록 — 사유 문구가 말한다).
     - **HPE 서비스태그는 SerialNumber**(COL2611-01, `redfish.js systemServiceTag`): `SKU||SerialNumber` 는 HPE 에서 모델 공통 부품번호라
       같은 모델 서버가 dedup·전력 합계에서 한 대로 합쳐졌다. 이미 SKU 로 등록된 항목은 인벤토리 갱신 때 `correctHpeServiceTag` 가 **1회 교정** —
-      ⚠ 그 결과 파트 장애·bmusage 키가 바뀌어 열린 장애가 한 번 새로 열릴 수 있다('키 기준 변경' 배지는 만들지 않았다 — 남은 일).
+      ⚠ 그 결과 파트 장애·bmusage 키가 바뀌어 열린 장애가 한 번 새로 열릴 수 있다(✅ v2.612 에 `key-migrated` 로 옮기고 화면이 '식별 키 변경' 배지로 보인다 — `partfault/incidents.js`·`partFaultText.js`, v2.742 LEFT-03 정정).
       HPE 팬 `ReadingUnits:'Percent'` 는 rpm 이 아니라 `pct`, Absent 온도 센서는 건너뛴다.
     - ⚠⚠ **범위 admin 의 쓰기 — 이번엔 '등록부 파일 11개' 전체였다**(AUTHZ2611-01·02·03·04, LEFT2611-02·03·07): v2.607 fleetWideOnly 를
       `/vcenters/import {mode:'replace'}` 가 그대로 우회했다(검증 중 신규 발견). 각 파일 상단 `const fleetOnly = fullScopeOnlyWith('<사유>')`.
@@ -4680,7 +4707,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       수집 서버 URL 끝 슬래시 정리 선형화(`util/trimSlashes.js`) · 중앙→엣지 호출 태그 5곳.
     - ⚠ **속도 절대값 테스트는 CPU 에 따라 깨진다**: `audit2606g` 의 '옛 정규식 > 150ms' 가 이 컨테이너에서 110ms 로 나와 전량 테스트가
       실패했다 — `tOld > 40 && tOld > tNew × 5`(상대 비율)로 바꿨다. **ReDoS 회귀 테스트는 비율로 쓸 것.**
-    - 남긴 것: 파트 장애 키 변경 배지(COL-01) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
+    - 남긴 것: ✅ 파트 장애 키 변경 배지(COL-01 — v2.612 `key-migrated`) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
       `/idrac/:id/gpu-probe` GET 로그인 · 실장비(iLO·CVP·구버전 엣지) 미확인 — 전부 가짜 서버·합성 입력 재현이다.
   - ⚠⚠ **v2.612 — 20차 점검 확정분**(사용자 요청 "코드 리뷰 보안 패치, 성능 개선 등" · 선택 10축 병렬 + 반증 · 전체 검증.
     확정·부분 확정 약 45건, 반증 7건. 회귀 `test/audit2612{a..e}.test.js` + 웹 `audit2612f.test.js` 외. 상세 `docs/AUDIT-2026-09-25b.md`):
@@ -5091,7 +5118,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `first=true` 로 prune 생략. `update-versions.mjs` 도 손상 목록은 중단. **이 두 보호를 `\|\| true` 로 되돌리지 말 것.**
     - ⚠⚠ **`/capacity` 요약은 시간 기준 양보 + stale-while-revalidate**(`capacity/evaluate.js`): 호스트×임계 지표 동기 SQL 이 700호스트 합성에서
       3,316ms 정지(최장 30ms 로) — v2.672 '양보는 시간 기준' 규약의 누락 지점. TTL 뒤에는 옛 값을 바로 주고 뒤에서 1건만 재계산하므로 응답
-      `summaryRefreshing`·`summaryAt` 이 그 사실을 말한다(화면 표시는 아직 — 남은 일).
+      `summaryRefreshing`·`summaryAt` 이 그 사실을 말한다(✅ 화면은 `CapacityAdvisor.jsx summaryCalcNote` 가 그린다 — v2.742 LEFT-03 정정).
     - ⚠⚠ **세션 연장 상한은 `lt`(원래 로그인 시각) 기준**(`auth/auth.js signToken` · `routes/auth.js /extend`): `iat` 는 연장마다 새로 찍혀
       `sessionMaxHours` 가 밀렸다(연쇄 연장 = 무기한). `lt` 는 토큰에 서명돼 승계되고 구버전 토큰만 iat 폴백. `/extend` 에 `requireEnrolled`.
     - **로그인 감사·활성 세션·실패 분석의 IP 는 `clientIp(req)`** — XFF 원문은 판정에 쓰지 않고 `xff` 필드(64자)로만 남긴다(형제 `auditMiddleware` 는 이미
@@ -5176,6 +5203,45 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       INJPKG-02(du 출력 4MB 상한) · DB-04(CVP·통신 점검 COUNT) · TIMING-03 주기 틱 보류 · 새 상태 필드 화면 표시(snapshotSave·keptCopy·staleCopy 등) · `/tools/waste/export` 메인 스레드 · REST 수집기 `/401/` 재던짐.
     · ⚠ 작업 방식: 분석은 Workflow 5개(축 10개 × 2인 반증), 수정은 12그룹이 같은 작업 트리에서 겹치지 않는 파일만 고쳤다. stop hook 이 WIP 커밋을 요구해 **66e3bed 는 그룹 변이 도중의 `ping/db.js` 되돌린 판본**을 담았다 —
       그 뒤 커밋이 바로잡았다(그 커밋판으로 되돌리지 말 것). GJ 는 같은 이유로 server/src 를 격리 사본에 복사해 변이 검증했다(다른 그룹의 진행 중 변경과 겹치지 않게).
+  - ⚠⚠ **v2.742 — '세 번 반복' 1회차(10축 발견 → 발견마다 2인 반증 → 12그룹 수정) 확정분**(사용자 요청 "세번 반복" · 선택 '직전과 동일' · '회차마다 릴리스'.
+    발견 52 = 확정 43 · 확정(약) 4 · SPLIT 1 · 가능성 4, 고친 것 51(일부만 6) · 남긴 것 1(VC-08 — v2.741 설계). 상세 `docs/AUDIT-2026-10-16.md`,
+    회귀 `server/test/audit2742{a..k,lead,m}.test.js` + `uagmon/test/uag2742` + 웹 `audit2742{l,n}`·`tools/audit2742j` — 그룹별 변이 검증(고친 파일을 `89adbd1` 판본으로 되돌리면 실패)):
+    · ⚠⚠ **iDRAC 스캔 '교체' 범위는 `idrac/registry.js makeScanReplaceScope` 하나**(DEV-01 high): 예전 replace-datacenter 는 법인 전체를 교체해 같은 법인의 다른 엔트리 등록·
+      손 등록·OME 를 지웠다. 등록 항목에 `scanRangeId` 표지 — 지우는 것은 그 표지가 있거나 id 가 주소인 옛 스캔 등록뿐이다. **새 교체 호출부는 scanRangeId·scanRanges 를 넘길 것.**
+    · ⚠⚠ **root 서명 확인: 회수는 어느 키 파일에서든, 키 추가는 root 소유 파일에서만**(RECENT-01·INJPKG-01 — v2.741 root 래퍼의 잔여): install.sh 가 root 전용 사본
+      `<tools>/trust/release-signing-keys.conf` 를 남기고 root 확인 셋이 env `VP_ROOT_TRUST_COPY` 로 그 사본의 **회수만** 합친다. 서비스 계정 소유 portal.env 의 RMA 유닛·재부팅 요청은
+      sudoers 를 넓히지 않는다(이미 설치된 같은 줄만 유지 — INJPKG-03). 상세는 server/CLAUDE.md 서명 절.
+    · ⚠⚠ **알림은 발송 대기열 하나(`alerts.js enqueueNotify`)로 보낸다**(TIMING-01): await 없는 동시 발송이 SMTP 인증 정지 가드를 우회했다(첫 실패가 기록되기 전에 같은 계정으로
+      여러 번 로그인). 같은 미대기 notify 루프가 relaycheck·loginMonitor·guestScanScheduler·rma testResults 에도 있었다. **새 알림 발송 경로는 이 대기열로.** 해소된 키의 발송 시각은
+      쿨다운 동안 기억한다(TIMING-02 — 경계 떨림이 억제 창마다 재발송).
+    · ⚠⚠ **주문형 vCenter 로그인 문은 `vcenter/dsBrowse.js onDemand*` 하나**(VC-03 — v2.732 B4-01 · v2.733 C3-01 의 형제 누락 4경로): 비활성·점검중·site·인증 정지면 로그인하지 않고
+      409 + `onDemandErrorFields`(skipReason·authStopped). 게스트 계정 추가만 인증 정지에도 1회(관리자 수동 작업). **새 주문형 vCenter 경로도 이 문을 지날 것.**
+    · **클러스터 식별은 `clusterGroupKeyOf`(vCenter + clusterRef, 없으면 이름) 한 벌**(VC-05): 같은 이름 다른 데이터센터 클러스터가 합쳐졌다. 수집기가 호스트·VM 에 `clusterRef`·
+      `vcDatacenter` 를 싣고(중앙 정제도 받는다), ref 모드는 그 vCenter 호스트가 **전부** ref 를 실었을 때만. 화면 key·이름은 웹 `clusterCfgText.clusterRowKey`·`clusterNameLabel`.
+      ⚠ 나머지 이름 키 소비처(드리프트·DS 분석·시계열 키·공개 API 클러스터 개수)는 남겼다 — 이력 연속성·대조 계약 판단 필요.
+    · **라이선스·확장 조회 실패는 `[]` 가 아니라 null + 사유**(VC-06 — `corelicense/analyze.js vcListUnread` 한 벌) · 엣지가 보낸 licenses·solutions 는 배열·평범한 객체·아는 필드만(VC-07).
+    · **스토리지 REST 자격증명 거부 판정은 `restCommon.isCredReject`·`credRejectError` 하나**(DEV-03): `/401/.test(e.message)` 는 호스트명(isi-401)·SID·본문 속 401 로 수집 전체를 끊었다.
+      표지(authFailed·status 401)가 먼저이고, 표지 없는 옛 오류는 '인증 실패(401)' 접두만. 403 은 대상 아님. 리드가 `storage/areasCollector.js` 의 형제 누락도 고쳤다(`audit2742lead`).
+    · **SAN**: 빈 슬롯(Absent·Not Present)은 장애가 아니다(`isAbsentWord` 한 벌 — 센서·팬·PSU·파트 장애 추출, 장착 0이면 확인 불가) · peer zone 속성 멤버(00: 접두 WWN)는 끝점이 아니다
+      (REST 는 principal↔peer 만 잇는다 · ⚠ SSH cfgshow 에는 principal 이 없어 SSH 경로는 그대로) · 처리량 간격 상한은 max(2시간, 주기×3 + 실행 소요)(`rates.setRateCadence`) ·
+      storage-summary 응답 객체 기억(agg WeakMap + 역할 키, TTL ≤ 60초).
+    · **PDU SSH 세션 예산**(DEV-05 — v2.528·v2.741 규약의 형제): `PDU_SESSION_BUDGET_MS` 75초 < 장비 시한 − 여유. 장비 시한 `PDU_DEVICE_TIMEOUT_MS` 는 수집기가 소유하고 폴러·재수집 큐가 import 한다.
+      Isilon SSH 부가 명령 순서는 계약이다(정확 용량 통계가 버전·계정 조회보다 먼저 — RECENT-04).
+    · **엣지 계약**: export 센서 상세는 바뀐 서버만(`?sdSince=`·`sdCursor` — 구버전 양쪽은 예전처럼 전량, 중앙은 직전 상세로 채우고 시각을 다시 자른다, EDGE-01) ·
+      중앙 지속형 503(registry/settings 손상·DB 불가)은 `Retry-After: 60` + no-store(`PERSISTENT_503_HEADERS` — central.js 의 503 전부가 거치는지 스윕) · 엣지 큰 본문 push 두 곳은 503 을
+      호출 안에서 다시 보내지 않는다(`postNo503Retry`) · iDRAC 스캔 결과 회신은 retries 0 + 다음 주기 백오프 큐(`unsentResults`·`unsentDropped`, EDGE-03).
+    · **아이실론 '지금 수집' 대기열은 `scan-journal.json` 의 queued 에 동기로 남는다**(RECENT-02·EDGE-02): 기동 때 원래 넣은 시각으로 돌아오고(6시간 시한), 재개를 기다리는 조사의 자리는 비워 둔다.
+      자동 업그레이드는 기록이 남은 대기 요청은 기다리지 않고(재시작 뒤 돌아온다), 기록을 못 남긴 요청과 진행 중 에이전트 대량 배포(`bulkDeploy.runningBulkDeploys`, TIMING-04)는 기다린다.
+    · **OS 인벤토리 prune 은 '읽은 vCenter 에서 사라진 VM' 만**(VC-04): 첫 수집 중·불통·낡음·점검중 vCenter 의 기록은 `keptUnread`, 등록부를 못 읽으면 vCenter 단위 삭제 안 함,
+      스캔 실패는 직전 OS 를 남기고 `error`·`errorAt`·`okAt`(웹 '최근 실패 · 이전 값').
+    · **끊긴 ESXi 호스트의 센서 온도는 `store.usageReadable` 로 적재·집계에서 뺀다**(VC-02 — v2.594 사용률 규칙의 온도판) · 유령 스냅샷 후보는 `consolidationNeeded` 근거일 때만 warn(RECENT-03).
+    · **로그 DB**: 엣지 연합 조회·네트워크 로그 분석의 정확 COUNT 를 상한 있는 조각 세기로(`countCappedAsync`, 100,000 — 넘으면 `totalCapped`·'N건 이상', 중앙 `logQueries` 가 그 필드를 보존한다) ·
+      logs prune 적응 청크(목표 40ms) · 필터 CSV 조각 읽기.
+    · **GPU 게스트 오버레이 TTL = max(30분, 폴 주기×3 + 30초)**(VC-01) · 이름으로 찾는 엣지 설정(GPU 게스트 배포·배포 사용자)은 쓰기도 `agentKeyOf`, 로드 때 대소문자 중복 병합(LEFT-01 — v2.604 규약의 쓰기 누락).
+    · **웹**: 서비스 중단 화면의 확인 요청은 토큰을 싣고 401·403 도 '서버 응답' 으로 본다(WEB-01) · `sendJson/putJson/…` 반환값은 `requireChanged` 로 판정(WEB-02 — `audit2727e` ALLOW2 스윕) ·
+      용량 모름 호스트는 `hostCapacityText`(LEFT-06) · 서버 `hostsCapacityUnknown` 을 쓰지 않던 세 화면.
+    · ⚠ 작업 방식: 첫 실행 12그룹 중 9그룹이 세션 사용량 한도로 멈췄다 — v2.607 규칙대로 반쯤 고친 파일 69개를 기준판으로 되돌리고 8그룹을 처음부터 다시 돌렸다(결과 파일·변이 기록이
+      있고 작업 트리가 수정본 백업과 바이트 동일했던 GF 만 완료로 인정). 변이 검증 중인 그룹의 파일은 WIP 커밋에서 뺐다(끝난 그룹 파일만 먼저 커밋).
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면

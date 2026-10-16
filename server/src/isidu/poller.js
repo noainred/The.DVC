@@ -19,6 +19,12 @@
  *  · v2.737: 조사를 시작하면 실행 중 스캔 기록(util/scanJournal)에 남긴다 — 업그레이드·재시작으로 끝나지 못하면 다음 기동 2분 뒤 자동으로
  *    다시 시작한다(재개 상한 2회). 장비에서 분리 실행 중이던 du 가 있으면(collect.js) 새로 돌리지 않고 **그 작업에 붙어 결과를 받는다**.
  *    재개 대기 중인 대상은 주기 틱이 먼저 새로 시작하지 않는다(같은 장비에 du 두 개를 겹치지 않게 — 최대 2시간).
+ *  · v2.742(감사 RECENT-02·EDGE-02): '지금 수집' 대기열도 실행 중 스캔 기록에 남긴다(`scanQueued` — 동기). 예전에는 메모리에만 있어
+ *    재시작·자동 업그레이드가 오면 대기 요청이 **기록도 없이** 사라졌고(v2.740 까지는 전부 곧바로 시작해 기록에 남았다 — v2.741 회귀),
+ *    엣지 위임 요청은 중앙이 그 요청을 결과 시한(수 시간)까지 '진행 중' 으로 잡아 두었다(엣지가 다시 시작하지 않는다).
+ *    기동 때(모듈 로드) 그 기록을 대기열로 되돌리고(원래 넣은 시각 그대로 — 대기 시한이 재시작으로 늘지 않는다) 자리가 나면 차례로 시작한다.
+ *    재시작 전에 **돌던** 조사(재개 대기)가 자리를 먼저 받는다(`freeSlots` — 되돌린 대기 요청·주기 실행이 그 자리를 먼저 차지하면 재개가
+ *    '다른 스캔 중' 으로 밀리다 그만둘 수 있다).
  */
 import { config } from '../config.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -26,7 +32,7 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { loadSettings, resolveTarget, edgeTargets } from './settings.js';
 import { collectTarget } from './collect.js';
 import * as db from './db.js';
-import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor } from '../util/scanJournal.js';
+import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor, scanQueued, scanDequeued, queuedOf } from '../util/scanJournal.js';
 import { notifyScanStored } from './notify.js';
 
 export const TICK_MS = 60_000;
@@ -59,6 +65,46 @@ let _afterScan = null;         // 엣지: 적재 뒤 push 예약(push.js 가 등
 export function onScanStored(fn) { _afterScan = typeof fn === 'function' ? fn : null; }
 
 const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
+
+/** v2.742(RECENT-02): 대기열에 넣는다 — 실행 중 스캔 기록에도 남긴다(재시작·업그레이드에도 대기 요청이 남게). */
+function enqueue(id, { since = Date.now(), trigger = 'manual', label = '', restored = false } = {}) {
+  _queue.set(id, { since, trigger, ...(restored ? { restored: true } : {}) });
+  if (!restored) scanQueued(KIND, id, { label: label || id, trigger, since, holdMs: QUEUE_HOLD_MS, meta: { manual: true } });
+}
+/** v2.742: 대기열에서 뺀다(시작·시한 초과·대상 없음) — 기록도 함께 지운다. */
+function dequeue(id) {
+  _queue.delete(id);
+  scanDequeued(KIND, id);
+}
+
+/**
+ * v2.742: 지금 새로 시작할 수 있는 자리 수 — 재시작 전에 돌던 조사(재개 대기, 기동 뒤 PENDING_HOLD_MS 안)의 자리는 비워 둔다.
+ * 재개 함수(resumeIsidu)는 이 값이 아니라 실제 진행 수만 본다(재개가 그 자리의 주인이다).
+ */
+function freeSlots(now = Date.now()) {
+  let reserved = 0;
+  for (const x of journalFor(KIND).interrupted) {
+    if (_inflight.has(x.key)) continue;
+    if (now - (x.detectedAt || 0) >= PENDING_HOLD_MS) continue;
+    reserved++;
+  }
+  return CONCURRENCY - _inflight.size - reserved;
+}
+
+/**
+ * v2.742(RECENT-02): 기동 때 재시작 전 대기 요청을 대기열로 되돌린다(원래 넣은 시각 그대로 — 대기 시한이 재시작으로 늘지 않는다).
+ * 시한이 지난 것은 drainQueue 가 버리고 기록에 남긴다. 같은 대상이 재개 대기 중이면 drainQueue 가 재개가 끝날 때까지 기다린다.
+ */
+function restoreQueue() {
+  let n = 0;
+  for (const q of queuedOf(KIND)) {
+    if (_queue.has(q.key) || _inflight.has(q.key)) continue;
+    enqueue(q.key, { since: q.since || Date.now(), trigger: q.trigger || 'manual', restored: true });
+    n++;
+  }
+  if (n) note('info', `재시작 전 '지금 수집' 대기 ${n}개를 대기열에 다시 넣었습니다 — 자리가 나면 차례로 시작합니다`);
+  return n;
+}
 
 function note(level, msg) {
   _recent.unshift({ at: Date.now(), level, msg: String(msg).slice(0, 300) });
@@ -108,6 +154,7 @@ function runOne(t, trigger, manual, { resumeOf = null } = {}) {
   // 재개 대기 항목이 있으면(재시작 전에 돌던 조사) 그 작업을 잇는다 — 사람이 먼저 '지금 수집' 을 눌러도 같다.
   const prior = resumeOf || pendingResumeOf(KIND, t.id);
   const attach = prior?.meta?.jobId && (!prior.meta.jobHost || prior.meta.jobHost === t.host) ? String(prior.meta.jobId) : null;
+  _queue.delete(t.id); // v2.742: 같은 대상의 대기 요청은 이 시작이 대신한다(기록은 scanStarted 가 같은 쓰기에서 지운다)
   scanStarted(KIND, t.id, {
     label: t.label || t.id, trigger, resumeOf: prior,
     ...(prior && !resumeOf ? { resumeNote: `${manual ? '수동 실행' : '주기 실행'}이 재시작 전 조사를 이어 받았습니다` } : {}),
@@ -171,18 +218,20 @@ async function drainQueue() {
   _draining = (async () => {
     do {
       _drainAgain = false;
-      if (!_queue.size || _inflight.size >= CONCURRENCY) continue;
+      if (!_queue.size || freeSlots() <= 0) continue;
       const all = await targetsForThisNode();
       const now = Date.now();
       for (const [id, q] of [..._queue]) {
-        if (now - q.since > QUEUE_HOLD_MS) { _queue.delete(id); note('error', `${id}: '지금 수집' 대기가 ${Math.round(QUEUE_HOLD_MS / 3_600_000)}시간을 넘어 시작하지 않았습니다 — 다시 누르세요`); continue; }
-        if (_inflight.size >= CONCURRENCY) break;
-        _queue.delete(id);
-        if (_inflight.has(id)) continue;
+        if (now - q.since > QUEUE_HOLD_MS) { dequeue(id); note('error', `${id}: '지금 수집' 대기가 ${Math.round(QUEUE_HOLD_MS / 3_600_000)}시간을 넘어 시작하지 않았습니다 — 다시 누르세요`); continue; }
+        if (_inflight.has(id)) { dequeue(id); continue; }
+        if (freeSlots(now) <= 0) break;
+        // 같은 대상이 재개를 기다리면 그 판정(시작·건너뜀)을 먼저 본다 — 재개가 시작하면 다음 꺼내기에서 위 줄이 대기를 지우고,
+        // 건너뛰면(꺼짐 등) 사람이 누른 이 요청이 그 뒤 시작한다(재개 결과에 묻혀 사라지지 않게).
+        if (pendingResumeOf(KIND, id)) continue;
         const t = all.find((x) => x.id === id);
-        if (!t) { note('info', `${id}: 기다리는 동안 대상이 이 노드의 목록에서 사라져 시작하지 않았습니다`); continue; }
-        if (String(t.id).startsWith('mock-') && !isMockMode()) continue;
-        runOne(t, q.trigger, true);
+        if (!t) { dequeue(id); note('info', `${id}: 기다리는 동안 대상이 이 노드의 목록에서 사라져 시작하지 않았습니다`); continue; }
+        if (String(t.id).startsWith('mock-') && !isMockMode()) { dequeue(id); continue; }
+        runOne(t, q.trigger, true);   // 대기열·대기 기록은 runOne(scanStarted)이 같은 쓰기에서 지운다
       }
     } while (_drainAgain);
   })().finally(() => { _draining = null; });
@@ -213,7 +262,7 @@ async function tick() {
     if (_queue.size) await drainQueue();
     for (const t of due) {
       if (_queue.has(t.id)) continue; // 대기열이 곧 시작한다(같은 대상을 두 길로 시작하지 않는다)
-      if (_inflight.size >= CONCURRENCY) break;
+      if (freeSlots() <= 0) break;    // v2.742: 재개를 기다리는 조사의 자리는 비워 둔다
       runOne(t, 'schedule', false);
     }
     if (Date.now() - _lastPrune >= PRUNE_EVERY_MS) {
@@ -244,7 +293,7 @@ export async function runNow(ids = null, { trigger = 'manual' } = {}) {
     if (String(t.id).startsWith('mock-') && !isMockMode()) { notHere.push(t.id); continue; }
     if (_inflight.has(t.id)) { busy.push(t.id); continue; }
     if (_queue.has(t.id)) { queued.push(t.id); continue; }
-    if (_inflight.size >= CONCURRENCY) { _queue.set(t.id, { since: Date.now(), trigger }); queued.push(t.id); continue; }
+    if (_inflight.size >= CONCURRENCY) { enqueue(t.id, { trigger, label: t.label }); queued.push(t.id); continue; }
     runOne(t, trigger, true);
     started.push(t.id);
   }
@@ -270,7 +319,7 @@ export function isiduPollerStatus() {
     tickMs: TICK_MS, concurrency: CONCURRENCY, lastTick: _lastTick, lastError: _lastError,
     running: [..._inflight.entries()].map(([id, v]) => ({ targetId: id, since: v.since, trigger: v.trigger })),
     // v2.741 TIMING-02: 동시 실행 상한에 걸려 기다리는 '지금 수집'.
-    queued: [..._queue.entries()].map(([id, v]) => ({ targetId: id, since: v.since, trigger: v.trigger })),
+    queued: [..._queue.entries()].map(([id, v]) => ({ targetId: id, since: v.since, trigger: v.trigger, ...(v.restored ? { restored: true } : {}) })),
     // v2.737: 재시작으로 중단돼 재개를 기다리는 조사 · 최근 재개 결과(util/scanJournal).
     ...(() => { const j = journalFor(KIND); return {
       interrupted: j.interrupted.map((x) => ({ targetId: x.key, since: x.since, detectedAt: x.detectedAt, nextAt: x.nextAt, resumes: x.resumes })),
@@ -286,5 +335,11 @@ export function startIsiduPoller() {
   _timer = startAdaptiveTimer(() => TICK_MS, () => tick(), { firstDelayMs: 90_000, name: '아이실론 디렉터리 사용량' });
 }
 
-export function _resetForTest() { _inflight.clear(); _lastTry.clear(); _queue.clear(); _seeded = false; _recent.length = 0; _lastError = null; _demoSkipped = 0; }
+export function _resetForTest() {
+  _inflight.clear(); _lastTry.clear(); _queue.clear(); _seeded = false; _recent.length = 0; _lastError = null; _demoSkipped = 0;
+  for (const q of queuedOf(KIND)) scanDequeued(KIND, q.key);
+}
 export { tick as _tickForTest };
+
+// v2.742(RECENT-02): 기동 때 재시작 전 대기 요청을 되돌린다(실행 중 스캔 기록은 이 모듈보다 먼저 읽혀 있다 — import 순서).
+restoreQueue();

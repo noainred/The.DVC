@@ -13,6 +13,7 @@ import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackTex
 import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
 import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
+import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -268,6 +269,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         </div>
       )}
 
+      {/* v2.742(LEFT-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트가 있는 카드는 짧은 표지만 달고, 이유는 여기서 한 번 말한다. */}
+      {hostCapFootnote(hostCapTotal(shown)) && (
+        <div className="muted" data-hostcap-note="" style={{ fontSize: 12, margin: '0 0 8px', whiteSpace: 'normal', lineHeight: 1.6 }}>ⓘ {hostCapFootnote(hostCapTotal(shown))}</div>
+      )}
       <div className="vc-grid">
         {shown.map((s) => {
           const m = s.metrics || {};
@@ -306,6 +311,11 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                   <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ' *' : ''}` : undefined}
                     title={m.hostsUsageExcluded ? `* 연결 끊긴 호스트 ${m.hostsUsageExcluded}대는 사용량을 알 수 없어 사용률(%) 계산에서 뺐습니다(GHz 합계에는 포함)` : undefined} />
                   <Bar label="메모리" pct={m.memUsagePct ?? null} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
+                  {hostCapShort(m.hostsCapacityUnknown) && (
+                    <div className="muted" data-hostcap="" style={{ fontSize: 11, margin: '-2px 0 4px', color: 'var(--amber)' }} title={hostCapFootnote(m.hostsCapacityUnknown)}>
+                      ⓘ CPU·메모리 총량: {hostCapShort(m.hostsCapacityUnknown)}
+                    </div>
+                  )}
                   <Bar label="스토리지" {...storageBarInfo(m)} />
                 </>
               )}

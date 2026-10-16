@@ -282,8 +282,6 @@ const ENV_MS_OK = {
   'logs/db.js:LOGS_META_TTL_MS': LB,
   'partfault/hooks.js:PARTFAULT_HOOK_DEBOUNCE_MS': LB,
   'partfault/scan.js:PARTFAULT_INV_MAX_AGE_MS': LB,
-  'pdu/collectRequests.js:PDU_DEVICE_TIMEOUT_MS': LB,
-  'pdu/poller.js:PDU_DEVICE_TIMEOUT_MS': LB,
   'pdu/push.js:PDU_PUSH_WITHHOLD_MAX_MS': LB,
   'perf/monitor.js:PERF_INFLIGHT_MAX_AGE_MS': LB,
   'portalcheck/tokenProbe.js:PORTALCHECK_TIMEOUT_MS': LB,

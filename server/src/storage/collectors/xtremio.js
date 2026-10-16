@@ -16,7 +16,7 @@
 import { applyScannedPower, powerProbe } from '../power.js';
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
-import { makeGetter, tryAny } from './restCommon.js';
+import { makeGetter, tryAny, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
 const KB = 1024; // XMS 공간 값 단위(KB) → 바이트 환산 계수
@@ -152,7 +152,7 @@ export async function collect(device, { signal = null } = {}) {
   const sect = { clusters: 'config', controllers: 'nodes', users: 'accounts', alerts: 'alerts' };
   const step = async (key, fn) => {
     try { raw[key] = await fn(); }
-    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (isCredReject(e)) throw e; }
   };
   try {
     // ① 클러스터 이름 목록(v3→v2 폴백) + ② 클러스터별 상세(?name= 조회).
@@ -177,12 +177,12 @@ export async function collect(device, { signal = null } = {}) {
           if (d?.content) raw.clusters.push(d.content);
           else raw.clustersFailed.push(n);   // v2.600(COL-2600-02): 응답은 왔지만 content 가 없다 — 역시 못 읽었다
         } catch (e) {
-          if (/401/.test(e.message)) throw e;
+          if (isCredReject(e)) throw e;
           snap.sections.config = `일부 클러스터 오류: ${e.message}`;
           raw.clustersFailed.push(n);        // v2.600(COL-2600-02): 합계에서 빠진 클러스터를 세도록 이름을 남긴다
         }
       }
-    } catch (e) { snap.sections.config = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    } catch (e) { snap.sections.config = `오류: ${e.message}`; if (isCredReject(e)) throw e; }
     // ③ 스토리지 컨트롤러(노드 상당) — full=1&prop 으로 목록+필드 한 번에(요청 수 절감).
     await step('controllers', async () => {
       const r = await tryAny(get, [
@@ -203,7 +203,7 @@ export async function collect(device, { signal = null } = {}) {
     raw.alertCount = raw.alerts; delete raw.alerts;
     // v2.667 — 전원(부가 정보 — 실패해도 섹션 오류로 만들지 않는다).
     try { raw.psus = await tryAny(get, XTREMIO_POWER_PATHS); }
-    catch (e) { if (/401/.test(e.message)) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
+    catch (e) { if (isCredReject(e)) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
   } catch (e) {
     const out = normalizeXtremio(device, raw);
     out.error = e.message;

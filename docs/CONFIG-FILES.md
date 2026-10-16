@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **212개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **213개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-15)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-16)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -119,6 +119,7 @@
 | `ipam.db` | DB | IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일) |  |  |  | config.js |
 | `ipscan-agent-state.json` | 설정 | 엣지 IP 스캔 워커의 마지막 스캔 시각(상태, v2.741 — 재시작 뒤에도 주기를 이어 센다) | ✅ | ✅ | ✅ | agent/ipScanWorker.js |
 | `isidu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | isidu/collect.js |
+| `isidu-digest-state.json` | 설정 | 아이실론 디렉터리 사용량 **종합 메일** 발송·일정·기록(v2.742). 규칙은 `digestRules.js`(순수), 본문은 `mailHtml.js`. | ✅ | ✅ | ✅ | isidu/digest.js |
 | `isidu-edge-targets.json` | 설정 | 엣지가 받은 아이실론 디렉터리 사용량 대상 사본(상태, v2.736) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu-mail-state.json` | 설정 | 아이실론 디렉터리 사용량 결과 메일 기록(상태, v2.738) | ✅ | ✅ | ✅ | isidu/notify.js |
 | `isidu-push.json` | 설정 | 아이실론 디렉터리 사용량 엣지 push 커서(상태, v2.736) | ✅ |  | ✅ | isidu/push.js |
@@ -216,7 +217,7 @@
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
-| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, ipam/scanDatacenterSource.js 외 2 |
+| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, inventory/osScanner.js 외 3 |
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |

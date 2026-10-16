@@ -77,6 +77,37 @@ export async function httpFailMessage(res, device = null) {
   return `HTTP ${res.status}${detail ? ` — ${detail}` : ''}`;
 }
 
+/**
+ * 401(자격증명 거부) 오류 — v2.742(감사 DEV-03). 오류 객체에 `authFailed`·`status` 를 싣는다.
+ * 예전에는 문구만 있어 수집기 약 25곳이 `/401/.test(e.message)` 로 '자격증명 거부인가' 를 판정했다. 그런데 오류 문구에는
+ * 장비 주소(`netError.describeFetchError` 의 `<host>:<port>`)·응답 본문 앞 200자(`httpFailMessage`)·SID 가 그대로 실린다 —
+ * 호스트명 `vmax-401.corp` 의 시한 초과, 본문 `Symmetrix 000197601401 …` 의 HTTP 500, 경로 `pool_401` 의 404 가 전부
+ * '401' 로 읽혀 **섹션 오류 하나가 그 주기 수집 전체를 실패시키고** 후보 경로 폴백(tryAny·tryPaths)도 다음 후보를 시도하지
+ * 않았다. 그래서 판정은 문구가 아니라 이 표지로 한다(`isCredReject`).
+ */
+export const CRED_REJECT_MESSAGE = '인증 실패(401) — 계정/비밀번호 확인';
+export function credRejectError(message = CRED_REJECT_MESSAGE) {
+  const e = new Error(message);
+  e.authFailed = true;
+  e.status = 401;
+  return e;
+}
+
+/**
+ * 이 오류가 자격증명 거부(401)인가 — 스토리지 REST 수집기의 '즉시 전체 중단(계정 잠금 예방)' 판정 **단일 소스**.
+ *  · 표지(`authFailed`·`status === 401`)가 먼저다 — 위 `credRejectError` 와 각 getter 가 싣는다.
+ *  · 표지가 없는 옛 오류(테스트·다른 모듈이 만든 `new Error('인증 실패(401) …')`)는 **문구가 그 말로 시작할 때만** 받는다.
+ *    ⚠ 부분 문자열(`/401/`)로 되돌리지 말 것 — 주소·본문·SID 속 '401' 이 다시 수집 전체를 멈춘다. 접두 고정이라 안전하다:
+ *    전송 오류는 `<host>:<port>` 로, HTTP 오류는 `HTTP <상태>` 로 시작한다.
+ *  · 403 은 대상이 아니다(예전과 같다) — 역할 권한이 없는 엔드포인트 하나가 수집 전체를 멈추지 않게. 주기 정지 판정은
+ *    `storage/authGuard.js isAuthFailure` 가 따로 한다(401·403 문맥형).
+ */
+export function isCredReject(e) {
+  if (!e || typeof e !== 'object') return false;
+  if (e.authFailed === true || e.status === 401) return true;
+  return /^인증 실패\(401\)/.test(String(e.message || ''));
+}
+
 export function makeGetter(device, { port = 443, headers = {}, signal = null } = {}) {
   assertHeaderSafe(headers); // 값 미포함 오류로 즉시 차단(아래 머리말 참조 — 유출 방지)
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
@@ -85,7 +116,7 @@ export function makeGetter(device, { port = 443, headers = {}, signal = null } =
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
       dispatcher, signal: reqSignal(signal),
     }, { host: device.host, port, signal });
-    if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+    if (res.status === 401) throw credRejectError();
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
   };
@@ -103,7 +134,7 @@ export function makeRawGetter(device, { port = 443, headers = {}, signal = null 
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
       dispatcher, signal: reqSignal(signal),
     }, { host: device.host, port, signal });
-    if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+    if (res.status === 401) throw credRejectError();
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return { body: await res.json(), headers: res.headers };
   };
@@ -126,15 +157,15 @@ export function makePoster(device, { port = 443, headers = {}, signal = null } =
       body: JSON.stringify(body ?? {}),
       dispatcher, signal: reqSignal(signal),
     }, { host: device.host, port, signal });
-    if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+    if (res.status === 401) throw credRejectError();
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
   };
 }
 
-/** 후보 경로 순차 시도(버전차 폴백) — 전부 실패 시 마지막 오류 throw. */
+/** 후보 경로 순차 시도(버전차 폴백) — 전부 실패 시 마지막 오류 throw. 자격증명 거부(401)만 즉시 던진다(계정 잠금 예방). */
 export async function tryAny(get, paths) {
   let err;
-  for (const p of paths) { try { return await get(p); } catch (e) { err = e; if (/401/.test(e.message)) throw e; } }
+  for (const p of paths) { try { return await get(p); } catch (e) { err = e; if (isCredReject(e)) throw e; } }
   throw err;
 }

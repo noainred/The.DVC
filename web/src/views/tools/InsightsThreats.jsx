@@ -4,6 +4,7 @@ import { Loading, ErrorBox, UsageCell, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { reclaimBasisNote } from '../toolsReportText.js';
+import { clusterRowKey, clusterNameLabel } from '../clustercfg/clusterCfgText.js'; // v2.742(VC-05): 같은 이름 다른 데이터센터 클러스터 — 행 키·이름 한 벌
 
 
 /**
@@ -26,9 +27,9 @@ export function N1Table({ cl }) {
       <STable minWidth={760} wrap={false}><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
         <tbody>
           {rows.map((c) => (
-            <tr key={`${c.vcenterId}:${c.cluster}`} style={{ background: c.n1Ok === false ? 'rgba(239,68,68,.10)' : undefined }}>
+            <tr key={clusterRowKey(c)} style={{ background: c.n1Ok === false ? 'rgba(239,68,68,.10)' : undefined }}>
               <td className="muted">{c.vcenterId}</td>
-              <td>{c.standalone ? <span title="클러스터에 속하지 않은 호스트들 — 한 클러스터가 아니다">독립 호스트(클러스터 없음)</span> : <b>{c.cluster}</b>}
+              <td>{c.standalone ? <span title="클러스터에 속하지 않은 호스트들 — 한 클러스터가 아니다">독립 호스트(클러스터 없음)</span> : <b>{clusterNameLabel(c)}</b>}
                 {c.clusterUnknown > 0 && <div className="muted" style={{ fontSize: 11 }}>소속을 읽지 못한 호스트 {c.clusterUnknown}대 포함</div>}</td>
               <td style={{ textAlign: 'right' }} data-sort={c.hosts}>{c.hosts}
                 {c.maintenance > 0 && <div className="muted" style={{ fontSize: 11 }}>유지보수 {c.maintenance}대 제외</div>}

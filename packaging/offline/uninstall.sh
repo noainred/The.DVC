@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Uninstall the VMware Global Monitoring Portal from a Rocky Linux 9 host.
-# Usage:  sudo ./uninstall.sh [--purge]   (--purge also removes config + user)
+# Usage:  sudo ./uninstall.sh [--purge] [--prefix /opt/vmware-portal] [--user vmportal]
+#         (--purge also removes config + user · --user 는 install.sh --user 로 설치했을 때 그 계정)
 
 set -euo pipefail
 
@@ -15,6 +16,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --purge) PURGE=1; shift ;;
     --prefix) PREFIX="$2"; shift 2 ;;
+    --user) SERVICE_USER="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -48,9 +50,25 @@ vp_check_prefix() {
   esac
   VP_PREFIX="$p"; return 0
 }
+# v2.742(감사 LEFT-07): --user 형식 검사 — install.sh 의 vp_check_user 와 글자 그대로 같은 함수다(test/audit2742a.test.js 가 대조한다).
+vp_check_user() {
+  if ! [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "--user 는 영문 소문자·숫자·_ - 로 된 계정 이름(첫 글자는 소문자 또는 _, 32자 이하)이어야 합니다: '$1'" >&2; return 1
+  fi
+  return 0
+}
 VP_PREFIX=""
 vp_check_prefix "$PREFIX" || exit 1
 PREFIX="$VP_PREFIX"
+vp_check_user "$SERVICE_USER" || exit 1
+# vp_purge_user <계정> — --purge 의 계정 삭제. uid 0(--user root 로 설치한 경우)은 지우지 않는다 — 시스템 관리자 계정이다.
+vp_purge_user() {
+  local u="$1" uid
+  uid="$(id -u "$u" 2>/dev/null || true)"
+  if [[ -z "$uid" ]]; then return 0; fi
+  if [[ "$uid" == 0 ]]; then echo "⚠ 계정 '$u' 은 uid 0 이라 지우지 않습니다(서비스를 root 로 돌린 설치)."; return 0; fi
+  userdel "$u" 2>/dev/null || true
+}
 # vp_prefix_is_install <prefix> — rm -rf 대상이 이 포탈의 설치본(앱 진입점 또는 번들 Node 런타임)인가.
 vp_prefix_is_install() { [[ -f "$1/app/server/src/index.js" || -x "$1/runtime/node/bin/node" ]]; }
 
@@ -122,7 +140,7 @@ fi
 if [[ "$PURGE" -eq 1 ]]; then
   echo "==> 설정 및 사용자 제거(purge)"
   rm -rf "$CONFIG_DIR"
-  userdel "$SERVICE_USER" 2>/dev/null || true
+  vp_purge_user "$SERVICE_USER"
 else
   echo "==> 설정 유지: $CONFIG_DIR  (완전 삭제는 --purge)"
 fi

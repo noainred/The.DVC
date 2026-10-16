@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, sendJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { requireChanged } from '../changeResult.js'; // v2.742(WEB-02): 400 본문을 '저장되었습니다' 로 읽지 않는다
 import { blankOr } from '../blankOr.js'; // v2.606 WEB2606-01: 빈 숫자 칸은 보내지 않는다(이전 값 유지 — MailSettings 와 같은 규약)
 
 /**
@@ -44,10 +45,11 @@ export function MailDiag() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await sendJson('/admin/mail', 'PUT', {
+      // v2.742(WEB-02): 서버 거부(400 {ok:false, reason})는 requireChanged 가 던진다 — 성공 문구·비밀번호 칸 비우기는 그 뒤에만.
+      const r = requireChanged(await sendJson('/admin/mail', 'PUT', {
         enabled,
         smtp: { ...smtp, port: blankOr(smtp.port), timeoutMs: blankOr(smtp.timeoutMs), password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
-      });
+      }));
       setMsg('저장되었습니다.');
       // 빈 칸으로 저장했으면 서버가 유지한 값을 다시 채운다(칸이 비어 있으면 '무엇으로 저장됐나' 를 알 수 없다).
       setSmtp((s) => ({ ...s, password: '', port: r?.settings?.smtp?.port ?? s.port, timeoutMs: r?.settings?.smtp?.timeoutMs ?? s.timeoutMs }));

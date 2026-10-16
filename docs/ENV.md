@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **658개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **659개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-15)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-16)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -705,7 +705,7 @@
 | `GUEST_GPU_MAX_HOSTS_PER_AGENT` |  |  | gpu/store.js |
 | `GUEST_GPU_MAX_VMS` |  |  | gpu/store.js |
 | `GUEST_GPU_MAX_VMS_PER_AGENT` |  |  | gpu/store.js |
-| `GUEST_GPU_TTL_MS` | `30` |  | gpu/store.js |
+| `GUEST_GPU_TTL_MS` |  |  | gpu/store.js |
 
 ## Horizon (6)
 
@@ -773,20 +773,21 @@
 | `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
 | `NSX_TLS_REJECT_UNAUTHORIZED` |  |  | nsx/client.js |
 
-## PDU (10)
+## PDU (11)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `PDU_CONCURRENCY` | `4` |  | pdu/poller.js |
 | `PDU_CONFIG_PULL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_DB` |  |  | pdu/db.js |
-| `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/collectRequests.js, pdu/poller.js |
+| `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/collectors/apcSsh.js |
 | `PDU_INTERVALS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/intervals.js |
 | `PDU_POLL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_PUSH_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
+| `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
 
 ## SAN 스위치 (34)
 
@@ -842,4 +843,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 658
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 659

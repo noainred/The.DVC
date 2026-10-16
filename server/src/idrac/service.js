@@ -67,23 +67,34 @@ function serverIdentity(serverId, entry) {
 
 const norm = (s) => String(s || '').trim().toLowerCase();
 
-/** Find an OME-discovered device matching an ESXi host name (serviceTag/name). */
-function findOmeDeviceForHost(hostName) {
+/**
+ * Find an OME-discovered device matching an ESXi host name (serviceTag/name).
+ * v2.742(감사 AUTHZ-01): `accept(cand)` 가 있으면 그것이 참인 장비만 고른다(범위 계정 — cand 는 { id, name, serviceTag, vcenterId }).
+ */
+function findOmeDeviceForHost(hostName, accept = null) {
   const key = norm(hostName);
   if (!key) return null;
+  const omeVc = accept ? new Map(loadRegistry().filter((s) => s.type === 'ome').map((s) => [s.id, String(s.vcenterId || '')])) : null;
   for (const { entryId, device } of allOmeDevices()) {
-    if (norm(device.serviceTag) === key || norm(device.name) === key) return { entryId, device };
+    if (norm(device.serviceTag) !== key && norm(device.name) !== key) continue;
+    if (accept && !accept({ id: dbKey(entryId, device), name: device.name, serviceTag: device.serviceTag || '', vcenterId: omeVc.get(entryId) || '' })) continue;
+    return { entryId, device };
   }
   return null;
 }
 
-/** registry entry (iDRAC-direct) that owns a given ESXi host name. */
-export function findServerForHost(hostName) {
+/**
+ * registry entry (iDRAC-direct) that owns a given ESXi host name.
+ * v2.742(감사 AUTHZ-01): `accept(s)` 가 있으면 그것이 참인 첫 서버(범위 계정은 이름이 같은 **범위 안** 서버) — 없으면 예전 그대로 첫 일치.
+ */
+export function findServerForHost(hostName, accept = null) {
   if (!hostName) return null;
   const key = norm(hostName);
   for (const s of loadRegistry()) {
     if (s.type === 'ome') continue; // OME hosts resolve via discovered devices
-    if (matchKeys(s).includes(key)) return s;
+    if (!matchKeys(s).includes(key)) continue;
+    if (accept && !accept(s)) continue;
+    return s;
   }
   return null;
 }
@@ -370,12 +381,17 @@ export async function latestPowerByServiceTag() {
 }
 
 /** Detailed power for one host: current reading + history series + server info. */
-export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag = '' } = {}) {
+export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag = '', accept = null, acceptRemote = null } = {}) {
   const db = await getDb();
   const since = Date.now() - hours * 3600_000;
+  // v2.742(감사 AUTHZ-01): 범위 계정이면 라우트가 accept(iDRAC·OME 서버)·acceptRemote(엣지 보고 항목)를 준다 — 이름이 같은 **다른 법인**
+  //   서버를 고르지 않는다(예전에는 이름이 맞는 첫 서버·가장 최근 엣지 항목을 귀속 확인 없이 돌려줬다). 둘 다 없으면 예전 동작 그대로다.
+  //   accept 만 오고 acceptRemote 가 없으면 엣지 항목은 받지 않는다(닫는 쪽).
+  const scoped = typeof accept === 'function';
+  const remoteOk = (r) => (!scoped ? true : (typeof acceptRemote === 'function' && acceptRemote(r)));
 
   // 1) iDRAC-direct
-  const server = findServerForHost(hostName);
+  const server = findServerForHost(hostName, scoped ? accept : null);
   if (server) {
     const latest = db.latest(server.id);
     return {
@@ -389,7 +405,7 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
   }
 
   // 2) OME-discovered device
-  const ome = findOmeDeviceForHost(hostName);
+  const ome = findOmeDeviceForHost(hostName, scoped ? accept : null);
   if (ome) {
     const key = dbKey(ome.entryId, ome.device);
     const latest = db.latest(key) || (ome.device.watts != null ? { watts: ome.device.watts, ts: Date.now() } : null);
@@ -405,7 +421,17 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
   }
 
   // 3) remote collector agent (another datacenter)
-  const r = remotePowerByHost().get(norm(hostName));
+  //   v2.742(AUTHZ-01): 범위 계정은 법인 축 없는 '호스트명 → 가장 최근 항목' 보기를 쓰지 않는다 — 받을 수 있는 항목(그 호스트를 수집한
+  //   엣지) 중 가장 최근 것만.
+  let r = null;
+  if (!scoped) r = remotePowerByHost().get(norm(hostName));
+  else {
+    const key = norm(hostName);
+    for (const x of remotePowerEntries()) {
+      if (x.host !== key || !remoteOk(x)) continue;
+      if (!r || (Number(x.ts) || 0) > (Number(r.ts) || 0)) r = x;
+    }
+  }
   if (r) {
     return {
       matched: true,
@@ -424,6 +450,8 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
   if (tag) {
     for (const m of await allMeasuredPower()) {
       if (norm(m.serviceTag) !== tag) continue;
+      // v2.742(AUTHZ-01): 범위 계정은 귀속을 다시 본다(엣지 항목은 담당 엣지 것만, 그 밖은 accept).
+      if (scoped && (m.source === 'remote' ? !remoteOk(m) : !accept({ id: m.serverId, name: m.serverName, serviceTag: m.serviceTag || '', vcenterId: m.vcenterId || '' }))) continue;
       // ⚠ 회귀 방지(v2.286, 확정 버그 #12): 원격(remote/edge) 전력은 DB에 'rmt:<host>' 키로
       // 적재되는데(collector/puller.js), measured.serverId 는 'remote:<collectorId>:...' 형식이라
       // 그대로 조회하면 항상 miss → 추이 그래프가 빈 점선이 됐다(현재값은 m.watts 인메모리 폴백으로

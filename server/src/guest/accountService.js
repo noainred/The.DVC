@@ -9,6 +9,8 @@ import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vce
 import { store } from '../store.js';
 import { VimSoapClient, addGuestUser } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
+import { onDemandVcBlock, onDemandBlockError, onDemandLoginError } from '../vcenter/dsBrowse.js';   // v2.742(VC-03): 주문형 vCenter 로그인 문
+import { vcAuthStopOf } from '../vcenter/authStopGate.js';
 
 export async function addUsersToVms({ vcenterId, vmIds = [], username, password, sudo = true, nopasswd = false, guestUser = '', guestPass = '' } = {}) {
   if (!vcenterId) throw new Error('vcenterId가 필요합니다.');
@@ -17,6 +19,16 @@ export async function addUsersToVms({ vcenterId, vmIds = [], username, password,
 
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === vcenterId);
   if (!vc) throw new Error(`vCenter(${vcenterId}) 설정을 찾을 수 없습니다(live 모드 필요).`);
+  /*
+   * v2.742(감사 VC-03): 비활성·점검중·엣지 위임(site) vCenter 에는 로그인하지 않는다 — 예전에는 VM 확인보다 로그인이 먼저라
+   *   관리자가 끈 vCenter 에도 로그인이 나갔다(판정은 collectTarget.js 하나 — dsBrowse.js onDemandVcBlock 이 묶는다).
+   *   ⚠ 인증 정지(주 폴러가 자격증명 거부로 멈춘 vCenter)는 **막지 않는다** — 관리자가 누른 수동 작업이라 1회 시도한다
+   *   (authGuard 규칙 3 · v2.741 심층 검색 게스트 탐침과 같은 판단). 대신 거부는 주 폴러와 같은 정지 기록에 올리고,
+   *   실패 문구가 '이미 멈춰 있던 vCenter' 라는 사실을 말한다.
+   */
+  const block = onDemandVcBlock(vc, { allowAuthStopped: true });
+  if (block) throw onDemandBlockError(block);
+  const stoppedBefore = vcAuthStopOf(vc);   // 읽기 전용 — 막지 않는다. 실패 문구에만 쓴다.
 
   const snap = store.get();
   const hostByName = new Map();
@@ -28,7 +40,13 @@ export async function addUsersToVms({ vcenterId, vmIds = [], username, password,
   const c = new VimSoapClient(vc);
   const results = [];
   try {
-    await c.login();
+    try { await c.login(); }
+    catch (e) {
+      const le = onDemandLoginError(vc, e);   // 자격증명 거부만 기록한다(시한·연결 실패는 원래 오류 그대로 — authGuard 규칙 4)
+      if (le === e) throw e;
+      le.message = `vCenter 로그인 실패: ${e.message}${stoppedBefore ? ' — 인증 실패로 주기 수집이 이미 멈춰 있던 vCenter 입니다(수동 실행이라 1회 시도)' : ''} · 인증 실패 기록 ${le.authStopped?.attempts ?? '?'}회`;
+      throw le;
+    }
     for (const vmId of vmIds) {
       const v = vmById.get(vmId);
       const moref = morefOf(vmId, v?.vcenterId || vcenterId);

@@ -9,11 +9,14 @@
 export const ISIDU_SETTINGS_KEY = 'isilon-dirusage';
 export const ISIDU_SETTINGS_HASH = `#/settings/${ISIDU_SETTINGS_KEY}`;
 export const ISIDU_SETTINGS_BULK_HASH = `${ISIDU_SETTINGS_HASH}/bulk`;
+/** v2.742 종합 메일 탭으로 바로 여는 주소(메일 본문의 '바꾸는 곳' 안내와 같은 자리). */
+export const ISIDU_SETTINGS_DIGEST_HASH = `${ISIDU_SETTINGS_HASH}/digest`;
 /** 화면 문구에 쓰는 메뉴 경로(메뉴 이름을 바꾸면 Settings.jsx 의 label·GROUPS 와 함께 바꿀 것 — 테스트가 대조한다). */
 export const ISIDU_SETTINGS_PLACE = '설정 › 수집 서버 › 아이실론 디렉터리 사용량';
 
-/** 주소 조각 → 설정 화면의 첫 탭('bulk' | 'edit'). segs = hashSegments(hash). */
+/** 주소 조각 → 설정 화면의 첫 탭('bulk' | 'digest' | 'edit'). segs = hashSegments(hash). */
 export function isiduSettingsTabOf(segs) {
   const s = Array.isArray(segs) ? segs : [];
-  return s[0] === 'settings' && s[1] === ISIDU_SETTINGS_KEY && s[2] === 'bulk' ? 'bulk' : 'edit';
+  if (s[0] !== 'settings' || s[1] !== ISIDU_SETTINGS_KEY) return 'edit';
+  return s[2] === 'bulk' || s[2] === 'digest' ? s[2] : 'edit';
 }

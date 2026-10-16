@@ -14,9 +14,10 @@
  * `KEY_KIND_NOTE.none` 이 정확히 이 경우를 위해 있다("SAN 스위치 팬 3/4 정상 — 어느 팬인지는
  * 알 수 없습니다"). 없는 식별자를 순번으로 지어내지 않는다(순번 키는 장비가 순서를 바꾸면 다른
  * 부품이 된다 — types.js `KEY_KIND.index` 경고).
- * ⚠ 정직 기록: 개수만 오므로 **'빠진 팬' 과 '고장 팬' 을 구분할 수 없다**(`parseFruShow` 는 'Ok'
- *   가 아닌 줄을 전부 non-ok 로 센다). `ok < total` 을 `fault` 로 보되 원문 `ok/total` 을
- *   `rawState` 에 남겨 사람이 대조할 수 있게 한다. 팬 단위 상태를 얻게 되면 그때 파트로 나눈다.
+ * ⚠ 정직 기록: 개수만 오므로 어느 팬인지는 모른다. v2.742(DEV-02)부터 수집기가 **'빈 슬롯'(Absent·Not Present)
+ *   줄을 total 에서 빼고 `absent` 로 따로 센다** — 예전에는 'Ok' 가 아닌 줄을 전부 non-ok 로 세어 빈 PSU 슬롯 하나가
+ *   fault 로 열렸다. 그래도 장비가 빈 슬롯을 'absent' 가 아닌 다른 말로 쓰면 여전히 fault 로 보일 수 있다(실장비 표기 미확인).
+ *   `ok < total` 을 `fault` 로 보되 원문 `ok/total`(+빈 슬롯 수)을 `rawState` 에 남겨 사람이 대조할 수 있게 한다.
  *
  * ── 링크 없는 포트는 판정 대상이 아니다 ──────────────────────────────────────────
  * v2.521 규약(`healthCheck.js isLinked` 머리말 — 사용자 신고 "사용하지 않는 포트는 제외 해야
@@ -133,10 +134,12 @@ export function extractSanSwitchParts(device = {}, snap = {}) {
     if (!g || typeof g !== 'object' || Array.isArray(g)) { notCollected.push(kind); return; }
     const ok = num(g.ok);
     const total = num(g.total);
+    const absent = num(g.absent) || 0;   // v2.742(DEV-02): 빈 슬롯 — total 에 들어 있지 않다(장애가 아니다)
     covered.push(kind);
-    const raw = `${ok == null ? '?' : ok}/${total == null ? '?' : total}`;
+    const raw = `${ok == null ? '?' : ok}/${total == null ? '?' : total}${absent ? ` · 빈 슬롯 ${absent}` : ''}`;
     let st;
     if (ok == null || total == null) st = PART_STATE.unknown;   // 개수를 못 읽었다 — 정상으로 접지 않는다
+    else if (total === 0) st = PART_STATE.unknown;               // 장착된 것이 없다고 보고됨 — 판정할 대상이 없다(정상이라 말하지 않는다)
     else if (ok < total) st = PART_STATE.fault;
     else st = PART_STATE.ok;
     // ⚠ unknown 에 '정상' 을 붙이지 않는다 — 라벨이 판정을 거짓말하면 안 된다.

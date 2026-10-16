@@ -59,7 +59,7 @@
  */
 import { scanPower, pickPower, powerResult, powerProbe } from '../power.js';
 import { emptySnapshot } from '../types.js';
-import { makeGetter } from './restCommon.js';
+import { makeGetter, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
 const TB = 1e12; // Unisphere *_tb → 바이트(10진 가정 — 파일 머리말 정직 표기 참조)
@@ -290,7 +290,7 @@ async function tryPaths(get, paths) {
   let err;
   for (const path of paths) {
     try { return { data: await get(path), path }; }
-    catch (e) { err = e; if (/401/.test(e.message)) throw e; }
+    catch (e) { err = e; if (isCredReject(e)) throw e; }
   }
   throw err;
 }
@@ -501,7 +501,7 @@ export async function collect(device, { signal = null } = {}) {
   try {
     // ① Unisphere 버전(무버전 경로 — 인증 확인 겸용, 401 이면 즉시 전체 중단).
     try { raw.version = await get('/univmax/restapi/version'); }
-    catch (e) { if (/401/.test(e.message)) throw e; /* 버전 실패는 치명 아님 */ }
+    catch (e) { if (isCredReject(e)) throw e; /* 버전 실패는 치명 아님 */ }
     const { vers, source } = apiVersionsFrom(raw.version);
     raw.apiVersions = { vers, source };
     raw.usedPaths = {};
@@ -511,7 +511,7 @@ export async function collect(device, { signal = null } = {}) {
       const r = await tryPaths(get, pathsFor(vers, '/system/symmetrix'));
       raw.usedPaths.arrays = r.path;
       ids = r.data?.symmetrixId || [];
-    } catch (e) { snap.sections.config = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    } catch (e) { snap.sections.config = `오류: ${e.message}`; if (isCredReject(e)) throw e; }
     raw.arrays = [];
     raw.arraysFailed = [];
     // v2.604(COL-2604-03): 상세를 먼저 읽어 원격을 거른 뒤 **로컬만** 상한으로 자른다(원격이 상한을 먹지 않게).
@@ -537,7 +537,7 @@ export async function collect(device, { signal = null } = {}) {
           if (!raw.powerSeen) raw.powerSeen = sc.keys;
         }
       } catch (e) {
-        if (/401/.test(e.message)) throw e;
+        if (isCredReject(e)) throw e;
         snap.sections.config = `일부 어레이 오류: ${e.message}`;
         raw.arraysFailed.push(id);   // v2.600(COL-2600-01): 합계에서 빠진 어레이를 세도록 남긴다
       }
@@ -558,7 +558,7 @@ export async function collect(device, { signal = null } = {}) {
         const cap = powermaxCapacity(s);
         if (cap) raw.caps[a.symmetrixId] = cap;
         else snap.sections.capacity = '오류: 용량 필드를 인식하지 못했습니다(system_capacity·physicalCapacity 모두 없음 — Unisphere 버전 확인)';
-      } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.capacity = `오류: ${e.message}`; }
+      } catch (e) { if (isCredReject(e)) throw e; snap.sections.capacity = `오류: ${e.message}`; }
     }
     // ④ SRP(풀)별 용량 — v2.534. 10.x 는 어레이 레벨에 usable_* 가 없어 **여기서만** 실제 기록량이 나오고,
     //    데이터 감축 절감량도 여기에만 있다. 보통 어레이당 SRP 1개라 왕복은 +2회다.
@@ -583,9 +583,9 @@ export async function collect(device, { signal = null } = {}) {
             if (parsed) { st.parsed += 1; (raw.srps[a.symmetrixId] ||= []).push({ ...parsed, id: parsed.id || String(sid) }); }
             else if (powermaxSrpIsEmpty(s)) st.empty += 1;   // v2.605: 빈 SRP 는 형식 미인식이 아니다
             else st.unrecognized += 1;
-          } catch (e2) { if (/401/.test(e2.message)) throw e2; st.failed += 1; raw.srpError = e2.message; }
+          } catch (e2) { if (isCredReject(e2)) throw e2; st.failed += 1; raw.srpError = e2.message; }
         }
-      } catch (e) { if (/401/.test(e.message)) throw e; raw.srpError = e.message; }
+      } catch (e) { if (isCredReject(e)) throw e; raw.srpError = e.message; }
     }
     // ⑤ 미해결 알람 수 — /system/alert 는 알람 ID 배열을 반환(버전에 따라 alert_summary 폴백).
     // v2.601(감사 COL-2601-05): '미해결' 이므로 **확인(acknowledged)되지 않은 것만** 센다 — 필터를 먼저 시도하고, 필터를
@@ -599,7 +599,7 @@ export async function collect(device, { signal = null } = {}) {
       raw.alertCount = a.count;
       raw.alertsBasis = a.basis;
       if (a.count == null) raw.alertsSection = '미수집(경보 응답에서 미확인 개수를 찾지 못했습니다)';
-    } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.alerts = `오류: ${e.message}`; }
+    } catch (e) { if (isCredReject(e)) throw e; snap.sections.alerts = `오류: ${e.message}`; }
   } catch (e) {
     const out = normalizePowermax(device, raw);
     out.error = e.message;

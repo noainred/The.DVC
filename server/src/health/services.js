@@ -2,7 +2,8 @@
  * 다빈치 서비스 점검 — 포탈 내부 서비스/수집기의 상태를 한 번에 집계한다(빠르고 비차단).
  * v2.613 RUNTIME2613-01: 고정 항목 + `edgelog/spec.js` 의 `collect.*` 폴러 전부(+ 중앙 전용 2개). `coverage` 가 무엇을 보고
  *   무엇을 안 보는지(push/pull 워커) 말한다.
- * 각 항목: { key, label, status:'ok'|'warn'|'down'|'off', detail, at }.
+ * 각 항목: { key, label, status:'ok'|'warn'|'down'|'off'|'unknown', detail, at }.
+ *   v2.742(TIMING-05): 'unknown' = 아직 결과를 받지 못한 비동기 상태 함수(정상도 장애도 아니다 — 화면은 회색 '확인 중').
  * 모든 점검은 try/catch로 격리되어 하나가 실패해도 전체 패널이 죽지 않는다.
  */
 
@@ -189,19 +190,38 @@ export function pollerCheck(st, { now = Date.now(), uptimeMs = process.uptime() 
  * 비동기 상태 함수(partFaultStatus 처럼 DB 를 읽는 것)는 동기 경로에서 기다릴 수 없다 — 마지막으로 받은 값을 캐시하고
  * 호출마다 갱신을 **띄워 둔다**(다음 조회에 반영). 첫 조회는 '상태 조회 중' 이라고 말한다(추측하지 않는다).
  */
-const _asyncCache = new Map(); // key -> { at, value }
-const _asyncPending = new Set();
-function readStatus(key, fn) {
-  const r = fn();
-  if (!r || typeof r.then !== 'function') return { value: r, pending: false };
+/*
+ * v2.742(감사 TIMING-05 — 재현): 실패도 기록한다. 예전에는 rejection 을 `() => {}` 로 버려 캐시가 끝내 생기지 않았고, 그 행은
+ *   매번 '정상 — 상태 조회 중' 이었다 — 로그 저장 경로를 만들 수 없어 vCenter 로그 수집이 멈춘 동안에도 초록이었다(v2.590 W1
+ *   '모르는 것을 정상으로 칠하지 않는다' 위반). 이제 ① 결과를 아직 받은 적이 없으면 'unknown'(정상 아님) ② 마지막 시도가
+ *   실패했으면 'warn' + 사유(직전 성공 값이 있으면 그 시각도) ③ 응답이 ASYNC_STATUS_STUCK_MS 넘게 오지 않으면 'warn'.
+ *   한 번에 하나만 띄우는 규칙은 그대로다(매달린 상태 함수를 15초마다 하나씩 더 쌓지 않는다).
+ */
+export const ASYNC_STATUS_STUCK_MS = 60_000;
+const _asyncCache = new Map(); // key -> { at, value, hasValue, errAt, error }
+const _asyncPending = new Map(); // key -> 시작 시각
+function readStatus(key, fn, now = Date.now()) {
+  // 띄워 둔 조회가 아직 끝나지 않았으면 상태 함수를 다시 부르지 않는다(매달린 함수가 15초마다 하나씩 쌓이지 않게).
+  const r = _asyncPending.has(key) ? null : fn();
+  if (!_asyncPending.has(key) && (!r || typeof r.then !== 'function')) return { value: r, pending: false };
   if (!_asyncPending.has(key)) {
-    _asyncPending.add(key);
-    Promise.resolve(r).then((v) => { _asyncCache.set(key, { at: Date.now(), value: v }); }, () => {}).finally(() => _asyncPending.delete(key));
+    _asyncPending.set(key, now);
+    Promise.resolve(r).then(
+      (v) => { _asyncCache.set(key, { at: Date.now(), value: v, hasValue: true, errAt: 0, error: null }); },
+      (e) => {
+        const prev = _asyncCache.get(key);
+        _asyncCache.set(key, { ...(prev || { at: 0, value: null, hasValue: false }), errAt: Date.now(), error: String(e?.message || e || '알 수 없는 오류').slice(0, 200) });
+      },
+    ).finally(() => _asyncPending.delete(key));
   }
   const c = _asyncCache.get(key);
-  return c ? { value: c.value, pending: false, cachedAt: c.at } : { value: null, pending: true };
+  const startedAt = _asyncPending.get(key);
+  const stuckMs = startedAt != null && now - startedAt > ASYNC_STATUS_STUCK_MS ? now - startedAt : 0;
+  if (!c) return { value: null, pending: true, stuckMs };
+  return { value: c.hasValue ? c.value : null, hasValue: !!c.hasValue, pending: false, cachedAt: c.at, error: c.error && c.errAt >= (c.at || 0) ? c.error : null, errAt: c.errAt || 0, stuckMs };
 }
 export function _resetAsyncStatusCacheForTest() { _asyncCache.clear(); _asyncPending.clear(); }
+export { readStatus as _readStatusForTest };
 
 /** spec 한 줄 → 점검 행. 대응표에 없는 모듈·함수는 warn(점검 미구현)으로 드러난다. */
 function specRow(spec, opts) {
@@ -209,10 +229,22 @@ function specRow(spec, opts) {
     const mod = MODS[spec.mod];
     const fn = mod && mod[spec.fn];
     if (typeof fn !== 'function') return { status: 'warn', detail: `점검 미구현 — ${spec.mod} ${spec.fn}() 이 대응표(MODS)에 없습니다`, at: Date.now() };
-    const { value, pending } = readStatus(spec.key, fn);
-    if (pending) return { status: 'ok', detail: '상태 조회 중(비동기 상태 함수) — 다음 조회에 반영됩니다', at: Date.now(), pendingAsync: true };
-    return pollerCheck(value, opts);
+    const now = Date.now();
+    const s = readStatus(spec.key, fn, now);
+    return asyncStatusRow(s, opts, now);
   });
+}
+
+/**
+ * 비동기 상태 함수 결과 → 점검 행(순수 — v2.742 TIMING-05). 결과를 받은 적이 없으면 'unknown'(정상 아님), 마지막 시도가 실패했으면
+ * 'warn', 응답이 오래 오지 않으면 'warn'. 직전 성공 값이 있으면 실패 문구에 그 시각을 함께 적는다(값으로 판정하지 않는다 — 지금 값이 아니다).
+ */
+export function asyncStatusRow(s, opts = {}, now = Date.now()) {
+  const mins = (ms) => Math.max(0, Math.round(ms / MIN));
+  if (s.stuckMs) return { status: 'warn', detail: `상태 함수가 ${Math.round(s.stuckMs / 1000)}초 넘게 응답하지 않습니다${s.hasValue ? ` — 마지막 성공 ${mins(now - s.cachedAt)}분 전` : ''}`, at: now, pendingAsync: true };
+  if (s.pending) return { status: 'unknown', detail: '상태 조회 중(비동기 상태 함수) — 아직 결과를 받지 못했습니다(정상이라는 뜻이 아닙니다). 다음 조회에 반영됩니다', at: now, pendingAsync: true };
+  if (s.error) return { status: 'warn', detail: `상태 조회 실패: ${s.error}${s.hasValue ? ` — 마지막 성공 ${mins(now - s.cachedAt)}분 전` : ' — 성공한 적이 없습니다'}`, at: s.errAt || now, asyncError: true };
+  return pollerCheck(s.value, opts);
 }
 
 export function getServiceCheck(opts = {}) {
@@ -428,9 +460,11 @@ export function getServiceCheck(opts = {}) {
     warn: checks.filter((c) => c.status === 'warn').length,
     down: checks.filter((c) => c.status === 'down').length,
     off: checks.filter((c) => c.status === 'off').length,
+    unknown: checks.filter((c) => c.status === 'unknown').length, // v2.742(TIMING-05)
     total: checks.length,
   };
-  const overall = summary.down ? 'down' : summary.warn ? 'warn' : 'ok';
+  // v2.742(TIMING-05): 확인하지 못한 행이 남아 있으면 종합을 '정상' 이라 말하지 않는다(장애·주의가 있으면 그것이 먼저다).
+  const overall = summary.down ? 'down' : summary.warn ? 'warn' : summary.unknown ? 'unknown' : 'ok';
   return { overall, summary, checks, coverage, generatedAt: Date.now() };
 }
 export { atOf as _atOf };

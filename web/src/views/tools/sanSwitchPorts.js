@@ -366,3 +366,37 @@ export function perfPartialMark(s) {
   const b = numOrNull(s?.partialBuckets);
   return b != null && b > 0 ? `부분 ${b}구간` : '';
 }
+
+/**
+ * 처리량을 계산하지 않은 이유(v2.742 DEV-06) — 서버 `sanswitch/rates.js applyRates` 의 reason 과 1:1.
+ * 예전에는 사유와 무관하게 '두 번째 수집부터 표시' 한 문장이었는데, 수집 주기를 2시간 넘게 둔 현장에서는
+ * 기다려도 영원히 안 나오는 상황을 '기다리면 된다' 고 말했다. 사유가 없으면(구버전 엣지) 예전 문장 그대로.
+ */
+export const RATE_REASON_TEXT = {
+  first: '처리량은 두 번째 수집부터 표시됩니다(누적 카운터의 차이로 계산 — 첫 수집은 비교 대상이 없습니다).',
+  'gap-too-short': '두 수집의 간격이 너무 짧아(5초 미만) 이번에는 처리량을 계산하지 않았습니다 — 다음 수집에서 다시 계산합니다.',
+  'gap-too-long': '두 수집의 간격이 상한을 넘어 처리량을 계산하지 않았습니다(긴 간격에서는 누적 카운터가 한 바퀴 돌았을 수 있습니다). 수집이 멈췄다가 다시 시작됐다면 다음 수집부터 나옵니다.',
+};
+const spanMin = (sec) => (sec == null || sec === '' || !Number.isFinite(Number(sec)) ? null : Math.max(1, Math.round(Number(sec) / 60)));
+export function rateNotReadyText(extra = {}) {
+  if (!extra || extra.rateReady !== false) return '';
+  const base = RATE_REASON_TEXT[extra.rateReason] || RATE_REASON_TEXT.first;
+  if (extra.rateReason !== 'gap-too-long') return base;
+  const gap = spanMin(extra.rateGapSec);
+  const lim = spanMin(extra.rateMaxGapSec);
+  return gap != null && lim != null ? `${base} (간격 ${gap}분 · 상한 ${lim}분)` : base;
+}
+
+/**
+ * 팬·PSU 개수 표기(v2.742 DEV-02) — 빈 슬롯(absent)은 장착 수(total)에 들어 있지 않다. 개수만 알면 'N개'.
+ * 값이 없으면 빈 문자열(행을 비운다).
+ */
+export function fruText(fru) {
+  if (!fru || typeof fru !== 'object') return '';
+  const total = numOrNull(fru.total);
+  const ok = numOrNull(fru.ok);
+  const absent = numOrNull(fru.absent) || 0;
+  const empty = absent ? ` · 빈 슬롯 ${absent}` : '';
+  if (ok == null) return `${total ?? '?'}개${empty}`;
+  return `${ok}/${total ?? '?'} 정상${empty}`;
+}

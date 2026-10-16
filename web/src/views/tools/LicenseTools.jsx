@@ -9,7 +9,51 @@ import { licenseScopeNote, licenseDupNote } from './licenseScopeText.js'; // v2.
 import { HorizonServerManager } from '../HorizonAdmin.jsx'; // v2.685: Horizon 연결 서버 등록(설정 메뉴와 공용)
 import BoldText from '../../components/boldText.jsx';
 import { numOrNull } from '../../numOrNull.js';
+import { licensesUnreadNotes, solutionsUnreadCell, solutionsUnreadNote, expiryUnreadNote } from './licenseUnreadText.js'; // v2.742(VC-06): 목록을 못 읽은 vCenter
 
+
+/**
+ * vCenter 카드의 확장 솔루션 표 — 렌더 스모크 테스트가 직접 그린다.
+ * v2.742(감사 VC-06): 목록을 못 읽은 vCenter(solutionsUnread)는 '정보 없음' 이 아니라 확인 불가(사유)다 — 문구는 licenseUnreadText 하나.
+ */
+export function SolutionsTable({ it }) {
+  const sols = Array.isArray(it?.solutions) ? it.solutions : [];
+  const unread = solutionsUnreadCell(it);
+  return (
+    <div className="table-wrap">
+      {/* v2.575 BUG-19: 상한은 정렬 뒤 적용(먼저 자르면 버전 정렬이 앞 30개 안에서만 돈다). */}
+      <STable limit={30}>
+        <thead><tr><th>확장 솔루션</th><th>버전</th><th>공급사</th></tr></thead>
+        <tbody>
+          {sols.map((s) => (
+            <tr key={s.key}><td>{/nsx/i.test(s.key + s.label) ? '🛡️ ' : ''}{s.label}</td><td className="tabular">{s.version || '—'}</td><td className="muted">{s.company || '—'}</td></tr>
+          ))}
+          {sols.length === 0 && (
+            <tr><td colSpan={3} className="muted center" style={{ padding: 14, whiteSpace: 'normal', color: unread ? 'var(--amber)' : undefined }} title={unread?.title || undefined}>
+              {unread ? unread.text : 'vCenter 확장 솔루션 정보 없음'}
+            </td></tr>
+          )}
+        </tbody>
+      </STable>
+      {/* v2.575: 조용한 상한 금지 — 뺀 개수를 밝힌다. */}
+      {sols.length > 30 && <div className="muted" style={{ fontSize: 11, padding: '4px 8px' }}>전체 {sols.length}건 중 <b>30건만</b> 표시합니다.</div>}
+    </div>
+  );
+}
+
+/** 라이선스 사용 현황 머리 안내 — 렌더 스모크 테스트가 직접 그린다(v2.742 VC-06: 못 읽은 vCenter · 부분 합). */
+export function LicensesUnreadBanner({ data }) {
+  const n = licensesUnreadNotes(data);
+  if (!n.partialNote && !n.disabledNote) return null;
+  return (
+    <>
+      {n.partialNote && (
+        <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'rgba(251,191,36,.1)', color: 'var(--amber)', whiteSpace: 'normal' }}>⚠ {n.partialNote}</div>
+      )}
+      {n.disabledNote && <div className="muted" style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal' }}>ⓘ {n.disabledNote}</div>}
+    </>
+  );
+}
 
 export function Solutions() {
   const { loading, data, error } = useTool('/tools/solutions', {});
@@ -27,6 +71,7 @@ export function Solutions() {
     <>
       {/* 전 함대 버전 요약(v2.327, 사용자 요구 — 모든 vCenter 의 NSX 포함 솔루션 버전 한눈에).
           버전이 2개 이상이면(드리프트) 노란 배지로 사이트 간 불일치를 강조한다. */}
+      {solutionsUnreadNote(data) && <div className="muted" style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal', color: 'var(--amber)' }}>⚠ {solutionsUnreadNote(data)}</div>}
       <div className="section-title" style={{ marginTop: 0 }}>vCenter 버전 분포 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>({data.items.length} 사이트)</span></div>
       <VerBadges arr={data.vcenterVersions} unit=" 사이트" />
       <div className="section-title">ESXi 버전 분포 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>(호스트 수)</span></div>
@@ -67,20 +112,7 @@ export function Solutions() {
                 {it.nsxManagers.map((m, i) => <span key={i} className={`badge ${m.status === 'connected' ? 'green' : 'red'}`} style={{ marginRight: 4, fontSize: 11 }} title={`${m.host || ''} · ${m.status}`}>{m.name} {m.version || '?'}</span>)}
               </div>
             )}
-            <div className="table-wrap">
-              {/* v2.575 BUG-19: 상한은 정렬 뒤 적용(먼저 자르면 버전 정렬이 앞 30개 안에서만 돈다). */}
-              <STable limit={30}>
-                <thead><tr><th>확장 솔루션</th><th>버전</th><th>공급사</th></tr></thead>
-                <tbody>
-                  {(it.solutions || []).map((s) => (
-                    <tr key={s.key}><td>{/nsx/i.test(s.key + s.label) ? '🛡️ ' : ''}{s.label}</td><td className="tabular">{s.version || '—'}</td><td className="muted">{s.company || '—'}</td></tr>
-                  ))}
-                  {(it.solutions || []).length === 0 && <tr><td colSpan={3} className="muted center" style={{ padding: 14 }}>vCenter 확장 솔루션 정보 없음</td></tr>}
-                </tbody>
-              </STable>
-              {/* v2.575: 조용한 상한 금지 — 뺀 개수를 밝힌다. */}
-              {(it.solutions || []).length > 30 && <div className="muted" style={{ fontSize: 11, padding: '4px 8px' }}>전체 {(it.solutions || []).length}건 중 <b>30건만</b> 표시합니다.</div>}
-            </div>
+            <SolutionsTable it={it} />
           </div>
         ))}
       </div>
@@ -103,6 +135,7 @@ export function Licenses({ scope }) {
   ];
   return (
     <>
+      <LicensesUnreadBanner data={data} />
       <div className="section-title" style={{ marginTop: 0 }}>제품별 합계</div>
       <div className="kpis" style={{ marginBottom: 14 }}>
         {data.byLicense.map((b) => <Card key={b.name} label={b.name} value={`${b.used}/${b.total}`} meta={b.productVersion ? `v${b.productVersion}` : ''} />)}
@@ -203,6 +236,8 @@ export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
           ⚠ 일부 수집 실패: {notices.failures.join(' · ')}
         </div>
       )}
+      {/* v2.742(VC-06): 비활성 vCenter 는 수집하지 않아 목록에 없다(실패가 아니다 — 그 밖의 못 읽은 vCenter 는 위 '일부 수집 실패' 줄이 말한다) */}
+      {expiryUnreadNote(data) && <div className="muted" style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal' }}>ⓘ {expiryUnreadNote(data)}</div>}
       {/* v2.732(그룹 i3): 데모 계정의 '접속 안 함' 은 실패가 아니다 — 별도 안내(회색) */}
       {notices.demoNote && (
         <div className="muted" style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal' }}>ⓘ <BoldText text={notices.demoNote} /></div>

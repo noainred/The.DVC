@@ -104,6 +104,9 @@ export function classifyServer(server, tagMap) {
 
 /* ── 집계 ─────────────────────────────────────────────────────────────────── */
 
+/** v2.742(VC-02): ESXi 호스트 연결이 끊겨(DISCONNECTED·NOT_RESPONDING) 그 온도가 지금 값이 아님 — 행의 staleReason. 웹 STALE_REASON_KO 와 같은 키. */
+export const HOST_DISCONNECTED = 'host-disconnected';
+
 const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 
 /**
@@ -157,18 +160,24 @@ export function splitAggregate(rows) {
  *                      `metrics/sampler.js unreadVcenterReasons` 를 라우트가 넘긴다. 판정을 여기서 복제하지 않는다). 그 vCenter 의
  *                      ESXi 대체 행은 마지막 수집 값(LASTGOOD_HOLD·위임 캐시)이라 지금 온도가 아니다 — stale(+staleReason)로 표시해
  *                      요약·법인 표에서 뺀다(iDRAC 행의 오래됨과 같은 규칙 — aggregate 의 staleExcluded).
+ * @param hostReadable  v2.742(VC-02): (host) => boolean — 그 ESXi 호스트를 지금 읽을 수 있는가(라우트가 `store.usageReadable` 을
+ *                      넘긴다. 판정을 여기서 복제하지 않는다). 거짓이면(DISCONNECTED·NOT_RESPONDING) 그 호스트의 ESXi 대체 행 온도는
+ *                      vCenter 가 마지막으로 받은 센서 값이라 지금 온도가 아니다 — stale(staleReason 'host-disconnected')로 표시해
+ *                      요약·법인 표에서 빼고 counts.disconnected 로 센다. 전력·CPU 가 같은 호스트를 이미 빼는데 온도만 남던 비대칭.
+ *                      ⚠ iDRAC 행은 건드리지 않는다 — BMC 를 직접 읽으므로 ESXi 연결과 무관하다. 인자를 안 주면 예전 그대로.
  * @returns { rows, summary, byDatacenter, counts }
  */
 export function buildServerTempReport({
   idracServers = [], hosts = [], latestOf = () => null,
   dcName = (id) => id, now = Date.now(), maxAgeMs = 15 * 60_000, localCycle = null,
-  unreadVcenters = null,
+  unreadVcenters = null, hostReadable = null,
 } = {}) {
   const unreadWhy = (vcId) => (unreadVcenters && typeof unreadVcenters.get === 'function' ? unreadVcenters.get(String(vcId ?? '')) || null : null);
+  const hostWhy = (h) => (typeof hostReadable === 'function' && !hostReadable(h) ? HOST_DISCONNECTED : null);
   const tagMap = hostsByServiceTag(hosts);
   const rows = [];
   const usedHostIds = new Set();
-  const counts = { idrac: 0, esxi: 0, stale: 0, noSensors: 0 };
+  const counts = { idrac: 0, esxi: 0, stale: 0, noSensors: 0, disconnected: 0 };
 
   for (const s of idracServers || []) {
     const id = String(s?.id ?? '').trim();
@@ -207,8 +216,10 @@ export function buildServerTempReport({
     const sum = summarizeSensors(h.temps);
     counts.esxi += 1;
     // v2.731(A2-03): 읽히지 않는 vCenter 의 호스트 온도는 직전 값이다 — 행에는 남기되 오래됨으로(요약·법인 표에서 빠진다).
-    const why = unreadWhy(h.vcenterId);
+    // v2.742(VC-02): vCenter 는 읽히는데 그 호스트만 연결이 끊긴 경우도 같다(사유 'host-disconnected' — vCenter 사유가 먼저).
+    const why = unreadWhy(h.vcenterId) || hostWhy(h);
     if (why) counts.stale += 1;
+    if (why === HOST_DISCONNECTED) counts.disconnected += 1;
     rows.push({
       id: h.id, source: 'esxi', kind: 'virtual',
       name: h.name, ip: '', serviceTag: h.serviceTag || '',

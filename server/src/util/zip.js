@@ -71,70 +71,106 @@ export function zipSingle(name, data) {
  * 상한: 항목 수 maxEntries(기본 2000)·원본 합계 maxBytes(기본 256MB) — 넘으면 throw(호출부가 상한을
  * 먼저 자르는 것이 원칙이고, 이것은 실수 방지용 마지막 방어선).
  * ZIP64 는 지원하지 않는다(4GB·65,535 항목 초과 불가 — 이 포탈의 내보내기 규모에서는 도달하지 않는다).
+ *
+ * ⚠ 이 함수는 항목마다 deflateRawSync 를 양보 없이 부른다 — 요청 경로에서 항목이 많으면 메인 스레드가 멈춘다
+ *   (v2.742 감사 LEFT-05·DB-05 실측: 리포트 200건 0.19초 · 1000건 0.88초). 요청 경로는 **zipManyAsync** 를 쓴다(결과 바이트가 같다).
  */
 export function zipMany(entries, { maxEntries = 2000, maxBytes = 256 * 1024 * 1024 } = {}) {
+  const st = zipBegin(entries, maxEntries);
+  for (const e of st.list) {
+    const { name, content } = zipEntryInput(st, e, maxBytes);
+    zipAppend(st, name, content, zlib.deflateRawSync(content), crc32(content));
+  }
+  return zipFinish(st);
+}
+
+/**
+ * zipMany 의 비동기판(v2.742 감사 LEFT-05·DB-05) — **결과 바이트가 zipMany 와 같다**(테스트가 대조한다).
+ * 압축은 zlib.deflateRaw(libuv 스레드 풀 — 같은 zlib·같은 기본 설정이라 deflateRawSync 와 출력이 같다)로 메인 스레드 밖에서 하고,
+ * CRC 는 네이티브 zlib.crc32(Node 22.2+, 없으면 JS 표)로 계산한다. 항목마다 압축 완료를 기다리는 동안 이벤트 루프가 다른 요청을 처리한다.
+ * 이름 검증·상한·오류 문구는 zipMany 와 같다(같은 함수를 쓴다). 남는 동기 구간은 헤더 조립과 마지막 Buffer.concat 하나뿐이다.
+ */
+export async function zipManyAsync(entries, { maxEntries = 2000, maxBytes = 256 * 1024 * 1024 } = {}) {
+  const st = zipBegin(entries, maxEntries);
+  for (const e of st.list) {
+    const { name, content } = zipEntryInput(st, e, maxBytes);
+    const comp = await deflateRawAsync(content);
+    zipAppend(st, name, content, comp, crcFast(content));
+  }
+  return zipFinish(st);
+}
+
+const deflateRawAsync = (buf) => new Promise((resolve, reject) => {
+  zlib.deflateRaw(buf, (err, out) => (err ? reject(err) : resolve(out)));
+});
+const crcFast = typeof zlib.crc32 === 'function' ? (buf) => zlib.crc32(buf) >>> 0 : crc32;
+
+/* zipMany·zipManyAsync 공용 단계(형식·검증 한 벌 — 두 판이 갈라지면 바이트 동일성이 깨진다). */
+function zipBegin(entries, maxEntries) {
   const list = Array.isArray(entries) ? entries : [];
   if (list.length > maxEntries) throw new Error(`zip 항목 수 ${list.length} — 상한 ${maxEntries} 초과`);
-  const locals = [];
-  const centrals = [];
-  let offset = 0;
-  let total = 0;
-  const seen = new Set();
-  for (const e of list) {
-    const name = String(e?.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!name) throw new Error('zip 항목 이름이 비어 있습니다');
-    // v2.500(감사 L-1): 범용 유틸이므로 Zip Slip 방어선을 여기서 둔다. 현재 호출부는 asciiSlug 로
-    // 구분자를 지워 도달 불가지만, 다음 호출부가 vCenter/VM 문자열을 그대로 넘기면 성립한다
-    // (압축을 푸는 쪽이 경로를 신뢰하면 임의 파일 덮어쓰기). 드라이브 문자도 함께 거부한다.
-    if (name.split('/').some((seg) => seg === '..')) throw new Error(`zip 항목 이름에 상위 경로(..)를 쓸 수 없습니다: ${name}`);
-    if (/^[A-Za-z]:/.test(name)) throw new Error(`zip 항목 이름에 드라이브 문자를 쓸 수 없습니다: ${name}`);
-    if (seen.has(name)) throw new Error(`zip 항목 이름 중복: ${name}`);
-    seen.add(name);
-    const content = Buffer.isBuffer(e.data) ? e.data : Buffer.from(String(e?.data ?? ''));
-    total += content.length;
-    if (total > maxBytes) throw new Error(`zip 원본 합계 ${total} 바이트 — 상한 ${maxBytes} 초과`);
-    const comp = zlib.deflateRawSync(content);
-    const crc = crc32(content);
-    const nameBuf = Buffer.from(name, 'utf8');
+  return { list, locals: [], centrals: [], offset: 0, total: 0, seen: new Set() };
+}
 
-    const lf = Buffer.alloc(30);
-    lf.writeUInt32LE(0x04034b50, 0);
-    lf.writeUInt16LE(20, 4);
-    lf.writeUInt16LE(0x0800, 6);      // flags: UTF-8 파일명
-    lf.writeUInt16LE(8, 8);           // deflate
-    lf.writeUInt16LE(0, 10); lf.writeUInt16LE(0, 12);
-    lf.writeUInt32LE(crc, 14);
-    lf.writeUInt32LE(comp.length, 18);
-    lf.writeUInt32LE(content.length, 22);
-    lf.writeUInt16LE(nameBuf.length, 26);
-    lf.writeUInt16LE(0, 28);
-    const localPart = Buffer.concat([lf, nameBuf, comp]);
+function zipEntryInput(st, e, maxBytes) {
+  const name = String(e?.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!name) throw new Error('zip 항목 이름이 비어 있습니다');
+  // v2.500(감사 L-1): 범용 유틸이므로 Zip Slip 방어선을 여기서 둔다. 현재 호출부는 asciiSlug 로
+  // 구분자를 지워 도달 불가지만, 다음 호출부가 vCenter/VM 문자열을 그대로 넘기면 성립한다
+  // (압축을 푸는 쪽이 경로를 신뢰하면 임의 파일 덮어쓰기). 드라이브 문자도 함께 거부한다.
+  if (name.split('/').some((seg) => seg === '..')) throw new Error(`zip 항목 이름에 상위 경로(..)를 쓸 수 없습니다: ${name}`);
+  if (/^[A-Za-z]:/.test(name)) throw new Error(`zip 항목 이름에 드라이브 문자를 쓸 수 없습니다: ${name}`);
+  if (st.seen.has(name)) throw new Error(`zip 항목 이름 중복: ${name}`);
+  st.seen.add(name);
+  const content = Buffer.isBuffer(e.data) ? e.data : Buffer.from(String(e?.data ?? ''));
+  st.total += content.length;
+  if (st.total > maxBytes) throw new Error(`zip 원본 합계 ${st.total} 바이트 — 상한 ${maxBytes} 초과`);
+  return { name, content };
+}
 
-    const cd = Buffer.alloc(46);
-    cd.writeUInt32LE(0x02014b50, 0);
-    cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6);
-    cd.writeUInt16LE(0x0800, 8); cd.writeUInt16LE(8, 10);
-    cd.writeUInt16LE(0, 12); cd.writeUInt16LE(0, 14);
-    cd.writeUInt32LE(crc, 16);
-    cd.writeUInt32LE(comp.length, 20);
-    cd.writeUInt32LE(content.length, 24);
-    cd.writeUInt16LE(nameBuf.length, 28);
-    cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32); cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36);
-    cd.writeUInt32LE(0, 38);
-    cd.writeUInt32LE(offset, 42);     // 이 항목의 로컬 헤더 오프셋
-    centrals.push(Buffer.concat([cd, nameBuf]));
-    locals.push(localPart);
-    offset += localPart.length;
-  }
-  const centralPart = Buffer.concat(centrals);
+function zipAppend(st, name, content, comp, crc) {
+  const nameBuf = Buffer.from(name, 'utf8');
+
+  const lf = Buffer.alloc(30);
+  lf.writeUInt32LE(0x04034b50, 0);
+  lf.writeUInt16LE(20, 4);
+  lf.writeUInt16LE(0x0800, 6);      // flags: UTF-8 파일명
+  lf.writeUInt16LE(8, 8);           // deflate
+  lf.writeUInt16LE(0, 10); lf.writeUInt16LE(0, 12);
+  lf.writeUInt32LE(crc, 14);
+  lf.writeUInt32LE(comp.length, 18);
+  lf.writeUInt32LE(content.length, 22);
+  lf.writeUInt16LE(nameBuf.length, 26);
+  lf.writeUInt16LE(0, 28);
+  const localPart = Buffer.concat([lf, nameBuf, comp]);
+
+  const cd = Buffer.alloc(46);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(0x0800, 8); cd.writeUInt16LE(8, 10);
+  cd.writeUInt16LE(0, 12); cd.writeUInt16LE(0, 14);
+  cd.writeUInt32LE(crc, 16);
+  cd.writeUInt32LE(comp.length, 20);
+  cd.writeUInt32LE(content.length, 24);
+  cd.writeUInt16LE(nameBuf.length, 28);
+  cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32); cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36);
+  cd.writeUInt32LE(0, 38);
+  cd.writeUInt32LE(st.offset, 42);  // 이 항목의 로컬 헤더 오프셋
+  st.centrals.push(Buffer.concat([cd, nameBuf]));
+  st.locals.push(localPart);
+  st.offset += localPart.length;
+}
+
+function zipFinish(st) {
+  const centralPart = Buffer.concat(st.centrals);
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
   eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6);
-  eocd.writeUInt16LE(list.length, 8); eocd.writeUInt16LE(list.length, 10);
+  eocd.writeUInt16LE(st.list.length, 8); eocd.writeUInt16LE(st.list.length, 10);
   eocd.writeUInt32LE(centralPart.length, 12);
-  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt32LE(st.offset, 16);
   eocd.writeUInt16LE(0, 20);
-  return Buffer.concat([...locals, centralPart, eocd]);
+  return Buffer.concat([...st.locals, centralPart, eocd]);
 }
 
 export const ZIP_THRESHOLD = 1 * 1024 * 1024; // 1MB 초과 시 zip 압축

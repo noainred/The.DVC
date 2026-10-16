@@ -17,6 +17,68 @@ import { VimSoapClient } from './soapClient.js';
 import { parseMorefs, parseDsSearchResults } from './soapParse.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
+import { directCollectSkipReason } from './collectTarget.js';
+import { vcAuthStopOf, noteVcAuthFailure, authStopView } from './authStopGate.js';
+
+/*
+ * v2.742(감사 VC-03) — 주문형 vCenter 로그인 문(gate). 데이터스토어 탐색·고아 VMDK 스캔·VM 전체 정보 내보내기·게스트 계정 추가
+ * 네 경로는 등록부에서 접속 정보만 찾으면 로그인했다 — 관리자가 끈·점검중으로 둔·엣지에 위임한 vCenter 와 주 폴러가 인증 실패로
+ * 멈춘 vCenter 에도 로그인이 나갔고, 거부는 정지 기록에 올라가지 않았다(재현: 가짜 vCenter 로 정지 기록의 시도 수 1 그대로).
+ * 판정은 복제하지 않는다 — 직접 수집 대상은 collectTarget.js `directCollectSkipReason`, 인증 정지는 authStopGate.js 하나다.
+ * 여기 있는 것은 그 둘을 '로그인 전에 막는 오류' 로 바꾸는 접착부뿐이다(사유 문장은 search/deepSearch.js PROBE_SKIP_TEXT 와 같은 뜻).
+ */
+export const ON_DEMAND_SKIP_TEXT = Object.freeze({
+  disabled: '비활성 vCenter — 이 포탈이 로그인하지 않습니다',
+  maintenance: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다',
+  site: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다',
+  invalid: 'vCenter 설정 형식이 올바르지 않습니다',
+});
+
+/**
+ * 로그인 전에 막을 사유. 직접 수집 대상이 아니면 `{ skipReason, reason }`, 주 폴러가 인증 실패로 멈춘 vCenter 면
+ * `{ authStopped, reason }`, 그 밖은 null. `allowAuthStopped` 면 인증 정지는 막지 않는다 — 관리자가 누른 수동 작업은
+ * 1회 시도한다(authGuard 규칙 3 · v2.741 심층 검색 게스트 탐침과 같은 판단). 비활성·점검중·site 는 수동이어도 막는다
+ * (collectTarget.js 머리말 '수동 실행도 이 셋은 건너뛴다').
+ */
+export function onDemandVcBlock(vc, { allowAuthStopped = false } = {}) {
+  const why = directCollectSkipReason(vc);
+  if (why) return { skipReason: why, reason: ON_DEMAND_SKIP_TEXT[why] || why };
+  if (allowAuthStopped) return null;
+  const stop = vcAuthStopOf(vc);
+  return stop ? { authStopped: authStopView(stop), reason: stop.reason } : null;
+}
+
+/** 막는 사유 → 오류(status 409 — 재시도 대상이 아니다. 웹 fetchJson 은 502 를 재시도한다). */
+export function onDemandBlockError(block) {
+  const e = new Error(block.reason);
+  e.status = 409;
+  if (block.skipReason) e.skipReason = block.skipReason;
+  if (block.authStopped) e.authStopped = block.authStopped;
+  return e;
+}
+
+/** 로그인 실패 — 자격증명 거부면 주 폴러와 **같은 정지 기록**에 올리고 409 오류로 바꾼다. 그 밖(시한·연결 실패)은 원래 오류 그대로(authGuard 규칙 4). */
+export function onDemandLoginError(vc, err) {
+  const info = noteVcAuthFailure(vc, err);
+  if (!info) return err;
+  const e = new Error(info.reason);
+  e.status = 409;
+  e.authStopped = authStopView(info);
+  e.cause = err;
+  return e;
+}
+
+/** 막는 사유가 있으면 로그인하지 않고 던지고, 없으면 로그인한다(거부는 기록 · 409). */
+export async function onDemandLogin(c, vc, opts) {
+  const block = onDemandVcBlock(vc, opts);
+  if (block) throw onDemandBlockError(block);
+  try { await c.login(); } catch (err) { throw onDemandLoginError(vc, err); }
+}
+
+/** 라우트용 — 409 오류의 본문 필드(사유 코드·정지 표지). 다른 오류면 빈 객체. */
+export const onDemandErrorFields = (e) => (e?.status === 409
+  ? { ...(e.skipReason ? { skipReason: e.skipReason } : {}), ...(e.authStopped ? { authStopped: e.authStopped } : {}) }
+  : {});
 
 const FILE_CAP = 10_000;
 const TASK_TIMEOUT_MS = 90_000;
@@ -109,8 +171,10 @@ async function browseFresh(dsId) {
   const vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
   if (!vcCfg) throw new Error('vCenter 접속 정보가 없습니다 — 엣지 수집(site) vCenter 는 중앙에서 직접 조회할 수 없습니다.');
 
+  // v2.742(감사 VC-03): 비활성·점검중·엣지 위임·인증 정지 vCenter 에는 로그인하지 않는다(409 + 사유). 거부는 같은 정지 기록에.
+  //   viewer 도 부르는 주문형 조회라 v2.733 C3-01 의 주문형 성능 조회와 같은 규칙이다(정지 중 로그인 0).
   const c = new VimSoapClient(vcCfg);
-  await c.login();
+  await onDemandLogin(c, vcCfg);
   try {
     const objs = await c.retrieveObjectProps('Datastore', moref, ['browser', 'vm']);
     const p = objs[0]?.props || {};

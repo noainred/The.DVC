@@ -64,7 +64,30 @@ function remember(entry) {
  *                             비밀번호는 util/smtp.js 가 가린다 — 여기서 따로 지울 필요가 없다.
  * @returns {Promise<{ok:boolean, reason?:string, accepted?:string[], skipped?:boolean}>}
  */
-export async function sendPortalMail({ kind, subject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
+/*
+ * v2.742(감사 TIMING-01 — 재현): **자동 발송의 SMTP 로그인은 한 번에 하나다.** 위 정지 확인(authStopFor)은 `await sendMail`
+ *   앞의 동기 구간에만 있고 정지 기록은 첫 535 응답이 돌아온 **뒤에야** 세워진다 — 그래서 동시에 들어온 자동 발송은 전부 검사를
+ *   통과했다(알림 엔진 40건 → 잘못된 비밀번호로 로그인 40회. 계정 잠금 경로). 이제 계정(smtp.user)이 있는 자동 발송은 줄을 서고,
+ *   차례가 오면 정지 기록·속도 제한을 **그때** 다시 본다 — 첫 거부 뒤의 나머지는 로그인 없이 건너뛴다.
+ *   · '한 번 성공했으면 동시에 보내도 된다' 로 풀지 않는다 — 막으려는 사고가 '서버 쪽에서 비밀번호가 바뀐 구간' 이라 직전 성공은
+ *     다음 시도의 근거가 되지 못한다.
+ *   · 사람이 누른 발송(테스트 발송 등)은 줄 서지 않는다 — 정지 중에도 시도하는 경로이고(고쳤는지 확인), 자동 발송 대기열 뒤에서
+ *     몇 분씩 기다리게 만들지 않는다. 계정이 없는(인증 없는) 릴레이는 잠글 계정이 없어 예전처럼 바로 보낸다.
+ */
+let _autoChain = Promise.resolve();
+let _autoWaiting = 0;
+export async function sendPortalMail(opts = {}) {
+  const manual = isManualSend(opts.kind, opts.by ?? 'system');
+  if (manual || !loadMail().smtp?.user) return sendPortalMailNow(opts);
+  _autoWaiting += 1;
+  const run = _autoChain.then(() => { _autoWaiting -= 1; return sendPortalMailNow(opts); });
+  _autoChain = run.catch(() => {});
+  return run;
+}
+/** 줄 선 자동 발송 수(상태 표시·테스트용). */
+export function mailAutoQueueLength() { return _autoWaiting; }
+
+async function sendPortalMailNow({ kind, subject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
   const cfg = loadMail();
   const at = Date.now();
 
@@ -147,6 +170,7 @@ export function mailStatus() {
     configured: !!String(cfg.smtp?.host || '').trim(),
     sentLastHour: sentAt.filter((t) => t > hourAgo).length,
     attemptsLastHour: attemptAt.filter((t) => t > hourAgo).length,
+    autoQueued: _autoWaiting, // v2.742(TIMING-01): 줄 선 자동 발송(한 번에 하나씩 로그인)
     authStopped,
     rateLimitPerHour: cfg.rateLimitPerHour,
     lastError,

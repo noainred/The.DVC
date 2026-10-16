@@ -22,7 +22,7 @@
  */
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
-import { makeGetter, tryAny } from './restCommon.js';
+import { makeGetter, tryAny, isCredReject, credRejectError } from './restCommon.js';
 
 /** v1 컨텍스트의 attributes:[{name,value}] → 평탄 객체(순수 — 테스트 고정). */
 export const attrsToObj = (ctx) => Object.fromEntries((ctx?.attributes || []).map((a) => [a.name, a.value]));
@@ -99,7 +99,7 @@ export async function collect(device, { signal = null } = {}) {
       raw.clusters = list.map((c) => ({ name: c.name, health: c.health_state || c['health-state'], operational: c.operational_status || c['operational-status'] || '' }));
       if (!raw.clusters.length) throw new Error('v2 응답에 클러스터 없음');
     } catch (e) {
-      v2Dead = /401/.test(e.message);
+      v2Dead = isCredReject(e);
       try {
         // v1: 목록(children) → 클러스터별 컨텍스트 attributes 조회.
         const listResp = await getV1('/vplex/clusters');
@@ -111,15 +111,15 @@ export async function collect(device, { signal = null } = {}) {
             const ctxs = d?.response?.context;
             const a = attrsToObj(Array.isArray(ctxs) ? ctxs[0] : ctxs);
             raw.clusters.push({ name: a.name || n, health: a['health-state'], operational: a['operational-status'] || '' });
-          } catch (e2) { if (/401/.test(e2.message)) throw e2; snap.sections.config = `일부 클러스터 오류: ${e2.message}`; }
+          } catch (e2) { if (isCredReject(e2)) throw e2; snap.sections.config = `일부 클러스터 오류: ${e2.message}`; }
         }
         v1Mode = true; // v1 인증 성공 — 이후 섹션은 v1 로 고정
       } catch (e1) {
         snap.sections.config = `오류: ${e1.message}`;
-        if (/401/.test(e1.message)) throw e1; // 두 세대 모두 인증 거부 → 전체 중단(잠금 예방)
+        if (isCredReject(e1)) throw e1; // 두 세대 모두 인증 거부 → 전체 중단(잠금 예방)
         // v2 가 401 이었고 v1 도(비-401로) 실패 — 동작하는 인증 경로가 없으므로 여기서 종결한다.
         // 계속 진행하면 이후 섹션의 v2 재시도가 주기마다 401 을 누적시킨다(잠금 위험).
-        if (v2Dead) throw new Error(`인증 실패(401) — v2(Basic) 거부, v1 폴백도 실패(${e1.message})`);
+        if (v2Dead) throw credRejectError(`인증 실패(401) — v2(Basic) 거부, v1 폴백도 실패(${e1.message})`);
       }
     }
     // ② 디렉터(=노드 상당) — v1 확정이면 v1 글롭만, 아니면 v2 → (비-401 시) v1 글롭 폴백.
@@ -128,7 +128,7 @@ export async function collect(device, { signal = null } = {}) {
       const d = v1Mode
         ? await getV1('/vplex/engines/*/directors/*') // v1 은 글롭 컨텍스트 조회 지원
         : await tryAny(getV2, ['/vplex/v2/directors']).catch(async (e) => {
-          if (/401/.test(e.message)) throw e;
+          if (isCredReject(e)) throw e;
           return getV1('/vplex/engines/*/directors/*');
         });
       if (Array.isArray(d) || Array.isArray(d?.directors)) {
@@ -138,7 +138,7 @@ export async function collect(device, { signal = null } = {}) {
         const ctxs = Array.isArray(d.response.context) ? d.response.context : [d.response.context];
         raw.directors = ctxs.map((c) => { const a = attrsToObj(c); return { name: a.name, health: a['health-state'] }; });
       }
-    } catch (e) { snap.sections.nodes = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    } catch (e) { snap.sections.nodes = `오류: ${e.message}`; if (isCredReject(e)) throw e; }
     // ③ 버전 — 부가 정보(실패 비치명). v1 확정이면 v1 만, 아니면 v2 → v1 순.
     try {
       const v = v1Mode

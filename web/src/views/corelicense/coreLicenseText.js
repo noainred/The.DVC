@@ -1,5 +1,6 @@
 // v2.703(A13) — 코어 라이선스 산정 문구. 판정은 서버 corelicense/analyze.js(규칙 키는 1:1 — 테스트 대조).
 // 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석).
+import { coreLicenseUnreadText } from '../tools/licenseUnreadText.js'; // v2.742(VC-06): 라이선스 목록을 못 읽은 vCenter
 export const VSAN_PLAN_LABEL = Object.freeze({ none: '계산 안 함', vvf: 'VVF 가정(코어당 0.25 TiB)', vcf: 'VCF 가정(코어당 1 TiB)' });
 const n = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 export const fmtInt = (v) => (n(v) == null ? '—' : Math.round(n(v)).toLocaleString());
@@ -31,10 +32,15 @@ export function coverageNote(t) {
   // v2.721(감사 B1-03): vSAN 추가분이 확정값이 아니면 어느 방향으로 틀릴 수 있는지 말한다.
   const bn = ADDON_BOUND_NOTE[t.vsanAddonBound];
   if (bn) parts.push(bn);
+  // v2.742(감사 VC-06): 라이선스 목록을 못 읽은 vCenter — 산정값(호스트 하드웨어 기준)은 그대로지만 vCenter 보고값과는 비교하지 않았다.
+  if (t.licensesUnread > 0) parts.push(`라이선스 목록을 읽지 못한 vCenter ${t.licensesUnread}곳은 vCenter 보고(코어 라이선스)와 비교하지 않았습니다 — 코어 라이선스가 없다는 뜻이 아닙니다`);
   return parts.length ? `${parts.join(' · ')}.` : null;
 }
 /** vCenter 가 보고한 코어 라이선스 사용량과 산정값 비교 문구. */
 export function reportedText(r) {
+  // v2.742(감사 VC-06): 라이선스 목록 자체를 못 읽었으면 '코어 단위 라이선스 없음' 이 아니다 — 확인 불가이고 비교하지 않는다.
+  const unread = coreLicenseUnreadText(r?.licensesUnread);
+  if (unread) return { text: unread, tone: 'muted' };
   // v2.727(감사 C-02): vCenter 가 used 를 보고하지 않은 코어 라이선스가 있으면 보고 합이 null 이다 — '없음' 이 아니라 '일부 미상' 이고 비교하지 않는다.
   if (r.reportedUsedUnknown > 0) return { text: `보고값 일부 미상(사용량 없는 코어 라이선스 ${r.reportedUsedUnknown}개) · 비교 안 함`, tone: 'muted' };
   if (r.reportedCoreUsed == null) return { text: '코어 단위 라이선스 없음', tone: 'muted' };

@@ -67,8 +67,21 @@ export function sanitizeGpuGuestDiag(diag) {
   const dropped = rawVcs.length - vcenters.length + (d.vcenters !== undefined && !Array.isArray(d.vcenters) ? 1 : 0);
   return {
     at: numOrNull(d.at), mode: str(d.mode, 16), vcenters,
+    intervalMs: pushIntervalOrNull(d.intervalMs),
     ...(dropped > 0 ? { dropped } : {}),
   };
+}
+
+/**
+ * v2.742(VC-01 후속): 엣지가 보고한 자기 push 주기(ms). 양수 유한수만 받고 7일로 자른다 — 그 밖(0·음수·글자 아닌 값·필드 없음 =
+ * 구버전 엣지)은 null 이고, 원인 판정(gpu/guestWhy.js edgeReportStaleMs)이 기본 30분을 쓴다(넓히지 않는다 — 추측 금지).
+ * 상한이 없으면 엉뚱한 값 하나로 그 엣지의 낡음 판정이 영원히 오지 않는다.
+ */
+export const PUSH_INTERVAL_MAX_MS = 7 * 86_400_000;
+function pushIntervalOrNull(v) {
+  const n = typeof v === 'number' || typeof v === 'string' ? numOrNull(v) : null;
+  if (n == null || n <= 0) return null;
+  return Math.min(n, PUSH_INTERVAL_MAX_MS);
 }
 
 /**

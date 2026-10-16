@@ -6,8 +6,10 @@ import { fmtBytes, fmtAgo } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 
-const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316' };
-const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림' };
+// v2.742(감사 TIMING-05): 'unknown' — 비동기 상태 함수의 첫 결과를 아직 받지 못한 행(정상도 장애도 아니다 — 회색).
+const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316', unknown: '#94a3b8' };
+const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림', unknown: '확인 중' };
+const OVERALL_CLASS = { ok: 'green', warn: 'amber', unknown: '' };
 // v2.590 W1: 객체·NaN 이면 'NaN분 전' 대신 비운다(서버가 폴러의 { at, … } 객체를 그대로 싣던 적이 있다).
 // v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다(이 화면은 c.at 이 있을 때만 부른다).
 const Dot = ({ s }) => <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: DOT[s] || '#64748b', boxShadow: s === 'ok' ? `0 0 6px ${DOT.ok}` : 'none', marginRight: 8 }} />;
@@ -23,8 +25,8 @@ export function ServiceCheck() {
     <div>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <div className="muted" style={{ fontSize: 13 }}>포탈 내부 서비스/수집기 상태를 한눈에 점검합니다(15초 자동 새로고침).</div>
-        <span className={`badge ${data.overall === 'ok' ? 'green' : data.overall === 'warn' ? 'amber' : 'red'}`} style={{ fontSize: 13, padding: '4px 12px' }}>
-          종합: {LBL[data.overall]} · 정상 {sm.ok} / 주의 {sm.warn} / 실패 {sm.down} / 비활성 {sm.off}
+        <span className={`badge ${OVERALL_CLASS[data.overall] ?? 'red'}`} style={{ fontSize: 13, padding: '4px 12px' }}>
+          종합: {LBL[data.overall] || data.overall} · 정상 {sm.ok} / 주의 {sm.warn} / 실패 {sm.down} / 비활성 {sm.off}{sm.unknown ? ` / 확인 중 ${sm.unknown}` : ''}
         </span>
       </div>
       <div className="vc-grid">

@@ -21,7 +21,6 @@ import { requireSuperAdmin } from '../../auth/roles.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
 import { ssrfBlockReason } from '../../collector/registry.js';
 import { listDevices, registryLoadError as storageRegistryLoadError } from '../../storage/registry.js';
@@ -30,9 +29,9 @@ import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from '../../isidu/settings.js';
 import { SIZE_MODES, duCommand } from '../../isidu/parse.js';
 import { keyInfo, publicKeyView, ensureKey, keyDir, KEY_FILE_NAME } from '../../isidu/sshKey.js';
-import { authGuard, authStopOf, FAIL_KINDS, testTargetPath } from '../../isidu/collect.js';
+import { authGuard, FAIL_KINDS, testTargetPath } from '../../isidu/collect.js';
 import { isiduPollerStatus, runNow, FAIL_RETRY_MS, LONG_FAIL_MS } from '../../isidu/poller.js';
-import { requestIsiduCollect, isiduRequestState, recentIsiduDrops } from '../../isidu/collectRequests.js';
+import { requestIsiduCollect, recentIsiduDrops } from '../../isidu/collectRequests.js';
 import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
 import { buildReport, listUsers, allRows, trend, TREND_DAYS, USERS_LIMIT_MAX, buildOverview, OVERVIEW_POOL } from '../../isidu/report.js';
 import { nudgeIsiduEdge, testIsiduOnEdge, MIN_ISIDU_EDGE_VERSION } from '../../central/isiduRemote.js';
@@ -42,68 +41,21 @@ import { HISTORY_AGENT } from '../../isidu/targets.js';
 import * as db from '../../isidu/db.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureIsiduDemo } from '../../mock/demo/isidu.js';
-import { isiduMailReady, isiduMailStateOf, sendLatestNow } from '../../isidu/notify.js';
-import { targetMailOf, mailRecipients, MAIL_LIST_MAX, FAIL_ALERT_MIN_MS } from '../../isidu/mailRules.js';
+import { isiduMailReady, sendLatestNow } from '../../isidu/notify.js';
+import { targetMailOf, MAIL_LIST_MAX, FAIL_ALERT_MIN_MS, isEmail } from '../../isidu/mailRules.js';
+import { load as loadMailCfg } from '../../mail/settings.js';
+import { DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { normalizeBulkPatch, applyBulk, removeTargets, bulkIdsOf, settingsRev, BULK_KEYS, NOT_APPLIED_CODES } from '../../isidu/bulk.js';
+import { targetRows, dcList } from '../../isidu/rows.js';   // v2.742: 목록 행 조립은 종합 메일과 같이 쓴다
+import { saveDigestSettings } from '../../isidu/settings.js';
+import { isiduDigestStatus, sendDigestNow, previewDigest } from '../../isidu/digest.js';
+import { DIGEST_TOPN_CHOICES, DIGEST_GRACE_MS, SURGE_MIN_BYTES, SURGE_MIN_RATIO } from '../../isidu/digestRules.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
 const fullScopeOnly = fullScopeOnlyWith('아이실론 디렉터리 사용량은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 아이실론은 vCenter 에 귀속되지 않습니다.');
 const t = (v) => String(v ?? '').trim();
 const lo = (v) => t(v).toLowerCase();
-
-function dcList() {
-  try { return listDatacenters().map((d) => ({ id: String(d.id), name: String(d.name || d.id) })); } catch { return []; }
-}
-
-/** 화면 표에 실을 대상 — 등록부 반영 + 법인 이름 + 최신 상태. */
-async function targetRows() {
-  const devices = listDevices();
-  const dcs = new Map(dcList().map((d) => [d.id, d.name]));
-  const latest = await db.latestAll();
-  const byId = new Map((latest || []).filter((r) => r.agent === HISTORY_AGENT).map((r) => [r.targetId, r]));
-  const ps = isiduPollerStatus();
-  const pollerRunning = new Map(ps.running.map((r) => [r.targetId, r]));
-  const pollerQueued = new Map((ps.queued || []).map((r) => [r.targetId, r]));               // v2.741 TIMING-02: 동시 실행 상한에 걸려 기다리는 '지금 수집'
-  const pollerInterrupted = new Map((ps.interrupted || []).map((r) => [r.targetId, r]));     // v2.737: 재시작으로 중단 · 재개 대기
-  const pollerResumes = new Map();
-  for (const r of ps.resumes || []) if (!pollerResumes.has(r.targetId)) pollerResumes.set(r.targetId, r);
-  const edges = new Map(allIsiduEdgeStatus().map((e) => [lo(e.agent), e]));
-  const st = loadSettings();
-  const commonTo = st.mail?.commonTo || [];
-  return Promise.all(st.targets.map(async (tg) => {
-    const r = resolveTarget(tg, { devices });
-    const l = byId.get(r.id) || null;
-    const ag = t(r.agent);
-    const edge = ag ? edges.get(lo(ag)) || null : null;
-    const edgeRunning = edge?.status?.poller?.running?.find((x) => x.targetId === r.id) || null;
-    const edgeInterrupted = edge?.status?.poller?.interrupted?.find((x) => x.targetId === r.id) || null;
-    const edgeResume = edge?.status?.poller?.resumes?.find((x) => x.targetId === r.id) || null;
-    return {
-      id: r.id, label: r.label || '', path: r.path, sizeMode: r.sizeMode, intervalHours: r.intervalHours, timeoutMin: r.timeoutMin, topN: r.topN,
-      enabled: r.enabled !== false, auth: r.auth, port: r.port, username: r.username || '',
-      deviceId: r.deviceId || '', deviceName: r.deviceName || '', host: r.host || '', agent: ag,
-      // v2.736: 실행 노드의 근거 — 'device'(장비 담당 노드) · 'override'(실행 노드 지정) · 'direct'(직접 입력 대상의 노드).
-      agentSource: r.agentSource || 'direct', runVia: r.runVia || (r.deviceId ? 'device' : ''), deviceAgent: r.deviceAgent ?? null,
-      datacenterId: r.datacenterId || '', corp: r.datacenterId ? (dcs.get(r.datacenterId) || r.datacenterId) : '',
-      issue: r.issue || null, deviceDisabled: !!r.deviceDisabled,
-      okScan: l?.okScan ? { id: l.okScan.id, ts: l.okScan.ts, durationMs: l.okScan.durationMs, count: l.okScan.count, total: l.okScan.total, sumBytes: l.okScan.sumBytes, errLines: l.okScan.errLines || 0, node: l.okScan.node || '' } : null,
-      lastTry: l?.lastTry ? { id: l.lastTry.id, ts: l.lastTry.ts, ok: l.lastTry.ok, kind: l.lastTry.kind, error: l.lastTry.error, durationMs: l.lastTry.durationMs, node: l.lastTry.node || '', trig: l.lastTry.trig } : null,
-      failStreak: l?.failStreak || 0,
-      running: ag ? (edgeRunning ? { since: edgeRunning.since, trigger: edgeRunning.trigger, reportedAt: edge.at } : null) : (pollerRunning.get(r.id) || null),
-      queued: ag ? null : (pollerQueued.get(r.id) || null),
-      request: ag ? isiduRequestState(r.id) : null,
-      // v2.737: 업그레이드·재시작으로 끝나지 못한 조사(재개 대기)와 마지막 자동 재개 결과 — 엣지 담당은 그 엣지의 보고.
-      interrupted: ag ? edgeInterrupted : (pollerInterrupted.get(r.id) || null),
-      lastResume: ag ? edgeResume : (pollerResumes.get(r.id) || null),
-      // 엣지 담당 대상의 인증 정지는 엣지에 있다 — 중앙은 그 엣지의 마지막 시도 결과(kind 'auth')로만 안다.
-      authStopped: ag ? null : await authStopOf(r),
-      // v2.738 결과 메일 — 이 표는 주소를 싣지 않는다(개수·선택만). 주소는 설정 조회에만 있다.
-      mail: (() => { const tm = targetMailOf(tg); const rc = mailRecipients(commonTo, tm); return { recipients: rc.to.length, onlyOnChange: tm.onlyOnChange, onFailure: tm.onFailure, excludeCommon: tm.excludeCommon }; })(),
-      lastMail: isiduMailStateOf(r.id),
-    };
-  }));
-}
 
 /** 엣지별 상태(공개키 — 관리자가 그 법인 아이실론에 등록할 값). */
 function edgeViews() {
@@ -351,6 +303,49 @@ api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, requireSup
   if (r.ok) return res.json(r);
   // 보내지 못한 것은 409(본문이 사유를 말한다) — 5xx 로 주면 재시도하는 호출부가 같은 메일을 두 번 보낼 수 있다.
   res.status(r.state === 'gone' ? 404 : 409).json(r);
+});
+
+/**
+ * 종합 메일(v2.742) — 전 법인 결과를 모아 정한 요일·시각(포탈 시각)에 한 통으로 보낸다. 슈퍼 관리자 전용(수집 대상 설정과 같은 기준).
+ *  · 조회는 설정 + 상태(다음 회차 3번 · 최근 기록 — 주소 없이 개수만) + 받는 사람 수(통합 관리자 · 추가 · 겹침).
+ *  · 저장은 종합 메일 설정만 바꾼다(대상 목록 저장이 이 값을 지우지 않고, 이 저장도 대상 목록을 건드리지 않는다).
+ */
+function digestView() {
+  const s = loadSettings();
+  // 통합 관리자(메일 설정의 기본 받는 사람) — 화면이 저장 전 입력으로 받는 사람 수(겹침 포함)를 세는 데 쓴다. 이 라우트는 슈퍼 관리자 전용이고
+  // 같은 주소는 설정 › 메일 발송에서도 보인다. 상태(status)·기록에는 여전히 주소를 싣지 않는다.
+  let adminTo = [];
+  try { adminTo = (loadMailCfg().defaultTo || []).filter(isEmail).slice(0, MAIL_LIST_MAX); } catch { adminTo = []; }
+  return {
+    ok: true, digest: s.mail?.digest || null, status: isiduDigestStatus(), loadError: isiduSettingsLoadError(), adminTo,
+    mailReady: isiduMailReady(), topNChoices: DIGEST_TOPN_CHOICES, graceMin: Math.round(DIGEST_GRACE_MS / 60_000),
+    surge: { minBytes: SURGE_MIN_BYTES, minRatio: SURGE_MIN_RATIO }, listMax: MAIL_LIST_MAX, offsetMin: DAY_OFFSET_MIN,
+  };
+}
+api.get('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperAdmin, (_req, res) => { res.json(digestView()); });
+
+api.put('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => {
+  if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 저장하세요.' });
+  const r = saveDigestSettings(req.body?.digest ?? req.body ?? {});
+  if (!r.ok) return res.status(r.unreadable ? 409 : 400).json({ ok: false, reason: r.error, field: r.field || null });
+  const d = r.digest;
+  logAudit({ user: req.user?.username, action: 'isidu.digest', target: 'isidu-settings.json', detail: `enabled=${d.enabled} days=${d.days.join('')} time=${d.time} admin=${d.includeAdmin} extra=${d.to.length} topN=${d.topN} watch=${d.includeWatch} targets=${d.includeTargets} skipIfNoNew=${d.skipIfNoNew}`, ip: req.ip });
+  res.json(digestView());
+});
+
+/** 지금 한 번 보내기 — 저장된 설정·받는 사람으로 보낸다('새 조사 없으면 생략' 은 보지 않는다). 실패는 409(본문이 사유 — 재시도로 두 번 보내지 않게). */
+api.post('/tools/isilon-dirusage/digest/send-now', adminOnly, fullScopeOnly, requireSuperAdmin, async (req, res) => {
+  const r = await sendDigestNow(req.user?.username || 'admin');
+  logAudit({ user: req.user?.username, action: 'isidu.digest.send', target: 'digest', detail: `${r.state}${r.to != null ? ` to=${r.to}` : ''}${r.reason ? ` · ${String(r.reason).slice(0, 120)}` : ''}`, ip: req.ip });
+  if (r.ok) return res.json(r);
+  res.status(409).json(r);
+});
+
+/** 미리보기 — 보내지 않는다. 본문 값(저장하지 않은 화면 값)이 있으면 그 값으로 만든다. 데모 대상도 넣고 그 사실을 밝힌다. */
+api.post('/tools/isilon-dirusage/digest/preview', adminOnly, fullScopeOnly, requireSuperAdmin, async (req, res) => {
+  const r = await previewDigest(req.body?.digest ?? null);
+  if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null });
+  res.json(r);
 });
 
 /** 이 노드(중앙)의 SSH 키 만들기 — 없을 때만. 공개키를 돌려준다(아이실론 authorized_keys 에 넣을 값). */

@@ -24,14 +24,51 @@ const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_POLL_MS) |
 const isEdge = () => !!config.agent.centralUrl;
 
 let _timer = null;
-let _busy = false;
+let _busy = null;   // 진행 중인 점검(프라미스) — 없으면 null
+let _again = null;  // 진행 중에 들어온 요청 { reason, notify, manual } — 끝난 뒤 한 번 더
 let _last = null;
+let _lastSkip = null; // 꺼져 있어 건너뛴 마지막 비수동 요청 { at, reason, source }
 
-/** 한 주기. 수동 실행('지금 점검')과 훅도 이 함수를 부른다 — 가드를 공유한다. */
+/**
+ * 한 주기. 수동 실행('지금 점검')과 훅도 이 함수를 부른다 — 가드를 공유한다.
+ * v2.742(감사 TIMING-03): ① 수동('manual')이 아닌 요청(훅·주기·기동)은 **스위치가 꺼져 있으면 아무것도 하지 않는다** — 예전에는
+ *   iDRAC 인벤토리 갱신 훅(hooks.js)이 꺼짐(기본값)을 보지 않고 이 함수를 불러 판정·DB 생성·**실제 알림 발송**까지 했다(주기·기동
+ *   타이머만 스위치를 봤다 — 엣지 push.js 는 보고 있었다). 판정은 partFaultEnabled() 하나.
+ *   ② 진행 중에 들어온 요청을 **거절하지 않고 끝난 뒤 한 번 더** 돈다(push.js v2.603 EDGE2603-01 과 같은 규약). 예전에는 '이전 점검
+ *   진행 중' 으로 끝나 진행 중이던 점검이 인벤토리 갱신 **전**에 시작했으면 새 장애가 다음 주기(기본 10분)까지 판정되지 않았다.
+ *   합류한 호출자는 **다시 돈 결과**를 받는다. 다시 도는 사유는 `reason+again`.
+ */
 export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {}) {
   if (isEdge()) return { ok: false, reason: '이 노드는 엣지입니다 — 판정·이력·알림은 중앙이 합니다(엣지는 push 만).' };
-  if (_busy) return { ok: false, reason: '이전 점검 진행 중(겹침 방지)' };
-  _busy = true;
+  const manual = reason === 'manual';
+  if (!manual) {
+    const en = partFaultEnabled();
+    if (!en.enabled) {
+      _lastSkip = { at: Date.now(), reason, source: en.source };
+      return { ok: false, skipped: true, reason: `파트 장애 기능이 꺼져 있습니다(${en.source}) — 판정·이력·알림을 하지 않았습니다` };
+    }
+  }
+  if (_busy) { // 재진입 가드(CLAUDE.md 필수) — 거절하지 않고 끝난 뒤 한 번 더
+    if (!_again) console.log(`[partfault] ${reason} — 이전 점검 진행 중, 끝난 뒤 한 번 더 점검합니다`);
+    _again = { reason: _again ? _again.reason : reason, notify: !!(notify || _again?.notify), manual: !!(manual || _again?.manual) };
+    return _busy;
+  }
+  _busy = (async () => {
+    let r = await runOnce({ notify, reason });
+    let rounds = 1;
+    while (_again && rounds < 5) {
+      const next = _again; _again = null; rounds++;
+      // 재실행 사이에 꺼졌을 수 있다 — 수동 요청이 섞이지 않았으면 스위치를 다시 본다.
+      if (!next.manual && !partFaultEnabled().enabled) { r = { ok: false, skipped: true, reason: '파트 장애 기능이 꺼져 있습니다 — 다시 점검하지 않았습니다' }; break; }
+      r = await runOnce({ notify: next.notify, reason: `${next.reason}+again` });
+    }
+    if (_again) { _again = null; console.warn('[partfault] 다시 점검 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 점검이 처리합니다'); }
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+
+async function runOnce({ notify = true, reason = 'timer' } = {}) {
   const t0 = Date.now();
   try {
     const local = await runScan();
@@ -74,7 +111,7 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
     _last = { at: Date.now(), reason, error: String(e.message || e).slice(0, 300) };
     console.warn(`[partfault] 점검 실패: ${_last.error}`);
     return { ok: false, reason: _last.error };
-  } finally { _busy = false; }
+  }
 }
 
 export function startPartFaultPoller() {
@@ -92,7 +129,7 @@ export async function partFaultStatus() {
   const en = partFaultEnabled();
   return {
     role: isEdge() ? 'edge' : 'central',
-    enabled: en.enabled, source: en.source, intervalMs: intervalMs(), busy: _busy,
-    last: _last, db: await partFaultDbStatus(), reset: await resetInfo().catch(() => null),
+    enabled: en.enabled, source: en.source, intervalMs: intervalMs(), busy: !!_busy,
+    last: _last, ...(_lastSkip ? { lastSkip: _lastSkip } : {}), db: await partFaultDbStatus(), reset: await resetInfo().catch(() => null),
   };
 }
