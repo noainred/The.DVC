@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-14T11:21:43.914Z",
+  "generatedAt": "2026-10-16T01:45:12.844Z",
   "count": 109,
   "tools": [
     {
@@ -756,7 +756,7 @@
     },
     {
       "k": "net-traffic",
-      "adminOnly": false,
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,

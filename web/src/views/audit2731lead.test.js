@@ -42,7 +42,7 @@ describe('v2.731 리드 — 웹', () => {
     expect(host).toMatch(/stale: !!h\.stale/);
     expect(s).toMatch(/view === 'host' \? \[\s*\{ key: 'name', label: '호스트', render: \(r\) => \(r\.stale/);
     expect(s).toMatch(/h\.stale \? ' · 오래된 값/);
-    expect(s).toMatch(/view === 'host' && data\.staleHosts/);
+    expect(s).toMatch(/view === 'host' \? staleHostsNote\(data\)/); // v2.742 GE2: 문구는 staleHostsNote 하나
   });
   it('④ VM 가용성 — tailCutText 는 tailCut 행에만, 측정 끝 시각을 말한다 · 화면이 그 문구를 그린다', () => {
     expect(tailCutText({ tailCut: false, windowTo: 5 })).toBe(null);

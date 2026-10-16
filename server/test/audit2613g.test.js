@@ -78,11 +78,11 @@ test('RUNTIME2613-01: 서비스 점검은 edgelog/spec.js 의 collect.* 폴러 �
   const svc = await import('../src/health/services.js');
   const r = svc.getServiceCheck();
   // 응답 모양은 그대로(overall·summary·checks[]{key,label,status,detail,at}) + coverage(추가)
-  assert.ok(['ok', 'warn', 'down'].includes(r.overall));
+  assert.ok(['ok', 'warn', 'down', 'unknown'].includes(r.overall)); // v2.742 TIMING-05: 비동기 상태 함수 결과 대기 = unknown
   assert.equal(r.summary.total, r.checks.length);
   for (const c of r.checks) {
     assert.ok(c.key && c.label, `행에 key·label 이 없다: ${JSON.stringify(c)}`);
-    assert.ok(['ok', 'warn', 'down', 'off'].includes(c.status), `${c.key}: status ${c.status}`);
+    assert.ok(['ok', 'warn', 'down', 'off', 'unknown'].includes(c.status), `${c.key}: status ${c.status}`); // v2.742 TIMING-05
     assert.equal(typeof c.detail, 'string'); assert.equal(typeof c.at, 'number');
   }
   const collect = STATUS_SPEC.filter((s) => s.group === 'collect').map((s) => s.key);
