@@ -5170,7 +5170,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **아이실론 du**: '지금 수집' 도 동시 상한(`ISIDU_CONCURRENCY` 2)을 지키고 나머지는 대기열(`queued`) · 30분 넘게 돈 실패는 1시간이 아니라 주기 뒤 재시도(DEV-05 — `failLongMs`) ·
       엣지 시계가 앞선 결과는 `edge_ts` 로 중복을 거르고 `clamped` 로 따로 밝힌다(거절 아님 — EDGE-01) · 잘못된 % 주소는 법인 현황으로(RECENT-02) · 보고서 기억 TTL 은 마지막 사용 기준(RECENT-03).
     · ⚠⚠ **인증 실패 판정에서 숫자 401/403 은 HTTP 문맥일 때만**(`util/authGuard.js isAuthFailureText`, DEV-01): 호스트명·경로·포트 속 '401' 이 주기 수집을 인증 정지시켰다. 낱말 규칙(인증 실패·
-      authentication fail·permission denied)은 그대로다. 실패 분류는 **시한·출력 상한·이름 해석을 인증 문구보다 먼저** 본다(isidu). ⚠ REST 수집기들의 `/401/.test(e.message)` 재던짐은 남았다(다음 후보).
+      authentication fail·permission denied)은 그대로다. 실패 분류는 **시한·출력 상한·이름 해석을 인증 문구보다 먼저** 본다(isidu). ✅ REST 수집기들의 `/401/.test(e.message)` 재던짐은 v2.742 DEV-03 `restCommon.isCredReject` 로 고쳤다(v2.744 LEFT-06 정정).
     · **SSH 세션 예산 — 두 수집기 더**(DEV-02, v2.528 Unity 규약): SAN `fosSsh` 100초(`SANSW_CLI_SESSION_BUDGET_MS`) · Isilon SSH 150초 — 예산 < 장비 시한 산수를 테스트가 고정한다.
       연결 테스트(60초)는 `timeoutMs − 10초` 를 넘긴다. ⚠ `sshExec` 의 exec 시한 하한이 1초라 1초 축척 테스트로는 시한 자르기가 보이지 않는다(정직 기록).
     · **nvidia-smi 가 CSV 대신 드라이버 실패 문장을 내면 그 첫 줄이 사유**다(DEV-04 — 예전엔 '출력이 비어 있음') · 로그 분석 규칙 `gpu-guest-nvsmi-driver` 추가.
@@ -5199,7 +5199,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `audit2741j` 가 같은 입력으로 대조한다. **'+' 로 시작하는 값은 계속 가드**(`+82…` 전화번호가 숫자로 바뀌지 않게 — 리드 통합에서 조였다). OS 스캔 CSV 의 사본 `esc` 는 `csvLine` 으로 옮겼다.
     · **패키징**(INJPKG-01·03·05): root 로 부르는 래퍼(vmware-portal-otp·-users·-verify)는 앱 트리 밖 root 소유 사본(`/usr/local/libexec/vmware-portal<prefix>/`)이고 앱 트리는 서비스 계정 권한으로만 실행 ·
       root 로 도는 서명 확인은 uid 0 소유 정책·키 파일만 받는다 · `vp_check_prefix`(install·uninstall 같은 함수)가 시스템 폴더 prefix 를 거부 · 빌드의 config 정리는 허용 목록(`*.example.json`).
-    · 남긴 것(다음 점검 후보): LEFT-07(hangLog 실패 경로 보고 — v2.560 수정의 위험 대비 이득이 작다) · LEFT-12(hostAccess 변경 라우트 전체 범위 게이트·Electron 버전 — 정책) · VC-03 · DEV-06 · WEB-03 ·
+    · 남긴 것(다음 점검 후보): LEFT-07(hangLog 실패 경로 보고 — v2.560 수정의 위험 대비 이득이 작다) · ✅ LEFT-12(hostAccess 변경 라우트 전체 범위 게이트·Electron 버전 — v2.743 LEFT-09 에 fleetOnly · electron 33.4.11 로 고쳤다, v2.744 LEFT-06 정정) · VC-03 · DEV-06 · WEB-03 ·
       INJPKG-02(du 출력 4MB 상한) · DB-04(CVP·통신 점검 COUNT) · TIMING-03 주기 틱 보류 · 새 상태 필드 화면 표시(snapshotSave·keptCopy·staleCopy 등) · `/tools/waste/export` 워크북 직렬화(압축은 ✅ v2.742 비동기) · ✅ REST 수집기 `/401/` 재던짐(v2.742 DEV-03 `restCommon.isCredReject` 로 고쳤다 — v2.743 LEFT-05 정정).
     · ⚠ 작업 방식: 분석은 Workflow 5개(축 10개 × 2인 반증), 수정은 12그룹이 같은 작업 트리에서 겹치지 않는 파일만 고쳤다. stop hook 이 WIP 커밋을 요구해 **66e3bed 는 그룹 변이 도중의 `ping/db.js` 되돌린 판본**을 담았다 —
       그 뒤 커밋이 바로잡았다(그 커밋판으로 되돌리지 말 것). GJ 는 같은 이유로 server/src 를 격리 사본에 복사해 변이 검증했다(다른 그룹의 진행 중 변경과 겹치지 않게).
@@ -5218,7 +5218,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       409 + `onDemandErrorFields`(skipReason·authStopped). 게스트 계정 추가만 인증 정지에도 1회(관리자 수동 작업). **새 주문형 vCenter 경로도 이 문을 지날 것.**
     · **클러스터 식별은 `clusterGroupKeyOf`(vCenter + clusterRef, 없으면 이름) 한 벌**(VC-05): 같은 이름 다른 데이터센터 클러스터가 합쳐졌다. 수집기가 호스트·VM 에 `clusterRef`·
       `vcDatacenter` 를 싣고(중앙 정제도 받는다), ref 모드는 그 vCenter 호스트가 **전부** ref 를 실었을 때만. 화면 key·이름은 웹 `clusterCfgText.clusterRowKey`·`clusterNameLabel`.
-      ⚠ 나머지 이름 키 소비처(드리프트·DS 분석·시계열 키·공개 API 클러스터 개수)는 남겼다 — 이력 연속성·대조 계약 판단 필요.
+      ⚠ 나머지 이름 키 소비처(드리프트·DS 분석·시계열 키·공개 API 클러스터 개수)는 남겼다 — 이력 연속성·대조 계약 판단 필요. ✅ 공개 API·/summary 클러스터 개수는 v2.743 LEFT-07 `clusterCountOf` 로, 드리프트·DS 분석·용량·비용·이전 준비도 판정은 v2.744 VC-02 로 고쳤다(시계열 키 temp_cluster·gpu_cluster 는 이력 연속성 때문에 그대로 — v2.744 LEFT-06 정정).
     · **라이선스·확장 조회 실패는 `[]` 가 아니라 null + 사유**(VC-06 — `corelicense/analyze.js vcListUnread` 한 벌) · 엣지가 보낸 licenses·solutions 는 배열·평범한 객체·아는 필드만(VC-07).
     · **스토리지 REST 자격증명 거부 판정은 `restCommon.isCredReject`·`credRejectError` 하나**(DEV-03): `/401/.test(e.message)` 는 호스트명(isi-401)·SID·본문 속 401 로 수집 전체를 끊었다.
       표지(authFailed·status 401)가 먼저이고, 표지 없는 옛 오류는 '인증 실패(401)' 접두만. 403 은 대상 아님. 리드가 `storage/areasCollector.js` 의 형제 누락도 고쳤다(`audit2742lead`).
@@ -5276,7 +5276,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       데이터율 초과는 null + `pctOver`) · 스토리지 합계 추이 시간 조각 + 양보(DB-01 — 결과 동일 대조) · `/overview/trend` 전력은 `?include=power` 일 때만(DB-02 — 없으면 `not-requested`).
     · Windows(INJPKG-01): start-portal.bat 이 `PORTAL_ENV_FILE` 로 자기가 call 하는 파일을 넘기고 토큰 저장이 그 파일에 `set "KEY=VAL"` CRLF 로 쓴다(cmd 메타문자 거부). 새 env `PORTAL_ENV_FILE`.
     · ⚠ 테스트 하니스: 자식 프로세스가 큰 응답을 `console.log` 직후 `process.exit` 하면 stdout 이 잘린다 — 결과는 파일로 넘길 것(audit2743a 가 이번에 그렇게 깨졌다).
-    · 남긴 것: INJPKG-02(Windows SYSTEM 예약 작업 ACL — 환경 없음) · `postNo503Retry` 본체 util/ 이동(엣지 워커 파일을 cvp·sanswitch 가 import) · 화면 표시 `folded`(GPU 게스트)·중앙 isidu 상태 `runDropped`·BmUsage HBA 각주.
+    · 남긴 것: INJPKG-02(Windows SYSTEM 예약 작업 ACL — 환경 없음 · v2.744 LEFT-05 는 README 안내만 더했다) · ✅ `postNo503Retry` 본체 util/ 이동(v2.744 LEFT-09) · ✅ 화면 표시 `folded`(GPU 게스트 — v2.744 LEFT-08①)·BmUsage HBA 각주(v2.744 LEFT-08②) · ✅ 중앙 isidu `runDropped` 는 v2.743 에 이미 `collectDropNote`(EDGE_DROP_TEXT)로 화면이 말한다(v2.744 LEFT-08③ 정정).
     · ⚠ 작업 방식: 첫 수정 실행의 12개 에이전트가 시작 직후 세션 한도에 걸렸다(작업 트리 깨끗 — 그대로 다시 돌렸다). CPU 4개라 워크플로당 동시 2 — 6개 워크플로로 나눴다.
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):

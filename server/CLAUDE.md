@@ -908,3 +908,17 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   (다음 주기·claim→ack 가 잇는다 — 커서를 전진하지 않으므로 유실은 없고, 혼잡 503 이면 한 주기 늦어진다).
 - **주문형 vCenter 로그인은 `vcenter/dsBrowse.js onDemandVcBlock`·`onDemandLogin` 을 지난다**(VC-03): 비활성·점검중·site·인증 정지면 로그인 0 + 409. 거부는 `noteVcAuthFailure`
   로 주 폴러와 같은 기록에 올린다(v2.732 B4-01 · v2.733 C3-01 규약의 형제 4경로).
+
+## 2026-10-16 v2.743 점검 — 관리자 판본 단일 판정·엣지 등록부 손상 503 — 되돌리지 말 것 (docs/AUDIT-2026-10-16b.md)
+
+(v2.744 LEFT-07 — 루트 CLAUDE.md 에만 있던 v2.743 서버 보안 규칙을 이 파일로 옮겼다. 서버 파일을 고칠 때 이 파일이 읽힌다.)
+
+- **'관리자 판본'(관리 IP·계정명·CONFIG_DIR 절대 경로·오류 원문·등록부 CSV) 판정은 `auth/demoGuest.js isAdminDetailUser` 하나**(AUTHZ-01): mock 데모 계정은 요청 문맥 역할이
+  admin 이라 `req.user?.role === 'admin'` 으로 가림을 정하면 데모 계정이 관리자 판본을 받는다. `addressMask.isAdminReq`·`scopeStatus.scopeDbStatus`·`scopeFilePaths`·
+  `redactPushStatus`·archScan `scopeArchPaths` 가 이 함수를 쓴다. **라우트에서 역할 문자열로 가림을 정하지 말 것** — v2.744 AUTHZ-01 이 남은 경로를 고치고 소스 스윕
+  (`audit2744e`)으로 직접 비교를 허용 목록과 대조한다. memoJson 의 extraKey 에 역할을 넣는 곳은 판정 결과(데모 포함)로 만든다(데모와 관리자가 같은 캐시 칸을 쓰지 않게).
+- **데모 계정은 `data.csv` 가 없다**(`auth/permissions.js userHasPermission`) · 실제 접속 GET 과 관리 조회는 `demoGuest.js READ_DENY`·`LIVE_GET_DENY` 로 막는다 —
+  새 관리 화면 접두를 만들면 READ_DENY 에도 넣을 것(v2.716 규약).
+- **엣지가 등록부를 읽어 '전량' 을 보내는 응답은 `registryLoadError()` 를 먼저 본다**(EDGE-01): 엣지 iDRAC 등록부(idrac.json)가 손상이면 `/api/collector/export` 가
+  503 `registryUnreadable` + Retry-After 60 + no-store 이고 중앙 puller 는 직전 스냅샷을 유지한다(`edgeReason` · 통신 지도 `pull-edge-registry`). 빈 목록을 보내면 중앙이
+  그 법인의 위임 서버·전력을 통째로 지운다. v2.744 EDGE-01·EDGE-03 이 같은 규칙을 fleet·파트 장애 push 와 자동 쓰기(설정 pull 적용·위임 스캔 등록)로 넓혔다.
