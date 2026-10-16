@@ -23,6 +23,7 @@ import { ssrfLookup } from './util/ssrfLookup.js';
 import { clampSetting } from './util/clampSetting.js'; // v2.607 TIM2607-03
 import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
+import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
 // 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
@@ -346,7 +347,7 @@ export function shouldSuppress(sentMap, key, now, windowMs) {
 const _sentAt = new Map(); // key -> lastSentTs (전역 억제 창)
 
 /*
- * v2.742(감사 TIMING-01 — 재현): **발송 대기열 — 한 번에 하나씩 보낸다.**
+ * v2.742(감사 TIMING-01 — 재현): **발송 대기열.**
  *   예전 엔진은 발생한 알림마다 notify() 를 await 없이 띄웠다. 데이터스토어 40개가 한 틱에 임계를 넘으면 SMTP 로그인이
  *   40개 동시에 나갔고, 메일 인증 정지(mail/service.js — v2.591 F4)는 첫 535 응답이 돌아온 **뒤에야** 세워져 나머지가 전부
  *   검사를 통과했다(재현: 잘못된 SMTP 비밀번호로 한 틱에 로그인 40회 — 계정 잠금 경로). 웹훅도 같은 순간 동시 40 POST 였다.
@@ -356,24 +357,72 @@ const _sentAt = new Map(); // key -> lastSentTs (전역 억제 창)
  *     (대기열 뒤에 줄 세우면 그 폴러가 남의 발송 시간만큼 멈춘다).
  *   · 상한(NOTIFY_QUEUE_MAX)을 넘으면 버리지 않고 'queue-full' 로 답한다 — 엔진은 그것을 실패로 보고 짧게 다시 시도하고,
  *     버린 개수는 alertStatus().queue 와 콘솔이 말한다(조용한 상한 금지).
+ *
+ * v2.743(감사 TIMING-02 — 재현): **줄은 채널마다 따로다.** v2.742 는 알림 하나를 통째로(채널까지) 한 줄에 세워, 응답 없는 웹훅
+ *   하나(시한 15초 × 재시도 1 ≈ 30초)가 **모든 알림·모든 채널**을 알림당 30초씩 늦췄다(재현: 알림 4건의 정상 Slack 도착
+ *   0.2·30.6·61.0·91.4초 — head-of-line). 직렬화가 필요한 것은 메일뿐이다(위 SMTP 로그인 — 메일 쪽 자동 발송 줄
+ *   `mail/service.js _autoChain` 도 계정 있는 SMTP 를 한 번에 하나씩 로그인시킨다. 메일 줄을 1 로 두는 것은 계정 없는 릴레이에서도
+ *   v2.742 의 '엔진 발송은 한 번에 하나' 를 지키기 위해서다). 웹훅 채널(slack·webhook·teams)은 채널마다 상한 있는 동시성으로
+ *   보낸다 — 한 채널이 막혀도 그 채널의 줄만 늦고, 다른 채널은 제때 나간다. 알림의 결과(채널별 문자열 배열 — 채널 순서 그대로)는
+ *   그 알림의 채널이 **모두** 끝난 뒤에 돌려준다(엔진의 재시도 판정은 예전처럼 한 알림 단위다).
  */
 export const NOTIFY_QUEUE_MAX = 1000;
-const _nq = [];
-let _nqDrain = null;
+/**
+ * 채널별 동시 발송 상한. 웹훅 채널은 webhookAgent 의 출처당 연결 수(connections: 4)와 같게 둔다 — 넘기면 undici 안에서 줄을 서며
+ * 요청 시한(15초)을 먹어 '응답 없음' 으로 끝난다. 메일은 1(위 머리말 — v2.742 TIMING-01).
+ */
+export const NOTIFY_LANE_LIMIT = Object.freeze({ slack: 4, webhook: 4, teams: 4, email: 1 });
+const CHANNEL_ORDER = Object.freeze(['slack', 'webhook', 'teams', 'email']);
+const _lanes = Object.fromEntries(CHANNEL_ORDER.map((n) => [n, { q: [], active: 0, done: 0 }]));
+const _nqInflight = new Set();   // 아직 채널이 다 끝나지 않은 알림(의 완료 프라미스)
 const _nqStats = { done: 0, dropped: 0, lastDropAt: 0, maxPending: 0 };
-async function drainNotifyQueue() {
-  while (_nq.length) {
-    const it = _nq.shift();
-    let res;
-    try { res = await notify(it.alert, it.cfg); } catch (e) { res = [`queue:err ${String(e?.message || e).slice(0, 120)}`]; }
-    _nqStats.done += 1;
-    try { it.resolve(res); } catch { /* */ }
+
+/** 알림 본문 한 줄(채널 공용). */
+function alertText(alert) {
+  return `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
+}
+async function postResult(name, url, payload) {
+  try { const r = await post(url, payload); return `${name}:${r.status}`; } catch (e) { return `${name}:err ${e.message}`; }
+}
+/**
+ * 켜진 채널마다 '보내는 일' 하나(채널 순서 그대로). 각 일은 던지지 않고 결과 문자열을 돌려준다.
+ * notify()(직접 호출)와 대기열이 같은 목록을 쓴다 — 채널 판정·본문이 두 벌로 갈라지지 않게.
+ */
+function channelJobs(alert, cfg) {
+  const ch = cfg?.channels || {};
+  const text = alertText(alert);
+  const jobs = [];
+  if (ch.slack?.enabled && ch.slack.url) jobs.push({ lane: 'slack', run: () => postResult('slack', ch.slack.url, { text }) });
+  if (ch.webhook?.enabled && ch.webhook.url) jobs.push({ lane: 'webhook', run: () => postResult('webhook', ch.webhook.url, { source: 'vmware-portal', ...alert, text, at: new Date().toISOString() }) });
+  if (ch.teams?.enabled && ch.teams.url) jobs.push({ lane: 'teams', run: () => postResult('teams', ch.teams.url, buildTeamsPayload(alert, text)) });
+  if (ch.email?.enabled) {
+    jobs.push({ lane: 'email', run: async () => {
+      // sendPortalMail 은 throw 하지 않는다(폴러가 메일 하나로 죽으면 안 된다) — 결과만 기록.
+      const r = await sendPortalMail({ kind: 'alert', subject: alertSubject(alert), html: alertHtml(alert), text });
+      return `email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`;
+    } });
+  }
+  return jobs;
+}
+function pumpLane(name) {
+  const L = _lanes[name];
+  const limit = NOTIFY_LANE_LIMIT[name] || 1;
+  while (L.active < limit && L.q.length) {
+    const job = L.q.shift();
+    L.active += 1;
+    Promise.resolve().then(job.run)
+      .catch((e) => `${name}:err ${String(e?.message || e).slice(0, 120)}`)
+      .then((r) => {
+        L.active -= 1; L.done += 1;
+        try { job.done(r); } catch { /* */ }
+        pumpLane(name);
+      });
   }
 }
-/** 대기열로 발송 — 결과(채널별 문자열 배열)는 실제로 보낸 뒤에 돌려준다. 던지지 않는다. */
+/** 대기열로 발송 — 결과(채널별 문자열 배열)는 그 알림의 채널이 모두 끝난 뒤에 돌려준다. 던지지 않는다. */
 export function enqueueNotify(alert, cfg) {
   return new Promise((resolve) => {
-    if (_nq.length >= NOTIFY_QUEUE_MAX) {
+    if (_nqInflight.size >= NOTIFY_QUEUE_MAX) {
       _nqStats.dropped += 1;
       const now = Date.now();
       if (now - _nqStats.lastDropAt > 60_000) console.warn(`[alerts] 발송 대기열이 가득 찼습니다(${NOTIFY_QUEUE_MAX}건) — '${String(alert?.key || '')}' 를 이번에는 보내지 않습니다(누적 ${_nqStats.dropped}건)`);
@@ -381,14 +430,35 @@ export function enqueueNotify(alert, cfg) {
       resolve(['queue-full']);
       return;
     }
-    _nq.push({ alert, cfg, resolve });
-    _nqStats.maxPending = Math.max(_nqStats.maxPending, _nq.length);
-    if (!_nqDrain) _nqDrain = drainNotifyQueue().finally(() => { _nqDrain = null; });
+    let jobs;
+    try {
+      const c = cfg || loadAlertConfig();
+      const windowMs = Math.max(0, c.suppressWindowMin ?? 5) * 60_000;
+      if (shouldSuppress(_sentAt, alert?.key, Date.now(), windowMs)) { resolve(['suppressed']); return; }
+      jobs = channelJobs(alert, c);
+    } catch (e) { resolve([`queue:err ${String(e?.message || e).slice(0, 120)}`]); return; }
+    if (!jobs.length) { resolve([]); return; }
+    const results = new Array(jobs.length);
+    let left = jobs.length;
+    const fin = new Promise((done) => {
+      jobs.forEach((j, i) => _lanes[j.lane].q.push({ run: j.run, done: (r) => { results[i] = r; if (--left === 0) done(); } }));
+    }).then(() => {
+      _nqInflight.delete(fin);
+      _nqStats.done += 1;
+      resolve(results);
+    });
+    _nqInflight.add(fin);
+    _nqStats.maxPending = Math.max(_nqStats.maxPending, _nqInflight.size);
+    for (const name of new Set(jobs.map((j) => j.lane))) pumpLane(name);
   });
 }
-export function notifyQueueStatus() { return { pending: _nq.length, sending: !!_nqDrain, ..._nqStats, max: NOTIFY_QUEUE_MAX }; }
+export function notifyQueueStatus() {
+  const lanes = {};
+  for (const n of CHANNEL_ORDER) lanes[n] = { waiting: _lanes[n].q.length, active: _lanes[n].active, done: _lanes[n].done, limit: NOTIFY_LANE_LIMIT[n] };
+  return { pending: _nqInflight.size, sending: CHANNEL_ORDER.some((n) => _lanes[n].active > 0), ..._nqStats, max: NOTIFY_QUEUE_MAX, lanes };
+}
 /** 테스트용 — 대기열이 빌 때까지 기다린다. */
-export async function _drainNotifyQueueForTest() { while (_nqDrain) await _nqDrain; }
+export async function _drainNotifyQueueForTest() { while (_nqInflight.size) await Promise.allSettled([..._nqInflight]); }
 
 /**
  * 발송 결과 판정(순수) — 'delivered'(한 채널이라도 받았다) · 'failed'(받은 채널 없이 오류가 있었다) · 'skipped'(정책으로 보내지
@@ -404,32 +474,24 @@ export function deliveryOutcome(res) {
   return 'skipped';
 }
 
+/**
+ * 즉시 발송(결과를 기다리는 호출부용). v2.743(TIMING-02): 채널끼리는 서로 기다리지 않는다 — 응답 없는 웹훅이 같은 알림의 다른
+ * 채널을 시한만큼 늦추지 않게. 결과 배열은 채널 순서(slack·webhook·teams·email) 그대로다.
+ */
 export async function notify(alert, cfg = loadAlertConfig()) {
-  const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
   const windowMs = Math.max(0, cfg.suppressWindowMin ?? 5) * 60_000;
   if (shouldSuppress(_sentAt, alert.key, Date.now(), windowMs)) return ['suppressed'];
-  const results = [];
-  if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
-    try { const r = await post(cfg.channels.slack.url, { text }); results.push(`slack:${r.status}`); } catch (e) { results.push(`slack:err ${e.message}`); }
-  }
-  if (cfg.channels.webhook?.enabled && cfg.channels.webhook.url) {
-    try { const r = await post(cfg.channels.webhook.url, { source: 'vmware-portal', ...alert, text, at: new Date().toISOString() }); results.push(`webhook:${r.status}`); } catch (e) { results.push(`webhook:err ${e.message}`); }
-  }
-  if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
-    try { const r = await post(cfg.channels.teams.url, buildTeamsPayload(alert, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
-  }
-  if (cfg.channels.email?.enabled) {
-    // sendPortalMail 은 throw 하지 않는다(폴러가 메일 하나로 죽으면 안 된다) — 결과만 기록.
-    const r = await sendPortalMail({ kind: 'alert', subject: alertSubject(alert), html: alertHtml(alert), text });
-    results.push(`email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`);
-  }
-  return results;
+  return Promise.all(channelJobs(alert, cfg).map((j) => j.run()));
 }
 
-/** 알림 메일 제목 — 심각도를 앞에 두어 받은 편지함에서 정렬·필터가 쉽게. */
+/**
+ * 알림 메일 제목 — 심각도를 앞에 두어 받은 편지함에서 정렬·필터가 쉽게.
+ * v2.743(감사 INJPKG-03): 제목의 제어문자(탭·CR·LF)를 공백으로 정리한 **뒤** 자른다 — 호스트명·VM 이름·원격 응답에 탭 하나가
+ *   섞이면 buildMime 이 던져 그 알림 메일 전체가 실패했다(Slack·웹훅은 나갔다). buildMime 의 throw 는 마지막 방어선으로 남는다.
+ */
 export function alertSubject(alert) {
   const sev = alert?.severity === 'critical' ? '[위험]' : alert?.severity === 'info' ? '[안내]' : '[경고]';
-  return `${sev} ${String(alert?.title || '알림').slice(0, 180)}`;
+  return `${sev} ${(headerSafeText(alert?.title) || '알림').slice(0, 180)}`;
 }
 
 /** 알림 메일 본문(HTML) — 메일 클라이언트 호환을 위해 인라인 스타일만 쓴다. */
@@ -506,14 +568,25 @@ function loadAlertState() {
   return _restored;
 }
 let _stateTimer = null;
+/*
+ * v2.743(감사 TIMING-02 — 재현): **대기 중인 발송은 '보냄' 으로 남기지 않는다.** 엔진은 대기열에 넣는 순간 lastNotified 를 지금으로
+ *   세우는데(같은 키를 다음 틱에 다시 넣지 않게), 그 값이 그대로 파일에 남아 대기 중에 재시작하면 **보내지 않은 알림이 쿨다운(60분)
+ *   동안 '보냄' 으로 복원**됐다(v2.742 줄 서기로 대기가 길어진 만큼 그 창도 커졌다). 발송 결과를 받기 전에는 파일에 직전 값(prev)을
+ *   쓰고, 결과를 받으면 다시 저장한다. key → { mark: 넣은 시각(= 그때의 lastNotified), prev: 그 전 값 }.
+ */
+const _pendingSend = new Map();
+function persistedNotified(key, ln) {
+  const p = _pendingSend.get(key);
+  return p && p.mark === ln ? p.prev : ln;
+}
 function writeAlertStateNow() {
   clearTimeout(_stateTimer); _stateTimer = null;
   const out = {};
   let n = 0;
-  for (const [k, st] of firing) { if (n++ >= STATE_MAX) break; out[k] = { since: st.since, lastNotified: st.lastNotified || 0 }; }
+  for (const [k, st] of firing) { if (n++ >= STATE_MAX) break; out[k] = { since: st.since, lastNotified: persistedNotified(k, st.lastNotified || 0) }; }
   for (const [k, r] of (_restored || new Map())) {
     if (n++ >= STATE_MAX) break;
-    if (!out[k]) out[k] = { since: r.since, lastNotified: r.lastNotified || 0, ...(Number.isFinite(r.resolvedAt) ? { resolvedAt: r.resolvedAt } : {}) };
+    if (!out[k]) out[k] = { since: r.since, lastNotified: persistedNotified(k, r.lastNotified || 0), ...(Number.isFinite(r.resolvedAt) ? { resolvedAt: r.resolvedAt } : {}) };
   }
   try { atomicWriteFileSync(STATE_FILE, JSON.stringify({ version: 1, at: Date.now(), firing: out })); } catch (e) { console.warn(`[alerts] 상태 저장 실패: ${e.message}`); }
 }
@@ -523,7 +596,7 @@ function saveAlertStateSoon() {
   _stateTimer.unref?.();
 }
 registerExitFlush('alerts-state', () => { if (_stateTimer) writeAlertStateNow(); });
-export function _resetAlertStateForTest() { firing.clear(); _restored = null; clearTimeout(_stateTimer); _stateTimer = null; }
+export function _resetAlertStateForTest() { firing.clear(); _restored = null; _pendingSend.clear(); clearTimeout(_stateTimer); _stateTimer = null; }
 export { refreshState as _refreshStateForTest, writeAlertStateNow as _writeAlertStateForTest };
 const recent = [];          // recent notifications (in-memory, newest first)
 let timer = null;
@@ -625,14 +698,21 @@ async function refreshState(cfg, sendEnabled) {
     st.alert = a;
     // v2.742(TIMING-01): 대기열로 보낸다(한 번에 하나). 보내는 중인 키는 다시 넣지 않는다.
     if (sendEnabled && !st.sending && now - (st.lastNotified || 0) >= cooldownMs) {
+      const sentMark = now;
+      // v2.743(TIMING-02): 결과를 받기 전에는 파일에 직전 값을 쓴다(persistedNotified) — 대기 중 재시작이 '보냄' 으로 복원되지 않게.
+      _pendingSend.set(a.key, { mark: sentMark, prev: st.lastNotified || 0 });
       st.lastNotified = now;
       st.sending = true;
       changed = true;
-      const sentMark = now;
       enqueueNotify(a, cfg).then((res) => {
         pushRecent({ at: new Date().toISOString(), ...a, channels: res });
-        if (noteSendOutcome(a.key, sentMark, res, cfg)) saveAlertStateSoon();
-      }).catch(() => {}).finally(() => { st.sending = false; });
+        noteSendOutcome(a.key, sentMark, res, cfg);
+      }).catch(() => {}).finally(() => {
+        st.sending = false;
+        const p = _pendingSend.get(a.key);
+        if (p && p.mark === sentMark) _pendingSend.delete(a.key);
+        saveAlertStateSoon(); // 결과를 받은 값(또는 재시도 예약)을 남긴다 — 대기 중에 쓴 직전 값을 덮는다
+      });
     }
   }
   // resolve

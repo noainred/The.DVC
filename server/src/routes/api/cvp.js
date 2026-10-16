@@ -751,7 +751,7 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
   const skippedNonDemo = edge.length - edgeRun.length;
   for (const s of edgeRun) { requestCvpCollect(s.id, s.agent); requested++; }
   logAudit({ user: req.user?.username, action: 'CVP 지금 수집', target: only || '(전체)', detail: `중앙 즉시 ${busy ? 0 : direct.length}대${busy ? '(진행 중이라 건너뜀)' : ''} · 엣지 요청 ${requested}대${skippedNonDemo ? ` · 데모 계정이라 엣지 요청 제외 ${skippedNonDemo}대` : ''}` });
-  res.json({ ok: true, direct: busy ? 0 : direct.length, requested, ...(skippedNonDemo ? { skippedNonDemo } : {}), ...(busy ? { busy: true, reason: '이전 수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' } : {}) });
+  res.json({ ok: true, direct: busy ? 0 : direct.length, requested, ...(skippedNonDemo ? { skippedNonDemo } : {}), ...(busy ? { busy: true, directBusy: direct.length, reason: '이전 수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' } : {}) }); // v2.743(감사 WEB-03): busy 면 시작하지 않은 중앙 직접 대수(directBusy) — direct 는 구버전 화면 호환으로 0
 });
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────

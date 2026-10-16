@@ -4,7 +4,7 @@
  * 조회는 차트용 시계열과 '증감 클릭' 상세(생성/삭제 VM + 클러스터·호스트·데이터스토어)를 제공.
  */
 
-import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs } from './diff.js';
+import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason } from './diff.js';
 import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, readDsChangesWindow, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration } from './db.js';
 
 /**
@@ -33,13 +33,6 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     if (!arr) byVc.set(k, arr = []);
     arr.push(v);
   }
-  // 추적 대상 vCenter: 스냅샷의 vcenters 목록(수집 실패로 인벤토리가 비어도 0 대로 기록하면
-  // 차트가 '전멸'로 보이므로, 인벤토리를 서빙하지 못하는 상태(unreachable + VM 0)는 건너뛴다).
-  const targets = (snap.vcenters || [])
-    .map((vc) => ({ id: String(vc.id || ''), status: vc.status }))
-    .filter((vc) => vc.id && !(vc.status === 'unreachable' && !(byVc.get(vc.id) || []).length)
-      && !(vc.status === 'pending' && !(byVc.get(vc.id) || []).length));
-
   // 데이터스토어도 같은 방식으로 vCenter별 1회 그룹핑(v2.348).
   const dsByVc = new Map();
   for (const d of snap.datastores || []) {
@@ -47,6 +40,21 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     let arr = dsByVc.get(k);
     if (!arr) dsByVc.set(k, arr = []);
     arr.push(d);
+  }
+  // 추적 대상 vCenter: 스냅샷의 vcenters 목록(수집 실패로 인벤토리가 비어도 0 대로 기록하면
+  // 차트가 '전멸'로 보이므로, 인벤토리를 서빙하지 못하는 상태는 건너뛴다).
+  // ⚠ v2.743(감사 VC-01 — 재현): 예전에는 unreachable·pending + VM 0 만 걸렀다 — **비활성**(store.js 가 VM·DS 없이 status 만 넣는다)과
+  //   **캐시 없는 점검중**(재시작 직후 VM 0)이 diff 로 들어가 직전 로스터 전부가 '삭제' 로 적재됐고 skipped 도 0 이었다(다시 켜면 기준선이 되어
+  //   그 사이 생성분도 '신규' 로 잡히지 않았다). 판정은 diff.js inventoryUnreadReason 한 벌(VM 생성·삭제 이력의 이름 대조와 같은 판정)이고,
+  //   건너뛴 vCenter 는 VM·데이터스토어 diff 를 **둘 다** 하지 않는다(빈 DS 목록을 diff 하면 DS 전부가 '해제' 로 적재된다). 로스터는 지우지 않는다(아래).
+  const targets = [];
+  const skippedVcenters = [];
+  for (const vc of snap.vcenters || []) {
+    const id = String(vc?.id || '');
+    if (!id) continue;
+    const why = inventoryUnreadReason(vc, (byVc.get(id) || []).length);
+    if (why) skippedVcenters.push({ id, status: vc.status || '', reason: why });
+    else targets.push({ id, status: vc.status });
   }
 
   const perVc = [];
@@ -57,7 +65,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     const ds = diffDatastores(dsByVc.get(vc.id) || [], dsPrev);
     perVc.push({ vcenterId: vc.id, ...d, ds });
   }
-  if (!perVc.length) return { ok: false, reason: '추적할 vCenter 가 없습니다(수집 대기 또는 전부 unreachable).' };
+  if (!perVc.length) return { ok: false, reason: '추적할 vCenter 가 없습니다(첫 수집 중·연결 실패·비활성·점검중이라 인벤토리를 읽은 vCenter 가 없음).', ...(skippedVcenters.length ? { skippedCount: skippedVcenters.length } : {}) };
 
   // 등록 해제(스냅샷 vcenters 목록에서 아예 사라진) vCenter 만 로스터를 정리한다.
   // liveIds(이번에 실제 처리한 vc)로 판단하면, 일시 unreachable(+인벤토리 0)로 targets 에서
@@ -67,9 +75,12 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   for (const id of await rosterVcenters()) if (!knownIds.has(id)) await dropRoster(id);
 
   const totalRow = totalsOf(perVc);
-  // v2.594: 이번 슬롯에서 빠진 vCenter(수집 실패·첫 수집 중이라 인벤토리 0)를 결과에 밝힌다 — 합계가 부분 합이다.
-  const skippedVcenters = (snap.vcenters || []).filter((vc) => vc.id && !targets.some((t) => t.id === String(vc.id))).map((vc) => ({ id: String(vc.id), status: vc.status || '' }));
+  // v2.594: 이번 슬롯에서 빠진 vCenter(수집 실패·첫 수집 중·v2.743 비활성·캐시 없는 점검중 — 인벤토리를 읽지 못함)를 결과에 밝힌다 —
+  //   합계가 부분 합이다(감소가 실제 삭제가 아닐 수 있다). 사유는 항목마다(reason) + 사유별 개수(skippedByReason — 비활성은 'disabled' 로 따로).
+  //   DB 의 skipped 열(차트 '부분 합' 표지)은 사유와 무관하게 빠진 vCenter 수다 — 비활성 vCenter 도 합계에 들어 있지 않다.
   totalRow.skipped = skippedVcenters.length;
+  const skippedByReason = {};
+  for (const x of skippedVcenters) skippedByReason[x.reason] = (skippedByReason[x.reason] || 0) + 1;
   const r = await commitSnapshot({ slot, ts, perVc, totalRow });
   if (!r.ok) return r;
   return {
@@ -81,7 +92,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
     ...(totalRow.dsUsedUnknown ? { dsUsedUnknown: totalRow.dsUsedUnknown } : {}),
     baseline: totalRow.baseline,
-    ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length } : {}),
+    ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length, skippedByReason } : {}),
   };
 }
 

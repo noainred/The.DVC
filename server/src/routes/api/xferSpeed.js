@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { loadCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { cmpVersion } from '../../util/cmpVersion.js';
@@ -145,7 +146,7 @@ async function computeMain({ s, cols, now }) {
 export function registerXferSpeed(api) {
 
 /** 메인 — 법인별 최신값·평소 대비·24시간 스파크라인·KPI·회선 사용 산수·최근 실패. */
-api.get('/tools/xfer-speed', adminOnly, fullScopeOnly, async (_req, res) => {
+api.get('/tools/xfer-speed', adminOnly, fullScopeOnly, async (req, res) => {
   const now = Date.now();
   const s = loadXferSpeedSettings();
   const cols = loadCollectors();
@@ -164,7 +165,7 @@ api.get('/tools/xfer-speed', adminOnly, fullScopeOnly, async (_req, res) => {
     baseline: { days: BASELINE_DAYS, minSamples: MIN_BASELINE }, offsetMin: DAY_OFFSET_MIN,
     recentTruncated: m.recentTruncated,
     computedAt: m.computedAt, memoTtlMs: MEMO_TTL_MS,
-    db: await dbStatus(),
+    db: scopeDbStatus(await dbStatus(), req.user),   // v2.743 AUTHZ-01: DB 경로는 관리자 상세(데모 계정 제외)에게만
   });
 });
 

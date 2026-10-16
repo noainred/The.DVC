@@ -187,6 +187,8 @@ async function runCheckInner(test, host) {
       case 'ssh': return banner(host, port, /^SSH-2\.0-|^SSH-1\.99-/, 'SSH', started, test);
       case 'ldap': {
         const r = await ldapBind(host, port, 5000);
+        // v2.743 DEV-01: 연결 종료 통지(ExtendedResponse)는 bind 응답이 아니다 — 그 사실을 문구에 남긴다.
+        if (r.op === 'extended') return bad(`서버가 연결 종료를 통지했습니다 (resultCode ${r.code})`, started);
         return r.ok ? ok(`bind 성공 (resultCode ${r.code})`, Date.now() - started)
           : bad(`bind 실패 (resultCode ${r.code})`, started);
       }
@@ -380,10 +382,75 @@ function ntpOffset(server, timeoutMs) {
 }
 
 /**
+ * LDAP 응답 하나를 모으는 상한 — BindResponse 는 보통 수십 바이트다. 이보다 크다고 선언하면 기다리지 않고 실패로 본다.
+ * (v2.743 DEV-01) 상한이 없으면 길이 칸이 큰 값을 선언한 응답이 소켓 시한까지 버퍼를 키운다.
+ */
+const LDAP_RESPONSE_MAX = 64 * 1024;
+
+/**
+ * (순수) BER 머리(tag + 길이) 하나를 읽는다 — v2.743 DEV-01.
+ * 길이는 **단형**(0x00~0x7f — 그 값이 곧 길이)과 **장형**(0x81~0x84 — 낮은 7비트가 뒤따르는 길이 바이트 수)이 있다.
+ * 0x80(부정 길이)은 LDAP 이 금지한다(RFC 4511 §5.1 — 확정 길이만) → 형식 오류. 5바이트 이상 길이도 형식 오류로 본다.
+ * @returns {{need:true}|{bad:string}|{tag:number, start:number, end:number}}  start/end = 내용의 [시작, 끝)
+ */
+export function berHeader(buf, off) {
+  if (buf.length < off + 2) return { need: true };
+  const tag = buf[off];
+  const l0 = buf[off + 1];
+  if (l0 < 0x80) return { tag, start: off + 2, end: off + 2 + l0 };
+  if (l0 === 0x80) return { bad: '부정 길이(0x80) — LDAP 은 확정 길이만 쓴다' };
+  const n = l0 & 0x7f;
+  if (n > 4) return { bad: `길이 칸 ${n}바이트 — 지원하지 않는 길이` };
+  if (buf.length < off + 2 + n) return { need: true };
+  let len = 0;
+  for (let i = 0; i < n; i++) len = len * 256 + buf[off + 2 + i];
+  return { tag, start: off + 2 + n, end: off + 2 + n + len };
+}
+
+/**
+ * (순수) LDAP 메시지 하나(BindResponse)에서 resultCode 를 읽는다 — v2.743 DEV-01.
+ *   LDAPMessage ::= SEQUENCE(0x30) { messageID INTEGER(0x02), protocolOp [APPLICATION n], … }
+ *   BindResponse = [APPLICATION 1](0x61) { resultCode ENUMERATED(0x0a), matchedDN, diagnosticMessage, … }
+ * ⚠⚠ 예전 판정은 `indexOf(0x61)` 위치에서 **4바이트 뒤**를 resultCode 로 읽었다. 그것은 길이가 **단형일 때만** 맞다 —
+ *   AD 는 길이를 **장형(0x84 + 4바이트)** 으로 보내므로 그 자리는 길이 셋째 바이트(늘 0x00)였고, resultCode 53·8 같은
+ *   실패가 'bind 성공 (resultCode 0)' 으로 보고됐다. 이제 길이를 해석해 정확한 위치에서 읽는다.
+ * 같은 이유로 ExtendedResponse(0x78 — 서버가 끊기 전에 보내는 연결 종료 통지)도 LDAPResult 를 먼저 싣는다 — 그 resultCode 를 읽되
+ *   bind 응답이 아니라고 밝힌다(op 'extended').
+ * @returns {{need:true}|{bad:string}|{op:'bind'|'extended', code:number, msgId:number|null}}
+ */
+export function parseLdapResponse(buf) {
+  const msg = berHeader(buf, 0);
+  if (msg.need || msg.bad) return msg;
+  if (msg.tag !== 0x30) return { bad: `LDAPMessage(0x30)가 아님 (0x${msg.tag.toString(16)})` };
+  if (msg.end - msg.start > LDAP_RESPONSE_MAX) return { bad: `응답 길이 ${msg.end - msg.start}바이트 — 상한 초과` };
+  if (buf.length < msg.end) return { need: true };
+  const id = berHeader(buf, msg.start);
+  if (id.need || id.end > msg.end) return { bad: '응답이 messageID 앞에서 끝났다' };
+  if (id.bad) return id;
+  if (id.tag !== 0x02) return { bad: `messageID(INTEGER) 자리에 0x${id.tag.toString(16)}` };
+  let msgId = null;
+  if (id.end - id.start >= 1 && id.end - id.start <= 4) { msgId = 0; for (let i = id.start; i < id.end; i++) msgId = msgId * 256 + buf[i]; }
+  const op = berHeader(buf, id.end);
+  if (op.need || op.end > msg.end) return { bad: '응답이 protocolOp 앞에서 끝났다' };
+  if (op.bad) return op;
+  if (op.tag !== 0x61 && op.tag !== 0x78) return { bad: `BindResponse(0x61)가 아님 (0x${op.tag.toString(16)})` };
+  const rc = berHeader(buf, op.start);
+  if (rc.need || rc.end > op.end) return { bad: '응답이 resultCode 앞에서 끝났다' };
+  if (rc.bad) return rc;
+  const n = rc.end - rc.start;
+  if (rc.tag !== 0x0a || n < 1 || n > 4) return { bad: `resultCode(ENUMERATED) 자리에 0x${rc.tag.toString(16)}/${n}바이트` };
+  let code = 0;
+  for (let i = rc.start; i < rc.end; i++) code = code * 256 + buf[i];
+  return { op: op.tag === 0x61 ? 'bind' : 'extended', code, msgId };
+}
+
+/**
  * LDAP 익명 simple bind — BER 최소 인코딩.
  * SEQ{ msgID INT 1, [APP 0] BindRequest{ version INT 3, name "", [CTX 0] "" } }
  * 응답의 resultCode 0(success) 또는 49(invalidCredentials)/48(inappropriateAuth)면 서버가
  * 정상 응답한 것으로 본다(익명 bind 금지 서버도 '살아있음'으로 판정).
+ * v2.743 DEV-01: 응답은 **여러 조각으로 올 수 있다** — 메시지 길이만큼 모일 때까지 모으고(`parseLdapResponse`),
+ *   모이기 전에 연결이 끝나면 '응답이 잘렸다' 로 실패한다(앞부분만 보고 판정하지 않는다).
  */
 function ldapBind(host, port, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -399,20 +466,27 @@ function ldapBind(host, port, timeoutMs) {
     // done 가드 — data 로 resolve 하면 destroy→close 가 뒤따르므로 close 핸들러가 재차 reject 하지
     // 않게 막는다.
     let done = false;
+    let got = Buffer.alloc(0);
     const settle = (fn, v) => { if (done) return; done = true; try { sock.destroy(); } catch { /* noop */ } fn(v); };
     const fail = (e) => settle(reject, e);
     sock.once('connect', () => sock.write(pdu));
-    sock.once('data', (res) => {
-      // 0x30(SEQ) … 0x61(BindResponse) 0xLL 0x0a 0x01 <resultCode>
-      const i = res.indexOf(0x61);
-      const code = (i >= 0 && res.length > i + 4) ? res[i + 4] : -1;
-      settle(resolve, { ok: [0, 48, 49].includes(code), code });
+    sock.on('data', (chunk) => {
+      if (done) return;
+      got = got.length ? Buffer.concat([got, chunk]) : chunk;
+      const r = parseLdapResponse(got);
+      if (r.need) {
+        if (got.length > LDAP_RESPONSE_MAX + 16) fail(new Error('LDAP 응답 과대(상한 초과)'));
+        return;   // 메시지 길이만큼 모일 때까지 기다린다(시한·연결 종료가 결말짓는다)
+      }
+      if (r.bad) { fail(new Error(`LDAP 응답 형식 오류(${r.bad})`)); return; }
+      settle(resolve, { ok: r.op === 'bind' && [0, 48, 49].includes(r.code), code: r.code, op: r.op });
     });
-    sock.once('timeout', () => fail(new Error('LDAP 타임아웃')));
+    sock.once('timeout', () => fail(new Error(got.length ? `LDAP 타임아웃(응답 ${got.length}바이트에서 멈춤)` : 'LDAP 타임아웃')));
     sock.once('error', fail);
     // ⚠ CRITICAL 회귀 방지(v2.279): 서버가 데이터 없이 정상 종료(FIN)하면 과거엔 close 핸들러가
     // 없어(data/timeout/error 만 존재) Promise 가 영구 미해결 → 폴러 전체가 멈췄다. FIN 도 결말짓는다.
-    sock.once('close', () => fail(new Error('LDAP 무응답(연결 종료)')));
+    // v2.743 DEV-01: 응답 일부만 받고 끝나면 '잘린 응답' 이다 — 앞부분으로 판정하지 않는다.
+    sock.once('close', () => fail(new Error(got.length ? `LDAP 응답이 잘렸습니다(${got.length}바이트 수신 뒤 연결 종료)` : 'LDAP 무응답(연결 종료)')));
   });
 }
 

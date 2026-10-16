@@ -503,15 +503,39 @@ export function seriesSourceNote(resp) {
 
 // ── 지금 수집 ────────────────────────────────────────────────────────────────
 
-/** POST /collect 응답 → 문장(중앙 즉시분과 엣지 요청분을 나눠 말한다). */
+/** 서버 busy 응답에 사유가 없을 때 쓰는 기본 문구(routes/api/cvp.js 와 같은 뜻). */
+const COLLECT_BUSY_REASON = '이전 수집이 진행 중입니다 — 끝난 뒤 다시 누르세요';
+
+/**
+ * POST /collect 응답 → 문장(중앙 즉시분과 엣지 요청분을 나눠 말한다).
+ * v2.743(감사 WEB-03): ① 폴러가 수집 중이면 서버는 `{direct:0, busy:true, reason}` 을 준다 — 예전에는 busy 를 읽지 않아
+ *   '중앙 직접 수집 대상은 없습니다' 라는 **틀린 문구**를 초록 배너로 보였다. 이제 '시작하지 않았다' 와 그 사유를 말한다.
+ *   ② 서버는 수집을 **시작만** 하고 기다리지 않는다 — '지금 수집했습니다' 가 아니라 '수집을 시작했습니다'.
+ *   ③ 데모 계정이라 요청하지 않은 엣지 위임 대수(skippedNonDemo)를 밝힌다(조용히 빼지 않는다).
+ */
 export function collectSummary(r) {
   if (!r || typeof r !== 'object') return '응답을 읽지 못했습니다.';
+  if (r.ok === false) return `수집 요청이 거부됐습니다${typeof r.reason === 'string' && r.reason ? ` — ${r.reason.slice(0, 300)}` : ''}.`;
   const d = numOrNull(r.direct); const q = numOrNull(r.requested);
+  const skipped = numOrNull(r.skippedNonDemo);
   const parts = [];
-  if (d != null) parts.push(d > 0 ? `중앙 직접 ${d}대는 지금 수집했습니다` : '중앙 직접 수집 대상은 없습니다');
+  if (r.busy === true) {
+    const why = typeof r.reason === 'string' && r.reason ? r.reason.slice(0, 300) : COLLECT_BUSY_REASON;
+    const n = numOrNull(r.directBusy);
+    parts.push(`${n != null && n > 0 ? `중앙 직접 ${n}대는` : '중앙 직접 수집은'} **시작하지 않았습니다** — ${why}`);
+  } else if (d != null) parts.push(d > 0 ? `중앙 직접 ${d}대는 수집을 시작했습니다(끝나면 목록에 반영됩니다)` : '중앙 직접 수집 대상은 없습니다');
   if (q != null) parts.push(q > 0 ? `엣지 위임 ${q}대는 재수집을 **요청만** 등록했습니다(엣지가 설정을 받아 수집한 뒤 반영됩니다)` : '엣지 위임 대상은 없습니다');
+  if (skipped != null && skipped > 0) parts.push(`데모 계정이라 사람이 등록한 엣지 위임 ${skipped}대는 요청하지 않았습니다`);
   if (!parts.length) return '수집 요청을 보냈습니다.';
   return `${parts.join(' · ')}.`;
+}
+
+/** POST /collect 응답 → 배너 { ok, tone:'ok'|'warn'|'bad', text } — busy 는 주의(성공도 실패도 아니다), 거부는 실패. */
+export function collectResult(r) {
+  const text = collectSummary(r);
+  if (!r || typeof r !== 'object' || r.ok === false) return { ok: false, tone: 'bad', text };
+  if (r.busy === true) return { ok: false, tone: 'warn', text };
+  return { ok: true, tone: 'ok', text };
 }
 
 // ── 등록·설정 폼 ─────────────────────────────────────────────────────────────

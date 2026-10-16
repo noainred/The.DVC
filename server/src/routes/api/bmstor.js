@@ -13,6 +13,7 @@ import { bmHistoryRange, bmHistoryDbStatus } from '../../bmstor/historyDb.js';
 import { historyPeriodOf, seriesFromRows, HISTORY_PERIODS } from '../../bmstor/history.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { isAdminReq, maskDeviceAddress, scrubHosts } from '../../auth/addressMask.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -22,12 +23,18 @@ const fullScopeOnly = fullScopeOnlyWith('베어메탈 스토리지는 vCenter �
 
 export function registerBmStorage(api) {
   // 현황 — 서버 목록(비밀 redact) + 최신 수집을 합산(서버/그룹/전체)해 반환. 엣지 콤보용 목록 포함.
-  api.get('/tools/bm-storage', adminOnly, fullScopeOnly, (_req, res) => {
+  api.get('/tools/bm-storage', adminOnly, fullScopeOnly, (req, res) => {
     const servers = listBmServers();
     const { total, groups, perServer } = aggregate(servers, getBmLatest());
+    // v2.743 AUTHZ-01: 관리 주소·SSH 계정은 관리자 상세(데모 계정 제외)에게만 — 형제 스토리지·SAN 목록과 같은 maskDeviceAddress.
+    //   오류 문구 속 주소도 같은 목록으로 가린다(v2.599 '형제 경로가 우회로' 규약). 가린 사실은 addressHidden.
+    const full = isAdminReq(req);
+    const hosts = full ? [] : servers.map((x) => x?.host).filter(Boolean);
+    const rows = full ? perServer : perServer.map((r) => ({ ...maskDeviceAddress(r), error: r.error ? scrubHosts(r.error, hosts) : r.error }));
     res.json({
-      ok: true, total, groups, servers: perServer,
-      config: servers, // 편집 폼용 원본(마운트 목록 포함, 비밀번호는 hasPassword 만)
+      ok: true, total, groups, servers: rows,
+      config: full ? servers : servers.map(maskDeviceAddress), // 편집 폼용 원본(마운트 목록 포함, 비밀번호는 hasPassword 만)
+      ...(full ? {} : { addressHidden: true }),
       settings: getBmSettings(), status: bmPollerStatus(),
       agents: listCollectors().map((c) => c.id), // 위임 가능한 엣지(수집 서버) 이름 목록
     });

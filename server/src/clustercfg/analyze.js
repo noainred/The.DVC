@@ -42,6 +42,21 @@ export function clusterGroupKeyOf(h, mode) {
   return mode?.get(h.vcenterId) === true ? refKeyOf(h.vcenterId, refOf(h)) : keyOf(h.vcenterId, h.cluster);
 }
 
+/**
+ * v2.743(감사 LEFT-07): 클러스터 개수 — 클러스터에 속한 호스트의 묶음 키(clusterGroupKeyOf) 수.
+ *   예전 /summary·공개 API 는 `${vcenterId}/${cluster}` 이름으로 세서 다른 데이터센터의 같은 이름 클러스터를 하나로 합치고,
+ *   수집기가 독립 호스트에 채우는 'standalone' 을 클러스터 하나로 셌다. 독립·소속 미상 호스트는 세지 않는다.
+ *   ⚠ 내부 /summary 와 공개 API /inventory/summary 가 이 함수 하나를 쓴다(대조 계약 — 한쪽만 바꾸면 publicApi2562 가 갈라진다).
+ *   호스트가 하나도 없는 빈 클러스터는 예전처럼 세지 않는다(호스트에서 센다).
+ */
+export function clusterCountOf(hosts) {
+  const hl = Array.isArray(hosts) ? hosts : [];
+  const mode = clusterRefMode(hl);
+  const keys = new Set();
+  for (const h of hl) { const k = clusterGroupKeyOf(h, mode); if (k) keys.add(k); }
+  return keys.size;
+}
+
 export function analyzeClusters(vcenters, hosts, opt = {}) {
   const vcs = Array.isArray(vcenters) ? vcenters : [];
   const hl = Array.isArray(hosts) ? hosts : [];

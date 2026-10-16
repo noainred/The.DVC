@@ -49,12 +49,15 @@ export function analyzeLifecycle(rows, { days = 7, now = Date.now(), vcName = ne
     if (ADD_KINDS.has(k) && (!firstAdd.has(key) || r.ts < firstAdd.get(key))) firstAdd.set(key, r.ts);
     if (k === 'remove' && (!lastRemove.has(key) || r.ts > lastRemove.get(key))) lastRemove.set(key, r.ts);
     // 지금 인벤토리에 있는가 — 이름으로만 안다(동명 VM 은 구분하지 못한다). liveNames 가 없으면 모른다(null).
+    // v2.743(감사 VC-01): 모르는 이유를 함께 싣는다 — 'initial'(인벤토리 자체를 모른다 — 첫 수집 중) / 'unread'(그 vCenter 의 VM 목록을
+    //   지금 읽지 못했다 — 비활성·점검중·연결 실패. liveNames 에 그 vCenter 가 없다). 화면이 '첫 수집 중' 하나로 덮지 않게.
     const live = liveNames?.get(r.vcenterId);
     const existsNow = live ? live.has(r.entity) : null;
+    const existsWhy = existsNow != null ? undefined : (liveNames ? 'unread' : 'initial');
     events.push({
       ts: r.ts, vcenterId: r.vcenterId, vcenterName: vcName.get(r.vcenterId) || r.vcenterId, type: r.type, kind: k,
       vm: r.entity || '', user: r.user || '', host: d?.host ?? null, ds: d?.ds ?? null, source: d?.source ?? null,
-      oldName: d?.oldName ?? null, newName: d?.newName ?? null, existsNow, hasDetail: !!d,
+      oldName: d?.oldName ?? null, newName: d?.newName ?? null, existsNow, ...(existsWhy ? { existsWhy } : {}), hasDetail: !!d,
     });
   }
   // 단명 VM — 이 기간 안에 추가된 뒤 삭제된 VM(같은 vCenter·같은 이름). 테스트·임시 VM 의 흔적이다.

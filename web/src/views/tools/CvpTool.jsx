@@ -24,7 +24,7 @@ import { hostText, addressHiddenNote } from './addressHiddenText.js';
 import {
   agoText, spanText, countText, bpsText, pctText, kpiItems, serverState, authStopText, isAuthStopped,
   missingFootnotes, itemLabel, CANDIDATE_NOTE, deviceCountLabel, partsCell, bgpCell, portsCell, streamingText, filterDevices,
-  partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
+  partState, partCounts, seriesGeometry, seriesSourceNote, collectResult,
   EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
   isTruncated, canCollect, listNotes, totalsFromDevices, unconfirmedNote, filterKpiNote, partsMissingText, telemetryText,
   edgeReportView, serverMetaText, dbStatsText, DEVICE_CHIPS, chipCounts, filterByChip, devicesCsvPath, CSV_NOTE,
@@ -101,7 +101,8 @@ export default function CvpTool() {
 
   const collectNow = async () => {
     setBusy(true); setMsg(null); setCollectErr(null);
-    try { const r = await postJson('/tools/cvp/collect', {}); setMsg({ ok: true, text: collectSummary(r) }); await load(); }
+    // v2.743(WEB-03): busy(이전 수집 진행 중)는 초록 성공이 아니라 주의 — 판정·문구는 cvpText.collectResult 하나.
+    try { const r = await postJson('/tools/cvp/collect', {}); setMsg(collectResult(r)); await load(); }
     catch (e) {
       // 403 은 '오류' 가 아니라 정책이다 — ErrorBox 가 AccessDenied 로 바꾼다(v2.398). 그 밖의 실패만 빨간 배너.
       if (e && e.status === 403) setCollectErr(e);
@@ -167,7 +168,7 @@ export default function CvpTool() {
       </div>
 
       {error && <div className="banner">새로고침에 실패했습니다 — 아래는 직전 값입니다({String(error.message || error)}).</div>}
-      {msg && <div className="banner" style={{ borderColor: msg.ok ? 'var(--green)' : 'var(--red)' }}><BoldText text={msg.text} /></div>}
+      {msg && <div className="banner" style={{ borderColor: msg.tone === 'warn' ? 'var(--amber)' : msg.ok ? 'var(--green)' : 'var(--red)' }}><BoldText text={msg.text} /></div>}
       {collectErr && <ErrorBox error={collectErr} />}
       {listNotes(data).map((t, i) => <div key={`note-${i}`} className="banner"><BoldText text={t} /></div>)}
       {data.enabled === false && (

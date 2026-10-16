@@ -25,7 +25,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken } from '../../auth/addressMask.js';
+import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken, isAdminReq } from '../../auth/addressMask.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
@@ -184,7 +184,7 @@ export function registerBmUsage(api) {
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
 api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = isAdminReq(req);
   try {
     const [tg, latest, db] = await Promise.all([
       currentTargets(),
@@ -277,7 +277,7 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   try {
     const tg = await currentTargets();
-    const isAdmin = req.user?.role === 'admin';
+    const isAdmin = isAdminReq(req);
     // v2.601 AUTHZ-2601-01: 비-admin 은 주소인 key 를 토큰으로 받는다 — 토큰으로도 같은 대상을 찾는다.
     const realKey = tg.targets.some((x) => x.key === key) ? key
       : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
@@ -349,7 +349,7 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   // v2.600 AUTHZ-2600-08: 작업 로그 이벤트의 host(iDRAC·OS 주소)도 비-admin 에는 가린다.
   // v2.601 AUTHZ-2601-01: deviceId·name 이 주소인 이벤트(IP 로 등록한 iDRAC)와 스킴 붙은 host 의 오류 문구도.
   //   ⚠ 범위 절단은 **원문 deviceId** 로 먼저 하고 가림은 그 뒤에 한다(가린 뒤에 대조하면 전부 빠진다).
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = isAdminReq(req);
   let tg = null;
   try { tg = await currentTargets(); } catch { tg = null; }
   const hosts = isAdmin ? [] : await bmAddressHosts(tg);
@@ -413,7 +413,7 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
      * ⚠ **등록부를 기준으로 줄을 만든다** — 보관분만 나열하면 '한 번도 당기지 않은 엣지' 가
      *   목록에서 사라져 화면이 '전부 봤다' 는 거짓을 말한다(v2.548 `classifyEdges` 와 같은 판단).
      */
-    const isAdmin = req.user?.role === 'admin';
+    const isAdmin = isAdminReq(req);
     const edgeUrls = cols.map((c) => t(c.url)).filter(Boolean);
     // v2.601 AUTHZ-2601-01: 엣지 보관분의 대상·최신값·정지 목록도 식별자가 주소인 행을 가린다.
     const regHosts = isAdmin ? [] : await bmAddressHosts(null);

@@ -335,7 +335,7 @@ async function runArchScanOnce() {
   const scan = scanArch(inputs);
   return { ok: true, at: Date.now(), version: safe(() => currentVersion(), ''), tookMs: Date.now() - t0, ...scan, vocab: { codes: ARCH_CODES, states: ARCH_STATES } };
 }
-api.get('/tools/portal-check/arch', adminOnly, fullScopeOnly, (req, res) => memoJson(req, res, ARCH_MEMO, async () => scopeArchPaths(await runArchScan(), req.user), { ttlMs: ARCH_TTL_MS, extraKey: `role=${req.user?.role || ''}` }));
+api.get('/tools/portal-check/arch', adminOnly, fullScopeOnly, (req, res) => memoJson(req, res, ARCH_MEMO, async () => scopeArchPaths(await runArchScan(), req.user), { ttlMs: ARCH_TTL_MS, extraKey: `role=${req.user?.role || ''}|demo=${req.user?.demoGuest ? 1 : 0}` }));
 api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, res) => {
   try {
     const out = await runArchScan();

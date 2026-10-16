@@ -345,3 +345,12 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
   담당을 바꾼 장비를 Overview 카드가 두 번 세던 것을 고쳤다(옛 엣지 행이 남아 있어도 지금 담당 행만 센다).
 - 포트 사용량 화면의 포트 설명은 비-admin 에게 가린다(주소·호스트명이 들어간다 — 장비 상세와 같은 규칙).
 - 회귀: `server/test/audit2732b.test.js` · 웹 `tools/audit2732b.test.js`.
+
+## 19. 예산 소진 장비 · 중앙 503 재전송(v2.743)
+
+- 장비 조회 도중 시간 예산이 떨어졌을 때 telemetry 는 `client.js budgetTelemetry` 하나가 정한다 — 무엇이라도 읽었으면 `budget-partial`(읽음 —
+  `faults.TELEMETRY_OK`), 인터페이스를 하나도 못 읽었으면 `budget`(확인 불가 — Overview·장애 판정에서 '읽은 장비' 로 세지 않고, 전이는 장비 실패로 보류).
+  예전 한 분기가 못 읽은 장비에도 `budget-partial` 을 넣어 확인 불가 장비가 정상 쪽으로 통과했다.
+- 엣지 CVP push 는 중앙의 503 을 같은 호출 안에서 다시 보내지 않는다(`postNo503Retry` — 큰 본문을 같은 주기에 여러 번 보내면 혼잡을 키운다).
+  실패는 상태·콘솔에 남고 다음 주기가 이어서 보낸다(커서는 전진하지 않는다).
+- 회귀: `server/test/audit2743k.test.js` · 웹 `tools/audit2743k.test.js`.

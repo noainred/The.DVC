@@ -49,7 +49,11 @@ export const NO_LINK = 'no-link';
 export const isBad = (s) => s === 'fault' || s === 'warn';
 /** C1 — 같은 키 중복 관측의 우선순위(큰 쪽이 이긴다). */
 const RANK = Object.freeze({ fault: 4, warn: 3, unknown: 2, ok: 1, absent: 0 });
-/** 수집이 '읽었다' 고 볼 telemetry 값 — 빈 값은 구버전 행(모름)이라 읽은 것으로 본다(없는 실패를 만들지 않는다). */
+/**
+ * 수집이 '읽었다' 고 볼 telemetry 값 — 빈 값은 구버전 행(모름)이라 읽은 것으로 본다(없는 실패를 만들지 않는다).
+ * 'budget-partial' 은 '예산이 떨어지기 전에 무엇이라도 읽었다' 는 뜻이고 'budget'(하나도 못 읽음)은 여기 없다 — 그 구분은
+ * `client.js budgetTelemetry` 하나가 정한다(v2.743 DEV-04 — 예전 한 분기가 못 읽은 장비에도 'budget-partial' 을 넣었다).
+ */
 export const TELEMETRY_OK = new Set(['ok', 'budget-partial', '']);
 const DEFAULT_INTERVAL_MS = 5 * 60_000;
 const STALE_FACTOR = 3;

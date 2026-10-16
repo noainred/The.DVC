@@ -29,6 +29,25 @@ export function DupIp({ scope }) {
   );
 }
 
+/**
+ * v2.743(감사 VC-03) — Tools 업그레이드 결과 문구(순수). 서버는 비활성·점검중·엣지 위임 vCenter 와 로그인이 거부된 vCenter 를 `blocked`
+ *   (사유 포함)로 밝힌다. 예전 문구는 실패가 있어도 언제나 초록 '요청: 0/3건' 이라 왜 실행되지 않았는지 말하지 않았다.
+ */
+export function upgradeResultMsg(r) {
+  const requested = Number(r?.requested) || 0;
+  const succeeded = r?.mock ? requested : (Number(r?.succeeded) || 0);
+  const failed = Math.max(0, requested - succeeded);
+  const blocked = Array.isArray(r?.blocked) ? r.blocked.filter((b) => b && typeof b === 'object') : [];
+  const blockedVms = blocked.reduce((a, b) => a + (Number(b.vms) || 0), 0);
+  const why = blocked.map((b) => `${b.vcenterId}(${b.vms}대): ${b.reason}`).join(' / ');
+  const other = failed - blockedVms;
+  const tail = [
+    why ? `실행하지 않은 vCenter — ${why}` : '',
+    other > 0 ? `실패 ${other}건` : '',
+  ].filter(Boolean).join(' · ');
+  return { ok: failed === 0, text: `업그레이드 요청: ${succeeded}/${requested}건${r?.mock ? ' (데모)' : ''}${tail ? ` — ${tail}` : ''}` };
+}
+
 export function VmTools({ scope }) {
   const { loading, data, error } = useTool('/tools/vmtools', scope ? { vcenterId: scope } : {});
   const [busy, setBusy] = useState(false);
@@ -43,7 +62,7 @@ export function VmTools({ scope }) {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/vms/upgrade-tools', { ids: row.ids });
-      setMsg({ ok: true, text: `업그레이드 요청: ${r.succeeded ?? r.requested}/${r.requested}건${r.mock ? ' (데모)' : ''}` });
+      setMsg(upgradeResultMsg(r));
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
 

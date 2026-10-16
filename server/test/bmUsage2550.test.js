@@ -281,7 +281,7 @@ test('Linux 둘째 주기 — 산수가 맞는다', () => {
   // v2.590 F9: 사용률은 전이중 방향별 max(rx, tx) ÷ 링크 속도 — rx·tx 가 반씩이면 합(125MB/s)이 아니라 62.5MB/s 기준.
   assert.equal(b.row.net_pct, 5, 'max(rx,tx)=62.5MB/s × 8 / 10Gb');
   assert.equal(b.row.net_bps, 125_000_000, '처리량은 여전히 rx+tx 합');
-  assert.equal(b.row.hba_pct, 5, 'max(rx,tx)=100MB/s × 8 / 16Gb');
+  assert.equal(b.row.hba_pct, 6.3, 'max(rx,tx)=100MB/s ÷ 16GFC 표준 데이터율 1,600MB/s (v2.743 DEV-03)');
   assert.equal(b.row.src, 'os');
 });
 

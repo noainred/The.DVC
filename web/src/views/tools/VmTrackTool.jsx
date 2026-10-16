@@ -299,7 +299,7 @@ export default function VmTrackTool() {
                     });
                     return (
                       <tr key={p.slot}>
-                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}</td>
+                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중·비활성·점검 중 — v2.743 부터 비활성·점검 중 vCenter 도 빈 목록으로 세지 않고 뺍니다). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}</td>
                         <td style={{ textAlign: 'right' }}>{p.total.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--green)' }}>{p.onCount.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--amber)' }}>{off.toLocaleString()}</td>

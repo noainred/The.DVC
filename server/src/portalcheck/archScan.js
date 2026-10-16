@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { TOOL_PATH_KEYS, TOOL_PATH2_KEYS, TOOL_EXACT_PATHS, UNMAPPED_TOOL_SEGMENTS } from '../auth/toolAccess.js';
 import { ROLES, roleToolsDenied, userToolOverrides } from '../auth/permissions.js';
+import { isAdminDetailUser } from '../auth/demoGuest.js';   // v2.743 AUTHZ-01
 import { STATUS_SPEC } from '../edgelog/spec.js';
 import { MIGRATABLE, MIGRATABLE_DIRS } from '../insights/dbLocation.js';
 import { PURPOSES } from '../insights/portalDb.js';
@@ -736,7 +737,7 @@ export function scanArch(inputs) {
  * (라우트 게이트가 admin 전체범위만 통과시키므로 실제로는 인증 비활성 배포의 대체 역할이 이 분기를 탄다.)
  */
 export function scopeArchPaths(result, user) {
-  if (!result || user?.role === 'admin') return result;
+  if (!result || isAdminDetailUser(user)) return result;   // v2.743 AUTHZ-01: 데모 계정(admin 문맥)은 basename
   const base = (p) => (typeof p === 'string' && p ? (p.split(/[\\/]/).filter(Boolean).pop() || null) : p);
   const out = { ...result, catalog: { ...result.catalog, path: base(result.catalog?.path) }, pathHidden: true };
   out.items = (result.items || []).map((it) => {

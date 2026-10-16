@@ -61,6 +61,7 @@ export const REASON_SEVERITY = Object.freeze({
   'pull-none': 'info',
   'pull-auth': 'fail',
   'pull-identity': 'warn',
+  'pull-edge-registry': 'fail', // v2.743(감사 EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 export 를 503 으로 거절(중앙은 직전 값 유지)
   'push-rejected': 'fail',
   'push-stale': 'warn',
   'push-none': 'info',
@@ -236,7 +237,7 @@ export function buildCommMap(p = {}) {
     const pullAge = pullAt != null ? now - pullAt : null;
     const neverOk = st?.neverOk === true;
     if (!st) pull = { state: 'none', at: null, ageMs: null, error: '', fails: 0 };
-    else if (st.ok === false) pull = { state: 'fail', at: pullAt, ageMs: pullAge, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0, ...(neverOk ? { neverOk } : {}) };
+    else if (st.ok === false) pull = { state: 'fail', at: pullAt, ageMs: pullAge, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0, ...(neverOk ? { neverOk } : {}), ...(st.edgeReason === 'registryUnreadable' ? { edgeReason: 'registryUnreadable' } : {}) };
     else if (st.degraded) pull = { state: 'degraded', at: pullAt, ageMs: pullAge, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0, ...(neverOk ? { neverOk } : {}) };
     else pull = { state: 'ok', at: pullAt, ageMs: pullAge, error: '', fails: 0 };
     pull.hosts = numOrNull(st?.hosts); pull.identityIssue = st?.identity?.issue || st?.identity || null;
@@ -294,7 +295,7 @@ export function buildCommMap(p = {}) {
     if (!enabled) reasons.push('disabled');
     else {
       if (pullIntervalMs <= 0) reasons.push('puller-off');
-      if (pull.state === 'fail') reasons.push(/인증 실패|토큰/.test(pull.error) ? 'pull-auth' : 'pull-fail');
+      if (pull.state === 'fail') reasons.push(pull.edgeReason === 'registryUnreadable' ? 'pull-edge-registry' : /인증 실패|토큰/.test(pull.error) ? 'pull-auth' : 'pull-fail');
       else if (pull.state === 'degraded') reasons.push('pull-degraded');
       else if (pull.state === 'none') reasons.push('pull-none');
       if (pull.identityIssue) reasons.push('pull-identity');

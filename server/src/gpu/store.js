@@ -9,6 +9,7 @@ let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalM
 
 import { numOrNull } from '../util/numOrNull.js';
 import { loadGpuGuestSettings } from './settings.js'; // v2.742(VC-01): 독립 GC 가 실행할 때 폴 주기를 읽는다
+import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js'; // v2.743(LEFT-02): 엣지 항목 TTL — 그 엣지가 보고한 push 주기(잎 모듈 — util 만 import)
 
 /**
  * v2.600(CEN2600-01 2차 방어): 사용률은 0~100 유한수만 싣는다. 예전에는 원소 값을 그대로 저장해 객체 하나가 지표 샘플러의
@@ -85,11 +86,39 @@ export function getGuestGpuHost(hostId) { return byHost.get(hostId) || null; }
 export function getGuestGpuAllHosts() { return byHost; }
 export function getGuestGpuVms() { return [...byVm.entries()].map(([vmId, v]) => ({ vmId, ...v })); }
 
-/** 오래된(staleMs 초과) 항목 제거. */
-export function pruneGuestGpu(staleMs) {
+/**
+ * 오래된(staleMs 초과) 항목 제거.
+ * v2.743(LEFT-02 — 재현): `localOnly` 면 **이 노드의 로컬 폴러가 넣은 항목(agent 없음)만** 지운다. 예전 폴러 정리
+ *   (poller.js — 이 노드 폴 주기 × 3 + 30초)는 agent 를 보지 않아 엣지가 push 한 항목까지 지웠다 — 그 경계는 엣지 push 간격
+ *   (AGENT_INVENTORY_INTERVAL_MS)·첫 폴 보류(최대 15분)·전송 실패와 무관하고, 독립 GC 의 TTL(max(30분, 주기 × 3 + 30초))과도 갈렸다.
+ *   중앙 폴 주기가 짧거나(약 10초) 엣지 push 가 그 경계보다 늦으면 받은 GPU 사용률이 다음 push 전에 화면에서 사라졌다.
+ *   엣지 항목은 독립 GC(runGuestGpuGc)가 그 엣지의 주기로 정리한다.
+ */
+export function pruneGuestGpu(staleMs, { localOnly = false } = {}) {
   const cut = Date.now() - staleMs;
-  for (const [k, v] of byHost) if (v.at < cut) byHost.delete(k);
-  for (const [k, v] of byVm) if (v.at < cut) byVm.delete(k);
+  const hit = (v) => v.at < cut && (!localOnly || !agentKeyOf(v.agent));
+  for (const [k, v] of byHost) if (hit(v)) byHost.delete(k);
+  for (const [k, v] of byVm) if (hit(v)) byVm.delete(k);
+}
+
+/**
+ * v2.743(LEFT-02): 엣지 항목 정리 — 엣지마다 자기 TTL(ttlOf(agentKey) ms)로 지운다. ttlOf 가 유한한 양수를 주지 않으면 그 엣지는 건너뛴다
+ * (지우지 않는 쪽 — 모르는 값으로 지우지 않는다). 반환: 지운 개수.
+ */
+export function pruneEdgeGuestGpu(ttlOf) {
+  const now = Date.now();
+  const cache = new Map();
+  const ttl = (ak) => { if (!cache.has(ak)) { const t = numOrNull(ttlOf(ak)); cache.set(ak, t != null && t > 0 ? t : null); } return cache.get(ak); };
+  let n = 0;
+  for (const m of [byHost, byVm]) {
+    for (const [k, v] of m) {
+      const ak = agentKeyOf(v.agent);
+      if (!ak) continue;
+      const t = ttl(ak);
+      if (t != null && v.at < now - t) { m.delete(k); n++; }
+    }
+  }
+  return n;
 }
 
 export function guestGpuCounts() { return { hosts: byHost.size, vms: byVm.size }; }
@@ -114,12 +143,37 @@ export function guestGpuTtlMs(pollIntervalMs, baseMs = GUEST_GPU_TTL_BASE_MS) {
   const p = numOrNull(pollIntervalMs);
   return Math.max(baseMs, p != null && p > 0 ? p * 3 + 30_000 : 0);
 }
-/** 독립 GC 한 번 — 실행할 때 설정을 읽는다. 반환: 이번에 쓴 TTL(ms). */
+/**
+ * v2.743(LEFT-02): 엣지 항목의 독립 TTL — max(기본 30분, 그 엣지 주기 × 3 + 30초). 엣지 주기는 그 엣지가 GPU 진단 push 에 실어 보낸
+ *   자기 push 주기(central/gpuGuestDiag.js intervalMs — 구버전 엣지·재시작 직후에는 없다)이고, 모르면 예전처럼 이 노드의 폴 주기를 쓴다
+ *   (예전 정리 기준보다 짧아지지 않게 — 넓히는 쪽만 바꾼다). 순수.
+ * @param {number|null} edgeIntervalMs 엣지가 보고한 push 주기
+ * @param {number|null} localPollMs 이 노드의 GPU 게스트 폴 주기
+ */
+export function edgeGuestGpuTtlMs(edgeIntervalMs, localPollMs) {
+  const e = numOrNull(edgeIntervalMs);
+  return guestGpuTtlMs(e != null && e > 0 ? e : localPollMs);
+}
+/** 엣지(소문자 키) → 보고한 push 주기(ms). 진단을 못 읽으면 빈 맵(= 이 노드 주기로 정리). */
+function edgeIntervals() {
+  const out = new Map();
+  try {
+    for (const d of getAllGpuGuestDiag()) {
+      const ak = agentKeyOf(d?.agent);
+      const n = numOrNull(d?.intervalMs);
+      if (ak && n != null && n > 0) out.set(ak, Math.max(out.get(ak) || 0, n));
+    }
+  } catch { /* 진단 없음 — 이 노드 주기 */ }
+  return out;
+}
+/** 독립 GC 한 번 — 실행할 때 설정을 읽는다. 반환: 이번에 쓴 로컬 TTL(ms). 엣지 항목은 엣지마다 edgeGuestGpuTtlMs 로 정리한다. */
 export function runGuestGpuGc() {
   let poll = null;
   try { poll = loadGpuGuestSettings()?.pollIntervalMs ?? null; } catch { poll = null; }
   const ttl = guestGpuTtlMs(poll);
-  pruneGuestGpu(ttl);
+  pruneGuestGpu(ttl, { localOnly: true });
+  const iv = edgeIntervals();
+  pruneEdgeGuestGpu((ak) => edgeGuestGpuTtlMs(iv.get(ak) ?? null, poll));
   return ttl;
 }
 const _gcTimer = setInterval(() => { try { runGuestGpuGc(); } catch { /* best effort */ } }, 5 * 60_000);

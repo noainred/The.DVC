@@ -11,11 +11,25 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.613 EDGE2613-10: 같은 주소 엣지를 데이터 흐름 지도에서 나눈다(v2.601 WEB2601-02 의 잔여)
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { readJsonCapped } from '../util/readCapped.js';
+import { capStr } from '../util/capStr.js';
 
 // v2.605(감사 LEFT2605-01 — 재현): 이 점검은 **주기 폴러**(relaycheck/poller.js startAdaptiveTimer)가 돈다 — 관리자 수동 실행만이 아니다.
 //   ping·health 응답은 수 KB 인데 fetch 의 json 읽기는 해제 후 크기 상한이 없어 150MB 응답에 중앙 RSS 70 → 693MB 였다. 상한까지만 읽는다.
 export const RELAY_PING_MAX_BYTES = 256 * 1024;
 const readPing = (r) => readJsonCapped(r, RELAY_PING_MAX_BYTES, '포탈 응답').then((j) => (j && typeof j === 'object' && !Array.isArray(j) ? j : {})).catch(() => ({}));
+
+/**
+ * v2.743(감사 INJPKG-04·INJPKG-03): 원격 응답의 이름 칸(agent·hostname·version·instance)은 **문자열일 때만** 받는다.
+ *   예전에는 `{ agent: 7 }` 같은 응답이 그대로 `got` 에 실려 remedyFor 의 `got.toLowerCase()` 가 TypeError 를 던졌고,
+ *   문자열이어도 탭·CR·LF 가 그대로 알림 제목(remedy.title)에 들어가 그 알림 메일이 통째로 실패했다(buildMime 이 헤더 주입을 막아 던진다).
+ *   제어 문자는 공백으로 바꾸고 길이를 자른다(capStr — 상주 상태 `_state` 에 들어간다). 문자열이 아니면 '' 다(String() 으로 억지 변환하지 않는다).
+ */
+// eslint-disable-next-line no-control-regex
+const CTRL_RE = /[\u0000-\u001f\u007f\u2028\u2029]/g;
+export function remoteText(v, max = 128) {
+  if (typeof v !== 'string') return '';
+  return capStr(v.replace(CTRL_RE, ' ').trim(), max);
+}
 
 function tcp(host, port, timeoutMs) {
   return new Promise((resolve) => {
@@ -73,14 +87,22 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
       if (r.status === 404) return { ok: false, phase: 'auth', error: 'HTTP 404 — 응답 포탈에 COLLECTOR_TOKEN 미설정(또는 포탈 아님)', ms: Date.now() - t0 };
       if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
       const j = await readPing(r);
-      const iss = expectAgent ? identityIssue({ id: expectAgent, name: expectAgent }, j, otherIds) : null;
-      if (iss) return { ok: false, phase: 'identity', error: iss.reason, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
-      return { ok: true, detail: `응답 ${j.agent || '(이름 없음)'}${j.hostname ? `(${j.hostname})` : ''} v${j.version || '?'}`, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
+      // 판정(identityIssue)은 원문으로 한다(문자열이 아닌 agent 도 '불일치' 로 잡아야 한다 — 비우면 '이름 없음 = 통과' 가 된다).
+      //   화면·알림·상태에 싣는 값은 remoteText 로 정리한 것만(v2.743 INJPKG-04).
+      const gotAgent = remoteText(j.agent), gotHost = remoteText(j.hostname, 253);
+      const got = { agent: gotAgent, hostname: gotHost };
+      //   문자열이 아닌 agent 는 표지 문자열로 바꿔 넘긴다 — identityIssue 의 String() 이 응답 객체의 toString 을 부르지 않게(던지면 판정이 '오류' 가 된다).
+      const idAgent = typeof j.agent === 'string' ? j.agent : (j.agent == null ? '' : '(문자열이 아닌 값)');
+      const iss = expectAgent ? identityIssue({ id: expectAgent, name: expectAgent }, { agent: idAgent, hostname: gotHost }, otherIds) : null;
+      if (iss) return { ok: false, phase: 'identity', error: remoteText(iss.reason, 600) || '응답한 엣지가 등록 항목과 다릅니다', got, ms: Date.now() - t0 };
+      return { ok: true, detail: `응답 ${gotAgent || '(이름 없음)'}${gotHost ? `(${gotHost})` : ''} v${remoteText(j.version, 40) || '?'}`, got, ms: Date.now() - t0 };
     }
     const r = await tagged(() => resilientFetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, timeoutMs, retries: 0 }));
     if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
     const j = await readPing(r);
-    return { ok: true, detail: `health 200 v${j.version || '?'}`, got: { instance: j.instance, agent: j.agent }, ms: Date.now() - t0 };
+    // v2.743(INJPKG-04): instance 가 있는데 문자열이 아니면 '구버전(대조 불가)' 로 통과시키지 않는다 — 형식을 읽지 못한 것이다.
+    const instanceBad = j.instance != null && typeof j.instance !== 'string';
+    return { ok: true, detail: `health 200 v${remoteText(j.version, 40) || '?'}`, got: { instance: remoteText(j.instance, 80) || undefined, agent: remoteText(j.agent), ...(instanceBad ? { instanceBad: true } : {}) }, ms: Date.now() - t0 };
   } catch (e) {
     const code = e?.cause?.code || e?.code || '';
     return { ok: false, phase: code === 'ECONNREFUSED' ? 'refused' : /timeout|abort/i.test(e.name || e.message) ? 'timeout' : 'http', error: code || e.message, ms: Date.now() - t0 };
@@ -102,6 +124,7 @@ export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
   if (kind === 'hq-portal') {
     const r = await portalPing(host, port, { timeoutMs });
     if (!r.ok) return r;
+    if (r.got?.instanceBad) return { ok: false, phase: 'hq', error: '응답 포탈의 인스턴스 값을 읽지 못함(문자열이 아님) — 이 중앙인지 확인할 수 없습니다', got: r.got, ms: r.ms };
     if (r.got?.instance && r.got.instance !== instanceId()) return { ok: false, phase: 'hq', error: `응답 포탈 인스턴스가 이 중앙이 아님(${r.got.agent || r.got.instance.slice(0, 8)})`, got: r.got, ms: r.ms };
     if (!r.got?.instance) return { ok: true, detail: `${r.detail} (구버전 응답 — 인스턴스 대조 불가)`, ms: r.ms };
     return { ok: true, detail: '중앙 자신에게 도달', ms: r.ms };

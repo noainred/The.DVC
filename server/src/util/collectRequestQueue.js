@@ -29,6 +29,7 @@
  *  - reap                     : 시한 안에 결과가 없으면 한 번 더 대기로 되돌리고(재인출), maxTries 를 넘으면
  *                               폐기하고 그 사실을 drops 에 남긴다(조용한 소실 금지).
  *  - has(id)                  : 대기 또는 진행 중이면 true — 결과가 올 때까지 배지가 유지된다.
+ *  - dropTaken(id, agent, …)  : v2.743 — 엣지가 그 요청을 시작하지 않고 버렸다고 알려 왔다(사유와 함께 즉시 폐기 — 아이실론만 쓴다).
  * 인메모리다 — 중앙 재시작 시 사라지는 저비용 요청이라 영속하지 않는다(edgeLogJobs 와 같은 판단).
  */
 
@@ -139,6 +140,24 @@ export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60
         }
       }
       return done;
+    },
+    /**
+     * v2.743(감사 LEFT-08): 엣지가 '받은 요청을 시작하지 않고 버렸다' 고 알려 왔다 — 진행 중인 그 요청을 결과 시한까지 기다리지 않고
+     * 폐기하고 그 사유를 drops 에 남긴다(source:'edge'). 그 엣지 몫(agent)만 · `before`(엣지가 버린 시각을 중앙 시계로 어림한 값)보다
+     * **뒤에** 인출한 요청은 건드리지 않는다(버린 뒤 다시 받은 요청은 엣지가 새로 넣었다). 대기(pending)는 엣지가 아직 받지 않은 요청이라
+     * 건드리지 않는다. 폐기했으면 true. 이 메서드를 부르는 큐만 동작이 바뀐다(지금은 아이실론 — 스토리지·SAN·PDU·CVP 는 그대로).
+     */
+    dropTaken(id, agent, reason, { before = null } = {}, now = Date.now()) {
+      reap(now);
+      const k = String(id);
+      const f = inflight.get(k);
+      if (!f || f.agent !== norm(agent)) return false;
+      const b = before == null || before === '' ? null : Number(before);
+      if (b != null && Number.isFinite(b) && f.takenAt > b) return false;
+      inflight.delete(k);
+      drops.unshift({ id: k, agent: f.agent, at: now, tries: f.tries, reason: String(reason || 'edge-other').slice(0, 32), source: 'edge' });
+      if (drops.length > DROPS_MAX) drops.length = DROPS_MAX;
+      return true;
     },
     has(id, now = Date.now()) { reap(now); const k = String(id); return pending.has(k) || inflight.has(k); },
     state(id, now = Date.now()) {

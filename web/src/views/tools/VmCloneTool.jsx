@@ -17,6 +17,7 @@ import { cloneRunMark } from '../authSkipText.js'; // v2.591(감사 F1): 인증 
 const MODE_LABEL = { manual: '수동만', daily: '매일', interval: '간격' };
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03 계열: 삭제 실패 본문을 성공으로 읽지 않는다
+import { mountLabel, MOUNTS_MASKED_NOTE, showMountsMaskedNote } from './vmCloneMountText.js'; // v2.743 AUTHZ-02: NFS 주소 가림
 
 /**
  * v2.732(점검 2회차 B5-05): 잡 추가 폼의 선택 목록(vCenter·VM·데이터스토어) 상태 → 'VM 검색·선택' 라벨.
@@ -73,6 +74,7 @@ export default function VmCloneTool() {
             : <span className="muted" style={{ fontSize: 12 }}>유휴 · 대기 {d.status?.queued?.length || 0}건</span>}
         {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
       </div>
+      {showMountsMaskedNote(d) && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{MOUNTS_MASKED_NOTE}</div>}
 
       <div className="card" style={{ padding: '9px 13px', marginBottom: 12, fontSize: 12, lineHeight: 1.7 }} >
         <b>동작</b>: 스냅샷(선택 시 정지점) → <b>스냅샷 시점 복제</b>(켜진 VM 무중단) → 스냅샷 삭제 → 보존 N개 유지.
@@ -95,7 +97,7 @@ export default function VmCloneTool() {
               <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.55 }}>
                 <td><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}</td>
                 <td className="muted">{j.vcenterId}</td>
-                <td>{j.dest.type === 'datastore' ? <span className="badge blue">DS · {j.dest.datastoreName}</span> : <span className="badge purple">NFS · {(d.mounts.find((m) => m.id === j.dest.mountId) || {}).server || j.dest.mountId}{j.dest.subdir ? `/${j.dest.subdir}` : ''}</span>}</td>
+                <td>{j.dest.type === 'datastore' ? <span className="badge blue">DS · {j.dest.datastoreName}</span> : <span className="badge purple">NFS · {mountLabel((d.mounts || []).find((m) => m.id === j.dest.mountId)) || j.dest.mountId}{j.dest.subdir ? `/${j.dest.subdir}` : ''}</span>}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{MODE_LABEL[j.schedule.mode]}{j.schedule.mode === 'daily' ? ` ${j.schedule.time}` : j.schedule.mode === 'interval' ? ` ${j.schedule.hours}h` : ''}</td>
                 <td style={{ textAlign: 'right' }}>{j.keep}</td>
                 <td>{j.quiesce ? <span className="badge green">앱 정합</span> : <span className="badge gray">크래시 정합</span>}</td>
@@ -214,10 +216,10 @@ function JobForm({ d, form, setForm, onSaved }) {
           </label>
         ) : (
           <>
-            <label style={{ fontSize: 12 }}>NFS 마운트(설정 › NFS 마운트에서 등록)<br />
+            <label style={{ fontSize: 12 }}>NFS 마운트(설정 › NFS 마운트에서 등록){d.mountsMasked ? ' — 주소 가림' : ''}<br />
               <Select className="select" value={form.dest.mountId || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, mountId: e.target.value } })}>
                 <option value="">(선택)</option>
-                {(d.mounts || []).map((m) => <option key={m.id} value={m.id}>{m.server}:{m.exportPath} {m.mounted ? '· 마운트됨' : '· ⚠ 미마운트'}</option>)}
+                {(d.mounts || []).map((m) => <option key={m.id} value={m.id}>{mountLabel(m)} {m.mounted ? '· 마운트됨' : '· ⚠ 미마운트'}</option>)}
               </Select>
             </label>
             <label style={{ fontSize: 12 }}>하위 폴더(선택)<br />

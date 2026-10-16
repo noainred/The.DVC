@@ -10,6 +10,7 @@ import { collectVCenterEvents } from '../vcenter/soapClient.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { createYielder } from '../util/timeSlice.js';
+import { capStr } from '../util/capStr.js';
 import { getLogsDb } from './db.js';
 import { loadLogSettings } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
@@ -23,6 +24,7 @@ const DAY = 86_400_000;
 let timer = null;
 let lastRun = null;
 let running = false;
+let runningSince = null; // v2.743(감사 WEB-04): 진행 중인 수집이 언제 시작됐는지 — '지금 수집' 이 겹쳤을 때 화면이 말한다
 let tick = 0; // prune/용량점검 스로틀용(매 폴 DELETE 스캔 방지)
 let lastCap = null; // v2.741(DB-03): 마지막 용량 상한 처리 결과 — 상태 화면이 '사용 중 크기 기준' 을 말한다
 const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
@@ -150,10 +152,15 @@ export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc)) {
  *   store 가 멈춰도 계정 잠금은 그대로다). 수동 실행은 막지 않는다(authGuard 규칙 3).
  */
 export async function pollLogsOnce({ manual = false } = {}) {
-  if (running) return lastRun;
+  // v2.743(감사 WEB-04): 진행 중이면 **직전 결과(lastRun)를 돌려주지 않는다** — '지금 수집' 이 그 값을 이번 결과로 읽어
+  //   '수집 완료: N건' 이라고 말했다(첫 실행 중이면 null 이라 0건). 이번 요청은 새로 수집하지 않았다는 사실을 busy 로 밝힌다.
+  if (running) return { busy: true, runningSince };
   const s = loadLogSettings();
+  // 꺼져 있으면 skipped:true(수집하지 않음) — '0건 수집' 과 다르다(화면이 구분한다).
   if (!s.enabled) { lastRun = { at: Date.now(), collected: 0, skipped: true }; return lastRun; }
   running = true;
+  runningSince = Date.now();
+  const failed = [];   // v2.743(WEB-04): 이번 주기에 인증 외 사유로 수집하지 못한 vCenter — 반환에만 싣는다(아래)
   try {
     const db = await getLogsDb();
     const mock = config.dataSource === 'mock';
@@ -201,7 +208,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
         if (!mock && isVcAuthError(e)) {
           const rec = vcAuthGuard.markAuthStopped(vc.id, vc, e.message);
           authRejected.push({ vcenterId: String(vc.id), attempts: rec?.attempts ?? null });
-        }
+        } else failed.push({ vcenterId: String(vc.id), error: capStr(String(e?.message || e || '알 수 없는 오류'), 300) });
       }
     });
     // v2.732(점검 2회차 B6-01): 적재는 vCenter 사이·조각 사이에서 이벤트 루프에 양보한다 — 예전에는 28곳 × 최대 5,000행을 양보 없이
@@ -274,8 +281,12 @@ export async function pollLogsOnce({ manual = false } = {}) {
     lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}),
       ...(split.skipped.length ? { notCollected: split.skipped } : {}) };
     if (collected) console.log(`[vclogs] ${collected}건 장기 보관`);
-    return lastRun;
-  } finally { running = false; }
+    // v2.743(WEB-04): 수집 실패한 vCenter 는 **반환에만** 싣는다 — '지금 수집'(관리자 + 전체 범위)이 '전부 실패해도 수집 완료 0건' 이라
+    //   말하지 않게. 상태(lastRun)에는 싣지 않는다 — /vclogs/status 는 범위 계정도 읽고, 오류 원문에 vCenter 주소가 들어간다
+    //   (scopeVcLogStatus 가 모르는 필드를 거르지 않는다). 상한 50곳, 넘으면 개수를 밝힌다.
+    if (!failed.length) return lastRun;
+    return { ...lastRun, failed: failed.slice(0, 50), ...(failed.length > 50 ? { failedOmitted: failed.length - 50 } : {}) };
+  } finally { running = false; runningSince = null; }
 }
 
 function schedule() {

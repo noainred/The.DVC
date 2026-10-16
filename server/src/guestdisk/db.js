@@ -109,6 +109,16 @@ export function guestDiskDbStatus() {
   return { available: Boolean(impl), path: DB_PATH, error: initError ? String(initError.message || initError) : (impl ? null : (lockRetry.note() || null)) };
 }
 
+/**
+ * 최신 행(vm_latest)의 '신선' 경계(ms) — 수집 주기(설정 intervalHours, 기본 12시간) × 3. 부분 합 보류 시한(commitCollection holdMaxMs 기본값)과
+ * **같은 값**이다(v2.743 감사 VC-02 — 회수 리포트가 이 경계를 넘긴 행을 '오래된 관측' 으로 밝힌다. 숫자를 따로 두지 않는다).
+ */
+export function latestHoldMs() {
+  let hours = 12;
+  try { hours = Number(loadGuestDiskSettings().intervalHours) || 12; } catch { /* 설정 없음 — 기본 */ }
+  return Math.max(1, hours) * 3 * 3_600_000;
+}
+
 /** 보류 시한 인자 — 양의 유한수만 값이다(null·''·음수는 '기본값 사용'). */
 function numHold(v) {
   if (v == null || v === '') return null;
@@ -179,12 +189,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   const prevLatest = new Map();
   for (const r of db.prepare('SELECT vm_id, vcenter_name, vm_name, alloc_gb, used_gb, part_count, ts, partial FROM vm_latest WHERE vcenter_id=?').all(vcenterId)) prevLatest.set(r.vm_id, r);
   let partialVms = 0; let partialHeld = 0; let partialShown = 0; let partialStale = 0;
-  let holdMs = numHold(holdMaxMs);
-  if (holdMs == null) {
-    let hours = 12;
-    try { hours = Number(loadGuestDiskSettings().intervalHours) || 12; } catch { /* 설정 없음 — 기본 */ }
-    holdMs = Math.max(1, hours) * 3 * 3_600_000;
-  }
+  const holdMs = numHold(holdMaxMs) ?? latestHoldMs();
 
   let vmSeriesRows = 0; let partSeriesRows = 0;
   db.exec('BEGIN');
@@ -394,6 +399,41 @@ export async function prune(retentionDays = 180) {
     if (b.deleted > 0) partLastCleared = db.prepare('DELETE FROM part_last WHERE NOT EXISTS (SELECT 1 FROM part_series s WHERE s.vm_id = part_last.vm_id AND s.path = part_last.path)').run().changes || 0;
     return { ok: true, vmSeriesDeleted: a.deleted, partSeriesDeleted: b.deleted, vmLastCleared, partLastCleared, done: a.done && b.done };
   });
+}
+
+/**
+ * v2.743(감사 VC-02 — 재현): **등록부에서 지운 vCenter** 의 최신 행·diff 기준을 지운다.
+ *   vm_latest 를 지우는 곳은 commitCollection 의 vCenter 단위 교체 하나뿐이라, 삭제된 vCenter 의 행이 무기한 남아 회수 가능 합계에 더해졌다
+ *   (coverage 는 스냅샷 vCenter 로만 만들어 그 vCenter 줄도 없었다). 알려진 vCenter(등록부 ∪ 스냅샷 — 호출부가 계산)는 status 와 무관하게
+ *   남긴다 — 비활성·점검중·수집 정지 vCenter 의 오래된 관측은 의도로 남기는 값이다(commitCollection '빈 수집 방어' 와 같은 판단).
+ *   vm_last·part_last 도 지운다 — part_last 가 남으면 prune 의 '현재 파티션' 보존 규칙이 그 vCenter 의 마지막 추이 행을 영원히 남긴다.
+ *   추이(vm_series·part_series)는 지우지 않는다 — 보존 기간 prune 이 정리한다(최신 행이 없으면 '키의 마지막 행' 보존 대상이 아니다).
+ * @param {Set<string>|null} knownIds 알려진 vCenter id. null·빈 집합 = 판정할 수 없다(등록부를 못 읽음·첫 병합 전) — **아무것도 지우지 않는다**.
+ * @returns {Promise<{ok:boolean, skipped?:string, vcenters?:string[], removedRows?:number}>}
+ */
+export async function pruneOrphanVcenters(knownIds) {
+  const db = await getDb();
+  if (!db) return { ok: false, skipped: 'db-unavailable' };
+  if (!(knownIds instanceof Set) || knownIds.size === 0) return { ok: false, skipped: 'known-unknown' };
+  const orphan = db.prepare('SELECT DISTINCT vcenter_id AS id FROM vm_latest').all().map((r) => r.id).filter((id) => !knownIds.has(String(id)));
+  if (!orphan.length) return { ok: true, vcenters: [], removedRows: 0 };
+  let removedRows = 0;
+  db.exec('BEGIN');
+  try {
+    const delLatest = db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?');
+    const delVmLast = db.prepare('DELETE FROM vm_last WHERE vcenter_id=?');
+    const delPartLast = db.prepare('DELETE FROM part_last WHERE vcenter_id=?');
+    for (const id of orphan) {
+      removedRows += Number(delLatest.run(id).changes) || 0;
+      delVmLast.run(id);
+      delPartLast.run(id);
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* */ }
+    return { ok: false, skipped: 'error', error: String(e?.message || e).slice(0, 300) };
+  }
+  return { ok: true, vcenters: orphan.slice(0, 64), vcenterCount: orphan.length, removedRows };
 }
 
 /**

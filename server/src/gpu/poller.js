@@ -342,8 +342,9 @@ async function pollOnce() {
       } catch (e) { errors++; console.warn(`[gpu-guest] ${vcId} 수집 실패: ${e.message}`); unreadVcenters.push({ vcId, reason: '예외' }); diags.push({ vcId, at: Date.now(), stage: '예외', counts: {}, results: [], error: e.message }); }
     });
 
-    // 3주기 이상 갱신 안 된 항목 정리.
-    pruneGuestGpu(s.pollIntervalMs * 3 + 30_000);
+    // 3주기 이상 갱신 안 된 항목 정리 — v2.743(LEFT-02): **이 폴러가 넣은 로컬 항목(agent 없음)만**. 엣지가 push 한 항목은
+    //   이 노드의 폴 주기와 무관하게 오므로(엣지 push 간격·첫 폴 보류·전송 실패) 독립 GC(gpu/store.js runGuestGpuGc)가 그 엣지 주기로 정리한다.
+    pruneGuestGpu(s.pollIntervalMs * 3 + 30_000, { localOnly: true });
     // v2.590: 인증 실패로 주기 수집이 멈춘 VM·vCenter 수를 함께 싣는다(설정 화면이 '멈췄다' 를 말한다).
     const authStoppedVms = diags.reduce((a, d) => a + (d.authStoppedVms || 0), 0);
     const vcAuthStopped = diags.filter((d) => d.authStopped).map((d) => d.vcId);

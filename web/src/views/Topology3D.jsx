@@ -48,7 +48,8 @@ export default function Topology3D() {
           // vCenter 인벤토리의 VM/호스트/vCenter **이름**(외부 입력)이므로 반드시 HTML 이스케이프한다 —
           // 안 하면 한 리전 vCenter 의 VM 이름에 심은 <img onerror=…> 가 글로벌 admin 세션에서 실행되는
           // 저장형 XSS 가 된다(교차테넌트 상향). cpu/gpus 는 숫자라 안전하지만 label/region 은 필수.
-          .nodeLabel((n) => `<div style="font:12px system-ui;color:#e2e8f0;background:#1e293b;padding:4px 8px;border-radius:6px;border:1px solid #334155">${escHtml(n.label)}${n.region ? ` · ${escHtml(n.region)}` : ''}${n.cpu != null ? ` · CPU ${Number(n.cpu)}%` : ''}${n.gpus ? ` · GPU ${Number(n.gpus)}` : ''}</div>`)
+          // v2.743(감사 VC-04): 호스트 CPU 를 못 읽었으면(연결 끊김·무응답 — 서버가 cpu:null·usageUnknown) 0% 가 아니라 '—'.
+          .nodeLabel((n) => `<div style="font:12px system-ui;color:#e2e8f0;background:#1e293b;padding:4px 8px;border-radius:6px;border:1px solid #334155">${escHtml(n.label)}${n.region ? ` · ${escHtml(n.region)}` : ''}${n.cpu != null ? ` · CPU ${Number(n.cpu)}%` : n.type === 'host' ? ` · CPU —${n.usageUnknown ? '(사용량 모름)' : ''}` : ''}${n.gpus ? ` · GPU ${Number(n.gpus)}` : ''}</div>`)
           .nodeColor(nodeColor)
           .nodeVal((n) => n.val || 4)
           .nodeOpacity(0.95)

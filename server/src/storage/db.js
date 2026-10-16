@@ -20,6 +20,8 @@ import { config } from '../config.js';
 import { openSqlite, isSqliteLockError, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
+import { pushAll } from '../util/pushAll.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -175,13 +177,26 @@ async function openInner() {
       // 수집 주기가 1시간(v2.531)인데 12h·24h 추이는 10분 버킷이라, 엣지 4곳이 서로 다른 분에
       // 수집하면 **점마다 한 엣지 장비만** 합산돼 합계가 실제의 1/4 로 그려졌다(재현: 20대 → 점마다 5대).
       // 점마다 장비 수가 같아서(5·5·5…) 화면의 '구간마다 장비 수가 다르다' 경고도 뜨지 않았다.
-      selCapDevBucket: conn.prepare(`SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
+      // v2.743(감사 DB-01): 기간 전체를 한 문장으로 GROUP BY 하지 않는다 — 버킷 정배수 시간 조각([lo, hi))으로 나눠 읽고
+      // 조각 사이에 양보한다(capacityHistoryAll). 조각 경계가 버킷 경계라 (버킷, 장비) 묶음이 두 조각에 나뉘지 않아 AVG 가
+      // 예전 한 문장과 같다(테스트가 예전 문장과 대조한다). 마지막 조각은 위가 열려 있다(엣지 시계가 앞선 표본도 예전처럼 읽는다).
+      // ORDER BY 1, 2 — 예전 문장은 ORDER BY 1 이었지만 GROUP BY 정렬이 이미 (버킷, 장비) 순이라 결과 순서는 같다.
+      selCapDevBucketSlice: conn.prepare(`SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
+            AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
+            AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used,
+            AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
+          FROM capacity_history WHERE ts >= ? AND ts < ?
+          GROUP BY CAST(ts/? AS INTEGER), device_id
+          ORDER BY 1, 2 LIMIT ?`),
+      // 조각 시작점 — 첫 표본 이전의 빈 조각을 묻지 않는다(since 가 아주 이르면 수만 조각이 된다). MIN 단독 문장이라 인덱스 끝 한 번이다(v2.550.3).
+      selCapMinTsFrom: conn.prepare('SELECT MIN(ts) AS t FROM capacity_history WHERE ts >= ?'),
+      selCapDevBucketTail: conn.prepare(`SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
             AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
             AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used,
             AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
           FROM capacity_history WHERE ts >= ?
           GROUP BY CAST(ts/? AS INTEGER), device_id
-          ORDER BY 1 LIMIT 400000`),
+          ORDER BY 1, 2 LIMIT ?`),
       // 일 롤업 upsert — **더 늦은 관측만** last_* 를 갱신한다(엣지 push 가 순서대로 오지 않을 수
       // 있다). max_used 는 항상 최대를 유지하고 samples 는 누적한다.
       /*
@@ -546,6 +561,11 @@ export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = C
  * 신선도 한계만큼 앞에서부터 읽어 첫 점에도 이전 관측이 이어지게 한다.
  * 반환은 점 배열이고 배열에 `expectedDevices`·`truncated` 를 속성으로 붙인다(기존 호출부 호환).
  */
+/** 합계 추이 한 번이 읽는 (버킷, 장비) 행 상한 — 예전 한 문장 판의 LIMIT 과 같은 값이다(넘으면 `truncated`). */
+const CAP_ALL_ROWS_MAX = 400000;
+/** 조각 목표 폭 — 버킷 정배수로 맞춘다(v2.693 SAN `sliceBounds` 와 같은 6시간). */
+const CAP_ALL_SLICE_TARGET_MS = 6 * 3_600_000;
+
 export async function capacityHistoryAll(sinceMs, bucketMs, opts = {}) {
   const db = await open();
   if (!db) return [];
@@ -554,13 +574,37 @@ export async function capacityHistoryAll(sinceMs, bucketMs, opts = {}) {
   const sb = opts.staleByDevice;
   const maxStale = Math.max(staleMs, ...(sb instanceof Map ? [...sb.values()] : Object.values(sb || {})).filter((v) => Number.isFinite(v)));
   const since = Number(sinceMs) || 0;
+  const nowMs = Number(opts.nowMs) || Date.now();
   try {
-    const rows = db.selCapDevBucket.all(b, b, since - maxStale, b);
-    const r = sumCapacityBuckets(rows, { sinceMs: since, nowMs: Number(opts.nowMs) || Date.now(), bucketMs: b, staleMs, staleByDevice: sb, knownIds: opts.knownIds ?? null });
+    /*
+     * v2.743(감사 DB-01): 예전에는 `ts >= since − maxStale` 전체를 한 문장으로 GROUP BY 하고 합산까지 양보 없이 이어 달려,
+     *   90일·400일을 고르면 그 시간 동안 이벤트 루프가 멈췄다(CLAUDE.md v2.672·v2.693 '요청 경로의 큰 집계 SQL 은 시간 조각 + 양보').
+     *   이제 버킷 정배수 조각([lo, hi))으로 읽고 조각 사이에 시간 기준으로 양보한다(createYielder). 첫 조각의 시작은 예전과 같은
+     *   `since − maxStale`(버킷 경계가 아닐 수 있다 — 예전 문장도 거기서 시작했다)이고 끝은 첫 버킷 경계 + 조각 폭이다.
+     *   마지막 조각은 위가 열려 있다(지금 이후 시각의 표본도 예전처럼 읽는다). 상한(40만 행)은 앞에서부터 채운다 — 예전과 같다.
+     * ⚠ 조각 경계를 버킷 정배수에서 떼지 말 것 — 한 (버킷, 장비) 묶음이 두 조각에 나뉘면 AVG 가 두 행이 되어 결과가 달라진다.
+     */
+    const width = Math.max(b, Math.floor(CAP_ALL_SLICE_TARGET_MS / b) * b);
+    const yielder = createYielder(Number.isFinite(opts.yieldMs) && opts.yieldMs > 0 ? opts.yieldMs : 15);
+    const rows = [];
+    let lo = since - maxStale;
+    // 첫 표본이 그보다 늦으면 그 버킷 경계부터 — 그 사이에는 행이 없으므로 결과가 같다.
+    const firstTs = numOrNull(db.selCapMinTsFrom.get(lo)?.t);
+    if (firstTs == null) lo = Math.max(lo, nowMs);   // 행이 하나도 없다 — 열린 마지막 조각 한 번만 묻는다
+    else lo = Math.max(lo, Math.floor(firstTs / b) * b);
+    let hi = Math.floor(lo / b) * b + width;
+    while (hi <= nowMs && rows.length < CAP_ALL_ROWS_MAX) {
+      pushAll(rows, db.selCapDevBucketSlice.all(b, b, lo, hi, b, CAP_ALL_ROWS_MAX - rows.length));
+      lo = hi; hi += width;
+      await yielder();
+    }
+    if (rows.length < CAP_ALL_ROWS_MAX) pushAll(rows, db.selCapDevBucketTail.all(b, b, lo, b, CAP_ALL_ROWS_MAX - rows.length));
+    await yielder();
+    const r = sumCapacityBuckets(rows, { sinceMs: since, nowMs, bucketMs: b, staleMs, staleByDevice: sb, knownIds: opts.knownIds ?? null });
     const pts = r.points;
     pts.expectedDevices = r.expectedDevices;
     pts.retiredDevices = r.retiredDevices;
-    pts.truncated = rows.length >= 400000;
+    pts.truncated = rows.length >= CAP_ALL_ROWS_MAX;
     return pts;
   } catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
 }

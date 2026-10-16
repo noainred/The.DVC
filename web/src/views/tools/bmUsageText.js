@@ -200,8 +200,12 @@ export function detailNotes(detail = {}) {
   }
   const noSpeed = (detail.interfaces || []).filter((x) => n(x.bps ?? x.bytesPerSec) != null && n(x.bitsPerSec) == null);
   if (noSpeed.length) out.push(`**링크 속도를 읽지 못한 인터페이스 ${noSpeed.length}개** — 그 회선의 사용률(%)은 내지 않고 처리량만 보여줍니다.`);
-  const fcNoSpeed = (detail.fc || []).filter((x) => n(x.bps) != null && !n(x.pct));
+  // v2.743(DEV-03): 사용률 0% 는 '속도를 못 읽음' 이 아니다(예전 `!n(x.pct)` 는 0 을 거기에 셌다) · 데이터율을 넘어 비운 포트는 따로 말한다.
+  const fcRows = detail.fc || [];
+  const fcNoSpeed = fcRows.filter((x) => n(x.bps) != null && n(x.pct) == null && !x.pctOver);
   if (fcNoSpeed.length) out.push(`**속도를 읽지 못한 FC 포트 ${fcNoSpeed.length}개** — 사용률(%) 대신 처리량만 보여줍니다.`);
+  const fcOver = fcRows.filter((x) => x && x.pctOver);
+  if (fcOver.length) out.push(`**FC 표준 데이터율을 넘는 처리량이 나온 포트 ${fcOver.length}개** — 사용률(%)은 비우고 처리량만 보여줍니다(카운터가 프레임 헤더까지 셀 수 있습니다).`);
   return out;
 }
 

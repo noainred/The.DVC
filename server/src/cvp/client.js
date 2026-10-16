@@ -210,6 +210,13 @@ const sig = (outer, leftMs) => {
  *   CVP API 는 리다이렉트를 쓸 이유가 없으므로 3xx 는 실패로 보고, 사유에는 상태와 Location 의 **origin 만** 싣는다(경로·쿼리에
  *   토큰이 있을 수 있다).
  */
+/**
+ * v2.743(감사 DEV-04): 장비 조회 도중 시간 예산이 떨어졌을 때의 telemetry — **무엇이라도 읽었으면** 'budget-partial'(읽음 — faults.js
+ *   TELEMETRY_OK), 하나도 못 읽었으면 'budget'(못 읽음). 예전에는 설명 조회 뒤의 분기가 인터페이스를 읽었는지와 무관하게
+ *   'budget-partial' 을 넣어, 인터페이스 조회가 실패하고 예산이 끝난 장비가 Overview·장애 판정에서 '읽은 장비' 로 통과했다
+ *   (직전 CPU·부품 값만으로 '정상(일부)' 가 됐다). 두 분기(설명 뒤 · 카운터 뒤)가 이 함수 하나를 쓴다.
+ */
+export const budgetTelemetry = (anyRead) => (anyRead ? 'budget-partial' : 'budget');
 export const isRedirect = (status) => status >= 300 && status < 400;
 export function redirectReason(res, base) {
   let origin = '';
@@ -641,12 +648,12 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         const cfg = await readKind('intfConfig', serial, (t) => { const x = P.parseIntfConfig(t); return { value: x.descs, keys: x.keys }; });
         if (cfg.value) { dev.ports = P.mergeIntfConfig(dev.ports, cfg.value); dev.descsAt = now(); }
       }
-      if (left() < MIN_SLICE_MS) { dev.telemetry = 'budget-partial'; return; }
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
       const upSet = Array.isArray(dev.ports) ? new Set(dev.ports.filter((p) => p.oper === 'up').map((p) => p.name)) : null;
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; }, upSet ? (k) => upSet.has(k) : null);
       if (cnt.value) { dev.counters = cnt.value; dev.countersAt = now(); }
       // v2.611(TIM2611-01): counters·bgp 앞에도 예산을 본다 — 시작해 놓고 잘리면 결과가 버려진다.
-      if (left() < MIN_SLICE_MS) { dev.telemetry = intf.value || cnt.value ? 'budget-partial' : 'budget'; return; }
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value || cnt.value); return; }
       const bgp = await readKind('bgp', serial, (t) => { const x = P.parseBgp(t); return { value: x.peers, keys: x.keys, truncated: x.truncated }; });
       if (bgp.value) { dev.bgp = bgp.value; truncated.peers += bgp.extra.truncated || 0; }
       else if (bgp.empty) dev.bgpEmpty = true; // v2.641: 빈 응답 — '피어 없음' 도 '못 읽음' 도 아닌 '이 경로에 값 없음'(BGP 미설정일 수 있다)

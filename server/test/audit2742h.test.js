@@ -36,7 +36,22 @@ fs.writeFileSync(path.join(tmp, 'central-agent-gpu-guest.json'), JSON.stringify(
   'Dup-X': { _updatedAt: 2000, enabled: true, pollIntervalMs: 60_000, vcenters: {
     vcA: { enabled: true, username: 'root2', password: 'NEW-A', vms: {}, vmIps: {} },
   } },
+  // v2.743(RECENT-01) 픽스처 ㉠ 결함이 만든 모양 — 빈 바탕({}) 위에 VM 계정 하나만 얹은 사본이 **더 최근**이다(값이 전부 DEFAULTS·빈 문자열).
+  'blank-y': { _updatedAt: 1000, enabled: true, pollIntervalMs: 120_000, collectMethod: 'ssh', vcenters: {
+    vcA: { enabled: true, username: 'root', password: 'KEEP-A', vms: { 'vcA:vm-1': { username: 'u1', password: 'p1' } }, vmIps: { 'vcA:vm-1': '10.1.1.1' } },
+  } },
+  'BLANK-Y': { _updatedAt: 2000, enabled: false, pollIntervalMs: 60_000, concurrency: 4, timeoutMs: 20_000, maxVmsPerVcenter: 1000, collectMethod: 'auto', sshPort: 22, vcenters: {
+    vcA: { enabled: false, username: '', password: '', winUsername: '', winPassword: '', vms: { 'vcA:vm-3': { username: 'u3', password: 'p3' } }, vmIps: {} },
+  } },
+  // v2.743(RECENT-01) 픽스처 ㉡ 엣지 실제 이름(수집 서버 등록부 name) = 옛 키
+  'real-z': { _updatedAt: 1000, enabled: true, pollIntervalMs: 60_000, vcenters: {
+    vcA: { enabled: true, username: 'root', password: 'OLD-Z', vms: { 'vcA:vm-1': { username: 'u1', password: 'p1' } }, vmIps: {} },
+  } },
+  'REAL-Z': { _updatedAt: 2000, enabled: true, pollIntervalMs: 60_000, vcenters: {
+    vcA: { enabled: true, username: 'root', password: 'NEW-Z', vms: {}, vmIps: {} },
+  } },
 }));
+fs.writeFileSync(path.join(tmp, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'real-z', name: 'real-z', url: 'https://10.9.0.7:4000', token: 't' }] }));
 fs.writeFileSync(path.join(tmp, 'central-agent-users.json'), JSON.stringify({
   'dup-u': { at: 1000, users: [{ username: 'ops1', name: 'Old', role: 'viewer' }, { username: 'ops2', name: 'Two', role: 'viewer' }] },
   'DUP-U': { at: 2000, users: [{ username: 'ops1', name: 'New', role: 'operator' }, { username: 'ops3', name: 'Three', role: 'viewer' }] },
@@ -154,10 +169,10 @@ test('INJPKG-08 게스트 파일 전송은 3xx 를 따라가지 않는다 — �
 });
 
 // ── LEFT-01 ──
-test('LEFT-01 ① 로드 때 대소문자만 다른 중복 키를 가장 최근 것으로 합친다(빠진 vCenter·사용자는 옮긴다)', async () => {
+test('LEFT-01 ① 로드 때 대소문자만 다른 중복 키를 하나로 합친다(빠진 vCenter·사용자는 옮긴다 · GPU 배포의 키는 v2.743 부터 근거가 없으면 먼저 있던 키)', async () => {
   const gg = await import('../src/central/agentGpuGuestConfig.js');
   const keys = gg.listAssignedGpuGuestAgents().map((a) => a.agent).filter((a) => a.toLowerCase() === 'dup-x');
-  assert.deepEqual(keys, ['Dup-X'], '중복 키는 하나로(가장 최근 저장분 키)');
+  assert.deepEqual(keys, ['dup-x'], '중복 키는 하나로 — v2.743(RECENT-01): 이름 근거가 없으면 먼저 있던 키(예전: 가장 최근 저장분 키)');
   const s = gg.getAssignedGpuGuest('dup-x');
   assert.equal(s.vcenters.vcA.password, 'NEW-A', '겹친 vCenter 는 최근 값');
   assert.equal(s.vcenters.vcB.password, 'OLD-B', '최근 사본에 없던 vCenter 는 옮긴다');
@@ -168,6 +183,34 @@ test('LEFT-01 ① 로드 때 대소문자만 다른 중복 키를 가장 최근 
   const users = au.getAgentUsers('dup-u');
   assert.deepEqual(users.map((u) => u.username).sort(), ['ops1', 'ops2', 'ops3'], '사용자는 합집합');
   assert.equal(users.find((u) => u.username === 'ops1').name, 'New', '같은 ID 는 최근 목록');
+});
+
+test('LEFT-01 ①-b(v2.743 RECENT-01) 빈 바탕 부분 사본이 더 최근이어도 옛 값을 지우지 않는다 · 엣지 실제 이름 = 옛 키면 그 키', async () => {
+  const gg = await import('../src/central/agentGpuGuestConfig.js');
+  const gs = await import('../src/gpu/settings.js');
+  const yk = gg.listAssignedGpuGuestAgents().map((a) => a.agent).filter((a) => a.toLowerCase() === 'blank-y');
+  assert.deepEqual(yk, ['blank-y'], '근거가 없으면 먼저 있던 키');
+  const y = gg.getAssignedGpuGuest('BLANK-Y');
+  assert.equal(y.enabled, true, '빈 바탕 기본값(enabled:false)이 수집을 끄면 안 된다');
+  assert.equal(y.pollIntervalMs, 120_000);
+  assert.equal(y.collectMethod, 'ssh');
+  assert.equal(y.vcenters.vcA.enabled, true);
+  assert.equal(y.vcenters.vcA.username, 'root');
+  assert.equal(y.vcenters.vcA.password, 'KEEP-A', '공용 비밀번호를 비우면 안 된다');
+  assert.equal(y.vcenters.vcA.vms['vcA:vm-1'].password, 'p1', '옛 VM 계정은 남는다');
+  assert.equal(y.vcenters.vcA.vms['vcA:vm-3'].password, 'p3', '최근 사본의 VM 계정은 더한다');
+  assert.equal(y.vcenters.vcA.vmIps['vcA:vm-1'], '10.1.1.1');
+  // 그 엣지가 v2.741 까지 받던 온전한 사본 위에 지금 사본을 적용해도 지워지는 것이 없다(실제 엣지 병합 함수).
+  const edgeLocal = gs.mergeGpuGuestSettings({}, { enabled: true, pollIntervalMs: 120_000, collectMethod: 'ssh', vcenters: { vcA: { enabled: true, username: 'root', password: 'KEEP-A', vms: { 'vcA:vm-1': { username: 'u1', password: 'p1' } }, vmIps: { 'vcA:vm-1': '10.1.1.1' } } } });
+  const { _updatedAt, ...pulled } = y;
+  const { next, removed } = gs.mergePulledGpuGuestSettings(edgeLocal, pulled);
+  assert.deepEqual(removed, { vms: 0, vmIps: 0 });
+  assert.equal(next.enabled, true); assert.equal(next.vcenters.vcA.password, 'KEEP-A');
+  const zk = gg.listAssignedGpuGuestAgents().map((a) => a.agent).filter((a) => a.toLowerCase() === 'real-z');
+  assert.deepEqual(zk, ['real-z'], '수집 서버 등록부 이름과 글자 그대로 같은 키(v2.742 는 최근 키 REAL-Z)');
+  const z = gg.getAssignedGpuGuest('real-z');
+  assert.equal(z.vcenters.vcA.password, 'NEW-Z', '최근 사본이 명시한(기본값 아닌) 값은 최근 것');
+  assert.equal(z.vcenters.vcA.vms['vcA:vm-1'].password, 'p1', '최근 사본에 없던 VM 계정은 남는다');
 });
 
 test('LEFT-01 ② 대소문자만 다른 이름으로 일부만 저장해도 사본이 생기지 않고, 엣지 pull 이 자격증명을 지우지 않는다(실제 centralRouter)', async () => {

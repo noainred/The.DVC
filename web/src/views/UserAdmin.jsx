@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { fetchJson, postJson, patchJson, delJson, putJson, getCurrentUser } from '../api.js';
 import { roleOptions, superTargetLocked, isAdminTier, permCell, toggleAdminDenied, roleBadgeTone, SUPER_LOCK_TITLE, SUPER_ROLE_TITLE, MATRIX_NOTE } from './userAdmin/roleText.js';
@@ -14,6 +14,7 @@ const TOOL_ROWS = roleToolRows(SPECIAL_TOOLS);
 // 권한 매트릭스 순수 연산(v2.295, 3차 감사 확정 #6) — toolsDenied '거부목록 반전' 의미론을
 // vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
+import { mergeReloadedPerms } from './userAdmin/permReload.js'; // v2.743(감사 WEB-02): 다시 읽기가 저장 안 한 매트릭스 편집을 덮지 않게
 import { STable } from '../components/STable.jsx';
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
@@ -57,7 +58,11 @@ export default function UserAdmin() {
   const [form, setForm] = useState({ username: '', name: '', role: 'viewer' });
   const [enroll, setEnroll] = useState(null); // { username, secret, otpauthURL, qr, code, error }
   const [perms, setPerms] = useState(null);   // { catalog, roles, matrix }
-  const [permDirty, setPermDirty] = useState(false);
+  const [permDirty, setPermDirtyState] = useState(false);
+  // v2.743(감사 WEB-02): load() 는 행 동작(추가·역할·삭제·범위·비밀번호·OTP) 뒤에도 불린다 — 그때 '저장 안 한 편집이 있는가' 를
+  //   렌더 시점 값(클로저)이 아니라 지금 값으로 봐야 한다(요청이 도는 사이 사용자가 매트릭스를 고칠 수 있다). 그래서 ref 를 함께 둔다.
+  const permDirtyRef = useRef(false);
+  const setPermDirty = (v) => { permDirtyRef.current = Boolean(v); setPermDirtyState(Boolean(v)); };
   const [vcx, setVcx] = useState([]);         // 범위 지정용 vCenter 목록 [{id,name,region}]
   // 점검 A5-10: vCenter 목록 조회 실패를 '표시할 vCenter가 없습니다'(= 0개)로 말하지 않는다. 실패는 따로 들고
   //   범위 편집 창이 '읽지 못했습니다' + 다시 읽기를 보인다(그 동안 vCenter 체크박스는 그릴 수 없다 — 지금 선택은 그대로 저장된다).
@@ -83,7 +88,9 @@ export default function UserAdmin() {
         fetchJson('/vcenters').then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })),
       ]);
       setData(u);
-      if (p) { setPerms(p); setPermDirty(false); }
+      // v2.743(WEB-02): 저장하지 않은 매트릭스 편집이 있으면 역할별 편집 칸은 화면 값을 지킨다(users 재정의 등 나머지는 서버 값).
+      //   예전에는 조건 없이 덮고 permDirty 를 내려, 행 동작 하나가 편집과 '저장되지 않았습니다' 경고를 말없이 지웠다.
+      if (p) setPerms((cur) => mergeReloadedPerms(cur, p, permDirtyRef.current).perms);
       applyVcList(vc);
       setError(null);
     } catch (e) { setError(e.message); }

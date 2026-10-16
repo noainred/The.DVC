@@ -12,6 +12,8 @@ import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { listRegistry as listNsxRegistry } from '../nsx/registry.js';
 import { managerInScope } from '../nsx/scope.js';
 import { config, currentVersion } from '../config.js';
+import { usageReadable } from '../store.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const VM_CAP = 1500; // 3D 성능 위해 VM 노드 총량 상한
 
@@ -88,8 +90,13 @@ export function buildGraph(snap, { vms = false, vcenterId = null, host = null, a
   // 6) ESXi 호스트 → vCenter
   for (const h of hosts) {
     const id = `host:${h.id}`;
+    // v2.743(감사 VC-04): 끊긴·무응답 호스트는 사용량을 읽을 수 없다(store.usageReadable — 사용률 기준 단일 소스).
+    //   수집기가 그 호스트에 채우는 0% 를 그대로 실으면 3D 툴팁이 'CPU 0%' 라는 거짓을 말한다 — null + usageUnknown 으로 밝힌다.
+    const readable = usageReadable(h);
     add({ id, type: 'host', label: h.name, val: 7, status: h.connectionState || 'unknown',
-      cpu: h.cpuUsagePct ?? null, mem: h.memUsagePct ?? null, gpus: (h.gpus || []).length, cluster: h.cluster || '' });
+      cpu: readable ? numOrNull(h.cpuUsagePct) : null, mem: readable ? numOrNull(h.memUsagePct) : null,
+      ...(readable ? {} : { usageUnknown: true }),
+      gpus: (h.gpus || []).length, cluster: h.cluster || '' });
     link(`vc:${h.vcenterId}`, id, 'host');
   }
 

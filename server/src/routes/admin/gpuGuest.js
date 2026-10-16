@@ -7,6 +7,7 @@ import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sa
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
+import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(감사 VC-03): 주문형 vCenter 로그인 문
 import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard, pinnedIpCheck, unknownPinnedIps } from '../../gpu/sshCollect.js';
 import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
@@ -426,7 +427,20 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   let c;
   try {
     c = new VimSoapClient(vc);
-    await c.login();
+    // v2.743(감사 VC-03): 관리자가 누른 테스트 — 주문형 로그인 문을 지난다. 비활성·점검중·엣지 위임(site) vCenter 는 이 포탈이
+    //   로그인하지 않고(엣지 위임 vCenter 의 게스트 수집은 담당 엣지가 한다 — 중앙 폴러도 건너뛴다), 인증 정지는 1회 시도하며, vCenter
+    //   로그인 거부는 주 폴러와 같은 정지 기록에 올라간다. 막혔으면 409 + 사유 필드와 함께 **행마다** 같은 사유를 싣는다 — 화면이 행을
+    //   results 로 갱신하므로 results 가 비면 행이 '테스트 중' 으로 남는다.
+    try {
+      await onDemandLogin(c, vc, { allowAuthStopped: true });
+    } catch (e) {
+      if (e?.status !== 409) throw e;
+      const t = Date.now();
+      return res.status(409).json({
+        ok: false, error: e.message, reason: e.message, ...onDemandErrorFields(e),
+        results: items.map((it) => ({ vmId: it?.vmId, login: false, read: false, error: e.message, trace: [{ t, msg: `✗ vCenter 로그인 안 함 — ${e.message}` }] })),
+      });
+    }
     const q = items.map((it, i) => ({ it, i }));
     const workers = Array.from({ length: Math.min(limit, q.length) }, async () => {
       while (q.length) {

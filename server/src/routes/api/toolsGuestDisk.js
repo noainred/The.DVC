@@ -12,7 +12,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { reclaimReport, vmDetail, reclaimCsv } from '../../guestdisk/service.js';
 import { guestDiskDbStatus } from '../../guestdisk/db.js';
-import { guestDiskPollerStatus, runGuestDiskNow } from '../../guestdisk/poller.js';
+import { guestDiskPollerStatus, runGuestDiskNow, guestDiskOrphanPruneStatus } from '../../guestdisk/poller.js';
 import { load as loadSettings, save as saveSettings } from '../../guestdisk/settings.js';
 import { todayStamp } from "../../util/dayKey.js";
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -27,8 +27,8 @@ export function registerToolsGuestDisk(api) {
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
     const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1; // v2.482: 회수 = 할당 − 사용×배율(정규화는 service)
     const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId, usageFactor });
-    // v2.583: 폴러 상태의 전 vCenter 합계·오류(범위 밖 id)·DB 경로를 범위 계정에 싣지 않는다(auth/scopeStatus.js).
-    res.json({ ...report, db: scopeDbStatus(guestDiskDbStatus(), req.user), poller: scopePollerStatus(guestDiskPollerStatus(), allowed), settings: loadSettings() });
+    // v2.583: 폴러 상태의 전 vCenter 합계·오류(범위 밖 id)·DB 경로를 범위 계정에 싣지 않는다(auth/scopeStatus.js). v2.743(VC-02): 삭제된 vCenter 행 정리 결과(전 함대의 vCenter id)는 전체 범위 계정에게만.
+    res.json({ ...report, db: scopeDbStatus(guestDiskDbStatus(), req.user), poller: scopePollerStatus(guestDiskPollerStatus(), allowed), settings: loadSettings(), ...(!allowed && guestDiskOrphanPruneStatus() ? { orphanPrune: guestDiskOrphanPruneStatus() } : {}) });
   });
 
   // 한 VM 의 파티션별 최신값 + 추이 — scope 단건 검사(범위 밖은 404 존재 은닉).

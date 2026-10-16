@@ -75,8 +75,9 @@ test('RECENT2611-01: 부분 결과 사유 — noCreds·인증 실패·(iLO 없�
   assert.deepEqual(scan.scanPartialReasons({ iloEnabled: true }, { registeredHpe: true }), []);
   assert.ok(scan.scanPartialReasons({ authSkipped: 2 }).length > 0, 'v2.591 규칙 유지');
   // 중앙·엣지 두 경로가 같은 판정을 쓴다(한쪽만 고치면 형제 비대칭).
-  assert.match(read('idrac/scanPoller.js'), /scanPartialReasons\(r, \{ registeredHpe: hasHpeInDatacenter\(e\.datacenterId\) \}\)/);
-  assert.match(read('idrac/localScan.js'), /scanPartialReasons\(scan, \{ registeredHpe: hasHpeInDatacenter\(datacenterId\) \}\)/);
+  // v2.743 LEFT-01: replace 강등 판정은 교체와 같은 술어(hasHpeInScanReplaceScope — 법인 전체가 아니라 그 엔트리의 교체 범위)
+  assert.match(read('idrac/scanPoller.js'), /scanPartialReasons\(r, \{ registeredHpe: hasHpeInScanReplaceScope\(\{ datacenterId: e\.datacenterId, scanRangeId: e\.id \|\| '', ranges: e\.ranges \}\) \}\)/);
+  assert.match(read('idrac/localScan.js'), /scanPartialReasons\(scan, \{ registeredHpe: hasHpeInScanReplaceScope\(\{ datacenterId, scanRangeId: rangeId, ranges: ips \}\) \}\)/);
 });
 
 test('RECENT2611-01: hasHpeInDatacenter — 그 법인의 HPE 등록만 본다', () => {

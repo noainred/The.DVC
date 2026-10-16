@@ -17,7 +17,9 @@ import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.RELAYCHECK_CONCURRENCY) || 4));
 let _timer = null;
 let _busy = false;
-let _last = { at: 0, total: 0, ok: 0, fail: 0 };
+// v2.743(감사 WEB-01): 정상 대상 개수는 `okCount` 다 — 예전 이름 `ok` 는 `runRelayChecks` 반환의 성공 여부 `ok:true` 를
+//   스프레드로 덮어 정상 0개(전부 실패·대상 0)일 때 화면이 '점검 실패: undefined' 라고 말했다. 상태 화면(last)도 같은 이름을 쓴다.
+let _last = { at: 0, total: 0, okCount: 0, fail: 0 };
 let _demoSuppressed = 0; // v2.719(감사 R1-05): 데모 호스트라 보내지 않은 알림 수
 const _state = new Map(); // `${host}:${port}` → { target, ok, phase, error, detail, ms, at, okStreak, failStreak, alerted, lastOkAt, lastFailAt, remedy }
 
@@ -93,7 +95,14 @@ export async function runRelayChecks({ force = false } = {}) {
       try { r = demoRelayCheck(t) || await runCheck(t, { timeoutMs: st.timeoutMs }); } catch (e) { r = { ok: false, phase: 'unknown', error: e.message, ms: 0 }; }
       const prev = _state.get(t.key);
       const { next, event } = transition(prev, r.ok, st.failStreak);
-      const remedy = r.ok ? null : remedyFor({ kind: t.kind, host: t.host, port: t.port, phase: r.phase, error: r.error, expect: { agent: t.expectAgent, relayAgent: t.relayAgent }, got: r.got || null });
+      // v2.743(감사 INJPKG-04): 해결방안 판정도 try 안에서 — 예전에는 try 밖이라 응답 agent 가 문자열이 아닌 대상 하나가
+      //   remedyFor 의 TypeError 로 runRelayChecks 를 통째로 거부시켰다(그 대상 결과·_last·빠진 대상 정리가 사라지고, 남은 워커가
+      //   도는 중에 재진입 가드가 풀렸다). 실패하면 단계 '오류' 의 일반 안내로 대신한다(실패 행이 해결방안 없이 남지 않게).
+      let remedy = null;
+      if (!r.ok) {
+        try { remedy = remedyFor({ kind: t.kind, host: t.host, port: t.port, phase: r.phase, error: r.error, expect: { agent: t.expectAgent, relayAgent: t.relayAgent }, got: r.got || null }); }
+        catch (e) { remedy = remedyFor({ kind: t.kind, host: t.host, port: t.port, phase: 'unknown', error: `해결방안을 만들지 못했습니다(${e?.message || e}) — 점검 결과: ${r.error || r.phase || '알 수 없음'}` }); }
+      }
       const now = Date.now();
       _state.set(t.key, { ...next, target: { key: t.key, host: t.host, port: t.port, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' },
         ok: r.ok, phase: r.ok ? 'ok' : (r.phase || 'unknown'), error: r.error || '', detail: r.detail || '', got: r.got || null, ms: r.ms || 0, at: now,
@@ -108,8 +117,9 @@ export async function runRelayChecks({ force = false } = {}) {
       }
     });
     for (const k of [..._state.keys()]) if (!seen.has(k)) _state.delete(k); // 대상에서 빠진 항목 정리
-    _last = { at: Date.now(), total: targets.length, ok: okN, fail: failN, durationMs: Date.now() - t0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}), ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}) };
-    return { ok: true, ..._last };
+    _last = { at: Date.now(), total: targets.length, okCount: okN, fail: failN, durationMs: Date.now() - t0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}), ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}) };
+    // v2.743(WEB-01): 성공 여부 `ok:true` 를 **마지막**에 둔다 — 상태 객체에 같은 이름이 다시 생겨도 덮이지 않게.
+    return { ..._last, ok: true };
   } finally { _busy = false; }
 }
 
@@ -123,4 +133,4 @@ export function startRelayCheckPoller() {
   if (_timer) return;
   _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (demoOn(loadSettings().enabled)) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검', subscribe: onRelayCheckSettingsChange });
 }
-export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, ok: 0, fail: 0 }; _demoSuppressed = 0; }
+export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, okCount: 0, fail: 0 }; _demoSuppressed = 0; }

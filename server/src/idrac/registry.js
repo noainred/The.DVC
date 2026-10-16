@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError } from '../util/registryCore.js'; // v2.743(감사 EDGE-01): 형제 등록부와 같은 로드 오류 판정(corruptOnlyReason 포함)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { retryTransient } from '../util/resilientFetch.js';
@@ -82,23 +83,44 @@ export function makeScanReplaceScope({ scanRangeId = '', ranges = null } = {}) {
 // '구조 복사본'을 돌려준다(호출부는 지금처럼 자유롭게 수정→save 가능 — 공유 객체 아님).
 let _regCache = null; // { mtimeMs, size, servers }
 
+/**
+ * v2.743(감사 EDGE-01): 등록부 파일을 **읽지 못했다**는 사실(형제 등록부 storage·sanswitch·pdu·cvp·bmstor 와 같은 `util/registryCore.js`
+ *   판정). 예전에는 손상 → preserveCorrupt → 빈 목록 뒤에 아무 표지가 없어, 엣지 `/api/collector/export` 가 200 + `servers:[]`·전력 0 을
+ *   보냈고 중앙 puller 가 그것을 정상 pull 로 받아 **그 법인의 위임 서버·원격 전력을 통째로 지웠다**(재현). 원본은 `.corrupt.<시각>` 으로
+ *   옮겨지므로 다음 pull·재시작 뒤에도 계속 0대였다 — 그래서 '원본 없이 보존본만 남은' 경우(corruptOnlyReason)도 못 읽은 것으로 본다.
+ *   풀리는 때: 저장이 성공했을 때(saveRegistry) · 다시 나타난 파일을 정상으로 읽었을 때(사람이 보존본을 되돌린 경우).
+ */
+const loadErr = makeLoadError();
+/** @returns {null|{at:number, reason:string}} 못 읽었으면 사유. 판정 비용: 파일이 있으면 loadRegistry 캐시, 없으면 설정 폴더 목록 1회. */
+export function registryLoadError() {
+  loadRegistry();
+  loadErr.checkCorruptOnly(FILE); // 오류가 이미 있거나 파일이 있으면 아무것도 하지 않는다
+  return loadErr.get();
+}
+
 export function loadRegistry() {
+  // ⚠ 파일이 없을 때의 corruptOnlyReason 판정(설정 폴더 목록)은 여기서 하지 않는다 — loadRegistry 는 요청·폴러마다 불리고,
+  //   iDRAC 등록이 없는 엣지는 파일이 없는 것이 정상이다. 판정은 registryLoadError() 가 한다(export 라우트가 부른다).
   if (!fs.existsSync(FILE)) { _regCache = null; return []; }
   try {
     const st = fs.statSync(FILE);
     if (!_regCache || _regCache.mtimeMs !== st.mtimeMs || _regCache.size !== st.size) {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []) }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
+      loadErr.clear(); // v2.743(EDGE-01): 파일을 정상으로 읽었다(보존본을 되돌린 경우 포함)
     }
     return structuredClone(_regCache.servers);
-  } catch {
-    preserveCorrupt(FILE); // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지)
+  } catch (e) {
+    preserveCorrupt(FILE, e?.message); // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지)
+    loadErr.set(e); // v2.743(EDGE-01): 조용한 빈 목록 금지 — export 가 이 사유로 503 을 낸다
+    _regCache = null;
     return [];
   }
 }
 
 function saveRegistry(list) {
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
+  loadErr.clear(); // v2.743(EDGE-01): 저장이 성공하면 그때부터는 관리자가 다시 만든 목록이 진실이다(형제 등록부와 같다)
   // 방금 쓴 내용으로 캐시 즉시 동기화(다음 읽기의 재파싱 회피). 실패 시 캐시 무효화가 안전.
   try {
     const st = fs.statSync(FILE);
@@ -176,7 +198,7 @@ function normalize(body, existing = null) {
   //   v2.611 정정(감사 RECENT2611-06): 예전 주석은 '폴러는 이 값으로 Dell 전용 경로를 건너뛴다' 였는데 **사실이 아니다** —
   //   `idrac/poller.js` 는 vendor 를 보지 않는다(표준 Redfish 경로라 HPE 에도 그대로 돈다). 이 값을 실제로 읽는 곳은
   //   `bmusage/targets.js`(HPE 에 Dell 전용 racadm 대체 경로를 걸지 않는다) · `idrac/redfish.js` 의 서비스태그 추출
-  //   (HPE 는 SerialNumber 우선) · `idrac/scanPoller.js`·`localScan.js`(replace 강등 판정 — hasHpeInDatacenter) 다.
+  //   (HPE 는 SerialNumber 우선) · `idrac/scanPoller.js`·`localScan.js`(replace 강등 판정 — v2.743 부터 hasHpeInScanReplaceScope) 다.
   //   그래서 이 값이 사라지면(가져오기 replace) 그 판단이 조용히 Dell 쪽으로 돌아간다 — CSV 가져오기도 vendor 열을 받는다.
   const vendor = normVendor(body.vendor !== undefined ? body.vendor : e.vendor);
   if (vendor) entry.vendor = vendor;
@@ -472,16 +494,38 @@ export function normVendor(v) {
 /**
  * v2.610: 등록 항목이 HPE iLO 인가.
  * v2.611(감사 RECENT2611-06): v2.610 에는 호출부가 **0곳**이었다(주석만 '폴러가 쓴다' 고 적었다). 지금은
- *   hasHpeInDatacenter(replace 강등 판정)가 쓴다.
+ *   hasHpeInDatacenter·hasHpeInScanReplaceScope(v2.743 — replace 강등 판정은 이쪽)가 쓴다.
  */
 export function isHpeEntry(entry) { return normVendor(entry?.vendor) === 'hpe'; }
 
-/** v2.611: 이 법인(datacenterId)에 HPE 로 등록된 서버가 있는가 — iLO 계정 없는 replace 스캔이 그것을 지우지 않게. */
+/**
+ * v2.611: 이 법인(datacenterId)에 HPE 로 등록된 서버가 있는가.
+ * ⚠ v2.743(감사 LEFT-01): replace 강등 판정에는 더 쓰지 않는다 — v2.742 DEV-01 뒤로 교체 범위가 **엔트리 단위**라 법인 전체를 보면
+ *   범위 밖 HPE(다른 엔트리 등록·수동 등록 — 교체가 지우지 않는다) 하나 때문에 Dell 전용 엔트리의 replace 가 매번 merge 로 떨어져
+ *   그 범위의 퇴역 등록이 남았다. 강등 판정은 아래 hasHpeInScanReplaceScope 다. 이 함수는 법인 단위 질의로 남긴다.
+ */
 export function hasHpeInDatacenter(datacenterId) {
   const dc = String(datacenterId || '').trim();
   if (!dc) return false;
   try { return loadRegistry().some((s) => String(s.datacenterId || '').trim() === dc && isHpeEntry(s)); }
   catch { return false; }
+}
+
+/**
+ * v2.743(감사 LEFT-01): 이 스캔 엔트리의 '교체'(replace-datacenter)가 **실제로 지울 수 있는** 등록 중에 HPE 가 있는가 — iLO 계정 없는
+ *   스캔은 HPE 를 found 에 넣지 못하므로(미지원 서버) 그런 HPE 가 있을 때만 replace 를 merge 로 강등해야 한다.
+ *   술어는 교체 자신과 **같은 것**이다: importServers 의 drop = '그 법인' ∧ makeScanReplaceScope({scanRangeId, ranges}) — registerScanned 가
+ *   교체에 넘기는 것과 같은 인자(엔트리 id·대역)를 받는다. 법인이 비면 교체가 아무것도 지우지 않으므로 false.
+ *   예기치 않은 오류는 **true**(강등 = 지우지 않는 쪽)로 둔다 — false 로 두면 지워질 수 있는 HPE 를 못 본 채 replace 가 돈다.
+ * @returns {boolean}
+ */
+export function hasHpeInScanReplaceScope({ datacenterId = '', scanRangeId = '', ranges = null } = {}) {
+  const dc = String(datacenterId || '').trim();
+  if (!dc) return false;
+  try {
+    const inScope = makeScanReplaceScope({ scanRangeId, ranges });
+    return loadRegistry().some((s) => String(s.datacenterId || '').trim() === dc && isHpeEntry(s) && inScope(s));
+  } catch { return true; }
 }
 
 /**

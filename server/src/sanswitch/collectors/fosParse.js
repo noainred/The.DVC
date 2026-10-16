@@ -532,12 +532,22 @@ export function parseFruShow(text) {
   return { ok, total: fitted.length, absent };
 }
 
+/*
+ * v2.743(감사 DEV-02 — v2.742 회귀): **센서 전용 이상어**는 healthWord 가 모르는 단어라도 '이상' 이다 — Warning·Above·Below·
+ *   High·Low·Over·Under·Alarm·Exceeded 는 '스위치 센서가 임계를 넘었다' 는 뜻이다. v2.742 는 이 단어들을 '모르는 단어' 로 보고
+ *   null(판정 불가)로 내려, 89adbd1 판본에서 bad 이던 점검 항목이 warn('판정하지 못한 센서')로 내려갔다. 정말 모르는 단어만 null.
+ *   ⚠ 정직 기록: Brocade sensorshow 가 실제로 이 상태어를 내는지는 실장비 출력으로 확인하지 못했다(파서 머리말과 같다).
+ *   상태 정규식이 첫 단어만 잡으므로('Below minimum' → 'Below') 단어 단위로 본다.
+ */
+const SENSOR_BAD_WORD = /\b(warn(?:ing)?|above|below|high|low|over\w*|under\w*|alarm\w*|exceed\w*|fault\w*|fail\w*|critical)\b/i;
+
 /**
  * sensorshow 의 상태 단어 → true(정상) / false(이상) / null(모름)(v2.742 DEV-02).
  * 판정은 `storage/healthWord.js` 하나를 쓴다(복제 금지). 다만 healthWord 는 **모르는 단어를 'bad'(규칙 ④)로** 접는데
- * 센서 상태는 펌웨어마다 문구가 달라 모르는 단어를 '이상' 으로 단정하지 않는다 — 모름(null)으로 두고 화면이 '상태를 읽지 못한
+ * 센서 상태는 펌웨어마다 문구가 달라 모르는 단어를 '이상' 으로 단정하지 않는다 — 모름(null)으로 두고 화면이 '상태를 판정하지 못한
  * 센서' 로 원문과 함께 밝힌다. 규칙 ②(명백한 이상어·부정어)와 ④(모르는 단어)는 **정상어를 덧붙여** 가른다 — healthWord 는
  * 이상어를 정상어보다 먼저 보므로 ②면 그래도 'bad', ④면 'ok' 가 된다.
+ * v2.743(DEV-02): 그보다 먼저 **센서 전용 이상어**(SENSOR_BAD_WORD)는 이상(false)이다 — 모름(null)은 정말 모르는 단어뿐이다.
  * 빈 슬롯(Absent)은 이 함수 밖에서 따로 표시한다(`absent:true`).
  */
 export function sensorStateOk(state) {
@@ -545,6 +555,7 @@ export function sensorStateOk(state) {
   if (!st) return null;
   const w = healthWord(st);
   if (w === 'ok' || /^present$/i.test(st)) return true;
+  if (SENSOR_BAD_WORD.test(st)) return false;
   if (w === 'unknown') return null;
   return healthWord(`${st} ok`) === 'bad' ? false : null;
 }

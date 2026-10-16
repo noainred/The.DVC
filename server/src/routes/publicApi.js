@@ -28,6 +28,7 @@ import path from 'node:path';
 import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publicapi/allowlist.js';
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { clusterCountOf } from '../clustercfg/analyze.js'; // v2.743 LEFT-07 — 내부 /summary 와 같은 클러스터 개수
 import { msOrNull } from '../publicapi/time.js';
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
@@ -206,7 +207,9 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     templates: vms.filter((v) => v.template).length,
     datastores: dss.length,
     networks: nets.length,
-    clusters: new Set(hosts.map((h) => `${h.vcenterId}/${h.cluster}`)).size,
+    // v2.743(감사 LEFT-07): 내부 /summary 와 같은 함수 — 클러스터 묶음 키 수('standalone' 은 세지 않고, clusterRef 를 실은 vCenter 는
+    //   같은 이름 다른 클러스터를 따로 센다). 예전 `${vcenterId}/${cluster}` 이름 셈보다 작거나 같다.
+    clusters: clusterCountOf(hosts),
     cpuCores: sum(hosts, (h) => h.cpuCores),
     cpuTotalMhz: sum(hosts, (h) => h.cpuTotalMhz),
     cpuUsedMhz: sum(hosts, (h) => h.cpuUsageMhz),

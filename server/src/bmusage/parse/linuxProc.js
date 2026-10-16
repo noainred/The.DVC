@@ -178,6 +178,8 @@ export function parseNetInfo(lines = []) {
  * `##FC` — HBA 한 대당 `<host> <port_state> <speed 원문> <tx_words> <rx_words>`.
  * ⚠ `tx_words`·`rx_words` 는 **4바이트 단위**이고 16진수(`0x…`)로 나올 수 있다.
  * ⚠ 속도 원문은 `16 Gbit` / `unknown` / `not negotiated` 등 — **'unknown' 을 0 으로 바꾸지 말 것**.
+ * ⚠ `bitsPerSec` 는 **명목 등급**(16 Gbit = 16e9)이다 — 사용률 분모로 그대로 쓰지 말 것. FC 표준 데이터율 환산은
+ *   `parse/fcRate.js fcUtilization` 하나가 한다(v2.743 DEV-03 — 명목으로 나누면 포화가 80% 에서 멈춘다).
  */
 export function parseFcHosts(lines = []) {
   const out = [];

@@ -6,6 +6,6 @@
   "main": "main.js",
   "license": "UNLICENSED",
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "33.4.11"
   }
 }

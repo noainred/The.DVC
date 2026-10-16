@@ -22,6 +22,10 @@
      set COLLECTOR_DATACENTER=Seoul-DC1
      ```
    - `CONFIG_DIR` 는 기본 `C:\ProgramData\vmware-portal` (업그레이드해도 보존)
+   - 포탈 화면(설정의 Edge 노드 포탈 설치·대량 배포 화면에 있는 중앙 토큰)에서 저장·생성한 `CENTRAL_TOKEN` 은 **이 `portal.env.bat`** 에 `set "CENTRAL_TOKEN=..."` 줄로
+     기록됩니다(`start-portal.bat` 이 이 파일 경로를 포탈에 넘깁니다 — v2.743). 새 zip 으로 패키지 폴더를 바꿀 때는 이 파일을 보존하세요.
+     예전 버전이 `C:\ProgramData\vmware-portal\portal.env.bat` 에 쓴 값은 시작 스크립트가 읽지 않습니다 — 필요하면 그 줄을 이 파일로 옮기세요.
+     Windows 에서는 토큰에 `& | < > ^ % ! "` 와 공백을 쓸 수 없습니다(이 파일을 cmd 가 실행합니다).
 3. **관리자 권한 PowerShell** 에서:
    ```powershell
    Set-ExecutionPolicy -Scope Process Bypass -Force

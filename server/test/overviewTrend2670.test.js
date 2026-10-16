@@ -104,7 +104,8 @@ test('⑥ 실제 라우트 — 범위 계정은 스토리지·전력 null + 사�
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const base = `http://127.0.0.1:${srv.address().port}/api`;
   try {
-    const full = await (await fetch(`${base}/overview/trend?days=30`)).json();
+    // v2.743 DB-02: 서버 전력 추이는 include=power 일 때만 계산한다(없으면 power.series null · reason 'not-requested').
+    const full = await (await fetch(`${base}/overview/trend?days=30&include=power`)).json();
     assert.equal(full.ok, true); assert.equal(full.days, 30); assert.equal(full.points, 30); assert.equal(full.grid.length, 30);
     assert.equal(full.physical.series, null); assert.equal(full.physical.reason, 'no-series');
     assert.ok(Array.isArray(full.virtual.series) && full.virtual.series.length === 30);

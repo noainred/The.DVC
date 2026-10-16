@@ -109,7 +109,8 @@ adminRouter.put('/report/daily', adminOnly, fleetOnly, (req, res) => {
   res.json({ ok: true, settings: s });
 });
 adminRouter.post('/report/daily/run', adminOnly, fleetOnly, async (req, res) => {
-  const r = await runDailyReportNow();
+  // v2.743(감사 TIMING-04): 화면의 '지금 발송(테스트)' — 정한 시각 전이면 그날 예약 발송을 건너뛰게 만들지 않는다(dailyReport.js).
+  const r = await runDailyReportNow({ manual: true });
   logAudit({ user: req.user?.username || 'unknown', action: '일일 리포트 수동 발송', detail: (r.results || []).join(', ') || r.reason || '' });
   res.json(r);
 });

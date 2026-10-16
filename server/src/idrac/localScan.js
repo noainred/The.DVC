@@ -8,7 +8,7 @@
 
 import { config } from '../config.js';
 import { scanForIdracs, scanPartialReasons } from './scan.js';
-import { registerScanned, hasHpeInDatacenter } from './registry.js';
+import { registerScanned, hasHpeInScanReplaceScope } from './registry.js';
 import { pollNow } from './poller.js';
 import { makeScanAuthPolicy } from './scanAuth.js';
 
@@ -28,8 +28,10 @@ export async function runLocalIdracScan({ ips, username, password, ilo = null, n
   //   scanPoller 와 같은 규칙). 절단(truncated)도 같은 이유로 강등한다(중앙은 이미 그렇게 한다 — 형제 비대칭).
   // v2.611(감사 RECENT2611-01): 사유 판정은 scan.js scanPartialReasons 하나(중앙 scanPoller 와 같은 규칙) — noCreds·인증 실패·
   //   (iLO 없이) 등록된 HPE 도 부분 결과다. 지금 중앙 주기 위임은 merge 만 보내지만 수동 PUSH(routes/collector.js)는 mode 를 받는다.
+  // v2.743(감사 LEFT-01): 'HPE 가 있다' 는 **이 스캔의 교체 범위 안**만 본다 — 아래 registerScanned 가 교체에 넘기는 것과 같은
+  //   엔트리 id(rangeId)·대역(ips)이다(중앙 scanPoller 와 같은 헬퍼). 법인 전체를 보면 범위 밖 HPE 하나로 매번 merge 로 떨어진다.
   const reqMode = mode || 'merge';
-  const partialReasons = reqMode === 'merge' ? [] : scanPartialReasons(scan, { registeredHpe: hasHpeInDatacenter(datacenterId) });
+  const partialReasons = reqMode === 'merge' ? [] : scanPartialReasons(scan, { registeredHpe: hasHpeInScanReplaceScope({ datacenterId, scanRangeId: rangeId, ranges: ips }) });
   const partial = partialReasons.length > 0;
   const effectiveMode = partial ? 'merge' : reqMode;
   // noRegister면 스캔만(중앙 UI에서 확인 후 별도 '등록'). 그 외엔 자동등록(autoRegister 켜진 경우).

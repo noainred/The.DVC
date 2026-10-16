@@ -35,6 +35,33 @@ export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString(
   return `최근 수집 ${fmt(lastRun.at)} · ${Number.isFinite(n) ? `${n.toLocaleString()}건` : '—'}`;
 }
 
+/**
+ * v2.743(감사 WEB-04): '지금 수집' 결과 문구(순수 — vitest 고정). 예전에는 응답과 무관하게 '수집 완료: N건' 만 썼다 —
+ *   진행 중(busy)이면 서버가 직전 결과를 돌려줘 그 건수를 이번 결과로 말했고, 꺼짐(skipped)은 '수집 완료: 0건', 전부 실패해도 '0건' 이었다.
+ *   판정: busy(새로 수집하지 않음) → skipped(꺼짐 — 수집하지 않음) → 적재 건수 + 로그인 거부·인증 정지·수집 실패·수집 대상 아님을 각각.
+ *   문제가 하나라도 있으면 '수집 완료' 라고 말하지 않는다. 건수를 모르면 '—'(0 아님).
+ */
+export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
+  if (!r || typeof r !== 'object') return '수집 결과를 읽지 못했습니다.';
+  if (r.ok === false) return `오류: ${typeof r.reason === 'string' && r.reason ? r.reason : '수집하지 못했습니다.'}`;
+  if (r.busy) return `이전 수집이 아직 진행 중입니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 이번 요청으로 새로 수집하지 않았습니다. 끝나면 상태 줄이 바뀝니다.`;
+  if (r.skipped) return '로그 수집이 꺼져 있어 수집하지 않았습니다 — 위에서 켜고 정책을 저장하세요.';
+  const len = (v) => (Array.isArray(v) ? v.length : 0);
+  const n = r.collected;
+  const nTxt = Number.isFinite(n) ? `${n.toLocaleString()}건` : '—';
+  const rejected = len(r.authRejected), stopped = len(r.authStopped), failed = len(r.failed) + (Number.isFinite(r.failedOmitted) ? r.failedOmitted : 0), skippedVc = len(r.notCollected);
+  const extra = [];
+  if (rejected) extra.push(`로그인 거부 ${rejected}곳(계정·비밀번호를 확인하세요 — 그 vCenter 의 주기 수집은 멈춥니다)`);
+  if (stopped) extra.push(`인증 실패로 멈춘 vCenter ${stopped}곳 건너뜀`);
+  if (failed) {
+    const first = Array.isArray(r.failed) && r.failed[0] ? `${r.failed[0].vcenterId}: ${r.failed[0].error || '알 수 없는 오류'}` : '';
+    extra.push(`수집 실패 ${failed}곳${first ? `(${first}${failed > 1 ? ' 외' : ''})` : ''}`);
+  }
+  if (skippedVc) extra.push(`수집 대상이 아닌 vCenter ${skippedVc}곳(아래 안내)`);
+  const problem = rejected || stopped || failed;
+  return `${problem ? '수집 끝(일부 실패)' : '수집 완료'}: ${nTxt} 적재${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
+}
+
 /** v2.733(C1-01): 로그 폴러가 이번 주기에 건너뛴 vCenter(엣지 위임·비활성·점검중) — 범위 계정에서 뺀 개수도 말한다. 없으면 ''. */
 export function vcLogNotCollectedText(lastRun) {
   const base = notCollectedNote(lastRun?.notCollected, { tail: '이 포탈은 그 vCenter 에 로그인하지 않아 이벤트가 쌓이지 않습니다(엣지 위임 vCenter 의 로그는 아래 조회가 엣지에서 가져옵니다)' });
@@ -95,7 +122,7 @@ export default function VcenterLogs() {
 
   // v2.731(A5-01): putJson 은 400(저장 경로 검사 실패 {ok:false,reason})을 던지지 않는다 — 판정 없이 setS(r) 하면 설정 폼이 오류 객체가 되고 '저장됨' 이 떴다.
   const save = async () => { setBusy('save'); setMsg(null); try { const r = requireChanged(await putJson('/admin/vclogs/settings', s)); setS(r); setMsg('저장됨'); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
-  const collect = async () => { setBusy('collect'); setMsg(null); try { const r = await postJson('/admin/vclogs/collect', {}); setMsg(`수집 완료: ${r.collected ?? 0}건`); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
+  const collect = async () => { setBusy('collect'); setMsg(null); try { const r = await postJson('/admin/vclogs/collect', {}); setMsg(vcLogCollectText(r, fmtTime)); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
 
   return (
     <div style={{ maxWidth: 1080 }}>

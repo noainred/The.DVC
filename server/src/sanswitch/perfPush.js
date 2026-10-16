@@ -17,7 +17,6 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
-import { resilientFetch } from '../util/resilientFetch.js';
 import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -25,6 +24,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { classifyCentral404Body } from '../util/central404.js';
 import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다
 
 const gzipAsync = promisify(zlib.gzip);
 const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');
@@ -111,7 +111,8 @@ async function sendStatusOnly(status) {
     let body = json;
     const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
-    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 20_000, retries: 1 });
+    // v2.743(감사 LEFT-03): 하트비트도 503(중앙 등록부 손상 — 지속형)이면 호출 안에서 다시 보내지 않는다(다음 주기에 다시 올린다).
+    const res = await postNo503Retry(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 20_000 }, { retries: 1 });
     if (!res.ok) return { ok: false, reason: `sanswitch-perf <- ${res.status}` };
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
@@ -202,7 +203,12 @@ async function pushPerfOnce() {
       const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
       if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
       bytes += json.length; gzBytes += body.length;
-      const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
+      /*
+       * v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다(postNo503Retry — isidu·edge-log-result 와 같은 규칙). 중앙 DB 불가·
+       *   등록부 손상은 지속형 503(Retry-After 60초)이라 예전 retries:2 는 같은 gzip 청크를 30~45초 간격으로 두 번 더 올렸다(결과도 같다).
+       *   아래 !res.ok 가 throw 하므로 커서는 전진하지 않고 다음 주기에 다시 간다. 그 밖의 일시 상태·연결 오류는 예전처럼 재시도(retries:2).
+       */
+      const res = await postNo503Retry(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 30_000 }, { retries: 2 });
       if (res.status === 404) {
         // v2.631(EDGE2631-03): 404 는 두 뜻이다 — 중앙 central 기능 꺼짐(404 {reason:'central 비활성화'}) / 엔드포인트 없음(구버전 중앙).
         //   예전에는 전부 'v2.423 미만' 이라 말해 화면이 '중앙을 업그레이드하라' 는 틀린 조치를 줬다(형제 push 들과 같은 판정 하나를 쓴다).

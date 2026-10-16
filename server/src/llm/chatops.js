@@ -7,10 +7,13 @@
 import { loadLlmConfig } from './config.js';
 import { ollamaGenerate } from './ollama.js';
 import { nlSearch, NL_ENTITY_PERM, NL_QUERY_MAX } from './nlSearch.js';
-import { store } from '../store.js';
+import { store, usageReadable } from '../store.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { alertStatus } from '../alerts.js';
 
 const pct = (n) => (Number.isFinite(n) ? Math.round(n) : 0);
+// v2.743(감사 VC-04): 못 읽은 사용률은 0% 가 아니라 '—'(util/numOrNull — 측정값 전용 판정).
+const pctText = (n) => { const v = numOrNull(n); return v == null ? '—' : `${Math.round(v)}%`; };
 
 /**
  * 스냅샷 → LLM에 줄 컴팩트 컨텍스트(수MB가 아니라 핵심 수치만). allowed 로 사용자 scope 강제.
@@ -24,8 +27,13 @@ function buildContext(allowed = null, can = () => true) {
   const vms = (snap.vms || []).filter(inScope);
   const ds = (snap.datastores || []).filter(inScope);
   const onVms = vms.filter((v) => v.powerState === 'POWERED_ON' && !v.template);
-  const topCpu = [...hosts].sort((a, b) => (b.cpuUsagePct || 0) - (a.cpuUsagePct || 0)).slice(0, 5)
-    .map((h) => `${h.name}(CPU ${pct(h.cpuUsagePct)}%/MEM ${pct(h.memUsagePct)}%)`);
+  // v2.743(감사 VC-04): 끊긴·무응답 호스트는 사용률을 읽을 수 없다(store.usageReadable) — 수집기가 채운 0% 를 'CPU 0%' 로 LLM 에 주지 않는다.
+  //   그런 호스트는 상위 목록에서 빼고 개수를 밝히며, 읽은 호스트의 결측 값도 0 이 아니라 '—' 다.
+  const hostsR = hosts.filter(usageReadable);
+  const usageUnknown = hosts.length - hostsR.length;
+  const cpuOf = (h) => numOrNull(h.cpuUsagePct) ?? -1;
+  const topCpu = [...hostsR].sort((a, b) => cpuOf(b) - cpuOf(a)).slice(0, 5)
+    .map((h) => `${h.name}(CPU ${pctText(h.cpuUsagePct)}/MEM ${pctText(h.memUsagePct)})`);
   const fullDs = ds.filter((d) => (d.usagePct || 0) >= 85).sort((a, b) => b.usagePct - a.usagePct).slice(0, 5)
     .map((d) => `${d.name}(${pct(d.usagePct)}%, 여유 ${Math.round(d.freeGB)}GB)`);
   const st = alertStatus();
@@ -39,7 +47,7 @@ function buildContext(allowed = null, can = () => true) {
       `생성시각: ${snap.generatedAt}`,
       `vCenter ${vcenters.length}개: ${vcLines.join(', ')}`,
       `호스트 ${hosts.length}개, VM ${vms.length}개(가동 ${onVms.length}), 데이터스토어 ${ds.length}개`,
-      `CPU 상위: ${can('inv.hosts') ? (topCpu.join(', ') || '없음') : '(호스트 조회 권한 없음 — 이름 생략)'}`,
+      `CPU 상위: ${can('inv.hosts') ? (topCpu.join(', ') || '없음') : '(호스트 조회 권한 없음 — 이름 생략)'}${usageUnknown ? ` (사용량을 읽지 못한 호스트 ${usageUnknown}대 제외 — 연결 끊김·무응답)` : ''}`,
       `포화 임박 데이터스토어: ${can('inv.datastores') ? (fullDs.join(', ') || '없음') : '(데이터스토어 조회 권한 없음 — 이름 생략)'}`,
       `진행중 경보 ${firingAll.length}건: ${can('inv.alarms') ? (firing.join('; ') || '없음') : '(경보 조회 권한 없음 — 내용 생략)'}`,
     ].join('\n'),

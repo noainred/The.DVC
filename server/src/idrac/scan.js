@@ -197,8 +197,9 @@ function knownOtherVendor(r) {
  *   않음(noCreds)' 이 빠져, iLO 전용 대역의 replace 스캔이 **그 법인의 Dell 등록을 전부 지웠다**(재현).
  *   · authFailed — 인증 실패도 실재 Redfish 서버다(비밀번호가 바뀐 등록 서버가 한 번의 실패로 삭제되지 않게). 이 판단의 대가는
  *     '인증 실패가 계속되는 대역은 replace 정리가 일어나지 않는다' 이고, 그것이 삭제보다 안전하다(merge 는 아무것도 지우지 않는다).
- *   · registeredHpe — iLO 계정 없는 대역에서 HPE 는 found 에 들어가지 않는다(미지원 서버). 그 법인에 이미 HPE 가 등록돼 있으면
- *     (iLO 계정을 비운 뒤) replace 가 그 행을 지운다.
+ *   · registeredHpe — iLO 계정 없는 대역에서 HPE 는 found 에 들어가지 않는다(미지원 서버). **그 엔트리의 교체 범위 안에** HPE 가
+ *     등록돼 있으면(iLO 계정을 비운 뒤) replace 가 그 행을 지운다. v2.743(감사 LEFT-01): 호출부는 registry.js hasHpeInScanReplaceScope
+ *     (교체와 같은 술어)로 계산한다 — 예전 hasHpeInDatacenter(법인 전체)는 교체가 지우지 않는 범위 밖 HPE 로도 강등했다.
  */
 export function scanPartialReasons(r, { registeredHpe = false } = {}) {
   const out = [];

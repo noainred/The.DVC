@@ -110,7 +110,8 @@ test('L-R2: CSV export 가 guardCell(수식 인젝션 방어)을 적용', () => 
   assert.match(src, /import \{ guardCell \} from '\.\.(?:\/\.\.)?\/util\/csv\.js'/);
   // 인라인 esc 들이 guardCell 을 통과.
   assert.ok(!/const esc = \(v\) => \{ const s = String\(v \?\? ''\)/.test(src), '가드 없는 esc(String 직접)가 남아있으면 안 됨');
-  assert.match(src, /const esc = \(v\) => \{ const s = guardCell\(v\)/);
+  // v2.743(INJPKG-05): 손으로 쓴 사본 대신 공용 csvCell(guardCell 을 거친다 — util/csv.js)을 쓴다.
+  assert.match(src, /const esc = \(v\) => \{ const s = guardCell\(v\)|const esc = csvCell;/);
   assert.match(src, /guardCell\(v\)\.replace\(\/"\/g/); // vclogs export.csv
 });
 

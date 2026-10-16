@@ -8,7 +8,7 @@
  */
 import { store } from '../store.js';
 import { load as loadSettings } from './settings.js';
-import { collectAndStore } from './service.js';
+import { collectAndStore, pruneOrphanGuestDisk } from './service.js';
 import { prune, getDb, lastCollectTs } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { loadVcenterConfig } from '../config.js';
@@ -28,6 +28,25 @@ let lastPruneTs = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 pr
 const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
 export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs, ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
+
+// v2.743(VC-02): 등록부에서 지운 vCenter 의 최신 행 정리 결과(지웠거나 판정할 수 없어 건너뛴 사실). ⚠ 폴러 상태(guestDiskPollerStatus)에 싣지
+//   않는다 — 그 객체는 범위 계정에도 scopePollerStatus 를 거쳐 나가는데 이 값은 전 함대의 삭제된 vCenter id 다(v2.550.3 '상태 객체에 집계를
+//   담아 내보내지 말 것'). 라우트가 전체 범위 계정에게만 따로 싣는다.
+let lastOrphanPrune = null;
+export function guestDiskOrphanPruneStatus() { return lastOrphanPrune; }
+
+/**
+ * v2.743(감사 VC-02): 보존 정리와 같은 틱에서 등록부에서 지운 vCenter 의 최신 행을 지운다(판정은 service.js knownVcenterIds 한 벌 —
+ *   등록부를 못 읽었거나 아무 vCenter 도 모르면 지우지 않고 그 사실을 남긴다). 지운 것은 콘솔에도 한 줄 남긴다(조용한 삭제 금지).
+ */
+export async function runOrphanPrune() {
+  let r;
+  try { r = await pruneOrphanGuestDisk(); } catch (e) { r = { ok: false, skipped: 'error', error: String(e?.message || e).slice(0, 300) }; }
+  lastOrphanPrune = { at: Date.now(), ...r };
+  if (r?.ok && r.removedRows > 0) console.warn(`[guestdisk] 등록부에 없는 vCenter ${r.vcenterCount}곳의 최신 행 ${r.removedRows}개를 지웠습니다: ${(r.vcenters || []).slice(0, 8).join(', ')}`);
+  else if (r && !r.ok && r.skipped !== 'db-unavailable' && r.skipped !== 'no-known-vcenters') console.warn(`[guestdisk] 삭제된 vCenter 정리를 건너뜀(${r.skipped}${r.error ? `: ${r.error}` : ''})`);
+  return r;
+}
 
 // v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
@@ -109,6 +128,7 @@ export async function runGuestDiskNow(trigger = 'manual') {
       partialStale += Number(r.commit?.partialStale) || 0;
     }
     await prune(s.retentionDays);
+    await runOrphanPrune();
     lastRunTs = Date.now();
     lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}),
       ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}), ...(notCollected.length ? { notCollected } : {}) };
@@ -142,6 +162,7 @@ export function startGuestDiskPoller() {
       if (Date.now() - lastPruneTs >= PRUNE_EVERY_MS) {
         lastPruneTs = Date.now();
         try { await prune(s.retentionDays); } catch (e) { console.warn(`[guestdisk] prune 실패: ${e.message}`); }
+        await runOrphanPrune();
       }
       if (!demoOn(s.enabled)) return;                 // opt-in(데모는 켜진 것처럼 — v2.708) — 주기 수집은 꺼져 있으면 안 한다(prune 은 위에서 이미 수행)
       // ⚠ v2.601(감사 TIM2601-04): 재시작 직후 lastRunTs 가 0 이라 주기(기본 12시간)를 무시하고 전량 수집했다(28대 로그인 ·

@@ -9,6 +9,7 @@ import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegi
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
+import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue } from '../../collector/registry.js';
 // 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
 import { withDefaultScheme, urlTransport, transportSummary, allowlistSummary, rejectedHttpRegistrations, centralUrlTransport } from '../../collector/transportPolicy.js';
@@ -383,7 +384,12 @@ adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res)
       .map((d) => ({ name: d.name, freeGB: d.freeGB, capacityGB: d.capacityGB }))
       .sort(byName);
     res.json({ ok: true, vmName: t.vm.name, powerState: hw.powerState, hw, networks, datastores });
-  } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
+  } catch (e) {
+    // v2.743(VC-03): 주문형 로그인 문이 막았거나(비활성·점검중·site·인증 정지) 로그인이 거부되면 409 + 사유 필드 — 502 는 웹이
+    //   재시도 대상으로 읽어 같은 거부를 다시 부른다(v2.742 고아 VMDK 스캔과 같은 판단).
+    if (e?.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });
+    res.status(502).json({ ok: false, reason: e.message });
+  }
 });
 
 // 사양 변경 실행. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
@@ -423,6 +429,7 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
     res.status(400).json({ ok: false, reason: r.error, changes: r.changes });
   } catch (e) {
     logAudit({ user: req.user?.username, action: 'VM 사양 변경', target: t.vm.name, detail: `오류: ${e.message}`, ip: req.ip || '' });
+    if (e?.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });   // v2.743(VC-03)
     res.status(502).json({ ok: false, reason: e.message });
   }
 });

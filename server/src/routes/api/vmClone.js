@@ -11,6 +11,7 @@ import { listJobs, saveJob, deleteJob, jobVmIds } from '../../vmclone/store.js';
 import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
+import { isAdminReq } from '../../auth/addressMask.js';
 
 const adminOnly = requireRole('admin');
 
@@ -26,6 +27,23 @@ export function scopeCloneStatus(st, visibleJobs, allJobs) {
   return { ...st, running: run, queued, runningOutOfScope: !!(st.running && !run), queuedOutOfScope: (st.queued || []).length - queued.length };
 }
 
+/**
+ * v2.743(감사 AUTHZ-02): NFS 마운트 요약 — 대상 선택 드롭다운·잡 배지의 원천.
+ * 형제 GET /admin/nfs-mounts 는 전체 범위 전용(403)인데 이 경로는 범위 관리자에게도 NFS 서버 주소·export 경로·포탈 마운트
+ * 절대 경로를 그대로 줬다. NFS 마운트에는 법인(vCenter) 귀속 필드가 없다 — '귀속 없는 데이터는 범위 계정에 노출하지 않는다'.
+ * 범위 계정(전체 범위 아님)과 관리자가 아닌 문맥(mock 데모 계정 — isAdminReq 판정 하나)에는 {id, label, mounted} 만 주고
+ * `masked:true` 로 밝힌다. label 은 서버 주소·경로 없이 마운트 id 로 만든다(마운트에는 이름 필드가 없다 — 지어내지 않는다).
+ * 잡 저장(NFS 대상)은 막지 않는다(정책 — 범위 관리자가 공용 NFS 를 쓸 수 있는지는 운영 판단).
+ * @returns {{ mounts: object[], masked: boolean }}
+ */
+export function mountsView(mounts, { full }) {
+  const list = Array.isArray(mounts) ? mounts : [];
+  if (full) {
+    return { masked: false, mounts: list.map((m) => ({ id: m.id, label: `${m.server}:${m.exportPath}`, server: m.server, exportPath: m.exportPath, mounted: m.mounted, mountPoint: m.mountPoint })) };
+  }
+  return { masked: true, mounts: list.map((m) => ({ id: m.id, label: `NFS 마운트 ${m.id}`, mounted: m.mounted })) };
+}
+
 export function registerVmClone(api) {
 
 /** 잡 목록 + 실행 상태 + NFS 마운트 요약(대상 선택 드롭다운용). */
@@ -35,11 +53,13 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const all = listJobs();
   const jobs = allowed ? all.filter((j) => allowed.has(String(j.vcenterId))) : all;
+  const mv = mountsView(listMounts(), { full: !allowed && isAdminReq(req) });
   res.json({
     jobs,
     ...(allowed ? { scoped: true, omittedOutOfScope: all.length - jobs.length } : {}),
     status: scopeCloneStatus(schedulerStatus(), jobs, all),
-    mounts: listMounts().map((m) => ({ id: m.id, server: m.server, exportPath: m.exportPath, mounted: m.mounted, mountPoint: m.mountPoint })),
+    mounts: mv.mounts,
+    ...(mv.masked ? { mountsMasked: true } : {}),
   });
 });
 

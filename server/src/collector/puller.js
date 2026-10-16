@@ -43,6 +43,27 @@ export function pullOptionsFor(failCount) {
   return { retries: failCount >= 1 ? SUSPECT_RETRIES : 2 };
 }
 
+/**
+ * v2.743(감사 EDGE-01): 엣지가 export 를 **이유와 함께** 거절한 비-2xx(지금은 503 `registryUnreadable` — 엣지 iDRAC 등록부를 읽지 못함)를
+ *   그 이유가 보이는 오류로 바꾼다. 예전에는 상태 코드만 남아('export -> 503 Service Unavailable') 엣지 장애와 구별되지 않았다.
+ *   어느 경우든 **던진다** — 호출부(pullNowInner)는 setCollectorServers 를 부르지 않으므로 직전 스냅샷이 남는다(빈 목록으로 지우지 않는다).
+ *   본문은 작게만 읽는다(16KB — 이 응답에 데이터는 없다). 읽지 못하면 예전 문구 그대로.
+ */
+export const EDGE_REASON_TEXT = Object.freeze({
+  registryUnreadable: '엣지 iDRAC 등록부(idrac.json)를 읽지 못함',
+});
+export async function exportFailError(res) {
+  const base = `export -> ${res.status} ${res.statusText || ''}`.trim();
+  let body = null;
+  try { body = await readJsonCapped(res, 16 * 1024, '엣지 export 오류 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* 이미 소비 */ } }
+  const code = body && typeof body.reason === 'string' && Object.hasOwn(EDGE_REASON_TEXT, body.reason) ? body.reason : null;
+  if (!code) return new Error(base);
+  const detail = typeof body.detail === 'string' ? body.detail.slice(0, 200) : '';
+  const err = new Error(`${EDGE_REASON_TEXT[code]}(${code}, HTTP ${res.status})${detail ? ` — ${detail}` : ''} · 중앙은 직전에 받은 서버·전력을 유지합니다`);
+  err.edgeReason = code;          // 상태(edgeReason)·통신 지도 사유가 읽는다 — 다시 당겨도 같은 결과라 호출부가 저하 유예를 주지 않는다
+  return err;
+}
+
 async function pullOne(c, { retries = 2, signal = null } = {}) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
   // v2.742(감사 EDGE-01): 마지막으로 저장한 export 의 센서 상세 커서를 보낸다 — 엣지는 그 뒤로 바뀌지 않은 서버의 상세를 뺀다.
@@ -54,7 +75,7 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
     onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
   });
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
-  if (!res.ok) throw new Error(`export -> ${res.status} ${res.statusText}`);
+  if (!res.ok) throw await exportFailError(res);
   // v2.583: 해제 후 크기 상한(gzip 폭탄 방어 — util/readCapped.js).
   // v2.602(감사 CEN2602-01 high): 응답을 **쓰는 필드만·아는 타입으로** 좁힌 뒤에 쓴다 — 오염된 원소 하나(예:
   //   serviceTag:{toString:1})가 함대 전체 물리 서버 집계·온도·3단 지도를 죽이지 못하게(remoteInventory.js 머리말).
@@ -277,6 +298,9 @@ async function pullNowInner(signal = null) {
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);
+      // v2.743(감사 EDGE-01): 엣지가 이유를 밝힌 지속형 거절(registryUnreadable)은 인증 실패처럼 곧바로 '실패' 로 둔다 — 한 주기 저하 유예는
+      //   일시 장애를 위한 것이고 이 상태는 다음 주기에도 같다. 사유 코드는 상태 `edgeReason` 으로 싣는다(통신 지도 pull-edge-registry).
+      const edgeReason = typeof err?.edgeReason === 'string' ? err.edgeReason : null;
       const n = (fails.get(c.id) || 0) + 1;
       fails.set(c.id, n);
       // 깜빡임 방지: 한 사이클(이미 내부 재시도 포함)만 실패하면 '저하(degraded)'로 두고 직전 데이터·온라인을
@@ -289,10 +313,10 @@ async function pullNowInner(signal = null) {
       //   동안 '정상(저하)' 로 보였다. 그때 `at` 은 null 이다 — state.js 는 at 을 '마지막 정상 pull' 로 두는데
       //   (v2.548 H5, 통신 지도 라벨) 비워 두지 않으면 실패 시각이 그 자리에 들어간다.
       const everOk = Number.isFinite(prevSt.hosts);
-      if (n >= 2 || isAuth || !everOk) {
-        setCollectorStatus(c.id, { ...prevSt, ok: false, degraded: false, error: d.message, fails: n, ...(everOk ? {} : { at: null, neverOk: true }) });
+      if (n >= 2 || isAuth || edgeReason || !everOk) {
+        setCollectorStatus(c.id, { ...prevSt, ok: false, degraded: false, error: d.message, fails: n, edgeReason, ...(everOk ? {} : { at: null, neverOk: true }) });
       } else {
-        setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n });
+        setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n, edgeReason: null });
       }
       failedMs += Date.now() - tStart; failedCount++;
       console.warn(`[collector] ${c.id} pull 실패(${n}${n >= 2 ? ' · 재시도 없이 1회' : ''}): ${d.message}`);

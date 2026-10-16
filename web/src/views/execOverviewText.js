@@ -208,6 +208,8 @@ export function deltaText(kind, delta, days) {
 export function trendNote(kind, t) {
   if (!t) return '';
   if (t.reason === 'no-series') return '수량 추이는 기록하지 않습니다';
+  // v2.743(DB-02): 서버가 전력 추이를 ?include=power 일 때만 계산한다 — 요청하지 않은 계열을 '범위 계정' 탓으로 말하지 않는다.
+  if (t.reason === 'not-requested') return '이 화면은 이 추이를 요청하지 않았습니다';
   if (t.reason) return '전체 범위 계정만 추이를 봅니다';
   if (t.error) return `추이를 읽지 못했습니다: ${t.error}`;
   const valid = (t.series || []).filter((p) => p && p.v != null).length;

@@ -18,8 +18,11 @@
 
 import crypto from 'node:crypto';
 import { isIP } from 'node:net';
+import { isAdminDetailUser } from './demoGuest.js';
 
-export const isAdminReq = (req) => req?.user?.role === 'admin';
+// v2.743(감사 AUTHZ-01): mock 모드 데모 계정(요청 문맥 role 'admin' + demoGuest)은 관리자가 아니다 — operator 와 같은 가림 판본.
+//   판정은 demoGuest.js isAdminDetailUser 하나(위 머리말의 'role === admin 하나' 를 그 함수가 대신한다).
+export const isAdminReq = (req) => isAdminDetailUser(req?.user);
 
 const HIDDEN = '(주소 가림)';
 

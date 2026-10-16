@@ -1161,7 +1161,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **설정 화면의 '목록에 없음' 판정은 그 vCenter 의 인벤토리를 읽었을 때만**(C1-03 — vmseries `staleUnknown`, 골격·pending·disabled·이월 없는 unreachable/maintenance).
     · **GPU 게스트 폴러도 `directCollectSkipReason` 으로 site·비활성·점검중을 로그인 전에 거른다**(C4-01 — v2.732 B4-01 의 형제 누락). site 는 unreadVcenters(push 보류 사유)에
       넣지 않는다 — '못 읽음' 이 아니라 '이 노드의 몫 아님'. **새 vCenter 로그인 수집기는 이 판정을 먼저 볼 것.**
-    · **엣지 설정 pull 은 '지금 수집' 을 기다리지 않는다**(C4-02 — SAN: 테스트 대행 먼저, 수집은 단일비행 작업 + 호스트 잠금). storage·PDU 는 후보로 남았다.
+    · **엣지 설정 pull 은 '지금 수집' 을 기다리지 않는다**(C4-02 — SAN: 테스트 대행 먼저, 수집은 단일비행 작업 + 호스트 잠금). ✅ storage·PDU 도 v2.741 LEFT-02 에 같은 단일비행 작업(`collectJob`·`collectRun`)으로 고쳤다(v2.743 LEFT-05 정정).
     · **스토리지 스냅샷도 SAN 과 같이 주기 끝 1회 + 안전 타이머 + 종료 flush**(C4-03) — 쓰기 실패는 수집을 멈추지 않고 콘솔·`snapshotSave` 에 남는다. 여러 대를 차례로 수집하는
       호출부는 `collectDeviceNow(id, {flush:false})` + 끝에 `flushSnapshotsNow()` 한 번(SAN·스토리지 둘 다 인자가 있다). `util/adaptiveTimer.js` 는 fn 오류를 1시간에 한 번 로그한다.
     · ⚠ **설정·등록부 캐시는 디스크 쓰기 성공 뒤에만 바꾸고 리스너도 그 뒤에**(C4-04 — v2.732 B5-03 이 2곳, 이번 8곳: partfault·pdu·cvp(엣지 applyCentral 포함)·curuser·relaycheck·
@@ -3551,7 +3551,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       토큰 확인은 본문을 읽기 전 · 거절은 `Connection: close`(받지 않을 본문을 흘려받지 않는다) · `XFER_TEST_ENABLED=false` 는 404 + 사유(구버전 HTML 404 와 `kindFor404` 로 갈린다).
     · 측정기(`probe.js`): 재시도 0 · 대상·토큰은 등록부에서만 · `withOutboundTag` · 속도 = 받는 쪽 구간(↓ 응답 머리 → 마지막 바이트, ↑ 엣지 recvMs).
       ⚠ 엣지 앞 프록시가 업로드 본문을 모았다 넘기면 recvMs 가 LAN 구간이 된다 — recvMs < 전체의 25% 이고 전체 > 1초면 중앙 전체 시간으로 계산하고 `basis:'sender-total'` 로 밝힌다.
-      실패 종류 `XFER_FAIL_KINDS` 10종 ↔ 웹 `FAIL_TEXT` 1:1(서버 테스트 ⑧ 대조) — 받기 시작한 뒤 끊기면 'unreachable' 이 아니라 'short'.
+      실패 종류 `XFER_FAIL_KINDS` 11종(v2.735.3 에 `collector-off` 추가 — v2.743 LEFT-06 정정) ↔ 웹 `FAIL_TEXT` 1:1(서버 테스트 ⑧ 대조) — 받기 시작한 뒤 끊기면 'unreachable' 이 아니라 'short'.
     · DB `xfer-speed.db`: 원시(기본 180일) + 일 요약(5년) + 최신 표(`xfer_latest` — GROUP BY MAX 금지) · `INSERT OR IGNORE`+changes(재적재 이중 계수 금지) ·
       최신은 더 늦은 ts 만 · **실패 행의 속도는 NULL**(0 아님) · 청크 prune + 진행 공유.
     · 판정(`analyze.js` — 웹은 다시 판정하지 않는다): 상태 6종 · 측정 없음·오래됨(`staleMsOf` — 간격 실행이면 `max(간격×3, 2시간)`, 예약만이면
@@ -3680,7 +3680,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 카드 묶음은 `font-size:0;line-height:0` 래퍼 안의 inline-block 이다 — **안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면 라벨과 값이 겹친다**(Chromium 판독에서 발견).
       좁은 폭은 `<style>` @media(520px 이하 여백 축소 — Outlook 데스크톱은 무시한다)로 400·360px 넘침 0. 테스트 ⑤ 가 두 규칙을 고정한다(변이 2/2).
     · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 등 메일 클라이언트에서의 모양은 확인하지 못했다(가짜 SMTP · Chromium 미리보기).
-  - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개 · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
+  - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개(v2.740 에 서머리를 지워 지금은 3개 — 옛 summary 주소는 법인 현황으로 열린다) · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
     (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
     "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".
     서버 `isidu/bulk.js`·`report.js overviewOf/buildOverview`·`db.js topEntriesOf` + `GET /tools/isilon-dirusage/overview`·`POST /tools/isilon-dirusage/bulk` +
@@ -5192,7 +5192,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       svcmon `/state`·`/diag` 는 읽기 전용 목록(LEFT-06) · Horizon 기간 집계는 3일 조각 + 양보(DB-02 — 결과·순서 동일).
     · ⚠⚠ **IP 대장 엑셀 내보내기는 워커 스레드다**(LEFT-01, `ipam/excel.js renderIpamWorkbook` + `ipam/excelWorker.js`): 시트 조립은 생성기 `subnetSheetsGen` 하나를 동기판·양보판이 같이 돌고, 워크북 조립·직렬화는 워커에서 —
       결과 파일은 압축을 푼 항목 단위로 예전과 같다(테스트 고정). 실측 400시트 최장 정지 6.5초 → 38ms. 워커를 못 띄우면 인라인(콘솔에 남김) · 시한 10분(`IPAM_XLSX_TIMEOUT_MS`) · 끊기면 멈추고 가드를 푼다 ·
-      `IPAM_XLSX_WORKER=0` 으로 끈다. ⚠ 형제 `/tools/waste/export` 는 여전히 메인 스레드다(다음 후보).
+      `IPAM_XLSX_WORKER=0` 으로 끈다. ⚠ 형제 `/tools/waste/export` 는 v2.742 LEFT-05 에 압축만 비동기(`zipManyAsync`)로 바꿨고 워크북 `writeBuffer` 직렬화는 여전히 메인 스레드다(다음 후보 — v2.743 LEFT-05 정정).
     · **웹**: Platform 전체 호스트·VM KPI 와 개요 VM 분포·리전 파이는 미수집 vCenter 를 더하지 않고 '최소 · 미수집 N곳 제외'(WEB-01 — `corpSiteStatus.countable`) · 업그레이드·VM 성능 트래킹은 다시 읽기 실패가
       화면을 오류로 바꾸지 않는다(WEB-04) · 용량 어드바이저 '계산 N분 전'(LEFT-09 일부) · GPU 게스트 진단 vCenter 목록 실패 사유(LEFT-11).
     · ⚠⚠ **CSV 수식 가드 — 음수·순수 숫자는 가드하지 않는다**(WEB-02): 엑셀이 `'-12.5` 를 텍스트로 읽어 정렬·합계에서 뺐다. 규칙은 웹 `util/csv.js`·서버 `util/csv.js`·pyportal `hub/csvio.py` **세 벌이 같고**
@@ -5200,7 +5200,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **패키징**(INJPKG-01·03·05): root 로 부르는 래퍼(vmware-portal-otp·-users·-verify)는 앱 트리 밖 root 소유 사본(`/usr/local/libexec/vmware-portal<prefix>/`)이고 앱 트리는 서비스 계정 권한으로만 실행 ·
       root 로 도는 서명 확인은 uid 0 소유 정책·키 파일만 받는다 · `vp_check_prefix`(install·uninstall 같은 함수)가 시스템 폴더 prefix 를 거부 · 빌드의 config 정리는 허용 목록(`*.example.json`).
     · 남긴 것(다음 점검 후보): LEFT-07(hangLog 실패 경로 보고 — v2.560 수정의 위험 대비 이득이 작다) · LEFT-12(hostAccess 변경 라우트 전체 범위 게이트·Electron 버전 — 정책) · VC-03 · DEV-06 · WEB-03 ·
-      INJPKG-02(du 출력 4MB 상한) · DB-04(CVP·통신 점검 COUNT) · TIMING-03 주기 틱 보류 · 새 상태 필드 화면 표시(snapshotSave·keptCopy·staleCopy 등) · `/tools/waste/export` 메인 스레드 · REST 수집기 `/401/` 재던짐.
+      INJPKG-02(du 출력 4MB 상한) · DB-04(CVP·통신 점검 COUNT) · TIMING-03 주기 틱 보류 · 새 상태 필드 화면 표시(snapshotSave·keptCopy·staleCopy 등) · `/tools/waste/export` 워크북 직렬화(압축은 ✅ v2.742 비동기) · ✅ REST 수집기 `/401/` 재던짐(v2.742 DEV-03 `restCommon.isCredReject` 로 고쳤다 — v2.743 LEFT-05 정정).
     · ⚠ 작업 방식: 분석은 Workflow 5개(축 10개 × 2인 반증), 수정은 12그룹이 같은 작업 트리에서 겹치지 않는 파일만 고쳤다. stop hook 이 WIP 커밋을 요구해 **66e3bed 는 그룹 변이 도중의 `ping/db.js` 되돌린 판본**을 담았다 —
       그 뒤 커밋이 바로잡았다(그 커밋판으로 되돌리지 말 것). GJ 는 같은 이유로 server/src 를 격리 사본에 복사해 변이 검증했다(다른 그룹의 진행 중 변경과 겹치지 않게).
   - ⚠⚠ **v2.742 — '세 번 반복' 1회차(10축 발견 → 발견마다 2인 반증 → 12그룹 수정) 확정분**(사용자 요청 "세번 반복" · 선택 '직전과 동일' · '회차마다 릴리스'.
@@ -5235,13 +5235,49 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · **OS 인벤토리 prune 은 '읽은 vCenter 에서 사라진 VM' 만**(VC-04): 첫 수집 중·불통·낡음·점검중 vCenter 의 기록은 `keptUnread`, 등록부를 못 읽으면 vCenter 단위 삭제 안 함,
       스캔 실패는 직전 OS 를 남기고 `error`·`errorAt`·`okAt`(웹 '최근 실패 · 이전 값').
     · **끊긴 ESXi 호스트의 센서 온도는 `store.usageReadable` 로 적재·집계에서 뺀다**(VC-02 — v2.594 사용률 규칙의 온도판) · 유령 스냅샷 후보는 `consolidationNeeded` 근거일 때만 warn(RECENT-03).
-    · **로그 DB**: 엣지 연합 조회·네트워크 로그 분석의 정확 COUNT 를 상한 있는 조각 세기로(`countCappedAsync`, 100,000 — 넘으면 `totalCapped`·'N건 이상', 중앙 `logQueries` 가 그 필드를 보존한다) ·
+    · **로그 DB**: 엣지 연합 조회·네트워크 로그 분석의 정확 COUNT 를 상한 있는 조각 세기로(엣지 연합 조회(검색어·심각도)는 `searchAsync` 기본 상한 `COUNT_CAP` 10,000 · 네트워크 로그 분석은 `ISSUE_COUNT_CAP` 100,000 · 필터 없는 엣지 조회는 정확 COUNT — v2.743 LEFT-04 정정. 넘으면 `totalCapped`·'N건 이상', 중앙 `logQueries` 가 그 필드를 보존한다) ·
       logs prune 적응 청크(목표 40ms) · 필터 CSV 조각 읽기.
     · **GPU 게스트 오버레이 TTL = max(30분, 폴 주기×3 + 30초)**(VC-01) · 이름으로 찾는 엣지 설정(GPU 게스트 배포·배포 사용자)은 쓰기도 `agentKeyOf`, 로드 때 대소문자 중복 병합(LEFT-01 — v2.604 규약의 쓰기 누락).
     · **웹**: 서비스 중단 화면의 확인 요청은 토큰을 싣고 401·403 도 '서버 응답' 으로 본다(WEB-01) · `sendJson/putJson/…` 반환값은 `requireChanged` 로 판정(WEB-02 — `audit2727e` ALLOW2 스윕) ·
       용량 모름 호스트는 `hostCapacityText`(LEFT-06) · 서버 `hostsCapacityUnknown` 을 쓰지 않던 세 화면.
     · ⚠ 작업 방식: 첫 실행 12그룹 중 9그룹이 세션 사용량 한도로 멈췄다 — v2.607 규칙대로 반쯤 고친 파일 69개를 기준판으로 되돌리고 8그룹을 처음부터 다시 돌렸다(결과 파일·변이 기록이
       있고 작업 트리가 수정본 백업과 바이트 동일했던 GF 만 완료로 인정). 변이 검증 중인 그룹의 파일은 WIP 커밋에서 뺐다(끝난 그룹 파일만 먼저 커밋).
+  - ⚠⚠ **v2.743 — '세 번 반복' 2회차(10축 발견 → 발견마다 2인 반증 → 12그룹 수정) 확정분**(같은 요청의 2회차 · 선택은 1회차와 같다.
+    발견 39 = 확정 29 · 확정(약) 8 · 가능성 1 · 반증(약) 1, 고친 것 37 · 남긴 것 2(INJPKG-02 Windows ACL 가능성 · DEV-05). 상세 `docs/AUDIT-2026-10-16b.md`,
+    회귀 `server/test/audit2743{a..l,lead}.test.js` + 웹 `audit2743j`·`tools/audit2743{d,k}`·`tools/vmCloneMountText`·`vmcfg/vmHygieneText` — 그룹별 변이 검증(고친 파일을 `46f5e5e` 판본으로 되돌리면 실패)):
+    · ⚠⚠ **'관리자 판본' 판정은 `auth/demoGuest.js isAdminDetailUser` 하나**(AUTHZ-01): mock 데모 계정은 요청 문맥이 admin 이라 `role === 'admin'` 으로 가림을 정하던
+      곳마다 관리자 판본(관리 IP·계정명·CONFIG_DIR 절대 경로·등록부 CSV)이 나갔다. addressMask `isAdminReq`·scopeDbStatus·scopeFilePaths·redactPushStatus·archScan
+      `scopeArchPaths` 가 이 함수를 쓰고, data.csv 는 데모 계정에 주지 않으며 READ_DENY 에 5접두를 더했다. ⚠ **라우트에서 `req.user?.role === 'admin'` 으로
+      가림을 정하지 말 것** — 그룹 수정 뒤에도 그 꼴 8곳(partFaults·bmUsage·xferSpeed·isilonDirUsage·bmstor·vmtrack·portalCheck)이 남아 리드가 고쳤다(GET 239경로 재조사 0건).
+      memoJson 의 extraKey 에 역할을 넣는 곳은 `demoGuest` 도 넣는다(portalCheck arch).
+    · **범위 관리자의 NFS 마운트 정보는 가린다**(AUTHZ-02 — `/tools/vm-clone` `mountsView`, 형제 `/admin/nfs-mounts` 는 403) · hostAccess 변경 5라우트 fleetOnly · uagmon Electron 33.4.11 고정(LEFT-09).
+    · ⚠⚠ **엣지 iDRAC 등록부도 `registryLoadError`**(EDGE-01 — v2.612 LEFT2612-01 의 형제): 손상이면 엣지 export 503 `registryUnreadable` + Retry-After 60, 중앙 puller 는 직전 스냅샷을 유지하고
+      `edgeReason`·통신 지도 `pull-edge-registry` 로 말한다. **등록부를 읽어 '전량' 을 보내는 엣지 응답은 이 판정을 먼저 볼 것.**
+    · iDRAC replace 강등 판정은 교체와 같은 술어 `hasHpeInScanReplaceScope`(LEFT-01 — v2.742 DEV-01 이 교체를 엔트리 단위로 바꾼 뒤 강등만 법인 단위로 남았다).
+    · ⚠ **대소문자 중복 접기는 키를 실제 엣지 이름으로, 값은 시간 순서로 '기본값 아닌 것' 만 얹는다**(RECENT-01 — v2.742 LEFT-01 회귀: 부분 사본이 최근 것으로 남아 수집 끔·계정 삭제).
+      GPU 게스트 정리는 로컬만 폴러가, 엣지 항목은 그 엣지 push 주기 TTL 로(LEFT-02).
+    · ⚠⚠ **'못 읽은 vCenter 의 빈 목록' 은 삭제가 아니다 — 판정은 `vmtrack/diff.js inventoryUnreadReason`**(VC-01): connected 면 읽음, VM 이 있으면 직전 값 서빙, 그 밖의 빈 목록은
+      사유(disabled·maintenance·pending·unreachable)로 diff 하지 않는다. VM 생성/삭제 이력의 '지금 있는가' 도 같은 함수. 게스트 디스크 최신 행은 삭제된 vCenter 를 지우고(`pruneOrphanVcenters`),
+      등록부를 못 읽으면 지우지 않는다(VC-02 — 오래된 행은 합계에 남기되 `stale` 표지).
+    · 끊긴 호스트 사용률 0% 의 형제 4경로(관계 그래프·/metrics·iDRAC vcenter-host·ChatOps — VC-04, `store.usageReadable`) · 클러스터 개수는 `clustercfg/analyze.js clusterCountOf` 하나(LEFT-07 — 내부·공개 API).
+    · **주문형 vCenter 로그인 문의 형제 — 쓰기·조회 4경로 + 배치 칸**(VC-03): VMware Tools 업그레이드·VM 사양 변경·프로비저닝(배치 전체가 로그인 1회 공유, 409 는 기억)·GPU 게스트 테스트가
+      `onDemandLogin`, 리드가 `provision/placement.js` 도 `onDemandVcBlock` 으로(v2.741 '배치 칸은 건너뛰지 않는다' 는 생성이 직접 로그인하던 때의 판단 — 테스트 계약을 바꿨다).
+    · ⚠⚠ **알림 발송은 채널별 줄**(TIMING-02 — v2.742 TIMING-01 회귀: 한 줄이라 응답 없는 웹훅이 모든 알림을 늦췄다): 웹훅류 동시 4 · 메일 1, 결과는 채널 순서대로. 메일 제목은 `util/smtp.js headerSafeText`
+      (INJPKG-03 — 제어 문자 하나가 메일 전체를 실패시켰다). VM 구성 점검 알림은 목업 vCenter VM 제외(VC-05 — 화면 문구 `vmHygieneText.notifyNowMsg`).
+      일일 보고 수동 발송은 `lastManualTs` 로 따로(TIMING-04). ⚠ **발송 성공 판정은 `reports/dailyReport.js anySendOk`(`/:(2\d\d|ok)\b/`)** — 예전 `/:(2\d\d)/` 는 메일 결과 'email:ok' 를 몰라
+      메일만 쓰는 현장에서 정기 보고를 하루 내내 다시 보냈다(리드가 찾은 기존 결함 — alerts.js 테스트 발송은 v2.479 에 이미 그 규칙이었다. **sendText 결과를 판정하는 새 코드도 이 함수로**).
+    · ⚠ **적응 타이머의 첫 실행 전 재무장은 `min(첫 실행 예정, 생성 + 새 주기)`**(TIMING-01): 첫 지연을 버리면 엣지 재시작 직후 스토리지 첫 수집이 약 1시간 밀렸다. 주기 변경 알림은 **실효 값이 바뀔 때만**.
+    · 아이실론 대기 기록은 한 번에(`scanQueuedMany`, TIMING-03) · 엣지가 버린 '지금 수집' 요청은 push 의 `runDropped` 로 알리고 중앙이 `applyIsiduEdgeDrops` → `dropTaken` 으로 사유와 함께 정리(LEFT-08 — 웹 `EDGE_DROP_TEXT`).
+    · 웹(GJ): 중계 '지금 점검' 응답 ok 덮어쓰기(WEB-01 — `okCount` 별도) · 권한 매트릭스 편집 유지(WEB-02 — `userAdmin/permReload.js`) · vCenter 로그 '지금 수집' busy·꺼짐 문구(WEB-04) ·
+      중계 응답 agent 비문자열 TypeError(INJPKG-04) · CSV 이스케이프는 `csvCell` 한 벌(INJPKG-05 — 손 사본 4곳이 단독 CR 을 빠뜨렸다). 라이선스 사용량 결측은 0% 가 아니라 '—'(WEB-05).
+    · CVP·SAN(GK): CVP·SAN 포트 사용량 push 는 `postNo503Retry`(LEFT-03 — 혼잡 503 도 다음 주기) · CVP 예산 소진 + 인터페이스 못 읽음 = 'budget'(`budgetTelemetry`, DEV-04) ·
+      sensorshow 이상어 `SENSOR_BAD_WORD`(DEV-02 — v2.742 회귀 되돌림, 'High'·'Low' 정상 펌웨어면 오탐 — 실장비 미확인) · CVP '지금 수집' busy 는 주의 톤 + `directBusy`(WEB-03).
+    · GL: svcmon LDAP 은 BER 단형·장형 길이를 읽는다(DEV-01 — AD 의 실패가 성공으로 보였다) · FC HBA 사용률 분모는 `bmusage/parse/fcRate.js` FC 표준 데이터율(DEV-03 — 표에 없는 속도는 명목 + `pctBasis`,
+      데이터율 초과는 null + `pctOver`) · 스토리지 합계 추이 시간 조각 + 양보(DB-01 — 결과 동일 대조) · `/overview/trend` 전력은 `?include=power` 일 때만(DB-02 — 없으면 `not-requested`).
+    · Windows(INJPKG-01): start-portal.bat 이 `PORTAL_ENV_FILE` 로 자기가 call 하는 파일을 넘기고 토큰 저장이 그 파일에 `set "KEY=VAL"` CRLF 로 쓴다(cmd 메타문자 거부). 새 env `PORTAL_ENV_FILE`.
+    · ⚠ 테스트 하니스: 자식 프로세스가 큰 응답을 `console.log` 직후 `process.exit` 하면 stdout 이 잘린다 — 결과는 파일로 넘길 것(audit2743a 가 이번에 그렇게 깨졌다).
+    · 남긴 것: INJPKG-02(Windows SYSTEM 예약 작업 ACL — 환경 없음) · `postNo503Retry` 본체 util/ 이동(엣지 워커 파일을 cvp·sanswitch 가 import) · 화면 표시 `folded`(GPU 게스트)·중앙 isidu 상태 `runDropped`·BmUsage HBA 각주.
+    · ⚠ 작업 방식: 첫 수정 실행의 12개 에이전트가 시작 직후 세션 한도에 걸렸다(작업 트리 깨끗 — 그대로 다시 돌렸다). CPU 4개라 워크플로당 동시 2 — 6개 워크플로로 나눴다.
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면
