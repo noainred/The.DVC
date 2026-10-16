@@ -149,7 +149,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
     const hb = maxOrNull(perFc.map((x) => x.bps));
     if (hb != null) out.hba_bps = hb;
-    notes.push(...fcRateNotes(perFc));
+    for (const t of fcRateNotes(perFc)) notes.push(t);
     // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
   }
@@ -216,7 +216,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
-      notes.push(...fcRateNotes(idracFc, 'iDRAC '));
+      for (const t of fcRateNotes(idracFc, 'iDRAC ')) notes.push(t);
     }
     if (idracStale) {
       notes.push(`iDRAC 텔레메트리 리포트가 이전 주기 이후 갱신되지 않은 장치 ${idracStale}개는 네트워크·HBA 사용률을 판정하지 않았습니다(같은 값을 두 번 읽어 0 으로 보이지 않게).`);

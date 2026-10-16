@@ -5242,6 +5242,42 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       용량 모름 호스트는 `hostCapacityText`(LEFT-06) · 서버 `hostsCapacityUnknown` 을 쓰지 않던 세 화면.
     · ⚠ 작업 방식: 첫 실행 12그룹 중 9그룹이 세션 사용량 한도로 멈췄다 — v2.607 규칙대로 반쯤 고친 파일 69개를 기준판으로 되돌리고 8그룹을 처음부터 다시 돌렸다(결과 파일·변이 기록이
       있고 작업 트리가 수정본 백업과 바이트 동일했던 GF 만 완료로 인정). 변이 검증 중인 그룹의 파일은 WIP 커밋에서 뺐다(끝난 그룹 파일만 먼저 커밋).
+  - ⚠⚠ **v2.743 — '세 번 반복' 2회차(10축 발견 → 발견마다 2인 반증 → 12그룹 수정) 확정분**(같은 요청의 2회차 · 선택은 1회차와 같다.
+    발견 39 = 확정 29 · 확정(약) 8 · 가능성 1 · 반증(약) 1, 고친 것 37 · 남긴 것 2(INJPKG-02 Windows ACL 가능성 · DEV-05). 상세 `docs/AUDIT-2026-10-16b.md`,
+    회귀 `server/test/audit2743{a..l,lead}.test.js` + 웹 `audit2743j`·`tools/audit2743{d,k}`·`tools/vmCloneMountText`·`vmcfg/vmHygieneText` — 그룹별 변이 검증(고친 파일을 `46f5e5e` 판본으로 되돌리면 실패)):
+    · ⚠⚠ **'관리자 판본' 판정은 `auth/demoGuest.js isAdminDetailUser` 하나**(AUTHZ-01): mock 데모 계정은 요청 문맥이 admin 이라 `role === 'admin'` 으로 가림을 정하던
+      곳마다 관리자 판본(관리 IP·계정명·CONFIG_DIR 절대 경로·등록부 CSV)이 나갔다. addressMask `isAdminReq`·scopeDbStatus·scopeFilePaths·redactPushStatus·archScan
+      `scopeArchPaths` 가 이 함수를 쓰고, data.csv 는 데모 계정에 주지 않으며 READ_DENY 에 5접두를 더했다. ⚠ **라우트에서 `req.user?.role === 'admin'` 으로
+      가림을 정하지 말 것** — 그룹 수정 뒤에도 그 꼴 8곳(partFaults·bmUsage·xferSpeed·isilonDirUsage·bmstor·vmtrack·portalCheck)이 남아 리드가 고쳤다(GET 239경로 재조사 0건).
+      memoJson 의 extraKey 에 역할을 넣는 곳은 `demoGuest` 도 넣는다(portalCheck arch).
+    · **범위 관리자의 NFS 마운트 정보는 가린다**(AUTHZ-02 — `/tools/vm-clone` `mountsView`, 형제 `/admin/nfs-mounts` 는 403) · hostAccess 변경 5라우트 fleetOnly · uagmon Electron 33.4.11 고정(LEFT-09).
+    · ⚠⚠ **엣지 iDRAC 등록부도 `registryLoadError`**(EDGE-01 — v2.612 LEFT2612-01 의 형제): 손상이면 엣지 export 503 `registryUnreadable` + Retry-After 60, 중앙 puller 는 직전 스냅샷을 유지하고
+      `edgeReason`·통신 지도 `pull-edge-registry` 로 말한다. **등록부를 읽어 '전량' 을 보내는 엣지 응답은 이 판정을 먼저 볼 것.**
+    · iDRAC replace 강등 판정은 교체와 같은 술어 `hasHpeInScanReplaceScope`(LEFT-01 — v2.742 DEV-01 이 교체를 엔트리 단위로 바꾼 뒤 강등만 법인 단위로 남았다).
+    · ⚠ **대소문자 중복 접기는 키를 실제 엣지 이름으로, 값은 시간 순서로 '기본값 아닌 것' 만 얹는다**(RECENT-01 — v2.742 LEFT-01 회귀: 부분 사본이 최근 것으로 남아 수집 끔·계정 삭제).
+      GPU 게스트 정리는 로컬만 폴러가, 엣지 항목은 그 엣지 push 주기 TTL 로(LEFT-02).
+    · ⚠⚠ **'못 읽은 vCenter 의 빈 목록' 은 삭제가 아니다 — 판정은 `vmtrack/diff.js inventoryUnreadReason`**(VC-01): connected 면 읽음, VM 이 있으면 직전 값 서빙, 그 밖의 빈 목록은
+      사유(disabled·maintenance·pending·unreachable)로 diff 하지 않는다. VM 생성/삭제 이력의 '지금 있는가' 도 같은 함수. 게스트 디스크 최신 행은 삭제된 vCenter 를 지우고(`pruneOrphanVcenters`),
+      등록부를 못 읽으면 지우지 않는다(VC-02 — 오래된 행은 합계에 남기되 `stale` 표지).
+    · 끊긴 호스트 사용률 0% 의 형제 4경로(관계 그래프·/metrics·iDRAC vcenter-host·ChatOps — VC-04, `store.usageReadable`) · 클러스터 개수는 `clustercfg/analyze.js clusterCountOf` 하나(LEFT-07 — 내부·공개 API).
+    · **주문형 vCenter 로그인 문의 형제 — 쓰기·조회 4경로 + 배치 칸**(VC-03): VMware Tools 업그레이드·VM 사양 변경·프로비저닝(배치 전체가 로그인 1회 공유, 409 는 기억)·GPU 게스트 테스트가
+      `onDemandLogin`, 리드가 `provision/placement.js` 도 `onDemandVcBlock` 으로(v2.741 '배치 칸은 건너뛰지 않는다' 는 생성이 직접 로그인하던 때의 판단 — 테스트 계약을 바꿨다).
+    · ⚠⚠ **알림 발송은 채널별 줄**(TIMING-02 — v2.742 TIMING-01 회귀: 한 줄이라 응답 없는 웹훅이 모든 알림을 늦췄다): 웹훅류 동시 4 · 메일 1, 결과는 채널 순서대로. 메일 제목은 `util/smtp.js headerSafeText`
+      (INJPKG-03 — 제어 문자 하나가 메일 전체를 실패시켰다). VM 구성 점검 알림은 목업 vCenter VM 제외(VC-05 — 화면 문구 `vmHygieneText.notifyNowMsg`).
+      일일 보고 수동 발송은 `lastManualTs` 로 따로(TIMING-04). ⚠ **발송 성공 판정은 `reports/dailyReport.js anySendOk`(`/:(2\d\d|ok)\b/`)** — 예전 `/:(2\d\d)/` 는 메일 결과 'email:ok' 를 몰라
+      메일만 쓰는 현장에서 정기 보고를 하루 내내 다시 보냈다(리드가 찾은 기존 결함 — alerts.js 테스트 발송은 v2.479 에 이미 그 규칙이었다. **sendText 결과를 판정하는 새 코드도 이 함수로**).
+    · ⚠ **적응 타이머의 첫 실행 전 재무장은 `min(첫 실행 예정, 생성 + 새 주기)`**(TIMING-01): 첫 지연을 버리면 엣지 재시작 직후 스토리지 첫 수집이 약 1시간 밀렸다. 주기 변경 알림은 **실효 값이 바뀔 때만**.
+    · 아이실론 대기 기록은 한 번에(`scanQueuedMany`, TIMING-03) · 엣지가 버린 '지금 수집' 요청은 push 의 `runDropped` 로 알리고 중앙이 `applyIsiduEdgeDrops` → `dropTaken` 으로 사유와 함께 정리(LEFT-08 — 웹 `EDGE_DROP_TEXT`).
+    · 웹(GJ): 중계 '지금 점검' 응답 ok 덮어쓰기(WEB-01 — `okCount` 별도) · 권한 매트릭스 편집 유지(WEB-02 — `userAdmin/permReload.js`) · vCenter 로그 '지금 수집' busy·꺼짐 문구(WEB-04) ·
+      중계 응답 agent 비문자열 TypeError(INJPKG-04) · CSV 이스케이프는 `csvCell` 한 벌(INJPKG-05 — 손 사본 4곳이 단독 CR 을 빠뜨렸다). 라이선스 사용량 결측은 0% 가 아니라 '—'(WEB-05).
+    · CVP·SAN(GK): CVP·SAN 포트 사용량 push 는 `postNo503Retry`(LEFT-03 — 혼잡 503 도 다음 주기) · CVP 예산 소진 + 인터페이스 못 읽음 = 'budget'(`budgetTelemetry`, DEV-04) ·
+      sensorshow 이상어 `SENSOR_BAD_WORD`(DEV-02 — v2.742 회귀 되돌림, 'High'·'Low' 정상 펌웨어면 오탐 — 실장비 미확인) · CVP '지금 수집' busy 는 주의 톤 + `directBusy`(WEB-03).
+    · GL: svcmon LDAP 은 BER 단형·장형 길이를 읽는다(DEV-01 — AD 의 실패가 성공으로 보였다) · FC HBA 사용률 분모는 `bmusage/parse/fcRate.js` FC 표준 데이터율(DEV-03 — 표에 없는 속도는 명목 + `pctBasis`,
+      데이터율 초과는 null + `pctOver`) · 스토리지 합계 추이 시간 조각 + 양보(DB-01 — 결과 동일 대조) · `/overview/trend` 전력은 `?include=power` 일 때만(DB-02 — 없으면 `not-requested`).
+    · Windows(INJPKG-01): start-portal.bat 이 `PORTAL_ENV_FILE` 로 자기가 call 하는 파일을 넘기고 토큰 저장이 그 파일에 `set "KEY=VAL"` CRLF 로 쓴다(cmd 메타문자 거부). 새 env `PORTAL_ENV_FILE`.
+    · ⚠ 테스트 하니스: 자식 프로세스가 큰 응답을 `console.log` 직후 `process.exit` 하면 stdout 이 잘린다 — 결과는 파일로 넘길 것(audit2743a 가 이번에 그렇게 깨졌다).
+    · 남긴 것: INJPKG-02(Windows SYSTEM 예약 작업 ACL — 환경 없음) · `postNo503Retry` 본체 util/ 이동(엣지 워커 파일을 cvp·sanswitch 가 import) · 화면 표시 `folded`(GPU 게스트)·중앙 isidu 상태 `runDropped`·BmUsage HBA 각주.
+    · ⚠ 작업 방식: 첫 수정 실행의 12개 에이전트가 시작 직후 세션 한도에 걸렸다(작업 트리 깨끗 — 그대로 다시 돌렸다). CPU 4개라 워크플로당 동시 2 — 6개 워크플로로 나눴다.
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면

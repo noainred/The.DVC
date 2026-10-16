@@ -132,7 +132,8 @@ test('AUTHZ-2595-02~04 — vmseries push 범위 · DB 경로는 admin 만', () =
   const v = read('routes/api/vmSeries.js');
   assert.ok(!/push: vmSeriesPushStatus\(\)/.test(v), 'push 가 거르지 않은 채 나간다');
   assert.match(v, /function scopeVmSeriesPush/);
-  assert.match(read('routes/api/vmtrack.js'), /req\.user\?\.role !== 'admin' \? \(\(\{ dbPath, \.\.\.r \}\)/);
+  // v2.743(감사 AUTHZ-01): 관리자 판본 판정은 isAdminDetailUser(데모 계정 제외) — 역할 문자열 직접 비교에서 바뀌었다.
+  assert.match(read('routes/api/vmtrack.js'), /!isAdminDetailUser\(req\.user\) \? \(\(\{ dbPath, \.\.\.r \}\)/);
   assert.ok(!/db: await hzSessionDbStatus\(\)/.test(read('routes/api/horizonSessions.js')));
   assert.ok(!/(db|historyDb): await healthHistoryStatus\(\)/.test(read('routes/api/sanSwitch.js')));
 });

@@ -904,6 +904,7 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   (역할 권한 없는 엔드포인트 하나가 수집 전체를 멈추지 않게). 새 REST 수집기의 401 도 credRejectError 로 만들 것 — 소스 스윕(`audit2742k` ⑩)이 7개 파일의 부분 일치 0 을 고정한다.
 - **중앙의 지속형 503(등록부·설정 손상, DB 불가)은 `Retry-After: 60` + `Cache-Control: no-store`**(`routes/central.js PERSISTENT_503_HEADERS`, EDGE-03): 다시 물어도 같은 결과라
   엣지가 400·800ms 간격으로 같은 큰 본문을 세 번 보내지 않게 한다. central.js 의 `status(503)` 전부가 그 머리를 거치는지 스윕한다 — 새 503 은 `persistent503()` 로.
-  큰 본문 push(isidu·edge-log-result)는 `postNo503Retry` 로 503 을 호출 안에서 다시 보내지 않는다(다음 주기·claim→ack 가 잇는다).
+  큰 본문 push(isidu·edge-log-result · v2.743 LEFT-03 에 cvp-data·sanswitch-perf 표본·하트비트도)는 `postNo503Retry` 로 503 을 호출 안에서 다시 보내지 않는다
+  (다음 주기·claim→ack 가 잇는다 — 커서를 전진하지 않으므로 유실은 없고, 혼잡 503 이면 한 주기 늦어진다).
 - **주문형 vCenter 로그인은 `vcenter/dsBrowse.js onDemandVcBlock`·`onDemandLogin` 을 지난다**(VC-03): 비활성·점검중·site·인증 정지면 로그인 0 + 409. 거부는 `noteVcAuthFailure`
   로 주 폴러와 같은 기록에 올린다(v2.732 B4-01 · v2.733 C3-01 규약의 형제 4경로).
