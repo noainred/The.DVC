@@ -11,7 +11,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import {
-  ALL_TEXT, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote, notifyText, settingsPatch, RANGES,
+  ALL_TEXT, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote, notifyText, notifyNowMsg, settingsPatch, RANGES,
 } from '../vmcfg/vmHygieneText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
@@ -48,7 +48,7 @@ function PolicyPanel({ settings, notify, canWrite, onSaved }) {
     setBusy(true); setMsg(null); setErr(null);
     try {
       const r = await postJson('/tools/vm-hygiene/notify-now', {});
-      setMsg(r?.sent ? '보냈습니다.' : r?.reason === 'no-violation' ? '위반이 없어 보낼 내용이 없습니다.' : r?.reason === 'no-channel' ? '켜진 알림 채널이 없습니다 — 설정 › 알림에서 채널을 켜세요.' : `보내지 않았습니다(${r?.reason || '알 수 없음'}).`);
+      setMsg(notifyNowMsg(r));
     } catch (e) { setErr(e); } finally { setBusy(false); }
   };
   const num = (k, label, unit) => (

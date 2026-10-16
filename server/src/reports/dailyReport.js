@@ -116,7 +116,7 @@ export async function runDailyReportNow({ manual = false } = {}) {
     if (!results.length) {
       return { ok: false, reason: '알림 채널이 설정되지 않았습니다 — 설정 › 알림 에서 Slack/Teams/이메일을 먼저 등록하세요.', results, issues: report.summary.issues };
     }
-    const anyOk = results.some((r) => /:(2\d\d)/.test(r));
+    const anyOk = anySendOk(results);
     let countedAsScheduled = false;
     if (anyOk) {
       const at = Date.now();
@@ -132,6 +132,15 @@ export async function runDailyReportNow({ manual = false } = {}) {
   } finally {
     running = false;
   }
+}
+
+/**
+ * 한 채널이라도 보냈는가(v2.743 리드 통합 — 기존 결함). sendText 결과는 웹훅 'slack:200' · 메일 'email:ok'/'email:err …'/'email:skip' 이다.
+ * 예전 판정은 /:(2\d\d)/ 하나라 **메일만 쓰는 현장**에서 발송이 성공해도 실패로 읽어 lastRunTs 를 세우지 않았고,
+ * 다음 틱(최대 하루 내내)마다 같은 보고서를 다시 보냈다. 판정은 alerts.js 테스트 발송(:786)과 같은 규칙이다.
+ */
+export function anySendOk(results) {
+  return Array.isArray(results) && results.some((r) => /:(2\d\d|ok)\b/.test(String(r)));
 }
 
 // v2.582 BUG-5: 발송 시각·'오늘 이미 발송' 판정은 **서버 프로세스 TZ 가 아니라 포탈 날짜 오프셋**(기본 UTC+9)

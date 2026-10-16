@@ -276,7 +276,7 @@ export function registerPartFaults(api) {
 /** 열린 장애 + 판정 재료. 화면의 주 조회. */
 api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const scope = t(req.query.scope);
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = isAdminReq(req);
   const [open, st] = await Promise.all([openFaults({ scope }).catch(() => []), partFaultStatus().catch(() => null)]);
   open.sort((a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || (b.firstSeenAt || 0) - (a.firstSeenAt || 0));
   const summary = { fault: 0, warn: 0 };
@@ -333,7 +333,7 @@ api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) 
   res.json({ ok: true, events, days, limit, labels: LABELS, truncated: events.length >= limit,
     ...(eventsError ? { eventsError } : {}),
     ...(isAdmin ? {} : { addressHidden: true }),
-    db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin') });
+    db: dbView(await partFaultDbStatus().catch(() => null), isAdminReq(req)) });
 });
 
 /**
@@ -385,7 +385,7 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
 /** 상태 — 폴러·DB·push·엣지 분류를 한 번에(진단 화면용). */
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
-  res.json({ ok: true, ...st, last: lastView(st.last, req.user?.role === 'admin'), db: dbView(st.db, req.user?.role === 'admin'), version: currentVersion(),
+  res.json({ ok: true, ...st, last: lastView(st.last, isAdminReq(req)), db: dbView(st.db, isAdminReq(req)), version: currentVersion(),
     push: config.agent.centralUrl ? partFaultPushStatus() : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
 });
 

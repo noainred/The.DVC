@@ -173,6 +173,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | 필드 | 뜻 |
 |---|---|
 | `vcenters` `hosts` `vms` `datastores` `networks` `clusters` | 개수 |
+| `clusters` | 클러스터 묶음 수(v2.743) — 독립 호스트(standalone)는 세지 않고, 호스트에 클러스터 참조(`clusterRef`)를 실은 vCenter 는 같은 이름의 다른 클러스터를 따로 센다(내부 `/summary` 와 같은 함수 `clustercfg/analyze.js clusterCountOf`) |
 | `vmsPoweredOn` | 전원 켜진 VM 수 |
 | `templates` | 템플릿 수(VM 수에 **포함**되어 있습니다) |
 | `cpuCores` `cpuTotalMhz` `cpuUsedMhz` | 호스트 CPU 합계 |

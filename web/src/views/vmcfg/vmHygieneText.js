@@ -91,6 +91,27 @@ export function notifyText(n) {
   return `매일 ${n.hour}시 이후 하루 한 번 · 마지막 발송 ${last}${why}${ex}`;
 }
 
+/**
+ * '지금 보내기' 결과 문구(v2.743 리드 통합 — VC-05 의 화면 쪽). 서버 vmhygiene/notifier.js 의 reason 코드와 1:1.
+ * 모르는 코드는 원문을 괄호로 남긴다(지어내지 않는다). 목업 VM 을 뺐으면 그 개수도 말한다.
+ */
+export const NOTIFY_NOW_TEXT = Object.freeze({
+  'no-violation': '위반이 없어 보낼 내용이 없습니다.',
+  'no-channel': '켜진 알림 채널이 없습니다 — 설정 › 알림에서 채널을 켜세요.',
+  demo: '데모(목업) 데이터라 실제 알림 채널로 보내지 않았습니다.',
+  'first-collect': '첫 수집이 끝나지 않아 판정할 VM 이 없습니다 — 잠시 뒤 다시 누르세요.',
+  busy: '다른 발송이 진행 중입니다 — 잠시 뒤 다시 누르세요.',
+});
+export function notifyNowMsg(r) {
+  const mx = Number(r?.mockExcluded);
+  const ex = r?.reason !== 'demo' && Number.isFinite(mx) && mx > 0 ? ` 목업 vCenter 의 VM ${mx.toLocaleString()}대는 뺐습니다.` : '';
+  if (r?.sent) return `보냈습니다.${ex}`;
+  const t = NOTIFY_NOW_TEXT[r?.reason];
+  if (t) return `${t}${ex}`;
+  if (r?.reason === 'error') return `보내지 못했습니다 — ${r?.error || '원인 미상'}`;
+  return `보내지 않았습니다(${r?.reason || '알 수 없음'}).${ex}`;
+}
+
 /** 설정 입력 검증(화면) — 서버가 같은 범위로 자른다. 빈 칸은 '바꾸지 않음'. */
 export const RANGES = Object.freeze({ snapAgeDays: [1, 3650], snapCount: [1, 100], snapSizeGB: [1, 100000], uptimeDays: [7, 3650] });
 export function settingsPatch(form) {

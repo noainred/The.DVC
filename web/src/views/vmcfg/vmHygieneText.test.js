@@ -31,4 +31,18 @@ describe('vmHygieneText', () => {
     expect(web.notifyText({ enabled: false })).toMatch(/꺼짐/);
     expect(web.notifyText({ enabled: true, hour: 9, last: { reason: 'no-channel' } })).toMatch(/채널이 없어/);
   });
+  it('notifyNowMsg — 데모·첫 수집·목업 제외 개수를 코드가 아니라 문장으로 말한다(v2.743)', () => {
+    expect(web.notifyNowMsg({ sent: false, reason: 'demo', mockExcluded: 12 })).toMatch(/데모\(목업\) 데이터라/);
+    expect(web.notifyNowMsg({ sent: false, reason: 'demo' })).not.toMatch(/\(demo\)/);
+    expect(web.notifyNowMsg({ sent: false, reason: 'first-collect' })).toMatch(/첫 수집/);
+    expect(web.notifyNowMsg({ sent: true, reason: 'sent', mockExcluded: 3 })).toBe('보냈습니다. 목업 vCenter 의 VM 3대는 뺐습니다.');
+    expect(web.notifyNowMsg({ sent: false, reason: 'error', error: 'smtp down' })).toMatch(/smtp down/);
+    expect(web.notifyNowMsg({ sent: false, reason: 'weird' })).toBe('보내지 않았습니다(weird).');
+    // 서버가 '지금 보내기'(force) 경로로 낼 수 있는 사유는 전부 문장이 있다
+    const fs = require('node:fs'); const path = require('node:path');
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../../server/src/vmhygiene/notifier.js'), 'utf8');
+    const reasons = new Set([...src.matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]));
+    for (const r of ['no-violation', 'no-channel', 'demo', 'first-collect', 'busy']) expect(reasons.has(r)).toBe(true);
+    for (const r of reasons) if (!['off', 'edge', 'before-hour', 'already-sent', 'sent', 'error'].includes(r)) expect(web.NOTIFY_NOW_TEXT[r], r).toBeTruthy();
+  });
 });

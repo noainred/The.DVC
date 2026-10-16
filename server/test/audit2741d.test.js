@@ -159,7 +159,7 @@ test('AUTHZ-01: 범위 관리자는 범위 밖 계정의 도구 재정의·설�
   assert.deepEqual(o.fileUsers, ['euop', 'ghost', 'sub']);
 });
 
-test('AUTHZ-03: 배치 조회는 인증 정지 vCenter 에 로그인하지 않고, 거부는 주 폴러와 같은 기록에 올린다(site 는 건너뛰지 않는다)', () => {
+test('AUTHZ-03: 배치 조회는 인증 정지 vCenter 에 로그인하지 않고, 거부는 주 폴러와 같은 기록에 올린다(v2.743: site 도 건너뛴다)', () => {
   const o = runChild(`
     ${FAKE_VC}
     const vcs = [
@@ -201,9 +201,11 @@ test('AUTHZ-03: 배치 조회는 인증 정지 vCenter 에 로그인하지 않�
   assert.equal(o.new1.attempts, 1, '거부를 주 폴러와 같은 기록(vcAuthGuard)에 올려야 한다');
   assert.equal(o.new2.logins, 1, '기록된 뒤 다음 조회는 로그인하지 않는다');
   assert.match(o.new2.src, /^auth-stopped:/);
-  // site vCenter 는 건너뛰지 않는다(프로비저닝 작업이 그 vCenter 에 직접 로그인하는 설계 — 검증자 판단)
-  assert.equal(o.site.logins, 1);
-  assert.equal(o.site.stopped, true, 'site vCenter 거부도 기록한다');
+  // v2.743(리드 통합 — VC-03 의 형제): 생성 작업(provision/vsphere.js)이 주문형 로그인 문으로 site·비활성·점검중을 막으므로
+  //   배치 칸 조회도 같은 문을 지난다 — 로그인 0, 사유 코드를 싣는다(v2.741 의 '건너뛰지 않는다' 는 생성이 직접 로그인하던 때의 판단).
+  assert.equal(o.site.logins, 0, 'site vCenter 에 로그인했다');
+  assert.match(o.site.src, /^skipped: site/);
+  assert.equal(o.site.stopped, false);
 });
 
 test('VC-05: 게스트 탐침은 비활성·점검중·엣지 위임 vCenter 에 로그인하지 않고 사유를 싣는다 · 거부는 같은 기록에', () => {

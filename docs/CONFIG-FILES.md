@@ -217,7 +217,7 @@
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
-| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, inventory/osScanner.js 외 3 |
+| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 4 |
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |

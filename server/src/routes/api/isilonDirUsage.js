@@ -18,6 +18,8 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { requireSuperAdmin } from '../../auth/roles.js';
+import { isAdminReq } from '../../auth/addressMask.js';
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -78,7 +80,7 @@ function pickTarget(id) {
 export function registerIsilonDirUsage(api) {
 
 /** 메인 — 대상 목록·최신 상태·노드 키·엣지 키·폴러 상태. */
-api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (_req, res) => {
+api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => {
   const now = Date.now();
   // 데모(mock): 첫 화면이 폴러의 첫 틱(기동 90초 뒤)을 기다리지 않게 — 한 번만 돈다(이후 즉시 반환).
   if (isMockMode()) { try { await ensureIsiduDemo(); } catch { /* 데모 실패는 화면을 막지 않는다 */ } }
@@ -86,14 +88,15 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (_req, res) =>
     ok: true, now,
     settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryLoadError(),
     targets: await targetRows(),
-    key: publicKeyView(keyInfo()), keyFile: `${keyDir()}/${KEY_FILE_NAME}`,
+    // v2.743 AUTHZ-01: 키 파일·DB 의 절대 경로(CONFIG_DIR)는 관리자 상세(데모 계정 제외)에게만 — 그 밖에는 파일 이름만.
+    key: publicKeyView(keyInfo()), keyFile: isAdminReq(req) ? `${keyDir()}/${KEY_FILE_NAME}` : KEY_FILE_NAME,
     edges: edgeViews(),
     poller: isiduPollerStatus(),
     drops: recentIsiduDrops(),
     // v2.741 DEV-05: failLongMs 이상 돈 실패는 1시간이 아니라 주기만큼 쉰다(화면 '다음 시도' 계산 — isiduOverviewText.nextRunOf).
     failKinds: FAIL_KINDS, failRetryMs: FAIL_RETRY_MS, failLongMs: LONG_FAIL_MS,
     retentionDays: loadSettings().retentionDays,
-    db: await db.dbStats(),
+    db: scopeDbStatus(await db.dbStats(), req.user),
   });
 });
 

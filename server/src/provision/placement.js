@@ -11,7 +11,8 @@ import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
 import { loadVcenterConfig } from '../config.js';
 import { collectFoldersAndPools } from '../vcenter/soapClient.js';
-import { vcAuthStopOf, noteVcAuthFailure, authStopView } from '../vcenter/authStopGate.js';
+import { noteVcAuthFailure, authStopView } from '../vcenter/authStopGate.js';
+import { onDemandVcBlock } from '../vcenter/dsBrowse.js';   // v2.743: 생성(vsphere.js)과 같은 주문형 로그인 문
 
 const uniq = (arr) => [...new Set(arr.filter(Boolean))];
 
@@ -39,6 +40,7 @@ export async function getPlacement(vcenterId) {
   let resourcePools = null;
   let foldersSource = mock ? 'demo' : 'default';
   let authStopped = null;
+  let skipReason = null;   // v2.743: 비활성·점검중·엣지 위임이라 로그인하지 않았다(onDemandVcBlock 사유 코드)
   if (!mock && vcenterId) {
     const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
     if (vc) {
@@ -48,14 +50,19 @@ export async function getPlacement(vcenterId) {
        *     자동으로 부르는 조회라 같은 서비스 계정의 실패 로그인을 쌓는다. 사유는 `foldersSource`·`authStopped` 로 싣고
        *     폴더·리소스 풀은 기본값('vm'·'Resources')으로 둔다(편집 가능 — 사람이 직접 입력할 수 있다).
        *   · 로그인 거부는 주 폴러와 **같은 기록**에 올린다(noteVcAuthFailure — 정지가 두 벌이면 한쪽을 풀어도 다른 쪽이 계속 로그인한다).
-       *   · ⚠ 비활성·점검중·엣지 위임(site) vCenter 는 **건너뛰지 않는다** — 프로비저닝 작업 자체(provision/vsphere.js·reconfig.js)가
-       *     그 vCenter 에 직접 로그인하는 설계라, 배치 칸만 막으면 선택지만 기본값으로 바뀌고 생성은 여전히 직접 접속한다(검증자 판단).
+       *   · v2.743(리드 통합 — VC-03 의 형제): 비활성·점검중·엣지 위임(site) vCenter 도 건너뛴다. v2.741 은 '생성 작업 자체가 그 vCenter 에
+       *     직접 로그인하므로 배치 칸만 막을 이유가 없다' 고 적었는데, v2.743 VC-03 이 생성(provision/vsphere.js·reconfig.js)도 주문형 로그인 문
+       *     (vcenter/dsBrowse.js onDemandLogin)으로 막았다 — 이제 배치 칸만 로그인하면 생성은 거부되는데 조회만 접속한다. 판정은 같은 문 하나.
+       *     사유는 `skipReason` 으로 싣는다(화면 칸은 기본값 그대로 — 편집 가능).
        *   · 정지 해제는 주 폴러·설정 › vCenter 연결 테스트가 한다(읽기 전용 조회 — 여기서 기록을 지우지 않는다).
        */
-      const stop = vcAuthStopOf(vc);
-      if (stop) {
-        authStopped = authStopView(stop);
-        foldersSource = `auth-stopped: ${stop.reason}`;
+      const block = onDemandVcBlock(vc);
+      if (block?.skipReason) {
+        skipReason = block.skipReason;
+        foldersSource = `skipped: ${block.skipReason}`;
+      } else if (block?.authStopped) {
+        authStopped = block.authStopped;
+        foldersSource = `auth-stopped: ${block.reason}`;
       } else {
         try {
           const r = await collectFoldersAndPools(vc);
@@ -74,7 +81,7 @@ export async function getPlacement(vcenterId) {
     ? ['Datastore Default', 'vSAN Default Storage Policy', 'Thin Provision', 'Thick Provision (Eager)']
     : ['Datastore Default'];
 
-  return { clusters, hosts: hostsOut, datastores: datastoresOut, folders, resourcePools, profiles, foldersSource, authStopped, editable: { folders: true, resourcePools: true, profiles: true } };
+  return { clusters, hosts: hostsOut, datastores: datastoresOut, folders, resourcePools, profiles, foldersSource, authStopped, ...(skipReason ? { skipReason } : {}), editable: { folders: true, resourcePools: true, profiles: true } };
 }
 
 /** Normalize an incoming placement payload (all optional, trimmed strings). */

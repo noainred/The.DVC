@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **659개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **660개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-16)
@@ -583,7 +583,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (54)
+## 중앙(위임 수집) (55)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -632,6 +632,7 @@
 | `PARTFAULT_EDGE_REPORT_PART_MAX` | `50000` |  | central/partFaultEdge.js |
 | `PING_ACK_TIMEOUT_MS` | `30000` |  | central/pingJobs.js |
 | `PING_PENDING_TTL_MS` | `90000` |  | central/pingJobs.js |
+| `PORTAL_ENV_FILE` |  |  | central/token.js |
 | `PORTALCHECK_PULL_STALE_MS` | `30` |  | central/tokenCheckPull.js |
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
@@ -843,4 +844,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 659
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 660

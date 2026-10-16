@@ -144,6 +144,7 @@ function runHarness() {
     (await import(${J('sanswitch/registry.js')})).saveDevice({ type: 'brocade', name: 'SAN-REAL-01', host: '10.77.2.22', username: 'sanuserZ', password: 'pw-SAN-zz' });
     (await import(${J('cvp/registry.js')})).saveServer({ name: 'CVP-REAL-01', host: '10.77.4.44', username: 'cvpuserZ', password: 'pw-CVP-zz', authMode: 'password' });
     (await import(${J('system/nfsMounts.js')})).addMount({ server: '10.77.8.88', exportPath: '/export/corp-backup', options: '' });
+    (await import(${J('bmstor/registry.js')})).saveBmServer({ name: 'BM-REAL-01', host: '10.77.6.66', username: 'bmuserZ', password: 'pw-BM-zz', os: 'linux', mounts: ['/data'] });
     const mk = (u) => auth.createUser(u, { trusted: true });
     mk({ username: 'sadm', role: 'admin', password: 'Passw0rd!long1', scope: { vcenters: ['vc-us-east'] } });
     mk({ username: 'fadm', role: 'admin', password: 'Passw0rd!long1' });
@@ -168,7 +169,10 @@ function runHarness() {
     for (const who of ['demo', 'fadm']) {
       const o = out[who] = {};
       for (const p of ['/api/tools/storage/devices/export.csv', '/api/tools/sanswitch/devices/export.csv', '/api/tools/cvp/bulk/servers/export.csv',
-        '/api/tools/sanswitch', '/api/tools/storage', '/api/admin/ipam/db-info', '/api/auth/me', '/api/tools/vm-clone', '/api/tools/cvp/servers'])
+        '/api/tools/sanswitch', '/api/tools/storage', '/api/admin/ipam/db-info', '/api/auth/me', '/api/tools/vm-clone', '/api/tools/cvp/servers',
+        // 리드 통합(v2.743 AUTHZ-01 나머지 8곳): 라우트가 role==='admin' 을 직접 보던 응답의 DB·키 파일 경로·관리 주소
+        '/api/tools/part-faults', '/api/tools/part-faults/status', '/api/tools/bm-usage', '/api/tools/xfer-speed',
+        '/api/tools/isilon-dirusage', '/api/tools/portal-check/arch', '/api/tools/bm-storage', '/api/tools/vm-track'])
         o[p] = await call(who, 'GET', p);
     }
     out.sadm = { vmclone: await call('sadm', 'GET', '/api/tools/vm-clone'), draft: await call('sadm', 'PUT', '/api/admin/host-access/draft', { settings: {} }) };
@@ -181,7 +185,9 @@ function runHarness() {
     out.gates = gates;
     out.configDir = process.env.CONFIG_DIR;
     srv.close();
-    console.log('@@' + JSON.stringify(out));
+    // 응답이 커서(아키텍처 점검 등) stdout 으로 넘기면 process.exit 직전 비동기 쓰기가 잘린다 — 파일로 넘긴다.
+    fs.writeFileSync(process.env.CONFIG_DIR + '/harness-out.json', JSON.stringify(out));
+    console.log('@@done');
     process.exit(0);`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true', AUTH_SECRET: 'x'.repeat(40), OTP_ROLE_ENFORCE: 'false',
@@ -189,9 +195,8 @@ function runHarness() {
     encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 240_000, maxBuffer: 64 * 1024 * 1024,
   });
   assert.equal(r.status, 0, r.stderr.slice(-2000));
-  const line = r.stdout.split('\n').find((l) => l.startsWith('@@'));
-  assert.ok(line, r.stdout.slice(-600) + r.stderr.slice(-600));
-  return JSON.parse(line.slice(2));
+  assert.ok(r.stdout.includes('@@done'), r.stdout.slice(-600) + r.stderr.slice(-600));
+  return JSON.parse(fs.readFileSync(path.join(dir, 'harness-out.json'), 'utf8'));
 }
 
 let H;
@@ -256,4 +261,23 @@ test('② LEFT-09 hostAccess 변경 라우트 전부 전체 범위 게이트 —
   const changes = Object.keys(gates).filter((k) => !k.startsWith('GET '));
   assert.deepEqual(changes.sort(), ['POST /host-access/apply', 'POST /host-access/confirm', 'POST /host-access/plan', 'POST /host-access/revert', 'PUT /host-access/draft']);
   for (const k of Object.keys(gates)) assert.ok(gates[k].includes('fullScope'), `${k}: ${gates[k].join(',')}`);
+});
+
+test('② AUTHZ-01 데모 계정 — 라우트가 역할을 직접 보던 8곳(파트 장애·베어메탈 사용률·전송 속도·아이실론·아키텍처 점검·베어메탈 스토리지·VM 수량 추이)에 CONFIG_DIR 절대 경로·관리 주소·계정명 0', () => {
+  const { demo, fadm, configDir } = harness();
+  const paths = ['/api/tools/part-faults', '/api/tools/part-faults/status', '/api/tools/bm-usage', '/api/tools/xfer-speed',
+    '/api/tools/isilon-dirusage', '/api/tools/portal-check/arch', '/api/tools/bm-storage', '/api/tools/vm-track'];
+  for (const p of paths) {
+    assert.equal(demo[p].st, 200, `${p} ${demo[p].txt.slice(0, 160)}`);   // 조회는 그대로(v2.716 '조회 전부')
+    assert.equal(demo[p].txt.includes(configDir), false, `${p} 절대 경로`);
+    assert.equal(fadm[p].st, 200, `${p} 관리자`);
+  }
+  for (const p of ['/api/tools/part-faults', '/api/tools/xfer-speed', '/api/tools/isilon-dirusage', '/api/tools/portal-check/arch', '/api/tools/vm-track'])
+    assert.ok(fadm[p].txt.includes(configDir), `대조: 관리자는 ${p} 경로를 본다`);
+  const bm = demo['/api/tools/bm-storage'];
+  assert.equal(bm.txt.includes('10.77.6.66'), false, 'bm-storage host');
+  assert.equal(bm.txt.includes('bmuserZ'), false, 'bm-storage username');
+  assert.equal(JSON.parse(bm.txt).addressHidden, true);
+  assert.ok(fadm['/api/tools/bm-storage'].txt.includes('10.77.6.66') && fadm['/api/tools/bm-storage'].txt.includes('bmuserZ'), '대조: 관리자 편집 폼은 주소·계정을 받는다');
+  for (const p of paths) assert.equal(/pw-BM-zz/.test(demo[p].txt) || /pw-BM-zz/.test(fadm[p].txt), false, `${p} 비밀번호`);
 });
