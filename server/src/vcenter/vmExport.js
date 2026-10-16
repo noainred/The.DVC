@@ -22,6 +22,7 @@ import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import { csvLine, CSV_BOM } from '../util/csv.js';
 import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
+import { onDemandVcBlock, onDemandLoginError } from './dsBrowse.js';   // v2.742(VC-03): 주문형 로그인 문(collectTarget·authStopGate 를 묶은 것)
 
 // 라이브 보강으로 가져올 per-VM 속성 — 없는 속성은 응답에서 빠질 뿐이라 전부 best-effort.
 const ENRICH_PROPS = [
@@ -224,6 +225,9 @@ export function buildVmExport(vcenterId) {
   entry.promise = buildVmExportFresh(vcenterId)
     .then((r) => {
       entry.settled = true; entry.at = Date.now();
+      // v2.742(VC-03): 로그인하지 않은 결과(비활성·점검중·위임·인증 정지 — 거부 포함)는 기억하지 않는다. 비밀번호를 고치거나
+      //   점검을 끝낸 직후의 내보내기가 60초 동안 '조회하지 않았습니다' 를 되풀이하지 않게.
+      if (r?.enrichBlocked) { if (_cache.get(vcenterId) === entry) _cache.delete(vcenterId); return r; }
       const t = setTimeout(() => { if (_cache.get(vcenterId) === entry) _cache.delete(vcenterId); }, CACHE_MS);
       t.unref?.();
       return r;
@@ -243,12 +247,19 @@ async function buildVmExportFresh(vcenterId) {
   let details = new Map();
   let enriched = false;
   let enrichError = '';
+  let enrichBlocked = null;   // v2.742(VC-03): 로그인하지 않은(또는 거부된) 사유 — { skipReason } | { authStopped }
   if (snap.source === 'mock') {
     enrichError = '데모 모드 — 라이브 상세(NIC/디스크/게스트 파티션) 미조회';
   } else {
     const vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
+    // v2.742(감사 VC-03): 비활성·점검중·엣지 위임·인증 정지 vCenter 에는 라이브 보강 로그인을 하지 않는다(판정은 dsBrowse.js
+    //   onDemandVcBlock — collectTarget·authStopGate 를 그대로 쓴다). 내보내기 자체는 스냅샷 필드로 계속하고 사유를 싣는다.
+    const block = vcCfg ? onDemandVcBlock(vcCfg) : null;
     if (!vcCfg) {
       enrichError = 'vCenter 접속 정보 없음 — 스냅샷 필드만 내보냅니다';
+    } else if (block) {
+      enrichError = `${block.reason} — 라이브 상세(NIC/디스크/게스트 파티션)를 조회하지 않고 스냅샷 필드만 내보냅니다`;
+      enrichBlocked = block.skipReason ? { skipReason: block.skipReason } : { authStopped: block.authStopped };
     } else {
       try {
         // vc.id 에는 콜론이 있을 수 있어 split(':') 금지 — 알려진 프리픽스 길이로 잘라낸다.
@@ -256,7 +267,10 @@ async function buildVmExportFresh(vcenterId) {
         if (morefs.length) details = await collectDetails(vcCfg, morefs);
         enriched = true;
       } catch (e) {
-        enrichError = `라이브 상세 조회 실패(${e.message}) — 스냅샷 필드만 내보냅니다(엣지 수집 vCenter 는 중앙에서 직접 접속이 안 될 수 있습니다)`;
+        // 로그인 거부(자격증명)는 주 폴러와 같은 정지 기록에 올린다 — 다음 내보내기는 로그인하지 않는다.
+        const le = onDemandLoginError(vcCfg, e);
+        if (le !== e && le.authStopped) enrichBlocked = { authStopped: le.authStopped };
+        enrichError = `라이브 상세 조회 실패(${e.message}) — 스냅샷 필드만 내보냅니다`;
       }
     }
   }
@@ -275,7 +289,7 @@ async function buildVmExportFresh(vcenterId) {
     return row;
   });
   rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  return { vcenterId, vcenterName: vcName, enriched, enrichError, total: rows.length, columns: VM_EXPORT_COLUMNS.map((c) => ({ key: c.key, label: c.label })), rows };
+  return { vcenterId, vcenterName: vcName, enriched, enrichError, ...(enrichBlocked ? { enrichBlocked } : {}), total: rows.length, columns: VM_EXPORT_COLUMNS.map((c) => ({ key: c.key, label: c.label })), rows };
 }
 
 /** export 결과 → CSV 문자열(UTF-8 BOM + 수식 인젝션 가드 — 엑셀에서 한글/보안 안전). */

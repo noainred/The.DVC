@@ -24,6 +24,7 @@ import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v
 export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.719(B1-09)
+import { capStr } from '../util/capStr.js';   // v2.742(VC-06): 라이선스·확장 조회 실패 사유(원문 SOAP 응답을 붙잡지 않게)
 import { refreshVmCfg, VM_CFG_BUDGET_MS } from '../vmcfg/collect.js';   // v2.697(B10)
 import { get as vmCfgCacheGet } from '../vmcfg/cache.js';
 import { refreshHostCfg, HOST_CFG_BUDGET_MS } from '../hostcfg/collect.js';   // v2.699(A1·A9·A11·A12)
@@ -1686,13 +1687,17 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
   const c = new VimSoapClient(vc, { signal });
   await c.login();
   try {
+    // v2.742(감사 VC-05): 클러스터 이름은 데이터센터 안에서만 유일하다 — 같은 vCenter 의 다른 데이터센터에 같은 이름 클러스터가 있으면
+    //   이름만으로는 섞인다. 클러스터의 parent 와 Datacenter 이름을 함께 받아 호스트에 클러스터 moref·vSphere 데이터센터 이름을 싣는다
+    //   (속성 2개 · 데이터센터 수만큼의 객체 — 같은 retrieveProperties 라 왕복은 늘지 않는다).
     const INV_TYPES = [
       'HostSystem', 'VirtualMachine', 'Datastore', 'ClusterComputeResource',
-      'Network', 'DistributedVirtualPortgroup', 'Folder', 'ResourcePool',
+      'Network', 'DistributedVirtualPortgroup', 'Folder', 'ResourcePool', 'Datacenter',
     ];
     const INV_SPECS = [
       { type: 'Folder', paths: ['name', 'parent'] },
-      { type: 'ClusterComputeResource', paths: ['name'] },
+      { type: 'ClusterComputeResource', paths: ['name', 'parent'] },
+      { type: 'Datacenter', paths: ['name'] },
       { type: 'HostSystem', paths: [
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         // v2.556: cpuModel 추가(사용자 요청 — 호스트 상세에 CPU 모델명). 같은 retrieveProperties
@@ -1742,6 +1747,17 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     // Folder hierarchy → resolve each VM's folder path (vSphere "VMs & Templates").
     const folderByRef = new Map(); // ref -> { name, parent }
     for (const o of objs) if (o.type === 'Folder') folderByRef.set(o.ref, { name: o.props.name, parent: o.props.parent });
+    // v2.742(감사 VC-05): 클러스터 → vSphere 데이터센터 이름(cluster.parent → 호스트 폴더(하위 폴더 포함) → Datacenter).
+    //   못 따라가면 null(지어내지 않는다). 포탈의 'DataCenter'(법인 묶음)와 다른 개념이라 필드 이름을 vcDatacenter 로 둔다.
+    const dcName = new Map();
+    for (const o of objs) if (o.type === 'Datacenter') dcName.set(o.ref, o.props.name);
+    const clusterDc = new Map();
+    for (const o of objs) {
+      if (o.type !== 'ClusterComputeResource') continue;
+      let cur = o.props.parent; let guard = 0;
+      while (cur && folderByRef.has(cur) && guard++ < 32) cur = folderByRef.get(cur).parent;
+      clusterDc.set(o.ref, (cur && typeof dcName.get(cur) === 'string' && dcName.get(cur)) || null);
+    }
     const folderPath = (ref) => {
       const parts = [];
       let cur = ref; let guard = 0;
@@ -1772,6 +1788,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         vcenterId: vc.id,
         name: p.name,
         cluster: clusterName.get(p.parent) || 'standalone',
+        // v2.742(감사 VC-05): 클러스터 moref — 같은 이름 클러스터를 가른다. 독립 호스트(ComputeResource 아래)는 null.
+        //   vcDatacenter 는 그 클러스터의 vSphere 데이터센터 이름(모르면 null).
+        clusterRef: clusterName.has(p.parent) ? p.parent : null,
+        vcDatacenter: clusterName.has(p.parent) ? (clusterDc.get(p.parent) ?? null) : null,
         connectionState: conn === 'connected' ? (maint ? 'MAINTENANCE' : 'CONNECTED') : 'DISCONNECTED',
         powerState: (p['runtime.powerState'] || '').toUpperCase().includes('ON') ? 'POWERED_ON' : 'POWERED_OFF',
         cpuCores: cores,
@@ -1959,6 +1979,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         vcenterId: vc.id,
         host: host?.name || '',
         cluster: host?.cluster || '',
+        clusterRef: host?.clusterRef ?? null,   // v2.742(VC-05) — 이름이 겹치는 클러스터를 가른다(VM 상세의 클러스터 칸)
         folder: folderPath(p.parent),
         resourcePool: poolName.get(p.resourcePool) || '',
         name: p.name,
@@ -2097,8 +2118,16 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     if (!tagInv || tagInv.skipped) tagInv = getTagInv(vc.id);
 
     const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
-    const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : [];
-    const licenses = licRes.status === 'fulfilled' ? licRes.value.slice(0, 200) : [];
+    // v2.742(감사 VC-06): 조회 실패를 빈 배열로 싣지 않는다 — [] 는 '보고 0개(라이선스·확장 없음)' 와 구분되지 않아 권한 부족
+    //   (NoPermission) vCenter 가 매 주기 '라이선스 없음' 으로 보였다. 실패면 null(모름) + 사유(licensesError·solutionsError, 200자)를
+    //   싣고, 소비처(/tools/licenses·license-expiry·solutions·코어 라이선스)는 '확인 불가' 로 말한다(판정은 corelicense/analyze.js vcListUnread).
+    const listErr = (r) => capStr(String(r?.reason?.message || r?.reason || '조회 실패'), 200);
+    const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : null;
+    const licenses = licRes.status === 'fulfilled' ? licRes.value.slice(0, 200) : null;
+    const listErrors = {
+      ...(solRes.status === 'fulfilled' ? {} : { solutionsError: listErr(solRes) }),
+      ...(licRes.status === 'fulfilled' ? {} : { licensesError: listErr(licRes) }),
+    };
 
     return {
       vcenter: {
@@ -2106,6 +2135,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
         build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
         solutions, licenses, clusterCfg, tagInv, invFetch,
+        ...listErrors,   // v2.742(VC-06): 라이선스·확장 조회 실패 사유(성공이면 키가 없다)
         ...(auxSkipped.length ? { auxSkipped } : {}),   // v2.719(S1-01): 데드라인이 모자라 건너뛴 부가 갱신
       },
       hosts, vms, datastores, networks, alarms,

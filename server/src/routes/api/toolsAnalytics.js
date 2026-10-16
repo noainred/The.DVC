@@ -16,6 +16,7 @@ import { nsxStore } from '../../nsx/store.js';
 import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
 import { suggestSize } from '../../reports/rightsizing.js'; // v2.629 DATA2629-05: 과대 VM 은 초과분만
 import { gpuHostKey } from './hardwareGpu.js'; // v2.598 VC2598-03 — (vCenter, 호스트) 키
+import { clusterRefMode, clusterGroupKeyOf } from '../../clustercfg/analyze.js'; // v2.742 VC-05 — 클러스터 묶음 키(ref)
 
 
 // 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
@@ -69,11 +70,17 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   //   받아야 하므로 사용량에는 넣는다. vSphere HA 수용 제어도 유지보수 호스트를 용량에 넣지 않는다.
   //   ② 클러스터가 없는 독립 호스트(SOAP 'standalone', REST 폴백은 소속 미상 null)는 서로 장애를 받아 줄 수 없다(HA 없음) — 한 그룹으로
   //   묶어 '여유' 라 말하지 않는다. 그룹 행은 남기되(호스트 수·현재 사용률) N+1 은 판정하지 않는다(n1Ok null · standalone true).
+  //   ③ v2.742(감사 VC-05): 클러스터 이름은 데이터센터 안에서만 유일하다 — (vCenter, 이름) 으로 묶으면 다른 데이터센터의 같은 이름
+  //   클러스터 호스트가 한 그룹이 되어 N+1 이 엉뚱하게 판정된다. 묶음 키는 clustercfg 의 clusterGroupKeyOf 하나(ref 우선 ·
+  //   clusterRef 를 싣지 않는 구버전 엣지 스냅샷 vCenter 는 예전 이름 키).
   const isStandalone = (c) => !c || c === 'standalone';
+  const cmode = clusterRefMode(hosts);
   const cmap = new Map();
   for (const h of hosts) {
-    const k = `${h.vcenterId}|${h.cluster || 'standalone'}`;
+    const k = clusterGroupKeyOf(h, cmode) ?? `${h.vcenterId}\u0000standalone`;
     const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', standalone: isStandalone(h.cluster), hosts: 0, readable: 0, excluded: 0, maintenance: 0, clusterUnknown: 0,
+      clusterRef: cmode.get(h.vcenterId) === true && !isStandalone(h.cluster) ? (h.clusterRef ?? null) : null,
+      vcDatacenter: !isStandalone(h.cluster) && typeof h.vcDatacenter === 'string' && h.vcDatacenter ? h.vcDatacenter : null,
       cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, active: 0, actCpu: 0, actMem: 0, maxCpu: 0, maxMem: 0 };
     g.hosts++;
     if (!h.cluster) g.clusterUnknown++;   // 빈 값 = 소속을 모른다(REST 폴백) — '독립' 으로 단정하지 않고 센다
@@ -86,6 +93,9 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
     g.active++; g.actCpu += h.cpuTotalMhz || 0; g.actMem += h.memTotalMB || 0;
     g.maxCpu = Math.max(g.maxCpu, h.cpuTotalMhz || 0); g.maxMem = Math.max(g.maxMem, h.memTotalMB || 0);
   }
+  // 같은 vCenter 의 같은 이름 그룹 수 — 2 이상이면 화면이 이름만으로 구분할 수 없다(데이터센터·ref 를 함께 보인다).
+  const sameNameN = new Map();
+  for (const g of cmap.values()) { const nk = `${g.vcenterId}\u0000${String(g.cluster).toLowerCase()}`; sameNameN.set(nk, (sameNameN.get(nk) || 0) + 1); }
   const clusters = [...cmap.values()].map((g) => {
     let cpuOkPct = null, memOkPct = null, n1Ok = null;
     if (!g.standalone) {
@@ -94,7 +104,7 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
       memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
       n1Ok = g.active >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
     }
-    return { vcenterId: g.vcenterId, cluster: g.cluster, standalone: g.standalone, hosts: g.hosts, hostsUsageExcluded: g.excluded, maintenance: g.maintenance, clusterUnknown: g.clusterUnknown,
+    return { vcenterId: g.vcenterId, cluster: g.cluster, clusterRef: g.clusterRef, vcDatacenter: g.vcDatacenter, sameName: sameNameN.get(`${g.vcenterId}\u0000${String(g.cluster).toLowerCase()}`) || 1, standalone: g.standalone, hosts: g.hosts, hostsUsageExcluded: g.excluded, maintenance: g.maintenance, clusterUnknown: g.clusterUnknown,
       n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
       // 읽을 수 있는 호스트가 없으면 사용률은 null('—') — 0% 는 '부하 없음' 이라는 거짓이다.
       cpuUsagePct: g.cpuMhz ? r0((g.cpuUsed / g.cpuMhz) * 100) : null, memUsagePct: g.memMB ? r0((g.memUsed / g.memMB) * 100) : null };

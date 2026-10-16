@@ -13,25 +13,86 @@ const SEV_ORDER = { crit: 0, warn: 1, info: 2 };
 export const ROWS_MAX = 2000;
 const keyOf = (vcId, name) => `${vcId}\u0000${String(name).toLowerCase()}`;
 
+/*
+ * v2.742(감사 VC-05): 클러스터 식별은 (vCenter, 클러스터 moref) 다. vSphere 의 클러스터 이름은 **데이터센터 안에서만** 유일해서
+ *   (vCenter, 이름) 으로 묶으면 다른 데이터센터의 같은 이름 클러스터가 한 행이 됐다 — 뒤 구성이 앞 구성을 덮어 HA 꺼짐 클러스터가
+ *   숨고, 두 묶음 호스트를 합쳐 없는 'EVC 꺼짐·CPU 모델 혼재' 가 떴다(재현).
+ *   · 호스트가 clusterRef 를 싣는 vCenter(2.742 이후 수집)는 ref 로 묶는다. 구성(clusterCfg)은 v2.701 부터 ref 를 싣는다.
+ *   · ⚠ 구버전 엣지 스냅샷처럼 clusterRef 가 없는 호스트가 하나라도 있는 vCenter 는 **예전 이름 키**로 떨어진다 — 한 vCenter 안에서
+ *     두 키를 섞으면 같은 클러스터가 '호스트만 있는 행' 과 '구성만 있는 행' 둘로 갈린다. 이름 키에서 구성끼리 이름이 겹치면 합치지
+ *     않는다 — 구성마다 행을 따로 두고 호스트는 어느 쪽인지 알 수 없어 붙이지 않는다(nameCollision · hostsAmbiguous 로 밝힌다).
+ */
+const refOf = (x) => (typeof x?.clusterRef === 'string' && x.clusterRef ? x.clusterRef : null);
+const refKeyOf = (vcId, ref) => `${vcId}\u0000r:${ref}`;
+const inCluster = (h) => !!h && typeof h.cluster === 'string' && h.cluster !== '' && h.cluster !== 'standalone';
+
+/** vCenter 마다 ref 로 묶을 수 있는가 — 클러스터에 속한 호스트가 **전부** clusterRef 를 실었을 때만 true. 클러스터 호스트가 없는 vCenter 는 항목이 없다. */
+export function clusterRefMode(hosts) {
+  const mode = new Map();
+  for (const h of Array.isArray(hosts) ? hosts : []) {
+    if (!inCluster(h)) continue;
+    mode.set(h.vcenterId, (mode.get(h.vcenterId) ?? true) && !!refOf(h));
+  }
+  return mode;
+}
+
+/** 호스트 → 클러스터 묶음 키(같은 vCenter·같은 클러스터면 같은 값). 독립·소속 미상 호스트는 null. mode 는 clusterRefMode 의 결과. */
+export function clusterGroupKeyOf(h, mode) {
+  if (!inCluster(h)) return null;
+  return mode?.get(h.vcenterId) === true ? refKeyOf(h.vcenterId, refOf(h)) : keyOf(h.vcenterId, h.cluster);
+}
+
 export function analyzeClusters(vcenters, hosts, opt = {}) {
   const vcs = Array.isArray(vcenters) ? vcenters : [];
   const hl = Array.isArray(hosts) ? hosts : [];
   const vcName = new Map(vcs.map((v) => [v.id, v.name || v.id]));
+  const mode = clusterRefMode(hl);
   const hostsBy = new Map();
   for (const h of hl) {
-    if (!h || !h.cluster || h.cluster === 'standalone') continue;
-    const k = keyOf(h.vcenterId, h.cluster);
-    if (!hostsBy.has(k)) hostsBy.set(k, { vcenterId: h.vcenterId, name: h.cluster, hosts: [] });
-    hostsBy.get(k).hosts.push(h);
+    const k = clusterGroupKeyOf(h, mode);
+    if (!k) continue;
+    if (!hostsBy.has(k)) hostsBy.set(k, { vcenterId: h.vcenterId, name: h.cluster, ref: mode.get(h.vcenterId) === true ? refOf(h) : null, vcDatacenter: null, hosts: [] });
+    const g = hostsBy.get(k);
+    if (!g.vcDatacenter && typeof h.vcDatacenter === 'string' && h.vcDatacenter) g.vcDatacenter = h.vcDatacenter;
+    g.hosts.push(h);
   }
   const cfgBy = new Map();
-  for (const v of vcs) for (const c of Array.isArray(v.clusterCfg) ? v.clusterCfg : []) cfgBy.set(keyOf(v.id, c.name), { vcenterId: v.id, cfg: c });
+  const ambiguousHosts = new Map();   // 이름 키 vCenter 에서 이름이 겹친 구성 키 → 그 이름의 호스트 수(어느 구성 소속인지 모름)
+  let hostsAmbiguous = 0;
+  for (const v of vcs) {
+    const list = (Array.isArray(v.clusterCfg) ? v.clusterCfg : []).filter((c) => c && typeof c === 'object');
+    if (mode.get(v.id) !== false) {
+      // ref 묶음(또는 클러스터 호스트가 없는 vCenter) — 구성은 ref 로(ref 가 없는 옛 구성만 이름으로).
+      for (const c of list) cfgBy.set(c.ref ? refKeyOf(v.id, c.ref) : keyOf(v.id, c.name), { vcenterId: v.id, cfg: c });
+      continue;
+    }
+    const byName = new Map();
+    for (const c of list) { const nk = keyOf(v.id, c.name); if (!byName.has(nk)) byName.set(nk, []); byName.get(nk).push(c); }
+    for (const [nk, cs] of byName) {
+      if (cs.length === 1) { cfgBy.set(nk, { vcenterId: v.id, cfg: cs[0] }); continue; }
+      const hb = hostsBy.get(nk);
+      const n = hb ? hb.hosts.length : 0;
+      if (hb) { hostsBy.delete(nk); hostsAmbiguous += n; }
+      cs.forEach((c, i) => {
+        const k = c.ref ? refKeyOf(v.id, c.ref) : `${nk}\u0000#${i}`;
+        cfgBy.set(k, { vcenterId: v.id, cfg: c, nameCollision: cs.length });
+        ambiguousHosts.set(k, n);
+      });
+    }
+  }
   const keys = new Set([...hostsBy.keys(), ...cfgBy.keys()]);
-  const coverage = { clusters: keys.size, cfg: 0, notCollected: 0 };
+  const coverage = { clusters: keys.size, cfg: 0, notCollected: 0, hostsAmbiguous };
   const byCode = Object.fromEntries(Object.entries(CLUSTER_CFG_CODES).map(([c, sev]) => [c, { sev, clusters: 0 }]));
   const totals = { haOn: 0, haOff: 0, drsOn: 0, drsOff: 0, rules: 0, rulesViolated: 0 };
   const rows = [];
   const byVc = new Map();
+  // 같은 vCenter 안 같은 이름 클러스터 수 — 화면이 이름만으로 구분할 수 없을 때 데이터센터(또는 ref)를 함께 보이게 싣는다.
+  const nameCount = new Map();
+  for (const k of keys) {
+    const hb = hostsBy.get(k); const cb = cfgBy.get(k);
+    const nk = keyOf(hb?.vcenterId ?? cb.vcenterId, cb?.cfg?.name ?? hb.name);
+    nameCount.set(nk, (nameCount.get(nk) || 0) + 1);
+  }
   for (const k of keys) {
     const hb = hostsBy.get(k);
     const cb = cfgBy.get(k);
@@ -39,6 +100,7 @@ export function analyzeClusters(vcenters, hosts, opt = {}) {
     const name = cb?.cfg?.name ?? hb.name;
     const hostList = hb?.hosts || [];
     const cfg = cb?.cfg || null;
+    const ambiguous = ambiguousHosts.has(k);   // 이름 키 vCenter 의 이름 겹침 — 호스트를 어느 구성에도 붙이지 않았다
     let findings = [];
     if (cfg) {
       coverage.cfg += 1;
@@ -58,11 +120,16 @@ export function analyzeClusters(vcenters, hosts, opt = {}) {
     if (opt.sev && sev !== opt.sev) continue;
     if (opt.q) {
       const q = String(opt.q).toLowerCase();
-      if (![name, vcName.get(vcenterId)].some((x) => String(x || '').toLowerCase().includes(q))) continue;
+      if (![name, vcName.get(vcenterId), hb?.vcDatacenter].some((x) => String(x || '').toLowerCase().includes(q))) continue;
     }
     rows.push({
       vcenterId, vcenterName: vcName.get(vcenterId) || vcenterId, name,
-      hosts: hostList.length, hostsDisconnected: hostList.filter((h) => h.connectionState === 'DISCONNECTED').length,
+      // v2.742(VC-05): 클러스터 moref(모르면 null) · vSphere 데이터센터 이름(모르면 null) · 같은 vCenter 의 같은 이름 행 수(2 이상이면 이름만으로 구분할 수 없다).
+      ref: cfg?.ref ?? hb?.ref ?? null, vcDatacenter: hb?.vcDatacenter ?? null,
+      sameName: nameCount.get(keyOf(vcenterId, name)) || 1,
+      ...(ambiguous ? { nameCollision: cb.nameCollision, hostsAmbiguous: ambiguousHosts.get(k) } : {}),
+      // 이름 겹침으로 호스트를 붙이지 못한 행은 호스트 수를 모른다(null — 0 대로 보이지 않게).
+      hosts: ambiguous ? null : hostList.length, hostsDisconnected: ambiguous ? null : hostList.filter((h) => h.connectionState === 'DISCONNECTED').length,
       collected: !!cfg, at: cfg?.at ?? null,
       ha: cfg?.ha ?? null, drs: cfg?.drs ?? null, evc: cfg ? cfg.evc : null,
       numHosts: cfg?.numHosts ?? null, numEffectiveHosts: cfg?.numEffectiveHosts ?? null,
@@ -81,21 +148,41 @@ export function analyzeClusters(vcenters, hosts, opt = {}) {
 /**
  * 상세 창용 — 클러스터 하나 + (VM 이면) 그 VM 이 들어 있는 규칙. vmId 는 `${vcenterId}:${ref}` 이고
  * vCenter id 에 콜론이 있을 수 있어 split 하지 않고 접두를 뗀다.
+ * v2.742(감사 VC-05): 이름만으로 찾으면 다른 데이터센터의 같은 이름 클러스터 구성을 줄 수 있다 — ref(클러스터 moref)를 먼저 쓴다.
+ *   ref 는 opt.clusterRef → opt.hostId 의 호스트 clusterRef → vmId 의 VM clusterRef(opt.vms) 순서로 얻는다.
+ *   ref 를 모르는데 이름이 같은 구성이 둘 이상이면 고르지 않는다(reason 'ambiguous' + candidates) — 엉뚱한 클러스터를 보여 주지 않는다.
  */
-export function clusterOf(vcenters, hosts, vcenterId, clusterName, vmId = null) {
+export function clusterOf(vcenters, hosts, vcenterId, clusterName, vmId = null, opt = {}) {
   if (!vcenterId || !clusterName || clusterName === 'standalone') return { cluster: null, vmRules: null, reason: 'standalone' };
   const vc = (vcenters || []).find((v) => v.id === vcenterId);
   const want = String(clusterName).toLowerCase();
-  const cfg = (Array.isArray(vc?.clusterCfg) ? vc.clusterCfg : []).find((cl) => String(cl.name).toLowerCase() === want) || null;
-  const hostList = (hosts || []).filter((h) => h.vcenterId === vcenterId && String(h.cluster).toLowerCase() === want);
+  const hl = (Array.isArray(hosts) ? hosts : []).filter((h) => h && h.vcenterId === vcenterId);
+  let ref = typeof opt?.clusterRef === 'string' && opt.clusterRef ? opt.clusterRef : null;
+  if (!ref && typeof opt?.hostId === 'string' && opt.hostId) ref = refOf(hl.find((h) => h.id === opt.hostId));
+  if (!ref && typeof vmId === 'string' && Array.isArray(opt?.vms)) ref = refOf(opt.vms.find((v) => v && v.id === vmId && v.vcenterId === vcenterId));
+  const named = (Array.isArray(vc?.clusterCfg) ? vc.clusterCfg : []).filter((cl) => cl && typeof cl === 'object' && String(cl.name).toLowerCase() === want);
+  let cfg = null;
+  let hostList;
+  if (ref) {
+    cfg = named.find((cl) => cl.ref === ref) || null;
+    // ref 를 싣지 않은 옛 구성(구버전 엣지)이 그 이름에 하나뿐이면 그것이다 — 둘 이상이면 고르지 않는다.
+    if (!cfg && named.length === 1 && !named[0].ref) cfg = named[0];
+    hostList = hl.filter((h) => refOf(h) === ref);
+  } else {
+    if (named.length > 1) {
+      return { cluster: null, vmRules: null, reason: 'ambiguous', candidates: named.length, hosts: null };
+    }
+    cfg = named[0] || null;
+    hostList = hl.filter((h) => String(h.cluster).toLowerCase() === want);
+  }
   if (!cfg) return { cluster: null, vmRules: null, reason: 'not-collected', hosts: hostList.length };
   let vmRules = null;
   if (typeof vmId === 'string' && vmId.startsWith(`${vcenterId}:`)) {
-    const ref = vmId.slice(vcenterId.length + 1);
-    vmRules = (cfg.rules || []).filter((r) => r.vms.includes(ref)).map((r) => ({ name: r.name, type: r.type, enabled: r.enabled, inCompliance: r.inCompliance, mandatory: r.mandatory }));
+    const vmRef = vmId.slice(vcenterId.length + 1);
+    vmRules = (cfg.rules || []).filter((r) => r.vms.includes(vmRef)).map((r) => ({ name: r.name, type: r.type, enabled: r.enabled, inCompliance: r.inCompliance, mandatory: r.mandatory }));
   }
   return {
-    cluster: { name: cfg.name, at: cfg.at, ha: cfg.ha, drs: cfg.drs, evc: cfg.evc, numHosts: cfg.numHosts, numEffectiveHosts: cfg.numEffectiveHosts, rulesTotal: cfg.rulesTotal, hosts: hostList.length },
+    cluster: { name: cfg.name, ref: cfg.ref ?? null, at: cfg.at, ha: cfg.ha, drs: cfg.drs, evc: cfg.evc, numHosts: cfg.numHosts, numEffectiveHosts: cfg.numEffectiveHosts, rulesTotal: cfg.rulesTotal, hosts: hostList.length },
     findings: clusterCfgFindings(cfg, hostList),
     vmRules,
   };

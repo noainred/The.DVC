@@ -12,7 +12,7 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { isDemoCollector } from '../mock/demo/edge.js';
 import { demoEdgeTick } from '../mock/demo/edgeSeed.js'; // v2.708: 데모 엣지(mock- · .demo.invalid)는 접속하지 않는다
 import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote, hostsOfOtherCollectors, remoteSeriesKey } from './state.js';
-import { setCollectorServers, sanitizeEdgeExport } from './remoteInventory.js';
+import { setCollectorServers, sanitizeEdgeExport, sensorDetailCursorOf } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -45,7 +45,10 @@ export function pullOptionsFor(failCount) {
 
 async function pullOne(c, { retries = 2, signal = null } = {}) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
-  const res = await resilientFetch(`${c.url}/api/collector/export`, {
+  // v2.742(감사 EDGE-01): 마지막으로 저장한 export 의 센서 상세 커서를 보낸다 — 엣지는 그 뒤로 바뀌지 않은 서버의 상세를 뺀다.
+  //   커서가 없으면(첫 pull·중앙 재시작·직전 저장이 불완전) 쿼리를 싣지 않는다 = 전량. 구버전 엣지는 쿼리를 무시하고 전량을 준다.
+  const sdSince = sensorDetailCursorOf(c.id);
+  const res = await resilientFetch(`${c.url}/api/collector/export${sdSince ? `?sdSince=${encodeURIComponent(sdSince)}` : ''}`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
     timeoutMs: config.collector.timeoutMs, retries, ...(signal ? { signal } : {}),
     onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
@@ -106,14 +109,18 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
   catch (e) { console.warn(`[collector] ${c.id} 원격 전력 적재 실패:`, e.message); }
   // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
   // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
-  setCollectorServers(c.id, data.datacenter || c.datacenter, data.servers || []);
-  const sd = data.serversDropped;
-  const serversDropped = sd && (sd.notObject + sd.badId + sd.overCount) > 0 ? sd : null;
-  if (serversDropped) console.warn(`[collector] ${c.id} export 서버 원소 ${sd.notObject + sd.badId + sd.overCount}개를 버림(객체 아님 ${sd.notObject} · id 오류 ${sd.badId} · 상한 초과 ${sd.overCount})`);
+  const sd = setCollectorServers(c.id, data.datacenter || c.datacenter, data.servers || [], { sdCursor: data.sdCursor, sdSince }) || { kept: 0, missing: 0 };
+  // v2.742(EDGE-01): 엣지가 뺐는데 중앙에 직전 값이 없던 상세(겹친 pull 등) — 그 서버는 이번 주기 상세가 비고 다음 pull 은 전량이다(조용히 넘기지 않는다).
+  if (sd.missing) console.warn(`[collector] ${c.id} 센서 상세 ${sd.missing}대를 엣지가 '변경 없음' 으로 뺐는데 중앙에 직전 값이 없습니다 — 다음 pull 에서 전량을 받습니다.`);
+  const sdr = data.serversDropped;
+  const serversDropped = sdr && (sdr.notObject + sdr.badId + sdr.overCount) > 0 ? sdr : null;
+  if (serversDropped) console.warn(`[collector] ${c.id} export 서버 원소 ${sdr.notObject + sdr.badId + sdr.overCount}개를 버림(객체 아님 ${sdr.notObject} · id 오류 ${sdr.badId} · 상한 초과 ${sdr.overCount})`);
   const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
   if (hostConflicts.length) console.warn(`[collector] ${c.id} 다른 수집 서버와 같은 호스트명 ${hostConflicts.length}개(${hostConflicts.slice(0, 5).join(', ')}) — 법인별로 따로 집계하고 전력 이력 키를 나눈다`);
-  return { hosts, duplicateSkipped: dupSkipped, hostConflicts: hostConflicts.length ? hostConflicts : null, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
+  return { hosts, duplicateSkipped: dupSkipped, hostConflicts: hostConflicts.length ? hostConflicts : null, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true,
+    // v2.742(EDGE-01): 센서 상세 변경분 — 직전 값을 다시 쓴 수 · 직전 값이 없어 비운 수(커서를 보낸 pull 일 때만)
+    sensorDetailDelta: sdSince ? { kept: sd.kept, missing: sd.missing } : null };
 }
 
 /**
@@ -122,7 +129,7 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
  * 'mock' 사유와 인증 거부 통계가 사라졌다(v2.548 H5 '통째로 바꾸면 정보가 사라진다' 의 형제 경로).
  */
 export function statusFromPull(r) {
-  return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock };
+  return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock, sensorDetailDelta: r.sensorDetailDelta || null };
 }
 
 /*

@@ -12,7 +12,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
-import { resilientFetch } from '../util/resilientFetch.js';
+import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.742(감사 EDGE-03): 503 은 호출 안에서 다시 보내지 않는다
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -65,8 +65,10 @@ async function postOnce(scans) {
   const body = { agent: config.agent.name, status: statusBody(), scans: scans.map((s) => ({ ...s, id: s.id, entries: s.entries.map((e) => [e.name, e.bytes, e.res]) })) };
   const json = Buffer.from(JSON.stringify(body));
   const payload = await gzipAsync(json);
-  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/isidu-data?agent=${encodeURIComponent(config.agent.name || '')}`, {
-    method: 'POST', timeoutMs: 120_000, retries: 2, body: payload,
+  // v2.742(감사 EDGE-03): 중앙 503(DB 불가·등록부/설정 손상·혼잡)이면 같은 본문(요청당 폴더 행 최대 약 6만)을 바로 다시 올리지 않는다 —
+  //   예전 retries:2 는 한 호출에 3번 올렸다. 커서를 전진하지 않으므로 다음 주기에 같은 스캔을 다시 보낸다. 연결 오류·그 밖의 5xx 는 예전처럼 재시도.
+  const res = await postNo503Retry(`${config.agent.centralUrl}/api/central/isidu-data?agent=${encodeURIComponent(config.agent.name || '')}`, {
+    method: 'POST', timeoutMs: 120_000, body: payload,
     headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'X-Central-Token': config.agent.centralToken, ...agentNameHeader(config.agent.name) },
   });
   let reply = null;

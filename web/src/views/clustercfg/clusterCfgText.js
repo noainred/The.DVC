@@ -100,3 +100,38 @@ export function ageText(at, now = Date.now()) {
   const m = Math.max(0, Math.round((now - at) / 60_000));
   return m < 60 ? `${m}분 전에 읽은 값` : `${Math.round(m / 60)}시간 전에 읽은 값`;
 }
+
+/*
+ * v2.742(감사 VC-05) — 같은 vCenter 안에 같은 이름 클러스터가 둘 이상일 수 있다(vSphere 이름은 데이터센터 안에서만 유일).
+ *   서버 행은 ref(클러스터 moref)·vcDatacenter(데이터센터 이름)·sameName(같은 이름 행 수)을 싣는다.
+ */
+/** 표의 행 키 — ref 가 있으면 ref, 없으면(구버전 엣지 스냅샷) 예전 이름 키. */
+export function clusterRowKey(r) {
+  if (!r) return '';
+  return r.ref ? `${r.vcenterId}|r:${r.ref}` : `${r.vcenterId}|${r.name ?? r.cluster ?? ''}`;
+}
+/** 클러스터 이름 표시 — 같은 이름이 둘 이상일 때만 데이터센터(모르면 ref)를 붙인다. */
+export function clusterNameLabel(r) {
+  const name = r?.name ?? r?.cluster ?? '';
+  if (!r || !(r.sameName > 1)) return String(name);
+  if (r.vcDatacenter) return `${name} · ${r.vcDatacenter}`;
+  if (r.ref) return `${name} (${r.ref})`;
+  return `${name} (같은 이름 ${r.sameName}개 — 구분 불가)`;
+}
+/** 상세 창 '클러스터 구성' 칸의 빈 사유 — 서버 clusterOf 의 reason 과 1:1. */
+export const CLUSTER_MISS_TEXT = Object.freeze({
+  standalone: '클러스터에 속하지 않은 호스트입니다',
+  'not-collected': '이 클러스터의 구성을 아직 읽지 않았습니다',
+  ambiguous: '같은 이름의 클러스터가 여러 데이터센터에 있어 어느 것인지 정하지 못했습니다 — 클러스터 HA·DRS 점검 화면에서 데이터센터로 구분해 보세요',
+});
+export function clusterMissText(d) {
+  if (!d || d.cluster) return null;
+  if (d.reason === 'ambiguous') return `${CLUSTER_MISS_TEXT.ambiguous}${d.candidates ? `(후보 ${d.candidates}개)` : ''}`;
+  return CLUSTER_MISS_TEXT[d.reason] || CLUSTER_MISS_TEXT['not-collected'];
+}
+/** 표의 호스트 칸 — 이름 겹침으로 호스트를 붙이지 못한 행(hosts null)은 0 이 아니라 '—'. */
+export function clusterHostsText(r) {
+  if (!r) return '—';
+  if (r.hosts == null) return r.hostsAmbiguous ? `— (같은 이름 클러스터 호스트 ${r.hostsAmbiguous}대 구분 불가)` : '—';
+  return String(r.hosts);
+}

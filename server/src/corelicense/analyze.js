@@ -12,6 +12,37 @@
  */
 import { numOrNull } from '../util/numOrNull.js';   // v2.727(감사 C-02)
 
+/**
+ * v2.742(감사 VC-06): vCenter 의 라이선스·확장 목록을 읽었는가 — 판정 한 벌(라이선스 현황·만료 확인·솔루션 버전·코어 라이선스가 쓴다).
+ * 배열이면 읽은 것(빈 배열 = 보고 0개)이라 null. 아니면 `{ why, error }` — why 'failed'(조회가 실패했다 — soapClient 가
+ * `<field>Error` 를 싣는다) / 'not-read'(첫 수집 전·REST 폴백·구버전 엣지처럼 그 필드가 아예 없거나 배열이 아니다).
+ * error 는 원문(200자) — 주소가 들어갈 수 있어 **관리자에게만** 내보낼 것(호출부 책임).
+ * @param {object} vc 스냅샷 vcenter 객체
+ * @param {'licenses'|'solutions'} field
+ */
+export function vcListUnread(vc, field) {
+  if (Array.isArray(vc?.[field])) return null;
+  const err = vc?.[`${field}Error`];
+  const error = typeof err === 'string' ? err.slice(0, 200) : '';
+  if (error) return { why: 'failed', error };
+  // 목록이 없는 이유는 vCenter 상태가 말한다(store.js 골격·병합이 붙이는 status). 그 밖은 '이 수집 경로가 싣지 않음'.
+  const st = typeof vc?.status === 'string' ? vc.status : '';
+  return { why: Object.hasOwn(LIST_UNREAD_TEXT, st) ? st : 'not-read', error: '' };
+}
+
+/** vcListUnread 의 why → 사람이 읽는 문장(서버 응답 collectionErrors 등 — 문구에 백틱·별표를 쓰지 않는다). */
+export const LIST_UNREAD_TEXT = Object.freeze({
+  failed: '조회 실패 — 없음이 아니라 확인 불가',
+  unreachable: 'vCenter 연결 실패로 읽지 못함 — 없음이 아니라 확인 불가',
+  pending: '첫 수집 전이라 아직 읽지 않음 — 없음이 아니라 확인 불가',
+  maintenance: '점검중 vCenter 라 수집하지 않음 — 없음이 아니라 확인 불가',
+  disabled: '비활성 vCenter 라 수집하지 않음',
+  'not-read': '이 수집 경로가 목록을 싣지 않음(REST 폴백·구버전 엣지) — 없음이 아니라 확인 불가',
+});
+
+/** 읽은 목록의 객체 원소만(엣지가 보낸 모양이 틀려도 글자 단위 항목·null 원소로 던지지 않게). 못 읽었으면 빈 배열. */
+export const vcListItems = (vc, field) => (Array.isArray(vc?.[field]) ? vc[field].filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : []);
+
 export const MIN_CORES_PER_SOCKET = 16;
 export const VSAN_TIB_PER_CORE = Object.freeze({ none: 0, vvf: 0.25, vcf: 1 });
 
@@ -49,6 +80,8 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     vcenterId: v.id, vcenterName: v.name || v.id, hosts: 0, counted: 0, unknown: 0, disconnected: 0,
     sockets: 0, cores: 0, licensed: 0, padded: 0, paddedHosts: 0,
     vsanTib: 0, vsanDs: 0, vsanUnknown: 0, reportedCoreUsed: null, reportedCoreTotal: null, coreLicenses: 0,
+    // v2.742(감사 VC-06): 라이선스 목록을 못 읽은 vCenter — '코어 라이선스 0개(보고 없음)' 와 구분한다. null 이면 읽었다.
+    licensesUnread: vcListUnread(v, 'licenses')?.why ?? null,
     // v2.727(감사 C-02): used/total 을 못 읽은(null) 코어 라이선스 개수 — 하나라도 있으면 보고 합은 null(부분 합 금지).
     reportedUsedUnknown: 0, reportedTotalUnknown: 0,
   }]));
@@ -73,7 +106,7 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
   }
   for (const v of vcs) {
     const r = rows.get(v.id);
-    const core = (Array.isArray(v.licenses) ? v.licenses : []).filter((l) => String(l?.costUnit || '').toLowerCase() === 'core');
+    const core = vcListItems(v, 'licenses').filter((l) => String(l?.costUnit || '').toLowerCase() === 'core');
     if (core.length) {
       r.coreLicenses = core.length;
       // v2.727(감사 C-02): soapClient 가 <used>/<total> 없는 라이선스를 null 로 싣는다(예전엔 0). null 을 0 으로 더하면
@@ -110,6 +143,7 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     vsanTib: Math.round(sum('vsanTib') * 100) / 100, vsanUnknown: sum('vsanUnknown'),
     vsanIncludedTib: rate ? Math.round(sum('licensed') * rate * 100) / 100 : null,
     reportedUsedUnknown: sum('reportedUsedUnknown'), reportedTotalUnknown: sum('reportedTotalUnknown'),   // v2.727(감사 C-02)
+    licensesUnread: list.filter((r) => r.licensesUnread).length,   // v2.742(VC-06): 라이선스 목록을 못 읽은 vCenter 수(0 이면 전부 읽었다)
   };
   // 포함 용량은 계약 전체에서 합쳐진다(법인별 초과를 더하면 다른 법인의 남는 몫을 무시해 과대가 된다) — 합계는 전체 기준.
   totals.vsanAddonTib = rate ? Math.max(0, Math.round((totals.vsanTib - totals.licensed * rate) * 100) / 100) : null;

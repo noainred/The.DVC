@@ -48,20 +48,22 @@ export function registerClusterCheck(api) {
     const vcenterId = qStr(req.query.vcenterId, 128);
     const cluster = qStr(req.query.cluster, 128);
     const vmId = qStr(req.query.vmId, 256) || null;
+    // v2.742(VC-05): 같은 이름 클러스터가 다른 데이터센터에 있을 수 있어 ref 로 고른다 — 클러스터 moref · 호스트 id · VM 의 clusterRef 순서.
+    const opt = { clusterRef: qStr(req.query.clusterRef, 64) || null, hostId: qStr(req.query.hostId, 256) || null, vms: snap.vms };
     if (!vcenterId || !cluster) return res.status(400).json({ ok: false, reason: 'vcenterId 와 cluster 가 필요합니다.' });
     const allowed = scopedVcenterIds(req.user, snap);
     if (allowed && !allowed.has(vcenterId)) return res.status(404).json({ ok: false, reason: 'not-found' });
-    res.json({ ok: true, ...clusterOf(snap.vcenters, snap.hosts, vcenterId, cluster, vmId), codes: CLUSTER_CFG_CODES });
+    res.json({ ok: true, ...clusterOf(snap.vcenters, snap.hosts, vcenterId, cluster, vmId, opt), codes: CLUSTER_CFG_CODES });
   });
 
   api.get('/tools/cluster-check.csv', csvPerm, toolsPerm, (req, res) => {
     const r = run(store.get(), req);
     const yn = (v) => (v === true ? '켜짐' : v === false ? '꺼짐' : '');
-    const head = ['vCenter', '클러스터', '호스트', '구성 읽음', 'HA', '수용 제어', '호스트 모니터링', 'DRS', 'DRS 자동화', 'EVC', '규칙 수', '규칙 위반', '가장 높은 심각도', '판정 코드'];
+    const head = ['vCenter', '클러스터', '데이터센터', '클러스터 ref', '호스트', '구성 읽음', 'HA', '수용 제어', '호스트 모니터링', 'DRS', 'DRS 자동화', 'EVC', '규칙 수', '규칙 위반', '가장 높은 심각도', '판정 코드'];
     const lines = [CSV_BOM + csvLine(head)];
     for (const row of r.rows) {
       lines.push(csvLine([
-        row.vcenterName, row.name, row.hosts, row.collected ? '예' : '아니오',
+        row.vcenterName, row.name, row.vcDatacenter ?? '', row.ref ?? '', row.hosts ?? '', row.collected ? '예' : '아니오',
         yn(row.ha?.enabled), yn(row.ha?.admission), row.ha?.hostMon || '', yn(row.drs?.enabled), row.drs?.behavior || '',
         row.evc == null ? '' : row.evc || '꺼짐', row.rulesTotal ?? '',
         row.rules.filter((x) => x.enabled === true && x.inCompliance === false).length, row.sev || '', row.findings.map((f) => f.code).join(' '),

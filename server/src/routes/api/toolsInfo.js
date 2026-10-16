@@ -18,6 +18,7 @@ import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
+import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -116,7 +117,14 @@ api.get('/tools/licenses', requirePerm('tools'), (req, res) => {
   if (allowed) vcs = vcs.filter((v) => allowed.has(v.id));
   if (req.query.vcenterId) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
   const items = [];
-  for (const vc of vcs) for (const l of vc.licenses || []) items.push({ vcenterId: vc.id, vcenterName: vc.name, ...l });
+  // v2.742(감사 VC-06): 라이선스 조회가 실패했거나 아직 읽지 않은 vCenter 는 '라이선스 0개' 가 아니라 확인 불가다 — 합계에서 빠졌다는
+  //   사실을 unread 로 밝힌다(사유 원문은 주소가 들어갈 수 있어 admin 에게만). 목록 원소는 객체만 받는다(엣지가 보낸 모양 방어).
+  const unread = [];
+  for (const vc of vcs) {
+    const u = vcListUnread(vc, 'licenses');
+    if (u) unread.push({ vcenterId: vc.id, vcenterName: vc.name || vc.id, why: u.why, ...(isAdminReq(req) && u.error ? { error: u.error } : {}) });
+    for (const l of vcListItems(vc, 'licenses')) items.push({ vcenterId: vc.id, vcenterName: vc.name, ...l });
+  }
   // rollup by license name
   // v2.631(감사 AX2-06, 가능성 — 실 ELM 미확인): Enhanced Linked Mode 로 라이선스 인벤토리를 공유하는 vCenter 들은
   //   같은 키를 각자 보고할 수 있다. 그대로 더하면 total·used 가 vCenter 수만큼 불어난다. 같은 (이름, 키) 는 한 번만
@@ -152,6 +160,7 @@ api.get('/tools/licenses', requirePerm('tools'), (req, res) => {
     byLicense: [...roll.values()].sort((a, b) => b.used - a.used),
     totalAssigned: [...roll.values()].reduce((a, e) => a + (e.used || 0), 0),
     duplicateKeys,   // 여러 vCenter 가 같은 키를 보고해 합산에서 한 번만 센 보고 수(0 이면 중복 없음)
+    unread, partial: unread.length > 0,   // v2.742(VC-06): 라이선스를 읽지 못한 vCenter — 합계는 그 vCenter 를 뺀 부분 합이다
   });
 });
 
@@ -167,8 +176,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   const scoped = Boolean(req.query.vcenterId);
   if (scoped) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
   const items = [];
+  // v2.742(감사 VC-06): 라이선스를 읽지 못한 vCenter — 빈 목록을 '만료 키 없음' 으로 보이지 않게 collectionErrors 에 한 줄씩 싣는다(아래).
+  const vcUnread = [];
   for (const vc of vcs) {
-    for (const l of (vc.licenses || [])) {
+    const u = vcListUnread(vc, 'licenses');
+    if (u) vcUnread.push({ vcenterId: vc.id, vcenterName: vc.name || vc.id, why: u.why, ...(isAdminReq(req) && u.error ? { error: u.error } : {}) });
+    for (const l of vcListItems(vc, 'licenses')) {
       // eval 키('Evaluation Mode')는 total=0·만료 별도 표기 그대로 노출.
       const ts = l.expires ? (Date.parse(l.expires) || null) : null;
       const st = licenseExpiryStatus(ts);
@@ -189,6 +202,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   // 뺀 것은 omittedOutOfScope 로 밝힌다(조용한 제외 금지).
   const omittedOutOfScope = { nsxManagers: 0, nsxLicenses: 0, horizon: false };
   const collectionErrors = [];   // v2.603: NSX 라이선스 조회 실패도 여기에 싣는다(선언을 NSX 블록 앞으로)
+  // 비활성 vCenter 는 일부러 수집하지 않는 것이라 '수집 실패' 줄에 넣지 않는다(vcenterLicensesUnread 에는 남긴다).
+  for (const u of vcUnread) if (u.why !== 'disabled') collectionErrors.push(`vCenter ${u.vcenterName}: 라이선스 ${LIST_UNREAD_TEXT[u.why] || u.why}${u.error ? ` (${u.error})` : ''}`);
   // NSX 매니저 직수집 라이선스 — 특정 vCenter 를 고른 조회에서는 빼고, 전체 조회에서는 사용자 범위 안 매니저만.
   if (!scoped) {
     const allMgrs = nsxStore.get()?.managers || [];
@@ -257,6 +272,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
     // 범위 계정에는 Horizon 등록 대수도 함대 정보라 싣지 않는다(null = 알려주지 않음, 0 과 다르다).
     horizonServers: allowed ? null : listHorizon().length,
     scoped: !!allowed, omittedOutOfScope,
+    vcenterLicensesUnread: vcUnread,   // v2.742(VC-06): 라이선스를 읽지 못한 vCenter(그 vCenter 의 만료는 확인 불가)
     ...(demoSkipped != null ? { demoSkipped } : {}),
     generatedAt: snap.generatedAt,
   });

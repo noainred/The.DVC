@@ -67,7 +67,8 @@ collectorRouter.get('/export', async (req, res) => {
     return res.status(403).json({ error: '토큰 불일치' });
   }
   try {
-    res.json(await buildExport());
+    // v2.742(감사 EDGE-01): 중앙이 마지막으로 저장한 커서 — 그 뒤로 바뀌지 않은 서버의 센서 상세는 뺀다(collector/agent.js). 없으면 전량.
+    res.json(await buildExport({ sdSince: typeof req.query.sdSince === 'string' ? req.query.sdSince : null }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -18,7 +18,7 @@
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
-import { resilientFetch } from '../util/resilientFetch.js';
+import { resilientFetch, retryDelayMs, abortableSleep, _internals as rfInternals } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { classifyCentral404 } from './central404.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
@@ -31,6 +31,32 @@ const pollMs = () => {
   if (Number.isFinite(v) && v === 0) return 0;                 // 0 = 이 엣지에서 폴백 끔
   return clampIntervalMs(v, DEFAULT_POLL_MS, 10_000);          // v2.599 T2599-02: 상한(2^31 초과 → 1ms 루프 방지)
 };
+
+/**
+ * v2.742(감사 EDGE-03): 중앙으로 **큰 본문**을 보낸다 — 503 은 호출 안에서 다시 보내지 않는다(다음 주기에 맡긴다).
+ *   중앙의 503 은 지속형(등록부·설정 파일 손상 · 중앙 DB 불가 — Retry-After 60초)이거나 큰 본문 해석 혼잡(bigJsonGate — 일시)이다.
+ *   어느 쪽이든 같은 본문을 400·800ms(또는 Retry-After) 뒤 곧바로 다시 올리면 회선과 중앙 해석 부담만 늘고, 지속형이면 결과도 같다
+ *   (예전에는 resilientFetch retries:2 로 한 호출에 3번 올렸다 — 재현). 이 함수를 쓰는 경로는 다음 주기에 다시 보낸다:
+ *   isidu push(커서를 전진하지 않는다) · edge-log-result(회신이 없으면 중앙이 인출분을 대기로 되돌려 다음 폴에서 다시 가져간다).
+ *   그 밖의 일시 상태(408·425·429·500·502·504)와 연결 오류는 **예전처럼** 호출 안에서 재시도한다 — resilientFetch 와 같은 대상·간격·
+ *   Retry-After 규칙(retryDelayMs)이고 시도마다 resilientFetch(retries:0)를 그대로 쓴다(리다이렉트·TLS·SSRF 규칙을 복제하지 않는다).
+ * @returns {Promise<Response>} 마지막 응답(503 이면 첫 503 응답) — 연결이 끝까지 실패하면 마지막 오류를 던진다.
+ */
+export async function postNo503Retry(url, init = {}, { retries = 2, backoffMs = 400 } = {}) {
+  const { retries: _r, ...rest } = init;
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try { res = await resilientFetch(url, { ...rest, retries: 0 }); }
+    catch (e) {
+      if (rest.signal?.aborted || attempt >= retries || !rfInternals.isTransientErr(e)) throw e;
+      await abortableSleep(backoffMs * 2 ** attempt, rest.signal);
+      continue;
+    }
+    if (res.status === 503 || !rfInternals.RETRYABLE_STATUS.has(res.status) || attempt >= retries) return res;
+    try { await res.body?.cancel?.(); } catch { /* 미소진 본문 정리 */ }
+    await abortableSleep(retryDelayMs(res.status, res.headers?.get?.('retry-after'), backoffMs * 2 ** attempt), rest.signal);
+  }
+}
 
 let _timer = null;
 let _running = false;
@@ -72,10 +98,15 @@ export async function runEdgeLogWorkerOnce() {
     const hdrs = headers();
     let payload = json;
     try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
-    const post = await resilientFetch(`${base}/api/central/edge-log-result?agent=${agent}`, {
-      method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2,
+    // v2.742(감사 EDGE-03): 503 은 다시 보내지 않는다(postNo503Retry) — 중앙이 회신을 받지 못하면 인출분을 대기로 되돌려 다음 폴에서 다시 준다.
+    const post = await postNo503Retry(`${base}/api/central/edge-log-result?agent=${agent}`, {
+      method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000,
     });
     if (post.status === 413) console.warn(`[edgelog-worker] 중앙이 본문 크기를 거부(413) — 로그 ${snap.logs?.count}줄. EDGELOG 한도를 확인하세요.`);
+    if (post.status === 503) {
+      try { await post.body?.cancel?.(); } catch { /* 본문은 읽지 않는다 */ }
+      throw Object.assign(new Error(`edge-log-result <- HTTP 503 — 중앙이 지금 받을 수 없습니다. 같은 본문을 바로 다시 보내지 않습니다(회신이 없으면 중앙이 재시도 한도 안에서 요청을 대기로 되돌려 다음 폴에서 다시 가져갑니다)`), { status: 503, kind: 'central-busy' });
+    }
     if (!post.ok) throw Object.assign(new Error(`edge-log-result <- HTTP ${post.status}`), { status: post.status });
     // v2.622(감사 EDGE-04): 200 이어도 본문을 본다 — stored:false 는 중앙이 **보관하지 않았다**(공유 토큰의 요청 없는 회신 —
     //   기한을 넘겨 작업이 회수된 뒤 도착) · acked:false 는 중앙이 요청으로 대조하지 못했다(작업이 대기로 되돌아가 한 번 더 수집될 수 있다).

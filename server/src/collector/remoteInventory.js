@@ -253,6 +253,8 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX, now = Da
     o.inv = sanitizeRemoteInv(s.inv, { now });
     o.sensors = sanitizeRemoteSensors(s.sensors, { now });
     o.sensorDetail = sanitizeRemoteSensorDetail(s.sensorDetail, { now });
+    // v2.742(감사 EDGE-01): 엣지가 '중앙이 이미 가진 상세' 라 뺐다는 표지 — 상세가 실제로 없을 때만 받는다(setCollectorServers 가 직전 값으로 채운다).
+    if (s.sensorDetailSame === true && o.sensorDetail == null) o.sensorDetailSame = true;
     servers.push(o);
   }
   if (max <= REMOTE_SERVERS_MAX && Number.isFinite(now) && now <= Date.now()) _sanitizedLists.add(servers);
@@ -291,6 +293,8 @@ export function sanitizeEdgeExport(data) {
   }
   const sv = Array.isArray(d.servers) ? sanitizeRemoteServers(d.servers) : null;
   return {
+    // v2.742(EDGE-01): 센서 상세 변경분 커서(엣지 collector/agent.js 형식만 — 그 밖은 null = 다음 pull 은 전량).
+    sdCursor: typeof d.sdCursor === 'string' && SD_CURSOR_RE.test(d.sdCursor) ? d.sdCursor : null,
     version: remoteStr(d.version, 64) ?? '', agent: remoteStr(d.agent, 64) ?? '', hostname: remoteStr(d.hostname, 64) ?? '',
     datacenter: remoteStr(d.datacenter, 128) ?? '', mock: d.mock === true,
     authDeny: sanitizeAuthDeny(d.authDeny),
@@ -300,15 +304,52 @@ export function sanitizeEdgeExport(data) {
   };
 }
 
+/** v2.742(EDGE-01): 엣지 커서 형식 — collector/agent.js 와 같다(<프로세스 표지 12자>:<세대>). */
+export const SD_CURSOR_RE = /^[0-9a-f]{12}:\d{1,15}$/;
+
+/**
+ * v2.742(EDGE-01): 직전에 받은 상세를 다시 쓸 때 시각을 **지금 기준으로 다시 자른다** — 전량을 다시 받았을 때 sanitizeRemoteSensorDetail
+ *   이 하는 일과 같다(엣지 시계가 앞서 잘렸던 값은 원본 edgeTimes 에서 다시 자르고, 원본이 지금보다 앞서지 않으면 원본을 쓴다).
+ *   그래야 생략한 서버의 나이 판정이 전량을 받았을 때와 같다.
+ */
+function reclampKeptDetail(d, now) {
+  if (!d || !isPlainObj(d.edgeTimes)) return d;
+  const raw = { at: numOrNull(d.edgeTimes.at), thermalAt: numOrNull(d.edgeTimes.thermalAt), collAt: numOrNull(d.edgeTimes.collAt) };
+  const cl = { at: clampFuture(raw.at, now), thermalAt: clampFuture(raw.thermalAt, now), collAt: clampFuture(raw.collAt, now) };
+  const stillFuture = cl.at !== raw.at || cl.thermalAt !== raw.thermalAt || cl.collAt !== raw.collAt;
+  const { edgeTimes: _e, ...rest } = d;
+  return { ...rest, ...cl, ...(stillFuture ? { edgeTimes: raw } : {}) };
+}
+
+/** v2.742(EDGE-01): 다음 pull 에 보낼 센서 상세 커서(없으면 null — 전량을 받는다). */
+export function sensorDetailCursorOf(collectorId) {
+  return byCollector.get(String(collectorId || '').trim())?.sdCursor || null;
+}
+
 /** Replace the whole server set reported by one collector. Call only on a
- *  successful pull (skip on failure to preserve the last good snapshot). */
-export function setCollectorServers(collectorId, datacenter, servers) {
+ *  successful pull (skip on failure to preserve the last good snapshot).
+ *  v2.742(EDGE-01): `sensorDetailSame` 표지가 붙은 서버는 **직전에 받은 그 서버의 상세**로 채운다. 직전 값이 없는 서버가 하나라도 있거나
+ *  직전 저장분의 커서가 이번 요청의 커서와 다르면(겹친 pull 등) 커서를 비워 다음 pull 이 전량을 받게 한다(스스로 복구).
+ *  @returns {{ kept: number, missing: number }} 직전 값으로 채운 수 · 직전 값이 없어 비운 수 */
+export function setCollectorServers(collectorId, datacenter, servers, { sdCursor = null, sdSince = null, now = Date.now() } = {}) {
   const id = String(collectorId || '').trim();
-  if (!id) return;
+  if (!id) return { kept: 0, missing: 0 };
   // 정리는 이 함수 안에서 한다(v2.602 CEN2602-01) — 다른 호출부가 생겨도 원본을 그대로 보관하지 않게.
   // v2.732(B6-05): 이 모듈이 이미 정제한 목록(WeakSet 표지 — pull 의 sanitizeEdgeExport 결과)은 다시 정제하지 않는다.
   const list = Array.isArray(servers) && _sanitizedLists.has(servers) ? servers : sanitizeRemoteServers(servers).servers;
-  byCollector.set(id, { at: Date.now(), datacenter: String(datacenter || ''), servers: list });
+  const prev = byCollector.get(id) || null;
+  let kept = 0; let missing = 0; let prevById = null;
+  for (const s of list) {
+    if (!s.sensorDetailSame) continue;
+    delete s.sensorDetailSame;   // 표지는 보관하지 않는다(소비처가 모르는 필드)
+    if (!prevById) prevById = new Map((prev?.servers || []).map((x) => [String(x.id), x]));
+    const p = prevById.get(String(s.id));
+    if (p) { s.sensorDetail = reclampKeptDetail(p.sensorDetail ?? null, now); kept += 1; }
+    else { s.sensorDetail = null; missing += 1; }
+  }
+  const cursor = typeof sdCursor === 'string' && SD_CURSOR_RE.test(sdCursor) && !missing && (!kept || prev?.sdCursor === sdSince) ? sdCursor : null;
+  byCollector.set(id, { at: Date.now(), datacenter: String(datacenter || ''), servers: list, sdCursor: cursor });
+  return { kept, missing };
 }
 
 /** Drop a collector's remote servers (e.g. collector removed/disabled). */

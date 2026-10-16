@@ -7,6 +7,7 @@
 
 import { exportSensorDetail } from '../idrac/sensorDetailCache.js'; // v2.659
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { config, currentVersion } from '../config.js';
 import { getCollectorDenyStats } from './denyLog.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-03)
 import { localPowerByHostName } from '../idrac/service.js';
@@ -68,11 +69,54 @@ function serverDisplayName(s) {
   return String(s.host || '').replace(/^https?:\/\//, '') || s.id; // 스킴 제거한 IP
 }
 
-function localServersForExport() {
+/*
+ * v2.742(감사 EDGE-01): 센서 상세(서버당 최대 150개)는 **바뀐 서버만** 싣는다. 예전에는 60초 pull 마다 전 서버의 상세를 통째로
+ *   다시 실어, 서버 1천 대 엣지에서 매분 엣지 직렬화(약 0.2초)·중앙 해석+정제(약 0.5초)가 동기로 돌았다(합성 측정 — 운영 규모는 추정).
+ *   계약(작고 양쪽이 모르는 경우 예전 그대로):
+ *    · 엣지는 서버마다 '내보낸 상세' 의 내용 지문(sha1)을 기억하고, 지문이 바뀐 export 의 세대(gen)를 붙인다. export 마다 커서
+ *      `sdCursor = <프로세스 표지>:<세대>` 를 싣는다.
+ *    · 중앙은 마지막으로 **저장한** export 의 커서를 다음 pull 에 `?sdSince=` 로 보낸다. 그 세대 뒤로 지문이 바뀌지 않은 서버는
+ *      상세를 빼고 `sensorDetailSame:true` 만 싣는다 — 중앙은 직전에 받은 그 서버의 상세를 그대로 쓴다(내용·시각이 같으므로
+ *      나이 판정도 같다).
+ *    · 표지가 다르거나(엣지 재시작) 형식이 틀리거나 세대가 앞서 있으면(위조·다른 엣지) **전량**이다. 쿼리가 없으면(구버전 중앙)
+ *      전량이고, 구버전 엣지는 쿼리를 모르므로 언제나 전량을 준다. 요청자별 상태를 엣지가 들고 있지 않으므로 중앙이 둘이어도 맞다.
+ *   ⚠ 지문은 내용 전체(시각 포함)로 만든다 — Thermal 시각은 폴마다 바뀌므로, 폴 주기(기본 60초)가 pull 주기보다 짧은 작은 엣지에서는
+ *     거의 전 서버가 매번 바뀐 것으로 나간다(줄어드는 것은 폴 주기가 pull 보다 긴 큰 엣지 · 응답 없는 서버 · 컬렉션만 있는 서버다 — 정직 기록).
+ *     시각을 빼고 지문을 만들면 중앙이 낡은 시각을 들고 있게 되어 나이 판정이 틀린다 — 되돌리지 말 것.
+ */
+const SD_BOOT = crypto.randomBytes(6).toString('hex');   // 이 프로세스의 표지(재시작하면 바뀐다 → 중앙 커서가 무효가 되어 전량)
+const SD_CURSOR_RE = /^([0-9a-f]{12}):(\d{1,15})$/;
+let sdGen = 0;
+const sdState = new Map(); // serverId -> { sig, gen } — 마지막으로 내보낸 상세의 지문과 그 지문이 처음 나온 세대
+/** 중앙이 보낸 커서 → 이 프로세스의 세대(쓸 수 없으면 null = 전량). 순수에 가깝다(현재 표지·세대만 본다). */
+export function parseSdSince(v) {
+  if (typeof v !== 'string') return null;
+  const m = SD_CURSOR_RE.exec(v.trim());
+  if (!m || m[1] !== SD_BOOT) return null;
+  const n = Number(m[2]);
+  return Number.isSafeInteger(n) && n >= 0 && n <= sdGen ? n : null;
+}
+function sdSigOf(d) { return d ? crypto.createHash('sha1').update(JSON.stringify(d)).digest('base64') : ''; }
+/** 테스트 전용 — 세대·기억을 비운다(표지는 그대로). */
+export function _resetSensorDetailDeltaForTest() { sdGen = 0; sdState.clear(); }
+
+function localServersForExport({ sdSince = null } = {}) {
   const out = [];
+  const since = parseSdSince(sdSince);
+  const cur = sdGen + 1; let changed = false; let omitted = 0;
+  const live = new Set();
   for (const s of loadIdracRegistry()) {
     if (s.type === 'ome') continue; // OME는 상세 인벤토리 미지원
     const inv = getInventory(s.id);
+    // v2.742(EDGE-01): 상세 지문 — 바뀌었으면 이번 세대를 붙인다. 중앙이 그 세대 이후를 이미 가졌으면 상세를 뺀다.
+    const detail = exportSensorDetailCapped(s.id);
+    const sid = String(s.id);
+    live.add(sid);
+    const sig = sdSigOf(detail);
+    const st = sdState.get(sid);
+    if (!st || st.sig !== sig) { sdState.set(sid, { sig, gen: cur }); changed = true; }
+    const same = detail != null && since != null && sdState.get(sid).gen <= since;
+    if (same) omitted += 1;
     out.push({
       id: s.id,
       name: serverDisplayName(s),
@@ -92,13 +136,20 @@ function localServersForExport() {
       inv: compactInv(inv),
       sensors: compactSensors(s.id), // 최신 온도(중앙 '법인별 온도'용) — 구버전 중앙은 무시(하위호환)
       // v2.659: 센서 상세(임계값·상태·전압 등 — 콤팩트, 서버당 상한). 구버전 중앙은 모르는 필드라 버린다.
-      sensorDetail: exportSensorDetailCapped(s.id),
+      // v2.742(EDGE-01): 중앙이 이미 가진 상세는 빼고 표지만 싣는다(`sensorDetailSame` — 중앙이 직전 값을 쓴다).
+      sensorDetail: same ? null : detail,
+      ...(same ? { sensorDetailSame: true } : {}),
     });
   }
-  return out;
+  if (changed) sdGen = cur;
+  for (const k of sdState.keys()) if (!live.has(k)) sdState.delete(k); // 등록부에서 빠진 서버의 지문은 버린다(다시 등록되면 새 세대로 나간다)
+  return { servers: out, sdCursor: `${SD_BOOT}:${sdGen}`, sensorDetailOmitted: omitted };
 }
 
-export async function buildExport() {
+/**
+ * @param {{ sdSince?: string|null }} [opts] sdSince — 중앙이 마지막으로 저장한 export 의 커서(`?sdSince=`). 없으면 센서 상세 전량.
+ */
+export async function buildExport({ sdSince = null } = {}) {
   const byNameMap = await localPowerByHostName();
   // 서버 1대당 한 행으로 중복 제거. localPowerByHostName은 한 서버를 여러 별칭(이름·서비스태그·
   // hostNames) 키로 넣으므로, 중복 제거 없이 export하면 중앙이 같은 서버를 별칭 수만큼 중복 집계한다
@@ -110,7 +161,7 @@ export async function buildExport() {
     if (r.serverId != null) seen.add(r.serverId);
     byHost.push({ host, watts: r.watts, ts: r.ts, serverName: r.serverName, serverId: r.serverId, serviceTag: r.serviceTag || '', model: r.model || '' });
   }
-  const servers = localServersForExport();
+  const { servers, sdCursor, sensorDetailOmitted } = localServersForExport({ sdSince });
   return {
     version: currentVersion(),
     datacenter: config.collector.datacenter || '',
@@ -127,5 +178,8 @@ export async function buildExport() {
     // 서버 분석용 인벤토리(위임 법인 서버가 중앙 '서버 분석'에 나타나게 함). 전력만 쓰던
     // 구버전 중앙은 이 필드를 무시하므로 하위호환.
     servers,
+    // v2.742(EDGE-01): 센서 상세 변경분 커서 · 이번에 뺀(중앙이 이미 가진) 상세 수 — 구버전 중앙은 모르는 필드라 버린다.
+    sdCursor,
+    sensorDetailOmitted,
   };
 }
