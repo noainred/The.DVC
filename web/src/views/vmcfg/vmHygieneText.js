@@ -7,7 +7,7 @@ export const HYGIENE_TEXT = Object.freeze({
   'snap-age': { title: '오래된 스냅샷', fix: '스냅샷은 백업이 아닙니다 · 오래 둘수록 델타가 커지고 통합 시간이 길어집니다' },
   'snap-count': { title: '스냅샷이 많습니다', fix: '체인이 길면 디스크 I/O 가 느려집니다 · 필요 없는 스냅샷을 지우세요' },
   'snap-size': { title: '스냅샷이 큽니다', fix: '데이터스토어 여유를 먹습니다 · 통합(삭제) 시간도 그만큼 길어집니다' },
-  'snap-orphan-delta': { title: '스냅샷이 없는데 델타 파일이 남아 있습니다(유령 스냅샷 후보)', fix: 'Snapshot Manager 에 안 보이는 델타 체인입니다 · 스냅샷 › 통합을 실행해 보세요(파일을 직접 지우지 마세요)' },
+  'snap-orphan-delta': { title: '스냅샷이 없는데 델타 꼴 파일이 있습니다(유령 스냅샷 후보 · 이름 규칙 기반)', fix: '판정 근거는 파일 이름(-000001-delta 등)뿐입니다 · 링크드 클론처럼 정상인 디스크일 수 있습니다 · vCenter 가 통합 필요로 표시한 VM 만 주의로 올립니다 · 스냅샷 › 통합을 실행해 보세요(파일을 직접 지우지 마세요)' },
   'tools-missing': { title: 'VMware Tools 가 설치되지 않았습니다', fix: '게스트 정보·정상 종료·백업 정지(quiesce)가 동작하지 않습니다' },
   'uptime-long': { title: '오래 재부팅하지 않았습니다', fix: '참고 · 게스트 OS 패치가 적용되지 않았을 수 있습니다' },
 });
@@ -30,7 +30,7 @@ export function findingDetail(f) {
     case 'snap-age': return `가장 오래된 스냅샷 ${x.days}일(기준 ${x.limit}일)`;
     case 'snap-count': return `${x.count}개(기준 ${x.limit}개 초과)`;
     case 'snap-size': return `${x.gb} GB(기준 ${x.limit} GB 초과)`;
-    case 'snap-orphan-delta': return `델타 ${x.gb} GB`;
+    case 'snap-orphan-delta': return orphanDeltaDetail(x);
     case 'uptime-long': return `부팅 ${x.days}일 전(기준 ${x.limit}일)`;
     case 'cpu-limit': return `CPU 제한 ${x.mhz} MHz`;
     case 'mem-limit': return `메모리 제한 ${x.mb} MB`;
@@ -41,6 +41,21 @@ export function findingDetail(f) {
     case 'managed': return [x.extensionKey, x.type].filter(Boolean).join(' · ');
     default: return x.count > 1 ? `${x.count}개` : '';
   }
+}
+
+/**
+ * 유령 스냅샷 후보(v2.742 RECENT-03·VC-09) — 근거를 말한다. 서버 facts.basis: 'consolidation'(vCenter 가 통합 필요로 표시 — 주의)
+ * | 'name-rule'(이름 규칙만 — 참고). consolidationNeeded: true|false|null(아직 안 읽음). 옛 서버(basis 없음)는 크기만.
+ */
+export function orphanDeltaDetail(x = {}) {
+  const gb = `델타 꼴 파일 ${x.gb} GB`;
+  if (x.basis === 'consolidation') return `${gb} · vCenter 가 통합 필요로 표시`;
+  if (x.basis === 'name-rule') {
+    return x.consolidationNeeded === false
+      ? `${gb} · 이름 규칙 기반 후보 — 통합 필요 표시 없음(링크드 클론 등 정상 디스크일 수 있음)`
+      : `${gb} · 이름 규칙 기반 후보 — 통합 필요 여부를 아직 읽지 않음`;
+  }
+  return gb;
 }
 
 /** 수집 범위 한 줄 — '이상 없음' 과 '아직 안 읽음' 을 섞지 않는다. */

@@ -18,6 +18,7 @@ import { deviceTlsConnect } from '../../security/tlsTrust.js'; // 2026-10-09 S-0
 import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
+import { credRejectError, isCredReject } from './restCommon.js'; // v2.742(감사 DEV-03): 자격증명 거부 판정 단일 소스
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 import { powerProbe } from '../power.js';
 import { pickIsiPowerKey, keyNamesOfRest, isiPowerFromStats, isiPowerResult, cachedIsiPowerKey, rememberIsiPowerKey } from './isilonPower.js';
@@ -58,7 +59,7 @@ export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 
     throw new Error(describeFetchError(e, { host: device.host, port: PORT, timeoutMs: TIMEOUT_MS }), { cause: e });
   }
   refuseRedirect(res, 'Isilon');
-  if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+  if (res.status === 401) throw credRejectError(); // v2.742(감사 DEV-03): 표지(authFailed·status)를 싣는다 — 판정은 isCredReject
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -260,7 +261,9 @@ export async function collect(device, { signal = null } = {}) {
   // 잘못된 비번으로 엔드포인트 6개 × 폴링마다 두드리면 장비 쪽 실패 잠금을 유발한다).
   try { raw.config = await get(device, '/platform/1/cluster/config'); }
   catch (e) {
-    if (/401/.test(e.message) || /인증 실패/.test(e.message)) {
+    // v2.742(감사 DEV-03): 문구 부분 일치(`/401/`)는 호스트명(isi-401.corp)·포트가 실린 전송 오류까지 '인증 실패' 로 읽어
+    //   나머지 섹션을 하나도 시도하지 않았다. 판정은 restCommon 의 isCredReject 하나다.
+    if (isCredReject(e)) {
       const out = normalizeIsilon(device, raw);
       out.error = e.message; out.sections.config = `오류: ${e.message}`;
       return out;

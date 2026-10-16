@@ -11,6 +11,8 @@
  *  ② 호스트 파일 `CONFIG_DIR/release-signing-keys.conf`(선택 — 호스트 관리자가 직접 둔다). 키 추가·회수.
  *     ⚠ 확장자가 `.json`/`.env` 가 아닌 이유: 백업 복원(backup/service.js ALLOW_EXT)·엣지 설정 push 가 그 확장자만 쓴다 —
  *     웹 화면 경로로 이 파일을 넣어 신뢰 키를 늘릴 수 없게 한다. 그룹·기타 쓰기 권한이 있으면 읽지 않는다(검증 중단).
+ *     권장 권한은 root:root 소유 · 0644 — 포탈(서비스 계정)이 읽을 수 있어야 하고(못 읽으면 trust-unreadable 로 업그레이드가 멈춘다),
+ *     root 로 도는 확인은 root 소유 파일의 키만 받는다(아래 runningAsRoot). install.sh 가 root 소유 도구 폴더에 사본을 둔다(회수 보존).
  *  회수(revoked)는 어느 출처든 이긴다 — 호스트 파일이 저장소 키를 회수할 수 있고, 저장소가 회수한 키를 되살릴 수 없다.
  *
  * ── 정책 ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -61,16 +63,32 @@ export function signaturePolicy(env = process.env, trust) {
   if (v != null && v !== '') return resolvePolicy(v);
   let t = trust;
   if (t === undefined) { try { t = loadTrust(); } catch { t = null; } }
-  return resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent: !!t?.sources?.host?.present }) });
+  // v2.742(INJPKG-01): root 소유 사본이 있으면 호스트 파일이 지워졌어도 '키 미설정' 으로 약해지지 않는다(require 쪽).
+  const hostPresent = !!(t?.sources?.host?.present || t?.sources?.rootCopy?.present);
+  return resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent }) });
 }
 
 /**
  * 지금 프로세스가 root 인가(v2.741 감사 INJPKG-01). root 로 도는 확인(install.sh·vmware-portal-verify)이 서비스 계정이 쓸 수 있는
  * 호스트 키 파일을 신뢰 기준으로 읽으면, 서비스 계정 권한을 얻은 공격자가 자기 키를 넣어 오프라인 서명 확인을 통과시킨다
- * (install.sh 가 CONFIG_DIR 를 chown -R 서비스 계정으로 바꾼다). 그래서 root 일 때는 uid 0 소유 파일만 받는다.
+ * (install.sh 가 CONFIG_DIR 를 chown -R 서비스 계정으로 바꾼다). 그래서 root 일 때는 **키 추가**를 uid 0 소유 파일에서만 받는다.
+ * ⚠ v2.742(RECENT-01): **회수**는 소유자와 무관하게 받는다 — 예전에는 root 소유가 아닌 파일을 통째로 버려 그 파일의 회수 목록까지
+ *   사라졌고, 회수한 키로 서명한 패키지를 install.sh·vmware-portal-verify 가 '확인됨' 으로 받았다(회수를 더해도 더 엄격해질 뿐이다).
+ *   그 파일이 손상돼 읽히지 않으면 회수 목록을 알 수 없으므로 예전 서비스 계정 판정처럼 fatal 이다(fail-closed).
  */
 export const runningAsRoot = () => process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0;
 let _hostNotRootWarned = false;
+let _rootCopyWarned = false;
+/**
+ * 호스트 키 파일의 root 소유 사본 경로를 싣는 env(v2.742 감사 INJPKG-01). install.sh 가 root 소유 도구 폴더
+ * (release-verify-lib.sh vp_root_tools_dir 아래 trust/)에 사본을 두고, root 로 도는 확인(vmware-portal-verify·install.sh)이 이 env 로
+ * 넘긴다. CONFIG_DIR 는 서비스 계정이 쓸 수 있어 root 소유 원본도 지울 수 있다 — 사본이 있으면 지워도 회수가 사라지지 않는다.
+ * 사본에서는 **회수 항목만** 받는다(키 추가는 원본에서만). root 판정(rootOwnedOnly)일 때만 읽는다 — 서비스 계정 판정은 예전 그대로.
+ */
+export const ROOT_TRUST_COPY_ENV = 'VP_ROOT_TRUST_COPY';
+/** 키 문서에서 회수 항목만 남긴다(revoked 목록 · keys[].revoked===true) — 키 추가는 버린다. */
+const revocationsOnly = (p) => ({ keys: [], revokedIds: p.revokedIds, errors: p.errors });
+const activeKeysOf = (p) => p.keys.filter((k) => !k.revoked).length;
 
 function readKeysFile(file, label, { checkPerms = false, rootOwnedOnly = false } = {}) {
   const C = fs.constants;
@@ -85,20 +103,30 @@ function readKeysFile(file, label, { checkPerms = false, rootOwnedOnly = false }
   try {
     const st = fs.fstatSync(fd);
     if (!st.isFile()) throw Object.assign(new Error(`${label}이(가) 파일이 아닙니다`), { code: 'ENOTFILE' });
-    if (rootOwnedOnly && st.uid !== 0) throw Object.assign(new Error(`${label}이(가) root 소유가 아닙니다(uid ${st.uid})`), { code: 'ENOTROOT' });
+    // v2.742(RECENT-01): root 판정에서 root 소유가 아닌 파일도 **읽는다** — 회수 항목만 받기 위해서다(loadTrust 가 키 추가를 버린다).
+    //   예전에는 여기서 던져 그 파일의 회수 목록까지 버렸다(회수한 키로 서명한 패키지를 root 확인이 받았다).
+    const rootOwned = st.uid === 0;
     if (st.size > KEYS_FILE_MAX) throw Object.assign(new Error(`${label}이(가) 너무 큽니다(${st.size}바이트)`), { code: 'ETOOBIG' });
-    if (checkPerms && process.platform !== 'win32' && (st.mode & 0o022) !== 0) {
-      throw Object.assign(new Error(`${label}의 권한이 너무 넓습니다(그룹·기타 쓰기 가능 — chmod 600 또는 640)`), { code: 'EPERMS' });
+    // 권한 검사는 키를 받을 파일에만 뜻이 있다 — root 판정에서 회수만 받는 파일은 넓은 권한이어도 더 엄격해질 뿐이다.
+    if (checkPerms && process.platform !== 'win32' && (!rootOwnedOnly || rootOwned) && (st.mode & 0o022) !== 0) {
+      throw Object.assign(new Error(`${label}의 권한이 너무 넓습니다(그룹·기타 쓰기 가능 — root:root 소유 · chmod 644 로 두세요. 포탈 서비스 계정이 읽을 수 있어야 합니다)`), { code: 'EPERMS' });
     }
-    return JSON.parse(fs.readFileSync(fd, 'utf8'));
+    return { doc: JSON.parse(fs.readFileSync(fd, 'utf8')), rootOwned, uid: st.uid };
   } finally { try { fs.closeSync(fd); } catch { /* 이미 닫힘 */ } }
+}
+/** 읽기 오류 문구 — 서비스 계정이 못 읽는 경우(EACCES)는 고칠 권한을 함께 말한다(v2.742 INJPKG-02). */
+function keysReadError(e) {
+  const msg = String(e?.message || e?.code || e).slice(0, 200);
+  if (e?.code === 'EACCES') return `${msg} — 포탈 서비스 계정이 읽을 수 있게 root:root 소유 · chmod 644 로 두세요(${DOC} 8절)`;
+  return msg;
 }
 
 /**
  * 신뢰 키를 읽는다. 파일이 작아 매번 읽는다(검증은 드물다). 호스트 파일이 **있는데** 못 읽으면 회수 목록을 알 수 없으므로
  * `fatal` 을 세워 검증을 진행하지 않는다(fail-closed). 저장소 파일을 못 읽어도 fatal.
  */
-export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(), rootOwnedOnly = runningAsRoot() } = {}) {
+export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(), rootOwnedOnly = runningAsRoot(),
+  rootCopyFile = process.env[ROOT_TRUST_COPY_ENV] || null } = {}) {
   const sources = {
     repo: { file: 'server/src/upgrade/release-signing-keys.json', ok: false, count: 0, error: null },
     host: { file: path.basename(hostFile), present: false, ok: true, count: 0, revoked: 0, error: null, ignored: null },
@@ -106,7 +134,7 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(),
   const parsed = [];
   let fatal = null;
   try {
-    const p = parseKeysDoc(readKeysFile(repoFile, '저장소 신뢰 키 파일'), 'repo');
+    const p = parseKeysDoc(readKeysFile(repoFile, '저장소 신뢰 키 파일').doc, 'repo');
     parsed.push(p);
     sources.repo.ok = true; sources.repo.count = p.keys.length;
   } catch (e) {
@@ -117,33 +145,77 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(),
   try { present = fs.existsSync(hostFile); } catch { present = false; }
   if (present) {
     sources.host.present = true;
+    const label = `호스트 신뢰 키 파일(${HOST_KEYS_NAME})`;
     try {
-      const p = parseKeysDoc(readKeysFile(hostFile, `호스트 신뢰 키 파일(${HOST_KEYS_NAME})`, { checkPerms: true, rootOwnedOnly }), 'host');
-      parsed.push(p);
-      sources.host.count = p.keys.length; sources.host.revoked = p.revokedIds.size;
+      const r = readKeysFile(hostFile, label, { checkPerms: true, rootOwnedOnly });
+      const p = parseKeysDoc(r.doc, 'host');
+      if (rootOwnedOnly && !r.rootOwned) {
+        // root 로 도는 확인 — 서비스 계정이 쓸 수 있는 파일의 **키 추가**는 받지 않는다(신뢰 기준을 넓히지 못하게).
+        //   **회수**는 받는다(v2.742 RECENT-01 — '회수는 어느 출처든 이긴다'. 회수를 더해도 더 엄격해질 뿐이다). 파일이 있다는
+        //   사실(present)은 그대로 두어 정책은 '키 미설정' 으로 약해지지 않는다(require 쪽).
+        parsed.push(revocationsOnly(p));
+        sources.host.ignored = 'not-root-owned';
+        sources.host.ignoredKeys = activeKeysOf(p);
+        sources.host.revoked = p.revokedIds.size;
+        sources.host.error = `${label}이(가) root 소유가 아닙니다(uid ${r.uid})`;
+        if (!_hostNotRootWarned) {
+          _hostNotRootWarned = true;
+          console.warn(`⚠ ${sources.host.error} — root 로 실행하는 서명 확인은 이 파일의 키 추가(${sources.host.ignoredKeys}개)를 받지 않고 회수 항목(${sources.host.revoked}개)만 합칩니다 `
+            + `(서비스 계정이 쓸 수 있는 파일로 신뢰 기준을 넓히지 않는다). 내용을 확인한 뒤 root:root 소유·chmod 644 의 새 파일로 바꾸세요(${DOC} 8절).`);
+        }
+      } else {
+        parsed.push(p);
+        sources.host.count = p.keys.length; sources.host.revoked = p.revokedIds.size;
+      }
     } catch (e) {
       if (e?.code === 'ENOTROOT') {
-        // root 로 도는 확인 — 서비스 계정이 쓸 수 있는 파일의 키·회수 목록을 받지 않는다(무시하고 알린다). 파일이 있다는
-        //   사실(present)은 그대로 두어 정책은 '키 미설정' 으로 약해지지 않는다(require 쪽).
+        // root 판정의 심볼릭 링크 — 따라가지 않는다(대상을 바꿔치기할 수 있다). 읽지 않았으므로 회수도 받지 못한다 —
+        //   지운 것과 같은 결과이고, 그 경우를 root 소유 사본(VP_ROOT_TRUST_COPY)이 막는다.
         sources.host.ignored = 'not-root-owned';
         sources.host.error = String(e?.message || e).slice(0, 200);
         if (!_hostNotRootWarned) {
           _hostNotRootWarned = true;
-          console.warn(`⚠ ${sources.host.error} — root 로 실행하는 서명 확인은 이 파일을 읽지 않습니다(서비스 계정이 쓸 수 있는 파일을 신뢰 기준으로 쓰지 않는다). `
-            + `내용을 확인한 뒤 root:root 소유·chmod 644 로 두세요(${DOC}).`);
+          console.warn(`⚠ ${sources.host.error} — root 로 실행하는 서명 확인은 이 파일을 읽지 않습니다(링크를 따라가지 않는다). `
+            + `내용을 확인한 뒤 root:root 소유·chmod 644 의 파일로 두세요(${DOC} 8절).`);
         }
-        return finish();
+      } else {
+        sources.host.ok = false;
+        sources.host.error = keysReadError(e);
+        fatal = fatal || `호스트 신뢰 키 파일을 읽지 못했습니다 — 회수 목록을 알 수 없어 검증을 진행하지 않습니다(${sources.host.error})`;
       }
-      sources.host.ok = false;
-      sources.host.error = String(e?.message || e?.code || e).slice(0, 200);
-      fatal = fatal || `호스트 신뢰 키 파일을 읽지 못했습니다 — 회수 목록을 알 수 없어 검증을 진행하지 않습니다(${sources.host.error})`;
     }
   }
-  return finish();
-  function finish() {
-    const t = mergeTrust(parsed);
-    return { ...t, sources, fatal };
+  if (rootOwnedOnly && rootCopyFile) {
+    // v2.742(INJPKG-01): install.sh 가 root 소유 도구 폴더에 둔 호스트 키 파일 사본 — 회수 항목만 합친다.
+    sources.rootCopy = { file: path.basename(String(rootCopyFile)), present: false, ok: true, revoked: 0, error: null, notRootOwned: false };
+    let st = null;
+    try { st = fs.lstatSync(rootCopyFile); } catch { st = null; }
+    if (st) {
+      sources.rootCopy.present = true;
+      try {
+        const r = readKeysFile(rootCopyFile, '호스트 신뢰 키 root 소유 사본', { rootOwnedOnly: true });
+        const p = parseKeysDoc(r.doc, 'host-copy');
+        parsed.push(revocationsOnly(p));
+        sources.rootCopy.revoked = p.revokedIds.size;
+        if (!r.rootOwned) {
+          sources.rootCopy.notRootOwned = true;
+          if (!_rootCopyWarned) { _rootCopyWarned = true; console.warn(`⚠ 호스트 신뢰 키 root 소유 사본이 root 소유가 아닙니다(uid ${r.uid}) — 회수 항목만 합칩니다. install.sh 를 다시 실행하세요.`); }
+        }
+      } catch (e) {
+        if (e?.code === 'ENOTROOT') {
+          sources.rootCopy.ok = false;
+          sources.rootCopy.error = String(e?.message || e).slice(0, 200);
+          if (!_rootCopyWarned) { _rootCopyWarned = true; console.warn(`⚠ ${sources.rootCopy.error} — 사본을 읽지 않습니다. install.sh 를 다시 실행하세요.`); }
+        } else {
+          sources.rootCopy.ok = false;
+          sources.rootCopy.error = keysReadError(e);
+          fatal = fatal || `호스트 신뢰 키 root 소유 사본을 읽지 못했습니다 — 회수 목록을 알 수 없어 검증을 진행하지 않습니다(${sources.rootCopy.error})`;
+        }
+      }
+    }
   }
+  const t = mergeTrust(parsed);
+  return { ...t, sources, fatal };
 }
 
 /* ── 검증 기록(v2.736.1) ─────────────────────────────────────────────────────────────────────────────────

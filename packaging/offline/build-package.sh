@@ -170,7 +170,9 @@ echo "${VERSION}" > "$STAGE/VERSION"
 # 5) Pack the full installer package -----------------------------------------
 TARBALL="$OUT_DIR/${PKG_NAME}-offline-${VERSION}-${STAMP}.tar.gz"
 echo "==> Packing installer package ${TARBALL}"
-tar -czf "$TARBALL" -C "$BUILD_DIR" "$(basename "$STAGE")"
+# v2.742(감사 INJPKG-04): 항목 소유자를 root(0)로 고정한다 — 빌드 runner 의 uid(CI 1001)가 그대로 들어가면 root 로 풀 때(GNU tar 는
+#   root 면 소유자를 되살린다) install.sh·app/·runtime/ 이 그 uid 소유가 된다(호스트에 같은 uid 계정이 있으면 설치 전에 고칠 수 있다).
+tar --owner=0 --group=0 --numeric-owner -czf "$TARBALL" -C "$BUILD_DIR" "$(basename "$STAGE")"
 ( cd "$OUT_DIR" && sha256sum "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256" )
 
 # 6) Pack the auto-upgrade bundle ---------------------------------------------
@@ -180,7 +182,7 @@ tar -czf "$TARBALL" -C "$BUILD_DIR" "$(basename "$STAGE")"
 BUNDLE="$OUT_DIR/${PKG_NAME}-${VERSION}.tar.gz"
 echo "==> Packing upgrade bundle ${BUNDLE}"
 cp -a "$APP" "$BUILD_DIR/${PKG_NAME}"
-tar -czf "$BUNDLE" -C "$BUILD_DIR" "${PKG_NAME}"
+tar --owner=0 --group=0 --numeric-owner -czf "$BUNDLE" -C "$BUILD_DIR" "${PKG_NAME}"
 ( cd "$OUT_DIR" && sha256sum "$(basename "$BUNDLE")" > "$(basename "$BUNDLE").sha256" )
 
 echo ""

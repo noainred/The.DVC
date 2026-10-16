@@ -9,6 +9,7 @@
  *   않았다**. 그래서 수집기는 각 명령의 원문 앞부분을 함께 보관해(연결 테스트의 'CLI 원문'
  *   패널) 파싱이 빗나가도 운영자가 실제 출력을 바로 볼 수 있게 한다.
  */
+import { healthWord } from '../../storage/healthWord.js';   // v2.742 DEV-02: 상태 단어 판정 단일 소스(v2.586)
 
 /** 'v8.2.3d' 같은 FOS 버전 문자열만 뽑기. */
 export function parseFirmwareShow(text) {
@@ -508,13 +509,44 @@ export function parsePortPerfShow(text) {
   return { ...last, samples: samples.length, partialDropped: pick < samples.length - 1, ...(unrecognized ? { unrecognized } : {}) };
 }
 
-/** fanshow / psshow → {ok, total}. 문구가 모델마다 달라 'Ok/Faulty' 단어 수로 센다. */
+/**
+ * 빈 슬롯(미장착) 표기인가 — 'Absent' · 'Not Present'(v2.742 DEV-02).
+ * 빈 슬롯은 고장이 아니다(v2.526 Unity REMOVED · v2.548 파트 장애 `absent` 와 같은 판단) — 정상에도 이상에도 세지 않는다.
+ * SSH(fanshow·psshow·sensorshow)와 REST(`operational-state`) 가 같은 판정을 쓴다.
+ */
+export const isAbsentWord = (s) => /\babsent\b|\bnot[\s_-]*present\b/i.test(String(s ?? ''));
+
+/**
+ * fanshow / psshow → {ok, total, absent}. 문구가 모델마다 달라 'Ok/Faulty' 단어 수로 센다.
+ * v2.742(DEV-02): **빈 슬롯 줄(absent)은 total 에서 빼고 `absent` 로 따로 센다** — 예전에는 'Ok' 가 없는 줄을
+ * 전부 '이상' 으로 세어 빈 PSU 슬롯 하나가 월간 점검 'N개 이상'·파트 장애 fault 가 됐다.
+ * ⚠ 정직 기록: psshow/fanshow 의 absent 표기는 실장비 출력으로 확인하지 못했다(관용 매칭).
+ */
 export function parseFruShow(text) {
   const s = String(text || '');
   const lines = s.split(/\r?\n/).filter((l) => /\b(Fan|Power Supply|Unit)\b/i.test(l));
   if (!lines.length) return null;
-  const ok = lines.filter((l) => /\bOk\b|\bOK\b|is Ok/i.test(l)).length;
-  return { ok, total: lines.length };
+  const absent = lines.filter((l) => isAbsentWord(l)).length;
+  const fitted = lines.filter((l) => !isAbsentWord(l));
+  const ok = fitted.filter((l) => /\bOk\b|\bOK\b|is Ok/i.test(l)).length;
+  return { ok, total: fitted.length, absent };
+}
+
+/**
+ * sensorshow 의 상태 단어 → true(정상) / false(이상) / null(모름)(v2.742 DEV-02).
+ * 판정은 `storage/healthWord.js` 하나를 쓴다(복제 금지). 다만 healthWord 는 **모르는 단어를 'bad'(규칙 ④)로** 접는데
+ * 센서 상태는 펌웨어마다 문구가 달라 모르는 단어를 '이상' 으로 단정하지 않는다 — 모름(null)으로 두고 화면이 '상태를 읽지 못한
+ * 센서' 로 원문과 함께 밝힌다. 규칙 ②(명백한 이상어·부정어)와 ④(모르는 단어)는 **정상어를 덧붙여** 가른다 — healthWord 는
+ * 이상어를 정상어보다 먼저 보므로 ②면 그래도 'bad', ④면 'ok' 가 된다.
+ * 빈 슬롯(Absent)은 이 함수 밖에서 따로 표시한다(`absent:true`).
+ */
+export function sensorStateOk(state) {
+  const st = String(state ?? '').trim();
+  if (!st) return null;
+  const w = healthWord(st);
+  if (w === 'ok' || /^present$/i.test(st)) return true;
+  if (w === 'unknown') return null;
+  return healthWord(`${st} ok`) === 'bad' ? false : null;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -564,12 +596,16 @@ export function parseSensorShow(text) {
     const val = rest.match(/(?:value|speed)\s+is\s+(-?[\d.]+)\s*([A-Za-z]+)?/i);
     const name = sensorNameOf(rest);
     const state = st ? st[1] : '';
+    // v2.742(DEV-02): 빈 슬롯('is Absent' · 'is Not Present')은 **별도 표지**다 — 예전에는 ok:false(이상)로 두어, 한 점검 항목에
+    //   '미장착 1 · 이상 1개' 가 함께 찍혔다(counts 는 absent 로 세고 판정은 ok===false 를 이상으로 셌다).
+    const absent = /\bis\s+(?:absent|not[\s_-]*present)\b/i.test(rest);
     list.push({
       n: Number(m[1]),
       kind: String(m[2] || '').trim().toLowerCase().replace(/\s+/g, ' '),
       name, state,
-      // ⚠ 상태를 모르면 `ok: null`(모른다) — false(장애)로 단정하지 않는다.
-      ok: state ? /^(ok|normal|present|absent)$/i.test(state) && !/^absent$/i.test(state) : null,
+      // ⚠ 상태를 모르면 `ok: null`(모른다) — false(장애)로 단정하지 않는다. 빈 슬롯도 null + absent:true.
+      ok: absent ? null : sensorStateOk(state),
+      ...(absent ? { absent: true } : {}),
       value: val ? Number(val[1]) : null,
       unit: val && val[2] ? val[2] : null,
       raw: raw.trim().slice(0, 200),
@@ -577,7 +613,7 @@ export function parseSensorShow(text) {
   }
   const counts = { total: list.length, ok: 0, bad: 0, unknown: 0, absent: 0 };
   for (const s of list) {
-    if (/^absent$/i.test(s.state)) counts.absent++;
+    if (s.absent) counts.absent++;
     else if (s.ok === true) counts.ok++;
     else if (s.ok === false) counts.bad++;
     else counts.unknown++;

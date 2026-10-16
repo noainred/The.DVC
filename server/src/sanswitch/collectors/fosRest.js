@@ -22,7 +22,8 @@ import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { deviceTlsConnect, unwrapTlsPeer } from '../../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
-import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SSH 경로와 같은 스키마
+import { zoningFromRest } from '../zoningCollect.js';
+import { isAbsentWord } from './fosParse.js';   // v2.742 DEV-02: 빈 슬롯 판정 — SSH 와 한 벌   // v2.511: 조닝 — SSH 경로와 같은 스키마
 
 // FOS REST 전용 로컬 디스패처 — 전역 TLS 오염 금지(server/CLAUDE.md).
 // 2026-10-09 S-02(사용자 승인 기본값 전환): 미설정 = CA 체인(시스템 루트 + 사설 CA 번들) 또는 장비별 승인 지문 —
@@ -203,8 +204,8 @@ export function buildSnapshot(device, parts = {}, { countersAt = null } = {}) {
   const psus = asArray(parts.psu?.['power-supply']);
   snap.health = {
     status: snap.switchState,
-    fans: fans.length ? { ok: fans.filter((f) => String(f['operational-state'] || '').toLowerCase() === 'ok').length, total: fans.length } : null,
-    psus: psus.length ? { ok: psus.filter((p) => String(p['operational-state'] || '').toLowerCase() === 'ok').length, total: psus.length } : null,
+    // v2.742(DEV-02): operational-state 'absent'(빈 슬롯)는 total 에서 빼고 따로 센다 — SSH(parseFruShow)와 같은 규칙.
+    fans: fruCounts(fans), psus: fruCounts(psus),
     tempC: list.reduce((mx, p) => (p.sfpTempC != null && p.sfpTempC > mx ? p.sfpTempC : mx), -Infinity) > -Infinity
       ? list.reduce((mx, p) => (p.sfpTempC != null && p.sfpTempC > mx ? p.sfpTempC : mx), -Infinity) : null,
     alerts: null, monitors: {},   // v2.590(감사 F6): REST 경로는 스위치 상태 모니터를 조회하지 않는다 — 0 이 아니라 '확인 불가'
@@ -216,6 +217,14 @@ export function buildSnapshot(device, parts = {}, { countersAt = null } = {}) {
 }
 
 const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
+
+/** brocade-fru 팬·PSU 목록 → {ok,total,absent}. 빈 슬롯(isAbsentWord)은 장착 수(total)에 넣지 않는다(v2.742 DEV-02). */
+export function fruCounts(list) {
+  if (!Array.isArray(list) || !list.length) return null;
+  const st = (x) => String(x?.['operational-state'] || '');
+  const fitted = list.filter((x) => !isAbsentWord(st(x)));
+  return { ok: fitted.filter((x) => st(x).toLowerCase() === 'ok').length, total: fitted.length, absent: list.length - fitted.length };
+}
 
 /** 수집 진입점. 섹션 실패는 sections 에 남기고 계속 진행한다(포트 표는 살린다). */
 export async function collect(device, { signal, trace = null } = {}) {

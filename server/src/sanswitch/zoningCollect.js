@@ -9,7 +9,7 @@
  *   개수는 `zoneCount` 다. 숫자 `zones` 를 읽던 곳은 없었다(확인: 화면은 `effectiveConfig` 만 썼다).
  *   한 이름이 숫자와 배열 두 뜻을 갖지 않게 이렇게 정리한다.
  */
-import { parseCfgShow, resolveZones, compactZoning, normWwn, ZONE_LIMITS } from './zoning.js';
+import { parseCfgShow, resolveZones, compactZoning, normWwn, isPropertyMember, ZONE_LIMITS } from './zoning.js';
 
 /** 조닝 없음/미수집을 나타내는 빈 구조 — 모든 경로가 같은 모양을 돌려주게. */
 export function emptyZoning(effectiveConfig = '', reason = '') {
@@ -44,15 +44,19 @@ export function zoningFromRest(eff, def) {
   const effCfg = arr(eff?.['effective-configuration'])[0] || {};
   const cfgName = effCfg['cfg-name'] || '';
   // 활성 설정의 zone 목록. FOS 는 `enabled-zone` 아래에 zone-name + member-entry 를 준다.
-  const effZones = arr(effCfg['enabled-zone']).map((z) => ({
-    name: z['zone-name'] || '',
-    members: arr(z['member-entry']?.['entry-name'] ?? z['member-entry']?.['principal-entry-name'] ?? []),
-  })).filter((z) => z.name);
+  // v2.742(DEV-04): peer zone 의 member-entry 는 entry-name(peer)과 principal-entry-name(principal — 보통 타깃) **둘 다**를 준다.
+  //   예전 `entry-name ?? principal-entry-name` 은 둘이 함께 오면 principal 을 버렸고, 정의 zone 쪽은 principal 을 아예 읽지 않았다.
+  //   ⚠ 정직 기록: FOS REST peer zone 응답 모양은 실장비로 확인하지 못했다(Brocade 모듈 필드 이름 기준).
+  const zoneRow = (z) => {
+    const me = z['member-entry'] || {};
+    const principals = arr(me['principal-entry-name']).map(String);
+    const zt = Number(z['zone-type']);
+    return { name: z['zone-name'] || '', members: [...arr(me['entry-name']).map(String), ...principals], principals,
+      peerType: zt === 1 || zt === 2 };   // zone-type 1 = 사용자 peer zone · 2 = 타깃이 만든 peer zone(0 = 일반)
+  };
+  const effZones = arr(effCfg['enabled-zone']).map(zoneRow).filter((z) => z.name);
   const defRoot = arr(def?.['defined-configuration'])[0] || {};
-  const defZones = arr(defRoot.zone).map((z) => ({
-    name: z['zone-name'] || '',
-    members: arr(z['member-entry']?.['entry-name'] ?? []),
-  })).filter((z) => z.name);
+  const defZones = arr(defRoot.zone).map(zoneRow).filter((z) => z.name);
   const aliases = {};
   for (const a of arr(defRoot.alias)) {
     const n = a['alias-name']; if (!n) continue;
@@ -61,18 +65,28 @@ export function zoningFromRest(eff, def) {
   // 활성이 있으면 활성을, 없으면 정의를 쓴다(SSH 경로와 같은 우선순위).
   const src = effZones.length ? effZones : defZones;
   const source = effZones.length ? 'effective' : (defZones.length ? 'defined' : 'none');
-  const expand = (members) => {
+  const resolveOne = (raw, aliasOf) => {
+    const w = normWwn(raw);
+    if (w) return [w];
+    const av = aliases[raw];
+    if (av?.length) { for (const x of av) aliasOf[x] = raw; return av; }
+    return null;
+  };
+  const expand = (z) => {
     const wwns = []; const unresolved = []; const aliasOf = {};
-    for (const raw of members) {
-      const w = normWwn(raw);
-      if (w) { wwns.push(w); continue; }
-      const av = aliases[raw];
-      if (av?.length) { for (const x of av) { wwns.push(x); aliasOf[x] = raw; } continue; }
+    let properties = 0;
+    for (const raw of z.members) {
+      if (isPropertyMember(raw)) { properties++; continue; }   // peer zone 속성 멤버 — 끝점이 아니다(개수만)
+      const r = resolveOne(raw, aliasOf);
+      if (r) { for (const x of r) wwns.push(x); continue; }
       unresolved.push(String(raw));
     }
-    return { members: [...new Set(wwns)].concat(unresolved), aliasOf };
+    const principals = [...new Set(z.principals.flatMap((raw) => resolveOne(raw, {}) || []).filter((w) => !isPropertyMember(w)))];
+    const peer = z.peerType || properties > 0 || principals.length > 0;
+    return { members: [...new Set(wwns)].concat(unresolved), aliasOf,
+      ...(peer ? { peer: true, properties } : {}), ...(principals.length ? { principals } : {}) };
   };
-  const zones = src.map((z) => ({ name: z.name, ...expand(z.members) })).slice(0, ZONE_LIMITS.zones);
+  const zones = src.map((z) => ({ name: z.name, ...expand(z) })).slice(0, ZONE_LIMITS.zones);
   return {
     effectiveConfig: cfgName,
     zones,

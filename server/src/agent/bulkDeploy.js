@@ -67,6 +67,19 @@ export function listRuns() {
   }));
 }
 export function activeRunId() { return _active; }
+/**
+ * v2.742(감사 TIMING-04): 지금 도는 대량 배포 — 자동 업그레이드가 끝나기를 기다린다(upgrade/manager.js — 상한은 스캔과 같은 UPGRADE_SCAN_DEFER_MAX_MS).
+ *   실행 상태가 메모리에만 있고 노드마다 SFTP + 원격 install.sh 를 동기로 돌리므로, 재시작이 오면 진행 기록이 사라지고 설치가 중간에 끊긴 노드가
+ *   남을 수 있다(이어 받는 경로가 없다 — resumable:false). 진행·대기 노드 수를 이름에 싣는다(자격증명은 싣지 않는다).
+ * @returns {{kind:'bulk-deploy', key:string, label:string, since:number, by:string, resumable:false}[]}
+ */
+export function runningBulkDeploys() {
+  const run = _active ? _runs.get(_active) : null;
+  if (!run || run.status !== 'running') return [];
+  const running = run.items.filter((i) => i.status === 'running').length;
+  const queued = run.items.filter((i) => i.status === 'queued').length;
+  return [{ kind: 'bulk-deploy', key: run.id, label: `에이전트 대량 배포 ${run.items.length}대(진행 ${running} · 대기 ${queued})`, since: run.at, by: run.by, resumable: false }];
+}
 export function cancelRun(runId) {
   const run = _runs.get(runId);
   if (!run) return { ok: false, reason: '실행을 찾을 수 없습니다.' };

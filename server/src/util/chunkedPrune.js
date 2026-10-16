@@ -40,6 +40,20 @@ export function shouldContinuePrune(lastDeleted, total, maxRows = PRUNE_MAX_ROWS
 }
 
 /**
+ * v2.742(감사 DB-04): 시간 기준 적응 청크의 다음 크기 — 순수 함수(chunkedDelete 의 targetMs 와, 호출부가 한 청크씩 부르는 경로
+ * (logs/db.js pruneOldest)가 같은 규칙을 쓴다 — 두 벌을 두지 않는다).
+ *   직전 청크(want 행)가 목표보다 오래 걸렸으면 그 비율만큼 줄이고(하한 minChunk), 목표의 절반도 안 걸렸고 줄여 요청한 것이 아니면
+ *   두 배로 늘린다(상한 maxChunk). 그 사이면 그대로.
+ * @returns {number}
+ */
+export function nextAdaptiveChunk(chunk, want, tookMs, { targetMs, minChunk = 1, maxChunk = chunk } = {}) {
+  if (!(Number.isFinite(targetMs) && targetMs > 0) || !Number.isFinite(tookMs)) return chunk;
+  if (tookMs > targetMs) return Math.max(minChunk, Math.floor(want * (targetMs / tookMs)));
+  if (tookMs < targetMs / 2 && want >= chunk) return Math.min(maxChunk, chunk * 2);
+  return chunk;
+}
+
+/**
  * 청크 DELETE 를 돌린다.
  *
  * @param {{run:(...a:any[])=>{changes?:number}}} stmt
@@ -48,20 +62,32 @@ export function shouldContinuePrune(lastDeleted, total, maxRows = PRUNE_MAX_ROWS
  *   (SQLITE_ENABLE_UPDATE_DELETE_LIMIT)이 켜져야 동작한다 — 번들 빌드에 의존하지 않으려면
  *   rowid 서브쿼리가 안전하다. 조건 컬럼에 인덱스가 있어야 풀스캔을 피한다.
  * @param {any[]} args   조건 바인딩 값들(마지막 LIMIT 은 이 함수가 붙인다)
- * @param {{chunk?:number, maxRows?:number, label?:string, onProgress?:(n:number)=>void}} [opt]
+ * @param {{chunk?:number, maxRows?:number, label?:string, onProgress?:(n:number)=>void,
+ *          targetMs?:number, minChunk?:number, maxChunk?:number, clock?:()=>number}} [opt]
+ *   v2.742(감사 DB-04): `targetMs` 를 주면 **시간 기준 적응 청크**다 — 직전 청크가 목표보다 오래 걸렸으면 그 비율만큼 줄이고
+ *   (하한 minChunk), 목표의 절반도 안 걸렸으면 두 배로 늘린다(상한 maxChunk — 기본은 시작 청크). 행 수가 같아도 표마다 비용이
+ *   다르다(인덱스 7개 + 긴 메시지 열인 vCenter 이벤트 표는 2만 행 한 청크가 0.2~0.5초 — 재현). 조건·상한(maxRows)·종료 판정은
+ *   같으므로 **지우는 행은 같다**(청크 크기만 바뀐다). 주지 않으면 예전 그대로 모든 청크가 같은 크기다(다른 호출부 무변경).
+ *   clock 은 테스트용 시계(기본 performance.now).
  * @returns {Promise<{deleted:number, done:boolean, chunks:number}>}
  *   `done=false` 면 상한에 걸려 남은 게 있다는 뜻이다.
  */
 export async function chunkedDelete(stmt, args = [], opt = {}) {
-  const chunk = Math.max(1, opt.chunk || PRUNE_CHUNK_ROWS);
+  let chunk = Math.max(1, opt.chunk || PRUNE_CHUNK_ROWS);
   const maxRows = opt.maxRows == null ? PRUNE_MAX_ROWS : opt.maxRows;
+  const targetMs = Number.isFinite(opt.targetMs) && opt.targetMs > 0 ? opt.targetMs : 0;
+  const minChunk = Math.max(1, Math.trunc(num(opt.minChunk, Math.min(500, chunk))));
+  const maxChunk = Math.max(minChunk, Math.trunc(num(opt.maxChunk, chunk)));
+  const clock = typeof opt.clock === 'function' ? opt.clock : () => performance.now();
   let deleted = 0;
   let chunks = 0;
   for (;;) {
     // 상한에 가까우면 남은 만큼만 요청해 초과 삭제를 막는다.
     const want = maxRows > 0 ? Math.min(chunk, maxRows - deleted) : chunk;
     if (want <= 0) break;
+    const t0 = targetMs ? clock() : 0;
     const r = stmt.run(...args, want);
+    if (targetMs) chunk = nextAdaptiveChunk(chunk, want, clock() - t0, { targetMs, minChunk, maxChunk });
     const n = Number(r?.changes ?? 0);
     deleted += n;
     chunks++;

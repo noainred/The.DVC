@@ -25,7 +25,9 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { demoPduSnapshot, ensurePduDemo, isDemoId, pduDemoActive } from '../mock/demo/pdu.js'; // v2.708 데모(mock 전용)
 
 const CONCURRENCY = Math.max(1, Number(process.env.PDU_CONCURRENCY) || 4);
-const DEVICE_TIMEOUT_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
+// v2.742(감사 DEV-05): 장비 시한은 수집기가 소유한다 — 세션 예산(PDU_SESSION_BUDGET_MS)을 그보다 작게 묶으려면 같은 값을 봐야 한다
+//   (식을 두 곳에 두면 한쪽만 바뀐 날 예산이 시한을 넘어 이미 읽은 값이 다시 버려진다). 결과는 예전 식과 같다(무한대만 기본값 90초).
+const DEVICE_TIMEOUT_MS = apcSsh.PDU_DEVICE_TIMEOUT_MS;
 
 let _running = false;                 // 재진입 가드(수동 실행과 공유)
 let _timer = null;
@@ -117,8 +119,11 @@ export function detectedUnits(snap) {
 /** 등록 화면 '연결 테스트' — 저장 전 임의 입력으로도 동작(레지스트리를 거치지 않는다). */
 export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace = null } = {}) {
   const t0 = Date.now();
+  // v2.742(DEV-05): 테스트 시한(기본 60초)은 주기 수집의 장비 시한보다 짧다 — 세션 예산도 그 시한보다 작게 넘긴다
+  //   (기본 예산 75초를 그대로 쓰면 예산 가드가 발동하기 전에 테스트 시한이 세션을 끊어 읽은 값이 버려진다).
+  const testBudgetMs = Math.min(apcSsh.PDU_SESSION_BUDGET_MS, Math.max(1_000, timeoutMs - Math.min(10_000, Math.floor(timeoutMs / 6))));
   try {
-    const snap = await withDeadline(timeoutMs, (signal) => apcSsh.collect(device, { signal, onTrace }), '테스트 타임아웃');
+    const snap = await withDeadline(timeoutMs, (signal) => apcSsh.collect(device, { signal, onTrace, budgetMs: testBudgetMs }), '테스트 타임아웃');
     return {
       ok: snap.ok, ms: Date.now() - t0,
       model: snap.model, serial: snap.serial, aosVersion: snap.aosVersion, appVersion: snap.appVersion,

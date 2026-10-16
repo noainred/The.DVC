@@ -18,6 +18,7 @@ import { enqueueLogQuery, getLogQueryResult, bindingOfReq } from '../../central/
 import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
+import { createYielder } from '../../util/timeSlice.js';   // v2.742(DB-03): 필터 내보내기 조각 사이 시간 기준 양보
 import { todayStamp } from "../../util/dayKey.js";
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
@@ -75,8 +76,14 @@ function scopeLogMeta(meta, allowed) {
  *  - 잘림은 상한에 닿은 뒤 **한 행 더 있을 때만** 밝힌다.
  * onRows 가 false 를 돌려주면 중단(aborted).
  */
-export async function exportLogPages(db, f, { max, chunk, onRows } = {}) {
+export async function exportLogPages(db, f, { max, chunk, onRows, sliceMs = 3_600_000, now = Date.now(), yieldMs = 15 } = {}) {
   const base = { ...f, until: f.until ? Number(f.until) : 0 };
+  // v2.742(감사 DB-03 — 재현): 검색어·심각도 필터가 있으면 ts 조각 안에서 키셋으로 읽는다(exportFilteredSlices). 키셋 한 문장은 인덱스 순서로
+  //   훑다 LIMIT 에서 멈추는데, 드물게 맞는 검색어는 그 한 문장이 표 끝까지(=전체 보관분) 동기로 훑었다. 필터가 없으면 아래 예전 경로 —
+  //   인덱스 순서 그대로 LIMIT 에서 곧 멈춘다(조각이 오히려 비용이다).
+  if ((base.q || base.severity) && typeof db.queryPage === 'function' && typeof db.tsRange === 'function') {
+    return exportFilteredSlices(db, base, { max, chunk, onRows, sliceMs, now, yieldMs });
+  }
   // v2.632(A6-2632-02): db 가 키셋 페이지(queryPage)를 주면 (ts, rowid) 커서로 잇는다 — OFFSET 이 없어 청크 사이에 커서와
   //   **같은 ts** 로 들어온 행도 결과를 밀지 않는다(예전: 경계 행 1개 중복 + 새 행 누락). 그 늦은 행은 내보내기 시작 뒤에 들어온
   //   것이라 이번 결과에 없다(스냅샷 의미 — 중복·누락이 아니다). queryPage 가 없는 구현(테스트 목)만 아래 OFFSET 경로를 쓴다.
@@ -123,6 +130,56 @@ export async function exportLogPages(db, f, { max, chunk, onRows } = {}) {
     if (rows.length < take) return { emitted, truncated: false, aborted: false };
     await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
   }
+}
+
+/**
+ * v2.742(감사 DB-03): 필터 내보내기 — ts 조각(최신부터) 안에서 (ts, rowid) 키셋으로 읽는다. 결과 순서·내용은 구간 없는 키셋(위 queryPage 경로)과 같다
+ *   (조각은 ts 로 겹치지 않고 최신부터 읽는다 — 테스트가 rid 순서로 대조). 조각 규칙은 logs/db.js searchAsync 와 같다: 하한은 since(없으면 표의 첫
+ *   시각), 맨 위 조각은 위가 열려 있고(until 이 있으면 base 의 ts<=until 이 묶는다 — vCenter 시계가 앞선 이벤트도 포함), 조각 수는 2,000 을 넘지
+ *   않게 넓힌다. onRows 에는 chunk 행씩(마지막만 짧다) 넘기고, 조각 사이에서 시간 기준으로 양보한다. 잘림은 상한에 닿은 뒤 한 행 더 있을 때만.
+ */
+async function exportFilteredSlices(db, base, { max, chunk, onRows, sliceMs, now, yieldMs }) {
+  const { min } = db.tsRange() || {};
+  if (min == null) return { emitted: 0, truncated: false, aborted: false };   // 빈 표
+  const since = Number(base.since) > 0 ? Number(base.since) : 0;
+  const lo0 = Math.max(since, Number(min));
+  const top = base.until ? Number(base.until) : (Number.isFinite(Number(now)) ? Number(now) : Date.now());
+  const step = Math.max(Number.isFinite(sliceMs) && sliceMs >= 60_000 ? sliceMs : 3_600_000, Math.ceil((top - lo0) / 2000));
+  const maybeYield = createYielder(yieldMs);
+  // 조각 [lo, hiExcl) — 맨 위는 hiExcl 이 없다(위가 열림).
+  const slices = function* () { let lo = Math.max(lo0, top - step); yield { lo }; let hi = lo; while (hi > lo0) { lo = Math.max(lo0, hi - step); yield { lo, hiExcl: hi }; hi = lo; } };
+  let emitted = 0; let cursor = null; let buf = [];
+  const flush = async () => {
+    if (!buf.length) return true;
+    const rows = buf; buf = [];
+    const go = await onRows(rows);
+    if (go === false) return false;
+    emitted += rows.length;
+    await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
+    return true;
+  };
+  let first = true;
+  for (const b of slices()) {
+    if (!first) await maybeYield();
+    first = false;
+    for (;;) {
+      const room = max - emitted - buf.length;
+      if (room <= 0) {
+        // 상한 — 남은 조각에서 한 행이라도 더 있으면 잘림(지금 조각부터).
+        if (!(await flush())) return { emitted, truncated: false, aborted: true };
+        if (db.queryPage(base, 1, cursor, b).length) return { emitted, truncated: true, aborted: false };
+        break;
+      }
+      const take = Math.min(chunk - buf.length, room);
+      const rows = db.queryPage(base, take, cursor, b);
+      for (const r of rows) buf.push(r);
+      if (rows.length) { const last = rows[rows.length - 1]; cursor = { ts: last.ts, rid: last.rid }; }
+      if (buf.length >= chunk && !(await flush())) return { emitted, truncated: false, aborted: true };
+      if (rows.length < take) break;   // 이 조각을 다 읽었다(상한에 닿은 채 넘어가면 다음 조각 첫 반복이 '한 행 더' 를 본다)
+    }
+  }
+  if (!(await flush())) return { emitted, truncated: false, aborted: true };
+  return { emitted, truncated: false, aborted: false };
 }
 
 export function registerChecksLogs(api) {

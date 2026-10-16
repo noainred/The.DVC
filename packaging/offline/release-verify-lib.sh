@@ -20,11 +20,17 @@
 #   ② 서명 확인 도구(node·server/src·공개키 목록)는 root 소유 사본(<도구 폴더>/verify)만 신뢰 기준으로 쓴다 — 그 사본은
 #      install.sh 가 **방금 확인한 패키지**에서 만든다(서비스 계정이 쓸 수 있는 앱 트리에서 복사하지 않는다).
 #   ③ root 로 읽는 portal.env 정책·호스트 키 파일은 uid 0 소유일 때만 받는다(호스트 키 파일은 signature.js 가 판정).
+#   ④ (v2.742 INJPKG-01) 호스트 키 파일은 서비스 계정 소유 CONFIG_DIR 안에 있어 root 소유여도 지워지거나 바꿔치기될 수 있다 —
+#      install.sh 가 그 파일의 root 소유 사본을 <도구 폴더>/trust/ 에 두고(vp_stage_trust_copy), root 로 도는 확인은 그 사본의
+#      **회수 항목**을 함께 합친다(env VP_ROOT_TRUST_COPY → signature.js). 원본을 지워도 회수가 사라지지 않는다.
 #   ⚠ 정직한 한계: 사본은 install.sh 를 실행할 때만 바뀐다 — 앱 안 업그레이드(서비스 계정)로 들어온 새 공개키 목록은
 #     다음 install.sh 실행 전까지 root 확인에 반영되지 않는다(서비스 계정이 root 신뢰 기준을 바꿀 수 없게 한 대가).
+#     호스트 키 파일의 회수를 **푼** 경우도 같다 — 지난 사본의 회수가 다음 install.sh 까지 남는다(지우려면 사본을 root 가 직접 지운다).
 VP_ROOT_TOOLS_BASE_DEFAULT=/usr/local/libexec/vmware-portal
 # vp_root_tools_dir <prefix> — 그 설치본의 root 소유 도구 폴더(설치본마다 따로 — prefix 를 그대로 잇는다).
 vp_root_tools_dir() { printf '%s%s\n' "${VP_ROOT_TOOLS_BASE:-$VP_ROOT_TOOLS_BASE_DEFAULT}" "$1"; }
+# 호스트 키 파일 이름 — signature.js HOST_KEYS_NAME 과 같다. 사본은 <도구 폴더>/trust/ 에 같은 이름으로 둔다.
+VP_HOST_KEYS_NAME=release-signing-keys.conf
 
 # vp_path_root_only <경로> — 경로와 그 위 모든 폴더가 root 소유이고 그룹·기타가 쓸 수 없는가(sticky 폴더 /tmp 는 허용 —
 #   남이 root 항목을 바꾸거나 지울 수 없다). 하나라도 아니면 그 경로는 서비스 계정이 갈아끼울 수 있다.
@@ -111,7 +117,9 @@ if [[ "$KIND" == verify ]]; then
   fi
   POLICY="${UPGRADE_SIGNATURE_POLICY:-}"
   [[ -n "$POLICY" ]] || POLICY="$(vp_root_env_policy "$CONFIG_DIR")"
-  exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" "$TOOLS/verify/node" "$TOOLS/verify/server/src/upgrade/verifyCli.js" "$@"
+  # v2.742(INJPKG-01): 호스트 키 파일의 root 소유 사본 — 그 회수 항목을 함께 합친다(없으면 signature.js 가 '없음' 으로 본다).
+  exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" VP_ROOT_TRUST_COPY="$TOOLS/trust/release-signing-keys.conf" \
+    "$TOOLS/verify/node" "$TOOLS/verify/server/src/upgrade/verifyCli.js" "$@"
 fi
 APP_TOOL="$PREFIX/app/$TOOL"
 if [[ "$(id -u)" -ne 0 ]]; then exec /bin/bash "$APP_TOOL" "$@"; fi   # root 가 아니면 권한 경계가 없다 — 앱 트리 래퍼 그대로
@@ -133,6 +141,42 @@ exit $rc
 BODY
   } > "$out"
   chmod 0755 "$out"
+}
+
+# vp_stage_trust_copy <config_dir> <지금 도구 폴더> <새 도구 폴더> <검사용 node>
+#   호스트 신뢰 키 파일(<config_dir>/release-signing-keys.conf)의 root 소유 사본을 <새 도구 폴더>/trust/ 에 둔다(v2.742 INJPKG-01).
+#   규칙: 원본이 root 소유 · 그룹/기타 쓰기 없음 · JSON 으로 읽히면 그 내용으로 바꾼다(연 파일 fd 에서 읽는다 — 확인 뒤 바꿔치기 차단).
+#     원본이 없거나 · root 소유가 아니거나 · 읽히지 않으면 **지난 사본을 그대로** 둔다 — 그 상태는 서비스 계정이 만들 수 있으므로
+#     (CONFIG_DIR 를 쓸 수 있다) 원본을 지우는 것만으로 회수가 풀리면 안 된다. 반환 0 = 준비(사본 없음 포함) · 1 = 실패.
+vp_stage_trust_copy() {
+  local src="$1/$VP_HOST_KEYS_NAME" cur="$2/trust/$VP_HOST_KEYS_NAME" dir="$3/trust" node="$4" fd st=""
+  local dst="$dir/$VP_HOST_KEYS_NAME" fresh=0
+  ( umask 022; mkdir -p -- "$dir" ) || return 1
+  if [[ -f "$src" && ! -L "$src" ]] && exec {fd}<"$src"; then
+    st="$(stat -L -c '%u %a' "/dev/fd/$fd" 2>/dev/null || echo 'x 0')"
+    if [[ "${st%% *}" == 0 ]] && ! (( 8#${st##* } & 8#022 )); then
+      if cat <&"$fd" > "$dst.part" 2>/dev/null && [[ -x "$node" ]] \
+        && "$node" -e 'const fs=require("fs");const f=process.argv[1];if(fs.statSync(f).size>262144)process.exit(1);const d=JSON.parse(fs.readFileSync(f,"utf8"));if(!d||typeof d!=="object"||Array.isArray(d))process.exit(1)' "$dst.part" 2>/dev/null; then
+        fresh=1
+      else
+        echo "⚠ $src 를 신뢰 키 문서(JSON)로 읽지 못해 root 소유 사본을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+      fi
+    else
+      echo "ⓘ $src 는 root 소유가 아니거나 그룹·기타가 쓸 수 있어 root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+    fi
+    exec {fd}<&-
+  fi
+  if [[ $fresh -eq 1 ]]; then
+    mv -f -- "$dst.part" "$dst" || return 1
+    echo "==> 호스트 신뢰 키 파일의 root 소유 사본을 만들었습니다: $cur"
+    return 0
+  fi
+  rm -f -- "$dst.part"
+  if [[ -f "$cur" ]]; then
+    cp -- "$cur" "$dst" || return 1
+    [[ -e "$src" || -L "$src" ]] || echo "ⓘ $src 가 없어 지난 root 소유 사본($cur)의 회수 목록을 그대로 둡니다 — 회수를 풀려면 그 사본을 root 가 직접 지우세요(docs/RELEASE-SIGNING.md 8절)."
+  fi
+  return 0
 }
 
 # vp_install_root_tools <prefix> <script_dir> <서비스 계정> <서비스 이름> <config_dir>
@@ -161,6 +205,8 @@ vp_install_root_tools() {
   if [[ $anchor_rc -eq 0 ]]; then
     vp_write_launcher "$tmp/vmware-portal-verify" verify "$prefix" "$user" "$svc" "$cdir" "$tools" || return 2
   fi
+  # 호스트 키 파일의 root 소유 사본(회수 보존) — 실패하면 지난 도구 폴더(지난 사본)를 그대로 둔다(바꾸면 사본이 사라진다).
+  vp_stage_trust_copy "$cdir" "$tools" "$tmp" "$sdir/runtime/node/bin/node" || { rm -rf -- "$tmp"; return 2; }
   chown -R 0:0 -- "$tmp" && chmod -R u+rwX,go+rX,go-w -- "$tmp" || { rm -rf -- "$tmp"; return 2; }
   [[ $anchor_rc -ne 0 ]] || chmod 0755 -- "$tmp/verify/node"
   rm -rf -- "$tools.old.$$"
@@ -219,7 +265,8 @@ verify_release_package() {
   #   root 소유 임시 폴더에 복사해 넘긴다(이름은 그대로 — manifest 의 파일 이름과 대조한다).
   _vp_verify_run() {
     if [[ -z "$runas_uid" ]]; then
-      CONFIG_DIR="$cdir" UPGRADE_SIGNATURE_POLICY="$pol" "$node" "$js" "$@"
+      # v2.742(INJPKG-01): root 소유 도구 폴더의 호스트 키 사본 — root 로 도는 확인이 그 회수 항목을 함께 합친다(옛 도구는 무시한다).
+      CONFIG_DIR="$cdir" UPGRADE_SIGNATURE_POLICY="$pol" VP_ROOT_TRUST_COPY="$tools/trust/$VP_HOST_KEYS_NAME" "$node" "$js" "$@"
       return
     fi
     local drop=()

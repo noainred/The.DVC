@@ -446,12 +446,16 @@ export async function collectViaSsh(device, { budgetMs = ISI_SESSION_BUDGET_MS }
         // 부가 명령은 각각 best-effort: 버전·계정이 없어도 status 파싱 결과는 살린다.
         // v2.741(DEV-02): 예산으로 시작하지 않은 명령은 `budget` 표지를 남긴다 — '실행 실패' 와 조치가 다르다.
         const soft = (p) => p.catch((e) => ({ stdout: '', budget: e?.code === 'SESSION_BUDGET' }));
-        const ver = await soft(bsh.exec('isi version'));
-        const usersRaw = await soft(bsh.exec('isi auth users list --format json'));
+        // ⚠ 순서가 계약이다(v2.742 감사 RECENT-04 — Unity SPECS '필수 → 매주기 → 구성' 과 같은 원칙): 예산이 모자랄 때 먼저 잃는 것은
+        //   **뒤** 명령이다. 예전에는 버전·계정 조회가 정확 용량 통계보다 앞이라, 두 조회가 느린 장비에서 통계가 시작되지 못해 그 주기의
+        //   용량이 'isi status (반올림 표기)' 로 떨어졌다(증가량 시계열에 쓰는 값이 부가 정보에 밀렸다). 그래서
+        //   isi status(필수) → 정확 용량 통계 → 전원 → 버전 → 계정 → 시리얼 순이다. 서로 의존이 없어 순서만 바꿨다.
         // v2.604(COL-2604-01): 정확한 용량 바이트(best-effort) — 못 읽으면 isi status 반올림 값을 쓰고 그 사실을 밝힌다.
         const stats = await soft(bsh.exec(ISI_STATS_CMD, 20_000));
         // v2.667 — 전원(best-effort): 키 탐색(6시간 캐시) → 그 키 하나의 현재값. 못 읽으면 사유만 남긴다.
         const power = await readIsiPowerSsh(bsh, device.host, { expectedNodes: parsedStatus.nodes.length || null });
+        const ver = await soft(bsh.exec('isi version'));
+        const usersRaw = await soft(bsh.exec('isi auth users list --format json'));
         // v2.735.2 — 노드별 시리얼·제품명(best-effort · 맨 뒤 · 6시간 캐시 · 세션 예산을 넘겼으면 시작하지 않는다).
         // v2.741(DEV-02): 세션 예산이 바닥이면 시리얼 모듈의 '예산 초과' 갈래로 보낸다(직전 성공값은 그대로 쓰고, 실패로 기억하지 않는다).
         const hwStart = leftMs() < ISI_MIN_SLICE_MS ? Date.now() - HW_START_BUDGET_MS - 1 : sessionStartedAt;

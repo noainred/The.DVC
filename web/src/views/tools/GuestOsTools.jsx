@@ -227,7 +227,10 @@ export function RealOs({ scope }) {
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12, maxWidth: 160, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }} title={r.host}>{r.host || '—'}</span> },
     { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12 }}>{r.esxiGuestOS || '—'}</span> },
-    { key: 'os', label: '실제 OS', render: (r) => (r.os ? <b>{r.os}</b> : <span className="badge red" title={r.error}>실패</span>) },
+    // v2.742 VC-04: 스캔이 실패해도 직전에 읽은 OS 는 남는다 — 그 값이 '마지막으로 읽은 값' 임을 같은 칸이 말한다(지금 읽은 척하지 않는다).
+    { key: 'os', label: '실제 OS', render: (r) => (r.os
+      ? <span><b>{r.os}</b>{r.error ? <span className="badge amber" style={{ marginLeft: 6 }} title={`최근 스캔 실패: ${r.error}${r.okAt ? ` · 마지막 성공 ${new Date(r.okAt).toLocaleString('ko-KR')}` : ''}`}>최근 실패 · 이전 값</span> : null}</span>
+      : <span className="badge red" title={r.error}>실패</span>) },
     { key: 'osVersion', label: '버전', render: (r) => r.osVersion || '—' },
     { key: 'family', label: '계열', render: (r) => r.family ? <span className="badge gray">{r.family}</span> : '—' },
     { key: 'mismatch', label: '불일치', sortValue: (r) => (r.mismatch ? 1 : 0), render: (r) => (r.mismatch ? <span className="badge amber">불일치</span> : (r.os ? <span className="badge green">일치</span> : '—')) },

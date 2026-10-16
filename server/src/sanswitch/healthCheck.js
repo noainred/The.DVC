@@ -213,13 +213,14 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
     if (!s) items.push(mk('sensors', 'unknown', uncheckedWhy(sec.sensors, 'sensorshow')));
     else if (!s.parsed) items.push(mk('sensors', 'unknown', uncheckedWhy('ok', 'sensorshow')));
     else {
-      const bad = s.list.filter((x) => x.ok === false);
-      const unk = s.list.filter((x) => x.ok == null);
+      // v2.742(DEV-02): 빈 슬롯(absent)은 이상도 '읽지 못함' 도 아니다 — '미장착 N' 으로만 밝힌다.
+      const bad = s.list.filter((x) => x.ok === false && !x.absent);
+      const unk = s.list.filter((x) => x.ok == null && !x.absent);
       const temps = s.list.filter((x) => /temp/.test(x.kind) && x.value != null).map((x) => x.value);
       // ⚠ 임계값은 **스위치 자신의 센서 상태**를 따른다(포탈이 숫자를 정하지 않는다).
       const info = [
         `센서 ${s.counts.total}개 — 정상 ${s.counts.ok}`,
-        s.counts.absent ? `미장착 ${s.counts.absent}` : null,
+        s.counts.absent ? `미장착 ${s.counts.absent}(빈 슬롯 — 장애로 세지 않음)` : null,
         temps.length ? `최고 온도 ${Math.max(...temps)}℃` : null,
       ].filter(Boolean).join(' · ');
       // ⚠ `sensorshow` 가 없어 `tempshow` 로 대체했으면 **전압은 보지 못했다** — 그 사실을 적는다.
@@ -370,14 +371,21 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
   return summarize(snap, attachUsed(items, used), { baselineAt: baseline?.at ?? null, usedCmds: used });
 }
 
-/** FRU(팬·PSU) 항목 — 개수만 아는 경우(`ok:null`)를 '정상' 으로 칠하지 않는다. */
+/**
+ * FRU(팬·PSU) 항목 — 개수만 아는 경우(`ok:null`)를 '정상' 으로 칠하지 않는다.
+ * v2.742(DEV-02): 빈 슬롯(`absent`)은 total 에 들어 있지 않다(`fosParse.parseFruShow`·`fosRest`) — 이상으로 세지 않고 개수만 밝힌다.
+ * 장착된 것이 하나도 없다고 보고되면 '정상' 이라 말하지 않는다(판정할 대상이 없다 — 확인 불가).
+ */
 function fruItem(key, fru, section, cmd) {
   if (!fru) return mk(key, 'unknown', uncheckedWhy(section, cmd));
   const total = num(fru.total);
   const ok = fru.ok;
-  if (ok == null) return mk(key, 'unknown', `${total ?? '?'}개가 장착돼 있다는 것만 확인했습니다 — 정상 여부는 ‘${cmd}’ 가 없어 알 수 없습니다.`);
-  if (total != null && ok < total) return mk(key, 'bad', `${ok}/${total} 정상 — ${total - ok}개 이상`);
-  return mk(key, 'ok', `${ok}/${total ?? ok} 정상`);
+  const absent = num(fru.absent) || 0;
+  const emptyNote = absent ? ` · 빈 슬롯 ${absent}개(장애로 세지 않음)` : '';
+  if (ok == null) return mk(key, 'unknown', `${total ?? '?'}개가 장착돼 있다는 것만 확인했습니다 — 정상 여부는 ‘${cmd}’ 가 없어 알 수 없습니다.${emptyNote}`);
+  if (total === 0) return mk(key, 'unknown', `장착된 항목을 찾지 못했습니다${emptyNote} — ‘${cmd}’ 출력을 확인하세요.`);
+  if (total != null && ok < total) return mk(key, 'bad', `${ok}/${total} 정상 — ${total - ok}개 이상${emptyNote}`);
+  return mk(key, 'ok', `${ok}/${total ?? ok} 정상${emptyNote}`);
 }
 
 /**

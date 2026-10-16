@@ -205,7 +205,7 @@ function runDemoOsScan(scope, s) {
       if (r.detected) total++; else failed++;
     }
   }
-  try { const ids = new Set((store.get().vms || []).map((v) => v.id)); pruneMissing(ids); } catch { /* */ }
+  try { pruneMissing(store.get(), { registryIds: registryVcIds() }); } catch { /* */ }
   write({ ...rawSettings(), lastRun: Date.now(), lastFound: total, lastErr: failed ? `데모 합성 — 탐지 실패 ${failed}대 포함` : '', lastAuth: null });
   return { ok: true, found: total, summary: osSummary(), demo: true };
 }
@@ -243,11 +243,25 @@ async function runOsScanNowInner(scopeVcId, manual) {
     if (r.auth.breaker) { lastAuth.breakerTripped.push(...r.auth.breaker.tripped.map((t) => ({ vcenterId: vc.id, ...t }))); lastAuth.breakerSkipped += r.auth.breaker.skipped; }
     console.log(`[osscan] ${vc.id} 대상 ${targets.length} → 탐지 ${r.found}${authStopped ? ` · 게스트 인증 정지로 제외 ${authStopped}` : ''}`);
   }
-  // 삭제된 VM 정리
-  try { const ids = new Set((store.get().vms || []).map((v) => v.id)); pruneMissing(ids); } catch { /* */ }
+  // 삭제된 VM·vCenter 정리 — v2.742(VC-04): 등록에서 지워진 vCenter 와, 인벤토리를 온전히 읽은 vCenter 에서 사라진 VM 만(osStore.pruneMissing).
+  //   첫 수집 중·연결 실패·인증 정지로 VM 목록이 빈 vCenter 의 기록은 남긴다(예전에는 전부 지워 게스트 로그인을 다시 해야 했다).
+  try { pruneMissing(store.get(), { registryIds: registryVcIds() }); } catch (e) { console.warn(`[osscan] 기록 정리 실패: ${e?.message || e}`); }
   const anyAuth = lastAuth.vcStopped.length || lastAuth.vmStopped || lastAuth.vmSkipped || lastAuth.breakerTripped.length || lastAuth.breakerSkipped;
   write({ ...rawSettings(), lastRun: Date.now(), lastFound: total, lastErr: allErrs.slice(0, 5).join(' · '), lastAuth: anyAuth ? lastAuth : null, lastSkipped: notCollected.length ? notCollected : null });
   return { ok: true, found: total, summary: osSummary(), ...(anyAuth ? { auth: lastAuth } : {}), ...(notCollected.length ? { notCollected } : {}) };
+}
+
+/**
+ * 등록부의 vCenter id(osStore.pruneMissing 의 '알려진 vCenter' — 스냅샷 vCenter 와 합친다).
+ * 등록부를 **못 읽었으면 null**(파일이 있는데 파싱 실패 — loadVcenterConfig 는 빈 목록을 돌려준다) — 그때는 vCenter 단위 정리를 하지 않는다
+ * (손상 한 번이 전 vCenter 의 OS 기록을 지우지 않게). 파일이 아예 없으면(미구성·데모) 빈 목록이다.
+ */
+function registryVcIds() {
+  try {
+    const r = loadVcenterConfig();
+    if (!r.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+    return (r.vcenters || []).map((v) => v?.id).filter(Boolean);
+  } catch { return null; }
 }
 
 function rawSettings() { const s = loadOsScanSettings(); return { enabled: s.enabled, intervalMin: s.intervalMin, scope: s.scope, maxVms: s.maxVms, rescanDays: s.rescanDays, concurrency: s.concurrency }; }

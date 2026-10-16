@@ -26,7 +26,7 @@ import { fmtTrendTick, tempColor, useTool } from '../shared.jsx';
 import { sparkProgressText, sparkCapText, SPARK_ROW_CAP } from '../sparkBatch.js';
 import {
   TEMP_WARN_C, TEMP_HOT_C, tempNum, tempCounts, hotList, compareRows, rowTint, dcKeyOf,
-  loadDensity, saveDensity, densityMetrics, histCutNote,
+  loadDensity, saveDensity, densityMetrics, histCutNote, staleRowTitle, staleHostsNote,
 } from './board.js';
 import {
   MonoLabel, Segment, DensityToggle, Section, TempHistogram, DcCompare, HotList, TempHeatmap,
@@ -38,8 +38,7 @@ import SensorDetailView from './SensorDetailView.jsx';
 
 const KIND_KO = { physical: '물리', virtual: '가상화' };
 // v2.659: '센서 상세' — iDRAC 전 센서(임계값·상태)·전산실 흡기·CPU/GPU 온도·CPU 사용률(SensorDetailView).
-// v2.731(A2-03): 서버 unreadVcenterReasons 의 사유 코드(metrics/sampler.js)
-const STALE_REASON_KO = { maintenance: '점검중', unreachable: '연결 실패', stale: '위임 수집 낡음' };
+// v2.731(A2-03)·v2.742(VC-02): 오래된 값의 사유 문구는 board.js STALE_REASON_KO·staleRowTitle 이 소유한다.
 const VIEWS = [['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['sensor', '센서 상세']];
 const VIEW_TITLE = { server: '서버별', host: 'ESXi 호스트별', cluster: '클러스터별', vc: '법인별' };
 const HEAT_TITLE = { server: '서버 히트맵', host: 'ESXi 호스트 히트맵', cluster: '클러스터 히트맵', vc: '법인 히트맵' };
@@ -234,7 +233,7 @@ export default function ServerTempBoard({ scope }) {
     { key: 'spark', label: '24시간 추이', align: 'right', sortValue: (r) => r.curC, render: sparkCell },
   ] : view === 'host' ? [
     { key: 'name', label: '호스트', render: (r) => (r.stale
-      ? <>{nameCell(r)} <span className="muted" style={{ fontSize: 11 }} title={`이 호스트의 vCenter 를 지금 읽지 못해(${STALE_REASON_KO[r.staleReason] || r.staleReason || '사유 미상'}) 마지막 수집 값입니다. 요약·클러스터·법인 집계에서 뺐습니다.`}>오래됨</span></>
+      ? <>{nameCell(r)} <span className="muted" style={{ fontSize: 11 }} title={staleRowTitle(r)}>오래됨</span></>
       : nameCell(r)) },
     { key: 'dc', label: '법인', render: (r) => dim(r.dc) },
     { key: 'cluster', label: '클러스터', render: (r) => dim(r.cluster) },
@@ -397,7 +396,7 @@ export default function ServerTempBoard({ scope }) {
       {/* 5. 표 */}
       <Section
         title={VIEW_TITLE[view]}
-        sub={`${int(tableRows.length)}${view === 'server' || view === 'host' ? '대' : '개'}${sel ? ` · 법인 ${selName}` : ''}${view === 'host' && data.staleHosts ? ` · 오래된 값 ${int(data.staleHosts)}대(집계 제외)` : ''}`}
+        sub={`${int(tableRows.length)}${view === 'server' || view === 'host' ? '대' : '개'}${sel ? ` · 법인 ${selName}` : ''}${view === 'host' ? staleHostsNote(data) : ''}`}
         right={view === 'server' ? (
           <Segment
             items={[['all', `전체 ${int(srvAll.length)}`], ['physical', `물리 ${int(S.physical?.servers)}`], ['virtual', `가상화 ${int(S.virtual?.servers)}`]]}

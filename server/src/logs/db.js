@@ -15,7 +15,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
-import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
+import { chunkedDelete, nextAdaptiveChunk, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
 import { TRACKED_TYPES, TRACKED_SQL, OPS_TYPES, OPS_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
 import { createYielder } from '../util/timeSlice.js';
 import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
@@ -33,6 +33,19 @@ function dbPath() {
 //   약 0.9초 정지). 이제 memo 는 **건수(COUNT·vCenter별 GROUP BY)** 만 들고 기본 5분(상한 30분)이며, 기간(MIN·MAX)은
 //   단독 aggregate(인덱스 끝점 조회 — v2.550.3)로 매번 새로 읽는다.
 const META_TTL_MS = Math.max(1_000, Math.min(1_800_000, Number(process.env.LOGS_META_TTL_MS) || 300_000));
+
+/**
+ * v2.742(감사 DB-04 — 재현): 이 표의 prune 청크. 전역 PRUNE_CHUNK_ROWS(2만 행)는 '한 청크 수십 ms' 를 전제로 정했는데, events 는
+ *   인덱스가 7개(uniq·(vc,ts)·ts·전원·추적·운영·추적 엔티티)이고 메시지 열이 길어 2만 행 한 청크가 0.2~0.5초 동기였다(합성 70만 행 실측
+ *   318~580ms — 용량 상한 루프는 그런 정지를 연달아 만든다). 그래서 **작게 시작해 시간 기준으로 맞춘다**(util/chunkedPrune.js targetMs —
+ *   목표를 넘으면 줄이고, 절반도 안 걸리면 두 배로 늘린다. 상한은 전역 청크). 지우는 조건·행은 같다 — 청크 크기만 바뀐다.
+ *   전역 청크를 env 로 더 작게 잡았으면 그것을 따른다(테스트가 500 으로 잡는다).
+ */
+const LOGS_PRUNE_TARGET_MS = 40;
+const LOGS_PRUNE_CHUNK_START = Math.min(PRUNE_CHUNK_ROWS, 2_000);
+const LOGS_PRUNE_CHUNK_MIN = Math.min(PRUNE_CHUNK_ROWS, 500);
+/** 직전 청크 소요로 다음 청크 크기를 정한다 — chunkedDelete 의 targetMs 와 같은 함수(util/chunkedPrune.js nextAdaptiveChunk). */
+const nextPruneChunk = (chunk, want, tookMs) => nextAdaptiveChunk(chunk, want, tookMs, { targetMs: LOGS_PRUNE_TARGET_MS, minChunk: LOGS_PRUNE_CHUNK_MIN, maxChunk: PRUNE_CHUNK_ROWS });
 
 /** v2.607 DB2607-02: 필터 조회의 total 상한(맞는 행을 이만큼까지만 센다). */
 export const COUNT_CAP = 10_000;
@@ -130,6 +143,9 @@ function initSqlite() {
     // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
     const pruneChunkStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE ts < ? LIMIT ?)');
     let pruneBg = null;                          // 진행 중인 백그라운드 청크 정리(단일 비행)
+    // v2.742(DB-04): 동기로 지우는 첫 청크(prune)와 pruneOldest 의 청크 — 작게 시작해 직전 청크 소요로 맞춘다(nextPruneChunk).
+    let pruneChunk = LOGS_PRUNE_CHUNK_START;
+    let oldestChunk = LOGS_PRUNE_CHUNK_START;
     // v2.606(DB2606-01): MIN·MAX 를 한 쿼리에 두면 aggregate 2개라 인덱스를 통째로 훑는다(v2.550.3) — 단독으로 나눈다.
     const minTsStmt = db.prepare('SELECT MIN(ts) mn FROM events');
     const maxTsStmt = db.prepare('SELECT MAX(ts) mx FROM events');
@@ -150,7 +166,7 @@ function initSqlite() {
      * @returns {Promise<{deleted:number, done:boolean, chunks:number}>}
      */
     const pruneAsync = async (beforeTs) => {
-      try { return await chunkedDelete(pruneChunkStmt, [beforeTs], { label: 'vclogs' }); }
+      try { return await chunkedDelete(pruneChunkStmt, [beforeTs], { label: 'vclogs', chunk: pruneChunk, targetMs: LOGS_PRUNE_TARGET_MS, minChunk: LOGS_PRUNE_CHUNK_MIN, maxChunk: PRUNE_CHUNK_ROWS }); }
       finally { metaCache = null; }
     };
     const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
@@ -163,6 +179,9 @@ function initSqlite() {
         if (f.vcenterIds.length) { w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
         else { w.push('1=0'); }
       }
+      // v2.742(감사 DB-02): 제외 목록 — 로그 이슈 분석이 '이 포탈이 지금 수집하지 않는 vCenter' 를 SQL 에서 바로 뺀다(예전에는 그 vCenter 만
+      //   정확 COUNT 로 따로 세어 빼고, 뺀 만큼 더 읽어 거르느라 기간 전체를 몇 번 더 훑었다). 빈 배열은 아무것도 빼지 않는다.
+      if (Array.isArray(f.excludeVcenterIds) && f.excludeVcenterIds.length) { w.push(`vcenterId NOT IN (${f.excludeVcenterIds.map(() => '?').join(',')})`); p.push(...f.excludeVcenterIds); }
       if (f.severity) { w.push('severity=?'); p.push(f.severity); }
       if (f.since) { w.push('ts>=?'); p.push(f.since); }
       if (f.until) { w.push('ts<=?'); p.push(f.until); }
@@ -365,15 +384,17 @@ function initSqlite() {
        *   그런 것과 같은 수준이다.
        * @returns {Promise<{rows:object[], total:number, capped:boolean, slices:number}>}
        */
-      searchAsync: async (f = {}, limit = 200, offset = 0, { cap = COUNT_CAP, sliceMs = 3_600_000, rowidChunk = 20_000, now = Date.now(), yieldMs = 15 } = {}) => {
-        const [lim, off] = clampPage(limit, offset);
+      searchAsync: async (f = {}, limit = 200, offset = 0, { cap = COUNT_CAP, sliceMs = 3_600_000, rowidChunk = 20_000, now = Date.now(), yieldMs = 15, countOnly = false } = {}) => {
+        const [lim0, off] = clampPage(limit, offset);
+        // v2.742(감사 DB-02): countOnly — 행은 읽지 않고 상한 있는 개수만(countCappedAsync). 같은 조각·같은 판정을 쓰려고 이 함수에 둔다.
+        const lim = countOnly ? 0 : lim0;
         const c = capOf(cap);
         const since = Number(f.since); const until = Number(f.until);
         const sinceOn = !!f.since; const untilOn = !!f.until;
         // 숫자가 아닌 기간 값(Infinity 등)은 조각을 만들 수 없다 — 한 문장 판 그대로(같은 뜻).
         if ((sinceOn && !Number.isFinite(since)) || (untilOn && !Number.isFinite(until))) {
           const cnt = api.countCapped(f, c);
-          return { rows: api.query(f, lim, off), total: cnt.total, capped: cnt.capped, slices: 0 };
+          return { rows: countOnly ? [] : api.query(f, lim, off), total: cnt.total, capped: cnt.capped, slices: 0 };
         }
         const empty = { rows: [], total: 0, capped: false, slices: 0 };
         if (Array.isArray(f.vcenterIds) && !f.vcenterIds.length) return empty;   // 범위 화이트리스트가 비었다 = 결과 없음(filterSql 의 1=0)
@@ -402,7 +423,7 @@ function initSqlite() {
               addCount(Number(cntSt.get(...fp, a, Math.min(r1, a + chunk), c + 1 - total)?.n || 0));
             }
           }
-          if (!capped && total <= off) return { rows: [], total, capped, slices };   // 보여 줄 행이 없다 — 행 조회를 하지 않는다
+          if (countOnly || (!capped && total <= off)) return { rows: [], total, capped, slices };   // 보여 줄 행이 없다 — 행 조회를 하지 않는다
         }
         // ② 행(기간 하한이 있으면 개수도 같은 조각에서) — ts 조각을 최신부터.
         const { where, params } = filterSql({ ...f, since: 0, until: 0 });      // 시각 조건만 빼고 같은 WHERE(검색어·심각도·범위)
@@ -447,6 +468,22 @@ function initSqlite() {
         return { rows, total, capped, slices };
       },
       /**
+       * v2.742(감사 DB-02): countCapped(f, cap) 와 **같은 결과**({total, capped})를 조각 + 조각 사이 시간 기준 양보로 센다 — searchAsync 의
+       *   개수 단계 그대로(기간 하한이 있으면 그 기간만 ts 조각, 없으면 rowid 구간 조각). 기간 전체를 한 문장으로 세던 정확 COUNT 의 대체다.
+       * @returns {Promise<{total:number, capped:boolean, slices:number}>}
+       */
+      countCappedAsync: async (f = {}, cap = COUNT_CAP, opts = {}) => {
+        const r = await api.searchAsync(f, 1, 0, { ...opts, cap, countOnly: true });
+        return { total: r.total, capped: r.capped, slices: r.slices };
+      },
+      /**
+       * v2.742(감사 DB-02·DB-03): 표 전체의 첫·마지막 이벤트 시각 — **단독 aggregate 두 문장**(인덱스 끝점 조회 — v2.550.3. 한 문장에 둘을 두면
+       *   인덱스를 통째로 훑는다). meta() 와 달리 COUNT·GROUP BY 를 하지 않는다. 빈 표면 둘 다 null.
+       */
+      tsRange: () => { const mn = minTsStmt.get()?.mn; const mx = maxTsStmt.get()?.mx; return { min: mn == null ? null : Number(mn), max: mx == null ? null : Number(mx) }; },
+      /** v2.742(DB-02): 마지막으로 들어간 행의 rowid(단독 aggregate) — 새 이벤트가 적재됐는지 보는 표지(늦게 수집된 옛 시각 이벤트도 바뀐다). 빈 표면 0. */
+      lastRowid: () => { const m = Number(maxRowidStmt.get()?.m); return Number.isFinite(m) ? m : 0; },
+      /**
        * v2.673(운영 장애): 로그인 실패 **후보**만 — 검색어(q)를 쓰지 않고 logs/loginFailPattern.js 의 좁은 조건 하나로 범위를 1회 훑는다.
        * 예전 분석은 이 범위를 단어 4개로 4번 훑었다(드문 단어는 매번 전 범위). 최종 판정은 호출부가 정규식으로 다시 한다.
        */
@@ -459,13 +496,17 @@ function initSqlite() {
        * v2.632(A6-2632-02): 키셋 페이지 — 커서 (ts, rid) 보다 **오래된** 행만(ORDER BY ts DESC, rowid DESC). OFFSET 을 쓰지 않으므로
        * 청크 사이에 커서와 같은 ts 로 행이 들어와도 결과가 밀리지 않는다(예전 OFFSET 경로는 '중복 1 + 누락 1' 이었다).
        * 반환 행에 rid(rowid)가 실린다 — 다음 커서용이다. cursor 가 null 이면 처음부터.
+       * v2.742(감사 DB-03): bounds `{lo, hiExcl}` 를 주면 ts 구간(lo 이상 · hiExcl 미만 — 둘 다 선택)으로도 묶는다. CSV 내보내기가 검색어·심각도
+       *   필터를 ts 조각 안에서 키셋으로 읽을 때 쓴다(구간이 없으면 드문 검색어 한 문장이 표 전체를 훑는다). 숫자가 아닌 경계는 무시한다.
        */
-      queryPage: (f = {}, limit = 200, cursor = null) => {
+      queryPage: (f = {}, limit = 200, cursor = null, bounds = null) => {
         const { where, params } = filterSql(f);
         const c = keysetCursor(cursor);
-        const cond = c ? '(ts < ? OR (ts = ? AND rowid < ?))' : '';
-        const w = c ? (where ? `${where} AND ${cond}` : `WHERE ${cond}`) : where;
-        const p = c ? [...params, c.ts, c.ts, c.rid] : params;
+        const conds = []; const p = [...params];
+        if (bounds && Number.isFinite(bounds.lo)) { conds.push('ts >= ?'); p.push(bounds.lo); }
+        if (bounds && Number.isFinite(bounds.hiExcl)) { conds.push('ts < ?'); p.push(bounds.hiExcl); }
+        if (c) { conds.push('(ts < ? OR (ts = ? AND rowid < ?))'); p.push(c.ts, c.ts, c.rid); }
+        const w = conds.length ? (where ? `${where} AND ${conds.join(' AND ')}` : `WHERE ${conds.join(' AND ')}`) : where;
         return db.prepare(`SELECT rowid AS rid,vcenterId,ts,severity,type,user,entity,message FROM events ${w} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...p, clampPage(limit, 0)[0]);
       },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
@@ -496,16 +537,19 @@ function initSqlite() {
         return { count: metaCache.n, firstTs, lastTs, vcenters: metaCache.vcs, countsAt: metaCache.at };
       },
       /**
-       * 호출부(poller)는 반환값을 **숫자로** 쓴다(동기 계약). 그래서 첫 청크만 동기로 지우고(≤ PRUNE_CHUNK_ROWS — 한 청크 수십 ms)
-       * 남으면 나머지를 백그라운드 청크 정리로 넘긴다(단일 비행 — 겹쳐 돌지 않는다). 나머지 건수는 끝날 때 여기서 로그로 밝힌다.
-       * 반환값은 **이번 호출이 동기로 지운 행 수**다(전체가 아니다 — 나머지는 로그 줄).
+       * 호출부(poller)는 반환값을 **숫자로** 쓴다(동기 계약). 그래서 첫 청크만 동기로 지우고(v2.742 DB-04: 작게 시작해 시간 기준으로
+       * 맞춘 청크 — nextPruneChunk) 남으면 나머지를 백그라운드 청크 정리로 넘긴다(단일 비행 — 겹쳐 돌지 않는다). 나머지 건수는 끝날 때
+       * 여기서 로그로 밝힌다. 반환값은 **이번 호출이 동기로 지운 행 수**다(전체가 아니다 — 나머지는 로그 줄).
        */
       prune: (beforeTs) => {
         if (pruneBg) return 0;                   // 이미 정리 중 — 같은 조건이므로 그쪽이 이어서 지운다
-        const r = pruneChunkStmt.run(beforeTs, PRUNE_CHUNK_ROWS);
+        const want = pruneChunk;
+        const t0 = performance.now();
+        const r = pruneChunkStmt.run(beforeTs, want);
+        pruneChunk = nextPruneChunk(pruneChunk, want, performance.now() - t0);
         metaCache = null;
         const first = Number(r?.changes || 0);
-        if (first >= PRUNE_CHUNK_ROWS) {
+        if (first >= want) {
           pruneBg = pruneAsync(beforeTs)
             .then((x) => { if (x.deleted) console.log(`[vclogs] 보관기간 초과 추가 정리 ${x.deleted}건(청크 ${x.chunks}회${x.done ? '' : ' · 상한에 걸려 다음 주기에 계속'})`); })
             .catch((e) => console.warn(`[vclogs] 보관기간 정리 실패: ${e.message}`))
@@ -519,7 +563,16 @@ function initSqlite() {
       // -wal 파일은 줄지 않아, 본 파일만 재면 상한 1GB 현장의 실제 점유가 약 2GB 였다.
       sizeBytes: () => { let n = 0; for (const f of [DB_PATH, `${DB_PATH}-wal`]) { try { n += fs.statSync(f).size; } catch { /* 없으면 0 */ } } return n; },
       // v2.601(DB2601-03): 한 번에 지우는 양을 청크 크기로 묶는다 — 예전에는 전체 행의 10% 를 한 문장으로 지웠다(수십만 행 동기).
-      pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.min(PRUNE_CHUNK_ROWS, Math.max(1, n))); metaCache = null; return Number(r?.changes || 0); },
+      // v2.742(DB-04): 그 청크도 작게 시작해 직전 청크 소요로 맞춘다(2만 행 고정은 이 표에서 청크당 0.2~0.5초). 호출부(용량 상한 루프)는
+      //   요청한 수를 다 지울 때까지 양보하며 다시 부르므로 지우는 행은 같다.
+      pruneOldest: (n) => {
+        const want = Math.min(oldestChunk, Math.max(1, Math.trunc(Number(n)) || 1));
+        const t0 = performance.now();
+        const r = pruneOldestStmt.run(want);
+        oldestChunk = nextPruneChunk(oldestChunk, want, performance.now() - t0);
+        metaCache = null;
+        return Number(r?.changes || 0);
+      },
       /**
        * v2.741(감사 DB-03): **사용 중 크기** — (page_count − freelist_count) × page_size. 용량 상한은 이것으로 판정한다.
        *   지운 행의 페이지는 freelist 로 돌아가 다음 INSERT 가 다시 쓰므로, 이 값이 상한 아래면 파일은 그 이상 커지지 않는다.
@@ -558,6 +611,7 @@ function initJson() {
   try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) { const r = JSON.parse(l); rows.push(r); seqOf.set(r, ++seq); seen.add(`${r.vcenterId}|${r.k}`); } } } catch { /* */ }
   const match = (r, f) => (!f.vcenterId || r.vcenterId === f.vcenterId) && (!f.severity || r.severity === f.severity)
     && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId)) // scope 화이트리스트(빈 배열=결과 없음)
+    && (!Array.isArray(f.excludeVcenterIds) || !f.excludeVcenterIds.includes(r.vcenterId)) // v2.742(DB-02): 제외 목록(SQLite 판과 같은 뜻)
     && (!f.since || r.ts >= f.since) && (!f.until || r.ts <= f.until)
     && (!f.q || `${r.message} ${r.entity} ${r.user} ${r.type}`.toLowerCase().includes(String(f.q).toLowerCase()));
   const api = {
@@ -591,15 +645,19 @@ function initJson() {
     insertManyAsync: async (recs) => { api.insertMany(recs); return { chunks: 1 }; },   // v2.732(B6-01): SQLite 판과 같은 API
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
     loginFailCandidates: (f = {}, limit = 5000) => rows.filter((r) => match(r, { ...f, q: '' }) && isLoginFailRow(r)).sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0]),
-    queryPage: (f = {}, limit = 200, cursor = null) => {
+    queryPage: (f = {}, limit = 200, cursor = null, bounds = null) => {
       const c = keysetCursor(cursor);
       const [lim] = clampPage(limit, 0);
-      return rows.filter((r) => match(r, f) && (!c || r.ts < c.ts || (r.ts === c.ts && seqOf.get(r) < c.rid)))
+      const lo = bounds && Number.isFinite(bounds.lo) ? bounds.lo : null; const hi = bounds && Number.isFinite(bounds.hiExcl) ? bounds.hiExcl : null;   // v2.742(DB-03)
+      return rows.filter((r) => match(r, f) && (lo == null || r.ts >= lo) && (hi == null || r.ts < hi) && (!c || r.ts < c.ts || (r.ts === c.ts && seqOf.get(r) < c.rid)))
         .sort((a, b) => b.ts - a.ts || seqOf.get(b) - seqOf.get(a)).slice(0, lim)
         .map((r) => ({ rid: seqOf.get(r), vcenterId: r.vcenterId, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message }));
     },
     count: (f = {}) => rows.filter((r) => match(r, f)).length,
     countCapped: (f = {}, cap = COUNT_CAP) => { const c = capOf(cap); let n = 0; for (const r of rows) { if (match(r, f) && ++n > c) return { total: c, capped: true }; } return { total: n, capped: false }; },
+    countCappedAsync: async (f = {}, cap = COUNT_CAP) => ({ ...api.countCapped(f, cap), slices: 0 }),   // v2.742(DB-02): SQLite 판과 같은 API
+    tsRange: () => { let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; } return { min: mn, max: mx }; },   // v2.742(DB-03)
+    lastRowid: () => seq,   // v2.742(DB-02): 삽입 순번(SQLite 판 rowid 대응)
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
     prune: (beforeTs) => { const before = rows.length; rows = rows.filter((r) => r.ts >= beforeTs); const removed = before - rows.length; if (removed) rewrite(); return removed; },
     sizeBytes: () => { try { return fs.statSync(file).size; } catch { return 0; } },

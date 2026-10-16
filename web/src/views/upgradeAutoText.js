@@ -219,7 +219,11 @@ export function runningScanWarning(status, now = Date.now()) {
   const list = Array.isArray(status?.runningScans) ? status.runningScans : [];
   // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡(서버 status.runningClones) — 스캔과 달리 재시작 뒤 이어 받는 경로가 없다.
   const clones = Array.isArray(status?.runningClones) ? status.runningClones.filter((x) => x && typeof x === 'object') : [];
-  if (!list.length && !clones.length) return null;
+  // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포(서버 status.runningDeploys) — 재시작이 원격 설치를 중간에 끊는다.
+  const deploys = Array.isArray(status?.runningDeploys) ? status.runningDeploys.filter((x) => x && typeof x === 'object') : [];
+  // v2.742(감사 RECENT-02): 시작을 기다리는 '지금 수집'(서버 status.queuedScans) — 기록을 남기지 못한 것(resumable 아님)만 재시작이 지운다.
+  const lost = Array.isArray(status?.queuedScans) ? status.queuedScans.filter((x) => x && typeof x === 'object' && !x.resumable) : [];
+  if (!list.length && !clones.length && !deploys.length && !lost.length) return null;
   const parts = [];
   if (list.length) {
     const names = list.slice(0, 5).map((x) => `${SCAN_KIND_TEXT[x?.kind] || x?.kind || '스캔'}${x?.label ? ` ‘${x.label}’` : ''}${numOrNull(x?.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
@@ -228,6 +232,14 @@ export function runningScanWarning(status, now = Date.now()) {
   if (clones.length) {
     const names = clones.slice(0, 5).map((x) => `${x.label ? `‘${x.label}’` : 'VM 복제'}${x.phase ? ` · ${x.phase}` : ''}${numOrNull(x.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
     parts.push(`지금 VM 복제 ${clones.length}개가 돌고 있습니다 — ${names.join(', ')}. 지금 적용하면 복제가 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요.`);
+  }
+  if (deploys.length) {
+    const names = deploys.slice(0, 3).map((x) => `${x.label ? `‘${x.label}’` : '에이전트 대량 배포'}${numOrNull(x.since) != null ? `(${agoText(x.since, now)} 시작)` : ''}`);
+    parts.push(`지금 에이전트 대량 배포가 돌고 있습니다 — ${names.join(', ')}. 지금 적용하면 배포가 중간에 끊기고 설치가 끝나지 않은 노드가 남을 수 있습니다 — 배포 화면에서 결과를 확인하고 다시 실행하세요.`);
+  }
+  if (lost.length) {
+    const names = lost.slice(0, 5).map((x) => `${SCAN_KIND_TEXT[x?.kind] || x?.kind || '스캔'}${x?.label ? ` ‘${x.label}’` : ''}`);
+    parts.push(`시작을 기다리는 ‘지금 수집’ ${lost.length}개는 기록을 남기지 못해(쓰기 실패 또는 SCAN_RESUME=0) 재시작 뒤 다시 돌지 않습니다 — ${names.join(', ')}${lost.length > 5 ? ' …' : ''}.`);
   }
   return `${parts.join(' ')} 계속할까요?`;
 }

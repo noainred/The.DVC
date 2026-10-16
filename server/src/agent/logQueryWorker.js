@@ -63,9 +63,19 @@ async function runLogQueryWorkerInner() {
     let sent = 0; const failures = [];
     for (const q of queries) {
       const f = q.filter || {};
-      let total = 0, rows = [], readError = null;
-      try { total = db.count(f); rows = db.query(f, f.limit || 200, 0); } catch (e) { readError = String(e?.message || e).slice(0, 200); }
-      const body = JSON.stringify({ reqId: q.reqId, vcenterId: q.vcenterId, total, rows, dbKind: db.kind, ...(readError ? { readError } : {}) });
+      let total = 0, rows = [], readError = null, totalCapped = false;
+      try {
+        // v2.742(감사 DB-01 — 재현): 검색어·심각도 조회는 중앙 /tools/vclogs 와 같은 db.searchAsync(조각 + 시간 기준 양보 · 상한 있는 개수)로 읽는다.
+        //   예전에는 상한 없는 정확 COUNT(db.count)와 정렬 조회를 기간 하한 없이 양보 없이 차례로 돌렸다 — '전체 보관분' + 무일치 검색어 한 번이
+        //   엣지 포탈 전체를 멈췄다(v2.741 DB-01 이 중앙 라우트만 고친 형제 누락). 상한에 닿으면 totalCapped 로 밝힌다(total 은 '적어도 이만큼').
+        //   필터가 없으면(vCenter·기간만) 예전대로 정확 COUNT — 인덱스로 싸다(중앙 라우트와 같은 판단).
+        const lim = f.limit || 200;
+        if ((f.q || f.severity) && typeof db.searchAsync === 'function') {
+          const r = await db.searchAsync(f, lim, 0);
+          rows = r.rows; total = r.total; totalCapped = r.capped === true;
+        } else { total = db.count(f); rows = db.query(f, lim, 0); }
+      } catch (e) { readError = String(e?.message || e).slice(0, 200); }
+      const body = JSON.stringify({ reqId: q.reqId, vcenterId: q.vcenterId, total, totalCapped, ...(totalCapped ? { totalCap: total } : {}), rows, dbKind: db.kind, ...(readError ? { readError } : {}) });
       try {
         const post = await resilientFetch(`${config.agent.centralUrl}/api/central/log-query-result`, {
           method: 'POST', headers: headers(), body, timeoutMs: 15_000, retries: 2,
@@ -80,7 +90,7 @@ async function runLogQueryWorkerInner() {
       } catch (e) {
         failures.push({ vcenterId: q.vcenterId, httpStatus: null, error: String(e?.message || e).slice(0, 200) });
       }
-      console.log(`[logq-agent] ${q.vcenterId}: ${rows.length}/${total}건 응답${readError ? ` (DB 오류: ${readError})` : ''}`);
+      console.log(`[logq-agent] ${q.vcenterId}: ${rows.length}/${total}${totalCapped ? '+' : ''}건 응답${readError ? ` (DB 오류: ${readError})` : ''}`);
     }
     for (const f of failures) console.warn(`[logq-agent] 결과 보고 실패 ${f.vcenterId}: ${f.error}`);   // 무음 실패 금지
     _last = { at: Date.now(), ms: Date.now() - t0, ok: failures.length === 0, queries: queries.length, sent,

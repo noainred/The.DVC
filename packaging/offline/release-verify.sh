@@ -26,4 +26,6 @@ NODE="$APP_DIR/../runtime/node/bin/node"
 [[ -n "$NODE" ]] || { echo "Node 런타임을 찾지 못했습니다($APP_DIR/../runtime/node/bin/node)." >&2; exit 3; }
 CONFIG_DIR="${CONFIG_DIR:-/etc/vmware-portal}"
 POLICY="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$CONFIG_DIR/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" "$NODE" "$APP_DIR/server/src/upgrade/verifyCli.js" "$@"
+# v2.742(INJPKG-01): root 소유 도구 폴더의 호스트 키 사본(회수 보존) — root 로 돌 때만 signature.js 가 읽는다.
+TRUST_COPY="${VP_ROOT_TOOLS_BASE:-/usr/local/libexec/vmware-portal}$(dirname "$APP_DIR")/trust/release-signing-keys.conf"
+exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" VP_ROOT_TRUST_COPY="$TRUST_COPY" "$NODE" "$APP_DIR/server/src/upgrade/verifyCli.js" "$@"

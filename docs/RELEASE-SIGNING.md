@@ -64,8 +64,18 @@ payload JSON:
 - 두 출처의 키는 **합집합**이다. **회수(revoked)는 어느 출처든 이긴다** — 호스트 파일이 저장소 키를 회수할 수 있고,
   저장소가 회수한 키를 호스트 파일이 되살릴 수 없다. `revoked` 배열은 공개키 없이 회수만 적는 목록이다.
 - 호스트 파일의 확장자가 `.conf` 인 이유: 백업 복원·엣지 설정 push 는 `.json`/`.env` 만 쓴다 — **웹 화면 경로로 신뢰 키를
-  늘릴 수 없게** 했다. 그룹·기타 쓰기 권한이 있으면(`chmod` 600/640 이 아니면) 읽지 않고 검증을 멈춘다.
+  늘릴 수 없게** 했다. 권장 소유·권한은 **`root:root` · `chmod 644`** 다 — 포탈(서비스 계정)도 이 파일을 읽어야 하므로
+  `600`(root 만 읽음)으로 두면 포탈의 업그레이드 확인이 '읽지 못함' 으로 멈춘다. 그룹·기타 **쓰기** 권한이 있으면
+  (`chmod go-w` 가 아니면) 읽지 않고 검증을 멈춘다.
+- **root 로 도는 확인**(install.sh·`vmware-portal-verify`)은 이 파일이 **root 소유일 때만 키 추가**를 받는다. 서비스 계정 소유
+  파일(예전 설치)이면 키 추가는 무시하고 **회수 항목만** 합친다 — 서비스 계정을 가진 쪽이 신뢰 키를 늘릴 수는 없고,
+  회수는 언제나 안전한 방향이기 때문이다. 이 경우 파일의 쓰기 권한은 보지 않는다(회수만 쓰므로).
+- install.sh 는 root 소유인 호스트 파일의 **사본**을 root 전용 도구 폴더
+  `/usr/local/libexec/vmware-portal<설치경로>/trust/release-signing-keys.conf` 에 남기고, root 로 도는 확인은 그 사본의
+  **회수 항목도** 합친다. 서비스 계정이 `CONFIG_DIR` 의 파일을 지우거나 바꿔도 마지막으로 설치할 때 있던 회수는 사라지지 않는다.
+  사본은 원본이 root 소유·`go-w`·올바른 JSON 일 때만 새로 고친다(그 밖이면 직전 사본을 그대로 둔다).
 - 호스트 파일이 **있는데** 읽지 못하면(형식 오류·권한) 회수 목록을 알 수 없으므로 검증을 진행하지 않는다(fail-closed).
+  root 로 도는 확인에서 서비스 계정 소유 파일이 손상돼 있어도 같다(회수 목록을 모르는 상태다).
 - 개인키는 **어디에도 없다** — 저장소·번들·엣지·로그·화면 어디에도. CI 비밀 `RELEASE_SIGNING_KEY` 에만 있다.
 
 ## 4. 수신측 판정(모든 경로가 같은 함수)
@@ -204,16 +214,25 @@ sudo systemctl restart vmware-portal
 ## 8. 키 회수(revocation)
 
 - 유출이 의심되면 즉시: ① 새 키로 교체(7절) ② 저장소 파일에서 그 키를 `revoked: true` 로 표시한 릴리스를 새 키로 서명해 게시.
-- 그 릴리스를 아직 받지 않은 현장은 호스트 파일로 바로 회수할 수 있다:
+- 그 릴리스를 아직 받지 않은 현장은 호스트 파일로 바로 회수할 수 있다. 파일은 **root 만 쓸 수 있는 곳에서 새로 만들어**
+  옮긴다(기존 파일 위에 `tee`·`chown` 하지 말 것 — 서비스 계정이 이미 그 파일을 쓰기로 열어 두었다면 소유자를 바꿔도
+  그 핸들로 계속 쓸 수 있다. 새 파일로 바꾸면 그 핸들은 옛 파일을 가리킨다):
 
   ```bash
-  sudo tee /etc/vmware-portal/release-signing-keys.conf >/dev/null <<'EOF'
+  sudo sh -c 'umask 022; d=$(mktemp -d /root/rsk.XXXXXX) && cat > "$d/k" <<EOF
   { "format": "vmware-portal-release-keys", "schema": 1, "keys": [], "revoked": ["ed25519:<회수할 keyId>"] }
   EOF
-  sudo chmod 600 /etc/vmware-portal/release-signing-keys.conf
+  chown root:root "$d/k" && chmod 644 "$d/k" && mv -f "$d/k" /etc/vmware-portal/release-signing-keys.conf && rmdir "$d"'
+  stat -c '%U:%G %a' /etc/vmware-portal/release-signing-keys.conf   # root:root 644 이어야 한다
   ```
 
-  파일은 매 검증마다 다시 읽으므로 재시작이 필요 없다.
+  - `644` 인 이유: 포탈(서비스 계정)도 이 파일을 읽어야 한다(`600` 이면 포탈의 업그레이드 확인이 '읽지 못함' 으로 멈춘다).
+    쓰기는 root 만이다(그룹·기타 쓰기가 있으면 검증이 멈춘다).
+  - 파일은 매 검증마다 다시 읽으므로 재시작이 필요 없다.
+  - 다음 install.sh 실행(업그레이드)이 이 파일의 사본을 root 전용 도구 폴더(`/usr/local/libexec/vmware-portal<설치경로>/trust/`)에
+    남긴다 — 그 뒤로는 서비스 계정이 `CONFIG_DIR` 의 파일을 지워도 root 로 도는 확인은 회수를 계속 지킨다.
+  - **회수를 되돌리려면**(잘못 회수한 경우) 호스트 파일을 고친 뒤 install.sh 를 다시 실행하거나, root 로 그 사본을 지운다
+    (`sudo rm /usr/local/libexec/vmware-portal<설치경로>/trust/release-signing-keys.conf`). 사본은 원본이 사라져도 지워지지 않는다(안전한 방향).
 
 ## 9. 오프라인 패키지
 

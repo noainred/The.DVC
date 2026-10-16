@@ -10,7 +10,7 @@
 #   - systemd service          -> /etc/systemd/system/vmware-portal.service
 #   - dedicated system user    -> vmportal
 #
-# Usage:  sudo ./install.sh [--port 4000] [--prefix /opt/vmware-portal]
+# Usage:  sudo ./install.sh [--port 4000] [--prefix /opt/vmware-portal] [--user vmportal]
 #                          [--package <설치 패키지.tar.gz>] [--manifest <vmware-portal-<버전>.manifest.json>]
 #                          [--skip-signature-check]
 #
@@ -95,9 +95,91 @@ vp_prefix_dir_ok() {
   fi
   return 0
 }
+# v2.742(감사 LEFT-07): --user 는 유닛(User=)·sudoers 줄·chown 에 그대로 들어간다 — 형식만 검사한다(useradd 기본 규칙의 부분집합).
+#   ⚠ --user root 는 문서화된 지원 모드(서비스를 root 로 돌리는 설치 — 래퍼가 그 경우를 따로 다룬다)라 거부하지 않는다.
+#   uninstall.sh 의 vp_check_user 와 글자 그대로 같은 함수다(test/audit2742a.test.js 가 대조한다).
+vp_check_user() {
+  if ! [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "--user 는 영문 소문자·숫자·_ - 로 된 계정 이름(첫 글자는 소문자 또는 _, 32자 이하)이어야 합니다: '$1'" >&2; return 1
+  fi
+  return 0
+}
 VP_PREFIX=""
 vp_check_prefix "$PREFIX" || exit 1
 PREFIX="$VP_PREFIX"
+vp_check_user "$SERVICE_USER" || exit 1
+
+# vp_chown_tree_except <폴더> <계정:그룹> <건드리지 않을 파일> — chown -R 과 같지만(링크는 따라가지 않는다) 그 파일 하나만 뺀다.
+#   v2.742(감사 INJPKG-01): root 소유 호스트 키 파일을 chown -R 로 서비스 계정에 넘겼다가 되돌리면, 그 사이 서비스 계정이 열어 둔
+#   쓰기 핸들이 되돌린 뒤에도 살아 있어 root 소유 파일에 자기 키를 넣을 수 있다 — 애초에 넘기지 않는다.
+vp_chown_tree_except() {
+  local dir="$1" owner="$2" keep="$3"
+  chown -h -- "$owner" "$dir" || return 1
+  if [[ -f "$keep" && ! -L "$keep" ]]; then
+    find "$dir" -mindepth 1 \( -samefile "$keep" -prune \) -o -exec chown -h -- "$owner" {} + || return 1
+  else
+    chown -R -- "$owner" "$dir" || return 1
+  fi
+}
+
+# vp_rma_env_request <portal.env> — RMA sudoers 를 넓히는 요청 값(RMA_SERVICE_UNITS·RMA_ALLOW_REBOOT)과 그 파일을 믿을 수 있는지.
+#   v2.742(감사 INJPKG-03): portal.env 는 chown -R 로 서비스 계정 소유가 되고 포탈도 직접 쓴다(central/token.js) — 그 값으로 root 가
+#   sudoers 를 넓히면 서비스 계정이 임의 유닛 제어·재부팅 권한을 스스로 줄 수 있었다. 연 파일(fd)의 소유자·권한을 보고 그 fd 에서
+#   읽는다(확인 뒤 바꿔치기 차단 — vp_root_env_policy 와 같은 방식). chown -R **전에** 부른다(HOSTKEYS_ROOT 와 같은 이유).
+#   결과(전역): VP_RMA_ENV_ROOT(1 = uid 0 소유 · 그룹/기타 쓰기 없음) · VP_RMA_UNITS(마지막 줄, 공백 구분) · VP_RMA_REBOOT(1 = true 줄 있음)
+#   ⚠ grep 파이프를 쓰지 않는다 — set -o pipefail 에서 '줄 없음'(grep 1)이 설치를 조용히 끝냈다(v2.742 에 함께 고친 결함).
+vp_rma_env_request() {
+  local f="$1" fd st line
+  VP_RMA_ENV_ROOT=0; VP_RMA_UNITS=""; VP_RMA_REBOOT=0
+  [[ -f "$f" && ! -L "$f" ]] || return 0
+  exec {fd}<"$f" || return 0
+  st="$(stat -L -c '%u %a' "/dev/fd/$fd" 2>/dev/null || echo 'x 0')"
+  if [[ "${st%% *}" == 0 ]] && ! (( 8#${st##* } & 8#022 )); then VP_RMA_ENV_ROOT=1; fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      RMA_SERVICE_UNITS=*) VP_RMA_UNITS="${line#RMA_SERVICE_UNITS=}" ;;
+      RMA_ALLOW_REBOOT=true*) VP_RMA_REBOOT=1 ;;
+    esac
+  done <&"$fd"
+  exec {fd}<&-
+  VP_RMA_UNITS="${VP_RMA_UNITS//,/ }"
+  return 0
+}
+
+# vp_rma_sudoers <계정> <portal.env 를 믿는가 1|0> <요청 유닛(공백 구분)> <요청 reboot 1|0> <지금 sudoers 파일>
+#   RMA sudoers 내용을 stdout 으로 낸다. 믿을 수 있는 portal.env(root 소유)면 요청 그대로(예전 동작), 아니면 **지금 설치된(root 가
+#   만든) sudoers 에 이미 있는 줄만** 남긴다 — 서비스 계정이 쓸 수 있는 값으로는 줄일 수만 있고 넓힐 수 없다(원격 RMA 배포가
+#   root 로 쓴 줄은 업그레이드 설치 뒤에도 남는다). 더하지 않은 항목은 VP_RMA_IGNORED(공백 구분)에 남긴다.
+vp_rma_sudoers() {
+  local user="$1" trusted="$2" units="$3" reboot="$4" cur="$5" line u v re had_reboot=0
+  local -a req=()
+  local -A have=()
+  VP_RMA_IGNORED=""
+  if [[ "$trusted" != 1 && -f "$cur" && ! -L "$cur" ]]; then
+    re='^'"$user"' ALL=\(root\) NOPASSWD: /usr/bin/systemctl (start|stop|restart) ([A-Za-z0-9][A-Za-z0-9@._-]{0,79})\.service$'
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ $re ]]; then have["${BASH_REMATCH[2]}|${BASH_REMATCH[1]}"]=1
+      elif [[ "$line" == "$user ALL=(root) NOPASSWD: /usr/bin/systemctl reboot" ]]; then had_reboot=1
+      fi
+    done < "$cur"
+  fi
+  printf '# vmware-portal RMA: 프리셋이 요구하는 systemctl 명령만 허용(commands.js sudo:true)\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n' "$user"
+  read -r -a req <<< "$units" || true   # 단어 나누기만 — 글롭(*)을 파일 이름으로 펼치지 않는다
+  for u in "${req[@]}"; do
+    [[ "$u" =~ ^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$ ]] || continue
+    if [[ "$trusted" == 1 ]] || [[ -n "${have["$u|start"]:-}" && -n "${have["$u|stop"]:-}" && -n "${have["$u|restart"]:-}" ]]; then
+      for v in start stop restart; do printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl %s %s.service\n' "$user" "$v" "$u"; done
+    else
+      VP_RMA_IGNORED="${VP_RMA_IGNORED:+$VP_RMA_IGNORED }$u"
+    fi
+  done
+  if [[ "$reboot" == 1 ]]; then
+    if [[ "$trusted" == 1 || $had_reboot -eq 1 ]]; then printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot\n' "$user"
+    else VP_RMA_IGNORED="${VP_RMA_IGNORED:+$VP_RMA_IGNORED }reboot"
+    fi
+  fi
+  return 0
+}
 
 [[ $EUID -eq 0 ]] || { echo "이 스크립트는 root 권한으로 실행해야 합니다 (sudo)." >&2; exit 1; }
 vp_prefix_dir_ok "$PREFIX" || exit 1
@@ -217,14 +299,21 @@ done
 HOSTKEYS="$CONFIG_DIR/release-signing-keys.conf"
 HOSTKEYS_ROOT=0
 if [[ -f "$HOSTKEYS" && ! -L "$HOSTKEYS" && "$(stat -c %u -- "$HOSTKEYS" 2>/dev/null)" == 0 ]]; then HOSTKEYS_ROOT=1; fi
+# v2.742(INJPKG-03): RMA sudoers 를 넓히는 portal.env 값은 chown -R 전에 — 그때의 소유자로 믿을지 정한다(아래 6-0).
+vp_rma_env_request "$CONFIG_DIR/portal.env"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"
+if [[ $HOSTKEYS_ROOT -eq 1 ]]; then
+  # v2.742(INJPKG-01): root 소유 호스트 키 파일은 넘기지 않는다(넘겼다 되돌리는 사이 열린 쓰기 핸들이 남는다).
+  vp_chown_tree_except "$CONFIG_DIR" "$SERVICE_USER:$SERVICE_USER" "$HOSTKEYS"
+else
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"
+fi
 chmod 0750 "$CONFIG_DIR"
 if [[ $HOSTKEYS_ROOT -eq 1 ]]; then
   chown 0:0 -- "$HOSTKEYS" && chmod go-w -- "$HOSTKEYS" && chmod o+r -- "$HOSTKEYS"
 elif [[ -e "$HOSTKEYS" || -L "$HOSTKEYS" ]]; then
-  echo "⚠ $HOSTKEYS 는 root 소유가 아닙니다 — root 로 실행하는 서명 확인(install.sh·vmware-portal-verify)은 이 파일을 읽지 않습니다."
-  echo "  내용을 확인한 뒤: sudo chown root:root '$HOSTKEYS' && sudo chmod 644 '$HOSTKEYS'"
+  echo "⚠ $HOSTKEYS 는 root 소유가 아닙니다 — root 로 실행하는 서명 확인(install.sh·vmware-portal-verify)은 이 파일의 키 추가를 받지 않고 회수 항목만 합칩니다."
+  echo "  내용을 확인한 뒤 root:root 소유·chmod 644 의 **새 파일**로 바꾸세요(기존 파일을 chown 하면 서비스 계정이 열어 둔 핸들로 계속 쓸 수 있다 — docs/RELEASE-SIGNING.md 8절)."
 fi
 
 # SELinux 라벨 처리(best-effort — 어떤 실패도 설치를 막지 않는다)
@@ -277,16 +366,16 @@ if [[ -f "$SCRIPT_DIR/vmware-portal-rma@.service" ]]; then
       -e "s|@CONFIG_DIR@|$CONFIG_DIR|g" \
       "$SCRIPT_DIR/vmware-portal-rma@.service" > "/etc/systemd/system/vmware-portal-rma@.service"
   # sudoers: 포탈 서비스 재시작 프리셋(commands.js portal-restart)만 허용 — visudo 검증 실패 시 설치하지 않음.
+  # v2.418: portal.env 의 RMA_SERVICE_UNITS(쉼표/공백 구분)·RMA_ALLOW_REBOOT 로 start/stop/restart·reboot 줄 추가.
+  # v2.742(INJPKG-03): 그 값은 portal.env 가 root 소유일 때만 sudoers 를 **넓힌다**(위 5) 에서 chown -R 전에 읽었다). 아니면 지금 설치된
+  #   sudoers 에 이미 있는 줄만 남긴다(vp_rma_sudoers — 줄일 수는 있고 넓힐 수는 없다).
   SUDO_TMP="$(mktemp)"
-  printf '# vmware-portal RMA: 프리셋이 요구하는 systemctl 명령만 허용(commands.js sudo:true)\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n' "$SERVICE_USER" > "$SUDO_TMP"
-  # v2.418: portal.env 의 RMA_SERVICE_UNITS(쉼표/공백 구분)·RMA_ALLOW_REBOOT 로 start/stop/restart·reboot 줄 추가
-  RMA_UNITS="$(grep -E '^RMA_SERVICE_UNITS=' "$CONFIG_DIR/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr ',' ' ')"
-  for u in $RMA_UNITS; do
-    if [[ "$u" =~ ^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$ ]]; then
-      for verb in start stop restart; do printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl %s %s.service\n' "$SERVICE_USER" "$verb" "$u" >> "$SUDO_TMP"; done
-    fi
-  done
-  if grep -qE '^RMA_ALLOW_REBOOT=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot\n' "$SERVICE_USER" >> "$SUDO_TMP"; fi
+  vp_rma_sudoers "$SERVICE_USER" "$VP_RMA_ENV_ROOT" "$VP_RMA_UNITS" "$VP_RMA_REBOOT" /etc/sudoers.d/vmware-portal-rma > "$SUDO_TMP"
+  if [[ -n "$VP_RMA_IGNORED" ]]; then
+    echo "⚠ $CONFIG_DIR/portal.env 가 root 소유가 아니라(서비스 계정이 쓸 수 있다) RMA sudoers 에 새로 더하지 않았습니다: $VP_RMA_IGNORED"
+    echo "  이미 허용돼 있던 줄은 그대로 둡니다. 더하려면 portal.env 내용을 확인한 뒤 sudo chown root:root $CONFIG_DIR/portal.env 후 install.sh 를 다시 실행하세요"
+    echo "  (설치가 끝나면 다시 서비스 계정 소유가 됩니다). 원격 RMA 배포(설정 › RMA)는 root 로 sudoers 를 직접 씁니다."
+  fi
   if visudo -cf "$SUDO_TMP" >/dev/null 2>&1; then install -m 0440 "$SUDO_TMP" /etc/sudoers.d/vmware-portal-rma; fi
   rm -f "$SUDO_TMP"
 fi
@@ -307,7 +396,7 @@ systemctl restart "$SERVICE_NAME"
 
 # 6-0-1) RMA 인스턴스 기동(RMA_ENABLED=true 인 경우)
 if grep -qE '^RMA_ENABLED=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then
-  RMA_INSTANCES="$(grep -E '^RMA_INSTANCES=' "$CONFIG_DIR/portal.env" | tail -1 | cut -d= -f2-)"
+  RMA_INSTANCES="$(grep -E '^RMA_INSTANCES=' "$CONFIG_DIR/portal.env" | tail -1 | cut -d= -f2- || true)"   # 줄이 없으면 grep 1 — pipefail 로 설치가 끝나지 않게
   for inst in ${RMA_INSTANCES:-default}; do
     if [[ "$inst" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
       [[ -f "$CONFIG_DIR/rma-$inst.env" ]] || printf 'RMA_INSTANCE=%s\nRMA_PRIORITY=100\n' "$inst" > "$CONFIG_DIR/rma-$inst.env"

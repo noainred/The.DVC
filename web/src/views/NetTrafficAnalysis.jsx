@@ -311,7 +311,9 @@ function Capture() {
 export function logIssueSummaryText(sm) {
   const v = (x) => (x == null || x === '' || !Number.isFinite(Number(x)) ? '—' : String(x));
   const s = sm && typeof sm === 'object' ? sm : {};
-  return `오류 ${v(s.errors)} · 경고 ${v(s.warnings)} · 시간당 최대 ${v(s.peakPerHour)}(평균 ${v(s.avgPerHour)})`;
+  // v2.742(감사 DB-02): 서버는 오류·경고를 상한(기본 10만 건)까지만 센다 — 닿았으면 '이상' 을 붙인다(정확한 수인 척하지 않는다).
+  const c = (x, capped) => { const t = v(x); return capped === true && t !== '—' ? `${t} 이상` : t; };
+  return `오류 ${c(s.errors, s.errorsCapped)} · 경고 ${c(s.warnings, s.warningsCapped)} · 시간당 최대 ${v(s.peakPerHour)}(평균 ${v(s.avgPerHour)})`;
 }
 
 /** v2.733(C1-01): 전체 보기에서 뺀 vCenter 안내 — 뺀 오류·경고 수를 함께. 없으면 ''. */
@@ -320,8 +322,9 @@ export function logIssueExcludedNote(d) {
   if (!base) return '';
   const ex = d?.excluded;
   // Number(null) === 0 — 못 센 개수를 '0건' 으로 말하지 않는다(numOrNull). 값이 없으면 단위 없이 '—'(v2.575 BUG-20).
-  const cnt = (x) => { const v = numOrNull(x); return v == null ? '—' : `${v.toLocaleString()}건`; };
-  const extra = ex && (numOrNull(ex.errors) != null || numOrNull(ex.warnings) != null) ? ` 기간 안에 남아 있던 그 vCenter 의 옛 오류 ${cnt(ex.errors)} · 경고 ${cnt(ex.warnings)}은 합계에서 뺐습니다.` : '';
+  // v2.742(DB-02): 상한에 닿은 개수는 '건 이상'.
+  const cnt = (x, capped) => { const v = numOrNull(x); return v == null ? '—' : `${v.toLocaleString()}건${capped === true ? ' 이상' : ''}`; };
+  const extra = ex && (numOrNull(ex.errors) != null || numOrNull(ex.warnings) != null) ? ` 기간 안에 남아 있던 그 vCenter 의 옛 오류 ${cnt(ex.errors, ex.errorsCapped)} · 경고 ${cnt(ex.warnings, ex.warningsCapped)}은 합계에서 뺐습니다.` : '';
   return `${base}${extra}`;
 }
 

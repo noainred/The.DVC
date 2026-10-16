@@ -772,6 +772,17 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
  * **용량 사용률**을 함께 붙여 준다. 대역폭(얼마나 바쁜가)과 용량(얼마나 찼는가)은 다른 축이라
  * 나란히 봐야 증설 판단이 된다. ⚠ 확실히 일치할 때만 붙이고, 아니면 비운다(억지 매칭 금지).
  */
+/**
+ * v2.742(DB-06): storage-summary **응답 객체**를 짧게 기억한다. 집계(agg)는 perfDb heavyQuery 가 기억하지만 라우트가 매번
+ * series.map 으로 새 객체를 만들어 res.json 에 넘겨, util/compress.js 의 객체 정체성 캐시(직렬화·SHA-1·gzip)가 한 번도
+ * 맞지 않았다 — '전체' 종류(목 기준 17.6MB)를 요청마다 메인 스레드에서 다시 직렬화했다. 키 = 같은 집계 객체(WeakMap — 집계 기억이
+ * 끝나면 함께 사라진다) + 조회 조건 + 종류 + 역할(관리 주소 가림이 다르다). 기억 시간은 min(60초, 집계 기억 시간)이다 —
+ * 집계 밖의 값(등록 스토리지 용량·엣지 마지막 표본 시각·장비 이름)은 이 시간만큼 늦게 바뀔 수 있다(그 대가로 직렬화를 아낀다).
+ */
+const _summaryMemo = new WeakMap();   // agg 객체 → Map(조회 키 → { at, body })
+const SUMMARY_MEMO_PER_AGG = 8;
+const summaryMemoTtl = () => Math.min(60_000, perfQueryTtlMs());
+
 api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue: rangeIssue } = rangeParams(req.query);
   // 법인은 **여러 개**를 받을 수 있다(쉼표 구분). 빈 값이면 전체.
@@ -800,6 +811,12 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   let agg;
   try { agg = await storageSeriesMulti(ids, { hours, from, to, groupOf, signal: perfAbortSignal(res) }); }
   catch (e) { if (abandoned(e)) return; throw e; }
+  // v2.742(DB-06): 같은 집계·같은 조건·같은 역할이면 **같은 응답 객체**를 넘긴다(위 _summaryMemo 머리말).
+  const memoTtl = summaryMemoTtl();
+  const memoKey = JSON.stringify([hours, from, to, rangeIssue || null, dcs, split, String(req.query.kind || ''), admin]);
+  const memo = memoTtl > 0 && agg && typeof agg === 'object' ? (_summaryMemo.get(agg) || null) : null;
+  const memoHit = memo?.get(memoKey);
+  if (memoHit && Date.now() - memoHit.at <= memoTtl) return res.json(memoHit.body);
 
   // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -865,7 +882,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     }
     return [...m.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
   })();
-  res.json({
+  const body = {
     ok: true, unit: 'bytesPerSec', hours, from, to, until: agg.until ?? null, rangeIssue: rangeIssue || null, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
     // v2.517: 화면이 '수집을 켜세요' 를 **꺼져 있을 때만** 말하게 하려면 실제 설정을 알아야 한다.
     // 예전에는 무조건 그 문구여서, 이미 켜져 있고 장비에서 실패하는 상황에서도 설정을 의심하게 만들었다.
@@ -880,7 +897,16 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     // v2.728: 결과를 언제 계산했는지 · 얼마나 기억하는지 · 어디서 읽었는지(원본 / 집계 표) — 화면 각주가 말한다.
     computedAt: agg.computedAt ?? null, cacheTtlMs: perfQueryTtlMs(), source: agg.source ?? null,
     ...(admin ? {} : { addressHidden: true }),
-  });
+  };
+  if (memoTtl > 0 && agg && typeof agg === 'object') {
+    const m = _summaryMemo.get(agg) || new Map();
+    const now = Date.now();
+    for (const [k, v] of m) if (now - v.at > memoTtl) m.delete(k);
+    if (m.size >= SUMMARY_MEMO_PER_AGG) m.delete(m.keys().next().value);
+    m.set(memoKey, { at: now, body });
+    _summaryMemo.set(agg, m);
+  }
+  res.json(body);
 });
 
 /**

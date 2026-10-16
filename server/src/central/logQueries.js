@@ -116,8 +116,12 @@ export function setLogQueryResult(reqId, payload = {}) {
   const rows = [];
   if (Array.isArray(p.rows)) for (const r of p.rows) { if (rows.length >= LOG_ROW_MAX) break; const x = sanitizeLogRow(r); if (x) rows.push(x); }
   const total = lqNum(p.total);
+  // v2.742 DB-01: 엣지가 필터 조회 건수를 상한까지만 셌으면 그 사실도 함께 든다(화면이 'N건 이상' 으로 말한다).
+  // 구버전 엣지는 필드를 보내지 않는다 — 없으면 정확한 수로 본다(false·null).
+  const totalCap = lqNum(p.totalCap);
   results.set(id, {
     at: Date.now(), vcenterId: lqStr(p.vcenterId, 128), total: total != null && total >= 0 ? total : null,
+    totalCapped: p.totalCapped === true, totalCap: totalCap != null && totalCap >= 0 ? totalCap : null,
     rows, dbKind: lqStr(p.dbKind, 16),
     owner: b.owner || '', reqVcenterId: b.vcenterId || '', // 바인딩을 결과와 함께 든다(#35)
   });
@@ -137,5 +141,5 @@ export function getLogQueryResult(reqId, now = Date.now()) {
     }
     return { state: 'pending' };
   }
-  return { state: 'done', total: r.total, rows: r.rows, dbKind: r.dbKind, at: r.at };
+  return { state: 'done', total: r.total, totalCapped: r.totalCapped === true, totalCap: r.totalCap ?? null, rows: r.rows, dbKind: r.dbKind, at: r.at };
 }
