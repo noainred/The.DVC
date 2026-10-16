@@ -90,6 +90,9 @@
     (재현). sha256 은 전송 손상만 잡고, 배포자 확인은 미리 고정한 공개키로 한 서명 검증이 한다. 같은 채널에서 온 SHA·탈취 가능한 전송 토큰 HMAC 을 배포자 서명으로 오인하지 말 것.
     ⚠ v2.735.1(사용자 결정 — 서명 키 등록 전 게시): 신뢰 키가 **하나도 설정되지 않은** 설치본은 env 없이 warn 이다(`signatureCore.resolvePolicy`·`trustUnconfigured`).
     키 항목(회수 포함)·호스트 파일·키 파일 오류 중 하나라도 있으면 require 다 — '아무것도 믿지 않음' 을 '설정 안 됨' 으로 약하게 읽지 말 것. 틀린 서명은 여전히 거부.
+    ⚠⚠ v2.742(RECENT-01·INJPKG-01): **root 로 도는 확인(install.sh·vmware-portal-verify·release-verify)은 회수를 어느 키 파일에서든 합치고, 키 추가만 root 소유 파일에서 받는다** —
+    v2.741 은 서비스 계정 소유 호스트 파일을 통째로 무시해 회수까지 버렸다(회수한 키로 서명한 번들을 root 가 받았다). install.sh 가 root 전용 사본(`<tools>/trust/release-signing-keys.conf`)을
+    남기고 root 확인이 env `VP_ROOT_TRUST_COPY` 로 그 사본의 **회수만** 합친다(원본을 지워도 회수가 풀리지 않는다). 서비스 계정 경로(포탈 자신)는 예전 그대로다. 회귀 `audit2742a`.
   - **연결 테스트는 저장 비밀번호를 물려받을 때 host/url 도 저장값으로 고정**(v2.480): vCenter·NSX·Horizon·iDRAC `testConnection`/`testServer`·수집 서버 `/collectors/test`·SMTP·PDU·베어메탈·GPU 게스트 테스트 전부 `{...saved, ...body}` 병합에서 host/url/ip 를 요청값으로 두면 저장 비밀번호가 공격자 호스트로 평문 전송된다(uagmon M3 클래스). 새 "저장 항목 테스트" 를 만들 때 같은 규칙.
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
@@ -893,3 +896,14 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - **SSH 세션 예산은 SAN·Isilon 수집기에도 있다**(DEV-02 — v2.528 Unity 규약의 형제): SAN `fosSsh` 기본 100초(`SANSW_CLI_SESSION_BUDGET_MS`, 장비 시한 − 15초로 묶음) ·
   Isilon SSH 150초. 필수 항목은 예산을 무시하고, 그 밖은 남은 시간이 조각(5초) 미만이면 시작하지 않고 사유를 남긴다(`extra.cliSkipped`·`cliSkippedKeys`/`cliSkippedCmds`).
   **예산 < 장비 시한** 산수를 `audit2741f` 가 고정한다. 바깥 시한이 짧은 호출부(SAN 연결 테스트 60초)는 `budgetMs` 를 넘긴다(`timeoutMs − 10초`).
+
+## 2026-10-16 v2.742 점검 — 자격증명 거부 판정·지속형 503·주문형 로그인 — 되돌리지 말 것 (docs/AUDIT-2026-10-16.md)
+
+- **스토리지 REST 의 자격증명 거부는 `storage/collectors/restCommon.js isCredReject` 로만 판정한다**(DEV-03): 401 오류는 `credRejectError`(authFailed·status 401 표지)로 만든다.
+  `/401/.test(e.message)` 꼴은 호스트명·SID·응답 본문 속 '401' 로 수집 전체를 끊었다(24곳). 표지 없는 옛 오류는 '인증 실패(401)' **접두**만 받는다. 403 은 즉시 중단 대상이 아니다
+  (역할 권한 없는 엔드포인트 하나가 수집 전체를 멈추지 않게). 새 REST 수집기의 401 도 credRejectError 로 만들 것 — 소스 스윕(`audit2742k` ⑩)이 7개 파일의 부분 일치 0 을 고정한다.
+- **중앙의 지속형 503(등록부·설정 손상, DB 불가)은 `Retry-After: 60` + `Cache-Control: no-store`**(`routes/central.js PERSISTENT_503_HEADERS`, EDGE-03): 다시 물어도 같은 결과라
+  엣지가 400·800ms 간격으로 같은 큰 본문을 세 번 보내지 않게 한다. central.js 의 `status(503)` 전부가 그 머리를 거치는지 스윕한다 — 새 503 은 `persistent503()` 로.
+  큰 본문 push(isidu·edge-log-result)는 `postNo503Retry` 로 503 을 호출 안에서 다시 보내지 않는다(다음 주기·claim→ack 가 잇는다).
+- **주문형 vCenter 로그인은 `vcenter/dsBrowse.js onDemandVcBlock`·`onDemandLogin` 을 지난다**(VC-03): 비활성·점검중·site·인증 정지면 로그인 0 + 409. 거부는 `noteVcAuthFailure`
+  로 주 폴러와 같은 기록에 올린다(v2.732 B4-01 · v2.733 C3-01 규약의 형제 4경로).
