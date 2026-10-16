@@ -42,6 +42,12 @@ export const READ_DENY = [
   //   응답 조각(link-check), RMA 에이전트 허용 IP·명령 이력(rma), 전 사이트 내부 IP 가 든 HAProxy 관리 블록(relaytopo/render).
   //   데모 계정 화면에서 이 도구들은 403(demoGuest 표지 → 데모 안내)으로 보인다 — 의도다.
   '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/rma', '/api/tools/relaytopo/render',
+  // v2.743(감사 AUTHZ-01): 데모 계정이 관리자 판본을 받던 설정·등록부 조회 — 가림 헬퍼를 거치지 않는 admin 전용 응답이라 막는다.
+  //   CVP 서버 등록부(관리 IP·계정명 — CVP 도구의 '설정' 탭) · SAN 포트 사용량 설정(DB 절대 경로) · vCenter 로그 보관 설정(설정 탭 —
+  //   DB 절대 경로) · IP 원장 공유 DB 위치(절대 경로 — operator 도 adminOnly 라 403 이다) · 중앙 자신의 콘솔 로그·상태(edge-log 와 같은
+  //   이유 — 등록 장비 주소·계정명이 상태에 실린다. 접두 비교라 위 '/api/tools/edge-log' 가 '-local' 을 덮지 않는다).
+  '/api/tools/cvp/servers', '/api/tools/sanswitch/perf/settings', '/api/admin/vclogs', '/api/admin/ipam/db-info',
+  '/api/tools/edge-log-local',
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */
@@ -107,6 +113,18 @@ const SAFE_RE = SAFE_ACTIONS.map((s) => {
 /** 데모 계정 요청인가 — 요청 문맥(resolveTokenUser 반환)의 표지. */
 export function isDemoGuest(user) {
   return !!user?.demoGuest;
+}
+
+/**
+ * v2.743(감사 AUTHZ-01): **관리자 판본**(관리 주소·장비 계정명·서버 절대 경로를 가리지 않은 응답)을 받을 사용자인가.
+ * 데모 계정은 요청 문맥이 role 'admin' 이라(admin 게이트를 통과해 화면을 보게 하려는 것) `role === 'admin'` 만 보던
+ * 가림 판정(addressMask.isAdminReq · scopeStatus.scopeDbStatus·scopeFilePaths·redactPushStatus)을 그대로 통과해
+ * operator·viewer 보다 넓게 봤다(사람이 등록한 장비의 관리 IP·계정명, DB 절대 경로). 데모 계정은 **operator 와 같은 가림
+ * 판본**을 받는다 — 조회 자체(v2.716 '조회 전부')는 그대로이고 가린 칸은 각 헬퍼가 표식·빈 칸으로 둔다.
+ * 판정은 이 함수 하나다(가림 헬퍼가 각자 demoGuest 를 보지 않게).
+ */
+export function isAdminDetailUser(user) {
+  return user?.role === 'admin' && !isDemoGuest(user);
 }
 
 /**

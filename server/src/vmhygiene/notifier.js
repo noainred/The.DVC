@@ -5,6 +5,9 @@
  *  · 첫 수집 중(snap.initial)이면 보내지 않는다(VM 0대 = '위반 0' 이 아니다).
  *  · 엣지 노드(CENTRAL_URL 있음)는 보내지 않는다 — 알림은 중앙 하나에서(같은 VM 을 두 번 알리지 않게).
  *  · 재진입 가드 · 실패는 상태와 콘솔에 남긴다(무음 실패 금지).
+ *  · v2.743(감사 VC-05 — 재현): 데모(목업) 데이터로 실제 알림 채널에 보내지 않는다(v2.708 규약 — bmusage·로그인 실패 알림과 같은
+ *    판단, '지금 보내기'(force) 포함). 목업 vCenter(`isMockVcenter` — id·이름 동시 일치)의 VM 은 live 에서도 알림 입력에서 뺀다.
+ *    mock 모드의 스냅샷은 전부 생성기 데이터라(store.js) 남는 VM 이 없어 'demo' 로 끝난다. 뺀 대수는 상태(`mockExcluded`)가 말한다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +19,8 @@ import { store } from '../store.js';
 import { sendText } from '../alerts.js';
 import { loadVmHygieneSettings } from './settings.js';
 import { analyzeVmHygiene, snapshotPolicySummary } from './analyze.js';
+import { isMockMode } from '../mock/demo/flags.js';
+import { isMockVcenter } from '../mock/generator.js';
 
 const STATE = registerStateFile('vm-hygiene-state.json');
 const FILE = () => path.join(config.configDir, STATE);
@@ -46,7 +51,13 @@ export async function vmHygieneNotifyOnce({ now = Date.now(), force = false, sen
     }
     if (!snap || snap.initial || !Array.isArray(snap.vms)) return (_last = { at: now, ok: true, sent: false, reason: 'first-collect' });
     const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
-    const r = analyzeVmHygiene(snap.vms, s, { now, vcName });
+    // v2.743(VC-05): 목업 vCenter 의 VM 은 알림 입력이 아니다. 남는 VM 이 없으면(mock 모드 = 언제나) 보내지 않고 상태 파일도 쓰지 않는다
+    //   (그날 '보냄' 으로 기록하면 live 로 바꾼 뒤 그날 첫 알림을 놓친다).
+    const mockVc = new Set((snap.vcenters || []).filter((v) => v && isMockVcenter(v)).map((v) => v.id));
+    const vms = mockVc.size ? snap.vms.filter((v) => !mockVc.has(v?.vcenterId)) : snap.vms;
+    const mockExcluded = snap.vms.length - vms.length;
+    if ((isMockMode() || mockExcluded > 0) && !vms.length) return (_last = { at: now, ok: true, sent: false, reason: 'demo', mockExcluded });
+    const r = analyzeVmHygiene(vms, s, { now, vcName });
     const text = snapshotPolicySummary(r);
     if (!text) {
       atomicWriteFileSync(FILE(), JSON.stringify({ ...st, lastSentDay: today, lastCheckedAt: now, lastSentAt: st.lastSentAt || null, lastCount: 0 }));
@@ -56,8 +67,9 @@ export async function vmHygieneNotifyOnce({ now = Date.now(), force = false, sen
     const list = Array.isArray(results) ? results.slice(0, 8).map((x) => String(x).slice(0, 120)) : [];
     // 켜진 채널이 하나도 없으면 '보냈다' 고 하지 않는다(그날 다시 보내지 않게 기록은 남긴다 — 매 10분 같은 시도 방지).
     atomicWriteFileSync(FILE(), JSON.stringify({ ...st, lastSentDay: today, lastSentAt: list.length ? now : (st.lastSentAt || null), lastCheckedAt: now }));
-    if (!list.length) return (_last = { at: now, ok: false, sent: false, reason: 'no-channel' });
-    return (_last = { at: now, ok: !list.some((x) => /err/.test(x)), sent: true, reason: 'sent', results: list });
+    const ex = mockExcluded ? { mockExcluded } : {};
+    if (!list.length) return (_last = { at: now, ok: false, sent: false, reason: 'no-channel', ...ex });
+    return (_last = { at: now, ok: !list.some((x) => /err/.test(x)), sent: true, reason: 'sent', results: list, ...ex });
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);
     console.warn(`[vm-hygiene] 스냅샷 정책 알림 실패: ${msg}`);

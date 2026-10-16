@@ -21,6 +21,7 @@
  */
 import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs } from './rates.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { fcUtilization, fcRateNotes } from './parse/fcRate.js';
 
 const n = numOrNull;   // v2.561: 공용 판정
 
@@ -134,17 +135,21 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       notes.push('링크 속도를 읽지 못한 인터페이스가 있어 그 회선의 사용률(%)은 내지 않았습니다(처리량만).');
     }
     // HBA — tx/rx words(4바이트) 누적. 속도를 모르면 퍼센트 없음.
+    // v2.743(감사 DEV-03): 분모는 명목 Gbit 가 아니라 **FC 표준 데이터율**(16GFC 1,600MB/s 등 — parse/fcRate.js)이다.
+    //   명목으로 나누면 포화한 포트가 80% 에서 멈춰 기본 임계 90% 알림이 울리지 않았다. 표에 없는 속도는 명목 + 사유 표지.
     const perFc = (c.hbas || []).map((x) => {
       const p = findBy(pc?.hbas, 'host', x.host);
       const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim);
       const tx = perSecond(p?.txBytes, x.txBytes, pAt, now, lim);
       const bps = sumStrict([rx, tx]);
-      return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, speedRaw: x.speedRaw };
+      const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
+      return { host: x.host, bps, pct: u.pct, pctBasis: u.basis, ...(u.over ? { pctOver: true } : {}), state: x.state, speedRaw: x.speedRaw };
     });
     const hp = maxOrNull(perFc.map((x) => x.pct));
     if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
     const hb = maxOrNull(perFc.map((x) => x.bps));
     if (hb != null) out.hba_bps = hb;
+    notes.push(...fcRateNotes(perFc));
     // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
   }
@@ -203,12 +208,15 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
         const p = findBy(pIdrac?.fcs, 'host', x.host);
         const { rx, tx } = idracRow(p, x);
         const bps = sumStrict([rx, tx]);
-        return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+        // v2.743(DEV-03): OS 경로와 같은 분모(FC 표준 데이터율) — 판정은 parse/fcRate.js 하나.
+        const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
+        return { host: x.host, bps, pct: u.pct, pctBasis: u.basis, ...(u.over ? { pctOver: true } : {}), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
       const hp = maxOrNull(idracFc.map((x) => x.pct));
       if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
+      notes.push(...fcRateNotes(idracFc, 'iDRAC '));
     }
     if (idracStale) {
       notes.push(`iDRAC 텔레메트리 리포트가 이전 주기 이후 갱신되지 않은 장치 ${idracStale}개는 네트워크·HBA 사용률을 판정하지 않았습니다(같은 값을 두 번 읽어 0 으로 보이지 않게).`);

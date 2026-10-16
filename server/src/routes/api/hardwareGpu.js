@@ -1,7 +1,7 @@
 // 하드웨어/ESXi/GPU 인벤토리·시계열 export·IP핑 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { guardCell } from '../../util/csv.js';
+import { csvCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -243,7 +243,7 @@ async function gpuSeriesExportCsvStream(req, res) {
   const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
   const CHUNK = 50_000;
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
-  const esc = (v) => { const t = guardCell(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }; // guardCell: 수식 인젝션 방어
+  const esc = csvCell; // v2.743(INJPKG-05): 공용 칸 이스케이프(수식 가드 + 단독 CR 도 따옴표) — 손으로 쓴 사본은 CR 을 빠뜨렸다
   const stamp = todayStamp();
   const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
 
@@ -466,7 +466,7 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
-  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
+  const esc = csvCell; // v2.743(INJPKG-05): 공용 칸 이스케이프(수식 가드 + 단독 CR 도 따옴표) — 손으로 쓴 사본은 CR 을 빠뜨렸다
   const lines = [head.join(',')];
   for (const r of data.items) {
     const breakdown = Object.entries(r.modes || {}).map(([m, n]) => `${m}:${n}`).join(' ');

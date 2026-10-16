@@ -11,6 +11,7 @@
  */
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
+import { onDemandLogin } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { store } from '../store.js';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 
@@ -80,8 +81,24 @@ function customizationXml(vm, guest, windows) {
 export function createProvisioner(vc) {
   const client = new VimSoapClient(vc);
   let loggedIn = false;
-
-  const ensureLogin = async () => { if (!loggedIn) { await client.login(); loggedIn = true; } };
+  // v2.743(감사 VC-03): 로그인은 주문형 로그인 문을 지난다(관리자가 누른 쓰기 실행 — 비활성·점검중·엣지 위임 vCenter 는 막고, 인증 정지는
+  //   1회 시도한다. 거부는 주 폴러와 같은 정지 기록에 올라간다). 그리고 **배치 전체가 한 번의 시도를 공유한다** — 예전에는 동시 실행
+  //   VM 마다 ensureLogin 을 따로 불러(로그인이 끝나기 전 loggedIn 이 거짓) 동시성만큼 로그인했고, 실패하면 남은 VM 마다 다시 로그인했다
+  //   (틀린 비밀번호면 VM 100대 배치가 실패 로그인 100회 — 계정 잠금 경로). 막힘·자격증명 거부(409)는 기억해 남은 VM 이 다시 시도하지 않고,
+  //   시한·연결 실패 같은 일시 오류만 다음 VM 이 다시 시도한다(authGuard 규칙 4 — 일시 장애를 계정 거부로 굳히지 않는다).
+  let loginTry = null;
+  let loginFatal = null;
+  const ensureLogin = async () => {
+    if (loggedIn) return;
+    if (loginFatal) throw loginFatal;
+    if (!loginTry) {
+      loginTry = onDemandLogin(client, vc, { allowAuthStopped: true })
+        .then(() => { loggedIn = true; })
+        .catch((err) => { if (err?.status === 409) loginFatal = err; throw err; })
+        .finally(() => { loginTry = null; });
+    }
+    await loginTry;
+  };
 
   /** Resolve a VM's parent Folder MoRef (clone target folder). */
   const parentFolder = async (srcRef) => {

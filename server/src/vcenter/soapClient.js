@@ -1542,10 +1542,15 @@ export async function fetchVmsPerfSeries(vc, morefs, type, interval, { start, en
   }
 }
 
-/** Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result. */
-export async function upgradeVmTools(vc, morefs) {
+/**
+ * Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result.
+ * v2.743(감사 VC-03): `login(c)` 를 넘기면 그것으로 로그인한다 — 라우트가 주문형 로그인 문(vcenter/dsBrowse.js onDemandLogin)을
+ *   넘겨 비활성·점검중·엣지 위임 vCenter 를 막고 거부를 주 폴러의 정지 기록에 올린다. 이 모듈은 dsBrowse.js 를 import 하지 않는다
+ *   (dsBrowse 가 이 모듈을 import 한다 — 순환). 생략하면 예전처럼 바로 로그인한다.
+ */
+export async function upgradeVmTools(vc, morefs, { login = null } = {}) {
   const c = new VimSoapClient(vc);
-  await c.login();
+  await (typeof login === 'function' ? login(c) : c.login());
   const results = [];
   try {
     for (const ref of morefs) {

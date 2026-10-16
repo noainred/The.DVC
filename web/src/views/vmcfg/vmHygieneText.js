@@ -82,8 +82,13 @@ export function notifyText(n) {
   if (!n.enabled) return '스냅샷 정책 알림 꺼짐';
   const last = n.lastSentAt ? new Date(n.lastSentAt).toLocaleString('ko-KR') : '보낸 적 없음';
   const r = n.last?.reason;
-  const why = r === 'no-channel' ? ' · 켜진 알림 채널이 없어 보내지 못했습니다' : r === 'error' ? ` · 마지막 시도 실패: ${n.last?.error || ''}` : r === 'edge' ? ' · 이 포탈은 엣지라 보내지 않습니다(중앙이 보냅니다)' : '';
-  return `매일 ${n.hour}시 이후 하루 한 번 · 마지막 발송 ${last}${why}`;
+  const why = r === 'no-channel' ? ' · 켜진 알림 채널이 없어 보내지 못했습니다' : r === 'error' ? ` · 마지막 시도 실패: ${n.last?.error || ''}` : r === 'edge' ? ' · 이 포탈은 엣지라 보내지 않습니다(중앙이 보냅니다)'
+    // v2.743(감사 VC-05): 데모(목업) 데이터로는 실제 알림 채널에 보내지 않는다(서버 vmhygiene/notifier.js — '지금 보내기' 포함).
+    : r === 'demo' ? ' · 데모(목업) 데이터라 실제 알림 채널로 보내지 않습니다' : '';
+  // 목업 vCenter 의 VM 을 알림에서 뺐으면 그 사실도 말한다(조용히 빼지 않는다).
+  const mx = Number(n.last?.mockExcluded);
+  const ex = r !== 'demo' && Number.isFinite(mx) && mx > 0 ? ` · 목업 vCenter 의 VM ${mx.toLocaleString()}대는 알림에서 뺐습니다` : '';
+  return `매일 ${n.hour}시 이후 하루 한 번 · 마지막 발송 ${last}${why}${ex}`;
 }
 
 /** 설정 입력 검증(화면) — 서버가 같은 범위로 자른다. 빈 칸은 '바꾸지 않음'. */

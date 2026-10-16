@@ -5,12 +5,14 @@
  * 그 vCenter 의 모든 VM guest.disk 를 한 번에 가져온다. VMware Tools 가 꺼진 VM 은 파티션이
  * 비어 오므로(관측 불가) 목록에서 제외한다(추정하지 않는다).
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { store } from '../store.js';
-import { loadVcenterConfig } from '../config.js';
+import { config, loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms } from './analyze.js';
-import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs } from './db.js';
+import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs, latestHoldMs, pruneOrphanVcenters } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -106,6 +108,42 @@ async function demoBackfill(vcenterId, changeThresholdGB) {
   return n;
 }
 
+/**
+ * v2.743(감사 VC-02): 알려진 vCenter id = 등록부 ∪ 스냅샷(status 무관 — 비활성·점검중·엣지 위임도 알려진 것이다). 회수 리포트의 '삭제된
+ *   vCenter 행' 판정과 그 행의 정리(pruneOrphanGuestDisk)가 같은 집합을 쓴다(판정 한 벌).
+ *   **판정할 수 없으면 null** — ① 등록부 파일(CONFIG_DIR/vcenters.json)이 있는데 읽지 못했다(loadVcenterConfig 는 그때 빈 목록이나 옛 위치의
+ *   파일을 준다 — 그 목록으로 지우면 손상 한 번이 전 vCenter 의 게스트 디스크 행을 지운다. osScanner registryVcIds 와 같은 판단)
+ *   ② 등록부도 스냅샷도 비었다(첫 병합 전·mock 첫 틱 — '아무 vCenter 도 없다' 를 근거로 전부 지우지 않는다).
+ * @returns {Set<string>|null}
+ */
+export function knownVcenterIds(snap = store.get()) {
+  return knownOf(snap).ids;
+}
+
+/** knownVcenterIds 본체 — 판정할 수 없는 이유('registry-unreadable' | 'no-known-vcenters')도 돌려준다. */
+function knownOf(snap) {
+  let reg;
+  try {
+    reg = loadVcenterConfig();
+    const primary = path.join(config.configDir, 'vcenters.json');
+    if (fs.existsSync(primary) && reg.file !== primary) return { ids: null, why: 'registry-unreadable' };
+  } catch { return { ids: null, why: 'registry-unreadable' }; }
+  const out = new Set();
+  for (const v of reg?.vcenters || []) if (v && v.id != null && v.id !== '') out.add(String(v.id));
+  for (const v of snap?.vcenters || []) if (v && v.id != null && v.id !== '') out.add(String(v.id));
+  return out.size ? { ids: out, why: null } : { ids: null, why: 'no-known-vcenters' };
+}
+
+/**
+ * v2.743(감사 VC-02): 등록부에서 지운 vCenter 의 최신 행을 정리한다(폴러의 보존 정리 틱이 부른다). 판정할 수 없으면 지우지 않고 사유를 돌려준다.
+ * @returns {Promise<{ok:boolean, skipped?:string, vcenters?:string[], vcenterCount?:number, removedRows?:number}>}
+ */
+export async function pruneOrphanGuestDisk(snap = store.get()) {
+  const k = knownOf(snap);
+  if (!k.ids) return { ok: false, skipped: k.why };
+  return pruneOrphanVcenters(k.ids);
+}
+
 /** 한 vCenter 수집 + DB 커밋(폴러/수동 공용). */
 export async function collectAndStore(vcenterId, { changeThresholdGB = 1 } = {}) {
   if (store.get()?.source === 'mock') { try { await demoBackfill(vcenterId, changeThresholdGB); } catch (e) { console.warn(`[guestdisk] 데모 백필 실패(${vcenterId}): ${e.message}`); } }
@@ -124,7 +162,20 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   let ids = allowed ? [...allowed] : null;
   // 특정 vCenter 선택 — scope 우선: 허용 목록 안일 때만 좁힌다(범위 밖이면 빈 결과).
   if (vcenterId) ids = (allowed && !allowed.has(vcenterId)) ? [] : [vcenterId];
-  const rows = await listLatest(ids);
+  const rows0 = await listLatest(ids);
+  // v2.743(감사 VC-02 — 재현): **등록부·스냅샷 어디에도 없는 vCenter**(등록에서 지운 vCenter)의 행은 합계·목록·CSV 에 넣지 않고 개수로 밝힌다
+  //   (예전에는 50일 전 행이 합계에 그대로 들어갔고 coverage 에는 그 vCenter 줄이 없었다). 행 정리는 폴러의 보존 정리 틱이 한다 — 그 전에도
+  //   리포트가 거짓 합계를 내지 않게 여기서 먼저 뺀다. 알려진 vCenter 를 판정할 수 없으면(null) 예전처럼 전부 둔다(지우는 쪽으로 단정하지 않는다).
+  //   범위 계정은 허용 vCenter(스냅샷에 있는 것)만 조회하므로 이 목록에 걸리지 않는다.
+  const known = knownVcenterIds();
+  const rows = known ? rows0.filter((r) => known.has(String(r.vcenterId))) : rows0;
+  const orphanRows = rows0.length - rows.length;
+  const orphanVcenters = orphanRows ? new Set(rows0.filter((r) => !known.has(String(r.vcenterId))).map((r) => String(r.vcenterId))).size : 0;
+  // v2.743(감사 VC-02 — 보수적 판단): **등록된 vCenter 의 오래된 행**(수집 주기 × 3 — 부분 합 보류와 같은 경계)은 db.js 가 의도로 남기는 값이라
+  //   (빈 수집 방어 '오래된 관측이 더 정직') 합계에서 빼지 않는다. 대신 행에 stale 표지를 달고 몇 대·몇 GB 인지 밝힌다 — 화면이 '지금 값이 아닐 수
+  //   있다' 를 말한다(합계에서 조용히 빼면 수집이 꺼진 법인의 회수 후보가 통째로 사라진다).
+  const staleAfterMs = latestHoldMs();
+  const staleBefore = Date.now() - staleAfterMs;
   // 필터(최소 회수/사용률)와 무관하게 '수집된 VM 수'와 '가장 큰 회수여유'를 먼저 잰다 —
   // 목록이 비었을 때 화면이 '데이터 없음'인지 '필터 때문'인지 정직하게 가르게 한다.
   let collectedCount = 0; let maxFreeGB = 0;
@@ -141,7 +192,8 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   try { for (const v of (store.get().vms || [])) clusterOf.set(v.id, v.cluster || ''); } catch { /* */ }
   let enriched = ranked.rows.map((r) => {
     const m = meta(r.vcenterId);
-    return { ...r, corpId: m.corpId, corpName: m.corpName, region: m.region, cluster: clusterOf.get(r.vmId) || '(미지정)' };
+    const stale = Number.isFinite(Number(r.ts)) && Number(r.ts) < staleBefore;
+    return { ...r, corpId: m.corpId, corpName: m.corpName, region: m.region, cluster: clusterOf.get(r.vmId) || '(미지정)', ...(stale ? { stale: true } : {}) };
   });
   // 사용률(%) 이하 필터 — 할당 대비 사용이 낮은(회수 여지가 큰) VM 만. 비율 null(할당 0)은 제외.
   // ★ 버그(v2.461~2.466): 미설정이면 maxRatioPct 는 null 인데 Number(null)===0 이라 isFinite(0)===true 로
@@ -150,6 +202,10 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   const mr = (maxRatioPct == null || maxRatioPct === '') ? NaN : Number(maxRatioPct);
   if (Number.isFinite(mr)) enriched = enriched.filter((r) => r.ratioPct != null && r.ratioPct <= mr);
   const totalReclaimGB = Math.round(enriched.reduce((s, r) => s + (r.freeGB || 0), 0) * 10) / 10;
+  // v2.743(VC-02): 합계 중 오래된 관측에서 온 몫(필터를 지난 목록 기준 — 합계와 같은 집합).
+  let staleRows = 0; let staleReclaimGB = 0;
+  for (const r of enriched) if (r.stale) { staleRows += 1; staleReclaimGB += r.freeGB || 0; }
+  staleReclaimGB = Math.round(staleReclaimGB * 10) / 10;
   // 콤보용 클러스터 목록 — **인벤토리 기준**(게스트 데이터가 없어도 vCenter 선택 시 채워지게).
   // scope 준수: ids(허용∩선택 vCenter) 안의 VM 클러스터만. ids=null 이면 무제한 계정.
   const idSet = ids ? new Set(ids) : null;
@@ -165,15 +221,16 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   // 커버리지 — 범위 내(또는 선택한) vCenter 각각의 데이터 유무·신선도·수집원(정직 표시용).
   // vm_latest 에 데이터가 있는 vCenter 만이 아니라 '보여야 할 모든 vCenter'를 기준으로 만든다:
   // 데이터가 0 인 vCenter 도 '왜 없나(엣지 push 대기 / Tools 미보고 / direct 미수집)'를 화면이 알린다.
-  const coverage = await buildCoverage(ids, idSet, vcenterId);
-  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, collectedCount, maxFreeGB, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, usageFactor: uf, scoped: Boolean(allowed) };
+  const coverage = await buildCoverage(ids, idSet, vcenterId, staleBefore);
+  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, collectedCount, maxFreeGB, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, usageFactor: uf, scoped: Boolean(allowed),
+    staleRows, staleReclaimGB, staleAfterMs, orphanRows, orphanVcenters };
 }
 
 /**
  * vCenter 별 커버리지 행 — 화면이 데이터 유무·수집원(direct/site)·신선도를 보이게 한다.
  * ids: 조회 대상 vCenterId 배열(null=무제한). idSet: Set(ids) 또는 null. vcenterId: 단일 선택(있으면 그것만).
  */
-async function buildCoverage(ids, idSet, vcenterId) {
+async function buildCoverage(ids, idSet, vcenterId, staleBefore = null) {
   let cov = new Map();
   try { cov = await coverageByVcenter(ids); } catch { cov = new Map(); }
   const snap = store.get();
@@ -194,6 +251,8 @@ async function buildCoverage(ids, idSet, vcenterId) {
       collectSource: v.collectSource === 'site' ? 'site' : 'direct', // site=엣지 수집(push), direct=중앙 직접
       vmCount: c.vmCount,
       lastTs: c.lastTs,
+      // v2.743(VC-02): 마지막 적재가 수집 주기 × 3 보다 오래됐다(그 vCenter 의 행 전부가 '오래된 관측' 이다).
+      ...(staleBefore != null && c.vmCount > 0 && c.lastTs != null && c.lastTs < staleBefore ? { stale: true } : {}),
     };
   });
   out.sort((a, b) => String(a.vcenterName).localeCompare(String(b.vcenterName)));

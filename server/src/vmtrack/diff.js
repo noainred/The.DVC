@@ -65,6 +65,33 @@ export function normalizeVm(v) {
 const isOn = (s) => s === 'POWERED_ON';
 
 /**
+ * v2.743(감사 VC-01 — 재현): 이 vCenter 의 VM 목록을 **지금 읽었다** 고 볼 수 있는가 — 판정 한 벌이다
+ *   (VM 수량 추이 `service.js takeVmSnapshot` · VM 생성·삭제 이력의 '지금 있는가' `routes/api/vmLifecycle.js liveNamesOf`).
+ *   예전 추이는 unreachable·pending 이면서 VM 0개인 vCenter 만 걸렀다. 그런데 store.js 는 **비활성** vCenter 를 VM·데이터스토어 없이
+ *   status 'disabled' 로만 넣고, **점검중** vCenter 도 직전 캐시가 없으면(재시작 직후) VM 0개다 — 그 빈 목록을 diff 하면 직전 로스터
+ *   전부가 '삭제(removed)'(데이터스토어는 '해제')로 적재되고 skipped 도 0 이었다. 다시 켜면 로스터가 비어 기준선이 되어 그 사이 만든
+ *   VM 이 '신규' 로도 잡히지 않았다. 규칙(v2.742 VC-04 osStore 와 같은 판단):
+ *   · status 'connected' 면 읽은 것이다 — VM 0개도 사실이다(정말 비었을 수 있다).
+ *   · 그 밖(비활성·점검중·첫 수집 중·연결 실패)이라도 VM 이 **실제로 있으면** 직전 값(lastGood·점검중 캐시 — 데이터스토어도 함께 온다)을
+ *     서빙하는 것이라 예전처럼 diff 한다(바뀐 것이 없으므로 변화 0 으로 나온다).
+ *   · 그 밖이면서 VM 목록이 비었으면 '비어 있다' 가 아니라 **모른다** — diff 하지 않는다(추이는 그 vCenter 의 VM·데이터스토어 둘 다).
+ *   ⚠ 데이터스토어 목록을 따로 보지 않는 이유: store.js 의 세 서빙 경로(직접 수집·lastGood·점검중 캐시·엣지 push)는 VM 과 데이터스토어를
+ *     함께 싣는다 — 'VM 은 있고 DS 만 빈 비연결 vCenter' 는 만들어지지 않는다. 그 조건을 더하면 상태 표기가 다른 픽스처·구버전 스냅샷에서
+ *     멀쩡한 vCenter 를 통째로 건너뛴다(자체 테스트 audit2598e RECENT2598-02 가 잡았다).
+ * @param {{status?:string, maintenance?:boolean}} vc 스냅샷의 vCenter 항목
+ * @param {number} vmCount 스냅샷에 실린 그 vCenter 의 VM 수
+ * @returns {null|'disabled'|'maintenance'|string} null = 읽음(diff 한다) · 문자열 = 읽지 못한 사유(status 그대로, 없으면 'unknown')
+ */
+export function inventoryUnreadReason(vc, vmCount) {
+  if (!vc || typeof vc !== 'object') return 'unknown';
+  if (vc.status === 'connected') return null;
+  if (Number(vmCount) > 0) return null;
+  if (vc.status === 'disabled') return 'disabled';
+  if (vc.status === 'maintenance' || vc.maintenance === true) return 'maintenance';
+  return typeof vc.status === 'string' && vc.status ? vc.status : 'unknown';
+}
+
+/**
  * 한 vCenter 의 diff 계산.
  * @param {Array} vms       현재 스냅샷의 그 vCenter VM 목록(원본 객체)
  * @param {Map}   prevRoster 직전 로스터 Map<vmId, row>(DB roster). 빈 Map 이면 baseline.

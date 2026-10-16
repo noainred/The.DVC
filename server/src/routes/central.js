@@ -2141,6 +2141,9 @@ centralRouter.get('/isidu-config', requireCentral(), async (req, res) => {
  *  · 저장 이름은 인증된 agent(개별 토큰이면 바인딩 이름). 대상은 **그 엣지에 배정된 것만** 받는다(남의 대상 id 는 버리고 개수를 밝힌다).
  *  · 상태(엣지 SSH 공개키·폴러)는 등록부를 쓰지 않으므로 먼저 받는다 — 키는 화면이 보여 줘야 관리자가 아이실론에 등록한다.
  *  · 스캔이 있는데 등록부·설정·DB 를 못 쓰면 503(엣지는 커서를 전진하지 않고 다시 보낸다 — v2.611·v2.620 규약).
+ *  · v2.743(감사 LEFT-08): 상태의 `runDropped`(엣지가 시작하지 않고 버린 '지금 수집' 요청)를 상태처럼 먼저 반영한다 — 그 요청을 결과 시한
+ *    (최대 약 10시간)까지 기다리지 않고 사유와 함께 폐기한다(화면의 '결과 없이 폐기' 배너가 말한다). 등록부·설정을 쓰지 않는다.
+ *    구버전 엣지는 이 필드가 없다(예전처럼 시한으로 정리). 응답 `runDrops` 로 몇 건을 정리했는지 돌려준다.
  */
 centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
@@ -2148,7 +2151,11 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   const E = await import('../central/isiduEdge.js');
   const hasScans = Array.isArray(req.body?.scans) && req.body.scans.length > 0;
   E.saveIsiduEdgeStatus(authAgent, req.body?.status, { at: Date.now(), scans: hasScans ? Math.min(req.body.scans.length, 999) : 0 });
-  if (!hasScans) return res.json({ ok: true, saved: { inserted: 0, duplicates: 0 } });
+  const { ackIsiduCollect, applyIsiduEdgeDrops } = await import('../isidu/collectRequests.js');
+  const runDropsRes = applyIsiduEdgeDrops(authAgent, req.body?.status);
+  if (runDropsRes?.applied) console.warn(`[central] isidu-data: ${String(authAgent).slice(0, 64)} 엣지가 '지금 수집' 요청 ${runDropsRes.applied}건을 시작하지 않고 버렸다고 알려 와 그 요청을 정리했습니다(사유는 화면의 폐기 안내)`);
+  const runDrops = runDropsRes ? { runDrops: runDropsRes } : {};
+  if (!hasScans) return res.json({ ok: true, saved: { inserted: 0, duplicates: 0 }, ...runDrops });
   const T = await import('../isidu/targets.js');
   if (registryUnreadable(res, T.storageRegistryLoadError, '스토리지')) { console.warn('[central] isidu-data: 중앙 스토리지 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
   const S = await import('../isidu/settings.js');
@@ -2159,11 +2166,10 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   const clean = E.sanitizeIsiduScans(req.body, owned);
   if (clean.dropped.notOwned) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 배정되지 않은 대상의 결과 ${clean.dropped.notOwned}건 거절`);
   const db = await import('../isidu/db.js');
-  const { ackIsiduCollect } = await import('../isidu/collectRequests.js');
   const { notifyScanStored: notifyIsidu } = await import('../isidu/notify.js');
   const saved = { inserted: 0, duplicates: 0, failed: 0 };
   if (clean.scans.length && !(await db.available())) {
-    return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
+    return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 디렉터리 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [isidu-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })), ...runDrops });
   }
   for (const sc of clean.scans) {
     // v2.741 EDGE-01: sc.srcTs(엣지 원본 시각)로 재전송 중복을 거른다 — 잘라 둔 시각(sc.ts)은 받을 때마다 다른 '지금' 이다.
@@ -2182,9 +2188,9 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   }
   // 시각을 잘라 받은 스캔(clamped)은 거절이 아니다 — rejected 합계에 넣지 않고 따로 밝힌다(엣지 시계가 앞서 있다는 진단).
   const clampedPart = clean.clamped ? { clamped: clean.clamped } : {};
-  if (saved.failed) return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
+  if (saved.failed) return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: `중앙이 결과 ${saved.failed}건을 적재하지 못했습니다 — 엣지는 다음 주기에 다시 보냅니다`, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart, ...runDrops });
   if (clean.clamped && E.clampWarnDue(node)) console.warn(`[central] isidu-data: ${String(node).slice(0, 64)} 엣지 시계가 중앙보다 5분 넘게 앞서 결과 ${clean.clamped}건의 시각을 수신 시각으로 잘랐습니다(원본 시각으로 중복을 거릅니다)`);
-  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart });
+  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart, ...runDrops });
 });
 
 // GET /api/central/users-config?agent=<이름>

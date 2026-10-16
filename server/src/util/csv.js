@@ -120,12 +120,19 @@ export function delimiterHint(headerRow) {
     : '';
 }
 
+/**
+ * 셀 하나 → CSV 칸(수식가드 + 필요한 경우만 따옴표). 단독 CR 도 quoting 한다(RFC 4180 — CR 을 담은 칸은 따옴표로 감싼다).
+ * v2.743(감사 INJPKG-05): 라우트마다 손으로 쓴 `esc`(따옴표 판정에서 CR 을 빠뜨렸다)를 이 함수로 모은다. `.map(csvCell)` 로 써도 되게
+ *   첫 인자만 본다(map 의 index·array 를 무시).
+ */
+export function csvCell(c) {
+  const s = guardCell(c);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 /** 셀 배열 → CSV 한 줄(수식가드 + 필요한 경우만 따옴표). 단독 CR 도 quoting 한다. */
 export function csvLine(cells) {
-  return cells.map((c) => {
-    const s = guardCell(c);
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }).join(',');
+  return cells.map((c) => csvCell(c)).join(',');
 }
 
 export { BOM as CSV_BOM };

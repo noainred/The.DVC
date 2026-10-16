@@ -76,7 +76,12 @@ export function DailyHealth({ scope, isAdmin }) {
   };
   const runNow = async () => {
     setSaving('발송 중…');
-    try { const r = await postJson('/admin/report/daily/run', {}); setSaving(r.ok ? `발송 완료 (${(r.results || []).join(', ') || '채널 미설정'})` : `실패: ${(r.results || []).join(', ') || r.reason}`); }
+    try {
+      const r = await postJson('/admin/report/daily/run', {});
+      // v2.743(감사 TIMING-04): 정한 시각 전의 테스트 발송은 그날 정기 발송을 대신하지 않는다 — 그 사실을 말한다.
+      const sched2 = r.ok && r.manual && sched?.enabled ? (r.countedAsScheduled ? ' — 정한 시각이 지나 오늘 정기 발송으로 처리했습니다' : ' — 테스트 발송이라 오늘 정기 발송은 정한 시각에 그대로 나갑니다') : '';
+      setSaving(r.ok ? `발송 완료 (${(r.results || []).join(', ') || '채널 미설정'})${sched2}` : `실패: ${(r.results || []).join(', ') || r.reason}`);
+    }
     catch (e) { setSaving(`실패: ${e.message}`); }
     // 수동 성공은 서버의 연속 실패 기록을 지운다 — 안내가 옛 값으로 남지 않게 다시 읽는다(v2.603).
     fetchJson('/admin/report/daily').then((r) => { setSched(r); setSchedErr(null); }).catch((e) => setSchedErr(e));
@@ -105,7 +110,7 @@ export function DailyHealth({ scope, isAdmin }) {
             <span className="muted">시</span>
             <input className="input" type="number" min="0" max="59" style={{ width: 64 }} value={sched.minute}
               onChange={(e) => setSched({ ...sched, minute: e.target.value })} onBlur={() => saveSched({})} />
-            <span className="muted">분{sched.tzOffsetMin != null ? ` (UTC${sched.tzOffsetMin >= 0 ? '+' : '-'}${Math.abs(sched.tzOffsetMin) / 60} 기준 — 서버 시간대와 무관)` : ''} · 알림 채널(Slack/Teams/웹훅)로 발송 · 마지막 발송: {fmtDate(sched.lastRunTs)}</span>
+            <span className="muted">분{sched.tzOffsetMin != null ? ` (UTC${sched.tzOffsetMin >= 0 ? '+' : '-'}${Math.abs(sched.tzOffsetMin) / 60} 기준 — 서버 시간대와 무관)` : ''} · 알림 채널(Slack/Teams/웹훅)로 발송 · 마지막 정기 발송: {fmtDate(sched.lastRunTs)}{sched.lastRunBy === 'manual' ? '(수동 발송으로 대신)' : ''} · 마지막 수동 발송: {fmtDate(sched.lastManualTs)}</span>
             <button className="logout-btn" onClick={runNow}>지금 발송(테스트)</button>
             {saving && <span className="muted" style={{ fontSize: 12 }}>{saving}</span>}
           </div>

@@ -14,6 +14,13 @@ listen fwd_${port}
     timeout server  10m
     server target ${backend} check`;
 
+// v2.743(감사 INJPKG-04·INJPKG-03): 원격 응답에서 온 값(got.agent·got.hostname)은 문자열일 때만 쓰고 제어 문자를 지운다 —
+//   숫자·객체 agent 가 `got.toLowerCase()` 에서 TypeError 를 던져 주기 점검 전체가 멈췄고, 탭·CR·LF 가 든 이름은 알림 제목(title)에
+//   그대로 들어가 그 알림 메일이 통째로 실패했다. checks.js 가 이미 정리하지만 이 함수는 순수 함수로 따로 불리므로 여기서도 지킨다.
+// eslint-disable-next-line no-control-regex
+const CTRL_RE = /[\u0000-\u001f\u007f\u2028\u2029]/g;
+const textOf = (v, max = 128) => (typeof v === 'string' ? v.replace(CTRL_RE, ' ').trim().slice(0, max) : '');
+
 export function remedyFor(r = {}) {
   const kind = KINDS[r.kind] ? r.kind : 'edge-portal';
   const k = KINDS[kind].label;
@@ -39,9 +46,11 @@ export function remedyFor(r = {}) {
     return { title: `${k} ${hp}: TLS 는 되나 HTTP 응답 없음`, cause: '백엔드 서비스(vpxd/포탈)가 지연·중단됐거나, 포워딩이 엉뚱한 서비스로 갑니다.', steps: ['백엔드 장비에서 서비스 상태 확인(vCenter: `service-control --status`, 포탈: `systemctl status vmware-portal`)', `haproxy.cfg 의 :${r.port} backend 주소 재확인`], haproxy: '' };
   }
   if (phase === 'identity') {
-    const got = r.got?.agent || '?';
-    const own = kind === 'irs-portal' && r.expect?.relayAgent && got.toLowerCase() === String(r.expect.relayAgent).toLowerCase();
-    return { title: `${k} ${hp}: 응답한 것이 기대한 대상이 아님(응답 '${got}')`, cause: own ? `:${r.port} 이 IRS 가 아니라 중계 엣지 자신(:4000)으로 되돌아갑니다 — haproxy.cfg 의 backend 가 자기 IP:4000 이거나 포트 오타입니다.` : `:${r.port} 이 다른 장비('${got}'${r.got?.hostname ? `, ${r.got.hostname}` : ''})로 갑니다. 기대: '${r.expect?.agent || '?'}'.`,
+    const got = textOf(r.got?.agent) || '?';
+    const gotHost = textOf(r.got?.hostname, 253);
+    const relay = textOf(r.expect?.relayAgent);
+    const own = kind === 'irs-portal' && relay && got !== '?' && got.toLowerCase() === relay.toLowerCase();
+    return { title: `${k} ${hp}: 응답한 것이 기대한 대상이 아님(응답 '${got}')`, cause: own ? `:${r.port} 이 IRS 가 아니라 중계 엣지 자신(:4000)으로 되돌아갑니다 — haproxy.cfg 의 backend 가 자기 IP:4000 이거나 포트 오타입니다.` : `:${r.port} 이 다른 장비('${got}'${gotHost ? `, ${gotHost}` : ''})로 갑니다. 기대: '${textOf(r.expect?.agent) || '?'}'.`,
       steps: [`haproxy.cfg 의 listen :${r.port} 의 server 주소를 ${backendHint} 로 수정`, '수집 서버 항목의 id/이름과 IRS 의 AGENT_NAME 이 같은지 확인(대소문자 무시)', `수정 후 \`${restart}\``], haproxy: snippet(r.port, backendHint) };
   }
   if (phase === 'auth') {

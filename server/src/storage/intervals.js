@@ -116,13 +116,19 @@ export function applyCentralIntervals(input = {}) {
   const { values } = normalizeIntervals(input);
   const before = JSON.stringify(_override);
   if (before === JSON.stringify(values)) return { applied: false, unchanged: true, values };
+  // v2.743(감사 TIMING-01): 리스너는 **실효 주기가 바뀔 때만** 부른다. _override 는 메모리에만 있어 엣지 재시작 직후에는 {} 이고,
+  //   중앙이 키를 하나라도 지정했으면 첫 pull 이 늘 '바뀜' 이 되어 폴러·push·pull 타이머를 전부 재무장시켰다(첫 실행 전이면
+  //   firstDelay 가 사라졌다 — util/adaptiveTimer.js 같은 번호 주석). 지정 값이 env·기본값과 같으면 출처 표시만 바뀐다.
+  const effBefore = runtimeIntervals();
   _override = values;
   _overrideAt = Date.now();
   const eff = runtimeIntervals();
+  const effectiveChanged = INTERVAL_SPEC.some((s) => eff[s.key] !== effBefore[s.key]);
   console.log('[storage-intervals] 중앙 지정 주기 적용: '
-    + INTERVAL_SPEC.map((s) => `${s.key}=${Math.round(eff[s.key] / 1000)}s`).join(' '));
-  for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
-  return { applied: true, values, effective: eff };
+    + INTERVAL_SPEC.map((s) => `${s.key}=${Math.round(eff[s.key] / 1000)}s`).join(' ')
+    + (effectiveChanged ? '' : ' (실효 주기는 그대로 — 타이머를 다시 잡지 않습니다)'));
+  if (effectiveChanged) for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
+  return { applied: true, values, effective: eff, effectiveChanged };
 }
 
 export function onIntervalsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }

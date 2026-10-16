@@ -6,6 +6,9 @@
  * 규약: gzip · 요청당 폴더 행 상한(약 6만 — 해제 후 16MB 한도 아래) · 재진입 가드(진행 중이면 끝난 뒤 한 번 더) ·
  *   **보낼 스캔이 0건이어도 상태를 올린다**(v2.517 sendStatusOnly — 중앙 화면이 이 엣지의 키·폴러 상태를 알아야 한다) ·
  *   중앙 응답의 거절 요약을 상태·콘솔에 남긴다 · 실패는 `_last` + 콘솔(같은 사유는 10분에 1줄).
+ * v2.743(감사 LEFT-08): 상태에 이 엣지가 **시작하지 않고 버린 중앙 '지금 수집' 요청**(`runDropped` [{id, reason, ageMs}])과 지금 돌리거나
+ *   기다리는 대상(`runHeld`)을 싣는다 — 중앙은 그 요청을 결과 시한(최대 약 10시간)까지 기다리지 않고 사유와 함께 정리한다.
+ *   중앙이 2xx 로 받았을 때만 지운다(실패·503 이면 다음 push 에 다시 싣는다). 구버전 중앙은 이 필드를 모른다(예전처럼 시한으로 정리한다).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +25,7 @@ import { classifyCentral404Body } from '../agent/central404.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
 import { publicKeyView } from './sshKey.js';
 import { edgeTargets } from './settings.js';
-import { isiduPollerStatus, onScanStored } from './poller.js';
+import { isiduPollerStatus, onScanStored, runDropsForPush, ackRunDrops } from './poller.js';
 import * as db from './db.js';
 
 const gzipAsync = promisify(zlib.gzip);
@@ -41,13 +44,17 @@ function saveCursor(id) {
   catch (e) { console.warn(`[isidu-push] 커서 저장 실패: ${e.message}`); }
 }
 
-export function statusBody() {
+export function statusBody(rd = runDropsForPush()) {
   const p = isiduPollerStatus();
   return {
     key: publicKeyView(),
     poller: { lastTick: p.lastTick, concurrency: p.concurrency, running: p.running, lastError: p.lastError, interrupted: p.interrupted || [], resumes: p.resumes || [] }, // v2.737: 재개 대기·결과
     targets: edgeTargets().targets.length,
     version: config.currentVersion?.() || null,
+    // v2.743(LEFT-08): 버린 중앙 요청 — 빈 배열도 싣는다(중앙이 '이 엣지는 알려 주는 판' 임을 안다). runHeld 는 버린 것이 있을 때만.
+    runDropped: rd.list,
+    ...(rd.list.length ? { runHeld: rd.held } : {}),
+    ...(rd.omitted ? { runDroppedOmitted: rd.omitted } : {}),
   };
 }
 
@@ -62,7 +69,8 @@ export function centralFailText(status, body) {
 }
 
 async function postOnce(scans) {
-  const body = { agent: config.agent.name, status: statusBody(), scans: scans.map((s) => ({ ...s, id: s.id, entries: s.entries.map((e) => [e.name, e.bytes, e.res]) })) };
+  const rd = runDropsForPush();
+  const body = { agent: config.agent.name, status: statusBody(rd), scans: scans.map((s) => ({ ...s, id: s.id, entries: s.entries.map((e) => [e.name, e.bytes, e.res]) })) };
   const json = Buffer.from(JSON.stringify(body));
   const payload = await gzipAsync(json);
   // v2.742(감사 EDGE-03): 중앙 503(DB 불가·등록부/설정 손상·혼잡)이면 같은 본문(요청당 폴더 행 최대 약 6만)을 바로 다시 올리지 않는다 —
@@ -74,13 +82,19 @@ async function postOnce(scans) {
   let reply = null;
   try { reply = await readJsonCapped(res, 256 * 1024, '중앙 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* */ } }
   if (!res.ok) { const e = new Error(`isidu-data ← ${centralFailText(res.status, reply)}`); e.status = res.status; throw e; }
-  return { reply, bytes: json.length, gz: payload.length };
+  // v2.743(LEFT-08): 중앙이 받았다 — 이번에 실은 버린 요청 기록을 지운다(그 뒤에 생긴 것은 다음 push).
+  if (rd.list.length) {
+    ackRunDrops(rd.seq);
+    const a = reply?.runDrops;
+    if (a && typeof a === 'object') console.log(`[isidu-push] 시작하지 않은 중앙 요청 ${rd.list.length}건을 알렸습니다(중앙이 정리 ${Number(a.applied) || 0}건)`);
+  }
+  return { reply, bytes: json.length, gz: payload.length, runDropped: rd.list.length };
 }
 
 async function pushInner() {
   if (!(await db.available())) {
-    await postOnce([]);   // 상태만 — DB 를 못 써도 키·폴러 상태는 중앙이 알아야 한다
-    _last = { at: Date.now(), ok: true, scans: 0, note: '엣지 DB 를 쓸 수 없어 상태만 보냈습니다' };
+    const r0 = await postOnce([]);   // 상태만 — DB 를 못 써도 키·폴러 상태는 중앙이 알아야 한다
+    _last = { at: Date.now(), ok: true, scans: 0, note: '엣지 DB 를 쓸 수 없어 상태만 보냈습니다', ...(r0.runDropped ? { runDropped: r0.runDropped } : {}) };
     return { ok: true, sent: 0, more: false };
   }
   let cursor = loadCursor();
@@ -100,7 +114,7 @@ async function pushInner() {
   const notOwned = Number(r.reply?.dropped?.notOwned) || 0;
   if (rejected) console.warn(`[isidu-push] 중앙이 일부를 받지 않았습니다(${JSON.stringify(r.reply?.dropped || {}).slice(0, 200)})${notOwned ? ` — 대상 ${notOwned}건은 이 엣지에 배정되지 않았습니다(배정이 바뀐 직후일 수 있습니다)` : ''}`);
   const more = mx != null && lastId < mx;
-  _last = { at: Date.now(), ok: true, scans: scans.length, rows, bytes: r.bytes, gzBytes: r.gz, more, ...(rejected ? { rejected, dropped: r.reply?.dropped || null } : {}) };
+  _last = { at: Date.now(), ok: true, scans: scans.length, rows, bytes: r.bytes, gzBytes: r.gz, more, ...(rejected ? { rejected, dropped: r.reply?.dropped || null } : {}), ...(r.runDropped ? { runDropped: r.runDropped } : {}) };
   return { ok: true, sent: scans.length, more };
 }
 

@@ -134,6 +134,44 @@ export function mergeGpuGuestSettings(cur, partial = {}, dropped = []) {
   return next;
 }
 
+/**
+ * v2.743(RECENT-01): 저장된 설정 사본에서 **빈 바탕 기본값이 아닌 값만** 부분 패치로 뽑는다(순수 — 디스크 접근 없음).
+ *   중앙 배포 사본(central/agentGpuGuestConfig.js)의 대소문자 중복을 합칠 때, 최근 사본을 옛 사본 위에 이 패치로 얹는다.
+ *   v2.741 까지 대소문자만 다른 이름으로 저장하면 **빈 바탕({}) 위에** 부분 본문만 얹은 사본이 생겼다 — 그 사본의
+ *   enabled:false·username:''·password:''·기본 주기는 '관리자가 끈 값' 이 아니라 **바탕에서 온 기본값**일 수 있어, 그대로 이기게 두면
+ *   정확한 이름의 엣지에서 수집이 꺼지고 공용 계정이 비워졌다. 그래서 DEFAULTS 와 같은 값·빈 문자열은 패치에 넣지 않는다(= 옛 값 유지).
+ *   VM 계정(vms)·고정 IP(vmIps)는 그대로 싣는다 — mergeGpuGuestSettings 가 합집합으로 합치고 같은 VM 은 이 값이 이긴다
+ *   (빈 비밀번호는 같은 계정이면 옛 값을 유지하고, 계정이 바뀌었으면 승계하지 않는다 — v2.611 규칙 그대로).
+ *   ⚠ null VM 계정은 넣지 않는다 — 패치의 null 은 '지움' 이다(저장된 사본에는 생기지 않지만 손으로 고친 파일이 있을 수 있다).
+ */
+export function gpuGuestNonDefaultPatch(copy) {
+  const c = copy && typeof copy === 'object' && !Array.isArray(copy) ? copy : {};
+  const p = {};
+  if (c.enabled === true) p.enabled = true;
+  for (const f of ['pollIntervalMs', 'concurrency', 'timeoutMs', 'maxVmsPerVcenter', 'sshPort']) {
+    const n = typeof c[f] === 'number' && Number.isFinite(c[f]) ? c[f] : null;
+    if (n != null && n !== DEFAULTS[f]) p[f] = n;
+  }
+  if (['guestops', 'ssh'].includes(c.collectMethod)) p.collectMethod = c.collectMethod; // 'auto' = 기본값
+  const vcs = c.vcenters && typeof c.vcenters === 'object' && !Array.isArray(c.vcenters) ? c.vcenters : {};
+  const out = {};
+  for (const [id, v] of Object.entries(vcs)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const pv = {};
+    if (v.enabled === true) pv.enabled = true;
+    for (const f of ['username', 'password', 'winUsername', 'winPassword']) if (typeof v[f] === 'string' && v[f] !== '') pv[f] = v[f];
+    const vms = {};
+    for (const [vmId, cred] of Object.entries(v.vms && typeof v.vms === 'object' ? v.vms : {})) if (cred && typeof cred === 'object' && !Array.isArray(cred)) vms[vmId] = { ...cred };
+    if (Object.keys(vms).length) pv.vms = vms;
+    const ips = {};
+    for (const [vmId, ip] of Object.entries(v.vmIps && typeof v.vmIps === 'object' ? v.vmIps : {})) if (typeof ip === 'string' && ip.trim()) ips[vmId] = ip;
+    if (Object.keys(ips).length) pv.vmIps = ips;
+    out[id] = pv;
+  }
+  if (Object.keys(out).length) p.vcenters = out;
+  return p;
+}
+
 /** Persist a partial update. vcenters는 병합하며, 빈 password는 기존 값을 유지한다. */
 export function saveGpuGuestSettings(partial, dropped = []) {
   const cur = readFile();

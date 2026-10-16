@@ -11,6 +11,8 @@
  */
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
+// v2.743(감사 VC-03): 주문형 vCenter 로그인 문 — 판정은 collectTarget.js·authStopGate.js 하나(dsBrowse.js 가 묶는다). 사본을 만들지 않는다.
+import { onDemandLogin } from '../vcenter/dsBrowse.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const GB_KB = 1024 * 1024;
@@ -223,7 +225,9 @@ async function waitTask(c, taskRef, timeoutMs = 180_000, t0 = Date.now()) {
 /** VM 현재 하드웨어 조회(라우트용). */
 export async function getVmHardware(vc, moref) {
   const c = new VimSoapClient(vc);
-  await c.login();
+  // v2.743(VC-03): 화면을 열 때 부르는 주문형 조회다 — 비활성·점검중·엣지 위임(site)·주 폴러가 인증 실패로 멈춘 vCenter 에는
+  //   로그인하지 않고 409(사유 skipReason·authStopped)를 던진다. 거부는 주 폴러와 같은 정지 기록에 올라간다.
+  await onDemandLogin(c, vc);
   try {
     const objs = await c.retrieveObjectProps('VirtualMachine', moref, [
       'config.hardware.device', 'config.hardware.numCPU', 'config.hardware.numCoresPerSocket', 'config.hardware.memoryMB',
@@ -256,7 +260,9 @@ async function resolveDvsBacking(c, pgMoref) {
  */
 export async function reconfigVm(vc, moref, plan = {}) {
   const c = new VimSoapClient(vc);
-  await c.login();
+  // v2.743(VC-03): 관리자가 누른 쓰기 실행 — 비활성·점검중·site 는 막고, 인증 정지는 1회 시도한다(게스트 계정 추가와 같은 판단).
+  //   로그인 거부는 정지 기록에 올리고 409 로 바꾼다.
+  await onDemandLogin(c, vc, { allowAuthStopped: true });
   try {
     // 최신 하드웨어 재조회(스냅샷과 어긋나도 안전하게 검증).
     const objs = await c.retrieveObjectProps('VirtualMachine', moref, [

@@ -4,6 +4,7 @@ import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top �
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../../store.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
@@ -138,7 +139,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const alarms = snap.alarms.filter((a) => vcIds.has(a.vcenterId));
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
-  const clusters = new Set(hosts.map((h) => `${h.vcenterId}/${h.cluster}`)).size;
+  // v2.743(감사 LEFT-07): 클러스터 묶음 키(vCenter + clusterRef, ref 없는 vCenter 는 이름) 수 — 다른 데이터센터의 같은 이름 클러스터를
+  //   합치지 않고 독립 호스트('standalone')를 클러스터로 세지 않는다.
+  //   공개 API /inventory/summary 와 같은 함수(clusterCountOf)다(대조 계약).
+  const clusters = clusterCountOf(hosts);
   const cpuCores = sum(hosts, (h) => h.cpuCores);
   const cpuTotalMhz = sum(hosts, (h) => h.cpuTotalMhz);
   const cpuUsedMhz = sum(hosts, (h) => h.cpuUsageMhz);

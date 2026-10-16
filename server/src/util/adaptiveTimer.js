@@ -28,7 +28,8 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   // v2.741(감사 TIMING-05): 변경 알림의 재무장 기준은 **마지막 실행이 끝난 시각**이다(머리말의 '이전 실행 종료 기준' 약속).
   //   예전에는 실행 **시작** 시각(lastRunAt)으로 남은 시간을 셌다 — 2.5초 걸린 실행 직후 같은 주기(3초)로 알림이 오면
   //   3 − 2.6 = 0.4초가 남은 것으로 보고 하한 1초 뒤에 다시 돌았다(알림 없는 대조군은 3초). bmusage 처럼 어떤 필드를 저장해도
-  //   알리는 설정에서 실제로 닿는다. 첫 실행 전에는 타이머를 만든 시각이 기준이다(예전과 같다).
+  //   알리는 설정에서 실제로 닿는다. 첫 실행 전에는 타이머를 만든 시각이 기준이다(예전과 같다 — 다만 v2.743 부터 첫 실행 전
+  //   알림은 firstDelay 보다 늦추지 않는다. 아래 subscribe 의 TIMING-01 주석).
   let lastEndAt = Date.now();
   // 지금 무장된 주기(getMs 값) — 알림이 와도 값이 그대로면 재무장하지 않는다(남은 시간을 다시 셀 이유가 없다). 첫 실행 전은 null.
   let armedMs = null;
@@ -37,6 +38,8 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   // 가져 피해는 없었지만, 이 유틸의 약속('틱이 겹쳐 쌓이지 않는다')이 깨져 있었다. 실행 중에는 재무장하지 않고
   // 끝날 때 getMs() 로 새 주기를 잡는다.
   let inFlight = false;
+  // v2.743(감사 TIMING-01): 첫 tick 이 한 번이라도 끝났는가. armedMs 는 getMs 를 못 읽으면 첫 실행 뒤에도 null 이라 따로 둔다.
+  let ranOnce = false;
   let warnedNaN = false;
   let warnedThrow = false;
   // v2.601(감사 TIM2601-02 — 재현): getMs() 가 던지면(설정 파일 손상 등 — TIM2601-03) tick 이 reject 되어 **재무장 없이
@@ -48,6 +51,8 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
       return undefined;
     }
   };
+  // v2.743(감사 TIMING-01): 지금 무장된 타이머가 울릴 시각 — 첫 실행 전 알림이 '같은 시각' 이면 재무장하지 않는 데 쓴다.
+  let fireAt = 0;
   const arm = (ms) => {
     clearTimeout(timer);
     // 하한 1초 — 0/음수 주기로 이벤트 루프를 태우지 않게(설정 실수·시계 역행 방어).
@@ -59,7 +64,9 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
       if (!warnedNaN && !warnedThrow) { warnedNaN = true; console.warn(`[adaptive-timer] ${name || '(이름 없음)'} 주기가 숫자가 아닙니다(${String(ms)}) — 60초로 대신합니다.`); }
       n = 60_000;
     }
-    timer = setTimeout(tick, Math.min(2_147_000_000, Math.max(1_000, n)));
+    const delay = Math.min(2_147_000_000, Math.max(1_000, n));
+    fireAt = Date.now() + delay;
+    timer = setTimeout(tick, delay);
     timer.unref?.();
   };
   const tick = async () => {
@@ -69,7 +76,7 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
       const msg = String(e?.message || e);
       try { if (shouldLogFail('fn', msg)) console.warn(`[adaptive-timer] ${name || '(이름 없음)'} 실행 실패: ${msg} — 다음 주기에 다시 실행합니다(같은 오류는 1시간에 한 번만 적습니다)`); } catch { /* 로그가 타이머를 멈추지 않게 */ }
     }
-    finally { inFlight = false; lastEndAt = Date.now(); }
+    finally { inFlight = false; lastEndAt = Date.now(); ranOnce = true; }
     if (!stopped) {
       const ms = safeMs();
       armedMs = numOrNull(ms);   // 못 읽은 주기(null·빈 값)를 0 으로 기억하지 않는다
@@ -77,12 +84,30 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
     }
   };
   arm(firstDelayMs);
+  // 첫 실행 예정 시각(하한·상한·NaN 처리를 거친 값) — 첫 실행 전 알림은 이보다 늦게 미루지 않는다.
+  const firstFireAt = fireAt;
   // 주기 변경 시 재무장 — 마지막 실행 종료 뒤 이미 흘린 시간을 빼고 다시 잡는다(주기를 늘렸다고 방금 돈 작업을
   // 또 돌리지 않고, 줄였다면 남은 시간이 음수가 되어 바로 다음 틱으로 간다). 주기가 그대로면 아무것도 하지 않는다.
+  // v2.743(감사 TIMING-01 — 재현): 첫 실행 전에 알림이 오면 예전에는 firstDelayMs 를 버리고 '주기 − 경과(생성 기준)' 로 재무장했다.
+  //   엣지 재시작마다 설정 pull(첫 실행 10~20초)이 중앙 주기를 적용하며 알리므로, 스토리지 첫 수집이 15초가 아니라 약 1시간 뒤,
+  //   PDU 첫 수집이 45초가 아니라 약 5분 뒤가 됐다(armedMs 가 null 이라 '값이 같으면 건너뜀' 도 동작하지 않았다).
+  //   첫 실행 전에는 min(첫 실행 예정 시각, 생성 시각 + 새 주기) 로 잡는다 — firstDelay 를 지키되 새 주기가 더 짧으면 당긴다.
+  //   그 시각이 지금 무장된 시각과 같으면 건드리지 않는다. 주기를 못 읽으면 firstDelay 그대로(못 읽은 값으로 첫 실행을 미루지 않는다).
+  //   첫 실행이 끝난 뒤의 규칙(실행 끝 기준 · 같은 값 알림은 그대로 — v2.741 TIMING-05)은 바꾸지 않는다.
   const off = subscribe ? subscribe(() => {
     if (stopped || inFlight) return;   // 실행 중이면 종료 시 tick 이 새 주기로 재무장한다
     const ms = safeMs();
     const n = numOrNull(ms);
+    if (!ranOnce) {
+      const target = n != null ? Math.min(firstFireAt, lastEndAt + Math.max(1_000, n)) : firstFireAt;
+      const now = Date.now();
+      if (target === fireAt) return;
+      if (target < fireAt && fireAt <= now + 1_000) return;   // 이미 하한(1초) 안에 울린다 — 더 당길 수 없고, 다시 걸면 밀리기만 한다
+      const next = target - now;
+      if (name) console.log(`[adaptive-timer] ${name} 타이머 재무장(첫 실행 전): ${Math.round(Math.max(1_000, next) / 1000)}초 후`);
+      arm(next);
+      return;
+    }
     if (armedMs != null && n != null && n === armedMs) return;
     armedMs = n;
     const next = n != null ? n - (Date.now() - lastEndAt) : ms; // 못 읽으면 arm 이 60초로

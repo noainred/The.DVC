@@ -19,7 +19,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 import { scanForIdracs, scanPartialReasons } from './scan.js';
-import { registerScanned, hasHpeInDatacenter } from './registry.js';
+import { registerScanned, hasHpeInScanReplaceScope } from './registry.js';
 import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt, scanEntryRuntime, scanEntryReady } from './scanRanges.js';
 import { appendIdracScanLog } from './scanLog.js';
@@ -143,7 +143,9 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   // v2.591: 인증 정지로 건너뛴 IP 가 있으면 부분 결과다 — replace 로 두면 **건너뛴 등록 서버가 삭제**된다.
   // v2.611(감사 RECENT2611-01): 사유 판정은 scan.js scanPartialReasons 하나(엣지 localScan.js 와 같은 규칙) — 계정이 없어
   //   시도하지 않은 서버(noCreds)·인증 실패 서버·(iLO 계정 없이) 이미 등록된 HPE 가 있으면 replace 가 그 등록을 지운다.
-  const partialReasons = e.mode === 'replace-datacenter' ? scanPartialReasons(r, { registeredHpe: hasHpeInDatacenter(e.datacenterId) }) : [];
+  // v2.743(감사 LEFT-01): 'HPE 가 있다' 는 **이 엔트리의 교체 범위 안**만 본다(아래 registerScanned 가 교체에 넘기는 것과 같은 엔트리 id·대역).
+  //   예전 hasHpeInDatacenter 는 법인 전체를 봐서, 교체가 지우지 않는 범위 밖 HPE 하나로도 매번 merge 로 떨어졌다.
+  const partialReasons = e.mode === 'replace-datacenter' ? scanPartialReasons(r, { registeredHpe: hasHpeInScanReplaceScope({ datacenterId: e.datacenterId, scanRangeId: e.id || '', ranges: e.ranges }) }) : [];
   const partial = partialReasons.length > 0;
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (partial) console.warn(`[idrac-scan] ${e.datacenterId}: 부분 결과라 법인 교체(replace-datacenter) 대신 병합(merge)으로 등록합니다 — ${partialReasons.join(' · ')}`);

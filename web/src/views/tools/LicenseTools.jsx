@@ -120,30 +120,69 @@ export function Solutions() {
   );
 }
 
-export function Licenses({ scope }) {
-  const { loading, data, error } = useTool('/tools/licenses', scope ? { vcenterId: scope } : {});
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+/*
+ * v2.743(감사 WEB-05) — 라이선스 used·total 은 못 읽으면 null 이다(v2.727 C-02 — vim25 의 used 는 선택 필드). 예전 화면은
+ *   `l.total ? round(used/total*100) : 0` 이라 못 읽은 값을 사용률 0%(= 사용 없음)로, 제품 카드를 '0/0' 으로 그렸다.
+ *   판정은 서버 롤업(usedUnknown·totalUnknown)을 읽기만 하고, 값이 없으면 '—' 와 '사용량 모름 N건' 을 말한다(순수 함수 — 테스트 고정).
+ */
+const numText = (v) => (numOrNull(v) == null ? '—' : String(numOrNull(v)));
+/** 사용률(%) — 사용량·총량을 둘 다 읽었고 총량이 0 보다 클 때만. 아니면 null(UsageCell 이 '—'). */
+export function licenseUsePct(l) {
+  const u = numOrNull(l?.used);
+  const t = numOrNull(l?.total);
+  if (u == null || t == null || t <= 0) return null;
+  return Math.round((u / t) * 100);
+}
+/** 제품 카드 — `{ value, meta }`. 못 읽은 보고 단위가 있으면 그 수를 meta 로 밝힌다(합계에서 빠졌다는 뜻). */
+export function licenseCardText(b) {
+  const uu = numOrNull(b?.usedUnknown) || 0;
+  const tu = numOrNull(b?.totalUnknown) || 0;
+  const parts = [];
+  if (b?.productVersion) parts.push(`v${b.productVersion}`);
+  if (uu > 0) parts.push(`사용량 모름 ${uu}건`);
+  if (tu > 0) parts.push(`총량 모름 ${tu}건`);
+  return { value: `${numText(b?.used)}/${numText(b?.total)}`, meta: parts.join(' · ') };
+}
+/** 화면 머리 안내 — 사용량·총량을 못 읽은 라이선스가 있으면 한 줄(없거나 구버전 서버면 null). */
+export function licenseUnknownNote(data) {
+  const uu = numOrNull(data?.usedUnknown) || 0;
+  const tu = numOrNull(data?.totalUnknown) || 0;
+  if (uu <= 0 && tu <= 0) return null;
+  const what = [uu > 0 ? `사용량 모름 ${uu}건` : '', tu > 0 ? `총량 모름 ${tu}건` : ''].filter(Boolean).join(' · ');
+  return `vCenter 가 사용량·총량을 보고하지 않은 라이선스가 있습니다(${what}) — 0 이 아니라 확인 불가이고, 제품별 합계와 사용률에서 빠졌습니다.`;
+}
+
+/** 라이선스 사용 현황 본문(조회와 분리 — 렌더 테스트가 계약 모양 응답으로 직접 그린다). */
+export function LicensesView({ data }) {
   const cols = [
     { key: 'name', label: '라이선스', render: (l) => <b>{l.name}</b> },
     { key: 'vcenterName', label: 'vCenter', render: (l) => <span className="muted">{l.vcenterName}</span> },
     { key: 'productVersion', label: '버전' },
-    { key: 'used', label: '사용', align: 'right' },
-    { key: 'total', label: '총량', align: 'right' },
-    { key: 'usePct', label: '사용률', sortValue: (l) => (l.total ? l.used / l.total : 0), render: (l) => <UsageCell pct={l.total ? Math.round((l.used / l.total) * 100) : 0} /> },
+    { key: 'used', label: '사용', align: 'right', sortValue: (l) => numOrNull(l.used), render: (l) => numText(l.used) },
+    { key: 'total', label: '총량', align: 'right', sortValue: (l) => numOrNull(l.total), render: (l) => numText(l.total) },
+    { key: 'usePct', label: '사용률', sortValue: (l) => licenseUsePct(l), render: (l) => <UsageCell pct={licenseUsePct(l)} /> },
     { key: 'expires', label: '만료', render: (l) => <span style={{ color: isSoon(l.expires) ? 'var(--amber)' : undefined }}>{l.expires || '—'}</span> },
   ];
+  const unknownNote = licenseUnknownNote(data);
   return (
     <>
       <LicensesUnreadBanner data={data} />
       <div className="section-title" style={{ marginTop: 0 }}>제품별 합계</div>
       <div className="kpis" style={{ marginBottom: 14 }}>
-        {data.byLicense.map((b) => <Card key={b.name} label={b.name} value={`${b.used}/${b.total}`} meta={b.productVersion ? `v${b.productVersion}` : ''} />)}
+        {(data.byLicense || []).map((b) => { const c = licenseCardText(b); return <Card key={b.name} label={b.name} value={c.value} meta={c.meta} />; })}
       </div>
+      {unknownNote && <p className="muted" style={{ fontSize: 12, margin: '-6px 0 10px', whiteSpace: 'normal' }}>{unknownNote}</p>}
       {licenseDupNote(data) && <p className="muted" style={{ fontSize: 12, margin: '-6px 0 10px' }}>{licenseDupNote(data)}</p>}
-      <DataTable columns={cols} rows={data.items} initialSort={{ key: 'used', dir: 'desc' }} />
+      <DataTable columns={cols} rows={data.items || []} initialSort={{ key: 'used', dir: 'desc' }} />
     </>
   );
+}
+
+export function Licenses({ scope }) {
+  const { loading, data, error } = useTool('/tools/licenses', scope ? { vcenterId: scope } : {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  return <LicensesView data={data} />;
 }
 function isSoon(d) { if (!d) return false; const t = Date.parse(d); return t && t - Date.now() < 90 * 86400000; }
 

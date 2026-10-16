@@ -16,7 +16,6 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
-import { resilientFetch } from '../util/resilientFetch.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -28,6 +27,7 @@ import { serversForThisNode, registryLoadError } from './registry.js';
 import { getStatus } from './store.js';
 import * as db from './db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
+import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다
 
 const gzipAsync = promisify(zlib.gzip);
 // v2.613 PERSIST2613-01(재현): 이 커서는 표본이 있는 push 마다 다시 쓴다 — 상태 파일로 등록하지 않으면 백업 변경 감시·엣지 설정 push 가
@@ -209,7 +209,13 @@ async function pushInner() {
     let payload = json; const h = { ...hdrs };
     if (PUSH_GZIP) { try { payload = await gzipAsync(json); h['Content-Encoding'] = 'gzip'; } catch { payload = json; } }
     bytes += json.length; gz += payload.length;
-    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/cvp-data?agent=${encodeURIComponent(config.agent.name || '')}`, { method: 'POST', headers: h, body: payload, timeoutMs: 60_000, retries: 2 });
+    /*
+     * v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다(postNo503Retry — isidu·edge-log-result 와 같은 규칙). 중앙의 503 은
+     *   지속형(DB 불가·등록부 손상 — Retry-After 60초)이거나 큰 본문 해석 혼잡(일시)이고, 예전 retries:2 는 같은 gzip 청크를 30~45초
+     *   간격으로 두 번 더 올렸다(지속형이면 결과도 같다). 커서·보낸 해시는 아래 throw 로 그대로 두므로 다음 주기에 다시 간다.
+     *   그 밖의 일시 상태(408·429·500·502·504)·연결 오류는 예전처럼 재시도한다(retries:2).
+     */
+    const res = await postNo503Retry(`${config.agent.centralUrl}/api/central/cvp-data?agent=${encodeURIComponent(config.agent.name || '')}`, { method: 'POST', headers: h, body: payload, timeoutMs: 60_000 }, { retries: 2 });
     if (!res.ok) {
       // v2.611(EDGE2611-06): 본문의 reason 을 읽는다(상한 64KB) — 예전엔 'HTTP 429/500' 만 남아 원인을 알 수 없었다.
       let errBody = null;

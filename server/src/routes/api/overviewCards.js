@@ -204,18 +204,22 @@ export function registerOverviewCards(api) {
    * 범위 계정: VM 은 허용 vCenter 만 합산하고, 스토리지·전력은 vCenter 축이 없어 null + 사유(카드와 같은 규칙).
    * ⚠ 스냅샷 세대(30초)가 아니라 **5분 캐시**다 — 전력 90일 창은 power_hourly 를 수백만 행 훑을 수 있고, 12시간·1일 버킷의
    *   추이는 5분 안에 바뀌지 않는다. 캐시 키에 범위(scopeKey)를 넣어 범위 계정 사이에 섞이지 않게 한다.
+   * v2.743(감사 DB-02): 서버 전력 추이(fleetHourSums)는 **`?include=power` 일 때만** 계산한다 — 경영 보기는 v2.677 부터 전력 계열을
+   *   그리지 않는데 매 조회마다 동기로 계산했다. 요청하지 않으면 `power: { series: null, reason: 'not-requested' }`(키는 남긴다 — 계약 유지).
+   *   캐시 키에 포함 여부를 넣는다(전력을 뺀 결과가 전력을 요청한 호출에 나가지 않게).
    */
   api.get('/overview/trend', async (req, res) => {
     try {
       const snap = store.get() || {};
       const allowed = scopedVcenterIds(req.user, snap);
       const days = normTrendDays(req.query.days);
-      const key = `${days}|${scopeKey(req.user, snap)}`;
+      const withPower = includeOf(req.query.include).has('power');
+      const key = `${days}|${withPower ? 'p' : '-'}|${scopeKey(req.user, snap)}`;
       const hit = TREND_CACHE.get(key);
       const now = Date.now();
       let p = hit && now - hit.at < TREND_TTL_MS ? hit.p : null;
       if (!p) {
-        p = computeTrend(days, allowed, now);
+        p = computeTrend(days, allowed, now, { withPower });
         TREND_CACHE.set(key, { at: now, p });
         p.catch(() => TREND_CACHE.delete(key));
         if (TREND_CACHE.size > 64) TREND_CACHE.delete(TREND_CACHE.keys().next().value);
@@ -261,8 +265,13 @@ export function storageTrendHistoryOpts(devs, now, { registryError = null, poll 
   return { nowMs: now, staleMs: 2 * envPoll, staleByDevice, knownIds };
 }
 
+/** `?include=power,…` → 소문자 집합(쉼표 구분 · 배열·객체는 쿼리 정규화가 이미 문자열로 좁힌다). */
+function includeOf(v) {
+  return new Set(String(v ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean));
+}
+
 /** 추이 계산 — 원천마다 실패해도 나머지는 준다(그 지표만 error). */
-async function computeTrend(days, allowed, now) {
+async function computeTrend(days, allowed, now, { withPower = false } = {}) {
   const spec = TREND_SPECS[days];
   const full = allowed == null;
   const since = now - spec.days * DAY_MS_T - spec.bucketMs;
@@ -288,6 +297,11 @@ async function computeTrend(days, allowed, now) {
     out.storage = { series, delta: deltaOf(series), partial: partialCount(series), unit: 'bytes', source: 'storage-history', devices: pts.expectedDevices ?? null };
   } catch (e) { out.storage = { series: null, error: e?.message || String(e) }; }
   // 소비 전력 — iDRAC 서버 전력 시간당 롤업만(카드는 서버+네트워크+스토리지 — 화면이 그 차이를 말한다).
+  // v2.743(DB-02): 요청한 호출만 계산한다(경영 보기는 그리지 않는다 — 계산 비용만 들었다).
+  if (!withPower) {
+    out.power = { series: null, reason: 'not-requested' };
+    return out;
+  }
   try {
     const db = await getPowerDb();
     const rows = typeof db?.fleetHourSums === 'function' ? db.fleetHourSums(powerSampleHours(days, now)) : [];

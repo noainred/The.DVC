@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { isSuperAdmin } from './roles.js';
+import { isDemoGuest } from './demoGuest.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다".
@@ -391,7 +392,11 @@ export function rolePermissions(role) {
 export function userPermissionSet(user) {
   if (!user) return new Set();
   if (isSuperAdmin(user)) return new Set(ALL_PERMISSION_KEYS);
-  return rolePermissionSet(user.role);
+  const set = rolePermissionSet(user.role);
+  // v2.743(감사 AUTHZ-01): mock 모드 데모 계정은 요청 문맥이 admin 이지만 저장 역할은 viewer 다 — 관리자 전용 키(data.csv,
+  //   v2.643 'CSV 는 관리자 이상')는 주지 않는다. 그래야 /auth/me 의 permissions 를 보는 웹 canCsv 도 CSV 버튼을 숨긴다.
+  if (isDemoGuest(user)) for (const k of ADMIN_ONLY_KEYS) set.delete(k);
+  return set;
 }
 
 /** 사용자 권한 키 배열(프론트 노출용 — 로그인·/auth/me). */
@@ -401,6 +406,8 @@ export function userPermissions(user) { return [...userPermissionSet(user)]; }
 export function userHasPermission(user, key) {
   if (!user) return false;
   if (isSuperAdmin(user)) return true;
+  // v2.743(감사 AUTHZ-01): 데모 계정(admin 문맥 + demoGuest)에는 관리자 전용 키를 주지 않는다 — 판정은 userPermissionSet 과 같다.
+  if (isDemoGuest(user) && ADMIN_ONLY_KEYS.includes(key)) return false;
   // admin 은 예전처럼 **어떤 키든** 통과한다(카탈로그 밖 키 포함 — 기존 계약) — admin 행에서 끈 키(data.csv)만 예외다.
   if (user.role === 'admin') return !(loadMatrix().adminDenied || []).includes(key);
   return rolePermissionSet(user.role).has(key);

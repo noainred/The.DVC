@@ -17,7 +17,7 @@
  */
 import { load as loadMail } from './settings.js';
 import { resolveRecipients, withinRateLimit, kindLabel } from './kinds.js';
-import { sendMail } from '../util/smtp.js';
+import { sendMail, headerSafeText } from '../util/smtp.js';
 import { logAudit } from '../audit.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 
@@ -87,7 +87,10 @@ export async function sendPortalMail(opts = {}) {
 /** 줄 선 자동 발송 수(상태 표시·테스트용). */
 export function mailAutoQueueLength() { return _autoWaiting; }
 
-async function sendPortalMailNow({ kind, subject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
+async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
+  // v2.743(감사 INJPKG-03): 제목의 제어문자(탭·CR·LF)는 공백으로 정리한다 — 호출부(알림·일일 보고·아이실론 등)가 운영 데이터(호스트명·
+  //   VM 이름·원격 응답)를 제목에 담는데, 탭 하나에 buildMime 이 던져 그 메일 전체를 잃었다. buildMime 의 throw 는 마지막 방어선으로 남긴다.
+  const subject = headerSafeText(rawSubject);
   const cfg = loadMail();
   const at = Date.now();
 

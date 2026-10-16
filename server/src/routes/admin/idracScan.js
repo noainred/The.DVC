@@ -1,6 +1,6 @@
 // iDRAC 상세(:id)·가져오기·스캔/대역/잡·삭제/할당 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { store } from '../../store.js';
+import { store, usageReadable } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { listInventory } from '../../central/inventory.js';
@@ -125,8 +125,9 @@ adminRouter.get('/idrac/:id/vcenter-host', adminOnly, (req, res) => {
       datacenterId: assign[String(host.vcenterId || '')] || '',
       cluster: host.cluster || '',
       connectionState: host.connectionState || '',
-      cpuUsagePct: host.cpuUsagePct ?? null,
-      memUsagePct: host.memUsagePct ?? null,
+      // v2.743(감사 VC-04): 끊긴·무응답 호스트의 0% 는 '읽지 못한 값' 이다(store.usageReadable) — null 이면 화면이 '—' 를 쓴다.
+      cpuUsagePct: usageReadable(host) ? numOrNull(host.cpuUsagePct) : null,
+      memUsagePct: usageReadable(host) ? numOrNull(host.memUsagePct) : null,
       vmCount: host.vmCount ?? null,
       model: host.model || '',
       powerState: host.powerState || '',

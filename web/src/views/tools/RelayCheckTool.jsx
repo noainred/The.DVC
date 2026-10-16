@@ -12,6 +12,22 @@ import Select from '../../components/Select.jsx';
  * 실패 시 원인 후보·조치·haproxy.cfg 예시를 보여준다. 상태 전이(연속 N회)에 알림 채널로 발화한다.
  */
 // v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
+/**
+ * v2.743(감사 WEB-01): '지금 점검' 결과 문구(순수 — vitest 고정). 성공은 `r.ok === true` 일 때만이다 — 예전 서버는 정상 대상 개수(ok)가
+ *   성공 여부 ok:true 를 스프레드로 덮어, 정상 0개(전부 실패·대상 0)면 화면이 실패 분기로 가서 '점검 실패: undefined' 라고 말했다.
+ *   개수는 명시 필드(okCount·fail·total)에서 읽고, 모르면 '—' 다(0 으로 채우지 않는다). 대상 0개는 '점검 완료 0/0' 이 아니라 그 사실을 말한다.
+ */
+export function relayRunText(r) {
+  if (!r || r.ok !== true) return `점검 실패: ${typeof r?.reason === 'string' && r.reason ? r.reason : '서버가 사유를 주지 않았습니다.'}`;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const total = num(r.total);
+  const demo = r.demoOnly && num(r.skippedNonDemo) ? ` (데모 모드 — 사람이 넣은 대상 ${r.skippedNonDemo}개는 점검하지 않았습니다)` : '';
+  if (total === 0) return `점검할 대상이 없습니다 — 아래 '수동 호스트' 를 추가하거나 수집 서버를 등록하세요.${demo}`;
+  const show = (v) => (num(v) == null ? '—' : v);
+  const sec = num(r.durationMs) == null ? '' : ` (${Math.round(r.durationMs / 1000)}초)`;
+  return `점검 완료 — 대상 ${show(r.total)} · 정상 ${show(r.okCount)} · 실패 ${show(r.fail)}${sec}${demo}`;
+}
+
 const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
 
 export default function RelayCheckTool() {
@@ -49,7 +65,7 @@ export default function RelayCheckTool() {
   };
   const runNow = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await postJson('/tools/relaycheck/run', {}); setMsg(r.ok ? `점검 완료 — 대상 ${r.total} · 정상 ${r.ok === true ? r.ok : r.ok} · 실패 ${r.fail} (${Math.round((r.durationMs || 0) / 1000)}초)` : `점검 실패: ${r.reason}`); await load(); }
+    try { const r = await postJson('/tools/relaycheck/run', {}); setMsg(relayRunText(r)); await load(); }
     catch (e) { setMsg(`점검 실패: ${e.message}`); }
     finally { setBusy(false); }
   };

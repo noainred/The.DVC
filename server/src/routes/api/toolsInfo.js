@@ -6,6 +6,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
 import { upgradeVmTools } from '../../vcenter/soapClient.js';
+import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
 import { nsxStore } from '../../nsx/store.js';
 import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.js';
@@ -135,30 +136,45 @@ api.get('/tools/licenses', requirePerm('tools'), (req, res) => {
     if (!key || /^0{5}-/.test(key)) return null;
     return `${l.name || l.edition || 'unknown'}|${key}`;
   };
+  // v2.743(감사 WEB-05): used·total 은 결측이면 null 이다(v2.727 C-02 — vim25 의 used 는 선택 필드). 예전 롤업은 `l.used || 0` 으로 더해
+  //   못 읽은 값이 '사용 0' 과 '총량 0' 이 되어 화면이 사용률 0%·합계 0 을 그렸다. 이제 보고 단위(같은 키는 한 단위 — 값이 다르면 큰 쪽)마다
+  //   값을 읽은 것만 더하고, 못 읽은 단위 수를 usedUnknown·totalUnknown 으로 싣는다. 한 단위도 읽지 못한 항목의 합은 0 이 아니라 null 이다.
+  const big = (a, b) => (a == null ? b : (b == null ? a : Math.max(a, b)));
   const roll = new Map();
-  const seenKey = new Map();   // dedupKey -> { rollEntry, total, used, vcs:Set }
+  const units = [];                 // { e, total, used } — 합산 단위(중복 보고는 한 단위)
+  const unitByKey = new Map();      // dedupKey -> unit
   let duplicateKeys = 0;
   for (const l of items) {
     const k = l.name || l.edition || 'unknown';
-    if (!roll.has(k)) roll.set(k, { name: k, total: 0, used: 0, product: l.product, productVersion: l.productVersion, count: 0, duplicates: 0 });
+    if (!roll.has(k)) roll.set(k, { name: k, total: 0, used: 0, product: l.product, productVersion: l.productVersion, count: 0, duplicates: 0, usedUnknown: 0, totalUnknown: 0, _ut: 0, _uu: 0 });
     const e = roll.get(k);
     e.count++;
+    const t = numOrNull(l.total), u = numOrNull(l.used);
     const dk = dedupKey(l);
-    if (dk && seenKey.has(dk)) {
-      const prev = seenKey.get(dk);
-      const t = l.total || 0, u = l.used || 0;
-      if (t > prev.total) { e.total += t - prev.total; prev.total = t; }
-      if (u > prev.used) { e.used += u - prev.used; prev.used = u; }
+    if (dk && unitByKey.has(dk)) {
+      const un = unitByKey.get(dk);
+      un.total = big(un.total, t); un.used = big(un.used, u);
       e.duplicates++; duplicateKeys++;
       continue;
     }
-    if (dk) seenKey.set(dk, { total: l.total || 0, used: l.used || 0 });
-    e.total += l.total || 0; e.used += l.used || 0;
+    const un = { e, total: t, used: u };
+    units.push(un);
+    if (dk) unitByKey.set(dk, un);
   }
+  for (const { e, total, used } of units) {
+    if (total == null) e.totalUnknown++; else { e.total += total; e._ut++; }
+    if (used == null) e.usedUnknown++; else { e.used += used; e._uu++; }
+  }
+  const byLicense = [...roll.values()].map(({ _ut, _uu, ...e }) => ({ ...e, total: _ut ? e.total : null, used: _uu ? e.used : null }));
+  const usedUnknown = byLicense.reduce((a, e) => a + e.usedUnknown, 0);
+  const totalUnknown = byLicense.reduce((a, e) => a + e.totalUnknown, 0);
+  const usedKnown = units.length - usedUnknown;
   res.json({
     items,
-    byLicense: [...roll.values()].sort((a, b) => b.used - a.used),
-    totalAssigned: [...roll.values()].reduce((a, e) => a + (e.used || 0), 0),
+    byLicense: byLicense.sort((a, b) => (b.used ?? -1) - (a.used ?? -1)),
+    // 읽은 사용량의 합. 보고 단위가 있는데 하나도 읽지 못했으면 null(0 은 '할당 0' 이라는 거짓). 일부만 읽었으면 usedUnknown 이 밝힌다.
+    totalAssigned: units.length && !usedKnown ? null : byLicense.reduce((a, e) => a + (e.used ?? 0), 0),
+    usedUnknown, totalUnknown,   // v2.743(WEB-05): 사용량·총량을 못 읽은 보고 단위 수(합계에서 빠졌다)
     duplicateKeys,   // 여러 vCenter 가 같은 키를 보고해 합산에서 한 번만 센 보고 수(0 이면 중복 없음)
     unread, partial: unread.length > 0,   // v2.742(VC-06): 라이선스를 읽지 못한 vCenter — 합계는 그 vCenter 를 뺀 부분 합이다
   });
@@ -311,17 +327,22 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
     byVc.get(vcId).push({ id, moref: morefOf(id, vcId) });
   }
   const cfg = loadVcenterConfig().vcenters;
+  // v2.743(감사 VC-03): 사람이 누른 쓰기 실행이다 — 주문형 로그인 문(dsBrowse.js onDemandLogin, allowAuthStopped)을 지난다.
+  //   비활성·점검중·엣지 위임(site) vCenter 는 로그인하지 않고, 인증 정지 vCenter 는 1회 시도하며, 거부는 주 폴러와 같은 정지 기록에
+  //   올라간다(게스트 계정 추가 accountService 와 같은 판단). 막힌 vCenter 는 `blocked` 로 사유를 밝힌다(VM 행의 error 와 함께).
+  const blocked = [];
   for (const [vcId, list] of byVc) {
     const vc = cfg.find((v) => v.id === vcId);
     if (!vc) { for (const x of list) results.push({ id: x.id, ok: false, error: 'vCenter 설정 없음' }); continue; }
     try {
-      const r = await upgradeVmTools(vc, list.map((x) => x.moref));
+      const r = await upgradeVmTools(vc, list.map((x) => x.moref), { login: (c) => onDemandLogin(c, vc, { allowAuthStopped: true }) });
       r.forEach((rr, i) => results.push({ id: list[i].id, ok: rr.ok, error: rr.error }));
     } catch (err) {
-      for (const x of list) results.push({ id: x.id, ok: false, error: err.message });
+      if (err?.status === 409) blocked.push({ vcenterId: vcId, vms: list.length, reason: err.message, ...onDemandErrorFields(err) });
+      for (const x of list) results.push({ id: x.id, ok: false, error: err.message, ...onDemandErrorFields(err) });
     }
   }
-  res.json({ ok: true, requested: ids.length, succeeded: results.filter((r) => r.ok).length, results });
+  res.json({ ok: true, requested: ids.length, succeeded: results.filter((r) => r.ok).length, results, ...(blocked.length ? { blocked } : {}) });
 });
 
 // Shared UI settings (e.g. dashboard map height) — same for all users.

@@ -5,7 +5,8 @@
  */
 
 import { Router } from 'express';
-import { store } from '../store.js';
+import { store, usageReadable } from '../store.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { latestPowerByHostName } from '../idrac/service.js';
 import { getGuestGpuAllHosts } from '../gpu/store.js';
 import { tokenMatches } from '../util/secureCompare.js';
@@ -65,8 +66,12 @@ metricsExportRouter.get('/', async (req, res) => {
   H('vmware_host_up', 'ESXi 호스트 연결 상태(1=connected)');
   for (const h of snap.hosts || []) {
     const labels = { vcenter: h.vcenterId, host: h.name, cluster: h.cluster };
-    out += line('vmware_host_cpu_percent', labels, h.cpuUsagePct);
-    out += line('vmware_host_mem_percent', labels, h.memUsagePct);
+    // v2.743(감사 VC-04): 끊긴·무응답 호스트는 사용률을 읽을 수 없다(store.usageReadable) — 수집기가 채운 0 을 내보내면 외부 대시보드가
+    //   '부하 0%' 로 그린다. Prometheus 규약대로 결측은 그 시계열을 내지 않는다(vmware_host_up=0 은 그대로 낸다 — 거기서 끊김을 본다).
+    if (usageReadable(h)) {
+      out += line('vmware_host_cpu_percent', labels, numOrNull(h.cpuUsagePct));
+      out += line('vmware_host_mem_percent', labels, numOrNull(h.memUsagePct));
+    }
     out += line('vmware_host_up', labels, h.connectionState === 'CONNECTED' ? 1 : 0);
     const p = powerMap.get(String(h.name || '').toLowerCase());
     if (p?.watts != null) out += line('vmware_host_power_watts', labels, p.watts);

@@ -17,7 +17,7 @@ import { certStatus } from '../security/certMonitor.js';
 import { localClock, dayKey, DAY_OFFSET_MIN } from "../util/dayKey.js";
 
 const FILE = path.join(config.configDir, 'daily-report.json');
-const DEFAULTS = { enabled: false, hour: 8, minute: 0, snapshotAgeDays: 3, dsWarnPct: 85, lastRunTs: 0 };
+const DEFAULTS = { enabled: false, hour: 8, minute: 0, snapshotAgeDays: 3, dsWarnPct: 85, lastRunTs: 0, lastRunBy: null, lastManualTs: 0 };
 
 let cache = null;
 let timer = null;
@@ -56,6 +56,9 @@ export function loadDailyReportSettings() {
         snapshotAgeDays: Math.min(365, Math.max(1, Number(s.snapshotAgeDays) || 3)),
         dsWarnPct: Math.min(99, Math.max(50, Number(s.dsWarnPct) || 85)),
         lastRunTs: Number(s.lastRunTs) || 0,
+        // v2.743(TIMING-04): 오늘 몫을 처리한 발송이 예약('schedule')인지 수동('manual')인지 · 마지막 수동 발송 시각(예약 기준과 별개).
+        lastRunBy: s.lastRunBy === 'manual' || s.lastRunBy === 'schedule' ? s.lastRunBy : null,
+        lastManualTs: Number(s.lastManualTs) || 0,
       };
     }
   } catch (e) {
@@ -81,13 +84,23 @@ export function saveDailyReportSettings(body = {}) {
     snapshotAgeDays: Math.min(365, Math.max(1, numOrNull(body.snapshotAgeDays) ?? cur.snapshotAgeDays)),
     dsWarnPct: Math.min(99, Math.max(50, numOrNull(body.dsWarnPct) ?? cur.dsWarnPct)),
     lastRunTs: cur.lastRunTs,
+    lastRunBy: cur.lastRunBy ?? null,
+    lastManualTs: cur.lastManualTs || 0,
   };
   persist();
   return cache;
 }
 
-/** 즉시 발송(관리자 테스트/수동 실행). 재진입 가드 공유. */
-export async function runDailyReportNow() {
+/**
+ * 발송 1회. 재진입 가드는 예약·수동이 공유한다.
+ * v2.743(감사 TIMING-04 — 재현): `manual`(화면의 '지금 발송(테스트)')이면 예약 기준 `lastRunTs` 를 **정한 시각 전에는** 바꾸지 않는다.
+ *   예전에는 수동 성공도 같은 lastRunTs 를 세워, 정한 시각 전에 테스트하면 dailyReportDue 가 '오늘 이미 발송' 으로 보고 **그날 정기
+ *   리포트를 건너뛰었다**(재현: 07:00 테스트 → 08:00 예약 생략). 수동 성공 시각은 `lastManualTs` 에 따로 남긴다.
+ *   · 정한 시각이 이미 지났는데 오늘 몫이 아직 안 나간 상태(예약이 실패해 재시도 대기 중 등)에서 수동 발송이 성공하면, 그것이 오늘
+ *     리포트다 — 그때는 예약 기준도 세운다(`lastRunBy:'manual'`). 세우지 않으면 고친 직후 같은 리포트가 1분 뒤 한 번 더 나간다.
+ *     판정은 dailyReportDue 하나다(완료 시각 기준 — 정한 시각 직전에 시작해 직후에 끝난 발송이 예약과 겹쳐 두 번 나가지 않게).
+ */
+export async function runDailyReportNow({ manual = false } = {}) {
   if (running) return { ok: false, reason: '이미 발송이 진행 중입니다.' };
   running = true;
   try {
@@ -104,8 +117,18 @@ export async function runDailyReportNow() {
       return { ok: false, reason: '알림 채널이 설정되지 않았습니다 — 설정 › 알림 에서 Slack/Teams/이메일을 먼저 등록하세요.', results, issues: report.summary.issues };
     }
     const anyOk = results.some((r) => /:(2\d\d)/.test(r));
-    if (anyOk) { cache.lastRunTs = Date.now(); persist(); failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; }
-    return { ok: anyOk, results, issues: report.summary.issues, ...(anyOk ? {} : { reason: '모든 알림 채널 전송에 실패했습니다 — 다음 주기에 재시도합니다.' }) };
+    let countedAsScheduled = false;
+    if (anyOk) {
+      const at = Date.now();
+      if (!manual) { cache.lastRunTs = at; cache.lastRunBy = 'schedule'; countedAsScheduled = true; }
+      else {
+        cache.lastManualTs = at;
+        if (dailyReportDue(cache, at)) { cache.lastRunTs = at; cache.lastRunBy = 'manual'; countedAsScheduled = true; }
+      }
+      persist();
+      failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' };
+    }
+    return { ok: anyOk, results, issues: report.summary.issues, ...(manual ? { manual: true, countedAsScheduled } : {}), ...(anyOk ? {} : { reason: '모든 알림 채널 전송에 실패했습니다 — 다음 주기에 재시도합니다.' }) };
   } finally {
     running = false;
   }

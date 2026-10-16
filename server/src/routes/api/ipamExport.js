@@ -6,7 +6,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 // 기록한 C2 의 회귀다. 테스트(audit2590)가 viewer+tools → 403 을 실제 라우터로 고정한다.
 const canWrite = requireRole('admin', 'operator');
 import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { guardCell } from '../../util/csv.js';
+import { csvCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
@@ -247,7 +247,7 @@ api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res)
   }
   const histMap = getIpHistoryMap();
   const rows = scanResultList();
-  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
+  const esc = csvCell; // v2.743(INJPKG-05): 공용 칸 이스케이프(수식 가드 + 단독 CR 도 따옴표) — 손으로 쓴 사본은 CR 을 빠뜨렸다
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = rows.map((r) => {
     const h = histMap[r.ip] || {};
@@ -504,7 +504,7 @@ api.get('/tools/ipam.csv', csvPerm, requirePerm('tools'), async (req, res) => {
   const { rows } = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
     'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'applied_by', 'range_policy_spec', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
-  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
+  const esc = csvCell; // v2.743(INJPKG-05): 공용 칸 이스케이프(수식 가드 + 단독 CR 도 따옴표) — 손으로 쓴 사본은 CR 을 빠뜨렸다
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = [head.join(',')];
   for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,

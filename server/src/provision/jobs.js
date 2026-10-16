@@ -17,6 +17,7 @@ import { expandSpec } from './spec.js';
 import { cleanPlacement } from './placement.js';
 import { addSaved } from './saved.js';
 import { createProvisioner } from './vsphere.js';
+import { onDemandVcBlock } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { describeError } from '../util/errors.js';
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
@@ -100,6 +101,14 @@ export function createJob(spec, { user } = {}) {
   if (!vms.length) return { ok: false, reason: '생성할 VM이 없습니다.' };
 
   const live = getDataSource() !== 'mock';
+  // v2.743(감사 VC-03): 실제 vCenter 에 VM 을 만드는 작업은 시작하기 전에 주문형 로그인 문을 본다 — 비활성·점검중·엣지 위임(site)
+  //   vCenter 는 이 포탈이 로그인하지 않으므로 작업을 만들지 않고 사유를 돌려준다(작업을 만든 뒤 VM 마다 같은 오류로 끝나는 것보다 낫다).
+  //   인증 정지는 막지 않는다(관리자가 누른 수동 작업은 1회 시도 — 거부는 vsphere.js 가 기록하고 남은 VM 은 다시 시도하지 않는다).
+  if (live) {
+    const vcCfg = (loadVcenterConfig().vcenters || []).find((v) => v.id === source.vcenterId);
+    const block = vcCfg ? onDemandVcBlock(vcCfg, { allowAuthStopped: true }) : null;
+    if (block) return { ok: false, reason: block.reason, ...(block.skipReason ? { skipReason: block.skipReason } : {}) };
+  }
   const guest = spec.guest || {};
   const placement = cleanPlacement(spec.placement);
   const job = {

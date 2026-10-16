@@ -9,6 +9,7 @@ import express from 'express';
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
+import { registryLoadError as idracRegistryLoadError } from '../idrac/registry.js'; // v2.743(감사 EDGE-01)
 import { upgradeManager } from '../upgrade/manager.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
@@ -67,12 +68,36 @@ collectorRouter.get('/export', async (req, res) => {
     return res.status(403).json({ error: '토큰 불일치' });
   }
   try {
+    // v2.743(감사 EDGE-01): iDRAC 등록부를 읽지 못했으면 **빈 목록을 2xx 로 보내지 않는다**. 예전에는 200 + servers:[]·전력 0 을
+    //   표지 없이 보내 중앙이 그 법인의 위임 서버·원격 전력을 통째로 지웠다. 503 이면 중앙 puller 는 실패로 보고 직전 스냅샷을 유지한다
+    //   (setCollectorServers 를 부르지 않는다 — 구버전 중앙도 비-2xx 는 실패다). 응답 전후 두 번 본다(사이에 손상이 드러난 경우).
+    const sdSince = typeof req.query.sdSince === 'string' ? req.query.sdSince : null;
+    const before = idracRegistryLoadError();
+    if (before) return idracRegistryUnreadable(res, before);
     // v2.742(감사 EDGE-01): 중앙이 마지막으로 저장한 커서 — 그 뒤로 바뀌지 않은 서버의 센서 상세는 뺀다(collector/agent.js). 없으면 전량.
-    res.json(await buildExport({ sdSince: typeof req.query.sdSince === 'string' ? req.query.sdSince : null }));
+    const out = await buildExport({ sdSince });
+    const after = idracRegistryLoadError();
+    if (after) return idracRegistryUnreadable(res, after);
+    res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * v2.743(감사 EDGE-01): 엣지 iDRAC 등록부를 읽지 못함 → **지속형 503**. 머리는 중앙의 지속형 503(routes/central.js
+ *   PERSISTENT_503_RETRY_AFTER_SEC — 60초 · no-store)과 같은 값이다(이 상태는 400·800ms 뒤에도 그대로다). 본문 `reason` 은 기계 판정용
+ *   코드이고 중앙 puller 가 읽어 상태·통신 지도 사유(pull-edge-registry)로 싣는다. `detail` 은 보존본 파일 이름 같은 사유 원문(비밀 없음).
+ */
+export const EDGE_EXPORT_503_RETRY_AFTER_SEC = 60;
+const EDGE_EXPORT_503_HEADERS = Object.freeze({ 'Retry-After': String(EDGE_EXPORT_503_RETRY_AFTER_SEC), 'Cache-Control': 'no-store' });
+function idracRegistryUnreadable(res, err) {
+  return res.status(503).set(EDGE_EXPORT_503_HEADERS).json({
+    ok: false, reason: 'registryUnreadable', registry: 'idrac',
+    detail: String(err?.reason || '').slice(0, 200), at: Number.isFinite(err?.at) ? err.at : null,
+    error: `엣지 iDRAC 등록부(idrac.json)를 읽지 못했습니다${err?.reason ? ` — ${String(err.reason).slice(0, 200)}` : ''}`,
+  });
+}
 
 // Lightweight liveness probe for the admin "테스트" button (no power payload).
 collectorRouter.get('/ping', (req, res) => {

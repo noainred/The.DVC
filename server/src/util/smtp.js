@@ -30,6 +30,18 @@ const MAX_REPLY_BYTES = 64 * 1024;
 /** 주소·제목에 CR/LF 가 들어가면 헤더 주입이다. 그 외 제어문자도 거부. */
 // eslint-disable-next-line no-control-regex
 const HEADER_UNSAFE = /[\x00-\x1f\x7f]/;
+// eslint-disable-next-line no-control-regex
+const HEADER_UNSAFE_RUN = /[\x00-\x1f\x7f]+/g;
+
+/**
+ * v2.743(감사 INJPKG-03 — 재현): 제목에 넣을 글자에서 제어문자(탭·CR·LF 포함)를 공백 하나로 바꾸고 양 끝을 다듬는다(순수).
+ *   제목은 호스트명·VM 이름·원격 응답(relaycheck agent) 같은 운영자가 정하지 않은 값을 그대로 담는다 — 탭 하나가 들어가면
+ *   buildMime 이 던져 **그 메일 전체**를 잃었다(Slack·웹훅은 나갔다). 정리는 보내는 쪽(alerts.alertSubject · mail/service 진입부)이
+ *   하고, buildMime 의 throw 는 마지막 방어선으로 남긴다(헤더 주입 방어를 '정리' 로 바꾸지 않는다). isidu settings 의 라벨 정리와 같은 규칙.
+ */
+export function headerSafeText(v) {
+  return String(v ?? '').replace(HEADER_UNSAFE_RUN, ' ').trim();
+}
 
 /** 아주 느슨한 주소 형식 검사 — 릴레이가 최종 판정하므로 여기서는 명백한 오류만 막는다. */
 const ADDR_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;

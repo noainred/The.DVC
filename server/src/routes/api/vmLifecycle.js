@@ -17,6 +17,7 @@ import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeLifecycle, kindOfLife } from '../../vmlife/analyze.js';
 import { LIFE_TYPES, parseDetail } from '../../vmchanges/eventDetail.js';
+import { inventoryUnreadReason } from '../../vmtrack/diff.js'; // v2.743(VC-01): '이 vCenter 의 VM 목록을 지금 읽었는가' 판정 한 벌(VM 수량 추이와 같다)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -48,8 +49,14 @@ async function load(req, snap) {
   return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
 }
 
-/** 지금 인벤토리의 VM 이름(vCenter 별) — 이벤트의 VM 이 지금도 있는지 이름으로만 본다. 첫 수집 중이면 모른다(null). */
-function liveNamesOf(snap, ids) {
+/**
+ * 지금 인벤토리의 VM 이름(vCenter 별) — 이벤트의 VM 이 지금도 있는지 이름으로만 본다. 첫 수집 중이면 모른다(null).
+ * ⚠ v2.743(감사 VC-01 — 재현): 예전에는 VM 이 하나도 없는 vCenter 를 **빈 이름 집합**으로 넣었다. 그런데 비활성 vCenter(store.js 가 VM 없이
+ *   status 만 넣는다)·캐시 없는 점검중·첫 수집 중·lastGood 만료 연결 실패도 VM 0개라, 그 vCenter 의 생성 이벤트가 전부 existsNow=false
+ *   ('없음' 호박색 — '만든 뒤 지웠을 수 있다')가 됐다. 그 목록은 '비었다' 가 아니라 **모른다** 다 — 맵에서 빼서 analyze 가 null('모름' ·
+ *   existsWhy 'unread')로 둔다. 판정은 vmtrack/diff.js inventoryUnreadReason 한 벌(VM 수량 추이와 같다). connected 의 빈 목록은 사실이라 넣는다.
+ */
+export function liveNamesOf(snap, ids) {
   if (snap.initial === true) return null;
   const set = new Set(ids);
   const m = new Map();
@@ -58,7 +65,11 @@ function liveNamesOf(snap, ids) {
     let s = m.get(v.vcenterId); if (!s) { s = new Set(); m.set(v.vcenterId, s); }
     s.add(v.name);
   }
-  for (const id of ids) if (!m.has(id)) m.set(id, new Set());
+  const vcById = new Map((snap.vcenters || []).filter((v) => v && v.id != null).map((v) => [String(v.id), v]));
+  for (const id of ids) {
+    if (m.has(id)) continue;
+    if (inventoryUnreadReason(vcById.get(String(id)), 0) == null) m.set(id, new Set());
+  }
   return m;
 }
 

@@ -11,6 +11,8 @@
  * **싣지 않는다**(보이는 것만으로 다시 셀 수 있는 것만 다시 센다). 뺀 사실은 `scoped:true` 로 밝힌다.
  * 전체 범위(allowed === null)는 원본 그대로다.
  */
+import { isAdminDetailUser } from './demoGuest.js';
+
 const vcOf = (x) => String(x?.vcenterId ?? x?.deviceId ?? x?.id ?? '');
 
 export function scopePollerStatus(st, allowed, { lists = ['errors', 'skippedVcenters', 'per', 'skipped', 'authStopped'], keep = ['at', 'trigger', 'ms', 'mock', 'paused'] } = {}) {
@@ -31,7 +33,7 @@ export function scopePollerStatus(st, allowed, { lists = ['errors', 'skippedVcen
 /** DB 상태의 파일 경로는 관리자에게만(operator 는 tools 를 기본 보유 — '거부 기본값'). */
 export function scopeDbStatus(db, user) {
   if (!db || typeof db !== 'object') return db;
-  if (user?.role === 'admin') return db;
+  if (isAdminDetailUser(user)) return db; // v2.743 AUTHZ-01: 데모 계정(admin 문맥)은 operator 와 같은 판본
   const { path, ...rest } = db;
   void path;
   return rest;
@@ -57,7 +59,7 @@ export function redactEdgeSummary(edges, full) {
  * @param {string[]} keys 경로가 담긴 필드 이름
  */
 export function scopeFilePaths(info, user, keys = ['file']) {
-  if (!info || typeof info !== 'object' || user?.role === 'admin') return info;
+  if (!info || typeof info !== 'object' || isAdminDetailUser(user)) return info;
   const out = { ...info };
   let hid = false;
   for (const k of keys) {
@@ -78,7 +80,7 @@ export function scopeFilePaths(info, user, keys = ['file']) {
  */
 export const ADMIN_ONLY_TEXT = '(관리자만 확인)';
 export function redactPushStatus(p, user) {
-  if (!p || typeof p !== 'object' || user?.role === 'admin') return p;
+  if (!p || typeof p !== 'object' || isAdminDetailUser(user)) return p;
   const out = { ...p, centralUrl: null, addressHidden: true };
   const l = p.last;
   if (l && typeof l === 'object') {

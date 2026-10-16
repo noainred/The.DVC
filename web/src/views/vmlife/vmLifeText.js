@@ -6,8 +6,13 @@ export const LIFE_KIND_LABEL = Object.freeze({
 export const LIFE_KIND_TONE = Object.freeze({ create: 'green', clone: 'green', deploy: 'green', register: 'blue', remove: 'red', rename: 'gray' });
 export const ADD_KINDS = Object.freeze(['create', 'clone', 'deploy', 'register']);
 
-/** 지금 인벤토리에 있는가 — 이름으로만 안다(동명 VM 은 구분하지 못한다). null 은 모름(첫 수집 중). */
+/**
+ * 지금 인벤토리에 있는가 — 이름으로만 안다(동명 VM 은 구분하지 못한다). null 은 모름.
+ * v2.743(VC-01): 서버가 모르는 이유(existsWhy)를 준다 — 'unread' 는 그 vCenter 의 VM 목록을 지금 읽지 못한 것(비활성·점검중·연결 실패)이고
+ * 'initial'·없음(구버전 서버)은 첫 수집 중이다. '없음' 이라고 말하지 않는다(그 vCenter 의 빈 목록은 비어 있다는 뜻이 아니다).
+ */
 export function existsText(e) {
+  if (e && e.existsNow == null && e.existsWhy === 'unread') return { text: '모름', tone: 'gray', title: '이 vCenter 의 인벤토리를 지금 읽지 못해(비활성·점검중·연결 실패) 대조하지 않았습니다' };
   if (!e || e.existsNow == null) return { text: '모름', tone: 'gray', title: '첫 수집 중이라 지금 인벤토리와 대조하지 않았습니다' };
   if (e.kind === 'remove') return e.existsNow
     ? { text: '같은 이름 있음', tone: 'amber', title: '삭제 뒤 같은 이름으로 다시 만들었거나, 인벤토리에서만 제거한 VM 을 다시 등록했을 수 있습니다' }

@@ -30,6 +30,9 @@
  *    재개가 꺼진(SCAN_RESUME=0) 기동에서는 다시 넣지 않고 이력에 사유를 남긴다(조용히 버리지 않는다). 같은 키로 스캔이 시작되면 대기 기록은
  *    그 시작이 대신한다. `queuedScans()` 의 `resumable` = 기록이 실제로 파일에 남았고(마지막 쓰기 성공) 재개가 켜져 있음 — 자동 업그레이드는
  *    그런 대기 요청을 기다리지 않는다(재시작 뒤 대기열로 돌아온다). 그렇지 않으면 기다린다(재시작이 그 요청을 지운다).
+ *  · v2.743(감사 TIMING-03): 대기 요청을 여러 건 한꺼번에 남길 때는 `scanQueuedMany`(쓰기 한 번)를 쓴다 — 대상마다 scanQueued 를 부르면
+ *    기록 파일 전체를 대상 수만큼 다시 써 O(N²) 이었다. 기동 때 다시 넣지 않은 대기 요청(대기 시한 초과·SCAN_RESUME=0)은
+ *    `takeQueuedBootDrops(kind)` 로 기능에 넘긴다(아이실론 엣지는 그것을 중앙에 알린다 — LEFT-08).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -80,6 +83,7 @@ let _interrupted = [];         // 이전 프로세스가 끝내지 못한 것 �
 let _history = [];             // 재개 결과
 const _resumers = new Map();   // kind -> async (entry) => { outcome, note }
 let _loadInfo = { at: null, found: 0, error: null, corruptKept: null };
+const _queuedBootDrops = [];   // v2.743(LEFT-08): 기동 때 다시 넣지 않은 대기 요청 { kind, key, trigger, reason } — 기능이 takeQueuedBootDrops 로 한 번 가져간다
 let _lastWriteError = null;
 let _timer = null;
 let _processing = false;
@@ -161,8 +165,8 @@ function loadOnce() {
     if (!q) continue;
     const k = keyOf(q.kind, q.key);
     if (_queued.has(k)) continue;
-    if (q.until != null && _bootAt > q.until) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'expired', "재시작 전 '지금 수집' 대기 요청이 대기 시한을 넘겨 다시 넣지 않았습니다 — 다시 누르세요"); qdrop.push(q); continue; }
-    if (!resumeEnabled()) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'skipped', "SCAN_RESUME=0 — 재시작 전 '지금 수집' 대기 요청을 다시 넣지 않았습니다(다시 누르세요)"); qdrop.push(q); continue; }
+    if (q.until != null && _bootAt > q.until) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'expired', "재시작 전 '지금 수집' 대기 요청이 대기 시한을 넘겨 다시 넣지 않았습니다 — 다시 누르세요"); qdrop.push(q); _queuedBootDrops.push({ kind: q.kind, key: q.key, trigger: q.trigger, reason: 'queue-hold' }); continue; }
+    if (!resumeEnabled()) { pushHistory({ ...q, detectedAt: _bootAt, resumes: 0 }, 'skipped', "SCAN_RESUME=0 — 재시작 전 '지금 수집' 대기 요청을 다시 넣지 않았습니다(다시 누르세요)"); qdrop.push(q); _queuedBootDrops.push({ kind: q.kind, key: q.key, trigger: q.trigger, reason: 'not-restored' }); continue; }
     _queued.set(k, q);
   }
   if (_queued.size) console.warn(`[scan-journal] 재시작 전 시작하지 못한 '지금 수집' 대기 요청 ${_queued.size}개를 찾았습니다 — 그 기능의 대기열에 다시 넣습니다`);
@@ -223,18 +227,61 @@ export function scanFinished(kind, key) {
  * @param {{label?:string, trigger?:string, since?:number, holdMs?:number, meta?:object}} [o] holdMs = 대기 시한(since 부터) — 지나면 기동 때 다시 넣지 않는다
  */
 export function scanQueued(kind, key, { label = '', trigger = '', since = null, holdMs = null, meta = {} } = {}) {
-  if (!KIND_RE.test(String(kind || '')) || !key) return;
-  const at = numOrNull(since) ?? now();
-  const hold = numOrNull(holdMs);
-  const q = normQueued({ kind, key, label, trigger, since: at, until: hold != null && hold > 0 ? at + hold : null, meta });
+  const q = queuedEntryOf(kind, { key, label, trigger, since, holdMs, meta });
   if (!q) return;
   _queued.set(keyOf(kind, key), q);
   write();
 }
 
+/** 대기 요청 한 건의 기록 모양(scanQueued·scanQueuedMany 공용 — 규칙을 두 벌로 두지 않는다). 형식이 틀리면 null. */
+function queuedEntryOf(kind, { key, label = '', trigger = '', since = null, holdMs = null, meta = {} } = {}) {
+  if (!KIND_RE.test(String(kind || '')) || !key) return null;
+  const at = numOrNull(since) ?? now();
+  const hold = numOrNull(holdMs);
+  return normQueued({ kind, key, label, trigger, since: at, until: hold != null && hold > 0 ? at + hold : null, meta });
+}
+
+/**
+ * v2.743(감사 TIMING-03): 대기 요청 여러 건을 **쓰기 한 번**으로 남긴다. '지금 수집' 이 동시 실행 상한을 넘는 대상마다
+ * scanQueued 를 부르면 대상마다 기록 파일 전체를 다시 썼다(파일·디렉터리 fsync 2회 × N번, 문서는 대기 항목만큼 커진다 — O(N²)).
+ * 요청 하나가 대상 98개(MAX_TARGETS 100 − 동시 2)에서 이벤트 루프를 약 0.1초(이 VM — fsync 가 느린 디스크면 더) 막았다.
+ * 동기 기록이라는 규칙(곧바로 재시작이 와도 남는다)은 그대로다 — 호출부가 모은 뒤 돌아가기 전에 한 번 쓴다.
+ * @param {string} kind
+ * @param {Array<{key:string, label?:string, trigger?:string, since?:number, holdMs?:number, meta?:object}>} entries
+ * @returns {number} 기록한 항목 수(형식이 틀린 항목은 빼고 센다)
+ */
+export function scanQueuedMany(kind, entries) {
+  if (!Array.isArray(entries) || !entries.length) return 0;
+  let n = 0;
+  for (const e of entries) {
+    const q = queuedEntryOf(kind, e && typeof e === 'object' ? e : {});
+    if (!q) continue;
+    _queued.set(keyOf(kind, e.key), q);   // scanQueued 와 같은 키(원래 key — scanStarted·scanDequeued 가 같은 값으로 찾는다)
+    n++;
+  }
+  if (n) write();
+  return n;
+}
+
 /** v2.742: 대기 요청 기록을 지운다(시작·시한 초과·대상 없음 — 사유는 기능이 자기 기록에 남긴다). */
 export function scanDequeued(kind, key) {
   if (_queued.delete(keyOf(kind, key))) write();
+}
+
+/**
+ * v2.743(감사 LEFT-08): 기동 때 다시 넣지 않은 이 기능의 대기 요청(대기 시한 초과 'queue-hold' · SCAN_RESUME=0 'not-restored') —
+ * 한 번만 돌려주고 비운다(기능이 그 사실을 다른 노드에 알린다. 이력에는 이미 남아 있다).
+ * @returns {{key:string, trigger:string, reason:string}[]}
+ */
+export function takeQueuedBootDrops(kind) {
+  const out = [];
+  for (let i = _queuedBootDrops.length - 1; i >= 0; i--) {
+    const d = _queuedBootDrops[i];
+    if (d.kind !== kind) continue;
+    out.unshift({ key: d.key, trigger: d.trigger, reason: d.reason });
+    _queuedBootDrops.splice(i, 1);
+  }
+  return out;
 }
 
 /** v2.742: 한 기능의 대기 요청(복사본, 먼저 넣은 것부터) — 기능이 기동 때 자기 대기열에 다시 넣는다. */
@@ -385,11 +432,11 @@ export function scanJournalStatus() {
 /** 테스트 전용 — 파일을 다시 읽는다(새 기동 흉내). 등록된 재개 함수는 그대로 둔다. */
 export function _reloadForTest() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
-  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _lastWriteError = null; _processing = false;
+  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _lastWriteError = null; _processing = false; _queuedBootDrops.length = 0;
   loadOnce();
 }
 export function _resetForTest() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
-  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _resumers.clear(); _lastWriteError = null; _processing = false;
+  _active.clear(); _queued.clear(); _interrupted = []; _history = []; _resumers.clear(); _lastWriteError = null; _processing = false; _queuedBootDrops.length = 0;
   try { fs.rmSync(FILE(), { force: true }); } catch { /* */ }
 }

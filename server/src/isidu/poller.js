@@ -25,6 +25,12 @@
  *    기동 때(모듈 로드) 그 기록을 대기열로 되돌리고(원래 넣은 시각 그대로 — 대기 시한이 재시작으로 늘지 않는다) 자리가 나면 차례로 시작한다.
  *    재시작 전에 **돌던** 조사(재개 대기)가 자리를 먼저 받는다(`freeSlots` — 되돌린 대기 요청·주기 실행이 그 자리를 먼저 차지하면 재개가
  *    '다른 스캔 중' 으로 밀리다 그만둘 수 있다).
+ *  · v2.743(감사 TIMING-03): runNow 는 대기열에 넣는 대상의 기록을 모아 **한 번에** 남긴다(`scanQueuedMany`) — 대상마다 쓰면 기록 파일 전체를
+ *    대상 수만큼 다시 써 요청 하나가 이벤트 루프를 막았다(O(N²)).
+ *  · v2.743(감사 LEFT-08): 엣지가 중앙이 보낸 '지금 수집' 요청을 **시작하지 않고 버리면**(대기 6시간 초과 'queue-hold' · 대상이 사본에 없음
+ *    'not-here'·'target-gone' · 재시작 뒤 다시 넣지 않음 'not-restored') 그 사실을 기록해 push 상태에 싣는다(`runDropsForPush`).
+ *    예전에는 엣지 기록(note)에만 남아 중앙이 결과 시한(최대 약 10시간)까지 '진행 중' 으로 잡아 두었다가 일반 '결과 없음' 으로 버렸다.
+ *    중앙이 보낸 요청을 실은 대기(trigger 'central' 이거나 중앙 요청이 합쳐진 것)만 싣는다 — 엣지에서 사람이 누른 것은 중앙 요청이 아니다.
  */
 import { config } from '../config.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -32,7 +38,7 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { loadSettings, resolveTarget, edgeTargets } from './settings.js';
 import { collectTarget } from './collect.js';
 import * as db from './db.js';
-import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor, scanQueued, scanDequeued, queuedOf } from '../util/scanJournal.js';
+import { scanStarted, scanFinished, scanProgress, pendingResumeOf, registerScanResumer, journalFor, scanQueued, scanQueuedMany, scanDequeued, queuedOf, takeQueuedBootDrops } from '../util/scanJournal.js';
 import { notifyScanStored } from './notify.js';
 
 export const TICK_MS = 60_000;
@@ -49,7 +55,7 @@ const PENDING_HOLD_MS = 2 * 3_600_000; // 재개 대기 대상을 틱이 건너�
 
 const _inflight = new Map();   // targetId → { since, trigger, promise }
 const _lastTry = new Map();    // targetId → { ts, ok, durationMs }
-const _queue = new Map();      // targetId → { since, trigger } — 동시 실행 상한에 걸려 기다리는 '지금 수집'(TIMING-02)
+const _queue = new Map();      // targetId → { since, trigger, central? } — 동시 실행 상한에 걸려 기다리는 '지금 수집'(TIMING-02)
 let _draining = null;          // 진행 중인 대기열 꺼내기(같이 기다린다)
 let _drainAgain = false;
 let _seeded = false;
@@ -66,10 +72,53 @@ export function onScanStored(fn) { _afterScan = typeof fn === 'function' ? fn : 
 
 const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
 
-/** v2.742(RECENT-02): 대기열에 넣는다 — 실행 중 스캔 기록에도 남긴다(재시작·업그레이드에도 대기 요청이 남게). */
-function enqueue(id, { since = Date.now(), trigger = 'manual', label = '', restored = false } = {}) {
-  _queue.set(id, { since, trigger, ...(restored ? { restored: true } : {}) });
-  if (!restored) scanQueued(KIND, id, { label: label || id, trigger, since, holdMs: QUEUE_HOLD_MS, meta: { manual: true } });
+/**
+ * v2.743(감사 LEFT-08): 엣지가 시작하지 않고 버린 '중앙 요청' — push 상태(runDropped)로 중앙에 알린다. 중앙은 그 요청을 결과 시한까지
+ * 기다리지 않고 이 사유로 정리한다. 보낸 뒤(중앙 2xx) 지운다(ackRunDrops) · 상한을 넘으면 오래된 것부터 버리고 개수를 센다.
+ * 사유 코드는 isidu/collectRequests.js EDGE_DROP_REASONS 와 같다(웹 collectDropText.EDGE_DROP_TEXT 와 1:1).
+ */
+export const RUN_DROPS_MAX = 50;
+const _runDrops = [];          // { seq, id, reason, at, trigger } (최신이 앞)
+let _runDropSeq = 0;
+let _runDropsOmitted = 0;
+function noteRunDrop(id, reason, trigger = '') {
+  _runDrops.unshift({ seq: ++_runDropSeq, id: String(id).slice(0, 64), reason, at: Date.now(), trigger: String(trigger || '').slice(0, 16) });
+  if (_runDrops.length > RUN_DROPS_MAX) { _runDropsOmitted += _runDrops.length - RUN_DROPS_MAX; _runDrops.length = RUN_DROPS_MAX; }
+  // 엣지면 곧 push(5초 묶음 — push.js 가 등록한 예약) — 다음 주기(10분)를 기다리지 않는다.
+  if (_afterScan) { try { _afterScan(); } catch { /* push 예약 실패는 다음 주기 */ } }
+}
+/** 대기 항목이 중앙 요청을 싣고 있는가(중앙이 보낸 것이거나 중앙 요청이 합쳐진 것). */
+const carriesCentral = (q) => !!q && (q.central === true || q.trigger === 'central');
+
+/**
+ * push 가 실을 버린 요청 목록 — `ageMs`(버린 뒤 지난 시간, 엣지 시계의 **길이**)를 싣는다: 중앙은 받은 시각에서 빼어 '언제 버렸는지' 를
+ * 어림한다(두 시계의 시각을 비교하지 않는다 — v2.591 R-Q1). `held` = 지금 이 엣지가 돌리거나 기다리는 대상 — 버린 뒤 다시 받은 요청을
+ * 중앙이 지우지 않게. `seq` 는 ackRunDrops 에 넘긴다.
+ */
+export function runDropsForPush(now = Date.now()) {
+  return {
+    list: _runDrops.map((d) => ({ id: d.id, reason: d.reason, ageMs: Math.max(0, now - d.at), trigger: d.trigger })),
+    held: [...new Set([..._inflight.keys(), ..._queue.keys()])].slice(0, 200),
+    omitted: _runDropsOmitted,
+    seq: _runDropSeq,
+  };
+}
+/** 중앙이 받았다(2xx) — 그때 실은 것까지 지운다(그 뒤에 생긴 것은 다음 push). */
+export function ackRunDrops(seq) {
+  const n = Number(seq);
+  if (!Number.isFinite(n)) return;
+  for (let i = _runDrops.length - 1; i >= 0; i--) if (_runDrops[i].seq <= n) _runDrops.splice(i, 1);
+  _runDropsOmitted = 0;
+}
+
+/** v2.742(RECENT-02): 대기열에 넣는다 — 실행 중 스캔 기록에도 남긴다(재시작·업그레이드에도 대기 요청이 남게).
+ *  v2.743(TIMING-03): batch 배열을 주면 기록을 거기에 모으고 호출부가 scanQueuedMany 로 한 번에 쓴다. */
+function enqueue(id, { since = Date.now(), trigger = 'manual', label = '', restored = false, batch = null } = {}) {
+  _queue.set(id, { since, trigger, ...(trigger === 'central' ? { central: true } : {}), ...(restored ? { restored: true } : {}) });
+  if (restored) return;
+  const rec = { key: id, label: label || id, trigger, since, holdMs: QUEUE_HOLD_MS, meta: { manual: true } };
+  if (Array.isArray(batch)) batch.push(rec);
+  else scanQueued(KIND, id, rec);
 }
 /** v2.742: 대기열에서 뺀다(시작·시한 초과·대상 없음) — 기록도 함께 지운다. */
 function dequeue(id) {
@@ -96,6 +145,8 @@ function freeSlots(now = Date.now()) {
  * 시한이 지난 것은 drainQueue 가 버리고 기록에 남긴다. 같은 대상이 재개 대기 중이면 drainQueue 가 재개가 끝날 때까지 기다린다.
  */
 function restoreQueue() {
+  // v2.743(LEFT-08): 기동 때 다시 넣지 못한 대기 요청 중 중앙이 보낸 것은 중앙에 알린다(이력에는 scanJournal 이 이미 남겼다).
+  for (const d of takeQueuedBootDrops(KIND)) if (d.trigger === 'central') noteRunDrop(d.key, d.reason, d.trigger);
   let n = 0;
   for (const q of queuedOf(KIND)) {
     if (_queue.has(q.key) || _inflight.has(q.key)) continue;
@@ -222,15 +273,19 @@ async function drainQueue() {
       const all = await targetsForThisNode();
       const now = Date.now();
       for (const [id, q] of [..._queue]) {
-        if (now - q.since > QUEUE_HOLD_MS) { dequeue(id); note('error', `${id}: '지금 수집' 대기가 ${Math.round(QUEUE_HOLD_MS / 3_600_000)}시간을 넘어 시작하지 않았습니다 — 다시 누르세요`); continue; }
+        if (now - q.since > QUEUE_HOLD_MS) {
+          dequeue(id); note('error', `${id}: '지금 수집' 대기가 ${Math.round(QUEUE_HOLD_MS / 3_600_000)}시간을 넘어 시작하지 않았습니다 — 다시 누르세요`);
+          if (carriesCentral(q)) noteRunDrop(id, 'queue-hold', q.trigger);   // v2.743(LEFT-08): 중앙이 결과 시한까지 기다리지 않게 알린다
+          continue;
+        }
         if (_inflight.has(id)) { dequeue(id); continue; }
         if (freeSlots(now) <= 0) break;
         // 같은 대상이 재개를 기다리면 그 판정(시작·건너뜀)을 먼저 본다 — 재개가 시작하면 다음 꺼내기에서 위 줄이 대기를 지우고,
         // 건너뛰면(꺼짐 등) 사람이 누른 이 요청이 그 뒤 시작한다(재개 결과에 묻혀 사라지지 않게).
         if (pendingResumeOf(KIND, id)) continue;
         const t = all.find((x) => x.id === id);
-        if (!t) { dequeue(id); note('info', `${id}: 기다리는 동안 대상이 이 노드의 목록에서 사라져 시작하지 않았습니다`); continue; }
-        if (String(t.id).startsWith('mock-') && !isMockMode()) { dequeue(id); continue; }
+        if (!t) { dequeue(id); note('info', `${id}: 기다리는 동안 대상이 이 노드의 목록에서 사라져 시작하지 않았습니다`); if (carriesCentral(q)) noteRunDrop(id, 'target-gone', q.trigger); continue; }
+        if (String(t.id).startsWith('mock-') && !isMockMode()) { dequeue(id); if (carriesCentral(q)) noteRunDrop(id, 'not-here', q.trigger); continue; }
         runOne(t, q.trigger, true);   // 대기열·대기 기록은 runOne(scanStarted)이 같은 쓰기에서 지운다
       }
     } while (_drainAgain);
@@ -287,16 +342,24 @@ export async function runNow(ids = null, { trigger = 'manual' } = {}) {
   const all = await targetsForThisNode();
   const want = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
   const started = []; const queued = []; const busy = []; const notHere = [];
+  const batch = [];   // v2.743(TIMING-03): 대기 기록을 모아 한 번에 쓴다(scanQueuedMany)
   if (want) for (const id of want) if (!all.some((t) => t.id === id)) notHere.push(id);
   for (const t of all) {
     if (want && !want.has(t.id)) continue;
     if (String(t.id).startsWith('mock-') && !isMockMode()) { notHere.push(t.id); continue; }
     if (_inflight.has(t.id)) { busy.push(t.id); continue; }
-    if (_queue.has(t.id)) { queued.push(t.id); continue; }
-    if (_inflight.size >= CONCURRENCY) { enqueue(t.id, { trigger, label: t.label }); queued.push(t.id); continue; }
+    if (_queue.has(t.id)) {
+      // v2.743(LEFT-08): 이미 기다리던 대상에 중앙 요청이 합쳐졌다 — 그 대기를 버리면 중앙 요청도 버린 것이다(중앙에 알린다).
+      if (trigger === 'central') _queue.get(t.id).central = true;
+      queued.push(t.id); continue;
+    }
+    if (_inflight.size >= CONCURRENCY) { enqueue(t.id, { trigger, label: t.label, batch }); queued.push(t.id); continue; }
     runOne(t, trigger, true);
     started.push(t.id);
   }
+  if (batch.length) scanQueuedMany(KIND, batch);
+  // v2.743(LEFT-08): 중앙이 보낸 요청인데 이 엣지 사본에 그 대상이 없다 — 시작할 수 없으므로 중앙에 알린다(결과 시한까지 기다리지 않게).
+  if (trigger === 'central') for (const id of notHere) noteRunDrop(id, 'not-here', trigger);
   if (queued.length) note('info', `동시 실행 상한(${CONCURRENCY}) — '지금 수집' ${queued.length}개는 앞 조사가 끝나면 차례로 시작합니다`);
   return { started, queued, busy, notHere, concurrency: CONCURRENCY };
 }
@@ -337,6 +400,7 @@ export function startIsiduPoller() {
 
 export function _resetForTest() {
   _inflight.clear(); _lastTry.clear(); _queue.clear(); _seeded = false; _recent.length = 0; _lastError = null; _demoSkipped = 0;
+  _runDrops.length = 0; _runDropsOmitted = 0;
   for (const q of queuedOf(KIND)) scanDequeued(KIND, q.key);
 }
 export { tick as _tickForTest };

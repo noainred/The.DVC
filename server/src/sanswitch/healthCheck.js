@@ -227,7 +227,8 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
       //   적지 않으면 '온도·전압 센서 정상' 이라는 거짓이 된다(v2.522).
       const alt = used.sensorshow?.alt ? ` ⚠ ‘${used.sensorshow.cmd}’ 로 대체 확인 — **전압은 확인하지 못했습니다**(이 명령은 온도만 줍니다).` : '';
       if (bad.length) items.push(mk('sensors', 'bad', `${info} · 이상 ${bad.length}개${alt}`, { evidence: bad.map((x) => x.raw) }));
-      else if (unk.length) items.push(mk('sensors', 'warn', `${info} · 상태를 읽지 못한 센서 ${unk.length}개${alt}`, { evidence: unk.map((x) => x.raw) }));
+      // v2.743(DEV-02): unk 는 상태 칸이 비었거나(못 읽음) 모르는 상태어다 — 읽은 상태어를 '읽지 못했다' 고 말하지 않는다.
+      else if (unk.length) items.push(mk('sensors', 'warn', `${info} · 상태를 판정하지 못한 센서 ${unk.length}개(상태가 비었거나 모르는 상태어 — 원문 참고)${alt}`, { evidence: unk.map((x) => x.raw) }));
       else if (alt) items.push(mk('sensors', 'warn', `${info} (임계 판정은 스위치 센서 상태 기준)${alt}`, { evidence: [] }));
       else items.push(mk('sensors', 'ok', `${info} (임계 판정은 스위치 센서 상태 기준)`));
     }

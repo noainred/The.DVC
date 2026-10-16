@@ -68,9 +68,11 @@ export function saveIntervals(partial = {}) {
     if (!Number.isFinite(n) || n <= 0) { delete next[s.key]; continue; } // 0/음수는 버린다(하한 승격 금지)
     next[s.key] = Math.min(MAX_MS, Math.max(s.min, n));
   }
+  const effBefore = runtimeIntervals();
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   _loadErr.ok();
-  notify();
+  // v2.743(감사 TIMING-01): 실효 주기가 그대로면 알리지 않는다(같은 값 저장이 타이머를 다시 잡지 않게 — applyCentralIntervals 와 같은 규칙).
+  if (effectiveDiffers(effBefore, runtimeIntervals())) notify();
   return next;
 }
 
@@ -88,10 +90,17 @@ export function applyCentralIntervals(obj) {
     if (Number.isFinite(n) && n > 0) next[s.key] = Math.min(MAX_MS, Math.max(s.min, n));
   }
   const changed = JSON.stringify(next) !== JSON.stringify(_central || {});
+  // v2.743(감사 TIMING-01): 리스너는 **실효 주기가 바뀔 때만** 부른다. _central 은 메모리에만 있어 엣지 재시작 직후에는 null 이고,
+  //   중앙이 키를 하나라도 지정했으면 첫 pull 이 늘 '바뀜' 이 되어 수집·push·pull 타이머를 전부 재무장시켰다(첫 실행 전이면
+  //   firstDelay 가 사라져 첫 수집이 45초가 아니라 약 5분 뒤가 됐다 — util/adaptiveTimer.js 같은 번호 주석).
+  //   반환값(중앙 지정 값이 바뀌었는가 — pull 상태의 intervalsApplied)은 예전 뜻 그대로다.
+  const effBefore = changed ? runtimeIntervals() : null;
   _central = next;
-  if (changed) notify();
+  if (changed && effectiveDiffers(effBefore, runtimeIntervals())) notify();
   return changed;
 }
+
+function effectiveDiffers(a, b) { return INTERVAL_SPEC.some((s) => a?.[s.key] !== b?.[s.key]); }
 
 /**
  * 실효 주기 — **중앙 지정값 > 엣지 env > 기본값**.

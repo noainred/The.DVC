@@ -13,7 +13,7 @@ import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { partsUnknownNote, partialVmsNote } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내
+import { partsUnknownNote, partialVmsNote, reclaimFreshnessNote, coverageStateText } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내 · v2.743 VC-02: 오래된 관측·삭제된 vCenter
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 import { guestDiskParams, guestDiskCsvPath } from './guestDiskCsv.js'; // 검토 I-10: 조회·CSV 가 같은 조건 · CSV 경로는 /api 이후
 import { downloadFailText } from '../downloadFailText.js';
@@ -314,6 +314,9 @@ export default function GuestDiskReport({ scope = '' }) {
       {partialVmsNote(poller.lastResult) && ( /* v2.631 A6-2631-04: 부분 합 VM 은 추이에 적재하지 않는다 — 그 사실을 말한다 */
         <div className="gd-warn"><BoldText text={partialVmsNote(poller.lastResult)} /></div>
       )}
+      {reclaimFreshnessNote(data) && ( /* v2.743 VC-02: 오래된 관측(합계에 남김)·삭제된 vCenter(합계에서 뺌)를 말한다 */
+        <div className="gd-warn"><BoldText text={reclaimFreshnessNote(data)} /></div>
+      )}
       {poller.lastResult?.errors?.length > 0 && (
         <div className="gd-warn">최근 수집에서 {poller.lastResult.errors.length}개 vCenter 조회 실패(엣지 수집 vCenter는 중앙에서 직접 접속이 안 될 수 있습니다).</div>
       )}
@@ -354,7 +357,7 @@ export default function GuestDiskReport({ scope = '' }) {
                   <td>{c.collectSource === 'site' ? '엣지 수집(push)' : '중앙 직접'}</td>
                   <td data-sort={c.vmCount} className="gd-num">{c.vmCount.toLocaleString()}</td>
                   <td data-sort={c.lastTs || ''}>{when(c.lastTs)}</td>
-                  <td data-nosort>{c.vmCount > 0 ? '✅ 데이터 있음' : (c.collectSource === 'site' ? '⏳ 엣지 push 대기' : '⏳ 미수집')}</td>
+                  <td data-nosort>{coverageStateText(c)}</td>
                 </tr>
               ))}
             </tbody>
