@@ -3653,6 +3653,33 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 메인 목록 응답(`targetRows`)은 주소를 싣지 않는다(개수·선택·마지막 결과만 — 테스트 고정). 주소는 설정 조회에만. 상태 파일에도 주소를 적지 않는다(개수만).
     · `mail-now` 실패는 409(본문 사유) — 5xx 로 주면 재시도하는 호출부가 같은 메일을 두 번 보낼 수 있다.
     · ⚠ 정직 기록: 실제 사내 메일 서버로는 보내 보지 못했다(가짜 SMTP). Chromium 은 목업(메일 꺼짐 상태)으로 설정 창·대상 화면 1440/400 을 봤다(넘침 0).
+  - ⚠⚠ **v2.742 — 아이실론 종합 메일(정한 요일·시각에 전 법인 결과 한 통). 규칙은 `isidu/digestRules.js`(순수), 발송·일정·기록은 `isidu/digest.js`, 본문은 `isidu/mailHtml.js` 하나**
+    (사용자 요청 + Claude Design 시안 ① 본문 · ② 설정 · ③④ 대상별 결과·실패 메일 새 템플릿 승인. 선택: v2.742 에 함께 · 전체 검증 · 시안 그대로.
+    회귀 `server/test/isiduDigest2742.test.js`(가짜 SMTP · 실제 api 라우터 · 틱·재시작·놓침 — 변이 12종 중 11종, 남은 1종은 개요 조회 대상 필터 = 결과가 같은 동등 변이) +
+    웹 `isiduDigestText.test.js`(서버 모듈과 같은 입력 대조)):
+    · **중앙만 보낸다** — 엣지는 틱도 돌지 않는다(`digestTick`·`sendDigest` 가 'edge'). 장비에 접속하지 않고 DB 의 마지막 성공 조사로 만든다(조사를 새로 돌리지 않는다).
+      목록 행은 메인 목록 응답과 **같은** `isidu/rows.js targetRows`(라우트에서 옮겼다 — 두 벌이면 화면과 메일의 상태가 갈라진다), 법인 이름은 `isidu/corpName.js`.
+    · 일정은 `xferspeed/schedule.js` 의 매주 일정 계산을 그대로 쓴다(포탈 시각 KST). '지금 이전의 가장 최근 회차' 하나만 본다 — 처리 기록(lastSlot)·since 보다 뒤이고
+      30분(`GRACE_MS`) 안이면 보내고, 넘으면 **몰아서 보내지 않고** 놓침(down 포탈 꺼짐 · late · clock 시계 되감김 → 기록을 지금으로)으로 남긴다.
+      ⚠⚠ **lastSlot 은 보내기 전에 상태 파일에 남긴다** — 보내는 중 재시작해도 같은 회차를 두 번 보내지 않는다(대신 그 회차는 못 보냈을 수 있다 — 정직 기록).
+      `since` 는 서버가 정한다(켜거나 요일·시각을 바꾼 시각) — 저장하자마자 오늘 지난 회차를 소급 발송하지 않는다.
+    · 받는 사람 = 통합 관리자(메일 설정 `defaultTo`, includeAdmin) ∪ 추가 주소, 대소문자 무시 한 번. 발송은 `sendPortalMail({kind:'isidu', to, by})` — 정기는 'system',
+      '지금 한 번 보내기' 는 사람 이름(수동 — SMTP 인증 정지 중에도 시도)이고 '새 조사 없으면 생략' 을 보지 않으며 회차 기록을 건드리지 않는다.
+    · 본문 모델(`buildDigestModel`): 대상 상태는 웹 `isiduText.targetStatus` 와 **같은 key·tone**(`statusOfRow` — 웹 테스트가 16개 입력으로 대조) · 합계는 성공한 수집이 있는 대상만 ·
+      7일 변화는 7일 이전 기준이 있는 대상만, 반올림 범위 안은 0 · 실패·보고 늦음은 '직전 성공 값' 표지 · 데모(mock-)는 실제 메일에서 빼고 미리보기에만 넣는다.
+      실패 종류 제목(`FAIL_TITLE`)은 웹 `FAIL_TEXT[].title` 과 같은 글자 — **실패 종류를 늘리면 둘 다**. 생략·놓침 코드(`DIGEST_SKIP_CODES`·`DIGEST_MISSED_REASONS`)는 웹
+      `isiduDigestText.SKIP_TEXT`·`MISSED_TEXT` 와 1:1(웹 테스트가 서버 소스의 code 리터럴까지 대조).
+    · 설정은 `isidu-settings.json` 의 `mail.digest` 이고 **전용 저장**(`saveDigestSettings` · `PUT /tools/isilon-dirusage/digest`)이다 — 대상 목록 저장(`saveSettings`)은 그 값을
+      그대로 옮기고, 종합 메일 저장은 대상 목록을 건드리지 않는다(서로 지우지 않는다 — 테스트 고정). 설정 파일을 못 읽으면 저장 409. 형식 오류는 400(field digest.days·time·topN·to).
+    · 라우트 4개(GET·PUT digest · POST send-now(실패 409 — 재시도로 두 번 보내지 않게) · POST preview(보내지 않음))는 adminOnly + fullScopeOnly + **requireSuperAdmin**(수집 대상 설정과 같은 기준).
+      조회 응답의 `adminTo` 는 화면이 저장 전 입력으로 받는 사람 수(겹침 포함)를 세는 데 쓴다 — **상태(status)·기록·상태 파일에는 주소를 싣지 않는다**(개수만, 테스트 고정).
+    · 상태 파일 `isidu-digest-state.json`(registerStateFile · 원자 0600 · 손상 보존 · 기록 20건). `startIsiduDigest` 30초 틱(index.js). edgeSweep `EXCLUDED` 에 '중앙 전용' 사유.
+    · 화면: 설정 › 수집 서버 › 아이실론 디렉터리 사용량 › **종합 메일** 탭(`#/settings/isilon-dirusage/digest` · `IsiduDigestSettings.jsx` · 판정·문구 `isiduDigestText.js`). 탭을 처음 열 때
+      만들고 오가도 유지한다(저장하지 않은 입력이 탭 전환으로 사라지지 않게). '지금 한 번 보내기' 는 바뀐 칸이 있으면 잠근다(저장된 설정으로 보낸다). 미리보기는 `sandbox` iframe(srcDoc).
+    · 메일 HTML 은 표 레이아웃 · 인라인 스타일 · 모든 값 이스케이프(`mailHtml.esc`) · 포탈 링크 없음(주소 설정이 없다 — 메뉴 경로를 글로 적는다). **메뉴 이름을 바꾸면 본문 안내도**(웹 테스트가 '› 종합 메일' 을 대조).
+      ⚠ 카드 묶음은 `font-size:0;line-height:0` 래퍼 안의 inline-block 이다 — **안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면 라벨과 값이 겹친다**(Chromium 판독에서 발견).
+      좁은 폭은 `<style>` @media(520px 이하 여백 축소 — Outlook 데스크톱은 무시한다)로 400·360px 넘침 0. 테스트 ⑤ 가 두 규칙을 고정한다(변이 2/2).
+    · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 등 메일 클라이언트에서의 모양은 확인하지 못했다(가짜 SMTP · Chromium 미리보기).
   - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개 · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
     (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
     "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".

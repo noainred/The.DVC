@@ -79,10 +79,10 @@ function deltaCell(d, { hasBase = true, isNew = false, partial = false } = {}) {
   return `<span style="color:${col};font-weight:600;white-space:nowrap;">${b > 0 ? '+' : ''}${esc(bytesText(b))}</span>${partial ? `<span style="color:${C.faint};font-size:11.5px;"> (일부)</span>` : ''}`;
 }
 function th(label, align = 'left', w = '') {
-  return `<th align="${align}" style="text-align:${align};padding:8px 8px;border-bottom:1px solid ${C.border};font-size:12px;font-weight:600;color:${C.dim};white-space:nowrap;"${w ? ` width="${w}"` : ''}>${esc(label)}</th>`;
+  return `<th align="${align}" style="text-align:${align};padding:8px 6px;border-bottom:1px solid ${C.border};font-size:12px;font-weight:600;color:${C.dim};white-space:nowrap;"${w ? ` width="${w}"` : ''}>${esc(label)}</th>`;
 }
 function td(html, align = 'left', extra = '') {
-  return `<td align="${align}" style="text-align:${align};padding:9px 8px;border-bottom:1px solid ${C.line};font-size:13px;color:${C.ink};vertical-align:top;${extra}">${html}</td>`;
+  return `<td align="${align}" style="text-align:${align};padding:9px 6px;border-bottom:1px solid ${C.line};font-size:13px;color:${C.ink};vertical-align:top;${extra}">${html}</td>`;
 }
 function table(head, rowsHtml) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:${FONT};"><tr>${head.join('')}</tr>${rowsHtml.join('')}</table>`;
@@ -90,10 +90,10 @@ function table(head, rowsHtml) {
 function sectionTitle(title, sub = '') {
   return `<div style="font-size:16px;font-weight:700;color:${C.head};margin:0 0 10px 0;">${esc(title)}${sub ? ` <span style="font-size:12.5px;font-weight:400;color:${C.faint};">${esc(sub)}</span>` : ''}</div>`;
 }
-const section = (inner, pad = '26px 32px 4px 32px') => `<tr><td style="padding:${pad};font-family:${FONT};">${inner}</td></tr>`;
+const section = (inner, pad = '26px 32px 4px 32px') => `<tr><td class="dvc-sec" style="padding:${pad};font-family:${FONT};">${inner}</td></tr>`;
 function kpis(cards) {
   const cell = (k) => `<div style="display:inline-block;vertical-align:top;width:25%;min-width:150px;box-sizing:border-box;padding:6px;">`
-    + `<div style="border:1px solid ${C.line};border-radius:6px;padding:12px 14px;background:#FFFFFF;">`
+    + `<div style="border:1px solid ${C.line};border-radius:6px;padding:12px 14px;background:#FFFFFF;font-size:13px;line-height:1.35;">`
     + `<div style="font-size:12px;color:${C.dim};font-family:${FONT};">${esc(k.label)}</div>`
     + `<div style="font-size:21px;font-weight:700;color:${k.color || C.head};margin-top:4px;font-family:${FONT};word-break:break-all;">${k.valueHtml ?? esc(k.value)}</div>`
     + `<div style="font-size:11.5px;color:${C.faint};margin-top:4px;line-height:1.5;font-family:${FONT};">${k.subHtml ?? esc(k.sub || '')}</div>`
@@ -101,7 +101,7 @@ function kpis(cards) {
   return `<div style="font-size:0;line-height:0;margin:0 -6px;">${cards.map(cell).join('')}</div>`;
 }
 function band({ label = 'ISILON · DIRECTORY USAGE', title, titleMono = false, chips = [], sub = '', bg = C.head, subColor = C.bandSub }) {
-  return `<tr><td style="background:${bg};padding:26px 32px 22px 32px;font-family:${FONT};color:#FFFFFF;">`
+  return `<tr><td class="dvc-sec" style="background:${bg};padding:26px 32px 22px 32px;font-family:${FONT};color:#FFFFFF;">`
     + `<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:${subColor};">${esc(label)}</div>`
     + (chips.length ? `<div style="margin-top:10px;">${chips.join(' ')}</div>` : '')
     + `<div style="font-size:${titleMono ? 24 : 26}px;font-weight:700;line-height:1.3;margin-top:8px;${titleMono ? `font-family:${MONO};word-break:break-all;` : ''}">${esc(title)}</div>`
@@ -110,17 +110,25 @@ function band({ label = 'ISILON · DIRECTORY USAGE', title, titleMono = false, c
 }
 const chip = (text, { solid = false, color = '#FFFFFF', bg = 'rgba(255,255,255,0.18)' } = {}) => `<span style="display:inline-block;font-size:12px;font-weight:700;color:${solid ? bg : color};background:${solid ? '#FFFFFF' : bg};border-radius:3px;padding:3px 8px;">${esc(text)}</span>`;
 function footer(lines) {
-  return `<tr><td style="padding:22px 32px 26px 32px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12.5px;line-height:1.7;color:${C.dim};">${lines.map((l) => `<div>${l}</div>`).join('')}</td></tr>`;
+  return `<tr><td class="dvc-sec" style="padding:22px 32px 26px 32px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12.5px;line-height:1.7;color:${C.dim};">${lines.map((l) => `<div>${l}</div>`).join('')}</td></tr>`;
 }
 function readHow(lines) {
   if (!lines.length) return '';
   return section(`${sectionTitle('숫자를 읽는 법')}<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.7;color:${C.dim};">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
 }
+/**
+ * 좁은 화면(휴대폰 메일 앱) — 바깥·구획 여백을 줄인다. 이 머리 스타일을 무시하는 클라이언트(Outlook 데스크톱)는
+ * 넓은 창에서 열리므로 인라인 여백 그대로 둔다. 표의 최소 폭(칸 여백 6px)은 360px 화면에 맞춰 두었다(테스트 고정).
+ */
+const NARROW_CSS = '<style>@media only screen and (max-width:520px){'
+  + '.dvc-outer{padding:12px 4px!important}'
+  + '.dvc-sec{padding-left:14px!important;padding-right:14px!important}'
+  + '}</style>';
 function doc(title, preheader, rowsHtml) {
   return '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-    + `<title>${esc(title)}</title></head><body style="margin:0;padding:0;background:${C.page};">`
+    + `<title>${esc(title)}</title>${NARROW_CSS}</head><body style="margin:0;padding:0;background:${C.page};">`
     + `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(preheader)}</div>`
-    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.page};border-collapse:collapse;"><tr><td align="center" style="padding:24px 10px;">`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.page};border-collapse:collapse;"><tr><td class="dvc-outer" align="center" style="padding:24px 10px;">`
     + `<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="width:100%;max-width:720px;background:#FFFFFF;border:1px solid ${C.border};border-radius:6px;border-collapse:separate;overflow:hidden;">`
     + rowsHtml.join('')
     + '</table></td></tr></table></body></html>';
@@ -204,7 +212,7 @@ export function renderDigestMail(m, o = {}) {
   const corpRows = m.corps.map((c) => `<tr>`
     + td(`<b>${esc(c.label)}</b>${c.unmeasured ? `<div style="font-size:11.5px;color:${C.faint};">결과 없음 ${c.unmeasured}개</div>` : ''}`)
     + td(String(c.targets), 'right')
-    + td(`<span style="white-space:nowrap;">${esc(bytesText(c.bytes))}</span>${c.share != null ? `${bar(c.share)}<div style="font-size:11px;color:${C.faint};">${esc(pct(c.share))}</div>` : ''}`, 'right', 'min-width:96px;')
+    + td(`<span style="white-space:nowrap;">${esc(bytesText(c.bytes))}</span>${c.share != null ? `${bar(c.share)}<div style="font-size:11px;color:${C.faint};">${esc(pct(c.share))}</div>` : ''}`, 'right', 'min-width:80px;')
     + td(c.bytes == null ? `<span style="color:${C.faint};">—</span>` : c.d7 == null ? `<span style="color:${C.faint};">기준 없음</span>` : deltaCell({ bytes: c.d7, within: c.d7Within }, { partial: c.d7Partial }), 'right')
     + td(corpStatusTag(c), 'left')
     + `</tr>`);
@@ -321,7 +329,7 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
   rows.push(section(`${sectionTitle(`폴더 Top ${k.topN ?? top.length}`)}${table([th('#', 'right', '24'), th('폴더'), th('크기', 'right'), th('7일 변화', 'right')], topRows)}`));
   const growth = (report.growth || []).slice(0, 3);
   if (growth.length) {
-    const cell = (g) => `<div style="display:inline-block;vertical-align:top;width:33.33%;min-width:150px;box-sizing:border-box;padding:6px;"><div style="border:1px solid ${C.line};border-radius:6px;padding:12px 14px;">`
+    const cell = (g) => `<div style="display:inline-block;vertical-align:top;width:33.33%;min-width:150px;box-sizing:border-box;padding:6px;"><div style="border:1px solid ${C.line};border-radius:6px;padding:12px 14px;font-size:13px;line-height:1.35;">`
       + `<div style="font-size:13px;font-weight:700;color:${C.head};word-break:break-all;font-family:${FONT};">${esc(g.name)}</div>`
       + `<div style="font-size:18px;font-weight:700;margin-top:4px;font-family:${FONT};">${deltaCell(g.d7)}</div>`
       + `<div style="font-size:11.5px;color:${C.faint};margin-top:2px;font-family:${FONT};">지금 ${esc(bytesText(g.bytes))}</div></div></div>`;

@@ -268,6 +268,19 @@ test('⑤ 본문 HTML — 폴더·라벨은 이스케이프 · 제목에 법인�
   const fm = H.renderFailureMail({ label: '<i>x</i>', corp: '한국', scan: { ts: T0, kind: 'timeout', error: '<img src=x>', path: '/ifs/a', host: 'h' }, target: { host: 'h' }, failStreak: 2 });
   assert.ok(!fm.html.includes('<img src=x>')); assert.ok(!fm.html.includes('<i>x</i>'));
   assert.match(fm.subject, /조사 실패 — <i>x<\/i>/, '제목은 텍스트(메일 헤더)라 그대로');
+  // 카드 묶음은 font-size:0·line-height:0 래퍼 안의 inline-block 이다 — 안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면
+  // 라벨과 값이 한 줄 높이 0 에서 겹친다(Chromium 판독에서 발견). 좁은 화면 여백 축소(@media)도 함께 고정한다.
+  const res = H.renderResultMail({ label: 'L', corp: '한국', report: { ok: true, ts: T0, total: { bytes: 1e12 }, entries: [{ path: '/ifs/a/x', bytes: 5e11 }] }, change: { growth: [{ path: '/ifs/a/x', delta: 1e11 }] } });
+  for (const html of [mail.html, res.html]) {
+    const inner = [...html.matchAll(/display:inline-block;vertical-align:top[^"]*"><div style="([^"]*)"/g)].map((x) => x[1]);
+    for (const st of inner) {
+      assert.match(st, /font-size:\d+px/, `카드 안쪽이 글자 크기를 되돌린다: ${st}`);
+      assert.match(st, /line-height:1\.\d+/, `카드 안쪽이 줄 높이를 되돌린다: ${st}`);
+    }
+    assert.match(html, /@media only screen and \(max-width:520px\)/);
+    assert.match(html, /class="dvc-outer"/);
+  }
+  assert.ok([...mail.html.matchAll(/display:inline-block;vertical-align:top/g)].length >= 4, 'KPI 카드 넷');
 });
 
 /* ── 실제 api 라우터 ──────────────────────────────────────────────────── */

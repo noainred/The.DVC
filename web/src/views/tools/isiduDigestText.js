@@ -9,6 +9,7 @@
  *  · 기록 문구의 코드는 서버와 1:1 이다(`MISSED_TEXT` ↔ DIGEST_MISSED_REASONS · `SKIP_TEXT` ↔ DIGEST_SKIP_CODES — 웹 테스트가 서버 소스에서 뽑아 대조).
  */
 import { parseMailInput, isEmail, MAIL_LIST_MAX } from './isiduText.js';
+import { unitText } from '../unitText.js';
 
 export const DAY_LABELS = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
 /** 화면 요일 버튼 순서 — 월요일부터(사람이 읽는 순서). 값은 0 = 일요일. */
@@ -196,7 +197,7 @@ export function historyLine(h, offsetMin = DEF_OFFSET) {
 /** 보내기·미리보기 결과 → 한 줄 문구. */
 export function sendResultText(r) {
   if (!r) return null;
-  if (r.ok && r.state === 'sent') return { tone: 'ok', text: `보냈습니다 — 받는 사람 ${r.to ?? '—'}명 · 대상 ${r.targets ?? '—'}개.` };
+  if (r.ok && r.state === 'sent') return { tone: 'ok', text: `보냈습니다 — 받는 사람 ${unitText(r.to, '명')} · 대상 ${unitText(r.targets, '개')}.` };
   if (r.state === 'edge') return { tone: 'muted', text: '엣지 포탈은 종합 메일을 보내지 않습니다(메인만 보냅니다).' };
   if (r.state === 'skipped') return { tone: 'muted', text: `보내지 않았습니다 — ${(r.code && SKIP_TEXT[r.code]) || r.reason || '사유 미상'}.` };
   return { tone: 'bad', text: `보내지 못했습니다 — ${r.reason || '사유 미상'}` };
