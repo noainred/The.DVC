@@ -23,6 +23,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import IsiduBulk from './IsiduBulk.jsx';
+import IsiduDigestSettings from './IsiduDigestSettings.jsx';
 import {
   blankTarget, formFromTarget, targetBody, pathHint, commandText, deviceLabel, keyStatus, INTERVAL_CHOICES, TIMEOUT_CHOICES, everyText,
   RUN_FOLLOW, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, testResultText,
@@ -56,7 +57,9 @@ function KeyBox({ k, agent, reportedAt, onCreate, creating }) {
 }
 
 export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = null, focusId = '', rows = [], initialTab = 'edit', page = false }) {
-  const [mtab, setMtab] = useState(initialTab === 'bulk' ? 'bulk' : 'edit');
+  const [mtab, setMtab] = useState(initialTab === 'bulk' || initialTab === 'digest' ? initialTab : 'edit');
+  // v2.742 종합 메일 탭 — 처음 열 때 한 번 만들고 탭을 오가도 유지한다(저장하지 않은 입력이 탭 전환으로 사라지지 않게).
+  const [digestSeen, setDigestSeen] = useState(initialTab === 'digest');
   const [srv, setSrv] = useState(null);
   const [loadErr, setLoadErr] = useState(null);
   const [forms, setForms] = useState([]);
@@ -200,8 +203,10 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
           <div className="isd-mtabs" role="tablist" aria-label="설정 보기">
             <button type="button" role="tab" aria-selected={mtab === 'edit'} className={mtab === 'edit' ? 'on' : ''} onClick={() => setMtab('edit')}>개별 편집</button>
             <button type="button" role="tab" aria-selected={mtab === 'bulk'} className={mtab === 'bulk' ? 'on' : ''} onClick={() => setMtab('bulk')}>일괄 변경{forms.length ? ` (${forms.length})` : ''}</button>
+            <button type="button" role="tab" aria-selected={mtab === 'digest'} className={mtab === 'digest' ? 'on' : ''} onClick={() => { setMtab('digest'); setDigestSeen(true); }}>종합 메일</button>
           </div>
           {mtab === 'bulk' ? <IsiduBulk srv={srv} rows={rows} dirty={dirty} locked={locked} onApplied={onBulkApplied} /> : null}
+          {digestSeen ? <div hidden={mtab !== 'digest'}><IsiduDigestSettings locked={!!srv.loadError} /></div> : null}
           {mtab === 'edit' ? (<>
 
           <div className="tlist" role="list" aria-label="대상 목록">

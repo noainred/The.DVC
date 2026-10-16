@@ -29,6 +29,8 @@ import { buildReport } from './report.js';
 import * as db from './db.js';
 import { HISTORY_AGENT } from './targets.js';
 import { targetMailOf, mailRecipients, changeSummary, failAlertDue, FAIL_ALERT_MIN_MS } from './mailRules.js';
+import { renderResultMail, renderFailureMail, bytesText, deltaText } from './mailHtml.js';
+import { corpNameOf } from './corpName.js';
 
 registerStateFile('isidu-mail-state.json');
 const FILE = () => path.join(config.configDir, 'isidu-mail-state.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
@@ -82,85 +84,20 @@ export function isiduMailStateOf(id) {
 }
 
 // ── 본문 ──────────────────────────────────────────────────────────────────
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-export function bytesText(b) {
-  if (b == null || !Number.isFinite(b)) return '—';
-  let v = Math.abs(b); let i = 0;
-  while (v >= 1024 && i < UNITS.length - 1) { v /= 1024; i++; }
-  return `${b < 0 ? '−' : ''}${i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)} ${UNITS[i]}`;
-}
-export function deltaText(d) {
-  if (!d) return '—';
-  if (d.withinRes) return '변화 없음(반올림 범위)';
-  return `${d.bytes > 0 ? '+' : ''}${bytesText(d.bytes)}`;
-}
-const pct = (x) => (x == null || !Number.isFinite(x) ? '—' : `${(x * 100).toFixed(1)}%`);
+// v2.742: 본문은 `mailHtml.js`(시안 ③④ — 표 기반 · 인라인 스타일)가 그린다. 이 두 함수는 예전 이름·인자를 유지한다(테스트·호출부 호환).
+export { bytesText, deltaText };
 
 function nameOf(t) { return t.label || t.path || t.id; }
 
 /** 결과 메일 본문(순수 — 테스트로 고정). */
-export function buildResultMail(t, report, { change = null } = {}) {
-  const s = report.scan;
-  const k = report.kpi || {};
-  const when = localStamp(s.ts) || '—';
-  const label = nameOf(t);
-  const subject = `[아이실론 디렉터리 사용량] ${label} — ${when} · 폴더 ${(k.users ?? 0).toLocaleString()}개 · 상위 ${k.topN ?? 0}개 ${bytesText(k.topBytes)}`.slice(0, 200);
-  const base7 = report.base7 ? `7일 변화 기준: ${localStamp(report.base7.ts) || '—'} 조사(${report.base7.spanDays}일 전)` : '7일 변화: 7일 이전 조사가 없어 비교하지 않았습니다';
-  const notes = [];
-  if (s.errLines) notes.push(`du 가 권한 오류 ${s.errLines}줄을 냈습니다 — 크기가 실제보다 작을 수 있습니다.`);
-  if (s.truncated) notes.push('폴더가 많아 일부만 저장했습니다(상한).');
-  if (s.sizeMode !== 'k') notes.push('크기는 du -h 반올림 값입니다 — 반올림 범위 안의 차이는 변화로 보지 않습니다.');
-  if (change && !change.first && change.reasons?.length) notes.push(`직전 조사 대비: ${change.reasons.join(' · ')}`);
-  const rows = (report.top || []).map((r) => ({ rank: r.rank, name: r.name, size: bytesText(r.bytes), share: pct(r.share), d7: r.new7 === true ? '신규' : deltaText(r.d7) }));
-  const growth = (report.growth || []).slice(0, 5).map((r) => ({ name: r.name, d7: deltaText(r.d7), size: bytesText(r.bytes) }));
-  const head = [
-    ['경로', s.path], ['장비', s.host || '—'], ['조사 노드', s.node || '메인'], ['조사 시각', when], ['소요', `${Math.round((s.durationMs || 0) / 1000)}초`],
-    ['전체 합계', `${bytesText(k.denomBytes)}${k.totalDelta7 ? ` (7일 ${deltaText(k.totalDelta7)})` : ''}`],
-    ['폴더 수', `${(k.users ?? 0).toLocaleString()}개${k.new7 != null ? ` · 7일 신규 ${k.new7}개` : ''}${k.removed7 != null ? ` · 사라짐 ${k.removed7}개` : ''}`],
-  ];
-  const td = 'style="padding:4px 8px;border-bottom:1px solid #ddd"';
-  const html = [
-    `<div style="font-family:sans-serif;font-size:13px;color:#222">`,
-    `<h3 style="margin:0 0 8px">${esc(label)} — 디렉터리 사용량 상위 ${esc(k.topN ?? 0)}개</h3>`,
-    `<table style="border-collapse:collapse;margin-bottom:10px">${head.map(([a, b]) => `<tr><td ${td}><b>${esc(a)}</b></td><td ${td}>${esc(b)}</td></tr>`).join('')}</table>`,
-    `<table style="border-collapse:collapse"><tr><th ${td}>순위</th><th ${td} align="left">폴더</th><th ${td} align="right">크기</th><th ${td} align="right">비중</th><th ${td} align="right">7일 변화</th></tr>`,
-    rows.map((r) => `<tr><td ${td} align="right">${r.rank}</td><td ${td}>${esc(r.name)}</td><td ${td} align="right">${esc(r.size)}</td><td ${td} align="right">${esc(r.share)}</td><td ${td} align="right">${esc(r.d7)}</td></tr>`).join(''),
-    `</table>`,
-    growth.length ? `<p style="margin:10px 0 4px"><b>7일 증가 상위</b></p><ul style="margin:0">${growth.map((g) => `<li>${esc(g.name)} — ${esc(g.d7)} (지금 ${esc(g.size)})</li>`).join('')}</ul>` : '',
-    `<p style="color:#666;margin-top:10px">${esc(base7)}</p>`,
-    notes.length ? `<ul style="color:#666">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '',
-    `<p style="color:#999">이 메일은 포탈의 특수 기능 › 아이실론 디렉터리 사용량에서 보냈습니다. 수신자는 수집 대상 설정의 '결과 메일' 에서 바꿉니다.</p>`,
-    `</div>`,
-  ].join('');
-  const text = [
-    `${label} — 디렉터리 사용량 상위 ${k.topN ?? 0}개`,
-    ...head.map(([a, b]) => `${a}: ${b}`),
-    '',
-    ...rows.map((r) => `${String(r.rank).padStart(2)}. ${r.name} — ${r.size} (${r.share}, 7일 ${r.d7})`),
-    ...(growth.length ? ['', '7일 증가 상위:', ...growth.map((g) => `- ${g.name} ${g.d7} (지금 ${g.size})`)] : []),
-    '', base7, ...notes.map((n) => `* ${n}`),
-  ].join('\n');
-  return { subject, html, text };
+export function buildResultMail(t, report, { change = null, corp = '', recipients = null, now = Date.now() } = {}) {
+  return renderResultMail({ label: nameOf(t), corp, report, change, recipients, onlyOnChange: targetMailOf(t).onlyOnChange, now });
 }
 
-/** 실패 알림 본문(순수). */
-export function buildFailureMail(t, scan, { failStreak = 0, lastOk = null } = {}) {
-  const label = nameOf(t);
-  const when = localStamp(scan.ts) || '—';
-  const subject = `[아이실론 디렉터리 사용량] 조사 실패 — ${label} (${when})`.slice(0, 200);
-  const lines = [
-    ['경로', scan.path || t.path || '—'], ['장비', scan.host || t.host || '—'], ['조사 노드', scan.node || '메인'], ['시각', when],
-    ['종류', scan.kind || 'error'], ['사유', scan.error || '—'], ['연속 실패', `${failStreak || 1}회`],
-    ['마지막 성공', lastOk ? (localStamp(lastOk) || '—') : '없음'],
-  ];
-  const td = 'style="padding:4px 8px;border-bottom:1px solid #ddd"';
-  const tail = `다음 실패 알림은 ${Math.round(FAIL_ALERT_MIN_MS / 3_600_000)}시간 뒤에야 보냅니다(같은 대상).`;
-  const html = `<div style="font-family:sans-serif;font-size:13px;color:#222"><h3 style="margin:0 0 8px">${esc(label)} — 디렉터리 사용량 조사 실패</h3>`
-    + `<table style="border-collapse:collapse">${lines.map(([a, b]) => `<tr><td ${td}><b>${esc(a)}</b></td><td ${td}>${esc(b)}</td></tr>`).join('')}</table>`
-    + `<p style="color:#666">${esc(tail)}</p></div>`;
-  const text = [`${label} — 디렉터리 사용량 조사 실패`, ...lines.map(([a, b]) => `${a}: ${b}`), '', tail].join('\n');
-  return { subject, html, text };
+/** 실패 알림 본문(순수). lastOk 는 시각(옛 호출) 또는 { ts, bytes }. */
+export function buildFailureMail(t, scan, { failStreak = 0, lastOk = null, firstFailTs = null, corp = '', authStopped = null, now = Date.now() } = {}) {
+  const lo = lastOk == null ? null : (typeof lastOk === 'object' ? lastOk : { ts: lastOk, bytes: null });
+  return renderFailureMail({ label: nameOf(t), corp, scan, target: t, failStreak, firstFailTs, lastOk: lo, authStopped, failAlertHours: Math.round(FAIL_ALERT_MIN_MS / 3_600_000), now });
 }
 
 // ── 발송 ──────────────────────────────────────────────────────────────────
@@ -212,7 +149,9 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
     }
     const latest = await db.latestOf(HISTORY_AGENT, id);
     const scan = latest?.lastTry && (latest.lastTry.id === sid || !Number.isFinite(sid)) ? latest.lastTry : { ts: sts, path: t.path, host: t.host, kind: 'error', error: '사유를 읽지 못했습니다' };
-    const mail = buildFailureMail(t, scan, { failStreak: latest?.failStreak || 0, lastOk: latest?.okScan?.ts || null });
+    const ok = latest?.okScan || null;
+    const firstFailTs = await firstFailureAfter(id, ok?.ts ?? null).catch(() => null);
+    const mail = buildFailureMail(t, scan, { failStreak: latest?.failStreak || 0, lastOk: ok ? { ts: ok.ts, bytes: totalOf(ok)?.bytes ?? null } : null, firstFailTs, corp: corpNameOf(t) });
     const out = await sendTo(t, rcpt.to, mail, 'system');
     if (out.state === 'sent') r.lastFailAlertAt = now;
     return { state: out.state, last: note(id, { kind: 'failure', scanId: sid, scanTs: sts, to: rcpt.to.length, ...out }) };
@@ -227,8 +166,11 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
   if (tm.onlyOnChange) {
     change = await changeVsPrevious(id, report, t.topN);
     if (!change.changed) return { state: 'unchanged', last: note(id, { kind: 'result', scanId: sid, scanTs: sts, state: 'skipped', reason: '직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같아 보내지 않았습니다(변화 없으면 생략)' }) };
+  } else {
+    // v2.742: 본문의 '직전 조사 대비' 알림용 — 판정에는 쓰지 않으므로 실패해도 메일은 보낸다.
+    try { change = await changeVsPrevious(id, report, t.topN); } catch { change = null; }
   }
-  const mail = buildResultMail(t, report, { change });
+  const mail = buildResultMail(t, report, { change, corp: corpNameOf(t), recipients: rcpt });
   const out = await sendTo(t, rcpt.to, mail, 'system');
   return { state: out.state, last: note(id, { kind: 'result', scanId: sid, scanTs: sts, to: rcpt.to.length, ...out }) };
 }
@@ -245,6 +187,13 @@ async function changeVsPrevious(id, report, topN) {
   const curNames = cur.rows.slice(0, n).map((r) => r.name).filter((x) => !entries.has(x));
   for (const [k, v] of ((await db.entriesByNames(prev.id, curNames)) || new Map())) entries.set(k, v);
   return changeSummary(cur, { entries, total: totalOf(prev) }, topN);
+}
+/** 마지막 성공 뒤 처음 실패한 조사 시각(실패 알림 '처음 실패'). 성공이 없으면 최근 30일에서 찾는다. 못 찾으면 null. */
+async function firstFailureAfter(id, okTs) {
+  const since = okTs != null ? Number(okTs) + 1 : Date.now() - 30 * 86_400_000;
+  const scans = (await db.scansIn(HISTORY_AGENT, id, since, 500)) || [];
+  const f = scans.find((sc) => sc && sc.ok === false);
+  return f ? f.ts : null;
 }
 function totalOf(scan) {
   if (scan?.total && Number.isFinite(scan.total.bytes)) return { bytes: scan.total.bytes, res: scan.total.res };
@@ -266,7 +215,7 @@ export function sendLatestNow(targetId, by = 'system') {
     if (String(id).startsWith('mock-')) return { ok: false, state: 'demo', reason: '데모 대상은 실제 메일을 보내지 않습니다.' };
     const report = await buildReport(id, { topN: t.topN });
     if (report.state !== 'ok') return { ok: false, state: 'no-report', reason: '보낼 성공 결과가 없습니다(먼저 조사를 한 번 실행하세요).' };
-    const out = await sendTo(t, rcpt.to, buildResultMail(t, report), by);
+    const out = await sendTo(t, rcpt.to, buildResultMail(t, report, { corp: corpNameOf(t), recipients: rcpt }), by);
     const last = note(id, { kind: 'result', scanId: report.scan.id, scanTs: report.scan.ts, to: rcpt.to.length, manual: true, ...out });
     return { ok: out.state === 'sent', ...last };
   });
