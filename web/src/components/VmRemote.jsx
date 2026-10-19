@@ -4,6 +4,7 @@ import { downloadFailText } from '../views/downloadFailText.js';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 import { openRemoteSession } from '../remote/sessions.js';
 import Select from './Select.jsx';
+import { probeFailState, probeRow, probeTip as probeTipText, probeColor as probeColorOf } from './vmRemoteProbeText.js';
 
 const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
 const INP = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
@@ -46,7 +47,7 @@ export function VmRemoteButton({ item }) {
     ips.forEach((ip) => {
       postJson('/remote/probe', { vcenterId: item.vcenterId, targetHost: ip, targetPort: probePort })
         .then((r) => { if (alive) setProbes((p) => ({ ...p, [ip]: { loading: false, ...r } })); })
-        .catch((e) => { if (alive) setProbes((p) => ({ ...p, [ip]: { loading: false, ok: false, reason: e.message } })); });
+        .catch((e) => { if (alive) setProbes((p) => ({ ...p, [ip]: probeFailState(e) })); });   // v2.744: 403·404 는 '도달 불가' 가 아니라 범위 거부
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -61,12 +62,10 @@ export function VmRemoteButton({ item }) {
 
   const anyLoading = ips.some((x) => probes[x]?.loading);
   const anyOpen = openIps.length > 0;
-  const probeColor = canRemote === false ? '#94a3b8' : noIp ? '#f59e0b' : anyLoading ? null : anyOpen ? '#22c55e' : '#f87171';
-  const probeTip = canRemote === false ? '원격 접속은 operator/admin 권한이 필요합니다.'
-    : noIp ? '수집된 IP가 없습니다.'
-      : anyLoading ? '프록시 경유 접속 점검 중…'
-        : anyOpen ? `접속 가능 IP: ${openIps.join(', ')} (:${probePort})`
-          : `모든 IP 접속 불가(:${probePort}) — 방화벽/포트/프록시 경로 확인`;
+  const allDenied = ips.length > 0 && ips.every((x) => probes[x]?.denied);
+  // v2.744(최종 검토 리드): 판정·문구는 vmRemoteProbeText.js 하나 — 범위 거부(403·404)를 네트워크 장애로 안내하지 않는다.
+  const probeColor = probeColorOf({ canRemote, ips, probes });
+  const probeTip = probeTipText({ canRemote, ips, probes, probePort });
   const connect = async () => {
     setBusy(true); setError(null);
     try {
@@ -129,9 +128,9 @@ export function VmRemoteButton({ item }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {ips.map((x) => {
                     const p = probes[x] || { loading: true };
-                    const st = p.loading ? 'pending' : p.portOpen ? 'up' : (p.pingOk ? 'warn' : 'down');
+                    const { st, label: base } = probeRow(p);
                     const c = st === 'up' ? '#22c55e' : st === 'down' ? '#ef4444' : st === 'warn' ? '#f59e0b' : '#9ca3af';
-                    const label = p.loading ? '확인 중…' : p.portOpen ? `접속 가능 · 포트 열림${p.pingOk ? ` · ping ${p.pingMs}ms` : ''}` : p.pingOk ? '포트 닫힘(ping만 응답)' : '도달 불가';
+                    const label = st === 'denied' && p.reason ? `${base} — ${p.reason}` : base;
                     return (
                       <label key={x} title={label} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 8px', borderRadius: 6,
                         border: ip === x ? '1px solid var(--accent,#2563eb)' : '1px solid transparent', background: ip === x ? 'rgba(37,99,235,.08)' : 'transparent' }}>
@@ -144,7 +143,7 @@ export function VmRemoteButton({ item }) {
                   })}
                 </div>
                 <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  {anyLoading ? '도달성 확인 중…' : anyOpen ? `✅ 접속 가능 IP: ${openIps.join(', ')} — 선택한 IP로 접속합니다.` : '⚠ 열린 포트가 없습니다. 그래도 선택한 IP로 접속을 시도할 수 있습니다.'}
+                  {anyLoading ? '도달성 확인 중…' : anyOpen ? `✅ 접속 가능 IP: ${openIps.join(', ')} — 선택한 IP로 접속합니다.` : allDenied ? `⛔ ${probeTip}` : '⚠ 열린 포트가 없습니다. 그래도 선택한 IP로 접속을 시도할 수 있습니다.'}
                 </div>
               </div>
 
