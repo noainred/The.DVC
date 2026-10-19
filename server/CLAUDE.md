@@ -921,4 +921,7 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   새 관리 화면 접두를 만들면 READ_DENY 에도 넣을 것(v2.716 규약).
 - **엣지가 등록부를 읽어 '전량' 을 보내는 응답은 `registryLoadError()` 를 먼저 본다**(EDGE-01): 엣지 iDRAC 등록부(idrac.json)가 손상이면 `/api/collector/export` 가
   503 `registryUnreadable` + Retry-After 60 + no-store 이고 중앙 puller 는 직전 스냅샷을 유지한다(`edgeReason` · 통신 지도 `pull-edge-registry`). 빈 목록을 보내면 중앙이
-  그 법인의 위임 서버·전력을 통째로 지운다. v2.744 EDGE-01·EDGE-03 이 같은 규칙을 fleet·파트 장애 push 와 자동 쓰기(설정 pull 적용·위임 스캔 등록)로 넓혔다.
+  그 법인의 위임 서버·전력을 통째로 지운다. v2.744 EDGE-01 이 같은 규칙을 fleet push(상태 전용 보고 — 중앙 2.744.0 이상일 때만)·파트 장애 push(`registryUnreadable` →
+  보류 사유 `registry-unreadable`)로 넓혔다. EDGE-03 은 **자동 등록**(위임 스캔·주기 스캔의 `registerScanned(…, {auto:true})`)만 손상 등록부 위에 쓰지 않게 했고
+  (`util/registryCore.js autoWriteRefusal` 한 벌 — 새 자동 저장 경로는 auto:true 를 넘길 것), 스토리지·SAN·PDU·CVP **설정 pull 적용은 예전처럼 다시 쓰되**
+  `registryRecovered` 로 기록한다(그 엣지의 수집 대상은 전부 중앙 배포분이라 다시 쓰는 것이 복구다 — 배포분이 아닌 로컬 항목은 손상 보존본에만 남는다).
