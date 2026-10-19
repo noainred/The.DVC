@@ -247,3 +247,39 @@ describe('⑤ 서버가 이 경로에서 실제로 보내는 거부·점검 못 
     expect(auth).toMatch(/error: 'otp_enrollment_required'/);
   });
 });
+
+describe('⑥ VD 검토 R1 — 경고(ping 만)·빈 200 본문·표지 없는 사유 403 이 다른 상태로 새지 않는다', () => {
+  it('ping 만 응답(포트 닫힘)은 실제로 점검한 결과다 — 접속 불가 · 방화벽 · 빨강 · "열린 포트가 없습니다"', async () => {
+    const q = await probeState(200, { ok: true, method: 'ssh', pingOk: true, pingMs: 2, portOpen: false });
+    expect(probeRow(q).st).toBe('warn');
+    const tip = probeTip(one(q));
+    expect(tip).toMatch(/^모든 IP 접속 불가\(:22\) — 방화벽/);
+    expect(probeColor(one(q))).toBe(RED);
+    expect(probeFooter(one(q))).toBe('⚠ 열린 포트가 없습니다. 그래도 선택한 IP로 접속을 시도할 수 있습니다.');
+    // 경고 1 + 점검 못 함 1 → '점검한 1개 IP' 로 센다(경고를 점검한 개수에서 빼지 않는다)
+    const mixed = { canRemote: true, ips: ['10.0.0.1', '10.0.0.2'], probes: { '10.0.0.1': q, '10.0.0.2': { loading: false, ok: false, method: 'none', reason: NO_SSH_REASON } }, probePort: 22 };
+    expect(probeTip(mixed)).toMatch(/^점검한 1개 IP 접속 불가\(:22\)/);
+    expect(probeColor(mixed)).toBe(RED);
+  });
+
+  it('빈 200 본문({})은 점검 결과가 아니다 — 점검 못 함(회색), 도달 불가라 말하지 않는다', async () => {
+    const q = await probeState(200, {});
+    const row = probeRow(q);
+    expect(row.st).toBe('unchecked');
+    expect(row.label).toBe('점검 못 함');
+    expect(probeTip(one(q))).not.toMatch(/방화벽/);
+    expect(probeColor(one(q))).toBe(GRAY);
+  });
+
+  it('사유는 있지만 범위 표지(ok:false)가 없는 403 은 범위라 단정하지 않는다 → 사유 미상', async () => {
+    const q = await probeState(403, { reason: '어떤 게이트의 거부 사유' });
+    expect(q.denied).toBe(true);
+    expect(q.denyKind).toBe('unknown');
+    expect(probeRow(q).label).toBe('점검 요청 거부됨(사유 미상)');
+    expect(probeTip(one(q))).not.toMatch(/범위 밖/);
+    // 같은 사유의 404 도 범위가 아니라 점검 못 함(거부가 아니다)
+    const q404 = await probeState(404, { reason: '어떤 게이트의 거부 사유' });
+    expect(q404.denied).toBeUndefined();
+    expect(probeRow(q404).st).toBe('unchecked');
+  });
+});

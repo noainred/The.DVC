@@ -302,7 +302,11 @@ test('INJPKG-01 ⑦-c 4) — 정상 경로: 새 portal.env(AUTH_SECRET·PORT·CO
   const r = runConfig(env, { bak });
   assert.equal(r.status, 0, r.stderr);
   const p = snap(path.join(env.cfg, 'portal.env'));
-  assert.match(p.body, /^AUTH_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef$/m);
+  // v2.744 VA(PKG-01): root 는 서비스 계정이 바꿀 수 있는 $PREFIX/runtime/node 를 실행하지 않는다 — 가짜 node 가 내는 고정값이
+  // AUTH_SECRET 이 되면 그 결함이다(예전 단언이 바로 그 동작을 고정하고 있었다). 비밀은 패키지 node·openssl·urandom 중 하나가 만든 64자리 16진.
+  const sec = (p.body.match(/^AUTH_SECRET=(.*)$/m) || [])[1];
+  assert.match(String(sec), /^[0-9a-f]{64}$/);
+  assert.notEqual(sec, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'PKG-01 — root 는 $PREFIX/runtime/node 를 실행하지 않는다');
   assert.match(p.body, /^PORT=4711$/m);
   assert.match(p.body, new RegExp(`^CONFIG_DIR=${env.cfg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
   assert.equal(p.mode, 0o640);

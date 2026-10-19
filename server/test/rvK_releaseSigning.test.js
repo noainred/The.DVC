@@ -463,7 +463,10 @@ test('S-10 ⑧ 오프라인 — verifyCli(같은 판정) 종료 코드 0/1/2 와
   // install.sh 가 source 하는 확인 함수 — 가짜 PREFIX(기존 설치본 = 이 저장소 코드 + 현재 node)로 실제 bash 실행
   const prefix = fs.mkdtempSync(path.join(CFG, 'prefix-'));
   fs.mkdirSync(path.join(prefix, 'runtime/node/bin'), { recursive: true });
-  fs.symlinkSync(process.execPath, path.join(prefix, 'runtime/node/bin/node'));
+  // v2.744 VB(VERIFY-01): 옛 설치본 node 는 경로 전체를 바꿀 수 있는 계정으로 낮춰 실행한다 — 심볼릭 링크로 이 컨테이너의
+  // node(uid 1000 소유)를 가리키면 root 로 도는 테스트가 그 계정으로 낮아져 0700 임시 폴더를 못 읽는다. root 소유 0755 래퍼로 둔다
+  // (audit2742a·audit2741l 과 같은 방식 — 비 root CI 에서는 결과가 같다).
+  fs.writeFileSync(path.join(prefix, 'runtime/node/bin/node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 });
   fs.mkdirSync(path.join(prefix, 'app/server'), { recursive: true });
   // 기존 설치본 = 이 저장소 코드의 사본 + 빈 저장소 공개키 목록(v2.735.2 에 실제 목록에 키가 들어갔다 — 심볼릭 링크면
   // import.meta.url 이 실제 경로로 풀려 실제 목록을 읽는다). 패키지는 저장소 node_modules 를 그대로 쓴다.

@@ -209,9 +209,21 @@ const FC_NOMINAL_REST_TEXT = Object.freeze({
   hold: '나머지 포트에 사용률이 없어 서버 대표 HBA 사용률은 비웠습니다(판정 보류 — 임계 알림은 초과로 보지 않습니다).',
 });
 
-/** 한 서버의 상세 안내 — '무엇을 읽었고 무엇을 못 읽었나'. */
+/**
+ * 한 서버의 상세 안내 — '무엇을 읽었고 무엇을 못 읽었나'.
+ * v2.744(최종 수정분 검토 RV2744F-WEB-03): 입력은 상세 조회 응답의 `usageDetail`(서버 poller.slimUsageDetail — 장치 이름 없이 판정 필드·개수만)이다.
+ *   예전에는 어떤 응답도 상세를 싣지 않아 이 문구가 화면에 한 번도 나오지 않았다. 서버 상세에 `notes`(buildUsage 의 노트 — FC 대표값을
+ *   실제로 정한 경로까지 아는 fcRateNotes 문구 · 첫 표본 · 간격 초과 · 카운터 이상)가 배열로 오면 그것을 끝에 그대로 싣고, 같은 내용을
+ *   말하는 웹 줄(링크 속도 없는 인터페이스 · FC 데이터율 초과 3종)은 양보한다 — 두 번 말하지 않고, 서버 문구가 128행 상한 전 전체 행으로
+ *   센 것이다. notes 가 없는 입력(옛 테스트·옛 응답)은 예전과 같다.
+ */
 export function detailNotes(detail = {}) {
   const out = [];
+  const serverNotes = Array.isArray(detail.notes) ? detail.notes.filter((x) => typeof x === 'string' && t(x)) : null;
+  // v2.744(VE 검토 R1): 양보는 서버 노트가 **같은 말을 실제로 했을 때만**이다 — 노트 배열은 비어 있어도 실린다(Windows 경로는
+  //   '링크 속도를 읽지 못한 인터페이스' 노트를 내지 않고, OS FC 노트는 Linux 경로에서만 나온다). 배열이 있다는 것만으로 숨기면 그 안내가 사라진다.
+  const serverSays = (s) => !!serverNotes && serverNotes.some((x) => x.includes(s));
+  const serverFc = serverSays('FC 표준 데이터율') || serverSays('명목 속도(Gbit)');
   const kind = t(detail.osKind);
   if (kind) out.push(`OS 경로: **${kind === 'windows' ? 'Windows(PowerShell)' : 'Linux(/proc)'}** · 읽음 ${(detail.osRead || []).join('·') || '없음'}`);
   if ((detail.osMissing || []).length) out.push(`**읽지 못한 항목**: ${detail.osMissing.join('·')} — 권한이나 명령 부재일 수 있습니다.`);
@@ -222,6 +234,8 @@ export function detailNotes(detail = {}) {
     if (has('diskspace')) out.push('디스크 **사용 공간**은 측정할 마운트를 등록해야 나옵니다(설정 › 베어메탈 스토리지).');
   }
   if (t(detail.osError)) out.push(`OS 수집 실패: ${t(detail.osError)}`);
+  // 응답 id 개수 — 서버 상세는 목록 대신 개수(idracSeenIdCount)를 싣는다(id 목록은 화면이 개수만 쓴다).
+  const seenIdCount = n(detail.idracSeenIdCount) ?? (Array.isArray(detail.idracSeenIds) ? detail.idracSeenIds.length : 0);
   if (t(detail.idracKind)) {
     const k = t(detail.idracKind);
     out.push(k === 'no-telemetry' ? telemetryMissingText(detail)
@@ -229,14 +243,19 @@ export function detailNotes(detail = {}) {
         // v2.591(감사 R-BM2): 403 은 자격증명 거부가 아니다 — 로그인은 됐고 그 리포트가 허락되지 않았다.
         : k === 'forbidden' ? 'iDRAC 이 텔레메트리 조회를 **거부했습니다(403)** — 라이선스(Datacenter)나 계정 권한 문제일 수 있습니다. 비밀번호 문제가 아니므로 주기 수집을 멈추지 않습니다.'
         : k === 'empty-report' ? 'iDRAC 텔레메트리 리포트가 비어 있습니다 — 텔레메트리가 켜져 있지 않을 수 있습니다.'
-          : k === 'ids-unmatched' ? `iDRAC 응답에서 **아는 메트릭 id 를 찾지 못했습니다** — 이 환경의 id 를 확인해야 합니다${(detail.idracSeenIds || []).length ? `(응답 id ${detail.idracSeenIds.length}개)` : ''}.`
+          : k === 'ids-unmatched' ? `iDRAC 응답에서 **아는 메트릭 id 를 찾지 못했습니다** — 이 환경의 id 를 확인해야 합니다${seenIdCount ? `(응답 id ${seenIdCount}개)` : ''}.`
             : `iDRAC 수집 실패: ${t(detail.idracError)}`);
   }
-  if (detail.idracUsedIds && Object.keys(detail.idracUsedIds).length) {
-    out.push(`iDRAC 이 쓴 메트릭 id: ${Object.entries(detail.idracUsedIds).map(([k, v]) => `${k}=${v}`).join(' · ')} — **이 id 는 이 환경에서 확인한 값입니다**(추정이 아닙니다).`);
+  // ⚠ '__' 로 시작하는 내부 키(전수 모드의 usedIds.__seenMetricIds — 배열)와 글자·숫자가 아닌 값은 id 가 아니다 — 'k=a,b,c…' 긴 줄이 되지 않게 뺀다.
+  const usedIds = detail.idracUsedIds && typeof detail.idracUsedIds === 'object' && !Array.isArray(detail.idracUsedIds)
+    ? Object.entries(detail.idracUsedIds).filter(([k, v]) => !String(k).startsWith('__') && (typeof v === 'string' || typeof v === 'number'))
+    : [];
+  if (usedIds.length) {
+    out.push(`iDRAC 이 쓴 메트릭 id: ${usedIds.map(([k, v]) => `${k}=${v}`).join(' · ')} — **이 id 는 이 환경에서 확인한 값입니다**(추정이 아닙니다).`);
   }
-  const noSpeed = (detail.interfaces || []).filter((x) => n(x.bps ?? x.bytesPerSec) != null && n(x.bitsPerSec) == null);
-  if (noSpeed.length) out.push(`**링크 속도를 읽지 못한 인터페이스 ${noSpeed.length}개** — 그 회선의 사용률(%)은 내지 않고 처리량만 보여줍니다.`);
+  // 가상 인터페이스는 보고 속도가 링크 속도가 아니라 사용률에서 뺀 것이다(서버 usage.js 와 같은 규칙) — '속도를 못 읽음' 으로 세지 않는다.
+  const noSpeed = (detail.interfaces || []).filter((x) => x && !x.virtual && n(x.bps ?? x.bytesPerSec) != null && n(x.bitsPerSec) == null);
+  if (noSpeed.length && !serverSays('링크 속도를 읽지 못한 인터페이스')) out.push(`**링크 속도를 읽지 못한 인터페이스 ${noSpeed.length}개** — 그 회선의 사용률(%)은 내지 않고 처리량만 보여줍니다.`);
   // v2.743(DEV-03): 사용률 0% 는 '속도를 못 읽음' 이 아니다(예전 `!n(x.pct)` 는 0 을 거기에 셌다) · 데이터율을 넘어 비운 포트는 따로 말한다.
   const fcRows = detail.fc || [];
   const fcNoSpeed = fcRows.filter((x) => n(x.bps) != null && n(x.pct) == null && !x.pctOver);
@@ -247,6 +266,12 @@ export function detailNotes(detail = {}) {
   //   (데이터율로 판정한 적이 없다 · 대표값은 나머지 포트 · 알림 초과 아님 — 서버 parse/fcRate.js fcRepresentative 와 같은 규칙).
   const fcBlanked = fcRows.filter((x) => x && x.pctOver && n(x.pct) == null && x.pctBasis !== 'nominal');
   const fcNominalOver = fcRows.filter((x) => x && x.pctOver && n(x.pct) == null && x.pctBasis === 'nominal');
+  // 서버 노트는 끝에 그대로 싣는다. 서버가 FC 데이터율 노트(fcRateNotes — 대표값을 실제로 정한 경로까지 안다)를 냈으면 FC 초과 3종은 그 문구가 말하고,
+  //   내지 않았으면(Windows 경로 · 노트 상한에 잘림) 아래 웹 줄이 말한다. fcNoSpeed 는 서버 노트에 없어 언제나 남긴다.
+  if (serverNotes) {
+    for (const x of serverNotes) out.push(x);
+    if (serverFc) return out;
+  }
   if (fcClamped.length) out.push(`**FC 표준 데이터율을 조금 넘은 포트 ${fcClamped.length}개** — 사용률을 100% 로 표시했습니다(카운터가 프레임 헤더까지 세는 측정 정의 차이입니다 — 처리량은 그대로입니다).`);
   if (fcBlanked.length) out.push(`**FC 표준 데이터율을 넘는 처리량이 크게 나온 포트 ${fcBlanked.length}개** — 그 포트의 사용률(%)과 서버 대표 HBA 사용률을 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 임계 알림은 초과로 봅니다).`);
   // v2.744(최종 검토 RV-2): 대표값이 어떻게 정해졌는지는 고정 문장이 아니라 판정(fcNominalRestKind — 서버와 같은 규칙)으로 말한다.
@@ -504,10 +529,12 @@ export function csvOf(rows = []) {
 export function telemetryNote(detail = {}) {
   const used = detail.idracReports || [];
   const seen = detail.idracSeenReports || [];
-  if (!seen.length && !used.length) return '';
+  // v2.744(RV2744F-WEB-03): 서버 상세는 목록을 100개로 자르고 전체 개수(idracSeenReportCount)를 따로 싣는다 — 개수는 그것이 먼저다.
+  const seenN = n(detail.idracSeenReportCount) ?? seen.length;
+  if (!seenN && !used.length) return '';
   const absent = detail.idracAbsent || [];
   const parts = [];
-  parts.push(`iDRAC 이 가진 텔레메트리 리포트 **${seen.length}종** 중 **${used.length}종**을 읽었습니다`
+  parts.push(`iDRAC 이 가진 텔레메트리 리포트 **${seenN}종** 중 **${used.length}종**을 읽었습니다`
     + `${used.length ? `(${used.slice(0, 5).join(' · ')}${used.length > 5 ? ' 외' : ''})` : ''}.`);
   const missKind = [];
   if (absent.includes('net')) missKind.push('네트워크');
@@ -627,10 +654,13 @@ export function entDetailNotes(detail = {}) {
   const out = [];
   const tried = detail.entTried || [];
   if (!tried.length) return out;
+  // v2.744(RV2744F-WEB-03): 서버 상세는 경로·센서 이름 대신 개수(entUsedPathCount·entSeenSensorCount)를 싣는다 — 개수는 그것이 먼저다.
+  const usedPathN = n(detail.entUsedPathCount) ?? Object.keys(detail.entUsedPaths || {}).length;
+  const seenSensorN = n(detail.entSeenSensorCount) ?? (Array.isArray(detail.entSeenSensors) ? detail.entSeenSensors.length : 0);
   const via = t(detail.entVia);
   if (via) {
     const how = [];
-    if (via.includes('api')) how.push(`표준 Redfish 센서(${Object.keys(detail.entUsedPaths || {}).length}개)`);
+    if (via.includes('api')) how.push(`표준 Redfish 센서(${usedPathN}개)`);
     if (via.includes('ssh')) how.push(`iDRAC SSH — ${t(detail.entUsedCmd) || 'racadm'}`);
     out.push(`대체 경로로 읽었습니다: **${how.join(' + ')}**.`);
     const stat = detail.entUsedStat || {};
@@ -654,10 +684,46 @@ export function entDetailNotes(detail = {}) {
   for (const sk of (detail.entSkipped || [])) {
     if (t(sk.reason)) out.push(`대체 경로 생략: ${t(sk.reason)}`);
   }
-  if ((detail.entSeenSensors || []).length && !Object.keys(detail.entUsedPaths || {}).length) {
-    out.push(`이 iDRAC 의 센서 **${detail.entSeenSensors.length}개** 중 사용률 이름이 맞는 것이 없었습니다 — 센서 이름을 알려 주시면 패턴을 맞추겠습니다.`);
+  if (seenSensorN && !usedPathN) {
+    out.push(`이 iDRAC 의 센서 **${seenSensorN}개** 중 사용률 이름이 맞는 것이 없었습니다 — 센서 이름을 알려 주시면 패턴을 맞추겠습니다.`);
   }
+  // 원문은 관리자에게만 싣는다(배너·호스트명이 섞일 수 있다 — 서버 routes/api/bmUsage.js maskUsageDetail). 빼면서 그 사실을 말한다.
+  if (detail.entRawHidden) out.push('racadm **원문은 관리자에게만** 보입니다(장비 배너·호스트명이 섞일 수 있어 이 계정에는 싣지 않았습니다).');
   return out.filter(Boolean);
+}
+
+/**
+ * v2.744(최종 수정분 검토 RV2744F-WEB-03): 상세 조회 응답의 수집 상세 상태 한 줄 — 서버 poller.usageDetailFor 의 state 를 그대로 말한다.
+ *   · 'ok' → 언제 수집한 상세인지(실패한 주기면 그 사실도) — 낡은 상세를 지금 값인 척하지 않는다.
+ *   · 'none' → 이 포탈 프로세스가 시작한 뒤 아직 그 서버를 수집하지 않았다(상세는 메모리에만 있어 재시작하면 다음 수집까지 빈다).
+ *     **'읽은 것이 없다' 고 말하지 않는다** — 모르는 것이다. 수집이 꺼져 있으면 그 사실을 말한다.
+ *   · 'demo' → 데모 대상이라 장치별 상세가 없다.
+ *   · 응답에 상태가 없으면(옛 서버) 빈 문자열 — 지어내지 않는다.
+ * @param {{usageDetail?:object|null, usageDetailState?:string, usageDetailSince?:number|null, usageDetailAt?:number}} resp
+ * @param {{enabled?:boolean, now?:number}} [o]
+ */
+export function usageDetailNote(resp, { enabled, now = Date.now() } = {}) {
+  if (!resp || typeof resp !== 'object') return '';
+  const st = t(resp.usageDetailState);
+  if (st === 'demo') return '데모 대상이라 장치별 수집 상세(무엇을 읽었는지)가 없습니다 — 사용률은 합성 값입니다.';
+  if (st === 'none') {
+    const since = n(resp.usageDetailSince);
+    const head = enabled === false
+      ? '수집이 꺼져 있어 이 서버의 수집 상세(무엇을 읽었고 무엇을 못 읽었는지)가 없습니다'
+      : `이 포탈이 ${since != null ? `${ageText(since, now)} ` : ''}시작한 뒤 이 서버를 아직 수집하지 않아 수집 상세(무엇을 읽었고 무엇을 못 읽었는지)가 없습니다`;
+    return `${head} — 상세는 메모리에만 두므로 재시작하면 다음 수집 뒤에 다시 나옵니다. 아래 추이는 저장된 값입니다.`;
+  }
+  if (st === 'ok') {
+    const d = resp.usageDetail && typeof resp.usageDetail === 'object' ? resp.usageDetail : null;
+    const at = n(d?.at);
+    const when = at != null ? `${ageText(at, now)} 수집` : '수집 시각 미상';
+    // v2.744(VE 검토 R2): 수집이 꺼져 있으면 마지막 상세가 그대로 남는다(폴러가 정리하지 않는다) — '다음 수집 때 바뀝니다' 는 거짓이다.
+    const tail = enabled === false ? '수집이 꺼져 있어 바뀌지 않습니다' : '다음 수집 때 바뀝니다';
+    return d && d.ok === false
+      ? `아래 수집 상세는 **${when}에서 값을 읽지 못한 주기**의 것입니다(그 주기의 실패 사유입니다 · ${tail}).`
+      : `아래 수집 상세는 **${when}** 기준입니다(${tail}).`;
+  }
+  return '';
 }
 
 /**

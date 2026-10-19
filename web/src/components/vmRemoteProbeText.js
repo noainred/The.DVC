@@ -6,11 +6,13 @@
  *   원인인데 사용자는 방화벽을 의심한다. 거부는 `denied` 로 따로 표시하고 서버가 준 사유를 그대로 보여 준다.
  *
  * v2.744(적대적 검토 VD — RV2744F-WEB-01): 403·404 를 **전부** '범위 밖 대상' 으로 단정하면 그것도 원인 오표시다.
- *   서버가 이 경로(`POST /api/remote/probe`)에서 거부하는 모양은 다섯 가지이고 조치가 다르다 — 거부 종류(`denyKind`)로 나눈다:
+ *   서버가 이 경로(`POST /api/remote/probe` — index.js `authMiddleware → requireEnrolled → auditMiddleware → remoteRouter`,
+ *   라우트 `requirePerm('remote.access')`)에서 거부하는 모양은 네 가지이고 조치가 다르다 — 거부 종류(`denyKind`)로 나눈다:
  *     · demo   — mock 데모 계정 거부: 403 `{error:'forbidden', demoGuest:true, reason}`(server/src/auth/demoGuest.js denyDemoGuest)
  *     · perm   — 기능 권한 거부: 403 `{error:'forbidden', requiredPerm:[…]}`(auth.js requirePerm('remote.access'))
- *     · role   — 역할 거부: 403 `{error:'forbidden', requiredRole:[…]}`(auth.js requireRole)
  *     · enroll — OTP 등록 전 세션: 403 `{error:'otp_enrollment_required', reason}`(auth.js requireEnrolled)
+ *     · role   — 역할 거부 403 `{requiredRole:[…]}` 는 **이 경로에는 없다**(requireRole 이 체인에 없다 — VD 검토가 확인). 같은 판정을
+ *       다른 경로에 쓸 때를 위한 방어 분기다.
  *     · scope  — 범위 밖 대상 403 `{ok:false, reason}` · 범위 밖 vCenter 404 `{ok:false, reason}`(server/src/routes/remote.js /probe)
  *   표지가 하나도 없는 403(중간 프록시의 HTML 403 등)은 `unknown` — '범위' 라고 단정하지 않는다. 표지 없는 404 는 거부가 아니라
  *   점검 API 를 찾지 못한 것이라 '점검 못 함' 이다. 판정은 `web/src/api.js HttpError` 가 싣는 필드(status·demoGuest·requiredPerm·

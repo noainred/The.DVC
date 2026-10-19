@@ -39,6 +39,7 @@ import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 장비에 접속하지 않고 합성 행
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
 import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
@@ -93,6 +94,110 @@ let _last = null;
 let _timer = null;
 /** 이전 주기의 누적 카운터(인메모리 — 재시작하면 첫 주기가 다시 `null` 이다. 그것이 정직하다). */
 const _prev = new Map();
+
+/*
+ * ── 서버별 마지막 수집 상세(v2.744 최종 수정분 검토 RV2744F-WEB-03) ─────────────────────────────
+ * 화면 상세 카드의 '무엇을 읽었고 무엇을 못 읽었나'(웹 bmUsageText.detailNotes·telemetryNote·entDetailNotes)는 buildUsage().detail
+ *   을 입력으로 쓰는데, 그 상세는 DB 에 넣지 않고(usage_latest 열 고정 — 장치 수 × 주기면 행이 폭주한다, v2.550.3) 어떤 응답도 싣지
+ *   않아 그 문구가 화면에 한 번도 나오지 않았다(정적 추적 + 반증 2인 재현). buildUsage 의 notes(FC 대표값 경로까지 아는 fcRateNotes
+ *   fallback 문구 · 첫 표본 · 간격 초과 · 카운터 이상)도 폴러가 버렸다.
+ * 그래서 서버마다 **마지막 수집의 상세를 화면이 쓰는 필드만** 메모리에 둔다(`slimUsageDetail`) — 상세 조회(/tools/bm-usage/history)가
+ *   한 서버 것만 싣는다. 주 조회(/tools/bm-usage)에는 싣지 않는다(200대 × 상세면 응답이 수 MB 가 된다).
+ *   · 키 = 대상 key(이 노드의 대상 — 엣지는 자기 것만 수집하므로 agent 축이 따로 필요 없다) · 매 주기 대상 목록(live)으로 정리
+ *     (dropStaleState — v2.550.3 '인메모리 상태 맵은 대상 목록 기준으로 정리') → 크기 상한 = 대상 수.
+ *   · 실패한 수집도 기록한다 — 그 주기의 실패 사유(osError·idracKind …)가 곧 상세다. 수집 자체가 예외로 끝나 상세가 없으면 직전 기록을 둔다.
+ *   · ⚠ **재시작하면 비고 다음 수집부터 다시 찬다** — 화면은 그 사실을 상태 코드('none')로 받고 지어내지 않는다.
+ *   · 이름·주소를 싣지 않는다: 장치 이름(eth0·host0·FQDD)·센서 이름·Redfish 경로·mounts 는 화면이 개수만 쓰므로 빼고 개수만 둔다.
+ *     오류 문구와 racadm 원문(entRaw)은 주소가 섞일 수 있어 라우트가 비-관리자에게 가린다(원문은 아예 싣지 않는다).
+ *   · 크기(계산): 문자열·배열 상한을 걸어 서버당 최대 약 30KB(notes 24줄 × 600자 · 원문 2.4KB · 장치 행 128개씩), 보통 2~4KB 다 —
+ *     200대면 메모리 약 0.6MB(최악 약 6MB). 상세 조회 응답은 한 서버 것뿐이다.
+ */
+const _detail = new Map();
+/** 이 프로세스가 상세 기록을 시작한 시각 — 화면이 '시작한 뒤 아직 수집하지 않았다' 를 말할 수 있게(지어내지 않는다). */
+const DETAIL_SINCE = Date.now();
+/** 상세 응답 필드 계약(화면 bmUsageText 가 읽는 것만) — 테스트가 고정한다. 필드를 늘리면 화면이 읽는지 먼저 볼 것. */
+export const USAGE_DETAIL_FIELDS = Object.freeze([
+  'at', 'ok',
+  'osKind', 'osRead', 'osMissing', 'osAbsent', 'osError',
+  'idracKind', 'idracError', 'idracUsedIds', 'idracSeenIdCount', 'idracReports', 'idracSeenReports', 'idracSeenReportCount', 'idracAbsent',
+  'interfaces', 'fc', 'idracFc',
+  'entTried', 'entVia', 'entKind', 'entError', 'entUsedPathCount', 'entUsedCmd', 'entUsedStat', 'entSkipped', 'entSeenSensorCount', 'entRaw',
+  'notes',
+]);
+const DETAIL_ROWS_MAX = 128;
+const dStr = (v, max) => (typeof v === 'string' ? capStr(v, max) : '');
+const dList = (a, maxN = 40, maxLen = 80) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x).slice(0, maxN).map((x) => capStr(x, maxLen)) : []);
+const dCount = (a) => (Array.isArray(a) ? a.length : null);
+/** 장치 행(NIC) — 이름 없이 화면이 세는 값만(속도를 읽었나 · 가상인가 · 처리량). */
+const dIf = (x) => (x && typeof x === 'object'
+  ? { bps: numOrNull(x.bps ?? x.bytesPerSec), bitsPerSec: numOrNull(x.bitsPerSec), pct: numOrNull(x.pct), ...(x.virtual ? { virtual: true } : {}) }
+  : null);
+/** 장치 행(FC) — 이름 없이 판정 필드만(fcNominalRestKind·FC 문구가 쓰는 것). */
+const dFc = (x) => (x && typeof x === 'object'
+  ? {
+    bps: numOrNull(x.bps), pct: numOrNull(x.pct), pctBasis: typeof x.pctBasis === 'string' ? capStr(x.pctBasis, 16) : null,
+    ...(x.pctOver ? { pctOver: true } : {}), ...(x.pctClamped ? { pctClamped: true } : {}), ...(x.countersInvalid ? { countersInvalid: true } : {}),
+  }
+  : null);
+const dRows = (a, fn) => (Array.isArray(a) ? a.slice(0, DETAIL_ROWS_MAX).map(fn).filter(Boolean) : []);
+/** 짧은 이름 → 짧은 값 맵(메트릭 id · 읽은 열). '__' 로 시작하는 내부 키(usedIds.__seenMetricIds — 배열)는 뺀다. */
+function dMap(o, maxN = 20) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const out = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(o)) {
+    if (n >= maxN || typeof k !== 'string' || k.startsWith('__')) continue;
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    out[capStr(k, 40)] = capStr(v, 80); n += 1;
+  }
+  return n ? out : null;
+}
+
+/**
+ * buildUsage() 결과 → 화면 상세(순수 — 원본을 바꾸지 않는다). 필드는 `USAGE_DETAIL_FIELDS` 그대로다.
+ * @param {{detail?:object, notes?:string[]}} built
+ * @param {{at?:number|null, ok?:boolean}} [o]
+ */
+export function slimUsageDetail(built, { at = null, ok = false } = {}) {
+  const d = built?.detail && typeof built.detail === 'object' ? built.detail : {};
+  return {
+    at: numOrNull(at), ok: !!ok,
+    osKind: dStr(d.osKind, 16) || null,
+    osRead: dList(d.osRead), osMissing: dList(d.osMissing), osAbsent: dList(d.osAbsent), osError: dStr(d.osError, 300),
+    idracKind: dStr(d.idracKind, 40), idracError: dStr(d.idracError, 300),
+    idracUsedIds: dMap(d.idracUsedIds),
+    idracSeenIdCount: dCount(d.idracSeenIds),
+    // 리포트 id 는 Dell 의 일반 리포트 이름(SystemUsage·NICStatistics …)이라 그대로 둔다 — 화면이 앞 5개를 이름으로 보인다.
+    idracReports: dList(d.idracReports, 60), idracSeenReports: dList(d.idracSeenReports, 100), idracSeenReportCount: dCount(d.idracSeenReports),
+    idracAbsent: dList(d.idracAbsent),
+    interfaces: dRows(d.interfaces, dIf), fc: dRows(d.fc, dFc), idracFc: dRows(d.idracFc, dFc),
+    entTried: dList(d.entTried, 8, 16), entVia: dStr(d.entVia, 16), entKind: dStr(d.entKind, 60), entError: dStr(d.entError, 300),
+    entUsedPathCount: d.entUsedPaths && typeof d.entUsedPaths === 'object' ? Object.keys(d.entUsedPaths).length : null,
+    entUsedCmd: dStr(d.entUsedCmd, 120), entUsedStat: dMap(d.entUsedStat),
+    entSkipped: (Array.isArray(d.entSkipped) ? d.entSkipped : []).slice(0, 10)
+      .filter((x) => x && typeof x === 'object').map((x) => ({ step: dStr(x.step, 16), reason: dStr(x.reason, 300) })),
+    entSeenSensorCount: dCount(d.entSeenSensors),
+    entRaw: dStr(d.entRaw, 2_400),
+    // buildUsage 의 노트 — FC 대표값을 실제로 정한 경로(fcRateNotes fallback)까지 아는 문구라 화면이 그대로 쓴다(웹 detailNotes 가 겹치는 줄을 양보한다).
+    notes: dList(built?.notes, 24, 600),
+  };
+}
+
+/** 한 서버의 마지막 수집 상세를 기록한다(collectOne — 실패 주기도). */
+function recordUsageDetail(key, built, { at = null, ok = false } = {}) {
+  if (!key || !built) return;
+  _detail.set(key, { state: 'ok', detail: slimUsageDetail(built, { at, ok }) });
+}
+
+/**
+ * 상세 조회용(라우트) — `{ state, detail, since }`. state: 'ok'(기록 있음) · 'none'(이 프로세스가 시작한 뒤 아직 수집하지 않음) ·
+ *   'demo'(데모 대상 — 합성 행이라 장치 상세가 없다). 사본을 준다(라우트가 가림을 덧대도 기록이 바뀌지 않게).
+ */
+export function usageDetailFor(key) {
+  const rec = key ? _detail.get(key) : null;
+  if (!rec) return { state: 'none', detail: null, since: DETAIL_SINCE };
+  return { state: rec.state, detail: rec.detail ? JSON.parse(JSON.stringify(rec.detail)) : null, since: DETAIL_SINCE, ...(rec.at ? { at: rec.at } : {}) };
+}
 
 /**
  * @param {{detail?:boolean}} [o]  detail = 등록부 로드 오류 사유의 위치(줄·칸)까지 싣는가(v2.744 최종 검토 FB — RD-R1·RG2744-03).
@@ -541,6 +646,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok || ent?.ok);
   recordHbaBasis(target.key, built, { at: sampledAt, ok });   // v2.744(LEFT-08 ②): 포트 수만 — 화면 각주가 분모 근거를 한 번 말한다
+  recordUsageDetail(target.key, built, { at: sampledAt, ok });   // v2.744(RV2744F-WEB-03): 화면 상세 카드 — 실패 주기도(그 사유가 상세다)
   recordBmUsage({
     // ⚠ `idracHost` 는 `publicTarget()` 이 만드는 응답용 필드다 — **내부 target 에는 없다**.
     //   `target.idracHost` 로 읽으면 iDRAC 전용 서버의 작업 로그에 host 가 빈 칸으로 남는다.
@@ -560,6 +666,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
 function dropStaleState(live) {
   for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
   pruneHbaBasis(live);   // v2.744(LEFT-08 ②)
+  for (const k of _detail.keys()) if (!live.has(k)) _detail.delete(k);   // v2.744(RV2744F-WEB-03)
   for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
 }
 
@@ -649,8 +756,11 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     if (demo && demoTargets.length) await demo.backfillBmUsage(demoTargets).catch(() => {});
     // v2.732(B1-01): 간격 한계용 주기 — 타이머가 재무장에 쓰는 값과 같은 출처(loadBmUsageSettings — 엣지는 배포분이 겹친 유효 설정)다.
     const intervalMs = loadBmUsageSettings().intervalMs;
+    const demoResults = demo ? demo.demoBmUsageResults(demoTargets, Date.now()) : [];
+    // v2.744(RV2744F-WEB-03): 데모 합성 행에는 장치 상세가 없다 — 화면이 '아직 수집하지 않았다' 고 말하지 않게 데모라고 표시해 둔다.
+    for (const r of demoResults) if (r?.target?.key) _detail.set(r.target.key, { state: 'demo', detail: null, at: Date.now() });
     const results = [
-      ...(demo ? demo.demoBmUsageResults(demoTargets, Date.now()) : []),
+      ...demoResults,
       ...(realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0 }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : []),
     ];
     /*
@@ -710,7 +820,7 @@ export function startBmUsagePoller() {
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _prev.clear(); _authStopped.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
+export function _resetForTest() { _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
