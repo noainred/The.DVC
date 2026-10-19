@@ -93,7 +93,8 @@ export function registerVmHygiene(api) {
     }
     // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
     // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
-    for (const t of notReadCsvLines(r.notReadVcenters, { what: '판정하지 않음' })) lines.push(csvLine([t]));
+    // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
+    for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: 'VM' })) lines.push(csvLine([t]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

@@ -63,17 +63,28 @@ export const notReadWhyText = (w) => NOT_READ_WHY_TEXT[w] || '읽지 못함';
  *   예전 세 라우트는 notReadVcenters 전체를 '읽지 못한 vCenter N곳' 으로 세고 사유를 영문 코드로 적어, 비활성 vCenter 만 있는 현장에서
  *   화면(partial=false · 하한 표지 없음 · '비활성 vCenter 만 합계에서 빠졌습니다')과 파일이 반대로 말했다. 이제 화면과 같은 기준
  *   (isNotReadMissing — notReadPartialOf·웹 notReadKpiSub 와 같다)으로 두 줄을 나눈다: 읽지 못한 것(합계는 하한) / 비활성(수집하지 않음).
+ * v2.744(최종 검토 RV-3·RX-CSV-01): 판정 목록 CSV(호스트·VM 구성 점검)는 mode 'judge' 다 — 그 파일에는 합계 행이 없으므로
+ *   ' · 합계는 하한' 을 붙이지 않고 웹 notReadJudgeNote(회귀 검토 FX-R2)와 같은 뜻으로 '그 vCenter 의 <noun> 판정 결과는 이 목록에 없음
+ *   (문제가 없다는 뜻이 아님)' 이라 적는다(예전에는 합계 화면 꼬리를 늘 붙여 화면 배너와 파일이 다르게 말했다). 비활성 줄은 두 모드가 같다
+ *   (원래 수집하지 않는다 — 화면 '비활성 N곳은 원래 수집하지 않습니다'). 모르는 mode 는 합계 문장(예전 동작)이다.
  * @param list notReadVcenters
- * @param what 그 리포트에서 빠진 것을 말하는 짧은 구절(예: '호스트가 이 목록에 없음')
+ * @param what 합계 화면에서 빠진 것을 말하는 짧은 구절(예: '호스트가 이 목록에 없음') — mode 'judge' 에서는 쓰지 않는다
+ * @param mode 'total'(합계 화면 — 기본) | 'judge'(판정 목록 화면)
+ * @param noun mode 'judge' 의 짧은 명사('호스트'·'VM' — 화면이 notReadJudgeNote 에 넘기는 값과 같게)
  * @returns {string[]} 0~2 줄(각각 CSV 한 칸)
  */
-export function notReadCsvLines(list, { what = '합계에 없음' } = {}) {
+export function notReadCsvLines(list, { what = '합계에 없음', mode = 'total', noun = '항목' } = {}) {
   const all = (Array.isArray(list) ? list : []).filter((x) => x && typeof x === 'object');
   const nameOf = (x) => String(x.name || x.vcenterId || '');
   const missing = all.filter(isNotReadMissing);
   const off = all.filter((x) => !isNotReadMissing(x));
   const out = [];
-  if (missing.length) out.push(`(읽지 못한 vCenter ${missing.length}곳 — ${what} · 합계는 하한: ${missing.map((x) => `${nameOf(x)}(${notReadWhyText(x.why)})`).join(', ')})`);
+  if (missing.length) {
+    const names = missing.map((x) => `${nameOf(x)}(${notReadWhyText(x.why)})`).join(', ');
+    out.push(mode === 'judge'
+      ? `(읽지 못한 vCenter ${missing.length}곳 — 판정하지 않음 · 그 vCenter 의 ${String(noun || '항목')} 판정 결과는 이 목록에 없음(문제가 없다는 뜻이 아님): ${names})`
+      : `(읽지 못한 vCenter ${missing.length}곳 — ${what} · 합계는 하한: ${names})`);
+  }
   if (off.length) out.push(`(비활성 vCenter ${off.length}곳(수집하지 않음): ${off.map(nameOf).join(', ')})`);
   return out;
 }
