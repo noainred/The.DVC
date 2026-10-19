@@ -26,6 +26,8 @@ import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../p
 import { devKeyOf, REGISTRY_SCOPES } from '../partfault/scan.js';
 import { admitAgent } from './edgeRecord.js';
 import { capStr } from '../util/capStr.js';
+import { safeLoadText } from '../util/atomicWrite.js';
+import { REGISTRY_ERROR_CODES } from '../util/registryCore.js';
 
 const t = (v) => String(v ?? '').trim();
 const s = (v, n) => capStr(t(v), n); // v2.607(TIM2607-01): 평탄화 — `.slice` 는 본문 원문을 붙잡는다
@@ -186,7 +188,9 @@ export async function putEdgeReport(agent, body = {}) {
 
 /**
  * v2.744(감사 EDGE-01): 엣지 보고의 '등록부를 읽지 못한 장비군' 표지를 좁힌다(순수). 아는 장비군만 · 객체만 · 사유 200자 · 시각은 수일 때만.
- * @returns {null|Record<string, {at:(number|null), reason:string}>}
+ * v2.744(최종 검토 리드): 엣지가 보낸 분류 코드(`code`)를 버리지 않고(아는 값만), 사유는 `safeLoadText` 를 거친다 — 엣지가 원문(JSON.parse 오류 =
+ *   등록부 조각 · 비밀번호가 끼일 수 있다)을 보내도 중앙 메모리·관리자 응답에는 요약만 남는다. 요약 글자('JSON 형식 오류(3번째 줄 …)')는 그대로다.
+ * @returns {null|Record<string, {at:(number|null), code:(string|null), reason:string}>}
  */
 export function sanitizeRegistryUnreadable(v) {
   if (!isObj(v)) return null;
@@ -194,7 +198,9 @@ export function sanitizeRegistryUnreadable(v) {
   for (const sc of REGISTRY_SCOPES) {
     if (!Object.hasOwn(v, sc) || !isObj(v[sc])) continue;
     const at = Number(v[sc].at);
-    out[sc] = { at: Number.isFinite(at) && at > 0 ? Math.round(at) : null, reason: s(typeof v[sc].reason === 'string' ? v[sc].reason : '', 200) || '사유 미상' };
+    const code = REGISTRY_ERROR_CODES.includes(v[sc].code) ? v[sc].code : null;
+    const reason = typeof v[sc].reason === 'string' ? safeLoadText(v[sc].reason.slice(0, 400), 200) : '';
+    out[sc] = { at: Number.isFinite(at) && at > 0 ? Math.round(at) : null, code, reason: s(reason, 200) || '사유 미상' };
   }
   return Object.keys(out).length ? out : null;
 }
