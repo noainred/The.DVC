@@ -4,8 +4,8 @@
  * 조회는 차트용 시계열과 '증감 클릭' 상세(생성/삭제 VM + 클러스터·호스트·데이터스토어)를 제공.
  */
 
-import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot } from './db.js';
+import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason, skipCategoryOf } from './diff.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
 import { createYielder } from '../util/timeSlice.js';
 
 /**
@@ -88,10 +88,18 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   //   diff 를 건너뛰는 판정(inventoryUnreadReason)은 그대로다(로스터 보존 — v2.743 VC-01).
   const skippedByReason = {};
   for (const x of skippedVcenters) skippedByReason[x.reason] = (skippedByReason[x.reason] || 0) + 1;
-  const maintExcluded = skippedByReason.maintenance || 0;
-  const partialSkipped = skippedVcenters.length - (skippedByReason.disabled || 0) - maintExcluded;
+  // v2.744(회귀 검토 GA-R2): 몫은 skipCategoryOf 한 벌로 센다(범위 계정 재계산이 같은 함수를 쓴다).
+  let maintExcluded = 0; let partialSkipped = 0;
+  for (const x of skippedVcenters) {
+    const c = skipCategoryOf(x.reason);
+    if (c === 'maintenance') maintExcluded += 1;
+    else if (c === 'partial') partialSkipped += 1;
+  }
   totalRow.skipped = partialSkipped;
   totalRow.maintExcluded = maintExcluded;
+  // v2.744(회귀 검토 GA-R2): 빠진 vCenter 의 id·사유를 합계 행에 남긴다 — 범위 계정은 이것으로 '범위 안' 빠진 vCenter 만 사유별로 센다
+  //   (예전에는 전 함대 사유 수를 빌려 와, 범위 안 비활성이 '점검중 제외' 로, 범위 안 점검중이 범위 밖 연결 실패 때문에 부분 합으로 보였다).
+  totalRow.skipDetail = skippedVcenters.map((x) => [x.id, x.reason]);
   const r = await commitSnapshot({ slot, ts, perVc, totalRow });
   if (!r.ok) return r;
   return {
@@ -226,8 +234,26 @@ async function computeSeries({ sinceTs, vcenterId = '', scopeIds = null }) {
   for (const r of perVcRows) { const f = firstSlotOf.get(r.vcenter_id); if (f == null || r.slot < f) firstSlotOf.set(r.vcenter_id, r.slot); }
   const presentBySlot = new Map();
   for (const r of perVcRows) (presentBySlot.get(r.slot) || presentBySlot.set(r.slot, new Set()).get(r.slot)).add(r.vcenter_id);
+  // v2.744(회귀 검토 GA-R2 — 재현): 위 '빌려 오기' 는 사유를 모르는 범위 안 빠진 수에 전 함대 사유 수를 skipped 먼저 붙였다 — 범위 안 비활성이
+  //   범위 밖 점검중 때문에 '점검중 제외' 로, 범위 안 점검중이 범위 밖 연결 실패 때문에 부분 합(vmTrend null)으로 보였다(범위 밖 점검 사실도 드러났다).
+  //   이제 합계 행에 남긴 [id, 사유](skip_detail)가 있으면 **범위 안이고 그 슬롯에 행이 없는** vCenter 만 사유별로 센다(skipCategoryOf — 전 함대와 같은 판정).
+  //   skip_detail 이 없는 옛 행(이 열 이전)만 예전 빌려 오기로 판정한다(그 행들은 사유를 남기지 않았다 — 예전 그대로이고 바뀌지 않는다).
+  const detailBySlot = new Map(totalRows.map((r) => [r.slot, parseSkipDetail(r.skip_detail)]));
   for (const a of bySlot.values()) {
     const present = presentBySlot.get(a.slot) || new Set();
+    const detail = detailBySlot.get(a.slot);
+    if (detail) {
+      let skipped = 0; let maint = 0;
+      for (const [id, why] of detail) {
+        if (!scopeIds.has(id) || present.has(id)) continue;
+        const c = skipCategoryOf(why);
+        if (c === 'partial') skipped += 1;
+        else if (c === 'maintenance') maint += 1;
+      }
+      a.skipped = skipped;
+      a.maintExcluded = maint;
+      continue;
+    }
     let cand = 0;
     for (const [id, first] of firstSlotOf) if (first < a.slot && !present.has(id)) cand += 1;
     a.skipped = Math.min(cand, totalSkipped.get(a.slot) || 0);

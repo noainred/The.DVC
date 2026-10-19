@@ -21,6 +21,22 @@ const slotLabel = (slot) => {
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
 };
 
+/**
+ * v2.744(회귀 검토 GA-R3): 조회 실패 자리 — 오류 안내 + 같은 조건으로 그 자리에서 다시 조회. 선택 도구는 이 위에 그대로 남는다.
+ *   (오류 안내의 '다시 시도' 는 새로고침이라 고른 vCenter·기간이 처음 값으로 돌아간다 — 이 버튼은 선택을 지킨다.)
+ */
+export function VmTrackLoadFailed({ error, onRetry }) {
+  return (
+    <div>
+      <ErrorBox message={error} />
+      <div className="flex gap" style={{ alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => onRetry?.()}>↻ 이 조건으로 다시 조회</button>
+        <span className="muted" style={{ fontSize: 12 }}>위에서 고른 vCenter·기간 그대로 다시 불러옵니다. 다른 vCenter·기간을 고르면 그 조건으로 조회합니다.</span>
+      </div>
+    </div>
+  );
+}
+
 export default function VmTrackTool() {
   const [days, setDays] = useState(30);
   const [vcenterId, setVcenterId] = useState('');
@@ -30,12 +46,14 @@ export default function VmTrackTool() {
   const [msg, setMsg] = useState(null);
   const [detail, setDetail] = useState(null); // { title, snapId?, slot? } — 증감 클릭 상세 모달
   const [dsDetail, setDsDetail] = useState(null); // 데이터스토어 사용량 변경 상세(v2.348)
+  // v2.744(회귀 검토 GA-R3): vCenter 목록은 마지막으로 받은 응답의 것을 따로 둔다 — 조회 중·조회 실패로 data 가 비어도 선택 도구를 그릴 수 있게.
+  const [vcList, setVcList] = useState([]);
 
   // v2.447(감사 B16): 세대 가드 — 고RTT vCenter 를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해
   // 최신 스코프 화면을 덮어썼다. useLatest 가 마지막 요청 결과만 반영한다.
   const run = useLatest();
   const load = () => run(fetchJson('/tools/vm-track', { days, vcenterId }),
-    (d) => { setData(d); setError(null); }, (e) => setError(e.message));
+    (d) => { setData(d); setError(null); if (Array.isArray(d?.vcenterList)) setVcList(d.vcenterList); }, (e) => setError(e.message));
   // load 는 매 렌더 재생성되므로 deps 에 넣으면 무한 루프 — 조회 파라미터만 의존한다(기존 뷰 관례).
   // v2.744(감사 WEB-01): vCenter·기간을 바꾸면 **먼저 이전 결과·오류를 비운다**(StorageTrackTool 과 같은 규칙) — 비우지 않으면
   //   새 조회가 끝날 때까지(고RTT·365일이면 수 초) 이전 vCenter·기간의 차트와 숫자가 새 선택의 값처럼 보였다. 새 조회가 실패하면
@@ -43,8 +61,56 @@ export default function VmTrackTool() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setError(null); load(); }, [days, vcenterId]);
 
-  if (error && !data) return <ErrorBox message={error} />;
-  if (!data) return <Loading />;
+  const snapshotNow = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postJson('/tools/vm-track/snapshot', {});
+      setMsg(r.ok
+        ? `스냅샷 완료 — ${r.slot} · vCenter ${r.vcenters} · 총 ${r.total}대 (+${r.added}/-${r.removed})${r.baseline ? ' · 기준선(증감은 다음 슬롯부터)' : ''}`
+        : (r.reason || '실패'));
+      await load();
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+
+  // v2.744(회귀 검토 GA-R3 — 재현): 예전에는 data 가 비면 선택 도구보다 먼저 Loading·오류 화면만 돌려줬다. 이 화면은 폴링하지 않아
+  //   vCenter·기간을 바꾼 조회가 한 번 실패하면 선택 도구까지 사라진 오류 화면에 갇혔고(남는 길은 새로고침 — 선택이 전체·30일로 돌아갔다),
+  //   365일·고RTT 조회 동안에도 다른 기간을 고를 수 없었다. 이제 선택 도구(vCenter·기간·지금 스냅샷)는 언제나 그리고 그 아래에만
+  //   조회 중·오류를 둔다. 오류면 같은 조건으로 그 자리에서 다시 조회한다(load). 이전 범위의 값은 여전히 보여 주지 않는다(WEB-01).
+  const head = (
+    <>
+      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div className="section-title" style={{ margin: 0 }}>📈 VM 수량 추이</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            매일 <b>00시·12시</b> 기준 vCenter별 VM 수를 전용 DB에 스냅샷하고 증감을 추적합니다.
+            증감(+N/−N)을 누르면 그 시각에 <b>생성·삭제된 VM</b>과 클러스터·호스트·데이터스토어를 봅니다.
+          </div>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+            <option value="">전체 vCenter(합계)</option>
+            {vcList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </Select>
+          <span className="flex gap">
+            {DAY_OPTS.map((d) => (
+              <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>
+            ))}
+          </span>
+          <button className="logout-btn" style={{ padding: '7px 13px' }} disabled={busy} onClick={snapshotNow} title="지금 즉시 스냅샷(같은 슬롯이면 최신 값으로 갱신)">⚡ 지금 스냅샷</button>
+        </div>
+      </div>
+      {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
+    </>
+  );
+
+  if (!data) {
+    return (
+      <div>
+        {head}
+        {error ? <VmTrackLoadFailed error={error} onRetry={() => load()} /> : <Loading />}
+      </div>
+    );
+  }
 
   const points = data.points || [];
   const chart = points.map((p, i, arr) => ({
@@ -79,42 +145,10 @@ export default function VmTrackTool() {
   const dsNet = dsLast && dsFirst ? Math.round(((dsLast.dsUsedGB || 0) - (dsFirst.dsUsedGB || 0)) * 10) / 10 : 0;
   const bySlotVc = data.bySlotVc || {};
 
-  const snapshotNow = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await postJson('/tools/vm-track/snapshot', {});
-      setMsg(r.ok
-        ? `스냅샷 완료 — ${r.slot} · vCenter ${r.vcenters} · 총 ${r.total}대 (+${r.added}/-${r.removed})${r.baseline ? ' · 기준선(증감은 다음 슬롯부터)' : ''}`
-        : (r.reason || '실패'));
-      await load();
-    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
-  };
-
   return (
     <div>
-      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <div>
-          <div className="section-title" style={{ margin: 0 }}>📈 VM 수량 추이</div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            매일 <b>00시·12시</b> 기준 vCenter별 VM 수를 전용 DB에 스냅샷하고 증감을 추적합니다.
-            증감(+N/−N)을 누르면 그 시각에 <b>생성·삭제된 VM</b>과 클러스터·호스트·데이터스토어를 봅니다.
-          </div>
-        </div>
-        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
-            <option value="">전체 vCenter(합계)</option>
-            {(data.vcenterList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </Select>
-          <span className="flex gap">
-            {DAY_OPTS.map((d) => (
-              <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>
-            ))}
-          </span>
-          <button className="logout-btn" style={{ padding: '7px 13px' }} disabled={busy} onClick={snapshotNow} title="지금 즉시 스냅샷(같은 슬롯이면 최신 값으로 갱신)">⚡ 지금 스냅샷</button>
-        </div>
-      </div>
-      {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
-      {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
+      {head}
+      {error &&<div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
       {data.status && !data.status.available && (
         <div className="card" style={{ padding: 10, marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 12.5 }}>
           ⚠ 추적 DB를 열 수 없어 기능이 비활성입니다{data.status.error ? ` — ${data.status.error}` : ''}. {data.status.dbPath ? ` (경로: ${data.status.dbPath})` : ''}

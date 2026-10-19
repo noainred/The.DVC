@@ -92,6 +92,19 @@ export function inventoryUnreadReason(vc, vmCount) {
 }
 
 /**
+ * v2.744(회귀 검토 GA-R2): 빠진 vCenter 의 사유 → 합계 행의 몫(판정 한 벌 — 전 함대 합계 행과 범위 계정 재계산이 같이 쓴다).
+ *   · 'disabled' — 원래 합계 대상이 아니다(v2.617 '비활성은 분모에서 뺀다'). 어느 쪽에도 세지 않는다.
+ *   · 'maintenance' — 기한 없는 상태라 합계를 막지 않는다(v2.622) — maintExcluded.
+ *   · 그 밖(첫 수집 중·연결 실패·모르는 상태) — '기다리면 다시 읽힐' 사유이고 모르는 상태는 단정하지 않는다 — skipped(부분 합).
+ * @returns {'disabled'|'maintenance'|'partial'}
+ */
+export function skipCategoryOf(reason) {
+  if (reason === 'disabled') return 'disabled';
+  if (reason === 'maintenance') return 'maintenance';
+  return 'partial';
+}
+
+/**
  * 한 vCenter 의 diff 계산.
  * @param {Array} vms       현재 스냅샷의 그 vCenter VM 목록(원본 객체)
  * @param {Map}   prevRoster 직전 로스터 Map<vmId, row>(DB roster). 빈 Map 이면 baseline.

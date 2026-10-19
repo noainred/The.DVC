@@ -151,11 +151,13 @@ function initSqlite() {
       ['skipped', 'INTEGER NOT NULL DEFAULT 0'], ['ds_used_unknown', 'INTEGER NOT NULL DEFAULT 0'],
       // v2.744(감사 RECENT-01): 캐시 없는 점검중이라 합계에서 뺀 vCenter 수 — skipped(부분 합)와 나눈다(점검중은 기한 없는 상태라 합계를 막지 않는다).
       ['maint_excluded', 'INTEGER NOT NULL DEFAULT 0'],
+      // v2.744(회귀 검토 GA-R2): 그 슬롯에 빠진 vCenter 의 [id, 사유] JSON(합계 행에만) — 범위 계정 재계산용. NULL = 이 열 이전 행(사유 미상).
+      ['skip_detail', 'TEXT'],
     ]);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {
-      setSkipped: db.prepare("UPDATE snaps SET skipped = ?, maint_excluded = ? WHERE slot = ? AND vcenter_id = ''"),
+      setSkipped: db.prepare("UPDATE snaps SET skipped = ?, maint_excluded = ?, skip_detail = ? WHERE slot = ? AND vcenter_id = ''"),
       insSnap: db.prepare(`INSERT INTO snaps (slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off,
           ds_count, ds_cap_gb, ds_used_gb, baseline, ds_used_unknown)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -238,7 +240,7 @@ function initSqlite() {
           storage_gb=excluded.storage_gb, guest_os=excluded.guest_os`),
       delRoster: db.prepare('DELETE FROM roster WHERE vcenter_id=? AND vm_id=?'),
       delRosterVc: db.prepare('DELETE FROM roster WHERE vcenter_id=?'),
-      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, skipped, maint_excluded, ds_used_unknown
+      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, skipped, maint_excluded, ds_used_unknown, skip_detail
         FROM snaps WHERE vcenter_id=? AND ts>=? ORDER BY ts`),
       seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, ds_used_unknown
         FROM snaps WHERE vcenter_id<>'' AND ts>=? ORDER BY ts`),
@@ -282,19 +284,32 @@ function initSqlite() {
       //   옛 한 방 문장(트랜잭션 하나로 DELETE 넷)은 테스트(audit2744a)의 대조 기준으로만 남겼다 — 정리를 한 방 문장으로 되돌리지 말 것.
       //   남기는 행이 있는 두 표(changes·ds_series)는 **(ts, rowid) 커서**로 후보를 고른다 — LIMIT 만 쓰면 청크마다 앞쪽의 남기는 행(VM·DS 수만큼)을
       //   처음부터 다시 훑어 행 수에 대해 제곱으로 늘었다(측정: 합성 45만 행 24초). 커서는 남기는 행을 한 번씩만 지난다.
-      chunkChangesSel: db.prepare(`SELECT c.rowid AS rid, c.ts AS ts FROM changes c WHERE c.ts < ? AND (c.ts, c.rowid) > (?, ?) AND NOT (
-          c.kind IN ('powered_off','powered_on')
-          AND (EXISTS (SELECT 1 FROM roster r WHERE r.vcenter_id = c.vcenter_id AND r.vm_id = c.vm_id)
-               OR NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.vcenter_id = c.vcenter_id))
-          AND c.rowid = (SELECT MAX(q.rowid) FROM changes q
-            WHERE q.vcenter_id = c.vcenter_id AND q.kind = c.kind AND q.vm_id = c.vm_id AND q.ts < ?))
-        ORDER BY c.ts, c.rowid LIMIT ?`),
+      // ⚠ v2.744(회귀 검토 GA-R1 — 재현): 처음 판은 후보 행마다 상관 서브쿼리 MAX(rowid) 로 '그 묶음의 경계 이전 마지막 행' 을 다시 구했다.
+      //   MAX(rowid) 는 인덱스의 ts 다음 열이라 min/max 최적화를 받지 못해 후보 한 행마다 그 묶음의 경계 이전 범위를 처음부터 끝까지 훑었다 —
+      //   총 비용이 묶음 크기의 제곱이다(측정: DS 300 × 1,500행 → 옛 한 방 1.26초 · 처음 판 총 46초 · 최장 정지 392ms). 이제 **정리마다 한 번**
+      //   묶음별 MAX(rowid) 를 묶음 인덱스 순서로 나눠 읽어(아래 keep*·청크 사이 양보) 메모리 표에 두고, 후보는 ts 커서로 고른 뒤 JS 가 판정한다.
+      //   남기는 규칙은 그대로다: ds_series 는 ds 별 경계 이전 MAX(rowid)(audit2590 P5 가 이 표기를 고정한다), changes 는 로스터 VM(또는 로스터
+      //   없는 vCenter)의 전원 전이 (vCenter, 종류, VM)별 경계 이전 MAX(rowid). INDEXED BY 로 계획을 고정한다(통계가 없으면 ts 인덱스 + 임시 정렬로
+      //   바뀔 수 있다 — 그러면 한 번이 표 전체 정렬이다).
+      keepChangesFirst: db.prepare(`SELECT vcenter_id AS vc, kind, vm_id AS vm, MAX(rowid) AS m FROM changes INDEXED BY idx_changes_vc_kind
+        WHERE kind IN ('powered_off','powered_on') AND ts < ?
+        GROUP BY vcenter_id, kind, vm_id ORDER BY vcenter_id, kind, vm_id LIMIT ?`),
+      keepChangesNext: db.prepare(`SELECT vcenter_id AS vc, kind, vm_id AS vm, MAX(rowid) AS m FROM changes INDEXED BY idx_changes_vc_kind
+        WHERE (vcenter_id, kind, vm_id) > (?, ?, ?) AND kind IN ('powered_off','powered_on') AND ts < ?
+        GROUP BY vcenter_id, kind, vm_id ORDER BY vcenter_id, kind, vm_id LIMIT ?`),
+      // 로스터 조건(남길 후보 한 행만 — 묶음당 많아야 한 번): 로스터에 그 VM 이 있거나, 그 vCenter 의 로스터가 비어 있다.
+      changesRosterKeep: db.prepare(`SELECT (EXISTS (SELECT 1 FROM roster r WHERE r.vcenter_id = ? AND r.vm_id = ?)
+          OR NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.vcenter_id = ?)) AS k`),
+      chunkChangesSel: db.prepare(`SELECT c.rowid AS rid, c.ts AS ts, c.kind AS kind, c.vcenter_id AS vc, c.vm_id AS vm FROM changes c
+        WHERE c.ts < ? AND (c.ts, c.rowid) > (?, ?) ORDER BY c.ts, c.rowid LIMIT ?`),
       delChangesRow: db.prepare('DELETE FROM changes WHERE rowid = ?'),
       chunkDsChanges: db.prepare('DELETE FROM ds_changes WHERE rowid IN (SELECT rowid FROM ds_changes WHERE ts < ? LIMIT ?)'),
-      //   (안쪽 서브쿼리의 rowid 는 가장 안쪽 FROM 인 q 의 것이다 — MAX(rowid) = ds 별 경계 이전 마지막 행, audit2590 P5 가 이 표기를 고정한다.)
-      chunkDsSeriesSel: db.prepare(`SELECT s.rowid AS rid, s.ts AS ts FROM ds_series s WHERE s.ts < ? AND (s.ts, s.rowid) > (?, ?)
-          AND s.rowid <> (SELECT MAX(rowid) FROM ds_series q WHERE q.ds_id = s.ds_id AND q.ts < ?)
-        ORDER BY s.ts, s.rowid LIMIT ?`),
+      keepDsFirst: db.prepare(`SELECT ds_id AS g, MAX(rowid) AS m FROM ds_series INDEXED BY idx_dsseries_ds
+        WHERE ts < ? GROUP BY ds_id ORDER BY ds_id LIMIT ?`),
+      keepDsNext: db.prepare(`SELECT ds_id AS g, MAX(rowid) AS m FROM ds_series INDEXED BY idx_dsseries_ds
+        WHERE ds_id > ? AND ts < ? GROUP BY ds_id ORDER BY ds_id LIMIT ?`),
+      chunkDsSeriesSel: db.prepare(`SELECT s.rowid AS rid, s.ts AS ts, s.ds_id AS g FROM ds_series s
+        WHERE s.ts < ? AND (s.ts, s.rowid) > (?, ?) ORDER BY s.ts, s.rowid LIMIT ?`),
       delDsSeriesRow: db.prepare('DELETE FROM ds_series WHERE rowid = ?'),
       chunkSnaps: db.prepare('DELETE FROM snaps WHERE rowid IN (SELECT rowid FROM snaps WHERE ts < ? LIMIT ?)'),
     };
@@ -358,6 +373,30 @@ export async function dsSeriesBoundary(sinceTs) {
   return r?.b ?? null;
 }
 
+/** v2.744(회귀 검토 GA-R2): 빠진 vCenter [id, 사유] 목록의 저장 상한 — 넘으면 저장하지 않는다(NULL = 사유 미상 — 범위 계정은 예전 판정으로 떨어진다). */
+export const SKIP_DETAIL_MAX = 1000;
+/** [id, 사유] 목록 → 저장 문자열(JSON 배열 — 객체 키로 두지 않는다: id '__proto__' 가 프로토타입을 바꾼다). 목록이 아니거나 상한을 넘으면 null. */
+export function encodeSkipDetail(list) {
+  if (!Array.isArray(list) || list.length > SKIP_DETAIL_MAX) return null;
+  const out = [];
+  for (const e of list) {
+    if (!Array.isArray(e)) return null;
+    const id = String(e[0] ?? '');
+    if (!id) continue;
+    out.push([id.slice(0, 256), String(e[1] ?? 'unknown').slice(0, 64)]);
+  }
+  return JSON.stringify(out);
+}
+/** 저장 문자열 → [id, 사유] 목록. 없거나(옛 행) 형식이 틀리면 null(= 사유 미상). */
+export function parseSkipDetail(text) {
+  if (text == null || text === '') return null;
+  try {
+    const v = JSON.parse(String(text));
+    if (!Array.isArray(v)) return null;
+    return v.filter((e) => Array.isArray(e) && typeof e[0] === 'string' && e[0]).map((e) => [e[0], typeof e[1] === 'string' ? e[1] : 'unknown']);
+  } catch { return null; }
+}
+
 export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
   const x = await getDb();
   if (!x) return { ok: false, reason: 'vmtrack DB 사용 불가' };
@@ -368,7 +407,7 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
     st.insSnap.run(slot, ts, '', totalRow.total, totalRow.onCount, totalRow.added, totalRow.removed,
       totalRow.poweredOn || 0, totalRow.poweredOff || 0,
       totalRow.dsCount || 0, totalRow.dsCapGB || 0, totalRow.dsUsedGB || 0, totalRow.baseline ? 1 : 0, totalRow.dsUsedUnknown || 0);
-    st.setSkipped.run(Math.max(0, Number(totalRow.skipped) || 0), Math.max(0, Number(totalRow.maintExcluded) || 0), slot);
+    st.setSkipped.run(Math.max(0, Number(totalRow.skipped) || 0), Math.max(0, Number(totalRow.maintExcluded) || 0), encodeSkipDetail(totalRow.skipDetail), slot);
     for (const vc of perVc) {
       const ds = vc.ds || null; // { count, capGB, usedGB, added:[], removed:[], changed:[] }
       st.insSnap.run(slot, ts, vc.vcenterId, vc.total, vc.onCount, vc.added.length, vc.removed.length,
@@ -661,16 +700,26 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
   //   단순 DELETE 보다 커서 2만 행 고정 청크면 한 청크가 0.4초를 넘었다(측정 — 합성 45만 행). 2천 행에서 시작해 목표(40ms)에 맞춰 늘리고 줄인다.
   const { st } = x;
   const opt = (label) => ({ label, chunk: Math.min(2000, PRUNE_CHUNK_ROWS), targetMs: PRUNE_TARGET_MS, minChunk: Math.min(200, PRUNE_CHUNK_ROWS), maxChunk: PRUNE_CHUNK_ROWS });
+  // v2.744(회귀 검토 GA-R1): 커서 정리는 500행에서 시작한다 — changes 는 인덱스가 넷이라 첫 청크 2천 행이 한 번에 170ms 를 넘었다(측정). 늘리는 것은 적응 규칙이 한다.
+  const curOpt = (label) => ({ ...opt(label), chunk: Math.min(500, PRUNE_CHUNK_ROWS) });
   return pruneFlight.run(cut, async () => {
     try {
-      const a = await cursorPrune(x.db, st.chunkChangesSel, st.delChangesRow, cut, opt('vmtrack.changes'));   // v2.602 DB2602-03 · v2.603 RECENT2603-03
+      // v2.744(회귀 검토 GA-R1): 남기는 행(묶음별 경계 이전 MAX(rowid))은 정리마다 한 번 묶음 인덱스를 나눠 읽어 구한다(keepMaxByGroup).
+      //   후보 판정은 그 표를 본다 — 후보 행마다 묶음 범위를 다시 훑던 상관 서브쿼리를 쓰지 않는다.
+      const keepCh = await keepMaxByGroup(st.keepChangesFirst, st.keepChangesNext, cut, (r) => [r.vc, r.kind, r.vm], chKey);
+      const a = await cursorPrune(x.db, st.chunkChangesSel, st.delChangesRow, cut, curOpt('vmtrack.changes'),
+        (r) => changesDeletable(r, keepCh, st.changesRosterKeep));   // v2.602 DB2602-03 · v2.603 RECENT2603-03
       const b = await chunkedDelete(st.chunkDsChanges, [cut], opt('vmtrack.ds_changes')); // v2.348
-      const c = await cursorPrune(x.db, st.chunkDsSeriesSel, st.delDsSeriesRow, cut, opt('vmtrack.ds_series')); // v2.353 · v2.601 DB2601-02
+      const keepDs = await keepMaxByGroup(st.keepDsFirst, st.keepDsNext, cut, (r) => [r.g], (r) => r.g);
+      const c = await cursorPrune(x.db, st.chunkDsSeriesSel, st.delDsSeriesRow, cut, curOpt('vmtrack.ds_series'),
+        (r) => groupDeletable(keepDs.get(r.g), r.rid)); // v2.353 · v2.601 DB2601-02
       const d = await chunkedDelete(st.chunkSnaps, [cut], opt('vmtrack.snaps'));
       return {
         ok: true, cut,
         changesDeleted: a.deleted, dsChangesDeleted: b.deleted, dsSeriesDeleted: c.deleted, snapsDeleted: d.deleted,
         chunks: { changes: a.chunks, dsChanges: b.chunks, dsSeries: c.chunks, snaps: d.chunks },
+        // v2.744(회귀 검토 GA-R1): 남기는 행 표를 읽은 쪽 수(쪽마다 양보한다) — chunks 와 따로 둔다(chunks 는 지우는 청크다).
+        keepPages: { changes: keepCh.pages, dsSeries: keepDs.pages },
         done: a.done && b.done && c.done && d.done,
       };
     } catch (e) {
@@ -686,12 +735,13 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
 const PRUNE_TARGET_MS = 40;
 
 /**
- * v2.744(감사 DB-04): (ts, rowid) 커서 청크 정리 — 남기는 행(보존 규칙)이 있는 표용. 후보를 커서 뒤에서 chunk 개 고르고(선택 문이 보존 규칙을
- * 판정한다) 그 행만 한 트랜잭션으로 지운 뒤 양보한다. 남기는 행은 MAX(rowid) 판정 대상이 아니라 지워지지 않으므로 청크마다 다시 판정해도
- * 한 방 문장과 결과가 같다(테스트가 대조). 청크 크기·상한·종료 판정은 chunkedDelete 와 같은 규칙(nextAdaptiveChunk · PRUNE_MAX_ROWS).
+ * v2.744(감사 DB-04): (ts, rowid) 커서 청크 정리 — 남기는 행(보존 규칙)이 있는 표용. 후보를 커서 뒤에서 chunk 개 고르고 그 중
+ * deletable(행) 이 참인 행만 한 트랜잭션으로 지운 뒤 양보한다. 청크 크기·상한·종료 판정은 chunkedDelete 와 같은 규칙(nextAdaptiveChunk · PRUNE_MAX_ROWS).
+ * v2.744(회귀 검토 GA-R1): 보존 판정을 선택 문의 상관 서브쿼리에서 빼서 deletable 로 옮겼다 — 선택 문은 ts 인덱스 범위만 읽는다.
+ *   남기는 행도 후보로 읽히지만 커서가 지나가므로 한 번씩만 읽는다. 결과는 옛 한 방 문장과 같다(server/test/audit2744a·audit2744ra 가 대조).
  * @returns {Promise<{deleted:number, done:boolean, chunks:number}>}
  */
-async function cursorPrune(db, selStmt, delStmt, cut, { chunk: chunk0 = 2000, targetMs = PRUNE_TARGET_MS, minChunk = 200, maxChunk = PRUNE_CHUNK_ROWS, maxRows = PRUNE_MAX_ROWS } = {}) {
+async function cursorPrune(db, selStmt, delStmt, cut, { chunk: chunk0 = 2000, targetMs = PRUNE_TARGET_MS, minChunk = 200, maxChunk = PRUNE_CHUNK_ROWS, maxRows = PRUNE_MAX_ROWS } = {}, deletable = () => true) {
   let chunk = Math.max(1, chunk0);
   let curTs = Number.MIN_SAFE_INTEGER; let curRid = 0;
   let deleted = 0; let chunks = 0;
@@ -699,13 +749,17 @@ async function cursorPrune(db, selStmt, delStmt, cut, { chunk: chunk0 = 2000, ta
     const want = maxRows > 0 ? Math.min(chunk, maxRows - deleted) : chunk;
     if (want <= 0) return { deleted, done: false, chunks };
     const t0 = performance.now();
-    const rows = selStmt.all(cut, curTs, curRid, cut, want);
+    const rows = selStmt.all(cut, curTs, curRid, want);
     if (rows.length) {
-      db.exec('BEGIN');
-      try { for (const r of rows) delStmt.run(r.rid); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      const del = [];
+      for (const r of rows) if (deletable(r)) del.push(r.rid);
+      if (del.length) {
+        db.exec('BEGIN');
+        try { for (const rid of del) delStmt.run(rid); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      }
       const last = rows[rows.length - 1];
       curTs = Number(last.ts); curRid = Number(last.rid);
-      deleted += rows.length;
+      deleted += del.length;
     }
     chunks += 1;
     chunk = nextAdaptiveChunk(chunk, want, performance.now() - t0, { targetMs, minChunk, maxChunk });
@@ -713,6 +767,51 @@ async function cursorPrune(db, selStmt, delStmt, cut, { chunk: chunk0 = 2000, ta
     if (maxRows > 0 && deleted >= maxRows) return { deleted, done: false, chunks };
     await new Promise((res) => setImmediate(res));
   }
+}
+
+/**
+ * v2.744(회귀 검토 GA-R1): 묶음별 '경계 이전 MAX(rowid)' 표 — 정리마다 한 번, 묶음 인덱스 순서로 나눠 읽는다(쪽마다 양보 · 쪽 크기는 시간 기준 적응).
+ *   한 쪽의 비용은 그 쪽 묶음들의 경계 이전 행 수에 비례하고 전체는 표 크기에 한 번 비례한다(예전: 후보 한 행마다 그 묶음 범위 전체 = 묶음 크기의 제곱).
+ *   firstStmt(cut, limit) · nextStmt(...cursorOf(마지막 행), cut, limit) — 결과 행은 묶음 열 + m(MAX(rowid)).
+ * @returns {Promise<Map<string, number>>}  키 = keyOf(행). 쪽 수는 .pages
+ */
+async function keepMaxByGroup(firstStmt, nextStmt, cut, cursorOf, keyOf, { targetMs = PRUNE_TARGET_MS, start = 16, maxLimit = 8192 } = {}) {
+  const keep = new Map();
+  let cursor = null; let limit = start; let pages = 0;
+  for (;;) {
+    const t0 = performance.now();
+    const rows = cursor ? nextStmt.all(...cursor, cut, limit) : firstStmt.all(cut, limit);
+    for (const r of rows) keep.set(keyOf(r), Number(r.m));
+    pages += 1;
+    if (rows.length < limit) { keep.pages = pages; return keep; }
+    cursor = cursorOf(rows[rows.length - 1]);
+    limit = nextAdaptiveChunk(limit, limit, performance.now() - t0, { targetMs, minChunk: 1, maxChunk: maxLimit });
+    await new Promise((res) => setImmediate(res));
+  }
+}
+
+/** changes 묶음 키 — vCenter id 길이를 앞에 붙여 구분자가 id 안에 있어도 겹치지 않게 한다(종류는 고정 낱말). */
+const chKey = (r) => `${String(r.vc).length}:${r.vc}|${r.kind}|${r.vm}`;
+
+/**
+ * ds_series 후보 판정: 묶음의 경계 이전 마지막 행(rid === m)은 남기고 그보다 앞의 행만 지운다.
+ *   m 이 없거나 rid > m 이면 정리를 시작한 뒤 생긴 행이라 기준이 없다 — 지우지 않는다(옛 규칙보다 더 지우는 일이 없게 · 다음 정리가 다시 본다).
+ */
+function groupDeletable(m, rid) {
+  return m != null && Number(rid) < m;
+}
+
+/**
+ * changes 후보 판정(옛 한 방 문장과 같은 규칙): 생성·삭제 행은 지운다. 전원 전이는 (vCenter, 종류, VM) 묶음의 경계 이전 마지막 행이고
+ *   로스터 조건(로스터에 그 VM 이 있거나 그 vCenter 의 로스터가 비어 있음)이 맞으면 남긴다. 로스터 조건은 마지막 행에서만 묻는다(묶음당 한 번).
+ */
+function changesDeletable(r, keep, rosterStmt) {
+  if (r.kind !== 'powered_off' && r.kind !== 'powered_on') return true;
+  const m = keep.get(chKey(r));
+  const rid = Number(r.rid);
+  if (m == null || rid > m) return false;
+  if (rid < m) return true;
+  return !rosterStmt.get(r.vc, r.vm, r.vc)?.k;
 }
 // v2.744(감사 DB-04): 정리끼리는 겹치지 않는다(키 = 경계 — 진행 중인 정리가 더 늦거나 같은 경계면 그 약속을 공유한다).
 const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });
