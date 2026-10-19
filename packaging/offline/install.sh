@@ -501,6 +501,28 @@ OWNERS
   return 0
 }
 
+# vp_gen_secret — AUTH_SECRET 으로 쓸 32바이트 난수를 64자리 16진(소문자)으로 stdout 에 낸다. 반환 0 = 냄 · 1 = 쓸 수 있는 도구가 없다(아무것도 내지 않는다).
+#   v2.744(최종 수정분 검토 PKG-01): 예전에는 4) 에서 "$PREFIX/runtime/node/bin/node" 를 root 로 실행했다. 부모 $PREFIX/runtime 은 지난 설치의
+#   5) chown -R 로 서비스 계정 소유라, 2) 가 root 로 새로 복사한 node 를 3) 의 mv·cp -a(수 초) 동안 서비스 계정이 rename 으로 갈아끼울 수 있었다
+#   (같은 부모 안의 rename 은 옮기는 폴더의 쓰기 권한을 요구하지 않는다 — 재현됨: 서비스 계정이 둔 스크립트가 uid 0 으로 실행됐다).
+#   아래 VP_CFG_NODE 규칙('$PREFIX/runtime/node 는 root 로 실행하지 않는다')을 이 경로도 따른다. root 가 믿는 도구만 쓴다 — 순서:
+#   ① 패키지 node(VP_CFG_NODE — 이 스크립트와 같은 신뢰) ② openssl rand ③ od(/dev/urandom). 결과가 64자리 16진이 아니면 다음 도구로 넘어가고,
+#   전부 실패하면 1 이다(빈 AUTH_SECRET 금지 — 부르는 쪽이 portal.env 를 만들지 않고 멈춘다). $PREFIX·CONFIG_DIR 아래 파일은 어떤 경우에도 실행하지 않는다.
+vp_gen_secret() {
+  local s="" node="${VP_CFG_NODE:-}"
+  if [[ -n "$node" && -x "$node" ]]; then
+    s="$("$node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' 2>/dev/null)" || s=""
+  fi
+  if ! [[ "$s" =~ ^[0-9a-f]{64}$ ]] && command -v openssl >/dev/null 2>&1; then
+    s="$(openssl rand -hex 32 2>/dev/null)" || s=""
+  fi
+  if ! [[ "$s" =~ ^[0-9a-f]{64}$ ]] && command -v od >/dev/null 2>&1 && [[ -r /dev/urandom ]]; then
+    s="$(od -An -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \n')" || s=""
+  fi
+  [[ "$s" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$s"
+}
+
 [[ $EUID -eq 0 ]] || { echo "이 스크립트는 root 권한으로 실행해야 합니다 (sudo)." >&2; exit 1; }
 vp_prefix_dir_ok "$PREFIX" || exit 1
 
@@ -581,7 +603,15 @@ PENV_ST=0; vp_cfg_state "$PENV" || PENV_ST=$?
 if [[ $PENV_ST -eq 1 ]]; then
   echo "==> 환경설정 생성: $PENV"
   # generate a persistent AUTH_SECRET so tokens survive restarts
-  SECRET="$("$PREFIX/runtime/node/bin/node" -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
+  # v2.744(최종 수정분 검토 PKG-01): 서비스 계정이 갈아끼울 수 있는 $PREFIX/runtime/node 를 root 로 실행하지 않는다 — vp_gen_secret
+  #   (패키지 node → openssl → od). 만들지 못하면 빈 AUTH_SECRET 으로 portal.env 를 만들지 않고 멈춘다(예전에도 node 가 실패하면 set -e 로
+  #   여기서 멈췄다 — 이제 사유를 말한다).
+  SECRET=""
+  if ! SECRET="$(vp_gen_secret)" || ! [[ "$SECRET" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "✖ AUTH_SECRET(32바이트 난수)을 만들지 못해 $PENV 를 만들지 않고 설치를 멈춥니다 — 패키지 node(${VP_CFG_NODE:-없음})·openssl·od(/dev/urandom) 중 쓸 수 있는 것이 없었습니다." >&2
+    echo "  $PREFIX/runtime/node 는 서비스 계정이 바꿀 수 있어 root 로 실행하지 않습니다. 런타임·앱은 이미 이 패키지로 바뀌었고 서비스 유닛 설치·재시작은 하지 않았습니다 — 원인을 고친 뒤 install.sh 를 다시 실행하세요." >&2
+    exit 1
+  fi
   # 예전과 같은 내용(예시 + AUTH_SECRET·PORT)·소유자(root — 아래 5) 의 chown -R 이 서비스 계정에 넘긴다)·권한(0640)
   if sed -e "s/^AUTH_SECRET=.*/AUTH_SECRET=${SECRET}/" -e "s/^PORT=.*/PORT=${PORT}/" "$SCRIPT_DIR/portal.env.example" \
        | vp_cfg_create "$PENV" 0:0 0640; then
