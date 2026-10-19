@@ -5349,6 +5349,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · 판정 목록 CSV 의 '읽지 못한 vCenter' 줄은 `notReadCsvLines(…, {mode:'judge', noun})`(FG — 합계가 없는 목록에 '합계는 하한' 금지, 명사는 화면과 대조) ·
         라이선스 표 칸 하한은 칸 폭 880px 미만일 때만(FE — 컨테이너 단위 `clamp`, 1280·1024px 에서 상태 열이 잘리던 것) · VM 추이 '다시 조회' 는 `createRetryGate`(진행 표시·실패 횟수) ·
         VM 추이 403 은 권한 안내만(`errorBoxInput(error).perm` — 오류 객체를 그대로 넘긴다).
+      · ⚠⚠ **root 가 서비스 계정 파일을 읽을 때는 '확인 → 다시 열기' 가 아니라 한 번 열기다 — 셸 둘 다**(FH·리드): install.sh 는 `vp_cfg_snap`(node 비정상 종료면 cp 폴백 ·
+        `/dev/fd/3` 로 ACL·xattr 보존 · RMA 요청 값도 사본에서), release-verify-lib.sh 는 `vp_root_read`(node O_NOFOLLOW·O_NONBLOCK·O_NOCTTY → fd 로 일반 파일·nlink 1·크기 상한 →
+        그 fd 에서 읽기 — root 래퍼도 `declare -f` 로 싣는다). `[[ -f && ! -L ]]` 뒤 `exec {fd}<` 는 그 사이에 FIFO 로 바꾸면 root 가 무기한 매달린다(DEBUG 트랩 재현 —
+        `audit2744fh`·`audit2744flead2`). **root 로 도는 새 셸 코드가 CONFIG_DIR 파일을 읽으면 이 둘 중 하나로.**
       · 남긴 것: RV-4(명목 기준 포트가 100% 를 조금 넘으면 대표값·알림에서 빠진다 — v2.743 과 같은 설계, 판단 필요) · RD-R3(제품에서 나오지 않는 입력 — 조사만 고침) ·
         엣지 export 오류 요약 두 벌(문구 상수는 하나) · 큰 vmtrack 정리의 COMMIT 정지(WAL 체크포인트로 추정 · 미확인) · 880px 기준은 목 데이터로만 정했다.
     · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).

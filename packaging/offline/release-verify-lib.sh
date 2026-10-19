@@ -63,10 +63,45 @@ vp_anchor_ok() {
   vp_path_root_only "$v" && vp_tree_root_only "$v"
 }
 
-# vp_root_env_policy <config_dir> — portal.env 의 UPGRADE_SIGNATURE_POLICY 를 **root 소유 파일일 때만** 돌려준다.
+# vp_root_read <파일> <node> [사본 경로] — root 로 도는 확인이 서비스 계정이 쓸 수 있는 파일을 **한 번만** 연다(v2.744 최종 검토 — RZ-REV-03 의 형제).
+#   `[[ -f && ! -L ]]` 로 확인한 뒤 bash 로 다시 열면 그 사이에 FIFO 로 바꿔 root 를 무기한 매달리게 하거나(열기가 막힌다) 링크로 바꿔
+#   따라가게 할 수 있다. node 가 O_NOFOLLOW·O_NONBLOCK·O_NOCTTY 로 한 번 열고, 연 fd 로 일반 파일·하드 링크 없음·크기 상한을 본 뒤 그 fd 에서 읽는다.
+#   stdout 첫 줄 = '<소유 uid> <권한 8진>'. 사본 경로를 주면 내용은 그 파일(새로 만든다 — O_EXCL)에, 안 주면 첫 줄 뒤에 그대로 싣는다.
+#   반환 0 = 읽음 · 10 = 일반 파일이 아님(링크·FIFO·장치·하드 링크·상한 초과) · 11 = 파일 없음 · 3 = node 없음 · 그 밖 = node 비정상 종료.
+vp_root_read() {
+  local f="$1" node="$2" out="${3:-}" r=0
+  [[ -n "$node" && -x "$node" ]] || return 3
+  "$node" -e 'const fs=require("fs"),C=fs.constants;const a=process.argv.slice(1);const src=a[0],max=Number(a[1]),out=a[2]||"";
+let fd;try{fd=fs.openSync(src,C.O_RDONLY|C.O_NOFOLLOW|C.O_NONBLOCK|C.O_NOCTTY)}catch(e){process.exit(e.code==="ENOENT"?11:10)}
+const st=fs.fstatSync(fd);if(!st.isFile()||st.nlink!==1||!(st.size<=max))process.exit(10);
+const buf=Buffer.alloc(st.size);let off=0;while(off<st.size){const n=fs.readSync(fd,buf,off,st.size-off,off);if(n<=0)break;off+=n}
+const head=st.uid+" "+(st.mode&0o7777).toString(8)+"\n";
+if(out){const o=fs.openSync(out,C.O_WRONLY|C.O_CREAT|C.O_EXCL|C.O_NOFOLLOW,0o644);fs.writeSync(o,buf,0,off);fs.closeSync(o);process.stdout.write(head)}
+else{process.stdout.write(head);process.stdout.write(buf.subarray(0,off))}' "$f" "${VP_ROOT_READ_MAX_BYTES:-16777216}" ${out:+"$out"} || r=$?
+  return $r
+}
+
+# vp_root_env_policy <config_dir> [node] — portal.env 의 UPGRADE_SIGNATURE_POLICY 를 **root 소유 파일일 때만** 돌려준다.
 #   연 파일(fd)의 소유자를 보므로 확인 뒤 바꿔치기가 끼어들지 않는다. 서비스 계정 소유면 값을 쓰지 않고 한 줄 알린다(stderr).
+#   v2.744: node 를 주면 vp_root_read 로 한 번만 연다(FIFO·링크 바꿔치기 차단). node 가 없거나 비정상 종료하면 예전 bash 경로다.
 vp_root_env_policy() {
-  local f="$1/portal.env" fd uid v=""
+  local f="$1/portal.env" node="${2:-}" fd uid v="" res="" rc=0 body=""
+  if [[ -n "$node" ]]; then
+    if res="$(vp_root_read "$f" "$node")"; then rc=0; else rc=$?; fi
+    case "$rc" in
+      11) return 0 ;;
+      10) echo "ⓘ $f 가 일반 파일이 아니거나(링크·FIFO·장치) 하드 링크·크기 상한을 넘어 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다." >&2; return 0 ;;
+      0)
+        uid="${res%% *}"
+        if [[ "$res" == *$'\n'* ]]; then body="${res#*$'\n'}"; fi
+        if [[ "$uid" == 0 ]]; then
+          v="$(printf '%s\n' "$body" | grep -E '^UPGRADE_SIGNATURE_POLICY=' 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+        elif printf '%s\n' "$body" | grep -qE '^UPGRADE_SIGNATURE_POLICY=' 2>/dev/null; then
+          echo "ⓘ $f 는 root 소유가 아니라(서비스 계정이 쓸 수 있다) 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다." >&2
+        fi
+        printf '%s' "$v"; return 0 ;;
+    esac
+  fi
   [[ -f "$f" && ! -L "$f" ]] || return 0
   exec {fd}<"$f" || return 0
   uid="$(stat -L -c %u "/dev/fd/$fd" 2>/dev/null || echo x)"
@@ -107,7 +142,7 @@ vp_write_launcher() {
     echo '# 앱 트리(<prefix>/app)·런타임은 서비스 계정이 쓸 수 있다 — root 로 그 파일을 읽거나 실행하지 않는다.'
     echo 'set -uo pipefail'
     printf 'PREFIX=%q\nSERVICE_USER=%q\nSERVICE_NAME=%q\nCONFIG_DIR=%q\nTOOLS=%q\nTOOL=%q\nKIND=%q\n' "$prefix" "$user" "$svc" "$cdir" "$tools" "$tool" "$kind"
-    declare -f vp_as_user vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok
+    declare -f vp_as_user vp_root_read vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok
     cat <<'BODY'
 if [[ "$KIND" == verify ]]; then
   # 서명 확인 — root 소유 사본(node·server/src·공개키 목록)만 신뢰 기준으로 쓴다.
@@ -116,7 +151,7 @@ if [[ "$KIND" == verify ]]; then
     exit 2
   fi
   POLICY="${UPGRADE_SIGNATURE_POLICY:-}"
-  [[ -n "$POLICY" ]] || POLICY="$(vp_root_env_policy "$CONFIG_DIR")"
+  [[ -n "$POLICY" ]] || POLICY="$(vp_root_env_policy "$CONFIG_DIR" "$TOOLS/verify/node")"
   # v2.742(INJPKG-01): 호스트 키 파일의 root 소유 사본 — 그 회수 항목을 함께 합친다(없으면 signature.js 가 '없음' 으로 본다).
   exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" VP_ROOT_TRUST_COPY="$TOOLS/trust/release-signing-keys.conf" \
     "$TOOLS/verify/node" "$TOOLS/verify/server/src/upgrade/verifyCli.js" "$@"
@@ -150,9 +185,32 @@ BODY
 #     (CONFIG_DIR 를 쓸 수 있다) 원본을 지우는 것만으로 회수가 풀리면 안 된다. 반환 0 = 준비(사본 없음 포함) · 1 = 실패.
 vp_stage_trust_copy() {
   local src="$1/$VP_HOST_KEYS_NAME" cur="$2/trust/$VP_HOST_KEYS_NAME" dir="$3/trust" node="$4" fd st=""
-  local dst="$dir/$VP_HOST_KEYS_NAME" fresh=0
+  local dst="$dir/$VP_HOST_KEYS_NAME" fresh=0 rc=0 hdr="" viaNode=0
   ( umask 022; mkdir -p -- "$dir" ) || return 1
-  if [[ -f "$src" && ! -L "$src" ]] && exec {fd}<"$src"; then
+  rm -f -- "$dst.part"
+  # v2.744(최종 검토 — RZ-REV-03 의 형제): 확인 뒤 bash 로 다시 열지 않고 vp_root_read 로 한 번만 연다(FIFO 로 바꿔 root 를 매달거나
+  #   링크로 바꿔 따라가게 하지 못하게). node 가 없거나 비정상 종료하면 아래 예전 경로다.
+  if [[ -x "$node" ]]; then
+    if hdr="$(vp_root_read "$src" "$node" "$dst.part")"; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0)
+        viaNode=1
+        st="${hdr%%$'\n'*}"
+        if [[ "${st%% *}" == 0 ]] && ! (( 8#${st##* } & 8#022 )); then
+          if "$node" -e 'const fs=require("fs");const f=process.argv[1];if(fs.statSync(f).size>262144)process.exit(1);const d=JSON.parse(fs.readFileSync(f,"utf8"));if(!d||typeof d!=="object"||Array.isArray(d))process.exit(1)' "$dst.part" 2>/dev/null; then
+            fresh=1
+          else
+            echo "⚠ $src 를 신뢰 키 문서(JSON)로 읽지 못해 root 소유 사본을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+          fi
+        else
+          echo "ⓘ $src 는 root 소유가 아니거나 그룹·기타가 쓸 수 있어 root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+        fi ;;
+      10) viaNode=1; echo "ⓘ $src 가 일반 파일이 아니거나(링크·FIFO·장치) 하드 링크·크기 상한을 넘어 root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다." ;;
+      11) viaNode=1 ;;
+      *) rm -f -- "$dst.part" ;;
+    esac
+  fi
+  if [[ $viaNode -eq 0 && -f "$src" && ! -L "$src" ]] && exec {fd}<"$src"; then
     st="$(stat -L -c '%u %a' "/dev/fd/$fd" 2>/dev/null || echo 'x 0')"
     if [[ "${st%% *}" == 0 ]] && ! (( 8#${st##* } & 8#022 )); then
       if cat <&"$fd" > "$dst.part" 2>/dev/null && [[ -x "$node" ]] \
@@ -257,7 +315,7 @@ verify_release_package() {
       #   root 가 아닌 실행도 같다 — 넘는 권한 경계가 없으므로 root 소유 파일만 받는 규칙이 지킬 것이 없다.
       pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
     else
-      pol="$(vp_root_env_policy "$cdir")"   # root 로 도는 확인 — root 소유 portal.env 의 정책만 받는다
+      pol="$(vp_root_env_policy "$cdir" "$node")"   # root 로 도는 확인 — root 소유 portal.env 의 정책만 받는다(이 확인이 곧 root 로 실행할 node 로 한 번만 연다)
     fi
   fi
 
