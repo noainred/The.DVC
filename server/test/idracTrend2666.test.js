@@ -1,6 +1,6 @@
 // v2.666 — iDRAC 통합 추이: 가상화 서버 ↔ ESXi 호스트 매칭(서비스태그 또는 호스트네임 — 도메인 제거·대소문자 무시) +
 // 매칭된 호스트의 vCenter CPU 사용률을 **별도 계열**(hostCpuPct)로 싣는다. iDRAC CPU(cpuPct)에는 섞지 않는다(v2.665 규칙 유지).
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,6 +12,7 @@ process.env.TEMP_DB_PATH = path.join(DIR, 'host-temp.db');
 process.env.IDRAC_DB_PATH = path.join(DIR, 'idrac-power.db');
 process.env.AUTH_ENABLED = 'false';
 process.env.DATA_SOURCE = 'mock';
+after(() => fs.rmSync(DIR, { recursive: true, force: true }));   // v2.744: 실행마다 약 66MB 를 /tmp 에 남겼다
 
 const { hostShortName, buildHostMatchIndex, matchHostForServer } = await import('../src/idrac/hostMatch.js');
 const { kindOf, HOST_CPU_METRIC } = await import('../src/routes/admin/idracTrend.js');
