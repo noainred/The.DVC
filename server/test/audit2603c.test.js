@@ -297,10 +297,7 @@ test('추가①: createPruneFlight — 같은 키는 공유, 다른 키는 끝�
 // 한 번에 지우는 보존 DELETE 가 허용되는 곳 — 사유와 함께. 새 항목을 여기 넣기 전에 청크(chunkedDelete)를 먼저 볼 것.
 const PRUNE_SINGLE_OK = {
   'vmseries/db.js:cover_batch': '엣지 청크 재전송 표식 — 10분만 보관(행 수 = 최근 청크 수)',
-  'vmtrack/db.js:ds_changes': 'diff 저장(변경분만) · 한 트랜잭션 정리 — DB2603-05 실측 정상 상태 39ms',
-  'vmtrack/db.js:snaps': 'vCenter × 슬롯(2회/일) — 연 2만 행 수준',
-  'vmtrack/db.js:ds_series': 'diff 저장 + 경계 이전 마지막 행 보존(NOT IN) — 청크화하면 보존 규칙을 청크마다 다시 계산해야 한다',
-  'vmtrack/db.js:changes': 'diff 저장 + 로스터 VM 마지막 전이 보존(v2.603) — 같은 이유',
+  // v2.744(감사 DB-04): vmtrack/db.js 의 ds_changes·snaps·ds_series·changes 는 청크 정리로 바꿔 목록에서 뺐다.
   'sanswitch/perfDb.js:port_meta': '장비×포트 메타 — 상한 4,096행',
   'sanswitch/healthHistory.js:runs': '장비당 점검 이력 상한(SANHEALTH_MAX_RUNS 기본 24)',
   'partfault/db.js:part_event': '전이만 적재(상태가 바뀔 때만) — 유계',
@@ -332,7 +329,9 @@ test('추가①: 시계열 보존 정리에 청크 없는 한 방 DELETE 를 새
   for (const k of ['linkcheck/db.js:link_sample', 'ping/db.js:samples', 'curuser/db.js:vc_series', 'horizon/sessionDb.js:hz_series',
     'vmseries/db.js:spikes', 'vmseries/db.js:cover', 'rma/historyDb.js:rma_history', 'rma/testResults.js:test_results', 'sanswitch/perfDb.js:port_perf',
     // v2.605(감사 DB2605-03·04): capacity 원본·롤업과 게스트 디스크 이력도 청크로 바꿨다 — 허용 목록에서 뺐다.
-    'capacity/db.js:samples', 'capacity/db.js:samples_hourly', 'guestdisk/db.js:vm_series', 'guestdisk/db.js:part_series']) {
+    'capacity/db.js:samples', 'capacity/db.js:samples_hourly', 'guestdisk/db.js:vm_series', 'guestdisk/db.js:part_series',
+    // v2.744(감사 DB-04): vmtrack 보존 정리도 청크로 바꿨다.
+    'vmtrack/db.js:ds_changes', 'vmtrack/db.js:snaps', 'vmtrack/db.js:ds_series', 'vmtrack/db.js:changes']) {
     assert.ok(!found.includes(k), `${k} 가 한 방 DELETE 로 되돌아갔다`);
     assert.ok(!PRUNE_SINGLE_OK[k], k);
   }

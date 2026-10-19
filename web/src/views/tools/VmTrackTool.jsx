@@ -37,8 +37,11 @@ export default function VmTrackTool() {
   const load = () => run(fetchJson('/tools/vm-track', { days, vcenterId }),
     (d) => { setData(d); setError(null); }, (e) => setError(e.message));
   // load 는 매 렌더 재생성되므로 deps 에 넣으면 무한 루프 — 조회 파라미터만 의존한다(기존 뷰 관례).
+  // v2.744(감사 WEB-01): vCenter·기간을 바꾸면 **먼저 이전 결과·오류를 비운다**(StorageTrackTool 과 같은 규칙) — 비우지 않으면
+  //   새 조회가 끝날 때까지(고RTT·365일이면 수 초) 이전 vCenter·기간의 차트와 숫자가 새 선택의 값처럼 보였다. 새 조회가 실패하면
+  //   이전 값 위에 배너가 아니라 오류 화면이 뜬다(다른 범위의 값을 보여 주지 않는다).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [days, vcenterId]);
+  useEffect(() => { setData(null); setError(null); load(); }, [days, vcenterId]);
 
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -299,7 +302,7 @@ export default function VmTrackTool() {
                     });
                     return (
                       <tr key={p.slot}>
-                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중·비활성·점검 중 — v2.743 부터 비활성·점검 중 vCenter 도 빈 목록으로 세지 않고 뺍니다). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}</td>
+                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중 — 다시 읽히면 채워질 수 있습니다). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}{p.maintExcluded > 0 && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }} title={`점검중이라 인벤토리를 읽지 못한 vCenter ${p.maintExcluded}곳을 합계에서 뺐습니다. 점검은 끝나는 시각이 정해져 있지 않아 부분 합으로 막지 않습니다 — 그 vCenter 의 VM 은 이 슬롯 합계에 없고 삭제로 세지도 않았습니다. 비활성 vCenter 는 원래 합계 대상이 아닙니다.`}>점검중 {p.maintExcluded}곳 제외</span>}</td>
                         <td style={{ textAlign: 'right' }}>{p.total.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--green)' }}>{p.onCount.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--amber)' }}>{off.toLocaleString()}</td>

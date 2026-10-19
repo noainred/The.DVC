@@ -30,6 +30,7 @@ import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
+import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
 import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
@@ -341,6 +342,33 @@ export function spanArgsFor({ intervalMs = null, prevRunMs = 0, runT0 = null, sa
 }
 
 /**
+ * v2.744(감사 DEV-04): iDRAC 텔레메트리 수집 한 건 — **장비 시한이 요청을 실제로 끊는다**(`withDeadline` + `signal`, v2.417 규약).
+ *
+ * 예전에는 OS 경로만 `withDeadline` 안에 있고 텔레메트리 GET 은 시한 없이 돌았다. 요청마다 걸린 시한(IDRAC_TIMEOUT_MS)만 있어
+ * 전수 모드에서 목록 1회 + 리포트 6개(동시 3)가 각자 시한을 다 쓰면 한 서버가 수 분을 붙잡았고, 그동안 동시성 슬롯이 묶여
+ * 뒤 서버들이 통째로 밀렸다(그 결과 주기가 간격을 넘겨 재진입 가드가 다음 틱을 건너뛴다). 이제 시한이 되면 남은 GET 을
+ * 보내지 않고 진행 중인 소켓을 끊는다.
+ *
+ * ⚠ 시한 초과는 `kind:'timeout'` 이다 — **자격증명 거부가 아니므로 인증 정지에 세지 않는다**(정지 조건은 `kind === 'auth'` 뿐).
+ *   타임아웃으로 멈추면 일시 장애가 수집을 영구 정지시킨다(v2.535 규약). 그 밖의 예외는 예전처럼 'unreachable'.
+ * ⚠ 공유 세션 POST 에는 호출자 signal 을 걸지 않는 규칙(v2.593 — 세션 생성 공유)은 `redfish.rawGet` 이 그대로 지킨다.
+ *
+ * @param {object} entry  `target.idrac`(등록 항목 사본)
+ * @param {{full?:boolean, allowList?:boolean, timeoutMs?:number}} [opt]  `timeoutMs` 는 테스트용 — 기본은 장비 시한
+ * @returns {Promise<object>} `fetchUsage()` 결과 또는 `{ok:false, kind:'timeout'|'unreachable', error}`
+ */
+export async function idracTelemetryJob(entry, { full = false, allowList = true, timeoutMs = DEVICE_TIMEOUT_MS } = {}) {
+  const LABEL = 'iDRAC 텔레메트리 시한 초과';
+  try {
+    const m = await import('../idrac/redfish.js');
+    return await withDeadline(timeoutMs, (signal) => m.fetchUsage(entry, { full, allowList, signal }), LABEL);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    return { ok: false, kind: msg.startsWith(LABEL) ? 'timeout' : 'unreachable', error: msg.slice(0, 300) };
+  }
+}
+
+/**
  * 한 서버 수집 — 두 경로를 병렬로 시도하고 실패도 사유와 함께 돌려준다.
  *
  * ⚠⚠ **표본 시각은 이 서버가 실제로 읽힌 시각이다**(v2.550.3 에 고친 결함). 예전에는 주기 시작
@@ -375,7 +403,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   if (allowList) _listBudget -= 1;
   jobs.push(!target.paths.includes('idrac') ? Promise.resolve(null)
     : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
-      : import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac, { full, allowList })).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) })));
+      : idracTelemetryJob(target.idrac, { full, allowList }));
   jobs.push((target.paths.includes('os') && !stopped)
     ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
@@ -472,6 +500,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt, ...spanArgsFor({ intervalMs, prevRunMs, runT0, sampledAt }) });
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok || ent?.ok);
+  recordHbaBasis(target.key, built, { at: sampledAt, ok });   // v2.744(LEFT-08 ②): 포트 수만 — 화면 각주가 분모 근거를 한 번 말한다
   recordBmUsage({
     // ⚠ `idracHost` 는 `publicTarget()` 이 만드는 응답용 필드다 — **내부 target 에는 없다**.
     //   `target.idracHost` 로 읽으면 iDRAC 전용 서버의 작업 로그에 host 가 빈 칸으로 남는다.
@@ -490,6 +519,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
  */
 function dropStaleState(live) {
   for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
+  pruneHbaBasis(live);   // v2.744(LEFT-08 ②)
   for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
 }
 

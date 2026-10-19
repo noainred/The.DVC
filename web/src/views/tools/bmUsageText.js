@@ -204,9 +204,38 @@ export function detailNotes(detail = {}) {
   const fcRows = detail.fc || [];
   const fcNoSpeed = fcRows.filter((x) => n(x.bps) != null && n(x.pct) == null && !x.pctOver);
   if (fcNoSpeed.length) out.push(`**속도를 읽지 못한 FC 포트 ${fcNoSpeed.length}개** — 사용률(%) 대신 처리량만 보여줍니다.`);
-  const fcOver = fcRows.filter((x) => x && x.pctOver);
-  if (fcOver.length) out.push(`**FC 표준 데이터율을 넘는 처리량이 나온 포트 ${fcOver.length}개** — 사용률(%)은 비우고 처리량만 보여줍니다(카운터가 프레임 헤더까지 셀 수 있습니다).`);
+  // v2.744(감사 RECENT-02): 데이터율을 **조금** 넘은 포트(110% 까지)는 100% 로 표시하고, **크게** 넘은 포트만 비운다 — 둘을 나눠 말한다.
+  const fcClamped = fcRows.filter((x) => x && x.pctOver && n(x.pct) != null);
+  const fcBlanked = fcRows.filter((x) => x && x.pctOver && n(x.pct) == null);
+  if (fcClamped.length) out.push(`**FC 표준 데이터율을 조금 넘은 포트 ${fcClamped.length}개** — 사용률을 100% 로 표시했습니다(카운터가 프레임 헤더까지 세는 측정 정의 차이입니다 — 처리량은 그대로입니다).`);
+  if (fcBlanked.length) out.push(`**FC 표준 데이터율을 넘는 처리량이 크게 나온 포트 ${fcBlanked.length}개** — 그 포트의 사용률(%)과 서버 대표 HBA 사용률을 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 임계 알림은 초과로 봅니다).`);
   return out;
+}
+
+/**
+ * v2.744(감사 LEFT-08 ②): HBA 사용률(%)의 **분모 근거** — 표 아래 각주 1회(v2.509 규약 — 행마다 반복하지 않는다).
+ * 서버 행의 `hbaBasis`(폴러가 수집할 때 센 포트 수 — targets.publicTarget)를 합산한다. 근거가 하나도 없으면 문구를 만들지 않는다
+ * (재시작 직후·HBA 없는 현장 — 지어내지 않는다). 개수는 **보이는 행** 기준이다(필터·범위로 빠진 서버는 세지 않는다).
+ * @returns {string} BoldText 용 문장(없으면 '')
+ */
+export function hbaBasisFootnote(rows = []) {
+  const sum = { ports: 0, dataRate: 0, nominal: 0, noSpeed: 0, clamped: 0, blanked: 0, unread: 0, servers: 0 };
+  let clampMax = null;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const b = r && typeof r === 'object' ? r.hbaBasis : null;
+    if (!b || typeof b !== 'object' || !(n(b.ports) > 0)) continue;
+    sum.servers += 1;
+    for (const k of ['ports', 'dataRate', 'nominal', 'noSpeed', 'clamped', 'blanked', 'unread']) sum[k] += n(b[k]) ?? 0;
+    if (n(b.clampMaxPct) != null) clampMax = n(b.clampMaxPct);
+  }
+  if (!sum.ports) return '';
+  const parts = [`HBA 사용률(%)의 분모는 **FC 표준 데이터율**입니다(16GFC 1,600MB/s 등 — 명목 Gbit 가 아닙니다) · 서버 ${sum.servers}대 · 포트 ${sum.ports}개 중 데이터율 기준 ${sum.dataRate}개`];
+  if (sum.nominal) parts.push(`표에 없는 속도라 **명목 속도**로 나눈 포트 ${sum.nominal}개`);
+  if (sum.noSpeed) parts.push(`속도를 읽지 못해 사용률을 내지 않은 포트 ${sum.noSpeed}개`);
+  if (sum.clamped) parts.push(`데이터율을 조금 넘어(${clampMax ?? 110}% 까지) **100% 로 표시한** 포트 ${sum.clamped}개(카운터가 프레임 헤더까지 세는 측정 정의 차이)`);
+  if (sum.blanked) parts.push(`크게 넘어 사용률을 **비운** 포트 ${sum.blanked}개(그 서버의 HBA 사용률도 비웠습니다 — 임계 알림은 초과로 봅니다)`);
+  if (sum.unread) parts.push(`통계 카운터를 읽지 못한 포트 ${sum.unread}개('-1' 표지 — 처리량을 비웠습니다)`);
+  return `${parts.join(' · ')}.`;
 }
 
 /**

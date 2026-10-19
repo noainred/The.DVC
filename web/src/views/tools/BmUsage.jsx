@@ -31,7 +31,7 @@ import { distStateOf, lapsedVerifiedNote, distributionSummary, centralManagedNot
 import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, hbaBasisFootnote, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
@@ -397,6 +397,10 @@ export function BmUsage() {
         {missingFootnotes(rows).map((f, i) => (
           <p key={i} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>
         ))}
+        {/* v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거 — 보이는 행 기준 각주 1회(근거가 없으면 그리지 않는다) */}
+        {hbaBasisFootnote(shown) && (
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={hbaBasisFootnote(shown)} /></p>
+        )}
         <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다). 네트워크·HBA 사용률(%)은 전이중이라 **방향별(수신·송신 중 큰 쪽)** ÷ 링크 속도이고, 처리량(B/s)은 두 방향의 합입니다.'.replace(/`/g, '')} />
         </p>

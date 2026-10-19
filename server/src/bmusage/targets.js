@@ -19,6 +19,7 @@
  *   (`fleetInventory.js:170`) iDRAC 등록이 없다 — 그것을 '주소 없음' 이라 말해야 한다.
  */
 import { licenseFromInventory } from './license.js';
+import { hbaBasisFor } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②)
 import { addressMatcher, extendMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -297,5 +298,7 @@ export function publicTarget(x = {}) {
     idracHost: idrac ? idrac.host : null,
     osHostName: osHost ? (osHost.host || '') : null,
     osMounts: osHost ? (osHost.mounts || []).length : null,
+    // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(포트 수만 — 주소·식별자 없음). 이 노드가 수집한 적이 없으면 null.
+    hbaBasis: hbaBasisFor(rest.key),
   };
 }

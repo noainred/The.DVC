@@ -21,7 +21,7 @@
  */
 import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs } from './rates.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { fcUtilization, fcRateNotes } from './parse/fcRate.js';
+import { fcUtilization, fcRateNotes, fcRowPctFields, fcRepresentative, fcPlausibleBps } from './parse/fcRate.js';
 
 const n = numOrNull;   // v2.561: 공용 판정
 
@@ -137,19 +137,34 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     // HBA — tx/rx words(4바이트) 누적. 속도를 모르면 퍼센트 없음.
     // v2.743(감사 DEV-03): 분모는 명목 Gbit 가 아니라 **FC 표준 데이터율**(16GFC 1,600MB/s 등 — parse/fcRate.js)이다.
     //   명목으로 나누면 포화한 포트가 80% 에서 멈춰 기본 임계 90% 알림이 울리지 않았다. 표에 없는 속도는 명목 + 사유 표지.
+    /*
+     * v2.744(감사 DEV-01): ① 통계를 못 읽은 포트(-1 표지 — parseFcHosts 가 null + countersInvalid)는 처리량을 비운다(전후 어느 쪽이든).
+     *   ② 한 방향 처리량이 회선의 **물리 상한**(fcRateCapBps — 데이터율 × 2, 속도 미상 1e12 B/s)을 넘으면 카운터 이상이다 — 값으로
+     *   두면 491 PB/s 같은 수치가 원시 표본과 5년 일 롤업 최대(hba_bps_max)에 남는다. 비우고 사유를 센다(조용히 버리지 않는다).
+     */
+    let fcImplausible = 0;
+    const fcCap = (v, bits) => { const ok = fcPlausibleBps(v, bits); if (v != null && ok == null) fcImplausible += 1; return ok; };
     const perFc = (c.hbas || []).map((x) => {
       const p = findBy(pc?.hbas, 'host', x.host);
-      const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim);
-      const tx = perSecond(p?.txBytes, x.txBytes, pAt, now, lim);
+      const rx = fcCap(perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim), x.bitsPerSec);
+      const tx = fcCap(perSecond(p?.txBytes, x.txBytes, pAt, now, lim), x.bitsPerSec);
       const bps = sumStrict([rx, tx]);
       const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
-      return { host: x.host, bps, pct: u.pct, pctBasis: u.basis, ...(u.over ? { pctOver: true } : {}), state: x.state, speedRaw: x.speedRaw };
+      return { host: x.host, bps, ...fcRowPctFields(u), state: x.state, speedRaw: x.speedRaw, ...(x.countersInvalid ? { countersInvalid: true } : {}) };
     });
-    const hp = maxOrNull(perFc.map((x) => x.pct));
-    if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
+    // v2.744(감사 RECENT-02): 대표값은 fcRepresentative 하나 — 크게 넘어 비운 포트가 있으면 다른 포트 값으로 채우지 않는다.
+    const rep = fcRepresentative(perFc);
+    if (rep.pct != null) { out.hba_pct = rep.pct; srcOf.hba = 'os'; }
+    if (rep.overBlank) out.hba_over = true;   // ⚠ DB 열이 아니다(insertUsage 는 열 목록만 읽는다) — 알림 판정(alertRules overFlag)용
     const hb = maxOrNull(perFc.map((x) => x.bps));
     if (hb != null) out.hba_bps = hb;
     for (const t of fcRateNotes(perFc)) notes.push(t);
+    const fcUnread = (c.hbas || []).filter((x) => x && x.countersInvalid).length;
+    if (fcUnread) notes.push(`FC HBA ${fcUnread}개는 통계 카운터를 읽지 못했습니다(드라이버가 '-1' 표지를 냈습니다 — 링크 다운·칩 재설정 중일 수 있습니다). 그 포트의 처리량·사용률은 비웠습니다(0 이 아닙니다).`);
+    // 표지 → 정상 주기: 이번 값은 읽었지만 비교할 직전 값이 없다 — 조용히 비우지 않고 '다음 주기부터' 라고 말한다.
+    const fcPrevUnread = (c.hbas || []).filter((x) => x && !x.countersInvalid && findBy(pc?.hbas, 'host', x.host)?.countersInvalid).length;
+    if (fcPrevUnread) notes.push(`FC HBA ${fcPrevUnread}개는 직전 주기에 통계 카운터를 읽지 못해('-1' 표지) 이번 주기 처리량·사용률은 비웠습니다(다음 주기부터 나옵니다).`);
+    if (fcImplausible) notes.push(`FC HBA 처리량 ${fcImplausible}건이 회선의 물리 상한을 넘어(카운터 이상) 비웠습니다 — 처리량·사용률로 저장하지 않았습니다.`);
     // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
   }
@@ -204,19 +219,29 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       if (out.net_bps == null && nb != null) out.net_bps = nb;
     }
     if ((idrac.fcs || []).length) {
+      let idracImplausible = 0;
+      const capI = (v, bits) => { const ok = fcPlausibleBps(v, bits); if (v != null && ok == null) idracImplausible += 1; return ok; };
       idracFc = idrac.fcs.map((x) => {
         const p = findBy(pIdrac?.fcs, 'host', x.host);
-        const { rx, tx } = idracRow(p, x);
+        const r0 = idracRow(p, x);
+        // v2.744(DEV-01): OS 경로와 같은 물리 상한 — 카운터 이상을 처리량으로 두지 않는다.
+        const rx = capI(r0.rx, x.bitsPerSec); const tx = capI(r0.tx, x.bitsPerSec);
         const bps = sumStrict([rx, tx]);
         // v2.743(DEV-03): OS 경로와 같은 분모(FC 표준 데이터율) — 판정은 parse/fcRate.js 하나.
         const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
-        return { host: x.host, bps, pct: u.pct, pctBasis: u.basis, ...(u.over ? { pctOver: true } : {}), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+        return { host: x.host, bps, ...fcRowPctFields(u), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
-      const hp = maxOrNull(idracFc.map((x) => x.pct));
-      if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }
+      // v2.744(RECENT-02): 대표값 판정은 OS 경로와 같은 fcRepresentative. OS 가 이미 '크게 초과로 비움'(hba_over)을 냈으면
+      //   iDRAC 값으로 채우지 않는다(같은 HBA 의 다른 측정으로 가장 바쁜 포트를 덮지 않게 — 빈 칸만 채우는 규칙의 예외가 아니라 그 연장이다).
+      const repI = fcRepresentative(idracFc);
+      if (out.hba_pct == null && !out.hba_over) {
+        if (repI.pct != null) { out.hba_pct = repI.pct; srcOf.hba = 'idrac'; }
+        else if (repI.overBlank) out.hba_over = true;
+      }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
       for (const t of fcRateNotes(idracFc, 'iDRAC ')) notes.push(t);
+      if (idracImplausible) notes.push(`iDRAC FC 처리량 ${idracImplausible}건이 회선의 물리 상한을 넘어(카운터 이상) 비웠습니다.`);
     }
     if (idracStale) {
       notes.push(`iDRAC 텔레메트리 리포트가 이전 주기 이후 갱신되지 않은 장치 ${idracStale}개는 네트워크·HBA 사용률을 판정하지 않았습니다(같은 값을 두 번 읽어 0 으로 보이지 않게).`);

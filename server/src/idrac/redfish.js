@@ -1293,18 +1293,24 @@ export function reportListCacheInfo() {
   return { entries: _reportList.size, ttlMs: REPORT_TTL_MS, maxReports: MAX_REPORTS_PER_DEVICE };
 }
 
-/** 리포트 URL 을 동시성 제한으로 읽는다(한 장비 안에서). */
-async function getReports(G, ids) {
+/**
+ * 리포트 URL 을 동시성 제한으로 읽는다(한 장비 안에서).
+ * v2.744(감사 DEV-04): 호출자 signal(폴러의 장비 시한)이 끊기면 **남은 리포트 GET 을 보내지 않고** 취소를 올린다 — 예전에는 리포트마다
+ *   실패를 삼켜 시한 뒤에도 남은 GET 이 BMC 로 나갔다.
+ */
+async function getReports(G, ids, signal = null) {
   const out = [];
   let i = 0;
   const workers = Array.from({ length: Math.min(REPORT_FETCH_CONCURRENCY, ids.length) }, async () => {
     for (;;) {
+      if (signal?.aborted) return;
       const idx = i; i += 1;
       if (idx >= ids.length) return;
       try { out.push(await G(ids[idx])); } catch { /* 그 리포트만 건너뛴다 */ }
     }
   });
   await Promise.all(workers);
+  if (signal?.aborted) throw signal.reason ?? new Error('aborted');
   return out;
 }
 
@@ -1314,9 +1320,10 @@ async function getReports(G, ids) {
  * @param {{allowList?:boolean}} opt  `allowList:false` 면 **캐시된 목록만** 쓴다(주기 예산 보호)
  * @returns {Promise<object|null>} `null` = 이번 주기에 전수 조회를 하지 않았다(목록 미보유)
  */
-async function fetchTelemetryReports(entry, { allowList = true } = {}) {
+async function fetchTelemetryReports(entry, { allowList = true, signal = null } = {}) {
   const base = entry.host.replace(/\/+$/, '');
-  const G = (p) => get(base, p, entry.username, entry.password);
+  // v2.744(감사 DEV-04): 호출자 signal 을 요청까지 넘긴다(get → rawGet outerSignal — 공유 세션 POST 에는 걸지 않는 규칙은 rawGet 이 지킨다).
+  const G = (p) => get(base, p, entry.username, entry.password, { signal });
   const key = `${base}|${entry.username || ''}`.toLowerCase();
   const cached = _reportList.get(key);
   let ids = (cached && Date.now() - cached.at < REPORT_TTL_MS) ? cached.ids : null;
@@ -1331,13 +1338,31 @@ async function fetchTelemetryReports(entry, { allowList = true } = {}) {
   const idOf = (u) => u.split('/').filter(Boolean).pop() || '';
   // v2.598(감사 IDRAC-2598-01): 목록 순서 앞 N개가 아니라 **종류별 우선순위**(SystemUsage → NIC → FC → …)로 고른다.
   const { wanted, skipped } = pickReports(ids, MAX_REPORTS_PER_DEVICE, idOf);
-  const reports = wanted.length ? await getReports(G, wanted) : [];
+  const reports = wanted.length ? await getReports(G, wanted, signal) : [];
   const built = buildIdracUsage(reports, ids.map(idOf));
   built.listedNow = listedNow;
   built.reportsRequested = wanted.length;
   // 상한으로 읽지 않은 리포트 수 — 조용히 자르지 않는다(화면·진단이 밝힌다).
   built.skippedReports = skipped;
   return built;
+}
+
+/**
+ * v2.744(감사 LEFT-02): Redfish GET 실패 → 실패 종류. **오류 객체의 표지만** 본다 — get() 은 401 에 `authFailed`·`status:401`, 그 밖의
+ *   HTTP 실패에 `status` 를 싣는다(v2.590). 문구(`/\b40[134]\b/`)는 보지 않는다: 오류 문구에는 호스트명이 실린다(bmcFetch 의 교차 출처
+ *   리다이렉트 '… → idrac-401.corp' — 하이픈과 숫자 사이도 단어 경계라 401 로 읽혔다). 표지가 없는 실패(리다이렉트 거부·연결·TLS·
+ *   세션 생성 일시 오류)는 'unreachable' 이다.
+ * @param {Error} e
+ * @param {string} notFoundKind 404 의 종류 — 텔레메트리 'no-telemetry' · Sensors 'absent'
+ */
+export function redfishAuthRejected(e) {
+  return !!e && (e.authFailed === true || e.status === 401);
+}
+export function redfishFailKind(e, notFoundKind) {
+  if (e?.status === 404) return notFoundKind;
+  if (redfishAuthRejected(e)) return 'auth';
+  if (e?.status === 403) return 'forbidden';
+  return 'unreachable';
 }
 
 /**
@@ -1362,7 +1387,16 @@ const USAGE_IDS = Object.freeze({
   sysPct: ['SystemBoardSYSUsage', 'SYSUsage', 'SystemUsage'],
 });
 
-export async function fetchUsage(entry, { full = false, allowList = true } = {}) {
+/*
+ * v2.744(감사 DEV-04): `signal` — 호출자(bmusage 폴러)의 **장비 시한**. 요청마다 걸린 시한(IDRAC_TIMEOUT_MS)만으로는 전수 모드 최악
+ *   (Basic 401 → 세션 POST → 목록 → 리포트 2파 → SystemUsage 폴백 ≈ 6 × 15초)이 장비 시한 60초를 넘기고, 넘겨도 아무것도 끊지 않았다.
+ *   끊기면 남은 GET 을 보내지 않고 **취소를 그대로 올린다**(결과 객체로 바꾸지 않는다 — withDeadline 이 '시한 초과' 로 바꾼다).
+ * v2.744(감사 LEFT-02): 실패 종류는 **오류 객체의 표지(status·authFailed)** 로만 가른다. 예전 문구 판정 `/\b40[134]\b/` 는 오류 문구에
+ *   실린 호스트명('idrac-401.corp' — bmcFetch 의 교차 출처 리다이렉트 문구가 대상 호스트를 싣는다)을 401 로 읽어 kind 'auth' 를 냈고,
+ *   bmusage 가 그 서버의 iDRAC 주기 수집을 **인증 정지**시켜 비밀번호를 고치라는 틀린 조치를 계속 보였다. get() 은 401·그 밖의 HTTP
+ *   실패에 status 를 싣는다(v2.590) — 문구는 필요 없다.
+ */
+export async function fetchUsage(entry, { full = false, allowList = true, signal = null } = {}) {
   const base = String(entry.host || '').replace(/\/+$/, '');
   /*
    * ── 전수 모드(v2.551) ──────────────────────────────────────────────────────
@@ -1372,7 +1406,7 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
    */
   if (full) {
     try {
-      const r = await fetchTelemetryReports(entry, { allowList });
+      const r = await fetchTelemetryReports(entry, { allowList, signal });
       // 보드 지표를 하나라도 읽었으면 전수 결과를 쓴다. 아무것도 못 읽었으면 단독 경로가 더 낫다.
       if (r && (r.cpuPct != null || r.memPct != null || r.nics.length || r.fcs.length || r.disks.length)) {
         const res = { ...r, ok: true, full: true, at: r.at || Date.now() };
@@ -1382,7 +1416,7 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
          * 단독 조회가 실패하면 그 사유를 `boardFallback` 으로 싣는다 — 전수 결과는 그대로 쓴다.
          */
         if (res.cpuPct == null && res.memPct == null) {
-          const fb = await fetchUsage(entry, { full: false });
+          const fb = await fetchUsage(entry, { full: false, signal });
           if (fb.ok) {
             for (const f of ['cpuPct', 'memPct', 'ioPct', 'sysPct']) {
               if (res[f] == null && fb[f] != null) { res[f] = fb[f]; res.usedIds = { ...(res.usedIds || {}), [f]: fb.usedIds?.[f] || 'SystemUsage' }; }
@@ -1397,36 +1431,36 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
       }
       if (r) {
         // 리포트는 열거했는데 아는 것이 없었다 — 그 사실을 실어 단독 경로로 내려간다.
-        const fb = await fetchUsage(entry, { full: false });
+        const fb = await fetchUsage(entry, { full: false, signal });
         return fb.ok
           ? { ...fb, seenReports: r.seenReports, usedReports: r.usedReports, absent: r.absent, fullTried: true }
           : { ...fb, seenReports: r.seenReports, usedReports: r.usedReports, fullTried: true };
       }
     } catch (e) {
+      if (signal?.aborted) throw e;   // v2.744(DEV-04): 시한 취소는 단독 경로로 내려가지 않는다(남은 시간이 없다)
       const msg = String(e?.message || e);
       // 401 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
       // v2.591(감사 R-BM2): **403 은 자격증명 거부가 아니다**(인증은 통했고 그 자원이 허락되지 않았다 — 라이선스·
       //   권한 부족일 수 있다). 403 을 'auth' 로 두면 bmusage 가 **자격증명과 무관하게** 텔레메트리 주기 수집을
       //   영구 정지하고 대체 경로(Enterprise)까지 막는다. 그래서 403 은 단독 경로로 내려가 스스로 판정한다.
-      if (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
+      // v2.744(LEFT-02): 표지로만 판정한다(문구의 호스트명 속 '401' 을 자격증명 거부로 읽지 않는다).
+      if (redfishAuthRejected(e)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
       /* 그 밖(403·404·타임아웃)은 단독 경로로 내려간다 */
     }
-    const fb = await fetchUsage(entry, { full: false });
+    const fb = await fetchUsage(entry, { full: false, signal });
     return { ...fb, fullTried: true };
   }
   let rep;
   try {
-    rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password);
+    rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password, { signal });
   } catch (e) {
+    if (signal?.aborted) throw e;   // v2.744(DEV-04): 취소는 결과 객체로 바꾸지 않는다 — 호출자의 withDeadline 이 '시한 초과' 로 말한다
     const msg = String(e?.message || e);
     // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401 은 자격증명이다 — 조치가 다르다.
     // v2.591(감사 R-BM2): 403 은 **'forbidden'** 이다 — 인증은 통했고 그 리포트가 허락되지 않았다(라이선스·계정 권한).
     //   'auth' 로 두면 bmusage 가 자격증명과 무관하게 주기 수집을 정지하고 비밀번호를 고치라는 틀린 조치를 준다.
-    //   자격증명 거부(401)는 get() 이 status·authFailed 를 싣는다 — 문구보다 그것을 먼저 본다.
-    const kind = /\b404\b/.test(msg) ? 'no-telemetry'
-      : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
-        : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
-    return { ok: false, kind, error: msg.slice(0, 300) };
+    // v2.744(LEFT-02): 판정은 get() 이 싣는 status·authFailed 로만 한다(redfishFailKind — 문구 판정 금지).
+    return { ok: false, kind: redfishFailKind(e, 'no-telemetry'), error: msg.slice(0, 300) };
   }
   const vals = Array.isArray(rep?.MetricValues) ? rep.MetricValues : [];
   const seenIds = vals.map((v) => String(v.MetricId || '')).filter(Boolean);
@@ -1610,9 +1644,8 @@ export async function fetchUsageSensors(entry, { allowProbe = true, signal = nul
       // v2.591(감사 R-BM2 — 형제 경로): 텔레메트리(fetchUsage)와 같은 규칙 — **401 만 자격증명 거부('auth')** 이고
       //   403 은 'forbidden'(인증은 통했고 그 자원이 허락되지 않았다)이다. 403 을 'auth' 로 두면 bmusage 가 대체 경로의
       //   인증 실패 정지를 걸어 비밀번호와 무관하게 수집이 멈춘다.
-      const kind = /\b404\b/.test(msg) ? 'absent'
-        : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
-          : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
+      // v2.744(LEFT-02): 표지(status·authFailed)로만 가른다 — 호스트명 속 '401'·'404' 를 판정에 쓰지 않는다.
+      const kind = redfishFailKind(e, 'absent');
       if (kind === 'absent') {
         _sensorPaths.set(key, { absent: true, reason: 'Sensors 경로가 없습니다(404).', seen: [], at: Date.now() });
       }

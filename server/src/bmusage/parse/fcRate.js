@@ -9,8 +9,16 @@
  * ── 규칙 ─────────────────────────────────────────────────────────────────
  *  · 분모는 아래 표(FC 표준 데이터율, 방향당 · 1MB = 10^6 바이트)다. 대표값(수신·송신 중 큰 쪽)을 그 값으로 나눈다.
  *  · **표에 없는 속도**(10 Gbit FCoE 등)는 예전 명목 계산을 그대로 쓰고 `basis: 'nominal'` 로 밝힌다 — 표를 추측해 늘리지 않는다.
- *  · 100% 를 넘는 값은 예전 규칙대로(`rates.linkPct` — v2.612 COL2612-01·v2.578 D3) **클램프하지 않고 null** 이다. 대신 `over:true`
- *    로 사유를 남긴다 — 카운터가 프레임 헤더까지 세는 드라이버면 데이터율을 조금 넘을 수 있다(⚠ 실장비 미확인 — 추정).
+ *  · v2.744(감사 RECENT-02 — v2.743 회귀): 데이터율을 **조금** 넘는 값(`FC_OVER_CLAMP_PCT` 110% 까지)은 **100 으로 표시**하고
+ *    `over:true`·`clamped:true`·`raw`(계산값)로 그 사실을 남긴다. 근거 — 이것은 링크 속도 보고가 틀린 것(v2.578 D3·v2.612 COL2612-01
+ *    이 null 로 둔 경우)이 아니라 **측정 정의 차이**다: 표준 데이터율은 페이로드 기준이고, 카운터가 프레임 헤더·SOF/EOF·프리미티브까지
+ *    세면 선로 속도(16GFC 14.025 Gbaud 64b/66b ≈ 1,700MB/s = 데이터율의 106.25% — 8b/10b 등급도 같은 비율)까지 올라갈 수 있다.
+ *    110% 는 그 위에 표본 시각 오차 여유를 둔 값이다. 예전처럼 null 로 두면 가장 바쁜 포트가 대표값(`maxOrNull`)에서 빠져 **다른
+ *    포트의 낮은 값이 그 서버의 HBA 사용률**이 되고 임계 알림이 울리지 않았다(16GFC 2포트 1,650·80MB/s → 5%).
+ *    조용히 보정하지 않는다 — 행의 `pctOver`·`pctClamped`·`pctRaw` 와 `fcRateNotes` 문구가 화면에 그 사실을 말한다.
+ *  · 110% 를 **크게** 넘는 값(선로 속도로도 설명되지 않는다 — 카운터 이상일 수 있다)은 예전처럼 **null** + `over:true` 다. 대신 그런
+ *    포트가 하나라도 있으면 서버 대표값을 **다른 포트 값으로 채우지 않는다**(`fcRepresentative` — 대표값 null + `overBlank`, 알림은 초과).
+ *  · 명목(nominal) 기준의 100% 초과는 명목 속도 보고가 실제와 다른 것이라 예전대로 null 이다(클램프하지 않는다).
  *  · 이더넷 NIC 는 이 모듈을 쓰지 않는다(링크 속도가 곧 데이터율에 가깝다 — 바꾸지 않는다).
  */
 import { linkPct } from '../rates.js';
@@ -18,6 +26,27 @@ import { numOrNull } from '../../util/numOrNull.js';
 
 /** FC 속도 등급(명목 Gbit) → 방향당 표준 데이터율(MB/s, 1MB = 10^6 바이트). */
 export const FC_DATA_RATE_MBPS = Object.freeze({ 1: 100, 2: 200, 4: 400, 8: 800, 16: 1600, 32: 3200, 64: 6400, 128: 12800 });
+/** v2.744(RECENT-02): 데이터율 기준 이 값(%)까지는 측정 정의 차이로 보고 100 으로 표시한다(위 머리말). 화면이 이 숫자를 서버에서 받는다. */
+export const FC_OVER_CLAMP_PCT = 110;
+/**
+ * v2.744(감사 DEV-01): 한 방향 처리량의 **물리 상한**(B/s) — 이보다 큰 값은 카운터 이상(재설정 표지·드라이버 오류)이지 처리량이 아니다.
+ *   속도를 알면 데이터율(표에 없으면 명목 bit/s ÷ 8) × 2, 모르면 1e12 B/s(128GFC 데이터율 12.8GB/s 의 80배 — 어떤 FC 회선도 닿지 못한다).
+ *   ⚠ 2배는 넉넉한 경계다 — 판정(사용률)은 `fcUtilization` 이 하고, 이 상한은 '값으로 저장할 수 없는 것' 만 거른다.
+ */
+export const FC_UNKNOWN_SPEED_CAP_BPS = 1e12;
+export function fcRateCapBps(bitsPerSec) {
+  const data = fcDataBytesPerSec(bitsPerSec);
+  if (data != null) return data * 2;
+  const l = numOrNull(bitsPerSec);
+  if (l != null && l > 0) return (l / 8) * 2;
+  return FC_UNKNOWN_SPEED_CAP_BPS;
+}
+/** 물리 상한 안의 처리량이면 그대로, 넘으면 null(값이 없으면 null). */
+export function fcPlausibleBps(bytesPerSec, bitsPerSec) {
+  const b = numOrNull(bytesPerSec);
+  if (b == null) return null;
+  return b > fcRateCapBps(bitsPerSec) ? null : b;
+}
 
 /**
  * 명목 속도(bit/s) → 표준 데이터율(바이트/초). 표에 없는 등급이면 null.
@@ -37,20 +66,54 @@ export function fcDataBytesPerSec(bitsPerSec) {
  * FC 포트 사용률(%) — 분모는 표준 데이터율(표에 있으면) 또는 명목 속도.
  * @param {number|null} bytesPerSec  대표 방향의 처리량(B/s)
  * @param {number|null} bitsPerSec   명목 속도(bit/s)
- * @returns {{ pct:number|null, basis:'fc-data-rate'|'nominal'|null, over:boolean }}
- *   basis null = 속도를 모른다(사용률을 내지 않는다) · over = 분모보다 큰 처리량이라 사용률을 비웠다
+ * @returns {{ pct:number|null, basis:'fc-data-rate'|'nominal'|null, over:boolean, clamped?:boolean, raw?:number }}
+ *   basis null = 속도를 모른다(사용률을 내지 않는다) · over = 분모보다 큰 처리량이다 ·
+ *   clamped = 데이터율 기준 소폭 초과(`FC_OVER_CLAMP_PCT` 까지)라 100 으로 표시했다(over 이면서 pct 100) ·
+ *   over 이면서 pct null = 크게 넘어 비웠다 · raw = 계산한 백분율(over 일 때만 — 화면이 근거로 보인다)
  */
 export function fcUtilization(bytesPerSec, bitsPerSec) {
   const b = numOrNull(bytesPerSec);
   const data = fcDataBytesPerSec(bitsPerSec);
   if (data != null) {
     const pct = linkPct(b, data * 8);   // linkPct = B×8 ÷ 분모(bit) — 분모를 데이터율×8 로 주면 B ÷ 데이터율이다(반올림·100% 초과 규칙 공유)
-    return { pct, basis: 'fc-data-rate', over: b != null && b >= 0 && pct == null };
+    if (pct != null || b == null || b < 0) return { pct, basis: 'fc-data-rate', over: false };
+    // v2.744(RECENT-02): linkPct 와 같은 식·같은 반올림으로 계산값을 다시 낸다(100 이하 판정이 갈리지 않게).
+    const raw = Math.round(((b * 8) / (data * 8)) * 1000) / 10;
+    if (raw <= FC_OVER_CLAMP_PCT) return { pct: 100, basis: 'fc-data-rate', over: true, clamped: true, raw };
+    return { pct: null, basis: 'fc-data-rate', over: true, clamped: false, raw };
   }
   const l = numOrNull(bitsPerSec);
   if (l == null || l <= 0) return { pct: null, basis: null, over: false };
   const pct = linkPct(b, l);
-  return { pct, basis: 'nominal', over: b != null && b >= 0 && pct == null };
+  const over = b != null && b >= 0 && pct == null;
+  return over
+    ? { pct, basis: 'nominal', over: true, clamped: false, raw: Math.round(((b * 8) / l) * 1000) / 10 }
+    : { pct, basis: 'nominal', over: false };
+}
+
+/** FC 행 하나에 붙일 사용률 필드(OS·iDRAC 경로가 같은 모양을 쓴다 — 두 벌로 조립하지 않는다). */
+export function fcRowPctFields(u = {}) {
+  return {
+    pct: u.pct ?? null, pctBasis: u.basis ?? null,
+    ...(u.over ? { pctOver: true, ...(u.clamped ? { pctClamped: true } : {}), ...(u.raw != null ? { pctRaw: u.raw } : {}) } : {}),
+  };
+}
+
+/**
+ * v2.744(감사 RECENT-02): FC 행 목록 → 서버 대표 사용률. 대표값은 '가장 높은 포트' 다(usage.js 규약).
+ *   ⚠ 데이터율을 **크게** 넘어 사용률을 비운 포트(`pctOver` 이고 pct null)가 하나라도 있으면 대표값을 **다른 포트 값으로 채우지
+ *   않는다** — 그 포트가 가장 바쁜 포트인데 빠지면 낮은 값이 서버 대표가 된다(오류 없이 틀린 값). 그때 `pct` 는 null 이고
+ *   `overBlank` 가 참이다(알림은 초과로 본다 — alertRules `overFlag`). 소폭 초과(100 으로 표시한 포트)는 그대로 최대에 들어간다.
+ * @returns {{ pct:number|null, overBlank:boolean, clamped:number, blanked:number }}
+ */
+export function fcRepresentative(rows = []) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  const blanked = list.filter((x) => x.pctOver && numOrNull(x.pct) == null).length;
+  const clamped = list.filter((x) => x.pctOver && numOrNull(x.pct) != null).length;
+  if (blanked) return { pct: null, overBlank: true, clamped, blanked };
+  let best = null;
+  for (const x of list) { const v = numOrNull(x.pct); if (v != null && (best == null || v > best)) best = v; }
+  return { pct: best, overBlank: false, clamped, blanked: 0 };
 }
 
 /**
@@ -63,7 +126,10 @@ export function fcRateNotes(rows, label = '') {
   const list = Array.isArray(rows) ? rows : [];
   const nominal = list.filter((x) => x && x.pctBasis === 'nominal' && x.pct != null).length;
   if (nominal) out.push(`${label}FC 표준 데이터율 표에 없는 속도의 HBA ${nominal}개는 명목 속도(Gbit)로 사용률을 냈습니다 — 포화해도 100% 에 못 미칠 수 있습니다.`);
-  const over = list.filter((x) => x && x.pctOver).length;
-  if (over) out.push(`${label}FC 표준 데이터율을 넘는 처리량이 나온 HBA ${over}개는 사용률(%)을 비웠습니다(카운터가 프레임 헤더까지 셀 수 있습니다 — 처리량은 그대로입니다).`);
+  // v2.744(RECENT-02): 소폭 초과(100 으로 표시)와 크게 초과(비움)를 나눠 말한다 — 조치가 다르다(앞은 정상 포화, 뒤는 카운터 확인).
+  const clamped = list.filter((x) => x && x.pctOver && numOrNull(x.pct) != null).length;
+  if (clamped) out.push(`${label}FC 표준 데이터율을 조금 넘는(${FC_OVER_CLAMP_PCT}% 까지) 처리량이 나온 HBA ${clamped}개는 사용률을 100% 로 표시했습니다(카운터가 프레임 헤더까지 세는 측정 정의 차이 — 처리량은 그대로입니다).`);
+  const blanked = list.filter((x) => x && x.pctOver && numOrNull(x.pct) == null).length;
+  if (blanked) out.push(`${label}FC 표준 데이터율을 ${FC_OVER_CLAMP_PCT}% 넘게 넘는 처리량이 나온 HBA ${blanked}개는 사용률(%)을 비웠고, 그 서버의 HBA 사용률 대표값도 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 카운터 이상일 수 있어 처리량을 확인하세요. 임계 알림은 초과로 봅니다).`);
   return out;
 }
