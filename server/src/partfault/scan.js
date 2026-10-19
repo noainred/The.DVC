@@ -28,6 +28,7 @@
 
 import { summarize, isBad, PART_STATE, COLLECTION_KINDS } from './types.js';
 import { extractIdracParts } from './extract/idrac.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 등록부 오류 사유는 요약(원문 없음)
 import { extractStorageParts } from './extract/storage.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -139,7 +140,13 @@ export function scanFrom({
   const ru = {};
   for (const sc of REGISTRY_SCOPES) {
     const e = registryUnreadable && typeof registryUnreadable === 'object' ? registryUnreadable[sc] : null;
-    if (e) { ru[sc] = { at: Number.isFinite(e.at) ? e.at : null, reason: String(e.reason ?? '').slice(0, 200) || '사유 미상' }; scanned[sc].registryUnreadable = ru[sc]; }
+    // v2.744(리드 후속 RY): 사유는 원문(JSON.parse 오류 조각 — 손상된 자격증명 파일 내용 일부)이 아니라 요약이다 — 이 표지는 push 로 중앙에 가고
+    //   중앙 파트 장애 화면(tools 권한 — operator 도 본다)·보류 사유에 실린다. code 는 분류(parse-error·corrupt-only·read-error)다.
+    if (e) {
+      const sum = summarizeRegistryError(e);
+      ru[sc] = { at: Number.isFinite(e.at) ? e.at : null, code: sum?.code || null, reason: sum?.text || '사유 미상' };
+      scanned[sc].registryUnreadable = ru[sc];
+    }
   }
   const parts = devices.flatMap((d) => d.parts);
   scanned.summary = summarize(parts);

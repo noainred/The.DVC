@@ -247,7 +247,9 @@ test('EDGE-03: 스토리지·SAN·PDU·CVP 설정 pull 은 손상 등록부를 �
   const { pullRecoveryNote } = await import('../src/util/registryCore.js');
   assert.equal(pullRecoveryNote(null), null, '읽을 수 있으면 기록하지 않는다');
   const n = pullRecoveryNote({ at: 1000, reason: '형식 오류' }, { what: '스토리지 등록부(storage-devices.json)', restored: 3 });
-  assert.equal(n.restored, 3); assert.equal(n.lostAt, 1000); assert.equal(n.reason, '형식 오류');
+  // v2.744(리드 후속 RY): reason 은 원문이 아니라 요약이다(summarizeRegistryError — 따옴표 없는 사람 문장도 분류 문구가 된다).
+  const { summarizeRegistryError } = await import('../src/util/registryCore.js');
+  assert.equal(n.restored, 3); assert.equal(n.lostAt, 1000); assert.equal(n.reason, summarizeRegistryError({ reason: '형식 오류' }).text);
   assert.match(n.note, /중앙 배포분 3건으로 다시 썼습니다/);
   assert.match(n.note, /손상 보존본/);
   assert.doesNotMatch(n.note, /`|\*\*/, '문구에 백틱·별표가 없다');

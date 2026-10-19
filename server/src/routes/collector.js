@@ -10,6 +10,7 @@ import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { registryLoadError as idracRegistryLoadError } from '../idrac/registry.js'; // v2.743(감사 EDGE-01)
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
@@ -87,19 +88,25 @@ collectorRouter.get('/export', async (req, res) => {
 /**
  * v2.743(감사 EDGE-01): 엣지 iDRAC 등록부를 읽지 못함 → **지속형 503**. 머리는 중앙의 지속형 503(routes/central.js
  *   PERSISTENT_503_RETRY_AFTER_SEC — 60초 · no-store)과 같은 값이다(이 상태는 400·800ms 뒤에도 그대로다). 본문 `reason` 은 기계 판정용
- *   코드이고 중앙 puller 가 읽어 상태·통신 지도 사유(pull-edge-registry)로 싣는다. `detail` 은 보존본 파일 이름 같은 사유 원문(비밀 없음).
+ *   코드이고 중앙 puller 가 읽어 상태·통신 지도 사유(pull-edge-registry)로 싣는다.
+ *   ⚠ v2.744(리드 후속 RY): `detail`·`error` 는 사유 **요약**(summarizeRegistryError — 분류 + 줄·칸·위치 숫자 + 시스템 오류 코드)이다. 예전에는
+ *     '비밀 없음' 이라 적고 등록부 로드 오류 원문(V8 JSON.parse 메시지 = 오류 위치 앞뒤 원문 약 10자 — 손상된 idrac.json 의 평문 비밀번호 조각)을
+ *     실어, 중앙 puller 가 그것을 수집 서버 상태 error 로 저장해 수집 서버 화면·통신 지도에 보였다(재현). 원문은 이 엣지의 보존본 파일에 있다.
+ *     `registryError` 는 같은 요약의 기계 판정용 필드(code·line·column·position·sysCode — 숫자·코드만)다. 구버전 중앙은 모르는 필드라 무시한다.
  */
 export const EDGE_EXPORT_503_RETRY_AFTER_SEC = 60;
 const EDGE_EXPORT_503_HEADERS = Object.freeze({ 'Retry-After': String(EDGE_EXPORT_503_RETRY_AFTER_SEC), 'Cache-Control': 'no-store' });
 function idracRegistryUnreadable(res, err) {
+  const sum = summarizeRegistryError(err);
   return res.status(503).set(EDGE_EXPORT_503_HEADERS).json({
     ok: false, reason: 'registryUnreadable', registry: 'idrac',
     // v2.744(감사 EDGE-04): 엣지 정체 — 정상 export·/ping 과 같은 값(비밀 없음). 중앙의 수집 서버 상태는 인메모리라, 중앙 재시작 뒤
     //   처음부터 이 503 이면 버전을 알 길이 없어 '버전 미상'(iLO 전용 스캔 보류·파트 장애/CVP 판정)이 등록부 복구 때까지 이어졌다.
     //   구버전 중앙은 모르는 필드라 무시한다.
     version: currentVersion(), agent: config.agent.name || '', hostname: os.hostname(),
-    detail: String(err?.reason || '').slice(0, 200), at: Number.isFinite(err?.at) ? err.at : null,
-    error: `엣지 iDRAC 등록부(idrac.json)를 읽지 못했습니다${err?.reason ? ` — ${String(err.reason).slice(0, 200)}` : ''}`,
+    detail: sum?.text || '', at: Number.isFinite(err?.at) ? err.at : null,
+    registryError: sum ? { code: sum.code, line: sum.line, column: sum.column, position: sum.position, sysCode: sum.sysCode } : null,
+    error: `엣지 iDRAC 등록부(idrac.json)를 읽지 못했습니다${sum?.text ? ` — ${sum.text}` : ''}`,
   });
 }
 

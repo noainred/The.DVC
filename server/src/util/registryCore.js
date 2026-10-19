@@ -11,10 +11,12 @@
  *   (`load/persist/secretCarry`)는 옮기지 않는다 — 비밀 승계(`accessMoved`)는 도구마다 접속 필드가 달라 한 벌로 묶으면
  *   회귀 위험이 이득보다 크다(verify-deps DEPS2613-04 판정). 각 등록부는 여기서 판정만 가져다 쓴다.
  *
- * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path 만).
+ * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path + 같은 util/ 의 atomicWrite 만 — v2.744 리드 후속 RY).
  */
 import fs from 'node:fs';
 import path from 'node:path';
+// v2.744(리드 후속 RY): 로드 오류 사유 분류는 atomicWrite 하나(preserveCorrupt 콘솔 줄과 같은 판정 — 두 벌 금지). atomicWrite 는 fs·path 만 import 한다(순환 없음).
+import { classifyLoadReason, loadReasonWhere } from './atomicWrite.js';
 
 /**
  * v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 빈 목록으로
@@ -136,23 +138,15 @@ export function summarizeRegistryError(err) {
   if (given) {
     line = posInt(err.line); column = posInt(err.column); position = posInt(err.position);
     sysCode = typeof err.sysCode === 'string' && /^E[A-Z]{2,15}$/.test(err.sysCode) ? err.sysCode : null;
+  } else if (raw.startsWith('등록부 파일이 없고 손상 보존본')) {
+    code = 'corrupt-only';
   } else {
-    if (raw.startsWith('등록부 파일이 없고 손상 보존본')) code = 'corrupt-only';
-    else if (/JSON|Unexpected (token|end|non-whitespace)|Bad (control|escaped|Unicode)|Expected /.test(raw)) code = 'parse-error';
-    else code = 'read-error';
-    if (code === 'parse-error') {
-      const lc = /\(line (\d{1,9}) column (\d{1,9})\)/.exec(raw);
-      if (lc) { line = posInt(lc[1]); column = posInt(lc[2]); }
-      const p = /at position (\d{1,9})/.exec(raw);
-      if (p) position = posInt(p[1]);
-    }
-    if (code === 'read-error') {
-      const s = /(?:^|[^A-Z])(E[A-Z]{2,15})(?![A-Za-z])/.exec(raw);
-      if (s) sysCode = s[1];
-    }
+    // v2.744(리드 후속 RY): JSON 형식 판정·숫자 추출·시스템 오류 코드는 공용 분류(atomicWrite.classifyLoadReason) 하나를 쓴다.
+    const c = classifyLoadReason(raw);
+    if (c.kind === 'parse') { code = 'parse-error'; line = c.line; column = c.column; position = c.position; } else { code = 'read-error'; sysCode = c.sysCode; }
   }
   const label = REGISTRY_ERROR_LABEL[code];
-  const where = line != null && column != null ? `${line}번째 줄 ${column}번째 칸` : position != null ? `위치 ${position}` : '';
+  const where = loadReasonWhere({ line, column, position });
   const text = `${label}${where ? `(${where})` : ''}${sysCode ? `(${sysCode})` : ''}`;
   return { code, line, column, position, sysCode, text, label };
 }
@@ -165,14 +159,17 @@ export function summarizeRegistryError(err) {
  *   손상 보존본에만 남는다' 를 상태·콘솔이 말한다 — 조용히 표지만 지우지 않는다.
  * @param {null|{at:number, reason:string}} err  적용 **직전**의 `registryLoadError()` 값
  * @param {{what?:string, restored?:number}} [o]
- * @returns {null|{at:number, lostAt:(number|null), reason:string, restored:(number|null), note:string}}
+ * @returns {null|{at:number, lostAt:(number|null), code:(string|null), reason:string, restored:(number|null), note:string}}  reason 은 요약(원문 없음)
  */
 export function pullRecoveryNote(err, { what = '등록부', restored = null } = {}) {
   if (!err) return null;
-  const why = String(err.reason ?? '').slice(0, 200) || '사유 미상';
+  // v2.744(리드 후속 RY): 사유는 원문(JSON.parse 오류 조각 — 손상된 자격증명 파일 내용 일부)이 아니라 요약이다 — 이 기록은 엣지 상태·콘솔에
+  //   실려 엣지 로그로 중앙에 당겨진다(summarizeRegistryError 머리말 · autoWriteRefusal 과 같은 판단). 원문은 그 노드의 보존본 파일에 있다.
+  const sum = summarizeRegistryError(err);
+  const why = sum?.text || '사유 미상';
   const n = Number.isFinite(restored) ? restored : null;
   return {
-    at: Date.now(), lostAt: Number.isFinite(err.at) ? err.at : null, reason: why, restored: n,
+    at: Date.now(), lostAt: Number.isFinite(err.at) ? err.at : null, code: sum?.code || null, reason: why, restored: n,
     note: `${what} 읽기 실패(${why}) — 중앙 배포분${n == null ? '' : ` ${n}건`}으로 다시 썼습니다. 배포분이 아닌 로컬 항목은 손상 보존본(.corrupt.*)에만 남습니다`,
   };
 }

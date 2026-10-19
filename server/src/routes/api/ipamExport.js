@@ -114,6 +114,15 @@ function slimHostRow(r) {
   if (r?.ownerType !== 'host' || !r.owner) return r;
   return { ...r, owner: undefined, hasOwner: true, ownerId: String(r.owner.id || ''), ownerName: r.ownerName || String(r.owner.name || '') };
 }
+/**
+ * v2.744(리드 후속 RY): 목록·시트가 같은 다이어트를 쓴다 — VM 행은 v2.253 모양(`hasOwner` 만, 상세는 `/vms/lookup` — inv.vms 게이트),
+ *   호스트 행은 slimHostRow. 예전에는 시트 라우트가 호스트만 줄여 **VM 칸에 스냅샷 VM 객체 통째**(uuid·MAC·디스크 경로·사용자 지정 속성 …)를
+ *   실었고, `/vms` 가 403 인 역할(tools 만 있고 inv.vms 없음)에게도 나갔다(v2.536 inv.* 우회 계열 — 재현). 화면은 시트 VM 칸의 owner 를
+ *   IP 사용 이력 창에서만 쓰고 그 창은 owner 가 없으면 이미 지연 조회한다(IpamCore needsLookup) — 화면 변경 없이 같은 경로를 탄다.
+ */
+export function slimOwnerRow(r) {
+  return r?.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : slimHostRow(r);
+}
 
 export function registerIpamExport(api) {
 
@@ -136,7 +145,7 @@ export function registerIpamExport(api) {
  */
 api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', async (snap) => {
   const data = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
-  let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : slimHostRow(r)));
+  let rows = data.rows.map(slimOwnerRow);
   const q = String(req.query.q || '').trim().toLowerCase();
   let truncated = false; let matched = null;
   if (q) {
@@ -189,8 +198,8 @@ api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
   const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 양보판 원장을 시트에 넘긴다(지금 입력의 것일 때만 쓰인다)
   const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed, ledger, cache: store.get() === snap });
   const sheet = sheets[0];
-  // v2.744(회귀 검토 GG-R3): 시트의 호스트 칸도 목록과 같이 줄인다(시트 객체는 캐시 공유 — 새 객체). VM 칸은 예전 그대로다.
-  res.json(sheet ? { ...sheet, rows: (sheet.rows || []).map(slimHostRow) } : { subnet: '', rows: [] });
+  // v2.744(회귀 검토 GG-R3 · 리드 후속 RY): 시트의 호스트·VM 칸도 목록과 같이 줄인다(시트 객체는 캐시 공유 — 새 객체). slimOwnerRow 머리말.
+  res.json(sheet ? { ...sheet, rows: (sheet.rows || []).map(slimOwnerRow) } : { subnet: '', rows: [] });
 });
 
 // Per-IP usage history (scan-derived online/offline transitions over time).

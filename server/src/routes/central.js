@@ -24,6 +24,7 @@ import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // 
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): registryUnreadable 503 사유는 요약(원문 없음)
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
@@ -1429,7 +1430,10 @@ function registryUnreadable(res, errOf, what) {
   let e = null;
   try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
   if (!e) return false;
-  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
+  // v2.744(리드 후속 RY): 사유는 중앙 등록부 로드 오류 **원문**(JSON.parse 메시지 = 손상된 자격증명 파일 조각)이 아니라 요약이다 —
+  //   이 응답은 엣지로 가서 그 엣지의 설정 pull 상태·콘솔(→ 엣지 로그)에 실린다. 원문은 중앙의 보존본 파일에 있다. 문장 모양은 그대로다.
+  const why = summarizeRegistryError(e)?.text || '사유 미상';
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${why}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
   return true;
 }
 
