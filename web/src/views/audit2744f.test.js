@@ -2,11 +2,12 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NOT_READ_WHY_TEXT, notReadNote, notReadKpiSub, notReadCell } from './bizreport/notReadText.js';
 import { SKIP_REASON_TEXT, skipNote, skipCell, skippedList } from './vcAuthStopText.js';
 import { coverageNote, ADDON_BOUND_NOTE } from './corelicense/coreLicenseText.js';
 
-const SRC = path.resolve(__dirname, '../../../server/src');
+const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../server/src');
 
 describe('VC-03 읽지 못한 vCenter 문구', () => {
   it('비활성만 빠졌으면 하한이라 말하지 않는다 · 읽지 못한 것이 있으면 하한', () => {

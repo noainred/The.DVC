@@ -5273,11 +5273,46 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · CVP·SAN(GK): CVP·SAN 포트 사용량 push 는 `postNo503Retry`(LEFT-03 — 혼잡 503 도 다음 주기) · CVP 예산 소진 + 인터페이스 못 읽음 = 'budget'(`budgetTelemetry`, DEV-04) ·
       sensorshow 이상어 `SENSOR_BAD_WORD`(DEV-02 — v2.742 회귀 되돌림, 'High'·'Low' 정상 펌웨어면 오탐 — 실장비 미확인) · CVP '지금 수집' busy 는 주의 톤 + `directBusy`(WEB-03).
     · GL: svcmon LDAP 은 BER 단형·장형 길이를 읽는다(DEV-01 — AD 의 실패가 성공으로 보였다) · FC HBA 사용률 분모는 `bmusage/parse/fcRate.js` FC 표준 데이터율(DEV-03 — 표에 없는 속도는 명목 + `pctBasis`,
-      데이터율 초과는 null + `pctOver`) · 스토리지 합계 추이 시간 조각 + 양보(DB-01 — 결과 동일 대조) · `/overview/trend` 전력은 `?include=power` 일 때만(DB-02 — 없으면 `not-requested`).
+      데이터율 초과는 null + `pctOver` — ⚠ v2.744 RECENT-02 가 바꿨다: 110% 까지는 100 + `pctClamped`, 그 위는 null + `hba_over`) · 스토리지 합계 추이 시간 조각 + 양보(DB-01 — 결과 동일 대조) · `/overview/trend` 전력은 `?include=power` 일 때만(DB-02 — 없으면 `not-requested`).
     · Windows(INJPKG-01): start-portal.bat 이 `PORTAL_ENV_FILE` 로 자기가 call 하는 파일을 넘기고 토큰 저장이 그 파일에 `set "KEY=VAL"` CRLF 로 쓴다(cmd 메타문자 거부). 새 env `PORTAL_ENV_FILE`.
     · ⚠ 테스트 하니스: 자식 프로세스가 큰 응답을 `console.log` 직후 `process.exit` 하면 stdout 이 잘린다 — 결과는 파일로 넘길 것(audit2743a 가 이번에 그렇게 깨졌다).
     · 남긴 것: INJPKG-02(Windows SYSTEM 예약 작업 ACL — 환경 없음 · v2.744 LEFT-05 는 README 안내만 더했다) · ✅ `postNo503Retry` 본체 util/ 이동(v2.744 LEFT-09) · ✅ 화면 표시 `folded`(GPU 게스트 — v2.744 LEFT-08①)·BmUsage HBA 각주(v2.744 LEFT-08②) · ✅ 중앙 isidu `runDropped` 는 v2.743 에 이미 `collectDropNote`(EDGE_DROP_TEXT)로 화면이 말한다(v2.744 LEFT-08③ 정정).
     · ⚠ 작업 방식: 첫 수정 실행의 12개 에이전트가 시작 직후 세션 한도에 걸렸다(작업 트리 깨끗 — 그대로 다시 돌렸다). CPU 4개라 워크플로당 동시 2 — 6개 워크플로로 나눴다.
+  - ⚠⚠ **v2.744 — '세 번 반복' 3회차(10축 발견 → 발견마다 2인 반증 → 10그룹 수정 → 후속 3그룹 → 수정분 적대적 회귀 검토) 확정분**(같은 요청의 3회차·마지막 ·
+    선택은 1회차와 같다. 발견 40 = 확정 35 · 확정(약) 3 · 가능성 2(중복 2쌍 — 고유 38), 고친 것 38(EDGE-03 일부). 상세 `docs/AUDIT-2026-10-19.md`,
+    회귀 `server/test/audit2744{a..m}.test.js` + 웹 `audit2744{f,k,l,m}`·`tools/audit2744{a,b,d,g,i}` — 그룹별 변이 검증(고친 파일을 `9a2ef1c`·후속은 `3b7816a` 판본으로 되돌리면 실패)):
+    · ⚠⚠ **'관리자 판본' 판정은 라우트에서도 `isAdminDetailUser` 하나 — 소스 스윕(`audit2744e`)이 `role === 'admin'` 직접 비교를 허용 목록(사유)과 개수까지 대조한다**(AUTHZ-01 = LEFT-01 — v2.743 의 남은 16파일:
+      중계 토폴로지 haproxy.cfg 원문·SSH 계정 · HAProxy 점검 주소 · svcmon 엣지 출처 · ping 엣지 주소 · 서비스 점검 스택 · /perf/req-status · 프로비저닝 남의 작업 · 구성 점검 5종 memo 키). **새 라우트의 가림은 이 함수로**.
+    · ⚠⚠ **설정 소유자 등급 라우트는 전체 범위 계정만**(AUTHZ-02, `routes/admin/shared.js requireSettingsOwner` — 범위 계정이면 소유자 목록에 있어도 403 `SETTINGS_OWNER_FULL_SCOPE_REASON`):
+      공유 CENTRAL_TOKEN 평문·백업 생성/내려받기/복원·비밀 정책·세션 보안. 저장 응답·GET 이 `ownerWarnings`(범위 계정 소유자)를 싣고 세션 보안 화면이 말한다. `/auth/me` 는 `settingsOwnerTier`(실제 게이트를 돌린 값)를 더 싣는다 —
+      `isSettingsOwner` 의 뜻은 그대로다(App 이 그 값으로 설정 탭 전체를 숨기므로 범위 소유자의 범위 안 설정까지 사라진다 — 후속 FB-3 판단). 남긴 것: 소유자 등급 서브메뉴를 settingsOwnerTier 로 잠그는 화면(지금은 눌렀을 때 403 안내).
+    · ⚠⚠ **엣지 등록부 손상 → 빈 목록을 보내지 않는다 — push 와 자동 쓰기도**(EDGE-01·03, v2.743 export 503 의 형제): fleet push 는 중앙이 **2.744.0 이상**일 때만 상태 전용 보고
+      (`FLEET_STATUS_ONLY_MIN_CENTRAL` — 이 릴리스 버전이 그 값 이상이어야 한다)이고 중앙은 `holdEdgeFleet` 으로 직전 목록 만료만 미룬다(`CENTRAL_FLEET_UNREADABLE_HOLD_MS` 기본 24시간 · 미검증 이름은 무변경) ·
+      파트 장애는 `registryUnreadable` → 보류 사유 `registry-unreadable`(HOLD_REASON) · 자동 등록은 `util/registryCore.js autoWriteRefusal` + `registerScanned(…, {auto:true})`. 설정 pull 4종은 막지 않고 `registryRecovered` 로 기록한다.
+    · **중앙 pull 은 엣지 export 503 을 호출 안에서 다시 묻지 않는다**(EDGE-02 = RECENT-03 — 약 75초 워커 점유) — `util/postNo503Retry.js`(onRetry · GET 별칭 `fetchNo503Retry`, LEFT-09 에 agent/ 에서 옮겼다) 한 벌.
+      즉시 당김도 `pullOptionsFor` · 주기 경고는 거절(edgeReason)을 '응답 없음' 과 따로 센다 · 503 본문에 version·agent·hostname(EDGE-04 — 실패 분기가 그 정체만 반영).
+    · **vmtrack 부분 합 = '다시 읽힐' 사유(pending·unreachable)만**(RECENT-01 — v2.743 회귀: 비활성·캐시 없는 점검중이 매 슬롯 skipped 로 세여 경영 보기 VM 추이가 영구 null). 비활성은 분모 밖 ·
+      점검중은 `maint_excluded` 열·`maintExcluded`(추이를 비우지 않는다). ⚠ v2.743 기간에 쌓인 합계 행은 구분할 수 없어 보존 기간까지 부분 합으로 남는다(정직 기록).
+      변경 이력은 슬롯 조각 + 양보(DB-01) · 정리는 청크·(ts,rowid) 커서(DB-04 — audit2603c 허용 목록에서 뺐다) · 결과 기억 키 = 세대 + 창 경계(DB-05).
+    · **bmusage FC**: 데이터율의 110% 까지는 100 + `pctClamped`(측정 정의 차이 — 16GFC 선로/데이터율 1.0625), 그 위는 null + 서버 대표값도 null + `hba_over`(알림은 초과로 본다 — 다른 포트의 낮은 값으로 대표하지 않는다, RECENT-02) ·
+      -1 표지(0xffffffffffffffff)·2^53 초과·물리 상한 초과는 처리량 null(DEV-01 — 491 PB/s 가 5년 롤업에 남던 것) · iDRAC 텔레메트리에 장비 시한·signal(DEV-04 — kind `timeout`, 인증 정지 대상 아님) ·
+      redfish 인증 판정은 오류 표지(`redfishFailKind`)만(LEFT-02 — 호스트명 속 401) · `describeError` 는 DNS·연결·시한을 인증보다 먼저 · HBA 기준 각주(`hbaBasis`, LEFT-08②).
+    · **같은 이름 클러스터는 (vCenter, moref) — 판정 `clustercfg/analyze.js clusterIndex` 한 벌**(VC-02): vSAN 분할·호스트 드리프트·/tools/capacity·비용·이전 준비도·토폴로지(노드 id `<vc>|cluster|r:<ref>`) +
+      화면 key·이름 `clusterRowKey`·`clusterNameLabel`(consoleData.clusterRows 포함, 후속 FA-①). 이름 모드는 대소문자 무시. 시계열 키 temp_cluster·gpu_cluster 는 그대로.
+    · **읽지 못한 vCenter 를 0 으로 섞지 않는다 — `corelicense/analyze.js notReadVcentersOf` 한 벌**(VC-03): 코어 라이선스·비용·이전 준비도 + 후속 FC 호스트·VM 구성 점검. 응답 `notReadVcenters`·`partial` + CSV 마지막 줄 · 문구 `bizreport/notReadText.js`.
+    · **주문형 성능 조회도 '직접 수집 대상인가' 를 먼저**(VC-04, `authStopGate.vcSkipOf` — manual=1 도 막는다 · ⚠ 동작 변화: site vCenter 성능 창이 중앙에서 열리지 않는다) · 화면은 `vcAuthStopText` skipNote·skipCell·skipSingleText ·
+      성능 창은 409 skipReason 이면 자동 갱신을 멈춘다(후속 FA-②③) · dsBrowse 사유 표는 authStopGate 것을 재수출(FA-④).
+    · **IP 원장: FQDN ESXi 의 관리 IP**(VC-01, `ledger.js hostLedgerIp` — 동기·양보판 같은 생성기, 입력 지문에 mgmtIp · ⚠ ipam.db 호스트 행이 늘어난다(외부 리더 계약)) · /24 제안도 같은 판정을 주입(후속 FB-2) ·
+      관리상태 일괄 적용은 무효 토큰이 하나라도 있으면 400 + invalid 로 전체 거부(WEB-02).
+    · **svcmon**: NTP 응답 LI·stratum·mode·원본 타임스탬프 판정(DEV-03 — 미동기를 '정상 · 0ms' 로, KoD 를 −4조 ms 로 보고하던 것) · LDAP resultCode 8·53 은 정책 거부 = 서버는 응답 중(ok), 51·52 는 bad(RECENT-04) ·
+      결과 로그 CSV 다운로드는 데모 계정 403(AUTHZ-03) · vCenter 로그 meta 는 재귀 CTE + vCenter 별 COUNT + 양보(DB-03 `metaAsync`).
+    · **SAN 팬·PSU 장애 라벨에 '정상' 을 붙이지 않는다**(DEV-02 — 엣지 추출이라 엣지 업그레이드 필요, 중앙 알림은 옛 라벨의 '정상' 을 뗀다) · Unity spinfo 제목 정규식 선형화(INJPKG-02) · Intl.Collator 재사용(DB-02).
+    · **install.sh 의 CONFIG_DIR 파일은 `vp_cfg_*` 로만 쓴다**(INJPKG-01 high — lstat 판정(링크·일반 파일 아님·하드 링크면 건너뜀) → root 전용 임시 폴더 → rename, 읽기는 cp -a 사본). 링크로 바꿔 둔 파일을 root 가 chown·쓰기 하던 로컬 권한 상승.
+      Windows README 에 설치·설정 폴더 ACL 단계(LEFT-05 — 스크립트는 그대로). 다음 후보(코드로만 추론): systemd `EnvironmentFile=` 이 portal.env 링크를 root 로 따라 읽는다.
+    · 그 밖: iDRAC 위임 결과 재전송 창은 나이 기준 30분(TIMING-01) · 아이실론 '지금 수집' 합침의 central 표지가 재시작 뒤에도 남는다(TIMING-02) · GPU 게스트 배포 대상 합침 표지 `foldReport`(LEFT-08①) ·
+      게스트 디스크 0대 '—'(LEFT-03) · 라이선스 표 폭(LEFT-04) · 통신 점검 로그 요청 키(WEB-03) · VM 추이 선택 변경 시 비움(WEB-01) · 데모 계정 큰 본문 풀(FB-4) · fleet 직전 목록 표시(FC-②) · V4 Compare RAM 여유 미상 정렬(FA-EXTRA).
+    · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).
+      커밋 33be198 은 그때 아직 하지 않은 수정을 '✅ v2.744' 로 적었다 — 이번 수정이 끝난 뒤 문구를 실제 범위로 맞췄다(EDGE-03 은 '자동 등록만').
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
     웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
     - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면
