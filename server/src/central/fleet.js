@@ -16,6 +16,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
@@ -185,7 +186,11 @@ export function holdEdgeFleet(agent, { registryUnreadable = null, now = Date.now
   const at = numOrNull(ru.at);
   const started = !Number.isFinite(e.registryUnreadable?.since);   // 이번 보고로 보류가 시작됐는가(콘솔은 바뀔 때만 — 5분마다 같은 줄 금지)
   const since = started ? now : e.registryUnreadable.since;
-  const rec = { at: at != null && at > 0 ? Math.round(at) : null, reason: capStr(typeof ru.reason === 'string' ? ru.reason : '', 200) || '사유 미상', since };
+  // v2.744(회귀 검토 GD-R1): 엣지가 보낸 사유 글자를 그대로 저장하지 않는다 — JSON.parse 오류 원문은 자격증명 파일(idrac.json) 조각을 싣는다
+  //   (재현: `..."assword": SuperSecre"...`). 분류 코드·숫자만 받아 문장을 다시 만든다(summarizeRegistryError — 코드가 오면 글자를 보지 않고,
+  //   코드 없이 원문만 보낸 엣지는 원문에서 분류만 한다). 원문은 그 엣지의 콘솔에만 남는다.
+  const sum = summarizeRegistryError(ru) || summarizeRegistryError({ reason: '' });
+  const rec = { at: at != null && at > 0 ? Math.round(at) : null, code: sum.code, line: sum.line, column: sum.column, position: sum.position, sysCode: sum.sysCode, reason: sum.text, since };
   if (now - since > UNREADABLE_HOLD_MS) {
     const firstExpired = !e.registryUnreadable?.holdExpired;
     e.registryUnreadable = { ...rec, holdExpired: true };
@@ -254,8 +259,15 @@ export function listEdgeFleet() {
     // v2.606 RECENT2606-03: 엣지가 일부를 빼고 보낸 목록인가(partial) · 못 읽은 vCenter · 뺀 대수.
     partial: !!e.partial, unreadVcenters: e.partial?.unreadVcenters || [], withheldItems: e.partial ? (e.partial.withheldItems ?? null) : 0,
     // v2.744(EDGE-01): 엣지 iDRAC 등록부를 읽지 못해 **직전 목록을 유지 중** — 이 행의 목록은 그 엣지가 마지막으로 온전히 보낸 것이다.
-    registryUnreadable: e.registryUnreadable ? { reason: e.registryUnreadable.reason || '', since: e.registryUnreadable.since || null, holdExpired: !!e.registryUnreadable.holdExpired } : null,
+    // v2.744(회귀 검토 GD-R1): 사유는 저장된 요약을 **한 번 더** 요약해 싣는다 — 이 수정 전에 원문으로 저장된 central-fleet.json 행도 응답에서 조각이 빠진다.
+    registryUnreadable: e.registryUnreadable ? registryUnreadableView(e.registryUnreadable) : null,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+/** 저장된 보류 기록 → 응답 모양(관리자용 요약). 원문 조각은 여기서도 빠진다(summarizeRegistryError). */
+function registryUnreadableView(r) {
+  const sum = summarizeRegistryError(r) || summarizeRegistryError({ reason: '' });
+  return { code: sum.code, reason: sum.text, since: r.since || null, holdExpired: !!r.holdExpired };
 }
 
 /** 부분 목록으로 보고 중인 엣지(통합 인벤토리 화면 데이터용 — 'N곳의 목록이 일부' 를 말할 수 있게). */
@@ -268,7 +280,12 @@ export function edgeFleetPartials() {
  *   v2.601·v2.606 이 저장만 하고 **응답에 싣는 라우트가 0개**였다(화면이 '일부 목록' 을 말할 길이 없었다).
  *   범위 제한 계정에는 호출부가 null 을 준다(엣지는 vCenter 귀속이 아니라 나눌 축이 없다 — v2.525 규약).
  */
-export function fleetPartialsSummary() {
+/**
+ * @param {{detail?:boolean}} [o]  detail = 사유의 위치(줄·칸)까지 싣는가 — **관리자 + 전체 범위** 응답에서만 참으로 준다(호출부가 isAdminDetailUser 로 판정).
+ *   v2.744(회귀 검토 GD-R1): 거짓이면 사유를 분류 고정 문구(REGISTRY_ERROR_LABEL)로만 싣고 `reasonDetailHidden` 으로 밝힌다 —
+ *   /tools/bm-usage 는 operator 에게도, /insights/fleet 는 insights 권한 계정에게도 이 요약을 준다. 기본값은 가리는 쪽이다(거부 기본값).
+ */
+export function fleetPartialsSummary({ detail = false } = {}) {
   const all = listEdgeFleet();
   const partials = all.filter((x) => x.partial).map((x) => ({ agent: x.agent, at: x.at, unreadVcenters: x.unreadVcenters, withheldItems: x.withheldItems }));
   let omitted = 0; let vcenterBlanked = 0; let withheldItems = 0; let withheldUnknown = 0;
@@ -277,7 +294,11 @@ export function fleetPartialsSummary() {
     if (x.partial) { if (x.withheldItems == null) withheldUnknown += 1; else withheldItems += Number(x.withheldItems) || 0; }
   }
   // v2.744(EDGE-01): 등록부 손상으로 직전 목록을 유지 중인 엣지 — 화면이 '이 엣지 목록은 갱신되지 않고 있다' 를 말할 수 있게.
-  const registryUnreadable = all.filter((x) => x.registryUnreadable).map((x) => ({ agent: x.agent, ...x.registryUnreadable }));
+  const registryUnreadable = all.filter((x) => x.registryUnreadable).map((x) => {
+    const r = x.registryUnreadable;
+    return detail ? { agent: x.agent, ...r }
+      : { agent: x.agent, code: r.code, reason: REGISTRY_ERROR_LABEL[r.code] || REGISTRY_ERROR_LABEL['read-error'], since: r.since, holdExpired: r.holdExpired, reasonDetailHidden: true };
+  });
   return { edges: all.length, partialEdges: partials.length, partials, withheldItems, withheldUnknown, omitted, vcenterBlanked, registryUnreadableEdges: registryUnreadable.length, registryUnreadable };
 }
 

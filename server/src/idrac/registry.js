@@ -13,7 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { makeLoadError, autoWriteRefusal } from '../util/registryCore.js'; // v2.743(감사 EDGE-01): 형제 등록부와 같은 로드 오류 판정(corruptOnlyReason 포함) · v2.744(EDGE-03) 자동 저장 거절
+import { makeLoadError, autoWriteRefusal, manualRemoteWriteRefusal } from '../util/registryCore.js'; // v2.743(감사 EDGE-01): 형제 등록부와 같은 로드 오류 판정(corruptOnlyReason 포함) · v2.744(EDGE-03) 자동 저장 거절
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { retryTransient } from '../util/resilientFetch.js';
@@ -345,14 +345,21 @@ export function bulkAddByIps(body) {
  * (ip, serviceTag, hostName, model); the shared username/password are applied
  * to all. hostNames includes the discovered hostname + IP for auto-matching.
  */
-export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '', { ilo = null, scanRangeId = '', scanRanges = null, auto = false } = {}) {
+export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '', { ilo = null, scanRangeId = '', scanRanges = null, auto = false, manualRemote = null } = {}) {
   if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
-  // v2.744(감사 EDGE-03 — 재현): **사람이 아닌 경로**(위임 스캔 등록 잡·엣지 현지 스캔·할당 스캐너·주기 스캔 — 호출부가 auto:true 를 준다)는
+  // v2.744(감사 EDGE-03 — 재현): **사람이 아닌 경로**(엣지 현지 스캔·할당 스캐너·주기 스캔 — 호출부가 auto:true 를 준다)는
   //   등록부를 읽지 못한 상태에서 저장하지 않는다. 손상된 빈 목록 위에 발견분만 저장하면 saveRegistry 가 '읽지 못함' 표지를 지워
   //   v2.743 엣지 export 503 보호가 풀리고, 다음 pull 에서 중앙이 그 엣지의 수동 등록·다른 엔트리 서버를 지웠다(검증 a7 재현).
   //   관리자 화면의 등록(routes/admin/idracScan.js)은 auto 를 주지 않는다 — 사람이 다시 만든 목록이 진실이다(saveRegistry 주석).
-  if (auto) {
-    const refusal = autoWriteRefusal(registryLoadError(), 'iDRAC 등록부(idrac.json)');
+  // v2.744(회귀 검토 GD-R3): 위임 등록 잡(agent/idracScanWorker.js 의 register)은 **자동 경로가 아니다** — 중앙 관리자가 '등록' 을 눌러야만
+  //   만들어진다(routes/admin/idracScan.js register-scanned 의 위임 분기가 유일한 생성처). 그 경로는 `manualRemote`(그 엣지 이름)를 주고,
+  //   손상 등록부에는 여전히 저장하지 않되 사유를 '자동' 이 아니라 '사람이 요청한 등록 — 이 노드의 등록부가 손상' 으로 말한다
+  //   (registryCore manualRemoteWriteRefusal). 요청한 사람은 이 노드의 등록부를 보지 못했으므로 덮어쓰지 않는 원칙은 같다.
+  if (auto || manualRemote) {
+    const err = registryLoadError();
+    const refusal = auto
+      ? autoWriteRefusal(err, 'iDRAC 등록부(idrac.json)')
+      : manualRemoteWriteRefusal(err, 'iDRAC 등록부(idrac.json)', { node: typeof manualRemote === 'string' ? manualRemote : '' });
     if (refusal) return { ...refusal, added: 0, updated: 0, refused: found.length };
   }
   // v2.610: HPE iLO 로 발견된 항목은 **iLO 계정**으로 등록한다(Dell 계정을 붙이면 폴러가 매 주기 iLO 에 실패 로그인한다).

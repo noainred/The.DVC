@@ -202,8 +202,14 @@ async function runIdracScanWorkerInner() {
         // '등록' 잡: UI가 스캔에서 확인한 found 목록을 현지 레지스트리에 등록.
         if (job.action === 'register') {
           // v2.742(감사 DEV-01): 등록 잡에는 대역이 없다 — 엔트리 id 가 오면 표지만 싣고, 교체 범위는 그 표지로만 정한다(대역 미상이면 표지 없는 항목은 지우지 않는다).
-          // v2.744(감사 EDGE-03): 자동 경로(auto) — 이 엣지의 iDRAC 등록부를 읽지 못했으면 저장하지 않고 사유를 회신한다(registry.js 주석).
-          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null, scanRangeId: String(job.rangeId || ''), auto: true });
+          // v2.744(감사 EDGE-03): 이 엣지의 iDRAC 등록부를 읽지 못했으면 저장하지 않고 사유를 회신한다(registry.js 주석).
+          // v2.744(회귀 검토 GD-R3): 등록 잡은 **사람 요청**이다 — 중앙 관리자가 스캔 결과 화면에서 '등록' 을 눌러야만 생긴다
+          //   (routes/admin/idracScan.js register-scanned). 예전 auto:true 는 거절 문구가 '자동으로 저장하지 않았습니다 … 등록 화면에서
+          //   저장하면 다시 등록합니다' 라고 방금 누른 사람에게 같은 동작을 다시 하라고 안내했다. manualRemote(이 엣지 이름)로 부르면 '이 엣지
+          //   포탈에서 보존본을 되돌리거나 등록부를 다시 저장한 뒤 다시 등록하세요' 로 말한다. 손상 등록부에 저장하지 않는 것은 같다.
+          //   중앙이 장차 자동 등록 잡을 만든다면 job.auto === true 로 표시하게 한다(그때만 자동 경로 문구).
+          const autoJob = job.auto === true;
+          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null, scanRangeId: String(job.rangeId || ''), ...(autoJob ? { auto: true } : { manualRemote: config.agent.name || true }) });
           const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
           if (rr.ok) pollNow().catch(() => {});
           if (rr.code === 'registry-unreadable') console.warn(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 ${job.reqId} — ${rr.reason}`);

@@ -132,7 +132,9 @@ test('② 중앙 fleetPartialsSummary 의 registryUnreadable 을 웹 문구가 �
   assert.equal(fp.registryUnreadableEdges, 1, JSON.stringify(fp));
   const note = fleetHeldNote(fp);
   assert.match(note, /edge-x/, note);
-  assert.match(note, /형식 오류/, '서버가 준 사유를 그대로 말한다');
+  // v2.744(회귀 검토 GD-R1): 중앙은 엣지가 보낸 사유 글자를 그대로 두지 않고 분류 문구로 바꾼다(원문은 자격증명 파일 조각일 수 있다) —
+  //   웹은 그 서버 출력을 그대로 말해야 한다.
+  assert.ok(fp.registryUnreadable[0].reason && note.includes(fp.registryUnreadable[0].reason), `서버가 준 사유를 그대로 말한다: ${note}`);
   assert.match(note, /직전 목록/);
   assert.ok(!/edge-y/.test(note), '읽지 못함이 아닌 엣지를 지목하지 않는다');
   const b = fleetHeldBadge(fp, 'edge-x');

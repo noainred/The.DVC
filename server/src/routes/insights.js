@@ -179,7 +179,7 @@ insightsRouter.get('/fleet', async (req, res) => {
     const { liveKeys, ...payload0 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
     // v2.607(감사 LEFT2607-02): 엣지 부분 목록·상한 제외·귀속 비움 요약. 이 라우트는 범위 계정에 403 이라(위) 여기서는 늘 싣는다.
     //   부분 상태는 fleetRev 를 올리지 않을 수 있어(목록 내용이 같으면) ETag 키에 요약을 함께 넣는다.
-    const fleetPartials = fleetPartialsSummary();
+    const fleetPartials = fleetPartialsSummary({ detail: isAdminReq(req) }); // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치는 관리자에게만(maskFleetPayload 는 이 요약을 건드리지 않는다)
     const payload = { ...payload0, fleetPartials };
     const fpKey = `${key}|fp:${JSON.stringify(fleetPartials)}`;
     if (isAdminReq(req)) sendCached(req, res, fpKey, payload);

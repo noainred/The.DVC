@@ -202,6 +202,8 @@ test('EDGE-03: 자동 호출부(위임 워커·엣지 스캐너·로컬 스캔·
   for (const c of route) assert.doesNotMatch(c, /auto:\s*true/, '관리자 등록은 사람의 저장이다');
 });
 
+// v2.744(회귀 검토 GD-R3): 등록 잡은 중앙 관리자가 누른 '등록' 이라 사유가 '자동' 이 아니라 사람 요청 거절(그 엣지에서 할 조치)이다 —
+//   손상 등록부에 쓰지 않는 것은 그대로다. 문구 단언을 그 사유로 바꿨다(자세한 회귀는 audit2744rd.test.js).
 test('EDGE-03: 위임 등록 잡은 손상 등록부에 쓰지 않고 사유를 회신·상태에 싣는다', async () => {
   const prev = { url: config.agent.centralUrl, tok: config.agent.centralToken, name: config.agent.name };
   let jobsServed = false; const results = [];
@@ -227,13 +229,13 @@ test('EDGE-03: 위임 등록 잡은 손상 등록부에 쓰지 않고 사유를 
     await W.runIdracScanWorkerOnce();
     assert.equal(results.length, 1, JSON.stringify(results));
     assert.equal(results[0].registered, 0);
-    assert.match(String(results[0].error || ''), /자동으로 저장하지 않았습니다/);
+    assert.match(String(results[0].error || ''), /요청한 등록을 저장하지 않았습니다/);
     assert.ok(registry.registryLoadError(), '잡이 표지를 지우지 않았다');
     const st = W.getIdracScanWorkerStatus();
     assert.ok(st.last?.registerError, JSON.stringify(st.last));
     // 중앙 정제가 그 사유를 버리지 않는다(새 결과 필드는 수신 화이트리스트에도 — v2.611 CEN2611-01).
     const { sanitizeIdracScanData } = await import('../src/central/idracScanJobs.js');
-    assert.match(sanitizeIdracScanData({ registerError: results[0].error }).registerError, /자동으로 저장하지 않았습니다/);
+    assert.match(sanitizeIdracScanData({ registerError: results[0].error }).registerError, /요청한 등록을 저장하지 않았습니다/);
   } finally {
     config.agent.centralUrl = prev.url; config.agent.centralToken = prev.tok; config.agent.name = prev.name;
     await new Promise((r) => fake.close(r));

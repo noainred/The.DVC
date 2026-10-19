@@ -261,7 +261,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // v2.605 LEFT2605-05: 호스트를 못 읽은 vCenter 때문에 이번에 뺀 베어메탈 — 화면이 말해야 조용한 제외가 아니다.
       hostsUnread: scopeHostsUnread(tg.hostsUnread, allowed),
       // v2.607(감사 LEFT2607-02): 엣지가 일부만 보낸 베어메탈 목록(부분 전송·상한 제외·귀속 비움) — 범위 계정에는 null(엣지는 나눌 축이 없다).
-      fleetPartials: allowed ? null : fleetPartialsSummary(),
+      fleetPartials: allowed ? null : fleetPartialsSummary({ detail: isAdmin }), // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치(줄·칸)는 관리자에게만(operator 는 tools 기본 보유) — 원문 조각은 누구에게도 싣지 않는다
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
       ...(isAdmin ? {} : { addressHidden: true }),
     });
