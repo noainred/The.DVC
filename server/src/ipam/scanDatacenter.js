@@ -163,7 +163,9 @@ export function ipOfHost(h) {
  * @param {(h:object)=>({ip:string}|null)} [p.hostIp]  호스트 → IP(원장 판정 hostLedgerIp). 없으면 이름이 IP 일 때만(예전 규칙).
  * @returns {{ subnets:Array<{base,cidr,ips,vcenterIps,idracIps,vcenters:string[]}>, omitted:number, skipped:{hostsNoIp:number,idracNoIp:number}, totals, hostIpRule:'name-only'|'name-or-mgmt' }}
  *   totals.hostMgmtIps — 이름이 IP 가 아니라 관리 IP 로 센 호스트 수(hostIpRule 'name-or-mgmt' 일 때만 0 이 아닐 수 있다).
- *   skipped.hostsNoIp — 주소를 알 수 없어 뺀 호스트(이름이 IP 가 아니고, 규칙이 'name-or-mgmt' 면 관리 IP 도 없는 것).
+ *   skipped.hostsNoIp — 주소를 알 수 없어 뺀 호스트(이름이 IP 가 아니고, 규칙이 'name-or-mgmt' 면 쓸 수 있는 관리 IP 도 없는 것).
+ *   totals.hostMgmtRejected — v2.744(회귀 검토 FX-R1): 그중 관리 IP 를 받았지만 판정이 쓰지 않은 호스트(비정규 표기·0.0.0.0) — hostsNoIp 의 부분집합.
+ *     skipped 모양은 바꾸지 않는다(기존 소비자·테스트 계약). 'name-only' 규칙이면 관리 IP 를 보지 않으므로 늘 0.
  */
 export function suggestAgentSubnets(p = {}) {
   const vcSet = new Set((Array.isArray(p.vcenterIds) ? p.vcenterIds : []).map(t));
@@ -177,7 +179,7 @@ export function suggestAgentSubnets(p = {}) {
     if (vc) e.vcenters.add(vcName[vc] || vc);
     return true;
   };
-  let hostsNoIp = 0; let idracNoIp = 0; let vmIps = 0; let hostIps = 0; let idracIps = 0; let hostMgmtIps = 0;
+  let hostsNoIp = 0; let idracNoIp = 0; let vmIps = 0; let hostIps = 0; let idracIps = 0; let hostMgmtIps = 0; let hostMgmtRejected = 0;
   const hostIpOf = typeof p.hostIp === 'function' ? p.hostIp : null;
   for (const vm of Array.isArray(p.vms) ? p.vms : []) {
     if (!vcSet.has(t(vm?.vcenterId))) continue;
@@ -187,9 +189,15 @@ export function suggestAgentSubnets(p = {}) {
   for (const h of Array.isArray(p.hosts) ? p.hosts : []) {
     if (!vcSet.has(t(h?.vcenterId))) continue;
     // v2.744(감사 후속 FB-2): 원장과 같은 판정(주입) — 없으면 예전처럼 이름만.
-    let ip = t(h.name);
-    if (hostIpOf) { let hip = null; try { hip = hostIpOf(h); } catch { hip = null; } ip = hip && typeof hip.ip === 'string' ? t(hip.ip) : ''; }
-    if (ip && add(ip, 'vcenter', t(h.vcenterId))) { hostIps += 1; if (ipToNum(t(h.name)) == null) hostMgmtIps += 1; } else hostsNoIp += 1;
+    let ip = t(h.name); let threw = false;
+    if (hostIpOf) { let hip = null; try { hip = hostIpOf(h); } catch { hip = null; threw = true; } ip = hip && typeof hip.ip === 'string' ? t(hip.ip) : ''; }
+    if (ip && add(ip, 'vcenter', t(h.vcenterId))) { hostIps += 1; if (ipToNum(t(h.name)) == null) hostMgmtIps += 1; } else {
+      hostsNoIp += 1;
+      // v2.744(회귀 검토 FX-R1): 관리 IP 를 **받았지만** 원장 판정(hostLedgerIp — 주입)이 쓰지 않은 호스트(비정규 표기·0.0.0.0)를 따로 센다.
+      //   예전에는 '관리 IP 없음' 과 한 칸이라 화면이 '관리 IP 도 수집되지 않아' 라고 말해 수집 쪽을 의심하게 했다. 판정은 복제하지 않는다 —
+      //   '원값이 비어 있지 않은데 주입 판정이 IP 를 주지 않았다' 만 본다. 판정이 던졌으면 표기 탓이라 말할 수 없어 세지 않는다.
+      if (hostIpOf && !threw && h.mgmtIp != null && String(h.mgmtIp).trim() !== '') hostMgmtRejected += 1;
+    }
   }
   for (const s of Array.isArray(p.idrac) ? p.idrac : []) {
     const ip = ipOfHost(s?.host) || ipOfHost(s?.id);
@@ -200,7 +208,7 @@ export function suggestAgentSubnets(p = {}) {
   })).sort((a, b) => b.ips - a.ips || (ipToNum(`${a.base}.0`) - ipToNum(`${b.base}.0`)));
   return {
     subnets: all.slice(0, SUGGEST_MAX), omitted: Math.max(0, all.length - SUGGEST_MAX),
-    skipped: { hostsNoIp, idracNoIp }, totals: { vmIps, hostIps, hostMgmtIps, idracIps, subnets: all.length },
+    skipped: { hostsNoIp, idracNoIp }, totals: { vmIps, hostIps, hostMgmtIps, hostMgmtRejected, idracIps, subnets: all.length },
     hostIpRule: hostIpOf ? 'name-or-mgmt' : 'name-only',
   };
 }

@@ -5,6 +5,7 @@
  * 아직 저장하지 않은 입력까지 봐야 하므로 여기서 계산한다 — 대역 문법은 ipmsRangeText.js 하나를 쓴다(사본 금지).
  */
 import { checkRangeSpec } from './ipmsRangeText.js';
+import { numOrNull } from '../../numOrNull.js'; // v2.744(회귀 검토 FX-R1): 서버 hostMgmtRejected — 없거나 숫자가 아니면 '모름'
 
 /**
  * 서버 판정(datacenter) → { tone, text, detail }.
@@ -85,9 +86,20 @@ export function suggestSummaryText(s) {
   const mgmtRule = s.hostIpRule === 'name-or-mgmt';
   if (mgmtRule && t.hostMgmtIps) notes.push(`이름으로 등록된 ESXi 호스트 ${t.hostMgmtIps}대는 관리 IP(첫 VMkernel 포트의 IPv4)로 셌습니다`);
   if (s.skipped?.hostsNoIp) {
-    notes.push(mgmtRule
-      ? `이름으로 등록된 ESXi 호스트 ${s.skipped.hostsNoIp}대는 관리 IP 도 수집되지 않아 뺐습니다`
-      : `이름으로 등록된 ESXi 호스트 ${s.skipped.hostsNoIp}대는 주소를 몰라 뺐습니다`);
+    const n = s.skipped.hostsNoIp;
+    if (!mgmtRule) notes.push(`이름으로 등록된 ESXi 호스트 ${n}대는 주소를 몰라 뺐습니다`);
+    else {
+      // v2.744(회귀 검토 FX-R1): 서버가 '관리 IP 를 받았지만 쓸 수 없는 표기(비정규·0.0.0.0)' 를 hostMgmtRejected(hostsNoIp 의 부분집합)로
+      //   따로 센다 — 두 경우를 각각 말한다(조치가 다르다: 앞은 수집·vmk 설정, 뒤는 그 호스트의 관리 IP 값). 필드가 없는 응답은 둘을 가를 수
+      //   없으므로 함께 말한다('수집되지 않아' 라고 단정하지 않는다). 뺀 수보다 크거나 음수인 값으로 음수·과다를 말하지 않게 자른다.
+      const rejRaw = numOrNull(s.totals?.hostMgmtRejected);
+      if (rejRaw == null) notes.push(`이름으로 등록된 ESXi 호스트 ${n}대는 관리 IP 가 없거나 쓸 수 없는 표기라 뺐습니다`);
+      else {
+        const rej = Math.min(n, Math.max(0, Math.floor(rejRaw)));
+        if (n - rej > 0) notes.push(`이름으로 등록된 ESXi 호스트 ${n - rej}대는 관리 IP 도 수집되지 않아 뺐습니다`);
+        if (rej > 0) notes.push(`이름으로 등록된 ESXi 호스트 ${rej}대는 관리 IP 가 쓸 수 없는 표기(비정규 표기·0.0.0.0 등)라 뺐습니다`);
+      }
+    }
   }
   if (s.skipped?.idracNoIp) notes.push(`IP 가 아닌 주소로 등록된 iDRAC ${s.skipped.idracNoIp}대는 뺐습니다`);
   if (s.omitted) notes.push(`상위 ${s.subnets?.length ?? 0}개만 보여 줍니다(나머지 ${s.omitted}개)`);

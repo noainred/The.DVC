@@ -12,7 +12,7 @@ import Select from '../../components/Select.jsx';
 import { mergeVcChoices, selectionKey, keyedResult } from './vcChoices.js';
 import { notCollectedWhyText } from '../eventCoverageText.js'; // v2.733(C1-01): 이벤트를 지금 수집하지 않는 vCenter 사유
 import { clusterRowKey, clusterNameLabel } from '../clustercfg/clusterCfgText.js'; // v2.744(감사 VC-02): 같은 이름 다른 데이터센터 클러스터 — 행 키·이름 한 벌
-import { notReadNote } from '../bizreport/notReadText.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 는 판정 결과에 없다는 사실을 한 번 말한다
+import { notReadJudgeNote } from '../bizreport/notReadText.js'; // v2.744(감사 후속 FC · 회귀 검토 FX-R2): 읽지 못한 vCenter 는 판정 결과에 없다는 사실을 한 번 말한다(판정 목록 문장 — 합계 문장이 아니다)
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -184,6 +184,8 @@ export default function HostHygieneTool({ scope }) {
   const chips = codeChips(data.byCode);
   const note = coverageNote(cov, data.scan);
   const rows = Array.isArray(data.rows) ? data.rows : [];
+  // v2.744(회귀 검토 FX-R2): 비활성만 있으면 빈 문자열(coverage 줄과 같은 판정) — 배너를 그리지 않는다.
+  const notReadBanner = notReadJudgeNote(data.notReadVcenters, '호스트');
 
   return (
     <div style={{ minWidth: 0 }}>
@@ -193,7 +195,7 @@ export default function HostHygieneTool({ scope }) {
       {data.initial && <div className="banner" style={{ marginBottom: 8 }}>첫 수집 중입니다 — 호스트 목록이 아직 비어 있을 수 있습니다.</div>}
       <div style={{ fontSize: 13, marginBottom: 6 }}>{coverageText(cov, data.notReadVcenters)}</div>
       {note && <div className="banner" style={{ marginBottom: 8 }}>{note}</div>}
-      {notReadNote(data.notReadVcenters) && <div className="banner" style={{ marginBottom: 8 }}>{notReadNote(data.notReadVcenters)}</div>}
+      {notReadBanner && <div className="banner" style={{ marginBottom: 8 }}>{notReadBanner}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>

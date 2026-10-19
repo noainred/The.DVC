@@ -144,7 +144,7 @@ test('FB-2 ② 판정을 주지 않으면 예전 규칙(이름이 IP 일 때만)
 
 test('FB-2 ③ 화면 문구 — 관리 IP 로 센 호스트와 뺀 호스트를 나눠 말한다 · 구버전 응답(규칙 없음)은 예전 문구', async () => {
   const w = await import(pathToFileURL(path.resolve(HERE, '../../web/src/views/tools/ipScanDcText.js')).href);
-  const now = w.suggestSummaryText({ totals: { subnets: 1, vmIps: 0, hostIps: 2, hostMgmtIps: 1, idracIps: 0 }, skipped: { hostsNoIp: 2 }, hostIpRule: 'name-or-mgmt', omitted: 0, subnets: [] });
+  const now = w.suggestSummaryText({ totals: { subnets: 1, vmIps: 0, hostIps: 2, hostMgmtIps: 1, hostMgmtRejected: 0, idracIps: 0 }, skipped: { hostsNoIp: 2 }, hostIpRule: 'name-or-mgmt', omitted: 0, subnets: [] });
   assert.match(now, /이름으로 등록된 ESXi 호스트 1대는 관리 IP\(첫 VMkernel 포트의 IPv4\)로 셌습니다/);
   assert.match(now, /이름으로 등록된 ESXi 호스트 2대는 관리 IP 도 수집되지 않아 뺐습니다/);
   const old = w.suggestSummaryText({ totals: { subnets: 1, vmIps: 0, hostIps: 1, idracIps: 0 }, skipped: { hostsNoIp: 1 }, omitted: 0, subnets: [] });

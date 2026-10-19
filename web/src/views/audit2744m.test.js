@@ -31,12 +31,9 @@ describe('① 호스트·VM 구성 점검 — 읽지 못한 vCenter', () => {
     expect(vmCoverageText(vc, NR)).toContain('읽지 못한 vCenter 2곳 제외 — 하한');
     expect(vmCoverageText(vc, null)).toBe('VM 3대 · 구성 읽음 3 · 장치 읽음 3');
   });
-  it('두 화면이 응답의 notReadVcenters 를 coverage 줄과 배너(notReadNote)에 넘긴다', () => {
-    for (const f of ['tools/HostHygieneTool.jsx', 'tools/VmHygieneTool.jsx']) {
-      const s = src(f);
-      expect(s, f).toMatch(/coverageText\(cov, data\.notReadVcenters\)/);
-      expect(s, f).toMatch(/notReadNote\(data\.notReadVcenters\)/);
-    }
+  // v2.744(회귀 검토 FX-R2·R3): 두 화면은 판정 목록 화면이라 합계 문장(notReadNote)이 아니라 notReadJudgeNote 를 쓴다.
+  //   '화면이 그 값을 실제로 넘기는가' 는 소스 정규식이 아니라 audit2744rx.test.js 가 화면 컴포넌트를 실제로 실행해 본다.
+  it('합계 화면용 문장(notReadNote)은 이름을 적는다 — 판정 목록 화면의 배너는 audit2744rx 가 렌더로 고정', () => {
     expect(notReadNote(NR)).toContain('VC-U');
   });
 });
@@ -68,11 +65,9 @@ describe('② 등록부 손상으로 직전 목록 유지 중인 엣지', () => 
     const all = [fleetHeldNote(fp), fleetHeldBadge(fp, 'edge-x').text, fleetHeldBadge(fp, 'edge-x').title, hostCoverageText({ hosts: 1, cfg: 1 }, NR)];
     for (const s of all) { expect(s).not.toMatch(/`/); expect(s).not.toMatch(/\*\*/); }
   });
-  it('통합 서버 인벤토리는 각주 한 번 + 엣지 행 표지, 베어메탈 사용률은 각주를 그린다', () => {
-    const fi = src('tools/FleetInventory.jsx');
-    expect(fi).toMatch(/fleetHeldNote\(d\.fleetPartials\)/);
-    expect(fi).toMatch(/<HeldMark fp=\{d\.fleetPartials\} agent=\{b\.remoteAgent\} \/>/);
-    expect(fi).toMatch(/fleetHeldBadge\(fp, agent\)/);
+  // v2.744(회귀 검토 FX-R3): 통합 서버 인벤토리의 각주·행 표지는 audit2744rx.test.js 가 화면을 실제로 실행해 본다.
+  //   베어메탈 사용률(BmUsage.jsx — 842줄 · 효과 여러 개)은 렌더 하니스를 만들지 않았다 — 마지막 수단으로 소스(주석 제거)를 본다.
+  it('베어메탈 사용률은 각주를 그린다(소스 — 렌더는 아직 없음)', () => {
     expect(src('tools/BmUsage.jsx')).toMatch(/fleetHeldNote\(data\?\.fleetPartials\)/);
   });
 });
