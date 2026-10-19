@@ -185,30 +185,69 @@ function stripSafeWraps(arg) {
   }
   return out + arg.slice(last);
 }
-/** catch 블록 안에서 preserveCorrupt 와 함께, 그 catch 변수의 원문을 콘솔에 찍는 곳(줄 번호). */
+/*
+ * v2.744(최종 수정분 검토 RV2744F-LOAD-01): 스윕 범위를 넓혔다. 예전 판본은 catch 본문에 `preserveCorrupt(` 가 있는 곳만 봤다 — 그런데
+ *   preserveCorrupt 를 거치지 않고 **스스로** `<파일>.corrupt.<시각>` 사본을 만드는 로더 6곳(게스트 조사 예약 · 패킷 캡처 모니터 ·
+ *   중앙 엣지 토큰 · 위임 인벤토리 캐시 · OS 스캔 설정 · 로그인 모니터 설정)이 같은 원문(`${err?.message || err}`)을 콘솔에 찍고 있었고,
+ *   그중 넷은 원문을 catch 가 아니라 **보존 도우미 함수**(`backupCorrupt(err)`)가 찍어 catch 단위 스윕으로는 보이지도 않았다.
+ *   이제 보는 단위는 ① catch 블록(변수) ② 함수(매개변수 — function 선언·화살표·메서드)이고, 그 본문이 `preserveCorrupt(` 를 부르거나
+ *   `.corrupt` 사본을 rename·copyFile 로 직접 만들면 대상이다. 함수 매개변수는 이름이 오류 같을 때(e·err·error·ex·reason·cause …)만 `${v}`·
+ *   `String(v)` 꼴까지 원문으로 보고, 그 밖의 이름(file 등)은 `.message` 접근만 본다(경로를 찍는 `${file}` 을 원문으로 오판하지 않게).
+ */
+const SELF_PRESERVE_CALL = /\b(?:renameSync|copyFileSync|rename|copyFile|cpSync)\s*\(/;
+/** 이 본문이 손상본을 보존하는가 — preserveCorrupt 호출 또는 `.corrupt` 사본을 직접 만드는 rename·copy. */
+const preservesCorrupt = (body) => /\bpreserveCorrupt\s*\(/.test(body) || (/\.corrupt\b/.test(body) && SELF_PRESERVE_CALL.test(body));
+const ERRISH_PARAM = /^(?:e|err|error|ex|exc|e\d|err\d|reason|cause)$/i;
+const NOT_METHOD = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'with', 'else']);
+/** 원문 참조 정규식 — loose 면 `${v}`·String(v)·인자 단독까지, 아니면 `v.message` 접근만. */
+function rawRefRe(name, loose) {
+  const v = name.replace(/\$/g, '\\$');
+  const msg = `\\b${v}\\s*\\??\\.\\s*message\\b`;
+  return new RegExp(loose ? `${msg}|\\$\\{\\s*${v}\\s*\\}|String\\(\\s*${v}\\s*\\)|\\$\\{\\s*${v}\\s*\\?\\?|\\|\\|\\s*${v}\\s*\\}|(?:^|[,(])\\s*${v}\\s*(?:[,)]|$)` : msg);
+}
+/** 매개변수 목록 문자열 → 단순 이름들(기본값·나머지 표기는 떼고, 구조분해는 건너뛴다). */
+function paramNames(list) {
+  return String(list).split(',').map((p) => p.trim().replace(/^\.\.\./, '').split('=')[0].trim()).filter((p) => /^[A-Za-z_$][\w$]*$/.test(p));
+}
+/** 보는 단위: catch 블록 · function 선언/식 · 화살표 함수(본문 블록) · 메서드. */
+function loadScopes(s) {
+  const scopes = []; let m;
+  const cre = /\bcatch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{/g;
+  while ((m = cre.exec(s))) scopes.push({ names: [[m[1], true]], open: m.index + m[0].length - 1 });
+  const fre = /\bfunction\b\s*\*?\s*[\w$]*\s*\(/g;
+  while ((m = fre.exec(s))) {
+    const po = m.index + m[0].length - 1; const pc = matchClose(s, po);
+    const b = /^\s*\{/.exec(s.slice(pc + 1, pc + 64));
+    if (b) scopes.push({ names: paramNames(s.slice(po + 1, pc)).map((n) => [n, ERRISH_PARAM.test(n)]), open: pc + b[0].length });
+  }
+  const are = /(?:\(([^()]*)\)|\b([A-Za-z_$][\w$]*))\s*=>\s*\{/g;
+  while ((m = are.exec(s))) scopes.push({ names: paramNames(m[1] ?? m[2]).map((n) => [n, ERRISH_PARAM.test(n)]), open: m.index + m[0].length - 1 });
+  const mre = /(?:^|[\n;{}])\s*(?:(?:async|static)\s+)*([A-Za-z_$][\w$]*)\s*\(([^()]*)\)\s*\{/g;
+  while ((m = mre.exec(s))) if (!NOT_METHOD.has(m[1])) scopes.push({ names: paramNames(m[2]).map((n) => [n, ERRISH_PARAM.test(n)]), open: m.index + m[0].length - 1 });
+  return scopes;
+}
+/** 손상본을 보존하는 catch·함수 안에서, 그 오류 변수의 원문을 콘솔에 찍는 곳(줄 번호 — 오름차순, 중복 없음). */
 function findRawLoadLogs(src) {
+  if (!/\bpreserveCorrupt\s*\(|\.corrupt\b/.test(src)) return [];
   const s = stripComments(src);
-  const hits = [];
-  const re = /\bcatch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{/g;
-  let m;
-  while ((m = re.exec(s))) {
-    const v = m[1].replace(/\$/g, '\\$');
-    const open = m.index + m[0].length - 1;
-    const body = s.slice(open, matchClose(s, open) + 1);
-    if (!/\bpreserveCorrupt\s*\(/.test(body)) continue;
-    const raw = new RegExp(`\\b${v}\\s*\\??\\.\\s*message\\b|\\$\\{\\s*${v}\\s*\\}|String\\(\\s*${v}\\s*\\)|\\$\\{\\s*${v}\\s*\\?\\?|\\|\\|\\s*${v}\\s*\\}|(?:^|[,(])\\s*${v}\\s*(?:[,)]|$)`);
+  const hits = new Set();
+  for (const sc of loadScopes(s)) {
+    if (!sc.names.length) continue;
+    const body = s.slice(sc.open, matchClose(s, sc.open) + 1);
+    if (!preservesCorrupt(body)) continue;
+    const raws = sc.names.map(([n, loose]) => rawRefRe(n, loose));
     const cre = /\bconsole\s*\.\s*(?:error|warn|log|info|debug)\s*\(/g;
     let cm;
     while ((cm = cre.exec(body))) {
       const po = cm.index + cm[0].length - 1;
       const arg = stripSafeWraps(body.slice(po + 1, matchClose(body, po)));
-      if (raw.test(arg)) hits.push(s.slice(0, open + cm.index).split('\n').length);
+      if (raws.some((r) => r.test(arg))) hits.add(s.slice(0, sc.open + cm.index).split('\n').length);
     }
   }
-  return hits;
+  return [...hits].sort((a, b) => a - b);
 }
 
-test('RG2744-02 ② 스윕 자체 — 원문 꼴은 잡고, 요약 함수를 거친 꼴·preserveCorrupt 없는 catch 는 잡지 않는다', () => {
+test('RG2744-02 ② 스윕 자체 — 원문 꼴은 잡고(preserveCorrupt · 자체 .corrupt 보존 · 보존 도우미 함수), 요약 함수를 거친 꼴·보존 없는 catch 는 잡지 않는다', () => {
   const flag = [
     'try { x(); } catch (err) { preserveCorrupt(F, err.message); console.error(`[a] 실패: ${err.message}`); }',
     'try { x(); } catch (e) { preserveCorrupt(F); console.warn(`[a] 실패(${e?.message || e}) — 보존`); }',
@@ -216,6 +255,12 @@ test('RG2744-02 ② 스윕 자체 — 원문 꼴은 잡고, 요약 함수를 거
     'try { x(); } catch (e) { preserveCorrupt(F, e); console.error("[a] 실패:", e); }',
     'try { x(); } catch (e) { preserveCorrupt(F, e); console.error("[a] 실패: " + String(e)); }',
     'try { x(); } catch (ex) { preserveCorrupt(F, ex); console.log(`[a] ${ex}`); }',
+    // v2.744(RV2744F-LOAD-01): preserveCorrupt 를 거치지 않는 자체 보존 — catch 안 · 보존 도우미 함수 · 화살표 · 메서드
+    'try { x(); } catch (e) { try { fs.renameSync(F, `${F}.corrupt.${Date.now()}`); } catch { /* */ } console.error(`[t] 파싱 실패(${e.message})`); }',
+    'try { x(); } catch (e) { const bak = `${F}.corrupt.${Date.now()}`; fs.renameSync(F, bak); console.warn(`[c] ${F} 파싱 실패(${e?.message || e})`); }',
+    'function backupCorrupt(err) {\n  try {\n    const bak = `${FILE}.corrupt.${Date.now()}`;\n    fs.renameSync(FILE, bak);\n    console.warn(`[g] 읽기/파싱 실패(${err?.message || err})`);\n  } catch { /* */ }\n}',
+    'const keep = (error) => { fs.copyFileSync(F, F + ".corrupt." + Date.now()); console.warn("[k] 실패:", error); };',
+    'class S { save(ex) { fs.renameSync(F, `${F}.corrupt.1`); console.error(String(ex)); } }',
   ];
   for (const s of flag) assert.equal(findRawLoadLogs(s).length, 1, s);
   const pass = [
@@ -224,10 +269,17 @@ test('RG2744-02 ② 스윕 자체 — 원문 꼴은 잡고, 요약 함수를 거
     'try { x(); } catch (e) { console.warn(`[a] 실패(${e.message})`); }',                    // preserveCorrupt 없음 — 이 스윕의 범위 밖
     'try { x(); } catch (e) { preserveCorrupt(F, e.message); console.error("[a] 손상 — 기본값으로 시작합니다"); }',
     '// catch (e) { preserveCorrupt(F); console.warn(`${e.message}`); }',                      // 주석
+    // v2.744(RV2744F-LOAD-01): 자체 보존이라도 요약 함수를 거친 꼴 · 보존하지 않는 함수 · 오류가 아닌 매개변수(경로)
+    'function backupCorrupt(err) { const bak = `${FILE}.corrupt.${Date.now()}`; fs.renameSync(FILE, bak); console.warn(`[g] 실패(${safeLoadText(err) || "사유 미상"}) — ${bak}`); }',
+    'function report(err) { console.warn(`[r] 실패(${err.message})`); }',                       // 보존 없음 — 범위 밖
+    'function keepCorrupt(file) { const bak = `${file}.corrupt.${Date.now()}`; fs.renameSync(file, bak); console.warn(`[k] ${file} → ${bak}`); }',
+    'try { x(); } catch (e) { console.warn(`[a] ${F}.corrupt 사본은 없습니다: ${e.message}`); }', // .corrupt 글자만 있고 사본을 만들지 않음
   ];
   for (const s of pass) assert.equal(findRawLoadLogs(s).length, 0, s);
   // 첫 줄 번호를 정확히 짚는다(주석 제거가 개행을 보존한다).
   assert.deepEqual(findRawLoadLogs('// a\n// b\ntry { x(); } catch (e) {\n  preserveCorrupt(F);\n  console.warn(`${e.message}`);\n}'), [5]);
+  // 도우미 함수 안의 줄도 정확히 짚는다(catch 와 함수가 겹쳐도 한 번만).
+  assert.deepEqual(findRawLoadLogs('// a\nfunction backupCorrupt(err) {\n  try {\n    fs.renameSync(F, `${F}.corrupt.1`);\n    console.warn(`${err.message}`);\n  } catch (e) { console.warn(`${e.message}`); }\n}'), [5]);
 });
 
 /** 이 그룹(FC)이 고친 파일 — 0 이어야 한다. */

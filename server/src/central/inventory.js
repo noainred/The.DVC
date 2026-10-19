@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
@@ -31,7 +31,8 @@ try {
   try {
     const bak = `${FILE}.corrupt.${Date.now()}`;
     fs.renameSync(FILE, bak);
-    console.warn(`[central] ${FILE} 파싱 실패(${e?.message || e}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);
+    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
+    console.warn(`[central] ${FILE} 파싱 실패(${safeLoadText(e) || '사유 미상'}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 

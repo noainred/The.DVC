@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -44,7 +44,7 @@ try {
       if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
     }
   }
-} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${e.message}`); }
+} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(e)}`); }
 
 let writeTimer = null;
 let writing = false;   // 비동기 원자 쓰기 진행 중

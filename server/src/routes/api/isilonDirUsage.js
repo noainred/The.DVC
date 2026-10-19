@@ -26,6 +26,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
 import { ssrfBlockReason } from '../../collector/registry.js';
 import { listDevices, registryLoadError as storageRegistryLoadError } from '../../storage/registry.js';
+import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../../util/registryCore.js'; // v2.744(최종 수정분 검토 RV2744F-LOAD-02)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from '../../isidu/settings.js';
@@ -68,6 +69,25 @@ function edgeViews() {
   }));
 }
 
+/**
+ * v2.744(최종 수정분 검토 RV2744F-LOAD-02): 스토리지 등록부 로드 오류의 **응답 모양**(순수 — 원본을 바꾸지 않는다).
+ *   `storageRegistryLoadError().reason` 은 V8 JSON.parse 오류 원문이라 오류 위치 앞뒤 파일 조각(손상된 storage-devices.json 의 장비 비밀번호
+ *   앞부분)을 싣는다 — 예전에는 그 객체를 응답에 그대로 실어 브라우저 네트워크 응답·HAR·프록시 로그에 조각이 남았다. 같은 등록부 오류를 내보내는
+ *   형제 경로(routes/central.js registryUnreadable · partFaults maskRegistryUnreadable · bmusage sourceErrorsView · central/fleet.js fleetPartialsSummary)와
+ *   같은 규칙이다: 관리자 상세(isAdminReq — 데모 계정 제외)에는 분류 + 위치 숫자(summarizeRegistryError().text), 그 밖에는 분류 고정 문구(label)만 +
+ *   `reasonDetailHidden`. 화면(IsilonDirUsageTool.jsx)은 이 값이 **있는지만** 본다 — 오류가 없으면 null(진리값 뜻 그대로).
+ * @param {null|{at:number, reason:string}} err  storageRegistryLoadError() 값
+ * @param {{detail?:boolean}} [o]
+ * @returns {null|{at:(number|null), code:string, reason:string, reasonDetailHidden?:true}}
+ */
+export function storageRegistryErrorView(err, { detail = false } = {}) {
+  if (!err || typeof err !== 'object') return null;
+  const sum = summarizeRegistryError(err) || summarizeRegistryError({ reason: '' });
+  const at = Number.isFinite(err.at) ? err.at : null;
+  return detail ? { at, code: sum.code, reason: sum.text }
+    : { at, code: sum.code, reason: sum.label || REGISTRY_ERROR_LABEL['read-error'], reasonDetailHidden: true };
+}
+
 function settingsCtx() {
   return { devices: listDevices(), agents: knownAgentNames(), dcs: dcList(), pickAgent, pickDatacenter, ssrfBlockReason };
 }
@@ -86,7 +106,7 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => 
   if (isMockMode()) { try { await ensureIsiduDemo(); } catch { /* 데모 실패는 화면을 막지 않는다 */ } }
   res.json({
     ok: true, now,
-    settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryLoadError(),
+    settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryErrorView(storageRegistryLoadError(), { detail: isAdminReq(req) }),
     targets: await targetRows(),
     // v2.743 AUTHZ-01: 키 파일·DB 의 절대 경로(CONFIG_DIR)는 관리자 상세(데모 계정 제외)에게만 — 그 밖에는 파일 이름만.
     key: publicKeyView(keyInfo()), keyFile: isAdminReq(req) ? `${keyDir()}/${KEY_FILE_NAME}` : KEY_FILE_NAME,

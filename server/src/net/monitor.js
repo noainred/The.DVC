@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { runTrafficCapture, runDualCapture } from './tcpdump.js';
 import { recordCapture } from './captureHistory.js';
 import { notify } from '../alerts.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
@@ -49,7 +49,8 @@ function backupCorrupt(err) {
   try {
     const bak = `${FILE}.corrupt.${Date.now()}`;
     fs.renameSync(FILE, bak);
-    console.warn(`[netmon] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
+    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각(SSH 비밀번호 앞부분)을 싣는다.
+    console.warn(`[netmon] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 
