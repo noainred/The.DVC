@@ -190,7 +190,7 @@ vp_rma_sudoers() {
 #   ① 경로는 lstat 으로만 판정한다(vp_cfg_state) — 링크·일반 파일 아님·하드 링크면 건드리지 않고 알린다.
 #   ② 내용·소유자·권한은 root 전용 임시 폴더(CONFIG_DIR 의 부모 아래 — 서비스 계정이 쓸 수 없다)에서 다 맞춘다.
 #   ③ 제자리에는 rename(mv -T)으로만 놓는다 — rename 은 링크를 따라가지 않으므로 ①의 확인 뒤에 바꿔치기해도 따라가지 않는다.
-#      읽어야 하는 원본은 cp -a 로 그 임시 폴더에 옮긴 사본에서 읽는다(cp -a 는 원본을 링크를 따라가지 않고 연다).
+#      읽어야 하는 원본은 vp_cfg_snap 으로 그 임시 폴더에 옮긴 사본에서 읽는다(재귀 없음 · 링크를 따라가지 않음 · 일반 파일만).
 #   ⚠ 하드 링크는 fs.protected_hardlinks(배포판 기본 1)가 남의 파일에 거는 것을 막는다는 전제다 — ①이 링크 수 1 만 받는다.
 
 # vp_cfg_state <파일> — 0 = 일반 파일(링크 아님·링크 수 1) · 1 = 없음(매달린 링크도 없음) · 2 = 건드리면 안 됨(stderr 에 알린다).
@@ -220,6 +220,75 @@ vp_cfg_tmp() {
   local base
   base="$(dirname -- "$(dirname -- "$1")")"
   mktemp -d -- "$base/.vmware-portal-cfg.XXXXXX" 2>/dev/null || mktemp -d 2>/dev/null
+}
+
+# vp_cfg_snap <원본> <사본(없는 경로 — root 전용 임시 폴더 안)> — 원본이 일반 파일(링크 아님·링크 수 1·상한 이하)일 때만 내용·소유자·
+#   권한·시각(·SELinux 라벨)을 사본으로 옮긴다. 반환 0 = 옮김 · 1 = 읽기·쓰기 실패 · 2 = 건너뜀(stderr 에 사유).
+#   v2.744(회귀 검토 GJ-R2): 예전 'cp -a' 는 재귀라, 확인 뒤 원본을 폴더로 바꿔치기하면 root 가 서비스 계정 트리를 root 전용 임시 폴더에
+#   통째로 복사한 뒤에야 거절했다(설치 지연·루트 파일 시스템 I/O — 재현됨). 지금은
+#   ① 패키지 node(VP_CFG_NODE)로 원본을 O_NOFOLLOW|O_NONBLOCK 으로 한 번 열고, 그 fd 를 fstat 해 확인한 뒤 그 fd 에서 읽는다 —
+#      확인 뒤 링크·폴더·FIFO(열기에서 매달리지 않는다)·하드 링크·큰 파일로 바꿔치기해도 따라가거나 복사하지 않는다.
+#   ② node 를 쓸 수 없으면(없음·실행 불가) lstat 확인 + 재귀 없는 'cp -P --preserve=all'(원본을 O_NOFOLLOW 로 열고 같은 inode 인지
+#      확인한다) + 시한(확인 뒤 FIFO 로 바뀌면 cp 가 열기에서 멈춘다) + 사본 크기 확인.
+#   상한은 VP_CFG_MAX_BYTES(기본 16MiB — CONFIG_DIR 의 설정 파일은 수 KB 다. 넘으면 그 사실을 알리고 건너뛴다).
+vp_cfg_snap() {
+  local src="$1" dst="$2" max="${VP_CFG_MAX_BYTES:-}" node="${VP_CFG_NODE:-}" secs="${VP_CFG_COPY_TIMEOUT:-}" why="" r=0 st
+  [[ "$max" =~ ^[0-9]+$ ]] || max=16777216
+  [[ "$secs" =~ ^[1-9][0-9]*$ ]] || secs=60
+  local js='const fs=require("fs"),C=fs.constants,[src,dst,mx]=process.argv.slice(1),max=Number(mx);
+const q=(m,c)=>{process.stdout.write(String(m));process.exit(c)};
+let fd,o;
+try{fd=fs.openSync(src,C.O_RDONLY|C.O_NOFOLLOW|C.O_NONBLOCK|C.O_NOCTTY)}catch(e){q(e.code==="ELOOP"?"link":e.code==="ENOENT"?"absent":"open:"+e.code,10)}
+const s=fs.fstatSync(fd);
+if(!s.isFile())q("notreg",10);
+if(s.nlink!==1)q("nlink:"+s.nlink,10);
+if(!(s.size<=max))q("size:"+s.size,10);
+try{o=fs.openSync(dst,C.O_WRONLY|C.O_CREAT|C.O_EXCL|C.O_NOFOLLOW,0o600)}catch(e){q("dst:"+e.code,11)}
+try{const b=Buffer.alloc(65536);let n,t=0;
+while((n=fs.readSync(fd,b,0,b.length,null))>0){t+=n;if(t>max)q("size:"+t,10);let w=0;while(w<n)w+=fs.writeSync(o,b,w,n-w)}
+fs.fchownSync(o,s.uid,s.gid);fs.fchmodSync(o,s.mode&0o7777);fs.futimesSync(o,s.atime,s.mtime)}catch(e){q("io:"+(e.code||"error"),11)}
+if(fs.existsSync("/sys/fs/selinux/enforce")){try{require("child_process").spawnSync("chcon",["--reference=/dev/fd/3","--",dst],{stdio:["ignore","ignore","ignore",fd]})}catch(e){}}
+fs.closeSync(o);fs.closeSync(fd)'
+  if [[ -n "$node" && -x "$node" ]]; then
+    why="$("$node" -e "$js" -- "$src" "$dst" "$max" 2>/dev/null)" || r=$?
+    case $r in
+      0) return 0 ;;
+      10) case "$why" in
+            link) echo "⚠ $src 는 심볼릭 링크입니다 — root 로 따라가 읽지 않도록 복사하지 않습니다." >&2 ;;
+            absent) echo "⚠ $src 가 없어졌습니다 — 복사하지 않습니다." >&2 ;;
+            notreg) echo "⚠ $src 는 일반 파일이 아닙니다(폴더·FIFO 등) — 복사하지 않습니다." >&2 ;;
+            nlink:*) echo "⚠ $src 는 하드 링크입니다(링크 수 ${why#nlink:}) — 복사하지 않습니다." >&2 ;;
+            size:*) echo "⚠ $src 가 너무 큽니다(${why#size:}바이트 — 상한 ${max}바이트) — 복사하지 않습니다(정상 설정 파일은 수 KB 입니다)." >&2 ;;
+            *) echo "⚠ $src 를 열지 못했습니다(${why}) — 복사하지 않습니다." >&2 ;;
+          esac
+          rm -f -- "$dst"; return 2 ;;
+      11) echo "⚠ $src 를 복사하지 못했습니다(${why})." >&2; rm -f -- "$dst"; return 1 ;;
+    esac
+    rm -f -- "$dst"   # node 를 실행하지 못함(실행 불가 마운트 등) — 아래 cp 경로로
+  fi
+  if [[ -L "$src" ]]; then echo "⚠ $src 는 심볼릭 링크입니다 — root 로 따라가 읽지 않도록 복사하지 않습니다." >&2; return 2; fi
+  if [[ ! -f "$src" ]]; then echo "⚠ $src 는 일반 파일이 아닙니다(폴더·FIFO 등이거나 없음) — 복사하지 않습니다." >&2; return 2; fi
+  st="$(stat -c '%h %s' -- "$src" 2>/dev/null || echo 'x 0')"
+  if [[ "${st%% *}" != 1 ]]; then echo "⚠ $src 는 하드 링크입니다(링크 수 ${st%% *}) — 복사하지 않습니다." >&2; return 2; fi
+  if (( ${st##* } > max )); then
+    echo "⚠ $src 가 너무 큽니다(${st##* }바이트 — 상한 ${max}바이트) — 복사하지 않습니다(정상 설정 파일은 수 KB 입니다)." >&2; return 2
+  fi
+  local -a to=()
+  if command -v timeout >/dev/null 2>&1; then to=(timeout "$secs"); fi
+  "${to[@]}" cp -P --preserve=all -- "$src" "$dst" 2>/dev/null || r=$?
+  if [[ $r -ne 0 ]]; then
+    rm -f -- "$dst"
+    if [[ $r -eq 124 ]]; then echo "⚠ $src 복사가 시한(${secs}초)을 넘겨 끊었습니다(그사이 FIFO 등으로 바뀌었을 수 있다) — 복사하지 않습니다." >&2
+    else echo "⚠ $src 를 복사하지 못했습니다(그사이 링크·일반 파일 아님으로 바뀌었을 수 있다) — 복사하지 않습니다." >&2
+    fi
+    return 2
+  fi
+  st="$(stat -c '%s' -- "$dst" 2>/dev/null || echo x)"
+  if [[ -L "$dst" || ! -f "$dst" || ! "$st" =~ ^[0-9]+$ ]] || (( st > max )); then
+    rm -f -- "$dst"
+    echo "⚠ $src 의 사본이 일반 파일이 아니거나 상한(${max}바이트)을 넘었습니다(그사이 바뀌었을 수 있다) — 복사하지 않습니다." >&2; return 2
+  fi
+  return 0
 }
 
 # vp_cfg_place <준비한 파일> <대상> <new|replace> — 준비한 일반 파일을 rename 으로 제자리에 놓는다.
@@ -253,12 +322,12 @@ vp_cfg_create() {
   return $rc
 }
 
-# vp_cfg_copy_new <원본> <대상> — 없는 대상에 원본(일반 파일일 때만)을 cp -a 로 옮긴다(소유자·권한 보존). 반환은 vp_cfg_create 와 같다.
-#   원본이 링크면 cp -a 가 링크 자체를 복사하므로 그 사본은 놓지 않는다.
+# vp_cfg_copy_new <원본> <대상> — 없는 대상에 원본(일반 파일일 때만)을 vp_cfg_snap 으로 옮긴다(소유자·권한 보존). 반환은 vp_cfg_create 와 같다.
+#   원본이 링크·폴더·FIFO·하드 링크·상한 초과면 사본을 만들지 않는다(v2.744 회귀 검토 GJ-R2 — 예전 cp -a 는 폴더를 통째로 복사했다).
 vp_cfg_copy_new() {
   local src="$1" dst="$2" t rc=0
   t="$(vp_cfg_tmp "$dst")" || return 1
-  if cp -a -- "$src" "$t/new" 2>/dev/null && [[ -f "$t/new" && ! -L "$t/new" ]]; then
+  if vp_cfg_snap "$src" "$t/new" && [[ -f "$t/new" && ! -L "$t/new" ]]; then
     vp_cfg_place "$t/new" "$dst" new || rc=$?
   else
     echo "⚠ $src 를 옮기지 못했습니다(일반 파일이 아님) — 건너뜁니다." >&2; rc=1
@@ -268,12 +337,13 @@ vp_cfg_copy_new() {
 }
 
 # vp_cfg_fix <대상> <소유 계정:그룹> <권한(chmod 표기)> [<원래 소유 uid 조건>] — 있는 일반 파일의 소유자·권한을 맞춘다.
-#   경로에 chown·chmod 하지 않는다(chmod 는 링크를 따라간다) — cp -a 사본을 맞춰 replace 로 바꿔 놓는다. 이미 맞으면 건드리지 않는다.
+#   경로에 chown·chmod 하지 않는다(chmod 는 링크를 따라간다) — vp_cfg_snap 사본을 맞춰 replace 로 바꿔 놓는다. 이미 맞으면 건드리지 않는다.
 #   uid 조건을 주면 사본(=그때 그 자리에 있던 파일)의 소유자가 그 uid 일 때만 맞춘다. 반환 0 = 맞음/맞춤 · 1 = 실패 · 2 = 건너뜀.
 vp_cfg_fix() {
   local dst="$1" owner="$2" mode="$3" need="${4:-}" t rc=0 before after
   t="$(vp_cfg_tmp "$dst")" || { echo "⚠ 임시 폴더를 만들지 못해 $dst 의 소유자·권한을 맞추지 않았습니다." >&2; return 1; }
-  if cp -a -- "$dst" "$t/cur" 2>/dev/null && [[ -f "$t/cur" && ! -L "$t/cur" ]] \
+  # v2.744(회귀 검토 GJ-R2): 사본은 vp_cfg_snap(재귀 없음 — 확인 뒤 폴더로 바꿔치기해도 트리를 복사하지 않는다)
+  if vp_cfg_snap "$dst" "$t/cur" && [[ -f "$t/cur" && ! -L "$t/cur" ]] \
      && { [[ -z "$need" ]] || [[ "$(stat -c %u -- "$t/cur" 2>/dev/null)" == "$need" ]]; }; then
     before="$(stat -c '%u:%g %a' -- "$t/cur")"
     if chown -- "$owner" "$t/cur" && chmod -- "$mode" "$t/cur"; then
@@ -291,20 +361,26 @@ vp_cfg_fix() {
 
 # vp_cfg_set_line <대상> <KEY> <VALUE> — 있는 일반 파일에서 'KEY=' 로 시작하는 줄을 전부 KEY=VALUE 로 바꾸고 없으면 끝에 붙인다
 #   (예전 'grep … || echo … >>' + 'sed -i s#^KEY=.*#…#' 와 같은 결과 — 마지막 줄에 줄바꿈이 없어도 이어 붙이지 않는다).
-#   바뀐 것이 없으면 쓰지 않는다. 소유자·권한·SELinux 라벨은 원본 그대로(cp -a 사본에서 고쳐 replace 로 놓는다).
+#   바뀐 것이 없으면 쓰지 않는다. 소유자·권한·SELinux 라벨은 원본 그대로(vp_cfg_snap 사본에서 고쳐 replace 로 놓는다).
+#   v2.744(회귀 검토 GJ-R1): 예전에는 bash 문자열에 한 줄씩 덧붙였다(out+=) — 덧붙일 때마다 전체를 다시 복사해 크기의 제곱에 비례했다
+#   (서비스 계정이 portal.env 를 키우면 root 설치기가 수 분~수 시간 멈춘다 — 실측 3.3MB 5.9초). 지금은 awk 한 번(선형)이고 결과는 예전과
+#   같다(줄 맨 앞 'KEY=' 글자 그대로 일치 — CONFIG_DIR_X= 와 섞지 않는다 · 마지막 줄 줄바꿈 보충 · 없으면 끝에 추가). 키·값은 ENVIRON
+#   으로 넘긴다(awk -v 는 값의 역슬래시를 해석한다). 크기 상한은 vp_cfg_snap 이 건다(넘으면 알리고 건너뛴다).
 vp_cfg_set_line() {
-  local dst="$1" key="$2" val="$3" t line out="" seen=0 rc=0
+  local dst="$1" key="$2" val="$3" t rc=0
   t="$(vp_cfg_tmp "$dst")" || { echo "⚠ 임시 폴더를 만들지 못해 $dst 의 $key 줄을 맞추지 않았습니다." >&2; return 1; }
-  if ! cp -a -- "$dst" "$t/cur" 2>/dev/null || [[ ! -f "$t/cur" || -L "$t/cur" ]]; then
-    echo "⚠ $dst 를 읽지 못해(그사이 링크·일반 파일 아님으로 바뀌었을 수 있다) $key 줄을 맞추지 않았습니다." >&2
+  if ! vp_cfg_snap "$dst" "$t/cur" || [[ ! -f "$t/cur" || -L "$t/cur" ]]; then
+    echo "⚠ $dst 를 읽지 못해(그사이 링크·일반 파일 아님으로 바뀌었거나 상한을 넘었을 수 있다) $key 줄을 맞추지 않았습니다." >&2
     rm -rf -- "$t"; return 2
   fi
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "$key="* ]]; then line="$key=$val"; seen=1; fi
-    out+="$line"$'\n'
-  done < "$t/cur"
-  (( seen )) || out+="$key=$val"$'\n'
-  printf '%s' "$out" > "$t/new"
+  # shellcheck disable=SC2016  # $0 은 awk 의 것이다
+  if ! VP_K="$key" VP_V="$val" LC_ALL=C awk 'BEGIN { k = ENVIRON["VP_K"] "="; r = ENVIRON["VP_K"] "=" ENVIRON["VP_V"]; s = 0 }
+      index($0, k) == 1 { print r; s = 1; next }
+      { print }
+      END { if (!s) print r }' < "$t/cur" > "$t/new"; then
+    echo "⚠ $dst 의 $key 줄을 만들지 못했습니다(awk 실패) — 건드리지 않았습니다." >&2
+    rm -rf -- "$t"; return 1
+  fi
   if ! cmp -s -- "$t/cur" "$t/new"; then
     if chown --reference="$t/cur" -- "$t/new" && chmod --reference="$t/cur" -- "$t/new"; then
       { command -v chcon >/dev/null 2>&1 && chcon --reference="$t/cur" -- "$t/new" 2>/dev/null; } || true
@@ -383,6 +459,11 @@ if [[ ! -d "$SCRIPT_DIR/runtime/node" || ! -d "$SCRIPT_DIR/app" ]]; then
   } >&2
   exit 1
 fi
+
+# v2.744(회귀 검토 GJ-R2): vp_cfg_snap 이 root 로 실행하는 node — 패키지의 것(이 스크립트와 같은 신뢰. 아래 0) 이 이 폴더의
+#   release-verify-lib.sh 를 root 로 source 한다). $PREFIX/runtime/node 는 5) 의 chown -R 뒤 서비스 계정 소유라 root 로 실행하지 않는다.
+#   없거나 실행되지 않으면(실행 불가 마운트 등) vp_cfg_snap 이 cp 경로로 떨어진다.
+VP_CFG_NODE="$SCRIPT_DIR/runtime/node/bin/node"
 
 VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo unknown)"
 echo "==> VMware Global Monitoring Portal 오프라인 설치 (v${VERSION}) — Rocky Linux 9"

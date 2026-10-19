@@ -76,7 +76,8 @@ function region(start, end) {
   return INSTALL.slice(INSTALL.lastIndexOf('\n', a) + 1, b);
 }
 const FNS = allFns(INSTALL);
-const CFG_FNS = ['vp_cfg_state', 'vp_cfg_tmp', 'vp_cfg_place', 'vp_cfg_create', 'vp_cfg_copy_new', 'vp_cfg_fix', 'vp_cfg_set_line', 'vp_rma_env_file', 'vp_cfg_settings_owners'];
+// v2.744 회귀 검토 GJ-R2: 사본 만들기(cp -a — 재귀)를 vp_cfg_snap 하나로 바꿨다(audit2744rz.test.js 가 그 동작을 고정한다).
+const CFG_FNS = ['vp_cfg_state', 'vp_cfg_tmp', 'vp_cfg_snap', 'vp_cfg_place', 'vp_cfg_create', 'vp_cfg_copy_new', 'vp_cfg_fix', 'vp_cfg_set_line', 'vp_rma_env_file', 'vp_cfg_settings_owners'];
 const bash = (script, args = [], opt = {}) => spawnSync('bash', ['-c', `set -euo pipefail\n${FNS}\n${script}`, '_', ...args], { encoding: 'utf8', ...opt });
 const rc = (r) => r.status;
 
@@ -394,6 +395,8 @@ test('LEFT-05 Windows README — 설치·설정 폴더 권한을 좁히는 안�
   }
   assert.match(doc, /경로에 공백을 넣지 마세요/, '예시 경로에 공백을 넣지 않는 이유');
   assert.match(doc, /실기로 확인하지 못했습니다/, 'Windows 실기로 확인하지 못했다는 사실');
+  // v2.744 회귀 검토 GJ-R3: 좁힌 권한과 맞물리는 편집 방법(관리자 권한 메모장) — 상세는 audit2744rz.test.js
+  assert.ok(doc.includes('notepad C:\\vmware-portal\\portal.env.bat'), '2단계 편집은 관리자 권한 명령 프롬프트의 메모장으로');
   // 명령 블록 안의 경로에는 공백이 없다(.bat 인용 회귀 위험)
   let blocks = 0;
   for (const blk of doc.matchAll(/```(?:bat|powershell)?\n([\s\S]*?)```/g)) {
