@@ -113,12 +113,34 @@ export function ackRunDrops(seq) {
 
 /** v2.742(RECENT-02): 대기열에 넣는다 — 실행 중 스캔 기록에도 남긴다(재시작·업그레이드에도 대기 요청이 남게).
  *  v2.743(TIMING-03): batch 배열을 주면 기록을 거기에 모으고 호출부가 scanQueuedMany 로 한 번에 쓴다. */
-function enqueue(id, { since = Date.now(), trigger = 'manual', label = '', restored = false, batch = null } = {}) {
-  _queue.set(id, { since, trigger, ...(trigger === 'central' ? { central: true } : {}), ...(restored ? { restored: true } : {}) });
+function enqueue(id, { since = Date.now(), trigger = 'manual', label = '', restored = false, batch = null, central = false } = {}) {
+  _queue.set(id, { since, trigger, ...(trigger === 'central' || central ? { central: true } : {}), ...(restored ? { restored: true } : {}) });
   if (restored) return;
-  const rec = { key: id, label: label || id, trigger, since, holdMs: QUEUE_HOLD_MS, meta: { manual: true } };
+  const rec = queuedRecOf(id, { since, trigger, label, central });
   if (Array.isArray(batch)) batch.push(rec);
   else scanQueued(KIND, id, rec);
+}
+
+/**
+ * 대기 요청 한 건의 실행 중 스캔 기록(enqueue·중앙 요청 합류 공용 — 모양을 두 벌로 두지 않는다).
+ * v2.744(감사 TIMING-02): 이미 기다리던 대상에 중앙 요청이 합쳐지면(central) 기록의 trigger 를 'central' 로 남긴다 —
+ *   재시작 뒤 takeQueuedBootDrops 가 돌려주는 것은 {key, trigger, reason} 뿐이라 trigger 가 그 표지다. 원래 trigger 는 meta.origTrigger 에 두어
+ *   restoreQueue 가 되살린다(재시작 여부로 조사 기록의 trig 가 달라지지 않게). since 는 원래 넣은 시각 그대로(대기 시한이 합류로 늘지 않는다).
+ */
+function queuedRecOf(id, { since, trigger, label = '', central = false }) {
+  const merged = central && trigger !== 'central';
+  return {
+    key: id, label: label || id, trigger: merged ? 'central' : trigger, since, holdMs: QUEUE_HOLD_MS,
+    meta: { manual: true, ...(merged ? { central: true, origTrigger: trigger } : {}) },
+  };
+}
+
+/** 재시작 전 대기 기록에서 원래 trigger 와 중앙 요청 표지를 되살린다(v2.744 TIMING-02 — queuedRecOf 의 반대). */
+const ORIG_TRIGGER_RE = /^[a-z][a-z-]{0,15}$/;
+function restoredQueueOf(q) {
+  const orig = typeof q?.meta?.origTrigger === 'string' && ORIG_TRIGGER_RE.test(q.meta.origTrigger) ? q.meta.origTrigger : null;
+  const central = q?.trigger === 'central' || q?.meta?.central === true;
+  return { trigger: orig || q?.trigger || 'manual', central };
 }
 /** v2.742: 대기열에서 뺀다(시작·시한 초과·대상 없음) — 기록도 함께 지운다. */
 function dequeue(id) {
@@ -146,11 +168,15 @@ function freeSlots(now = Date.now()) {
  */
 function restoreQueue() {
   // v2.743(LEFT-08): 기동 때 다시 넣지 못한 대기 요청 중 중앙이 보낸 것은 중앙에 알린다(이력에는 scanJournal 이 이미 남겼다).
+  //   v2.744(TIMING-02): 중앙 요청이 합쳐진 대기는 기록의 trigger 가 'central' 이다(queuedRecOf) — 이 판정이 그것도 잡는다.
   for (const d of takeQueuedBootDrops(KIND)) if (d.trigger === 'central') noteRunDrop(d.key, d.reason, d.trigger);
   let n = 0;
   for (const q of queuedOf(KIND)) {
     if (_queue.has(q.key) || _inflight.has(q.key)) continue;
-    enqueue(q.key, { since: q.since || Date.now(), trigger: q.trigger || 'manual', restored: true });
+    // v2.744(감사 TIMING-02): 합쳐진 중앙 요청의 표지(central)를 되살린다 — 예전에는 trigger 만 보아 'manual' 대기로 돌아왔고,
+    //   그 뒤 시한 초과·대상 없음으로 버려도 중앙에 알리지 않았다(중앙은 결과 시한까지 기다렸다).
+    const r = restoredQueueOf(q);
+    enqueue(q.key, { since: q.since || Date.now(), trigger: r.trigger, central: r.central, restored: true });
     n++;
   }
   if (n) note('info', `재시작 전 '지금 수집' 대기 ${n}개를 대기열에 다시 넣었습니다 — 자리가 나면 차례로 시작합니다`);
@@ -350,7 +376,12 @@ export async function runNow(ids = null, { trigger = 'manual' } = {}) {
     if (_inflight.has(t.id)) { busy.push(t.id); continue; }
     if (_queue.has(t.id)) {
       // v2.743(LEFT-08): 이미 기다리던 대상에 중앙 요청이 합쳐졌다 — 그 대기를 버리면 중앙 요청도 버린 것이다(중앙에 알린다).
-      if (trigger === 'central') _queue.get(t.id).central = true;
+      // v2.744(감사 TIMING-02): 표지를 메모리에만 두면 재시작 뒤 사라진다 — 대기 기록에도 남긴다(since 유지, 아래 scanQueuedMany 로 한 번에).
+      const qe = _queue.get(t.id);
+      if (trigger === 'central' && !carriesCentral(qe)) {
+        qe.central = true;
+        batch.push(queuedRecOf(t.id, { since: qe.since, trigger: qe.trigger, label: t.label, central: true }));
+      }
       queued.push(t.id); continue;
     }
     if (_inflight.size >= CONCURRENCY) { enqueue(t.id, { trigger, label: t.label, batch }); queued.push(t.id); continue; }

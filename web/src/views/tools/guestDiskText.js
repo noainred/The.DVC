@@ -67,3 +67,20 @@ export function coverageStateText(c) {
   if (c.vmCount > 0) return c.stale ? '⚠ 오래된 관측' : '✅ 데이터 있음';
   return c.collectSource === 'site' ? '⏳ 엣지 push 대기' : '⏳ 미수집';
 }
+
+/** v2.744(LEFT-03): 수집된 VM 이 0대일 때 '회수 가능 합계' 카드의 메타 문구(커버리지 표가 없으면 그것을 가리키지 않는다). */
+export const RECLAIM_NO_DATA_NOTE = '수집된 VM 없음 — 아래 커버리지 참고';
+export const RECLAIM_NO_DATA_NOTE_BARE = '수집된 VM 없음';
+
+/**
+ * '회수 가능 합계' 카드(v2.744 감사 LEFT-03): 서버는 수집된 VM 이 0대여도 totalReclaimGB 0 을 준다(reduce 합).
+ * 그것을 그대로 그리면 '모름' 이 '회수할 것 없음(0 GB)' 으로 읽힌다 — 같은 화면의 빈 목록 안내는 이미 collectedCount 로 나눠 말한다.
+ * collectedCount 가 정확히 0 일 때만 모름이다(필드가 없는 구버전 서버는 예전 표시 그대로 — 지어내지 않는다).
+ * @returns {{unknown:boolean, note:string}} unknown 이면 카드 값은 '—', 메타는 note.
+ */
+export function reclaimTotalCard(data) {
+  const n = data?.collectedCount;
+  const hasCoverage = Array.isArray(data?.coverage) && data.coverage.length > 0;
+  if (typeof n === 'number' && n === 0) return { unknown: true, note: hasCoverage ? RECLAIM_NO_DATA_NOTE : RECLAIM_NO_DATA_NOTE_BARE };
+  return { unknown: false, note: '' };
+}

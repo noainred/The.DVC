@@ -181,6 +181,179 @@ vp_rma_sudoers() {
   return 0
 }
 
+# ── CONFIG_DIR 파일 안전 쓰기 — v2.744(감사 INJPKG-01) ──────────────────────────────────────────────────────────────
+# CONFIG_DIR 은 서비스 계정 소유(chmod 0750, 아래 5)라 서비스 계정이 그 안의 파일을 지우고 심볼릭 링크·하드 링크로 바꿔 둘 수 있다.
+#   예전에는 root 로 도는 이 스크립트가 rma-<인스턴스>.env·settings-owners.txt·portal.env 를 경로 그대로 chown·chmod·cat >·
+#   printf >·sed -i·>> 해서 링크를 따라갔다 — 서비스 계정이 고른 임의 파일(/etc/shadow 등)이 서비스 계정 소유·0640 이 되거나
+#   root 소유로 새로 만들어졌다(로컬 권한 상승, 재현됨). v2.741·v2.742 가 앱 트리·portal.env 값에 세운 '서비스 계정을 믿지 않는다'
+#   규칙을 CONFIG_DIR 파일 권한 경로에도 적용한다. 규칙 셋:
+#   ① 경로는 lstat 으로만 판정한다(vp_cfg_state) — 링크·일반 파일 아님·하드 링크면 건드리지 않고 알린다.
+#   ② 내용·소유자·권한은 root 전용 임시 폴더(CONFIG_DIR 의 부모 아래 — 서비스 계정이 쓸 수 없다)에서 다 맞춘다.
+#   ③ 제자리에는 rename(mv -T)으로만 놓는다 — rename 은 링크를 따라가지 않으므로 ①의 확인 뒤에 바꿔치기해도 따라가지 않는다.
+#      읽어야 하는 원본은 cp -a 로 그 임시 폴더에 옮긴 사본에서 읽는다(cp -a 는 원본을 링크를 따라가지 않고 연다).
+#   ⚠ 하드 링크는 fs.protected_hardlinks(배포판 기본 1)가 남의 파일에 거는 것을 막는다는 전제다 — ①이 링크 수 1 만 받는다.
+
+# vp_cfg_state <파일> — 0 = 일반 파일(링크 아님·링크 수 1) · 1 = 없음(매달린 링크도 없음) · 2 = 건드리면 안 됨(stderr 에 알린다).
+vp_cfg_state() {
+  local f="$1" n
+  if [[ -L "$f" ]]; then
+    echo "⚠ $f 는 심볼릭 링크입니다 — root 로 따라가 쓰거나 소유자·권한을 바꾸지 않도록 건너뜁니다(서비스 계정이 심은 링크일 수 있습니다)." >&2
+    echo "  링크를 지우고 내용을 확인한 일반 파일로 둔 뒤 install.sh 를 다시 실행하세요." >&2
+    return 2
+  fi
+  [[ -e "$f" ]] || return 1
+  if [[ ! -f "$f" ]]; then
+    echo "⚠ $f 는 일반 파일이 아닙니다 — 건너뜁니다." >&2
+    return 2
+  fi
+  n="$(stat -c %h -- "$f" 2>/dev/null || echo 0)"
+  if [[ "$n" != 1 ]]; then
+    echo "⚠ $f 는 하드 링크입니다(링크 수 $n) — 다른 파일과 같은 내용일 수 있어 건너뜁니다. 일반 파일로 다시 만든 뒤 install.sh 를 다시 실행하세요." >&2
+    return 2
+  fi
+  return 0
+}
+
+# vp_cfg_tmp <대상 파일> — root 전용 임시 폴더(0700)를 대상 폴더의 부모 아래에 만들고 그 경로를 낸다(같은 파일 시스템이라 rename 이
+#   한 번에 된다). 부모에 못 만들면 기본 임시 폴더에 — 그때 mv 는 대상을 지우고 새로(O_EXCL) 만들어 옮기므로 역시 링크를 따라가지 않는다.
+vp_cfg_tmp() {
+  local base
+  base="$(dirname -- "$(dirname -- "$1")")"
+  mktemp -d -- "$base/.vmware-portal-cfg.XXXXXX" 2>/dev/null || mktemp -d 2>/dev/null
+}
+
+# vp_cfg_place <준비한 파일> <대상> <new|replace> — 준비한 일반 파일을 rename 으로 제자리에 놓는다.
+#   new = 그 자리에 무엇이든(매달린 링크 포함) 있으면 놓지 않는다(2) · replace = 그 자리의 이름만 바꾼다(링크를 따라가지 않는다).
+vp_cfg_place() {
+  local src="$1" dst="$2" how="$3"
+  [[ -f "$src" && ! -L "$src" ]] || return 1
+  if [[ "$how" == new ]]; then
+    mv -n -T -- "$src" "$dst" 2>/dev/null || true
+    if [[ -e "$src" || -L "$src" ]]; then
+      echo "⚠ $dst 가 그사이에 생겨(서비스 계정이 만든 것일 수 있다) 새로 만들지 않았습니다 — 확인한 뒤 install.sh 를 다시 실행하세요." >&2
+      return 2
+    fi
+    return 0
+  fi
+  mv -f -T -- "$src" "$dst" 2>/dev/null || { echo "⚠ $dst 를 바꾸지 못했습니다(폴더로 바뀌었을 수 있다) — 건너뜁니다." >&2; return 1; }
+  return 0
+}
+
+# vp_cfg_create <대상> <소유 계정:그룹> <권한> — 없는 파일을 stdin 내용으로 만든다(임시 폴더에서 내용·소유자·권한을 맞춘 뒤 new 로 놓는다).
+#   반환 0 = 만듦 · 1 = 실패 · 2 = 대상이 있어(또는 그사이 생겨) 만들지 않음.
+vp_cfg_create() {
+  local dst="$1" owner="$2" mode="$3" t rc=0
+  t="$(vp_cfg_tmp "$dst")" || { echo "⚠ 임시 폴더를 만들지 못해 $dst 를 만들지 않았습니다." >&2; return 1; }
+  if cat > "$t/new" && chown -- "$owner" "$t/new" && chmod -- "$mode" "$t/new"; then
+    vp_cfg_place "$t/new" "$dst" new || rc=$?
+  else
+    echo "⚠ $dst 를 만들지 못했습니다(내용·소유자·권한)." >&2; rc=1
+  fi
+  rm -rf -- "$t"
+  return $rc
+}
+
+# vp_cfg_copy_new <원본> <대상> — 없는 대상에 원본(일반 파일일 때만)을 cp -a 로 옮긴다(소유자·권한 보존). 반환은 vp_cfg_create 와 같다.
+#   원본이 링크면 cp -a 가 링크 자체를 복사하므로 그 사본은 놓지 않는다.
+vp_cfg_copy_new() {
+  local src="$1" dst="$2" t rc=0
+  t="$(vp_cfg_tmp "$dst")" || return 1
+  if cp -a -- "$src" "$t/new" 2>/dev/null && [[ -f "$t/new" && ! -L "$t/new" ]]; then
+    vp_cfg_place "$t/new" "$dst" new || rc=$?
+  else
+    echo "⚠ $src 를 옮기지 못했습니다(일반 파일이 아님) — 건너뜁니다." >&2; rc=1
+  fi
+  rm -rf -- "$t"
+  return $rc
+}
+
+# vp_cfg_fix <대상> <소유 계정:그룹> <권한(chmod 표기)> [<원래 소유 uid 조건>] — 있는 일반 파일의 소유자·권한을 맞춘다.
+#   경로에 chown·chmod 하지 않는다(chmod 는 링크를 따라간다) — cp -a 사본을 맞춰 replace 로 바꿔 놓는다. 이미 맞으면 건드리지 않는다.
+#   uid 조건을 주면 사본(=그때 그 자리에 있던 파일)의 소유자가 그 uid 일 때만 맞춘다. 반환 0 = 맞음/맞춤 · 1 = 실패 · 2 = 건너뜀.
+vp_cfg_fix() {
+  local dst="$1" owner="$2" mode="$3" need="${4:-}" t rc=0 before after
+  t="$(vp_cfg_tmp "$dst")" || { echo "⚠ 임시 폴더를 만들지 못해 $dst 의 소유자·권한을 맞추지 않았습니다." >&2; return 1; }
+  if cp -a -- "$dst" "$t/cur" 2>/dev/null && [[ -f "$t/cur" && ! -L "$t/cur" ]] \
+     && { [[ -z "$need" ]] || [[ "$(stat -c %u -- "$t/cur" 2>/dev/null)" == "$need" ]]; }; then
+    before="$(stat -c '%u:%g %a' -- "$t/cur")"
+    if chown -- "$owner" "$t/cur" && chmod -- "$mode" "$t/cur"; then
+      after="$(stat -c '%u:%g %a' -- "$t/cur")"
+      if [[ "$before" != "$after" ]]; then vp_cfg_place "$t/cur" "$dst" replace || rc=$?; fi
+    else
+      rc=1
+    fi
+  else
+    echo "⚠ $dst 의 소유자·권한을 맞추지 않았습니다(그사이 링크·일반 파일 아님·다른 소유자로 바뀌었을 수 있다)." >&2; rc=2
+  fi
+  rm -rf -- "$t"
+  return $rc
+}
+
+# vp_cfg_set_line <대상> <KEY> <VALUE> — 있는 일반 파일에서 'KEY=' 로 시작하는 줄을 전부 KEY=VALUE 로 바꾸고 없으면 끝에 붙인다
+#   (예전 'grep … || echo … >>' + 'sed -i s#^KEY=.*#…#' 와 같은 결과 — 마지막 줄에 줄바꿈이 없어도 이어 붙이지 않는다).
+#   바뀐 것이 없으면 쓰지 않는다. 소유자·권한·SELinux 라벨은 원본 그대로(cp -a 사본에서 고쳐 replace 로 놓는다).
+vp_cfg_set_line() {
+  local dst="$1" key="$2" val="$3" t line out="" seen=0 rc=0
+  t="$(vp_cfg_tmp "$dst")" || { echo "⚠ 임시 폴더를 만들지 못해 $dst 의 $key 줄을 맞추지 않았습니다." >&2; return 1; }
+  if ! cp -a -- "$dst" "$t/cur" 2>/dev/null || [[ ! -f "$t/cur" || -L "$t/cur" ]]; then
+    echo "⚠ $dst 를 읽지 못해(그사이 링크·일반 파일 아님으로 바뀌었을 수 있다) $key 줄을 맞추지 않았습니다." >&2
+    rm -rf -- "$t"; return 2
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$key="* ]]; then line="$key=$val"; seen=1; fi
+    out+="$line"$'\n'
+  done < "$t/cur"
+  (( seen )) || out+="$key=$val"$'\n'
+  printf '%s' "$out" > "$t/new"
+  if ! cmp -s -- "$t/cur" "$t/new"; then
+    if chown --reference="$t/cur" -- "$t/new" && chmod --reference="$t/cur" -- "$t/new"; then
+      { command -v chcon >/dev/null 2>&1 && chcon --reference="$t/cur" -- "$t/new" 2>/dev/null; } || true
+      vp_cfg_place "$t/new" "$dst" replace || rc=$?
+    else
+      rc=1
+    fi
+  fi
+  rm -rf -- "$t"
+  return $rc
+}
+
+# vp_rma_env_file <config_dir> <인스턴스> <서비스 계정> — RMA 인스턴스 환경 파일(rma-<인스턴스>.env)을 준비한다.
+#   없으면 기본 내용으로 만들고(서비스 계정 소유·0640), 있으면 소유자·권한만 맞춘다. 반환 0 = 그 인스턴스를 기동해도 된다 ·
+#   그 밖 = 링크·일반 파일 아님 등으로 건너뛰었다(그 인스턴스를 기동하지 않는다 — systemd 가 root 로 그 링크를 따라 읽지 않게).
+vp_rma_env_file() {
+  local cdir="$1" inst="$2" user="$3" f st=0
+  f="$cdir/rma-$inst.env"
+  vp_cfg_state "$f" || st=$?
+  case $st in
+    1) printf 'RMA_INSTANCE=%s\nRMA_PRIORITY=100\n' "$inst" | vp_cfg_create "$f" "$user:$user" 0640 || return $? ;;
+    0) vp_cfg_fix "$f" "$user:$user" 0640 || st=$?
+       # 2 = 그사이 링크 등으로 바뀜 → 기동하지 않는다 · 1 = 임시 폴더·소유자 맞추기 실패(파일은 확인한 일반 파일) → 알리고 기동은 한다
+       if [[ $st -eq 2 ]]; then return 2; fi
+       if [[ $st -ne 0 ]]; then echo "⚠ $f 의 소유자·권한(서비스 계정 · 0640)을 맞추지 못했습니다 — 파일은 그대로 두고 인스턴스는 기동합니다." >&2; fi ;;
+    *) return 2 ;;
+  esac
+  return 0
+}
+
+# vp_cfg_settings_owners <config_dir> — '설정' 화면 접근 계정 파일이 없으면 주석만 담은 예시를 만든다(root 소유 0600 —
+#   아래 5) 의 chown -R 이 서비스 계정 소유로 넘긴다. 예전과 같은 최종 상태). 링크면 만들지 않고 알린다.
+vp_cfg_settings_owners() {
+  local f="$1/settings-owners.txt" st=0
+  vp_cfg_state "$f" || st=$?
+  [[ $st -eq 1 ]] || return 0
+  if vp_cfg_create "$f" 0:0 0600 <<'OWNERS'
+# '설정' 탭을 볼 수 있는 계정 목록 — 한 줄에 하나(# 은 주석).
+# 여기에 적은 계정은 포탈 UI에서 지울 수 없습니다(서버 파일이 우선 합산).
+# 수퍼관리자 noainred 는 항상 자동 포함됩니다.
+# 예)
+# noainred
+OWNERS
+  then
+    echo "==> 설정 접근 계정 파일 생성: $f"
+  fi
+  return 0
+}
+
 [[ $EUID -eq 0 ]] || { echo "이 스크립트는 root 권한으로 실행해야 합니다 (sudo)." >&2; exit 1; }
 vp_prefix_dir_ok "$PREFIX" || exit 1
 
@@ -250,42 +423,43 @@ cp -a "$SCRIPT_DIR/app" "$APP_DST"
 
 # 4) Config — lives in $CONFIG_DIR (OUTSIDE the app), so upgrades never touch it
 mkdir -p "$CONFIG_DIR"
-if [[ ! -f "$CONFIG_DIR/portal.env" ]]; then
-  echo "==> 환경설정 생성: $CONFIG_DIR/portal.env"
-  install -m 0640 "$SCRIPT_DIR/portal.env.example" "$CONFIG_DIR/portal.env"
+# v2.744(감사 INJPKG-01): CONFIG_DIR 안의 파일은 서비스 계정이 링크로 바꿔 둘 수 있다 — 경로를 따라가 쓰지 않는다(위 vp_cfg_* 규칙).
+PENV="$CONFIG_DIR/portal.env"
+PENV_ST=0; vp_cfg_state "$PENV" || PENV_ST=$?
+if [[ $PENV_ST -eq 1 ]]; then
+  echo "==> 환경설정 생성: $PENV"
   # generate a persistent AUTH_SECRET so tokens survive restarts
   SECRET="$("$PREFIX/runtime/node/bin/node" -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
-  sed -i "s/^AUTH_SECRET=.*/AUTH_SECRET=${SECRET}/" "$CONFIG_DIR/portal.env"
-  sed -i "s/^PORT=.*/PORT=${PORT}/" "$CONFIG_DIR/portal.env"
-else
-  echo "==> 기존 환경설정 유지: $CONFIG_DIR/portal.env"
+  # 예전과 같은 내용(예시 + AUTH_SECRET·PORT)·소유자(root — 아래 5) 의 chown -R 이 서비스 계정에 넘긴다)·권한(0640)
+  if sed -e "s/^AUTH_SECRET=.*/AUTH_SECRET=${SECRET}/" -e "s/^PORT=.*/PORT=${PORT}/" "$SCRIPT_DIR/portal.env.example" \
+       | vp_cfg_create "$PENV" 0:0 0640; then
+    PENV_ST=0
+  else
+    PENV_ST=2; echo "⚠ $PENV 를 만들지 못했습니다(위 안내)."
+  fi
+elif [[ $PENV_ST -eq 0 ]]; then
+  echo "==> 기존 환경설정 유지: $PENV"
 fi
 # ensure the app reads user config from $CONFIG_DIR
-grep -q '^CONFIG_DIR=' "$CONFIG_DIR/portal.env" || echo "CONFIG_DIR=$CONFIG_DIR" >> "$CONFIG_DIR/portal.env"
-sed -i "s#^CONFIG_DIR=.*#CONFIG_DIR=$CONFIG_DIR#" "$CONFIG_DIR/portal.env"
+if [[ $PENV_ST -eq 0 ]]; then
+  vp_cfg_set_line "$PENV" CONFIG_DIR "$CONFIG_DIR" || echo "⚠ $PENV 의 CONFIG_DIR 줄을 맞추지 못했습니다(위 안내)."
+else
+  echo "⚠ $PENV 를 일반 파일로 쓸 수 없어(위 안내) 만들거나 고치지 않았습니다 — 포탈 설정이 이 파일에 있으니 고친 뒤 install.sh 를 다시 실행하세요."
+fi
 
 # '설정' 화면 접근 계정 파일 — 없으면 주석만 담은 예시를 만들어 둔다(운영자가 편집).
 # UI 저장분과 합쳐 적용되므로, 모든 관리자가 설정에 못 들어가는 잠금 상황의 복구 경로가 된다.
-if [[ ! -f "$CONFIG_DIR/settings-owners.txt" ]]; then
-  cat > "$CONFIG_DIR/settings-owners.txt" <<'OWNERS'
-# '설정' 탭을 볼 수 있는 계정 목록 — 한 줄에 하나(# 은 주석).
-# 여기에 적은 계정은 포탈 UI에서 지울 수 없습니다(서버 파일이 우선 합산).
-# 수퍼관리자 noainred 는 항상 자동 포함됩니다.
-# 예)
-# noainred
-OWNERS
-  chmod 0600 "$CONFIG_DIR/settings-owners.txt"
-  echo "==> 설정 접근 계정 파일 생성: $CONFIG_DIR/settings-owners.txt"
-fi
+vp_cfg_settings_owners "$CONFIG_DIR"
 
 # Migrate user config from an older in-app location (current or backed-up app)
 # into $CONFIG_DIR so existing registrations/users/settings are kept.
+# v2.744(INJPKG-01): 대상이 링크면 건너뛰고(vp_cfg_state 가 알린다), 원본은 일반 파일만 · 놓을 때는 rename(vp_cfg_copy_new).
 for f in vcenters.json users.json upgrade.json; do
-  if [[ ! -f "$CONFIG_DIR/$f" ]]; then
+  MIG_ST=0; vp_cfg_state "$CONFIG_DIR/$f" || MIG_ST=$?
+  if [[ $MIG_ST -eq 1 ]]; then
     for src in "$BAK/server/config/$f" "$APP_DST/server/config/$f"; do
-      if [[ -n "$src" && -f "$src" ]]; then
-        echo "==> 기존 설정 이전: $f -> $CONFIG_DIR/"
-        cp -a "$src" "$CONFIG_DIR/$f"
+      if [[ -n "$src" && -f "$src" && ! -L "$src" ]]; then
+        if vp_cfg_copy_new "$src" "$CONFIG_DIR/$f"; then echo "==> 기존 설정 이전: $f -> $CONFIG_DIR/"; fi
         break
       fi
     done
@@ -310,7 +484,10 @@ else
 fi
 chmod 0750 "$CONFIG_DIR"
 if [[ $HOSTKEYS_ROOT -eq 1 ]]; then
-  chown 0:0 -- "$HOSTKEYS" && chmod go-w -- "$HOSTKEYS" && chmod o+r -- "$HOSTKEYS"
+  # v2.744(감사 INJPKG-01): 위 HOSTKEYS_ROOT 판정과 여기 사이에는 chown -R 이 돈다(큰 트리면 수 초) — 그사이 서비스 계정이 이 파일을
+  #   지우고 링크(/etc/shadow 등)로 바꾸면 예전 'chown 0:0 · chmod go-w · chmod o+r' 이 링크를 따라가 그 파일을 모두가 읽게 만들었다.
+  #   지금은 사본에서 맞춰 rename 으로 놓는다(vp_cfg_fix) — 그 자리가 지금도 root 소유 일반 파일일 때만.
+  vp_cfg_fix "$HOSTKEYS" 0:0 go-w,o+r 0 || echo "⚠ $HOSTKEYS 의 권한(go-w,o+r)을 맞추지 않았습니다(위 안내) — 내용을 확인한 뒤 root:root 소유·chmod 644 의 새 파일로 두세요."
 elif [[ -e "$HOSTKEYS" || -L "$HOSTKEYS" ]]; then
   echo "⚠ $HOSTKEYS 는 root 소유가 아닙니다 — root 로 실행하는 서명 확인(install.sh·vmware-portal-verify)은 이 파일의 키 추가를 받지 않고 회수 항목만 합칩니다."
   echo "  내용을 확인한 뒤 root:root 소유·chmod 644 의 **새 파일**로 바꾸세요(기존 파일을 chown 하면 서비스 계정이 열어 둔 핸들로 계속 쓸 수 있다 — docs/RELEASE-SIGNING.md 8절)."
@@ -395,12 +572,17 @@ systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE_NAME"
 
 # 6-0-1) RMA 인스턴스 기동(RMA_ENABLED=true 인 경우)
-if grep -qE '^RMA_ENABLED=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then
-  RMA_INSTANCES="$(grep -E '^RMA_INSTANCES=' "$CONFIG_DIR/portal.env" | tail -1 | cut -d= -f2- || true)"   # 줄이 없으면 grep 1 — pipefail 로 설치가 끝나지 않게
+# v2.744(INJPKG-01): portal.env 가 링크 등이면(위 4 에서 알렸다) root 가 그 링크를 따라 읽지 않는다.
+if [[ $PENV_ST -eq 0 && -f "$PENV" && ! -L "$PENV" ]] && grep -qE '^RMA_ENABLED=true' "$PENV" 2>/dev/null; then
+  RMA_INSTANCES="$(grep -E '^RMA_INSTANCES=' "$PENV" | tail -1 | cut -d= -f2- || true)"   # 줄이 없으면 grep 1 — pipefail 로 설치가 끝나지 않게
   for inst in ${RMA_INSTANCES:-default}; do
     if [[ "$inst" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
-      [[ -f "$CONFIG_DIR/rma-$inst.env" ]] || printf 'RMA_INSTANCE=%s\nRMA_PRIORITY=100\n' "$inst" > "$CONFIG_DIR/rma-$inst.env"
-      chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR/rma-$inst.env" 2>/dev/null || true; chmod 0640 "$CONFIG_DIR/rma-$inst.env"
+      # v2.744(감사 INJPKG-01): 예전에는 '-f' 가드 밖에서 chown·chmod 를 경로에 그대로 해서 서비스 계정이 심은 링크를 따라갔다
+      #   (rma-<이름>.env → /etc/shadow 면 shadow 가 서비스 계정 소유·0640 이 됐다 — 재현됨). 링크면 그 인스턴스를 기동하지도 않는다.
+      if ! vp_rma_env_file "$CONFIG_DIR" "$inst" "$SERVICE_USER"; then
+        echo "⚠ RMA 인스턴스 '$inst' 는 환경 파일($CONFIG_DIR/rma-$inst.env)을 준비하지 못해 기동하지 않습니다(위 안내)."
+        continue
+      fi
       systemctl enable "vmware-portal-rma@$inst" >/dev/null 2>&1 || true
       systemctl restart "vmware-portal-rma@$inst" 2>&1 || true
       echo "==> RMA 인스턴스 기동: vmware-portal-rma@$inst"

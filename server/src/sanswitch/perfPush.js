@@ -24,7 +24,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { classifyCentral404Body } from '../util/central404.js';
 import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
-import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다
+import { postNo503Retry } from '../util/postNo503Retry.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다 · v2.744(감사 LEFT-09): 엣지 워커가 아니라 util/ 에서 가져온다
 
 const gzipAsync = promisify(zlib.gzip);
 const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');

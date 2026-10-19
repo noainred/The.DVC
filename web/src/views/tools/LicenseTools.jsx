@@ -204,6 +204,14 @@ export function licenseNotices(data) {
   return { failures, demoNote };
 }
 
+// v2.744(감사 LEFT-04): 라이선스 만료 표의 폭 제한(px). 줄바꿈 칸은 inline-block + white-space normal — tbody td 가 nowrap 이라
+//   안쪽에서 풀어야 칸이 좁아진다(styles.css 'tbody td'). 키는 한 줄 말줄임(키 일부만 보여도 대조할 수 있게 title 에 전체).
+export const LIC_NAME_MAXW = 220;
+export const LIC_SOURCE_MAXW = 200;
+export const LIC_KEY_MAXW = 140;
+const LIC_WRAP = (maxWidth) => ({ display: 'inline-block', maxWidth, whiteSpace: 'normal', overflowWrap: 'anywhere', verticalAlign: 'top' });
+const LIC_KEY_STYLE = { fontSize: 11, display: 'inline-block', maxWidth: LIC_KEY_MAXW, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' };
+
 /**
  * 라이선스 만료일 확인 — vCenter LicenseManager(ESXi·vCenter·vSAN·VCF/VVF 등 등록 전 제품)
  * + NSX Manager + Horizon Connection Server(등록 시 REST 직수집)의 유효/만료 날짜 통합.
@@ -241,10 +249,12 @@ export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
   const dday = (i) => (i.daysLeft == null ? '' : i.daysLeft < 0 ? `D+${-i.daysLeft}` : `D-${i.daysLeft}`);
   const cols = [
     { key: 'family', label: '제품군', render: (i) => <span className="badge blue">{i.family}</span> },
-    { key: 'name', label: '라이선스', render: (i) => <b>{i.name}</b> },
-    { key: 'source', label: '소스', render: (i) => <span className="muted">{i.source} · {i.where}</span> },
+    // v2.744(감사 LEFT-04): 1440px 에서 표 폭(1222px)이 칸(1154px)보다 넓어 맨 오른쪽 '상태' 배지가 잘렸다 — 폭 제한이 없던
+    //   '라이선스'·'소스 · where' 는 줄바꿈을 허용하고, '키' 는 폭을 묶어 말줄임(전체는 title)으로 둔다. 열 순서·정렬 값·CSV 열은 그대로다.
+    { key: 'name', label: '라이선스', render: (i) => <b style={LIC_WRAP(LIC_NAME_MAXW)}>{i.name}</b> },
+    { key: 'source', label: '소스', render: (i) => <span className="muted" style={LIC_WRAP(LIC_SOURCE_MAXW)}>{i.source} · {i.where}</span> },
     { key: 'productVersion', label: '버전', render: (i) => <span className="muted">{i.productVersion || '—'}</span> },
-    { key: 'key', label: '키', render: (i) => <span className="muted" style={{ fontSize: 11 }}>{i.key || '—'}</span> },
+    { key: 'key', label: '키', render: (i) => <span className="muted" style={LIC_KEY_STYLE} title={i.key || undefined}>{i.key || '—'}</span> },
     { key: 'used', label: '사용/총량', align: 'right', sortValue: (i) => i.used ?? null, render: (i) => (i.total != null ? `${i.used ?? '—'}/${i.total}` : '—') },
     { key: 'expires', label: '만료일', sortValue: (i) => (i.expires ? Date.parse(i.expires) : Infinity), render: (i) => (i.expires ? <b style={{ color: statusColor[i.status] }}>{i.expires}</b> : <span className="muted">영구/미표기</span>) },
     { key: 'daysLeft', label: '남은 기간', align: 'right', sortValue: (i) => (i.daysLeft == null ? Infinity : i.daysLeft), render: (i) => <b style={{ color: statusColor[i.status] }}>{dday(i) || '—'}</b> },

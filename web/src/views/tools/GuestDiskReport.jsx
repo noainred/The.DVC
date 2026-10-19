@@ -13,7 +13,7 @@ import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { partsUnknownNote, partialVmsNote, reclaimFreshnessNote, coverageStateText } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내 · v2.743 VC-02: 오래된 관측·삭제된 vCenter
+import { partsUnknownNote, partialVmsNote, reclaimFreshnessNote, coverageStateText, reclaimTotalCard } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내 · v2.743 VC-02: 오래된 관측·삭제된 vCenter
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 import { guestDiskParams, guestDiskCsvPath } from './guestDiskCsv.js'; // 검토 I-10: 조회·CSV 가 같은 조건 · CSV 경로는 /api 이후
 import { downloadFailText } from '../downloadFailText.js';
@@ -186,6 +186,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const covWithData = coverage.filter((c) => c.vmCount > 0).length;
   const covEmpty = coverage.length - covWithData;
   const uf = Number(data.usageFactor) || 1;   // 서버가 실제 적용한 배율(정규화 후)
+  const reclaimCard = reclaimTotalCard(data);   // v2.744(LEFT-03): 수집 0대면 합계 '—'
 
   const tableHead = (
     <thead>
@@ -223,8 +224,9 @@ export default function GuestDiskReport({ scope = '' }) {
       <div className="gd-cards">
         <div className="gd-card accent">
           <div className="gd-card-k">회수 가능 합계</div>
-          <div className="gd-card-v">{fmtSize(data.totalReclaimGB, unit === 'auto' ? 'auto' : unit)}</div>
-          <div className="gd-card-m">여유 ≥ {fmtSize(data.minReclaimGB, unit)}{uf !== 1 ? ` · 배율 ×${uf} (회수 = 할당 − 사용×${uf})` : ''}</div>
+          {/* v2.744(감사 LEFT-03): 수집된 VM 이 0대면 합계를 모른다 — '0 GB(회수할 것 없음)' 로 그리지 않는다 */}
+          <div className="gd-card-v">{reclaimCard.unknown ? '—' : fmtSize(data.totalReclaimGB, unit === 'auto' ? 'auto' : unit)}</div>
+          <div className="gd-card-m">{reclaimCard.unknown ? reclaimCard.note : <>여유 ≥ {fmtSize(data.minReclaimGB, unit)}{uf !== 1 ? ` · 배율 ×${uf} (회수 = 할당 − 사용×${uf})` : ''}</>}</div>
         </div>
         <div className="gd-card">
           <div className="gd-card-k">대상 VM</div>

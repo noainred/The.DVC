@@ -27,7 +27,7 @@ import { serversForThisNode, registryLoadError } from './registry.js';
 import { getStatus } from './store.js';
 import * as db from './db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
-import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다
+import { postNo503Retry } from '../util/postNo503Retry.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다 · v2.744(감사 LEFT-09): 엣지 워커가 아니라 util/ 에서 가져온다
 
 const gzipAsync = promisify(zlib.gzip);
 // v2.613 PERSIST2613-01(재현): 이 커서는 표본이 있는 push 마다 다시 쓴다 — 상태 파일로 등록하지 않으면 백업 변경 감시·엣지 설정 push 가

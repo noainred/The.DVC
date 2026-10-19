@@ -306,3 +306,52 @@ export function trailFromLatest(latest, phases = ['dns', 'tcp', 'tls', 'http', '
     return { phase: ph, state: 'ok', ms };
   });
 }
+
+/*
+ * v2.744(감사 WEB-03): 점검 로그 조회는 **요청 키(링크·기간·구분)** 를 붙여 보관하고, 화면은 지금 고른 키의 응답만 그린다.
+ *   예전에는 필터를 바꾼 조회가 실패하면 setEvents 가 불리지 않아 **이전 필터의 행이 새 필터 아래에 그대로** 남았다
+ *   (세대 가드 useLatest 는 늦은 응답만 막고 실패 시 남은 값은 막지 못한다). 이제
+ *   · 같은 키의 다시 읽기가 실패하면 직전 결과를 남기고 '직전 조회 결과' 라고 말한다(v2.729 I-04 규칙).
+ *   · 다른 키의 조회가 실패하면 행을 비우고 실패를 말한다 — '기록이 없습니다' 문구도 띄우지 않는다(조회 실패는 기록 없음이 아니다).
+ *   · 응답이 오기 전(키가 다르거나 아직 없음)에는 이전 필터의 행을 보이지 않는다.
+ */
+export function eventsKeyOf(linkId = '', hours = 0, event = '') {
+  return JSON.stringify([String(linkId || ''), Number(hours) || 0, String(event || '')]);
+}
+
+/** 성공 응답에 요청 키를 붙인다(원본 객체는 바꾸지 않는다). */
+export function eventsTagged(data, key) {
+  const d = data && typeof data === 'object' ? data : {};
+  return { ...d, _key: key, _error: '' };
+}
+
+/** 조회 실패 — 같은 키의 직전 결과는 남기고 실패 표지만, 다른 키면 행 없이 실패만. */
+export function eventsAfterFail(prev, key, error) {
+  const msg = String(error || '조회 실패');
+  if (prev && typeof prev === 'object' && prev._key === key && !prev._none) return { ...prev, _error: msg };
+  return { rows: [], truncated: false, _key: key, _error: msg, _none: true };
+}
+
+/** 화면이 그릴 값 — 지금 고른 키의 보관분만. */
+export function eventsView(stored, key) {
+  if (!stored || typeof stored !== 'object' || stored._key !== key) {
+    return { rows: [], truncated: false, ready: false, failed: false, stale: false, error: '' };
+  }
+  const failed = !!stored._error;
+  return {
+    rows: Array.isArray(stored.rows) ? stored.rows : [],
+    truncated: !!stored.truncated,
+    ready: true,
+    failed,
+    stale: failed && !stored._none,
+    error: stored._error || '',
+  };
+}
+
+/** 실패 안내 한 줄 — 직전 결과를 남겼는지에 따라 말을 나눈다. 값이 없으면 빈 문자열. */
+export function eventsFailText(view) {
+  if (!view?.failed) return '';
+  return view.stale
+    ? `로그를 다시 읽지 못했습니다(${view.error}) — 아래는 직전 조회 결과입니다.`
+    : `이 조건의 로그를 읽지 못했습니다(${view.error}) — 이전 조건의 행은 보이지 않습니다. 잠시 뒤 다시 고르거나 새로고침하세요.`;
+}

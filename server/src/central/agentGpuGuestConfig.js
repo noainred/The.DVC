@@ -55,6 +55,8 @@ export function gpuGuestConfigLoadError() { if (!_loadErr.get() && !fs.existsSyn
  *      VM 계정·고정 IP 는 합집합(같은 VM 은 최근 것 — 빈 비밀번호는 같은 계정이면 옛 값, 계정이 바뀌었으면 승계하지 않는다 v2.611).
  *   대가(정직 기록): 관리자가 'Edge-A' 행에서 **일부러** 끄거나 비운 값은 되살아난다 — 빈 바탕에서 온 기본값과 사본만으로는 가를 수 없어
  *   자격증명·수집을 잃지 않는 쪽을 골랐다. 그 사실(옛 값을 유지한 항목 경로)을 상태(gpuGuestFoldStatus)·목록 행(folded)·콘솔에 남긴다.
+ *   v2.744(감사 LEFT-08): 상태는 배포 목록 응답(GET /admin/gpu-guest/deploy/agents)의 foldReport 로, 행의 folded 는 같은 응답의 행으로 화면까지
+ *   간다(GpuGuestSettings.jsx gpuGuestFoldNote — 설정 대상 목록의 짧은 표지 + title 상세). 예전에는 둘 다 화면이 읽지 않아 콘솔에만 남았다.
  * @param {object} map 파일에서 읽은 { agent: settings }
  * @param {{authNames?: Iterable<string>, regNames?: Iterable<string>}} [names] 엣지 실제 이름 근거(글자 그대로 비교)
  * @returns {{ map: object, merged: Array<{kept:string, dropped:string[], keptBy:'authenticated'|'registry'|'older', keptOlder:string[], vcentersFromOlder:string[], droppedSecrets:string[]}> }}
