@@ -181,7 +181,7 @@ test('GA-R1 ① 남기는 행 표 방식의 정리는 옛 한 방 정리와 지�
   FIX.newMs = performance.now() - t0;
   stop = true;
   FIX.maxGap = maxGap;
-  console.log(`[GA-R1] 옛 한 방 ${Math.round(FIX.oneShotMs)}ms · 새 정리 총 ${Math.round(FIX.newMs)}ms · 최장 정지 ${Math.round(maxGap)}ms · 청크 ${JSON.stringify(r.chunks)} · 쪽 ${JSON.stringify(r.keepPages)}`);
+  console.log(`[GA-R1] 옛 한 방 ${Math.round(FIX.oneShotMs)}ms · 새 정리 총 ${Math.round(FIX.newMs)}ms · 최장 정지 ${Math.round(maxGap)}ms · 청크 ${JSON.stringify(r.chunks)} · 묶음 기준 조회 ${JSON.stringify(r.keepLookups)}`);
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.ok(Math.abs(r.cut - C) < 10 * 60_000);
   for (const t of ['changes', 'ds_series']) {
@@ -189,8 +189,8 @@ test('GA-R1 ① 남기는 행 표 방식의 정리는 옛 한 방 정리와 지�
     assert.ok(isDeepStrictEqual(got, want[t]), `${t}: 남은 행이 옛 한 방 정리와 같다(옛 ${want[t].length}행 · 새 ${got.length}행 · 정리 전 ${beforeN[t]}행)`);
   }
   assert.ok(r.dsSeriesDeleted > 20_000 && r.changesDeleted > 15_000, JSON.stringify(r));
-  // 남기는 행 표는 쪽으로 나눠 읽는다(쪽마다 양보) — 한 문장으로 전 묶음을 읽지 않는다.
-  assert.ok(r.keepPages?.dsSeries >= 2 && r.keepPages?.changes >= 2, `남기는 행 표를 여러 쪽으로 읽었다: ${JSON.stringify(r.keepPages)}`);
+  // 한 문장으로 전 묶음을 읽지 않는다 — v2.744 FF(RA-R1): 묶음 기준은 묶음마다 그 묶음의 경계 이전 범위만 읽는 문장 하나로 구한다(쪽 나눔 대신).
+  assert.ok(r.keepLookups?.dsSeries >= 2 && r.keepLookups?.changes >= 2, `묶음 기준을 묶음마다 따로 구했다: ${JSON.stringify(r.keepLookups)}`);
 });
 
 test('GA-R1 ② 후보 선택 문에 상관 서브쿼리가 없고, 남기는 행 표는 묶음 인덱스를 커버링으로 순서대로 읽는다(임시 정렬 없음)', { skip: SKIP }, async () => {
@@ -203,9 +203,10 @@ test('GA-R1 ② 후보 선택 문에 상관 서브쿼리가 없고, 남기는 �
     assert.doesNotMatch(p, /CORRELATED/, `${k}: 후보 행마다 묶음을 다시 훑는 상관 서브쿼리가 없다 — ${p}`);
     assert.doesNotMatch(p, /TEMP B-TREE/, `${k}: ${p}`);
   }
+  // v2.744 FF(RA-R1): 묶음 인덱스 전체를 쪽으로 나눠 읽던 keep*First/Next 대신 묶음 하나의 경계 이전 범위만 읽는 keep*One 이다.
   const cases = [
-    ['keepDsFirst', 'idx_dsseries_ds', [1, 1]], ['keepDsNext', 'idx_dsseries_ds', ['a', 1, 1]],
-    ['keepChangesFirst', 'idx_changes_vc_kind', [1, 1]], ['keepChangesNext', 'idx_changes_vc_kind', ['a', 'b', 'c', 1, 1]],
+    ['keepDsOne', 'idx_dsseries_ds', ['a', 1]],
+    ['keepChangesOne', 'idx_changes_vc_kind', ['a', 'b', 'c', 1]],
   ];
   for (const [k, idx, args] of cases) {
     assert.ok(x.st[k], `${k} 가 있다`);
@@ -213,7 +214,7 @@ test('GA-R1 ② 후보 선택 문에 상관 서브쿼리가 없고, 남기는 �
     assert.match(p, new RegExp(`COVERING INDEX ${idx}`), `${k}: ${p}`);
     assert.doesNotMatch(p, /TEMP B-TREE|CORRELATED/, `${k}: ${p}`);
   }
-  assert.match(x.st.keepDsFirst.sourceSQL, /MAX\(rowid\)/, '보존 규칙(ds 별 경계 이전 MAX(rowid))은 그대로다');
+  assert.match(x.st.keepDsOne.sourceSQL, /MAX\(rowid\)/, '보존 규칙(ds 별 경계 이전 MAX(rowid))은 그대로다');
 });
 
 test('GA-R1 ③ 총 소요가 묶음 크기의 제곱으로 늘지 않는다 — 옛 한 방 정리의 상수배 안이다(비율로 본다)', { skip: SKIP }, () => {
