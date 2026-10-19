@@ -195,7 +195,7 @@ export function abortableSleep(ms, signal) {
 /**
  * 고RTT·간헐 네트워크에 견디는 fetch. 일시 오류는 지수 백오프로 재시도한다.
  * @param {string} url
- * @param {object} opts - { timeoutMs=20000, retries=2, retryBackoffMs=400, onRetry, ...fetchInit }
+ * @param {object} opts - { timeoutMs=20000, retries=2, retryBackoffMs=400, onRetry, noRetryStatus, ...fetchInit }
  * @returns {Promise<Response>} 최종 응답(성공 또는 재시도 소진 후의 마지막 응답). 연결 자체가
  *          끝까지 실패하면 마지막 오류를 throw 한다.
  */
@@ -349,8 +349,16 @@ export function retryDelayMs(status, retryAfterHeader, baseMs, rand = Math.rando
   return baseMs;
 }
 
-async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
+/*
+ * v2.744(회귀 검토 GC-R1): `noRetryStatus`(배열·Set) — 이 상태들은 재시도 대상(RETRYABLE_STATUS)이어도 **다시 묻지 않고 그 응답을 돌려준다**.
+ *   util/postNo503Retry.js 가 503(지속형 거절)에 쓴다. 예전 그 헬퍼는 재시도 루프를 밖에 두고 시도마다 resilientFetch(retries:0)를 따로 불러
+ *   데이터 흐름 기록(outboundStats)이 '최종 결과 1회'(아래 resilientFetch 머리말)가 아니라 시도 수로 쌓였다(502 → 200 한 번에 count 2 ·
+ *   failCount 1 · lastError 'HTTP 502' · lastMs 는 마지막 시도만 — 재현). 루프를 여기 하나로 두면 기록·재시도 규칙이 한 벌이다.
+ *   주지 않으면(기본) 예전과 같다.
+ */
+async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, noRetryStatus, ...init } = {}) {
   const timeoutMs = normFetchTimeoutMs(rawTimeoutMs);
+  const noRetry = noRetryStatus ? new Set(noRetryStatus) : null;
   let lastErr;
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
   // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).
@@ -360,7 +368,7 @@ async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retr
     if (callerSignal?.aborted) throw abortError(callerSignal); // v2.620(RECENT2620-05)
     try {
       const res = await fetchFollowing(url, init, disp, timeoutMs);
-      if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
+      if (RETRYABLE_STATUS.has(res.status) && attempt < retries && !noRetry?.has(res.status)) {
         onRetry?.({ attempt: attempt + 1, status: res.status });
         // 재시도 전 이전 응답 본문을 취소 — undici는 미소진 본문이 연결을 붙잡아, 제한된
         // 커넥션풀(wanAgent connections:6)이 flapping 오리진의 5xx 재시도로 고갈된다.

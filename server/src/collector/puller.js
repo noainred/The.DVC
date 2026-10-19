@@ -105,15 +105,23 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
   //   커서가 없으면(첫 pull·중앙 재시작·직전 저장이 불완전) 쿼리를 싣지 않는다 = 전량. 구버전 엣지는 쿼리를 무시하고 전량을 준다.
   // v2.744(감사 EDGE-02): 503(지속형 거절)은 호출 안에서 다시 묻지 않는다(fetchNo503Retry — 위 머리말).
   const sdSince = sensorDetailCursorOf(c.id);
+  // v2.744(회귀 검토 GC-R3): 마지막 재시도 시각 — 거절(edgeReason)이 앞선 일시 오류·시한 재시도 뒤에 왔으면 그 앞 시간(preRejectMs)을
+  //   오류에 실어 주기 경고가 '거절' 이 아니라 '실패(응답 없음·일시 오류)' 쪽에 세게 한다. 재시도 직전 백오프 대기(수백 ms)는 거절 쪽에 남는다(근사).
+  const t0 = Date.now(); let lastRetryAt = 0;
+  const retryLog = {
+    retries,
+    onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
+  };
   const res = await fetchNo503Retry(`${c.url}/api/collector/export${sdSince ? `?sdSince=${encodeURIComponent(sdSince)}` : ''}`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
     timeoutMs: config.collector.timeoutMs, ...(signal ? { signal } : {}),
-  }, {
-    retries,
-    onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
-  });
+  }, { ...retryLog, onRetry: (i) => { lastRetryAt = Date.now(); retryLog.onRetry(i); } });
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
-  if (!res.ok) throw await exportFailError(res);
+  if (!res.ok) {
+    const e = await exportFailError(res);
+    if (e.edgeReason && lastRetryAt > t0) e.preRejectMs = lastRetryAt - t0;
+    throw e;
+  }
   // v2.583: 해제 후 크기 상한(gzip 폭탄 방어 — util/readCapped.js).
   // v2.602(감사 CEN2602-01 high): 응답을 **쓰는 필드만·아는 타입으로** 좁힌 뒤에 쓴다 — 오염된 원소 하나(예:
   //   serviceTag:{toString:1})가 함대 전체 물리 서버 집계·온도·3단 지도를 죽이지 못하게(remoteInventory.js 머리말).
@@ -329,6 +337,8 @@ async function pullNowInner(signal = null) {
   // v2.744(감사 EDGE-02): 엣지가 이유를 밝혀 거절한 실패(edgeReason — 등록부 손상 등)는 '응답 없음' 과 따로 센다. 섞으면 주기 경고가
   //   수 ms 만에 거절한 엣지를 '응답하지 않은 엣지 — 주소·방화벽 확인' 으로 말한다(조치가 정반대다).
   let rejectedMs = 0; let rejectedCount = 0; const rejectedBy = {};
+  // v2.744(회귀 검토 GC-R3): 거절 앞에 일시 오류·시한 재시도가 있던 엣지 수 — 그 앞 시간은 실패(응답 없음) 쪽에 센다(아래).
+  let rejectedAfterRetry = 0;
   const t0 = Date.now();
   await poolRun(collectors, config.collector.pullConcurrency, async (c) => {
     if (signal?.aborted) return;   // v2.693: 버려진 주기는 남은 수집 서버를 새로 시작하지 않는다
@@ -364,15 +374,21 @@ async function pullNowInner(signal = null) {
       } else {
         setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n, edgeReason: null });
       }
-      if (edgeReason) { rejectedMs += Date.now() - tStart; rejectedCount++; rejectedBy[edgeReason] = (rejectedBy[edgeReason] || 0) + 1; }
-      else { failedMs += Date.now() - tStart; failedCount++; }
+      const spent = Date.now() - tStart;
+      if (edgeReason) {
+        // v2.744(회귀 검토 GC-R3): 거절 응답을 받기 전의 재시도 시간(첫 시도 시한 20초 등)은 '거절' 이 아니라 응답 없음·일시 오류다 —
+        //   예전에는 점유 시간 전체(약 41초)를 거절로 세어 경고가 '응답이 없던 것이 아니라' 라고 말했다. 그 앞 시간은 실패 쪽에 센다.
+        const pre = Math.min(spent, Math.max(0, Number(err?.preRejectMs) || 0));
+        rejectedMs += spent - pre; rejectedCount++; rejectedBy[edgeReason] = (rejectedBy[edgeReason] || 0) + 1;
+        if (pre > 0) { failedMs += pre; failedCount++; rejectedAfterRetry++; }
+      } else { failedMs += spent; failedCount++; }
       console.warn(`[collector] ${c.id} pull 실패(${n}${n >= 2 ? ' · 재시도 없이 1회' : ''}): ${d.message}`);
     } finally { if (cycleBusy.get(c.id) === busyAt) cycleBusy.delete(c.id); }
   });
   const took = Date.now() - t0;
   // 한 주기가 주기의 절반을 넘기면 알린다 — 동시 개수를 줄인 대가(벽시계 증가)를 조용히 두지 않는다.
   if (collectors.length && config.collector.pullIntervalMs > 0 && took > config.collector.pullIntervalMs / 2) { // 주기 0(끔)에서 수동 pull 은 경고하지 않는다
-    console.warn(slowCycleText({ took, count: collectors.length, concurrency: config.collector.pullConcurrency, intervalMs: config.collector.pullIntervalMs, failedCount, failedMs, suspectCount: suspectIds.size, rejectedCount, rejectedMs, rejectedBy }));
+    console.warn(slowCycleText({ took, count: collectors.length, concurrency: config.collector.pullConcurrency, intervalMs: config.collector.pullIntervalMs, failedCount, failedMs, suspectCount: suspectIds.size, rejectedCount, rejectedMs, rejectedBy, rejectedAfterRetry }));
   }
 }
 
@@ -387,26 +403,33 @@ export function orderForPull(collectors, failsOf) {
  * v2.620(EDGE2620-02): 주기가 길어진 경고 문구(순수). 불통 엣지가 워커를 점유한 것이 원인이면 그렇게 말한다 — 예전 문구는
  *   원인과 무관하게 '동시 개수를 늘리라' 고만 했다(원인이 불통 엣지면 동시 개수를 늘려도 응답 없는 엣지를 더 기다릴 뿐이다).
  */
-export function slowCycleText({ took, count, concurrency, intervalMs, failedCount = 0, failedMs = 0, suspectCount = 0, rejectedCount = 0, rejectedMs = 0, rejectedBy = null }) {
+export function slowCycleText({ took, count, concurrency, intervalMs, failedCount = 0, failedMs = 0, suspectCount = 0, rejectedCount = 0, rejectedMs = 0, rejectedBy = null, rejectedAfterRetry = 0 }) {
   const head = `[collector] pull 주기 소요 ${Math.round(took / 1000)}초(엣지 ${count}곳 · 동시 ${concurrency}) — 주기 ${Math.round(intervalMs / 1000)}초의 절반을 넘었습니다.`;
   const workerMs = took * Math.min(concurrency, count);
   // v2.744(감사 EDGE-02): 엣지가 이유를 밝혀 거절한 실패(edgeReason)는 '응답 없음' 과 따로 말한다 — 조치가 다르다(주소·방화벽이 아니라
   //   그 엣지의 상태). 거절은 재시도하지 않아 보통 짧지만, 고RTT 로 그 시간이 워커의 절반을 넘으면 원인으로 말한다.
-  const rej = rejectedCount > 0 ? ` ${rejectedNote(rejectedCount, rejectedMs, rejectedBy)}` : '';
+  const rej = rejectedCount > 0 ? ` ${rejectedNote(rejectedCount, rejectedMs, rejectedBy, rejectedAfterRetry)}` : '';
+  // v2.744(회귀 검토 GC-R3): 실패 엣지 문구 — 셋째 분기와 같은 글자. 거절 우세 분기에도 싣는다(예전에는 그 분기에서 조용히 빠졌다).
+  const failedNote = failedCount ? ` (이번 주기 실패 엣지 ${failedCount}곳 · 약 ${Math.round(failedMs / 1000)}초)` : '';
   // 실패 엣지가 쓴 워커 시간이 전체 워커 시간의 절반 이상이면 원인은 불통 엣지다.
   if (failedCount > 0 && failedMs * 2 >= workerMs) {
     return `${head} 원인: 응답하지 않은 엣지 ${failedCount}곳이 워커를 약 ${Math.round(failedMs / 1000)}초 점유했습니다(직전부터 실패 중 ${suspectCount}곳은 재시도 없이 1회만 · 순서 맨 뒤). 그 엣지의 주소·방화벽·서비스 상태를 확인하거나 비활성화하세요 — 동시 개수를 늘려도 응답 없는 엣지를 더 기다릴 뿐입니다.${rej}`;
   }
-  if (rejectedCount > 0 && rejectedMs * 2 >= workerMs) return `${head} 원인:${rej}`;
-  return `${head} COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.${failedCount ? ` (이번 주기 실패 엣지 ${failedCount}곳 · 약 ${Math.round(failedMs / 1000)}초)` : ''}${rej}`;
+  if (rejectedCount > 0 && rejectedMs * 2 >= workerMs) return `${head} 원인:${rej}${failedNote}`;
+  return `${head} COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.${failedNote}${rej}`;
 }
 
 /** v2.744(감사 EDGE-02): 거절 엣지 문구(순수) — 사유별 개수와 할 일. 모르는 사유 코드는 개수만 말한다(지어내지 않는다). */
-function rejectedNote(count, ms, by) {
+function rejectedNote(count, ms, by, afterRetry = 0) {
   const entries = by && typeof by === 'object' ? Object.entries(by).filter(([, n]) => Number(n) > 0) : [];
   const what = entries.map(([code, n]) => `${Object.hasOwn(EDGE_REASON_TEXT, code) ? EDGE_REASON_TEXT[code] : code} ${n}곳`).join(' · ');
   const fixes = [...new Set(entries.map(([code]) => (Object.hasOwn(EDGE_REASON_FIX, code) ? EDGE_REASON_FIX[code] : '')).filter(Boolean))];
-  return `엣지가 이유를 밝혀 거절한 곳 ${count}곳(${what || '사유 미상'} · 약 ${Math.round(ms / 1000)}초) — 응답이 없던 것이 아니라 엣지 쪽 상태 문제입니다(재시도하지 않고 다음 주기에 다시 당깁니다).${fixes.length ? ` ${fixes.join(' · ')}.` : ''}`;
+  // v2.744(회귀 검토 GC-R3): 거절 앞에 응답 없음·일시 오류 재시도가 있었으면 '응답이 없던 것이 아니라' 고 말하지 않는다(그 앞 시간은 실패로 셌다).
+  const n = Number(afterRetry) > 0 ? Math.floor(Number(afterRetry)) : 0;
+  const kind = n
+    ? `엣지 쪽 상태 문제입니다(그중 ${n}곳은 거절 전에 응답 없음·일시 오류로 재시도했고 그 시간은 실패 엣지 시간으로 셌습니다 · 거절은 재시도하지 않고 다음 주기에 다시 당깁니다).`
+    : '응답이 없던 것이 아니라 엣지 쪽 상태 문제입니다(재시도하지 않고 다음 주기에 다시 당깁니다).';
+  return `엣지가 이유를 밝혀 거절한 곳 ${count}곳(${what || '사유 미상'} · 약 ${Math.round(ms / 1000)}초) — ${kind}${fixes.length ? ` ${fixes.join(' · ')}.` : ''}`;
 }
 
 export function startCollectorPuller() {

@@ -13,11 +13,11 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
-const BASE = '/tmp/claude-0/-home-user-The-DVC/6697d1b4-2c16-59c4-a364-a62c466221b4/scratchpad/audit2743/fix-GI';
-fs.mkdirSync(BASE, { recursive: true });
-const DIR = fs.mkdtempSync(path.join(fs.existsSync(BASE) ? BASE : path.join(process.cwd(), '..', '..'), 'cfg-2743i-'));
+// v2.744(회귀 검토 GI-R3 형제): 세션 스크래치 경로를 박지 않는다 — 다른 환경에서는 EACCES 로 파일 전체가 실패한다.
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cfg-2743i-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';

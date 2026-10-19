@@ -24,6 +24,7 @@ import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow } from '../../collector/puller.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
+import { fetchNo503Retry } from '../../util/postNo503Retry.js'; // v2.744(회귀 검토 GC-R2): 엣지 export 받기 — 503 은 다시 묻지 않는다
 import { withOutboundTag } from '../../util/outboundStats.js'; // v2.611 LEFT2611-08: 같은 주소 엣지를 기록에서 나눈다
 // v2.605(감사 LEFT2605-01 형제): 엣지 응답은 상한까지만 읽는다 — 비밀번호 변경·오류 본문은 작고, export 는 인벤토리 전량이라 큰 상한.
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js';
@@ -489,11 +490,13 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   try {
     // 단발 fetch는 고RTT·일시적 네트워크 블립에 '가끔 연결 안 됨'으로 오판된다 → 재시도로 흡수.
     // 연결 테스트는 /export 본문(hosts·agent·version)이 필요하다 — 태그만 붙인다(v2.611 LEFT2611-08).
-    const r = await withOutboundTag(String(req.body?.id || url), () => resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
+    // v2.744(회귀 검토 GC-R2): 503 은 다시 묻지 않는다(fetchNo503Retry — 주기 pull 과 같은 규칙). 엣지 export 의 503 은 지속형 거절
+    //   (registryUnreadable — Retry-After 60)이라, 예전 resilientFetch(retries 2)는 엣지가 수 ms 만에 거절했는데도 Retry-After 만큼 두 번 기다려
+    //   이 버튼이 약 73초 동안 답하지 않았다(export 3회 — 재현). 502·시한 등 그 밖의 일시 상태는 예전처럼 재시도하고 retried 로 센다.
+    const r = await withOutboundTag(String(req.body?.id || url), () => fetchNo503Retry(`${url.replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', ...(token ? { 'X-Collector-Token': token } : {}) },
-      timeoutMs: config.collector.timeoutMs, retries: 2,
-      onRetry: () => { retried++; },
-    }));
+      timeoutMs: config.collector.timeoutMs,
+    }, { retries: 2, onRetry: () => { retried++; } }));
     if (!r.ok) {
       // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
       let serverMsg = '';
@@ -552,12 +555,14 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, fleetOnly, async (req
   // 중앙 저장 토큰도 동일 값으로 고정(managed) — 엣지 자기등록이 이 값을 덮어쓰지 않게.
   const upd = updateCollector(saved.id, { ...saved, token, url: saved.url }, { managed: true });
   // 재검증: 새 토큰으로 export가 200인지 확인(서비스 기동 직후라 재시도 여유).
+  // v2.744(회귀 검토 GC-R2): 503(엣지 지속형 거절)은 다시 묻지 않는다 — 연결 테스트와 같은 이유(Retry-After 만큼 두 번 기다렸다).
+  //   기동 직후의 연결 거부(ECONNREFUSED)·시한은 예전처럼 재시도한다.
   let verified = false; let verifyReason = '';
   try {
-    const vr = await withOutboundTag(saved.id, () => resilientFetch(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {
+    const vr = await withOutboundTag(saved.id, () => fetchNo503Retry(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', 'X-Collector-Token': token },
-      timeoutMs: config.collector.timeoutMs, retries: 2,
-    }));
+      timeoutMs: config.collector.timeoutMs,
+    }, { retries: 2 }));
     try { await vr.body?.cancel?.(); } catch { /* 상태만 본다 — 인벤토리 본문은 읽지 않고 닫는다(v2.611 LEFT2611-08) */ }
     verified = vr.ok;
     if (!vr.ok) verifyReason = `HTTP ${vr.status}`;

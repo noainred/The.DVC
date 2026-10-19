@@ -14,11 +14,12 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 
 // CONFIG_DIR 은 저장소 밖(작업 지시 — 스크래치패드 아래)에 둔다.
-const BASE = process.env.AUDIT2744RB_TMP || path.join('/tmp/claude-0/-home-user-The-DVC/6697d1b4-2c16-59c4-a364-a62c466221b4/scratchpad/audit2744/rfix/RB/cfg');
-fs.mkdirSync(BASE, { recursive: true });
+// v2.744(회귀 검토 GI-R3 형제): 세션 스크래치 경로를 박지 않는다(다른 환경에서는 EACCES). 필요하면 env 로 바꾼다.
+const BASE = process.env.AUDIT2744RB_TMP || os.tmpdir();
 const TMP = fs.mkdtempSync(path.join(BASE, 'audit2744rb-'));
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = process.env.DATA_SOURCE || 'mock';

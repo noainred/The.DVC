@@ -17,6 +17,7 @@ import { forceCollectorToken } from '../../agent/deploy.js';
 import { loadCollectors, updateCollector } from '../../collector/registry.js';
 import { pullNow } from '../../collector/puller.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
+import { fetchNo503Retry } from '../../util/postNo503Retry.js'; // v2.744(회귀 검토 GC-R2): 배포 후 검증 — 503 은 다시 묻지 않는다
 import { withOutboundTag } from '../../util/outboundStats.js'; // v2.611 LEFT2611-08: 같은 주소 엣지를 기록에서 나눈다
 import { logAudit } from '../../audit.js';
 import { ipBlockReason } from '../../collector/registry.js';
@@ -475,10 +476,12 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, fleetOnly, async (re
     let verified = null;
     if (verify) {
       try {
-        const vr = await withOutboundTag(col.id, () => resilientFetch(`${col.url}/api/collector/export`, {
+        // v2.744(회귀 검토 GC-R2): 503(엣지 지속형 거절 — Retry-After 60)은 다시 묻지 않는다. 예전 retries 1 은 대상마다 Retry-After 만큼
+        //   기다려(30~45초) 한 번에 50대(동시 3)를 고르면 웹 요청 시한(180초)을 넘길 수 있었다. 그 밖의 일시 상태는 예전처럼 1회 재시도.
+        const vr = await withOutboundTag(col.id, () => fetchNo503Retry(`${col.url}/api/collector/export`, {
           headers: { Accept: 'application/json', 'X-Collector-Token': token },
-          timeoutMs: config.collector.timeoutMs, retries: 1,
-        }));
+          timeoutMs: config.collector.timeoutMs,
+        }, { retries: 1 }));
         try { await vr.body?.cancel?.(); } catch { /* 상태만 본다(v2.611 LEFT2611-08) */ }
         verified = { ok: vr.ok, reason: vr.ok ? '' : `HTTP ${vr.status}${vr.status === 403 ? ' (엣지의 COLLECTOR_TOKEN 이 다릅니다 — 배포하거나 엣지 반영을 켜세요)' : ''}` };
       } catch (e) { verified = { ok: false, reason: e.message }; }
