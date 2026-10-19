@@ -74,20 +74,30 @@ function adDiagForm(rc) {
   return Buffer.concat([Buffer.from([0x30, 0x81, body.length]), body]);
 }
 
-test('DEV-01 ① 단형 길이 응답 — 성공(0)·실패(53) 판정', async () => {
+test('DEV-01 ① 단형 길이 응답 — 성공(0)·정책 거부(53)·실패(1) 판정', async () => {
   const ok0 = await ldapCheck([shortForm(0)]);
   assert.equal(ok0.status, 'ok', JSON.stringify(ok0));
   assert.match(ok0.reply, /resultCode 0/);
-  const bad53 = await ldapCheck([shortForm(53)]);
-  assert.equal(bad53.status, 'bad', JSON.stringify(bad53));
-  assert.match(bad53.reply, /resultCode 53/);
+  // v2.744(감사 RECENT-04): 53(unwillingToPerform — 익명 bind 금지 정책)은 정책 거부 응답 — 서버는 살아 있다.
+  const pol53 = await ldapCheck([shortForm(53)]);
+  assert.equal(pol53.status, 'ok', JSON.stringify(pol53));
+  assert.match(pol53.reply, /bind 거부\(정책\).*resultCode 53/);
+  // 그 밖의 코드(예: 1 operationsError)는 실패다.
+  const bad1 = await ldapCheck([shortForm(1)]);
+  assert.equal(bad1.status, 'bad', JSON.stringify(bad1));
+  assert.match(bad1.reply, /bind 실패 \(resultCode 1\)/);
 });
 
-test('DEV-01 ② AD 식 장형 길이(0x84) 응답의 resultCode 53 을 실패로 읽는다(예전: 길이 바이트 0x00 → "성공 0")', async () => {
-  const r = await ldapCheck([longForm(53)]);
+test('DEV-01 ② AD 식 장형 길이(0x84) 응답의 resultCode 를 정확히 읽는다(예전: 길이 바이트 0x00 → "성공 0")', async () => {
+  // v2.744(감사 RECENT-04): 53 은 정책 거부(살아 있음)로 판정이 바뀌었다 — 장형 해석 검증은 실패 코드 52 로 한다.
+  const r = await ldapCheck([longForm(52)]);
   assert.equal(r.status, 'bad', JSON.stringify(r));
-  assert.match(r.reply, /resultCode 53/);
+  assert.match(r.reply, /resultCode 52/);
   assert.doesNotMatch(r.reply, /resultCode 0\b/);
+  const pol = await ldapCheck([longForm(53)]);
+  assert.equal(pol.status, 'ok', JSON.stringify(pol));
+  assert.match(pol.reply, /bind 거부\(정책\).*resultCode 53/);
+  assert.doesNotMatch(pol.reply, /resultCode 0\b/);
   const ok = await ldapCheck([longForm(0)]);
   assert.equal(ok.status, 'ok', JSON.stringify(ok));
   const inv = await ldapCheck([longForm(49)]);           // 49(invalidCredentials)는 원래 설계대로 '살아있음'
@@ -96,16 +106,24 @@ test('DEV-01 ② AD 식 장형 길이(0x84) 응답의 resultCode 53 을 실패�
 });
 
 test('DEV-01 ③ 진단 메시지가 긴 AD 응답(0x81 장형 + 140자 오류 문구)도 resultCode 를 정확히 읽는다', async () => {
+  // v2.744(감사 RECENT-04): 8(strongerAuthRequired — 서명 필수 DC 의 익명 simple bind 거부)은 서버가 BindResponse 로 정책 거부를
+  //   돌려준 것이라 liveness 점검에서는 '살아 있음' 이다(48·49 와 같은 성격). 문구가 거부 사실과 코드를 함께 말한다.
   const r = await ldapCheck([adDiagForm(8)]);              // 8 = strongerAuthRequired
-  assert.equal(r.status, 'bad', JSON.stringify(r));
-  assert.match(r.reply, /resultCode 8\b/);
+  assert.equal(r.status, 'ok', JSON.stringify(r));
+  assert.match(r.reply, /bind 거부\(정책\) — 서버는 응답 중 \(resultCode 8\)/);
+  // 51(busy)·52(unavailable)는 서버가 요청을 처리하지 못하는 상태 — 실패다.
+  for (const rc of [51, 52]) {
+    const b = await ldapCheck([adDiagForm(rc)]);
+    assert.equal(b.status, 'bad', JSON.stringify(b));
+    assert.match(b.reply, new RegExp(`bind 실패 \\(resultCode ${rc}\\)`));
+  }
 });
 
 test('DEV-01 ④ 응답이 여러 조각으로 와도 끝까지 모아 판정한다', async () => {
-  const whole = adDiagForm(53);
+  const whole = adDiagForm(52);                             // v2.744: 53 은 정책 거부(살아 있음)라 실패 코드 52 로 본다
   const r = await ldapCheck([whole.subarray(0, 3), whole.subarray(3, 12), whole.subarray(12)], { gapMs: 30 });
   assert.equal(r.status, 'bad', JSON.stringify(r));
-  assert.match(r.reply, /resultCode 53/);
+  assert.match(r.reply, /resultCode 52/);
   const ok = longForm(0);
   const r2 = await ldapCheck([ok.subarray(0, 4), ok.subarray(4)], { gapMs: 30 });
   assert.equal(r2.status, 'ok', JSON.stringify(r2));
@@ -170,12 +188,18 @@ test('DEV-03 ② 표의 모든 등급이 포화 = 100% · 표에 없는 속도(1
   assert.equal(unk.pct, null); assert.equal(unk.basis, null); assert.equal(unk.over, false);
 });
 
-test('DEV-03 ③ 데이터율을 넘는 처리량은 클램프하지 않고 null + 사유(처리량은 그대로)', () => {
-  const b = twoCycles({ fcBps: 1.7e9 });
-  assert.equal(b.row.hba_pct, null);
+// v2.744 RECENT-02: 데이터율을 조금(≤110%) 넘는 값은 측정 정의 차이(프레임 헤더)라 100% + 표지, 크게 넘으면 비우고 hba_over 로 알린다.
+test('DEV-03 ③ 데이터율을 넘는 처리량 — 조금 넘으면 100% + 표지, 크게 넘으면 null + hba_over(처리량은 그대로)', () => {
+  const b = twoCycles({ fcBps: 1.7e9 });   // 106%
+  assert.equal(b.row.hba_pct, 100);
   assert.equal(b.detail.fc[0].pctOver, true);
+  assert.equal(b.detail.fc[0].pctClamped, true);
   assert.ok(b.row.hba_bps > 0);
-  assert.ok(b.notes.some((x) => x.includes('넘는 처리량')), JSON.stringify(b.notes));
+  const c = twoCycles({ fcBps: 2.0e9 });   // 125%
+  assert.equal(c.row.hba_pct, null);
+  assert.equal(c.row.hba_over, true);
+  assert.ok(c.row.hba_bps > 0);
+  assert.ok(c.notes.some((x) => x.includes('크게')), JSON.stringify(c.notes));
 });
 
 test('DEV-03 ④ 이더넷 NIC 는 바꾸지 않는다(링크 속도 그대로 — 10Gb 에서 1.25GB/s = 100%)', () => {

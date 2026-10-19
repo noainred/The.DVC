@@ -15,7 +15,46 @@
 
 ## 설치 절차
 1. zip 압축 해제 (예: `C:\vmware-portal\`)
+   - **경로에 공백을 넣지 마세요**(예: `C:\Program Files\…` 는 피합니다). 예약 작업은 `cmd.exe /c "<경로>\start-portal.bat"` 으로
+     이 파일을 실행하는데, 공백이 든 경로에서 cmd 의 따옴표 처리가 맞게 동작하는지는 Windows 실기로 확인하지 못했습니다.
+     공백 없는 짧은 경로(`C:\vmware-portal`)를 쓰고 아래 1-1 로 권한을 좁히는 것을 기준으로 안내합니다.
+1-1. **설치 폴더와 설정 폴더의 권한을 좁힙니다**(v2.744 — 다음 단계로 토큰을 적기 전에, 서비스를 등록하기 전에)
+   - 왜: 예약 작업이 이 폴더의 `start-portal.bat`·`portal.env.bat`·`runtime\node\node.exe` 를 **SYSTEM 권한**으로 실행합니다.
+     `C:\` 바로 아래에 새로 만든 폴더는 보통 C:\ 의 권한을 물려받아 **일반 사용자도 파일을 만들거나 바꿀 수 있습니다** —
+     그러면 그 사용자가 `portal.env.bat` 에 줄을 넣어 다음 부팅에 SYSTEM 으로 실행시킬 수 있고, 이 파일에 저장되는
+     `CENTRAL_TOKEN`·`COLLECTOR_TOKEN` 도 읽힙니다. 설정 폴더(`C:\ProgramData\vmware-portal`)에도 계정·비밀이 저장됩니다.
+   - **관리자 권한 PowerShell 또는 명령 프롬프트**에서(따옴표를 그대로 두세요 — PowerShell 이 괄호를 식으로 읽지 않게):
+     ```bat
+     icacls C:\vmware-portal /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
+     icacls C:\vmware-portal\* /reset /T /C
+     mkdir C:\ProgramData\vmware-portal
+     icacls C:\ProgramData\vmware-portal /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
+     icacls C:\ProgramData\vmware-portal\* /reset /T /C
+     ```
+     · `/inheritance:r` 는 물려받은 권한(일반 사용자 쓰기 포함)을 지우고, 남는 권한은 SYSTEM(`S-1-5-18`)과
+       Administrators(`S-1-5-32-544`)의 전체 권한뿐입니다. 이름 대신 SID 를 쓰는 것은 Windows 언어에 따라 계정 이름이 달라서입니다.
+     · 두 번째 줄(`/reset /T`)은 폴더 안 파일들이 위 권한을 그대로 물려받게 맞춥니다(압축을 풀 때 생긴 개별 권한 정리).
+     · 일반 사용자(Users)에게는 읽기 권한도 주지 않습니다 — `portal.env.bat` 에 토큰이 들어갑니다. 수동 실행(`start-portal.bat`)은
+       관리자 권한 창에서 하세요. 설정 폴더가 이미 있으면 `mkdir` 줄의 '이미 있음' 오류는 무시해도 됩니다.
+   - **확인 명령** — 아래 두 줄의 출력에 SYSTEM·Administrators 두 줄만 있어야 합니다(`Users`·`Authenticated Users`·`Everyone`·
+     `CREATOR OWNER` 줄이 보이면 위 명령을 다시 실행하세요. 표시 이름은 Windows 언어에 따라 다를 수 있습니다):
+     ```bat
+     icacls C:\vmware-portal
+     icacls C:\ProgramData\vmware-portal
+     ```
+   - ⚠ 정직 기록: 이 안내는 Windows 의 일반적인 기본 권한(클라이언트 Windows 는 C:\ 아래 새 폴더에 Authenticated Users 수정 권한,
+     Windows Server 는 Users 파일 추가 권한이 물려 내려온다)을 근거로 했고, **이 환경에는 Windows 가 없어 실기로 확인하지 못했습니다.**
+     `install-service.ps1` 은 권한을 바꾸지 않습니다(이 릴리스는 안내만 — 실기 확인 전에 스크립트가 기존 폴더 권한을 바꾸지 않게).
+     위 확인 명령의 출력으로 현장에서 확인하세요.
 2. `portal.env.bat` 편집
+   - **관리자 권한으로 연 메모장**으로 편집하세요(v2.744 회귀 검토 — 1-1 뒤 이 폴더는 SYSTEM·Administrators 만 읽고 쓸 수 있습니다).
+     관리자 권한 명령 프롬프트에서:
+     ```bat
+     notepad C:\vmware-portal\portal.env.bat
+     ```
+     · UAC 가 켜진 관리자 계정의 일반 창(관리자 권한이 아닌 메모장)으로는 이 파일을 열거나 저장할 수 없습니다(액세스 거부).
+     · 탐색기로 이 폴더에 들어갈 때 뜨는 '계속' 단추를 누르면 **그 사용자 계정의 권한이 폴더에 영구로 추가**됩니다 — 1-1 의 확인 명령에
+       그 계정 줄이 보이게 되고 권한을 좁힌 의미가 줄어듭니다. 눌렀다면 1-1 의 명령을 다시 실행하세요.
    - 수집 에이전트로 쓸 경우:
      ```bat
      set COLLECTOR_TOKEN=강력한-공유-토큰
@@ -24,6 +63,8 @@
    - `CONFIG_DIR` 는 기본 `C:\ProgramData\vmware-portal` (업그레이드해도 보존)
    - 포탈 화면(설정의 Edge 노드 포탈 설치·대량 배포 화면에 있는 중앙 토큰)에서 저장·생성한 `CENTRAL_TOKEN` 은 **이 `portal.env.bat`** 에 `set "CENTRAL_TOKEN=..."` 줄로
      기록됩니다(`start-portal.bat` 이 이 파일 경로를 포탈에 넘깁니다 — v2.743). 새 zip 으로 패키지 폴더를 바꿀 때는 이 파일을 보존하세요.
+     패키지 폴더를 바꾸면(새 폴더에 압축을 풀면) 그 새 폴더는 다시 `C:\` 의 권한을 물려받습니다 — **새 폴더에 1-1 의 명령을 다시 실행**한 뒤
+     `portal.env.bat` 을 옮기고 서비스를 등록하세요(하지 않으면 업그레이드 때 권한을 좁힌 효과가 조용히 풀립니다).
      예전 버전이 `C:\ProgramData\vmware-portal\portal.env.bat` 에 쓴 값은 시작 스크립트가 읽지 않습니다 — 필요하면 그 줄을 이 파일로 옮기세요.
      Windows 에서는 토큰에 `& | < > ^ % ! "` 와 공백을 쓸 수 없습니다(이 파일을 cmd 가 실행합니다).
 3. **관리자 권한 PowerShell** 에서:
@@ -42,9 +83,13 @@
      먼저 로그인한 사람이 OTP 를 등록해 계정을 가져갈 수 있습니다.
 
 ## 수동 실행 / 점검
+1-1 로 권한을 좁힌 폴더라 **관리자 권한 명령 프롬프트**에서 실행하세요(일반 창에서는 `portal.env.bat` 을 읽지 못해 실행되지 않습니다):
 ```bat
+cd /d C:\vmware-portal
 start-portal.bat
 ```
+⚠ 정직 기록: 위 권한 동작(UAC 일반 창의 액세스 거부 · 탐색기 '계속' 이 계정 권한을 영구로 더하는 것)은 Windows 의 표준 동작을 근거로 적었고
+이 환경에는 Windows 가 없어 실기로 확인하지 못했습니다.
 
 ## 중앙 포탈에 등록
 중앙 포탈의 **수집 서버** 메뉴에서 이 에이전트를 등록합니다:

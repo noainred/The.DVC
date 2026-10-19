@@ -216,6 +216,9 @@ export function trendNote(kind, t) {
   if (!valid) return '이 기간에 쌓인 추이가 없습니다';
   const bits = [];
   if (t.partial) bits.push(`일부만 집계된 ${t.partial}칸은 그리지 않았습니다`);
+  // v2.744(감사 RECENT-01): 점검중 vCenter 는 기한 없는 상태라 칸을 비우지 않고 그 vCenter 를 뺀 값으로 그린다 — 그 사실을 말한다.
+  const maint = (t.series || []).filter((p) => p && p.v != null && Number(p.maintExcluded) > 0).length;
+  if (maint) bits.push(`${maint}칸은 점검중 vCenter 를 뺀 값입니다`);
   if (kind === 'power') bits.push('추이는 서버(iDRAC) 전력만');
   if (kind === 'storage') bits.push('추이는 스토리지 사용량');
   return bits.join(' · ');

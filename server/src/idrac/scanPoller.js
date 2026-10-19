@@ -149,16 +149,21 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const partial = partialReasons.length > 0;
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (partial) console.warn(`[idrac-scan] ${e.datacenterId}: 부분 결과라 법인 교체(replace-datacenter) 대신 병합(merge)으로 등록합니다 — ${partialReasons.join(' · ')}`);
+  let registerError = null; // v2.744(감사 EDGE-03)
   if (r.found.length) {
     // v2.742(감사 DEV-01): 엔트리 id·대역을 넘긴다 — 교체(replace-datacenter)는 **이 엔트리가 등록한 서버만** 지운다(같은 법인의 다른
     //   서비스 엔트리 등록·수동 등록은 남긴다). 예전에는 법인 전체를 지워 엔트리 둘이 서로의 등록을 매 주기 지웠다.
-    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo, scanRangeId: e.id || '', scanRanges: e.ranges });
+    // v2.744(감사 EDGE-03): 스캔 등록은 자동 경로(auto)다 — '지금 스캔' 도 사람이 고른 것은 스캔이지 손상 등록부 덮어쓰기가 아니다.
+    //   이 노드의 iDRAC 등록부를 읽지 못했으면 저장하지 않고 '최근 결과'·로그에 사유를 남긴다.
+    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo, scanRangeId: e.id || '', scanRanges: e.ranges, auto: true });
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
+    else if (reg.code === 'registry-unreadable') { registerError = reg.reason; console.warn(`[idrac-scan] ${e.datacenterId}: 발견한 iDRAC ${r.found.length}대를 등록하지 않았습니다 — ${reg.reason}`); }
   }
   // v2.591(감사 C5): 무응답·인증실패·소요를 싣는다 — 위임 회신(central/idracScanJobs.js)과 같은 모양. 예전에는 빠져
   //   비밀번호가 틀려도 '최근 결과' 가 '성공 · 발견 0대' 로 보였다(형제 비대칭).
   return {
     datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated, aborted: r.aborted,
+    ...(registerError ? { registerError } : {}),
     modeDowngraded: e.mode === 'replace-datacenter' && partial, modeDowngradedReason: partial ? partialReasons.join(' · ') : null, unsupported: r.unsupportedCount || 0,
     unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authFailReason: r.authFailReason || null,
     blocked: r.blocked ?? null, authSkipped: r.authSkipped || 0, authSkippedRegistered: r.authSkippedRegistered || 0,
@@ -233,6 +238,7 @@ export async function runIdracScanOnce(opts = {}) {
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
         if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
+        if (r.registerError) errors.push(`${e.datacenterId}: ${r.registerError}`); // v2.744(EDGE-03): 발견했지만 등록하지 않은 사유(조용한 0대 금지)
         // v2.441: 위임이면 reqId 를 함께 남긴다 — 나중에 에이전트가 결과를 회신할 때
         // recordScanRangeRunByReqId 가 이 값으로 짝을 찾아 발견/등록 수치를 채운다.
         // (예전에는 '던짐' 만 기록돼 '최근 결과' 가 영원히 '위임(AZ) · 시각' 이었다.)
@@ -254,7 +260,7 @@ export async function runIdracScanOnce(opts = {}) {
               ...(r.modeDowngraded ? { modeDowngraded: true, modeDowngradedReason: r.modeDowngradedReason || '' } : {}),
             }),
             ...(r.iloNote ? { iloNote: r.iloNote } : {}),
-            delegated: !!r.delegated, agent: r.agent || null, error: r.error || null,
+            delegated: !!r.delegated, agent: r.agent || null, error: r.error || r.registerError || null,
             ...(r.delegated ? { reqId: r.reqId || '', dispatch: r.dispatch || e.dispatch || 'poll', dispatchedAt: Date.now(), pending: true } : {}),
           });
         }
@@ -265,7 +271,7 @@ export async function runIdracScanOnce(opts = {}) {
           datacenterId: e.datacenterId, service: e.service, agent: (r.delegated || r.held) ? (r.agent || e.agent) : '',
           dispatch: r.delegated ? (r.dispatch || e.dispatch) : '', reqId: r.reqId || '',
           scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
-          durationMs: r.delegated ? null : Date.now() - entryStart, error: r.error || null, stopped: r.aborted,
+          durationMs: r.delegated ? null : Date.now() - entryStart, error: r.error || r.registerError || null, stopped: r.aborted,
           ...(r.delegated ? {} : { unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authSkipped: r.authSkipped || 0, noCreds: r.held ? null : (r.noCreds || 0) }),
           ...(r.held ? { error: r.heldReason || '위임 보류' } : {}),
         });

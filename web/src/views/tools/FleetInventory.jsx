@@ -7,7 +7,7 @@ import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
-import { fleetPartialsNote } from '../fleetPartialText.js'; // v2.607 LEFT2607-02
+import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 
 /**
@@ -38,6 +38,11 @@ function TagSelect({ value, onChange, disabled }) {
   );
 }
 
+/** v2.744(감사 후속 FC): 그 행의 엣지가 등록부 손상으로 직전 목록 유지 중이면 짧은 표지(설명은 표 위 각주 한 번 — v2.509 규약). */
+function HeldMark({ fp, agent }) {
+  const hb = fleetHeldBadge(fp, agent);
+  return hb ? <span className="badge amber" style={{ marginLeft: 6 }} title={hb.title}>{hb.text}</span> : null;
+}
 const MODE_BADGE = { edge: ['엣지(현장)', 'teal'], central: ['중앙', 'blue'], standalone: ['단독', 'purple'] };
 // 소속 법인 출처 라벨 [짧은표시, 툴팁].
 const VC_SRC = {
@@ -202,6 +207,8 @@ export function FleetInventory({ isAdmin }) {
       {err && d && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13, alignItems: 'center' }}><span>⚠ {err}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setErr(null)}>✕</button></div>}
       {/* v2.607 LEFT2607-02: 엣지 베어메탈 목록 부분 전송·상한 제외·귀속 비움 */}
       {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
+      {/* v2.744(감사 후속 FC — EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 중앙이 그 엣지의 직전 목록을 유지 중 — 행에는 짧은 표지, 설명은 여기 한 번. */}
+      {d && fleetHeldNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetHeldNote(d.fleetPartials)}</div>}
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>
@@ -231,7 +238,7 @@ export function FleetInventory({ isAdmin }) {
                 {bm.map((b, i) => (
                   <tr key={b.serverId || b.fleetId || i}>
                     {isAdmin && <td><input type="checkbox" checked={sel.has(selKey(b))} onChange={() => toggleSel(selKey(b))} /></td>}
-                    <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}{b.remoteAgent && <span className="badge teal" style={{ marginLeft: 6 }} title="엣지(현장) 포탈이 보고한 베어메탈">🛰 {b.remoteAgent}</span>}</td>
+                    <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}{b.remoteAgent && <span className="badge teal" style={{ marginLeft: 6 }} title="엣지(현장) 포탈이 보고한 베어메탈">🛰 {b.remoteAgent}</span>}<HeldMark fp={d.fleetPartials} agent={b.remoteAgent} /></td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>

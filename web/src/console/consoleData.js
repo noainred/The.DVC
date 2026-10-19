@@ -20,6 +20,8 @@ export const REGION_COLORS = { '아시아': '#0891b2', '중국': '#ef4444', '유
 export const DOMAIN_LABEL = { COMPUTE: '컴퓨트', STORAGE: '스토리지', NETWORK: '네트워크', OTHER: '기타' };
 
 import { numOrNull as num } from '../numOrNull.js'; // v2.618(ARCH-6): 사본 대신 웹 코어
+// v2.744(감사 후속 FA-①): /tools/capacity 행의 key·이름 — 같은 이름 다른 데이터센터 클러스터를 한 판정으로 가른다(사본 금지).
+import { clusterRowKey, clusterNameLabel } from '../views/clustercfg/clusterCfgText.js';
 
 /** 사용률(%) → 0 정상 / 1 주의 / 2 위험. 값이 없으면 null(판정 불가). */
 export function levelOf(pct) {
@@ -171,7 +173,10 @@ export function clusterRows(clusters, limit = Infinity) {
   return (clusters || []).map((c) => ({
     // v2.733: CPU·메모리 사용률을 둘 다 모르면(REST 폴백·끊긴 호스트만) 부하도 모른다 — 0 으로 두면 '부하 최저 → 신규 배치 우선' 으로 뽑혔다.
     ...c, load: (num(c.cpuUsedPct) == null && num(c.memUsedPct) == null) ? null : Math.max(num(c.cpuUsedPct) ?? 0, num(c.memUsedPct) ?? 0),
-    name: c.cluster, key: `${c.vcenterId}|${c.cluster}`,
+    // v2.744(감사 후속 FA-①): v2.744 VC-02 가 같은 이름 다른 데이터센터 클러스터를 다른 행으로 나눴다(clusterRef·vcDatacenter·sameName).
+    //   이름으로 key 를 만들면 두 행의 React key 가 겹치고 같은 글자가 두 줄로 보인다 — clusterCfgText 의 판정을 그대로 쓴다
+    //   (ref 를 싣지 않은 옛 행은 예전 키·이름 그대로).
+    name: clusterNameLabel(c), key: clusterRowKey(c),
   })).sort((a, b) => (a.load == null) - (b.load == null) || (b.load ?? 0) - (a.load ?? 0) || b.hosts - a.hosts).slice(0, limit);
 }
 

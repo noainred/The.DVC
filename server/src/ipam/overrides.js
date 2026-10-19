@@ -151,14 +151,52 @@ export function clearOverride(ip) {
   return { ok: true };
 }
 
+/** v2.744(감사 WEB-02): 무효 토큰 목록을 응답에 실을 때의 상한(전체 개수는 invalidCount 로 따로 밝힌다). */
+export const INVALID_SHOW_MAX = 50;
+
+/**
+ * v2.744(감사 WEB-02 — 재현): 일괄 적용 대상 판정 — 라우트(사전 거부)·setOverrideBatch·웹 사본(web/src/views/tools/ipamBulkText.js)이
+ * 같은 규칙을 쓴다. 토큰 = 공백·쉼표로 나눈 조각(배열 입력은 원소마다 다듬는다). 정규형(canonIp — 단건 PUT 과 같은 판정)이 null 이면
+ * 무효다. 예전에는 무효 토큰을 filter(Boolean) 으로 조용히 버리고 나머지만 적용해, 화면은 '성공' 으로 창을 닫았다
+ * (10.250.1.300 · 10.250.1 같은 오타 IP 에 예약 기록이 남지 않는다 — 다른 사람이 같은 주소를 할당할 수 있다).
+ * @returns {{tokens:string[], ips:string[], invalid:string[]}} tokens = 다듬은 원문 전부(중복 포함), ips = 정규형·중복 제거,
+ *   invalid = 무효 원문·중복 제거(입력 순서)
+ */
+export function splitBatchIps(ips) {
+  const tokens = (Array.isArray(ips) ? ips : String(ips ?? '').split(/[\s,]+/))
+    .map((s) => (s == null ? '' : String(s).trim())).filter(Boolean);
+  const seen = new Set(); const ipsOut = []; const bad = new Set();
+  for (const t of tokens) {
+    const k = canonIp(t);
+    if (!k) { bad.add(t); continue; }
+    if (!seen.has(k)) { seen.add(k); ipsOut.push(k); }
+  }
+  return { tokens, ips: ipsOut, invalid: [...bad] };
+}
+
+/** v2.744(감사 WEB-02): 무효 토큰이 있으면 전체를 거부하는 응답 본문(라우트·setOverrideBatch rejectInvalid 공용). 없으면 null. */
+export function invalidBatchResult(invalid) {
+  // 각 토큰은 64자로 줄여 싣는다(붙여넣은 긴 문자열이 응답·화면을 덮지 않게 — 개수는 그대로 밝힌다).
+  const list = (Array.isArray(invalid) ? invalid : []).map((t) => { const v = String(t); return v.length > 64 ? `${v.slice(0, 63)}…` : v; });
+  if (!list.length) return null;
+  const head = list.slice(0, 5).join(', ');
+  const more = list.length > 5 ? ` 외 ${list.length - 5}개` : '';
+  return {
+    ok: false,
+    reason: `IPv4 주소가 아닌 값이 ${list.length}개 있습니다(${head}${more}). 고친 뒤 다시 적용하세요 — 전체를 적용하지 않았습니다.`,
+    invalid: list.slice(0, INVALID_SHOW_MAX), invalidCount: list.length,
+  };
+}
+
 /**
  * 여러 IP에 같은 변경을 일괄 적용(예: 한 대역을 모두 'reserved'로). 단일 쓰기.
- * ips: string[] | "a,b\nc" — 반환 { ok, changed }.
+ * ips: string[] | "a,b\nc" — 반환 { ok, changed }(무효 토큰이 있었으면 invalid·invalidCount 도 — 조용히 버리지 않는다).
+ * v2.744(감사 WEB-02): opts.rejectInvalid 면 무효 토큰이 하나라도 있을 때 아무것도 쓰지 않고 거부한다(라우트는 이 판정을 먼저 한다).
  */
-export function setOverrideBatch(ips, partial = {}, user) {
-  const raw = (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((s) => String(s).trim()).filter(Boolean);
-  const list = [...new Set(raw.map(canonIp).filter(Boolean))]; // 유효 IPv4만(정규형 — v2.594), 중복 제거
-  if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.' };
+export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
+  const { ips: list, invalid } = splitBatchIps(ips); // 유효 IPv4만(정규형 — v2.594), 중복 제거
+  if (opts?.rejectInvalid) { const bad = invalidBatchResult(invalid); if (bad) return bad; }
+  if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.', ...(invalid.length ? { invalid: invalid.slice(0, INVALID_SHOW_MAX), invalidCount: invalid.length } : {}) };
   if (list.length > MAX_BATCH) return { ok: false, reason: `한 번에 ${MAX_BATCH}개까지만 일괄 적용할 수 있습니다.` };
   const data = load();
   const patch = clean(partial);
@@ -174,7 +212,7 @@ export function setOverrideBatch(ips, partial = {}, user) {
     data[ip] = next; changed++;
   }
   if (changed) persist(data);
-  return { ok: true, changed };
+  return { ok: true, changed, ...(invalid.length ? { invalid: invalid.slice(0, INVALID_SHOW_MAX), invalidCount: invalid.length } : {}) };
 }
 
 /**

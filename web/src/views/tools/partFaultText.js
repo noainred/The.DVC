@@ -345,6 +345,8 @@ export function holdText(holdReason) {
     'no-report': '판정 보류 — 이 수집 서버의 보고가 없음',
     'edge-stale': '판정 보류 — 이 수집 서버의 보고가 오래됨(엣지 상태를 확인하세요)',            // v2.548 H7
     'edge-legacy': '판정 보류 — 구버전 수집 서버(해소를 판정할 수 없음 — 업그레이드 필요)',
+    // v2.744(감사 EDGE-01): 그 수집 서버가 자기 장비 등록부를 읽지 못해 이 장비를 판정하지 않았다 — 재배정·삭제(unassigned)가 아니다.
+    'registry-unreadable': '판정 보류 — 수집 서버가 장비 등록부를 읽지 못함(그 수집 서버의 등록 파일 확인)',
   };
   return map[holdReason] || '';
 }
@@ -354,7 +356,7 @@ export function holdText(holdReason) {
  * @returns {string} 보류가 없으면 빈 문자열
  */
 export function holdNote(open = []) {
-  const by = { unknown: 0, 'device-failed': 0, 'collection-failed': 0, missing: 0, unassigned: 0, 'no-report': 0, 'edge-stale': 0, 'edge-legacy': 0 };
+  const by = { unknown: 0, 'device-failed': 0, 'collection-failed': 0, missing: 0, unassigned: 0, 'no-report': 0, 'edge-stale': 0, 'edge-legacy': 0, 'registry-unreadable': 0 };
   for (const p of open) if (by[p?.holdReason] != null) by[p.holdReason] += 1;
   const total = Object.values(by).reduce((a, b) => a + b, 0);
   if (!total) return '';
@@ -366,6 +368,8 @@ export function holdNote(open = []) {
   if (by['no-report']) bits.push(`수집 서버 보고 없음 ${by['no-report']}건`);
   if (by['edge-stale']) bits.push(`수집 서버 보고 오래됨 ${by['edge-stale']}건`);
   if (by['edge-legacy']) bits.push(`구버전 수집 서버 ${by['edge-legacy']}건(업그레이드 전까지 해소 판정 불가)`);
+  // v2.744(감사 EDGE-01): 등록부를 고치면 다음 점검에서 다시 판정한다 — 관리자가 닫을 일이 아니다(unassigned 와 조치가 다르다).
+  if (by['registry-unreadable']) bits.push(`수집 서버 장비 등록부 손상 ${by['registry-unreadable']}건(그 수집 서버의 등록 파일을 복구하면 다시 판정합니다)`);
   // v2.548 C5 — 재배정·등록 삭제된 장비는 스스로 닫히지 않는다. 관리자가 사유를 적어 닫는 길을 알린다.
   if (by.unassigned) bits.push(`**수집 서버가 더는 보고하지 않는 장비 ${by.unassigned}건**(재배정·삭제했다면 관리자가 행의 '닫기' 로 정리하세요)`);
   return `판정 보류 ${total}건(${bits.join(' · ')}) — 이번 점검에서 확인하지 못해 **해소로 처리하지 않았습니다**.`

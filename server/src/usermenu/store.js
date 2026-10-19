@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
 
 export const MENU_V = 1;
@@ -126,7 +126,7 @@ function load() {
     }
   } catch (e) {
     preserveCorrupt(file, e.message);
-    console.warn(`[usermenu] ${path.basename(file)} 를 읽지 못해 빈 저장소로 시작합니다(원본은 .corrupt 로 보존): ${e.message}`);
+    console.warn(`[usermenu] ${path.basename(file)} 를 읽지 못해 빈 저장소로 시작합니다(원본은 .corrupt 로 보존): ${safeLoadText(e) || '사유 미상'}`);
     data = empty();
   }
   cache = data;

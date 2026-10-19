@@ -10,6 +10,7 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { memoJson, scopeKey } from './shared.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeTags, vmTagsOf, vmRefOf, tagStateOf } from '../../tags/analyze.js';
@@ -33,7 +34,8 @@ function scopedVcs(req, snap) {
 }
 
 /** v2.720(감사 B2-02): 오류 원문을 볼 수 있는가 — admin + 전체 범위(vCenter 제한 없음). */
-function isFullAdmin(req, snap) { return req.user?.role === 'admin' && !scopedVcenterIds(req.user, snap); }
+// v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — 데모 계정은 vCenter 오류 원문·수집 상태를 받지 않는다(operator 와 같은 판본).
+function isFullAdmin(req, snap) { return isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, snap); }
 export const ERROR_HIDDEN_TEXT = '(오류 — 관리자 화면에서 확인)';
 /** v2.720(감사 B2-02): vCenter 행의 tagsError·customError 를 고정 문구로 바꾼다(없으면 null 그대로). */
 export function maskVcErrors(rows) {
@@ -56,7 +58,7 @@ export function registerVmTags(api) {
       return { ...r, vcenters: vcRows, ...(full ? {} : { errorsHidden: true }), policyRev: pol.rev, policyDemo: pol.demo === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
         status: full ? tagInvStatus() : null };
       // v2.720(감사 B2-02): 캐시 키에 역할 — scopeKey 는 범위만이라 전체 범위 admin 의 판본(오류 원문·status)이 operator 에게 나갔다.
-    }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}|${req.user?.role === 'admin' ? 'a' : 'u'}` });
+    }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` });   // v2.744(AUTHZ-01): 판정 결과로 — 데모와 관리자가 같은 칸을 쓰지 않게
   });
 
   api.get('/tools/vm-tags/of', toolsPerm, (req, res) => {

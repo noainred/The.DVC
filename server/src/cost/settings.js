@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const SETTINGS_FILE_NAME = 'cost-rates.json';
@@ -64,7 +64,7 @@ export function loadCostSettings() {
     }
   } catch (e) {
     preserveCorrupt(file, e?.message);
-    console.warn(`[cost] 단가 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(단가 없음)으로 시작합니다: ${e?.message || e}`);
+    console.warn(`[cost] 단가 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(단가 없음)으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = { ...base, updatedAt, updatedBy, rev: revOf(base) };
   return cache;

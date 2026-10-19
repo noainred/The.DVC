@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { KINDS, isKind } from './kinds.js';
@@ -75,7 +75,8 @@ export function load() {
   } catch (e) {
     // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다.
     preserveCorrupt(FILE);
-    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e.message}`);
+    // v2.744(최종 검토 RG2744-02): 사유는 요약이다(원문은 SMTP 비밀번호 앞부분 같은 파일 조각을 싣는다 — 원문은 mail.json.corrupt.* 에 있다).
+    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = out;
   return cache;

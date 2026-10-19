@@ -5,6 +5,7 @@
  * ⚠ vSAN 헬스 서비스(vsanHealth API — 리싱크·객체 상태·헬스 점수)는 쓰지 않는다. 여기의 vSAN 판정은 호스트 런타임(디스크 문제·멤버 수)과 용량뿐이다.
  */
 import { dsCfgFindings, DS_CFG_CODES } from './parse.js';
+import { clusterIndex } from '../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 
 const SEV_ORDER = { crit: 0, warn: 1, info: 2 };
 export const ROWS_MAX = 2000;
@@ -64,13 +65,19 @@ export function analyzePaths(hosts, opt = {}) {
 export function analyzeVsan(hosts, dss, opt = {}) {
   const byCl = new Map();
   let unknownHosts = 0;
-  for (const h of Array.isArray(hosts) ? hosts : []) {
+  // v2.744(감사 VC-02): 클러스터는 (vCenter, 클러스터 moref) 로 묶는다 — 이름으로 묶으면 다른 데이터센터의 같은 이름 vSAN 클러스터
+  //   두 개가 한 묶음이 되어 '보고 멤버 4 < vSAN 호스트 8' 이라는 거짓 분할(crit)이 났다(재현). 클러스터에 속하지 않은 호스트는
+  //   예전 키 그대로다. 모드는 끊긴 호스트까지 포함한 호스트 전부로 정한다(clustercfg 와 같은 판정).
+  const hl = Array.isArray(hosts) ? hosts : [];
+  const idx = clusterIndex(hl);
+  for (const h of hl) {
     if (h.connectionState === 'DISCONNECTED') continue;
     const v = h.hcfg?.vsan;
     if (!v) { unknownHosts += 1; continue; }
     if (v.enabled !== true) continue;
-    const k = `${h.vcenterId}\u0000${h.cluster}`;
-    const c = byCl.get(k) || { vcenterId: h.vcenterId, vcenterName: opt.vcName?.get(h.vcenterId) || h.vcenterId, cluster: h.cluster, hosts: 0, diskIssues: 0, minMembers: null, membersUnknown: 0, issueHosts: [] };
+    const gk = idx.keyOf(h);
+    const k = gk ?? `${h.vcenterId}\u0000${h.cluster}`;
+    const c = byCl.get(k) || { vcenterId: h.vcenterId, vcenterName: opt.vcName?.get(h.vcenterId) || h.vcenterId, cluster: h.cluster, ...idx.meta(gk), hosts: 0, diskIssues: 0, minMembers: null, membersUnknown: 0, issueHosts: [] };
     c.hosts += 1;
     if (Number.isFinite(v.diskIssues) && v.diskIssues > 0) { c.diskIssues += v.diskIssues; if (c.issueHosts.length < 10) c.issueHosts.push(h.name); }
     // v2.727(감사 C-05): 멤버 수를 못 읽은(null) 호스트는 분할 판정에서 뺀다 — 비교 분모(hosts)에서도 빼고 개수(membersUnknown)를 밝힌다.

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const SETTINGS_FILE_NAME = 'vm-hygiene.json';
@@ -74,7 +74,7 @@ export function loadVmHygieneSettings() {
     }
   } catch (e) {
     preserveCorrupt(file, e?.message);
-    console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e?.message || e}`);
+    console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   const { updatedAt = null, updatedBy = null, ...core } = base;
   cache = { ...core, updatedAt, updatedBy, rev: revOf(core) };

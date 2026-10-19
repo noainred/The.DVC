@@ -63,20 +63,208 @@ vp_anchor_ok() {
   vp_path_root_only "$v" && vp_tree_root_only "$v"
 }
 
-# vp_root_env_policy <config_dir> — portal.env 의 UPGRADE_SIGNATURE_POLICY 를 **root 소유 파일일 때만** 돌려준다.
-#   연 파일(fd)의 소유자를 보므로 확인 뒤 바꿔치기가 끼어들지 않는다. 서비스 계정 소유면 값을 쓰지 않고 한 줄 알린다(stderr).
-vp_root_env_policy() {
-  local f="$1/portal.env" fd uid v=""
-  [[ -f "$f" && ! -L "$f" ]] || return 0
-  exec {fd}<"$f" || return 0
-  uid="$(stat -L -c %u "/dev/fd/$fd" 2>/dev/null || echo x)"
-  if [[ "$uid" == 0 ]]; then
-    v="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' <&"$fd" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-  elif grep -qE '^UPGRADE_SIGNATURE_POLICY=' <&"$fd" 2>/dev/null; then
-    echo "ⓘ $f 는 root 소유가 아니라(서비스 계정이 쓸 수 있다) 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다." >&2
+# vp_path_controllers <절대 경로> — 그 경로를 찾아가는 길 전체를 root 말고 누가 바꿀 수 있는가(v2.744 최종 수정분 검토 VERIFY-01).
+#   / 부터 모든 폴더·링크·마지막 항목을 lstat 으로 한 단계씩 본다 — 링크를 무작정 따라가지 않고, 링크를 만나면 그 링크(소유자) 다음에
+#   **링크 대상의 길**을 이어서 본다(vp_path_root_only 의 readlink -f 는 '링크가 놓인 폴더' 를 보지 않는다 — 서비스 계정 폴더 안의 링크가
+#   root 소유 폴더를 가리키면 통과했다).
+#   반환 0 = 판정함 — stdout 에 그 길의 비-root 소유자 'uid:gid'(uid 기준 중복 없이 처음 나온 순서 · 공백 구분 · 비었으면 root 만 바꿀 수 있다).
+#   반환 1 = 판정할 수 없음 — stdout 에 사유: 'stat:<경로>'(확인 실패) · 'writable:<경로>'(그룹·기타가 쓸 수 있다 — 소유자 밖의 계정도
+#            바꿀 수 있다. sticky 폴더는 남의 항목을 바꾸지 못하므로 허용) · 'loop:<경로>'(링크 40단계 초과) · 'relative'(절대 경로가 아님).
+vp_path_controllers() {
+  local p="${1:-}" cur="" nxt="/" comp="" st="" uid="" gid="" mode="" typ="" t="" hops=0 seen=" " i=0 sticky=0 res=""
+  local -a todo=() lt=()
+  if [[ "$p" != /* ]]; then printf 'relative'; return 1; fi
+  IFS=/ read -r -a todo <<< "${p#/}"
+  while :; do
+    if ! st="$(stat -c '%u %g %a %F' -- "$nxt" 2>/dev/null)"; then printf 'stat:%s' "$nxt"; return 1; fi
+    read -r uid gid mode typ <<< "$st"
+    if [[ "$uid" != 0 && "$seen" != *" $uid:"* ]]; then seen+="$uid:$gid "; fi
+    if [[ "$typ" == symbolic* ]]; then
+      hops=$((hops + 1))
+      if (( hops > 40 )); then printf 'loop:%s' "$nxt"; return 1; fi
+      if ! t="$(readlink -- "$nxt")"; then printf 'stat:%s' "$nxt"; return 1; fi
+      if [[ "$t" == /* ]]; then cur=""; fi
+      lt=()
+      IFS=/ read -r -a lt <<< "${t#/}"
+      todo=("${lt[@]}" "${todo[@]:i}"); i=0
+    else
+      sticky=0
+      if [[ "$typ" == directory ]] && (( 8#$mode & 8#1000 )); then sticky=1; fi
+      if (( 8#$mode & 8#022 )) && (( sticky == 0 )); then printf 'writable:%s' "$nxt"; return 1; fi
+      cur="${nxt%/}"
+    fi
+    nxt=""
+    while (( i < ${#todo[@]} )); do
+      comp="${todo[i]}"; i=$((i + 1))
+      case "$comp" in
+        ''|.) ;;
+        ..) cur="${cur%/*}" ;;
+        *) nxt="$cur/$comp"; break ;;
+      esac
+    done
+    if [[ -z "$nxt" ]]; then break; fi
+  done
+  res="${seen# }"; printf '%s' "${res% }"
+  return 0
+}
+
+# vp_path_controllers_text <사유> — vp_path_controllers 의 판정 불가 사유를 사람이 읽는 문장으로.
+vp_path_controllers_text() {
+  case "${1:-}" in
+    stat:*) printf '%s 를 확인하지 못했습니다' "${1#stat:}" ;;
+    writable:*) printf '%s 를 그룹·기타가 쓸 수 있습니다(소유자 밖의 계정도 바꿀 수 있다)' "${1#writable:}" ;;
+    loop:*) printf '%s 에서 링크가 너무 많이 이어집니다' "${1#loop:}" ;;
+    relative) printf '절대 경로가 아닙니다' ;;
+    *) printf '경로를 판정하지 못했습니다(%s)' "${1:-?}" ;;
+  esac
+}
+
+# vp_policy_reader <후보 node>… — root 로 portal.env 를 읽을 때 실행해도 되는 node 하나(v2.744 최종 수정분 검토 VERIFY-02).
+#   후보 가운데 **길 전체가 root 전용**(vp_path_controllers 가 비-root 소유자 없이 판정)이고 실행할 수 있는 첫 node 를 돌려준다. 없으면 빈 값 —
+#   호출부는 node 없이(vp_safe_read 의 시한 있는 한 번 열기) 읽는다. 예전에는 서비스 계정이 바꿀 수 있는 옛 설치본 node 를 정책 한 줄을
+#   읽으려고 root 로 실행했다(--skip-signature-check 로 도구를 실행하지 않는 경로에서도).
+vp_policy_reader() {
+  local n c
+  for n in "$@"; do
+    [[ -n "$n" && -x "$n" ]] || continue
+    if c="$(vp_path_controllers "$n")" && [[ -z "$c" ]]; then printf '%s' "$n"; return 0; fi
+  done
+  return 0
+}
+
+# vp_root_read <파일> <node> [사본 경로] — root 로 도는 확인이 서비스 계정이 쓸 수 있는 파일을 **한 번만** 연다(v2.744 최종 검토 — RZ-REV-03 의 형제).
+#   `[[ -f && ! -L ]]` 로 확인한 뒤 bash 로 다시 열면 그 사이에 FIFO 로 바꿔 root 를 무기한 매달리게 하거나(열기가 막힌다) 링크로 바꿔
+#   따라가게 할 수 있다. node 가 O_NOFOLLOW·O_NONBLOCK·O_NOCTTY 로 한 번 열고, 연 fd 로 일반 파일·하드 링크 없음·크기 상한을 본 뒤 그 fd 에서 읽는다.
+#   ⚠ node 는 **root 로 실행해도 되는 것**만 넘긴다(root 소유 확인 사본 · 길 전체가 root 전용인 node — vp_policy_reader). 이 함수가 그 node 를 실행한다.
+#   stdout 첫 줄 = '<소유 uid> <권한 8진>'. 사본 경로를 주면 내용은 그 파일(새로 만든다 — O_EXCL)에, 안 주면 첫 줄 뒤에 그대로 싣는다.
+#   반환 0 = 읽음 · 10 = 일반 파일이 아님(링크·FIFO·폴더·장치·소켓·하드 링크·상한 초과) · 11 = 파일 없음 ·
+#        12 = 그 밖의 열기·읽기·사본 쓰기 오류(권한 없음 EACCES · 경로 중간이 폴더가 아님 ENOTDIR 등 — v2.744 최종 수정분 검토 VERIFY-04:
+#             예전에는 10 으로 접어 '링크·FIFO·장치' 라는 틀린 원인을 말했다) · 3 = node 없음(실행 불가) · 그 밖 = node 비정상 종료.
+#   실패(10·11·12)면 stdout 에 사유 한 마디 — 'link' · 'notreg' · 'nlink:<수>' · 'size:<바이트>' · 'absent' · 'open:<코드>' · 'io:<코드>' · 'dst:<코드>'.
+vp_root_read() {
+  local f="$1" node="$2" out="${3:-}" r=0
+  [[ -n "$node" && -x "$node" ]] || return 3
+  "$node" -e 'const fs=require("fs"),C=fs.constants;const a=process.argv.slice(1);const src=a[0],max=Number(a[1]),out=a[2]||"";
+const q=(m,c)=>{process.stdout.write(String(m));process.exit(c)};
+let fd,st,buf,off=0;
+try{fd=fs.openSync(src,C.O_RDONLY|C.O_NOFOLLOW|C.O_NONBLOCK|C.O_NOCTTY)}catch(e){const c=e.code||"error";
+if(c==="ENOENT")q("absent",11);if(c==="ELOOP")q("link",10);if(c==="ENXIO"||c==="EISDIR"||c==="EAGAIN"||c==="EWOULDBLOCK")q("notreg",10);q("open:"+c,12)}
+try{st=fs.fstatSync(fd)}catch(e){q("io:"+(e.code||"error"),12)}
+if(!st.isFile())q("notreg",10);if(st.nlink!==1)q("nlink:"+st.nlink,10);if(!(st.size<=max))q("size:"+st.size,10);
+try{buf=Buffer.alloc(st.size);while(off<st.size){const n=fs.readSync(fd,buf,off,st.size-off,off);if(n<=0)break;off+=n}}catch(e){q("io:"+(e.code||"error"),12)}
+const head=st.uid+" "+(st.mode&0o7777).toString(8)+"\n";
+if(out){try{const o=fs.openSync(out,C.O_WRONLY|C.O_CREAT|C.O_EXCL|C.O_NOFOLLOW,0o644);fs.writeSync(o,buf,0,off);fs.closeSync(o)}catch(e){q("dst:"+(e.code||"error"),12)}process.stdout.write(head)}
+else{process.stdout.write(head);process.stdout.write(buf.subarray(0,off))}' "$f" "${VP_ROOT_READ_MAX_BYTES:-16777216}" ${out:+"$out"} || r=$?
+  return $r
+}
+
+# vp_safe_read <파일> [node] [권한을 내릴 uid:gid] — 서비스 계정이 쓸 수 있는 파일을 **한 번만** 열어 읽는다(v2.744 최종 수정분 검토 VERIFY-03·06).
+#   node 를 주면 vp_root_read 다. node 가 없거나(3) 비정상 종료하면 예전처럼 '확인 뒤 bash 로 다시 열기'(시한 없음 — 그 사이 FIFO 로 바꾸면
+#   root 가 무기한 매달렸다)를 하지 않고, lstat 확인 뒤 **시한(VP_ROOT_READ_TIMEOUT 초, 기본 10) 안에서** bash 가 한 번 열고 연 fd 의
+#   종류·링크 수·inode(지금 그 경로에 있는 파일과 같은가 — 링크로 바꿔치기했으면 다르다)·크기를 본 뒤 그 fd 에서 읽는다.
+#   uid:gid 를 주면(root 일 때만 뜻이 있다) 그 시한 있는 읽기를 그 계정 권한으로 한다 — root 가 서비스 계정 경로를 직접 열지 않게.
+#   ⚠ 정직한 한계: node 없는 경로는 bash 의 열기가 링크를 따라간다 — 확인(lstat)과 열기 사이에 timeout·하위 셸·bash 기동이 끼어 있어
+#     창이 수십 ms 다(VB 검토 strace 실측 33.7ms — strace 부하 포함). 그 사이 링크로 바꾸면 그 대상을 한 번 연 뒤 inode 가 달라 버리고
+#     (내용은 쓰지 않는다), FIFO 를 가리키는 링크면 열기가 시한까지 기다린다. 그래서 node 를 쓸 수 있으면 언제나 node 쪽(vp_root_read)을 쓴다 —
+#     root 가 이 폴백을 직접 여는 것은 root 로 실행할 node 가 하나도 없는 경우뿐이다(옛 설치본 node 를 권한 내려 실행할 수 없는 root 분기).
+#   stdout·반환은 vp_root_read 와 같다(+ 124 = 시한 초과 · 사유 'open:no-timeout'(timeout 명령 없음)·'open:no-drop'(권한을 내릴 수 없음)).
+vp_safe_read() {
+  local f="$1" node="${2:-}" as="${3:-}" out="" r=0 err="" u="" max="${VP_ROOT_READ_MAX_BYTES:-16777216}" secs="${VP_ROOT_READ_TIMEOUT:-10}"
+  local -a pre=()
+  if [[ -n "$node" ]]; then
+    if out="$(vp_root_read "$f" "$node")"; then printf '%s' "$out"; return 0; else r=$?; fi
+    case "$r" in 10|11|12) printf '%s' "$out"; return "$r" ;; esac
+    # 3 = node 를 실행할 수 없다 · 그 밖 = node 비정상 종료 — 아래 시한 있는 한 번 열기로(사유는 호출부가 묻지 않는다)
   fi
-  exec {fd}<&-
+  [[ "$max" =~ ^[0-9]+$ ]] || max=16777216
+  [[ "$secs" =~ ^[1-9][0-9]*$ ]] || secs=10
+  if ! err="$(LC_ALL=C stat -c '%F' -- "$f" 2>&1)"; then
+    case "$err" in
+      *"No such file"*) printf 'absent'; return 11 ;;
+      *"Not a directory"*) printf 'open:ENOTDIR'; return 12 ;;
+      *"Permission denied"*) printf 'open:EACCES'; return 12 ;;
+      *) printf 'open:stat'; return 12 ;;
+    esac
+  fi
+  case "$err" in
+    symbolic*) printf 'link'; return 10 ;;
+    regular*) ;;
+    *) printf 'notreg'; return 10 ;;
+  esac
+  if ! command -v timeout >/dev/null 2>&1; then printf 'open:no-timeout'; return 12; fi
+  if [[ -n "$as" && "$(id -u)" == 0 ]]; then
+    if command -v setpriv >/dev/null 2>&1; then pre=(setpriv --reuid="${as%%:*}" --regid="${as##*:}" --clear-groups --)
+    elif command -v runuser >/dev/null 2>&1 && u="$(getent passwd "${as%%:*}" | cut -d: -f1)" && [[ -n "$u" ]]; then pre=(runuser -u "$u" --)
+    else printf 'open:no-drop'; return 12
+    fi
+  fi
+  r=0
+  ( cd / && exec timeout -k 2 "$secs" "${pre[@]}" bash -c 'f=$1; max=$2
+if ! exec 3<"$f"; then if [ -r "$f" ]; then printf "open:error"; else printf "open:EACCES"; fi; exit 12; fi
+a=$(stat -L -c "%d:%i %u %a %h %s %F" /dev/fd/3 2>/dev/null) || { printf "io:stat"; exit 12; }
+b=$(stat -c "%d:%i" -- "$f" 2>/dev/null) || { printf "notreg"; exit 10; }
+read -r id uid mode nl sz typ <<< "$a"
+case "$typ" in regular*) ;; *) printf "notreg"; exit 10 ;; esac
+[ "$id" = "$b" ] || { printf "notreg"; exit 10; }
+[ "$nl" = 1 ] || { printf "nlink:%s" "$nl"; exit 10; }
+[ "$sz" -le "$max" ] || { printf "size:%s" "$sz"; exit 10; }
+printf "%s %s\n" "$uid" "$mode"
+head -c "$max" <&3' _ "$f" "$max" 2>/dev/null ) || r=$?
+  return $r
+}
+
+# vp_root_read_text <파일> <반환 코드> <사유 한 마디> — vp_root_read·vp_safe_read 실패를 **실제 원인**대로 말한다(v2.744 최종 수정분 검토 VERIFY-04).
+vp_root_read_text() {
+  local f="$1" rc="$2" why="${3:-}" c=""
+  case "$rc:$why" in
+    10:link) printf '%s 는 심볼릭 링크라 따라가 읽지 않습니다' "$f" ;;
+    10:nlink:*) printf '%s 는 하드 링크라(링크 수 %s) 읽지 않습니다' "$f" "${why#nlink:}" ;;
+    10:size:*) printf '%s 가 크기 상한(%s바이트)을 넘어(%s바이트) 읽지 않습니다' "$f" "${VP_ROOT_READ_MAX_BYTES:-16777216}" "${why#size:}" ;;
+    10:*) printf '%s 가 일반 파일이 아니거나(FIFO·폴더·장치·소켓) 확인 사이에 바뀌어 읽지 않습니다' "$f" ;;
+    12:open:no-timeout) printf 'timeout 명령이 없어 %s 를 시한 없이 열지 않습니다' "$f" ;;
+    12:open:no-drop) printf 'setpriv·runuser 가 없어 권한을 내려 %s 를 열 수 없습니다 — root 로 열지 않습니다' "$f" ;;
+    12:open:*)
+      c="${why#open:}"
+      case "$c" in
+        EACCES|EPERM) printf '%s 를 열 권한이 없습니다(%s — 이 계정은 그 파일이나 폴더를 읽을 수 없습니다)' "$f" "$c" ;;
+        ENOTDIR) printf '%s 의 경로 중간이 폴더가 아니라 열 수 없습니다(ENOTDIR)' "$f" ;;
+        ENAMETOOLONG) printf '%s 의 경로가 너무 길어 열 수 없습니다(ENAMETOOLONG)' "$f" ;;
+        *) printf '%s 를 열지 못했습니다(%s)' "$f" "$c" ;;
+      esac ;;
+    12:io:*) printf '%s 를 읽는 중 오류가 났습니다(%s)' "$f" "${why#io:}" ;;
+    12:dst:*) printf '%s 의 사본을 쓰지 못했습니다(%s)' "$f" "${why#dst:}" ;;
+    124:*|137:*) printf '%s 를 읽는 데 시한(%s초)을 넘겨 끊었습니다(확인 사이에 FIFO 등으로 바뀌었을 수 있다)' "$f" "${VP_ROOT_READ_TIMEOUT:-10}" ;;
+    *) printf '%s 를 읽지 못했습니다(코드 %s)' "$f" "$rc" ;;
+  esac
+}
+
+# vp_root_env_policy <config_dir> [node] — portal.env 의 UPGRADE_SIGNATURE_POLICY 를 **root 소유이고 그룹·기타가 쓸 수 없는 파일일 때만** 돌려준다.
+#   연 파일(fd)의 소유자·권한을 보므로 확인 뒤 바꿔치기가 끼어들지 않는다. 믿을 수 없으면 값을 쓰지 않고 한 줄 알린다(stderr).
+#   v2.744: 한 번만 연다(vp_safe_read — node 가 있으면 vp_root_read, 없거나 비정상 종료면 시한 있는 한 번 열기).
+#   v2.744(최종 수정분 검토 VERIFY-05): 권한도 본다 — root 소유라도 그룹·기타가 쓸 수 있으면(root:vmportal 0660 등) 서비스 계정이 정책을
+#     warn 으로 낮출 수 있었다. 형제 vp_stage_trust_copy · install.sh vp_rma_env_request 와 같은 '& 022' 판정이다.
+#   ⚠ node 는 root 로 실행해도 되는 것만 넘긴다(vp_policy_reader) — 이 함수가 그 node 를 실행한다.
+vp_root_env_policy() {
+  local f="$1/portal.env" node="${2:-}" res="" rc=0 st="" uid="" mode="" body="" v="" re=$'(^|\n)UPGRADE_SIGNATURE_POLICY='
+  if res="$(vp_safe_read "$f" "$node")"; then rc=0; else rc=$?; fi
+  case "$rc" in
+    0) ;;
+    11) return 0 ;;
+    *) echo "ⓘ $(vp_root_read_text "$f" "$rc" "$res") — 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다." >&2; return 0 ;;
+  esac
+  st="${res%%$'\n'*}"; uid="${st%% *}"; mode="${st##* }"
+  if [[ "$res" == *$'\n'* ]]; then body="${res#*$'\n'}"; fi
+  if [[ "$uid" == 0 && "$mode" =~ ^[0-7]+$ ]] && ! (( 8#$mode & 8#022 )); then
+    v="$(printf '%s\n' "$body" | grep -E '^UPGRADE_SIGNATURE_POLICY=' 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  elif [[ "$body" =~ $re ]]; then
+    if [[ "$uid" == 0 ]]; then
+      echo "ⓘ $f 는 root 소유지만 그룹·기타가 쓸 수 있어(권한 $mode — 서비스 계정이 쓸 수 있다) 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다(sudo chmod go-w 로 고치세요)." >&2
+    else
+      echo "ⓘ $f 는 root 소유가 아니라(서비스 계정이 쓸 수 있다) 그 안의 UPGRADE_SIGNATURE_POLICY 를 root 확인에 쓰지 않습니다." >&2
+    fi
+  fi
   printf '%s' "$v"
+  return 0
 }
 
 # vp_as_user <계정> 명령… — 권한을 그 계정으로 내린 뒤 실행한다(runuser → setpriv). 터미널이면 새 pty 를 만든다
@@ -107,7 +295,7 @@ vp_write_launcher() {
     echo '# 앱 트리(<prefix>/app)·런타임은 서비스 계정이 쓸 수 있다 — root 로 그 파일을 읽거나 실행하지 않는다.'
     echo 'set -uo pipefail'
     printf 'PREFIX=%q\nSERVICE_USER=%q\nSERVICE_NAME=%q\nCONFIG_DIR=%q\nTOOLS=%q\nTOOL=%q\nKIND=%q\n' "$prefix" "$user" "$svc" "$cdir" "$tools" "$tool" "$kind"
-    declare -f vp_as_user vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok
+    declare -f vp_as_user vp_root_read vp_safe_read vp_root_read_text vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok
     cat <<'BODY'
 if [[ "$KIND" == verify ]]; then
   # 서명 확인 — root 소유 사본(node·server/src·공개키 목록)만 신뢰 기준으로 쓴다.
@@ -116,7 +304,7 @@ if [[ "$KIND" == verify ]]; then
     exit 2
   fi
   POLICY="${UPGRADE_SIGNATURE_POLICY:-}"
-  [[ -n "$POLICY" ]] || POLICY="$(vp_root_env_policy "$CONFIG_DIR")"
+  [[ -n "$POLICY" ]] || POLICY="$(vp_root_env_policy "$CONFIG_DIR" "$TOOLS/verify/node")"
   # v2.742(INJPKG-01): 호스트 키 파일의 root 소유 사본 — 그 회수 항목을 함께 합친다(없으면 signature.js 가 '없음' 으로 본다).
   exec env CONFIG_DIR="$CONFIG_DIR" UPGRADE_SIGNATURE_POLICY="$POLICY" VP_ROOT_TRUST_COPY="$TOOLS/trust/release-signing-keys.conf" \
     "$TOOLS/verify/node" "$TOOLS/verify/server/src/upgrade/verifyCli.js" "$@"
@@ -149,22 +337,36 @@ BODY
 #     원본이 없거나 · root 소유가 아니거나 · 읽히지 않으면 **지난 사본을 그대로** 둔다 — 그 상태는 서비스 계정이 만들 수 있으므로
 #     (CONFIG_DIR 를 쓸 수 있다) 원본을 지우는 것만으로 회수가 풀리면 안 된다. 반환 0 = 준비(사본 없음 포함) · 1 = 실패.
 vp_stage_trust_copy() {
-  local src="$1/$VP_HOST_KEYS_NAME" cur="$2/trust/$VP_HOST_KEYS_NAME" dir="$3/trust" node="$4" fd st=""
-  local dst="$dir/$VP_HOST_KEYS_NAME" fresh=0
+  local src="$1/$VP_HOST_KEYS_NAME" cur="$2/trust/$VP_HOST_KEYS_NAME" dir="$3/trust" node="$4" st="" rc=0 hdr=""
+  local dst="$dir/$VP_HOST_KEYS_NAME" fresh=0 keep="root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
   ( umask 022; mkdir -p -- "$dir" ) || return 1
-  if [[ -f "$src" && ! -L "$src" ]] && exec {fd}<"$src"; then
-    st="$(stat -L -c '%u %a' "/dev/fd/$fd" 2>/dev/null || echo 'x 0')"
-    if [[ "${st%% *}" == 0 ]] && ! (( 8#${st##* } & 8#022 )); then
-      if cat <&"$fd" > "$dst.part" 2>/dev/null && [[ -x "$node" ]] \
-        && "$node" -e 'const fs=require("fs");const f=process.argv[1];if(fs.statSync(f).size>262144)process.exit(1);const d=JSON.parse(fs.readFileSync(f,"utf8"));if(!d||typeof d!=="object"||Array.isArray(d))process.exit(1)' "$dst.part" 2>/dev/null; then
-        fresh=1
-      else
-        echo "⚠ $src 를 신뢰 키 문서(JSON)로 읽지 못해 root 소유 사본을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
-      fi
-    else
-      echo "ⓘ $src 는 root 소유가 아니거나 그룹·기타가 쓸 수 있어 root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+  rm -f -- "$dst.part"
+  # v2.744(최종 검토 — RZ-REV-03 의 형제): 확인 뒤 bash 로 다시 열지 않고 vp_root_read 로 한 번만 연다(FIFO 로 바꿔 root 를 매달거나
+  #   링크로 바꿔 따라가게 하지 못하게).
+  # v2.744(최종 수정분 검토 VERIFY-06): node 를 실행할 수 없으면(없음·실행 불가 마운트·비정상 종료) 원본을 **열지 않는다** — 그때는 아래
+  #   JSON 검사도 할 수 없어 사본을 바꿀 수 없는데, 예전 경로는 '확인 뒤 다시 열기'(시한 없음)로 원본을 열어 root 를 매달 수 있었다.
+  if [[ -z "$node" || ! -x "$node" ]]; then
+    if [[ -e "$src" || -L "$src" ]]; then
+      echo "ⓘ 검사용 node(${node:-없음})를 실행할 수 없어 $src 를 읽지 않습니다 — $keep"
     fi
-    exec {fd}<&-
+  else
+    if hdr="$(vp_root_read "$src" "$node" "$dst.part")"; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0)
+        st="${hdr%%$'\n'*}"
+        if [[ "${st%% *}" == 0 && "${st##* }" =~ ^[0-7]+$ ]] && ! (( 8#${st##* } & 8#022 )); then
+          if "$node" -e 'const fs=require("fs");const f=process.argv[1];if(fs.statSync(f).size>262144)process.exit(1);const d=JSON.parse(fs.readFileSync(f,"utf8"));if(!d||typeof d!=="object"||Array.isArray(d))process.exit(1)' "$dst.part" 2>/dev/null; then
+            fresh=1
+          else
+            echo "⚠ $src 를 신뢰 키 문서(JSON)로 읽지 못해 root 소유 사본을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+          fi
+        else
+          echo "ⓘ $src 는 root 소유가 아니거나 그룹·기타가 쓸 수 있어 root 소유 사본(회수 목록)을 바꾸지 않습니다 — 지난 사본이 있으면 그대로 둡니다."
+        fi ;;
+      11) ;;
+      10|12) echo "ⓘ $(vp_root_read_text "$src" "$rc" "$hdr") — $keep" ;;
+      *) echo "ⓘ 검사용 node 가 정상 종료하지 않아(코드 $rc) $src 를 읽지 않습니다 — $keep" ;;
+    esac
   fi
   if [[ $fresh -eq 1 ]]; then
     mv -f -- "$dst.part" "$dst" || return 1
@@ -224,21 +426,43 @@ verify_release_package() {
   if [[ -z "$pkg" && -f "$sdir/../$base.tar.gz" ]]; then pkg="$sdir/../$base.tar.gz"; fi
   if [[ -z "$man" && -f "$sdir/../vmware-portal-$ver.manifest.json" ]]; then man="$sdir/../vmware-portal-$ver.manifest.json"; fi
 
-  local node js trust runas_uid="" runas_gid="" tools
+  local node js trust runas_uid="" runas_gid="" tools anchored=0 noverify="" rnode="" res=""
   local old_node="$prefix/runtime/node/bin/node" old_js="$prefix/app/server/src/upgrade/verifyCli.js"
   tools="$(vp_root_tools_dir "$prefix")"
   if vp_anchor_ok "$tools"; then
     # v2.741(INJPKG-01): 지난 install.sh 가 만든 root 소유 사본 — 서비스 계정이 바꿀 수 없는 신뢰 기준이다.
-    node="$tools/verify/node"; js="$tools/verify/server/src/upgrade/verifyCli.js"; trust="existing"
+    node="$tools/verify/node"; js="$tools/verify/server/src/upgrade/verifyCli.js"; trust="existing"; anchored=1
   elif [[ -d "$prefix/app" && -x "$old_node" && -f "$old_js" ]]; then
     node="$old_node"; js="$old_js"; trust="existing"
     # root 소유 사본이 아직 없는 설치본(v2.741 이전) — 앱 트리의 도구는 서비스 계정이 쓸 수 있으므로 root 로 실행하지 않고
-    #   그 파일의 소유자 권한으로 실행한다(서비스 계정이 변조했다면 이 확인을 믿을 수 없다 — 그 사실을 말한다).
+    #   그 도구를 바꿀 수 있는 계정 권한으로 실행한다(서비스 계정이 변조했다면 이 확인을 믿을 수 없다 — 그 사실을 말한다).
     #   ⚠ 권한을 내리는 것은 **root 로 실행할 때만**이다 — root 가 아니면 넘을 권한 경계가 없고(지금 계정이 이미 그 권한이다)
     #     setpriv·runuser 는 다른 계정으로 바꿀 수 없어 확인이 통째로 실패한다(v2.741 CI — uid 1001 에서 setgroups 거부).
-    local ou; ou="$(stat -c %u -- "$old_js" 2>/dev/null || echo 0)"
-    if [[ "$(id -u)" == 0 && "$ou" != 0 ]]; then
-      runas_uid="$ou"; runas_gid="$(stat -c %g -- "$old_js" 2>/dev/null || echo "$ou")"
+    #   v2.744(최종 수정분 검토 VERIFY-01): 실행 계정은 old_js 의 소유자 하나가 아니라 **node·js 를 찾아가는 길 전체**(vp_path_controllers —
+    #     폴더·링크·파일을 lstat 으로 · 링크는 대상의 길까지)를 바꿀 수 있는 계정으로 정한다. 예전 'stat -c %u old_js || echo 0' 은
+    #     ① 중간 링크를 따라가(app 을 root 소유 폴더로 가는 링크로 바꾸면 0) ② node 를 보지 않았고 ③ stat 이 실패하면 0 — 곧 서비스 계정이
+    #     바꾼 node 를 root 로 실행했다. 길 전체가 root 전용이면 root 로(--user root 설치), 바꿀 수 있는 비-root 계정이 하나면 그 계정으로,
+    #     판정할 수 없거나 여러 계정이 바꿀 수 있으면 **실행하지 않는다**(아래에서 멈추거나 --skip-signature-check 면 확인 없이 넘긴다).
+    local ou="" og="" ctl_n="" ctl_j="" c="" seen=" " n=0
+    if [[ "$(id -u)" == 0 ]]; then
+      if ! ctl_n="$(vp_path_controllers "$old_node")"; then
+        noverify="기존 설치본의 확인 도구(node)를 누가 바꿀 수 있는지 판정하지 못했습니다 — $(vp_path_controllers_text "$ctl_n")"
+      elif ! ctl_j="$(vp_path_controllers "$old_js")"; then
+        noverify="기존 설치본의 확인 도구(verifyCli.js)를 누가 바꿀 수 있는지 판정하지 못했습니다 — $(vp_path_controllers_text "$ctl_j")"
+      else
+        for c in $ctl_n $ctl_j; do
+          if [[ "$seen" != *" ${c%%:*}:"* ]]; then seen+="$c "; n=$((n + 1)); ou="${c%%:*}"; og="${c##*:}"; fi
+        done
+        if (( n == 0 )); then ou=0
+        elif (( n > 1 )); then
+          ou=""; noverify="기존 설치본의 확인 도구를 여러 계정(uid $(printf '%s ' $seen | sed 's/:[0-9]*//g; s/ $//; s/ /·/g'))이 바꿀 수 있어 어느 계정으로도 안전하게 실행할 수 없습니다"
+        fi
+      fi
+    fi
+    if [[ -n "$noverify" ]]; then
+      :   # 아래에서 멈춘다(그 도구를 root 로 실행하지 않는다)
+    elif [[ "$(id -u)" == 0 && "$ou" != 0 ]]; then
+      runas_uid="$ou"; runas_gid="$og"
       echo "⚠ 기존 설치본에 root 소유 서명 확인 도구가 없습니다(v2.741 이전) — 이번 확인은 기존 설치본의 도구를 그 소유 계정(uid $ou) 권한으로 실행합니다."
       echo "  그 계정이 변조됐다면 이 확인을 믿을 수 없습니다. 이번 설치가 root 소유 확인 도구($tools)를 만듭니다."
     fi
@@ -250,14 +474,49 @@ verify_release_package() {
     fi
   fi
 
+  if [[ -n "$noverify" ]]; then
+    # v2.744(최종 수정분 검토 VERIFY-01): 예전에는 이 경우 root 로 열렸다(실패하면 열리는 기본값). 이제 실행하지 않는다.
+    if [[ "$skip" == "1" ]]; then
+      echo "⚠ --skip-signature-check: ${noverify}. 그 도구를 실행하지 않고(root 로 실행하지 않는다) 서명 확인 없이 설치를 계속합니다."
+      return 0
+    fi
+    echo "✗ ${noverify}." >&2
+    echo "  서명을 확인할 수 없어 설치를 멈춥니다. 아무것도 바뀌지 않았습니다." >&2
+    echo "  조치: ① 기존 설치 폴더($prefix)와 그 위 폴더를 서비스 계정 하나(또는 root)만 쓸 수 있게 고친 뒤 다시 실행하세요" >&2
+    echo "         (예: sudo chown -R <서비스 계정>: \"$prefix\" · 그룹·기타 쓰기 빼기 sudo chmod -R go-w \"$prefix\")." >&2
+    echo "        ② 또는 신뢰하는 다른 서버에서 release-verify.sh 로 패키지와 manifest 를 확인한 뒤 --skip-signature-check 로 설치하세요(docs/RELEASE-SIGNING.md)." >&2
+    return 1
+  fi
+
+  # root 로 portal.env 를 읽을 node(v2.744 최종 수정분 검토 VERIFY-02) — root 로 실행해도 되는 것만: root 소유 확인 사본(위 vp_anchor_ok)
+  #   · 새 패키지의 node(trust=package — 바로 아래 _vp_verify_run 과 install.sh 의 VP_CFG_NODE 가 어차피 root 로 실행한다) ·
+  #   길 전체가 root 전용인 옛 설치본 node(--user root). 서비스 계정이 바꿀 수 있는 옛 설치본 node 는 정책 한 줄을 읽으려고 root 로
+  #   실행하지 않는다(예전에는 --skip-signature-check 로 도구를 실행하지 않는 경로에서도 실행했다). 없으면 node 없이 시한 있는 한 번 열기로 읽는다.
+  #   ⚠ 새 패키지 node 를 vp_policy_reader 로 거르지 말 것(VB 검토 — 재현): 관리자가 자기 홈(비-root 소유)에 패키지를 풀고 sudo 로 설치하면
+  #     길 전체가 root 전용이 아니라 거부되어, 정책 읽기만 링크를 따라 여는 bash 폴백으로 떨어졌다 — 같은 node 를 곧 root 로 실행하므로
+  #     거부해서 얻는 보호는 없고 portal.env 바꿔치기 방어만 약해진다.
+  if [[ $anchored -eq 1 || "$trust" == "package" ]]; then rnode="$node"; else rnode="$(vp_policy_reader "$node")"; fi
   local pol="${UPGRADE_SIGNATURE_POLICY:-}"
   if [[ -z "$pol" ]]; then
     if [[ -n "$runas_uid" || "$(id -u)" != 0 ]]; then
       # 소유 계정 권한으로 도는 옛 도구는 예전처럼 portal.env 정책을 따른다(그 도구 자체가 그 계정의 신뢰 수준이다).
       #   root 가 아닌 실행도 같다 — 넘는 권한 경계가 없으므로 root 소유 파일만 받는 규칙이 지킬 것이 없다.
-      pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+      #   v2.744(최종 수정분 검토 VERIFY-03): root 가 서비스 계정 경로를 grep 으로 직접 열지 않는다(FIFO 면 시한 없이 매달리고 링크면 따라갔다) —
+      #   그 소유 계정 권한으로 시한 안에서 한 번 연다(vp_safe_read — node 를 실행하지 않는다 · 소유자는 예전처럼 따지지 않는다).
+      local body="" rrc=0
+      if [[ -n "$runas_uid" ]]; then
+        if res="$(vp_safe_read "$cdir/portal.env" "" "$runas_uid:$runas_gid")"; then rrc=0; else rrc=$?; fi
+        if [[ $rrc -eq 0 ]]; then
+          if [[ "$res" == *$'\n'* ]]; then body="${res#*$'\n'}"; fi
+          pol="$(printf '%s\n' "$body" | grep -E '^UPGRADE_SIGNATURE_POLICY=' 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+        elif [[ $rrc -ne 11 ]]; then
+          echo "ⓘ $(vp_root_read_text "$cdir/portal.env" "$rrc" "$res") — 그 안의 UPGRADE_SIGNATURE_POLICY 를 쓰지 않습니다(정책은 확인 도구의 기본값을 따릅니다)." >&2
+        fi
+      else
+        pol="$(grep -E '^UPGRADE_SIGNATURE_POLICY=' "$cdir/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"   # root 가 아니다 — 예전 그대로
+      fi
     else
-      pol="$(vp_root_env_policy "$cdir")"   # root 로 도는 확인 — root 소유 portal.env 의 정책만 받는다
+      pol="$(vp_root_env_policy "$cdir" "$rnode")"   # root 로 도는 확인 — root 소유·그룹/기타 쓰기 없는 portal.env 의 정책만 받는다(한 번만 연다)
     fi
   fi
 

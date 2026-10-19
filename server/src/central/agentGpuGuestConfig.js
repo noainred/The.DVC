@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings, gpuGuestNonDefaultPatch } from '../gpu/settings.js';
 // v2.743(RECENT-01): 대소문자 중복을 합칠 때 남길 키의 근거(엣지 실제 이름) — 중복이 있을 때만 읽는다(edgeNameEvidence).
@@ -55,6 +55,8 @@ export function gpuGuestConfigLoadError() { if (!_loadErr.get() && !fs.existsSyn
  *      VM 계정·고정 IP 는 합집합(같은 VM 은 최근 것 — 빈 비밀번호는 같은 계정이면 옛 값, 계정이 바뀌었으면 승계하지 않는다 v2.611).
  *   대가(정직 기록): 관리자가 'Edge-A' 행에서 **일부러** 끄거나 비운 값은 되살아난다 — 빈 바탕에서 온 기본값과 사본만으로는 가를 수 없어
  *   자격증명·수집을 잃지 않는 쪽을 골랐다. 그 사실(옛 값을 유지한 항목 경로)을 상태(gpuGuestFoldStatus)·목록 행(folded)·콘솔에 남긴다.
+ *   v2.744(감사 LEFT-08): 상태는 배포 목록 응답(GET /admin/gpu-guest/deploy/agents)의 foldReport 로, 행의 folded 는 같은 응답의 행으로 화면까지
+ *   간다(GpuGuestSettings.jsx gpuGuestFoldNote — 설정 대상 목록의 짧은 표지 + title 상세). 예전에는 둘 다 화면이 읽지 않아 콘솔에만 남았다.
  * @param {object} map 파일에서 읽은 { agent: settings }
  * @param {{authNames?: Iterable<string>, regNames?: Iterable<string>}} [names] 엣지 실제 이름 근거(글자 그대로 비교)
  * @returns {{ map: object, merged: Array<{kept:string, dropped:string[], keptBy:'authenticated'|'registry'|'older', keptOlder:string[], vcentersFromOlder:string[], droppedSecrets:string[]}> }}
@@ -141,6 +143,20 @@ function edgeNameEvidence() {
 let _foldReport = null;
 export function gpuGuestFoldStatus() { return _foldReport ? structuredClone(_foldReport) : null; }
 const foldOfKey = (k) => (_foldReport ? _foldReport.groups.find((g) => g.kept === k) || null : null);
+// v2.744(회귀 검토 GI-R2): 합친 키에 관리자 저장이 성공하면 그 그룹의 표지를 내린다 — 화면은 '확인하고 필요하면 고쳐 저장하세요' 라고
+//   안내하는데 예전에는 _foldReport 가 로드 때 한 번 정해져 중앙을 재시작할 때까지 남았다(저장이 먹지 않은 것처럼 보였다).
+//   그룹은 groups 에서 빼고 resolved 에 '언제 저장으로 확인됐는지' 만 남긴다(값·비밀번호 없음 · 최근 RESOLVED_MAX 개).
+const RESOLVED_MAX = 50;
+function resolveFoldOf(k) {
+  if (!_foldReport || !Array.isArray(_foldReport.groups)) return;
+  const lk = String(k).toLowerCase();
+  const i = _foldReport.groups.findIndex((g) => String(g.kept).toLowerCase() === lk);
+  if (i < 0) return;
+  const [g] = _foldReport.groups.splice(i, 1);
+  const resolved = Array.isArray(_foldReport.resolved) ? _foldReport.resolved : [];
+  resolved.push({ kept: g.kept, dropped: Array.isArray(g.dropped) ? [...g.dropped] : [], at: Date.now() });
+  _foldReport.resolved = resolved.slice(-RESOLVED_MAX);
+}
 
 // v2.296 배포 사본 계정 복호. ⚠ 손상 시 조용히 빈 객체로 출발하면 다음 persist()가 온전했던
 // 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
@@ -162,7 +178,10 @@ try {
     }
     _loadErr.ok();
   } else _loadErr.missing();
-} catch (err) { _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
+} catch (err) {
+  // v2.744(최종 검토 RG2744-02): 콘솔 사유는 요약이다 — 원문은 게스트 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
+  _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`); byAgent = Object.create(null);
+}
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -192,6 +211,7 @@ export function setAssignedGpuGuest(agent, partial, dropped = []) {
   next._updatedAt = Date.now();
   byAgent[k] = next;
   persist();
+  resolveFoldOf(k); // v2.744(회귀 검토 GI-R2): 디스크 쓰기가 성공한 뒤에만(실패면 표지를 남긴다)
   return next;
 }
 

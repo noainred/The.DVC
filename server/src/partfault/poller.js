@@ -83,7 +83,11 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     const prev = await openFaults();
     // 이번 주기에 판정 대상을 낸 agent — 중앙 로컬('') + 보고가 있는 엣지. 없는 agent 의 열린 장애는 'no-report'(C5).
     const agentsReported = new Set(['', ...edge.agents.map((a) => String(a.agent || '').toLowerCase())]);
-    const tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason } });
+    // v2.744(감사 EDGE-01): 장비군 등록부를 읽지 못한 노드(중앙 로컬 '' · 신선한 엣지 보고) — 그 장비군 장비가 빠진 열린 장애는
+    //   '재배정·등록 삭제(unassigned)' 가 아니라 '등록부 손상' 으로 보류한다(transition.js).
+    const scopeUnreadable = { ...(edge.scopeUnreadable || {}) };
+    for (const [sc, e] of Object.entries(local.registryUnreadable || {})) scopeUnreadable[`|${sc}`] = e?.reason || '사유 미상';
+    const tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable } });
     const saved = await applyTransition(tr);
 
     let note = null;
@@ -105,6 +109,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     // 성공·실패 **둘 다** 로그를 남긴다(무음 실패 금지).
     console.log(`[partfault] 점검(${reason}) ${Date.now() - t0}ms — 신규 ${tr.stats.opened} · 해소 ${tr.stats.closed} · 변화 ${tr.stats.changed}`
       + ` · 보류 unknown ${tr.stats.heldUnknown}/장비실패 ${tr.stats.heldDeviceFailed}/컬렉션실패 ${tr.stats.heldCollectionFailed}/누락 ${tr.stats.heldMissing}`
+      + (tr.stats.heldRegistryUnreadable ? `/등록부손상 ${tr.stats.heldRegistryUnreadable}` : '')
       + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : ''));
     return { ok: true, ..._last };
   } catch (e) {

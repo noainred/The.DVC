@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { compactSensor, expandCompact, mergeSensors, SENSOR_LIST_MAX } from './sensorDetail.js';
@@ -47,7 +47,7 @@ function load() {
       for (const [k, v] of Object.entries(obj)) if (v && typeof v === 'object') collection.set(k, v);
     }
   } catch (e) {
-    console.warn(`[idrac] 센서 상세 캐시를 읽지 못해 새로 시작합니다: ${e?.message || e}`);
+    console.warn(`[idrac] 센서 상세 캐시를 읽지 못해 새로 시작합니다: ${safeLoadText(e)}`);
     collection = new Map();
   }
 }

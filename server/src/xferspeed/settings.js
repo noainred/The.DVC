@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js';
 import { demoOn } from '../mock/demo/flags.js';
@@ -158,7 +158,8 @@ export function loadXferSpeedSettings() {
     return normalizeSettings(_lastGood);
   } catch (e) {
     // 손상은 보존한다 — 다음 저장이 온전했던 원본을 덮어쓰지 않게(v2.190 규약). 기본값은 꺼짐이라 안전한 쪽이다.
-    _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) };
+    // v2.744(최종 검토 리드): 원문(JSON.parse 오류 = 그 파일의 조각)이 아니라 요약을 싣는다 — 이 값은 설정·상태 응답과 서비스 점검에 실린다.
+    _loadError = { at: Date.now(), reason: safeLoadText(e, 200) || '설정 파일을 읽지 못했습니다(사유 미상)' };
     try { preserveCorrupt(FILE()); } catch { /* 보존 실패는 best effort */ }
     return normalizeSettings({});
   }

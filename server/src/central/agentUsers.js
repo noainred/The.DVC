@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { hashPassword } from '../auth/auth.js';
 import { agentKeyOf } from '../util/agentKey.js';
 import { capStr } from '../util/capStr.js'; // v2.612: 상주 사유 문자열은 평탄화해 자른다(v2.607 TIM2607-01)
@@ -76,7 +76,10 @@ try {
   }
 } catch (err) {
   if (fs.existsSync(FILE)) {
-    preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${err.message}`);
+    // v2.744(최종 검토 RG2744-02): 콘솔 사유는 요약이다(원문 = 비밀번호 해시 앞부분 같은 파일 조각 — 콘솔 링버퍼로 나간다).
+    //   메모리의 _loadError.reason 은 원문 그대로 둔다 — 밖으로 나가는 경로(routes/central.js registryUnreadable)가 summarizeRegistryError 로 요약하고
+    //   관리자용 줄·칸 위치가 이 원문에서 나온다.
+    preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
     _loadError = { at: Date.now(), reason: capStr(String(err?.message || err), 200) };
   }
   byAgent = Object.create(null);

@@ -11,6 +11,119 @@
  */
 import { healthWord } from '../../storage/healthWord.js';   // v2.742 DEV-02: 상태 단어 판정 단일 소스(v2.586)
 
+/* 줄 끝 문자(\n·\r·U+2028·U+2029) — 정규식의 '.' 이 맞추지 않는 글자. 줄은 \r?\n 으로 나눴지만 외로운 \r·U+2028 은 남을 수 있다. */
+const LINE_TERM = /[\n\r\u2028\u2029]/;
+const WS_RE = /\s/;
+
+/*
+ * v2.744(회귀 검토 GH-R2): 이 파일의 '접두 + 공백 + 값' 꼴 정규식(`…:\s*(.+)$`·`\s*(.*)$`)은 값 앞 공백 뒤에 외로운 \r·U+2028 이
+ *   오면 (공백 길이 × 줄 길이)로 역추적했다 — 3만 자 공백 줄 하나에 parseChassisShow·parseSwitchShow·parseSfpShow·parseNsRoles·
+ *   parseSensorShow 가 0.8~1.4초, parseBottleneckMon·parseFabricShow·parseTempShow 가 1.7~2.2초 멈췄다(장비 출력은 외부 입력 —
+ *   svcDiag.js INJPKG-02 와 같은 꼴의 형제 누락). 접두만 정규식으로 맞추고(한 가지로만 맞는 접두) 값은 아래 선형 함수가 고른다.
+ *   각 함수는 예전 정규식과 결과가 같고 test/audit2744rg.test.js 가 무작위 입력·파서 전체 결과(sha256)로 대조한다 —
+ *   정규식으로 되돌리지 말 것.
+ */
+
+/**
+ * (순수) `^접두\s*(.+)$`(plus) · `^접두\s*(.*)$` 를 선형으로 — 예전 정규식과 같은 결과.
+ * 규칙: 값 = 접두 뒤 앞 공백을 뺀 나머지이고 그 안에 줄 끝 문자가 있으면 맞지 않는다. 나머지가 공백뿐이면 (.*) 는 '',
+ *   (.+) 는 마지막 한 글자(그것이 줄 끝 문자가 아닐 때 — 탐욕 \s* 가 한 글자를 돌려준 결과)다.
+ * @param {string} line
+ * @param {RegExp} head `^` 로 시작하는 접두 정규식 — 예전 정규식에서 끝의 꼬리를 뗀 것(g·y 플래그 없음, 한 가지로만 맞을 것)
+ * @param {boolean} [plus] true = 꼬리가 (.+), false = (.*)
+ * @returns {Array<string|undefined>|null} [줄, ...접두 그룹, 값] — 예전 match 결과와 같은 자리에 같은 그룹
+ */
+export function tailMatch(line, head, plus = true) {
+  const s = String(line);
+  const h = head.exec(s);
+  if (!h || h.index !== 0) return null;
+  const rest = s.slice(h[0].length);
+  const v = rest.trimStart();
+  let val;
+  if (v) {
+    if (LINE_TERM.test(v)) return null;
+    val = v;
+  } else if (!plus) {
+    val = '';
+  } else {
+    const last = rest.slice(-1);
+    if (!last || LINE_TERM.test(last)) return null;
+    val = last;
+  }
+  return [s, ...h.slice(1), val];
+}
+
+/** 공백이 아닌 첫 토큰의 끝 위치(공백 글자 = 정규식 \s 와 같은 집합 — 줄 끝 문자도 공백이다). */
+function tokenEnd(s) {
+  let i = 0;
+  while (i < s.length && !WS_RE.test(s[i])) i++;
+  return i;
+}
+
+/**
+ * (순수) bottleneckmon 포트 행 — 예전 `/^\s*(\d{1,3})\s+(.*\S)\s*$/` 와 같은 판정.
+ * 규칙: 접두(앞 공백 + 1~3자리 + 공백) 뒤 나머지에서 끝 공백을 뗀 것이 값이고, 비었거나 그 안에 줄 끝 문자가 있으면 맞지 않는다.
+ * @returns {[string, string, string]|null} [줄, 포트 번호, 상세]
+ */
+export function bottleneckRow(raw) {
+  const s = String(raw);
+  const h = /^\s*(\d{1,3})\s+/.exec(s);
+  if (!h) return null;
+  const v = s.slice(h[0].length).trimEnd();
+  if (!v || LINE_TERM.test(v)) return null;
+  return [s, h[1], v];
+}
+
+const FABRIC_HEAD = /^\s*(?:(>)\s*)?(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+/;
+/**
+ * (순수) fabricshow 행 — 예전
+ * `/^\s*(?:(>)\s*)?(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+(\S+)(?:\s+(\S+))?\s*(.*)$/` 와 같은 판정.
+ * 규칙: 접두 뒤 첫 토큰 = 이더넷 IP · 다음 토큰(있으면) = FC IP · 그 뒤의 앞 공백을 뺀 나머지 = 이름 부분이고, 그 나머지에
+ *   줄 끝 문자가 있으면 맞지 않는다(토큰 사이 공백의 줄 끝 문자는 \s 라 괜찮다).
+ * @returns {Array<string|undefined>|null} [줄, '>'|undefined, 도메인, 스위치 id, WWN, 이더넷 IP, FC IP|undefined, 나머지]
+ */
+export function fabricRow(raw) {
+  const s = String(raw);
+  const h = FABRIC_HEAD.exec(s);
+  if (!h) return null;
+  const r = s.slice(h[0].length);              // 접두의 끝 \s+ 가 탐욕이라 r 은 공백이 아닌 글자로 시작한다
+  if (!r) return null;
+  const i = tokenEnd(r);
+  const a = r.slice(0, i);
+  const r2 = r.slice(i).trimStart();
+  if (!r2) return [s, h[1], h[2], h[3], h[4], a, undefined, ''];
+  const j = tokenEnd(r2);
+  const z = r2.slice(j).trimStart();
+  if (LINE_TERM.test(z)) return null;
+  return [s, h[1], h[2], h[3], h[4], a, r2.slice(0, j), z];
+}
+
+const TEMP_ROW = /^\s*(\d{1,3})\s+(-?\d{1,3}(?:\.\d+)?)\s*(?:(-?\d{1,3}(?:\.\d+)?)\s*)?([A-Za-z]+)?\s*$/;
+/**
+ * (순수) tempshow 행 — 예전 `TEMP_ROW` 를 원문 줄에 바로 걸던 것과 같은 판정.
+ * 공백 연속을 한 칸으로 줄인 줄에 건다 — 이 정규식은 그룹이 공백을 담지 않고 공백은 \s*·\s+ 만 받으며 공백 한 덩어리에
+ *   \s+ 가 둘 이상 걸리는 자리가 없어 결과가 같다. 붙은 \s* 둘이 긴 공백을 나눠 갖는 경우의 수(O(n²))가 사라진다.
+ * @returns {Array<string|undefined>|null} [줄, 센서 id, ℃, ℉|undefined, 상태 단어|undefined]
+ */
+export function tempRow(raw) {
+  const s = String(raw);
+  const m = TEMP_ROW.exec(s.replace(/\s+/g, ' '));
+  return m ? [s, ...m.slice(1)] : null;
+}
+
+/* 접두 정규식 — 예전 '…:\s*(.+)$' 정규식에서 꼬리를 뗀 것(tailMatch 와 함께 쓴다). */
+const H_CHASSIS_FAMILY = /^Chassis\s+Family:/i;
+const H_PS_SOURCE = /^Power\s+Source:/i;
+const H_PS_VOLTAGE = /^PS\s+Voltage\s+input:/i;
+const H_PS_USAGE = /^Power\s+Usage:/i;
+const H_SWITCH_HEADER = /^(switchName|switchType|switchState|switchMode|switchRole|switchDomain|switchId|switchWwn|zoning|Fabric Name|switchBeacon):/i;
+const H_SFP = {
+  tempC: /^Temperature:/i, voltageMv: /^Voltage:/i, currentMa: /^Current:/i, rxPowerDbm: /^RX\s*Power:/i, txPowerDbm: /^TX\s*Power:/i,
+  vendor: /^Vendor\s*Name:/i, partNumber: /^Vendor\s*PN:/i, serial: /^Serial\s*No:/i, wavelengthNm: /^Wavelength:/i,
+};
+const H_NS_ROLE = /^(?:Device type|FC4s)\s*:/i;
+const H_SENSOR = /^\s*sensor\s+(\d+)\s*:\s*\(([^)]*)\)/i;
+
 /** 'v8.2.3d' 같은 FOS 버전 문자열만 뽑기. */
 export function parseFirmwareShow(text) {
   const m = String(text || '').match(/v\d+\.\d+\.\d+[a-z0-9_]*/i);
@@ -51,7 +164,7 @@ export function parseChassisShow(text) {
     const l = raw.trim();
     let m;
     // 일부 FOS 버전에는 이 줄이 있다(있으면 그게 가장 정확한 모델명).
-    if ((m = l.match(/^Chassis\s+Family:\s*(.+)$/i))) { out.model = m[1].trim(); continue; }
+    if ((m = tailMatch(l, H_CHASSIS_FAMILY))) { out.model = m[1].trim(); continue; }   // v2.744(회귀 검토 GH-R2): 선형 판정
 
     if (/^FAN\s+Unit:/i.test(l)) { flushPsu(); block = 'fan'; out.fans++; continue; }
     if ((m = l.match(/^POWER\s+SUPPLY\s+Unit:\s*(\d+)/i))) { flushPsu(); block = 'psu'; psu = { unit: Number(m[1]) }; continue; }
@@ -59,12 +172,12 @@ export function parseChassisShow(text) {
     if (/^(SW|CP|AP|CORE)\s+BLADE\s+Slot:/i.test(l)) { flushPsu(); block = 'blade'; continue; }
 
     if (block === 'psu' && psu) {
-      if ((m = l.match(/^Power\s+Source:\s*(.+)$/i))) psu.source = m[1].trim();
-      else if ((m = l.match(/^PS\s+Voltage\s+input:\s*(.+)$/i))) psu.voltageV = num(m[1]);
+      if ((m = tailMatch(l, H_PS_SOURCE))) psu.source = m[1].trim();             // v2.744(회귀 검토 GH-R2): 선형 판정
+      else if ((m = tailMatch(l, H_PS_VOLTAGE))) psu.voltageV = num(m[1]);
       // -240W = 240W 소비(FOS 표기). 절댓값으로 통일한다.
       // v2.604(감사 COL-2604-04): 읽은 0W 는 값이다 — 예전 `Math.abs(num ?? 0) || null` 은 0 을 null('못 읽음')로 바꿔
       //   거짓 powerPartial 을 만들었다. 숫자를 못 읽은 경우만 null 이다.
-      else if ((m = l.match(/^Power\s+Usage:\s*(.+)$/i))) { const w = num(m[1]); psu.powerW = w == null || !Number.isFinite(w) ? null : Math.abs(w); }
+      else if ((m = tailMatch(l, H_PS_USAGE))) { const w = num(m[1]); psu.powerW = w == null || !Number.isFinite(w) ? null : Math.abs(w); }
       else if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) psu.serial = m[1];
       else if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) psu.partNumber = m[1];
       continue;
@@ -128,7 +241,7 @@ export function parseSwitchShow(text) {
   for (const raw of lines) {
     const l = raw.trimEnd();   // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
     if (!inTable) {
-      const m = l.match(/^(switchName|switchType|switchState|switchMode|switchRole|switchDomain|switchId|switchWwn|zoning|Fabric Name|switchBeacon):\s*(.+)$/i);
+      const m = tailMatch(l, H_SWITCH_HEADER);   // v2.744(회귀 검토 GH-R2): 선형 판정
       if (m) { header[m[1].replace(/\s+/g, '')] = m[2].trim(); continue; }
       if (/^\s*Index\s+/i.test(l)) { hasSlot = /^\s*Index\s+Slot\s+/i.test(l); inTable = true; }
       continue;
@@ -286,15 +399,16 @@ export function parseSfpShow(text) {
       continue;
     }
     if (!cur) continue;
-    if ((m = l.match(/^Temperature:\s*(.+)$/i))) cur.tempC = num(m[1]);
-    else if ((m = l.match(/^Voltage:\s*(.+)$/i))) cur.voltageMv = num(m[1]);
-    else if ((m = l.match(/^Current:\s*(.+)$/i))) cur.currentMa = num(m[1]);
-    else if ((m = l.match(/^RX\s*Power:\s*(.+)$/i))) cur.rxPowerDbm = dbm(m[1]);
-    else if ((m = l.match(/^TX\s*Power:\s*(.+)$/i))) cur.txPowerDbm = dbm(m[1]);
-    else if ((m = l.match(/^Vendor\s*Name:\s*(.+)$/i))) cur.vendor = m[1].trim();
-    else if ((m = l.match(/^Vendor\s*PN:\s*(.+)$/i))) cur.partNumber = m[1].trim();
-    else if ((m = l.match(/^Serial\s*No:\s*(.+)$/i))) cur.serial = m[1].trim();
-    else if ((m = l.match(/^Wavelength:\s*(.+)$/i))) cur.wavelengthNm = num(m[1]);
+    // v2.744(회귀 검토 GH-R2): 선형 판정(tailMatch) — 판정 순서는 예전 else-if 사슬 그대로다.
+    if ((m = tailMatch(l, H_SFP.tempC))) cur.tempC = num(m[1]);
+    else if ((m = tailMatch(l, H_SFP.voltageMv))) cur.voltageMv = num(m[1]);
+    else if ((m = tailMatch(l, H_SFP.currentMa))) cur.currentMa = num(m[1]);
+    else if ((m = tailMatch(l, H_SFP.rxPowerDbm))) cur.rxPowerDbm = dbm(m[1]);
+    else if ((m = tailMatch(l, H_SFP.txPowerDbm))) cur.txPowerDbm = dbm(m[1]);
+    else if ((m = tailMatch(l, H_SFP.vendor))) cur.vendor = m[1].trim();
+    else if ((m = tailMatch(l, H_SFP.partNumber))) cur.partNumber = m[1].trim();
+    else if ((m = tailMatch(l, H_SFP.serial))) cur.serial = m[1].trim();
+    else if ((m = tailMatch(l, H_SFP.wavelengthNm))) cur.wavelengthNm = num(m[1]);
   }
   return out;
 }
@@ -392,7 +506,7 @@ export function parseNsRoles(text) {
     }
     if (/^N[L]?\s+[0-9a-f]{6}\s*;/i.test(l)) { cur = null; continue; } // 형식이 다른 헤더 — 귀속시키지 않는다
     if (!cur) continue;
-    if ((m = l.match(/^(?:Device type|FC4s)\s*:\s*(.+)$/i))) {
+    if ((m = tailMatch(l, H_NS_ROLE))) {   // v2.744(회귀 검토 GH-R2): 선형 판정
       const v = m[1];
       const init = /initiator/i.test(v);
       const targ = /target/i.test(v);
@@ -599,7 +713,7 @@ export function parseSensorShow(text) {
   const lines = String(text || '').split(/\r?\n/);
   const list = [];
   for (const raw of lines) {
-    const m = raw.match(/^\s*sensor\s+(\d+)\s*:\s*\(([^)]*)\)\s*(.*)$/i);
+    const m = tailMatch(raw, H_SENSOR, false);   // v2.744(회귀 검토 GH-R2): 선형 판정 — 꼬리는 '\s*(.*)$'
     if (!m) continue;
     const rest = String(m[3] || '');
     // `... is Ok, value is 31 C` / `... is Ok,speed is 7050 RPM` / `... is Absent`
@@ -692,7 +806,7 @@ export function parseBottleneckMon(text) {
   const ports = [];
   for (const raw of s.split(/\r?\n/)) {
     // 헤더·구분선·요약 문구는 건너뛴다. `  12   ...  3.5  ...` 처럼 선두가 포트 번호인 행만.
-    const m = raw.match(/^\s*(\d{1,3})\s+(.*\S)\s*$/);
+    const m = bottleneckRow(raw);   // v2.744(회귀 검토 GH-R2): 선형 판정
     if (!m) continue;
     if (/^=+$/.test(m[2]) || /port/i.test(m[2]) && /type|state/i.test(m[2])) continue;
     ports.push({ port: Number(m[1]), detail: m[2].slice(0, 120) });
@@ -717,7 +831,7 @@ export function parseFabricShow(text) {
   let principal = null;
   for (const raw of lines) {
     // v2.599(SEC2599-02): `^\s*(>?)\s*` 는 붙은 두 \s* 가 공백을 나눠 갖는 경우의 수만큼 재시도해 O(n²) 였다 — '>' 가 있을 때만 뒤 공백.
-    const m = raw.match(/^\s*(?:(>)\s*)?(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+(\S+)(?:\s+(\S+))?\s*(.*)$/);
+    const m = fabricRow(raw);   // v2.744(회귀 검토 GH-R2): 선형 판정
     if (!m) continue;
     let name = String(m[7] || '').trim();
     const q = name.match(/"([^"]*)"/);
@@ -755,7 +869,7 @@ export function parseTempShow(text) {
   for (const raw of s.split(/\r?\n/)) {
     if (/sensor\s*id/i.test(raw) || /^[\s=-]+$/.test(raw)) continue;
     // `<id> <C> [<F>] [<status>]` — 상태 단어가 없으면 ok 를 **추정하지 않는다**(null).
-    const m = raw.match(/^\s*(\d{1,3})\s+(-?\d{1,3}(?:\.\d+)?)\s*(?:(-?\d{1,3}(?:\.\d+)?)\s*)?([A-Za-z]+)?\s*$/);
+    const m = tempRow(raw);   // v2.744(회귀 검토 GH-R2): 공백 연속을 한 칸으로 줄여 판정(결과 동일)
     if (!m) continue;
     const st = (m[4] || '').toLowerCase();
     list.push({

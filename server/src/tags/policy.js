@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'tag-policy.json');
@@ -69,7 +69,7 @@ export function loadTagPolicy() {
     }
   } catch (e) {
     preserveCorrupt(file, e?.message);
-    console.warn(`[tags] 태그 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 정책 없음으로 시작합니다: ${e?.message || e}`);
+    console.warn(`[tags] 태그 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 정책 없음으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = { ...base, rev: revOf({ r: base.requiredCategories, c: base.corpCategory }) };
   return cache;

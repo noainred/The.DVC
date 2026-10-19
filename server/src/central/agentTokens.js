@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
 
 const FILE = path.join(config.configDir, 'central-agent-tokens.json');
@@ -41,7 +41,8 @@ function load() {
   } catch (e) {
     // 손상 파일을 조용히 빈 값으로 덮어쓰면 전 엣지 토큰이 유실된다 → 보존 후 경고.
     try { fs.renameSync(FILE, `${FILE}.corrupt.${Date.now()}`); } catch { /* */ }
-    console.error(`[central-token] central-agent-tokens.json 파싱 실패(${e.message}) — 손상본을 .corrupt로 보존하고 빈 목록으로 시작합니다.`);
+    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
+    console.error(`[central-token] central-agent-tokens.json 파싱 실패(${safeLoadText(e) || '사유 미상'}) — 손상본을 .corrupt로 보존하고 빈 목록으로 시작합니다.`);
   }
   cache = [];
   return cache;

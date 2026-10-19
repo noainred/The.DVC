@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { normalizeSettings } from './render.js';
 import { listeningPortalPorts } from '../util/httpsServer.js';
 
@@ -16,7 +16,7 @@ export function loadHostAccess() {
   if (cache) return cache;
   let raw = {};
   try { if (fs.existsSync(FILE)) raw = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; }
-  catch (e) { preserveCorrupt(FILE); console.warn(`[host-access] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e.message}`); raw = {}; }
+  catch (e) { preserveCorrupt(FILE); console.warn(`[host-access] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`); raw = {}; }
   // v2.731(G2b A4-02): 포탈 포트는 config.port 가 아니라 **실제로 듣는 포트 전부**(TLS_PORT 만 열면 PORT 는 듣지 않는다).
   const { settings } = normalizeSettings(raw.draft || {}, { portalPorts: listeningPortalPorts(config.port) });
   cache = {

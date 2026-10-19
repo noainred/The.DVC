@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'login-fails.ndjson');
@@ -26,7 +26,7 @@ function load() {
   rows = [];
   let text = null;
   try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {
-    if (e?.code !== 'ENOENT') { console.warn(`[login-fails] 기록 파일을 읽지 못했습니다(${e.message}) — 원본을 보존하고 새로 시작합니다`); preserveCorrupt(FILE, e.message); }
+    if (e?.code !== 'ENOENT') { console.warn(`[login-fails] 기록 파일을 읽지 못했습니다(${safeLoadText(e) || '사유 미상'}) — 원본을 보존하고 새로 시작합니다`); preserveCorrupt(FILE, e.message); }
     return rows;
   }
   let bad = 0;

@@ -24,6 +24,8 @@ import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // 
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): registryUnreadable 503 사유는 요약(원문 없음)
+import { safeLoadText } from '../util/atomicWrite.js'; // v2.744(회귀 검토 리드): 설정 파일 손상 사유도 요약(원문 = 파일 조각)
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
@@ -33,7 +35,7 @@ import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../centr
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
-import { setEdgeFleet } from '../central/fleet.js';
+import { setEdgeFleet, holdEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu, withGpuTrust, mbOrNull, tempOrNull } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
@@ -1182,6 +1184,16 @@ centralRouter.post('/fleet', requireCentral(), (req, res) => {
   //   원소를 버리지 않고 **귀속만 비운다**(서버 자체는 실재한다). ② 공유 토큰 + 중앙이 모르는 이름은 '미검증' 이라 이름 수·원소 수를
   //   작게 묶고, 소유를 증명할 길이 없으므로 귀속도 비운다. 뺀·비운 개수는 응답에 싣는다(조용한 상한 금지).
   const verified = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
+  // v2.744(감사 EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 보낸 **상태 전용 보고** — 목록을 교체하지 않고 직전 목록의 만료만 미룬다
+  //   (agent/fleetPush.js 가 중앙 2.744.0 이상을 확인한 뒤에만 보낸다). 이름을 검증하지 못한 보고는 보관분을 건드리지 않는다
+  //   (공유 토큰으로 남의 이름을 골라 옛 목록을 붙잡아 두지 못하게 — 기록만 응답한다).
+  if (b.statusOnly === true) {
+    if (!verified) return res.json({ ok: true, agent, statusOnly: true, kept: 0, unverifiedAgent: true });
+    const st = b.status && typeof b.status === 'object' && !Array.isArray(b.status) ? b.status : {};
+    const h = holdEdgeFleet(agent, { registryUnreadable: st.registryUnreadable });
+    if (h.changed) console.warn(`[central] fleet: '${agent}' 엣지가 iDRAC 등록부를 읽지 못했다고 보고했습니다 — ${h.noPrior ? '보관 중인 목록이 없어 아무것도 바꾸지 않았습니다' : h.holdExpired ? '직전 목록 유지 시한이 지나 만료를 미루지 않았습니다' : `직전 목록 ${h.kept}대를 유지합니다`}`);
+    return res.json({ ok: true, agent, statusOnly: true, kept: h.kept, ...(h.noPrior ? { noPrior: true } : {}), ...(h.holdExpired ? { holdExpired: true } : {}) });
+  }
   const vcAllowed = verified ? (vc) => agentOwnsVcenter(agent, vc) : () => false;
   // v2.606(RECENT2606-03): 엣지가 일부를 빼고 보낸 목록이면(partial) 그 사실을 저장해 중앙이 밝힌다 — 예전에는 버렸다.
   const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed, partial: b });
@@ -1419,7 +1431,10 @@ function registryUnreadable(res, errOf, what) {
   let e = null;
   try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
   if (!e) return false;
-  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
+  // v2.744(리드 후속 RY): 사유는 중앙 등록부 로드 오류 **원문**(JSON.parse 메시지 = 손상된 자격증명 파일 조각)이 아니라 요약이다 —
+  //   이 응답은 엣지로 가서 그 엣지의 설정 pull 상태·콘솔(→ 엣지 로그)에 실린다. 원문은 중앙의 보존본 파일에 있다. 문장 모양은 그대로다.
+  const why = summarizeRegistryError(e)?.text || '사유 미상';
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${why}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
   return true;
 }
 
@@ -1429,6 +1444,11 @@ function registryUnreadable(res, errOf, what) {
  *   지워 전 엣지의 수집이 한 번에 꺼졌다(등록부는 v2.612 에 막았는데 설정 배포 경로가 빠져 있었다). 엣지 pull 은 비-2xx 를
  *   실패로 보고 직전 사본을 유지한다. 중앙 자신의 로컬 동작(꺼짐 표시)은 바꾸지 않는다.
  */
+/**
+ * v2.744(회귀 검토 리드 — RY 보고): 중앙 **설정 파일** 손상 사유(대개 JSON.parse 오류 원문 = 그 파일의 조각 — agent-assignments.json 의 iDRAC 비밀번호,
+ *   GPU 게스트 배포의 게스트 비밀번호가 들어 있다)를 엣지 응답·콘솔에 싣기 전에 요약한다(`safeLoadText` — 따옴표가 든 원문만 분류·위치로 바꾸고 이미 만든 사람 문장은 그대로). 원문은 중앙의 보존본 파일에 있다.
+ */
+const loadWhy = (reason) => safeLoadText(reason) || '사유 미상';
 const settingsUnreadableLog = createChangeLogger({ windowMs: 3_600_000 }); // v2.632 AX1-2632-02: 같은 사유는 1시간에 1줄
 function settingsUnreadable(res, errOf, what) {
   let e = null;
@@ -1436,9 +1456,9 @@ function settingsUnreadable(res, errOf, what) {
   if (!e) return false;
   // v2.632(감사 AX1-2632-02): 예전에는 콘솔에도 남기지 않아 503 이 나가는 동안 중앙 어디에서도 그 사실이 보이지 않았다.
   if (settingsUnreadableLog(what, String(e.reason || ''))) {
-    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에 503 으로 답합니다(엣지는 직전 설정 유지): ${String(e.reason || '사유 미상').slice(0, 200)}`);
+    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에 503 으로 답합니다(엣지는 직전 설정 유지): ${loadWhy(e.reason)}`);
   }
-  persistent503(res).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
+  persistent503(res).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${loadWhy(e.reason)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
   return true;
 }
 
@@ -1456,9 +1476,9 @@ function intervalsPartOrUnreadable(req, res, errOf, what, valuesOf) {
   if (!e) return { intervals: valuesOf() };
   if (String(req.query.intervalsHold || '') !== '1') { settingsUnreadable(res, () => e, what); return null; }
   if (settingsUnreadableLog(what, String(e.reason || ''))) {
-    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에서 intervals 를 뺍니다(엣지는 직전 주기 유지): ${String(e.reason || '사유 미상').slice(0, 200)}`);
+    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에서 intervals 를 뺍니다(엣지는 직전 주기 유지): ${loadWhy(e.reason)}`);
   }
-  return { intervalsUnreadable: { reason: String(e.reason || '사유 미상').slice(0, 200), since: e.at || null } };
+  return { intervalsUnreadable: { reason: loadWhy(e.reason), since: e.at || null } };
 }
 
 /**
@@ -1769,10 +1789,10 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   let perfErr = null;
   try { perfErr = perfSettingsLoadError(); } catch (x) { perfErr = { at: Date.now(), reason: x?.message || String(x) }; }
   if (perfErr && settingsUnreadableLog('SAN 스위치 포트 사용량', String(perfErr.reason || ''))) {
-    console.warn(`[central] 중앙 SAN 스위치 포트 사용량 설정 파일을 읽지 못해 sanswitch-config 에서 perf 를 뺍니다(엣지는 직전 설정 유지): ${String(perfErr.reason || '사유 미상').slice(0, 200)}`);
+    console.warn(`[central] 중앙 SAN 스위치 포트 사용량 설정 파일을 읽지 못해 sanswitch-config 에서 perf 를 뺍니다(엣지는 직전 설정 유지): ${loadWhy(perfErr.reason)}`);
   }
   const perfPart = perfErr
-    ? { perfSettingsUnreadable: { reason: String(perfErr.reason || '사유 미상').slice(0, 200), since: perfErr.at || null } }
+    ? { perfSettingsUnreadable: { reason: loadWhy(perfErr.reason), since: perfErr.at || null } }
     : { perf: loadPerfSettings() };
   // testNow(v2.421): 중앙 등록 화면의 '연결 테스트' 를 이 엣지가 현지에서 대행(비밀번호 포함 — 엣지가 로그인해야 한다).
   // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
@@ -2020,7 +2040,7 @@ centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
   let setErr = null;
   try { setErr = cvpSettingsLoadError(); } catch (x) { setErr = { at: Date.now(), reason: x?.message || String(x) }; }
   const settingsPart = setErr
-    ? { settingsUnreadable: { reason: String(setErr.reason || '사유 미상').slice(0, 200), since: setErr.at || null } }
+    ? { settingsUnreadable: { reason: loadWhy(setErr.reason), since: setErr.at || null } }
     : { settings: loadSettings() };
   res.json({ ok: true, agent, servers: serversForAgent(agent), ...settingsPart, collectNow: takeCvpRequests(agent) });
 });

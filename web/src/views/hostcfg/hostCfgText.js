@@ -1,5 +1,7 @@
 // v2.699 — ESXi 호스트 구성·보안 문구·판정. 서버 hostcfg/parse.js 와 같은 입력으로 대조한다(번들 경계라 두 벌).
 // 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석).
+import { notReadKpiSub } from '../bizreport/notReadText.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 문구 한 벌(코어 라이선스·비용 배분과 공용)
+
 export const HOST_CFG_CODES = Object.freeze({
   'cert-expired': 'crit',
   'cert-expiring': 'warn',
@@ -147,11 +149,18 @@ export function codeChips(byCode) {
   return list.sort((a, b) => (b.hosts > 0) - (a.hosts > 0) || SEV_ORDER[a.sev] - SEV_ORDER[b.sev] || b.hosts - a.hosts || a.title.localeCompare(b.title));
 }
 
-export function coverageText(c) {
+/**
+ * @param {object} c 서버 coverage
+ * @param {Array} [notReadVcenters] v2.744(감사 후속 FC): 서버 응답 notReadVcenters — 첫 수집 중·불통(직전 값 없음) vCenter 는 호스트가 0대라
+ *   coverage 에 나오지 않는다. 있으면 '읽지 못한 vCenter N곳 제외 — 하한' 을 덧붙인다(비활성만이면 붙이지 않는다 — notReadKpiSub 규칙).
+ */
+export function coverageText(c, notReadVcenters) {
   if (!c) return '';
   const parts = [`호스트 ${c.hosts.toLocaleString()}대`, `구성 읽음 ${c.cfg.toLocaleString()}`];
   if (c.notCollected) parts.push(`아직 안 읽음 ${c.notCollected.toLocaleString()}`);
   if (c.disconnected) parts.push(`연결 끊김 ${c.disconnected.toLocaleString()} 제외`);
+  const nr = notReadKpiSub(notReadVcenters);
+  if (nr) parts.push(nr);
   return parts.join(' · ');
 }
 export function coverageNote(c, scan) {

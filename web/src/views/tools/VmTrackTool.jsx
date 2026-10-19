@@ -2,11 +2,12 @@
 // · 전체 합계 라인 + vCenter 선택(단위 vCenter 추이)
 // · 증감(+N/-N) 숫자를 누르면 그 슬롯에 생성/삭제된 VM 과 위치(클러스터·호스트·데이터스토어)
 // 데이터는 서버 전용 DB(vm-track.db)에서 오고, 사용자 데이터 범위(scope)는 서버가 강제한다.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { ResponsiveContainer, ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
+import { errorBoxInput } from '../../components/accessDeniedText.js';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData, dsUnknownNote } from './storageTrack.js';
@@ -21,6 +22,61 @@ const slotLabel = (slot) => {
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
 };
 
+/**
+ * v2.744(회귀 검토 GA-R3): 조회 실패 자리 — 오류 안내 + 같은 조건으로 그 자리에서 다시 조회. 선택 도구는 이 위에 그대로 남는다.
+ *   (오류 안내의 '다시 시도' 는 새로고침이라 고른 vCenter·기간이 처음 값으로 돌아간다 — 이 버튼은 선택을 지킨다.)
+ * v2.744(최종 검토 RA-R2 — Chromium 재현): 예전 버튼은 다시 조회하는 동안 아무 표시도 잠금도 없어 눌렀는지 알 수 없었고(같은 오류로
+ *   끝나면 화면이 그대로다), 연타한 만큼 같은 조회가 나갔다(useLatest 는 마지막 응답만 반영할 뿐 요청을 막지 않는다).
+ *   busy 면 버튼을 잠그고 글자를 '다시 조회 중…' 으로 바꾸며, failedRetries 가 있으면 다시 조회도 실패했다는 사실을 말한다.
+ */
+export function VmTrackLoadFailed({ error, onRetry, busy = false, failedRetries = 0 }) {
+  const fails = Number.isInteger(failedRetries) && failedRetries > 0 ? failedRetries : 0;
+  // v2.744(최종 검토 리드 — FE 가 남긴 별건): 403(권한·범위)은 다시 물어도 결과가 같다 — ErrorBox 가 권한 안내로 그리고 다시 조회 버튼을 두지 않는다.
+  if (errorBoxInput(error).perm) return <div><ErrorBox message={error} /></div>;
+  return (
+    <div>
+      <ErrorBox message={error} />
+      <div className="flex gap" style={{ alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="logout-btn" style={{ padding: '6px 12px' }} disabled={busy} aria-busy={busy || undefined}
+          title={busy ? '같은 조건으로 다시 조회하는 중입니다 — 끝날 때까지 다시 누를 수 없습니다' : undefined}
+          onClick={() => { if (!busy) onRetry?.(); }}>{busy ? '↻ 다시 조회 중…' : '↻ 이 조건으로 다시 조회'}</button>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {busy
+            ? '위에서 고른 vCenter·기간으로 다시 불러오는 중입니다. 위 오류 안내는 직전 시도의 것입니다.'
+            : '위에서 고른 vCenter·기간 그대로 다시 불러옵니다. 다른 vCenter·기간을 고르면 그 조건으로 조회합니다.'}
+        </span>
+      </div>
+      {!busy && fails > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>다시 조회 {fails}번째도 실패했습니다 — 위 오류 안내는 마지막 시도의 것입니다.</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * v2.744(최종 검토 RA-R2): '다시 조회' 잠금 — 진행 중이면 새 요청을 내지 않는다(연타 방지). reset() 은 조건(vCenter·기간)이 바뀌어
+ *   진행 중 다시 조회가 더는 이 화면의 것이 아닐 때 부른다 — 진행 표시를 내리고, 늦게 끝난 옛 시도가 새 표시를 지우지 않게 한다.
+ *   응답 반영(늦은 응답 버림)은 여전히 useLatest 가 한다 — 이 잠금은 요청을 낼지만 정한다.
+ */
+export function createRetryGate() {
+  let tok = 0;
+  let inflight = 0;
+  return {
+    busy: () => inflight !== 0,
+    start(task, setBusy) {
+      if (inflight) return false;
+      const t = ++tok;
+      inflight = t;
+      setBusy?.(true);
+      Promise.resolve().then(task).catch(() => {}).finally(() => {
+        if (inflight === t) { inflight = 0; setBusy?.(false); }
+      });
+      return true;
+    },
+    reset(setBusy) { tok += 1; inflight = 0; setBusy?.(false); },
+  };
+}
+
 export default function VmTrackTool() {
   const [days, setDays] = useState(30);
   const [vcenterId, setVcenterId] = useState('');
@@ -30,18 +86,84 @@ export default function VmTrackTool() {
   const [msg, setMsg] = useState(null);
   const [detail, setDetail] = useState(null); // { title, snapId?, slot? } — 증감 클릭 상세 모달
   const [dsDetail, setDsDetail] = useState(null); // 데이터스토어 사용량 변경 상세(v2.348)
+  // v2.744(회귀 검토 GA-R3): vCenter 목록은 마지막으로 받은 응답의 것을 따로 둔다 — 조회 중·조회 실패로 data 가 비어도 선택 도구를 그릴 수 있게.
+  const [vcList, setVcList] = useState([]);
+  // v2.744(최종 검토 RA-R2): '이 조건으로 다시 조회' 진행 표시·잠금과 다시 조회도 실패한 횟수.
+  const [retrying, setRetrying] = useState(false);
+  const [retryFails, setRetryFails] = useState(0);
+  const retryGate = useRef(null);
+  if (!retryGate.current) retryGate.current = createRetryGate();
 
   // v2.447(감사 B16): 세대 가드 — 고RTT vCenter 를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해
   // 최신 스코프 화면을 덮어썼다. useLatest 가 마지막 요청 결과만 반영한다.
   const run = useLatest();
-  const load = () => run(fetchJson('/tools/vm-track', { days, vcenterId }),
-    (d) => { setData(d); setError(null); }, (e) => setError(e.message));
+  // onDone(ok) 는 이 요청이 마지막 요청으로 반영됐을 때만 불린다(useLatest — 늦은 응답은 무시).
+  const load = (onDone) => {
+    const done = typeof onDone === 'function' ? onDone : null;
+    return run(fetchJson('/tools/vm-track', { days, vcenterId }),
+      (d) => { setData(d); setError(null); if (Array.isArray(d?.vcenterList)) setVcList(d.vcenterList); done?.(true); },
+      (e) => { setError(e); done?.(false); });   // v2.744: 객체 그대로 — 403 이면 ErrorBox 가 권한 안내로 그린다
+  };
+  // 같은 조건 다시 조회 — 진행 중이면 내지 않는다(retryGate). 결과가 실패면 횟수를 센다(같은 오류여도 눌렀다는 사실이 화면에 남게).
+  const retry = () => retryGate.current.start(() => load((ok) => setRetryFails((n) => (ok ? 0 : n + 1))), setRetrying);
   // load 는 매 렌더 재생성되므로 deps 에 넣으면 무한 루프 — 조회 파라미터만 의존한다(기존 뷰 관례).
+  // v2.744(감사 WEB-01): vCenter·기간을 바꾸면 **먼저 이전 결과·오류를 비운다**(StorageTrackTool 과 같은 규칙) — 비우지 않으면
+  //   새 조회가 끝날 때까지(고RTT·365일이면 수 초) 이전 vCenter·기간의 차트와 숫자가 새 선택의 값처럼 보였다. 새 조회가 실패하면
+  //   이전 값 위에 배너가 아니라 오류 화면이 뜬다(다른 범위의 값을 보여 주지 않는다).
+  //   조건이 바뀌면 진행 중이던 '다시 조회' 표시·실패 횟수도 내린다(그 시도는 옛 조건의 것이다 — RA-R2).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [days, vcenterId]);
+  useEffect(() => { retryGate.current.reset(setRetrying); setRetryFails(0); setData(null); setError(null); load(); }, [days, vcenterId]);
 
-  if (error && !data) return <ErrorBox message={error} />;
-  if (!data) return <Loading />;
+  const snapshotNow = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postJson('/tools/vm-track/snapshot', {});
+      setMsg(r.ok
+        ? `스냅샷 완료 — ${r.slot} · vCenter ${r.vcenters} · 총 ${r.total}대 (+${r.added}/-${r.removed})${r.baseline ? ' · 기준선(증감은 다음 슬롯부터)' : ''}`
+        : (r.reason || '실패'));
+      await load();
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+
+  // v2.744(회귀 검토 GA-R3 — 재현): 예전에는 data 가 비면 선택 도구보다 먼저 Loading·오류 화면만 돌려줬다. 이 화면은 폴링하지 않아
+  //   vCenter·기간을 바꾼 조회가 한 번 실패하면 선택 도구까지 사라진 오류 화면에 갇혔고(남는 길은 새로고침 — 선택이 전체·30일로 돌아갔다),
+  //   365일·고RTT 조회 동안에도 다른 기간을 고를 수 없었다. 이제 선택 도구(vCenter·기간·지금 스냅샷)는 언제나 그리고 그 아래에만
+  //   조회 중·오류를 둔다. 오류면 같은 조건으로 그 자리에서 다시 조회한다(load). 이전 범위의 값은 여전히 보여 주지 않는다(WEB-01).
+  const head = (
+    <>
+      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div className="section-title" style={{ margin: 0 }}>📈 VM 수량 추이</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            매일 <b>00시·12시</b> 기준 vCenter별 VM 수를 전용 DB에 스냅샷하고 증감을 추적합니다.
+            증감(+N/−N)을 누르면 그 시각에 <b>생성·삭제된 VM</b>과 클러스터·호스트·데이터스토어를 봅니다.
+          </div>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+            <option value="">전체 vCenter(합계)</option>
+            {vcList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </Select>
+          <span className="flex gap">
+            {DAY_OPTS.map((d) => (
+              <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>
+            ))}
+          </span>
+          <button className="logout-btn" style={{ padding: '7px 13px' }} disabled={busy} onClick={snapshotNow} title="지금 즉시 스냅샷(같은 슬롯이면 최신 값으로 갱신)">⚡ 지금 스냅샷</button>
+        </div>
+      </div>
+      {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
+    </>
+  );
+
+  if (!data) {
+    return (
+      <div>
+        {head}
+        {error ? <VmTrackLoadFailed error={error} onRetry={retry} busy={retrying} failedRetries={retryFails} /> : <Loading />}
+      </div>
+    );
+  }
 
   const points = data.points || [];
   const chart = points.map((p, i, arr) => ({
@@ -76,42 +198,10 @@ export default function VmTrackTool() {
   const dsNet = dsLast && dsFirst ? Math.round(((dsLast.dsUsedGB || 0) - (dsFirst.dsUsedGB || 0)) * 10) / 10 : 0;
   const bySlotVc = data.bySlotVc || {};
 
-  const snapshotNow = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await postJson('/tools/vm-track/snapshot', {});
-      setMsg(r.ok
-        ? `스냅샷 완료 — ${r.slot} · vCenter ${r.vcenters} · 총 ${r.total}대 (+${r.added}/-${r.removed})${r.baseline ? ' · 기준선(증감은 다음 슬롯부터)' : ''}`
-        : (r.reason || '실패'));
-      await load();
-    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
-  };
-
   return (
     <div>
-      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <div>
-          <div className="section-title" style={{ margin: 0 }}>📈 VM 수량 추이</div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            매일 <b>00시·12시</b> 기준 vCenter별 VM 수를 전용 DB에 스냅샷하고 증감을 추적합니다.
-            증감(+N/−N)을 누르면 그 시각에 <b>생성·삭제된 VM</b>과 클러스터·호스트·데이터스토어를 봅니다.
-          </div>
-        </div>
-        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
-            <option value="">전체 vCenter(합계)</option>
-            {(data.vcenterList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </Select>
-          <span className="flex gap">
-            {DAY_OPTS.map((d) => (
-              <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setDays(d)}>{d}일</button>
-            ))}
-          </span>
-          <button className="logout-btn" style={{ padding: '7px 13px' }} disabled={busy} onClick={snapshotNow} title="지금 즉시 스냅샷(같은 슬롯이면 최신 값으로 갱신)">⚡ 지금 스냅샷</button>
-        </div>
-      </div>
-      {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
-      {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
+      {head}
+      {error &&<div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {errorBoxInput(error).text}</div>}
       {data.status && !data.status.available && (
         <div className="card" style={{ padding: 10, marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 12.5 }}>
           ⚠ 추적 DB를 열 수 없어 기능이 비활성입니다{data.status.error ? ` — ${data.status.error}` : ''}. {data.status.dbPath ? ` (경로: ${data.status.dbPath})` : ''}
@@ -299,7 +389,7 @@ export default function VmTrackTool() {
                     });
                     return (
                       <tr key={p.slot}>
-                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중·비활성·점검 중 — v2.743 부터 비활성·점검 중 vCenter 도 빈 목록으로 세지 않고 뺍니다). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}</td>
+                        <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{p.skipped > 0 && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`이 슬롯에는 vCenter ${p.skipped}곳이 빠졌습니다(수집 실패·첫 수집 중 — 다시 읽히면 채워질 수 있습니다). 합계는 부분 합이라 감소가 실제 삭제가 아닐 수 있습니다.`}>부분 합 −{p.skipped}곳</span>}{p.maintExcluded > 0 && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }} title={`점검중이라 인벤토리를 읽지 못한 vCenter ${p.maintExcluded}곳을 합계에서 뺐습니다. 점검은 끝나는 시각이 정해져 있지 않아 부분 합으로 막지 않습니다 — 그 vCenter 의 VM 은 이 슬롯 합계에 없고 삭제로 세지도 않았습니다. 비활성 vCenter 는 원래 합계 대상이 아닙니다.`}>점검중 {p.maintExcluded}곳 제외</span>}</td>
                         <td style={{ textAlign: 'right' }}>{p.total.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--green)' }}>{p.onCount.toLocaleString()}</td>
                         <td style={{ textAlign: 'right', color: 'var(--amber)' }}>{off.toLocaleString()}</td>

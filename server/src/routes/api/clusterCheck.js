@@ -11,6 +11,7 @@ import { store } from '../../store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeClusters, clusterOf } from '../../clustercfg/analyze.js';
@@ -34,14 +35,16 @@ function run(snap, req) {
 export function registerClusterCheck(api) {
   api.get('/tools/cluster-check', toolsPerm, (req, res) => memoJson(req, res, 'cluster-check', (snap) => {
     const r = run(snap, req);
-    const full = req.user?.role === 'admin' && scopeKey(req.user, snap) === 'all';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === 'all';
     return {
       ...r, codes: CLUSTER_CFG_CODES, initial: snap.initial === true, generatedAt: snap.generatedAt || null,
       scan: { enabled: config.clusterCfgScan, refreshMs: config.clusterCfgRefreshMs, perCycle: config.clusterCfgPerCycle },
       // 수집 상태(오류 문구에 vCenter 응답 원문이 들어갈 수 있다) — 전체 범위 관리자에게만.
       status: full ? clusterCfgStatus() : null,
     };
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role || ''}` }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/cluster-check/of', toolsPerm, (req, res) => {
     const snap = store.get();

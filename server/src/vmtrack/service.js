@@ -4,8 +4,9 @@
  * 조회는 차트용 시계열과 '증감 클릭' 상세(생성/삭제 VM + 클러스터·호스트·데이터스토어)를 제공.
  */
 
-import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, readDsChangesWindow, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration } from './db.js';
+import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason, skipCategoryOf } from './diff.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
+import { createYielder } from '../util/timeSlice.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -75,12 +76,30 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   for (const id of await rosterVcenters()) if (!knownIds.has(id)) await dropRoster(id);
 
   const totalRow = totalsOf(perVc);
-  // v2.594: 이번 슬롯에서 빠진 vCenter(수집 실패·첫 수집 중·v2.743 비활성·캐시 없는 점검중 — 인벤토리를 읽지 못함)를 결과에 밝힌다 —
-  //   합계가 부분 합이다(감소가 실제 삭제가 아닐 수 있다). 사유는 항목마다(reason) + 사유별 개수(skippedByReason — 비활성은 'disabled' 로 따로).
-  //   DB 의 skipped 열(차트 '부분 합' 표지)은 사유와 무관하게 빠진 vCenter 수다 — 비활성 vCenter 도 합계에 들어 있지 않다.
-  totalRow.skipped = skippedVcenters.length;
+  // v2.594: 이번 슬롯에서 빠진 vCenter(수집 실패·첫 수집 중·v2.743 비활성·캐시 없는 점검중 — 인벤토리를 읽지 못함)를 결과에 밝힌다.
+  //   사유는 항목마다(reason) + 사유별 개수(skippedByReason — 비활성은 'disabled' 로 따로). skippedCount 는 예전처럼 diff 를 건너뛴 전부다.
+  // ⚠⚠ v2.744(감사 RECENT-01 — v2.743 회귀, 재현): 예전에는 DB 의 skipped 열(차트 '부분 합' 표지)에 **사유와 무관하게** 빠진 수를 넣었다.
+  //   경영 보기 VM 추이(overview/trend.js vmTrend)는 skipped>0 인 칸을 통째로 비우므로, 비활성 vCenter 가 하나라도 등록돼 있으면 그 상태가
+  //   끝날 때까지 **모든 슬롯이 부분 합**이 되어 추이가 영구히 비었다(VM 수량 추이 화면의 '부분 합' 배지도 사라지지 않았다). 사유별로 나눈다:
+  //   · skipped(부분 합) = '기다리면 다시 읽힐' 사유 — 첫 수집 중·연결 실패 · 모르는 상태(unknown·그 밖)는 단정하지 않고 부분 합 쪽에 둔다.
+  //   · 비활성(disabled) = 원래 합계 대상이 아니다(v2.617 '비활성은 분모에서 뺀다' — 카드 값 virtual.count 에도 없다). skippedByReason 에만 남긴다.
+  //   · 캐시 없는 점검중(maintenance) = 기한 없는 상태라 합계를 막는 집합에 넣지 않는다(v2.622 RECENT-01) — maint_excluded 열·maintExcluded 로
+  //     따로 남기고 화면이 '점검중 N곳 제외' 로 말한다(추이를 null 로 만들지 않는다).
+  //   diff 를 건너뛰는 판정(inventoryUnreadReason)은 그대로다(로스터 보존 — v2.743 VC-01).
   const skippedByReason = {};
   for (const x of skippedVcenters) skippedByReason[x.reason] = (skippedByReason[x.reason] || 0) + 1;
+  // v2.744(회귀 검토 GA-R2): 몫은 skipCategoryOf 한 벌로 센다(범위 계정 재계산이 같은 함수를 쓴다).
+  let maintExcluded = 0; let partialSkipped = 0;
+  for (const x of skippedVcenters) {
+    const c = skipCategoryOf(x.reason);
+    if (c === 'maintenance') maintExcluded += 1;
+    else if (c === 'partial') partialSkipped += 1;
+  }
+  totalRow.skipped = partialSkipped;
+  totalRow.maintExcluded = maintExcluded;
+  // v2.744(회귀 검토 GA-R2): 빠진 vCenter 의 id·사유를 합계 행에 남긴다 — 범위 계정은 이것으로 '범위 안' 빠진 vCenter 만 사유별로 센다
+  //   (예전에는 전 함대 사유 수를 빌려 와, 범위 안 비활성이 '점검중 제외' 로, 범위 안 점검중이 범위 밖 연결 실패 때문에 부분 합으로 보였다).
+  totalRow.skipDetail = skippedVcenters.map((x) => [x.id, x.reason]);
   const r = await commitSnapshot({ slot, ts, perVc, totalRow });
   if (!r.ok) return r;
   return {
@@ -92,9 +111,12 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
     ...(totalRow.dsUsedUnknown ? { dsUsedUnknown: totalRow.dsUsedUnknown } : {}),
     baseline: totalRow.baseline,
-    ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length, skippedByReason } : {}),
+    ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length, skippedByReason, partialSkipped, maintExcluded } : {}),
   };
 }
+
+/** v2.744(감사 RECENT-01): 사유별로 나눠 저장하기 시작한 열 — 옛 행(열 추가 이전)은 0 이다. */
+const maintOf = (r) => Number(r?.maint_excluded) || 0;
 
 /**
  * 차트/표 데이터. scopeIds(사용자 데이터 범위)가 주어지면 그 vCenter 만 집계한다 —
@@ -111,8 +133,49 @@ export function dsAggPct(usedGB, capGB) {
   return Math.round((u / c) * 1000) / 10;
 }
 
+/**
+ * v2.744(감사 DB-05·DB-01): 세대 + 창 경계 + 조건 키의 결과 기억(진행 중 조회 공유 포함).
+ *   데이터는 슬롯 커밋(하루 2회)·prune 때만 바뀌는데 스토리지 추적 화면이 30초마다 같은 365일 조회(스냅샷 2만 행 읽기 + 묶기)를
+ *   다시 돌렸다(합성 0.12~0.2초 정지 × 30초마다). 세대(vmtrackGeneration)는 snaps·ds_changes 를 바꾸는 커밋·prune 이 올린다.
+ *   ⚠ 키에 days 가 아니라 **창 경계**(경계 ≥ sinceTs 인 첫 행 시각 — 인덱스 끝점 1회)를 쓴다 — sinceTs 는 요청마다 움직이지만
+ *   '행 ts >= sinceTs' 와 '행 ts >= 경계' 는 같은 집합이다(v2.630 dsStartValues 와 같은 판단). 반환 객체는 **공유**다 — 호출부는 고치지 말 것.
+ *   DB 를 못 연 상태는 기억하지 않는다(빈 결과가 남으면 잠금이 풀린 뒤에도 '스냅샷 없음' 이라는 거짓이 된다).
+ */
+function createGenMemo(max) {
+  const m = new Map();
+  const memo = (gen, key, fn) => {
+    const k = `${gen}|${key}`;
+    const hit = m.get(k);
+    if (hit) { m.delete(k); m.set(k, hit); return hit; }
+    // 세대가 바뀌면 옛 세대 항목은 다시 맞을 수 없다 — 지운다(v2.580 TUNE-B 규약).
+    for (const kk of m.keys()) if (!kk.startsWith(`${gen}|`)) m.delete(kk);
+    const p = Promise.resolve().then(fn);
+    m.set(k, p);
+    p.catch(() => { if (m.get(k) === p) m.delete(k); });
+    // 조회 중에 세대가 바뀌었으면(커밋·정리가 끼어들었으면) 이 결과를 기억으로 남기지 않는다.
+    p.then(() => { if (vmtrackGeneration() !== gen && m.get(k) === p) m.delete(k); }, () => {});
+    while (m.size > max) m.delete(m.keys().next().value);
+    return p;
+  };
+  memo.size = () => m.size;
+  memo.clear = () => m.clear();
+  return memo;
+}
+const scopeKeyOf = (scopeIds) => (scopeIds ? `s:${[...scopeIds].map(String).sort().join(',')}` : '*');
+const _seriesMemo = createGenMemo(6);
+const _changeLogMemo = createGenMemo(6);   // v2.744(감사 DB-01): 스토리지 변경 이력 — 시각별
+/** 테스트용 — 기억 크기·비우기. */
+export function _vmtrackMemoForTest() { return { series: _seriesMemo.size(), clear: () => { _seriesMemo.clear(); _changeLogMemo.clear(); } }; }
+
 export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null } = {}) {
   const sinceTs = Date.now() - Math.max(1, Math.min(1095, days)) * 86_400_000;
+  if (!vmtrackStatus().available) return computeSeries({ sinceTs, vcenterId, scopeIds });
+  const gen = vmtrackGeneration();
+  const boundary = await snapsBoundary(sinceTs);
+  return _seriesMemo(gen, `${boundary ?? 'none'}|${vcenterId}|${scopeKeyOf(scopeIds)}`, () => computeSeries({ sinceTs, vcenterId, scopeIds }));
+}
+
+async function computeSeries({ sinceTs, vcenterId = '', scopeIds = null }) {
 
   // 특정 vCenter 요청: 범위 검사 후 그 계열만.
   if (vcenterId) {
@@ -140,7 +203,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
         dsUsagePct: dsAggPct(r.ds_used_gb, r.ds_cap_gb),
-        baseline: !!r.baseline, skipped: r.skipped || 0, dsUsedUnknown: r.ds_used_unknown || 0 })),
+        baseline: !!r.baseline, skipped: r.skipped || 0, maintExcluded: maintOf(r), dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
     };
@@ -162,16 +225,39 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   // 다시 센다 — 슬롯 S 에 행이 없는 범위 안 vCenter 중 **S 이전에 행이 있던 것**(조회 구간 안에서 추적 중이던 것)을
   // 후보로 보고, 그 슬롯의 전 함대 skipped 를 넘지 않게 자른다(그 슬롯에 '빠진 vCenter' 가 없었다면 등록 해제·신규라
   // 부분 합이 아니다). 범위 밖 vCenter 의 skipped 가 섞여 한 대까지 과대할 수 있다 — 과소(급감을 정상으로 보이게)보다 낫다.
-  const totalSkipped = new Map((await readSeries({ vcenterId: '', sinceTs })).map((r) => [r.slot, Number(r.skipped) || 0]));
+  const totalRows = await readSeries({ vcenterId: '', sinceTs });
+  const totalSkipped = new Map(totalRows.map((r) => [r.slot, Number(r.skipped) || 0]));
+  // v2.744(감사 RECENT-01): 점검중 제외 수도 같은 방식으로 범위 안에서 다시 센다 — 후보 중 부분 합으로 센 몫을 뺀 나머지를
+  //   그 슬롯의 전 함대 점검중 제외 수 이하로 자른다(비활성은 어느 쪽에도 세지 않는다 — 전 함대 값이 둘 다 0 이면 0 이다).
+  const totalMaint = new Map(totalRows.map((r) => [r.slot, maintOf(r)]));
   const firstSlotOf = new Map();
   for (const r of perVcRows) { const f = firstSlotOf.get(r.vcenter_id); if (f == null || r.slot < f) firstSlotOf.set(r.vcenter_id, r.slot); }
   const presentBySlot = new Map();
   for (const r of perVcRows) (presentBySlot.get(r.slot) || presentBySlot.set(r.slot, new Set()).get(r.slot)).add(r.vcenter_id);
+  // v2.744(회귀 검토 GA-R2 — 재현): 위 '빌려 오기' 는 사유를 모르는 범위 안 빠진 수에 전 함대 사유 수를 skipped 먼저 붙였다 — 범위 안 비활성이
+  //   범위 밖 점검중 때문에 '점검중 제외' 로, 범위 안 점검중이 범위 밖 연결 실패 때문에 부분 합(vmTrend null)으로 보였다(범위 밖 점검 사실도 드러났다).
+  //   이제 합계 행에 남긴 [id, 사유](skip_detail)가 있으면 **범위 안이고 그 슬롯에 행이 없는** vCenter 만 사유별로 센다(skipCategoryOf — 전 함대와 같은 판정).
+  //   skip_detail 이 없는 옛 행(이 열 이전)만 예전 빌려 오기로 판정한다(그 행들은 사유를 남기지 않았다 — 예전 그대로이고 바뀌지 않는다).
+  const detailBySlot = new Map(totalRows.map((r) => [r.slot, parseSkipDetail(r.skip_detail)]));
   for (const a of bySlot.values()) {
     const present = presentBySlot.get(a.slot) || new Set();
+    const detail = detailBySlot.get(a.slot);
+    if (detail) {
+      let skipped = 0; let maint = 0;
+      for (const [id, why] of detail) {
+        if (!scopeIds.has(id) || present.has(id)) continue;
+        const c = skipCategoryOf(why);
+        if (c === 'partial') skipped += 1;
+        else if (c === 'maintenance') maint += 1;
+      }
+      a.skipped = skipped;
+      a.maintExcluded = maint;
+      continue;
+    }
     let cand = 0;
     for (const [id, first] of firstSlotOf) if (first < a.slot && !present.has(id)) cand += 1;
     a.skipped = Math.min(cand, totalSkipped.get(a.slot) || 0);
+    a.maintExcluded = Math.min(cand - a.skipped, totalMaint.get(a.slot) || 0);
   }
   // 사용률은 합산 후 1회 계산 — '전체 사용량 ÷ 전체 용량'(vCenter별 사용률의 평균이 아니다).
   for (const a of bySlot.values()) {
@@ -388,21 +474,40 @@ export function _dsStartValuesForTest(sinceTs) { return dsStartValues(sinceTs); 
  */
 export async function vmtrackDsChangeLog({ days = 30, vcenterId = '', scopeIds = null, chipLimit = 24 } = {}) {
   const sinceTs = Date.now() - clampDays(days) * 86_400_000;
-  const rows = (await readDsChangesWindow(sinceTs))
-    .filter((r) => (!vcenterId || r.vcenter_id === vcenterId) && (!scopeIds || scopeIds.has(r.vcenter_id)));
-  const bySlot = new Map();
-  for (const r of rows) {
-    let g = bySlot.get(r.slot);
-    if (!g) bySlot.set(r.slot, g = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.slot_ts, items: [], more: 0, sumDeltaGB: 0 });
-    g.sumDeltaGB = Math.round((g.sumDeltaGB + (r.delta_gb || 0)) * 10) / 10;
-    if (g.items.length >= Math.max(1, Math.min(100, chipLimit))) { g.more += 1; continue; }
-    g.items.push({
-      dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
-      kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null, capGB: r.cap_gb ?? null,
-      usagePct: r.usage_pct ?? null,
-    });
-  }
-  return { slots: [...bySlot.values()].sort((a, b) => b.ts - a.ts) };
+  const lim = Math.max(1, Math.min(100, chipLimit));   // 예전과 같은 식(라우트가 숫자로 넘긴다)
+  // ⚠ v2.744(감사 DB-01 — 측정: 합성 365일 ds_changes 16.4만 행 · 28 vCenter 에서 옛 한 문장 조회 1,478ms 동안 이벤트 루프가 멈췄다 →
+  //   새 경로 전체 709ms · 최장 멈춤 34ms · 기억 적중 0ms. 감사 보고는 운영 규모에서 1.5~9.6초): 예전에는 기간 전체를
+  //   정렬해 한 번에 읽었다(readDsChangesWindow — LIMIT·양보·vCenter 조건 없음). 이제 창 안 슬롯마다 나눠 읽고(슬롯 안 정렬은 예전 조회와
+  //   같다 — 묶음·칩 상한·합계가 슬롯 단위라 결과가 같다) 슬롯 사이에 시간 기준으로 양보한다. vCenter 조건은 SQL 로 내렸다.
+  //   결과는 세대 + 창 경계(snaps·ds_changes 둘 다) + 조건 키로 기억한다 — 탭을 오갈 때마다 다시 읽지 않는다.
+  //   ⚠ 한계(정직 기록): 읽는 사이에 커밋·정리가 끼면 슬롯마다 그 시점의 값이다(한 문장 조회처럼 한 순간의 사진이 아니다) — 그 결과는
+  //   세대가 바뀌어 기억에 남지 않는다. 슬롯 목록은 snaps.ts>=since 로 고른다 — 시계가 거꾸로 간 경우(스냅샷 ts 가 줄어든 경우)만 다를 수 있다.
+  const compute = async () => {
+    const slots = await slotsSince(sinceTs);
+    const yieldMaybe = createYielder(15);
+    const bySlot = new Map();
+    for (const slot of slots) {
+      const rows = (await readDsChangesOfSlot(slot, sinceTs, vcenterId))
+        .filter((r) => (!vcenterId || r.vcenter_id === vcenterId) && (!scopeIds || scopeIds.has(r.vcenter_id)));
+      for (const r of rows) {
+        let g = bySlot.get(r.slot);
+        if (!g) bySlot.set(r.slot, g = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.slot_ts, items: [], more: 0, sumDeltaGB: 0 });
+        g.sumDeltaGB = Math.round((g.sumDeltaGB + (r.delta_gb || 0)) * 10) / 10;
+        if (g.items.length >= lim) { g.more += 1; continue; }
+        g.items.push({
+          dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
+          kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null, capGB: r.cap_gb ?? null,
+          usagePct: r.usage_pct ?? null,
+        });
+      }
+      await yieldMaybe();
+    }
+    return { slots: [...bySlot.values()].sort((a, b) => b.ts - a.ts) };
+  };
+  if (!vmtrackStatus().available) return compute();
+  const gen = vmtrackGeneration();
+  const [snapB, dsB] = await Promise.all([snapsBoundary(sinceTs), dsChangesBoundary(sinceTs)]);
+  return _changeLogMemo(gen, `${snapB ?? 'none'}|${dsB ?? 'none'}|${vcenterId}|${lim}|${scopeKeyOf(scopeIds)}`, compute);
 }
 
 /**
@@ -412,9 +517,7 @@ export async function vmtrackDsChangeLog({ days = 30, vcenterId = '', scopeIds =
  */
 export async function vmtrackDsPivot({ days = 30, vcenterId = '', scopeIds = null, q = '', changedOnly = true, sort = 'cum', offset = 0, limit = 20, slotCount = 6 } = {}) {
   const sinceTs = Date.now() - clampDays(days) * 86_400_000;
-  const [roster, changeRows, startVals] = await Promise.all([
-    listDsRoster(), readDsChangesWindow(sinceTs), dsStartValues(sinceTs),
-  ]);
+  const [roster, startVals] = await Promise.all([listDsRoster(), dsStartValues(sinceTs)]);
   const scoped = (vc) => (!vcenterId || vc === vcenterId) && (!scopeIds || scopeIds.has(vc));
 
   // 슬롯 열: 윈도우 내 스냅샷 슬롯 최근 N 개(전체 합계 행 기준 — 변화가 0 인 슬롯도 열로 나와야
@@ -425,12 +528,17 @@ export async function vmtrackDsPivot({ days = 30, vcenterId = '', scopeIds = nul
   const colSet = new Set(slotCols.map((c) => c.slot));
 
   // DS별 슬롯 증감 맵(변경분만 존재 — 없는 칸은 0 또는 관측 전).
+  // ⚠ v2.744(감사 DB-01 — 감사 보고: 365일 ds-pivot 1.5~9.6초 정지, 검색어 한 글자마다 반복 · 같은 합성 16.4만 행에서 새 경로 11ms): 예전에는 기간 전체 변경 행을 읽고 열(최근 N 슬롯)
+  //   밖 행을 버렸다. 열로 쓰는 슬롯의 행만 슬롯마다 읽는다(누적 증감은 dsStartValues·로스터로 계산하므로 창 전체 행이 필요 없다).
+  //   슬롯 안 순서는 예전 조회와 같다 — 같은 (DS, 슬롯) 이 두 번 나오면 뒤 행이 이기는 규칙도 그대로다.
   const perDs = new Map();
-  for (const r of changeRows) {
-    if (!scoped(r.vcenter_id) || !colSet.has(r.slot)) continue;
-    let m = perDs.get(r.ds_id);
-    if (!m) perDs.set(r.ds_id, m = {});
-    m[r.slot] = { kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null };
+  for (const c of slotCols) {
+    for (const r of await readDsChangesOfSlot(c.slot, sinceTs, vcenterId)) {
+      if (!scoped(r.vcenter_id) || !colSet.has(r.slot)) continue;
+      let m = perDs.get(r.ds_id);
+      if (!m) perDs.set(r.ds_id, m = {});
+      m[r.slot] = { kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null };
+    }
   }
 
   const ql = String(q || '').trim().toLowerCase();

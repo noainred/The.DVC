@@ -28,10 +28,13 @@
 
 import { summarize, isBad, PART_STATE, COLLECTION_KINDS } from './types.js';
 import { extractIdracParts } from './extract/idrac.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 등록부 오류 사유는 요약(원문 없음)
 import { extractStorageParts } from './extract/storage.js';
 
 const t = (v) => String(v ?? '').trim();
 export const devKeyOf = (agent, deviceId) => `${t(agent)}|${t(deviceId)}`;
+/** v2.744(EDGE-01): 등록부를 갖는 장비군 — 손상 판정(`registryLoadError`)을 보는 범위. */
+export const REGISTRY_SCOPES = Object.freeze(['idrac', 'storage', 'sanswitch']);
 
 /**
  * @param {object} deps 주입(테스트 가능하게) — 실제 배선은 `runScan()` 이 한다.
@@ -41,7 +44,7 @@ export function scanFrom({
   idracServers = [], invOf = () => null, invFresh = () => true,
   storageDevices = [], storageSnapOf = () => null,
   sanDevices = [], sanSnapOf = () => null, extractSan = null,
-  agent = '',
+  agent = '', registryUnreadable = null,
 } = {}) {
   const devices = [];
   const deviceOk = {};
@@ -132,12 +135,25 @@ export function scanFrom({
     put({ ...base, ok: true, reason: '', failedKinds: [], notCollected: r.notCollected || [], notJudged: r.notJudged || null, parts: r.parts });
   }
 
+  // v2.744(감사 EDGE-01): 장비군 등록부를 읽지 못한 사실(scope → {at, reason}). 그 장비군의 장비는 위에서 0대로 보인다 —
+  //   push 는 이 표지를 함께 실어 중앙 전이가 '재배정·등록 삭제(unassigned)' 가 아니라 '수집 서버 등록부 손상' 보류로 말하게 한다.
+  const ru = {};
+  for (const sc of REGISTRY_SCOPES) {
+    const e = registryUnreadable && typeof registryUnreadable === 'object' ? registryUnreadable[sc] : null;
+    // v2.744(리드 후속 RY): 사유는 원문(JSON.parse 오류 조각 — 손상된 자격증명 파일 내용 일부)이 아니라 요약이다 — 이 표지는 push 로 중앙에 가고
+    //   중앙 파트 장애 화면(tools 권한 — operator 도 본다)·보류 사유에 실린다. code 는 분류(parse-error·corrupt-only·read-error)다.
+    if (e) {
+      const sum = summarizeRegistryError(e);
+      ru[sc] = { at: Number.isFinite(e.at) ? e.at : null, code: sum?.code || null, reason: sum?.text || '사유 미상' };
+      scanned[sc].registryUnreadable = ru[sc];
+    }
+  }
   const parts = devices.flatMap((d) => d.parts);
   scanned.summary = summarize(parts);
   scanned.devicesFailed = devices.filter((d) => !d.ok).length;
   const open = parts.filter((p) => isBad(p.state));
   void PART_STATE;
-  return { devices, parts, open, scanned, deviceOk, kindFailed };
+  return { devices, parts, open, scanned, deviceOk, kindFailed, registryUnreadable: Object.keys(ru).length ? ru : null };
 }
 
 /**
@@ -152,7 +168,7 @@ export function scanFrom({
  *   그래도 **중앙이 그 값으로 위임 장비를 판정하지 않는다** — 판정·전이·알림은 그 엣지가 한다(같은 부품이 두 번 열리지 않게).
  */
 export async function runScan() {
-  const [{ loadRegistry }, { getInventory, inventoryStale }, cfg, stReg, stStore, swReg, swStore] = await Promise.all([
+  const [idracReg, { getInventory, inventoryStale }, cfg, stReg, stStore, swReg, swStore] = await Promise.all([
     import('../idrac/registry.js'),
     import('../idrac/invCache.js'),
     import('../config.js'),
@@ -166,7 +182,7 @@ export async function runScan() {
   try { ({ extractSanSwitchParts: extractSan } = await import('./extract/sanswitch.js')); } catch { extractSan = null; }
   // 인벤토리 신선도 기준 — iDRAC 인벤토리는 30분 주기라(poller.js) 그 두 배까지는 유효로 본다.
   const MAX_AGE = Math.max(60_000, Number(process.env.PARTFAULT_INV_MAX_AGE_MS) || 90 * 60_000);
-  const servers = (() => { try { return loadRegistry(); } catch { return []; } })();
+  const servers = (() => { try { return idracReg.loadRegistry(); } catch { return []; } })();
   const snaps = new Map();
   try { for (const s of stStore.localSnapshots()) snaps.set(s.deviceId, s); } catch { /* 스냅샷 없음 */ }
   const swSnaps = new Map();
@@ -174,6 +190,10 @@ export async function runScan() {
   const devices = (() => { try { return stReg.devicesForThisNode(); } catch { return []; } })();
   const switches = (() => { try { return swReg.devicesForThisNode(); } catch { return []; } })();
   const isEdge = !!cfg.config.agent.centralUrl;
+  // v2.744(감사 EDGE-01): 등록부를 읽지 못하면 loadRegistry()·devicesForThisNode() 가 빈 목록이다 — 그 사실을 따로 싣는다(위 scanFrom 주석).
+  const loadErrOf = (m) => { try { return m.registryLoadError?.() || null; } catch (e) { return { at: Date.now(), reason: String(e?.message || e).slice(0, 200) }; } };
+  const registryUnreadable = {};
+  for (const [sc, m] of [['idrac', idracReg], ['storage', stReg], ['sanswitch', swReg]]) { const e = loadErrOf(m); if (e) registryUnreadable[sc] = e; }
   return scanFrom({
     idracServers: servers.filter((s) => t(s?.type) !== 'ome'),   // 관리 콘솔 등록은 물리 서버가 아니다
     invOf: (id) => { try { return getInventory(id); } catch { return null; } },
@@ -184,5 +204,6 @@ export async function runScan() {
     sanSnapOf: (id) => swSnaps.get(id) || null,
     extractSan,
     agent: isEdge ? cfg.config.agent.name : '',
+    registryUnreadable,
   });
 }

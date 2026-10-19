@@ -20,9 +20,13 @@ Object.assign(process.env, { DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', IPAM_WR
 const MIN = 60_000;
 const HOUR = 3600_000;
 const DAY = 86_400_000;
-// 기준 시각은 정시에서 떨어뜨려 고정한다(CLAUDE.md — Date.now() 를 기준으로 쓰지 말 것).
-const BASE = Math.floor(1_790_000_000_000 / HOUR) * HOUR + 17 * MIN;
-const NOW = BASE + HOUR;   // 집계 표 가용성 판정용 '지금'(15분 표 보관 31일 안)
+// 기준 시각은 정시에서 떨어뜨려 고정한다(CLAUDE.md — Date.now() 를 그대로 기준으로 쓰지 말 것).
+// v2.744: 예전 BASE 는 고정 epoch(2026-09-22)였다. 그런데 제품의 15분 표 보관 경계(백필 lo15·addRollups cut15)는 **실제 시각** 기준이라,
+//   실제 날짜가 BASE + 27일을 넘자(2026-10-19) 백필이 앞 구간의 15분 표를 만들지 않고 조회(now: NOW)는 15분 표가 있다고 보아
+//   ② 가 매번 실패했다(테스트 시한 폭탄 — 제품은 두 쪽 모두 실제 시각이라 어긋나지 않는다). 이제 BASE 는 실제 시각에서 정시 −2시간 + 17분 —
+//   항상 과거이고 정시 경계에서 17분 떨어져 있으며, 데이터(BASE − 4일)는 언제나 15분 표 보관(31일) 안이다.
+const BASE = Math.floor(Date.now() / HOUR) * HOUR - 2 * HOUR + 17 * MIN;
+const NOW = BASE + HOUR;   // 집계 표 가용성 판정용 '지금'(실제 시각보다 43~103분 과거 — 15분 표 보관 31일 안)
 
 const OLD_SQL = (bucket) => `SELECT device_id, port, (ts / ${bucket}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps, MAX(ts) AS last_ts
   FROM port_perf WHERE device_id IN (?,?,?) AND ts >= ? AND ts <= ? GROUP BY device_id, port, b`;

@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { localStamp } from '../util/dayKey.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -46,7 +46,7 @@ function state() {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _state = { targets: raw && typeof raw.targets === 'object' && !Array.isArray(raw.targets) ? raw.targets : {} };
   } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); console.warn(`[isidu-mail] 상태 파일을 읽지 못해 새로 시작합니다(같은 결과를 한 번 더 보낼 수 있습니다): ${e?.message}`); }
+    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); console.warn(`[isidu-mail] 상태 파일을 읽지 못해 새로 시작합니다(같은 결과를 한 번 더 보낼 수 있습니다): ${safeLoadText(e) || '사유 미상'}`); }
     _state = { targets: {} };
   }
   return _state;

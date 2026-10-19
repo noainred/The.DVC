@@ -46,3 +46,57 @@ export function authStopSingleText(info) {
 
 /** 툴팁(title)용 — 강조 표지를 뺀 평문(title 은 BoldText 를 거치지 않는다). */
 export const plainText = (t) => String(t || '').replace(/\*\*/g, '');
+
+/*
+ * v2.744(감사 VC-04): 직접 수집 대상이 아니라(비활성·점검중·엣지 위임) 이 포탈이 로그인하지 않은 vCenter.
+ * 서버 authStopGate.js DIRECT_SKIP_TEXT 와 키 1:1(테스트 대조). 인증 정지와 다른 사실이다 — '인증 정지' 로 말하지 않는다.
+ * 응답 모양: 여러 vCenter 경로는 skippedVcenters: { [vcenterId]: { skipReason, reason } }, 단건은 409 본문 { skipReason, reason }.
+ */
+export const SKIP_REASON_TEXT = Object.freeze({
+  disabled: '비활성',
+  maintenance: '점검중',
+  site: '엣지 위임',
+  invalid: '설정 형식 오류',
+});
+const skipLabel = (k) => SKIP_REASON_TEXT[k] || '직접 수집 대상 아님';
+
+/** 맵 → 정렬된 목록 `[{ vcenterId, skipReason }]`. */
+export function skippedList(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
+  return Object.keys(map).sort().map((vcenterId) => ({ vcenterId, skipReason: map[vcenterId]?.skipReason ?? null }));
+}
+
+/** 여러 vCenter 응답의 각주 한 줄. 건너뛴 vCenter 가 없으면 빈 문자열. 이름은 5곳까지 적고 나머지는 개수로 밝힌다. */
+export function skipNote(map) {
+  const list = skippedList(map);
+  if (!list.length) return '';
+  const names = list.slice(0, 5).map((x) => `‘${x.vcenterId}’(${skipLabel(x.skipReason)})`).join(' · ');
+  const more = list.length > 5 ? ` 외 ${list.length - 5}곳` : '';
+  return `**이 포탈이 직접 수집하지 않는 vCenter** ${list.length}곳(${names}${more})은 조회하지 않았습니다 — 비활성·점검중은 로그인하지 않고, 엣지 위임 vCenter 는 담당 엣지가 수집합니다. 값이 비어 있는 것은 사용량이 0 이라는 뜻이 아닙니다.`;
+}
+
+/** 표의 한 칸(건너뛴 vCenter 의 행). 이력이 없는 '—' 와 구분되는 짧은 글자 + 툴팁. */
+export function skipCell(info) {
+  const k = info?.skipReason;
+  return { text: skipLabel(k), title: plainText(info?.reason || '이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다') };
+}
+
+/*
+ * v2.744(감사 후속 FA-②·③): vCenter 하나짜리 응답(호스트·클러스터 추이·VM 성능 창 409)의 안내 한 줄과 사유별 조치.
+ * 인증 정지 문구(authStopSingleText)와 따로 둔다 — 비활성·점검중·엣지 위임은 비밀번호 문제가 아니다.
+ * 키는 SKIP_REASON_TEXT 와 같다(테스트 대조). 모르는 사유는 일반 안내로 떨어진다(지어내지 않는다).
+ */
+export const SKIP_HOW = Object.freeze({
+  disabled: '비활성 vCenter 에는 로그인하지 않습니다. 설정 › vCenter 에서 다시 켜면 조회합니다',
+  maintenance: '점검중으로 둔 vCenter 는 수집이 멈춰 있어 로그인하지 않습니다. 점검중을 풀면 다시 조회합니다',
+  site: '엣지 위임 vCenter 는 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다',
+  invalid: 'vCenter 설정 형식이 올바르지 않아 로그인하지 않습니다. 설정 › vCenter 에서 등록 정보를 고치세요',
+});
+
+/** 단건 응답의 `{ skipReason, reason }` → 안내 한 줄(BoldText). 사유가 없으면 빈 문자열. */
+export function skipSingleText(info) {
+  const k = info && typeof info === 'object' ? info.skipReason : null;
+  if (typeof k !== 'string' || !k) return '';
+  const how = SKIP_HOW[k] || '설정 › vCenter 에서 수집 방식·상태를 확인하세요';
+  return `**이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다**(${skipLabel(k)}) — ${how}. 값이 비어 있는 것은 사용량이 0 이라는 뜻이 아닙니다.`;
+}

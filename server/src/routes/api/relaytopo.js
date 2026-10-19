@@ -14,6 +14,7 @@ import { todayStamp } from "../../util/dayKey.js";
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -31,7 +32,9 @@ const fullScopeOnly = fullScopeOnlyWith('중계 토폴로지는 엣지 사이트
 const toolsPerm = requirePerm('tools');
 // 거부 기본값 — authMiddleware 는 인증 비활성 시에도 req.user 를 AUTH_DISABLED_ROLE 로 채우므로
 // (auth.js:909) 이 판정으로 충분하고, authMiddleware 없이 mount 되는 사고에도 데이터가 새지 않는다.
-const isAdmin = (req) => req.user?.role === 'admin';
+// v2.744(감사 AUTHZ-01): 관리자 판본(전 사이트 IP·SSH 계정·haproxy.cfg 원문·portal.env 발췌·배포 대상)은 isAdminDetailUser 하나로 정한다 —
+//   mock 데모 계정은 요청 문맥이 role 'admin' 이라 예전 `role === 'admin'` 판정을 그대로 통과해 operator 보다 넓게 봤다(v2.743 AUTHZ-01 의 형제).
+const isAdmin = (req) => isAdminDetailUser(req.user);
 const RE_DC = /^[^\s/\\]{1,40}$/;
 
 export function registerRelayTopo(api) {

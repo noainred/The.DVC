@@ -65,10 +65,17 @@
     생성 가능(`remote.js targetHostScopeIssue`, 순수 — `test/nsxRemoteScope.test.js` 고정).
     인벤토리에 없는 임의 IP 는 범위 계정에 403(내부망 정찰·범위 밖 피벗 준비 차단). 전체 범위
     계정은 기존 신뢰 모델 유지(임의 대상 허용). 이 검사를 형식 검증(SAFE_HOST)만으로 되돌리지 말 것.
+    ⚠ v2.744(최종 검토 FD — RF-R1): '인벤토리에 실재하는 대상' 에는 **허용 vCenter 호스트의 원장 관리 IP**(`ipam/ledger.js hostLedgerIp` — FQDN 으로 등록된 ESXi 의
+    관리 IP)도 들어간다(`proxy/targetHostScope.js`). IP 대장 호스트 행이 그 IP 를 보여 주고 원격 접속 대상으로 쓰므로, 빠지면 범위 계정이 자기 호스트에 403 을 받는다.
+    그 주소가 **범위 밖 객체(VM IP·호스트 이름·관리 IP)와도 겹치면 거부**하고, 비정규 IPv4 표기(`010.0.0.5`)는 거부한다(inet_aton 이 다르게 읽는다 — v2.589).
+    회귀 `test/audit2744fd.test.js`.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
 - **소유자 경계는 서버측 강제**: `settingsOwners`(설정 소유 계정)처럼 UI가 숨기는 권한 경계는 서버에서도 검사한다(`routes/admin.js requireSettingsOwner`). 클라이언트 전용 게이트는 admin이 API를 직접 호출해 우회·소유자 목록 탈취가 가능하다.
+  - ⚠ **소유자 등급 = 소유자 ∧ 전체 범위**(v2.744 AUTHZ-02, `routes/admin/shared.js requireSettingsOwner`): 소유자 목록에 있어도
+    범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —
+    소유자 목록에 있는가) ≠ `settingsOwnerTier`(소유자 등급 라우트를 실제로 통과하는가)** — 화면이 소유자 등급 버튼을 잠글 때는 뒤의 값을 볼 것.
   - **백업 라우트도 소유자 경계에 포함**: 백업 아카이브는 `portal.env`(AUTH_SECRET·CENTRAL_TOKEN)·
     `users.json`(TOTP 시크릿)·`vcenters.json` 등 자격증명 사본이라 `/api/admin/backup/*` 전부에
     `requireSettingsOwner`를 건다(v2.210). AUTH_SECRET이 새면 임의 계정 토큰 위조로 OTP 정책·
@@ -908,3 +915,20 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   (다음 주기·claim→ack 가 잇는다 — 커서를 전진하지 않으므로 유실은 없고, 혼잡 503 이면 한 주기 늦어진다).
 - **주문형 vCenter 로그인은 `vcenter/dsBrowse.js onDemandVcBlock`·`onDemandLogin` 을 지난다**(VC-03): 비활성·점검중·site·인증 정지면 로그인 0 + 409. 거부는 `noteVcAuthFailure`
   로 주 폴러와 같은 기록에 올린다(v2.732 B4-01 · v2.733 C3-01 규약의 형제 4경로).
+
+## 2026-10-16 v2.743 점검 — 관리자 판본 단일 판정·엣지 등록부 손상 503 — 되돌리지 말 것 (docs/AUDIT-2026-10-16b.md)
+
+(v2.744 LEFT-07 — 루트 CLAUDE.md 에만 있던 v2.743 서버 보안 규칙을 이 파일로 옮겼다. 서버 파일을 고칠 때 이 파일이 읽힌다.)
+
+- **'관리자 판본'(관리 IP·계정명·CONFIG_DIR 절대 경로·오류 원문·등록부 CSV) 판정은 `auth/demoGuest.js isAdminDetailUser` 하나**(AUTHZ-01): mock 데모 계정은 요청 문맥 역할이
+  admin 이라 `req.user?.role === 'admin'` 으로 가림을 정하면 데모 계정이 관리자 판본을 받는다. `addressMask.isAdminReq`·`scopeStatus.scopeDbStatus`·`scopeFilePaths`·
+  `redactPushStatus`·archScan `scopeArchPaths` 가 이 함수를 쓴다. **라우트에서 역할 문자열로 가림을 정하지 말 것** — v2.744 AUTHZ-01 이 남은 경로를 고치고 소스 스윕
+  (`audit2744e`)으로 직접 비교를 허용 목록과 대조한다. memoJson 의 extraKey 에 역할을 넣는 곳은 판정 결과(데모 포함)로 만든다(데모와 관리자가 같은 캐시 칸을 쓰지 않게).
+- **데모 계정은 `data.csv` 가 없다**(`auth/permissions.js userHasPermission`) · 실제 접속 GET 과 관리 조회는 `demoGuest.js READ_DENY`·`LIVE_GET_DENY` 로 막는다 —
+  새 관리 화면 접두를 만들면 READ_DENY 에도 넣을 것(v2.716 규약).
+- **엣지가 등록부를 읽어 '전량' 을 보내는 응답은 `registryLoadError()` 를 먼저 본다**(EDGE-01): 엣지 iDRAC 등록부(idrac.json)가 손상이면 `/api/collector/export` 가
+  503 `registryUnreadable` + Retry-After 60 + no-store 이고 중앙 puller 는 직전 스냅샷을 유지한다(`edgeReason` · 통신 지도 `pull-edge-registry`). 빈 목록을 보내면 중앙이
+  그 법인의 위임 서버·전력을 통째로 지운다. v2.744 EDGE-01 이 같은 규칙을 fleet push(상태 전용 보고 — 중앙 2.744.0 이상일 때만)·파트 장애 push(`registryUnreadable` →
+  보류 사유 `registry-unreadable`)로 넓혔다. EDGE-03 은 **자동 등록**(위임 스캔·주기 스캔의 `registerScanned(…, {auto:true})`)만 손상 등록부 위에 쓰지 않게 했고
+  (`util/registryCore.js autoWriteRefusal` 한 벌 — 새 자동 저장 경로는 auto:true 를 넘길 것), 스토리지·SAN·PDU·CVP **설정 pull 적용은 예전처럼 다시 쓰되**
+  `registryRecovered` 로 기록한다(그 엣지의 수집 대상은 전부 중앙 배포분이라 다시 쓰는 것이 복구다 — 배포분이 아닌 로컬 항목은 손상 보존본에만 남는다).

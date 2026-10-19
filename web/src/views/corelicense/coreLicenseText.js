@@ -26,13 +26,18 @@ export function addonText(v, bound) {
 export function coverageNote(t) {
   if (!t) return null;
   const parts = [];
+  // v2.744(감사 VC-03): 호스트·VM 을 읽지 못한 vCenter 는 0 대로 더하지 않았다 — 합계가 하한이라는 사실을 가장 먼저 말한다.
+  if (t.notRead > 0) parts.push(`읽지 못한 vCenter ${t.notRead}곳은 산정에서 빠졌습니다 — 필요 코어 합계는 하한이고 vSAN 추가 필요량은 계산하지 않았습니다`);
+  if (t.notReadDisabled > 0) parts.push(`비활성 vCenter ${t.notReadDisabled}곳은 수집하지 않아 산정에 없습니다`);
   if (t.unknown > 0) parts.push(`소켓·코어 수를 읽지 못한 호스트 ${t.unknown.toLocaleString()}대는 합계에서 뺐습니다 — 실제 필요 코어는 이보다 많습니다(하한)`);
   if (t.disconnected > 0) parts.push(`연결이 끊긴 호스트 ${t.disconnected.toLocaleString()}대도 라이선스 대상이라 포함했습니다(마지막으로 읽은 하드웨어 값)`);
   if (t.vsanUnknown > 0) parts.push(`용량을 읽지 못한 vSAN 데이터스토어 ${t.vsanUnknown}개는 vSAN 합계에서 뺐습니다`);
   // v2.721(감사 B1-03): vSAN 추가분이 확정값이 아니면 어느 방향으로 틀릴 수 있는지 말한다.
-  const bn = ADDON_BOUND_NOTE[t.vsanAddonBound];
+  // v2.744(감사 VC-03): 읽지 못한 vCenter 때문에 산정 불가인 경우는 위 문장이 이미 말했다(호스트·데이터스토어 사유 문장을 덧붙이지 않는다).
+  const bn = t.partial ? null : ADDON_BOUND_NOTE[t.vsanAddonBound];
   if (bn) parts.push(bn);
-  // v2.742(감사 VC-06): 라이선스 목록을 못 읽은 vCenter — 산정값(호스트 하드웨어 기준)은 그대로지만 vCenter 보고값과는 비교하지 않았다.
+  // v2.742(감사 VC-06): 라이선스 목록을 못 읽은 vCenter — 그 vCenter 의 vCenter 보고값과는 비교하지 않았다.
+  //   v2.744(감사 VC-03): 이 수는 호스트를 읽은 vCenter 만 센다(서버가 미수집 vCenter 를 뺀다) — 미수집 vCenter 의 산정값은 위 하한 문장이 말한다.
   if (t.licensesUnread > 0) parts.push(`라이선스 목록을 읽지 못한 vCenter ${t.licensesUnread}곳은 vCenter 보고(코어 라이선스)와 비교하지 않았습니다 — 코어 라이선스가 없다는 뜻이 아닙니다`);
   return parts.length ? `${parts.join(' · ')}.` : null;
 }

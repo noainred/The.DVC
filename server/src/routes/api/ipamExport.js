@@ -21,7 +21,7 @@ import { rangeSize } from '../../ipam/scan.js';
 import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
 import { makeVcResolver } from '../../ipam/vcResolve.js';
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
@@ -91,10 +91,6 @@ function ipOverrideWriteVerdict(req, snap, allowed, owners, ip, bodyClaim) {
   if ((existing && writeScopeDenied(req, snap, owners, ip, prevClaim)) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
   return null;
 }
-/** setOverrideBatch 와 같은 규칙으로 대상 IP 목록을 만든다(문자열 입력도 — 검사한 목록과 적용 목록이 같아야 한다). */
-function bulkIpList(ips) {
-  return (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
-}
 
 /**
  * v2.740(감사 F-06 — 재현): 라우트의 원장 — 결과는 `buildIpamRows` 와 같고(같은 생성기·같은 세대 키), 캐시에 없으면 **양보하며** 만든다.
@@ -106,6 +102,28 @@ function routeLedger(snap, vcenterId, allowed) {
   return buildIpamRowsShared(snap, vcenterId, allowed, { shouldCache: () => store.get() === snap });
 }
 
+/**
+ * v2.744(회귀 검토 GG-R3): 목록·시트 응답의 **호스트 행** 소유 자원 본문(스냅샷 호스트 객체 통째)을 싣지 않는다.
+ *   예전 다이어트(v2.253)는 '호스트 행은 작다' 를 전제로 VM 만 줄였는데, VC-01 로 FQDN 호스트 전부가 행이 되어
+ *   ① 응답이 약 31% 커졌고(운영 규모 목 데이터 실측) ② `/hosts` 가 403 인 역할(tools 만 있고 inv.hosts 없음)에게도
+ *   호스트 전체 객체(hcfg 보안 구성·NIC MAC·HBA·serviceTag)가 나갔다. 화면은 행의 ownerName·hostName·cluster·guestOS·
+ *   vcenterId 만 쓰고(IpamCore·IpmsMatches — grep 확인), 상세는 클릭 때 `/hosts`(inv.hosts 게이트)로 1건만 가져온다.
+ *   `ownerId`(호스트 id)는 그 지연 조회가 같은 이름 호스트를 헷갈리지 않게 싣는다. 원장 캐시는 공유 객체라 새 객체를 만든다.
+ */
+function slimHostRow(r) {
+  if (r?.ownerType !== 'host' || !r.owner) return r;
+  return { ...r, owner: undefined, hasOwner: true, ownerId: String(r.owner.id || ''), ownerName: r.ownerName || String(r.owner.name || '') };
+}
+/**
+ * v2.744(리드 후속 RY): 목록·시트가 같은 다이어트를 쓴다 — VM 행은 v2.253 모양(`hasOwner` 만, 상세는 `/vms/lookup` — inv.vms 게이트),
+ *   호스트 행은 slimHostRow. 예전에는 시트 라우트가 호스트만 줄여 **VM 칸에 스냅샷 VM 객체 통째**(uuid·MAC·디스크 경로·사용자 지정 속성 …)를
+ *   실었고, `/vms` 가 403 인 역할(tools 만 있고 inv.vms 없음)에게도 나갔다(v2.536 inv.* 우회 계열 — 재현). 화면은 시트 VM 칸의 owner 를
+ *   IP 사용 이력 창에서만 쓰고 그 창은 owner 가 없으면 이미 지연 조회한다(IpamCore needsLookup) — 화면 변경 없이 같은 경로를 탄다.
+ */
+export function slimOwnerRow(r) {
+  return r?.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : slimHostRow(r);
+}
+
 export function registerIpamExport(api) {
 
 // Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM
@@ -114,7 +132,7 @@ export function registerIpamExport(api) {
 // 응답 다이어트(v2.253): VM 행의 owner(스냅샷 VM 객체 통째 — 행당 수 KB)가 응답을 수십 MB 로
 // 만들어 JSON.stringify + SHA-1(ETag)이 요청마다 이벤트 루프를 세웠다. 목록에선 hasOwner
 // 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
-// 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
+// 호스트 행도 v2.744(GG-R3)부터 같은 방식(slimHostRow) — 스캔 행은 owner 가 없다. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
 /**
  * v2.582 TUNE-1: 이 응답은 운영 규모(33 vCenter · 6,004 VM 목)에서 **5.3MB** 이고, 예전에는 요청마다
  * rows 복사 → JSON 직렬화 → SHA-1(ETag) → gzip 을 다시 했다(in-process p50 71ms — 다른 폴링 라우트는
@@ -127,7 +145,7 @@ export function registerIpamExport(api) {
  */
 api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', async (snap) => {
   const data = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
-  let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r));
+  let rows = data.rows.map(slimOwnerRow);
   const q = String(req.query.q || '').trim().toLowerCase();
   let truncated = false; let matched = null;
   if (q) {
@@ -179,7 +197,9 @@ api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 양보판 원장을 시트에 넘긴다(지금 입력의 것일 때만 쓰인다)
   const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed, ledger, cache: store.get() === snap });
-  res.json(sheets[0] || { subnet: '', rows: [] });
+  const sheet = sheets[0];
+  // v2.744(회귀 검토 GG-R3 · 리드 후속 RY): 시트의 호스트·VM 칸도 목록과 같이 줄인다(시트 객체는 캐시 공유 — 새 객체). slimOwnerRow 머리말.
+  res.json(sheet ? { ...sheet, rows: (sheet.rows || []).map(slimOwnerRow) } : { subnet: '', rows: [] });
 });
 
 // Per-IP usage history (scan-derived online/offline transitions over time).
@@ -349,9 +369,14 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   const allowedW = writeScopedVcenterIds(req.user, snap);
   // v2.630 AUTHZ2630-01: 단건 PUT 과 같은 판정(기존 claim 먼저) — 예전엔 본문 claim 만 봐서 범위 밖 vCenter 가
   //   claim 한(소유 VM 없는) 예약을 본문 claim 하나로 덮어써 탈취할 수 있었다. 문자열 ips 도 같은 목록으로 검사한다.
-  const list = bulkIpList(ips);
+  // v2.744(감사 WEB-02): 대상 목록은 setOverrideBatch 와 같은 판정(overrides.splitBatchIps) — 무효 토큰을 조용히 버리지 않는다.
+  const split = splitBatchIps(ips);
   // 판정 루프 전에 개수 상한(setOverrideBatch 의 MAX_BATCH 와 같은 값 — 중복 포함 원문 기준으로 먼저 자른다).
-  if (list.length > 10_000) return res.status(400).json({ ok: false, reason: '한 번에 10000개까지만 일괄 적용할 수 있습니다.' });
+  if (split.tokens.length > 10_000) return res.status(400).json({ ok: false, reason: '한 번에 10000개까지만 일괄 적용할 수 있습니다.' });
+  // 무효 토큰이 하나라도 있으면 범위 판정보다 먼저 400 + 목록 — 단건 PUT 이 같은 값을 400 으로 거부하는 것과 같은 판정이고, 일부만 적용하지 않는다.
+  const bad = invalidBatchResult(split.invalid);
+  if (bad) return res.status(400).json(bad);
+  const list = split.ips;
   if (allowed || allowedW) {
     const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
     const claimed = fields.claimedVcenterId || '';
@@ -361,7 +386,7 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
       if (v?.status === 403) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
     }
   }
-  const r = setOverrideBatch(list, fields, req.user);
+  const r = setOverrideBatch(list, fields, req.user, { rejectInvalid: true });
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });

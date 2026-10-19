@@ -167,10 +167,14 @@ test('SEC2603-01: 이름 추출 결과가 예전 정규식과 같다(정상 표�
 // stripChoiceLines 로 바뀌었으므로 두 함수의 동치성을 본다.
 const oldChoiceRule = (t) => t.replace(/^\s*\[[123]\][^\n]*\n?/gm, '');
 
-test('SEC2603-02: 빈 줄 10만 개 + 공백 줄 입력이 150ms 안', () => {
+// v2.744: 이 입력은 30만~40만 줄이라 다른 테스트와 같은 150ms 상한은 전량 테스트·다른 작업과 겹친 부하에서 넘쳤다
+//   (단독 117~134ms · 전량 실행 중 314ms 실측). 판정하려는 것은 O(n²) 회귀이고 옛 규칙은 같은 입력에서 12~48초다 —
+//   상한 1초로도 12배 이상 차이로 갈린다(정상은 15~40ms). 다른 테스트의 LIMIT_MS 는 그대로 둔다.
+const STRIP_LIMIT_MS = 1000;
+test('SEC2603-02: 빈 줄 10만 개 + 공백 줄 입력이 1초 안(옛 규칙 12~48초)', () => {
   for (const s of ['1: ID = x\n' + '\n'.repeat(100000), '1: ID = x\n' + ' \n'.repeat(100000) + 'y', '\r\n'.repeat(100000) + '[4]']) {
     const { ms } = timed(() => stripUemcliBanner(s));
-    assert.ok(ms < LIMIT_MS, `${ms.toFixed(1)}ms`);
+    assert.ok(ms < STRIP_LIMIT_MS, `${ms.toFixed(1)}ms`);
   }
 });
 

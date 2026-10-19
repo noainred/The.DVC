@@ -27,15 +27,29 @@ export const HYSTERESIS_PCT = 3;
 /** 값이 이만큼 안 들어오면 진행 중이던 초과를 '끊어진 것' 으로 본다(주기 배수). */
 export const STALE_FACTOR = 3;
 
-/** 감시 지표 — 퍼센트 지표만. 처리량(B/s)은 장비마다 정상 범위가 달라 임계를 정하지 않는다. */
+/**
+ * 감시 지표 — 퍼센트 지표만. 처리량(B/s)은 장비마다 정상 범위가 달라 임계를 정하지 않는다.
+ * v2.744(감사 RECENT-02): `overFlag` — 값이 null 이어도 이 표지가 참이면 **초과**로 본다(`OVER_FLAG_VALUE`). HBA 는 FC 표준 데이터율을
+ *   크게 넘는 처리량이 나온 포트가 있으면 대표값을 비운다(usage.js — 다른 포트의 낮은 값으로 대표하지 않는다). 그때 판정을 '보류'
+ *   로 두면 가장 바쁜 포트가 포화해도 알림이 울리지 않는다 — 그 포트는 적어도 데이터율만큼은 쓰고 있다.
+ */
 export const ALERT_METRICS = Object.freeze([
   { col: 'cpu_pct', label: 'CPU' },
   { col: 'mem_pct', label: '메모리' },
   { col: 'disk_busy_pct', label: '디스크 I/O' },
   { col: 'disk_used_pct', label: '디스크 공간' },
   { col: 'net_pct', label: '네트워크' },
-  { col: 'hba_pct', label: 'HBA' },
+  { col: 'hba_pct', label: 'HBA', overFlag: 'hba_over' },
 ]);
+/** `overFlag` 가 참인 행의 판정 값 — 데이터율 포화(100%)로 본다. */
+export const OVER_FLAG_VALUE = 100;
+/** 한 행·한 지표의 판정 값과 '표지로 본 초과' 여부. */
+function metricValueOf(r, m) {
+  const v = n(r?.[m.col]);
+  if (v != null) return { v, flagged: false };
+  if (m.overFlag && r?.[m.overFlag] === true) return { v: OVER_FLAG_VALUE, flagged: true };
+  return { v: null, flagged: false };
+}
 
 /**
  * 한 서버·한 지표의 상태 전이.
@@ -134,17 +148,18 @@ export function evaluateRows(rows = [], state = {}, cfg = {}, now = Date.now()) 
     for (const m of ALERT_METRICS) {
       const id = `${key}|${m.col}`;
       seen.add(id);
-      const out = stepAlert(state[id] || null, r[m.col], cfg, now);
+      const mv = metricValueOf(r, m);
+      const out = stepAlert(state[id] || null, mv.v, cfg, now);
       if (out.state) { next[id] = out.state; counts.tracked += 1; }
       if (out.reason === 'sustaining') counts.sustaining += 1;
       if (out.reason === 'suppressed') counts.suppressed += 1;
       if (out.reason === 'unknown') counts.unknown += 1;
       if (out.fire === 'over') {
         counts.over += 1;
-        fires.push({ kind: 'over', key, name: r.name || key, vcenterId: r.vcenterId || '', metric: m.col, label: m.label, value: n(r[m.col]), peak: out.state?.peak ?? null, sustainedMin: out.sustainedMin, pct: n(cfg.pct) });
+        fires.push({ kind: 'over', key, name: r.name || key, vcenterId: r.vcenterId || '', metric: m.col, label: m.label, value: mv.v, ...(mv.flagged ? { overRate: true } : {}), peak: out.state?.peak ?? null, sustainedMin: out.sustainedMin, pct: n(cfg.pct) });
       } else if (out.fire === 'recovered') {
         counts.recovered += 1;
-        fires.push({ kind: 'recovered', key, name: r.name || key, vcenterId: r.vcenterId || '', metric: m.col, label: m.label, value: n(r[m.col]), pct: n(cfg.pct) });
+        fires.push({ kind: 'recovered', key, name: r.name || key, vcenterId: r.vcenterId || '', metric: m.col, label: m.label, value: mv.v, pct: n(cfg.pct) });
       }
     }
   }
@@ -172,11 +187,13 @@ export function alertOf(f = {}) {
     };
   }
   const sev = f.value != null && f.pct != null && f.value >= Math.min(99, f.pct + 5) ? 'critical' : 'warning';
+  // v2.744(RECENT-02): 데이터율을 크게 넘어 대표값을 비운 HBA 는 숫자 대신 그 사실을 말한다(100% 를 측정값처럼 쓰지 않는다).
+  const valueText = f.overRate ? 'FC 표준 데이터율 초과(사용률 미산출)' : (f.value == null ? '' : `${f.value}%`);
   return {
     key: `bmusage:${f.key}:${f.metric}`,
     severity: sev,
-    title: `${f.name} ${f.label} 사용률 ${f.value == null ? '' : `${f.value}%`} (임계 ${f.pct}%)`,
-    detail: `${f.sustainedMin}분 이상 지속${f.peak != null ? ` · 최고 ${f.peak}%` : ''}${f.vcenterId ? ` · 법인 ${f.vcenterId}` : ''}`
+    title: `${f.name} ${f.label} 사용률 ${valueText} (임계 ${f.pct}%)`,
+    detail: `${f.sustainedMin}분 이상 지속${f.peak != null && !f.overRate ? ` · 최고 ${f.peak}%` : ''}${f.overRate ? ' · HBA 처리량을 확인하세요(카운터 이상일 수 있습니다)' : ''}${f.vcenterId ? ` · 법인 ${f.vcenterId}` : ''}`
       + ` · 베어메탈 사용률 화면에서 추이를 확인하세요.`,
   };
 }

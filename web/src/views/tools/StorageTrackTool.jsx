@@ -22,6 +22,8 @@ import { unitText } from '../unitText.js';
 import DsTrendModal from './DsTrendModal.jsx'; // 개별 DS 추이 모달(v2.354) — 변경 이력 칩/행 클릭용
 
 const DAY_OPTS = [7, 30, 90, 365];
+// v2.744(감사 DB-01): 서버 조회를 부르는 검색칸은 입력이 멈춘 뒤 이만큼 기다렸다가 한 번만 보낸다.
+const SEARCH_DEBOUNCE_MS = 300;
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 const slotLabel = (slot) => {
@@ -335,12 +337,16 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
   const [log, setLog] = useState(null);
   const [pivot, setPivot] = useState(null);
   const [q, setQ] = useState('');
+  // v2.744(감사 DB-01): 검색어는 입력이 멈춘 뒤 300ms 에 한 번만 서버에 보낸다(SEARCH_DEBOUNCE_MS) — 예전에는 글자마다 ds-pivot 을 불렀고,
+  //   그 조회가 기간 전체 변경 행을 읽어 365일이면 한 번에 수 초씩 포탈을 멈췄다(서버 쪽도 고쳤다 — 열 슬롯만 읽는다).
+  const [qApplied, setQApplied] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQApplied(q), SEARCH_DEBOUNCE_MS); return () => clearTimeout(t); }, [q]);
   const [changedOnly, setChangedOnly] = useState(true);
   const [page, setPage] = useState(0);
   const [err, setErr] = useState(null);
   const LIMIT = 20;
 
-  useEffect(() => { setPage(0); }, [vcenterId, days, q, changedOnly, view]);
+  useEffect(() => { setPage(0); }, [vcenterId, days, qApplied, changedOnly, view]);
   useEffect(() => {
     if (view !== 'slots') return;
     run(fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId }),
@@ -348,9 +354,9 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
   }, [view, days, vcenterId, run]);
   useEffect(() => {
     if (view !== 'ds') return;
-    run(fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT }),
+    run(fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q: qApplied, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT }),
       (d) => { setPivot(d); setErr(null); }, (e) => setErr(e.message));
-  }, [view, days, vcenterId, q, changedOnly, page, run]);
+  }, [view, days, vcenterId, qApplied, changedOnly, page, run]);
 
   const chip = (it) => (
     <button key={`${it.dsId}`} className="tab" onClick={() => onPick(it)}

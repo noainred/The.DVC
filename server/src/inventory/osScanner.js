@@ -14,7 +14,7 @@ import { VimSoapClient } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScanInfo, osSummary, pruneMissing } from './osStore.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
@@ -34,7 +34,8 @@ function backupCorrupt(err) {
   try {
     const bak = `${FILE}.corrupt.${Date.now()}`;
     fs.renameSync(FILE, bak);
-    console.warn(`[osscan] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
+    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
+    console.warn(`[osscan] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 

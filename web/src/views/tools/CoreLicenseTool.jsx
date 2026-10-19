@@ -8,6 +8,7 @@ import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VSAN_PLAN_LABEL, fmtInt, fmtTib, addonText, coverageNote, reportedText, RULE_NOTE } from '../corelicense/coreLicenseText.js';
+import { notReadKpiSub, notReadCell } from '../bizreport/notReadText.js'; // v2.744(감사 VC-03)
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
 
@@ -78,7 +79,7 @@ export default function CoreLicenseTool({ scope }) {
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 8, marginBottom: 10 }}>
-        <Kpi label="필요 코어(산정)" value={fmtInt(t.licensed)} sub={`호스트 ${fmtInt(t.counted)}대 · 소켓 ${fmtInt(t.sockets)}`} />
+        <Kpi label="필요 코어(산정)" value={fmtInt(t.licensed)} sub={`호스트 ${fmtInt(t.counted)}대 · 소켓 ${fmtInt(t.sockets)}${notReadKpiSub(data.notReadVcenters) ? ` · ${notReadKpiSub(data.notReadVcenters)}` : ''}`} />
         <Kpi label="물리 코어" value={fmtInt(t.cores)} sub={t.padded ? `최소 16코어로 ${fmtInt(t.padded)}코어 더함(${fmtInt(t.paddedHosts)}대)` : '최소 16코어로 더한 코어 없음'} />
         <Kpi label="vSAN 용량" value={fmtTib(t.vsanTib)} sub={rate ? `포함 ${fmtTib(t.vsanIncludedTib)} · 추가 필요 ${addonText(t.vsanAddonTib, t.vsanAddonBound)}` : 'vSAN 포함 용량은 가정을 고르면 계산합니다'} />
         <Kpi label="산정 못 한 호스트" value={fmtInt(t.unknown)} sub={`전체 ${fmtInt(t.hosts)}대 중`} />
@@ -108,6 +109,19 @@ export default function CoreLicenseTool({ scope }) {
               <thead><tr><th>vCenter</th><th>호스트</th><th>소켓</th><th>물리 코어</th><th>필요 코어</th><th>16코어 보정</th><th>vSAN</th>{rate ? <th>vSAN 추가</th> : null}<th>vCenter 보고(코어 라이선스)</th></tr></thead>
               <tbody>
                 {vcs.map((r) => {
+                  // v2.744(감사 VC-03): 호스트·VM 을 읽지 못한 vCenter 는 0 대가 아니다 — '미수집' 으로 말하고 정렬은 맨 뒤(빈 값).
+                  if (r.notRead) {
+                    const c = notReadCell(r.notRead);
+                    return (
+                      <tr key={r.vcenterId}>
+                        <td style={{ minWidth: 150 }}><b>{r.vcenterName}</b></td>
+                        <td data-sort="" title={c.title}><span className="muted">{c.text}</span></td>
+                        <td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td>
+                        {rate ? <td data-sort="">—</td> : null}
+                        <td className="muted" style={{ whiteSpace: 'normal', fontSize: 12 }}>비교 안 함</td>
+                      </tr>
+                    );
+                  }
                   const rep = reportedText(r);
                   return (
                     <tr key={r.vcenterId}>

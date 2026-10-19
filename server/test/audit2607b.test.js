@@ -268,7 +268,8 @@ test('LEFT2607-02: fleet 부분 전송 요약이 통합 인벤토리·베어메�
   const ins = stripComments(SRC('routes/insights.js'));
   assert.match(ins.slice(ins.indexOf("insightsRouter.get('/fleet'"), ins.indexOf("insightsRouter.put('/fleet/tag'")), /fleetPartials/);
   const bm = stripComments(SRC('routes/api/bmUsage.js'));
-  assert.match(bm, /fleetPartials:\s*allowed\s*\?\s*null\s*:\s*fleetPartialsSummary\(\)/, '범위 계정에는 null');
+  // v2.744(회귀 검토 GD-R1): 요약은 사유 상세 여부를 인자로 받는다(fleetPartialsSummary({ detail: isAdmin })) — 범위 계정 null 규칙은 그대로.
+  assert.match(bm, /fleetPartials:\s*allowed\s*\?\s*null\s*:\s*fleetPartialsSummary\([^)]*\)/, '범위 계정에는 null');
 });
 
 /* ── TIM2607-01 · LEFT2607-05 ───────────────────────────────────────────── */

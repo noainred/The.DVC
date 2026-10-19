@@ -27,6 +27,7 @@ const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'authstop2591-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';   // 이 테스트의 가짜 서버가 127.0.0.1 에 산다 — 이 테스트 전용
+process.env.VMSERIES_MIN_FREE_GB = '0';   // v2.744: 실시간 스파이크 디스크 여유 가드(기본 5GB)를 끈다 — 이 테스트는 인증 정지를 보며, 호스트 디스크 여유에 따라 결과가 바뀌면 안 된다(여유 4GB 컨테이너에서 실제로 실패했다)
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 
 const closers = [];

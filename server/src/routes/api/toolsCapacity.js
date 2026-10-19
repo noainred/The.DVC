@@ -10,7 +10,7 @@ import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { fetchVmMetric, fetchVmsPerfSeries, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
-import { createVcAuthGate, vcAuthStopOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다
+import { createVcAuthGate, vcAuthStopOf, vcSkipOf, noteVcAuthFailure, respondIfVcAuthStopped, respondVcError, authStopView } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 주문형 성능 조회도 인증 정지를 따른다 · v2.744(VC-04): 직접 수집 대상이 아니면 로그인하지 않는다
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
 import { buildWasteSheets, reportTargets, reportFileName, exportZipName } from '../../tools/wasteExport.js'; // v2.497: 낭비 리소스 엑셀 내보내기
@@ -40,6 +40,7 @@ import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
+import { clusterIndex } from '../../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -74,10 +75,14 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   const vms = scoped.vms.filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
   const byCluster = new Map();
-  const key = (h) => `${h.vcenterId}|${h.cluster || 'standalone'}`;
+  // v2.744(감사 VC-02): 클러스터는 (vCenter, 클러스터 moref) 로 묶는다 — 이름으로 묶으면 다른 데이터센터의 같은 이름 클러스터가 한 행
+  //   (두 클러스터의 합)이 됐다. VM 은 호스트에서 받은 clusterRef 로 같은 행에 붙는다. 클러스터에 속하지 않은 호스트·VM 은 예전 키
+  //   ('standalone' 행) 그대로다. 행에는 clusterRef·vcDatacenter·sameName 을 싣는다(같은 이름이 둘 이상이면 화면이 데이터센터를 붙인다).
+  const cidx = clusterIndex(hosts);
+  const key = (x) => cidx.keyOf(x) ?? `${x.vcenterId}|${x.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
-    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', ...cidx.meta(cidx.keyOf(h)), hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
     c.hosts++;
     // v2.733(점검 3회차 C2-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)는 용량 합에 0 으로
     //   넣지 않고 센다(capacityUnknown). 예전에는 그 법인이 코어 0 · vCPU:코어 0 · RAM 오버커밋 0% 로 보였다.
@@ -94,7 +99,7 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     byCluster.set(k, c);
   }
   for (const v of vms) {
-    const k = `${v.vcenterId}|${v.cluster || 'standalone'}`;
+    const k = key(v);
     const c = byCluster.get(k); if (!c) continue;
     c.vms++; const on = v.powerState === 'POWERED_ON';
     c.vcpuAll += v.cpuCount || 0;
@@ -106,7 +111,7 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     const capOk = c.capUnknown === 0;
     const allUnknown = c.capUnknown === c.hosts;
     return {
-      vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
+      vcenterId: c.vcenterId, cluster: c.cluster, clusterRef: c.clusterRef, vcDatacenter: c.vcDatacenter, sameName: c.sameName, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
       cores: allUnknown ? null : c.cores, memTotalGB: allUnknown ? null : Math.round(c.memTotalGB),
       vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
       vcpuPerCore: !capOk ? null : c.cores ? r1(c.vcpuOn / c.cores) : 0,
@@ -365,6 +370,7 @@ api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
   // v2.733(C3-01): 인증 정지로 조회하지 않은 vCenter → 사유. 그 VM 은 null(비움)이고 **캐시하지 않는다** — 비밀번호를 고치면 곧바로
   //   다시 조회하게(정지 판정은 매번 파일 조회 1회라 비용이 없다). 화면이 '사용률 0%' 가 아니라 사유를 말한다.
   let authStopped = {};
+  let skippedVcenters = {};   // v2.744(감사 VC-04): 비활성·점검중·엣지 위임이라 로그인하지 않은 vCenter → {skipReason, reason}
   if (need.length) {
     if (snap.source === 'mock') {
       // 데모(mock): 실데이터가 없으므로 스냅샷 순간값 주변으로 **결정적** 합성값을 만든다.
@@ -398,17 +404,18 @@ api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
         // (dsBrowse.js·spark 와 같은 패턴. split 이면 moref 가 깨져 그 vCenter 전체가 조용히 빈다).
         const refOf = (v) => v.id.slice(String(v.vcenterId || '').length + 1);
         const r = await gate.run(vc, () => fetchVmsUsageBatch(vc, list.map(refOf), interval, { start, end }));
-        if (r.stopped) { for (const v of list) usage[v.id] = null; return; } // 캐시하지 않는다(위 주석)
+        if (r.stopped || r.skip) { for (const v of list) usage[v.id] = null; return; } // 캐시하지 않는다(위 주석) · v2.744(VC-04) 건너뛴 vCenter 도
         if (r.error) { for (const v of list) put(v.id, null); return; } // 이 vCenter 만 실패(권한·사이트 위임 수집 등) — 트리는 계속 그린다
         for (const v of list) put(v.id, r.value.usage.get(refOf(v)) || null);
       });
       authStopped = gate.stopped();
+      skippedVcenters = gate.skippedVcenters();
     }
   }
   if (usageCache.size > 8000) {
     for (const [k, e] of usageCache) if (now - e.at > USAGE_TTL_MS) usageCache.delete(k);
   }
-  res.json({ ...base, truncated, synthesized: snap.source === 'mock', source: snap.source || '', usage, authStopped });
+  res.json({ ...base, truncated, synthesized: snap.source === 'mock', source: snap.source || '', usage, authStopped, skippedVcenters });
 });
 
 /**
@@ -507,8 +514,16 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
     for (const v of targets.slice(WASTE_EXPORT_MAX_REPORTS)) reports.set(v.id, { skipped: `상한 ${WASTE_EXPORT_MAX_REPORTS}대` });
     const results = await withJob('waste.export.perf', () => rightsizeReportsFor(snap, capped, days));
     const files = []; let failed = 0; let n = 0;
+    // v2.744(회귀 검토 GF-R1): 이 포탈이 로그인하지 않은 vCenter(직접 수집 대상 아님·인증 정지)의 VM 은 '조회 실패' 로 세지 않는다 —
+    //   시트에는 사유를, 요약에는 개수를 나눠 적는다(notQueried 표지는 시트 '근거 리포트' 칸 문구를 '상한' 생략과 가르는 데 쓴다 — tools/wasteExport.js reportCells).
+    const notQueried = { skip: 0, authStopped: 0 };
     for (const v of capped) {
       const r = results.get(v.id);
+      if (r?.notQueried) {
+        reports.set(v.id, { skipped: r.notQueried, notQueried: true });
+        if (r.authStopped) notQueried.authStopped++; else notQueried.skip++;
+        continue;
+      }
       if (!r || r.error) { reports.set(v.id, { error: r?.error || '알 수 없음' }); failed++; continue; }
       const file = reportFileName(v);
       files.push({ name: file, data: withJobSync('waste.export.html', () => renderRightsizeHtml({ report: r.report, vm: r.report.vm || v, days, generatedAt: t0 })) });
@@ -517,7 +532,9 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
       // 막았다(리포트 1건이 SVG 3개 × 360점). 간격을 줄여 한 덩어리를 수십 ms 로 쪼갠다.
       if ((++n % 3) === 0) await new Promise((resolve) => setImmediate(resolve));
     }
-    const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
+    const nqTotal = notQueried.skip + notQueried.authStopped;
+    const nqNote = nqTotal ? ` · 조회하지 않음 ${nqTotal}건(${[notQueried.skip ? `직접 수집 대상 아님 ${notQueried.skip}` : '', notQueried.authStopped ? `인증 정지 ${notQueried.authStopped}` : ''].filter(Boolean).join(' · ')})` : '';
+    const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${nqNote}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
     const sheets = buildWasteSheets({ waste, offSince, reports, scopeLabel: vcId || 'all', cluster: group.cluster, folder: group.folder, days, full, generatedAt: t0, reportNote, nameFilter: q });
     const wb = await sheetsToWorkbook(sheets);
     // xlsx 직렬화는 쪼갤 수 없는 동기 구간이다(exceljs) — 작업 이름을 달아 루프 정체가 관측되면 설정 › 서버 성능 측정의 hang 기록에서
@@ -528,7 +545,7 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
     //   0.88초). 비동기판(zlib.deflateRaw — 스레드 풀)으로 바꿨다 — 결과 바이트는 같다(테스트 대조). 동시 1건 가드(acquireExport)는 그대로다.
     const zip = await withJob('waste.export.zip', () => zipManyAsync([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]));
     logAudit({ user: req.user?.username, action: '낭비 리소스 엑셀 내보내기', target: vcId || 'all',
-      detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
+      detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} notQueried=${nqTotal} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
     res.setHeader('Cache-Control', 'no-store');
@@ -589,11 +606,28 @@ async function rightsizeReportsFor(snap, targets, days) {
   if (!byVc.size) return out;
   const cfg = loadVcenterConfig().vcenters || [];
   const morefOf = (vm) => vm.id.slice(String(vm.vcenterId || '').length + 1); // vc.id 에 콜론이 있을 수 있어 split 금지
+  // v2.744(회귀 검토 GF-R1 — VC-04 형제 경로 누락): 이 배치는 vCenter 마다 바로 fetchVmsRightsizeBatch 를 불러, 단건 /tools/rightsize 가
+  //   409 로 막는 vCenter(점검중·엣지 위임·비활성)와 인증 정지 vCenter 에 내보내기마다 로그인했다(재현: 가짜 vCenter 로그인 1회씩).
+  //   같은 파일의 다른 주문형 경로와 같은 문(createVcAuthGate — 직접 수집 대상 판정 → 인증 정지 → 첫 시도 결과)을 지난다.
+  //   거부는 문이 noteVcAuthFailure 로 주 폴러와 같은 기록에 올린다. 조회하지 않은 VM 은 '조회 실패' 가 아니라 notQueried(사유)다.
+  const gate = createVcAuthGate();
   await eachLimited([...byVc.entries()], 4, async ([vcenterId, list]) => {
     const vc = cfg.find((x) => x.id === vcenterId);
     if (!vc) { for (const vm of list) out.set(vm.id, { error: 'vCenter 설정을 찾을 수 없습니다' }); return; }
+    const r = await gate.run(vc, () => fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK }));
+    if (r.skipped) {
+      const why = r.skip ? { notQueried: r.skip.reason, skipReason: r.skip.skipReason } : { notQueried: r.stopped.reason, authStopped: true };
+      for (const vm of list) out.set(vm.id, why);
+      return;
+    }
+    if (r.error) {
+      // 자격증명 거부면 문이 기록에 올렸다(r.stopped) — 그 문장을 쓴다(원문 그대로). 그 밖은 예전 문구.
+      const msg = r.stopped ? r.stopped.reason : `vCenter 성능 조회 실패: ${r.error?.message || r.error}`;
+      for (const vm of list) out.set(vm.id, { error: msg });
+      return;
+    }
     try {
-      const m = await fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK });
+      const m = r.value;
       let n = 0;
       for (const vm of list) {
         const fetched = m.get(morefOf(vm));
@@ -809,6 +843,9 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
     if (!vc) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: 'vCenter 설정 없음(위임 수집 vCenter 는 중앙에서 성능 조회 불가)' });
     // v2.733(C3-01): 화면이 추이 탭·범위 선택마다 자동으로 부르는 경로다 — 주 폴러가 인증 실패로 멈춘 vCenter 에는 로그인하지 않는다.
     //   예전 실패 응답과 같은 모양(200 + 빈 점 + reason)에 `authStopped` 표지를 싣는다(0 으로 채우지 않는다 — 점이 없다).
+    // v2.744(감사 VC-04): 비활성·점검중·엣지 위임 vCenter 에는 로그인하지 않는다(정지 판정보다 먼저) — 같은 모양 + skipReason.
+    const skipNow = vcSkipOf(vc);
+    if (skipNow) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: skipNow.reason, skipReason: skipNow.skipReason });
     const stopNow = vcAuthStopOf(vc);
     if (stopNow) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: stopNow.reason, authStopped: authStopView(stopNow) });
     try {
@@ -1060,6 +1097,7 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
   const series = {};
   const need = [];
   let authStopped = {};   // v2.733(C3-01): 인증 정지로 조회하지 않은 vCenter → {since, at, attempts, reason}
+  let skippedVcenters = {};   // v2.744(감사 VC-04): 비활성·점검중·엣지 위임이라 로그인하지 않은 vCenter → {skipReason, reason}
   for (const v of targets) {
     const ck = `${v.id}|${type}`;
     const hit = sparkCache.get(ck);
@@ -1111,13 +1149,14 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
         }
       });
       authStopped = gate.stopped();
+      skippedVcenters = gate.skippedVcenters();
     }
   }
   // 캐시 크기 상한 — 오래된 항목 정리(무한 증가 방지).
   if (sparkCache.size > 4000) {
     for (const [k, e] of sparkCache) if (now - e.at > SPARK_TTL_MS) sparkCache.delete(k);
   }
-  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, capped, skipped, synthesized: snap.source === 'mock', series, authStopped });
+  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, capped, skipped, synthesized: snap.source === 'mock', series, authStopped, skippedVcenters });
 });
 
 /**
@@ -1302,16 +1341,19 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
           gate.run(vc, () => fetchVmMetric(vc, moref, 'cpu', 'week')),
         ]);
         if (day.stopped || week.stopped) it.authStopped = true;
+        if (day.skip || week.skip) it.skipReason = (day.skip || week.skip).skipReason;   // v2.744(VC-04): 직접 수집 대상이 아니라 조회하지 않음
         if (day.skipped && week.skipped) notQueried += 1;
         it.avgDayCpu = day.value ? avg(day.value) : null; it.avgWeekCpu = week.value ? avg(week.value) : null; // per-VM best effort
       });
       result.authStopped = gate.stopped();
+      result.skippedVcenters = gate.skippedVcenters();   // v2.744(감사 VC-04)
       result.avgNotQueried = notQueried;
     }
     for (const it of targets) {
       const a = it.avgWeekCpu ?? it.avgDayCpu;
       // v2.733(C3-01): 인증 정지로 평균을 못 읽은 VM 은 '유휴 아님(false)' 이 아니라 판정 불가(null)다.
-      it.idle = it.authStopped && a == null ? null : (it.powerState === 'POWERED_ON' && a != null && a <= threshold);
+      // v2.744(VC-04): 직접 수집 대상이 아니라 조회하지 않은 VM 도 같다(판정 불가).
+      it.idle = (it.authStopped || it.skipReason) && a == null ? null : (it.powerState === 'POWERED_ON' && a != null && a <= threshold);
     }
     result.idleCount = targets.filter((x) => x.idle).length;
     result.idleThreshold = threshold;

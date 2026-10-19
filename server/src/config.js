@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reqTimeoutMs } from './util/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동)
-import { tlsModeFromEnv } from './security/tlsMode.js';   // 2026-10-09 S-02: 장비 TLS 검증 모드(무의존 leaf 모듈)
+import { tlsModeFromEnv } from './security/tlsMode.js';
+import { safeLoadText } from './util/atomicWrite.js';   // v2.744(적대적 검토 VC 후속): 로드 오류 원문(JSON.parse 조각 = 파일 내용)을 콘솔에 찍지 않는다(무의존 leaf)   // 2026-10-09 S-02: 장비 TLS 검증 모드(무의존 leaf 모듈)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -77,7 +78,7 @@ function readDbDir() {
     // 소유권을 잘못 잡아 이 파일을 못 읽는 경우(EACCES)에도 아무 흔적 없이 **옛 경로로 폴백**했고,
     // 관리자는 "복사·검증 완료" 만 보고 성공했다고 믿었다. '파일 없음'(정상)과 그 외를 구분한다.
     if (e && e.code !== 'ENOENT') {
-      console.error(`[db-location] ${file} 을(를) 읽지 못해 **기본 경로(CONFIG_DIR)로 폴백**합니다: ${e.message}`);
+      console.error(`[db-location] ${file} 을(를) 읽지 못해 **기본 경로(CONFIG_DIR)로 폴백**합니다: ${safeLoadText(e)}`);
       console.error('[db-location] DB 경로를 옮겼다면 이 상태에서는 적용되지 않습니다 — 파일 권한(서비스 계정 읽기 가능)을 확인하세요.');
     }
     return null;
@@ -477,7 +478,8 @@ export function loadVcenterConfig() {
           return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters };
         }
       } catch (err) {
-        console.error(`[config] Failed to parse ${file}: ${err.message}`);
+        // v2.744(적대적 검토 VC 후속): 원문이면 vcenters.json 의 비밀번호 앞부분(V8 이 보여 주는 조각)이 매 수집 주기 콘솔·엣지 로그로 나갔다.
+        console.error(`[config] Failed to parse ${file}: ${safeLoadText(err)}`);
       }
     }
   }

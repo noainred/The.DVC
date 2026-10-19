@@ -30,13 +30,14 @@ import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
 import { mockLocalReport } from '../../vmseries/mock.js';
 import { memoJson, scopeKey } from './shared.js';
 import { pushAll } from '../../util/pushAll.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 /**
  * v2.595(감사 AUTHZ-2595-02): push 상태도 범위로 거른다 — status 만 거르고 push.last 로 범위 밖 vCenter id·오류 문구·
  * centralUrl 이 나갔다(v2.574 SEC-07 과 같은 우회). 범위 계정은 자기 범위 vCenter 의 마지막 보고만, centralUrl·오류 원문은 admin 만.
  */
 function scopeVmSeriesPush(p, allowed, user) {
   if (!p || typeof p !== 'object') return p;
-  const admin = user?.role === 'admin';
+  const admin = isAdminDetailUser(user);   // v2.744(감사 AUTHZ-01): 데모 계정은 centralUrl·오류 원문을 받지 않는다
   const last = p.last && (!allowed || !p.last.vcenterId || allowed.has(p.last.vcenterId)) ? p.last : null;
   const out = { ...p, last: last && !admin ? { ...last, error: last.error ? '(관리자만 확인)' : last.error } : last };
   if (!admin) out.centralUrl = null;

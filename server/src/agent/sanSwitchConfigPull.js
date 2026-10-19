@@ -8,7 +8,8 @@ import { config, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { classifyCentral404 } from './central404.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { applyPulledDevices, getDeviceWithSecret } from '../sanswitch/registry.js';
+import { applyPulledDevices, getDeviceWithSecret, registryLoadError } from '../sanswitch/registry.js';
+import { pullRecoveryNote } from '../util/registryCore.js'; // v2.744(감사 EDGE-03)
 import { dropSnapshot, flushSnapshotsNow } from '../sanswitch/store.js';
 import { collectDeviceNow, testDeviceConnection } from '../sanswitch/poller.js';
 import { applyCentralPerfSettings } from '../sanswitch/perfSettings.js';
@@ -23,6 +24,7 @@ export const configPullMs = () => clampIntervalMs(Number(process.env.SANSW_CONFI
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+let _registryRecovered = null; // v2.744(감사 EDGE-03): 손상 등록부를 중앙 배포분으로 다시 쓴 마지막 기록
 let _perfCollectPush = null; // v2.603 EDGE2603-03: 포트 사용량 '지금 수집' 대행 뒤 push 의 결과
 let _collectPush = null; // v2.601 EDGE2601-06: '지금 수집' 직후 push 의 결과(상태 화면·엣지 로그용)
 
@@ -153,7 +155,13 @@ async function _pull() {
     let applied = false;
     if (sig !== _lastSig) {
       // 중앙에서 빠진 장비의 로컬 스냅샷도 함께 제거(낡은 스냅샷이 매 주기 push 되어 orphan 으로 남는 것 방지).
+      // v2.744(감사 EDGE-03): 손상 등록부를 배포분으로 다시 쓰는 것은 막지 않고(복구) 그 사실을 남긴다 — pullRecoveryNote 머리말.
+      const regErr = registryLoadError();
       applyPulledDevices(devices, { onRemoved: (ids) => ids.forEach((id) => { try { dropSnapshot(id); } catch { /* */ } }) });
+      if (regErr) {
+        _registryRecovered = pullRecoveryNote(regErr, { what: 'SAN 스위치 등록부(sanswitch-devices.json)', restored: devices.length });
+        console.warn(`[sanswitch-config] ${_registryRecovered.note}`);
+      }
       _lastSig = sig;
       applied = true;
       console.log(`[sanswitch-config] 중앙 배포 스위치 적용: agent=${config.agent.name} ${devices.length}대`);
@@ -233,7 +241,7 @@ export function startSanSwitchConfigPull() {
 }
 export function sanSwitchConfigPullStatus() {
   return {
-    ..._last, ...(_collectPush ? { collectPush: _collectPush } : {}), ...(_perfCollectPush ? { perfCollectPush: _perfCollectPush } : {}), intervalMs: configPullMs(),
+    ..._last, ...(_registryRecovered ? { registryRecovered: _registryRecovered } : {}), ...(_collectPush ? { collectPush: _collectPush } : {}), ...(_perfCollectPush ? { perfCollectPush: _perfCollectPush } : {}), intervalMs: configPullMs(),
     // v2.733(C4-02): '지금 수집' 작업 — 진행 중 여부·대기·지금 장비 · 마지막으로 끝난 작업 요약(무음 금지).
     collectJob: { running: _collectRunning, queued: _collectQueue.length, current: _collectCurrent },
     ...(_collectRun ? { collectRun: _collectRun } : {}),

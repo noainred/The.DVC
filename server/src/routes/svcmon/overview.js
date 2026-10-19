@@ -30,8 +30,10 @@ import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 import { redactEdgeSummary, redactPushStatus, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 // v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
-const fullAddr = (req) => req.user?.role === 'admin' && !scopedVcenterIds(req.user, _storeForScope.get());
+// v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — mock 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 가림 판본이다.
+const fullAddr = (req) => isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, _storeForScope.get());
 
 // 상태 판정·요약 키는 svcmon/status.js 하나에서만 정의한다(라우트·화면·테스트 공용).
 const statusOf = (t, x, results, now) => testState(t, x, results, now);
@@ -39,7 +41,7 @@ const statusOf = (t, x, results, now) => testState(t, x, results, now);
 /** v2.598: 로그 라이터 상태 — 실패 원문(lastError)은 admin 에게만(ADMIN_ONLY_TEXT, auth/scopeStatus.js). */
 function logStatsFor(user) {
   const st = logStats();
-  return user?.role === 'admin' || !st.lastError ? st : { ...st, lastError: ADMIN_ONLY_TEXT };
+  return isAdminDetailUser(user) || !st.lastError ? st : { ...st, lastError: ADMIN_ONLY_TEXT };   // v2.744(AUTHZ-01)
 }
 
 export function registerOverview(svcmonRouter) {

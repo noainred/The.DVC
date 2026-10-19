@@ -24,10 +24,11 @@ import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../agent/c
 import { classifyCentral404Body } from '../agent/central404.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { serversForThisNode, registryLoadError } from './registry.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(최종 검토 FB): 등록부 로드 오류는 원문이 아니라 요약
 import { getStatus } from './store.js';
 import * as db from './db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
-import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다
+import { postNo503Retry } from '../util/postNo503Retry.js'; // v2.743(감사 LEFT-03): 503 은 호출 안에서 다시 보내지 않는다 · v2.744(감사 LEFT-09): 엣지 워커가 아니라 util/ 에서 가져온다
 
 const gzipAsync = promisify(zlib.gzip);
 // v2.613 PERSIST2613-01(재현): 이 커서는 표본이 있는 push 마다 다시 쓴다 — 상태 파일로 등록하지 않으면 백업 변경 감시·엣지 설정 push 가
@@ -144,7 +145,8 @@ function edgeRegistryError() {
 async function pushInner() {
   const regErr = edgeRegistryError();
   if (regErr) {
-    const e = new Error(`엣지 CVP 등록부를 읽지 못해 보내지 않았습니다(${String(regErr.reason || '사유 미상').slice(0, 200)}) — '위임 0대' 가 아닙니다. 중앙 cvp-config pull 이 등록부를 다시 쓰면 풀립니다 · 표본은 커서 뒤에 남아 다음 주기에 갑니다`);
+    // v2.744(최종 검토 FB — RD-R2·RG2744-01): 사유는 원문(JSON.parse 메시지의 파일 조각)이 아니라 요약이다 — 이 메시지는 _last.error(엣지 로그)·콘솔에 실린다.
+    const e = new Error(`엣지 CVP 등록부를 읽지 못해 보내지 않았습니다(${summarizeRegistryError(regErr)?.text || '사유 미상'}) — '위임 0대' 가 아닙니다. 중앙 cvp-config pull 이 등록부를 다시 쓰면 풀립니다 · 표본은 커서 뒤에 남아 다음 주기에 갑니다`);
     e.kind = 'edge-registry-unreadable';
     throw e;
   }

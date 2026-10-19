@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { parseCsvRows } from '../util/csv.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -47,7 +47,8 @@ export function loadAssignments() {
     // preserveCorrupt' 불변조건. 보존 후에만 빈 값을 반환한다.
     _loadErr.corrupt(err); // v2.727(D-01): 보존 전에 세운다(보존 뒤에는 파일이 없어 missing() 이 같은 상태를 유지한다)
     preserveCorrupt(FILE, err.message);
-    console.error(`[central] agent-assignments.json 파싱 실패: ${err.message}`);
+    // v2.744(최종 검토 RG2744-02): 사유는 요약이다 — 원문은 iDRAC 스캔 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
+    console.error(`[central] agent-assignments.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
     return [];
   }
 }
@@ -257,7 +258,7 @@ function loadResultsFile() {
   return out;
 }
 try { if (fs.existsSync(RESULT_FILE)) results = loadResultsFile(); }
-catch (err) { preserveCorrupt(RESULT_FILE, err.message); console.error(`[central] agent-results.json 파싱 실패: ${err.message}`); results = Object.create(null); }
+catch (err) { preserveCorrupt(RESULT_FILE, err.message); console.error(`[central] agent-results.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`); results = Object.create(null); } // v2.744 RG2744-02: 사유는 요약(원문 = 파일 조각)
 
 let persistTimer = null;
 function persistResults() {

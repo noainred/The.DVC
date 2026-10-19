@@ -9,6 +9,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeHostCfg } from '../../hostcfg/analyze.js';
@@ -20,6 +21,7 @@ import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(사유)
 import { loadLogSettings } from '../../logs/settings.js';
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -28,25 +30,32 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  return analyzeHostCfg(scoped.hosts, {
+  const r = analyzeHostCfg(scoped.hosts, {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
     q: qStr(req.query.q, 128) || undefined,
   });
+  // v2.744(감사 후속 FC — VC-03 의 형제): 첫 수집 중·불통(직전 값 없음)·비활성 vCenter 는 스냅샷에 호스트가 0대라 판정 결과 어디에도
+  //   나오지 않았다(coverage 는 들어온 호스트만 센다) — 읽은 vCenter 만의 결과를 전체 결과처럼 말하지 않게 그 목록(범위·선택 안만)과
+  //   partial(비활성만 빠졌으면 false)을 싣는다. 화면이 '읽지 못한 vCenter N곳 제외' 를 말한다.
+  const notReadVcenters = notReadVcentersOf(scoped);
+  return { ...r, notReadVcenters, partial: notReadPartialOf(notReadVcenters) };
 }
 
 export function registerHostHygiene(api) {
   api.get('/tools/host-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene', (snap) => {
     const r = run(snap, req);
-    const full = req.user?.role === 'admin' && scopeKey(req.user, snap) === 'all';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === 'all';
     return {
       ...r, codes: HOST_CFG_CODES, initial: snap.initial === true, generatedAt: snap.generatedAt || null,
       scan: { enabled: config.hostCfgScan, refreshMs: config.hostCfgRefreshMs, perCycle: config.hostCfgPerCycle },
       // 수집 상태(오류 문구에 vCenter 응답 원문이 들어갈 수 있다) — 전체 범위 관리자에게만.
       status: full ? hostCfgStatus() : null,
     };
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role || ''}` }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   // v2.706(C4): 최근 재부팅 — bootTime(스냅샷) + 유지보수 모드·연결 끊김 이벤트(logs DB). vCenter 왕복 0.
   api.get('/tools/host-hygiene/reboots', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene-reboots', async (snap) => {
@@ -84,6 +93,10 @@ export function registerHostHygiene(api) {
       const drift = row.findings.filter((f) => f.code === 'drift').map((f) => `${f.facts.field}=${f.facts.value}`).join(' / ');
       lines.push(csvLine([row.vcenterName, row.name, row.cluster, row.version, row.build, row.sev, [...new Set(row.findings.map((f) => f.code))].join(' '), drift]));
     }
+    // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 호스트는 이 파일에 없다 — 파일만 받은 사람도 알 수 있게 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
+    // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
+    // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
+    for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: '호스트' })) lines.push(csvLine([t]));
     logAudit({ user: req.user?.username, action: 'host-hygiene.csv', target: 'host-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="host-hygiene-${fileStamp()}.csv"`);

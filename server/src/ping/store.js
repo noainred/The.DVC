@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ping-targets.json');
 const norm = (s) => String(s || '').trim();
@@ -41,7 +41,7 @@ function loadRaw() {
     // (v2.447 alarm-mutes B4 와 같은 유형). 원본을 `.corrupt.<ts>` 로 보존하고 경고를 남긴다.
     if (fs.existsSync(FILE)) {
       preserveCorrupt(FILE, e?.message);
-      console.warn(`[ping] 대상 파일이 손상돼 읽지 못했습니다 — 원본을 보존했습니다: ${e?.message || e}`);
+      console.warn(`[ping] 대상 파일이 손상돼 읽지 못했습니다 — 원본을 보존했습니다: ${safeLoadText(e) || '사유 미상'}`);
     }
     cache = { targets: [], seededVc: [], seededEdge: [], vcPorts: [] };
   }

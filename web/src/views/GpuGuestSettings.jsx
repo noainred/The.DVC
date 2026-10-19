@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { Field } from './gpu-guest/shared.jsx';
-import { fmtAgo } from '../util/fmt.js'; // v2.613 DEPS2613-11
+import { fmtAgo, fmtTime } from '../util/fmt.js'; // v2.613 DEPS2613-11 · v2.744(회귀 검토 GI-R2) fmtTime
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
@@ -75,6 +75,59 @@ export function gpuSkippedNote(last) {
   return parts.length ? `건너뜀(로그인하지 않음): ${parts.join(' · ')}` : null;
 }
 
+/*
+ * v2.744(감사 LEFT-08①): 배포 목록 행의 folded(중앙이 설정 파일을 읽을 때 대소문자만 다른 엣지 이름의 사본을 하나로 합친 사실)를
+ *   화면이 말한다. 예전에는 서버가 행에 folded 를 싣고 콘솔에도 적었지만 이 화면은 그 필드를 그리지 않아 — 합친 사실도, 최근 사본의
+ *   빈 값 대신 옛 값을 유지한 항목도 화면에서는 알 수 없었다. 짧은 표지는 선택지·대상 줄에, 항목 경로는 title 로 한 번만 보인다.
+ *   경로 이름은 같은 응답의 foldReport(서버가 그룹마다 앞 일부 + 전체 개수)에서 읽는다 — 없으면(구버전 중앙) 개수만 말한다.
+ *   값·비밀번호는 응답에 없다.
+ */
+export const GPU_FOLD_BY_TEXT = Object.freeze({
+  authenticated: '엣지 인증 이름과 같은 이름을 남겼습니다.',
+  registry: '수집 서버 등록부 이름과 같은 이름을 남겼습니다.',
+  older: '이름 근거가 없어 먼저 있던 이름을 남겼습니다.',
+});
+
+const foldCount = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+const foldList = (label, paths, total) => {
+  const shown = Array.isArray(paths) ? paths.map(String) : [];
+  const n = foldCount(total) ?? shown.length;
+  if (!n) return null;
+  if (!shown.length) return `${label} ${n}개(항목 이름은 이 응답에 없습니다)`;
+  return `${label} ${n}개: ${shown.join(', ')}${n > shown.length ? ` 외 ${n - shown.length}개` : ''}`;
+};
+
+/** 배포 대상 행의 합침 표지 — folded 가 없으면 null. { short, title } (문구에 백틱·별표 없음). */
+export function gpuGuestFoldNote(row, foldReport = null) {
+  const f = row && typeof row === 'object' && row.folded && typeof row.folded === 'object' ? row.folded : null;
+  if (!f) return null;
+  const agent = String(row.agent || '');
+  const from = Array.isArray(f.from) ? f.from.map(String).filter(Boolean) : [];
+  const kept = foldCount(f.keptOlder);
+  const short = `대소문자만 다른 이름 ${from.length}개를 합침 · 옛 값 유지 ${kept == null ? '—' : kept}`;
+  const groups = Array.isArray(foldReport?.groups) ? foldReport.groups : [];
+  const g = groups.find((x) => x && typeof x === 'object' && String(x.kept || '').toLowerCase() === agent.toLowerCase()) || null;
+  const lines = [`중앙이 설정 파일을 읽을 때 대소문자만 다른 엣지 이름의 배포 설정을 하나로 합쳤습니다: ${from.join(', ') || '—'} → ${agent || '—'}`];
+  if (GPU_FOLD_BY_TEXT[f.by]) lines.push(GPU_FOLD_BY_TEXT[f.by]);
+  lines.push('값은 옛 사본 위에 최근 사본의 기본값이 아닌 값을 얹었습니다(VM 계정·고정 IP 는 합집합). 값이 맞는지 확인하고 필요하면 고쳐 저장하세요.');
+  // v2.744(회귀 검토 GI-R2): 표지가 '지금 상태' 가 아니라 중앙이 설정 파일을 읽은 때(기동)의 일임을 밝힌다 — 이 엣지를 저장하면 중앙이 표지를 내린다.
+  const foldAt = typeof foldReport?.at === 'number' && Number.isFinite(foldReport.at) && foldReport.at > 0 ? foldReport.at : null;
+  if (foldAt != null) lines.push(`합친 때: ${fmtTime(foldAt)}(중앙이 설정 파일을 읽은 때) — 이 엣지 설정을 저장하면 이 표지는 사라집니다.`);
+  const items = g
+    ? [
+      foldList('최근 사본의 빈 값 대신 옛 값을 유지한 항목', g.keptOlder, g.keptOlderTotal),
+      foldList('옛 사본에만 있던 vCenter 를 옮김', g.vcentersFromOlder, g.vcentersFromOlderTotal),
+      foldList('계정이 바뀌어 비밀번호를 승계하지 않은 항목', g.droppedSecrets, g.droppedSecretsTotal),
+    ]
+    : [
+      foldList('최근 사본의 빈 값 대신 옛 값을 유지한 항목', null, kept),
+      foldList('옛 사본에만 있던 vCenter 를 옮김', null, foldCount(f.vcentersFromOlder)),
+      foldList('계정이 바뀌어 비밀번호를 승계하지 않은 항목', null, foldCount(f.droppedSecrets)),
+    ];
+  for (const it of items) if (it) lines.push(it);
+  return { short, title: lines.join('\n') };
+}
+
 /**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
  * VM에 VMware Tools 게스트 작업으로 nvidia-smi를 실행해 사용률을 가져온다.
@@ -101,6 +154,7 @@ export default function GpuGuestSettings() {
   // 설정 대상: '' = 이 포탈(로컬 수집), 그 외 = 원격 엣지(agent) 앞으로 배포(엣지가 pull해 적용).
   const [deployAgent, setDeployAgent] = useState('');
   const [agents, setAgents] = useState([]);
+  const [foldReport, setFoldReport] = useState(null); // v2.744(감사 LEFT-08①): 같은 응답의 합침 보고(경로 이름)
 
   const settingsUrl = (agent) => (agent ? `/admin/gpu-guest/deploy/${encodeURIComponent(agent)}` : '/admin/gpu-guest/settings');
 
@@ -134,7 +188,7 @@ export default function GpuGuestSettings() {
     }
   };
   // 배포 대상 후보 목록(1회).
-  useEffect(() => { fetchJson('/admin/gpu-guest/deploy/agents').then((r) => setAgents(r.agents || [])).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/admin/gpu-guest/deploy/agents').then((r) => { setAgents(r.agents || []); setFoldReport(r.foldReport || null); }).catch(() => {}); }, []);
   // 대상 전환 시 폼 재로딩. 로컬일 때만 30초 자동 폴링(배포 편집 중 덮어쓰기 방지).
   useEffect(() => {
     // v2.622(감사 WEB-01): 전환하는 순간 이전 대상의 폼을 비운다 — 새 대상 조회가 성공해야 다시 채워진다.
@@ -174,7 +228,7 @@ export default function GpuGuestSettings() {
         // v2.612 RECENT2612-05: 배포 경로도 폐기된 비밀번호를 응답한다 — 말하지 않으면 '저장됨' 만 보인다.
         ? [`원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`, droppedSecretNote(r)].filter(Boolean).join(' ')
         : ['저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.', droppedSecretNote(r), r.ignoredReason || ''].filter(Boolean).join(' '));
-      if (deployAgent) fetchJson('/admin/gpu-guest/deploy/agents').then((rr) => setAgents(rr.agents || [])).catch(() => {});
+      if (deployAgent) fetchJson('/admin/gpu-guest/deploy/agents').then((rr) => { setAgents(rr.agents || []); setFoldReport(rr.foldReport || null); }).catch(() => {});
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -184,6 +238,8 @@ export default function GpuGuestSettings() {
 
   // 설정 대상: 이 포탈(로컬) vs 원격 엣지 배포. 원격 엣지는 폐쇄망/NAT라 중앙이 직접 접속 못 하므로,
   // 여기서 지정한 설정을 엣지가 pull해 자기 로컬에 적용한다(실제 SSH/게스트작업은 엣지에서 수행).
+  // v2.744(감사 LEFT-08①): 지금 고른 엣지가 합친 키면 대상 줄에 짧은 표지(세부는 title).
+  const selFold = deployAgent ? gpuGuestFoldNote(agents.find((a) => a.agent === deployAgent), foldReport) : null;
   const targetCard = (
       <div className="card" style={{ padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 13 }}>설정 대상</b>
@@ -191,9 +247,16 @@ export default function GpuGuestSettings() {
           title="이 포탈(로컬)에서 직접 수집할지, 원격 엣지 앞으로 설정을 배포할지 선택. 원격 엣지 앞 설정은 엣지가 주기적으로 가져가 적용합니다.">
           <option value="">🖥️ 이 포탈(로컬 수집)</option>
           {agents.length > 0 && <optgroup label="원격 엣지에 배포(pull)">
-            {agents.map((a) => <option key={a.agent} value={a.agent}>📡 {a.agent}{a.assigned ? ` · 배포됨(vC ${a.vcenters}·VM계정 ${a.vmCreds})` : ''}</option>)}
+            {agents.map((a) => {
+              const fold = gpuGuestFoldNote(a, foldReport);
+              return <option key={a.agent} value={a.agent} title={fold?.title}>📡 {a.agent}{a.assigned ? ` · 배포됨(vC ${a.vcenters}·VM계정 ${a.vmCreds})` : ''}{fold ? ` · ${fold.short}` : ''}</option>;
+            })}
           </optgroup>}
         </Select>
+        {selFold && (
+          <span style={{ fontSize: 12, color: 'var(--amber,#f59e0b)', border: '1px solid var(--amber,#f59e0b)', borderRadius: 4, padding: '1px 6px', whiteSpace: 'normal', maxWidth: '100%' }}
+            title={selFold.title}>⚠ {selFold.short}</span>
+        )}
         {deployAgent && (
           <span className="muted" style={{ fontSize: 12, color: 'var(--amber,#f59e0b)' }}>
             ℹ 이 설정은 원격 엣지 <b>{deployAgent}</b>로 배포됩니다. 엣지가 다음 pull 주기(약 1분)에 가져가 로컬에 적용하고, <b>실제 SSH/게스트작업은 엣지에서</b> 수행합니다. (테스트 버튼은 중앙에서 원격 VM에 도달 못 하므로 비활성)

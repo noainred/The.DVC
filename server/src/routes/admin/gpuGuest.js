@@ -14,7 +14,7 @@ import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
-import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest } from '../../central/agentGpuGuestConfig.js';
+import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest, gpuGuestFoldStatus } from '../../central/agentGpuGuestConfig.js';
 import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers, listAgentUserAgents, GLOBAL_AGENT } from '../../central/agentUsers.js';
 import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
@@ -112,6 +112,26 @@ export function caseFoldNames(sources) {
     if (n && !out.has(n.toLowerCase())) out.set(n.toLowerCase(), n);
   }
   return out;
+}
+
+const FOLD_PATHS_MAX = 20;
+/** v2.744(LEFT-08): 합친 결과의 응답 모양 — 경로 목록 상한 + 전체 개수. */
+function foldReportView(fold) {
+  const cap = (a) => (Array.isArray(a) ? a.slice(0, FOLD_PATHS_MAX).map((x) => String(x)) : []);
+  const n = (a) => (Array.isArray(a) ? a.length : 0);
+  return {
+    at: fold.at || null,
+    groups: (Array.isArray(fold.groups) ? fold.groups : []).map((g) => ({
+      kept: String(g.kept || ''), dropped: cap(g.dropped), keptBy: String(g.keptBy || ''),
+      keptOlder: cap(g.keptOlder), keptOlderTotal: n(g.keptOlder),
+      vcentersFromOlder: cap(g.vcentersFromOlder), vcentersFromOlderTotal: n(g.vcentersFromOlder),
+      droppedSecrets: cap(g.droppedSecrets), droppedSecretsTotal: n(g.droppedSecrets),
+    })),
+    // v2.744(회귀 검토 GI-R2): 관리자 저장으로 확인된 그룹(표지는 내렸다) — 언제 저장했는지만(최근 FOLD_PATHS_MAX 개).
+    resolved: (Array.isArray(fold.resolved) ? fold.resolved : []).slice(-FOLD_PATHS_MAX).map((x) => ({
+      kept: String(x?.kept || ''), dropped: cap(x?.dropped), at: Number.isFinite(x?.at) ? x.at : null,
+    })),
+  };
 }
 
 export function registerGpuGuest(adminRouter) {
@@ -249,7 +269,10 @@ adminRouter.get('/gpu-guest/deploy/agents', adminOnly, fleetReadOnly, (_req, res
     const a = assigned.get(agent.toLowerCase());
     return { ...(a || { at: 0, vcenters: 0, vmCreds: 0, vmIps: 0, enabled: false }), agent, assigned: !!a }; // 배정됐으면 표기 = 저장 키(첫 출처)
   });
-  res.json({ agents });
+  // v2.744(감사 LEFT-08): 로드 때 대소문자 중복 사본을 합친 결과(행의 folded 는 개수만) — 화면이 '옛 값을 유지한 항목' 경로를 title 로 보여 준다.
+  //   값·비밀번호는 싣지 않는다(경로 이름뿐). 경로 목록은 그룹마다 앞 FOLD_PATHS_MAX 개만 싣고 전체 개수를 함께 준다(조용한 절단 금지).
+  const fold = gpuGuestFoldStatus();
+  res.json({ agents, ...(fold ? { foldReport: foldReportView(fold) } : {}) });
 });
 // 특정 엣지 앞 배포 설정 조회(비밀번호 가림).
 adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, fleetReadOnly, (req, res) => {

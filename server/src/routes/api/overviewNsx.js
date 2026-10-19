@@ -2,6 +2,7 @@
 import { requirePerm } from '../../auth/auth.js'; // v2.536: inv.nsx 서버 집행(그전까지 탭 표시 조건일 뿐이었다)
 import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store, scopedRollups, siteInventoryStale } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
@@ -179,7 +180,7 @@ api.get('/health', (req, res) => {
     // 검토 I-06: Node 런타임 계약·전역 fetch + undici Agent 자가 점검(util/runtimeCheck.js). 비지원 major 에서 장비 수집 실패가
     //   '장비 장애' 처럼 보이지 않게 화면이 이 값으로 배너를 띄운다. 관리자(전체 범위·데모 아님)만 버전·계약·상세를 받고,
     //   나머지 계정은 배너 판정에 필요한 state 하나만(서버 소프트웨어 버전 노출을 줄인다). 경로·비밀은 어느 쪽에도 없다.
-    runtime: runtimeForHealth(req.user?.role === 'admin' && !allowed && !req.user?.demoGuest),
+    runtime: runtimeForHealth(isAdminDetailUser(req.user) && !allowed),   // v2.744(감사 AUTHZ-01): 데모 제외 판정을 isAdminDetailUser 하나로(예전 인라인과 같은 값)
   });
 });
 

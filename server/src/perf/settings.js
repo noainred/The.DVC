@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'perf-monitor.json');
 
@@ -62,7 +62,7 @@ export function loadPerfSettings() {
     }
   } catch (e) {
     preserveCorrupt(FILE);
-    console.warn(`[perf] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e.message}`);
+    console.warn(`[perf] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = out;
   return cache;

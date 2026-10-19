@@ -16,11 +16,17 @@ import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { cmpVersion } from '../util/cmpVersion.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { readCentralReply } from '../util/centralReply.js'; // v2.744(회귀 검토 GD-R2)
 
 /** `/storage-data` 가 statusOnly 를 아는 첫 중앙 버전(v2.581 BUG-D). */
 export const STATUS_ONLY_MIN_CENTRAL = '2.581.0';
 /** `/sanswitch-data`·`/pdu-data` 가 statusOnly 를 아는 첫 중앙 버전(v2.613 EDGE2613-04). */
 export const DEVICE_STATUS_ONLY_MIN_CENTRAL = '2.613.0';
+/**
+ * `/fleet`(엣지 베어메탈) 이 statusOnly 를 아는 첫 중앙 버전(v2.744 EDGE-01). 그 전 중앙은 `baremetal` 이 없는 본문을 **빈 목록으로**
+ *   받아 그 엣지의 베어메탈을 지운다(central/fleet.js setEdgeFleet 교체) — 이 버전 미만·미상이면 보내지 않는다.
+ */
+export const FLEET_STATUS_ONLY_MIN_CENTRAL = '2.744.0';
 const CAP_TTL_MS = 60 * 60_000;
 const CAP_FAIL_TTL_MS = 5 * 60_000;
 const _caps = new Map(); // minVersion → { at, ok, reason, version, text }
@@ -64,14 +70,18 @@ export function _resetStatusOnlyCapForTest() { _caps.clear(); }
  * @param {string} route  `/api/central/…` 경로(예: '/api/central/sanswitch-data')
  * @param {object} status  { reason, registered, … } — 아는 키만 담긴다(중앙이 자른다)
  * @param {object} [extra]  본문에 함께 실을 필드(예: `{ devices: [] }` · `{ snapshots: [], chunk: 0, chunks: 1 }`)
- * @returns {Promise<{ok:true}|{ok:false, reason:string}>}
+ * @param {{readReply?:boolean}} [opts]  v2.744(회귀 검토 GD-R2): 참이면 2xx 응답 본문(JSON)을 읽어 `reply` 로 돌려준다(읽지 못하면 null).
+ *   중앙이 200 으로 받고도 보고를 반영하지 않을 수 있다 — fleet 은 이름 미검증·보관분 없음·유지 시한 지남(routes/central.js /fleet) —
+ *   HTTP 200 만 보고 '반영했다' 고 말하면 거짓이다(v2.606 EDGE2606-03 '엣지 push 는 중앙 응답을 읽어 말한다'). 기본값은 예전 그대로 읽지 않는다.
+ * @returns {Promise<{ok:true, reply?:(object|null)}|{ok:false, reason:string}>}
  */
-export async function sendStatusOnly(route, status, extra = {}) {
+export async function sendStatusOnly(route, status, extra = {}, { readReply = false } = {}) {
   try {
     const json = JSON.stringify({ agent: config.agent.name, ...extra, statusOnly: true, status: { ...status, at: Date.now() } });
     const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
     const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}${route}`, config.agent.name), { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
     if (!res.ok) return { ok: false, reason: `${route.replace(/^\/api\/central\//, '')} <- ${res.status}` };
+    if (readReply) return { ok: true, reply: await readCentralReply(res) };
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
 }

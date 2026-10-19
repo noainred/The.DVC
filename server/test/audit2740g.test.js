@@ -22,13 +22,14 @@ process.env.IPAM_WRITE_DEBOUNCE_MS = '60000';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, '../../web/src');
 
-let st, led, ov, srv, baseUrl;
+let st, led, ov, srv, baseUrl; let slimOwnerRow;
 before(async () => {
   st = await import('../src/store.js');
   led = await import('../src/ipam/ledger.js');
   ov = await import('../src/ipam/overrides.js');
   const express = (await import('express')).default;
   const { api } = await import('../src/routes/api.js');
+  ({ slimOwnerRow } = await import('../src/routes/api/ipamExport.js')); // v2.744(리드 후속 RY): 시트 응답 다이어트 기준
   const app = express();
   app.use(express.json());
   app.use('/api', api);
@@ -231,7 +232,8 @@ test('F-06 ④ live 재현 — store 가 원장을 건너뛴 새 세대에서 �
       // 결과는 동기 원장으로 만든 것과 같다
       if (p.startsWith('/tools/ipam/sheet')) {
         const want = led.buildSubnetSheets(snap, { onlyBase: '10.100.7' })[0];
-        assert.ok(isDeepStrictEqual(r.body, JSON.parse(JSON.stringify(want))), '시트 결과가 동기 원장과 다르다');
+        // v2.744(리드 후속 RY): 시트 라우트는 VM·호스트 칸의 owner 본문을 뺀다(slimOwnerRow) — 기준도 같은 다이어트를 거친다.
+        assert.ok(isDeepStrictEqual(r.body, JSON.parse(JSON.stringify({ ...want, rows: want.rows.map(slimOwnerRow) }))), '시트 결과가 동기 원장과 다르다');
       } else {
         const q = new URL(`http://x${p}`).searchParams.get('q');
         const want = led.buildIpamRows(snap, '', null).rows.filter((x) => String(x.ip).toLowerCase().includes(q)).length;
@@ -277,7 +279,7 @@ test('F-06 ④-b 계산 도중 새 스냅샷이 게시돼도(캐시에 넣지 �
     assert.equal(after.syncBuilds, before.syncBuilds, '새 세대 게시 뒤 시트가 원장을 동기로 다시 만들었다(넘겨받은 원장을 쓰지 않았다)');
     assert.equal(after.asyncBuilds, before.asyncBuilds + 1);
     const want = led.buildSubnetSheets({ ...old, generatedAt: `${old.generatedAt}-ref` }, { onlyBase: '10.100.9' })[0];
-    assert.ok(isDeepStrictEqual(body, JSON.parse(JSON.stringify(want))), '시트 결과가 동기 원장과 다르다');
+    assert.ok(isDeepStrictEqual(body, JSON.parse(JSON.stringify({ ...want, rows: want.rows.map(slimOwnerRow) }))), '시트 결과가 동기 원장과 다르다'); // v2.744(리드 후속 RY)
   } finally {
     st._setLedgerAsyncMinForTest(NaN);
   }

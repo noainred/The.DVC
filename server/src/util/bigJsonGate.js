@@ -61,21 +61,30 @@ const SVCMON_HOSTMAP_PARSE = '/api/svcmon/targets/hostmap/parse';
  *   v2.621(감사 RECENT-06): '(import) fullScopeOnly' 를 **svcmon 전 경로**에 적용하고 있었다. hostmap/parse 는 canEdit 뿐인
  *   (저장하지 않는 변환 — routes/svcmon/shared.js) 라우트라 범위 operator·admin 의 750KB 넘는 xlsx 가 1MB 파서에서 413 이었다.
  *   범위 판정은 import 에만 한다(그 밖의 모르는 svcmon 경로는 예전처럼 범위 계정이면 파싱하지 않는다 — 안전한 쪽).
- * @param {object} user   resolveTokenUser 결과({role, scope, mustEnrollOtp})
+ *   v2.744(감사 후속 FB-4): **데모 계정(mock 모드 내장 데모 — 요청 문맥 role 'admin' + demoGuest)은 403 을 받을 경로에서 슬롯을 잡지 않는다.**
+ *   로그 분석 붙여넣기는 auth/demoGuest.js READ_DENY('/api/admin/log-analysis'), svcmon 가져오기(import)는 SAFE_ACTIONS·읽기성 POST
+ *   (auditSkipped) 밖이라 authMiddleware 의 denyDemoGuest 가 403 이다. 그런데 이 게이트는 그 미들웨어보다 **먼저**(본문 파서 단계) 돌아
+ *   role 'admin' 만 보고 통과시켰다 — 데모 계정이 세션 풀 슬롯(동시 2 · 요청자당 1)을 붙잡고 최대 16MB 를 해석한 뒤에야 403 이었다.
+ *   hostmap/parse 는 읽기성 POST(audit.js AUDIT_SKIP)라 데모 계정에도 열려 있으므로 예전처럼 통과한다.
+ *   이 모듈은 util/ 이라 auth/demoGuest.js 를 import 하지 않는다(arch2579 ②) — 같은 표지(user.demoGuest)만 본다. 판정이 갈라지지 않게
+ *   audit2744l FB-4 가 세 경로 각각을 demoGuestDenial 과 대조한다(데모 계정의 허용 범위를 바꾸면 그 테스트가 먼저 깨진다).
+ * @param {object} user   resolveTokenUser 결과({role, scope, mustEnrollOtp, demoGuest})
  * @param {string} full   전체 경로
  * @param {{permsOf?:(role)=>Set<string>, scoped?:(user)=>boolean}} deps
  */
 export function sessionBigBodyAllowed(user, full, deps = {}) {
   if (!user || typeof user !== 'object') return false;
   if (user.mustEnrollOtp) return false; // requireEnrolled 가 403 을 낸다
+  const demo = !!user.demoGuest;         // v2.744(감사 후속 FB-4): 데모 계정 — 403 을 받을 경로는 슬롯을 잡지 않는다(위 머리말)
   const role = String(user.role || '');
   const scoped = () => { try { return !!deps.scoped?.(user); } catch { return true; } }; // 판정 실패는 '범위 계정' 으로(파싱 안 함)
   const f = String(full || '');
-  if (f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !scoped();
+  if (f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !demo && !scoped();
   if (f.startsWith('/api/svcmon/')) {
     if (role !== 'admin' && role !== 'operator') return false;
     if (role !== 'admin') { let set = null; try { set = deps.permsOf?.(role); } catch { set = null; } if (!set || !set.has?.('svcmon')) return false; }
-    if (f === SVCMON_HOSTMAP_PARSE || f.startsWith(`${SVCMON_HOSTMAP_PARSE}/`)) return true; // v2.621 RECENT-06: canEdit 뿐(범위 무관)
+    if (f === SVCMON_HOSTMAP_PARSE || f.startsWith(`${SVCMON_HOSTMAP_PARSE}/`)) return true; // v2.621 RECENT-06: canEdit 뿐(범위 무관) · 데모 계정에도 열린 읽기성 POST
+    if (demo) return false; // v2.744(감사 후속 FB-4): svcmon 가져오기 등 상태 변경 POST 는 데모 계정에 403
     return !scoped();
   }
   return false; // 모르는 세션 경로는 파싱하지 않는다(안전한 쪽)

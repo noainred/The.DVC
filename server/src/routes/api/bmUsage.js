@@ -25,8 +25,8 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken, isAdminReq } from '../../auth/addressMask.js';
-import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
+import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken, isAdminReq, scrubberFor, maskedIdToken } from '../../auth/addressMask.js';
+import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
@@ -172,6 +172,35 @@ export function scopeHostsUnread(h, allowed) {
   };
 }
 
+/*
+ * v2.744(최종 수정분 검토 RV2744F-WEB-03): 서버 상세(poller.usageDetailFor)의 비-관리자 판본(순수 — 원본을 바꾸지 않는다).
+ *   상세에는 장치 이름·경로가 없다(폴러가 개수만 둔다). 남는 위험은 **자유 문장**(OS·iDRAC·대체 경로 오류 문구 · 노트 · 대체 경로 생략 사유)에
+ *   섞인 주소와 racadm **원문**(entRaw — 배너·호스트명이 섞일 수 있다)이다. 문장은 등록부 주소를 표식으로 바꾸고 IPv4 는 토큰으로(maskBmIdentity 와
+ *   같은 규칙), 원문은 싣지 않고 `entRawHidden` 으로 밝힌다(조용히 빼지 않는다). ⚠ IPv6 는 등록부에 있는 주소만 가린다(정직 기록).
+ */
+const IPV4_TEXT = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
+export function maskUsageDetail(d, hosts = []) {
+  if (!d || typeof d !== 'object') return d;
+  const sc = scrubberFor(Array.isArray(hosts) ? hosts : []);
+  const clean = (v) => (typeof v === 'string' && v ? sc(v).replace(IPV4_TEXT, (ip) => maskedIdToken(ip)) : v);
+  const { entRaw, ...rest } = d;
+  return {
+    ...rest,
+    osError: clean(d.osError), idracError: clean(d.idracError), entError: clean(d.entError),
+    entSkipped: Array.isArray(d.entSkipped) ? d.entSkipped.map((x) => (x && typeof x === 'object' ? { ...x, reason: clean(x.reason) } : x)) : d.entSkipped,
+    notes: Array.isArray(d.notes) ? d.notes.map(clean) : d.notes,
+    entRaw: '', ...(entRaw ? { entRawHidden: true } : {}),
+  };
+}
+/** 상세 응답 조각 — 화면이 '왜 상세가 없는지' 를 상태 코드로 받는다(state 'none' · 'demo'). */
+function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
+  const u = usageDetailFor(key);
+  return {
+    usageDetail: u.detail ? (admin ? u.detail : maskUsageDetail(u.detail, hosts)) : null,
+    usageDetailState: u.state, usageDetailSince: u.since ?? null, ...(u.at ? { usageDetailAt: u.at } : {}),
+  };
+}
+
 // v2.613 RUNTIME2613-03(a): 엣지 인출 풀 상수(모듈 최상위 — export 를 등록 함수 안에 두면 SyntaxError, v2.593 교훈).
 export const EDGE_PULL_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.BMUSAGE_PULL_CONCURRENCY) || 4));
 // 시한 env 는 [1초, 10분] 정규화(v2.605 TIM2605-04 규약 — agent/envTimeout.js). 예산 상한 150초 < 웹 시한 180초.
@@ -240,7 +269,9 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       distribution: isAdmin && !allowed && !tg.isEdge ? distributionStatus(safeKnownAgents()) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
-      status: scopeBmStatus(isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts), allowed),
+      // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
+      //   원문 조각은 폴러가 처음부터 싣지 않는다(registrySourceError). fleetPartials(아래)와 같은 규칙이다.
+      status: scopeBmStatus(isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), isAdmin), hosts), allowed),
       enterpriseActive: enterpriseActive(),
       licenseLabels: TIER_LABEL,
       /*
@@ -261,7 +292,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // v2.605 LEFT2605-05: 호스트를 못 읽은 vCenter 때문에 이번에 뺀 베어메탈 — 화면이 말해야 조용한 제외가 아니다.
       hostsUnread: scopeHostsUnread(tg.hostsUnread, allowed),
       // v2.607(감사 LEFT2607-02): 엣지가 일부만 보낸 베어메탈 목록(부분 전송·상한 제외·귀속 비움) — 범위 계정에는 null(엣지는 나눌 축이 없다).
-      fleetPartials: allowed ? null : fleetPartialsSummary(),
+      fleetPartials: allowed ? null : fleetPartialsSummary({ detail: isAdmin }), // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치(줄·칸)는 관리자에게만(operator 는 tools 기본 보유) — 원문 조각은 누구에게도 싣지 않는다
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
       ...(isAdmin ? {} : { addressHidden: true }),
     });
@@ -302,14 +333,17 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
       usageHistory(target.key, { agent, hours: Number(req.query.hours) || 24 }),
       usageDaily({ key: target.key, agent, days: Number(req.query.days) || 90 }),
     ]);
+    // v2.744(RV2744F-WEB-03): 그 서버의 마지막 수집 상세(읽은 항목·장치별 판정·노트) — 화면 상세 카드가 쓴다. 주 조회에는 싣지 않는다(크기).
     if (isAdmin) {
-      return res.json({ ok: true, key, target: publicTarget(target), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS });
+      return res.json({ ok: true, key, target: publicTarget(target), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS, ...usageDetailPart(target.key, { admin: true }) });
     }
     const hosts = await bmAddressHosts(tg);
     const match = addressMatcher(hosts);
+    const own = [target.idrac?.host, target.osHost?.host].filter((h) => typeof h === 'string' && h);
     res.json({ ok: true, key, target: maskTargetAddress(publicTarget(target), hosts), addressHidden: true,
       raw: maskBmList(raw.rows, match), rawTruncated: raw.truncated,
-      daily: Array.isArray(daily) ? maskBmList(daily, match) : daily, metrics: METRICS });
+      daily: Array.isArray(daily) ? maskBmList(daily, match) : daily, metrics: METRICS,
+      ...usageDetailPart(target.key, { admin: false, hosts: [...own, ...hosts] }) });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
@@ -327,7 +361,8 @@ api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
     user: req.user?.username, action: 'bm-usage.collect', ip: req.ip || '',
     detail: JSON.stringify({ ok: !!r.ok, servers: r.servers ?? null }).slice(0, 300),
   });
-  res.json(r);
+  // v2.744(최종 검토 FB): 결과의 sourceErrors 도 주 조회와 같은 규칙 — 등록부 사유의 위치(줄·칸)는 관리자에게만(operator 는 분류 문구만).
+  res.json(!isAdminReq(req) && Array.isArray(r?.sourceErrors) ? { ...r, sourceErrors: sourceErrorsView(r.sourceErrors, { detail: false }) } : r);
 });
 
 /**
@@ -355,7 +390,7 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   const hosts = isAdmin ? [] : await bmAddressHosts(tg);
   const maskEv = (list) => (isAdmin ? list : maskActivityEvents(list, hosts));
   if (!allowed) {
-    const poller = isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), false), hosts);
+    const poller = isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), false), hosts);
     return res.json({ ok: true, poller, events: maskEv(events0), log: scopeFilePaths(bmUsageLogInfo(), req.user), ...(isAdmin ? {} : { addressHidden: true }) });
   }
   // 대상을 못 읽으면 아래에서 전부 걸러진다 — 넓게 여는 쪽으로 실패하지 않는다.

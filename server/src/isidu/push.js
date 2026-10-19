@@ -15,7 +15,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
-import { postNo503Retry } from '../agent/edgeLogWorker.js'; // v2.742(감사 EDGE-03): 503 은 호출 안에서 다시 보내지 않는다
+import { postNo503Retry } from '../util/postNo503Retry.js'; // v2.742(감사 EDGE-03): 503 은 호출 안에서 다시 보내지 않는다 · v2.744(감사 LEFT-09): 엣지 워커가 아니라 util/ 에서 가져온다
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';

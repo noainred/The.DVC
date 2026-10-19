@@ -19,8 +19,10 @@ import { canEdit, fullScopeOnly } from './shared.js';
 import { redactEdgeSummary, redactPushStatus } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 // v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
-const fullAddr = (req) => req.user?.role === 'admin' && !scopedVcenterIds(req.user, _storeForScope.get());
+// v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — mock 데모 계정은 엣지 소스 IP·포털 포트를 받지 않는다(operator 와 같은 판본).
+const fullAddr = (req) => isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, _storeForScope.get());
 
 export function registerEdge(svcmonRouter) {
 

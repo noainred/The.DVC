@@ -13,6 +13,7 @@ import { capStr } from '../../util/capStr.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeCost, tagCategories, GROUP_KINDS } from '../../cost/analyze.js';
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 VC-03): 읽지 못한 vCenter 판정 한 벌
 import { loadCostSettings, saveCostSettings } from '../../cost/settings.js';
 
 const toolsPerm = requirePerm('tools');
@@ -26,7 +27,10 @@ function run(req, snap) {
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const by = GROUP_KINDS.includes(req.query.by) ? req.query.by : 'vcenter';
   const r = analyzeCost(scoped, loadCostSettings(), { by, category: qStr(req.query.category, 128), q: qStr(req.query.q, 128), vcName });
-  return { ...r, categories: tagCategories(scoped.vcenters) };
+  // v2.744(감사 VC-03): 첫 수집 중·불통(직전 값 없음)·점검중(캐시 없음) vCenter 의 VM 은 합계에 없다 — 0 으로 섞은 부분 합을 전체라 말하지
+  //   않게 그 vCenter 목록(범위 안만)과 partial 을 싣는다. 화면이 '읽지 못한 vCenter N곳 제외 — 하한' 을 말한다.
+  const notReadVcenters = notReadVcentersOf(scoped);
+  return { ...r, categories: tagCategories(scoped.vcenters), notReadVcenters, partial: notReadPartialOf(notReadVcenters) };
 }
 
 export function registerCostShowback(api) {
@@ -58,6 +62,9 @@ export function registerCostShowback(api) {
       const n = (x) => (x == null ? '' : String(x));
       const lines = [CSV_BOM + csvLine([`그룹(${r.by})`, 'vCenter', 'VM', '켜진 VM', 'vCPU', '메모리(GB)', '스토리지(GB)', '스토리지 모름', `vCPU 비용(${r.currency})`, `메모리 비용(${r.currency})`, `스토리지 비용(${r.currency})`, `합계(${r.currency})`, '비중(%)'])];
       for (const g of r.groups) lines.push(csvLine([g.label, n(g.vcenterName), g.vms, g.on, g.vcpu, g.ramGB, g.storageGB, g.storageUnknown, n(g.cpu), n(g.ram), n(g.storage), n(g.total), n(g.share)]));
+      // v2.744(감사 VC-03): 읽지 못한 vCenter 는 합계에 없다 — 파일만 받은 사람도 알 수 있게 마지막 줄에 밝힌다.
+      //   v2.744(회귀 검토 GF-R2): 읽지 못한 것(합계는 하한)과 비활성(수집하지 않음)을 나눠 적고 사유는 한글 — 화면 partial 과 같은 기준.
+      for (const l of notReadCsvLines(r.notReadVcenters, { what: '그 vCenter 의 VM 은 합계에 없음' })) lines.push(csvLine([l]));
       logAudit({ user: req.user?.username, action: 'cost-showback.csv', target: 'cost-showback', detail: `${lines.length - 1} rows · by ${r.by}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="cost-showback-${fileStamp()}.csv"`);

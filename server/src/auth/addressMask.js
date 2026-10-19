@@ -353,6 +353,15 @@ export function maskPollerStatus(poller, hosts = []) {
   if (Array.isArray(out.errors)) out.errors = out.errors.map((x) => (typeof x === 'string' ? scrubAll(x) : x));
   if (typeof out.error === 'string') out.error = scrubAll(out.error);
   if (typeof out.lastError === 'string') out.lastError = scrubAll(out.lastError);
+  // v2.744(최종 검토 FB — RD-R1): 마지막 주기 요약의 입력 실패 목록(`last.sourceErrors[].error` — 베어메탈 사용률 폴러)도 주소를 가린다.
+  //   예전에는 최상위 필드만 보고 이 경로를 그대로 두었다. ⚠ 원문 조각(JSON.parse 메시지)은 여기서 지우지 않는다 — 폴러가 처음부터 싣지 않는다
+  //   (bmusage/poller.js registrySourceError). 이 함수는 주소만 다룬다.
+  if (out.last && typeof out.last === 'object' && Array.isArray(out.last.sourceErrors)) {
+    out.last = {
+      ...out.last,
+      sourceErrors: out.last.sourceErrors.map((x) => (x && typeof x === 'object' && typeof x.error === 'string' ? { ...x, error: scrubAll(x.error) } : x)),
+    };
+  }
   return out;
 }
 

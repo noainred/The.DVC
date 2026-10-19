@@ -15,11 +15,13 @@ import { store } from '../../store.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeVmHygiene, ALL_CODES } from '../../vmhygiene/analyze.js';
 import { loadVmHygieneSettings, saveVmHygieneSettings } from '../../vmhygiene/settings.js';
 import { vmHygieneNotifyOnce, vmHygieneNotifierStatus } from '../../vmhygiene/notifier.js';
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -30,20 +32,29 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  return analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
+  const r = analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
     q: qStr(req.query.q, 128) || undefined,
   });
+  // v2.744(감사 후속 FC — VC-03 의 형제): 첫 수집 중·불통(직전 값 없음)·비활성 vCenter 는 스냅샷에 VM 이 0대라 판정 결과 어디에도
+  //   나오지 않았다(coverage 는 들어온 VM 만 센다) — 그 목록(범위·선택 안만)과 partial(비활성만 빠졌으면 false)을 싣는다.
+  //   ⚠ r 에는 열거하지 않는 allRows(알림 요약용 — v2.719 B1-05)가 있어 펼치면 사라진다 — 원본 객체에 덧붙인다.
+  const notReadVcenters = notReadVcentersOf(scoped);
+  r.notReadVcenters = notReadVcenters;
+  r.partial = notReadPartialOf(notReadVcenters);
+  return r;
 }
 
 export function registerVmHygiene(api) {
   api.get('/tools/vm-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'vm-hygiene', (snap) => {
     const r = run(snap, req);
-    const isAdmin = req.user?.role === 'admin';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const isAdmin = isAdminDetailUser(req.user);
     return { ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${req.user?.role || ''}` }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/vm-hygiene/settings', toolsPerm, (req, res) => {
     const s = loadVmHygieneSettings();
@@ -80,6 +91,10 @@ export function registerVmHygiene(api) {
     for (const row of r.rows) {
       lines.push(csvLine([row.vcenterName, row.name, row.host, row.cluster, row.powerState, row.worst, row.findings.map((f) => f.code).join(' '), row.excepted || '']));
     }
+    // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
+    // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
+    // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
+    for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: 'VM' })) lines.push(csvLine([t]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

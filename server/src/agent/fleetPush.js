@@ -21,6 +21,10 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { UNREAD_STATUSES } from './inventoryPush.js'; // v2.604 EDGE2604-01: '읽지 못한 vCenter' 판정은 인벤토리 push 와 한 기준
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { registryLoadError } from '../idrac/registry.js'; // v2.744(감사 EDGE-01)
+import { centralStatusOnlySupport, sendStatusOnly, FLEET_STATUS_ONLY_MIN_CENTRAL } from './centralStatusOnly.js'; // v2.744(감사 EDGE-01)
+import { createChangeLogger } from '../util/logThrottle.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -98,6 +102,79 @@ let timer = null;
 let last = null;     // { at, sent, error }
 let running = false;  // single-flight
 
+/*
+ * v2.744(감사 EDGE-01 — 재현): 엣지 iDRAC 등록부(idrac.json)를 **읽지 못하면** 베어메탈 목록을 보내지 않는다.
+ *   v2.743 은 같은 등록부를 읽는 /api/collector/export 만 503 으로 막았다. 이 push 는 손상 → preserveCorrupt → 빈 목록 위에서
+ *   `baremetal:[]` 를 표지 없이 보냈고, 중앙 setEdgeFleet 이 그 엣지 목록을 0대로 **교체**했다(검증 a1 재현 — 전력 미보고 서버와
+ *   엣지가 정한 vCenter 귀속이 통합 인벤토리에서 사라졌다). 베어메탈 목록은 전부 그 등록부(iDRAC·OME 등록·전력 표본의 서버 id)에서
+ *   나오므로 손상 상태에서는 보낼 '온전한 일부' 가 없다.
+ *   · 중앙이 v2.744 이상이면 **상태 전용 보고**(`statusOnly` + registryUnreadable)를 보낸다 — 중앙은 직전 목록을 지우지 않고
+ *     만료 시각만 미룬다(central/fleet.js holdEdgeFleet, 시한 있음).
+ *   · 구버전·버전 미상 중앙에는 보내지 않는다(v2.613 EDGE2613-04 규약 — 구버전은 baremetal 이 없는 본문을 빈 목록 교체로 받는다).
+ *     그때는 중앙이 마지막 수신부터 TTL(기본 30분) 뒤에 이 엣지 목록을 만료로 지운다 — 빈 목록으로 지우는 것과 달리 '보고 없음' 이라는
+ *     사실 그대로다. ⚠ 이 경우의 보류에는 v2.605 시한(FLEET_WITHHOLD_MAX_MS) 뒤 '부분 전송' 을 하지 않는다 — 부분으로 보낼 목록이
+ *     전부 손상 등록부에서 나오므로 그것이 곧 빈 목록 교체(이 결함 자체)다.
+ *   상태(last)·콘솔(같은 사유는 10분에 한 줄)에 남긴다(무음 실패 금지).
+ */
+const _regLog = createChangeLogger({ windowMs: 10 * 60_000 });
+let _statusOnlyCapImpl = null;
+/** 테스트 주입용 — 중앙 버전 확인을 바꾼다(null 이면 health-probe). */
+export function _setFleetStatusOnlySupportForTest(fn) { _statusOnlyCapImpl = typeof fn === 'function' ? fn : null; }
+function fleetStatusOnlySupport() {
+  if (_statusOnlyCapImpl) return Promise.resolve(_statusOnlyCapImpl());
+  return centralStatusOnlySupport({ minVersion: FLEET_STATUS_ONLY_MIN_CENTRAL });
+}
+function idracRegistryError() {
+  try { return registryLoadError(); } catch (e) { return { at: Date.now(), reason: String(e?.message || e).slice(0, 200) }; }
+}
+/**
+ * v2.744(회귀 검토 GD-R2): 상태 전용 보고에 대한 **중앙 응답**(routes/central.js /fleet statusOnly 분기)을 사실대로 읽는다(순수).
+ *   예전에는 HTTP 200 만 보고 언제나 '직전 목록을 유지하게 했습니다' 라고 적었다 — 중앙이 보류를 받지 않은 세 경우가 같은 문구였다:
+ *   ① 공유 토큰 + 중앙이 모르는 이름(`unverifiedAgent` — 아무것도 붙잡지 않는다) ② 중앙에 이 엣지 보관분이 없음(`noPrior`)
+ *   ③ 보류 시작부터 유지 시한(기본 24시간)이 지남(`holdExpired` — 만료를 더 미루지 않아 TTL 뒤 목록이 빠진다).
+ *   그때 엣지 상태·콘솔·엣지 로그는 '유지 중' 이라 말하고 중앙에서는 목록이 사라졌다. 응답을 읽지 못하면(`null`·statusOnly 표지 없음) **모른다** 고 말한다.
+ * @returns {{held:boolean, code:'held'|'unverified-agent'|'no-prior'|'hold-expired'|'unknown', kept:(number|null), text:string}}
+ */
+export function fleetHoldOutcome(reply) {
+  const j = reply && typeof reply === 'object' && !Array.isArray(reply) ? reply : null;
+  const kept = j && Number.isInteger(j.kept) && j.kept >= 0 ? j.kept : null;
+  if (!j || j.statusOnly !== true) return { held: false, code: 'unknown', kept, text: '중앙 응답에 보류 결과가 없어 직전 목록을 유지했는지 알 수 없습니다(중앙 버전·응답 본문을 확인하세요)' };
+  if (j.unverifiedAgent === true) return { held: false, code: 'unverified-agent', kept: 0, text: '중앙이 이 엣지 이름을 검증하지 못해(공유 토큰 · 중앙이 모르는 이름) 직전 목록을 붙잡지 않았습니다 — 중앙은 마지막 수신부터 만료 시간(기본 30분) 뒤 이 엣지 목록을 지웁니다. 엣지별 개별 토큰을 쓰면 유지됩니다' };
+  if (j.noPrior === true) return { held: false, code: 'no-prior', kept: 0, text: '중앙에 이 엣지가 보관된 베어메탈 목록이 없어 유지할 것이 없습니다(처음 보내기 전이거나 이미 만료됐습니다)' };
+  if (j.holdExpired === true) return { held: false, code: 'hold-expired', kept, text: `중앙의 직전 목록 유지 시한(기본 24시간)이 지나 만료를 더 미루지 않았습니다 — 중앙은 만료 시간(기본 30분) 뒤 이 엣지 목록${kept != null ? ` ${kept}대를` : '을'} 지웁니다` }; // v2.744(최종 검토 RD-R3): 수가 없을 때 '목록를' 이 되던 조사
+  return { held: true, code: 'held', kept, text: `중앙이 직전 목록${kept != null ? ` ${kept}대를` : '을'} 유지합니다` };
+}
+
+async function reportRegistryUnreadable(regErr) {
+  // v2.744(회귀 검토 GD-R1): 사유는 원문이 아니라 요약이다 — registryLoadError().reason 은 JSON.parse 오류 원문이라 idrac.json(자격증명 파일)
+  //   조각을 싣는다(재현: `..."assword": SuperSecre"...`). 중앙·상태·콘솔(엣지 로그로 중앙에 당겨진다) 어디에도 원문을 싣지 않는다.
+  //   분류 코드와 숫자(줄·칸·위치)만 보내고, 원문은 이 엣지의 preserveCorrupt 콘솔 줄(서버 로그)에 있다.
+  const sum = summarizeRegistryError(regErr) || summarizeRegistryError({ reason: '' });
+  const why = sum.text;
+  const base = `엣지 iDRAC 등록부(idrac.json)를 읽지 못해(${why}) 베어메탈 목록을 보내지 않았습니다 — 손상 보존본(idrac.json.corrupt.*)을 되돌리거나 iDRAC 등록 화면에서 저장하면 다음 주기에 다시 보냅니다`;
+  const registryUnreadable = { at: Number.isFinite(regErr?.at) ? regErr.at : null, code: sum.code, line: sum.line, column: sum.column, position: sum.position, sysCode: sum.sysCode, reason: why };
+  const cap = await fleetStatusOnlySupport();
+  if (!cap.ok) {
+    const note = `${base}. ${cap.text || '중앙 버전을 확인하지 못해 상태 보고도 보내지 않았습니다'} — 중앙은 마지막 수신부터 만료 시간(기본 30분) 뒤 이 엣지 목록을 지웁니다`;
+    last = { at: Date.now(), sent: 0, error: null, skipped: true, registryUnreadable, statusOnly: false, statusOnlyReason: cap.reason || 'central-version-unknown', note };
+    if (_regLog('registry', `${why}|${cap.reason}`)) console.warn(`[fleet-push] ${note}`);
+    return { ok: false, skipped: true, registryUnreadable: true, reason: note };
+  }
+  const r = await sendStatusOnly('/api/central/fleet', { registryUnreadable }, {}, { readReply: true });
+  if (!r.ok) {
+    const note = `${base}. 상태 보고도 실패했습니다(${r.reason})`;
+    last = { at: Date.now(), sent: 0, error: r.reason, skipped: true, registryUnreadable, statusOnly: false, note };
+    if (_regLog('registry', `${why}|${r.reason}`)) console.warn(`[fleet-push] ${note}`);
+    return { ok: false, skipped: true, registryUnreadable: true, statusOnly: false, reason: note };
+  }
+  // v2.744(회귀 검토 GD-R2): 보냈다 ≠ 유지됐다 — 중앙 응답이 말한 결과를 그대로 적는다. 유지되지 않았으면 error 에도 싣는다(엣지 로그 화면이 '정상' 으로 보이지 않게).
+  const hold = fleetHoldOutcome(r.reply);
+  const note = `${base}. 중앙에 상태 보고를 보냈습니다 — ${hold.text}`;
+  last = { at: Date.now(), sent: 0, error: hold.held ? null : hold.text, skipped: true, registryUnreadable, statusOnly: true, centralHold: { held: hold.held, code: hold.code, kept: hold.kept }, note };
+  if (_regLog('registry', `${why}|${hold.code}`)) console.warn(`[fleet-push] ${note}`);
+  return { ok: false, skipped: true, registryUnreadable: true, statusOnly: true, held: hold.held, centralHold: hold.code, reason: note };
+}
+
 const ENABLED = process.env.AGENT_PUSH_FLEET !== 'false';
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -111,6 +188,9 @@ export async function pushFleetNow() {
   if (running) return { ok: false, reason: '이전 push 진행 중' };
   running = true;
   try {
+    // v2.744(감사 EDGE-01): 등록부를 읽지 못했으면 목록을 만들지 않는다(위 주석). 못 읽은 vCenter 보류보다 먼저 본다.
+    const regErr = idracRegistryError();
+    if (regErr) return await reportRegistryUnreadable(regErr);
     const snap = store.get();
     let registered = [];
     try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }

@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayIndex } from '../util/dayKey.js';
 import { linregSlope } from '../util/linreg.js';
@@ -327,7 +327,7 @@ function loadHistory(now = Date.now()) {
   _loaded = true;
   let raw;
   try { raw = JSON.parse(fs.readFileSync(historyFile(), 'utf8')); } catch (e) {
-    if (e?.code !== 'ENOENT') { console.warn(`[portal-db] 크기 표본 파일을 읽지 못했습니다(${e.message}) — 새로 시작합니다`); preserveCorrupt(historyFile(), e.message); }
+    if (e?.code !== 'ENOENT') { console.warn(`[portal-db] 크기 표본 파일을 읽지 못했습니다(${safeLoadText(e) || '사유 미상'}) — 새로 시작합니다`); preserveCorrupt(historyFile(), e.message); }
     return;
   }
   const take = (obj, map, maxAge, max) => {

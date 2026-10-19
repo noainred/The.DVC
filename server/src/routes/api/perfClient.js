@@ -21,6 +21,7 @@ import { loadPerfSettings } from '../../perf/settings.js';
 import { routeKeyOf } from '../../perf/stats.js';
 import { clientIp } from '../../util/rateLimit.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { capStr } from '../../util/capStr.js';
 
@@ -106,7 +107,8 @@ export function registerPerfClient(api) {
     const ids = raw.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20);
     // v2.620(SEC2620-04): '전부 보기' 는 전체 범위 admin 만 — 범위 관리자가 서버 발급 ID(부팅 접두 + 순번)를 넘겨짚어
     //   다른 법인 계정의 요청(계정명·라우트)을 읽을 수 있었다(v2.607 '범위 관리자 ≠ 관리자').
-    const isAdmin = req.user?.role === 'admin' && !scopedVcenterIds(req.user, store.get());
+    // v2.744(감사 AUTHZ-01): 데모 계정(요청 문맥 admin + demoGuest)은 남의 요청(계정명·라우트)을 보지 않는다 — 판정은 isAdminDetailUser.
+    const isAdmin = isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, store.get());
     const items = requestStatus(ids, { user: req.user?.username || '', isAdmin });
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, at: Date.now(), items });

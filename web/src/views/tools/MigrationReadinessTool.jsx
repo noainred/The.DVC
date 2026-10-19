@@ -7,8 +7,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import { notReadNote, notReadKpiSub } from '../bizreport/notReadText.js'; // v2.744(감사 VC-03): 읽지 못한 vCenter 는 0 으로 더하지 않는다
 import { VmLink } from '../../components/EntityDetail.jsx';
 import { MIG_TEXT, LEVEL_LABEL, LEVEL_BADGE, readyPctText, unknownNote, SCOPE_NOTE } from '../bizreport/migrationText.js';
+import { clusterNameLabel } from '../clustercfg/clusterCfgText.js'; // v2.744(감사 VC-02): 같은 이름 다른 데이터센터 클러스터 — 이름 한 벌
 
 function Chip({ active, onClick, children }) {
   return <button type="button" className={`tab${active ? ' active' : ''}`} onClick={onClick} style={{ padding: '4px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>{children}</button>;
@@ -61,9 +63,10 @@ export default function MigrationReadinessTool({ scope }) {
     <div style={{ minWidth: 0 }}>
       <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{SCOPE_NOTE}</div>
       {un && <div className="banner" style={{ marginBottom: 8 }}>{un}</div>}
+      {notReadNote(data.notReadVcenters) && <div className="banner" style={{ marginBottom: 8 }}>{notReadNote(data.notReadVcenters)}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
       <div className="kpis" style={{ marginBottom: 10 }}>
-        <div className="kpi"><div className="label">준비율</div><div className="value">{readyPctText(data.readyPct)}</div><div className="sub">판정한 VM 중 준비됨</div></div>
+        <div className="kpi"><div className="label">준비율</div><div className="value">{readyPctText(data.readyPct)}</div><div className="sub">판정한 VM 중 준비됨{notReadKpiSub(data.notReadVcenters) ? ` · ${notReadKpiSub(data.notReadVcenters)}` : ''}</div></div>
         <div className="kpi"><div className="label">막힘</div><div className="value">{(c.blocked ?? 0).toLocaleString()}</div><div className="sub">먼저 조치해야 옮길 수 있음</div></div>
         <div className="kpi"><div className="label">확인 필요</div><div className="value">{(c.caution ?? 0).toLocaleString()}</div><div className="sub">옮길 수 있지만 준비·확인</div></div>
         <div className="kpi"><div className="label">준비됨</div><div className="value">{(c.ready ?? 0).toLocaleString()}</div><div className="sub">판정 불가 {(c.unknown ?? 0).toLocaleString()}대 별도</div></div>
@@ -96,7 +99,7 @@ export default function MigrationReadinessTool({ scope }) {
           <tbody>
             {groups.map((g) => (
               <tr key={g.key}>
-                <td>{g.vcenterName}</td>{by === 'cluster' && <td>{g.cluster}</td>}<td data-sort={g.vms}>{g.vms.toLocaleString()}</td>
+                <td>{g.vcenterName}</td>{by === 'cluster' && <td>{clusterNameLabel(g)}</td>}<td data-sort={g.vms}>{g.vms.toLocaleString()}</td>
                 <td data-sort={g.blocked}>{g.blocked ? <span className="badge red">{g.blocked}</span> : 0}</td><td data-sort={g.caution}>{g.caution}</td>
                 <td data-sort={g.unknown}>{g.unknown}</td><td data-sort={g.ready}>{g.ready}</td><td data-sort={g.readyPct ?? ''}>{g.readyPct == null ? '—' : `${g.readyPct}%`}</td>
               </tr>

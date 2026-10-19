@@ -18,6 +18,30 @@
  *    보내면 정지 기록이 생기기 전에 실패 로그인이 6회 나간다. 자격증명이 맞으면 첫 시도 뒤 예전처럼 동시에 돈다.
  */
 import { vcAuthGuard, isVcAuthError } from './restClient.js';
+import { directCollectSkipReason } from './collectTarget.js';
+
+/*
+ * v2.744(감사 VC-04): 이 문은 인증 정지만 보고 **직접 수집 대상인가**(비활성·점검중·엣지 위임)를 보지 않았다 — 점검중으로 둔 vCenter 의
+ *   VM 성능 창을 열면 주 폴러가 일부러 쉬는 vCenter 에 20초마다 로그인했고, 엣지 위임(site) vCenter 는 중앙 등록부의 비어 있거나 낡은
+ *   비밀번호로 엣지와 같은 계정 로그인을 시도했다(재현: 실제 라우터 · 가짜 vCenter 접속 수 {점검중 2, site 1, 비활성 1}).
+ *   판정은 복제하지 않는다 — collectTarget.js `directCollectSkipReason` 하나이고 순서는 dsBrowse.js `onDemandVcBlock` 과 같다
+ *   (직접 수집 대상 판정 → 인증 정지). 비활성·점검중·site 는 사람이 누른 '다시 조회'(manual=1)여도 막는다(collectTarget 머리말
+ *   '수동 실행도 이 셋은 건너뛴다'). ⚠ dsBrowse.js 를 import 하면 순환이 생긴다(dsBrowse 가 이 파일을 import 한다) — 그래서
+ *   사유 문장 표를 여기에 두고, 테스트(server/test/audit2744f.test.js)가 dsBrowse 의 ON_DEMAND_SKIP_TEXT 와 같은지 대조한다.
+ *   (후속 FA-④: dsBrowse 는 이제 사본 대신 이 표를 import 해 ON_DEMAND_SKIP_TEXT 로 재수출한다 — 같은 객체 한 벌이다.)
+ */
+export const DIRECT_SKIP_TEXT = Object.freeze({
+  disabled: '비활성 vCenter — 이 포탈이 로그인하지 않습니다',
+  maintenance: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다',
+  site: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다',
+  invalid: 'vCenter 설정 형식이 올바르지 않습니다',
+});
+
+/** 이 vCenter 에 이 포탈이 로그인하지 않는 이유(비활성·점검중·엣지 위임) — 있으면 `{ skipReason, reason }`, 직접 수집 대상이면 null. */
+export function vcSkipOf(vc) {
+  const why = directCollectSkipReason(vc);
+  return why ? { skipReason: why, reason: DIRECT_SKIP_TEXT[why] || why } : null;
+}
 
 /** 정지 중이라 조회하지 않았다 — 화면이 그대로 쓰는 문장(vmMetrics.js v2.591 문구와 같다). */
 export const authStoppedReason = (attempts) =>
@@ -47,8 +71,11 @@ export const authStopBody = (info) => ({ ok: false, ...info });
 /**
  * 단건 라우트: 정지면 **409**(재시도 대상이 아니다 — 웹 fetchJson 은 502 를 2회 재시도해 실패 로그인이 3배가 된다)를
  * 보내고 true. `allowManual` 이면 사람이 누른 `manual=1` 은 막지 않는다(성능 모달 '다시 조회' — v2.591 규칙 3).
+ * v2.744(감사 VC-04): 그보다 먼저 직접 수집 대상인지 본다 — 비활성·점검중·엣지 위임이면 manual 이어도 **409 + skipReason**.
  */
 export function respondIfVcAuthStopped(req, res, vc, { allowManual = false } = {}) {
+  const skip = vcSkipOf(vc);
+  if (skip) { res.status(409).json({ ok: false, ...skip }); return true; }
   if (allowManual && req.query?.manual === '1') return false;
   const info = vcAuthStopOf(vc);
   if (!info) return false;
@@ -68,9 +95,12 @@ export function respondVcError(res, vc, err, { prefix = '' } = {}) {
  *
  *   const gate = createVcAuthGate();
  *   const r = await gate.run(vc, () => fetchSomething(vc, ...));
- *   // r = { value } | { error } | { error, stopped } | { skipped: true, stopped }
+ *   // r = { value } | { error } | { error, stopped } | { skipped: true, stopped } | { skipped: true, skip }
  *   gate.stopped()  // { [vcId]: {since, at, attempts, reason} } — 응답 authStopped 로 싣는다
+ *   gate.skippedVcenters()  // { [vcId]: {skipReason, reason} } — 응답 skippedVcenters 로 싣는다(v2.744 VC-04)
  *
+ * · v2.744(감사 VC-04): 처음 보는 vCenter 는 **직접 수집 대상인지 먼저** 본다 — 비활성·점검중·엣지 위임이면 fn 을 부르지 않고
+ *   `{ skipped: true, skip }`(로그인 0). 인증 정지와 다른 필드로 싣는다(화면이 '인증 정지' 라고 잘못 말하지 않게).
  * · 처음 보는 vCenter 는 정지 기록을 먼저 본다 — 정지면 fn 을 부르지 않는다(로그인 0).
  * · 정지가 아니면 그 vCenter 의 **첫 호출만** 시작하고 같은 vCenter 의 나머지는 그 결과를 기다린다. 첫 호출이 자격증명
  *   거부면 기록에 올리고 나머지는 시작하지 않는다(실패 로그인 1회). 그 밖의 결과면 나머지가 그대로 돈다.
@@ -90,15 +120,17 @@ export function createVcAuthGate() {
       const id = String(vc?.id || '');
       let s = state.get(id);
       if (!s) {
-        s = { stop: vcAuthStopOf(vc), first: null };
+        const skip = vcSkipOf(vc);
+        s = { skip, stop: skip ? null : vcAuthStopOf(vc), first: null };
         state.set(id, s);
-        if (!s.stop) {
+        if (!s.skip && !s.stop) {
           let release;
           s.first = new Promise((r) => { release = r; });
           try { return await attempt(vc, s, fn); } finally { release(); }
         }
       }
       if (s.first) await s.first;
+      if (s.skip) return { skipped: true, skip: s.skip };
       if (s.stop) return { skipped: true, stopped: s.stop };
       return attempt(vc, s, fn);
     },
@@ -109,5 +141,11 @@ export function createVcAuthGate() {
       return out;
     },
     isStopped(vcId) { return !!state.get(String(vcId || ''))?.stop; },
+    /** v2.744(VC-04): 이 요청에서 직접 수집 대상이 아니라 건너뛴 vCenter → `{skipReason, reason}`. 없으면 빈 객체. */
+    skippedVcenters() {
+      const out = {};
+      for (const [id, s] of state) if (s.skip) out[id] = { ...s.skip };
+      return out;
+    },
   };
 }

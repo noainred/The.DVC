@@ -38,6 +38,7 @@ import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { config, currentVersion } from '../../config.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubberFor } from '../../auth/addressMask.js';
+import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../../util/registryCore.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -148,7 +149,50 @@ export function lastView(last, isAdmin) {
     const { results, ...rest } = out.notify;
     out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true };
   }
+  return maskRegistryUnreadable(out);
+}
+
+/**
+ * v2.744(최종 검토 RG2744-05): 등록부 손상 표지(`registryUnreadable`)의 사유는 **관리자용 요약**이다 — 분류 + 줄·칸·위치 + 시스템 오류 코드
+ *   (partfault/scan.js 가 summarizeRegistryError().text 로 저장하고, 엣지 보고는 그 엣지가 만든 같은 글자를 싣는다). 같은 릴리스의 RD 규칙
+ *   (central/fleet.js fleetPartialsSummary)은 비-admin 에 **분류 고정 문구(label)만** 주고 `reasonDetailHidden` 으로 밝힌다 — 이 함수가 같은 규칙이다.
+ *   저장은 그대로 두고 응답에서 가린다(관리자에게는 위치가 조치 단서다).
+ *   ⚠ 마지막 실행 기록의 local·edgeAgents[].registryUnreadable·edgeAgents[].scanned(엣지가 보낸 임의 요약)·엣지 push 상태가 **모두** 이 표지를 싣는다 —
+ *   한 경로만 가리면 형제가 우회로다(v2.596 규약). 그래서 경로를 나열하지 않고 `registryUnreadable` 키를 깊이 8까지 찾아 바꾼다.
+ *   원본(poller _last·push _last — 관리자 응답과 공유)은 바꾸지 않는다: 바뀐 경로만 새 객체이고 나머지는 같은 참조다.
+ *   2.744 이전 엣지가 보낸 원문(V8 메시지)도 summarizeRegistryError 가 분류만 남긴다.
+ */
+function registryUnreadableLabel(e) {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+  const sum = summarizeRegistryError({ code: e.code, reason: typeof e.reason === 'string' ? e.reason : '' });
+  const { line: _l, column: _c, position: _p, sysCode: _s, ...rest } = e;
+  return { ...rest, code: sum?.code || null, reason: sum?.label || REGISTRY_ERROR_LABEL['read-error'], reasonDetailHidden: true };
+}
+function registryUnreadableView(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+  if (Object.hasOwn(v, 'reason')) return registryUnreadableLabel(v);   // 단건 {at, code, reason}
+  const out = {};                                                        // 장비군 맵 {storage:{…}, sanswitch:{…}}
+  for (const k of Object.keys(v)) out[k] = registryUnreadableLabel(v[k]);
   return out;
+}
+export function maskRegistryUnreadable(v, depth = 0) {
+  if (depth > 8 || !v || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    let changed = false;
+    const arr = v.map((x) => { const y = maskRegistryUnreadable(x, depth + 1); if (y !== x) changed = true; return y; });
+    return changed ? arr : v;
+  }
+  let out = null;
+  for (const k of Object.keys(v)) {
+    const x = v[k];
+    const y = k === 'registryUnreadable' ? registryUnreadableView(x) : maskRegistryUnreadable(x, depth + 1);
+    if (y !== x) { out ||= { ...v }; out[k] = y; }
+  }
+  return out || v;
+}
+/** 엣지 push 상태(엣지 노드의 GET /tools/part-faults · /status) — 비-admin 은 등록부 손상 사유를 분류 문구로만(RG2744-05). */
+export function pushView(st, isAdmin) {
+  return isAdmin ? st : maskRegistryUnreadable(st);
 }
 
 function dbView(db, isAdmin) {
@@ -299,7 +343,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
     reset: st?.reset || null,
     edges: role === 'central' ? edgesNow() : null,
-    push: role === 'edge' ? partFaultPushStatus() : null,
+    push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
   });
@@ -386,7 +430,7 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
   res.json({ ok: true, ...st, last: lastView(st.last, isAdminReq(req)), db: dbView(st.db, isAdminReq(req)), version: currentVersion(),
-    push: config.agent.centralUrl ? partFaultPushStatus() : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
+    push: config.agent.centralUrl ? pushView(partFaultPushStatus(), isAdminReq(req)) : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
 });
 
 /**

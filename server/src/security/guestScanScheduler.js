@@ -16,7 +16,7 @@ import { scanGuestNetCounters } from './guestNetScan.js';
 import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
@@ -34,7 +34,8 @@ function backupCorrupt(err) {
   try {
     const bak = `${FILE}.corrupt.${Date.now()}`;
     fs.renameSync(FILE, bak);
-    console.warn(`[gscan] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
+    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각(게스트 비밀번호 앞부분)을 싣는다.
+    console.warn(`[gscan] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 

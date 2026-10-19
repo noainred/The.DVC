@@ -7,7 +7,7 @@
  *  ③ 뒤 재계산이 실패해도 옛 값을 지우지 않는다.
  * 기준 시각은 정시 −30분으로 고정(v2.517 규약).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'capsum2689-'));
+// 합성 DB 가 약 93MB 다 — 지우지 않으면 전량 테스트마다 /tmp 에 쌓여 디스크 여유 가드 테스트(authStop2591 F1)를 깨뜨린다(v2.744 에 24벌 2.2GB 를 실제로 찾았다).
+after(() => { try { fs.rmSync(process.env.CONFIG_DIR, { recursive: true, force: true }); } catch {} });
 const HOUR = 3600_000;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
 const METRICS = ['cpu_system', 'cpu_process', 'event_loop_lag', 'mem_system', 'mem_rss', 'load_per_core', 'disk_used', 'net_rx', 'net_tx', 'extra_m'];

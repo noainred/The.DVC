@@ -18,7 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
-import { fleetPartialsNote } from '../fleetPartialText.js';
+import { fleetPartialsNote, fleetHeldNote } from '../fleetPartialText.js'; // v2.744(감사 후속 FC): fleetHeldNote — 등록부 손상으로 직전 목록 유지
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
@@ -31,10 +31,10 @@ import { distStateOf, lapsedVerifiedNote, distributionSummary, centralManagedNot
 import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, hbaBasisFootnote, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
-  licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
+  licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
 import Select from '../../components/Select.jsx';
 
@@ -244,6 +244,14 @@ export function BmUsage() {
   // v2.627: 중앙이 배포 중인 엣지는 배포 키 입력을 잠근다(서버도 저장하지 않는다 — Enterprise 칸만 열려 있다).
   const dl = saving || !!data?.central?.managed;
   const selRow = rows.find((r) => r.key === sel) || null;
+  /*
+   * v2.744(최종 수정분 검토 RV2744F-WEB-03): 서버별 수집 상세는 상세 조회 응답(`usageDetail` — 폴러가 그 서버의 마지막 수집에서 남긴 것)에만 있다.
+   *   예전에는 목록 행의 `detail` 을 읽었는데 어떤 응답도 그 필드를 싣지 않아 상세 문구가 한 번도 나오지 않았다. 고른 서버와 다른 응답은 쓰지 않는다.
+   *   상세가 없으면(재시작 직후 · 데모 · 옛 서버) 빈 객체 — 문구 함수가 아무것도 지어내지 않는다(이유는 usageDetailNote 가 말한다).
+   */
+  const detailForSel = detail && (detail.key === sel || detail.target?.key === sel) ? detail : null;
+  const ud = detailForSel?.usageDetail && typeof detailForSel.usageDetail === 'object' ? detailForSel.usageDetail : null;
+  const udNote = usageDetailNote(detailForSel, { enabled: data?.enabled });
   const fsNote = firstSampleNote(data?.rows || []);
   const skNotes = skippedNotes(data?.skippedCounts || {}, data?.reasons || {});
 
@@ -277,6 +285,10 @@ export function BmUsage() {
         {/* v2.607 LEFT2607-02: 엣지가 일부만 보낸 베어메탈 목록 — 빠진 서버가 조용히 사라지지 않게 말한다. */}
         {fleetPartialsNote(data?.fleetPartials) && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>{fleetPartialsNote(data.fleetPartials)}</p>
+        )}
+        {/* v2.744(감사 후속 FC — EDGE-01): 엣지 iDRAC 등록부 손상으로 중앙이 직전 베어메탈 목록을 유지 중 — 그 엣지 서버 목록이 갱신되지 않는다. */}
+        {fleetHeldNote(data?.fleetPartials) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>{fleetHeldNote(data.fleetPartials)}</p>
         )}
         {/* ⚠ 인증 실패 정지는 **반드시 화면이 말한다** — 조용히 멈추면 사용자는 수집되는 줄 안다(v2.528). */}
         {authStopNote(data?.authStops || []) && (
@@ -397,6 +409,10 @@ export function BmUsage() {
         {missingFootnotes(rows).map((f, i) => (
           <p key={i} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>
         ))}
+        {/* v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거 — 보이는 행 기준 각주 1회(근거가 없으면 그리지 않는다) */}
+        {hbaBasisFootnote(shown) && (
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={hbaBasisFootnote(shown)} /></p>
+        )}
         <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다). 네트워크·HBA 사용률(%)은 전이중이라 **방향별(수신·송신 중 큰 쪽)** ÷ 링크 속도이고, 처리량(B/s)은 두 방향의 합입니다.'.replace(/`/g, '')} />
         </p>
@@ -757,17 +773,22 @@ export function BmUsage() {
             <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}>🔒 <BoldText text={addressHiddenNote(data)} /></p>
           )}
           {/* iDRAC 이 무엇을 지원하는지 장비별로 밝힌다(v2.551 — 사용자 선택). */}
-          {telemetryNote(selRow.detail || {}) && (
-            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={telemetryNote(selRow.detail)} /></p>
+          {/* v2.744(RV2744F-WEB-03): 수집 상세가 언제 것인지 · 왜 없는지(재시작 직후 · 데모) — 없는 상세를 지어내지 않는다. */}
+          {udNote && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}><BoldText text={udNote} /></p>
           )}
-          {detailNotes(detail?.target ? { ...detail.target, ...(selRow.detail || {}) } : (selRow.detail || {})).map((s, i) => (
+          {telemetryNote(ud || {}) && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={telemetryNote(ud || {})} /></p>
+          )}
+          {/* 대상(target — 라이선스 등)과 수집 상세(ud)를 겹친다. 상세가 없으면 대상만이라 상세 문구는 나오지 않는다. */}
+          {(ud ? detailNotes({ ...(detailForSel?.target || {}), ...ud }) : []).map((s, i) => (
             <p key={i} style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
           {/* 라이선스 — **언제 본 값인지** 함께(인벤토리는 느린 주기로 갱신된다). */}
-          {licenseNote(selRow.detail?.license || selRow.license) && (
-            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={licenseNote(selRow.detail?.license || selRow.license)} /></p>
+          {licenseNote(detailForSel?.target?.license || selRow.license) && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={licenseNote(detailForSel?.target?.license || selRow.license)} /></p>
           )}
-          {entDetailNotes(selRow.detail || {}).map((x, i) => (
+          {entDetailNotes(ud || {}).map((x, i) => (
             <p key={`ent${i}`} style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={x} /></p>
           ))}
           {/*
@@ -775,10 +796,10 @@ export function BmUsage() {
             *   이 현장 racadm 출력 형식을 확인한 적이 없어 파싱이 빗나갈 수 있다. 그때 사용자가
             *   실제 출력을 보고 알려줄 수 있어야 한다 — '읽지 못했습니다' 만 남기면 추측만 남는다.
             */}
-          {!!selRow.detail?.entRaw && (
+          {!!ud?.entRaw && (
             <details style={{ margin: '0 0 8px' }}>
               <summary style={{ fontSize: 12, cursor: 'pointer' }}>iDRAC SSH(racadm) 원문 보기</summary>
-              <pre style={{ margin: '6px 0 0', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 240, overflow: 'auto', background: 'rgba(0,0,0,0.25)', padding: 8, borderRadius: 4 }}>{selRow.detail.entRaw}</pre>
+              <pre style={{ margin: '6px 0 0', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 240, overflow: 'auto', background: 'rgba(0,0,0,0.25)', padding: 8, borderRadius: 4 }}>{ud.entRaw}</pre>
             </details>
           )}
           {detail?.rawTruncated && (
@@ -799,7 +820,7 @@ export function BmUsage() {
               raw={detail?.raw || []} daily={detail?.daily || []}
               rawTruncated={!!detail?.rawTruncated}
               intervalMs={data?.status?.intervalMs}
-              absent={[...(selRow?.detail?.idracAbsent || []), ...(selRow?.detail?.osAbsent || [])]}
+              absent={[...(ud?.idracAbsent || []), ...(ud?.osAbsent || [])]}
               rangeKey={rangeKey} onRange={changeRange} loading={detailLoading}
             />
           </React.Suspense>

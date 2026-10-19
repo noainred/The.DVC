@@ -24,6 +24,7 @@ export async function runLocalIdracScan({ ips, username, password, ilo = null, n
   const authPolicy = makeScanAuthPolicy({ rangeId: rangeId || datacenterId || vcenterId || '', username, password, ilo, periodic: trigger === 'periodic' });
   const scan = await scanForIdracs({ ips, username, password, ilo, onProgress, authPolicy });
   let registered = 0;
+  let registerError = null; // v2.744(감사 EDGE-03): 등록부를 읽지 못해 자동 등록을 거절했으면 그 사유(회신·상태가 말한다 — 조용한 0대 금지)
   // v2.591: 인증 정지로 건너뛴 IP 가 있으면 부분 결과다 — replace 로 두면 **건너뛴 등록 서버가 삭제**된다(중앙
   //   scanPoller 와 같은 규칙). 절단(truncated)도 같은 이유로 강등한다(중앙은 이미 그렇게 한다 — 형제 비대칭).
   // v2.611(감사 RECENT2611-01): 사유 판정은 scan.js scanPartialReasons 하나(중앙 scanPoller 와 같은 규칙) — noCreds·인증 실패·
@@ -37,8 +38,10 @@ export async function runLocalIdracScan({ ips, username, password, ilo = null, n
   // noRegister면 스캔만(중앙 UI에서 확인 후 별도 '등록'). 그 외엔 자동등록(autoRegister 켜진 경우).
   if (!noRegister && config.agent.autoRegister && scan.found.length) {
     // v2.742(감사 DEV-01): 엔트리 id(rangeId)·스캔한 대역(ips)을 넘긴다 — 교체는 그 엔트리 등록만 지운다(중앙 scanPoller 와 같은 규칙).
-    const rr = registerScanned(scan.found, username, password, effectiveMode, vcenterId || '', datacenterId || '', { ilo, scanRangeId: rangeId, scanRanges: ips });
+    // v2.744(감사 EDGE-03): 자동 경로(auto) — 이 노드의 iDRAC 등록부를 읽지 못했으면 저장하지 않는다(registry.js 주석).
+    const rr = registerScanned(scan.found, username, password, effectiveMode, vcenterId || '', datacenterId || '', { ilo, scanRangeId: rangeId, scanRanges: ips, auto: true });
     if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
+    else if (rr.code === 'registry-unreadable') { registerError = rr.reason; console.warn(`[idrac-scan] 발견한 iDRAC ${scan.found.length}대를 현지 등록하지 않았습니다 — ${rr.reason}`); }
   }
-  return { ...scan, registered, modeDowngraded: partial && effectiveMode !== reqMode, ...(partial ? { modeDowngradedReason: partialReasons.join(' · ') } : {}), durationMs: Date.now() - started };
+  return { ...scan, registered, ...(registerError ? { registerError } : {}), modeDowngraded: partial && effectiveMode !== reqMode, ...(partial ? { modeDowngradedReason: partialReasons.join(' · ') } : {}), durationMs: Date.now() - started };
 }

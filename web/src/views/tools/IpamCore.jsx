@@ -42,6 +42,48 @@ export function sheetScopeArg(vc, scope) {
   return scope;
 }
 
+/**
+ * v2.744(회귀 검토 GG-R2·GG-R3) — 대장·시트 행의 소유 자원(VM·호스트) 판정과 원격 접속 대상. 순수 함수(테스트 고정).
+ *
+ * · 목록·시트 응답은 VM(v2.253)·호스트(v2.744 GG-R3) 모두 owner 본문 없이 `hasOwner` 표지만 준다 — 상세는 클릭 때
+ *   VM 은 `/vms/lookup`(inv.vms), 호스트는 `/hosts`(inv.hosts)로 1건만 가져온다. 권한이 없으면 서버가 403 이다(넓히지 않는다).
+ * · ⚠ 호스트 행의 원격 접속 대상은 **행의 IP** 다. 스냅샷 호스트 객체에는 ipAddresses·ipAddress 가 없어(관리 IP 는 mgmtIp)
+ *   owner 를 그대로 넘기면 '수집된 IP가 없습니다' 로 막혔다 — VC-01 로 FQDN 호스트의 관리 IP 가 스캔 행(owner 없음 → IP 로 접속)에서
+ *   호스트 행이 되면서 생긴 회귀다. 접속 권한·대상 범위는 서버(/remote/probe·quick-connect)가 예전 그대로 판정한다.
+ */
+export const hasOwnerRow = (r) => !!(r && (r.owner || (r.hasOwner && (r.ownerType === 'vm' || r.ownerType === 'host'))));
+export function ipRemoteItem(row, owner, scope = '') {
+  const ip = row?.ip || '';
+  const vcenterId = row?.vcenterId || scope || '';
+  if (row?.ownerType === 'host') {
+    return { name: row.ownerName || owner?.name || row.hostname || ip, ipAddresses: ip ? [ip] : [], vcenterId, guestOS: row.guestOS || row.os || '' };
+  }
+  return owner || { name: row?.hostname || ip, ipAddresses: ip ? [ip] : [], vcenterId };
+}
+/** `/hosts?vcenterId=&q=` 결과에서 그 행의 호스트 하나 — id 가 있으면 id, 없으면 같은 vCenter 의 같은 이름(대소문자 무시). 모르면 null. */
+export function pickHostOwner(items, row) {
+  const list = Array.isArray(items) ? items : [];
+  if (row?.ownerId) { const byId = list.find((h) => h?.id === row.ownerId); if (byId) return byId; }
+  const nm = String(row?.ownerName || '').toLowerCase();
+  if (!nm) return null;
+  return list.find((h) => String(h?.name || '').toLowerCase() === nm && (!row?.vcenterId || h?.vcenterId === row.vcenterId)) || null;
+}
+/** 소유 자원 1건 지연 조회 — VM 은 /vms/lookup, 호스트는 /hosts. 못 찾으면 null, 403 은 그대로 던진다(호출부가 권한 안내). */
+async function lookupOwner(row) {
+  if (row.ownerType === 'host') {
+    const name = row.ownerName || '';
+    const r = await fetchJson('/hosts', { ...(row.vcenterId ? { vcenterId: row.vcenterId } : {}), ...(name ? { q: name } : {}) });
+    return pickHostOwner(r?.items, row);
+  }
+  const nm = row.ownerName || row.label || '';
+  const r = await fetchJson(`/vms/lookup?ip=${encodeURIComponent(row.ip || '')}${nm ? `&name=${encodeURIComponent(nm)}` : ''}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`);
+  return r?.vm || null;
+}
+const needsLookup = (row) => !row.owner && row.hasOwner && (row.ownerType === 'vm' || row.ownerType === 'host');
+const deniedText = (row) => (row.ownerType === 'host'
+  ? '호스트 상세는 인벤토리 › 호스트 조회 권한이 필요합니다(관리자에게 요청).'
+  : 'VM 상세는 인벤토리 › 가상머신 조회 권한이 필요합니다(관리자에게 요청).');
+
 export function IpamStandalone({ defaultScope = '' } = {}) {
   // v2.616: V5 틀의 법인 범위를 첫 값으로 받는다(바꾸면 따라간다). 개발 포탈은 넘기지 않아 예전 그대로('').
   const [scope, setScope] = useState(defaultScope);
@@ -224,7 +266,7 @@ function Ipam({ scope, onScope }) {
     ) },
     // 소유 자원 — v2.253 응답 다이어트로 VM 행은 owner 본문 대신 hasOwner 플래그만 온다.
     // owner 가 있거나(hasOwner VM 행이면 IpOwnerDetail 이 지연 조회) 클릭 가능하게 한다(v2.277).
-    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => ((r.owner || (r.hasOwner && r.ownerType === 'vm')) ? <button className="cell-link" onClick={() => setSel(r)}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
+    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => (hasOwnerRow(r) ? <button className="cell-link" onClick={() => setSel(r)}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
     { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
@@ -487,25 +529,25 @@ function VcenterChips({ byVcenter, scope, onPick }) {
  */
 function IpOwnerDetail({ row, onClose }) {
   const [owner, setOwner] = useState(row.owner || null);
-  // ready=상세 표시 가능 · loading=지연 조회 중 · none=연결 자원 없음/조회 실패(크래시 대신 안내)
-  const [state, setState] = useState(row.owner ? 'ready' : (row.hasOwner && row.ownerType === 'vm' ? 'loading' : 'none'));
+  // ready=상세 표시 가능 · loading=지연 조회 중 · denied=권한 없음(403) · none=연결 자원 없음/조회 실패(크래시 대신 안내)
+  const [state, setState] = useState(row.owner ? 'ready' : (needsLookup(row) ? 'loading' : 'none'));
   useEffect(() => {
-    if (row.owner || !(row.hasOwner && row.ownerType === 'vm')) return undefined;
+    if (!needsLookup(row)) return undefined;
     let dead = false;
     // VM 이름(ownerName)도 함께 넘긴다(v2.287, 확정 버그 #16). 같은 vCenter 안에서 같은 IP 를
     // 여러 VM 이 주장하는 '중복 IP' 행은 ip 만으로 조회하면 스냅샷 순서상 첫 VM 이 와서, 클릭한
     // 행과 다른 VM 상세가 뜬다. 서버가 ip+name 을 함께 받으면 그 이름의 VM 을 우선 반환한다.
-    const nm = row.ownerName || row.label || '';
-    fetchJson(`/vms/lookup?ip=${encodeURIComponent(row.ip || '')}${nm ? `&name=${encodeURIComponent(nm)}` : ''}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
-      .then((r) => { if (!dead) { if (r?.vm) { setOwner(r.vm); setState('ready'); } else setState('none'); } })
-      .catch(() => { if (!dead) setState('none'); });
+    // v2.744(GG-R3): 호스트 행도 owner 본문 없이 오므로 /hosts 로 1건을 가져온다(inv.hosts 게이트 — 없으면 403 → 권한 안내).
+    lookupOwner(row)
+      .then((o) => { if (!dead) { if (o) { setOwner(o); setState('ready'); } else setState('none'); } })
+      .catch((e) => { if (!dead) setState(e?.status === 403 ? 'denied' : 'none'); });
     return () => { dead = true; };
   }, [row]);
   if (state === 'ready' && owner) return <EntityDetail type={row.ownerType || 'vm'} item={owner} onClose={onClose} />;
   return (
     <Modal title={`IP ${row.ip || ''} — 소유 자원`} onClose={onClose} width={440}>
       <div className="muted" style={{ fontSize: 13, lineHeight: 1.9 }}>
-        {state === 'loading' ? '소유 자원 정보를 조회 중…' : '이 IP에 연결된 자원 상세를 열 수 없습니다(미귀속 IP이거나 조회 실패).'}
+        {state === 'loading' ? '소유 자원 정보를 조회 중…' : state === 'denied' ? deniedText(row) : '이 IP에 연결된 자원 상세를 열 수 없습니다(미귀속 IP이거나 조회 실패).'}
         <div style={{ marginTop: 8 }}>
           {row.ownerName && <div>소유 자원: <b>{row.label || row.ownerName}</b></div>}
           {row.vcenterName && <div>센터: {row.vcenterName}</div>}
@@ -525,14 +567,17 @@ function IpHistoryModal({ row, scope, onClose }) {
   // 모달을 연 시점에 /vms/lookup 으로 1건만 지연 조회 — 목록이 수십 MB로 커지던 것의 짝 수정.
   const [owner, setOwner] = useState(row.owner || null);
   useEffect(() => {
-    if (!row.owner && row.hasOwner && row.ownerType === 'vm') {
-      fetchJson(`/vms/lookup?ip=${encodeURIComponent(ip)}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
-        .then((r) => { if (r?.vm) setOwner(r.vm); })
-        .catch(() => { /* 실패 시 상세 버튼만 미표시 — 원격 접속은 IP 폴백으로 동작 */ });
-    }
+    if (!needsLookup(row)) return undefined;
+    let dead = false;
+    // v2.744(GG-R3): 호스트 행도 지연 조회(/hosts). VM 은 예전처럼 ip(+vCenter)로 찾는다.
+    const q = row.ownerType === 'vm' ? { ...row, ownerName: '', label: '' } : row;
+    lookupOwner(q)
+      .then((o) => { if (!dead && o) setOwner(o); })
+      .catch(() => { /* 실패(403 포함) 시 상세 버튼만 미표시 — 원격 접속은 행의 IP 로 동작 */ });
+    return () => { dead = true; };
   }, [ip]); // eslint-disable-line react-hooks/exhaustive-deps
-  // VM/호스트 소유 IP면 그 자원으로, 스캔 IP면 IP만으로 원격 접속 대상 구성.
-  const remoteItem = owner || { name: hostname || ip, ipAddresses: [ip], vcenterId: row.vcenterId || scope || '' };
+  // VM 소유 IP면 그 VM 으로, 호스트·스캔 IP면 행의 IP 로 원격 접속 대상 구성(v2.744 GG-R2 — ipRemoteItem).
+  const remoteItem = useMemo(() => ipRemoteItem(row, owner, scope), [row, owner, scope]);
   // v2.618(WEB-3): 조회 실패를 '이력 없음'(null)으로 삼키지 않는다 — 못 읽음은 없음이 아니다. 늦게 온 이전 IP 응답도 버린다.
   const [hErr, setHErr] = useState('');
   useEffect(() => {
@@ -616,7 +661,7 @@ function IpHistoryModal({ row, scope, onClose }) {
       )}
       {/* 하단: VM 정보 보기(소유 자원이 있을 때) + 원격 접속(SSH/RDP) — 기존 기능 재사용 */}
       <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center' }}>
-        {owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>🖥 VM 정보 보기</button>}
+        {owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>{row.ownerType === 'host' ? '🖥 호스트 정보 보기' : '🖥 VM 정보 보기'}</button>}
         <VmRemoteButton item={remoteItem} />
         {!owner && !row.hasOwner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
       </div>

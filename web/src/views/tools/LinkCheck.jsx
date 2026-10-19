@@ -27,6 +27,7 @@ import { linkSettingsSig, serverChangedWhileEditing, SERVER_CHANGED_NOTE } from 
 import {
   STATE_LABEL, stateTone, rowState, msText, ageText, certText, kpisOf, headerNote,
   runResultText, EVENT_LABEL, eventTone, tableFootnotes, pairNote, trailFromLatest,
+  eventsKeyOf, eventsTagged, eventsAfterFail, eventsView, eventsFailText, // v2.744(감사 WEB-03): 로그는 요청 키별
 } from './linkCheckText.js';
 import Select from '../../components/Select.jsx';
 // v2.553: 설정 전수 점검(25종) + 해결책 — 같은 화면의 탭이다(도구를 하나 더 만들지 않는다).
@@ -127,15 +128,26 @@ export function LinkCheck() {
    *   `useLatest` 세대 가드로 **마지막 요청의 응답만** 반영한다(성공·실패·로딩 해제 모두).
    */
   const latestEvents = useLatest();
+  /*
+   * v2.744(감사 WEB-03): 응답에 요청 키(링크·기간·구분)를 붙여 보관하고 화면은 지금 고른 키의 응답만 그린다(eventsView).
+   *   예전에는 필터를 바꾼 조회가 실패하면 setEvents 가 불리지 않아 이전 필터의 행이 새 필터 아래에 남았다.
+   *   실패는 eventsAfterFail — 같은 키면 직전 결과 + 실패 표지, 다른 키면 행 없이 실패(이전 필터의 행을 보이지 않는다).
+   */
   const loadEvents = React.useCallback((linkId = '', hours = 24 * 7, event = '') => {
     setEvLoading(true);
+    const key = eventsKeyOf(linkId, hours, event);
     const qs = new URLSearchParams({ hours: String(hours), limit: '300' });
     if (linkId) qs.set('linkId', linkId);
     if (event) qs.set('event', event);
     return latestEvents(
-      fetchJson(`/tools/link-check/events?${qs}`),
+      fetchJson(`/tools/link-check/events?${qs}`).then((r) => eventsTagged(r, key)),
       (d) => { setEvents(d); setEvLoading(false); },
-      (e) => { setNote(`로그 조회 실패: ${e?.message || e}`); setEvLoading(false); },
+      (e) => {
+        const msg = e?.message || String(e);
+        setNote(`로그 조회 실패: ${msg}`);
+        setEvents((prev) => eventsAfterFail(prev, key, msg));
+        setEvLoading(false);
+      },
     );
   }, [latestEvents]);
   useEffect(() => { loadEvents(evLink, evHours, evKind); }, [loadEvents, evLink, evHours, evKind]);
@@ -164,6 +176,8 @@ export function LinkCheck() {
   const kpi = useMemo(() => kpisOf(data?.links || [], opt), [data, opt]);
   const banners = useMemo(() => headerNote(data || {}), [data]);
   const foots = useMemo(() => tableFootnotes(rows, opt), [rows, opt]);
+  // v2.744(감사 WEB-03): 지금 고른 필터의 보관분만 그린다(다른 필터의 행·실패 전 이전 행을 섞지 않는다).
+  const evView = eventsView(events, eventsKeyOf(evLink, evHours, evKind));
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} />;
@@ -395,12 +409,13 @@ export function LinkCheck() {
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
           <BoldText text={'상세 원문은 **실패이거나 상태가 바뀔 때만** 남습니다 — 정상이 이어지는 주기까지 원문을 남기면 저장소가 폭발합니다(요약 표본은 따로 매 주기 남습니다). 계속 실패하는 링크는 **주기마다 \'실패 지속\'** 이 쌓이므로, 시작·복구만 보려면 구분을 골라 주세요.'} />
         </div>
-        {events?.truncated && <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)' }}>상한(300건)으로 잘렸습니다 — 기간을 좁히거나 링크를 고르세요.</div>}
+        {evView.failed && <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)', marginBottom: 4 }}>{eventsFailText(evView)}</div>}
+        {evView.truncated && <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)' }}>상한(300건)으로 잘렸습니다 — 기간을 좁히거나 링크를 고르세요.</div>}
         <div style={{ overflowX: 'auto' }}>
           <STable className="v3-table" minWidth={860} wrap={false}>
             <thead><tr><th>시각</th><th>구분</th><th>링크</th><th>단계</th><th>실패 종류</th><th>측정자</th><th>요약</th><th data-nosort>상세</th></tr></thead>
             <tbody>
-              {(events?.rows || []).map((e) => (
+              {evView.rows.map((e) => (
                 <tr key={e.id}>
                   <td style={{ whiteSpace: 'nowrap' }} data-sort={e.ts}>{new Date(e.ts).toLocaleString('ko-KR')}</td>
                   <td><Badge text={EVENT_LABEL[e.event] || e.event} tone={eventTone(e.event, !!e.ok)} /></td>
@@ -419,7 +434,7 @@ export function LinkCheck() {
             </tbody>
           </STable>
         </div>
-        {(events?.rows || []).length === 0 && !evLoading && (
+        {evView.ready && !evView.failed && evView.rows.length === 0 && !evLoading && (
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
             <BoldText text={'이 기간에 기록이 없습니다 — **문제가 없었다는 뜻일 수도 있고**(실패·상태변화가 없으면 로그를 남기지 않습니다) 점검이 아직 돌지 않았다는 뜻일 수도 있습니다. 위의 마지막 주기 시각을 함께 보세요.'} />
           </div>

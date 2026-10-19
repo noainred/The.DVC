@@ -24,7 +24,7 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopNote, authStopCell, authStopSingleText, plainText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음
+import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -184,12 +184,7 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
         : !d ? <Loading />
           : pts.length < 2 && !isVc ? (
             <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
-              {/* v2.733(C3-01): 주 폴러가 인증 실패로 멈춘 vCenter 에는 서버가 로그인하지 않는다 — '가져오지 못했다' 와 구분해 말한다. */}
-              {d.authStopped
-                ? <BoldText text={authStopSingleText(d.authStopped)} />
-                : d.reason
-                  ? <>이 범위의 추이를 가져오지 못했습니다: <b>{d.reason}</b></>
-                  : <>이 기간에 vCenter 가 돌려준 표본이 없습니다 — 호스트가 그 구간에 연결되어 있지 않았거나 vCenter 통계 보관 기간 밖입니다.</>}
+              <TrendEmptyNote d={d} />
             </div>
           ) : pts.length < 2 ? (
             <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
@@ -429,6 +424,7 @@ export default function VCenterDetail({ site, onBack }) {
     // vCenter 로 나가는 요청 수를 예측 가능하게 묶는다(폴더를 전부 펼친 경우 대비).
     const MAX_ROUNDS = 6;
     let stopAcc = {};   // v2.733(C3-01): 이 조회에서 인증 정지로 서버가 조회하지 않은 vCenter
+    let skipAcc = {};   // v2.744(감사 후속 FA-②): 직접 수집 대상이 아니라(비활성·점검중·엣지 위임) 서버가 조회하지 않은 vCenter
     (async () => {
       for (let round = 0; round < MAX_ROUNDS && alive; round++) {
         const todo = pendingIds(wantIds, usageDays, usageRef.current, usageMaxRef.current);
@@ -445,7 +441,8 @@ export default function VCenterDetail({ site, onBack }) {
           setUsage(merged);
           // v2.578 D4: 롤업 구간(초)을 기억해 툴팁이 서버가 아는 값으로 말하게 한다(숫자 하드코딩 금지).
           if (r?.authStopped && typeof r.authStopped === 'object') stopAcc = { ...stopAcc, ...r.authStopped };
-          setUsageInfo({ loading: false, synthesized: !!r?.synthesized, truncated: !!r?.truncated, maxVms: r?.maxVms || usageMaxRef.current, intervalSec: r?.intervalSec ?? null, error: '', authStopped: stopAcc });
+          if (r?.skippedVcenters && typeof r.skippedVcenters === 'object') skipAcc = { ...skipAcc, ...r.skippedVcenters };
+          setUsageInfo({ loading: false, synthesized: !!r?.synthesized, truncated: !!r?.truncated, maxVms: r?.maxVms || usageMaxRef.current, intervalSec: r?.intervalSec ?? null, error: '', authStopped: stopAcc, skippedVcenters: skipAcc });
         } catch (e) {
           if (!alive) return;
           // 조회 실패는 화면 전체 오류로 바꾸지 않는다 — 트리는 계속 보여야 한다(고RTT 깜빡임 방지 규약).
@@ -466,6 +463,7 @@ export default function VCenterDetail({ site, onBack }) {
       u: usage[k], known: k in usage, days: usageDays, loading: usageInfo.loading, synthesized: usageInfo.synthesized,
       poweredOff: vm.powerState !== 'POWERED_ON', template: !!vm.template,
       stop: usageInfo.authStopped?.[vm.vcenterId] || null,   // v2.733(C3-01)
+      skip: usageInfo.skippedVcenters?.[vm.vcenterId] || null,   // v2.744(감사 후속 FA-②)
     };
   };
 
@@ -592,6 +590,8 @@ export default function VCenterDetail({ site, onBack }) {
             </span>
             {usageInfo.error && <span className="badge amber" title={usageInfo.error}>사용률 조회 실패 — 행은 '—' 로 표시</span>}
             {authStopNote(usageInfo.authStopped) && <span className="badge amber" title={plainText(authStopNote(usageInfo.authStopped))}>vCenter 인증 정지 — 사용률을 조회하지 않음</span>}
+            {/* v2.744(감사 후속 FA-②): 직접 수집 대상이 아닌 vCenter — 인증 정지와 다른 사실이라 회색 배지로 따로 말한다 */}
+            {skipNote(usageInfo.skippedVcenters) && <span className="badge gray" title={plainText(skipNote(usageInfo.skippedVcenters))}>직접 수집 대상 아님 — 사용률을 조회하지 않음</span>}
             {usageInfo.synthesized && <span className="badge blue" title="데모(mock) 데이터 소스입니다 — 사용률은 합성값이며 실측이 아닙니다">합성값(데모)</span>}
             <span className="muted" style={{ marginLeft: 'auto' }}>
               출처: vCenter 성능 롤업 · 펼친 폴더·검색 결과의 VM 만 조회
@@ -805,15 +805,33 @@ function MiniBar({ label, pct }) {
 }
 
 /**
+ * 호스트·클러스터 추이가 비었을 때의 안내 한 줄.
+ * v2.733(C3-01): 주 폴러가 인증 실패로 멈춘 vCenter 에는 서버가 로그인하지 않는다 — '가져오지 못했다' 와 구분해 말한다.
+ * v2.744(감사 후속 FA-②): 직접 수집 대상이 아닌 vCenter(비활성·점검중·엣지 위임)도 서버가 로그인하지 않고 skipReason 을 싣는다 —
+ *   예전에는 그 응답의 reason 을 '이 범위의 추이를 가져오지 못했습니다' 로 그려 장애처럼 읽혔다. 인증 정지로도 말하지 않는다.
+ */
+export function TrendEmptyNote({ d }) {
+  if (d?.skipReason) return <BoldText text={skipSingleText(d)} />;
+  if (d?.authStopped) return <BoldText text={authStopSingleText(d.authStopped)} />;
+  if (d?.reason) return <>이 범위의 추이를 가져오지 못했습니다: <b>{d.reason}</b></>;
+  return <>이 기간에 vCenter 가 돌려준 표본이 없습니다 — 호스트가 그 구간에 연결되어 있지 않았거나 vCenter 통계 보관 기간 밖입니다.</>;
+}
+
+/**
  * VM 행의 기간 실사용률 셀(v2.492) — 트리 한 줄에 들어가도록 짧은 텍스트로 그린다.
  * 값 없음을 두 가지로 구분한다: 아직 조회하지 않았으면 '조회 중…'(또는 '—'), 조회했는데 표본이
  * 없으면 '표본 없음'. 둘을 합치면 사용자가 '느린 건지 데이터가 없는 건지' 알 수 없다.
  * 트리 행은 nowrap 이라 MiniBar(바 2개 ≈ 300px) 대신 수치만 쓴다.
  */
-function VmUsageCell({ enabled, u, known, days, loading, synthesized, poweredOff, template, stop }) {
+export function VmUsageCell({ enabled, u, known, days, loading, synthesized, poweredOff, template, stop, skip }) {
   if (!enabled) return null;                      // '사용량 조회' 미체크 = 행에 아무것도 붙이지 않는다
   if (!known) {
     return <span className="muted" style={{ fontSize: 11.5 }}> · {usageDaysLabel(days)} {loading ? '조회 중…' : '—'}</span>;
+  }
+  if (!u && skip) {
+    // v2.744(감사 후속 FA-②): 직접 수집 대상이 아니라(비활성·점검중·엣지 위임) 서버가 조회하지 않았다 — '표본 없음' 도 '인증 정지' 도 아니다.
+    const c = skipCell(skip);
+    return <span className="muted" style={{ fontSize: 11.5 }} title={c.title}>{' · '}{usageDaysLabel(days)} {c.text}</span>;
   }
   if (!u && stop) {
     // v2.733(C3-01): 서버가 인증 정지로 조회하지 않았다 — '표본 없음' 으로 그리면 vCenter 에 이력이 없다고 읽힌다.

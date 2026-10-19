@@ -37,7 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from './atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './atomicWrite.js';
 import { registerStateFile } from './stateFiles.js';
 import { numOrNull } from './numOrNull.js';
 
@@ -126,8 +126,9 @@ function loadOnce() {
   catch (e) {
     if (e?.code !== 'ENOENT') {
       const kept = preserveCorrupt(FILE(), e.message);
-      _loadInfo = { at: _bootAt, found: 0, error: String(e.message).slice(0, 200), corruptKept: kept || null };
-      console.warn(`[scan-journal] 기록 파일을 읽지 못해 새로 시작합니다(${e.message})`);
+      // v2.744(최종 검토 리드): 기록 파일의 원문 조각은 서비스 점검 응답(scanJournalStatus().load)에 싣지 않는다 — 요약만(원문은 보존본에).
+      _loadInfo = { at: _bootAt, found: 0, error: safeLoadText(e, 200) || '사유 미상', corruptKept: kept || null };
+      console.warn(`[scan-journal] 기록 파일을 읽지 못해 새로 시작합니다(${safeLoadText(e) || '사유 미상'})`);
     }
     return;
   }

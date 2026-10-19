@@ -1,6 +1,6 @@
 // 감사·알림·일일리포트·인증서·이상탐지·세션보안·OS스캔·프로비저닝 저장 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { verifyUserOtp } from '../../auth/auth.js';
+import { verifyUserOtp, getUser } from '../../auth/auth.js';
 import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
@@ -14,7 +14,7 @@ import { inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
-import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
@@ -74,6 +74,22 @@ export function scopeAlertStatus(st, allowed) {
 //   PUT /alerts 로 웹훅을 자기 주소로 바꾸면 전 법인 알림·전 함대 일일 리포트가 그리로 나갔다(형제 PUT /anomaly 는 전역 값을
 //   ignoredGlobal 로 막는데 이 경로는 통째로 교체했다). 쓰기·즉시 발송은 전체 범위 계정만. 조회(GET)는 그대로(v2.604 정책).
 const fleetOnly = fullScopeOnlyWith('알림 채널·규칙과 일일 헬스체크 리포트는 전 법인 공용 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 발송할 수 있습니다.');
+
+/**
+ * v2.744(감사 AUTHZ-02): 소유자 목록에 **범위가 지정된 로컬 계정**이 있으면 저장은 그대로 하되(막지 않는다 — 범위를 나중에 풀 수 있다)
+ * 응답에 경고를 싣는다. 그 계정은 소유자 등급 라우트에서 403 이다(requireSettingsOwner 가 전체 범위만 통과시킨다) — 조용히 두면
+ * 관리자는 '소유자로 넣었는데 왜 안 되나' 를 알 수 없다. AD 계정은 로컬 레코드가 없어 미리 판정하지 못한다(경고하지 않는다).
+ */
+export function scopedOwnerWarnings(owners) {
+  const snap = store.get();
+  const out = [];
+  for (const name of Array.isArray(owners) ? owners : []) {
+    let rec = null;
+    try { rec = getUser(String(name)); } catch { rec = null; }
+    if (rec && scopedVcenterIds(rec, snap)) out.push({ username: String(name), reason: SETTINGS_OWNER_FULL_SCOPE_REASON });
+  }
+  return out;
+}
 
 export function registerOpsSettings(adminRouter) {
 
@@ -183,7 +199,13 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
   res.json({ ok: true, policy: after, migration: mig });
 });
 
-adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
+// v2.744(감사 후속 FB-3): 조회에도 ownerWarnings — 저장 응답에만 있으면, 이미 범위 계정이 소유자 목록에 든 현장은 화면을 열어도 그 사실을 모른다
+//   (그 계정은 소유자 등급 라우트에서 403 이다). 저장 응답과 같은 함수(scopedOwnerWarnings)로 만든다.
+adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => {
+  const cur = loadConfiguredSecurity();
+  const ownerWarnings = scopedOwnerWarnings(cur.settingsOwners);
+  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}) });
+});
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
@@ -216,7 +238,8 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   const warnLabel = (x) => (x.sessionWarnEnabled ? `${x.sessionWarnMin}분 전 경고 · ${x.sessionExtendMin}분 연장 · 총상한 ${x.sessionMaxHours ? `${x.sessionMaxHours}시간` : '무제한'}` : '비활성');
   if (warnLabel(before) !== warnLabel(after)) parts.push(`세션 만료 경고 ${warnLabel(before)} → ${warnLabel(after)}`);
   logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
-  res.json({ ok: true, settings: after });
+  const ownerWarnings = scopedOwnerWarnings(after.settingsOwners);   // v2.744(감사 AUTHZ-02)
+  res.json({ ok: true, settings: after, ...(ownerWarnings.length ? { ownerWarnings } : {}) });
 });
 
 // 실제 OS 인벤토리(게스트에서 읽은 실제 설치 OS) — 조회·설정·즉시 실행·결과·CSV.

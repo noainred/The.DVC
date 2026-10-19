@@ -62,8 +62,16 @@ export function vmTrend(points, days, nowMs = Date.now()) {
     if (!p) return { ts: t, v: null };
     const total = Number(p.total);
     if ((Number(p.skipped) || 0) > 0 || !Number.isFinite(total)) return { ts: t, v: null, partial: true };
-    return { ts: t, v: total };
+    // v2.744(감사 RECENT-01): skipped 는 이제 '기다리면 다시 읽힐' vCenter(첫 수집 중·연결 실패) 수만이다 — 비활성은 원래 합계 밖이고
+    //   캐시 없는 점검중은 기한 없는 상태라 칸을 비우지 않는다(v2.622 규칙). 대신 점검중으로 뺀 vCenter 수를 칸에 실어 화면이 말한다.
+    const maint = Number(p.maintExcluded) || 0;
+    return maint > 0 ? { ts: t, v: total, maintExcluded: maint } : { ts: t, v: total };
   });
+}
+
+/** v2.744(감사 RECENT-01): 점검중 vCenter 를 빼고 센 칸 수(값은 그렸다 — 화면이 '점검중 제외' 를 밝힌다). */
+export function maintExcludedCount(series) {
+  return (Array.isArray(series) ? series : []).filter((p) => p && p.v != null && Number(p.maintExcluded) > 0).length;
 }
 
 /**

@@ -5,7 +5,7 @@ import {
 import { fetchJson } from '../api.js';
 import EscClose from './EscClose.jsx';
 import BoldText from './boldText.jsx';
-import { metricErrorState, metricAuthStopText } from './vmMetricsText.js';
+import { metricErrorState, metricAuthStopText, metricSkipText, stopsAutoRefresh } from './vmMetricsText.js';
 import { metricStats } from './vmMetricStats.js'; // v2.598 VC2598-02 — 결측 점을 0 으로 더하지 않는다
 
 const TYPES = [
@@ -61,7 +61,7 @@ export function HostMetricButton({ hostId, hostName }) {
   );
 }
 
-function MetricModal({ metricsPath, name, onClose }) {
+export function MetricModal({ metricsPath, name, onClose }) {
   const [type, setType] = useState('cpu');
   const [interval, setIntv] = useState('realtime');
   const [range, setRange] = useState({ start: '', end: '' }); // applied range
@@ -80,9 +80,10 @@ function MetricModal({ metricsPath, name, onClose }) {
           if (!active) return;
           // v2.591(감사 F6): vCenter 가 인증 실패로 멈춰 있으면 자동 갱신을 멈춘다 — 20초마다 같은 계정으로 로그인하면
           //   계정이 잠긴다. 사유를 말하고 사람이 누르는 '다시 조회' 만 남긴다.
+          //   v2.744(감사 후속 FA-③): 직접 수집 대상이 아닌 vCenter(비활성·점검중·엣지 위임)의 409 + skipReason 도 같은 답이 반복되므로 멈춘다.
           const st = metricErrorState(e);
-          if (st.authStopped && timer) { clearInterval(timer); timer = null; }
-          setState({ loading: false, error: st.message, authStopped: st.authStopped });
+          if (stopsAutoRefresh(st) && timer) { clearInterval(timer); timer = null; }
+          setState({ loading: false, error: st.message, authStopped: st.authStopped, skip: st.skip });
         });
     };
     setState({ loading: true });
@@ -93,7 +94,7 @@ function MetricModal({ metricsPath, name, onClose }) {
     return () => { active = false; if (timer) clearInterval(timer); };
   }, [metricsPath, type, interval, range.start, range.end, retry]);
 
-  const { loading, data, error, authStopped } = state;
+  const { loading, data, error, authStopped, skip } = state;
   const cfg = TYPES.find((t) => t.k === type);
   const pts = (data?.points || []).map((p) => ({ t: p.t, v: p.v }));
   // v2.598 VC2598-02: 결측(null) 점은 요약에서 빼고, 차트는 그 구간에서 선을 끊는다(connectNulls 없음).
@@ -144,7 +145,9 @@ function MetricModal({ metricsPath, name, onClose }) {
 
         <div style={{ height: 340 }}>
           {loading && <div className="muted" style={{ padding: 40, textAlign: 'center' }}>vCenter에서 불러오는 중…</div>}
-          {error && !authStopped && <div className="error-box" style={{ margin: 8 }}>조회 실패: {error}</div>}
+          {error && !authStopped && !skip && <div className="error-box" style={{ margin: 8 }}>조회 실패: {error}</div>}
+          {/* v2.744(감사 후속 FA-③): 장애가 아니라 수집 방식·상태 때문이다 — 오류 상자가 아니라 안내로 그린다. 서버가 manual 도 막으므로 '다시 조회' 는 두지 않는다. */}
+          {skip && <div className="muted" style={{ padding: 24, textAlign: 'center', lineHeight: 1.7 }}><BoldText text={metricSkipText(skip)} /></div>}
           {authStopped && (
             <div className="error-box" style={{ margin: 8 }}>
               <BoldText text={metricAuthStopText(authStopped)} />
@@ -172,7 +175,7 @@ function MetricModal({ metricsPath, name, onClose }) {
           )}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-          이 데이터는 평소 수집하지 않으며, 이 창을 열 때 vCenter에서 직접 조회합니다. 실시간은 20초마다 자동 갱신됩니다{authStopped ? '(인증 실패로 멈춤)' : ''}.
+          이 데이터는 평소 수집하지 않으며, 이 창을 열 때 vCenter에서 직접 조회합니다. 실시간은 20초마다 자동 갱신됩니다{authStopped ? '(인증 실패로 멈춤)' : skip ? '(직접 수집 대상이 아니라 멈춤)' : ''}.
         </div>
       </div>
     </div>

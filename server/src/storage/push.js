@@ -10,6 +10,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { devicesForThisNode, registryLoadError } from './registry.js';
 import { createChangeLogger } from '../util/logThrottle.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(최종 검토 FB): 등록부 로드 오류는 원문이 아니라 요약
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04: 프로브를 공용으로 승격
@@ -123,7 +124,9 @@ function registeredCount() {
   try {
     const err = registryLoadError();
     if (err) {
-      if (_regLog('registry', err.reason)) console.warn(`[storage-push] 엣지 스토리지 등록부를 읽지 못해 목록을 보내지 않습니다(${String(err.reason || '사유 미상').slice(0, 200)}) — '위임 0대' 가 아닙니다. 중앙 storage-config pull 이 등록부를 다시 쓰면 풀립니다`);
+      // v2.744(최종 검토 FB — RD-R2·RG2744-01): 사유는 원문(JSON.parse 메시지의 파일 조각)이 아니라 요약 — 콘솔 줄은 엣지 로그로 중앙에 당겨진다.
+      const why = summarizeRegistryError(err)?.text || '사유 미상';
+      if (_regLog('registry', why)) console.warn(`[storage-push] 엣지 스토리지 등록부를 읽지 못해 목록을 보내지 않습니다(${why}) — '위임 0대' 가 아닙니다. 중앙 storage-config pull 이 등록부를 다시 쓰면 풀립니다`);
       return null;
     }
     return devicesForThisNode().length;

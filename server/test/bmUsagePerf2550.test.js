@@ -171,7 +171,10 @@ test('실제 DB 왕복 — 롤업 산수 · 중복 방지 · 낡은 ts · null �
     const db = await import('../src/bmusage/db.js');
     db._resetForTest();
     if (!(await db.available())) { console.log('  (node:sqlite 없음 — 건너뜀)'); return; }
-    const now = Date.parse('2026-09-17T03:00:00Z');   // KST 12:00
+    // KST 12:00(같은 날 안에서 ±10분이 일 롤업 하루를 넘지 않게). v2.744: 예전에는 고정 날짜(2026-09-17)였는데 일 롤업 조회 창이
+    //   **실제 시각** 기준이라 그 날짜가 창 밖으로 밀리면(시계를 60일 민 실행으로 재현) usageDaily 가 비어 실패했다 — 어제 KST 정오로 둔다.
+    const DAYMS = 86_400_000; const KST = 9 * 3_600_000;
+    const now = Math.floor((Date.now() + KST) / DAYMS) * DAYMS - KST - DAYMS + 12 * 3_600_000;
     const mk = (key, ts, cpu, mem, x = {}) => ({ key, ts, name: `bm-${key}`, vcenterId: 'vc1', src: 'os', cpu_pct: cpu, mem_pct: mem, ...x });
 
     assert.deepEqual(await db.insertUsage([mk('A', now, 20, 60), mk('B', now, null, 44)], ''), { ok: true, inserted: 2, duplicates: 0 });

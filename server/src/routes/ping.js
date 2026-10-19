@@ -23,6 +23,7 @@
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
 import { scopedVcenterIds } from '../auth/scope.js';
+import { isAdminDetailUser } from '../auth/demoGuest.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import {
@@ -203,7 +204,8 @@ pingRouter.post('/seed-vcenters', adminOnly, (req, res) => {
  * ⚠ 가린 사실을 **숨기지 않는다**(`addressHidden`) — 화면이 '왜 주소가 비었나' 를 말할 수 있게.
  */
 export function canSeeEdgeAddress(req) {
-  return req.user?.role === 'admin' && !scopedVcenterIds(req.user, store.get());
+  // v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — mock 데모 계정은 엣지 host·port 를 받지 않는다(operator 와 같은 판본).
+  return isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, store.get());
 }
 const isEdgeTarget = (id) => listTargets().some((t) => String(t.id) === String(id) && t.source === 'edge');
 

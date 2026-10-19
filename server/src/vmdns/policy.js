@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { strictIpv4Num, numToIp } from '../util/ipv4.js';
 
 export const POLICY_FILE_NAME = 'vm-dns-policy.json';
@@ -111,7 +111,7 @@ export function loadVmDnsPolicy() {
     }
   } catch (e) {
     preserveCorrupt(file, e?.message);
-    console.warn(`[vm-dns] 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 시작합니다: ${e?.message || e}`);
+    console.warn(`[vm-dns] 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = { ...base, invalid, rev: revOf({ corps: base.corps, publicUnapproved: base.publicUnapproved }) };
   return cache;

@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, downloadFile, canCsv, hasRole } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import { notReadNote, notReadKpiSub } from '../bizreport/notReadText.js'; // v2.744(감사 VC-03): 읽지 못한 vCenter 는 0 으로 더하지 않는다
 import { GROUP_LABEL, OFF_POLICY_LABEL, STORAGE_BASIS_LABEL, moneyText, numText, ratesNote, notesText, BASIS_NOTE } from '../bizreport/costText.js';
 import Select from '../../components/Select.jsx';
 
@@ -124,9 +125,10 @@ export default function CostShowbackTool({ scope }) {
     <div style={{ minWidth: 0 }}>
       <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{BASIS_NOTE}</div>
       {rn && <div className="banner" style={{ marginBottom: 8 }}>{rn}</div>}
+      {notReadNote(data.notReadVcenters) && <div className="banner" style={{ marginBottom: 8 }}>{notReadNote(data.notReadVcenters)}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
       <div className="kpis" style={{ marginBottom: 10 }}>
-        <div className="kpi"><div className="label">월 합계</div><div className="value">{moneyText(t.total, cur)}</div><div className="sub">VM {(t.vms ?? 0).toLocaleString()}대</div></div>
+        <div className="kpi"><div className="label">월 합계</div><div className="value">{moneyText(t.total, cur)}</div><div className="sub">VM {(t.vms ?? 0).toLocaleString()}대{notReadKpiSub(data.notReadVcenters) ? ` · ${notReadKpiSub(data.notReadVcenters)}` : ''}</div></div>
         <div className="kpi"><div className="label">vCPU</div><div className="value">{numText(t.vcpu)}</div><div className="sub">{moneyText(t.cpu, cur)}</div></div>
         <div className="kpi"><div className="label">메모리</div><div className="value">{numText(t.ramGB, ' GB')}</div><div className="sub">{moneyText(t.ram, cur)}</div></div>
         <div className="kpi"><div className="label">스토리지</div><div className="value">{numText(t.storageGB, ' GB')}</div><div className="sub">{t.storage == null ? '' : `${moneyText(t.storage, cur)} · `}{STORAGE_BASIS_LABEL[data.storageBasis] || ''}</div></div>

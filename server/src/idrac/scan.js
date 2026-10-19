@@ -8,6 +8,9 @@ import { expandIpList } from './iprange.js';
 import { probeIdrac } from './redfish.js';
 import { ipBlockReason } from '../collector/registry.js'; // v2.537: 차단 대역은 스캔하지 않는다
 
+// v2.744(감사 DB-02): IP 정렬 비교는 공유 collator 하나 — 옵션 객체를 넘기는 localeCompare 는 호출마다 collator 를 새로 해석한다(결과는 같다).
+const IP_COLLATOR = new Intl.Collator(undefined, { numeric: true });
+
 /**
  * @param {object} p
  * @param {object|null} [p.authPolicy] v2.591(감사 F3) — `idrac/scanAuth.js makeScanAuthPolicy` 의 결과. 주기 스캔이면
@@ -130,11 +133,11 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
   finally { authPolicy?.flush(); }   // 지연 기록을 실행 끝에 한 번 쓴다(건마다 쓰면 파일 전체를 수천 번 다시 쓴다)
   report(); // 최종 100%
 
-  found.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+  found.sort((a, b) => IP_COLLATOR.compare(a.ip, b.ip));   // v2.744(감사 DB-02): 공유 collator(결과 같음)
   // 인증실패 원인 요약(가장 많은 것 우선) — '계정 맞는데 401'의 실제 이유를 UI 로그에 노출.
   const authFailReason = [...authHints.entries()].sort((a, z) => z[1] - a[1])
     .map(([msg, n]) => `${msg} (${n})`).join(' · ') || null;
-  authFailedIps.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  authFailedIps.sort(IP_COLLATOR.compare);
   return {
     scanned: aborted ? done : targets.length,
     aborted,
@@ -156,7 +159,7 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
     authFailedIps, // 인증 거부된 IP 목록(≤200) — 어느 iDRAC을 점검할지
     authFailedIpsTruncated: authFailed > authFailedIps.length,
     // v2.495: 비-Dell Redfish 장비(HPE iLO 등). 상한 200 — 넘으면 unsupportedTruncated 로 알린다.
-    unsupported: unsupported.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+    unsupported: unsupported.sort((a, b) => IP_COLLATOR.compare(a.ip, b.ip)),
     unsupportedCount,
     unsupportedTruncated: unsupportedCount > unsupported.length,
     truncated: truncated || allowed.length > max,
@@ -168,7 +171,7 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
     // v2.591(감사 F3): 인증 실패 정지로 시도하지 않은 IP(주기 스캔만) — registered 는 주 전력 폴러 정지를 따른 것.
     authSkipped,
     authSkippedRegistered,
-    authSkippedIps: authSkippedIps.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    authSkippedIps: authSkippedIps.sort(IP_COLLATOR.compare),
     authSkippedTruncated: authSkipped > authSkippedIps.length,
   };
 }

@@ -193,23 +193,48 @@ export function parseFcHosts(lines = []) {
     //   구간 안의 모든 위치에서 끝까지 다시 훑어 O(n²) 였다('0.' 2만 번에 수 초). 결과는 같다 — 가장 왼쪽 매치는
     //   언제나 구간의 시작이다(중간에서 매치되면 시작에서도 같은 끝으로 매치된다).
     const gb = /(?<![\d.])([\d.]+)\s*gbit/i.exec(speedRaw);
+    const tw = fcWords(txw); const rw = fcWords(rxw);
     out.push({
       host,
       state: state || '',
       speedRaw: speedRaw || '',
       bitsPerSec: gb ? Number(gb[1]) * 1e9 : null,   // 못 읽으면 null — 퍼센트를 내지 않는다
-      txBytes: hexOrDec(txw) == null ? null : hexOrDec(txw) * 4,
-      rxBytes: hexOrDec(rxw) == null ? null : hexOrDec(rxw) * 4,
+      txBytes: tw.value == null ? null : tw.value * 4,
+      rxBytes: rw.value == null ? null : rw.value * 4,
+      // v2.744(감사 DEV-01): '-1 표지'를 만났다는 사실 — 화면·노트가 '못 읽음' 을 말한다(빈 값과 구분).
+      ...(tw.invalid || rw.invalid ? { countersInvalid: true } : {}),
     });
   }
   return out.length ? out : null;
 }
 
-function hexOrDec(v) {
+/**
+ * FC 통계 한 칸 → `{ value, invalid }`.
+ * ⚠⚠ v2.744(감사 DEV-01): **`0xffffffffffffffff`(-1 표지)는 카운터가 아니라 '못 읽음' 이다.** Linux qla2xxx 는 통계 구조체를 -1 로
+ *   채운 뒤(memset(p,-1)) 칩 다운·ISP 재설정·PCI 오프라인·통계 조회 실패면 그대로 돌려주고, scsi_transport_fc 는 그 값을 `0x%llx`
+ *   로 sysfs 에 낸다. 예전에는 그것을 1.8e19 단어(×4 바이트)로 읽어, 정상 → 표지 주기에 약 491 PB/s 가 원시 표본과 5년 일 롤업
+ *   최대에 남았고(오류 없이 틀린 값), 표지 → 표지 주기는 0 B/s('트래픽 없음' 이라는 거짓)였다.
+ *   음수(10진 '-1')·10진 2^64−1(부호 없는 -1)도 카운터가 아니다. 64비트에 담을 수 없는 값(2^64 이상 — 반올림으로 표지와 같아지는 값
+ *   포함)도 같은 취급이다. 빈 칸은 예전처럼 null(표지 아님).
+ * ⚠ v2.744(회귀 검토 GB-R3): **2^53 을 넘는 정상 카운터는 표지가 아니다** — 값으로 읽는다(근사). 예전에는 2^53(= 36 PB 단어) 초과를 표지와
+ *   같이 '못 읽음' 으로 처리해, 32GFC 를 한 방향 1.6GB/s 로 약 260일 돌린 HBA 의 처리량이 칩 재설정 전까지 영원히 비었고 노트는
+ *   ''-1' 표지' 라는 틀린 원인을 말했다. 정밀도는 문제가 되지 않는다 — 2^57 근처 double 의 ulp 는 32 단어(128 바이트)라 5분 차이의
+ *   오차는 1 B/s 에 못 미친다(2^63 근처도 ulp 2,048 단어 = 8KB → 약 27 B/s). 남는 쓰레기 값은 물리 상한(fcRate.fcPlausibleBps)이 거른다.
+ */
+const FC_U64_SENTINEL_DEC = '18446744073709551615';
+const FC_U64_LIMIT = 2 ** 64;
+function fcWords(v) {
   const s = String(v ?? '').trim();
-  if (!s) return null;
-  if (/^0x[0-9a-f]+$/i.test(s)) { const n = Number.parseInt(s, 16); return Number.isFinite(n) ? n : null; }
-  return num(s);
+  if (!s) return { value: null, invalid: false };
+  if (/^0x[0-9a-f]+$/i.test(s)) {
+    if (/^0xf{16}$/i.test(s)) return { value: null, invalid: true };
+    const n = Number.parseInt(s, 16);
+    return Number.isFinite(n) && n < FC_U64_LIMIT ? { value: n, invalid: false } : { value: null, invalid: true };
+  }
+  if (s === FC_U64_SENTINEL_DEC) return { value: null, invalid: true };
+  const n = num(s);
+  if (n == null) return { value: null, invalid: false };
+  return n >= 0 && n < FC_U64_LIMIT ? { value: n, invalid: false } : { value: null, invalid: true };
 }
 
 /** `##TICK` — `getconf CLK_TCK`(보통 100). 값이 없으면 null(우리 계산은 비율이라 필요 없지만 진단용). */

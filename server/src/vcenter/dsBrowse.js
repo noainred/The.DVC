@@ -17,8 +17,7 @@ import { VimSoapClient } from './soapClient.js';
 import { parseMorefs, parseDsSearchResults } from './soapParse.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
-import { directCollectSkipReason } from './collectTarget.js';
-import { vcAuthStopOf, noteVcAuthFailure, authStopView } from './authStopGate.js';
+import { vcAuthStopOf, noteVcAuthFailure, authStopView, DIRECT_SKIP_TEXT, vcSkipOf } from './authStopGate.js';
 
 /*
  * v2.742(감사 VC-03) — 주문형 vCenter 로그인 문(gate). 데이터스토어 탐색·고아 VMDK 스캔·VM 전체 정보 내보내기·게스트 계정 추가
@@ -26,13 +25,13 @@ import { vcAuthStopOf, noteVcAuthFailure, authStopView } from './authStopGate.js
  * 멈춘 vCenter 에도 로그인이 나갔고, 거부는 정지 기록에 올라가지 않았다(재현: 가짜 vCenter 로 정지 기록의 시도 수 1 그대로).
  * 판정은 복제하지 않는다 — 직접 수집 대상은 collectTarget.js `directCollectSkipReason`, 인증 정지는 authStopGate.js 하나다.
  * 여기 있는 것은 그 둘을 '로그인 전에 막는 오류' 로 바꾸는 접착부뿐이다(사유 문장은 search/deepSearch.js PROBE_SKIP_TEXT 와 같은 뜻).
+ *
+ * v2.744(감사 후속 FA-④): 사유 문장 표는 authStopGate.js DIRECT_SKIP_TEXT 한 벌이다 — v2.742 가 여기에, v2.744 VC-04 가 그쪽에
+ *   같은 표를 각자 두어 한쪽만 고치면 두 경로(데이터스토어 탐색 409 · 성능 조회 409)의 문구가 갈라질 자리였다. authStopGate 는
+ *   이 파일을 import 하지 않으므로(순환 없음) 이쪽이 가져온다. 옛 이름 ON_DEMAND_SKIP_TEXT 는 같은 객체로 다시 내보낸다
+ *   (export … from 은 이 모듈 스코프에 이름을 만들지 않는다 — v2.575 규약이라 import + export 로 쓴다).
  */
-export const ON_DEMAND_SKIP_TEXT = Object.freeze({
-  disabled: '비활성 vCenter — 이 포탈이 로그인하지 않습니다',
-  maintenance: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다',
-  site: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다',
-  invalid: 'vCenter 설정 형식이 올바르지 않습니다',
-});
+export { DIRECT_SKIP_TEXT as ON_DEMAND_SKIP_TEXT };
 
 /**
  * 로그인 전에 막을 사유. 직접 수집 대상이 아니면 `{ skipReason, reason }`, 주 폴러가 인증 실패로 멈춘 vCenter 면
@@ -41,8 +40,8 @@ export const ON_DEMAND_SKIP_TEXT = Object.freeze({
  * (collectTarget.js 머리말 '수동 실행도 이 셋은 건너뛴다').
  */
 export function onDemandVcBlock(vc, { allowAuthStopped = false } = {}) {
-  const why = directCollectSkipReason(vc);
-  if (why) return { skipReason: why, reason: ON_DEMAND_SKIP_TEXT[why] || why };
+  const skip = vcSkipOf(vc);   // v2.744(감사 후속 FA-④): 직접 수집 대상 판정 + 사유 문장은 authStopGate 한 벌
+  if (skip) return skip;
   if (allowAuthStopped) return null;
   const stop = vcAuthStopOf(vc);
   return stop ? { authStopped: authStopView(stop), reason: stop.reason } : null;
