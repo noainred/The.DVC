@@ -7,6 +7,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { ResponsiveContainer, ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
+import { errorBoxInput } from '../../components/accessDeniedText.js';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData, dsUnknownNote } from './storageTrack.js';
@@ -30,6 +31,8 @@ const slotLabel = (slot) => {
  */
 export function VmTrackLoadFailed({ error, onRetry, busy = false, failedRetries = 0 }) {
   const fails = Number.isInteger(failedRetries) && failedRetries > 0 ? failedRetries : 0;
+  // v2.744(최종 검토 리드 — FE 가 남긴 별건): 403(권한·범위)은 다시 물어도 결과가 같다 — ErrorBox 가 권한 안내로 그리고 다시 조회 버튼을 두지 않는다.
+  if (errorBoxInput(error).perm) return <div><ErrorBox message={error} /></div>;
   return (
     <div>
       <ErrorBox message={error} />
@@ -99,7 +102,7 @@ export default function VmTrackTool() {
     const done = typeof onDone === 'function' ? onDone : null;
     return run(fetchJson('/tools/vm-track', { days, vcenterId }),
       (d) => { setData(d); setError(null); if (Array.isArray(d?.vcenterList)) setVcList(d.vcenterList); done?.(true); },
-      (e) => { setError(e.message); done?.(false); });
+      (e) => { setError(e); done?.(false); });   // v2.744: 객체 그대로 — 403 이면 ErrorBox 가 권한 안내로 그린다
   };
   // 같은 조건 다시 조회 — 진행 중이면 내지 않는다(retryGate). 결과가 실패면 횟수를 센다(같은 오류여도 눌렀다는 사실이 화면에 남게).
   const retry = () => retryGate.current.start(() => load((ok) => setRetryFails((n) => (ok ? 0 : n + 1))), setRetrying);
@@ -198,7 +201,7 @@ export default function VmTrackTool() {
   return (
     <div>
       {head}
-      {error &&<div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
+      {error &&<div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {errorBoxInput(error).text}</div>}
       {data.status && !data.status.available && (
         <div className="card" style={{ padding: 10, marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 12.5 }}>
           ⚠ 추적 DB를 열 수 없어 기능이 비활성입니다{data.status.error ? ` — ${data.status.error}` : ''}. {data.status.dbPath ? ` (경로: ${data.status.dbPath})` : ''}
