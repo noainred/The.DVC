@@ -194,6 +194,11 @@ test('GD-R2: fleetHoldOutcome — 보류 수락·이름 미검증·보관분 없
   const { fleetHoldOutcome } = await import('../src/agent/fleetPush.js');
   assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 4 }).code, 'held');
   assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 4 }).held, true);
+  // v2.744(최종 검토 RD-R3): 수가 없을 때 조사가 '목록를' 이 되지 않는다
+  assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true }).text, '중앙이 직전 목록을 유지합니다');
+  assert.match(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 4 }).text, /직전 목록 4대를 유지합니다/);
+  assert.match(fleetHoldOutcome({ ok: true, statusOnly: true, holdExpired: true }).text, /이 엣지 목록을 지웁니다/);
+  assert.doesNotMatch(JSON.stringify([fleetHoldOutcome({ ok: true, statusOnly: true }), fleetHoldOutcome({ ok: true, statusOnly: true, holdExpired: true })]), /목록를/);
   assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 0, unverifiedAgent: true }).code, 'unverified-agent');
   assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 0, noPrior: true }).code, 'no-prior');
   assert.equal(fleetHoldOutcome({ ok: true, statusOnly: true, kept: 2, holdExpired: true }).code, 'hold-expired');

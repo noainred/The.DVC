@@ -141,8 +141,8 @@ export function fleetHoldOutcome(reply) {
   if (!j || j.statusOnly !== true) return { held: false, code: 'unknown', kept, text: '중앙 응답에 보류 결과가 없어 직전 목록을 유지했는지 알 수 없습니다(중앙 버전·응답 본문을 확인하세요)' };
   if (j.unverifiedAgent === true) return { held: false, code: 'unverified-agent', kept: 0, text: '중앙이 이 엣지 이름을 검증하지 못해(공유 토큰 · 중앙이 모르는 이름) 직전 목록을 붙잡지 않았습니다 — 중앙은 마지막 수신부터 만료 시간(기본 30분) 뒤 이 엣지 목록을 지웁니다. 엣지별 개별 토큰을 쓰면 유지됩니다' };
   if (j.noPrior === true) return { held: false, code: 'no-prior', kept: 0, text: '중앙에 이 엣지가 보관된 베어메탈 목록이 없어 유지할 것이 없습니다(처음 보내기 전이거나 이미 만료됐습니다)' };
-  if (j.holdExpired === true) return { held: false, code: 'hold-expired', kept, text: `중앙의 직전 목록 유지 시한(기본 24시간)이 지나 만료를 더 미루지 않았습니다 — 중앙은 만료 시간(기본 30분) 뒤 이 엣지 목록${kept != null ? ` ${kept}대` : ''}를 지웁니다` };
-  return { held: true, code: 'held', kept, text: `중앙이 직전 목록${kept != null ? ` ${kept}대` : ''}를 유지합니다` };
+  if (j.holdExpired === true) return { held: false, code: 'hold-expired', kept, text: `중앙의 직전 목록 유지 시한(기본 24시간)이 지나 만료를 더 미루지 않았습니다 — 중앙은 만료 시간(기본 30분) 뒤 이 엣지 목록${kept != null ? ` ${kept}대를` : '을'} 지웁니다` }; // v2.744(최종 검토 RD-R3): 수가 없을 때 '목록를' 이 되던 조사
+  return { held: true, code: 'held', kept, text: `중앙이 직전 목록${kept != null ? ` ${kept}대를` : '을'} 유지합니다` };
 }
 
 async function reportRegistryUnreadable(regErr) {
