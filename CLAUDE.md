@@ -5332,7 +5332,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         `vp_cfg_set_line` 은 awk 한 번(LC_ALL=C · ENVIRON · 3MB 3초 → 0.1초). ⚠ `$PREFIX` 의 node 는 서비스 계정 소유라 root 로 실행하지 않는다(`$SCRIPT_DIR/runtime/node`). 남은 위험: `$BAK/server/config` 중간 디렉터리 링크.
       · 그 밖: vCenter 로그 상태 집계는 정리로 0건이 된 vCenter 를 싣지 않는다 · CSV 마지막 줄의 비활성/읽지 못함 구분(`notReadCsvLines`) · /24 제안의 관리 IP 거부는 `totals.hostMgmtRejected` 로 따로 ·
         구성 점검 배너는 `notReadJudgeNote`(비활성만이면 배너 없음) · 라이선스 표 칸 `LIC_WRAP_MINW` · GPU 게스트 합침 표지는 저장 성공 뒤(`resolveFoldOf`) · 테스트 임시 폴더는 `os.tmpdir()`.
-      · 남긴 것: FX-R3 일부(VCenterDetail · SessionSecurity · BmUsage 화면 실행 테스트) · register-scanned 로컬 분기의 손상 등록부 저장 · 설정 손상 원문을 싣는 admin 화면 3곳(svcmon /assign · 아이실론 · 전송 속도) — 판단 필요.
+      · 남긴 것: FX-R3 일부(VCenterDetail · SessionSecurity · BmUsage 화면 실행 테스트) · register-scanned 로컬 분기의 손상 등록부 저장 — 판단 필요.
+        (설정 손상 원문 3곳은 최종 검토에서 정정 — svcmon·아이실론은 이미 `settingsLoadError.corrupt()` 가 요약하고 있었고 전송 속도는 고쳤다.)
+    · ⚠⚠ **최종 검토(회귀 검토 수정분을 다시 본 것 — 기준 `44952f3`, FA~FH 8그룹 + 리드)** — 발견 22 = 확정 16 · 재현 확정·의도 가능성 1 · 가능성 3 · 반증 1 · 문서 결함 1,
+      고친 것 20(+ RD-R3 조사). 회귀 `server/test/audit2744f{a,b,c,d,f,g,h,lead}` + 웹 `tools/audit2744f{a,e}`·`vmRemoteProbeText`·`tools/vmTrack403_2744` — 그룹별 변이 검증:
+      · ⚠⚠ **로드 오류 원문은 콘솔 줄에도 싣지 않는다 — 호출부 자신의 `console.warn/error` 까지**(FC·리드 30곳): `preserveCorrupt` 의 줄만 요약하고 같은 catch 의 호출부 줄이
+        `err.message`(V8 JSON.parse 조각 — 비밀번호 앞부분)를 찍었다. `safeLoadText(err)` 로 쓰고, 소스 스윕 `audit2744fc findRawLoadLogs` 가 0 을 고정한다 — **새 로드 catch 의 콘솔 줄도 이 함수로.**
+        상주 상태(전송 속도 설정 로드 오류·실행 중 스캔 기록 load.error·중앙 `sanitizeRegistryUnreadable`)도 요약이고, 중앙은 엣지가 보낸 분류 코드를 `REGISTRY_ERROR_CODES` 로 거른다(리드 `audit2744flead`).
+      · **등록부 오류 요약은 역할로 나눈다**(FB·FC): 베어메탈 사용률 상태(`bmUsageStatus({detail})`·`sourceErrorsView`)·파트 장애 `registryUnreadable`(`maskRegistryUnreadable` — 깊이 8까지)은
+        관리자에게 위치 숫자, 그 밖에는 분류 문구 + `reasonDetailHidden`. 엣지 push 4종(SAN·CVP·PDU·스토리지)의 `_last`·콘솔도 요약 · 수집 서버 연결 테스트는 `edgeExportErrorText`(puller 와 같은 문구 상수).
+      · **원격 접속 범위는 원장 관리 IP 도 인정한다**(FD — server/CLAUDE.md v2.320 항목). IP 대장이 보여 주는 호스트 관리 IP 로 범위 계정이 403 을 받던 것(v2.744 GG-R2 가 행 IP 를 원격 접속 대상으로 쓰기 시작해 드러났다).
+        VM 원격 접속 버튼의 사전 점검 403·404 는 '도달 불가 · 방화벽 확인' 이 아니라 '범위 밖 대상(계정 권한)'(`components/vmRemoteProbeText.js` — 회색, 서버 사유 그대로).
+      · **FC 명목 초과 노트는 대표값을 실제로 정한 경로로 말한다**(FA — `detail.hbaRepSrc`, 노트는 iDRAC 채움 **뒤에**, 웹 `fcNominalRestKind` 로 문구 선택, 각주 `hbaBasis.rep`·`osFallback`).
+      · **VM 추이 정리의 묶음 기준은 후보가 나온 묶음만**(FF — `makeGroupResolver`·`keepChangesOne`·`keepDsOne` · 청크마다 40ms 예산 · `keepPages` → `keepLookups`). 남길 행 표를 정리마다 한 번 만드는
+        v2.744 RA 방식은 경계 이전 행이 0개여도 묶음 인덱스 전체를 한 동기 구간으로 읽었다(100만 행 145~254ms → 2ms). **'표를 한 번 만든다' 는 수정도 그 표를 만드는 훑기의 크기를 볼 것.**
+      · 판정 목록 CSV 의 '읽지 못한 vCenter' 줄은 `notReadCsvLines(…, {mode:'judge', noun})`(FG — 합계가 없는 목록에 '합계는 하한' 금지, 명사는 화면과 대조) ·
+        라이선스 표 칸 하한은 칸 폭 880px 미만일 때만(FE — 컨테이너 단위 `clamp`, 1280·1024px 에서 상태 열이 잘리던 것) · VM 추이 '다시 조회' 는 `createRetryGate`(진행 표시·실패 횟수) ·
+        VM 추이 403 은 권한 안내만(`errorBoxInput(error).perm` — 오류 객체를 그대로 넘긴다).
+      · 남긴 것: RV-4(명목 기준 포트가 100% 를 조금 넘으면 대표값·알림에서 빠진다 — v2.743 과 같은 설계, 판단 필요) · RD-R3(제품에서 나오지 않는 입력 — 조사만 고침) ·
+        엣지 export 오류 요약 두 벌(문구 상수는 하나) · 큰 vmtrack 정리의 COMMIT 정지(WAL 체크포인트로 추정 · 미확인) · 880px 기준은 목 데이터로만 정했다.
     · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).
       커밋 33be198 은 그때 아직 하지 않은 수정을 '✅ v2.744' 로 적었다 — 이번 수정이 끝난 뒤 문구를 실제 범위로 맞췄다(EDGE-03 은 '자동 등록만').
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".

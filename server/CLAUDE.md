@@ -65,6 +65,10 @@
     생성 가능(`remote.js targetHostScopeIssue`, 순수 — `test/nsxRemoteScope.test.js` 고정).
     인벤토리에 없는 임의 IP 는 범위 계정에 403(내부망 정찰·범위 밖 피벗 준비 차단). 전체 범위
     계정은 기존 신뢰 모델 유지(임의 대상 허용). 이 검사를 형식 검증(SAFE_HOST)만으로 되돌리지 말 것.
+    ⚠ v2.744(최종 검토 FD — RF-R1): '인벤토리에 실재하는 대상' 에는 **허용 vCenter 호스트의 원장 관리 IP**(`ipam/ledger.js hostLedgerIp` — FQDN 으로 등록된 ESXi 의
+    관리 IP)도 들어간다(`proxy/targetHostScope.js`). IP 대장 호스트 행이 그 IP 를 보여 주고 원격 접속 대상으로 쓰므로, 빠지면 범위 계정이 자기 호스트에 403 을 받는다.
+    그 주소가 **범위 밖 객체(VM IP·호스트 이름·관리 IP)와도 겹치면 거부**하고, 비정규 IPv4 표기(`010.0.0.5`)는 거부한다(inet_aton 이 다르게 읽는다 — v2.589).
+    회귀 `test/audit2744fd.test.js`.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
