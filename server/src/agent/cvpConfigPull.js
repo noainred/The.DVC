@@ -15,7 +15,8 @@ import { classifyCentral404 } from './central404.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { applyPulledServers, serversForThisNode } from '../cvp/registry.js';
+import { applyPulledServers, serversForThisNode, registryLoadError } from '../cvp/registry.js';
+import { pullRecoveryNote } from '../util/registryCore.js'; // v2.744(감사 EDGE-03)
 import { applyCentralSettings } from '../cvp/settings.js';
 import { dropStatus } from '../cvp/store.js';
 import { pruneDevices, LOCAL_AGENT } from '../cvp/db.js';
@@ -27,6 +28,7 @@ const _log = createChangeLogger({ windowMs: 10 * 60_000 });
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+let _registryRecovered = null; // v2.744(감사 EDGE-03): 손상 등록부를 중앙 배포분으로 다시 쓴 마지막 기록
 let running = false;
 
 export async function pullCvpConfigNow() {
@@ -52,7 +54,13 @@ async function _pull() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(servers)).digest('hex');
     let applied = false; let removed = [];
     if (sig !== _lastSig) {
+      // v2.744(감사 EDGE-03): 손상 등록부를 배포분으로 다시 쓰는 것은 막지 않고(복구) 그 사실을 남긴다 — pullRecoveryNote 머리말.
+      const regErr = registryLoadError();
       const r = applyPulledServers(servers);
+      if (regErr) {
+        _registryRecovered = pullRecoveryNote(regErr, { what: 'CVP 등록부(cvp-servers.json)', restored: r.count });
+        console.warn(`[cvp-config] ${_registryRecovered.note}`);
+      }
       removed = r.removed;
       for (const id of removed) dropStatus(id);
       if (removed.length) {
@@ -88,4 +96,4 @@ export function startCvpConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   _timer = startAdaptiveTimer(configPullMs, () => pullCvpConfigNow(), { firstDelayMs: 25_000, name: 'CVP 설정 pull' });
 }
-export function cvpConfigPullStatus() { return { ...(_last || {}), intervalMs: configPullMs() }; }
+export function cvpConfigPullStatus() { return { ...(_last || {}), ...(_registryRecovered ? { registryRecovered: _registryRecovered } : {}), intervalMs: configPullMs() }; }

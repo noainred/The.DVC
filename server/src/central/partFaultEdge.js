@@ -23,7 +23,7 @@
  *   `version`(엣지 포탈 버전)을 보관해 화면이 '구버전 / 무보고 / 오래됨' 을 **각각** 말하게 한다.
  */
 import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../partfault/types.js';
-import { devKeyOf } from '../partfault/scan.js';
+import { devKeyOf, REGISTRY_SCOPES } from '../partfault/scan.js';
 import { admitAgent } from './edgeRecord.js';
 import { capStr } from '../util/capStr.js';
 
@@ -178,8 +178,25 @@ export async function putEdgeReport(agent, body = {}) {
     version: s(body.version, 32), protocol,
     devices, rejected, omitted: Number(body.omitted) || 0, partsOmitted, scannedDropped,
     scanned,
+    // v2.744(감사 EDGE-01): 엣지가 장비군 등록부를 읽지 못했다는 표지 — 아는 장비군(scope)만, 사유 글자 200자(아는 필드만).
+    registryUnreadable: sanitizeRegistryUnreadable(body.registryUnreadable),
   });
   return { ok: true, protocol, devices: devices.length, rejected, open: openN, partsOmitted };
+}
+
+/**
+ * v2.744(감사 EDGE-01): 엣지 보고의 '등록부를 읽지 못한 장비군' 표지를 좁힌다(순수). 아는 장비군만 · 객체만 · 사유 200자 · 시각은 수일 때만.
+ * @returns {null|Record<string, {at:(number|null), reason:string}>}
+ */
+export function sanitizeRegistryUnreadable(v) {
+  if (!isObj(v)) return null;
+  const out = {};
+  for (const sc of REGISTRY_SCOPES) {
+    if (!Object.hasOwn(v, sc) || !isObj(v[sc])) continue;
+    const at = Number(v[sc].at);
+    out[sc] = { at: Number.isFinite(at) && at > 0 ? Math.round(at) : null, reason: s(typeof v[sc].reason === 'string' ? v[sc].reason : '', 200) || '사유 미상' };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export function edgeReports() { return [..._map.entries()].map(([agent, r]) => ({ agent, ...r })); }
@@ -200,11 +217,14 @@ export function mergeEdgeReports({ staleMs = 3 * 3_600_000, now = Date.now() } =
   const deviceOk = {};
   const kindFailed = {};
   const deviceReason = {};
+  const scopeUnreadable = {};   // v2.744(EDGE-01): 'agent|scope' → 사유 — 그 엣지가 그 장비군 등록부를 읽지 못했다(신선한 보고만)
   const agents = [];
   for (const r of edgeReports()) {
     const age = now - (Number(r.at) || 0);
     const stale = age > staleMs;
     const legacy = r.protocol !== PUSH_PROTOCOL;
+    // ⚠ 오래된 보고의 표지는 쓰지 않는다 — 지금도 그런지 모른다(오래된 보고의 장비는 위 규칙대로 edge-stale·장비 실패로 보류된다).
+    if (!stale && r.registryUnreadable) for (const [sc, e] of Object.entries(r.registryUnreadable)) scopeUnreadable[`${r.agent}|${sc}`] = e?.reason || '사유 미상';
     let open = 0;
     for (const d of r.devices || []) {
       const k = devKeyOf(r.agent, d.deviceId);
@@ -228,7 +248,8 @@ export function mergeEdgeReports({ staleMs = 3 * 3_600_000, now = Date.now() } =
       agent: r.agent, at: r.at, reportedAt: r.reportedAt, ageMs: age, stale, legacy, version: r.version, protocol: r.protocol,
       devices: (r.devices || []).length, devicesFailed: (r.devices || []).filter((d) => !d.ok).length,
       open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped, scanned: r.scanned,
+      ...(r.registryUnreadable ? { registryUnreadable: r.registryUnreadable } : {}),   // v2.744(EDGE-01)
     });
   }
-  return { observed, deviceOk, kindFailed, deviceReason, agents };
+  return { observed, deviceOk, kindFailed, deviceReason, scopeUnreadable, agents };
 }

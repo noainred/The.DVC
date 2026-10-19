@@ -28,6 +28,14 @@
 
 import { PART_STATE, HOLD_REASON, isBad } from './types.js';
 
+/**
+ * v2.744(감사 EDGE-01): 보류 사유 '수집 서버가 그 장비군 등록부를 읽지 못함'. 등록부가 손상되면 그 장비군 장비가 보고에서
+ *   통째로 빠진다 — 예전에는 그것을 '재배정·등록 삭제(unassigned)' 로 보류해 화면이 '닫기로 정리' 를 안내했다(실제 장애를 사람이 닫을
+ *   위험). 문구는 웹 partFaultText.holdText 가 소유한다(코드 ↔ 문구 1:1).
+ *   ⚠ 공용 계약표 partfault/types.js HOLD_REASON 에 같은 값으로 옮길 자리다(리드 — 이 그룹 파일 범위 밖). 값은 글자 그대로 같아야 한다.
+ */
+export const HOLD_REGISTRY_UNREADABLE = HOLD_REASON.registryUnreadable || 'registry-unreadable';
+
 const t = (v) => String(v ?? '').trim();
 const okey = (p) => `${t(p.agent)}|${t(p.partKey)}`;
 const dkey = (p) => `${t(p.agent)}|${t(p.deviceId)}`;
@@ -48,6 +56,9 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   const reported = scan.agentsReported instanceof Set ? scan.agentsReported : null;
   // deviceOk=false 의 이유(mergeEdgeReports.deviceReason) — 엣지 보고 오래됨/구버전은 '장비 실패' 와 조치가 다르다(H7).
   const deviceReason = scan.deviceReason || {};
+  // v2.744(EDGE-01): 'agent|scope' → 사유 — 그 agent 가 그 장비군 등록부를 읽지 못했다(중앙 로컬은 agent '').
+  const scopeUnreadable = scan.scopeUnreadable && typeof scan.scopeUnreadable === 'object' ? scan.scopeUnreadable : {};
+  const scopeHeld = (o) => Object.hasOwn(scopeUnreadable, `${t(o.agent)}|${t(o.scope)}`);
   const REFINE = { 'edge-stale': HOLD_REASON.edgeStale, 'edge-legacy': HOLD_REASON.edgeLegacy };
   const failedHold = (dk) => REFINE[deviceReason[dk]] || HOLD_REASON.deviceFailed;
   const openBy = new Map();
@@ -162,6 +173,8 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     else if (dOk === true) holdReason = kf ? HOLD_REASON.collectionFailed : HOLD_REASON.missing;
     // 장비가 이번 판정 대상에 아예 없다(C5): 그 agent 가 보고는 했는데 이 장비가 빠졌으면 재배정·등록 삭제
     // (unassigned), 보고 자체가 없으면 no-report. 구 호출부(agentsReported 없음)는 예전대로 장비 실패.
+    // v2.744(EDGE-01): 그 agent 가 그 장비군 등록부를 읽지 못해 장비를 못 냈으면 unassigned(재배정·삭제)가 아니다.
+    else if (scopeHeld(o)) holdReason = HOLD_REGISTRY_UNREADABLE;
     else if (reported) holdReason = reported.has(String(o.agent || '')) ? HOLD_REASON.unassigned : HOLD_REASON.noReport;
     else holdReason = HOLD_REASON.deviceFailed;
     held.push({ ...o, holdReason, lastHeldAt: now });
@@ -181,6 +194,7 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
       heldCollectionFailed: held.filter((h) => h.holdReason === HOLD_REASON.collectionFailed).length,
       heldUnassigned: held.filter((h) => h.holdReason === HOLD_REASON.unassigned).length,
       heldNoReport: held.filter((h) => h.holdReason === HOLD_REASON.noReport).length,
+      heldRegistryUnreadable: held.filter((h) => h.holdReason === HOLD_REGISTRY_UNREADABLE).length,   // v2.744(EDGE-01)
       heldEdge: held.filter((h) => h.holdReason === HOLD_REASON.edgeStale || h.holdReason === HOLD_REASON.edgeLegacy).length,
       duplicateObserved,   // 같은 키의 중복 관측 수 — 0 이 아니면 등록부에 같은 장비가 두 id 로 있을 가능성(C1)
     },

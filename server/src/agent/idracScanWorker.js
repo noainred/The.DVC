@@ -41,16 +41,24 @@ function headers() {
  *   대신 보내지 못한 회신을 **미전송 목록**에 두고 다음 폴 주기(기본 5초)부터 간격을 두 배씩 늘려(상한 5분, Retry-After 가 더 길면 그것)
  *   다시 보낸다 — 이 회신은 1회성이라(주기 재전송이 따로 없다) 버리면 중앙 잡이 '진행 중' 으로 남다가 만료된다. 중앙은 늦은 결과·같은 결과의
  *   재전송을 받는다(v2.621 EDGE-07 멱등). 재시도 대상은 일시 상태(408·425·429·500·502·503·504)와 연결 오류뿐이고, 410(중앙에 잡이 없음)·
- *   그 밖의 4xx(토큰·버전)는 다시 보내도 같은 결과라 버린다. 최대 6번·30분이 지나면 버리고 콘솔·상태에 남긴다(조용한 소실 금지).
+ *   그 밖의 4xx(토큰·버전)는 다시 보내도 같은 결과라 버린다. 처음 보낸 뒤 30분이 지나면 버리고 콘솔·상태에 남긴다(조용한 소실 금지).
+ * v2.744(감사 TIMING-01 — 재현): 예전에는 '최대 6번' 이 30분보다 먼저 걸렸다 — 백오프가 5·10·20·40·80초라 처음 보낸 뒤 **약 2.6분**
+ *   (+5·+15·+35·+75·+155초)에 버렸다. 중앙은 마지막 활동 뒤 약 20분(잡 만료 10분 + 완료 보존 10분) 동안 늦은 결과를 받으므로
+ *   3~15분 회선 단절·지속형 503 이면 받을 수 있는 결과를 엣지가 먼저 버렸다. 이제 버리는 기준은 **나이**(UNSENT_MAX_AGE_MS)다 —
+ *   폴 주기 5초·백오프 상한 5분이면 +5·+15·+35·+75·+155·+315·+615·+915·+1215·+1515초에 다시 보내고 마지막 시도는 정확히
+ *   +1800초(나이 상한에 맞춰 당긴다)다 — 처음 포함 약 12번. 시도 횟수 상한(UNSENT_MAX_ATTEMPTS)은 나이보다 먼저 걸리지 않게
+ *   폭주 방지용으로만 둔다(폴 주기 하한 1초에서도 30분 안 시도는 15번 안팎이다). 미전송 보관 상한 8건은 그대로다.
  */
 const RESULT_RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const UNSENT_MAX = 8;                 // 미전송 회신 보관 상한(넘치면 가장 오래된 것부터 버리고 밝힌다)
-const UNSENT_MAX_ATTEMPTS = 6;        // 처음 보낸 것을 포함한 시도 횟수
-const UNSENT_MAX_AGE_MS = 30 * 60_000;
+const UNSENT_MAX_ATTEMPTS = 40;       // v2.744(TIMING-01): 폭주 방지용 안전 상한 — 실제로 버리는 기준은 나이다(위 주석)
+const UNSENT_MAX_AGE_MS = 30 * 60_000;   // 중앙이 늦은 결과를 받는 창(만료 10분 + 보존 10분)보다 짧지 않게
 const UNSENT_BACKOFF_MAX_MS = 5 * 60_000;
 let _unsent = [];                     // [{ payload, attempts, firstAt, nextAt, lastError }]
 let _unsentDropped = null;            // 마지막으로 버린 회신 { at, reqId, attempts, reason }
 const backoffMs = (attempts) => Math.min(UNSENT_BACKOFF_MAX_MS, POLL_MS * 2 ** Math.max(0, attempts - 1));
+/** v2.744(TIMING-01): 테스트가 창을 계산할 수 있게 상수를 내보낸다. */
+export const UNSENT_RETRY_WINDOW = Object.freeze({ maxAgeMs: UNSENT_MAX_AGE_MS, backoffMaxMs: UNSENT_BACKOFF_MAX_MS, maxAttempts: UNSENT_MAX_ATTEMPTS, keep: UNSENT_MAX, pollMs: POLL_MS });
 
 /** 한 번 보낸다(재시도 없음). { ok } · { retry, status?, retryAfter?, error } · { drop, error } */
 async function postResultOnce(payload) {
@@ -75,9 +83,12 @@ async function postResultOnce(payload) {
 }
 
 function deferResult(payload, res, attempts, firstAt, now = Date.now()) {
-  const wait = Math.max(backoffMs(attempts), res.status ? retryDelayMs(res.status, res.retryAfter, 0) : 0);
+  const want = Math.max(backoffMs(attempts), res.status ? retryDelayMs(res.status, res.retryAfter, 0) : 0);
+  // v2.744(TIMING-01): 다음 시도가 나이 상한을 넘기면 상한 시각으로 당긴다 — 마지막 시도를 30분 창의 끝에 한 번 더 한다(그 뒤에 버린다).
+  const nextAt = Math.max(now + 1, Math.min(now + want, firstAt + UNSENT_MAX_AGE_MS));
+  const wait = nextAt - now;
   _unsent = _unsent.filter((x) => x.payload?.reqId !== payload.reqId); // 같은 잡의 회신은 하나만(나중 것이 이긴다)
-  _unsent.push({ payload, attempts, firstAt, nextAt: now + wait, lastError: res.error || null });
+  _unsent.push({ payload, attempts, firstAt, nextAt, lastError: res.error || null });
   while (_unsent.length > UNSENT_MAX) {
     const old = _unsent.shift();
     _unsentDropped = { at: now, reqId: old.payload?.reqId || null, attempts: old.attempts, reason: `미전송 회신 보관 상한(${UNSENT_MAX}건) 초과` };
@@ -110,8 +121,8 @@ export async function flushUnsentResults(now = Date.now()) {
     const attempts = item.attempts + 1;
     if (res.drop || attempts >= UNSENT_MAX_ATTEMPTS || now - item.firstAt >= UNSENT_MAX_AGE_MS) {
       dropped++;
-      _unsentDropped = { at: Date.now(), reqId: item.payload?.reqId || null, attempts, reason: res.error || '실패' };
-      if (!res.drop) console.error(`[idrac-scan-agent] 결과 회신을 ${attempts}번 보냈지만 받지 않아 버렸습니다(reqId=${_unsentDropped.reqId}, 마지막 ${res.error}) — 중앙 잡은 만료로 끝납니다. 현지 등록은 그대로입니다.`);
+      _unsentDropped = { at: Date.now(), reqId: item.payload?.reqId || null, attempts, ageMs: Math.max(0, now - item.firstAt), reason: res.error || '실패' };
+      if (!res.drop) console.error(`[idrac-scan-agent] 결과 회신을 ${Math.round(Math.max(0, now - item.firstAt) / 60_000)}분 동안 ${attempts}번 보냈지만 받지 않아 버렸습니다(reqId=${_unsentDropped.reqId}, 마지막 ${res.error}) — 중앙 잡은 만료로 끝납니다. 현지 등록은 그대로입니다.`);
       continue;
     }
     deferResult(item.payload, res, attempts, item.firstAt, now);
@@ -191,12 +202,14 @@ async function runIdracScanWorkerInner() {
         // '등록' 잡: UI가 스캔에서 확인한 found 목록을 현지 레지스트리에 등록.
         if (job.action === 'register') {
           // v2.742(감사 DEV-01): 등록 잡에는 대역이 없다 — 엔트리 id 가 오면 표지만 싣고, 교체 범위는 그 표지로만 정한다(대역 미상이면 표지 없는 항목은 지우지 않는다).
-          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null, scanRangeId: String(job.rangeId || '') });
+          // v2.744(감사 EDGE-03): 자동 경로(auto) — 이 엣지의 iDRAC 등록부를 읽지 못했으면 저장하지 않고 사유를 회신한다(registry.js 주석).
+          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null, scanRangeId: String(job.rangeId || ''), auto: true });
           const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
           if (rr.ok) pollNow().catch(() => {});
+          if (rr.code === 'registry-unreadable') console.warn(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 ${job.reqId} — ${rr.reason}`);
           // v2.621(감사 EDGE-01): 등록 잡도 회신 실패(410 = 중앙에 잡 없음 등)를 상태에 싣는다 — 스캔 잡(v2.593 EDGE-4)과 같은 규칙.
           const regPostErr = await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
-          last = { at: Date.now(), reqId: job.reqId, registered, ...(regPostErr ? { postError: regPostErr } : {}) };
+          last = { at: Date.now(), reqId: job.reqId, registered, ...(rr.code === 'registry-unreadable' ? { registerError: rr.reason, registryUnreadable: rr.registryUnreadable } : {}), ...(regPostErr ? { postError: regPostErr } : {}) };
           console.log(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 — ${registered}대 현지 등록`);
           continue;
         }
@@ -225,8 +238,8 @@ async function runIdracScanWorkerInner() {
         } finally { releaseScan(); }
         // v2.593(감사 EDGE-4): 회신 실패를 콘솔뿐 아니라 상태에도 싣는다 — 엣지 로그 화면이 '성공 모양' 으로 보이지 않게.
         const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
-        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered, ...(postErr ? { postError: postErr } : {}) };
-        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${scan.registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);
+        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered, ...(scan.registerError ? { registerError: scan.registerError } : {}), ...(postErr ? { postError: postErr } : {}) };
+        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${scan.registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}${scan.registerError ? ` — ${scan.registerError}` : ''}`);
       } catch (e) {
         const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, error: e.message });
         last = { at: Date.now(), reqId: job.reqId, error: e.message, ...(postErr ? { postError: postErr } : {}) };

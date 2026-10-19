@@ -452,6 +452,8 @@ export function sanitizeIdracScanData(raw) {
   const d = raw && typeof raw === 'object' ? raw : {};
   const o = {
     error: scanStr(d.error, 500), authFailReason: scanStr(d.authFailReason, 500),
+    // v2.744(감사 EDGE-03): 엣지가 등록부를 읽지 못해 발견분을 현지 등록하지 않은 사유 — 없으면 '현지 등록 0대' 가 이유 없이 보였다.
+    registerError: scanStr(d.registerError, 500),
     found: scanObjs(d.found, FOUND_KEYS, 5000), unsupported: scanObjs(d.unsupported, UNSUP_KEYS, 200),
     authFailedIps: scanIps(d.authFailedIps, 200), blockedIps: scanIps(d.blockedIps, 50),
     authFailedIpsTruncated: d.authFailedIpsTruncated === true, unsupportedTruncated: d.unsupportedTruncated === true,
@@ -518,6 +520,7 @@ export function applyIdracScanResult(reqId, rawData = {}) {
     addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${af}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
     // 인증실패가 있으면 원인을 별도 경고 이벤트로 남긴다('계정 맞는데 401'의 실제 이유).
     if (af > 0 && data.authFailReason) addEvent(j, `인증실패 원인: ${data.authFailReason}`, 'warn');
+    if (data.registerError) addEvent(j, `현지 등록 안 함: ${data.registerError}`, 'warn'); // v2.744(EDGE-03)
     // v2.591(감사 F3): 주기 스캔이 인증 실패 정지로 건너뛴 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.
     if (Number(data.authSkipped) > 0) addEvent(j, `인증 실패 정지로 이번 주기에 시도하지 않은 IP ${Number(data.authSkipped)}개${Number(data.authSkippedRegistered) > 0 ? `(그중 ${Number(data.authSkippedRegistered)}개는 등록 서버의 전력 수집이 같은 계정으로 이미 정지)` : ''} — 계정을 고치면 자동 재개되고, '지금 스캔'(수동)은 전부 시도합니다.`, 'warn');
     // v2.537: 차단 대역(루프백·링크로컬)이라 찌르지 않은 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.

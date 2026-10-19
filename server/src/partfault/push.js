@@ -63,6 +63,10 @@ export function buildPayload(scan, { agent = config.agent.name, version = curren
     devices: devs,
     omitted: Math.max(0, (scan.devices || []).length - devs.length),   // ⚠ 상한으로 뺀 장비 수를 밝힌다
     scanned: scan.scanned,
+    // v2.744(감사 EDGE-01): 장비군 등록부를 읽지 못했다는 표지(scope → {at, reason}). 그 장비군 장비가 devices 에서 빠진 이유다 —
+    //   없으면 중앙이 빠진 장비의 열린 장애를 '재배정·등록 삭제(unassigned)' 로 보류하고 화면이 '닫기로 정리' 를 안내했다.
+    //   이 표지를 모르는 구버전 중앙은 무시한다(예전 동작 그대로 — 닫지는 않는다).
+    ...(scan.registryUnreadable ? { registryUnreadable: scan.registryUnreadable } : {}),
   };
 }
 
@@ -133,10 +137,13 @@ async function pushOnce(reason) {
       devices: payload.devices.length, open: openN, omitted: payload.omitted,
       bytes: json.length, gzipBytes: hdrs['Content-Encoding'] === 'gzip' ? body.length : null,
       scanned: scan.scanned,
+      ...(payload.registryUnreadable ? { registryUnreadable: payload.registryUnreadable } : {}),   // v2.744(EDGE-01)
     };
     // ⚠ 성공도 로그를 남긴다 — 기동·실패 로그를 둘 다 두지 않아 "무로그 = 성공·실패 구분 불가" 가 된
     //   `storageConfigPull` 이 이번 조사의 확정 결함이다. 같은 실수 금지.
     console.log(`[partfault-push] ${reason} — 장비 ${payload.devices.length}대(실패 ${scan.scanned.devicesFailed}) · 열린 장애 ${openN}건 · ${Math.round(json.length / 1024)}KB${_last.gzipBytes ? `→gzip ${Math.round(_last.gzipBytes / 1024)}KB` : ''}${payload.omitted ? ` · 상한으로 ${payload.omitted}대 제외` : ''}`);
+    // v2.744(감사 EDGE-01): 등록부를 읽지 못한 장비군은 장비 0대로 보고됐다 — 그 사실을 따로 한 줄(무음 금지). 중앙은 그 장비군의 열린 장애를 보류한다.
+    if (payload.registryUnreadable) console.warn(`[partfault-push] 장비 등록부를 읽지 못한 장비군 ${Object.keys(payload.registryUnreadable).join('·')} — 그 장비군 장비는 이번 보고에 없습니다(중앙은 열린 장애를 닫지 않고 '등록부 손상' 으로 보류합니다). ${Object.entries(payload.registryUnreadable).map(([k, v]) => `${k}: ${v.reason}`).join(' · ')}`);
     // v2.607(감사 EDGE2607-02): 소유권 불일치로 버린 장비(rejected)는 그 장비의 장애가 중앙에서 열리지도 닫히지도 않는다 —
     //   예전에는 _last 에만 있고 콘솔 줄은 성공만 말했다. 같은 사유는 10분에 한 줄(centralReply.warnDrop).
     warnDrop('partfault-push', dropSummaryOf({ rejected: _last.rejected, omitted: _last.partsOmitted || 0 }));

@@ -58,6 +58,46 @@ export function makeLoadError() {
 }
 
 /**
+ * v2.744(감사 EDGE-03): 등록부를 **읽지 못한 상태**에서 사람이 아닌 경로(위임 스캔 등록·주기 스캔 등록)가 저장하려 할 때의 거절(순수).
+ *   그 저장이 성공하면 '읽지 못함' 표지가 지워지고(`loadErr.clear()`) 보존본(`.corrupt.<시각>`)에만 남은 등록이 조용히 사라진다 —
+ *   v2.743 엣지 export 503 보호도 다음 자동 저장에서 풀려 중앙이 그 엣지의 다른 서버를 지웠다(재현). 표지를 지우는 것은
+ *   관리자 저장(화면)뿐이다(`seedDevicesIfEmpty` 가 이미 같은 판단을 한다 — 손상이면 자동으로 쓰지 않는다).
+ * @param {null|{at:number, reason:string}} err  그 등록부의 `registryLoadError()` 값
+ * @param {string} what  사람에게 보일 등록부 이름(예: 'iDRAC 등록부(idrac.json)')
+ * @returns {null|{ok:false, code:'registry-unreadable', reason:string, registryUnreadable:{at:(number|null), reason:string}}}
+ *   읽을 수 있으면 null. `reason` 은 기존 호출부가 그대로 화면·회신에 싣는 사람 말이고 판정은 `code` 로 한다.
+ */
+export function autoWriteRefusal(err, what = '등록부') {
+  if (!err) return null;
+  const why = String(err.reason ?? '').slice(0, 200) || '사유 미상';
+  return {
+    ok: false, code: 'registry-unreadable',
+    reason: `${what} 읽기 실패(${why}) — 자동으로 저장하지 않았습니다. 손상 보존본(.corrupt.*)을 되돌리거나 등록 화면에서 저장하면 다시 등록합니다`,
+    registryUnreadable: { at: Number.isFinite(err.at) ? err.at : null, reason: why },
+  };
+}
+
+/**
+ * v2.744(감사 EDGE-03): 엣지 설정 pull 이 **읽지 못한 등록부**를 중앙 배포분으로 다시 쓸 때 남기는 기록(순수).
+ *   스토리지·SAN 스위치·PDU·CVP 의 pull 적용은 막지 않는다 — 그 엣지가 수집하는 장비는 전부 중앙 배포분이고
+ *   (devicesForThisNode 가 agent 가 자기 이름인 항목만 고른다) 중앙이 진실의 원천이라, 막으면 손상된 동안 위임 수집이 통째로 멈춘다
+ *   (push 도 v2.621 부터 손상이면 보내지 않는다). 대신 '읽지 못해 배포분으로 다시 썼다' 와 '배포분이 아닌 로컬 항목은
+ *   손상 보존본에만 남는다' 를 상태·콘솔이 말한다 — 조용히 표지만 지우지 않는다.
+ * @param {null|{at:number, reason:string}} err  적용 **직전**의 `registryLoadError()` 값
+ * @param {{what?:string, restored?:number}} [o]
+ * @returns {null|{at:number, lostAt:(number|null), reason:string, restored:(number|null), note:string}}
+ */
+export function pullRecoveryNote(err, { what = '등록부', restored = null } = {}) {
+  if (!err) return null;
+  const why = String(err.reason ?? '').slice(0, 200) || '사유 미상';
+  const n = Number.isFinite(restored) ? restored : null;
+  return {
+    at: Date.now(), lostAt: Number.isFinite(err.at) ? err.at : null, reason: why, restored: n,
+    note: `${what} 읽기 실패(${why}) — 중앙 배포분${n == null ? '' : ` ${n}건`}으로 다시 썼습니다. 배포분이 아닌 로컬 항목은 손상 보존본(.corrupt.*)에만 남습니다`,
+  };
+}
+
+/**
  * 등록부 목록의 원소 형태 필터 — 객체만 남긴다(null·문자열·배열 원소는 손편집·손상 파일에서 온다). 배열이 아니면 빈 배열.
  *   ⚠ 파일 **전체**를 손상으로 보존하지 않는다 — 원소 하나 때문에 정상 장비까지 비우면 그것이 곧 소실이다(bmstor 재현).
  * @returns {{ list: object[], dropped: number }}

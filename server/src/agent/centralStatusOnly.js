@@ -21,6 +21,11 @@ import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6
 export const STATUS_ONLY_MIN_CENTRAL = '2.581.0';
 /** `/sanswitch-data`·`/pdu-data` 가 statusOnly 를 아는 첫 중앙 버전(v2.613 EDGE2613-04). */
 export const DEVICE_STATUS_ONLY_MIN_CENTRAL = '2.613.0';
+/**
+ * `/fleet`(엣지 베어메탈) 이 statusOnly 를 아는 첫 중앙 버전(v2.744 EDGE-01). 그 전 중앙은 `baremetal` 이 없는 본문을 **빈 목록으로**
+ *   받아 그 엣지의 베어메탈을 지운다(central/fleet.js setEdgeFleet 교체) — 이 버전 미만·미상이면 보내지 않는다.
+ */
+export const FLEET_STATUS_ONLY_MIN_CENTRAL = '2.744.0';
 const CAP_TTL_MS = 60 * 60_000;
 const CAP_FAIL_TTL_MS = 5 * 60_000;
 const _caps = new Map(); // minVersion → { at, ok, reason, version, text }

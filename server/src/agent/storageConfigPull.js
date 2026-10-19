@@ -10,7 +10,8 @@ import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { classifyCentral404 } from '../util/central404.js'; // v2.613 DEPS2613-06·EDGE2613-06: 404 사유(central 꺼짐/거절/엔드포인트 없음) 판정
 import { resilientFetch } from '../util/resilientFetch.js';
-import { applyPulledDevices, getDeviceWithSecret } from '../storage/registry.js';
+import { applyPulledDevices, getDeviceWithSecret, registryLoadError } from '../storage/registry.js';
+import { pullRecoveryNote } from '../util/registryCore.js'; // v2.744(감사 EDGE-03)
 import { dropSnapshot } from '../storage/store.js';
 import { collectDeviceNow } from '../storage/poller.js';
 import { flushSnapshotsNow } from '../storage/store.js'; // v2.733(C4-03): 재수집 묶음 끝에 한 번 쓴다
@@ -24,6 +25,7 @@ const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+let _registryRecovered = null; // v2.744(감사 EDGE-03): 손상 등록부를 중앙 배포분으로 다시 쓴 마지막 기록
 // v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 /*
@@ -143,7 +145,13 @@ async function _pullStorageConfigNow() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
     if (sig !== _lastSig) {
+      // v2.744(감사 EDGE-03): 손상 등록부를 배포분으로 다시 쓰는 것은 막지 않고(복구) 그 사실을 남긴다 — pullRecoveryNote 머리말.
+      const regErr = registryLoadError();
       const ap = applyPulledDevices(devices);
+      if (regErr) {
+        _registryRecovered = pullRecoveryNote(regErr, { what: '스토리지 등록부(storage-devices.json)', restored: devices.length });
+        console.warn(`[storage-config] ${_registryRecovered.note}`);
+      }
       for (const id of ap?.removed || []) dropSnapshot(id);   // v2.596(EF-3): 빠진 장비의 스냅샷은 push 에서 빠져야 한다
       if (ap?.removed?.length) console.log(`[storage-config] 이 엣지에서 빠진 장비 ${ap.removed.length}대의 로컬 스냅샷을 지웠습니다`);
       _lastSig = sig;
@@ -178,6 +186,7 @@ export function startStorageConfigPull() {
 export function storageConfigPullStatus() {
   return {
     ...(_last || {}),
+    ...(_registryRecovered ? { registryRecovered: _registryRecovered } : {}), // v2.744(감사 EDGE-03)
     // v2.741(LEFT-02): '지금 수집' 작업 — 진행 중 여부·대기·지금 장비 · 마지막으로 끝난 작업 요약(무음 금지). 엣지 로그 표(pull.storage)가
     //   이 값을 그대로 보여 준다. pushError 는 마지막으로 끝난 작업의 push 실패(예전 _last.pushError 자리 — 데이터 흐름 지도가 읽는다).
     collectJob: { running: _collectRunning, queued: _collectQueue.length, current: _collectCurrent },

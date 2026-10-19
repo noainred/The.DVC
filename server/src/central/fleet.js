@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
@@ -165,6 +165,39 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };
 }
 
+/**
+ * v2.744(감사 EDGE-01): 엣지가 **iDRAC 등록부를 읽지 못해** 목록 대신 상태 전용 보고를 보냈을 때 — 직전 목록을 지우지 않고
+ *   만료 시각(at)만 미룬다. 예전 엣지는 손상 등록부 위에서 빈 목록을 보내 이 캐시를 0대로 교체했다(agent/fleetPush.js 주석).
+ *   · 직전 목록이 없으면 아무것도 만들지 않는다(지어낸 '0대' 행 금지) — `noPrior`.
+ *   · 보류에는 시한이 있다(v2.601 규약): 처음 보류한 때부터 UNREADABLE_HOLD_MS(기본 24시간)가 지나면 at 을 더 미루지 않는다 —
+ *     그 뒤 TTL 이 흐르면 목록이 만료로 빠진다(복구되지 않는 등록부의 옛 목록을 영원히 '지금 목록' 으로 두지 않는다).
+ *   · 목록 내용(sig)은 그대로라 fleet 캐시 무효화(bumpFleetRev)를 하지 않는다. 다음 정상 push(setEdgeFleet)가 표지를 지운다.
+ *   · 받는 것은 사유 글자와 시각뿐이다(아는 필드만 — 글자 200자).
+ * @returns {{kept:number, noPrior?:true, holdExpired?:true, since?:number, changed?:boolean}}  changed = 보류가 막 시작됐거나 막 시한을 넘겼다
+ */
+export const UNREADABLE_HOLD_MS = Math.max(TTL_MS, clampIntervalMs(numOrNull(process.env.CENTRAL_FLEET_UNREADABLE_HOLD_MS) ?? 86_400_000, 86_400_000, 60_000));   // 빈 값·0·음수는 기본 24시간(v2.605 TIM2605-04 규약)
+export function holdEdgeFleet(agent, { registryUnreadable = null, now = Date.now() } = {}) {
+  const a = String(agent || '').trim();
+  if (!a) return { kept: 0, noPrior: true };
+  const e = cache[a];
+  if (!e || !Array.isArray(e.baremetal)) return { kept: 0, noPrior: true };
+  const ru = registryUnreadable && typeof registryUnreadable === 'object' ? registryUnreadable : {};
+  const at = numOrNull(ru.at);
+  const started = !Number.isFinite(e.registryUnreadable?.since);   // 이번 보고로 보류가 시작됐는가(콘솔은 바뀔 때만 — 5분마다 같은 줄 금지)
+  const since = started ? now : e.registryUnreadable.since;
+  const rec = { at: at != null && at > 0 ? Math.round(at) : null, reason: capStr(typeof ru.reason === 'string' ? ru.reason : '', 200) || '사유 미상', since };
+  if (now - since > UNREADABLE_HOLD_MS) {
+    const firstExpired = !e.registryUnreadable?.holdExpired;
+    e.registryUnreadable = { ...rec, holdExpired: true };
+    persistSoon();
+    return { kept: e.baremetal.length, holdExpired: true, since, changed: firstExpired };
+  }
+  e.at = now;
+  e.registryUnreadable = rec;
+  persistSoon();
+  return { kept: e.baremetal.length, since, changed: started };
+}
+
 // 분류 관련 필드만으로 안정 해시(djb2). 전력(watts)은 remote 경로/TTL로 반영하므로 제외.
 function hashList(list) {
   let h = 5381;
@@ -220,6 +253,8 @@ export function listEdgeFleet() {
     omitted: e.omitted || 0, vcenterBlanked: e.vcenterBlanked || 0, verified: e.verified !== false,
     // v2.606 RECENT2606-03: 엣지가 일부를 빼고 보낸 목록인가(partial) · 못 읽은 vCenter · 뺀 대수.
     partial: !!e.partial, unreadVcenters: e.partial?.unreadVcenters || [], withheldItems: e.partial ? (e.partial.withheldItems ?? null) : 0,
+    // v2.744(EDGE-01): 엣지 iDRAC 등록부를 읽지 못해 **직전 목록을 유지 중** — 이 행의 목록은 그 엣지가 마지막으로 온전히 보낸 것이다.
+    registryUnreadable: e.registryUnreadable ? { reason: e.registryUnreadable.reason || '', since: e.registryUnreadable.since || null, holdExpired: !!e.registryUnreadable.holdExpired } : null,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
@@ -241,7 +276,9 @@ export function fleetPartialsSummary() {
     omitted += Number(x.omitted) || 0; vcenterBlanked += Number(x.vcenterBlanked) || 0;
     if (x.partial) { if (x.withheldItems == null) withheldUnknown += 1; else withheldItems += Number(x.withheldItems) || 0; }
   }
-  return { edges: all.length, partialEdges: partials.length, partials, withheldItems, withheldUnknown, omitted, vcenterBlanked };
+  // v2.744(EDGE-01): 등록부 손상으로 직전 목록을 유지 중인 엣지 — 화면이 '이 엣지 목록은 갱신되지 않고 있다' 를 말할 수 있게.
+  const registryUnreadable = all.filter((x) => x.registryUnreadable).map((x) => ({ agent: x.agent, ...x.registryUnreadable }));
+  return { edges: all.length, partialEdges: partials.length, partials, withheldItems, withheldUnknown, omitted, vcenterBlanked, registryUnreadableEdges: registryUnreadable.length, registryUnreadable };
 }
 
 /** 테스트/관리용 초기화. */

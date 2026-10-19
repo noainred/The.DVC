@@ -33,7 +33,7 @@ import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../centr
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
-import { setEdgeFleet } from '../central/fleet.js';
+import { setEdgeFleet, holdEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu, withGpuTrust, mbOrNull, tempOrNull } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
@@ -1182,6 +1182,16 @@ centralRouter.post('/fleet', requireCentral(), (req, res) => {
   //   원소를 버리지 않고 **귀속만 비운다**(서버 자체는 실재한다). ② 공유 토큰 + 중앙이 모르는 이름은 '미검증' 이라 이름 수·원소 수를
   //   작게 묶고, 소유를 증명할 길이 없으므로 귀속도 비운다. 뺀·비운 개수는 응답에 싣는다(조용한 상한 금지).
   const verified = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
+  // v2.744(감사 EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 보낸 **상태 전용 보고** — 목록을 교체하지 않고 직전 목록의 만료만 미룬다
+  //   (agent/fleetPush.js 가 중앙 2.744.0 이상을 확인한 뒤에만 보낸다). 이름을 검증하지 못한 보고는 보관분을 건드리지 않는다
+  //   (공유 토큰으로 남의 이름을 골라 옛 목록을 붙잡아 두지 못하게 — 기록만 응답한다).
+  if (b.statusOnly === true) {
+    if (!verified) return res.json({ ok: true, agent, statusOnly: true, kept: 0, unverifiedAgent: true });
+    const st = b.status && typeof b.status === 'object' && !Array.isArray(b.status) ? b.status : {};
+    const h = holdEdgeFleet(agent, { registryUnreadable: st.registryUnreadable });
+    if (h.changed) console.warn(`[central] fleet: '${agent}' 엣지가 iDRAC 등록부를 읽지 못했다고 보고했습니다 — ${h.noPrior ? '보관 중인 목록이 없어 아무것도 바꾸지 않았습니다' : h.holdExpired ? '직전 목록 유지 시한이 지나 만료를 미루지 않았습니다' : `직전 목록 ${h.kept}대를 유지합니다`}`);
+    return res.json({ ok: true, agent, statusOnly: true, kept: h.kept, ...(h.noPrior ? { noPrior: true } : {}), ...(h.holdExpired ? { holdExpired: true } : {}) });
+  }
   const vcAllowed = verified ? (vc) => agentOwnsVcenter(agent, vc) : () => false;
   // v2.606(RECENT2606-03): 엣지가 일부를 빼고 보낸 목록이면(partial) 그 사실을 저장해 중앙이 밝힌다 — 예전에는 버렸다.
   const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed, partial: b });

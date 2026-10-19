@@ -93,11 +93,14 @@ export async function runAgentScan() {
     }
     let scan;
     let registered = 0;
+    let registerError = null; // v2.744(감사 EDGE-03)
     try {
       scan = await scanForIdracs({ ips: a.ips, username: a.username, password: a.password, authPolicy });
       if (config.agent.autoRegister && scan.found.length) {
-        const r = registerScanned(scan.found, a.username, a.password, 'merge');
+        // v2.744(감사 EDGE-03): 자동 경로(auto) — 이 엣지의 iDRAC 등록부를 읽지 못했으면 저장하지 않는다(registry.js 주석).
+        const r = registerScanned(scan.found, a.username, a.password, 'merge', '', '', { auto: true });
         if (r.ok) { registered = (r.added || 0) + (r.updated || 0); pollNow().catch(() => {}); }
+        else if (r.code === 'registry-unreadable') { registerError = r.reason; console.warn(`[agent] 발견한 iDRAC ${scan.found.length}대를 현지 등록하지 않았습니다 — ${r.reason}`); }
       }
     } finally { releaseScan(); }
 
@@ -109,10 +112,11 @@ export async function runAgentScan() {
       unreachable: scan.unreachable,
       notIdrac: scan.notIdrac,
       authFailed: scan.authFailed,
+      ...(registerError ? { registerError } : {}),
       durationMs: Date.now() - started,
     });
 
-    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered, authFailed: scan.authFailed || 0, authSkipped: scan.authSkipped || 0, ...(postErr ? { postError: postErr } : {}) };
+    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered, authFailed: scan.authFailed || 0, authSkipped: scan.authSkipped || 0, ...(registerError ? { registerError } : {}), ...(postErr ? { postError: postErr } : {}) };
     if (postErr) console.warn(`[agent] 스캔은 끝났지만 중앙에 결과를 보내지 못했습니다: ${postErr}`);
     console.log(`[agent] 스캔 완료: ${config.agent.name} — ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 등록${scan.authSkipped ? ` · 인증 실패 정지로 ${scan.authSkipped}개 IP 건너뜀(계정을 고치면 자동 재개)` : ''}`);
     return last;

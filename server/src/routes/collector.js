@@ -94,6 +94,10 @@ const EDGE_EXPORT_503_HEADERS = Object.freeze({ 'Retry-After': String(EDGE_EXPOR
 function idracRegistryUnreadable(res, err) {
   return res.status(503).set(EDGE_EXPORT_503_HEADERS).json({
     ok: false, reason: 'registryUnreadable', registry: 'idrac',
+    // v2.744(감사 EDGE-04): 엣지 정체 — 정상 export·/ping 과 같은 값(비밀 없음). 중앙의 수집 서버 상태는 인메모리라, 중앙 재시작 뒤
+    //   처음부터 이 503 이면 버전을 알 길이 없어 '버전 미상'(iLO 전용 스캔 보류·파트 장애/CVP 판정)이 등록부 복구 때까지 이어졌다.
+    //   구버전 중앙은 모르는 필드라 무시한다.
+    version: currentVersion(), agent: config.agent.name || '', hostname: os.hostname(),
     detail: String(err?.reason || '').slice(0, 200), at: Number.isFinite(err?.at) ? err.at : null,
     error: `엣지 iDRAC 등록부(idrac.json)를 읽지 못했습니다${err?.reason ? ` — ${String(err.reason).slice(0, 200)}` : ''}`,
   });

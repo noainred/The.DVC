@@ -21,6 +21,9 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { UNREAD_STATUSES } from './inventoryPush.js'; // v2.604 EDGE2604-01: '읽지 못한 vCenter' 판정은 인벤토리 push 와 한 기준
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { registryLoadError } from '../idrac/registry.js'; // v2.744(감사 EDGE-01)
+import { centralStatusOnlySupport, sendStatusOnly, FLEET_STATUS_ONLY_MIN_CENTRAL } from './centralStatusOnly.js'; // v2.744(감사 EDGE-01)
+import { createChangeLogger } from '../util/logThrottle.js';
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -98,6 +101,49 @@ let timer = null;
 let last = null;     // { at, sent, error }
 let running = false;  // single-flight
 
+/*
+ * v2.744(감사 EDGE-01 — 재현): 엣지 iDRAC 등록부(idrac.json)를 **읽지 못하면** 베어메탈 목록을 보내지 않는다.
+ *   v2.743 은 같은 등록부를 읽는 /api/collector/export 만 503 으로 막았다. 이 push 는 손상 → preserveCorrupt → 빈 목록 위에서
+ *   `baremetal:[]` 를 표지 없이 보냈고, 중앙 setEdgeFleet 이 그 엣지 목록을 0대로 **교체**했다(검증 a1 재현 — 전력 미보고 서버와
+ *   엣지가 정한 vCenter 귀속이 통합 인벤토리에서 사라졌다). 베어메탈 목록은 전부 그 등록부(iDRAC·OME 등록·전력 표본의 서버 id)에서
+ *   나오므로 손상 상태에서는 보낼 '온전한 일부' 가 없다.
+ *   · 중앙이 v2.744 이상이면 **상태 전용 보고**(`statusOnly` + registryUnreadable)를 보낸다 — 중앙은 직전 목록을 지우지 않고
+ *     만료 시각만 미룬다(central/fleet.js holdEdgeFleet, 시한 있음).
+ *   · 구버전·버전 미상 중앙에는 보내지 않는다(v2.613 EDGE2613-04 규약 — 구버전은 baremetal 이 없는 본문을 빈 목록 교체로 받는다).
+ *     그때는 중앙이 마지막 수신부터 TTL(기본 30분) 뒤에 이 엣지 목록을 만료로 지운다 — 빈 목록으로 지우는 것과 달리 '보고 없음' 이라는
+ *     사실 그대로다. ⚠ 이 경우의 보류에는 v2.605 시한(FLEET_WITHHOLD_MAX_MS) 뒤 '부분 전송' 을 하지 않는다 — 부분으로 보낼 목록이
+ *     전부 손상 등록부에서 나오므로 그것이 곧 빈 목록 교체(이 결함 자체)다.
+ *   상태(last)·콘솔(같은 사유는 10분에 한 줄)에 남긴다(무음 실패 금지).
+ */
+const _regLog = createChangeLogger({ windowMs: 10 * 60_000 });
+let _statusOnlyCapImpl = null;
+/** 테스트 주입용 — 중앙 버전 확인을 바꾼다(null 이면 health-probe). */
+export function _setFleetStatusOnlySupportForTest(fn) { _statusOnlyCapImpl = typeof fn === 'function' ? fn : null; }
+function fleetStatusOnlySupport() {
+  if (_statusOnlyCapImpl) return Promise.resolve(_statusOnlyCapImpl());
+  return centralStatusOnlySupport({ minVersion: FLEET_STATUS_ONLY_MIN_CENTRAL });
+}
+function idracRegistryError() {
+  try { return registryLoadError(); } catch (e) { return { at: Date.now(), reason: String(e?.message || e).slice(0, 200) }; }
+}
+async function reportRegistryUnreadable(regErr) {
+  const why = String(regErr?.reason || '사유 미상').slice(0, 200);
+  const base = `엣지 iDRAC 등록부(idrac.json)를 읽지 못해(${why}) 베어메탈 목록을 보내지 않았습니다 — 손상 보존본(idrac.json.corrupt.*)을 되돌리거나 iDRAC 등록 화면에서 저장하면 다음 주기에 다시 보냅니다`;
+  const registryUnreadable = { at: Number.isFinite(regErr?.at) ? regErr.at : null, reason: why };
+  const cap = await fleetStatusOnlySupport();
+  if (!cap.ok) {
+    const note = `${base}. ${cap.text || '중앙 버전을 확인하지 못해 상태 보고도 보내지 않았습니다'} — 중앙은 마지막 수신부터 만료 시간(기본 30분) 뒤 이 엣지 목록을 지웁니다`;
+    last = { at: Date.now(), sent: 0, error: null, skipped: true, registryUnreadable, statusOnly: false, statusOnlyReason: cap.reason || 'central-version-unknown', note };
+    if (_regLog('registry', `${why}|${cap.reason}`)) console.warn(`[fleet-push] ${note}`);
+    return { ok: false, skipped: true, registryUnreadable: true, reason: note };
+  }
+  const r = await sendStatusOnly('/api/central/fleet', { registryUnreadable });
+  const note = r.ok ? `${base}. 중앙에는 상태 보고만 보내 직전 목록을 유지하게 했습니다` : `${base}. 상태 보고도 실패했습니다(${r.reason})`;
+  last = { at: Date.now(), sent: 0, error: r.ok ? null : r.reason, skipped: true, registryUnreadable, statusOnly: !!r.ok, note };
+  if (_regLog('registry', `${why}|${r.ok ? 'ok' : r.reason}`)) console.warn(`[fleet-push] ${note}`);
+  return { ok: false, skipped: true, registryUnreadable: true, statusOnly: !!r.ok, reason: note };
+}
+
 const ENABLED = process.env.AGENT_PUSH_FLEET !== 'false';
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -111,6 +157,9 @@ export async function pushFleetNow() {
   if (running) return { ok: false, reason: '이전 push 진행 중' };
   running = true;
   try {
+    // v2.744(감사 EDGE-01): 등록부를 읽지 못했으면 목록을 만들지 않는다(위 주석). 못 읽은 vCenter 보류보다 먼저 본다.
+    const regErr = idracRegistryError();
+    if (regErr) return await reportRegistryUnreadable(regErr);
     const snap = store.get();
     let registered = [];
     try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }
