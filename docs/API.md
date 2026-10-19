@@ -755,14 +755,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bm-storage/servers` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:65](../server/src/routes/api/bmstor.js#L65) |
 | DELETE | `/tools/bm-storage/servers/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:71](../server/src/routes/api/bmstor.js#L71) |
 | PUT | `/tools/bm-storage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:78](../server/src/routes/api/bmstor.js#L78) |
-| GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:185](../server/src/routes/api/bmUsage.js#L185) |
-| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:349](../server/src/routes/api/bmUsage.js#L349) |
-| POST | `/tools/bm-usage/collect` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:321](../server/src/routes/api/bmUsage.js#L321) |
-| PUT | `/tools/bm-usage/distribute` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:528](../server/src/routes/api/bmUsage.js#L528) |
-| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:407](../server/src/routes/api/bmUsage.js#L407) |
-| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:487](../server/src/routes/api/bmUsage.js#L487) |
-| GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:276](../server/src/routes/api/bmUsage.js#L276) |
-| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:540](../server/src/routes/api/bmUsage.js#L540) |
+| GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:214](../server/src/routes/api/bmUsage.js#L214) |
+| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:381](../server/src/routes/api/bmUsage.js#L381) |
+| POST | `/tools/bm-usage/collect` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:353](../server/src/routes/api/bmUsage.js#L353) |
+| PUT | `/tools/bm-usage/distribute` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:560](../server/src/routes/api/bmUsage.js#L560) |
+| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:439](../server/src/routes/api/bmUsage.js#L439) |
+| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:519](../server/src/routes/api/bmUsage.js#L519) |
+| GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:305](../server/src/routes/api/bmUsage.js#L305) |
+| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:572](../server/src/routes/api/bmUsage.js#L572) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:71](../server/src/routes/api/toolsCapacity.js#L71) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1786](../server/src/routes/api/toolsCapacity.js#L1786) |
 | GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1697](../server/src/routes/api/toolsCapacity.js#L1697) |
@@ -891,23 +891,23 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/ipam/subnets` | 권한 `tools` | [server/src/routes/api/ipamExport.js:191](../server/src/routes/api/ipamExport.js#L191) |
 | GET | `/tools/ipam/vc-ranges` | 권한 `tools` | [server/src/routes/api/ipamExport.js:214](../server/src/routes/api/ipamExport.js#L214) |
 | GET | `/tools/ipam/vc-ranges.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/ipamExport.js:236](../server/src/routes/api/ipamExport.js#L236) |
-| GET | `/tools/isilon-dirusage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:83](../server/src/routes/api/isilonDirUsage.js#L83) |
-| POST | `/tools/isilon-dirusage/bulk` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:206](../server/src/routes/api/isilonDirUsage.js#L206) |
-| GET | `/tools/isilon-dirusage/digest` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:328](../server/src/routes/api/isilonDirUsage.js#L328) |
-| PUT | `/tools/isilon-dirusage/digest` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:330](../server/src/routes/api/isilonDirUsage.js#L330) |
-| POST | `/tools/isilon-dirusage/digest/preview` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:348](../server/src/routes/api/isilonDirUsage.js#L348) |
-| POST | `/tools/isilon-dirusage/digest/send-now` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:340](../server/src/routes/api/isilonDirUsage.js#L340) |
-| GET | `/tools/isilon-dirusage/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:152](../server/src/routes/api/isilonDirUsage.js#L152) |
-| POST | `/tools/isilon-dirusage/key` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:355](../server/src/routes/api/isilonDirUsage.js#L355) |
-| POST | `/tools/isilon-dirusage/mail-now` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:301](../server/src/routes/api/isilonDirUsage.js#L301) |
-| GET | `/tools/isilon-dirusage/overview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:108](../server/src/routes/api/isilonDirUsage.js#L108) |
-| GET | `/tools/isilon-dirusage/report` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:123](../server/src/routes/api/isilonDirUsage.js#L123) |
-| POST | `/tools/isilon-dirusage/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:241](../server/src/routes/api/isilonDirUsage.js#L241) |
-| GET | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:175](../server/src/routes/api/isilonDirUsage.js#L175) |
-| PUT | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:190](../server/src/routes/api/isilonDirUsage.js#L190) |
-| POST | `/tools/isilon-dirusage/test` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:269](../server/src/routes/api/isilonDirUsage.js#L269) |
-| GET | `/tools/isilon-dirusage/trend` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:142](../server/src/routes/api/isilonDirUsage.js#L142) |
-| GET | `/tools/isilon-dirusage/users` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:131](../server/src/routes/api/isilonDirUsage.js#L131) |
+| GET | `/tools/isilon-dirusage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:103](../server/src/routes/api/isilonDirUsage.js#L103) |
+| POST | `/tools/isilon-dirusage/bulk` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:226](../server/src/routes/api/isilonDirUsage.js#L226) |
+| GET | `/tools/isilon-dirusage/digest` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:348](../server/src/routes/api/isilonDirUsage.js#L348) |
+| PUT | `/tools/isilon-dirusage/digest` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:350](../server/src/routes/api/isilonDirUsage.js#L350) |
+| POST | `/tools/isilon-dirusage/digest/preview` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:368](../server/src/routes/api/isilonDirUsage.js#L368) |
+| POST | `/tools/isilon-dirusage/digest/send-now` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:360](../server/src/routes/api/isilonDirUsage.js#L360) |
+| GET | `/tools/isilon-dirusage/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:172](../server/src/routes/api/isilonDirUsage.js#L172) |
+| POST | `/tools/isilon-dirusage/key` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:375](../server/src/routes/api/isilonDirUsage.js#L375) |
+| POST | `/tools/isilon-dirusage/mail-now` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:321](../server/src/routes/api/isilonDirUsage.js#L321) |
+| GET | `/tools/isilon-dirusage/overview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:128](../server/src/routes/api/isilonDirUsage.js#L128) |
+| GET | `/tools/isilon-dirusage/report` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:143](../server/src/routes/api/isilonDirUsage.js#L143) |
+| POST | `/tools/isilon-dirusage/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:261](../server/src/routes/api/isilonDirUsage.js#L261) |
+| GET | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:195](../server/src/routes/api/isilonDirUsage.js#L195) |
+| PUT | `/tools/isilon-dirusage/settings` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:210](../server/src/routes/api/isilonDirUsage.js#L210) |
+| POST | `/tools/isilon-dirusage/test` | 역할 `admin` · `fullScopeOnly` · `requireSuperAdmin` | [server/src/routes/api/isilonDirUsage.js:289](../server/src/routes/api/isilonDirUsage.js#L289) |
+| GET | `/tools/isilon-dirusage/trend` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:162](../server/src/routes/api/isilonDirUsage.js#L162) |
+| GET | `/tools/isilon-dirusage/users` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/isilonDirUsage.js:151](../server/src/routes/api/isilonDirUsage.js#L151) |
 | GET | `/tools/license-expiry` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:187](../server/src/routes/api/toolsInfo.js#L187) |
 | GET | `/tools/licenses` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:114](../server/src/routes/api/toolsInfo.js#L114) |
 | GET | `/tools/link-check` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:53](../server/src/routes/api/linkCheck.js#L53) |

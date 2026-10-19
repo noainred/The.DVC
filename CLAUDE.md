@@ -5362,6 +5362,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         `audit2744fh`·`audit2744flead2`). **root 로 도는 새 셸 코드가 CONFIG_DIR 파일을 읽으면 이 둘 중 하나로.**
       · 남긴 것: RV-4(명목 기준 포트가 100% 를 조금 넘으면 대표값·알림에서 빠진다 — v2.743 과 같은 설계, 판단 필요) · RD-R3(제품에서 나오지 않는 입력 — 조사만 고침) ·
         엣지 export 오류 요약 두 벌(문구 상수는 하나) · 큰 vmtrack 정리의 COMMIT 정지(WAL 체크포인트로 추정 · 미확인) · 880px 기준은 목 데이터로만 정했다.
+    · ⚠⚠ **최종 수정분 적대적 검토(기준 `56fa133`, VA~VE 5그룹 + 리드) — 생존 12건 전부 고쳤다**(회귀 `server/test/audit2744{va,vb,vc,ve,vlead}` + 웹 `audit2744vd`·`tools/audit2744ve` — 그룹별 변이 검증):
+      · ⚠⚠ **root 는 서비스 계정이 바꿀 수 있는 실행 파일을 실행하지 않는다 — '비밀 하나 만들기' 같은 작은 일도**(VA PKG-01): install.sh 가 AUTH_SECRET 을 만들려고 `$PREFIX/runtime/node` 를 root 로 돌렸다
+        (같은 파일 주석이 금지한 바로 그 일). `vp_gen_secret` = 패키지 node → openssl → urandom, 셋 다 안 되면 portal.env 를 만들지 않고 멈춘다(빈 AUTH_SECRET 금지).
+      · ⚠⚠ **'누구 권한으로 실행하나' 는 파일 소유자 하나가 아니라 길 전체로 정한다**(VB VERIFY-01·02, `release-verify-lib.sh vp_path_controllers`): 옛 설치본 확인 도구의 node·js 경로의 폴더·링크·링크 대상을
+        lstat 으로 훑어 바꿀 수 있는 비-root 계정이 0명이면 root, 1명이면 그 계정으로 낮추고, 둘 이상·그룹/기타 쓰기·순환이면 **실행하지 않고 멈춘다**. 정책 한 줄을 읽으려고 그 node 를 root 로 돌리지 않는다
+        (`vp_policy_reader` — 길 전체가 root 전용인 node 만). 열기 오류는 반환 12 + 실제 원인(VERIFY-04) · `& 022` portal.env 정책 거부(VERIFY-05) · node 없는 폴백은 시한 있는 한 번 열기 + inode 대조(`vp_safe_read`, VERIFY-03·06).
+      · **로드 오류 원문 — 손상본을 보존하지 않는 catch 도**(VC + 리드 10곳): 자체 보존 로더 6곳 + `vcenters.json`(비밀번호 평문 — 수집 주기마다 반복되던 줄)·db-location·central-fleet·센서 상세 캐시.
+        스윕은 둘이다 — `audit2744fc findRawLoadLogs`(보존 경로) · `audit2744vlead`(`try { JSON.parse } catch` 의 콘솔 줄 전수, 보존 여부와 무관).
+      · **'점검하지 못함' 은 '닿지 않음' 이 아니다**(VD — `vmRemoteProbeText.js`): 거부는 종류별(데모·권한·OTP·범위·사유 미상), 점검 못 한 200 `{ok:false, method}` 는 회색 + 서버 사유, 방화벽 안내·빨강은 실제로 점검했고 닫혔을 때만.
+      · **화면 문구 함수가 쓰는 데이터를 응답이 실제로 싣는지 볼 것**(VE WEB-03): `detailNotes` 의 FC 판정은 어떤 응답도 수집 상세를 싣지 않아 화면에 닿지 않았다(단위 테스트는 통과했다). 폴러가 서버별 최근 상세를 들고 `/history` 가 싣는다.
+      · 남긴 것: install.sh 2)·3) 의 `rm -rf "$PREFIX/runtime/node"`·`cp -a … "$APP_DST"` 링크 추종(쓰기·삭제 계열 — VA 검토자 재현, 다음 점검 후보) · VB node 없는 폴백의 열기 순간 경쟁(inode 대조로 버린다) · 스윕은 휴리스틱(중간 변수를 거치면 놓친다).
     · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).
       커밋 33be198 은 그때 아직 하지 않은 수정을 '✅ v2.744' 로 적었다 — 이번 수정이 끝난 뒤 문구를 실제 범위로 맞췄다(EDGE-03 은 '자동 등록만').
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
