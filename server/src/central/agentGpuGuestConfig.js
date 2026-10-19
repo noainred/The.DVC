@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings, gpuGuestNonDefaultPatch } from '../gpu/settings.js';
 // v2.743(RECENT-01): 대소문자 중복을 합칠 때 남길 키의 근거(엣지 실제 이름) — 중복이 있을 때만 읽는다(edgeNameEvidence).
@@ -178,7 +178,10 @@ try {
     }
     _loadErr.ok();
   } else _loadErr.missing();
-} catch (err) { _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
+} catch (err) {
+  // v2.744(최종 검토 RG2744-02): 콘솔 사유는 요약이다 — 원문은 게스트 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
+  _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`); byAgent = Object.create(null);
+}
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

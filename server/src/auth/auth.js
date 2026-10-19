@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
@@ -184,7 +184,9 @@ export function loadUsers() {
       // 손상본을 조용히 무시하고 아래에서 기본 admin을 시드하면, 다음 persistUsers가
       // 실사용자 전부를 시드 1건으로 덮어써 계정이 영구 유실된다 → 손상본을 .corrupt로 보존.
       preserveCorrupt(file, err.message);
-      console.error(`[auth] Failed to parse users.json: ${err.message}`);
+      // v2.744(최종 검토 RG2744-02): 사유는 요약이다 — JSON.parse 원문은 오류 위치 앞뒤 파일 조각(TOTP 시크릿·비밀번호 해시 앞부분)을 싣고,
+      //   이 줄은 콘솔 링버퍼(/admin/logs·로그 분석·엣지 로그)로 나간다. 원문은 users.json.corrupt.* 보존본에 있다. 접두 문구는 로그 분석 규칙이 본다.
+      console.error(`[auth] Failed to parse users.json: ${safeLoadText(err) || '사유 미상'}`);
     }
   }
   // Seed a default admin so the portal is usable out of the box.
