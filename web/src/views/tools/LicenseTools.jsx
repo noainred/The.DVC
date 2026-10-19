@@ -212,10 +212,23 @@ export const LIC_KEY_MAXW = 140;
 // v2.744(회귀 검토 GI-R1): 줄바꿈 칸의 최소 폭(px). overflow-wrap:anywhere 는 min-content 를 한 글자 폭으로 만들어, 표가 칸보다 넓은 폭
 //   (400px)에서 자동 표 레이아웃이 '라이선스'·'소스' 열을 51~74px 로 짜부라뜨렸다(행 37 → 141px, 'vC/ent/er' 처럼 단어 중간 줄바꿈).
 //   min-width 가 그 열의 하한이 되어 나머지는 표 래퍼(DataTable 의 table-wrap, overflow:auto)가 가로 스크롤로 넘긴다. anywhere 는 남긴다 —
-//   상자(140~220px)보다 긴 한 단어(공백·하이픈 없는 FQDN)만 끊고 열 폭은 140px 하한에 묶여, 1280·1440px 에서 '상태' 열이 다시 밀리지 않는다
-//   (break-word·normal 은 그 단어 폭만큼 열을 넓혀 1280px 에서 상태 열을 밀어냈고, normal 은 상자를 넘쳐 옆 칸과 겹쳤다 — Chromium 실측).
+//   상자(140~220px)보다 긴 한 단어(공백·하이픈 없는 FQDN)만 끊는다(break-word·normal 은 그 단어 폭만큼 열을 넓혀 1280px 에서 상태 열을
+//   밀어냈고, normal 은 상자를 넘쳐 옆 칸과 겹쳤다 — Chromium 실측).
+// v2.744(최종 검토 RV-GI-R1-01 — Chromium 재현): 그 하한을 **언제나** 걸면 표가 들어갈 수 있는 폭에서도 표 최소 폭이 약 1042px 가 되어
+//   1280px(래퍼 996px)에서 48px · 1200px(펼침, 916px)에서 128px · 1024px(레일, 912px)에서 132px 가 래퍼 밖으로 밀려 '상태' 열이 잘렸다
+//   (하한이 없던 판은 같은 폭에서 0px — 행 높이도 1280px 에서 같았다). 그래서 하한은 **표 칸(래퍼) 폭이 LIC_WRAP_NARROW_PX 보다 좁을 때만**
+//   건다 — 그 폭에서는 나머지 열(약 700px)만으로 칸을 거의 채워 하한이 없으면 두 열이 머리글 폭(51~74px)까지 짜부라지고(행 평균 143~161px),
+//   어차피 가로 스크롤이 생긴다. 그보다 넓으면 하한 없이 자동 표 레이아웃이 두 열을 칸에 맞춘다(1024px 레일에서 행 평균 80px · 상태 열 보임).
+//   판정은 CSS 컨테이너 단위다 — 표를 감싸는 div(LIC_TABLE_HOST)가 inline-size 컨테이너이고, 칸 안 상자의 min-width 는
+//   clamp(0, (기준 − 100cqi) × 1000, 140px) 로 기준보다 좁으면 140px · 넓으면 0 인 계단이다(사이드바가 펼침·레일·서랍 어느 쪽이든
+//   뷰포트가 아니라 실제 칸 폭을 본다). 컨테이너 단위를 모르는 브라우저는 선언 전체를 버려 하한이 없던 판과 같다(상태 열은 보인다).
+//   기준(880px)은 목 데이터의 나머지 열 합(706px) + 두 열에 머리글보다 넓은 최소 내용 폭(약 60px)을 준 값이다 — 운영 데이터의 버전·제품군
+//   문자열이 더 길면 그만큼 기준 위에서 두 열이 좁아진다(정직 기록 — 실운영 라이선스 이름 길이로는 보지 못했다).
 export const LIC_WRAP_MINW = 140;
-const LIC_WRAP = (maxWidth) => ({ display: 'inline-block', minWidth: LIC_WRAP_MINW, maxWidth, whiteSpace: 'normal', overflowWrap: 'anywhere', verticalAlign: 'top' });
+export const LIC_WRAP_NARROW_PX = 880;
+export const LIC_WRAP_MIN_CSS = `clamp(0px, calc((${LIC_WRAP_NARROW_PX}px - 100cqi) * 1000), ${LIC_WRAP_MINW}px)`;
+const LIC_TABLE_HOST = { containerType: 'inline-size' };
+const LIC_WRAP = (maxWidth) => ({ display: 'inline-block', minWidth: LIC_WRAP_MIN_CSS, maxWidth, whiteSpace: 'normal', overflowWrap: 'anywhere', verticalAlign: 'top' });
 const LIC_KEY_STYLE = { fontSize: 11, display: 'inline-block', maxWidth: LIC_KEY_MAXW, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' };
 
 /**
@@ -311,7 +324,10 @@ export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
         {canCsv() && <button className="tab" style={{ marginLeft: 'auto', padding: '5px 12px' }} onClick={exportCsv}>CSV 내보내기</button>}
       </div>
 
-      <DataTable columns={cols} rows={rows} initialSort={{ key: 'daysLeft', dir: 'asc' }} />
+      {/* v2.744(RV-GI-R1-01): 줄바꿈 칸의 최소 폭이 표 칸 폭(cqi)을 보도록 inline-size 컨테이너로 감싼다(위 LIC_WRAP_MIN_CSS) */}
+      <div style={LIC_TABLE_HOST}>
+        <DataTable columns={cols} rows={rows} initialSort={{ key: 'daysLeft', dir: 'asc' }} />
+      </div>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
         vCenter 소스는 LicenseManager에 등록된 모든 키(ESXi·vCenter·vSAN·VCF/VVF 및 vCenter에 할당된 타 제품 포함)이고, NSX는 각 매니저에서 직접 수집합니다.

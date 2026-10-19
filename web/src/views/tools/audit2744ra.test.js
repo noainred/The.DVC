@@ -40,9 +40,9 @@ describe('GA-R3 VM 수량 추이 — data 가 비어도 선택 도구를 그린�
     const code = stripComments(fs.readFileSync(path.join(here, 'VmTrackTool.jsx'), 'utf8'));
     expect(code).not.toMatch(/if \(error && !data\) return <ErrorBox/);
     expect(code).not.toMatch(/if \(!data\) return <Loading \/>/);
-    expect(code).toMatch(/if \(!data\) \{\s*return \(\s*<div>\s*\{head\}\s*\{error \? <VmTrackLoadFailed error=\{error\} onRetry=\{\(\) => load\(\)\} \/> : <Loading \/>\}/);
-    // 다시 조회는 같은 조건의 load() — 새로고침(location.reload)이 아니다.
-    expect(code).toMatch(/onRetry=\{\(\) => load\(\)\}/);
+    expect(code).toMatch(/if \(!data\) \{\s*return \(\s*<div>\s*\{head\}\s*\{error \? <VmTrackLoadFailed error=\{error\} onRetry=\{retry\} busy=\{retrying\} failedRetries=\{retryFails\} \/> : <Loading \/>\}/);
+    // 다시 조회는 같은 조건의 load() — 새로고침(location.reload)이 아니다. v2.744(RA-R2): 진행 중 잠금(retryGate)을 거친다.
+    expect(code).toMatch(/const retry = \(\) => retryGate\.current\.start\(\(\) => load\(/);
     // vCenter 목록은 마지막 응답의 것을 따로 둔다(data 가 비어도 선택 상자가 빈 목록이 되지 않게).
     expect(code).toMatch(/setVcList\(d\.vcenterList\)/);
     expect(code).toMatch(/vcList\.map\(/);

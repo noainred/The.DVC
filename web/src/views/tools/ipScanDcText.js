@@ -89,15 +89,18 @@ export function suggestSummaryText(s) {
     const n = s.skipped.hostsNoIp;
     if (!mgmtRule) notes.push(`이름으로 등록된 ESXi 호스트 ${n}대는 주소를 몰라 뺐습니다`);
     else {
-      // v2.744(회귀 검토 FX-R1): 서버가 '관리 IP 를 받았지만 쓸 수 없는 표기(비정규·0.0.0.0)' 를 hostMgmtRejected(hostsNoIp 의 부분집합)로
+      // v2.744(회귀 검토 FX-R1): 서버가 '관리 IP 를 받았지만 쓸 수 없는 값' 을 hostMgmtRejected(hostsNoIp 의 부분집합)로
       //   따로 센다 — 두 경우를 각각 말한다(조치가 다르다: 앞은 수집·vmk 설정, 뒤는 그 호스트의 관리 IP 값). 필드가 없는 응답은 둘을 가를 수
       //   없으므로 함께 말한다('수집되지 않아' 라고 단정하지 않는다). 뺀 수보다 크거나 음수인 값으로 음수·과다를 말하지 않게 자른다.
+      // v2.744(최종 검토 RX-IP-02): 서버의 판정은 'mgmtIp 원값이 비어 있지 않은데 원장 판정(hostLedgerIp — 정규형 IPv4 만)이 거부' 다 —
+      //   비정규 IPv4·0.0.0.0 뿐 아니라 **IPv4 가 아닌 값(IPv6 전용 관리망의 vmk 주소 등)** 도 여기에 든다. 원인을 'IPv4 표기 오류' 로
+      //   돌리지 않게 문구가 둘을 함께 말한다(서버 판정은 바꾸지 않았다 — 어느 쪽인지는 그 호스트의 관리 IP 값을 보면 안다).
       const rejRaw = numOrNull(s.totals?.hostMgmtRejected);
       if (rejRaw == null) notes.push(`이름으로 등록된 ESXi 호스트 ${n}대는 관리 IP 가 없거나 쓸 수 없는 표기라 뺐습니다`);
       else {
         const rej = Math.min(n, Math.max(0, Math.floor(rejRaw)));
         if (n - rej > 0) notes.push(`이름으로 등록된 ESXi 호스트 ${n - rej}대는 관리 IP 도 수집되지 않아 뺐습니다`);
-        if (rej > 0) notes.push(`이름으로 등록된 ESXi 호스트 ${rej}대는 관리 IP 가 쓸 수 없는 표기(비정규 표기·0.0.0.0 등)라 뺐습니다`);
+        if (rej > 0) notes.push(`이름으로 등록된 ESXi 호스트 ${rej}대는 관리 IP 값이 IPv4 가 아니거나 쓸 수 없는 표기(IPv6 · 비정규 표기 · 0.0.0.0 등)라 뺐습니다`);
       }
     }
   }

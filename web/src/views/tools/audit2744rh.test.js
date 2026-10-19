@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { LicenseExpiry, LIC_KEY_MAXW, LIC_NAME_MAXW, LIC_SOURCE_MAXW, LIC_WRAP_MINW } from './LicenseTools.jsx';
+import { LicenseExpiry, LIC_KEY_MAXW, LIC_NAME_MAXW, LIC_SOURCE_MAXW, LIC_WRAP_MINW, LIC_WRAP_MIN_CSS } from './LicenseTools.jsx';
 import { gpuGuestFoldNote } from '../GpuGuestSettings.jsx';
 
 const h = React.createElement;
@@ -38,7 +38,7 @@ describe('GI-R1 라이선스 만료 표 — 줄바꿈 칸이 좁은 폭에서 �
   it('라이선스 칸 — 모든 행에 min-width 하한 + max-width 상한 + 줄바꿈(white-space:normal)', () => {
     expect(nameCells.length, '라이선스 칸 2행').toBe(2);
     for (const [, st] of nameCells) {
-      expect(st).toMatch(new RegExp(`min-width:${LIC_WRAP_MINW}px`));
+      expect(st).toContain(`min-width:${LIC_WRAP_MIN_CSS}`); // v2.744(RV-GI-R1-01): 좁은 칸에서만 거는 하한 — audit2744fe 가 계단을 고정
       expect(st).toMatch(new RegExp(`max-width:${LIC_NAME_MAXW}px`));
       expect(st).toMatch(/white-space:normal/);
       expect(st).toMatch(/display:inline-block/);
@@ -48,7 +48,7 @@ describe('GI-R1 라이선스 만료 표 — 줄바꿈 칸이 좁은 폭에서 �
   it('소스 · where 칸 — 모든 행에 min-width 하한 + max-width 상한 + 줄바꿈', () => {
     expect(srcCells.length, '소스 칸 2행').toBe(2);
     for (const [, st] of srcCells) {
-      expect(st).toMatch(new RegExp(`min-width:${LIC_WRAP_MINW}px`));
+      expect(st).toContain(`min-width:${LIC_WRAP_MIN_CSS}`); // v2.744(RV-GI-R1-01): 좁은 칸에서만 거는 하한 — audit2744fe 가 계단을 고정
       expect(st).toMatch(new RegExp(`max-width:${LIC_SOURCE_MAXW}px`));
       expect(st).toMatch(/white-space:normal/);
     }
@@ -57,7 +57,7 @@ describe('GI-R1 라이선스 만료 표 — 줄바꿈 칸이 좁은 폭에서 �
   it('overflow-wrap:anywhere 를 쓰는 칸은 반드시 min-width 를 함께 갖는다(anywhere 는 min-content 를 한 글자 폭으로 만든다)', () => {
     const spans = [...html.matchAll(/style="([^"]*overflow-wrap:anywhere[^"]*)"/g)].map((m) => m[1]);
     expect(spans.length).toBeGreaterThan(0);
-    for (const st of spans) expect(st, st).toMatch(/min-width:\d+px/);
+    for (const st of spans) expect(st, st).toMatch(/min-width:[^;]*\d+px/);
   });
 
   it('표는 스크롤 래퍼 안에 있다(남는 폭은 가로 스크롤로 — 열을 짜부라뜨리지 않는다)', () => {

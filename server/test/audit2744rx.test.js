@@ -62,12 +62,13 @@ test('FX-R1 ③ 화면 문구 — 관리 IP 없음과 쓸 수 없는 표기를 �
   const r = suggestAgentSubnets({ vcenterIds: ['vc-a'], vms: [], hosts: HOSTS, idrac: [], hostIp: hostLedgerIp });
   const s = w.suggestSummaryText(r);
   assert.match(s, /이름으로 등록된 ESXi 호스트 2대는 관리 IP 도 수집되지 않아 뺐습니다/);
-  assert.match(s, /이름으로 등록된 ESXi 호스트 2대는 관리 IP 가 쓸 수 없는 표기\(비정규 표기·0\.0\.0\.0 등\)라 뺐습니다/);
+  // v2.744(최종 검토 RX-IP-02): IPv4 가 아닌 값(IPv6)도 같은 칸이라 문구가 그 사실을 함께 말한다.
+  assert.match(s, /이름으로 등록된 ESXi 호스트 2대는 관리 IP 값이 IPv4 가 아니거나 쓸 수 없는 표기\(IPv6 · 비정규 표기 · 0\.0\.0\.0 등\)라 뺐습니다/);
   // 검토 시나리오 그대로: 두 호스트 모두 받았지만 못 씀 → '수집되지 않아' 라고 말하지 않는다.
   const only = suggestAgentSubnets({ vcenterIds: ['vc-a'], vms: [], hosts: HOSTS.slice(4, 6), idrac: [], hostIp: hostLedgerIp });
   const so = w.suggestSummaryText(only);
   assert.doesNotMatch(so, /수집되지 않아/);
-  assert.match(so, /2대는 관리 IP 가 쓸 수 없는 표기/);
+  assert.match(so, /2대는 관리 IP 값이 IPv4 가 아니거나 쓸 수 없는 표기/);
   // 구버전 응답(규칙은 있는데 새 필드 없음) — 둘을 가를 수 없으므로 함께 말한다.
   const mid = w.suggestSummaryText({ totals: { subnets: 0, vmIps: 0, hostIps: 0, hostMgmtIps: 0, idracIps: 0 }, skipped: { hostsNoIp: 3 }, hostIpRule: 'name-or-mgmt', omitted: 0, subnets: [] });
   assert.match(mid, /3대는 관리 IP 가 없거나 쓸 수 없는 표기라 뺐습니다/);
@@ -78,7 +79,7 @@ test('FX-R1 ③ 화면 문구 — 관리 IP 없음과 쓸 수 없는 표기를 �
   assert.doesNotMatch(old, /관리 IP/);
   // 이상한 값(음수·뺀 수보다 큼·문자열)으로 음수·과다를 말하지 않는다.
   const odd = w.suggestSummaryText({ totals: { hostMgmtRejected: 9 }, skipped: { hostsNoIp: 2 }, hostIpRule: 'name-or-mgmt', subnets: [] });
-  assert.match(odd, /2대는 관리 IP 가 쓸 수 없는 표기/);
+  assert.match(odd, /2대는 관리 IP 값이 IPv4 가 아니거나 쓸 수 없는 표기/);
   assert.doesNotMatch(odd, /수집되지 않아|-\d+대/);
   for (const t of [s, so, mid, old, odd]) { assert.doesNotMatch(t, /`/); assert.doesNotMatch(t, /\*\*/); }
 });
