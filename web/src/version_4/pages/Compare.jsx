@@ -10,6 +10,7 @@ import { usePolling, can, toolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Panel, Bar, PctCell, Empty, PollState, Spark } from '../ui.jsx';
 import { fmtInt, fmtPct, textColor, barColor, REGION_COLORS, WARN_PCT, CRIT_PCT } from '../data.js';
+import { clusterRowKey, clusterNameLabel } from '../../views/clustercfg/clusterCfgText.js'; // v2.744(감사 후속 FA-①): 같은 이름 다른 데이터센터 클러스터 — 행 키·이름 한 벌
 
 const NEED_TOOLS = '이 패널은 “특수 기능(tools)” 권한이 필요합니다 — 관리자에게 요청하세요.';
 
@@ -49,9 +50,11 @@ export default function Compare({ scope, sitesAll, spec, go }) {
     .sort((a, b) => a.daysToFull - b.daysToFull)
     .slice(0, spec.rows);
 
+  // v2.744(감사 후속 FA-①): RAM 여유를 모르는(null — 용량을 못 읽은 호스트가 섞인 클러스터) 행은 뒤로 — `|| 0` 이면 '여유 0' 으로
+  //   세어 가장 급한 클러스터처럼 맨 위에 왔다(서버는 그 칸을 일부러 null 로 준다 — v2.733 C2-06).
   const capRows = (cap.data?.clusters || [])
     .filter((c) => scope.inScope(c.vcenterId))
-    .sort((a, b) => (a.ramHeadroomGB || 0) - (b.ramHeadroomGB || 0))
+    .sort((a, b) => (a.ramHeadroomGB == null) - (b.ramHeadroomGB == null) || (a.ramHeadroomGB ?? 0) - (b.ramHeadroomGB ?? 0))
     .slice(0, spec.rows);
 
   const dsPoints = (track.data?.points || []).map((p) => ({ x: p.ts, y: p.dsUsedGB == null ? null : p.dsUsedGB / 1024 }));
@@ -136,9 +139,9 @@ export default function Compare({ scope, sitesAll, spec, go }) {
               <STable className="v3-table">
                 <thead><tr><th>법인 · 클러스터</th><th className="num">호스트</th><th className="num">vCPU/코어</th><th className="num">RAM 오버커밋</th><th className="num">RAM 여유</th></tr></thead>
                 <tbody>
-                  {capRows.map((c) => (
-                    <tr key={`${c.vcenterId}:${c.cluster}`}>
-                      <td><div className="v3-cellname">{c.cluster}</div><div className="v3-cellsub">{c.vcenterId}</div></td>
+                  {capRows.map((c, i) => (
+                    <tr key={clusterRowKey(c, i)}>
+                      <td><div className="v3-cellname">{clusterNameLabel(c)}</div><div className="v3-cellsub">{c.vcenterId}</div></td>
                       <td className="num" data-sort={c.hosts ?? ''}>{fmtInt(c.hosts)}</td>
                       <td className="num" data-sort={c.vcpuPerCore ?? ''}>{c.vcpuPerCore ?? '—'}</td>
                       <td className="num" data-sort={c.ramOvercommitPct ?? ''} style={{ color: textColor(c.ramOvercommitPct) }}>{fmtPct(c.ramOvercommitPct)}</td>

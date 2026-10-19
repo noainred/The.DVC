@@ -18,7 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
-import { fleetPartialsNote } from '../fleetPartialText.js';
+import { fleetPartialsNote, fleetHeldNote } from '../fleetPartialText.js'; // v2.744(감사 후속 FC): fleetHeldNote — 등록부 손상으로 직전 목록 유지
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
@@ -277,6 +277,10 @@ export function BmUsage() {
         {/* v2.607 LEFT2607-02: 엣지가 일부만 보낸 베어메탈 목록 — 빠진 서버가 조용히 사라지지 않게 말한다. */}
         {fleetPartialsNote(data?.fleetPartials) && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>{fleetPartialsNote(data.fleetPartials)}</p>
+        )}
+        {/* v2.744(감사 후속 FC — EDGE-01): 엣지 iDRAC 등록부 손상으로 중앙이 직전 베어메탈 목록을 유지 중 — 그 엣지 서버 목록이 갱신되지 않는다. */}
+        {fleetHeldNote(data?.fleetPartials) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>{fleetHeldNote(data.fleetPartials)}</p>
         )}
         {/* ⚠ 인증 실패 정지는 **반드시 화면이 말한다** — 조용히 멈추면 사용자는 수집되는 줄 안다(v2.528). */}
         {authStopNote(data?.authStops || []) && (

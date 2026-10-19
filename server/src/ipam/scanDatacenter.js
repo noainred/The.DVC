@@ -18,6 +18,11 @@
  * ── 대역 제안(순수 — suggestAgentSubnets) ─────────────────────────────────────────────────
  *   그 에이전트가 수집하는 vCenter 의 VM·ESXi 호스트 IP + 그 에이전트가 담당하는 iDRAC 의 관리 IP 를 /24 로 묶는다.
  *   주소가 IP 가 아닌 것(FQDN 등록 호스트·iDRAC)은 대역을 알 수 없으므로 **개수만** 밝힌다(지어내지 않는다).
+ *   v2.744(감사 후속 FB-2): ESXi 호스트의 IP 판정은 원장과 같은 ipam/ledger.js hostLedgerIp(이름이 IP 면 이름, 아니면 관리 IP mgmtIp)를
+ *   **호출자가 넘긴다**(p.hostIp). 예전에는 이름만 봐서 VMware 권장 방식(FQDN 등록)인 현장의 호스트가 전부 'IP 없음' 으로 빠졌다 —
+ *   원장(v2.744 VC-01)은 같은 호스트의 관리 IP 를 올리는데 제안은 그 /24 를 내지 못했다. 이 모듈이 ledger.js 를 직접 import 하면
+ *   ledger → scanDatacenterSource → scanDatacenter → ledger 순환이 생겨(arch2579 ②-b SCC 상한) 함수를 주입받는다(판정 복제 금지).
+ *   주지 않으면 예전 규칙(이름이 IP 일 때만)이고 응답 hostIpRule 이 그 사실을 말한다('name-only' / 'name-or-mgmt').
  */
 import { ipToNum } from '../util/ipv4.js';
 
@@ -155,7 +160,10 @@ export function ipOfHost(h) {
  * @param {Array} p.vms p.hosts    스냅샷
  * @param {Array} p.idrac          그 에이전트 담당 iDRAC 서버({host,name,id})
  * @param {Record<string,string>} [p.vcName]
- * @returns {{ subnets:Array<{base,cidr,ips,vcenterIps,idracIps,vcenters:string[]}>, omitted:number, skipped:{hostsNoIp:number,idracNoIp:number}, totals }}
+ * @param {(h:object)=>({ip:string}|null)} [p.hostIp]  호스트 → IP(원장 판정 hostLedgerIp). 없으면 이름이 IP 일 때만(예전 규칙).
+ * @returns {{ subnets:Array<{base,cidr,ips,vcenterIps,idracIps,vcenters:string[]}>, omitted:number, skipped:{hostsNoIp:number,idracNoIp:number}, totals, hostIpRule:'name-only'|'name-or-mgmt' }}
+ *   totals.hostMgmtIps — 이름이 IP 가 아니라 관리 IP 로 센 호스트 수(hostIpRule 'name-or-mgmt' 일 때만 0 이 아닐 수 있다).
+ *   skipped.hostsNoIp — 주소를 알 수 없어 뺀 호스트(이름이 IP 가 아니고, 규칙이 'name-or-mgmt' 면 관리 IP 도 없는 것).
  */
 export function suggestAgentSubnets(p = {}) {
   const vcSet = new Set((Array.isArray(p.vcenterIds) ? p.vcenterIds : []).map(t));
@@ -169,7 +177,8 @@ export function suggestAgentSubnets(p = {}) {
     if (vc) e.vcenters.add(vcName[vc] || vc);
     return true;
   };
-  let hostsNoIp = 0; let idracNoIp = 0; let vmIps = 0; let hostIps = 0; let idracIps = 0;
+  let hostsNoIp = 0; let idracNoIp = 0; let vmIps = 0; let hostIps = 0; let idracIps = 0; let hostMgmtIps = 0;
+  const hostIpOf = typeof p.hostIp === 'function' ? p.hostIp : null;
   for (const vm of Array.isArray(p.vms) ? p.vms : []) {
     if (!vcSet.has(t(vm?.vcenterId))) continue;
     const ips = Array.isArray(vm.ipAddresses) && vm.ipAddresses.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
@@ -177,7 +186,10 @@ export function suggestAgentSubnets(p = {}) {
   }
   for (const h of Array.isArray(p.hosts) ? p.hosts : []) {
     if (!vcSet.has(t(h?.vcenterId))) continue;
-    if (add(t(h.name), 'vcenter', t(h.vcenterId))) hostIps += 1; else hostsNoIp += 1;
+    // v2.744(감사 후속 FB-2): 원장과 같은 판정(주입) — 없으면 예전처럼 이름만.
+    let ip = t(h.name);
+    if (hostIpOf) { let hip = null; try { hip = hostIpOf(h); } catch { hip = null; } ip = hip && typeof hip.ip === 'string' ? t(hip.ip) : ''; }
+    if (ip && add(ip, 'vcenter', t(h.vcenterId))) { hostIps += 1; if (ipToNum(t(h.name)) == null) hostMgmtIps += 1; } else hostsNoIp += 1;
   }
   for (const s of Array.isArray(p.idrac) ? p.idrac : []) {
     const ip = ipOfHost(s?.host) || ipOfHost(s?.id);
@@ -188,6 +200,7 @@ export function suggestAgentSubnets(p = {}) {
   })).sort((a, b) => b.ips - a.ips || (ipToNum(`${a.base}.0`) - ipToNum(`${b.base}.0`)));
   return {
     subnets: all.slice(0, SUGGEST_MAX), omitted: Math.max(0, all.length - SUGGEST_MAX),
-    skipped: { hostsNoIp, idracNoIp }, totals: { vmIps, hostIps, idracIps, subnets: all.length },
+    skipped: { hostsNoIp, idracNoIp }, totals: { vmIps, hostIps, hostMgmtIps, idracIps, subnets: all.length },
+    hostIpRule: hostIpOf ? 'name-or-mgmt' : 'name-only',
   };
 }

@@ -80,3 +80,23 @@ export function skipCell(info) {
   const k = info?.skipReason;
   return { text: skipLabel(k), title: plainText(info?.reason || '이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다') };
 }
+
+/*
+ * v2.744(감사 후속 FA-②·③): vCenter 하나짜리 응답(호스트·클러스터 추이·VM 성능 창 409)의 안내 한 줄과 사유별 조치.
+ * 인증 정지 문구(authStopSingleText)와 따로 둔다 — 비활성·점검중·엣지 위임은 비밀번호 문제가 아니다.
+ * 키는 SKIP_REASON_TEXT 와 같다(테스트 대조). 모르는 사유는 일반 안내로 떨어진다(지어내지 않는다).
+ */
+export const SKIP_HOW = Object.freeze({
+  disabled: '비활성 vCenter 에는 로그인하지 않습니다. 설정 › vCenter 에서 다시 켜면 조회합니다',
+  maintenance: '점검중으로 둔 vCenter 는 수집이 멈춰 있어 로그인하지 않습니다. 점검중을 풀면 다시 조회합니다',
+  site: '엣지 위임 vCenter 는 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다',
+  invalid: 'vCenter 설정 형식이 올바르지 않아 로그인하지 않습니다. 설정 › vCenter 에서 등록 정보를 고치세요',
+});
+
+/** 단건 응답의 `{ skipReason, reason }` → 안내 한 줄(BoldText). 사유가 없으면 빈 문자열. */
+export function skipSingleText(info) {
+  const k = info && typeof info === 'object' ? info.skipReason : null;
+  if (typeof k !== 'string' || !k) return '';
+  const how = SKIP_HOW[k] || '설정 › vCenter 에서 수집 방식·상태를 확인하세요';
+  return `**이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다**(${skipLabel(k)}) — ${how}. 값이 비어 있는 것은 사용량이 0 이라는 뜻이 아닙니다.`;
+}

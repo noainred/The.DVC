@@ -15,7 +15,7 @@ import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorSta
 import { setCollectorServers, sanitizeEdgeExport, sensorDetailCursorOf } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
-import { resilientFetch, retryDelayMs, abortableSleep, _internals as rfInternals } from '../util/resilientFetch.js';
+import { fetchNo503Retry } from '../util/postNo503Retry.js'; // v2.744(감사 후속 FB-1): 503 은 다시 묻지 않는 받기 — 한 벌
 import { identityIssue } from './registry.js';
 import { withOutboundTag } from '../util/outboundStats.js';
 import { poolRun } from '../util/pool.js';
@@ -88,45 +88,24 @@ export function edgeIdentityPatch(err) {
   return out;
 }
 
-/**
- * v2.744(감사 EDGE-02 = RECENT-03): 엣지 export 를 당긴다 — **503 은 호출 안에서 다시 묻지 않는다**.
+/*
+ * v2.744(감사 EDGE-02 = RECENT-03): 엣지 export 를 당길 때 **503 은 호출 안에서 다시 묻지 않는다**.
  *   엣지 export 의 503 은 지속형이다(v2.743 registryUnreadable — Retry-After 60 · no-store, 이 상태는 400·800ms 뒤에도 그대로다).
  *   예전 resilientFetch(retries 2)는 그 503 을 Retry-After(30초 상한 × 1~1.5)만큼 두 번 기다려, 첫 실패 pull 이 약 75초 걸렸다(재현 r3·a3
  *   — 동시 4 워커 중 하나를 붙잡고 주기를 넘겨 다음 틱을 건너뛰게 했다). 위임 스캔 직후 즉시 당김은 호출마다 같은 대기였다.
  *   다음 주기(기본 60초)가 다시 당기므로 잃는 것은 없다(실패 분기는 직전 스냅샷을 지우지 않는다).
- *   엣지 → 중앙 큰 본문 push 의 postNo503Retry(util/postNo503Retry.js — v2.742, v2.744 LEFT-09 에 util 로 옮김)와 **같은 규칙의 GET 판**이고,
- *   차이는 재시도 로그(onRetry — 로그 분석 규칙 collector-pull-retry 가 그 줄을 읽는다)뿐이다. 그 함수가 onRetry 를 받게 되면 이 함수는
- *   그 호출 한 줄로 바꿀 것(한 벌로). 재시도 대상 상태·간격·Retry-After·일시 오류 판정은 resilientFetch 의
- *   같은 상수·함수(RETRYABLE_STATUS·retryDelayMs·isTransientErr)를 쓴다 — 규칙을 복제하지 않는다. 시도마다 resilientFetch(retries 0)라
- *   리다이렉트·TLS·SSRF·계측 규칙도 그대로다. ⚠ resilientFetch 자체의 기본 동작(503 재시도)은 바꾸지 않는다 — 다른 호출부가 기댄다.
  *   그 밖의 재시도 대상(408·425·429·500·502·504)과 연결 오류는 **예전처럼** 호출 안에서 재시도한다.
- * @returns {Promise<Response>} 마지막 응답(503 이면 첫 503 응답) — 연결이 끝까지 실패하면 마지막 오류를 던진다.
+ * v2.744(감사 후속 FB-1): 이 규칙의 GET 판 사본(fetchExportNo503Retry)을 지우고 util/postNo503Retry.js 하나(fetchNo503Retry 이름)를 쓴다 —
+ *   두 벌의 차이는 재시도 로그(onRetry)뿐이었고 그 함수가 onRetry 를 받게 됐다. 재시도 로그 문장은 아래 pullOne 이 그대로 만든다
+ *   (로그 분석 규칙 collector-pull-retry 가 그 줄을 읽는다 — audit2744c ⑥ 이 고정).
  */
-async function fetchExportNo503Retry(url, init, { retries = 2, backoffMs = 400, onRetry = null } = {}) {
-  const signal = init.signal || null;
-  for (let attempt = 0; ; attempt++) {
-    let res;
-    try { res = await resilientFetch(url, { ...init, retries: 0 }); }
-    catch (e) {
-      if (signal?.aborted || attempt >= retries || !rfInternals.isTransientErr(e)) throw e;
-      onRetry?.({ attempt: attempt + 1, error: e.message });
-      await abortableSleep(backoffMs * 2 ** attempt, signal);
-      continue;
-    }
-    if (res.status === 503 || !rfInternals.RETRYABLE_STATUS.has(res.status) || attempt >= retries) return res;
-    onRetry?.({ attempt: attempt + 1, status: res.status });
-    try { await res.body?.cancel?.(); } catch { /* 미소진 본문 정리 — 연결을 붙잡지 않게 */ }
-    await abortableSleep(retryDelayMs(res.status, res.headers?.get?.('retry-after'), backoffMs * 2 ** attempt), signal);
-  }
-}
-
 async function pullOne(c, { retries = 2, signal = null } = {}) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
   // v2.742(감사 EDGE-01): 마지막으로 저장한 export 의 센서 상세 커서를 보낸다 — 엣지는 그 뒤로 바뀌지 않은 서버의 상세를 뺀다.
   //   커서가 없으면(첫 pull·중앙 재시작·직전 저장이 불완전) 쿼리를 싣지 않는다 = 전량. 구버전 엣지는 쿼리를 무시하고 전량을 준다.
-  // v2.744(감사 EDGE-02): 503(지속형 거절)은 호출 안에서 다시 묻지 않는다(fetchExportNo503Retry — 위 머리말).
+  // v2.744(감사 EDGE-02): 503(지속형 거절)은 호출 안에서 다시 묻지 않는다(fetchNo503Retry — 위 머리말).
   const sdSince = sensorDetailCursorOf(c.id);
-  const res = await fetchExportNo503Retry(`${c.url}/api/collector/export${sdSince ? `?sdSince=${encodeURIComponent(sdSince)}` : ''}`, {
+  const res = await fetchNo503Retry(`${c.url}/api/collector/export${sdSince ? `?sdSince=${encodeURIComponent(sdSince)}` : ''}`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
     timeoutMs: config.collector.timeoutMs, ...(signal ? { signal } : {}),
   }, {

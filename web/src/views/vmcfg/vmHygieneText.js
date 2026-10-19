@@ -2,6 +2,7 @@
 // 코드 집합은 서버 ALL_CODES 와 1:1(테스트 대조) — B10 코드 문구는 vmCfgText.VM_CFG_TEXT 를 그대로 쓴다.
 // 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석).
 import { VM_CFG_TEXT } from './vmCfgText.js';
+import { notReadKpiSub } from '../bizreport/notReadText.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 문구 한 벌(코어 라이선스·비용 배분과 공용)
 
 export const HYGIENE_TEXT = Object.freeze({
   'snap-age': { title: '오래된 스냅샷', fix: '스냅샷은 백업이 아닙니다 · 오래 둘수록 델타가 커지고 통합 시간이 길어집니다' },
@@ -59,12 +60,19 @@ export function orphanDeltaDetail(x = {}) {
 }
 
 /** 수집 범위 한 줄 — '이상 없음' 과 '아직 안 읽음' 을 섞지 않는다. */
-export function coverageText(c) {
+/**
+ * @param {object} c 서버 coverage
+ * @param {Array} [notReadVcenters] v2.744(감사 후속 FC): 서버 응답 notReadVcenters — 첫 수집 중·불통(직전 값 없음) vCenter 는 VM 이 0대라
+ *   coverage 에 나오지 않는다. 있으면 '읽지 못한 vCenter N곳 제외 — 하한' 을 덧붙인다(비활성만이면 붙이지 않는다).
+ */
+export function coverageText(c, notReadVcenters) {
   if (!c) return '';
   const parts = [`VM ${c.vms.toLocaleString()}대`, `구성 읽음 ${c.cfg.toLocaleString()}`, `장치 읽음 ${c.dev.toLocaleString()}`];
   if (c.notCollected) parts.push(`아직 안 읽음 ${c.notCollected.toLocaleString()}`);
   if (c.templates) parts.push(`템플릿 ${c.templates.toLocaleString()} 제외`);
   if (c.excepted) parts.push(`스냅샷 정책 예외 ${c.excepted.toLocaleString()}`);
+  const nr = notReadKpiSub(notReadVcenters);
+  if (nr) parts.push(nr);
   return parts.join(' · ');
 }
 

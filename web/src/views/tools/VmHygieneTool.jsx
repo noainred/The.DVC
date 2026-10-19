@@ -15,6 +15,7 @@ import {
 } from '../vmcfg/vmHygieneText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
+import { notReadNote } from '../bizreport/notReadText.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 는 판정 결과에 없다는 사실을 한 번 말한다
 
 function Chip({ active, onClick, children, title }) {
   return (
@@ -174,8 +175,9 @@ export default function VmHygieneTool({ scope }) {
         VM 구성(통합 필요·질문 대기·CBT·예약/제한·게스트 OS 대조·CD-ROM·디스크 모드)과 스냅샷 정책·유령 스냅샷·Tools 미설치·장기 미재부팅을 한 표로 봅니다. vCenter 에 따로 묻지 않습니다(수집 서버가 나눠 읽은 값).
       </div>
       {data.initial && <div className="banner" style={{ marginBottom: 8 }}>첫 수집 중입니다 — VM 목록이 아직 비어 있을 수 있습니다.</div>}
-      <div style={{ fontSize: 13, marginBottom: 6 }}>{coverageText(cov)}</div>
+      <div style={{ fontSize: 13, marginBottom: 6 }}>{coverageText(cov, data.notReadVcenters)}</div>
       {note && <div className="banner" style={{ marginBottom: 8 }}>{note}</div>}
+      {notReadNote(data.notReadVcenters) && <div className="banner" style={{ marginBottom: 8 }}>{notReadNote(data.notReadVcenters)}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>

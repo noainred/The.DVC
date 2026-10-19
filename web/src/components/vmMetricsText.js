@@ -7,11 +7,16 @@
  * 사람이 누르는 '다시 조회' 는 막지 않는다(`manual=1` — 고친 뒤 확인할 길).
  *
  * ⚠ 문구는 BoldText 로 그린다(강조는 별표 두 개). 백틱 금지.
+ *
+ * v2.744(감사 후속 FA-③): 서버는 그보다 먼저 **직접 수집 대상인지**(비활성·점검중·엣지 위임) 보고, 아니면 manual 이어도
+ *   409 + `skipReason` 으로 답한다(authStopGate.js respondIfVcAuthStopped). 예전에는 그 본문을 몰라 '조회 실패: …' 로 그리고
+ *   20초마다 같은 409 를 다시 받았다. 이제 `skip` 으로 따로 돌려주고 자동 갱신을 멈춘다(문구는 vcAuthStopText 한 벌).
  */
+import { skipSingleText } from '../views/vcAuthStopText.js';
 
 /**
  * @param {unknown} err fetchJson 이 던진 오류(HttpError 면 `status`·`body` 가 있다)
- * @returns {{authStopped: null | {attempts:number|null, since:number|null, reason:string}, message: string}}
+ * @returns {{authStopped: null | {attempts:number|null, since:number|null, reason:string}, skip: null | {skipReason:string, reason:string}, message: string}}
  */
 export function metricErrorState(err) {
   const body = err && typeof err === 'object' ? err.body : null;
@@ -20,9 +25,21 @@ export function metricErrorState(err) {
     const a = body.attempts;
     const attempts = a == null || a === '' || !Number.isFinite(Number(a)) ? null : Number(a);
     const since = body.since == null || body.since === '' || !Number.isFinite(Number(body.since)) ? null : Number(body.since);
-    return { authStopped: { attempts, since, reason: String(body.reason || '') }, message: String(body.reason || err.message || '') };
+    return { authStopped: { attempts, since, reason: String(body.reason || '') }, skip: null, message: String(body.reason || err.message || '') };
   }
-  return { authStopped: null, message: String(err?.message || err || '') };
+  if (body && typeof body === 'object' && typeof body.skipReason === 'string' && body.skipReason) {
+    return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || '') }, message: String(body.reason || err.message || '') };
+  }
+  return { authStopped: null, skip: null, message: String(err?.message || err || '') };
+}
+
+/** 이 오류면 20초 자동 갱신을 멈춘다 — 다시 물어도 같은 답이다(인증 정지 · 직접 수집 대상 아님). */
+export const stopsAutoRefresh = (st) => !!(st && (st.authStopped || st.skip));
+
+/** v2.744(감사 후속 FA-③): 직접 수집 대상이 아니라 조회하지 않은 vCenter 안내(자동 갱신을 멈췄다는 사실 포함). 없으면 빈 문자열. */
+export function metricSkipText(skip) {
+  const t = skipSingleText(skip);
+  return t ? `${t} 자동 갱신도 멈췄습니다 — 다시 물어도 같은 답이라 로그인하지 않습니다.` : '';
 }
 
 /** 인증 실패 정지 안내(자동 갱신을 멈췄다는 사실 + 조치). */

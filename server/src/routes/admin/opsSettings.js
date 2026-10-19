@@ -199,7 +199,13 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
   res.json({ ok: true, policy: after, migration: mig });
 });
 
-adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
+// v2.744(감사 후속 FB-3): 조회에도 ownerWarnings — 저장 응답에만 있으면, 이미 범위 계정이 소유자 목록에 든 현장은 화면을 열어도 그 사실을 모른다
+//   (그 계정은 소유자 등급 라우트에서 403 이다). 저장 응답과 같은 함수(scopedOwnerWarnings)로 만든다.
+adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => {
+  const cur = loadConfiguredSecurity();
+  const ownerWarnings = scopedOwnerWarnings(cur.settingsOwners);
+  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}) });
+});
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).

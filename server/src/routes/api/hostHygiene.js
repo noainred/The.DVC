@@ -21,6 +21,7 @@ import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(사유)
 import { loadLogSettings } from '../../logs/settings.js';
+import { notReadVcentersOf, notReadPartialOf } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -29,12 +30,17 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  return analyzeHostCfg(scoped.hosts, {
+  const r = analyzeHostCfg(scoped.hosts, {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
     q: qStr(req.query.q, 128) || undefined,
   });
+  // v2.744(감사 후속 FC — VC-03 의 형제): 첫 수집 중·불통(직전 값 없음)·비활성 vCenter 는 스냅샷에 호스트가 0대라 판정 결과 어디에도
+  //   나오지 않았다(coverage 는 들어온 호스트만 센다) — 읽은 vCenter 만의 결과를 전체 결과처럼 말하지 않게 그 목록(범위·선택 안만)과
+  //   partial(비활성만 빠졌으면 false)을 싣는다. 화면이 '읽지 못한 vCenter N곳 제외' 를 말한다.
+  const notReadVcenters = notReadVcentersOf(scoped);
+  return { ...r, notReadVcenters, partial: notReadPartialOf(notReadVcenters) };
 }
 
 export function registerHostHygiene(api) {
@@ -87,6 +93,8 @@ export function registerHostHygiene(api) {
       const drift = row.findings.filter((f) => f.code === 'drift').map((f) => `${f.facts.field}=${f.facts.value}`).join(' / ');
       lines.push(csvLine([row.vcenterName, row.name, row.cluster, row.version, row.build, row.sev, [...new Set(row.findings.map((f) => f.code))].join(' '), drift]));
     }
+    // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 호스트는 이 파일에 없다 — 파일만 받은 사람도 알 수 있게 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
+    if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — 판정하지 않음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
     logAudit({ user: req.user?.username, action: 'host-hygiene.csv', target: 'host-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="host-hygiene-${fileStamp()}.csv"`);

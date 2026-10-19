@@ -5,7 +5,7 @@ import { DataTable, ErrorBox, StateBadge, UsageCell, VmLink } from '../../compon
 import { Card } from './shared.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopNote, authStopCell } from '../vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 평균을 조회하지 않은 vCenter
+import { authStopNote, authStopCell, skipNote, skipCell } from '../vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 평균을 조회하지 않은 vCenter · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
 
 // 모듈 스코프(props만 사용) — VmFinder 렌더 바디 안에 정의하면 매 렌더 새 타입이 되어 칩
@@ -64,6 +64,8 @@ export function VmFinder() {
       { key: 'avgDayCpu', label: '1일 평균', align: 'right', render: (r) => (r.avgDayCpu == null ? '—' : `${r.avgDayCpu}%`) },
       { key: 'avgWeekCpu', label: '1주 평균', align: 'right', render: (r) => (r.avgWeekCpu == null ? '—' : `${r.avgWeekCpu}%`) },
       { key: 'idle', label: '유휴', render: (r) => (r.idle ? <span className="badge red">유휴</span> : (r.idle === false ? <span className="badge green">사용</span>
+        // v2.744(감사 후속 FA-②): 직접 수집 대상이 아니라(비활성·점검중·엣지 위임) 평균을 조회하지 않은 VM — 인증 정지와 다른 사실이다.
+        : r.skipReason ? <span className="muted" style={{ fontSize: 11.5 }} title={skipCell(data?.skippedVcenters?.[r.vcenterId] || { skipReason: r.skipReason }).title}>{skipCell({ skipReason: r.skipReason }).text}</span>
         // v2.733(C3-01): vCenter 가 인증 실패로 멈춰 평균을 조회하지 않은 VM — '—'(판정 불가)의 이유를 말한다.
         : r.authStopped ? <span className="muted" style={{ fontSize: 11.5, color: 'var(--amber)' }} title={authStopCell(data?.authStopped?.[r.vcenterId]).title}>{authStopCell(null).text}</span> : '—')) },
     ] : []),
@@ -100,6 +102,7 @@ export function VmFinder() {
         {withAvg && data.avgTruncated && <Card label="평균 분석 범위" value={`상위 ${data.avgCap}`} meta="성능부하 방지 상한" />}
       </div>
       {withAvg && authStopNote(data.authStopped) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>※ <BoldText text={authStopNote(data.authStopped)} /></div>}
+      {withAvg && skipNote(data.skippedVcenters) && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ <BoldText text={skipNote(data.skippedVcenters)} /></div>}
       {withAvg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ 1일/1주 평균은 {data.avgTruncated ? `결과 상위 ${data.avgCap}대에 한해 ` : ''}vCenter 성능 데이터로 산출합니다(라이브). 평균이 기준 이하이고 전원 On인 VM을 ‘유휴(생성됐지만 미사용)’로 표시합니다.</div>}
       <DataTable columns={cols} rows={items} initialSort={withAvg ? { key: 'avgWeekCpu', dir: 'asc' } : { key: 'cpuUsagePct', dir: 'asc' }} />
     </>

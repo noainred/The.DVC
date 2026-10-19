@@ -21,6 +21,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { analyzeVmHygiene, ALL_CODES } from '../../vmhygiene/analyze.js';
 import { loadVmHygieneSettings, saveVmHygieneSettings } from '../../vmhygiene/settings.js';
 import { vmHygieneNotifyOnce, vmHygieneNotifierStatus } from '../../vmhygiene/notifier.js';
+import { notReadVcentersOf, notReadPartialOf } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -31,12 +32,19 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  return analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
+  const r = analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
     q: qStr(req.query.q, 128) || undefined,
   });
+  // v2.744(감사 후속 FC — VC-03 의 형제): 첫 수집 중·불통(직전 값 없음)·비활성 vCenter 는 스냅샷에 VM 이 0대라 판정 결과 어디에도
+  //   나오지 않았다(coverage 는 들어온 VM 만 센다) — 그 목록(범위·선택 안만)과 partial(비활성만 빠졌으면 false)을 싣는다.
+  //   ⚠ r 에는 열거하지 않는 allRows(알림 요약용 — v2.719 B1-05)가 있어 펼치면 사라진다 — 원본 객체에 덧붙인다.
+  const notReadVcenters = notReadVcentersOf(scoped);
+  r.notReadVcenters = notReadVcenters;
+  r.partial = notReadPartialOf(notReadVcenters);
+  return r;
 }
 
 export function registerVmHygiene(api) {
@@ -83,6 +91,8 @@ export function registerVmHygiene(api) {
     for (const row of r.rows) {
       lines.push(csvLine([row.vcenterName, row.name, row.host, row.cluster, row.powerState, row.worst, row.findings.map((f) => f.code).join(' '), row.excepted || '']));
     }
+    // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
+    if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — 판정하지 않음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

@@ -4,6 +4,24 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { sessionSecurityBody } from './sessionSecurityBody.js';
 
 /**
+ * v2.744(감사 후속 FB-3): 소유자 목록에 **범위가 지정된 계정**이 있으면 그 사실을 말한다(서버 GET·PUT 응답의 ownerWarnings).
+ *   v2.744 AUTHZ-02 로 소유자 등급 라우트는 소유자 + 전체 범위 계정만 통과한다 — 그 계정은 목록에 있어 '설정' 메뉴는 보이지만
+ *   이 화면·자격증명 저장 방식·포탈 백업·메일 발송·공유 중앙 토큰 같은 소유자 등급 화면에서 거부된다. 조용히 두면 관리자는
+ *   '소유자로 넣었는데 왜 안 되나' 를 알 수 없다. 저장은 막지 않는다(범위를 나중에 풀 수 있다 — 서버도 막지 않는다).
+ */
+export function OwnerScopeWarnings({ warnings }) {
+  const list = (Array.isArray(warnings) ? warnings : []).map((w) => String(w?.username || '')).filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div role="status" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--amber,#f59e0b)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+      ⚠ 범위가 지정된 계정 {list.length}개는 소유자 목록에 있어도 소유자 등급 화면(세션 보안·자격증명 저장 방식·포탈 백업·메일 발송·공유 중앙 토큰 등)을 쓸 수 없습니다 —
+      전 법인 공용 설정이라 서버가 전체 범위(vCenter 제한 없는) 계정만 통과시킵니다. ‘설정’ 메뉴는 그대로 보입니다.
+      <div style={{ marginTop: 4 }}>해당 계정: <b>{list.join(', ')}</b> — 소유자 등급 화면을 쓰게 하려면 사용자 관리에서 그 계정의 범위를 비우세요.</div>
+    </div>
+  );
+}
+
+/**
  * 설정 → 세션 보안 — 유휴 자동 로그아웃 시간 설정. 변경 시 본인 OTP 재인증이 필요하며,
  * 누가 언제 바꿨는지 감사 로그(설정 › 감사 로그)에 기록된다.
  */
@@ -14,7 +32,7 @@ export default function SessionSecurity() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const load = () => fetchJson('/admin/security/session').then((r) => { setS({ ...r, settingsOwners: (r.settingsOwners || []).join(', ') }); setErr(null); }).catch((e) => setErr(e.message));
+  const load = () => fetchJson('/admin/security/session').then((r) => { setS({ ...r, ownerWarnings: r.ownerWarnings || [], settingsOwners: (r.settingsOwners || []).join(', ') }); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   if (err) return <ErrorBox message={err} />;
   if (!s) return <Loading />;
@@ -24,7 +42,7 @@ export default function SessionSecurity() {
     try {
       const r = await putJson('/admin/security/session', sessionSecurityBody(s, otp));
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
-      else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
+      else { const ns = r.settings || s; setS({ ...ns, ownerWarnings: r.ownerWarnings || [], settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -86,6 +104,7 @@ export default function SessionSecurity() {
           <input className="input" style={{ width: '100%', maxWidth: 480 }} placeholder="noainred, admin" value={s.settingsOwners || ''}
             onChange={(e) => setS({ ...s, settingsOwners: e.target.value })} />
           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>⚠ 본인 계정을 빼면 다음부터 설정에 못 들어올 수 있으니 주의하세요.</div>
+          <OwnerScopeWarnings warnings={s.ownerWarnings} />
           {(s.autoOwners || []).length > 0 && (
             <div className="muted" style={{ fontSize: 11, marginTop: 6, color: 'var(--accent-2,#22d3ee)' }}>
               ＋ 자동 포함(중앙 배포 admin): <b>{(s.autoOwners || []).join(', ')}</b> — 중앙에서 이 엣지로 배포한 관리자 계정은 설정에 접근할 수 있습니다(여기서 지우지 않아도 됨. 중앙에서 제거하면 자동 해제).

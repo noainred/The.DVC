@@ -80,7 +80,15 @@ export function suggestSummaryText(s) {
   const t = s.totals || {};
   const parts = [`/24 대역 ${t.subnets ?? 0}개`, `VM IP ${t.vmIps ?? 0}`, `ESXi 호스트 IP ${t.hostIps ?? 0}`, `iDRAC IP ${t.idracIps ?? 0}`];
   const notes = [];
-  if (s.skipped?.hostsNoIp) notes.push(`이름으로 등록된 ESXi 호스트 ${s.skipped.hostsNoIp}대는 주소를 몰라 뺐습니다`);
+  // v2.744(감사 후속 FB-2): 서버가 원장과 같은 판정(이름이 IP 가 아니면 관리 IP)을 썼으면 hostIpRule 'name-or-mgmt' 다 —
+  //   관리 IP 로 센 호스트를 밝히고, 뺀 호스트는 '관리 IP 도 없다' 고 말한다. 구버전 응답(필드 없음)은 예전 문구.
+  const mgmtRule = s.hostIpRule === 'name-or-mgmt';
+  if (mgmtRule && t.hostMgmtIps) notes.push(`이름으로 등록된 ESXi 호스트 ${t.hostMgmtIps}대는 관리 IP(첫 VMkernel 포트의 IPv4)로 셌습니다`);
+  if (s.skipped?.hostsNoIp) {
+    notes.push(mgmtRule
+      ? `이름으로 등록된 ESXi 호스트 ${s.skipped.hostsNoIp}대는 관리 IP 도 수집되지 않아 뺐습니다`
+      : `이름으로 등록된 ESXi 호스트 ${s.skipped.hostsNoIp}대는 주소를 몰라 뺐습니다`);
+  }
   if (s.skipped?.idracNoIp) notes.push(`IP 가 아닌 주소로 등록된 iDRAC ${s.skipped.idracNoIp}대는 뺐습니다`);
   if (s.omitted) notes.push(`상위 ${s.subnets?.length ?? 0}개만 보여 줍니다(나머지 ${s.omitted}개)`);
   return `${parts.join(' · ')}${notes.length ? ` — ${notes.join(' · ')}` : ''}`;

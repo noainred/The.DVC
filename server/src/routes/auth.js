@@ -121,7 +121,6 @@ authRouter.post('/login', async (req, res) => {
   logAudit({ user: user.username, action: '로그인', detail: `${user.role}${single ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
-  const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const { adEpoch: _adEpoch, ...userOut } = user; // 정책 epoch 는 토큰에만 싣는다(응답에는 필요 없다)
   const enriched = {
     ...userOut,
@@ -136,13 +135,32 @@ authRouter.post('/login', async (req, res) => {
     ...toolFields(user),
     // username 만으로 판정 — 표시이름(name)은 admin 이 변경 가능한 값이라 권한 축에서 제외한다
     // (routes/admin/shared.js requireSettingsOwner 주석 참고: 4차 재감사에서 승계 우회 재현).
-    isSettingsOwner: !config.auth.enabled || owners.includes(user.username),
+    // v2.744(감사 후속 FB-3): 판정은 ownerFields 한 곳(/auth/me 와 같은 함수 — 아래 머리말).
+    ...ownerFields({ ...user, scope: local ? local.scope : user.scope }),
     // 서비스 허브 주소는 인증 후에만 — 미인증 응답에 내부 호스트를 노출하지 않는다.
     serviceHubUrl: config.serviceHubUrl || '',
     scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] },
   };
   res.json({ token, user: enriched });
 });
+
+/**
+ * 응답에 싣는 설정 소유자 필드(v2.744 감사 후속 FB-3) — 로그인과 /auth/me 가 **같은 함수**로 만든다.
+ *  · isSettingsOwner — '설정' 메뉴 노출(소유자 목록에 username 이 있는가). **뜻을 바꾸지 않는다**: 웹은 이 값 하나로 설정 탭 전체를
+ *    숨기는데(App.jsx ownerOnly), 설정 탭에는 범위 관리자가 쓸 수 있는 화면(범위 안 사용자 관리 · 범위 병합 설정)이 함께 있다.
+ *    범위 계정이면 거짓으로 바꾸면 그 화면들까지 통째로 사라진다(세션 보안 화면 문구도 '이 계정으로 로그인했을 때만 설정이 보입니다').
+ *  · settingsOwnerTier — 소유자 등급 라우트(requireSettingsOwner — 세션 보안·자격증명 저장 방식·백업·메일·공유 중앙 토큰 등)를
+ *    **실제로 통과하는가**(v2.744 AUTHZ-02: 소유자 + 전체 범위). 판정을 복제하지 않으려고 그 미들웨어를 그대로 불러 결과만 본다 —
+ *    화면은 이 값으로 소유자 등급 화면·버튼을 잠근다(소유자이지만 범위 계정이면 isSettingsOwner true · settingsOwnerTier false).
+ */
+function ownerFields(user) {
+  const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
+  const isSettingsOwner = !config.auth.enabled || owners.includes(user?.username); // username 만(위 주석 참고)
+  let settingsOwnerTier = false;
+  const sink = { status() { return sink; }, json() { return sink; } };
+  try { requireSettingsOwner({ user }, sink, () => { settingsOwnerTier = true; }); } catch { settingsOwnerTier = false; }
+  return { isSettingsOwner, settingsOwnerTier };
+}
 
 /**
  * 응답에 싣는 도구 접근 필드(v2.555) — **한 곳에서 만든다**. 로그인과 `/auth/me` 가 각자
@@ -164,9 +182,8 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   // permissions: 현재 매트릭스 기준 '내 기능 권한'(프론트 메뉴/버튼 게이팅용, 매 조회 시 최신 반영).
   // scope: 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체).
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
-  const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
-  const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username); // username 만(위 주석 참고)
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: userPermissions(req.user), ...toolFields(req.user), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
+  // settingsOwnerTier(v2.744 감사 후속 FB-3): 소유자 등급 라우트를 실제로 통과하는가(소유자 + 전체 범위) — ownerFields 머리말.
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: userPermissions(req.user), ...toolFields(req.user), ...ownerFields(req.user), serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
 /**
