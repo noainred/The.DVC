@@ -19,7 +19,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.604
-import { corruptOnlyReason } from '../util/registryCore.js';
+import { corruptOnlyReason, summarizeRegistryError } from '../util/registryCore.js';
+import { safeLoadText } from '../util/atomicWrite.js'; // v2.744(최종 검토 FB): 등록부 읽기 예외 문구도 원문 조각 없이
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -93,9 +94,15 @@ let _timer = null;
 /** 이전 주기의 누적 카운터(인메모리 — 재시작하면 첫 주기가 다시 `null` 이다. 그것이 정직하다). */
 const _prev = new Map();
 
-export function bmUsageStatus() {
+/**
+ * @param {{detail?:boolean}} [o]  detail = 등록부 로드 오류 사유의 위치(줄·칸)까지 싣는가(v2.744 최종 검토 FB — RD-R1·RG2744-03).
+ *   거짓이면 sourceErrors 의 등록부 항목을 분류 고정 문구로만 싣는다(sourceErrorsView). 기본값은 가리는 쪽이다(거부 기본값 —
+ *   fleetPartialsSummary 와 같은 규칙). 관리자 + 전체 범위 응답(routes/api/bmUsage.js — isAdminReq)만 참으로 준다.
+ *   ⚠ 어느 쪽이든 원문(JSON.parse 메시지의 파일 조각)은 없다 — 원문은 _last 에 들어가지 않는다(registrySourceError).
+ */
+export function bmUsageStatus({ detail = false } = {}) {
   const s = loadBmUsageSettings();
-  return {
+  const st = {
     enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs, ...(isMockMode() ? { demo: true } : {}),
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     // v2.613 RUNTIME2613-05: 실제로 쓰는 예산(장비 시한과 묶인 값)과 잘랐는지.
@@ -121,6 +128,9 @@ export function bmUsageStatus() {
     authStopCount: _authStopped.size,
     lastPrune: _lastPrune,
   };
+  // v2.744(최종 검토 FB): 등록부 로드 오류 사유는 detail 일 때만 위치(줄·칸)까지 — 그 밖에는 분류 문구(sourceErrorsView).
+  if (st.last && Array.isArray(st.last.sourceErrors)) st.last = { ...st.last, sourceErrors: sourceErrorsView(st.last.sourceErrors, { detail }) };
+  return st;
 }
 
 /**
@@ -154,6 +164,35 @@ export function authStopsFor(targets = []) {
 const _srcErrLog = createChangeLogger({ windowMs: 10 * 60_000 });
 let _fleetOverride = null;   // 테스트 전용(_setFleetForTest)
 const errText = (e) => String(e?.message || e || 'unknown').slice(0, 200);
+
+/*
+ * v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류는 **원문이 아니라 요약**으로 싣는다. `registryLoadError().reason` 은 V8 JSON.parse
+ *   메시지라 오류 위치 앞뒤 파일 조각(`..."assword": SuperSecre"...` — 손상된 OS 계정 등록부의 평문 비밀번호 앞부분)을 싣는데, sourceErrors 는
+ *   _last → GET /tools/bm-usage 상태(operator 는 tools 를 기본 보유)·지금 수집 응답·콘솔·엣지 로그로 나간다. 요약은 summarizeRegistryError 한 벌이고
+ *   (GD-R1 fleetPartials 와 같은 규칙) 관리자용 문장(위치 숫자 포함)을 항목에, 그 밖의 계정용 문장(분류 고정 문구)을 SRC_LABEL 에 둔다 —
+ *   항목 모양({source, error})은 그대로라 화면(bmUsageText.sourceErrorsNote)이 바뀌지 않는다. 원문은 그 노드의 보존본 파일에 있다.
+ */
+const SRC_LABEL = new WeakMap();
+/** @param {string} source  @param {(why:string)=>string} sentence  @param {any} err  registryLoadError() 값(또는 사유 문자열) */
+export function registrySourceError(source, sentence, err) {
+  const e0 = err && typeof err === 'object' ? err : { reason: err == null ? '' : String(err) };
+  const sum = summarizeRegistryError(e0) || summarizeRegistryError({ reason: '' });
+  const entry = { source, error: sentence(sum.text) };
+  SRC_LABEL.set(entry, sentence(sum.label));
+  return entry;
+}
+/**
+ * sourceErrors 의 응답 모양(순수 — 원본을 바꾸지 않는다). detail 이 거짓이면 등록부 항목을 분류 고정 문구로 바꾼다. 그 밖의 항목은 그대로.
+ *   관리자 + 전체 범위 응답만 detail:true(호출부가 isAdminReq 로 판정). 원소가 객체가 아니면 그대로 둔다(화면이 거른다).
+ */
+export function sourceErrorsView(list, { detail = false } = {}) {
+  if (!Array.isArray(list)) return list;
+  return list.map((x) => {
+    if (!x || typeof x !== 'object') return x;
+    if (detail || !SRC_LABEL.has(x)) return { ...x };
+    return { ...x, error: SRC_LABEL.get(x) };
+  });
+}
 const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
 
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
@@ -194,15 +233,16 @@ export async function currentTargets() {
         if (why) sourceErrors.push({ source: 'idrac-registry', error: `iDRAC 등록부(idrac.json)를 읽지 못했습니다(${why}) — 대상 서버가 no-idrac 로 보일 수 있습니다` });
       }
       return list;
-    } catch (e) { sourceErrors.push({ source: 'idrac-registry', error: errText(e) }); return []; }
+    } catch (e) { sourceErrors.push({ source: 'idrac-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; } // v2.744(최종 검토 FB): 따옴표 든 원문은 요약
   })();
   const bmServers = (() => {
     try {
       const list = listBmServersRaw();
       const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
-      if (le) sourceErrors.push({ source: 'os-registry', error: `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${errText(le?.message || le?.reason || le)})` });
+      // v2.744(최종 검토 FB — RD-R1·RG2744-03): 원문(le.reason — JSON.parse 메시지의 파일 조각)이 아니라 요약(registrySourceError).
+      if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})`, le));
       return list;
-    } catch (e) { sourceErrors.push({ source: 'os-registry', error: errText(e) }); return []; }
+    } catch (e) { sourceErrors.push({ source: 'os-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; }
   })();
   for (const se of sourceErrors) {
     if (_srcErrLog(`src:${se.source}`, se.error)) console.warn(`[bmusage] 대상 해석 입력 실패(${se.source}): ${se.error}`);

@@ -36,6 +36,7 @@ import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
 import { createChangeLogger } from '../util/logThrottle.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(최종 검토 FB): 등록부 로드 오류는 원문이 아니라 요약
 import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const _regLog = createChangeLogger({ windowMs: 60 * 60_000 }); // v2.621(감사 EDGE-03): 등록부 손상 경고는 같은 사유면 1시간에 한 줄
@@ -166,8 +167,11 @@ async function pushSanSwitchOnce() {
         // v2.613(감사 EDGE2613-04): **보내지 않되 상태는 올린다**(v2.517 규약 — storage v2.581 과 같다). 예전에는 여기서 조용히
         //   돌아가 중앙이 '엣지가 안 보냈다' 와 '위임은 있는데 첫 수집 대기' 를 구분하지 못했다. ⚠ `/sanswitch-data` 의 statusOnly 수신은
         //   v2.613.0 부터라 그보다 낮은 중앙에는 보내지 않는다(빈 청크 0 = 목록 교체 — 중앙 목록이 비워진다). 사유는 상태에 남긴다.
-        const reason = assigned == null ? `등록부를 읽지 못해 보내지 않았습니다${regErr?.reason ? `(${String(regErr.reason).slice(0, 200)})` : ''} — '위임 0대' 가 아닙니다` : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)`;
-        if (assigned == null && _regLog('registry', regErr?.reason)) console.warn(`[sanswitch-push] ${reason}. 중앙 sanswitch-config pull 이 등록부를 다시 쓰면 풀립니다`);
+        // v2.744(최종 검토 FB — RD-R2·RG2744-01): 사유는 원문(registryLoadError().reason — JSON.parse 메시지의 파일 조각, 손상된 자격증명 파일이면
+        //   평문 비밀번호 앞부분)이 아니라 요약(summarizeRegistryError — 분류 + 위치 숫자)이다. 이 문장은 _last(엣지 로그로 중앙에 당겨진다)와 콘솔에 실린다.
+        const why = regErr ? (summarizeRegistryError(regErr)?.text || '') : '';
+        const reason = assigned == null ? `등록부를 읽지 못해 보내지 않았습니다${why ? `(${why})` : ''} — '위임 0대' 가 아닙니다` : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)`;
+        if (assigned == null && _regLog('registry', why)) console.warn(`[sanswitch-push] ${reason}. 중앙 sanswitch-config pull 이 등록부를 다시 쓰면 풀립니다`);
         const cap = await centralStatusOnlySupport({ minVersion: DEVICE_STATUS_ONLY_MIN_CENTRAL });
         if (!cap.ok) {
           _last = { at: Date.now(), sent: 0, reason, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null };

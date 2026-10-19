@@ -26,7 +26,7 @@ import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attri
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken, isAdminReq } from '../../auth/addressMask.js';
-import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
+import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
@@ -240,7 +240,9 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       distribution: isAdmin && !allowed && !tg.isEdge ? distributionStatus(safeKnownAgents()) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
-      status: scopeBmStatus(isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts), allowed),
+      // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
+      //   원문 조각은 폴러가 처음부터 싣지 않는다(registrySourceError). fleetPartials(아래)와 같은 규칙이다.
+      status: scopeBmStatus(isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), isAdmin), hosts), allowed),
       enterpriseActive: enterpriseActive(),
       licenseLabels: TIER_LABEL,
       /*
@@ -327,7 +329,8 @@ api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
     user: req.user?.username, action: 'bm-usage.collect', ip: req.ip || '',
     detail: JSON.stringify({ ok: !!r.ok, servers: r.servers ?? null }).slice(0, 300),
   });
-  res.json(r);
+  // v2.744(최종 검토 FB): 결과의 sourceErrors 도 주 조회와 같은 규칙 — 등록부 사유의 위치(줄·칸)는 관리자에게만(operator 는 분류 문구만).
+  res.json(!isAdminReq(req) && Array.isArray(r?.sourceErrors) ? { ...r, sourceErrors: sourceErrorsView(r.sourceErrors, { detail: false }) } : r);
 });
 
 /**
@@ -355,7 +358,7 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   const hosts = isAdmin ? [] : await bmAddressHosts(tg);
   const maskEv = (list) => (isAdmin ? list : maskActivityEvents(list, hosts));
   if (!allowed) {
-    const poller = isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), false), hosts);
+    const poller = isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), false), hosts);
     return res.json({ ok: true, poller, events: maskEv(events0), log: scopeFilePaths(bmUsageLogInfo(), req.user), ...(isAdmin ? {} : { addressHidden: true }) });
   }
   // 대상을 못 읽으면 아래에서 전부 걸러진다 — 넓게 여는 쪽으로 실패하지 않는다.

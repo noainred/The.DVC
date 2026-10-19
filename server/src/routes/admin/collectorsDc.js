@@ -21,7 +21,9 @@ import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
-import { pullNow } from '../../collector/puller.js';
+import { pullNow, EDGE_REASON_TEXT } from '../../collector/puller.js';
+import { summarizeRegistryError } from '../../util/registryCore.js'; // v2.744(최종 검토 FB — RG2744-04)
+import { safeLoadText } from '../../util/atomicWrite.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
 import { fetchNo503Retry } from '../../util/postNo503Retry.js'; // v2.744(회귀 검토 GC-R2): 엣지 export 받기 — 503 은 다시 묻지 않는다
@@ -37,6 +39,28 @@ const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('수집 서버(엣지)·DataCenter 등록부는 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 조회·변경할 수 있습니다.');
 
+
+/**
+ * v2.744(최종 검토 FB — RG2744-04): 엣지 export 오류 본문의 **사유 문구**(순수). 원문 조각을 싣지 않는다 — collector/puller.js exportFailError 와
+ *   같은 규칙이다. 2.743 엣지는 등록부 손상 503 의 detail·error 에 JSON.parse 오류 원문(손상된 idrac.json 의 조각 — 평문 비밀번호 앞부분)을 실어
+ *   보냈고, 이 연결 테스트가 그 error 를 reason·steps 에 그대로 실었다(주기 pull 쪽은 이미 요약했다 — 비대칭).
+ *   · 알려진 거절 코드(reason)면 그 고정 문구 + 요약(summarizeRegistryError — registryError 코드가 오면 글자를 보지 않는다). error 는 읽지 않는다.
+ *   · 그 밖(export 500 의 err.message 등)은 safeLoadText — 따옴표·제어 문자가 든 원문만 요약하고 사람 문장은 그대로 둔다.
+ *   이 라우트는 관리자 + 전체 범위 전용이라 위치(줄·칸) 숫자는 남긴다(summary text).
+ * @returns {string}  사유가 없으면 ''
+ */
+export function edgeExportErrorText(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  const code = typeof body.reason === 'string' && Object.hasOwn(EDGE_REASON_TEXT, body.reason) ? body.reason : null;
+  if (code) {
+    const rawDetail = typeof body.detail === 'string' ? body.detail.slice(0, 400) : '';
+    const re = body.registryError && typeof body.registryError === 'object' && !Array.isArray(body.registryError) ? body.registryError : null;
+    const why = (rawDetail || re) ? (summarizeRegistryError(re ? { ...re, reason: rawDetail } : { reason: rawDetail })?.text || '') : '';
+    return `${EDGE_REASON_TEXT[code]}(${code})${why ? ` — ${why}` : ''}`;
+  }
+  const msg = (typeof body.error === 'string' && body.error) || (typeof body.reason === 'string' && body.reason) || '';
+  return safeLoadText(msg, 300);
+}
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
 // vmId 형식 '<vcId>:<moref>'. 스냅샷으로 VM 존재·vCenter 자격증명을 확인한 뒤 SOAP 실행.
@@ -500,7 +524,8 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
     if (!r.ok) {
       // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
       let serverMsg = '';
-      try { const j = await readJsonCapped(r, EDGE_SMALL_MAX_BYTES, '엣지 오류 응답'); serverMsg = (typeof j?.error === 'string' && j.error) || (typeof j?.reason === 'string' && j.reason) || ''; } catch { /* 본문 없음/비JSON */ }
+      // v2.744(최종 검토 FB — RG2744-04): 본문 원문을 그대로 싣지 않는다(edgeExportErrorText — puller exportFailError 와 같은 요약).
+      try { const j = await readJsonCapped(r, EDGE_SMALL_MAX_BYTES, '엣지 오류 응답'); serverMsg = edgeExportErrorText(j); } catch { /* 본문 없음/비JSON */ }
       const hint = r.status === 404
         ? "수집 서버에 COLLECTOR_TOKEN이 설정되지 않았습니다(export 비활성). 그 에이전트를 'COLLECTOR_TOKEN=<토큰>' 환경변수와 함께 실행/재시작하세요(리눅스: /etc/vmware-portal/portal.env)."
         : (r.status === 403 || r.status === 401)
