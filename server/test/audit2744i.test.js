@@ -15,13 +15,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { stripComments } from './_stripComments.js';
 
-const BASE = '/tmp/claude-0/-home-user-The-DVC/6697d1b4-2c16-59c4-a364-a62c466221b4/scratchpad/audit2744/fix-GI';
-const ROOT_TMP = fs.existsSync(path.dirname(BASE)) ? BASE : path.join(process.cwd(), '..', '..');
-fs.mkdirSync(ROOT_TMP, { recursive: true });
-const DIR = fs.mkdtempSync(path.join(ROOT_TMP, 'cfg-2744i-'));
+// v2.744(회귀 검토 GI-R3): 임시 폴더는 os.tmpdir() 아래 — 예전에는 세션 스크래치 경로를 박고, 없으면 cwd/../.. 에 만들었다
+//   (저장소 루트에서 실행하면 /home 에 mkdtemp → EACCES, server/ 에서 실행하면 저장소 밖에 쓰기). after 에서 지운다.
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744i-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 process.env.AUTH_ENABLED = 'false';

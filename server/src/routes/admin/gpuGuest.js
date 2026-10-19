@@ -127,6 +127,10 @@ function foldReportView(fold) {
       vcentersFromOlder: cap(g.vcentersFromOlder), vcentersFromOlderTotal: n(g.vcentersFromOlder),
       droppedSecrets: cap(g.droppedSecrets), droppedSecretsTotal: n(g.droppedSecrets),
     })),
+    // v2.744(회귀 검토 GI-R2): 관리자 저장으로 확인된 그룹(표지는 내렸다) — 언제 저장했는지만(최근 FOLD_PATHS_MAX 개).
+    resolved: (Array.isArray(fold.resolved) ? fold.resolved : []).slice(-FOLD_PATHS_MAX).map((x) => ({
+      kept: String(x?.kept || ''), dropped: cap(x?.dropped), at: Number.isFinite(x?.at) ? x.at : null,
+    })),
   };
 }
 

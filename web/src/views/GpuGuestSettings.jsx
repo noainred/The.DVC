@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { Field } from './gpu-guest/shared.jsx';
-import { fmtAgo } from '../util/fmt.js'; // v2.613 DEPS2613-11
+import { fmtAgo, fmtTime } from '../util/fmt.js'; // v2.613 DEPS2613-11 · v2.744(회귀 검토 GI-R2) fmtTime
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
@@ -110,6 +110,9 @@ export function gpuGuestFoldNote(row, foldReport = null) {
   const lines = [`중앙이 설정 파일을 읽을 때 대소문자만 다른 엣지 이름의 배포 설정을 하나로 합쳤습니다: ${from.join(', ') || '—'} → ${agent || '—'}`];
   if (GPU_FOLD_BY_TEXT[f.by]) lines.push(GPU_FOLD_BY_TEXT[f.by]);
   lines.push('값은 옛 사본 위에 최근 사본의 기본값이 아닌 값을 얹었습니다(VM 계정·고정 IP 는 합집합). 값이 맞는지 확인하고 필요하면 고쳐 저장하세요.');
+  // v2.744(회귀 검토 GI-R2): 표지가 '지금 상태' 가 아니라 중앙이 설정 파일을 읽은 때(기동)의 일임을 밝힌다 — 이 엣지를 저장하면 중앙이 표지를 내린다.
+  const foldAt = typeof foldReport?.at === 'number' && Number.isFinite(foldReport.at) && foldReport.at > 0 ? foldReport.at : null;
+  if (foldAt != null) lines.push(`합친 때: ${fmtTime(foldAt)}(중앙이 설정 파일을 읽은 때) — 이 엣지 설정을 저장하면 이 표지는 사라집니다.`);
   const items = g
     ? [
       foldList('최근 사본의 빈 값 대신 옛 값을 유지한 항목', g.keptOlder, g.keptOlderTotal),

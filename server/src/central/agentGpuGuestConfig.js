@@ -143,6 +143,20 @@ function edgeNameEvidence() {
 let _foldReport = null;
 export function gpuGuestFoldStatus() { return _foldReport ? structuredClone(_foldReport) : null; }
 const foldOfKey = (k) => (_foldReport ? _foldReport.groups.find((g) => g.kept === k) || null : null);
+// v2.744(회귀 검토 GI-R2): 합친 키에 관리자 저장이 성공하면 그 그룹의 표지를 내린다 — 화면은 '확인하고 필요하면 고쳐 저장하세요' 라고
+//   안내하는데 예전에는 _foldReport 가 로드 때 한 번 정해져 중앙을 재시작할 때까지 남았다(저장이 먹지 않은 것처럼 보였다).
+//   그룹은 groups 에서 빼고 resolved 에 '언제 저장으로 확인됐는지' 만 남긴다(값·비밀번호 없음 · 최근 RESOLVED_MAX 개).
+const RESOLVED_MAX = 50;
+function resolveFoldOf(k) {
+  if (!_foldReport || !Array.isArray(_foldReport.groups)) return;
+  const lk = String(k).toLowerCase();
+  const i = _foldReport.groups.findIndex((g) => String(g.kept).toLowerCase() === lk);
+  if (i < 0) return;
+  const [g] = _foldReport.groups.splice(i, 1);
+  const resolved = Array.isArray(_foldReport.resolved) ? _foldReport.resolved : [];
+  resolved.push({ kept: g.kept, dropped: Array.isArray(g.dropped) ? [...g.dropped] : [], at: Date.now() });
+  _foldReport.resolved = resolved.slice(-RESOLVED_MAX);
+}
 
 // v2.296 배포 사본 계정 복호. ⚠ 손상 시 조용히 빈 객체로 출발하면 다음 persist()가 온전했던
 // 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
@@ -194,6 +208,7 @@ export function setAssignedGpuGuest(agent, partial, dropped = []) {
   next._updatedAt = Date.now();
   byAgent[k] = next;
   persist();
+  resolveFoldOf(k); // v2.744(회귀 검토 GI-R2): 디스크 쓰기가 성공한 뒤에만(실패면 표지를 남긴다)
   return next;
 }
 

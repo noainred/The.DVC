@@ -209,7 +209,13 @@ export function licenseNotices(data) {
 export const LIC_NAME_MAXW = 220;
 export const LIC_SOURCE_MAXW = 200;
 export const LIC_KEY_MAXW = 140;
-const LIC_WRAP = (maxWidth) => ({ display: 'inline-block', maxWidth, whiteSpace: 'normal', overflowWrap: 'anywhere', verticalAlign: 'top' });
+// v2.744(회귀 검토 GI-R1): 줄바꿈 칸의 최소 폭(px). overflow-wrap:anywhere 는 min-content 를 한 글자 폭으로 만들어, 표가 칸보다 넓은 폭
+//   (400px)에서 자동 표 레이아웃이 '라이선스'·'소스' 열을 51~74px 로 짜부라뜨렸다(행 37 → 141px, 'vC/ent/er' 처럼 단어 중간 줄바꿈).
+//   min-width 가 그 열의 하한이 되어 나머지는 표 래퍼(DataTable 의 table-wrap, overflow:auto)가 가로 스크롤로 넘긴다. anywhere 는 남긴다 —
+//   상자(140~220px)보다 긴 한 단어(공백·하이픈 없는 FQDN)만 끊고 열 폭은 140px 하한에 묶여, 1280·1440px 에서 '상태' 열이 다시 밀리지 않는다
+//   (break-word·normal 은 그 단어 폭만큼 열을 넓혀 1280px 에서 상태 열을 밀어냈고, normal 은 상자를 넘쳐 옆 칸과 겹쳤다 — Chromium 실측).
+export const LIC_WRAP_MINW = 140;
+const LIC_WRAP = (maxWidth) => ({ display: 'inline-block', minWidth: LIC_WRAP_MINW, maxWidth, whiteSpace: 'normal', overflowWrap: 'anywhere', verticalAlign: 'top' });
 const LIC_KEY_STYLE = { fontSize: 11, display: 'inline-block', maxWidth: LIC_KEY_MAXW, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' };
 
 /**
