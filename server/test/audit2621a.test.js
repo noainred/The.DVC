@@ -296,7 +296,9 @@ test('DATA-02 발견이 있으면 그 판정이 이긴다 · 확인 불가가 �
 
 const perf = await import('../src/sanswitch/perfDb.js');
 const ARR_META = [{ port: 1, attachedName: 'SYMMETRIX::000497700230::SAF-1d', speed: '16G', portType: 'F-Port' }];
-const T0 = Date.UTC(2026, 8, 20, 1, 0, 0);   // 정시 — 표본은 +45초·+85초로 어긋나게 심는다
+// 정시 — 표본은 +45초·+85초로 어긋나게 심는다. v2.744: 예전에는 고정 날짜(2026-09-20)였는데 SAN 원본 보관(90일)이 **실제 시각**
+//   기준이라 그 날짜가 보관 밖으로 밀리면(시계를 90일 민 실행으로 재현) 버킷이 12개로 줄어 실패했다 — 실제 시각의 정시 −3시간으로 둔다.
+const T0 = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3 * 3_600_000;
 
 async function seedPair(a, b, { stopBAfter = Infinity } = {}) {
   for (let i = 0; i < 16; i++) {
