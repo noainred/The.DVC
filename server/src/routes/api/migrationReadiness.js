@@ -11,7 +11,7 @@ import { capStr } from '../../util/capStr.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeMigration } from '../../migration/analyze.js';
-import { notReadVcentersOf, notReadPartialOf } from '../../corelicense/analyze.js'; // v2.744(감사 VC-03): 읽지 못한 vCenter 판정 한 벌
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 VC-03): 읽지 못한 vCenter 판정 한 벌
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -44,7 +44,8 @@ export function registerMigrationReadiness(api) {
           v.findings.map((f) => f.code).join(' '), v.collected.cfg ? 'Y' : '', v.collected.dev ? 'Y' : '']));
       }
       // v2.744(감사 VC-03): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다.
-      if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — VM 이 이 목록에 없음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
+      //   v2.744(회귀 검토 GF-R2): 읽지 못한 것(합계는 하한)과 비활성(수집하지 않음)을 나눠 적고 사유는 한글 — 화면 partial 과 같은 기준.
+      for (const l of notReadCsvLines(r.notReadVcenters, { what: 'VM 이 이 목록에 없음' })) lines.push(csvLine([l]));
       logAudit({ user: req.user?.username, action: 'migration-readiness.csv', target: 'migration-readiness', detail: `${lines.length - 1} rows`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="migration-readiness-${fileStamp()}.csv"`);

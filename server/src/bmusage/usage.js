@@ -143,11 +143,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
      *   두면 491 PB/s 같은 수치가 원시 표본과 5년 일 롤업 최대(hba_bps_max)에 남는다. 비우고 사유를 센다(조용히 버리지 않는다).
      */
     let fcImplausible = 0;
-    const fcCap = (v, bits) => { const ok = fcPlausibleBps(v, bits); if (v != null && ok == null) fcImplausible += 1; return ok; };
+    // v2.744(회귀 검토 GB-R2): 상한은 직전 표본 속도도 함께 본다(주기 중 재협상 — 큰 쪽) · 1 Gbit 미만 속도는 상한 근거가 아니다(fcRateCapBps).
+    const fcCap = (v, bits, prevBits) => { const ok = fcPlausibleBps(v, bits, prevBits); if (v != null && ok == null) fcImplausible += 1; return ok; };
     const perFc = (c.hbas || []).map((x) => {
       const p = findBy(pc?.hbas, 'host', x.host);
-      const rx = fcCap(perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim), x.bitsPerSec);
-      const tx = fcCap(perSecond(p?.txBytes, x.txBytes, pAt, now, lim), x.bitsPerSec);
+      const rx = fcCap(perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim), x.bitsPerSec, p?.bitsPerSec);
+      const tx = fcCap(perSecond(p?.txBytes, x.txBytes, pAt, now, lim), x.bitsPerSec, p?.bitsPerSec);
       const bps = sumStrict([rx, tx]);
       const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
       return { host: x.host, bps, ...fcRowPctFields(u), state: x.state, speedRaw: x.speedRaw, ...(x.countersInvalid ? { countersInvalid: true } : {}) };
@@ -220,12 +221,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     }
     if ((idrac.fcs || []).length) {
       let idracImplausible = 0;
-      const capI = (v, bits) => { const ok = fcPlausibleBps(v, bits); if (v != null && ok == null) idracImplausible += 1; return ok; };
+      const capI = (v, bits, prevBits) => { const ok = fcPlausibleBps(v, bits, prevBits); if (v != null && ok == null) idracImplausible += 1; return ok; };
       idracFc = idrac.fcs.map((x) => {
         const p = findBy(pIdrac?.fcs, 'host', x.host);
         const r0 = idracRow(p, x);
-        // v2.744(DEV-01): OS 경로와 같은 물리 상한 — 카운터 이상을 처리량으로 두지 않는다.
-        const rx = capI(r0.rx, x.bitsPerSec); const tx = capI(r0.tx, x.bitsPerSec);
+        // v2.744(DEV-01): OS 경로와 같은 물리 상한 — 카운터 이상을 처리량으로 두지 않는다(GB-R2: 직전 속도 함께 · 1 Gbit 미만 속도는 근거 아님).
+        const rx = capI(r0.rx, x.bitsPerSec, p?.bitsPerSec); const tx = capI(r0.tx, x.bitsPerSec, p?.bitsPerSec);
         const bps = sumStrict([rx, tx]);
         // v2.743(DEV-03): OS 경로와 같은 분모(FC 표준 데이터율) — 판정은 parse/fcRate.js 하나.
         const u = fcUtilization(maxStrict([rx, tx]), x.bitsPerSec);
@@ -234,13 +235,15 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       // v2.744(RECENT-02): 대표값 판정은 OS 경로와 같은 fcRepresentative. OS 가 이미 '크게 초과로 비움'(hba_over)을 냈으면
       //   iDRAC 값으로 채우지 않는다(같은 HBA 의 다른 측정으로 가장 바쁜 포트를 덮지 않게 — 빈 칸만 채우는 규칙의 예외가 아니라 그 연장이다).
       const repI = fcRepresentative(idracFc);
-      if (out.hba_pct == null && !out.hba_over) {
+      // v2.744(회귀 검토 GB-R4): iDRAC 행이 대표값을 정할 수 있었는가 — OS 가 이미 정했으면(값 또는 '크게 초과로 비움') 노트가 그렇게 말한다.
+      const idracForRep = out.hba_pct == null && !out.hba_over;
+      if (idracForRep) {
         if (repI.pct != null) { out.hba_pct = repI.pct; srcOf.hba = 'idrac'; }
         else if (repI.overBlank) out.hba_over = true;
       }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
-      for (const t of fcRateNotes(idracFc, 'iDRAC ')) notes.push(t);
+      for (const t of fcRateNotes(idracFc, 'iDRAC ', { usedForRep: idracForRep })) notes.push(t);
       if (idracImplausible) notes.push(`iDRAC FC 처리량 ${idracImplausible}건이 회선의 물리 상한을 넘어(카운터 이상) 비웠습니다.`);
     }
     if (idracStale) {

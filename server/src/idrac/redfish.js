@@ -1223,12 +1223,14 @@ export async function fetchSensorCollection(entry, { signal = null, now = Date.n
     try { coll = await G(`${m}/Sensors?$expand=*($levels=1)`); }
     catch (e) {
       if (e?.authFailed) throw e;
-      if (e?.status === 404 || /\b404\b/.test(String(e?.message))) { absent += 1; continue; }
+      // v2.744(회귀 검토 GB-R5 — LEFT-02 의 형제 누락): '없음' 은 **표지(status 404)** 로만 가른다. 문구 판정 `/\b404\b/` 는 호스트명
+      //   ('idrac-404.corp' 로의 교차 출처 리다이렉트 거부 문구)을 404 로 읽어 실패를 'Sensors 없음 · ok' 로 기록했다(redfishFailKind 와 같은 규칙).
+      if (e?.status === 404) { absent += 1; continue; }
       // $expand 를 거부하는 구현 — 확장 없이 한 번 더.
       try { coll = await G(`${m}/Sensors`); }
       catch (e2) {
         if (e2?.authFailed) throw e2;
-        if (e2?.status === 404 || /\b404\b/.test(String(e2?.message))) { absent += 1; continue; }
+        if (e2?.status === 404) { absent += 1; continue; }
         failed += 1; if (!firstErr) firstErr = String(e2?.message || e2).slice(0, 200); continue;
       }
     }

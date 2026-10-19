@@ -103,15 +103,15 @@ test('RECENT-02 ③ 임계 알림 — hba_over 행은 초과로 판정되어 지
 
 // ───────────────────────────── DEV-01 ─────────────────────────────
 
-test('DEV-01 ① parseFcHosts — -1 표지(0xffffffffffffffff)와 2^53 초과는 카운터가 아니다(null + countersInvalid)', () => {
+test('DEV-01 ① parseFcHosts — -1 표지(0xffffffffffffffff)·10진 -1 은 카운터가 아니다(null + countersInvalid) · 2^53 초과는 값(GB-R3)', () => {
   const [s, big, ok, dec] = parseFcHosts([
     fcLine('host5', '0xffffffffffffffff', '0xffffffffffffffff'),
-    fcLine('host6', '0x20000000000000', '0x1f4'),     // 2^53 — 정밀도를 잃는다
+    fcLine('host6', '0x20000000000000', '0x1f4'),     // 2^53 — 표지가 아니다(근사로 읽는다 — v2.744 회귀 검토 GB-R3)
     fcLine('host7', '0x1f4', '0x10'),
     fcLine('host8', '-1', '500'),
   ]);
   assert.equal(s.txBytes, null); assert.equal(s.rxBytes, null); assert.equal(s.countersInvalid, true);
-  assert.equal(big.txBytes, null); assert.equal(big.rxBytes, 0x1f4 * 4); assert.equal(big.countersInvalid, true);
+  assert.equal(big.txBytes, 0x20000000000000 * 4); assert.equal(big.rxBytes, 0x1f4 * 4); assert.equal(big.countersInvalid, undefined);
   assert.equal(ok.txBytes, 0x1f4 * 4); assert.equal(ok.rxBytes, 0x10 * 4); assert.equal(ok.countersInvalid, undefined);
   assert.equal(dec.txBytes, null); assert.equal(dec.rxBytes, 2000); assert.equal(dec.countersInvalid, true);
 });

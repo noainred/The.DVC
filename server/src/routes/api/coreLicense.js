@@ -9,7 +9,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { memoJson, scopeKey } from './shared.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeCoreLicense, VSAN_TIB_PER_CORE } from '../../corelicense/analyze.js';
+import { analyzeCoreLicense, VSAN_TIB_PER_CORE, notReadCsvLines } from '../../corelicense/analyze.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -40,7 +40,8 @@ export function registerCoreLicense(api) {
     }
     if (r.hostsOmitted) lines.push(csvLine([`(상한으로 ${r.hostsOmitted}대 생략)`]));
     // v2.744(감사 VC-03): 읽지 못한 vCenter 의 호스트는 이 파일에 없다(합계는 하한) — 마지막 줄에 밝힌다.
-    if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — 호스트가 이 목록에 없음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
+    //   v2.744(회귀 검토 GF-R2): 읽지 못한 것(합계는 하한)과 비활성(수집하지 않음)을 나눠 적고 사유는 한글 — 화면 partial 과 같은 기준.
+    for (const l of notReadCsvLines(r.notReadVcenters, { what: '호스트가 이 목록에 없음' })) lines.push(csvLine([l]));
     logAudit({ user: req.user?.username, action: 'core-license.csv', target: 'hosts', detail: `${r.hosts.length} rows`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="core-license-${fileStamp()}.csv"`);

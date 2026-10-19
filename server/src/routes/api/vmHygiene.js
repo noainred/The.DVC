@@ -21,7 +21,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { analyzeVmHygiene, ALL_CODES } from '../../vmhygiene/analyze.js';
 import { loadVmHygieneSettings, saveVmHygieneSettings } from '../../vmhygiene/settings.js';
 import { vmHygieneNotifyOnce, vmHygieneNotifierStatus } from '../../vmhygiene/notifier.js';
-import { notReadVcentersOf, notReadPartialOf } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -92,7 +92,8 @@ export function registerVmHygiene(api) {
       lines.push(csvLine([row.vcenterName, row.name, row.host, row.cluster, row.powerState, row.worst, row.findings.map((f) => f.code).join(' '), row.excepted || '']));
     }
     // v2.744(감사 후속 FC): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다(비용 배분 CSV 와 같은 모양).
-    if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — 판정하지 않음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
+    // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
+    for (const t of notReadCsvLines(r.notReadVcenters, { what: '판정하지 않음' })) lines.push(csvLine([t]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

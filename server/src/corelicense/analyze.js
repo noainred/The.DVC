@@ -40,8 +40,43 @@ export function notReadVcentersOf(snap, vcenterIds = null) {
   return out;
 }
 
+/** 읽지 못한 vCenter 중 합계를 하한으로 만드는 것인가(비활성은 관리자가 끈 것이라 따로 센다) — partial·totals.notRead·CSV 가 같은 판정을 쓴다. */
+export const isNotReadMissing = (x) => x?.why !== 'disabled';
 /** 읽지 못한 vCenter 중 합계를 하한으로 만드는 것(비활성은 관리자가 끈 것이라 따로 센다) — 하나라도 있으면 합계는 부분 합이다. */
-export const notReadPartialOf = (list) => (Array.isArray(list) ? list : []).some((x) => x?.why !== 'disabled');
+export const notReadPartialOf = (list) => (Array.isArray(list) ? list : []).some(isNotReadMissing);
+
+/**
+ * v2.744(회귀 검토 GF-R2): 읽지 못한 사유의 한글 — 웹 views/bizreport/notReadText.js NOT_READ_WHY_TEXT 의 **서버 사본**이다(번들 경계라
+ *   두 벌이고 server/test/audit2744re.test.js 가 키·값을 대조한다 — 사유를 늘리면 두 표를 함께 고칠 것).
+ */
+export const NOT_READ_WHY_TEXT = Object.freeze({
+  pending: '첫 수집 중',
+  unreachable: '연결 실패',
+  maintenance: '점검중',
+  stale: '보고 낡음',
+  disabled: '비활성',
+});
+export const notReadWhyText = (w) => NOT_READ_WHY_TEXT[w] || '읽지 못함';
+
+/**
+ * v2.744(회귀 검토 GF-R2): CSV 마지막 줄(코어 라이선스·비용 배분·이전 준비도 공용 — 라우트마다 문구를 복제하지 않는다).
+ *   예전 세 라우트는 notReadVcenters 전체를 '읽지 못한 vCenter N곳' 으로 세고 사유를 영문 코드로 적어, 비활성 vCenter 만 있는 현장에서
+ *   화면(partial=false · 하한 표지 없음 · '비활성 vCenter 만 합계에서 빠졌습니다')과 파일이 반대로 말했다. 이제 화면과 같은 기준
+ *   (isNotReadMissing — notReadPartialOf·웹 notReadKpiSub 와 같다)으로 두 줄을 나눈다: 읽지 못한 것(합계는 하한) / 비활성(수집하지 않음).
+ * @param list notReadVcenters
+ * @param what 그 리포트에서 빠진 것을 말하는 짧은 구절(예: '호스트가 이 목록에 없음')
+ * @returns {string[]} 0~2 줄(각각 CSV 한 칸)
+ */
+export function notReadCsvLines(list, { what = '합계에 없음' } = {}) {
+  const all = (Array.isArray(list) ? list : []).filter((x) => x && typeof x === 'object');
+  const nameOf = (x) => String(x.name || x.vcenterId || '');
+  const missing = all.filter(isNotReadMissing);
+  const off = all.filter((x) => !isNotReadMissing(x));
+  const out = [];
+  if (missing.length) out.push(`(읽지 못한 vCenter ${missing.length}곳 — ${what} · 합계는 하한: ${missing.map((x) => `${nameOf(x)}(${notReadWhyText(x.why)})`).join(', ')})`);
+  if (off.length) out.push(`(비활성 vCenter ${off.length}곳(수집하지 않음): ${off.map(nameOf).join(', ')})`);
+  return out;
+}
 
 /**
  * v2.742(감사 VC-06): vCenter 의 라이선스·확장 목록을 읽었는가 — 판정 한 벌(라이선스 현황·만료 확인·솔루션 버전·코어 라이선스가 쓴다).
@@ -189,8 +224,8 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     //   notRead 로 따로 말하므로 여기서 빼고 센다(같은 vCenter 를 두 문장이 두 번 말하지 않게).
     licensesUnread: list.filter((r) => r.licensesUnread && !r.notRead).length,
     // v2.744(감사 VC-03): 읽지 못한 vCenter 수(비활성 제외) · 비활성 vCenter 수 · 합계가 하한인가.
-    notRead: notReadVcenters.filter((x) => x.why !== 'disabled').length,
-    notReadDisabled: notReadVcenters.filter((x) => x.why === 'disabled').length,
+    notRead: notReadVcenters.filter(isNotReadMissing).length,   // v2.744(회귀 검토 GF-R2): partial·CSV 와 같은 판정 한 벌
+    notReadDisabled: notReadVcenters.filter((x) => !isNotReadMissing(x)).length,
     partial: notReadPartialOf(notReadVcenters),
   };
   // 포함 용량은 계약 전체에서 합쳐진다(법인별 초과를 더하면 다른 법인의 남는 몫을 무시해 과대가 된다) — 합계는 전체 기준.

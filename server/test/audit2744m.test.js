@@ -110,8 +110,11 @@ test('① 범위 계정에는 범위 안의 읽지 못한 vCenter 만 싣는다 
   }
   for (const p of ['/api/tools/host-hygiene.csv', '/api/tools/vm-hygiene.csv']) {
     const csv = await fetch(`${base}${p}`).then((x) => x.text());
-    assert.match(csv, /읽지 못한 vCenter 3곳/, `${p} 파일만 받은 사람이 결과가 일부임을 모른다`);
-    assert.match(csv, /VC-U\(unreachable\)/);
+    // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것(첫 수집 중·불통)과 비활성을 나눠 한글 사유로 적는다(notReadCsvLines 한 벌).
+    assert.match(csv, /읽지 못한 vCenter 2곳/, `${p} 파일만 받은 사람이 결과가 일부임을 모른다`);
+    assert.match(csv, /VC-U\(연결 실패\)/);
+    assert.match(csv, /비활성 vCenter 1곳\(수집하지 않음\): VC-O/);
+    assert.doesNotMatch(csv, /\((unreachable|pending|disabled)\)/, `${p} 사유를 영문 코드로 적었다`);
   }
 });
 

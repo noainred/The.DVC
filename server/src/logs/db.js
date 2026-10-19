@@ -18,6 +18,7 @@ import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { chunkedDelete, nextAdaptiveChunk, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
 import { TRACKED_TYPES, TRACKED_SQL, OPS_TYPES, OPS_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';   // v2.744(회귀 검토 GE-R1): 마지막 시각을 못 읽으면 null(0 = 1970 이 아니다)
 import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
@@ -178,9 +179,16 @@ function initSqlite() {
       const vcs = []; let n = 0;
       for (const row of vcIdsStmt.all()) {
         const id = row.v;
+        // v2.744(회귀 검토 GE-R1): 목록은 먼저 읽고 vCenter 사이에 양보하므로, 그 사이 정리(prune)가 아직 세지 않은 vCenter 의 행을
+        //   전부 지울 수 있다 — 예전에는 그 vCenter 가 {count:0, lastTs:0(Number(null))} 행으로 실렸다(한 문장 GROUP BY 에서는 생길 수 없던 값).
+        //   0건이면 싣지 않고, 마지막 시각은 numOrNull 로 받는다. COUNT·MAX 를 한 문장으로 합치지 않은 이유: 둘 다 SEARCH(vcenterId=?)지만
+        //   합친 문장은 COUNT 전용 경로·MAX 끝점 조회를 잃어 vCenter 당 약 2배 느렸다(합성 150만 행 실측). 두 문장은 같은 동기 단계 안에서
+        //   연달아 돌아 그 사이에 정리가 끼지 않는다(같은 연결 · 이 단계 안에는 양보가 없다).
         const c = Number(vcCountStmt.get(id)?.n || 0);
-        vcs.push({ vcenterId: id, count: c, lastTs: Number(lastTsStmt.get(id)?.mx) });
-        n += c;
+        if (c > 0) {
+          vcs.push({ vcenterId: id, count: c, lastTs: numOrNull(lastTsStmt.get(id)?.mx) });
+          n += c;
+        }
         yield;
       }
       return { n, vcs };

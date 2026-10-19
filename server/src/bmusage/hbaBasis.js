@@ -17,10 +17,12 @@ const _basis = new Map();
 /**
  * FC 행 목록 → 개수 요약(순수). 판정 필드(`pctBasis`)가 없는 행(Windows WMI 원본 등)은 세지 않는다 — 지어내지 않는다.
  * @param {object[]} rows  usage.js 의 FC 행(fcRowPctFields 가 붙인 pct·pctBasis·pctOver·pctClamped)
- * @returns {{ports:number, dataRate:number, nominal:number, noSpeed:number, clamped:number, blanked:number, unread:number}}
+ * v2.744(회귀 검토 GB-R1): `blanked`(데이터율을 크게 넘어 비움 — 서버 대표값도 비우고 알림은 초과)는 **데이터율 기준 포트만** 센다.
+ *   명목 기준 포트의 100% 초과는 `nominalOver` 로 따로 센다(대표값·알림 규칙이 다르다 — parse/fcRate.js fcRepresentative).
+ * @returns {{ports:number, dataRate:number, nominal:number, noSpeed:number, clamped:number, blanked:number, nominalOver:number, unread:number}}
  */
 export function summarizeHbaBasis(rows = []) {
-  const out = { ports: 0, dataRate: 0, nominal: 0, noSpeed: 0, clamped: 0, blanked: 0, unread: 0 };
+  const out = { ports: 0, dataRate: 0, nominal: 0, noSpeed: 0, clamped: 0, blanked: 0, nominalOver: 0, unread: 0 };
   for (const x of Array.isArray(rows) ? rows : []) {
     if (!x || typeof x !== 'object' || !Object.hasOwn(x, 'pctBasis')) continue;
     out.ports += 1;
@@ -28,7 +30,10 @@ export function summarizeHbaBasis(rows = []) {
     else if (x.pctBasis === 'nominal') out.nominal += 1;
     else out.noSpeed += 1;
     if (x.pctOver && x.pctClamped && x.pct != null) out.clamped += 1;
-    if (x.pctOver && x.pct == null) out.blanked += 1;
+    if (x.pctOver && x.pct == null) {
+      if (x.pctBasis === 'nominal') out.nominalOver += 1;
+      else out.blanked += 1;
+    }
     if (x.countersInvalid) out.unread += 1;
   }
   return out;
