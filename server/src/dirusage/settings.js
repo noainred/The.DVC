@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -100,7 +100,7 @@ export function load() {
   } catch (e) {
     // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(대상 목록·수신자)을 지운다.
     preserveCorrupt(FILE);
-    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e.message}`);
+    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = out;
   return cache;

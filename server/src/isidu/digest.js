@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
@@ -51,7 +51,7 @@ function state() {
       history: (Array.isArray(raw.history) ? raw.history : []).filter((h) => h && typeof h === 'object').slice(0, DIGEST_HISTORY_MAX),
     };
   } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); console.warn(`[isidu-digest] 상태 파일을 읽지 못해 새로 시작합니다: ${e?.message}`); }
+    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); console.warn(`[isidu-digest] 상태 파일을 읽지 못해 새로 시작합니다: ${safeLoadText(e) || '사유 미상'}`); }
     _state = { lastSlot: null, lastSentAt: null, lastScanMark: null, history: [] };
   }
   return _state;

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { isSuperAdmin } from './roles.js';
 import { isDemoGuest } from './demoGuest.js';
 
@@ -243,7 +243,7 @@ export function loadMatrix() {
     } catch (err) {
       // 손상 파일을 조용히 기본값으로 덮어쓰면 다음 저장이 원본을 잃는다 → .corrupt 로 보존.
       preserveCorrupt(file, err.message);
-      console.error(`[perm] permissions.json 파싱 실패: ${err.message}`);
+      console.error(`[perm] permissions.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
     }
   }
   cached = defaultMatrix();

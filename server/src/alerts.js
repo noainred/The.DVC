@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
-import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
@@ -563,7 +563,7 @@ function loadAlertState() {
       }
     }
   } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(STATE_FILE, e.message); console.warn(`[alerts] 상태 파일 손상(${e.message}) — 보존 후 빈 상태로 시작`); }
+    if (e?.code !== 'ENOENT') { preserveCorrupt(STATE_FILE, e.message); console.warn(`[alerts] 상태 파일 손상(${safeLoadText(e) || '사유 미상'}) — 보존 후 빈 상태로 시작`); }
   }
   return _restored;
 }

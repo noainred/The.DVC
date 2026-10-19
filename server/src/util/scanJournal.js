@@ -37,7 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from './atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './atomicWrite.js';
 import { registerStateFile } from './stateFiles.js';
 import { numOrNull } from './numOrNull.js';
 
@@ -127,7 +127,7 @@ function loadOnce() {
     if (e?.code !== 'ENOENT') {
       const kept = preserveCorrupt(FILE(), e.message);
       _loadInfo = { at: _bootAt, found: 0, error: String(e.message).slice(0, 200), corruptKept: kept || null };
-      console.warn(`[scan-journal] 기록 파일을 읽지 못해 새로 시작합니다(${e.message})`);
+      console.warn(`[scan-journal] 기록 파일을 읽지 못해 새로 시작합니다(${safeLoadText(e) || '사유 미상'})`);
     }
     return;
   }

@@ -237,11 +237,7 @@ const OWNED = ['auth/auth.js', 'mail/settings.js', 'central/assignments.js', 'ce
  *   콘솔에 싣지 않는다)은 같다. 리드가 고친 파일은 **이 목록에서 지울 것** — 고쳐진 파일이 남아 있으면 아래 테스트가 실패한다.
  */
 const PENDING_LEAD = {
-  'alarm-mutes.js': 1, 'alerts.js': 1, 'auth/permissions.js': 1, 'bulletin/store.js': 1, 'cost/settings.js': 1,
-  'dirusage/settings.js': 1, 'guestdisk/settings.js': 1, 'hostaccess/settings.js': 1, 'insights/finops.js': 1, 'insights/portalDb.js': 1,
-  'ipam/scanStore.js': 2, 'isidu/digest.js': 1, 'isidu/notify.js': 1, 'perf/settings.js': 1, 'ping/store.js': 1,
-  'reports/dailyReport.js': 1, 'security/loginStore.js': 1, 'tags/policy.js': 1, 'toolcats/settings.js': 1, 'tools/powerOffSettings.js': 1,
-  'usermenu/store.js': 1, 'util/scanJournal.js': 1, 'vmdns/policy.js': 1, 'vmhygiene/settings.js': 1,
+  // v2.744 리드 통합: FC 가 남긴 25곳(24파일)을 같은 방법(safeLoadText)으로 고쳐 비웠다 — 새 위반은 이 목록에 넣지 말고 고칠 것.
 };
 
 function sweepAll() {

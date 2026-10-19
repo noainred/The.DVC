@@ -53,7 +53,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
@@ -178,7 +178,7 @@ function load(file, key) {
     }
   } catch (e) {
     preserveCorrupt(file, e.message);
-    console.warn(`[bulletin] ${path.basename(file)} 를 읽지 못해 빈 목록으로 시작합니다: ${e.message}`);
+    console.warn(`[bulletin] ${path.basename(file)} 를 읽지 못해 빈 목록으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
     list = []; bytes = 0;
   }
   caches.set(file, { list });
