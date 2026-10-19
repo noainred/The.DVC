@@ -58,7 +58,8 @@ const OFF_SRC = { event: '이벤트', observed: '점검', track: '추적', first
 function reportCells(vm, rep) {
   if (!rep) return { verdict: '—', link: '리포트 없음' };
   if (rep.error) return { verdict: `조회 실패: ${rep.error}`, link: '리포트 없음(조회 실패)' };
-  if (rep.skipped) return { verdict: `리포트 생략(${rep.skipped})`, link: '리포트 없음(상한)' };
+  // v2.744(회귀 검토 GF-R1): 직접 수집 대상 아님·인증 정지로 조회하지 않은 VM(notQueried)은 '상한' 생략과 다르다.
+  if (rep.skipped) return { verdict: `리포트 생략(${rep.skipped})`, link: rep.notQueried ? '리포트 없음(조회하지 않음)' : '리포트 없음(상한)' };
   const title = rep.verdict?.title || '';
   const sum = rep.verdict?.summary || '';
   return { verdict: sum ? `${title} — ${sum}` : title, link: LINK('📊 리포트 열기', rep.file, `${vm.name} 근거 리포트(HTML) — ZIP 을 풀고 xlsx 를 열어야 링크가 동작합니다`) };

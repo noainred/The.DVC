@@ -514,8 +514,16 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
     for (const v of targets.slice(WASTE_EXPORT_MAX_REPORTS)) reports.set(v.id, { skipped: `상한 ${WASTE_EXPORT_MAX_REPORTS}대` });
     const results = await withJob('waste.export.perf', () => rightsizeReportsFor(snap, capped, days));
     const files = []; let failed = 0; let n = 0;
+    // v2.744(회귀 검토 GF-R1): 이 포탈이 로그인하지 않은 vCenter(직접 수집 대상 아님·인증 정지)의 VM 은 '조회 실패' 로 세지 않는다 —
+    //   시트에는 사유를, 요약에는 개수를 나눠 적는다(notQueried 표지는 시트 '근거 리포트' 칸 문구를 '상한' 생략과 가르는 데 쓴다 — tools/wasteExport.js reportCells).
+    const notQueried = { skip: 0, authStopped: 0 };
     for (const v of capped) {
       const r = results.get(v.id);
+      if (r?.notQueried) {
+        reports.set(v.id, { skipped: r.notQueried, notQueried: true });
+        if (r.authStopped) notQueried.authStopped++; else notQueried.skip++;
+        continue;
+      }
       if (!r || r.error) { reports.set(v.id, { error: r?.error || '알 수 없음' }); failed++; continue; }
       const file = reportFileName(v);
       files.push({ name: file, data: withJobSync('waste.export.html', () => renderRightsizeHtml({ report: r.report, vm: r.report.vm || v, days, generatedAt: t0 })) });
@@ -524,7 +532,9 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
       // 막았다(리포트 1건이 SVG 3개 × 360점). 간격을 줄여 한 덩어리를 수십 ms 로 쪼갠다.
       if ((++n % 3) === 0) await new Promise((resolve) => setImmediate(resolve));
     }
-    const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
+    const nqTotal = notQueried.skip + notQueried.authStopped;
+    const nqNote = nqTotal ? ` · 조회하지 않음 ${nqTotal}건(${[notQueried.skip ? `직접 수집 대상 아님 ${notQueried.skip}` : '', notQueried.authStopped ? `인증 정지 ${notQueried.authStopped}` : ''].filter(Boolean).join(' · ')})` : '';
+    const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${nqNote}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
     const sheets = buildWasteSheets({ waste, offSince, reports, scopeLabel: vcId || 'all', cluster: group.cluster, folder: group.folder, days, full, generatedAt: t0, reportNote, nameFilter: q });
     const wb = await sheetsToWorkbook(sheets);
     // xlsx 직렬화는 쪼갤 수 없는 동기 구간이다(exceljs) — 작업 이름을 달아 루프 정체가 관측되면 설정 › 서버 성능 측정의 hang 기록에서
@@ -535,7 +545,7 @@ api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) =
     //   0.88초). 비동기판(zlib.deflateRaw — 스레드 풀)으로 바꿨다 — 결과 바이트는 같다(테스트 대조). 동시 1건 가드(acquireExport)는 그대로다.
     const zip = await withJob('waste.export.zip', () => zipManyAsync([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]));
     logAudit({ user: req.user?.username, action: '낭비 리소스 엑셀 내보내기', target: vcId || 'all',
-      detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
+      detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} notQueried=${nqTotal} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
     res.setHeader('Cache-Control', 'no-store');
@@ -596,11 +606,28 @@ async function rightsizeReportsFor(snap, targets, days) {
   if (!byVc.size) return out;
   const cfg = loadVcenterConfig().vcenters || [];
   const morefOf = (vm) => vm.id.slice(String(vm.vcenterId || '').length + 1); // vc.id 에 콜론이 있을 수 있어 split 금지
+  // v2.744(회귀 검토 GF-R1 — VC-04 형제 경로 누락): 이 배치는 vCenter 마다 바로 fetchVmsRightsizeBatch 를 불러, 단건 /tools/rightsize 가
+  //   409 로 막는 vCenter(점검중·엣지 위임·비활성)와 인증 정지 vCenter 에 내보내기마다 로그인했다(재현: 가짜 vCenter 로그인 1회씩).
+  //   같은 파일의 다른 주문형 경로와 같은 문(createVcAuthGate — 직접 수집 대상 판정 → 인증 정지 → 첫 시도 결과)을 지난다.
+  //   거부는 문이 noteVcAuthFailure 로 주 폴러와 같은 기록에 올린다. 조회하지 않은 VM 은 '조회 실패' 가 아니라 notQueried(사유)다.
+  const gate = createVcAuthGate();
   await eachLimited([...byVc.entries()], 4, async ([vcenterId, list]) => {
     const vc = cfg.find((x) => x.id === vcenterId);
     if (!vc) { for (const vm of list) out.set(vm.id, { error: 'vCenter 설정을 찾을 수 없습니다' }); return; }
+    const r = await gate.run(vc, () => fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK }));
+    if (r.skipped) {
+      const why = r.skip ? { notQueried: r.skip.reason, skipReason: r.skip.skipReason } : { notQueried: r.stopped.reason, authStopped: true };
+      for (const vm of list) out.set(vm.id, why);
+      return;
+    }
+    if (r.error) {
+      // 자격증명 거부면 문이 기록에 올렸다(r.stopped) — 그 문장을 쓴다(원문 그대로). 그 밖은 예전 문구.
+      const msg = r.stopped ? r.stopped.reason : `vCenter 성능 조회 실패: ${r.error?.message || r.error}`;
+      for (const vm of list) out.set(vm.id, { error: msg });
+      return;
+    }
     try {
-      const m = await fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK });
+      const m = r.value;
       let n = 0;
       for (const vm of list) {
         const fetched = m.get(morefOf(vm));

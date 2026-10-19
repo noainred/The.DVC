@@ -4,6 +4,7 @@ import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { store, usageReadable } from '../../store.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { getClassifier } from '../../ipam/settings.js';
+import { hostLedgerIp } from '../../ipam/ledger.js'; // v2.744(회귀 검토 GG-R1) — IP 대장과 같은 호스트 IP 판정
 import { getMetricsDb } from '../../metrics/db.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -171,7 +172,10 @@ api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res,
   // A4) 신규 rogue IP — vCenter가 모르고, 최근 7일 내 처음 스캔된 IP
   const known = new Set();
   for (const v of (snap.vms || [])) { const ips = v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : []); for (const ip of ips) known.add(ip); }
-  for (const h of (snap.hosts || [])) known.add(h.name);
+  // v2.744(회귀 검토 GG-R1): '원장이 아는 IP' 판정은 IP 대장과 한 벌이다(ipam/ledger.js hostLedgerIp — 이름이 IP 면 그 IP, FQDN 이면
+  //   수집기가 실은 관리 IP). 예전 h.name 은 FQDN 이라 관리 IP 가 known 에 없어, IP 대장이 ESXi 호스트로 보이는 IP 를 이 화면은
+  //   'vCenter 가 모르는 rogue IP' 로 말했다.
+  for (const h of (snap.hosts || [])) { const hip = hostLedgerIp(h); if (hip) known.add(hip.ip); }
   const hist = getIpHistoryMap();
   const cut = Date.now() - 7 * 86_400_000;
   const rogue = scan.filter((s) => !known.has(s.ip) && (hist[s.ip]?.firstSeen || 0) > cut)

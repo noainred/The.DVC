@@ -102,6 +102,19 @@ function routeLedger(snap, vcenterId, allowed) {
   return buildIpamRowsShared(snap, vcenterId, allowed, { shouldCache: () => store.get() === snap });
 }
 
+/**
+ * v2.744(회귀 검토 GG-R3): 목록·시트 응답의 **호스트 행** 소유 자원 본문(스냅샷 호스트 객체 통째)을 싣지 않는다.
+ *   예전 다이어트(v2.253)는 '호스트 행은 작다' 를 전제로 VM 만 줄였는데, VC-01 로 FQDN 호스트 전부가 행이 되어
+ *   ① 응답이 약 31% 커졌고(운영 규모 목 데이터 실측) ② `/hosts` 가 403 인 역할(tools 만 있고 inv.hosts 없음)에게도
+ *   호스트 전체 객체(hcfg 보안 구성·NIC MAC·HBA·serviceTag)가 나갔다. 화면은 행의 ownerName·hostName·cluster·guestOS·
+ *   vcenterId 만 쓰고(IpamCore·IpmsMatches — grep 확인), 상세는 클릭 때 `/hosts`(inv.hosts 게이트)로 1건만 가져온다.
+ *   `ownerId`(호스트 id)는 그 지연 조회가 같은 이름 호스트를 헷갈리지 않게 싣는다. 원장 캐시는 공유 객체라 새 객체를 만든다.
+ */
+function slimHostRow(r) {
+  if (r?.ownerType !== 'host' || !r.owner) return r;
+  return { ...r, owner: undefined, hasOwner: true, ownerId: String(r.owner.id || ''), ownerName: r.ownerName || String(r.owner.name || '') };
+}
+
 export function registerIpamExport(api) {
 
 // Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM
@@ -110,7 +123,7 @@ export function registerIpamExport(api) {
 // 응답 다이어트(v2.253): VM 행의 owner(스냅샷 VM 객체 통째 — 행당 수 KB)가 응답을 수십 MB 로
 // 만들어 JSON.stringify + SHA-1(ETag)이 요청마다 이벤트 루프를 세웠다. 목록에선 hasOwner
 // 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
-// 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
+// 호스트 행도 v2.744(GG-R3)부터 같은 방식(slimHostRow) — 스캔 행은 owner 가 없다. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
 /**
  * v2.582 TUNE-1: 이 응답은 운영 규모(33 vCenter · 6,004 VM 목)에서 **5.3MB** 이고, 예전에는 요청마다
  * rows 복사 → JSON 직렬화 → SHA-1(ETag) → gzip 을 다시 했다(in-process p50 71ms — 다른 폴링 라우트는
@@ -123,7 +136,7 @@ export function registerIpamExport(api) {
  */
 api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', async (snap) => {
   const data = await routeLedger(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)); // v2.740 F-06: 양보판
-  let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r));
+  let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : slimHostRow(r)));
   const q = String(req.query.q || '').trim().toLowerCase();
   let truncated = false; let matched = null;
   if (q) {
@@ -175,7 +188,9 @@ api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   const ledger = await routeLedger(snap, req.query.vcenterId, allowed); // v2.740 F-06: 양보판 원장을 시트에 넘긴다(지금 입력의 것일 때만 쓰인다)
   const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed, ledger, cache: store.get() === snap });
-  res.json(sheets[0] || { subnet: '', rows: [] });
+  const sheet = sheets[0];
+  // v2.744(회귀 검토 GG-R3): 시트의 호스트 칸도 목록과 같이 줄인다(시트 객체는 캐시 공유 — 새 객체). VM 칸은 예전 그대로다.
+  res.json(sheet ? { ...sheet, rows: (sheet.rows || []).map(slimHostRow) } : { subnet: '', rows: [] });
 });
 
 // Per-IP usage history (scan-derived online/offline transitions over time).
