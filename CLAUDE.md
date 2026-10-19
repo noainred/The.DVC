@@ -5367,12 +5367,12 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         (같은 파일 주석이 금지한 바로 그 일). `vp_gen_secret` = 패키지 node → openssl → urandom, 셋 다 안 되면 portal.env 를 만들지 않고 멈춘다(빈 AUTH_SECRET 금지).
       · ⚠⚠ **'누구 권한으로 실행하나' 는 파일 소유자 하나가 아니라 길 전체로 정한다**(VB VERIFY-01·02, `release-verify-lib.sh vp_path_controllers`): 옛 설치본 확인 도구의 node·js 경로의 폴더·링크·링크 대상을
         lstat 으로 훑어 바꿀 수 있는 비-root 계정이 0명이면 root, 1명이면 그 계정으로 낮추고, 둘 이상·그룹/기타 쓰기·순환이면 **실행하지 않고 멈춘다**. 정책 한 줄을 읽으려고 그 node 를 root 로 돌리지 않는다
-        (`vp_policy_reader` — 길 전체가 root 전용인 node 만). 열기 오류는 반환 12 + 실제 원인(VERIFY-04) · `& 022` portal.env 정책 거부(VERIFY-05) · node 없는 폴백은 시한 있는 한 번 열기 + inode 대조(`vp_safe_read`, VERIFY-03·06).
+        (`vp_policy_reader` — 길 전체가 root 전용인 node 만. ⚠ 새 패키지 node(trust=package)는 거르지 않는다 — 곧 root 로 확인 실행하는 node 라 거부하면 정책 읽기만 더 약한 bash 폴백으로 떨어진다, VB 검토 재현). 열기 오류는 반환 12 + 실제 원인(VERIFY-04) · `& 022` portal.env 정책 거부(VERIFY-05) · node 없는 폴백은 시한 있는 한 번 열기 + inode 대조(`vp_safe_read`, VERIFY-03·06).
       · **로드 오류 원문 — 손상본을 보존하지 않는 catch 도**(VC + 리드 10곳): 자체 보존 로더 6곳 + `vcenters.json`(비밀번호 평문 — 수집 주기마다 반복되던 줄)·db-location·central-fleet·센서 상세 캐시.
         스윕은 둘이다 — `audit2744fc findRawLoadLogs`(보존 경로) · `audit2744vlead`(`try { JSON.parse } catch` 의 콘솔 줄 전수, 보존 여부와 무관).
       · **'점검하지 못함' 은 '닿지 않음' 이 아니다**(VD — `vmRemoteProbeText.js`): 거부는 종류별(데모·권한·OTP·범위·사유 미상), 점검 못 한 200 `{ok:false, method}` 는 회색 + 서버 사유, 방화벽 안내·빨강은 실제로 점검했고 닫혔을 때만.
       · **화면 문구 함수가 쓰는 데이터를 응답이 실제로 싣는지 볼 것**(VE WEB-03): `detailNotes` 의 FC 판정은 어떤 응답도 수집 상세를 싣지 않아 화면에 닿지 않았다(단위 테스트는 통과했다). 폴러가 서버별 최근 상세를 들고 `/history` 가 싣는다.
-      · 남긴 것: install.sh 2)·3) 의 `rm -rf "$PREFIX/runtime/node"`·`cp -a … "$APP_DST"` 링크 추종(쓰기·삭제 계열 — VA 검토자 재현, 다음 점검 후보) · VB node 없는 폴백의 열기 순간 경쟁(inode 대조로 버린다) · 스윕은 휴리스틱(중간 변수를 거치면 놓친다).
+      · 남긴 것: install.sh 2)·3) 의 `rm -rf "$PREFIX/runtime/node"`·`cp -a … "$APP_DST"` 링크 추종(쓰기·삭제 계열 — VA 검토자 재현, 다음 점검 후보) · VB node 없는 폴백의 열기 순간 경쟁(수십 ms 창 — inode 대조로 버린다) · 스윕은 휴리스틱(중간 변수를 거치면 놓친다).
     · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).
       커밋 33be198 은 그때 아직 하지 않은 수정을 '✅ v2.744' 로 적었다 — 이번 수정이 끝난 뒤 문구를 실제 범위로 맞췄다(EDGE-03 은 '자동 등록만').
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".

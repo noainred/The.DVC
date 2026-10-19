@@ -163,8 +163,10 @@ else{process.stdout.write(head);process.stdout.write(buf.subarray(0,off))}' "$f"
 #   root 가 무기한 매달렸다)를 하지 않고, lstat 확인 뒤 **시한(VP_ROOT_READ_TIMEOUT 초, 기본 10) 안에서** bash 가 한 번 열고 연 fd 의
 #   종류·링크 수·inode(지금 그 경로에 있는 파일과 같은가 — 링크로 바꿔치기했으면 다르다)·크기를 본 뒤 그 fd 에서 읽는다.
 #   uid:gid 를 주면(root 일 때만 뜻이 있다) 그 시한 있는 읽기를 그 계정 권한으로 한다 — root 가 서비스 계정 경로를 직접 열지 않게.
-#   ⚠ 정직한 한계: node 없는 경로는 bash 의 열기가 링크를 따라간다 — 확인과 열기 사이(수 마이크로초)에 링크로 바꾸면 그 대상을 한 번 연 뒤
-#     inode 가 달라 버린다(내용은 쓰지 않는다). 권한을 내릴 계정이 없는 root 분기(옛 패키지 신뢰 경로)에서만 root 가 연다.
+#   ⚠ 정직한 한계: node 없는 경로는 bash 의 열기가 링크를 따라간다 — 확인(lstat)과 열기 사이에 timeout·하위 셸·bash 기동이 끼어 있어
+#     창이 수십 ms 다(VB 검토 strace 실측 33.7ms — strace 부하 포함). 그 사이 링크로 바꾸면 그 대상을 한 번 연 뒤 inode 가 달라 버리고
+#     (내용은 쓰지 않는다), FIFO 를 가리키는 링크면 열기가 시한까지 기다린다. 그래서 node 를 쓸 수 있으면 언제나 node 쪽(vp_root_read)을 쓴다 —
+#     root 가 이 폴백을 직접 여는 것은 root 로 실행할 node 가 하나도 없는 경우뿐이다(옛 설치본 node 를 권한 내려 실행할 수 없는 root 분기).
 #   stdout·반환은 vp_root_read 와 같다(+ 124 = 시한 초과 · 사유 'open:no-timeout'(timeout 명령 없음)·'open:no-drop'(권한을 내릴 수 없음)).
 vp_safe_read() {
   local f="$1" node="${2:-}" as="${3:-}" out="" r=0 err="" u="" max="${VP_ROOT_READ_MAX_BYTES:-16777216}" secs="${VP_ROOT_READ_TIMEOUT:-10}"
@@ -487,9 +489,13 @@ verify_release_package() {
   fi
 
   # root 로 portal.env 를 읽을 node(v2.744 최종 수정분 검토 VERIFY-02) — root 로 실행해도 되는 것만: root 소유 확인 사본(위 vp_anchor_ok)
-  #   또는 길 전체가 root 전용인 node(--user root 옛 설치본·새 패키지). 서비스 계정이 바꿀 수 있는 node 는 정책 한 줄을 읽으려고 root 로
+  #   · 새 패키지의 node(trust=package — 바로 아래 _vp_verify_run 과 install.sh 의 VP_CFG_NODE 가 어차피 root 로 실행한다) ·
+  #   길 전체가 root 전용인 옛 설치본 node(--user root). 서비스 계정이 바꿀 수 있는 옛 설치본 node 는 정책 한 줄을 읽으려고 root 로
   #   실행하지 않는다(예전에는 --skip-signature-check 로 도구를 실행하지 않는 경로에서도 실행했다). 없으면 node 없이 시한 있는 한 번 열기로 읽는다.
-  if [[ $anchored -eq 1 ]]; then rnode="$node"; else rnode="$(vp_policy_reader "$node")"; fi
+  #   ⚠ 새 패키지 node 를 vp_policy_reader 로 거르지 말 것(VB 검토 — 재현): 관리자가 자기 홈(비-root 소유)에 패키지를 풀고 sudo 로 설치하면
+  #     길 전체가 root 전용이 아니라 거부되어, 정책 읽기만 링크를 따라 여는 bash 폴백으로 떨어졌다 — 같은 node 를 곧 root 로 실행하므로
+  #     거부해서 얻는 보호는 없고 portal.env 바꿔치기 방어만 약해진다.
+  if [[ $anchored -eq 1 || "$trust" == "package" ]]; then rnode="$node"; else rnode="$(vp_policy_reader "$node")"; fi
   local pol="${UPGRADE_SIGNATURE_POLICY:-}"
   if [[ -z "$pol" ]]; then
     if [[ -n "$runas_uid" || "$(id -u)" != 0 ]]; then

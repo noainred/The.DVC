@@ -221,6 +221,23 @@ test('VERIFY-02 ⑤ vp_policy_reader — 길 전체가 root 전용인 node 만 �
   assert.equal(pick(path.join(d, 'none')), '[]');
 });
 
+test('VERIFY-02 ⑤-b (VB 검토 회귀) 관리자 홈(비-root 소유)에 푼 새 패키지 — 정책 읽기도 그 node(한 번 열기)로 한다(어차피 root 로 확인 실행하는 node)', { skip: ROOT_ONLY }, () => {
+  // 기존 설치본은 v2.730 이전(verifyCli 없음) → trust=package. 패키지 폴더를 관리자 계정(OTHER_UID) 소유로 둔다.
+  const d = path.join(base, 'PB'); mkdirs(path.join(d, 'opt/vp/app'), path.join(d, 'etc'));
+  const { sdir, pkg, man } = pkgFor(d);
+  chownR(path.join(d, 'pkg'), OTHER_UID, OTHER_UID);
+  chownR(path.join(d, 'opt'), NB.uid, NB.gid);
+  const CFG = path.join(d, 'etc');
+  writeFile(path.join(CFG, 'portal.env'), 'UPGRADE_SIGNATURE_POLICY=warn\n', 0o644);   // root 소유 0644 — root 확인이 받는 정책
+  const env = envFor(d);
+  clearMarks();
+  const r = verify(path.join(d, 'opt/vp'), sdir, CFG, pkg, man, 0, env);
+  assert.equal(r.hung, false, r.stdout + r.stderr);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(marks().includes('pkg:0:-e'), `정책 읽기를 bash 폴백(링크를 따라 연다)이 아니라 패키지 node 의 한 번 열기로 한다: ${marks()}`);
+  assert.match(r.stdout, /VERIFY-OK policy=\[warn\]/, 'root 소유 portal.env 의 정책은 예전처럼 받는다');
+});
+
 /* ── VERIFY-03 ───────────────────────────────────────────────────────────────────────────────────────────── */
 test('VERIFY-03 ⑥ 소유 계정 권한으로 확인하는 분기 — portal.env 가 FIFO 여도 매달리지 않고, 링크면 따라가지 않으며, 일반 파일은 예전처럼 따른다', { skip: ROOT_ONLY }, () => {
   const d = path.join(base, 'G'); mkdirs(path.join(d, 'opt'), path.join(d, 'etc'));
