@@ -10,6 +10,7 @@
  *  · 판정 근거(코드)를 함께 싣는다 — 문구는 웹이 같은 키로 만든다(1:1 테스트).
  */
 import { TOOLS_NEED_UPGRADE } from '../reports/compliance.js';
+import { clusterIndex } from '../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 export const MIG_CODES = Object.freeze({
   // blocked
   'rdm-physical': 'blocked',       // 물리 호환 RDM — 디스크를 그대로 옮길 수 없다(가상 디스크로 바꾸거나 LUN 을 대상에 다시 매핑)
@@ -86,21 +87,27 @@ export function migrationOf(vm) {
 
 /**
  * @param vms   스냅샷 VM(범위로 이미 거른 것)
- * @param opts  { q, level, code, vcName:Map, by:'vcenter'|'cluster' }
+ * @param opts  { q, level, code, vcName:Map, by:'vcenter'|'cluster', hosts }
+ *   hosts — 클러스터 묶음 판정용 호스트(범위로 거른 것). v2.744(감사 VC-02): 없으면 이름 키로 묶는다(예전 동작).
  */
-export function analyzeMigration(vms, { q = '', level = '', code = '', vcName = new Map(), by = 'vcenter' } = {}) {
+export function analyzeMigration(vms, { q = '', level = '', code = '', vcName = new Map(), by = 'vcenter', hosts = [] } = {}) {
   const counts = { blocked: 0, caution: 0, unknown: 0, ready: 0 };
   const byCode = Object.fromEntries(Object.keys(MIG_CODES).map((k) => [k, 0]));
   const groups = new Map();
   const rows = [];
   let templates = 0; let gb = 0;
+  // v2.744(감사 VC-02): 클러스터 묶음은 (vCenter, 클러스터 moref) — 이름으로 묶으면 다른 데이터센터의 같은 이름 클러스터 VM 이 한 그룹이
+  //   됐다. 그룹 행에 clusterRef·vcDatacenter·sameName 을 싣는다(화면이 clusterNameLabel 로 같은 이름을 가른다).
+  const cidx = by === 'cluster' ? clusterIndex(hosts) : null;
   for (const v of vms || []) {
     if (v.template) { templates += 1; continue; }
     const m = migrationOf(v);
     counts[m.level] += 1;
     for (const f of m.findings) byCode[f.code] += 1;
-    const gk = by === 'cluster' ? `${v.vcenterId}\u0000${v.cluster || ''}` : v.vcenterId;
-    const g = groups.get(gk) || { key: gk, vcenterId: v.vcenterId, vcenterName: vcName.get(v.vcenterId) || v.vcenterId, cluster: by === 'cluster' ? v.cluster || '(클러스터 없음)' : null, vms: 0, blocked: 0, caution: 0, unknown: 0, ready: 0, storageGB: 0 };
+    const ck = cidx ? cidx.keyOf(v) : null;
+    const gk = by === 'cluster' ? (ck ?? `${v.vcenterId}\u0000${v.cluster || ''}`) : v.vcenterId;
+    const g = groups.get(gk) || { key: gk, vcenterId: v.vcenterId, vcenterName: vcName.get(v.vcenterId) || v.vcenterId, cluster: by === 'cluster' ? v.cluster || '(클러스터 없음)' : null,
+      ...(cidx ? cidx.meta(ck) : {}), vms: 0, blocked: 0, caution: 0, unknown: 0, ready: 0, storageGB: 0 };
     g.vms += 1; g[m.level] += 1;
     if (Number.isFinite(v.storageGB)) { g.storageGB += v.storageGB; gb += v.storageGB; }
     groups.set(gk, g);

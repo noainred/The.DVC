@@ -22,6 +22,28 @@ import { PART_STATE_LABEL, PART_KIND_LABEL, SCOPE_LABEL, KEY_KIND_NOTE } from '.
 
 const t = (v) => String(v ?? '').trim();
 
+/** 라벨이 종류명으로 시작하는가 — 대소문자 무시 · 다음 글자가 문자(\p{L})면 아니다('PSUs' 는 'PSU' 로 시작하지 않는다). */
+function startsWithKind(label, kind) {
+  const k = String(kind || '');
+  if (!k || label.length < k.length) return false;
+  if (label.slice(0, k.length).toLowerCase() !== k.toLowerCase()) return false;
+  const next = label.charAt(k.length);
+  return next === '' || !/\p{L}/u.test(next);
+}
+
+/**
+ * 알림에 쓸 라벨 — v2.744(감사 DEV-02): 상태가 ok 가 아닌데 라벨이 '… 정상' 으로 끝나면 그 판정 단어를 뗀다.
+ *   판정은 엣지가 하므로(v2.548 '전부 엣지 판정') 2.744 이전 엣지는 장애 팬을 '팬 3/4 정상' 으로 계속 보낸다 —
+ *   critical 알림 제목이 '정상' 이라 말하면 받는 사람이 오탐으로 넘긴다. 저장된 라벨(화면)은 바꾸지 않는다(엣지 업그레이드로 바뀐다).
+ *   정규식 대신 문자열 비교로 뗀다(라벨은 외부 입력이다 — 공백 반복에 백트래킹하지 않게).
+ */
+function labelForState(p) {
+  const lbl = t(p?.label);
+  if (p?.state === 'ok' || !lbl.endsWith('정상')) return lbl;
+  const head = lbl.slice(0, -'정상'.length);
+  return head && /\s$/.test(head) ? head.trimEnd() : lbl;
+}
+
 /** 알림 1건의 제목·본문(순수) — 문구를 여기 한 곳에서만 만든다. */
 export function alertOf(p, { closed = false } = {}) {
   const scope = SCOPE_LABEL[p.scope] || p.scope;
@@ -32,9 +54,12 @@ export function alertOf(p, { closed = false } = {}) {
   /*
    * ⚠ 라벨이 이미 종류를 담고 있으면 되풀이하지 않는다 — 'PSU PSU 2' 처럼 보인다
    *   (v2.547 자체 점검에서 실제로 그랬다).
+   * v2.744(감사 DEV-02): 예전 판정 `^종류\b` 는 ASCII 단어 경계라 한글 종류명('팬')에서는 성립하지 않아
+   *   제목이 '팬 팬 3/4' 로 되풀이됐고, 정규식 특수문자가 든 종류명('메모리(DIMM)')은 그룹으로 읽혀 맞지 않았다.
+   *   이제 글자 그대로 앞부분을 비교하고 다음 글자가 문자(\p{L})가 아닐 때만 '이미 담고 있다' 로 본다.
    */
-  const partText = t(p.label) && new RegExp(`^${kind}\\b`, 'i').test(t(p.label))
-    ? t(p.label) : `${kind} ${t(p.label)}`.trim();
+  const label = labelForState(p);
+  const partText = label && startsWithKind(label, kind) ? label : `${kind} ${label}`.trim();
   const title = `${head} — ${dev} · ${partText}`;
   const lines = [
     `장비군: ${scope}`,

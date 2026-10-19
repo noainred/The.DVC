@@ -11,6 +11,37 @@
  *  · vCenter 가 보고한 코어 단위 라이선스(costUnit 'core')의 사용량과 나란히 둔다 — 둘이 다르면 그 사실만 말한다.
  */
 import { numOrNull } from '../util/numOrNull.js';   // v2.727(감사 C-02)
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // v2.744(감사 VC-03): '지금 값으로 쓰지 않는 vCenter' 판정 한 벌
+
+/**
+ * v2.744(감사 VC-03): 리포트(코어 라이선스·비용 배분·이전 준비도)가 **읽지 못한 vCenter** — 인벤토리(호스트·VM)가 하나도 없는데 상태가
+ *   '못 읽음' 인 vCenter. 예전 리포트는 snap.initial(첫 병합 전 골격) 하나만 봐서, 첫 병합 뒤에도 수집 중인 vCenter(pending — 고RTT·새로
+ *   등록)나 불통인데 직전 값이 없는 vCenter(store.js 최소 unreachable 항목)를 0 으로 섞은 부분 합을 전체 합계로 보였다(재현: 3곳 중 2곳을
+ *   못 읽었는데 '필요 코어(산정) 64' 를 표지 없이). 판정은 metrics/unreadVcenters.js unreadVcenterReasons 를 그대로 쓰고(사본 금지),
+ *   그 판정이 일부러 빼는 'pending'(첫 수집 중 — 샘플러 합계를 영원히 막지 않으려고 뺐다)과 'disabled'(관리자가 끈 vCenter)를 상태로 더한다.
+ *   ⚠ 호스트·VM 이 남아 있는 vCenter(직전 값 이월·점검중 캐시·낡은 위임 보고)는 여기 넣지 않는다 — 값이 있고, 합계에서 빠지지 않는다.
+ * @param vcenterIds 범위(null 이면 스냅샷 전부) — 범위 밖 vCenter 는 싣지 않는다.
+ * @returns {{vcenterId:string, name:string, why:'pending'|'unreachable'|'maintenance'|'stale'|'disabled'}[]}
+ */
+export function notReadVcentersOf(snap, vcenterIds = null) {
+  const allow = vcenterIds ? new Set([...vcenterIds].map(String)) : null;
+  const reasons = unreadVcenterReasons(snap);
+  const has = new Set();
+  for (const x of snap?.hosts || []) if (x && x.vcenterId != null) has.add(String(x.vcenterId));
+  for (const x of snap?.vms || []) if (x && x.vcenterId != null) has.add(String(x.vcenterId));
+  const out = [];
+  for (const vc of snap?.vcenters || []) {
+    if (!vc || vc.id == null) continue;
+    const id = String(vc.id);
+    if ((allow && !allow.has(id)) || has.has(id)) continue;
+    const why = reasons.get(id) ?? (vc.status === 'pending' ? 'pending' : vc.status === 'disabled' ? 'disabled' : null);
+    if (why) out.push({ vcenterId: id, name: vc.name || id, why });
+  }
+  return out;
+}
+
+/** 읽지 못한 vCenter 중 합계를 하한으로 만드는 것(비활성은 관리자가 끈 것이라 따로 센다) — 하나라도 있으면 합계는 부분 합이다. */
+export const notReadPartialOf = (list) => (Array.isArray(list) ? list : []).some((x) => x?.why !== 'disabled');
 
 /**
  * v2.742(감사 VC-06): vCenter 의 라이선스·확장 목록을 읽었는가 — 판정 한 벌(라이선스 현황·만료 확인·솔루션 버전·코어 라이선스가 쓴다).
@@ -76,6 +107,9 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
   const allow = vcenterIds ? new Set(vcenterIds) : null;
   const vcs = (snap?.vcenters || []).filter((v) => !allow || allow.has(v.id));
   const rate = VSAN_TIB_PER_CORE[vsanPlan] ?? 0;
+  // v2.744(감사 VC-03): 읽지 못한 vCenter — 그 행은 '호스트 0 · 필요 코어 0' 이 아니라 '미수집' 이고 합계는 하한이다.
+  const notReadVcenters = notReadVcentersOf(snap, vcs.map((v) => v.id));
+  const notReadBy = new Map(notReadVcenters.map((x) => [x.vcenterId, x.why]));
   const rows = new Map(vcs.map((v) => [v.id, {
     vcenterId: v.id, vcenterName: v.name || v.id, hosts: 0, counted: 0, unknown: 0, disconnected: 0,
     sockets: 0, cores: 0, licensed: 0, padded: 0, paddedHosts: 0,
@@ -122,20 +156,28 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
       r.reportedCoreTotal = r.reportedTotalUnknown > 0 ? null : total;
     }
   }
+  const NUM_KEYS = ['hosts', 'counted', 'unknown', 'disconnected', 'sockets', 'cores', 'licensed', 'padded', 'paddedHosts', 'vsanTib', 'vsanDs', 'vsanUnknown'];
   const list = [...rows.values()].map((r) => {
+    const nr = notReadBy.get(String(r.vcenterId)) ?? null;
+    if (nr) {
+      // v2.744(VC-03): 읽지 못한 vCenter 의 수치는 0 이 아니라 null(모름)이다 — 보고 비교·vSAN 추가분도 내지 않는다.
+      const o = { ...r, notRead: nr, vsanIncludedTib: null, vsanAddonTib: null, vsanAddonBound: null, reportedDiff: null, reportedCoreUsed: null, reportedCoreTotal: null };
+      for (const k of NUM_KEYS) o[k] = null;
+      return o;
+    }
     const vsanTib = Math.round(r.vsanTib * 100) / 100;
     const included = r.licensed * rate;
     const addon = rate ? Math.max(0, Math.round((vsanTib - included) * 100) / 100) : null;
     const bound = rate ? addonBoundOf(r.unknown, r.vsanUnknown, addon) : null;
     return {
-      ...r, vsanTib,
+      ...r, notRead: null, vsanTib,
       vsanIncludedTib: rate ? Math.round(included * 100) / 100 : null,
       vsanAddonTib: bound === 'unknown' ? null : addon,
       vsanAddonBound: bound,
       // vCenter 보고와의 차이 — 산정 못 한 호스트가 있으면 비교하지 않는다(부분 합끼리 비교하면 거짓 차이).
       reportedDiff: r.reportedCoreUsed != null && r.unknown === 0 ? r.reportedCoreUsed - r.licensed : null,
     };
-  }).sort((a, b) => b.licensed - a.licensed || String(a.vcenterName).localeCompare(String(b.vcenterName)));
+  }).sort((a, b) => (b.licensed ?? -1) - (a.licensed ?? -1) || String(a.vcenterName).localeCompare(String(b.vcenterName)));
   const sum = (k) => list.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const totals = {
     vcenters: list.length, hosts: sum('hosts'), counted: sum('counted'), unknown: sum('unknown'), disconnected: sum('disconnected'),
@@ -143,12 +185,21 @@ export function analyzeCoreLicense(snap, { vcenterIds = null, vsanPlan = 'none' 
     vsanTib: Math.round(sum('vsanTib') * 100) / 100, vsanUnknown: sum('vsanUnknown'),
     vsanIncludedTib: rate ? Math.round(sum('licensed') * rate * 100) / 100 : null,
     reportedUsedUnknown: sum('reportedUsedUnknown'), reportedTotalUnknown: sum('reportedTotalUnknown'),   // v2.727(감사 C-02)
-    licensesUnread: list.filter((r) => r.licensesUnread).length,   // v2.742(VC-06): 라이선스 목록을 못 읽은 vCenter 수(0 이면 전부 읽었다)
+    // v2.742(VC-06): 라이선스 목록을 못 읽은 vCenter 수(0 이면 전부 읽었다). v2.744(VC-03): 인벤토리 자체를 못 읽은 vCenter 는
+    //   notRead 로 따로 말하므로 여기서 빼고 센다(같은 vCenter 를 두 문장이 두 번 말하지 않게).
+    licensesUnread: list.filter((r) => r.licensesUnread && !r.notRead).length,
+    // v2.744(감사 VC-03): 읽지 못한 vCenter 수(비활성 제외) · 비활성 vCenter 수 · 합계가 하한인가.
+    notRead: notReadVcenters.filter((x) => x.why !== 'disabled').length,
+    notReadDisabled: notReadVcenters.filter((x) => x.why === 'disabled').length,
+    partial: notReadPartialOf(notReadVcenters),
   };
   // 포함 용량은 계약 전체에서 합쳐진다(법인별 초과를 더하면 다른 법인의 남는 몫을 무시해 과대가 된다) — 합계는 전체 기준.
   totals.vsanAddonTib = rate ? Math.max(0, Math.round((totals.vsanTib - totals.licensed * rate) * 100) / 100) : null;
   totals.vsanAddonBound = rate ? addonBoundOf(totals.unknown, totals.vsanUnknown, totals.vsanAddonTib) : null;
+  // v2.744(감사 VC-03): 읽지 못한 vCenter 가 있으면 그 vCenter 의 코어(포함 용량)와 vSAN 용량을 둘 다 모른다 — 추가분이 어느 쪽으로
+  //   틀릴지 알 수 없다('unknown'). 사유 문장은 화면 coverageNote 가 notRead 로 말한다.
+  if (rate && totals.partial) totals.vsanAddonBound = 'unknown';
   if (totals.vsanAddonBound === 'unknown') totals.vsanAddonTib = null;
   hostRows.sort((a, b) => (b.padded ?? -1) - (a.padded ?? -1) || String(a.name).localeCompare(String(b.name)));
-  return { rule: { minCoresPerSocket: MIN_CORES_PER_SOCKET, vsanPlan, vsanTibPerCore: rate }, totals, vcenters: list, hosts: hostRows.slice(0, 3000), hostsOmitted: Math.max(0, hostRows.length - 3000) };
+  return { rule: { minCoresPerSocket: MIN_CORES_PER_SOCKET, vsanPlan, vsanTibPerCore: rate }, totals, notReadVcenters, vcenters: list, hosts: hostRows.slice(0, 3000), hostsOmitted: Math.max(0, hostRows.length - 3000) };
 }

@@ -21,7 +21,7 @@ import { rangeSize } from '../../ipam/scan.js';
 import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
 import { makeVcResolver } from '../../ipam/vcResolve.js';
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
@@ -90,10 +90,6 @@ function ipOverrideWriteVerdict(req, snap, allowed, owners, ip, bodyClaim) {
   // 기존 레코드가 없으면 '기존 claim' 판정은 뜻이 없다(빈 claim 은 소유 VM 없는 IP 에서 항상 거부 — 새 예약이 막혔다).
   if ((existing && writeScopeDenied(req, snap, owners, ip, prevClaim)) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
   return null;
-}
-/** setOverrideBatch 와 같은 규칙으로 대상 IP 목록을 만든다(문자열 입력도 — 검사한 목록과 적용 목록이 같아야 한다). */
-function bulkIpList(ips) {
-  return (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
 }
 
 /**
@@ -349,9 +345,14 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   const allowedW = writeScopedVcenterIds(req.user, snap);
   // v2.630 AUTHZ2630-01: 단건 PUT 과 같은 판정(기존 claim 먼저) — 예전엔 본문 claim 만 봐서 범위 밖 vCenter 가
   //   claim 한(소유 VM 없는) 예약을 본문 claim 하나로 덮어써 탈취할 수 있었다. 문자열 ips 도 같은 목록으로 검사한다.
-  const list = bulkIpList(ips);
+  // v2.744(감사 WEB-02): 대상 목록은 setOverrideBatch 와 같은 판정(overrides.splitBatchIps) — 무효 토큰을 조용히 버리지 않는다.
+  const split = splitBatchIps(ips);
   // 판정 루프 전에 개수 상한(setOverrideBatch 의 MAX_BATCH 와 같은 값 — 중복 포함 원문 기준으로 먼저 자른다).
-  if (list.length > 10_000) return res.status(400).json({ ok: false, reason: '한 번에 10000개까지만 일괄 적용할 수 있습니다.' });
+  if (split.tokens.length > 10_000) return res.status(400).json({ ok: false, reason: '한 번에 10000개까지만 일괄 적용할 수 있습니다.' });
+  // 무효 토큰이 하나라도 있으면 범위 판정보다 먼저 400 + 목록 — 단건 PUT 이 같은 값을 400 으로 거부하는 것과 같은 판정이고, 일부만 적용하지 않는다.
+  const bad = invalidBatchResult(split.invalid);
+  if (bad) return res.status(400).json(bad);
+  const list = split.ips;
   if (allowed || allowedW) {
     const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
     const claimed = fields.claimedVcenterId || '';
@@ -361,7 +362,7 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
       if (v?.status === 403) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
     }
   }
-  const r = setOverrideBatch(list, fields, req.user);
+  const r = setOverrideBatch(list, fields, req.user, { rejectInvalid: true });
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });

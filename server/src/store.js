@@ -98,7 +98,7 @@ export async function ledgerSignatureAsync(rows, { sliceMs = 10, isCancelled = (
  * 이 지문이 직전 **성공한** 동기화와 같으면 원장 재구성(`buildIpamRows` 운영 규모 약 27ms)·행 서명·행 객체 수천 개의
  * GC 를 건너뛴다. 결과(ipam.db 내용)는 예전과 같다 — 원장 행 서명(`ledgerSignature`)의 모든 열이 아래 입력의 순수 함수다:
  *  · 스냅샷: vCenter id·이름(표시명) · VM(vcenterId·name·powerState·guestOS·host·cluster·ipAddresses·ipAddress)
- *    · 호스트(name·vcenterId·powerState·version·cluster). 배열 순서도 넣는다(같은 IP 행의 순서가 서명에 들어간다).
+ *    · 호스트(name·vcenterId·powerState·version·cluster·mgmtIp — v2.744). 배열 순서도 넣는다(같은 IP 행의 순서가 서명에 들어간다).
  *  · 관리 입력: `ipamRevKey()`(무시/분류 설정·주석·스캔 결과와 이력·override·대역 정책 리비전).
  * 시각에 따라 바뀌는 행 값(예약 만료 `reservedExpired`)은 원장 서명에 원래 들어 있지 않다 — 그래서 예전에도 시각만으로는
  * 재기록되지 않았다(동작 불변). ⚠ 원장이 새 필드를 읽기 시작하면 **여기에도 더할 것**(`test/perf2619.test.js` 가 원장 서명의
@@ -119,7 +119,8 @@ export function ledgerInputSignature(snap, revKey = ipamRevKey()) {
   h.update('#host');
   const hosts = snap?.hosts || [];
   h.update(String(hosts.length));
-  for (const x of hosts) h.update([x?.name, x?.vcenterId, x?.powerState, x?.version, x?.cluster].map(f).join('|') + ';');
+  // v2.744(감사 VC-01): 원장이 FQDN 호스트의 관리 IP(mgmtIp)를 읽기 시작했다 — 지문에도 넣는다(빠지면 관리 IP 변경이 ipam.db 에 늦게 반영된다).
+  for (const x of hosts) h.update([x?.name, x?.vcenterId, x?.powerState, x?.version, x?.cluster, x?.mgmtIp].map(f).join('|') + ';');
   return h.digest('hex');
 }
 /*

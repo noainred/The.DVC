@@ -15,6 +15,7 @@ import { store } from '../../store.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeVmHygiene, ALL_CODES } from '../../vmhygiene/analyze.js';
@@ -41,9 +42,11 @@ function run(snap, req) {
 export function registerVmHygiene(api) {
   api.get('/tools/vm-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'vm-hygiene', (snap) => {
     const r = run(snap, req);
-    const isAdmin = req.user?.role === 'admin';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const isAdmin = isAdminDetailUser(req.user);
     return { ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${req.user?.role || ''}` }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/vm-hygiene/settings', toolsPerm, (req, res) => {
     const s = loadVmHygieneSettings();

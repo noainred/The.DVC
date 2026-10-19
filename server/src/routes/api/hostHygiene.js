@@ -9,6 +9,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeHostCfg } from '../../hostcfg/analyze.js';
@@ -39,14 +40,16 @@ function run(snap, req) {
 export function registerHostHygiene(api) {
   api.get('/tools/host-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene', (snap) => {
     const r = run(snap, req);
-    const full = req.user?.role === 'admin' && scopeKey(req.user, snap) === 'all';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === 'all';
     return {
       ...r, codes: HOST_CFG_CODES, initial: snap.initial === true, generatedAt: snap.generatedAt || null,
       scan: { enabled: config.hostCfgScan, refreshMs: config.hostCfgRefreshMs, perCycle: config.hostCfgPerCycle },
       // 수집 상태(오류 문구에 vCenter 응답 원문이 들어갈 수 있다) — 전체 범위 관리자에게만.
       status: full ? hostCfgStatus() : null,
     };
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role || ''}` }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   // v2.706(C4): 최근 재부팅 — bootTime(스냅샷) + 유지보수 모드·연결 끊김 이벤트(logs DB). vCenter 왕복 0.
   api.get('/tools/host-hygiene/reboots', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene-reboots', async (snap) => {

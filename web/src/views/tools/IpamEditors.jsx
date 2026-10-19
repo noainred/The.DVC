@@ -5,6 +5,7 @@ import { Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
 import Select from '../../components/Select.jsx';
+import { splitBulkIps, bulkInvalidText, invalidOfResponse } from './ipamBulkText.js';
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
 export function MemoEditor({ init, onClose, onSaved }) {
@@ -87,18 +88,29 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
     return () => { alive = false; };
   }, [row.ip, isNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ipList = String(ip).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  // v2.744(감사 WEB-02): 서버 splitBatchIps 와 같은 판정으로 나눈다 — 무효 토큰(10.250.1.300 · 10.250.1)을 저장 전에 보이고 저장을 막는다.
+  //   예전에는 나누기만 하고 보냈고 서버가 무효 토큰을 조용히 버려, 일부만 예약된 채 창이 '성공' 으로 닫혔다.
+  const split = splitBulkIps(ip);
+  const ipList = split.tokens;
   const bulk = ipList.length > 1;
+  const invalidNote = isNew ? bulkInvalidText(split.invalid) : null;
   const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note,
     ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }) };
   const save = async () => {
     if (!ipList.length) { setErr('IP를 입력하세요.'); return; }
+    if (invalidNote) { setErr(invalidNote); return; }
     setBusy(true); setErr(null);
     let r;
-    if (bulk) r = await postJson('/tools/ipam/bulk', { ips: ipList, ...fields }).catch((e) => ({ ok: false, reason: e.message }));
-    else r = await putJson(`/tools/ipam/ip/${encodeURIComponent(ipList[0])}`, fields).catch((e) => ({ ok: false, reason: e.message }));
+    // postJson 은 400 을 던진다 — 본문(HttpError.body)의 invalid 목록을 버리지 않고 옮긴다.
+    const failOf = (e) => ({ ok: false, reason: e.message, ...(invalidOfResponse(e?.body) || {}) });
+    // 원문 토큰을 보낸다 — 판정의 주인은 서버다(웹 사본이 틀려도 서버가 다시 거부한다).
+    if (bulk) r = await postJson('/tools/ipam/bulk', { ips: ipList, ...fields }).catch(failOf);
+    else r = await putJson(`/tools/ipam/ip/${encodeURIComponent(ipList[0])}`, fields).catch(failOf);
     setBusy(false);
-    if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
+    if (r.ok) { onSaved(); return; }
+    // 서버가 무효 값을 돌려줬으면 창을 닫지 않고 그 목록을 그대로 보인다(아무것도 저장되지 않았다 — 같은 말을 두 번 하지 않게 한 줄로).
+    const inv = invalidOfResponse(r);
+    setErr(inv ? bulkInvalidText(inv.invalid, inv.invalidCount, { server: true }) : (r.reason || '저장 실패'));
   };
   const remove = async () => {
     if (!ipList.length || bulk) return;
@@ -118,12 +130,17 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
         vCenter 수집·스캔으로 자동 채워지는 값과 <b>별개로</b> 운영자가 직접 지정하는 관리 정보입니다(수집 갱신에도 유지).
         {isNew && ' 여러 IP를 콤마/줄바꿈으로 넣으면 한 번에 같은 상태로 일괄 적용됩니다.'}
       </div>
-      {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      {err && <div className="login-error" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{err}</div>}
       {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew
-          ? <textarea className="input" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="예: 10.20.0.5  또는  10.20.0.5, 10.20.0.6" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />
+          ? (
+            <div style={{ minWidth: 0 }}>
+              <textarea className="input" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="예: 10.20.0.5  또는  10.20.0.5, 10.20.0.6" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />
+              {invalidNote && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{invalidNote}</div>}
+            </div>
+          )
           : <input className="input" value={ip} disabled style={{ width: '100%', boxSizing: 'border-box', opacity: .8 }} />}
 
         <label style={L}>관리상태</label>
@@ -161,7 +178,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
 
         <div />
         <div className="flex gap" style={{ marginTop: 4, alignItems: 'center' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : (bulk ? `일괄 적용 (${ipList.length}개)` : '저장')}</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !!invalidNote} title={invalidNote || undefined} onClick={save}>{busy ? '저장 중…' : (bulk ? `일괄 적용 (${split.ips.length}개)` : '저장')}</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
           {!isNew && row.managed && <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto', color: 'var(--red)' }} disabled={busy} onClick={remove} title="관리상태 삭제(자동 발견 상태로 되돌림)">관리상태 삭제</button>}
         </div>

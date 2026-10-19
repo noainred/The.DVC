@@ -23,6 +23,8 @@ import { capStr, capTrim } from '../util/capStr.js';
 const FILE = path.join(config.configDir, 'central-unsupported-servers.json');
 const MAX_PER_KEY = 200;   // 스캔 결과 상한과 동일(중앙 회신 본문 1MB 안)
 const MAX_KEYS = 500;      // (agent, 법인, 서비스) 조합 상한 — 무한 증가 방지
+// v2.744(감사 DB-02): IP 정렬 비교는 공유 collator 하나(옵션 객체를 넘기는 localeCompare 는 호출마다 collator 를 새로 해석한다 — 결과는 같다).
+const IP_COLLATOR = new Intl.Collator(undefined, { numeric: true });
 
 let _map = null; // key -> { key, agent, datacenterId, service, at, trigger, count, truncated, servers: [] }
 
@@ -98,7 +100,7 @@ export function listUnsupportedServers({ datacenterId = '' } = {}) {
     groups.push({ agent: e.agent, datacenterId: e.datacenterId, service: e.service, at: e.at, count: e.count, truncated: e.truncated, trigger: e.trigger });
     for (const s of e.servers || []) rows.push({ ...s, agent: e.agent, datacenterId: e.datacenterId, service: e.service, scannedAt: e.at, source: e.agent ? 'edge' : 'central' });
   }
-  rows.sort((a, b) => (b.scannedAt - a.scannedAt) || a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+  rows.sort((a, b) => (b.scannedAt - a.scannedAt) || IP_COLLATOR.compare(a.ip, b.ip));   // v2.744(감사 DB-02): 공유 collator(결과 같음)
   return { rows, groups, total: rows.length, truncatedGroups: groups.filter((g) => g.truncated).length };
 }
 

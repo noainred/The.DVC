@@ -11,6 +11,7 @@
 //     net: { switches:[{name,kind:'vss'|'dvs',uplinks:[vmnicN…],pgs:int|null}], pgs:[{name,vlan,sw,promisc}], pgsTotal }|null(v2.701 A10) }
 //   - 못 읽은 값은 null 이다(false·0·빈 목록이 아니다 — 그것은 값이다).
 import { xmlUnescape } from '../vcenter/soapParse.js';
+import { clusterIndex } from '../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 
 /** 전부 vSphere 5.0+ 경로(없는 경로는 요청 전체를 InvalidProperty 로 만든다). lockdownMode(6.0+)는 따로 요청한다. */
 export const HOST_CFG_PATHS = Object.freeze([
@@ -363,19 +364,24 @@ export const DRIFT_FIELDS = Object.freeze({
 
 /**
  * 클러스터마다 필드별 값 분포 → 다수값과 다른 호스트에 drift 판정. 동률이면 '다수' 를 정하지 않고 전부 표시(어느 쪽이 옳은지 모른다).
- * @returns {Map<hostId, Array<{field,value,majority}>>, clusters:[{vcenterId,cluster,hosts,fields:{field:{values:[{value,count}]}}}]}
+ * @returns {Map<hostId, Array<{field,value,majority}>>, clusters:[{vcenterId,cluster,clusterRef,vcDatacenter,sameName,hosts,fields:{field:{values:[{value,count}]}}}]}
  */
 export function clusterDrift(hosts) {
   const byCl = new Map();
-  for (const h of hosts || []) {
-    if (!h || h.connectionState === 'DISCONNECTED' || !h.cluster || h.cluster === 'standalone') continue;
-    const k = `${h.vcenterId}\u0000${h.cluster}`;
+  // v2.744(감사 VC-02): 같은 클러스터 = (vCenter, 클러스터 moref) — 이름으로 묶으면 다른 데이터센터의 같은 이름 클러스터 값이 섞여
+  //   다수값과 다른 호스트를 거짓으로 경고했다(재현: Seoul 2대·Busan 3대 'Prod' → Seoul 2대 NTP 드리프트). 키는 clustercfg 한 벌.
+  const hl = (hosts || []).filter((h) => h && typeof h === 'object');
+  const idx = clusterIndex(hl);
+  for (const h of hl) {
+    if (h.connectionState === 'DISCONNECTED' || !h.cluster || h.cluster === 'standalone') continue;
+    const k = idx.keyOf(h);
+    if (!k) continue;
     if (!byCl.has(k)) byCl.set(k, []);
     byCl.get(k).push(h);
   }
   const perHost = new Map();
   const clusters = [];
-  for (const list of byCl.values()) {
+  for (const [k, list] of byCl) {
     if (list.length < 2) continue;
     const fields = {};
     for (const [f, get] of Object.entries(DRIFT_FIELDS)) {
@@ -392,7 +398,7 @@ export function clusterDrift(hosts) {
         perHost.get(h.id).push({ field: f, value: v, majority });
       }
     }
-    if (Object.keys(fields).length) clusters.push({ vcenterId: list[0].vcenterId, cluster: list[0].cluster, hosts: list.length, fields });
+    if (Object.keys(fields).length) clusters.push({ vcenterId: list[0].vcenterId, cluster: list[0].cluster, ...idx.meta(k), hosts: list.length, fields });
   }
   return { perHost, clusters };
 }

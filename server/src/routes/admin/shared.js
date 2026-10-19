@@ -40,13 +40,25 @@ export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 
 // 이후 변경 경로가 없다(rename API 부재).
 // 운영 주의: settings-owners.txt·SETTINGS_OWNERS·UI 목록에 **표시이름**을 적어 두었다면 이제
 // 소유자로 인정되지 않는다 → 해당 계정의 **로그인 ID**로 바꿔 적어야 한다.
+// v2.744(감사 AUTHZ-02): 설정 소유자 등급은 **전 법인 공용**(공유 CENTRAL_TOKEN 평문·전 법인 자격증명이 든 백업의 생성·내려받기·복원·삭제·
+//   비밀 정책·세션 보안·메일)이라 **전체 범위 계정만** 통과한다. 예전에는 username 만 봐서 settingsOwners 에 든 범위 관리자
+//   (scope.vcenters 가 있는 admin)가 소유자 라우트 35개 중 fullScope 게이트가 없던 16개를 그대로 썼다 — 같은 등급의 형제
+//   (개별 엣지 토큰·host-access·API 키·엣지 사용자)는 fleetOnly 로 403 이었다(v2.743 LEFT-09 와 같은 판단의 남은 형제).
+//   판정을 여기 두면 새 소유자 라우트도 자동으로 따른다(아키텍처 점검 archScan 도 이 게이트를 전체 범위로 센다).
+//   거부 응답은 fullScopeOnlyWith 와 같은 모양({ok,error,reason}) — requiredOwner 를 싣지 않는다(이미 소유자인 계정에
+//   '소유자 목록에 등록하라' 는 틀린 조치를 화면이 말하지 않게. 화면은 서버 사유와 함께 '범위' 안내로 그린다).
+export const SETTINGS_OWNER_FULL_SCOPE_REASON = '설정 소유자 등급은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 이 계정은 소유자 목록에 있지만 범위가 지정되어 있습니다.';
 export function requireSettingsOwner(req, res, next) {
   if (!config.auth.enabled) return next();
   let owners = [];
   try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
   const u = req.user || {};
-  if (owners.includes(u.username)) return next();
-  return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
+  if (!owners.includes(u.username)) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
+  // 범위 판정이 던지면(스냅샷 이상) 범위 계정으로 본다 — 거부 기본값.
+  let scoped = true;
+  try { scoped = !!scopedVcenterIds(u, store.get()); } catch { scoped = true; }
+  if (scoped) return res.status(403).json({ ok: false, error: 'forbidden', reason: SETTINGS_OWNER_FULL_SCOPE_REASON });
+  return next();
 }
 requireSettingsOwner.gate = Object.freeze({ kind: 'settingsOwner' }); // v2.614 아키텍처 점검 태그
 

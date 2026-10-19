@@ -12,6 +12,7 @@
  *  · 템플릿은 넣지 않는다.
  */
 import { vmRefOf, vmTagsOf, tagStateOf, tagsPartialOf } from '../tags/analyze.js';
+import { clusterIndex, clusterLabelOf } from '../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키·이름 한 벌(ref 우선)
 
 export const GROUP_KINDS = Object.freeze(['vcenter', 'cluster', 'folder', 'tag']);
 export const ROWS_MAX = 500;
@@ -54,7 +55,7 @@ export function costOf(a, s) {
 }
 
 /**
- * @param snap   { vcenters, vms }(범위로 이미 거른 것)
+ * @param snap   { vcenters, vms, hosts }(범위로 이미 거른 것 — hosts 는 클러스터 묶음 판정에 쓴다)
  * @param s      단가 설정
  * @param opts   { by: 'vcenter'|'cluster'|'folder'|'tag', category, q, vcName:Map }
  */
@@ -69,6 +70,9 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
   const notes = { excludedOff: 0, storageUnknown: 0, cpuUnknown: 0, provisionedPartial: 0, partialVms: 0, multiTag: 0, tagUnknown: 0, tagPartial: 0, templates: 0 };
   const vmRows = [];
   const total = { vms: 0, vcpu: 0, ramGB: 0, storageGB: 0, cpu: 0, ram: 0, storage: 0, total: 0 };
+  // v2.744(감사 VC-02): 클러스터 기준은 (vCenter, 클러스터 moref) 로 묶는다 — 이름으로 묶으면 다른 데이터센터의 같은 이름 클러스터
+  //   비용이 한 행으로 합쳐졌다. 이름은 clusterLabelOf(같은 이름이 둘 이상일 때만 데이터센터를 붙인다 — 화면·CSV 가 같은 글자).
+  const cidx = kind === 'cluster' ? clusterIndex(snap.hosts) : null;
   for (const v of snap.vms || []) {
     if (v.template) { notes.templates += 1; continue; }
     const a = vmAllocation(v, s);
@@ -80,7 +84,11 @@ export function analyzeCost(snap, s, { by = 'vcenter', category = '', q = '', vc
     const c = costOf(a, s);
     let key; let label;
     if (kind === 'vcenter') { key = v.vcenterId; label = vcName.get(v.vcenterId) || v.vcenterId; }
-    else if (kind === 'cluster') { key = `${v.vcenterId}\u0000${v.cluster || ''}`; label = v.cluster || '(클러스터 없음)'; }
+    else if (kind === 'cluster') {
+      const gk = cidx.keyOf(v);
+      key = gk ?? `${v.vcenterId}\u0000${v.cluster || ''}`;
+      label = gk ? clusterLabelOf({ name: v.cluster, ...cidx.meta(gk) }) : (v.cluster || '(클러스터 없음)');
+    }
     else if (kind === 'folder') { key = `${v.vcenterId}\u0000${v.folder || ''}`; label = v.folder || '(폴더 없음)'; }
     else {
       const inv = invByVc.get(v.vcenterId);

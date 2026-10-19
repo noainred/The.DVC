@@ -143,7 +143,12 @@ export function extractSanSwitchParts(device = {}, snap = {}) {
     else if (ok < total) st = PART_STATE.fault;
     else st = PART_STATE.ok;
     // ⚠ unknown 에 '정상' 을 붙이지 않는다 — 라벨이 판정을 거짓말하면 안 된다.
-    const text = st === PART_STATE.unknown ? `${label} ${raw}(상태 미확인)` : `${label} ${raw} 정상`;
+    // v2.744(감사 DEV-02): fault 에도 붙이지 않는다 — 예전 라벨은 unknown 만 따로 다뤄 팬 하나가 멈춘 스위치가
+    //   '팬 3/4 정상' 으로 part_state·이벤트·critical 알림 제목에 실렸다(상태 배지는 장애인데 이름은 정상이라 말했다).
+    //   장애 라벨은 **개수만** 둔다 — 판정은 상태 배지·알림의 '상태:' 줄이 말한다. '정상' 은 실제로 ok 일 때만 붙인다.
+    const text = st === PART_STATE.unknown ? `${label} ${raw}(상태 미확인)`
+      : st === PART_STATE.ok ? `${label} ${raw} 정상`
+        : `${label} ${raw}`;
     push(kind, 'all', KEY_KIND.none, st, raw, text, '');
   }
 }

@@ -9,6 +9,7 @@ import { relayCheckView } from '../../relaycheck/view.js';   // v2.500(감사 M1
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -29,7 +30,8 @@ api.get('/tools/relaycheck', toolsPerm, (_req, res) => {
   // v2.478(감사 S9)은 targets[].host/port 만 가렸는데 `...st` 스프레드로 settings.hosts·
   // results[].target.host/port 가 그대로 나가고, key("host:port")로 복원까지 됐다(v2.500 감사 M1).
   // 축약은 relaycheck/view.js 가 한 곳에서 한다 — 여기서 필드를 다시 펼치지 말 것.
-  const isAdmin = _req.user?.role === 'admin';
+  // v2.744(감사 AUTHZ-01): 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 가림 판본 — 판정은 isAdminDetailUser 하나.
+  const isAdmin = isAdminDetailUser(_req.user);
   const targets = buildTargets(st.settings, loadCollectors(), loadTopology())
     .map((t) => ({ key: t.key, host: t.host, port: t.port, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' }));
   res.json({ ok: true, ...relayCheckView(st, targets, isAdmin), limits: LIMITS, defaultProfile: DEFAULT_PROFILE, kinds: KINDS });

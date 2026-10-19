@@ -13,16 +13,30 @@ import { logStatus, logFilePath, pruneOld } from '../../svcmon/csvlog.js';
 import { canEdit, adminOnly, fullScopeOnly } from './shared.js';
 import { dirPathIssue } from '../../util/dirPathGuard.js';
 import { scopeFilePaths, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
+import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
 
 // v2.598(감사 AUTHZ-2598-04): 로그 디렉터리 절대 경로는 admin 만(이름만 남기고 pathHidden 으로 밝힌다).
 //   실패 원문(stats.lastError — fs 오류는 경로를 담는다)도 같은 이유로 가린다.
 export function logStatusFor(user) {
   const st = scopeFilePaths(logStatus(), user, ['dir', 'dirPath']);
-  if (user?.role === 'admin' || !st?.stats?.lastError) return st;
+  if (isAdminDetailUser(user) || !st?.stats?.lastError) return st;   // v2.744(감사 AUTHZ-01): 데모 계정은 operator 와 같은 판본
   return { ...st, stats: { ...st.stats, lastError: ADMIN_ONLY_TEXT } };
 }
 
 let analyzeRunning = false;   // /log/analyze 동시 1건 가드(T2599-03)
+
+/**
+ * v2.744(감사 AUTHZ-03): 결과 로그 CSV 파일(전 대상 호스트·결과 — 사실상 인벤토리 내보내기)은 mock 데모 계정에 주지 않는다.
+ *   v2.743 이 데모 계정의 data.csv 를 빼서 CSV 내보내기를 403 으로 만들었는데, 이 경로는 canEdit(역할)만 보고 csvPerm 이 없어
+ *   요청 문맥이 admin 인 데모 계정이 그대로 받았다. operator 에게 data.csv 를 요구할지는 v2.643 이 남긴 정책 판단이라 여기서는 데모만 막는다.
+ *   응답 모양은 requirePerm 의 403({error, requiredPerm}) + 데모 표지(demoGuest) — 화면이 데모 안내로 그린다.
+ */
+function deniedDemoCsv(req, res) {
+  if (!isDemoGuest(req.user)) return false;
+  res.status(403).json({ error: 'forbidden', requiredPerm: ['data.csv'], demoGuest: true,
+    reason: '데모 계정은 CSV 내보내기(결과 로그 파일)를 받을 수 없습니다.' });
+  return true;
+}
 
 export function registerLogs(svcmonRouter) {
 
@@ -52,6 +66,7 @@ svcmonRouter.put('/log', adminOnly, fullScopeOnly, (req, res) => {
  * 조회 권한만으로 열어 두지 않고 편집 권한을 요구하고 감사에 남긴다.
  */
 svcmonRouter.get('/log/files/:name', canEdit, (req, res) => {
+  if (deniedDemoCsv(req, res)) return;   // v2.744(AUTHZ-03) — 파일 경로 확인보다 먼저(데모 계정에는 파일 존재도 말하지 않는다)
   const p = logFilePath(req.params.name);
   if (!p) return res.status(404).json({ error: '로그 파일을 찾을 수 없습니다.' });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

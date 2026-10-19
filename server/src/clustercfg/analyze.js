@@ -36,10 +36,64 @@ export function clusterRefMode(hosts) {
   return mode;
 }
 
-/** 호스트 → 클러스터 묶음 키(같은 vCenter·같은 클러스터면 같은 값). 독립·소속 미상 호스트는 null. mode 는 clusterRefMode 의 결과. */
+/**
+ * 호스트 → 클러스터 묶음 키(같은 vCenter·같은 클러스터면 같은 값). 독립·소속 미상 호스트는 null. mode 는 clusterRefMode 의 결과.
+ * v2.744(감사 VC-02): VM 도 이 함수로 묶는다(VM 은 호스트의 cluster·clusterRef 를 싣는다). ref 모드 vCenter 에서 ref 가 없는 원소
+ *   (엣지 수신 정제가 형식 밖 ref 를 null 로 바꾼 VM 등)는 'r:null' 키가 아니라 이름 키로 떨어진다 — 호스트는 ref 모드면 전부
+ *   ref 를 실었으므로(clusterRefMode 의 조건) 호스트 결과는 예전과 같다.
+ */
 export function clusterGroupKeyOf(h, mode) {
   if (!inCluster(h)) return null;
-  return mode?.get(h.vcenterId) === true ? refKeyOf(h.vcenterId, refOf(h)) : keyOf(h.vcenterId, h.cluster);
+  return mode?.get(h.vcenterId) === true && refOf(h) ? refKeyOf(h.vcenterId, refOf(h)) : keyOf(h.vcenterId, h.cluster);
+}
+
+/**
+ * v2.744(감사 VC-02): 판정 경로(vSAN 분할·호스트 드리프트·용량·비용 배분·이전 준비도·토폴로지)가 함께 쓰는 클러스터 색인.
+ *   v2.742 VC-05 는 클러스터 점검·N+1 만 ref 로 묶고 나머지를 '이력 연속성 판단 필요' 로 남겼는데, 그중 이 경로들은 **저장하지 않는
+ *   실시간 판정**이다 — (vCenter, 이름) 으로 묶으면 다른 데이터센터의 같은 이름 클러스터가 한 묶음이 되어 vSAN 분할 crit·드리프트
+ *   경고·합계가 거짓이 됐다(재현: DC 둘의 4대 'Prod' → '보고 멤버 4 < vSAN 호스트 8'). 묶음 키는 clusterGroupKeyOf 하나다.
+ *   ⚠ 시계열 키(metrics/sampler.js temp_cluster·gpu_cluster)는 이 색인을 쓰지 않는다 — 키를 바꾸면 그 클러스터의 이력이 끊긴다.
+ * @param hosts 그 판정이 보는 호스트 전부(모드는 vCenter 마다 '클러스터 호스트가 전부 ref 를 실었는가' 로 정한다)
+ * @returns {{ mode: Map, keyOf: (x)=>string|null, meta: (key)=>{clusterRef, vcDatacenter, sameName} }}
+ *   meta.sameName = 같은 vCenter 안 같은 이름(대소문자 무시) 묶음 수 — 2 이상이면 이름만으로 구분할 수 없다(clusterLabelOf 가 데이터센터를 붙인다).
+ */
+export function clusterIndex(hosts) {
+  const hl = Array.isArray(hosts) ? hosts : [];
+  const mode = clusterRefMode(hl);
+  const info = new Map();   // 묶음 키 → { vcenterId, name, ref, vcDatacenter }
+  for (const h of hl) {
+    const k = clusterGroupKeyOf(h, mode);
+    if (!k) continue;
+    let g = info.get(k);
+    if (!g) { g = { vcenterId: h.vcenterId, name: h.cluster, ref: mode.get(h.vcenterId) === true ? refOf(h) : null, vcDatacenter: null }; info.set(k, g); }
+    if (!g.vcDatacenter && typeof h.vcDatacenter === 'string' && h.vcDatacenter) g.vcDatacenter = h.vcDatacenter;
+  }
+  const nameN = new Map();
+  for (const g of info.values()) { const nk = keyOf(g.vcenterId, g.name); nameN.set(nk, (nameN.get(nk) || 0) + 1); }
+  const keyFn = (x) => clusterGroupKeyOf(x, mode);
+  return {
+    mode,
+    keyOf: keyFn,
+    meta(k) {
+      const g = k ? info.get(k) : null;
+      if (!g) return { clusterRef: null, vcDatacenter: null, sameName: 1 };
+      return { clusterRef: g.ref, vcDatacenter: g.vcDatacenter, sameName: nameN.get(keyOf(g.vcenterId, g.name)) || 1 };
+    },
+  };
+}
+
+/**
+ * v2.744(감사 VC-02): 서버가 글자를 만드는 곳(토폴로지 노드·비용 배분 그룹 이름·CSV)의 클러스터 이름 —
+ *   웹 views/clustercfg/clusterCfgText.js clusterNameLabel 과 **같은 규칙**이다(같은 이름이 둘 이상일 때만 데이터센터, 모르면 ref 를 붙인다).
+ *   번들 경계라 두 벌이고 server/test/audit2744f.test.js 가 같은 입력으로 두 결과를 대조한다.
+ */
+export function clusterLabelOf(r) {
+  const name = r?.name ?? r?.cluster ?? '';
+  if (!r || !(r.sameName > 1)) return String(name);
+  if (r.vcDatacenter) return `${name} · ${r.vcDatacenter}`;
+  const ref = typeof r.ref === 'string' && r.ref ? r.ref : typeof r.clusterRef === 'string' && r.clusterRef ? r.clusterRef : null;
+  if (ref) return `${name} (${ref})`;
+  return `${name} (같은 이름 ${r.sameName}개 — 구분 불가)`;
 }
 
 /**

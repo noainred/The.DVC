@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import { DS_TEXT, SEV_LABEL, SEV_BADGE, findingDetail, dsCoverageText, pathCoverageText, gbText } from '../dscfg/dsCfgText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
+import { clusterRowKey, clusterNameLabel } from '../clustercfg/clusterCfgText.js'; // v2.744(감사 VC-02): 같은 이름 다른 데이터센터 클러스터 — 행 키·이름 한 벌
 
 const TABS = [['ds', '데이터스토어'], ['paths', '스토리지 경로'], ['vsan', 'vSAN']];
 
@@ -181,9 +182,9 @@ export default function StoragePathsTool({ scope }) {
                 <STable minWidth={640}>
                   <thead><tr><th>클러스터</th><th>vCenter</th><th>vSAN 호스트</th><th>보고된 멤버</th><th>디스크 문제</th><th>판정</th></tr></thead>
                   <tbody>
-                    {vs.clusters.map((c) => (
-                      <tr key={`${c.vcenterId}|${c.cluster}`}>
-                        <td><b>{c.cluster}</b></td>
+                    {vs.clusters.map((c, i) => (
+                      <tr key={clusterRowKey(c, i)}>
+                        <td><b>{clusterNameLabel(c)}</b></td>
                         <td className="muted" style={{ fontSize: 12 }}>{c.vcenterName}</td>
                         <td data-sort={c.hosts}>{c.hosts}</td>
                         <td data-sort={c.minMembers ?? ''}>{c.minMembers ?? '—'}</td>

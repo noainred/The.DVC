@@ -109,13 +109,19 @@ function testFilter(item, f, regionIds) {
  *   (STable 과 같은 규약). 예전엔 String(null)='null' 을 숫자 문자열과 localeCompare 해 내림차순에서 맨 앞에 와,
  *   '사용률 높은 데이터스토어' 상위 N 이 사용량 미상 DS 로 채워졌다. 숫자끼리는 수치 비교, 나머지는 문자열(숫자 인식) 비교.
  */
+/*
+ * v2.744(감사 DB-02): 문자열 비교는 모듈 수준 Intl.Collator 하나로 한다. 옵션 객체를 넘기는 localeCompare 는 호출마다 collator 를
+ *   새로 해석해 VM 6,000대 이름 정렬이 약 0.4초 동기 정지였다(v2.503 웹 STable 과 같은 원인). 결과는 ECMA-402 상 같다 — 테스트가 대조한다.
+ */
+const NUM_COLLATOR = new Intl.Collator(undefined, { numeric: true });
+
 export function nlSortCompare(field, dir = 1) {
   const empty = (v) => v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v));
   return (a, b) => {
     const x = a?.[field], y = b?.[field];
     const ex = empty(x), ey = empty(y);
     if (ex || ey) return ex === ey ? 0 : ex ? 1 : -1;
-    const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+    const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : NUM_COLLATOR.compare(String(x), String(y));
     return cmp * dir;
   };
 }

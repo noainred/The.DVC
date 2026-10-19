@@ -313,6 +313,8 @@ export async function logStatus() {
   // v2.741(DB-03): 파일 크기와 함께 사용 중 크기·빈 공간을 싣는다 — 용량 상한은 사용 중 크기로 판정하고 파일은 줄어들지 않는다.
   const used = typeof db.usedBytes === 'function' ? db.usedBytes() : null;
   const free = typeof db.freeBytes === 'function' ? db.freeBytes() : null;
-  return { settings: loadLogSettings(), lastRun, store: db.meta(), dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes(),
+  // v2.744(감사 DB-03): 건수 집계는 vCenter 사이에 양보하는 metaAsync(설정 화면이 30초마다 부른다 — 캐시가 지날 때의 동기 정지 제거).
+  const meta = typeof db.metaAsync === 'function' ? await db.metaAsync() : db.meta();
+  return { settings: loadLogSettings(), lastRun, store: meta, dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes(),
     dbUsedBytes: Number.isFinite(used) ? used : null, dbFreeBytes: Number.isFinite(free) ? free : null, ...(lastCap ? { lastCap } : {}) };
 }

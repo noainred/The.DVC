@@ -19,6 +19,7 @@ import { addSaved } from './saved.js';
 import { createProvisioner } from './vsphere.js';
 import { onDemandVcBlock } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { describeError } from '../util/errors.js';
+import { isAdminDetailUser } from '../auth/demoGuest.js';   // v2.744(감사 AUTHZ-01): '남의 작업도 본다' 판정 하나
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const CONCURRENCY = Number(process.env.PROVISION_CONCURRENCY) || 4;
@@ -61,7 +62,8 @@ const inScope = (j, allowed) => !allowed || (j.vcenterId && allowed.has(String(j
 
 /** @returns {{jobs: object[], omittedOutOfScope: number}} */
 export function listJobsScoped(user, allowed = null) {
-  const isAdmin = user?.role === 'admin';
+  // v2.744(감사 AUTHZ-01): mock 데모 계정은 요청 문맥이 admin 이지만 남의 작업(createdBy·원본 VM·생성 VM 이름)을 보지 않는다.
+  const isAdmin = isAdminDetailUser(user);
   const mine = jobs.filter((j) => isAdmin || j.createdBy === user?.username);
   const visible = mine.filter((j) => inScope(j, allowed));
   return { jobs: visible.map(redact), omittedOutOfScope: mine.length - visible.length };
@@ -72,7 +74,7 @@ export function listJobs(user, allowed = null) {
 export function getJob(id, user, allowed = null) {
   const j = jobs.find((x) => x.id === id);
   if (!j) return null;
-  if (user && user.role !== 'admin' && j.createdBy !== user.username) return null;
+  if (user && !isAdminDetailUser(user) && j.createdBy !== user.username) return null;   // v2.744(AUTHZ-01)
   if (!inScope(j, allowed)) return null; // 범위 밖은 존재 은닉(404)
   return redact(j);
 }

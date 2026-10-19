@@ -10,6 +10,7 @@ import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSear
 import { getServiceCheck } from '../../health/services.js';
 import { confirmSettingsDefault } from '../../util/settingsLoadError.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { getNetworkCheck } from '../../health/network.js';
 import { buildVmwareConfigExport } from '../../backup/vmwareExport.js';
@@ -212,7 +213,8 @@ api.post('/tools/deep-search', requirePerm('tools'), (req, res) => {
 api.get('/tools/service-check', requirePerm('tools'), (req, res) => {
   try {
     // v2.617(SEC-2): 멈춤 감시 행의 '멈춘 지점'(설치 절대 경로·소스 줄)은 관리자에게만.
-    const r = getServiceCheck({ isAdmin: req.user?.role === 'admin' });
+    // v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — 데모 계정에는 멈춘 지점(절대 경로·소스 줄)을 주지 않는다.
+    const r = getServiceCheck({ isAdmin: isAdminDetailUser(req.user) });
     if (!scopedVcenterIds(req.user, store.get())) return res.json(r);
     res.json({ ...r, scoped: true, checks: (r.checks || []).map((c) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -365,7 +367,8 @@ api.get('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   // v2.583 #35: 바인딩이 없으면(만료·위조 reqId) 결과를 주지 않는다 — 빈 owner/vc 로 검사를 건너뛰던 것이 우회로였다.
   const bind = bindingOfReq(reqId);
   if (!bind) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다(만료되었을 수 있습니다 — 다시 조회하세요).' });
-  if (req.user?.role !== 'admin' && bind.owner !== String(req.user?.username || '')) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
+  // v2.744(감사 AUTHZ-01): '남의 조회 결과도 본다' 는 관리자(isAdminDetailUser)만 — 데모 계정은 자기 조회만.
+  if (!isAdminDetailUser(req.user) && bind.owner !== String(req.user?.username || '')) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
   if (!bind.vcenterId || !inUserScope(req.user, store.get(), bind.vcenterId)) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
   res.json({ ok: true, ...getLogQueryResult(reqId) });
 });
@@ -392,9 +395,11 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
       counted = filtered && typeof db.countCapped === 'function' ? db.countCapped(f) : { total: db.count(f), capped: false };
       rows = db.query(f, limit, offset);
     }
+    // v2.744(감사 DB-03): 헤더 건수는 vCenter 사이에 양보하는 metaAsync(결과는 meta() 와 같다) — 끊긴 연결 확인보다 먼저 계산한다.
+    const meta = typeof db.metaAsync === 'function' ? await db.metaAsync() : db.meta();
     if (res.headersSent || res.destroyed) return undefined;
     res.json({ total: counted.total, totalCapped: counted.capped, ...(counted.capped ? { totalCap: counted.total } : {}),
-      rows, meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
+      rows, meta: scopeLogMeta(meta, allowed), dbKind: db.kind });
     return undefined;
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

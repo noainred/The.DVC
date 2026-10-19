@@ -157,8 +157,34 @@ function initSqlite() {
     const freelistStmt = db.prepare('PRAGMA freelist_count');
     const pageSizeStmt = db.prepare('PRAGMA page_size');
     const rowCountStmt = db.prepare('SELECT COUNT(*) n FROM events');
-    let metaCache = null;                       // { at, v } — 아래 meta() 주석 참조(v2.503)
-    const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
+    let metaCache = null;                       // { at, n, vcs } — 아래 meta() 주석 참조(v2.503)
+    // v2.744(감사 DB-03): vCenter 별 건수·마지막 시각. 예전 한 문장 'SELECT vcenterId, COUNT(*), MAX(ts) FROM events GROUP BY vcenterId'
+    //   는 idx_events_ts 를 통째로 훑어(합성 150만 행 147ms · 250만 행 262ms) 캐시가 지날 때마다(5분) 한 번 동기 정지였다. 이제
+    //   ① vCenter 목록은 재귀 CTE 로 인덱스를 건너뛰며(loose index scan — v2.675 metrics keysOf 와 같은 모양, (vcenterId, ts) 선행열)
+    //   ② 건수는 vCenter 마다 'COUNT WHERE vcenterId=?'(같은 인덱스 SEARCH) ③ 마지막 시각은 vCenter 마다 MAX(ts) 단독 문장(lastTsStmt —
+    //   인덱스 끝점). 전체 건수는 vCenter 별 건수의 합이다(vcenterId 는 NOT NULL 이라 COUNT(*) 와 같다 — 같은 값을 두 번 세지 않는다).
+    //   결과(순서 포함 — 둘 다 vcenterId BINARY 오름차순)는 예전 GROUP BY 와 같다(audit2744e 가 대조). metaAsync 는 vCenter 사이에 양보한다.
+    //   ⚠ 남는 한계: vCenter 하나의 COUNT 는 여전히 한 문장이다(그 vCenter 행 수에 비례 — 합성 150만 행 28대에서 최대 4.2ms).
+    const vcIdsStmt = db.prepare(`WITH RECURSIVE vs(v) AS (
+        SELECT (SELECT MIN(vcenterId) FROM events)
+        UNION ALL SELECT (SELECT MIN(vcenterId) FROM events WHERE vcenterId>vs.v) FROM vs WHERE vs.v IS NOT NULL)
+      SELECT v FROM vs WHERE v IS NOT NULL`);
+    const vcCountStmt = db.prepare('SELECT COUNT(*) n FROM events WHERE vcenterId=?');
+    let metaGen = 0;                            // 무효화 세대 — 계산 도중 지워졌으면(prune) 그 결과를 캐시에 넣지 않는다
+    let metaInflight = null;                    // metaAsync 진행 중 계산(같은 계산을 겹쳐 돌리지 않는다)
+    const invalidateMeta = () => { metaCache = null; metaGen++; };
+    /** vCenter 하나씩 세는 단계 — 동기 meta() 는 끝까지 한 번에, metaAsync 는 단계 사이에 양보하며 돈다(판정은 이 생성기 하나). */
+    function* metaCountSteps() {
+      const vcs = []; let n = 0;
+      for (const row of vcIdsStmt.all()) {
+        const id = row.v;
+        const c = Number(vcCountStmt.get(id)?.n || 0);
+        vcs.push({ vcenterId: id, count: c, lastTs: Number(lastTsStmt.get(id)?.mx) });
+        n += c;
+        yield;
+      }
+      return { n, vcs };
+    }
     // 용량 정리 루프가 반복 호출한다 — 매 회 prepare 하면 파싱·계획 수립이 반복된다(v2.503).
     const pruneOldestStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events ORDER BY ts ASC LIMIT ?)');
     /**
@@ -167,7 +193,7 @@ function initSqlite() {
      */
     const pruneAsync = async (beforeTs) => {
       try { return await chunkedDelete(pruneChunkStmt, [beforeTs], { label: 'vclogs', chunk: pruneChunk, targetMs: LOGS_PRUNE_TARGET_MS, minChunk: LOGS_PRUNE_CHUNK_MIN, maxChunk: PRUNE_CHUNK_ROWS }); }
-      finally { metaCache = null; }
+      finally { invalidateMeta(); }
     };
     const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
     const build = (where, params) => ({ where, params });
@@ -530,9 +556,35 @@ function initSqlite() {
         const firstTs = minTsStmt.get()?.mn ?? null;
         const lastTs = maxTsStmt.get()?.mx ?? null;
         if (!metaCache || now - metaCache.at >= META_TTL_MS) {
-          const n = Number(rowCountStmt.get()?.n || 0);
-          const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) }));
-          metaCache = { at: now, n, vcs };
+          const it = metaCountSteps(); let r;
+          while (!(r = it.next()).done) { /* 동기 — 끝까지 */ }
+          metaCache = { at: now, n: r.value.n, vcs: r.value.vcs };
+        }
+        return { count: metaCache.n, firstTs, lastTs, vcenters: metaCache.vcs, countsAt: metaCache.at };
+      },
+      /**
+       * v2.744(감사 DB-03): meta() 와 **같은 결과**를 vCenter 사이 시간 기준 양보(createYielder)로 계산한다 — 설정 › vCenter 로그 상태
+       *   (/admin/vclogs/status — 화면이 30초마다)·로그 뷰어 조회(/tools/vclogs)가 쓴다. 캐시가 신선하면 즉시 돌려준다. 같은 계산이
+       *   진행 중이면 합류한다(겹쳐 돌리지 않는다). 계산 도중 prune 이 캐시를 지웠으면(세대가 바뀜) 결과는 돌려주되 캐시에 넣지 않는다.
+       */
+      metaAsync: async ({ yieldMs = 15 } = {}) => {
+        const now = Date.now();
+        const firstTs = minTsStmt.get()?.mn ?? null;
+        const lastTs = maxTsStmt.get()?.mx ?? null;
+        if (!metaCache || now - metaCache.at >= META_TTL_MS) {
+          if (!metaInflight) {
+            const gen = metaGen;
+            metaInflight = (async () => {
+              const maybeYield = createYielder(yieldMs);
+              const it = metaCountSteps(); let r;
+              while (!(r = it.next()).done) await maybeYield();
+              const v = { at: now, n: r.value.n, vcs: r.value.vcs };
+              if (gen === metaGen) metaCache = v;
+              return v;
+            })().finally(() => { metaInflight = null; });
+          }
+          const v = await metaInflight;
+          return { count: v.n, firstTs, lastTs, vcenters: v.vcs, countsAt: v.at };
         }
         return { count: metaCache.n, firstTs, lastTs, vcenters: metaCache.vcs, countsAt: metaCache.at };
       },
@@ -547,7 +599,7 @@ function initSqlite() {
         const t0 = performance.now();
         const r = pruneChunkStmt.run(beforeTs, want);
         pruneChunk = nextPruneChunk(pruneChunk, want, performance.now() - t0);
-        metaCache = null;
+        invalidateMeta();
         const first = Number(r?.changes || 0);
         if (first >= want) {
           pruneBg = pruneAsync(beforeTs)
@@ -570,7 +622,7 @@ function initSqlite() {
         const t0 = performance.now();
         const r = pruneOldestStmt.run(want);
         oldestChunk = nextPruneChunk(oldestChunk, want, performance.now() - t0);
-        metaCache = null;
+        invalidateMeta();
         return Number(r?.changes || 0);
       },
       /**
@@ -658,6 +710,7 @@ function initJson() {
     countCappedAsync: async (f = {}, cap = COUNT_CAP) => ({ ...api.countCapped(f, cap), slices: 0 }),   // v2.742(DB-02): SQLite 판과 같은 API
     tsRange: () => { let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; } return { min: mn, max: mx }; },   // v2.742(DB-03)
     lastRowid: () => seq,   // v2.742(DB-02): 삽입 순번(SQLite 판 rowid 대응)
+    metaAsync: async () => api.meta(),   // v2.744(감사 DB-03): SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에 센다
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
     prune: (beforeTs) => { const before = rows.length; rows = rows.filter((r) => r.ts >= beforeTs); const removed = before - rows.length; if (removed) rewrite(); return removed; },
     sizeBytes: () => { try { return fs.statSync(file).size; } catch { return 0; } },

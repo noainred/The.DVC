@@ -301,7 +301,7 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
     for (const g of (inv.gpus || [])) { const m = (g.model || g.name || '').trim(); if (m) { bump(byGpu, m); totalGpuCards++; } }
   }
   const toArr = (map, numericKey = false) => [...map.entries()].map(([key, count]) => ({ key, count }))
-    .sort((a, b) => (numericKey ? (parseInt(b.key) - parseInt(a.key)) : 0) || b.count - a.count || String(a.key).localeCompare(String(b.key), undefined, { numeric: true }));
+    .sort((a, b) => (numericKey ? (parseInt(b.key) - parseInt(a.key)) : 0) || b.count - a.count || NUM_COLLATOR.compare(String(a.key), String(b.key)));
   res.json({
     ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
     byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
@@ -490,7 +490,7 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
       ...(dim === 'gpu' ? { gpuCount } : {}),
     });
   }
-  out.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+  out.sort((a, b) => NUM_COLLATOR.compare(String(a.name), String(b.name)));   // v2.744(감사 DB-02): 공유 collator
   res.json({ ok: true, dim, key, datacenterId: dcFilter, count: out.length, servers: out, ...scopeFields(scoped) });
 });
 
@@ -658,3 +658,7 @@ adminRouter.get('/idrac/parts-servers', adminOnly, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 }
+
+// v2.744(감사 DB-02): 정렬 비교는 공유 collator 하나 — 옵션 객체를 넘기는 localeCompare 는 호출마다 collator 를 새로 해석한다(결과는 같다).
+// 라우트 줄 번호(docs/API.md)를 밀지 않으려고 파일 끝에 둔다 — 핸들러가 요청 시점에 읽으므로 모듈 평가 순서와 무관하다.
+const NUM_COLLATOR = new Intl.Collator(undefined, { numeric: true });

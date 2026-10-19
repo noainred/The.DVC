@@ -173,7 +173,11 @@ async function runCheckInner(test, host) {
         return { status: 'ok', reply: `D-${days}`, ms };
       }
       case 'ntp': {
-        const offset = await ntpOffset(test.server || host, 4000);
+        // v2.744(감사 DEV-03): 응답 머리를 먼저 판정한다 — 미동기·KoD 응답의 시각은 오프셋으로 쓰지 않는다(judgeNtpReply 머리말).
+        const q = await ntpQuery(test.server || host, 4000);
+        if (q.kind === 'kod') return bad(`KoD(${q.code}) — 서버가 요청을 거부했습니다(stratum 0)`, started);
+        if (q.kind === 'unsync') return bad(`서버가 동기되지 않았습니다(stratum ${q.stratum} · LI ${q.li})`, started);
+        const offset = q.offset;
         const abs = Math.abs(offset);
         const ms = Date.now() - started;
         if (abs > (test.badMs || 5000)) return { status: 'bad', reply: `오프셋 ${Math.round(offset)}ms`, ms };
@@ -189,8 +193,12 @@ async function runCheckInner(test, host) {
         const r = await ldapBind(host, port, 5000);
         // v2.743 DEV-01: 연결 종료 통지(ExtendedResponse)는 bind 응답이 아니다 — 그 사실을 문구에 남긴다.
         if (r.op === 'extended') return bad(`서버가 연결 종료를 통지했습니다 (resultCode ${r.code})`, started);
-        return r.ok ? ok(`bind 성공 (resultCode ${r.code})`, Date.now() - started)
-          : bad(`bind 실패 (resultCode ${r.code})`, started);
+        // v2.744(감사 RECENT-04): 판정은 ldapBindVerdict 하나 — 'BindResponse 로 거부를 돌려준 것' 은 서버가 살아 있다는 뜻이다.
+        const v = ldapBindVerdict(r.code);
+        if (v === 'ok') return ok(`bind 성공 (resultCode ${r.code})`, Date.now() - started);
+        if (v === 'credentials') return ok(`bind 거부(자격증명) — 서버는 응답 중 (resultCode ${r.code})`, Date.now() - started);
+        if (v === 'policy') return ok(`bind 거부(정책) — 서버는 응답 중 (resultCode ${r.code})`, Date.now() - started);
+        return bad(`bind 실패 (resultCode ${r.code})`, started);
       }
       case 'domain': {
         const days = await domainDaysLeft(test.record || host, 8000);
@@ -359,25 +367,89 @@ function certDaysLeft(host, port, timeoutMs) {
   });
 }
 
-/** SNTP 1회 질의 — 서버시각 − 로컬시각(ms). RFC 4330 48바이트. */
-function ntpOffset(server, timeoutMs) {
+/** NTP 시각(1900년 기준 초)과 Unix epoch(1970년)의 차 — RFC 5905. */
+const NTP_EPOCH_OFFSET_S = 2208988800;
+
+/**
+ * (순수) SNTP 서버 응답 머리 판정 — v2.744(감사 DEV-03).
+ *   48바이트 = 0: LI(2비트)·VN(3)·Mode(3) · 1: stratum · 12~15: refid(KoD 코드) · 24~31: originate · 40~47: transmit.
+ * 예전에는 길이만 보고 송신 타임스탬프(40~47)로 오프셋을 냈다. 그래서
+ *   ① 상위 동기를 잃은 ntpd 의 응답(LI=3·stratum 16 — 로컬 시계로 계속 응답한다)이 '정상 · 오프셋 0ms' 였고
+ *      (chronyd·ntpd·w32time 은 그런 서버를 시간 원천으로 받지 않는데 점검만 초록이었다)
+ *   ② Kiss-o'-Death(stratum 0, 송신 타임스탬프 0)가 1900년 기준 '오프셋 −4조 ms' 로 보고됐고
+ *   ③ 요청을 그대로 되돌리는 응답(mode 3)도 '오프셋 0ms' 였다.
+ * 판정 순서(앞이 이긴다): 길이 → mode(4 = server 만) → stratum 0(KoD) → 원본 타임스탬프 대조 → LI=3 또는 stratum ≥ 16(미동기)
+ *   → 송신 타임스탬프 0(형식 오류) → 오프셋.
+ * 원본 타임스탬프(24~31)는 서버가 요청의 송신 타임스탬프를 그대로 복사한 값이다(RFC 4330 §5). 다르면 이 요청의 응답이 아니다 —
+ *   'mismatch' 를 돌려주고 호출부가 다음 패킷을 기다린다(실제 클라이언트도 그런 패킷을 버린다).
+ * @param {Buffer} msg
+ * @param {Buffer|null} sentTx 보낸 송신 타임스탬프 8바이트(없으면 대조하지 않는다)
+ * @returns {{kind:'format', reason:string}|{kind:'kod', code:string}|{kind:'mismatch'}|{kind:'unsync', stratum:number, li:number}
+ *          |{kind:'ok', stratum:number, li:number, serverMs:number}}
+ */
+export function judgeNtpReply(msg, sentTx = null) {
+  if (!msg || msg.length < 48) return { kind: 'format', reason: `길이 ${msg ? msg.length : 0}바이트 — 48바이트 미만` };
+  const li = msg[0] >> 6;
+  const mode = msg[0] & 7;
+  const stratum = msg[1];
+  if (mode !== 4) return { kind: 'format', reason: `mode ${mode} — 서버 응답(4)이 아님` };
+  if (stratum === 0) {
+    // KoD 코드는 refid 자리의 ASCII 4글자다(RATE·DENY·RSTR …). 인쇄 가능한 글자만 남긴다(응답 바이트를 그대로 화면에 싣지 않는다).
+    const code = msg.subarray(12, 16).toString('latin1').replace(/[^\x21-\x7e]/g, '');
+    return { kind: 'kod', code: code || '코드 없음' };
+  }
+  if (sentTx && !msg.subarray(24, 32).equals(sentTx)) return { kind: 'mismatch' };
+  if (li === 3 || stratum >= 16) return { kind: 'unsync', stratum, li };
+  const secs = msg.readUInt32BE(40);
+  const fracRaw = msg.readUInt32BE(44);
+  if (secs === 0 && fracRaw === 0) return { kind: 'format', reason: '송신 타임스탬프 0' };
+  return { kind: 'ok', stratum, li, serverMs: (secs - NTP_EPOCH_OFFSET_S + fracRaw / 2 ** 32) * 1000 };
+}
+
+/** epoch ms → NTP 64비트 타임스탬프 8바이트. 아래 12비트는 무작위(같은 ms 의 두 요청을 응답에서 가르기 위해 — 1µs 미만이라 시각에는 영향이 없다). */
+function ntpTimestamp(ms) {
+  const b = Buffer.alloc(8);
+  const secs = (Math.floor(ms / 1000) + NTP_EPOCH_OFFSET_S) % 2 ** 32;   // 2036년 era 경계에서 writeUInt32BE 가 던지지 않게
+  const frac = ((Math.floor(((ms % 1000) / 1000) * 2 ** 32) & 0xfffff000) | Math.floor(Math.random() * 4096)) >>> 0;
+  b.writeUInt32BE(secs, 0);
+  b.writeUInt32BE(frac, 4);
+  return b;
+}
+
+/**
+ * SNTP 1회 질의(RFC 4330 48바이트) — 판정은 `judgeNtpReply`.
+ * v2.744(감사 DEV-03): 요청에 송신 타임스탬프를 싣고 응답의 원본 타임스탬프와 대조한다. 대조가 맞지 않는 패킷은 버리고 기다린다 —
+ *   시한까지 맞는 응답이 없고 맞지 않는 응답만 왔으면 그 사실을 사유로 말한다(조용한 '타임아웃' 으로 뭉개지 않는다).
+ * ⚠ 소켓은 connect 하지 않는다(정직 기록) — 출처 주소를 고정하지 않으므로 원본 타임스탬프 대조가 '이 요청의 응답인가' 를 가린다.
+ * @param {number} [port] 기본 123(점검 유형은 표준 포트만 쓴다 — test.port 를 읽지 않던 예전 동작 그대로)
+ * @returns {Promise<{kind:'ok', offset:number, stratum:number}|{kind:'kod', code:string}|{kind:'unsync', stratum:number, li:number}>}
+ */
+export function ntpQuery(server, timeoutMs, port = 123) {
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket('udp4');
     const pkt = Buffer.alloc(48);
     pkt[0] = 0x1b;                       // LI=0, VN=3, Mode=3(client)
     const t1 = Date.now();
-    const timer = setTimeout(() => { sock.close(); reject(new Error('NTP 타임아웃')); }, timeoutMs);
-    sock.once('message', (msg) => {
-      clearTimeout(timer);
+    const sentTx = ntpTimestamp(t1);
+    sentTx.copy(pkt, 40);                // 송신 타임스탬프 — 서버가 응답의 원본 타임스탬프(24~31)로 되돌려 준다
+    let mismatched = 0;
+    let done = false;
+    const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); try { sock.close(); } catch { /* noop */ } fn(v); };
+    const timer = setTimeout(() => finish(reject, new Error(mismatched
+      ? `NTP 응답 ${mismatched}건이 보낸 요청과 맞지 않습니다(원본 타임스탬프 불일치 — 다른 요청의 응답이거나 위조)`
+      : 'NTP 타임아웃')), timeoutMs);
+    sock.on('message', (msg) => {
+      if (done) return;
       const t4 = Date.now();
-      sock.close();
-      if (msg.length < 48) return reject(new Error('NTP 응답 형식 오류'));
-      const secs = msg.readUInt32BE(40) - 2208988800;
-      const frac = msg.readUInt32BE(44) / 2 ** 32;
-      resolve((secs + frac) * 1000 - (t1 + t4) / 2);
+      const r = judgeNtpReply(msg, sentTx);
+      if (r.kind === 'mismatch') { mismatched += 1; return; }   // 이 요청의 응답이 아니다 — 버리고 기다린다
+      if (r.kind === 'format') return finish(reject, new Error(`NTP 응답 형식 오류(${r.reason})`));
+      if (r.kind === 'kod') return finish(resolve, { kind: 'kod', code: r.code });
+      if (r.kind === 'unsync') return finish(resolve, { kind: 'unsync', stratum: r.stratum, li: r.li });
+      finish(resolve, { kind: 'ok', offset: r.serverMs - (t1 + t4) / 2, stratum: r.stratum });
     });
-    sock.once('error', (e) => { clearTimeout(timer); sock.close(); reject(e); });
-    sock.send(pkt, 123, server, (e) => { if (e) { clearTimeout(timer); sock.close(); reject(e); } });
+    sock.once('error', (e) => finish(reject, e));
+    sock.send(pkt, port, server, (e) => { if (e) finish(reject, e); });
   });
 }
 
@@ -445,10 +517,27 @@ export function parseLdapResponse(buf) {
 }
 
 /**
+ * (순수) 익명 simple bind 의 BindResponse resultCode → 점검 판정 — v2.744(감사 RECENT-04).
+ * 이 점검은 **살아 있음(liveness)** 점검이다 — 익명 bind 로 '서버가 LDAP 으로 정상 응답하는가' 만 본다(계정 검증이 아니다).
+ *   · 'ok'          0(success)
+ *   · 'credentials' 48(inappropriateAuthentication)·49(invalidCredentials) — 익명 bind 를 금지한 서버의 정상 응답(원래 설계)
+ *   · 'policy'      8(strongerAuthRequired — LDAP 서명을 요구하는 DC 가 평문 simple bind 를 거부)·53(unwillingToPerform — 익명 bind 금지 정책).
+ *                   서버가 BindResponse 로 **정책 거부를 돌려준 것**이라 48·49 와 같은 성격이다. v2.743 DEV-01 이 장형 BER 을 읽게 되며
+ *                   AD 의 8·53 이 처음으로 정확히 읽혔는데, 그것을 'bad' 로 두면 서명 필수 DC 가 업그레이드 직후 일제히 '장애' 가 된다.
+ *   · 'bad'         51(busy)·52(unavailable)·그 밖의 코드 — 서버가 요청을 처리하지 못하는 상태다.
+ * 형식 오류·연결 종료 통지(ExtendedResponse)·무응답·잘린 응답은 이 함수에 오기 전에 실패다(ldapBind·runCheckInner).
+ * ⚠ 실제 AD 가 익명 bind 에 8 을 돌려주는지는 실장비로 확인하지 못했다(정직 기록) — 돌려준다면 이 판정이 맞다.
+ */
+export const LDAP_BIND_CODES = Object.freeze({ ok: [0], credentials: [48, 49], policy: [8, 53] });
+export function ldapBindVerdict(code) {
+  for (const k of ['ok', 'credentials', 'policy']) if (LDAP_BIND_CODES[k].includes(code)) return k;
+  return 'bad';
+}
+
+/**
  * LDAP 익명 simple bind — BER 최소 인코딩.
  * SEQ{ msgID INT 1, [APP 0] BindRequest{ version INT 3, name "", [CTX 0] "" } }
- * 응답의 resultCode 0(success) 또는 49(invalidCredentials)/48(inappropriateAuth)면 서버가
- * 정상 응답한 것으로 본다(익명 bind 금지 서버도 '살아있음'으로 판정).
+ * 응답의 resultCode 판정은 `ldapBindVerdict`(0·48·49·8·53 = 서버가 정상 응답 — 익명 bind 금지 서버도 '살아있음').
  * v2.743 DEV-01: 응답은 **여러 조각으로 올 수 있다** — 메시지 길이만큼 모일 때까지 모으고(`parseLdapResponse`),
  *   모이기 전에 연결이 끝나면 '응답이 잘렸다' 로 실패한다(앞부분만 보고 판정하지 않는다).
  */
@@ -479,7 +568,7 @@ function ldapBind(host, port, timeoutMs) {
         return;   // 메시지 길이만큼 모일 때까지 기다린다(시한·연결 종료가 결말짓는다)
       }
       if (r.bad) { fail(new Error(`LDAP 응답 형식 오류(${r.bad})`)); return; }
-      settle(resolve, { ok: r.op === 'bind' && [0, 48, 49].includes(r.code), code: r.code, op: r.op });
+      settle(resolve, { ok: r.op === 'bind' && ldapBindVerdict(r.code) !== 'bad', code: r.code, op: r.op });
     });
     sock.once('timeout', () => fail(new Error(got.length ? `LDAP 타임아웃(응답 ${got.length}바이트에서 멈춤)` : 'LDAP 타임아웃')));
     sock.once('error', fail);

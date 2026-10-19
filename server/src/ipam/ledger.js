@@ -8,7 +8,7 @@ import { getAnnotations, annotationsRev } from './annotations.js';
 import { scanResultList, scanResultListAsync, ipHistoryEntry, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
-import { ipToNum } from '../util/ipv4.js';
+import { ipToNum, numToIp, strictIpv4Num } from '../util/ipv4.js';
 import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
 import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -207,6 +207,25 @@ export async function buildIpamRowsAsync(snap, vcenterId, allowed = null, opts =
   return out;
 }
 
+/**
+ * v2.744(감사 VC-01 — 재현): ESXi 호스트의 원장 IP. 예전에는 `host.name` 이 IP 일 때만 원장에 넣고 FQDN 이면 건너뛰었다
+ *   (주석이 '이름이 FQDN 이면 관리 IP 가 없다' 고 적었다). 그런데 수집기는 `host.mgmtIp`(config.network.vnic 의 첫 IPv4 —
+ *   vcenter/soapClient.js)를 이미 싣고 엣지 수신도 받는다. 그래서 VMware 권장 방식(FQDN 등록)인 현장에서 스캔에 잡힌 ESXi 관리 IP 가
+ *   '(네트워크 스캔)' 미지 장비로 보였고, 같은 IP 를 쓰는 다른 vCenter VM 과의 충돌도 잡히지 않았다.
+ *   규칙: 이름이 IP 면 예전 그대로 이름(느슨한 ipToNum — 기존 키 호환). 아니면 mgmtIp 가 **정규형 IPv4** 일 때만 그 값
+ *   (비정규 표기는 8진 오해석 위험이 있어 쓰지 않는다 — util/ipv4.js strictIpv4Num, 0.0.0.0 은 미설정 표기라 뺀다).
+ *   ⚠ 한계: mgmtIp 는 첫 vnic(보통 vmk0)의 IPv4 다 — vmk0 에 IPv4 가 없으면 다음 vmk(vMotion 등)의 IP 일 수 있다.
+ *   원장 행·known(스캔 판정)·vcByIp(충돌)·쓰기 범위 소유 맵(ipVcenterOwners)이 모두 이 함수 하나를 쓴다(판정이 어긋나지 않게).
+ * @returns {{ip:string, n:number}|null}
+ */
+export function hostLedgerIp(h) {
+  const byName = ipToNum(h?.name);
+  if (byName != null) return { ip: h.name, n: byName };
+  const m = strictIpv4Num(h?.mgmtIp);
+  if (typeof m !== 'number' || m === 0) return null;
+  return { ip: numToIp(m), n: m };
+}
+
 function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
   let tick = 0;
   let vms = snap.vms || [];
@@ -264,16 +283,18 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
   }
   for (const h of hosts) {
     if ((++tick & YIELD_MASK) === 0) yield;
-    const n = ipToNum(h.name);
-    if (n == null) continue; // host registered by FQDN → no mgmt IP
-    if (ignoredAt(h.name, n, h.vcenterId)) continue;
-    count.set(h.name, (count.get(h.name) || 0) + 1);
+    // v2.744(감사 VC-01): 이름이 FQDN 이면 수집기가 실은 관리 IP(mgmtIp)를 쓴다 — ip 열은 그 IP, ownerName·hostName 은 FQDN 그대로.
+    const hip = hostLedgerIp(h);
+    if (!hip) continue; // 이름도 IP 가 아니고 관리 IP 도 읽지 못했다
+    const { ip, n } = hip;
+    if (ignoredAt(ip, n, h.vcenterId)) continue;
+    count.set(ip, (count.get(ip) || 0) + 1);
     rows.push({
-      ip: h.name, ipNum: n, vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
+      ip, ipNum: n, vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
       ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
       osName: 'ESXi', osVersion: h.version || '',
-      hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: scopeAt(h.name, n), owner: h,
-      discovery: scanIpSet.has(h.name) ? 'both' : 'vcenter',
+      hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: scopeAt(ip, n), owner: h,
+      discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
     });
   }
   // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
@@ -290,7 +311,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
       for (const ip of ips) known.add(ip);
     }
-    for (const h of uniHosts) { if ((++tick & YIELD_MASK) === 0) yield; if (ipToNum(h.name) != null) known.add(h.name); }
+    for (const h of uniHosts) { if ((++tick & YIELD_MASK) === 0) yield; const hip = hostLedgerIp(h); if (hip) known.add(hip.ip); } // v2.744(VC-01): 관리 IP 도 vCenter 가 아는 IP
     const seen = new Set();
     for (const r of rows) seen.add(r.ip);
     // v2.638: 스캔한 에이전트의 데이터센터에 귀속한다(수동 지정 > 자동 — ipam/scanDatacenter.js). 귀속을 판정하지 못한 행은
@@ -359,7 +380,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) { if (!vcByIp.has(ip)) vcByIp.set(ip, new Set()); if (vm.vcenterId) vcByIp.get(ip).add(vm.vcenterId); }
   }
-  for (const h of uniHosts) { if (ipToNum(h.name) == null) continue; if (!vcByIp.has(h.name)) vcByIp.set(h.name, new Set()); if (h.vcenterId) vcByIp.get(h.name).add(h.vcenterId); }
+  for (const h of uniHosts) { const hip = hostLedgerIp(h); if (!hip) continue; if (!vcByIp.has(hip.ip)) vcByIp.set(hip.ip, new Set()); if (h.vcenterId) vcByIp.get(hip.ip).add(h.vcenterId); } // v2.744(VC-01)
   const now = Date.now();
 
   // 모든 행에 관리 정보를 입힌다 — 필드별 폭포식: IP override(개별 예외) > 대역 정책(대역 기본값) > 자동발견.
@@ -683,6 +704,7 @@ export function ipVcenterOwners(snap) {
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) { if (!m.has(ip)) m.set(ip, new Set()); if (vm.vcenterId) m.get(ip).add(vm.vcenterId); }
   }
-  for (const h of snap.hosts || []) { if (ipToNum(h.name) == null) continue; if (!m.has(h.name)) m.set(h.name, new Set()); if (h.vcenterId) m.get(h.name).add(h.vcenterId); }
+  // v2.744(감사 VC-01): 원장과 같은 호스트 IP 판정(hostLedgerIp) — 원장은 관리 IP 를 그 vCenter 소유로 보이는데 쓰기 판정만 '미귀속' 으로 보면 어긋난다.
+  for (const h of snap.hosts || []) { const hip = hostLedgerIp(h); if (!hip) continue; if (!m.has(hip.ip)) m.set(hip.ip, new Set()); if (h.vcenterId) m.get(hip.ip).add(h.vcenterId); }
   return m;
 }

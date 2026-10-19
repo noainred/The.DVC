@@ -11,6 +11,7 @@ import { config } from '../../config.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { memoJson, scopeKey } from './shared.js';
 import { capStr } from '../../util/capStr.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { analyzeContention } from '../../contention/analyze.js';
@@ -33,7 +34,9 @@ export function registerContention(api) {
     const S = scoped(req, snap);
     const vcName = new Map(S.vcenters.map((v) => [v.id, v.name || v.id]));
     const out = analyzeContention(S, { refreshMs: config.contentionRefreshMs, q: qStr(req.query.q, 128), sev: qStr(req.query.sev, 16), vcName });
-    const isFullAdmin = S.full && req.user?.role === 'admin';
+    // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
+    //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
+    const isFullAdmin = S.full && isAdminDetailUser(req.user);
     const st = contentionStatus();
     const ids = new Set(S.vcenters.map((v) => v.id));
     return {
@@ -49,7 +52,7 @@ export function registerContention(api) {
       vcenterChoices: S.vcenters.map((v) => ({ vcenterId: v.id, name: v.name || v.id })),
       initial: snap.initial === true,
     };
-  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${req.user?.role === 'admin' ? 'a' : 'u'}` }));
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/contention.csv', csvPerm, toolsPerm, (req, res) => {
     try {

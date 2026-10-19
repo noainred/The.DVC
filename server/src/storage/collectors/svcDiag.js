@@ -72,6 +72,52 @@ const num = (v) => {
   return m ? Number(m[0]) : null;
 };
 
+/* 줄 끝 문자(\n·\r·U+2028·U+2029) — 정규식의 '.' 이 맞추지 않는 글자. 줄은 \r?\n 으로 나눴지만 외로운 \r·U+2028 은 남을 수 있다. */
+const LINE_TERM = /[\n\r\p{Zl}\p{Zp}]/u;
+
+/*
+ * v2.744(감사 INJPKG-02): 이 파일의 줄 판정은 **정규식 대신 선형 함수**다. 장비 출력(외부 입력)에 줄 길이 상한이 없어,
+ *   '공백 + 값' 꼴 정규식(`\s*(.*)$`)은 값 앞 공백 뒤에 외로운 \r 이 오면 (공백 길이 × 줄 길이)로 역추적했다(1.6만 자 줄에 약 0.35초).
+ *   각 함수는 예전 정규식과 결과가 같고 테스트가 무작위 입력으로 대조한다 — 정규식으로 되돌리지 말 것.
+ */
+
+/** [\w.\-/] 한 글자(ASCII — 예전 정규식에 u 플래그가 없었다). */
+const isNameChar = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 46 || c === 45 || c === 47;
+const isAsciiLetter = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+
+/**
+ * (순수) FRU 상태 줄 — 예전 `/^(\s*)([A-Za-z][\w.\-/]*)\s*:\s*(.*)$/` 와 같은 판정(원문 줄 — 앞뒤 공백을 지우지 않은 것).
+ * @returns {{pad:string, name:string, rest:string}|null} rest 는 ':' 뒤 앞 공백을 뺀 나머지(호출부가 trim 한다)
+ */
+export function fruStatusLine(raw) {
+  const s = String(raw);
+  const p = s.length - s.trimStart().length;             // (\s*) — 탐욕이라 앞 공백 전부
+  if (!isAsciiLetter(s.charCodeAt(p))) return null;
+  let q = p + 1;
+  while (q < s.length && isNameChar(s.charCodeAt(q))) q++;   // 이름은 가장 긴 것(짧게 끊으면 다음 글자가 ':'·공백이 아니다)
+  const afterName = s.slice(q);
+  const colon = q + (afterName.length - afterName.trimStart().length);
+  if (s.charCodeAt(colon) !== 58) return null;           // 58 = ':'
+  const rest = s.slice(colon + 1).trimStart();
+  if (LINE_TERM.test(rest)) return null;
+  return { pad: s.slice(0, p), name: s.slice(p, q), rest };
+}
+
+/**
+ * (순수) `Device: X` 줄 — 예전 `/^Device:\s*(.+)$/` 와 같은 판정(앞뒤 공백을 지운 줄).
+ * @returns {string|null} 장치 이름(앞뒤 공백 제거)
+ */
+export function deviceLine(t) {
+  if (!t.startsWith('Device:')) return null;
+  const rest = t.slice('Device:'.length);
+  const v = rest.trimStart();
+  if (!v) {
+    // 퇴화 입력 — 옛 정규식은 ':' 뒤가 공백뿐이면 그 마지막 공백 한 글자를 잡았다(trim 하면 ''). 줄 끝 문자뿐이면 맞지 않았다.
+    return /[^\n\r\p{Zl}\p{Zp}]/u.test(rest) ? '' : null;
+  }
+  return LINE_TERM.test(v) ? null : v.trim();
+}
+
 /* ────────────────── ① FRU 상태 트리 ────────────────── */
 
 /**
@@ -84,9 +130,9 @@ function parseFruStatuses(lines) {
   let group = '';          // 현재 SP('spa'|'spb') 또는 ''
   let groupIndent = -1;
   for (const raw of lines) {
-    const m = /^(\s*)([A-Za-z][\w.\-/]*)\s*:\s*(.*)$/.exec(raw);
+    const m = fruStatusLine(raw);                       // v2.744(INJPKG-02): 선형 판정
     if (!m) continue;
-    const [, pad, nameRaw, restRaw] = m;
+    const { pad, name: nameRaw, rest: restRaw } = m;
     const indent = pad.length;
     const name = nameRaw.trim();
     const rest = restRaw.trim();
@@ -135,15 +181,15 @@ function parseFruResume(lines, { maxDevices = 64 } = {}) {
     const t = raw.trim();
     if (!t) continue;
     if (/^-{5,}$/.test(t)) { push(); continue; }
-    const dev = /^Device:\s*(.+)$/.exec(t);
-    if (dev) { push(); cur = { device: dev[1].trim(), fields: {}, programmables: [], error: '' }; continue; }
+    const dev = deviceLine(t);                          // v2.744(INJPKG-02): 선형 판정
+    if (dev != null) { push(); cur = { device: dev, fields: {}, programmables: [], error: '' }; continue; }
     // `Error failed to read DIMM resume...` — 그 부품은 **못 읽은 것**이다(없는 것이 아니다).
     if (/^Error\b/i.test(t)) { errors += 1; if (cur) cur.error = t.slice(0, 120); continue; }
     if (!cur) continue;
-    const kv = /^([^:]{2,60}?)\s*:\s*(.*)$/.exec(t);
+    const kv = fieldKv(t);                               // v2.744(INJPKG-02): 제목 블록과 같은 선형 판정
     if (!kv) continue;
-    const key = kv[1].trim();
-    const val = kv[2].trim();
+    const key = kv.key;
+    const val = kv.value;
     if (!val) continue;
     if (key === 'Programmable Name') { cur.programmables.push({ name: val }); continue; }
     if (key === 'Programmable Revision' && cur.programmables.length) {
@@ -169,6 +215,50 @@ const BOOL = (v) => {
 };
 
 /**
+ * (순수) 제목 줄 `__ 제목 __` 판정 — v2.744(감사 INJPKG-02). 예전 `/^_{2,}\s*(.+?)\s*_{2,}$/` 와 **결과가 같다**(테스트가 무작위 입력으로 대조한다).
+ * ⚠⚠ 그 정규식은 양끝 탐욕 `_{2,}` 가 게으른 `(.+?)` 를 감싸 밑줄이 긴 줄에서 재앙적으로 역추적했다(밑줄 3,200자 줄 하나에 약 10~40초) —
+ *   장비 출력(svc_diag -s spinfo)은 외부 입력이고 줄 길이 상한이 없어(exec 총량 4MB 뿐) 그 한 줄로 스토리지 폴러의 이벤트 루프가 멈췄다.
+ *   여기서는 앞뒤 밑줄 개수를 세고 가운데를 잘라 판정한다(선형). 퇴화 입력(밑줄만·가운데가 공백만)의 결과도 옛 정규식과 같게 둔다 —
+ *   밑줄만 5자 이상이면 제목 '_', 가운데가 공백뿐이면 '' 또는 '_'(옛 정규식이 그렇게 잡았다).
+ * @param {string} t 앞뒤 공백을 지운 줄
+ * @returns {string|null} 제목(앞뒤 공백 제거) 또는 제목 줄이 아니면 null
+ */
+export function titledBlockHead(t) {
+  const n = t.length;
+  let i = 0;
+  while (i < n && t.charCodeAt(i) === 95) i++;          // 95 = '_'
+  if (i < 2) return null;
+  if (i === n) return n >= 5 ? '_' : null;
+  let j = 0;
+  while (t.charCodeAt(n - 1 - j) === 95) j++;            // 밑줄이 아닌 글자가 있으므로 앞 밑줄과 겹치지 않는다
+  if (j < 2) return null;
+  const mid = t.slice(i, n - j);
+  const core = mid.trim();
+  if (core) return LINE_TERM.test(core) ? null : core;   // 제목 안의 줄 끝 문자는 '.' 이 건너지 못한다
+  if (j >= 3) return '_';
+  if (/[^\n\r\p{Zl}\p{Zp}]/u.test(mid)) return '';
+  return i >= 3 ? '_' : null;
+}
+
+/**
+ * (순수) `키 : 값` 줄 — v2.744(감사 INJPKG-02). 예전 `/^([^:]{2,60}?)\s*:\s*(.*)$/` 와 **결과가 같다**(테스트가 무작위 입력으로 대조한다).
+ * 그 정규식은 키 뒤 공백이 길면 (60 × 공백 길이), 값 앞 공백 뒤에 외로운 \r 이 있으면 (공백 길이 × 줄 길이)로 역추적했다 —
+ *   제목 줄을 고친 뒤 같은 줄을 받는 다음 정규식이라 함께 선형으로 바꿨다.
+ * 규칙: 첫 ':' 앞(키 + 공백)에서 끝 공백을 뺀 길이가 60 이하이고 ':' 가 2번째 글자 이후일 것 · 값(앞 공백 뺀 것)에 줄 끝 문자가 없을 것.
+ * @param {string} t 앞뒤 공백을 지운 줄
+ * @returns {{key:string, value:string}|null} 키·값(앞뒤 공백 제거)
+ */
+export function fieldKv(t) {
+  const c = t.indexOf(':');
+  if (c < 2) return null;
+  const e = t.slice(0, c).trimEnd().length;
+  if (e > 60) return null;
+  const v = t.slice(c + 1).trimStart();
+  if (LINE_TERM.test(v)) return null;
+  return { key: t.slice(0, Math.max(2, e)).trim(), value: v.trim() };
+}
+
+/**
  * `__ SPA PS0 Status __` 처럼 밑줄 두 개로 감싼 제목 블록을 읽는다.
  * ⚠ 모르는 제목도 버리지 않고 담는다 — 출력을 전부 보지 못했기 때문이다(머리말).
  */
@@ -178,13 +268,12 @@ function parseTitledBlocks(lines, { maxBlocks = 40 } = {}) {
   for (const raw of lines) {
     const t = raw.trim();
     if (!t) continue;
-    const head = /^_{2,}\s*(.+?)\s*_{2,}$/.exec(t);
-    if (head) { if (cur) out.push(cur); cur = { title: head[1].trim(), fields: {} }; continue; }
+    const head = titledBlockHead(t);                     // v2.744(INJPKG-02): 선형 판정 — 정규식 역추적 금지
+    if (head != null) { if (cur) out.push(cur); cur = { title: head, fields: {} }; continue; }
     if (!cur) continue;
-    const kv = /^([^:]{2,60}?)\s*:\s*(.*)$/.exec(t);
+    const kv = fieldKv(t);
     if (!kv) continue;
-    const v = kv[2].trim();
-    if (v) cur.fields[kv[1].trim()] = v.slice(0, 120);
+    if (kv.value) cur.fields[kv.key] = kv.value.slice(0, 120);
   }
   if (cur) out.push(cur);
   return out.slice(0, maxBlocks);

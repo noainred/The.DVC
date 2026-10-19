@@ -46,3 +46,37 @@ export function authStopSingleText(info) {
 
 /** 툴팁(title)용 — 강조 표지를 뺀 평문(title 은 BoldText 를 거치지 않는다). */
 export const plainText = (t) => String(t || '').replace(/\*\*/g, '');
+
+/*
+ * v2.744(감사 VC-04): 직접 수집 대상이 아니라(비활성·점검중·엣지 위임) 이 포탈이 로그인하지 않은 vCenter.
+ * 서버 authStopGate.js DIRECT_SKIP_TEXT 와 키 1:1(테스트 대조). 인증 정지와 다른 사실이다 — '인증 정지' 로 말하지 않는다.
+ * 응답 모양: 여러 vCenter 경로는 skippedVcenters: { [vcenterId]: { skipReason, reason } }, 단건은 409 본문 { skipReason, reason }.
+ */
+export const SKIP_REASON_TEXT = Object.freeze({
+  disabled: '비활성',
+  maintenance: '점검중',
+  site: '엣지 위임',
+  invalid: '설정 형식 오류',
+});
+const skipLabel = (k) => SKIP_REASON_TEXT[k] || '직접 수집 대상 아님';
+
+/** 맵 → 정렬된 목록 `[{ vcenterId, skipReason }]`. */
+export function skippedList(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
+  return Object.keys(map).sort().map((vcenterId) => ({ vcenterId, skipReason: map[vcenterId]?.skipReason ?? null }));
+}
+
+/** 여러 vCenter 응답의 각주 한 줄. 건너뛴 vCenter 가 없으면 빈 문자열. 이름은 5곳까지 적고 나머지는 개수로 밝힌다. */
+export function skipNote(map) {
+  const list = skippedList(map);
+  if (!list.length) return '';
+  const names = list.slice(0, 5).map((x) => `‘${x.vcenterId}’(${skipLabel(x.skipReason)})`).join(' · ');
+  const more = list.length > 5 ? ` 외 ${list.length - 5}곳` : '';
+  return `**이 포탈이 직접 수집하지 않는 vCenter** ${list.length}곳(${names}${more})은 조회하지 않았습니다 — 비활성·점검중은 로그인하지 않고, 엣지 위임 vCenter 는 담당 엣지가 수집합니다. 값이 비어 있는 것은 사용량이 0 이라는 뜻이 아닙니다.`;
+}
+
+/** 표의 한 칸(건너뛴 vCenter 의 행). 이력이 없는 '—' 와 구분되는 짧은 글자 + 툴팁. */
+export function skipCell(info) {
+  const k = info?.skipReason;
+  return { text: skipLabel(k), title: plainText(info?.reason || '이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다') };
+}

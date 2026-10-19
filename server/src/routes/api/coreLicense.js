@@ -39,6 +39,8 @@ export function registerCoreLicense(api) {
       lines.push(csvLine([vcName.get(h.vcenterId) || h.vcenterId, h.name, h.cluster || '', h.sockets ?? '', h.cores ?? '', h.unknown ? '' : h.perSocket, h.unknown ? '' : h.licensed, h.unknown ? '' : h.padded, h.unknown ? '소켓·코어 수를 읽지 못해 산정 안 함' : '']));
     }
     if (r.hostsOmitted) lines.push(csvLine([`(상한으로 ${r.hostsOmitted}대 생략)`]));
+    // v2.744(감사 VC-03): 읽지 못한 vCenter 의 호스트는 이 파일에 없다(합계는 하한) — 마지막 줄에 밝힌다.
+    if (r.notReadVcenters.length) lines.push(csvLine([`(읽지 못한 vCenter ${r.notReadVcenters.length}곳 — 호스트가 이 목록에 없음: ${r.notReadVcenters.map((x) => `${x.name}(${x.why})`).join(', ')})`]));
     logAudit({ user: req.user?.username, action: 'core-license.csv', target: 'hosts', detail: `${r.hosts.length} rows`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="core-license-${fileStamp()}.csv"`);
