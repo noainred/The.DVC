@@ -28,6 +28,7 @@ import { directCollectSkipReason } from './collectTarget.js';
  *   (직접 수집 대상 판정 → 인증 정지). 비활성·점검중·site 는 사람이 누른 '다시 조회'(manual=1)여도 막는다(collectTarget 머리말
  *   '수동 실행도 이 셋은 건너뛴다'). ⚠ dsBrowse.js 를 import 하면 순환이 생긴다(dsBrowse 가 이 파일을 import 한다) — 그래서
  *   사유 문장 표를 여기에 두고, 테스트(server/test/audit2744f.test.js)가 dsBrowse 의 ON_DEMAND_SKIP_TEXT 와 같은지 대조한다.
+ *   (후속 FA-④: dsBrowse 는 이제 사본 대신 이 표를 import 해 ON_DEMAND_SKIP_TEXT 로 재수출한다 — 같은 객체 한 벌이다.)
  */
 export const DIRECT_SKIP_TEXT = Object.freeze({
   disabled: '비활성 vCenter — 이 포탈이 로그인하지 않습니다',

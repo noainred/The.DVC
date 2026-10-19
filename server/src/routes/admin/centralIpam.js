@@ -16,6 +16,7 @@ import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
+import { hostLedgerIp } from '../../ipam/ledger.js'; // v2.744(감사 후속 FB-2): FQDN 호스트의 관리 IP — IP 원장과 같은 판정(복제 금지)
 import { listDatacenters, datacenterOfVcenter, getDatacenterAssign } from '../../datacenter/store.js';
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
 import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
@@ -170,7 +171,7 @@ adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
   const idrac = agentIdracServers(agent, inputs.collectors);
   const vcName = {};
   for (const v of snap.vcenters || []) vcName[v.id] = v.name || v.id;
-  const r = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName });
+  const r = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName, hostIp: hostLedgerIp });
   res.json({
     ok: true, agent, ...r,
     vcenters: vcIds.map((id) => ({ id, name: vcName[id] || id })),
