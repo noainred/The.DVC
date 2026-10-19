@@ -107,7 +107,7 @@ test('④ 팬 3/4 → fault · 그룹 단위(partId all · keyKind none) · 라�
   assert.equal(fan.state, 'fault');
   assert.equal(fan.partId, 'all');
   assert.equal(fan.keyKind, KEY_KIND.none);       // 어느 팬인지 알 수 없다 — 순번을 지어내지 않는다
-  assert.equal(fan.label, '팬 3/4 정상');
+  assert.equal(fan.label, '팬 3/4');   // v2.744 DEV-02: 장애 라벨에는 '정상' 을 붙이지 않는다
   assert.equal(fan.rawState, '3/4');
   assert.equal(fan.partKey, `sanswitch:${DEV.id}:fan:all`);
   assert.equal(psu.state, 'ok');

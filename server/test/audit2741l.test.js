@@ -355,7 +355,7 @@ test('INJPKG-01 install.sh 는 앱 트리를 가리키는 /usr/local/bin 링크�
   assert.doesNotMatch(s, /ln -sf[n]? "\$APP_DST\//, '앱 트리(서비스 계정이 쓸 수 있다)를 가리키는 root 용 링크 금지');
   assert.match(s, /vp_install_root_tools "\$PREFIX" "\$SCRIPT_DIR"/, '방금 확인한 패키지 폴더에서 root 소유 사본을 만든다');
   assert.ok(s.indexOf('HOSTKEYS_ROOT=1') < s.indexOf('chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"'), 'chown -R 전에 root 소유였는지 기억한다');
-  assert.match(s, /chown 0:0 -- "\$HOSTKEYS"/);
+  assert.match(s, /vp_cfg_fix "\$HOSTKEYS" 0:0 go-w,o\+r 0/);   // v2.744 INJPKG-01: 링크를 따라가지 않는 vp_cfg_fix 로 바꿨다(소유자·권한 의도는 같다)
   const lib = rd('packaging/offline/release-verify-lib.sh').replace(/^\s*#.*$/gm, '');
   assert.ok(lib.indexOf('vp_anchor_ok "$tools"') < lib.indexOf('node="$old_node"'), 'root 소유 사본을 옛 앱 트리 도구보다 먼저 고른다');
 });

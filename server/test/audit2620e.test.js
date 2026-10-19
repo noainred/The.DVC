@@ -63,7 +63,7 @@ test('SEC2620-03 · CVP 오류 문구의 주소는 비-admin 에 가린다(등�
 });
 
 test('SEC2620-04 · /perf/req-status 의 전부 보기는 전체 범위 admin 만', () => {
-  assert.match(src('routes/api/perfClient.js'), /isAdmin\s*=\s*req\.user\?\.role === 'admin' && !scopedVcenterIds\(/);
+  assert.match(src('routes/api/perfClient.js'), /isAdmin\s*=\s*isAdminDetailUser\(req\.user\) && !scopedVcenterIds\(/);
 });
 
 test('SEC2620-05 · iDRAC 스캔 대역·결과·로그·잡 조회에 fleetOnly', () => {

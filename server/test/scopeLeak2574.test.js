@@ -218,7 +218,7 @@ describe('소스 계약 — 같은 실수가 되살아나지 않게', () => {
     // v2.598(AUTHZ-2598-01): 판정은 canSeeEdgeAddress 하나로 옮겼다(/series 와 공유) — 그 함수가 두 조건을 갖는다.
     assert.match(fn, /canSeeEdgeAddress\(req\)/);
     const judge = /function canSeeEdgeAddress[\s\S]*?\n\}/.exec(src)[0];
-    assert.match(judge, /role === 'admin'/);
+    assert.match(judge, /isAdminDetailUser\(req\.user\)/);   // v2.744 AUTHZ-01: 관리자 판본 판정 한 벌(데모 계정 제외)
     assert.match(judge, /scopedVcenterIds/);
     assert.match(fn, /addressHidden/, '가린 사실을 밝혀야 한다(조용한 축약 금지)');
   });

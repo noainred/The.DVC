@@ -157,7 +157,7 @@ test('④-b SEC-1: 세션 계열은 엣지 풀을 먹지 못하고, 요청자당
 });
 
 test('④-c SEC-2: 서비스 점검의 멈춘 지점(스택)은 관리자에게만', () => {
-  assert.match(stripComments(read('routes/api/checksLogs.js')), /getServiceCheck\(\{ isAdmin: req\.user\?\.role === 'admin' \}\)/);
+  assert.match(stripComments(read('routes/api/checksLogs.js')), /getServiceCheck\(\{ isAdmin: isAdminDetailUser\(req\.user\) \}\)/);
   assert.match(stripComments(read('health/services.js')), /opts\.isAdmin \? ` · 멈춘 지점 \$\{l\.frames\[0\]\}`/);
 });
 

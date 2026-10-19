@@ -130,6 +130,6 @@ export function fcRateNotes(rows, label = '') {
   const clamped = list.filter((x) => x && x.pctOver && numOrNull(x.pct) != null).length;
   if (clamped) out.push(`${label}FC 표준 데이터율을 조금 넘는(${FC_OVER_CLAMP_PCT}% 까지) 처리량이 나온 HBA ${clamped}개는 사용률을 100% 로 표시했습니다(카운터가 프레임 헤더까지 세는 측정 정의 차이 — 처리량은 그대로입니다).`);
   const blanked = list.filter((x) => x && x.pctOver && numOrNull(x.pct) == null).length;
-  if (blanked) out.push(`${label}FC 표준 데이터율을 ${FC_OVER_CLAMP_PCT}% 넘게 넘는 처리량이 나온 HBA ${blanked}개는 사용률(%)을 비웠고, 그 서버의 HBA 사용률 대표값도 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 카운터 이상일 수 있어 처리량을 확인하세요. 임계 알림은 초과로 봅니다).`);
+  if (blanked) out.push(`${label}FC 표준 데이터율의 ${FC_OVER_CLAMP_PCT}% 를 크게 넘는 처리량이 나온 HBA ${blanked}개는 사용률(%)을 비웠고, 그 서버의 HBA 사용률 대표값도 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 카운터 이상일 수 있어 처리량을 확인하세요. 임계 알림은 초과로 봅니다).`);
   return out;
 }

@@ -91,10 +91,11 @@ test('VC-01 ② 추이 — 비활성·캐시 없는 점검중 vCenter 의 빈 �
   const ser = await svc.vmtrackSeries({ days: 30 });
   const bySlot = new Map(ser.points.map((p) => [p.slot, p]));
   assert.equal(bySlot.get(r2.slot).removed, 0);
-  assert.equal(bySlot.get(r2.slot).skipped, 1);
+  assert.equal(bySlot.get(r2.slot).skipped, 0);   // v2.744 RECENT-01: 비활성은 분모 밖 — 부분 합이 아니다(skippedByReason 에만)
   assert.equal(bySlot.get(r3.slot).removed, 0);
   assert.equal(bySlot.get(r3.slot).added, 1);
-  assert.equal(bySlot.get(r3.slot).skipped, 1);
+  assert.equal(bySlot.get(r3.slot).skipped, 0);   // v2.744 RECENT-01: 캐시 없는 점검중은 기한 없는 상태 — 부분 합이 아니라 제외 수
+  assert.equal(bySlot.get(r3.slot).maintExcluded, 1);
 });
 
 test('VC-01 ③ 생성·삭제 이력 — 읽지 못한 vCenter(빈 목록·비연결)는 이름 대조를 하지 않는다(existsNow null · 사유 unread)', async () => {

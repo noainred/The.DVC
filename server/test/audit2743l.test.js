@@ -188,12 +188,18 @@ test('DEV-03 ② 표의 모든 등급이 포화 = 100% · 표에 없는 속도(1
   assert.equal(unk.pct, null); assert.equal(unk.basis, null); assert.equal(unk.over, false);
 });
 
-test('DEV-03 ③ 데이터율을 넘는 처리량은 클램프하지 않고 null + 사유(처리량은 그대로)', () => {
-  const b = twoCycles({ fcBps: 1.7e9 });
-  assert.equal(b.row.hba_pct, null);
+// v2.744 RECENT-02: 데이터율을 조금(≤110%) 넘는 값은 측정 정의 차이(프레임 헤더)라 100% + 표지, 크게 넘으면 비우고 hba_over 로 알린다.
+test('DEV-03 ③ 데이터율을 넘는 처리량 — 조금 넘으면 100% + 표지, 크게 넘으면 null + hba_over(처리량은 그대로)', () => {
+  const b = twoCycles({ fcBps: 1.7e9 });   // 106%
+  assert.equal(b.row.hba_pct, 100);
   assert.equal(b.detail.fc[0].pctOver, true);
+  assert.equal(b.detail.fc[0].pctClamped, true);
   assert.ok(b.row.hba_bps > 0);
-  assert.ok(b.notes.some((x) => x.includes('넘는 처리량')), JSON.stringify(b.notes));
+  const c = twoCycles({ fcBps: 2.0e9 });   // 125%
+  assert.equal(c.row.hba_pct, null);
+  assert.equal(c.row.hba_over, true);
+  assert.ok(c.row.hba_bps > 0);
+  assert.ok(c.notes.some((x) => x.includes('크게')), JSON.stringify(c.notes));
 });
 
 test('DEV-03 ④ 이더넷 NIC 는 바꾸지 않는다(링크 속도 그대로 — 10Gb 에서 1.25GB/s = 100%)', () => {

@@ -151,6 +151,7 @@ export const HOLD_REASON = Object.freeze({
   noReport: 'no-report',                    // 그 agent 의 보고 자체가 없음(엣지 재기동·무보고 — '장비 실패' 와 다르다)
   edgeStale: 'edge-stale',                  // 그 엣지의 마지막 보고가 오래됨(기본 3시간) — 장비가 아니라 엣지 문제(v2.548 리뷰 H7)
   edgeLegacy: 'edge-legacy',                // 구 프로토콜 엣지(v2.547) — 해소를 판정할 수 없어 업그레이드 전까지 열려 있다
+  registryUnreadable: 'registry-unreadable', // v2.744(EDGE-01): 그 장비군 등록부를 읽지 못함 — 목록에서 빠진 것이 재배정·삭제가 아니다(닫지 않음)
 });
 
 /**
