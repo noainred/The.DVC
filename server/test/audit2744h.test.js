@@ -141,8 +141,9 @@ test('DEV-03 ⑥ judgeNtpReply(순수) — 판정 순서 길이 → mode → KoD
   const sent = req.subarray(40, 48);
   assert.equal(ck.judgeNtpReply(Buffer.alloc(20), sent).kind, 'format');
   assert.equal(ck.judgeNtpReply(Buffer.from(req), sent).kind, 'format');                         // mode 0
-  assert.deepEqual(ck.judgeNtpReply(ntpReply(req, { stratum: 0, refid: 'R\x01TE', tx: 'zero' }), sent), { kind: 'kod', code: 'RTE' });
-  assert.deepEqual(ck.judgeNtpReply(ntpReply(req, { stratum: 0, tx: 'zero' }), sent), { kind: 'kod', code: '코드 없음' });
+  // v2.744(회귀 검토 GH-R1): KoD 결과에 refused(거부 코드 RATE·DENY·RSTR 인가)가 붙었다 — 이 두 입력은 거부 코드가 아니다(audit2744rg ①).
+  assert.deepEqual(ck.judgeNtpReply(ntpReply(req, { stratum: 0, refid: 'R\x01TE', tx: 'zero' }), sent), { kind: 'kod', code: 'RTE', refused: false });
+  assert.deepEqual(ck.judgeNtpReply(ntpReply(req, { stratum: 0, tx: 'zero' }), sent), { kind: 'kod', code: '코드 없음', refused: false });
   assert.equal(ck.judgeNtpReply(ntpReply(req, { echo: false }), sent).kind, 'mismatch');
   assert.equal(ck.judgeNtpReply(ntpReply(req, { echo: false }), null).kind, 'ok');                 // 대조할 값이 없으면 대조하지 않는다
   assert.deepEqual(ck.judgeNtpReply(ntpReply(req, { li: 3, stratum: 16 }), sent), { kind: 'unsync', stratum: 16, li: 3 });

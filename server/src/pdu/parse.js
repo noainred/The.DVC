@@ -29,13 +29,49 @@
  *   - 단위를 값에 녹이지 않고 그대로 돌려준다 — 화면/DB 에서 환산 규칙을 한 곳에 둔다.
  */
 
+/* 줄 끝 문자(\n·\r·U+2028·U+2029) — 정규식의 '.' 이 맞추지 않는 글자. 줄은 \r?\n 으로 나눴지만 외로운 \r·U+2028 은 남을 수 있다. */
+const LINE_TERM = /[\n\r\u2028\u2029]/;
+
+/*
+ * v2.744(회귀 검토 GH-R2): '접두 + 공백 + 값' 꼴 정규식(`…\s*(.*)$`)은 값 앞 공백 뒤에 외로운 \r·U+2028 이 오면
+ *   (공백 길이 × 줄 길이)로 역추적했다 — 3만 자 공백 줄 하나에 parseCode·parseReading 이 각각 약 1.4초 멈췄다
+ *   (svcDiag.js INJPKG-02 와 같은 꼴의 형제 누락). 접두만 정규식으로 맞추고(한 가지로만 맞는 접두) 값은 선형으로 고른다.
+ *   규칙: 값 = ':'(또는 숫자) 뒤 앞 공백을 뺀 나머지 · 그 안에 줄 끝 문자가 있으면 맞지 않는다('.' 이 건너지 못한다).
+ *   예전 정규식과 결과가 같다(test/audit2744rg.test.js 가 무작위 입력으로 대조한다) — 정규식으로 되돌리지 말 것.
+ */
+
+/**
+ * (순수) `E000: Success` 줄 — 예전 `/^\s*E(\d{3})\s*:\s*(.*)$/` 와 같은 판정.
+ * @returns {[string, string, string]|null} [줄, 코드 숫자 3자리, 메시지(앞 공백 제거)]
+ */
+export function codeLine(line) {
+  const s = String(line);
+  const h = /^\s*E(\d{3})\s*:/.exec(s);
+  if (!h) return null;
+  const v = s.slice(h[0].length).trimStart();
+  return LINE_TERM.test(v) ? null : [s, h[1], v];
+}
+
+/**
+ * (순수) `22.9 C` 값 줄 — 예전 `/^(-?\d+(?:\.\d+)?)\s*(.*)$/` 와 같은 판정.
+ * 숫자 접두는 가장 긴 것을 쓴다 — 짧게 끊어도 꼬리(나머지 숫자 + 원래 꼬리)의 줄 끝 문자는 그대로라 결과가 같다.
+ * @returns {[string, string, string]|null} [줄, 숫자, 단위(앞 공백 제거)]
+ */
+export function readingLine(line) {
+  const s = String(line);
+  const h = /^(-?\d+(?:\.\d+)?)/.exec(s);
+  if (!h) return null;
+  const v = s.slice(h[0].length).trimStart();
+  return LINE_TERM.test(v) ? null : [s, h[1], v];
+}
+
 /** 응답 코드 줄 파싱. `E000: Success` → { code:'E000', ok:true } */
 export function parseCode(text) {
   // v2.602(SEC2602-02): 예전 `/^\s*E…$/m` 는 m 플래그에서 `\s*` 가 줄을 넘어가 빈 줄이 이어지면 O(n²) 였다
-  //   (빈 줄 8만 개 ≈ 5.8초 — 장비 출력도 외부 입력이다). 줄로 먼저 나누고 각 줄에 앵커 정규식을 한 번씩 건다(선형).
+  //   (빈 줄 8만 개 ≈ 5.8초 — 장비 출력도 외부 입력이다). 줄로 먼저 나누고 각 줄을 한 번씩 본다(선형).
   let m = null;
   for (const line of String(text || '').split(/\r?\n/)) {
-    m = /^\s*E(\d{3})\s*:\s*(.*)$/.exec(line);
+    m = codeLine(line);                     // v2.744(회귀 검토 GH-R2): 선형 판정
     if (m) break;
   }
   if (!m) return { code: '', ok: false, message: '' };
@@ -57,7 +93,7 @@ export function parseReading(text) {
     if (!l) continue;
     if (/^apc>/i.test(l)) break;             // 다음 프롬프트 — 값 줄이 없었다
     // 예: '22.9 C' · '34 %RH' · '1.98 kW' · '2.32' · '-1.5 C'
-    const m = /^(-?\d+(?:\.\d+)?)\s*(.*)$/.exec(l);
+    const m = readingLine(l);               // v2.744(회귀 검토 GH-R2): 선형 판정
     if (!m) continue;
     const v = Number(m[1]);
     if (!Number.isFinite(v)) continue;

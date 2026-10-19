@@ -36,8 +36,24 @@
  * **용량 수치와 괄호 표기는 원본 그대로**다(v2.513 공개 저장소 규약).
  */
 
-/** 레코드 시작 줄 — 맨 앞의 `1:` `2:` … (앞 공백 없음). */
-const REC_START = /^(\d+):\s*(.*)$/;
+/* 줄 끝 문자(\n·\r·U+2028·U+2029) — 정규식의 '.' 이 맞추지 않는 글자. 줄은 \r?\n 으로 나눴지만 외로운 \r·U+2028 은 남을 수 있다. */
+const LINE_TERM = /[\n\r\u2028\u2029]/;
+
+/**
+ * (순수) 레코드 시작 줄 — 맨 앞의 `1:` `2:` … (앞 공백 없음). 예전 `/^(\d+):\s*(.*)$/` 와 같은 판정.
+ * v2.744(회귀 검토 GH-R2): 그 정규식은 ':' 뒤 긴 공백 다음 값 안에 외로운 \r·U+2028 이 있으면 (공백 길이 × 줄 길이)로
+ *   역추적했다 — 3만 자 공백 줄 하나에 parseUemcli 가 약 2.3초 멈췄다(장비 출력은 외부 입력 — svcDiag.js INJPKG-02 와 같은 꼴).
+ *   규칙: 값 = ':' 뒤 앞 공백을 뺀 나머지 · 그 안에 줄 끝 문자가 있으면 맞지 않는다. 결과가 같음을 test/audit2744rg.test.js 가
+ *   무작위 입력으로 대조한다 — 정규식으로 되돌리지 말 것.
+ * @returns {[string, string, string]|null} [줄, 레코드 번호, 같은 줄의 나머지(앞 공백 제거)]
+ */
+export function recStart(line) {
+  const s = String(line);
+  const h = /^(\d+):/.exec(s);
+  if (!h) return null;
+  const v = s.slice(h[0].length).trimStart();
+  return LINE_TERM.test(v) ? null : [s, h[1], v];
+}
 
 /**
  * uemcli 사람이 읽는 출력 → 레코드 배열. 각 레코드는 `{ [키]: 원문값 }` 이다.
@@ -100,12 +116,12 @@ export function parseUemcli(text) {
    */
   // v2.599(감사 SEC2599-02 — 재현): 줄 끝 공백 제거는 trimEnd() 다. `replace(/\s+$/, '')` 는 앞쪽 공백 연속마다
   //   끝까지 다시 훑어 O(n²) 라, 공백만 긴 줄 하나(오동작·변조 장비 출력 — 상한 4MB)로 이벤트 루프가 멈춘다.
-  const noMarker = !lines.some((l) => REC_START.test(l.trimEnd()));
+  const noMarker = !lines.some((l) => recStart(l.trimEnd()));
 
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (!line.trim()) continue;
-    const m = noMarker ? null : REC_START.exec(line);
+    const m = noMarker ? null : recStart(line);   // v2.744(회귀 검토 GH-R2): 선형 판정
     if (m) {
       cur = {};
       out.push(cur);

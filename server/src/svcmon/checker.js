@@ -175,8 +175,17 @@ async function runCheckInner(test, host) {
       case 'ntp': {
         // v2.744(감사 DEV-03): 응답 머리를 먼저 판정한다 — 미동기·KoD 응답의 시각은 오프셋으로 쓰지 않는다(judgeNtpReply 머리말).
         const q = await ntpQuery(test.server || host, 4000);
-        if (q.kind === 'kod') return bad(`KoD(${q.code}) — 서버가 요청을 거부했습니다(stratum 0)`, started);
-        if (q.kind === 'unsync') return bad(`서버가 동기되지 않았습니다(stratum ${q.stratum} · LI ${q.li})`, started);
+        // v2.744(회귀 검토 GH-R1): stratum 0 은 refid 로 가른 결과를 그대로 말한다 — '요청 거부' 는 RATE·DENY·RSTR 뿐이다.
+        if (q.kind === 'kod') {
+          return bad(q.refused
+            ? `KoD(${q.code}) — 서버가 요청을 거부했습니다(${NTP_KOD_REFUSE[q.code]} · stratum 0)`
+            : `KoD(${q.code}) — 서버가 시각을 주지 않았습니다(stratum 0)`, started);
+        }
+        if (q.kind === 'unsync') {
+          if (q.code == null) return bad(`서버가 동기되지 않았습니다(stratum ${q.stratum} · LI ${q.li})`, started);
+          const what = NTP_UNSYNC_CODE[q.code] || (q.code ? `refid ${q.code}` : 'refid 없음');
+          return bad(`서버가 동기되지 않았습니다(stratum 0 · ${what} · LI ${q.li})`, started);
+        }
         const offset = q.offset;
         const abs = Math.abs(offset);
         const ms = Date.now() - started;
@@ -371,6 +380,14 @@ function certDaysLeft(host, port, timeoutMs) {
 const NTP_EPOCH_OFFSET_S = 2208988800;
 
 /**
+ * v2.744(회귀 검토 GH-R1): stratum 0 응답의 refid → 뜻(judgeNtpReply 머리말).
+ *   거부(KoD) — ntpd kiss_code_check 가 KoD 로 보는 세 코드. 화면 문구의 괄호 안 설명이기도 하다.
+ *   미동기 — 그 상태의 이름인 코드(ntpd 첫 동기 전 'INIT' · 시계 step 뒤 재동기 전 'STEP').
+ */
+const NTP_KOD_REFUSE = Object.freeze({ RATE: '요청 빈도 제한', DENY: '접근 거부', RSTR: '접근 거부(정책)' });
+const NTP_UNSYNC_CODE = Object.freeze({ INIT: 'INIT 첫 동기 전', STEP: 'STEP 시계 조정 뒤 재동기 전' });
+
+/**
  * (순수) SNTP 서버 응답 머리 판정 — v2.744(감사 DEV-03).
  *   48바이트 = 0: LI(2비트)·VN(3)·Mode(3) · 1: stratum · 12~15: refid(KoD 코드) · 24~31: originate · 40~47: transmit.
  * 예전에는 길이만 보고 송신 타임스탬프(40~47)로 오프셋을 냈다. 그래서
@@ -378,14 +395,29 @@ const NTP_EPOCH_OFFSET_S = 2208988800;
  *      (chronyd·ntpd·w32time 은 그런 서버를 시간 원천으로 받지 않는데 점검만 초록이었다)
  *   ② Kiss-o'-Death(stratum 0, 송신 타임스탬프 0)가 1900년 기준 '오프셋 −4조 ms' 로 보고됐고
  *   ③ 요청을 그대로 되돌리는 응답(mode 3)도 '오프셋 0ms' 였다.
- * 판정 순서(앞이 이긴다): 길이 → mode(4 = server 만) → stratum 0(KoD) → 원본 타임스탬프 대조 → LI=3 또는 stratum ≥ 16(미동기)
- *   → 송신 타임스탬프 0(형식 오류) → 오프셋.
+ * 판정 순서(앞이 이긴다): 길이 → mode(4 = server 만) → stratum 0(refid 로 가른다 — 아래) → 원본 타임스탬프 대조
+ *   → LI=3 또는 stratum ≥ 16(미동기) → 송신 타임스탬프 0(형식 오류) → 오프셋.
+ * ⚠⚠ v2.744(회귀 검토 GH-R1): **stratum 0 이 곧 KoD(거부)는 아니다.** 실서버가 미동기일 때 싣는 값이 stratum 0 이다 —
+ *   ntpd 는 STRATUM_UNSPEC(16)을 패킷에서 0 으로 바꾸고(include/ntp.h STRATUM_TO_PKT) 첫 동기 전에는 refid 'INIT',
+ *   시계 step 뒤에는 'STEP' 을 싣는다(ntpd/ntp_proto.c 초기화·step 경로). chronyd 도 미동기면 stratum 16 → 0, refid 0
+ *   (ntp_core.c transmit_packet 'Stratum 16 and larger are invalid' · reference.c NTP_REFID_UNSYNC)이다.
+ *   ntpd 클라이언트 자신도 KoD 를 **LI 3 · stratum 0 · refid RATE·DENY·RSTR**(그리고 'X' 실험 코드)일 때만 KoD 로 본다
+ *   (ntp_proto.c kiss_code_check). 예전 판정은 이 미동기 응답을 전부 '서버가 요청을 거부했습니다' 로 말해, 운영자가 상위 동기
+ *   상실 대신 restrict·방화벽을 점검하게 만들었다(조치가 정반대). 그래서:
+ *     · refid RATE·DENY·RSTR → {kind:'kod', refused:true}(거부 — 빈도 제한·접근 거부)
+ *     · refid INIT·STEP(LI 무관 — 그 상태의 이름이다), 또는 refid 가 비었고 LI 3(chronyd 미동기) → {kind:'unsync', stratum:0, code}
+ *     · 그 밖의 코드(AUTH·CRYP·NTSN …) → {kind:'kod', refused:false} — 원인을 단정하지 않는 중립 문구.
+ *     LI 3 만으로는 가를 수 없다 — ntpd 의 RATE KoD 도 LI 3 이다(ntp_proto.c fast_xmit RES_KOD 분기).
+ *   ⚠ 정직 기록: RFC 5905 원문은 이 환경에서 열지 못했다(프록시 403) — 위 판정은 ntpd·chronyd 원본 소스로 확인한 것이다.
+ *   stratum 0 판정이 원본 대조보다 앞인 것은 그대로다(실서버의 KoD·미동기 응답은 둘 다 originate 를 요청의 송신 타임스탬프로
+ *   채우므로 대조를 앞에 둬도 결과가 같지만, 판정 순서를 이 수정 범위 밖에서 바꾸지 않는다).
  * 원본 타임스탬프(24~31)는 서버가 요청의 송신 타임스탬프를 그대로 복사한 값이다(RFC 4330 §5). 다르면 이 요청의 응답이 아니다 —
  *   'mismatch' 를 돌려주고 호출부가 다음 패킷을 기다린다(실제 클라이언트도 그런 패킷을 버린다).
  * @param {Buffer} msg
  * @param {Buffer|null} sentTx 보낸 송신 타임스탬프 8바이트(없으면 대조하지 않는다)
- * @returns {{kind:'format', reason:string}|{kind:'kod', code:string}|{kind:'mismatch'}|{kind:'unsync', stratum:number, li:number}
- *          |{kind:'ok', stratum:number, li:number, serverMs:number}}
+ * @returns {{kind:'format', reason:string}|{kind:'kod', code:string, refused:boolean}|{kind:'mismatch'}
+ *          |{kind:'unsync', stratum:number, li:number, code?:string}|{kind:'ok', stratum:number, li:number, serverMs:number}}
+ *   unsync 의 code 는 stratum 0 일 때만 있다(refid ASCII — 비었으면 '').
  */
 export function judgeNtpReply(msg, sentTx = null) {
   if (!msg || msg.length < 48) return { kind: 'format', reason: `길이 ${msg ? msg.length : 0}바이트 — 48바이트 미만` };
@@ -396,7 +428,10 @@ export function judgeNtpReply(msg, sentTx = null) {
   if (stratum === 0) {
     // KoD 코드는 refid 자리의 ASCII 4글자다(RATE·DENY·RSTR …). 인쇄 가능한 글자만 남긴다(응답 바이트를 그대로 화면에 싣지 않는다).
     const code = msg.subarray(12, 16).toString('latin1').replace(/[^\x21-\x7e]/g, '');
-    return { kind: 'kod', code: code || '코드 없음' };
+    // v2.744(회귀 검토 GH-R1): refid 로 가른다(머리말). 거부 코드만 '요청 거부' 다.
+    if (Object.hasOwn(NTP_KOD_REFUSE, code)) return { kind: 'kod', code, refused: true };
+    if (Object.hasOwn(NTP_UNSYNC_CODE, code) || (!code && li === 3)) return { kind: 'unsync', stratum: 0, li, code };
+    return { kind: 'kod', code: code || '코드 없음', refused: false };
   }
   if (sentTx && !msg.subarray(24, 32).equals(sentTx)) return { kind: 'mismatch' };
   if (li === 3 || stratum >= 16) return { kind: 'unsync', stratum, li };
@@ -422,7 +457,8 @@ function ntpTimestamp(ms) {
  *   시한까지 맞는 응답이 없고 맞지 않는 응답만 왔으면 그 사실을 사유로 말한다(조용한 '타임아웃' 으로 뭉개지 않는다).
  * ⚠ 소켓은 connect 하지 않는다(정직 기록) — 출처 주소를 고정하지 않으므로 원본 타임스탬프 대조가 '이 요청의 응답인가' 를 가린다.
  * @param {number} [port] 기본 123(점검 유형은 표준 포트만 쓴다 — test.port 를 읽지 않던 예전 동작 그대로)
- * @returns {Promise<{kind:'ok', offset:number, stratum:number}|{kind:'kod', code:string}|{kind:'unsync', stratum:number, li:number}>}
+ * @returns {Promise<{kind:'ok', offset:number, stratum:number}|{kind:'kod', code:string, refused:boolean}
+ *          |{kind:'unsync', stratum:number, li:number, code?:string}>}
  */
 export function ntpQuery(server, timeoutMs, port = 123) {
   return new Promise((resolve, reject) => {
@@ -444,8 +480,8 @@ export function ntpQuery(server, timeoutMs, port = 123) {
       const r = judgeNtpReply(msg, sentTx);
       if (r.kind === 'mismatch') { mismatched += 1; return; }   // 이 요청의 응답이 아니다 — 버리고 기다린다
       if (r.kind === 'format') return finish(reject, new Error(`NTP 응답 형식 오류(${r.reason})`));
-      if (r.kind === 'kod') return finish(resolve, { kind: 'kod', code: r.code });
-      if (r.kind === 'unsync') return finish(resolve, { kind: 'unsync', stratum: r.stratum, li: r.li });
+      if (r.kind === 'kod') return finish(resolve, { kind: 'kod', code: r.code, refused: r.refused });
+      if (r.kind === 'unsync') return finish(resolve, r);   // v2.744(회귀 검토 GH-R1): stratum 0 이면 code(refid)도 함께
       finish(resolve, { kind: 'ok', offset: r.serverMs - (t1 + t4) / 2, stratum: r.stratum });
     });
     sock.once('error', (e) => finish(reject, e));
