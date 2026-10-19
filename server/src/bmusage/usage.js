@@ -60,6 +60,14 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
   const srcOf = {};
   const notes = [];
   /*
+   * v2.744(최종 검토 RV-1): 서버 HBA 대표값(값 또는 '크게 초과로 비움' hba_over)을 **실제로 정한 경로** — 'os' | 'idrac' | null(아무도 못 정함).
+   *   srcOf.hba 는 값이 있을 때만 세워지므로(row.src 계약 — 바꾸지 않는다) hba_over 를 세운 경로는 이것으로만 알 수 있다.
+   *   노트(OS FC 노트의 대체 문구)와 각주 근거(hbaBasis.recordHbaBasis — 어느 경로의 포트를 셀지)가 이 값을 쓴다. DB 에는 넣지 않는다.
+   */
+  let hbaRepSrc = null;
+  // v2.744(RV-1): OS FC 노트는 iDRAC 경로가 빈 대표값을 채운 **뒤에** 만든다(그 전에 만들면 '대표값은 비웠다' 는 거짓이 된다) — 자리만 잡아 둔다.
+  let osFcRows = null; let osFcNotesAt = -1;
+  /*
    * v2.732(감사 B1-01): 누적 카운터 간격 한계를 **한 번** 계산해 CPU·디스크 I/O·네트워크·HBA·iDRAC NIC/FC 가 **전부 같은 값**을 쓴다
    *   (v2.731 A2-04 '한 행 안에서 같은 경계' 원칙). 예전 60분 고정은 주기 60분 이상(설정 상한 6시간)에서 매 주기 값을 비웠다.
    */
@@ -88,7 +96,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     const nb = maxOrNull((os.nics || []).map((x) => x.bytesPerSec));
     if (nb != null) out.net_bps = nb;
     const hp = maxOrNull((os.hbas || []).map((x) => x.pct));
-    if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
+    if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; hbaRepSrc = 'os'; }
     // ⚠ Windows FC 처리량 카운터는 표준이 아니다 — 없으면 없다고 둔다(0 을 만들지 않는다).
     if ((os.hbas || []).length && hp == null) notes.push('Windows 에서 HBA 사용률 카운터를 읽지 못했습니다(드라이버가 제공하지 않을 수 있습니다).');
   } else if (osOk && os.osKind === 'linux') {
@@ -155,11 +163,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     });
     // v2.744(감사 RECENT-02): 대표값은 fcRepresentative 하나 — 크게 넘어 비운 포트가 있으면 다른 포트 값으로 채우지 않는다.
     const rep = fcRepresentative(perFc);
-    if (rep.pct != null) { out.hba_pct = rep.pct; srcOf.hba = 'os'; }
-    if (rep.overBlank) out.hba_over = true;   // ⚠ DB 열이 아니다(insertUsage 는 열 목록만 읽는다) — 알림 판정(alertRules overFlag)용
+    if (rep.pct != null) { out.hba_pct = rep.pct; srcOf.hba = 'os'; hbaRepSrc = 'os'; }
+    if (rep.overBlank) { out.hba_over = true; hbaRepSrc = 'os'; }   // ⚠ DB 열이 아니다(insertUsage 는 열 목록만 읽는다) — 알림 판정(alertRules overFlag)용
     const hb = maxOrNull(perFc.map((x) => x.bps));
     if (hb != null) out.hba_bps = hb;
-    for (const t of fcRateNotes(perFc)) notes.push(t);
+    // v2.744(최종 검토 RV-1): 노트는 아래 iDRAC 경로 뒤에 이 자리에 끼워 넣는다(순서는 예전 그대로).
+    osFcRows = perFc; osFcNotesAt = notes.length;
     const fcUnread = (c.hbas || []).filter((x) => x && x.countersInvalid).length;
     if (fcUnread) notes.push(`FC HBA ${fcUnread}개는 통계 카운터를 읽지 못했습니다(드라이버가 '-1' 표지를 냈습니다 — 링크 다운·칩 재설정 중일 수 있습니다). 그 포트의 처리량·사용률은 비웠습니다(0 이 아닙니다).`);
     // 표지 → 정상 주기: 이번 값은 읽었지만 비교할 직전 값이 없다 — 조용히 비우지 않고 '다음 주기부터' 라고 말한다.
@@ -172,6 +181,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
 
   // ── iDRAC 경로(빈 칸만 채운다) ─────────────────────────────────────────────
   let idracIf = null; let idracFc = null;
+  let idracRep = null;   // v2.744(RV-1): iDRAC 행이 빈 대표값을 정했으면 그 fcRepresentative 결과(OS 노트의 대체 문구가 쓴다)
   if (idrac && idrac.ok) {
     if (out.cpu_pct == null && n(idrac.cpuPct) != null) { out.cpu_pct = n(idrac.cpuPct); srcOf.cpu = 'idrac'; }
     if (out.mem_pct == null && n(idrac.memPct) != null) { out.mem_pct = n(idrac.memPct); srcOf.mem = 'idrac'; }
@@ -240,6 +250,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       if (idracForRep) {
         if (repI.pct != null) { out.hba_pct = repI.pct; srcOf.hba = 'idrac'; }
         else if (repI.overBlank) out.hba_over = true;
+        if (repI.pct != null || repI.overBlank) { hbaRepSrc = 'idrac'; idracRep = repI; }
       }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
@@ -253,6 +264,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     //   용량 계열이 읽히면 사용 공간만 채운다.
     const du = maxOrNull((idrac.disks || []).map((d) => d.usedPct));
     if (out.disk_used_pct == null && du != null) { out.disk_used_pct = du; srcOf.diskUsed = 'idrac'; }
+  }
+
+  // v2.744(최종 검토 RV-1): OS FC 노트 — iDRAC 이 빈 대표값을 정했으면 그 결과를 넘긴다(노트가 최종 hba_pct·hba_over 와 같은 말을 하게).
+  if (osFcRows) {
+    const fallback = idracRep ? { label: 'iDRAC', pct: idracRep.pct, overBlank: idracRep.overBlank } : null;
+    notes.splice(osFcNotesAt, 0, ...fcRateNotes(osFcRows, '', { fallback }));
   }
 
   /*
@@ -288,6 +305,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       fc: out._perFc || (osOk && winShape ? (os.hbas || []) : []),
       // iDRAC 이 읽은 장치 목록 — OS 목록과 **나란히** 둔다(어느 경로의 값인지 알 수 있게).
       idracInterfaces: idracIf || [], idracFc: idracFc || [],
+      // v2.744(최종 검토 RV-1): 서버 HBA 대표값을 정한 경로('os'|'idrac'|null) — 각주 근거가 그 경로의 포트를 센다(hbaBasis.recordHbaBasis).
+      hbaRepSrc,
       idracReports: idrac?.usedReports || [], idracSeenReports: idrac?.seenReports || [],
       idracAbsent: idrac?.absent || [], idracRead: idrac?.read || [],
       idracFull: !!idrac?.full, idracFullTried: !!idrac?.fullTried,

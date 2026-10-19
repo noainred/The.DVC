@@ -140,14 +140,37 @@ export function fcRepresentative(rows = []) {
 }
 
 /**
+ * v2.744(최종 검토 RV-1): 명목 초과 포트가 있는 행 목록에서 **서버 대표값이 실제로 어떻게 정해졌는가**(순수 — 노트 문구의 분기 하나).
+ *   ⚠ OS 행의 노트는 iDRAC 경로가 빈 대표값을 채우기 전에 만들면 '대표값은 비웠다 · 알림은 초과로 보지 않는다' 라고 적는데, 같은 주기에
+ *   iDRAC FC 행이 값을 넣거나(hba_pct · srcOf.hba 'idrac') 데이터율 크게 초과로 hba_over 를 세울 수 있다 — 그래서 `fallback`(그 뒤에
+ *   대표값을 정한 다른 경로의 fcRepresentative 결과)을 받는다. 웹 bmUsageText.fcNominalRestKind 가 같은 규칙의 사본이다(테스트 대조).
+ * @param {object[]} rows
+ * @param {object} [opt]
+ * @param {boolean} [opt.usedForRep=true]  이 행 목록이 대표값을 정할 자리였는가(false = 다른 경로가 이미 정했다)
+ * @param {{pct:number|null, overBlank:boolean}|null} [opt.fallback]  이 행의 대표값이 비었을 때 그 뒤에 대표값을 정한 다른 경로의 결과
+ * @returns {'not-used'|'other-blank'|'rest'|'fallback-value'|'fallback-over'|'hold'}
+ */
+export function fcNominalRestKind(rows, { usedForRep = true, fallback = null } = {}) {
+  if (!usedForRep) return 'not-used';
+  const rep = fcRepresentative(rows);
+  if (rep.overBlank) return 'other-blank';
+  if (rep.pct != null) return 'rest';
+  if (fallback && numOrNull(fallback.pct) != null) return 'fallback-value';
+  if (fallback && fallback.overBlank) return 'fallback-over';
+  return 'hold';
+}
+
+/**
  * FC 행 목록 → 화면·상태 문구(사유 표지). 조용히 바꾸지 않는다 — 명목 기준·데이터율 초과를 개수로 밝힌다.
  * @param {Array<{bps:number|null, pctBasis?:string|null, pctOver?:boolean, pct?:number|null}>} rows
  * @param {string} label  '' 또는 'iDRAC ' 같은 출처 접두
  * @param {object} [opt]
  * @param {boolean} [opt.usedForRep=true]  v2.744(회귀 검토 GB-R4): 이 행 목록이 서버 대표값을 정했는가. iDRAC 행은 OS 값이 이미 대표면
  *   쓰이지 않는다(usage.js '빈 칸만 채운다') — 그때 '대표값도 비웠다 · 알림은 초과' 라고 적으면 화면 값(OS)과 반대되는 거짓이다.
+ * @param {{label?:string, pct:number|null, overBlank:boolean}|null} [opt.fallback]  v2.744(최종 검토 RV-1): 이 행의 대표값이 비었는데
+ *   그 뒤에 다른 경로(label — 'iDRAC')가 대표값을 정했으면 그 결과. 없으면 예전 문구(판정 보류) 그대로다(`fcNominalRestKind`).
  */
-export function fcRateNotes(rows, label = '', { usedForRep = true } = {}) {
+export function fcRateNotes(rows, label = '', { usedForRep = true, fallback = null } = {}) {
   const out = [];
   const list = Array.isArray(rows) ? rows : [];
   const nominal = list.filter((x) => x && x.pctBasis === 'nominal' && x.pct != null).length;
@@ -164,11 +187,17 @@ export function fcRateNotes(rows, label = '', { usedForRep = true } = {}) {
   // v2.744(회귀 검토 GB-R1): 명목 기준 100% 초과는 데이터율 초과가 아니다 — 속도 보고를 의심하라고 말하고, 대표값이 어떻게 정해졌는지 밝힌다.
   const nomOver = list.filter(isNominalOver).length;
   if (nomOver) {
-    const rep = fcRepresentative(list);
-    const rest = !usedForRep ? '서버 HBA 사용률 대표값은 OS 측정으로 정했습니다(이 포트 값은 대표값·임계 알림에 쓰지 않았습니다).'
-      : rep.overBlank ? '서버 HBA 사용률 대표값은 데이터율을 크게 넘은 다른 포트 때문에 비웠습니다(이 포트 때문에 초과로 보지는 않습니다).'
-        : rep.pct != null ? '서버 HBA 사용률 대표값은 그 포트를 뺀 나머지 포트 기준입니다(이 포트는 임계 알림에서 초과로 보지 않습니다).'
-          : '나머지 포트에 사용률이 없어 서버 HBA 사용률 대표값은 비웠습니다(판정 보류 — 임계 알림은 초과로 보지 않습니다).';
+    // v2.744(최종 검토 RV-1): 분기는 fcNominalRestKind 하나 — 다른 경로(iDRAC)가 빈 대표값을 정했으면 그 사실을 말한다.
+    const by = String(fallback?.label || '').trim() || '다른 경로';
+    const REST = {
+      'not-used': '서버 HBA 사용률 대표값은 OS 측정으로 정했습니다(이 포트 값은 대표값·임계 알림에 쓰지 않았습니다).',
+      'other-blank': '서버 HBA 사용률 대표값은 데이터율을 크게 넘은 다른 포트 때문에 비웠습니다(이 포트 때문에 초과로 보지는 않습니다).',
+      rest: '서버 HBA 사용률 대표값은 그 포트를 뺀 나머지 포트 기준입니다(이 포트는 임계 알림에서 초과로 보지 않습니다).',
+      'fallback-value': `나머지 포트에 사용률이 없어 서버 HBA 사용률 대표값은 ${by} 측정으로 정했습니다(이 포트는 임계 알림에서 초과로 보지 않습니다).`,
+      'fallback-over': `나머지 포트에 사용률이 없었고, 서버 HBA 사용률 대표값은 ${by} 측정에서 데이터율을 크게 넘은 포트 때문에 비웠습니다(임계 알림은 그 포트 때문에 초과로 봅니다 — 이 포트 때문이 아닙니다).`,
+      hold: '나머지 포트에 사용률이 없어 서버 HBA 사용률 대표값은 비웠습니다(판정 보류 — 임계 알림은 초과로 보지 않습니다).',
+    };
+    const rest = REST[fcNominalRestKind(list, { usedForRep, fallback })];
     out.push(`${label}FC 표준 데이터율 표에 없는 속도라 명목 속도(Gbit)로 나눴는데 100% 를 넘은 HBA ${nomOver}개는 사용률(%)을 비웠습니다(보고된 링크 속도가 실제와 다를 수 있습니다 — 속도 보고를 확인하세요. 처리량은 그대로입니다). ${rest}`);
   }
   return out;

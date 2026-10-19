@@ -172,6 +172,43 @@ export function skippedNotes(counts = {}, reasons = {}) {
   return out;
 }
 
+/**
+ * v2.744(최종 검토 RV-1·RV-2): FC 행 목록 → 서버 대표 사용률(서버 parse/fcRate.js fcRepresentative 의 사본 — 번들 경계라 두 벌이고
+ *   서버 테스트·웹 테스트가 같은 입력으로 대조한다). 데이터율 기준으로 **크게** 넘어 비운 포트가 있으면 대표값을 비운다(overBlank).
+ */
+function fcRepOf(rows) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  if (list.some((x) => x.pctOver && x.pctBasis !== 'nominal' && n(x.pct) == null)) return { pct: null, overBlank: true };
+  let best = null;
+  for (const x of list) { const v = n(x.pct); if (v != null && (best == null || v > best)) best = v; }
+  return { pct: best, overBlank: false };
+}
+
+/**
+ * v2.744(최종 검토 RV-1·RV-2): 명목 초과 포트가 있는 OS 행에서 서버 대표값이 **실제로** 어떻게 정해졌나 — 서버
+ *   parse/fcRate.js `fcNominalRestKind` 와 같은 규칙(웹 테스트가 같은 입력으로 대조한다). OS 행이 대표값을 못 정했으면 iDRAC 행이
+ *   빈 칸을 채운다(서버 usage.js '빈 칸만 채운다') — 그 결과를 본다. 예전 웹 문구는 이 분기 없이 언제나 '나머지 포트 기준 · 알림 초과
+ *   아님' 이라 같은 서버의 '데이터율을 크게 넘어 대표값을 비웠다 · 알림 초과' 줄과 모순됐다.
+ * @returns {'other-blank'|'rest'|'fallback-value'|'fallback-over'|'hold'}
+ */
+export function fcNominalRestKind(fcRows, idracFc = null) {
+  const rep = fcRepOf(fcRows);
+  if (rep.overBlank) return 'other-blank';
+  if (rep.pct != null) return 'rest';
+  const ri = Array.isArray(idracFc) && idracFc.length ? fcRepOf(idracFc) : null;
+  if (ri && ri.pct != null) return 'fallback-value';
+  if (ri && ri.overBlank) return 'fallback-over';
+  return 'hold';
+}
+
+const FC_NOMINAL_REST_TEXT = Object.freeze({
+  'other-blank': '서버 대표 HBA 사용률은 데이터율을 크게 넘은 다른 포트 때문에 비웠습니다(이 포트 때문에 초과로 보지는 않습니다).',
+  rest: '서버 대표 HBA 사용률은 나머지 포트 기준이고 임계 알림은 초과로 보지 않습니다.',
+  'fallback-value': '나머지 포트에 사용률이 없어 서버 대표 HBA 사용률은 iDRAC 측정으로 정했습니다(이 포트는 임계 알림에서 초과로 보지 않습니다).',
+  'fallback-over': '나머지 포트에 사용률이 없었고, 서버 대표 HBA 사용률은 iDRAC 측정에서 데이터율을 크게 넘은 포트 때문에 비웠습니다(임계 알림은 그 포트 때문에 초과로 봅니다 — 이 포트 때문이 아닙니다).',
+  hold: '나머지 포트에 사용률이 없어 서버 대표 HBA 사용률은 비웠습니다(판정 보류 — 임계 알림은 초과로 보지 않습니다).',
+});
+
 /** 한 서버의 상세 안내 — '무엇을 읽었고 무엇을 못 읽었나'. */
 export function detailNotes(detail = {}) {
   const out = [];
@@ -212,8 +249,27 @@ export function detailNotes(detail = {}) {
   const fcNominalOver = fcRows.filter((x) => x && x.pctOver && n(x.pct) == null && x.pctBasis === 'nominal');
   if (fcClamped.length) out.push(`**FC 표준 데이터율을 조금 넘은 포트 ${fcClamped.length}개** — 사용률을 100% 로 표시했습니다(카운터가 프레임 헤더까지 세는 측정 정의 차이입니다 — 처리량은 그대로입니다).`);
   if (fcBlanked.length) out.push(`**FC 표준 데이터율을 넘는 처리량이 크게 나온 포트 ${fcBlanked.length}개** — 그 포트의 사용률(%)과 서버 대표 HBA 사용률을 비웠습니다(다른 포트의 낮은 값으로 대표하지 않습니다 — 임계 알림은 초과로 봅니다).`);
-  if (fcNominalOver.length) out.push(`**명목 속도(Gbit)를 넘는 처리량이 나온 포트 ${fcNominalOver.length}개** — 표준 데이터율 표에 없는 속도라 명목 속도로 나눴는데 100% 를 넘어 그 포트의 사용률(%)을 비웠습니다(보고된 링크 속도가 실제와 다를 수 있습니다 — 속도 보고를 확인하세요). 서버 대표 HBA 사용률은 나머지 포트 기준이고 임계 알림은 초과로 보지 않습니다.`);
+  // v2.744(최종 검토 RV-2): 대표값이 어떻게 정해졌는지는 고정 문장이 아니라 판정(fcNominalRestKind — 서버와 같은 규칙)으로 말한다.
+  if (fcNominalOver.length) out.push(`**명목 속도(Gbit)를 넘는 처리량이 나온 포트 ${fcNominalOver.length}개** — 표준 데이터율 표에 없는 속도라 명목 속도로 나눴는데 100% 를 넘어 그 포트의 사용률(%)을 비웠습니다(보고된 링크 속도가 실제와 다를 수 있습니다 — 속도 보고를 확인하세요). ${FC_NOMINAL_REST_TEXT[fcNominalRestKind(fcRows, detail.idracFc)]}`);
   return out;
+}
+
+/**
+ * v2.744(최종 검토 RV-1): 각주의 명목 초과 조각 — 서버마다 기록된 최종 대표값(`hbaBasis.rep` — value·over·none)으로 말한다.
+ *   예전 고정 문장('나머지 포트 기준이고 알림은 초과로 보지 않습니다')은 같은 서버가 데이터율 크게 초과로 대표값을 비우고 알림을 초과로
+ *   보거나(over), 나머지 포트에 값이 없어 비웠을 때(none) 그대로 거짓이었다. rep 가 없는 옛 기록은 overBlank 로만 가르고, 그것도
+ *   없으면 언제나 참인 말('이 포트 값은 쓰지 않았다 · 알림 초과 아님')만 한다.
+ */
+const NOMINAL_REP_TEXT = Object.freeze({
+  value: '서버 HBA 사용률은 나머지 포트 기준이고 알림은 초과로 보지 않습니다',
+  over: '그 서버의 HBA 사용률은 데이터율을 크게 넘은 다른 포트 때문에 비웠고 알림 초과는 그 포트 때문입니다',
+  none: '나머지 포트에 사용률이 없어 서버 HBA 사용률은 비웠고 판정 보류라 알림은 초과로 보지 않습니다',
+  unknown: '이 포트 값은 서버 HBA 사용률에 쓰지 않았고 알림은 초과로 보지 않습니다',
+});
+function nominalRepKind(b) {
+  const r = t(b?.rep);
+  if (r === 'value' || r === 'over' || r === 'none') return r;
+  return b?.overBlank ? 'over' : 'unknown';
 }
 
 /**
@@ -224,12 +280,21 @@ export function detailNotes(detail = {}) {
  */
 export function hbaBasisFootnote(rows = []) {
   const sum = { ports: 0, dataRate: 0, nominal: 0, noSpeed: 0, clamped: 0, blanked: 0, nominalOver: 0, unread: 0, servers: 0 };
+  // v2.744(최종 검토 RV-1): 명목 초과 포트를 그 서버의 최종 대표값 모양별로 · iDRAC 포트로 센 서버 · OS 에 값이 없어 iDRAC 이 정한 서버.
+  const nomBy = { value: 0, over: 0, none: 0, unknown: 0 };
+  let idracServers = 0; let fbServers = 0; let fbNominalOver = 0;
   let clampMax = null;
   for (const r of Array.isArray(rows) ? rows : []) {
     const b = r && typeof r === 'object' ? r.hbaBasis : null;
     if (!b || typeof b !== 'object' || !(n(b.ports) > 0)) continue;
     sum.servers += 1;
     for (const k of ['ports', 'dataRate', 'nominal', 'noSpeed', 'clamped', 'blanked', 'nominalOver', 'unread']) sum[k] += n(b[k]) ?? 0;
+    if (n(b.nominalOver) > 0) nomBy[nominalRepKind(b)] += n(b.nominalOver);
+    if (b.src === 'idrac') {
+      idracServers += 1;
+      const fb = b.osFallback && typeof b.osFallback === 'object' ? b.osFallback : null;
+      if (fb && n(fb.ports) > 0) { fbServers += 1; fbNominalOver += n(fb.nominalOver) ?? 0; }
+    }
     if (n(b.clampMaxPct) != null) clampMax = n(b.clampMaxPct);
   }
   if (!sum.ports) return '';
@@ -238,9 +303,23 @@ export function hbaBasisFootnote(rows = []) {
   if (sum.noSpeed) parts.push(`속도를 읽지 못해 사용률을 내지 않은 포트 ${sum.noSpeed}개`);
   if (sum.clamped) parts.push(`데이터율을 조금 넘어(${clampMax ?? 110}% 까지) **100% 로 표시한** 포트 ${sum.clamped}개(카운터가 프레임 헤더까지 세는 측정 정의 차이)`);
   if (sum.blanked) parts.push(`크게 넘어 사용률을 **비운** 포트 ${sum.blanked}개(그 서버의 HBA 사용률도 비웠습니다 — 임계 알림은 초과로 봅니다)`);
-  // v2.744(회귀 검토 GB-R1): 명목 기준 100% 초과는 데이터율 초과와 규칙이 다르다(대표값은 나머지 포트 · 알림 초과 아님 — 서버 hbaBasis.nominalOver).
-  if (sum.nominalOver) parts.push(`**명목 속도**를 넘어 사용률을 비운 포트 ${sum.nominalOver}개(보고된 링크 속도를 확인하세요 — 서버 HBA 사용률은 나머지 포트 기준이고 알림은 초과로 보지 않습니다)`);
+  // v2.744(회귀 검토 GB-R1): 명목 기준 100% 초과는 데이터율 초과와 규칙이 다르다(그 포트 값은 대표값·알림에 쓰지 않는다 — 서버 hbaBasis.nominalOver).
+  // v2.744(최종 검토 RV-1): 대표값이 어떻게 정해졌는지는 서버마다 기록된 최종 모양(rep)으로 말한다 — 고정 문장은 over·none 에서 거짓이었다.
+  if (sum.nominalOver) {
+    const kinds = ['value', 'over', 'none', 'unknown'].filter((k) => nomBy[k] > 0);
+    const tail = kinds.length === 1 ? NOMINAL_REP_TEXT[kinds[0]]
+      : kinds.map((k) => `포트 ${nomBy[k]}개: ${NOMINAL_REP_TEXT[k]}`).join('; ');
+    parts.push(`**명목 속도**를 넘어 사용률을 비운 포트 ${sum.nominalOver}개(보고된 링크 속도를 확인하세요 — ${tail})`);
+  }
   if (sum.unread) parts.push(`통계 카운터를 읽지 못한 포트 ${sum.unread}개('-1' 표지 — 처리량을 비웠습니다)`);
+  // v2.744(최종 검토 RV-1): 위 개수가 어느 경로의 포트인지 — iDRAC 포트로 센 서버를 밝히고, OS 포트에 사용률이 없어 iDRAC 측정으로 판정한
+  //   서버의 OS 쪽 명목 초과(속도 보고 확인)는 버리지 않고 말한다(그 포트는 위 개수에 없다).
+  if (idracServers) {
+    const fbText = fbServers
+      ? ` — 그중 ${fbServers}대는 OS 측정 HBA 에 사용률이 없어 iDRAC 측정으로 판정했습니다${fbNominalOver ? `(OS 쪽 명목 속도를 넘어 사용률을 비운 포트 ${fbNominalOver}개: 보고된 링크 속도를 확인하세요)` : ''}`
+      : '';
+    parts.push(`iDRAC 측정 포트로 센 서버 ${idracServers}대${fbText}`);
+  }
   return `${parts.join(' · ')}.`;
 }
 

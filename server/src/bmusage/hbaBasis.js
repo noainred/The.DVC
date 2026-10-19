@@ -46,13 +46,29 @@ export function summarizeHbaBasis(rows = []) {
 export function recordHbaBasis(key, built, { at = null, ok = false } = {}) {
   if (!key) return;
   const d = built?.detail || {};
+  const row = built?.row || {};
   const os = summarizeHbaBasis(d.fc);
   const idrac = summarizeHbaBasis(d.idracFc);
   if (!os.ports && !idrac.ports) { if (ok) _basis.delete(key); return; }
-  // 서버 대표값(hba_pct)을 낸 쪽의 포트를 센다 — OS 가 있으면 OS, 없으면 iDRAC(usage.js 의 '빈 칸만 채운다' 규칙과 같은 순서).
-  const src = os.ports ? 'os' : 'idrac';
-  const s = os.ports ? os : idrac;
-  _basis.set(key, { ...s, src, at: at ?? null, clampMaxPct: FC_OVER_CLAMP_PCT, ...(built?.row?.hba_over ? { overBlank: true } : {}) });
+  /*
+   * 서버 대표값을 **실제로 정한** 경로의 포트를 센다(v2.744 최종 검토 RV-1). 예전에는 OS 포트가 있으면 무조건 OS 를 셌는데, OS 포트가
+   *   전부 사용률 없음(명목 초과·속도 미상)이면 같은 주기에 iDRAC FC 행이 값을 넣거나 hba_over 를 세운다(usage.js '빈 칸만 채운다') —
+   *   그때 OS 포트를 세면 각주가 화면 값과 다른 분모를 말하고, '나머지 포트 기준 · 알림은 초과로 보지 않는다' 는 거짓이 된다.
+   *   출처는 usage.js 의 `detail.hbaRepSrc`(값 또는 hba_over 를 세운 경로) — 없는 옛 모양이면 srcOf.hba, 그것도 없으면 예전 순서(OS → iDRAC).
+   *   ⚠ 대표값을 정한 경로에 분모 근거가 없으면(Windows WMI 값 — pctBasis 없음) 다른 경로의 포트를 근거라 말하지 않는다 — 기록하지 않는다.
+   */
+  const repSrc = Object.hasOwn(d, 'hbaRepSrc') ? d.hbaRepSrc : (built?.srcOf?.hba ?? null);
+  let src;
+  if (repSrc === 'idrac') src = idrac.ports ? 'idrac' : null;
+  else if (repSrc === 'os') src = os.ports ? 'os' : null;
+  else src = os.ports ? 'os' : 'idrac';
+  if (!src) { if (ok) _basis.delete(key); return; }
+  const s = src === 'os' ? os : idrac;
+  // 최종 대표값의 모양 — 각주가 명목 초과 포트의 '대표값은 어떻게 정해졌나' 를 서버마다 이것으로 말한다(값 · 크게 초과로 비움 · 판정 보류).
+  const rep = row.hba_pct != null ? 'value' : row.hba_over ? 'over' : 'none';
+  // OS 포트가 있었는데 iDRAC 이 정했으면 OS 쪽 사실(명목 초과 — 속도 보고 확인)을 버리지 않고 따로 남긴다(개수만).
+  const osFallback = src === 'idrac' && os.ports ? { osFallback: { ports: os.ports, nominalOver: os.nominalOver, noSpeed: os.noSpeed, unread: os.unread } } : {};
+  _basis.set(key, { ...s, src, rep, at: at ?? null, clampMaxPct: FC_OVER_CLAMP_PCT, ...(row.hba_over ? { overBlank: true } : {}), ...osFallback });
 }
 
 /** 응답용 사본(없으면 null). */
