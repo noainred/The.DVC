@@ -5311,6 +5311,28 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       Windows README 에 설치·설정 폴더 ACL 단계(LEFT-05 — 스크립트는 그대로). 다음 후보(코드로만 추론): systemd `EnvironmentFile=` 이 portal.env 링크를 root 로 따라 읽는다.
     · 그 밖: iDRAC 위임 결과 재전송 창은 나이 기준 30분(TIMING-01) · 아이실론 '지금 수집' 합침의 central 표지가 재시작 뒤에도 남는다(TIMING-02) · GPU 게스트 배포 대상 합침 표지 `foldReport`(LEFT-08①) ·
       게스트 디스크 0대 '—'(LEFT-03) · 라이선스 표 폭(LEFT-04) · 통신 점검 로그 요청 키(WEB-03) · VM 추이 선택 변경 시 비움(WEB-01) · 데모 계정 큰 본문 풀(FB-4) · fleet 직전 목록 표시(FC-②) · V4 Compare RAM 여유 미상 정렬(FA-EXTRA).
+    · ⚠⚠ **수정분 적대적 회귀 검토(리뷰 기준 `3b7816a`·후속 `96f55a2`) — 이번에도 수정이 만든 결함이 있었다**(회귀 `server/test/audit2744{ra..rh,rx,ry,rz,rlead}` + 웹 `audit2744rx`·`tools/audit2744{ra,rb,rf,rh,ry}` — 그룹별 변이 검증.
+      ⚠ 반증 단계는 사용 한도로 62개 중 8개만 끝나 **수정 그룹이 고치기 전에 현재 판본에서 먼저 재현**하는 것으로 대신했다 — 상세 `docs/AUDIT-2026-10-19.md` '회귀 검토' 절):
+      · ⚠⚠ **보존 정리에 상관 서브쿼리를 쓰지 말 것**(RA — vmtrack DB-04 가 '남길 행' 을 행마다 다시 찾아 묶음 크기의 제곱이었다): 남길 행 표를 정리마다 한 번(`keepPages`). 범위 계정 VM 추이는 `snaps.skip_detail`(빠진 vCenter id·사유)로
+        **범위 안만** 센다(`skipCategoryOf` 한 벌 · 옛 행 NULL = 예전 판정). 조회 실패에도 선택 도구 + '이 조건으로 다시 조회'(`VmTrackLoadFailed`). ⚠ 정리의 큰 최장 정지(0.7~7초)는 WAL 체크포인트 fsync 다(범위 밖 · 운영 DB 미측정).
+      · **FC HBA**(RB): 명목 기준(표준 데이터율 표에 없는 속도) 포트의 100% 초과는 그 포트만 비고 대표값·알림은 나머지 포트(`nominalOver`) · 1 Gbit 미만 속도는 물리 상한 근거가 아니다 ·
+        2^53 초과 카운터는 값이다(2^64 이상만 표지 — v2.744 DEV-01 이 과하게 잘랐다) · iDRAC 초과 노트는 대표값에 쓰였을 때만 · Sensors 404 판정은 상태 코드만.
+      · **503 무재시도는 `resilientFetch({noRetryStatus:[503]})` 한 번**(RC — 래퍼가 두 번 부르면 기록이 둘이다) · 관리 화면 export 호출도 `fetchNo503Retry` · 거절 우세 경고가 실패 엣지·앞선 재시도 시간을 함께 말한다.
+        ⚠ 동작 변화: 관리 화면 '연결 테스트'·'토큰 강제 동기화' 는 엣지 앞 HAProxy 의 일시 503 도 다시 묻지 않는다.
+      · ⚠⚠ **로드 오류 원문(파일 조각 — 비밀번호가 들어 있을 수 있다)은 어디에도 싣지 않는다 — 요약은 `util/atomicWrite.js classifyLoadReason`·`summarizeLoadReason`·`safeLoadText` 한 벌**(RD·RY·리드):
+        V8 의 JSON.parse 오류 문구는 그 파일의 앞뒤 조각을 담는다. 등록부 요약 `summarizeRegistryError` 도 이 분류를 쓰고(비-admin 은 분류 문구만), 엣지 export 503(`registryError{code,line,column,position,sysCode}` 추가) ·
+        파트 장애 스캔 · 중앙 registryUnreadable·설정 손상 503(central `loadWhy`) · `pullRecoveryNote` · `preserveCorrupt` 콘솔 줄(130곳 공용) · `settingsLoadError.corrupt` 가 요약만 싣는다. 중앙 puller 는 2.743 엣지가 보낸 원문 detail 도 요약한다.
+        `safeLoadText` 는 따옴표·백슬래시·제어 문자가 든 원문만 요약하고 사람 문장은 그대로 둔다(조치 단서 '손상 보존본' 유지 — 옛 테스트가 그 문구를 고정한다). **새 로드 오류 경로도 원문을 싣지 말고 이 함수로.**
+        fleet 상태 보고는 중앙 응답을 읽는다(`fleetHoldOutcome`) · 사람이 누른 위임 등록은 `manualRemoteWriteRefusal`.
+      · **응답에 객체를 통째로 싣지 않는다 — IP 대장 호스트 행 `slimHostRow`, 시트 VM 칸 `slimOwnerRow`**(RF·RY — 키 변경: owner → hasOwner·ownerId·ownerName, 상세는 클릭 때 `/vms/lookup`) · 호스트 행 원격 접속은 `ipRemoteItem` ·
+        낭비 내보내기의 근거 리포트도 `createVcAuthGate`(건너뛴 vCenter 의 리포트는 만들지 않는다 — 로그인 0) · 위협 화면 rogue 판정도 `hostLedgerIp`.
+      · **NTP stratum 0 은 refid 로 가른다**(RG): RATE·DENY·RSTR = 거부(`kod.refused`) · INIT·STEP·(빈 refid + LI 3) = 미동기 · 그 밖 = '시각을 주지 않음'. 파서 꼬리 정규식 O(n²) 9곳 선형화(PDU `codeLine`·`readingLine` · uemcli `recStart` ·
+        FOS `tailMatch` 류 — 옛 결과와 대조). ⚠ 같은 꼴 10여 곳이 남았다(linuxProc·zoning·cliSsh·isilonSsh·capacity/collectors·guestNetScan·vmclone/vsphere·bulkText) · 줄 끝 규칙 LINE_TERM 이 4파일에 따로 있다.
+      · **install.sh `vp_cfg_snap`**(RZ): 패키지 node 로 O_NOFOLLOW|O_NONBLOCK 단일 열기 → fstat(일반 파일·nlink 1·`VP_CFG_MAX_BYTES` 16MiB) → fd 에서 복사, node 가 없으면 lstat + 시한 있는 비재귀 `cp -P` ·
+        `vp_cfg_set_line` 은 awk 한 번(LC_ALL=C · ENVIRON · 3MB 3초 → 0.1초). ⚠ `$PREFIX` 의 node 는 서비스 계정 소유라 root 로 실행하지 않는다(`$SCRIPT_DIR/runtime/node`). 남은 위험: `$BAK/server/config` 중간 디렉터리 링크.
+      · 그 밖: vCenter 로그 상태 집계는 정리로 0건이 된 vCenter 를 싣지 않는다 · CSV 마지막 줄의 비활성/읽지 못함 구분(`notReadCsvLines`) · /24 제안의 관리 IP 거부는 `totals.hostMgmtRejected` 로 따로 ·
+        구성 점검 배너는 `notReadJudgeNote`(비활성만이면 배너 없음) · 라이선스 표 칸 `LIC_WRAP_MINW` · GPU 게스트 합침 표지는 저장 성공 뒤(`resolveFoldOf`) · 테스트 임시 폴더는 `os.tmpdir()`.
+      · 남긴 것: FX-R3 일부(VCenterDetail · SessionSecurity · BmUsage 화면 실행 테스트) · register-scanned 로컬 분기의 손상 등록부 저장 · 설정 손상 원문을 싣는 admin 화면 3곳(svcmon /assign · 아이실론 · 전송 속도) — 판단 필요.
     · ⚠ 작업 방식: 10/16 첫 수정 실행 10그룹이 **조직 월 사용 한도**로 전부 중단됐다 — 그 사실을 바로 보고하지 않은 것은 리드의 실수다. 한도 해제(10/19 13:00 KST) 뒤 반쯤 고친 파일 8개를 기준판으로 되돌리고 처음부터 다시 돌렸다(v2.607 규칙).
       커밋 33be198 은 그때 아직 하지 않은 수정을 '✅ v2.744' 로 적었다 — 이번 수정이 끝난 뒤 문구를 실제 범위로 맞췄다(EDGE-03 은 '자동 등록만').
   - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
