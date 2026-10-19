@@ -111,6 +111,18 @@ export function summarizeLoadReason(reason) {
 }
 
 /**
+ * v2.744(회귀 검토 리드): **이미 사람 문장으로 만든 사유는 그대로 두고**, 값이 끼었을 수 있는 원문만 요약한다. 판정 기준은 `LOAD_UNSAFE_RE`
+ *   (따옴표·백슬래시·제어 문자) — V8 의 JSON.parse 오류는 파일 조각을 언제나 따옴표로 감싸 보여 준다('…"assword": SuperSecre"…'). 따옴표 없는
+ *   V8 문구('Bad control character … at position 32 (line 1 column 33)')와 이 저장소가 만든 한글 사유는 그대로 남는다(조치 단서를 지우지 않게).
+ * @returns {string}  빈 사유면 ''
+ */
+export function safeLoadText(reason, max = 200) {
+  const raw = loadReasonRaw(reason).slice(0, max);
+  if (!raw) return '';
+  return LOAD_UNSAFE_RE.test(raw) ? summarizeLoadReason(reason) : raw;
+}
+
+/**
  * 손상된 자격증명/설정 파일을 `<file>.corrupt.<ts>`로 보존한다(로드 시 JSON 파싱 실패 대응).
  * 손상본을 조용히 빈 값으로 취급하면, 다음 저장이 '온전했던 원본'을 빈/축소 목록으로 덮어써
  * 자격증명이 영구 유실된다(과거 감사 지적 H11/H12). 파싱 실패한 파일을 먼저 옆으로 치워

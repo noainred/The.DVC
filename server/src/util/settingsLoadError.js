@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { corruptOnlyReason } from './registryCore.js';
+import { safeLoadText } from './atomicWrite.js'; // v2.744(회귀 검토 리드): 손상 사유의 원문 조각 요약
 
 /**
  * v2.632(감사 AX1-2632-02): 만든 로드 오류 상태를 모듈 안에 등록해 둔다 — 예전에는 *LoadError() 의 소비처가 설정 pull 라우트뿐이라
@@ -43,7 +44,9 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
     ok() { err = null; },
     corrupt(e) {
       const msg = e && typeof e === 'object' && 'message' in e ? e.message : e;
-      set(`설정 파일을 읽지 못했습니다(${String(msg ?? '사유 미상').slice(0, 120)}) — 손상 보존본으로 옮겼습니다`);
+      // v2.744(회귀 검토 리드): 괄호 안은 원문(JSON.parse 오류 = 그 파일의 조각 — 배정 설정의 iDRAC 비밀번호, GPU 게스트 배포의 게스트 비밀번호)이
+      //   아니라 요약이다 — 이 사유는 엣지 설정 pull 503·콘솔·서비스 점검 화면에 실린다. 원문은 보존본 파일에 그대로 있다.
+      set(`설정 파일을 읽지 못했습니다(${safeLoadText(msg, 120) || '사유 미상'}) — 손상 보존본으로 옮겼습니다`);
     },
     missing() {
       let why = null;

@@ -19,6 +19,7 @@ import { fetchNo503Retry } from '../util/postNo503Retry.js'; // v2.744(감사 �
 import { identityIssue } from './registry.js';
 import { withOutboundTag } from '../util/outboundStats.js';
 import { poolRun } from '../util/pool.js';
+import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(회귀 검토 리드): 엣지 export 503 사유는 요약만
 
 /**
  * v2.601(감사 WEB2601-02): 데이터 흐름 지도의 '중앙 → 엣지' 기록은 주소(origin+경로 접두)로 엣지를 찾는다 —
@@ -65,7 +66,12 @@ export async function exportFailError(res) {
   try { body = await readJsonCapped(res, 16 * 1024, '엣지 export 오류 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* 이미 소비 */ } }
   const code = body && typeof body.reason === 'string' && Object.hasOwn(EDGE_REASON_TEXT, body.reason) ? body.reason : null;
   if (!code) return new Error(base);
-  const detail = typeof body.detail === 'string' ? body.detail.slice(0, 200) : '';
+  // v2.744(회귀 검토 리드 — RY 보고): detail 을 그대로 싣지 않는다 — 2.743 엣지는 등록부 JSON.parse 오류 **원문**(손상된 idrac.json 의 조각 — 비밀번호가
+  //   들어 있을 수 있다)을 보냈고 이 문구는 수집 서버 상태·콘솔·화면에 실린다. 2.744 엣지는 registryError(코드·위치)를 함께 보내므로 그것으로 다시 만들고,
+  //   없으면 원문을 같은 분류(summarizeRegistryError)로 요약한다.
+  const rawDetail = typeof body.detail === 'string' ? body.detail.slice(0, 400) : '';
+  const re = body.registryError && typeof body.registryError === 'object' && !Array.isArray(body.registryError) ? body.registryError : null;
+  const detail = (rawDetail || re) ? (summarizeRegistryError(re ? { ...re, reason: rawDetail } : { reason: rawDetail })?.text || '') : '';
   const err = new Error(`${EDGE_REASON_TEXT[code]}(${code}, HTTP ${res.status})${detail ? ` — ${detail}` : ''} · 중앙은 직전에 받은 서버·전력을 유지합니다`);
   err.edgeReason = code;          // 상태(edgeReason)·통신 지도 사유가 읽는다 — 다시 당겨도 같은 결과라 호출부가 저하 유예를 주지 않는다
   // v2.744(감사 EDGE-04): 거절 본문이 실어 온 엣지 정체(version·agent·hostname — 정상 export 와 같은 값, 비밀 없음). 정제는 성공 경로와
