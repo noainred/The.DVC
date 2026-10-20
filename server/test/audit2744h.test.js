@@ -301,20 +301,30 @@ test('INJPKG-02 ② 실제 출력 픽스처의 parseSpinfo 결과가 감사 기�
   assert.ok(r.power.supplies.length >= 1, '전원 블록을 읽어야 한다');
 });
 
+// 기계 속도와 무관하게 — 옛 정규식이 40ms 를 넘을 때까지 입력을 두 배로 늘린 뒤(최대 4번) 같은 크기로 새 판정을 잰다.
+//   v2.746 CI 에서 고정 크기(공백 9,000)의 옛 정규식이 빠른 러너에서 34.5ms 로 나와 하한 40ms 에 걸렸다(새 판정 0.09ms — 개선은 그대로였다).
+//   크기를 늘려도 새 판정이 선형인지는 그대로 본다: 같은 크기에서 옛 판정보다 5배 이상 빨라야 한다.
+function growUntilSlow(make, oldRun, n0, maxDoublings = 4) {
+  let n = n0;
+  for (let k = 0; ; k++) {
+    const input = make(n);
+    const t = timeIt(() => oldRun(input));
+    if (t > 40 || k >= maxDoublings) return { input, t, n };
+    n *= 2;
+  }
+}
+
 test('INJPKG-02 ③ 긴 밑줄 줄·긴 공백 + 외로운 \\r 줄에서 선형 — 옛 정규식 대비 비율', () => {
   // 제목 줄: 밑줄 n + 비매칭 꼬리. 옛 정규식은 이 크기에서 수백 ms(측정 800자 약 0.2초) — 새 판정은 parseSpinfo 전체로 잰다.
-  const head = '_'.repeat(800) + ' x';
-  const tOldHead = timeIt(() => OLD_HEAD.exec(head));
+  const { input: head, t: tOldHead } = growUntilSlow((n) => '_'.repeat(n) + ' x', (s) => OLD_HEAD.exec(s), 800);
   const tNewHead = timeIt(() => sd.parseSpinfo(`Summary of power supply info:\n${head}\n__ SPA PS0 Status __\nInput Power : 330 Watts`), 5) / 5;
   assert.ok(tOldHead > 40 && tOldHead > tNewHead * 5, `제목: 옛 ${tOldHead.toFixed(1)}ms · 새 ${tNewHead.toFixed(2)}ms`);
   // 키:값 줄 — 값 앞 긴 공백 뒤 외로운 \r (옛 정규식은 공백 × 줄 길이)
-  const kvLine = 'Input Power:' + ' '.repeat(9000) + 'a\rb';
-  const tOldKv = timeIt(() => OLD_KV.exec(kvLine));
+  const { input: kvLine, t: tOldKv } = growUntilSlow((n) => 'Input Power:' + ' '.repeat(n) + 'a\rb', (s) => OLD_KV.exec(s), 9000);
   const tNewKv = timeIt(() => sd.parseSpinfo(`Summary of power supply info:\n__ SPA PS0 Status __\n${kvLine}`), 5) / 5;
   assert.ok(tOldKv > 40 && tOldKv > tNewKv * 5, `키:값: 옛 ${tOldKv.toFixed(1)}ms · 새 ${tNewKv.toFixed(2)}ms`);
   // FRU 상태 줄 — 같은 꼴
-  const stLine = '  ps0:' + ' '.repeat(9000) + 'OK\r330';
-  const tOldSt = timeIt(() => OLD_STATUS.exec(stLine));
+  const { input: stLine, t: tOldSt } = growUntilSlow((n) => '  ps0:' + ' '.repeat(n) + 'OK\r330', (s) => OLD_STATUS.exec(s), 9000);
   const tNewSt = timeIt(() => sd.parseSpinfo(`Displaying all FRU statuses:\n${stLine}\n`), 5) / 5;
   assert.ok(tOldSt > 40 && tOldSt > tNewSt * 5, `상태: 옛 ${tOldSt.toFixed(1)}ms · 새 ${tNewSt.toFixed(2)}ms`);
   // 결과도 옛 판정과 같다(외로운 \r 줄은 맞지 않는다 — 버린다)
