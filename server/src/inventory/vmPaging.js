@@ -59,6 +59,9 @@ export const VM_FILTER_KEYS = [
   'vcenterId', 'region', 'q', 'notes', 'nameOnly', 'powerState', 'host',
   'vcpuMin', 'vcpuMax', 'ramMinGB', 'ramMaxGB', 'diskMinGB', 'diskMaxGB',
   'cpuUsageMin', 'cpuUsageMax', 'memUsageMin', 'memUsageMax', 'os', 'toolsStatus', 'gpu', 'gpuType',
+  // v2.746(VM 상세 C안) 패널 선택 — 선택을 바꾸면 옛 커서는 400 cursor-query-mismatch. 없으면 지문이 예전과 같다(옛 커서 유효).
+  //   `dist` 는 넣지 않는다(목록을 바꾸지 않는다).
+  'cpuBin', 'memBin', 'power', 'osName',
 ];
 export function vmFilterString(q) {
   const parts = [];

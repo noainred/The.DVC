@@ -11,17 +11,25 @@
  * 문구에 백틱을 쓰지 않는다(BoldText 는 별표 두 개 강조만 해석한다). 숫자는 en-US 천 단위 구분.
  */
 
+import { facetKey } from './vmDistText.js';
+
 /** 한 페이지에 받는 VM 수 — 서버 상한(5,000)보다 작게 둔다(전량을 한 번에 그리지 않는다). */
 export const VM_PAGE_SIZE = 1000;
 
 const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
 const nonNeg = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
 
-/** 페이지 순회를 처음으로 되돌릴 조건(필터·GPU 선택)의 키 — 바뀌면 커서 스택을 버린다. */
-export function vmPageQueryKey(filters, gpuOnly, gpuType) {
+/**
+ * 페이지 순회를 처음으로 되돌릴 조건(필터·GPU 선택·분포 패널 선택)의 키 — 바뀌면 커서 스택을 버린다.
+ * v2.746: facets(분포 패널 선택 — vmDistText.facetKey) 를 넷째 인자로 받는다. 비어 있으면 예전 키와 글자 그대로 같다
+ * (기존 호출 호환). 서버는 cpuBin·memBin·power·osName 을 커서 조건 지문에 넣으므로 선택이 바뀐 뒤 옛 커서는 400 이다.
+ */
+export function vmPageQueryKey(filters, gpuOnly, gpuType, facets) {
   const f = filters && typeof filters === 'object' ? filters : {};
   const keys = Object.keys(f).sort();
-  return JSON.stringify([keys.map((k) => [k, f[k]]), !!gpuOnly, gpuType || '']);
+  const base = [keys.map((k) => [k, f[k]]), !!gpuOnly, gpuType || ''];
+  const fk = facetKey(facets);
+  return JSON.stringify(fk ? [...base, fk] : base);
 }
 
 const STALE = new Set(['cursor-stale']);
