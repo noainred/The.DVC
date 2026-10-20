@@ -1,6 +1,6 @@
 // 검토 I-02(그룹 B) — VM 목록 서버 페이지 문구·판정(vmPageText.js).
 import { describe, it, expect } from 'vitest';
-import { VM_PAGE_SIZE, vmPageQueryKey, cursorErrorKind, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navAfterError } from './vmPageText.js';
+import { VM_PAGE_SIZE, vmPageQueryKey, cursorErrorKind, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navSync, navAfterError } from './vmPageText.js';
 
 const items = (n) => Array.from({ length: n }, (_, i) => ({ id: `vc1:vm-${i}` }));
 
@@ -84,5 +84,16 @@ describe('vmPageText', () => {
     expect(navAfterError(nav, K, 'cursor-query-mismatch')).toMatchObject({ notice: 'invalid' });
     expect(navAfterError(nav, K, '/vms -> 500')).toBe(null);                // 일반 오류는 페이지를 유지(배너로 말한다)
     expect(navView(navNext(r, K, 'c9'), K).notice).toBe(null);              // 이동하면 안내는 사라진다
+  });
+
+  it('조건을 바꿨다가 되돌리면 1페이지 — navSync 가 쪽 번호 기록을 실제로 비운다(v2.746)', () => {
+    const K = 'k1';
+    let nav = navNext(navNext(navFirst(K), K, 'c1'), K, 'c2');
+    expect(navSync(nav, K)).toBe(nav);                                      // 조건이 같으면 같은 객체(다시 그리지 않음)
+    nav = navSync(nav, 'k2');                                               // 패널 막대를 고름
+    expect(nav).toEqual({ key: 'k2', stack: [], notice: null });
+    nav = navSync(nav, K);                                                  // '모두 해제' — 예전 조건으로 돌아옴
+    expect(navView(nav, K).stack).toEqual([]);                              // 예전 c1·c2 가 살아나지 않는다
+    expect(navSync(null, K)).toEqual(navFirst(K));
   });
 });

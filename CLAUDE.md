@@ -3711,6 +3711,29 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       직전 시도 실패(`failed-before`) · 값 신선도(`old` — 보고 늦음과 같은 경계 `valueStaleMsOf`)를 본다. 꺼짐·조사 중·요청 대기 대상의 몇 달 전 값이 표지 없이 순위에 실리던 것.
     · 설정 탭은 대상 목록을 종합 메일 탭에도 넘긴다(TOPNM-01 — 넘기지 않아 '메일에 싣는 사용자 행' 수와 120줄 경고가 늘 꺼져 있었다). 감사 로그에 corpTopM, 조회 응답에 `ranges`.
     · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 렌더·실제 OneFS 출력·`PORTAL_TZ_OFFSET_MIN≠540` 현장은 확인하지 못했다(가짜 SMTP·주입한 now·합성 입력).
+  - ⚠⚠ **v2.746 — 가상머신 상세 C안: 사용률 분포 4패널 + 선택 칩 + 400px 목록. 칸·선택 판정은 서버 `inventory/vmDist.js` 하나다**
+    (사용자 요청 "가상머신 상세가 텍스트만 나오는데 멋있게" → 시안 3안 중 C. `server/src/inventory/vmDist.js` + `routes/api/inventory.js /vms` +
+    웹 `views/vmDistText.js`(순수)·`VmDistPanels.jsx`·`vmDist.css`·`Vms.jsx`. 회귀 `server/test/vmDist2746.test.js` + 웹 `vmDistText.test.js`·`vmDistRender.test.jsx` —
+    변이 서버 15/15 · 웹 22/22 · 검토 수정분 20/20):
+    · 칸 = 5% × 20(`usageBinOf` — 못 읽음·음수 null, 100 이상은 칸 19, 100 **초과**는 `over100` 으로 따로 센다). 75 는 칸 15, 90 은 칸 18 — 화면의 75%↑·90%↑ 와 같다.
+      **분포·칸 선택은 POWERED_ON VM 만**(꺼진 VM 의 사용률은 낡은 값) — 나머지는 `off` 로 센다. 웹은 칸을 다시 판정하지 않는다.
+    · 각 패널의 개수는 **다른 패널의 선택만** 반영한다(자기 선택으로 자기 칸이 0 이 되면 다른 칸을 고를 수 없다 — `deviceFacets.js` 와 같은 규칙).
+      **KPI 8장은 선택과 무관**하다 — 응답 `totals`(KPI 집합)와 `total`(표·페이지 집합)은 선택이 있을 때만 다르다. 선택이 없으면 응답은 예전 본문에 `facets:{}` 만 더한 것과 바이트 단위로 같다(테스트 ④ — BASE 구현 오라클 대조).
+    · 쿼리 `cpuBin`·`memBin`(`a-b` 칸 번호)·`power`·`osName` 은 `vmPaging.js VM_FILTER_KEYS` 에도 넣었다 — 선택을 바꾸면 옛 커서는 400 `cursor-query-mismatch`.
+      `dist=1` 일 때만 분포를 계산한다. 형식 오류는 400 `bad-facet`(field)이고 **memoJson·paged 판정보다 먼저**다.
+    · ⚠ 운영 앱은 `util/queryNormalize.js` 가 배열을 마지막 값으로, 객체(`키[x]=`)를 버림으로 바꾼다 — `req.query` 만 보면 '같은 키 두 번 → 400' 이 운영에서 성립하지 않는다.
+      라우트가 원문 쿼리를 `parseVmFacets(q, { rawQuery })` 로 넘긴다(`facetShapeIssues`). 테스트 하니스도 그 정규화기를 라우터 앞에 단다 — 빼면 운영 경로를 보지 않는 테스트가 된다.
+    · Guest OS 키는 앞뒤 공백을 지운 원문(대소문자 그대로) · 비면 `~` · 200자에서 자르되 서로게이트 쌍 가운데서 자르지 않고 끝 공백을 지우며 `toWellFormed` —
+      분포에 나온 이름을 그대로 다시 보내면 같은 키가 된다(검토 RV-S1·C-02: 200번째가 공백이거나 쌍 가운데서 잘리면 그 줄을 눌러도 0대였다).
+    · 웹: '보이는 응답이 지금 선택으로 받은 것인가' 는 `selectionView().current` 하나 — 페이저·칩 개수는 current 일 때만 쓴다(선택을 바꾼 직후 한 렌더는 옛 응답이라
+      옛 커서로 '다음 페이지' 가 켜졌다). 선택만 바뀐 동안 직전 응답을 흐리게 둔다(필터·GPU 가 바뀌면 예전처럼 Loading). 막대 칸의 aria-pressed 는 **그 칸 하나만 고른 경우**뿐
+      (`binButton` — 90%↑ 구간 안의 칸은 '구간에 포함'). 패널의 POWERED_OFF 라벨은 '꺼짐'(KPI '정지' = 전체 − 구동은 그대로). 좁은 화면은 표 대신 2줄 목록이고
+      `.vmd-mlist` 는 `max-height:64vh`(없으면 문서가 4만 px 로 늘었다). CSS 는 전부 `.vmd` 아래 · uppercase 금지 · 색은 var(--…).
+    · ⚠ 조건(queryKey)이 바뀌면 쪽 번호 기록을 **실제로 비운다**(`vmPageText.navSync` + Vms.jsx 효과). `navView` 는 무시만 해서, 2페이지에서 막대를 골랐다가 '모두 해제' 하면
+      예전 커서가 살아나 2페이지로 돌아갔다(통합 Chromium 확인에서 발견 — 요청에 cursor 가 실려 나갔다).
+    · ⚠ (같은 릴리스 CI) ReDoS 비율 테스트의 '옛 정규식 > 40ms' 하한은 **고정 입력 크기로 두지 말 것** — 빠른 러너에서 옛 판정이 34.5ms 로 나와 실패했다
+      (`audit2744h` INJPKG-02 ③). 옛 판정이 하한을 넘을 때까지 입력을 두 배로 늘린 뒤 같은 크기로 새 판정을 잰다(`growUntilSlow` — 변이 검증: 새 판정을 O(n²) 로 되돌리면 실패).
+    · ⚠ 정직 기록: 실운영 vCenter 의 사용률 분포(값이 한쪽에 몰린 경우의 막대 높이)는 보지 못했다 — 목 데이터 2,242대로 확인했다.
   - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개(v2.740 에 서머리를 지워 지금은 3개 — 옛 summary 주소는 법인 현황으로 열린다) · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
     (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
     "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".

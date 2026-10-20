@@ -11,17 +11,25 @@
  * 문구에 백틱을 쓰지 않는다(BoldText 는 별표 두 개 강조만 해석한다). 숫자는 en-US 천 단위 구분.
  */
 
+import { facetKey } from './vmDistText.js';
+
 /** 한 페이지에 받는 VM 수 — 서버 상한(5,000)보다 작게 둔다(전량을 한 번에 그리지 않는다). */
 export const VM_PAGE_SIZE = 1000;
 
 const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
 const nonNeg = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
 
-/** 페이지 순회를 처음으로 되돌릴 조건(필터·GPU 선택)의 키 — 바뀌면 커서 스택을 버린다. */
-export function vmPageQueryKey(filters, gpuOnly, gpuType) {
+/**
+ * 페이지 순회를 처음으로 되돌릴 조건(필터·GPU 선택·분포 패널 선택)의 키 — 바뀌면 커서 스택을 버린다.
+ * v2.746: facets(분포 패널 선택 — vmDistText.facetKey) 를 넷째 인자로 받는다. 비어 있으면 예전 키와 글자 그대로 같다
+ * (기존 호출 호환). 서버는 cpuBin·memBin·power·osName 을 커서 조건 지문에 넣으므로 선택이 바뀐 뒤 옛 커서는 400 이다.
+ */
+export function vmPageQueryKey(filters, gpuOnly, gpuType, facets) {
   const f = filters && typeof filters === 'object' ? filters : {};
   const keys = Object.keys(f).sort();
-  return JSON.stringify([keys.map((k) => [k, f[k]]), !!gpuOnly, gpuType || '']);
+  const base = [keys.map((k) => [k, f[k]]), !!gpuOnly, gpuType || ''];
+  const fk = facetKey(facets);
+  return JSON.stringify(fk ? [...base, fk] : base);
 }
 
 const STALE = new Set(['cursor-stale']);
@@ -119,6 +127,14 @@ export function navNext(nav, queryKey, cursor) {
 /** 이전 페이지 · 처음. */
 export function navPrev(nav, queryKey) { const { stack } = navView(nav, queryKey); return { key: queryKey, stack: stack.slice(0, -1), notice: null }; }
 export function navFirst(queryKey) { return { key: queryKey, stack: [], notice: null }; }
+/**
+ * 조건(queryKey)이 바뀌었으면 쪽 번호 기록을 실제로 비운다(바뀌지 않았으면 같은 객체 — 다시 그리지 않게).
+ * navView 만으로는 '무시' 일 뿐이라, 조건을 바꿨다가 되돌리면(패널 막대를 골랐다가 '모두 해제') 예전 스택이 살아나
+ * 1페이지가 아니라 예전에 넘겨 둔 쪽으로 돌아갔다(v2.746 Chromium 확인에서 발견).
+ */
+export function navSync(nav, queryKey) {
+  return nav && nav.key === queryKey ? nav : navFirst(queryKey);
+}
 /**
  * 커서 오류(409 만료·400 거절)를 받았을 때 — 첫 페이지로 되돌린 상태(안내 포함). 되돌릴 것이 없으면 null.
  * 첫 페이지(커서 없음)에서는 커서 오류가 날 수 없으므로 null 이다(같은 오류로 무한히 되돌리지 않게).

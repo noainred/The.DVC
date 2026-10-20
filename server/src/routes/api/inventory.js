@@ -12,6 +12,7 @@ import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
 import { isPagedRequest, prepareVmPage, buildVmPage } from '../../inventory/vmPaging.js'; // v2.730(I-02)
+import { parseVmFacets, passGpu, filterVmsByFacets, vmDistribution, VM_FACET_KEYS } from '../../inventory/vmDist.js'; // v2.746(VM 상세 C안)
 
 /**
  * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
@@ -120,6 +121,24 @@ function matchVms(snap, q, user) {
     out.push(v);
   }
   return { vms: out, gpuCounts };
+}
+
+/**
+ * v2.746(VM 상세 C안): /vms 의 집합 셋을 한 번에 만든다 — 페이지 판정(캐시 앞)과 본 계산이 **같은 함수**를 쓴다(판정 한 벌).
+ *  ① `pre`   = matchVms(gpu·gpuType·패널 선택 키를 뺀 쿼리) — 분포(dist)의 바탕. GPU 도 패널 하나로 다룬다.
+ *  ② `kpiVms` = pre 를 예전 gpu·gpuType 판정으로 거른 것 — **예전 vms 와 같은 배열(순서 포함)**. KPI(totals)는 이것으로만.
+ *               `sort` 를 주면 예전처럼 정렬한 뒤 KPI·목록을 만든다(부동소수 합계까지 예전과 같게 — 합은 순서에 따라 비트가 달라진다).
+ *  ③ `items`  = kpiVms 를 cpuBin·memBin·power·osName 으로 거른 것 — total·정렬·페이지의 집합. 선택이 없으면 kpiVms 그 자체.
+ * gpuCounts 는 예전에도 GPU 필터 '이전' 집합 기준이었다 — matchVms 가 gpu 키 유무와 무관하게 같은 값을 센다.
+ */
+const FACET_STRIP_KEYS = ['gpu', 'gpuType', ...VM_FACET_KEYS];
+function matchVmsFacet(snap, q, user, sel, { sort = null } = {}) {
+  const q0 = { ...q };
+  for (const k of FACET_STRIP_KEYS) delete q0[k];
+  const pre = matchVms(snap, q0, user);
+  let kpiVms = (sel.gpu || sel.gpuTypeRaw) ? pre.vms.filter((v) => passGpu(v, sel)) : pre.vms;
+  if (sort) kpiVms = sort(kpiVms);
+  return { pre: pre.vms, gpuCounts: pre.gpuCounts, kpiVms, items: filterVmsByFacets(kpiVms, sel) };
 }
 
 export function registerInventory(api) {
@@ -350,26 +369,42 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   return { total: hosts.length, items: hosts, summary };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
+/** 요청의 원문 쿼리 문자열('?' 뒤) — 없으면 ''. 정규화기를 거치기 전 모양을 보기 위한 것이다. */
+function rawQueryOf(req) {
+  const u = typeof req.originalUrl === 'string' ? req.originalUrl : (typeof req.url === 'string' ? req.url : '');
+  const i = u.indexOf('?');
+  return i < 0 ? '' : u.slice(i + 1);
+}
+
 // v2.730(검토 I-02): `paged=1` 또는 `cursor=` 를 주면 5,000 상한 뒤를 페이지로 이어 받는다 — 계약·스냅샷 변경 규칙은
 //   `inventory/vmPaging.js` 머리말. 둘 다 없으면 예전 응답 그대로(items 순서·limit 동일)이고 새 필드(returned·hasMore·
 //   nextCursor:null·snapshotAt)만 붙는다. 형식·정렬·조건·범위·순서 기억 판정은 캐시 앞에서 한다 — 400·409 는 캐시하지 않는다.
 //   범위(scope)는 여전히 applyFilters(req.user)가 먼저 강제하고, 캐시 키는 URL(cursor·정렬·조건 포함) + scopeKey 다.
+// v2.746(VM 상세 C안): 패널 선택 키 cpuBin·memBin·power·osName(형식 오류 400 bad-facet — 캐시·페이지 판정보다 먼저) +
+//   `dist=1` 이면 분포(`inventory/vmDist.js vmDistribution`)를 싣는다. total·items·페이지는 패널 선택을 따르고 totals(KPI)는 따르지 않는다.
+//   새 키가 없으면 응답은 예전과 바이트 단위로 같고 끝에 `facets:{}` 만 붙는다(test/vmDist2746 ④가 예전 구현과 대조한다).
 api.get('/vms', invVms, (req, res) => {
+  // 원문 쿼리도 넘긴다 — 운영은 라우터 앞의 queryNormalize 가 배열을 마지막 값으로, 객체를 버림으로 바꿔 req.query 만으로는
+  //   '같은 키 여러 번·키[x]=' 를 400 으로 판정할 수 없다(v2.746 검토 SP-01). 판정은 vmDist.js facetShapeIssues 하나.
+  const fp = parseVmFacets(req.query, { rawQuery: rawQueryOf(req) });
+  if (!fp.ok) return res.status(400).json({ ok: false, error: 'bad-facet', reason: 'bad-facet', field: fp.field });
+  const sel = fp.sel;
   const paged = isPagedRequest(req.query);
   if (paged) {
     const snapNow = store.get();
     const chk = prepareVmPage({ q: req.query, snapAt: snapNow.generatedAt, scopeKeyStr: scopeKey(req.user, snapNow),
-      matched: () => matchVms(snapNow, req.query, req.user).vms });
+      matched: () => matchVmsFacet(snapNow, req.query, req.user, sel).items });
     if (!chk.ok) return res.status(chk.status).json({ ok: false, error: chk.code, reason: chk.code, ...(chk.why ? { why: chk.why } : {}) });
   }
+  const wantDist = req.query.dist === '1' || req.query.dist === 'true';
   return memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
-  const matched = matchVms(snap, q, req.user);
-  let vms = matched.vms;
-  const gpuCounts = matched.gpuCounts;
-
   // 페이지 순회는 vmPaging 이 전순서(정렬 값 → VM id)로 정렬한다 — 예전 정렬(동률은 스냅샷 순서)은 경계에서 누락·중복이 난다.
-  if (q.sortBy && !paged) vms = sortBy(vms, q.sortBy, q.order);
+  const matched = matchVmsFacet(snap, q, req.user, sel, { sort: q.sortBy && !paged ? (arr) => sortBy(arr, q.sortBy, q.order) : null });
+  const vms = matched.kpiVms;       // KPI 집합(예전 vms 그대로)
+  const list = matched.items;       // 표·페이지 집합(패널 선택 적용)
+  const gpuCounts = matched.gpuCounts;
+  const extra = { facets: fp.facets, ...(wantDist ? { dist: vmDistribution(matched.pre, sel) } : {}) };
   const limit = Math.max(1, Math.min(Number(q.limit) || 500, 5000)); // Math.max(1,…): 음수 limit 이 slice(0,-n)로 뒤에서 잘리는 것 방지
 
   // Aggregate over ALL matched VMs (not just the page) so the UI can show the
@@ -408,14 +443,14 @@ api.get('/vms', invVms, (req, res) => {
   };
   const snapshotAt = snap.generatedAt ?? null;
   if (paged) {
-    const pg = buildVmPage({ vms, q, snapAt: snap.generatedAt, scopeKeyStr: scopeKey(req.user, snap) });
+    const pg = buildVmPage({ vms: list, q, snapAt: snap.generatedAt, scopeKeyStr: scopeKey(req.user, snap) });
     // 위 판정과 같은 틱이라 여기서 실패하는 것은 경합뿐이다 — 캐시에 남기지 않도록 던진다(memoJson 500 → 클라이언트 재시도 → 409).
     if (!pg.ok) throw new Error(pg.code);
-    return { total: vms.length, items: pg.items, totals, returned: pg.items.length, hasMore: pg.hasMore, nextCursor: pg.nextCursor, snapshotAt, page: pg.page };
+    return { total: list.length, items: pg.items, totals, returned: pg.items.length, hasMore: pg.hasMore, nextCursor: pg.nextCursor, snapshotAt, page: pg.page, ...extra };
   }
-  const items = vms.slice(0, limit);
+  const items = list.slice(0, limit);
   // 예전 응답에는 이어 받는 방법이 없다(nextCursor:null) — 나머지는 paged=1 로 다시 요청한다.
-  return { total: vms.length, items, totals, returned: items.length, hasMore: vms.length > items.length, nextCursor: null, snapshotAt };
+  return { total: list.length, items, totals, returned: items.length, hasMore: list.length > items.length, nextCursor: null, snapshotAt, ...extra };
 }, { extraKey: scopeKey(req.user, store.get()) });
 });
 
