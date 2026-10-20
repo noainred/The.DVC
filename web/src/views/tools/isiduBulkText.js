@@ -9,7 +9,7 @@
  *  · 문구에 백틱을 쓰지 않는다. 값 인용은 ‘ ’.
  */
 import { numOrNull } from '../../numOrNull.js';
-import { parseMailInput, everyText, nodeText } from './isiduText.js';
+import { parseMailInput, everyText, nodeText, mailDaysOf, mailDaysText, isMailTime, MAIL_WHEN_CHOICES } from './isiduText.js';
 
 /** 실행 노드 '장비 담당 노드 따름' · '메인' 표지(서버 bulk.js 와 같은 값). */
 export const RUN_FOLLOW = '__device__';
@@ -40,7 +40,14 @@ export const BULK_FIELDS = Object.freeze([
   { key: 'mailExcludeCommon', label: '공통 받는 사람 빼기', kind: 'bool', on: '빼기', off: '공통에도 보내기' },
   { key: 'mailOnlyOnChange', label: '변화 없으면 보내지 않기', kind: 'bool', on: '켜기', off: '끄기' },
   { key: 'mailOnFailure', label: '실패하면 알리기', kind: 'bool', on: '켜기', off: '끄기' },
+  // v2.745 결과 메일 보내는 때 — 요일은 칩(kind 'days' — '그대로' 가 아니면 요일 배열), 시각은 'HH:MM'(kind 'time').
+  { key: 'mailWhen', label: '결과 메일 보내는 때', kind: 'select' },
+  { key: 'mailDays', label: '결과 메일 요일(정한 요일·시각일 때)', kind: 'days' },
+  { key: 'mailTime', label: '결과 메일 시각(한국 시각)', kind: 'time' },
+  { key: 'mailSkipIfNoNew', label: '새 조사가 없으면 보내지 않기', kind: 'bool', on: '켜기', off: '끄기' },
 ]);
+/** 보내는 때 선택지 — 개별 편집 창과 같은 글자(isiduText.MAIL_WHEN_CHOICES). */
+export const MAIL_WHEN_OPTIONS = MAIL_WHEN_CHOICES;
 export const BULK_FIELD_KEYS = Object.freeze(BULK_FIELDS.map((f) => f.key));
 
 export const MAIL_MODES = Object.freeze([['', '그대로'], ['add', '추가'], ['remove', '빼기'], ['replace', '이 목록으로 바꾸기'], ['clear', '모두 지우기']]);
@@ -65,6 +72,16 @@ export function bulkPatchFrom(s) {
     if (f.kind === 'mail') continue;
     if (v == null || v === '') continue;
     if (f.kind === 'bool') { patch[f.key] = v === 'on'; continue; }
+    // v2.745 요일 — 지정했는데 하나도 고르지 않으면 막는다(서버도 mailDays 로 400). '그대로' 는 빈 값('')이다.
+    if (f.kind === 'days') {
+      const d = mailDaysOf(v);
+      if (!d.length) { issues.push({ key: f.key, text: `${f.label}: 요일을 하나 이상 고르세요.` }); continue; }
+      patch[f.key] = d; continue;
+    }
+    if (f.kind === 'time') {
+      if (!isMailTime(v)) { issues.push({ key: f.key, text: `${f.label}: 00:00~23:59 형식이어야 합니다.` }); continue; }
+      patch[f.key] = String(v).trim(); continue;
+    }
     if (f.key === 'intervalHours' || f.key === 'timeoutMin' || f.kind === 'num') {
       const n = numOrNull(v);
       if (n == null || !Number.isInteger(n)) { issues.push({ key: f.key, text: `${f.label}: 정수를 입력하세요.` }); continue; }
@@ -111,6 +128,10 @@ export function patchSummary(patch, { dcName = (id) => id } = {}) {
   if ('mailExcludeCommon' in p) out.push(p.mailExcludeCommon ? '공통 받는 사람 빼기' : '공통 받는 사람에게도 보내기');
   if ('mailOnlyOnChange' in p) out.push(`변화 없으면 생략 ${onoff(p.mailOnlyOnChange)}`);
   if ('mailOnFailure' in p) out.push(`실패 알림 ${onoff(p.mailOnFailure)}`);
+  if ('mailWhen' in p) out.push(`결과 메일 보내는 때 ${p.mailWhen === 'schedule' ? '정한 요일·시각' : '조사가 끝날 때마다'}`);
+  if ('mailDays' in p) out.push(`결과 메일 요일 ${mailDaysText(p.mailDays)}`);
+  if ('mailTime' in p) out.push(`결과 메일 시각 ${p.mailTime}`);
+  if ('mailSkipIfNoNew' in p) out.push(`새 조사 없으면 생략 ${onoff(p.mailSkipIfNoNew)}`);
   return out.join(' · ');
 }
 

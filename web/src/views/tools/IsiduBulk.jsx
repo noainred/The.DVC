@@ -15,9 +15,11 @@ import {
   INTERVAL_CHOICES, TIMEOUT_CHOICES, everyText, nodeText, formFromTarget, targetBody, testResultText, runResultText, nudgeLines, mailStateText,
 } from './isiduText.js';
 import {
-  BULK_FIELDS, BOOL_CHOICES, MAIL_MODES, RUN_FOLLOW, RUN_MAIN, DC_NONE, USER_REGISTRY, SELECT_PRESETS,
+  BULK_FIELDS, BOOL_CHOICES, MAIL_MODES, RUN_FOLLOW, RUN_MAIN, DC_NONE, USER_REGISTRY, SELECT_PRESETS, MAIL_WHEN_OPTIONS,
   blankBulk, bulkPatchFrom, patchSummary, bulkResultText, presetIds, seqProgressText,
 } from './isiduBulkText.js';
+// v2.745 결과 메일 요일·시각 — 칩·선택지는 종합 메일 설정 화면과 같은 것을 쓴다.
+import { DAY_LABELS, DAY_ORDER, HOURS, MINUTES, toggleDay } from './isiduDigestText.js';
 
 const lo = (s) => String(s || '').toLowerCase();
 
@@ -165,6 +167,46 @@ export default function IsiduBulk({ srv, rows = [], dirty = false, locked = fals
     if (f.kind === 'num' || f.kind === 'text') {
       return <input type={f.kind === 'num' ? 'number' : 'text'} className="mono" value={v} min={f.min} max={f.max} maxLength={f.kind === 'text' ? 64 : undefined} placeholder={f.placeholder} onChange={(e) => setField(f.key, e.target.value)} disabled={locked} />;
     }
+    // v2.745 요일 — '그대로'(빈 값) 또는 '지정'(요일 배열). 지정하고 하나도 고르지 않으면 적용을 막는다(bulkPatchFrom).
+    if (f.kind === 'days') {
+      const picked = Array.isArray(v);
+      return (
+        <div className="isd-bulkdays">
+          <Select value={picked ? 'set' : ''} sort={false} disabled={locked} onChange={(e) => setField(f.key, e.target.value === 'set' ? [1] : '')}>
+            <option value="">그대로</option>
+            <option value="set">요일 지정</option>
+          </Select>
+          {picked ? (
+            <div className="isd-days" role="group" aria-label={f.label}>
+              {DAY_ORDER.map((d) => {
+                const on = v.includes(d);
+                return (
+                  <button key={d} type="button" className={`isd-day${on ? ' on' : ''}${d === 0 ? ' sun' : d === 6 ? ' sat' : ''}`} aria-pressed={on} onClick={() => setField(f.key, toggleDay(v, d))} disabled={locked}>
+                    <span>{DAY_LABELS[d]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+    // v2.745 시각 — 시를 고르면 지정(분 기본 00), '그대로' 면 빈 값.
+    if (f.kind === 'time') {
+      const hh = v ? String(v).slice(0, 2) : '';
+      const mm = v ? String(v).slice(3, 5) : '00';
+      return (
+        <div className="isd-bulktime">
+          <Select value={hh} sort={false} disabled={locked} aria-label="시" onChange={(e) => setField(f.key, e.target.value ? `${e.target.value}:${mm}` : '')}>
+            <option value="">그대로</option>
+            {HOURS.map((h) => <option key={h} value={h}>{h}시</option>)}
+          </Select>
+          <Select value={mm} sort={false} disabled={locked || !hh} aria-label="분" onChange={(e) => setField(f.key, `${hh}:${e.target.value}`)}>
+            {[...new Set([...MINUTES, mm])].sort().map((m) => <option key={m} value={m}>{m}분</option>)}
+          </Select>
+        </div>
+      );
+    }
     if (f.kind === 'mail') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -182,6 +224,7 @@ export default function IsiduBulk({ srv, rows = [], dirty = false, locked = fals
     else if (f.key === 'auth') opts = [['key', 'SSH 키(비밀번호 없음)'], ['device', '스토리지 등록부 계정(등록부 장비만)']];
     else if (f.key === 'runNode') opts = [[RUN_FOLLOW, '장비 담당 노드 따름(등록부 장비만)'], [RUN_MAIN, '메인(이 서버)'], ...(choices.agents || []).map((a) => [a, `엣지 ${a}`])];
     else if (f.key === 'datacenterId') opts = [[DC_NONE, '(지정 안 함)'], ...(choices.datacenters || []).map((d) => [d.id, d.name])];
+    else if (f.key === 'mailWhen') opts = MAIL_WHEN_OPTIONS.map(([k, l]) => [k, l]);
     return (
       <Select value={v} onChange={(e) => setField(f.key, e.target.value)} sort={f.key === 'runNode' || f.key === 'datacenterId'} disabled={locked}>
         <option value="">그대로</option>
@@ -227,7 +270,7 @@ export default function IsiduBulk({ srv, rows = [], dirty = false, locked = fals
               <td data-sort={x.s.timeoutMin}>{x.s.timeoutMin}분</td>
               <td>{x.s.enabled === false ? <span className="isd-tag muted">꺼짐</span> : <span className="isd-tag ok">켜짐</span>}</td>
               <td>{x.s.detach === false ? '끔' : '켬'}</td>
-              <td data-sort={x.s.mail?.to?.length || 0}>{x.s.mail?.to?.length ? `${x.s.mail.to.length}명` : '—'}</td>
+              <td data-sort={x.s.mail?.to?.length || 0}>{x.s.mail?.to?.length ? `${x.s.mail.to.length}명` : '—'}{x.s.mail?.when === 'schedule' ? <div className="hint">정기 발송</div> : null}</td>
             </tr>
           ))}
         </tbody>
@@ -237,10 +280,11 @@ export default function IsiduBulk({ srv, rows = [], dirty = false, locked = fals
         <legend>바꿀 항목</legend>
         <div className="isd-bulkgrid">
           {BULK_FIELDS.map((f) => (
-            <label key={f.key} className={`fld${(f.kind === 'mail') ? ' wide' : ''}`}>{f.label}
+            <label key={f.key} className={`fld${(f.kind === 'mail' || f.kind === 'days') ? ' wide' : ''}`}>{f.label}
               {fieldControl(f)}
               {f.key === 'username' && userSet && !ed.username ? <span className="hint">계정을 입력하지 않으면 바꾸지 않습니다.</span> : null}
               {f.key === 'timeoutMin' ? <span className="hint">du 를 기다리는 최대 시간 — 기본 2시간 · 최대 3시간.</span> : null}
+              {f.key === 'mailWhen' && ed.mailWhen === 'schedule' && (!Array.isArray(ed.mailDays) || !ed.mailTime) ? <span className="hint">요일·시각을 ‘그대로’ 두면 대상마다 저장된 요일·시각(처음이면 월요일 08:00)을 씁니다. 조사 실패 알림은 정한 시각과 무관하게 조사 직후 보냅니다.</span> : null}
             </label>
           ))}
         </div>

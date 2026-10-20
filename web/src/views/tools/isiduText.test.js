@@ -392,7 +392,8 @@ describe('v2.738 결과 메일 — 화면 미리보기는 서버 규칙과 같�
   it('폼 ↔ 저장 본문 — 메일 칸을 싣고, 옛 저장값(mail 없음)은 빈 칸', () => {
     const f = formFromTarget({ id: 't1', path: '/ifs/a', mail: { to: ['a@corp.local', 'b@corp.local'], onlyOnChange: true, onFailure: true } });
     expect(f.mailTo).toBe('a@corp.local\nb@corp.local');
-    expect(targetBody(f).mail).toEqual({ to: 'a@corp.local\nb@corp.local', excludeCommon: false, onlyOnChange: true, onFailure: true });
+    // v2.745: 보내는 때·요일·시각·새 조사 없으면 생략도 싣는다(옛 저장값 = 서버 기본값 · since 는 싣지 않는다 — isiduSchedMail2745.test.js).
+    expect(targetBody(f).mail).toEqual({ to: 'a@corp.local\nb@corp.local', excludeCommon: false, onlyOnChange: true, onFailure: true, when: 'scan', days: [1], time: '08:00', skipIfNoNew: true });
     const old = formFromTarget({ id: 't2', path: '/ifs/b' });
     expect(old).toMatchObject({ mailTo: '', mailExcludeCommon: false, mailOnlyOnChange: false, mailOnFailure: false });
     expect(blankTarget().mailTo).toBe('');

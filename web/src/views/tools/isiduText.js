@@ -526,6 +526,8 @@ export function blankTarget() {
     id: '', label: '', deviceId: '', host: '', port: '', username: '', auth: 'key', path: '/ifs/data/workspace/users', sizeMode: 'h', intervalHours: 24, timeoutMin: 120, topN: 10, enabled: true, agent: '', datacenterId: '', runVia: 'device', detach: true,
     // v2.738 결과 메일 — 주소는 줄바꿈으로 받는다(쉼표·세미콜론도 서버가 나눈다).
     mailTo: '', mailExcludeCommon: false, mailOnlyOnChange: false, mailOnFailure: false,
+    // v2.745 보내는 때 — 기본값은 서버 mailRules.TARGET_MAIL_DEFAULTS 와 같다(조사가 끝날 때마다 · 월 · 08:00 · 새 조사 없으면 생략).
+    mailWhen: 'scan', mailDays: [...MAIL_DEFAULT_DAYS], mailTime: MAIL_DEFAULT_TIME, mailSkipIfNoNew: true,
   };
 }
 
@@ -542,6 +544,11 @@ export function formFromTarget(t) {
     detach: t.detach !== false, // v2.737 — 옛 저장값(필드 없음)은 켬
     mailTo: Array.isArray(t.mail?.to) ? t.mail.to.join('\n') : '', mailExcludeCommon: t.mail?.excludeCommon === true,
     mailOnlyOnChange: t.mail?.onlyOnChange === true, mailOnFailure: t.mail?.onFailure === true,
+    // v2.745 — 서버 targetMailOf 와 같은 보정(옛 저장값은 필드가 없다).
+    mailWhen: t.mail?.when === 'schedule' ? 'schedule' : 'scan',
+    mailDays: Array.isArray(t.mail?.days) ? mailDaysOf(t.mail.days) : [...MAIL_DEFAULT_DAYS],
+    mailTime: isMailTime(t.mail?.time) ? String(t.mail.time).trim() : MAIL_DEFAULT_TIME,
+    mailSkipIfNoNew: t.mail?.skipIfNoNew !== false,
   };
 }
 
@@ -554,6 +561,11 @@ export function targetBody(f) {
   if (f.id) out.id = f.id;
   // v2.738 결과 메일 — 주소 판정은 서버가 한다(형식이 틀리면 400 · 칸을 짚는다). 화면은 입력 중 미리 알려 줄 뿐이다.
   out.mail = { to: String(f.mailTo || ''), excludeCommon: f.mailExcludeCommon === true, onlyOnChange: f.mailOnlyOnChange === true, onFailure: f.mailOnFailure === true };
+  // v2.745 보내는 때 — since 는 싣지 않는다(서버가 정한다). 요일·시각은 '조사가 끝날 때마다' 여도 싣는다(다시 정기로 바꿀 때 고른 값이 남게).
+  out.mail.when = f.mailWhen === 'schedule' ? 'schedule' : 'scan';
+  out.mail.days = mailDaysOf(f.mailDays);
+  out.mail.time = String(f.mailTime ?? '').trim();
+  out.mail.skipIfNoNew = f.mailSkipIfNoNew !== false;
   for (const k of ['port', 'intervalHours', 'timeoutMin', 'topN']) {
     const n = numOrNull(f[k]);
     if (n != null) out[k] = n;
@@ -758,27 +770,158 @@ export function mailReadyText(r) {
 
 export const MAIL_STATE_TEXT = Object.freeze({ sent: '보냄', skipped: '보내지 않음', failed: '보내지 못함' });
 
-/** 마지막 메일 결과 → { tone, text }(없으면 null). 주소는 서버가 싣지 않는다(개수만). */
-export function mailStateText(last, now = Date.now()) {
+/* ── v2.745 결과 메일 '보내는 때'(대상별) ─────────────────────────────────────
+ * 판정·회차 계산은 서버(`isidu/mailRules.js normalizeTargetMail`·`digestRules.nextDigestSlots` — 종합 메일과 같은 함수)가 한다.
+ * 여기는 입력 중 미리보기와 문구뿐이고, 같은 규칙의 순수 사본이다(번들 경계 — isiduSchedMail2745.test.js 가 서버 함수·종합 메일 화면
+ * 사본(isiduDigestText)과 같은 입력으로 대조한다). isiduDigestText 가 이 모듈을 import 하므로 그쪽을 import 하면 순환이다 — 여기 둔다.
+ *  · 저장 모양: mail.{ when:'scan'|'schedule', days:[0..6](0 = 일요일), time:'HH:MM'(포탈 시각), skipIfNoNew(기본 켬) } — since 는 서버가 정한다.
+ *  · 실패 알림은 보내는 때와 무관하게 조사 직후 나간다(알림이라 미루지 않는다 — 서버 notify.js).
+ */
+/** 보내는 때 선택지(키 = 서버 TARGET_MAIL_WHEN). */
+export const MAIL_WHEN_CHOICES = Object.freeze([['scan', '조사가 끝날 때마다'], ['schedule', '정한 요일·시각에']]);
+export const MAIL_DEFAULT_DAYS = Object.freeze([1]);
+export const MAIL_DEFAULT_TIME = '08:00';
+const MAIL_DAY_LABELS = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
+const MAIL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const MAIL_DEF_OFFSET = 540;
+
+/** 요일 목록 정리(0~6 정수 · 중복 제거 · 정렬) — 서버 mailDaysOf 와 같은 규칙. */
+export const mailDaysOf = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b);
+/** 보내는 시각 'HH:MM'(00:00~23:59, 앞뒤 공백 허용) — 서버 isMailTime 과 같은 규칙. */
+export const isMailTime = (v) => (typeof v === 'string' || typeof v === 'number') && MAIL_TIME_RE.test(String(v).trim());
+
+/** 요일 목록 → '평일' / '매일' / '월·목'(서버 digestRules.daysLabel 과 같은 글자). */
+export function mailDaysText(days) {
+  const d = mailDaysOf(days);
+  if (d.length === 7) return '매일';
+  if (d.join(',') === '1,2,3,4,5') return '평일';
+  if (!d.length) return '요일 없음';
+  return d.map((x) => MAIL_DAY_LABELS[x]).join('·');
+}
+/** 일정 한 줄 — '매주 월·목 08:00' / '평일 08:00'. */
+export function mailScheduleText(days, time) {
+  const lab = mailDaysText(days);
+  return lab === '매일' || lab === '평일' ? `${lab} ${time || '—'}` : `매주 ${lab} ${time || '—'}`;
+}
+
+const mailParts = (ms, off) => { const d = new Date(Number(ms) + off * MIN); return { y: d.getUTCFullYear(), mo: d.getUTCMonth(), d: d.getUTCDate(), wd: d.getUTCDay(), h: d.getUTCHours(), mi: d.getUTCMinutes() }; };
+
+/** 다음 회차 n 개(서버 nextDigestSlots 와 같은 계산 — 포탈 시각의 매주 일정). 요일이 없거나 시각이 틀리면 []. */
+export function nextMailSlots({ days, time } = {}, now = Date.now(), n = 3, offsetMin = MAIL_DEF_OFFSET) {
+  const ds = mailDaysOf(days);
+  const m = MAIL_TIME_RE.exec(String(time ?? '').trim());
+  if (!ds.length || !m) return [];
+  const h = Number(m[1]); const mi = Number(m[2]);
+  const out = []; let after = now;
+  for (let k = 0; k < n; k++) {
+    const b = mailParts(after, offsetMin); let found = null;
+    for (let i = 0; i <= 8 && found == null; i++) {
+      const day = new Date(Date.UTC(b.y, b.mo, b.d + i));
+      if (!ds.includes(day.getUTCDay())) continue;
+      const occ = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, mi) - offsetMin * MIN;
+      if (occ > after) found = occ;
+    }
+    if (found == null) break;
+    out.push(found); after = found;
+  }
+  return out;
+}
+/** epoch ms → '10/22(목) 08:00'(포탈 시각). 못 읽으면 '—'. */
+export function mailSlotShort(ms, offsetMin = MAIL_DEF_OFFSET) {
+  if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '—';
+  const p = mailParts(ms, offsetMin);
+  return `${p.mo + 1}/${p.d}(${MAIL_DAY_LABELS[p.wd]}) ${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')}`;
+}
+
+/**
+ * 입력 중 문제(저장 전에 미리 — 서버가 같은 이유로 400 을 준다). 없으면 null.
+ * 요일은 정기 발송일 때만 필요하고, 시각 형식은 서버가 보내는 때와 무관하게 검사하므로 여기도 늘 본다.
+ * @returns {{field:'mail.days'|'mail.time', text:string}|null}
+ */
+export function mailScheduleIssue(f) {
+  if (!f) return null;
+  if (f.mailWhen === 'schedule' && !mailDaysOf(f.mailDays).length) return { field: 'mail.days', text: '결과 메일을 보낼 요일을 하나 이상 고르세요 — 이대로는 저장할 수 없습니다.' };
+  if (!isMailTime(f.mailTime)) return { field: 'mail.time', text: '보내는 시각은 00:00~23:59 형식이어야 합니다 — 이대로는 저장할 수 없습니다.' };
+  return null;
+}
+/** 여러 대상 중 첫 문제(대상 번호·이름과 함께) — 선택하지 않은 대상의 문제도 저장을 막는다. 없으면 null. */
+export function firstMailScheduleIssue(forms) {
+  const list = Array.isArray(forms) ? forms : [];
+  for (let i = 0; i < list.length; i++) {
+    const iss = mailScheduleIssue(list[i]);
+    if (iss) return { index: i, field: iss.field, text: `대상 ‘${list[i].label || list[i].path || i + 1}’: ${iss.text}` };
+  }
+  return null;
+}
+/** 다음 발송 미리보기 — 정기 발송일 때만. { slots, text }. */
+export function mailWhenPreview(f, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
+  if (!f || f.mailWhen !== 'schedule') return { slots: [], text: '' };
+  const slots = nextMailSlots({ days: f.mailDays, time: f.mailTime }, now, 3, offsetMin);
+  return { slots, text: slots.length ? `다음 발송: ${slots.map((x) => mailSlotShort(x, offsetMin)).join(' · ')} (한국 시각)` : '다음 발송: — (요일을 고르세요)' };
+}
+
+/**
+ * 정기 발송 기록의 code → 문구(서버 mailRules.TARGET_MAIL_CODES 와 1:1 — 테스트가 서버 소스와 대조한다).
+ * 숫자(늦게 확인한 허용 시간 등)는 문구에 박지 않는다 — 서버가 정한다.
+ */
+export const TARGET_MAIL_CODE_TEXT = Object.freeze({
+  'no-new': '직전 정기 발송 뒤 새로 끝난 성공 조사가 없습니다(새 조사 없으면 생략)',
+  unchanged: '마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같습니다(변화 없으면 생략)',
+  'no-report': '보낼 성공 조사 결과가 아직 없습니다',
+  demo: '데모 대상은 실제 메일을 보내지 않습니다',
+  'missed-down': '포탈이 꺼져 있던 동안의 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
+  'missed-late': '정한 시각을 한참 지나 확인한 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
+  'no-recipients': '보낼 때 받는 사람이 없었습니다',
+});
+const MISSED_CODES = new Set(['missed-down', 'missed-late']);
+
+/** 기록 한 건의 사유 문구 — 아는 code 는 화면 문구, 모르는 code 는 서버 사유 그대로(지어내지 않는다). */
+function lastReasonText(last) {
+  const code = last?.code;
+  // 같은 code 'no-report' 라도 실패(결과 DB 를 열지 못함)는 서버 사유가 원인을 말한다 — 화면 문구로 덮지 않는다.
+  if (code === 'no-report' && last.state === 'failed') return last.reason || '결과 DB 를 열지 못해 보내지 않았습니다';
+  if (code && Object.hasOwn(TARGET_MAIL_CODE_TEXT, code)) {
+    const n = numOrNull(last.count);
+    return `${TARGET_MAIL_CODE_TEXT[code]}${MISSED_CODES.has(code) && n != null && n > 1 ? ` — 놓친 회차 ${countText(n)}번` : ''}`;
+  }
+  return last?.reason || '사유 없음';
+}
+
+/** 마지막 메일 결과 → { tone, text }(없으면 null). 주소는 서버가 싣지 않는다(개수만). v2.745: 정기 회차 기록은 회차를 함께 말한다. */
+export function mailStateText(last, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
   if (!last || !last.state) return null;
   const when = agoText(last.at, now) || '';
-  const what = last.kind === 'failure' ? '실패 알림' : '결과 메일';
+  const what = last.kind === 'failure' ? '실패 알림' : last.schedule ? `정기 결과 메일${numOrNull(last.slot) != null ? `(${mailSlotShort(last.slot, offsetMin)} 회차)` : ''}` : '결과 메일';
   if (last.state === 'sent') return { tone: 'ok', text: `${what} ${when} 보냄 · ${countText(last.accepted ?? last.to)}명${last.manual ? ' (수동)' : ''}` };
-  if (last.state === 'skipped') return { tone: 'muted', text: `${what} ${when} 보내지 않음 — ${last.reason || '사유 없음'}` };
-  return { tone: 'bad', text: `${what} ${when} 보내지 못함 — ${last.reason || '사유 없음'}` };
+  if (last.state === 'skipped' && MISSED_CODES.has(last.code)) return { tone: 'warn', text: `${what} ${when} 놓침 — ${lastReasonText(last)}` };
+  if (last.state === 'skipped') return { tone: 'muted', text: `${what} ${when} 보내지 않음 — ${lastReasonText(last)}` };
+  return { tone: 'bad', text: `${what} ${when} 보내지 못함 — ${lastReasonText(last)}` };
 }
 
 /**
  * 대상 화면의 '결과 메일' 한 줄(메인 목록 응답 — 주소 없이 개수·선택·마지막 결과만). 메일을 고르지 않은 대상은 null(말할 것이 없다).
  * 마지막 결과가 있으면 그것을 붙인다 — 보냈는지·왜 건너뛰었는지를 화면이 말한다.
+ * v2.745: 정기 발송이면 '정기 · 월·목 08:00 · 다음 10/22(목) 08:00'(다음 회차는 서버 rows 의 next — 받는 사람이 0명이면 서버가 [] 를 준다).
  */
-export function targetMailLine(t, now = Date.now()) {
+export function targetMailLine(t, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
   const m = t?.mail;
-  const last = t?.lastMail ? mailStateText(t.lastMail, now) : null;
-  if (!m || !(m.recipients > 0)) return last ? { tone: last.tone, text: `결과 메일: 받는 사람이 없습니다(지금은 보내지 않습니다) · 마지막 — ${last.text}` } : null;
+  const last = t?.lastMail ? mailStateText(t.lastMail, now, offsetMin) : null;
+  if (!m || !(m.recipients > 0)) {
+    if (!last) return null;
+    const parts = ['받는 사람이 없습니다(지금은 보내지 않습니다)', `마지막 — ${last.text}`];
+    return { tone: last.tone, text: `결과 메일: ${parts.join(' · ')}`, parts };
+  }
   const opts = [`받는 사람 ${countText(m.recipients)}명`];
+  const sched = m.when === 'schedule';
+  if (sched) {
+    const next = Array.isArray(m.next) ? m.next.filter((x) => numOrNull(x) != null) : [];
+    opts.push(`정기 · ${mailDaysText(m.days)} ${isMailTime(m.time) ? String(m.time).trim() : '—'}`);
+    opts.push(`다음 ${next.length ? mailSlotShort(next[0], offsetMin) : '—'}`);
+    if (m.skipIfNoNew !== false) opts.push('새 조사 없으면 생략');
+  }
   if (m.onlyOnChange) opts.push('변화 없으면 생략');
-  if (m.onFailure) opts.push('실패 알림');
-  const text = `결과 메일: ${opts.join(' · ')}${last ? ` · 마지막 — ${last.text}` : ' · 아직 보낸 적 없음'}`;
-  return { tone: last ? last.tone : 'muted', text };
+  if (m.onFailure) opts.push(sched ? '실패 알림(조사 직후)' : '실패 알림');
+  // parts: 표 칸처럼 좁은 자리에서 한 조각씩 줄을 바꿔 그리게(v2.745 — 한 문장을 74px 칸에 넣으면 글자 단위로 쪼개져 행이 13줄이 됐다).
+  const parts = [...opts, last ? `마지막 — ${last.text}` : '아직 보낸 적 없음'];
+  return { tone: last ? last.tone : 'muted', text: `결과 메일: ${parts.join(' · ')}`, parts };
 }

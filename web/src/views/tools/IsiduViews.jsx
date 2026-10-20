@@ -165,7 +165,7 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
             {rows.map(({ t, st }) => {
               const at = attemptText(t, now);
               const next = nextRunOf(t, data.failRetryMs, now, data.failLongMs);   // v2.741 DEV-05: 서버 값과 묶는다(없으면 같은 상수)
-              const ml = targetMailLine(t, now);
+              const ml = targetMailLine(t, now, data?.offsetMin);   // v2.745: 정기 발송이면 '정기 · 월·목 08:00 · 다음 …'(서버가 포탈 시각 오프셋을 주면 그 값)
               return (
                 <tr key={t.id}>
                   <td><b>{targetChip(t).corp || '—'}</b> <button type="button" className="isd-namebtn" onClick={() => openTarget(t.id)}>{t.label || t.id}</button><div className="isd-note">{t.deviceName || t.host || '—'}</div></td>
@@ -176,7 +176,7 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
                   <td data-sort={t.intervalHours}>{everyText(t.intervalHours)} · {t.timeoutMin}분</td>
                   <td data-sort={typeof next === 'number' ? next : ''}>{next == null ? (t.running ? '진행 중' : '—') : next === 'soon' ? '곧' : aheadText(next, now)}</td>
                   <td className="isd-mono" style={{ textAlign: 'right' }}>{t.failStreak ? countText(t.failStreak) : '0'}</td>
-                  <td className="isd-note" style={{ maxWidth: 200, whiteSpace: 'normal' }}>{ml ? ml.text.replace(/^결과 메일: /, '') : '—'}</td>
+                  <td className="isd-note isd-mailcell">{ml ? ml.parts.map((p, i) => <div key={i}>{p}</div>) : '—'}</td>
                   <td><button type="button" className="isd-btn small" disabled={busy || !!t.issue} onClick={() => runNow([t.id])}>수집</button></td>
                 </tr>
               );
