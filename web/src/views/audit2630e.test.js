@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from '../test/_stripComments.js';
-import { contribRowKind, corpContribution, contribNote } from '../version_6/v6Data.js';
+import { contribRowKind, corpContribution, contribNote } from './corpContribution.js';
 import { scopeOmitNote, roomSparkScopeNote } from './scopeOmitText.js';
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, reclaimBasisNote } from './toolsReportText.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
@@ -13,7 +13,7 @@ import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './s
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (rel) => stripComments(fs.readFileSync(path.join(here, rel), 'utf8'));
 
-describe('R2630-02 V6 기여도 — 점검 중이어도 값이 없으면 직전 값이 아니다', () => {
+describe('R2630-02 Summary 기여도 — 점검 중이어도 값이 없으면 직전 값이 아니다', () => {
   it('점검 중 · 호스트·VM 0 → none(값 모름), 값이 있으면 carried', () => {
     expect(contribRowKind({ status: 'maintenance', hosts: 0, vms: 0 })).toBe('none');
     expect(contribRowKind({ status: 'maintenance' })).toBe('none');

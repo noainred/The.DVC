@@ -139,7 +139,7 @@ body {
   .topbar .tb-brandrow .user-box { padding-left: 0; border-left: none; }
   .topbar .tb-brandrow .user-meta { display: none; }
 }
-/* 개발 포탈 헤더의 ⌘K 팔레트 — V4 Palette 컴포넌트(version_4/Palette.jsx)를 다크 토큰으로 입힌다(v4.css 는 V4 셸이 켜질 때만 로드된다).
+/* 헤더의 ⌘K 팔레트(components/Palette.jsx)를 다크 토큰으로 입힌다. 클래스 이름(v4-palette·v3-*)은 V4 셸에서 옮겨 온 그대로다(v2.747 — 셸은 지웠다).
    z-index 210: 공용 Modal(200) 위, 토스트(400)·공지(1200) 아래. */
 .hdr-palette .v4-palette-back { position: fixed; inset: 0; background: rgba(5,8,16,.6); display: flex; justify-content: center; align-items: flex-start; padding: 10vh 16px 16px; z-index: 210; }
 .hdr-palette .v4-palette { width: 100%; max-width: 640px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; max-height: 70vh; box-shadow: var(--shadow); color: var(--text); }

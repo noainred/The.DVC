@@ -192,30 +192,14 @@ describe('① 같은 이름 다른 데이터센터 클러스터 — key·표시�
     expect(adv.find((a) => a.level === 2).title).toContain('Prod · DC-Seoul');
   });
 
-  it('V4 Compute · 관제 콘솔 Compute: 클러스터 주의 목록이 두 Prod 를 데이터센터로 구분해 그린다', async () => {
+  it('관제 콘솔 Compute: 클러스터 주의 목록이 두 Prod 를 데이터센터로 구분해 그린다(v2.747 V4 Compute 는 셸과 함께 지웠다)', async () => {
     H.api.usePolling = (p) => (p === '/tools/capacity' ? { data: CAP, error: null, loading: false } : { data: null, error: null, loading: true });
-    const { default: Compute } = await import('../version_4/pages/Compute.jsx');
     const { default: ConsoleCompute } = await import('../console/pages/ConsoleCompute.jsx');
-    for (const C of [Compute, ConsoleCompute]) {
+    for (const C of [ConsoleCompute]) {
       const out = html(React.createElement(C, { global: null, ov: null, sitesAll: [], scope, polls: { ov: null }, phase: null, phaseText: null, health: null }));
       expect(out).toContain('Prod · DC-Seoul');
       expect(out).toContain('Prod · DC-Busan');
     }
-  });
-
-  it('V4 Compare: 클러스터 여력 표의 행 key 가 겹치지 않고, RAM 여유를 모르는(null) 클러스터를 "여유 0" 으로 맨 앞에 두지 않는다', async () => {
-    const unknown = capRow({ vcenterId: 'vc-c', cluster: 'Unk', clusterRef: 'domain-c9', ramHeadroomGB: null, capacityUnknown: 2 });
-    H.api.usePolling = (p) => (p === '/tools/capacity' ? { data: { ...CAP, clusters: [unknown, SEOUL, BUSAN, OTHER] }, error: null, loading: false } : { data: null, error: null, loading: true });
-    const { default: Compare } = await import('../version_4/pages/Compare.jsx');
-    const out = html(React.createElement(Compare, { scope, sitesAll: [], spec: { rows: 8, days: 30, rawCols: false }, go: () => {} }));
-    const capTable = H.stTables.find((ks) => ks.some((k) => /domain-c10/.test(String(k))));
-    expect(capTable).toBeTruthy();
-    expect(dupFree(capTable)).toBe(true);
-    expect(out).toContain('Prod · DC-Seoul');
-    expect(out).toContain('Prod · DC-Busan');
-    // RAM 여유 적은 순 — 모르는 값은 뒤로(0 으로 세면 가장 급한 클러스터처럼 맨 위에 온다)
-    expect(String(capTable[0])).toMatch(/domain-c10/);
-    expect(String(capTable[capTable.length - 1])).toMatch(/domain-c9/);
   });
 
   it('특수 기능 › 클러스터 수용여력: 표 행 key 가 겹치지 않고 클러스터 칸·정렬 값이 데이터센터를 붙인 이름이다', async () => {

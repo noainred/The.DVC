@@ -17,7 +17,7 @@ import { hashSegments } from '../hooks/hashTab.js';
 import './console.css';
 import { PAGE_IDS, PAGE_META, GROUP_TILE, visibleGroups } from './nav.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt } from './consoleData.js';
-import { loadPhase, loadText } from '../version_4/loadState.js'; // v2.586 — 타일 대기 문구(순수 모듈, import 0)
+import { loadPhase, loadText } from '../components/loadState.js'; // v2.586 — 타일 대기 문구(순수 모듈, import 0)
 import { levelColor } from './ui.jsx';
 import ConsoleOverview from './pages/ConsoleOverview.jsx';
 import ConsoleCompute from './pages/ConsoleCompute.jsx';

@@ -10,8 +10,8 @@
  *     그 사람에게는 존재를 알릴 이유가 없고, 사용자가 그것을 요청했다.
  *   · **거부 목록 모드**(기존) → 그대로 **회색 잠금**. 기존 현장의 화면이 바뀌면 안 된다.
  *
- * ⚠ 판정을 화면마다 복제하지 말 것 — 카드 그리드·V4 내비 트리·⌘K 팔레트 셋이 같은 답을 써야
- *   한다. 한 곳만 고치면 "내비에는 없는데 팔레트로는 열린다" 가 된다(v2.536 이 겪은 유형).
+ * ⚠ 판정을 화면마다 복제하지 말 것 — 카드 그리드·⌘K 팔레트가 같은 답을 써야 한다(v2.747 V4 내비 트리는
+ *   셸과 함께 지웠다). 한 곳만 고치면 "그리드에는 없는데 팔레트로는 열린다" 가 된다(v2.536 이 겪은 유형).
  * ⚠ 두 축이 있다 — **숨김**(`toolHidden`)과 **회색 잠금 사유**(`lockReasonOf`, v2.613). 둘 다 이 모듈이 소유한다.
  * ⚠ **이것은 접근제어가 아니라 표시**다. 서버 집행은 `auth/toolAccess.js` 가 한다 —
  *   화면만 고치는 것은 '메뉴 숨김' 이라는 것이 이 저장소의 기록된 교훈이다(v2.536).
@@ -23,7 +23,7 @@
  * @param {object} opt
  * @param {boolean} opt.isAdmin        admin 은 언제나 전부 본다(관리자 잠김 방지)
  * @param {string[]|null} opt.toolsAllowed  서버가 준 허용 목록(배열이면 허용 목록 모드)
- * @param {boolean} opt.hideAdminOnly  관리자 전용 도구를 숨기는 화면인가(V4 내비·팔레트 = true,
+ * @param {boolean} opt.hideAdminOnly  관리자 전용 도구를 숨기는 화면인가(⌘K 팔레트 = true,
  *                                     특수기능 카드 그리드 = false → 회색 잠금 유지)
  */
 export function toolHidden(t, { isAdmin = false, toolsAllowed = null, hideAdminOnly = false } = {}) {
@@ -44,7 +44,7 @@ export function toolHidden(t, { isAdmin = false, toolsAllowed = null, hideAdminO
  * `canTools && toolAllowed(k)` 만 따로 봤다 — 그래서 `perm`(insights-hub:insights · nsx:inv.nsx ·
  * svcmon-config:svcmon · explore:dashboard) 잠금이 그리드에만 있고 V4 내비·팔레트에는 반영되지
  * 않았다("내비에는 열려 보이는데 누르면 막힌다"). 숨김 축(`toolHidden`)과 같은 이유로 **한 모듈**이
- * 소유한다 — 카드 그리드·V4 내비·V4 기능 찾기·⌘K 팔레트가 같은 답을 쓴다.
+ * 소유한다 — 카드 그리드·⌘K 팔레트가 같은 답을 쓴다.
  *
  * ⚠ 이 함수는 순수다 — `api.js` 를 import 하지 않고 판정 함수(`can`·`toolAllowed`)를 **인자로** 받는다
  *   (웹 테스트는 node 환경이고, 판정 자체를 목으로 고정하기 위해).

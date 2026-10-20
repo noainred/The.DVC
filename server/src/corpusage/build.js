@@ -18,7 +18,7 @@
  *  · 값이 오래됐으면(`freshMs` 초과) 지금 값이 아니다 → `stale` 로 따로 세고 합계에서 뺀다.
  *  · 분모가 0 이면 사용률은 null('—')이다(0% 가 아니다).
  *  · 출처를 숨기지 않는다: `src` = idrac(iDRAC 텔레메트리·대체 경로) / os(OS SSH) / vcenter(가상화 호스트 대체).
- *  · 법인 구분(다빈치/IRS)은 **법인 이름**에 'IRS' 가 있는가로만 정한다 — V6 Overview `siteGroupOf` 와 같은 규칙(v2.624).
+ *  · 법인 구분(다빈치/IRS)은 **법인 이름**에 'IRS' 가 있는가로만 정한다 — 웹 화면(VCenters 의 다빈치/IRS 구분)과 같은 규칙(v2.624).
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { idOf } from '../bmusage/targets.js';
@@ -31,7 +31,7 @@ const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 
 export const ROLES = Object.freeze(['all', 'bm', 'virt']);
 export const GROUPS = Object.freeze(['all', 'davinci', 'irs']);
-/** 법인 구분 — 이름에 'IRS' 가 있으면 irs(대소문자 무시). V6 `siteGroupOf` 와 같은 판정이다(테스트가 대조). */
+/** 법인 구분 — 이름에 'IRS' 가 있으면 irs(대소문자 무시). 예전 V6 `siteGroupOf` 와 같은 판정(v2.747 V6 셸 삭제로 대조 대상은 사라졌다). */
 export function corpGroupOf(name) { return /irs/i.test(t(name)) ? 'irs' : 'davinci'; }
 
 function emptyMetric() { return { used: 0, total: 0, n: 0 }; }

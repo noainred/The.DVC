@@ -5,7 +5,7 @@
  * 그래서 옛 주소(#/hosts · #/vms · #/vcenters …)는 그대로 열리고, 특수 기능 카드도 그대로 남는다.
  *
  * 규칙(회귀 방지):
- *  · 탭 id·도구 키를 바꾸지 말 것 — 탭 id 는 V5·V6 틀과 해시 라우팅이, 도구 키는 permissions.json(toolsDenied)과
+ *  · 탭 id·도구 키를 바꾸지 말 것 — 탭 id 는 해시 라우팅(북마크)이, 도구 키는 permissions.json(toolsDenied)과
  *    auth/toolAccess.js 가 쓴다. 여기서는 **이름(label)과 묶음**만 정한다.
  *  · App 의 TABS 에 있는 탭은 전부 어느 메뉴엔가 들어 있어야 한다(빠지면 그 화면은 메뉴로 갈 길이 없다 — 테스트가 고정).
  *  · 지금 주소가 어느 메뉴인지는 locate() 하나가 판정한다. 특수 기능 카드로 같은 도구를 열어도 그 도구가 속한
