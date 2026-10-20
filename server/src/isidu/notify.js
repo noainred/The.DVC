@@ -14,6 +14,17 @@
  *    v2.719 'live 에서는 데모 표지 항목을 실행하지 않는다').
  *  · 결과(보냄·생략·실패·사유)는 대상별로 남기고 화면이 말한다 — 조용히 빼지 않는다. 주소는 남기지 않는다(개수만).
  *  · 발송은 한 줄로 묶는다(동시에 여러 대상이 끝나도 릴레이에 한 번에 하나씩).
+ *
+ * ── v2.745 보내는 때 '정한 요일·시각'(대상 mail.when === 'schedule') ─────────────────────
+ *  · 조사 성공이 적재되면 결과 메일을 **보내지 않는다** — 중복·오래된 결과 판정(lastScanId·lastScanTs)만 갱신하고 마지막 메일 기록(last)은
+ *    덮지 않는다(화면의 '마지막 메일' 은 실제 발송 결과다). **실패 알림은 보내는 때와 무관하게 조사 직후 그대로 보낸다**(알림이라 미루지 않는다).
+ *  · 정기 틱(`targetMailTick`, 30초 — 중앙만)이 대상마다 종합 메일과 **같은 판정**(`digestRules.planDigestTick`)으로 회차를 본다:
+ *    send(정한 시각 뒤 30분 안) / missed(그보다 늦음·포탈이 꺼져 있던 회차 — 몰아서 보내지 않고 기록만) / rebase(시계가 뒤로 감) / none.
+ *    처리한 회차(lastSlot)는 **보내기 전에** 상태 파일에 남긴다(보내는 중 재시작해도 같은 회차를 두 번 보내지 않는다 — 대신 그 회차는 못 보냈을 수 있다).
+ *  · 보낼 때: 마지막 **성공** 조사 결과 · 받는 사람 규칙은 그대로 · 데모 대상은 기록만. '새 조사 없으면 생략'(skipIfNoNew, 기본 켬)은 마지막 정기 발송
+ *    이후 새 성공 조사가 없으면 건너뛴다. '변화 없으면 생략' 은 **마지막으로 보낸 조사**(없으면 직전 성공 조사)와 비교한다.
+ *  · 받는 사람이 0명인 대상은 회차를 판정하지 않는다(기록도 남기지 않는다). 사람이 누른 '지금 보내기' 는 정기 발송 기록(lastSlot·schedSent*)을 건드리지 않는다.
+ *  · 기록 code 는 `mailRules.TARGET_MAIL_CODES` 하나다(웹 문구 표와 1:1).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,6 +40,8 @@ import { buildReport } from './report.js';
 import * as db from './db.js';
 import { HISTORY_AGENT } from './targets.js';
 import { targetMailOf, mailRecipients, changeSummary, failAlertDue, FAIL_ALERT_MIN_MS } from './mailRules.js';
+import { planDigestTick, slotLabel, DIGEST_GRACE_MS } from './digestRules.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { renderResultMail, renderFailureMail, bytesText, deltaText } from './mailHtml.js';
 import { corpNameOf } from './corpName.js';
 
@@ -38,8 +51,12 @@ const STATE_MAX = 200;
 export const MAIL_KIND = 'isidu';
 
 const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
+const BOOT_AT = Date.now();
+/** v2.745 정기 발송 틱 간격(종합 메일과 같다). */
+export const TARGET_MAIL_TICK_MS = 30_000;
 
-let _state = null; // { targets: { [id]: { lastScanId, lastScanTs, lastFailAlertAt, last } } }
+// 대상 기록: { lastScanId, lastScanTs, lastFailAlertAt, last, lastSlot(처리한 정기 회차), schedSentScanId·schedSentScanTs·schedSentAt(마지막 정기 발송한 조사) }
+let _state = null; // { targets: { [id]: { … } } }
 function state() {
   if (_state) return _state;
   try {
@@ -89,9 +106,9 @@ export { bytesText, deltaText };
 
 function nameOf(t) { return t.label || t.path || t.id; }
 
-/** 결과 메일 본문(순수 — 테스트로 고정). */
-export function buildResultMail(t, report, { change = null, corp = '', recipients = null, now = Date.now() } = {}) {
-  return renderResultMail({ label: nameOf(t), corp, report, change, recipients, onlyOnChange: targetMailOf(t).onlyOnChange, now });
+/** 결과 메일 본문(순수 — 테스트로 고정). v2.745: schedule({days, time}) 가 있으면 정기 발송 메일이다(본문 머리가 그 사실을 말한다). */
+export function buildResultMail(t, report, { change = null, corp = '', recipients = null, schedule = null, now = Date.now() } = {}) {
+  return renderResultMail({ label: nameOf(t), corp, report, change, recipients, onlyOnChange: targetMailOf(t).onlyOnChange, schedule, now });
 }
 
 /** 실패 알림 본문(순수). lastOk 는 시각(옛 호출) 또는 { ts, bytes }. */
@@ -134,11 +151,15 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
   const r = rec(id);
   const sid = Number(scanId);
   const sts = Number(ts);
+  // v2.745: 정기 발송 대상의 성공 결과는 지금 보내지 않는다 — 정한 요일·시각에 틱이 보낸다(실패 알림은 아래 그대로 즉시).
+  const scheduled = ok && tm.when === 'schedule';
   if (Number.isFinite(sid) && Number(r.lastScanId) === sid) return { state: 'duplicate' };
   if (Number.isFinite(sts) && Number.isFinite(Number(r.lastScanTs)) && sts < Number(r.lastScanTs)) {
+    if (scheduled) return { state: 'older' };   // 마지막 메일 기록(실제 발송 결과)을 덮지 않는다
     return { state: 'older', last: note(id, { kind: ok ? 'result' : 'failure', scanId: sid, scanTs: sts, state: 'skipped', reason: '이미 메일을 보낸 조사보다 오래된 결과라 보내지 않았습니다(엣지가 밀린 결과를 늦게 보냄)' }) };
   }
   r.lastScanId = Number.isFinite(sid) ? sid : r.lastScanId; r.lastScanTs = Number.isFinite(sts) ? sts : r.lastScanTs;
+  if (scheduled) { save(); return { state: 'scheduled' }; }
   if (String(id).startsWith('mock-')) return { state: 'demo', last: note(id, { kind: ok ? 'result' : 'failure', scanId: sid, scanTs: sts, state: 'skipped', reason: '데모 대상은 실제 메일을 보내지 않습니다' }) };
 
   if (!ok) {
@@ -176,7 +197,10 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
 }
 
 async function changeVsPrevious(id, report, topN) {
-  const prev = await db.okScanBefore(HISTORY_AGENT, id, report.scan.ts);
+  return changeVsScan(id, report, topN, await db.okScanBefore(HISTORY_AGENT, id, report.scan.ts));
+}
+/** 고른 기준 조사(prev — 없으면 첫 결과)와 비교한 변화. 정기 발송은 마지막으로 보낸 조사를 기준으로 쓴다(v2.745). */
+async function changeVsScan(id, report, topN, prev) {
   if (!prev) return changeSummary(null, null, topN);
   // v2.740 E-03: 직전 스캔의 폴더 전체(최대 5만 행)를 읽지 않는다 — 비교에 필요한 것은 직전 상위 N 개와 지금 상위 폴더의 직전 크기뿐이다.
   // changeSummary 는 받은 맵에서 직전 상위 N 을 다시 고르는데, 진짜 상위 N 을 포함한 부분 집합이면 같은 N 개가 나온다(정렬 기준이 같다).
@@ -221,4 +245,117 @@ export function sendLatestNow(targetId, by = 'system') {
   });
 }
 
-export function _resetForTest() { _state = null; _chain = Promise.resolve(); }
+// ── v2.745 정기 발송(대상 mail.when === 'schedule') ─────────────────────────────
+const MISSED_TEXT = {
+  down: '포탈이 꺼져 있던 동안의 회차라 보내지 않았습니다(몰아서 보내지 않습니다).',
+  late: `정한 시각보다 ${Math.round(DIGEST_GRACE_MS / 60_000)}분 넘게 늦게 확인해 보내지 않았습니다(몰아서 보내지 않습니다).`,
+};
+let _tickBusy = false;
+let _tickTimer = null;
+
+/** 정기 발송의 '변화 없으면 생략' 기준 — 마지막으로 보낸 조사(없거나 지워졌으면 직전 성공 조사). */
+async function sentBaseScan(id, r, report) {
+  const sentTs = numOrNull(r.schedSentScanTs);
+  if (sentTs != null) {
+    const b = await db.okScanAtOrBefore(HISTORY_AGENT, id, sentTs);
+    if (b) return b;
+  }
+  return db.okScanBefore(HISTORY_AGENT, id, report.scan.ts);
+}
+
+/** 정기 회차 한 번 보내기(serial 줄 안에서 — 던지지 않는 쪽은 호출부가 잡는다). 설정은 지금 다시 읽는다(틱이 본 뒤 바뀌었을 수 있다). */
+async function sendScheduled(id, slot, now) {
+  const { s, t } = targetById(id);
+  if (!t) return { state: 'gone' };
+  const tm = targetMailOf(t);
+  if (tm.when !== 'schedule') return { state: 'not-scheduled' };   // 그 사이 '조사가 끝날 때마다' 로 바뀌었다 — 기록하지 않는다
+  const base = { kind: 'result', schedule: true, slot };
+  const rcpt = mailRecipients(s.mail?.commonTo, tm);
+  if (!rcpt.to.length) return { state: 'skipped', last: note(id, { ...base, state: 'skipped', code: 'no-recipients', reason: '보낼 때 받는 사람이 없어 보내지 않았습니다.' }) };
+  if (String(id).startsWith('mock-')) return { state: 'demo', last: note(id, { ...base, state: 'skipped', code: 'demo', reason: '데모 대상은 실제 메일을 보내지 않습니다' }) };
+  const r = rec(id);
+  const report = await buildReport(id, { topN: t.topN });
+  if (report.state !== 'ok') {
+    const dbOff = report.state === 'db-unavailable';
+    return { state: 'no-report', last: note(id, { ...base, state: dbOff ? 'failed' : 'skipped', code: 'no-report', reason: dbOff ? '결과 DB 를 열지 못해 보내지 않았습니다.' : '보낼 성공 조사 결과가 없어 보내지 않았습니다(아직 성공한 조사가 없습니다).' }) };
+  }
+  const scanInfo = { scanId: report.scan.id, scanTs: report.scan.ts };
+  const sentId = numOrNull(r.schedSentScanId);
+  if (tm.skipIfNoNew && sentId != null && report.scan.id === sentId) {
+    return { state: 'no-new', last: note(id, { ...base, ...scanInfo, state: 'skipped', code: 'no-new', reason: '직전 정기 발송 뒤 새로 끝난 성공 조사가 없어 보내지 않았습니다(새 조사 없으면 생략).' }) };
+  }
+  let change = null;
+  if (tm.onlyOnChange) {
+    change = await changeVsScan(id, report, t.topN, await sentBaseScan(id, r, report));
+    if (!change.changed) return { state: 'unchanged', last: note(id, { ...base, ...scanInfo, state: 'skipped', code: 'unchanged', reason: '마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같아 보내지 않았습니다(변화 없으면 생략).' }) };
+  } else {
+    // 본문의 '직전 대비' 알림용 — 판정에는 쓰지 않으므로 실패해도 보낸다.
+    try { change = await changeVsScan(id, report, t.topN, await sentBaseScan(id, r, report)); } catch { change = null; }
+  }
+  const mail = buildResultMail(t, report, { change, corp: corpNameOf(t), recipients: rcpt, schedule: { days: [...tm.days], time: tm.time }, now });
+  const out = await sendTo(t, rcpt.to, mail, 'system');
+  if (out.state === 'sent') { r.schedSentScanId = report.scan.id; r.schedSentScanTs = report.scan.ts; r.schedSentAt = Date.now(); }
+  return { state: out.state, last: note(id, { ...base, ...scanInfo, to: rcpt.to.length, ...out }) };
+}
+
+/** 대상 하나의 이번 틱(회차 판정 → 기록 → 필요하면 보내기). */
+async function tickTarget(t, tm, now, bootAt) {
+  const id = t.id;
+  const cur = state().targets[id];
+  const plan = planDigestTick({ digest: { enabled: true, days: tm.days, time: tm.time, since: tm.since }, state: { lastSlot: cur?.lastSlot }, now, bootAt });
+  if (plan.action === 'none') return { id, action: 'none' };
+  const r = rec(id);
+  if (plan.action === 'rebase') {
+    r.lastSlot = plan.lastSlot; save();
+    console.warn(`[isidu-mail] ${id}: 서버 시계가 뒤로 가 정기 발송 처리 기록을 지금으로 다시 잡았습니다.`);
+    return { id, ...plan };
+  }
+  if (plan.action === 'missed') {
+    const code = plan.reason === 'down' ? 'missed-down' : 'missed-late';
+    r.lastSlot = plan.slot;
+    note(id, { kind: 'result', schedule: true, slot: plan.slot, state: 'skipped', code, count: plan.count, reason: `${MISSED_TEXT[plan.reason === 'down' ? 'down' : 'late']}${plan.count > 1 ? ` (놓친 회차 ${plan.count}번 — 마지막 ${slotLabel(plan.slot)})` : ''}` });
+    console.warn(`[isidu-mail] ${id}: 결과 메일 정기 회차를 놓쳤습니다(${slotLabel(plan.slot)} · ${plan.reason}${plan.count > 1 ? ` · ${plan.count}번` : ''}) — 몰아서 보내지 않습니다.`);
+    return { id, ...plan };
+  }
+  if (plan.action !== 'send') return { id, action: plan.action };
+  r.lastSlot = plan.slot; save();   // 보내기 전에 남긴다 — 보내는 중 재시작해도 같은 회차를 두 번 보내지 않는다
+  const result = await serial(() => sendScheduled(id, plan.slot, now));
+  if (result.state === 'failed') console.warn(`[isidu-mail] ${id}: 정기 결과 메일을 보내지 못했습니다(${slotLabel(plan.slot)}): ${result.last?.reason || ''}`);
+  return { id, ...plan, result };
+}
+
+/**
+ * 정기 발송 틱(v2.745) — 보내는 때가 '정한 요일·시각' 인 대상마다 회차를 판정한다(던지지 않는다). 중앙만 · 진행 중이면 건너뛴다.
+ * @param {number} now
+ * @param {{bootAt?:number}} opts 놓침 사유('포탈이 꺼져 있었음') 판정용 기동 시각
+ * @returns {Promise<{action:'edge'|'busy'|'error'}|{action:'tick', at:number, results:object[]}>}
+ */
+export async function targetMailTick(now = Date.now(), { bootAt = BOOT_AT } = {}) {
+  if (isEdge()) return { action: 'edge' };
+  if (_tickBusy) return { action: 'busy' };
+  _tickBusy = true;
+  try {
+    const s = loadSettings();
+    const results = [];
+    for (const t of s.targets) {
+      const tm = targetMailOf(t);
+      if (tm.when !== 'schedule') continue;
+      if (!mailRecipients(s.mail?.commonTo, tm).to.length) continue;   // 받는 사람이 없으면 회차를 판정하지 않는다(기록도 없음)
+      try { results.push(await tickTarget(t, tm, now, bootAt)); }
+      catch (e) { console.warn(`[isidu-mail] ${t.id}: 정기 발송 틱 실패: ${e?.message || e}`); results.push({ id: t.id, action: 'error', error: String(e?.message || e).slice(0, 300) }); }
+    }
+    return { action: 'tick', at: now, results };
+  } catch (e) {
+    console.warn(`[isidu-mail] 정기 발송 틱 실패: ${e?.message || e}`);
+    return { action: 'error', error: String(e?.message || e).slice(0, 300) };
+  } finally { _tickBusy = false; }
+}
+
+/** 정기 발송 틱 시작(중앙만 — 엣지는 메일을 보내지 않는다). */
+export function startIsiduTargetMail() {
+  if (_tickTimer || isEdge()) return;
+  _tickTimer = setInterval(() => { targetMailTick().catch(() => {}); }, TARGET_MAIL_TICK_MS);
+  _tickTimer.unref?.();
+}
+
+export function _resetForTest() { _state = null; _chain = Promise.resolve(); _tickBusy = false; if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null; } }

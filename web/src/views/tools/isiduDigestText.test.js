@@ -137,7 +137,8 @@ describe('⑥ 실패 제목 — 메일(FAIL_TITLE)과 화면(FAIL_TEXT)이 같�
 describe('⑦ 폼 ↔ 본문 · 입력 중 문제 · 탭 주소', () => {
   it('옛 설정(필드 없음)은 기본값', () => {
     const f = formFromDigest(undefined);
-    expect(f).toMatchObject({ enabled: false, days: [1], hour: '08', minute: '00', includeAdmin: true, to: '', topN: 10, includeWatch: true, includeTargets: true, skipIfNoNew: false });
+    // v2.745: 순위 개수는 입력한 글자 그대로 든다(틀린 값이 화면에서 사라지지 않게) — 옛 파일(corpTopM 없음) = '0'.
+    expect(f).toMatchObject({ enabled: false, days: [1], hour: '08', minute: '00', includeAdmin: true, to: '', topN: '10', corpTopM: '0', includeWatch: true, includeTargets: true, skipIfNoNew: false });
   });
   it('왕복하면 서버 정규화를 통과한다', () => {
     const f = formFromDigest({ enabled: true, days: [5, 1, 3], time: '07:30', to: ['a@corp.local'], topN: 20, skipIfNoNew: true });

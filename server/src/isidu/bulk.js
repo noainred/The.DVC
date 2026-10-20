@@ -11,15 +11,16 @@
 import crypto from 'node:crypto';
 import { RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from './settings.js';
 import { SIZE_MODES } from './parse.js';
-import { normalizeMailList, MAIL_LIST_MAX } from './mailRules.js';
+import { normalizeMailList, MAIL_LIST_MAX, TARGET_MAIL_WHEN, mailDaysOf, isMailTime, targetMailOf } from './mailRules.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 /** 실행 노드 '장비 담당 노드 따름' 표지(웹 isiduText.RUN_FOLLOW 와 같은 값). */
 export const RUN_FOLLOW = '__device__';
 export const MAIL_TO_MODES = Object.freeze(['add', 'remove', 'replace', 'clear']);
-const BOOL_KEYS = Object.freeze(['enabled', 'detach', 'mailExcludeCommon', 'mailOnlyOnChange', 'mailOnFailure']);
+const BOOL_KEYS = Object.freeze(['enabled', 'detach', 'mailExcludeCommon', 'mailOnlyOnChange', 'mailOnFailure', 'mailSkipIfNoNew']);
 const NUM_KEYS = Object.freeze(['intervalHours', 'timeoutMin', 'topN', 'port']);
-const STR_KEYS = Object.freeze(['sizeMode', 'auth', 'runNode', 'datacenterId', 'username']);
+// v2.745: 결과 메일 보내는 때(mailWhen 'scan'|'schedule') · 요일(mailDays — 요일 배열) · 시각(mailTime 'HH:MM'). 웹 계약 대조가 세 목록만 읽으므로 여기에 둔다.
+const STR_KEYS = Object.freeze(['sizeMode', 'auth', 'runNode', 'datacenterId', 'username', 'mailWhen', 'mailDays', 'mailTime']);
 /** 바꿀 수 있는 항목 전부(웹 BULK_FIELDS 키와 1:1 — 웹 테스트가 이 소스와 대조한다). */
 export const BULK_KEYS = Object.freeze([...BOOL_KEYS, ...NUM_KEYS, ...STR_KEYS, 'mailTo']);
 /** 대상에 맞지 않아 그 대상에서 뺀 사유 코드(웹 NOT_APPLIED_TEXT 와 1:1). */
@@ -80,6 +81,21 @@ export function normalizeBulkPatch(raw) {
     const v = t(raw.username);
     if (v.length > 64) return { error: '계정 이름이 너무 깁니다.', field: 'username' };
     patch.username = v === '__registry__' ? '' : v;   // '__registry__' = 등록부 계정으로 되돌리기(등록부 장비만)
+  }
+  // v2.745 결과 메일 보내는 때 — 잘못된 값은 고치지 않고 400(고른 값과 다른 값이 저장되면 거짓이다).
+  if (raw.mailWhen != null && raw.mailWhen !== '') {
+    if (!TARGET_MAIL_WHEN.includes(raw.mailWhen)) return { error: "결과 메일 보내는 때는 '조사가 끝날 때마다'(scan) 또는 '정한 요일·시각'(schedule) 입니다.", field: 'mailWhen' };
+    patch.mailWhen = raw.mailWhen;
+  }
+  if (raw.mailDays != null && raw.mailDays !== '') {
+    const v = raw.mailDays;
+    const isDay = (x) => (typeof x === 'number' || (typeof x === 'string' && /^\s*\d\s*$/.test(x))) && Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 6;
+    if (!Array.isArray(v) || !v.length || v.length > 50 || !v.every(isDay)) return { error: '결과 메일 요일은 0(일)~6(토) 사이 요일을 하나 이상 고르세요.', field: 'mailDays' };
+    patch.mailDays = mailDaysOf(v.map(Number));
+  }
+  if (raw.mailTime != null && raw.mailTime !== '') {
+    if (!isMailTime(raw.mailTime)) return { error: '결과 메일 보내는 시각은 00:00~23:59 형식이어야 합니다.', field: 'mailTime' };
+    patch.mailTime = String(raw.mailTime).trim();
   }
   if (raw.mailTo != null && raw.mailTo !== '') {
     const m = raw.mailTo;
@@ -162,10 +178,17 @@ export function applyBulk(targets, ids, patch, ctx) {
     if ('mailExcludeCommon' in patch) cand.mail.excludeCommon = patch.mailExcludeCommon;
     if ('mailOnlyOnChange' in patch) cand.mail.onlyOnChange = patch.mailOnlyOnChange;
     if ('mailOnFailure' in patch) cand.mail.onFailure = patch.mailOnFailure;
+    // v2.745 보내는 때 — since 는 정규화(normalizeTargetMail)가 정한다(schedule 로 바꾸거나 요일·시각이 바뀌면 지금).
+    if ('mailWhen' in patch) cand.mail.when = patch.mailWhen;
+    if ('mailDays' in patch) cand.mail.days = [...patch.mailDays];
+    if ('mailTime' in patch) cand.mail.time = patch.mailTime;
+    if ('mailSkipIfNoNew' in patch) cand.mail.skipIfNoNew = patch.mailSkipIfNoNew;
     if (cand.mail.to.length > MAIL_LIST_MAX) { out.skipped.push({ id: x.id, reason: `대상별 수신자는 ${MAIL_LIST_MAX}명까지입니다(합치면 ${cand.mail.to.length}명).`, field: 'mailTo' }); out.targets.push(x); continue; }
     const r = normalizeTarget(cand, x, ctx);
     if (r.error) { out.skipped.push({ id: x.id, reason: r.error, field: r.field || null }); out.targets.push(x); continue; }
-    const keys = Object.keys({ ...x, ...r.target }).filter((k) => canon(x[k]) !== canon(r.target[k]));
+    // mail 은 정규화한 모양끼리 비교한다 — 옛 저장 모양(필드 일부)과 정규화 모양(전 필드)이 같은 값이면 바뀐 것이 아니다(v2.745).
+    const cmp = (k, v) => (k === 'mail' ? canon(targetMailOf({ mail: v })) : canon(v));
+    const keys = Object.keys({ ...x, ...r.target }).filter((k) => cmp(k, x[k]) !== cmp(k, r.target[k]));
     if (keys.length) out.changed.push({ id: x.id, keys }); else out.unchanged.push(x.id);
     out.targets.push(r.target);
   }

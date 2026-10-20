@@ -19,6 +19,7 @@
  *  · 숫자 칸의 빈 값은 '미지정' — 이전 값을 유지한다(v2.596 규약. `Number('')===0` 이 하한으로 승격되는 사고 방지).
  *  · 손상 파일은 보존하고(preserveCorrupt) 로드 오류를 세운다 — 설정 pull 이 503 으로 답해 엣지 사본을 지우지 않게(v2.631).
  *  · v2.738 결과 메일: 공통 수신자(`mail.commonTo`)와 대상별 `mail`(to·excludeCommon·onlyOnChange·onFailure). 규칙은 `mailRules.js`.
+ *    v2.745: 대상별 보내는 때(when 'scan'|'schedule' · days · time · skipIfNoNew · since — since 는 서버가 정한다).
  *    형식이 틀린 주소는 저장하지 않고 400 으로 거부한다. **엣지로 내려가지 않는다**(edgeTargetView·cleanEdgeTarget 이 싣지 않는다 —
  *    메일은 중앙만 보낸다. 주소 목록을 28곳에 퍼뜨리지 않는다).
  */
@@ -32,7 +33,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { DEADLINE_LONG_MAX_MS } from '../util/deadline.js';
 import { normPath, SIZE_MODES } from './parse.js';
-import { normalizeTargetMail, normalizeCommonMail, isEmail } from './mailRules.js';
+import { normalizeTargetMail, normalizeCommonMail, isEmail, targetMailIsDefault } from './mailRules.js';
 import { digestOf, normalizeDigest } from './digestRules.js';
 import { ssrfBlockReason } from '../util/ssrfBlock.js';
 
@@ -176,7 +177,7 @@ function load() {
 
 export function loadSettings() {
   const v = load();
-  return { ...v, targets: v.targets.map((t) => ({ ...t, ...(t.mail && typeof t.mail === 'object' ? { mail: { ...t.mail, to: Array.isArray(t.mail.to) ? [...t.mail.to] : [] } } : {}) })), mail: { commonTo: [...(v.mail?.commonTo || [])], digest: cloneDigest(v.mail?.digest) } };
+  return { ...v, targets: v.targets.map((t) => ({ ...t, ...(t.mail && typeof t.mail === 'object' ? { mail: { ...t.mail, to: Array.isArray(t.mail.to) ? [...t.mail.to] : [], ...(Array.isArray(t.mail.days) ? { days: [...t.mail.days] } : {}) } } : {}) })), mail: { commonTo: [...(v.mail?.commonTo || [])], digest: cloneDigest(v.mail?.digest) } };
 }
 
 function saveSettingsRaw(v) {
@@ -215,10 +216,11 @@ export function normalizeTarget(input, prev, ctx) {
     detach: t.detach !== false,
   };
   // v2.738 결과 메일 — 요청에 mail 이 없으면 이전 값 유지(옛 화면·다른 경로의 저장이 지우지 않게).
+  // v2.745 보내는 때(when·days·time·skipIfNoNew) — 빠진 칸도 이전 값, since 는 서버가 정한다(mailRules.normalizeTargetMail).
   const m = normalizeTargetMail(t.mail, prev?.mail ?? null);
   if (m.error) return { error: m.error, field: m.field };
-  // 아무것도 고르지 않았으면 저장하지 않는다(파일을 작게 — 없는 것과 같은 뜻).
-  if (m.mail.to.length || m.mail.excludeCommon || m.mail.onlyOnChange || m.mail.onFailure) out.mail = m.mail;
+  // 기본값과 같으면 저장하지 않는다(파일을 작게 — 없는 것과 같은 뜻). v2.745: 새 필드가 기본값과 다를 때도 저장한다.
+  if (!targetMailIsDefault(m.mail)) out.mail = m.mail;
   const user = String(t.username ?? prev?.username ?? '').trim();
   const deviceId = String(t.deviceId || '').trim();
   if (deviceId) {

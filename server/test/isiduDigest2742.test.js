@@ -89,7 +89,10 @@ test('① 설정 정규화 — 형식 오류는 400(field) · 빠진 칸은 이�
   assert.equal(R.normalizeDigest({ enabled: true, days: [] }, null).field, 'digest.days', '켰는데 요일이 없으면 거부(조용히 고치지 않는다)');
   assert.equal(R.normalizeDigest({ enabled: true, days: [1], time: '24:00' }, null).field, 'digest.time');
   assert.equal(R.normalizeDigest({ enabled: true, days: [1], time: '8:00' }, null).field, 'digest.time', 'HH:MM 형식만');
-  assert.equal(R.normalizeDigest({ enabled: true, days: [1], topN: 7 }, null).field, 'digest.topN');
+  // v2.745: 순위 개수는 1~50 정수(DIGEST_RANGES) — 범위 밖·정수 아님만 거부한다(7 은 이제 유효).
+  assert.equal(R.normalizeDigest({ enabled: true, days: [1], topN: 51 }, null).field, 'digest.topN');
+  assert.equal(R.normalizeDigest({ enabled: true, days: [1], topN: 2.5 }, null).field, 'digest.topN');
+  assert.equal(R.normalizeDigest({ enabled: true, days: [1], topN: 7 }, null).digest.topN, 7);
   const badTo = R.normalizeDigest({ enabled: true, days: [1], to: 'ok@corp.local\nbad' }, null);
   assert.equal(badTo.field, 'digest.to'); assert.match(badTo.error, /bad/);
   // 꺼진 상태는 요일이 없어도 저장된다(요일 검사는 켤 때만)
@@ -259,7 +262,7 @@ test('⑤ 본문 HTML — 폴더·라벨은 이스케이프 · 제목에 법인�
   assert.match(mail.subject, /종합 보고 — 2026-10-19 \(월\) 08:00 · 법인 2곳 · 대상 4개/);
   assert.match(mail.html, /매주 월·수·금 08:00/);
   assert.match(mail.html, /데모 대상 1개는 넣지 않았습니다/);
-  assert.match(mail.text, /전 법인 폴더 Top 10/);
+  assert.match(mail.text, /전 법인 사용자 Top 10/, "v2.745: 열 이름 '사용자(폴더)' — 절 제목도 '사용자'");
   assert.match(mail.html, /직전 성공 값/);
   // 수집 대상별·먼저 볼 것을 끄면 그 구획이 빠진다
   const slim = H.renderDigestMail(m, { digest: { days: [1], time: '08:00' }, slot: MON_0800_KST, includeWatch: false, includeTargets: false });
@@ -317,7 +320,7 @@ test('⑥ 라우터 — 슈퍼 관리자 전용 · 형식 오류 400 · 저장 �
   assert.deepEqual(g.body.adminTo, ['admin@corp.local', 'Lead@corp.local'], '화면이 저장 전 입력으로 받는 사람 수를 세도록 통합 관리자 주소를 준다(슈퍼 관리자 전용 응답)');
   assert.equal(g.body.offsetMin, 540);
 
-  for (const [body, field] of [[{ enabled: true, days: [] }, 'digest.days'], [{ enabled: true, days: [1], time: '25:00' }, 'digest.time'], [{ enabled: true, days: [1], to: 'nope' }, 'digest.to'], [{ topN: 3 }, 'digest.topN']]) {
+  for (const [body, field] of [[{ enabled: true, days: [] }, 'digest.days'], [{ enabled: true, days: [1], time: '25:00' }, 'digest.time'], [{ enabled: true, days: [1], to: 'nope' }, 'digest.to'], [{ topN: 51 }, 'digest.topN'], [{ corpTopM: 21 }, 'digest.corpTopM']]) {
     const r = await call('PUT', '/tools/isilon-dirusage/digest', { digest: body });
     assert.equal(r.status, 400, JSON.stringify(body)); assert.equal(r.body.field, field);
   }
@@ -350,7 +353,7 @@ test('⑥ 미리보기(보내지 않음 · 데모 포함 표시) · 지금 보�
   assert.equal(pv.body.demoIncluded, 1); assert.match(pv.body.html, /미리보기/); assert.match(pv.body.html, /demo-folder-xyz/, '미리보기는 데모를 넣고 그 사실을 밝힌다');
   assert.ok(!pv.body.html.includes('수집 대상별'), '저장하지 않은 화면 값(includeTargets:false)으로 만든다');
   assert.equal(s.st.mails.length, before, '미리보기는 보내지 않는다');
-  assert.equal((await call('POST', '/tools/isilon-dirusage/digest/preview', { digest: { topN: 3 } })).status, 400);
+  assert.equal((await call('POST', '/tools/isilon-dirusage/digest/preview', { digest: { topN: 51 } })).status, 400);
 
   const sn = await call('POST', '/tools/isilon-dirusage/digest/send-now', {});
   assert.equal(sn.status, 200, JSON.stringify(sn.body));

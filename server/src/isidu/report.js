@@ -12,6 +12,7 @@
 import * as db from './db.js';
 import { deltaOf, sortBySize, nameCompare } from './parse.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { HISTORY_AGENT } from './targets.js';
 
 const DAY = 86_400_000;
@@ -243,12 +244,17 @@ export async function trend(targetId, { name = '', days = 30 } = {}) {
 
 /* ─────────────── v2.739 개요(서머리 · 법인 현황 · 전 법인 Top 10) ─────────────── */
 
-/** 대상마다 싣는 상위 폴더 수 — 전 법인 Top 10 은 대상별 상위 10 의 합집합에서 고른다(어떤 법인 조합의 상위 10 도 그 대상들의 상위 10 안에 있다). */
+/** 대상마다 싣는 상위 폴더 수 — 전 법인 Top 10 은 대상별 상위 10 의 합집합에서 고른다(어떤 법인 조합의 상위 10 도 그 대상들의 상위 10 안에 있다).
+ *  ⚠ 이 수는 **화면용 개요**의 값이다. 순위 개수가 이보다 큰 곳(종합 메일 Top 20 등)은 `buildOverview(ids, { pool })` 로 그만큼 모은다 —
+ *  10개만 모아 Top 20 을 고르면 한 대상이 상위 20 중 11개 이상을 가질 때 순위가 틀린다(v2.745 수정). */
 export const OVERVIEW_POOL = 10;
+/** pool 상한 — db.topEntriesOf 의 상한(50)과 같다. */
+export const OVERVIEW_POOL_MAX = 50;
+const poolOf = (p) => { const n = numOrNull(p); return n != null && n >= 1 ? Math.min(OVERVIEW_POOL_MAX, Math.round(n)) : OVERVIEW_POOL; };
 /** 30일 추이 점 상한(카드의 작은 선 — 마지막 점은 항상 포함). */
 export const OVERVIEW_POINTS = 30;
 const OV_CACHE_MAX = 200;
-const _ovCache = new Map(); // `${targetId}|${okScanId}|${base7Id}` → value
+const _ovCache = new Map(); // `${targetId}|${okScanId}|${base7Id}|p${pool}` → value(pool 이 다르면 다른 값 — 섞으면 10개짜리를 20개 요청에 준다)
 
 /** 점 줄이기(순수) — 고르게 뽑되 첫·마지막 점은 남긴다. */
 export function thinPoints(points, max = OVERVIEW_POINTS) {
@@ -262,20 +268,20 @@ export function thinPoints(points, max = OVERVIEW_POINTS) {
 }
 
 /**
- * 대상 하나의 개요 — 최신 성공 스캔의 크기·폴더 수, 전체 크기의 7일 변화, 30일 추이(전체 크기), 상위 폴더 OVERVIEW_POOL 개(7일 변화 포함).
- * 장비 접속 없음. 같은 스캔 조합은 기억한다.
+ * 대상 하나의 개요 — 최신 성공 스캔의 크기·폴더 수, 전체 크기의 7일 변화, 30일 추이(전체 크기), 상위 폴더 pool 개(기본 OVERVIEW_POOL · 7일 변화 포함).
+ * 장비 접속 없음. 같은 스캔 조합·같은 pool 은 기억한다.
  */
-async function overviewOf(targetId) {
+async function overviewOf(targetId, pool = OVERVIEW_POOL) {
   const latest = await db.latestOf(HISTORY_AGENT, targetId);
   if (latest == null) return { id: targetId, state: 'db-unavailable' };
   const okScan = latest.okScan;
   if (!okScan) return { id: targetId, state: latest.lastTry ? 'failed-only' : 'no-data' };
   const base7 = await db.okScanAtOrBefore(HISTORY_AGENT, targetId, okScan.ts - 7 * DAY);
-  const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}`;
+  const key = `${targetId}|${okScan.id}|${base7?.id ?? '-'}|p${pool}`;
   sweepExpired(_ovCache);
   const hit = _ovCache.get(key);
   if (hit) { hit.at = Date.now(); _ovCache.delete(key); _ovCache.set(key, hit); return hit.value; }
-  const top = (await db.topEntriesOf(okScan.id, OVERVIEW_POOL)) || [];
+  const top = (await db.topEntriesOf(okScan.id, pool)) || [];
   const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
   const denom = denomOf(okScan);
   const scans = (await db.scansIn(HISTORY_AGENT, targetId, okScan.ts - 30 * DAY, 5000)) || [];
@@ -300,13 +306,15 @@ async function overviewOf(targetId) {
 /**
  * 여러 대상의 개요(설정 순서). 대상 하나의 실패가 다른 대상을 막지 않는다(그 대상만 state 'error').
  * @param {string[]} targetIds
+ * @param {{pool?:number}} [opts] 대상마다 모을 상위 폴더 수(1~50, 기본 OVERVIEW_POOL — 화면용 개요 라우트는 넘기지 않는다).
  */
-export async function buildOverview(targetIds) {
+export async function buildOverview(targetIds, { pool } = {}) {
+  const p = poolOf(pool);
   const out = [];
   // v2.740 E-05: 대상 사이에 시간 기준으로 양보한다(대상 100개 콜드 계산이 0.13~0.9초 동안 쉬지 않고 돌았다 — 재시작 뒤 첫 진입은 전부 콜드).
   const yieldIf = createYielder(15);
   for (const id of Array.isArray(targetIds) ? targetIds : []) {
-    try { out.push(await overviewOf(String(id))); } catch (e) { out.push({ id: String(id), state: 'error', error: String(e?.message || e).slice(0, 200) }); }
+    try { out.push(await overviewOf(String(id), p)); } catch (e) { out.push({ id: String(id), state: 'error', error: String(e?.message || e).slice(0, 200) }); }
     await yieldIf();
   }
   return out;

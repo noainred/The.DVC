@@ -5,8 +5,11 @@
  * 선택: v2.742 에 함께 · 전체 검증 · 시안 그대로.
  *
  * ── 설정 한 벌(`mail.digest`) ────────────────────────────────────────────────
- *   { enabled, days:[0..6](0 = 일요일), time:'HH:MM'(포탈 시각 — 기본 한국 시각), includeAdmin, to:[주소], topN:5|10|20,
+ *   { enabled, days:[0..6](0 = 일요일), time:'HH:MM'(포탈 시각 — 기본 한국 시각), includeAdmin, to:[주소], topN:1~50, corpTopM:0~20,
  *     includeWatch, includeTargets, skipIfNoNew, since }
+ *  · v2.745: 순위 개수는 `DIGEST_RANGES` 한 벌이다(웹이 같은 값으로 대조한다). 전 법인 Top N 은 1~50, 법인별 Top M 은 0~20 이고 0 이면
+ *    법인별 절을 싣지 않는다. **옛 파일(corpTopM 없음) = 0** — 업그레이드만으로 기존 메일이 바뀌지 않게. 범위 밖·정수 아님은 저장하지 않고
+ *    400 이다(자르지 않는다 — 51 을 50 으로 바꿔 저장하면 사용자가 고른 값이 조용히 사라진다). 빈 값은 '그대로'.
  *  · 받는 사람 = 통합 관리자(메일 설정의 '기본 받는 사람' — 고르면) ∪ 추가 주소. 같은 주소(대소문자 무시)는 한 번만.
  *  · 형식이 틀린 주소·켰는데 요일이 하나도 없음·시각 형식 오류는 **저장하지 않고 400** 이다(조용히 고치면 사용자가 정한 값이 사라진다).
  *  · `since` 는 서버가 정한다 — 켜거나 요일·시각을 바꾼 시각. 그 이전 회차는 보내지 않는다(저장하자마자 오늘 지난 회차를 소급 발송하지 않게).
@@ -22,12 +25,23 @@
  *  · 7일 변화는 7일 이전 기준이 있는 대상만 더하고, du -h 반올림 범위 안의 차이는 0 으로 센다(웹 서머리와 같은 규칙).
  *  · 실패·오래된 대상의 값은 '직전 성공 값' 이다 — 표가 그 사실을 칸마다 말한다.
  *  · 데모(mock-) 대상은 실제 메일에 넣지 않는다(미리보기만 넣고 그 사실을 밝힌다).
+ *  · v2.745 순위 모으기: 전 법인 Top N·법인별 Top M 은 **대상별 상위 묶음의 합집합**에서 고른다. 그 묶음이 대상마다 k 개면 k ≥ max(N, M) 일 때만
+ *    정확하다(어떤 폴더가 전체·법인 상위 N 안에 있으면 그 대상 안에서 더 큰 폴더는 N−1 개 이하라 그 대상 상위 N 안에 있다 — 동률은 컷 크기와
+ *    같은 행을 전부 읽고 같은 비교로 자른다). v2.744 까지는 화면용 개요(10개)를 그대로 써 Top 20 이 틀릴 수 있었다(한 대상이 상위 20 중
+ *    11개 이상을 가지면). 그래서 종합 메일용 개요는 `digestPoolOf`(max(N, M, 10))개를 모은다. 같은 이름 폴더도 대상이 다르면 따로 센다.
  */
 import { nextOccurrence, prevOccurrence, localParts, GRACE_MS } from '../xferspeed/schedule.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { normalizeMailList, isEmail, MAIL_LIST_MAX } from './mailRules.js';
+import { nameCompare } from './parse.js';
 
+/** 순위 개수 범위(v2.745) — 웹 `isiduDigestText.js` 가 같은 값으로 대조한다. 숫자를 문구에 박지 말고 이 값을 쓸 것. */
+export const DIGEST_RANGES = Object.freeze({
+  topN: Object.freeze({ min: 1, max: 50, def: 10 }),
+  corpTopM: Object.freeze({ min: 0, max: 20, def: 0 }),
+});
+/** ⚠ 호환용(v2.742 의 고정 선택지) — 판정에 쓰지 않는다. 판정은 `DIGEST_RANGES` 다. */
 export const DIGEST_TOPN_CHOICES = Object.freeze([5, 10, 20]);
 export const DIGEST_GRACE_MS = GRACE_MS;
 export const DIGEST_HISTORY_MAX = 20;
@@ -41,15 +55,28 @@ export const SURGE_MIN_RATIO = 0.2;
 export const SURGE_MAX = 5;
 export const DAY_LABELS = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
 
-const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+/** 보내는 시각 형식 'HH:MM'(00:00~23:59) — 대상별 정기 발송도 이 규칙을 쓴다(사본 금지). */
+export const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const HOUR = 3_600_000;
 const MIN = 60_000;
 const CLOCK_TOL_MS = 2 * MIN;
 
 export const DIGEST_DEFAULTS = Object.freeze({
   enabled: false, days: Object.freeze([1]), time: '08:00', includeAdmin: true, to: Object.freeze([]),
-  topN: 10, includeWatch: true, includeTargets: true, skipIfNoNew: false, since: null,
+  topN: DIGEST_RANGES.topN.def, corpTopM: DIGEST_RANGES.corpTopM.def, includeWatch: true, includeTargets: true, skipIfNoNew: false, since: null,
 });
+
+/** 범위 안의 정수면 그 값, 아니면 null(읽는 경로 — 저장 판정은 normalizeDigest 가 400 으로 한다). */
+const intIn = (v, r) => { const n = numOrNull(v); return n != null && Number.isInteger(n) && n >= r.min && n <= r.max ? n : null; };
+/**
+ * 저장 경로의 숫자 칸 — 빈 값·빠진 칸은 '그대로'(undefined), 범위 밖·정수 아님·숫자 아닌 값(true·[])은 오류.
+ * @returns {{value:number}|{keep:true}|{error:true}}
+ */
+function numField(v, r) {
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return { keep: true };
+  const n = intIn(v, r);
+  return n == null ? { error: true } : { value: n };
+}
 
 const intDays = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b);
 
@@ -57,7 +84,9 @@ const intDays = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filte
 export function digestOf(raw) {
   const d = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const time = TIME_RE.test(String(d.time || '')) ? String(d.time) : DIGEST_DEFAULTS.time;
-  const topN = DIGEST_TOPN_CHOICES.includes(Number(d.topN)) ? Number(d.topN) : DIGEST_DEFAULTS.topN;
+  const topN = intIn(d.topN, DIGEST_RANGES.topN) ?? DIGEST_DEFAULTS.topN;
+  // 옛 파일(필드 없음)·범위 밖 = 0(법인별 절 없음) — 업그레이드만으로 메일이 바뀌지 않게.
+  const corpTopM = intIn(d.corpTopM, DIGEST_RANGES.corpTopM) ?? DIGEST_DEFAULTS.corpTopM;
   const since = numOrNull(d.since);
   return {
     enabled: d.enabled === true,
@@ -66,6 +95,7 @@ export function digestOf(raw) {
     includeAdmin: d.includeAdmin !== false,
     to: (Array.isArray(d.to) ? d.to : []).filter(isEmail).slice(0, MAIL_LIST_MAX),
     topN,
+    corpTopM,
     includeWatch: d.includeWatch !== false,
     includeTargets: d.includeTargets !== false,
     skipIfNoNew: d.skipIfNoNew === true,
@@ -87,18 +117,19 @@ export function normalizeDigest(input, prev, now = Date.now()) {
   if (enabled && !days.length) return { error: '종합 메일을 보낼 요일을 하나 이상 고르세요.', field: 'digest.days' };
   const time = input.time == null ? p.time : String(input.time).trim();
   if (!TIME_RE.test(time)) return { error: '보내는 시각은 00:00~23:59 형식이어야 합니다.', field: 'digest.time' };
-  let topN = p.topN;
-  if (input.topN != null && String(input.topN).trim() !== '') {
-    const n = Number(input.topN);
-    if (!DIGEST_TOPN_CHOICES.includes(n)) return { error: `전 법인 순위는 ${DIGEST_TOPN_CHOICES.join('·')}개 중에서 고르세요.`, field: 'digest.topN' };
-    topN = n;
-  }
+  const RN = DIGEST_RANGES.topN; const RM = DIGEST_RANGES.corpTopM;
+  const nf = numField(input.topN, RN);
+  if (nf.error) return { error: `전 법인 순위 개수는 ${RN.min}~${RN.max} 사이의 정수여야 합니다.`, field: 'digest.topN' };
+  const topN = nf.keep ? p.topN : nf.value;
+  const mf = numField(input.corpTopM, RM);
+  if (mf.error) return { error: `법인별 순위 개수는 ${RM.min}~${RM.max} 사이의 정수여야 합니다(${RM.min} = 법인별 순위를 싣지 않음).`, field: 'digest.corpTopM' };
+  const corpTopM = mf.keep ? p.corpTopM : mf.value;
   const to = input.to == null ? { list: p.to, invalid: [], over: 0 } : normalizeMailList(input.to);
   if (to.invalid.length) return { error: `추가 받는 사람 주소 형식이 잘못됐습니다: ${to.invalid.slice(0, 3).join(', ')}${to.invalid.length > 3 ? ` 외 ${to.invalid.length - 3}개` : ''}`, field: 'digest.to' };
   if (to.over) return { error: `추가 받는 사람은 ${MAIL_LIST_MAX}명까지입니다(${to.over}명 초과).`, field: 'digest.to' };
   const flag = (k) => (typeof input[k] === 'boolean' ? input[k] : p[k]);
   const out = {
-    enabled, days, time, includeAdmin: flag('includeAdmin'), to: to.list, topN,
+    enabled, days, time, includeAdmin: flag('includeAdmin'), to: to.list, topN, corpTopM,
     includeWatch: flag('includeWatch'), includeTargets: flag('includeTargets'), skipIfNoNew: flag('skipIfNoNew'), since: p.since,
   };
   // 켜거나, 요일·시각을 바꾸면 기준 시각을 지금으로 — 그 이전 회차(오늘 이미 지난 시각)를 소급 발송하지 않는다.
@@ -106,6 +137,15 @@ export function normalizeDigest(input, prev, now = Date.now()) {
   if (enabled && !(sameDef && p.since)) out.since = now;
   if (!enabled) out.since = null;
   return { digest: out };
+}
+
+/**
+ * 종합 메일용 개요가 대상마다 모을 상위 폴더 수 — max(N, M, base). base 는 화면용 개요의 수(report.js OVERVIEW_POOL)다.
+ * 그보다 적게 모으면 한 대상이 상위 N 중 base 개를 넘게 가질 때 순위가 틀린다(머리말 'v2.745 순위 모으기').
+ */
+export function digestPoolOf(d, base = 10) {
+  const g = digestOf(d);
+  return Math.max(g.topN, g.corpTopM, numOrNull(base) ?? 10);
 }
 
 /** 일정 계산용 모양(xferspeed/schedule.js 의 매주 일정). */
@@ -241,9 +281,10 @@ const corpOf = (t) => String(t?.corp || t?.datacenterId || '').trim();
  * 본문 모델(순수).
  * @param {object[]} rows 메인 목록 응답의 대상 행(isidu/rows.js targetRows)
  * @param {Map<string, object>} ovById buildOverview 결과(id → 개요)
- * @param {{now?:number, topN?:number, excludeDemo?:boolean}} opts
+ * @param {{now?:number, topN?:number, corpTopM?:number, excludeDemo?:boolean}} opts — topN 1~50 · corpTopM 0~20(범위 밖은 기본값 — 지어내지 않는다).
+ *   ovById 의 상위 묶음은 대상마다 max(topN, corpTopM) 개 이상이어야 순위가 정확하다(`digestPoolOf`).
  */
-export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), topN = 10, excludeDemo = true } = {}) {
+export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), topN = DIGEST_RANGES.topN.def, corpTopM = DIGEST_RANGES.corpTopM.def, excludeDemo = true } = {}) {
   const all = (Array.isArray(rows) ? rows : []).filter((t) => t && typeof t === 'object' && t.id);
   const demoCount = all.filter((t) => String(t.id).startsWith('mock-')).length;
   const list = excludeDemo ? all.filter((t) => !String(t.id).startsWith('mock-')) : all;
@@ -305,14 +346,47 @@ export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), t
       folders.push({
         name: String(u.name || ''), bytes: b, res: numOrNull(u.res), share: numOrNull(u.share),
         d7: u.d7 && numOrNull(u.d7.bytes) != null ? { bytes: u.d7.bytes, within: u.d7.withinRes === true } : null,
-        new7: u.new7 === true, hasBase: !!x.ov.base7, corpLabel: x.corpLabel, device: x.device, path: x.ov.scan?.path || x.path,
-        targetId: x.t.id, lastValue: x.lastValue, statusKey: x.st.key, scanTs: numOrNull(x.ov.scan?.ts), sizeMode: x.ov.scan?.sizeMode || 'h',
+        new7: u.new7 === true, hasBase: !!x.ov.base7, corp: x.corp, corpLabel: x.corpLabel, device: x.device, path: x.ov.scan?.path || x.path,
+        targetId: x.t.id, lastValue: x.lastValue, statusKey: x.st.key, scanTs: numOrNull(x.ov.scan?.ts), sizeMode: x.ov.scan?.sizeMode || 'h', okTs: x.okTs,
       });
     }
   }
-  folders.sort((a, b) => (b.bytes - a.bytes) || String(a.name).localeCompare(String(b.name)) || String(a.targetId).localeCompare(String(b.targetId)));
-  const n = DIGEST_TOPN_CHOICES.includes(Number(topN)) ? Number(topN) : 10;
+  // 순서: 크기 → 이름(보고서·개요와 같은 비교 — parse.nameCompare) → 대상 id. 같은 이름도 대상이 다르면 따로 센다(합치지 않는다).
+  folders.sort((a, b) => (b.bytes - a.bytes) || nameCompare(a.name, b.name) || nameCompare(a.targetId, b.targetId));
+  const n = intIn(topN, DIGEST_RANGES.topN) ?? DIGEST_RANGES.topN.def;
   const top = folders.slice(0, n).map((r, i) => ({ ...r, rank: i + 1 }));
+
+  // 법인별 Top M(v2.745) — 그 법인 대상들의 상위 폴더를 모아 크기 순 M 개. 법인 순서는 법인별 사용량 표(corps)와 같다. M=0 이면 싣지 않는다.
+  const cm = intIn(corpTopM, DIGEST_RANGES.corpTopM) ?? DIGEST_RANGES.corpTopM.def;
+  const corpTop = [];
+  if (cm > 0) {
+    const byCorpFolders = new Map();
+    for (const f of folders) { if (!byCorpFolders.has(f.corp)) byCorpFolders.set(f.corp, []); byCorpFolders.get(f.corp).push(f); }   // 이미 정렬된 순서를 유지한다
+    for (const c of corps) {
+      const shownRows = (byCorpFolders.get(c.corp) || []).slice(0, cm);
+      const topBytes = shownRows.reduce((sum, r) => sum + r.bytes, 0);
+      const okItems = c.items.filter((x) => x.ov?.state === 'ok');
+      const counts = okItems.map((x) => numOrNull(x.ov.scan?.count));
+      const ovFailed = c.items.filter((x) => x.bytes != null && x.ov?.state !== 'ok').length;   // 결과는 있는데 개요(폴더 목록)를 읽지 못한 대상
+      const lastValueTargets = [];
+      for (const r of shownRows) {
+        if (!r.lastValue || lastValueTargets.some((t) => t.targetId === r.targetId)) continue;
+        lastValueTargets.push({ targetId: r.targetId, device: r.device, path: r.path, statusKey: r.statusKey, okTs: r.okTs ?? null });
+      }
+      corpTop.push({
+        corp: c.corp, label: c.label, bytes: c.bytes, targets: c.targets, measured: c.measured, unmeasured: c.unmeasured, ovFailed,
+        wanted: cm, shown: shownRows.length, fewer: shownRows.length < cm,
+        // 실제 폴더 수 — 개요를 읽은 대상의 폴더 수 합(하나라도 모르면 null — 지어내지 않는다).
+        folderTotal: okItems.length && counts.every((v) => v != null) ? counts.reduce((sum, v) => sum + v, 0) : null,
+        topBytes: shownRows.length ? topBytes : null,
+        topShare: shownRows.length && c.bytes ? topBytes / c.bytes : null,
+        noData: shownRows.length === 0,
+        emptyReason: shownRows.length ? null : c.measured === 0 ? 'no-scan' : ovFailed > 0 ? 'ov-failed' : 'no-folders',
+        lastValueTargets,
+        rows: shownRows.map((r, i) => ({ ...r, rank: i + 1, share: c.bytes ? r.bytes / c.bytes : null })),
+      });
+    }
+  }
 
   // 먼저 볼 것 — 실패(나쁨) → 오래됨·권한 오류(주의) → 7일 급증(폴더).
   const watch = [];
@@ -338,9 +412,9 @@ export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), t
       d7: d7Sum, d7Targets: withBase.length, d7Pct: d7Sum != null && d7BaseBytes > 0 ? d7Sum / d7BaseBytes : null,
       d7Within: withBase.length > 0 && withBase.every((x) => x.d7.within),
     },
-    counts, corps, top, watch, biggest: top[0] || null,
+    counts, corps, top, corpTopM: cm, corpTop, watch, biggest: top[0] || null,
     newestOk: okTsList.length ? Math.max(...okTsList) : null, oldestOk: okTsList.length ? Math.min(...okTsList) : null,
-    approx: top.some((r) => r.sizeMode !== 'k'),
+    approx: top.some((r) => r.sizeMode !== 'k') || corpTop.some((c) => c.rows.some((r) => r.sizeMode !== 'k')),
   };
 }
 
