@@ -171,7 +171,7 @@ let md = `# 환경변수 레퍼런스 (자동 생성)
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
 
 > ⚠️ 스토리지·SAN 수집 주기 등 **중앙에서 배포하는 값**은 portal.env 로 잡아도 중앙 설정이 우선한다
-> (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
+> (\`docs/rules/storage.md\` '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 `;
 for (const [area, list] of [...byArea].sort((a, b) => a[0].localeCompare(b[0], 'ko'))) {
