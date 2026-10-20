@@ -11,7 +11,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const size = (p) => fs.statSync(path.join(ROOT, p)).size;
 
 const LIMITS = {
-  'CLAUDE.md': 40_000,
+  'CLAUDE.md': 30_000,
   'server/CLAUDE.md': 40_000,
   'pyportal/CLAUDE.md': 20_000,
   'horizon-uag-monitor/CLAUDE.md': 10_000,
@@ -58,4 +58,14 @@ test('루트 CLAUDE.md 는 사용자 선호 절을 유지한다', () => {
   for (const s of ['## 사용자 선호 (반드시 준수)', '작업 현황', 'TZ=Asia/Seoul', 'versions.json', '존댓말']) {
     assert.ok(root.includes(s), `사용자 선호 절에서 빠졌다: ${s}`);
   }
+});
+
+test('절차는 스킬에 있고 루트가 그 스킬을 가리킨다', () => {
+  const root = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
+  const verify = fs.readFileSync(path.join(ROOT, '.claude/skills/verify/SKILL.md'), 'utf8');
+  const release = fs.readFileSync(path.join(ROOT, '.claude/skills/release/SKILL.md'), 'utf8');
+  assert.ok(root.includes('.claude/skills/verify/SKILL.md') && root.includes('.claude/skills/release/SKILL.md'));
+  for (const s of ['/opt/pw-browsers/chromium', 'DATA_SOURCE=mock', 'pgrep -af', '1440']) assert.ok(verify.includes(s), `verify 스킬에서 빠졌다: ${s}`);
+  for (const s of ['scripts/release.sh', 'workflow_dispatch', 'versions.json', '1000']) assert.ok(release.includes(s), `release 스킬에서 빠졌다: ${s}`);
+  assert.ok(root.includes('## 작업 규모 기본값'), '작업 규모 기본값 절이 없다');
 });
