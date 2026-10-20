@@ -1,0 +1,19 @@
+/* v2.745 종합 메일 '담을 내용'(시안 ⑥) — 순위 개수 두 칸 · 사용자 행 미리 계산 · 메일 순서 카드.
+ * isidu.css 의 .isd-form 위에 얹는다(그 파일은 건드리지 않는다). 좁은 폭은 1열 — 400px 에서 넘치지 않게 칸은 minmax(min(...,100%)) · 줄은 flex-wrap. */
+.isd-form .isd-dtop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; min-width: 0; }
+.isd-form .isd-dtop-box { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep); }
+.isd-form .isd-dtop-box .ttl { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.isd-form .isd-dtop-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.isd-form .isd-dtop-in input { width: 96px; max-width: 100%; height: 40px; box-sizing: border-box; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-soft); color: var(--text); font: inherit; font-family: var(--mono); font-size: 16px; padding: 0 10px; min-width: 0; }
+.isd-form .isd-dtop-in input.bad, .isd-form .isd-dtop-in input[aria-invalid="true"] { border-color: var(--red); }
+.isd-form .isd-dtop-in input:disabled { opacity: .7; }
+.isd-form .isd-dtop-in .unit { font-size: 13px; color: var(--text-dim); }
+.isd-form .isd-dtop-sum { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--bg-soft); font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; min-width: 0; }
+.isd-form .isd-dtop-sum b { color: var(--text); font-family: var(--mono); }
+.isd .isd-dtop-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: 13px; }
+.isd .isd-dtop-order li { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border-soft); color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+.isd .isd-dtop-order li:first-child { border-top: 0; }
+.isd .isd-dtop-order li .n { flex: none; width: 20px; font-family: var(--mono); color: var(--text-faint); }
+.isd .isd-dtop-order li.focus { color: var(--text); font-weight: 600; }
+.isd .isd-dtop-order li.focus .n { color: #5eead4; }
+.isd .isd-dtop-order li.off { color: var(--text-faint); font-weight: 400; }

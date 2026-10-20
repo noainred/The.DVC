@@ -87,7 +87,8 @@ test('① 주소 목록 — 줄바꿈·쉼표·세미콜론으로 나누고, 형
   const bad = R.normalizeTargetMail({ to: 'ok@corp.local\nbad' }, null);
   assert.equal(bad.field, 'mail.to'); assert.match(bad.error, /bad/);
   const keep = R.normalizeTargetMail(undefined, { to: ['p@corp.local'], onFailure: true });
-  assert.deepEqual(keep.mail, { to: ['p@corp.local'], excludeCommon: false, onlyOnChange: false, onFailure: true }, '메일 필드가 없는 저장 요청은 이전 값을 유지한다');
+  // v2.745: 보내는 때 필드(when·days·time·skipIfNoNew·since)가 기본값으로 함께 채워진다(옛 저장값 = 조사마다).
+  assert.deepEqual(keep.mail, { to: ['p@corp.local'], excludeCommon: false, onlyOnChange: false, onFailure: true, when: 'scan', days: [1], time: '08:00', skipIfNoNew: true, since: null }, '메일 필드가 없는 저장 요청은 이전 값을 유지한다');
 });
 
 /* ── ② 수신자 ─────────────────────────────────────────────────────────── */

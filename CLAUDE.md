@@ -3687,6 +3687,30 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 카드 묶음은 `font-size:0;line-height:0` 래퍼 안의 inline-block 이다 — **안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면 라벨과 값이 겹친다**(Chromium 판독에서 발견).
       좁은 폭은 `<style>` @media(520px 이하 여백 축소 — Outlook 데스크톱은 무시한다)로 400·360px 넘침 0. 테스트 ⑤ 가 두 규칙을 고정한다(변이 2/2).
     · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 등 메일 클라이언트에서의 모양은 확인하지 못했다(가짜 SMTP · Chromium 미리보기).
+  - ⚠⚠ **v2.745 — 아이실론 대상별 결과 메일 '보내는 때'(조사마다 | 정한 요일·시각) + 종합 메일 Top N/M 개수. 일정 규칙은 `isidu/mailRules.js`(대상)·`digestRules.js`(종합) 순수, 정기 발송은 `isidu/notify.js targetMailTick`**
+    (사용자 요청 + 선택: 대상마다 각각 · '새 조사 없으면 보내지 않기' 대상별 선택(기본 켬) · 종합 메일 전 법인 Top N 1~50 · 법인별 Top M 0~20 · 열 '사용자(폴더)' ·
+    같은 이름 폴더는 대상별로 따로 셈 · 전체 검증. 회귀 `server/test/isiduSchedMail2745`·`isiduSchedReview2745`·`isiduDigestTop2745`·`isiduTopReview2745`·`isiduLead2745` +
+    웹 `views/tools/isiduSchedMail2745`·`isiduDigestTop2745`·`isiduMailReview2745`·`isiduLead2745` — 그룹별 변이 검증):
+    · 대상 메일 저장 모양 `{…기존, when:'scan'|'schedule', days, time, skipIfNoNew(기본 true), since}` — **옛 저장값(필드 없음) = scan**(업그레이드만으로 메일이 바뀌지 않는다).
+      since 는 서버가 정한다(schedule 로 바꾸거나 요일·시각을 바꾼 시각 — 소급 발송 금지). 요청에 빠진 필드는 **이전 값 유지**(⚠ 동작 변화 — 예전에는 기본값으로 덮었다).
+      요일·시각 판정은 `xferspeed/schedule.js` 를 그대로 쓰고 종합 메일 판정과 같은 결과다(테스트 대조 — digestRules 를 import 하면 순환이라 사본 정규식을 두지 않았다).
+    · 정기 발송: 30초 틱(`startIsiduTargetMail` — ⚠ 시작 줄은 테스트가 부르지 않는다) · 지금 이전 가장 최근 회차 하나만 · 30분 넘게 늦거나 포탈이 꺼져 있던 회차는
+      몰아서 보내지 않고 `missed-late`·`missed-down` · 서버 시계가 since 보다 앞서 있으면(미래 since) 설정 파일을 고치지 않고 기록에 `sinceFrom`·`sinceCap` 을 남겨 지금으로 잡고
+      막힌 회차는 `missed-clock`. 코드 `TARGET_MAIL_CODES` ↔ 웹 `TARGET_MAIL_CODE_TEXT` 1:1(웹 테스트가 서버 소스와 대조 — 코드를 늘리면 둘 다).
+    · ⚠⚠ **'변화 없으면 생략' 의 기준은 마지막으로 실제 보낸 정기 발송 조사다**(검토 SCHED-01) — 직전 조사와 비교하면 조사마다 반올림 해상도보다 조금씩 자라는 폴더가
+      영원히 '변화 없음' 이었다(재현 8회차 0통). 보낸 기록이 없거나 그 조사가 DB 에 없으면 비교 없이 보낸다.
+    · 받는 사람 0명 대상은 회차를 판정하되 메일 기록(last)·경고 없이 `lastSlot` 만 넘긴다(SCHED-02 — 판정하지 않으면 수신자를 넣는 순간 '놓침 N번' 이 한꺼번에 찍혔다).
+      화면 미리보기도 0명이면 '다음 발송: —'(서버 rows 의 next 와 같다). 정기 발송 대상의 **늦게 온 옛 결과(성공·실패)는 마지막 기록을 덮지 않는다**(SCHED-05·F4).
+    · 조사 실패 알림은 정한 시각과 무관하게 조사 직후(onFailure) · '지금 보내기' 메일 바닥글은 그 대상의 보내는 때를 말한다(F3 — `buildResultMail(…, {manual:true})`).
+    · 포탈 시각 오프셋: 메인 목록·설정 조회 응답이 `offsetMin`(= `DAY_OFFSET_MIN`)을 싣고 화면이 그것으로 다음 발송·회차를 그린다. 540 이 아니면 '한국 시각' 이라 적지 않는다
+      (`isiduText.portalTimeLabel`). 종합 메일 설정 화면의 'KST' 표지는 아직 고정이다(v2.742 부터 — 남은 일).
+    · 종합 메일 순위: `DIGEST_RANGES`(topN 1~50 · corpTopM 0~20 — **옛 파일 corpTopM 없음 = 0**, 범위 밖은 자르지 않고 400) · 순위 후보는 대상별 상위 `digestPoolOf` = max(N, M, 10)개의
+      합집합(k ≥ max(N, M) 일 때만 정확하다는 산수가 근거). 법인 안 비중의 분모는 max(법인 사용량, 그 법인 대상들의 폴더 크기 합, 읽은 상위 M 합)이고 올렸으면
+      `shareDenomRaised` + 각주(TOPNM-02 — du -h 반올림으로 100% 를 넘었다). 폴더 목록을 못 읽은 대상이 있는 법인은 'N개라' 단정하지 않는다(TOPNM-04).
+    · ⚠ **동작 변화(TOPNM-03)**: '직전 성공 값' 표지가 더 많이 붙는다 — 표시 상태(statusOfRow, 웹 targetStatus 와 대조)는 그대로 두고 `lastValueWhyOf` 가 상태 key ·
+      직전 시도 실패(`failed-before`) · 값 신선도(`old` — 보고 늦음과 같은 경계 `valueStaleMsOf`)를 본다. 꺼짐·조사 중·요청 대기 대상의 몇 달 전 값이 표지 없이 순위에 실리던 것.
+    · 설정 탭은 대상 목록을 종합 메일 탭에도 넘긴다(TOPNM-01 — 넘기지 않아 '메일에 싣는 사용자 행' 수와 120줄 경고가 늘 꺼져 있었다). 감사 로그에 corpTopM, 조회 응답에 `ranges`.
+    · ⚠ 정직 기록: 실제 사내 메일 서버·Outlook 렌더·실제 OneFS 출력·`PORTAL_TZ_OFFSET_MIN≠540` 현장은 확인하지 못했다(가짜 SMTP·주입한 now·합성 입력).
   - ⚠⚠ **v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개(v2.740 에 서머리를 지워 지금은 3개 — 옛 summary 주소는 법인 현황으로 열린다) · 수집 대상 일괄 변경 · 시한 기본 2시간/최대 3시간**
     (사용자 요청 "법인 상황이 세로로 나와서 불편 · 서브 메뉴 — 서머리 · 법인 현황 · 수집 상태 · 모든 법인 사용량 Top 10"(승인된 Claude Design 시안) ·
     "스캔 대기 시간 기본 2시간" · "설정에서 바꿀 수 있는 모든 기능을 등록된 아이템에서 일괄로(일괄 수집·일괄 대기 시간 …)" · "대기 시간 최대 3시간".

@@ -5,7 +5,8 @@
  *  · 레이아웃은 표(table)로 짓고 스타일은 전부 인라인이다(메일 클라이언트는 <style>·flex·외부 글꼴을 버리는 경우가 많다).
  *    글꼴은 시스템 글꼴(맑은 고딕 → Apple SD Gothic Neo → sans-serif) — 시안의 IBM Plex 는 메일에서 받아지지 않는다.
  *  · KPI 칸은 inline-block(폭 25% · 최소 150px)이라 좁은 화면에서 2칸씩 줄바꿈된다.
- *  · 값이 없으면 단위를 붙이지 않는다('—'). 반올림 범위 안의 차이는 '변화 없음' 이다. 실패·보고 늦음 대상의 값은 '직전 성공 값' 이라 칸이 말한다.
+ *  · 값이 없으면 단위를 붙이지 않는다('—'). 반올림 범위 안의 차이는 '변화 없음' 이다. 실패·보고 늦음 대상과 값이 오래된 대상(꺼짐·조사 중 포함)의
+ *    값은 '직전 성공 값' 이라 칸이 말한다(판정은 digestRules buildDigestModel 의 lastValueWhy).
  *  · 포탈 주소를 설정에서 알 수 없어 '포탈에서 보기' 링크는 두지 않는다 — 대신 화면 위치(메뉴 경로)를 글로 적는다(지어낸 주소 금지).
  *  · 모든 값은 이스케이프한다(폴더 이름·경로·오류 원문은 장비가 준 문자열이다).
  */
@@ -100,12 +101,13 @@ function kpis(cards) {
     + `</div></div>`;
   return `<div style="font-size:0;line-height:0;margin:0 -6px;">${cards.map(cell).join('')}</div>`;
 }
-function band({ label = 'ISILON · DIRECTORY USAGE', title, titleMono = false, chips = [], sub = '', bg = C.head, subColor = C.bandSub }) {
+function band({ label = 'ISILON · DIRECTORY USAGE', title, titleMono = false, chips = [], sub = '', bg = C.head, subColor = C.bandSub, note = '' }) {
   return `<tr><td class="dvc-sec" style="background:${bg};padding:26px 32px 22px 32px;font-family:${FONT};color:#FFFFFF;">`
     + `<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:${subColor};">${esc(label)}</div>`
     + (chips.length ? `<div style="margin-top:10px;">${chips.join(' ')}</div>` : '')
     + `<div style="font-size:${titleMono ? 24 : 26}px;font-weight:700;line-height:1.3;margin-top:8px;${titleMono ? `font-family:${MONO};word-break:break-all;` : ''}">${esc(title)}</div>`
     + (sub ? `<div style="font-size:13.5px;color:${subColor};line-height:1.6;margin-top:6px;">${esc(sub)}</div>` : '')
+    + (note ? `<div style="font-size:12.5px;font-weight:700;color:#FFFFFF;line-height:1.5;margin-top:8px;">${esc(note)}</div>` : '')
     + `</td></tr>`;
 }
 const chip = (text, { solid = false, color = '#FFFFFF', bg = 'rgba(255,255,255,0.18)' } = {}) => `<span style="display:inline-block;font-size:12px;font-weight:700;color:${solid ? bg : color};background:${solid ? '#FFFFFF' : bg};border-radius:3px;padding:3px 8px;">${esc(text)}</span>`;
@@ -148,11 +150,46 @@ function corpStatusTag(c) {
   if (mut) return tag(mut.st.text, 'muted');
   return tag('정상', 'ok');
 }
+/** 법인별 순위가 빈 이유(digestRules buildDigestModel 의 emptyReason) — 지어내지 않는다. */
+const CORP_EMPTY_TEXT = Object.freeze({
+  'no-scan': '성공한 수집이 없어 순위를 만들 수 없습니다.',
+  'ov-failed': '폴더 목록을 읽지 못해 순위를 만들 수 없습니다.',
+  'no-folders': '조사한 경로 아래 폴더가 없습니다.',
+});
+const LAST_VALUE_WHY = Object.freeze({ failed: '최근 실패', stale: '보고 늦음', 'auth-stopped': '인증 정지', issue: '장비 문제' });
+/** 직전 성공 값의 사유(digestRules lastValueWhy) — 상태 key 가 아니면 지금 상태 글자 + 이유('조사 중 · 직전 조사 실패', '꺼짐 · 값이 오래됨'). */
+function lastValueWhyText(t) {
+  const why = t?.why ?? t?.statusKey;
+  if (LAST_VALUE_WHY[why]) return LAST_VALUE_WHY[why];
+  const st = t?.statusText ? `${t.statusText} · ` : '';
+  if (why === 'failed-before') return `${st}직전 조사 실패`;
+  if (why === 'old') return `${st}값이 오래됨`;
+  return '최근 조사 실패';
+}
+/** 법인별 순위 표 아래 각주(글자 — 호출부가 이스케이프한다). */
+function corpTopNotes(c) {
+  const out = [];
+  // 법인 전체 폴더 수는 모든 대상의 폴더 목록을 읽었을 때만 안다(folderTotal) — 못 읽은 대상이 있으면 '읽은 폴더' 로 말한다(TOPNM-04).
+  if (c.rows.length && c.fewer) out.push(c.folderTotal != null ? `이 법인은 사용자 폴더가 ${c.folderTotal}개라 ${c.shown}개만 실었습니다.` : `읽은 폴더가 ${c.shown}개라 ${c.shown}개만 실었습니다.`);
+  if (c.unmeasured) out.push(`결과가 없는 대상 ${c.unmeasured}개는 빠졌습니다.`);
+  if (c.rows.length && c.ovFailed) out.push(`폴더 목록을 읽지 못한 대상 ${c.ovFailed}개는 순위에서 빠졌습니다.`);
+  if (c.rows.length && c.shareDenomRaised) {
+    out.push(`${c.shareApprox ? 'du -h 반올림 때문에 ' : ''}폴더 크기 합이 법인 사용량(du 합계 줄)보다 커서, 비중은 폴더 크기 합을 분모로 계산했습니다(100% 를 넘지 않게).`);
+  }
+  for (const t of c.lastValueTargets || []) {
+    out.push(`직전 성공 값: ${t.device} ${t.path} — ${lastValueWhyText(t)} · 마지막 성공 조사(${t.okTs ? short(t.okTs) : '—'}) 값을 썼습니다.`);
+  }
+  return out;
+}
+
 export function scheduleText(digest) {
   const lab = daysLabel(digest?.days || []);
   const time = digest?.time || '—';
   return lab === '매일' || lab === '평일' ? `${lab} ${time}` : `매주 ${lab} ${time}`;
 }
+
+/** '전 법인 순위 10개 · 법인별 순위 법인마다 5개'(0 이면 '싣지 않음'). */
+export const rankCountText = (m) => `전 법인 순위 ${m.topN}개 · 법인별 순위 ${m.corpTopM > 0 ? `법인마다 ${m.corpTopM}개` : '싣지 않음'}`;
 
 /**
  * 종합 메일 본문(순수).
@@ -191,7 +228,7 @@ export function renderDigestMail(m, o = {}) {
         const f = w.folder;
         return `<tr><td width="88" style="padding:9px 0;vertical-align:top;border-bottom:1px solid ${C.line};">${tag('급증', 'surge')}</td>`
           + `<td style="padding:9px 0 9px 8px;border-bottom:1px solid ${C.line};font-size:13px;line-height:1.55;color:${C.ink};"><b>${esc(f.name)}</b> — 7일 ${deltaCell(f.d7)} (지금 ${esc(bytesText(f.bytes))})`
-          + `<div style="font-size:11.5px;color:${C.faint};">${metaLine([f.corpLabel, f.device])} · <span style="font-family:${MONO};">${esc(f.path)}</span></div></td></tr>`;
+          + `<div style="font-size:11.5px;color:${C.faint};">${metaLine([f.corpLabel, f.device])} · <span style="font-family:${MONO};word-break:break-all;">${esc(f.path)}</span></div></td></tr>`;
       }
       const x = w.item;
       const why = w.kind === 'bad'
@@ -199,7 +236,7 @@ export function renderDigestMail(m, o = {}) {
         : x.st.key === 'stale' ? `보고 늦음 · 마지막 성공 ${agoText(x.okTs, now)}` : `권한 오류 ${(x.t.okScan?.errLines || 0).toLocaleString('ko-KR')}줄 — 일부 폴더 크기가 작을 수 있습니다`;
       const err = w.kind === 'bad' && x.t.lastTry?.error ? `<div style="font-size:11.5px;color:${C.faint};font-family:${MONO};word-break:break-all;">${esc(String(x.t.lastTry.error).slice(0, 160))}</div>` : '';
       return `<tr><td width="88" style="padding:9px 0;vertical-align:top;border-bottom:1px solid ${C.line};">${tag(w.kind === 'bad' ? '실패' : x.st.key === 'stale' ? '보고 늦음' : '권한 오류', w.kind)}</td>`
-        + `<td style="padding:9px 0 9px 8px;border-bottom:1px solid ${C.line};font-size:13px;line-height:1.55;color:${C.ink};"><b>${esc(x.corpLabel)} · ${esc(x.device)}</b> <span style="font-family:${MONO};font-size:12px;">${esc(x.path)}</span>`
+        + `<td style="padding:9px 0 9px 8px;border-bottom:1px solid ${C.line};font-size:13px;line-height:1.55;color:${C.ink};"><b>${esc(x.corpLabel)} · ${esc(x.device)}</b> <span style="font-family:${MONO};font-size:12px;word-break:break-all;">${esc(x.path)}</span>`
         + `<div style="font-size:12px;color:${C.dim};">${esc(why)}</div>${err}</td></tr>`;
     };
     const inner = shown.length
@@ -219,14 +256,40 @@ export function renderDigestMail(m, o = {}) {
   corpRows.push(`<tr>${td('<b>합계</b>', 'left', 'border-bottom:none;')}${td(String(T.targets), 'right', 'border-bottom:none;')}${td(`<b style="white-space:nowrap;">${esc(bytesText(T.bytes))}</b>`, 'right', 'border-bottom:none;')}${td(T.d7 == null ? '—' : deltaCell({ bytes: T.d7, within: T.d7Within }), 'right', 'border-bottom:none;')}${td('', 'left', 'border-bottom:none;')}</tr>`);
   rows.push(section(`${sectionTitle('법인별 사용량', '사용량 많은 순')}${table([th('법인'), th('대상', 'right'), th('사용량', 'right'), th('7일 변화', 'right'), th('상태')], corpRows)}`));
 
-  // 전 법인 폴더 Top N
+  // 전 법인 사용자 Top N(v2.745: 1~50) — 열 이름 '사용자(폴더)'. 같은 이름 폴더도 대상이 다르면 따로 센다.
   const topRows = m.top.map((r) => `<tr>`
     + td(`<span style="color:${C.faint};">${r.rank}</span>`, 'right', 'width:24px;')
     + td(`<b style="word-break:break-all;">${esc(r.name)}</b> ${r.lastValue ? tag('직전 성공 값', 'warn') : ''}<div style="font-size:11.5px;color:${C.faint};">${metaLine([r.corpLabel, r.device])} · <span style="font-family:${MONO};word-break:break-all;">${esc(r.path)}</span></div>`)
     + td(`<span style="white-space:nowrap;">${esc(bytesText(r.bytes))}</span>`, 'right')
     + td(deltaCell(r.d7, { hasBase: r.hasBase, isNew: r.new7 }), 'right')
     + `</tr>`);
-  rows.push(section(`${sectionTitle(`전 법인 폴더 Top ${m.topN}`)}${topRows.length ? table([th('#', 'right', '24'), th('폴더'), th('크기', 'right'), th('7일 변화', 'right')], topRows) : `<div style="font-size:13px;color:${C.dim};">성공한 수집이 있는 대상이 없어 순위를 만들 수 없습니다.</div>`}`));
+  rows.push(section(`${sectionTitle(`전 법인 사용자 Top ${m.topN}`, '모든 법인을 합쳐 크기 순')}${topRows.length ? table([th('#', 'right', '24'), th('사용자(폴더)'), th('크기', 'right'), th('7일 변화', 'right')], topRows) : `<div style="font-size:13px;color:${C.dim};">성공한 수집이 있는 대상이 없어 순위를 만들 수 없습니다.</div>`}`));
+
+  // 법인별 사용자 Top M(v2.745: 0~20, 0 이면 절을 싣지 않는다) — 법인마다 표 하나(4칸 — 360px 화면에서 넘치지 않게 비중은 크기 칸 아래에 둔다).
+  const corpTop = Array.isArray(m.corpTop) ? m.corpTop : [];
+  if (m.corpTopM > 0 && corpTop.length) {
+    const blocks = corpTop.map((c) => {
+      const head = `<tr><td colspan="4" style="background:#F4F6F8;padding:10px 12px;border-bottom:1px solid ${C.border};font-family:${FONT};">`
+        + `<div style="font-size:14px;font-weight:700;color:${C.bar};">${esc(c.label)}</div>`
+        + `<div style="font-size:12px;color:${C.dim};margin-top:2px;line-height:1.5;">법인 사용량 <b style="color:${C.ink};white-space:nowrap;">${esc(bytesText(c.bytes))}</b>${c.shown ? ` · 상위 ${c.shown}개가 <b style="color:${C.ink};">${esc(pct(c.topShare))}</b>` : ''}</div></td></tr>`;
+      let body;
+      if (c.rows.length) {
+        body = `<tr>${th('#', 'right', '24')}${th('사용자(폴더)')}${th('크기', 'right')}${th('7일 변화', 'right')}</tr>`
+          + c.rows.map((r) => `<tr>`
+            + td(`<span style="color:${C.faint};">${r.rank}</span>`, 'right', 'width:24px;')
+            + td(`<b style="word-break:break-all;">${esc(r.name)}</b> ${r.lastValue ? tag('직전 성공 값', 'warn') : ''}<div style="font-size:11.5px;color:${C.faint};">${esc(r.device)} · <span style="font-family:${MONO};word-break:break-all;">${esc(r.path)}</span></div>`)
+            + td(`<span style="white-space:nowrap;">${esc(bytesText(r.bytes))}</span>${r.share != null ? `${bar(r.share)}<div style="font-size:11px;color:${C.faint};white-space:nowrap;">법인 안 ${esc(pct(r.share))}</div>` : ''}`, 'right')
+            + td(deltaCell(r.d7, { hasBase: r.hasBase, isNew: r.new7 }), 'right')
+            + `</tr>`).join('');
+      } else {
+        body = `<tr><td colspan="4" style="padding:10px 12px;font-size:13px;color:${C.dim};font-family:${FONT};">${esc(CORP_EMPTY_TEXT[c.emptyReason] || CORP_EMPTY_TEXT['no-scan'])}</td></tr>`;
+      }
+      const notes = corpTopNotes(c);
+      const foot = notes.length ? `<tr><td colspan="4" style="padding:8px 12px;font-size:12px;line-height:1.5;color:${C.dim};background:#FBFCFD;font-family:${FONT};">${notes.map((n) => esc(n)).join('<br>')}</td></tr>` : '';
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid ${C.border};border-radius:6px;margin:0 0 12px 0;font-family:${FONT};">${head}${body}${foot}</table>`;
+    });
+    rows.push(section(`${sectionTitle(`법인별 사용자 Top ${m.corpTopM}`, '법인 사용량 많은 순 · 법인 안에서 크기 순')}${blocks.join('')}`));
+  }
 
   // 수집 대상별
   if (includeTargets) {
@@ -247,8 +310,13 @@ export function renderDigestMail(m, o = {}) {
 
   // 숫자를 읽는 법
   const how = [];
+  how.push('사용자 = 조사한 경로 바로 아래 폴더 하나입니다(du -d 1). 폴더 이름이 계정 이름과 같다고 확인한 것은 아닙니다.');
+  how.push('같은 이름의 폴더가 대상 둘에 있으면 따로 셉니다(합치지 않습니다).');
+  if (m.corpTopM > 0 && corpTop.length) {
+    how.push(`법인별 순위는 그 법인에 속한 대상들의 폴더를 모아 크기 순으로 매겼습니다. 법인 안 비중의 분모는 그 법인의 사용량(성공한 수집이 있는 대상의 합)입니다${corpTop.some((c) => c.shareDenomRaised) ? ' — 폴더 크기 합이 그보다 크면(반올림) 폴더 크기 합을 분모로 썼습니다' : ''}.`);
+  }
   if (m.approx) how.push('크기는 du -h 반올림 값입니다 — 두 조사의 차이가 반올림 범위 안이면 ‘변화 없음’ 으로 셉니다.');
-  how.push('실패·보고 늦음 대상의 값은 직전 성공 조사 값입니다(칸에 ‘직전 성공 값’ 이라 적었습니다).');
+  how.push('실패·보고 늦음 대상과, 꺼짐·조사 중이라도 직전 시도가 실패했거나 마지막 성공 조사가 보고 늦음 경계보다 오래된 대상의 값은 직전 성공 조사 값입니다(칸에 ‘직전 성공 값’ 이라 적었습니다).');
   if (T.d7 != null) how.push(`7일 변화는 7일 이전 성공 조사가 있는 대상만 더했습니다(${T.d7Targets}/${T.measured}개).`);
   if (T.unmeasured) how.push(`전체 사용량은 성공한 수집이 있는 대상만 더했습니다(결과가 없는 ${T.unmeasured}개는 뺐습니다).`);
   if (includeWatch) how.push(`급증: 7일 증가가 ${esc(bytesText(SURGE_MIN_BYTES))} 이상이면서 7일 전 크기의 ${Math.round(SURGE_MIN_RATIO * 100)}% 이상인 폴더.`);
@@ -258,6 +326,7 @@ export function renderDigestMail(m, o = {}) {
   const foot = [
     `발송 일정: <b style="color:${C.ink};">${esc(sched)}</b>(포탈 시각). 정한 시각에 그때까지 모인 마지막 성공 조사로 만들었습니다 — 조사를 새로 돌리지 않습니다.`,
     `받는 사람 ${o.recipients != null ? `${o.recipients}명` : '—'} · 바꾸는 곳: ${esc(SETTINGS_PATH)} › 종합 메일 · 화면: ${esc(VIEW_PATH)}`,
+    `순위 개수: ${esc(rankCountText(m))}`,
   ];
   if (m.demoExcluded) foot.push(`데모 대상 ${m.demoExcluded}개는 넣지 않았습니다.`);
   if (m.demoIncluded) foot.push(`미리보기 — 데모 대상 ${m.demoIncluded}개가 들어 있습니다(실제 발송에서는 빠집니다).`);
@@ -277,19 +346,33 @@ export function renderDigestMail(m, o = {}) {
     '법인별 사용량:',
     ...m.corps.map((c) => `- ${c.label}: ${bytesText(c.bytes)} (${pct(c.share)}) · 7일 ${c.d7 == null ? '기준 없음' : deltaText({ bytes: c.d7, withinRes: c.d7Within })} · 대상 ${c.targets}개`),
     '',
-    `전 법인 폴더 Top ${m.topN}:`,
+    `전 법인 사용자 Top ${m.topN}:`,
     ...m.top.map((r) => `${String(r.rank).padStart(2)}. ${r.name} — ${bytesText(r.bytes)} · 7일 ${r.new7 ? '신규' : r.d7 ? deltaText({ bytes: r.d7.bytes, withinRes: r.d7.within }) : '—'} (${r.corpLabel} · ${r.path})${r.lastValue ? ' [직전 성공 값]' : ''}`),
     '',
-    `발송 일정: ${sched} · 설정: ${SETTINGS_PATH} › 종합 메일`,
+    ...(m.corpTopM > 0 && corpTop.length ? [
+      `법인별 사용자 Top ${m.corpTopM}:`,
+      ...corpTop.flatMap((c) => [
+        `[${c.label}] 법인 사용량 ${bytesText(c.bytes)}${c.shown ? ` · 상위 ${c.shown}개 ${bytesText(c.topBytes)}(${pct(c.topShare)})` : ''}`,
+        ...(c.rows.length
+          ? c.rows.map((r) => `${String(r.rank).padStart(2)}. ${r.name} — ${bytesText(r.bytes)}${r.share != null ? ` (법인 안 ${pct(r.share)})` : ''} · 7일 ${r.new7 ? '신규' : r.d7 ? deltaText({ bytes: r.d7.bytes, withinRes: r.d7.within }) : '—'} · ${r.device} ${r.path}${r.lastValue ? ' [직전 성공 값]' : ''}`)
+          : [`  ${CORP_EMPTY_TEXT[c.emptyReason] || CORP_EMPTY_TEXT['no-scan']}`]),
+        ...corpTopNotes(c).map((n) => `  * ${n}`),
+        '',
+      ]),
+    ] : []),
+    `발송 일정: ${sched} · 순위 개수: ${rankCountText(m)} · 설정: ${SETTINGS_PATH} › 종합 메일`,
   ].join('\n');
   return { subject, html, text };
 }
 
 // ── ③ 대상별 결과 메일 ────────────────────────────────────────────────────
 /**
- * @param {{label:string, corp?:string, report:object, change?:object|null, recipients?:{fromCommon:number, fromTarget:number}|null, onlyOnChange?:boolean, now?:number}} a
+ * @param {{label:string, corp?:string, report:object, change?:object|null, recipients?:{fromCommon:number, fromTarget:number}|null, onlyOnChange?:boolean, now?:number,
+ *   schedule?:{days:number[], time:string}|null}} a
+ *   schedule(v2.745) — 대상별 정기 발송이면 {days, time}: 머리에 '정기 발송 · 매주 월·목 08:00' 한 줄을 싣고 바닥글이 보내는 때를 그렇게 말한다.
+ *   없으면(기본) 예전 본문과 바이트 단위로 같다.
  */
-export function renderResultMail({ label, corp = '', report, change = null, recipients = null, onlyOnChange = false, now = Date.now() }) {
+export function renderResultMail({ label, corp = '', report, change = null, recipients = null, onlyOnChange = false, now = Date.now(), schedule = null, manual = false, mode = null }) {
   const s = report.scan || {};
   const k = report.kpi || {};
   const when = localStamp(s.ts) || '—';
@@ -297,7 +380,8 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
   const subject = `[아이실론 디렉터리 사용량] ${label}${corp ? ` · ${corp}` : ''} — ${when} · 전체 ${bytesText(k.denomBytes)}${d7 ? ` · 7일 ${deltaText(d7)}` : ''}`.slice(0, 200);
   const rows = [];
   const chips = [corp ? chip(corp) : '', s.sizeMode === 'k' ? chip('정확(-k)') : chip('반올림(-h)')].filter(Boolean);
-  rows.push(band({ title: s.path || '—', titleMono: true, chips, sub: metaLine([s.host || '—', `${when} 조사`, `소요 ${secText(s.durationMs)}`, s.node ? `엣지 ${s.node}` : '메인']) }));
+  const schedLine = schedule && typeof schedule === 'object' ? `정기 발송 · ${scheduleText(schedule)}` : '';
+  rows.push(band({ title: s.path || '—', titleMono: true, chips, sub: metaLine([s.host || '—', `${when} 조사`, `소요 ${secText(s.durationMs)}`, s.node ? `엣지 ${s.node}` : '메인']), note: schedLine }));
   const base7Bytes = d7 && numOrNull(k.denomBytes) != null ? k.denomBytes - d7.bytes : null;
   const d7Pct = d7 && !d7.withinRes && base7Bytes > 0 ? d7.bytes / base7Bytes : null;
   rows.push(section(kpis([
@@ -341,13 +425,18 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
   rows.push(readHow(how));
   const rc = recipients ? `받는 사람: 공통 ${recipients.fromCommon}명 + 이 대상 ${recipients.fromTarget}명` : '';
   rows.push(footer([
-    `조사가 끝날 때마다 보냅니다${onlyOnChange ? '(직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`,
+    schedLine
+      ? `${esc(schedLine)}(포탈 시각) — 정한 시각에 그때까지의 마지막 성공 조사로 만들었습니다${onlyOnChange ? '(마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`
+      : manual
+        ? `지금 보내기로 보낸 메일입니다(마지막 성공 조사) — 평소에는 ${mode && mode.when === 'schedule' ? `정기 발송 · ${esc(scheduleText(mode))}(포탈 시각)에` : '조사가 끝날 때마다'} 보냅니다.`
+        : `조사가 끝날 때마다 보냅니다${onlyOnChange ? '(직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`,
     `${rc ? `${esc(rc)} · ` : ''}바꾸는 곳: ${esc(SETTINGS_PATH)} › 대상 › 결과 메일`,
     `화면: ${esc(VIEW_PATH)} · 보낸 시각 ${esc(localStamp(now) || '—')}`,
   ]));
   const html = doc(subject, `${label} — 전체 ${bytesText(k.denomBytes)}${d7 ? ` · 7일 ${deltaText(d7)}` : ''}`, rows);
   const text = [
     `${label}${corp ? ` · ${corp}` : ''} — 디렉터리 사용량 상위 ${k.topN ?? 0}개`,
+    ...(schedLine ? [schedLine] : []),
     `경로: ${s.path}`, `장비: ${s.host || '—'}`, `조사 노드: ${s.node || '메인'}`, `조사 시각: ${when}`, `소요: ${secText(s.durationMs)}`,
     `전체 합계: ${bytesText(k.denomBytes)}${d7 ? ` (7일 ${deltaText(d7)})` : ''}`,
     `폴더 수: ${(numOrNull(k.users) ?? 0).toLocaleString()}개${k.new7 != null ? ` · 7일 신규 ${k.new7}개` : ''}${k.removed7 != null ? ` · 사라짐 ${k.removed7}개` : ''}`,

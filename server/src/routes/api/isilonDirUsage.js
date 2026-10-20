@@ -52,7 +52,7 @@ import { normalizeBulkPatch, applyBulk, removeTargets, bulkIdsOf, settingsRev, B
 import { targetRows, dcList } from '../../isidu/rows.js';   // v2.742: 목록 행 조립은 종합 메일과 같이 쓴다
 import { saveDigestSettings } from '../../isidu/settings.js';
 import { isiduDigestStatus, sendDigestNow, previewDigest } from '../../isidu/digest.js';
-import { DIGEST_TOPN_CHOICES, DIGEST_GRACE_MS, SURGE_MIN_BYTES, SURGE_MIN_RATIO } from '../../isidu/digestRules.js';
+import { DIGEST_TOPN_CHOICES, DIGEST_RANGES, DIGEST_GRACE_MS, SURGE_MIN_BYTES, SURGE_MIN_RATIO } from '../../isidu/digestRules.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -105,7 +105,7 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => 
   // 데모(mock): 첫 화면이 폴러의 첫 틱(기동 90초 뒤)을 기다리지 않게 — 한 번만 돈다(이후 즉시 반환).
   if (isMockMode()) { try { await ensureIsiduDemo(); } catch { /* 데모 실패는 화면을 막지 않는다 */ } }
   res.json({
-    ok: true, now,
+    ok: true, now, offsetMin: DAY_OFFSET_MIN,   // v2.745 검토 SCHED-04: 정기 발송 회차 표기를 서버 일정과 같은 포탈 시각 오프셋으로
     settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryErrorView(storageRegistryLoadError(), { detail: isAdminReq(req) }),
     targets: await targetRows(),
     // v2.743 AUTHZ-01: 키 파일·DB 의 절대 경로(CONFIG_DIR)는 관리자 상세(데모 계정 제외)에게만 — 그 밖에는 파일 이름만.
@@ -195,7 +195,7 @@ api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, 
 api.get('/tools/isilon-dirusage/settings', adminOnly, fullScopeOnly, requireSuperAdmin, (_req, res) => {
   const devices = listDevices().filter((d) => d.type === 'isilon').map((d) => ({ id: d.id, name: d.name || d.host, host: d.host, agent: d.agent || '', datacenterId: d.datacenterId || '', enabled: d.enabled !== false, username: d.username || '' }));
   res.json({
-    ok: true, settings: loadSettings(), loadError: isiduSettingsLoadError(),
+    ok: true, settings: loadSettings(), loadError: isiduSettingsLoadError(), offsetMin: DAY_OFFSET_MIN,   // SCHED-04: 편집 창 '다음 발송' 미리보기용
     rev: settingsRev(loadSettings().targets),   // v2.739 일괄 변경 — 화면이 읽은 판(그 뒤 다른 사람이 바꿨으면 일괄 적용이 409)
     bulkKeys: BULK_KEYS,
     choices: { devices, agents: knownAgentNames(), datacenters: dcList() },
@@ -341,7 +341,7 @@ function digestView() {
   try { adminTo = (loadMailCfg().defaultTo || []).filter(isEmail).slice(0, MAIL_LIST_MAX); } catch { adminTo = []; }
   return {
     ok: true, digest: s.mail?.digest || null, status: isiduDigestStatus(), loadError: isiduSettingsLoadError(), adminTo,
-    mailReady: isiduMailReady(), topNChoices: DIGEST_TOPN_CHOICES, graceMin: Math.round(DIGEST_GRACE_MS / 60_000),
+    mailReady: isiduMailReady(), topNChoices: DIGEST_TOPN_CHOICES, ranges: DIGEST_RANGES, graceMin: Math.round(DIGEST_GRACE_MS / 60_000),
     surge: { minBytes: SURGE_MIN_BYTES, minRatio: SURGE_MIN_RATIO }, listMax: MAIL_LIST_MAX, offsetMin: DAY_OFFSET_MIN,
   };
 }
@@ -352,7 +352,7 @@ api.put('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperA
   const r = saveDigestSettings(req.body?.digest ?? req.body ?? {});
   if (!r.ok) return res.status(r.unreadable ? 409 : 400).json({ ok: false, reason: r.error, field: r.field || null });
   const d = r.digest;
-  logAudit({ user: req.user?.username, action: 'isidu.digest', target: 'isidu-settings.json', detail: `enabled=${d.enabled} days=${d.days.join('')} time=${d.time} admin=${d.includeAdmin} extra=${d.to.length} topN=${d.topN} watch=${d.includeWatch} targets=${d.includeTargets} skipIfNoNew=${d.skipIfNoNew}`, ip: req.ip });
+  logAudit({ user: req.user?.username, action: 'isidu.digest', target: 'isidu-settings.json', detail: `enabled=${d.enabled} days=${d.days.join('')} time=${d.time} admin=${d.includeAdmin} extra=${d.to.length} topN=${d.topN} corpTopM=${d.corpTopM} watch=${d.includeWatch} targets=${d.includeTargets} skipIfNoNew=${d.skipIfNoNew}`, ip: req.ip });
   res.json(digestView());
 });
 

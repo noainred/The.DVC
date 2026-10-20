@@ -19,10 +19,10 @@ import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { loadSettings, isiduSettingsLoadError } from './settings.js';
 import { targetRows } from './rows.js';
-import { buildOverview } from './report.js';
+import { buildOverview, OVERVIEW_POOL } from './report.js';
 import { MAIL_KIND } from './notify.js';
 import {
-  digestOf, normalizeDigest, planDigestTick, nextDigestSlots, digestRecipients, buildDigestModel, scanMarkOf, slotLabel, DIGEST_HISTORY_MAX,
+  digestOf, normalizeDigest, planDigestTick, nextDigestSlots, digestRecipients, buildDigestModel, scanMarkOf, slotLabel, DIGEST_HISTORY_MAX, digestPoolOf,
 } from './digestRules.js';
 import { renderDigestMail } from './mailHtml.js';
 
@@ -79,14 +79,17 @@ let _timer = null;
 let _lastTick = null;
 let _lastError = null;
 
-/** 본문 모델을 만든다(장비 접속 없음). */
+/**
+ * 본문 모델을 만든다(장비 접속 없음). 정기 발송·지금 보내기·미리보기가 이 함수 하나를 쓴다(같은 모델).
+ * v2.745: 대상마다 상위 폴더를 max(N, M, OVERVIEW_POOL) 개 모은다 — 화면용 개요(10개)를 그대로 쓰면 Top 20·법인별 Top M 이 틀릴 수 있다.
+ */
 async function buildModel(digest, { excludeDemo, now }) {
   const t0 = Date.now();
   const rows = await targetRows();
   const ids = rows.filter((r) => !excludeDemo || !String(r.id).startsWith('mock-')).map((r) => r.id);
-  const ov = await buildOverview(ids);
+  const ov = await buildOverview(ids, { pool: digestPoolOf(digest, OVERVIEW_POOL) });
   const ovById = new Map((Array.isArray(ov) ? ov : []).filter((x) => x && x.id).map((x) => [x.id, x]));
-  const model = buildDigestModel(rows, ovById, { now, topN: digest.topN, excludeDemo });
+  const model = buildDigestModel(rows, ovById, { now, topN: digest.topN, corpTopM: digest.corpTopM, excludeDemo });
   return { model, buildMs: Date.now() - t0 };
 }
 

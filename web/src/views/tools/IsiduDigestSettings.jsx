@@ -9,20 +9,93 @@
  *  · 미리보기는 저장하지 않은 화면 값으로 만든다(서버가 보내지 않고 본문만 돌려준다). 본문은 스크립트가 없는 메일 HTML 이라
  *    `sandbox` iframe(srcDoc) 에 그린다 — 스크립트·폼·링크 이동을 막는다.
  *  · 폴링하지 않는다(설정 화면이다). 저장·보내기 뒤에만 다시 읽는다.
+ *  · v2.745 '담을 내용'(시안 ⑥): 전 법인 사용자 Top N · 법인별 사용자 Top M 숫자 칸 + 빠른 선택 + '메일에 싣는 사용자 행' 미리 계산.
+ *    범위·판정은 `isiduDigestText.js`(서버와 같은 값 — 웹 테스트가 대조) — 범위 밖이면 저장·미리보기를 잠그고 사유를 말한다.
+ *    빈 칸은 '그대로'(저장된 값 유지). 법인 수는 상위 화면이 이미 받은 대상 목록(`rows`)에서 센다 — 받지 못했으면 '—'(지어내지 않는다).
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import {
-  DAY_LABELS, DAY_ORDER, DAY_PRESETS, HOURS, TOPN_CHOICES, formFromDigest, digestBody, minuteChoices, toggleDay, presetActive,
+  DAY_LABELS, DAY_ORDER, DAY_PRESETS, HOURS, formFromDigest, digestBody, minuteChoices, toggleDay, presetActive,
   recipientsOf, formIssues, nextSlots, slotText, untilText, scheduleText, historyLine, sendResultText, mailReadyNote,
+  TOPN_PRESETS, CORP_TOPM_PRESETS, countField, countHint, keptHint, presetLabel, corpGroupsOf, rowsPlan, rowsPlanText, formDirty, mailOrder,
 } from './isiduDigestText.js';
+import './isiduDigestTop.css';
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** 순위 개수 칸 하나(숫자 + 빠른 선택 + 설명). 입력은 글자 그대로 들고 판정은 isiduDigestText.countField 가 한다. */
+function CountBox({ k, title, unit, presets, form, saved, set, issue, serverBad }) {
+  const id = useId();
+  const c = countField(form[k], k);
+  const kept = keptHint(form, saved, k);
+  const bad = !!issue || serverBad;
+  return (
+    <div className="isd-dtop-box">
+      <label className="ttl" htmlFor={id}>{title}</label>
+      <div className="isd-dtop-in">
+        <input id={id} type="text" inputMode="numeric" autoComplete="off" className={bad ? 'bad' : ''} value={form[k]} onChange={(e) => set({ [k]: e.target.value })} aria-invalid={bad || undefined} aria-describedby={`${id}-h`} />
+        <span className="unit">{unit}</span>
+      </div>
+      <div className="row" role="group" aria-label={`${title} 빠른 선택`}>
+        {presets.map((v) => {
+          const on = c.value === v;
+          return <button key={v} type="button" className={`btn2 small${on ? ' on' : ''}`} aria-pressed={on} onClick={() => set({ [k]: String(v) })}>{presetLabel(v)}</button>;
+        })}
+      </div>
+      {/* 범위 밖 사유는 카드 아래 한 곳에서 말한다(칸마다 같은 문장을 두 번 쓰지 않는다) — 여기는 칸 설명·'그대로' 안내 */}
+      <div id={`${id}-h`} className="hint">{kept || countHint(k)}</div>
+    </div>
+  );
+}
 
-export default function IsiduDigestSettings({ locked: lockedOuter = false }) {
+/**
+ * '담을 내용' 카드(시안 ⑥) — 순위 개수 두 칸 · 사용자 행 미리 계산 · 범위 밖 사유 · 긴 메일 경고 · 실을 절 선택.
+ * 서버 없이 그릴 수 있게 값만 받는다(웹 테스트가 renderToStaticMarkup 으로 본다).
+ */
+export function DigestContentCard({ form, saved, groups = null, set, locked = false, issues = {}, badField = () => false }) {
+  const plan = rowsPlan(form, saved, groups);
+  const t = rowsPlanText(plan);
+  const countIssues = [issues.topN, issues.corpTopM].filter(Boolean);
+  return (
+    <fieldset disabled={locked}>
+      <legend>담을 내용</legend>
+      <div className="isd-dtop-grid">
+        <CountBox k="topN" title="전 법인 사용자 Top" unit="명" presets={TOPN_PRESETS} form={form} saved={saved} set={set} issue={issues.topN} serverBad={badField('digest.topN')} />
+        <CountBox k="corpTopM" title="법인별 사용자 Top" unit="명 · 법인마다" presets={CORP_TOPM_PRESETS} form={form} saved={saved} set={set} issue={issues.corpTopM} serverBad={badField('digest.corpTopM')} />
+      </div>
+      <div className="isd-dtop-sum" aria-live="polite">
+        <div>메일에 싣는 사용자 행 최대 <b className="mono">{t.total}</b>줄 = {t.expr}</div>
+        {t.notes.map((n) => <div key={n} className="hint">{n}</div>)}
+      </div>
+      {countIssues.length ? <div className="result bad">{countIssues.map((x) => <div key={x}>{x}</div>)}</div> : null}
+      {t.long ? <div className="result warn">{t.long}</div> : null}
+      <label className="radio"><input type="checkbox" checked={form.includeWatch} onChange={(e) => set({ includeWatch: e.target.checked })} /><span>수집 실패·오래된 대상을 ‘먼저 볼 것’ 에 싣기</span></label>
+      <label className="radio"><input type="checkbox" checked={form.includeTargets} onChange={(e) => set({ includeTargets: e.target.checked })} /><span>수집 대상별 표 싣기</span></label>
+      <label className="radio"><input type="checkbox" checked={form.skipIfNoNew} onChange={(e) => set({ skipIfNoNew: e.target.checked })} /><span>직전 발송 뒤 새로 성공한 조사가 하나도 없으면 보내지 않기</span></label>
+    </fieldset>
+  );
+}
+
+/** 메일 순서 카드(시안 ⑥ 오른쪽) — 서버 본문의 절 순서. 끈 절은 '싣지 않음' 으로 보인다. */
+export function DigestOrderCard({ form, plan }) {
+  const items = mailOrder(form, plan);
+  return (
+    <div className="isd-card">
+      <div className="isd-cardhead"><h3>메일 순서</h3><span className="hint">화면 값 기준</span></div>
+      <ol className="isd-dtop-order">
+        {items.map((x, i) => (
+          <li key={x.key} className={`${x.focus ? 'focus' : ''}${x.off ? ' off' : ''}`}>
+            <span className="n" aria-hidden="true">{i + 1}</span><span>{x.text}{x.off ? ' — 싣지 않음' : ''}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+export default function IsiduDigestSettings({ locked: lockedOuter = false, rows = null }) {
   const [srv, setSrv] = useState(null);
   const [loadErr, setLoadErr] = useState(null);
   const [form, setForm] = useState(null);
@@ -47,12 +120,15 @@ export default function IsiduDigestSettings({ locked: lockedOuter = false }) {
 
   const off = srv?.offsetMin ?? 540;
   const adminTo = useMemo(() => srv?.adminTo || [], [srv]);
+  // 법인 수 — 상위 화면이 받은 대상 목록(메인 목록 응답의 행). 받지 못했으면 null('—').
+  const groups = useMemo(() => corpGroupsOf(rows), [rows]);
   const locked = lockedOuter || !srv || !!srv.loadError;
-  const dirty = !!form && !!saved && !same(form, saved);
+  const dirty = formDirty(form, saved);
   const rc = form ? recipientsOf(form, adminTo) : null;
   const issues = form ? formIssues(form, adminTo) : {};
   const slots = form ? nextSlots(form, now, 3, off) : [];
-  const hasIssue = !!(issues.days || issues.to);
+  const countBad = !!(issues.topN || issues.corpTopM);
+  const hasIssue = !!(issues.days || issues.to || issues.topN || issues.corpTopM);
 
   if (loadErr && !srv) return <ErrorBox error={loadErr} />;
   if (!srv || !form) return <Loading />;
@@ -168,25 +244,14 @@ export default function IsiduDigestSettings({ locked: lockedOuter = false }) {
             </span>
           </fieldset>
 
-          <fieldset disabled={locked}>
-            <legend>담을 내용</legend>
-            <div className="row">
-              <span className="hint" style={{ fontSize: 12.5 }}>전 법인 폴더 순위</span>
-              <div className="isd-seg" role="group" aria-label="전 법인 폴더 순위 개수">
-                {TOPN_CHOICES.map((n) => <button key={n} type="button" className={form.topN === n ? 'on' : ''} aria-pressed={form.topN === n} onClick={() => set({ topN: n })}>Top {n}</button>)}
-              </div>
-            </div>
-            <label className="radio"><input type="checkbox" checked={form.includeWatch} onChange={(e) => set({ includeWatch: e.target.checked })} /><span>수집 실패·오래된 대상을 ‘먼저 볼 것’ 에 싣기</span></label>
-            <label className="radio"><input type="checkbox" checked={form.includeTargets} onChange={(e) => set({ includeTargets: e.target.checked })} /><span>수집 대상별 표 싣기</span></label>
-            <label className="radio"><input type="checkbox" checked={form.skipIfNoNew} onChange={(e) => set({ skipIfNoNew: e.target.checked })} /><span>직전 발송 뒤 새로 성공한 조사가 하나도 없으면 보내지 않기</span></label>
-          </fieldset>
+          <DigestContentCard form={form} saved={saved} groups={groups} set={set} locked={locked} issues={issues} badField={badField} />
 
           {msg ? <div className={`result ${msg.tone}`}>{msg.text}</div> : null}
           <div className="row" style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
             <button type="button" className="btn2 primary" onClick={save} disabled={locked || !!busy || hasIssue || !dirty}>{busy === 'save' ? '저장 중…' : '저장'}</button>
             <button type="button" className="btn2" onClick={sendNow} disabled={locked || !!busy || dirty || st.edge} title={dirty ? '바뀐 칸을 먼저 저장하세요 — 지금 보내기는 저장된 설정으로 보냅니다.' : undefined}>{busy === 'send' ? '보내는 중…' : '지금 한 번 보내기'}</button>
-            <button type="button" className="btn2" onClick={openPreview} disabled={!!busy || !!issues.to}>{busy === 'preview' ? '만드는 중…' : '메일 미리보기 열기'}</button>
-            {dirty ? <span className="hint" style={{ marginLeft: 'auto' }}>저장하지 않은 변경이 있습니다{form.enabled && !saved.enabled ? ' — 켠 뒤 처음 맞는 회차부터 보냅니다(오늘 이미 지난 시각은 보내지 않습니다)' : ''}.</span> : null}
+            <button type="button" className="btn2" onClick={openPreview} disabled={!!busy || !!issues.to || countBad} title={countBad ? '순위 개수를 범위 안으로 고치면 미리보기를 열 수 있습니다.' : undefined}>{busy === 'preview' ? '만드는 중…' : '메일 미리보기 열기'}</button>
+            {dirty ? <span className="hint" style={{ marginLeft: 'auto' }}>저장하지 않은 변경이 있습니다 — ‘지금 한 번 보내기’ 는 저장한 뒤에 쓸 수 있습니다(저장된 설정으로 보냅니다){form.enabled && !saved.enabled ? '. 켠 뒤 처음 맞는 회차부터 보냅니다(오늘 이미 지난 시각은 보내지 않습니다)' : ''}.</span> : null}
           </div>
         </div>
 
@@ -217,9 +282,15 @@ export default function IsiduDigestSettings({ locked: lockedOuter = false }) {
             }) : <div className="hint">아직 기록이 없습니다. 보낸 결과·생략·실패·놓친 회차가 여기 남습니다(주소는 남기지 않고 개수만).</div>}
           </div>
 
+          <DigestOrderCard form={form} plan={rowsPlan(form, saved, groups)} />
+
           <div className="isd-card">
             <div className="isd-cardhead"><h3>알아 둘 것</h3></div>
             <ul className="isd-nudge">
+              <li>사용자는 조사한 경로 바로 아래 폴더 하나입니다. 폴더 이름이 계정 이름과 같은지는 포탈이 확인하지 않습니다.</li>
+              <li>같은 이름의 폴더가 대상 둘에 있으면 따로 셉니다.</li>
+              <li>순위는 대상마다 마지막 성공 조사의 폴더 목록에서 고릅니다. 조사를 새로 돌리지 않습니다.</li>
+              <li>바꾼 개수는 저장한 뒤 다음 발송부터 적용됩니다. 대상별 결과 메일의 Top 개수(대상마다 정함)와는 따로입니다.</li>
               <li>중앙 포탈만 보냅니다. 엣지 법인의 결과는 중앙이 이미 받아 둔 값을 씁니다.</li>
               <li>포탈이 정한 시각에 꺼져 있었다면 그 회차는 ‘놓침’ 으로 남기고 몰아서 보내지 않습니다(정한 시각부터 {srv.graceMin ?? 30}분 안에 확인하면 보냅니다).</li>
               <li>데모 대상은 실제 메일에 싣지 않습니다(미리보기에는 넣고 그 사실을 밝힙니다).</li>

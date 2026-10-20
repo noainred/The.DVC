@@ -248,6 +248,8 @@
 .isd .isd-ccard .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .isd .isd-ccard .head b { font-size: 15px; }
 .isd .isd-ccard .head .isd-note { flex: 1 1 auto; min-width: 0; }
+/* v2.745 수집 상태 표의 결과 메일 칸 — 조각(parts)을 한 줄씩. 칸 폭을 지키지 않으면 표가 이 칸을 74px 로 눌러 글자 단위로 쪼개졌다. */
+.isd .isd-mailcell { min-width: 160px; max-width: 230px; white-space: normal; overflow-wrap: normal; word-break: keep-all; }
 .isd .isd-ccard .dev { font-size: 12.5px; color: var(--text-dim); overflow-wrap: anywhere; }
 .isd .isd-ccard .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); gap: 8px 12px; }
 .isd .isd-ccard .stats > span { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-weight: 600; font-size: 14px; min-width: 0; }
@@ -286,6 +288,15 @@
 .isd-form .isd-day.sun span { color: #fca5a5; }
 .isd-form .isd-day.sat span { color: #93c5fd; }
 .isd-form .isd-day:disabled { opacity: .6; cursor: not-allowed; }
+/* v2.745 대상별 결과 메일 '보내는 때' — 정한 요일·시각 칸(요일 칩은 종합 메일 탭과 같은 isd-days · isd-day). */
+.isd-form .isd-mailwhen { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.isd-form .isd-mailsched { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-soft); background: var(--bg-soft); }
+.isd-form .isd-mailsched .row { flex-wrap: wrap; }
+.isd-form .isd-bulkdays { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.isd-form .isd-bulkdays .isd-days { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.isd-form .isd-bulkdays .isd-day { height: 36px; }
+.isd-form .isd-bulktime { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.isd-form .isd-bulktime select { flex: 1 1 72px; }
 .isd-form label.fld.inline { width: 96px; }
 .isd-form .isd-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .isd-form .isd-seg button { height: 32px; padding: 0 12px; border: 0; background: transparent; color: var(--text-dim); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }

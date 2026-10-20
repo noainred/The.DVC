@@ -7,9 +7,14 @@
  *    받는 사람(`recipientsOf` ↔ `digestRecipients`) · 다음 회차(`nextSlots` ↔ `nextDigestSlots`) · 요일 표기(`daysLabel`).
  *  · 시각은 서버가 준 포탈 오프셋(`offsetMin`, 기본 한국 시각)으로 쓴다 — 브라우저 시간대에 기대지 않는다.
  *  · 기록 문구의 코드는 서버와 1:1 이다(`MISSED_TEXT` ↔ DIGEST_MISSED_REASONS · `SKIP_TEXT` ↔ DIGEST_SKIP_CODES — 웹 테스트가 서버 소스에서 뽑아 대조).
+ *  · v2.745 '담을 내용'(시안 ⑥): 전 법인 사용자 Top N · 법인별 사용자 Top M 의 범위는 `DIGEST_RANGES`(서버와 같은 값 — 웹 테스트가 대조)이고
+ *    숫자 칸 판정(`countField`)도 서버 `normalizeDigest` 와 같은 규칙이다 — 빈 칸은 '그대로'(저장된 값 유지 — `Number('')` 가 0 이 되는 함정),
+ *    범위 밖·정수 아님은 저장하지 않는다(자르지 않는다). 폼은 숫자 칸을 **입력한 글자 그대로** 들고 있어 틀린 값이 화면에서 사라지지 않는다.
+ *    '메일에 싣는 사용자 행' 은 최대치(전 법인 N + 법인 수 × M)이고 법인 수는 화면이 받은 대상 목록에서 센다 — 모르면 '—'(지어내지 않는다).
  */
 import { parseMailInput, isEmail, MAIL_LIST_MAX } from './isiduText.js';
 import { unitText } from '../unitText.js';
+import { numOrNull } from '../../numOrNull.js';
 
 export const DAY_LABELS = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
 /** 화면 요일 버튼 순서 — 월요일부터(사람이 읽는 순서). 값은 0 = 일요일. */
@@ -22,10 +27,56 @@ export const DAY_PRESETS = Object.freeze([
 ]);
 export const HOURS = Object.freeze(Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')));
 export const MINUTES = Object.freeze(['00', '10', '20', '30', '40', '50']);
-export const TOPN_CHOICES = Object.freeze([5, 10, 20]);
+/** 순위 개수 범위(v2.745) — 서버 `digestRules.js DIGEST_RANGES` 와 같은 값(웹 테스트가 대조한다). 화면 문구의 숫자는 이 값에서 만든다. */
+export const DIGEST_RANGES = Object.freeze({
+  topN: Object.freeze({ min: 1, max: 50, def: 10 }),
+  corpTopM: Object.freeze({ min: 0, max: 20, def: 0 }),
+});
+/** 빠른 선택(시안 ⑥) — 전 법인 / 법인별. 0 = 법인별 절을 싣지 않는다. */
+export const TOPN_PRESETS = Object.freeze([5, 10, 20, 30]);
+export const CORP_TOPM_PRESETS = Object.freeze([0, 3, 5, 10]);
+/** 사용자 행이 이보다 많으면 '메일이 길어집니다' 경고(화면 안내 기준 — 서버가 막지는 않는다). */
+export const LONG_MAIL_ROWS = 120;
+const COUNT_KEYS = Object.freeze(['topN', 'corpTopM']);
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MIN = 60_000;
 const DEF_OFFSET = 540;
+
+/** 범위 안의 정수면 그 값, 아니면 null(서버 digestRules.js intIn 과 같은 규칙 — 같은 numOrNull 판정). */
+const intIn = (v, r) => { const n = numOrNull(v); return n != null && Number.isInteger(n) && n >= r.min && n <= r.max ? n : null; };
+
+/**
+ * 순위 개수 칸 하나의 판정 — 서버 `normalizeDigest` 의 숫자 칸(numField)과 같은 규칙.
+ * 빈 값·빠진 칸 = `{keep:true}`(저장된 값 그대로) · 범위 안 정수 = `{value}` · 그 밖(범위 밖·소수·글자·true·[]) = `{error:true}`.
+ * @param {unknown} v @param {'topN'|'corpTopM'} key
+ */
+export function countField(v, key) {
+  const r = DIGEST_RANGES[key];
+  if (!r) return { error: true };
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return { keep: true };
+  const n = intIn(v, r);
+  return n == null ? { error: true } : { value: n };
+}
+
+/** 빠른 선택 버튼 글자 — 0 은 '0 · 빼기'(법인별 절을 싣지 않음). */
+export const presetLabel = (v) => (Number(v) === 0 ? '0 · 빼기' : String(v));
+
+/** 칸 설명(시안 ⑥) — 범위 숫자는 DIGEST_RANGES 에서. */
+export function countHint(key) {
+  const r = DIGEST_RANGES[key];
+  if (key === 'topN') return `모든 법인을 합쳐 큰 순서로 싣습니다. ${r.min}~${r.max}명.`;
+  return `법인마다 그 법인 안에서 큰 순서로 싣습니다. ${r.min}~${r.max}명 · ${r.min} 이면 이 절을 싣지 않습니다.`;
+}
+
+/** 저장된 폼의 숫자 칸 값(없거나 틀리면 null). */
+const savedCount = (saved, key) => countField(saved?.[key], key).value ?? null;
+
+/** 빈 칸이면 '저장된 값을 그대로 둡니다' 안내(빈 칸이 아니면 null). */
+export function keptHint(f, saved, key) {
+  if (!countField(f?.[key], key).keep) return null;
+  const v = savedCount(saved, key);
+  return v == null ? '비워 두면 저장된 값을 그대로 둡니다.' : `비워 두면 저장된 값 ${v} 을 그대로 둡니다.`;
+}
 
 const intDays = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b);
 
@@ -54,7 +105,9 @@ export function formFromDigest(d) {
     hour: time.slice(0, 2), minute: time.slice(3, 5),
     includeAdmin: g.includeAdmin !== false,
     to: (Array.isArray(g.to) ? g.to : []).join('\n'),
-    topN: TOPN_CHOICES.includes(Number(g.topN)) ? Number(g.topN) : 10,
+    // 숫자 칸은 글자로 든다(입력한 그대로 — 틀린 값이 화면에서 사라지지 않게). 저장값 판정은 서버 digestOf 와 같다(옛 파일 corpTopM 없음 = 0).
+    topN: String(intIn(g.topN, DIGEST_RANGES.topN) ?? DIGEST_RANGES.topN.def),
+    corpTopM: String(intIn(g.corpTopM, DIGEST_RANGES.corpTopM) ?? DIGEST_RANGES.corpTopM.def),
     includeWatch: g.includeWatch !== false,
     includeTargets: g.includeTargets !== false,
     skipIfNoNew: g.skipIfNoNew === true,
@@ -67,12 +120,39 @@ export function minuteChoices(cur) {
   return MINUTES.includes(c) || !/^[0-5]\d$/.test(c) ? [...MINUTES] : [...MINUTES, c].sort();
 }
 
-/** 화면 폼 → 저장 요청 본문(서버가 다시 판정한다). */
+/**
+ * 화면 폼 → 저장 요청 본문(서버가 다시 판정한다).
+ * 순위 개수: 빈 칸은 **보내지 않는다**(서버가 저장된 값을 그대로 둔다 — '' 를 0 으로 보내면 법인별 절이 조용히 꺼진다) ·
+ * 범위 안 정수는 수로 · 틀린 값은 글자 그대로 보내 서버가 400 으로 칸을 짚게 한다(화면은 그 전에 저장을 잠근다).
+ */
 export function digestBody(f) {
-  return {
+  const out = {
     enabled: !!f.enabled, days: intDays(f.days), time: `${f.hour}:${f.minute}`, includeAdmin: !!f.includeAdmin,
-    to: String(f.to ?? ''), topN: Number(f.topN), includeWatch: !!f.includeWatch, includeTargets: !!f.includeTargets, skipIfNoNew: !!f.skipIfNoNew,
+    to: String(f.to ?? ''), includeWatch: !!f.includeWatch, includeTargets: !!f.includeTargets, skipIfNoNew: !!f.skipIfNoNew,
   };
+  for (const k of COUNT_KEYS) {
+    const c = countField(f?.[k], k);
+    if (c.value != null) out[k] = c.value;
+    else if (c.error) out[k] = String(f[k]);
+  }
+  return out;
+}
+
+/**
+ * 바뀐 칸이 있는가 — 숫자 칸은 **값**으로 비교한다('010' = '10', 빈 칸 = 저장된 값 그대로). 틀린 값은 바뀐 것이다.
+ * 이 판정이 '지금 한 번 보내기' 를 잠근다(저장된 설정으로 보내기 때문 — 기존 규칙).
+ */
+export function formDirty(f, saved) {
+  if (!f || !saved) return false;
+  const canon = (x) => {
+    const o = { ...x };
+    for (const k of COUNT_KEYS) {
+      const c = countField(x?.[k], k);
+      o[k] = c.error ? `bad:${String(x?.[k] ?? '').trim()}` : c.keep ? savedCount(saved, k) : c.value;
+    }
+    return o;
+  };
+  return JSON.stringify(canon(f)) !== JSON.stringify(canon(saved));
 }
 
 /** 요일 하나 켜기/끄기. */
@@ -112,7 +192,88 @@ export function formIssues(f, adminTo = []) {
   if (r.invalid.length) out.to = `형식이 틀린 주소 ${r.invalid.length}개: ${r.invalid.slice(0, 3).join(', ')}${r.invalid.length > 3 ? ' …' : ''} — 저장하지 않습니다.`;
   else if (r.over) out.to = `추가 받는 사람은 ${MAIL_LIST_MAX}명까지입니다(${r.over}명 초과).`;
   if (f?.enabled && !r.count && !out.to) out.noRecipients = '받는 사람이 없습니다 — 통합 관리자를 넣거나 주소를 적으세요.';
+  // 순위 개수 — 서버는 켜짐과 무관하게 400 이므로 꺼져 있어도 본다.
+  const RN = DIGEST_RANGES.topN; const RM = DIGEST_RANGES.corpTopM;
+  if (countField(f?.topN, 'topN').error) out.topN = `전 법인 사용자 Top 은 ${RN.min}~${RN.max} 사이 정수여야 합니다 — 이대로는 저장할 수 없습니다.`;
+  if (countField(f?.corpTopM, 'corpTopM').error) out.corpTopM = `법인별 사용자 Top 은 ${RM.min}~${RM.max} 사이 정수여야 합니다(${RM.min} = 싣지 않음) — 이대로는 저장할 수 없습니다.`;
   return out;
+}
+
+/* ── 담을 내용 — 사용자 행 미리 계산(v2.745) ─────────────────────────── */
+/**
+ * 대상 목록(메인 목록 응답의 행) → 법인 묶음 수. **실제 메일의 법인별 절과 같은 묶음**이다(서버 buildDigestModel —
+ * 법인 = corp → datacenterId, 법인 미지정 대상은 한 묶음, 데모(mock-) 대상은 실제 메일에서 빠진다). 목록을 모르면 null.
+ * @returns {{corps:number, unassigned:boolean, demoTargets:number}|null}
+ */
+export function corpGroupsOf(rows) {
+  if (!Array.isArray(rows)) return null;
+  const real = new Set(); let demo = 0;
+  for (const t of rows) {
+    if (!t || typeof t !== 'object' || !t.id) continue;
+    if (String(t.id).startsWith('mock-')) { demo++; continue; }
+    real.add(String(t.corp || t.datacenterId || '').trim());
+  }
+  return { corps: real.size, unassigned: real.has(''), demoTargets: demo };
+}
+
+/**
+ * 사용자 행 최대치 = 전 법인 N + 법인 수 × M(M = 0 이면 N). 빈 칸은 저장된 값으로 센다. 값이 틀리거나 법인 수를 모르면 null.
+ * @returns {{topN:number|null, corpTopM:number|null, corps:number|null, total:number|null, long:boolean, invalid:boolean, groups:object|null}}
+ */
+export function rowsPlan(f, saved, groups) {
+  const val = (k) => { const c = countField(f?.[k], k); return c.error ? null : c.keep ? savedCount(saved, k) : c.value; };
+  const n = val('topN'); const m = val('corpTopM');
+  const g = groups && Number.isInteger(groups.corps) && groups.corps >= 0 ? groups : null;
+  const corps = g ? g.corps : null;
+  const total = n == null || m == null ? null : m === 0 ? n : corps == null ? null : n + corps * m;
+  return { topN: n, corpTopM: m, corps, total, long: total != null && total > LONG_MAIL_ROWS, invalid: n == null || m == null, groups: g };
+}
+
+/**
+ * 미리 계산 문구 — { total('35'·'—'), expr('전 법인 10 + 법인별 5곳 × 5'), notes[], long(경고 문장 또는 null) }.
+ * '최대' 다 — 사용자 폴더가 그보다 적으면 있는 만큼만 싣는다.
+ */
+export function rowsPlanText(p) {
+  const n = p?.topN == null ? '—' : String(p.topN);
+  let corp;
+  if (p?.corpTopM == null) corp = '—';
+  else if (p.corpTopM === 0) corp = '0(싣지 않음)';
+  else corp = `${p.corps == null ? '—' : p.corps}곳 × ${p.corpTopM}`;
+  const notes = [];
+  const g = p?.groups || null;
+  if (p?.corpTopM === 0) notes.push('법인별 사용자 Top 절은 싣지 않습니다.');
+  else if (p?.corpTopM != null && g) {
+    notes.push(`지금 등록된 법인 ${g.corps}곳 기준입니다${g.unassigned ? '(법인 미지정 대상은 한 묶음으로 셉니다)' : ''}. 사용자 폴더가 그보다 적은 법인은 있는 만큼만 싣습니다.`);
+  } else if (p?.corpTopM != null) notes.push('등록된 법인 수를 알 수 없어 줄 수를 계산하지 않았습니다(이 화면이 대상 목록을 받지 못했습니다).');
+  if (g?.demoTargets) {
+    notes.push(g.corps === 0
+      ? '데모 대상만 있습니다 — 데모 데이터는 실제 메일에 넣지 않습니다(미리보기에는 넣습니다).'
+      : `데모 대상 ${g.demoTargets}개는 실제 메일에서 빠집니다 — 위 법인 수에 넣지 않았습니다(미리보기에는 넣습니다).`);
+  }
+  return {
+    total: p?.total == null ? '—' : String(p.total),
+    expr: `전 법인 ${n} + 법인별 ${corp}`,
+    notes,
+    long: p?.long ? `사용자 행이 최대 ${p.total}줄이라 메일이 길어집니다. 휴대폰 메일 앱에서는 아래로 많이 내려야 합니다.` : null,
+  };
+}
+
+/**
+ * 메일 순서(시안 ⑥ 오른쪽 카드) — 서버 renderDigestMail 의 절 순서와 같다(웹 테스트가 서버 소스로 대조).
+ * 끈 절은 지우지 않고 off 로 둔다(무엇이 빠지는지 보이게).
+ * @returns {{key:string, text:string, off:boolean, focus:boolean}[]}
+ */
+export function mailOrder(f, plan) {
+  const n = plan?.topN; const m = plan?.corpTopM;
+  return [
+    { key: 'kpi', text: '요약 숫자', off: false, focus: false },
+    { key: 'watch', text: '먼저 볼 것', off: !f?.includeWatch, focus: false },
+    { key: 'corps', text: '법인별 사용량', off: false, focus: false },
+    { key: 'top', text: `전 법인 사용자 Top ${n == null ? '—' : n}`, off: false, focus: true },
+    { key: 'corpTop', text: `법인별 사용자 Top ${m == null ? '—' : m}`, off: m === 0, focus: true },
+    { key: 'targets', text: '수집 대상별', off: !f?.includeTargets, focus: false },
+    { key: 'how', text: '숫자를 읽는 법', off: false, focus: false },
+  ];
 }
 
 /* ── 시각 ─────────────────────────────────────────────────────────── */
