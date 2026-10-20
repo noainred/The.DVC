@@ -3,7 +3,7 @@ import { usePolling } from '../api.js';
 import { DataTable, Loading, ErrorBox, EntityDetail, GpuBadge } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import { unitText } from './unitText.js';
-import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navAfterError } from './vmPageText.js';
+import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navSync, navAfterError } from './vmPageText.js';
 // v2.746 C안: '가상머신 상세' = 분포 4패널 + 선택 칩 + 표. 판정·문구는 vmDistText.js, 그리기는 VmDistPanels.jsx.
 import { EMPTY_FACETS, facetParams, facetKey, hasFacet, clearFacet, chipList, facetErrorText, specText, specSort, selectionView } from './vmDistText.js';
 import { VmDistPanels, VmDistChips, VmUsageBar, VmNameCell, VmMobileList, useNarrowScreen } from './VmDistPanels.jsx';
@@ -56,6 +56,8 @@ export default function Vms({ filters }) {
   useEffect(() => {
     if (reset) setNav(reset);
   }, [reset?.notice, reset?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 조건이 바뀌면 쪽 번호 기록을 비운다 — 되돌아왔을 때 예전 쪽으로 가지 않고 1페이지부터 보이게(navSync).
+  useEffect(() => { setNav((n) => navSync(n, queryKey)); }, [queryKey]);
   const setFacet = (key, value) => setFacets((f) => ({ ...f, [key]: value }));
   const clearAllSel = () => { setFacets(EMPTY_FACETS); setGpuOnly(false); setGpuType(''); };
   if (reset) return <Loading />;

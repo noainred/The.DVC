@@ -128,6 +128,14 @@ export function navNext(nav, queryKey, cursor) {
 export function navPrev(nav, queryKey) { const { stack } = navView(nav, queryKey); return { key: queryKey, stack: stack.slice(0, -1), notice: null }; }
 export function navFirst(queryKey) { return { key: queryKey, stack: [], notice: null }; }
 /**
+ * 조건(queryKey)이 바뀌었으면 쪽 번호 기록을 실제로 비운다(바뀌지 않았으면 같은 객체 — 다시 그리지 않게).
+ * navView 만으로는 '무시' 일 뿐이라, 조건을 바꿨다가 되돌리면(패널 막대를 골랐다가 '모두 해제') 예전 스택이 살아나
+ * 1페이지가 아니라 예전에 넘겨 둔 쪽으로 돌아갔다(v2.746 Chromium 확인에서 발견).
+ */
+export function navSync(nav, queryKey) {
+  return nav && nav.key === queryKey ? nav : navFirst(queryKey);
+}
+/**
  * 커서 오류(409 만료·400 거절)를 받았을 때 — 첫 페이지로 되돌린 상태(안내 포함). 되돌릴 것이 없으면 null.
  * 첫 페이지(커서 없음)에서는 커서 오류가 날 수 없으므로 null 이다(같은 오류로 무한히 되돌리지 않게).
  */
