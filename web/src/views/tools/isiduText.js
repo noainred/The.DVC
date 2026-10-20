@@ -754,6 +754,19 @@ export function recipientPreviewText(p) {
   return `받는 사람 ${p.count}명(${parts.join(' + ')}${p.dupes ? ` — 같은 주소 ${p.dupes}개는 한 번만` : ''})`;
 }
 
+/**
+ * 편집 창 '결과 메일' 의 안내 한 줄 — 받는 사람 미리보기 + 언제 누가 보내는지.
+ * 받는 사람이 0명이면 '보내지 않습니다' 만 말한다(그 뒤에 '…보냅니다' 를 이어 붙이면 한 줄이 서로 반대말을 한다 — v2.745 검토).
+ * 정기 발송은 정한 요일·시각에 메인이 그때까지 메인에 들어온 마지막 성공 결과로 보낸다(결과가 들어올 때 보내는 것이 아니다).
+ */
+export function mailSendHint(p, sched) {
+  const who = recipientPreviewText(p);
+  if (!p || !p.count) return who;
+  return sched
+    ? `${who} · 정한 요일·시각에 메인이 보냅니다(엣지 담당 대상도 그때까지 메인에 들어온 마지막 성공 결과로 보냅니다).`
+    : `${who} · 조사가 성공할 때마다 보냅니다(메인이 보냅니다 — 엣지 담당 대상도 결과가 메인에 들어오면 보냅니다).`;
+}
+
 /** 입력 칸의 형식 오류 안내(없으면 null). */
 export function mailInputIssue(text) {
   const n = parseMailInput(text);
@@ -826,6 +839,17 @@ export function nextMailSlots({ days, time } = {}, now = Date.now(), n = 3, offs
   }
   return out;
 }
+/**
+ * 포탈 시각의 이름 — 오프셋이 540분(UTC+9)이면 '한국 시각', 아니면 'UTC±h[:mm]'.
+ * 서버(PORTAL_TZ_OFFSET_MIN)가 다른 시간대를 쓰는 현장에서 '한국 시각' 이라 적지 않게(v2.745 리뷰 SCHED-04·WEB-2745-02).
+ */
+export function portalTimeLabel(offsetMin = MAIL_DEF_OFFSET) {
+  const off = numOrNull(offsetMin);
+  if (off == null || off === MAIL_DEF_OFFSET) return '한국 시각';
+  const sign = off < 0 ? '−' : '+';
+  const a = Math.abs(off); const h = Math.floor(a / 60); const m = a % 60;
+  return `포탈 시각 UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
+}
 /** epoch ms → '10/22(목) 08:00'(포탈 시각). 못 읽으면 '—'. */
 export function mailSlotShort(ms, offsetMin = MAIL_DEF_OFFSET) {
   if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '—';
@@ -853,11 +877,16 @@ export function firstMailScheduleIssue(forms) {
   }
   return null;
 }
-/** 다음 발송 미리보기 — 정기 발송일 때만. { slots, text }. */
-export function mailWhenPreview(f, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
+/**
+ * 다음 발송 미리보기 — 정기 발송일 때만. { slots, text }.
+ * recipients(받는 사람 수 — recipientPreview().count)가 0 이면 회차가 없다: 서버(rows.js)는 받는 사람이 없는 대상의 next 를 [] 로 주고
+ * 회차를 판정하지 않는다(notify.js). 발송 시각을 지어내지 않는다. 주지 않으면(undefined) 예전처럼 요일·시각만으로 계산한다.
+ */
+export function mailWhenPreview(f, now = Date.now(), offsetMin = MAIL_DEF_OFFSET, recipients = undefined) {
   if (!f || f.mailWhen !== 'schedule') return { slots: [], text: '' };
+  if (recipients === 0) return { slots: [], text: '다음 발송: — (받는 사람이 없어 보내지 않습니다)' };
   const slots = nextMailSlots({ days: f.mailDays, time: f.mailTime }, now, 3, offsetMin);
-  return { slots, text: slots.length ? `다음 발송: ${slots.map((x) => mailSlotShort(x, offsetMin)).join(' · ')} (한국 시각)` : '다음 발송: — (요일을 고르세요)' };
+  return { slots, text: slots.length ? `다음 발송: ${slots.map((x) => mailSlotShort(x, offsetMin)).join(' · ')} (${portalTimeLabel(offsetMin)})` : '다음 발송: — (요일을 고르세요)' };
 }
 
 /**
@@ -871,9 +900,10 @@ export const TARGET_MAIL_CODE_TEXT = Object.freeze({
   demo: '데모 대상은 실제 메일을 보내지 않습니다',
   'missed-down': '포탈이 꺼져 있던 동안의 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
   'missed-late': '정한 시각을 한참 지나 확인한 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
+  'missed-clock': '서버 시계가 뒤로 가 보내는 때를 저장한 시각이 지금보다 뒤였던 동안의 회차라 보내지 않았습니다(소급해 보내지 않습니다)',
   'no-recipients': '보낼 때 받는 사람이 없었습니다',
 });
-const MISSED_CODES = new Set(['missed-down', 'missed-late']);
+const MISSED_CODES = new Set(['missed-down', 'missed-late', 'missed-clock']);
 
 /** 기록 한 건의 사유 문구 — 아는 code 는 화면 문구, 모르는 code 는 서버 사유 그대로(지어내지 않는다). */
 function lastReasonText(last) {

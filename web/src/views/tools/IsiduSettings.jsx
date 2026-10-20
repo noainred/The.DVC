@@ -19,6 +19,8 @@
  *  · v2.745 결과 메일 '보내는 때'(대상별): 조사가 끝날 때마다(예전 동작) / 정한 요일·시각에(요일 칩 · 시각 · 새 조사 없으면 생략 · 다음 발송 미리보기).
  *    판정·회차 계산은 서버(mailRules·digestRules — 종합 메일과 같은 함수)가 하고 화면은 같은 규칙의 사본으로 미리 알려 준다(isiduText).
  *    정기 발송인데 요일이 없으면 저장을 잠근다(선택하지 않은 대상도). 조사 실패 알림은 보내는 때와 무관하게 조사 직후 나간다 — 화면이 말한다.
+ *    받는 사람이 0명이면 다음 발송 회차도 '보냅니다' 안내도 말하지 않는다(서버는 그 대상의 회차를 판정하지 않는다 — v2.745 검토).
+ *  · 종합 메일 탭에는 이 화면이 받은 대상 목록(rows)을 넘긴다 — 그 탭이 법인 수로 사용자 행 수·120줄 경고를 계산한다(일괄 변경 탭과 같은 목록).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
@@ -30,8 +32,8 @@ import IsiduDigestSettings from './IsiduDigestSettings.jsx';
 import {
   blankTarget, formFromTarget, targetBody, pathHint, commandText, deviceLabel, keyStatus, INTERVAL_CHOICES, TIMEOUT_CHOICES, everyText,
   RUN_FOLLOW, runSelectValue, runSelectPatch, formRunNode, deviceAuthIssue, testResultText,
-  recipientPreview, recipientPreviewText, mailInputIssue, mailReadyText, mailStateText,
-  MAIL_WHEN_CHOICES, isMailTime, mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview,
+  recipientPreview, mailSendHint, mailInputIssue, mailReadyText, mailStateText,
+  MAIL_WHEN_CHOICES, isMailTime, mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview, portalTimeLabel,
 } from './isiduText.js';
 // v2.745 보내는 때(정한 요일·시각) — 요일 칩·시각 선택지는 종합 메일 설정 화면과 같은 것을 쓴다(모양·선택지를 두 벌 두지 않게).
 import { DAY_LABELS, DAY_ORDER, DAY_PRESETS, HOURS, minuteChoices, toggleDay, presetActive } from './isiduDigestText.js';
@@ -186,7 +188,8 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
   const mailOff = srv?.offsetMin ?? 540;   // 포탈 시각 오프셋(서버가 주면 그 값 — 없으면 한국 시각)
   const mailTimeOk = f && isMailTime(f.mailTime) ? String(f.mailTime).trim() : '08:00';
   const mailHour = mailTimeOk.slice(0, 2); const mailMinute = mailTimeOk.slice(3, 5);
-  const preview2 = f ? mailWhenPreview(f, Date.now(), mailOff) : null;
+  // 받는 사람이 0명이면 회차를 말하지 않는다(서버 rows.js 가 next 를 [] 로 주고 회차를 판정하지 않는다 — v2.745 검토).
+  const preview2 = f ? mailWhenPreview(f, Date.now(), mailOff, preview ? preview.count : undefined) : null;
   // 저장하지 않은 변경(개별 편집) — 일괄 적용이 목록을 새로 읽어 그 변경을 지우지 않게 일괄 탭이 이 값을 본다.
   const dirty = useMemo(() => {
     if (!srv) return false;
@@ -220,7 +223,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
             <button type="button" role="tab" aria-selected={mtab === 'digest'} className={mtab === 'digest' ? 'on' : ''} onClick={() => { setMtab('digest'); setDigestSeen(true); }}>종합 메일</button>
           </div>
           {mtab === 'bulk' ? <IsiduBulk srv={srv} rows={rows} dirty={dirty} locked={locked} onApplied={onBulkApplied} /> : null}
-          {digestSeen ? <div hidden={mtab !== 'digest'}><IsiduDigestSettings locked={!!srv.loadError} /></div> : null}
+          {digestSeen ? <div hidden={mtab !== 'digest'}><IsiduDigestSettings locked={!!srv.loadError} rows={rows} /></div> : null}
           {mtab === 'edit' ? (<>
 
           <div className="tlist" role="list" aria-label="대상 목록">
@@ -385,7 +388,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
                   {MAIL_WHEN_CHOICES.map(([k, l]) => (
                     <label key={k} className="radio">
                       <input type="radio" name="isd-mailwhen" checked={(sched ? 'schedule' : 'scan') === k} onChange={() => set({ mailWhen: k })} disabled={locked} />
-                      <span><b>{l}</b> — {k === 'schedule' ? '정한 요일·시각(한국 시각)에 그때까지의 마지막 성공 조사로 보냅니다' : '조사가 성공할 때마다 그 결과를 보냅니다'}</span>
+                      <span><b>{l}</b> — {k === 'schedule' ? `정한 요일·시각(${portalTimeLabel(mailOff)})에 그때까지의 마지막 성공 조사로 보냅니다` : '조사가 성공할 때마다 그 결과를 보냅니다'}</span>
                     </label>
                   ))}
                 </div>
@@ -419,7 +422,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
                           {minuteChoices(mailMinute).map((m) => <option key={m} value={m}>{m}</option>)}
                         </Select>
                       </label>
-                      <span className="isd-tag muted" style={{ marginTop: 18 }}>한국 시각(KST)</span>
+                      <span className="isd-tag muted" style={{ marginTop: 18 }}>{mailOff === 540 ? '한국 시각(KST)' : portalTimeLabel(mailOff)}</span>
                     </div>
                     {selSchedIssue?.field === 'mail.time' ? <span className="hint bad" role="alert">{selSchedIssue.text}</span> : null}
                     <label className="radio"><input type="checkbox" checked={f.mailSkipIfNoNew !== false} onChange={(e) => set({ mailSkipIfNoNew: e.target.checked })} disabled={locked} /> <span>새 조사가 없으면 보내지 않기 — 직전 정기 발송 뒤 새로 끝난 성공 조사가 없으면 그 회차를 건너뜁니다</span></label>
@@ -432,7 +435,7 @@ export default function IsiduSettings({ onClose, onSaved, edges = [], mainKey = 
                   ? '변화 없으면 보내지 않기 — 마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 건너뜁니다'
                   : '변화 없으면 보내지 않기 — 직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 건너뜁니다'}</span></label>
                 <label className="radio"><input type="checkbox" checked={f.mailOnFailure} onChange={(e) => set({ mailOnFailure: e.target.checked })} disabled={locked} /> <span>조사가 실패하면 알리기({failHours}시간에 한 번까지{sched ? ' · 보내는 때와 무관하게 조사 직후' : ''})</span></label>
-                <div className="hint">{recipientPreviewText(preview)} · {sched ? '정한 요일·시각에 보냅니다' : '조사가 성공할 때마다 보냅니다'}(메인이 보냅니다 — 엣지 담당 대상도 결과가 메인에 들어오면 보냅니다).</div>
+                <div className="hint">{mailSendHint(preview, sched)}</div>
                 {readyNote ? <div className="hint bad">{readyNote}</div> : null}
                 <div className="row">
                   <button type="button" className="btn2" onClick={sendNow} disabled={locked || !f.id || (mr && mr.running)} title={f.id ? '저장된 받는 사람에게 마지막 성공 결과를 지금 보냅니다' : '저장한 뒤에 보낼 수 있습니다'}>{mr && mr.running ? '보내는 중…' : '마지막 결과 지금 보내기'}</button>

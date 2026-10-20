@@ -43,7 +43,7 @@ export const BULK_FIELDS = Object.freeze([
   // v2.745 결과 메일 보내는 때 — 요일은 칩(kind 'days' — '그대로' 가 아니면 요일 배열), 시각은 'HH:MM'(kind 'time').
   { key: 'mailWhen', label: '결과 메일 보내는 때', kind: 'select' },
   { key: 'mailDays', label: '결과 메일 요일(정한 요일·시각일 때)', kind: 'days' },
-  { key: 'mailTime', label: '결과 메일 시각(한국 시각)', kind: 'time' },
+  { key: 'mailTime', label: '결과 메일 시각(포탈 시각)', kind: 'time' },
   { key: 'mailSkipIfNoNew', label: '새 조사가 없으면 보내지 않기', kind: 'bool', on: '켜기', off: '끄기' },
 ]);
 /** 보내는 때 선택지 — 개별 편집 창과 같은 글자(isiduText.MAIL_WHEN_CHOICES). */

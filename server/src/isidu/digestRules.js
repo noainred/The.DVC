@@ -23,7 +23,10 @@
  *  · 대상 상태는 웹 `isiduText.targetStatus` 와 **같은 판정**이다(`statusOfRow` — 웹 테스트가 같은 입력으로 대조한다).
  *  · 합계는 **성공한 수집이 있는 대상만** 더하고 뺀 개수를 함께 말한다 — 부분 합을 전체라 말하지 않는다.
  *  · 7일 변화는 7일 이전 기준이 있는 대상만 더하고, du -h 반올림 범위 안의 차이는 0 으로 센다(웹 서머리와 같은 규칙).
- *  · 실패·오래된 대상의 값은 '직전 성공 값' 이다 — 표가 그 사실을 칸마다 말한다.
+ *  · 실패·오래된 대상의 값은 '직전 성공 값' 이다 — 표가 그 사실을 칸마다 말한다. v2.745 검토(TOPNM-03): 표시 상태(statusOfRow)는 꺼짐·조사 중·
+ *    재시작 중단·요청 대기를 먼저 돌려주므로 그 상태 key 만 보면 몇 달 전 값이 표지 없이 순위에 실린다. 그래서 표지는 상태 key 와 따로
+ *    **값의 신선도**(보고 늦음과 같은 경계 — valueStaleMsOf)와 **직전 시도 실패**도 본다(lastValueWhy: 상태 key · 'failed-before' · 'old').
+ *    표시 상태 자체는 바꾸지 않는다(웹 targetStatus 와 같은 판정).
  *  · 데모(mock-) 대상은 실제 메일에 넣지 않는다(미리보기만 넣고 그 사실을 밝힌다).
  *  · v2.745 순위 모으기: 전 법인 Top N·법인별 Top M 은 **대상별 상위 묶음의 합집합**에서 고른다. 그 묶음이 대상마다 k 개면 k ≥ max(N, M) 일 때만
  *    정확하다(어떤 폴더가 전체·법인 상위 N 안에 있으면 그 대상 안에서 더 큰 폴더는 N−1 개 이하라 그 대상 상위 N 안에 있다 — 동률은 컷 크기와
@@ -257,11 +260,30 @@ export function statusOfRow(t, now = Date.now()) {
   const ok = t.okScan; const lt = t.lastTry;
   if (lt && lt.ok === false && (!ok || lt.ts > ok.ts)) return { key: 'failed', tone: 'bad', text: failTitleOf(lt.kind) };
   if (!ok) return { key: 'never', tone: 'muted', text: '수집 전' };
-  const every = (numOrNull(t.intervalHours) || 24) * HOUR;
-  const staleMs = every * 2 + (numOrNull(t.timeoutMin) || 120) * MIN + HOUR;
-  if (now - ok.ts > staleMs) return { key: 'stale', tone: 'warn', text: '보고 늦음' };
+  if (now - ok.ts > valueStaleMsOf(t)) return { key: 'stale', tone: 'warn', text: '보고 늦음' };
   if (ok.errLines > 0) return { key: 'ok-partial', tone: 'warn', text: '정상(권한 오류 일부)' };
   return { key: 'ok', tone: 'ok', text: '정상' };
+}
+
+/**
+ * '보고 늦음' 경계(ms) — 수집 주기 × 2 + 시한 + 1시간. statusOfRow 와 값의 신선도 판정(buildDigestModel lastValueWhy 'old')이 같은 함수를 쓴다
+ * (웹 `isiduText.targetStatus` 와 같은 식 — 바꾸면 웹도).
+ */
+export function valueStaleMsOf(t) {
+  const every = (numOrNull(t?.intervalHours) || 24) * HOUR;
+  return every * 2 + (numOrNull(t?.timeoutMin) || 120) * MIN + HOUR;
+}
+
+/** 직전 성공 값 표지의 사유 — 상태 key(실패·보고 늦음·인증 정지·장비 문제)가 먼저, 그다음 직전 시도 실패, 그다음 오래된 값. */
+const LAST_VALUE_KEYS = new Set(['failed', 'stale', 'auth-stopped', 'issue']);
+function lastValueWhyOf(t, st, now) {
+  if (LAST_VALUE_KEYS.has(st.key)) return st.key;
+  const ok = t?.okScan; const lt = t?.lastTry;
+  if (!ok) return null;
+  if (lt && lt.ok === false && lt.ts > ok.ts) return 'failed-before';   // 마지막 시도가 실패 — 지금 상태(조사 중·꺼짐 등)와 무관하게 이 값은 직전 성공 값이다
+  const okTs = numOrNull(ok.ts);
+  if (okTs != null && now - okTs > valueStaleMsOf(t)) return 'old';      // 꺼짐·조사 중이어도 값이 보고 늦음 경계보다 오래됐다
+  return null;
 }
 
 /** 대상의 디렉터리 크기 — 웹 `targetBytesOf` 와 같은 규칙(du 합계 줄 → 폴더 합). 못 읽으면 null. */
@@ -293,13 +315,16 @@ export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), t
     const ov = ovById.get(t.id) || null;
     const bytes = rowBytesOf(t);
     const d = ov?.state === 'ok' && ov.totalDelta7 && numOrNull(ov.totalDelta7.bytes) != null ? ov.totalDelta7 : null;
+    const why = lastValueWhyOf(t, st, now);
+    // 폴더 크기 합(du -h 반올림으로 합계 줄보다 클 수 있다 — TOPNM-02). 법인 안 비중의 분모를 정할 때만 쓴다.
+    const sumBytes = numOrNull(t.okScan?.sumBytes);
     return {
-      t, st, ov, bytes,
+      t, st, ov, bytes, folderBytes: bytes == null ? null : Math.max(bytes, sumBytes != null && sumBytes > 0 ? sumBytes : 0),
       d7: d ? { bytes: d.withinRes ? 0 : d.bytes, within: d.withinRes === true } : null,
       corp: corpOf(t), corpLabel: corpOf(t) || '법인 미지정',
       device: t.deviceName || t.host || '—', path: t.path || '', label: t.label || '',
       okTs: numOrNull(t.okScan?.ts), failStreak: numOrNull(t.failStreak) || 0,
-      lastValue: st.key === 'failed' || st.key === 'stale' || st.key === 'auth-stopped' || st.key === 'issue',
+      lastValue: why != null, lastValueWhy: why,
     };
   });
   const measured = items.filter((x) => x.bytes != null);
@@ -347,7 +372,8 @@ export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), t
         name: String(u.name || ''), bytes: b, res: numOrNull(u.res), share: numOrNull(u.share),
         d7: u.d7 && numOrNull(u.d7.bytes) != null ? { bytes: u.d7.bytes, within: u.d7.withinRes === true } : null,
         new7: u.new7 === true, hasBase: !!x.ov.base7, corp: x.corp, corpLabel: x.corpLabel, device: x.device, path: x.ov.scan?.path || x.path,
-        targetId: x.t.id, lastValue: x.lastValue, statusKey: x.st.key, scanTs: numOrNull(x.ov.scan?.ts), sizeMode: x.ov.scan?.sizeMode || 'h', okTs: x.okTs,
+        targetId: x.t.id, lastValue: x.lastValue, lastValueWhy: x.lastValueWhy, statusKey: x.st.key, statusText: x.st.text,
+        scanTs: numOrNull(x.ov.scan?.ts), sizeMode: x.ov.scan?.sizeMode || 'h', okTs: x.okTs,
       });
     }
   }
@@ -368,22 +394,29 @@ export function buildDigestModel(rows, ovById = new Map(), { now = Date.now(), t
       const okItems = c.items.filter((x) => x.ov?.state === 'ok');
       const counts = okItems.map((x) => numOrNull(x.ov.scan?.count));
       const ovFailed = c.items.filter((x) => x.bytes != null && x.ov?.state !== 'ok').length;   // 결과는 있는데 개요(폴더 목록)를 읽지 못한 대상
+      const foldersUnread = c.items.filter((x) => x.ov?.state !== 'ok').length;                // 폴더 목록을 읽지 못한 대상(결과 없음 포함 — TOPNM-04)
+      // 법인 안 비중의 분모(TOPNM-02) — 법인 사용량이 기본이고, du -h 반올림으로 그 법인에서 읽은 폴더 크기 합이 더 크면 그 합이다(100% 를 넘지 않게).
+      // 읽은 상위 폴더 합(topBytes)도 바닥으로 둔다(행에 폴더 합이 없는 옛 행). 법인 사용량 칸(bytes)은 바꾸지 않는다.
+      const folderSum = c.items.reduce((sum, x) => sum + (x.folderBytes ?? 0), 0);
+      const shareDenom = c.bytes ? Math.max(c.bytes, folderSum, topBytes) : null;
       const lastValueTargets = [];
       for (const r of shownRows) {
         if (!r.lastValue || lastValueTargets.some((t) => t.targetId === r.targetId)) continue;
-        lastValueTargets.push({ targetId: r.targetId, device: r.device, path: r.path, statusKey: r.statusKey, okTs: r.okTs ?? null });
+        lastValueTargets.push({ targetId: r.targetId, device: r.device, path: r.path, statusKey: r.statusKey, statusText: r.statusText, why: r.lastValueWhy, okTs: r.okTs ?? null });
       }
       corpTop.push({
         corp: c.corp, label: c.label, bytes: c.bytes, targets: c.targets, measured: c.measured, unmeasured: c.unmeasured, ovFailed,
-        wanted: cm, shown: shownRows.length, fewer: shownRows.length < cm,
-        // 실제 폴더 수 — 개요를 읽은 대상의 폴더 수 합(하나라도 모르면 null — 지어내지 않는다).
-        folderTotal: okItems.length && counts.every((v) => v != null) ? counts.reduce((sum, v) => sum + v, 0) : null,
+        wanted: cm, shown: shownRows.length, fewer: shownRows.length < cm, foldersUnread,
+        // 실제 폴더 수 — 법인의 모든 대상에서 폴더 목록을 읽었을 때만 그 합(하나라도 못 읽었거나 개수를 모르면 null — 지어내지 않는다).
+        folderTotal: foldersUnread === 0 && okItems.length && counts.every((v) => v != null) ? counts.reduce((sum, v) => sum + v, 0) : null,
         topBytes: shownRows.length ? topBytes : null,
-        topShare: shownRows.length && c.bytes ? topBytes / c.bytes : null,
+        shareDenom, shareDenomRaised: shareDenom != null && shareDenom > c.bytes,
+        shareApprox: shownRows.some((r) => r.sizeMode !== 'k'),
+        topShare: shownRows.length && shareDenom ? topBytes / shareDenom : null,
         noData: shownRows.length === 0,
         emptyReason: shownRows.length ? null : c.measured === 0 ? 'no-scan' : ovFailed > 0 ? 'ov-failed' : 'no-folders',
         lastValueTargets,
-        rows: shownRows.map((r, i) => ({ ...r, rank: i + 1, share: c.bytes ? r.bytes / c.bytes : null })),
+        rows: shownRows.map((r, i) => ({ ...r, rank: i + 1, share: shareDenom ? r.bytes / shareDenom : null })),
       });
     }
   }

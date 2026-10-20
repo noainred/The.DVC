@@ -5,7 +5,8 @@
  *  · 레이아웃은 표(table)로 짓고 스타일은 전부 인라인이다(메일 클라이언트는 <style>·flex·외부 글꼴을 버리는 경우가 많다).
  *    글꼴은 시스템 글꼴(맑은 고딕 → Apple SD Gothic Neo → sans-serif) — 시안의 IBM Plex 는 메일에서 받아지지 않는다.
  *  · KPI 칸은 inline-block(폭 25% · 최소 150px)이라 좁은 화면에서 2칸씩 줄바꿈된다.
- *  · 값이 없으면 단위를 붙이지 않는다('—'). 반올림 범위 안의 차이는 '변화 없음' 이다. 실패·보고 늦음 대상의 값은 '직전 성공 값' 이라 칸이 말한다.
+ *  · 값이 없으면 단위를 붙이지 않는다('—'). 반올림 범위 안의 차이는 '변화 없음' 이다. 실패·보고 늦음 대상과 값이 오래된 대상(꺼짐·조사 중 포함)의
+ *    값은 '직전 성공 값' 이라 칸이 말한다(판정은 digestRules buildDigestModel 의 lastValueWhy).
  *  · 포탈 주소를 설정에서 알 수 없어 '포탈에서 보기' 링크는 두지 않는다 — 대신 화면 위치(메뉴 경로)를 글로 적는다(지어낸 주소 금지).
  *  · 모든 값은 이스케이프한다(폴더 이름·경로·오류 원문은 장비가 준 문자열이다).
  */
@@ -156,14 +157,27 @@ const CORP_EMPTY_TEXT = Object.freeze({
   'no-folders': '조사한 경로 아래 폴더가 없습니다.',
 });
 const LAST_VALUE_WHY = Object.freeze({ failed: '최근 실패', stale: '보고 늦음', 'auth-stopped': '인증 정지', issue: '장비 문제' });
+/** 직전 성공 값의 사유(digestRules lastValueWhy) — 상태 key 가 아니면 지금 상태 글자 + 이유('조사 중 · 직전 조사 실패', '꺼짐 · 값이 오래됨'). */
+function lastValueWhyText(t) {
+  const why = t?.why ?? t?.statusKey;
+  if (LAST_VALUE_WHY[why]) return LAST_VALUE_WHY[why];
+  const st = t?.statusText ? `${t.statusText} · ` : '';
+  if (why === 'failed-before') return `${st}직전 조사 실패`;
+  if (why === 'old') return `${st}값이 오래됨`;
+  return '최근 조사 실패';
+}
 /** 법인별 순위 표 아래 각주(글자 — 호출부가 이스케이프한다). */
 function corpTopNotes(c) {
   const out = [];
-  if (c.rows.length && c.fewer) out.push(`이 법인은 사용자 폴더가 ${c.folderTotal ?? c.shown}개라 ${c.shown}개만 실었습니다.`);
+  // 법인 전체 폴더 수는 모든 대상의 폴더 목록을 읽었을 때만 안다(folderTotal) — 못 읽은 대상이 있으면 '읽은 폴더' 로 말한다(TOPNM-04).
+  if (c.rows.length && c.fewer) out.push(c.folderTotal != null ? `이 법인은 사용자 폴더가 ${c.folderTotal}개라 ${c.shown}개만 실었습니다.` : `읽은 폴더가 ${c.shown}개라 ${c.shown}개만 실었습니다.`);
   if (c.unmeasured) out.push(`결과가 없는 대상 ${c.unmeasured}개는 빠졌습니다.`);
   if (c.rows.length && c.ovFailed) out.push(`폴더 목록을 읽지 못한 대상 ${c.ovFailed}개는 순위에서 빠졌습니다.`);
+  if (c.rows.length && c.shareDenomRaised) {
+    out.push(`${c.shareApprox ? 'du -h 반올림 때문에 ' : ''}폴더 크기 합이 법인 사용량(du 합계 줄)보다 커서, 비중은 폴더 크기 합을 분모로 계산했습니다(100% 를 넘지 않게).`);
+  }
   for (const t of c.lastValueTargets || []) {
-    out.push(`직전 성공 값: ${t.device} ${t.path} — ${LAST_VALUE_WHY[t.statusKey] || '최근 조사 실패'}로 마지막 성공 조사(${t.okTs ? short(t.okTs) : '—'}) 값을 썼습니다.`);
+    out.push(`직전 성공 값: ${t.device} ${t.path} — ${lastValueWhyText(t)} · 마지막 성공 조사(${t.okTs ? short(t.okTs) : '—'}) 값을 썼습니다.`);
   }
   return out;
 }
@@ -298,9 +312,11 @@ export function renderDigestMail(m, o = {}) {
   const how = [];
   how.push('사용자 = 조사한 경로 바로 아래 폴더 하나입니다(du -d 1). 폴더 이름이 계정 이름과 같다고 확인한 것은 아닙니다.');
   how.push('같은 이름의 폴더가 대상 둘에 있으면 따로 셉니다(합치지 않습니다).');
-  if (m.corpTopM > 0 && corpTop.length) how.push('법인별 순위는 그 법인에 속한 대상들의 폴더를 모아 크기 순으로 매겼습니다. 법인 안 비중의 분모는 그 법인의 사용량(성공한 수집이 있는 대상의 합)입니다.');
+  if (m.corpTopM > 0 && corpTop.length) {
+    how.push(`법인별 순위는 그 법인에 속한 대상들의 폴더를 모아 크기 순으로 매겼습니다. 법인 안 비중의 분모는 그 법인의 사용량(성공한 수집이 있는 대상의 합)입니다${corpTop.some((c) => c.shareDenomRaised) ? ' — 폴더 크기 합이 그보다 크면(반올림) 폴더 크기 합을 분모로 썼습니다' : ''}.`);
+  }
   if (m.approx) how.push('크기는 du -h 반올림 값입니다 — 두 조사의 차이가 반올림 범위 안이면 ‘변화 없음’ 으로 셉니다.');
-  how.push('실패·보고 늦음 대상의 값은 직전 성공 조사 값입니다(칸에 ‘직전 성공 값’ 이라 적었습니다).');
+  how.push('실패·보고 늦음 대상과, 꺼짐·조사 중이라도 직전 시도가 실패했거나 마지막 성공 조사가 보고 늦음 경계보다 오래된 대상의 값은 직전 성공 조사 값입니다(칸에 ‘직전 성공 값’ 이라 적었습니다).');
   if (T.d7 != null) how.push(`7일 변화는 7일 이전 성공 조사가 있는 대상만 더했습니다(${T.d7Targets}/${T.measured}개).`);
   if (T.unmeasured) how.push(`전체 사용량은 성공한 수집이 있는 대상만 더했습니다(결과가 없는 ${T.unmeasured}개는 뺐습니다).`);
   if (includeWatch) how.push(`급증: 7일 증가가 ${esc(bytesText(SURGE_MIN_BYTES))} 이상이면서 7일 전 크기의 ${Math.round(SURGE_MIN_RATIO * 100)}% 이상인 폴더.`);
@@ -356,7 +372,7 @@ export function renderDigestMail(m, o = {}) {
  *   schedule(v2.745) — 대상별 정기 발송이면 {days, time}: 머리에 '정기 발송 · 매주 월·목 08:00' 한 줄을 싣고 바닥글이 보내는 때를 그렇게 말한다.
  *   없으면(기본) 예전 본문과 바이트 단위로 같다.
  */
-export function renderResultMail({ label, corp = '', report, change = null, recipients = null, onlyOnChange = false, now = Date.now(), schedule = null }) {
+export function renderResultMail({ label, corp = '', report, change = null, recipients = null, onlyOnChange = false, now = Date.now(), schedule = null, manual = false, mode = null }) {
   const s = report.scan || {};
   const k = report.kpi || {};
   const when = localStamp(s.ts) || '—';
@@ -411,7 +427,9 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
   rows.push(footer([
     schedLine
       ? `${esc(schedLine)}(포탈 시각) — 정한 시각에 그때까지의 마지막 성공 조사로 만들었습니다${onlyOnChange ? '(마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`
-      : `조사가 끝날 때마다 보냅니다${onlyOnChange ? '(직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`,
+      : manual
+        ? `지금 보내기로 보낸 메일입니다(마지막 성공 조사) — 평소에는 ${mode && mode.when === 'schedule' ? `정기 발송 · ${esc(scheduleText(mode))}(포탈 시각)에` : '조사가 끝날 때마다'} 보냅니다.`
+        : `조사가 끝날 때마다 보냅니다${onlyOnChange ? '(직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같으면 보내지 않습니다)' : ''}.`,
     `${rc ? `${esc(rc)} · ` : ''}바꾸는 곳: ${esc(SETTINGS_PATH)} › 대상 › 결과 메일`,
     `화면: ${esc(VIEW_PATH)} · 보낸 시각 ${esc(localStamp(now) || '—')}`,
   ]));

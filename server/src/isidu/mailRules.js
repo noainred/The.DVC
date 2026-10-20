@@ -61,9 +61,10 @@ export const TARGET_MAIL_DEFAULTS = Object.freeze({
 /**
  * 대상별 결과 메일 기록(last)의 code — 웹 문구 표와 1:1(웹 테스트가 이 소스에서 뽑아 대조한다).
  * no-new(새 조사 없으면 생략) · unchanged(변화 없으면 생략) · no-report(보낼 성공 결과 없음) · demo(데모 대상) ·
- * missed-down(포탈이 꺼져 있던 회차) · missed-late(늦게 확인한 회차) · no-recipients(보낼 때 받는 사람이 없어짐).
+ * missed-down(포탈이 꺼져 있던 회차) · missed-late(늦게 확인한 회차) · no-recipients(보낼 때 받는 사람이 없어짐) ·
+ * missed-clock(서버 시계가 뒤로 가 미래가 된 '보내는 때 저장 시각' 때문에 막힌 회차 — 지금으로 잡고 소급해 보내지 않음, v2.745 검토 SCHED-03).
  */
-export const TARGET_MAIL_CODES = Object.freeze(['no-new', 'unchanged', 'no-report', 'demo', 'missed-down', 'missed-late', 'no-recipients']);
+export const TARGET_MAIL_CODES = Object.freeze(['no-new', 'unchanged', 'no-report', 'demo', 'missed-down', 'missed-late', 'no-recipients', 'missed-clock']);
 
 /** 요일 목록 정리(0~6 정수 · 중복 제거 · 정렬) — 일정 계산 모듈(checkSchedule)의 규칙을 그대로 쓴다. 쓸 수 있는 요일이 없으면 []. */
 export function mailDaysOf(v) {

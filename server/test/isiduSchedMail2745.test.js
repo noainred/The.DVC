@@ -6,7 +6,7 @@
  *   ② 정기 틱(고정 now · bootAt 주입) — send / missed(late·down) / rebase / none · 보내기 전에 lastSlot 이 상태 파일에 남는다 · 재시작 뒤 같은 회차 두 번 안 보냄
  *   ③ skipIfNoNew(마지막 정기 발송 이후 새 성공 조사) · onlyOnChange(**마지막으로 보낸 조사**와 비교)
  *   ④ schedule 모드에서 조사 적재는 결과 메일을 보내지 않고 last 를 덮지 않는다 · 실패 알림은 그대로 즉시 · scan 모드는 예전 그대로
- *   ⑤ 데모 대상·받는 사람 0명·결과 없음·엣지 노드 · ⑥ rows 의 when/days/time/skipIfNoNew/next · ⑦ 일괄 변경 4키(400 field) · ⑧ 설정 저장 왕복
+ *   ⑤ 데모 대상·받는 사람 0명(메일 기록 없이 회차만 넘김 — 검토 SCHED-02)·결과 없음·엣지 노드 · ⑥ rows 의 when/days/time/skipIfNoNew/next · ⑦ 일괄 변경 4키(400 field) · ⑧ 설정 저장 왕복
  * ⚠ 일정 계산은 고정 시각을 주입한다(Date.now() 를 기준 시각으로 쓰지 않는다 — CLAUDE.md 규약). 회차는 같은 함수(nextDigestSlots)로 구한다 —
  *   포탈 시각 오프셋 env 가 달라도 깨지지 않게.
  */
@@ -244,7 +244,7 @@ test('②④ schedule 모드 — 조사 적재는 결과 메일을 보내지 않
   assert.equal(s.st.mails.length, 2);
 });
 
-test('② 회차가 오면 보낸다 — 보내기 전에 lastSlot 을 상태 파일에 남긴다 · 데모·결과 없음은 기록 · 받는 사람 0명은 판정·기록 안 함 · 재시작 뒤 두 번 안 보냄', async () => {
+test('② 회차가 오면 보낸다 — 보내기 전에 lastSlot 을 상태 파일에 남긴다 · 데모·결과 없음은 기록 · 받는 사람 0명은 메일 기록 없이 회차만 넘김 · 재시작 뒤 두 번 안 보냄', async () => {
   const s = await setup();
   const N = await import('../src/isidu/notify.js');
   const S0 = SLOTS[0];
@@ -275,7 +275,10 @@ test('② 회차가 오면 보낸다 — 보내기 전에 lastSlot 을 상태 �
   const em = N.isiduMailStateOf('ts-empty');
   assert.equal(em.code, 'no-report'); assert.equal(em.slot, S0);
   assert.equal(N.isiduMailStateOf('ts-none'), null);
-  assert.equal(st.targets['ts-none'], undefined, '받는 사람 0명 대상은 회차를 판정하지 않는다');
+  // v2.745 검토 SCHED-02: 받는 사람 0명 대상은 메일 기록(last)을 남기지 않고, 지나간 회차는 처리 기록(lastSlot)만 조용히 넘긴다
+  // (그러지 않으면 수신자를 넣은 직후 그 회차들이 거짓 '놓침 N번' 이 된다 — isiduSchedReview2745.test.js).
+  assert.equal(st.targets['ts-none']?.last, undefined, '받는 사람 0명 대상은 메일 기록을 남기지 않는다');
+  assert.equal(st.targets['ts-none']?.lastSlot, S0, '지나간 회차는 조용히 처리한 것으로 넘긴다');
   assert.equal(N.isiduMailStateOf('tscan').schedule, undefined, 'scan 모드 대상은 틱이 건드리지 않는다');
   for (const v of Object.values(st.targets)) if (v.last?.code) assert.ok((await import('../src/isidu/mailRules.js')).TARGET_MAIL_CODES.includes(v.last.code), v.last.code);
   // 재시작 흉내 — 메모리를 비우고 상태 파일에서 다시 읽는다: 같은 회차는 다시 보내지 않는다

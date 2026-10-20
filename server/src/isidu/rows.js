@@ -12,9 +12,8 @@ import { isiduRequestState } from './collectRequests.js';
 import { allIsiduEdgeStatus } from '../central/isiduEdge.js';
 import { HISTORY_AGENT } from './targets.js';
 import * as db from './db.js';
-import { isiduMailStateOf } from './notify.js';
+import { isiduMailStateOf, targetMailNextOf } from './notify.js';
 import { targetMailOf, mailRecipients } from './mailRules.js';
-import { nextDigestSlots } from './digestRules.js';
 
 const t = (v) => String(v ?? '').trim();
 const lo = (v) => t(v).toLowerCase();
@@ -68,9 +67,10 @@ export async function targetRows() {
       authStopped: ag ? null : await authStopOf(r),
       // v2.738 결과 메일 — 이 표는 주소를 싣지 않는다(개수·선택만). 주소는 설정 조회에만 있다.
       // v2.745 보내는 때 — next 는 정기 발송(schedule)일 때 다음 회차 최대 3개(종합 메일과 같은 계산), 받는 사람이 0명이면 보내지 않으므로 [].
+      // 검토 SCHED-03: 틱과 같은 실효 since 로 계산한다(notify.targetMailNextSlots — since 를 보지 않는 계산을 여기서 다시 만들지 않는다).
       mail: (() => {
         const tm = targetMailOf(tg); const rc = mailRecipients(commonTo, tm);
-        const next = tm.when === 'schedule' && rc.to.length ? nextDigestSlots({ enabled: true, days: tm.days, time: tm.time, since: tm.since }, now, 3) : [];
+        const next = rc.to.length ? targetMailNextOf(r.id, tm, now, 3) : [];
         return { recipients: rc.to.length, onlyOnChange: tm.onlyOnChange, onFailure: tm.onFailure, excludeCommon: tm.excludeCommon, when: tm.when, days: [...tm.days], time: tm.time, skipIfNoNew: tm.skipIfNoNew, next };
       })(),
       lastMail: isiduMailStateOf(r.id),
