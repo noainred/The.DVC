@@ -6,7 +6,7 @@
  * 화면이 둘을 같은 문구로 덮으면 사용자는 조치해야 할 때 하염없이 기다린다.
  */
 import { describe, it, expect } from 'vitest';
-import { loadPhase, loadText, collectProgress, liveText, shouldBanner, isTimeoutError } from './loadState.js';
+import { loadPhase, loadText, collectProgress, isTimeoutError } from './loadState.js';
 
 const health = (o = {}) => ({
   vcenters: 28, vcentersConnected: 28, vcentersPending: 0, vcentersUnreachable: 0,
@@ -96,39 +96,5 @@ describe('진행률', () => {
   it('총 대수를 모르면 null — 없는 진행률을 만들지 않는다', () => {
     expect(collectProgress(null)).toBe(null);
     expect(collectProgress({ vcenters: 0 })).toBe(null);
-  });
-});
-
-describe('LIVE 배지', () => {
-  it('첫 수집 중에 OK 라고 말하지 않는다', () => {
-    // v2.508 까지의 문구는 `28/28 vCenter OK` 뿐이라 수집 중에도 정상처럼 보였다.
-    const s = liveText(health({ vcentersConnected: 20, vcentersPending: 8 }), '3:13:28');
-    expect(s).not.toMatch(/OK/);
-    expect(s).toMatch(/대기 8/);
-    expect(s).toMatch(/3:13:28/);
-  });
-
-  it('전부 정상이면 기존 문구를 유지한다', () => {
-    expect(liveText(health(), '3:13:28')).toBe('28/28 vCenter OK · 3:13:28');
-  });
-
-  it('연결 실패·점검도 구분해 보여준다', () => {
-    const s = liveText(health({ vcentersConnected: 24, vcentersUnreachable: 3, vcentersMaintenance: 1 }), 'x');
-    expect(s).toMatch(/불가 3/);
-    expect(s).toMatch(/점검 1/);
-  });
-
-  it('health 가 없으면 연결 중', () => {
-    expect(liveText(null, 'x')).toBe('연결 중…');
-  });
-});
-
-describe('배너', () => {
-  it('행동이 갈리는 두 경우만 띄운다', () => {
-    expect(shouldBanner('first-collect')).toBe(true);
-    expect(shouldBanner('unreachable')).toBe(true);
-    for (const p of ['ready', 'loading', 'retrying', 'error', 'empty', 'no-health']) {
-      expect(shouldBanner(p)).toBe(false);
-    }
   });
 });

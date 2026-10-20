@@ -1,11 +1,11 @@
-// v2.629 그룹 f 회귀 — V6 기여도·알람 미조회·빈 구분 문구 / 스캔 대역 폼 목록 밖 값 / 403 폴링 중단 / NSX 삭제 실패 /
+// v2.629 그룹 f 회귀 — Summary 기여도·알람 미조회 / 스캔 대역 폼 목록 밖 값 / 403 폴링 중단 / NSX 삭제 실패 /
 // bm-usage 입력 실패·보존 정리 / 전산실 추이 각주. 순수 판정은 값으로, 화면 배선은 주석을 뺀 소스로 본다.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from '../test/_stripComments.js';
-import { corpContribution, contribRowKind, contribNote, contribTotalLabel, statusTiles, alarmsUnknownCount, emptyGroupText } from '../version_6/v6Data.js';
+import { corpContribution, contribRowKind, contribNote, contribTotalLabel } from './corpContribution.js';
 import { missingChoice, choiceLoadNote } from './idrac/scanRangeFormText.js';
 import { sourceErrorsNote, lastPruneNote } from './tools/bmUsageText.js';
 import { trendNotes } from './tools/roomTempView.js';
@@ -15,7 +15,7 @@ const src = (rel) => stripComments(fs.readFileSync(path.join(here, rel), 'utf8')
 // 기준 시각은 고정값(Date.now() 금지 — CLAUDE.md).
 const NOW = Date.UTC(2026, 8, 27, 3, 30, 0);
 
-describe('A1-2629-02 V6 법인별 기여도 — 점검 중·이월 vCenter 는 값을 쓴다', () => {
+describe('A1-2629-02 Summary 법인별 기여도 — 점검 중·이월 vCenter 는 값을 쓴다', () => {
   const S = { byVcenter: [
     { id: 'a', status: 'connected', hosts: 20, vms: 100 },
     { id: 'b', status: 'maintenance', hosts: 30, vms: 300 },
@@ -46,35 +46,17 @@ describe('A1-2629-02 V6 법인별 기여도 — 점검 중·이월 vCenter 는 �
     expect(contribTotalLabel(corpContribution({ byVcenter: [{ id: 'a', status: 'connected', hosts: 1 }] }))).toBe('합계');
   });
   it('Summary 화면이 새 라벨을 쓴다', () => {
-    const s = src('../version_6/pages/Summary.jsx');
+    const s = src('./Summary.jsx');
     expect(s).toMatch(/contribTotalLabel\(contrib\)/);
     expect(s).toMatch(/contribNote\(contrib\)/);
   });
 });
 
 describe('WEB2629-04 활성 알람 — 경보 미조회 vCenter 를 밝힌다', () => {
-  const G = { vcenters: 2, vcentersConnected: 2, alarms: 3, alarmsCritical: 2, alarmsWarning: 1 };
-  const sites = [{ id: 'a', metrics: { alarmsCritical: 2, alarmsWarning: 1 } }, { id: 'b', collectSource: 'rest', alarmsUnknown: true, metrics: {} }];
-  it('타일 note', () => {
-    expect(alarmsUnknownCount(sites)).toBe(1);
-    expect(alarmsUnknownCount(undefined)).toBe(null);
-    expect(statusTiles(G, sites).find((t) => t.id === 'alarms').note).toMatch(/경보 미조회 vCenter 1곳/);
-    expect(statusTiles(G, [sites[0]]).find((t) => t.id === 'alarms').note).toBe('');
-  });
-  it('Overview 가 sites 를 넘기고 상태바가 같은 판정(alarmTotals)을 쓴다', () => {
-    expect(src('../version_6/pages/Overview.jsx')).toMatch(/statusTiles\(g, ov\.sites\)/);
+  it('상태바가 경보 미조회 판정(alarmTotals)을 쓴다(v2.747 V6 타일 검사는 셸과 함께 지웠다)', () => {
     const app = src('../App.jsx');
     expect(app).toMatch(/alarmTotals\(vcenters\)\.unknown/);
     expect(app).not.toMatch(/\(health\?\.alarms \|\| 0\)/);
-  });
-});
-
-describe('WEB2629-05 빈 구분 문구', () => {
-  it('전체는 다빈치 문구가 아니다', () => {
-    expect(emptyGroupText('all')).toBe('표시할 법인이 없습니다.');
-    expect(emptyGroupText('irs')).toMatch(/들어간 법인이 없습니다/);
-    expect(emptyGroupText('davinci')).toMatch(/없는 법인이 없습니다/);
-    expect(src('../version_6/pages/Overview.jsx')).toMatch(/emptyGroupText\(group\)/);
   });
 });
 

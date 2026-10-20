@@ -1083,7 +1083,7 @@
   - ⚠ 작업 방식: 첫 수정 워크플로 8개가 전부 세션 한도(`session limit`)로 즉시 실패했다 — 작업 트리는 깨끗했으므로 한도 해제 뒤
     **처음부터 재실행**했다(v2.607 규약). 그룹 보고의 '리드가 할 것' 은 `scratchpad/arch2613/LEAD-TODO.md` 에 모아 통합에서 전부 처리했다.
 - ⚠⚠ **v2.618 — 전면 점검(6축 병렬) 확정분**(사용자 요청 "코드 수정·튜닝·오류 수정·튜닝 포인트·보안·메모리 누수·코드·아키텍처 점검".
-  상세 `docs/AUDIT-2026-09-26.md`, 회귀 `server/test/audit2618.test.js` + 웹 `version_5/audit2617.test.js`):
+  상세 `docs/AUDIT-2026-09-26.md`, 회귀 `server/test/audit2618.test.js` + 웹 `views/audit2617.test.js`(v2.747 에 version_5/ 에서 옮김)):
   - ⚠⚠ **새로 만든 상한·게이트는 '인증된 저권한 계정' 이 점유할 수 있는지 먼저 볼 것**(SEC-1 — v2.617 초판이 그랬다): 전역 풀 하나를
     세션(viewer 포함)과 엣지가 나눠 쓰면 느린 본문 몇 개로 엣지 수신 전체가 막힌다. 계열별 풀 · 요청자당 상한 · 본문 읽기 시한이 짝이다.
   - **503 에 Retry-After 를 실었으면 받는 쪽이 따르는지 확인할 것**(ARCH-2) — `resilientFetch.retryDelayMs`(429·503, 상한 30초 + 흔들림).
@@ -1183,7 +1183,7 @@
     저장·삭제되던 것) · 조회 실패를 '없음' 으로 보이지 않는다(WEB-06) · `null GB` 금지(WEB-02) · HPE 서버 상세 제목은 모든 진입점이 `detailServerOf` 를 쓴다(RECENT-04).
   - 남긴 것: curuser `partialRows` 표시 · 물리 GPU·NSX 403 의 권한 안내 컴포넌트화. ✅ 용량 추이 화면의 `vmperfStale`·`vmStatsSkipped` 표시는 v2.628 `samplerWithheldText` 가 한다(v2.741 LEFT-10 정정).
 - ⚠⚠ **v2.628 — 6축 감사("프로그램 개선해줘") 확정분**(상세 `docs/AUDIT-2026-09-27b.md`, 회귀 `server/test/audit2628{a,b,d}.test.js` +
-  웹 `views/tools/audit2628a.test.js`·`version_6/audit2628c.test.js`·`views/audit2628d.test.js` — 그룹별 변이 검증 전부 통과):
+  웹 `views/tools/audit2628a.test.js`·`views/audit2628c.test.js`(v2.747 에 옮김)·`views/audit2628d.test.js` — 그룹별 변이 검증 전부 통과):
   - ⚠⚠ **범위 관리자 차단은 `routes/` 최상위 파일도 본다**(SEC2628-01 high — 재현): `routes/upgrade.js` 가 역할만 봐서 범위 관리자가 업그레이드
     설정·적용·재시작·번들 설치를 할 수 있었다. `audit2612a` 스윕은 `routes/api/*`·`routes/admin/*` 만 본다 — `routes/capacity.js`·`routes/auth.js`
     (AD 설정·연결 테스트)도 같은 이유로 빠져 있었다. **새 라우터 파일은 위치와 무관하게 '범위 참조 0건' 인지 먼저 볼 것.**
@@ -1545,7 +1545,7 @@
   · **요청 경로에서 등록부를 행마다 읽지 말 것**(A-04 — `loadIdracRegistry` 는 statSync + structuredClone) · 지표 기간 통계는 키별 seek(E-02 — `GROUP BY k` 는 파티션 전체).
   · **사용자 입력 일수는 함수 안에서도 자른다**(C-01 — Infinity 가 끝나지 않는 조각 루프) · super_admin 판정은 로컬 토큰 표지 `authSrc:'local'`(C-03 — 이름 조회는 같은 이름 AD 세션을 통과시켰다).
   · 정직 기록: 실장비 미확인(합성 재현) · B-06(브레이크아웃 트랜시버)·F-03(CVP 이벤트 워터마크) 미처리 · 센서 상세 캐시 동기 저장은 빈도만 줄였다.
-- ⚠⚠ **v2.681 — 2회차 점검 확정분**(1회차 회귀 축 포함 6축 → 4그룹 + 리드 수정, 회귀 `server/test/audit2681{a,b,c,e}` + 웹 `version_6/audit2681d`. 상세 `docs/AUDIT-2026-10-02b.md`):
+- ⚠⚠ **v2.681 — 2회차 점검 확정분**(1회차 회귀 축 포함 6축 → 4그룹 + 리드 수정, 회귀 `server/test/audit2681{a,b,c,e}` + 웹 `views/audit2681d`(v2.747 에 옮김). 상세 `docs/AUDIT-2026-10-02b.md`):
   · ⚠⚠ **로컬 계정과 이름이 같은 AD 로그인은 받지 않는다**(R2B-01 HIGH): 설정 소유자·자격증명 가드가 이름으로 판정하므로 같은 이름 AD 세션이 그 로컬 계정 권한을 얻었다.
     `authenticate()` 는 로컬 이름(대소문자 무시)이면 AD 를 시도하지 않고, `resolveTokenUser` 는 그런 비-로컬 토큰을 null 로 본다. **이름으로 판정하는 새 가드를 만들 때 이 전제가 그 안전의 근거다.**
   · ⚠⚠ **1회차 수정이 만든 회귀 셋**(R2A-01~03): 엣지 위임 행은 push 의 60분 전량 갱신(`faults.EDGE_FULL_REFRESH_MS` — push.js 와 한 벌)만큼 부품 신선도가 넓다 ·

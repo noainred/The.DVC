@@ -1,5 +1,6 @@
 /**
- * version_4/mode.js — '경영 보기 ↔ 엔지니어 보기' 모드 판정(v2.508, 순수).
+ * views/overviewMode.js — Overview '경영 보기 ↔ 엔지니어 보기' 모드 판정(v2.508, 순수).
+ * v2.747: V4 셸 삭제로 version_4/mode.js 에서 옮겼다. V4 전용이던 modeSpec·viewFromHash 는 함께 지웠다.
  *
  * ⚠ 모드는 **보기 설정이지 권한이 아니다.** 모드를 바꿔서 볼 수 있는 데이터가 늘거나 줄지 않는다.
  *   보장하는 것: **권한 · 데이터 범위 · 임계값(75/90)** 은 두 모드가 완전히 같다.
@@ -43,29 +44,4 @@ export function defaultMode(role) {
 /** ① query → ② stored → ③ 역할 기본값. 어느 것도 유효하지 않으면 역할 기본값. */
 export function resolveMode({ query, stored, role } = {}) {
   return normMode(query) || normMode(stored) || defaultMode(role);
-}
-
-/**
- * 모드가 **바꾸는 것만** 모아 둔다. 권한·API 경로·임계값은 여기 없다(바꾸지 않으므로).
- *   rows      표 기본 행수
- *   days      추이 차트 기본 기간(일)
- *   rawCols   vCenter ID · 서비스태그 · moref 같은 원시 식별자 열을 보이는가
- *   collect   수집 상태 바를 펼치는가
- *   unit      숫자 단위 표기 계열
- */
-export function modeSpec(mode) {
-  return normMode(mode) === 'eng'
-    ? { rows: 50, days: 7, rawCols: true, collect: true, unit: 'raw' }
-    : { rows: 10, days: 90, rawCols: false, collect: false, unit: 'exec' };
-}
-
-/** 해시 질의(`#/v4/overview?view=exec`)에서 view 값을 읽는다. 없으면 null. */
-export function viewFromHash(hash) {
-  const q = String(hash || '').split('?')[1];
-  if (!q) return null;
-  for (const part of q.split('&')) {
-    const [k, v] = part.split('=');
-    if (k === 'view') return normMode(decodeURIComponent(v || ''));
-  }
-  return null;
 }

@@ -1,5 +1,6 @@
 /**
- * loadState.js — V4 화면이 '비어 있는 이유' 를 정직하게 말하게 하는 판정(v2.509, 순수 모듈).
+ * components/loadState.js — 화면이 '비어 있는 이유' 를 정직하게 말하게 하는 판정(v2.509, 순수 모듈).
+ * v2.747: V4 셸 삭제로 version_4/loadState.js 에서 옮겼다(관제 콘솔이 쓴다).
  *
  * 배경(2026-09-14 사용자 질문): 운영 포탈이 v2.508.0 으로 업그레이드돼 재시작된 직후, 전사 현황의
  * KPI 6장이 전부 '수집 대기' · 패널이 전부 '불러오는 중…' 으로 남았다. 사용자가 물었다 —
@@ -160,25 +161,4 @@ export function loadText(phase, { health, pollError } = {}) {
     default:
       return { short: '수집 대기', long: '아직 표시할 데이터가 없습니다.', waiting: null };
   }
-}
-
-/** 상단 배너로 알릴 만한 상황인가 — 행동이 갈리는 두 경우만 띄운다(배너 남발 금지). */
-export const shouldBanner = (phase) => phase === 'first-collect' || phase === 'unreachable';
-
-/**
- * LIVE 배지 문구. 기존 문구는 `28/28 vCenter OK` 뿐이라 **첫 수집 중에도 'OK' 라고 말했다**
- * (실제 화면에서 확인된 오해 요인). 대기·실패가 있으면 그것을 먼저 보여준다.
- */
-export function liveText(health, updated) {
-  if (!health) return '연결 중…';
-  const p = collectProgress(health);
-  if (!p) return `수집 대기 · ${updated}`;
-  const parts = [`연결 ${p.connected}/${p.total}`];
-  if (p.pending) parts.push(`대기 ${p.pending}`);
-  if (p.unreachable) parts.push(`불가 ${p.unreachable}`);
-  if (p.maintenance) parts.push(`점검 ${p.maintenance}`);
-  const head = p.pending || p.unreachable || p.maintenance
-    ? parts.join(' · ')
-    : `${p.connected}/${p.total} vCenter OK`;
-  return `${head} · ${updated}`;
 }

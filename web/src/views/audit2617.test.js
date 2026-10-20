@@ -1,10 +1,11 @@
+// v2.617~2.618 회귀 — v2.747 에 version_5/ 에서 옮겼다(V5 셸 삭제 — V5 전용 검사는 지웠다).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { buildDomainTiles } from '../console/consoleData.js';
 
 const src = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
-describe('v2.617 — 비활성 vCenter 는 불가가 아니다(관제 콘솔·V4 타일)', () => {
+describe('v2.617 — 비활성 vCenter 는 불가가 아니다(관제 콘솔 타일)', () => {
   it('컴퓨트 타일이 비활성을 불가로 세지 않는다', () => {
     const g = { vcenters: 4, vcentersConnected: 3, vcentersMaintenance: 0, vcentersDisabled: 1, hosts: 10, vms: 50, hostsDisconnected: 0, cpuUsagePct: 10, memUsagePct: 10 };
     const t = buildDomainTiles({ global: g, alarms: [] }).find((x) => x.page === 'compute');
@@ -12,18 +13,9 @@ describe('v2.617 — 비활성 vCenter 는 불가가 아니다(관제 콘솔·V4
     expect(t.meta).not.toContain('불가');
     expect(t.meta).toContain('비활성 1');
   });
-  it('헤더·개요·V4 컴퓨트도 비활성을 뺀다(소스)', () => {
+  it('헤더·개요도 비활성을 뺀다(소스)', () => {
     expect(src('../App.jsx')).toMatch(/conn \+ maint \+ off === total/);
-    // v2.618: 개요·V4 컴퓨트의 뺄셈은 vcStatusCounts 로 옮겼다(아래 ARCH-1 묶음이 고정한다).
-  });
-});
-
-describe('v2.617 — V5 사이트 클릭은 상단 법인 선택을 바꾼다', () => {
-  it('selectSite 가 v5 분기에서 setV5Scope', () => {
-    const s = src('../App.jsx');
-    const m = /const selectSite = \(id\) => \{([\s\S]*?)\n {2}\};/.exec(s);
-    expect(m).not.toBeNull();
-    expect(m[1]).toMatch(/if \(v5On\) setV5Scope\(/);
+    // v2.618: 개요의 뺄셈은 vcStatusCounts 로 옮겼다(아래 ARCH-1 묶음이 고정한다).
   });
 });
 
@@ -45,8 +37,8 @@ describe('v2.618 ARCH-1 — 첫 수집 중은 연결 불가가 아니다(판정 
   it('구버전 서버면 예전 뺄셈(비활성 제외)', () => {
     expect(vcStatusCounts({ vcenters: 5, vcentersConnected: 3, vcentersDisabled: 1 }).unreach).toBe(1);
   });
-  it('4곳 모두 그 함수를 쓰고 뺄셈 사본이 없다', () => {
-    for (const p of ['../views/Overview.jsx', '../version_4/pages/Compute.jsx', '../console/pages/ConsoleCompute.jsx']) {
+  it('쓰는 곳 모두 그 함수를 쓰고 뺄셈 사본이 없다(v2.747 V4 컴퓨트는 셸과 함께 지웠다)', () => {
+    for (const p of ['../views/Overview.jsx', '../console/pages/ConsoleCompute.jsx']) {
       const s = src(p);
       expect(s).toContain('vcStatusMeta(g)');
       expect(s).not.toMatch(/g\.vcenters - g\.vcentersConnected/);

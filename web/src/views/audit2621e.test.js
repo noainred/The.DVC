@@ -8,8 +8,7 @@ import { renderToString } from 'react-dom/server';
 import { ErrorBox } from '../components/primitives.jsx';
 import { errorBoxInput, ERROR_BOX_UNKNOWN_TEXT } from '../components/accessDeniedText.js';
 import { HttpError, noteHttpError } from '../api.js';
-import { storageUsageUnknownNote, physicalServersKpi } from './vcCardText.js';
-import { infraTotals } from '../version_5/overviewData.js';
+import { storageUsageUnknownNote } from './vcCardText.js';
 import { vcRangesGate } from './tools/VcScanRangeEditor.jsx'; // v2.639(U1): 편집기 한 벌로 옮겼다
 import { scanJobsView } from './IdracAdmin.jsx';
 import { stripComments } from '../test/_stripComments.js';
@@ -115,36 +114,10 @@ describe('WEB-03 — 개요 스토리지 KPI: 사용량 미상 DS 를 합계에�
     expect(storageUsageUnknownNote({ datastoresUsageUnknown: null })).toBeNull();
     expect(storageUsageUnknownNote(null)).toBeNull();
   });
-  it('V5 infraTotals 가 전체·범위 모드 모두 문구를 싣는다', () => {
-    const ov = {
-      global: { vcenters: 1, hosts: 2, vms: 3, vmsPoweredOn: 1, storageUsedTB: 600, storageTotalTB: 900, storageUsagePct: 66.7, datastores: 38, datastoresUsageUnknown: 7 },
-      sites: [{ id: 'a', status: 'connected', metrics: { hosts: 2, storageUsedTB: 1, storageTotalTB: 2, storageUsagePct: 50, datastoresUsageUnknown: 3 } }],
-    };
-    expect(infraTotals(ov).storageNote).toContain('7개');
-    expect(infraTotals(ov, 'a').storageNote).toContain('3개');
-    expect(infraTotals({ ...ov, global: { ...ov.global, datastoresUsageUnknown: 0 } }).storageNote).toBeNull();
-  });
-  it('소스: 개요 네 화면이 같은 함수를 쓴다', () => {
-    for (const rel of ['./Overview.jsx', '../version_4/pages/Overview.jsx', '../console/pages/ConsoleOverview.jsx', '../version_5/pages/Overview.jsx']) {
+  it('소스: 개요 화면들이 같은 함수를 쓴다(v2.747 V4·V5 개요는 셸과 함께 지웠다)', () => {
+    for (const rel of ['./Overview.jsx', '../console/pages/ConsoleOverview.jsx']) {
       const src = stripComments(read(rel));
       expect(src, rel).toMatch(/storageUsageUnknownNote|storageNote/);
-    }
-  });
-});
-
-describe('WEB-08 — 물리 서버 KPI 를 ESXi 호스트 수로 대체하지 않는다', () => {
-  it('iDRAC 수가 있으면 그 값, 0·null 이면 null + 이유', () => {
-    expect(physicalServersKpi({ servers: 70 })).toEqual({ value: 70, note: null });
-    expect(physicalServersKpi({ servers: 0 })).toEqual({ value: null, note: 'iDRAC 등록 없음' });
-    expect(physicalServersKpi(null)).toEqual({ value: null, note: '물리 서버 집계 없음' });
-    expect(physicalServersKpi(undefined).value).toBeNull();
-    expect(physicalServersKpi({}).value).toBeNull();
-  });
-  it('소스: V4 두 곳이 `physical.servers || hosts` 대체를 쓰지 않는다', () => {
-    for (const rel of ['../version_4/pages/Overview.jsx', '../version_4/V4App.jsx']) {
-      const src = stripComments(read(rel));
-      expect(src, rel).not.toMatch(/physical\?\.servers\s*\|\|/);
-      expect(src, rel).toMatch(/physicalServersKpi\(/);
     }
   });
 });

@@ -89,20 +89,3 @@ export function storageUsageUnknownNote(roll) {
   const n = numOrNull(roll?.datastoresUsageUnknown);
   return n != null && n > 0 ? `사용량 미상 DS ${n.toLocaleString('en-US')}개는 용량·사용량 합계에서 뺐습니다` : null;
 }
-
-/**
- * v2.621(감사 WEB-08): '물리 서버' KPI 값. iDRAC 등록 수가 없거나(범위 계정의 귀속 실패 → physical=null) 0 이면
- * **ESXi 호스트 수로 대체하지 않는다** — 예전 `physical.servers || global.hosts` 는 186(ESXi 호스트)을 '물리 서버 186'
- * 으로 보였고, 같은 원천을 V5 는 '—', classic 은 iDRAC 수로 보여 화면마다 같은 이름의 수치가 달랐다.
- * 값이 없으면 null(화면 '—')이고 `note` 가 이유를 말한다. ESXi 호스트 수는 호출부가 meta 에 따로 적는다.
- * @returns {{ value: number|null, note: string|null }}
- */
-export function physicalServersKpi(physical) {
-  // v2.632 WEB2632-06: 서버 집계가 예외로 실패하면 `{servers:0, error}` 가 온다 — 그것을 'iDRAC 등록 없음' 이라
-  // 말하면 실패가 '없음' 으로 보인다. error 가 있으면 값은 null 이고 실패라고 말한다(servers 를 보기 전에 본다).
-  if (physical && physical.error) return { value: null, note: '물리 서버 집계 실패' };
-  const n = numOrNull(physical?.servers);
-  if (n != null && n > 0) return { value: n, note: null };
-  if (physical == null || n == null) return { value: null, note: '물리 서버 집계 없음' };
-  return { value: null, note: 'iDRAC 등록 없음' };
-}

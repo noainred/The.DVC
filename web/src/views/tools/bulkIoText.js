@@ -2,7 +2,7 @@
  * views/tools/bulkIoText.js — 대량 등록(CSV·자유텍스트) 화면의 **판정·문구**(순수, v2.513).
  *
  * 왜 순수 모듈인가: 웹 테스트는 node 환경(DOM 없음)이라 컴포넌트 렌더를 테스트할 수 없다.
- * 그래서 이 저장소 관례대로(`components/accessDeniedText.js`·`version_4/loadState.js`)
+ * 그래서 이 저장소 관례대로(`components/accessDeniedText.js`·`components/loadState.js`)
  * '무엇을 켜고 무엇을 뭐라고 부르는가' 는 여기서 결정하고 회귀로 고정한다.
  *
  * ── 반드시 지킬 것 ──────────────────────────────────────────────────────────

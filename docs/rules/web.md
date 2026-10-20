@@ -74,7 +74,7 @@
 - ⚠⚠ **v2.725 — 상단 메뉴는 대메뉴 10개 + 하위 메뉴 줄(시안 A '2단 탭')이고, 표는 `web/src/views/topMenu.js` 하나다**
   (사용자 요청 메뉴 재구성 + Claude Design 시안 https://claude.ai/artifact/HMEPTddM42sLXFikvQX1eq · 업그레이드는 설정 하위. 회귀 `web/src/views/topMenu.test.js`):
   · 화면을 새로 만들지 않는다 — 하위 메뉴는 기존 탭(`#/<tab>`)이나 특수 기능 도구(`#/tools/<k>`)를 가리킬 뿐이다. **탭 id·도구 키는 그대로**
-    (V5·V6·해시 라우팅·toolsDenied 가 쓴다). 옛 주소(#/hosts 등)는 그대로 열린다.
+    (해시 라우팅·북마크·toolsDenied 가 쓴다). 옛 주소(#/hosts 등)는 그대로 열린다.
   · ⚠ **App 의 TABS 에 탭을 더하면 MENU_GROUPS 에도 넣을 것** — 빠진 탭은 메뉴로 갈 길이 없다(테스트가 두 집합을 대조한다).
   · 지금 위치는 `locate(tab, hash)` 하나가 판정한다 — 특수 기능 카드로 연 도구도 그 도구가 속한 메뉴가 켜진다. 물리 서버는 서버 분석의
     셋째 주소 조각 `baremetal`(`#/tools/serveranalysis/baremetal/<하위 탭>`)이고 서버 분석은 그 모드에서 구분을 Baremetal 로 고정한다
@@ -135,7 +135,7 @@
     `TOOL_ROWS.filter` 가 **0건** ③ 라벨 문자열을 JSX 에 다시 적지 않았는지. 변이 검증 —
     필터를 되살리면 ②가 실패한다(실측 1 failed / 12 passed).
   - ⚠ **나머지 등록처는 이미 자동이거나 테스트가 막고 있다**(v2.573 에 전수 확인):
-    사용자별 모달(`SPECIAL_TOOLS` 직접) · `version_4/tree.js` 배치(미배치 0, `tree.test.js`) ·
+    사용자별 모달(`SPECIAL_TOOLS` 직접) · (v2.747 V4 트리 배치는 셸과 함께 폐기) ·
     서버 집행 커버리지(`audit2506.test.js:282` 가 `specialToolsList.js` 를 **정규식으로 읽어**
     미선언 0 을 고정 — 새 도구를 매핑도 선언도 없이 추가하면 CI 가 깨진다). 즉 **남은
     수동 작업은 `auth/toolAccess.js` 에 경로를 매핑하거나 사유를 선언하는 것 하나**이고,
@@ -296,7 +296,7 @@
     빈 값은 키를 지운다) · `stageDisplay`(badge|suffix). 단계 색은 `STAGE_COLORS` 팔레트만(서버 400) — 임의 문자열이 style 로 들어가지 않게.
   · 첫 단계가 기본값 — 없는 단계를 가리키면 화면은 기본 단계로 본다(서버는 저장 때 그 stage 를 지우고 경고). 단계 축을 끄면(null) 지정은 남긴다.
   · 카테고리 저장(PUT 에 overrides·stages 없음)은 덮어쓰기를 건드리지 않는다 — `Object.hasOwn(body, …)` 일 때만 바꾼다(테스트 고정).
-  · 바꾼 이름은 특수 기능 화면·도구 제목에만 쓴다. V4·V5·V6 내비·⌘K 팔레트는 원래 이름이다(드로어 안내가 말한다). 원래 이름은 `aka` 로 검색된다.
+  · 바꾼 이름은 특수 기능 화면·도구 제목에만 쓴다. ⌘K 팔레트는 원래 이름이다(드로어 안내가 말한다). 원래 이름은 `aka` 로 검색된다.
   · 분류 바 sticky top = 셸 머리 실제 높이 + 8px(ResizeObserver) · 720px 이하는 고정하지 않는다(탭이 여러 줄이라 400px 화면의 1/3 을 가렸다 — Chromium 판독).
 - **접속 공지 팝업 · 게시판(v2.722)** — `server/src/bulletin/store.js`(notices.json·board.json, 원자 쓰기·손상 보존·상한 거부) + `routes/api/bulletin.js`
   (`/notices/*`·`/board/*`, 회귀 `server/test/bulletin2722.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/board/`{Board.jsx,NoticePopup.jsx,bulletinText.js}:
@@ -320,92 +320,28 @@
 ## 원래 루트 「프론트엔드 회귀 방지」 절
 
 
-- **신규 포탈은 V4 하나다**(`web/src/version_4/`, v2.508 — v2.490 의 V3 를 승격): 셸을 더 만들지 말 것.
-  `console/` ↔ `version_3/` 가 페이지별 **58~87% 동일**했고 v2.506 svcmon 권한 버그를 **두 곳에**
-  고쳐야 했다(`server/test/audit2506.test.js:64` 가 그 배열을 하드코딩한다). 네 번째 복제를 만들면
-  같은 수정이 세 곳이 된다. V4 에 화면을 더할 때 지킬 것:
-  - **도구 키(`#/tools/<k>`) 는 어떤 이름 변경에도 바꾸지 않는다** — `permissions.json` 의
-    `toolsDenied` 값이자 `auth/toolAccess.js` 의 집행 매핑이다. 옛 이름은 `specialToolsList.js` 의
-    **`aka` 배열**에 남긴다(v2.508 신설). desc 에 검색어를 끼워 넣는 우회를 되살리지 말 것.
-    검색 매칭은 `views/toolSearch.js` 하나가 소유한다 — 카드 그리드와 ⌘K 팔레트가 같은 모듈을 쓴다.
-  - **새 도구를 추가하면 `version_4/tree.js` 에 배치한다** — 안 하면 내비에서 영원히 못 찾는다
-    (레거시 그리드에만 남는다). `tree.test.js` 가 '주소속 1회 · 미분류 0 · 유령 키 0' 을 고정한다.
-    **상태를 바꾸는 도구**(rma·vm-clone·vmprovision·shutdown·diskadd·backup·massdeploy·agent-scans)는
-    무조건 `운영 작업` 이 주소속이다 — 조회 그룹을 훑다가 실행 버튼을 만나지 않게.
-    `toolcats/catalog.js` 의 PRESET 도 같이 채운다(빠지면 화면에서 '기타' 로 밀린다).
-  - **모드 토글은 권한이 아니다**(`version_4/mode.js`): 바꾸는 것은 표 행수·기간·원시 열·펼침뿐이고
-    **권한·데이터 범위·임계값(75/90)은 두 모드가 같다**. ⚠ '호출 API 도 같다' 고 쓰지 말 것 —
-    ②와 ⑤는 패널이 달라 실제 호출 집합이 다르다(시안 초안의 오류였고 v2.508 에 정정했다).
-    `localStorage` 접근은 반드시 try/catch(프라이빗 창에서 throw).
-  - **V4 에서 무거운 API 는 15초 폴링 금지**: `/tools/capacity-forecast` 는 실측 1.5초(v2.503)라
-    120초 이상 · 페이지 마운트 시에만. **고아 VMDK 스캔(`/tools/orphan-vmdk`)은 폴링 금지** —
-    실행마다 vCenter SOAP 왕복이다(v2.505). 버튼 실행 + 재진입 가드.
-    목록(`/tools/orphan-vmdk/datastores`)은 스냅샷 memo 라 폴링해도 된다 — 둘을 구분할 것.
-    이 규약은 `server/test/v4Portal2508.test.js` 가 고정한다.
-  - **'수집 대기' 로 뭉개지 말 것 — 화면이 '기다리면 되는지' 를 말해야 한다**(`version_4/loadState.js`,
-    v2.509. 2026-09-14 사용자 질문 "기다리면 나오는거야?" 가 그대로 증거다): 업그레이드 재시작 직후
-    KPI·패널이 전부 '수집 대기'·'불러오는 중…' 이었는데, 그 한 문구가 **행동이 정반대인 상황들**을
-    덮고 있었다 — 첫 수집 중(기다리면 채워진다) / vCenter 연결 실패(**기다려도 안 된다**) /
-    응답 시한 초과·연결 실패(재시도 중) / 등록 0개. `/health` 가 `vcentersPending`(첫 수집 전·중)과
-    `vcentersUnreachable` 을 **따로** 세어 주는데(`routes/api/overviewNsx.js`, 그 주석이 직접
-    "'pending' 을 'unreachable' 과 구분해" 라고 적고 있다) 프론트가 그걸 안 쓰고 있었다.
-    - **pending 과 unreachable 을 합치지 말 것.** 합치면 '조치하세요' 라고 말해 놓고 잠시 뒤
-      저절로 채워진다(거짓 안내). 대기가 하나라도 있으면 '수집 중' 이 이긴다 — `loadState.test.js` 고정.
-    - **타임아웃·연결 실패는 ErrorBox(화면 전체 오류)로 띄우지 않는다** — 재시도 중이지 장애가 아니다.
-      `usePolling` 은 20초 타임아웃 × 3회 뒤 실패로 떨어지고 15초 후 다시 폴링한다(`api.js:135`).
-      오류 문구 판정은 브라우저별 변형을 다 받아야 한다 — Chrome 은 `timeout` 이 아니라
-      **`signed timed out`** 이라 'timeout' 만 보면 놓친다(테스트에서 실제로 걸렸다).
-    - **긴 설명은 상단 배너가 한 번만** 한다. 패널·KPI 는 짧은 문구(`short`). 패널마다 긴 문장을
-      넣으면 화면이 같은 말로 뒤덮인다(스크린샷을 읽어야 보인다 — 수치로는 안 잡혔다).
-    - LIVE 배지는 **첫 수집 중에 'OK' 라고 말하지 않는다**(`liveText`). v2.508 까지
-      `28/28 vCenter OK` 뿐이라 수집 중에도 정상처럼 보였다.
-    - 수집 주기·동시성·데드라인 **숫자를 문구에 박지 말 것** — `/health` 가 주는 값만 쓰고
-      나머지는 '몇 분' 처럼 범위로 말한다.
-    - ✅ 도메인 타일 6장의 메타 문구도 v2.586 에 `loadState` 의 짧은 문구(`waitMeta`)를 받는다 — V4 와
-      관제 콘솔 셸 양쪽이 같은 판정을 넘긴다(기본값 '수집 대기' 는 호출부가 안 넘길 때만).
-  - **표 머리글에 영문 소문자 단위를 쓰지 말 것**: `.v3-table th` 가 `text-transform: uppercase` 라
-    `kWh` 가 **`KWH`** 로 샌다(v2.508 실제 발견 — 스크린샷을 읽어야 잡힌다). 한글 라벨로 쓰고
-    단위는 각주에 적는다.
-  - CSS 클래스 접두는 승격 후에도 `v3-` 를 유지했다(163개 규칙 전량 치환은 이득 없이 소실 위험).
-    V4 전용 셸 크롬만 `v4-` 를 쓴다.
-- ⚠⚠ **V5 는 셸이 아니라 '틀(chrome)' 이다 — 화면을 복제하지 않는다**(`web/src/version_5/`, v2.616 — 사용자 요청
-  "화면을 이렇게 수정해줘 … 설정의 V5 로 만들어줘, 좌측의 메뉴들에 맞게 특수기능을 좌측에 넣어줘" + 시안 승인.
-  선택: 도구·탭은 **틀 안에서** 연다 · **V4 유지** · 자산 그룹은 **소제목**으로 나눈다):
-  - 위 'V4 하나다' 규칙과 충돌하지 않게, V5 는 **새 라우터가 아니라 기존 App 라우터 위의 새 틀**이다. 주소는 개발 포탈과
-    같고(#/vms · #/tools/<k>) 본문은 App 이 그리는 **같은 요소**(`filterBar`·`tabBody`·`overlays`)를 두 레이아웃이 공유한다.
-    V5 전용 화면은 Overview(카드 3장) 하나뿐이다 — **새 화면을 V5 안에 복제하지 말 것**(수정이 두 곳이 된다).
-  - '지금 V5 로 그리는가' 는 해시가 아니라 **localStorage `ui.shell='v5'`**(`route.js`, try/catch — 못 읽으면 기존 화면)가
-    정한다. `#/v5`·`#/v5/<탭>` 은 진입 신호이고 App 이 **탭을 읽기 전에** 소비해 실제 주소로 바꾼다. V4·콘솔 판정이 먼저다.
-  - **새 도구를 추가하면 `version_5/tree.js` 에도 배치한다** — `tree.test.js` 가 카탈로그 전부 1회 · 유령 0 · 상태 변경 도구는
-    '자동화' 를 고정한다(V4 트리와 같은 약속). 숨김·잠금은 `views/toolVisibility.js`, 검색은 `views/toolSearch.js` 를 그대로 쓴다.
-  - 셸은 `/health`·`/vcenters` 를 **다시 폴링하지 않는다**(App 것을 props 로). 통신 지도(`/tools/comm-map` 60초)는
-    **관리자 + 전체 범위 + 도구 허용** 일 때만 부른다(`shell.test.js` 고정 — viewer 403 0건 실측). 켜진 엣지가 0곳이면
-    'Edge 0/0' 대신 vCenter 기준으로 말한다(뜻 없는 숫자 금지). 판정 대기(첫 수집 중·경보 모름)는 정상에 넣지 않는다.
-  - 상단 '법인' 선택은 `vcenterId` 로 모든 탭에 적용되고 특수 기능·IP관리에는 `defaultScope` 로 넘어간다(개발 포탈은 넘기지
-    않아 예전 그대로). IP관리·시리얼 조회 검색어는 `hooks/searchHandoff.js`(메모리 · 1회 · 30초)로 넘긴다 — URL 에 싣지 않는다.
-  - CSS 는 `.v5` 아래로만(`shell.test.js` 가 선택자 전수 검사) · uppercase 금지 · 1024px 이하는 서랍.
-  - ⚠ 정직 기록: Chromium 검증은 목 스택(엣지 0곳)이라 **엣지가 있는 'Main · Edge N/N' 표시는 화면으로 보지 못했다**(단위 테스트만).
-- ⚠⚠ **V6 도 셸이 아니라 '틀' 이다 — 상위 메뉴 10개는 `version_6/menus.js` 하나가 소유한다**(`web/src/version_6/`, v2.623 — 사용자 제공
-  핸드오프 `design_handoff_portal_home`(README 는 `docs/design/portal-home/README.md`). 선택: **V5 처럼 새 틀 추가** · **Overview/Summary 재정의는 V6 안에서만** ·
-  v2.622 뒤 별도 릴리스 · 전체 검증):
-  - V5 와 같은 원칙이다 — 본문은 App 의 `filterBar`·`tabBody` 를 그대로 쓰고, V6 전용 화면은 **Overview · Summary · 메뉴 페이지(`#/m/<id>`)** 셋뿐이다.
-    기존 `#/overview`·`#/summary` 화면은 바뀌지 않는다(V6 일 때만 V6 판을 그린다).
-  - 셸 플래그는 V5 와 **같은 키**(`ui.shell`)에 `'v6'` 이다 — 둘은 동시에 켜지지 않는다. `writeShellV6(false)` 는 값이 `'v6'` 일 때만 지운다(V5 를 끄지 않게).
-    App 판정 순서: 콘솔 → V4 → **V6 → V5**(`shell.test.js` 고정).
-  - ⚠⚠ **메뉴 주소 `#/m/…` 는 기존 탭이 아니다** — App 의 해시 동기화 가드에 `isMenuHash` 를 빼면 진입 즉시 `#/<tab>` 으로 덮여 메뉴 페이지가 튕긴다
-    (V5 때 적어 둔 '셸 판정이 하나라도 빠지면' 과 같은 함정). V6 를 끄면 메뉴 주소는 Overview 로 옮긴다.
-  - **새 도구를 추가하면 `version_6/menus.js` 에도 배치한다** — `menus.test.js` 가 카탈로그 전부 1회 · 유령 0 · 상태 변경 도구는 '자동화' 를 고정한다.
-    ⚠ 핸드오프는 `vm-clone`·`backup` 을 '보호/규정' 에 두었지만 **상태를 바꾸는 도구라 '자동화' 로 옮겼다**(V4·V5 와 같은 규칙 — 조회 메뉴에서 실행 버튼을 만나지 않게).
-  - 숨김·잠금은 `views/toolVisibility.js`, 검색은 V5 `searchData.js`(= `views/toolSearch.js`)를 그대로 쓴다. 관리자 표시 도구는 **숨기지 않고 🔒**(핸드오프 규칙).
-  - 셸은 폴링하지 않는다. `/overview` 는 V6 Overview 와 **서버 메뉴에서만**, `/summary` 는 V6 Summary 에서만 부른다(다른 메뉴 페이지는 폴링 0 — 테스트 고정).
-    '조치 필요' 는 **개수를 세지 않는 바로가기**다(각 도구 API 를 Overview 마다 부르면 그 자체가 부하 — 화면이 '개수는 각 화면에서' 라고 말한다).
-  - 핸드오프 숫자는 목업이다 — 전부 실제 API 에서 계산한다(`v6Data.js`, 값 없으면 '—', 첫 수집 중·판정 대기를 정상에 섞지 않는다, 임계 75/90 은 consoleData 하나).
-  - ⚠ 법인 격자 구분선을 **격자 배경색**으로 그리지 말 것 — 마지막 줄 빈 칸이 밝은 덩어리가 된다(v2.623 스크린샷 판독에서 발견. 수치로는 안 잡혔다). 칸마다 inset 그림자로 그린다.
-  - ⚠ 정직 기록: Chromium 검증은 목 스택(엣지 0곳)으로 admin·viewer × 1440/400 을 봤다. 실운영 규모(법인 28곳)의 법인 격자 줄바꿈은 보지 못했다.
-  - **법인별 상태 카드는 이름 알파벳순 + 다빈치/IRS 구분**(v2.624 사용자 요청): 순서는 `v6Data.bySiteName`(재사용 Collator · 숫자 인식 · 대소문자 무시) —
-    `consoleData.siteRows` 의 '가장 나쁜 사용률 먼저' 는 다른 화면이 쓰므로 **거기를 바꾸지 말고** V6 에서만 다시 정렬한다. 구분은 `siteGroupOf`
-    (이름에 'IRS' 가 있으면 IRS, 없으면 다빈치 — 판정 근거는 이름뿐)이고 머리말 톤 개수는 고른 구분 안에서 센다. 목 데이터에 IRS 이름이 없어
-    Chromium 검증은 `/api/overview` 이름을 가로채 바꿔 봤다.
+- ⚠⚠ **V4·V5·V6 셸은 지웠다 — 되살리거나 고치지 않는다**(v2.747, 2026-10-20 사용자 요청 "독립셀 version 4,5,6 은 삭제하고
+  더이상 수정하거나 업데이트 하지 않도록 변경해줘, 그리고 설정에서 신규 포탈 보기 메뉴 삭제"): `web/src/version_{4,5,6}/` ·
+  `views/V4Portal.jsx`(설정 › 신규 포탈 보기)를 지웠다. 화면은 **기본 셸(App 라우터) + 관제 콘솔(`console/`)** 둘이다.
+  `server/test/v4Portal2508.test.js` 가 폴더 부활·옛 경로 import·설정 메뉴 부활을 막는다. 새 셸·새 틀을 만들지 말 것.
+  - 기본 화면이 쓰던 모듈은 옮겨 살렸다: ⌘K 팔레트 `components/Palette.jsx`·`palette.js` · Overview 보기 모드 `views/overviewMode.js` ·
+    로딩 판정 `components/loadState.js`(관제 콘솔) · Summary 기여도 `views/corpContribution.js`. V4·V5·V6 만 쓰던 함수는 함께 지웠다
+    (`physicalServersKpi`·`corpTotalLabel`·`modeSpec`·`viewFromHash`·`liveText`·`shouldBanner`).
+  - **옛 주소는 버리지 않는다**: `#/v3·#/v4·#/m/…` → `#/overview`, `#/v5/<주소>`·`#/v6/<주소>` → `#/<주소>` (`hooks/hashTab.js legacyShellHash`,
+    App 의 `migrateMovedHash` 가 기동·hashchange 때 적용). 남은 셸 플래그 `localStorage ui.shell` 은 기동 시 지운다.
+  - ⌘K 팔레트는 V4 메뉴 트리 없이 동작한다 — 분류명은 특수 기능 카테고리 설정(`/admin/tool-categories`, 카드 그리드와 같은 출처),
+    탭은 App 의 `visibleTabs`(권한으로 거른 것)를 받는다. **새 도구를 추가할 때 고칠 트리가 없다**(V4·V5·V6 트리 배치 규칙은 폐기).
+  - 셸이 사라져도 남는 규칙(v2.508 에서 정한 것):
+    - **도구 키(`#/tools/<k>`) 는 어떤 이름 변경에도 바꾸지 않는다** — `permissions.json` 의 `toolsDenied` 값이자 `auth/toolAccess.js` 의
+      집행 매핑이다. 옛 이름은 `specialToolsList.js` 의 **`aka` 배열**에 남긴다. 검색 매칭은 `views/toolSearch.js` 하나(카드 그리드 = ⌘K).
+    - 새 도구는 `toolcats/catalog.js` 의 PRESET 도 채운다(빠지면 화면에서 '기타' 로 밀린다). 상태를 바꾸는 도구(rma·vm-clone·vmprovision·
+      shutdown·diskadd·backup·massdeploy·agent-scans)는 PRESET 의 '운영 작업' 분류에 둔다.
+    - **모드 토글은 권한이 아니다**(`views/overviewMode.js`): 권한·데이터 범위·임계값(75/90)은 두 보기가 같다. `localStorage` 는 try/catch.
+    - **무거운 API 는 15초 폴링 금지**: `/tools/capacity-forecast`(실측 1.5초)는 120초 이상·마운트 시에만, 고아 VMDK 스캔(`/tools/orphan-vmdk`)은
+      폴링 금지(버튼 + 재진입 가드). 목록(`/tools/orphan-vmdk/datastores`)은 스냅샷 memo 라 폴링해도 된다.
+    - **'수집 대기' 로 뭉개지 말 것**(`components/loadState.js`, v2.509 — "기다리면 나오는거야?"): pending(기다리면 채워진다)과
+      unreachable(기다려도 안 된다)을 합치지 않는다 · 타임아웃·연결 실패는 화면 전체 오류가 아니다(재시도 중) · 수집 주기 숫자를 문구에 박지 않는다.
+    - **표 머리글에 영문 소문자 단위를 쓰지 말 것**(uppercase 셸 CSS 에서 `kWh` 가 `KWH` 로 샜다 — 한글 라벨 + 각주).
 - **위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다**(v2.493, 2026-09-12 실제 신고 — 같은 유형이
   v2.381→2.383 에서 이미 한 번 발생했다): 위임 법인 서버는 중앙 레지스트리에 없고, 엣지가 export 로
   **최신 스냅샷만** 올려 보낸다(`collector/agent.js compactSensors` → 중앙 `collector/remoteInventory.js`).
