@@ -8,6 +8,8 @@ import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS, kindCountOf, PERF_TABLE_PAGE, limitRows, perfComputedNote, perfBucketMsFor } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
+import SanPortUsage from './SanPortUsage.jsx';   // v2.748 📊 포트 사용량(시안 A안 개정 2)
+import SanPortMap from './SanPortMap.jsx';       // v2.748 🔲 포트 배치(스위치 한 대 전체 포트)
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -1319,6 +1321,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
 //   eslint 에 no-undef 가 없어 잡지 못했다 → eslint.config.js 에 no-undef 추가.
 function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }) {
   const d = detail;
+  const [focusPort, setFocusPort] = useState(null);   // v2.748: 포트 배치 ↔ 포트 사용량 사이에 넘기는 포트
   const list = d.ports?.list || [];
   const unit = d.extra?.rateUnit || 'fps';
   const filtered = sortPorts(filterPorts(list, portFilter).filter((p) => {
@@ -1382,13 +1385,18 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
           </div>
 
           {/* 포트 목록 / 사용량 분석 전환(v2.411) — 분석 탭은 portperfshow 시계열 DB 를 읽는다. */}
-          <div className="vc-views" style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
-            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석'], ['zoning', '🔗 조닝'], ['health', '🩺 점검']].map(([k, label]) => (
+          <div className="vc-views" style={{ marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {[['ports', '포트 목록'], ['map', '🔲 포트 배치'], ['usage', '📊 포트 사용량'], ['perf', '📈 사용량 분석'], ['zoning', '🔗 조닝'], ['health', '🩺 점검']].map(([k, label]) => (
               <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px' }}
-                onClick={() => setTab(k)}>{label}</button>
+                onClick={() => { setFocusPort(null); setTab(k); }}>{label}</button>
             ))}
           </div>
 
+          {/* v2.748: 두 탭은 서로 포트를 넘겨 연다(배치에서 고른 포트의 기록 ↔ 기록에서 본 포트의 배치). key 로 다시 마운트해 초기 대상을 바꾼다. */}
+          {tab === 'map' && <SanPortMap key={`map-${focusPort ?? ''}`} deviceId={d.deviceId} ports={list} focusPort={focusPort}
+            onOpenUsage={(p) => { setFocusPort(p); setTab('usage'); }} />}
+          {tab === 'usage' && <SanPortUsage key={`usage-${focusPort ?? ''}`} deviceId={d.deviceId} ports={list} focusPort={focusPort}
+            onPickPort={(p) => { setFocusPort(p); setTab('map'); }} />}
           {tab === 'perf' && <PerfPanel deviceId={d.deviceId} ports={list} />}
           {/* 조닝(v2.511) — cfgshow 파싱 결과. 폴링하지 않는다(탭을 열 때 1회 조회). */}
           {tab === 'zoning' && <SanZoningPanel deviceId={d.deviceId} />}
