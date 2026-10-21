@@ -1178,6 +1178,9 @@
     잡을 주고, 엣지는 받은 잡을 반납할 수 없다. **새 쿼리 플래그로 중앙 동작을 바꾸면 구버전 중앙이 그 플래그를 무시했을 때를 먼저 볼 것.**
   - **모르는 reqId 는 410, 재전송은 멱등**(LEFT-03 capture · EDGE-03 bmstor) · **순차 실행 엣지에는 한 번에 1건**(EDGE-01 RMA — v2.621 iDRAC 스캔 TAKE_MAX 의 형제) ·
     **stored:false·acked:false 는 실패**(EDGE-04 edgeLogWorker).
+    ⚠ 2026-10-21 정정: bmstor 의 '같은 에이전트의 더 새 잡'(superseded)을 createdAt(ms) 으로 비교해, 두 잡이 같은 ms 에 만들어지면 옛 늦은 결과가
+    새 값을 덮었다(release 워크플로 1회 실패 — 테스트의 `setTimeout(2)` 도 같은 ms 를 막지 못했다). 이제 생성 순번 `order` 로 판정하고 createdAt 은 TTL 전용이다.
+    **'더 새 것' 판정에 벽시계 ms 를 쓰지 말 것**(같은 ms·시계 조정에서 순서를 잃는다) — 회귀 `test/audit2622c.test.js`(Date.now 고정).
   - **범위 관리자**: 전역 알림·일일 보고 저장/발송(SEC-01) · GPU 게스트 배포/진단/엣지 사용자/물리 GPU 조회(SEC-03) · NSX 매니저 목록(SEC-04).
   - **웹**: 대상(엣지·vCenter)을 바꾸는 설정 화면은 새 대상 조회가 성공하기 전에 폼을 비우고 저장을 잠근다(WEB-01·03·04·08 — 이전 대상 값이 새 대상에
     저장·삭제되던 것) · 조회 실패를 '없음' 으로 보이지 않는다(WEB-06) · `null GB` 금지(WEB-02) · HPE 서버 상세 제목은 모든 진입점이 `detailServerOf` 를 쓴다(RECENT-04).
