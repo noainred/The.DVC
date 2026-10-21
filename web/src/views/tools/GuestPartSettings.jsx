@@ -116,15 +116,22 @@ export default function GuestPartSettings() {
     setBusy(true); setMsg(''); setErr('');
     try {
       if (collect && (collect.enabled !== cfg.collect.enabled || collect.intervalHours !== cfg.collect.intervalHours)) {
-        await putJson('/tools/guest-disk/settings', { enabled: collect.enabled, intervalHours: collect.intervalHours });
+        const g = await putJson('/tools/guest-disk/settings', { enabled: collect.enabled, intervalHours: collect.intervalHours });
+        if (g?.ok === false) { setErr(g.reason || g.error || '수집 설정을 저장하지 못했습니다.'); return; }
       }
-      await putJson('/tools/guest-partition/settings', { threshold: form.threshold, mode: form.mode, vcThresholds: form.vcThresholds });
-      setMsg('저장했습니다.'); setReload((x) => x + 1);
+      const r = await putJson('/tools/guest-partition/settings', { threshold: form.threshold, mode: form.mode, vcThresholds: form.vcThresholds });
+      if (r?.ok === false) { setErr(r.reason || '저장하지 못했습니다.'); return; }   // sendJson 은 400 을 던지지 않고 본문을 준다 — 저장 거부를 성공으로 읽지 않는다
+      setMsg(`저장했습니다 — 기본 임계 ${r?.settings?.threshold ?? form.threshold}%.`); setReload((x) => x + 1);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const saveRules = async () => {
     setBusy(true); setMsg(''); setErr('');
-    try { await putJson('/tools/guest-partition/settings', { rules: form.rules }); setMsg('저장했습니다 — 화면에는 바로, 메일에는 다음 발송부터 반영됩니다.'); setReload((x) => x + 1); }
+    try {
+      const res = await putJson('/tools/guest-partition/settings', { rules: form.rules });
+      if (res?.ok === false) { setErr(res.reason || '저장하지 못했습니다.'); return; }
+      const n = (res?.settings?.rules?.win?.patterns?.length || 0) + (res?.settings?.rules?.lnx?.patterns?.length || 0);
+      setMsg(`저장했습니다(경로 패턴 ${n}개) — 화면에는 바로, 메일에는 다음 발송부터 반영됩니다.`); setReload((x) => x + 1);
+    }
     catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const saveMail = async () => {
@@ -134,10 +141,11 @@ export default function GuestPartSettings() {
       const vcenters = { ...form.mail.vcenters };
       for (const id of Object.keys(before)) if (!(id in vcenters)) vcenters[id] = null;   // 뺀 vCenter 는 null(서버가 지운다)
       for (const [id, v] of Object.entries(vcenters)) if (v) vcenters[id] = { ...v, to: Array.isArray(v.to) ? v.to : splitEmails(v.to) };
-      await putJson('/tools/guest-partition/settings', { mail: {
+      const res = await putJson('/tools/guest-partition/settings', { mail: {
         from: form.mail.from, fromName: form.mail.fromName, commonTo: Array.isArray(form.mail.commonTo) ? form.mail.commonTo : splitEmails(form.mail.commonTo),
         digest: { ...form.mail.digest, to: Array.isArray(form.mail.digest.to) ? form.mail.digest.to : splitEmails(form.mail.digest.to), thr: form.mail.digest.thr === '' ? null : form.mail.digest.thr }, vcenters } });
-      setMsg('메일 설정을 저장했습니다.'); setReload((x) => x + 1);
+      if (res?.ok === false) { setErr(res.reason || '저장하지 못했습니다.'); return; }
+      setMsg(`메일 설정을 저장했습니다 — 통합 메일 ${res?.settings?.mail?.digest?.enabled ? '켜짐' : '꺼짐'} · vCenter 별 메일 ${Object.keys(res?.settings?.mail?.vcenters || {}).length}개.`); setReload((x) => x + 1);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const runNow = async () => {
@@ -397,10 +405,10 @@ export default function GuestPartSettings() {
           )}
           <section className="card" style={box}>
             <b>최근 발송 기록</b>
-            <STable minWidth={640} style={{ width: '100%' }}>
+            <STable minWidth={640} limit={30} style={{ width: '100%' }}>
               <thead><tr><th>시각</th><th>결과</th><th>내용</th></tr></thead>
               <tbody>
-                {(mail?.status?.history || []).slice(0, 30).map((h, i) => (
+                {(mail?.status?.history || []).map((h, i) => (
                   <tr key={`${h.at}-${i}`}>
                     <td data-sort={h.at}>{timeText(h.at)}</td>
                     <td style={{ color: h.state === 'sent' ? '#86efac' : h.state === 'failed' ? '#fca5a5' : undefined }}>{MAIL_STATE_TEXT[h.state] || h.state}</td>
