@@ -838,7 +838,7 @@ api.get('/tools/sanswitch/devices/:id/port-usage.csv', csvPerm, toolsPerm, fullS
   const { r } = out;
   const rows = pu.usageCsvRows(r, { deviceName: out.name });
   logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 CSV 내보내기', target: `${out.name}(${req.params.id})`, detail: `${r.view} ${r.unit} ${r.label} ${rows.length - 1}행` });
-  const day = new Date(r.start + 540 * 60_000).toISOString().slice(0, 10).replace(/-/g, '');
+  const day = new Date(r.start + r.offsetMin * 60_000).toISOString().slice(0, 10).replace(/-/g, '');
   const safeId = String(req.params.id).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 60);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="san-port-usage_${safeId}_${r.view}_${{ d: '1d', w: '7d', m: '1m' }[r.unit]}_${day}.csv"`);
