@@ -112,3 +112,40 @@ export function collectNote(c) {
   if (!c.enabled) return '주기 수집이 꺼져 있어 값이 더 갱신되지 않습니다(엣지 위임 vCenter 는 엣지가 보낸 값으로 갱신됩니다).';
   return '';
 }
+
+/** v2.750 VM 상세 — '3시간 전' 같은 경과 문구. 미래 시각(시계 차이)은 '방금'. */
+export function agoText(ts, now = Date.now()) {
+  const t = numOrNull(ts);
+  if (t == null) return '';
+  const m = Math.max(0, Math.floor((now - t) / 60_000));
+  if (m < 1) return '방금';
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
+}
+
+/**
+ * v2.750 VM 상세 — 파티션 값이 없거나 오래된 이유(아는 것만 말한다).
+ *   d = GET /vms/:id/partitions 응답. 반환 { empty: 값이 없을 때의 안내, stale: 값은 있지만 오래됐을 때의 안내 }.
+ */
+export function vmPartNote(d, now = Date.now()) {
+  if (!d) return { empty: '', stale: '' };
+  const where = '설정 › 수집 서버 › 게스트 파티션 사용률';
+  const enabled = !!d.collect?.enabled;
+  const iv = numOrNull(d.collect?.intervalHours);
+  if (!d.dbAvailable) return { empty: '게스트 디스크 DB 를 열 수 없어 파티션 값을 보여 줄 수 없습니다(설정 › 진단에서 확인).', stale: '' };
+  if (numOrNull(d.collectedAt) == null) {
+    const vcTs = numOrNull(d.vcenterLastTs);
+    if (vcTs != null) {
+      return { empty: `이 vCenter 의 최근 수집(${timeText(vcTs, d.offsetMin)})에 이 VM 의 파티션이 없습니다 — 전원 꺼짐·VMware Tools 미실행·Tools 가 파티션을 보고하지 않는 경우입니다.`, stale: '' };
+    }
+    return { empty: enabled ? '이 vCenter 는 아직 게스트 파티션을 수집하지 않았습니다 — 다음 수집이 끝나면 채워집니다.'
+      : `게스트 파티션 주기 수집이 꺼져 있어 값이 없습니다(${where}에서 켜거나 지금 수집).`, stale: '' };
+  }
+  if (!enabled) return { empty: '', stale: '주기 수집이 꺼져 있어 마지막으로 수집한 값입니다(엣지 위임 vCenter 는 엣지가 보낸 값으로 갱신됩니다).' };
+  if (iv != null && now - d.collectedAt > iv * 2 * 3_600_000) {
+    return { empty: '', stale: `수집 주기(${iv}시간)의 두 배 넘게 지났습니다 — 최근 수집이 실패했을 수 있습니다.` };
+  }
+  return { empty: '', stale: '' };
+}
