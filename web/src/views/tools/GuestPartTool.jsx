@@ -4,6 +4,7 @@ import { Loading, ErrorBox, Kpi, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { VmLink } from '../../components/EntityDetail.jsx';   // v2.749.1 '정보' — 공용 VM 상세 창
 import {
   levelOf, gbText, pctText, growthText, etaText, osLabel, timeText, overviewParams, collectNote,
 } from './guestPartText.js';
@@ -278,14 +279,22 @@ function VcDetail({ vcId, onBack, onPick }) {
               const L = levelOf(d.mode === 'vm' ? v.pct : v.maxPct, eff);
               return (
                 <div key={v.vmId} className="card" style={{ padding: 0, minWidth: 0, borderColor: v.over ? 'rgba(251,191,36,.4)' : undefined }}>
-                  <button type="button" aria-expanded={isOpen} onClick={() => setOpen((o) => ({ ...o, [v.vmId]: !o[v.vmId] }))}
-                    style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', padding: '10px 12px' }}>
-                    <span className="muted" style={{ width: 12 }}>{isOpen ? '▾' : '▸'}</span>
-                    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 160, maxWidth: 280 }}>
-                      <b style={{ fontSize: 13.5, ...ELL }}>{v.vmName}</b>
-                      <span className="muted" style={{ fontSize: 11.5, ...ELL }}>{[v.guestOS, v.cluster, v.host].filter(Boolean).join(' · ') || '—'}</span>
+                  {/* v2.749.1: 머리 줄은 버튼 안에 버튼을 둘 수 없어 '펼치기' 버튼(이름·파티션 칩)과 '정보'(VM 상세 창 — 공용 VmLink·EntityDetail)를 나란히 둔다. */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', padding: '10px 12px', minWidth: 0 }}>
+                    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 160, maxWidth: 320 }}>
+                      <button type="button" aria-expanded={isOpen} aria-label={`${v.vmName} 파티션 ${isOpen ? '접기' : '펼치기'}`} onClick={() => setOpen((o) => ({ ...o, [v.vmId]: !o[v.vmId] }))}
+                        style={{ all: 'unset', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <span className="muted" style={{ width: 12, flex: 'none' }}>{isOpen ? '▾' : '▸'}</span>
+                        <b style={{ fontSize: 13.5, ...ELL }}>{v.vmName}</b>
+                      </button>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, paddingLeft: 20 }}>
+                        <span className="muted" style={{ fontSize: 11.5, ...ELL }} title={[v.guestOS, v.cluster, v.host].filter(Boolean).join(' · ')}>{[v.guestOS, v.cluster, v.host].filter(Boolean).join(' · ') || '—'}</span>
+                        <VmLink vmId={v.vmId} name={v.vmName} vcenterId={vcId} label="정보" className="tab" title="VM 세부 정보(전원·IP·vCPU·RAM·디스크·구성 점검 등)"
+                          style={{ flex: 'none', padding: '1px 8px', fontSize: 11.5 }} />
+                      </span>
                     </span>
-                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 5, flex: '1 1 300px', minWidth: 0 }}>
+                    <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => ({ ...o, [v.vmId]: !o[v.vmId] }))}
+                      style={{ all: 'unset', cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: 5, flex: '1 1 300px', minWidth: 0 }}>
                       {v.parts.slice(0, 8).map((p) => {
                         const pl = levelOf(p.pct, eff);
                         const hot = p.over && !p.ignored;
@@ -294,9 +303,9 @@ function VcDetail({ vcId, onBack, onPick }) {
                         </span>;
                       })}
                       {v.parts.length > 8 && <span className="muted" style={{ fontSize: 11.5 }}>외 {v.parts.length - 8}개</span>}
-                    </span>
-                    <b style={{ color: L.color, minWidth: 90, textAlign: 'right' }}>{d.mode === 'vm' ? `합계 ${pctText(v.pct)}` : `최고 ${pctText(v.maxPct)}`}</b>
-                  </button>
+                    </button>
+                    <b style={{ color: L.color, minWidth: 90, textAlign: 'right', marginLeft: 'auto' }}>{d.mode === 'vm' ? `합계 ${pctText(v.pct)}` : `최고 ${pctText(v.maxPct)}`}</b>
+                  </div>
                   {isOpen && (
                     <div style={{ padding: '0 12px 12px 36px', minWidth: 0 }}>
                       <STable minWidth={760} style={{ width: '100%' }}>

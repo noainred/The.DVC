@@ -456,14 +456,17 @@ api.get('/vms', invVms, (req, res) => {
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
 api.get('/vms/lookup', invVms, (req, res) => {
-  const { name, ip, vcenterId } = req.query;
+  const { name, ip, vcenterId, id } = req.query;
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const vms = (snap.vms || [])
     .filter((v) => !allowed || allowed.has(v.vcenterId))   // scope 강제(요청 필터로 우회 불가)
     .filter((v) => !vcenterId || v.vcenterId === vcenterId);
   let vm = null;
-  if (ip) {
+  // v2.749.1: VM id(스냅샷 id — 'vcId:moref')로 정확히 찾는다 — 이름 검색은 부분 일치로 넘어가 동명·비슷한 이름의 다른 VM 을 열 수 있다.
+  //   범위는 위에서 이미 좁혔다(범위 밖 id 는 null).
+  if (id) vm = vms.find((v) => v.id === String(id)) || null;
+  if (!vm && ip) {
     // 같은 vCenter 안에서 같은 IP 를 여러 VM 이 주장하는 '중복 IP'가 있으므로, ip 매칭이 여럿이면
     // name 으로 정확히 지목한다(v2.287, 확정 버그 #16). name 이 있으면 ip+name 일치 VM 을 우선,
     // 없거나 불일치면 첫 ip 매칭(기존 동작 유지).
@@ -475,7 +478,7 @@ api.get('/vms/lookup', invVms, (req, res) => {
       vm = ipMatches[0] || null;
     }
   }
-  if (!vm && name) {
+  if (!vm && name && !id) {
     const n = String(name).toLowerCase();
     vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
   }

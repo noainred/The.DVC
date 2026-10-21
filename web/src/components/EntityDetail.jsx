@@ -828,7 +828,7 @@ function VmChangesSection({ vm }) {
  * 어디서나 VM 이름/IP/호스트명을 클릭하면 VM 상세(EntityDetail) 팝업을 띄우는 공용 링크.
  * 스냅샷에서 단건 조회(/vms/lookup) 후 모달을 연다. 못 찾으면 안내 모달.
  */
-export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-link', style }) {
+export function VmLink({ name, ip, vcenterId, vmId, label, item, className = 'cell-link', style, title }) {
   const [vm, setVm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -843,6 +843,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
       if (name) params.name = name;
       if (ip) params.ip = ip;
       if (vcenterId) params.vcenterId = vcenterId;
+      if (vmId) params.id = vmId;   // v2.749.1: id 를 알면 정확히 찾는다(이름 부분 일치로 다른 VM 을 열지 않게)
       const r = await fetchJson('/vms/lookup', params);
       // seed로 이미 열렸는데 cur가 null이면 사용자가 닫은 것 — 늦은 응답이 모달을 다시 열지 않게 한다.
       // (seed가 없던 경우엔 아직 안 열린 상태이므로 정상적으로 연다.)
@@ -854,7 +855,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
   };
   return (
     <>
-      <button className={className} style={style} disabled={busy} onClick={open} title="클릭하면 VM 상세 보기">{label ?? name ?? ip}</button>
+      <button type="button" className={className} style={style} disabled={busy} onClick={open} title={title || '클릭하면 VM 상세 보기'}>{label ?? name ?? ip}</button>
       {vm && <EntityDetail type="vm" item={vm} onClose={() => setVm(null)} />}
       {msg && <Modal title="VM 조회" onClose={() => setMsg(null)} width={380}><div className="muted" style={{ padding: 4 }}>{msg}</div></Modal>}
     </>
