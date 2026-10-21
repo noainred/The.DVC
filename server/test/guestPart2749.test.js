@@ -214,3 +214,15 @@ test('라우트 게이트: 조회는 tools 권한, CSV 는 data.csv, 설정 저�
   const k = fs.readFileSync(path.join(HERE, '../src/mail/kinds.js'), 'utf8');
   assert.match(k, /id: 'guestpart'/);
 });
+
+test('v2.749.1 /vms/lookup: id 로 정확히 찾고(이름 부분 일치로 넘어가지 않음) 범위로 먼저 좁힌다 · 웹 "정보" 는 vmId 를 넘긴다', () => {
+  const inv = fs.readFileSync(path.join(HERE, '../src/routes/api/inventory.js'), 'utf8');
+  const body = inv.slice(inv.indexOf("api.get('/vms/lookup'"), inv.indexOf("api.get('/datastores'"));
+  assert.match(body, /const \{ name, ip, vcenterId, id \} = req\.query;/);
+  assert.ok(body.indexOf('allowed.has(v.vcenterId)') < body.indexOf('v.id === String(id)'), '범위 필터가 id 찾기보다 먼저');
+  assert.match(body, /if \(!vm && name && !id\)/, 'id 로 못 찾으면 이름으로 넘어가지 않는다(다른 VM 을 열지 않게)');
+  const web = fs.readFileSync(path.join(HERE, '../../web/src/views/tools/GuestPartTool.jsx'), 'utf8');
+  assert.match(web, /<VmLink vmId=\{v\.vmId\}[^>]*label="정보"/);
+  const link = fs.readFileSync(path.join(HERE, '../../web/src/components/EntityDetail.jsx'), 'utf8');
+  assert.match(link, /if \(vmId\) params\.id = vmId;/);
+});
