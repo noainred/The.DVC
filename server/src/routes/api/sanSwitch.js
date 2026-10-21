@@ -38,6 +38,8 @@ import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswi
 import { recordRun, listRuns, compareRuns, healthHistoryStatus, MAX_RUNS } from '../../sanswitch/healthHistory.js';
 import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
+import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
+import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -759,6 +761,88 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
   try { r = await storageSeries(req.params.id, { hours, from, to, signal: perfAbortSignal(res) }); }
   catch (e) { if (abandoned(e)) return; throw e; }
   res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
+});
+
+/**
+ * v2.748 — 포트 사용량 화면(시안 A안 개정 2): 1일/7일/1달 단위 + 이전 기록 + 포트별/스토리지별 + 히스토리 칸.
+ * 조립은 sanswitch/portUsage.js(순수)이고 여기는 portSeries 조회(기억·합류·취소)만 한다. 조회는 기간 전체 창(끝이 미래여도)으로 —
+ * 그래야 버킷이 기간 경계에 정확히 맞고, 같은 기간을 다시 열면 기억이 맞는다.
+ *  ① hist: 1시간 칸, 모든 포트 — d 는 고른 날로 끝나는 7일(히트맵 B), w·m 은 그 기간(차트·히트맵 A·B 를 함께 채운다)
+ *  ② chart: d 만, 대상 포트만 15분 칸(15분 집계 보관 31일 안일 때 — 지나면 hist 의 그날을 쓴다)
+ *  ③ prev: 요청했을 때만, 대상 포트만 — 앞 기간
+ *  ④ idle: 지난 30일 하루 칸, 모든 포트(유휴 판정)
+ * 단위·off 가 틀리면 400(조용히 다른 기간을 보여 주지 않는다).
+ */
+async function portUsageFor(req, res) {
+  const id = req.params.id;
+  const dev = listDevices().find((d) => d.id === id);
+  if (!dev) { res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' }); return null; }
+  const unit = String(req.query.unit || 'd');
+  const now = Date.now();
+  const retentionDays = (() => { try { return Number(loadPerfSettings().rollupRetentionDays) || 730; } catch { return 730; } })();
+  const period = pu.periodOf(unit, req.query.off == null || req.query.off === '' ? 0 : Number(req.query.off), { now, retentionDays });
+  if (period.issue) { res.status(400).json({ ok: false, reason: period.issue, minOff: period.minOff ?? null }); return null; }
+  const view = req.query.view === 'storage' ? 'storage' : 'port';
+  const signal = perfAbortSignal(res);
+  const HOUR = 3_600_000, DAY = 86_400_000;
+  const isD = unit === 'd';
+  const histSince = isD ? period.start - 6 * DAY : period.start;
+  const q = (from, to, bucketMs, ports = null) => portSeries(id, { from, to, points: Math.round((to - from) / bucketMs), ports, signal });
+  const hist = await q(histSince, period.end, HOUR);
+  const snap = snapshotFor(id);
+  const meta = new Map((hist.series || []).map((s) => [Number(s.port), { name: s.name, speed: s.speed }]));
+  const ports = pu.portList(snap?.ports?.list || [], meta);
+  // 대상을 먼저 정해야 대상 포트만 조회할 수 있다 — 조립을 한 번 돌려 기본 대상을 얻는다(순수 계산이라 싸다).
+  const first = pu.buildPortUsage({ period, ports, hist, histSince, view, target: req.query.target ?? null, now });
+  const members = first.target?.members || [];
+  let chart = null, prev = null, daily30 = null;
+  if (members.length) {
+    if (isD && period.fine) chart = { res: await q(period.start, period.end, 900_000, members), since: period.start, bucketMs: 900_000, n: 96 };
+    if (req.query.prev === '1') {
+      const pp = pu.periodOf(unit, period.off - 1, { now, retentionDays: retentionDays + 400 });
+      if (!pp.issue) {
+        const bm = isD && pp.fine ? 900_000 : HOUR;
+        prev = { res: await q(pp.start, pp.end, bm, members), since: pp.start, bucketMs: bm, n: Math.round((pp.end - pp.start) / bm), label: pp.label };
+      }
+    }
+  }
+  const idleSince = pu.dayStartOf(now) - (pu.IDLE_DAYS - 1) * DAY;
+  const idleRes = await q(idleSince, idleSince + pu.IDLE_DAYS * DAY, DAY);
+  daily30 = pu.denseByPort(idleRes, { since: idleSince, bucketMs: DAY, n: pu.IDLE_DAYS, now });
+  const r = pu.buildPortUsage({ period, ports, hist, histSince, chart, prev, daily30, view, target: req.query.target ?? null, now });
+  if (r.target?.chart?.prev && prev) r.target.chart.prev.label = prev.label;
+  // 조닝 상대(포트 하나일 때만) — 트래픽 몫이 아니라 조닝 설정상의 상대다. 전 포트로 넓히지 말 것(O(zone×멤버²)).
+  if (r.target?.kind === 'port' && snap) {
+    const z = zoneDetailFor(snap, [{ index: r.target.port }]);
+    r.target.zones = { row: z.rows[0] || null, note: z.note };
+  }
+  const admin = isAdminReq(req);
+  const name = admin ? (dev.name || dev.host) : ((dev.name && dev.name !== dev.host) ? dev.name : maskedNameLabel(dev));
+  return { r, name, demo: !!hist.demo, collectedAt: snap?.collectedAt || null, admin };
+}
+
+api.get('/tools/sanswitch/devices/:id/port-usage', toolsPerm, fullScopeOnly, async (req, res) => {
+  let out;
+  try { out = await portUsageFor(req, res); }
+  catch (e) { if (abandoned(e)) return; throw e; }
+  if (!out) return;
+  res.json({ ok: true, deviceId: req.params.id, name: out.name, unitOfValue: 'bytesPerSec', demo: out.demo, collectedAt: out.collectedAt,
+    ...out.r, ...(out.admin ? {} : { addressHidden: true }) });
+});
+
+api.get('/tools/sanswitch/devices/:id/port-usage.csv', csvPerm, toolsPerm, fullScopeOnly, async (req, res) => {
+  let out;
+  try { out = await portUsageFor(req, res); }
+  catch (e) { if (abandoned(e)) return; throw e; }
+  if (!out) return;
+  const { r } = out;
+  const rows = pu.usageCsvRows(r, { deviceName: out.name });
+  logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 CSV 내보내기', target: `${out.name}(${req.params.id})`, detail: `${r.view} ${r.unit} ${r.label} ${rows.length - 1}행` });
+  const day = new Date(r.start + 540 * 60_000).toISOString().slice(0, 10).replace(/-/g, '');
+  const safeId = String(req.params.id).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 60);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="san-port-usage_${safeId}_${r.view}_${{ d: '1d', w: '7d', m: '1m' }[r.unit]}_${day}.csv"`);
+  res.send(CSV_BOM + rows.map((x) => csvLine(x)).join('\r\n') + '\r\n');
 });
 
 /**
