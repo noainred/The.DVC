@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1003개** |
+| 엔드포인트 | **1012개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 102개 |
-| GET | 542개 |
-| POST | 308개 |
-| PUT | 99개 |
+| 라우트 파일 | 103개 |
+| GET | 547개 |
+| POST | 311개 |
+| PUT | 100개 |
 | PATCH | 2개 |
 | DELETE | 52개 |
 
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 459 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 468 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -848,6 +848,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/guest-disk/vm/:id` | 권한 `tools` | [server/src/routes/api/toolsGuestDisk.js:35](../server/src/routes/api/toolsGuestDisk.js#L35) |
 | GET | `/tools/guest-os` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:48](../server/src/routes/api/toolsInfo.js#L48) |
 | GET | `/tools/guest-os/vms` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:66](../server/src/routes/api/toolsInfo.js#L66) |
+| GET | `/tools/guest-partition` | 권한 `tools` | [server/src/routes/api/toolsGuestPart.js:40](../server/src/routes/api/toolsGuestPart.js#L40) |
+| GET | `/tools/guest-partition/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/toolsGuestPart.js:62](../server/src/routes/api/toolsGuestPart.js#L62) |
+| GET | `/tools/guest-partition/mail` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/toolsGuestPart.js:94](../server/src/routes/api/toolsGuestPart.js#L94) |
+| POST | `/tools/guest-partition/mail/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/toolsGuestPart.js:100](../server/src/routes/api/toolsGuestPart.js#L100) |
+| POST | `/tools/guest-partition/mail/send` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/toolsGuestPart.js:106](../server/src/routes/api/toolsGuestPart.js#L106) |
+| POST | `/tools/guest-partition/mail/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/toolsGuestPart.js:114](../server/src/routes/api/toolsGuestPart.js#L114) |
+| GET | `/tools/guest-partition/settings` | 권한 `tools` | [server/src/routes/api/toolsGuestPart.js:77](../server/src/routes/api/toolsGuestPart.js#L77) |
+| PUT | `/tools/guest-partition/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/toolsGuestPart.js:85](../server/src/routes/api/toolsGuestPart.js#L85) |
+| GET | `/tools/guest-partition/vcenter/:id` | 권한 `tools` | [server/src/routes/api/toolsGuestPart.js:53](../server/src/routes/api/toolsGuestPart.js#L53) |
 | GET | `/tools/hardware` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:398](../server/src/routes/api/hardwareGpu.js#L398) |
 | GET | `/tools/hba` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:90](../server/src/routes/api/toolsInfo.js#L90) |
 | GET | `/tools/horizon-sessions` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:200](../server/src/routes/api/horizonSessions.js#L200) |
@@ -1175,7 +1184,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 240 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 245 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 198 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 54 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `csvPerm` | 37 | **CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403. |

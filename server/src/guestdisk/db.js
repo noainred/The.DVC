@@ -83,6 +83,20 @@ function initSqlite() {
         used_gb REAL NOT NULL DEFAULT 0,
         PRIMARY KEY (vm_id, path)
       );
+      -- v2.749 게스트 파티션 사용률: 파티션별 **이번 수집 값**. part_last 는 diff 기준(변화가 changeThresholdGB 이상일 때만 갱신)이라
+      --   현재 사용률의 원천이 될 수 없다(50 GB 파티션에서 1 GB = 2%p). vm_latest 처럼 수집마다 vCenter 단위로 통째 교체한다.
+      --   used_gb·cap_gb 가 NULL 이고 unknown=1 이면 여유 공간을 보고하지 않은 파티션(사용률을 모른다 — 0 이 아니다).
+      CREATE TABLE IF NOT EXISTS part_latest (
+        vm_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        vcenter_id TEXT NOT NULL,
+        cap_gb REAL,
+        used_gb REAL,
+        unknown INTEGER NOT NULL DEFAULT 0,
+        ts INTEGER NOT NULL,
+        PRIMARY KEY (vm_id, path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plat_vc ON part_latest (vcenter_id);
     `);
     // v2.631(감사 R2631-01): vm_latest.partial — 이 행이 **부분 합**(여유 공간 미보고 파티션을 뺀 합)인지. 예전 DB 에는 열이 없다.
     //   table_info 로 없을 때만 더한다(v2.603 DB2603-01 — 잠금을 '열 있음' 으로 삼키지 않게 duplicate 만 삼킨다).
@@ -103,6 +117,18 @@ export function getDb() {
   if (!ready && lockRetry.blocked()) return Promise.resolve(null);
   if (!ready) ready = initSqlite();
   return ready;
+}
+
+/*
+ * v2.749: 수집 커밋 알림 — 한 vCenter 의 수집이 커밋되면(중앙 직접 수집·엣지 수신 둘 다 commitCollection 을 지난다) 등록한 함수를 부른다.
+ *   게스트 파티션 사용률 메일('수집이 끝날 때마다'·95% 즉시 알림)이 쓴다. 듣는 쪽의 오류·지연이 수집을 막지 않게 다음 틱에 부르고 예외는 삼켜 로그만 남긴다.
+ */
+const commitListeners = new Set();
+export function onGuestDiskCommitted(fn) { if (typeof fn === 'function') commitListeners.add(fn); return () => commitListeners.delete(fn); }
+function emitCommitted(info) {
+  for (const fn of commitListeners) {
+    setImmediate(() => { Promise.resolve().then(() => fn(info)).catch((e) => console.warn(`[guestdisk] 커밋 알림 처리 실패: ${String(e?.message || e).slice(0, 200)}`)); });
+  }
 }
 
 export function guestDiskDbStatus() {
@@ -157,6 +183,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   const insPartSer = db.prepare('INSERT INTO part_series (vcenter_id,vm_id,path,ts,cap_gb,used_gb) VALUES (?,?,?,?,?,?)');
   const upPartLast = db.prepare('INSERT OR REPLACE INTO part_last (vm_id,path,vcenter_id,cap_gb,used_gb) VALUES (?,?,?,?,?)');
   const delPartLast = db.prepare('DELETE FROM part_last WHERE vm_id=? AND path=?');
+  const insPartLatest = db.prepare('INSERT OR REPLACE INTO part_latest (vm_id,path,vcenter_id,cap_gb,used_gb,unknown,ts) VALUES (?,?,?,?,?,?,?)');
 
   // ⚠ v2.601(감사 RECENT2601-01) 2차 방어: 사용량·용량이 유한한 숫자가 아닌 파티션·VM 은 적재하지 않는다(개수는 밝힌다).
   //   used_gb 가 NOT NULL 이라 null 하나가 아래 트랜잭션 전체(= 그 vCenter 의 전 VM)를 매 주기 롤백했다. 호출부(service·
@@ -196,7 +223,12 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   try {
     // vm_latest 는 이 vCenter 분을 통째로 교체(변화 없는 VM 도 최신값 유지 + 사라진 VM 제거).
     db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?').run(vcenterId);
+    db.prepare('DELETE FROM part_latest WHERE vcenter_id=?').run(vcenterId);   // v2.749: 파티션 최신 값도 같은 단위로 교체
     for (const vm of rows) {
+      for (const p of (vm.parts || [])) insPartLatest.run(vm.vmId, p.path, vcenterId, p.capGB, p.usedGB, 0, ts);
+      for (const up of (Array.isArray(vm.unknownPaths) ? vm.unknownPaths : [])) {
+        if (!(vm.parts || []).some((p) => p.path === up)) insPartLatest.run(vm.vmId, up, vcenterId, null, null, 1, ts);
+      }
       const partial = Number(vm.partsUnknown) > 0;
       if (partial) {
         partialVms++;
@@ -249,6 +281,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
     return { ok: false, reason: String(e.message || e) };
   }
   if (skippedParts || skippedVms) console.warn(`[guestdisk] ${vcenterId}: 값이 숫자가 아니어서 적재하지 않은 파티션 ${skippedParts}개 · VM ${skippedVms}대`);
+  emitCommitted({ vcenterId: String(vcenterId), vcenterName: vcenterName || '', ts, vms: rows.length });
   return { ok: true, vms: rows.length, vmSeriesRows, partSeriesRows, ...(skippedParts ? { skippedParts } : {}), ...(skippedVms ? { skippedVms } : {}),
     ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}) };
 }
@@ -423,10 +456,12 @@ export async function pruneOrphanVcenters(knownIds) {
     const delLatest = db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?');
     const delVmLast = db.prepare('DELETE FROM vm_last WHERE vcenter_id=?');
     const delPartLast = db.prepare('DELETE FROM part_last WHERE vcenter_id=?');
+    const delPartLatest = db.prepare('DELETE FROM part_latest WHERE vcenter_id=?');
     for (const id of orphan) {
       removedRows += Number(delLatest.run(id).changes) || 0;
       delVmLast.run(id);
       delPartLast.run(id);
+      delPartLatest.run(id);
     }
     db.exec('COMMIT');
   } catch (e) {
@@ -449,6 +484,47 @@ export async function lastCollectTs(vcenterIds) {
   const r = db.prepare(`SELECT MAX(ts) AS mt FROM vm_latest WHERE vcenter_id IN (${q})`).get(...vcenterIds.map(String));
   const t = Number(r?.mt);
   return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+/**
+ * v2.749 게스트 파티션 사용률 — 파티션별 이번 수집 값(part_latest) + VM 이름·vCenter 이름(vm_latest). vcenterIds=null 이면 전체, [] 면 없음.
+ * 반환: [{ vmId, path, vcenterId, capGB|null, usedGB|null, unknown, ts, vmName, vcenterName }]
+ */
+export async function listPartLatest(vcenterIds = null) {
+  const db = await getDb();
+  if (!db) return [];
+  if (vcenterIds && vcenterIds.length === 0) return [];
+  const base = `SELECT p.vm_id, p.path, p.vcenter_id, p.cap_gb, p.used_gb, p.unknown, p.ts, v.vm_name, v.vcenter_name
+    FROM part_latest p LEFT JOIN vm_latest v ON v.vm_id = p.vm_id`;
+  const rows = vcenterIds
+    ? db.prepare(`${base} WHERE p.vcenter_id IN (${vcenterIds.map(() => '?').join(',')})`).all(...vcenterIds.map(String))
+    : db.prepare(base).all();
+  return rows.map((r) => ({
+    vmId: r.vm_id, path: r.path, vcenterId: r.vcenter_id,
+    capGB: r.cap_gb == null ? null : Number(r.cap_gb), usedGB: r.used_gb == null ? null : Number(r.used_gb),
+    unknown: Number(r.unknown) === 1, ts: Number(r.ts), vmName: r.vm_name || '', vcenterName: r.vcenter_name || '',
+  }));
+}
+
+/**
+ * v2.749: 파티션별 기준 시각(cutTs) 시점의 사용량 — part_series 의 cutTs 이하 마지막 점(diff-저장이라 그 값이 그때 유효하던 값이다).
+ *   기준 점이 없으면(그 뒤에 처음 관측) 그 키는 결과에 없다 — 호출부가 '관측 기간 부족' 으로 밝힌다(0 증가로 지어내지 않는다).
+ *   vmIds 를 500 개씩 나눠 묻는다(바인딩 상한). 반환 Map<'vmId\u0000path', usedGB>.
+ */
+export async function partUsedAt(vmIds = [], cutTs = 0) {
+  const out = new Map();
+  const db = await getDb();
+  if (!db || !Array.isArray(vmIds) || !vmIds.length) return out;
+  const ids = [...new Set(vmIds.map(String))];
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const rows = db.prepare(`SELECT p.vm_id, p.path, p.used_gb FROM part_series p
+      WHERE p.vm_id IN (${chunk.map(() => '?').join(',')})
+        AND p.ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = p.vm_id AND q.path = p.path AND q.ts <= ?)`).all(...chunk, cutTs);
+    for (const r of rows) out.set(`${r.vm_id}\u0000${r.path}`, Number(r.used_gb));
+    if (i + 500 < ids.length) await new Promise((res) => setImmediate(res));
+  }
+  return out;
 }
 
 export const _DB_PATH = DB_PATH;

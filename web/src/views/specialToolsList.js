@@ -67,6 +67,7 @@ export const TOOLS = [
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'orphanvmdk', icon: '🧩', label: '고아 VMDK 찾기', desc: '데이터스토어에 있지만 어떤 VM 에도 연결되지 않은 가상디스크 · VM 소유 파일(layoutEx)과 대조 · FCD·콘텐츠 라이브러리·복제는 제외 · 확인 필요 후보만 제시(삭제 기능 없음)' },
   { k: 'guest-disk', icon: '🧹', label: '게스트 디스크 회수', desc: 'VM 게스트(VMware Tools) 파티션의 할당 대비 사용·비율 · 파티션별 사용량 증가 추이(전용 DB) · 줄일 수 있는 여유가 큰 VM 정렬 · 회수 판정(증가 중이면 보류) · CSV export' },
+  { k: 'guest-partition', icon: '💽', label: '게스트 파티션 사용률', desc: 'VMware Tools 가 보고한 게스트 파티션(드라이브·마운트)의 할당 대비 사용률이 지정한 %(기본 80) 이상인 게스트 — 전체 vCenter 한눈에·특정 vCenter 의 게스트별 전 파티션 · Windows/Linux 무시 규칙 · 7일 증가와 가득 참 예상 · 통합·vCenter 별 담당자 메일 · CSV', aka: ['파티션 사용률', '디스크 사용률', '드라이브 사용률', '디스크 부족', '파티션 부족', 'disk full', 'partition usage', 'C 드라이브', '디스크 80%'] },
   { k: 'vm-export', icon: '📤', label: 'VM 전체 정보 CSV', desc: '선택 vCenter 모든 VM 의 최대 상세(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크 1~7 슬롯별 용량·타입·데이터스토어·파일/게스트 파티션 사용량/스냅샷/Tools/UUID 등 85+ 컬럼)를 CSV 로 내보내기' },
   // ipam 은 상단 'IP관리' 탭으로 승격(v2.274, 화면은 SpecialTools.jsx IpamStandalone). topTab:
   // 특수 기능 카드 그리드에는 안 보이지만 항목은 유지 — 권한 매트릭스(사용자 관리 › 도구별 접근)의
