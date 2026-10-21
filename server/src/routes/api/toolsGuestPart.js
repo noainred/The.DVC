@@ -7,13 +7,13 @@
  *   메일 주소·보내는 사람은 관리자 판본(isAdminDetailUser)에만 싣는다.
  * 수집 켜기·주기·지금 수집은 게스트 디스크 회수와 같은 수집이라 그쪽 API(/tools/guest-disk/settings · /run)를 쓴다(설정 한 곳).
  */
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
-import { overview, vcenterDetail, overCsv } from '../../guestpart/report.js';
+import { overview, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
 import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError } from '../../guestpart/settings.js';
 import { thresholdOk, MODES, RANGES, IGNORE_TEXT, CRIT_PCT, WIN_ISO_MAX_GB } from '../../guestpart/rules.js';
 import { mailStatus, previewMail, sendDigest, sendVcenter, sendTest } from '../../guestpart/notify.js';
@@ -37,6 +37,16 @@ function viewQuery(q) {
 const meta = () => ({ rangeThr: RANGES.threshold, rangeTinyGB: RANGES.tinyGB, critPct: CRIT_PCT, ignoreText: IGNORE_TEXT, winIsoMaxGB: WIN_ISO_MAX_GB });
 
 export function registerToolsGuestPart(api) {
+  // v2.750 VM 상세 창의 '게스트 파티션 사용량' — VM 상세와 같은 권한(inv.vms)이다(특수 기능 도구가 아니라 그 VM 의 속성).
+  //   VM 은 스냅샷에서 id 로 찾고 범위 밖이면 404(존재 은닉) — 수집 DB 의 vCenter 가 아니라 **스냅샷의** vCenter 로 판정한다.
+  //   무시 규칙은 사유 문구만 싣는다(패턴 원문·메일 설정은 싣지 않는다).
+  api.get('/vms/:id/partitions', requirePerm('inv.vms'), async (req, res) => {
+    const snap = store.get();
+    const vm = (snap.vms || []).find((v) => v.id === String(req.params.id));
+    if (!vm || !inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+    res.json(await vmPartitions(vm));
+  });
+
   api.get('/tools/guest-partition', toolsPerm, async (req, res) => {
     const allowed = scopedVcenterIds(req.user, store.get());
     const v = viewQuery(req.query);

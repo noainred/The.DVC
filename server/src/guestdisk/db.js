@@ -507,6 +507,25 @@ export async function listPartLatest(vcenterIds = null) {
 }
 
 /**
+ * v2.750 VM 상세 — 한 VM 의 파티션별 이번 수집 값(part_latest) + 그 VM 의 수집 행(vm_latest). PK·vm_id 조회라 가볍다.
+ * 반환 null = DB 없음. vm=null 이면 최근 수집에 이 VM 이 없다(파티션도 비어 있다 — 둘 다 vCenter 단위로 통째 교체된다).
+ */
+export async function vmPartLatest(vmId) {
+  const db = await getDb();
+  if (!db) return null;
+  const id = String(vmId ?? '');
+  const v = db.prepare('SELECT vcenter_id, ts, partial FROM vm_latest WHERE vm_id=?').get(id);
+  const parts = db.prepare('SELECT path, cap_gb, used_gb, unknown, ts FROM part_latest WHERE vm_id=? ORDER BY path').all(id);
+  return {
+    vm: v ? { vcenterId: v.vcenter_id, ts: Number(v.ts), partial: Number(v.partial) === 1 } : null,
+    parts: parts.map((r) => ({
+      path: r.path, capGB: r.cap_gb == null ? null : Number(r.cap_gb), usedGB: r.used_gb == null ? null : Number(r.used_gb),
+      unknown: Number(r.unknown) === 1, ts: Number(r.ts),
+    })),
+  };
+}
+
+/**
  * v2.749: 파티션별 기준 시각(cutTs) 시점의 사용량 — part_series 의 cutTs 이하 마지막 점(diff-저장이라 그 값이 그때 유효하던 값이다).
  *   기준 점이 없으면(그 뒤에 처음 관측) 그 키는 결과에 없다 — 호출부가 '관측 기간 부족' 으로 밝힌다(0 증가로 지어내지 않는다).
  *   vmIds 를 500 개씩 나눠 묻는다(바인딩 상한). 반환 Map<'vmId\u0000path', usedGB>.

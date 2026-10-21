@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   levelOf, gbText, pctText, growthText, etaText, osLabel, timeText, daysLabel, splitEmails, isWinPattern, isLnxPattern,
-  overviewParams, sortRows, historyLine, collectNote,
+  overviewParams, sortRows, historyLine, collectNote, agoText, vmPartNote,
 } from './guestPartText.js';
 
 // v2.749 — 게스트 파티션 사용률 화면 판정(순수). 패턴 검사는 서버 guestpart/rules.js 와 같은 입력·같은 결과(서버 테스트가 같은 표를 쓴다).
@@ -77,5 +77,28 @@ describe('조회 조건·정렬·문구', () => {
     expect(collectNote({ dbAvailable: true, empty: true, enabled: false })).toMatch(/꺼져/);
     expect(collectNote({ dbAvailable: true, empty: true, enabled: true })).toMatch(/첫 수집 전/);
     expect(collectNote({ dbAvailable: true, empty: false, enabled: true })).toBe('');
+  });
+});
+
+describe('v2.750 VM 상세 파티션 안내', () => {
+  const NOW = Date.UTC(2026, 9, 21, 9, 0);
+  it('경과 문구', () => {
+    expect(agoText(null, NOW)).toBe('');
+    expect(agoText(NOW + 5000, NOW)).toBe('방금');
+    expect(agoText(NOW - 5 * 60_000, NOW)).toBe('5분 전');
+    expect(agoText(NOW - 3 * 3_600_000, NOW)).toBe('3시간 전');
+    expect(agoText(NOW - 3 * 86_400_000, NOW)).toBe('3일 전');
+  });
+  it('값이 없는 이유 — 아는 것만', () => {
+    expect(vmPartNote({ dbAvailable: false }, NOW).empty).toMatch(/DB/);
+    expect(vmPartNote({ dbAvailable: true, collectedAt: null, vcenterLastTs: NOW - 3_600_000, offsetMin: 540, collect: { enabled: true } }, NOW).empty).toMatch(/Tools/);
+    expect(vmPartNote({ dbAvailable: true, collectedAt: null, vcenterLastTs: null, collect: { enabled: false } }, NOW).empty).toMatch(/꺼져/);
+    expect(vmPartNote({ dbAvailable: true, collectedAt: null, vcenterLastTs: null, collect: { enabled: true } }, NOW).empty).toMatch(/아직/);
+  });
+  it('오래된 값 — 주기의 두 배를 넘으면 · 수집 꺼짐은 마지막 값', () => {
+    const base = { dbAvailable: true, collect: { enabled: true, intervalHours: 12 } };
+    expect(vmPartNote({ ...base, collectedAt: NOW - 10 * 3_600_000 }, NOW)).toEqual({ empty: '', stale: '' });
+    expect(vmPartNote({ ...base, collectedAt: NOW - 25 * 3_600_000 }, NOW).stale).toMatch(/12시간/);
+    expect(vmPartNote({ ...base, collect: { enabled: false }, collectedAt: NOW }, NOW).stale).toMatch(/마지막/);
   });
 });

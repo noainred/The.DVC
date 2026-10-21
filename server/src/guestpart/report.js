@@ -8,10 +8,10 @@
  *   초과에도 정상에도 넣지 않고 따로 센다. 파티션은 있는데 여유 공간을 보고하지 않은 것은 '값 모름 파티션' 으로 따로 센다.
  */
 import { store } from '../store.js';
-import { listPartLatest, partUsedAt, guestDiskDbStatus, latestHoldMs, onGuestDiskCommitted } from '../guestdisk/db.js';
+import { listPartLatest, partUsedAt, guestDiskDbStatus, latestHoldMs, onGuestDiskCommitted, vmPartLatest, lastCollectTs } from '../guestdisk/db.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
-import { evaluate, histogram, etaDays, CRIT_PCT, IGNORE_TEXT } from './rules.js';
+import { evaluate, histogram, etaDays, CRIT_PCT, IGNORE_TEXT, thresholdFor, rulesOf, pctOf, ignoreReason, osOfPath } from './rules.js';
 import { load as loadSettings } from './settings.js';
 import { csvLine, CSV_BOM } from '../util/csv.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
@@ -249,6 +249,43 @@ export async function vcenterDetail(vcenterId, { allowed = null, thr = null, mod
     vms: list, total: (onlyOver ? overVms : allVms).length, onlyOver: !!onlyOver,
     ignored: ignoredSummary(ev.parts),
     collect: collectState(parts, allowed),
+  };
+}
+
+/**
+ * v2.750 VM 상세 '게스트 파티션 사용량'(순수). rec = guestdisk/db.js vmPartLatest 결과, vcenterId = **스냅샷의** vCenter.
+ *   수집 행의 vCenter 가 스냅샷과 다르면(옮겨진 VM 의 옛 행) 이 VM 의 값으로 쓰지 않는다 — 다른 vCenter 의 옛 값을 지금 값처럼 보이지 않게.
+ *   값을 모르는 파티션(여유 공간 미보고)은 사용률·여유를 null 로(0 이 아니다). 무시 규칙에 걸린 파티션도 보여 주되 사유를 단다(경보에서만 빠진다).
+ *   정렬: 사용률 높은 순, 모르는 값은 뒤로.
+ */
+export function buildVmPartitions(rec, settings, { vcenterId, vmName = '' } = {}) {
+  const vm = rec?.vm && String(rec.vm.vcenterId) === String(vcenterId) ? rec.vm : null;
+  const thr = thresholdFor(vcenterId, settings);
+  if (!vm) return { collectedAt: null, partial: false, thr, parts: [] };
+  const rules = rulesOf(settings?.rules);
+  const parts = (rec.parts || []).map((p) => {
+    const known = !p.unknown && p.capGB != null && p.usedGB != null;
+    const pct = known ? pctOf(p.usedGB, p.capGB) : null;
+    const code = ignoreReason({ path: p.path, capGB: p.capGB, usedGB: p.usedGB, vmName }, rules);
+    return {
+      path: p.path, os: osOfPath(p.path), capGB: p.capGB, usedGB: known ? p.usedGB : null,
+      freeGB: known ? Math.round(Math.max(0, p.capGB - p.usedGB) * 10) / 10 : null, pct, unknown: !known,
+      over: pct != null && pct >= thr, ignored: code ? (IGNORE_TEXT[code] || code) : null,
+    };
+  });
+  parts.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || String(a.path).localeCompare(String(b.path)));
+  return { collectedAt: vm.ts, partial: vm.partial, thr, parts };
+}
+
+/** v2.750 VM 상세 — 한 VM 의 게스트 파티션(라우트가 범위를 먼저 검사한 뒤 부른다). */
+export async function vmPartitions(vm, { now = Date.now() } = {}) {
+  const rec = await vmPartLatest(vm.id);
+  const gd = loadGuestDiskSettings();
+  return {
+    ok: true, vmId: vm.id, dbAvailable: rec != null, now, offsetMin: DAY_OFFSET_MIN, critPct: CRIT_PCT,
+    collect: { enabled: !!gd.enabled, intervalHours: gd.intervalHours },
+    vcenterLastTs: rec ? await lastCollectTs([vm.vcenterId]) : null,
+    ...buildVmPartitions(rec, loadSettings(), { vcenterId: vm.vcenterId, vmName: vm.name }),
   };
 }
 

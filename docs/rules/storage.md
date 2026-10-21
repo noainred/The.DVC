@@ -726,4 +726,7 @@
   - 메일은 아이실론과 **같은 코어**(`isidu/digestRules.planDigestTick·digestRecipients` · `isidu/mailRules.normalizeTargetMail·mailRecipients·failAlertDue`)를 쓴다 — 사본 금지.
     공용 서비스(`sendPortalMail`)는 받는 사람이 비면 기본 받는 사람으로 보내므로 **호출 전에** 빈 목록을 막는다. 보내는 사람(From)은 헤더만 바꾸고(봉투는 메일 설정 주소 — 반송),
     CSV 첨부는 `util/smtp.js buildMime` 의 `attachments`(파일 이름·형식 화이트리스트 — 헤더 주입 차단, 5개·5 MB 상한) 를 쓴다. 데모(mock)는 자동 메일을 보내지 않는다.
+  - (v2.750) VM 상세 창의 '게스트 파티션 사용량'은 `GET /vms/:id/partitions`(**inv.vms** — 특수 기능이 아니라 그 VM 의 속성, 창을 열 때 1회) ·
+    조립은 `report.js buildVmPartitions`(순수) 하나. VM 은 **스냅샷에서** 찾고 범위 밖은 404, 수집 행의 vCenter 가 스냅샷과 다르면 쓰지 않는다(옮겨진 VM 의 옛 값).
+    라이브 조회가 아니므로 **수집 시각을 반드시 함께** 보이고(`timeText`·`agoText`), 값이 없는 이유는 `guestPartText.vmPartNote` 가 아는 것만 말한다. 무시 규칙은 사유 문구만 싣는다(패턴 원문 금지). 회귀 `server/test/vmPartitions2750.test.js`.
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
