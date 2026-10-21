@@ -9,7 +9,7 @@
  *   onExpire 콜백으로 해당 서버들에 실패 사유를 남긴다(무한 '수집 대기' 방지).
  */
 
-const jobs = new Map();           // reqId -> { reqId, agent, servers, state, createdAt, takenAt, claims, claimDeadline, doneAt }
+const jobs = new Map();           // reqId -> { reqId, agent, servers, state, order, createdAt, takenAt, claims, claimDeadline, doneAt }
 const pendingByAgent = new Map(); // agentLower -> Set<reqId>
 
 const DONE_TTL = 5 * 60_000;
@@ -20,8 +20,9 @@ const ACK_BASE_MS = Number(process.env.BMSTOR_ACK_GRACE_MS) || 60_000;
 const ACK_PER_SERVER_MS = 20_000; // 서버당 SSH 접속+df 여유
 const ACK_MAX_MS = 10 * 60_000;
 
+// seq 는 잡 생성 순번이기도 하다(2026-10-21) — '더 새 잡' 판정은 createdAt(ms 벽시계: 같은 ms·시계 조정에 무력) 대신 이 단조 순번으로 한다.
 let seq = 0;
-const newReqId = () => `bms_${Date.now().toString(36)}_${(seq++).toString(36)}`;
+const newReqId = (n) => `bms_${Date.now().toString(36)}_${n.toString(36)}`;
 const agentKey = (a) => String(a || '').trim().toLowerCase();
 
 let onExpire = null; // (agent, serverIds, reason) — poller 가 등록(만료 서버에 오류 표시)
@@ -65,12 +66,13 @@ export function enqueueBmstorJob(agent, servers) {
   const key = agentKey(agent);
   const set = pendingByAgent.get(key) || new Set();
   if (set.size >= MAX_PENDING) { // 가장 오래된 대기 잡 폐기 — 최신 주기 우선
-    let oldestId = null, oldestAt = Infinity;
-    for (const rid of set) { const at = jobs.get(rid)?.createdAt ?? 0; if (at < oldestAt) { oldestAt = at; oldestId = rid; } }
+    let oldestId = null, oldestOrder = Infinity;
+    for (const rid of set) { const n = jobs.get(rid)?.order ?? -1; if (n < oldestOrder) { oldestOrder = n; oldestId = rid; } }
     if (oldestId) { jobs.delete(oldestId); set.delete(oldestId); }
   }
-  const reqId = newReqId();
-  jobs.set(reqId, { reqId, agent: String(agent || ''), servers, state: 'pending', createdAt: Date.now(), takenAt: null, claims: 0, claimDeadline: null, doneAt: null });
+  const order = seq++;
+  const reqId = newReqId(order);
+  jobs.set(reqId, { reqId, agent: String(agent || ''), servers, state: 'pending', order, createdAt: Date.now(), takenAt: null, claims: 0, claimDeadline: null, doneAt: null });
   set.add(reqId); pendingByAgent.set(key, set);
   return reqId;
 }
@@ -110,6 +112,7 @@ export function ackBmstorJob(reqId) {
  *   돌려 라우트가 200 {stale:true} 로 버렸고, 중앙 화면은 수집이 끝났는데도 '회신하지 않았다' 로 남았다(엣지는 성공으로 기록).
  *   · 같은 잡의 늦은 결과는 한 번만 반영한다(재전송 중복 방지).
  *   · 그 뒤 **같은 에이전트의 더 새 잡**이 이미 정상 회신됐으면 반영하지 않는다(새 값을 옛 값으로 되돌리지 않게) — `superseded`.
+ *     '더 새' 는 생성 순번(order)으로 판정한다(2026-10-21 — createdAt 비교는 같은 ms 에 만든 두 잡·벽시계 조정을 못 가린다. release CI 1회 실패의 추정 원인).
  * @returns {null|{agent:string, serverIds:string[], late:true}|{superseded:true}|{duplicate:true}}  null = 모르는 잡·만료가 아닌 종결
  */
 export function lateBmstorResult(reqId) {
@@ -118,7 +121,7 @@ export function lateBmstorResult(reqId) {
   if (j.lateAppliedAt) return { duplicate: true };
   const key = agentKey(j.agent);
   for (const o of jobs.values()) {
-    if (o !== j && agentKey(o.agent) === key && o.ackedAt && (o.createdAt || 0) > (j.createdAt || 0)) return { superseded: true };
+    if (o !== j && agentKey(o.agent) === key && o.ackedAt && (o.order ?? -1) > (j.order ?? -1)) return { superseded: true };
   }
   j.lateAppliedAt = Date.now();
   return { agent: j.agent, serverIds: j.servers.map((s) => s.id), late: true };

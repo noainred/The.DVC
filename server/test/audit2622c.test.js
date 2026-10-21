@@ -271,11 +271,34 @@ test('EDGE-03 — bmstor: 만료 종결 잡에 늦게 온 결과는 반영되고
   const old = bj.enqueueBmstorJob('edge-d', [{ id: 'bm-2622d', host: '10.74.0.6' }]);
   bj.takeBmstorJobs('edge-d', now); bj.reapBmstorClaims(now + 20 * 60_000);
   bj.takeBmstorJobs('edge-d', now + 20 * 60_000); bj.reapBmstorClaims(now + 40 * 60_000);
-  await new Promise((r) => setTimeout(r, 2));
   const fresh = bj.enqueueBmstorJob('edge-d', [{ id: 'bm-2622d', host: '10.74.0.6' }]);
   bj.takeBmstorJobs('edge-d');
   assert.ok(bj.ackBmstorJob(fresh));
   assert.deepEqual(bj.lateBmstorResult(old), { superseded: true });
+});
+
+test('EDGE-03 — bmstor: 두 잡의 createdAt 이 같은 ms 여도(또는 벽시계가 뒤로 가도) 더 새 잡 뒤의 늦은 결과는 superseded', async () => {
+  const bj = await import('../src/bmstor/jobs.js');
+  const realNow = Date.now;
+  const now = realNow();
+  for (const [agent, clock] of [['edge-same-ms', [now, now]], ['edge-clock-back', [now, now - 60_000]]]) {
+    const ticks = [...clock];
+    let old, fresh;
+    try {
+      Date.now = () => ticks[0];
+      old = bj.enqueueBmstorJob(agent, [{ id: `bm-${agent}`, host: '10.74.0.7' }]);
+      Date.now = () => ticks[1];
+      fresh = bj.enqueueBmstorJob(agent, [{ id: `bm-${agent}`, host: '10.74.0.7' }]);
+    } finally { Date.now = realNow; }
+    assert.ok(bj._bmstorJobForTest(old).createdAt >= bj._bmstorJobForTest(fresh).createdAt, '전제: createdAt 으로는 fresh 가 더 새 잡이 아니다');
+    // old 만 만료 종결시키고(인출 2회 미회신), fresh 는 정상 회신한다.
+    bj.takeBmstorJobs(agent, now);
+    bj.reapBmstorClaims(now + 20 * 60_000);
+    assert.ok(bj.ackBmstorJob(fresh));
+    bj.takeBmstorJobs(agent, now + 20 * 60_000); bj.reapBmstorClaims(now + 40 * 60_000);
+    assert.equal(bj._bmstorJobForTest(old).expired, true);
+    assert.deepEqual(bj.lateBmstorResult(old), { superseded: true }, `${agent}: 예전(createdAt 비교)에는 late 로 옛 값을 반영했다`);
+  }
 });
 
 test('EDGE-03 — bmstorWorker 는 200 stale(미반영)을 실패로 상태·콘솔에 남기고, 재전송 중복은 실패로 보지 않는다', async () => {
