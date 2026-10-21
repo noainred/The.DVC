@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **213개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **215개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-16)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-21)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -86,7 +86,9 @@
 | `gpu-physical.json` | 설정 | 물리(베어메탈) GPU 서버 등록부 — 가상화하지 않은 서버를 IP+계정으로 등록해 SSH(nvidia-smi)로 | ✅ | ✅ | ✅ | gpu/physicalRegistry.js |
 | `guest-disk.db` | DB | 게스트 디스크 회수 리포트 시계열 DB(v2.459). |  |  | ✅ | guestdisk/db.js |
 | `guest-disk.json` | 설정 | 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). | ✅ | ✅ | ✅ | guestdisk/settings.js |
+| `guest-partition.json` | 설정 | 게스트 파티션 사용률 경보 설정(`guest-partition.json`, v2.749). | ✅ | ✅ |  | guestpart/settings.js |
 | `guest-scans.json` | 설정 | 게스트 조사 스케줄러 — 사용자가 지정한 주기로 게스트 OS를 조사해 기록·저장한다. | ✅ |  | ✅ | security/guestScanScheduler.js |
+| `guestpart-mail-state.json` | 설정 | 게스트 파티션 사용률 메일 발송·일정·기록(v2.749). 규칙은 아이실론 디렉터리 사용량과 같은 코어를 쓴다 | ✅ | ✅ | ✅ | guestpart/notify.js |
 | `guestscan-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | security/guestScanScheduler.js |
 | `horizon-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | horizon/sessionPoller.js |
 | `horizon-session-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | horizon/sessionActivityLog.js |

@@ -74,6 +74,7 @@ const RelayTopoTool = React.lazy(() => import('./tools/RelayTopoTool.jsx'));
 const SerialLookup = React.lazy(() => import('./tools/SerialLookup.jsx'));
 const VmTrackTool = React.lazy(() => import('./tools/VmTrackTool.jsx'));
 const GuestDiskReport = React.lazy(() => import('./tools/GuestDiskReport.jsx'));
+const GuestPartTool = React.lazy(() => import('./tools/GuestPartTool.jsx'));   // v2.749 게스트 파티션 사용률 경보
 const StorageTrackTool = React.lazy(() => import('./tools/StorageTrackTool.jsx'));
 const ServiceCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.ServiceCheck })));
 const NetworkCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.NetworkCheck })));
@@ -640,6 +641,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'serial-lookup' && <SerialLookup />}
       {tool === 'vm-track' && <VmTrackTool />}
       {tool === 'guest-disk' && <GuestDiskReport scope={scope} />}
+      {tool === 'guest-partition' && <GuestPartTool />}
       {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}

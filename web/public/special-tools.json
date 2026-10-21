@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-16T01:45:12.844Z",
-  "count": 109,
+  "generatedAt": "2026-10-21T04:48:58.663Z",
+  "count": 110,
   "tools": [
     {
       "k": "service-hub",
@@ -372,6 +372,14 @@
     },
     {
       "k": "guest-disk",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "guest-partition",
       "adminOnly": false,
       "perm": null,
       "external": null,

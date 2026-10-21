@@ -27,6 +27,13 @@ let restoreTried = false;  // v2.601(TIM2601-04): 재시작 후 lastRunTs 를 DB
 let lastPruneTs = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 prune 하지 않는다(v2.453 규약)       // 보존 prune 스로틀(수집 enabled 와 무관하게 돈다 — 데이터가 push 로도 들어옴)
 const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
+/** v2.749: 수집 1회가 끝나면 결과(lastResult — vCenter 별 errors 포함)를 넘긴다. 게스트 파티션 사용률의 '수집 실패 알림' 이 쓴다. 듣는 쪽 오류는 삼킨다. */
+const runListeners = new Set();
+export function onGuestDiskRunDone(fn) { if (typeof fn === 'function') runListeners.add(fn); return () => runListeners.delete(fn); }
+function emitRunDone(result) {
+  for (const fn of runListeners) setImmediate(() => { Promise.resolve().then(() => fn(result)).catch((e) => console.warn(`[guestdisk] 수집 완료 알림 처리 실패: ${String(e?.message || e).slice(0, 200)}`)); });
+}
+
 export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs, ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
 
 // v2.743(VC-02): 등록부에서 지운 vCenter 의 최신 행 정리 결과(지웠거나 판정할 수 없어 건너뛴 사실). ⚠ 폴러 상태(guestDiskPollerStatus)에 싣지
@@ -132,6 +139,7 @@ export async function runGuestDiskNow(trigger = 'manual') {
     lastRunTs = Date.now();
     lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}),
       ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}), ...(notCollected.length ? { notCollected } : {}) };
+    emitRunDone(lastResult);
     return { ok: true, ...lastResult };
   } finally {
     running = false;

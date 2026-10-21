@@ -49,6 +49,7 @@ const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장�
 import About from './About.jsx';
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
+const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -69,6 +70,7 @@ const SUB = [
   // v2.740(사용자 요청 "수집 대상 설정은 설정 메뉴로 이동해서 일반 사용자, 관리자는 못 보게"): 특수 기능 화면 안에 있던 수집 대상 설정.
   //   superOnly — 슈퍼 관리자에게만 메뉴가 보인다(표시 게이팅). 서버 설정 API 는 requireSuperAdmin 이 집행한다.
   { k: 'isilon-dirusage', label: '아이실론 디렉터리 사용량', C: IsiduSettingsPage, group: 'collect', superOnly: true },
+  { k: 'guest-partition', label: '게스트 파티션 사용률', C: GuestPartSettings, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },

@@ -85,7 +85,7 @@ function foldBase64(b64) {
  * html 과 text 가 모두 있으면 multipart/alternative, 하나만 있으면 단일 파트.
  * @returns {string} DATA 로 보낼 본문(끝의 `.` 는 붙이지 않는다)
  */
-export function buildMime({ from, to = [], cc = [], subject = '', html = '', text = '', date = new Date(), messageId = '' }) {
+export function buildMime({ from, to = [], cc = [], subject = '', html = '', text = '', date = new Date(), messageId = '', attachments = [] }) {
   if (HEADER_UNSAFE.test(String(subject))) throw new Error('제목에 제어문자를 쓸 수 없습니다.');
   const h = [];
   h.push(`From: ${from}`);
@@ -103,18 +103,60 @@ export function buildMime({ from, to = [], cc = [], subject = '', html = '', tex
     foldBase64(Buffer.from(body, 'utf8').toString('base64')),
   ].join('\r\n');
 
+  const boundary = (tag) => `_dvc_${tag}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  // v2.749: 첨부(attachments) — 본문(아래 alternative 또는 단일 파트)을 multipart/mixed 로 한 번 더 감싼다. 첨부가 없으면 예전 모양 그대로.
+  const files = attachmentParts(attachments);
+  const bodyParts = [];   // [헤더줄들(Content-Type 등), 본문] — 최상위면 h 에 붙이고, mixed 안이면 파트로
   if (html && text) {
-    const b = `_dvc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-    h.push(`Content-Type: multipart/alternative; boundary="${b}"`);
-    return [
-      h.join('\r\n'), '',
+    const b = boundary('alt');
+    bodyParts.push(`Content-Type: multipart/alternative; boundary="${b}"`, '', [
       `--${b}`, part('text/plain', text),
       `--${b}`, part('text/html', html),
       `--${b}--`, '',
-    ].join('\r\n');
+    ].join('\r\n'));
   }
-  const body = html || text || '';
-  return [h.join('\r\n'), part(html ? 'text/html' : 'text/plain', body)].join('\r\n');
+  if (!files.length) {
+    if (bodyParts.length) { h.push(bodyParts[0]); return [h.join('\r\n'), '', bodyParts[2]].join('\r\n'); }
+    const body = html || text || '';
+    return [h.join('\r\n'), part(html ? 'text/html' : 'text/plain', body)].join('\r\n');
+  }
+  const m = boundary('mix');
+  h.push(`Content-Type: multipart/mixed; boundary="${m}"`);
+  const first = bodyParts.length ? `${bodyParts[0]}\r\n\r\n${bodyParts[2]}` : part(html ? 'text/html' : 'text/plain', html || text || '');
+  const out = [h.join('\r\n'), '', `--${m}`, first];
+  for (const f of files) out.push(`--${m}`, f);
+  out.push(`--${m}--`, '');
+  return out.join('\r\n');
+}
+
+/** 첨부 상한 — 메일 한 통에 5개 · 합계 5 MB(본문 base64 전). 넘으면 던진다(조용히 자르지 않는다). */
+export const ATTACH_MAX_FILES = 5;
+export const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACH_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const ATTACH_TYPE_RE = /^[a-z]+\/[a-z0-9.+-]+$/;
+
+/** [{filename, content(string|Buffer), contentType}] → MIME 파트 문자열들. 파일명·형식은 ASCII 화이트리스트만(헤더 주입 차단). */
+function attachmentParts(list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  if (list.length > ATTACH_MAX_FILES) throw new Error(`첨부는 ${ATTACH_MAX_FILES}개까지입니다.`);
+  let total = 0;
+  return list.map((a) => {
+    const name = String(a?.filename || '');
+    const type = String(a?.contentType || 'application/octet-stream').toLowerCase();
+    if (!ATTACH_NAME_RE.test(name)) throw new Error('첨부 파일 이름은 영문·숫자·._- 만 쓸 수 있습니다.');
+    if (!ATTACH_TYPE_RE.test(type)) throw new Error('첨부 형식이 올바르지 않습니다.');
+    const buf = Buffer.isBuffer(a.content) ? a.content : Buffer.from(String(a?.content ?? ''), 'utf8');
+    total += buf.length;
+    if (total > ATTACH_MAX_BYTES) throw new Error(`첨부 합계가 ${ATTACH_MAX_BYTES / 1024 / 1024} MB 를 넘습니다.`);
+    const charset = /^text\//.test(type) ? '; charset=UTF-8' : '';
+    return [
+      `Content-Type: ${type}${charset}; name="${name}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${name}"`,
+      '',
+      foldBase64(buf.toString('base64')),
+    ].join('\r\n');
+  });
 }
 
 /** DATA 구간의 dot-stuffing — 줄 시작의 `.` 은 `..` 로 바꿔야 본문이 조기 종료되지 않는다. */
@@ -344,7 +386,7 @@ export async function sendMail(cfg, msg, opts = {}) {
     // 표시 이름은 호출부(mail/service.js)가 제어문자·따옴표를 제거한 뒤 넘긴다.
     const headerFrom = String(cfg.displayFrom || '').trim() || from;
     if (HEADER_UNSAFE.test(headerFrom)) throw new Error('보내는 사람 표시 이름에 제어문자를 쓸 수 없습니다.');
-    const mime = buildMime({ from: headerFrom, to: to.ok, cc: cc.ok, subject: msg.subject, html: msg.html, text: msg.text });
+    const mime = buildMime({ from: headerFrom, to: to.ok, cc: cc.ok, subject: msg.subject, html: msg.html, text: msg.text, attachments: msg.attachments || [] });
     // 본문은 추적 로그에 싣지 않는다(내용·수신자 유출 방지) — 크기만 남긴다.
     const sent = expect(await converse(sk, `${dotStuff(mime)}\r\n.`, timeoutMs, { ...T, as: `<본문 ${Buffer.byteLength(mime, 'utf8')} bytes>` }), [250], '본문 전송');
     try { await converse(sk, 'QUIT', 3000, T); } catch { /* QUIT 응답은 못 받아도 무방 */ }

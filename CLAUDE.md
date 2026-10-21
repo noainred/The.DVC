@@ -66,7 +66,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/security-api.md` (16항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
 | `docs/rules/web.md` (22항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (17항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
-| `docs/rules/storage.md` (31항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
+| `docs/rules/storage.md` (32항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | `docs/rules/idrac-server.md` (24항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | `docs/rules/vcenter.md` (19항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
