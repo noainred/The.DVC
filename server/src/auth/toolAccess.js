@@ -56,6 +56,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'esxi-temp': 'esxitemp',
   gpu: 'gpu',
   'guest-disk': 'guest-disk',
+  'guest-partition': 'guest-partition', // v2.749 게스트 파티션 사용률 경보(GuestPartTool.jsx)
   'guest-os': 'guestos',
   hardware: 'hardware',
   hba: 'hba',

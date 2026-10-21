@@ -66,8 +66,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/security-api.md` (16항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
 | `docs/rules/web.md` (22항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (17항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
-| `docs/rules/storage.md` (31항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
-| `docs/rules/sanswitch.md` (15항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
+| `docs/rules/storage.md` (32항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
+| `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | `docs/rules/idrac-server.md` (24항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | `docs/rules/vcenter.md` (19항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (6항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
@@ -92,10 +92,10 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 
 ## 프론트엔드 회귀 방지 (요약 — 상세는 `docs/rules/web.md`)
 
-- **신규 셸을 더 만들지 말 것**: V4 는 하나의 셸이고 V5·V6 는 기존 App 라우터 위의 **틀(chrome)** 이다 — 화면을 복제하지 않는다.
+- **V4·V5·V6 셸은 v2.747 에 지웠다 — 되살리거나 고치지 않는다**(사용자 요청 · `server/test/v4Portal2508.test.js` 가 막는다). 새 셸·틀을 만들지 말 것 — 화면은 기본 셸 + 관제 콘솔 둘.
 - **도구 키(`#/tools/<k>`)는 바꾸지 않는다**(권한 파일의 값이자 서버 집행 매핑). 옛 이름은 `specialToolsList.js` 의 `aka`.
-  새 도구는 `version_4/tree.js`·`version_5/tree.js`·`version_6/menus.js`·`toolcats/catalog.js` 에도 배치하고, 카탈로그 `adminOnly` 를 실제 API 게이트와 맞춘다
-  (테스트가 대조). 상태를 바꾸는 도구는 '운영 작업'/'자동화' 소속.
+  새 도구는 `toolcats/catalog.js` PRESET 에도 배치하고, 카탈로그 `adminOnly` 를 실제 API 게이트와 맞춘다
+  (테스트가 대조). 상태를 바꾸는 도구는 '운영 작업' 소속.
 - 위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다(`findRemoteServer`) · 값이 없는 이유를 단정하지 말 것 · 주기·상한 숫자를 화면에 박지 말 것(API 값).
 - 긴 작업의 '진행 중' 잠금은 그 대상만 · 무거운 API 는 15초 폴링 금지(마운트 1회 + 버튼) · 늦게 온 이전 응답은 버린다 · 조회 실패 상태로 저장 버튼을 열지 않는다.
 

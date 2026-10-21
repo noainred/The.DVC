@@ -2,7 +2,7 @@
  * views/tools/horizonSessionText.js — Horizon 실시간 사용자 화면의 **판정·문구**(v2.525, 순수 모듈).
  *
  * 웹 테스트가 node 환경(DOM 없음)이라 컴포넌트 렌더 테스트가 불가하다 — 그래서 판정·문구는
- * 여기서 회귀로 고정한다(`accessDeniedText.js`·`version_4/loadState.js`·`sanPerfDiagText.js` 와 같은 관례).
+ * 여기서 회귀로 고정한다(`accessDeniedText.js`·`components/loadState.js`·`sanPerfDiagText.js` 와 같은 관례).
  *
  * ── 이 모듈이 지켜야 하는 정직성 규칙 ───────────────────────────────────────────
  * 1. **'실시간 사용자' 는 접속 중(CONNECTED) 세션의 고유 계정이다.** 상태를 읽지 못한 서버가

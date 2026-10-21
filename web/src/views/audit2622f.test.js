@@ -11,7 +11,6 @@ import { tb as vcdTb } from './VCenterDetail.jsx';
 import { edgeUsersView } from './EdgeUserDeploy.jsx';
 import { vmCredRowsMatch } from './gpu-guest/VmCredManager.jsx';
 import { proxyListEmptyText } from './ProxySettings.jsx';
-import { v5SearchFootText } from '../version_5/V5Shell.jsx';
 import { ipScanAccept } from './tools/IpScanSettings.jsx'; // v2.639(U2): IpamSettings.jsx 분할
 import { detailServerOf, bmcLabel, serverVendorOf } from './tools/serverVendorText.js';
 import { perfPartialNote, perfPartialMark } from './tools/sanSwitchPorts.js';
@@ -116,15 +115,6 @@ describe('WEB-06 — 프록시 목록 조회 실패는 "없음" 이 아니다', 
     const s = src('./ProxySettings.jsx');
     expect(s).not.toMatch(/\.catch\(\(\) => setProxies\(\[\]\)\)/);
     expect(s).toMatch(/setProxiesErr\(e\?\.message \|\| String\(e\)\)/);
-  });
-});
-
-describe('WEB-07 — V5 검색 하단 안내가 🔒 행과 모순되지 않는다', () => {
-  it('잠긴 결과가 있을 때만 그 사실을 말한다', () => {
-    expect(v5SearchFootText([])).toBe('↑↓ 이동 · Enter 열기 · Esc 닫기');
-    expect(v5SearchFootText([{ locked: false }, { locked: true }, { locked: true }])).toContain('🔒 표시 메뉴 2개는 권한이 없어 열 수 없습니다');
-    expect(v5SearchFootText(null)).not.toContain('나오지 않습니다');
-    expect(src('../version_5/V5Shell.jsx')).not.toContain('권한이 없는 메뉴는 목록에 나오지 않습니다');
   });
 });
 

@@ -30,7 +30,7 @@ const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
-import { movedTabHash } from './hooks/hashTab.js';
+import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY } from './hooks/hashTab.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
@@ -39,33 +39,14 @@ import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
 import { resolveMenu, retryDelayMs } from './views/sidebar/sideMenu.js';
 import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, SEARCH_TITLE } from './views/headerText.js'; // v2.727 헤더 C안
-const Palette = lazy(() => import('./version_4/Palette.jsx')); // v2.727: 헤더 ⌘K — V4 팔레트 컴포넌트 재사용(판정·검색은 같은 모듈)
+const Palette = lazy(() => import('./components/Palette.jsx')); // v2.727: 헤더 ⌘K(v2.747 에 version_4 에서 옮김)
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
 const DvcConsole = lazy(() => import('./console/DvcConsole.jsx'));
 const isConsoleHash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'console';
-// 신규 포탈(version_4, v2.508 — v2.490 의 V3 를 승격) — 설정 › 신규 포탈 보기 › V4 버튼으로 진입하는
-// 별도 화면(#/v4/…). 기존 화면은 개발용으로 그대로 둔다.
-// ⚠ lazy() 를 유지할 것 — static import 로 바꾸면 초기 번들(index-*.js)이 셸 전체만큼 커진다.
-const V4App = lazy(() => import('./version_4/V4App.jsx'));
-const isV4Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v4';
-// 구 딥링크 보존: v2.490~v2.507 사용자가 저장한 #/v3/<page> 북마크를 버리지 않는다.
-const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v3';
-// V5 셸(v2.616) — 새 라우터가 아니라 기존 라우터 위의 새 틀. 주소는 개발 포탈과 같고, '지금 V5 로 그리는가' 는
-// 브라우저에 저장한 셸 플래그(version_5/route.js)가 정한다. #/v5 는 그 플래그를 켜는 진입 신호다.
-// ⚠ lazy() 를 유지할 것 — 초기 번들이 셸만큼 커진다.
-import { isV5Hash, v5EntryTarget, readShell, writeShell } from './version_5/route.js';
-const V5Shell = lazy(() => import('./version_5/V5Shell.jsx'));
-const V5Overview = lazy(() => import('./version_5/pages/Overview.jsx'));
-// V6 셸(v2.623) — V5 와 같은 '기존 라우터 위의 새 틀'. 셸 플래그는 V5 와 같은 키(ui.shell)에 'v6' 로 둔다(둘은 동시에 켜지지 않는다).
-//   #/v6 는 진입 신호, #/m/<메뉴> 는 V6 메뉴 페이지 주소다(기존 탭이 아니므로 해시 동기화가 덮지 않게 따로 판정한다).
-import { isV6Hash, v6EntryTarget, readShellV6, writeShellV6, isMenuHash } from './version_6/route.js';
-const V6Shell = lazy(() => import('./version_6/V6Shell.jsx'));
-const V6Overview = lazy(() => import('./version_6/pages/Overview.jsx'));
-const V6Summary = lazy(() => import('./version_6/pages/Summary.jsx'));
-const redirectV3 = () => { window.location.replace(`${window.location.pathname}${window.location.search}${window.location.hash.replace(/^#\/?v3/, '#/v4')}`); };
+// v2.747: V4·V5·V6 셸(version_4·5·6)은 지웠다 — 옛 주소(#/v3·#/v4·#/v5·#/v6·#/m)는 hooks/hashTab.js legacyShellHash 가 기본 화면으로 옮긴다.
 
 const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
@@ -112,7 +93,7 @@ import { REGIONS } from './regions.js'; // v2.575 IMP-10 — 단일 소스
 import { alarmTotals } from './views/restFallbackText.js'; // v2.629 WEB2629-04 — 상태바 경보 미조회 vCenter
 import OverviewModeToggle from './views/OverviewModeToggle.jsx'; // v2.670
 import { modeFromHash } from './views/execOverviewText.js';
-import { MODE_KEY, normMode, resolveMode } from './version_4/mode.js';
+import { MODE_KEY, normMode, resolveMode } from './views/overviewMode.js';
 import { statusCounts } from './views/statusBarText.js'; // v2.675 — 첫 수집 중 상태바는 0 이 아니라 '—'
 import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검토 I-06
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
@@ -233,7 +214,7 @@ export default function App() {
       </div></div>
     }>
       <Portal user={user} onLogout={logout} />
-      {/* 접속 공지 팝업(v2.722) — 로그인 뒤에만(무인증 면을 늘리지 않는다). 모든 셸(V4·V5·V6·콘솔) 위에 뜬다. */}
+      {/* 접속 공지 팝업(v2.722) — 로그인 뒤에만(무인증 면을 늘리지 않는다). 기본 화면·콘솔 모두 위에 뜬다. */}
       <Suspense fallback={null}><NoticePopup username={user.username || ''} /></Suspense>
       {/* 세션 수명 만료 경고·연장(v2.428) — 유휴 로그아웃과는 별개 축이다.
           만료되면 서버가 이미 401 을 주지만, 화면을 그대로 두면 '멈춘 화면'을 보게 되므로
@@ -259,7 +240,7 @@ function Portal({ user, onLogout }) {
   };
   // 특수 기능으로 옮긴 옛 탭 주소(#/insights …)를 새 주소로 바꾼다 — 기록을 남기지 않고 교체(뒤로가기 루프 방지).
   const migrateMovedHash = () => {
-    const to = movedTabHash(window.location.hash);
+    const to = legacyShellHash(window.location.hash) || movedTabHash(window.location.hash);
     if (to) window.history.replaceState(null, '', to);
     return Boolean(to);
   };
@@ -271,17 +252,7 @@ function Portal({ user, onLogout }) {
 
   // Initial view: the tab in the URL hash (so a refresh stays put), else the
   // user's saved landing-page preference.
-  // V5 진입 신호(#/v5 · #/v5/<탭>)는 탭을 읽기 **전에** 소비한다 — 셸 플래그를 켜고 실제 주소로 바꾼다.
-  const [v5On, setV5On] = useState(() => {
-    if (isV6Hash(window.location.hash)) return false;   // V6 진입 신호가 먼저다(아래 v6On 초기화가 플래그를 V6 로 바꾼다)
-    if (isV5Hash(window.location.hash)) {
-      writeShell(true);
-      window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
-      return true;
-    }
-    return readShell();
-  });
-  // v2.670 Overview 보기 모드(경영 ↔ 엔지니어): ① #/overview/exec|eng(그 탭에만, 저장 안 함) → ② 저장값 → ③ 역할 기본값(version_4/mode.js).
+  // v2.670 Overview 보기 모드(경영 ↔ 엔지니어): ① #/overview/exec|eng(그 탭에만, 저장 안 함) → ② 저장값 → ③ 역할 기본값(views/overviewMode.js).
   const [ovModeStored, setOvModeStored] = useState(readOvMode);
   const [ovModeHash, setOvModeHash] = useState(() => modeFromHash(window.location.hash));
   useEffect(() => {
@@ -289,15 +260,6 @@ function Portal({ user, onLogout }) {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  const [v6On, setV6On] = useState(() => {
-    if (isV6Hash(window.location.hash)) {
-      writeShellV6(true);
-      window.history.replaceState(null, '', v6EntryTarget(window.location.hash));
-      return true;
-    }
-    return !v5On && readShellV6();
-  });
-  const [v5Scope, setV5Scope] = useState(''); // V5 상단 '법인' 범위(vCenter id) — 모든 탭에 함께 적용된다
   const [tab, setTabState] = useState(() => { migrateMovedHash(); return tabFromHash() || getLandingTab(); });
   const [landingTab, setLandingTab] = useState(getLandingTab);
   // Filters are kept PER TAB so a filter set on one menu never carries over to
@@ -308,21 +270,18 @@ function Portal({ user, onLogout }) {
   const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
   // 통합 관제 콘솔 표시 여부(v2.487) — 해시 첫 세그먼트 'console' 로 판단해 새로고침해도 콘솔에 머문다.
   const [consoleOn, setConsoleOn] = useState(isConsoleHash);
-  // 신규 포탈(V4) 표시 여부(v2.508) — 해시 첫 세그먼트 'v4' 로 판단해 새로고침해도 신규 포탈에 머문다.
-  const [v4On, setV4On] = useState(isV4Hash);
   const [paletteOn, setPaletteOn] = useState(false); // v2.727 헤더 ⌘K(사용자 선택 C안)
-  // v2.727: ⌘K / Ctrl+K 는 기본 셸에서만 — V4·V6 셸은 자기 핸들러를 갖는다(둘 다 걸면 두 번 열린다). 의존성에 셸 플래그를 둬 전환 때 떼고 붙인다.
+  // v2.727: ⌘K / Ctrl+K 는 기본 셸에서만 — 관제 콘솔에서는 걸지 않는다. 의존성에 콘솔 플래그를 둬 전환 때 떼고 붙인다.
   useEffect(() => {
-    if (consoleOn || v4On || v5On || v6On) return undefined;
+    if (consoleOn) return undefined;
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') { e.preventDefault(); setPaletteOn((v) => !v); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [consoleOn, v4On, v5On, v6On]);
+  }, [consoleOn]);
 
   const cur = tabFilters[tab] || {};
-  // V5 는 법인 범위를 상단 하나로 둔다(탭마다 따로 두지 않는다) — 리전 선택은 V5 에서 쓰지 않는다.
-  const region = v5On ? '' : (cur.region || '');
-  const vcenterId = v5On ? v5Scope : (cur.vcenterId || '');
+  const region = cur.region || '';
+  const vcenterId = cur.vcenterId || '';
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
@@ -410,25 +369,16 @@ function Portal({ user, onLogout }) {
     if (ro) { if (topbarRef.current) ro.observe(topbarRef.current); if (statusRef.current) ro.observe(statusRef.current); }
     window.addEventListener('resize', calc);
     return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
-  }, [v5On, v6On, v4On, consoleOn]);
+  }, [consoleOn]);
   useEffect(() => {
-    // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
-    if (isV3Hash()) redirectV3();
-    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash() && !isV5Hash(window.location.hash) && !isV6Hash(window.location.hash) && !isMenuHash(window.location.hash)) window.history.replaceState(null, '', `#/${tab}`);
+    // ⚠ 이 가드에 콘솔 판정이 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 콘솔이 즉시 튕긴다.
+    if (!tabFromHash() && !isConsoleHash()) window.history.replaceState(null, '', `#/${tab}`);
+    // v2.747: 지운 V5·V6 셸의 플래그가 브라우저에 남아 있으면 지운다(읽는 코드는 없다 — 남길 이유가 없다).
+    try { window.localStorage.removeItem(LEGACY_SHELL_KEY); } catch { /* 저장소 차단 — 무시 */ }
     const onHash = () => {
-      if (isV3Hash()) { redirectV3(); return; }                             // 구 딥링크 #/v3/<page> → #/v4/<page>
-      if (isV6Hash(window.location.hash)) {                                 // V6 진입 — 플래그를 V6 로 바꾸고 실제 주소로
-        writeShellV6(true); setV6On(true); setV5On(false);
-        window.history.replaceState(null, '', v6EntryTarget(window.location.hash));
-      }
-      if (isV5Hash(window.location.hash)) {                                 // V5 진입 — 플래그를 켜고 실제 주소로(replaceState 는 hashchange 를 내지 않는다)
-        writeShell(true); setV5On(true); setV6On(false);
-        window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
-      }
-      if (isConsoleHash()) { setConsoleOn(true); setV4On(false); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
-      if (isV4Hash()) { setV4On(true); setConsoleOn(false); return; }       // 신규 포탈 내부 페이지 전환은 V4App 이 처리
-      setConsoleOn(false); setV4On(false);
-      migrateMovedHash();
+      if (isConsoleHash()) { setConsoleOn(true); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
+      setConsoleOn(false);
+      migrateMovedHash();                                    // 옛 셸 주소(#/v4 …)·옮긴 탭 주소를 새 주소로
       setHashNow(window.location.hash);
       const t = tabFromHash(); if (t) setTabState(t);
     };
@@ -439,12 +389,6 @@ function Portal({ user, onLogout }) {
   // 콘솔 진입/복귀 — 복귀 시 목적지 해시(콘솔 내비의 '개발 포탈 ↗' 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
   const openConsole = () => { setConsoleOn(true); window.location.hash = '#/console'; };
   const exitConsole = (hash) => { setConsoleOn(false); window.location.hash = hash || `#/${tab}`; };
-  // 신규 포탈(V4) 복귀 — 목적지 해시(내비의 개발 포탈 항목·도구)가 있으면 그리로, 없으면 직전 탭으로.
-  const exitV4 = (hash) => { setV4On(false); window.location.hash = hash || `#/${tab}`; };
-  // V5 끄기 — 주소는 그대로 두고 틀만 바꾼다(같은 화면이 기존 틀로 보인다).
-  const exitV5 = () => { writeShell(false); setV5On(false); setV5Scope(''); };
-  // V6 끄기 — 메뉴 페이지(#/m/…)는 기존 틀에 없는 주소라 Overview 로 옮기고, 나머지는 주소를 그대로 둔다.
-  const exitV6 = () => { writeShellV6(false); setV6On(false); if (isMenuHash(window.location.hash)) setTab('overview'); };
 
   const saveLanding = (id) => { setLandingTab(id); try { localStorage.setItem(LANDING_KEY, id); } catch { /* 저장 불가 — 이번 세션에만 적용 */ } };
 
@@ -547,7 +491,6 @@ function Portal({ user, onLogout }) {
     if (vcenterId) s.vcenterId = vcenterId;
     else if (region) s.region = region;
     return s;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vcenterId, region]);
 
 
@@ -559,15 +502,12 @@ function Portal({ user, onLogout }) {
   const showFilters = !noFilterTabs.includes(tab);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
-  // v2.617: V5 에서는 탭별 vCenter 필터를 읽지 않고 상단 '법인' 선택(v5Scope)이 모든 탭에 적용된다 — 예전에는 사이트를
-  //   눌러도 탭 필터에만 써서 호스트 화면이 전 vCenter 를 보였고, V5 는 그 드롭다운을 숨겨 고칠 방법도 없었다.
   const selectSite = (id) => {
-    if (v5On) setV5Scope(id || '');
-    else patchFilter({ vcenterId: id, region: '' }, 'hosts');
+    patchFilter({ vcenterId: id, region: '' }, 'hosts');
     setTab('hosts');
   };
 
-  // 필터바·본문·오버레이 — 기존 틀과 V5 틀이 **같은 요소**를 쓴다(화면을 두 벌 만들지 않는다).
+  // 필터바·본문·오버레이.
   // 2026-10-09 검토 I-06: 서버 Node 런타임 불일치 — 장비 수집 실패를 장비 장애로 오판하기 전에 원인을 먼저 말한다(세 셸 공통).
   const rtBanner = runtimeBanner(health);
   const rtBannerEl = rtBanner && (
@@ -577,17 +517,16 @@ function Portal({ user, onLogout }) {
   );
   const filterBar = (showFilters && (
           <div className="filters">
-            {!v5On && <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
+            <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
               <option value="">전체 리전</option>
               {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
               {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
                 .map((r) => <option key={r} value={r}>{r}</option>)}
-            </Select>}
-            {/* V5 는 법인 범위를 상단 하나로 둔다 — 여기서 다시 고르게 하지 않는다. */}
-            {!v5On && <Select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
+            </Select>
+            <Select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
               <option value="">전체 vCenter</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </Select>}
+            </Select>
             {MENU_FILTERS[tab] && (
               <Select sort={false} className="select" value={menuFilter[tab] || ''}
                 onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
@@ -605,8 +544,8 @@ function Portal({ user, onLogout }) {
                 <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
               </label>
             )}
-            {((!v5On && (region || vcenterId)) || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { patchFilter(v5On ? { q: '', qNotes: false, qIpms: false } : { region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+            {(region || vcenterId || q || menuFilter[tab]) && (
+              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
             )}
           </div>
         ));
@@ -620,23 +559,19 @@ function Portal({ user, onLogout }) {
   const tabBody = (
     <ErrorBoundary key={tab}>
          <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
-          {tab === 'overview' && (v6On
-            ? <V6Overview health={health} healthError={healthError} onSelectSite={selectSite} />
-            : v5On
-              ? <V5Overview scope={v5Scope} health={health} healthError={healthError} onGotoTab={setTab} />
-              : ovMode === 'exec'
-                ? <ExecOverview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />
-                : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
-          {tab === 'summary' && (v6On ? <V6Summary vcenters={vcenters} /> : <Summary scope={scope} onGotoTab={setTab} />)}
+          {tab === 'overview' && (ovMode === 'exec'
+            ? <ExecOverview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />
+            : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
+          {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
           {tab === 'svcmon' && <SvcMonitor />}
-          {tab === 'ipam' && <Ipam defaultScope={v5On ? v5Scope : ''} />}
+          {tab === 'ipam' && <Ipam />}
           {tab === 'hosts' && <Hosts filters={filters} />}
           {tab === 'vms' && <Vms filters={filters} />}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
-          {tab === 'tools' && <SpecialTools defaultScope={v5On ? v5Scope : ''} />}
+          {tab === 'tools' && <SpecialTools />}
           {tab === 'board' && <Board />}
           {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
@@ -680,8 +615,8 @@ function Portal({ user, onLogout }) {
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
       {paletteOn && (
         <Suspense fallback={null}>
-          <div className="hdr-palette">{/* v2.727: V4 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
-            <Palette includePages={false} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
+          <div className="hdr-palette">{/* v2.727: 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
+            <Palette tabs={visibleTabs} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
               onClose={() => setPaletteOn(false)}
               onPick={(h) => { setPaletteOn(false); if (h && window.location.hash !== h) window.location.hash = h; }} />
           </div>
@@ -707,52 +642,6 @@ function Portal({ user, onLogout }) {
       </Suspense>
     );
   }
-  // 신규 포탈(version_4, v2.508) — 포탈 셸 대신 전체 화면. 훅은 모두 위에서 선언된 뒤라 조기 반환해도 훅 개수가 같다.
-  if (v4On) {
-    return (
-      <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V4) 불러오는 중…</div></div>}>
-        <V4App user={user} health={health} healthError={healthError} onExit={exitV4} />
-      </Suspense>
-    );
-  }
-
-  // V6 셸(v2.623) — 같은 본문을 새 틀로 감싼다(메뉴 페이지 #/m/… 만 셸이 직접 그린다). 훅은 모두 위에서 선언됐다.
-  if (v6On) {
-    return (
-      <>
-        <Suspense fallback={<div className="login-screen"><div className="loading">V6 불러오는 중…</div></div>}>
-          <V6Shell user={user} health={health} healthError={healthError} upgrading={upgrading} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
-            onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
-            onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV6} onLogout={onLogout}>
-            {rtBannerEl}
-            {filterBar}
-            {tabBody}
-          </V6Shell>
-        </Suspense>
-        {overlays}
-      </>
-    );
-  }
-
-  // V5 셸(v2.616) — 같은 본문을 새 틀로 감싼다. V4·콘솔이 먼저다(위 조기 반환). 훅은 모두 위에서 선언됐다.
-  if (v5On) {
-    return (
-      <>
-        <Suspense fallback={<div className="login-screen"><div className="loading">V5 불러오는 중…</div></div>}>
-          <V5Shell user={user} health={health} healthError={healthError} upgrading={upgrading} vcenters={vcenters} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
-            scope={v5Scope} setScope={setV5Scope}
-            onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
-            onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV5} onLogout={onLogout}>
-            {rtBannerEl}
-            {filterBar}
-            {tabBody}
-          </V5Shell>
-        </Suspense>
-        {overlays}
-      </>
-    );
-  }
-
   // v2.675: 하단 상태바 숫자 — 첫 수집 중(health.initial)이면 0 대신 '—'(일반 함수라 조기 반환 뒤에 둬도 훅 규칙과 무관하다).
   const sbCounts = statusCounts(health);
 
@@ -800,7 +689,7 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
-        {/* v2.727(사용자 선택 C안): 가운데 ⌘K 검색 — 기존 V4 팔레트(기능·탭)를 연다. 400px 미만은 아이콘만(CSS). */}
+        {/* v2.727(사용자 선택 C안): 가운데 ⌘K 검색 — 팔레트(기능·탭)를 연다. 400px 미만은 아이콘만(CSS). */}
         <div className="tb-search">
           <button type="button" className="tb-cmdk" onClick={() => setPaletteOn(true)} title={SEARCH_TITLE} aria-label={SEARCH_TITLE}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
@@ -834,7 +723,7 @@ function Portal({ user, onLogout }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.3, whiteSpace: 'nowrap' }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-                  {/* v2.675: 분모는 비활성을 뺀 수다(V6 pill·consoleData 와 같은 기준) — v2.617 이 '분모에서 뺐다' 고 적었지만 이 헤더는 전체를 쓰고 있었다. */}
+                  {/* v2.675: 분모는 비활성을 뺀 수다(consoleData 와 같은 기준) — v2.617 이 '분모에서 뺐다' 고 적었지만 이 헤더는 전체를 쓰고 있었다. */}
                   {health ? <span title={off > 0 ? `비활성 ${off}곳은 분모에서 뺐습니다(수집하지 않음)` : undefined}>{`${conn}/${Math.max(0, total - off)} vCenter`}</span> : '연결 중…'}
                   {health && (allOk ? <span style={{ color: '#4ade80', fontWeight: 700 }}> OK</span> : tail)}
                 </span>
@@ -869,7 +758,7 @@ function Portal({ user, onLogout }) {
 
       <footer className="statusbar" ref={statusRef}>
         <div className="sb-cell"><span className="sb-label">서버 Uptime</span><span className="sb-val">{fmtUptime(health?.uptimeSec)}</span></div>
-        {/* v2.675: 첫 수집 중(health.initial)·미수신이면 0 이 아니라 '—' — 판정은 statusBarText.statusCounts 하나(V6 상태바와 공용). */}
+        {/* v2.675: 첫 수집 중(health.initial)·미수신이면 0 이 아니라 '—' — 판정은 statusBarText.statusCounts 하나. */}
         <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val" title={sbCounts.title}>{sbCounts.hosts}</span></div>
         <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val" title={sbCounts.title}>{sbCounts.vms} <small className="muted">({sbCounts.vmsOn} On)</small></span></div>
         {/* v2.629 WEB2629-04: REST 폴백 vCenter 는 경보를 조회하지 않아 합계에 0 으로 들어간다 — 그 개수를 밝힌다(판정은 alarmTotals 하나). */}

@@ -56,7 +56,7 @@ export const PRESET = Object.freeze([
   {
     id: 'storage', label: '스토리지', icon: '💾',
     tools: ['storage-mon', 'storage-growth', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
-      'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk'],
+      'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
@@ -66,7 +66,7 @@ export const PRESET = Object.freeze([
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',
     tools: ['capacity', 'capacity-advisor', 'capacity-forecast', 'forecast', 'waste', 'rightsizing',
-      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage', 'orphanvmdk', 'guest-disk'],
+      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
     id: 'security', label: '보안·계정', icon: '🛡️',

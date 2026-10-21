@@ -9,8 +9,8 @@ import { GuestOsVmsModal } from './SpecialTools.jsx';
 import { STable } from '../components/STable.jsx';
 import { unitText } from './unitText.js';
 import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
-// v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 V6 와 같은 함수를 쓴다(형제 비대칭 — 개발 포탈만 0 행을 합계에 더했다).
-import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from '../version_6/v6Data.js';
+// v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 corpContribution.js 하나가 한다(v2.747 에 version_6/v6Data.js 에서 옮겼다).
+import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from './corpContribution.js';
 import Select from '../components/Select.jsx';
 
 const OS_COLORS = {
@@ -146,7 +146,7 @@ export default function Summary({ scope, onGotoTab }) {
     { key: 'provisionedTB', label: '프로비저닝(TB)', align: 'right' },
   ];
   // totals row — v2.632(WEB2632-02): 첫 수집 중·비활성·보관 인벤토리 없는 연결 불가 행은 서버가 0 으로 채워 보낸다.
-  //   그 0 은 값이 아니라 '모른다' 이므로 V6 와 같은 corpContribution 으로 행을 '—' 로 바꾸고 합계에서 뺀 뒤 개수를 밝힌다.
+  //   그 0 은 값이 아니라 '모른다' 이므로 corpContribution 으로 행을 '—' 로 바꾸고 합계에서 뺀 뒤 개수를 밝힌다.
   const contrib = corpContribution(s);
   const totals = contrib.total;
   const stPhys = physStorageTB(st); // v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)

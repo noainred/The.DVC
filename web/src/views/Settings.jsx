@@ -1,4 +1,4 @@
-import React, { useEffect, lazy, Suspense } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Loading } from '../components/ui.jsx';
 import { isSuperAdminUser } from '../api.js';
 // v2.580(튜닝): 설정 하위 화면 42개가 **한 청크(605KB)** 로 묶여 있었다 — 어느 탭을 열든 전부 받는다.
@@ -28,7 +28,6 @@ const VmSeriesSettings = lazy(() => import('./VmSeriesSettings.jsx')); // VM 실
 const PerfMonitor = lazy(() => import('./PerfMonitor.jsx')); // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
 const LogAnalysis = lazy(() => import('./LogAnalysis.jsx')); // 로그 분석 — 로그에서 개선점 도출(v2.583)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
-import V4Portal from './V4Portal.jsx'; // 신규 포탈 보기(version_4 진입, v2.508 — v2.490 의 V3 승격)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
 const GpuGuestSettings = lazy(() => import('./GpuGuestSettings.jsx'));
 import GpuGuestDiag from './GpuGuestDiag.jsx';
@@ -50,6 +49,7 @@ const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장�
 import About from './About.jsx';
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
+const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -70,6 +70,7 @@ const SUB = [
   // v2.740(사용자 요청 "수집 대상 설정은 설정 메뉴로 이동해서 일반 사용자, 관리자는 못 보게"): 특수 기능 화면 안에 있던 수집 대상 설정.
   //   superOnly — 슈퍼 관리자에게만 메뉴가 보인다(표시 게이팅). 서버 설정 API 는 requireSuperAdmin 이 집행한다.
   { k: 'isilon-dirusage', label: '아이실론 디렉터리 사용량', C: IsiduSettingsPage, group: 'collect', superOnly: true },
+  { k: 'guest-partition', label: '게스트 파티션 사용률', C: GuestPartSettings, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
@@ -97,7 +98,6 @@ const SUB = [
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'mail', label: '메일 발송', C: MailSettings },
   { k: 'tool-categories', label: '특수 기능 카테고리', C: ToolCategories },
-  { k: 'v4-portal', label: '신규 포탈 보기', C: V4Portal },
   { k: 'backup', label: '포탈 백업', C: PortalBackup },
   { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts },
   { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings },
@@ -129,12 +129,6 @@ const groupChildren = (g) => visibleSubs().filter((s) => s.group === g);
 const DEFAULT_SUB = 'vcenter-admin';
 const SUB_KEYS = SUB.map((s) => s.k);
 
-/**
- * 이름이 바뀐 하위 탭의 옛 키(v2.508). 키가 그대로 URL 이라 바꾸면 저장해 둔 북마크가
- * 조용히 첫 탭으로 떨어진다 — 알려진 옛 키는 새 키로 넘긴다.
- */
-const SUB_ALIAS = { 'v3-portal': 'v4-portal' };
-const resolveSub = (k) => SUB_ALIAS[k] || k;
 
 /** 설정 — 관리자용 하위 메뉴. 수집/원격접속은 2개 그룹으로 묶어 2단 탭으로 표시. */
 export default function Settings({ initialSub }) {
@@ -142,14 +136,8 @@ export default function Settings({ initialSub }) {
   // 하위 항목이 30개가 넘어 매번 다시 찾아 들어가야 했던 불편이 사라진다. 링크 공유도 된다.
   const [sub, setSub] = useHashTab({
     base: ['settings'], valid: SUB_KEYS,
-    fallback: SUB_KEYS.includes(resolveSub(initialSub)) ? resolveSub(initialSub) : DEFAULT_SUB,
+    fallback: SUB_KEYS.includes(initialSub) ? initialSub : DEFAULT_SUB,
   });
-  // 옛 키로 들어온 딥링크(#/settings/v3-portal)를 새 키로 한 번 바꿔 준다.
-  useEffect(() => {
-    const seg = window.location.hash.replace(/^#\/?/, '').split('/')[1];
-    if (seg && SUB_ALIAS[seg]) setSub(SUB_ALIAS[seg]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const cur = SUB.find((s) => s.k === sub) || SUB[0];
   const Cur = cur.C;
   const activeGroup = cur.group || null;

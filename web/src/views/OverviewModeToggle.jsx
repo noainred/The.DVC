@@ -1,9 +1,9 @@
 /**
  * OverviewModeToggle.jsx — Overview '경영 보기 ↔ 엔지니어 보기' 전환(v2.670).
- * 모드는 **보기 설정이지 권한이 아니다**(version_4/mode.js) — 두 보기의 권한·데이터 범위·임계값은 같다.
+ * 모드는 **보기 설정이지 권한이 아니다**(views/overviewMode.js) — 두 보기의 권한·데이터 범위·임계값은 같다.
  */
 import React from 'react';
-import { MODES, MODE_LABEL } from '../version_4/mode.js';
+import { MODES, MODE_LABEL } from './overviewMode.js';
 
 export default function OverviewModeToggle({ mode, onChange }) {
   return (

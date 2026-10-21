@@ -1,10 +1,10 @@
 /**
- * v2.508 — V4 신규 포탈 + 개편 전 선행 수정 3건 회귀.
+ * v2.508 — 개편 전 선행 수정 3건 회귀 + (v2.747) V4·V5·V6 셸 삭제 고정.
  *
  * 여기서 고정하는 것은 '화면이 그려진다' 가 아니라 **되돌리면 다시 깨지는 경계**다.
  *   F0-1 사용빈도 API 상한   — 상한이 12 면 '클릭 많은 순' 정렬이 상위 12개에만 실효한다.
  *   F0-3 추천 분류 커버리지  — PRESET 에 없는 도구는 화면에서 '기타' 로 빠진다.
- *   V4  셸 계약             — svcmon 권한 게이트(v2.506)·해시 라우팅·도구 키 불변.
+ *   셸 삭제                 — v2.508 에 만든 V4 셸(과 V5·V6)은 v2.747 에 사용자 요청으로 지웠다. 되살리지 않는다.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,36 +55,33 @@ test('F0-2 카드 모양은 renderToolCard 하나만 소유한다', () => {
   assert.equal((web.match(/className=\{`st-card\$\{/g) || []).length, 1, '카드 JSX 가 복제됐다');
 });
 
-// --- V4 셸 계약 --------------------------------------------------------------
-test('V4 셸도 svcmon 권한 게이트(v2.506)를 지킨다', () => {
-  const src = readWeb('version_4/V4App.jsx');
-  assert.ok(/const canSvcmon = can\('svcmon'\)/.test(src), 'can(\'svcmon\') 판정이 없다');
-  assert.ok(/usePolling\(canSvcmon \? '\/svcmon\/state' : null/.test(src), '권한 없는 역할에 30초마다 403 을 만든다');
-  assert.ok(/svcmon: canSvcmon/.test(src), '타일이 권한 없음을 거짓 원인(점검 상태 대기)으로 표시한다');
-});
-
-test('V4 는 구 딥링크 #/v3 를 버리지 않는다', () => {
-  const app = readWeb('App.jsx');
-  assert.ok(/isV4Hash/.test(app), 'App.jsx 에 V4 해시 판정이 없다');
-  assert.ok(/isV3Hash/.test(app), '#/v3 리다이렉트 판정이 사라졌다 — 기존 북마크가 죽는다');
-  assert.ok(/#\/v4/.test(app), '#/v3 → #/v4 리다이렉트 대상이 없다');
-  // replaceState 가드에 V4 가 빠지면 진입 직후 해시가 덮여 즉시 튕긴다.
-  assert.ok(/!tabFromHash\(\)[^\n]*!isV4Hash\(\)/.test(app), 'replaceState 가드에 isV4Hash 가 빠졌다');
-});
-
-test('V4 화면 중 무거운 API 는 15초 폴링을 걸지 않는다', () => {
-  // /tools/capacity-forecast 는 실측 1.5초(CLAUDE.md v2.503), /tools/orphan-vmdk 는 실행마다
-  // SOAP 왕복 2회(v2.505)다. 28 vCenter · 고RTT 환경에서 짧은 주기로 돌리면 안 된다.
-  const dir = path.join(ROOT, 'web/src/version_4/pages');
-  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.jsx'))) {
-    const src = fs.readFileSync(path.join(dir, f), 'utf8');
-    for (const m of src.matchAll(/usePolling\([^;]*?'(\/tools\/capacity-forecast|\/tools\/waste|\/tools\/vm-track[^']*|\/compare\/matrix|\/insights\/[^']*)'[^;]*?,\s*([\d_]+)\)/g)) {
-      const ms = Number(String(m[2]).replace(/_/g, ''));
-      assert.ok(ms >= 60_000, `${f}: ${m[1]} 폴링 주기 ${ms}ms — 60초 이상이어야 한다`);
-    }
-    // 스캔 엔드포인트('/tools/orphan-vmdk')만 금지한다. 목록('/tools/orphan-vmdk/datastores')은
-    // 스냅샷 memoJson 이라 값이 싸다(toolsCapacity.js:1298) — 둘을 구분하지 않으면 오탐이 난다.
-    assert.ok(!/usePolling\([^;]*'\/tools\/orphan-vmdk'/.test(src),
-      `${f}: 고아 VMDK **스캔**은 폴링하지 않는다 — 실행마다 vCenter SOAP 왕복이 발생한다(v2.505)`);
+// --- V4·V5·V6 셸 삭제(v2.747, 사용자 요청) --------------------------------------
+// 셸은 지웠고 다시 만들거나 고치지 않는다 — 폴더가 되살아나거나 기본 화면이 다시 가져다 쓰면 여기서 막힌다.
+test('V4·V5·V6 셸 폴더가 없고 기본 화면이 그 코드를 가져다 쓰지 않는다', () => {
+  for (const d of ['version_4', 'version_5', 'version_6']) {
+    assert.ok(!fs.existsSync(path.join(ROOT, 'web/src', d)), `web/src/${d} 가 되살아났다 — v2.747 에 지운 셸이다`);
   }
+  const walk = (dir, out = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== 'vendor' && e.name !== 'node_modules') walk(p, out); } else if (/\.(jsx?|css)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const bad = walk(path.join(ROOT, 'web/src'))
+    .filter((f) => /(?:from\s+|import\()\s*['"][^'"]*version_[456]\//.test(fs.readFileSync(f, 'utf8')))
+    .map((f) => path.relative(ROOT, f));
+  assert.deepEqual(bad, [], '지운 셸 경로를 import 한다');
+});
+
+test('옛 셸 주소(#/v3·#/v4·#/v5·#/v6·#/m)는 기본 화면으로 옮기고, 설정에 신규 포탈 보기가 없다', () => {
+  const app = readWeb('App.jsx');
+  assert.match(app, /legacyShellHash\(window\.location\.hash\) \|\| movedTabHash\(window\.location\.hash\)/,
+    '옛 북마크(#/v4/…)가 빈 화면·엉뚱한 랜딩 탭으로 떨어진다');
+  assert.match(app, /localStorage\.removeItem\(LEGACY_SHELL_KEY\)/, '지운 V5·V6 셸 플래그(ui.shell)를 정리하지 않는다');
+  for (const name of ['V4App', 'V5Shell', 'V6Shell', 'v4On', 'v5On', 'v6On']) assert.ok(!app.includes(name), `App.jsx 에 ${name} 이 남았다`);
+  const settings = readWeb('views/Settings.jsx');
+  assert.ok(!settings.includes('신규 포탈 보기'), '설정에 신규 포탈 보기 메뉴가 남았다');
+  assert.ok(!/v4-portal|V4Portal/.test(settings), '설정에 v4-portal 항목이 남았다');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'web/src/views/V4Portal.jsx')), 'V4Portal.jsx 가 되살아났다');
 });

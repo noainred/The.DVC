@@ -142,6 +142,7 @@ import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
+import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
 import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 결과 메일 정기 발송(보내는 때 '정한 요일·시각') — 중앙 전용 · 30초 틱
 import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
 import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
@@ -591,6 +592,7 @@ const stagger = [
   startLinkCheckPoller,
   startLinkCheckWorker,
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
+  startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
 ];
 /*

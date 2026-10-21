@@ -37,6 +37,7 @@
 - (원래 3594행) 스토리지 시리얼(v2.735.2) — 못 읽으면 사유를 싣고, 화면 문구는 `web/src/views/tools/storageSerialText.js` 하나
 - (원래 4615행) 스토리지 소비 전력(v2.667) — 경로 표는 `storage/power.js POWER_PATHS` 하나이고, 못 읽은 장비는 사유별로 센다
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
+- (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 
 ## 본문
 
@@ -714,3 +715,18 @@
     · 90% 도달은 7일 온전한 점의 **선형 추정**이고 증가가 0 이하·점 2개 미만이면 null(말하지 않는다). 부분 합 점은 변화 계산에서 뺀다. 그룹 색은 이름 가나다 자리로 정한다(사용량 순위가 바뀌어도 색이 바뀌지 않게).
     · 셸(← 특수 기능 · 제목)은 SpecialTools 가 그린다 — 시안의 breadcrumb·h1 은 넣지 않았다.
 
+- **게스트 파티션 사용률 경보(v2.749 — 시안 ①~④ 승인)** — 판정 코어 `server/src/guestpart/rules.js`(순수) · 조회 `report.js` · 설정 `settings.js`(`guest-partition.json`) ·
+  메일 `notify.js`(+ `mailHtml.js`) · 라우트 `routes/api/toolsGuestPart.js` · 화면 `GuestPartTool.jsx`(특수기능)·`GuestPartSettings.jsx`(설정 › 수집 서버). 회귀 `server/test/guestPart2749.test.js` · `web/src/views/tools/guestPartText.test.js`.
+  - **원천은 게스트 디스크 회수와 같은 수집**이다(수집 켜기·주기는 `guest-disk.json` 한 곳 — 두 곳에 두지 말 것). 현재 사용률은 새 표 `part_latest`(수집마다 vCenter 단위 교체,
+    `commitCollection` 같은 트랜잭션)에서 읽는다. `part_last` 는 diff 기준(변화가 기준 GB 이상일 때만 갱신)이라 사용률 원천이 될 수 없다(50 GB 에서 1 GB = 2%p). 엣지 수신도 같은 함수를 지난다.
+  - 사용률을 모르는 파티션(여유 공간 미보고)은 `unknown=1`·값 null — 0% 가 아니다. Tools 미보고 게스트는 '확인 불가' 로 따로 센다(인벤토리 게스트 − 보고 게스트, 템플릿 제외).
+  - OS 는 **경로 모양**(드라이브 문자·UNC = Windows, `/` = Linux)으로 가린다. 무시 규칙은 경보·메일에서만 빼고 수집·저장은 그대로 — 무시한 수는 사유별로 보여 준다.
+    패턴은 `*` 만 특수 문자인 **정규식 없는** 두 포인터 매칭(외부 입력 패턴 × 경로 1,024자 — ReDoS 규약). Windows CD-ROM·ISO 는 경로로 알 수 없어 '남은 공간 0 + 10 GB 이하' 로 **추정**한다(화면 문구도 추정이라 말한다).
+  - 범위 계정은 자기 vCenter 행만 — 기억한 전체 목록(수집 커밋마다 세대 증가 + 60초)에서 **판정·요청 필터보다 먼저** 좁힌다. 범위 밖 단건은 404. 설정·메일 저장은 관리자 + 전체 범위(전 법인 공용).
+  - 메일은 아이실론과 **같은 코어**(`isidu/digestRules.planDigestTick·digestRecipients` · `isidu/mailRules.normalizeTargetMail·mailRecipients·failAlertDue`)를 쓴다 — 사본 금지.
+    공용 서비스(`sendPortalMail`)는 받는 사람이 비면 기본 받는 사람으로 보내므로 **호출 전에** 빈 목록을 막는다. 보내는 사람(From)은 헤더만 바꾸고(봉투는 메일 설정 주소 — 반송),
+    CSV 첨부는 `util/smtp.js buildMime` 의 `attachments`(파일 이름·형식 화이트리스트 — 헤더 주입 차단, 5개·5 MB 상한) 를 쓴다. 데모(mock)는 자동 메일을 보내지 않는다.
+  - (v2.750) VM 상세 창의 '게스트 파티션 사용량'은 `GET /vms/:id/partitions`(**inv.vms** — 특수 기능이 아니라 그 VM 의 속성, 창을 열 때 1회) ·
+    조립은 `report.js buildVmPartitions`(순수) 하나. VM 은 **스냅샷에서** 찾고 범위 밖은 404, 수집 행의 vCenter 가 스냅샷과 다르면 쓰지 않는다(옮겨진 VM 의 옛 값).
+    라이브 조회가 아니므로 **수집 시각을 반드시 함께** 보이고(`timeText`·`agoText`), 값이 없는 이유는 `guestPartText.vmPartNote` 가 아는 것만 말한다. 무시 규칙은 사유 문구만 싣는다(패턴 원문 금지). 회귀 `server/test/vmPartitions2750.test.js`.
+  - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.

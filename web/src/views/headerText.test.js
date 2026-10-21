@@ -46,11 +46,12 @@ describe('헤더 C안(v2.727) — 소스 계약', () => {
     expect(rule).toBeTruthy();
     expect(rule[0]).not.toMatch(/text-transform/);
   });
-  it('⑧ ⌘K 단축키는 기본 셸에서만 — V4·V5·V6·콘솔이 켜져 있으면 걸지 않는다(두 번 열림 방지)', () => {
-    expect(appSrc).toMatch(/if \(consoleOn \|\| v4On \|\| v5On \|\| v6On\) return undefined;/);
-    expect(appSrc).toMatch(/<Palette includePages=\{false\}/);
+  it('⑧ ⌘K 단축키는 기본 셸에서만 — 콘솔이 켜져 있으면 걸지 않는다 · 팔레트는 보이는 탭만 받는다(v2.747 V4·V5·V6 셸 삭제)', () => {
+    expect(appSrc).toMatch(/if \(consoleOn\) return undefined;/);
+    expect(appSrc).toMatch(/<Palette tabs=\{visibleTabs\}/);
+    expect(appSrc).not.toMatch(/version_[456]|V4App|V5Shell|V6Shell/);
   });
-  it('⑨ 검색·팔레트 CSS 는 .topbar / .tb- / .hdr-palette 아래로만(V4 셸 v4.css 와 섞이지 않게)', () => {
+  it('⑨ 검색·팔레트 CSS 는 .topbar / .tb- / .hdr-palette 아래로만', () => {
     const sels = [...css.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map((m) => m[2].trim()).filter((s) => /tb-search|tb-cmdk|v4-palette|v3-/.test(s));
     expect(sels.length).toBeGreaterThan(5);
     for (const s of sels) for (const part of s.split(',')) expect(part.trim()).toMatch(/^(\.topbar|\.tb-cmdk|\.hdr-palette)/);

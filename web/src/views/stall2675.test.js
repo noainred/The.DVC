@@ -1,8 +1,8 @@
 /**
  * v2.675 — 운영 멈춤 후보 개선의 화면 쪽(순수 문구 + 소스 스윕).
- *  ① 첫 병합 전 골격(/overview initial)이면 0 대가 아니라 '첫 수집 중' 을 말한다(엔지니어·경영 보기 · V6)
+ *  ① 첫 병합 전 골격(/overview initial)이면 0 대가 아니라 '첫 수집 중' 을 말한다(엔지니어·경영 보기)
  *  ② 로그인 실패 분석: 무엇을 얼마나 훑었는지·잘렸는지·언제 분석한 값인지 말한다 · 분석은 상태보다 드물게 부른다
- *  ③ 롤업 백필 상태 한 줄  ④ 하단 상태바(개발 포탈·V6) — 첫 수집 중이면 0 이 아니라 '—'
+ *  ③ 롤업 백필 상태 한 줄  ④ 하단 상태바 — 첫 수집 중이면 0 이 아니라 '—'
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -11,7 +11,6 @@ import { fileURLToPath } from 'node:url';
 import { stripComments } from '../test/_stripComments.js';
 import { firstCollectNotice } from './overviewCardsText.js';
 import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS } from './loginFailsText.js';
-import { serverSegments } from '../version_6/v6Data.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const src = (rel) => stripComments(fs.readFileSync(path.join(HERE, rel), 'utf8'));
@@ -49,14 +48,7 @@ describe('① 첫 수집 중 안내(firstCollectNotice)', () => {
       expect(n.title + n.detail).not.toMatch(/`|\*\*/);
     }
   });
-  it('V6 서버 3구분 — 골격이면 0 이 아니라 값 없음(—) + 첫 수집 중', () => {
-    const s = serverSegments({ initial: true, global: { hosts: 0, vms: 0 }, physical: { servers: 0 } });
-    expect(s.phys.value).toBe(null); expect(s.host.value).toBe(null); expect(s.vm.value).toBe(null);
-    expect(s.host.sub).toMatch(/첫 수집 중/);
-    const t = serverSegments({ global: { hosts: 5, vms: 9 }, physical: { servers: 2 } });
-    expect(t.host.value).toBe(5); expect(t.vm.value).toBe(9);
-  });
-  it('소스 — 엔지니어·경영 보기는 골격이면 안내를 그리고, V6 Overview 는 initial 을 본다', () => {
+  it('소스 — 엔지니어·경영 보기는 골격이면 안내를 그린다', () => {
     const ov = src('Overview.jsx');
     expect(ov).toMatch(/const fc = firstCollectNotice\(ov\);/);
     expect(ov).toMatch(/if \(!ov\.global \|\| fc\) return/);
@@ -64,7 +56,6 @@ describe('① 첫 수집 중 안내(firstCollectNotice)', () => {
     expect(ex).toMatch(/const fc = firstCollectNotice\(ov\);/);
     expect(ex).toMatch(/if \(!g \|\| fc\) return/);
     expect(ex.indexOf('if (!g || fc)')).toBeLessThan(ex.indexOf('const kpis'));   // 0 대 KPI 보다 먼저(v2.677: 헤드라인은 지웠다)
-    expect(src('../version_6/pages/Overview.jsx')).toMatch(/if \(!ov\.global \|\| ov\.initial\)/);
   });
 });
 
@@ -176,16 +167,13 @@ describe('④ 하단 상태바 — 첫 수집 중·미수신이면 0 이 아니�
     expect(r.title).toBeUndefined();
     expect(statusCounts({ initial: false, hosts: 2 }).hosts).toBe('2');
   });
-  it('소스 — 개발 포탈·V6 상태바가 같은 판정을 쓰고 health.hosts 를 0 으로 채우지 않는다', () => {
+  it('소스 — 상태바가 같은 판정을 쓰고 health.hosts 를 0 으로 채우지 않는다', () => {
     const app = src('../App.jsx');
     expect(app).toMatch(/const sbCounts = statusCounts\(health\);/);
     expect(app).toMatch(/\{sbCounts\.hosts\}/);
     expect(app).not.toMatch(/\(health\?\.hosts \|\| 0\)/);
     expect(app).not.toMatch(/\(health\?\.vms \|\| 0\)/);
-    expect(app, '헤더 pill 분모가 비활성을 포함한다(V6 와 다른 숫자)').toMatch(/\$\{conn\}\/\$\{Math\.max\(0, total - off\)\} vCenter/);
+    expect(app, '헤더 pill 분모가 비활성을 포함한다').toMatch(/\$\{conn\}\/\$\{Math\.max\(0, total - off\)\} vCenter/);
     expect(app).not.toMatch(/`\$\{conn\}\/\$\{total\} vCenter`/);
-    const v6 = src('../version_6/V6Shell.jsx');
-    expect(v6).toMatch(/const sb = statusCounts\(health\);/);
-    expect(v6).toMatch(/sb\.pending \? '—' : fmtInt\(health\?\.hosts\)/);
   });
 });

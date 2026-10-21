@@ -457,7 +457,7 @@ test('엣지 자기보고는 racadm 류 부하를 만들지 않는다 — 중앙
 
 /* ── 11. 등록 6곳 ─────────────────────────────────────────────────────────── */
 
-test('도구 키가 6곳에 등록돼 있다 — 하나만 빠져도 메뉴에서 못 찾거나 권한이 안 걸린다', async () => {
+test('도구 키가 5곳에 등록돼 있다 — 하나만 빠져도 메뉴에서 못 찾거나 권한이 안 걸린다', async () => {
   const fs = await import('node:fs');
   const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
   // ① 카드 목록: `{ k: 'portal-check'` 형태여야 검색·권한 테스트의 정규식이 잡는다.
@@ -466,13 +466,11 @@ test('도구 키가 6곳에 등록돼 있다 — 하나만 빠져도 메뉴에�
   const st = read('../../web/src/views/SpecialTools.jsx');
   assert.match(st, /PortalCheck = React\.lazy/);
   assert.match(st, /tool === 'portal-check' && <PortalCheck \/>/);
-  // ③ V4 트리(안 넣으면 내비에서 영원히 못 찾는다)
-  assert.match(read('../../web/src/version_4/tree.js'), /tool\('portal-check'\)/);
-  // ④ 카테고리 프리셋(빠지면 '기타' 로 밀린다)
+  // ③ 카테고리 프리셋(빠지면 '기타' 로 밀린다)
   assert.match(read('../src/toolcats/catalog.js'), /'portal-check'/);
-  // ⑤ 서버 집행 매핑
+  // ④ 서버 집행 매핑
   assert.match(read('../src/auth/toolAccess.js'), /'portal-check':\s*'portal-check'/);
-  // ⑥ 라우터 등록
+  // ⑤ 라우터 등록
   assert.match(read('../src/routes/api.js'), /registerPortalCheck\(api\)/);
 });
 

@@ -32,6 +32,7 @@ import { fetchJson, postJson, toolAllowed } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
 import { STable } from './STable.jsx';
+import { levelOf, gbText, pctText, timeText, agoText, vmPartNote } from '../views/tools/guestPartText.js'; // v2.750 게스트 파티션 사용량(순수·vitest 고정)
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01)
@@ -361,6 +362,89 @@ function DsBrowseSection({ item }) {
  * 판정은 vmCfgText.vmCfgFindings 하나(서버 vmcfg/parse.js 와 같은 규칙 — 테스트 대조).
  */
 const SEV_BADGE = { crit: ['위험', 'red'], warn: ['주의', 'amber'], info: ['참고', 'gray'] };
+
+/**
+ * v2.750: 게스트 파티션 사용량 — 게스트 디스크 주기 수집(VMware Tools 가 보고한 guest.disk)의 이 VM 최신 값과 **수집 시각**.
+ * 창을 열 때 1회 조회한다(폴링 없음 — 값은 수집 주기마다 바뀐다). 라이브 조회가 아니므로 시각을 반드시 함께 보인다.
+ * 값을 모르는 파티션(여유 공간 미보고)은 0% 가 아니라 '값 모름'. 경보 무시 규칙에 걸린 파티션도 보이되 표지를 단다.
+ */
+function VmPartitionsSection({ vm }) {
+  const [st, setSt] = useState({ data: null, error: null });
+  useEffect(() => {
+    if (!vm?.id) return undefined;
+    let active = true;
+    setSt({ data: null, error: null });
+    fetchJson(`/vms/${encodeURIComponent(vm.id)}/partitions`)
+      .then((d) => { if (active) setSt({ data: d, error: null }); })
+      .catch((e) => { if (active) setSt({ data: null, error: e }); });
+    return () => { active = false; };
+  }, [vm?.id]);
+  if (!vm?.id) return null;
+  const d = st.data;
+  const parts = Array.isArray(d?.parts) ? d.parts : [];
+  const note = vmPartNote(d, d?.now);
+  const over = parts.filter((p) => p.over && !p.ignored).length;
+  const iv = d?.collect?.intervalHours;
+  return (
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'baseline' }}>
+        <span>게스트 파티션 사용량{parts.length ? ` — ${parts.length}개` : ''}{over ? ` · 임계 ${d.thr}% 이상 ${over}개` : ''}</span>
+        {d?.collectedAt != null && (
+          <span title="게스트 디스크 주기 수집이 이 VM 의 파티션을 읽은 시각(포탈 시각). 화면을 연 시각의 실시간 값이 아닙니다.">
+            수집 <b style={{ color: 'var(--text)' }}>{timeText(d.collectedAt, d.offsetMin)}</b> ({agoText(d.collectedAt, d.now)})
+          </span>
+        )}
+        {d && <span>{d.collect?.enabled ? `주기 ${iv}시간` : '주기 수집 꺼짐'}</span>}
+      </div>
+      {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : st.error.status === 403 ? '파티션 사용량을 볼 권한이 없습니다.' : '파티션 사용량을 불러오지 못했습니다.'}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : note.empty ? <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{note.empty}</div>
+        : (
+          <>
+            <div className="table-wrap" style={{ maxHeight: '32vh' }}>
+              <STable limit={50}>
+                <thead><tr><th>파티션</th><th style={{ width: '46%' }} title="사용률 · 사용 / 할당">사용률</th><th style={{ textAlign: 'right' }}>여유</th></tr></thead>
+                <tbody>
+                  {parts.map((p) => {
+                    const lv = levelOf(p.pct, d.thr);
+                    return (
+                      <tr key={p.path}>
+                        <td style={{ maxWidth: 220, overflowWrap: 'anywhere' }} data-sort={p.path}>
+                          <b style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5 }}>{p.path}</b>
+                          {p.ignored && <span className="badge gray" style={{ fontSize: 10, marginLeft: 6 }} title={`경보 무시 규칙 — ${p.ignored}. 메일·초과 목록에서 빠집니다.`}>경보 제외</span>}
+                        </td>
+                        <td data-sort={p.pct ?? ''}>
+                          {p.pct == null ? <span className="muted" style={{ fontSize: 12 }} title="게스트가 이 파티션의 여유 공간을 보고하지 않았습니다(0% 가 아닙니다).">값 모름</span> : (
+                            <>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                <span style={{ flex: 1, minWidth: 24, height: 7, borderRadius: 4, background: 'rgba(148,163,184,.18)', overflow: 'hidden' }}>
+                                  <span style={{ display: 'block', width: `${Math.min(100, p.pct)}%`, height: '100%', background: lv.color }} />
+                                </span>
+                                <b style={{ color: lv.color, fontSize: 12.5, whiteSpace: 'nowrap' }}>{pctText(p.pct)}</b>
+                              </span>
+                              <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>{gbText(p.usedGB)} / {gbText(p.capGB)}</span>
+                            </>
+                          )}
+                          {p.pct == null && p.capGB != null && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>할당 {gbText(p.capGB)}</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} data-sort={p.freeGB ?? ''}>{gbText(p.freeGB)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </STable>
+            </div>
+            {(note.stale || d.partial) && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>
+                {[note.stale, d.partial ? '여유 공간을 보고하지 않은 파티션이 있어 VM 합계는 부분 값입니다.' : ''].filter(Boolean).join(' ')}
+              </div>
+            )}
+          </>
+        )}
+    </div>
+  );
+}
+
 function VmCfgSection({ vm }) {
   const view = vmCfgRows(vm);
   const findings = vmCfgFindings(vm);
@@ -559,6 +643,7 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
+      {type === 'vm' && <VmPartitionsSection vm={item} />}
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
       {(type === 'vm' || type === 'host') && <PerfcSection item={item} isVm={type === 'vm'} />}
@@ -828,7 +913,7 @@ function VmChangesSection({ vm }) {
  * 어디서나 VM 이름/IP/호스트명을 클릭하면 VM 상세(EntityDetail) 팝업을 띄우는 공용 링크.
  * 스냅샷에서 단건 조회(/vms/lookup) 후 모달을 연다. 못 찾으면 안내 모달.
  */
-export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-link', style }) {
+export function VmLink({ name, ip, vcenterId, vmId, label, item, className = 'cell-link', style, title }) {
   const [vm, setVm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -843,6 +928,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
       if (name) params.name = name;
       if (ip) params.ip = ip;
       if (vcenterId) params.vcenterId = vcenterId;
+      if (vmId) params.id = vmId;   // v2.749.1: id 를 알면 정확히 찾는다(이름 부분 일치로 다른 VM 을 열지 않게)
       const r = await fetchJson('/vms/lookup', params);
       // seed로 이미 열렸는데 cur가 null이면 사용자가 닫은 것 — 늦은 응답이 모달을 다시 열지 않게 한다.
       // (seed가 없던 경우엔 아직 안 열린 상태이므로 정상적으로 연다.)
@@ -854,7 +940,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
   };
   return (
     <>
-      <button className={className} style={style} disabled={busy} onClick={open} title="클릭하면 VM 상세 보기">{label ?? name ?? ip}</button>
+      <button type="button" className={className} style={style} disabled={busy} onClick={open} title={title || '클릭하면 VM 상세 보기'}>{label ?? name ?? ip}</button>
       {vm && <EntityDetail type="vm" item={vm} onClose={() => setVm(null)} />}
       {msg && <Modal title="VM 조회" onClose={() => setMsg(null)} width={380}><div className="muted" style={{ padding: 4 }}>{msg}</div></Modal>}
     </>
