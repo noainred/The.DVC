@@ -94,7 +94,12 @@ test('라우트 — 범위 안만 · Veeam 연결 vCenter 는 Veeam 기준만 ·
     assert.deepEqual(Object.keys(body.byVc).sort(), [VC, SN, SITE].sort(), '범위 밖 vCenter 는 싣지 않는다');
     const v = body.byVc[VC];
     assert.deepEqual([v.src, v.n, v.vmTotal, v.running, v.partial], ['veeam', 2, 3, 1, false], 'Veeam 기준만 — vm-3 의 임시 스냅샷을 더하지 않는다');
-    const s = body.byVc[SN];
+    // v2.759: 전용 DB(veeam-snap.db) 백필 전이면 카드는 로그 DB 를 훑으며 기다리지 않고 '준비 중' — 백필이 끝나면 바로 센다.
+    assert.deepEqual([body.byVc[SN].n, body.byVc[SN].reason], [null, 'preparing']);
+    const { backfillSnap } = await import('../src/veeam/snapDb.js');
+    await backfillSnap({ logsDb: db, vcenterIds: [SN] });   // 요청이 시작한 백필이 있으면 그것을 기다린다
+    store.snapshot = { ...store.snapshot, generatedAt: NOW + 1 };   // 응답 캐시(60초) 키만 바꾼다
+    const s = (await (await fetch(`http://127.0.0.1:${srv.address().port}/api/veeam/backup-counts`)).json()).byVc[SN];
     assert.deepEqual([s.src, s.n, s.vmTotal, s.snapEv, s.snapNow, s.overlap], ['snap', 2, 3, 1, 1, 0]);
     const e = body.byVc[SITE];
     assert.deepEqual([e.src, e.n, e.reason, e.snapNow], ['snap', null, 'no-edge-data', 1]);

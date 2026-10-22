@@ -174,3 +174,13 @@ describe('v2.758 — VM 목록 수집 전은 0 이 아니라 모름', () => {
     expect(veeamEventStatusText({ status: 'no-inventory' })).toMatch(/VM 목록을 아직 수집하지 않았습니다/);
   });
 });
+
+describe('v2.759 — 전용 DB 준비 중', () => {
+  it('준비 중은 0 이 아니라 대시 + 이유 · 카드가 빨리 다시 묻는 판정', async () => {
+    const { backupPreparing } = await import('./veeamBadge.js');
+    const c = backupCell({ src: 'snap', n: null, reason: 'preparing' });
+    expect(c.text).toBe('—'); expect(c.title).toMatch(/전용 DB 로 옮기는 중/);
+    expect(backupPreparing({ a: { reason: 'preparing' }, b: { n: 1 } })).toBe(true);
+    expect(backupPreparing({ b: { n: 1 } })).toBe(false); expect(backupPreparing(null)).toBe(false);
+  });
+});

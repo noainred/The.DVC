@@ -150,6 +150,7 @@ import { startIsiduConfigPull } from './agent/isiduConfigPull.js'; // 〃 중앙
 import { startVeeamPoller } from './veeam/poller.js';               // Veeam 백업 상태(v2.751) — 중앙 직접 + 엣지 위임
 import { startVeeamPush } from './veeam/push.js';                   // 〃 엣지→중앙 결과 push(gzip — CENTRAL_URL 없으면 자기기동 안 함)
 import { startVeeamConfigPull } from './agent/veeamConfigPull.js'; // 〃 중앙→엣지 서버 배정 pull(자격증명 포함)
+import { startVeeamSnapWarmup } from './veeam/snapWarm.js';          // 〃 스냅샷 전용 DB(v2.759) — 엣지 요약 복원 + 로그에서 백필
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
@@ -597,7 +598,7 @@ const stagger = [
   startLinkCheckWorker,
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
-  startVeeamPoller, startVeeamPush, startVeeamConfigPull, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
+  startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
 ];
 /*

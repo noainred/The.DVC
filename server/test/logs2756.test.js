@@ -81,6 +81,9 @@ test('실제 폴러 — vCenter 이벤트 번호가 다시 매겨져도(옛 번�
     await P.pollLogsOnce({ manual: true });
     assert.equal(db.lastTs('oc2'), t1 + 149 * 60_000, '다음 주기에 나머지를 읽는다');
     assert.equal(db.countCapped({ vcenterId: 'oc2' }, 1000).total, 250, '옛 100건 + 새 150건(중복 없이)');
+    // v2.759: 폴러가 적재한 스냅샷 행은 Veeam 전용 DB(veeam-snap.db)에도 들어간다(카드 백업 수량을 로그 DB 검색 없이 계산)
+    const { getSnapDb } = await import('../src/veeam/snapDb.js');
+    assert.equal((await getSnapDb()).rowsFor('oc2', 0, 1000).length, 250, '실제 폴러 경로로 전용 DB 에 적재');
     // 같은 이벤트를 다시 읽어도(같은 번호·같은 시각) 두 번 저장하지 않는다
     const again = state.events.slice(-1).map((e) => ({ vcenterId: 'oc2', key: P.eventRowKey(e), ts: e.ts, severity: 'info', type: 'TaskEvent', user: '', entity: '', message: 'dup' }));
     await db.insertManyAsync(again);

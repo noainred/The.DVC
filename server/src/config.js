@@ -231,6 +231,9 @@ export const config = {
     dbPath: process.env.IPAM_DB_PATH ||
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ipam.db'),
   },
+  // v2.759 Veeam 스냅샷 이벤트 전용 DB — vCenter 이벤트 중 스냅샷 생성·제거만 31일 보관(카드 백업 수량·VM 화면을 즉시 계산).
+  //   로그 DB(전 이벤트)를 요청마다 4열 LIKE 로 훑던 것을 대신한다. 엣지가 보낸 요약도 여기 보존해 재시작 직후에도 보인다.
+  veeamSnap: { dbPath: dbFile('veeam-snap.db') },
   capacity: {
     // 리소스 적정성 진단(Capacity Advisor) — 포탈 서버 '호스트 자신'의 CPU/메모리/네트워크/
     // 디스크/이벤트루프를 상시 in-process 로 실측해 시계열(capacity.db)에 적재하고, 1일/1주/1달

@@ -15,7 +15,9 @@ import { memoJson, scopeKey } from './shared.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
-import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS } from '../../veeam/snapEvents.js';
+import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS, snapCovered } from '../../veeam/snapEvents.js';
+import { getSnapDb } from '../../veeam/snapDb.js';
+import { kickSnapBackfill } from '../../veeam/snapWarm.js';
 import { logCollectOkAt } from '../../logs/poller.js';
 import { veeamCount, snapCount } from '../../veeam/backupCounts.js';
 import { createYielder } from '../../util/timeSlice.js';
@@ -69,7 +71,12 @@ function resultsFor(vcenterId, req) {
  * 그 vCenter 의 'Veeam 계정이 만든 스냅샷 생성 이벤트' 요약(/veeam/snap-events 본문 — v2.757 에 카드 수량이 같이 쓰도록 함수로 뺐다).
  * 로그 DB(직접 수집) 또는 엣지가 보낸 요약만 읽는다(vCenter 왕복 없음).
  */
-async function snapEventsFor(vcenterId, vms, { initial = false } = {}) {
+
+/**
+ * @param {{ initial?: boolean, wait?: boolean }} o  wait=false(카드): 전용 DB 가 아직 준비 전이면 기다리지 않고 'preparing'.
+ *   wait=true(VM 화면 · vCenter 하나): 준비 전이면 예전처럼 로그 DB 에서 계산한다(느리지만 그 화면은 값이 바로 필요하다).
+ */
+async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = {}) {
   const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
   // v2.758: VM 목록이 없으면(재시작 직후 골격 · 아직 수집 전) 대조할 대상이 없다 — '0대' 가 아니라 모름.
   if (initial || !vms.length) return { ...base, status: 'no-inventory' };
@@ -89,7 +96,12 @@ async function snapEventsFor(vcenterId, vms, { initial = false } = {}) {
   const ls = loadLogSettings();
   if (ls?.enabled === false) return { ...base, status: 'log-off' };
   if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
-  const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
+  const snapDb = await getSnapDb();
+  if (snapDb && !snapCovered(snapDb, vcenterId, Date.now() - LOOKBACK_DAYS * 86_400_000)) {
+    kickSnapBackfill();
+    if (!wait) return { ...base, status: 'preparing', source: 'local' };
+  }
+  const r = await localSnapSummary(await getLogsDb(), vcenterId, vms, { snapDb });
   // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
   return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
 }
@@ -102,13 +114,13 @@ async function snapEventsFor(vcenterId, vms, { initial = false } = {}) {
  */
 const SNAP_CACHE_MS = 60_000;
 const _snapCache = new Map(); // vcenterId → { at, p }
-function cachedSnapEvents(vcenterId, vms, { initial = false, now = Date.now() } = {}) {
+function cachedSnapEvents(vcenterId, vms, { initial = false, wait = true, now = Date.now() } = {}) {
   const c = _snapCache.get(vcenterId);
-  if (c && now - c.at < SNAP_CACHE_MS) return c.p;
-  const entry = { at: now, p: null };
+  if (c && now - c.at < SNAP_CACHE_MS && (wait || !c.wait)) return c.p;   // 기다리지 않는 쪽(카드)은 기다리는 계산(옛 경로)에 묶이지 않는다
+  const entry = { at: now, p: null, wait };
   const drop = () => { if (_snapCache.get(vcenterId) === entry) _snapCache.delete(vcenterId); }; // 그 사이 새로 담긴 항목은 지우지 않는다
-  entry.p = snapEventsFor(vcenterId, vms, { initial })
-    .then((r) => { if (r?.source !== 'local') drop(); return r; })
+  entry.p = snapEventsFor(vcenterId, vms, { initial, wait })
+    .then((r) => { if (r?.source !== 'local' || r?.status !== 'ok') drop(); else entry.wait = false; return r; })
     .catch((e) => { drop(); return { status: 'error', error: String(e?.message || e) }; });
   _snapCache.set(vcenterId, entry);
   return entry.p;
@@ -168,7 +180,7 @@ export function registerVeeamBadges(api) {
         } else if (isMockMode()) {
           byVc[vc.id] = { ...veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length }), demo: true };
         } else {
-          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true }), vms });
+          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true, wait: false }), vms });
         }
       }
       return { ok: true, at: Date.now(), byVc };
