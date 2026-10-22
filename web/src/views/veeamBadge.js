@@ -252,3 +252,52 @@ export function veeamEventStatusText(d) {
   if (d.unpaired > 0) notes.push(`공용 계정(administrator 등)이 만들고 12시간 안에 지우지 않은 스냅샷 ${d.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다(지금 백업 중이면 보라 배지로 보입니다).`);
   return notes.join(' ');
 }
+
+/* ── vCenter 카드의 'VM 백업 수량'(v2.757 — 서버 /veeam/backup-counts byVc 값) ─────────────────────────────────── */
+
+const BACKUP_REASON = {
+  'veeam-pending': 'Veeam 서버의 첫 수집을 기다리는 중입니다.',
+  'veeam-failed': 'Veeam 서버를 아직 한 번도 읽지 못했습니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.',
+  'no-account': 'Veeam 이 쓰는 vCenter 계정을 아직 모릅니다 — 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요.',
+};
+
+/**
+ * 카드의 백업 칸 — 'n/전체' 형식(사용자 지정). 모르면 '—'(0 으로 쓰지 않는다) · 부분 값은 '*' 와 노란 칸.
+ * tone: veeam(채운 녹색) | snap(하늘색 점선) | warn(부분) | none(모름). entry 가 없으면 null(칸을 그리지 않는다).
+ * @param {object|null} e  byVc[vcenterId]
+ * @param {number|null} vmFallback  서버가 전체 VM 수를 못 줬을 때 카드의 VM 수
+ */
+export function backupCell(e, vmFallback = null, now = Date.now()) {
+  if (!e || typeof e !== 'object' || (e.src !== 'veeam' && e.src !== 'snap')) return null;
+  const veeam = e.src === 'veeam';
+  const total = Number.isFinite(e.vmTotal) ? e.vmTotal : (Number.isFinite(vmFallback) ? vmFallback : null);
+  const label = veeam ? '백업 · Veeam' : '백업 · 스냅샷';
+  if (!Number.isFinite(e.n)) {
+    let why = BACKUP_REASON[e.reason];
+    if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.`;
+    if (!why) why = veeamEventStatusText({ status: e.reason, at: e.at }) || '백업 정보를 읽지 못했습니다.';
+    const lines = [`${veeam ? 'Veeam 기준' : '스냅샷 기준'} 백업 수량을 알 수 없습니다(0대가 아닙니다)`, why];
+    if (!veeam && e.snapNow > 0) lines.push(`지금 Veeam 임시 스냅샷이 있는 VM ${e.snapNow}대`);
+    return { text: '—', label: veeam ? label : '백업 · 확인 불가', tone: 'none', title: lines.join('\n') };
+  }
+  const text = `${e.n}/${total ?? '—'}${e.partial ? ' *' : ''}`;
+  const lines = [];
+  if (veeam) {
+    lines.push(`Veeam 백업 ${e.n}대${total != null ? ` / VM ${total}대` : ''}${e.demo ? ' (데모)' : ''}`);
+    lines.push('Veeam 작업에 포함됐거나 복원 지점이 있는 VM 수(VM 화면의 Veeam 배지와 같은 기준)');
+    if (e.running || e.pending) lines.push(`지금 백업 중 ${e.running || 0} · 대기 ${e.pending || 0}`);
+    if (Number.isFinite(e.basisTs)) lines.push(`기준 ${fmtTime(e.basisTs)}`);
+    if (e.failed) lines.push(`* Veeam 서버 ${e.failed}대를 이번에 읽지 못해 마지막 성공 값을 썼습니다(사유는 설정 › Veeam 백업 서버).`);
+    if (e.waiting) lines.push(`* Veeam 서버 ${e.waiting}대는 아직 첫 수집 전이라 빠졌습니다.`);
+  } else {
+    lines.push(`스냅샷 기준 ${e.n}대${total != null ? ` / VM ${total}대` : ''}`);
+    lines.push('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다');
+    lines.push(`최근 ${e.days || 7}일 Veeam 이 스냅샷을 만든 VM ${e.snapEv || 0} + 지금 Veeam 임시 스냅샷이 있는 VM ${e.snapNow || 0}${e.overlap ? ` (겹침 ${e.overlap})` : ''}`);
+    lines.push('백업 성공 여부는 알 수 없습니다 — 스냅샷 생성은 백업 시작 단계입니다.');
+    if (e.unpaired > 0) lines.push(`공용 계정이 만들고 12시간 안에 지우지 않은 스냅샷 ${e.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다.`);
+    if (e.partial) lines.push('* 이벤트가 많아 일부만 읽었습니다 — 실제보다 적을 수 있습니다.');
+    if (e.source === 'edge') lines.push('이 vCenter 를 수집하는 엣지가 보낸 요약입니다.');
+    if (Number.isFinite(e.collectedAt) && now - e.collectedAt > 3_600_000) lines.push(`vCenter 이벤트 마지막 수집 ${fmtTime(e.collectedAt)}`);
+  }
+  return { text, label, tone: e.partial ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
+}

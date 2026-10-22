@@ -16,6 +16,9 @@ process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sansw2421-'));
 // 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
 process.env.SSH_HOSTKEY_POLICY = 'observe';
 const TEST_HOST_KEY = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'pkcs1', format: 'pem' } }).privateKey;
+// v2.757: 로그 누출 검사의 비밀번호는 길고 고유하게 — 예전 'pw'(2글자)는 실행마다 새로 만드는 호스트키의 SHA256 지문(base64 43자)에
+//   우연히 들어가 '비밀번호는 로그에 없다' 가 약 1% 확률로 실패했다(v2.756 릴리스 CI 에서 실제 발생 — 제품 누출 아님).
+const SSH_PW = 'pw-2421-Secr3t!';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function closedPort() {
@@ -106,7 +109,7 @@ function startSshServer({ algorithms, respond = (cmd) => `ran:${cmd}\n` } = {}) 
   const clients = new Set();
   const server = new ssh2.Server({ hostKeys: [privateKey], banner: 'FOS-TEST', ...(algorithms ? { algorithms } : {}) }, (client) => {
     clients.add(client); client.on('close', () => clients.delete(client));
-    client.on('authentication', (ctx) => (ctx.method === 'password' && ctx.password === 'pw' ? ctx.accept() : ctx.reject(['password'])));
+    client.on('authentication', (ctx) => (ctx.method === 'password' && ctx.password === SSH_PW ? ctx.accept() : ctx.reject(['password'])));
     client.on('ready', () => {
       client.on('session', (accept) => {
         const session = accept();
@@ -128,7 +131,7 @@ test('withSsh 추적: 접속·배너·핸드셰이크·세션 준비·실행 로
   const { withSsh } = await import('../src/proxy/sshExec.js');
   const srv = await startSshServer();
   const lines = [];
-  const r = await withSsh({ host: '127.0.0.1', port: srv.port, username: 'admin', password: 'pw', trace: (m, lv) => lines.push({ m, lv }), verbose: true }, async (sh) => {
+  const r = await withSsh({ host: '127.0.0.1', port: srv.port, username: 'admin', password: SSH_PW, trace: (m, lv) => lines.push({ m, lv }), verbose: true }, async (sh) => {
     const x = await sh.exec('switchshow', 5000);
     return { out: x.stdout };
   });
@@ -141,7 +144,7 @@ test('withSsh 추적: 접속·배너·핸드셰이크·세션 준비·실행 로
   assert.ok(txt.some((m) => /SSH 세션 준비 완료\(인증 성공\)/.test(m)));
   assert.ok(txt.some((m) => /^실행: switchshow$/.test(m)) && txt.some((m) => /^완료\(exec\): exit=0/.test(m)));
   assert.ok(lines.filter((l) => l.lv === 'debug' && /^ssh2: /.test(l.m)).length > 5, 'verbose 프로토콜 로그');
-  assert.ok(!txt.some((m) => m.includes('pw')), '비밀번호는 로그에 없다');
+  assert.ok(!txt.some((m) => m.includes(SSH_PW)), '비밀번호는 로그에 없다');
 });
 
 test('withSsh 인증 실패는 오류 로그로 남고 reject 된다; verbose 아니면 ssh2 프로토콜 로그가 없다', { timeout: 60_000 }, async () => {
@@ -158,7 +161,7 @@ test('구형 알고리즘 전용 서버(dh-group1-sha1/aes128-cbc)에는 1회 �
   const { withSsh } = await import('../src/proxy/sshExec.js');
   const srv = await startSshServer({ algorithms: { kex: ['diffie-hellman-group1-sha1'], cipher: ['aes128-cbc'], serverHostKey: ['ssh-rsa'], hmac: ['hmac-sha1'] } });
   const lines = [];
-  const r = await withSsh({ host: '127.0.0.1', port: srv.port, username: 'admin', password: 'pw', trace: (m) => lines.push(m) }, async (sh) => ({ out: (await sh.exec('x', 5000)).stdout }));
+  const r = await withSsh({ host: '127.0.0.1', port: srv.port, username: 'admin', password: SSH_PW, trace: (m) => lines.push(m) }, async (sh) => ({ out: (await sh.exec('x', 5000)).stdout }));
   await srv.close();
   assert.match(r.out, /ran:x/);
   assert.ok(lines.some((m) => /구형 알고리즘.*재시도/.test(m)), '폴백이 로그에 남는다');
@@ -170,14 +173,14 @@ test('testDeviceConnection(SSH): 로컬 ssh 서버에 붙어 단계 추적을 �
   const { testDeviceConnection } = await import('../src/sanswitch/poller.js');
   // 명령을 모르는 서버(제한 셸 흉내) — 필수 명령 switchshow 가 없으면 실패해야 한다.
   const srv = await startSshServer({ respond: (cmd) => `sh: ${cmd.split(' ')[0]}: command not found\n` });
-  const r = await testDeviceConnection({ type: 'brocade', collectMethod: 'ssh', host: '127.0.0.1', sshPort: srv.port, username: 'admin', password: 'pw' }, { timeoutMs: 20_000, verbose: false });
+  const r = await testDeviceConnection({ type: 'brocade', collectMethod: 'ssh', host: '127.0.0.1', sshPort: srv.port, username: 'admin', password: SSH_PW }, { timeoutMs: 20_000, verbose: false });
   await srv.close();
   assert.equal(r.ok, false, '가짜 서버는 switchshow 를 모른다 → 실패');
   assert.ok(['exec', 'parse'].includes(r.phase), `phase=${r.phase}`);
   const msgs = r.trace.map((l) => l.msg);
   assert.ok(msgs.some((m) => /연결 테스트 시작/.test(m)) && msgs.some((m) => /TCP 연결 성공/.test(m)) && msgs.some((m) => /SSH 세션 준비 완료/.test(m)));
   assert.ok(r.hint && r.hint.length > 10);
-  assert.ok(!JSON.stringify(r).includes('"pw"'));
+  assert.ok(!JSON.stringify(r).includes(SSH_PW));
 });
 
 test('withSsh: 서버가 준비 전에 소켓을 끊으면 매달리지 않고 reject 된다(미결 Promise 방지)', { timeout: 30_000 }, async () => {

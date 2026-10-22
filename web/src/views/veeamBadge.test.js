@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -134,5 +134,34 @@ describe('vCenter 이벤트 기준 배지 (v2.754)', () => {
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, at, collectedAt: at - 7 * 3_600_000 })).toMatch(/마지막으로 수집한 시각/);
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, truncated: true })).toMatch(/일부만 읽었습니다/);
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, unpaired: 3 })).toMatch(/공용 계정\(administrator 등\).*3건/); // v2.755
+  });
+});
+
+describe('backupCell (v2.757 — vCenter 카드 백업 수량)', () => {
+  it('Veeam 기준은 n/전체 · 녹색 칸 · 백업 중을 툴팁에', () => {
+    const c = backupCell({ src: 'veeam', n: 182, vmTotal: 195, running: 3, pending: 1, basisTs: 1 });
+    expect(c.text).toBe('182/195'); expect(c.tone).toBe('veeam'); expect(c.label).toBe('백업 · Veeam');
+    expect(c.title).toMatch(/Veeam 백업 182대 \/ VM 195대/); expect(c.title).toMatch(/지금 백업 중 3 · 대기 1/);
+  });
+  it('스냅샷 기준은 하늘색 점선 칸 · 성공 여부를 모른다고 말한다', () => {
+    const c = backupCell({ src: 'snap', n: 271, vmTotal: 340, snapEv: 268, snapNow: 5, overlap: 2, days: 7 });
+    expect(c.text).toBe('271/340'); expect(c.tone).toBe('snap'); expect(c.label).toBe('백업 · 스냅샷');
+    expect(c.title).toMatch(/최근 7일 Veeam 이 스냅샷을 만든 VM 268 \+ 지금 Veeam 임시 스냅샷이 있는 VM 5 \(겹침 2\)/);
+    expect(c.title).toMatch(/백업 성공 여부는 알 수 없습니다/);
+  });
+  it('부분 값은 별표·노란 칸 · 모르면 0 이 아니라 대시와 이유', () => {
+    const p = backupCell({ src: 'veeam', n: 240, vmTotal: 288, partial: true, failed: 1 });
+    expect(p.text).toBe('240/288 *'); expect(p.tone).toBe('warn'); expect(p.title).toMatch(/마지막 성공 값/);
+    const st = backupCell({ src: 'snap', n: null, reason: 'stale-events', collectedAt: new Date(2026, 9, 10, 4, 32).getTime(), snapNow: 2 });
+    expect(st.text).toBe('—'); expect(st.tone).toBe('none'); expect(st.label).toBe('백업 · 확인 불가');
+    expect(st.title).toMatch(/0대가 아닙니다/); expect(st.title).toMatch(/2026-10-10 04:32/); expect(st.title).toMatch(/임시 스냅샷이 있는 VM 2대/);
+    expect(backupCell({ src: 'snap', n: null, reason: 'log-off' }).title).toMatch(/이벤트 수집이 꺼져/);
+    expect(backupCell({ src: 'veeam', n: null, reason: 'veeam-pending' }).label).toBe('백업 · Veeam');
+    expect(backupCell({ src: 'snap', n: null, reason: '??' }).title).toMatch(/받지 못했습니다/);
+  });
+  it('항목이 없으면 칸을 그리지 않는다 · 전체 VM 수는 카드 값으로 보충', () => {
+    expect(backupCell(null)).toBe(null); expect(backupCell({ src: 'x', n: 1 })).toBe(null);
+    expect(backupCell({ src: 'veeam', n: 5 }, 9).text).toBe('5/9');
+    expect(backupCell({ src: 'veeam', n: 5 }).text).toBe('5/—');
   });
 });
