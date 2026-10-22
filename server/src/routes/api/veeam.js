@@ -69,8 +69,10 @@ function resultsFor(vcenterId, req) {
  * 그 vCenter 의 'Veeam 계정이 만든 스냅샷 생성 이벤트' 요약(/veeam/snap-events 본문 — v2.757 에 카드 수량이 같이 쓰도록 함수로 뺐다).
  * 로그 DB(직접 수집) 또는 엣지가 보낸 요약만 읽는다(vCenter 왕복 없음).
  */
-async function snapEventsFor(vcenterId, vms) {
+async function snapEventsFor(vcenterId, vms, { initial = false } = {}) {
   const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
+  // v2.758: VM 목록이 없으면(재시작 직후 골격 · 아직 수집 전) 대조할 대상이 없다 — '0대' 가 아니라 모름.
+  if (initial || !vms.length) return { ...base, status: 'no-inventory' };
   // 검토 #8: 지금 인벤토리에 있는 VM 만 싣는다(엣지가 보낸 접두사만 맞는 id·지운 VM 이 'N대' 를 부풀리지 않게).
   const known = new Set(vms.map((v) => v.id));
   const onlyKnown = (m) => { const o = {}; for (const [k, v] of Object.entries(m || {})) if (known.has(k)) o[k] = v; return o; };
@@ -93,17 +95,23 @@ async function snapEventsFor(vcenterId, vms) {
 }
 
 /*
- * v2.757 카드 수량용 스냅샷 요약 캐시 — vCenter 별·계정과 무관(범위는 응답에서 거른다). 5분(화면 폴링 주기와 같다).
- * 세대: 시각만 본다 — 지금 등록부에 없는 vCenter 항목은 다음 계산 때 지운다. 같은 vCenter 를 동시에 두 번 읽지 않는다(진행 중 약속 공유).
+ * 스냅샷 요약 캐시 — vCenter 별·계정과 무관(범위는 응답에서 거른다). 카드(/backup-counts)와 VM 화면(/snap-events)이 **같은 값**을 쓴다.
+ * v2.758: 5분 → 60초, 로그 DB 를 읽은 결과(source local)만 담는다 — 엣지 요약은 메모리라 읽는 비용이 없고, 담아 두면 다음 push 의
+ *   새 값이 늦게 보인다(실서버: 카드 0/340 · VM 화면 54대). 세대: 시각만 — 등록부에 없는 vCenter 항목은 다음 카드 계산 때 지운다.
+ *   같은 vCenter 를 동시에 두 번 읽지 않는다(진행 중 약속 공유).
  */
-const SNAP_CACHE_MS = 300_000;
+const SNAP_CACHE_MS = 60_000;
 const _snapCache = new Map(); // vcenterId → { at, p }
-function cachedSnapEvents(vcenterId, vms, now = Date.now()) {
+function cachedSnapEvents(vcenterId, vms, { initial = false, now = Date.now() } = {}) {
   const c = _snapCache.get(vcenterId);
   if (c && now - c.at < SNAP_CACHE_MS) return c.p;
-  const p = snapEventsFor(vcenterId, vms).catch((e) => { _snapCache.delete(vcenterId); return { status: 'error', error: String(e?.message || e) }; });
-  _snapCache.set(vcenterId, { at: now, p });
-  return p;
+  const entry = { at: now, p: null };
+  const drop = () => { if (_snapCache.get(vcenterId) === entry) _snapCache.delete(vcenterId); }; // 그 사이 새로 담긴 항목은 지우지 않는다
+  entry.p = snapEventsFor(vcenterId, vms, { initial })
+    .then((r) => { if (r?.source !== 'local') drop(); return r; })
+    .catch((e) => { drop(); return { status: 'error', error: String(e?.message || e) }; });
+  _snapCache.set(vcenterId, entry);
+  return entry.p;
 }
 
 export function registerVeeamBadges(api) {
@@ -126,7 +134,12 @@ export function registerVeeamBadges(api) {
   api.get('/veeam/snap-events', (req, res) => {
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
-    return memoJson(req, res, 'veeam-snap-events', () => snapEventsFor(t.vcenterId, t.vms), { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
+    // v2.758: 카드와 같은 캐시(같은 순간 같은 값) · 오류 원문은 싣지 않는다.
+    return memoJson(req, res, 'veeam-snap-events', async (snap) => {
+      const r = await cachedSnapEvents(t.vcenterId, t.vms, { initial: snap?.initial === true });
+      const { error: _e, ...rest } = r || {};
+      return { ok: true, vcenterId: t.vcenterId, days: LOOKBACK_DAYS, byVm: {}, ...rest };
+    }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
   });
 
   // v2.757(사용자 요청 — vCenter 카드에 'VM 백업 수량', 182/195 형식): 범위 안 vCenter 마다 한 줄.
@@ -148,12 +161,14 @@ export function registerVeeamBadges(api) {
         const vms = vmsBy.get(vc.id) || [];
         if (serversForVcenter(vc.id).length) {
           const { results, views, host } = resultsFor(vc.id, req);
+          // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
+          if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
           const byVm = results.length ? matchToVcenter({ id: vc.id, host }, vms, results).byVm : null;
           byVc[vc.id] = veeamCount({ views, byVm, vmTotal: vms.length });
         } else if (isMockMode()) {
           byVc[vc.id] = { ...veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length }), demo: true };
         } else {
-          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms), vms });
+          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true }), vms });
         }
       }
       return { ok: true, at: Date.now(), byVc };

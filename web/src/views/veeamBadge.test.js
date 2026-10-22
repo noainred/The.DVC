@@ -165,3 +165,12 @@ describe('backupCell (v2.757 — vCenter 카드 백업 수량)', () => {
     expect(backupCell({ src: 'veeam', n: 5 }).text).toBe('5/—');
   });
 });
+
+describe('v2.758 — VM 목록 수집 전은 0 이 아니라 모름', () => {
+  it('카드·VM 화면 모두 no-inventory 를 안내한다', () => {
+    const c = backupCell({ src: 'snap', n: null, reason: 'no-inventory' });
+    expect(c.text).toBe('—'); expect(c.title).toMatch(/VM 목록을 아직 수집하지 않았습니다/);
+    expect(backupCell({ src: 'veeam', n: null, reason: 'no-inventory' }).title).toMatch(/VM 목록을 아직 수집하지 않았습니다/);
+    expect(veeamEventStatusText({ status: 'no-inventory' })).toMatch(/VM 목록을 아직 수집하지 않았습니다/);
+  });
+});

@@ -374,6 +374,10 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
     if (logSettings?.enabled === false) { out.push({ vcenterId, status: 'log-off', at: now }); continue; }
     if (logSettings?.minSeverity && logSettings.minSeverity !== 'info') { out.push({ vcenterId, status: 'severity-filter', at: now }); continue; }
     const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcenterId);
+    // v2.758: 재시작 직후 골격(snap.initial — vCenter 목록만, VM 없음)이나 VM 을 아직 못 읽은 vCenter 는 보내지 않는다.
+    //   예전에는 대조할 VM 이 없어 'ok · 0대' 를 보냈고, 중앙 카드가 0/340 으로 보였다(실서버 GM1 — 다음 push 에서 54대).
+    //   보내지 않으면 중앙은 직전 요약을 유지한다(putEdgeSnap 은 vCenter 단위 갱신 · 오래되면 stale-edge).
+    if (snap?.initial === true || !vms.length) continue;
     const r = await localSnapSummary(db, vcenterId, vms, { now });
     out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now });
   }
