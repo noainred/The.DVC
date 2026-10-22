@@ -92,6 +92,16 @@ export function hostFromPath(p) {
   return /^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/.test(first) && first.includes('.') ? first : '';
 }
 
+/**
+ * 백업 세션 유형인가(v2.761 A1) — 실행 중 세션·끝난 세션 필터가 **같은 판정 하나**를 쓴다(예전에는 두 벌이라 실행 중 쪽이
+ * 'BackupCopy' 를 통과시켜 백업 복사가 '백업 중' 배지를 만들었다). 유형이 없으면(옛 판) 받는다 — 작업 쪽 판정(jobCountsAsBackup)이 다시 거른다.
+ */
+export function isBackupSessionType(t) {
+  if (t == null || t === '') return true;
+  const x = String(t);
+  return /backup/i.test(x) && !/copy|replica|configuration/i.test(x);
+}
+
 const RUNNING_RE = /^(running|working|starting|resuming|postprocessing)$/i;
 const PENDING_RE = /^(pending|waiting|queued)$/i;
 
@@ -224,13 +234,17 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
     e.rp = rp != null ? Math.max(e.rp ?? 0, Math.max(0, Math.round(rp))) : (e.rp ?? -1); // -1 = 복원 지점 있음(개수 모름)
   }
   // ── 실행 중 세션 ────────────────────────────────────────────────────────────
-  const runningJobs = new Set(jobs.filter((x) => x.running).map((x) => x.id));
+  // v2.761 A1: 복제·백업 복사·꺼진 작업은 '백업 중/대기' 근거가 아니다(jobCountsAsBackup — 대조의 okJobs 와 같은 판정).
+  //   작업 상태(states)의 Running 과 실행 중 세션의 jobId 양쪽에 적용한다. 목록에 없는 작업(에이전트 작업 등)의 세션은 그대로 둔다.
+  const backupJobId = (jid) => !jobIdx.has(jid) || jobCountsAsBackup(jobs[jobIdx.get(jid)]);
+  const runningJobs = new Set(jobs.filter((x) => x.running && jobCountsAsBackup(x)).map((x) => x.id));
   const jobLevel = new Set();
   for (const it of Array.isArray(raw.sessions) ? raw.sessions : []) {
     const ses = isObj(it?.session) ? it.session : null;
     if (!ses) continue;
-    counts.sessions++;
     const jid = s(ses.jobId, 64);
+    if (jid && !backupJobId(jid)) continue;
+    counts.sessions++;
     if (jid) runningJobs.add(jid);
     const tasks = listOf(it.tasks);
     if (it.tasksError || !tasks.length) { if (jid) jobLevel.add(jid); continue; }
@@ -444,11 +458,17 @@ export function jobCountsAsBackup(jb) {
  * @param {Array<{server:{id,name}, result:object}>} results
  * @returns {{ byVm: Record<string, object>, unmatched:number, otherVcenter:number, ambiguous:number }}
  */
-/** 마지막 백업 완료 시각 — 마지막 task 가 성공·경고로 끝났으면 그 끝 시각(완료), 아니면 최신 복원 지점 생성 시각. */
+/**
+ * 마지막 백업 완료 시각 — 성공·경고로 끝난 마지막 task 의 끝 시각과 최신 복원 지점 생성 시각 중 **더 늦은 것**(v2.761 A8: task 를
+ * 무조건 앞세우면 지금 도는 세션에서 이미 끝난 VM 의 새 복원 지점을 버리고 어제 시각을 말했다). src 는 이긴 쪽, 같으면 task.
+ */
 export function lastBackupOf(e) {
-  if (e?.lt && /^(success|warning)$/i.test(String(e.lt.r || '')) && e.lt.e != null) return { t: e.lt.e, src: 'task' };
-  if (Array.isArray(e?.rl) && e.rl.length) return { t: e.rl[0], src: 'rp' };
-  return null;
+  const tt = e?.lt && /^(success|warning)$/i.test(String(e.lt.r || '')) && Number.isFinite(e.lt.e) ? e.lt.e : null;
+  let rt = null;
+  if (Array.isArray(e?.rl)) for (const x of e.rl) if (Number.isFinite(x) && (rt == null || x > rt)) rt = x;
+  if (tt == null && rt == null) return null;
+  if (rt == null || (tt != null && tt >= rt)) return { t: tt, src: 'task' };
+  return { t: rt, src: 'rp' };
 }
 
 export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
@@ -457,7 +477,8 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
   const byName = new Map();
   const byShort = new Map(); // 이름 첫 마디(점 앞) — 에이전트 컴퓨터 이름(FQDN ↔ 짧은 이름) 대조 전용
   const nameOf = new Map();
-  const shortOf = (k) => k.split('.')[0];
+  // v2.761 A6: IP(IPv4·IPv6) 꼴이면 자르지 않는다(hostKey 와 같은 규칙) — '10.20.30.40' 을 '10' 으로 잘라 다른 VM 에 배지를 달았다.
+  const shortOf = (k) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(k) || k.includes(':') ? k : k.split('.')[0]);
   for (const v of Array.isArray(vms) ? vms : []) {
     if (!v || typeof v.id !== 'string' || !v.id.startsWith(prefix)) continue;
     byMoref.set(v.id.slice(prefix.length), v.id);
