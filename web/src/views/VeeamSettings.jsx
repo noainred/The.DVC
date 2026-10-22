@@ -85,7 +85,9 @@ export default function VeeamSettings() {
       } else {
         const r = await postJson(`/admin/veeam/servers/${encodeURIComponent(s.id)}/${kind}`, {});
         if (kind === 'test') setMsg(r.ok ? { ok: true, text: `연결 성공 · 작업 ${r.jobs}개 · ${r.ms}ms · API ${r.apiVersion}` } : { ok: false, text: r.reason || '연결 실패' });
-        else setMsg(r.ok ? { ok: true, text: `읽기 완료(성공 ${r.ok ?? 0} · 실패 ${r.fail ?? 0})` } : { ok: false, text: r.reason || (r.skipped ? '이미 수집 중입니다 — 끝나면 목록에 반영됩니다' : '읽기 실패') });
+        // v2.761(D6): 응답의 ok 는 성공 여부(불리언) · 개수는 okCount/failCount. 실패하면 서버가 준 사유(status.error)까지 보인다.
+        else setMsg(r.ok ? { ok: true, text: `읽기 완료(성공 ${r.okCount ?? 0} · 실패 ${r.failCount ?? 0})` }
+          : { ok: false, text: r.reason || (r.skipped ? '이미 수집 중입니다 — 끝나면 목록에 반영됩니다' : `읽기 실패${r.status?.error ? `: ${r.status.error}` : ''}`) });
       }
       load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
@@ -126,7 +128,7 @@ export default function VeeamSettings() {
                     <td className="right nowrap">
                       <button className={open === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!!busy} onClick={() => setOpen(open === s.id ? null : s.id)}>작업 목록</button>{' '}
                       {!s.agent && <><button className="tab" disabled={!!busy} onClick={() => act(s, 'test')}>{busy === `test:${s.id}` ? '시험 중…' : '연결 시험'}</button>{' '}</>}
-                      {!s.agent && <><button className="tab" disabled={!!busy} onClick={() => act(s, 'collect')}>{busy === `collect:${s.id}` ? '읽는 중…' : '지금 읽기'}</button>{' '}</>}
+                      {!s.agent && <><button className="tab" disabled={!!busy || s.enabled === false} title={s.enabled === false ? '수집이 꺼진 서버입니다 — 편집에서 켠 뒤 읽으세요' : undefined} onClick={() => act(s, 'collect')}>{busy === `collect:${s.id}` ? '읽는 중…' : '지금 읽기'}</button>{' '}</>}
                       <button className="tab" disabled={!!busy} onClick={() => edit(s)}>편집</button>{' '}
                       <button className="tab" style={{ color: 'var(--red)' }} disabled={!!busy} onClick={() => act(s, 'del')}>삭제</button>
                     </td>
@@ -195,7 +197,7 @@ export default function VeeamSettings() {
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
           읽는 것: 작업 목록(작업에 VM 단위로 넣은 VM) · 작업 상태 · 백업 객체(복원 지점이 있는 VM) · 실행 중 세션의 VM 별 진행. 작업을 시작·중지하지 않습니다(조회 전용).
-          폴더·클러스터·태그 단위로 넣은 VM 은 복원 지점이 생기거나 백업 중일 때 표시됩니다. 주기는 기본 10분(VEEAM_POLL_MS)이고, 엣지 담당 서버는 엣지가 배정을 받는 대로(최대 5분) 읽습니다.
+          폴더·클러스터·태그 단위로 넣은 VM 은 복원 지점이 생기거나 백업 중일 때 표시됩니다. 주기는 {Number.isFinite(d?.poller?.intervalMs) ? `${Math.round(d.poller.intervalMs / 60_000)}분` : '서버 설정값'}(VEEAM_POLL_MS)이고, 엣지 담당 서버는 엣지가 배정을 받는 대로 읽습니다.
           엣지 담당 서버의 연결 시험·지금 읽기는 그 엣지의 망에서만 의미가 있어 중앙 화면에서는 하지 않습니다.
         </div>
       </div>
@@ -253,6 +255,8 @@ function VeeamVcAccounts() {
     } catch (e) { setMsg(`지우지 못했습니다: ${e.message || e}`); }
     setBusy(false);
   };
+  // v2.761(D7): 계정 파일을 못 읽은 상태(loadError)에서는 입력·저장·지우기를 열지 않는다(조회 실패 상태로 저장 버튼을 열지 않는다 규약).
+  const locked = !d || !!busy || !!d?.loadError;
   return (
     <div className="card" style={{ marginTop: 12, padding: '12px 14px', minWidth: 0 }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>Veeam 이 vCenter 에 접속하는 계정 — 이벤트로 Veeam 백업 찾기</div>
@@ -262,10 +266,10 @@ function VeeamVcAccounts() {
       </div>
       {err ? <div style={{ color: 'var(--red)', fontSize: 12 }}>불러오지 못했습니다: {err}</div> : (
         <>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} disabled={!d || busy} placeholder="CORP\svc-backup"
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} disabled={locked} placeholder="CORP\svc-backup"
             style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--mono, monospace)', fontSize: 12 }} aria-label="Veeam vCenter 계정" />
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            <button className="login-btn" style={{ flex: 'none' }} disabled={!d || busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+            <button className="login-btn" style={{ flex: 'none' }} disabled={locked} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
             {msg && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{msg}</span>}
           </div>
           {d && (
@@ -274,7 +278,7 @@ function VeeamVcAccounts() {
               {(d.learned || []).map((x) => (
                 <div key={x.name} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{x.name} · VM {x.vms}대 · 마지막 {fmt(x.lastSeen)} · {x.active ? '사용 중' : '후보(아직 안 씀)'}</span>
-                  <button className="tab" style={{ flex: 'none' }} disabled={busy} onClick={() => forget(x.name)}>지우기</button>
+                  <button className="tab" style={{ flex: 'none' }} disabled={locked} onClick={() => forget(x.name)}>지우기</button>
                 </div>
               ))}
               {(d.pulled || []).length > 0 && <div>중앙에서 받은 계정: {d.pulled.join(' · ')}</div>}

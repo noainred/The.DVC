@@ -13,7 +13,7 @@ import { fetchJson } from '../api.js';
 import { Modal } from '../components/Modal.jsx';
 import { ErrorBox, Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
-import { veeamBadge, veeamSnapBadge, veeamEventBadge, veeamEventStatusText, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
+import { veeamBadge, veeamSnapBadge, veeamEventBadge, veeamEventChip, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
 
 const TONE = {
   green: { bg: 'rgba(34,197,94,.15)', fg: '#4ade80' },
@@ -78,15 +78,18 @@ export function VeeamSnapChip({ label, tone, title, ariaLabel }) {
 }
 
 /** 스냅샷 기준 요약 줄(체크했을 때만 — Veeam 서버 등록과 무관하게 보인다). */
-export function VeeamSnapSummary({ counts, ev }) {
-  if (!counts) return null;
-  const none = !counts.running && !counts.stale;
-  const evN = ev?.status === 'ok' ? Object.keys(ev.byVm || {}).length : null;
-  const evWhy = veeamEventStatusText(ev);
+export function VeeamSnapSummary({ counts, ev, evError = '' }) {
+  // v2.761(D2): VM 목록을 못 받았으면(counts=null) 줄을 없애지 않고 '셀 수 없음' 이라 말한다 — 이벤트 칩은 그대로.
+  if (!counts && !ev && !evError) return null;
+  const none = counts && !counts.running && !counts.stale;
+  // v2.761(D4): 칩 숫자는 서버 판정(verdict — 카드와 같은 조건)이 허락할 때만.
+  const { n: evN, why: chipWhy } = veeamEventChip(ev);
+  // v2.761(D3): 이벤트 조회가 실패하면 조용히 사라지지 않고 말한다.
+  const evWhy = evError ? `이벤트 기준 정보를 읽지 못했습니다(백업 시도가 없다는 뜻이 아닙니다): ${evError}` : chipWhy;
   return (
     <div className="muted" style={{ margin: '0 0 10px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
       <span style={{ fontWeight: 600 }}>vCenter 기준(스냅샷·이벤트)</span>
-      {none ? <span>Veeam 임시 스냅샷이 있는 VM 이 없습니다.</span> : (
+      {!counts ? <span>VM 목록을 아직 받지 못해 Veeam 임시 스냅샷을 셀 수 없습니다.</span> : none ? <span>Veeam 임시 스냅샷이 있는 VM 이 없습니다.</span> : (
         <>
           <VeeamSnapChip label={`📸 백업 중 ${counts.running}대`} tone="purple" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 있고 만든 지 하루가 안 된 VM" />
           <VeeamSnapChip label={`📸 스냅샷 잔존 ${counts.stale}대`} tone="red" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 하루 넘게 남은 VM — 정리 실패 의심" />
@@ -103,7 +106,13 @@ export function VeeamSnapSummary({ counts, ev }) {
 export function VeeamSummaryCard({ sum }) {
   if (!sum || (!sum.text && !sum.stats)) return null;
   if (!sum.stats) {
-    return <div style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.6, color: sum.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)', minWidth: 0, overflowWrap: 'anywhere' }}>{sum.text}</div>;
+    // v2.761(D1): '첫 수집 대기' 처럼 수가 없을 때도 서버별 실패 사유(경고)는 보인다.
+    return (
+      <div style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.6, color: sum.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)', minWidth: 0, overflowWrap: 'anywhere' }}>
+        <div>{sum.text}</div>
+        {(sum.warnings || []).map((w, i) => <div key={i}>· {w}</div>)}
+      </div>
+    );
   }
   const st = sum.stats;
   const stat = (label, val, color, tail) => (
@@ -119,8 +128,8 @@ export function VeeamSummaryCard({ sum }) {
       <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 28px', minWidth: 0 }}>
           {stat('백업 대상', st.total, '#4ade80', st.vmTotal != null ? `/ ${st.vmTotal} VM` : 'VM')}
-          {stat('지금 백업 중', st.running, '#fbbf24')}
-          {stat('대기', st.pending, '#60a5fa')}
+          {stat('지금 백업 중', st.running ?? '—', '#fbbf24')}
+          {stat('대기', st.pending ?? '—', '#60a5fa')}
           <div className="muted" style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, fontSize: 12, minWidth: 0, textAlign: 'right' }}>
             {sum.source && <span>{sum.source}{sum.demo ? ' (데모 데이터)' : ''}</span>}
             {sum.basis && <span>{sum.basis}</span>}
@@ -166,6 +175,9 @@ export function VeeamDetailModal({ vcenterId, vm, onClose }) {
   const view = d ? veeamDetailView(d.detail) : null;
   const tone = view ? (TONE[view.status.tone] || TONE.muted) : TONE.muted;
   const basis = d?.servers?.length ? d.servers.map((s) => `${s.name}${s.ok === false ? '(읽기 실패 — 마지막 성공분)' : ''}`).join(', ') : '';
+  // v2.761(D9): 주기를 화면에 박지 않고 실제 마지막 수집 시각(서버들의 결과 시각 중 가장 이른 것)을 말한다.
+  const lastCollectList = (d?.servers || []).map((s) => s.lastOkTs ?? s.ts).filter((x) => Number.isFinite(x));
+  const lastCollect = lastCollectList.length ? Math.min(...lastCollectList) : null;
   return (
     <Modal title={`Veeam 백업 상세 — ${vm.name}`} onClose={onClose} width={900}>
       {err && <ErrorBox error={err} />}
@@ -238,7 +250,7 @@ export function VeeamDetailModal({ vcenterId, vm, onClose }) {
             </div>
           )}
           <div className="muted" style={{ fontSize: 11, lineHeight: 1.6 }}>
-            출처: {basis || 'Veeam'}{d.demo ? ' (데모 데이터 — 실제 Veeam 에 접속하지 않았습니다)' : ''} · 주기 수집(기본 10분)한 값이라 지금 Veeam 화면과 몇 분 다를 수 있습니다.
+            출처: {basis || 'Veeam'}{d.demo ? ' (데모 데이터 — 실제 Veeam 에 접속하지 않았습니다)' : ''} · 주기적으로 수집한 값이라{lastCollect ? `(마지막 수집 ${fmt(lastCollect)})` : ''} 지금 Veeam 화면과 다를 수 있습니다.
             값이 '—' 인 칸은 이 Veeam 판의 REST 응답이 그 정보를 주지 않은 것입니다.
           </div>
         </div>

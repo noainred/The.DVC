@@ -326,10 +326,13 @@ export default function VCenterDetail({ site, onBack }) {
   const vms = useMemo(() => vmsD?.items || [], [vmsD]);
   // ⚠ vms 아래에 둔다(TDZ — 위에 두면 상세 화면이 'Cannot access before initialization' 으로 죽는다. v2.751 Chromium 확인에서 잡음).
   // 사용자 결정(시안 검토): 체크하면 요약 카드, 체크하지 않으면 요약·배지(스냅샷 기준 포함)까지 Veeam 관련 표시를 하나도 그리지 않는다.
-  const veeamSum = useMemo(() => (veeamOn ? veeamSummary(veeamD, { loading: veeamP.loading, error: veeamD ? '' : (veeamP.errorInfo?.message || veeamP.error || ''), vmTotal: vms.length }) : null),
-    [veeamOn, veeamD, veeamP.loading, veeamP.error, veeamP.errorInfo, vms.length]);
+  // v2.761(D2·D8): VM 목록을 못 받았으면 전체 VM 수·임시 스냅샷 수를 0 으로 단정하지 않는다(vmsOk 일 때만) ·
+  //   첫 응답 뒤 갱신이 실패하면 옛 값을 지우지 않되 '마지막으로 받은 값' 이라고 말한다.
+  const veeamErr = veeamP.errorInfo?.message || veeamP.error || '';
+  const veeamSum = useMemo(() => (veeamOn ? veeamSummary(veeamD, { loading: veeamP.loading, error: veeamD ? '' : veeamErr, refreshError: veeamD ? veeamErr : '', vmTotal: vmsOk ? vms.length : null }) : null),
+    [veeamOn, veeamD, veeamP.loading, veeamErr, vmsOk, vms.length]);
   // v2.753(사용자 요청 — Veeam 연동 없이 스냅샷으로만): VM 의 'VEEAM BACKUP TEMPORARY SNAPSHOT'(수집기가 veeamSnaps·veeamSnapTs 로 싣는다).
-  const veeamSnapCnt = useMemo(() => (veeamOn ? veeamSnapCounts(vms) : null), [veeamOn, vms]);
+  const veeamSnapCnt = useMemo(() => (veeamOn && vmsOk ? veeamSnapCounts(vms) : null), [veeamOn, vmsOk, vms]);
   // v2.754: vCenter 이벤트 기준(최근 7일 Veeam 계정의 스냅샷 생성) — 저장된 이벤트를 읽는 조회라 5분마다만(서버 60초 캐시).
   const veeamEvP = usePolling(veeamOn ? '/veeam/snap-events' : null, { vcenterId }, 300_000);
   const veeamEv = veeamOn ? (veeamEvP.data || null) : null;
@@ -596,7 +599,7 @@ export default function VCenterDetail({ site, onBack }) {
             )}
           </div>
           {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
-          {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} />}
+          {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} evError={veeamEvP.errorInfo?.message || veeamEvP.error || ''} />}
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
               볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
               DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}

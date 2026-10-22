@@ -80,11 +80,11 @@ export function veeamCounts(byVm) {
 /**
  * 요약 카드(v2.751 시안 — 체크했을 때만 보인다). tone: ok | warn | muted.
  * @param {object|null} d   /api/veeam/badges 응답
- * @param {{loading?:boolean, error?:string, vmTotal?:number}} o
- * @returns {{ tone:string, kind:'loading'|'error'|'unconfigured'|'ok', text:string, stats:null|{total:number, running:number, pending:number, vmTotal:(number|null)},
+ * @param {{loading?:boolean, error?:string, vmTotal?:number, refreshError?:string}} o
+ * @returns {{ tone:string, kind:'loading'|'error'|'unconfigured'|'pending'|'ok', text:string, stats:null|{total:number, running:(number|null), pending:(number|null), vmTotal:(number|null)},
  *   source:string, basis:string, warnings:string[], details:string[], demo:boolean }}
  */
-export function veeamSummary(d, { loading = false, error = '', vmTotal = null } = {}) {
+export function veeamSummary(d, { loading = false, error = '', vmTotal = null, refreshError = '' } = {}) {
   const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false };
   if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
   if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
@@ -92,20 +92,34 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null } 
   const c = veeamCounts(d.byVm);
   const servers = Array.isArray(d.servers) ? d.servers : [];
   const warnings = []; const details = [];
+  // v2.761(D8): 첫 응답 뒤 갱신이 실패해도 옛 값을 '지금' 처럼 보이지 않는다 — 마지막으로 받은 값이라고 말한다.
+  if (refreshError) warnings.push(`최근 갱신에 실패했습니다 — 마지막으로 받은 값을 보여 줍니다: ${refreshError}`);
   for (const sv of servers) {
     if (sv.ok === false) {
       const last = sv.lastOkTs ? ` — 표시는 마지막 성공(${fmtTime(sv.lastOkTs)}) 기준입니다` : ' — 아직 성공한 적이 없어 이 서버의 VM 은 표시되지 않습니다';
       warnings.push(`${sv.name} ${sv.authStopped ? '인증 실패로 주기 수집을 멈췄습니다' : '읽기 실패'}: ${sv.error || '사유 미상'}${last}`);
     } else if (sv.ok == null) details.push(`${sv.name}: 아직 읽은 결과가 없습니다(담당 노드의 첫 수집을 기다리는 중)`);
+    // v2.761(B2): 오래된 결과(엣지가 멈췄거나 배정이 바뀜) — 수는 그대로 두고 경고한다.
+    if (sv.stale) warnings.push(`${sv.name}: 마지막으로 받은 결과가 오래됐습니다(${fmtTime(sv.lastOkTs) || '시각 모름'}) — 그 뒤의 백업 변화는 반영되지 않았습니다`);
     for (const n of Array.isArray(sv.notes) ? sv.notes : []) details.push(`${sv.name}: ${n}`);
   }
-  if (d.otherVcenter) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${d.otherVcenter}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
+  // v2.761(D1): 쓸 수 있는 결과가 하나도 없으면(첫 수집 전 · 실패만) '0 / N VM' 이 아니라 모름.
+  if (servers.length && servers.every((sv) => !Number.isFinite(sv.lastOkTs))) {
+    return { ...base, tone: 'warn', kind: 'pending', warnings, details,
+      text: '연결된 Veeam 서버를 아직 한 번도 읽지 못했습니다(첫 수집 대기 또는 읽기 실패) — 백업 대상 수는 0대가 아니라 아직 모릅니다.' };
+  }
+  // v2.761(A5): 맞은 VM 이 하나도 없고 Veeam 이 다른 vCenter 로 적은 VM 만 있으면 주소 표기(IP·FQDN) 불일치일 수 있다.
+  if (d.otherVcenter && c.total === 0) warnings.push(`Veeam 이 적은 VM ${d.otherVcenter}개가 모두 다른 vCenter 로 되어 있어 이 vCenter 와 맞은 VM 이 없습니다 — 포탈에 등록한 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다`);
+  else if (d.otherVcenter) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${d.otherVcenter}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
   if (d.ambiguous) details.push(`이름이 같은 VM 이 둘 이상이라 고르지 못한 항목 ${d.ambiguous}개`);
   if (d.unmatched) details.push(`이 vCenter 에서 찾지 못한 Veeam 항목 ${d.unmatched}개(삭제·이름 변경된 VM 일 수 있습니다)`);
+  // v2.761(D5): 서버가 오래된 '백업 중' 표지를 지웠으면 실행 중·대기 0 은 사실이 아니다 — 모름.
+  const runKnown = !d.runningStale;
+  if (!runKnown) details.push('지금 백업 중·대기는 최신 결과가 아니라 표시하지 않습니다(Veeam 서버를 최근에 읽지 못했습니다)');
   const when = servers.map((sv) => sv.lastOkTs).filter((x) => Number.isFinite(x));
   return {
     tone: warnings.length ? 'warn' : 'ok', kind: 'ok', text: '',
-    stats: { total: c.total, running: c.running, pending: c.pending, vmTotal: Number.isFinite(vmTotal) ? vmTotal : null },
+    stats: { total: c.total, running: runKnown ? c.running : null, pending: runKnown ? c.pending : null, vmTotal: Number.isFinite(vmTotal) ? vmTotal : null },
     source: servers.length ? `서버 ${servers.map((sv) => sv.name).join(', ')}` : '',
     basis: when.length ? `기준 ${fmtTime(Math.min(...when))}` : '',
     warnings, details, demo: !!d.demo,
@@ -242,6 +256,7 @@ export function veeamEventStatusText(d) {
     'no-edge-data': '이 vCenter 를 수집하는 엣지가 아직 이벤트 요약을 보내지 않았습니다 — 엣지가 이 버전 이상이고 개별 토큰을 쓰는지 확인하세요(중앙이 재시작한 직후라면 다음 push 까지 기다리세요).',
     'no-inventory': '이 vCenter 의 VM 목록을 아직 수집하지 않았습니다(포탈 시작 직후 등) — 수집이 끝나면 보입니다.',
     preparing: '최근 Veeam 스냅샷 이벤트를 전용 DB 로 옮기는 중입니다(업그레이드 뒤 한 번 · 몇 분) — 끝나면 바로 보입니다.',
+    'no-collect-yet': '이 포탈이 시작된 뒤 이 vCenter 의 이벤트를 아직 한 번도 수집하지 못했습니다(접속 실패·인증 정지 등) — 0대가 아니라 모릅니다.',
     'stale-edge': `이 vCenter 를 수집하는 엣지의 이벤트 요약이 오래됐습니다(마지막 ${fmtTime(d.at) || '—'}) — 엣지가 멈췄거나 담당이 바뀌었을 수 있어 표시하지 않습니다.`,
   };
   if (d.status && d.status !== 'ok') return why[d.status] || '이벤트 기준 정보를 받지 못했습니다.';
@@ -261,6 +276,7 @@ const BACKUP_REASON = {
   'veeam-pending': 'Veeam 서버의 첫 수집을 기다리는 중입니다.',
   'no-inventory': '이 vCenter 의 VM 목록을 아직 수집하지 않았습니다(포탈 시작 직후 등) — 수집이 끝나면 보입니다.',
   preparing: '최근 Veeam 스냅샷 이벤트를 전용 DB 로 옮기는 중입니다(업그레이드 뒤 한 번 · 몇 분) — 끝나면 바로 보입니다.',
+  'no-collect-yet': '이 포탈이 시작된 뒤 이 vCenter 의 이벤트를 아직 한 번도 수집하지 못했습니다(접속 실패·인증 정지 등) — 0대가 아니라 모릅니다.',
   'veeam-failed': 'Veeam 서버를 아직 한 번도 읽지 못했습니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.',
   'no-account': 'Veeam 이 쓰는 vCenter 계정을 아직 모릅니다 — 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요.',
 };
@@ -293,15 +309,37 @@ export function backupCell(e, vmFallback = null, now = Date.now()) {
     if (Number.isFinite(e.basisTs)) lines.push(`기준 ${fmtTime(e.basisTs)}`);
     if (e.failed) lines.push(`* Veeam 서버 ${e.failed}대를 이번에 읽지 못해 마지막 성공 값을 썼습니다(사유는 설정 › Veeam 백업 서버).`);
     if (e.waiting) lines.push(`* Veeam 서버 ${e.waiting}대는 아직 첫 수집 전이라 빠졌습니다.`);
+    if (e.stale > 0) lines.push(`* Veeam 서버 ${e.stale}대의 결과가 오래됐습니다 — 그 뒤의 백업 변화는 반영되지 않았습니다.`);   // v2.761(B2)
+    if (e.hostMismatch) lines.push(`Veeam 이 적은 VM ${e.otherVcenter}개가 모두 다른 vCenter 로 되어 있습니다 — 포탈의 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다(0대가 아닐 수 있음).`);   // v2.761(A5)
   } else {
     lines.push(`스냅샷 기준 ${e.n}대${total != null ? ` / VM ${total}대` : ''}`);
     lines.push('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다');
     lines.push(`최근 ${e.days || 7}일 Veeam 이 스냅샷을 만든 VM ${e.snapEv || 0} + 지금 Veeam 임시 스냅샷이 있는 VM ${e.snapNow || 0}${e.overlap ? ` (겹침 ${e.overlap})` : ''}`);
     lines.push('백업 성공 여부는 알 수 없습니다 — 스냅샷 생성은 백업 시작 단계입니다.');
     if (e.unpaired > 0) lines.push(`공용 계정이 만들고 12시간 안에 지우지 않은 스냅샷 ${e.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다.`);
-    if (e.partial) lines.push('* 이벤트가 많아 일부만 읽었습니다 — 실제보다 적을 수 있습니다.');
+    if (e.partial && !e.ambiguous) lines.push('* 이벤트가 많아 일부만 읽었습니다 — 실제보다 적을 수 있습니다.');
+    if (e.ambiguous > 0) lines.push(`* 이름이 같은 VM 이 둘 이상이라 고르지 못한 이벤트 ${e.ambiguous}건은 세지 않았습니다 — 실제보다 적을 수 있습니다.`);   // v2.761(C6)
+    if (e.snapStale > 0) lines.push(`하루 넘게 남은 Veeam 임시 스냅샷 ${e.snapStale}대는 백업으로 세지 않았습니다(정리 실패 의심 — VM 화면의 빨간 '스냅샷 잔존').`);   // v2.761(C3)
     if (e.source === 'edge') lines.push('이 vCenter 를 수집하는 엣지가 보낸 요약입니다.');
     if (Number.isFinite(e.collectedAt) && now - e.collectedAt > 3_600_000) lines.push(`vCenter 이벤트 마지막 수집 ${fmtTime(e.collectedAt)}`);
   }
-  return { text, label, tone: e.partial ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
+  return { text, label, tone: (e.partial || e.hostMismatch || e.stale > 0) ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
+}
+
+/**
+ * v2.761(D4): VM 화면 '최근 7일 Veeam 백업 시도 N대' 칩 — 숫자를 낼지는 서버 판정(snap-events verdict — 카드 snapCount 와 같은 조건)을 따른다.
+ *   판정을 웹에 따로 두지 않는다(옛 서버라 verdict 가 없으면 예전처럼 status 만 본다). n=null 이면 칩을 그리지 않고 why 로 이유를 말한다.
+ * @returns {{ n: (number|null), why: string }}
+ */
+export function veeamEventChip(ev) {
+  if (!ev) return { n: null, why: '' };
+  const v = ev.verdict && typeof ev.verdict === 'object' ? ev.verdict : null;
+  const ok = v ? v.ok === true : ev.status === 'ok';
+  const n = ok ? Object.keys(ev.byVm || {}).length : null;
+  let why = veeamEventStatusText(ev);
+  if (v && !v.ok && ev.status === 'ok') {
+    if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.`;
+    else why = BACKUP_REASON[v.reason] || why || '이벤트 기준 수를 표시할 수 없습니다.';
+  }
+  return { n, why };
 }
