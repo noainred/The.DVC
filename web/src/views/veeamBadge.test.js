@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -103,5 +103,28 @@ describe('vCenter 스냅샷 기준 배지 (v2.753)', () => {
     expect(sb.label.startsWith('📸')).toBe(true); expect(vb.label.startsWith('📸')).toBe(false); expect(sb.color).not.toBe(vb.color);
     expect(veeamSnapCounts([{ veeamSnaps: 1, veeamSnapTs: now }, { veeamSnaps: 1, veeamSnapTs: now - 3 * 86_400_000 }, {}, null], now)).toEqual({ running: 1, stale: 1 });
     expect(sb.title).not.toMatch(/`/);
+  });
+});
+
+describe('vCenter 이벤트 기준 배지 (v2.754)', () => {
+  it('최근 Veeam 스냅샷 생성 시각 · 횟수 · 출처 · 성공 여부는 모른다고 말한다', () => {
+    expect(veeamEventBadge(null)).toBe(null);
+    expect(veeamEventBadge([null, 1])).toBe(null);
+    const ts = new Date(2026, 9, 22, 1, 12).getTime();
+    const b = veeamEventBadge([ts, 3], { days: 7 });
+    expect(b.label).toBe('📸 10-22 01:12'); expect(b.color).toBe('green');
+    expect(b.title).toMatch(/vCenter 이벤트 기준 — Veeam 서버에서 확인한 값이 아닙니다/);
+    expect(b.title).toMatch(/최근 7일 3번/); expect(b.title).toMatch(/성공 여부는 이벤트로 알 수 없습니다/);
+    expect(veeamEventBadge([ts, 1], { source: 'edge' }).title).toMatch(/엣지가 보낸 요약/);
+    expect(b.title).not.toMatch(/`/);
+  });
+  it('상태 문구 — ok 면 없음 · 못 본 이유는 백업 없음으로 말하지 않는다', () => {
+    expect(veeamEventStatusText(null)).toBe('');
+    expect(veeamEventStatusText({ status: 'ok' })).toBe('');
+    for (const st of ['log-off', 'severity-filter', 'not-collected', 'no-edge-data']) {
+      const t = veeamEventStatusText({ status: st });
+      expect(t.length).toBeGreaterThan(10); expect(t).not.toMatch(/백업 안 됨|백업이 없/);
+    }
+    expect(veeamEventStatusText({ status: 'weird' })).toMatch(/받지 못했습니다/);
   });
 });

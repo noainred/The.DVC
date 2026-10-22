@@ -204,11 +204,68 @@ export default function VeeamSettings() {
           엣지 보고: {d.edges.map((e) => `${e.agent} ${fmt(e.at)}(서버 ${e.status?.servers != null ? `${e.status.servers}대` : '—'})`).join(' · ')}
         </div>
       )}
+      <VeeamVcAccounts />
       {canCsv() && bulk && (
         <BulkDeviceIo base="/admin/veeam" resource="servers" unitLabel="서버" typeCol={null} keyLabel="host:port"
           title="Veeam 백업 서버 대량 등록 — CSV · 자유텍스트"
           onClose={() => setBulk(false)} onDone={() => { setBulk(false); load(); }} />
       )}
     </>
+  );
+}
+
+/**
+ * v2.754: vCenter 이벤트로 Veeam 백업을 가리는 'Veeam 계정'(Veeam 이 vCenter 에 접속하는 계정).
+ * 이름에 'veeam' 이 든 계정은 적지 않아도 된다 · 지금 Veeam 임시 스냅샷을 만든 계정은 자동으로 배운다(아래 목록) · 엣지는 다음 pull 때 받는다.
+ * 조회 실패 상태로 저장 버튼을 열지 않는다(덮어쓰기 방지).
+ */
+function VeeamVcAccounts() {
+  const [d, setD] = useState(null);
+  const [text, setText] = useState('');
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const seq = useRef(0);
+  const load = () => {
+    const my = ++seq.current;
+    fetchJson('/admin/veeam/vc-accounts')
+      .then((r) => { if (my !== seq.current) return; setD(r); setText((r.manual || []).join('\n')); setErr(''); })
+      .catch((e) => { if (my === seq.current) setErr(e.message || String(e)); });
+  };
+  useEffect(() => { load(); return () => { seq.current += 1; }; }, []);
+  const save = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await sendJson('/admin/veeam/vc-accounts', 'PUT', { accounts: text });
+      setD(r); setText((r.manual || []).join('\n'));
+      setMsg(`저장했습니다 — ${r.saved}개${r.dropped ? ` · 형식·상한으로 버림 ${r.dropped}개` : ''}. 엣지는 다음 pull 때 받습니다.`);
+    } catch (e) { setMsg(`저장하지 못했습니다: ${e.message || e}`); }
+    setBusy(false);
+  };
+  return (
+    <div className="card" style={{ marginTop: 12, padding: '12px 14px', minWidth: 0 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Veeam 이 vCenter 에 접속하는 계정 — 이벤트로 Veeam 백업 찾기</div>
+      <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 8, overflowWrap: 'anywhere' }}>
+        vCenter › VM 및 폴더의 녹색 점선 배지(📸 날짜)는 최근 7일 vCenter 이벤트 중 이 계정들이 만든 VM 스냅샷으로 정합니다. 이름에 veeam 이 든 계정은 적지 않아도 되고,
+        지금 Veeam 임시 스냅샷을 만든 계정은 자동으로 배웁니다. 한 줄에 하나(예: CORP\svc-backup 또는 svc-backup@vsphere.local).
+      </div>
+      {err ? <div style={{ color: 'var(--red)', fontSize: 12 }}>불러오지 못했습니다: {err}</div> : (
+        <>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} disabled={!d || busy} placeholder="CORP\svc-backup"
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--mono, monospace)', fontSize: 12 }} aria-label="Veeam vCenter 계정" />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 }}>
+            <button className="login-btn" style={{ flex: 'none' }} disabled={!d || busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+            {msg && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{msg}</span>}
+          </div>
+          {d && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6, overflowWrap: 'anywhere' }}>
+              자동으로 배운 계정: {(d.learned || []).length ? d.learned.map((x) => `${x.name}(${fmt(x.lastSeen)})`).join(' · ') : '아직 없음'}
+              {(d.pulled || []).length > 0 && <> · 중앙에서 받은 계정: {d.pulled.join(' · ')}</>}
+              {d.loadError && <span style={{ color: 'var(--amber)' }}> · 계정 파일을 읽지 못했습니다(손상본은 옆에 보존)</span>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

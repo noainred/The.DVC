@@ -20,6 +20,7 @@ import { pickAgent } from '../../cvp/formChoices.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import * as vbBulk from '../../veeam/bulk.js';
+import { accountView, saveManualAccounts } from '../../veeam/snapEvents.js';
 // CSV·텍스트 가져오기/내보내기는 관리자 + 'data.csv' 권한(다른 대량 등록 화면과 같은 게이트 — v2.643).
 const csvPerm = requirePerm('data.csv');
 
@@ -39,6 +40,19 @@ export function serverStatusView(rec) {
 }
 
 export function registerVeeam(adminRouter) {
+  // v2.754: vCenter 이벤트에서 Veeam 스냅샷을 가리는 'Veeam 계정'(Veeam 이 vCenter 에 접속하는 계정). 사람이 적은 것 + 자동으로 배운 것.
+  //   비밀은 아니지만 계정 이름이라 관리자·전체 범위만 본다. 저장은 감사 로그(계정 수만). 엣지는 veeam-config pull 로 받는다.
+  adminRouter.get('/veeam/vc-accounts', adminOnly, fleetWideOnly, (_req, res) => res.json({ ok: true, ...accountView() }));
+  adminRouter.put('/veeam/vc-accounts', adminOnly, fleetWideOnly, (req, res) => {
+    const raw = req.body?.accounts;
+    if (raw != null && !Array.isArray(raw) && typeof raw !== 'string') return res.status(400).json({ ok: false, reason: 'accounts 는 목록 또는 줄바꿈 문자열입니다.' });
+    try {
+      const r = saveManualAccounts(raw ?? []);
+      logAudit({ user: req.user?.username, action: 'Veeam vCenter 계정 저장', target: 'veeam-vc-accounts', detail: `${r.list.length}개${r.dropped ? ` · 버림 ${r.dropped}` : ''}` });
+      res.json({ ok: true, saved: r.list.length, dropped: r.dropped, ...accountView() });
+    } catch (e) { res.status(500).json({ ok: false, reason: `저장하지 못했습니다: ${String(e?.message || e).slice(0, 120)}` }); }
+  });
+
   adminRouter.get('/veeam/servers', adminOnly, fleetWideOnly, (_req, res) => {
     const le = registryLoadError();
     const owners = new Map(listInventory().map((i) => [i.vcenterId, i.agent]));

@@ -11,6 +11,11 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { listRegistry as listVcenters } from '../../vcenter/registry.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { demoVeeamMatch, demoVeeamDetail } from '../../mock/demo/veeam.js';
+import { memoJson, scopeKey } from './shared.js';
+import { getLogsDb } from '../../logs/db.js';
+import { loadLogSettings } from '../../logs/settings.js';
+import { eventNotCollectedMap } from '../../logs/coverage.js';
+import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS } from '../../veeam/snapEvents.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -69,6 +74,31 @@ export function registerVeeamBadges(api) {
     const { results, views, host } = resultsFor(vcenterId, req);
     const m = matchToVcenter({ id: vcenterId, host }, vms, results);
     res.json({ ok: true, configured: true, servers: views, ...m, at: Date.now() });
+  });
+
+  // v2.754(사용자 요청 '지금 스냅샷이 없으면 확인 안 되는가' → vCenter 이벤트 방식): 최근 7일 'Veeam 계정이 만든 VM 스냅샷 생성 이벤트'.
+  //   이 포탈이 직접 이벤트를 모으는 vCenter 는 로그 DB 에서 바로, 엣지 위임(site) vCenter 는 그 엣지가 Veeam push 로 보낸 요약(veeam/snapEvents.js).
+  //   vCenter 왕복 없음(저장된 이벤트만). 화면은 체크했을 때만 5분마다 부른다 · 60초 캐시(범위 키) · 계정 이름은 싣지 않는다.
+  api.get('/veeam/snap-events', (req, res) => {
+    const t = vcOf(req);
+    if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    return memoJson(req, res, 'veeam-snap-events', async () => {
+      const { vcenterId, vms } = t;
+      const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
+      const why = eventNotCollectedMap().get(vcenterId); // mock 이면 빈 맵(로그 폴러가 전부 모은다)
+      if (why === 'site') {
+        const e = edgeSnapFor(vcenterId);
+        if (!e) return { ...base, status: 'no-edge-data', source: 'edge' };
+        if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
+        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: e.byVm, events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, truncated: e.truncated, at: e.at };
+      }
+      if (why) return { ...base, status: 'not-collected', why };
+      const ls = loadLogSettings();
+      if (ls?.enabled === false) return { ...base, status: 'log-off' };
+      if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
+      const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
+      return { ...base, status: 'ok', source: 'local', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, truncated: r.truncated, at: r.at };
+    }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
   });
 
   // VM 1대의 백업 상세(v2.751 사용자 요청: 'Veeam 배지를 누르면 백업 세부 정보 창' — 복원 지점·용량·마지막 백업 등).

@@ -13,13 +13,14 @@ import { fetchJson } from '../api.js';
 import { Modal } from '../components/Modal.jsx';
 import { ErrorBox, Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
-import { veeamBadge, veeamSnapBadge, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
+import { veeamBadge, veeamSnapBadge, veeamEventBadge, veeamEventStatusText, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
 
 const TONE = {
   green: { bg: 'rgba(34,197,94,.15)', fg: '#4ade80' },
   amber: { bg: 'rgba(245,158,11,.15)', fg: '#fbbf24' },
   blue: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
   muted: { bg: 'rgba(139,155,180,.12)', fg: 'var(--text-dim)' },
+  greenLine: { bg: 'rgba(34,197,94,.08)', fg: '#4ade80' },
   purple: { bg: 'rgba(168,85,247,.10)', fg: '#c084fc' },
   red: { bg: 'rgba(239,68,68,.10)', fg: '#f87171' },
 };
@@ -36,13 +37,16 @@ function ProgressBar({ pct, width = 36, height = 4 }) {
 }
 
 /** VM 행의 Veeam 배지 — 누르면 상세 창. 행(Leaf) 클릭(VM 상세)으로 번지지 않게 막는다. */
-export function VeeamTag({ vm, veeam, on, onOpen }) {
+export function VeeamTag({ vm, veeam, on, ev, onOpen }) {
   const vb = veeam ? veeamBadge(veeam[vm.id]) : null;
   // v2.753: vCenter 스냅샷 기준 배지 — Veeam 서버 배지와 다른 모양(📸 · 점선 테두리 · 보라/빨강). Veeam 서버가 이미 '백업 중' 이라
   //   알려 준 VM 의 새 스냅샷은 같은 사실이라 다시 달지 않는다(잔존은 다른 사실이라 함께 단다).
   let sb = on ? veeamSnapBadge(vm) : null;
   if (sb && !sb.stale && vb && veeam[vm.id]?.run === 1) sb = null;
-  if (!vb && !sb) return null;
+  // v2.754: vCenter 이벤트 기준(최근 N일 Veeam 계정의 스냅샷 생성) — 녹색 점선 '📸 MM-DD HH:mm'. Veeam 서버 배지가 있으면(더 정확) 달지 않고,
+  //   지금 백업 중(새 임시 스냅샷)이면 그 배지가 같은 사실을 말하므로 달지 않는다.
+  const eb = on && ev && !vb && !(sb && !sb.stale) ? veeamEventBadge(ev.byVm?.[vm.id], { days: ev.days, source: ev.source }) : null;
+  if (!vb && !sb && !eb) return null;
   const t = vb ? (TONE[vb.color] || TONE.green) : null;
   return (
     <>
@@ -56,6 +60,7 @@ export function VeeamTag({ vm, veeam, on, onOpen }) {
         </button>
       )}
       {sb && <VeeamSnapChip label={sb.label} tone={sb.color} title={sb.title} ariaLabel={`${vm.name} — ${sb.label}(vCenter 스냅샷 기준)`} />}
+      {eb && <VeeamSnapChip label={eb.label} tone="greenLine" title={eb.title} ariaLabel={`${vm.name} — Veeam 스냅샷 이벤트 ${eb.label}(vCenter 이벤트 기준)`} />}
     </>
   );
 }
@@ -73,19 +78,23 @@ export function VeeamSnapChip({ label, tone, title, ariaLabel }) {
 }
 
 /** 스냅샷 기준 요약 줄(체크했을 때만 — Veeam 서버 등록과 무관하게 보인다). */
-export function VeeamSnapSummary({ counts }) {
+export function VeeamSnapSummary({ counts, ev }) {
   if (!counts) return null;
   const none = !counts.running && !counts.stale;
+  const evN = ev?.status === 'ok' ? Object.keys(ev.byVm || {}).length : null;
+  const evWhy = veeamEventStatusText(ev);
   return (
     <div className="muted" style={{ margin: '0 0 10px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
-      <span style={{ fontWeight: 600 }}>vCenter 스냅샷 기준</span>
+      <span style={{ fontWeight: 600 }}>vCenter 기준(스냅샷·이벤트)</span>
       {none ? <span>Veeam 임시 스냅샷이 있는 VM 이 없습니다.</span> : (
         <>
           <VeeamSnapChip label={`📸 백업 중 ${counts.running}대`} tone="purple" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 있고 만든 지 하루가 안 된 VM" />
           <VeeamSnapChip label={`📸 스냅샷 잔존 ${counts.stale}대`} tone="red" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 하루 넘게 남은 VM — 정리 실패 의심" />
         </>
       )}
-      <span style={{ flex: '1 1 260px', minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 서버에서 확인한 값이 아니라 vCenter 스냅샷 이름으로 본 것입니다(점선 배지). 백업 성공·이력은 알 수 없고, 수집 주기 사이에 끝난 백업은 보이지 않습니다.</span>
+      {evN != null && <VeeamSnapChip label={`📸 최근 ${ev.days}일 Veeam 스냅샷 ${evN}대`} tone="greenLine" title={`vCenter 이벤트 기준 — 최근 ${ev.days}일 안에 Veeam 계정이 스냅샷을 만든 VM(백업 시작 시각에 가깝다 · 성공 여부는 모름)${ev.ambiguous ? ` · 같은 이름의 VM 이 둘 이상이라 고르지 못한 이벤트 ${ev.ambiguous}건` : ''}${ev.truncated ? ' · 이벤트가 많아 일부만 읽었습니다' : ''}`} />}
+      <span style={{ flex: '1 1 260px', minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 서버에서 확인한 값이 아니라 vCenter 스냅샷 이름(지금 백업 중·잔존)과 이벤트(최근 백업 시각)로 본 것입니다(점선 배지). 백업 성공 여부는 알 수 없습니다.</span>
+      {evWhy && <span style={{ flex: '1 1 100%', minWidth: 0, overflowWrap: 'anywhere', color: 'var(--amber)' }}>{evWhy}</span>}
     </div>
   );
 }

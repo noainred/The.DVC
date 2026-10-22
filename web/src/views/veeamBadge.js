@@ -211,3 +211,35 @@ export function veeamSnapCounts(vms, now = Date.now()) {
   }
   return { running, stale };
 }
+
+/* ── vCenter 이벤트 기준(v2.754 — 지금 스냅샷이 없어도 최근 Veeam 백업을 본다) ───────────────────────────────────── */
+
+/**
+ * VM 1대의 이벤트 배지 — 그 VM 에 최근 N일 'Veeam 계정이 만든 스냅샷 생성 이벤트' 가 없으면 null.
+ * @param {[number, number]|null} entry  [마지막 시각, 횟수] (서버 /veeam/snap-events byVm 값)
+ */
+export function veeamEventBadge(entry, { days = 7, source = 'local' } = {}) {
+  if (!Array.isArray(entry) || !Number.isFinite(entry[0])) return null;
+  const [ts, n] = entry;
+  const lines = [
+    'vCenter 이벤트 기준 — Veeam 서버에서 확인한 값이 아닙니다',
+    `Veeam 계정이 이 VM 의 스냅샷을 만든 마지막 시각: ${fmtTime(ts)}(백업 시작 시각에 가깝습니다)`,
+    `최근 ${days}일 ${Number.isInteger(n) ? n : '?'}번`,
+    '백업 성공 여부는 이벤트로 알 수 없습니다.',
+  ];
+  if (source === 'edge') lines.push('이 vCenter 를 수집하는 엣지가 보낸 요약입니다.');
+  return { label: `📸 ${shortTime(ts)}`, color: 'green', title: lines.join('\n'), ts };
+}
+
+/** 이벤트 조회 상태 → 요약 줄 문구(ok 가 아니면 이유 — 이벤트가 없다고 '백업 없음' 으로 말하지 않는다). */
+export function veeamEventStatusText(d) {
+  if (!d) return '';
+  const why = {
+    'log-off': '이 포탈의 vCenter 이벤트 수집이 꺼져 있어 이벤트 기준으로는 볼 수 없습니다(설정 › vCenter 로그).',
+    'severity-filter': 'vCenter 이벤트를 경고 이상만 저장하도록 설정돼 스냅샷(정보) 이벤트가 없습니다(설정 › vCenter 로그 › 최소 심각도).',
+    'not-collected': '이 vCenter 는 지금 이벤트를 수집하지 않습니다(비활성·점검 중).',
+    'no-edge-data': '이 vCenter 를 수집하는 엣지가 아직 이벤트 요약을 보내지 않았습니다 — 엣지가 이 버전 이상이고 개별 토큰을 쓰는지 확인하세요(중앙이 재시작한 직후라면 다음 push 까지 기다리세요).',
+  };
+  if (d.status && d.status !== 'ok') return why[d.status] || '이벤트 기준 정보를 받지 못했습니다.';
+  return '';
+}

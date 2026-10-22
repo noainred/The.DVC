@@ -18,6 +18,11 @@ import { agentNameHeader } from '../util/agentNameHeader.js';
 import { serversForThisNode } from './registry.js';
 import { getRecord } from './store.js';
 import { veeamPollerStatus, onVeeamCollected, pollMs } from './poller.js';
+import { store } from '../store.js';
+import { getLogsDb } from '../logs/db.js';
+import { loadLogSettings } from '../logs/settings.js';
+import { eventNotCollectedMap } from '../logs/coverage.js';
+import { edgeSnapPayload } from './snapEvents.js';
 
 const gzipAsync = promisify(zlib.gzip);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
@@ -38,8 +43,20 @@ export function buildPushBody() {
   };
 }
 
+/** v2.754: 이 엣지가 직접 이벤트를 모으는 vCenter 의 'Veeam 계정 스냅샷 생성' 요약(veeam/snapEvents.js). 실패해도 결과 push 는 보낸다. */
+async function snapEventsForPush() {
+  try {
+    return { list: await edgeSnapPayload({ db: await getLogsDb(), snap: store.get(), notCollected: eventNotCollectedMap(), logSettings: loadLogSettings() }) };
+  } catch (e) {
+    if (failLog('snap', String(e?.message || e))) console.warn(`[veeam-push] vCenter 이벤트 요약을 만들지 못했습니다(결과는 그대로 보냅니다): ${String(e?.message || e).slice(0, 200)}`);
+    return { list: null, error: String(e?.message || e).slice(0, 200) };
+  }
+}
+
 async function pushInner() {
   const body = buildPushBody();
+  const snapEv = await snapEventsForPush();
+  if (snapEv.list) body.snapEvents = snapEv.list;
   const json = Buffer.from(JSON.stringify(body));
   const payload = await gzipAsync(json);
   const res = await postNo503Retry(`${config.agent.centralUrl}/api/central/veeam-data?agent=${encodeURIComponent(config.agent.name || '')}`, {
@@ -56,8 +73,10 @@ async function pushInner() {
   }
   const notOwned = Number(reply?.dropped?.notOwned) || 0;
   if (notOwned && failLog('notOwned', String(notOwned))) console.warn(`[veeam-push] 중앙이 이 엣지에 배정되지 않은 서버 결과 ${notOwned}건을 받지 않았습니다(배정이 바뀐 직후일 수 있습니다)`);
-  _last = { at: Date.now(), ok: true, servers: body.status.servers, results: body.results.length, bytes: json.length, gzBytes: payload.length, ...(notOwned ? { notOwned } : {}) };
-  return { ok: true, sent: body.results.length };
+  _last = { at: Date.now(), ok: true, servers: body.status.servers, results: body.results.length, bytes: json.length, gzBytes: payload.length, ...(notOwned ? { notOwned } : {}),
+    snapVcenters: snapEv.list ? snapEv.list.length : null, ...(snapEv.error ? { snapError: snapEv.error } : {}),
+    ...(Number(reply?.snap?.saved) >= 0 ? { snapSaved: Number(reply.snap.saved) } : {}) };
+  return { ok: true, sent: body.results.length, snapVcenters: snapEv.list ? snapEv.list.length : null };
 }
 
 export async function pushVeeamNow() {

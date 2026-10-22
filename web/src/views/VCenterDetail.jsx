@@ -330,6 +330,9 @@ export default function VCenterDetail({ site, onBack }) {
     [veeamOn, veeamD, veeamP.loading, veeamP.error, veeamP.errorInfo, vms.length]);
   // v2.753(사용자 요청 — Veeam 연동 없이 스냅샷으로만): VM 의 'VEEAM BACKUP TEMPORARY SNAPSHOT'(수집기가 veeamSnaps·veeamSnapTs 로 싣는다).
   const veeamSnapCnt = useMemo(() => (veeamOn ? veeamSnapCounts(vms) : null), [veeamOn, vms]);
+  // v2.754: vCenter 이벤트 기준(최근 7일 Veeam 계정의 스냅샷 생성) — 저장된 이벤트를 읽는 조회라 5분마다만(서버 60초 캐시).
+  const veeamEvP = usePolling(veeamOn ? '/veeam/snap-events' : null, { vcenterId }, 300_000);
+  const veeamEv = veeamOn ? (veeamEvP.data || null) : null;
   // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 트리·검색뿐 아니라
   // CPU·MEM 가상화율(할당 vCPU/RAM 합계)도 이 목록을 기준으로 계산한다(v2.334, 사용자 요구 —
   // '꺼진 VM 제외하고 실제로 켜진 부하만 보는' 용도. 전체 기준으로 보려면 체크박스를 켠다).
@@ -593,7 +596,7 @@ export default function VCenterDetail({ site, onBack }) {
             )}
           </div>
           {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
-          {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} />}
+          {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} />}
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
               볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
               DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}
@@ -677,7 +680,7 @@ export default function VCenterDetail({ site, onBack }) {
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} onOpen={setVeeamVm} /></>}
+                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /></>}
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
@@ -712,7 +715,7 @@ export default function VCenterDetail({ site, onBack }) {
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                        label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} onOpen={setVeeamVm} /></>}
+                        label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /></>}
                         sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
                     ))}
                   </Tree>
@@ -726,7 +729,7 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
@@ -977,7 +980,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, veeamOn, setVeeamVm, usageProps }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -986,9 +989,9 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, v
         const f = node.folders[name];
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect} />
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect} />
             {f.vms.map((vm) => (
-              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} onOpen={setVeeamVm} /></>}
+              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /></>}
                 sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
             ))}
           </Tree>
