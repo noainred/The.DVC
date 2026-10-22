@@ -17,6 +17,8 @@ import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS } from '../../veeam/snapEvents.js';
 import { logCollectOkAt } from '../../logs/poller.js';
+import { veeamCount, snapCount } from '../../veeam/backupCounts.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -63,6 +65,47 @@ function resultsFor(vcenterId, req) {
   return { results, views, host: listVcenters().find((v) => v.id === vcenterId)?.host || '' };
 }
 
+/**
+ * 그 vCenter 의 'Veeam 계정이 만든 스냅샷 생성 이벤트' 요약(/veeam/snap-events 본문 — v2.757 에 카드 수량이 같이 쓰도록 함수로 뺐다).
+ * 로그 DB(직접 수집) 또는 엣지가 보낸 요약만 읽는다(vCenter 왕복 없음).
+ */
+async function snapEventsFor(vcenterId, vms) {
+  const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
+  // 검토 #8: 지금 인벤토리에 있는 VM 만 싣는다(엣지가 보낸 접두사만 맞는 id·지운 VM 이 'N대' 를 부풀리지 않게).
+  const known = new Set(vms.map((v) => v.id));
+  const onlyKnown = (m) => { const o = {}; for (const [k, v] of Object.entries(m || {})) if (known.has(k)) o[k] = v; return o; };
+  const why = eventNotCollectedMap().get(vcenterId); // mock 이면 빈 맵(로그 폴러가 전부 모은다)
+  if (why === 'site') {
+    const e = edgeSnapFor(vcenterId);
+    if (!e) return { ...base, status: 'no-edge-data', source: 'edge' };
+    // 검토 #7: 엣지가 멈췄거나 담당이 바뀌면 마지막 요약을 '지금' 처럼 보이지 않는다(push 주기 2배 + 여유).
+    if (Date.now() - e.at > pollMs() * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
+    if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
+    return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, unpaired: e.unpaired, truncated: e.truncated, accounts: e.accounts, at: e.at };
+  }
+  if (why) return { ...base, status: 'not-collected', why };
+  const ls = loadLogSettings();
+  if (ls?.enabled === false) return { ...base, status: 'log-off' };
+  if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
+  const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
+  // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
+  return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
+}
+
+/*
+ * v2.757 카드 수량용 스냅샷 요약 캐시 — vCenter 별·계정과 무관(범위는 응답에서 거른다). 5분(화면 폴링 주기와 같다).
+ * 세대: 시각만 본다 — 지금 등록부에 없는 vCenter 항목은 다음 계산 때 지운다. 같은 vCenter 를 동시에 두 번 읽지 않는다(진행 중 약속 공유).
+ */
+const SNAP_CACHE_MS = 300_000;
+const _snapCache = new Map(); // vcenterId → { at, p }
+function cachedSnapEvents(vcenterId, vms, now = Date.now()) {
+  const c = _snapCache.get(vcenterId);
+  if (c && now - c.at < SNAP_CACHE_MS) return c.p;
+  const p = snapEventsFor(vcenterId, vms).catch((e) => { _snapCache.delete(vcenterId); return { status: 'error', error: String(e?.message || e) }; });
+  _snapCache.set(vcenterId, { at: now, p });
+  return p;
+}
+
 export function registerVeeamBadges(api) {
   api.get('/veeam/badges', (req, res) => {
     const t = vcOf(req);
@@ -83,29 +126,38 @@ export function registerVeeamBadges(api) {
   api.get('/veeam/snap-events', (req, res) => {
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
-    return memoJson(req, res, 'veeam-snap-events', async () => {
-      const { vcenterId, vms } = t;
-      const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
-      // 검토 #8: 지금 인벤토리에 있는 VM 만 싣는다(엣지가 보낸 접두사만 맞는 id·지운 VM 이 'N대' 를 부풀리지 않게).
-      const known = new Set(vms.map((v) => v.id));
-      const onlyKnown = (m) => { const o = {}; for (const [k, v] of Object.entries(m || {})) if (known.has(k)) o[k] = v; return o; };
-      const why = eventNotCollectedMap().get(vcenterId); // mock 이면 빈 맵(로그 폴러가 전부 모은다)
-      if (why === 'site') {
-        const e = edgeSnapFor(vcenterId);
-        if (!e) return { ...base, status: 'no-edge-data', source: 'edge' };
-        // 검토 #7: 엣지가 멈췄거나 담당이 바뀌면 마지막 요약을 '지금' 처럼 보이지 않는다(push 주기 2배 + 여유).
-        if (Date.now() - e.at > pollMs() * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
-        if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
-        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, unpaired: e.unpaired, truncated: e.truncated, accounts: e.accounts, at: e.at };
+    return memoJson(req, res, 'veeam-snap-events', () => snapEventsFor(t.vcenterId, t.vms), { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
+  });
+
+  // v2.757(사용자 요청 — vCenter 카드에 'VM 백업 수량', 182/195 형식): 범위 안 vCenter 마다 한 줄.
+  //   Veeam 서버가 하나라도 연결돼 있으면 Veeam 기준만(스냅샷과 섞지 않는다), 없으면 스냅샷 기준(이벤트 7일 ∪ 지금 임시 스냅샷).
+  //   모르면 n=null + 이유 코드(0 으로 쓰지 않는다). 오류 원문·계정 이름은 싣지 않는다. 화면은 마운트 1회 + 5분마다.
+  api.get('/veeam/backup-counts', (req, res) => {
+    const snap = store.get();
+    const allowed = scopedVcenterIds(req.user, snap);
+    return memoJson(req, res, 'veeam-backup-counts', async () => {
+      const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+      const live = new Set((snap?.vcenters || []).map((v) => v.id));
+      for (const k of _snapCache.keys()) if (!live.has(k)) _snapCache.delete(k);
+      const vmsBy = new Map();
+      for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+      const maybeYield = createYielder(15);
+      const byVc = {};
+      for (const vc of vcs) {
+        await maybeYield();
+        const vms = vmsBy.get(vc.id) || [];
+        if (serversForVcenter(vc.id).length) {
+          const { results, views, host } = resultsFor(vc.id, req);
+          const byVm = results.length ? matchToVcenter({ id: vc.id, host }, vms, results).byVm : null;
+          byVc[vc.id] = veeamCount({ views, byVm, vmTotal: vms.length });
+        } else if (isMockMode()) {
+          byVc[vc.id] = { ...veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length }), demo: true };
+        } else {
+          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms), vms });
+        }
       }
-      if (why) return { ...base, status: 'not-collected', why };
-      const ls = loadLogSettings();
-      if (ls?.enabled === false) return { ...base, status: 'log-off' };
-      if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
-      const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
-      // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
-      return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
-    }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
+      return { ok: true, at: Date.now(), byVc };
+    }, { ttlMs: 60_000, extraKey: scopeKey(req.user, snap) });
   });
 
   // VM 1대의 백업 상세(v2.751 사용자 요청: 'Veeam 배지를 누르면 백업 세부 정보 창' — 복원 지점·용량·마지막 백업 등).
