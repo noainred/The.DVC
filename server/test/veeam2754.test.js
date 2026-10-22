@@ -46,7 +46,7 @@ test('판정 코어 — 생성 이벤트만 · Veeam 계정(이름·표기 차�
   assert.equal(is('CORP\\svc-veeam'), 'name');
   assert.equal(is('svc-bk@corp.local'), 'account', '도메인 없이 적은 계정 ↔ user@domain');
   assert.equal(is('corp\\SVC-BK'), 'account', '대소문자');
-  assert.equal(is('VSPHERE.LOCAL\\Administrator'), null, '도메인 표기가 다르면 같은 계정으로 보지 않는다(정확히 적은 그대로만)');
+  assert.equal(is('VSPHERE.LOCAL\\Administrator'), 'account', 'v2.755: 같은 도메인의 DOMAIN\\user ↔ user@domain 은 같은 계정');
   assert.equal(is('administrator@vsphere.local'), 'account');
   assert.equal(is('CORP\\Administrator'), null, '다른 도메인의 administrator 는 Veeam 이 아니다');
   assert.equal(is('CORP\\admin'), null);

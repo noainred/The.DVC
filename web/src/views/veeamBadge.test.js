@@ -133,5 +133,6 @@ describe('vCenter 이벤트 기준 배지 (v2.754)', () => {
     const at = Date.UTC(2026, 9, 22, 12);
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, at, collectedAt: at - 7 * 3_600_000 })).toMatch(/마지막으로 수집한 시각/);
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, truncated: true })).toMatch(/일부만 읽었습니다/);
+    expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, unpaired: 3 })).toMatch(/공용 계정\(administrator 등\).*3건/); // v2.755
   });
 });

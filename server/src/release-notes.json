@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.755.0",
+      "date": "2026-10-22",
+      "title": "Veeam 백업 시도(vCenter 이벤트) — administrator@vsphere.local 로 백업하는 환경 대응",
+      "notes": [
+        "계정 표기 통일: 'VSPHERE.LOCAL\\Administrator' 와 'administrator@vsphere.local' 을 같은 계정으로(같은 도메인일 때) — v2.754 는 설정에 적은 계정이 이벤트와 맞지 않았다",
+        "공용 계정(administrator·root 등 — 사람도 같이 쓴다)은 스냅샷을 만들고 12시간 안에 같은 계정이 지운 짝만 백업 시도로 셈(사람이 만들어 둔 스냅샷은 빼고 건수를 안내)",
+        "작업 문구를 영어와 한국어('가상 시스템 스냅샷 생성'·'스냅샷 제거') 모두 인식"
+      ]
+    },
+    {
       "version": "2.754.0",
       "date": "2026-10-22",
       "title": "vCenter › VM 및 폴더 'Veeam 백업 VM 표시' — vCenter 이벤트로 최근 Veeam 백업 시도 표시(지금 스냅샷이 없어도)",

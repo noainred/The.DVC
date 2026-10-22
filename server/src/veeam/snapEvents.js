@@ -34,19 +34,44 @@ const s = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
 /** 이벤트 1건이 'VM 스냅샷 생성' 인가 — 실제 vCenter 는 TaskEvent('Task: Create virtual machine snapshot'), 데모는 VmSnapshotCreatedEvent. */
+// v2.755(실서버 화면 — 작업 이름이 '가상 시스템 스냅샷 생성'·'스냅샷 제거'): 이 포탈은 vCenter 로그인에 언어를 지정하지 않아(soapClient login)
+//   이벤트 문구가 vCenter 기본 언어를 따른다 — 영어와 한국어를 모두 본다. 그 밖의 언어는 보지 못한다(화면이 '계정 모름'·0대로 말한다).
+const CREATE_RE = /create\s+(?:a\s+)?(?:virtual\s+machine\s+)?snapshot|(?:가상\s*(?:시스템|머신)\s*)?스냅샷\s*(?:생성|만들기)/i;
+const REMOVE_RE = /remove\s+(?:all\s+)?snapshots?|delete\s+snapshot|스냅샷\s*(?:제거|삭제)|모든\s*스냅샷\s*(?:제거|삭제)/i;
+const NOT_CREATE_RE = /remove|revert|delete|consolidat|fail|cannot|unable|error|제거|삭제|되돌|복원|통합|실패|오류|할\s*수\s*없/i;
+const taskLike = (row) => /^(?:TaskEvent|VmSnapshotCreatedEvent|VmSnapshotRemovedEvent)$/.test(String(row?.type || '')) && (!row.severity || row.severity === 'info');
+
 export function isSnapshotCreateEvent(row) {
-  if (!row) return false;
+  if (!row || !taskLike(row) || row.type === 'VmSnapshotRemovedEvent') return false;
   // 검토 #9: 종류를 한정한다(경보·EventEx 문구에 'create snapshot' 이 들어가도 잡지 않게) · 실패 문구는 생성으로 세지 않는다 · 정보 심각도만.
-  if (!/^(?:TaskEvent|VmSnapshotCreatedEvent)$/.test(String(row.type || ''))) return false;
-  if (row.severity && row.severity !== 'info') return false;
   const m = String(row.message || '').slice(0, 300);
-  if (/remove|revert|delete|consolidat|fail|cannot|unable|error/i.test(m)) return false;
-  return row.type === 'VmSnapshotCreatedEvent' || /create\s+(?:a\s+)?(?:virtual\s+machine\s+)?snapshot/i.test(m);
+  if (NOT_CREATE_RE.test(m)) return false;
+  return row.type === 'VmSnapshotCreatedEvent' || CREATE_RE.test(m);
+}
+/** 스냅샷 '제거' 작업(공용 계정의 짝 맞추기에 쓴다). */
+export function isSnapshotRemoveEvent(row) {
+  if (!row || !taskLike(row) || row.type === 'VmSnapshotCreatedEvent') return false;
+  const m = String(row.message || '').slice(0, 300);
+  if (/fail|cannot|unable|error|실패|오류|할\s*수\s*없/i.test(m)) return false;
+  return row.type === 'VmSnapshotRemovedEvent' || REMOVE_RE.test(m);
 }
 
 const normAcct = (u) => s(String(u ?? ''), ACCOUNT_MAX_LEN).toLowerCase();
 const bareOf = (a) => (a.includes('\\') ? a.slice(a.lastIndexOf('\\') + 1) : a.split('@')[0]);
 const hasDomain = (a) => a.includes('\\') || a.includes('@');
+/**
+ * 같은 도메인의 두 표기를 하나로 — 'VSPHERE.LOCAL\\Administrator' ↔ 'administrator@vsphere.local'(v2.755 실서버: vSphere 작업 목록은
+ * user@domain 으로 보이고 이벤트는 DOMAIN\\user 로 남을 수 있다 — v2.754 는 둘을 다른 계정으로 봐 사람이 적은 계정이 맞지 않았다).
+ * ⚠ 도메인 이름이 다른 표기(CORP\\svc ↔ svc@corp.local — NetBIOS 와 FQDN)는 같다고 단정하지 않는다(도메인 없이 적으면 맞춘다).
+ */
+const canonAcct = (u) => {
+  const a = normAcct(u);
+  if (a.includes('\\')) { const i = a.lastIndexOf('\\'); const d = a.slice(0, i); const n = a.slice(i + 1); return d && n ? `${n}@${d}` : a; }
+  return a;
+};
+/** 공용 계정(사람도 같이 쓴다) — 학습하지 않고, 사람이 적었으면 '생성 후 제거된 짝' 만 백업 시도로 센다. */
+export const isSharedAccount = (u) => COMMON_ACCOUNT.test(bareOf(normAcct(u)));
+export const PAIR_MS = 12 * 3_600_000; // 공용 계정: 생성 뒤 이 안에 같은 계정이 같은 VM 의 스냅샷을 지웠을 때만(Veeam 은 백업이 끝나면 바로 지운다)
 
 /**
  * Veeam 계정 판정기. accounts = 사람이 적은 계정 + 학습한 계정(배열). 이름에 'veeam' 이 든 계정은 항상 Veeam 으로 본다.
@@ -59,13 +84,13 @@ export function makeVeeamAccountMatcher(accounts = []) {
   for (const raw of accounts) {
     const a = normAcct(raw);
     if (!a) continue;
-    if (hasDomain(a)) full.add(a); else bare.add(a);
+    if (hasDomain(a)) full.add(canonAcct(a)); else bare.add(a);
   }
   return (user) => {
     const a = normAcct(user);
     if (!a) return null;
     if (a.includes('veeam')) return 'name';
-    return full.has(a) || bare.has(bareOf(a)) ? 'account' : null;
+    return full.has(canonAcct(a)) || bare.has(bareOf(a)) ? 'account' : null;
   };
 }
 
@@ -113,11 +138,24 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
     if (k) byName.set(k, byName.has(k) ? null : v.id); // null = 같은 이름의 VM 이 둘 이상(이벤트는 이름만 준다)
   }
   const byVm = {};
-  let events = 0; let ambiguous = 0; let unmatched = 0;
-  for (const r of Array.isArray(rows) ? rows : []) {
+  let events = 0; let ambiguous = 0; let unmatched = 0; let unpaired = 0;
+  // 공용 계정의 짝 — (VM 이름, 계정) → 제거 시각들. Veeam 은 VM 디스크를 다 읽으면 그 스냅샷을 곧바로 지운다.
+  const removes = new Map();
+  const list = Array.isArray(rows) ? rows : [];
+  for (const r of list) {
+    if (!r || !isSnapshotRemoveEvent(r) || !isSharedAccount(r.user)) continue;
+    const k = `${String(r.entity || '').trim().toLowerCase()}\u0000${canonAcct(r.user)}`;
+    let a = removes.get(k); if (!a) { a = []; removes.set(k, a); }
+    a.push(Number(r.ts));
+  }
+  for (const r of list) {
     if (!r || !isSnapshotCreateEvent(r) || !isVeeam(r.user)) continue;
     const ts = Number(r.ts);
     if (!Number.isFinite(ts) || ts < since) continue;
+    if (isSharedAccount(r.user)) {
+      const rm = removes.get(`${String(r.entity || '').trim().toLowerCase()}\u0000${canonAcct(r.user)}`) || [];
+      if (!rm.some((t) => t >= ts && t - ts <= PAIR_MS)) { unpaired++; continue; } // 사람이 만들어 둔 스냅샷일 수 있다(또는 아직 백업 중)
+    }
     events++;
     const id = byName.get(String(r.entity || '').trim().toLowerCase());
     if (id === null) { ambiguous++; continue; }
@@ -126,7 +164,7 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
     if (!cur) byVm[id] = [ts, 1];
     else { cur[1]++; if (ts > cur[0]) cur[0] = ts; }
   }
-  return { byVm, events, ambiguous, unmatched };
+  return { byVm, events, ambiguous, unmatched, unpaired };
 }
 
 /* ── 계정 저장(veeam-vc-accounts.json — 비밀 아님) ─────────────────────────────────────────────────────────── */
@@ -254,13 +292,22 @@ export function forgetLearned(names) {
  */
 export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), days = LOOKBACK_DAYS } = {}) {
   const since = now - days * DAY;
-  const f = { vcenterId, q: 'snapshot', since };
-  const rows = typeof db.queryAsync === 'function' ? await db.queryAsync(f, ROW_LIMIT) : db.query(f, ROW_LIMIT, 0);
+  // 영어('snapshot')·한국어('스냅샷') 문구 둘 다(v2.755) — 같은 행이 둘에 걸리면 한 번만.
+  const read = (q) => (typeof db.queryAsync === 'function' ? db.queryAsync({ vcenterId, q, since }, ROW_LIMIT) : db.query({ vcenterId, q, since }, ROW_LIMIT, 0));
+  const a = await read('snapshot');
+  const b = await read('스냅샷');
+  const seen = new Set(); const rows = [];
+  for (const r of [...a, ...b]) {
+    const k = `${r.ts}\u0000${r.type}\u0000${r.entity}\u0000${r.user}\u0000${r.message}`;
+    if (seen.has(k)) continue;
+    seen.add(k); rows.push(r);
+  }
+  const truncated = a.length >= ROW_LIMIT || b.length >= ROW_LIMIT;
   const learned = learnAccounts(vms, rows);
   if (learned.length) rememberLearned(learned, now);
   const accounts = veeamAccounts(now);
   const r = summarizeVeeamSnapEvents(vms, rows, { accounts, since });
-  return { ...r, truncated: rows.length >= ROW_LIMIT, since, at: now, accounts: accounts.length };
+  return { ...r, truncated, since, at: now, accounts: accounts.length };
 }
 
 /* ── 중앙: 엣지가 보낸 요약(인메모리 — 재시작하면 다음 push 까지 비고 화면이 그 사실을 말한다) ─────────── */
@@ -298,7 +345,7 @@ export function sanitizeEdgeSnap(raw, owns, now = Date.now()) {
     }
     const num = (v) => (Number.isInteger(v) && v >= 0 ? Math.min(v, 1e7) : 0);
     const at = Number(x.at);
-    items.push({ vcenterId, status, byVm, events: num(x.events), ambiguous: num(x.ambiguous), unmatched: num(x.unmatched), truncated: x.truncated === true, accounts: num(x.accounts),
+    items.push({ vcenterId, status, byVm, events: num(x.events), ambiguous: num(x.ambiguous), unmatched: num(x.unmatched), unpaired: num(x.unpaired), truncated: x.truncated === true, accounts: num(x.accounts),
       days: Number.isInteger(x.days) && x.days > 0 && x.days <= 90 ? x.days : LOOKBACK_DAYS,
       edgeAt: Number.isFinite(at) && at > 0 ? at : null, at: Number.isFinite(at) && at > 0 && at <= now + FUTURE_SKEW_MS ? Math.min(at, now) : now });
   }
@@ -328,7 +375,7 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
     if (logSettings?.minSeverity && logSettings.minSeverity !== 'info') { out.push({ vcenterId, status: 'severity-filter', at: now }); continue; }
     const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcenterId);
     const r = await localSnapSummary(db, vcenterId, vms, { now });
-    out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now });
+    out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now });
   }
   return out;
 }
