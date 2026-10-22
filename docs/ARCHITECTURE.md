@@ -117,7 +117,7 @@
 | `linkcheck/` | 12 | 2,652 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 577 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,045 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
-| `logs/` | 5 | 1,264 | `logs/db.js` (13) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
+| `logs/` | 5 | 1,300 | `logs/db.js` (13) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
 | `mail/` | 3 | 452 | `mail/settings.js` (7) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
 | `metrics/` | 8 | 2,097 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
 | `migration/` | 1 | 140 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
@@ -163,7 +163,7 @@
 | `vmtrack/` | 4 | 1,780 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 | `xferspeed/` | 7 | 1,951 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 86개 · 파일 941개 · 203,950줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 86개 · 파일 941개 · 203,986줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
