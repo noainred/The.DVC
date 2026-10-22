@@ -25,6 +25,8 @@ const numOrNull = (v) => {
   return null;
 };
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+/** 0 이상 유한 수만(시각·바이트·개수·비율) — 그 밖은 null. */
+const posNum = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? n : null; };
 /** ISO 시각 → epoch ms. 못 읽으면 null(0 을 지어내지 않는다). */
 export function timeOf(v) {
   if (typeof v !== 'string' || !v) return null;
@@ -90,8 +92,13 @@ const PENDING_RE = /^(pending|waiting|queued)$/i;
  * @param {any} [raw.states]       GET /api/v1/jobs/states 응답
  * @param {any} [raw.backupObjects] GET /api/v1/backupObjects 응답(페이지를 합친 배열도 받는다)
  * @param {Array<{session:object, tasks:any, tasksError?:string}>} [raw.sessions] 실행 중 세션과 그 task 응답
- * @returns {{jobs:object[], vms:object[], counts:object, notes:string[]}}
- *   vms 원소: { n:이름, m:moref, h:vCenter 호스트, j:[작업 인덱스], rp:복원지점수|null, run:0|1|2(1=백업 중·2=대기), pg:진행률|null, by:'task'|'job'|'' }
+ * @param {Array<{session:object, tasks:any}>} [raw.lastTasks] 작업마다 마지막으로 끝난 세션과 그 task 응답
+ * @param {any} [raw.restorePoints]  GET /api/v1/restorePoints(페이지를 합친 배열)
+ * @param {Array<{backup:object, files:any}>} [raw.backups] GET /api/v1/backups 원소와 그 backupFiles(못 읽었으면 files:null)
+ * @returns {{jobs:object[], vms:object[], counts:object, notes:string[], backups:object[]}}
+ *   vms 원소: { n:이름, m:moref, h:vCenter 호스트, j:[작업 인덱스], rp:복원지점수|null, run:0|1|2(1=백업 중·2=대기), pg:진행률|null, by:'task'|'job'|'',
+ *              lt?:{r 결과, m 메시지, s 시작, e 끝, ps 처리, rs 읽음, ts 전송, j 작업}, rn?:복원 지점 수, ro?:가장 오래된, rl?:[최근 10개 시각], rb?:[백업 인덱스], sz?:VM 별 파일 용량 }
+ *   backups 원소: { id, name, j:작업 인덱스, repo, n:파일 수|null, bs:백업 파일 합|null, ds:데이터 크기 합|null, dd·cr:최근 파일의 중복 제거·압축 비율, lf:최근 파일 시각 }
  */
 export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   const notes = [];
@@ -107,13 +114,27 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   }
   const vmMap = new Map();
   const keyOf = (host, moref, name) => `${hostKey(host).full}|${moref ? `m:${moref}` : `n:${String(name).toLowerCase()}`}`;
+  // 같은 VM 을 응답마다 다르게 가리킨다 — 작업 includes 는 vCenter 이름을 주고 task·백업 객체는 안 줄 수 있다. vCenter 를 모르는 항목은
+  // 같은 moref(없으면 이름)의 항목이 **하나뿐일 때만** 그것에 합친다(둘 이상이면 어느 vCenter 것인지 모르므로 따로 둔다 — 대조가 다시 거른다).
+  const sameIdx = new Map(); // 'm:<moref>' | 'n:<이름>' → 항목 배열
+  const idKey = (moref, name) => (moref ? `m:${moref}` : `n:${String(name).toLowerCase()}`);
   const touch = (host, moref, name) => {
-    const k = keyOf(host, moref, name);
-    let e = vmMap.get(k);
+    const ik = idKey(moref, name);
+    const peers = sameIdx.get(ik) || [];
+    let e = vmMap.get(keyOf(host, moref, name));
+    if (!e && !host && peers.length > 1 && moref) { // moref 가 여러 vCenter 에 있으면 이름까지 같은 것이 하나뿐일 때만
+      const same = peers.filter((x) => String(x.n).toLowerCase() === String(name).toLowerCase());
+      if (same.length === 1) e = same[0];
+    }
+    // 한쪽이 vCenter 를 모르면 하나뿐인 같은 VM 에 합친다 — 둘 다 진짜 이름을 가지면 이름도 같아야 한다(다른 vCenter 의 같은 moref 를 합쳐 거짓 배지가 나지 않게).
+    const realName = (x) => x && x !== moref;
+    if (!e && peers.length === 1 && (!host || !peers[0].h)
+      && (!realName(name) || !realName(peers[0].n) || String(peers[0].n).toLowerCase() === String(name).toLowerCase())) e = peers[0];
     if (!e) {
       if (vmMap.size >= maxVms) { counts.skipped++; return null; }
       e = { n: name, m: moref, h: host, j: [], rp: null, run: 0, pg: null, by: '' };
-      vmMap.set(k, e);
+      vmMap.set(keyOf(host, moref, name), e);
+      peers.push(e); sameIdx.set(ik, peers);
     }
     if (!e.m && moref) e.m = moref;
     if (!e.h && host) e.h = host;
@@ -204,11 +225,101 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
     if (hadTasks) continue;
     for (const e of vmMap.values()) if (e.j.includes(idx) && !e.run) { e.run = 1; e.by = 'job'; }
   }
+  // ── 작업마다 마지막으로 끝난 세션의 VM 별 결과(v2.751 사용자 요청 '백업 완료 날짜·시간' · 상세 창) ─────────────────
+  // ⚠ 정직 기록: task 의 결과·시각·용량 필드 이름은 실서버로 확인하지 못했다(추정 — result 는 문자열 또는 {result,message},
+  //   시각은 creationTime/startTime·endTime, 용량은 progress.processedSize·readSize·transferredSize). 없으면 null 로 둔다(0 을 만들지 않는다).
+  for (const it of Array.isArray(raw.lastTasks) ? raw.lastTasks : []) {
+    const ses = isObj(it?.session) ? it.session : null;
+    if (!ses) continue;
+    const jid = s(ses.jobId, 64);
+    for (const t of listOf(it.tasks).slice(0, 20_000)) {
+      if (!isObj(t)) continue;
+      const name = s(t.name, 256) || s(t.objectName, 256);
+      const moref = morefOrEmpty(t.objectId);
+      if (!name && !moref) continue;
+      const res = s(isObj(t.result) ? t.result.result : t.result, 32);
+      const en = timeOf(t.endTime);
+      const e = touch(s(t.hostName, 256), moref, name || moref);
+      if (!e) continue;
+      if (e.lt && (e.lt.e ?? 0) >= (en ?? 0)) continue;
+      const pr = isObj(t.progress) ? t.progress : {};
+      const ji = jid && jobIdx.has(jid) ? jobIdx.get(jid) : null;
+      e.lt = {
+        r: res, m: s(isObj(t.result) ? t.result.message : '', 300), s: timeOf(t.creationTime) ?? timeOf(t.startTime), e: en,
+        ps: numOrNull(pr.processedSize ?? t.processedSize), rs: numOrNull(pr.readSize ?? t.readSize),
+        ts: numOrNull(pr.transferredSize ?? pr.transferedSize ?? t.transferredSize), j: ji,
+      };
+      if (ji != null && !e.j.includes(ji)) e.j.push(ji);
+      counts.lastTasks = (counts.lastTasks || 0) + 1;
+    }
+  }
+  // ── 복원 지점(VM 별 개수·가장 오래된·최근 10개 시각) ─────────────────────────────────────────────
+  // 복원 지점은 VM 을 이름(name)으로만 가리킨다(확인된 필드: creationTime·backupId·platformId). 한 Veeam 서버 안에서 같은 이름의
+  // VM 항목이 둘 이상이면(다른 vCenter 의 동명 VM) 어느 쪽 것인지 모르므로 붙이지 않고 센다.
+  const byLowerName = new Map();
+  for (const e of vmMap.values()) { const k = String(e.n || '').toLowerCase(); byLowerName.set(k, byLowerName.has(k) ? null : e); }
+  const rpOwner = new Map(); // 복원 지점 id → VM 항목(파일 용량을 VM 에 돌리는 데 쓴다)
+  const rpLists = new Map();
+  let rpAmbiguous = 0;
+  for (const p of listOf(raw.restorePoints).slice(0, 200_000)) {
+    if (!isObj(p)) continue;
+    const plat = s(p.platformName, 32);
+    if (plat && !/^vmware$/i.test(plat)) continue;
+    const name = s(p.name, 256);
+    const t = timeOf(p.creationTime);
+    if (!name || t == null) continue;
+    const e = byLowerName.get(name.toLowerCase());
+    if (e === null) { rpAmbiguous++; continue; }
+    if (!e) continue; // 이 서버가 VM 으로 모르는 이름(컨테이너로만 든 VM 은 백업 객체로 이미 잡힌다)
+    let l = rpLists.get(e); if (!l) { l = []; rpLists.set(e, l); }
+    const id = s(p.id, 64);
+    l.push({ t, b: s(p.backupId, 64) });
+    if (id) rpOwner.set(id, e);
+  }
+  // ── 백업(체인)과 그 파일 — 용량 ───────────────────────────────────────────────────────────────
+  // ⚠ 추정: /api/v1/backups/{id}/backupFiles 의 원소가 backupSize·dataSize·dedupRatio·compressRatio·creationTime·objectRestorePointIds 를 준다
+  //   (Enterprise Manager API 의 같은 이름 필드로 확인 — B&R v1 판은 미확인). 없으면 용량은 '—'.
+  const backups = [];
+  const bIdx = new Map();
+  for (const it of (Array.isArray(raw.backups) ? raw.backups : []).slice(0, 500)) {
+    const b = isObj(it?.backup) ? it.backup : null;
+    const id = b ? s(b.id, 64) : '';
+    if (!id || bIdx.has(id)) continue;
+    const files = it.files == null ? null : listOf(it.files);
+    let bs = null; let ds = null; let lf = null; let dd = null; let cr = null;
+    for (const f of files || []) {
+      if (!isObj(f)) continue;
+      const fb = numOrNull(f.backupSize); const fd = numOrNull(f.dataSize); const ft = timeOf(f.creationTime);
+      if (fb != null) bs = (bs ?? 0) + fb;
+      if (fd != null) ds = (ds ?? 0) + fd;
+      if (ft != null && (lf == null || ft > lf)) { lf = ft; dd = numOrNull(f.dedupRatio); cr = numOrNull(f.compressRatio); }
+      // 파일 하나가 이 VM 의 복원 지점만 담으면(VM 별 백업 파일) 그 용량을 VM 에 돌린다 — 여러 VM 이 섞인 파일은 나누지 않는다.
+      const ids = Array.isArray(f.objectRestorePointIds) ? f.objectRestorePointIds.filter((x) => typeof x === 'string') : [];
+      if (fb != null && ids.length) {
+        const owners = new Set(ids.map((x) => rpOwner.get(x)).filter(Boolean));
+        if (owners.size === 1 && ids.every((x) => rpOwner.has(x))) { const o = [...owners][0]; o.sz = (o.sz ?? 0) + fb; }
+      }
+    }
+    const ji = jobIdx.has(s(b.jobId, 64)) ? jobIdx.get(s(b.jobId, 64)) : null;
+    bIdx.set(id, backups.length);
+    backups.push({ id, name: s(b.name, 128), j: ji, repo: s(b.repositoryName, 128) || s(b.repositoryId, 64), n: files ? files.length : null, bs, ds, dd, cr, lf });
+  }
+  for (const [e, l] of rpLists) {
+    l.sort((a, b2) => b2.t - a.t);
+    e.rn = l.length;
+    e.ro = l[l.length - 1].t;
+    e.rl = l.slice(0, 10).map((x) => x.t);
+    e.rb = [...new Set(l.map((x) => bIdx.get(x.b)).filter((x) => x != null))].slice(0, 5);
+    if (e.rp == null || e.rp === -1) e.rp = l.length;
+  }
+  if (rpAmbiguous) notes.push(`이름이 같은 VM 이 둘 이상이라 복원 지점 ${rpAmbiguous}개를 어느 VM 것인지 정하지 못했습니다`);
+  counts.restorePoints = [...rpLists.values()].reduce((a, l) => a + l.length, 0);
+  counts.backups = backups.length;
   const vms = [...vmMap.values()];
   for (const e of vms) { if (e.run === 1) counts.running++; else if (e.run === 2) counts.pending++; }
   if (counts.skipped) notes.push(`VM 상한(${maxVms})을 넘어 ${counts.skipped}건을 버렸습니다`);
   if (counts.containers) notes.push(`작업이 폴더·클러스터·태그 같은 컨테이너 ${counts.containers}개를 포함합니다 — 그 안의 VM 은 복원 지점이 생기거나 백업 중일 때만 표시됩니다`);
-  return { jobs, vms, counts, notes };
+  return { jobs, vms, counts, notes, backups };
 }
 
 /* ── 중앙 수신 정제(엣지가 보낸 결과) ───────────────────────────────────────── */
@@ -230,6 +341,12 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     containers: Math.max(0, Math.round(numOrNull(j.containers) ?? 0)), vms: Math.max(0, Math.round(numOrNull(j.vms) ?? 0)),
   }));
   const nJobs = jobs.length;
+  const backups = (Array.isArray(r.backups) ? r.backups : []).slice(0, 500).filter(isObj).map((b) => {
+    const bj = numOrNull(b.j);
+    return { id: s(b.id, 64), name: s(b.name, 128), j: bj != null && Number.isInteger(bj) && bj >= 0 && bj < nJobs ? bj : null, repo: s(b.repo, 128),
+      n: posNum(b.n), bs: posNum(b.bs), ds: posNum(b.ds), dd: posNum(b.dd), cr: posNum(b.cr), lf: posNum(b.lf) };
+  });
+  const nBackups = backups.length;
   const vms = [];
   for (const v of (Array.isArray(r.vms) ? r.vms : []).slice(0, maxVms)) {
     if (!isObj(v)) continue;
@@ -239,17 +356,27 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     const rp = numOrNull(v.rp);
     const run = v.run === 1 || v.run === 2 ? v.run : 0;
     const pg = numOrNull(v.pg);
-    vms.push({ n, m, h: s(v.h, 256), j, rp: rp == null ? null : Math.max(-1, Math.round(rp)), run, pg: pg == null ? null : Math.max(0, Math.min(100, Math.round(pg))), by: v.by === 'task' || v.by === 'job' ? v.by : '' });
+    const out = { n, m, h: s(v.h, 256), j, rp: rp == null ? null : Math.max(-1, Math.round(rp)), run, pg: pg == null ? null : Math.max(0, Math.min(100, Math.round(pg))), by: v.by === 'task' || v.by === 'job' ? v.by : '' };
+    if (isObj(v.lt)) {
+      const lj = numOrNull(v.lt.j);
+      out.lt = { r: s(v.lt.r, 32), m: s(v.lt.m, 300), s: posNum(v.lt.s), e: posNum(v.lt.e), ps: posNum(v.lt.ps), rs: posNum(v.lt.rs), ts: posNum(v.lt.ts), j: lj != null && Number.isInteger(lj) && lj >= 0 && lj < nJobs ? lj : null };
+    }
+    if (Array.isArray(v.rl)) out.rl = v.rl.map(posNum).filter((x) => x != null).slice(0, 10);
+    if (v.rn != null) out.rn = posNum(v.rn);
+    if (v.ro != null) out.ro = posNum(v.ro);
+    if (v.sz != null) out.sz = posNum(v.sz);
+    if (Array.isArray(v.rb)) out.rb = v.rb.map((x) => numOrNull(x)).filter((x) => x != null && Number.isInteger(x) && x >= 0 && x < nBackups).slice(0, 5);
+    vms.push(out);
   }
   const c = isObj(r.counts) ? r.counts : {};
   const counts = {};
-  for (const k of ['jobs', 'vmJobs', 'containers', 'backupObjects', 'sessions', 'running', 'pending', 'skipped']) counts[k] = numOrNull(c[k]);
+  for (const k of ['jobs', 'vmJobs', 'containers', 'backupObjects', 'sessions', 'running', 'pending', 'skipped', 'lastTasks', 'restorePoints', 'backups']) counts[k] = numOrNull(c[k]);
   return {
     ok: r.ok === true, ts: Math.round(ts), ...(edgeTs != null ? { edgeTs } : {}), ms: numOrNull(r.ms),
     error: s(r.error, 600), kind: s(r.kind, 32), apiVersion: s(r.apiVersion, 32),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
     authStop: isObj(r.authStop) ? { since: numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
-    jobs, vms, counts,
+    jobs, vms, counts, backups,
   };
 }
 
@@ -275,7 +402,14 @@ export function jobCountsAsBackup(jb) {
  * @param {Array<{server:{id,name}, result:object}>} results
  * @returns {{ byVm: Record<string, object>, unmatched:number, otherVcenter:number, ambiguous:number }}
  */
-export function matchToVcenter(vc, vms, results) {
+/** 마지막 백업 완료 시각 — 마지막 task 가 성공·경고로 끝났으면 그 끝 시각(완료), 아니면 최신 복원 지점 생성 시각. */
+export function lastBackupOf(e) {
+  if (e?.lt && /^(success|warning)$/i.test(String(e.lt.r || '')) && e.lt.e != null) return { t: e.lt.e, src: 'task' };
+  if (Array.isArray(e?.rl) && e.rl.length) return { t: e.rl[0], src: 'rp' };
+  return null;
+}
+
+export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
   const prefix = `${vc.id}:`;
   const byMoref = new Map();
   const byName = new Map();
@@ -295,7 +429,8 @@ export function matchToVcenter(vc, vms, results) {
     const jobs = Array.isArray(result.jobs) ? result.jobs : [];
     for (const e of result.vms) {
       const okJobs = (e.j || []).map((ji) => jobs[ji]).filter(jobCountsAsBackup);
-      const hasEvidence = okJobs.length > 0 || (e.rp != null && e.rp !== 0) || e.run === 1 || e.run === 2;
+      const taskOk = !!(e.lt && /^(success|warning)$/i.test(String(e.lt.r || '')));
+      const hasEvidence = okJobs.length > 0 || (e.rp != null && e.rp !== 0) || e.run === 1 || e.run === 2 || taskOk;
       if (!hasEvidence) continue;
       if (e.h && !sameHost(e.h, vc.host)) { otherVcenter++; continue; }
       const nm = String(e.n || '').trim().toLowerCase();
@@ -309,8 +444,11 @@ export function matchToVcenter(vc, vms, results) {
         id = hit;
       }
       if (!id) { unmatched++; continue; }
-      const cur = byVm[id] || (byVm[id] = { jobs: [], run: 0, pg: null, by: '', rp: null, lastRun: null, lastResult: '', servers: [] });
+      const cur = byVm[id] || (byVm[id] = { jobs: [], run: 0, pg: null, by: '', rp: null, lastRun: null, lastResult: '', servers: [], lb: null, lbSrc: '' });
       if (!cur.servers.includes(server.name)) cur.servers.push(server.name);
+      const lb = lastBackupOf(e);
+      if (lb && (cur.lb == null || lb.t > cur.lb)) { cur.lb = lb.t; cur.lbSrc = lb.src; }
+      if (refsFor && id === refsFor) (cur.refs || (cur.refs = [])).push({ server, result, entry: e });
       for (const jb of okJobs) {
         if (cur.jobs.includes(jb.name)) continue;
         cur.jobs.push(jb.name);
@@ -335,3 +473,50 @@ export function withoutStaleRunning(result, { failed = false, now = Date.now(), 
   if (!stale) return result;
   return { ...result, runningStale: true, vms: result.vms.map((v) => (v.run ? { ...v, run: 0, pg: null, by: '' } : v)) };
 }
+
+/**
+ * VM 1대의 백업 상세(배지를 누르면 뜨는 창) — matchToVcenter(…, { refsFor }) 가 모은 원소들로 만든다(순수).
+ * 값이 없으면 null 로 둔다(화면이 '—' 와 이유를 말한다). 백업(체인) 용량은 **그 백업 전체**다 — 작업 단위 백업이면 다른 VM 과 공유한다.
+ * @returns {object|null}
+ */
+export function buildVmDetail(cur) {
+  if (!cur || !Array.isArray(cur.refs) || !cur.refs.length) return null;
+  const jobsOut = []; const backupsOut = []; const rlAll = [];
+  let rn = null; let ro = null; let sz = null; let lastTask = null; const servers = [];
+  for (const { server, result, entry: e } of cur.refs) {
+    const jobs = Array.isArray(result.jobs) ? result.jobs : [];
+    if (!servers.some((x) => x.name === server.name)) servers.push({ name: server.name, ts: result.ts ?? null });
+    for (const ji of e.j || []) {
+      const jb = jobs[ji];
+      if (!jb || jobsOut.some((x) => x.name === jb.name)) continue;
+      jobsOut.push({ name: jb.name, type: jb.type || '', status: jb.status || '', lastResult: jb.lastResult || '', lastRun: jb.lastRun ?? null, nextRun: jb.nextRun ?? null,
+        disabled: jb.disabled === true, running: jb.running === true, counts: jobCountsAsBackup(jb) });
+    }
+    if (e.rn != null) rn = (rn ?? 0) + e.rn;
+    if (e.ro != null) ro = ro == null ? e.ro : Math.min(ro, e.ro);
+    if (Array.isArray(e.rl)) for (const t of e.rl.slice(0, 10)) rlAll.push(t);
+    if (e.sz != null) sz = (sz ?? 0) + e.sz;
+    if (e.lt && (lastTask == null || (e.lt.e ?? 0) > (lastTask.end ?? 0))) {
+      const lj = e.lt.j != null ? jobs[e.lt.j] : null;
+      lastTask = { result: e.lt.r || '', message: e.lt.m || '', start: e.lt.s ?? null, end: e.lt.e ?? null,
+        durationSec: e.lt.s != null && e.lt.e != null && e.lt.e >= e.lt.s ? Math.round((e.lt.e - e.lt.s) / 1000) : null,
+        processed: e.lt.ps ?? null, read: e.lt.rs ?? null, transferred: e.lt.ts ?? null, job: lj ? lj.name : '' };
+    }
+    const bks = Array.isArray(result.backups) ? result.backups : [];
+    for (const bi of e.rb || []) {
+      const b = bks[bi];
+      if (!b || backupsOut.some((x) => x.id === b.id)) continue;
+      backupsOut.push({ id: b.id, name: b.name, job: b.j != null && jobs[b.j] ? jobs[b.j].name : '', repo: b.repo || '', files: b.n ?? null,
+        backupSize: b.bs ?? null, dataSize: b.ds ?? null, dedup: b.dd ?? null, compress: b.cr ?? null, lastFile: b.lf ?? null });
+    }
+  }
+  rlAll.sort((a, b) => b - a);
+  return {
+    running: cur.run === 1 ? { progress: cur.pg ?? null, by: cur.by || '' } : null, pending: cur.run === 2,
+    lastBackup: cur.lb ?? null, lastBackupSrc: cur.lbSrc || '',
+    lastTask,
+    restorePoints: { count: rn ?? (cur.rp != null && cur.rp >= 0 ? cur.rp : null), oldest: ro, latest: rlAll[0] ?? null, recent: [...new Set(rlAll)].slice(0, 10) },
+    vmSize: sz, backups: backupsOut, jobs: jobsOut, servers,
+  };
+}
+

@@ -10,7 +10,8 @@
  *  · 값이 없으면 단위를 붙이지 않는다(진행률 null → '%' 없음). 백틱 금지 · 강조는 **만.
  */
 
-const fmtTime = (ms) => {
+/** 'YYYY-MM-DD HH:mm'(상세 창·툴팁 공용 — 화면마다 다른 날짜 모양을 쓰지 않는다). 값이 없으면 ''. */
+export const fmtTime = (ms) => {
   if (ms == null || !Number.isFinite(Number(ms))) return '';
   const d = new Date(Number(ms));
   const p = (n) => String(n).padStart(2, '0');
@@ -27,14 +28,25 @@ export function resultLabel(r) {
   return t;
 }
 
+/** 'MM-DD HH:mm'(배지 칸이 좁다 — 연도는 툴팁·상세 창에). 값이 없으면 ''. */
+export function shortTime(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return '';
+  const d = new Date(Number(ms));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /**
- * VM 한 대의 배지. 없으면 null.
- * @returns {null|{label:string, color:'green'|'amber'|'blue', title:string}}
+ * VM 한 대의 배지. 없으면 null. progress 는 '백업 중' 일 때 진행률(0~100, 모르면 null — 막대를 그리지 않는다).
+ * v2.751 사용자 요청: 'Veeam' 배지에 **백업이 완료된 날짜·시간** — 마지막 task 가 성공·경고로 끝난 시각(lbSrc 'task'),
+ *   그것을 모르면 최신 복원 지점이 만들어진 시각(lbSrc 'rp' — 완료 시각이 아니라고 툴팁이 말한다).
+ * @returns {null|{label:string, color:'green'|'amber'|'blue', title:string, progress:(number|null)}}
  */
 export function veeamBadge(e) {
   if (!e || typeof e !== 'object') return null;
   const jobs = Array.isArray(e.jobs) ? e.jobs.filter((x) => typeof x === 'string' && x) : [];
   const lines = [];
+  if (Number.isFinite(e.lb)) lines.push(e.lbSrc === 'rp' ? `최신 복원 지점 생성: ${fmtTime(e.lb)}(완료 시각은 Veeam 이 VM 단위로 알려 주지 않았습니다)` : `마지막 백업 완료: ${fmtTime(e.lb)}`);
   if (jobs.length) lines.push(`작업: ${jobs.slice(0, 5).join(', ')}${jobs.length > 5 ? ` 외 ${jobs.length - 5}개` : ''}`);
   const lr = fmtTime(e.lastRun);
   const res = resultLabel(e.lastResult);
@@ -42,13 +54,15 @@ export function veeamBadge(e) {
   if (Number.isFinite(e.rp) && e.rp > 0) lines.push(`복원 지점 ${e.rp}개`);
   else if (e.rp === -1) lines.push('복원 지점 있음(개수 모름)');
   if (Array.isArray(e.servers) && e.servers.length) lines.push(`Veeam 서버: ${e.servers.join(', ')}`);
+  lines.push('누르면 백업 상세(복원 지점·용량·마지막 결과)를 엽니다');
   if (e.run === 1) {
-    const pg = Number.isFinite(e.pg) ? ` ${e.pg}%` : '';
-    const how = e.by === 'job' ? '작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)' : '이 VM 을 지금 백업하고 있습니다';
-    return { label: `Veeam 백업 중${pg}`, color: 'amber', title: [how, ...lines].join('\n') };
+    const pg = Number.isFinite(e.pg) ? e.pg : null;
+    const how = e.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)' : 'Veeam 이 이 VM 을 지금 백업하고 있습니다';
+    return { label: pg != null ? `백업 중 ${pg}%` : '백업 중', color: 'amber', title: [how, ...lines].join('\n'), progress: pg };
   }
-  if (e.run === 2) return { label: 'Veeam 대기', color: 'blue', title: ['실행 중인 작업에서 차례를 기다리고 있습니다', ...lines].join('\n') };
-  return { label: 'Veeam', color: 'green', title: ['Veeam 백업 대상(작업 포함 또는 복원 지점 있음)', ...lines].join('\n') };
+  if (e.run === 2) return { label: '대기', color: 'blue', title: ['Veeam 실행 중인 작업에서 차례를 기다리고 있습니다', ...lines].join('\n'), progress: null };
+  const when = shortTime(e.lb);
+  return { label: when ? `Veeam ${when}` : 'Veeam', color: 'green', title: ['Veeam 백업 대상(작업 포함 또는 복원 지점 있음)', ...lines].join('\n'), progress: null };
 }
 
 /** 배지 집계 — 화면 요약 줄. */
@@ -63,30 +77,88 @@ export function veeamCounts(byVm) {
 }
 
 /**
- * 요약 줄(체크박스 옆 안내). tone: ok | warn | muted.
- * @returns {{ tone:string, text:string, details:string[] }}
+ * 요약 카드(v2.751 시안 — 체크했을 때만 보인다). tone: ok | warn | muted.
+ * @param {object|null} d   /api/veeam/badges 응답
+ * @param {{loading?:boolean, error?:string, vmTotal?:number}} o
+ * @returns {{ tone:string, kind:'loading'|'error'|'unconfigured'|'ok', text:string, stats:null|{total:number, running:number, pending:number, vmTotal:(number|null)},
+ *   source:string, basis:string, warnings:string[], details:string[], demo:boolean }}
  */
-export function veeamSummary(d, { loading = false, error = '' } = {}) {
-  if (error) return { tone: 'warn', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}`, details: [] };
-  if (!d) return { tone: 'muted', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '', details: [] };
-  if (!d.configured) return { tone: 'muted', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요.', details: [] };
+export function veeamSummary(d, { loading = false, error = '', vmTotal = null } = {}) {
+  const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false };
+  if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
+  if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
+  if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금 배지는 VM 메모의 Veeam 기록(휴리스틱)입니다.' };
   const c = veeamCounts(d.byVm);
   const servers = Array.isArray(d.servers) ? d.servers : [];
-  const details = [];
-  for (const s of servers) {
-    if (s.ok === false) {
-      const last = s.lastOkTs ? ` · 표시는 마지막 성공(${fmtTime(s.lastOkTs)}) 기준` : ' · 아직 성공한 적이 없어 이 서버의 VM 은 표시되지 않습니다';
-      details.push(`${s.name}: ${s.authStopped ? '인증 실패로 주기 수집 정지' : '읽기 실패'} — ${s.error || '사유 미상'}${last}`);
-    } else if (s.ok == null) details.push(`${s.name}: 아직 읽은 결과가 없습니다(담당 노드의 첫 수집을 기다리는 중)`);
-    for (const n of Array.isArray(s.notes) ? s.notes : []) details.push(`${s.name}: ${n}`);
+  const warnings = []; const details = [];
+  for (const sv of servers) {
+    if (sv.ok === false) {
+      const last = sv.lastOkTs ? ` — 표시는 마지막 성공(${fmtTime(sv.lastOkTs)}) 기준입니다` : ' — 아직 성공한 적이 없어 이 서버의 VM 은 표시되지 않습니다';
+      warnings.push(`${sv.name} ${sv.authStopped ? '인증 실패로 주기 수집을 멈췄습니다' : '읽기 실패'}: ${sv.error || '사유 미상'}${last}`);
+    } else if (sv.ok == null) details.push(`${sv.name}: 아직 읽은 결과가 없습니다(담당 노드의 첫 수집을 기다리는 중)`);
+    for (const n of Array.isArray(sv.notes) ? sv.notes : []) details.push(`${sv.name}: ${n}`);
   }
   if (d.otherVcenter) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${d.otherVcenter}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
   if (d.ambiguous) details.push(`이름이 같은 VM 이 둘 이상이라 고르지 못한 항목 ${d.ambiguous}개`);
   if (d.unmatched) details.push(`이 vCenter 에서 찾지 못한 Veeam 항목 ${d.unmatched}개(삭제·이름 변경된 VM 일 수 있습니다)`);
-  const when = servers.map((s) => s.lastOkTs).filter((x) => Number.isFinite(x));
-  const at = when.length ? ` · 기준 ${fmtTime(Math.min(...when))}` : '';
-  const demo = d.demo ? ' (데모 데이터)' : '';
-  const run = c.running || c.pending ? ` · **백업 중 ${c.running}**${c.pending ? ` · 대기 ${c.pending}` : ''}` : ' · 지금 백업 중인 VM 없음';
-  const tone = servers.some((s) => s.ok === false) ? 'warn' : 'ok';
-  return { tone, text: `Veeam 백업 대상 **${c.total} VM**${run}${at}${demo} — 배지가 없는 VM 은 백업 여부가 확인되지 않은 것입니다(백업 안 됨이 아닙니다).`, details };
+  const when = servers.map((sv) => sv.lastOkTs).filter((x) => Number.isFinite(x));
+  return {
+    tone: warnings.length ? 'warn' : 'ok', kind: 'ok', text: '',
+    stats: { total: c.total, running: c.running, pending: c.pending, vmTotal: Number.isFinite(vmTotal) ? vmTotal : null },
+    source: servers.length ? `서버 ${servers.map((sv) => sv.name).join(', ')}` : '',
+    basis: when.length ? `기준 ${fmtTime(Math.min(...when))}` : '',
+    warnings, details, demo: !!d.demo,
+  };
+}
+
+/** 바이트 → 사람이 읽는 값(TB 까지). 못 읽은 값은 '—'(0 은 0 B). */
+export function sizeText(n) {
+  if (n == null || n === '' || !Number.isFinite(Number(n))) return '—';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let v = Number(n); let i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+/** 초 → 'N시간 M분' · 'M분 S초'. 없으면 '—'. */
+export function durationText(sec) {
+  if (sec == null || !Number.isFinite(Number(sec)) || sec < 0) return '—';
+  const s0 = Math.round(Number(sec));
+  const h = Math.floor(s0 / 3600); const m = Math.floor((s0 % 3600) / 60); const r = s0 % 60;
+  return h ? `${h}시간 ${m}분` : m ? `${m}분${r ? ` ${r}초` : ''}` : `${r}초`;
+}
+
+/**
+ * 상세 창의 구획(순수 — 화면은 이것을 그대로 그린다). 값이 없으면 '—' 와 그 이유를 note 에 적는다(지어내지 않는다).
+ * @returns {{ status:{tone:string,text:string,progress:(number|null)}, sections:Array<{title:string, rows:Array<[string,string]>, note?:string}>,
+ *   recent:number[], backups:object[], jobs:object[] }}
+ */
+export function veeamDetailView(detail) {
+  if (!detail) return { status: { tone: 'muted', text: '이 VM 에 대한 Veeam 백업 정보가 없습니다 — 백업 대상이 아니거나, 폴더·태그 단위 작업에 들어 있어 아직 복원 지점이 없을 수 있습니다(백업 안 됨으로 단정하지 않습니다).', progress: null }, sections: [], recent: [], backups: [], jobs: [] };
+  let status;
+  if (detail.running) status = { tone: 'amber', text: detail.running.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 모릅니다)' : `지금 백업하고 있습니다${Number.isFinite(detail.running.progress) ? ` · ${detail.running.progress}%` : ''}`, progress: Number.isFinite(detail.running.progress) ? detail.running.progress : null };
+  else if (detail.pending) status = { tone: 'blue', text: '실행 중인 작업에서 차례를 기다리고 있습니다', progress: null };
+  else status = { tone: 'green', text: detail.lastBackup ? `${detail.lastBackupSrc === 'rp' ? '최신 복원 지점' : '마지막 백업 완료'} ${fmtTime(detail.lastBackup)}` : 'Veeam 백업 대상입니다', progress: null };
+  const lt = detail.lastTask;
+  const sections = [];
+  sections.push({
+    title: '마지막 백업',
+    rows: lt ? [
+      ['결과', resultLabel(lt.result) || '—'], ['작업', lt.job || '—'], ['시작', fmtTime(lt.start) || '—'], ['완료', fmtTime(lt.end) || '—'],
+      ['소요 시간', durationText(lt.durationSec)], ['처리한 데이터', sizeText(lt.processed)], ['읽은 데이터', sizeText(lt.read)], ['전송한 데이터', sizeText(lt.transferred)],
+      ...(lt.message ? [['메시지', lt.message]] : []),
+    ] : [['완료 시각', fmtTime(detail.lastBackup) || '—']],
+    note: lt ? (lt.processed == null && lt.read == null && lt.transferred == null ? 'Veeam 이 이 판의 REST 응답에 VM 별 처리 용량을 주지 않았습니다.' : '') : 'Veeam 이 이 VM 의 마지막 작업 결과(task)를 주지 않아 복원 지점 시각만 보여 줍니다.',
+  });
+  const rp = detail.restorePoints || {};
+  sections.push({
+    title: '복원 지점',
+    rows: [['개수', rp.count != null ? `${rp.count}개` : '—'], ['가장 최근', fmtTime(rp.latest) || '—'], ['가장 오래된', fmtTime(rp.oldest) || '—']],
+    note: rp.count == null ? '복원 지점 목록을 읽지 못했습니다.' : '',
+  });
+  sections.push({
+    title: '용량',
+    rows: [['이 VM 의 백업 파일 합', sizeText(detail.vmSize)]],
+    note: detail.vmSize == null ? 'VM 별 용량은 VM 마다 따로 저장하는 백업 파일(per-machine)일 때만 알 수 있습니다. 아래 백업(체인) 용량은 같은 작업의 다른 VM 과 공유합니다.' : '',
+  });
+  return { status, sections, recent: Array.isArray(rp.recent) ? rp.recent : [], backups: Array.isArray(detail.backups) ? detail.backups : [], jobs: Array.isArray(detail.jobs) ? detail.jobs : [] };
 }

@@ -36,9 +36,9 @@ export function putResult(serverId, result, { via = 'local', agent = '' } = {}) 
   if (!m.has(serverId) && m.size >= MAX_SERVERS) return false;
   const prev = m.get(serverId);
   const rec = { result, via, agent: String(agent || ''), at: Date.now() };
-  if (result?.ok) rec.lastOk = { ts: result.ts, jobs: result.jobs, vms: result.vms, counts: result.counts, notes: result.notes };
+  if (result?.ok) rec.lastOk = { ts: result.ts, jobs: result.jobs, vms: result.vms, counts: result.counts, notes: result.notes, backups: result.backups };
   else if (prev?.lastOk) rec.lastOk = prev.lastOk;
-  else if (prev?.result?.ok) rec.lastOk = { ts: prev.result.ts, jobs: prev.result.jobs, vms: prev.result.vms, counts: prev.result.counts, notes: prev.result.notes };
+  else if (prev?.result?.ok) rec.lastOk = { ts: prev.result.ts, jobs: prev.result.jobs, vms: prev.result.vms, counts: prev.result.counts, notes: prev.result.notes, backups: prev.result.backups };
   m.set(serverId, rec);
   writer().save();
   return true;

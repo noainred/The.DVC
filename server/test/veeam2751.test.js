@@ -257,6 +257,70 @@ test('검토 #8: 오류 문구는 가린 뒤에 자르고, URL 인코딩된 비�
     (e) => !e.message.includes(pw) && !e.message.includes(encodeURIComponent(pw)) && !e.message.includes('Pw+Enc') && !e.message.includes('Pw%2BEnc'));
 });
 
+test('상세: 마지막 task(완료 시각·결과·용량) · 복원 지점(개수·최근) · 백업 파일 용량 → VM 상세 창 값', () => {
+  const r = P.buildServerResult({
+    jobs: JOBS, states: STATES, backupObjects: BOBJ,
+    lastTasks: [{ session: { id: 's9', jobId: 'j1', state: 'Stopped' }, tasks: { data: [
+      { name: 'web01', objectId: 'vm-101', state: 'Stopped', result: { result: 'Success', message: '' }, creationTime: '2026-10-21T16:00:00Z', endTime: '2026-10-21T16:42:00Z', progress: { processedSize: 1000, readSize: 400, transferredSize: 100 } },
+    ] } }],
+    restorePoints: { data: [
+      { id: 'rp1', name: 'web01', platformName: 'VMware', creationTime: '2026-10-20T16:00:00Z', backupId: 'b1' },
+      { id: 'rp2', name: 'web01', platformName: 'VMware', creationTime: '2026-10-21T16:00:00Z', backupId: 'b1' },
+      { id: 'rpx', name: 'unknown-vm', platformName: 'VMware', creationTime: '2026-10-21T16:00:00Z', backupId: 'b1' },
+    ] },
+    backups: [{ backup: { id: 'b1', name: 'BJ-Web', jobId: 'j1', repositoryName: 'Repo1' }, files: { data: [
+      { backupSize: 300, dataSize: 900, creationTime: '2026-10-20T16:30:00Z', objectRestorePointIds: ['rp1'] },
+      { backupSize: 50, dataSize: 120, creationTime: '2026-10-21T16:40:00Z', dedupRatio: 1.5, compressRatio: 2, objectRestorePointIds: ['rp2'] },
+      { backupSize: 999, creationTime: '2026-10-19T16:40:00Z', objectRestorePointIds: ['rp1', 'rpx'] },
+    ] } }],
+  });
+  const web = r.vms.find((v) => v.n === 'web01');
+  assert.equal(web.lt.r, 'Success'); assert.equal(web.lt.e, Date.parse('2026-10-21T16:42:00Z')); assert.equal(web.lt.ps, 1000);
+  assert.equal(web.rn, 2); assert.equal(web.rl[0], Date.parse('2026-10-21T16:00:00Z'));
+  assert.equal(web.sz, 350, 'VM 하나의 복원 지점만 담은 파일만 그 VM 용량 — 다른 것이 섞인 파일(999)은 나누지 않는다');
+  assert.equal(r.backups[0].bs, 1349); assert.equal(r.backups[0].dd, 1.5, '최근 파일의 비율');
+  // 정제 왕복 + 대조 + 상세
+  const clean = P.sanitizeServerResult({ ...r, ok: true, ts: Date.now() });
+  assert.equal(clean.vms.find((v) => v.n === 'web01').sz, 350);
+  const vms = [{ id: `${VC}:vm-101`, name: 'web01' }];
+  const m = P.matchToVcenter({ id: VC, host: 'vc01.corp.local' }, vms, [{ server: { id: 'v', name: 'VBR-A' }, result: clean }], { refsFor: `${VC}:vm-101` });
+  const cur = m.byVm[`${VC}:vm-101`];
+  assert.equal(cur.lb, Date.parse('2026-10-21T16:42:00Z')); assert.equal(cur.lbSrc, 'task', '완료 시각은 task 의 끝');
+  const d = P.buildVmDetail(cur);
+  assert.equal(d.lastTask.durationSec, 42 * 60); assert.equal(d.lastTask.job, 'BJ-Web');
+  assert.equal(d.restorePoints.count, 2); assert.equal(d.restorePoints.oldest, Date.parse('2026-10-20T16:00:00Z'));
+  assert.equal(d.vmSize, 350); assert.equal(d.backups[0].repo, 'Repo1'); assert.equal(d.backups[0].files, 3);
+  assert.deepEqual(d.servers.map((x) => x.name), ['VBR-A']);
+  // task 가 실패면 완료 시각은 복원 지점 생성 시각으로(완료라고 말하지 않는다)
+  assert.deepEqual(P.lastBackupOf({ lt: { r: 'Failed', e: 5 }, rl: [3] }), { t: 3, src: 'rp' });
+  assert.equal(P.lastBackupOf({}), null);
+});
+
+test('상세: 같은 서버 안에 동명 VM 이 둘이면 복원 지점을 어느 쪽에도 붙이지 않는다 · 정제는 음수·범위 밖 인덱스를 버린다', () => {
+  const r = P.buildServerResult({
+    jobs: { data: [{ id: 'j', name: 'J', virtualMachines: { includes: [
+      { type: 'VirtualMachine', hostName: 'vcA.corp', name: 'dup', objectId: 'vm-1' }, { type: 'VirtualMachine', hostName: 'vcB.corp', name: 'dup', objectId: 'vm-1' },
+    ] } }] },
+    restorePoints: [{ id: 'p', name: 'dup', creationTime: '2026-10-21T00:00:00Z', backupId: 'b' }],
+  });
+  assert.ok(r.vms.every((v) => v.rn == null));
+  assert.ok(r.notes.some((n) => /복원 지점 1개/.test(n)));
+  const c = P.sanitizeServerResult({ ok: true, ts: 1, jobs: [], backups: [{ id: 'b', bs: -5, j: 3 }], vms: [{ n: 'a', m: 'vm-1', rb: [0, 7], rl: [5, -1, 'x'], sz: -3, lt: { r: 'Success', e: -1, j: 9 } }] });
+  assert.equal(c.backups[0].bs, null); assert.equal(c.backups[0].j, null);
+  assert.deepEqual(c.vms[0].rb, [0]); assert.deepEqual(c.vms[0].rl, [5]); assert.equal(c.vms[0].sz, null);
+  assert.equal(c.vms[0].lt.e, null); assert.equal(c.vms[0].lt.j, null);
+});
+
+test('상세: vCenter 를 모르는 항목은 같은 moref 라도 이름이 다르면 합치지 않는다(다른 vCenter 의 VM)', () => {
+  const r = P.buildServerResult({
+    jobs: { data: [{ id: 'j', name: 'J', virtualMachines: { includes: [{ type: 'VirtualMachine', hostName: 'vcA.corp', name: 'alpha', objectId: 'vm-7' }] } }] },
+    backupObjects: [{ name: 'beta', type: 'VM', platformName: 'VMware', objectId: 'vm-7', restorePointsCount: 4 }],
+  });
+  const alpha = r.vms.find((v) => v.n === 'alpha');
+  assert.equal(alpha.rp, null, 'beta 의 복원 지점이 alpha 에 붙지 않는다');
+  assert.ok(r.vms.find((v) => v.n === 'beta'));
+});
+
 /* ═══════════════ 엣지 진입 — 실제 pull·push → 실제 centralRouter ═══════════════ */
 let port = 0;
 before(async () => {
@@ -349,6 +413,15 @@ test('배지 라우트: 범위 밖 vCenter 404 · 등록 없음 configured:false
     assert.equal(rv.body.byVm[`${VC}:vm-101`]?.run ?? 0, 0, '실패해 마지막 성공분을 쓰면 백업 중을 지운다');
     user = { username: 'adm', role: 'admin' };
     assert.match((await get(VC)).body.servers.find((x) => x.name === 'VBR-E').error, /vbr-e\.corp\.local/, '관리자는 원문을 본다');
+    // 상세 라우트 — 범위 밖 404 · 없는 VM 404 · 있는 VM 은 상세
+    const getD = async (vc, vm) => { const res = await fetch(`http://127.0.0.1:${srv.address().port}/api/veeam/vm-detail?vcenterId=${encodeURIComponent(vc)}&vmId=${encodeURIComponent(vm)}`); return { status: res.status, body: await res.json() }; };
+    user = { username: 'u', role: 'viewer', scope: { vcenters: [VC] } };
+    assert.equal((await getD('eu:vc02', 'eu:vc02:vm-5')).status, 404);
+    assert.equal((await getD(VC, `${VC}:vm-999`)).status, 404);
+    const dd = await getD(VC, `${VC}:vm-101`);
+    assert.equal(dd.status, 200); assert.equal(dd.body.vm.name, 'web01');
+    assert.ok(dd.body.detail && dd.body.detail.jobs.length >= 1, JSON.stringify(dd.body).slice(0, 300));
+    assert.ok(!JSON.stringify(dd.body).includes('vbr-e.corp.local'));
     user = { username: 'v', role: 'viewer' };
     for (const d of R.listServers()) R.deleteServer(d.id);
     const r2 = await get('eu:vc02');
