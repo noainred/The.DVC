@@ -237,6 +237,8 @@ function VeeamVcAccounts() {
     setBusy(true); setMsg('');
     try {
       const r = await sendJson('/admin/veeam/vc-accounts', 'PUT', { accounts: text });
+      // 서버가 거부(400·409 {ok:false, reason})하면 저장했다고 말하지 않는다(v2.742 WEB-02 · audit2727e 스윕).
+      if (!r?.ok) { setMsg(`저장하지 못했습니다: ${r?.reason || '서버가 거부했습니다'}`); setBusy(false); return; }
       setD(r); setText((r.manual || []).join('\n'));
       setMsg(`저장했습니다 — ${r.saved}개${r.dropped ? ` · 형식·상한으로 버림 ${r.dropped}개` : ''}. 엣지는 다음 pull 때 받습니다.`);
     } catch (e) { setMsg(`저장하지 못했습니다: ${e.message || e}`); }
@@ -246,6 +248,7 @@ function VeeamVcAccounts() {
     setBusy(true); setMsg('');
     try {
       const r = await sendJson('/admin/veeam/vc-accounts', 'PUT', { forget: [name] });
+      if (!r?.ok) { setMsg(`지우지 못했습니다: ${r?.reason || '서버가 거부했습니다'}`); setBusy(false); return; }
       setD(r); setMsg(r.forgot ? `학습 계정을 지웠습니다: ${name}` : '이미 없는 계정입니다.');
     } catch (e) { setMsg(`지우지 못했습니다: ${e.message || e}`); }
     setBusy(false);
