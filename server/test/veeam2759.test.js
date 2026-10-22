@@ -81,7 +81,7 @@ test('② 백필 순서 — 8일을 전 vCenter 먼저, 그다음 31일까지', 
   fs.rmSync(path.join(DIR, 'veeam-snap.db'), { force: true });
   const seen = [];
   const logs = { queryAsync: async (f) => { seen.push([f.vcenterId, Math.round((NOW - f.since) / DAY)]); return []; } };
-  await D.backfillSnap({ logsDb: logs, vcenterIds: ['a', 'b'], now: NOW });
+  await D.backfillSnap({ logsDb: logs, vcenterIds: ['a', 'b'], now: NOW, pauseMs: 0 });
   const firstB = seen.findIndex(([v]) => v === 'b');
   assert.ok(seen.slice(0, firstB).every(([, d]) => d <= 8), 'a 의 8일 → b 의 8일 → (그다음) 31일');
   assert.equal(Math.max(...seen.slice(0, seen.findIndex(([, d]) => d > 8)).map(([, d]) => d)), 8);
@@ -107,8 +107,31 @@ test('④ 엣지 push — 백필 전 vCenter 는 보내지 않고(중앙은 직�
   const snap = { vcenters: [{ id: 'kr:new' }], vms: [{ id: 'kr:new:vm-1', vcenterId: 'kr:new', name: 'n1' }] };
   const out = await S.edgeSnapPayload({ db: logs, snap, notCollected: new Map(), logSettings: null, now: NOW, snapDb: db });
   assert.deepEqual(out, []);
-  await D.backfillSnap({ logsDb: logs, vcenterIds: ['kr:new'], now: NOW });
+  await D.backfillSnap({ logsDb: logs, vcenterIds: ['kr:new'], now: NOW, pauseMs: 0 });
   assert.ok(q > 0, '백필이 로그 DB 를 읽었다');
   const out2 = await S.edgeSnapPayload({ db: logs, snap, notCollected: new Map(), logSettings: null, snapDb: db });
   assert.equal(out2.length, 1, '백필 뒤에는 보낸다'); assert.equal(out2[0].status, 'ok');
+});
+
+test('v2.759.1 핫픽스 — 실제 로그 DB(SQLite) 백필은 워커가 읽고, 그동안 주 스레드가 막히지 않는다', async () => {
+  D._resetSnapDbForTest();
+  fs.rmSync(path.join(DIR, 'veeam-snap.db'), { force: true });
+  const logs = await getLogsDb();
+  assert.equal(logs.kind, 'sqlite'); assert.ok(logs.file, '로그 DB 파일 경로를 알린다');
+  // 고빈도 vCenter 흉내 — 8일 · 20만 행(스냅샷 1%)
+  const VC3 = 'kr:busy'; let rows = [];
+  for (let i = 0; i < 200_000; i++) {
+    const snap = i % 100 === 0;
+    rows.push({ vcenterId: VC3, key: `b${i}`, ts: NOW - Math.floor((i / 200_000) * 8 * DAY), severity: 'info', type: 'TaskEvent', user: snap ? 'CORP\\svc-veeam' : 'CORP\\u1', entity: `vm${i % 50}`, message: snap ? 'Task: Create virtual machine snapshot' : 'Reconfigure virtual machine settings and annotations' });
+    if (rows.length === 20_000) { await logs.insertManyAsync(rows); rows = []; }
+  }
+  const before = { ...D._backfillStats };
+  let maxLag = 0; let last = performance.now();
+  const iv = setInterval(() => { const t = performance.now(); maxLag = Math.max(maxLag, t - last - 10); last = t; }, 10);
+  try { await D.backfillSnap({ logsDb: logs, vcenterIds: [VC3], now: NOW }); } finally { clearInterval(iv); }
+  assert.ok(D._backfillStats.worker - before.worker >= 8, '워커 경로로 읽었다');
+  assert.equal(D._backfillStats.inline, before.inline, '주 스레드 검색은 없다');
+  const db = await D.getSnapDb();
+  assert.equal(db.rowsFor(VC3, 0, 1e6).length, 2000, '스냅샷 행 전부(1%)');
+  assert.ok(maxLag < 250, `백필 중 이벤트 루프 최대 지연 ${Math.round(maxLag)}ms(주 스레드는 넣기만)`);
 });

@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -141,35 +142,88 @@ export function backfillSnap(a) {
 }
 export function backfillRunning() { return !!_backfill; }
 
-async function runBackfill({ logsDb, vcenterIds, now = Date.now() }) {
+/*
+ * v2.759.1 핫픽스 — 백필의 로그 DB 검색은 **워커 스레드**에서(snapBackfillWorker.js · 로그 DB 를 읽기 전용으로 따로 연다).
+ *   v2.759 는 주 스레드에서 검색해(조각 사이 양보는 했으나 동기 SQL 한 번이 수십~수백 ms) 업그레이드 직후 큰 vCenter 12개의 인벤토리
+ *   수집이 90초 데드라인을 넘겼다(실서버 — 시점·코드 근거의 추정). 주 스레드는 받은 행을 넣기만 한다(하루 수천 행 · 해시 + 트랜잭션 1번).
+ *   워커를 못 쓰면(NDJSON 폴백 로그 · 워커 생성 실패) 주 스레드에서 읽되 **하루마다 쉰다**(BACKFILL_PAUSE_MS — 수집에 자리를 내준다).
+ */
+const BACKFILL_PAUSE_MS = 200;
+const WORKER_PAUSE_MS = 50;
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+let _workerUrl = new URL('./snapBackfillWorker.js', import.meta.url);
+export function _setBackfillWorkerUrlForTest(u) { _workerUrl = u || new URL('./snapBackfillWorker.js', import.meta.url); }
+export const _backfillStats = { worker: 0, inline: 0 };   // 테스트·진단용 — 어느 경로로 읽었는가(하루 창 수)
+
+/** 워커 읽기 — read(vc, since, until, limit) → rows. 워커가 죽으면 reject(호출부가 중단한다 — 주 스레드 검색으로 넘어가지 않는다). */
+function workerReader(file) {
+  const w = new Worker(_workerUrl, { workerData: { file } });
+  let seq = 0; const pending = new Map();
+  const failAll = (err) => { for (const [, p] of pending) p.reject(err); pending.clear(); };
+  w.on('message', (m) => { const p = pending.get(m?.id); if (!p) return; pending.delete(m.id); if (m.ok) p.resolve(m.rows || []); else p.reject(new Error(m.error || 'worker error')); });
+  w.on('error', (e) => failAll(e));
+  w.on('exit', (code) => { if (pending.size) failAll(new Error(`백필 워커 종료(exit ${code})`)); });
+  return {
+    kind: 'worker',
+    read(vcenterId, since, until, limit) {
+      return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); w.postMessage({ id, vcenterId, since, until, limit }); });
+    },
+    close() { try { w.terminate(); } catch { /* */ } },
+  };
+}
+
+/** 주 스레드 읽기(워커를 못 쓸 때만) — 예전과 같은 검색 두 번 · 하루마다 쉰다. */
+function inlineReader(logsDb, pauseMs) {
+  return {
+    kind: 'inline',
+    async read(vcenterId, since, until, limit) {
+      const out = [];
+      for (const q of ['snapshot', '스냅샷']) for (const r of await logsDb.queryAsync({ vcenterId, q, since, until }, limit)) out.push(r);
+      if (pauseMs > 0) await sleep(pauseMs);
+      return out;
+    },
+    close() {},
+  };
+}
+
+async function runBackfill({ logsDb, vcenterIds, now = Date.now(), pauseMs = BACKFILL_PAUSE_MS }) {
   const db = await getSnapDb();
   if (!db || !logsDb || typeof logsDb.queryAsync !== 'function') return { done: 0 };
   const ids = [...new Set((vcenterIds || []).map(String))];
+  let reader = null;
+  if (logsDb.kind === 'sqlite' && typeof logsDb.file === 'string' && logsDb.file) {
+    try { reader = workerReader(logsDb.file); } catch (e) { console.warn(`[veeam-snap] 백필 워커를 만들지 못했습니다 — 백필을 미룹니다: ${String(e?.message || e).slice(0, 200)}`); return { done: 0, error: 'worker' }; }
+  } else reader = inlineReader(logsDb, pauseMs);
   const maybeYield = createYielder(15);
   let days = 0; let truncatedDays = 0;
-  for (const limitMs of [BACKFILL_FIRST_MS, RETENTION_MS]) {
-    for (const vc of ids) {
-      const floor = now - limitMs;
-      let from = db.coveredFrom(vc);
-      if (from == null) from = now;  // 처음 — 지금부터 거꾸로
-      while (from > floor) {
-        await maybeYield();
-        const lo = Math.max(floor, from - DAY);
-        let n = 0;
-        for (const q of ['snapshot', '스냅샷']) {
-          const rows = await logsDb.queryAsync({ vcenterId: vc, q, since: lo, until: from }, DAY_ROW_LIMIT);
-          n = Math.max(n, rows.length);
-          db.ingest(rows.map((r) => ({ ...r, vcenterId: vc })));
+  try {
+    for (const limitMs of [BACKFILL_FIRST_MS, RETENTION_MS]) {
+      for (const vc of ids) {
+        const floor = now - limitMs;
+        let from = db.coveredFrom(vc);
+        if (from == null) from = now;  // 처음 — 지금부터 거꾸로
+        while (from > floor) {
+          await maybeYield();
+          const lo = Math.max(floor, from - DAY);
+          const rows = await reader.read(vc, lo, from, DAY_ROW_LIMIT * 2);
+          // 넣기는 주 스레드 — 조각(2,000행)마다 양보
+          for (let i = 0; i < rows.length; i += 2000) { db.ingest(rows.slice(i, i + 2000).map((r) => ({ ...r, vcenterId: vc }))); await maybeYield(); }
+          if (rows.length >= DAY_ROW_LIMIT * 2) {
+            truncatedDays++;
+            console.warn(`[veeam-snap] ${vc} ${new Date(lo).toISOString().slice(0, 10)} 하루 스냅샷 이벤트가 ${DAY_ROW_LIMIT * 2}건을 넘어 일부만 옮겼습니다`);
+          }
+          db.setCoveredFrom(vc, lo);
+          _backfillStats[reader.kind]++;
+          if (reader.kind === 'worker' && pauseMs > 0) await sleep(Math.min(pauseMs, WORKER_PAUSE_MS));   // 워커도 하루마다 잠깐 — CPU·디스크를 수집과 나눈다
+          from = lo; days++;
         }
-        if (n >= DAY_ROW_LIMIT) {
-          truncatedDays++;
-          console.warn(`[veeam-snap] ${vc} ${new Date(lo).toISOString().slice(0, 10)} 하루 스냅샷 이벤트가 ${DAY_ROW_LIMIT}건을 넘어 일부만 옮겼습니다`);
-        }
-        db.setCoveredFrom(vc, lo);
-        from = lo; days++;
       }
     }
-  }
+  } catch (e) {
+    console.warn(`[veeam-snap] 백필 중단(다음 요청·재시작 때 이어서): ${String(e?.message || e).slice(0, 200)}`);
+    return { done: days, truncatedDays, error: String(e?.message || e) };
+  } finally { reader.close(); }
   return { done: days, truncatedDays };
 }
 
