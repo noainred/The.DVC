@@ -23,6 +23,7 @@ import { registerHorizonSessions } from './api/horizonSessions.js';  // v2.525: 
 import { registerInventory } from './api/inventory.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
+import { registerVeeamBadges } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
@@ -118,6 +119,7 @@ registerCurUser(api);
 registerHorizonSessions(api);
 registerInventory(api);
 registerVmClone(api);
+registerVeeamBadges(api);
 registerStorageMon(api);
 registerSanSwitch(api);
 registerCvp(api);

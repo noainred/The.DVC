@@ -147,6 +147,9 @@ import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 
 import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
 import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
 import { startIsiduConfigPull } from './agent/isiduConfigPull.js'; // 〃 중앙→엣지 대상 pull(비밀 없음)
+import { startVeeamPoller } from './veeam/poller.js';               // Veeam 백업 상태(v2.751) — 중앙 직접 + 엣지 위임
+import { startVeeamPush } from './veeam/push.js';                   // 〃 엣지→중앙 결과 push(gzip — CENTRAL_URL 없으면 자기기동 안 함)
+import { startVeeamConfigPull } from './agent/veeamConfigPull.js'; // 〃 중앙→엣지 서버 배정 pull(자격증명 포함)
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
@@ -374,6 +377,7 @@ app.use('/api/central/sanswitch-test-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
+app.use('/api/central/veeam-data', BIG_JSON);   // v2.751 — Veeam 서버별 VM 표(5,850 VM 규모면 해제 후 1MB 를 넘을 수 있다 — 413 은 조용한 소실)
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
@@ -593,6 +597,7 @@ const stagger = [
   startLinkCheckWorker,
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
+  startVeeamPoller, startVeeamPush, startVeeamConfigPull, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
 ];
 /*
