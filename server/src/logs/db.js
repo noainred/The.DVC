@@ -254,6 +254,7 @@ function initSqlite() {
     };
     const api = {
       kind: 'sqlite',
+      file: DB_PATH,   // v2.759.1: Veeam 스냅샷 백필 워커가 이 파일을 읽기 전용으로 따로 연다(주 스레드 검색 금지)
       insertMany: (rows) => insertRange(rows, 0, rows.length),
       /**
        * v2.732(점검 2회차 B6-01): insertMany 와 같은 결과를 **조각 트랜잭션 + 조각 사이 시간 기준 양보**로 적재한다.
