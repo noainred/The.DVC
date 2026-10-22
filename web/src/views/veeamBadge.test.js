@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -28,7 +28,7 @@ describe('veeamBadge (v2.751)', () => {
 describe('veeamSummary (v2.751 요약 카드)', () => {
   it('미등록 · 읽기 실패는 백업 없음으로 단정하지 않는다', () => {
     const u = veeamSummary({ configured: false });
-    expect(u.kind).toBe('unconfigured'); expect(u.text).toMatch(/Veeam 백업 서버에서 등록/); expect(u.stats).toBe(null);
+    expect(u.kind).toBe('unconfigured'); expect(u.text).toMatch(/Veeam 백업 서버에서 등록/); expect(u.stats).toBe(null); expect(u.text).not.toMatch(/메모/); expect(u.text).toMatch(/스냅샷 기준/);
     const e = veeamSummary(null, { error: 'HTTP 500' });
     expect(e.tone).toBe('warn'); expect(e.text).toMatch(/백업이 없다는 뜻이 아닙니다/);
   });
@@ -79,5 +79,29 @@ describe('에이전트 백업 표시 (v2.752)', () => {
     expect(veeamBadge({ rp: 7, ag: 1, servers: ['OC'] }).title).toMatch(/에이전트 백업 — .*컴퓨터 이름으로/);
     expect(veeamBadge({ rp: 7, servers: ['OC'] }).title).not.toMatch(/에이전트/);
     expect(veeamDetailView({ agent: true, restorePoints: { count: 7 }, lastBackup: Date.UTC(2026, 9, 22), lastBackupSrc: 'rp' }).status.text).toMatch(/에이전트 백업\(컴퓨터 이름으로 맞춤\)/);
+  });
+});
+
+describe('vCenter 스냅샷 기준 배지 (v2.753)', () => {
+  const now = new Date(2026, 9, 22, 12, 0).getTime();
+  it('Veeam 임시 스냅샷이 없으면 배지 없음 · 새 스냅샷은 보라 📸 백업 중 · 하루 넘으면 빨강 잔존', () => {
+    expect(veeamSnapBadge({}, now)).toBe(null);
+    expect(veeamSnapBadge({ veeamSnaps: 0, veeamSnapTs: now }, now)).toBe(null);
+    const run = veeamSnapBadge({ veeamSnaps: 1, veeamSnapTs: now - 40 * 60_000 }, now);
+    expect(run.label).toBe('📸 백업 중'); expect(run.color).toBe('purple'); expect(run.stale).toBe(false);
+    expect(run.title).toMatch(/vCenter 스냅샷 기준 — Veeam 서버에서 확인한 값이 아닙니다/);
+    expect(run.title).toMatch(/성공 여부와 지난 백업 이력은 스냅샷으로 알 수 없습니다/);
+    const old = veeamSnapBadge({ veeamSnaps: 1, veeamSnapTs: now - VEEAM_SNAP_STALE_MS - 3_600_000 }, now);
+    expect(old.label).toBe('📸 스냅샷 잔존 25시간'); expect(old.color).toBe('red'); expect(old.title).toMatch(/KB1790/);
+    expect(veeamSnapBadge({ veeamSnaps: 2, veeamSnapTs: now - 5 * 86_400_000 }, now).label).toBe('📸 스냅샷 잔존 5일');
+    const unk = veeamSnapBadge({ veeamSnaps: 1, veeamSnapTs: null }, now);
+    expect(unk.stale).toBe(false); expect(unk.title).toMatch(/생성 시각 모름/); // 시각을 모르면 잔존이라 단정하지 않는다
+  });
+  it('Veeam 서버 배지와 모양·문구가 다르다 · 집계 · 백틱 없음', () => {
+    const vb = veeamBadge({ run: 1, pg: 10, by: 'task' });
+    const sb = veeamSnapBadge({ veeamSnaps: 1, veeamSnapTs: now }, now);
+    expect(sb.label.startsWith('📸')).toBe(true); expect(vb.label.startsWith('📸')).toBe(false); expect(sb.color).not.toBe(vb.color);
+    expect(veeamSnapCounts([{ veeamSnaps: 1, veeamSnapTs: now }, { veeamSnaps: 1, veeamSnapTs: now - 3 * 86_400_000 }, {}, null], now)).toEqual({ running: 1, stale: 1 });
+    expect(sb.title).not.toMatch(/`/);
   });
 });

@@ -68,7 +68,7 @@ Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node, v2.302+) · VM 복제(백업식
 ### 인프라 운영
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
 - **스토리지 어레이 모니터링 (v2.302~2.326)** — 글로벌 법인의 물리 스토리지를 **엣지 현지 수집 → 중앙 집계**로 통합 조회. 수집기 카탈로그 8종 전체 구현: **PowerScale/Isilon**(SSH `isi status` 파싱이 기본 + OneFS API 39개 영역 선택) · **PowerStore · Unity · XtremIO · VPLEX/Metro Node**(REST 또는 SSH CLI — 장비별 선택: pstcli·uemcli·xmcli·vplexcli) · **VMAX/PowerMax**(Unisphere REST 전용, 기본 8443). 용량(HDD/SSD 풀 분리)·노드별 상세(IP·상태·처리량)·Critical Events·버전을 수집해 SQLite 시계열로 저장, 장비 상세에 **용량 추이 그래프**(v2.318). 장비 CSV 가져오기/내보내기(비밀번호 포함 내보내기 선택 + 가져오기 드라이런 검증, v2.317), 수집 방식(SSH/API) 표시, 전체 새로고침 + **수집 작업 로그 패널**(진행중/완료, v2.315), 실패 사유 표시.
-- **VM 복제(백업식) (v2.299)** — vCenter별 VM 지정 → 스냅샷 시점 무중단 클론. **스케줄 정기 복제**·대상 데이터스토어/NFS 선택·**최근 N개 보존**(오래된 사본 자동 정리)·Platform 트리에 Clone/veeamed 배지.
+- **VM 복제(백업식) (v2.299)** — vCenter별 VM 지정 → 스냅샷 시점 무중단 클론. **스케줄 정기 복제**·대상 데이터스토어/NFS 선택·**최근 N개 보존**(오래된 사본 자동 정리)·Platform 트리에 Clone 배지(Veeam 표시는 'Veeam 백업 VM 표시' — Veeam 서버 연동 배지 + vCenter 스냅샷 기준 📸 점선 배지. v2.753 에 VM 메모 휴리스틱 veeamed 는 없앴다).
 - **VM 전체 정보 CSV (v2.275·2.278)** — 선택 vCenter 모든 VM 을 **85+ 컬럼**(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크 1~7 슬롯별 용량·타입·데이터스토어·파일/게스트 파티션/스냅샷/Tools/UUID 등)으로 내보내기.
 - **데이터스토어 브라우즈 (v2.276)** — 데이터스토어 클릭 시 할당된 VM 과 실제 파일 목록(크기·유형·수정시각).
 - **파트 인벤토리 (v2.328~2.330, 서버 분석 내)** — iDRAC Redfish 로 물리 서버의 전체 하드웨어 파트(CPU·DIMM·디스크·NIC·PSU 등)를 수집·필터·드릴다운. 장착 서버 목록에 호스트 IP·호스트네임 병기.

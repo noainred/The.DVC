@@ -38,8 +38,11 @@ export function layoutFileBlocks(xml) {
  * VM 'snapshot'(VirtualMachineSnapshotInfo) + 'layoutEx.file' XML → 스냅샷 요약.
  * 개수·근사 크기에 더해 생성일(가장 오래된/최신)과 이름 목록을 파싱한다 — 커뮤니티 표준
  * 점검 항목인 "N일 이상 된 스냅샷" 탐지에 필요(추가 SOAP 왕복 없음, 이미 수집된 XML 재사용).
- * 반환: { snapshotCount, snapshotSizeGB, snapshotOldestTs, snapshotNewestTs, snapshotNames }.
+ * 반환: { snapshotCount, snapshotSizeGB, snapshotOldestTs, snapshotNewestTs, snapshotNames, [veeamSnaps, veeamSnapTs] }.
  */
+/** Veeam 백업 임시 스냅샷 이름(Veeam KB1790 — 'VEEAM BACKUP TEMPORARY SNAPSHOT'). 대문자 비교. */
+export const VEEAM_SNAP_NAME = 'VEEAM BACKUP TEMPORARY SNAPSHOT';
+
 export function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
   if (snapXml) snapshotCount = (snapXml.match(/<snapshot type="VirtualMachineSnapshot">/g) || []).length
@@ -64,6 +67,7 @@ export function snapshotInfo(snapXml, layoutXml) {
   // 트리 내 모든 <createTime>(중첩 child 포함)에서 가장 오래된/최신 생성일을 뽑는다.
   let oldest = null; let newest = null;
   const names = [];
+  let veeamSnaps = 0; let veeamSnapTs = null;
   if (snapshotCount > 0 && snapXml) {
     const ctRe = /<createTime>([^<]+)<\/createTime>/g;
     let m;
@@ -75,9 +79,20 @@ export function snapshotInfo(snapXml, layoutXml) {
     }
     // 스냅샷 이름 — currentSnapshot 참조 등에는 <name>이 없고 트리 노드에만 있다.
     const nameRe = /<name>([^<]*)<\/name>/g;
-    while ((m = nameRe.exec(snapXml)) && names.length < 5) {
+    while ((m = nameRe.exec(snapXml))) {
       const n = xmlUnescape(m[1]).trim();
-      if (n) names.push(n);
+      if (n && names.length < 5) names.push(n);
+      // v2.753: Veeam 이 백업하는 동안 만드는 임시 스냅샷(이름 고정 — Veeam KB1790). 생성 시각은 트리 노드에서 이름 뒤의
+      //   첫 <createTime> 이다(VirtualMachineSnapshotTree 원소 순서: name → description → id → createTime → … → childSnapshotList).
+      //   이름 목록(5개 상한)과 따로 끝까지 본다 — 6번째 이후에 있어도 놓치지 않게.
+      if (n.toUpperCase() === VEEAM_SNAP_NAME) {
+        const ctRe2 = /<createTime>([^<]+)<\/createTime>/g;
+        ctRe2.lastIndex = nameRe.lastIndex;
+        const c = ctRe2.exec(snapXml);
+        const ts = c ? Date.parse(c[1]) : NaN;
+        veeamSnaps++;
+        if (Number.isFinite(ts) && (veeamSnapTs == null || ts < veeamSnapTs)) veeamSnapTs = ts;
+      }
     }
   }
   // v2.698(A3): 스냅샷이 0개인데 델타 체인 파일(-NNNNNN.vmdk · -delta · -sesparse)이 남아 있으면 '유령 스냅샷' 후보다
@@ -99,6 +114,8 @@ export function snapshotInfo(snapXml, layoutXml) {
     snapshotOldestTs: oldest,
     snapshotNewestTs: newest,
     snapshotNames: names,
+    // Veeam 임시 스냅샷이 있을 때만 싣는다(없는 VM 의 응답 모양은 예전 그대로). 시각을 못 읽었으면 veeamSnapTs 는 null.
+    ...(veeamSnaps ? { veeamSnaps, veeamSnapTs } : {}),
   };
 }
 

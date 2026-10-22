@@ -88,7 +88,7 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null } 
   const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false };
   if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
   if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
-  if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금 배지는 VM 메모의 Veeam 기록(휴리스틱)입니다.' };
+  if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금은 vCenter 스냅샷 기준 배지(📸 점선)만 보입니다.' };
   const c = veeamCounts(d.byVm);
   const servers = Array.isArray(d.servers) ? d.servers : [];
   const warnings = []; const details = [];
@@ -163,4 +163,51 @@ export function veeamDetailView(detail) {
     note: detail.vmSize == null ? 'VM 별 용량은 VM 마다 따로 저장하는 백업 파일(per-machine)일 때만 알 수 있습니다. 아래 백업(체인) 용량은 같은 작업의 다른 VM 과 공유합니다.' : '',
   });
   return { status, sections, recent: Array.isArray(rp.recent) ? rp.recent : [], backups: Array.isArray(detail.backups) ? detail.backups : [], jobs: Array.isArray(detail.jobs) ? detail.jobs : [] };
+}
+
+/* ── vCenter 스냅샷 기준(v2.753 사용자 요청 — Veeam 연동 없이, 메모는 보지 않고 스냅샷으로만) ───────────────────────── */
+
+/** Veeam 이 백업하는 동안만 두는 임시 스냅샷 이름(Veeam KB1790). 서버 vcenter/soapParse.js VEEAM_SNAP_NAME 과 같은 값. */
+export const VEEAM_SNAP_NAME = 'VEEAM BACKUP TEMPORARY SNAPSHOT';
+/** 이보다 오래 남은 임시 스냅샷은 '백업 중' 이 아니라 '잔존(정리 실패 의심)' 으로 본다. 큰 VM 의 백업이 하룻밤을 넘는 일은 드물다. */
+export const VEEAM_SNAP_STALE_MS = 24 * 3_600_000;
+
+const ageText = (ms) => {
+  const h = Math.floor(ms / 3_600_000);
+  return h < 48 ? `${Math.max(1, h)}시간` : `${Math.floor(h / 24)}일`;
+};
+
+/**
+ * VM 1대의 스냅샷 배지 — Veeam 임시 스냅샷이 없으면 null. Veeam 서버 배지(veeamBadge)와 **다른 모양**으로 그린다(사용자 요청):
+ * 근거가 다르다 — 이것은 vCenter 가 보여 준 스냅샷 이름뿐이고, 백업 성공·이력은 알 수 없다.
+ * @param {{veeamSnaps?:number, veeamSnapTs?:number|null}} vm
+ */
+export function veeamSnapBadge(vm, now = Date.now()) {
+  const n = Number(vm?.veeamSnaps);
+  if (!(n > 0)) return null;
+  const ts = Number.isFinite(vm.veeamSnapTs) ? vm.veeamSnapTs : null;
+  const age = ts != null ? Math.max(0, now - ts) : null;
+  const stale = age != null && age >= VEEAM_SNAP_STALE_MS;
+  const lines = [
+    'vCenter 스냅샷 기준 — Veeam 서버에서 확인한 값이 아닙니다',
+    `‘${VEEAM_SNAP_NAME}’${n > 1 ? ` ${n}개` : ''} · ${ts != null ? `생성 ${fmtTime(ts)}` : '생성 시각 모름'}`,
+  ];
+  if (stale) {
+    lines.push(`만든 지 ${ageText(age)}이 지났습니다 — 백업이 끝났는데 Veeam 이 지우지 못한 잔재일 수 있습니다(Veeam KB1790). 남아 있는 동안 델타 디스크가 커지므로 확인하세요.`);
+  } else {
+    lines.push('Veeam 이 지금 이 VM 을 백업하고 있을 가능성이 큽니다. 백업 성공 여부와 지난 백업 이력은 스냅샷으로 알 수 없습니다.');
+  }
+  lines.push('vCenter 수집 주기 사이에 시작해 끝난 백업은 보이지 않습니다.');
+  return { label: stale ? `📸 스냅샷 잔존 ${ageText(age)}` : '📸 백업 중', color: stale ? 'red' : 'purple', title: lines.join('\n'), stale, ts };
+}
+
+/** 스냅샷 배지 집계(요약 줄). */
+export function veeamSnapCounts(vms, now = Date.now()) {
+  let running = 0; let stale = 0;
+  for (const v of Array.isArray(vms) ? vms : []) {
+    const b = veeamSnapBadge(v, now);
+    if (!b) continue;
+    if (b.stale) stale++; else running++;
+  }
+  return { running, stale };
 }
