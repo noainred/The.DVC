@@ -174,3 +174,15 @@ describe('v2.758 — VM 목록 수집 전은 0 이 아니라 모름', () => {
     expect(veeamEventStatusText({ status: 'no-inventory' })).toMatch(/VM 목록을 아직 수집하지 않았습니다/);
   });
 });
+
+describe('v2.759 — 전용 DB 준비 중', () => {
+  it('준비 중은 0 이 아니라 대시 + 이유', () => {
+    const c = backupCell({ src: 'snap', n: null, reason: 'preparing' });
+    expect(c.text).toBe('—'); expect(c.title).toMatch(/전용 DB 로 옮기는 중/);
+  });
+  it('카드 폴링 주기는 고정(상태에 따라 바꾸면 usePolling 이 데이터를 비우고 다시 묻는 무한 재요청)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/usePolling\(openId \? null : '\/veeam\/backup-counts', \{\}, 60_000\)/);
+  });
+});

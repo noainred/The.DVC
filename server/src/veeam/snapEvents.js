@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { getSnapDb, backfillSnap } from './snapDb.js';
 
 export const LOOKBACK_DAYS = 7;
 const DAY = 86_400_000;
@@ -290,19 +291,35 @@ export function forgetLearned(names) {
  * @param {string} vcenterId
  * @param {object[]} vms  그 vCenter 의 VM
  */
-export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), days = LOOKBACK_DAYS } = {}) {
+/**
+ * v2.759: Veeam 전용 DB(snapDb.js)가 이 vCenter 의 스냅샷 행을 since 부터 빠짐없이 가졌는가(백필 완료 구간).
+ * @param {object|null} snapDb  getSnapDb() 결과
+ */
+export function snapCovered(snapDb, vcenterId, since) {
+  const from = snapDb ? snapDb.coveredFrom(vcenterId) : null;
+  return from != null && from <= since;
+}
+
+export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), days = LOOKBACK_DAYS, snapDb = null } = {}) {
   const since = now - days * DAY;
-  // 영어('snapshot')·한국어('스냅샷') 문구 둘 다(v2.755) — 같은 행이 둘에 걸리면 한 번만.
-  const read = (q) => (typeof db.queryAsync === 'function' ? db.queryAsync({ vcenterId, q, since }, ROW_LIMIT) : db.query({ vcenterId, q, since }, ROW_LIMIT, 0));
-  const a = await read('snapshot');
-  const b = await read('스냅샷');
-  const seen = new Set(); const rows = [];
-  for (const r of [...a, ...b]) {
-    const k = `${r.ts}\u0000${r.type}\u0000${r.entity}\u0000${r.user}\u0000${r.message}`;
-    if (seen.has(k)) continue;
-    seen.add(k); rows.push(r);
+  let rows; let truncated;
+  if (snapCovered(snapDb, vcenterId, since)) {
+    // v2.759: 전용 DB(스냅샷 행만)에서 바로 — 로그 DB 를 검색어로 훑지 않는다. 행 모양·중복 제거 키는 아래 경로와 같다.
+    rows = snapDb.rowsFor(vcenterId, since, ROW_LIMIT * 2);
+    truncated = rows.length >= ROW_LIMIT * 2;
+  } else {
+    // 영어('snapshot')·한국어('스냅샷') 문구 둘 다(v2.755) — 같은 행이 둘에 걸리면 한 번만.
+    const read = (q) => (typeof db.queryAsync === 'function' ? db.queryAsync({ vcenterId, q, since }, ROW_LIMIT) : db.query({ vcenterId, q, since }, ROW_LIMIT, 0));
+    const a = await read('snapshot');
+    const b = await read('스냅샷');
+    const seen = new Set(); rows = [];
+    for (const r of [...a, ...b]) {
+      const k = `${r.ts}\u0000${r.type}\u0000${r.entity}\u0000${r.user}\u0000${r.message}`;
+      if (seen.has(k)) continue;
+      seen.add(k); rows.push(r);
+    }
+    truncated = a.length >= ROW_LIMIT || b.length >= ROW_LIMIT;
   }
-  const truncated = a.length >= ROW_LIMIT || b.length >= ROW_LIMIT;
   const learned = learnAccounts(vms, rows);
   if (learned.length) rememberLearned(learned, now);
   const accounts = veeamAccounts(now);
@@ -352,10 +369,26 @@ export function sanitizeEdgeSnap(raw, owns, now = Date.now()) {
   return { items, dropped };
 }
 export function putEdgeSnap(agent, items) {
+  const saved = [];
   for (const it of items) {
     if (!_edge.has(it.vcenterId) && _edge.size >= 512) continue;
-    _edge.set(it.vcenterId, { ...it, agent: s(String(agent || ''), 64) });
+    const v = { ...it, agent: s(String(agent || ''), 64) };
+    _edge.set(it.vcenterId, v); saved.push(v);
   }
+  // v2.759: 전용 DB 에도 보존 — 중앙이 재시작해도 다음 push 전까지 마지막 요약이 보인다(예전: 'no-edge-data' 로 몇 분 비었다).
+  if (saved.length) getSnapDb().then((db) => { if (db) for (const v of saved) db.saveEdge(v.vcenterId, v, v.at); }).catch(() => {});
+}
+
+/** v2.759: 기동 때 전용 DB 의 엣지 요약을 메모리로(그사이 새 push 가 왔으면 그것을 둔다). 오래된 것은 화면이 stale-edge 로 거른다. */
+export async function restoreEdgeSnap() {
+  const db = await getSnapDb();
+  if (!db) return 0;
+  let n = 0;
+  for (const { vcenterId, obj } of db.loadEdge()) {
+    if (!obj || typeof obj !== 'object' || _edge.has(vcenterId) || _edge.size >= 512) continue;
+    _edge.set(vcenterId, { ...obj, vcenterId }); n++;
+  }
+  return n;
 }
 export function edgeSnapFor(vcenterId) { return _edge.get(String(vcenterId)) || null; }
 export function _resetForTest() { _acc = null; _loadError = ''; _edge.clear(); }
@@ -366,8 +399,9 @@ export function _resetForTest() { _acc = null; _loadError = ''; _edge.clear(); }
  * @param {{ db: object, snap: object, notCollected: Map<string,string>, logSettings: object|null, now?: number }} ctx
  * @returns {Promise<object[]>} sanitizeEdgeSnap 이 받는 모양
  */
-export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now = Date.now() }) {
+export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now = Date.now(), snapDb = null }) {
   const out = [];
+  const need = [];   // v2.759: 전용 DB 백필 전인 vCenter — 이번에는 보내지 않고(중앙은 직전 요약 유지) 백필을 시작한다
   const vcs = (snap?.vcenters || []).filter((v) => v && v.id != null && !notCollected?.has(String(v.id))).slice(0, MAX_EDGE_VCS);
   for (const vc of vcs) {
     const vcenterId = String(vc.id);
@@ -378,8 +412,10 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
     //   예전에는 대조할 VM 이 없어 'ok · 0대' 를 보냈고, 중앙 카드가 0/340 으로 보였다(실서버 GM1 — 다음 push 에서 54대).
     //   보내지 않으면 중앙은 직전 요약을 유지한다(putEdgeSnap 은 vCenter 단위 갱신 · 오래되면 stale-edge).
     if (snap?.initial === true || !vms.length) continue;
-    const r = await localSnapSummary(db, vcenterId, vms, { now });
+    if (snapDb && !snapCovered(snapDb, vcenterId, now - LOOKBACK_DAYS * DAY)) { need.push(vcenterId); continue; }
+    const r = await localSnapSummary(db, vcenterId, vms, { now, snapDb });
     out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now });
   }
+  if (need.length) backfillSnap({ logsDb: db, vcenterIds: need }).catch(() => {});
   return out;
 }

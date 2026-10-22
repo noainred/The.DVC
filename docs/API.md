@@ -1176,10 +1176,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:789](../server/src/routes/api/toolsCapacity.js#L789) |
-| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:148](../server/src/routes/api/veeam.js#L148) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:118](../server/src/routes/api/veeam.js#L118) |
-| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:134](../server/src/routes/api/veeam.js#L134) |
-| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:180](../server/src/routes/api/veeam.js#L180) |
+| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:160](../server/src/routes/api/veeam.js#L160) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:130](../server/src/routes/api/veeam.js#L130) |
+| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:146](../server/src/routes/api/veeam.js#L146) |
+| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:192](../server/src/routes/api/veeam.js#L192) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:386](../server/src/routes/api/inventory.js#L386) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |

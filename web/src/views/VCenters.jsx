@@ -189,7 +189,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const [openId, setOpenId] = useState(null);
   // v2.757(사용자 요청): 카드의 'VM 백업 수량' — Veeam 연동이면 Veeam 기준, 아니면 스냅샷 기준. 5분마다(상세를 연 동안은 멈춘다).
   //   실패해도 카드는 그대로 — 백업 칸만 그리지 않는다(백업 정보가 카드 전체를 막지 않게).
-  const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, 300_000);
+  //   v2.759: 서버는 전용 DB 에서 바로 답한다(응답 캐시 60초) — 고정 60초. 업그레이드 직후 '준비 중' 인 vCenter 도 1분 안에 채워진다.
+  //   ⚠ 주기를 상태에 따라 바꾸지 말 것 — usePolling 은 주기가 바뀌면 데이터를 비우고 다시 묻는다('준비 중' ↔ 주기 전환이 무한 재요청이 됐다).
+  const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, 60_000);
   const backupBy = backupP.data?.byVc || null;
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');

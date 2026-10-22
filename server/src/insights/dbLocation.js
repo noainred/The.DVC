@@ -33,6 +33,7 @@ export const MIGRATABLE = [
   { file: 'idrac-power.db', label: '전력 시계열(iDRAC/OME)' },
   { file: 'ping-monitor.db', label: '핑 모니터 이력' },
   { file: 'capacity.db', label: '용량 샘플' },
+  { file: 'veeam-snap.db', label: 'Veeam 스냅샷 이벤트(최근 31일 · 카드 백업 수량)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).

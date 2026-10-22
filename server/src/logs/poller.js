@@ -12,6 +12,7 @@ import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.7
 import { createYielder } from '../util/timeSlice.js';
 import { capStr } from '../util/capStr.js';
 import { getLogsDb } from './db.js';
+import { ingestSnapRows } from '../veeam/snapDb.js';   // v2.759: 스냅샷 행은 Veeam 전용 DB 에도(카드 백업 수량을 바로 계산)
 import { loadLogSettings } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
 import { demoBackupEvents } from '../mock/demo/backup.js'; // v2.711 미보호 VM 데모(mock 에서만)
@@ -246,6 +247,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
         if (typeof db.insertManyAsync === 'function') await db.insertManyAsync(rows);
         else db.insertMany(rows);
         collected += rows.length;
+        await ingestSnapRows(rows);   // 실패해도 로그 적재는 그대로(시간당 경고 1줄)
       }
       // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 vCenter 이후는 기록되지 않는다 — 온전하지 않다).
       if (done.at != null) _collectOk.set(vcId, { at: done.at, capped: done.capped, events });
