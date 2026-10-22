@@ -226,6 +226,26 @@ class ShortcutStore:
                 self._write(self._items)
             return moved
 
+    def reassign_missing_datacenters(self, valid_ids) -> int:
+        """v2.760(점검 B-07): 없는 데이터센터를 가리키는 바로가기를 '전체(all)'로 정리한다(삭제·기본값 복원 후처리).
+
+        정리하지 않으면 그 링크는 데이터센터 상세의 '이 사이트' 에도 '공통' 에도 잡히지 않는다
+        (카테고리 삭제의 reassign_category 와 같은 이유).
+        """
+        valid = set(valid_ids or ())
+        with self._lock:
+            self._ensure_loaded()
+            moved = 0
+            for item in self._items:
+                dc = item.get("datacenterId") or "all"
+                if dc != "all" and dc not in valid:
+                    item["datacenterId"] = "all"
+                    item["updatedAt"] = _now_iso()
+                    moved += 1
+            if moved:
+                self._write(self._items)
+            return moved
+
     def reassign_missing(self, valid_ids, to_id: str) -> int:
         """유효 목록에 없는 카테고리를 전부 기본값으로 정리한다(기본값 복원 후처리)."""
         with self._lock:

@@ -107,7 +107,7 @@ export function skipCategoryOf(reason) {
 /**
  * 한 vCenter 의 diff 계산.
  * @param {Array} vms       현재 스냅샷의 그 vCenter VM 목록(원본 객체)
- * @param {Map}   prevRoster 직전 로스터 Map<vmId, row>(DB roster). 빈 Map 이면 baseline.
+ * @param {Map}   prevRoster 직전 로스터 Map<vmId, row>(DB roster). 빈 Map 이면 baseline — 단 opts.knownEmpty(직전 슬롯 0대)면 아니다.
  * @returns {{ total, onCount, offCount, added:Array, removed:Array,
  *            poweredOn:Array, poweredOff:Array, live:Array, baseline:boolean }}
  *   baseline=true(직전 로스터 없음)면 added/removed/전환을 비운다 — 최초 1회가 전량 '신규'로
@@ -115,12 +115,15 @@ export function skipCategoryOf(reason) {
  *   전원 전환(v2.347)은 **양쪽 스냅샷에 모두 존재하는 VM** 만 센다 — 새로 생성된 켜진 VM 은
  *   added 로만, 삭제된 켜진 VM 은 removed 로만 집계해 중복(생성=전원켜짐)을 만들지 않는다.
  */
-export function diffVcenter(vms, prevRoster) {
+export function diffVcenter(vms, prevRoster, { knownEmpty = false } = {}) {
   const live = (vms || []).map(normalizeVm).filter((v) => v.vmId);
   const total = live.length;
   const onCount = live.filter((v) => isOn(v.powerState)).length;
   const offCount = total - onCount;
-  const baseline = !prevRoster || prevRoster.size === 0;
+  // v2.760(점검 B-03 — 재현): 로스터가 비어도 직전 슬롯에 **0대를 읽었다**(knownEmpty — db.rosterKnownEmpty)면 기준선이 있다.
+  //   예전에는 '기준선 없음' 과 '기준선 0대' 를 구분하지 못해, 연결된 빈 vCenter(새로 등록·전부 삭제)에 새로 만든 VM 이
+  //   '신규' 로 잡히지 않고 총계만 뛰었다.
+  const baseline = (!prevRoster || prevRoster.size === 0) && !knownEmpty;
   if (baseline) return { total, onCount, offCount, added: [], removed: [], poweredOn: [], poweredOff: [], live, baseline: true };
 
   const nowIds = new Set(live.map((v) => v.vmId));

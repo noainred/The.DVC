@@ -306,8 +306,9 @@ export function Rightsizing({ scope }) {
   const columns = [
     { key: 'name', label: 'VM', render: (r) => <VmLink id={r.id} name={r.name} /> },
     { key: 'vcenterId', label: 'vCenter' },
-    { key: 'vcpu', label: 'vCPU', align: 'right' },
-    { key: 'ramGB', label: 'RAM', align: 'right', render: (r) => `${r.ramGB}GB` },
+    { key: 'vcpu', label: 'vCPU', align: 'right', render: (r) => (r.vcpu == null ? '—' : r.vcpu) },
+    // v2.760(점검 B-04): 못 읽은 메모리는 '—'(서버가 null 로 준다 — 'nullGB' 가 되지 않게).
+    { key: 'ramGB', label: 'RAM', align: 'right', render: (r) => (r.ramGB == null ? '—' : `${r.ramGB}GB`) },
     pctCol('cpuAvg', 'CPU평균'), pctCol('cpuMax', 'CPU피크'), pctCol('memAvg', 'MEM평균'), pctCol('memMax', 'MEM피크'),
     ...(tab === 'oversized' ? [
       // v2.604(감사 RECENT2604-04): 피크를 못 읽어 권고를 보류한 차원(held)은 현재 사양을 초록 '추천' 으로 그리지 않는다.

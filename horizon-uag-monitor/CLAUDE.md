@@ -2,11 +2,13 @@
 
 포탈(`server/`·`web/`)과 별개인 .NET 8 WinForms 앱이다. 릴리스는 `.github/workflows/horizon-monitor-release.yml`
 (롤링 릴리스 `horizon-monitor`)이고 포탈 버전과 무관하다. 소스를 고치면 `dotnet test tests/UagMonitor.Tests.csproj` 를 돌린다
-(화면과 무관한 논리 53건 — Linux 에서도 돈다. WinForms 화면은 Linux 에서 띄울 수 없다).
+(화면과 무관한 논리 55건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
+⚠ 이 테스트는 PR CI(`ci.yml`)에서 돌지 않는다 — 릴리스 워크플로(수동·`horizon-v*` 태그)에서만 돈다. 소스를 고쳤으면 직접 돌릴 것.
 
 - **알람 판정은 `AlarmEngine`(순수)이 하고 화면(`AlarmOverlay`)은 그리기만 한다.** 규칙: 주의·위험이 알람, 끄면(확인) 같은 상태에서는
   다시 울리지 않고 ① 정상을 거쳐 재발 ② 주의→위험 악화 ③ 다른 대상의 새 장애에서만 다시 울린다. 위험→주의는 다시 울리지 않는다.
   **오래된 점검 결과(주기×3, 최소 3분)는 알람이 아니다** — 앱을 켠 직후 DB 에 남은 예전 '위험'으로 울리지 않게 하는 장치다.
+  v2.760: 결과가 오래돼 사라진 알람이 '확인됨' 이었으면 그 등급을 기억해, 정상을 거치지 않고 같은 등급 이하로 돌아오면 **확인된 채로** 되살린다(절전 뒤 재울림 방지).
 - **저장 폴더 위치는 DB 안에 둘 수 없다.** `%LOCALAPPDATA%\HorizonUagMonitor\location.json`(`DataLocation`)에만 둔다.
   `--db` 로 실행하면 설정에서 폴더를 못 바꾼다(`CommandLineOverride`). 지정 폴더를 시작 때 못 쓰면 기본 폴더로 열고 **location.json 은 지우지 않는다**.
 - **폴더 이동 순서가 안전장치다**(`DataMigrator` + `Database.ExportCopyTo/FinishMigration`): 점검 → 별도 연결로 `VACUUM INTO` 복사(점검은 계속)

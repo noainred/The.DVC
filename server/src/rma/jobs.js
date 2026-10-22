@@ -126,12 +126,44 @@ export function reapClaims(now = Date.now()) {
   return { failed };
 }
 
+/**
+ * v2.760(점검 B-01 — 재현): 미완료 잡의 수명을 '등록 시각부터 15분' 으로 재면 안 된다.
+ *   ① 엣지는 명령을 **하나씩** 순서대로 돌고(TAKE_MAX=1) 그동안 폴하지 않는다 — 앞 잡 둘이 8분씩 걸리면 세 번째 잡은 한 번도
+ *      인출되지 못한 채 16분째 지워졌다(폴더 사용량 스캔 3대상 실측). 대기 잡은 **그 법인이 마지막으로 움직인 시각**(하트비트·
+ *      인출·완료)부터 재고, 그 법인에 기한이 남은 실행 중 잡이 있으면 지우지 않는다(줄이 움직이고 있다).
+ *   ② 실행 중 잡은 기한(claimDeadline = 인출 + timeoutMs + 유예)을 reapClaims 가 판정한다 — 그 전에 15분으로 지우면
+ *      timeoutMs ≥ 15분인 잡(du-top 900초)의 실제 결과가 '모르는 잡' 으로 버려졌다.
+ *   대기 잡에는 절대 상한(PENDING_MAX_AGE)을 둔다 — 법인이 계속 폴하는데도 인출되지 않는 잡이 영원히 남지 않게.
+ */
+export const PENDING_MAX_AGE = 6 * 3600_000;
+function agentActivity(now) {
+  const lastAt = new Map();   // agentLower -> 마지막으로 움직인 시각
+  const busy = new Set();     // 기한이 남은 실행 중 잡이 있는 법인
+  const bump = (a, t) => { if (Number.isFinite(t) && t > (lastAt.get(a) || 0)) lastAt.set(a, t); };
+  for (const h of heartbeats.values()) bump(lc(h.agent), h.lastSeen);
+  for (const j of jobs.values()) {
+    const a = lc(j.agent);
+    bump(a, j.takenAt); bump(a, j.doneAt);
+    if (j.state === 'running' && j.claimDeadline && now <= j.claimDeadline) busy.add(a);
+  }
+  return { lastAt, busy };
+}
+
 function prune(now = Date.now()) {
   reapClaims(now);
+  let act = null;
   for (const [reqId, j] of jobs) {
-    const done = j.state === 'done';
-    const last = done ? (j.doneAt || 0) : Math.max(j.createdAt || 0, j.takenAt || 0);
-    if (now - last > (done ? DONE_TTL : UNDONE_TTL)) { jobs.delete(reqId); dropPending(j.agent, reqId); }
+    let expired;
+    if (j.state === 'done') expired = now - (j.doneAt || 0) > DONE_TTL;
+    else if (j.state === 'running' && j.claimDeadline) expired = false;   // 기한 판정은 reapClaims 몫(②)
+    else if (j.state === 'running') expired = now - Math.max(j.createdAt || 0, j.takenAt || 0) > UNDONE_TTL;
+    else {
+      act = act || agentActivity(now);
+      const a = lc(j.agent);
+      const since = Math.max(j.createdAt || 0, act.lastAt.get(a) || 0);
+      expired = now - (j.createdAt || 0) > PENDING_MAX_AGE || (!act.busy.has(a) && now - since > UNDONE_TTL);
+    }
+    if (expired) { jobs.delete(reqId); dropPending(j.agent, reqId); }
   }
 }
 

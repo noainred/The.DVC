@@ -105,7 +105,9 @@ class SettingsStore:
                 "intervalMinutes": _clamp_choice(backup.get("intervalMinutes"),
                                                  BACKUP_INTERVAL_CHOICES,
                                                  DEFAULTS["backup"]["intervalMinutes"]),
-                "keep": max(1, min(200, int(backup.get("keep", DEFAULTS["backup"]["keep"]) or 1))),
+                # v2.760(점검 B-08): 다른 칸과 같은 _clamp_int — int() 를 그대로 쓰면 'abc'·'7.5' 한 칸 때문에
+                #   설정 전체를 읽지 못해 자동 백업·자동 점검이 매 주기 실패했다.
+                "keep": _clamp_int(backup.get("keep"), 1, 200, DEFAULTS["backup"]["keep"]),
             },
             "health": {
                 "autoEnabled": bool(health.get("autoEnabled", DEFAULTS["health"]["autoEnabled"])),
