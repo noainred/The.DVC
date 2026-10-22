@@ -71,7 +71,7 @@ test('① 백필 뒤 전용 DB 요약 = 로그 DB 검색 요약 · 그 뒤로는
 test('② 31일 보관 — prune 은 31일보다 오래된 행만 지운다', async () => {
   const db = await D.getSnapDb();
   await D.ingestSnapRows([ev({ vcenterId: VC2, ts: NOW - 45 * DAY, entity: 'old', message: 'Create virtual machine snapshot' }), ev({ vcenterId: VC2, ts: NOW - 30 * DAY, entity: 'keep', message: 'Create virtual machine snapshot' })]);
-  db.prune(NOW);
+  await db.prune(NOW);
   assert.deepEqual(db.rowsFor(VC2, 0, 10).map((x) => x.entity), ['keep']);
   assert.ok(db.rowsFor(VC, 0, 100_000).every((x) => x.ts >= NOW - D.RETENTION_MS));
 });

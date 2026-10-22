@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { createYielder } from '../util/timeSlice.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DAY = 86_400_000;
 export const RETENTION_MS = 31 * DAY;          // 사용자 지시: 최근 1달
@@ -59,8 +60,10 @@ function initSqlite(dbPath) {
     const metaSet = db.prepare('INSERT INTO snap_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v');
     const edgeSet = db.prepare('INSERT INTO snap_edge (vcenterId, json, at) VALUES (?, ?, ?) ON CONFLICT(vcenterId) DO UPDATE SET json=excluded.json, at=excluded.at');
     const edgeAll = db.prepare('SELECT vcenterId, json, at FROM snap_edge');
-    const edgeDel = db.prepare('DELETE FROM snap_edge WHERE at<?');
-    const del = db.prepare('DELETE FROM snap_ev WHERE ts<?');
+    // 보관 정리는 청크(util/chunkedPrune.js — 한 방 DELETE 금지 규약) · ts 단독 인덱스를 탄다 · 동시에 하나(진행 중이면 그것을 쓴다).
+    const edgeDel = db.prepare('DELETE FROM snap_edge WHERE rowid IN (SELECT rowid FROM snap_edge WHERE at < ? LIMIT ?)');
+    const del = db.prepare('DELETE FROM snap_ev WHERE rowid IN (SELECT rowid FROM snap_ev WHERE ts < ? LIMIT ?)');
+    const pruneFlight = createPruneFlight();
     let tick = 0;
     const api = {
       /** 스냅샷 행만 골라 한 트랜잭션으로 넣는다. 반환: 넣으려 한 행 수. */
@@ -73,7 +76,7 @@ function initSqlite(dbPath) {
             db.exec('COMMIT');
           } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
         }
-        if ((++tick % PRUNE_EVERY) === 0) api.prune();   // 첫 회 금지(기동 직후 DELETE 스캔을 피한다)
+        if ((++tick % PRUNE_EVERY) === 0) api.prune().catch(() => {});   // 첫 회 금지(기동 직후 DELETE 스캔을 피한다)
         return list.length;
       },
       /** 그 vCenter 의 since 이후 행(최신 먼저, 상한). */
@@ -83,7 +86,15 @@ function initSqlite(dbPath) {
       setCoveredFrom(vcenterId, ts) { metaSet.run(`from:${vcenterId}`, String(Math.floor(ts))); },
       saveEdge(vcenterId, obj, at) { edgeSet.run(String(vcenterId), JSON.stringify(obj), Math.floor(Number(at) || Date.now())); },
       loadEdge() { return edgeAll.all().map((r) => { try { return { vcenterId: r.vcenterId, at: r.at, obj: JSON.parse(r.json) }; } catch { return null; } }).filter(Boolean); },
-      prune(now = Date.now()) { del.run(now - RETENTION_MS); edgeDel.run(now - RETENTION_MS); },
+      /** 31일보다 오래된 행 정리(청크 · 비동기). */
+      prune(now = Date.now()) {
+        const cut = now - RETENTION_MS;
+        return pruneFlight.run(cut, async () => {
+          const r = await chunkedDelete(del, [cut], { label: 'veeam-snap.snap_ev' });
+          await chunkedDelete(edgeDel, [cut], { label: 'veeam-snap.snap_edge' });
+          return r;
+        });
+      },
       close() { try { db.close(); } catch { /* */ } },
     };
     try { fs.chmodSync(dbPath, 0o600); } catch { /* best effort */ }

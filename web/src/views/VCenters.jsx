@@ -14,7 +14,7 @@ import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
 import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
-import { backupCell, backupPreparing } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량
+import { backupCell } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -189,11 +189,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const [openId, setOpenId] = useState(null);
   // v2.757(사용자 요청): 카드의 'VM 백업 수량' — Veeam 연동이면 Veeam 기준, 아니면 스냅샷 기준. 5분마다(상세를 연 동안은 멈춘다).
   //   실패해도 카드는 그대로 — 백업 칸만 그리지 않는다(백업 정보가 카드 전체를 막지 않게).
-  //   v2.759: 서버는 전용 DB 에서 바로 답한다. 업그레이드 직후 백필 중인 vCenter 가 있으면('준비 중') 30초마다 다시 묻는다.
-  const [bkFast, setBkFast] = useState(false);
-  const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, bkFast ? 30_000 : 300_000);
+  //   v2.759: 서버는 전용 DB 에서 바로 답한다(응답 캐시 60초) — 고정 60초. 업그레이드 직후 '준비 중' 인 vCenter 도 1분 안에 채워진다.
+  //   ⚠ 주기를 상태에 따라 바꾸지 말 것 — usePolling 은 주기가 바뀌면 데이터를 비우고 다시 묻는다('준비 중' ↔ 주기 전환이 무한 재요청이 됐다).
+  const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, 60_000);
   const backupBy = backupP.data?.byVc || null;
-  useEffect(() => { setBkFast(backupPreparing(backupBy)); }, [backupBy]);
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.

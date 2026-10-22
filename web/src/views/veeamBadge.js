@@ -305,8 +305,3 @@ export function backupCell(e, vmFallback = null, now = Date.now()) {
   }
   return { text, label, tone: e.partial ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
 }
-
-/** v2.759: 집계 준비 중(전용 DB 백필)인 vCenter 가 있는가 — 있으면 카드가 더 자주(30초) 다시 묻는다. */
-export function backupPreparing(byVc) {
-  return Object.values(byVc || {}).some((e) => e && e.reason === 'preparing');
-}
