@@ -205,6 +205,58 @@ test('폴러: 401 이면 주기 수집을 멈추고(정지 기록) 수동 실행
   assert.equal(poller.authGuard.authStopFor({ ...d, password: 'p2' }), null, '비밀번호가 바뀌면 자동 재개');
 });
 
+test('검토 #1·#2: moref 가 있으면 이름으로 대신 맞추지 않고, vCenter 를 모르는 moref 는 이름까지 같아야 한다', () => {
+  const vms = [{ id: `${VC}:vm-900`, name: 'app01' }, { id: `${VC}:vm-50`, name: 'db01' }];
+  const res = { jobs: [], vms: [
+    { n: 'app01', m: 'vm-100', h: 'vc01.corp.local', j: [], rp: 14, run: 0 },   // 지운 VM 의 복원 지점 — 같은 이름의 새 VM 에 붙으면 안 된다
+    { n: 'web77', m: 'vm-50', h: '', j: [], rp: null, run: 1 },                  // vCenter 를 모르는 task — 다른 vCenter 의 vm-50
+  ] };
+  const m = P.matchToVcenter({ id: VC, host: 'vc01.corp.local' }, vms, [{ server: { id: 's', name: 'S' }, result: res }]);
+  assert.deepEqual(m.byVm, {}, JSON.stringify(m.byVm));
+  assert.equal(m.unmatched, 2);
+  // 같은 이름이면 vCenter 를 몰라도 인정한다
+  const m2 = P.matchToVcenter({ id: VC, host: 'vc01.corp.local' }, vms, [{ server: { id: 's', name: 'S' }, result: { jobs: [], vms: [{ n: 'DB01', m: 'vm-50', h: '', j: [], rp: 3, run: 0 }] } }]);
+  assert.equal(m2.byVm[`${VC}:vm-50`].rp, 3);
+});
+
+test('검토 #3: 둘 다 FQDN 이면 첫 마디만 같은 다른 vCenter 를 같은 것으로 보지 않는다', () => {
+  assert.equal(P.sameHost('vc01.pl.corp', 'https://vc01.kr.corp'), false);
+  assert.equal(P.sameHost('vc01', 'https://vc01.kr.corp'), true, '한쪽이 짧은 이름이면 같다');
+  assert.equal(P.sameHost('VC01.KR.CORP', 'https://vc01.kr.corp:443/sdk'), true);
+  assert.equal(P.sameHost('10.0.0.1', '10.0.0.2'), false);
+});
+
+test('검토 #4: 꺼진 작업·복제·복사 작업에만 든 VM 은 배지를 달지 않는다', () => {
+  const res = { jobs: [
+    { id: 'a', name: 'BJ-Off', type: 'Backup', disabled: true }, { id: 'b', name: 'RJ', type: 'VSphereReplica' },
+    { id: 'c', name: 'BCJ', type: 'BackupCopy' }, { id: 'd', name: 'BJ-On', type: 'Backup' },
+  ], vms: [
+    { n: 'x1', m: 'vm-1', h: '', j: [0, 1, 2], rp: null, run: 0 },
+    { n: 'x2', m: 'vm-2', h: '', j: [1, 3], rp: null, run: 0 },
+  ] };
+  const vms = [{ id: `${VC}:vm-1`, name: 'x1' }, { id: `${VC}:vm-2`, name: 'x2' }];
+  const m = P.matchToVcenter({ id: VC, host: '' }, vms, [{ server: { id: 's', name: 'S' }, result: res }]);
+  assert.equal(m.byVm[`${VC}:vm-1`], undefined);
+  assert.deepEqual(m.byVm[`${VC}:vm-2`].jobs, ['BJ-On'], '근거가 되는 작업만 적는다');
+});
+
+test('검토 #6: 실패해 마지막 성공분을 쓰거나 오래된 결과의 백업 중은 지운다(백업 대상은 둔다)', () => {
+  const r = { ts: 1_000, vms: [{ n: 'a', m: 'vm-1', run: 1, pg: 37, by: 'task', rp: 5 }] };
+  assert.equal(P.withoutStaleRunning(r, { failed: true, now: 1_001 }).vms[0].run, 0);
+  assert.equal(P.withoutStaleRunning(r, { failed: false, now: 1_000 + 3_600_000, maxAgeMs: 1_200_000 }).vms[0].run, 0);
+  assert.equal(P.withoutStaleRunning(r, { failed: false, now: 2_000, maxAgeMs: 1_200_000 }).vms[0].run, 1);
+  assert.equal(P.withoutStaleRunning(r, { failed: true, now: 1_001 }).vms[0].rp, 5);
+});
+
+test('검토 #8: 오류 문구는 가린 뒤에 자르고, URL 인코딩된 비밀번호도 가린다', async () => {
+  const { collectVeeamServer } = await import('../src/veeam/client.js');
+  const pw = 'Pw+Enc/Check&1';
+  const srv = { id: 'v', name: 'V', host: 'vbr.corp.local', port: 9419, username: 'svc', password: pw };
+  const body = `${'x'.repeat(290)} ${encodeURIComponent(pw)} ${pw}`;
+  await assert.rejects(collectVeeamServer(srv, { fetchImpl: async () => new Response(JSON.stringify({ message: body }), { status: 500 }) }),
+    (e) => !e.message.includes(pw) && !e.message.includes(encodeURIComponent(pw)) && !e.message.includes('Pw+Enc') && !e.message.includes('Pw%2BEnc'));
+});
+
 /* ═══════════════ 엣지 진입 — 실제 pull·push → 실제 centralRouter ═══════════════ */
 let port = 0;
 before(async () => {
@@ -225,8 +277,16 @@ test('엣지 pull → 배정 서버(자격증명 포함)를 받아 로컬 등록
   const keep = { ...config.agent };
   const quiet = console.log; console.log = () => {};
   try {
+    const { issueAgentToken } = await import('../src/central/agentTokens.js');
+    const tokA = issueAgentToken('edge-a').token;
+    // 검토 #5: 공유 토큰은 Veeam 위임 라우트에서 403 — 어느 엣지인지 가릴 수 없어 남의 엣지 비밀번호를 받아 갈 수 있다.
+    for (const [m, u] of [['GET', '/veeam-config?agent=edge-a'], ['POST', '/veeam-data?agent=edge-a']]) {
+      const r = await fetch(`http://127.0.0.1:${port}/api/central${u}`, { method: m, headers: { 'Content-Type': 'application/json', 'X-Central-Token': 'ctok-2751', 'X-Agent-Name': 'edge-a' }, ...(m === 'POST' ? { body: JSON.stringify({ results: [] }) } : {}) });
+      assert.equal(r.status, 403, `${m} ${u} 공유 토큰`);
+      assert.equal((await r.json()).agentTokenRequired, true);
+    }
     config.agent.centralUrl = `http://127.0.0.1:${port}`;
-    config.agent.centralToken = 'ctok-2751';
+    config.agent.centralToken = tokA;
     config.agent.name = 'edge-a';
     const { pullVeeamConfigNow } = await import('../src/agent/veeamConfigPull.js');
     const pr = await pullVeeamConfigNow();
@@ -244,12 +304,12 @@ test('엣지 pull → 배정 서버(자격증명 포함)를 받아 로컬 등록
     assert.equal(r.ok, true, r.reason); assert.equal(r.sent, 1);
     assert.equal(ST.getRecord(mine.id).via, 'edge');
     // 남의 서버 id 를 직접 보내면 거절한다
-    const res = await fetch(`http://127.0.0.1:${port}/api/central/veeam-data?agent=edge-a`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': 'ctok-2751', 'X-Agent-Name': 'edge-a' },
+    const res = await fetch(`http://127.0.0.1:${port}/api/central/veeam-data?agent=edge-a`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': tokA, 'X-Agent-Name': 'edge-a' },
       body: JSON.stringify({ agent: 'edge-a', results: [{ serverId: other.id, ok: true, ts: Date.now(), vms: [] }] }) });
     const j = await res.json();
     assert.equal(j.saved, 0); assert.equal(j.dropped.notOwned, 1);
     // 결과 0건이어도 상태는 받는다
-    const res0 = await fetch(`http://127.0.0.1:${port}/api/central/veeam-data?agent=edge-a`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': 'ctok-2751', 'X-Agent-Name': 'edge-a' },
+    const res0 = await fetch(`http://127.0.0.1:${port}/api/central/veeam-data?agent=edge-a`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': tokA, 'X-Agent-Name': 'edge-a' },
       body: JSON.stringify({ agent: 'edge-a', status: { servers: 0 }, results: [] }) });
     assert.equal(res0.status, 200);
     const { veeamEdgeStatus } = await import('../src/central/veeamEdge.js');
@@ -280,6 +340,15 @@ test('배지 라우트: 범위 밖 vCenter 404 · 등록 없음 configured:false
     assert.equal(r.body.configured, true);
     assert.equal(r.body.byVm[`${VC}:vm-101`].run, 1);
     assert.ok(!JSON.stringify(r.body).includes('vbr-e.corp.local'), '배지 응답에 Veeam 주소를 싣지 않는다');
+    // 검토 #7: 실패 결과의 오류 원문(주소 포함)은 관리자에게만 — 범위 viewer 에게는 일반 문구.
+    const sid = R.listServers().find((x) => x.name === 'VBR-E').id;
+    ST.putResult(sid, { ok: false, ts: Date.now(), error: 'vbr-e.corp.local:9419 응답이 없습니다(60초 초과)', jobs: [], vms: [], counts: {}, notes: [] });
+    const rv = await get(VC);
+    assert.ok(!JSON.stringify(rv.body).includes('vbr-e.corp.local'), 'viewer 에게 Veeam 주소가 새지 않는다');
+    assert.match(rv.body.servers.find((x) => x.name === 'VBR-E').error, /관리자 화면/);
+    assert.equal(rv.body.byVm[`${VC}:vm-101`]?.run ?? 0, 0, '실패해 마지막 성공분을 쓰면 백업 중을 지운다');
+    user = { username: 'adm', role: 'admin' };
+    assert.match((await get(VC)).body.servers.find((x) => x.name === 'VBR-E').error, /vbr-e\.corp\.local/, '관리자는 원문을 본다');
     user = { username: 'v', role: 'viewer' };
     for (const d of R.listServers()) R.deleteServer(d.id);
     const r2 = await get('eu:vc02');

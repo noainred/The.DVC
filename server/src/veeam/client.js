@@ -39,15 +39,22 @@ export function authError(message = '인증 실패(401) — Veeam 계정/비밀�
   return e;
 }
 
+/** 오류 문구에서 비밀을 가린다 — **가린 뒤에** 자른다(v2.751 검토 #8: 먼저 자르면 경계에 걸린 비밀의 앞부분이 남는다). URL 인코딩된 형태도 가린다. */
 function maskText(text, secrets) {
-  let t = String(text || '').replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 300); // eslint-disable-line no-control-regex
-  for (const sct of secrets) if (sct && sct.length >= 3 && t.includes(sct)) t = t.split(sct).join('***');
-  return t;
+  let t = String(text || '').slice(0, 8192).replace(/[\x00-\x1f]+/g, ' '); // eslint-disable-line no-control-regex
+  for (const sct of secrets) {
+    if (!sct || sct.length < 3) continue;
+    for (const form of new Set([sct, encodeURIComponent(sct), new URLSearchParams({ p: sct }).toString().slice(2)])) {
+      if (form && t.includes(form)) t = t.split(form).join('***');
+    }
+  }
+  return t.trim().slice(0, 300);
 }
 
 async function failText(res, secrets) {
   let text = '';
-  try { text = (await readBodyPrefix(res, 4096)).text; } catch { text = ''; } // 앞부분만 읽는다(본문 전체를 읽고 자르지 않는다)
+  // 앞부분만 읽는다(본문 전체를 읽고 자르지 않는다). 상한에서 잘렸으면 끝 256자를 버린다 — 경계에 걸려 반쯤 남은 비밀은 가림이 못 찾는다.
+  try { const r = await readBodyPrefix(res, 4096); text = r.capped ? r.text.slice(0, -256) : r.text; } catch { text = ''; }
   let detail = '';
   try { const j = JSON.parse(text); detail = String(j?.message || j?.errorCode || j?.error_description || j?.error || ''); } catch { detail = text; }
   return `HTTP ${res.status}${detail ? ` — ${maskText(detail, secrets)}` : ''}`;

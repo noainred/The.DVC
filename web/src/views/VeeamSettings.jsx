@@ -114,7 +114,9 @@ export default function VeeamSettings() {
                     <td><b>{s.name}</b>{s.enabled === false && <span className="badge gray" style={{ marginLeft: 6 }}>꺼짐</span>}</td>
                     <td className="muted">{s.host}:{s.port}</td>
                     <td>{(s.vcenterIds || []).map((id) => vcName.get(id) || id).join(', ')}</td>
-                    <td>{s.agent ? `엣지 ${s.agent}` : '중앙'}</td>
+                    <td>{s.agent ? `엣지 ${s.agent}` : '중앙'}{s.agent && Array.isArray(d?.tokenAgents) && !d.tokenAgents.some((a) => String(a).toLowerCase() === String(s.agent).toLowerCase()) && (
+                      <div style={{ color: 'var(--amber)', fontSize: 11, marginTop: 2 }} title="Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 토큰으로는 어느 엣지인지 가릴 수 없어 자격증명을 내려보내지 않습니다">개별 토큰 없음 — 설정 › 수집 서버에서 발급</div>
+                    )}</td>
                     <td style={{ color: TONE[c.tone], maxWidth: 360, overflowWrap: 'anywhere' }}>{c.text}</td>
                     <td className="right" data-sort={num(cn.jobs) ?? ''}>{num(cn.jobs) ?? '—'}</td>
                     <td className="right" data-sort={num(cn.vmJobs) ?? ''} title="작업에 VM 단위로 넣은 VM 수 · 복원 지점이 있는 VM 수">{num(cn.vmJobs) != null || num(cn.backupObjects) != null ? `${num(cn.vmJobs) ?? 0} · 복원 ${num(cn.backupObjects) ?? 0}` : '—'}</td>

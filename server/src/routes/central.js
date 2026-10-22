@@ -2215,10 +2215,14 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
 
 // ── Veeam 백업 상태 위임(v2.751) — vCenter 와 같은 법인에 있는 Veeam B&R 을 그 엣지가 REST 로 읽는다 ────────────────
 // GET /api/central/veeam-config?agent=<이름> — 이 엣지 몫 Veeam 서버(자격증명 포함: 엣지가 Veeam 에 로그인해야 한다 —
-// storage-config 와 같은 신뢰 경계·WAN TLS 검증 ON). 개별 토큰이면 미들웨어가 토큰↔agent 일치를 이미 강제했다.
+// WAN TLS 검증 ON). **개별(엣지별) 토큰만** 받는다 — 이 파일 머리말의 신규 라우트 규약 1·2(v2.751 검토 #5): 공유 CENTRAL_TOKEN 은
+// 어느 엣지의 것인지 가릴 수 없어 `?agent=<아무 엣지>` 로 그 엣지의 Veeam 비밀번호를 받아 갈 수 있다(storage-config 의 레거시 동작을
+// 새 라우트에 복사하지 않는다). 공유 토큰 엣지는 설정 › 수집 서버에서 그 엣지의 개별 토큰을 발급해야 Veeam 위임을 쓴다.
 // 등록부를 못 읽으면 503(빈 목록을 ok 로 주면 엣지가 사본을 지운다 — v2.612).
+const VEEAM_AGENT_TOKEN_ONLY = 'Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
 centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
-  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : (strAgent(req.query.agent) || strAgent(req.get('X-Agent-Name')));
+  if (req.centralAuth?.mode !== 'agent') return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true });
+  const agent = req.centralAuth.agent;
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const R = await import('../veeam/registry.js');
   if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) return;
@@ -2229,7 +2233,8 @@ centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
 // POST /api/central/veeam-data — 엣지가 읽은 Veeam 결과. 저장 이름은 인증된 agent · 그 엣지에 배정된 서버 id 만 받는다.
 // 결과가 0건이어도 상태는 받는다(엣지 무음 실패 금지 규약). 결과가 있는데 등록부를 못 읽으면 503(엣지는 다음 주기에 다시 보낸다).
 centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
-  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (req.centralAuth?.mode !== 'agent') return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true }); // v2.751 검토 #5
+  const agent = req.centralAuth.agent;
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const E = await import('../central/veeamEdge.js');
   const results = Array.isArray(req.body?.results) ? req.body.results : [];

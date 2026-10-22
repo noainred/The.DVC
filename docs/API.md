@@ -113,14 +113,14 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2283](../server/src/routes/central.js#L2283) |
+| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2288](../server/src/routes/central.js#L2288) |
 | GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:409](../server/src/routes/central.js#L409) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2368](../server/src/routes/central.js#L2368) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2372](../server/src/routes/central.js#L2372) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2373](../server/src/routes/central.js#L2373) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2377](../server/src/routes/central.js#L2377) |
 | GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central.js:1606](../server/src/routes/central.js#L1606) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:548](../server/src/routes/central.js#L548) |
-| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2347](../server/src/routes/central.js#L2347) |
-| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2351](../server/src/routes/central.js#L2351) |
+| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2352](../server/src/routes/central.js#L2352) |
+| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2356](../server/src/routes/central.js#L2356) |
 | POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1040](../server/src/routes/central.js#L1040) |
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1138](../server/src/routes/central.js#L1138) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:2027](../server/src/routes/central.js#L2027) |
@@ -131,25 +131,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1400](../server/src/routes/central.js#L1400) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1320](../server/src/routes/central.js#L1320) |
 | POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:903](../server/src/routes/central.js#L903) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2482](../server/src/routes/central.js#L2482) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2487](../server/src/routes/central.js#L2487) |
 | GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1244](../server/src/routes/central.js#L1244) |
 | POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1254](../server/src/routes/central.js#L1254) |
 | POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1266](../server/src/routes/central.js#L1266) |
 | POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:777](../server/src/routes/central.js#L777) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2396](../server/src/routes/central.js#L2396) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2407](../server/src/routes/central.js#L2407) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2401](../server/src/routes/central.js#L2401) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2412](../server/src/routes/central.js#L2412) |
 | GET | `/isidu-config` | `requireCentral` | [server/src/routes/central.js:2146](../server/src/routes/central.js#L2146) |
 | POST | `/isidu-data` | `requireCentral` | [server/src/routes/central.js:2168](../server/src/routes/central.js#L2168) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2496](../server/src/routes/central.js#L2496) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2526](../server/src/routes/central.js#L2526) |
-| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2321](../server/src/routes/central.js#L2321) |
-| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2328](../server/src/routes/central.js#L2328) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2501](../server/src/routes/central.js#L2501) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2531](../server/src/routes/central.js#L2531) |
+| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2326](../server/src/routes/central.js#L2326) |
+| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2333](../server/src/routes/central.js#L2333) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1528](../server/src/routes/central.js#L1528) |
 | GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1596](../server/src/routes/central.js#L1596) |
 | GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1723](../server/src/routes/central.js#L1723) |
 | POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1742](../server/src/routes/central.js#L1742) |
-| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2256](../server/src/routes/central.js#L2256) |
-| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2264](../server/src/routes/central.js#L2264) |
+| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2261](../server/src/routes/central.js#L2261) |
+| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2269](../server/src/routes/central.js#L2269) |
 | POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:422](../server/src/routes/central.js#L422) |
 | POST | `/result` | `requireCentral` | [server/src/routes/central.js:501](../server/src/routes/central.js#L501) |
 | POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:1953](../server/src/routes/central.js#L1953) |
@@ -164,9 +164,9 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:590](../server/src/routes/central.js#L590) |
 | POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:606](../server/src/routes/central.js#L606) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:525](../server/src/routes/central.js#L525) |
-| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2246](../server/src/routes/central.js#L2246) |
-| GET | `/veeam-config` | `requireCentral` | [server/src/routes/central.js:2220](../server/src/routes/central.js#L2220) |
-| POST | `/veeam-data` | `requireCentral` | [server/src/routes/central.js:2231](../server/src/routes/central.js#L2231) |
+| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2251](../server/src/routes/central.js#L2251) |
+| GET | `/veeam-config` | `requireCentral` | [server/src/routes/central.js:2223](../server/src/routes/central.js#L2223) |
+| POST | `/veeam-data` | `requireCentral` | [server/src/routes/central.js:2235](../server/src/routes/central.js#L2235) |
 | POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:980](../server/src/routes/central.js#L980) |
 | GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1162](../server/src/routes/central.js#L1162) |
 
@@ -623,11 +623,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:183](../server/src/routes/admin/backupNetSec.js#L183) |
 | PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:169](../server/src/routes/admin/backupNetSec.js#L169) |
 | GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:166](../server/src/routes/admin/backupNetSec.js#L166) |
-| GET | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:34](../server/src/routes/admin/veeam.js#L34) |
-| POST | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:49](../server/src/routes/admin/veeam.js#L49) |
-| DELETE | `/veeam/servers/:id` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:57](../server/src/routes/admin/veeam.js#L57) |
-| POST | `/veeam/servers/:id/collect` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:84](../server/src/routes/admin/veeam.js#L84) |
-| POST | `/veeam/servers/:id/test` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:67](../server/src/routes/admin/veeam.js#L67) |
+| GET | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:35](../server/src/routes/admin/veeam.js#L35) |
+| POST | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:52](../server/src/routes/admin/veeam.js#L52) |
+| DELETE | `/veeam/servers/:id` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:60](../server/src/routes/admin/veeam.js#L60) |
+| POST | `/veeam/servers/:id/collect` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:87](../server/src/routes/admin/veeam.js#L87) |
+| POST | `/veeam/servers/:id/test` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:70](../server/src/routes/admin/veeam.js#L70) |
 | GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:393](../server/src/routes/admin/collectorsDc.js#L393) |
 | POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:421](../server/src/routes/admin/collectorsDc.js#L421) |
 
@@ -1167,7 +1167,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:789](../server/src/routes/api/toolsCapacity.js#L789) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:26](../server/src/routes/api/veeam.js#L26) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:34](../server/src/routes/api/veeam.js#L34) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:386](../server/src/routes/api/inventory.js#L386) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |

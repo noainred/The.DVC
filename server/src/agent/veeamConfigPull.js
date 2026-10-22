@@ -42,7 +42,7 @@ async function _pull() {
     }
     if (!res.ok) {
       let b = null; try { b = await readJsonCapped(res, 64 * 1024, '중앙 오류 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* */ } }
-      throw new Error(`veeam-config <- ${res.status}${b?.reason ? ` ${String(b.reason).slice(0, 60)}` : ''} — 직전 서버 사본을 그대로 씁니다`);
+      throw new Error(`veeam-config <- ${res.status}${b?.reason ? ` ${String(b.reason).slice(0, b?.agentTokenRequired ? 240 : 60)}` : ''} — 직전 서버 사본을 그대로 씁니다`);
     }
     const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, 'veeam-config 응답');
     const servers = Array.isArray(body?.servers) ? body.servers : [];

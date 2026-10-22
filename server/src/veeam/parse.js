@@ -59,11 +59,17 @@ export function hostKey(v) {
   return { full: h, short: isIp ? h : h.split('.')[0] };
 }
 
-/** Veeam 이 적은 vCenter 이름(hostName)이 이 vCenter 인가. 둘 중 하나라도 비면 판정하지 않는다(true). */
+/**
+ * Veeam 이 적은 vCenter 이름(hostName)이 이 vCenter 인가. 둘 중 하나라도 비면 판정하지 않는다(true) — 호출부가 따로 다룬다.
+ * 짧은 이름 비교는 **한쪽이 점 없는 짧은 이름일 때만**이다(v2.751 검토 #3): 둘 다 FQDN 이면 첫 마디만 같은 다른 vCenter
+ * (vc01.pl.corp · vc01.kr.corp)를 같은 것으로 보면 다른 법인 VM 에 배지가 붙는다.
+ */
 export function sameHost(a, b) {
   const x = hostKey(a); const y = hostKey(b);
   if (!x.full || !y.full) return true;
-  return x.full === y.full || (x.short && x.short === y.short);
+  if (x.full === y.full) return true;
+  const shortOnly = (k) => !k.full.includes('.') && !k.full.includes(':');
+  return (shortOnly(x) || shortOnly(y)) && x.short === y.short;
 }
 
 /** backupObjects 의 path(`vc01.corp.local\Datacenter\…`)에서 첫 마디 — 형식이 다르면 빈 값. */
@@ -249,10 +255,21 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
 
 /* ── vCenter VM 과 대조 ───────────────────────────────────────────────────── */
 
+/** 배지 근거가 되는 작업인가 — 꺼진 작업·복제(replica)·백업 복사(copy) 작업은 'Veeam 백업 대상' 근거가 아니다(v2.751 검토 #4). */
+export function jobCountsAsBackup(jb) {
+  if (!jb || typeof jb !== 'object') return false;
+  if (jb.disabled === true) return false;
+  return !/replica|copy/i.test(String(jb.type || ''));
+}
+
 /**
- * 한 vCenter 의 VM 목록과 그 vCenter 에 연결된 Veeam 서버 결과를 맞춘다.
- *  · Veeam 이 적은 vCenter 이름(h)이 있고 이 vCenter 주소와 다르면 **다른 vCenter 의 VM** 이다(moref 는 vCenter 마다 겹친다) — 세기만 한다.
- *  · moref 가 있으면 moref 로, 없으면 이름(대소문자 무시)으로 — 이 vCenter 안에서 이름이 하나뿐일 때만(동명이면 고르지 않는다).
+ * 한 vCenter 의 VM 목록과 그 vCenter 에 연결된 Veeam 서버 결과를 맞춘다. **틀린 배지(거짓 '백업됨')가 빠진 배지보다 나쁘다** —
+ * 애매하면 맞추지 않고 센다.
+ *  · Veeam 이 적은 vCenter 이름(h)이 이 vCenter 주소와 다르면 **다른 vCenter 의 VM** 이다(moref 는 vCenter 마다 겹친다) — 세기만 한다.
+ *  · moref 가 있으면 **moref 로만** 찾는다(v2.751 검토 #1) — 못 찾으면 이름으로 대신하지 않는다(지운 VM 의 복원 지점이 같은 이름의 새 VM 에 붙지 않게).
+ *    h 가 비어 있으면(task·백업 객체는 vCenter 이름을 안 줄 수 있다) moref 로 찾은 VM 의 이름도 같아야 한다(검토 #2 — 다른 vCenter 의 같은 moref).
+ *  · moref 가 없으면 이름(대소문자 무시)으로 — 이 vCenter 안에서 이름이 하나뿐일 때만(동명이면 고르지 않는다).
+ *  · 꺼진 작업·복제·복사 작업에만 든 VM 은 배지를 달지 않는다(검토 #4). 복원 지점·실행 중 task 는 작업과 무관하게 근거다.
  * @param {{id:string, host:string}} vc
  * @param {Array<{id:string, name:string}>} vms   이 vCenter 의 VM(포탈 인벤토리)
  * @param {Array<{server:{id,name}, result:object}>} results
@@ -262,10 +279,12 @@ export function matchToVcenter(vc, vms, results) {
   const prefix = `${vc.id}:`;
   const byMoref = new Map();
   const byName = new Map();
+  const nameOf = new Map();
   for (const v of Array.isArray(vms) ? vms : []) {
     if (!v || typeof v.id !== 'string' || !v.id.startsWith(prefix)) continue;
     byMoref.set(v.id.slice(prefix.length), v.id);
     const k = String(v.name || '').trim().toLowerCase();
+    nameOf.set(v.id, k);
     if (!k) continue;
     byName.set(k, byName.has(k) ? null : v.id); // null = 동명 VM 이 둘 이상
   }
@@ -275,25 +294,44 @@ export function matchToVcenter(vc, vms, results) {
     if (!result || !Array.isArray(result.vms)) continue;
     const jobs = Array.isArray(result.jobs) ? result.jobs : [];
     for (const e of result.vms) {
+      const okJobs = (e.j || []).map((ji) => jobs[ji]).filter(jobCountsAsBackup);
+      const hasEvidence = okJobs.length > 0 || (e.rp != null && e.rp !== 0) || e.run === 1 || e.run === 2;
+      if (!hasEvidence) continue;
       if (e.h && !sameHost(e.h, vc.host)) { otherVcenter++; continue; }
-      let id = e.m ? byMoref.get(e.m) : undefined;
-      if (!id) {
-        const nm = byName.get(String(e.n || '').trim().toLowerCase());
-        if (nm === null) { ambiguous++; continue; }
-        id = nm;
+      const nm = String(e.n || '').trim().toLowerCase();
+      let id;
+      if (e.m) {
+        id = byMoref.get(e.m);
+        if (id && !e.h && nm && nameOf.get(id) !== nm) id = undefined; // vCenter 를 모르는 moref — 이름까지 같아야 이 vCenter 의 그 VM 이다
+      } else {
+        const hit = byName.get(nm);
+        if (hit === null) { ambiguous++; continue; }
+        id = hit;
       }
       if (!id) { unmatched++; continue; }
       const cur = byVm[id] || (byVm[id] = { jobs: [], run: 0, pg: null, by: '', rp: null, lastRun: null, lastResult: '', servers: [] });
       if (!cur.servers.includes(server.name)) cur.servers.push(server.name);
-      for (const ji of e.j || []) {
-        const jb = jobs[ji];
-        if (!jb || cur.jobs.includes(jb.name)) continue;
+      for (const jb of okJobs) {
+        if (cur.jobs.includes(jb.name)) continue;
         cur.jobs.push(jb.name);
         if (jb.lastRun != null && (cur.lastRun == null || jb.lastRun > cur.lastRun)) { cur.lastRun = jb.lastRun; cur.lastResult = jb.lastResult || ''; }
       }
-      if (e.rp != null) cur.rp = cur.rp == null ? e.rp : Math.max(cur.rp, e.rp);
+      if (e.rp != null && e.rp !== 0) cur.rp = cur.rp == null ? e.rp : Math.max(cur.rp, e.rp);
       if (e.run === 1 || (e.run === 2 && cur.run !== 1)) { cur.run = e.run; cur.pg = e.pg; cur.by = e.by; }
     }
   }
   return { byVm, unmatched, otherVcenter, ambiguous };
+}
+
+/**
+ * 대조 전에 '지금 백업 중' 을 낡은 결과에서 지운다(v2.751 검토 #6) — 이번 읽기가 실패해 마지막 성공분을 쓰거나 결과가 주기의 2배보다
+ * 오래됐으면, 그때의 '백업 중 37%' 는 지금 사실이 아니다. 백업 대상(작업·복원 지점)은 그대로 둔다(그것은 금방 바뀌지 않는다).
+ * @param {object} result  usableResult 값
+ * @param {{failed:boolean, now:number, maxAgeMs:number}} o
+ */
+export function withoutStaleRunning(result, { failed = false, now = Date.now(), maxAgeMs = 1_200_000 } = {}) {
+  if (!result || !Array.isArray(result.vms)) return result;
+  const stale = failed || !(Number(result.ts) > 0) || now - Number(result.ts) > maxAgeMs;
+  if (!stale) return result;
+  return { ...result, runningStale: true, vms: result.vms.map((v) => (v.run ? { ...v, run: 0, pg: null, by: '' } : v)) };
 }

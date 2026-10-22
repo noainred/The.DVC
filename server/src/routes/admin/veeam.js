@@ -13,6 +13,7 @@ import { listRegistry as listVcenters } from '../../vcenter/registry.js';
 import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
+import { listAgentTokens } from '../../central/agentTokens.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 
 const fleetWideOnly = fullScopeOnlyWith('Veeam 백업 서버 등록은 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -41,6 +42,8 @@ export function registerVeeam(adminRouter) {
       ok: true,
       servers: listServers().map((d) => ({ ...d, status: serverStatusView(getRecord(d.id)) })),
       vcenters, agents: knownAgentNames(), edges: allVeeamEdgeStatus(), poller: veeamPollerStatus(),
+      // 개별 토큰이 발급된 엣지 이름 — Veeam 위임 라우트는 개별 토큰만 받는다(central.js veeam-config). 화면이 토큰 없는 엣지 배정을 경고한다.
+      tokenAgents: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
       defaults: { port: DEFAULT_PORT, apiVersion: DEFAULT_API_VERSION },
       ...(le ? { registryError: summarizeRegistryError(le)?.text || '등록부 읽기 오류' } : {}),
     });
