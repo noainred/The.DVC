@@ -54,6 +54,7 @@ export function veeamBadge(e) {
   if (Number.isFinite(e.rp) && e.rp > 0) lines.push(`복원 지점 ${e.rp}개`);
   else if (e.rp === -1) lines.push('복원 지점 있음(개수 모름)');
   if (Array.isArray(e.servers) && e.servers.length) lines.push(`Veeam 서버: ${e.servers.join(', ')}`);
+  if (e.ag === 1) lines.push('에이전트 백업 — Veeam 이 vCenter 정보를 주지 않아 컴퓨터 이름으로 이 VM 과 맞췄습니다');
   lines.push('누르면 백업 상세(복원 지점·용량·마지막 결과)를 엽니다');
   if (e.run === 1) {
     const pg = Number.isFinite(e.pg) ? e.pg : null;
@@ -138,6 +139,7 @@ export function veeamDetailView(detail) {
   if (detail.running) status = { tone: 'amber', text: detail.running.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 모릅니다)' : `지금 백업하고 있습니다${Number.isFinite(detail.running.progress) ? ` · ${detail.running.progress}%` : ''}`, progress: Number.isFinite(detail.running.progress) ? detail.running.progress : null };
   else if (detail.pending) status = { tone: 'blue', text: '실행 중인 작업에서 차례를 기다리고 있습니다', progress: null };
   else status = { tone: 'green', text: detail.lastBackup ? `${detail.lastBackupSrc === 'rp' ? '최신 복원 지점' : '마지막 백업 완료'} ${fmtTime(detail.lastBackup)}` : 'Veeam 백업 대상입니다', progress: null };
+  if (detail.agent) status = { ...status, text: `${status.text} · 에이전트 백업(컴퓨터 이름으로 맞춤)` };
   const lt = detail.lastTask;
   const sections = [];
   sections.push({

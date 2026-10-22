@@ -41,6 +41,16 @@ export function listOf(body) {
   return [];
 }
 
+/**
+ * Veeam 에이전트(게스트 OS 안에서 도는 Windows·Linux·Mac·Unix 에이전트) 백업의 플랫폼 이름인가(v2.752).
+ * ⚠ 추정: 실서버 표본이 없어 이름은 문서 검색 요약 기반('WindowsPhysical'·'LinuxPhysical' 계열) — 하이퍼바이저(VMware·HyperV·
+ *   vCloud·Nutanix 등)는 아니다. 모르는 이름은 건너뛰고 notes 로 개수를 말한다(다음 실서버 화면으로 보정).
+ */
+export function isAgentPlatform(plat) {
+  const p = String(plat || '');
+  return !!p && /physical|agent|windows|linux|unix|solaris|aix|mac/i.test(p) && !/vmware|hyper-?v|vcloud|cloud\s*director|nutanix|ahv|proxmox/i.test(p);
+}
+
 /** vSphere moref 형태만(vm-123). 그 밖(GUID·urn)은 moref 가 아니다. */
 const RE_MOREF = /^vm-\d{1,12}$/;
 export const morefOrEmpty = (v) => (typeof v === 'string' && RE_MOREF.test(v.trim()) ? v.trim() : '');
@@ -102,7 +112,7 @@ const PENDING_RE = /^(pending|waiting|queued)$/i;
  */
 export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   const notes = [];
-  const counts = { jobs: 0, vmJobs: 0, containers: 0, backupObjects: 0, sessions: 0, running: 0, pending: 0, skipped: 0 };
+  const counts = { jobs: 0, vmJobs: 0, containers: 0, backupObjects: 0, agentObjects: 0, sessions: 0, running: 0, pending: 0, skipped: 0 };
   // ── 작업 ─────────────────────────────────────────────────────────────────
   const jobs = [];
   const jobIdx = new Map();
@@ -140,6 +150,18 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
     if (!e.h && host) e.h = host;
     return e;
   };
+  // 에이전트 항목은 VMware 항목과 따로 둔다(같은 이름이어도 합치지 않는다 — 판단 근거가 다르다: moref 대조 ↔ 이름 대조).
+  const agentMap = new Map();
+  const touchAgent = (name) => {
+    const k = String(name).toLowerCase();
+    let e = agentMap.get(k);
+    if (!e) {
+      if (vmMap.size + agentMap.size >= maxVms) { counts.skipped++; return null; }
+      e = { n: name, m: '', h: '', j: [], rp: null, run: 0, pg: null, by: '', ag: 1 };
+      agentMap.set(k, e);
+    }
+    return e;
+  };
   for (const j of listOf(raw.jobs)) {
     if (!isObj(j)) continue;
     const id = s(j.id, 64);
@@ -175,10 +197,21 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   }
   counts.jobs = jobs.length;
   // ── 백업 객체(복원 지점이 있는 VM) ──────────────────────────────────────────
+  const otherPlat = new Map(); // 건너뛴 플랫폼 이름 → 개수(실서버 판독용 — 화면 notes 에 싣는다)
   for (const o of listOf(raw.backupObjects)) {
     if (!isObj(o)) continue;
     const plat = s(o.platformName, 32);
-    if (plat && !/^vmware$/i.test(plat)) continue;
+    if (isAgentPlatform(plat)) { // v2.752: Veeam 에이전트 백업(게스트 안 에이전트) — vCenter 정보가 없어 컴퓨터 이름으로만 맞춘다
+      const name = s(o.name, 256);
+      if (!name) continue;
+      const e = touchAgent(name);
+      if (!e) continue;
+      counts.agentObjects++;
+      const rp = numOrNull(o.restorePointsCount);
+      e.rp = rp != null ? Math.max(e.rp ?? 0, Math.max(0, Math.round(rp))) : (e.rp ?? -1);
+      continue;
+    }
+    if (plat && !/^vmware$/i.test(plat)) { otherPlat.set(plat, (otherPlat.get(plat) || 0) + 1); continue; }
     const type = s(o.type, 40) || s(o.viType, 40);
     if (type && !/^(vm|virtualmachine)$/i.test(type)) continue;
     const name = s(o.name, 256);
@@ -264,11 +297,12 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   for (const p of listOf(raw.restorePoints).slice(0, 200_000)) {
     if (!isObj(p)) continue;
     const plat = s(p.platformName, 32);
-    if (plat && !/^vmware$/i.test(plat)) continue;
+    const agent = isAgentPlatform(plat);
+    if (plat && !agent && !/^vmware$/i.test(plat)) continue;
     const name = s(p.name, 256);
     const t = timeOf(p.creationTime);
     if (!name || t == null) continue;
-    const e = byLowerName.get(name.toLowerCase());
+    const e = agent ? agentMap.get(name.toLowerCase()) : byLowerName.get(name.toLowerCase());
     if (e === null) { rpAmbiguous++; continue; }
     if (!e) continue; // 이 서버가 VM 으로 모르는 이름(컨테이너로만 든 VM 은 백업 객체로 이미 잡힌다)
     let l = rpLists.get(e); if (!l) { l = []; rpLists.set(e, l); }
@@ -315,8 +349,15 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   if (rpAmbiguous) notes.push(`이름이 같은 VM 이 둘 이상이라 복원 지점 ${rpAmbiguous}개를 어느 VM 것인지 정하지 못했습니다`);
   counts.restorePoints = [...rpLists.values()].reduce((a, l) => a + l.length, 0);
   counts.backups = backups.length;
-  const vms = [...vmMap.values()];
+  const vms = [...vmMap.values(), ...agentMap.values()];
   for (const e of vms) { if (e.run === 1) counts.running++; else if (e.run === 2) counts.pending++; }
+  if (!jobs.length) {
+    notes.push(counts.agentObjects
+      ? `작업 목록(/api/v1/jobs)이 비어 있습니다 — Veeam REST 는 에이전트 작업을 이 목록에 싣지 않는 것으로 알려져 있습니다. 에이전트 백업 ${counts.agentObjects}대는 백업 객체·복원 지점의 컴퓨터 이름으로 VM 에 맞춥니다`
+      : '작업 목록(/api/v1/jobs)이 비어 있습니다 — 이 계정의 Veeam 역할에 작업이 보이는지, 작업이 에이전트·복사 작업뿐인지 확인하세요');
+  }
+  if (counts.agentObjects) notes.push(`에이전트 백업 ${counts.agentObjects}대는 vCenter 정보가 없어 컴퓨터 이름(또는 점 앞 첫 마디)이 같은 VM 이 하나뿐일 때만 배지를 붙입니다`);
+  if (otherPlat.size) notes.push(`VMware·에이전트가 아닌 백업 객체는 건너뛰었습니다: ${[...otherPlat].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k} ${n}개`).join(', ')}`);
   if (counts.skipped) notes.push(`VM 상한(${maxVms})을 넘어 ${counts.skipped}건을 버렸습니다`);
   if (counts.containers) notes.push(`작업이 폴더·클러스터·태그 같은 컨테이너 ${counts.containers}개를 포함합니다 — 그 안의 VM 은 복원 지점이 생기거나 백업 중일 때만 표시됩니다`);
   return { jobs, vms, counts, notes, backups };
@@ -357,6 +398,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     const run = v.run === 1 || v.run === 2 ? v.run : 0;
     const pg = numOrNull(v.pg);
     const out = { n, m, h: s(v.h, 256), j, rp: rp == null ? null : Math.max(-1, Math.round(rp)), run, pg: pg == null ? null : Math.max(0, Math.min(100, Math.round(pg))), by: v.by === 'task' || v.by === 'job' ? v.by : '' };
+    if (v.ag === 1 && !m) { out.ag = 1; out.h = ''; } // 에이전트 항목은 moref·vCenter 가 없다(있으면 에이전트 표지를 믿지 않는다)
     if (isObj(v.lt)) {
       const lj = numOrNull(v.lt.j);
       out.lt = { r: s(v.lt.r, 32), m: s(v.lt.m, 300), s: posNum(v.lt.s), e: posNum(v.lt.e), ps: posNum(v.lt.ps), rs: posNum(v.lt.rs), ts: posNum(v.lt.ts), j: lj != null && Number.isInteger(lj) && lj >= 0 && lj < nJobs ? lj : null };
@@ -370,7 +412,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
   }
   const c = isObj(r.counts) ? r.counts : {};
   const counts = {};
-  for (const k of ['jobs', 'vmJobs', 'containers', 'backupObjects', 'sessions', 'running', 'pending', 'skipped', 'lastTasks', 'restorePoints', 'backups']) counts[k] = numOrNull(c[k]);
+  for (const k of ['jobs', 'vmJobs', 'containers', 'backupObjects', 'agentObjects', 'sessions', 'running', 'pending', 'skipped', 'lastTasks', 'restorePoints', 'backups']) counts[k] = numOrNull(c[k]);
   return {
     ok: r.ok === true, ts: Math.round(ts), ...(edgeTs != null ? { edgeTs } : {}), ms: numOrNull(r.ms),
     error: s(r.error, 600), kind: s(r.kind, 32), apiVersion: s(r.apiVersion, 32),
@@ -413,7 +455,9 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
   const prefix = `${vc.id}:`;
   const byMoref = new Map();
   const byName = new Map();
+  const byShort = new Map(); // 이름 첫 마디(점 앞) — 에이전트 컴퓨터 이름(FQDN ↔ 짧은 이름) 대조 전용
   const nameOf = new Map();
+  const shortOf = (k) => k.split('.')[0];
   for (const v of Array.isArray(vms) ? vms : []) {
     if (!v || typeof v.id !== 'string' || !v.id.startsWith(prefix)) continue;
     byMoref.set(v.id.slice(prefix.length), v.id);
@@ -421,6 +465,8 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
     nameOf.set(v.id, k);
     if (!k) continue;
     byName.set(k, byName.has(k) ? null : v.id); // null = 동명 VM 이 둘 이상
+    const sk = shortOf(k);
+    if (sk) byShort.set(sk, byShort.has(sk) ? null : v.id);
   }
   const byVm = {};
   let unmatched = 0; let otherVcenter = 0; let ambiguous = 0;
@@ -439,13 +485,16 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
         id = byMoref.get(e.m);
         if (id && !e.h && nm && nameOf.get(id) !== nm) id = undefined; // vCenter 를 모르는 moref — 이름까지 같아야 이 vCenter 의 그 VM 이다
       } else {
-        const hit = byName.get(nm);
+        let hit = byName.get(nm);
+        // 에이전트 백업(v2.752): 컴퓨터 이름이 FQDN 이고 VM 이름이 짧은 이름(또는 그 반대)이면 첫 마디로 — 그 첫 마디의 VM 이 하나뿐일 때만.
+        if (hit === undefined && e.ag === 1 && nm) hit = byShort.get(shortOf(nm));
         if (hit === null) { ambiguous++; continue; }
         id = hit;
       }
       if (!id) { unmatched++; continue; }
       const cur = byVm[id] || (byVm[id] = { jobs: [], run: 0, pg: null, by: '', rp: null, lastRun: null, lastResult: '', servers: [], lb: null, lbSrc: '' });
       if (!cur.servers.includes(server.name)) cur.servers.push(server.name);
+      if (e.ag === 1) cur.ag = 1;
       const lb = lastBackupOf(e);
       if (lb && (cur.lb == null || lb.t > cur.lb)) { cur.lb = lb.t; cur.lbSrc = lb.src; }
       if (refsFor && id === refsFor) (cur.refs || (cur.refs = [])).push({ server, result, entry: e });
@@ -517,6 +566,7 @@ export function buildVmDetail(cur) {
     lastTask,
     restorePoints: { count: rn ?? (cur.rp != null && cur.rp >= 0 ? cur.rp : null), oldest: ro, latest: rlAll[0] ?? null, recent: [...new Set(rlAll)].slice(0, 10) },
     vmSize: sz, backups: backupsOut, jobs: jobsOut, servers,
+    agent: cur.ag === 1, // 에이전트 백업 — 컴퓨터 이름으로 맞췄다(화면이 그 근거를 말한다)
   };
 }
 
