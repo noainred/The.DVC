@@ -96,3 +96,5 @@ export function veeamPollerStatus() {
   return { ...(_last || {}), intervalMs: pollMs(), running: _running ? { since: _running.since } : null, inFlight: [..._inFlight], servers: serversForThisNode().length };
 }
 export function _resetForTest() { _running = null; _last = null; _inFlight.clear(); }
+/** 테스트 전용 — 진행 중인 주기(pull 직후 백그라운드로 시작한 것 포함)의 promise. 없으면 null. */
+export function _runningForTest() { return _running?.promise || null; }
