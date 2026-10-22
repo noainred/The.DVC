@@ -13,13 +13,15 @@ import { fetchJson } from '../api.js';
 import { Modal } from '../components/Modal.jsx';
 import { ErrorBox, Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
-import { veeamBadge, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
+import { veeamBadge, veeamSnapBadge, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
 
 const TONE = {
   green: { bg: 'rgba(34,197,94,.15)', fg: '#4ade80' },
   amber: { bg: 'rgba(245,158,11,.15)', fg: '#fbbf24' },
   blue: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
   muted: { bg: 'rgba(139,155,180,.12)', fg: 'var(--text-dim)' },
+  purple: { bg: 'rgba(168,85,247,.10)', fg: '#c084fc' },
+  red: { bg: 'rgba(239,68,68,.10)', fg: '#f87171' },
 };
 const fmt = (ms) => fmtTime(ms) || '—';
 
@@ -34,18 +36,57 @@ function ProgressBar({ pct, width = 36, height = 4 }) {
 }
 
 /** VM 행의 Veeam 배지 — 누르면 상세 창. 행(Leaf) 클릭(VM 상세)으로 번지지 않게 막는다. */
-export function VeeamTag({ vm, veeam, onOpen }) {
+export function VeeamTag({ vm, veeam, on, onOpen }) {
   const vb = veeam ? veeamBadge(veeam[vm.id]) : null;
-  if (!vb) return null;
-  const t = TONE[vb.color] || TONE.green;
+  // v2.753: vCenter 스냅샷 기준 배지 — Veeam 서버 배지와 다른 모양(📸 · 점선 테두리 · 보라/빨강). Veeam 서버가 이미 '백업 중' 이라
+  //   알려 준 VM 의 새 스냅샷은 같은 사실이라 다시 달지 않는다(잔존은 다른 사실이라 함께 단다).
+  let sb = on ? veeamSnapBadge(vm) : null;
+  if (sb && !sb.stale && vb && veeam[vm.id]?.run === 1) sb = null;
+  if (!vb && !sb) return null;
+  const t = vb ? (TONE[vb.color] || TONE.green) : null;
   return (
-    <button type="button" className="veeam-tag" title={vb.title} aria-label={`${vm.name} Veeam 백업 상세 — ${vb.label}`}
-      onClick={(e) => { e.stopPropagation(); onOpen?.(vm); }}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 4, padding: '2px 9px', borderRadius: 20, border: 'none', cursor: 'pointer',
-        fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', background: t.bg, color: t.fg, fontFamily: 'inherit', lineHeight: 1.6 }}>
-      {vb.label}
-      <ProgressBar pct={vb.progress} />
-    </button>
+    <>
+      {vb && (
+        <button type="button" className="veeam-tag" title={vb.title} aria-label={`${vm.name} Veeam 백업 상세 — ${vb.label}`}
+          onClick={(e) => { e.stopPropagation(); onOpen?.(vm); }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 4, padding: '2px 9px', borderRadius: 20, border: 'none', cursor: 'pointer',
+            fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', background: t.bg, color: t.fg, fontFamily: 'inherit', lineHeight: 1.6 }}>
+          {vb.label}
+          <ProgressBar pct={vb.progress} />
+        </button>
+      )}
+      {sb && <VeeamSnapChip label={sb.label} tone={sb.color} title={sb.title} ariaLabel={`${vm.name} — ${sb.label}(vCenter 스냅샷 기준)`} />}
+    </>
+  );
+}
+
+/** 스냅샷 기준 배지 모양(행·요약 범례 공용) — 누를 곳이 없다(Veeam 상세가 없다). 설명은 title. */
+export function VeeamSnapChip({ label, tone, title, ariaLabel }) {
+  const t = TONE[tone] || TONE.purple;
+  return (
+    <span className="veeam-snap-tag" title={title} aria-label={ariaLabel || label} role="img"
+      style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 4, padding: '1px 8px', borderRadius: 20, border: `1px dashed ${t.fg}`,
+        fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', background: t.bg, color: t.fg, lineHeight: 1.6, cursor: 'help' }}>
+      {label}
+    </span>
+  );
+}
+
+/** 스냅샷 기준 요약 줄(체크했을 때만 — Veeam 서버 등록과 무관하게 보인다). */
+export function VeeamSnapSummary({ counts }) {
+  if (!counts) return null;
+  const none = !counts.running && !counts.stale;
+  return (
+    <div className="muted" style={{ margin: '0 0 10px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
+      <span style={{ fontWeight: 600 }}>vCenter 스냅샷 기준</span>
+      {none ? <span>Veeam 임시 스냅샷이 있는 VM 이 없습니다.</span> : (
+        <>
+          <VeeamSnapChip label={`📸 백업 중 ${counts.running}대`} tone="purple" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 있고 만든 지 하루가 안 된 VM" />
+          <VeeamSnapChip label={`📸 스냅샷 잔존 ${counts.stale}대`} tone="red" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 하루 넘게 남은 VM — 정리 실패 의심" />
+        </>
+      )}
+      <span style={{ flex: '1 1 260px', minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 서버에서 확인한 값이 아니라 vCenter 스냅샷 이름으로 본 것입니다(점선 배지). 백업 성공·이력은 알 수 없고, 수집 주기 사이에 끝난 백업은 보이지 않습니다.</span>
+    </div>
   );
 }
 

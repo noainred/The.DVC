@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.753.0",
+      "date": "2026-10-22",
+      "title": "vCenter › VM 및 폴더 'Veeam 백업 VM 표시' — Veeam 연동 없이 vCenter 스냅샷으로도 표시(📸 점선 배지)",
+      "notes": [
+        "VM 에 Veeam 임시 스냅샷('VEEAM BACKUP TEMPORARY SNAPSHOT', Veeam KB1790)이 있으면 '📸 백업 중', 하루 넘게 남아 있으면 '📸 스냅샷 잔존 N시간·N일'(정리 실패 의심)",
+        "Veeam 서버에서 확인한 배지(채운 알약·누르면 상세)와 모양을 다르게 — 점선 테두리·보라/빨강 · 설명에 'vCenter 스냅샷 기준, Veeam 서버 확인 아님' · 성공 여부·이력은 알 수 없음을 밝힘",
+        "VM 메모의 'veeam' 글자로 붙이던 veeamed 휴리스틱 제거(사용자 지시 — 메모는 참고하지 않음) · 요약에 스냅샷 기준 백업 중·잔존 대수"
+      ]
+    },
+    {
       "version": "2.752.0",
       "date": "2026-10-22",
       "title": "Veeam — 실서버(VBR 12.3) 대응: 복원 지점 판 자동 상향 · 에이전트 백업 VM 표시",
