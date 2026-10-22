@@ -9,11 +9,12 @@
  * ⚠ 훅은 전부 조기 return 위에(React #310). 백틱 금지(BoldText 는 **만 해석).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, sendJson, postJson, delJson } from '../api.js';
+import { fetchJson, sendJson, postJson, delJson, canCsv } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { resultLabel } from './veeamBadge.js';
+import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
 
 const EMPTY = { id: '', name: '', host: '', port: '', username: '', password: '', apiVersion: '', agent: '', vcenterIds: [], enabled: true, note: '' };
 const fmt = (ms) => {
@@ -40,6 +41,7 @@ export default function VeeamSettings() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState('');
   const [open, setOpen] = useState(null); // 작업 목록을 펼친 서버 id
+  const [bulk, setBulk] = useState(false); // CSV·자유텍스트 대량 등록 모달
   const seq = useRef(0);
   const load = () => {
     const my = ++seq.current;
@@ -189,6 +191,7 @@ export default function VeeamSettings() {
         <div className="flex gap wrap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || !form.host || !form.name || !form.vcenterIds.length} onClick={save}>{busy === 'save' ? '저장 중…' : form.id ? '수정 저장' : '등록'}</button>
           {form.id && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy} onClick={() => { setForm(EMPTY); setMsg(null); }}>새로 입력</button>}
+          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy} onClick={() => setBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
           읽는 것: 작업 목록(작업에 VM 단위로 넣은 VM) · 작업 상태 · 백업 객체(복원 지점이 있는 VM) · 실행 중 세션의 VM 별 진행. 작업을 시작·중지하지 않습니다(조회 전용).
@@ -200,6 +203,11 @@ export default function VeeamSettings() {
         <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
           엣지 보고: {d.edges.map((e) => `${e.agent} ${fmt(e.at)}(서버 ${e.status?.servers != null ? `${e.status.servers}대` : '—'})`).join(' · ')}
         </div>
+      )}
+      {canCsv() && bulk && (
+        <BulkDeviceIo base="/admin/veeam" resource="servers" unitLabel="서버" typeCol={null} keyLabel="host:port"
+          title="Veeam 백업 서버 대량 등록 — CSV · 자유텍스트"
+          onClose={() => setBulk(false)} onDone={() => { setBulk(false); load(); }} />
       )}
     </>
   );

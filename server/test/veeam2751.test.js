@@ -428,3 +428,85 @@ test('배지 라우트: 범위 밖 vCenter 404 · 등록 없음 configured:false
     assert.equal(r2.body.configured, false);
   } finally { store.snapshot = prev; }
 });
+
+/* ═══════════════ 대량 등록(CSV·자유텍스트) ═══════════════ */
+const B = await import('../src/veeam/bulk.js');
+const VCS = [{ id: 'vc-az', name: 'vcenter-az-01' }, { id: 'vc-pl', name: 'vcenter-pl-01' }, { id: 'vc-dup1', name: 'same' }, { id: 'vc-dup2', name: 'same' }];
+
+test('대량: CSV·자유텍스트 파싱 · vCenter 는 id 또는 이름(;) · 동명·모르는 vCenter 는 사유', () => {
+  const csv = B.sampleCsv();
+  const c = B.parseServersCsv(csv);
+  assert.equal(c.error, undefined, c.error);
+  assert.equal(c.rows.length, 2, '샘플 주석 행은 건너뛴다');
+  assert.equal(c.rows[1].vcenters, 'vc-pl;vc-pl-dr');
+  const t = B.parseServersText(B.sampleText());
+  assert.equal(t.error, undefined, t.error);
+  assert.ok(t.rows.length >= 3, JSON.stringify(t.rows.map((r) => r.host)));
+  assert.ok(t.rows.some((r) => r.host === 'vbr-us.corp.local' && r.agent === '중앙' && r.password === 'ChangeMe!3'), '키=값형 한글 키');
+  const r = B.resolveVcenters('vc-az; vcenter-pl-01;nope;same', VCS);
+  assert.deepEqual(r.ids, ['vc-az', 'vc-pl']); assert.deepEqual(r.unknown, ['nope']); assert.deepEqual(r.ambiguous, ['same']);
+});
+
+test('대량: 내보내기·샘플에 비밀번호 없음 · 엣지는 아는 이름만 · 계정이 바뀌면 비밀번호 필요 · 신규는 비밀번호 필수', () => {
+  const out = B.serversToCsv([{ name: 'A', host: 'h', port: 9419, username: 'u', password: 'SECRET-X', vcenterIds: ['vc-az'], agent: 'az-edge' }]);
+  assert.ok(!out.includes('SECRET-X'));
+  assert.ok(!B.serversToText([{ name: 'A', host: 'h', password: 'SECRET-X', vcenterIds: [] }]).includes('SECRET-X'));
+  const prev = { id: 'vbr-1', host: 'vbr.corp', port: 9419, username: 'svc', agent: 'old-edge', vcenterIds: ['vc-az'] };
+  const ctx = { existing: (k) => (k === 'vbr.corp:9419' ? prev : undefined), vcenters: VCS, agents: ['AZ-Edge'] };
+  const add = B.toSaveInput({ name: 'N', host: 'new.corp', port: '', username: 'svc', vcenters: 'vc-az', agent: 'az-edge', enabled: true, _hasPassword: false }, ctx);
+  assert.equal(add.agent, 'AZ-Edge', '대소문자만 다른 값은 목록 표기로');
+  assert.match(B.inputIssue(add, { isNew: true }), /비밀번호가 필요/);
+  const typo = B.toSaveInput({ name: 'N', host: 'new.corp', username: 'svc', vcenters: 'vc-az', agent: 'az-edg', _hasPassword: true, password: 'p' }, ctx);
+  assert.match(B.inputIssue(typo, { isNew: true }), /엣지 목록에 없습니다/);
+  const keepOld = B.toSaveInput({ name: 'N', host: 'vbr.corp', username: 'svc', vcenters: '', agent: 'old-edge', _hasPassword: false }, ctx);
+  assert.equal(keepOld.id, 'vbr-1'); assert.equal(keepOld.agent, 'old-edge', '이미 저장된 값은 목록에 없어도 통과');
+  assert.deepEqual(keepOld.vcenterIds, ['vc-az'], 'vCenter 칸을 비우면 기존 유지');
+  assert.equal(B.inputIssue(keepOld), null);
+  const moved = B.toSaveInput({ name: 'N', host: 'vbr.corp', username: 'other', vcenters: 'vc-az', agent: '', _hasPassword: false }, ctx);
+  assert.match(B.inputIssue(moved), /승계하지 않습니다/);
+  assert.equal(B.cleanInput(moved)._moved, undefined);
+});
+
+test('대량: 실제 관리 라우트 — 드라이런 → 저장(추가·수정) · 비밀번호 유지 · 내보내기에 비밀번호 없음', async () => {
+  const express = (await import('express')).default;
+  const { store } = await import('../src/store.js');
+  const { registerVeeam } = await import('../src/routes/admin/veeam.js');
+  const prevSnap = store.snapshot;
+  store.snapshot = { source: 'live', vcenters: VCS.slice(0, 2), vms: [], hosts: [] };
+  for (const d of R.listServers()) R.deleteServer(d.id);
+  R.saveServer({ name: 'Old', host: 'vbr-old.corp', username: 'svc', password: 'KEEP-PW', vcenterIds: ['vc-az'] });
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { req.user = { username: 'adm', role: 'admin' }; next(); });
+  const r = express.Router(); registerVeeam(r); app.use('/api/admin', r);
+  const srv = await new Promise((ok) => { const s = app.listen(0, '127.0.0.1', () => ok(s)); });
+  closers.push(() => new Promise((ok) => srv.close(() => ok())));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin/veeam/servers`;
+  const post = async (path, body) => { const res = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json() }; };
+  try {
+    const text = [
+      'name host port username vcenters agent apiVersion enabled note password',
+      '"AZ Veeam" vbr-az.corp - svc vcenter-az-01 중앙 - true - NewPw!1',
+      '"Old renamed" vbr-old.corp - svc vc-az - - true - -',
+      '"Bad" vbr-bad.corp - svc nope 중앙 - true - x',
+    ].join('\n');
+    const dry = await post('/import', { text, format: 'text', dryRun: true });
+    assert.equal(dry.status, 200, JSON.stringify(dry.body));
+    const act = Object.fromEntries(dry.body.report.map((x) => [x.name, x.action]));
+    assert.equal(act['AZ Veeam'], 'add'); assert.equal(act['Old renamed'], 'update'); assert.equal(act.Bad, 'error');
+    const done = await post('/import', { text, format: 'text', selectLines: dry.body.report.filter((x) => x.action !== 'error').map((x) => x.line) });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal(done.body.added, 1); assert.equal(done.body.updated, 1);
+    const old = R.listServers().find((d) => d.host === 'vbr-old.corp');
+    assert.equal(old.name, 'Old renamed');
+    assert.equal(R.getServerWithSecret(old.id).password, 'KEEP-PW', '비밀번호를 비운 행은 기존 유지');
+    assert.equal(R.getServerWithSecret(R.listServers().find((d) => d.host === 'vbr-az.corp').id).password, 'NewPw!1');
+    const exp = await fetch(`${base}/export.csv`);
+    assert.equal(exp.status, 200);
+    const expText = await exp.text();
+    assert.ok(!expText.includes('KEEP-PW') && !expText.includes('NewPw!1'), '내보내기에 비밀번호 없음');
+    // 단건 저장도 모르는 엣지 이름은 400
+    const bad = await post('', { name: 'X', host: 'vbr-x.corp', username: 'u', password: 'p', vcenterIds: ['vc-az'], agent: 'ghost-edge' });
+    assert.equal(bad.status, 400); assert.equal(bad.body.field, 'agent');
+  } finally { store.snapshot = prevSnap; for (const d of R.listServers()) R.deleteServer(d.id); }
+});
