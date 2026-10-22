@@ -2227,7 +2227,10 @@ centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
   const R = await import('../veeam/registry.js');
   if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) return;
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, agent, servers: R.serversForAgent(agent) });
+  // v2.754: 'Veeam 계정' — 사람이 적은 것 + 중앙이 배운 것. 엣지가 자기 vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다(비밀 아님).
+  const S = await import('../veeam/snapEvents.js');
+  //   계정 파일을 못 읽었으면 필드를 싣지 않는다(빈 목록을 보내면 엣지 사본이 지워진다 — 엣지는 필드가 없으면 그대로 둔다, v2.754 검토 #4).
+  res.json({ ok: true, agent, servers: R.serversForAgent(agent), ...(S.accountsUnreadable() ? {} : { vcAccounts: S.veeamAccounts() }) });
 });
 
 // POST /api/central/veeam-data — 엣지가 읽은 Veeam 결과. 저장 이름은 인증된 agent · 그 엣지에 배정된 서버 id 만 받는다.
@@ -2237,14 +2240,27 @@ centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
   const agent = req.centralAuth.agent;
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const E = await import('../central/veeamEdge.js');
+  // v2.754: 엣지가 직접 이벤트를 모으는 vCenter 의 'Veeam 계정 스냅샷 생성' 요약 — 그 엣지가 맡은 site vCenter 만 받는다
+  //   (위임 인벤토리 소유자 일치 + edgeVcWriteDenied(requireSite)). 정제는 veeam/snapEvents.js sanitizeEdgeSnap.
+  let snap = null;
+  if (Array.isArray(req.body?.snapEvents)) {
+    const S = await import('../veeam/snapEvents.js');
+    // 소유권은 TOFU 없이 — 그 site vCenter 의 위임 인벤토리를 실제로 보내는 엣지만(인벤토리가 아직 없으면 받지 않는다 — 다음 push 에 다시 온다).
+    const inv = new Map(listInventory().map((e) => [String(e.vcenterId), String(e.agent || '').toLowerCase()]));
+    const me = String(agent).toLowerCase();
+    const r = S.sanitizeEdgeSnap(req.body.snapEvents, (vcId) => inv.get(vcId) === me && !edgeVcWriteDenied(vcId, { requireSite: true }));
+    S.putEdgeSnap(agent, r.items);
+    snap = { saved: r.items.length, ...(r.dropped.notOwned || r.dropped.bad ? { dropped: r.dropped } : {}) };
+    if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 가 맡지 않은 vCenter 의 이벤트 요약 ${r.dropped.notOwned}건 거절`);
+  }
   const results = Array.isArray(req.body?.results) ? req.body.results : [];
-  if (!results.length) { E.saveVeeamEdgeStatus(agent, req.body?.status, { at: Date.now(), results: 0, saved: 0 }); return res.json({ ok: true, saved: 0 }); }
+  if (!results.length) { E.saveVeeamEdgeStatus(agent, req.body?.status, { at: Date.now(), results: 0, saved: 0 }); return res.json({ ok: true, saved: 0, ...(snap ? { snap } : {}) }); }
   const R = await import('../veeam/registry.js');
   if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) { console.warn('[central] veeam-data: 중앙 Veeam 서버 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
   const owned = new Set(R.serversForAgent(agent).map((d) => d.id));
   const r = E.ingestVeeamPush(agent, req.body || {}, owned);
   if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 배정되지 않은 서버 결과 ${r.dropped.notOwned}건 거절`);
-  res.json({ ok: true, saved: r.saved, ...(r.dropped.notOwned || r.dropped.bad ? { rejected: r.dropped.notOwned + r.dropped.bad, dropped: r.dropped } : {}) });
+  res.json({ ok: true, saved: r.saved, ...(r.dropped.notOwned || r.dropped.bad ? { rejected: r.dropped.notOwned + r.dropped.bad, dropped: r.dropped } : {}), ...(snap ? { snap } : {}) });
 });
 
 // GET /api/central/users-config?agent=<이름>

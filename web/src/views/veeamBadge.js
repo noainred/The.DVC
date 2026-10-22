@@ -211,3 +211,42 @@ export function veeamSnapCounts(vms, now = Date.now()) {
   }
   return { running, stale };
 }
+
+/* ── vCenter 이벤트 기준(v2.754 — 지금 스냅샷이 없어도 최근 Veeam 백업을 본다) ───────────────────────────────────── */
+
+/**
+ * VM 1대의 이벤트 배지 — 그 VM 에 최근 N일 'Veeam 계정이 만든 스냅샷 생성 이벤트' 가 없으면 null.
+ * @param {[number, number]|null} entry  [마지막 시각, 횟수] (서버 /veeam/snap-events byVm 값)
+ */
+export function veeamEventBadge(entry, { days = 7, source = 'local' } = {}) {
+  if (!Array.isArray(entry) || !Number.isFinite(entry[0])) return null;
+  const [ts, n] = entry;
+  const lines = [
+    'vCenter 이벤트 기준 — Veeam 서버에서 확인한 값이 아닙니다',
+    `Veeam 이 백업을 시도한(스냅샷을 만든) 마지막 시각: ${fmtTime(ts)}`,
+    `최근 ${days}일 ${Number.isInteger(n) ? n : '?'}번`,
+    '백업 성공 여부는 이벤트로 알 수 없습니다(스냅샷 생성은 백업 시작 단계입니다).',
+  ];
+  if (source === 'edge') lines.push('이 vCenter 를 수집하는 엣지가 보낸 요약입니다.');
+  // v2.754 검토 #3: 녹색은 '성공' 으로 읽힌다 — 중립색(하늘색 점선). 성공은 Veeam 서버 배지(채운 녹색)만 말한다.
+  return { label: `📸 ${shortTime(ts)}`, color: 'sky', title: lines.join('\n'), ts };
+}
+
+/** 이벤트 조회 상태 → 요약 줄 문구(ok 가 아니면 이유 — 이벤트가 없다고 '백업 없음' 으로 말하지 않는다). */
+export function veeamEventStatusText(d) {
+  if (!d) return '';
+  const why = {
+    'log-off': '이 포탈의 vCenter 이벤트 수집이 꺼져 있어 이벤트 기준으로는 볼 수 없습니다(설정 › vCenter 로그).',
+    'severity-filter': 'vCenter 이벤트를 경고 이상만 저장하도록 설정돼 스냅샷(정보) 이벤트가 없습니다(설정 › vCenter 로그 › 최소 심각도).',
+    'not-collected': '이 vCenter 는 지금 이벤트를 수집하지 않습니다(비활성·점검 중).',
+    'no-edge-data': '이 vCenter 를 수집하는 엣지가 아직 이벤트 요약을 보내지 않았습니다 — 엣지가 이 버전 이상이고 개별 토큰을 쓰는지 확인하세요(중앙이 재시작한 직후라면 다음 push 까지 기다리세요).',
+    'stale-edge': `이 vCenter 를 수집하는 엣지의 이벤트 요약이 오래됐습니다(마지막 ${fmtTime(d.at) || '—'}) — 엣지가 멈췄거나 담당이 바뀌었을 수 있어 표시하지 않습니다.`,
+  };
+  if (d.status && d.status !== 'ok') return why[d.status] || '이벤트 기준 정보를 받지 못했습니다.';
+  const notes = [];
+  // 검토 #6: 0대를 '백업 없음' 으로 읽지 않게 — 계정을 모르거나 이벤트 수집이 멈췄으면 그 사실을 말한다.
+  if (d.accounts === 0 && !Object.keys(d.byVm || {}).length) notes.push('Veeam 계정을 아직 모릅니다 — Veeam 이 쓰는 vCenter 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요(지금 백업 중인 VM 이 2대 이상 보이면 자동으로 배웁니다).');
+  if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > 6 * 3_600_000) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다.`);
+  if (d.truncated) notes.push('이벤트가 많아 일부만 읽었습니다.');
+  return notes.join(' ');
+}

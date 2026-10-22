@@ -15,6 +15,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { applyPulledServers } from '../veeam/registry.js';
+import { applyPulledAccounts } from '../veeam/snapEvents.js';
 import { dropResult } from '../veeam/store.js';
 import { pollVeeamOnce } from '../veeam/poller.js';
 import { agentHeaders } from './agentNameCarry.js';
@@ -56,7 +57,10 @@ async function _pull() {
       console.log(`[veeam-config] 중앙 배정 Veeam 서버 적용: ${applied.count}대${applied.removed.length ? ` · 빠짐 ${applied.removed.length}` : ''}${applied.rejected ? ` · 형식 오류로 버림 ${applied.rejected}` : ''}`);
       if (applied.count) pollVeeamOnce().catch(() => {});
     }
-    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }) };
+    // v2.754: 'Veeam 계정'(vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다 — 비밀 아님). 옛 중앙(필드 없음)이면 그대로 둔다.
+    let accounts = null;
+    if (Array.isArray(body?.vcAccounts)) { try { accounts = applyPulledAccounts(body.vcAccounts) ? 'changed' : 'same'; } catch (e) { accounts = `error: ${String(e?.message || e).slice(0, 80)}`; } }
+    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }), ...(accounts ? { accounts } : {}) };
     return { ok: true, count: servers.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };
