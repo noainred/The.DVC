@@ -353,8 +353,17 @@ test('엣지 pull → 배정 서버(자격증명 포함)를 받아 로컬 등록
     config.agent.centralToken = tokA;
     config.agent.name = 'edge-a';
     const { pullVeeamConfigNow } = await import('../src/agent/veeamConfigPull.js');
+    // pull 이 새 배정을 받으면 바로 백그라운드 수집(pollVeeamOnce)을 돌린다. 그 결과(via 'local')가 아래 push 보다 늦게 오면
+    // 러너 속도에 따라 기록을 덮어써 흔들렸다(v2.751 릴리스 러너에서 재현) — 네트워크 없이 끝나게 인증 정지로 두고, 끝날 때까지 기다린다.
+    const poller = await import('../src/veeam/poller.js');
+    poller.authGuard.markAuthStopped(mine.id, R.getServerWithSecret(mine.id), '테스트 — 백그라운드 수집이 네트워크로 나가지 않게');
     const pr = await pullVeeamConfigNow();
     assert.equal(pr.ok, true, pr.reason); assert.equal(pr.count, 1);
+    const bg = poller._runningForTest();
+    assert.ok(bg, 'pull 직후 백그라운드 수집이 시작된다');
+    await bg;
+    assert.equal(ST.getRecord(mine.id)?.result?.kind, 'auth-stopped', '백그라운드 수집은 네트워크 없이 끝났다');
+    poller.authGuard.clearAuthStop(mine.id);
     const local = R.serversForThisNode();
     assert.deepEqual(local.map((x) => x.id), [mine.id]);
     assert.equal(local[0].password, 'pw-e'); assert.equal(local[0].pulled, true);
