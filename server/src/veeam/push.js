@@ -24,6 +24,7 @@ import { loadLogSettings } from '../logs/settings.js';
 import { eventNotCollectedMap } from '../logs/coverage.js';
 import { edgeSnapPayload } from './snapEvents.js';
 import { getSnapDb } from './snapDb.js';
+import { logCollectOkAt, logPollerRanOnce } from '../logs/poller.js';
 
 const gzipAsync = promisify(zlib.gzip);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
@@ -47,7 +48,9 @@ export function buildPushBody() {
 /** v2.754: 이 엣지가 직접 이벤트를 모으는 vCenter 의 'Veeam 계정 스냅샷 생성' 요약(veeam/snapEvents.js). 실패해도 결과 push 는 보낸다. */
 async function snapEventsForPush() {
   try {
-    return { list: await edgeSnapPayload({ db: await getLogsDb(), snap: store.get(), notCollected: eventNotCollectedMap(), logSettings: loadLogSettings(), snapDb: await getSnapDb() }) };
+    // v2.761(C2): 이벤트 수집 신선도(마지막 온전한 수집 시각 · 폴러가 한 주기를 끝냈는가)도 싣는다 — 중앙이 6시간 판정·'아직 못 모음' 을 한다.
+    return { list: await edgeSnapPayload({ db: await getLogsDb(), snap: store.get(), notCollected: eventNotCollectedMap(), logSettings: loadLogSettings(), snapDb: await getSnapDb(),
+      collectedAtFor: logCollectOkAt, collectRan: logPollerRanOnce() }) };
   } catch (e) {
     if (failLog('snap', String(e?.message || e))) console.warn(`[veeam-push] vCenter 이벤트 요약을 만들지 못했습니다(결과는 그대로 보냅니다): ${String(e?.message || e).slice(0, 200)}`);
     return { list: null, error: String(e?.message || e).slice(0, 200) };

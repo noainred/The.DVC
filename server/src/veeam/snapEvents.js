@@ -98,6 +98,8 @@ export function makeVeeamAccountMatcher(accounts = []) {
 /**
  * 지금 Veeam 임시 스냅샷이 있는 VM(vm.veeamSnapTs — soapParse 가 그 이름으로만 싣는다)의 스냅샷 생성 이벤트를 만든 계정을 찾는다.
  * 같은 VM 에서 그 시각 ±3분 안에 생성 이벤트가 하나뿐일 때만(둘 이상이면 어느 계정이 Veeam 인지 모른다) · 공용 계정은 뺀다.
+ * v2.761(C4): 공용 계정 행도 고유성 판정에 넣는다 — 먼저 버리면 Veeam(administrator)과 겹친 자동화·사람 계정이 '유일 후보' 가 됐다.
+ *   유일한 계정이 공용 계정이면 후보로 내지 않는다.
  * 여기서 돌려준 것은 **후보** 다 — rememberLearned 가 서로 다른 VM 2대 이상에서 모였을 때만 학습 계정으로 쓴다.
  * @returns {{account:string, vm:string}[]}
  */
@@ -114,12 +116,15 @@ export function learnAccounts(vms, rows) {
     const k = String(r?.entity || '').toLowerCase();
     const t0 = byName.get(k);
     if (t0 == null || !isSnapshotCreateEvent(r) || !r.user || Math.abs(Number(r.ts) - t0) > LEARN_WINDOW_MS) continue;
-    if (COMMON_ACCOUNT.test(bareOf(normAcct(r.user)))) continue;
     let set = hits.get(k); if (!set) { set = new Set(); hits.set(k, set); }
     set.add(s(r.user, ACCOUNT_MAX_LEN));
   }
   const out = [];
-  for (const [vm, set] of hits) if (set.size === 1) out.push({ account: [...set][0], vm });
+  for (const [vm, set] of hits) {
+    if (set.size !== 1) continue;
+    const account = [...set][0];
+    if (!COMMON_ACCOUNT.test(bareOf(normAcct(account)))) out.push({ account, vm });
+  }
   return out;
 }
 
@@ -333,7 +338,7 @@ const MAX_EDGE_VCS = 64;
 const MAX_EDGE_VMS = 30_000;
 const FUTURE_SKEW_MS = 5 * 60_000;
 const EDGE_STATUS = new Set(['ok', 'log-off', 'severity-filter']);
-const _edge = new Map(); // vcenterId → { agent, at, edgeAt, days, byVm, events, ambiguous, unmatched, truncated }
+const _edge = new Map(); // vcenterId → { agent, at(중앙 수신 시각), edgeAt(엣지 계산 시각), days, byVm, events, ambiguous, unmatched, truncated, collectedAt, collectRan }
 
 /**
  * 엣지 push 의 snapEvents 정제 — 아는 필드만·객체만·상한·문자열 수치는 수로 · VM id 는 그 vCenter 접두사만 · 시각은 수신 시각으로 자른다.
@@ -362,9 +367,14 @@ export function sanitizeEdgeSnap(raw, owns, now = Date.now()) {
     }
     const num = (v) => (Number.isInteger(v) && v >= 0 ? Math.min(v, 1e7) : 0);
     const at = Number(x.at);
+    // v2.761(C2): 엣지 로그 폴러의 마지막 온전한 수집 시각 — 수만(문자열 수치·0 이하·90일보다 오래된 것은 null = 모름), 미래는 수신 시각으로 자른다.
+    //   옛 엣지는 보내지 않는다(null — 판정은 막지 않는다).
+    const ca = typeof x.collectedAt === 'number' && Number.isFinite(x.collectedAt) && x.collectedAt > 0 && x.collectedAt >= now - 90 * DAY ? Math.min(x.collectedAt, now) : null;
     items.push({ vcenterId, status, byVm, events: num(x.events), ambiguous: num(x.ambiguous), unmatched: num(x.unmatched), unpaired: num(x.unpaired), truncated: x.truncated === true, accounts: num(x.accounts),
       days: Number.isInteger(x.days) && x.days > 0 && x.days <= 90 ? x.days : LOOKBACK_DAYS,
-      edgeAt: Number.isFinite(at) && at > 0 ? at : null, at: Number.isFinite(at) && at > 0 && at <= now + FUTURE_SKEW_MS ? Math.min(at, now) : now });
+      collectedAt: ca, ...(x.collectRan === true ? { collectRan: true } : {}),
+      // v2.761(C8): at 은 중앙 수신 시각(오래됨 판정이 엣지 시계에 묶이지 않게) — 엣지가 적은 시각은 edgeAt 에만.
+      edgeAt: Number.isFinite(at) && at > 0 ? at : null, at: now });
   }
   return { items, dropped };
 }
@@ -396,10 +406,12 @@ export function _resetForTest() { _acc = null; _loadError = ''; _edge.clear(); }
 /* ── 엣지: push 에 실을 요약(이 엣지가 직접 이벤트를 모으는 vCenter 만) ───────────────────────────────── */
 
 /**
- * @param {{ db: object, snap: object, notCollected: Map<string,string>, logSettings: object|null, now?: number }} ctx
+ * @param {{ db: object, snap: object, notCollected: Map<string,string>, logSettings: object|null, now?: number,
+ *   collectedAtFor?: (vcenterId:string) => (number|null), collectRan?: boolean }} ctx
+ *   collectedAtFor·collectRan(v2.761 C2) = 이 엣지 로그 폴러의 마지막 온전한 수집 시각·한 주기를 끝냈는가(logs/poller.js) — 중앙 snapVerdict 가 쓴다.
  * @returns {Promise<object[]>} sanitizeEdgeSnap 이 받는 모양
  */
-export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now = Date.now(), snapDb = null }) {
+export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now = Date.now(), snapDb = null, collectedAtFor = null, collectRan = false }) {
   const out = [];
   const need = [];   // v2.759: 전용 DB 백필 전인 vCenter — 이번에는 보내지 않고(중앙은 직전 요약 유지) 백필을 시작한다
   const vcs = (snap?.vcenters || []).filter((v) => v && v.id != null && !notCollected?.has(String(v.id))).slice(0, MAX_EDGE_VCS);
@@ -414,7 +426,9 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
     if (snap?.initial === true || !vms.length) continue;
     if (snapDb && !snapCovered(snapDb, vcenterId, now - LOOKBACK_DAYS * DAY)) { need.push(vcenterId); continue; }
     const r = await localSnapSummary(db, vcenterId, vms, { now, snapDb });
-    out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now });
+    const ca = typeof collectedAtFor === 'function' ? collectedAtFor(vcenterId) : null;
+    out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now,
+      collectedAt: Number.isFinite(ca) ? ca : null, ...(collectRan === true ? { collectRan: true } : {}) });
   }
   if (need.length) backfillSnap({ logsDb: db, vcenterIds: need }).catch(() => {});
   return out;
