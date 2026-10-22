@@ -96,7 +96,7 @@ export function registerVeeamBadges(api) {
         // 검토 #7: 엣지가 멈췄거나 담당이 바뀌면 마지막 요약을 '지금' 처럼 보이지 않는다(push 주기 2배 + 여유).
         if (Date.now() - e.at > pollMs() * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
         if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
-        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, truncated: e.truncated, accounts: e.accounts, at: e.at };
+        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, unpaired: e.unpaired, truncated: e.truncated, accounts: e.accounts, at: e.at };
       }
       if (why) return { ...base, status: 'not-collected', why };
       const ls = loadLogSettings();
@@ -104,7 +104,7 @@ export function registerVeeamBadges(api) {
       if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
       const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
       // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
-      return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
+      return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
     }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
   });
 

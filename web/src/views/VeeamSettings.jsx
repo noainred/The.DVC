@@ -258,7 +258,7 @@ function VeeamVcAccounts() {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>Veeam 이 vCenter 에 접속하는 계정 — 이벤트로 Veeam 백업 찾기</div>
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 8, overflowWrap: 'anywhere' }}>
         vCenter › VM 및 폴더의 하늘색 점선 배지(📸 날짜 — Veeam 백업 시도)는 최근 7일 vCenter 이벤트 중 이 계정들이 만든 VM 스냅샷으로 정합니다. 이름에 veeam 이 든 계정은 적지 않아도 되고,
-        지금 Veeam 임시 스냅샷을 만든 계정은 자동으로 배웁니다. 한 줄에 하나 — 도메인까지 적으면 그 계정만(예: CORP\svc-backup), 도메인 없이 적으면 어느 도메인의 같은 이름이든 맞춥니다.
+        지금 Veeam 임시 스냅샷을 만든 계정은 자동으로 배웁니다. 한 줄에 하나 — 도메인까지 적으면 그 계정만(예: CORP\svc-backup · VSPHERE.LOCAL\Administrator 와 administrator@vsphere.local 은 같은 계정), 도메인 없이 적으면 어느 도메인의 같은 이름이든 맞춥니다. administrator 같은 공용 계정을 적으면 사람이 만든 스냅샷과 섞이지 않게 만들고 12시간 안에 지운 스냅샷만 셉니다.
       </div>
       {err ? <div style={{ color: 'var(--red)', fontSize: 12 }}>불러오지 못했습니다: {err}</div> : (
         <>

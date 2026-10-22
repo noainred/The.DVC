@@ -248,5 +248,7 @@ export function veeamEventStatusText(d) {
   if (d.accounts === 0 && !Object.keys(d.byVm || {}).length) notes.push('Veeam 계정을 아직 모릅니다 — Veeam 이 쓰는 vCenter 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요(지금 백업 중인 VM 이 2대 이상 보이면 자동으로 배웁니다).');
   if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > 6 * 3_600_000) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다.`);
   if (d.truncated) notes.push('이벤트가 많아 일부만 읽었습니다.');
+  // v2.755: 공용 계정(administrator@vsphere.local 등 — 사람도 같이 쓴다)은 '만들고 12시간 안에 같은 계정이 지운' 스냅샷만 센다.
+  if (d.unpaired > 0) notes.push(`공용 계정(administrator 등)이 만들고 12시간 안에 지우지 않은 스냅샷 ${d.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다(지금 백업 중이면 보라 배지로 보입니다).`);
   return notes.join(' ');
 }
