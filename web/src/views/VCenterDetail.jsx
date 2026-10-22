@@ -24,6 +24,7 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
+import { veeamBadge, veeamSummary } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 배지·요약 문구(순수)
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
 const VIEWS = [
@@ -270,6 +271,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [inclNotes, setInclNotes] = useState(false); // 검색 시 VM 메모(vSphere annotation) 포함 여부(v2.293)
   const [inclPoweredOff, setInclPoweredOff] = useState(true); // 트리·검색에 Off VM 포함 여부(기본 포함=기존 동작 유지)
+  const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
@@ -296,6 +298,14 @@ export default function VCenterDetail({ site, onBack }) {
   //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
   const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
+  // v2.751(사용자 요청 "veeam 백업 VM 표시"): vCenter 와 같은 법인의 Veeam 서버(중앙 직접 또는 그 법인 엣지가 읽음)가 알려 준
+  //   백업 대상·백업 중 VM 에 배지를 붙인다. 켤 때만 60초 폴링(서버는 Veeam 을 주기 수집해 둔 값을 대조만 한다 — Veeam 왕복 없음).
+  const veeamP = usePolling(veeamOn ? '/veeam/badges' : null, { vcenterId }, 60_000);
+  const veeamD = veeamOn ? veeamP.data : null;
+  // 연결된 서버가 있을 때만 배지 표 — 없으면 null 이라 기존 메모 휴리스틱(veeamed)이 그대로 보인다.
+  const veeamMap = useMemo(() => (veeamD?.configured ? (veeamD.byVm || {}) : null), [veeamD]);
+  const veeamSum = useMemo(() => (veeamOn ? veeamSummary(veeamD, { loading: veeamP.loading, error: veeamD ? '' : (veeamP.errorInfo?.message || veeamP.error || '') }) : null),
+    [veeamOn, veeamD, veeamP.loading, veeamP.error, veeamP.errorInfo]);
   const vmsP = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
   const dsP = usePolling('/datastores', { vcenterId }, 30_000);
   const netP = usePolling('/networks', { vcenterId }, 30_000);
@@ -553,6 +563,11 @@ export default function VCenterDetail({ site, onBack }) {
               title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색에서 숨기고, VM 수와 CPU·MEM 가상화율을 켜진 VM 기준으로 계산합니다">
               <input type="checkbox" checked={inclPoweredOff} onChange={(e) => setInclPoweredOff(e.target.checked)} /> Off VM 포함
             </label>
+            {/* v2.751 Veeam 백업 VM 표시 — 목록은 그대로 두고 백업 대상·백업 중 VM 행에 배지만 붙인다(숨기는 필터가 아니다). */}
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
+              title="체크하면 이 vCenter 와 연결된 Veeam 백업 서버가 알려 준 백업 대상 VM 에 'Veeam' 배지를, 지금 백업 중인 VM 에 'Veeam 백업 중' 배지를 붙입니다(목록은 그대로)">
+              <input type="checkbox" checked={veeamOn} onChange={(e) => setVeeamOn(e.target.checked)} /> Veeam 백업 VM 표시
+            </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
             {/* 전체 현황 / CSV — 트리를 하나하나 펼치지 않고 모든 클러스터·호스트를 한 번에 본다(v2.335).
@@ -571,6 +586,17 @@ export default function VCenterDetail({ site, onBack }) {
               </span>
             )}
           </div>
+          {veeamSum && veeamSum.text && (
+            <div style={{ margin: '0 0 8px', fontSize: 12, lineHeight: 1.6, color: veeamSum.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)', minWidth: 0, overflowWrap: 'anywhere' }}>
+              <BoldText text={veeamSum.text} />
+              {veeamSum.details.length > 0 && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: 'pointer' }}>자세히({veeamSum.details.length})</summary>
+                  <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>{veeamSum.details.map((t, i) => <li key={i}>{t}</li>)}</ul>
+                </details>
+              )}
+            </div>
+          )}
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
               볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
               DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}
@@ -654,13 +680,13 @@ export default function VCenterDetail({ site, onBack }) {
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<StateBadge state={vm.powerState} />}
+                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} /></>}
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
-                    <VmBadges vm={vm} cloneSet={cloneSet} />
+                    <VmBadges vm={vm} cloneSet={cloneSet} veeam={veeamMap} />
                   </>} />
               ))}
             </Node>
@@ -689,8 +715,8 @@ export default function VCenterDetail({ site, onBack }) {
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                        label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                        label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} /></>}
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} veeam={veeamMap} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -703,7 +729,7 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
@@ -953,7 +979,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, usageProps }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -962,10 +988,10 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps 
         const f = node.folders[name];
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={onSelect} />
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} usageProps={usageProps} onSelect={onSelect} />
             {f.vms.map((vm) => (
-              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} /></>}
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} veeam={veeamMap} /></>} />
             ))}
           </Tree>
         );
@@ -1001,10 +1027,21 @@ export const tb = (g) => {
  * veeamed 는 **휴리스틱**이다 — Veeam 이 기본 설정에서 백업 시각을 VM 메모(vSphere notes)에
  * 기록하는 동작을 근거로 vm.notes 의 'veeam' 문자열을 탐지한다. Veeam 쪽에서 메모 기록을
  * 꺼둔 환경에서는 표시되지 않는다(정직 표기 — 툴팁에 명시).
+ * v2.751: 'Veeam 백업 VM 표시' 가 켜지면 Veeam REST 가 알려 준 값(veeam 표)으로 'Veeam'·'Veeam 백업 중'·'Veeam 대기' 배지를 단다(veeamBadge.js).
  */
-function VmBadges({ vm, cloneSet }) {
+/** v2.751 Veeam 배지(백업 대상·백업 중·대기) — 전원 배지 옆에 둔다(보조 줄은 좁은 화면에서 잘린다). 표가 없으면(꺼짐·미등록) 그리지 않는다. */
+function VeeamTag({ vm, veeam }) {
+  const vb = veeam ? veeamBadge(veeam[vm.id]) : null;
+  if (!vb) return null;
+  return <span className={`badge ${vb.color}`} style={{ fontSize: 10, marginLeft: 4, whiteSpace: 'nowrap' }} title={vb.title}>{vb.label}</span>;
+}
+
+function VmBadges({ vm, cloneSet, veeam }) {
   const cloned = cloneSet?.has(vm.id);
-  const veeamed = /veeam/i.test(vm.notes || '');
+  // v2.751: 'Veeam 백업 VM 표시' 가 켜져 있고 연결된 Veeam 서버가 있으면(veeam 표가 있으면) Veeam 이 직접 알려 준 값을 쓴다 —
+  //   그때는 메모 휴리스틱(veeamed)을 함께 그리지 않는다(같은 뜻의 배지 두 개가 서로 다른 근거로 엇갈려 보이지 않게).
+  //   Veeam 배지 자체는 VeeamTag 가 전원 배지 옆(badge 칸)에 그린다 — 보조 줄(sub)은 좁은 화면(400px)에서 말줄임으로 잘려 배지가 사라졌다.
+  const veeamed = !veeam && /veeam/i.test(vm.notes || '');
   if (!cloned && !veeamed) return null;
   return (
     <>

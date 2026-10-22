@@ -63,6 +63,7 @@ const EXISTING_MARKERS = [
   //   이것만 쓰던 현장이 '새 설치' 로 판정되면 업그레이드 직후 그 SSH 접속이 전부 승인 대기로 끊긴다.
   'remote-access.json', 'agent-deploy-targets.json', 'relay-topology.json', 'capture-monitors.json', 'gpu-guest.json',
   'bmusage-settings.json',
+  'veeam-servers.json', // v2.751 Veeam B&R REST(9419)
 ];
 
 const FILE = () => path.join(config.configDir, 'peer-trust.json');
