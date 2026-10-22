@@ -73,3 +73,11 @@ describe('veeamDetailView (v2.751 상세 창)', () => {
     expect(v.status.progress).toBe(37); expect(v.status.text).toMatch(/37%/);
   });
 });
+
+describe('에이전트 백업 표시 (v2.752)', () => {
+  it('배지·상세가 이름으로 맞췄다는 근거를 말한다', () => {
+    expect(veeamBadge({ rp: 7, ag: 1, servers: ['OC'] }).title).toMatch(/에이전트 백업 — .*컴퓨터 이름으로/);
+    expect(veeamBadge({ rp: 7, servers: ['OC'] }).title).not.toMatch(/에이전트/);
+    expect(veeamDetailView({ agent: true, restorePoints: { count: 7 }, lastBackup: Date.UTC(2026, 9, 22), lastBackupSrc: 'rp' }).status.text).toMatch(/에이전트 백업\(컴퓨터 이름으로 맞춤\)/);
+  });
+});

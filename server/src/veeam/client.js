@@ -55,6 +55,25 @@ function maskText(text, secrets) {
   return t.trim().slice(0, 300);
 }
 
+const verKey = (v) => { const m = /^v?(\d{1,3})\.(\d{1,3})-rev(\d{1,3})$/i.exec(String(v || '').trim()); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null; };
+const verCmp = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+/**
+ * '판을 지원하지 않습니다' 거절문에서 지원 목록을 읽어 지금 판보다 높은 것 중 가장 높은 판을 돌려준다. 없으면 null.
+ * 예(실서버 VBR 12.3): 'Unsupported RESTAPI version. The following versions are supported: v1.0-rev1, …, v1.2-rev0'
+ */
+export function higherVersion(text, current) {
+  const t = String(text || '').slice(0, 2000);
+  if (!/unsupported\s+rest\s*api\s+version/i.test(t)) return null;
+  const cur = verKey(current);
+  let best = null; let bestKey = null;
+  for (const m of t.matchAll(/\bv?(\d{1,3}\.\d{1,3}-rev\d{1,3})\b/gi)) {
+    const k = verKey(m[1]);
+    if (!k || (cur && verCmp(k, cur) <= 0)) continue;
+    if (!bestKey || verCmp(k, bestKey) > 0) { best = m[1]; bestKey = k; }
+  }
+  return best;
+}
+
 async function failText(res, secrets) {
   let text = '';
   // 앞부분만 읽는다(본문 전체를 읽고 자르지 않는다). 상한에서 잘렸으면 끝 256자를 버린다 — 경계에 걸려 반쯤 남은 비밀은 가림이 못 찾는다.
@@ -84,7 +103,11 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
     }
     return res;
   }
-  const headers = (extra = {}) => ({ Accept: 'application/json', 'x-api-version': apiVersion, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra });
+  const headers = (extra = {}, ver = apiVersion) => ({ Accept: 'application/json', 'x-api-version': ver, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra });
+  // 경로마다 쓰는 판 — 서버가 '이 판은 지원하지 않습니다(지원: …)' 로 거절한 경로만 지원 목록의 가장 높은 판으로 올린다(v2.752, 실서버:
+  // VBR 12.3 은 /api/v1/restorePoints 를 1.2-rev0 이상에서만 준다). 그 밖의 경로는 등록한 판 그대로(응답 모양이 판마다 다를 수 있다).
+  const pathVer = new Map();
+  const bumped = [];
 
   async function login() {
     const body = new URLSearchParams({ grant_type: 'password', username: String(server.username || ''), password: String(server.password || '') });
@@ -104,10 +127,20 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
   }
 
   async function get(path) {
-    const res = await call(path, { method: 'GET', headers: headers() });
+    const base0 = path.split('?')[0];
+    const ver = pathVer.get(base0) || apiVersion;
+    const res = await call(path, { method: 'GET', headers: headers({}, ver) });
     if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw authError('인증 만료·거부(401)'); }
-    if (!res.ok) { const e = new Error(`${path.split('?')[0]} ← ${await failText(res, secrets)}`); e.status = res.status; throw e; }
-    return readJsonCapped(res, BODY_MAX, `Veeam ${path.split('?')[0]} 응답`);
+    if (!res.ok) {
+      const text = await failText(res, secrets);
+      const up = res.status === 400 && !pathVer.has(base0) ? higherVersion(text, ver) : null;
+      if (up) { // 한 번만 — 올린 판으로도 실패하면 그 오류를 그대로 던진다
+        pathVer.set(base0, up); bumped.push({ path: base0, from: ver, to: up });
+        return get(path);
+      }
+      const e = new Error(`${base0} ← ${text}`); e.status = res.status; throw e;
+    }
+    return readJsonCapped(res, BODY_MAX, `Veeam ${base0} 응답`);
   }
 
   /** 페이지를 합친 원소 배열. 상한(maxPages)에서 멈췄으면 배열에 truncated:true 를 단다(호출부가 안내한다). */
@@ -130,7 +163,7 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
     try { const r = await call('/api/oauth2/logout', { method: 'POST', headers: headers() }); try { await r.body?.cancel?.(); } catch { /* */ } } catch { /* 최선 */ }
     token = '';
   }
-  return { login, get, getAll, logout, apiVersion };
+  return { login, get, getAll, logout, apiVersion, bumped };
 }
 
 /**
@@ -187,7 +220,16 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
       catch (e) { if (e?.authFailed) throw e; }
     }));
     if (lastList.length && !lastTasks.length) notes.push('끝난 세션의 VM 별 결과(task)를 읽지 못해 완료 시각은 복원 지점 생성 시각으로 보여 줍니다');
-    const restorePoints = await soft('복원 지점', () => c.getAll('/api/v1/restorePoints', { maxPages: RP_MAX_PAGES }));
+    // 복원 지점: /api/v1/restorePoints 는 1.2-rev0 판부터(그 아래 판은 판 거절 → 위 get 이 지원 판으로 올려 다시 읽는다).
+    // 1.2 를 지원하지 않는 서버(VBR 12.0~12.2)는 같은 정보를 /api/v1/objectRestorePoints 로 준다(1.1-rev0 문서).
+    const restorePoints = await soft('복원 지점', async () => {
+      try { return await c.getAll('/api/v1/restorePoints', { maxPages: RP_MAX_PAGES }); }
+      catch (e) {
+        if (e?.authFailed || (e?.status !== 400 && e?.status !== 404)) throw e;
+        try { return await c.getAll('/api/v1/objectRestorePoints', { maxPages: RP_MAX_PAGES }); }
+        catch (e2) { if (e2?.authFailed) throw e2; throw new Error(`${String(e.message).slice(0, 160)} · ${String(e2?.message || e2).slice(0, 160)}`); }
+      }
+    });
     if (restorePoints?.truncated) notes.push(`복원 지점이 ${restorePoints.length}개를 넘어 일부만 읽었습니다`);
     // 백업(체인)과 그 파일(용량). 파일 경로가 없는 판(404)이면 첫 실패에서 멈추고 용량 없이 간다.
     const backupList = (await soft('백업 목록', () => c.getAll('/api/v1/backups'))) || [];
@@ -201,6 +243,7 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     }));
     if (filesUnsupported) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
     if (backupList.length > MAX_BACKUPS) notes.push(`백업 ${backupList.length}개 중 ${MAX_BACKUPS}개만 용량을 읽었습니다`);
+    for (const b of c.bumped) notes.push(`${b.path} 는 이 서버가 판 ${b.from} 으로는 주지 않아 지원 판 ${b.to} 으로 읽었습니다`);
     const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
     return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, notes: [...notes, ...r.notes] };
   } finally {

@@ -69,7 +69,7 @@ test('parse: 작업 includes 두 모양 · 백업 객체 · 컨테이너는 세�
   assert.equal(by.app02.run, 2, 'Pending = 대기');
   assert.equal(by.db01.rp, 14, '백업 객체의 복원 지점');
   assert.equal(by.db01.h, 'vc01.corp.local', 'path 첫 마디가 vCenter');
-  assert.ok(!by['linux-phys'], 'VMware 가 아닌 객체는 버린다');
+  assert.equal(by['linux-phys']?.ag, 1, 'VMware 가 아닌 에이전트 객체는 에이전트 항목으로만 둔다(v2.752 — 이름 대조 전용)'); assert.equal(by['linux-phys'].m, '');
   assert.ok(!by.done, '끝난 task 는 백업 중이 아니다');
   assert.equal(r.jobs[1].lastRun, Date.parse('2026-10-22T01:00:00Z'));
   assert.equal(r.jobs[1].running, true);
