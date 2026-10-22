@@ -240,6 +240,7 @@ export function veeamEventStatusText(d) {
     'severity-filter': 'vCenter 이벤트를 경고 이상만 저장하도록 설정돼 스냅샷(정보) 이벤트가 없습니다(설정 › vCenter 로그 › 최소 심각도).',
     'not-collected': '이 vCenter 는 지금 이벤트를 수집하지 않습니다(비활성·점검 중).',
     'no-edge-data': '이 vCenter 를 수집하는 엣지가 아직 이벤트 요약을 보내지 않았습니다 — 엣지가 이 버전 이상이고 개별 토큰을 쓰는지 확인하세요(중앙이 재시작한 직후라면 다음 push 까지 기다리세요).',
+    'no-inventory': '이 vCenter 의 VM 목록을 아직 수집하지 않았습니다(포탈 시작 직후 등) — 수집이 끝나면 보입니다.',
     'stale-edge': `이 vCenter 를 수집하는 엣지의 이벤트 요약이 오래됐습니다(마지막 ${fmtTime(d.at) || '—'}) — 엣지가 멈췄거나 담당이 바뀌었을 수 있어 표시하지 않습니다.`,
   };
   if (d.status && d.status !== 'ok') return why[d.status] || '이벤트 기준 정보를 받지 못했습니다.';
@@ -257,6 +258,7 @@ export function veeamEventStatusText(d) {
 
 const BACKUP_REASON = {
   'veeam-pending': 'Veeam 서버의 첫 수집을 기다리는 중입니다.',
+  'no-inventory': '이 vCenter 의 VM 목록을 아직 수집하지 않았습니다(포탈 시작 직후 등) — 수집이 끝나면 보입니다.',
   'veeam-failed': 'Veeam 서버를 아직 한 번도 읽지 못했습니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.',
   'no-account': 'Veeam 이 쓰는 vCenter 계정을 아직 모릅니다 — 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요.',
 };
