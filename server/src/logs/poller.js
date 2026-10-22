@@ -40,6 +40,27 @@ const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
  *    재시작 사이에 쌓인 이벤트는 다음 수집이 lastTs 부터 다시 읽으므로 그 틈은 실제로 아직 수집 전이다.
  */
 const _collectOk = new Map();   // vcenterId → { at, capped, events }
+
+/*
+ * v2.756(실서버 — OC2 vCenter 의 이벤트 수집이 2026-10-10 04:32 에서 12일째 멈춤): 수집 시작점이 '로그 DB 에 마지막으로 **저장된** 시각'
+ *   (db.lastTs + 1)뿐이었다. 읽은 이벤트가 전부 저장되지 않으면(① 중복 키로 INSERT OR IGNORE 가 버림 ② 최소 심각도로 걸러짐) 시작점이
+ *   그대로라 다음 주기가 같은 구간을 다시 읽고 다시 버렸다 — 영원히. ①의 실제 경로: 중복 키가 vCenter **이벤트 번호(key) 하나**였다 —
+ *   vCenter 를 다시 배포·마이그레이션 업그레이드하면 번호가 처음부터 다시 매겨져 새 이벤트가 보관 중인 옛 번호(기본 365일)와 겹친다(추정 —
+ *   그 vCenter 의 업그레이드 이력은 확인하지 못했다). 이제 ⓐ 중복 키 = 번호@시각(eventRowKey) ⓑ 시작점 = max(마지막 저장, 마지막으로 **읽은** 시각)
+ *   (nextSinceTs — 읽은 커서는 인메모리, 재시작하면 한 번 더 읽고 다시 나아간다) ⓒ 읽었는데 하나도 저장되지 않은 상한 주기는 경고·결과에 남긴다.
+ */
+const _readCursor = new Map();  // vcenterId → 마지막으로 읽은 이벤트 시각(저장 여부와 무관)
+/** 이벤트 행의 중복 키 — vCenter 이벤트 번호 + 시각. 번호가 없으면 null(db 가 시각·문구로 만든다). */
+export function eventRowKey(e) {
+  const k = e?.key;
+  return k == null || k === '' ? null : `${k}@${Number(e.ts) || 0}`;
+}
+/** 다음 수집 시작 시각 — 저장된 마지막과 읽은 마지막 중 늦은 것 + 1ms. 둘 다 없으면 첫 수집 창. */
+export function nextSinceTs(lastStored, lastRead, { now = Date.now(), firstDays = 7 } = {}) {
+  const base = Math.max(Number(lastStored) || 0, Number(lastRead) || 0);
+  return base > 0 ? base + 1 : now - firstDays * DAY;
+}
+const _stallLog = new Map();    // vcenterId → 마지막 경고 시각(같은 vCenter 는 1시간에 1줄)
 /** 수집 결과로 '이벤트가 온전한 시각' 을 계산한다(순수). events = 원시 이벤트(심각도 거르기 전), max = 한 번에 읽는 상한. */
 export function eventsCompleteUntil(events, { startedAt, max = Infinity } = {}) {
   const list = Array.isArray(events) ? events : [];
@@ -191,16 +212,18 @@ export async function pollLogsOnce({ manual = false } = {}) {
         // 첫 수집은 최근 7일. v2.710: 데모(mock)는 91일 — VM 가용성(7·30·90일 보기)이 합성 이벤트 7일치만으로
         //   전 VM 을 '수집 시작부터만 잼(일부 기간)' 으로 내던 공백. 이벤트 수도 기간에 비례(7일마다 25건).
         const firstDays = mock ? MOCK_FIRST_DAYS : 7;
-        const sinceTs = last ? last + 1 : Date.now() - firstDays * DAY;
+        const sinceTs = nextSinceTs(last, _readCursor.get(String(vc.id)), { firstDays }); // v2.756: 읽은 커서까지 본다
         const events = mock
           ? synthEvents(vc.id, sinceTs, last ? 25 : 25 * Math.ceil(firstDays / 7))
           : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll, signal }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
-          .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message, detail: e.detail ?? null }));
+          .map((e) => ({ vcenterId: vc.id, key: eventRowKey(e), ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message, detail: e.detail ?? null }));
         // v2.731(A2-01): 적재할 행이 0개여도 '수집은 성공' 이다 — 성공 시각 기록을 위해 항상 넘긴다.
         const done = eventsCompleteUntil(events, { startedAt, max: mock ? Infinity : s.maxPerPoll });
-        perVc.push({ vcId: String(vc.id), rows, done, events: events.length });
+        let maxRead = 0;
+        for (const e of events) { const t = Number(e?.ts); if (Number.isFinite(t) && t > maxRead) maxRead = t; }
+        perVc.push({ vcId: String(vc.id), rows, done, events: events.length, maxRead });
       } catch (e) {
         console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`);
         // v2.732(B4-01): 로그인 거부(InvalidLogin 등)면 주 폴러와 **같은 정지 기록**에 올린다(v2.591 보조 수집기 규약 — 이 폴러만 빠져 있었다).
@@ -215,8 +238,10 @@ export async function pollLogsOnce({ manual = false } = {}) {
     //   이어 붙여 따라잡기 주기마다 약 2.4초 멈췄다(재현). 조각은 ts 가 바뀌는 안전 지점에서만 자른다(logs/db.js tsSafeChunks).
     //   같은 연결의 동시 write 는 여전히 없다(running 재진입 가드 · 양보는 COMMIT 뒤).
     const maybeYield = createYielder(15);
-    for (const { vcId, rows, done, events } of perVc) {
+    const stalled = [];   // v2.756: 상한만큼 읽었는데 하나도 저장되지 않은 vCenter(중복 키·심각도 필터) — 예전에는 여기서 영원히 멈췄다
+    for (const { vcId, rows, done, events, maxRead } of perVc) {
       await maybeYield();
+      const before = db.lastTs(vcId);
       if (rows.length) {
         if (typeof db.insertManyAsync === 'function') await db.insertManyAsync(rows);
         else db.insertMany(rows);
@@ -224,6 +249,17 @@ export async function pollLogsOnce({ manual = false } = {}) {
       }
       // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 vCenter 이후는 기록되지 않는다 — 온전하지 않다).
       if (done.at != null) _collectOk.set(vcId, { at: done.at, capped: done.capped, events });
+      if (maxRead > 0) {
+        if (maxRead > (_readCursor.get(vcId) || 0)) _readCursor.set(vcId, maxRead);
+        if (done.capped && db.lastTs(vcId) <= before) {
+          stalled.push({ vcenterId: vcId, read: events, stored: rows.length });
+          const t = Date.now();
+          if (!_stallLog.has(vcId) || t - _stallLog.get(vcId) > 3_600_000) {
+            _stallLog.set(vcId, t);
+            console.warn(`[vclogs] ${vcId}: 이벤트 ${events}건을 읽었는데 새로 저장된 것이 없습니다(중복 또는 심각도 필터) — 읽은 시각(${new Date(maxRead).toISOString()})부터 이어 읽습니다`);
+          }
+        }
+      }
     }
     // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
     // ⚠ v2.503: `tick++ % N === 0` 은 tick 초기값이 0 이라 **첫 폴에서 즉시 참**이었다 —
@@ -278,7 +314,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
         lastCap = { at: Date.now(), limitBytes: limit, usedBytes: size, dropped, stuck };
       }
     }
-    lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}),
+    lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}), ...(stalled.length ? { stalled } : {}),
       ...(split.skipped.length ? { notCollected: split.skipped } : {}) };
     if (collected) console.log(`[vclogs] ${collected}건 장기 보관`);
     // v2.743(WEB-04): 수집 실패한 vCenter 는 **반환에만** 싣는다 — '지금 수집'(관리자 + 전체 범위)이 '전부 실패해도 수집 완료 0건' 이라
