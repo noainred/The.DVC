@@ -16,6 +16,7 @@ import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS } from '../../veeam/snapEvents.js';
+import { logCollectOkAt } from '../../logs/poller.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -85,19 +86,25 @@ export function registerVeeamBadges(api) {
     return memoJson(req, res, 'veeam-snap-events', async () => {
       const { vcenterId, vms } = t;
       const base = { ok: true, vcenterId, days: LOOKBACK_DAYS, byVm: {} };
+      // 검토 #8: 지금 인벤토리에 있는 VM 만 싣는다(엣지가 보낸 접두사만 맞는 id·지운 VM 이 'N대' 를 부풀리지 않게).
+      const known = new Set(vms.map((v) => v.id));
+      const onlyKnown = (m) => { const o = {}; for (const [k, v] of Object.entries(m || {})) if (known.has(k)) o[k] = v; return o; };
       const why = eventNotCollectedMap().get(vcenterId); // mock 이면 빈 맵(로그 폴러가 전부 모은다)
       if (why === 'site') {
         const e = edgeSnapFor(vcenterId);
         if (!e) return { ...base, status: 'no-edge-data', source: 'edge' };
+        // 검토 #7: 엣지가 멈췄거나 담당이 바뀌면 마지막 요약을 '지금' 처럼 보이지 않는다(push 주기 2배 + 여유).
+        if (Date.now() - e.at > pollMs() * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
         if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
-        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: e.byVm, events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, truncated: e.truncated, at: e.at };
+        return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, truncated: e.truncated, accounts: e.accounts, at: e.at };
       }
       if (why) return { ...base, status: 'not-collected', why };
       const ls = loadLogSettings();
       if (ls?.enabled === false) return { ...base, status: 'log-off' };
       if (ls?.minSeverity && ls.minSeverity !== 'info') return { ...base, status: 'severity-filter' };
       const r = await localSnapSummary(await getLogsDb(), vcenterId, vms);
-      return { ...base, status: 'ok', source: 'local', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, truncated: r.truncated, at: r.at };
+      // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
+      return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
     }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
   });
 

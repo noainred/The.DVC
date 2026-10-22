@@ -20,7 +20,7 @@ import { pickAgent } from '../../cvp/formChoices.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import * as vbBulk from '../../veeam/bulk.js';
-import { accountView, saveManualAccounts } from '../../veeam/snapEvents.js';
+import { accountView, saveManualAccounts, forgetLearned, accountsUnreadable } from '../../veeam/snapEvents.js';
 // CSV·텍스트 가져오기/내보내기는 관리자 + 'data.csv' 권한(다른 대량 등록 화면과 같은 게이트 — v2.643).
 const csvPerm = requirePerm('data.csv');
 
@@ -45,11 +45,16 @@ export function registerVeeam(adminRouter) {
   adminRouter.get('/veeam/vc-accounts', adminOnly, fleetWideOnly, (_req, res) => res.json({ ok: true, ...accountView() }));
   adminRouter.put('/veeam/vc-accounts', adminOnly, fleetWideOnly, (req, res) => {
     const raw = req.body?.accounts;
+    const forget = req.body?.forget;
     if (raw != null && !Array.isArray(raw) && typeof raw !== 'string') return res.status(400).json({ ok: false, reason: 'accounts 는 목록 또는 줄바꿈 문자열입니다.' });
+    if (forget != null && !Array.isArray(forget)) return res.status(400).json({ ok: false, reason: 'forget 은 계정 이름 목록입니다.' });
+    // 파일을 못 읽은 상태로 저장하면 학습 계정·받은 계정까지 빈 값으로 덮는다 — 막고 이유를 말한다(조회 실패 상태로 저장하지 않는다).
+    if (accountsUnreadable()) return res.status(409).json({ ok: false, reason: '계정 파일을 읽지 못한 상태라 저장하지 않습니다 — 손상본(veeam-vc-accounts.json.corrupt.*)을 확인한 뒤 포탈을 다시 시작하세요.' });
     try {
-      const r = saveManualAccounts(raw ?? []);
-      logAudit({ user: req.user?.username, action: 'Veeam vCenter 계정 저장', target: 'veeam-vc-accounts', detail: `${r.list.length}개${r.dropped ? ` · 버림 ${r.dropped}` : ''}` });
-      res.json({ ok: true, saved: r.list.length, dropped: r.dropped, ...accountView() });
+      const forgot = forget ? forgetLearned(forget) : 0;
+      const r = raw != null ? saveManualAccounts(raw) : { list: accountView().manual, dropped: 0 };
+      logAudit({ user: req.user?.username, action: 'Veeam vCenter 계정 저장', target: 'veeam-vc-accounts', detail: `${r.list.length}개${r.dropped ? ` · 버림 ${r.dropped}` : ''}${forgot ? ` · 학습 계정 지움 ${forgot}` : ''}` });
+      res.json({ ok: true, saved: r.list.length, dropped: r.dropped, forgot, ...accountView() });
     } catch (e) { res.status(500).json({ ok: false, reason: `저장하지 못했습니다: ${String(e?.message || e).slice(0, 120)}` }); }
   });
 

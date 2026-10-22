@@ -20,7 +20,7 @@ const TONE = {
   amber: { bg: 'rgba(245,158,11,.15)', fg: '#fbbf24' },
   blue: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
   muted: { bg: 'rgba(139,155,180,.12)', fg: 'var(--text-dim)' },
-  greenLine: { bg: 'rgba(34,197,94,.08)', fg: '#4ade80' },
+  sky: { bg: 'rgba(56,189,248,.08)', fg: '#7dd3fc' },
   purple: { bg: 'rgba(168,85,247,.10)', fg: '#c084fc' },
   red: { bg: 'rgba(239,68,68,.10)', fg: '#f87171' },
 };
@@ -60,7 +60,7 @@ export function VeeamTag({ vm, veeam, on, ev, onOpen }) {
         </button>
       )}
       {sb && <VeeamSnapChip label={sb.label} tone={sb.color} title={sb.title} ariaLabel={`${vm.name} — ${sb.label}(vCenter 스냅샷 기준)`} />}
-      {eb && <VeeamSnapChip label={eb.label} tone="greenLine" title={eb.title} ariaLabel={`${vm.name} — Veeam 스냅샷 이벤트 ${eb.label}(vCenter 이벤트 기준)`} />}
+      {eb && <VeeamSnapChip label={eb.label} tone="sky" title={eb.title} ariaLabel={`${vm.name} — Veeam 백업 시도 ${eb.label}(vCenter 이벤트 기준)`} />}
     </>
   );
 }
@@ -92,7 +92,7 @@ export function VeeamSnapSummary({ counts, ev }) {
           <VeeamSnapChip label={`📸 스냅샷 잔존 ${counts.stale}대`} tone="red" title="‘VEEAM BACKUP TEMPORARY SNAPSHOT’ 이 하루 넘게 남은 VM — 정리 실패 의심" />
         </>
       )}
-      {evN != null && <VeeamSnapChip label={`📸 최근 ${ev.days}일 Veeam 스냅샷 ${evN}대`} tone="greenLine" title={`vCenter 이벤트 기준 — 최근 ${ev.days}일 안에 Veeam 계정이 스냅샷을 만든 VM(백업 시작 시각에 가깝다 · 성공 여부는 모름)${ev.ambiguous ? ` · 같은 이름의 VM 이 둘 이상이라 고르지 못한 이벤트 ${ev.ambiguous}건` : ''}${ev.truncated ? ' · 이벤트가 많아 일부만 읽었습니다' : ''}`} />}
+      {evN != null && <VeeamSnapChip label={`📸 최근 ${ev.days}일 Veeam 백업 시도 ${evN}대`} tone="sky" title={`vCenter 이벤트 기준 — 최근 ${ev.days}일 안에 Veeam 계정이 스냅샷을 만든 VM(백업 시작 단계 · 성공 여부는 모름)${ev.ambiguous ? ` · 같은 이름의 VM 이 둘 이상이라 고르지 못한 이벤트 ${ev.ambiguous}건` : ''}`} />}
       <span style={{ flex: '1 1 260px', minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 서버에서 확인한 값이 아니라 vCenter 스냅샷 이름(지금 백업 중·잔존)과 이벤트(최근 백업 시각)로 본 것입니다(점선 배지). 백업 성공 여부는 알 수 없습니다.</span>
       {evWhy && <span style={{ flex: '1 1 100%', minWidth: 0, overflowWrap: 'anywhere', color: 'var(--amber)' }}>{evWhy}</span>}
     </div>

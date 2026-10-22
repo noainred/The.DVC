@@ -112,7 +112,8 @@ describe('vCenter 이벤트 기준 배지 (v2.754)', () => {
     expect(veeamEventBadge([null, 1])).toBe(null);
     const ts = new Date(2026, 9, 22, 1, 12).getTime();
     const b = veeamEventBadge([ts, 3], { days: 7 });
-    expect(b.label).toBe('📸 10-22 01:12'); expect(b.color).toBe('green');
+    expect(b.label).toBe('📸 10-22 01:12'); expect(b.color).toBe('sky'); // 성공처럼 읽히는 녹색이 아니다(v2.754 검토 #3)
+    expect(b.title).toMatch(/백업을 시도한/);
     expect(b.title).toMatch(/vCenter 이벤트 기준 — Veeam 서버에서 확인한 값이 아닙니다/);
     expect(b.title).toMatch(/최근 7일 3번/); expect(b.title).toMatch(/성공 여부는 이벤트로 알 수 없습니다/);
     expect(veeamEventBadge([ts, 1], { source: 'edge' }).title).toMatch(/엣지가 보낸 요약/);
@@ -126,5 +127,11 @@ describe('vCenter 이벤트 기준 배지 (v2.754)', () => {
       expect(t.length).toBeGreaterThan(10); expect(t).not.toMatch(/백업 안 됨|백업이 없/);
     }
     expect(veeamEventStatusText({ status: 'weird' })).toMatch(/받지 못했습니다/);
+    expect(veeamEventStatusText({ status: 'stale-edge', at: Date.now() })).toMatch(/오래됐습니다/);
+    expect(veeamEventStatusText({ status: 'ok', accounts: 0, byVm: {} })).toMatch(/Veeam 계정을 아직 모릅니다/);
+    expect(veeamEventStatusText({ status: 'ok', accounts: 0, byVm: { a: [1, 1] } })).toBe('');
+    const at = Date.UTC(2026, 9, 22, 12);
+    expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, at, collectedAt: at - 7 * 3_600_000 })).toMatch(/마지막으로 수집한 시각/);
+    expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, truncated: true })).toMatch(/일부만 읽었습니다/);
   });
 });

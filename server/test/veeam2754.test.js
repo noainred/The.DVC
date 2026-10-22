@@ -36,13 +36,19 @@ const ev = (o) => ({ type: 'TaskEvent', severity: 'info', message: 'Task: Create
 test('판정 코어 — 생성 이벤트만 · Veeam 계정(이름·표기 차이) · 동명 VM 은 고르지 않는다 · 기간 밖은 버린다', () => {
   assert.equal(S.isSnapshotCreateEvent(ev({})), true);
   assert.equal(S.isSnapshotCreateEvent({ type: 'VmSnapshotCreatedEvent', message: '' }), true);
-  for (const m of ['Task: Remove snapshot', 'Task: Revert to current snapshot', 'Task: Consolidate virtual machine disk files', 'Task: Remove all snapshots']) {
+  for (const m of ['Task: Remove snapshot', 'Task: Revert to current snapshot', 'Task: Consolidate virtual machine disk files', 'Task: Remove all snapshots', 'Cannot create virtual machine snapshot: failed']) {
     assert.equal(S.isSnapshotCreateEvent(ev({ message: m })), false, m);
   }
-  const is = S.makeVeeamAccountMatcher(['CORP\\svc-bk', 'other@vsphere.local']);
+  assert.equal(S.isSnapshotCreateEvent({ type: 'AlarmStatusChangedEvent', severity: 'info', message: 'Task: Create virtual machine snapshot' }), false, '종류 한정(검토 #9)');
+  assert.equal(S.isSnapshotCreateEvent(ev({ severity: 'error' })), false, '정보 심각도만');
+  // 검토 #2: 도메인까지 적은 계정은 정확히 그 계정만 · 도메인 없이 적은 것만 어느 도메인이든
+  const is = S.makeVeeamAccountMatcher(['svc-bk', 'administrator@vsphere.local']);
   assert.equal(is('CORP\\svc-veeam'), 'name');
-  assert.equal(is('svc-bk@corp.local'), 'account', 'DOMAIN\\user ↔ user@domain');
+  assert.equal(is('svc-bk@corp.local'), 'account', '도메인 없이 적은 계정 ↔ user@domain');
   assert.equal(is('corp\\SVC-BK'), 'account', '대소문자');
+  assert.equal(is('VSPHERE.LOCAL\\Administrator'), null, '도메인 표기가 다르면 같은 계정으로 보지 않는다(정확히 적은 그대로만)');
+  assert.equal(is('administrator@vsphere.local'), 'account');
+  assert.equal(is('CORP\\Administrator'), null, '다른 도메인의 administrator 는 Veeam 이 아니다');
   assert.equal(is('CORP\\admin'), null);
   assert.equal(is(''), null);
   const vms = [{ id: `${VC}:vm-1`, name: 'web01' }, { id: `${VC}:vm-2`, name: 'dup' }, { id: `${VC}:vm-3`, name: 'DUP' }];
@@ -60,11 +66,13 @@ test('판정 코어 — 생성 이벤트만 · Veeam 계정(이름·표기 차�
   assert.equal(r.ambiguous, 1); assert.equal(r.unmatched, 1); assert.equal(r.events, 4);
 });
 
-test('자동 학습 — 지금 임시 스냅샷이 있는 VM 의 그 시각 ±15분 생성 이벤트가 하나뿐일 때만', () => {
+test('자동 학습 후보 — 지금 임시 스냅샷이 있는 VM 의 그 시각 ±3분 생성 이벤트가 하나뿐일 때만 · 공용 계정 제외', () => {
   const vms = [
     { id: `${VC}:vm-1`, name: 'web01', veeamSnaps: 1, veeamSnapTs: NOW - 10 * 60_000 },
     { id: `${VC}:vm-2`, name: 'db01', veeamSnaps: 1, veeamSnapTs: NOW - 10 * 60_000 },
     { id: `${VC}:vm-3`, name: 'app01' }, // 임시 스냅샷 없음
+    { id: `${VC}:vm-4`, name: 'web02', veeamSnaps: 1, veeamSnapTs: NOW - 10 * 60_000 },
+    { id: `${VC}:vm-5`, name: 'web03', veeamSnaps: 1, veeamSnapTs: NOW - 10 * 60_000 },
   ];
   const rows = [
     ev({ ts: NOW - 11 * 60_000, user: 'CORP\\svc-bk', entity: 'web01' }),
@@ -72,29 +80,40 @@ test('자동 학습 — 지금 임시 스냅샷이 있는 VM 의 그 시각 ±15
     ev({ ts: NOW - 12 * 60_000, user: 'CORP\\someone', entity: 'db01' }),       // 같은 창에 둘 — db01 은 배우지 않는다
     ev({ ts: NOW - 11 * 60_000, user: 'CORP\\admin', entity: 'app01' }),        // 임시 스냅샷 없는 VM
     ev({ ts: NOW - 3 * HOUR, user: 'CORP\\late', entity: 'web01' }),            // 창 밖
+    ev({ ts: NOW - 6 * 60_000, user: 'CORP\\kim', entity: 'web02' }),          // 4분 차 — 창(3분) 밖(검토 #1)
+    ev({ ts: NOW - 10 * 60_000, user: 'administrator@vsphere.local', entity: 'web03' }), // 공용 계정 — 배우지 않는다(검토 #2)
   ];
-  assert.deepEqual(S.learnAccounts(vms, rows), ['CORP\\svc-bk']);
+  assert.deepEqual(S.learnAccounts(vms, rows), [{ account: 'CORP\\svc-bk', vm: 'web01' }]);
 });
 
 test('계정 저장 — 정리·상한·제어문자 · 학습 기억 · 다시 읽기 · 엣지 pull 반영 · 손상 보존', () => {
   S._resetForTest();
   const r = S.saveManualAccounts('CORP\\svc-bk\ncorp\\SVC-BK\n\n bad\u0001x \n' + 'x'.repeat(200));
   assert.deepEqual(r.list, ['CORP\\svc-bk']); assert.equal(r.dropped, 2);
-  assert.equal(S.rememberLearned(['CORP\\learned'], NOW), 1);
-  assert.equal(S.rememberLearned(['CORP\\learned'], NOW + 60_000), 0, '1시간 안에 다시 쓰지 않는다');
+  assert.equal(S.rememberLearned([{ account: 'CORP\\learned', vm: 'a' }], NOW), 1);
+  assert.equal(S.veeamAccounts(NOW).includes('CORP\\learned'), false, 'VM 1대로는 쓰지 않는다(검토 #1)');
+  assert.equal(S.rememberLearned([{ account: 'CORP\\learned', vm: 'a' }], NOW + 60_000), 0, '같은 VM 을 1시간 안에 다시 쓰지 않는다');
+  assert.equal(S.rememberLearned([{ account: 'CORP\\learned', vm: 'b' }], NOW + 60_000), 1, '새 VM 은 쓴다');
+  assert.equal(S.rememberLearned([{ account: 'CORP\\wrong', vm: 'a' }, { account: 'CORP\\wrong', vm: 'b' }], NOW), 2);
+  assert.equal(S.forgetLearned(['CORP\\wrong', 'nope']), 1, '잘못 배운 계정 지우기');
   assert.equal(S.applyPulledAccounts(['CORP\\from-central']), true);
   assert.equal(S.applyPulledAccounts(['CORP\\from-central']), false, '같으면 쓰지 않는다');
   S._resetForTest(); // 파일에서 다시 읽는다
   assert.deepEqual(S.veeamAccounts(NOW).sort(), ['CORP\\from-central', 'CORP\\learned', 'CORP\\svc-bk']);
+  assert.equal(S.accountView(NOW).learned.find((x) => x.name === 'CORP\\learned').active, true);
   assert.deepEqual(S.veeamAccounts(NOW + 91 * 24 * HOUR).includes('CORP\\learned'), false, '90일 지난 학습 계정은 버린다');
   const file = path.join(DIR, 'veeam-vc-accounts.json');
   assert.equal((fs.statSync(file).mode & 0o777).toString(8), '600');
   fs.writeFileSync(file, '{broken');
   S._resetForTest();
   assert.deepEqual(S.veeamAccounts(NOW), []);
-  assert.ok(S.accountView().loadError);
+  assert.ok(S.accountView().loadError); assert.equal(S.accountsUnreadable(), true);
   assert.ok(fs.readdirSync(DIR).some((f) => f.startsWith('veeam-vc-accounts.json.corrupt.')), '손상본 보존');
-  S._resetForTest(); fs.rmSync(file, { force: true });
+  S._resetForTest();
+  assert.equal(S.accountsUnreadable(), false, '재시작 뒤에는 파일 없음');
+  assert.equal(S.accountView().corruptKept, true, '그래도 예전 손상본이 있다는 사실은 말한다');
+  for (const f of fs.readdirSync(DIR)) if (f.startsWith('veeam-vc-accounts.json')) fs.rmSync(path.join(DIR, f), { force: true });
+  S._resetForTest();
 });
 
 test('로컬 계산 — 실제 로그 DB · 학습한 계정으로 Veeam 이 아닌 이름의 이벤트도 잡는다', async () => {
@@ -108,10 +127,12 @@ test('로컬 계산 — 실제 로그 DB · 학습한 계정으로 Veeam 이 아
     { vcenterId: SITE, key: 'b1', ts: NOW - HOUR, severity: 'info', type: 'TaskEvent', user: 'CORP\\svc-veeam', entity: 'web01', message: 'Task: Create virtual machine snapshot' },
   ];
   await db.insertManyAsync(rows);
-  const vms = [{ id: `${VC}:vm-1`, name: 'web01', veeamSnaps: 1, veeamSnapTs: NOW - 9 * 60_000 }, { id: `${VC}:vm-3`, name: 'app01' }];
+  await db.insertManyAsync([{ vcenterId: VC, key: 'a4', ts: NOW - 10 * 60_000, severity: 'info', type: 'TaskEvent', user: 'CORP\\svc-bk', entity: 'db01', message: 'Task: Create virtual machine snapshot' }]);
+  const vms = [{ id: `${VC}:vm-1`, name: 'web01', veeamSnaps: 1, veeamSnapTs: NOW - 9 * 60_000 }, { id: `${VC}:vm-2`, name: 'db01', veeamSnaps: 1, veeamSnapTs: NOW - 9 * 60_000 }, { id: `${VC}:vm-3`, name: 'app01' }];
   const r = await S.localSnapSummary(db, VC, vms, { now: NOW });
-  assert.deepEqual(r.byVm, { [`${VC}:vm-1`]: [NOW - 10 * 60_000, 1], [`${VC}:vm-3`]: [NOW - 25 * HOUR, 1] }, '다른 vCenter 이벤트·Veeam 아닌 계정은 빠진다');
-  assert.ok(S.accountView(NOW).learned.some((x) => x.name === 'CORP\\svc-bk'), '학습 계정이 저장됐다');
+  assert.deepEqual(r.byVm, { [`${VC}:vm-1`]: [NOW - 10 * 60_000, 1], [`${VC}:vm-2`]: [NOW - 10 * 60_000, 1], [`${VC}:vm-3`]: [NOW - 25 * HOUR, 1] }, '다른 vCenter 이벤트·Veeam 아닌 계정은 빠진다');
+  assert.ok(S.accountView(NOW).learned.some((x) => x.name === 'CORP\\svc-bk' && x.active), 'VM 2대에서 배운 계정이 저장·활성화됐다');
+  assert.equal(r.accounts, 1);
 });
 
 test('엣지 요약 만들기 — 이 엣지가 직접 모으는 vCenter 만 · 수집 꺼짐은 상태로', async () => {
@@ -138,6 +159,8 @@ test('정제 — 맡은 vCenter 만 · VM id 접두사 · 수치 형식 · 미�
   assert.equal(r.items[0].at, NOW, '미래 시각은 수신 시각으로'); assert.equal(r.items[0].edgeAt, NOW + 3_600_000);
   assert.equal('junk' in r.items[0], false);
   assert.deepEqual(r.dropped, { notOwned: 1, bad: 2 });
+  const old = S.sanitizeEdgeSnap([{ vcenterId: SITE, byVm: { [`${SITE}:vm-1`]: [1, 1] } }], owns, NOW);
+  assert.deepEqual(old.items[0].byVm, {}, '1970 같은 기간 밖 시각은 버린다(검토 #7)');
   const st = S.sanitizeEdgeSnap([{ vcenterId: SITE, status: 'log-off' }], owns, NOW);
   assert.equal(st.items[0].status, 'log-off'); assert.deepEqual(st.items[0].byVm, {});
 });
@@ -175,8 +198,8 @@ test('엣지 진입 — 실제 pushVeeamNow · 중앙은 그 엣지의 site vCen
     // 공유 토큰은 여전히 403(v2.751 #5 — snapEvents 도 같은 문을 쓴다)
     assert.equal((await post('ctok-2754', 'edge-a', { snapEvents: [] })).status, 403);
     const body = { results: [], snapEvents: [
-      { vcenterId: SITE, status: 'ok', at: NOW, byVm: { [`${SITE}:vm-1`]: [NOW - HOUR, 2] } },
-      { vcenterId: VC, status: 'ok', at: NOW, byVm: { [`${VC}:vm-1`]: [NOW - HOUR, 2] } }, // 중앙 직접 수집 — 거절
+      { vcenterId: SITE, status: 'ok', at: Date.now(), byVm: { [`${SITE}:vm-1`]: [NOW - HOUR, 2] } }, // at 은 실제 시각 — 정시로 내린 NOW 면 30분 뒤 '오래됨' 판정에 걸린다
+      { vcenterId: VC, status: 'ok', at: Date.now(), byVm: { [`${VC}:vm-1`]: [NOW - HOUR, 2] } }, // 중앙 직접 수집 — 거절
     ] };
     const a = await post(tokA, 'edge-a', body);
     assert.equal(a.status, 200); assert.equal(a.body.snap.saved, 1); assert.equal(a.body.snap.dropped.notOwned, 1);
@@ -229,8 +252,15 @@ test('조회 라우트 — 범위 밖 404 · 직접 수집은 로컬 · site 는
     assert.equal(JSON.stringify(local.body).includes('svc-bk'), false, '계정 이름을 싣지 않는다');
     const site = await get(SITE);
     assert.equal(site.body.source, 'edge'); assert.deepEqual(site.body.byVm, { [`${SITE}:vm-1`]: [NOW - HOUR, 2] });
+    // 오래된 엣지 요약은 '지금' 처럼 보이지 않는다(검토 #7) · 인벤토리에 없는 VM id 는 싣지 않는다(검토 #8)
+    S.putEdgeSnap('edge-a', [{ vcenterId: SITE, status: 'ok', byVm: { [`${SITE}:vm-1`]: [NOW - HOUR, 1], [`${SITE}:vm-ghost`]: [NOW - HOUR, 1] }, at: Date.now() }]);
+    store.snapshot = { ...store.snapshot, generatedAt: NOW + 1 };
+    assert.deepEqual(Object.keys((await get(SITE)).body.byVm), [`${SITE}:vm-1`]);
+    S.putEdgeSnap('edge-a', [{ vcenterId: SITE, status: 'ok', byVm: { [`${SITE}:vm-1`]: [NOW - HOUR, 1] }, at: Date.now() - 2 * HOUR }]);
+    store.snapshot = { ...store.snapshot, generatedAt: NOW + 2 };
+    assert.equal((await get(SITE)).body.status, 'stale-edge');
     S._resetForTest();
-    store.snapshot = { ...store.snapshot, generatedAt: NOW + 1 }; // 캐시 키를 바꾼다
+    store.snapshot = { ...store.snapshot, generatedAt: NOW + 3 }; // 캐시 키를 바꾼다
     const none = await get(SITE);
     assert.equal(none.body.status, 'no-edge-data');
   } finally { store.snapshot = prev; }

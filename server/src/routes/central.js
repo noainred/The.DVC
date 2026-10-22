@@ -2229,7 +2229,8 @@ centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
   res.set('Cache-Control', 'no-store');
   // v2.754: 'Veeam 계정' — 사람이 적은 것 + 중앙이 배운 것. 엣지가 자기 vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다(비밀 아님).
   const S = await import('../veeam/snapEvents.js');
-  res.json({ ok: true, agent, servers: R.serversForAgent(agent), vcAccounts: S.veeamAccounts() });
+  //   계정 파일을 못 읽었으면 필드를 싣지 않는다(빈 목록을 보내면 엣지 사본이 지워진다 — 엣지는 필드가 없으면 그대로 둔다, v2.754 검토 #4).
+  res.json({ ok: true, agent, servers: R.serversForAgent(agent), ...(S.accountsUnreadable() ? {} : { vcAccounts: S.veeamAccounts() }) });
 });
 
 // POST /api/central/veeam-data — 엣지가 읽은 Veeam 결과. 저장 이름은 인증된 agent · 그 엣지에 배정된 서버 id 만 받는다.
