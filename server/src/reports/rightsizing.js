@@ -5,6 +5,8 @@
  * 순수 함수 — statsFor(vmId)를 주입받아 테스트 가능.
  */
 
+import { numOrNull } from '../util/numOrNull.js';
+
 // v2.603(감사 LEFT2603-03 후속): 못 읽은 값은 null 로 남긴다 — 예전 `(n || 0)` 은 결측을 '0%' 로 표시했다(화면은 null 을 '—' 로 그린다).
 const r1 = (n) => (n == null || n === '' || !Number.isFinite(Number(n)) ? null : Math.round(Number(n) * 10) / 10);
 
@@ -18,9 +20,10 @@ export function suggestSize(vcpu, ramGB, cpuMaxPct, memMaxPct) {
   const known = (v) => v != null && v !== '' && Number.isFinite(Number(v));
   const held = [];
   let sVcpu = vcpu; let sRam = ramGB;
-  if (known(cpuMaxPct)) sVcpu = Math.max(1, Math.ceil((vcpu * (Number(cpuMaxPct) / 100)) / 0.6)); else held.push('cpu');
-  if (known(memMaxPct)) sRam = Math.max(1, Math.ceil((ramGB * (Number(memMaxPct) / 100)) / 0.75)); else held.push('mem');
-  return { suggestedVcpu: Math.min(sVcpu, vcpu), suggestedRamGB: Math.min(sRam, ramGB), ...(held.length ? { held } : {}) };
+  // v2.760(점검 B-04): 현재 사양을 못 읽은 차원(vcpu·ramGB null)도 권고를 보류한다 — 0 으로 보고 '0 → 0' 을 그리지 않는다.
+  if (known(cpuMaxPct) && known(vcpu)) sVcpu = Math.min(vcpu, Math.max(1, Math.ceil((vcpu * (Number(cpuMaxPct) / 100)) / 0.6))); else held.push('cpu');
+  if (known(memMaxPct) && known(ramGB)) sRam = Math.min(ramGB, Math.max(1, Math.ceil((ramGB * (Number(memMaxPct) / 100)) / 0.75))); else held.push('mem');
+  return { suggestedVcpu: sVcpu, suggestedRamGB: sRam, ...(held.length ? { held } : {}) };
 }
 
 /**
@@ -46,27 +49,29 @@ export function computeRightsizing(vms, statsFor, opts = {}) {
     const cpuMax = hasStats ? st.cpuMax : (v.cpuUsagePct ?? null);   // v2.603: 결측은 0 이 아니라 null(권고 보류)
     const memMax = hasStats ? st.memMax : (v.memUsagePct ?? null);
     if (cpuAvg == null && memAvg == null) continue;
-    const ramGB = Math.round((v.memMB || 0) / 1024);
+    // v2.760(점검 B-04 — 재현): 메모리를 정수 GB 로 반올림하면 1.5GB VM 이 '2GB → 1GB, 회수 1GB'(실제 0.5GB)였고,
+    //   못 읽은 메모리·vCPU(null)는 '0' 으로 보였다(numOrNull 규약). 0.1GB 단위로 두고 결측은 null(화면 '—'·회수 0·권고 보류).
+    const memMB = numOrNull(v.memMB);
+    const ramGB = memMB == null ? null : Math.round((memMB / 1024) * 10) / 10;
+    const vcpu = numOrNull(v.cpuCount);
     const base = {
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
-      vcpu: v.cpuCount || 0, ramGB,
+      vcpu, ramGB,
       cpuAvg: r1(cpuAvg), memAvg: r1(memAvg), cpuMax: r1(cpuMax), memMax: r1(memMax),
       samples: hasStats ? st.samples : 0, observedSinceTs: hasStats ? st.sinceTs : null,
     };
     // 유휴: 평균 CPU/메모리 모두 매우 낮음.
     if ((cpuAvg ?? 100) < cpuIdle && (memAvg ?? 100) < 20) {
-      idle.push({ ...base, reclaimVcpu: base.vcpu, reclaimRamGB: ramGB });
+      idle.push({ ...base, reclaimVcpu: vcpu ?? 0, reclaimRamGB: ramGB ?? 0 });
       continue;
     }
     // 과대: vCPU가 minVcpu 이상이고 평균 CPU가 낮음 → 피크 기준 추천 사양 계산.
-    if ((v.cpuCount || 0) >= minVcpu && (cpuAvg ?? 100) < overCpu) {
-      const s = suggestSize(base.vcpu, ramGB, cpuMax, memMax);
-      if (s.suggestedVcpu < base.vcpu || s.suggestedRamGB < ramGB) {
-        oversized.push({
-          ...base, ...s,
-          reclaimVcpu: Math.max(0, base.vcpu - s.suggestedVcpu),
-          reclaimRamGB: Math.max(0, ramGB - s.suggestedRamGB),
-        });
+    if ((vcpu ?? 0) >= minVcpu && (cpuAvg ?? 100) < overCpu) {
+      const s = suggestSize(vcpu, ramGB, cpuMax, memMax);
+      const rv = vcpu != null && s.suggestedVcpu != null ? Math.max(0, vcpu - s.suggestedVcpu) : 0;
+      const rr = ramGB != null && s.suggestedRamGB != null ? Math.round(Math.max(0, ramGB - s.suggestedRamGB) * 10) / 10 : 0;
+      if (rv > 0 || rr > 0) {
+        oversized.push({ ...base, ...s, reclaimVcpu: rv, reclaimRamGB: rr });
         continue;
       }
     }
@@ -74,8 +79,8 @@ export function computeRightsizing(vms, statsFor, opts = {}) {
     if ((cpuAvg ?? 0) > 85 || (memAvg ?? 0) > 90) undersized.push(base);
   }
 
-  const sum = (arr, k) => arr.reduce((a, x) => a + (x[k] || 0), 0);
-  idle.sort((a, b) => b.vcpu - a.vcpu);
+  const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + (x[k] || 0), 0) * 10) / 10;
+  idle.sort((a, b) => (b.vcpu ?? -1) - (a.vcpu ?? -1));
   oversized.sort((a, b) => b.reclaimVcpu - a.reclaimVcpu);
   undersized.sort((a, b) => (b.cpuAvg || 0) - (a.cpuAvg || 0));
   return {

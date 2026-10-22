@@ -595,14 +595,20 @@ class HubHandler(BaseHTTPRequestHandler):
             return None
         if not self.ctx.datacenters.delete(dc_id):
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
-        return self._json({"success": True, "datacenters": self.ctx.datacenters.all()})
+        # v2.760(점검 B-07): 그 데이터센터에 묶인 바로가기는 '전체'로 옮긴다(카테고리 삭제와 같은 규칙).
+        moved = self.ctx.shortcuts.reassign_missing_datacenters(self.ctx.datacenters.ids())
+        return self._json({"success": True, "datacenters": self.ctx.datacenters.all(),
+                           "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_reset(self):
         actor = self._require_admin()
         if not actor:
             return None
         self._audit("datacenter.reset", actor=actor["username"])
-        return self._json({"success": True, "datacenters": self.ctx.datacenters.reset()})
+        datacenters = self.ctx.datacenters.reset()
+        moved = self.ctx.shortcuts.reassign_missing_datacenters({dc["id"] for dc in datacenters})
+        return self._json({"success": True, "datacenters": datacenters,
+                           "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_move(self, dc_id):
         if not self._require_admin():

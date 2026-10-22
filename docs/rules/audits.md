@@ -1574,3 +1574,12 @@
   · 성능: 아키텍처 점검 import 그래프 비동기 빌드(최장 정지 354.9 → 25.5ms — 대신 첫 응답 총시간은 231 → 424ms) · iDRAC 통합 추이 서버 표 30초 memo.
   · ⚠ `routes/publicApi.js` 라우트 본문이 길어지면 `scripts/api-doc.mjs` 가 '인자 목록을 읽지 못한 라우트' 로 멈춘다 — 행·meta 조립을 헬퍼로 뺐다(이번에도 밟았다).
 
+- **v2.760 — 단독 점검(덜 감사된 영역 우선) 확정 9건**(회귀 `server/test/audit2760{a,b}` · `uagmon/test/uag2760` · pyportal `test_history`·`test_backup_dc`·`test_api` · C# `AlarmEngineTests` — 전부 수정 전 코드로 되돌려 실패 확인):
+  · ⚠⚠ **순차로 소비하는 큐의 미완료 TTL 을 '등록 시각' 부터 재지 말 것**(B-01 `rma/jobs.js prune`): 엣지는 TAKE_MAX=1 로 하나씩 돌고 그동안 폴하지 않는다 —
+    대기 잡은 '그 법인이 마지막으로 움직인 시각' 부터, 실행 중 잡은 기한(claimDeadline)까지 둔다. 타임아웃이 TTL 과 같거나 긴 잡(du-top 900초)은 결과가 버려졌다.
+  · '못 읽은 값은 0 이 아니다' 재발 3곳: 라이트사이징 RAM(B-04 — 정수 GB 반올림까지) · 심층 검색 RAM 필터(B-09) · uagmon `parseStats` 의 `Number(v)`(B-06).
+  · '기준선 없음' ≠ '기준선 0대'(B-03 vmtrack — 직전 슬롯 total 0 이면 기준선이 있다) · 평균의 평균 금지(B-02 pyportal 기간 평균 지연 — 표본 가중).
+  · 확인 창이 약속한 정리를 서버가 하지 않았다(B-07 pyportal 데이터센터 삭제 → 바로가기 '전체' 로) · 한 칸의 `int()` 가 설정 전체를 막았다(B-08).
+  · ⚠ **horizon-uag-monitor 의 C# 테스트는 PR CI 에서 돌지 않는다**(릴리스 워크플로에서만) — 소스를 고쳤으면 `apt install dotnet-sdk-8.0` 후 직접 돌릴 것(B-05 이번에 그렇게 확인).
+  · 남긴 것(기능개선 후보, 미착수): dirusage 실패 회차의 짧은 재시도 · pyportal 응답시간의 DNS 분리 · 웹훅 실패 시 알림 보존 · uagmon 주기 런타임 변경·이력 시간 기준 보존 ·
+    vmclone '매일' 새 잡 즉시 실행(테스트가 고정한 설계 — 확인 필요) · 백업 파일명 초 단위 충돌 · 스냅샷 경과 보고서 `snapshotSizeGB || 0` · 남은 `text-transform: uppercase` 9곳.

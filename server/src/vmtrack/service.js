@@ -5,7 +5,7 @@
  */
 
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason, skipCategoryOf } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
+import { commitSnapshot, loadRoster, rosterKnownEmpty, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
 import { createYielder } from '../util/timeSlice.js';
 
 /**
@@ -61,7 +61,8 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   const perVc = [];
   for (const vc of targets) {
     const prev = await loadRoster(vc.id);
-    const d = diffVcenter(byVc.get(vc.id) || [], prev);
+    const knownEmpty = prev.size === 0 ? await rosterKnownEmpty(vc.id) : false;   // v2.760(점검 B-03)
+    const d = diffVcenter(byVc.get(vc.id) || [], prev, { knownEmpty });
     const dsPrev = await loadDsRoster(vc.id);
     const ds = diffDatastores(dsByVc.get(vc.id) || [], dsPrev);
     perVc.push({ vcenterId: vc.id, ...d, ds });

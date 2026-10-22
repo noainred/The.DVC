@@ -295,9 +295,13 @@ class HealthHistory:
             rows = self._db.execute(sql, params).fetchall()
 
         points = []
+        all_lat_sum = 0
+        all_lat_n = 0
         for row in rows:
             lat_n = int(row["lat_n"] or 0)
             lat_sum = int(row["lat_sum"] or 0)
+            all_lat_sum += lat_sum
+            all_lat_n += lat_n
             total = int(row["total"] or 0)
             points.append({
                 "ts": int(row["bucket"]),
@@ -306,13 +310,13 @@ class HealthHistory:
                 "warn": int(row["warn"] or 0),
                 "down": int(row["down"] or 0),
                 "avgLatencyMs": round(lat_sum / lat_n, 1) if lat_n else None,
-                "maxLatencyMs": int(row["max_latency"]) if row["max_latency"] else None,
+                # 0ms 도 값이다(None 은 '정상 응답 없음'일 때만 — 롤업은 정상 응답이 없으면 lat_n 이 0).
+                "maxLatencyMs": int(row["max_latency"]) if lat_n and row["max_latency"] is not None else None,
                 "uptimePct": round(100.0 * (row["up"] or 0) / total, 1) if total else None,
             })
 
         total = sum(p["total"] for p in points)
         up = sum(p["up"] for p in points)
-        latencies = [p["avgLatencyMs"] for p in points if p["avgLatencyMs"] is not None]
         return {
             "range": range_key,
             "rangeLabel": RANGE_LABELS[range_key],
@@ -323,7 +327,9 @@ class HealthHistory:
             "summary": {
                 "samples": total,
                 "uptimePct": round(100.0 * up / total, 2) if total else None,
-                "avgLatencyMs": round(sum(latencies) / len(latencies), 1) if latencies else None,
+                # v2.760(점검 B-02 — 재현): 구간 평균들의 평균이 아니라 전체 정상 응답의 평균이다(표본 수 가중).
+                #   예전에는 10ms 100건 구간과 2000ms 1건 구간이 같은 무게라 1005ms 로 보였다(실제 29.7ms).
+                "avgLatencyMs": round(all_lat_sum / all_lat_n, 1) if all_lat_n else None,
                 "maxLatencyMs": max((p["maxLatencyMs"] for p in points
                                      if p["maxLatencyMs"] is not None), default=None),
                 "failures": total - up,

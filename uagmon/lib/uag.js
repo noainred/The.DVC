@@ -83,7 +83,14 @@ export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
 
 /* ------------------------------ 정규화 파서 ------------------------------ */
 
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+// v2.760(점검 B-06 — 재현): '못 읽은 값' 은 0 이 아니다. 예전 `Number(v)` 는 null·''(XML 빈 요소)·[] 를 0 으로 만들어
+//   전체 세션이 '0'(서비스 합계 대체를 건너뜀)·메모리 '0%' 로 보였다. 숫자와 숫자 문자열만 값으로 읽는다.
+export const num = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string' || v.trim() === '') return null;
+  const n = Number(v.trim());
+  return Number.isFinite(n) ? n : null;
+};
 const str = (v) => (v == null ? '' : String(v));
 const arr = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
 

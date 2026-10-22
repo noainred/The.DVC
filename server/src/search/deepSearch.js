@@ -87,8 +87,11 @@ export function snapshotFilter(snap, { vcenterIds = [], f = {} } = {}) {
   const ge = (field, min) => { const n = numOr(min); if (n != null) vms = vms.filter((v) => (v[field] ?? 0) >= n); };
   const le = (field, max) => { const n = numOr(max); if (n != null) vms = vms.filter((v) => (v[field] ?? 1e12) <= n); };
   ge('cpuCount', f.vcpuMin); le('cpuCount', f.vcpuMax);
-  if (numOr(f.ramMinGB) != null) vms = vms.filter((v) => (v.memMB || 0) >= numOr(f.ramMinGB) * 1024);
-  if (numOr(f.ramMaxGB) != null) vms = vms.filter((v) => (v.memMB || 0) <= numOr(f.ramMaxGB) * 1024);
+  // v2.760(점검 B-09): 메모리를 못 읽은 VM 은 vCPU·디스크 조건과 같이 최소·최대 어느 쪽에도 맞지 않는다 —
+  //   예전 `(v.memMB || 0)` 은 그 VM 을 0MB 로 보고 'RAM N GB 이하' 결과에 넣었다.
+  const memOf = (v) => numOr(v.memMB);
+  if (numOr(f.ramMinGB) != null) vms = vms.filter((v) => memOf(v) != null && memOf(v) >= numOr(f.ramMinGB) * 1024);
+  if (numOr(f.ramMaxGB) != null) vms = vms.filter((v) => memOf(v) != null && memOf(v) <= numOr(f.ramMaxGB) * 1024);
   ge('storageGB', f.diskMinGB); le('storageGB', f.diskMaxGB);
   ge('cpuUsagePct', f.cpuUsageMin); ge('memUsagePct', f.memUsageMin);
   return vms;
@@ -97,7 +100,7 @@ export function snapshotFilter(snap, { vcenterIds = [], f = {} } = {}) {
 export const slimVm = (v) => ({
   id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster, powerState: v.powerState,
   guestOS: v.guestOS, ipAddress: v.ipAddress, ipAddresses: v.ipAddresses, gateways: v.gateways || [],
-  toolsStatus: v.toolsStatus, cpuCount: v.cpuCount, memGB: Math.round((v.memMB || 0) / 1024),
+  toolsStatus: v.toolsStatus, cpuCount: v.cpuCount, memGB: numOr(v.memMB) == null ? null : Math.round(numOr(v.memMB) / 1024), // v2.760 B-09: 못 읽음은 null
   gpu: v.gpu, cpuUsagePct: v.cpuUsagePct, memUsagePct: v.memUsagePct, snapshotCount: v.snapshotCount,
 });
 
