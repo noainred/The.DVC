@@ -14,6 +14,7 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { resultLabel } from './veeamBadge.js';
+import { STEP_ICON, STEP_TONE, progressHint } from './veeamProgressText.js'; // v2.773 단계별 진행 상태
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
 
 // v2.763(V5-2): agentTouched — 사람이 '읽는 곳' 을 골랐는가('' 는 '아직 안 고름' 과 '중앙에서 직접(명시)' 둘 다라 따로 든다). 서버로 보내지 않는다.
@@ -93,6 +94,7 @@ export default function VeeamSettings() {
   const busyOn = (k) => setBusy((b) => new Set(b).add(k));
   const busyOff = (k) => setBusy((b) => { const n = new Set(b); n.delete(k); return n; });
   const [open, setOpen] = useState(null); // 작업 목록을 펼친 서버 id
+  const [prog, setProg] = useState(null); // v2.773: 진행 상태를 펼친 서버 id
   const [bulk, setBulk] = useState(false); // CSV·자유텍스트 대량 등록 모달
   const seq = useRef(0);
   const load = () => {
@@ -171,7 +173,7 @@ export default function VeeamSettings() {
             <thead><tr><th>이름</th><th>주소</th><th>vCenter</th><th>읽는 곳</th><th>상태</th><th className="right">작업</th><th className="right">VM</th><th className="right">백업 중</th><th data-nosort className="right">동작</th></tr></thead>
             <tbody>
               {servers.map((s) => {
-                const st = s.status; const c = statusCell(st); const cn = st?.counts || {};
+                const st = s.status; const c = statusCell(st); const cn = st?.counts || {}; const ph = progressHint(s.progress);
                 return (
                   <tr key={s.id}>
                     <td><b>{s.name}</b>{s.enabled === false && <span className="badge gray" style={{ marginLeft: 6 }}>꺼짐</span>}</td>
@@ -180,11 +182,13 @@ export default function VeeamSettings() {
                     <td>{s.agent ? `엣지 ${s.agent}` : '중앙'}{s.agent && Array.isArray(d?.tokenAgents) && !d.tokenAgents.some((a) => String(a).toLowerCase() === String(s.agent).toLowerCase()) && (
                       <div style={{ color: 'var(--amber)', fontSize: 11, marginTop: 2 }} title="Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 토큰으로는 어느 엣지인지 가릴 수 없어 자격증명을 내려보내지 않습니다">개별 토큰 없음 — 설정 › 수집 서버에서 발급</div>
                     )}</td>
-                    <td style={{ color: TONE[c.tone], maxWidth: 360, overflowWrap: 'anywhere' }}>{c.text}</td>
+                    <td style={{ color: TONE[c.tone], maxWidth: 360, overflowWrap: 'anywhere' }}>{c.text}
+                      {ph && <div style={{ color: TONE[ph.tone], fontSize: 11, marginTop: 2 }}>{ph.text}</div>}</td>
                     <td className="right" data-sort={num(cn.jobs) ?? ''}>{num(cn.jobs) ?? '—'}</td>
                     <td className="right" data-sort={num(cn.vmJobs) ?? ''} title="작업에 VM 단위로 넣은 VM 수 · 복원 지점이 있는 VM 수">{num(cn.vmJobs) != null || num(cn.backupObjects) != null ? `${num(cn.vmJobs) ?? 0} · 복원 ${num(cn.backupObjects) ?? 0}` : '—'}</td>
                     <td className="right" data-sort={num(cn.running) ?? ''} title={st?.runningStale ? '실패 중이거나 오래된 결과라 지금 백업 중인 VM 수를 알 수 없습니다(0 이 아닙니다)' : undefined}>{num(cn.running) ?? '—'}</td>
                     <td className="right nowrap">
+                      {s.progress && <><button className={prog === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} onClick={() => setProg(prog === s.id ? null : s.id)}>진행 상태</button>{' '}</>}
                       <button className={open === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} onClick={() => setOpen(open === s.id ? null : s.id)}>작업 목록</button>{' '}
                       {/* v2.762(G3): 이 노드가 읽는 서버(readsHere — 엣지에서는 받은 자기 몫)도 연다 — 엣지에서 인증 정지를 푸는 길 · v2.763: 잠금은 그 버튼만 */}
                       {rowActions(s, busy).map((a) => (a.kind === 'central'
@@ -198,6 +202,35 @@ export default function VeeamSettings() {
             </tbody>
           </STable>
         )}
+        {(() => {
+          // v2.773: 진행 상태 — 단계마다 판정·마지막 시각·할 일. 판정은 서버(veeam/progress.js) 하나에서 한다.
+          const s = servers.find((x) => x.id === prog);
+          const pg = s?.progress;
+          if (!pg) return null;
+          return (
+            <div style={{ margin: '0 0 12px', padding: 10, borderRadius: 8, background: 'rgba(148,163,184,.06)', minWidth: 0 }}>
+              <div className="flex gap wrap" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name} — 진행 상태</span>
+                <button className="tab" style={{ flex: 'none', padding: '2px 10px' }} onClick={load}>새로 읽기</button>
+              </div>
+              <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
+                {pg.steps.map((x) => (
+                  <li key={x.key} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                    <span style={{ fontWeight: 600 }}>{STEP_ICON[x.state] || '·'} {x.label}</span>
+                    {x.at != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{fmt(x.at)}</span>}
+                    <div style={{ fontSize: 12, color: TONE[STEP_TONE[x.state]] || 'var(--text-dim)' }}>{x.text}</div>
+                    {x.action && <div style={{ fontSize: 12, marginTop: 2 }}>→ {x.action}</div>}
+                  </li>
+                ))}
+              </ol>
+              {pg.mode === 'edge' && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
+                  엣지 접속·배정 받기·결과 올리기 기록은 중앙 메모리에 있어 중앙이 다시 시작하면 비고, 엣지가 다시 접속하면 찹니다{pg.since != null ? ` (기록 시작 ${fmt(pg.since)})` : ''}. 기록이 없다는 것이 엣지가 안 했다는 뜻은 아닙니다.
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {(() => {
           // 작업 목록은 표 밖에 따로 그린다 — 정렬 표 안에 펼침 행을 끼우면 정렬 때 부모 행과 떨어진다.
           const s = servers.find((x) => x.id === open);

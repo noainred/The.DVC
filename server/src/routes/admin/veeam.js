@@ -9,12 +9,15 @@ import { getRecord, dropResult } from '../../veeam/store.js';
 import { pollVeeamOnce, veeamPollerStatus, authGuard } from '../../veeam/poller.js';
 import { testVeeamServer } from '../../veeam/client.js';
 import { withDeadline } from '../../util/deadline.js';
-import { allVeeamEdgeStatus } from '../../central/veeamEdge.js';
+import { allVeeamEdgeStatus, veeamEdgeStatus } from '../../central/veeamEdge.js';
+import { pullStats } from '../../central/pullStats.js';
+import { rejectStats } from '../../central/ingestReject.js';
+import { veeamProgress } from '../../veeam/progress.js';
 import { listRegistry as listVcenters } from '../../vcenter/registry.js';
 import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listAgentTokens } from '../../central/agentTokens.js';
+import { listAgentTokens, agentTokensLoadError } from '../../central/agentTokens.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { requirePerm } from '../../auth/auth.js';
 import { pickAgent } from '../../cvp/formChoices.js';
@@ -93,14 +96,26 @@ export function registerVeeam(adminRouter) {
     // 화면 목록은 지금 보이는 vCenter(스냅샷 — 데모 포함) + 등록부의 주소·수집 방식.
     const reg = new Map(listVcenters().map((v) => [v.id, v]));
     const vcenters = (store.get()?.vcenters || []).map((v) => ({ id: v.id, name: v.name, host: reg.get(v.id)?.host || '', collectMode: reg.get(v.id)?.collectMode || 'direct', siteAgent: owners.get(v.id) || '' }));
+    // v2.773: 토큰 파일을 못 읽었으면(agentTokensLoadError) '발급 없음' 이 아니라 모름(null) — 진행 상태가 거짓 '토큰 없음' 을 말하지 않게.
+    const tokens = (() => { try { return agentTokensLoadError() ? null : listAgentTokens(); } catch { return null; } })();
+    const tokenAgents = tokens ? tokens.map((t) => t.agent) : null;
+    const pulls = (() => { try { return pullStats(); } catch { return null; } })();
+    const rejects = (() => { try { return rejectStats(); } catch { return null; } })();
+    const poller = veeamPollerStatus(); const now = Date.now();
     res.json({
       ok: true,
       // v2.762(G3): readsHere — 이 노드가 읽는 서버인가(엣지에서는 받은 자기 몫). 화면이 '연결 시험'·'지금 읽기' 를 이것으로 연다.
       // v2.763(V2-1): centralManaged — 엣지에서 중앙이 배정한 서버(화면이 편집·삭제를 숨기고 '중앙에서 고치세요' 를 말한다 · POST·DELETE 는 409).
-      servers: listServers().map((d) => ({ ...d, readsHere: readsHere(d), ...(centralManagedReason(d) ? { centralManaged: true } : {}), status: serverStatusView(getRecord(d.id)) })),
-      vcenters, agents: knownAgentNames(), edges: allVeeamEdgeStatus(), poller: veeamPollerStatus(),
+      servers: listServers().map((d) => {
+        const status = serverStatusView(getRecord(d.id)); const here = readsHere(d);
+        // v2.773: 단계별 진행 상태(배정 → 개별 토큰 → 엣지 접속 → 배정 받기 → 엣지에서 읽기 → 결과 올리기 → 결과) — 이미 기록된 값만 모은다.
+        const progress = veeamProgress({ server: d, status, readsHere: here, tokenAgents: tokens, pulls, rejects, edge: d.agent ? veeamEdgeStatus(d.agent) : null, poller, now });
+        return { ...d, readsHere: here, ...(centralManagedReason(d) ? { centralManaged: true } : {}), status, progress };
+      }),
+      vcenters, agents: knownAgentNames(), edges: allVeeamEdgeStatus(), poller,
       // 개별 토큰이 발급된 엣지 이름 — Veeam 위임 라우트는 개별 토큰만 받는다(central.js veeam-config). 화면이 토큰 없는 엣지 배정을 경고한다.
-      tokenAgents: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
+      // v2.773: 못 읽었으면 진행 상태는 '모름'(null)으로 판정하고, 이 필드는 예전처럼 빈 목록이다.
+      tokenAgents: tokenAgents || [],
       defaults: { port: DEFAULT_PORT, apiVersion: DEFAULT_API_VERSION },
       ...(le ? { registryError: summarizeRegistryError(le)?.text || '등록부 읽기 오류' } : {}),
     });
