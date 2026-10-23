@@ -69,7 +69,7 @@ import { commitCurUser } from '../curuser/db.js';                     // v2.520:
 import { load as loadCurUserSettings, curUserSettingsLoadError } from '../curuser/settings.js';
 import { recordCurUserActivity } from '../curuser/activityLog.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
-import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
+import { sanitizeGuestDiskVms, splitVmsByOwner } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
 import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
@@ -917,7 +917,12 @@ centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   if (b.source === 'mock' || b.mock === true || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenterName })) {
     return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 게스트 디스크를 보냈습니다 — 저장하지 않습니다.`, mockBlocked: true });
   }
-  const vms = sanitizeGuestDiskVms(b.vms);
+  // v2.767(점검 R2-B2-02 — 재현): vmId 는 `${vcenterId}:` 네임스페이스여야 한다(최장 프리픽스 — vc.id 에 콜론). 아니면 남의 vCenter VM 행을
+  //   vm_id PK 로 덮어 그 이력·파티션 경로가 이 vCenter 범위 계정에 열렸다. 토큰 종류와 무관한 구조 규칙이라 공유 토큰에도 건다. 뺀 수는 dropped 로 밝힌다.
+  const gdKnownVcIds = (() => { try { return (loadVcenterConfig().vcenters || []).map((v) => String(v?.id || '')).filter(Boolean); } catch { return []; } })();
+  const gdOwn = splitVmsByOwner(sanitizeGuestDiskVms(b.vms), String(b.vcenterId), gdKnownVcIds);
+  const vms = gdOwn.kept;
+  if (gdOwn.foreign) console.warn(`[central] guest-disk: ${String(agent).slice(0, 64)} vc=${String(b.vcenterId).slice(0, 128)} 의 vCenter 네임스페이스가 아닌 VM ${gdOwn.foreign}개 드롭(위조 방지)`);
   const vcName = String(b.vcenterName || '').slice(0, 256) || String(b.vcenterId);
   // 시계열 ts 는 중앙 수신시각(단일 권위 시계)을 쓴다 — 엣지 wall-clock(generatedAt)을 그대로
   // 쓰면 NTP 미동기 엣지의 시계 오차가 prune(중앙 Date.now 기준)·신선도와 어긋난다(미래 skew =
@@ -930,9 +935,9 @@ centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
   // v2.613(감사 CONTRACT2613-03): 적재하지 않고 **센** 행(v2.601 RECENT2601-01 — 숫자가 아닌 VM·파티션)을 응답에 싣는다. 예전에는 로그에만
   //   남아 엣지 상태·로그가 '보냈다(N대)' 인데 중앙에는 그만큼 없었다(v2.606 centralReply 규약의 누락). 뺀 것이 없으면 필드 자체가 없다(구버전 엣지 호환).
-  const gdSkipped = (Number(commit.skippedVms) || 0) + (Number(commit.skippedParts) || 0);
+  const gdSkipped = (Number(commit.skippedVms) || 0) + (Number(commit.skippedParts) || 0) + gdOwn.foreign;
   res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows,
-    ...(gdSkipped ? { dropped: { vms: Number(commit.skippedVms) || 0, parts: Number(commit.skippedParts) || 0 } } : {}) });
+    ...(gdSkipped ? { dropped: { vms: Number(commit.skippedVms) || 0, parts: Number(commit.skippedParts) || 0, ...(gdOwn.foreign ? { notOwned: gdOwn.foreign } : {}) } } : {}) });
 });
 
 // 사이트 위임 실시간 스파이크 수신(v2.510) — 엣지 vmseries 폴러가 저장한 같은 주기 결과를 push.

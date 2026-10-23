@@ -281,10 +281,12 @@ test('EDGE2613-05: readDropSummary 사본은 0벌 — util/centralReply.dropSumm
 // ─────────────────────────────────────────────────────────────────────────────
 test('CONTRACT2613-03: /guest-disk 응답은 적재하지 않은 행을 dropped:{vms,parts} 로 싣고, guestDiskPush·vmSeriesPush 가 중앙 응답을 읽는다', async () => {
   const c = code('routes/central.js');
-  assert.ok(/dropped: \{ vms: Number\(commit\.skippedVms\) \|\| 0, parts: Number\(commit\.skippedParts\) \|\| 0 \}/.test(c), '/guest-disk 응답에 dropped 가 없다');
+  // v2.767(점검 R2-B2-02): 네임스페이스 밖 VM 드롭 수(notOwned)가 같은 객체에 붙는다 — 앞 두 필드는 그대로.
+  assert.ok(/dropped: \{ vms: Number\(commit\.skippedVms\) \|\| 0, parts: Number\(commit\.skippedParts\) \|\| 0[ ,}]/.test(c), '/guest-disk 응답에 dropped 가 없다');
   // 정상 push 에는 필드가 없다(구버전 엣지 호환 — 뺀 것이 없으면 필드 자체가 없다)
   const ok = await quiet(() => call('POST', '/guest-disk', { agent: 'edge-c', vcenterId: 'vc-site1', vcenterName: 'Site1', total: 1, withGuest: 1,
-    vms: [{ vmId: 'vm-1', vmName: 'a', allocGB: 10, usedGB: 2, partCount: 1, parts: [{ path: '/', capGB: 10, usedGB: 2 }] }] }));
+    // v2.767(점검 R2-B2-02): VM id 는 `${vcenterId}:${moref}` 네임스페이스여야 적재된다(예전 입력 'vm-1' 은 이제 notOwned 로 드롭).
+    vms: [{ vmId: 'vc-site1:vm-1', vmName: 'a', allocGB: 10, usedGB: 2, partCount: 1, parts: [{ path: '/', capGB: 10, usedGB: 2 }] }] }));
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   assert.equal('dropped' in (ok.body || {}), false);
   // ⚠ 정직 기록: v2.601+ 엣지는 push 전에 같은 sanitizeGuestDiskVms 를 거치므로 HTTP 로는 skipped 를 만들 수 없다(2중 방어) — 응답 조립은 소스로 고정.

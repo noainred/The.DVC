@@ -56,8 +56,9 @@ import { rejectStats } from '../../central/ingestReject.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import {
   scanInventory, findingsOf as invFindingsOf, groupFindings as invGroupFindings,
-  findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE,
+  findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE, maskInventoryForDemoGuest,
 } from '../../portalcheck/invScan.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 // v2.614 — 아키텍처 점검(세 번째 서브메뉴): 라우터 스택·게이트 태그·카탈로그·엣지 로그 표·BIG_JSON·DB·설정 파일·import 그래프.
 //   판정 코어(`portalcheck/archScan.js`)는 routes/ 를 import 하지 않으므로(arch2579 규칙 ①) 라우터는 **여기서** 넘긴다.
 import { adminRouter } from '../admin.js';
@@ -66,7 +67,7 @@ import { collectorRouter } from '../collector.js';
 import { declaredRoutes as flowDeclaredRoutes } from './dataFlow.js';
 import { memoJson } from './shared.js';
 import { isMockMode } from '../../mock/demo/flags.js';
-import { isDemoCollector, demoProbeResult, demoSiteVcenters, demoInventoryRows } from '../../mock/demo/edge.js'; // v2.708 데모 엣지
+import { isDemoCollector, isDemoEdgeId, demoProbeResult, demoSiteVcenters, demoInventoryRows } from '../../mock/demo/edge.js'; // v2.708 데모 엣지
 import { snapCacheClear } from '../../util/snapCache.js';
 import { currentVersion } from '../../config.js';
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
@@ -155,7 +156,18 @@ function localScan() {
   });
   // 이름의 출처를 행에 붙인다(화면이 '등록부 없음' 행의 근거를 말할 수 있게).
   const fromBy = new Map(known.map((k) => [norm(k.name), k.from]));
-  scan.rows = scan.rows.map((r) => ({ ...r, nameFrom: fromBy.get(norm(r.agent)) || [] }));
+  // v2.767(점검 R2-B4-5): 비활성 수집 서버 표시 — 프로브 토큰 조회(tokenLookup)가 비활성 항목을 건너뛰어 예전에는
+  //   '중앙 등록부에 토큰이 저장돼 있지 않습니다'(지문 칸에는 토큰이 보이는데) 라는 거짓 안내가 나갔다. 같은 키에 활성 항목이 하나라도 있으면 활성.
+  const enabledKeys = new Set(); const disabledKeys = new Set();
+  for (const c of collectors) {
+    const ks = [norm(c?.id || c?.name), norm(c?.name)].filter(Boolean);
+    for (const k of ks) (c?.enabled === false ? disabledKeys : enabledKeys).add(k);
+  }
+  scan.rows = scan.rows.map((r) => {
+    const k = norm(r.agent);
+    const disabled = disabledKeys.has(k) && !enabledKeys.has(k);
+    return { ...r, nameFrom: fromBy.get(k) || [], ...(disabled ? { disabled: true } : {}) };
+  });
   return scan;
 }
 
@@ -357,13 +369,14 @@ api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, r
  * 조합한다. 토큰 점검과 달리 엣지에 나가는 프로브가 없다 — 그래서 재진입 가드(`running`)를
  * 공유하지 않는다(공유할 왕복이 없다).
  */
-api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (req, res) => {
   // v2.708: 데모(mock) 모드에서 위임(site) vCenter 등록이 없으면 데모 엣지가 맡는 vCenter 를 입력으로 쓴다(판정은 그대로).
   const regVcs = safe(() => listVcentersFull(), []);
   const demoInv = isMockMode() && !regVcs.some((v) => v?.collectMode === 'site');
   const snapNow = demoInv ? safe(() => store.get(), null) : null;
-  const scan = scanInventory({
-    vcenters: demoInv ? [...regVcs, ...demoSiteVcenters(snapNow?.vcenters || [])] : regVcs,
+  const demoVcs = demoInv ? demoSiteVcenters(snapNow?.vcenters || []) : [];
+  const scan0 = scanInventory({
+    vcenters: demoInv ? [...regVcs, ...demoVcs] : regVcs,
     inventory: demoInv ? [...safe(() => listInventory(), []), ...demoInventoryRows(snapNow)] : safe(() => listInventory(), []),
     ingestRows: safe(() => getIngestStats().rows, []),
     rejects: safe(() => rejectStats(), null),
@@ -371,6 +384,11 @@ api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (_req, res) =
     now: Date.now(),
     staleMs: SITE_STALE_MS,
   });
+  // v2.767(점검 R2-B4-6): 데모 계정은 사람이 등록한 항목(실제 엣지 이름·거부 원문·vCenter 이름)을 가린 판본을 받는다 — 데모 엣지 행은 그대로.
+  const demoVcIds = new Set(demoVcs.map((v) => String(v.id).toLowerCase()));
+  const scan = isDemoGuest(req.user)
+    ? maskInventoryForDemoGuest(scan0, { isDemoVcenter: (id) => demoVcIds.has(String(id ?? '').toLowerCase()), isDemoAgent: isDemoEdgeId })
+    : scan0;
   const findings = invFindingsOf(scan);
   res.json({
     ok: true,

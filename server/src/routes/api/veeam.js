@@ -295,7 +295,7 @@ export function registerVeeamBadges(api) {
     }
     const { results, views, host } = resultsFor(vcenterId, req);
     const m = matchToVcenter({ id: vcenterId, host }, t.vms, results, { refsFor: vmId });
-    res.json({ ok: true, configured: true, vm: { id: vm.id, name: vm.name }, detail: maskDetail(buildVmDetail(m.byVm[vmId]), isAdminDetailUser(req.user)), servers: views, at: Date.now() });
+    res.json({ ok: true, configured: true, vm: { id: vm.id, name: vm.name }, detail: maskDetail(buildVmDetail(m.byVm[vmId]), isAdminDetailUser(req.user), vm.name), servers: views, at: Date.now() });
   });
 }
 
@@ -303,11 +303,22 @@ export function registerVeeamBadges(api) {
  * v2.766(점검 R1-A4-3, 판독): VM 상세의 lastTask.message 는 Veeam 작업 결과 원문(≤300자)이다 — 실패 문구에 프록시·저장소·호스트 주소가 들어갈 수 있다(추정 —
  *   실서버 표본 없음). 비고(publicNote)와 같은 주소 꼴(ADDR_LIKE)이 보이면 관리자가 아닌 계정에는 일반 문구로. 수는 이 VM 의 작업 것이라 가리지 않는다.
  */
-export function publicTaskMessage(m) {
+/*
+ * v2.767(점검 R2-B1-3): ADDR_LIKE 의 호스트 규칙은 ':포트' 가 있어야 해서 포트 없는 FQDN('vbr-proxy01.corp.local')·UNC 경로('\\nas01\veeam')를
+ *   그대로 내보냈다(실제 Veeam 실패 문구에 들어가는지는 표본 없음 — 추정). 점 2개 이상 + 영문 끝 라벨인 호스트명과 UNC·'//host' 를 주소 꼴로 본다.
+ *   ⚠ VM 이름에 점이 든 경우(db01.corp.local)는 작업 메시지에 그 이름이 늘 들어가므로 **VM 이름을 먼저 빼고** 판정한다(과잉 가림 방지).
+ *   숫자뿐인 버전(12.1.2)은 끝 라벨이 영문이 아니라 걸리지 않는다. 입력은 300자로 먼저 자른다(라벨 길이도 상한 — 선형).
+ */
+const FQDN_LIKE = /\b(?:[a-z0-9-]{1,63}\.){2,}[a-z]{2,24}\b/i;
+const UNC_LIKE = /\\\\[A-Za-z0-9._-]|(?:^|[\s'"(])\/\/[A-Za-z0-9]/;
+export function publicTaskMessage(m, { vmName = '' } = {}) {
   const t = String(m || '').slice(0, 300);
-  return ADDR_LIKE.test(t) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
+  const name = String(vmName || '').trim().toLowerCase();
+  // 판정용 사본에서만 VM 이름을 뺀다(돌려주는 문구는 원문 그대로).
+  const probe = name.length >= 3 ? t.toLowerCase().split(name).join(' ') : t;
+  return ADDR_LIKE.test(probe) || FQDN_LIKE.test(probe) || UNC_LIKE.test(probe) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
 }
-function maskDetail(detail, admin) {
+function maskDetail(detail, admin, vmName = '') {
   if (admin || !detail?.lastTask?.message) return detail;
-  return { ...detail, lastTask: { ...detail.lastTask, message: publicTaskMessage(detail.lastTask.message) } };
+  return { ...detail, lastTask: { ...detail.lastTask, message: publicTaskMessage(detail.lastTask.message, { vmName }) } };
 }

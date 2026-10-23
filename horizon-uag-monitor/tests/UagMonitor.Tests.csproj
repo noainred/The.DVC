@@ -2,7 +2,7 @@
 
   <!--
     Horizon UAG Monitor 단위 테스트 — 화면(WinForms)과 무관한 순수 논리만 검사한다:
-    알람 판정(AlarmEngine)·알람 설정(AlarmSettings)·저장 폴더(DataLocation)·폴더 이동(DataMigrator + Database).
+    알람 판정(AlarmEngine)·알람 설정(AlarmSettings)·저장 폴더(DataLocation)·폴더 이동(DataMigrator + Database)·점검 엔진(MonitorService — 저장 실패).
     앱은 Windows 전용이라 소스 파일을 직접 포함해 Linux/Windows 어디서든 `dotnet test` 로 돈다.
   -->
   <PropertyGroup>
@@ -24,6 +24,7 @@
     <Compile Include="../AlarmSettings.cs" />
     <Compile Include="../AlarmEngine.cs" />
     <Compile Include="../MonitorRules.cs" />
+    <Compile Include="../MonitorService.cs" />
   </ItemGroup>
 
   <ItemGroup>

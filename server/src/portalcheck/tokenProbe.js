@@ -66,6 +66,10 @@ export function errorKindOf(msg) {
  */
 export async function probeCollectorPing(row, { fetchImpl = resilientFetch, timeoutMs = PROBE_TIMEOUT_MS, otherIds = [], token = '' } = {}) {
   const t0 = Date.now();
+  // v2.767(점검 R2-B4-5): 비활성 수집 서버는 점검하지 않는다 — '토큰 미저장' 으로 말하면 거짓이다(등록부에 토큰은 있다).
+  if (row?.disabled === true) {
+    return { at: t0, ms: 0, state: PROBE_STATE.NOT_RUN, httpStatus: null, reason: '비활성 수집 서버라 점검하지 않았습니다 — 설정 › 수집 서버에서 켜면 점검합니다.', evidence: 'unknown', disabled: true };
+  }
   const hasToken = row?.collector?.set === true && t(token) !== '';
   const url = base(row?.url);
   if (!url) {
@@ -188,6 +192,8 @@ export async function probeAll(rows = [], {
   const t0 = Date.now();
 
   const probes = await pool(rows, concurrency, async (row) => {
+    // v2.767(점검 R2-B4-5): 비활성 항목은 예산과 무관하게 '비활성' 으로 남긴다(네트워크 0 — 예산 초과로 세지 않는다).
+    if (row?.disabled === true) return { agent: row.agent, probe: await probeCollectorPing(row, { fetchImpl, timeoutMs }), centralRole: null };
     // ⚠ 남은 예산이 한 요청 시한보다 적으면 **시작하지 않는다** — 시작해 놓고 잘리면 결과가
     //   버려지고 화면에는 '시한 초과' 만 남는다(v2.550.3 osSsh 규약).
     if (Date.now() + timeoutMs > deadline) {

@@ -2,7 +2,7 @@
 
 포탈(`server/`·`web/`)과 별개인 .NET 8 WinForms 앱이다. 릴리스는 `.github/workflows/horizon-monitor-release.yml`
 (롤링 릴리스 `horizon-monitor`)이고 포탈 버전과 무관하다. 소스를 고치면 `dotnet test tests/UagMonitor.Tests.csproj` 를 돌린다
-(화면과 무관한 논리 55건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
+(화면과 무관한 논리 63건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
 ⚠ 이 테스트는 PR CI(`ci.yml`)에서 돌지 않는다 — 릴리스 워크플로(수동·`horizon-v*` 태그)에서만 돈다. 소스를 고쳤으면 직접 돌릴 것.
 
 - **알람 판정은 `AlarmEngine`(순수)이 하고 화면(`AlarmOverlay`)은 그리기만 한다.** 규칙: 주의·위험이 알람, 끄면(확인) 같은 상태에서는
@@ -26,3 +26,10 @@
   `History(LIMIT 20000)` 이 아니라 `HistoryBuckets`(1일=1분 … 365일=4시간, 점 ≤ 약 2,200)로 그리고 통계도 같은 집계다 — 2만 건 상한은 60초 주기에서
   약 14일이었다. 버킷의 가장 나쁜 상태는 Down 이 하나라도 있으면 Down. ④ `Prune` 은 5,000건 청크 사이에 잠금을 놓고 끝에 `wal_checkpoint(TRUNCATE)`
   (VACUUM 은 이동의 `VACUUM INTO` 가 담당). 되돌리기 전에 `tests/MonitorFixTests.cs`(변이 10종 검출)를 볼 것.
+- **v2.767(점검 R2-B5) — 저장 실패·오래됨·최신 조회**: ① 점검 결과 저장(InsertSample) 예외를 삼키지 않는다 — `SaveFailureTracker`(MonitorRules.cs)가
+  연속 실패를 세고 error.log 는 첫 실패 즉시 + 5분마다 한 줄 + 복구 한 줄. 트레이 툴팁·메인 창 바닥 줄이 '저장 실패' 를 보인다.
+  ② 트레이 아이콘·머리말 집계는 `MonitorRules.CountStatuses` 하나로 — **오래된 결과(주기×3, 최소 3분)는 대기**, 저장 실패 중이면 '정상' 으로 그리지 않는다.
+  오래됨 경계는 알람 엔진과 같은 `MonitorRules.IsFresh`(복제 금지). 트레이는 점검 완료가 없어도 10초마다 다시 그린다(멈추면 Updated 도 안 온다).
+  ③ `LatestByEndpoint` 는 대상별 `ORDER BY ts DESC, id DESC LIMIT 1`(인덱스 시크) — `GROUP BY + MAX(ts)` 로 되돌리지 말 것(630만 행 약 0.5초, 잠금+UI 스레드).
+  ④ `MonitorService.Snapshot` 은 `Database.ChangeStamp()`(연결 세대 + total_changes)가 같으면 직전 결과를 메인 창·트레이가 나눠 쓴다 — 연결을 바꾸는 곳은
+  `_connEpoch` 를 올릴 것. 근거·변이 검증은 `tests/SaveAndLatestTests.cs`. MainForm·TrayAppContext 변경은 Linux 에서 WinForms 참조 팩(Microsoft.WindowsDesktop.App.Ref 8.0.10)으로 컴파일만 확인했다(화면은 미확인).

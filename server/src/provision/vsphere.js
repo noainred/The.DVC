@@ -34,7 +34,7 @@ const esc = (s) => String(s ?? '')
 
 const isWindows = (guestOS = '') => /win|microsoft/i.test(guestOS);
 
-function customizationXml(vm, guest, windows) {
+export function customizationXml(vm, guest, windows) {   // v2.767: 요소 순서 고정 테스트용으로 내보낸다(audit2767a)
   const dns = (guest.dnsServers || []).filter(Boolean);
   // vim25 CustomizationGlobalIPSettings 시퀀스는 dnsSuffixList → dnsServerList 순서다.
   // (순서가 뒤바뀌면 vCenter SOAP 디시리얼라이저가 unexpected-element로 거부 → 정적 IP 클론 전부 실패.)
@@ -46,7 +46,10 @@ function customizationXml(vm, guest, windows) {
 
   const identity = windows
     ? `<identity xsi:type="CustomizationSysprep">` +
-        `<guiUnattended><autoLogon>false</autoLogon><autoLogonCount>0</autoLogonCount><timeZone>110</timeZone></guiUnattended>` +
+        // v2.767(점검 R2-B3-5): vim25 CustomizationGuiUnattended 시퀀스는 password? → timeZone → autoLogon → autoLogonCount 다
+        //   (pyVmomi 9.1.1.0 _typeinfo_vim CustomizationGuiUnattended 대조 — 실 vCenter 미확인). 예전 autoLogon→autoLogonCount→timeZone 은
+        //   위 globalIPSettings 와 같은 unexpected-element 거부를 부른다(Windows 원본 프로비저닝 전부 실패 예상).
+        `<guiUnattended><timeZone>110</timeZone><autoLogon>false</autoLogon><autoLogonCount>0</autoLogonCount></guiUnattended>` +
         `<userData>` +
           `<fullName>Administrator</fullName><orgName>Org</orgName>` +
           `<computerName xsi:type="CustomizationFixedName"><name>${esc(vm.hostname || vm.name)}</name></computerName>` +

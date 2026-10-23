@@ -1,4 +1,4 @@
-# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.744
+# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.767
 
 > 루트 `CLAUDE.md` 에서 옮긴 기록(2026-10-20, v2.746 시점). 문구는 원문 그대로이고 목록 들여쓰기만 한 단계 줄였다. "되돌리지 말 것" 규칙은 그대로 유효하다 — 이 영역 코드를 고치기 전에 이 파일을 읽을 것. 새 교훈은 테스트 → 이 파일 순으로 남기고 루트 CLAUDE.md 에는 쌓지 않는다.
 
@@ -1625,3 +1625,14 @@
   · 비관리자 가림은 형제 필드 전부(R1-A4-2 unmatched — otherVcenter 만 가렸다) · stale 결과의 '실행 중' 은 jobs 까지(R1-A4-1) · 엣지 pull 상한 < 중앙 송신 상한 금지(R1-A5-2).
   · 자동 제안 값은 '사람이 고른 값' 과 구분해 입력이 바뀔 때마다 다시 계산(R1-A3-01 — 남은 제안이 자격증명을 엉뚱한 엣지로 보냈다).
   · 남긴 것: A3-02(점검 호스트 CPU 카드 포함)는 테스트가 고정한 설계라 문구만 · 상대 경로 storagePath 기준(cwd)이 문서와 다를 수 있음(반증 부수 관찰, 미확인).
+- **v2.767 — 버그 점검 2회차(다중 에이전트 5축 → 반증 1인 → 수정 4그룹) 확정 32건 중 31건 수정 — B4-6 데모 가림은 portal-check/inventory 만**(회귀 `server/test/audit2767{a,b,c}` · `pyportal/tests/test_audit2767` · `uagmon/test/uag2767` · C# `SaveAndLatestTests`):
+  · ⚠⚠ **쓰기 범위는 '실제로 만들어질 곳' 으로 판정한다**(B3-1 `routes/admin/opsSettings.js /provision/jobs`): 범위를 `body.vcenterId` 로 보고 생성은 원본 VM 의 vCenter 로 해서
+    범위 밖 vCenter 에 VM 이 만들어졌다. 원본 VM 기준 '조회 밖 404 → 쓰기 밖 403', body.vcenterId 가 다르면 400, 원본이 없으면 404(범위 검사를 건너뛰고 넘기지 않는다).
+  · ⚠ **엣지 push 의 id 는 그 엣지의 네임스페이스에 묶는다**(B2-02 guest-disk): vmId 가 vcenterId 접두로 시작하지 않으면 `dropped.notOwned` — split(':') 금지(vc id 에 콜론), 최장 프리픽스.
+  · **보존 정리는 '내가 만든 것' 만 지운다**(B3-2·3·4 vmclone NFS): 경로에 vCenter·VM MoRef 슬러그 + 데이터스토어별 하위 폴더, 보존은 manifest 의 vcenterId·vmId 일치 폴더만,
+    실패 폴더는 즉시 정리. 옛 경로 백업은 지우지 않고 남긴다(안내만).
+  · 외부 명령의 '일부 실패' 를 전체 실패로 버리지 않는다(B2-01 du exit 1 + 루트 합계 행 = 경고 성공, du-top 출력 상한은 엣지·중앙 RMA 결과 보관 상한까지 함께 올림).
+  · 판정 시각은 그 판정에 쓰인 엔드포인트의 시각으로(B4-1 '/inventory' lastAt) · 입력 칸 의미 하나(B4-2 SSH 포트 ≠ Ollama 포트, 이미 잘못 저장된 설치본은 자동 복구 안 됨) ·
+    낡은 엣지 보고는 FAULT 가 아니라 UNKNOWN(B4-4) · 비활성 대상은 NOT_RUN(B4-5·B5-3) · 앵커 없는 반복 정규식 29개 규칙 교체(B2-03).
+  · 남긴 것(3회차 후보): 데모 계정의 comm-map·data-flow·device-flow 형제 라우트 가림 · pyportal 세마포어·guard IPv6·history.latest GROUP BY·check_url 유휴 시한 ·
+    C# 가져오기 정렬 · LogAnalysis run 늦은 응답 가드 · onlyOnChange 실패 후 생략 · 상대 경로 storagePath 기준.

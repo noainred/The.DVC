@@ -3,6 +3,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { dirUsageRows, dirUsageNotes, dirUsageDeltaText } from './dirUsageRows.js';
 
 /**
  * 특수 기능 › 폴더 사용량 Top-N (v2.454, admin 전용).
@@ -59,25 +60,9 @@ export function DirUsageReport() {
   // 첫 로드에서 대상이 하나뿐이면 자동 선택(클릭 한 번을 아낀다).
   useEffect(() => { if (!sel && targets.length) setSel(targets[0].id); }, [targets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rows = useMemo(() => {
-    const scan = detail?.scan;
-    if (!scan) return [];
-    const prevMap = new Map((detail?.prev?.entries || []).map((e) => [e.name, e.bytes]));
-    const hasPrev = (detail?.prev?.entries || []).length > 0;
-    const denom = scan.total_bytes || scan.sum_bytes || 0;
-    return (scan.entries || []).map((e, i) => {
-      const p = prevMap.get(e.name);
-      return {
-        rank: i + 1,
-        name: e.name,
-        bytes: e.bytes,
-        pct: denom > 0 ? Math.round((e.bytes / denom) * 1000) / 10 : null,
-        // 기준선 원칙: 직전 관측이 없으면 증감을 만들지 않는다(0 으로 채우지 않는다).
-        delta: !hasPrev ? null : (p == null ? null : e.bytes - p),
-        isNew: hasPrev && p == null,
-      };
-    });
-  }, [detail]);
+  // v2.767(점검 R2-B2-05): 판정은 서버 compareScans 결과(메일과 같은 기준) — dirUsageRows.js.
+  const rows = useMemo(() => dirUsageRows(detail), [detail]);
+  const notes = useMemo(() => dirUsageNotes(detail), [detail]);
 
   const runNow = async () => {
     setBusy(true); setMsg(null);
@@ -135,10 +120,11 @@ export function DirUsageReport() {
             {detail?.prev && <Stat label="직전 수집" value={new Date(detail.prev.ts).toLocaleString()} />}
           </div>
 
-          {(scan.skipped > 0 || scan.truncated) && (
+          {(scan.skipped > 0 || scan.truncated || scan.warn_count > 0) && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 10, color: '#fb0' }}>
               {scan.skipped > 0 && `⚠ 해석하지 못한 줄 ${scan.skipped}개(권한 없는 폴더이거나 이름에 개행이 있는 경우) — 그만큼 합계에서 빠집니다. `}
-              {scan.truncated && '⚠ 하위 폴더가 매우 많아 일부만 집계했습니다.'}
+              {scan.truncated && '⚠ 하위 폴더가 매우 많아 일부만 집계했습니다. '}
+              {scan.warn_count > 0 && `⚠ du 가 읽지 못한 경로 ${scan.warn_count}건(권한 거부 등) — 그 아래 용량은 합계에서 빠졌을 수 있습니다.`}
             </div>
           )}
 
@@ -160,8 +146,8 @@ export function DirUsageReport() {
                       <div style={{ height: '100%', width: `${Math.max(1, r.pct || 0)}%`, background: '#2e90fa' }} />
                     </div>
                   </td>
-                  <td data-sort={r.delta ?? ''} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
-                    {r.isNew ? '신규' : r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${human(r.delta)}`}
+                  <td data-sort={r.delta ?? ''} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.entered ? '#53b1fd' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
+                    {dirUsageDeltaText(r, human)}
                   </td>
                 </tr>
               ))}
@@ -175,6 +161,12 @@ export function DirUsageReport() {
               )}
             </tbody>
           </STable>
+
+          {notes.length > 0 && (
+            <ul className="muted" style={{ fontSize: 12, lineHeight: 1.7, margin: '10px 0 0', paddingLeft: 18 }}>
+              {notes.map((n) => <li key={n} style={{ minWidth: 0, wordBreak: 'break-all' }}>{n}</li>)}
+            </ul>
+          )}
 
           {history.length > 1 && (
             <>

@@ -385,16 +385,19 @@ class HubHandler(BaseHTTPRequestHandler):
                            "checkedAt": self.date_time_string()})
 
     def _health_targets(self, payload) -> list:
+        # v2.767(점검 R2-B5-3): 중지된 바로가기(v2.227)는 자동 점검뿐 아니라 [지금 점검](전체)·ids 경로에서도 뺀다 —
+        # 예전에는 전부 넘겨 중지한 링크에 접속하고 이력·웹훅 전환 알림까지 냈다(툴팁 '사용으로 바꾸면 다시 포함' 과 모순).
+        active = [item for item in self.ctx.shortcuts.all() if item.get("enabled", True)]
         if isinstance(payload, dict):
             ids = payload.get("ids")
             if isinstance(ids, list) and ids:
                 wanted = {str(value) for value in ids}
                 return [{"id": item["id"], "url": item["url"]}
-                        for item in self.ctx.shortcuts.all() if item["id"] in wanted]
+                        for item in active if item["id"] in wanted]
             urls = payload.get("urls")
             if isinstance(urls, list) and urls:
                 return [{"id": None, "url": str(value)} for value in urls[:200]]
-        return [{"id": item["id"], "url": item["url"]} for item in self.ctx.shortcuts.all()]
+        return [{"id": item["id"], "url": item["url"]} for item in active]
 
     # ================= 설정 세션 =================
 

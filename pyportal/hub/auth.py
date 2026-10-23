@@ -484,7 +484,15 @@ class SessionStore:
         encoded, _, signature = token.rpartition(".")
         if not encoded or not signature:
             return None
-        if not hmac.compare_digest(self._sign(encoded.encode("ascii")), signature):
+        # v2.767(점검 R2-B5-6): compare_digest 에 str 을 넣으면 비-ASCII 서명부에서 TypeError 가 난다(파이썬 사양) —
+        # _dispatch 가 잡지 않는 예외라 응답 없이 연결이 끊겼다(미인증 헤더·쿠키 한 줄). _hub_token_ok(v2.500 L1)처럼
+        # 바이트로 비교하고, 인코딩·비교 예외는 '없는 세션'(None)으로 접는다.
+        try:
+            expected = self._sign(encoded.encode("ascii")).encode("ascii")
+            supplied = str(signature).encode("utf-8", "surrogateescape")
+            if not hmac.compare_digest(expected, supplied):
+                return None
+        except (TypeError, ValueError, UnicodeError):
             return None
         try:
             padding = "=" * (-len(encoded) % 4)

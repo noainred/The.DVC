@@ -84,7 +84,7 @@ const auth = new Auth({ required: !isLoopback, passwordHash, onRehash });
 
 /* --------------------------------- 폴러 --------------------------------- */
 // 재진입 가드 + 대상 변경 직후 재실행 예약 + 삭제된 대상 결과 버림 — lib/poller.js.
-const poller = createPoller(store, (t) => fetchUagStats(t)); // per-target 10s 타임아웃 내장
+const poller = createPoller(store, (t) => fetchUagStats(t)); // 대상마다 전체 10초 시한(주소 해석~본문 끝, v2.767 R2-B5-5)
 const pollOnce = (o) => poller.pollOnce(o);
 const pollTimer = setInterval(() => { pollOnce().catch(logPollError); }, Math.max(10, store.settings.pollSeconds) * 1000);
 pollTimer.unref?.();

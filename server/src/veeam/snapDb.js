@@ -11,6 +11,7 @@
  *   snap_meta(k, v) — 'from:<vcenterId>' = 이 DB 가 그 vCenter 의 스냅샷 행을 빠짐없이 가진 가장 이른 시각(백필이 거꾸로 넓힌다).
  *     v2.765: 'cur:<vcenterId>'·'ok:<vcenterId>'·'seen:<vcenterId>' = Veeam 계정 전용 수집기(snapCollector.js)의 읽기 커서·완결 시각·
  *     '그 계정 표기로 이벤트를 한 번이라도 읽었다'(okAt 은 seen 뒤에만 유효 — 표기 불일치의 0건 완결을 '최신' 으로 믿지 않는다).
+ *     v2.767(점검 R2-B1-1): 'vu:<vcenterId>' = 판정이 Veeam 으로 본 적 있는 계정 → 마지막으로 본 시각(JSON, 상한 64·31일) — 전용 수집기 덮음 판정.
  *   snap_edge(vcenterId, json, at) — 엣지가 보낸 요약(중앙). 재시작해도 다음 push 전까지 마지막 값이 보인다.
  * 보관: 31일(RETENTION_MS) — prune 은 적재 N회마다 1회(첫 회 금지) · ts 단독 인덱스.
  * node:sqlite 가 없으면 getSnapDb() 는 null — 호출부는 예전 경로(로그 DB 검색)로 간다(기능은 같고 느릴 뿐).
@@ -141,6 +142,11 @@ function initSqlite(dbPath) {
       ingest(rows, { tick: countTick = true } = {}) {
         const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.vcenterId != null && Number.isFinite(Number(r.ts)) && isSnapRow(r));
         if (list.length) insertTx(list);
+        // v2.767(점검 R2-B1-1): 넣은 행 중 Veeam 계정의 스냅샷 생성 계정을 '본 계정' 으로 기록한다 — 로그 폴러가 7일 넘게 밀려 옛 행만 넣는
+        //   동안에도(요약 7일 창에는 안 들어온다) 그 계정이 있다는 사실이 덮음 판정에 남는다. 실패해도 적재는 그대로.
+        if (list.length && _snapUserPick) {
+          try { for (const [vc, users] of _snapUserPick(list)) rememberVeeamUsers(vc, users, Date.now(), api); } catch { /* 기록 실패는 덮음 판정을 보수적으로 둘 뿐 */ }
+        }
         if (countTick && (++tick % PRUNE_EVERY) === 0) api.prune().catch(() => {});   // 첫 회 금지(기동 직후 DELETE 스캔을 피한다)
         return list.length;
       },
@@ -198,6 +204,16 @@ function initSqlite(dbPath) {
           db.exec('COMMIT');
         } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
       },
+      /**
+       * v2.767(점검 R2-B1-1): 'vu:<vc>' — 판정이 Veeam 으로 **본 적 있는** 계정(정규형 → 마지막으로 본 시각, JSON). 전용 수집기 덮음 판정
+       *   (snapCollector.snapCollectorCovers)이 요약의 7일 창 밖 계정까지 보게 한다. 수집기 목록이 바뀌어도(resetSnapCollector) 지우지 않는다.
+       */
+      veeamUsersMeta(vcenterId) {
+        const v = metaGet.get(`vu:${vcenterId}`)?.v;
+        if (typeof v !== 'string' || !v) return null;
+        try { const o = JSON.parse(v); return o && typeof o === 'object' && !Array.isArray(o) ? o : null; } catch { return null; }
+      },
+      setVeeamUsersMeta(vcenterId, obj) { metaSet.run(`vu:${vcenterId}`, JSON.stringify(obj)); },
       /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
       dropCoverage(vcenterIds) {
         let ok = true;
@@ -220,6 +236,66 @@ function initSqlite(dbPath) {
     try { fs.chmodSync(dbPath, 0o600); } catch { /* best effort */ }
     return api;
   });
+}
+
+/* ── v2.767(점검 R2-B1-1): 판정이 Veeam 으로 본 계정의 누적 기록(snap_meta 'vu:<vc>') ─────────────────────────────── */
+// 1회차 A1-1 ③ 은 '요약(7일 창)의 계정 ⊆ 전용 수집기 userList' 만 봤다 — 로그 폴러가 7일 넘게 밀리면 이름 규칙('veeam') 계정의 행이 창에 하나도
+// 없어 판정을 통과했고 전용 수집기 okAt(지금)이 섞여 '7일 미백업' 이 ok 로 나왔다(2회차 B1-1 재현). 본 적 있는 계정을 vCenter 별로 누적
+// 영속하고(상한·시한) 덮음 판정이 그것까지 본다. ⚠ '로그 폴러가 늦으면 섞지 않기' 로 바꾸지 말 것(전용 수집기의 존재 이유 — A1-1 — 가 사라진다).
+// 한 번도 본 적 없는 계정(설치 직후부터 로그 폴러가 밀린 경우)은 여전히 알 수 없다 — 한계로 기록한다.
+export const VEEAM_USERS_MAX = 64;                 // vCenter 당 — 넘으면 가장 오래전에 본 것부터 버린다
+export const VEEAM_USERS_TTL_MS = RETENTION_MS;    // 31일 동안 다시 보지 못한 계정은 버린다(퇴역한 계정이 영원히 섞음을 막지 않게)
+const VEEAM_USERS_REFRESH_MS = 6 * 3_600_000;      // 이미 아는 계정은 이 간격으로만 시각을 다시 쓴다(매 회차 meta 쓰기 방지)
+const _vu = new Map();                             // vcenterId → Map(정규형 계정 → 마지막으로 본 시각) — meta 의 메모리 사본
+let _snapUserPick = null;                          // (rows) => Map(vcenterId → Iterable<정규형 계정>) — snapEvents.js 가 등록(순환 import 회피)
+/** snapEvents.js 가 모듈 로드 때 등록한다 — 넣은 행에서 'Veeam 계정의 스냅샷 생성' 계정을 골라 준다. */
+export function setSnapUserPicker(fn) { _snapUserPick = typeof fn === 'function' ? fn : null; }
+function vuLoad(db, vc) {
+  let m = _vu.get(vc);
+  if (m) return m;
+  m = new Map();
+  let o = null;
+  try { o = typeof db?.veeamUsersMeta === 'function' ? db.veeamUsersMeta(vc) : null; } catch { o = null; }
+  if (o) {
+    for (const [k, t] of Object.entries(o).slice(0, VEEAM_USERS_MAX * 2)) {
+      const a = String(k).trim().toLowerCase().slice(0, 128);
+      if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) m.set(a, t);
+    }
+  }
+  _vu.set(vc, m);
+  return m;
+}
+/**
+ * 본 계정을 기록한다(정규형 — snapEvents.canonAccount). DB 가 없으면 아무것도 하지 않는다(false).
+ * @returns {boolean} meta 를 다시 썼는가
+ */
+export function rememberVeeamUsers(vcenterId, users, now = Date.now(), db = impl) {
+  if (!db || vcenterId == null) return false;
+  const vc = String(vcenterId);
+  const m = vuLoad(db, vc);
+  let dirty = false;
+  for (const u of users || []) {
+    const k = String(u ?? '').trim().toLowerCase().slice(0, 128);
+    if (!k) continue;
+    const prev = m.get(k);
+    if (prev == null || now - prev >= VEEAM_USERS_REFRESH_MS) { m.set(k, Math.max(prev || 0, now)); dirty = true; }
+  }
+  for (const [k, t] of m) if (now - t > VEEAM_USERS_TTL_MS) { m.delete(k); dirty = true; }
+  if (m.size > VEEAM_USERS_MAX) {
+    for (const [k] of [...m].sort((x, y) => x[1] - y[1]).slice(0, m.size - VEEAM_USERS_MAX)) m.delete(k);
+    dirty = true;
+  }
+  if (dirty && typeof db.setVeeamUsersMeta === 'function') { try { db.setVeeamUsersMeta(vc, Object.fromEntries(m)); } catch { /* 메모리 사본은 남는다 — 재시작 뒤 다시 모은다 */ } }
+  return dirty;
+}
+/** 그 vCenter 에서 판정이 Veeam 으로 본 적 있는 계정(정규형, 시한 안) — DB 가 열려 있지 않으면 null(모름). */
+export function seenVeeamUsers(vcenterId, now = Date.now()) {
+  const db = impl;
+  if (!db || vcenterId == null) return null;
+  const m = vuLoad(db, String(vcenterId));
+  const out = [];
+  for (const [k, t] of m) if (now - t <= VEEAM_USERS_TTL_MS) out.push(k);
+  return out;
 }
 
 /**
@@ -383,7 +459,7 @@ async function runBackfill({ logsDb, vcenterIds, now = Date.now(), pauseMs = BAC
 }
 
 /** 테스트 전용 — 핸들 닫고 상태 초기화. */
-export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; ready = null; unavailable = false; _backfill = null; _lock.ok(); _coverInvalid.clear(); _markerIds.clear(); _markerWarned = false; }
+export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; _vu.clear(); ready = null; unavailable = false; _backfill = null; _lock.ok(); _coverInvalid.clear(); _markerIds.clear(); _markerWarned = false; }
 /** 테스트 전용 — 덮음 무효 표지 파일 경로(_resetSnapDbForTest 는 메모리 무효까지 지운다 = 재시작 — 표지만 남는다). */
 export const _invalidMarkerPathForTest = () => markerPath();
 /** 테스트 전용 — 잠금 재시도 대기를 끝낸다. */

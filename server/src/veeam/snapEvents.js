@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { getSnapDb, backfillSnap } from './snapDb.js';
+import { getSnapDb, backfillSnap, rememberVeeamUsers, setSnapUserPicker } from './snapDb.js';
 import { createYielder } from '../util/timeSlice.js';
 
 export const LOOKBACK_DAYS = 7;
@@ -366,8 +366,27 @@ export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), d
   if (learned.length) rememberLearned(learned, now);
   const accounts = veeamAccounts(now);
   const r = summarizeVeeamSnapEvents(vms, rows, { accounts, since });
+  // v2.767(점검 R2-B1-1): 이 요약이 Veeam 으로 본 계정을 vCenter 별로 누적 기록한다(snap_meta 'vu:<vc>') — 로그 폴러가 7일 넘게 밀려 다음 요약의
+  //   창에서 그 계정이 사라져도 전용 수집기 덮음 판정(snapCollectorCovers)이 그 계정을 기억한다. 실패는 판정을 보수적으로 둘 뿐이다.
+  if (snapDb && r.veeamUsers?.length) { try { rememberVeeamUsers(vcenterId, r.veeamUsers, now, snapDb); } catch { /* */ } }
   return { ...r, truncated, since, at: now, accounts: accounts.length };
 }
+
+/*
+ * v2.767(점검 R2-B1-1): 전용 DB 에 들어가는 행(로그 폴러·전용 수집기·백필)에서 'Veeam 계정의 스냅샷 생성' 계정을 골라 준다 — snapDb 가 넣을 때마다
+ *   '본 계정' 으로 누적한다(요약 7일 창 밖의 옛 행만 들어오는 동안에도). 판정기는 요약과 같은 것(makeVeeamAccountMatcher + veeamAccounts).
+ */
+setSnapUserPicker((rows) => {
+  const isVeeam = makeVeeamAccountMatcher(veeamAccounts());
+  const by = new Map();
+  for (const r of rows) {
+    if (!r || !isSnapshotCreateEvent(r) || !isVeeam(r.user)) continue;
+    const vc = String(r.vcenterId);
+    let set = by.get(vc); if (!set) { set = new Set(); by.set(vc, set); }
+    set.add(canonAcct(r.user));
+  }
+  return by;
+});
 
 /* ── 중앙: 엣지가 보낸 요약(인메모리 — 재시작하면 다음 push 까지 비고 화면이 그 사실을 말한다) ─────────── */
 

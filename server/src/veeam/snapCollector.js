@@ -51,7 +51,7 @@ import { splitDirectCollectTargets } from '../vcenter/collectTarget.js';
 import { loadLogSettings } from '../logs/settings.js';
 import { vcLogWithDeadline, vcLogDeadlineMs, DEADLINE_GRACE_MS, logCollectOkAt } from '../logs/poller.js';
 import { veeamAccounts, isSharedAccount, canonAccount } from './snapEvents.js';
-import { getSnapDb, ingestSnapRows, isSnapRow } from './snapDb.js';
+import { getSnapDb, ingestSnapRows, isSnapRow, seenVeeamUsers } from './snapDb.js';
 
 const DAY = 86_400_000;
 export const LOOKBACK_MS = 8 * DAY;       // 첫 수집 창 — 화면 7일 + 공용 계정 짝짓기 12시간(snapDb BACKFILL_FIRST_MS 와 같다)
@@ -135,13 +135,21 @@ function currentCoverage(now = Date.now()) {
 /**
  * v2.766(점검 R1-A1-1 ③): 요약(localSnapSummary)에서 판정이 Veeam 으로 본 계정이 이 수집기의 지금 userList 로 전부 덮이는가.
  *   summary 를 주지 않으면 검사하지 않는다(순수 결합 시험용). 상한을 넘어 다 세지 못한 요약은 '모름' — 덮지 않는 것으로 본다.
+ * v2.767(점검 R2-B1-1): 요약의 7일 창만 보면 로그 폴러가 7일 넘게 밀렸을 때 이름 규칙('veeam') 계정이 창에서 빠져 통과했다 — vcenterId 를 주면
+ *   그 vCenter 에서 **본 적 있는** Veeam 계정(snapDb 'vu:<vc>' 누적 — 요약·전용 DB 적재가 기록)까지 덮여야 한다. 그 기록을 읽을 수 없으면(DB 닫힘) 모름.
+ *   잘린 요약(truncated — 행 상한)도 오래된 행의 계정이 빠졌을 수 있어 '모름'.
  */
-export function snapCollectorCovers(summary) {
+export function snapCollectorCovers(summary, vcenterId) {
   if (summary === undefined) return true;
-  if (!summary || summary.veeamUsersOverflow === true) return false;
+  if (!summary || summary.veeamUsersOverflow === true || summary.truncated === true) return false;
   const cov = currentCoverage();
   if (!cov) return false;
-  const users = Array.isArray(summary.veeamUsers) ? summary.veeamUsers : [];
+  const users = Array.isArray(summary.veeamUsers) ? [...summary.veeamUsers] : [];
+  if (vcenterId != null) {
+    const seen = seenVeeamUsers(vcenterId);
+    if (seen == null) return false;
+    for (const u of seen) users.push(u);   // push(...x) 금지 스윕(audit2603a) — 상한 64 라도 같은 꼴로
+  }
   return users.every((u) => cov.covered.has(canonAccount(u)));
 }
 
@@ -176,7 +184,8 @@ export function snapCollectorSeen(vcenterId) { return _seen.has(String(vcenterId
  */
 export function snapEventsOkAt(vcenterId, { dedicated = true, summary } = {}) {
   // v2.766(점검 R1-A1-1 ③): 요약이 Veeam 으로 본 계정 중 이 수집기가 읽지 않는 계정(이름 규칙 'veeam' 등)이 있으면 이 수집기의 시각을 섞지 않는다.
-  return combineOkAt(logCollectOkAt(vcenterId), dedicated && snapCollectorCovers(summary) ? snapCollectorOkAt(vcenterId) : null);
+  // v2.767(점검 R2-B1-1): 그 vCenter 에서 본 적 있는 Veeam 계정까지 덮여야 한다(snapCollectorCovers 머리말).
+  return combineOkAt(logCollectOkAt(vcenterId), dedicated && snapCollectorCovers(summary, vcenterId) ? snapCollectorOkAt(vcenterId) : null);
 }
 
 /** 완결 시각(순수) — 끝까지 읽었으면 수집 시작 시각(vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각), 아니면 마지막으로 읽은 시각. */

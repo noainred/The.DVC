@@ -59,7 +59,7 @@ export function startVmCloneScheduler() {
   // v2.741(감사 TIMING-01): 이전 프로세스(업그레이드·재시작 전)가 끝내지 못한 실행을 lastRun 에 남긴다 — 첫 틱(60초)이 남은 스냅샷을 정리하고 다시 실행한다.
   try {
     const n = markInterruptedRuns();
-    if (n) console.warn(`[vmclone] 재시작으로 중단된 복제 실행 ${n}개 — 켜져 있는 잡은 다음 확인(약 1분 뒤)에 남은 스냅샷을 정리하고 다시 실행합니다(꺼진 잡은 수동 실행 때 정리)`);
+    if (n) console.warn(`[vmclone] 재시작으로 중단된 복제 실행 ${n}개 — 켜져 있는 잡은 다음 확인(약 1분 뒤)에 남은 스냅샷을 정리하고 다시 실행합니다(꺼진 잡은 다시 켜면 그다음 확인에서 정리 — 꺼진 채로는 수동 실행도 하지 않습니다)`);   // v2.767(점검 R2-B3-9): runner 는 꺼진 잡을 수동 실행해도 바로 끝낸다 — 문구를 동작에 맞춤
   } catch (e) { console.warn(`[vmclone] 중단된 실행 확인 실패: ${e?.message || e}`); }
   _timer = setInterval(tick, 60_000);
   setTimeout(() => ensureVmCloneDemo().catch(() => null), 30_000).unref?.(); // 데모: 첫 틱(60초)을 기다리지 않게

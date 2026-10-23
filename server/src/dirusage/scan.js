@@ -62,7 +62,75 @@ export function parseDuOutput(stdout, root) {
   return { entries, totalBytes, skipped, truncated };
 }
 
-function stripSlash(p) { return p.length > 1 && p.endsWith('/') ? p.replace(/\/+$/, '') : p; }
+// v2.767(점검 R2-B2-04): `/\/+$/` 는 엣지 du 출력 줄(외부 입력)에 O(n²) 였다('/'×8만 + 'x/' 한 줄 5.7초 — 재현).
+//   끝에서부터 '/' 를 세는 선형 루프로 바꿨다(의미는 같다 — 길이 1 초과이고 '/' 로 끝날 때만, 끝의 '/' 를 전부 뗀다).
+function stripSlash(p) {
+  if (!(p.length > 1 && p.endsWith('/'))) return p;
+  let e = p.length;
+  while (e > 0 && p.charCodeAt(e - 1) === 47) e--;
+  return p.slice(0, e);
+}
+
+/** du 표준오류의 경고 줄(`du: cannot read directory …` 등) 수 — 선형. */
+export function countDuWarnings(stderr) {
+  const s = typeof stderr === 'string' ? stderr : '';
+  if (!s) return 0;
+  let n = 0;
+  for (const line of s.split('\n')) if (line.startsWith('du:')) n++;
+  return n;
+}
+
+/**
+ * v2.767(점검 R2-B2-01): RMA du-top 결과를 '쓸 수 있는가' 판정한다(순수).
+ * GNU du 는 읽지 못한 하위 폴더가 하나라도 있으면(사용자 홈 700 등) **끝까지 돈 뒤 exit 1** 이다. 예전에는 exec 의 ok:false(종료 코드 1)를
+ * 그대로 '스캔 실패' 로 버려, parseDuOutput 의 권한 오류 내성이 실제로는 닿지 않았다(재현 — 정상 파싱되는 stdout 을 폐기).
+ * 규칙: ① 출력이 잘렸으면(엣지 상한 truncated · 줄 상한 clipped · 중앙 결과 상한) 실패 — du 는 루트 합계를 **마지막 줄**에 쓰므로 잘린 출력은
+ *   부분 목록이고, 부분 합을 적재하지 않는다 ② exit 0 이면 성공 ③ exit 1(신호·시간 초과 없음)은 stdout 에 **루트 합계 행이 있을 때만** 성공 —
+ *   읽지 못한 경로 수(stderr 의 `du:` 줄)를 warnings 로 남긴다 ④ 그 밖은 실패.
+ * @returns {{ok:true, parsed:object, warnings:number} | {ok:false, reason:string}}
+ */
+export function judgeDuResult(r, root) {
+  const res = r && typeof r === 'object' ? r : {};
+  const stdout = typeof res.stdout === 'string' ? res.stdout : (typeof res.output === 'string' ? res.output : '');
+  if (res.rejected) return { ok: false, reason: res.reason || '엣지가 명령을 거부했습니다' };
+  if (res.timedOut) return { ok: false, reason: res.reason || '제한 시간 초과로 중단' };
+  if (res.truncated || res.clipped) {
+    return { ok: false, reason: `출력 상한을 넘어 잘렸습니다(${res.reason || '하위 폴더가 너무 많음'}) — 루트 합계 행이 없는 부분 목록이라 적재하지 않습니다` };
+  }
+  const warnings = countDuWarnings(res.stderr);
+  if (res.ok === true) return { ok: true, parsed: parseDuOutput(stdout, root), warnings };
+  if (Number(res.exitCode) === 1 && res.exitCode !== null && !res.signal) {
+    const parsed = parseDuOutput(stdout, root);
+    if (parsed.totalBytes != null) return { ok: true, parsed, warnings };
+    return { ok: false, reason: `${res.reason || '종료 코드 1'} — 루트 합계 행이 없어 결과를 쓸 수 없습니다` };
+  }
+  return { ok: false, reason: res.reason || (res.exitCode != null ? `종료코드 ${res.exitCode}` : '알 수 없는 실패') };
+}
+
+/**
+ * v2.767(점검 R2-B2-06): 증감 비교의 기준선 — 직전 기록이 **같은 루트·같은 엣지**일 때만 쓴다.
+ * 대상 행은 화면에서 제자리 수정돼 id 가 유지되므로, 경로(또는 엣지)를 바꾼 뒤 첫 수집이 옛 경로와 비교한 증감·'사라진 폴더' 를 냈다(재현).
+ * 레코드(camelCase)·DB 행 모두 받는다. @returns {{prev:object|null, baseChanged:boolean}}
+ */
+export function comparableBase(cur, prev) {
+  if (!cur || !prev) return { prev: null, baseChanged: false };
+  const same = String(cur.root ?? '') === String(prev.root ?? '') && String(cur.agent ?? '') === String(prev.agent ?? '');
+  return same ? { prev, baseChanged: false } : { prev: null, baseChanged: true };
+}
+
+/**
+ * v2.767(점검 R2-B2-05): compareScans 결과를 JSON 으로(화면이 메일과 **같은 판정**을 쓰게 — Map 은 직렬화되지 않는다).
+ */
+export function compareScansJson(cur, prev) {
+  const c = compareScans(cur, prev);
+  return {
+    delta: Object.fromEntries(c.delta),
+    removed: c.removed,
+    rankedOut: c.rankedOut,
+    enteredUnknown: c.enteredUnknown,
+    hasPrev: !!(prev && (prev.entries || []).length),
+  };
+}
 
 /**
  * 상위 N개를 뽑고 나머지를 '기타'로 묶는다.
@@ -244,7 +312,7 @@ export function humanBytes(b) {
  * 스캔 1건의 저장용 요약을 만든다 — **전량이 아니라 Top-N + 합계만** 저장한다.
  * 하위 폴더가 수천 개인 공유를 매 주기 전량 적재하면 vmtrack 이 피하려던 그 문제가 반복된다.
  */
-export function buildScanRecord({ targetId, root, agent, ts, parsed, topN }) {
+export function buildScanRecord({ targetId, root, agent, ts, parsed, topN, warnCount = 0 }) {
   const t = topEntries(parsed.entries, topN, parsed.totalBytes);
   return {
     targetId: String(targetId || ''),
@@ -258,6 +326,8 @@ export function buildScanRecord({ targetId, root, agent, ts, parsed, topN }) {
     othersCount: t.othersCount,
     skipped: parsed.skipped,
     truncated: parsed.truncated,
+    // v2.767(점검 R2-B2-01): du 가 읽지 못한 경로 수(exit 1 성공 — 그 아래 용량은 합계에서 빠졌을 수 있다)
+    warnCount: Number.isInteger(warnCount) && warnCount > 0 ? warnCount : 0,
     entries: t.top.map((e) => ({ name: e.name, bytes: e.bytes })),
     // v2.620(SRV2620-01): 전체 이름 지문 — 순위 밖 이탈·진입과 삭제·신규를 구분하는 근거(바이트는 없음).
     nameSet: buildNameSet(parsed.entries),

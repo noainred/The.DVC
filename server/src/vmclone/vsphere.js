@@ -120,7 +120,9 @@ export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = nul
  * 켜져 있으면(누가 수동으로 켰으면) 삭제하지 않고 오류를 돌려준다 — 백업 사본을 쓰는 중일 수
  * 있는데 자동으로 꺼서 지우는 건 파괴적이다(정직한 실패 > 조용한 강행).
  */
-export async function destroyClone(c, vmRef) {
+// vSphere 는 엔터티 이름의 '/'·'\\'·'%' 를 %2f·%5c·%25 로 바꿔 돌려준다 — 원장 이름과 비교하기 전에 되돌린다.
+const vcNameNorm = (s) => String(s ?? '').replace(/%(2f|5c|25)/gi, (m) => decodeURIComponent(m));
+export async function destroyClone(c, vmRef, { expectedName = '' } = {}) {
   let objs = [];
   // 이미 수동 삭제된 클론 조회는 ManagedObjectNotFound fault 로 throw 될 수 있다 — 그 경우도
   // '원장에서만 제거'로 처리(진짜 통신 오류와 구분: not.?found 계열 메시지일 때만).
@@ -128,6 +130,11 @@ export async function destroyClone(c, vmRef) {
   catch (e) { if (/notfound|not found|managedobject/i.test(String(e.message))) return { gone: true }; throw e; }
   const p = objs[0]?.props || {};
   if (!p.name) return { gone: true }; // 이미 수동 삭제됨 — 원장에서만 제거
+  // v2.767(점검 R2-B3-6): ref 가 원장 이름과 다른 VM 을 가리키면 지우지 않는다 — vCenter 재설치 뒤 같은 vcenterId 로 재등록하면
+  //   MoRef 카운터가 다시 시작해 옛 클론의 ref 가 꺼진 운영 VM 을 가리킬 수 있다. 오류로 돌려 건너뜀으로 보고하고 원장에서는 지우지 않는다.
+  if (expectedName && vcNameNorm(p.name) !== vcNameNorm(expectedName)) {
+    throw new Error(`보존정책 삭제 건너뜀 — 원장의 클론 '${expectedName}' 자리(${vmRef})에 다른 이름의 VM '${p.name}' 이 있습니다(수동 확인 필요)`);
+  }
   if (p['runtime.powerState'] === 'poweredOn') throw new Error(`보존정책 삭제 건너뜀 — 클론 '${p.name}' 이 켜져 있습니다(수동 확인 필요)`);
   const xml = await c.callRaw(`<Destroy_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this></Destroy_Task>`);
   const task = taskRefOf(xml);
