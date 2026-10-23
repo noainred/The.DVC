@@ -2220,8 +2220,13 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
 // 새 라우트에 복사하지 않는다). 공유 토큰 엣지는 설정 › 수집 서버에서 그 엣지의 개별 토큰을 발급해야 Veeam 위임을 쓴다.
 // 등록부를 못 읽으면 503(빈 목록을 ok 로 주면 엣지가 사본을 지운다 — v2.612).
 const VEEAM_AGENT_TOKEN_ONLY = 'Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
+// v2.763(V2-3): 403 의도(v2.751 검토 #5)는 그대로 — 거부 기록의 사유만 사실대로('토큰 불일치' 가 아니라 '개별 토큰 필요').
+const veeamAgentTokenOnly = (res) => {
+  res.locals.ingestReject = { kind: REJECT_KIND.AUTH, reason: '개별 토큰 필요 — 공유 토큰으로는 Veeam 위임을 받지 않습니다(토큰 자체는 맞습니다)' };
+  return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true });
+};
 centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
-  if (req.centralAuth?.mode !== 'agent') return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true });
+  if (req.centralAuth?.mode !== 'agent') return veeamAgentTokenOnly(res);
   const agent = req.centralAuth.agent;
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const R = await import('../veeam/registry.js');
@@ -2236,7 +2241,7 @@ centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
 // POST /api/central/veeam-data — 엣지가 읽은 Veeam 결과. 저장 이름은 인증된 agent · 그 엣지에 배정된 서버 id 만 받는다.
 // 결과가 0건이어도 상태는 받는다(엣지 무음 실패 금지 규약). 결과가 있는데 등록부를 못 읽으면 503(엣지는 다음 주기에 다시 보낸다).
 centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
-  if (req.centralAuth?.mode !== 'agent') return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true }); // v2.751 검토 #5
+  if (req.centralAuth?.mode !== 'agent') return veeamAgentTokenOnly(res); // v2.751 검토 #5
   const agent = req.centralAuth.agent;
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const E = await import('../central/veeamEdge.js');
@@ -2254,7 +2259,7 @@ centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
     if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 가 맡지 않은 vCenter 의 이벤트 요약 ${r.dropped.notOwned}건 거절`);
   }
   const results = Array.isArray(req.body?.results) ? req.body.results : [];
-  if (!results.length) { E.saveVeeamEdgeStatus(agent, req.body?.status, { at: Date.now(), results: 0, saved: 0 }); return res.json({ ok: true, saved: 0, ...(snap ? { snap } : {}) }); }
+  if (!results.length) { const at = Date.now(); E.saveVeeamEdgeStatus(agent, req.body?.status, { at, results: 0, saved: 0 }, { clockOffsetMs: E.edgeClockOffset(req.body, at), now: at }); return res.json({ ok: true, saved: 0, ...(snap ? { snap } : {}) }); }
   const R = await import('../veeam/registry.js');
   if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) { console.warn('[central] veeam-data: 중앙 Veeam 서버 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
   // v2.762(G1): id → 지금 접속처 지문 — 접속처를 바꾼 뒤 옛 접속처에서 읽은 결과(엣지가 아직 pull 전)를 받지 않는다.

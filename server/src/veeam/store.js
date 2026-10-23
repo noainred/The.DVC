@@ -15,18 +15,29 @@ const FILE = () => path.join(config.configDir, 'veeam-latest.json');
 const MAX_SERVERS = 400;
 let _map = null;
 let _writer = null;
+const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}) });
 
 function load() {
   if (_map) return _map;
   _map = new Map();
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    for (const [k, v] of Object.entries(raw?.servers || {})) if (v && typeof v === 'object') _map.set(k, v);
+    for (const [k, v] of Object.entries(raw?.servers || {})) {
+      if (!v || typeof v !== 'object') continue;
+      // v2.763(V3-I1): 성공 기록은 lastOk 를 파일에 싣지 않는다(아래 slim) — 메모리 모양은 예전과 같게 result 에서 다시 만든다(같은 배열을 가리킨다).
+      if (v.result?.ok && !v.lastOk) v.lastOk = okPart(v.result);
+      _map.set(k, v);
+    }
   } catch { /* 없거나 깨짐 — 다시 받으면 되는 캐시 */ }
   return _map;
 }
+/**
+ * v2.763(V3-I1): 성공 기록(result.ok)의 lastOk 는 result 와 같은 배열이라 파일에 두 번 쓰면 크기·stringify·기동 parse 가 2배였다(6대×5,850 VM → 5.85MB).
+ *   직렬화에서만 뺀다. 옛 판(다운그레이드)도 읽는다 — usableResult 는 result.ok 면 result 를 쓰고, putResult 는 prev.result.ok 갈래로 승계한다(v2.751 부터).
+ */
+const slim = (rec) => { if (!rec?.result?.ok || !rec.lastOk) return rec; const { lastOk: _drop, ...rest } = rec; return rest; };
 function writer() {
-  if (!_writer) _writer = createDebouncedWriter(FILE(), () => JSON.stringify({ v: 1, servers: Object.fromEntries(load()) }), { delayMs: 5_000, name: 'veeam-latest.json' });
+  if (!_writer) _writer = createDebouncedWriter(FILE(), () => JSON.stringify({ v: 1, servers: Object.fromEntries([...load()].map(([k, v]) => [k, slim(v)])) }), { delayMs: 5_000, name: 'veeam-latest.json' });
   return _writer;
 }
 
@@ -42,7 +53,6 @@ export function putResult(serverId, result, { via = 'local', agent = '', expectT
   if (!m.has(serverId) && m.size >= MAX_SERVERS) return false;
   const prev = m.get(serverId);
   const sameTarget = (t) => !tgt || !t || t === tgt;
-  const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}) });
   const rec = { result, via, agent: String(agent || ''), at: Date.now() };
   if (result?.ok) rec.lastOk = okPart(result);
   else if (prev?.lastOk && sameTarget(prev.lastOk.target)) rec.lastOk = prev.lastOk;
@@ -67,3 +77,6 @@ export function usableResult(rec) {
   return rec.lastOk || null;
 }
 export function _resetForTest() { _map = new Map(); }
+/** 테스트 전용 — 대기 중인 쓰기를 지금 하고(파일 모양 확인), 다음 접근이 파일에서 다시 읽게 한다(재시작 모사). */
+export function _flushForTest() { writer().flushSync(); }
+export function _reloadForTest() { _map = null; }

@@ -72,16 +72,16 @@ function looksKeyed(tokens, aliasOf) {
  * 정렬된 표로 만들기 때문에, 단순 `split(/\s+/)` 로는 그 값이 쪼개져 왕복이 깨진다
  * (테스트가 잡은 실제 버그). 사람이 직접 `"내 장비 01" 10.0.0.1` 로 적는 경우도 함께 살린다.
  */
-function splitWs(s) {
+function splitWsRaw(s) {
   const out = [];
-  let cur = '';
+  let cur = ''; let raw = '';
   let q = false;
   for (const ch of String(s)) {
-    if (ch === '"') { q = !q; continue; }         // 따옴표는 경계 표시일 뿐 값에 넣지 않는다
-    if (!q && /\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
-    cur += ch;
+    if (ch === '"') { q = !q; raw += ch; continue; }         // 따옴표는 경계 표시일 뿐 값에 넣지 않는다(원문에는 남긴다)
+    if (!q && /\s/.test(ch)) { if (cur) out.push({ value: cur, raw }); cur = ''; raw = ''; continue; }
+    cur += ch; raw += ch;
   }
-  if (cur) out.push(cur);
+  if (cur) out.push({ value: cur, raw });
   return out;
 }
 
@@ -100,11 +100,46 @@ function splitWs(s) {
  * @returns {{cells:string[], explicit:boolean}}
  */
 export function splitCells(line) {
+  const r = splitCellsRaw(line);
+  return { cells: r.cells, explicit: r.explicit };
+}
+
+/**
+ * v2.763(V1-2): 명시적 구분자(탭·|·쉼표)를 **따옴표 밖** 것만으로 판정·분리한다. 내보내기(rowsToFreeText)는
+ *   `[\s|,]` 가 든 값을 `"…"` 로 감싸는데, 예전에는 따옴표 안의 쉼표 하나로 줄 전체를 쉼표로 잘라 왕복이 깨졌다
+ *   (메모 'Phoenix DC, rack 12' → 표시명 형식 오류). 따옴표는 **칸·토큰 머리(구분자·공백 바로 뒤)에서만** 연다(낱말 가운데 따옴표는 글자) ·
+ *   닫히지 않은 따옴표면 그 구분자는 예전처럼 따옴표를 무시하고 자른다. 칸 값의 따옴표는 그대로 두고 unmark 가 벗긴다.
+ * @returns {string[]|null} 따옴표 밖에 d 가 없으면 [] · 닫히지 않은 따옴표면 null
+ */
+function splitOutsideQuotes(s, d) {
+  const parts = [];
+  let cur = ''; let q = false; let atTok = true; let hit = false;
+  for (const ch of s) {
+    if (q) { cur += ch; if (ch === '"') q = false; continue; }
+    if (ch === d) { parts.push(cur); cur = ''; atTok = true; hit = true; continue; }
+    if (ch === '"' && atTok) { q = true; atTok = false; cur += ch; continue; }
+    atTok = /\s/.test(ch);
+    cur += ch;
+  }
+  if (q) return null;
+  parts.push(cur);
+  return hit ? parts : [];
+}
+
+/**
+ * splitCells + 칸의 **원문**(clean 전 — v2.763(V1-3): 비밀번호 칸이 파싱에서 바뀌었는지 호출부가 알 수 있게)과 구분자.
+ *   공백 구분의 원문은 따옴표를 포함한 토큰 그대로(공백 경계는 원래 값이 아니다).
+ * @returns {{cells:string[], raw:string[], explicit:boolean, delim:string}}
+ */
+export function splitCellsRaw(line) {
   const s = String(line);
-  if (s.includes('\t')) return { cells: s.split('\t').map(clean), explicit: true };
-  if (s.includes('|')) return { cells: s.split('|').map(clean), explicit: true };
-  if (s.includes(',')) return { cells: s.split(',').map(clean), explicit: true };
-  return { cells: splitWs(s.trim()).map(clean), explicit: false };
+  for (const d of ['\t', '|', ',']) {
+    if (!s.includes(d)) continue;
+    const parts = splitOutsideQuotes(s, d) ?? s.split(d);
+    if (parts.length) return { cells: parts.map(clean), raw: parts, explicit: true, delim: d };
+  }
+  const w = splitWsRaw(s.trim());
+  return { cells: w.map((x) => clean(x.value)), raw: w.map((x) => x.raw), explicit: false, delim: ' ' };
 }
 
 /** 호환용 — 빈 칸 정보가 필요 없는 곳(조언의 토큰 위치 계산 등)에서 쓴다. */
@@ -122,7 +157,10 @@ export function splitLine(line) {
  *     키로 오인돼 note 값이 사라진다(테스트가 잡은 실제 버그).
  */
 export function parseKeyed(line, { aliasOf }) {
-  const s = clean(String(line).replace(/[\t\v\f\r]+/g, ' '));
+  // v2.763(V1-3): 원문 값(raw)은 줄 끝 공백을 남긴 판본에서 같은 경계로 뗀다 — clean 은 줄 끝을 잘라 '비밀번호=Qx9␠␠' 의 공백이 보이지 않는다.
+  //   두 판본은 줄 끝 공백만 다르므로(앞은 똑같이 자른다) 키 위치가 같다.
+  const sRaw = String(line).replace(/[\t\v\f\r]+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\u00a0/g, ' ').trimStart(); // eslint-disable-line no-control-regex
+  const s = clean(sRaw);
   const starts = [];
   const re = new RegExp(`(^|\\s)(${KEY_CH})\\s*([=:])`, 'gu');
   let m;
@@ -132,15 +170,19 @@ export function parseKeyed(line, { aliasOf }) {
     starts.push({ at: m.index + m[1].length, key, valueFrom: re.lastIndex });
   }
   const out = {};
+  const raw = {};
   for (let i = 0; i < starts.length; i++) {
-    const end = i + 1 < starts.length ? starts[i + 1].at : s.length;
+    const last = i + 1 >= starts.length;
+    const end = last ? s.length : starts[i + 1].at;
     const field = aliasOf(starts[i].key);
     if (!field) continue;                                  // 모르는 키는 조용히 버리지 않고…
     out[field] = clean(s.slice(starts[i].valueFrom, end));
+    // 다음 키 앞의 구분 공백 한 칸은 값이 아니다(정규식의 (^|\s)).
+    raw[field] = last ? sRaw.slice(starts[i].valueFrom) : sRaw.slice(starts[i].valueFrom, end - 1);
   }
   // 인식 못 한 키를 호출부가 알 수 있게 목록으로 돌려준다(조용한 무시 금지).
   const unknown = starts.map((x) => x.key).filter((k) => !aliasOf(k));
-  return { values: out, unknown };
+  return { values: out, unknown, raw };
 }
 
 export const LIMITS = { maxRows: 2000, maxCell: 8192, maxLines: 20000 };
@@ -157,7 +199,14 @@ export const LIMITS = { maxRows: 2000, maxCell: 8192, maxLines: 20000 };
  * @returns {{rows:Array<Object>, error?:string, warnings:string[], headerUsed:string[]|null}}
  *   각 행에 `_line`(사람용 원문 줄 번호)이 붙는다 — 드라이런 표가 그 번호로 오류를 가리킨다.
  */
-export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limits = {} } = {}) {
+/*
+ * v2.763(V1-1·V1-3) 덧붙인 반환값(추가만 — 기존 호출부는 무시해도 된다):
+ *   · presentByLine: Map(줄 번호 → 그 줄에 **실제로 적힌** 필드 Set) — 키=값이면 적은 키, 위치형이면 토큰이 있는 열
+ *     (명시적 구분자의 빈 칸·'-' 는 '비움' 이라 적힌 것으로 본다) + 기본값이 채운 필드. 'parseFreeRows 는 없는 필드를
+ *     '' 로 채운다' 때문에 '비움' 과 '열 없음' 을 호출부가 가를 수 없던 것을 여기서 준다(cvp/bulk.js 가 따로 계산하던 것).
+ *   · rawByLine: Map(줄 번호 → { 필드: 원문 }) — `rawFields` 로 고른 필드만(비밀번호 칸이 따옴표 제거·트림으로 바뀌었는지).
+ */
+export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limits = {}, rawFields = [] } = {}) {
   const lim = { ...LIMITS, ...limits };
   const aliasMap = new Map();
   for (const f of fields) aliasMap.set(f.toLowerCase(), f);
@@ -170,6 +219,9 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
 
   const warnings = [];
   const rows = [];
+  const presentByLine = new Map();
+  const rawByLine = new Map();
+  const wantRaw = new Set(rawFields);
   let order = fields;          // 위치형 대입 순서(헤더 줄이 있으면 교체)
   let headerUsed = null;
   let sawData = false;
@@ -183,11 +235,14 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     // v2.516: 명시적 구분자(탭·|·쉼표)에서는 **빈 칸을 유지**한다 — 그 자체가 '이 열은 비움' 이라는
     // 정보다. 무조건 버리면 중간 칸을 비운 줄의 뒤 값이 한 칸씩 밀린다(splitCells 머리말 참조).
     // 공백 구분은 빈 토큰이 의미 없으므로 계속 버린다.
-    const { cells, explicit } = splitCells(line);
+    const { cells, raw: rawCells, explicit, delim } = splitCellsRaw(line);
     // 뒤쪽 빈 칸은 떼어낸다(`a\tb\t` 처럼 줄 끝에 구분자가 남은 경우 — 열 개수 초과 경고 오탐 방지).
-    const trimmed = [...cells];
-    while (trimmed.length && trimmed[trimmed.length - 1] === '') trimmed.pop();
-    const tokens = explicit ? trimmed : trimmed.filter((t) => t !== '');
+    let pairs = cells.map((c, n) => [c, rawCells[n]]);
+    while (pairs.length && pairs[pairs.length - 1][0] === '') pairs.pop();
+    if (!explicit) pairs = pairs.filter(([t]) => t !== '');
+    const tokens = pairs.map(([t]) => t);
+    // 쉼표·| 옆 공백 한 칸은 사람이 줄을 맞춘 것이다(a, b · a | b) — 원문에서 그것만 뗀다(탭은 칸 값 그대로).
+    const rawTokens = pairs.map(([, r]) => (delim === ',' || delim === '|' ? String(r).replace(/^ /, '').replace(/ $/, '') : String(r)));
     // 헤더 판정·키형 판정은 **값이 있는 칸만** 본다(빈 칸이 섞이면 둘 다 거짓이 된다).
     const filled = tokens.filter((t) => t !== '');
     if (!filled.length) continue;
@@ -214,21 +269,25 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     }
 
     let values = {};
+    let raws = {};
+    const positional = () => order.forEach((f, n) => { if (tokens[n] != null) { values[f] = tokens[n]; raws[f] = rawTokens[n]; } });
     if (looksKeyed(filled, aliasOf)) {
       const k = parseKeyed(line, { aliasOf });
       values = k.values;
+      raws = k.raw;
       if (k.unknown.length) warnings.push(`${lineNo}줄: 알 수 없는 키 ${k.unknown.map((x) => `'${x}'`).join(', ')} — 무시했습니다.`);
       // 안전망: 키형으로 봤는데 알아본 필드가 하나도 없으면 **위치형으로 되돌린다**.
       // 그냥 두면 빈 행이 되어 호출부의 'name·host 없는 행 스킵' 에 걸려 조용히 사라진다.
       if (!Object.keys(values).length) {
         warnings.push(`${lineNo}줄: 키=값 으로 읽히지 않아 순서대로 해석했습니다.`);
-        order.forEach((f, n) => { if (tokens[n] != null) values[f] = tokens[n]; });
+        raws = {};
+        positional();
       }
     } else {
       if (tokens.length > order.length) {
         warnings.push(`${lineNo}줄: 항목이 ${tokens.length}개인데 열은 ${order.length}개입니다 — 뒤 ${tokens.length - order.length}개를 무시했습니다.`);
       }
-      order.forEach((f, n) => { if (tokens[n] != null) values[f] = tokens[n]; });
+      positional();
     }
 
     // 셀 길이 상한 — 초과는 자르고 **자른 사실을 알린다**(조용한 절단 금지).
@@ -240,16 +299,24 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     }
     // 기본값은 **빈 필드만** 채운다(줄에 적힌 값을 덮지 않는다).
     const row = { _line: lineNo };
+    const present = new Set(Object.keys(values).filter((f) => fields.includes(f)));
     for (const f of fields) {
       const v = values[f];
       row[f] = (v == null || v === '') ? (defaults[f] ?? '') : v;
+      if ((v == null || v === '') && defaults[f] != null && defaults[f] !== '') present.add(f);
     }
     rows.push(row);
+    presentByLine.set(lineNo, present);
+    if (wantRaw.size) {
+      const o = {};
+      for (const f of wantRaw) if (raws[f] != null) o[f] = raws[f];
+      rawByLine.set(lineNo, o);
+    }
     sawData = true;
   }
 
-  if (!rows.length) return { rows: [], warnings, headerUsed, error: '읽을 수 있는 줄이 없습니다(빈 줄·주석만 있거나 형식을 인식하지 못했습니다).' };
-  return { rows, warnings, headerUsed };
+  if (!rows.length) return { rows: [], warnings, headerUsed, presentByLine, rawByLine, error: '읽을 수 있는 줄이 없습니다(빈 줄·주석만 있거나 형식을 인식하지 못했습니다).' };
+  return { rows, warnings, headerUsed, presentByLine, rawByLine };
 }
 
 /**

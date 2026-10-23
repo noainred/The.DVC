@@ -29,6 +29,10 @@ const COMMON_ACCOUNT = /^(?:administrator|admin|root|vpxuser|vpxd-extension[\w-]
 const MAX_ACCOUNTS = 32;                 // 사람이 적는 계정 상한
 const MAX_LEARNED = 32;
 const LEARNED_TTL_MS = 90 * DAY;         // 90일 동안 다시 보이지 않은 학습 계정은 버린다
+// v2.763(V4-I1): 관리자가 지운 학습 계정은 이 기간 다시 배우지 않는다 — 근거(임시 스냅샷 + ±3분 생성 이벤트)가 이벤트 창(7일) 동안 남아
+//   다음 계산(카드 60초 캐시)에서 곧바로 다시 배웠다. 사람이 적은 계정(manual)은 막지 않는다. 상한을 넘으면 오래된 것부터 버린다.
+export const FORGET_TTL_MS = LOOKBACK_DAYS * DAY;
+const MAX_FORGOTTEN = 64;
 const ACCOUNT_MAX_LEN = 128;
 export const ROW_LIMIT = 20_000;
 
@@ -175,7 +179,8 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
 }
 
 /* ── 계정 저장(veeam-vc-accounts.json — 비밀 아님) ─────────────────────────────────────────────────────────── */
-// { manual: [사람이 적은 계정] · learned: { 계정: { t: 마지막으로 본 시각, vms: [본 VM 이름 ≤5] } } · pulled: [엣지 — 중앙에서 받은 계정] }
+// { manual: [사람이 적은 계정] · learned: { 계정: { t: 마지막으로 본 시각, vms: [본 VM 이름 ≤5] } } · pulled: [엣지 — 중앙에서 받은 계정]
+//   · forgotten(v2.763 V4-I1): { 계정(정규형): 지운 시각 } — 옛 파일은 없다(빈 목록) }
 // 학습 계정은 vms 가 LEARN_MIN_VMS 이상일 때만 판정에 쓴다(후보는 저장하되 쓰지 않는다).
 
 const FILE = () => path.join(config.configDir, 'veeam-vc-accounts.json');
@@ -183,7 +188,7 @@ let _acc = null;
 let _loadError = '';
 function loadAcc() {
   if (_acc) return _acc;
-  _acc = { manual: [], learned: {}, pulled: [] };
+  _acc = { manual: [], learned: {}, pulled: [], forgotten: {} };
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _acc.manual = cleanAccountList(raw?.manual).list;
@@ -192,6 +197,12 @@ function loadAcc() {
       for (const [k, v] of Object.entries(raw.learned).slice(0, MAX_LEARNED)) {
         const a = s(k, ACCOUNT_MAX_LEN);
         if (a && isObj(v) && Number.isFinite(v.t)) _acc.learned[a] = { t: v.t, vms: (Array.isArray(v.vms) ? v.vms : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 256)).slice(0, 5) };
+      }
+    }
+    if (isObj(raw?.forgotten)) {
+      for (const [k, t] of Object.entries(raw.forgotten).slice(0, MAX_FORGOTTEN)) {
+        const a = canonAcct(k);
+        if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) _acc.forgotten[a] = t;
       }
     }
   } catch (e) {
@@ -265,6 +276,7 @@ export function rememberLearned(list, now = Date.now()) {
     const k = s(it?.account, ACCOUNT_MAX_LEN);
     const vm = s(it?.vm, 256);
     if (!k || !vm) continue;
+    if (forgottenAt(a, k, now) != null) continue;   // v2.763(V4-I1): 관리자가 지운 계정 — 시한 동안 다시 배우지 않는다
     const prev = a.learned[k];
     if (!prev) { a.learned[k] = { t: now, vms: [vm] }; changed++; continue; }
     const newVm = !prev.vms.includes(vm);
@@ -278,15 +290,28 @@ export function rememberLearned(list, now = Date.now()) {
   if (changed) persist();
   return changed;
 }
-/** 학습 계정 지우기(관리자 — 잘못 배운 계정, 검토 #1). 지운 수. */
-export function forgetLearned(names) {
+/** v2.763(V4-I1): 지운 시각이 시한 안인가 — 시계가 되돌려져 미래가 된 시각도 시한만큼만(영구 거부가 되지 않게). */
+const forgetFresh = (t, now) => Number.isFinite(t) && Math.abs(now - t) < FORGET_TTL_MS;
+/** 그 계정을 지운 시각(시한 안일 때만) 또는 null. */
+function forgottenAt(a, account, now) {
+  const t = a.forgotten?.[canonAcct(account)];
+  return forgetFresh(t, now) ? t : null;
+}
+/** 학습 계정 지우기(관리자 — 잘못 배운 계정, 검토 #1). 지운 수. v2.763(V4-I1): 지운 계정은 FORGET_TTL_MS 동안 다시 배우지 않는다. */
+export function forgetLearned(names, now = Date.now()) {
   const a = loadAcc();
   let n = 0;
   for (const raw of Array.isArray(names) ? names.slice(0, MAX_LEARNED) : []) {
     const k = typeof raw === 'string' ? raw.trim() : '';
-    if (k && a.learned[k]) { delete a.learned[k]; n++; }
+    if (k && a.learned[k]) { delete a.learned[k]; a.forgotten[canonAcct(k)] = now; n++; }
   }
-  if (n) persist();
+  if (n) {
+    // 시한이 지난 것은 지우고, 상한을 넘으면 오래된 것부터 버린다(파일이 끝없이 자라지 않게).
+    for (const [k, t] of Object.entries(a.forgotten)) if (!forgetFresh(t, now)) delete a.forgotten[k];
+    const keys = Object.keys(a.forgotten);
+    if (keys.length > MAX_FORGOTTEN) for (const k of keys.sort((x, y) => a.forgotten[x] - a.forgotten[y]).slice(0, keys.length - MAX_FORGOTTEN)) delete a.forgotten[k];
+    persist();
+  }
   return n;
 }
 
@@ -338,6 +363,8 @@ export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), d
 const MAX_EDGE_VCS = 64;
 const MAX_EDGE_VMS = 30_000;
 const FUTURE_SKEW_MS = 5 * 60_000;
+const EDGE_SKEW_MIN_MS = 120_000;
+const EDGE_SKEW_MAX_MS = 30 * DAY;   // v2.763: 엣지 시계 보정의 상한 — 넘으면 비상식(시계 고장)으로 보고 옮기지 않는다
 const EDGE_STATUS = new Set(['ok', 'log-off', 'severity-filter']);
 const _edge = new Map(); // vcenterId → { agent, at(중앙 수신 시각), edgeAt(엣지 계산 시각), days, byVm, events, ambiguous, unmatched, truncated, collectedAt, collectRan }
 
@@ -368,12 +395,19 @@ export function sanitizeEdgeSnap(raw, owns, now = Date.now()) {
     }
     const num = (v) => (Number.isInteger(v) && v >= 0 ? Math.min(v, 1e7) : 0);
     const at = Number(x.at);
+    // v2.763(엣지 시계): collectedAt 은 엣지 시계로 잰 값이다 — 엣지 시계가 늦으면(예: 30분) 정상 수집도 '오래됨' 으로, 빠르면 멈춘 수집이 '신선' 으로 보였다
+    //   (미래만 수신 시각으로 잘랐다). 같은 엣지 시계로 잰 계산 시각(at)과의 차를 중앙 수신 시각에 맞춰 옮긴다: collectedAt + (수신 − at).
+    //   at 이 수가 아니거나(옛 엣지) 차가 30일을 넘으면(비상식) 옮기지 않는다. 원본은 edgeCollectedAt 에 따로 둔다. 옮긴 뒤 기존 검사(미래 자르기 등).
+    const caRaw = typeof x.collectedAt === 'number' && Number.isFinite(x.collectedAt) && x.collectedAt > 0 ? x.collectedAt : null;
+    // v2.763(R2-1): 2분 미만은 전송 지연으로 보고 옮기지 않는다(결과 쪽 central/veeamEdge.js CLOCK_FIX_MIN_MS 와 같은 값)
+    const skew = typeof x.at === 'number' && Number.isFinite(x.at) && x.at > 0 && Math.abs(now - x.at) <= EDGE_SKEW_MAX_MS && Math.abs(now - x.at) >= EDGE_SKEW_MIN_MS ? now - x.at : 0;
     // v2.761(C2): 엣지 로그 폴러의 마지막 온전한 수집 시각 — 수만(문자열 수치·0 이하·90일보다 오래된 것은 null = 모름), 미래는 수신 시각으로 자른다.
     //   옛 엣지는 보내지 않는다(null — 판정은 막지 않는다).
-    const ca = typeof x.collectedAt === 'number' && Number.isFinite(x.collectedAt) && x.collectedAt > 0 && x.collectedAt >= now - 90 * DAY ? Math.min(x.collectedAt, now) : null;
+    const caAdj = caRaw == null ? null : caRaw + skew;
+    const ca = caAdj != null && caAdj > 0 && caAdj >= now - 90 * DAY ? Math.min(caAdj, now) : null;
     items.push({ vcenterId, status, byVm, events: num(x.events), ambiguous: num(x.ambiguous), unmatched: num(x.unmatched), unpaired: num(x.unpaired), truncated: x.truncated === true, accounts: num(x.accounts),
       days: Number.isInteger(x.days) && x.days > 0 && x.days <= 90 ? x.days : LOOKBACK_DAYS,
-      collectedAt: ca, ...(x.collectRan === true ? { collectRan: true } : {}),
+      collectedAt: ca, ...(caRaw != null && skew !== 0 ? { edgeCollectedAt: caRaw } : {}), ...(x.collectRan === true ? { collectRan: true } : {}),
       // v2.761(C8): at 은 중앙 수신 시각(오래됨 판정이 엣지 시계에 묶이지 않게) — 엣지가 적은 시각은 edgeAt 에만.
       edgeAt: Number.isFinite(at) && at > 0 ? at : null, at: now });
   }

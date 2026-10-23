@@ -28,6 +28,7 @@ import { pushAll } from '../util/pushAll.js';
 import { poolSettled } from '../util/pool.js';
 import { buildServerResult, listOf, isBackupSessionType } from './parse.js';
 import { DEFAULT_PORT, DEFAULT_API_VERSION, accessFingerprint } from './registry.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'veeam', label: 'Veeam', envKey: 'VEEAM_TLS_VERIFY', envRaw: process.env.VEEAM_TLS_VERIFY, tls: withSsrfLookup({}) }) });
 const TIMEOUT_MS = reqTimeoutMs(process.env.VEEAM_HTTP_TIMEOUT_MS, 60_000);
@@ -36,6 +37,7 @@ const MAX_PAGES = 60;            // backupObjects 최대 3만 건(5,850 VM 규�
 const MAX_SESSIONS = 20;         // 실행 중 세션의 task 조회 상한(요청 수 상한)
 const MAX_LAST_JOBS = 40;        // '마지막으로 끝난 세션' 의 task 를 읽을 작업 수 상한(VM 별 완료 시각·결과)
 const MAX_BACKUPS = 100;         // 파일(용량)을 읽을 백업(체인) 수 상한
+const TASK_MAX_PAGES = 10;       // v2.763(V1-7): 세션 하나의 task 페이지 상한(VM 5천 대 — 그 너머는 잘렸다고 말한다)
 const RP_MAX_PAGES = 100;        // 복원 지점 최대 5만 건
 const FILES_UNSUPPORTED_N = 3;   // 백업 파일 목록이 처음부터 연속 이만큼 404·400 이면 '이 판은 미지원'(v2.761 A7 — 한 건은 개별 경합)
 const LOGOUT_TIMEOUT_MS = 5_000; // logout 은 상위 시한과 따로(시한이 끊긴 뒤에도 토큰 세션을 닫으려 시도한다 — v2.761 A2)
@@ -227,10 +229,15 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const sessions = sesList.map((ses, i) => (i >= MAX_SESSIONS ? { session: ses, tasks: null, tasksError: 'skipped' } : null));
     authOf(await poolSettled(sesList.slice(0, MAX_SESSIONS), 4, async (ses, i) => {
       const id = encodeURIComponent(String(ses.id || ''));
-      try { sessions[i] = { session: ses, tasks: await c.get(`/api/v1/sessions/${id}/taskSessions?limit=${PAGE}`) }; }
-      catch (e) { if (isFatal(e)) throw e; sessions[i] = { session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }; }
+      // v2.763(V1-7): task 도 total 까지 페이지로 읽는다(예전에는 limit 500 한 쪽만 — 501번째 VM 부터 '백업 중' 에서 빠지고 running 이 확정 0 처럼 나갔다).
+      //   상한에서 잘리면 그 세션은 작업 단위 표시로(일부 task 로 '나머지는 안 돈다' 고 단정하지 않는다).
+      try {
+        const tasks = await c.getAll(`/api/v1/sessions/${id}/taskSessions`, { maxPages: TASK_MAX_PAGES });
+        sessions[i] = tasks.truncated ? { session: ses, tasks: null, tasksError: 'truncated' } : { session: ses, tasks };
+      } catch (e) { if (isFatal(e)) throw e; sessions[i] = { session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }; }
     }));
-    if (sessions.some((x) => x.tasksError && x.tasksError !== 'skipped')) notes.push('실행 중 세션의 VM 단위 task 를 읽지 못해 그 작업의 VM 을 작업 단위로 \'백업 중\' 표시했습니다');
+    if (sessions.some((x) => x.tasksError && x.tasksError !== 'skipped' && x.tasksError !== 'truncated')) notes.push('실행 중 세션의 VM 단위 task 를 읽지 못해 그 작업의 VM 을 작업 단위로 \'백업 중\' 표시했습니다');
+    if (sessions.some((x) => x.tasksError === 'truncated')) notes.push(`실행 중 세션의 task 가 ${TASK_MAX_PAGES * PAGE}개를 넘어 그 작업의 VM 을 작업 단위로 '백업 중' 표시했습니다`);
     // ── 상세(v2.751 사용자 요청: 백업 완료 시각 · 복원 지점 · 용량) — 각각 실패해도 나머지로 결과를 만든다 ──────────
     // 작업마다 마지막으로 끝난 백업 세션 → 그 세션의 VM 별 task(완료 시각·결과·처리 용량).
     const recent = await soft('최근 세션', async () => {
@@ -246,12 +253,16 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
       if (!prev || t > prev.t) lastByJob.set(x.jobId, { t, ses: x });
     }
     const lastList = [...lastByJob.values()].sort((a, b) => b.t - a.t).slice(0, MAX_LAST_JOBS);
-    const lastTasks = [];
+    const lastTasks = []; let lastCut = 0;
     authOf(await poolSettled(lastList, 4, async ({ ses }) => {
-      try { lastTasks.push({ session: ses, tasks: await c.get(`/api/v1/sessions/${encodeURIComponent(String(ses.id || ''))}/taskSessions?limit=${PAGE}`) }); }
-      catch (e) { if (isFatal(e)) throw e; }
+      try {
+        const tasks = await c.getAll(`/api/v1/sessions/${encodeURIComponent(String(ses.id || ''))}/taskSessions`, { maxPages: TASK_MAX_PAGES }); // v2.763(V1-7)
+        if (tasks.truncated) lastCut++;
+        lastTasks.push({ session: ses, tasks });
+      } catch (e) { if (isFatal(e)) throw e; }
     }));
     if (lastList.length && !lastTasks.length) notes.push('끝난 세션의 VM 별 결과(task)를 읽지 못해 완료 시각은 복원 지점 생성 시각으로 보여 줍니다');
+    if (lastCut) notes.push(`끝난 세션 ${lastCut}개는 task 가 ${TASK_MAX_PAGES * PAGE}개를 넘어 일부 VM 의 마지막 결과를 비웠습니다`);
     // 복원 지점: /api/v1/restorePoints 는 1.2-rev0 판부터(그 아래 판은 판 거절 → 위 get 이 지원 판으로 올려 다시 읽는다).
     // 1.2 를 지원하지 않는 서버(VBR 12.0~12.2)는 같은 정보를 /api/v1/objectRestorePoints 로 준다(1.1-rev0 문서).
     const restorePoints = await soft('복원 지점', async () => {
@@ -269,19 +280,26 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const backups = [];
     let filesUnsupported = false; let filesOk = false; let filesMissing = 0; let filesTried = 0;
     const filesFailBy = new Map(); // v2.762(G-I3): 404·400 밖 실패 — 상태 코드(없으면 전송 오류·시한)별 건수만(원문은 주소가 섞여 싣지 않는다)
+    const filesInFlight = new Set();
     authOf(await poolSettled(backupList.slice(0, MAX_BACKUPS), 4, async (b) => {
       if (!b || typeof b !== 'object' || !b.id) return;
-      if (filesUnsupported) { backups.push({ backup: b, files: null }); return; }
+      // v2.763(V1-6): '판 미지원' 은 성공이 한 번도 없을 때만 — 404·400 이 먼저 N 건 와도 아직 도는 요청(늦게 오는 성공)이 끝날 때까지 기다린 뒤 정한다.
+      //   예전에는 4병렬 첫 묶음의 404 3건이 먼저 오면 바로 켜져 나머지를 묻지 않고, 늦게 온 성공이 있어도 '판 미지원' 이라 단정했다.
+      if (!filesOk && !filesUnsupported && filesMissing >= FILES_UNSUPPORTED_N && filesInFlight.size) await Promise.allSettled([...filesInFlight]);
+      if (!filesOk && filesMissing >= FILES_UNSUPPORTED_N) filesUnsupported = true;
+      if (filesUnsupported && !filesOk) { backups.push({ backup: b, files: null }); return; }
       filesTried++;
-      try { backups.push({ backup: b, files: await c.get(`/api/v1/backups/${encodeURIComponent(String(b.id))}/backupFiles?limit=${PAGE}`) }); filesOk = true; }
+      const req = c.get(`/api/v1/backups/${encodeURIComponent(String(b.id))}/backupFiles?limit=${PAGE}`);
+      filesInFlight.add(req);
+      try { backups.push({ backup: b, files: await req }); filesOk = true; }
       catch (e) {
         if (isFatal(e)) throw e;
-        if (e?.status === 404 || e?.status === 400) { filesMissing++; if (!filesOk && filesMissing >= FILES_UNSUPPORTED_N) filesUnsupported = true; }
+        if (e?.status === 404 || e?.status === 400) filesMissing++;
         else { const k = Number.isInteger(e?.status) ? `HTTP ${e.status}` : '전송 오류·시한'; filesFailBy.set(k, (filesFailBy.get(k) || 0) + 1); }
         backups.push({ backup: b, files: null });
-      }
+      } finally { filesInFlight.delete(req); }
     }));
-    if (filesUnsupported || (!filesOk && filesMissing > 0 && filesMissing === filesTried)) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
+    if ((filesUnsupported && !filesOk) || (!filesOk && filesMissing > 0 && filesMissing === filesTried)) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
     else if (filesMissing) notes.push(`백업 ${filesMissing}개는 파일 목록을 받지 못해(404·400) 그 백업만 용량을 비웠습니다`);
     if (filesFailBy.size) {
       const n = [...filesFailBy.values()].reduce((a, b) => a + b, 0);
@@ -307,7 +325,8 @@ export async function testVeeamServer(server, { signal = null, fetchImpl } = {})
   await c.login();
   try {
     const body = await c.get('/api/v1/jobs?limit=1');
-    const total = Number(body?.pagination?.total);
-    return { ok: true, ms: Date.now() - t0, apiVersion: c.apiVersion, jobs: Number.isFinite(total) ? total : listOf(body).length };
+    // v2.763(V1-I2): total 이 없으면 '작업 수 모름'(null) — Number(null)===0 으로 '작업 0개' 라 하지 않는다(limit=1 이라 받은 수로 대신할 수도 없다).
+    const total = numOrNull(body?.pagination?.total);
+    return { ok: true, ms: Date.now() - t0, apiVersion: c.apiVersion, jobs: total != null && total >= 0 ? total : null };
   } finally { await c.logout(); }
 }

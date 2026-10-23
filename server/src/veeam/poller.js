@@ -45,6 +45,12 @@ export async function collectOne(server, { manual = false } = {}) {
   const target = accessFingerprint(full);
   // 시작 때 등록부에 있던 서버만 대조한다(등록부 밖 원소로 부른 호출은 예전 그대로).
   const moved = () => { if (!cur) return false; const now = getServerWithSecret(full.id); return !now || accessFingerprint(now) !== target; };
+  // v2.763(V1-I1): 비밀번호가 없으면(접속처 변경으로 폐기 · 배정에 실리지 않음) 접속하지 않는다 — 빈 비밀번호 로그인 1회가 AD 잠금 카운터에 쌓이고
+  //   인증 정지로 이어졌다. 로그인 시도 자체가 없으므로 정지 기록도 남기지 않는다(수동 실행도 같다).
+  if (!full.password) {
+    // v2.763(R2-6): 엣지의 중앙 배정(pulled) 서버는 엣지 화면에서 고칠 수 없다(V2-1) — 안내는 중앙 포탈로
+    return { ok: false, ts: Date.now(), ms: 0, error: `비밀번호가 없습니다(접속처를 바꿔 저장한 비밀번호를 폐기했거나 배정에 실리지 않았습니다) — ${full.pulled === true ? '중앙 포탈의 ' : ''}설정 › Veeam 백업 서버에서 비밀번호를 다시 입력하세요`, kind: 'no-password', target, jobs: [], vms: [], counts: {}, notes: [] };
+  }
   if (!manual) {
     const stop = authGuard.authStopFor(full);
     if (stop) return { ok: false, ts: Date.now(), ms: 0, error: `인증 실패로 주기 수집을 멈췄습니다(${stop.reason}) — 비밀번호를 고치면 자동으로 다시 읽습니다`, kind: 'auth-stopped', authStop: authStopView(stop), target, jobs: [], vms: [], counts: {}, notes: [] };
@@ -79,8 +85,11 @@ export async function pollVeeamOnce({ manual = false, ids = null } = {}) {
     const isEdge = !!config.agent.centralUrl;
     // v2.762(F4b): 등록부를 못 읽었으면(빈 목록) 지우지 않는다 — 저장된 결과를 전부 지우고 파일까지 덮는다(못 읽은 상태로 지우지 않는다).
     if (!isEdge && !ids && !registryLoadError()) pruneExcept(listServers().map((d) => d.id));
-    let ok = 0; let fail = 0; let discarded = 0;
+    let ok = 0; let fail = 0; let discarded = 0; let gone = 0;
     const res = await poolSettled(list, concurrency(), async (d) => {
+      // v2.763(V3-1): 대기열에서 차례가 왔을 때 다시 본다 — 그 사이 삭제·수집 끄기·담당 변경(엣지 pull 의 빠짐 포함)된 서버는 주기 시작 때의
+      //   원소(비밀번호 포함)로 로그인하지 않는다(결과·인증 정지 기록이 되살아났다). serversForThisNode 가 enabled·이 노드 몫을 함께 본다.
+      if (!serversForThisNode().some((x) => x.id === d.id)) { gone++; return; }
       const r = await collectOne(d, { manual });
       if (!r) return;
       if (r.discarded) { discarded++; return; }
@@ -91,7 +100,7 @@ export async function pollVeeamOnce({ manual = false, ids = null } = {}) {
     const crashed = res.filter((x) => x.status === 'rejected').length;
     _last = { at: Date.now(), servers: list.length, ok, fail: fail + crashed, manual };
     for (const fn of _listeners) { try { fn(); } catch { /* */ } }
-    return { ok, fail: fail + crashed, servers: list.length, ...(discarded ? { discarded } : {}) };
+    return { ok, fail: fail + crashed, servers: list.length, ...(discarded ? { discarded } : {}), ...(gone ? { gone } : {}) };
   };
   // 주기 상한: 서버 시한 × ceil(대수/동시성) + 여유. 넘기면 가드를 풀어 다음 주기가 돈다(끝나지 않는 주기 방지).
   const n = Math.max(1, serversForThisNode().length);

@@ -91,7 +91,9 @@ test('C2·C8 — 엣지 요약 정제: collectedAt 은 수만(미래는 수신 �
   ], () => true, now);
   assert.equal(items[0].at, now, 'C8: 엣지 시계가 40분 늦어도 받은 시각');
   assert.equal(items[0].edgeAt, now - 40 * 60_000);
-  assert.deepEqual([items[0].collectedAt, items[0].collectRan], [now - 2 * HOUR, true]);
+  // v2.763: 엣지 시계가 40분 늦으면 수집 시각도 같은 만큼 옮긴다(받은 시각 − 엣지 at) — 원본은 edgeCollectedAt
+  assert.deepEqual([items[0].collectedAt, items[0].collectRan], [now - 2 * HOUR + 40 * 60_000, true]);
+  assert.equal(items[0].edgeCollectedAt, now - 2 * HOUR);
   assert.equal(items[1].collectedAt, now, '미래는 수신 시각으로');
   assert.equal(items[2].collectedAt, null, '문자열은 받지 않는다(모름)');
   assert.equal(items[2].collectRan, undefined);

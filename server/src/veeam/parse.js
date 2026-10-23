@@ -382,14 +382,19 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
 const FUTURE_SKEW_MS = 5 * 60_000;
 /**
  * 엣지 결과 1건 정제 — 아는 필드만·객체만·상한·문자열 수치는 수로. ts 는 수신 시각으로 자르고 원본은 edgeTs.
+ * v2.763(V2-2): clockOffsetMs(= 중앙 수신 시각 − 엣지 송신 시각 sentAt — central/veeamEdge.js edgeClockOffset)가 있으면 엣지 시계의 시각
+ *   (ts·authStop.since)을 중앙 시계로 옮기고 원본은 edgeTs. 보정 뒤에도 미래면 now 로 자른다. 0(옛 엣지·보정 안 함)이면 예전 그대로(미래만 자름).
  * @returns {object|null} 형식이 틀리면 null
  */
-export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, maxJobs = 2_000 } = {}) {
+export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, maxJobs = 2_000, clockOffsetMs = 0 } = {}) {
   if (!isObj(r)) return null;
   let ts = numOrNull(r.ts);
   if (ts == null || ts <= 0) return null;
   let edgeTs = null;
-  if (ts > now + FUTURE_SKEW_MS) { edgeTs = ts; ts = now; }
+  const off = Number.isFinite(clockOffsetMs) ? clockOffsetMs : 0;
+  const shift = (t) => (t == null ? null : Math.min(now, Math.max(0, t + off)));
+  if (off) { edgeTs = ts; ts = shift(ts); }
+  else if (ts > now + FUTURE_SKEW_MS) { edgeTs = ts; ts = now; }
   const jobs = (Array.isArray(r.jobs) ? r.jobs : []).slice(0, maxJobs).filter(isObj).map((j) => ({
     id: s(j.id, 64), name: s(j.name, 128), type: s(j.type, 48), disabled: j.disabled === true, status: s(j.status, 32),
     lastResult: s(j.lastResult, 32), lastRun: numOrNull(j.lastRun), nextRun: numOrNull(j.nextRun), running: j.running === true,
@@ -433,7 +438,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     // v2.762(G1): 접속처 지문(registry.accessFingerprint — 16자 hex). 형식이 다르면 싣지 않는다(지문 없음 = 옛 엣지와 같이 취급).
     ...(typeof r.target === 'string' && /^[0-9a-f]{16}$/.test(r.target) ? { target: r.target } : {}),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
-    authStop: isObj(r.authStop) ? { since: numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
+    authStop: isObj(r.authStop) ? { since: off ? shift(numOrNull(r.authStop.since)) : numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
     jobs, vms, counts, backups,
   };
 }

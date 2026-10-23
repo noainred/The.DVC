@@ -188,11 +188,13 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   const [openId, setOpenId] = useState(null);
   // v2.757(사용자 요청): 카드의 'VM 백업 수량' — Veeam 연동이면 Veeam 기준, 아니면 스냅샷 기준. 60초마다(v2.759 — 상세를 연 동안은 멈춘다).
-  //   실패해도 카드는 그대로 — 백업 칸만 그리지 않는다(백업 정보가 카드 전체를 막지 않게).
+  //   실패해도 카드는 그대로 — 첫 응답 전 실패면 백업 칸만 그리지 않고, 받은 뒤의 갱신 실패는 칸에 '최근 갱신 실패' 표지(v2.763 V5-I1).
   //   v2.759: 서버는 전용 DB 에서 바로 답한다(응답 캐시 60초) — 고정 60초. 업그레이드 직후 '준비 중' 인 vCenter 도 1분 안에 채워진다.
   //   ⚠ 주기를 상태에 따라 바꾸지 말 것 — usePolling 은 주기가 바뀌면 데이터를 비우고 다시 묻는다('준비 중' ↔ 주기 전환이 무한 재요청이 됐다).
   const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, 60_000);
   const backupBy = backupP.data?.byVc || null;
+  // v2.763(V5-I1): 받은 값이 있는데 최근 갱신이 실패했다 — 칸은 그리되 '최근 갱신 실패' 표지(backupCell refreshError).
+  const backupRefreshErr = backupP.data && backupP.error ? String(backupP.error) : '';
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
@@ -315,7 +317,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                       ? <div className="vc-count" title="REST 폴백 수집 — 경보를 조회하지 않았습니다(0건이 아닙니다)"><b style={{ color: 'var(--text-dim)' }}>—</b><span>알람(미조회)</span></div>
                       : <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>}
                     {(() => {
-                      const bk = backupCell(backupBy?.[s.id], Number.isFinite(m.vms) ? m.vms : null);
+                      const bk = backupCell(backupBy?.[s.id], Number.isFinite(m.vms) ? m.vms : null, Date.now(), { refreshError: backupRefreshErr });
                       return bk && <div className={`vc-count vc-bk ${bk.tone}`} data-backup={bk.tone} title={bk.title}><b>{bk.text}</b><span>{bk.label}</span></div>;
                     })()}
                   </div>

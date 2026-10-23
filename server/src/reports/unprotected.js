@@ -6,6 +6,9 @@
  */
 
 import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
+// v2.763(V4-1): 스냅샷 생성·제거 판정은 카드·칩(veeam/snapEvents.js)과 같은 코어 — 실제 vCenter 는 TaskEvent('Task: Create virtual machine snapshot')·
+//   한국어('가상 시스템 스냅샷 생성')로 남긴다. 예전에는 종류에 'Snapshot' 이 든 행만 봐서 실서버에서 켜진 VM 전부가 '미보호' 였다.
+import { isSnapshotCreateEvent, isSnapshotRemoveEvent } from '../veeam/snapEvents.js';
 
 export const DEFAULT_BACKUP_PATTERNS = ['veeam', 'backup', 'commvault', 'netbackup', 'nbu', 'avamar', 'rubrik', 'cohesity', 'networker', 'vranger', 'nakivo'];
 
@@ -34,17 +37,54 @@ export function normalizePatterns(raw) {
   return { patterns: out, omitted, tooLong };
 }
 
-/** 소문자화가 끝난 패턴 목록으로 판정(내부 — 행마다 패턴을 다시 소문자화하지 않는다, v2.606 SEC2606-02). */
+/**
+ * v2.763(V4-1): 행 1건의 스냅샷 작업 종류 — 'create' | 'remove' | 'other'(되돌리기·통합·실패 등) | null(스냅샷 작업 아님).
+ * 판정 코어는 snapEvents(TaskEvent·VmSnapshotCreatedEvent·VmSnapshotRemovedEvent · 영어·한국어 문구 · 정보 심각도만)이고,
+ * 그 밖의 종류 이름에 'Snapshot' 이 든 행(옛 행·다른 판)만 종류 이름으로 가린다(예전 동작 — 제거·되돌리기·실패는 생성으로 세지 않는다).
+ */
+export function snapshotKind(row) {
+  if (!row) return null;
+  if (isSnapshotCreateEvent(row)) return 'create';
+  if (isSnapshotRemoveEvent(row)) return 'remove';
+  const type = String(row.type || '');
+  if (/^(?:TaskEvent|VmSnapshotCreatedEvent|VmSnapshotRemovedEvent)$/.test(type)) {
+    // 코어가 생성·제거로 보지 않은 같은 종류 행 — 스냅샷 문구면 '그 밖의 스냅샷 작업', 아니면 스냅샷 작업이 아니다(전원 켜기 TaskEvent 등).
+    return type !== 'TaskEvent' || /snapshot|스냅샷/i.test(String(row.message || '').slice(0, 300)) ? 'other' : null;
+  }
+  if (!/Snapshot/i.test(type)) return null;
+  if (/revert|consolidat|fail|error/i.test(type)) return 'other';
+  return /remov|delet/i.test(type) ? 'remove' : 'create';
+}
+
+/**
+ * 소문자화가 끝난 패턴 목록으로 판정(내부 — 행마다 패턴을 다시 소문자화하지 않는다, v2.606 SEC2606-02).
+ * v2.763(V4-1): 생성은 계정 **또는** 문구가 패턴에 맞으면(예전 그대로), 제거는 **계정만**(백업 소프트웨어는 자기 계정으로 지운다 —
+ *   사람이 지운 스냅샷의 문구에 'backup' 이 들어 있어도 보호 근거가 아니다). 되돌리기·실패 등은 근거가 아니다.
+ */
 function matchesLower(row, lowerPatterns) {
-  if (!/Snapshot/i.test(row.type || '')) return false;
-  const hay = `${row.user || ''} ${row.message || ''}`.toLowerCase();
+  const kind = snapshotKind(row);
+  if (kind !== 'create' && kind !== 'remove') return false;
+  const hay = kind === 'create' ? `${row.user || ''} ${row.message || ''}`.toLowerCase() : String(row.user || '').toLowerCase();
   for (const p of lowerPatterns) if (p && hay.includes(p)) return true;
   return false;
 }
 
-/** 이벤트 1건이 '백업 소프트웨어의 스냅샷 작업'인지 — user 또는 message에 패턴 매칭. */
+/** 이벤트 1건이 '백업 소프트웨어의 스냅샷 작업'인지 — 생성은 user 또는 message, 제거는 user 에 패턴 매칭. */
 export function isBackupEvent(row, patterns = DEFAULT_BACKUP_PATTERNS) {
   return matchesLower(row, patterns.map((p) => String(p ?? '').toLowerCase()));
+}
+
+/** v2.763(V4-1): 검색어별로 읽은 행 목록들을 합친다 — 두 검색어에 걸린 같은 행은 한 번만(snapEvents localSnapSummary 와 같은 키 + vCenter). */
+export function mergeSnapRows(lists) {
+  const seen = new Set(); const out = [];
+  for (const list of Array.isArray(lists) ? lists : []) {
+    for (const r of Array.isArray(list) ? list : []) {
+      const k = `${r.vcenterId}\u0000${r.ts}\u0000${r.type}\u0000${r.entity}\u0000${r.user}\u0000${r.message}`;
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(r);
+    }
+  }
+  return out;
 }
 
 /**
@@ -65,7 +105,9 @@ export function computeUnprotected(vms, rows, opts = {}) {
   //   같은 이름 VM 까지 '보호됨' 으로 셌다 — 백업 공백을 찾는 리포트가 공백을 **숨겼다**(가장 나쁜 방향의 오류).
   //   이벤트 행에 vcenterId 가 있으면 반드시 그것까지 맞춘다. vcenterId 가 없는 옛 행만 이름으로 폴백하고
   //   그 개수를 밝힌다(nameOnlyEvents).
-  const key = (vc, name) => `${vc}\u0000${name}`;
+  // v2.763(V4-1): 이름은 앞뒤 공백을 떼고 소문자로 맞춘다(snapEvents 와 같다 — 이벤트 'WEB-01' ↔ 인벤토리 'web-01').
+  const nameKey = (n) => String(n ?? '').trim().toLowerCase();
+  const key = (vc, name) => `${vc}\u0000${nameKey(name)}`;
   const protectedByVcName = new Map();
   const protectedByNameOnly = new Map();
   let backupEvents = 0, nameOnlyEvents = 0;
@@ -73,7 +115,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
   for (const r of rows || []) {
     if (!matchesLower(r, patterns)) continue;
     backupEvents++;
-    const name = r.entity || '';
+    const name = nameKey(r.entity);
     if (!name) continue;
     if (r.vcenterId) keep(protectedByVcName, key(r.vcenterId, name), r);
     else { nameOnlyEvents++; keep(protectedByNameOnly, name, r); }
@@ -102,7 +144,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
   const protectedList = [];
   for (const v of vms) {
     if (v.template || v.powerState !== 'POWERED_ON') continue; // 가동 중 VM만 보호 대상 판단
-    const hit = protectedByVcName.get(key(v.vcenterId, v.name)) || protectedByNameOnly.get(v.name);
+    const hit = protectedByVcName.get(key(v.vcenterId, v.name)) || protectedByNameOnly.get(nameKey(v.name));
     const item = {
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
       guestOS: v.guestOS || '', storageGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(0 GB 아님)
@@ -137,7 +179,8 @@ export function computeUnprotected(vms, rows, opts = {}) {
       backupEvents,
       nameOnlyEvents,
       // 이벤트 조회 상한에 걸렸으면 오래된 백업 흔적이 빠져 '미보호' 가 과대 보고될 수 있다 — 조용히 두지 않는다.
-      eventsTruncated: Number(opts.rowLimit) > 0 && (rows || []).length >= Number(opts.rowLimit),
+      //   v2.763(V4-1): 라우트가 영어·한국어 두 검색어로 읽어 합치면 합친 수로는 상한을 판정할 수 없다 — 호출자가 truncated 를 주면 그것을 쓴다.
+      eventsTruncated: typeof opts.truncated === 'boolean' ? opts.truncated : Number(opts.rowLimit) > 0 && (rows || []).length >= Number(opts.rowLimit),
       // v2.622(DATA-05): 분모는 판정한 VM(보호+미보호)이다. 판정 불가만 있으면 0% 가 아니라 null.
       protectedPct: (unprotectedList.length + protectedList.length) > 0
         ? Math.round((protectedList.length / (unprotectedList.length + protectedList.length)) * 100)
@@ -151,6 +194,6 @@ export function computeUnprotected(vms, rows, opts = {}) {
     unprotected: unprotectedList.slice(0, 1000),
     protected: protectedList.slice(0, 1000),
     undetermined: undeterminedList.slice(0, 1000),
-    note: '휴리스틱 판정: 조회 기간 내 백업 계정 패턴의 VM 스냅샷 이벤트가 관측된 VM을 보호로 간주합니다. 스냅샷을 쓰지 않는 백업(에이전트 방식 등)은 미보호로 보일 수 있습니다.',
+    note: '휴리스틱 판정: 조회 기간 내 백업 계정 패턴의 VM 스냅샷 생성(또는 그 계정의 스냅샷 제거) 이벤트가 관측된 VM을 보호로 간주합니다. 스냅샷을 쓰지 않는 백업(에이전트 방식 등)은 미보호로 보일 수 있습니다. 이벤트 문구는 영어·한국어만 읽습니다.',
   };
 }

@@ -69,6 +69,10 @@ export function snapVerdict(ev, now = Date.now()) {
     if (now - ev.collectedAt > staleLimitOf(ev)) return { ok: false, reason: 'stale-events' };   // v2.762(F6): 로컬은 주기 반영 한도
   } else if (ev.collectRan === true) return { ok: false, reason: 'no-collect-yet' };
   if (ev.accounts === 0 && !Object.keys(ev.byVm || {}).length) return { ok: false, reason: 'no-account' };
+  // v2.763(V4-2): 계정 목록은 전 vCenter 공용이라(사람 입력·학습·받은 것) 다른 법인의 계정만 알아도 'no-account' 가 아니다 — 그 vCenter 의 창 안에서
+  //   아는 계정의 생성 이벤트가 한 건도 없으면(공용 계정의 짝 못 맞춘 것도 없음) 수는 그대로 두되 '이 vCenter 에서는 계정이 보이지 않음' 표지를 단다.
+  //   (정말 0대일 수도 있어 숨기지 않는다 — 화면이 부분 톤으로 말한다.) events 가 수가 아니면(모름) 달지 않는다.
+  if (Number(ev.accounts) > 0 && ev.events === 0 && !(Number(ev.unpaired) > 0) && !Object.keys(ev.byVm || {}).length) return { ok: true, reason: null, accountUnseen: true };
   return { ok: true, reason: null };
 }
 
@@ -96,9 +100,11 @@ export function snapCount({ ev, vms, now = Date.now() }) {
   const evIds = Object.keys(ev.byVm || {});
   const all = new Set([...evIds, ...nowSet]);
   const ambiguous = Number.isInteger(ev.ambiguous) && ev.ambiguous > 0 ? ev.ambiguous : 0;
+  // v2.763(V4-2): 지금 임시 스냅샷도 없으면 — 이 vCenter 에서 Veeam 흔적을 하나도 못 봤다(다른 계정을 쓸 수 있다). 수는 그대로, 표지만.
+  const accountUnseen = vd.accountUnseen === true && nowSet.size === 0;
   return {
     ...base, n: all.size, snapEv: evIds.length, overlap: evIds.length + nowSet.size - all.size,
-    unpaired: ev.unpaired || 0, ambiguous,
+    unpaired: ev.unpaired || 0, ambiguous, ...(accountUnseen ? { accountUnseen: true } : {}),
     // 이벤트가 상한에 걸려 일부만 읽었거나(truncated) 동명 VM 이라 정하지 못한 이벤트가 있다(v2.761 C6 — unmatched 는 지운 VM 이 정상이라 넣지 않는다)
     partial: !!ev.truncated || ambiguous > 0,
     source: ev.source || 'local',

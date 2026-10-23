@@ -131,10 +131,11 @@ export function sampleText() {
 
 /* ────────────────── 가져오기 파싱 ────────────────── */
 
-function normRow(line, get) {
+function normRow(line, get, present) {
   const password = get('password', { trim: false });
   return {
     _line: line,
+    _present: present,   // v2.763(V1-1): 파일에 **있던** 열(없는 열은 기존 값 유지 — toSaveInput)
     name: get('name'), host: get('host'), port: get('port'), username: get('username'),
     vcenters: get('vcenters'), agent: get('agent'), apiVersion: get('apiVersion'),
     enabled: bool(get('enabled')), note: get('note'),
@@ -151,29 +152,52 @@ export function parseServersCsv(text) {
   const col = {};
   header.forEach((h, i) => { const f = aliasOf(h); if (f && col[f] == null) col[f] = i; });
   if (col.host == null) return { rows: [], error: "필수 헤더 'host' 가 없습니다." + delimiterHint(rows[0]) };
+  const present = new Set(COLUMNS.filter((c) => col[c] != null));
   const out = [];
   rows.slice(1).forEach((cells, n) => {
     const get = (f, { trim = true } = {}) => {
       const i = col[f];
       if (i == null) return '';
-      const raw = unguardCell(cells[i] ?? '');
+      // v2.763(V1-3): 비밀번호 칸은 수식 방지 접두(')를 벗기지 않는다 — 내보내기는 비밀번호를 싣지 않아 그 접두가 붙을 일이 없고,
+      //   벗기면 ‘'-Secret1’ 이 경고 없이 ‘-Secret1’ 로 저장된다(자격증명을 조용히 바꾸지 않는다).
+      const raw = f === 'password' ? String(cells[i] ?? '') : unguardCell(cells[i] ?? '');
       if (raw.trim() === EMPTY_MARK) return '';
       return trim ? raw.trim() : raw;
     };
     if (!get('host') && !get('name')) return;
     if (get('name').startsWith('#') || get('host').startsWith('#')) return; // 샘플 주석 행
-    out.push(normRow(n + 2, get));
+    out.push(normRow(n + 2, get, present));
   });
   if (!out.length) return { rows: [], error: 'host·name 이 모두 빈 행만 있습니다.' };
-  return { rows: out, order: COLUMNS.filter((c) => col[c] != null) };
+  // v2.763(R2-4): 비밀번호 칸이 수식 방지 접두(')로 시작하면 그 글자째 저장된다 — 엑셀이 붙인 접두라면 비밀번호가 달라지므로 드라이런이 말한다(값은 바꾸지 않는다).
+  const warnings = out.filter((row) => /^'[=+\-@\t\r]/.test(row.password || '')).map((row) => `${row._line}행: 비밀번호가 작은따옴표(')로 시작합니다 — CSV 비밀번호 칸은 그 글자까지 그대로 저장합니다. 엑셀이 붙인 접두라면 지우고 올리세요. 연결 시험으로 확인할 수 있습니다.`);
+  return { rows: out, warnings, order: COLUMNS.filter((c) => col[c] != null) };
+}
+
+/**
+ * v2.763(V1-3): 자유텍스트의 비밀번호 칸 원문에 따옴표·앞뒤 공백이 있으면 경고한다 — 위치형은 따옴표를 감싸기 표시로 지우고,
+ *   키=값형·구분자형은 앞뒤 공백을 지운다. 값은 바꾸지 않는다(지금 규칙대로 읽은 값) — 다만 **조용히** 바뀌지 않게 드라이런이 말한다.
+ */
+export function passwordMangleWarning(line, raw) {
+  const t = String(raw ?? '');
+  if (!t || (!t.includes('"') && t === t.trim())) return null;
+  const q = t.includes('"'); const ws = t !== t.trim();
+  const what = q && ws ? '따옴표(")·앞뒤 공백이' : q ? '따옴표(")가' : '앞뒤 공백이';
+  return `${line}줄: 비밀번호 칸에 ${what} 있습니다 — 자유텍스트는 따옴표를 감싸기 표시로, 앞뒤 공백을 구분으로 읽어 그 글자를 비밀번호에서 뺍니다. `
+    + '그 글자가 비밀번호의 일부라면 CSV 로 등록하세요(CSV 는 비밀번호 칸을 그대로 씁니다). 연결 시험으로 확인할 수 있습니다.';
 }
 
 export function parseServersText(text, { defaults = {} } = {}) {
-  const r = parseFreeRows(text, { fields: COLUMNS, aliases: ALIASES, defaults });
+  const r = parseFreeRows(text, { fields: COLUMNS, aliases: ALIASES, defaults, rawFields: ['password'] });
   if (r.error) return { rows: [], error: r.error, warnings: r.warnings, headerUsed: null, order: COLUMNS };
-  const rows = r.rows.map((row) => normRow(row._line, (f) => unmark(row[f]))).filter((row) => row.host || row.name);
-  if (!rows.length) return { rows: [], error: 'host·name 이 모두 빈 줄만 있습니다.', warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };
-  return { rows, warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };
+  const warnings = [...(r.warnings || [])];
+  const rows = r.rows.map((row) => normRow(row._line, (f) => unmark(row[f]), r.presentByLine?.get(row._line))).filter((row) => row.host || row.name);
+  for (const row of rows) {
+    const w = row._hasPassword ? passwordMangleWarning(row._line, r.rawByLine?.get(row._line)?.password) : null;
+    if (w) warnings.push(w);
+  }
+  if (!rows.length) return { rows: [], error: 'host·name 이 모두 빈 줄만 있습니다.', warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };
+  return { rows, warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };
 }
 
 /* ────────────────── 저장 입력 · 검증 ────────────────── */
@@ -186,21 +210,28 @@ export function parseServersText(text, { defaults = {} } = {}) {
  */
 export function toSaveInput(row, ctx) {
   const prev = ctx.existing(keyOfHostPort(row.host, row.port));
+  // v2.763(V1-1): 행에 **없는 열**은 기존 서버 값을 유지한다(cvp/bulk.js 의 has/keep 과 같다). 명시적으로 비운 칸('', '-')은 지금처럼 비움.
+  //   예전에는 헤더형·키=값형에서 열이 없어도 '' 로 읽어 끈 서버를 켜고(enabled), 엣지 담당을 중앙 직접으로 바꾸고, API 판·메모를 지웠다.
+  const has = (f) => !row._present || row._present.has(f);
+  const keep = (f, prevVal) => (has(f) || !prev ? row[f] : prevVal);
+  const agentRaw = String(keep('agent', prev?.agent || '') || '').trim();
   const vc = resolveVcenters(row.vcenters, ctx.vcenters);
-  const agentRaw = String(row.agent || '').trim();
   const ag = CENTRAL_WORDS.has(agentRaw.toLowerCase().replace(/\s+/g, '')) ? { value: '' } : pickAgent(agentRaw, ctx.agents, prev?.agent || '');
   const issues = [];
+  // v2.763(V2-1): 엣지 노드에서 중앙이 배정한(pulled) 서버는 고치지 않는다 — 관리 라우트의 409 와 같은 판정·문구(registry.centralManagedReason).
+  const locked = prev ? ctx.centralManaged?.(prev) : null;
+  if (locked) issues.push(locked);
   if (vc.unknown.length) issues.push(`vCenter ‘${vc.unknown.join(', ')}’ 를 찾지 못했습니다 — 포탈에 등록된 vCenter id 또는 이름을 적으세요(여러 개는 ;)`);
   if (vc.ambiguous.length) issues.push(`vCenter 이름 ‘${vc.ambiguous.join(', ')}’ 이 둘 이상과 같습니다 — id 로 적으세요`);
   if (ag.error) issues.push(ag.error);
   const out = {
     ...(prev ? { id: prev.id } : {}),
-    name: row.name, host: row.host, port: String(row.port || '').trim() === '' ? DEFAULT_PORT : row.port, username: row.username,
+    name: keep('name', prev?.name || ''), host: row.host, port: String(row.port || '').trim() === '' ? DEFAULT_PORT : row.port, username: keep('username', prev?.username || ''),
     vcenterIds: vc.ids.length ? vc.ids : (String(row.vcenters || '').trim() === '' && prev ? prev.vcenterIds : vc.ids),
-    agent: ag.error ? agentRaw : ag.value, apiVersion: row.apiVersion, enabled: row.enabled, note: row.note,
+    agent: ag.error ? agentRaw : ag.value, apiVersion: keep('apiVersion', prev?.apiVersion || ''), enabled: has('enabled') || !prev ? row.enabled : prev.enabled !== false, note: keep('note', prev?.note || ''),
     _issues: issues,
     // 같은 host:port 인데 계정이 바뀌면 저장 비밀번호를 승계하지 않는다(util/secretCarry.js) — 그 행은 비밀번호를 다시 적어야 한다.
-    _moved: !!prev && String(prev.username || '').trim().toLowerCase() !== String(row.username || '').trim().toLowerCase(),
+    _moved: !!prev && String(prev.username || '').trim().toLowerCase() !== String(keep('username', prev?.username || '') || '').trim().toLowerCase(),
   };
   if (row._hasPassword) out.password = row.password;
   return out;
@@ -221,7 +252,9 @@ export function analyzeImport(rows, ctx) {
   return analyzeBulkImport(rows, {
     keyOf: (row) => keyOfHostPort(row.host, row.port),
     keyLabel: 'host:port',
-    quickIssue: (row) => (!row.host ? 'host 누락 — Veeam B&R 서버 IP·호스트명을 적으세요' : !row.name ? 'name 누락 — 표시명을 적으세요' : null),
+    // v2.763(V1-1): name 열이 아예 없는 행은 기존 서버면 그 이름을 쓴다(toSaveInput keep) — 누락이 아니다.
+    quickIssue: (row) => (!row.host ? 'host 누락 — Veeam B&R 서버 IP·호스트명을 적으세요'
+      : !row.name && !(row._present && !row._present.has('name') && ctx.existing(keyOfHostPort(row.host, row.port))) ? 'name 누락 — 표시명을 적으세요' : null),
     toInput: (row) => toSaveInput(row, ctx),
     existing: (row) => !!ctx.existing(keyOfHostPort(row.host, row.port)),
     validate: (input) => inputIssue(input, { isNew: !input.id }),

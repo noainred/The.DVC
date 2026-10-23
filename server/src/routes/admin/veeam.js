@@ -3,7 +3,8 @@
 // 연결 시험은 **저장된 서버만**(id 로) — 요청 본문의 host 로 저장 비밀번호를 보내지 않는다(server/CLAUDE.md v2.480 규칙).
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
+import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, centralManagedReason, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
+import { resultMaxAgeMs } from '../api/veeam.js';
 import { getRecord, dropResult } from '../../veeam/store.js';
 import { pollVeeamOnce, veeamPollerStatus, authGuard } from '../../veeam/poller.js';
 import { testVeeamServer } from '../../veeam/client.js';
@@ -26,16 +27,27 @@ const csvPerm = requirePerm('data.csv');
 
 const fleetWideOnly = fullScopeOnlyWith('Veeam 백업 서버 등록은 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
 
-/** 서버 1대의 상태 요약(화면 표 한 줄) — VM 표는 싣지 않는다. */
-export function serverStatusView(rec) {
+/**
+ * 서버 1대의 상태 요약(화면 표 한 줄) — VM 표는 싣지 않는다.
+ * v2.763(V5-4): 작업 수·VM 수는 실패 중에도 마지막 성공분(lastOk)으로 보이지만(천천히 바뀐다), '지금' 값(백업 중·대기 수 · 작업의 실행 중)은
+ *   실패 중이거나 한도(routes/api/veeam.js resultMaxAgeMs — 사용자 화면 stale·runningStale 과 같은 식)보다 오래된 결과면 모름(null·false)
+ *   + runningStale 표지다. 예전에는 3일째 실패 중인 서버를 '백업 중 7 · 작업 2개 실행 중' 으로 보였다.
+ */
+export function serverStatusView(rec, now = Date.now()) {
   if (!rec) return null;
   const r = rec.result || {};
+  const useTs = r.ok ? r.ts : (rec.lastOk?.ts ?? null);
+  const hasUse = r.ok === true || !!rec.lastOk;
+  const stale = hasUse && (!(Number(useTs) > 0) || now - Number(useTs) > resultMaxAgeMs(rec.via, rec.agent));
+  const runningStale = r.ok !== true || stale;
+  const counts = r.ok ? (r.counts || {}) : (rec.lastOk?.counts || {});
   return {
     at: rec.at, via: rec.via, agent: rec.agent || '', ok: r.ok === true, ts: r.ts ?? null, ms: r.ms ?? null,
     error: r.error || '', kind: r.kind || '', apiVersion: r.apiVersion || '', notes: Array.isArray(r.notes) ? r.notes : [],
-    counts: r.ok ? (r.counts || {}) : (rec.lastOk?.counts || {}), lastOkTs: r.ok ? r.ts : (rec.lastOk?.ts ?? null),
+    counts: runningStale ? { ...counts, running: null, pending: null } : counts, lastOkTs: r.ok ? r.ts : (rec.lastOk?.ts ?? null),
+    stale, runningStale,
     authStop: r.authStop || null,
-    jobs: (r.ok ? r.jobs : rec.lastOk?.jobs || []).slice(0, 300).map((j) => ({ name: j.name, status: j.status, lastResult: j.lastResult, lastRun: j.lastRun, running: j.running, disabled: j.disabled, vms: j.vms, containers: j.containers })),
+    jobs: (r.ok ? r.jobs : rec.lastOk?.jobs || []).slice(0, 300).map((j) => ({ name: j.name, status: j.status, lastResult: j.lastResult, lastRun: j.lastRun, running: runningStale ? false : j.running, disabled: j.disabled, vms: j.vms, containers: j.containers })),
   };
 }
 
@@ -84,7 +96,8 @@ export function registerVeeam(adminRouter) {
     res.json({
       ok: true,
       // v2.762(G3): readsHere — 이 노드가 읽는 서버인가(엣지에서는 받은 자기 몫). 화면이 '연결 시험'·'지금 읽기' 를 이것으로 연다.
-      servers: listServers().map((d) => ({ ...d, readsHere: readsHere(d), status: serverStatusView(getRecord(d.id)) })),
+      // v2.763(V2-1): centralManaged — 엣지에서 중앙이 배정한 서버(화면이 편집·삭제를 숨기고 '중앙에서 고치세요' 를 말한다 · POST·DELETE 는 409).
+      servers: listServers().map((d) => ({ ...d, readsHere: readsHere(d), ...(centralManagedReason(d) ? { centralManaged: true } : {}), status: serverStatusView(getRecord(d.id)) })),
       vcenters, agents: knownAgentNames(), edges: allVeeamEdgeStatus(), poller: veeamPollerStatus(),
       // 개별 토큰이 발급된 엣지 이름 — Veeam 위임 라우트는 개별 토큰만 받는다(central.js veeam-config). 화면이 토큰 없는 엣지 배정을 경고한다.
       tokenAgents: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
@@ -98,6 +111,8 @@ export function registerVeeam(adminRouter) {
       // 읽는 곳(엣지)은 중앙이 아는 엣지 목록에서만(대소문자·공백 차이는 목록 표기로) — 이미 저장된 값은 목록에 없어도 통과(docs/rules/edge.md).
       const body = { ...(req.body || {}) };
       const prev = body.id ? getServerWithSecret(String(body.id)) : null;
+      const locked = centralManagedReason(prev);   // v2.763(V2-1): 엣지에서 중앙 배정 서버 수정 거절
+      if (locked) return res.status(409).json({ ok: false, reason: locked, centralManaged: true });
       const ag = pickAgent(body.agent, knownAgentNames(), prev?.agent || '');
       if (ag.error) return res.status(400).json({ ok: false, reason: ag.error, field: 'agent' });
       body.agent = ag.value;
@@ -111,6 +126,8 @@ export function registerVeeam(adminRouter) {
 
   adminRouter.delete('/veeam/servers/:id', adminOnly, fleetWideOnly, (req, res) => {
     const d = getServerWithSecret(req.params.id);
+    const locked = centralManagedReason(d);   // v2.763(V2-1): 지워도 pull 이 되살리지 않아 아무도 읽지 않게 된다 — 중앙에서 지운다
+    if (locked) return res.status(409).json({ ok: false, reason: locked, centralManaged: true });
     if (!d || !deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     dropResult(req.params.id);
     authGuard.clearAuthStop(req.params.id);
@@ -124,10 +141,15 @@ export function registerVeeam(adminRouter) {
     if (!d) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     if (String(d.id).startsWith('mock-')) return res.json({ ok: false, reason: '데모 서버는 접속하지 않습니다.' });
     if ((d.agent || '').trim() && !readsHere(d)) return res.json({ ok: false, edge: true, reason: edgeRefusal(d, '시험하지 않습니다') });
+    // v2.763(V1-I1): 비밀번호가 없으면(접속처 변경으로 폐기됨) 빈 비밀번호로 로그인하지 않는다 — AD 실패 로그온이 쌓인다(주기 수집과 같은 규칙).
+    if (!d.password) return res.json({ ok: false, kind: 'no-password', reason: '저장된 비밀번호가 없어 시험하지 않았습니다 — 편집에서 비밀번호를 입력하세요.' });
     try {
       const r = await withDeadline(90_000, (signal) => testVeeamServer(d, { signal }), 'Veeam 연결 시험 시한 초과');
-      logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `성공 · 작업 ${r.jobs}개` });
-      res.json(r);
+      // v2.763(V5-I2): 저장된 자격증명으로 로그인이 됐으면 그 서버의 인증 실패 정지를 푼다(gpuGuest 연결 시험 v2.590 F2 와 같다 —
+      //   AD 잠금만 풀었거나 같은 비밀번호면 credHash 가 그대로라 자동 재개되지 않고, 화면은 '정지' 만 계속 말했다).
+      const authStopCleared = r?.ok !== false && authGuard.clearAuthStop(d.id);
+      logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `성공 · 작업 ${r.jobs != null ? `${r.jobs}개` : '수 모름'}${authStopCleared ? ' · 인증 실패 정지 해제' : ''}` });
+      res.json({ ...r, ...(authStopCleared ? { authStopCleared: true } : {}) });
     } catch (e) {
       const reason = String(e?.message || e).slice(0, 600);
       logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `실패 · ${reason.slice(0, 120)}` });
@@ -165,14 +187,14 @@ export function registerVeeam(adminRouter) {
    */
   const vbCtx = () => {
     const byKey = new Map(listServers().map((d) => [vbBulk.keyOfHostPort(d.host, d.port), d]));
-    return { existing: (k) => byKey.get(k), vcenters: (store.get()?.vcenters || []).map((v) => ({ id: v.id, name: v.name })), agents: knownAgentNames() };
+    return { existing: (k) => byKey.get(k), vcenters: (store.get()?.vcenters || []).map((v) => ({ id: v.id, name: v.name })), agents: knownAgentNames(), centralManaged: (prev) => centralManagedReason(prev) };
   };
   const vbParse = (body = {}) => {
     const raw = String(body.text ?? body.csv ?? '');
     const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
     if (format === 'text') return { ...vbBulk.parseServersText(raw, { defaults: body.defaults || {} }), format, raw };
     const r = vbBulk.parseServersCsv(raw);
-    return { ...r, warnings: [], headerUsed: null, order: r.order || vbBulk.COLUMNS, format, raw };
+    return { ...r, warnings: r.warnings || [], headerUsed: null, order: r.order || vbBulk.COLUMNS, format, raw };
   };
   const sendFile = (res, type, name, body) => { res.setHeader('Content-Type', `${type}; charset=utf-8`); res.setHeader('Content-Disposition', `attachment; filename="${name}"`); res.send(body); };
 
@@ -215,7 +237,7 @@ export function registerVeeam(adminRouter) {
         }
         try {
           const r = await testVeeamServer({ ...srv, port: Number(srv.port) || DEFAULT_PORT }, { signal });
-          return { ok: true, detail: { summary: `로그인 성공 · 작업 ${r.jobs}개 · API ${r.apiVersion}` } };
+          return { ok: true, detail: { summary: `로그인 성공 · 작업 ${r.jobs != null ? `${r.jobs}개` : '수 모름'} · API ${r.apiVersion}` } };
         } catch (e) { return { ok: false, reason: String(e?.message || e).slice(0, 300) }; }
       },
     });

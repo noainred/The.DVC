@@ -118,7 +118,10 @@ export function saveServer(input = {}) {
   if (password && password !== '********') dev.password = password;
   else if (moved) droppedSecrets = dropCarriedSecrets(dev, input, ['password']);
   if (!existing && !dev.password) throw new Error('비밀번호를 입력하세요.');
-  if (!existing && db.servers.some((d) => String(d.host).toLowerCase() === host.toLowerCase() && Number(d.port || DEFAULT_PORT) === port)) {
+  // v2.763(V1-4): 수정이라도 host:port 를 **바꾸면** 중복을 본다(예전에는 신규만 — 수정으로 남의 host:port 를 받아 같은 Veeam 을 두 번 읽었다).
+  //   host:port 가 그대로인 수정은 보지 않는다 — 이미 중복인 쌍(옛 결함으로 생긴 것)의 비밀번호 수정·끄기까지 막지 않게.
+  const keyChanged = !existing || String(existing.host || '').trim().toLowerCase() !== host.toLowerCase() || Number(existing.port || DEFAULT_PORT) !== port;
+  if (keyChanged && db.servers.some((d) => d.id !== dev.id && String(d.host).toLowerCase() === host.toLowerCase() && Number(d.port || DEFAULT_PORT) === port)) {
     throw new Error(`이미 등록된 Veeam 서버입니다(${host}:${port}).`);
   }
   Object.assign(dev, {
@@ -143,6 +146,18 @@ export function deleteServer(id) {
   if (i < 0) return false;
   db.servers.splice(i, 1); persist();
   return true;
+}
+
+/**
+ * v2.763(V2-1=V5-3): 엣지 노드에서 중앙이 배정한(pulled) 서버는 이 노드에서 고치거나 지우지 않는다 — 고쳐도 pull 이 중앙 응답의 해시만
+ *   비교해 되돌리지 않고(엣지 사본이 중앙과 어긋난 채 남는다), 재시작 뒤 첫 pull 에 아무 안내 없이 중앙 값으로 돌아간다. host 를 고치면
+ *   중앙이 지문 대조(v2.762 G1)로 그 결과를 계속 버린다. 이 노드에서 직접 등록한 서버(pulled 아님)는 그대로 고칠 수 있다.
+ * @returns {string|null} 막을 사유(관리 라우트 409 · 대량 가져오기 오류 행이 같은 문구) — 막지 않으면 null
+ */
+export function centralManagedReason(d, { isEdge = !!config.agent.centralUrl } = {}) {
+  if (!isEdge || !d || d.pulled !== true) return null;
+  return '중앙 포탈이 배정한 Veeam 서버라 이 엣지에서는 고치거나 지우지 않습니다 — 여기서 바꾸면 중앙과 어긋나고 재시작 뒤 중앙 값으로 되돌아갑니다. '
+    + '중앙 포탈의 설정 › Veeam 백업 서버에서 고치세요(연결 시험·지금 읽기는 이 화면에서 할 수 있습니다).';
 }
 
 /** 이 노드가 읽을 서버(중앙 = agent '' · 엣지 = agent 가 내 이름). */
