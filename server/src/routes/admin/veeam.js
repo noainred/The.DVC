@@ -141,12 +141,14 @@ export function registerVeeam(adminRouter) {
     if (!d) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     if (String(d.id).startsWith('mock-')) return res.json({ ok: false, reason: '데모 서버는 접속하지 않습니다.' });
     if ((d.agent || '').trim() && !readsHere(d)) return res.json({ ok: false, edge: true, reason: edgeRefusal(d, '시험하지 않습니다') });
+    // v2.763(V1-I1): 비밀번호가 없으면(접속처 변경으로 폐기됨) 빈 비밀번호로 로그인하지 않는다 — AD 실패 로그온이 쌓인다(주기 수집과 같은 규칙).
+    if (!d.password) return res.json({ ok: false, kind: 'no-password', reason: '저장된 비밀번호가 없어 시험하지 않았습니다 — 편집에서 비밀번호를 입력하세요.' });
     try {
       const r = await withDeadline(90_000, (signal) => testVeeamServer(d, { signal }), 'Veeam 연결 시험 시한 초과');
       // v2.763(V5-I2): 저장된 자격증명으로 로그인이 됐으면 그 서버의 인증 실패 정지를 푼다(gpuGuest 연결 시험 v2.590 F2 와 같다 —
       //   AD 잠금만 풀었거나 같은 비밀번호면 credHash 가 그대로라 자동 재개되지 않고, 화면은 '정지' 만 계속 말했다).
       const authStopCleared = r?.ok !== false && authGuard.clearAuthStop(d.id);
-      logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `성공 · 작업 ${r.jobs}개${authStopCleared ? ' · 인증 실패 정지 해제' : ''}` });
+      logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `성공 · 작업 ${r.jobs != null ? `${r.jobs}개` : '수 모름'}${authStopCleared ? ' · 인증 실패 정지 해제' : ''}` });
       res.json({ ...r, ...(authStopCleared ? { authStopCleared: true } : {}) });
     } catch (e) {
       const reason = String(e?.message || e).slice(0, 600);
@@ -235,7 +237,7 @@ export function registerVeeam(adminRouter) {
         }
         try {
           const r = await testVeeamServer({ ...srv, port: Number(srv.port) || DEFAULT_PORT }, { signal });
-          return { ok: true, detail: { summary: `로그인 성공 · 작업 ${r.jobs}개 · API ${r.apiVersion}` } };
+          return { ok: true, detail: { summary: `로그인 성공 · 작업 ${r.jobs != null ? `${r.jobs}개` : '수 모름'} · API ${r.apiVersion}` } };
         } catch (e) { return { ok: false, reason: String(e?.message || e).slice(0, 300) }; }
       },
     });

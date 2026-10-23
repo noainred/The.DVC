@@ -321,3 +321,19 @@ test('V5-I2: 연결 시험 성공은 인증 실패 정지를 풀고 authStopClea
     assert.equal(again.body.authStopCleared, undefined, '정지가 없으면 표지 없음');
   } finally { vbrHandler = null; poller.authGuard.clearAuthStop(d.id); clearRegistry(); }
 });
+
+test('V1-I1 후속: 비밀번호가 없는(접속처 변경으로 폐기된) 서버는 연결 시험에서도 로그인하지 않는다', async () => {
+  resetAgent(); clearRegistry();
+  const d = R.saveServer({ name: 'NoPw', host: 'vbr-a.corp', username: 'svc', password: 'pw', vcenterIds: [VC_KR] });
+  const { password: _pw, ...pub } = R.getServerWithSecret(d.id);
+  R.saveServer({ ...pub, id: d.id, host: 'vbr-b.corp' });   // 접속처가 바뀌면 비밀번호를 승계하지 않는다(secretCarry)
+  assert.equal(R.getServerWithSecret(d.id).password || '', '', '전제: 비밀번호 폐기');
+  let calls = 0;
+  try {
+    vbrHandler = async () => { calls++; return json({ message: 'nope' }, 401); };
+    const r = await call('POST', `/${d.id}/test`);
+    assert.equal(r.body.ok, false);
+    assert.equal(r.body.kind, 'no-password');
+    assert.equal(calls, 0, '빈 비밀번호로 로그인을 시도하지 않는다(AD 실패 로그온)');
+  } finally { vbrHandler = null; clearRegistry(); }
+});
