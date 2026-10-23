@@ -174,7 +174,7 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
 adminRouter.get('/vclogs/status', adminOnly, async (req, res) => {
   try { res.json(scopeVcLogStatus(await logStatus(), scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
@@ -185,6 +185,12 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   const s = saveLogSettings(req.body || {});
   if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
   rescheduleLogPoller();
+  // v2.764(4-f): Veeam 계정 이벤트 전용 수집기도 같은 주기(pollIntervalMin)를 쓴다 — 저장 즉시 재무장(예전에는 다음 틱부터, 주기가 1일이면 최대 1일 뒤).
+  //   동적 import + 함수 존재 확인 — 수집기 모듈이 아직 그 함수를 내보내지 않는 판에서도 설정 저장은 막히지 않는다.
+  try {
+    const m = await import('../../veeam/snapCollector.js');
+    if (typeof m.rescheduleVeeamSnapCollector === 'function') m.rescheduleVeeamSnapCollector();
+  } catch (e) { console.warn(`[vclogs] Veeam 전용 수집기 주기 재무장 실패(다음 틱부터 반영): ${e?.message || e}`); }
   delete s._pathChanged;
   res.json(s);
 });

@@ -221,12 +221,13 @@ test('V4-4 ① 수집기 한도(200쪽 × 200건)를 넘는 설정은 그 한도
   assert.equal(snapVerdict(evOk({ collectedAt: NOW - 8 * HOUR, events: 1, byVm: { x: [NOW, 1] } }), NOW).reason, 'stale-events');
 });
 
-test('V4-4 ② 폴러는 수집 호출과 완결 판정에 같은 상한(maxEv)을 쓴다 · 수집기 쪽 수·쪽 크기는 상수와 같다', () => {
+test('V4-4 ② 폴러는 설정 상한을 수집기에 그대로 넘기지 않는다(묶음 수집 — 시간 예산) · 수집기 쪽 수·쪽 크기는 상수와 같다', () => {
+  // v2.764(재검토 1-c): 폴러는 onBatch 묶음 수집으로 바뀌어 상한(maxEv)을 수집 호출에 넘기지 않는다 — '같은 상한을 두 곳에 쓴다' 단언은 대상이 없어졌다.
+  //   남는 불변조건: 설정값(maxPerPoll)을 수집기 max 로 넘기는 곳이 없다 · onBatch 호출에 시간 예산(budgetMs)이 실린다 · 수집기 비묶음 경로의 쪽 상수.
   const src = fs.readFileSync(new URL('../src/logs/poller.js', import.meta.url), 'utf8');
-  assert.match(src, /const maxEv = effectiveMaxPerPoll\(s\);/);
-  assert.match(src, /collectVCenterEvents\(vc, \{ sinceTs, max: maxEv, signal \}\)/);
-  assert.match(src, /eventsCompleteUntil\(events, \{ startedAt, max: mock \? Infinity : maxEv \}\)/);
+  assert.match(src, /collectVCenterEvents\(vc, \{ sinceTs, signal, onBatch, batchSize: EVENT_BATCH_ROWS, budgetMs: budget \}\)/);
   assert.ok(!/max: s\.maxPerPoll/.test(src), '설정값을 그대로 쓰는 곳이 남지 않는다');
+  assert.ok(!/max: maxEv/.test(src), '설정 상한을 수집기에 넘기는 곳이 남지 않는다(시간 예산으로 대체)');
   const soap = fs.readFileSync(new URL('../src/vcenter/soapClient.js', import.meta.url), 'utf8');
   const fn = soap.slice(soap.indexOf('export async function collectVCenterEvents'), soap.indexOf('export function parseEventsXml'));
   assert.match(fn, /pageSize = 200/);

@@ -159,9 +159,11 @@ test('B6-01 로그 폴러: 적재는 조각 적재(insertManyAsync)로 · 수집
     await P.pollLogsOnce({ manual: true });
   } finally { db.insertManyAsync = orig; }
   const mine = calls.filter((c) => c.vc === 'vc-good');
-  assert.equal(mine.length, 1, `vc-good 은 조각 적재로 들어가야 한다: ${JSON.stringify(calls)}`);
-  assert.equal(mine[0].n, 2_500);
-  assert.equal(mine[0].okBefore, null, '적재가 시작될 때 수집 성공은 아직 기록되지 않았다');
+  // v2.764(재검토 1-a): 폴러가 묶음(기본 2,000건)마다 적재하므로 2,500건은 insertManyAsync 2회(2,000 + 500)다 — 전부 조각 적재로, 합은 전량.
+  assert.ok(mine.length >= 1, `vc-good 은 조각 적재로 들어가야 한다: ${JSON.stringify(calls)}`);
+  assert.equal(mine.reduce((a, c) => a + c.n, 0), 2_500);
+  assert.equal(mine[0].okBefore, null, '첫 적재가 시작될 때 수집 성공은 아직 기록되지 않았다');
+  for (const c of mine.slice(1)) assert.ok(c.okBefore != null, '다음 묶음의 적재가 시작될 때는 앞 묶음까지의 기록이 있다(묶음마다 커서가 나아간다)');
   assert.ok(P.logCollectOkAt('vc-good') != null, '적재가 끝난 뒤 기록된다');
   assert.equal(db.count({ vcenterId: 'vc-good' }), 2_500);
 });

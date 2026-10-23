@@ -136,11 +136,12 @@ test('A2-01 ⑥ 로그 폴러 — 수집 성공 시각을 남기고(상한에 �
     const P = await import('../src/logs/poller.js');
     assert.equal(typeof P.logCollectOkAt, 'function', '로그 폴러가 vCenter 별 수집 성공 시각을 내놓아야 한다');
     assert.equal(P.logCollectOkAt('vcx'), null, '수집 전에는 기록이 없다');
-    // (1) 상한(100건)에 걸린 수집 — 100번째 이벤트까지만 온전하다.
+    // (1) 끝까지 못 읽은 수집 — 마지막으로 읽은 이벤트까지만 온전하다.
+    //   v2.764(재검토 1-c): 폴러는 설정 상한(maxPerPoll) 대신 시간 예산 안에서 한 세션으로 이어 읽는다 — 예산 1ms 로 첫 쪽(200건) 뒤 멈추게 한다.
     const base = Date.now() - 10 * H;
-    state.events = Array.from({ length: 150 }, (_, i) => ({ key: `k${i}`, ts: base + i * 60_000 }));
-    await P.pollLogsOnce({ manual: true });
-    assert.equal(P.logCollectOkAt('vcx'), base + 99 * 60_000, '상한에 걸리면 수집 시작 시각이 아니라 마지막으로 읽은 이벤트 시각');
+    state.events = Array.from({ length: 250 }, (_, i) => ({ key: `k${i}`, ts: base + i * 60_000 }));
+    await P.pollLogsOnce({ manual: true, budgetMs: 1 });
+    assert.equal(P.logCollectOkAt('vcx'), base + 199 * 60_000, '끝까지 못 읽으면 수집 시작 시각이 아니라 마지막으로 읽은 이벤트 시각');
     assert.equal(P.logCollectOk('vcx').capped, true);
     // (2) 상한에 걸리지 않은 수집 — 수집을 시작한 시각까지 온전하다.
     state.events = [];
