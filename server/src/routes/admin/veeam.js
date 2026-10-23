@@ -3,7 +3,7 @@
 // 연결 시험은 **저장된 서버만**(id 로) — 요청 본문의 host 로 저장 비밀번호를 보내지 않는다(server/CLAUDE.md v2.480 규칙).
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
+import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
 import { getRecord, dropResult } from '../../veeam/store.js';
 import { pollVeeamOnce, veeamPollerStatus, authGuard } from '../../veeam/poller.js';
 import { testVeeamServer } from '../../veeam/client.js';
@@ -37,6 +37,22 @@ export function serverStatusView(rec) {
     authStop: r.authStop || null,
     jobs: (r.ok ? r.jobs : rec.lastOk?.jobs || []).slice(0, 300).map((j) => ({ name: j.name, status: j.status, lastResult: j.lastResult, lastRun: j.lastRun, running: j.running, disabled: j.disabled, vms: j.vms, containers: j.containers })),
   };
+}
+
+/**
+ * v2.761 B3: 이 노드가 읽는 서버인가 — 엣지 노드에서는 중앙에서 받은 자기 몫(serversForThisNode)이 여기 든다. 그 서버의 '지금 읽기'·'연결 시험' 을
+ * 막으면 엣지에서 인증 정지를 풀 길이 없다(authGuard 규칙 3 — 수동 실행은 막지 않는다).
+ */
+const readsHere = (d) => serversForThisNode().some((x) => x.id === d.id);
+/** 중앙에서 엣지 담당 서버를 거절할 때의 문구 — 정지 중이면 '다음 주기에 반영' 이라 말하지 않는다(그 주기는 읽지 않는다). */
+function edgeRefusal(d, what) {
+  const rec = getRecord(d.id);
+  const stopped = rec?.result?.kind === 'auth-stopped' || !!rec?.result?.authStop;
+  if (stopped) {
+    return `엣지 '${d.agent}' 가 읽는 서버입니다 — 그 엣지에서 인증 실패로 주기 수집이 멈춰 있어 다음 주기에도 읽지 않습니다. `
+      + 'Veeam 계정을 고친 뒤(비밀번호를 바꿔 저장하면 자동으로 다시 읽습니다) 같은 비밀번호라면 엣지 포탈의 이 화면에서 \'지금 읽기\' 를 누르세요.';
+  }
+  return `엣지 '${d.agent}' 가 읽는 서버입니다 — 중앙에서는 ${what}. 엣지가 자기 수집 주기에 읽어 올리며, 바로 확인하려면 엣지 포탈의 이 화면에서 '지금 읽기' 를 누르세요.`;
 }
 
 export function registerVeeam(adminRouter) {
@@ -84,7 +100,9 @@ export function registerVeeam(adminRouter) {
       if (ag.error) return res.status(400).json({ ok: false, reason: ag.error, field: 'agent' });
       body.agent = ag.value;
       const d = saveServer(body);
-      logAudit({ user: req.user?.username, action: 'Veeam 서버 저장', target: d.name, detail: `${d.host}:${d.port} · vCenter ${d.vcenterIds.join(',')} · 읽는 곳=${d.agent || '중앙'}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
+      // v2.761 B4: 접속처가 바뀌면 옛 접속처의 결과(lastOk — 실패해도 승계된다)와 인증 정지를 지운다(다른 서버다 — secretCarry 와 같은 판단).
+      if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); }
+      logAudit({ user: req.user?.username, action: 'Veeam 서버 저장', target: d.name, detail: `${d.host}:${d.port} · vCenter ${d.vcenterIds.join(',')} · 읽는 곳=${d.agent || '중앙'}${d.moved ? ' · 접속처 변경으로 이전 결과·인증 정지 지움' : ''}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
       res.status(201).json({ ok: true, server: d });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
   });
@@ -98,12 +116,12 @@ export function registerVeeam(adminRouter) {
     res.json({ ok: true });
   });
 
-  // 연결 시험 — 중앙이 직접 읽는 서버만(엣지 담당은 그 엣지가 읽는다 — 중앙에서는 닿지 않는 망일 수 있다).
+  // 연결 시험 — 이 노드가 읽는 서버만(중앙: 직접 서버 · 엣지: 받은 자기 몫 — v2.761 B3). 남의 엣지 담당은 그 엣지가 읽는다(중앙에서는 닿지 않는 망일 수 있다).
   adminRouter.post('/veeam/servers/:id/test', adminOnly, fleetWideOnly, async (req, res) => {
     const d = getServerWithSecret(req.params.id);
     if (!d) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     if (String(d.id).startsWith('mock-')) return res.json({ ok: false, reason: '데모 서버는 접속하지 않습니다.' });
-    if ((d.agent || '').trim()) return res.json({ ok: false, edge: true, reason: `엣지 '${d.agent}' 가 읽는 서버입니다 — 중앙에서는 시험하지 않습니다. 엣지가 배정을 받는 대로(최대 5분) 읽고 결과를 올립니다.` });
+    if ((d.agent || '').trim() && !readsHere(d)) return res.json({ ok: false, edge: true, reason: edgeRefusal(d, '시험하지 않습니다') });
     try {
       const r = await withDeadline(90_000, (signal) => testVeeamServer(d, { signal }), 'Veeam 연결 시험 시한 초과');
       logAudit({ user: req.user?.username, action: 'Veeam 연결 시험', target: d.name, detail: `성공 · 작업 ${r.jobs}개` });
@@ -115,14 +133,27 @@ export function registerVeeam(adminRouter) {
     }
   });
 
-  // 지금 읽기 — 중앙 직접 서버만 바로 읽는다(수동은 인증 정지를 건너뛴다 — 고쳤는지 확인할 길).
+  // 지금 읽기 — 이 노드가 읽는 서버를 바로 읽는다(수동은 인증 정지를 건너뛴다 — 고쳤는지 확인할 길. 엣지 노드에서는 자기 몫도 — v2.761 B3).
+  // v2.761 D6 응답 계약: { ok:<전체 성공 boolean>, okCount, failCount, skipped?, timedOut?, disabled?, reason?, status }
+  //   (예전에는 pollVeeamOnce 의 ok(성공 개수)가 스프레드로 boolean ok 를 덮었다 — 꺼진 서버는 시도도 안 했는데 '읽기 실패').
   adminRouter.post('/veeam/servers/:id/collect', adminOnly, fleetWideOnly, async (req, res) => {
     const d = getServerWithSecret(req.params.id);
     if (!d) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
-    if ((d.agent || '').trim()) return res.json({ ok: false, edge: true, reason: `엣지 '${d.agent}' 가 읽는 서버입니다 — 엣지의 다음 수집 주기에 반영됩니다.` });
+    if ((d.agent || '').trim() && !readsHere(d)) return res.json({ ok: false, edge: true, reason: edgeRefusal(d, '읽지 않습니다') });
+    if (d.enabled === false) {
+      return res.json({ ok: false, okCount: 0, failCount: 0, disabled: true, reason: '수집이 꺼진 서버라 읽지 않았습니다 — 수정에서 수집을 켠 뒤 읽으세요.', status: serverStatusView(getRecord(d.id)) });
+    }
     const r = await pollVeeamOnce({ manual: true, ids: [d.id] });
-    logAudit({ user: req.user?.username, action: 'Veeam 지금 읽기', target: d.name, detail: r.skipped ? '이미 수집 중' : `성공 ${r.ok ?? 0}·실패 ${r.fail ?? 0}` });
-    res.json({ ok: !r.skipped && !r.timedOut, ...r, status: serverStatusView(getRecord(d.id)) });
+    const okCount = Number(r.ok) || 0; const failCount = Number(r.fail) || 0;
+    const status = serverStatusView(getRecord(d.id));
+    const ok = !r.skipped && !r.timedOut && okCount > 0 && failCount === 0;
+    let reason = '';
+    if (r.skipped) reason = '이미 수집 중입니다 — 끝난 뒤 다시 누르세요.';
+    else if (r.timedOut) reason = '수집 주기 상한을 넘겨 기다리지 않았습니다 — 잠시 뒤 상태를 확인하세요.';
+    else if (!ok && !okCount && !failCount) reason = '이 노드가 읽는 서버 목록에 없어 읽지 않았습니다.';
+    else if (!ok) reason = status?.error || '읽기에 실패했습니다.';
+    logAudit({ user: req.user?.username, action: 'Veeam 지금 읽기', target: d.name, detail: r.skipped ? '이미 수집 중' : r.timedOut ? '주기 상한 초과' : `성공 ${okCount}·실패 ${failCount}` });
+    res.json({ ok, okCount, failCount, ...(r.skipped ? { skipped: true } : {}), ...(r.timedOut ? { timedOut: true } : {}), ...(reason ? { reason } : {}), status });
   });
 
   /* ══════════════════ 대량 등록(CSV·자유텍스트, v2.751 사용자 요청) ══════════════════
@@ -216,6 +247,7 @@ export function registerVeeam(adminRouter) {
       if (issue) { failed.push({ line: row._line, name: row.name || row.host, reason: issue }); continue; }
       try {
         const d = saveServer(vbBulk.cleanInput(input));
+        if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); } // v2.761 B4: 단건 저장과 같다
         if (input.id) updated++; else added++;
         if (d.droppedSecrets?.length) dropped.push({ line: row._line, name: row.name || row.host, reason: '접속처가 바뀌어 저장된 비밀번호를 폐기했습니다 — 비밀번호를 다시 등록하세요.' });
       } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: String(e?.message || e).slice(0, 300) }); }

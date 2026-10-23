@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
-import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
+import { openSqlite, retryOnLock, createLockRetry } from '../util/sqliteOpen.js';
 import { createYielder } from '../util/timeSlice.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
@@ -39,6 +39,14 @@ const rowHash = (r) => crypto.createHash('sha1').update(`${Number(r.ts) || 0}\u0
 let impl = null;
 let ready = null;
 let unavailable = false;
+// v2.761(C9): 잠금으로 못 열면 래치하지 않고 30초 뒤 다시 연다(sqliteOpen 규칙 3) — 잠금이 아닌 오류만 unavailable 로 래치한다.
+const _lock = createLockRetry(30_000);
+/*
+ * v2.761(C5): 실시간 적재가 실패한(또는 DB 를 못 연 동안 버린) vCenter — vcenterId → 무효로 한 시각.
+ *   coveredFrom 은 이 vCenter 를 '모름(null)' 으로 돌려 화면은 로그 DB 경로·백필로 간다(빠진 행을 믿지 않는다).
+ *   DB 가 쓰이면 meta 'from:<vc>' 도 지운다(재시작 뒤에도 무효) · 무효로 한 뒤 시작한 백필이 덮음을 다시 기록하면 풀린다.
+ */
+const _coverInvalid = new Map();
 
 function initSqlite(dbPath) {
   // eslint-disable-next-line import/no-unresolved
@@ -59,6 +67,7 @@ function initSqlite(dbPath) {
     const sel = db.prepare('SELECT vcenterId, ts, severity, type, user, entity, message FROM snap_ev WHERE vcenterId=? AND ts>=? ORDER BY ts DESC LIMIT ?');
     const metaGet = db.prepare('SELECT v FROM snap_meta WHERE k=?');
     const metaSet = db.prepare('INSERT INTO snap_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v');
+    const metaDel = db.prepare('DELETE FROM snap_meta WHERE k=?');
     const edgeSet = db.prepare('INSERT INTO snap_edge (vcenterId, json, at) VALUES (?, ?, ?) ON CONFLICT(vcenterId) DO UPDATE SET json=excluded.json, at=excluded.at');
     const edgeAll = db.prepare('SELECT vcenterId, json, at FROM snap_edge');
     // 보관 정리는 청크(util/chunkedPrune.js — 한 방 DELETE 금지 규약) · ts 단독 인덱스를 탄다 · 동시에 하나(진행 중이면 그것을 쓴다).
@@ -82,9 +91,23 @@ function initSqlite(dbPath) {
       },
       /** 그 vCenter 의 since 이후 행(최신 먼저, 상한). */
       rowsFor(vcenterId, since, limit) { return sel.all(String(vcenterId), Number(since) || 0, Math.max(1, Math.floor(limit) || 1)); },
-      /** 빠짐없이 가진 가장 이른 시각(백필 진행) — 모르면 null. */
-      coveredFrom(vcenterId) { const r = metaGet.get(`from:${vcenterId}`); const n = Number(r?.v); return Number.isFinite(n) && n > 0 ? n : null; },
-      setCoveredFrom(vcenterId, ts) { metaSet.run(`from:${vcenterId}`, String(Math.floor(ts))); },
+      /** 빠짐없이 가진 가장 이른 시각(백필 진행) — 모르면 null(적재 실패로 무효가 된 vCenter 도 — v2.761 C5). */
+      coveredFrom(vcenterId) {
+        if (_coverInvalid.has(String(vcenterId))) return null;
+        const r = metaGet.get(`from:${vcenterId}`); const n = Number(r?.v); return Number.isFinite(n) && n > 0 ? n : null;
+      },
+      /** startedAt = 그 백필을 시작한 시각 — 무효로 한 뒤 시작한 백필만 덮음을 다시 기록한다(그 전 백필은 빠진 구간을 다시 읽지 않았다). */
+      setCoveredFrom(vcenterId, ts, startedAt = Date.now()) {
+        const k = String(vcenterId); const inv = _coverInvalid.get(k);
+        if (inv != null && startedAt < inv) return false;
+        metaSet.run(`from:${k}`, String(Math.floor(ts)));
+        if (inv != null) _coverInvalid.delete(k);
+        return true;
+      },
+      /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
+      dropCoverage(vcenterIds) {
+        for (const vc of vcenterIds) { try { metaDel.run(`from:${vc}`); } catch { /* 메모리 무효로 대신한다 */ } }
+      },
       saveEdge(vcenterId, obj, at) { edgeSet.run(String(vcenterId), JSON.stringify(obj), Math.floor(Number(at) || Date.now())); },
       loadEdge() { return edgeAll.all().map((r) => { try { return { vcenterId: r.vcenterId, at: r.at, obj: JSON.parse(r.json) }; } catch { return null; } }).filter(Boolean); },
       /** 31일보다 오래된 행 정리(청크 · 비동기). */
@@ -103,25 +126,50 @@ function initSqlite(dbPath) {
   });
 }
 
-/** DB 핸들(없으면 null — node:sqlite 불가). 잠금은 몇 번 기다렸다 다시 연다(sqliteOpen 규약). */
+/**
+ * DB 핸들(없으면 null — node:sqlite 불가·잠금 재시도 대기). 잠금은 몇 번 기다렸다 다시 열고(retryOnLock), 그래도 잠겨 있으면
+ * 래치하지 않고 30초 뒤 다음 호출이 다시 연다(v2.761 C9 — sqliteOpen 규칙 3). 잠금이 아닌 오류만 프로세스 수명 동안 래치한다.
+ */
 export async function getSnapDb() {
   if (impl) return impl;
-  if (unavailable) return null;
+  if (unavailable || _lock.blocked()) return null;
   if (!ready) {
     ready = retryOnLock(() => initSqlite(config.veeamSnap.dbPath), { tag: 'veeam-snap' })
-      .catch((e) => { unavailable = true; console.warn(`[veeam-snap] 전용 DB 를 열지 못했습니다 — 로그 DB 검색으로 계산합니다(느림): ${String(e?.message || e).slice(0, 200)}`); return null; });
+      .then((db) => { _lock.ok(); if (_coverInvalid.size) db.dropCoverage([..._coverInvalid.keys()]); return db; })
+      .catch((e) => {
+        if (_lock.onFail(e)) console.warn(`[veeam-snap] 전용 DB 가 잠겨 있어 열지 못했습니다 — 30초 뒤 다시 엽니다(그동안 로그 DB 검색): ${String(e?.message || e).slice(0, 200)}`);
+        else { unavailable = true; console.warn(`[veeam-snap] 전용 DB 를 열지 못했습니다 — 로그 DB 검색으로 계산합니다(느림): ${String(e?.message || e).slice(0, 200)}`); }
+        return null;
+      });
   }
-  impl = await ready;
-  return impl;
+  const p = ready;
+  const db = await p;
+  if (db) impl = db;
+  else if (ready === p) ready = null;   // 다음 시도(잠금이면 30초 뒤)가 다시 연다
+  return db;
+}
+
+/** v2.761(C5): 적재하지 못한 스냅샷 행의 vCenter 를 '덮음 무효' 로 — 메모리 + (DB 가 있으면) meta 삭제. */
+function invalidateCoverage(rows, db) {
+  const ids = new Set();
+  for (const r of Array.isArray(rows) ? rows : []) if (r && r.vcenterId != null && isSnapRow(r)) ids.add(String(r.vcenterId));
+  if (!ids.size) return;
+  const t = Date.now();
+  for (const vc of ids) _coverInvalid.set(vc, t);
+  if (db) { try { db.dropCoverage([...ids]); } catch { /* 메모리 무효로 대신한다 */ } }
 }
 
 let _ingestWarned = 0;
-/** 로그 폴러가 적재한 행 중 스냅샷 행을 넣는다(실패해도 로그 적재는 그대로 — 시간당 경고 1줄). */
+/** 로그 폴러가 적재한 행 중 스냅샷 행을 넣는다(실패해도 로그 적재는 그대로 — 시간당 경고 1줄). 실패·DB 없음이면 그 vCenter 의 덮음을 무효로(v2.761 C5). */
 export async function ingestSnapRows(rows) {
+  let db = null;
   try {
-    const db = await getSnapDb();
-    return db ? db.ingest(rows) : 0;
+    db = await getSnapDb();
+    if (db) return db.ingest(rows);
+    if (!unavailable) invalidateCoverage(rows, null);   // 잠금 대기 중 — 버린 행이 있다(node:sqlite 자체가 없으면 덮음도 쓰지 않는다)
+    return 0;
   } catch (e) {
+    invalidateCoverage(rows, db);
     if (Date.now() - _ingestWarned > 3_600_000) { _ingestWarned = Date.now(); console.warn(`[veeam-snap] 스냅샷 행 적재 실패: ${String(e?.message || e).slice(0, 200)}`); }
     return 0;
   }
@@ -213,7 +261,7 @@ async function runBackfill({ logsDb, vcenterIds, now = Date.now(), pauseMs = BAC
             truncatedDays++;
             console.warn(`[veeam-snap] ${vc} ${new Date(lo).toISOString().slice(0, 10)} 하루 스냅샷 이벤트가 ${DAY_ROW_LIMIT * 2}건을 넘어 일부만 옮겼습니다`);
           }
-          db.setCoveredFrom(vc, lo);
+          db.setCoveredFrom(vc, lo, now);   // v2.761(C5): 이 백필 시작 전에 무효가 된 vCenter 는 기록하지 않는다
           _backfillStats[reader.kind]++;
           if (reader.kind === 'worker' && pauseMs > 0) await sleep(Math.min(pauseMs, WORKER_PAUSE_MS));   // 워커도 하루마다 잠깐 — CPU·디스크를 수집과 나눈다
           from = lo; days++;
@@ -228,4 +276,6 @@ async function runBackfill({ logsDb, vcenterIds, now = Date.now(), pauseMs = BAC
 }
 
 /** 테스트 전용 — 핸들 닫고 상태 초기화. */
-export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; ready = null; unavailable = false; _backfill = null; }
+export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; ready = null; unavailable = false; _backfill = null; _lock.ok(); _coverInvalid.clear(); }
+/** 테스트 전용 — 잠금 재시도 대기를 끝낸다. */
+export function _expireSnapLockForTest() { _lock._expire(); }

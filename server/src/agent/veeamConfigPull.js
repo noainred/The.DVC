@@ -17,7 +17,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { applyPulledServers } from '../veeam/registry.js';
 import { applyPulledAccounts } from '../veeam/snapEvents.js';
 import { dropResult } from '../veeam/store.js';
-import { pollVeeamOnce } from '../veeam/poller.js';
+import { pollVeeamOnce, authGuard } from '../veeam/poller.js';
 import { agentHeaders } from './agentNameCarry.js';
 
 export const configPullMs = () => clampIntervalMs(Number(process.env.VEEAM_CONFIG_PULL_MS) || 300_000, 300_000, 60_000);
@@ -53,14 +53,18 @@ async function _pull() {
     if (sig !== _lastSig) {
       applied = applyPulledServers(servers);
       _lastSig = sig;
-      for (const id of applied.removed) dropResult(id);
-      console.log(`[veeam-config] 중앙 배정 Veeam 서버 적용: ${applied.count}대${applied.removed.length ? ` · 빠짐 ${applied.removed.length}` : ''}${applied.rejected ? ` · 형식 오류로 버림 ${applied.rejected}` : ''}`);
+      for (const id of applied.removed) { dropResult(id); authGuard.clearAuthStop(id, { defer: true }); }
+      // v2.761 B4: 같은 id 의 접속처(host·port·username)가 바뀌면 옛 접속처의 결과(lastOk)를 새 서버 것으로 보내지 않고, 옛 접속처의 인증 정지도 푼다.
+      const moved = applied.moved || [];
+      for (const id of moved) { dropResult(id); authGuard.clearAuthStop(id, { defer: true }); }
+      authGuard.flush();
+      console.log(`[veeam-config] 중앙 배정 Veeam 서버 적용: ${applied.count}대${applied.removed.length ? ` · 빠짐 ${applied.removed.length}` : ''}${moved.length ? ` · 접속처 변경 ${moved.length}` : ''}${applied.rejected ? ` · 형식 오류로 버림 ${applied.rejected}` : ''}`);
       if (applied.count) pollVeeamOnce().catch(() => {});
     }
     // v2.754: 'Veeam 계정'(vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다 — 비밀 아님). 옛 중앙(필드 없음)이면 그대로 둔다.
     let accounts = null;
     if (Array.isArray(body?.vcAccounts)) { try { accounts = applyPulledAccounts(body.vcAccounts) ? 'changed' : 'same'; } catch (e) { accounts = `error: ${String(e?.message || e).slice(0, 80)}`; } }
-    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length } : { unchanged: true }), ...(accounts ? { accounts } : {}) };
+    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length, moved: (applied.moved || []).length } : { unchanged: true }), ...(accounts ? { accounts } : {}) };
     return { ok: true, count: servers.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };

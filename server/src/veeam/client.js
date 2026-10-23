@@ -10,7 +10,10 @@
  *  · TLS 는 장비 신뢰 판정(security/tlsTrust.js deviceTlsConnect — CA 체인 또는 승인 지문)을 **비밀번호를 보내기 전에** 거친다.
  *    Veeam 기본 인증서는 자체서명이라 처음에는 '승인 대기' 로 끊긴다 — 설정 › Security › 장비 신뢰에서 승인한다(그 노드에서).
  *  · DNS 리바인딩 차단(withSsrfLookup) · 리다이렉트 거부(토큰을 다른 주소로 따라 보내지 않는다).
- *  · 401 은 즉시 중단(authFailed 표지) — 폴러가 주기 수집을 멈춘다(util/authGuard.js, 계정 잠금 예방). 자동 재시도 없음.
+ *  · **로그인**(토큰 요청)의 401·403·invalid_grant 는 즉시 중단(authFailed 표지) — 폴러가 주기 수집을 멈춘다(util/authGuard.js, 계정 잠금 예방).
+ *    로그인이 성공한 뒤 GET 의 401(토큰 만료·VBR 서비스 재시작)은 자격증명 문제가 아니다 — 이번 수집만 실패(kind 'token'), 정지하지 않는다(v2.761 A3).
+ *    어느 쪽이든 같은 실행 안에서 다시 로그인하지 않는다(자동 재시도 없음).
+ *  · 시한(signal)이 끊기면 부분 결과를 성공으로 돌려주지 않는다(v2.761 A2 — 직전 완전한 결과를 덮지 않게).
  *  · 오류 문구에 비밀번호·토큰을 싣지 않는다(응답 본문에 되울려도 가린다).
  */
 import { Agent } from 'undici';
@@ -23,7 +26,7 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { pushAll } from '../util/pushAll.js';
 import { poolSettled } from '../util/pool.js';
-import { buildServerResult, listOf } from './parse.js';
+import { buildServerResult, listOf, isBackupSessionType } from './parse.js';
 import { DEFAULT_PORT, DEFAULT_API_VERSION } from './registry.js';
 
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'veeam', label: 'Veeam', envKey: 'VEEAM_TLS_VERIFY', envRaw: process.env.VEEAM_TLS_VERIFY, tls: withSsrfLookup({}) }) });
@@ -34,6 +37,8 @@ const MAX_SESSIONS = 20;         // 실행 중 세션의 task 조회 상한(요�
 const MAX_LAST_JOBS = 40;        // '마지막으로 끝난 세션' 의 task 를 읽을 작업 수 상한(VM 별 완료 시각·결과)
 const MAX_BACKUPS = 100;         // 파일(용량)을 읽을 백업(체인) 수 상한
 const RP_MAX_PAGES = 100;        // 복원 지점 최대 5만 건
+const FILES_UNSUPPORTED_N = 3;   // 백업 파일 목록이 처음부터 연속 이만큼 404·400 이면 '이 판은 미지원'(v2.761 A7 — 한 건은 개별 경합)
+const LOGOUT_TIMEOUT_MS = 5_000; // logout 은 상위 시한과 따로(시한이 끊긴 뒤에도 토큰 세션을 닫으려 시도한다 — v2.761 A2)
 const BODY_MAX = 32 * 1024 * 1024;
 
 const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS));
@@ -42,6 +47,14 @@ export function authError(message = '인증 실패(401) — Veeam 계정/비밀�
   const e = new Error(message); e.authFailed = true; e.status = 401; e.kind = 'auth';
   return e;
 }
+/** 로그인 뒤 GET 의 401(v2.761 A3) — 이번 수집 전체를 실패로(fatal) 하되 인증 정지는 하지 않는다(authFailed 없음). */
+function tokenError() {
+  const e = new Error('토큰 만료·거부(401) — 로그인은 성공했으므로 주기 수집은 멈추지 않습니다(다음 주기에 다시 로그인)');
+  e.status = 401; e.kind = 'token'; e.fatal = true;
+  return e;
+}
+/** 부분 결과로 넘기지 않고 수집 전체를 실패시킬 오류인가 — 인증 실패·토큰 거부. */
+const isFatal = (e) => !!(e?.authFailed || e?.fatal);
 
 /** 오류 문구에서 비밀을 가린다 — **가린 뒤에** 자른다(v2.751 검토 #8: 먼저 자르면 경계에 걸린 비밀의 앞부분이 남는다). URL 인코딩된 형태도 가린다. */
 function maskText(text, secrets) {
@@ -93,10 +106,10 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
   const secrets = [String(server.password || '')];
   let token = '';
 
-  async function call(path, init = {}) {
+  async function call(path, init = {}, { ownSignal = null } = {}) {
     let res;
     try {
-      res = refuseRedirect(await fetchImpl(`${base}${path}`, { ...init, redirect: NO_REDIRECT, dispatcher, signal: reqSignal(signal) }), `Veeam ${host}`);
+      res = refuseRedirect(await fetchImpl(`${base}${path}`, { ...init, redirect: NO_REDIRECT, dispatcher, signal: ownSignal || reqSignal(signal) }), `Veeam ${host}`);
     } catch (e) {
       if (!isTransportError(e)) throw e;
       throw new Error(describeFetchError(e, { host, port, timeoutMs: TIMEOUT_MS, cancelled: !!signal?.aborted }), { cause: e });
@@ -130,7 +143,7 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
     const base0 = path.split('?')[0];
     const ver = pathVer.get(base0) || apiVersion;
     const res = await call(path, { method: 'GET', headers: headers({}, ver) });
-    if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw authError('인증 만료·거부(401)'); }
+    if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw tokenError(); }
     if (!res.ok) {
       const text = await failText(res, secrets);
       const up = res.status === 400 && !pathVer.has(base0) ? higherVersion(text, ver) : null;
@@ -143,16 +156,23 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
     return readJsonCapped(res, BODY_MAX, `Veeam ${base0} 응답`);
   }
 
-  /** 페이지를 합친 원소 배열. 상한(maxPages)에서 멈췄으면 배열에 truncated:true 를 단다(호출부가 안내한다). */
+  /**
+   * 페이지를 합친 원소 배열. 상한(maxPages)에서 멈췄거나 total 보다 적게 끝났으면 배열에 truncated:true 를 단다(호출부가 안내한다).
+   * v2.761 A4: skip 은 **받은 개수**로 누적한다(서버가 limit 을 낮춰 주면 p*PAGE 는 건너뛴다) · pagination.total 이 있으면 그것으로
+   *   끝을 정한다('짧은 페이지 = 끝' 은 total 이 없을 때만). total 이 null·빈 값이면 모름(Number(null)===0 함정).
+   */
   async function getAll(path, { maxPages = MAX_PAGES } = {}) {
     const out = [];
     for (let p = 0; p < maxPages; p++) {
       const sep = path.includes('?') ? '&' : '?';
-      const body = await get(`${path}${sep}skip=${p * PAGE}&limit=${PAGE}`);
+      const body = await get(`${path}${sep}skip=${out.length}&limit=${PAGE}`);
       const items = listOf(body);
       pushAll(out, items); // 백업 객체는 수만 건일 수 있다 — 펼침 인자 push 금지
-      const total = Number(body?.pagination?.total);
-      if (items.length < PAGE || (Number.isFinite(total) && out.length >= total)) return out;
+      const tv = body?.pagination?.total;
+      const total = typeof tv === 'number' || (typeof tv === 'string' && tv.trim() !== '') ? Number(tv) : NaN;
+      const hasTotal = Number.isFinite(total) && total >= 0;
+      if (!items.length) { if (hasTotal && out.length < total) out.truncated = true; return out; }
+      if (hasTotal ? out.length >= total : items.length < PAGE) return out;
     }
     out.truncated = true;
     return out;
@@ -160,7 +180,7 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
 
   async function logout() {
     if (!token) return;
-    try { const r = await call('/api/oauth2/logout', { method: 'POST', headers: headers() }); try { await r.body?.cancel?.(); } catch { /* */ } } catch { /* 최선 */ }
+    try { const r = await call('/api/oauth2/logout', { method: 'POST', headers: headers() }, { ownSignal: AbortSignal.timeout(LOGOUT_TIMEOUT_MS) }); try { await r.body?.cancel?.(); } catch { /* */ } } catch { /* 최선 */ }
     token = '';
   }
   return { login, get, getAll, logout, apiVersion, bumped };
@@ -178,24 +198,27 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
   try {
     const jobs = await c.getAll('/api/v1/jobs');
     const soft = async (label, fn) => {
-      try { return await fn(); } catch (e) { if (e?.authFailed) throw e; notes.push(`${label}을(를) 읽지 못했습니다: ${String(e?.message || e).slice(0, 200)}`); return null; }
+      try { return await fn(); } catch (e) { if (isFatal(e)) throw e; notes.push(`${label}을(를) 읽지 못했습니다: ${String(e?.message || e).slice(0, 200)}`); return null; }
     };
-    const states = await soft('작업 상태', () => c.getAll('/api/v1/jobs/states'));
-    const backupObjects = await soft('백업 객체', () => c.getAll('/api/v1/backupObjects'));
+    // v2.761 A4: 상한·total 로 잘린 목록은 사실을 말한다(예전에는 복원 지점만 안내했다).
+    const cut = (label, arr) => { if (arr?.truncated) notes.push(`${label}이(가) ${arr.length}개에서 잘려 일부만 읽었습니다`); return arr; };
+    cut('작업 목록', jobs);
+    const states = cut('작업 상태', await soft('작업 상태', () => c.getAll('/api/v1/jobs/states')));
+    const backupObjects = cut('백업 객체', await soft('백업 객체', () => c.getAll('/api/v1/backupObjects')));
     // 실행 중 세션 — 필터 이름이 판마다 다를 수 있어 거절(400)이면 필터 없이 최근 세션을 받아 직접 거른다.
     let sesList = await soft('실행 중 세션', async () => {
       try { return listOf(await c.get(`/api/v1/sessions?stateFilter=Working&limit=${PAGE}`)); }
       catch (e) { if (e?.status === 400) return listOf(await c.get(`/api/v1/sessions?limit=${PAGE}`)); throw e; }
     });
     sesList = (sesList || []).filter((x) => x && typeof x === 'object' && /^(working|starting|resuming)$/i.test(String(x.state || ''))
-      && (!x.sessionType || /backup/i.test(String(x.sessionType))));
+      && isBackupSessionType(x.sessionType)); // v2.761 A1: 끝난 세션 필터와 같은 판정(백업 복사·복제 제외)
     if (sesList.length > MAX_SESSIONS) notes.push(`실행 중 세션 ${sesList.length}개 중 ${MAX_SESSIONS}개만 VM 단위로 읽었습니다(나머지는 작업 단위)`);
     const sessions = [];
     for (const [i, ses] of sesList.entries()) {
       if (i >= MAX_SESSIONS) { sessions.push({ session: ses, tasks: null, tasksError: 'skipped' }); continue; }
       const id = encodeURIComponent(String(ses.id || ''));
       try { sessions.push({ session: ses, tasks: await c.get(`/api/v1/sessions/${id}/taskSessions?limit=${PAGE}`) }); }
-      catch (e) { if (e?.authFailed) throw e; sessions.push({ session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }); }
+      catch (e) { if (isFatal(e)) throw e; sessions.push({ session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }); }
     }
     if (sessions.some((x) => x.tasksError && x.tasksError !== 'skipped')) notes.push('실행 중 세션의 VM 단위 task 를 읽지 못해 그 작업의 VM 을 작업 단위로 \'백업 중\' 표시했습니다');
     // ── 상세(v2.751 사용자 요청: 백업 완료 시각 · 복원 지점 · 용량) — 각각 실패해도 나머지로 결과를 만든다 ──────────
@@ -207,17 +230,17 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const lastByJob = new Map();
     for (const x of recent || []) {
       if (!x || typeof x !== 'object' || !x.jobId || !/^stopped$/i.test(String(x.state || ''))) continue;
-      if (x.sessionType && (!/backup/i.test(String(x.sessionType)) || /copy|replica/i.test(String(x.sessionType)))) continue;
+      if (!isBackupSessionType(x.sessionType)) continue;
       const t = Date.parse(x.endTime || x.creationTime || '') || 0;
       const prev = lastByJob.get(x.jobId);
       if (!prev || t > prev.t) lastByJob.set(x.jobId, { t, ses: x });
     }
     const lastList = [...lastByJob.values()].sort((a, b) => b.t - a.t).slice(0, MAX_LAST_JOBS);
     const lastTasks = [];
-    const authOf = (rs) => { const x = rs.find((r) => r.status === 'rejected' && r.reason?.authFailed); if (x) throw x.reason; }; // 묶음 안의 401 도 인증 정지로
+    const authOf = (rs) => { const x = rs.find((r) => r.status === 'rejected' && isFatal(r.reason)); if (x) throw x.reason; }; // 묶음 안의 401 도 전체 실패로
     authOf(await poolSettled(lastList, 4, async ({ ses }) => {
       try { lastTasks.push({ session: ses, tasks: await c.get(`/api/v1/sessions/${encodeURIComponent(String(ses.id || ''))}/taskSessions?limit=${PAGE}`) }); }
-      catch (e) { if (e?.authFailed) throw e; }
+      catch (e) { if (isFatal(e)) throw e; }
     }));
     if (lastList.length && !lastTasks.length) notes.push('끝난 세션의 VM 별 결과(task)를 읽지 못해 완료 시각은 복원 지점 생성 시각으로 보여 줍니다');
     // 복원 지점: /api/v1/restorePoints 는 1.2-rev0 판부터(그 아래 판은 판 거절 → 위 get 이 지원 판으로 올려 다시 읽는다).
@@ -225,25 +248,35 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const restorePoints = await soft('복원 지점', async () => {
       try { return await c.getAll('/api/v1/restorePoints', { maxPages: RP_MAX_PAGES }); }
       catch (e) {
-        if (e?.authFailed || (e?.status !== 400 && e?.status !== 404)) throw e;
+        if (isFatal(e) || (e?.status !== 400 && e?.status !== 404)) throw e;
         try { return await c.getAll('/api/v1/objectRestorePoints', { maxPages: RP_MAX_PAGES }); }
-        catch (e2) { if (e2?.authFailed) throw e2; throw new Error(`${String(e.message).slice(0, 160)} · ${String(e2?.message || e2).slice(0, 160)}`); }
+        catch (e2) { if (isFatal(e2)) throw e2; throw new Error(`${String(e.message).slice(0, 160)} · ${String(e2?.message || e2).slice(0, 160)}`); }
       }
     });
     if (restorePoints?.truncated) notes.push(`복원 지점이 ${restorePoints.length}개를 넘어 일부만 읽었습니다`);
-    // 백업(체인)과 그 파일(용량). 파일 경로가 없는 판(404)이면 첫 실패에서 멈추고 용량 없이 간다.
-    const backupList = (await soft('백업 목록', () => c.getAll('/api/v1/backups'))) || [];
+    // 백업(체인)과 그 파일(용량). v2.761 A7: 한 백업의 404·400(목록과 파일 조회 사이 삭제 등)은 **그 백업만** 용량을 비운다.
+    //   '이 판은 미지원' 은 성공이 한 번도 없이 처음부터 연속 FILES_UNSUPPORTED_N 건(또는 시도한 전부)이 404·400 일 때만 — 그 뒤로는 묻지 않는다.
+    const backupList = cut('백업 목록', (await soft('백업 목록', () => c.getAll('/api/v1/backups'))) || []);
     const backups = [];
-    let filesUnsupported = false;
+    let filesUnsupported = false; let filesOk = false; let filesMissing = 0; let filesTried = 0;
     authOf(await poolSettled(backupList.slice(0, MAX_BACKUPS), 4, async (b) => {
       if (!b || typeof b !== 'object' || !b.id) return;
       if (filesUnsupported) { backups.push({ backup: b, files: null }); return; }
-      try { backups.push({ backup: b, files: await c.get(`/api/v1/backups/${encodeURIComponent(String(b.id))}/backupFiles?limit=${PAGE}`) }); }
-      catch (e) { if (e?.authFailed) throw e; if (e?.status === 404 || e?.status === 400) filesUnsupported = true; backups.push({ backup: b, files: null }); }
+      filesTried++;
+      try { backups.push({ backup: b, files: await c.get(`/api/v1/backups/${encodeURIComponent(String(b.id))}/backupFiles?limit=${PAGE}`) }); filesOk = true; }
+      catch (e) {
+        if (isFatal(e)) throw e;
+        if (e?.status === 404 || e?.status === 400) { filesMissing++; if (!filesOk && filesMissing >= FILES_UNSUPPORTED_N) filesUnsupported = true; }
+        backups.push({ backup: b, files: null });
+      }
     }));
-    if (filesUnsupported) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
+    if (filesUnsupported || (!filesOk && filesMissing > 0 && filesMissing === filesTried)) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
+    else if (filesMissing) notes.push(`백업 ${filesMissing}개는 파일 목록을 받지 못해(404·400) 그 백업만 용량을 비웠습니다`);
     if (backupList.length > MAX_BACKUPS) notes.push(`백업 ${backupList.length}개 중 ${MAX_BACKUPS}개만 용량을 읽었습니다`);
     for (const b of c.bumped) notes.push(`${b.path} 는 이 서버가 판 ${b.from} 으로는 주지 않아 지원 판 ${b.to} 으로 읽었습니다`);
+    // v2.761 A2: 시한이 끊긴 뒤의 요청은 모두 '취소' 로 실패하고 soft·세션 루프·두 묶음이 그것을 삼킨다 — 여기서 결과를 만들면 잘린 결과가
+    //   ok:true 로 저장돼 직전 완전한 결과(lastOk)를 덮는다. 전체 실패로 던진다(withDeadline 이 시한 문구로 바꾼다).
+    if (signal?.aborted) throw new Error('수집 시한이 지나 일부만 읽었습니다 — 부분 결과는 저장하지 않습니다');
     const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
     return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, notes: [...notes, ...r.notes] };
   } finally {

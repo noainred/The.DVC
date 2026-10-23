@@ -123,7 +123,8 @@ export function saveServer(input = {}) {
     db.servers.push(dev);
   }
   persist();
-  return { ...redact(dev), ...(droppedSecrets.length ? { droppedSecrets } : {}) };
+  // v2.761 B4: moved 를 돌려준다 — 호출부(관리 라우트·대량 가져오기)가 옛 접속처의 결과(lastOk)와 인증 정지를 지운다.
+  return { ...redact(dev), ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(moved ? { moved: true } : {}) };
 }
 
 export function deleteServer(id) {
@@ -145,12 +146,19 @@ export function serversForVcenter(vcenterId) {
   return load().servers.filter((d) => d.enabled !== false && Array.isArray(d.vcenterIds) && d.vcenterIds.includes(vcenterId)).map(redact);
 }
 
-/** 엣지: 중앙 pull 결과 반영 — 내 몫을 통째로 교체(중앙에서 지운 서버가 유령으로 남지 않게). 빠진 id 를 돌려준다. */
+/**
+ * 엣지: 중앙 pull 결과 반영 — 내 몫을 통째로 교체(중앙에서 지운 서버가 유령으로 남지 않게). 빠진 id(removed)와
+ * 접속처(host·port·username)가 바뀐 id(moved — v2.761 B4: 호출부가 옛 결과·인증 정지를 지운다)를 돌려준다.
+ * v2.761 B6: 중앙에서 받은 원소(pulled)는 **agent 이름과 무관하게** 전부 교체한다 — 엣지 이름이 바뀌면 옛 이름으로 받은 서버
+ *   (봉인된 비밀번호 포함)가 영구히 남았다. 남기는 것은 이 노드에서 직접 등록한(pulled 아님) 남의 몫뿐이다.
+ */
 export function applyPulledServers(list) {
   const db = load();
   const mine = String(config.agent.name || '').toLowerCase();
-  const keep = db.servers.filter((d) => String(d.agent || '').toLowerCase() !== mine);
-  const before = new Set(db.servers.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => String(d.id)));
+  const replaced = (d) => d.pulled === true || String(d.agent || '').toLowerCase() === mine;
+  const keep = db.servers.filter((d) => !replaced(d));
+  const prevById = new Map(db.servers.filter(replaced).map((d) => [String(d.id), d]));
+  const before = new Set(prevById.keys());
   const clean = (Array.isArray(list) ? list : []).filter((d) => d && typeof d === 'object' && typeof d.id === 'string' && !serverInputIssue({ ...d, password: d.password || '' }))
     .slice(0, MAX_SERVERS)
     .map((d) => ({
@@ -162,7 +170,12 @@ export function applyPulledServers(list) {
   db.servers = [...keep, ...clean];
   persist();
   const now = new Set(clean.map((d) => d.id));
-  return { count: clean.length, rejected: (Array.isArray(list) ? list.length : 0) - clean.length, removed: [...before].filter((id) => !now.has(id)) };
+  const moved = clean.filter((d) => {
+    const p = prevById.get(d.id);
+    return !!p && accessMoved({ host: p.host, port: String(p.port || DEFAULT_PORT), username: p.username || '' },
+      { host: d.host, port: String(d.port), username: d.username }, ['host', 'port', 'username']);
+  }).map((d) => d.id);
+  return { count: clean.length, rejected: (Array.isArray(list) ? list.length : 0) - clean.length, removed: [...before].filter((id) => !now.has(id)), moved };
 }
 
 export function _resetForTest() { _db = null; loadErr.clear(); }

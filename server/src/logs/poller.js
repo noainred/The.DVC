@@ -76,6 +76,8 @@ export function eventsCompleteUntil(events, { startedAt, max = Infinity } = {}) 
 export function logCollectOk(vcenterId) { const r = _collectOk.get(String(vcenterId ?? '')); return r ? { ...r } : null; }
 /** 그 vCenter 의 이벤트가 온전한 마지막 시각(ms) 또는 null(기록 없음). */
 export function logCollectOkAt(vcenterId) { return _collectOk.get(String(vcenterId ?? ''))?.at ?? null; }
+/** v2.761(Veeam C1): 이 프로세스에서 수집 주기를 한 번 이상 끝까지 돌았는가 — 그 뒤에도 기록이 없는 vCenter 는 '아직 못 모음'(기동 직후와 구분). */
+export function logPollerRanOnce() { return lastRun != null && lastRun.skipped !== true; }
 
 const MOCK_TYPES = [
   ['UserLoginSessionEvent', 'info', (u, e) => `User ${u} logged in`],

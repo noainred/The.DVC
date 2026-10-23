@@ -623,20 +623,20 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:183](../server/src/routes/admin/backupNetSec.js#L183) |
 | PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:169](../server/src/routes/admin/backupNetSec.js#L169) |
 | GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:166](../server/src/routes/admin/backupNetSec.js#L166) |
-| GET | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:61](../server/src/routes/admin/veeam.js#L61) |
-| POST | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:78](../server/src/routes/admin/veeam.js#L78) |
-| DELETE | `/veeam/servers/:id` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:92](../server/src/routes/admin/veeam.js#L92) |
-| POST | `/veeam/servers/:id/collect` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:119](../server/src/routes/admin/veeam.js#L119) |
-| POST | `/veeam/servers/:id/test` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:102](../server/src/routes/admin/veeam.js#L102) |
-| GET | `/veeam/servers/export.csv` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:146](../server/src/routes/admin/veeam.js#L146) |
-| GET | `/veeam/servers/export.txt` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:151](../server/src/routes/admin/veeam.js#L151) |
-| POST | `/veeam/servers/import` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:200](../server/src/routes/admin/veeam.js#L200) |
-| POST | `/veeam/servers/import/test` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:161](../server/src/routes/admin/veeam.js#L161) |
-| GET | `/veeam/servers/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:193](../server/src/routes/admin/veeam.js#L193) |
-| GET | `/veeam/servers/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:156](../server/src/routes/admin/veeam.js#L156) |
-| GET | `/veeam/servers/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:157](../server/src/routes/admin/veeam.js#L157) |
-| GET | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:45](../server/src/routes/admin/veeam.js#L45) |
-| PUT | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:46](../server/src/routes/admin/veeam.js#L46) |
+| GET | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:77](../server/src/routes/admin/veeam.js#L77) |
+| POST | `/veeam/servers` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:94](../server/src/routes/admin/veeam.js#L94) |
+| DELETE | `/veeam/servers/:id` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:110](../server/src/routes/admin/veeam.js#L110) |
+| POST | `/veeam/servers/:id/collect` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:139](../server/src/routes/admin/veeam.js#L139) |
+| POST | `/veeam/servers/:id/test` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:120](../server/src/routes/admin/veeam.js#L120) |
+| GET | `/veeam/servers/export.csv` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:177](../server/src/routes/admin/veeam.js#L177) |
+| GET | `/veeam/servers/export.txt` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:182](../server/src/routes/admin/veeam.js#L182) |
+| POST | `/veeam/servers/import` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:231](../server/src/routes/admin/veeam.js#L231) |
+| POST | `/veeam/servers/import/test` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:192](../server/src/routes/admin/veeam.js#L192) |
+| GET | `/veeam/servers/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:224](../server/src/routes/admin/veeam.js#L224) |
+| GET | `/veeam/servers/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:187](../server/src/routes/admin/veeam.js#L187) |
+| GET | `/veeam/servers/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:188](../server/src/routes/admin/veeam.js#L188) |
+| GET | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:61](../server/src/routes/admin/veeam.js#L61) |
+| PUT | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:62](../server/src/routes/admin/veeam.js#L62) |
 | GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:393](../server/src/routes/admin/collectorsDc.js#L393) |
 | POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:421](../server/src/routes/admin/collectorsDc.js#L421) |
 
@@ -1176,10 +1176,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:789](../server/src/routes/api/toolsCapacity.js#L789) |
-| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:160](../server/src/routes/api/veeam.js#L160) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:130](../server/src/routes/api/veeam.js#L130) |
-| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:146](../server/src/routes/api/veeam.js#L146) |
-| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:192](../server/src/routes/api/veeam.js#L192) |
+| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:196](../server/src/routes/api/veeam.js#L196) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:164](../server/src/routes/api/veeam.js#L164) |
+| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:181](../server/src/routes/api/veeam.js#L181) |
+| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:228](../server/src/routes/api/veeam.js#L228) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:386](../server/src/routes/api/inventory.js#L386) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |

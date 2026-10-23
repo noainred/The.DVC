@@ -18,8 +18,9 @@ import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS, snapCovered } from '../../veeam/snapEvents.js';
 import { getSnapDb } from '../../veeam/snapDb.js';
 import { kickSnapBackfill } from '../../veeam/snapWarm.js';
-import { logCollectOkAt } from '../../logs/poller.js';
-import { veeamCount, snapCount } from '../../veeam/backupCounts.js';
+import { logCollectOkAt, logPollerRanOnce } from '../../logs/poller.js';
+import { veeamCount, snapCount, snapVerdict } from '../../veeam/backupCounts.js';
+import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
@@ -28,19 +29,45 @@ function genericError(r) {
   return 'Veeam 서버를 읽지 못했습니다 — 자세한 사유는 관리자 화면(설정 › Veeam 백업 서버)에 있습니다';
 }
 
-/** 서버별 상태(화면 안내용 — 계정 없음. 오류 원문(주소 포함)은 관리자에게만). */
-function serverView(d, rec, admin) {
+/*
+ * v2.761(B1): 비고(notes)의 '…을(를) 읽지 못했습니다: <원문>' 원문에는 Veeam 주소·포트·TLS 지문이 들어간다(describeFetchError) —
+ *   error 와 같이 관리자에게만 원문, 그 밖에는 '읽지 못했습니다' 까지만. 다른 비고에도 주소 꼴(host:port · URL)이 있으면 일반 문구로.
+ */
+const NOTE_CUT = '읽지 못했습니다';
+const ADDR_LIKE = /:\/\/|[A-Za-z0-9-]\.[A-Za-z0-9-]+:\d{2,5}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b|fingerprint|지문/i;
+function publicNote(n) {
+  const t = String(n || '').slice(0, 300);   // 정제 상한(300)과 같다 — 정규식 입력 길이를 먼저 자른다
+  const i = t.indexOf(`${NOTE_CUT}:`);
+  const cut = i >= 0 ? `${t.slice(0, i + NOTE_CUT.length)} — 자세한 사유는 관리자 화면에 있습니다` : t;
+  return ADDR_LIKE.test(cut) ? 'Veeam 서버를 읽는 중 일부 항목에 문제가 있었습니다 — 자세한 사유는 관리자 화면에 있습니다' : cut;
+}
+
+/**
+ * v2.761(B2·B5): 결과가 '지금' 이라고 볼 수 있는 한도 — 그 결과를 만든 노드의 수집 주기 × 2 + 2분.
+ *   엣지가 읽은 결과는 그 엣지가 보고한 주기(veeamEdge status.poller.intervalMs), 없으면 중앙 주기.
+ */
+function resultMaxAgeMs(via, agent) {
+  const i = via === 'edge' ? veeamEdgeStatus(agent)?.status?.poller?.intervalMs : null;
+  return (Number.isFinite(i) && i > 0 ? i : pollMs()) * 2 + 120_000;
+}
+
+/** 서버별 상태(화면 안내용 — 계정 없음. 오류 원문(주소 포함)·서버 전체 집계는 관리자에게만). */
+function serverView(d, rec, admin, now = Date.now()) {
   const r = rec?.result || null;
   const use = usableResult(rec);
+  const notes = Array.isArray(use?.notes) ? use.notes.slice(0, 5) : [];
   return {
     name: d.name, ok: r ? r.ok === true : null, ts: r?.ts ?? null, lastOkTs: use?.ts ?? null,
+    // v2.761(B2): 쓸 수 있는 결과가 한도보다 오래됐다(엣지가 멈춤·담당 변경 등) — 숫자는 그대로, 표지만.
+    stale: !!use && (!(Number(use.ts) > 0) || now - Number(use.ts) > resultMaxAgeMs(rec?.via, rec?.agent)),
     error: r && !r.ok ? (admin ? String(r.error || '').slice(0, 300) : genericError(r)) : '', authStopped: !!r?.authStop,
-    via: rec?.via || '', notes: Array.isArray(use?.notes) ? use.notes.slice(0, 5) : [],
-    counts: use?.counts || null,
+    via: rec?.via || '', notes: admin ? notes : notes.map(publicNote),
+    // v2.761(B7): 서버 전체(다른 법인 vCenter 포함) 집계 — 범위 계정에 새지 않게 관리자만(화면은 이 값을 쓰지 않는다).
+    counts: admin ? (use?.counts || null) : null,
   };
 }
 
-const DEMO_SERVER_VIEW = () => ({ name: '데모 Veeam', ok: true, ts: Date.now(), lastOkTs: Date.now(), error: '', authStopped: false, via: 'demo', notes: [], counts: null });
+const DEMO_SERVER_VIEW = () => ({ name: '데모 Veeam', ok: true, ts: Date.now(), lastOkTs: Date.now(), stale: false, error: '', authStopped: false, via: 'demo', notes: [], counts: null });
 
 /** 요청 vCenter 의 범위·존재 판정 — 밖이면 null(호출부가 404). */
 function vcOf(req) {
@@ -59,10 +86,11 @@ function resultsFor(vcenterId, req) {
   const results = []; const views = [];
   for (const d of serversForVcenter(vcenterId)) {
     const rec = getRecord(d.id);
-    views.push(serverView(d, rec, admin));
+    views.push(serverView(d, rec, admin, now));
     const use = usableResult(rec);
     // v2.751 검토 #6: 실패해 마지막 성공분을 쓰거나 주기의 2배보다 오래된 결과의 '백업 중' 은 지금 사실이 아니다 — 지우고 대조한다.
-    if (use) results.push({ server: { id: d.id, name: d.name }, result: withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: pollMs() * 2 + 120_000 }) });
+    //   v2.761(B5): 엣지 결과는 그 엣지의 주기로.
+    if (use) results.push({ server: { id: d.id, name: d.name }, result: withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) }) });
   }
   return { results, views, host: listVcenters().find((v) => v.id === vcenterId)?.host || '' };
 }
@@ -88,9 +116,13 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
     const e = edgeSnapFor(vcenterId);
     if (!e) return { ...base, status: 'no-edge-data', source: 'edge' };
     // 검토 #7: 엣지가 멈췄거나 담당이 바뀌면 마지막 요약을 '지금' 처럼 보이지 않는다(push 주기 2배 + 여유).
-    if (Date.now() - e.at > pollMs() * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
+    //   v2.761(B5): 그 엣지가 보고한 주기로(없으면 중앙 주기) · e.at 은 중앙 수신 시각이다(C8 — 엣지 시계와 무관).
+    const ei = veeamEdgeStatus(e.agent)?.status?.poller?.intervalMs;
+    if (Date.now() - e.at > (Number.isFinite(ei) && ei > 0 ? ei : pollMs()) * 2 + 600_000) return { ...base, status: 'stale-edge', source: 'edge', at: e.at };
     if (e.status && e.status !== 'ok') return { ...base, status: e.status, source: 'edge', at: e.at };
-    return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, unpaired: e.unpaired, truncated: e.truncated, accounts: e.accounts, at: e.at };
+    // v2.761(C2): 엣지 로그 폴러의 마지막 온전한 수집 시각(옛 엣지는 없다 — null = 모름, 막지 않는다)과 '그 엣지 폴러가 돌았는가'.
+    return { ...base, status: 'ok', source: 'edge', days: e.days, byVm: onlyKnown(e.byVm), events: e.events, ambiguous: e.ambiguous, unmatched: e.unmatched, unpaired: e.unpaired, truncated: e.truncated, accounts: e.accounts, at: e.at,
+      collectedAt: Number.isFinite(e.collectedAt) ? e.collectedAt : null, ...(e.collectRan === true ? { collectRan: true } : {}) };
   }
   if (why) return { ...base, status: 'not-collected', why };
   const ls = loadLogSettings();
@@ -103,7 +135,9 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
   }
   const r = await localSnapSummary(await getLogsDb(), vcenterId, vms, { snapDb });
   // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
-  return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at, collectedAt: logCollectOkAt(vcenterId) };
+  //   v2.761(C1): collectRan = 이 프로세스에서 로그 폴러가 한 주기를 끝냈다(그 뒤에도 null 이면 '아직 못 모음' — 기동 직후는 아니다).
+  return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at,
+    collectedAt: logCollectOkAt(vcenterId), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
 }
 
 /*
@@ -137,7 +171,8 @@ export function registerVeeamBadges(api) {
     }
     const { results, views, host } = resultsFor(vcenterId, req);
     const m = matchToVcenter({ id: vcenterId, host }, vms, results);
-    res.json({ ok: true, configured: true, servers: views, ...m, at: Date.now() });
+    // v2.761(D5): 실패·오래된 결과라 '백업 중' 을 지운 서버가 있으면 실행 중·대기 수는 0 이 아니라 모름.
+    res.json({ ok: true, configured: true, servers: views, ...m, runningStale: results.some((x) => x.result?.runningStale === true), at: Date.now() });
   });
 
   // v2.754(사용자 요청 '지금 스냅샷이 없으면 확인 안 되는가' → vCenter 이벤트 방식): 최근 7일 'Veeam 계정이 만든 VM 스냅샷 생성 이벤트'.
@@ -150,7 +185,8 @@ export function registerVeeamBadges(api) {
     return memoJson(req, res, 'veeam-snap-events', async (snap) => {
       const r = await cachedSnapEvents(t.vcenterId, t.vms, { initial: snap?.initial === true });
       const { error: _e, ...rest } = r || {};
-      return { ok: true, vcenterId: t.vcenterId, days: LOOKBACK_DAYS, byVm: {}, ...rest };
+      // v2.761(D4): 카드(snapCount)와 같은 판정 — 칩은 verdict.ok 일 때만 숫자를 보인다(판정 코어 하나).
+      return { ok: true, vcenterId: t.vcenterId, days: LOOKBACK_DAYS, byVm: {}, ...rest, verdict: snapVerdict(r) };
     }, { ttlMs: 60_000, extraKey: scopeKey(req.user, store.get()) });
   });
 
@@ -175,8 +211,8 @@ export function registerVeeamBadges(api) {
           const { results, views, host } = resultsFor(vc.id, req);
           // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
-          const byVm = results.length ? matchToVcenter({ id: vc.id, host }, vms, results).byVm : null;
-          byVc[vc.id] = veeamCount({ views, byVm, vmTotal: vms.length });
+          const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results) : null;
+          byVc[vc.id] = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
         } else if (isMockMode()) {
           byVc[vc.id] = { ...veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length }), demo: true };
         } else {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -184,5 +184,44 @@ describe('v2.759 — 전용 DB 준비 중', () => {
     const fs = await import('node:fs');
     const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
     expect(src).toMatch(/usePolling\(openId \? null : '\/veeam\/backup-counts', \{\}, 60_000\)/);
+  });
+});
+
+describe('v2.761 — Veeam 표시 버그 점검 수정(웹)', () => {
+  const sv = (o) => ({ name: 'VBR', ok: true, lastOkTs: 1, notes: [], ...o });
+  it('D1: 쓸 수 있는 결과가 하나도 없으면 0/N 이 아니라 모름(경고는 남긴다)', () => {
+    const s = veeamSummary({ configured: true, servers: [sv({ ok: false, lastOkTs: null, error: '연결 거부' })], byVm: {} }, { vmTotal: 340 });
+    expect(s.stats).toBe(null); expect(s.kind).toBe('pending'); expect(s.text).toMatch(/0대가 아니라 아직 모릅니다/);
+    expect(s.warnings.join()).toMatch(/연결 거부/);
+    expect(veeamSummary({ configured: true, servers: [sv({ ok: null, lastOkTs: null })], byVm: {} }).kind).toBe('pending');
+  });
+  it('D5: 서버가 오래된 백업 중 표지를 지웠으면 실행 중·대기는 모름', () => {
+    const s = veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, runningStale: true });
+    expect(s.stats.running).toBe(null); expect(s.stats.pending).toBe(null); expect(s.details.join()).toMatch(/최신 결과가 아니라/);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: { a: { run: 1 } } }).stats.running).toBe(1);
+  });
+  it('D8: 첫 응답 뒤 갱신 실패는 경고로 · B2: 오래된 결과 경고 · A5: 맞은 VM 0 + 다른 vCenter 만 → 주소 불일치 경고', () => {
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: {} }, { refreshError: '503' }).warnings[0]).toMatch(/최근 갱신에 실패했습니다.*503/);
+    expect(veeamSummary({ configured: true, servers: [sv({ stale: true })], byVm: { a: {} } }).warnings.join()).toMatch(/오래됐습니다/);
+    const mis = veeamSummary({ configured: true, servers: [sv()], byVm: {}, otherVcenter: 120 });
+    expect(mis.warnings.join()).toMatch(/IP·FQDN/); expect(mis.tone).toBe('warn');
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: 3 }).details.join()).toMatch(/정상/);
+  });
+  it('카드 칸: 오래됨·주소 불일치는 노란 칸 · 동명 VM·잔존 스냅샷 안내 · 새 사유 코드', () => {
+    expect(backupCell({ src: 'veeam', n: 5, vmTotal: 9, stale: 1, partial: true }).title).toMatch(/1대의 결과가 오래됐습니다/);
+    const hm = backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: 9, hostMismatch: true });
+    expect(hm.tone).toBe('warn'); expect(hm.title).toMatch(/IP·FQDN/);
+    const sn = backupCell({ src: 'snap', n: 3, vmTotal: 9, ambiguous: 2, snapStale: 1, partial: true, snapEv: 3, snapNow: 0 });
+    expect(sn.title).toMatch(/이름이 같은 VM 이 둘 이상.*2건/); expect(sn.title).toMatch(/하루 넘게 남은.*1대/);
+    expect(backupCell({ src: 'snap', n: null, reason: 'no-collect-yet' }).title).toMatch(/아직 한 번도 수집하지 못했습니다/);
+  });
+  it('D4: 칩 숫자는 서버 판정(verdict)을 따른다 — 계정 모름·오래됨이면 숫자 없이 이유', () => {
+    const byVm = { a: [1, 1], b: [1, 2] };
+    expect(veeamEventChip({ status: 'ok', byVm, verdict: { ok: true, reason: null } }).n).toBe(2);
+    const st = veeamEventChip({ status: 'ok', byVm, collectedAt: new Date(2026, 9, 10, 6, 27).getTime(), verdict: { ok: false, reason: 'stale-events' } });
+    expect(st.n).toBe(null); expect(st.why).toMatch(/2026-10-10 06:27/);
+    expect(veeamEventChip({ status: 'ok', byVm: {}, verdict: { ok: false, reason: 'no-account' } }).why).toMatch(/계정을 아직 모릅니다/);
+    expect(veeamEventChip({ status: 'ok', byVm }).n).toBe(2);   // 옛 서버(verdict 없음)는 예전처럼
+    expect(veeamEventChip({ status: 'log-off' }).n).toBe(null);
   });
 });
