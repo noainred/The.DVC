@@ -133,6 +133,9 @@ test('V4-1 ⑥ 실제 라우트 — 영어·한국어 TaskEvent 를 읽어 보�
     { vcenterId: 'vc-a', key: 'r2', ts: T + 1000, severity: 'info', type: 'TaskEvent', user: 'CORP\\svc-veeam', entity: 'ko-vm', message: '작업: 가상 시스템 스냅샷 생성' },
     { vcenterId: 'vc-a', key: 'r3', ts: T + 2000, severity: 'info', type: 'TaskEvent', user: 'CORP\\kim', entity: 'human-vm', message: 'Task: Remove snapshot (backup)' },
     { vcenterId: 'vc-a', key: 'r4', ts: T + 3000, severity: 'info', type: 'VmPoweredOnEvent', user: '', entity: 'none-vm', message: 'none-vm is powered on' },
+    // v2.772(Z4-1): 수집이 지금까지 온전한 vCenter 로 둔다 — 마지막 이벤트가 2시간 전이고 폴러 기록이 없으면 '수집이 뒤처진 vCenter' 라
+    //   보호 근거 없는 VM 이 미보호가 아니라 판정 불가(collect-lag)가 된다(그 판정은 evlog2772c 가 본다). 여기서는 V4-1 의 보호 판정만 본다.
+    { vcenterId: 'vc-a', key: 'r5', ts: Date.now(), severity: 'info', type: 'UserLoginSessionEvent', user: 'x', entity: '', message: 'login' },
   ]);
   store.snapshot = {
     generatedAt: new Date().toISOString(), source: 'live',

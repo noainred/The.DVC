@@ -19,7 +19,7 @@ import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
-import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다)
+import { eventNotCollectedMap, notCollectedList, eventLagForView } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다) · v2.772(Z4-1): 수집이 뒤처진 vCenter
 
 /**
  * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
@@ -187,6 +187,9 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
     const notCollected = notCollectedList(eventNotCollectedMap(), { allowed, only: vcParam ? [vcParam] : null, names });
     res.json({
       total: changes.length, scanned: rows.length, truncated: rows.length >= SCAN_MAX,
+      // v2.772(Z4-3): 실제로 훑은 행의 시각 범위(행은 최신 먼저). 예전 화면 안내 '기간을 줄이세요' 는 틀렸다 — 상한은 종류와 무관한 최신 행 수라
+      //   이벤트가 많은 현장에서는 1일로 줄여도 최근 1시간 남짓만 본다. 화면이 'X ~ Y 만 봤습니다' 라 말한다(종류 선필터·조각 읽기는 별 작업 — perf 위험).
+      scanMax: SCAN_MAX, scannedFrom: rows.length ? numOrNull(rows[rows.length - 1]?.ts) : null, scannedTo: rows.length ? numOrNull(rows[0]?.ts) : null,
       days, categories: CHANGE_CATEGORIES,
       notCollected,
       rows: changes.slice(offset, offset + limit),
@@ -207,7 +210,8 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
     const vcParam = req.query.vcenterId || '';
     const allowed = scopedVcenterIds(req.user, snap);
-    const lf = { vcenterId: vcParam, q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 };
+    const now = Date.now();
+    const lf = { vcenterId: vcParam, q: 'Snapshot', since: now - lookbackDays * 86_400_000 };
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
     const ROW_LIMIT = 20_000;
     // v2.732(점검 2회차 B6-03): 'Snapshot' 4열 LIKE 를 조회 창 전체에 한 문장으로 돌려(합성 7일 80만 행 · 431ms, 범위 계정 693ms 정지 — 재현)
@@ -232,7 +236,11 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
       if (why) { notCollectedVcenterIds.set(String(vc.id), why); continue; }
       if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
     }
-    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, truncated, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds });
+    // v2.772(Z4-1): 수집은 하지만 완결 시각이 허용치보다 낡은 vCenter(따라잡기 중 포함) — 보호 근거가 없는 VM 은 미보호가 아니라
+    //   판정 불가('collect-lag'). 판정은 logs/coverage.js 한 벌(VM 가용성의 측정 끝과 같은 코어 · 같은 허용치). 범위는 이미 거른 scoped.vcenters.
+    //   판정을 못 하면(null — 등록부·폴러를 못 읽음) 예전처럼 판정한다(근거 없이 '판정 불가' 로 몰지 않는다). memo 30초라 지연 변화는 30초 안에 반영된다.
+    const lag = await eventLagForView({ db, now, only: (scoped.vcenters || []).map((v) => String(v.id)), notCollected: ncMap });
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, truncated, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds, laggingVcenters: Array.isArray(lag) ? lag : undefined });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

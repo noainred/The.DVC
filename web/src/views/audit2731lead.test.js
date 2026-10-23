@@ -47,8 +47,8 @@ describe('v2.731 리드 — 웹', () => {
   it('④ VM 가용성 — tailCutText 는 tailCut 행에만, 측정 끝 시각을 말한다 · 화면이 그 문구를 그린다', () => {
     expect(tailCutText({ tailCut: false, windowTo: 5 })).toBe(null);
     expect(tailCutText(null)).toBe(null);
-    expect(tailCutText({ tailCut: true, windowTo: 1000 }, () => 'T')).toBe('수집 멈춤 — T 까지만 잼');
-    expect(tailCutText({ tailCut: true, windowTo: null })).toBe('수집 멈춤 — 멈춘 시각까지만 잼');
+    expect(tailCutText({ tailCut: true, windowTo: 1000 }, () => 'T')).toBe('수집 멈춤·지연 — T 까지만 잼');   // v2.772(Z4-S2): 따라잡는 중도 여기에 든다
+    expect(tailCutText({ tailCut: true, windowTo: null })).toBe('수집 멈춤·지연 — 수집이 끝난 시각까지만 잼');
     const s = stripComments(fs.readFileSync(path.join(SRC, 'views/tools/VmAvailabilityTool.jsx'), 'utf8'));
     expect(s).toMatch(/v\.tailCut && <div[^>]*>\{tailCutText\(v\)\}/);
   });

@@ -45,9 +45,10 @@ export function coverageNote(data) {
     // v2.733(C1-01): 서버는 지금 수집하지 않는 vCenter 를 tailFromLastEvent 에서 빼고 tailNotCollected 로 따로 센다 — 원인을 섞지 않는다.
     const src = c.tailFromLastEvent ? ` — 그중 ${Number(c.tailFromLastEvent).toLocaleString()}곳은 수집 성공 기록이 없어(포탈 재시작 직후이거나 수집이 계속 실패하는 중) 마지막으로 받은 이벤트 시각을 썼습니다` : '';
     const ncTail = c.tailNotCollected ? ` — 그중 ${Number(c.tailNotCollected).toLocaleString()}곳은 이 포탈이 지금 이벤트를 수집하지 않는 vCenter 입니다(위 문장)` : '';
-    parts.push(`이벤트 수집이 멈춘 vCenter ${Number(c.tailVcenters || 0).toLocaleString()}곳의 VM ${c.staleTail.toLocaleString()}대는 수집이 멈춘 시각까지만 쟀습니다${age} — 그 뒤의 정지는 알 수 없습니다(전원 기록이 없는 VM 은 지금 전원 상태가 측정 구간 내내 이어졌다고 봤습니다)${src}${ncTail}`);
+    // v2.772(Z4-S2): 서버 staleTail 은 원인을 가리지 않는다 — 멈춘 vCenter 와 따라잡는 중(뒤처진) vCenter 를 함께 센다. '멈춘' 으로 단정하지 않는다.
+    parts.push(`이벤트 수집이 멈췄거나 뒤처진(따라잡는 중 포함) vCenter ${Number(c.tailVcenters || 0).toLocaleString()}곳의 VM ${c.staleTail.toLocaleString()}대는 수집이 끝난 시각까지만 쟀습니다${age} — 그 뒤의 정지는 알 수 없습니다(전원 기록이 없는 VM 은 지금 전원 상태가 측정 구간 내내 이어졌다고 봤습니다)${src}${ncTail}`);
   }
-  if (c.stoppedEarly) parts.push(`이벤트 수집이 측정 기간 시작 전에 멈춘 vCenter 의 VM ${c.stoppedEarly.toLocaleString()}대는 판정하지 않았습니다(가동 100% 가 아닙니다)`);
+  if (c.stoppedEarly) parts.push(`이벤트 수집이 측정 기간 시작보다 앞에서 끝난(멈췄거나 그만큼 뒤처진) vCenter 의 VM ${c.stoppedEarly.toLocaleString()}대는 판정하지 않았습니다(가동 100% 가 아닙니다)`);
   if (c.offAll) parts.push(`기간 내내 꺼져 있던 VM ${c.offAll.toLocaleString()}대는 서비스 중이 아니라 따로 셌습니다`);
   if (data.logs?.minSeverity && data.logs.minSeverity !== 'info') parts.push(`수집 최소 심각도가 ${data.logs.minSeverity} 라 정보 수준의 전원 이벤트가 쌓이지 않아 가동률이 실제보다 높게 나올 수 있습니다`);
   // v2.719(감사 B1-01): 잘리면 서버가 잘린 시점부터만 잰다 — '빠졌을 수 있다' 가 아니라 그 앞을 판정하지 않았다.
@@ -67,7 +68,8 @@ export const METHOD_NOTE = '정지 시간은 전원 끔·일시 정지부터 다
 export function tailCutText(row, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
   if (!row?.tailCut) return null;
   const to = Number(row.windowTo);
-  return Number.isFinite(to) && to > 0 ? `수집 멈춤 — ${fmt(to)} 까지만 잼` : '수집 멈춤 — 멈춘 시각까지만 잼';
+  // v2.772(Z4-S2): 따라잡는 중(뒤처짐)인 vCenter 도 여기에 든다 — '멈춤' 으로 단정하지 않는다.
+  return Number.isFinite(to) && to > 0 ? `수집 멈춤·지연 — ${fmt(to)} 까지만 잼` : '수집 멈춤·지연 — 수집이 끝난 시각까지만 잼';
 }
 
 export function bornWindowText(row, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {

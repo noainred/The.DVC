@@ -55,3 +55,18 @@ export function forecastCapNote(data) {
   const lim = posInt(data.listLimit);
   return `추세 산출 데이터스토어가 목록 상한(${lim != null ? `${lim}개` : '적용'})에 닿았습니다 — 고갈이 빠른 순으로 상한까지만 표시하며, 표시하지 않은 데이터스토어가 더 있을 수 있습니다.`;
 }
+
+/**
+ * v2.772(Z4-3): 구성 변경 이력이 스캔 상한에 닿았을 때 한 줄 — 상한에 닿지 않았으면 null.
+ * 서버는 기간 안 **모든 종류** 이벤트의 최신 scanMax 행만 읽고 변경 종류·분류·계정·대상을 거른다. 예전 안내 '기간을 줄이세요' 는 틀렸다 —
+ * 이벤트가 많은 현장에서는 1일로 줄여도 최근 한 시간 남짓만 본다. 실제로 훑은 행의 시각 범위(scannedFrom ~ scannedTo)를 말한다.
+ * fmt 는 시각 문구(화면의 fmtDate). 시각을 모르면 범위 없이 말한다(지어내지 않는다).
+ */
+export function changeScanNote(data, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
+  if (!data || data.truncated !== true) return null;
+  const from = typeof data.scannedFrom === 'number' && Number.isFinite(data.scannedFrom) ? data.scannedFrom : null;
+  const to = typeof data.scannedTo === 'number' && Number.isFinite(data.scannedTo) ? data.scannedTo : null;
+  const max = posInt(data.scanMax) ?? posInt(data.scanned);
+  const range = from != null && to != null ? ` — ${fmt(from)} ~ ${fmt(to)} 만 봤습니다` : '';
+  return `스캔 상한(최신 ${max != null ? `${max.toLocaleString()}행` : '상한'})에 닿았습니다${range}. 그보다 앞의 변경은 이 결과에 없고, 분류·계정·대상 필터도 이 범위 안에서만 찾습니다(상한은 종류와 무관한 최신 행 수라 기간을 줄여도 범위가 넓어지지 않을 수 있습니다). VM 의 이동·구성 변경은 특수 기능 'VM 이동·구성 변경 이력' 이 기간 전체를 봅니다.`;
+}

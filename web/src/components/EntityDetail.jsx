@@ -35,7 +35,7 @@ import { STable } from './STable.jsx';
 import { levelOf, gbText, pctText, timeText, agoText, vmPartNote } from '../views/tools/guestPartText.js'; // v2.750 게스트 파티션 사용량(순수·vitest 고정)
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
-import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01)
+import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText, vmHistoryLagText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01) · v2.772(Z4-2)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
@@ -882,10 +882,12 @@ function VmChangesSection({ vm }) {
         // v2.733(C1-01): 이 VM 의 vCenter 를 이 포탈이 지금 이벤트로 수집하지 않으면(엣지 위임·비활성·점검중) '변경 없음' 이라 말하지 않는다.
         : vmHistoryNotCollectedText(d) && items.length === 0 ? <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{vmHistoryNotCollectedText(d)}</div>
         : !d.lastTs ? <div className="muted" style={{ fontSize: 12 }}>이 VM 의 vCenter 에서 받은 이벤트가 아직 없습니다 — '이동 없음' 이 아닙니다.</div>
-        : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.</div>
+        // v2.772(Z4-2): 수집이 뒤처졌으면 '없음' 이 그 뒤까지 뜻하지 않게 함께 말한다.
+        : items.length === 0 ? <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.{vmHistoryLagText(d) ? ` ${vmHistoryLagText(d)}` : ''}</div>
         : (
           <>
           {vmHistoryNotCollectedText(d) && <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 4 }}>{vmHistoryNotCollectedText(d)}</div>}
+          {vmHistoryLagText(d) && <div style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 4, color: 'var(--amber)' }}>⚠ {vmHistoryLagText(d)}</div>}
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
             {items.map((x, i) => (
               <li key={`${x.ts}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0, fontSize: 12, whiteSpace: 'normal', flexWrap: 'wrap' }}>

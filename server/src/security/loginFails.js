@@ -8,7 +8,7 @@ import { isLoginFailRow } from '../logs/loginFailPattern.js';
 import { createYielder } from '../util/timeSlice.js';
 import { getStoredFails } from './loginStore.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { eventNotCollectedMap, notCollectedList } from '../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
+import { eventNotCollectedMap, notCollectedList, eventLagForView } from '../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter · v2.772(Z4-2): 뒤처진 vCenter
 
 const DAY = 86_400_000;
 const IPV4 = /(?:\d{1,3}\.){3}\d{1,3}/;
@@ -93,6 +93,7 @@ export function clampLoginFailParams(p = {}, defaults = LOGIN_FAIL_DEFAULTS) {
 /**
  * @param opts { vcenterId?, days=7, threshold=5, windowMin=10 }
  * threshold: 같은 사용자/IP가 이 횟수 이상이면 브루트포스 의심. windowMin: 활성 브루트포스 판정 창.
+ * deps.lag(v2.772) — 지연 판정 주입 { registry?, okAtOf?, tolMs?, lastTsOf? }(테스트용 · 주지 않으면 등록부·로그 폴러·로그 설정·db.lastTs).
  */
 export async function analyzeLoginFails(opts = {}, deps = {}) {
   const vcenterId = opts?.vcenterId || '';
@@ -146,6 +147,11 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
   const portalFails = stored.filter((r) => r.kind === 'portal');
 
   const all = [...vcFails, ...stored].sort((a, b) => b.ts - a.ts);
+  // v2.772(Z4-2): 수집은 하지만 뒤처진 vCenter(따라잡는 중 포함) — 완결 시각(okAt) 뒤의 로그인 실패는 아직 이 DB 에 없다. '실패 0건'·
+  //   '감시 중' 에 섞지 않고 lagging[{vcenterId, okAt, lagMs, source}] 로 밝힌다(판정은 logs/coverage.js — VM 가용성과 같은 코어·허용치).
+  //   집계 수치는 그대로 둔다(받은 만큼은 실재한다). 고른 vCenter 가 있으면 그 하나만. 판정을 못 하면 null('모른다' — [] 가 아니다).
+  //   이 분석의 라우트는 범위 계정을 403 으로 막고(포탈 실패가 섞인다) 주기 감시 상태는 fleetOnly 라 범위 거르기 대상이 없다.
+  const lagging = vcSkipped ? [] : await eventLagForView({ db, now, only: vcenterId ? [String(vcenterId)] : null, notCollected: nc, deps: deps.lag || {} });
 
   // 집계
   const byUser = new Map(); const byIp = new Map(); const bySource = new Map();
@@ -202,6 +208,7 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
     notCollected: vcSkipped
       ? notCollectedList(nc, { only: [String(vcenterId)] }).map((x) => ({ ...x, oldFails: null }))
       : exclude ? notCollectedList(nc).map((x) => ({ ...x, oldFails: scan.mode === 'full' ? (excluded.get(x.vcenterId) || 0) : null })) : [],
+    lagging,   // v2.772(Z4-2): 수집이 뒤처진 vCenter — 그 뒤의 실패는 아직 이 분석에 없다(null = 판정 못 함)
     scan,   // v2.673: 훑은 조각 수·후보 수·상한으로 잘렸는지·소요(정직 — 잘렸으면 화면이 '최근 N건까지' 라고 말할 수 있다)
     generatedAt: Date.now(),
   };
