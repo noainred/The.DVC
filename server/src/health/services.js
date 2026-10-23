@@ -187,7 +187,9 @@ export function pollerCheck(st, { now = Date.now(), uptimeMs = process.uptime() 
   }
   const age = now - last;
   const stale = age > staleMs;
-  return { status: stale ? 'warn' : 'ok', detail: `${running ? '실행 중' : '활성'} · 최근 ${Math.round(age / MIN)}분 전${stale ? ' — 주기의 2배를 넘겼습니다' : ''}${ivText}`, at: last };
+  // v2.772(Z3 I1): 상태 함수가 스스로 경고(warn + warnText — 예: Veeam 전용 수집기가 일부 vCenter 를 구제하지 못함)를 내면 시각이 신선해도 '활성' 으로만 칠하지 않는다.
+  const own = st && st.warn === true && typeof st.warnText === 'string' && st.warnText ? String(st.warnText).slice(0, 200) : '';
+  return { status: stale || own ? 'warn' : 'ok', detail: `${running ? '실행 중' : '활성'} · 최근 ${Math.round(age / MIN)}분 전${stale ? ' — 주기의 2배를 넘겼습니다' : ''}${own ? ` — ${own}` : ''}${ivText}`, at: last };
 }
 
 /*

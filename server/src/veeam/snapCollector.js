@@ -70,6 +70,7 @@ const _seen = new Map();  // v2.765(4-a): vcenterId → 계정 필터로 이벤�
 const _fp = new Map();    // v2.766(점검 R1-A1-1·A5-1): vcenterId → 그 vCenter 의 커서·okAt 을 만든 userList 지문(snap_meta 'fp:<vc>')
 let _covMemo = { key: null, cov: null };   // 지금 계정 목록의 덮음(같은 목록이면 다시 계산하지 않는다)
 const _perVc = new Map(); // vcenterId → { state, okAt, cursor, read, stored, calls, capped, kind, seen, reason, stalled, at }
+let _lastIds = null;      // v2.772(Z3 I1): 마지막 주기의 대상 vCenter(상태 요약이 등록부에서 빠진 vCenter 의 옛 항목을 세지 않게)
 const failLog = createChangeLogger({ windowMs: 3_600_000 });
 const _rearm = new Set(); // v2.765(4-f): startAdaptiveTimer 재무장 알림 구독자
 
@@ -123,7 +124,9 @@ export function userListCoverage(accounts) {
   let missing = 0;
   for (const a of originals) if (!lower.has(a)) missing++;
   const fp = crypto.createHash('sha256').update([...covered].sort().join('\n')).digest('hex').slice(0, 32);
-  return { userNames, covered, fp, full: missing === 0, missing };
+  // v2.772(Z3-1): 원문 계정이 전부 공용 계정(administrator 등)인가 — 진단 사유('shared-only')에만 쓴다. seen·okAt·결합 판정은 이 값을 보지 않는다.
+  const sharedOnly = originals.size > 0 && [...originals].every((a) => isSharedAccount(a));
+  return { userNames, covered, fp, full: missing === 0, missing, sharedOnly };
 }
 function currentCoverage(now = Date.now()) {
   let accounts;
@@ -190,6 +193,30 @@ export function snapEventsOkAt(vcenterId, { dedicated = true, summary } = {}) {
   return combineOkAt(logCollectOkAt(vcenterId), dedicated && snapCollectorCovers(summary, vcenterId) ? snapCollectorOkAt(vcenterId) : null);
 }
 
+/*
+ * v2.772(Z3 I1): 이 수집기가 그 vCenter 의 완결 시각을 **보태지 못하는** 이유 코드(계정 이름·주소·오류 원문 없음 — 화면 stale 문구가 무엇을 하면
+ *   되는지 한 줄로 말한다). null = 보태고 있다(또는 모른다 — 아직 그 vCenter 를 돌지 않았다·요약이 전용 DB 를 읽지 않았다).
+ *   판정은 snapEventsOkAt 과 같은 입력(dedicated·summary)과 지금 메모리 상태만 본다 — 결합 판정을 바꾸지 않는다(진단 전용).
+ *   'failed'(실패·인증 정지) · 'no-account'(읽을 계정 0) · 'accounts-over-limit' · 'not-covered'(요약·본 적 있는 Veeam 계정을 userList 가 덮지 않음 —
+ *   이름 규칙 계정 등) · 'shared-only'(목록이 공용 계정뿐 — v2.766 ② 로 seen 이 서지 않는다) · 'unseen'(표기 불일치 의심) · 'refilling'(목록 변경 뒤 다시 읽는 중).
+ */
+export const SNAP_COLLECTOR_REASONS = Object.freeze(['failed', 'no-account', 'accounts-over-limit', 'not-covered', 'shared-only', 'unseen', 'refilling']);
+export function snapCollectorReason(vcenterId, { dedicated = true, summary } = {}) {
+  const id = String(vcenterId ?? '');
+  if (!dedicated) return null;
+  const per = _perVc.get(id);
+  if (!per) return null;   // 이 프로세스에서 아직 그 vCenter 를 돌지 않았다 — 모름(사유를 지어내지 않는다)
+  if (per.state === 'fail' || per.state === 'auth-stopped') return 'failed';
+  const cov = currentCoverage();
+  if (per.state === 'no-account' || (cov && !cov.userNames.length)) return 'no-account';
+  if (cov && !cov.full) return 'accounts-over-limit';
+  // 덮음이 먼저 — 덮지 않으면 seen 이 서도 구제되지 않는다(공용 계정 목록 + 이름 규칙 Veeam 계정 = v2.766 ② 의 실제 원인도 여기서 드러난다).
+  if (summary !== undefined && !snapCollectorCovers(summary, id)) return 'not-covered';
+  if (!_seen.has(id)) return per.reason === 'shared-only' || cov?.sharedOnly ? 'shared-only' : 'unseen';
+  if (snapCollectorOkAt(id) == null) return 'refilling';
+  return null;
+}
+
 /** 완결 시각(순수) — 끝까지 읽었으면 수집 시작 시각(vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각), 아니면 마지막으로 읽은 시각. */
 export function completeUntil({ complete, startedAt, maxRead }) {
   if (complete) return Math.max(Number(startedAt) || 0, Number(maxRead) || 0) || null;
@@ -202,7 +229,12 @@ const skipReason = (s) => {
   if (s?.minSeverity && s.minSeverity !== 'info') return 'severity-filter';
   return null;
 };
-const setPer = (id, v) => _perVc.set(id, { ...(_perVc.get(id) || {}), ...v, at: Date.now() });
+/*
+ * v2.772(Z3-2): 상태는 병합이 아니라 **교체** — 예전에는 이전 값에 덮어써 한 번 선 stalled·accountsMissing 이 정상 주기 뒤에도 남았고,
+ *   실패 주기에는 직전 성공의 read·stored·cursor 가 '이번 값' 처럼 보였다. 실패·건너뜀 갈래는 이번 회차 값이 없음을 null 로 밝힌다(RUN_NONE).
+ */
+const RUN_NONE = Object.freeze({ cursor: null, read: null, stored: null, calls: null, capped: null, ended: null, reason: null, stalled: null, listChanged: null, accountsMissing: null });
+const setPer = (id, v) => _perVc.set(id, { ...v, at: Date.now() });
 /** 재시작 뒤 영속값 복원(vCenter 1곳) — seen 이 없으면 ok 도 믿지 않는다(4-a: seen 전의 ok 는 표기 불일치의 0건 완결일 수 있다). */
 function restoreOne(db, id) {
   if (!_fp.has(id)) { const f = db.snapFp(id); if (f) _fp.set(id, f); }   // v2.766(점검 R1-A1-1·A5-1)
@@ -212,7 +244,7 @@ function restoreOne(db, id) {
 }
 
 /** vCenter 1곳 — 커서부터 이어 읽어 전용 DB 에 넣고 커서·완결 시각을 기록한다. 던지면 호출부가 실패로 센다(커서·okAt 은 읽은 만큼만 바뀐다). */
-async function collectOne(vc, db, { now, userNames, full = true, perCallMax, budgetMs }) {
+async function collectOne(vc, db, { now, userNames, full = true, sharedOnly = false, perCallMax, budgetMs }) {
   const id = String(vc.id);
   const startedAt = now;
   const t0 = Date.now();
@@ -256,8 +288,11 @@ async function collectOne(vc, db, { now, userNames, full = true, perCallMax, bud
   const seen = _seen.has(id);
   if (seen && full && okAt != null && (complete || _okAt.has(id)) && okAt > (_okAt.get(id) || 0)) { _okAt.set(id, okAt); db.setSnapOkAt(id, okAt); }
   const okNow = snapCollectorOkAt(id);
-  const reason = !full ? 'accounts-over-limit' : !seen ? 'unseen' : okNow == null ? 'refilling' : null;
-  return { okAt: okNow, cursor, read, stored, calls, capped: !complete, ended, seen, reason, ...(stalled ? { stalled: true } : {}) };
+  // v2.772(Z3-1): 목록의 원문 계정이 전부 공용 계정이면 '표기 불일치(unseen)' 가 아니라 'shared-only' — 공용 계정 이벤트는 seen 근거가 아니므로(v2.766 ②)
+  //   이 vCenter 는 이 수집기로 구제되지 않는다. 사유 문자열만 다르다 — seen·okAt·결합은 그대로(공용 계정만으로 결합을 열면 ② 를 깬다).
+  const reason = !full ? 'accounts-over-limit' : !seen ? (sharedOnly ? 'shared-only' : 'unseen') : okNow == null ? 'refilling' : null;
+  // v2.772(Z3-2): stalled 는 늘 싣는다(참일 때만 실으면 교체 전 병합에서 영구히 남았다).
+  return { okAt: okNow, cursor, read, stored, calls, capped: !complete, ended, seen, reason, stalled: !!stalled };
 }
 
 /**
@@ -279,12 +314,13 @@ export async function pollVeeamSnapOnce({ now = Date.now(), perCallMax = PER_CAL
     const cov = userListCoverage(accounts);   // v2.766(점검 R1-A1-1·A5-1): userList + 지문 + 원문 계정이 다 들었나
     const userNames = cov.userNames;
     let ok = 0; let fail = 0; let noAccount = 0; let read = 0; let stored = 0;
+    _lastIds = new Set(targets.map((vc) => String(vc.id)));
     const authStopped = [];
     await poolRun(targets, CONCURRENCY, async (vc) => {
       const id = String(vc.id);
       restoreOne(db, id);   // 재시작 뒤 영속값 복원
-      if (vcAuthGuard.authStopFor(vc)) { authStopped.push(id); setPer(id, { state: 'auth-stopped' }); return; }
-      if (!userNames.length) { noAccount++; setPer(id, { state: 'no-account', okAt: snapCollectorOkAt(id), seen: _seen.has(id) }); return; }
+      if (vcAuthGuard.authStopFor(vc)) { authStopped.push(id); setPer(id, { state: 'auth-stopped', ...RUN_NONE, kind: 'auth', okAt: snapCollectorOkAt(id), seen: _seen.has(id) }); return; }
+      if (!userNames.length) { noAccount++; setPer(id, { state: 'no-account', ...RUN_NONE, kind: null, okAt: snapCollectorOkAt(id), seen: _seen.has(id) }); return; }
       try {
         // v2.766(점검 R1-A5-1): 계정 목록(지문)이 바뀌었으면 커서·okAt·seen 을 지우고 새 지문을 적는다 — 새 계정의 지난 LOOKBACK 을 다시 읽는다.
         let listChanged = false;
@@ -292,16 +328,16 @@ export async function pollVeeamSnapOnce({ now = Date.now(), perCallMax = PER_CAL
           db.resetSnapCollector(id, cov.fp);
           _fp.set(id, cov.fp); _okAt.delete(id); _seen.delete(id); listChanged = true;
         }
-        const r = await collectOne(vc, db, { now, userNames, full: cov.full, perCallMax, budgetMs: budget });
+        const r = await collectOne(vc, db, { now, userNames, full: cov.full, sharedOnly: cov.sharedOnly, perCallMax, budgetMs: budget });
         ok++; read += r.read; stored += r.stored;
-        setPer(id, { state: 'ok', ...r, kind: null, listChanged, ...(cov.full ? {} : { accountsMissing: cov.missing }) });
+        setPer(id, { state: 'ok', ...r, kind: null, listChanged, accountsMissing: cov.full ? null : cov.missing });   // v2.772(Z3-2): full 이면 null
       } catch (e) {
         fail++;
         const msg = String(e?.message || e || '알 수 없는 오류');
         const kind = isVcAuthError(e) ? 'auth' : /데드라인/.test(msg) ? 'deadline' : 'error';
         // 로그인 거부는 주 폴러와 같은 정지 기록에 올린다(v2.732 보조 수집기 규약) — 다음 주기는 authStopFor 가 건너뛴다.
         if (kind === 'auth') vcAuthGuard.markAuthStopped(id, vc, msg);
-        setPer(id, { state: 'fail', kind, okAt: snapCollectorOkAt(id), seen: _seen.has(id) });
+        setPer(id, { state: 'fail', ...RUN_NONE, kind, okAt: snapCollectorOkAt(id), seen: _seen.has(id) });   // v2.772(Z3-2): 이전 run 필드는 null
         if (failLog(id, kind)) console.warn(`[veeam-snap-collector] ${id} Veeam 계정 이벤트 수집 실패(${kind}): ${capStr(msg, 200)}`);
       }
     });
@@ -357,10 +393,24 @@ export function rescheduleVeeamSnapCollector() {
 export function veeamSnapCollectorStatus() {
   const s = loadLogSettings();
   const perVc = {};
-  for (const [k, v] of _perVc) perVc[k] = { ...v };
-  return { ...(_last || {}), enabled: skipReason(s) == null, intervalMs: intervalMs(), running: !!_running, ...(_running ? { runningSince: _running.since } : {}), perVc };
+  // v2.772(Z3 I1): 사유별 vCenter 수 — 실패·표기 불일치(unseen)·공용 계정뿐(shared-only)이 있으면 warn(이 수집기가 그 vCenter 를 구제하지 못한다).
+  //   health/services.js pollerCheck 는 지금 시각만 본다 — 이 warn 을 행 상태로 올리려면 그쪽이 읽어야 한다.
+  const issues = { failed: 0, unseen: 0, sharedOnly: 0, noAccount: 0, refilling: 0, overLimit: 0 };
+  for (const [k, v] of _perVc) {
+    perVc[k] = { ...v };
+    if (_lastIds && !_lastIds.has(k)) continue;
+    if (v.state === 'fail' || v.state === 'auth-stopped') issues.failed++;
+    else if (v.state === 'no-account') issues.noAccount++;
+    else if (v.reason === 'unseen') issues.unseen++;
+    else if (v.reason === 'shared-only') issues.sharedOnly++;
+    else if (v.reason === 'refilling') issues.refilling++;
+    else if (v.reason === 'accounts-over-limit') issues.overLimit++;
+  }
+  const warnParts = [issues.failed && `실패 ${issues.failed}곳`, issues.unseen && `계정 표기 불일치 의심 ${issues.unseen}곳`, issues.sharedOnly && `공용 계정뿐 ${issues.sharedOnly}곳`].filter(Boolean);
+  return { ...(_last || {}), enabled: skipReason(s) == null, intervalMs: intervalMs(), running: !!_running, ...(_running ? { runningSince: _running.since } : {}), perVc,
+    issues, warn: warnParts.length > 0, ...(warnParts.length ? { warnText: `전용 수집으로 구제하지 못한 vCenter — ${warnParts.join(' · ')}` } : {}) };
 }
 
-export function _resetForTest() { _running = null; _last = null; _okAt.clear(); _seen.clear(); _fp.clear(); _perVc.clear(); _covMemo = { key: null, cov: null }; }
+export function _resetForTest() { _running = null; _last = null; _lastIds = null; _okAt.clear(); _seen.clear(); _fp.clear(); _perVc.clear(); _covMemo = { key: null, cov: null }; }
 export function _setOkAtForTest(vcenterId, ts) { _okAt.set(String(vcenterId), ts); _seen.set(String(vcenterId), ts); const c = currentCoverage(); if (c) _fp.set(String(vcenterId), c.fp); }
 export function _stopForTest() { _timer?.stop(); _timer = null; _rearm.clear(); }

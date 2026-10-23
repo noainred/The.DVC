@@ -19,7 +19,7 @@ import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS, snapCovered } from '../..
 import { getSnapDb } from '../../veeam/snapDb.js';
 import { kickSnapBackfill } from '../../veeam/snapWarm.js';
 import { logPollerRanOnce } from '../../logs/poller.js';
-import { snapEventsOkAt } from '../../veeam/snapCollector.js';   // v2.765: 로그 폴러 ok 시각과 Veeam 계정 전용 수집기 ok 시각 중 늦은 것(결합 함수 하나)
+import { snapEventsOkAt, snapCollectorReason } from '../../veeam/snapCollector.js';   // v2.765: 로그 폴러 ok 시각과 Veeam 계정 전용 수집기 ok 시각 중 늦은 것(결합 함수 하나)
 import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
@@ -183,7 +183,17 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
   //   v2.765: collectedAt = 로그 폴러와 Veeam 계정 전용 수집기(snapCollector) 중 늦은 완결 시각 — 전용 수집기의 행은 전용 DB 에만 있으므로
   //     이 요약이 전용 DB 를 읽었을 때만(viaSnapDb) 그 시각을 섞는다(백필 전 로그 DB 경로는 로그 폴러 값 그대로). v2.766(점검 R1-A1-1): 요약이 Veeam 으로 본 계정을 전용 수집기가 다 덮을 때만(summary).
   return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at,
-    collectedAt: snapEventsOkAt(vcenterId, { dedicated: viaSnapDb, summary: r }), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
+    collectedAt: snapEventsOkAt(vcenterId, { dedicated: viaSnapDb, summary: r }), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}),
+    ...snapCollectorField(vcenterId, viaSnapDb, r) };
+}
+/*
+ * v2.772(Z3 I1): 전용 수집기가 이 vCenter 를 구제하지 못한 사유 **코드만**(snapCollectorReason — 계정 이름·주소·오류 원문·수 없음). 범위는 호출부가 이미 골랐다
+ *   (vcOf 404 · backup-counts 는 allowed 안 vCenter 만). 사유 코드는 관리자 판본과 같다 — 계정 이름이 없고 그 vCenter 의 수집 상태뿐이라 가리지 않는다.
+ */
+function snapCollectorField(vcenterId, dedicated, summary) {
+  let code = null;
+  try { code = snapCollectorReason(vcenterId, { dedicated, summary }); } catch { code = null; }
+  return code ? { snapCollector: code } : {};
 }
 
 /*
@@ -273,7 +283,10 @@ export function registerVeeamBadges(api) {
           const vcnt = veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length });
           byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), demo: true };
         } else {
-          byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true, wait: false }), vms });
+          const ev = await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true, wait: false });
+          const cnt = snapCount({ ev, vms });
+          // v2.772(Z3 I1): 수를 못 낸(n null) 로컬 vCenter 에만 전용 수집기 사유 코드를 싣는다(카드 stale 문구 한 줄).
+          byVc[vc.id] = cnt.n == null && ev?.source === 'local' && ev?.snapCollector ? { ...cnt, snapCollector: ev.snapCollector } : cnt;
         }
       }
       return { ok: true, at: Date.now(), byVc };

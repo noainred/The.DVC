@@ -93,7 +93,8 @@ test('A1-1 ② — userList 의 공용 계정(administrator) 이벤트만 읽혔
     assert.equal(C.snapCollectorOkAt('oc2'), null);
     const db = await D.getSnapDb();
     assert.equal(db.snapOkAt('oc2'), null, '영속도 하지 않는다');
-    assert.equal(C.veeamSnapCollectorStatus().perVc.oc2.reason, 'unseen');
+    // v2.772(Z3-1): 목록이 공용 계정뿐이면 사유는 'shared-only'(표기 문제가 아니다) — seen·결합 판정(위·아래 단언)은 그대로
+    assert.equal(C.veeamSnapCollectorStatus().perVc.oc2.reason, 'shared-only');
     const logOkAt = NOW - 13 * DAY;
     const combined = C.combineOkAt(logOkAt, C.snapCollectorOkAt('oc2'));
     assert.equal(combined, logOkAt, '결합은 로그 폴러 값으로 폴백');

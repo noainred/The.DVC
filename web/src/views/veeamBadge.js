@@ -311,6 +311,27 @@ const BACKUP_REASON = {
   'registry-unreadable': 'Veeam 서버 등록부를 읽지 못해 이 vCenter 가 Veeam 과 연동돼 있는지 알 수 없습니다 — 관리자가 설정 › Veeam 백업 서버에서 확인해야 합니다.',
 };
 
+/*
+ * v2.772(Z3 I1): 서버 snapCollector 사유 코드(snap-events·backup-counts 의 snapCollector — 계정 이름 없음) → 무엇을 하면 되는지 한 줄.
+ *   stale 문구('설정 › Log 에서 원인을 확인하세요')는 로그 폴러만 말한다 — Veeam 계정 전용 수집기가 왜 이 vCenter 를 보완하지 못했는지가 화면에 없었다.
+ *   모르는 코드·코드 없음은 ''(지어내지 않는다). 백틱 금지 · 값 인용은 ‘ ’.
+ */
+const ACCOUNT_FIELD = '설정 › Veeam 백업 서버의 ‘Veeam 이 vCenter 에 접속하는 계정’';
+export const SNAP_COLLECTOR_TEXT = {
+  failed: '이 vCenter 의 Veeam 계정 이벤트를 읽지 못했습니다(접속 실패·시한 초과·인증 정지) — vCenter 연결 상태를 확인하세요.',
+  'no-account': `읽을 Veeam 계정을 모릅니다 — 이름에 veeam 이 든 계정도 적어야 따로 읽습니다. ${ACCOUNT_FIELD} 에 계정을 이벤트 원문(CORP\\계정 또는 계정@도메인) 그대로 적으세요.`,
+  'accounts-over-limit': `적힌 Veeam 계정이 너무 많아 일부를 읽지 못합니다 — ${ACCOUNT_FIELD} 에서 쓰지 않는 계정을 정리하세요.`,
+  'not-covered': `이 vCenter 에서 본 Veeam 계정 중 적히지 않은 계정이 있어(이름 규칙으로만 알려진 계정 등) 따로 읽은 값을 쓰지 않습니다 — 그 계정을 ${ACCOUNT_FIELD} 에 이벤트 원문(CORP\\계정) 그대로 적으세요.`,
+  'shared-only': `적힌 계정이 공용 계정(administrator 등)뿐이라 따로 읽을 수 없습니다 — 공용 계정은 사람도 쓰므로 Veeam 의 것으로 확정할 수 없습니다. Veeam 전용 계정을 쓰고 그 계정을 ${ACCOUNT_FIELD} 에 적는 것을 권장합니다.`,
+  unseen: `적힌 Veeam 계정으로 이 vCenter 의 이벤트를 한 건도 읽지 못했습니다 — 계정 표기를 이벤트 원문(CORP\\계정 또는 계정@도메인) 그대로 적으세요(${ACCOUNT_FIELD}).`,
+  refilling: '계정 목록이 바뀌어 지난 8일을 다시 읽는 중입니다 — 끝나면 최신으로 보입니다.',
+};
+/** 사유 코드 → 'Veeam 계정 전용 수집으로도 보완하지 못했습니다: …' 한 줄. 모르는 코드면 ''. */
+export function snapCollectorText(code) {
+  const t = typeof code === 'string' ? SNAP_COLLECTOR_TEXT[code] : null;
+  return t ? `Veeam 계정 전용 수집으로도 보완하지 못했습니다: ${t}` : '';
+}
+
 /** v2.763(V4-2): 다른 vCenter 에서 배운 Veeam 계정이 이 vCenter 이벤트에는 한 번도 없다(서버 verdict.accountUnseen) — 0대가 확정이 아니다. */
 export const ACCOUNT_UNSEEN = '이 vCenter 에서는 아는 Veeam 계정의 스냅샷이 최근 이벤트에 한 건도 보이지 않습니다 — Veeam 이 이 vCenter 에 다른 계정으로 접속하면 설정 › Veeam 백업 서버의 ‘Veeam 이 vCenter 에 접속하는 계정’ 에 적으세요(정말 0대일 수도 있습니다).';
 
@@ -339,6 +360,8 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
     // v2.762(F3): 실패 서버를 먼저 말하고(사유 코드), 첫 수집 전인 서버도 함께 센다.
     if (veeam && e.reason === 'veeam-failed' && e.waiting > 0) lines.push(`Veeam 서버 ${e.waiting}대는 아직 첫 수집 전입니다.`);
     if (!veeam && e.snapNow > 0) lines.push(`지금 Veeam 임시 스냅샷이 있는 VM ${e.snapNow}대`);
+    // v2.772(Z3 I1): 이벤트 수집이 늦어(또는 못 해) 수를 못 낸 칸 — 전용 수집기가 보완하지 못한 이유(코드가 있을 때만)
+    if (!veeam && (e.reason === 'stale-events' || e.reason === 'no-collect-yet')) { const sc = snapCollectorText(e.snapCollector); if (sc) lines.push(sc); }
     return { text: '—', label: veeam && !unknownSrc ? label : '백업 · 확인 불가', tone: 'none', title: lines.join('\n') };
   }
   const text = `${e.n}/${total ?? '—'}${e.partial ? ' *' : ''}`;
@@ -385,6 +408,8 @@ export function veeamEventChip(ev) {
   if (v && !v.ok && ev.status === 'ok') {
     if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.${Number.isFinite(ev.collectedAt) ? ` ${collectLagText(ev.collectedAt, Number.isFinite(ev.at) ? ev.at : Date.now())}` : ''}`;   // v2.765: 며칠 뒤처졌는지 + 원인을 볼 곳
     else why = BACKUP_REASON[v.reason] || why || '이벤트 기준 수를 표시할 수 없습니다.';
+    // v2.772(Z3 I1): 카드와 같은 한 줄 — 전용 수집기가 보완하지 못한 이유
+    if (v.reason === 'stale-events' || v.reason === 'no-collect-yet') { const sc = snapCollectorText(ev.snapCollector); if (sc) why = `${why} ${sc}`; }
   }
   if (v?.ok && v.accountUnseen && n === 0) why = ACCOUNT_UNSEEN;   // v2.763(V4-2)
   return { n, why };

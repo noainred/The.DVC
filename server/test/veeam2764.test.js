@@ -145,7 +145,7 @@ test('④ 호출 상한에 걸리면 같은 주기 안에서 이어 읽는다(�
     assert.equal(state.creates.length, 4);
     assert.equal(C.snapCollectorOkAt('oc3'), NOW + 8 * 60_000, '상한에 걸려 멈췄으면 마지막으로 읽은 이벤트 시각(시작 시각이 아니다 — 커서 #25 재읽기 1 + 새 9건)');
     assert.equal(C.veeamSnapCollectorStatus().perVc.oc3.capped, true);
-    assert.equal(C.veeamSnapCollectorStatus().perVc.oc3.stalled, undefined, '진행이 있었으니 stalled 아님');
+    assert.equal(C.veeamSnapCollectorStatus().perVc.oc3.stalled, false, '진행이 있었으니 stalled 아님(v2.772 Z3-2: 늘 싣는다 — 예전 undefined)');
   } finally { unquiet(q); await new Promise((r) => { srv.close(r); srv.closeAllConnections?.(); }); }
 });
 
@@ -293,7 +293,7 @@ test('⑩ 2-b — 같은 ms 에 상한 경계가 걸려도 유실 없음(since =
     const begin2 = Date.parse(/<beginTime>([^<]+)<\/beginTime>/.exec(state.creates[1])[1]);
     assert.equal(begin2, t0 + 8 * 60_000, '둘째 호출 since = 커서 시각(포함)');
     assert.equal(C.snapCollectorOkAt('oc6'), NOW, '끝까지 읽어 완결');
-    assert.equal(C.veeamSnapCollectorStatus().perVc.oc6.stalled, undefined);
+    assert.equal(C.veeamSnapCollectorStatus().perVc.oc6.stalled, false);   // v2.772(Z3-2): 늘 싣는다(예전 undefined)
     // 같은 ms 에 상한(10)보다 많은 15건 — 둘째 호출이 같은 결과(maxRead == 커서) → stalled 로 멈춘다(호출 2회 · 저장 10)
     S._resetForTest(); C._resetForTest();
     S.saveManualAccounts(['CORP\\svc-veeam']);
