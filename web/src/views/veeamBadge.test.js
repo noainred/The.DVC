@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rowActions, agentAfterVcToggle, statusCell } from './VeeamSettings.jsx';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -310,5 +310,22 @@ describe('v2.763 — Veeam 등록·관리 화면 점검 수정(웹, 그룹 A)', 
     expect(unk.tone).toBe('none'); expect(unk.title).toMatch(/최근 갱신에 실패/);
     const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
     expect(src).toMatch(/refreshError: backupRefreshErr/);
+  });
+});
+
+describe('v2.763(V4-2) — 아는 Veeam 계정이 이 vCenter 이벤트에 한 번도 없으면 0대를 확정으로 보이지 않는다', () => {
+  it('카드: 스냅샷 기준 0대 + accountUnseen → warn 톤 + 안내 줄', () => {
+    const c = backupCell({ src: 'snap', n: 0, vmTotal: 300, snapEv: 0, snapNow: 0, days: 7, accountUnseen: true });
+    expect(c.tone).toBe('warn');
+    expect(c.title).toContain(ACCOUNT_UNSEEN);
+    const plain = backupCell({ src: 'snap', n: 0, vmTotal: 300, snapEv: 0, snapNow: 0, days: 7 });
+    expect(plain.tone).toBe('snap');
+    expect(plain.title).not.toContain(ACCOUNT_UNSEEN);
+  });
+  it('VM 칩: verdict.accountUnseen 이고 0대면 이유를 말한다(수는 0 그대로)', () => {
+    const r = veeamEventChip({ status: 'ok', days: 7, byVm: {}, verdict: { ok: true, reason: null, accountUnseen: true } });
+    expect(r.n).toBe(0);
+    expect(r.why).toBe(ACCOUNT_UNSEEN);
+    expect(veeamEventChip({ status: 'ok', days: 7, byVm: { a: [1, 1] }, verdict: { ok: true, reason: null, accountUnseen: true } }).why).not.toBe(ACCOUNT_UNSEEN);
   });
 });

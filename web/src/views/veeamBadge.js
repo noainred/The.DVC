@@ -299,6 +299,9 @@ const BACKUP_REASON = {
   'registry-unreadable': 'Veeam 서버 등록부를 읽지 못해 이 vCenter 가 Veeam 과 연동돼 있는지 알 수 없습니다 — 관리자가 설정 › Veeam 백업 서버에서 확인해야 합니다.',
 };
 
+/** v2.763(V4-2): 다른 vCenter 에서 배운 Veeam 계정이 이 vCenter 이벤트에는 한 번도 없다(서버 verdict.accountUnseen) — 0대가 확정이 아니다. */
+export const ACCOUNT_UNSEEN = '이 vCenter 에서는 아는 Veeam 계정의 스냅샷이 최근 이벤트에 한 건도 보이지 않습니다 — Veeam 이 이 vCenter 에 다른 계정으로 접속하면 설정 › Veeam 백업 서버의 ‘Veeam 이 vCenter 에 접속하는 계정’ 에 적으세요(정말 0대일 수도 있습니다).';
+
 /**
  * 카드의 백업 칸 — 'n/전체' 형식(사용자 지정). 모르면 '—'(0 으로 쓰지 않는다) · 부분 값은 '*' 와 노란 칸.
  * tone: veeam(채운 녹색) | snap(하늘색 점선) | warn(부분) | none(모름). entry 가 없으면 null(칸을 그리지 않는다).
@@ -349,10 +352,11 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
     if (e.partial && !e.ambiguous) lines.push('* 이벤트가 많아 일부만 읽었습니다 — 실제보다 적을 수 있습니다.');
     if (e.ambiguous > 0) lines.push(`* 이름이 같은 VM 이 둘 이상이라 고르지 못한 이벤트 ${e.ambiguous}건은 세지 않았습니다 — 실제보다 적을 수 있습니다.`);   // v2.761(C6)
     if (e.snapStale > 0) lines.push(`하루 넘게 남은 Veeam 임시 스냅샷 ${e.snapStale}대는 백업으로 세지 않았습니다(정리 실패 의심 — VM 화면의 빨간 '스냅샷 잔존').`);   // v2.761(C3)
+    if (e.accountUnseen) lines.push(`* ${ACCOUNT_UNSEEN}`);   // v2.763(V4-2) — 수는 그대로, 0대가 확정이 아님을 알린다
     if (e.source === 'edge') lines.push('이 vCenter 를 수집하는 엣지가 보낸 요약입니다.');
     if (Number.isFinite(e.collectedAt) && now - e.collectedAt > 3_600_000) lines.push(`vCenter 이벤트 마지막 수집 ${fmtTime(e.collectedAt)}`);
   }
-  return { text, label, tone: (e.partial || e.hostMismatch || e.stale > 0) ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
+  return { text, label, tone: (e.partial || e.hostMismatch || e.stale > 0 || e.accountUnseen) ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
 }
 
 /**
@@ -370,5 +374,6 @@ export function veeamEventChip(ev) {
     if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.`;
     else why = BACKUP_REASON[v.reason] || why || '이벤트 기준 수를 표시할 수 없습니다.';
   }
+  if (v?.ok && v.accountUnseen && n === 0) why = ACCOUNT_UNSEEN;   // v2.763(V4-2)
   return { n, why };
 }
