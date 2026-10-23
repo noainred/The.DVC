@@ -77,9 +77,10 @@ test('실제 폴러 — vCenter 이벤트 번호가 다시 매겨져도(옛 번�
     state.events = [...state.events, ...Array.from({ length: 150 }, (_, i) => ({ key: String(i + 1), ts: t1 + i * 60_000 }))];
     await P.pollLogsOnce({ manual: true });
     const last2 = db.lastTs('oc2');
-    assert.equal(last2, t1 + 99 * 60_000, `겹친 번호의 새 이벤트도 저장돼 앞으로 나아가야 한다(예전에는 ${new Date(last1).toISOString()} 에 멈췄다)`);
+    // v2.764(따라잡기): 상한(100)에 걸린 vCenter 는 같은 주기 안에서 이어 읽는다 — 150건이 한 주기에 전부 저장된다(예전에는 두 주기).
+    assert.equal(last2, t1 + 149 * 60_000, `겹친 번호의 새 이벤트도 저장돼 앞으로 나아가야 한다(예전에는 ${new Date(last1).toISOString()} 에 멈췄다)`);
     await P.pollLogsOnce({ manual: true });
-    assert.equal(db.lastTs('oc2'), t1 + 149 * 60_000, '다음 주기에 나머지를 읽는다');
+    assert.equal(db.lastTs('oc2'), t1 + 149 * 60_000, '다음 주기에 새 이벤트가 없으면 그대로');
     assert.equal(db.countCapped({ vcenterId: 'oc2' }, 1000).total, 250, '옛 100건 + 새 150건(중복 없이)');
     // v2.759: 폴러가 적재한 스냅샷 행은 Veeam 전용 DB(veeam-snap.db)에도 들어간다(카드 백업 수량을 로그 DB 검색 없이 계산)
     const { getSnapDb } = await import('../src/veeam/snapDb.js');

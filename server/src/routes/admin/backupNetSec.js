@@ -102,12 +102,20 @@ export function scopeVcLogStatus(st, allowed) {
       lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
     }
     // v2.732(점검 2회차 B4-01 후속): 수집하지 않은 vCenter·이번 주기 로그인 거부 목록도 범위 안 것만(전 법인 vCenter id·사유는 범위 밖 정보다)
-    for (const k of ['notCollected', 'authRejected']) {
+    // v2.764: 지연 vCenter(lagging)·저장 0 vCenter(stalled)도 범위 안 것만.
+    for (const k of ['notCollected', 'authRejected', 'lagging', 'stalled']) {
       if (!Array.isArray(st.lastRun[k])) continue;
       lr[k] = st.lastRun[k].filter((x) => x && allowed.has(String(x.vcenterId)));
       lr[`${k}Omitted`] = st.lastRun[k].length - lr[k].length;
     }
     out.lastRun = lr;
+  }
+  // v2.764(진단): vCenter 별 수집 진단은 범위 안 것만, 오류 원문(vCenter 주소가 들어간다)은 지운다 — 전체 범위 관리자만 본다.
+  if (Array.isArray(st.collect)) {
+    const kept = st.collect.filter((c) => c && allowed.has(String(c.vcenterId)));
+    out.collect = kept.map((c) => (c.lastPoll && typeof c.lastPoll === 'object' && c.lastPoll.error != null
+      ? { ...c, lastPoll: { ...c.lastPoll, error: null, errorHidden: true } } : c));
+    out.collectOmitted = st.collect.length - kept.length;
   }
   if ('dbPath' in out) out.dbPath = null;
   if (out.settings && typeof out.settings === 'object' && out.settings.storagePath) out.settings = { ...out.settings, storagePath: '' };

@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **220개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **221개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-22)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-23)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -216,6 +216,7 @@
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |
+| `vcenter-logs-cursor.json` | 설정 | vCenter 이벤트 수집 커서(상태, v2.764 — 읽은 마지막 시각·온전한 시각·연속 상한 수) | ✅ | ✅ | ✅ | logs/poller.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
@@ -286,6 +287,7 @@
 - **`sanswitch-perf.db`** — 첫 수집·카운터 리셋은 값이 없다(null) — 0 으로 채우지 않는다
 - **`rma-tests.db`** — 상태 변화 + 1시간 단위만 저장(diff-저장)
 - **`ipam.db`** — ⚠ WAL 로 전환하지 말 것(외부 리더의 -wal/-shm 호환 미확인). **DB 경로 이관 대상에서도 제외**된다 — 외부 연동이 경로를 고정으로 알고 있기 때문
+- **`vcenter-logs-cursor.json`** — 상태 파일(백업 감시 제외). 지우면 다음 수집이 마지막 저장 시각부터 다시 읽는다(중복 저장은 없음 — 번호@시각 키)
 - **`vcenter-logs.db`** — 보존일수(설정 › vCenter 로그 보관)로 통제한다. 경로 이관 대상 아님
 
 ---

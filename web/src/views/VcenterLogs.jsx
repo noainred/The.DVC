@@ -6,6 +6,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
+import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText } from './vcLogCollect.js'; // v2.764: vCenter 별 수집 상태 표
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -151,7 +152,11 @@ export default function VcenterLogs() {
           <Select sort={false} className="select" value={s.minSeverity} onChange={(e) => setS({ ...s, minSeverity: e.target.value })}>
             <option value="info">정보 이상(전체)</option><option value="warning">경고 이상</option><option value="error">위험만</option>
           </Select>
+          {/* v2.764: 한 주기 상한 — 설정 라우트가 이미 받는 값(100~50,000). 수집기 한도(서버 collectorMaxEvents)를 넘는 설정은 실효 상한으로 잘린다(아래 안내). */}
+          <span className="muted" style={{ marginLeft: 8 }}><b>한 주기 상한</b></span>
+          <input className="input" type="number" min="100" max="50000" step="100" style={{ width: 100 }} value={s.maxPerPoll ?? ''} onChange={(e) => setS({ ...s, maxPerPoll: e.target.value })} title="vCenter 하나가 한 주기에 읽는 최대 이벤트 수(100~50,000). 넘는 분량은 같은 주기 안에서 이어 읽습니다." /> <span className="muted">건 (100~50,000)</span>
         </div>
+        {vcLogMaxPerPollText(st) && <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>{vcLogMaxPerPollText(st)}</div>}
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12, marginTop: 12 }}>
           <span className="muted"><b>저장 경로</b></span>
           <input className="input" placeholder="비우면 기본(CONFIG_DIR)" style={{ flex: 1, minWidth: 280 }} value={s.storagePath || ''} onChange={(e) => setS({ ...s, storagePath: e.target.value })} />
@@ -163,14 +168,50 @@ export default function VcenterLogs() {
           <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>
         {vcLogNotCollectedText(st.lastRun) && <div className="muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{vcLogNotCollectedText(st.lastRun)}</div>}
-        {(st.store?.vcenters || []).length > 0 && (
-          <div className="flex gap wrap" style={{ marginTop: 10 }}>
-            {st.store.vcenters.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 11 }} title={`최근 ${fmtTime(v.lastTs)}`}>{v.vcenterId}: {fmtNum(v.count)}</span>)}
-          </div>
-        )}
+        <VcLogCollectTable st={st} />
       </div>
 
       <LogViewer />
+    </div>
+  );
+}
+
+/**
+ * v2.764: vCenter 별 수집 상태 표(예전 배지 묶음 대체) — 보관 건수·마지막 저장·온전한 시각·지연(1일 넘으면 호박색)·이번 주기 읽음/저장·상한·소요/시한·상태.
+ * 서버 collect 가 없으면(구버전) 건수·마지막 저장만 채우고 나머지는 '—'. STable 이 minWidth 와 가로 스크롤 래퍼를 함께 만든다(400px 넘침 방지).
+ */
+export function VcLogCollectTable({ st }) {
+  const rows = vcLogCollectRows(st);
+  if (!rows.length) return null;
+  const omitted = Number(st?.collectOmitted);
+  return (
+    <div style={{ marginTop: 10 }}>
+      <STable minWidth={980} style={{ fontSize: 12 }}>
+        <thead><tr>
+          <th>vCenter</th><th>보관 건수</th><th>마지막 저장</th><th title="이 시각까지의 이벤트는 전부 모았습니다(상한에 걸리면 마지막으로 읽은 이벤트 시각)">온전한 시각</th>
+          <th title="지금 − 온전한 시각(없으면 마지막 저장). 1일을 넘으면 호박색">지연</th><th title="이번 주기에 읽은 수 / 저장한 수(회차)">이번 주기 읽음/저장</th>
+          <th title="이번 주기가 끝까지 읽지 못한 이유 — 상한(maxPerPoll)·쪽 수 한도·시한(데드라인)">상한</th><th>소요/시한</th><th>상태</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((r) => {
+            const warn = vcLogLagWarn(r.lagMs);
+            return (
+              <tr key={r.vcenterId}>
+                <td style={{ whiteSpace: 'nowrap' }}>{r.vcenterId}</td>
+                <td data-sort={r.count ?? ''} className="right">{fmtNum(r.count)}</td>
+                <td data-sort={r.lastStoredTs ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.lastStoredTs)}</td>
+                <td data-sort={r.okAt ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.okAt)}</td>
+                <td data-sort={r.lagMs ?? ''} style={{ whiteSpace: 'nowrap', color: warn ? 'var(--amber)' : undefined, fontWeight: warn ? 600 : undefined }}>{vcLogLagText(r.lagMs)}</td>
+                <td data-sort={r.read ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogReadStoredText(r, fmtNum)}</td>
+                <td data-sort={r.capped == null ? '' : r.capped ? 1 : 0}>{vcLogCappedText(r)}</td>
+                <td data-sort={r.ms ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogDurText(r)}</td>
+                <td data-sort={r.state ?? ''}><span className={`badge ${vcLogStateClass(r.state)}`} title={r.error || (r.errorHidden ? '오류 원문은 전체 범위 관리자만 봅니다' : undefined)}>{vcLogStateText(r.state)}</span></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </STable>
+      {Number.isFinite(omitted) && omitted > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>범위 밖 vCenter {omitted.toLocaleString()}곳은 표시하지 않았습니다.</div>}
     </div>
   );
 }
