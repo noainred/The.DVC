@@ -128,8 +128,8 @@ copy_one() {  # \$1=원본 \$2=대상
   else cp -a "\$1" "\$2"; fi
 }
 ${files.map((f) => `
-# ${f} (+ -wal/-shm 사이드카)
-for SFX in "" "-wal" "-shm"; do
+# ${f} (+ -wal/-shm 사이드카 · .invalid 무효화 표지 — v2.762 veeam-snap.db)
+for SFX in "" "-wal" "-shm" ".invalid"; do
   P="\${SRC%/}/${f}\${SFX}"
   if [ -f "\$P" ]; then
     log "복사: ${f}\${SFX}"
@@ -156,7 +156,7 @@ verify_one() {  # \$1=원본 \$2=대상
   if [ "\$a" != "\$b" ]; then log "  MISMATCH \$1"; VERIFY_FAIL=1; else log "  ok \$(basename "\$1")"; fi
 }
 ${files.map((f) => `
-for SFX in "" "-wal" "-shm"; do
+for SFX in "" "-wal" "-shm" ".invalid"; do
   P="\${SRC%/}/${f}\${SFX}"
   [ -f "\$P" ] && verify_one "\$P" "\${DST%/}/${f}\${SFX}"
 done`).join('')}

@@ -271,3 +271,12 @@ test('라우트 — F4 등록부 손상 → badges·vm-detail 503 · backup-coun
     } finally { console.warn = w; }
   } finally { store.snapshot = prev; }
 });
+
+test('E1 후속 — DB 위치 이전 스크립트가 무효화 표지(<db>.invalid)도 함께 옮긴다(빠지면 새 위치에서 빈 구간이 완전한 값으로 나간다)', async () => {
+  const { writeMigrationScript } = await import('../src/insights/migrateScript.js');
+  const r = writeMigrationScript({ targetDir: path.join(DIR, 'newdb') });
+  const sh = fs.readFileSync(r.scriptPath, 'utf8');
+  assert.match(sh, /veeam-snap\.db/);
+  const loops = sh.match(/for SFX in ""[^;]*; do/g) || [];
+  assert.ok(loops.length > 0 && loops.every((l) => l.includes('".invalid"')), '복사·검증 루프 모두 표지를 포함');
+});
