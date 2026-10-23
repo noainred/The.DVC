@@ -17,7 +17,7 @@
  */
 import { load as loadMail } from './settings.js';
 import { resolveRecipients, withinRateLimit, kindLabel } from './kinds.js';
-import { sendMail, headerSafeText, normalizeAddresses } from '../util/smtp.js';
+import { sendMail, headerSafeText, normalizeAddresses, formatDisplayName } from '../util/smtp.js';
 import { logAudit } from '../audit.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 
@@ -125,8 +125,9 @@ async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = 
   const fromOverride = typeof fromAddr === 'string' && fromAddr.trim() && normalizeAddresses([fromAddr.trim()]).ok.length === 1 ? fromAddr.trim() : '';
   const headerAddr = fromOverride || cfg.smtp.from;
   const headerName = fromName != null && String(fromName).trim() ? fromName : cfg.smtp.fromName;
+  // 표시 이름에 따옴표·제어문자가 섞이면 헤더가 깨진다 — 안전한 형태로만 감싼다(비ASCII 는 RFC 2047 — v2.768 R3-C5-06, util/smtp.js).
   const from = headerName
-    ? `${quoteName(headerName)} <${headerAddr}>`
+    ? `${formatDisplayName(headerName)} <${headerAddr}>`
     : headerAddr;
 
   attemptAt.push(at);
@@ -160,13 +161,6 @@ async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = 
   }
 }
 
-/** 표시 이름에 따옴표·제어문자가 섞이면 헤더가 깨진다 — 안전한 형태로만 감싼다. */
-function quoteName(n) {
-  // eslint-disable-next-line no-control-regex
-  const clean = String(n || '').replace(/[\x00-\x1f\x7f"\\<>]/g, '').trim().slice(0, 80);
-  if (!clean) return '';
-  return /^[A-Za-z0-9 ._-]+$/.test(clean) ? clean : `"${clean}"`;
-}
 
 /** 설정 화면·상태 API 용. 비밀 없음. */
 export function mailStatus() {

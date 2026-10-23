@@ -2,7 +2,7 @@
 
 포탈(`server/`·`web/`)과 별개인 .NET 8 WinForms 앱이다. 릴리스는 `.github/workflows/horizon-monitor-release.yml`
 (롤링 릴리스 `horizon-monitor`)이고 포탈 버전과 무관하다. 소스를 고치면 `dotnet test tests/UagMonitor.Tests.csproj` 를 돌린다
-(화면과 무관한 논리 63건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
+(화면과 무관한 논리 70건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
 ⚠ 이 테스트는 PR CI(`ci.yml`)에서 돌지 않는다 — 릴리스 워크플로(수동·`horizon-v*` 태그)에서만 돈다. 소스를 고쳤으면 직접 돌릴 것.
 
 - **알람 판정은 `AlarmEngine`(순수)이 하고 화면(`AlarmOverlay`)은 그리기만 한다.** 규칙: 주의·위험이 알람, 끄면(확인) 같은 상태에서는
@@ -33,3 +33,6 @@
   ③ `LatestByEndpoint` 는 대상별 `ORDER BY ts DESC, id DESC LIMIT 1`(인덱스 시크) — `GROUP BY + MAX(ts)` 로 되돌리지 말 것(630만 행 약 0.5초, 잠금+UI 스레드).
   ④ `MonitorService.Snapshot` 은 `Database.ChangeStamp()`(연결 세대 + total_changes)가 같으면 직전 결과를 메인 창·트레이가 나눠 쓴다 — 연결을 바꾸는 곳은
   `_connEpoch` 를 올릴 것. 근거·변이 검증은 `tests/SaveAndLatestTests.cs`. MainForm·TrayAppContext 변경은 Linux 에서 WinForms 참조 팩(Microsoft.WindowsDesktop.App.Ref 8.0.10)으로 컴파일만 확인했다(화면은 미확인).
+- **v2.768(점검 R3-C3-2) — JSON 가져오기 판정은 `EndpointImport.Build`(순수)**: 갱신은 기존 레코드에 **파일에 있는 칸만** 덮고 sort 는 파일값 또는 유지
+  (새 Endpoint 로 덮으면 Sort=0 으로 맨 위로 튀고 꺼 둔 대상이 다시 켜진다), 파일 안 같은 키(name|host|port)는 처음 한 번만, DB 중복 키는 `GroupBy` 로 견딘다
+  (`ToDictionary` 예외로 이후 가져오기가 전부 실패했다). `tests/EndpointImportTests.cs`. SettingsForm 은 Linux 에서 WinForms 참조 팩으로 컴파일만 확인했다.

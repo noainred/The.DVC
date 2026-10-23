@@ -309,14 +309,47 @@ export function registerVeeamBadges(api) {
  *   ⚠ VM 이름에 점이 든 경우(db01.corp.local)는 작업 메시지에 그 이름이 늘 들어가므로 **VM 이름을 먼저 빼고** 판정한다(과잉 가림 방지).
  *   숫자뿐인 버전(12.1.2)은 끝 라벨이 영문이 아니라 걸리지 않는다. 입력은 300자로 먼저 자른다(라벨 길이도 상한 — 선형).
  */
-const FQDN_LIKE = /\b(?:[a-z0-9-]{1,63}\.){2,}[a-z]{2,24}\b/i;
+const FQDN_LIKE_G = /\b(?:[a-z0-9-]{1,63}\.){2,}[a-z]{2,24}\b/gi;
 const UNC_LIKE = /\\\\[A-Za-z0-9._-]|(?:^|[\s'"(])\/\/[A-Za-z0-9]/;
+/*
+ * v2.768(점검 R3-C1-2): ① VM 이름은 **단어 경계**(앞뒤 글자가 [a-z0-9.-] 가 아닌 자리)에서만 뺀다 — 부분 문자열로 빼면 vmName='corp' 가
+ *   'vbr01.corp.local' 을 'vbr01. .local' 로 쪼개 FQDN 판정을 통과시켰다(원문 주소 노출). ② 대문자로 시작하는 라벨만으로 된 .NET 점 구분 식별자
+ *   (Veeam.Backup.Core.CVmRestoreException — 소문자가 섞인 PascalCase)는 호스트명이 아니다(과잉 가림). 전부 대문자인 'VBR01.CORP.LOCAL'·흔한 내부 끝 라벨은 그대로 주소.
+ *   300자 선절단은 그대로 — 이름 탐색은 indexOf 순방향(선형), 정규식은 상한 있는 반복만.
+ */
+const NAME_BOUND = /[a-z0-9.-]/;
+const HOST_TLD = new Set(['local', 'lan', 'corp', 'internal', 'intra', 'home', 'localdomain', 'com', 'net', 'org', 'io', 'kr', 'jp', 'cn', 'de', 'pl', 'us', 'uk', 'eu', 'biz', 'info', 'co']);
+function stripVmName(orig, name) {
+  const lower = orig.toLowerCase();
+  // 소문자화로 길이가 바뀌는 문자(드묾)가 있으면 위치가 어긋난다 — 그때는 소문자 사본에서 뺀다(.NET 판정을 못 해 가리는 쪽 = 보수).
+  const src = lower.length === orig.length ? orig : lower;
+  if (name.length < 3) return src;
+  let out = ''; let from = 0; let i = lower.indexOf(name);
+  while (i >= 0) {
+    const before = i > 0 ? lower[i - 1] : '';
+    const after = lower[i + name.length] || '';
+    if (!(before && NAME_BOUND.test(before)) && !(after && NAME_BOUND.test(after))) {
+      out += `${src.slice(from, i)} `; from = i + name.length;
+      i = lower.indexOf(name, from);
+    } else i = lower.indexOf(name, i + 1);
+  }
+  return out + src.slice(from);
+}
+function isDotNetIdent(tok) {
+  const labels = tok.split('.');
+  if (HOST_TLD.has(labels[labels.length - 1].toLowerCase())) return false;
+  return /[a-z]/.test(tok) && labels.every((l) => /^[A-Z][A-Za-z0-9]*$/.test(l));
+}
+function hasFqdn(text) {
+  for (const m of text.matchAll(FQDN_LIKE_G)) if (!isDotNetIdent(m[0])) return true;
+  return false;
+}
 export function publicTaskMessage(m, { vmName = '' } = {}) {
   const t = String(m || '').slice(0, 300);
-  const name = String(vmName || '').trim().toLowerCase();
-  // 판정용 사본에서만 VM 이름을 뺀다(돌려주는 문구는 원문 그대로).
-  const probe = name.length >= 3 ? t.toLowerCase().split(name).join(' ') : t;
-  return ADDR_LIKE.test(probe) || FQDN_LIKE.test(probe) || UNC_LIKE.test(probe) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
+  const name = String(vmName || '').trim().toLowerCase().slice(0, 300);
+  // 판정용 사본에서만 VM 이름을 뺀다(돌려주는 문구는 원문 그대로). 대소문자는 원문 위치를 지키며 본다(.NET 판정이 대문자를 쓴다).
+  const probe = name.length >= 3 ? stripVmName(t, name) : t;
+  return ADDR_LIKE.test(probe) || hasFqdn(probe) || UNC_LIKE.test(probe) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
 }
 function maskDetail(detail, admin, vmName = '') {
   if (admin || !detail?.lastTask?.message) return detail;

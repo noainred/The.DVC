@@ -287,11 +287,12 @@
 | `VMPERF_RETENTION_DAYS` | `90` |  | metrics/vmperfSettings.js |
 | `VMPERF_TRACK_TOTAL` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
 
-## 백업 (1)
+## 백업 (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
+| `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
 ## 베어메탈 스토리지 (8)
 
@@ -544,11 +545,10 @@
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
 | `SSH_READY_TIMEOUT_MS` |  |  | proxy/sshExec.js, proxy/sshGateway.js |
 
-## 인사이트 (7)
+## 인사이트 (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `CONFIG_DIR` |  | ✅ | config.js, insights/dbLocation.js 외 1 |
 | `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
 | `DB_HEALTH_QUICK_MAX_BYTES` | `512` |  | insights/dbHealth.js |

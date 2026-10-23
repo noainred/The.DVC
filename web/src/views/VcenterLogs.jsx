@@ -220,7 +220,7 @@ export function VcLogCollectTable({ st }) {
   );
 }
 
-function LogViewer() {
+export function LogViewer() {   // v2.768: 회귀 테스트(audit2768c)가 직접 띄운다
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [f, setF] = useState({ vcenterId: '', severity: '', q: '' });
   const [period, setPeriod] = useState(VCLOG_DEFAULT_PERIOD);   // v2.741(DB-01): 기본 최근 7일
@@ -238,6 +238,9 @@ function LogViewer() {
   // v2.590 P11: 엣지 연합 조회가 끝나지 않은 이유 — 예전에는 13초 뒤 조용히 빈 표로 끝나 '로그가 없다' 처럼 보였다.
   const [fedNote, setFedNote] = useState('');
   const [dlMsg, setDlMsg] = useState('');   // v2.602 WEB2602-01: CSV 내려받기 실패 사유
+  // v2.768(점검 R3-C4-1): 로컬 조회 실패 — 예전엔 catch(()=>{}) 로 삼켜 필터를 바꾼 뒤 실패하면 이전 조건의 행이 남았고,
+  //   첫 조회 실패는 '기간 안 로그 없음' 으로 보였다(값 없는 이유를 단정). 오류 객체를 그대로 둔다(ErrorBox 가 403·일시 미가용을 가른다).
+  const [loadErr, setLoadErr] = useState(null);
   const LIMIT = 200;
   const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
 
@@ -248,7 +251,7 @@ function LogViewer() {
   const fedGen = useRef(0);
   const federate = async () => {
     const gen = ++fedGen.current;
-    setMode('edge'); setLoading(true); setRows([]); setFedNote('');
+    setMode('edge'); setLoading(true); setRows([]); setFedNote(''); setLoadErr(null);
     try {
       sinceRef.current = vcLogSinceOf(period);
       const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT, ...(sinceRef.current ? { since: sinceRef.current } : {}) });
@@ -270,7 +273,7 @@ function LogViewer() {
   const load = (reset = true) => {
     if (f.vcenterId && remoteAgent(f.vcenterId)) return federate(); // 엣지 보관 → 연합 조회
     const gen = ++fedGen.current; // 진행 중이던 연합 폴링 무효화 + 이 로컬 조회의 세대
-    setMode('local'); setLoading(true); setFedNote('');
+    setMode('local'); setLoading(true); setFedNote(''); setLoadErr(null);
     const off = reset ? 0 : offset;
     if (reset) sinceRef.current = vcLogSinceOf(period);
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
@@ -282,7 +285,12 @@ function LogViewer() {
       if (gen !== fedGen.current) return; // 더 새 조회로 대체됨
       setTotal(d.total); setTotalInfo({ totalCapped: d.totalCapped === true, totalCap: Number.isFinite(d.totalCap) ? d.totalCap : null, lastBatch: d.rows.length });
       setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
-    }).catch(() => {}).finally(() => { if (gen === fedGen.current) setLoading(false); });
+    }).catch((e) => {
+      if (gen !== fedGen.current) return; // 더 새 조회로 대체됨 — 늦게 온 실패가 새 화면을 덮지 않게
+      setLoadErr(e || new Error('로그를 불러오지 못했습니다'));
+      // 새 조건의 첫 페이지를 못 읽었으면 이전 조건의 행·건수를 남기지 않는다('더 보기' 실패는 읽은 행을 그대로 둔다).
+      if (reset) { setRows([]); setTotal(0); setTotalInfo({ totalCapped: false, totalCap: null, lastBatch: 0 }); setOffset(0); }
+    }).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
   useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, period, sources]);
 
@@ -316,15 +324,16 @@ function LogViewer() {
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           {mode === 'edge' && <span className="badge amber" title="데이터는 엣지에 보관, 조회만 중계">엣지 조회: {remoteAgent(f.vcenterId) || '?'}</span>}
-          <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>
+          {!(mode === 'local' && loadErr) && <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>}
           {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>}
         </div>
       </div>
       {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 8 }}>{dlMsg}</div>}
+      {mode === 'local' && loadErr && <div style={{ marginBottom: 8 }}><ErrorBox error={loadErr} /></div>}
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
         <STable><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
           <tbody>
-            {rows.length === 0 && !loading && <tr><td colSpan={7} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{vcLogEmptyText(period)}</td></tr>}
+            {rows.length === 0 && !loading && !(mode === 'local' && loadErr) && !(mode === 'edge' && fedNote) && <tr><td colSpan={7} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{vcLogEmptyText(period)}</td></tr>}
             {rows.map((r, i) => {
               const [lbl, cls] = SEV[r.severity] || ['정보', 'gray'];
               return (

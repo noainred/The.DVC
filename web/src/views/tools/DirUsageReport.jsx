@@ -23,6 +23,14 @@ export function DirUsageReport() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const pollRef = useRef(null);
+  // v2.768(점검 R3-C4-2): 상세(최신 스캔·이력·[보기]) 전용 상태 — 예전엔 상세 실패를 폴링 오류(err)에 실어 20초 폴링의 setErr(null) 이 지웠고,
+  //   대상을 바꿔도 detail·history 를 비우지 않아 실패하면 이전 대상의 표가 새 선택 아래 남았다. [보기] 의 늦은 응답도 가드가 없었다.
+  //   세대(detailGen) — 대상 전환·[보기] 마다 올리고, 응답은 자기 세대·자기 대상일 때만 반영한다.
+  const [detailErr, setDetailErr] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailGen = useRef(0);
+  const selRef = useRef(sel);
+  selRef.current = sel;
 
   const load = async () => {
     try { setD(await fetchJson('/admin/dir-usage')); setErr(null); }
@@ -37,24 +45,41 @@ export function DirUsageReport() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
 
-  // 대상이 정해지면 최신 스캔 + 이력을 가져온다.
+  // 대상이 정해지면 최신 스캔 + 이력을 가져온다. 전환하면 이전 대상의 표·이력·오류를 먼저 비운다.
   useEffect(() => {
-    if (!sel) { setDetail(null); setHistory([]); return; }
+    const g = ++detailGen.current;
+    setDetail(null); setHistory([]); setDetailErr(null);
+    if (!sel) { setDetailLoading(false); return undefined; }
     let alive = true;
+    const fresh = () => alive && g === detailGen.current;
+    setDetailLoading(true);
     (async () => {
       try {
         const h = await fetchJson(`/admin/dir-usage/history/${encodeURIComponent(sel)}`, { limit: 30 });
-        if (!alive) return;
+        if (!fresh()) return;
         setHistory(h.scans || []);
         const newest = (h.scans || [])[0];
         if (newest) {
           const one = await fetchJson(`/admin/dir-usage/scan/${newest.id}`);
-          if (alive) setDetail(one);
+          if (fresh()) setDetail(one);
         } else setDetail(null);
-      } catch (e) { if (alive) setErr(e.message); }
+      } catch (e) { if (fresh()) setDetailErr(e); }
+      finally { if (fresh()) setDetailLoading(false); }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; };   // 언마운트·전환 — 진행 중 응답 무효화(전환은 다음 실행이 세대도 올린다)
   }, [sel]);
+
+  /** 이력의 [보기] — 누른 순간의 대상·세대가 그대로일 때만 반영한다(대상을 바꾼 뒤 늦게 온 옛 스캔이 새 화면을 덮지 않게). */
+  const viewScan = (id) => {
+    const g = ++detailGen.current;
+    const target = sel;
+    setDetailErr(null);
+    fetchJson(`/admin/dir-usage/scan/${id}`).then((one) => {
+      if (g !== detailGen.current || selRef.current !== target) return;
+      if (one?.scan?.target_id != null && String(one.scan.target_id) !== String(target)) return;
+      setDetail(one); setDetailLoading(false);
+    }).catch((e) => { if (g === detailGen.current && selRef.current === target) { setDetailErr(e); setDetailLoading(false); } });
+  };
 
   const targets = d?.settings?.targets || [];
   // 첫 로드에서 대상이 하나뿐이면 자동 선택(클릭 한 번을 아낀다).
@@ -103,7 +128,10 @@ export function DirUsageReport() {
         </div>
       )}
 
-      {targets.length > 0 && !scan && (
+      {detailErr && <div style={{ marginBottom: 8 }}><ErrorBox error={detailErr} /></div>}
+      {targets.length > 0 && !scan && detailLoading && <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>수집 결과를 불러오는 중…</div>}
+
+      {targets.length > 0 && !scan && !detailErr && !detailLoading && (
         <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>
           아직 수집 결과가 없습니다. '지금 스캔'을 누르거나 설정한 주기를 기다리세요.
           {target && <> (엣지 <b>{target.agent}</b> 의 RMA 가 온라인이어야 합니다)</>}
@@ -182,7 +210,7 @@ export function DirUsageReport() {
                       <td className="muted">{h.mailed === 1 ? `발송(${h.mail_note || ''})` : h.mailed === 2 ? `실패: ${h.mail_note || ''}` : h.mail_note || '—'}</td>
                       <td>
                         <button className="logout-btn" style={{ padding: '2px 8px', fontSize: 11 }}
-                          onClick={() => fetchJson(`/admin/dir-usage/scan/${h.id}`).then(setDetail).catch((e) => setErr(e.message))}>보기</button>
+                          onClick={() => viewScan(h.id)}>보기</button>
                       </td>
                     </tr>
                   ))}

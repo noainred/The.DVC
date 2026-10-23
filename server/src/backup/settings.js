@@ -87,7 +87,7 @@ async function safeBackup(reason) {
     // v2.591 L5: `m.skipped` 는 성공한 백업에서도 **배열**(크기 상한으로 뺀 파일 — v2.590 D5)이라 빈 배열도 참이다. 그 값으로
     //   '생략' 을 판정하면 모든 자동 백업이 lastSkip 으로 가고 lastRun 이 영원히 비어 서비스 점검이 '백업 없음' 이라 말했다.
     if (m.skipped === true) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }
-    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: Array.isArray(m.skipped) ? m.skipped.length : 0 }; return m;
+    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: Array.isArray(m.skipped) ? m.skipped.length : 0, edgesOmitted: Array.isArray(m.edgesOmitted?.agents) ? m.edgesOmitted.agents.length : 0 }; return m; // v2.768(R3-C5-01): 상한으로 뺀 엣지 사본 수
   }
   catch (e) { console.warn(`[backup] ${reason} 백업 실패: ${e.message}`); return null; }
 }

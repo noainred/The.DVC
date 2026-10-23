@@ -73,6 +73,29 @@ export function encodeHeaderWord(s) {
   return `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`;
 }
 
+/**
+ * 헤더 From 의 표시 이름 — 따옴표·제어문자·꺾쇠를 지우고 안전한 형태로만 싼다(mail/service.js 에서 옮김 — 순수 함수로 테스트).
+ * v2.768(점검 R3-C5-06): 비ASCII 이름(예: 'VMware 포탈')은 따옴표로만 싸서 원시 UTF-8 이 From 헤더에 실렸다(제목은
+ *   encodeHeaderWord 로 인코딩했다 — SMTPUTF8 협상도 없다). RFC 2047 encoded-word 로 바꾼다. encoded-word 는 따옴표 안에
+ *   두면 해석되지 않으므로 싸지 않고, 한 단어 75자 상한에 맞게 코드포인트 경계로 나눠 공백으로 잇는다(디코더는 인접
+ *   encoded-word 사이 공백을 버린다). 주소부(<addr>)는 호출부가 붙인다 — 그대로다.
+ */
+export function formatDisplayName(n) {
+  // eslint-disable-next-line no-control-regex
+  const clean = String(n || '').replace(/[\x00-\x1f\x7f"\\<>]/g, '').trim().slice(0, 80);
+  if (!clean) return '';
+  if (/^[A-Za-z0-9 ._-]+$/.test(clean)) return clean;
+  if (/^[\x20-\x7e]*$/.test(clean)) return `"${clean}"`;
+  const words = [];
+  let cur = '';
+  for (const ch of clean) {
+    if (Buffer.byteLength(cur + ch, 'utf8') > 45) { words.push(cur); cur = ''; }   // base64 60자 + 표지 12자 = 72자
+    cur += ch;
+  }
+  if (cur) words.push(cur);
+  return words.map((w) => (/^[\x20-\x7e]*$/.test(w) ? `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=` : encodeHeaderWord(w))).join(' ');
+}
+
 /** base64 본문을 76자로 접는다(RFC 2045 권장 줄 길이). */
 function foldBase64(b64) {
   const out = [];
@@ -164,9 +187,16 @@ export function dotStuff(body) {
   return String(body).replace(/\r?\n/g, '\r\n').replace(/^\./gm, '..');
 }
 
-/** 서버 응답 한 덩어리를 파싱한다. 멀티라인(`250-…` 반복 후 `250 …`)을 하나로 합친다. */
+/**
+ * 서버 응답 한 덩어리를 파싱한다. 멀티라인(`250-…` 반복 후 `250 …`)을 하나로 합친다.
+ * v2.768(점검 R3-C5-05): 버퍼가 줄바꿈으로 끝날 때만 판정한다 — 마지막 줄이 TCP 조각 경계에서 잘리면('…250 STAR' + 'TTLS\r\n')
+ *   예전엔 앞부분만으로 '완성' 으로 보고 STARTTLS 를 놓쳤다(계정이 있으면 '광고하지 않음' 으로 중단, 없으면 평문 발송). 나머지
+ *   조각은 다음 명령 응답 앞에 붙어 대화가 한 칸씩 밀렸다. 끝이 줄바꿈인지는 마지막 한 글자만 본다(정규식 반복 없음).
+ */
 export function parseReply(buf) {
-  const lines = String(buf).split(/\r?\n/).filter(Boolean);
+  const sbuf = String(buf);
+  if (!sbuf.endsWith('\n')) return null;               // 마지막 줄이 아직 덜 왔다
+  const lines = sbuf.split(/\r?\n/).filter(Boolean);
   if (!lines.length) return null;
   const last = lines[lines.length - 1];
   const m = /^(\d{3})([ -])(.*)$/.exec(last);

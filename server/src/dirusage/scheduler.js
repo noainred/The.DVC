@@ -144,7 +144,10 @@ async function ingest(cfg, targetId, p, parsed, now, warnCount = 0) {
 
   const mail = cfg.mail || {};
   if (!mail.enabled) return;
-  if (mail.onlyOnChange && prev && sameTop(rec, prev)) {
+  // v2.768(점검 R3-C4-3): 생략 판단은 '직전 저장 스캔' 이 아니라 **마지막 발송 성공 회차** 와 비교한다 — 직전 회차가 미발송(수신자·SMTP 미설정)이거나
+  //   발송 실패였으면 같은 Top 이 이어지는 한 영영 '동일해 생략' 이었다(재현). 그런 회차가 없으면 생략하지 않는다. 보고서 증감 비교(base)는 그대로.
+  const mailedBase = mail.onlyOnChange && typeof db.lastMailed === 'function' ? comparableBase(rec, db.lastMailed(targetId)).prev : null;
+  if (mail.onlyOnChange && mailedBase && sameTop(rec, mailedBase)) {
     db.markMailed(id, 0, '직전과 동일해 발송 생략(변경 시에만 발송)');
     return;
   }

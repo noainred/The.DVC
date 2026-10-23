@@ -1,4 +1,4 @@
-# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.767
+# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.768
 
 > 루트 `CLAUDE.md` 에서 옮긴 기록(2026-10-20, v2.746 시점). 문구는 원문 그대로이고 목록 들여쓰기만 한 단계 줄였다. "되돌리지 말 것" 규칙은 그대로 유효하다 — 이 영역 코드를 고치기 전에 이 파일을 읽을 것. 새 교훈은 테스트 → 이 파일 순으로 남기고 루트 CLAUDE.md 에는 쌓지 않는다.
 
@@ -1634,5 +1634,18 @@
   · 외부 명령의 '일부 실패' 를 전체 실패로 버리지 않는다(B2-01 du exit 1 + 루트 합계 행 = 경고 성공, du-top 출력 상한은 엣지·중앙 RMA 결과 보관 상한까지 함께 올림).
   · 판정 시각은 그 판정에 쓰인 엔드포인트의 시각으로(B4-1 '/inventory' lastAt) · 입력 칸 의미 하나(B4-2 SSH 포트 ≠ Ollama 포트, 이미 잘못 저장된 설치본은 자동 복구 안 됨) ·
     낡은 엣지 보고는 FAULT 가 아니라 UNKNOWN(B4-4) · 비활성 대상은 NOT_RUN(B4-5·B5-3) · 앵커 없는 반복 정규식 29개 규칙 교체(B2-03).
-  · 남긴 것(3회차 후보): 데모 계정의 comm-map·data-flow·device-flow 형제 라우트 가림 · pyportal 세마포어·guard IPv6·history.latest GROUP BY·check_url 유휴 시한 ·
+  · 남긴 것(3회차 후보 — v2.768 에서 처리·판정, 아래 항목): 데모 계정의 comm-map·data-flow·device-flow 형제 라우트 가림 · pyportal 세마포어·guard IPv6·history.latest GROUP BY·check_url 유휴 시한 ·
     C# 가져오기 정렬 · LogAnalysis run 늦은 응답 가드 · onlyOnChange 실패 후 생략 · 상대 경로 storagePath 기준.
+- **v2.768 — 버그 점검 3회차(다중 에이전트 5축 → 반증 1인 → 수정 4그룹) 확정 17·개연 2 = 19건 수정**(회귀 `server/test/audit2768{a,b,c}` · 웹 `views/{audit2768c,mailSettings2768,portalBackup2768}` · `pyportal/tests/test_audit2768` · C# `EndpointImportTests`):
+  · ⚠⚠ **복원은 '예약 → 기동 시 첫 단계에서 적용'**(R3-C5-02 `backup/stagedRestore.js`·`stagedRestoreBoot.js`): 파일만 덮고 '재시작 필요' 라 하면 인메모리 캐시 모듈(엣지 토큰 touch 60초·게시판·사용자)의
+    다음 저장이 복원을 되돌린다(엣지 28대면 약 2초 간격). JSON 은 `backups/.restore-staged.json` 에 예약, index.js **두 번째 import**(logbuffer 다음)가 config.js 보다 먼저 적용 —
+    이 줄을 옮기지 말 것, 이 모듈은 node 내장·atomicWrite 만 import. `session-state.json`(세션 폐기 목록)은 복원하지 않는다(보안 후퇴). `.env` 는 즉시 쓴다(EnvironmentFile).
+  · ⚠ **알림 엔진도 공용 '못 읽은 vCenter' 판정을 쓴다**(R3-C5-03 `alerts.js unreadVcenterIds` = `unreadVcenterReasons` + pending·disabled): stale 위임 vCenter 의 마지막 값으로
+    알림을 새로 내거나 해소하지 않고, 보고 끊김은 별도 키 `vcstale:` warning. 상태 목록 사본을 다시 만들지 말 것(테스트 스윕).
+  · 가림은 응답 경로 전부(R3-C2-1 메일 이력 — 형제 /admin/alerts 는 범위로 잘랐는데 /admin/mail 은 아님 · R3-C2-2 데모 계정 흐름 화면 4개 — memoJson extraKey 에 판본).
+  · 검증과 저장은 같은 승계 규칙(R3-C5-04 SMTP 비밀번호 `nextSmtpPassword` 하나) · 응답 판정은 줄 끝까지 받은 뒤(R3-C5-05) · 만들 수 있는 백업은 열 수 있어야 한다(R3-C5-01).
+  · '변경 시에만 발송' 의 기준은 마지막 **발송 성공** 회차(R3-C4-3) · pyportal 요청 전체 시한(점검·웹훅, R3-C3-1 — uagmon B5-5 와 같은 클래스) · 새 계정 tokenVersion 무작위 시작(R3-C3-5).
+  · 2회차 '남긴 것' 정정: 데모 형제 라우트 가림(완료) · pyportal 세마포어(반증 — check_many 는 상한 32) · guard IPv6(반증) · history.latest(완료) · check_url 시한(완료) · C# 가져오기 정렬(완료) ·
+    LogAnalysis 늦은 응답(도달 불가) · onlyOnChange(완료) · 상대 storagePath(버그 아님 — 라우트 400).
+  · 남긴 것: pyportal HubServer 연결 세마포어를 스레드 생성 뒤 획득(미인증 64연결로 슬롯 고갈) · C# EndpointEditForm IPv6 ':' 절단(판독) · pyportal check_url 첫 주소만 접속 ·
+    pyportal stats 첫 호출 COUNT 는 O(N) · 복원 예약 뒤 재시작 전에 바꾼 설정은 재시작 때 덮인다(화면 배너·취소 버튼) · 웹 vcdOverview·DatastoreUsage 결측 0 합산(낮음 참고).

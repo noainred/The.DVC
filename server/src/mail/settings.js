@@ -102,6 +102,22 @@ export function smtpHostIssue(host) {
   return ssrfBlockReason(h.includes(':') && !h.startsWith('[') ? `[${h}]` : h);
 }
 
+/**
+ * 저장 후 SMTP 비밀번호와, 비밀번호가 비게 된 사유 — **save 와 PUT 검증이 같은 식을 쓴다**(v2.768 점검 R3-C5-04).
+ * 예전 PUT 검증은 `body.password || cur.password` 로 기존 비번을 승계해 보고, save 는 호스트가 바뀌면 비웠다 — 검증을 통과한
+ * '계정 있음 + 비밀번호 없음' 설정이 저장돼 자동 발송이 빈 비밀번호로 AUTH → 535 → 인증 정지로 이어졌다.
+ *   · 빈 값 = 기존 유지. 지우려면 clearPassword 를 명시적으로 보낸다.
+ *   · v2.480(3차 감사 S8): host 가 바뀌면 저장 비번 이월 금지(PDU S-1 규칙) — 새 SMTP 로 평문 자격증명 전송 방지.
+ * @returns {{ password: string, dropped: 'cleared'|'hostChanged'|null }}
+ */
+export function nextSmtpPassword(s = {}, curSmtp = {}) {
+  if (s?.clearPassword === true) return { password: '', dropped: curSmtp?.password ? 'cleared' : null };
+  if (s?.password) return { password: String(s.password), dropped: null };
+  const hostChanged = String(s?.host ?? curSmtp?.host ?? '').trim() !== String(curSmtp?.host || '').trim();
+  if (hostChanged) return { password: '', dropped: curSmtp?.password ? 'hostChanged' : null };
+  return { password: curSmtp?.password || '', dropped: null };
+}
+
 export function save(body = {}) {
   const cur = load();
   const next = structuredClone(cur);
@@ -120,9 +136,8 @@ export function save(body = {}) {
       secure: s.secure === true,
       startTls: s.startTls !== false,
       user: String(s.user ?? cur.smtp.user).trim().slice(0, 200),
-      // ★ 빈 값 = 기존 유지. 지우려면 clearPassword 를 명시적으로 보낸다.
-      // v2.480(3차 감사 S8): host 가 바뀌면 저장 비번 이월 금지(PDU S-1 규칙) — 새 SMTP 로 평문 자격증명 전송 방지
-      password: s.clearPassword === true ? '' : (s.password ? String(s.password) : (String(s.host ?? cur.smtp.host).trim() !== String(cur.smtp.host || '').trim() ? '' : cur.smtp.password)),
+      // ★ 빈 값 = 기존 유지 · v2.480 host 가 바뀌면 이월 금지 — 판정은 nextSmtpPassword 한 벌(PUT 검증과 공유 — v2.768 R3-C5-04)
+      password: nextSmtpPassword(s, cur.smtp).password,
       from: String(s.from ?? cur.smtp.from).trim().slice(0, 253),
       fromName: String(s.fromName ?? cur.smtp.fromName).slice(0, 80),
       rejectUnauthorized: s.rejectUnauthorized !== false,
@@ -149,23 +164,32 @@ export function redact(cfg = load()) {
 
 /* ── 검증(순수) ─────────────────────────────────────────────────────── */
 
-/** SMTP 설정의 문제점. 없으면 null. */
-export function smtpIssue(smtp) {
+/**
+ * SMTP 설정의 문제점. 없으면 null.
+ * @param {string|null} [dropped] v2.768(점검 R3-C5-04): nextSmtpPassword 가 돌려준 '비밀번호가 비게 된 사유'(PUT 검증만 넘긴다).
+ */
+export function smtpIssue(smtp, dropped = null) {
   if (!String(smtp?.host || '').trim()) return 'SMTP 서버 주소를 입력하세요.';
   const from = String(smtp?.from || '').trim();
   if (!from) return '보내는 사람(From) 주소를 입력하세요.';
   if (normalizeAddresses([from]).ok.length !== 1) return '보내는 사람(From) 주소 형식이 올바르지 않습니다.';
   const port = Number(smtp?.port);
   if (!Number.isFinite(port) || port < 1 || port > 65535) return '포트는 1~65535 사이여야 합니다.';
-  if (smtp?.user && !smtp?.password) return '계정을 입력했다면 비밀번호도 필요합니다(이미 저장돼 있다면 비워 두세요).';
+  // v2.768(점검 R3-C5-04): 이 오류가 나는 것은 **저장된 비밀번호가 없거나 버려지는** 경우뿐이다(있으면 빈 칸이 기존 유지라
+  //   통과한다) — 예전 '(이미 저장돼 있다면 비워 두세요)' 는 그 어느 경우에도 맞지 않는 안내였다. 사유별로 말한다.
+  if (smtp?.user && !smtp?.password) {
+    if (dropped === 'hostChanged') return 'SMTP 서버 주소가 바뀌어 저장된 비밀번호를 새 서버로 넘기지 않습니다 — 새 서버의 비밀번호를 다시 입력하세요(계정 없이 보내려면 계정을 비우세요).';
+    if (dropped === 'cleared') return '비밀번호를 지우려면 계정도 비우세요 — 계정을 쓰려면 새 비밀번호를 입력하세요.';
+    return '계정을 입력했다면 비밀번호도 필요합니다(저장된 비밀번호가 없습니다).';
+  }
   return null;
 }
 
 /** 저장 전 전체 검증. 문제 목록(빈 배열이면 통과). */
-export function validate(cfg) {
+export function validate(cfg, dropped = null) {
   const out = [];
   if (!cfg?.enabled) return out;                       // 꺼져 있으면 형식만 맞으면 된다
-  const s = smtpIssue(cfg.smtp);
+  const s = smtpIssue(cfg.smtp, dropped);
   if (s) out.push(s);
   // 켜져 있는 종류 중 받는 사람을 어디서도 찾을 수 없는 것이 있으면 미리 알린다
   // (조용히 안 보내면 "왜 메일이 안 오지" 로 이어진다).
