@@ -72,6 +72,18 @@ export function eventsCompleteUntil(events, { startedAt, max = Infinity } = {}) 
   // 상한 밖 — 수집을 시작한 시각까지 온전하다. vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각까지.
   return { at: Math.max(Number(startedAt) || 0, maxTs ?? 0) || null, capped: false };
 }
+/*
+ * v2.763(V4-4): 수집기(soapClient collectVCenterEvents)가 한 번에 실제로 읽을 수 있는 최대 — ReadNextEvents 200쪽 × 쪽당 200건.
+ *   설정은 50,000 까지 허용해 40,000 을 넘게 두면 수집기는 40,000 에서 멈추는데, 폴러는 설정값으로 상한을 판정해 '상한에 안 걸림 →
+ *   수집 시작 시각까지 온전' 으로 기록했다(그 뒤 몇 시간치 이벤트가 빠진 채 스냅샷 판정·가용성이 '신선'). 수집 호출과 완결 판정에 같은 값을 쓴다.
+ *   ⚠ 수집기의 쪽 수·쪽 크기를 바꾸면 이 값도 바꿀 것(test/veeam2763c 가 소스를 대조한다).
+ */
+export const COLLECTOR_MAX_EVENTS = 200 * 200;
+/** 이번 주기에 읽을 상한 — 설정값과 수집기 한도 중 작은 것. */
+export function effectiveMaxPerPoll(settings) {
+  const m = Number(settings?.maxPerPoll);
+  return Number.isFinite(m) && m > 0 ? Math.min(m, COLLECTOR_MAX_EVENTS) : COLLECTOR_MAX_EVENTS;
+}
 /** 그 vCenter 의 마지막 수집 성공 기록 — { at, capped, events } 또는 null. */
 export function logCollectOk(vcenterId) { const r = _collectOk.get(String(vcenterId ?? '')); return r ? { ...r } : null; }
 /** 그 vCenter 의 이벤트가 온전한 마지막 시각(ms) 또는 null(기록 없음). */
@@ -189,6 +201,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
     const db = await getLogsDb();
     const mock = config.dataSource === 'mock';
     const minRank = SEV_RANK[s.minSeverity] || 0;
+    const maxEv = effectiveMaxPerPoll(s);   // v2.763(V4-4): 수집 호출과 완결 판정에 같은 상한
     // v2.732(점검 2회차 B4-01): live 대상은 **직접 수집 vCenter 만**이다 — 관리자가 끈(enabled:false)·점검중(maintenance)·엣지 위임
     //   (collectMode 'site') vCenter 는 로그인하지 않는다(store.js 주 폴러·vmseries·curuser 와 같은 판정 — vcenter/collectTarget.js 하나).
     //   예전에는 등록부 전량이라 그 셋에 10분마다 로그인했고(재현: 3주기 × 계정 3개 = 9회), 주 폴러가 그 셋을 수집하지 않으므로 인증 정지
@@ -218,12 +231,12 @@ export async function pollLogsOnce({ manual = false } = {}) {
         const sinceTs = nextSinceTs(last, _readCursor.get(String(vc.id)), { firstDays }); // v2.756: 읽은 커서까지 본다
         const events = mock
           ? synthEvents(vc.id, sinceTs, last ? 25 : 25 * Math.ceil(firstDays / 7))
-          : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll, signal }));
+          : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: maxEv, signal }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
           .map((e) => ({ vcenterId: vc.id, key: eventRowKey(e), ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message, detail: e.detail ?? null }));
         // v2.731(A2-01): 적재할 행이 0개여도 '수집은 성공' 이다 — 성공 시각 기록을 위해 항상 넘긴다.
-        const done = eventsCompleteUntil(events, { startedAt, max: mock ? Infinity : s.maxPerPoll });
+        const done = eventsCompleteUntil(events, { startedAt, max: mock ? Infinity : maxEv });
         let maxRead = 0;
         for (const e of events) { const t = Number(e?.ts); if (Number.isFinite(t) && t > maxRead) maxRead = t; }
         perVc.push({ vcId: String(vc.id), rows, done, events: events.length, maxRead });
