@@ -113,6 +113,7 @@ test('A1-1 ③ — 요약이 Veeam 으로 본 계정(이름 규칙 svc-veeam)을
     const vms = [{ id: 'oc9:vm-1', name: 'web01' }, { id: 'oc9:vm-2', name: 'db01' }, { id: 'oc9:vm-3', name: 'db02' }];
     db.setCoveredFrom('oc9', NOW - 9 * DAY, NOW);
     // 덮는 경우 — 전용 DB 의 행이 svc-bk 뿐: 요약 계정 ⊆ userList → 수집기 시각을 섞는다
+    // v2.767(점검 R2-B1-1): 단 이것은 svc-veeam 을 **한 번도 본 적 없을 때** 뿐이다(알 수 없는 계정 — 남은 한계). 아래 s2 에서 본 뒤에는 같은 s1 도 섞지 않는다.
     const s1 = await S.localSnapSummary(null, 'oc9', vms, { now: NOW, snapDb: db });
     assert.deepEqual(s1.veeamUsers, ['svc-bk@corp']);
     assert.equal(C.snapEventsOkAt('oc9', { dedicated: true, summary: s1 }), NOW);
@@ -125,6 +126,8 @@ test('A1-1 ③ — 요약이 Veeam 으로 본 계정(이름 규칙 svc-veeam)을
     const s2 = await S.localSnapSummary(null, 'oc9', vms, { now: NOW, snapDb: db });
     assert.deepEqual(s2.veeamUsers, ['svc-bk@corp', 'svc-veeam@corp']);
     assert.equal(C.snapEventsOkAt('oc9', { dedicated: true, summary: s2 }), null, '판정 계정 ⊄ 덮은 계정 → 수집기 시각을 섞지 않는다');
+    // v2.767(점검 R2-B1-1): s1 단언 갱신 — 본 적 있는 svc-veeam 은 기억된다(snap_meta 'vu:<vc>'). 로그 폴러가 밀려 7일 창에 svc-bk 만 남은 요약(s1 모양)도 섞지 않는다.
+    assert.equal(C.snapEventsOkAt('oc9', { dedicated: true, summary: s1 }), null, '1회차 판본은 여기서 NOW(섞음) — 2회차 B1-1');
     assert.equal(C.snapEventsOkAt('oc9', { dedicated: true, summary: { veeamUsers: [], veeamUsersOverflow: true } }), null, '다 세지 못한 요약은 모름');
     // 엣지 push 경로(edgeSnapPayload)도 요약을 넘긴다 — 필드는 그대로
     const out = await S.edgeSnapPayload({ db: null, snap: { vcenters: [{ id: 'oc9' }], vms: vms.map((v) => ({ ...v, vcenterId: 'oc9' })) }, notCollected: new Map(), logSettings: { enabled: true, minSeverity: 'info' }, now: NOW, snapDb: db,

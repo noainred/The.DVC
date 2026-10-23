@@ -82,6 +82,7 @@ export function hygieneOf(raw, { minLen = 16 } = {}) {
 //   `edgeReportCapability()` 가 `cmpVersion is not defined` 로 죽는다(v2.575 에 실제로 겪었다).
 //   import 한 뒤 다시 export 할 것.
 import { cmpVersion } from '../util/cmpVersion.js';
+import { STALE_MS as EDGE_REPORT_STALE_MS } from '../central/tokenCheckPull.js'; // v2.767(점검 R2-B4-4): 낡음 경계는 하나(화면 limits.staleMs 와 같은 값)
 
 export { cmpVersion };
 
@@ -342,11 +343,16 @@ export const FAULT_PROBE_STATES = Object.freeze([
  */
 export function rowStateOf(row) {
   const st = row?.probe?.state || PROBE_STATE.NOT_RUN;
-  const fact = row?.edge?.fact || '';
   const hygiene = (row?.collector?.hygiene || []).length > 0;
   if (FAULT_PROBE_STATES.includes(st)) return ROW_STATE.FAULT;
-  if (fact === EDGE_TOKEN_FACT.REJECTED || fact === EDGE_TOKEN_FACT.AGENT_WRONG_NAME) return ROW_STATE.FAULT;
-  if (row?.edge?.collectorShortMatch === false) return ROW_STATE.FAULT;
+  if (edgeReportFault(row?.edge)) {
+    // v2.767(점검 R2-B4-4): **낡은 보고**(STALE_MS 초과)의 결함은 지금도 그런지 모른다 — 고친 뒤에도 FAULT 로 남던 결함.
+    //   결함으로도 정상으로도 세지 않는다(다른 주의 근거가 있으면 주의, 아니면 확인 불가). 다시 당기면 새 보고로 판정한다.
+    if (!row.edge.stale) return ROW_STATE.FAULT;
+    if (st === PROBE_STATE.SKIP_NO_TOKEN || hygiene || row?.registered === false) return ROW_STATE.WARN;
+    return ROW_STATE.UNKNOWN;
+  }
+  const fact = row?.edge?.fact || '';
   if (st === PROBE_STATE.OK) {
     if (hygiene) return ROW_STATE.WARN;
     if (fact === EDGE_TOKEN_FACT.SHARED || row?.central?.mode === TOKEN_MODE.SHARED) return ROW_STATE.WARN;
@@ -356,6 +362,16 @@ export function rowStateOf(row) {
   }
   if (st === PROBE_STATE.SKIP_NO_TOKEN || hygiene || row?.registered === false) return ROW_STATE.WARN;
   return ROW_STATE.UNKNOWN;
+}
+
+/**
+ * 엣지 자기보고가 말하는 결함(중앙 거부·다른 엣지 이름·수집 토큰 지문 불일치)이 있나 — 행 상태와 발견 목록이 같이 쓴다.
+ * 보고의 신선도는 따로(`edge.stale`) 본다.
+ */
+export function edgeReportFault(edge) {
+  if (!edge) return false;
+  return edge.fact === EDGE_TOKEN_FACT.REJECTED || edge.fact === EDGE_TOKEN_FACT.AGENT_WRONG_NAME
+    || edge.collectorShortMatch === false;
 }
 
 /** 행마다 `state` 를 붙인다 — 화면은 이 값을 **읽기만** 한다(판정 복제 금지). */
@@ -433,8 +449,9 @@ export const EDGE_TOKEN_FACT = Object.freeze({
  * ⚠ **저장 키(중앙이 아는 이름)와 엣지가 말한 이름이 다르면 그 사실 자체가 진단**이다 —
  *   한쪽으로 덮지 않고 `nameMismatch` 로 나란히 남긴다(v2.548 F5 · v2.549 규약).
  */
-export function mergeEdgeReport(scan, reports = []) {
+export function mergeEdgeReport(scan, reports = [], { now = Date.now(), staleMs = EDGE_REPORT_STALE_MS } = {}) {
   const by = new Map(reports.filter(Boolean).map((x) => [norm(x.agent), x]));
+  const staleLimit = Number(staleMs) > 0 ? Number(staleMs) : EDGE_REPORT_STALE_MS;
   return {
     ...scan,
     rows: (scan?.rows || []).map((r) => {
@@ -459,6 +476,9 @@ export function mergeEdgeReport(scan, reports = []) {
       const centralShort = r.collector?.short || '';
       const edgeShort = rep?.tokens?.collector?.short || '';
       const collectorShortMatch = (centralShort && edgeShort) ? centralShort === edgeShort : null;
+      // v2.767(점검 R2-B4-4): 보고 나이 — `central/tokenCheckPull.js STALE_MS` 를 넘으면 낡음(값은 지우지 않는다).
+      const reportAt = Number(rec.reportAt) > 0 ? Number(rec.reportAt) : null;
+      const ageMs = reportAt != null && Number.isFinite(Number(now)) ? Math.max(0, Number(now) - reportAt) : null;
       return {
         ...r,
         edge: {
@@ -466,6 +486,9 @@ export function mergeEdgeReport(scan, reports = []) {
           // v2.601(WEB2601-03): `at` 은 보고가 없으면 **마지막 시도 시각**이다(호환 때문에 그대로 둔다).
           //   '보고를 받은 적 있는가' 는 이 값으로 판정한다 — 화면이 실패 시각을 'N초 전 받음' 으로 읽지 않게.
           reportAt: rec.reportAt || null,
+          ageMs,
+          stale: ageMs != null && ageMs > staleLimit,
+          staleMs: staleLimit,
           ok: !!rec.ok,
           kind: rec.kind || '',
           reason: rec.reason || '',

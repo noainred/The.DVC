@@ -88,6 +88,10 @@ export function logsDbKey(db) {
 export function sameLogsDb(a, b) {
   if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return true;
   if (String(a.kind || '') !== String(b.kind || '') || String(a.path || '') !== String(b.path || '')) return false;
+  // v2.767(점검 R2-B1-2): JSON(NDJSON) 폴백은 prune 이 1건이라도 지우면 파일을 통째로 다시 쓴다(logs/db.js rewrite — tmp→rename)라 같은 DB 인데
+  //   inode 가 바뀐다 — 주기마다 거짓 'DB 바뀜' 으로 커서·완결 시각을 비웠다. 같은 경로·같은 종류의 JSON 폴백만 inode 를 보지 않는다
+  //   (SQLite 는 제자리 갱신이라 inode 변화가 곧 파일 교체다 — A2-01 감지는 그대로).
+  if (String(a.kind || '') === 'json') return true;
   return !(a.ino && b.ino) || String(a.ino) === String(b.ino);
 }
 /** 커서 파일의 vCenter 항목 하나를 믿을 수 있는 모양으로(순수). 쓸 값이 없으면 null. */

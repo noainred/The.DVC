@@ -18,7 +18,7 @@ import { enqueueJob, getJob, onlineInstances, DONE_TTL } from '../rma/jobs.js';
 import { signJob } from '../rma/signing.js';
 import { rmaPasswordFor } from '../rma/agentSecrets.js';
 import { load as loadSettings } from './settings.js';
-import { parseDuOutput, buildScanRecord } from './scan.js';
+import { buildScanRecord, judgeDuResult, comparableBase } from './scan.js';
 import { renderReport, renderSubject } from './report.js';
 import { getDb } from './db.js';
 import { clampIntervalMs } from '../config.js';
@@ -110,30 +110,35 @@ async function collectPending(cfg, now) {
       note('error', `${p.root}: 잡 상태를 확인할 수 없습니다(${j.state}) — 결과 보존 시간이 지났을 수 있습니다.`);
       continue;
     }
-    const r = j.result || {};
-    if (!r.ok) {
-      note('error', `${p.root}: 스캔 실패 — ${r.reason || `종료코드 ${r.exitCode}`}`);
+    // v2.767(점검 R2-B2-01): exit 1(읽지 못한 하위 폴더 — 사용자 홈 700 등)은 stdout 에 루트 합계 행이 있으면 성공으로 받는다(경고 수만 남김).
+    //   예전에는 r.ok 만 보아 그런 공유는 매 주기 결과를 통째로 버렸다(재현). 잘린 출력은 부분 목록이라 여전히 버린다(judgeDuResult).
+    const v = judgeDuResult(j.result, p.root);
+    if (!v.ok) {
+      note('error', `${p.root}: 스캔 실패 — ${v.reason}`);
       continue;
     }
+    if (v.warnings) note('info', `${p.root}: du 가 읽지 못한 경로 ${v.warnings}건(권한 등) — 그 아래 용량은 합계에서 빠졌을 수 있습니다.`);
     try {
-      await ingest(cfg, targetId, p, r.stdout || r.output || '', now);
+      await ingest(cfg, targetId, p, v.parsed, now, v.warnings);
     } catch (e) {
       note('error', `${p.root}: 결과 처리 실패 — ${e.message}`);
     }
   }
 }
 
-/** 표준출력을 파싱해 저장하고 필요하면 메일을 보낸다. */
-async function ingest(cfg, targetId, p, stdout, now) {
-  const parsed = parseDuOutput(stdout, p.root);
+/** 파싱 결과를 저장하고 필요하면 메일을 보낸다. */
+async function ingest(cfg, targetId, p, parsed, now, warnCount = 0) {
   if (!parsed.entries.length && parsed.totalBytes == null) {
     note('error', `${p.root}: du 출력을 해석하지 못했습니다(빈 결과) — 경로·권한을 확인하세요.`);
     return;
   }
-  const rec = buildScanRecord({ targetId, root: p.root, agent: p.agent, ts: now, parsed, topN: p.topN });
+  const rec = buildScanRecord({ targetId, root: p.root, agent: p.agent, ts: now, parsed, topN: p.topN, warnCount });
   const db = await getDb();
   if (!db) { note('error', '이력 DB 를 열 수 없어 저장하지 못했습니다(node:sqlite).'); return; }
-  const prev = db.last(targetId);           // 저장 **전** 마지막 = 직전 회차
+  // 저장 **전** 마지막 = 직전 회차. v2.767(점검 R2-B2-06): 같은 루트·엣지일 때만 기준선 — 대상 경로를 같은 id 로 바꾼 뒤 첫 메일이
+  //   옛 경로와 비교한 증감·'사라진 폴더' 를 냈다(재현). 다르면 비교하지 않고 '경로 변경 후 첫 수집' 이라고 밝힌다.
+  const base = comparableBase(rec, db.last(targetId));
+  const prev = base.prev;
   const id = db.insertScan(rec);
   note('info', `${p.root}: 하위 폴더 ${rec.count}개 · 전체 ${rec.totalBytes ?? rec.sumBytes} bytes 수집`);
 
@@ -143,7 +148,7 @@ async function ingest(cfg, targetId, p, stdout, now) {
     db.markMailed(id, 0, '직전과 동일해 발송 생략(변경 시에만 발송)');
     return;
   }
-  const { html, text } = renderReport(rec, prev);
+  const { html, text } = renderReport(rec, prev, { baseChanged: base.baseChanged });
   const subject = renderSubject(mail.subject, { root: rec.root, agent: rec.agent, ts: rec.ts, topN: rec.entries.length });
   // sendPortalMail 은 throw 하지 않는다 — 수신자·SMTP 미설정은 skipped 로, 실제 실패만 failed 로 온다.
   // 수신자를 비워 두면 공용 설정(설정 › 메일 발송)의 종류별/기본 수신자로 간다.

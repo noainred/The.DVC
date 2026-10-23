@@ -43,7 +43,7 @@ export function renderSubject(template, { root, agent, ts, topN }) {
  * @param {object|null} prev 직전 스캔(증감 계산용, 없으면 null)
  * @returns {{html:string, text:string}}
  */
-export function renderReport(scan, prev = null) {
+export function renderReport(scan, prev = null, { baseChanged = false } = {}) {
   const rows = scan?.entries || [];
   // v2.620(SRV2620-01): Top-N 끼리가 아니라 전체 이름 지문으로 비교한다 — 순위 밖 이탈은 '삭제' 가 아니고
   //   순위 진입은 '신규' 가 아니다. 지문이 없는 옛 기록이면 단정하지 않고 따로 말한다.
@@ -75,6 +75,8 @@ export function renderReport(scan, prev = null) {
   if (cmp.enteredUnknown) tl.push('', `순위 진입 ${cmp.enteredUnknown}개는 직전 기록에 전체 폴더 목록이 없어 새로 생긴 폴더인지 알 수 없습니다.`);
   if (scan.skipped) tl.push('', `⚠ 해석하지 못한 줄 ${scan.skipped}개(권한 없는 폴더이거나 이름에 개행이 있는 경우).`);
   if (scan.truncated) tl.push('⚠ 하위 폴더가 매우 많아 일부만 집계했습니다.');
+  if (scan.warnCount > 0) tl.push(`⚠ du 가 읽지 못한 경로 ${scan.warnCount}건(권한 거부 등) — 그 아래 용량은 합계에서 빠졌을 수 있습니다.`);
+  if (!prev && baseChanged) tl.push('', '대상 경로(또는 엣지)가 바뀐 뒤 첫 수집이라 증감을 표시하지 않았습니다.');
   const text = tl.join('\n');
 
   // ── HTML ────────────────────────────────────────────────────────────────────
@@ -118,7 +120,10 @@ export function renderReport(scan, prev = null) {
   if (cmp.enteredUnknown) notes.push(`'순위 진입' <b>${cmp.enteredUnknown}개</b>는 직전 기록에 전체 폴더 목록이 없어 새로 생긴 폴더인지 알 수 없습니다.`);
   if (scan.skipped) notes.push(`해석하지 못한 줄 <b>${scan.skipped}개</b> — 읽기 권한이 없는 폴더이거나 이름에 개행이 든 경우입니다. 그만큼 합계에서 빠집니다.`);
   if (scan.truncated) notes.push('하위 폴더가 매우 많아 일부만 집계했습니다.');
-  if (!prev) notes.push('직전 수집 기록이 없어 <b>증감을 표시하지 않았습니다</b>(다음 회차부터 표시됩니다).');
+  if (scan.warnCount > 0) notes.push(`du 가 읽지 못한 경로 <b>${scan.warnCount}건</b>(권한 거부 등) — 그 아래 용량은 합계에서 빠졌을 수 있습니다.`);
+  // v2.767(점검 R2-B2-06): 직전 기록이 다른 루트·엣지면 비교하지 않는다 — 그 사실을 '기록 없음' 과 구분해 말한다.
+  if (!prev && baseChanged) notes.push('대상 경로(또는 엣지)가 바뀐 뒤 첫 수집이라 <b>증감을 표시하지 않았습니다</b>(다음 회차부터 표시됩니다).');
+  else if (!prev) notes.push('직전 수집 기록이 없어 <b>증감을 표시하지 않았습니다</b>(다음 회차부터 표시됩니다).');
 
   const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Malgun Gothic',sans-serif;max-width:760px;margin:0 auto;padding:16px;color:#101828;">
   <h2 style="margin:0 0 4px;font-size:18px;">${esc(scan.root)} 폴더 사용량 Top ${rows.length}</h2>

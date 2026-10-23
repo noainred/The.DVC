@@ -62,11 +62,13 @@ function initSqlite() {
     //   옛 행은 NULL → 리포트가 단정하지 않고 '확인 불가' 로 말한다.
     const cols = db.prepare('PRAGMA table_info(scans)').all().map((c) => c.name);
     if (!cols.includes('name_set')) db.exec('ALTER TABLE scans ADD COLUMN name_set TEXT');
+    // v2.767(점검 R2-B2-01): du 가 읽지 못한 경로 수(exit 1 인데 루트 합계가 있어 받은 회차). 옛 행은 0.
+    if (!cols.includes('warn_count')) db.exec('ALTER TABLE scans ADD COLUMN warn_count INTEGER NOT NULL DEFAULT 0');
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const ins = db.prepare(`INSERT INTO scans
-      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries, name_set)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries, name_set, warn_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const lastFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT 1');
     const prevFor = db.prepare('SELECT * FROM scans WHERE target_id=? AND ts<? ORDER BY ts DESC LIMIT 1');
     const listFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT ?');
@@ -91,7 +93,8 @@ function initSqlite() {
           Math.round(rec.othersBytes || 0), rec.othersCount || 0,
           rec.skipped || 0, rec.truncated ? 1 : 0,
           JSON.stringify(rec.entries || []),
-          typeof rec.nameSet === 'string' && rec.nameSet ? rec.nameSet : null);
+          typeof rec.nameSet === 'string' && rec.nameSet ? rec.nameSet : null,
+          Number.isInteger(rec.warnCount) && rec.warnCount > 0 ? rec.warnCount : 0);
         return Number(r.lastInsertRowid);
       },
       /** 이 대상의 가장 최근 스캔. */

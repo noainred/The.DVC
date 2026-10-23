@@ -32,6 +32,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr, capTrim } from '../util/capStr.js';
 import { signJob } from './signing.js';
 import { rmaPasswordFor } from './agentSecrets.js';
+import { DU_TOP_MAX_OUTPUT } from './commands.js';
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -349,15 +350,15 @@ const REASON_MAX = 2000;
 const ARGV_MAX = 64; const ARGV_ITEM_MAX = 1000;
 // v2.607(TIM2607-01·LEFT2607-05): capStr — `.slice` 는 결과 본문(최대 수 MB) 원문을 붙잡는다.
 const str = (v, n) => capStr(v, n);
-export function sanitizeRmaResult(result) {
+export function sanitizeRmaResult(result, { textMax = RESULT_TEXT_MAX } = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return { ok: false, reason: '에이전트가 빈 결과를 회신했습니다.' };
   const r = result;
   const rawOut = typeof r.stdout === 'string' ? r.stdout : ''; const rawErr = typeof r.stderr === 'string' ? r.stderr : '';
   const out = {
     ok: r.ok === true, timedOut: r.timedOut === true, rejected: r.rejected === true, clipped: r.clipped === true,
-    truncated: r.truncated === true || rawOut.length > RESULT_TEXT_MAX || rawErr.length > RESULT_TEXT_MAX,
+    truncated: r.truncated === true || rawOut.length > textMax || rawErr.length > textMax,
     exitCode: numOrNull(r.exitCode), durationMs: numOrNull(r.durationMs),
-    stdout: capStr(rawOut, RESULT_TEXT_MAX), stderr: capStr(rawErr, RESULT_TEXT_MAX),
+    stdout: capStr(rawOut, textMax), stderr: capStr(rawErr, textMax),
   };
   const reason = str(r.reason, REASON_MAX); if (reason) out.reason = reason;
   if (typeof r.signal === 'string' && r.signal) out.signal = capStr(r.signal, 32);
@@ -387,7 +388,9 @@ export function setJobResult(reqId, result) {
   const late = j.state === 'done';
   const expiredAt = j.doneAt;
   j.state = 'done'; j.doneAt = now; j.claimDeadline = null;
-  j.result = sanitizeRmaResult(result);
+  // v2.767(점검 R2-B2-01 후속): du-top 은 엣지 출력 상한이 4MB(commands.js DU_TOP_MAX_OUTPUT)라 공용 보관 상한(512K 자)에서 자르면
+  //   루트 합계 행이 빠져 폴더 사용량 스캔이 '잘림' 으로 실패한다 — 그 명령만 엣지 상한까지 보관한다(다른 명령은 그대로).
+  j.result = sanitizeRmaResult(result, j.spec?.cmd === 'du-top' ? { textMax: Math.max(RESULT_TEXT_MAX, DU_TOP_MAX_OUTPUT) } : {});
   if (late) {
     j.late = true;
     j.result.late = true;

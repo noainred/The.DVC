@@ -44,7 +44,10 @@ export const PARAM_TYPES = {
  *  - maxLines: 결과 줄 수 상한(엣지가 잘라 보냄 — ps/top 같이 긴 출력)
  *  - sudo: sudo -n 으로 실행(install.sh 의 sudoers 규칙과 1:1 — 목록을 넓히면 규칙도 함께)
  *  - danger: 상태를 바꾸는 명령(UI 2중 확인 + 감사로그 강조)
+ *  - maxOutput: 프리셋 전용 출력 상한(바이트, v2.767) — 엣지 공용 상한(RMA_MAX_OUTPUT)보다 클 때만 쓰인다(exec.js 가 큰 쪽).
  */
+/** du-top 출력 상한 — 2만 줄 × 경로 약 200바이트(v2.767 점검 R2-B2-01). 중앙 결과 보관 상한(jobs.js RESULT_TEXT_MAX)도 이 값 이상이어야 잘리지 않는다. */
+export const DU_TOP_MAX_OUTPUT = 4 * 1024 * 1024;
 export const PRESETS = [
   { id: 'uptime',      group: '시스템', label: '가동 시간·부하 (uptime)',        argv: () => ['uptime'] },
   { id: 'hostname',    group: '시스템', label: '호스트명 (hostnamectl)',         argv: () => ['hostnamectl'] },
@@ -67,7 +70,9 @@ export const PRESETS = [
   { id: 'du-top', group: '디스크', label: '하위 폴더 사용량 (du --max-depth=1)',
     params: [{ name: 'path', label: '폴더', type: 'path', required: true }],
     argv: (a) => ['du', '-x', '-b', '--max-depth=1', a.path],
-    filePolicy: true, timeoutMs: 900_000, maxLines: 20_000 },
+    // v2.767(점검 R2-B2-01): 공용 출력 상한(256KB)이면 하위 폴더 약 8천 개에서 du 가 죽어 그 대상이 매 주기 '실패' 였다(재현 9천 개) —
+    //   dirusage MAX_ENTRIES(2만)에 맞춘 전용 상한. maxLines 는 2만 + 루트 합계 1줄(du 는 합계를 마지막 줄에 쓴다 — 잘리면 결과를 버린다).
+    filePolicy: true, timeoutMs: 900_000, maxLines: 20_001, maxOutput: DU_TOP_MAX_OUTPUT },
   { id: 'top',         group: '프로세스', label: 'CPU 상위 프로세스 (top -bn1)', argv: () => ['top', '-bn1', '-w', '200'], maxLines: 40 },
   { id: 'ps-cpu',      group: '프로세스', label: 'CPU 순 프로세스 (ps)',          argv: () => ['ps', 'aux', '--sort=-%cpu'], maxLines: 30 },
   { id: 'ps-mem',      group: '프로세스', label: '메모리 순 프로세스 (ps)',       argv: () => ['ps', 'aux', '--sort=-%mem'], maxLines: 30 },
@@ -240,6 +245,7 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
     }
   }
   const out = { ok: true, preset: preset.id, args, timeoutMs, maxLines: preset.maxLines || 0, sudo: !!preset.sudo, danger: !!preset.danger };
+  if (preset.maxOutput) out.maxOutput = preset.maxOutput;   // v2.767(R2-B2-01): 프리셋 전용 출력 상한(엣지가 프리셋에서 다시 만든 값 — 중앙이 보낸 값이 아니다)
   if (preset.filePolicy) out.filePolicy = true;  // 엣지가 realpath 로 2차 검사하도록 표시(agent.js)
   if (preset.native) out.native = preset.native;
   else if (preset.shell) out.shell = args.command;

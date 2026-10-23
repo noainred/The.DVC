@@ -230,6 +230,10 @@ const INTRO_CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 const CSP_HEADER = process.env.CSP === 'off' ? '' : (process.env.CSP || DEFAULT_CSP);
+// v2.767(점검 R2-B4-3): '/intro 경로인가' 판정은 하나 — CSP 완화 분기와 아래 SPA 폴백의 404 가 같은 함수를 쓴다.
+//   예전에는 확장자 없는 /intro/<아무거나> 가 SPA 폴백으로 **메인 포탈 index.html** 을 받으면서 경로만 보고 INTRO_CSP
+//   ('unsafe-eval')를 달았다 — 위 ⚠ 가 금지한 '완화 정책을 앱 전체로 넓히기' 가 URL 하나로 성립했다.
+const isIntroPath = (p) => p === '/intro' || p.startsWith('/intro/');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');            // 웹에 iframe 없음 → 클릭재킹 차단
@@ -239,8 +243,7 @@ app.use((req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 실제 HTTPS일 때만
   }
   if (CSP_HEADER) {
-    const isIntro = req.path === '/intro' || req.path.startsWith('/intro/');
-    res.setHeader('Content-Security-Policy', isIntro && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
+    res.setHeader('Content-Security-Policy', isIntroPath(req.path) && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
   }
   next();
 });
@@ -475,6 +478,8 @@ if (fs.existsSync(config.webDist)) {
   }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    // v2.767(점검 R2-B4-3): /intro 아래에서 정적 파일이 없으면 메인 SPA 를 주지 않는다(INTRO_CSP 가 붙은 채 메인 앱이 뜬다).
+    if (isIntroPath(req.path)) return res.status(404).end();
     // A missing file with an extension (e.g. a stale asset hash) must 404 — never
     // return index.html for it, or the browser executes HTML as JS and shows a blank page.
     if (path.extname(req.path)) return res.status(404).end();

@@ -36,7 +36,7 @@ public sealed class AlarmEngine
     public HealthStatus MinLevel { get; set; } = HealthStatus.Warn;
 
     /// <summary>점검 결과를 알람으로 보지 않는 최소 유예. 실제로는 max(이 값, 점검 주기 × 3).</summary>
-    public TimeSpan MinStale { get; set; } = TimeSpan.FromSeconds(180);
+    public TimeSpan MinStale { get; set; } = MonitorRules.DefaultMinStale;
 
     public IReadOnlyList<AlarmEvent> Update(IEnumerable<EndpointStatus> snapshot, DateTime nowUtc)
     {
@@ -93,8 +93,7 @@ public sealed class AlarmEngine
         var ep = es.Endpoint;
         if (!ep.Enabled || es.Latest == null) return false;
         if (es.Status < MinLevel || es.Status == HealthStatus.Unknown) return false;
-        var stale = TimeSpan.FromSeconds(Math.Max(MinStale.TotalSeconds, 3.0 * Math.Max(1, ep.IntervalSec)));
-        return nowUtc - es.Latest.TimestampUtc <= stale;
+        return MonitorRules.IsFresh(es, nowUtc, MinStale); // v2.767(R2-B5-1): 트레이·머리말 집계와 같은 '오래됨' 판정
     }
 
     /// <summary>알람 상태인 대상 전부(위험 먼저, 이름순).</summary>

@@ -120,6 +120,8 @@ export function agentRowExplain(a) {
   }
   if (a?.mockReported) return '**이 엣지가 mock(가짜) 데이터를 자기보고했습니다.**';
   if (a?.sentInventory) {
+    // v2.767(점검 R2-B4-1): 인벤토리는 받았는데 마지막 요약이 다른 경로(svcmon 하트비트 등)면 수량을 모른다 — '?' 대신 그 사실을 말한다.
+    if (n(a.lastHosts) == null && n(a.lastVms) == null) return '최근 인벤토리 push 를 받았습니다(마지막 push 는 다른 경로라 호스트·VM 수는 여기 표시하지 않습니다).';
     return `최근 push: 호스트 ${n(a.lastHosts) ?? '?'}·VM ${n(a.lastVms) ?? '?'}${a?.gzip === false ? ' · **무압축**' : ''}`;
   }
   if (a?.knownOwner) {

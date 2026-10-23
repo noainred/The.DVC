@@ -10,7 +10,7 @@ import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomal
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
-import { inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
+import { inUserWriteScope, inUserScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
@@ -301,26 +301,52 @@ adminRouter.get('/os-scan/results.csv', csvPerm, adminOnly, (req, res) => {
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
   // VM 생성은 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
-  if (!inUserWriteScope(req.user, store.get(), String(req.body?.vcenterId || ''))) {
-    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  // v2.767(점검 R2-B3-1): 판정 대상은 **원본 VM 의 vCenter**(createJob 이 그 vCenter 에 클론을 만든다)다.
+  //   예전엔 body.vcenterId 만 봐서 범위 관리자가 vcenterId 는 자기 vCenter, sourceId 는 범위 밖 VM 으로 보내 범위 밖 vCenter 에
+  //   VM 을 만들었다(작업은 그 사용자 목록에서도 숨었다). 반대로 화면은 vcenterId 를 보내지 않아 범위 관리자는 늘 403 이었다.
+  //   규약: 조회 밖 404 → 쓰기 밖 403 · body.vcenterId 는 선택이고 있으면 원본과 같아야 한다(400).
+  const snap = store.get();
+  const sourceId = String(req.body?.sourceId || '');
+  const source = sourceId ? (snap?.vms || []).find((v) => v.id === sourceId) : null;
+  // v2.767(리드 검토): 원본을 못 찾으면 여기서 끝낸다 — 범위 검사 없이 createJob 으로 넘기면 그 사이 스냅샷이 바뀐 경우
+  //   createJob 이 새 스냅샷에서 원본을 찾아 expectVcenterId 없이 만들 수 있다.
+  if (!source) return res.status(404).json({ ok: false, reason: '원본 VM/템플릿을 찾을 수 없습니다.' });
+  {
+    const srcVc = String(source.vcenterId || '');
+    if (!inUserScope(req.user, snap, srcVc)) return res.status(404).json({ ok: false, reason: '원본 VM/템플릿을 찾을 수 없습니다.' });
+    if (!inUserWriteScope(req.user, snap, srcVc)) {
+      return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+    }
+    const bodyVc = String(req.body?.vcenterId || '');
+    if (bodyVc && bodyVc !== srcVc) return res.status(400).json({ ok: false, reason: '선택한 원본 VM/템플릿이 지정한 vCenter 에 속하지 않습니다.' });
   }
-  const result = createProvisionJob(req.body || {}, { user: req.user });
+  // expectVcenterId: 판정한 원본과 다른 vCenter 로 작업이 만들어지지 않게(이중 방어 — 판정과 생성 사이 스냅샷 교체).
+  const result = createProvisionJob(req.body || {}, { user: req.user, expectVcenterId: source ? String(source.vcenterId || '') : null });
   res.status(result.ok ? 201 : 400).json(result);
 });
 // 저장된 작업 메모/태그 수정·삭제 (관리자) — 대상 작업이 귀속된 vCenter 의 쓰기 범위 강제.
-adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
-  const item = getSaved(req.params.id);
-  if (item && !inUserWriteScope(req.user, store.get(), item.vcenterId || '')) {
-    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+// v2.767(점검 R2-B3-8): 조회 범위 밖(귀속 없는 작업 포함 — listSaved 가 범위 계정에 숨긴다)은 404(존재 은닉), 조회는 되지만 쓰기 밖은 403.
+function savedScopeDenied(req, res, item) {
+  if (!item) return false;
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed && !(item.vcenterId && allowed.has(String(item.vcenterId)))) {
+    res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });
+    return true;
   }
+  if (!inUserWriteScope(req.user, snap, item.vcenterId || '')) {
+    res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+    return true;
+  }
+  return false;
+}
+adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
+  if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = updateSaved(req.params.id, req.body || {});
   res.status(r.ok ? 200 : 404).json(r);
 });
 adminRouter.delete('/provision/saved/:id', adminOnly, (req, res) => {
-  const item = getSaved(req.params.id);
-  if (item && !inUserWriteScope(req.user, store.get(), item.vcenterId || '')) {
-    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
-  }
+  if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = removeSaved(req.params.id);
   res.status(r.ok ? 200 : 404).json(r);
 });

@@ -108,6 +108,9 @@ export function runCommand(spec, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
   }
   const t0 = Date.now();
   const timeoutMs = Math.max(1000, Number(spec.timeoutMs) || 30_000);
+  // v2.767(점검 R2-B2-01): 프리셋 전용 상한(du-top — commands.js 가 프리셋에서 만든 값)이 공용 상한보다 크면 그것을 쓴다(작게는 줄이지 않는다).
+  const presetMax = Number(spec.maxOutput);
+  if (Number.isFinite(presetMax) && presetMax > maxOutput) maxOutput = presetMax;
   return new Promise((resolve) => {
     let child;
     try {

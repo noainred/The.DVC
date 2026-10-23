@@ -233,3 +233,12 @@ describe('v2.602 WEB2602-02 — 인증 전 거부를 종류별로 말한다', ()
     expect(line).not.toContain('토큰 인증에 실패');
   });
 });
+
+describe('agentRowExplain — 마지막 push 가 다른 경로(v2.767 점검 R2-B4-1)', () => {
+  it('인벤토리는 받았는데 수량을 모르면 ? 대신 그 사실을 말한다', () => {
+    const line = agentRowExplain({ sentInventory: true, lastHosts: null, lastVms: null, gzip: null, lastEndpoint: 'svcmon-report' });
+    expect(line).toContain('최근 인벤토리 push 를 받았습니다');
+    expect(line).not.toContain('?');
+    expect(line).not.toContain('무압축');
+  });
+});

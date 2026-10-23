@@ -93,10 +93,14 @@ const redact = (j) => ({
  * Create + start a provisioning job. Returns { ok, job } or { ok:false, reason }.
  * spec is the bulk spec (see expandSpec); sourceId picks the VM/template to clone.
  */
-export function createJob(spec, { user } = {}) {
+export function createJob(spec, { user, expectVcenterId = null } = {}) {
   const snap = store.get();
   const source = snap.vms.find((v) => v.id === spec.sourceId);
   if (!source) return { ok: false, reason: '원본 VM/템플릿을 찾을 수 없습니다.' };
+  // v2.767(점검 R2-B3-1): 라우트가 범위를 판정한 원본의 vCenter 와 다르면 만들지 않는다(그 사이 스냅샷이 바뀐 경우까지 — 이중 방어).
+  if (expectVcenterId != null && String(source.vcenterId || '') !== String(expectVcenterId)) {
+    return { ok: false, reason: '원본 VM/템플릿의 vCenter 가 확인한 값과 다릅니다 — 다시 시도하세요.' };
+  }
 
   const { vms, errors } = expandSpec(spec);
   if (errors.length) return { ok: false, reason: errors.join(' / ') };

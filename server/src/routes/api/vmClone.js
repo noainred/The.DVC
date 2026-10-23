@@ -4,7 +4,7 @@
 // 예외: /badges 는 Platform 트리(전 사용자)가 'Clone' 아이콘 표시에 쓰는 조회라 로그인만 요구
 // 하되, scope 제한 계정에는 범위 밖 vCenter 를 비운다(존재 자체도 안 흘림 — scope 규칙).
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
-import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, inUserScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { listJobs, saveJob, deleteJob, jobVmIds } from '../../vmclone/store.js';
@@ -84,6 +84,11 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
     if (String(existing.vcenterId) !== vcenterId) {
       return res.status(400).json({ ok: false, reason: '기존 복제 잡의 vCenter 는 바꿀 수 없습니다 — 잡을 삭제하고 새로 만드세요.' });
     }
+    // v2.767(점검 R2-B3-7): 대상 VM(vmId)도 바꾸지 않는다 — 바꾸면 '같은 VM 잡 중복 금지'(store.saveJob — 새 잡에만 검사)를 우회해 한 VM 에
+    //   잡 두 개가 붙고, 옛 VM 의 클론 원장(clones)이 새 VM 의 보존 개수로 지워진다. 화면도 수정 때 VM 을 잠근다.
+    if (String(existing.vmId) !== String(req.body?.vmId || '')) {
+      return res.status(400).json({ ok: false, reason: '기존 복제 잡의 대상 VM 은 바꿀 수 없습니다 — 잡을 삭제하고 새로 만드세요.' });
+    }
   }
   // v2.599(AUTHZ-2599-06): vmId 가 인벤토리에 있으면 그 VM 의 vCenter 가 잡의 vCenter 와 같아야 한다(입력 정합성).
   //   권한 문제는 아니다(moref 는 job.vcenterId 연결에서만 쓰인다) — 다른 vCenter 의 VM 이 잡에 붙어 엉뚱한 moref 로
@@ -100,11 +105,24 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
+// v2.767(점검 R2-B3-8): 단건 쓰기는 '조회 밖 404 → 쓰기 밖 403'(server/CLAUDE.md writeVcenters 규약). 예전엔 조회 범위 밖 잡에도 403 을 줘
+//   존재를 흘렸고, 없는 잡 id 로 run 하면 큐에 넣고 202 '큐 등록' 이라고 답했다.
+function cloneJobDenied(req, res, target) {
+  const snap = store.get();
+  if (!target || !inUserScope(req.user, snap, String(target.vcenterId || ''))) {
+    res.status(404).json({ ok: false, reason: '잡을 찾을 수 없습니다.' });
+    return true;
+  }
+  if (!inUserWriteScope(req.user, snap, target.vcenterId)) {
+    res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+    return true;
+  }
+  return false;
+}
+
 api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
   const target = listJobs().find((j) => j.id === req.params.id);
-  if (target && !inUserWriteScope(req.user, store.get(), target.vcenterId)) {
-    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
-  }
+  if (cloneJobDenied(req, res, target)) return;
   if (!deleteJob(req.params.id)) return res.status(404).json({ ok: false, reason: '잡을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'VM 복제 잡 삭제', target: req.params.id, detail: '잡 정의만 삭제(만든 클론/사본은 유지)' });
   res.json({ ok: true });
@@ -113,9 +131,9 @@ api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
 /** 지금 실행 — 스케줄과 같은 직렬 큐에 넣는다(중복이면 사유 반환). */
 api.post('/tools/vm-clone/jobs/:id/run', adminOnly, (req, res) => {
   const target = listJobs().find((j) => j.id === req.params.id);
-  if (target && !inUserWriteScope(req.user, store.get(), target.vcenterId)) {
-    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
-  }
+  if (cloneJobDenied(req, res, target)) return;
+  // v2.767(R2-B3-9): 꺼진 잡은 runner 가 실행하지 않고 바로 끝낸다 — 큐 등록(202)이라고 답하지 않는다.
+  if (!target.enabled) return res.status(409).json({ ok: false, reason: '꺼진 잡은 실행하지 않습니다 — 잡을 켠 뒤 실행하세요.' });
   const r = enqueueRun(req.params.id, 'manual');
   logAudit({ user: req.user?.username, action: 'VM 복제 수동 실행', target: req.params.id, detail: r.queued ? '큐 등록' : r.reason });
   res.status(r.queued ? 202 : 409).json({ ok: r.queued, reason: r.reason });
