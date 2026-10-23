@@ -269,13 +269,16 @@ async function pollLive(snap, vc, s) {
       const osLabel = isWindows ? 'Windows' : 'Linux';
       const acct = `${creds.username}(${creds.source})·${usedMethod}`;
       if (r && r.utilPct != null) {
-        console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} mem=${r.memUsedPct ?? '-'}% temp=${r.tempC ?? '-'}C gpus=${r.count}`);
+        console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} mem=${r.memUsedPct ?? '-'}% temp=${r.tempC ?? '-'}C gpus=${r.count}${r.gpuErrors > 0 ? ` · 응답 없음 ${r.gpuErrors}장` : ''}`);
         // v2.593(감사 DATA-02): MIG 모드로 GPU 단위 사용률이 없으면(utilNA) 파서가 0 을 채운다 — 그 0 을 그대로 저장하면
         //   '사용률 0%(유휴)' 가 되어 호스트 대표값·평균을 끌어내린다. 사용률은 null + utilNA 로 싣고 호스트 대표값에서 뺀다.
         // v2.650: 메모리 절대량(MB)·온도(℃, 가장 뜨거운 GPU)·읽은 GPU 수도 싣는다 — 호스트 상세·GPU 모니터링의 할당/사용/온도.
-        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.count });
+        // v2.769(점검 R4-D5-3): 일부 GPU 가 '응답 없음'(fallen off bus 등)이면 파서가 gpuErrors 로 세는데 예전에는 어디에도 싣지 않아
+        //   2장 중 1장이 죽은 VM 이 'GPU 1장 정상' 으로 보였다. 레코드·진단에 싣고 화면이 'N장 응답 없음' 을 말한다(0 이면 0).
+        const gpuErrors = Number.isFinite(r.gpuErrors) && r.gpuErrors > 0 ? Math.floor(r.gpuErrors) : 0;
+        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.count, gpuErrors });
         if (!r.utilNA) { const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr); }
-        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, mem: r.memUsedPct ?? null, temp: r.tempC ?? null, gpus: r.count });
+        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, mem: r.memUsedPct ?? null, temp: r.tempC ?? null, gpus: r.count, gpuErrors });
       } else if (diag.results.length < 200) {
         diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)', ...(authRec ? { authStopped: gpuStopView(authRec) } : {}) });
       }

@@ -53,7 +53,7 @@
 | `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517, | ✅ | ✅ | ✅ | central/sanSwitchPerfEdge.js |
 | `central-agent-sanswitch.json` | 설정 | 엣지들이 push 한 SAN 스위치 스냅샷의 중앙 보관(v2.410). |  |  |  | central/sanSwitchEdge.js |
 | `central-agent-storage.json` | 설정 | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). |  |  |  | central/storageEdge.js |
-| `central-agent-tokens.json` | 설정 | 엣지 에이전트별 개별 토큰 | ✅ |  | ✅ | central/agentTokens.js |
+| `central-agent-tokens.json` | 설정 | 엣지 에이전트별 개별 토큰 | ✅ |  | ✅ | backup/service.js, central/agentTokens.js |
 | `central-agent-users.json` | 설정 | 중앙에서 지정하는 'agent(엣지)별 배포 사용자' 저장소. | ✅ | ✅ | ✅ | central/agentUsers.js |
 | `central-fleet.json` | 설정 | 엣지 베어메탈 집계 — 중앙(OC2) 측 캐시. | ✅ |  | ✅ | central/fleet.js |
 | `central-inventory.json` | 설정 | 위임 사이트가 push 한 인벤토리 캐시 | ✅ |  | ✅ | central/inventory.js |

@@ -5,7 +5,8 @@
  */
 
 let byHost = new Map(); // hostId -> { utilPct, at, source:'guest' }
-let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalMB, tempC, gpus, at, host, vcenterId }
+let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalMB, tempC, gpus, gpuErrors, at, host, vcenterId }
+// v2.769(점검 R4-D5-3): gpuErrors = 응답 없는 GPU 장수(0~64). null 은 '모름'(구버전 엣지·필드 없음) — 0 과 다르다.
 
 import { numOrNull } from '../util/numOrNull.js';
 import { loadGpuGuestSettings } from './settings.js'; // v2.742(VC-01): 독립 GC 가 실행할 때 폴 주기를 읽는다
@@ -50,7 +51,7 @@ export function withGpuTrust(verified, fn) { const prev = _trust; _trust = !!ver
 export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = _trust }) {
   const now = Date.now();
   hosts = (Array.isArray(hosts) ? hosts : []).filter((h) => h && typeof h === 'object').map((h) => ({ ...h, utilPct: pctOrNull(h.utilPct) }));
-  vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct), memUsedMB: mbOrNull(v.memUsedMB), memTotalMB: mbOrNull(v.memTotalMB), tempC: tempOrNull(v.tempC), gpus: cntOrNull(v.gpus) }));
+  vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct), memUsedMB: mbOrNull(v.memUsedMB), memTotalMB: mbOrNull(v.memTotalMB), tempC: tempOrNull(v.tempC), gpus: cntOrNull(v.gpus), gpuErrors: cntOrNull(v.gpuErrors) }));
   const ak = agentKeyOf(agent);
   // ① 엣지 보고는 교체 — 이 엣지가 넣은 이전 항목을 지운다(다른 엣지·로컬 항목은 건드리지 않는다).
   if (ak) {
@@ -76,7 +77,7 @@ export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = _trus
     if (!(v && v.vmId != null && (v.utilPct != null || v.utilNA))) continue;
     const exists = byVm.has(v.vmId);
     if (!exists && (nv >= vmCap || byVm.size >= GPU_LIMITS.vmsTotal)) { omittedVms++; continue; }
-    byVm.set(v.vmId, { utilPct: v.utilNA ? null : v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
+    byVm.set(v.vmId, { utilPct: v.utilNA ? null : v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, gpuErrors: v.gpuErrors ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
     nv++;
   }
   return { hosts: nh, vms: nv, omittedHosts, omittedVms };

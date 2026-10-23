@@ -189,6 +189,8 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     if (r.envWritten) parts.push(`.env ${r.envWritten}개는 바로 썼습니다(재시작 때 읽힘).`);
     if (nFail) parts.push(`${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}) — 실패한 파일은 복원되지 않습니다.`);
     if (r.excluded?.length) parts.push(`복원 제외 ${r.excluded.length}개(${r.excluded.map((f) => `${f.file}: ${f.reason}`).join(' · ')}).`);
+    // v2.769(점검 R4-D1-2): 적용 때 되살아날 엣지 토큰·전원 재로그인 같은 경고를 문구에도 싣는다(응답 JSON 에만 두면 화면이 말하지 않는다).
+    if (r.warnings?.length) parts.push(`주의: ${r.warnings.join(' · ')}`);
     parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');
     res.json({ ok: true, ...r, restarting: restart, note: parts.join(' ') });
     if (restart) setTimeout(() => restartProcess(), 250);

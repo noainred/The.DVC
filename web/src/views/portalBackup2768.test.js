@@ -44,3 +44,16 @@ describe('C5-01 — 엣지 사본을 뺀 백업 경고', () => {
     expect(src).toMatch(/edgesOmittedText\(view\.edgesOmitted\)/);
   });
 });
+
+describe('v2.769 R4-D1-2 — 예약 복원 적용 경고 표시', () => {
+  it('적용 결과의 warnings(되살린 엣지 토큰·재로그인)를 마지막 적용 문구에 붙이고 경고 배너로 띄운다', () => {
+    const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: ['a.json'], failed: [], rejected: [], warnings: ['백업에만 있던 엣지 토큰 2개를 되살렸습니다'] } });
+    expect(t.last).toContain('주의: 백업에만 있던 엣지 토큰 2개');
+    expect(t.warn).toBe(true);
+  });
+  it('경고가 없으면 예전과 같다', () => {
+    const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: ['a.json'], failed: [], rejected: [] } });
+    expect(t.last).not.toContain('주의');
+    expect(t.warn).toBe(false);
+  });
+});

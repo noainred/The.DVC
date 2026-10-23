@@ -27,6 +27,9 @@ const stamp = (ts) => `${fileStamp(ts)}${String(Math.floor(((Number(ts) || 0) % 
 
 /** 셸 인용 — 경로에 공백/특수문자가 있어도 안전하게. 단일 인용부호를 '\'' 로 이스케이프. */
 const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+// v2.769(점검 R4-D2-01): 스크립트 머리 주석에 넣는 경로 — 개행이 주석을 탈출해 실행 줄이 되지 않게 제어문자를 지운다
+//   (srcDir 은 db-location.json 의 dbDir 이라 preflight 를 거치지 않은 값일 수 있다).
+const cmt = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, '?');
 
 /**
  * bash 스크립트 본문 생성(Rocky/RHEL 계열 systemd 전제).
@@ -70,8 +73,8 @@ function renderBash({ srcDir, targetDir, inv, service, user, configDir, ts }) {
 # =============================================================================
 #  VMware Global Monitoring Portal — DB 저장 경로 마이그레이션 스크립트
 #  생성 시각 : ${new Date(ts).toISOString()}
-#  현재 경로 : ${srcDir}
-#  새  경 로 : ${targetDir}
+#  현재 경로 : ${cmt(srcDir)}
+#  새  경 로 : ${cmt(targetDir)}
 #  대상 용량 : 약 ${totalMB} MB
 #
 #  ⚠ 이 스크립트는 서비스를 **정지**한 뒤 DB 를 복사합니다(원본은 지우지 않습니다).
@@ -100,6 +103,12 @@ read -r -p "계속하려면 'yes' 를 입력하세요: " ANSWER
 
 # 0) 준비 — 대상 디렉터리와 로그
 mkdir -p "\$DST"
+# v2.769(점검 R4-D2-02): 공용 디렉터리(sticky·모든 사용자 쓰기)에 아래 5)의 chown -R·chmod 700 을 하면 시스템이 깨진다.
+#   포탈 사전 점검이 막지만, 생성 뒤 실행까지 사이에 바뀌었을 수 있어 실행 시점에 한 번 더 본다.
+if [ -k "\$DST" ] || [ -n "\$(find "\$DST" -maxdepth 0 -perm -0002 2>/dev/null)" ]; then
+  echo "ERROR 대상이 공용 디렉터리(sticky 또는 모든 사용자 쓰기 가능)입니다 — 중단합니다(아무것도 변경하지 않았습니다): \$DST" >&2
+  exit 9
+fi
 log "마이그레이션 시작 (src=\$SRC dst=\$DST)"
 
 # 1) 여유 공간 확인(원본을 남기므로 전체 용량 + 여유 필요)
@@ -222,10 +231,10 @@ function renderReadme({ srcDir, targetDir, inv, service, scriptName, ts }) {
   return `# DB 저장 경로 마이그레이션 안내
 
 - 생성 시각: ${localStamp(ts)}
-- 현재 경로: \`${srcDir}\`
-- 새 경로: \`${targetDir}\`
+- 현재 경로: \`${q(srcDir)}\`
+- 새 경로: \`${q(targetDir)}\`
 - 대상 총 용량: **${(inv.totalBytes / 1048576).toFixed(1)} MB**
-- 실행 스크립트: \`${scriptName}\`
+- 실행 스크립트: \`${q(scriptName)}\`
 
 ## 왜 스크립트로 실행하나
 
@@ -261,17 +270,17 @@ ${rows || '| (없음) | 아직 생성된 DB 가 없습니다 | 0 MB |'}
 
 \`\`\`bash
 # 1) 스크립트가 있는 디렉터리로 이동
-cd ${path.dirname(path.join(migrationsDir(), scriptName))}
+cd ${q(path.dirname(path.join(migrationsDir(), scriptName)))}
 
 # 2) 내용을 먼저 읽어보세요(무엇을 하는지 확인)
-less ${scriptName}
+less ${q(scriptName)}
 
 # 3) root 로 실행 (서비스 정지·복사·권한 변경이 필요)
-sudo bash ${scriptName}
+sudo bash ${q(scriptName)}
 
 # 4) 스크립트가 안내하는 대로 서비스 시작
-sudo systemctl start ${service}
-sudo systemctl status ${service} --no-pager
+sudo systemctl start ${q(service)}
+sudo systemctl status ${q(service)} --no-pager
 \`\`\`
 
 ## 실패하면?
@@ -280,7 +289,7 @@ sudo systemctl status ${service} --no-pager
 서비스만 다시 시작하면 기존 경로로 정상 동작합니다.
 
 \`\`\`bash
-sudo systemctl start ${service}
+sudo systemctl start ${q(service)}
 \`\`\`
 
 ## 되돌리기(이전 완료 후에도 가능)
@@ -288,20 +297,20 @@ sudo systemctl start ${service}
 원본을 지우지 않았으므로 언제든 되돌릴 수 있습니다.
 
 \`\`\`bash
-sudo systemctl stop ${service}
-sudo rm -f ${path.join(defaultDbDir(), 'db-location.json')}   # 경로 설정 삭제 → 기본 경로 사용
-sudo systemctl start ${service}
+sudo systemctl stop ${q(service)}
+sudo rm -f ${q(path.join(defaultDbDir(), 'db-location.json'))}   # 경로 설정 삭제 → 기본 경로 사용
+sudo systemctl start ${q(service)}
 \`\`\`
 
 ## 완료 후 확인
 
 1. 포탈 접속 → **특수 기능 › 포탈 DB**
-2. 경로가 \`${targetDir}\` 로 바뀌었는지, 용량이 이전과 비슷한지 확인
+2. 경로가 \`${q(targetDir)}\` 로 바뀌었는지, 용량이 이전과 비슷한지 확인
 3. **DB 정합성 점검**(같은 화면) 실행 → 모두 \`ok\` 인지 확인
 4. 며칠 정상 운영을 확인한 뒤 원본 삭제:
    \`\`\`bash
    # ⚠ 되돌릴 수 없습니다. 위 3단계 확인 후에만.
-   sudo rm -f ${srcDir}/host-temp.db* ${srcDir}/idrac-power.db* ...
+   sudo rm -f ${q(srcDir)}/host-temp.db* ${q(srcDir)}/idrac-power.db* ...
    \`\`\`
 `;
 }

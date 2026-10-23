@@ -71,3 +71,6 @@
     `historyStep` 의 `truncated`·`coveredSince` 로 밝힌다. 화면은 상한을 넘는 기간 버튼을 막고, 사용률 수집 주기(`sampleSec` =
     `gpuUtilIntervalSec`)와 비슷한 단위면 '같은 값이 이어질 수 있다' 고 적는다. GPU 계열은 dead-band 가 없어 1분 원본이 그대로 있다.
 
+  · v2.769(점검 R4-D5): **호스트 GPU 사용률 = 켜진 GPU VM 의 최댓값**(MIG 제외) — 폴러·sampler·`gpu_util` 이력·엣지 push 가 이 정의이고, 표(`/tools/gpu`)·호스트 상세도 같은 값이다(평균으로 되돌리지 말 것 — 표와 추이가 갈린다).
+    일부 GPU 무응답은 `gpuErrors`(0~64, 밖이면 null)로 레코드·store·중앙 `narrowGpuRow`·엣지 push 에 싣고 화면이 'GPU N장 응답 없음' 으로 알린다.
+    클러스터 키(`<vcenterId>|<cluster>`)의 소유 vCenter 는 `gpu/clusterKeyScope.js` 최장 프리픽스(스냅샷 id ∪ 허용 id) — `split('|')[0]` 금지.

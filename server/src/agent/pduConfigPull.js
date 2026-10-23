@@ -19,6 +19,7 @@ import { pullRecoveryNote } from '../util/registryCore.js'; // v2.744(감사 EDG
 import { collectDeviceNow, forgetDevices } from '../pdu/poller.js';
 import { pushPduNow, pduPushStatus } from '../pdu/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../pdu/intervals.js';
+import { applyCentralThresholds } from '../pdu/thresholds.js';
 
 const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
@@ -136,6 +137,17 @@ async function _pull() {
     if (intervalsUnreadable && _logChange('intervals-unreadable', intervalsUnreadable)) console.warn(`[pdu-config] 중앙 주기 설정을 읽지 못해 받지 않았습니다(직전 주기 유지): ${intervalsUnreadable}`);
     const intervalsApplied = intervalsUnreadable ? false : applyCentralIntervals(body?.intervals && typeof body.intervals === 'object' ? body.intervals : {});
 
+    // v2.769(점검 R4-D4-02): 중앙 임계치 — 위임 PDU 경보는 이 엣지가 현장에서 보낸다(pdu/poller.js). 중앙이 값을 실었을 때만 적용하고
+    //   (정제는 applyCentralThresholds — 알려진 키·유한수·불리언만), 없거나(옛 중앙·중앙 파일 없음) 못 읽었다고 하면 **직전 값을 유지**한다.
+    //   알림 채널 설정은 중앙이 내려보내지 않는다 — 이 엣지의 알림 설정으로 보낸다.
+    const thresholdsUnreadable = body?.thresholdsUnreadable && typeof body.thresholdsUnreadable === 'object'
+      ? String(body.thresholdsUnreadable.reason || '사유 미상').slice(0, 200) : '';
+    if (thresholdsUnreadable && _logChange('thresholds-unreadable', thresholdsUnreadable)) console.warn(`[pdu-config] 중앙 임계치 설정을 읽지 못해 받지 않았습니다(직전 임계치 유지): ${thresholdsUnreadable}`);
+    let thresholdsApplied = false;
+    if (!thresholdsUnreadable && body?.thresholds && typeof body.thresholds === 'object' && !Array.isArray(body.thresholds)) {
+      try { thresholdsApplied = applyCentralThresholds(body.thresholds); } catch (e) { console.warn(`[pdu-config] 중앙 임계치 적용 실패(직전 임계치 유지): ${e.message}`); }
+    }
+
     const devices = Array.isArray(body?.devices) ? body.devices : [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
@@ -159,6 +171,7 @@ async function _pull() {
     const enq = wants.length ? enqueueCollect(wants) : null;
 
     _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, ...(intervalsUnreadable ? { intervalsUnreadable } : {}),
+      thresholdsApplied, ...(thresholdsUnreadable ? { thresholdsUnreadable } : {}),
       collectRequested: wants.length, collectQueued: enq ? enq.queued : 0,
       ...(enq?.already ? { collectAlready: enq.already } : {}), ...(enq?.dropped ? { collectDropped: enq.dropped } : {}) };
     return { ok: true, ...(_last) };

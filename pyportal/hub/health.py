@@ -28,9 +28,11 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
-from .pinned import connect_pinned, build_pinned_opener, RequestDeadline  # v2.322: 검증 IP 핀(리바인딩 TOCTOU 차단)
+from .pinned import connect_pinned, build_pinned_opener, RequestDeadline, total_deadline_seconds  # v2.322: 검증 IP 핀(리바인딩 TOCTOU 차단)
 
 USER_AGENT = "GlobalDCServiceHub-HealthCheck/1.0"
+# v2.769(점검 R4-D1-1): http 점검의 요청 전체 시한 env(초). 없으면 소켓 시한(HUB_HEALTH_TIMEOUT) × 3.
+TOTAL_TIMEOUT_ENV = "HUB_HEALTH_TOTAL_TIMEOUT"
 
 STATUS_HEALTHY = "healthy"      # 포트 응답 / HTTP 2xx·3xx
 STATUS_WARNING = "warning"      # HTTP 4xx·5xx — 살아 있으나 정상 응답 아님(http 모드 전용)
@@ -119,8 +121,10 @@ def _classify(code: int) -> str:
 
 
 def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
-              allow_private: bool = True) -> dict:
+              allow_private: bool = True, total_timeout: float | None = None) -> dict:
+    """timeout = 소켓 연산(연결·recv 1회) 시한, total_timeout = 요청 전체 시한(없으면 env 또는 timeout × 3 — v2.769 R4-D1-1)."""
     started = time.monotonic()
+    total = float(total_timeout) if total_timeout else total_deadline_seconds(timeout, TOTAL_TIMEOUT_ENV)
 
     def elapsed_ms() -> int:
         return int((time.monotonic() - started) * 1000)
@@ -139,17 +143,18 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
                 "latencyMs": elapsed_ms(), "message": reason,
                 "addresses": addresses}
 
-    with RequestDeadline(timeout) as deadline:
-        result = _http_get(target, addresses, timeout=timeout, tls_verify=tls_verify,
+    with RequestDeadline(total) as deadline:
+        result = _http_get(target, addresses, timeout=timeout, total=total, tls_verify=tls_verify,
                            deadline=deadline, elapsed_ms=elapsed_ms)
     return result
 
 
-def _http_get(target, addresses, *, timeout, tls_verify, deadline, elapsed_ms) -> dict:
+def _http_get(target, addresses, *, timeout, total, tls_verify, deadline, elapsed_ms) -> dict:
     # v2.322 보안 감사: urllib 은 target URL 의 host 를 재해석한다(리바인딩 TOCTOU). 검증된
     # addresses[0] 로 핀한 opener 를 쓰되 Host/TLS SNI 는 원 호스트명 유지(_NoRedirect 정책 보존).
     # v2.768(점검 R3-C3-1): timeout 은 소켓 연산 단위라 1바이트씩 흘리는 대상이 점검(과 GuardedJob)을
-    # 무한정 붙잡았다 — deadline 워치독이 요청 전체를 timeout 안에서 끊는다.
+    # 무한정 붙잡았다 — deadline 워치독이 요청 전체를 total 안에서 끊는다.
+    # v2.769(점검 R4-D1-1): total 은 소켓 시한과 따로다(같은 값이면 고RTT TLS 정상 서버가 시한 초과로 떨어졌다).
     opener = build_pinned_opener(addresses[0], tls_context=_tls_context(tls_verify),
                                  extra_handlers=(_NoRedirect,), deadline=deadline)
     request = urllib.request.Request(target, method="GET", headers={
@@ -161,17 +166,23 @@ def _http_get(target, addresses, *, timeout, tls_verify, deadline, elapsed_ms) -
 
     def timed_out():
         return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
-                "latencyMs": elapsed_ms(), "message": f"응답 시간 초과(요청 전체 {timeout:g}초)",
+                "latencyMs": elapsed_ms(), "message": f"응답 시간 초과(요청 전체 {total:g}초 · 소켓 {timeout:g}초)",
                 "addresses": addresses}
 
     try:
         with opener.open(request, timeout=timeout) as response:
+            # v2.769(점검 R4-D1-1): 워치독이 헤더를 다 받기 전에 끊으면 평문 http.client 는 EOF 를 '헤더 끝' 으로 읽어
+            #   잘린 상태줄('HTTP/1.1 200')만으로 healthy 가 됐다(TLS 와 판정이 갈렸다). 헤더 단계에서 시한이 지났으면 시한 초과다.
+            if deadline.fired:
+                return timed_out()
             code = response.getcode()
             response.read(1024)       # 상태줄·헤더를 다 받았으면 본문이 시한에 잘려도 응답 코드가 결과다
             return {"url": target, "status": _classify(code), "statusCode": code,
                     "latencyMs": elapsed_ms(), "message": f"HTTP {code}",
                     "addresses": addresses}
     except urllib.error.HTTPError as exc:
+        if deadline.fired:            # v2.769(R4-D1-1): 잘린 헤더로 만든 응답 — 위와 같은 이유
+            return timed_out()
         # 3xx 는 리다이렉트 미추적으로 여기 떨어질 수 있다 — 살아 있다는 뜻이다.
         return {"url": target, "status": _classify(exc.code), "statusCode": exc.code,
                 "latencyMs": elapsed_ms(),

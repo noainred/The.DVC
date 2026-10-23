@@ -35,9 +35,11 @@ const sevRank = (s) => (s === 'critical' ? 3 : s === 'warning' ? 2 : s === 'reso
  *   실어 정밀 필터링하는 것은 후속 개선 과제 — 지금은 '덜 보여주는' 쪽이 안전하다.)
  */
 export function getIncidents({ limit = 200, allowed = null } = {}) {
-  const st = alertStatus();
-  const snap = store.get();
-  const now = Date.now();
+  return buildIncidents(alertStatus(), store.get(), { limit, allowed });
+}
+
+/** 순수 본체(v2.769 R4-D2-05 — 테스트가 알림 상태를 직접 넣어 본다). st = alertStatus() 모양, snap = 스냅샷. */
+export function buildIncidents(st, snap, { limit = 200, allowed = null, now = Date.now() } = {}) {
   const alertInScope = (a) => !allowed || (a.vcenterId ? allowed.has(a.vcenterId) : false);
 
   // 1) 현재 진행중(firing) — 시작시각 기준 미해소 인시던트.
@@ -57,9 +59,12 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
 
   // 3) vCenter 수집 실패도 인시던트로 표면화(알림 채널 미설정이어도 보이게).
   // snap 은 store 전체이므로 여기서 직접 scope 를 적용한다(허용 vCenter 만).
+  // v2.769(점검 R4-D2-05): 알림 엔진 vcenterDown 규칙이 같은 키(vc:<id>)로 발송할 때마다 recent 에 fired 를 남긴다 —
+  //   그때 합성 이벤트를 또 넣으면 한 장애가 타임라인·24h·일자별에 두 번 이상 셌다. 같은 key 의 fired 가 없을 때만 합성한다.
+  const firedKeys = new Set(events.filter((e) => e.kind === 'fired').map((e) => e.key));
   for (const v of snap.vcenters || []) {
     if (allowed && !allowed.has(v.id)) continue;
-    if (v.status === 'unreachable') {
+    if (v.status === 'unreachable' && !firedKeys.has(`vc:${v.id}`)) {
       const t = vcFailureStartTs(v);
       events.push({ at: t == null ? null : new Date(t).toISOString(), ts: t, ...(t == null ? { timeUnknown: true } : {}), key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
     }

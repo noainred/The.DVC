@@ -346,11 +346,11 @@ export function LinkCheck() {
       <div className="card">
         <div style={{ fontWeight: 600, marginBottom: 6 }}>링크 {rows.length}개 {rows.length !== (data?.links || []).length ? `(전체 ${(data?.links || []).length})` : ''}</div>
         <div style={{ overflowX: 'auto' }}>
-          <STable className="v3-table" minWidth={1100} wrap={false}>
+          <STable className="v3-table" minWidth={1180} wrap={false}>
             <thead>
               <tr>
                 <th>종류</th><th>출발</th><th>대상</th><th>주소</th><th>상태</th>
-                <th data-nosort>단계</th><th>응답</th><th>인증서</th><th>측정자</th><th>언제부터</th><th>사유</th>
+                <th data-nosort>단계</th><th>응답</th><th>인증서</th><th>측정자</th><th>마지막 측정</th><th>언제부터</th><th>사유</th>
               </tr>
             </thead>
             <tbody>
@@ -371,6 +371,10 @@ export function LinkCheck() {
                     <td className="right" data-sort={L?.totalMs ?? ''}>{msText(L?.totalMs)}</td>
                     <td data-sort={L?.certDaysLeft ?? ''}><span style={{ color: cert.tone, whiteSpace: 'nowrap' }}>{cert.text}</span></td>
                     <td style={{ whiteSpace: 'nowrap' }}>{L?.byNode || (r.by === 'edge' ? `${r.from}(엣지)` : '중앙')}</td>
+                    {/* v2.769(점검 R4-D3-2): 값이 언제 것인지 — '언제부터'(상태 시작)만으로는 오래된 값을 알아볼 수 없었다. */}
+                    <td style={{ whiteSpace: 'nowrap' }} data-sort={L?.ts ?? ''} title={L?.ts ? new Date(L.ts).toLocaleString('ko-KR') : ''}>
+                      {L?.ts ? ageText(L.ts) : '—'}
+                    </td>
                     <td style={{ whiteSpace: 'nowrap' }} data-sort={L?.sinceTs ?? ''}>
                       {L ? `${ageText(L.sinceTs)}${L.streak > 1 ? ` · ${L.streak}회` : ''}` : '—'}
                     </td>

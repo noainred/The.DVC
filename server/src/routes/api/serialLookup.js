@@ -45,7 +45,9 @@ export function maskSerialRow(x) {
   const hide = new Set([x.host, bareHost(x.host)].filter(Boolean));
   const isAddr = (v) => typeof v === 'string' && v !== '' && (hide.has(v) || hide.has(bareHost(v)) || IPV4_RE.test(bareHost(v)));
   const out = { ...x, host: '' };
-  if (isAddr(out.deviceId)) out.deviceId = '';
+  // v2.769(점검 R4-D2-03): 엣지 베어메탈 deviceId 는 `edge:<agent>:<fleetId|태그|이름>` — 이름이 주소면 끝 조각에 IP 가 남는다.
+  const tailAddr = (v) => typeof v === 'string' && IPV4_RE.test(v.slice(v.lastIndexOf(':') + 1));
+  if (isAddr(out.deviceId) || tailAddr(out.deviceId)) out.deviceId = '';
   if (isAddr(out.deviceName)) out.deviceName = `${x.kindLabel || x.kind || '장비'} (이름 가림)`;
   if (isAddr(out.hostname)) out.hostname = '';
   return out;

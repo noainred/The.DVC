@@ -32,6 +32,8 @@ const { stripComments } = await import('./_stripComments.js');
 
 const HOUR = 3_600_000;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;   // 정시 −30분 고정
+// v2.769(점검 R4-D1-5): vcstale 는 기준 = max(receivedAt, 프로세스 기동 시각) — 테스트 프로세스는 방금 떴으므로 '2시간 전 기동' 으로 둔다.
+alerts._setProcessStartForTest(NOW - 2 * HOUR);
 
 /* ── C5-03 ─────────────────────────────────────────────────────────── */
 const CFG = {

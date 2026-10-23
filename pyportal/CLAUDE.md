@@ -110,3 +110,7 @@
 - **`_dispatch` 최종 `except Exception` → 500 JSON(원문 미노출)**, 응답을 이미 쓰기 시작했으면 덧쓰지 않는다(`_response_started`). 웹훅 전송은 `http.client.HTTPException`(BadStatusLine — OSError 아님)도 실패로 접는다. CSV 의 `csv.Error` 는 `ValidationError`(400).
 - **이력 최신값은 재귀 CTE + id 별 `ORDER BY ts DESC, id DESC LIMIT 1`**, stats 는 MIN·MAX 단독 문장 + 행 수 캐시(record/prune 이 같은 잠금에서 맞춤). `GROUP BY + MAX(ts)`·한 문장 다중 집계로 되돌리지 말 것.
 - **새 계정 `tokenVersion` 은 무작위 시작**(`auth._fresh_token_version`, bootstrap 포함): 1 로 시작하면 삭제 → 재기동 → 같은 이름 재생성 때 삭제 전 토큰이 통과했다. 기존 계정 값은 건드리지 않고, payload `i` 도 유지한다.
+
+## v2.769 버그 점검 4회차 조치 — 되돌리지 말 것(`tests/test_audit2769.py`)
+- **요청 전체 시한 ≠ 소켓 시한**(`pinned.total_deadline_seconds` — 기본 소켓 × 3, 상한 90초 · env `HUB_HEALTH_TOTAL_TIMEOUT` 우선): v2.768 은 둘을 같은 값(4초)으로 잡아 RTT 800ms TLS 대상의 정상 서버가 '응답 시간 초과' 로 떨어졌다. 배수는 4 미만(드립 시험 상한 = 시한 × 4). 웹훅도 같은 구조.
+- **헤더 단계에서 워치독이 끊었으면 시한 초과**(`deadline.fired` 를 `opener.open` 직후·HTTPError 에서 본다): 평문 http.client 는 shutdown 뒤 EOF 를 '헤더 끝' 으로 읽어 잘린 상태줄만으로 healthy 가 됐다(TLS 와 판정이 갈렸다).

@@ -63,8 +63,11 @@ export function restoreStateText(r) {
     if (l.reason === 'interrupted') out.last = `${fmtTime(l.at)} 기동 때: 이전 적용이 중단된 흔적이 있어 예약 복원을 적용하지 않았습니다.`;
     else if (l.reason) out.last = `${fmtTime(l.at)} 기동 때: 예약 복원을 적용하지 못했습니다 — ${l.reason}`;
     else out.last = `${fmtTime(l.at)} 기동 때 예약 복원 적용${l.source ? `(${l.source})` : ''}: ${applied}개${failed.length ? ` · 실패 ${failed.length}개(${failed.slice(0, 5).map((f) => f.file).join(', ')})` : ''}${rejected ? ` · 거부 ${rejected}개` : ''}`;
+    // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
+    const warns = Array.isArray(l.warnings) ? l.warnings.filter((w) => typeof w === 'string' && w) : [];
+    if (out.last && warns.length) out.last += ` — 주의: ${warns.slice(0, 5).join(' · ')}`;
   }
-  out.warn = !!(out.pending || r.interrupted || (l && l.ok === false));
+  out.warn = !!(out.pending || r.interrupted || (l && (l.ok === false || (Array.isArray(l.warnings) && l.warnings.length))));
   if (r.interrupted) out.interrupted = '예약 복원 적용이 도중에 끊긴 흔적이 있습니다 — 서버 로그를 확인하고 설정 디렉터리의 backups 폴더에 남은 예약 파일을 정리하세요.';
   return out;
 }
