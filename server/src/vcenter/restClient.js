@@ -206,6 +206,23 @@ function isTransientSoapError(err) {
 }
 
 /**
+ * v2.771(점검 R6-F3-1): '능력 부재' 로 볼 수 있는 vim fault 타입. 이것 말고 **vim fault 가 붙은** 오류(soapClient #call 이
+ * `err.fault` 에 상세 타입을 싣는다 — SystemError·NotAuthenticated·RequestCanceled·NoPermission 등)는 SOAP 가 **살아서 답한**
+ * 것이라 능력 부재가 아니다. 예전에는 위 정규식에 안 걸린다는 이유만으로 REST 로 폴백해, vpxd 일시 오류(HTTP 500 SystemError)
+ * 한 번에 직전 정상 SOAP 스냅샷이 ok:true REST 저품질 스냅샷(VM IP 없음·호스트 용량 null·경보 미조회)으로 바뀌었다
+ * (IP 원장 재기록 플랩 — v2.287 #10 이 막으려던 상태). fault 없는 응답(비 vim 서버의 404·405, 응답 형식·파싱 실패,
+ * RetrieveServiceContent 실패)은 예전처럼 폴백한다.
+ * 대가: vim fault 를 **계속** 내는 vCenter(예: 권한 부족으로 매번 NoPermission)는 이제 REST 데이터 대신 연결 실패(lastGood 이월,
+ * 보존 창이 지나면 unreachable)로 보인다 — 오류 문구에 fault 가 그대로 남아 원인은 화면에서 보인다.
+ */
+const SOAP_CAPABILITY_FAULTS = new Set(['MethodNotFound', 'NotSupported', 'NotImplemented']);
+export function soapFallbackAllowed(err) {
+  const fault = typeof err?.fault === 'string' ? err.fault : '';
+  if (fault) return SOAP_CAPABILITY_FAULTS.has(fault);
+  return !isTransientSoapError(err);
+}
+
+/**
  * @param {object} vc
  * @param {{signal?: AbortSignal}} [opts] signal — 데드라인(v2.590). 만료되면 SOAP·REST 요청을 **실제로 끊는다**.
  */
@@ -222,8 +239,8 @@ export async function collectFromVCenter(vc, { signal = null } = {}) {
       if (isVcAuthError(err)) throw err;
       // 데드라인으로 끊긴 것은 폴백하지 않는다(REST 가 같은 신호로 즉시 끊긴다 — 헛 로그인만 남는다).
       if (signal?.aborted) throw err;
-      if (isTransientSoapError(err)) {
-        // 일시 오류 → 폴백 금지. 던지면 store 가 실패로 처리하되 마지막 정상 스냅샷을 유지한다.
+      if (!soapFallbackAllowed(err)) {
+        // 일시 오류·능력 부재가 아닌 vim fault(v2.771 R6-F3-1) → 폴백 금지. 던지면 store 가 실패로 처리하되 마지막 정상 스냅샷을 유지한다.
         throw err;
       }
       // 능력 부재로 추정(SOAP 응답 형식 오류·미지원 등) → REST 목록 API 로 폴백(저품질이지만

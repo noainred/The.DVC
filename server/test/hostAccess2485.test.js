@@ -98,6 +98,11 @@ test('계획 — 존 target ACCEPT 면 오류, 추가 규칙이 포탈 포트를
   const cur2 = R.parseListAll(LIST_ALL);
   const s2 = R.normalizeSettings({ firewall: { extra: [{ port: '4000', proto: 'tcp', action: 'drop' }] } }, { portalPort: 4000 }).settings;
   assert.ok(R.planCommands(s2, cur2, { requesterIp: '10.1.1.1' }).errors.some((e) => /포탈이 잠깁니다/.test(e)));
+  // v2.771(점검 R6-F5-3): 포트 '범위' 가 포탈 포트를 덮어도 같은 오류(예전 문자열 일치는 '1-65535' 를 통과시켰다).
+  const s2r = R.normalizeSettings({ firewall: { extra: [{ port: '1-65535', proto: 'tcp', action: 'drop' }] } }, { portalPort: 4000 }).settings;
+  assert.ok(R.planCommands(s2r, cur2, { requesterIp: '10.1.1.1' }).errors.some((e) => /포탈이 잠깁니다/.test(e)));
+  const s2s = R.normalizeSettings({ firewall: { extra: [{ port: '3999-4001', proto: 'tcp', action: 'reject', sources: ['10.1.1.0/24'] }] } }, { portalPort: 4000 }).settings;
+  assert.ok(R.planCommands(s2s, cur2, { requesterIp: '10.1.1.1' }).errors.some((e) => /요청자 IP 10\.1\.1\.1/.test(e)), '소스 지정 범위도 포함 판정');
   // 열림+열림, 기존 ssh 허용 rich rule 은 관리 대상이라 제거됨 → 명령 1개. 그 규칙이 없다면 0개.
   const s3 = R.normalizeSettings({}, { portalPort: 4000 }).settings;
   const cur3 = R.parseListAll(LIST_ALL.replace(/\trule family="ipv4" source address="10.9.9.9" service name="ssh" accept\n/, ''));

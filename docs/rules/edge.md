@@ -676,3 +676,5 @@
     PDU 임계치는 중앙 파일이 있을 때만 pdu-config 로 엣지에 배포(메모리 적용 · `PDU_THRESHOLDS_LOCAL=1` 이면 현장 고정) — 알림 채널 설정은 배포하지 않는다(위임 PDU 경보는 엣지 채널에 달림).
   - v2.770(점검 R5): 통신 점검 엣지 보고 낡음 경계 = max(3시간, 주기×3+10분)(`reportStaleLimitMs` — 서버 판정과 응답 `reportStaleMs` 가 같은 값), 엣지 결과 ts 는 엣지 시계 나이를 수신 시각에서 빼 환산(원본은 detail.edgeTs).
     PDU 임계치 배포는 관리자가 **바꾼 키만**(`_assigned`, enabled 제외 · 표지 없는 파일은 `{}` — 엣지는 `{}` 를 '중앙 지정 없음' 으로 직전 세트를 지운다). 혼합 버전(v2.769 중앙 + v2.770 엣지)에서는 중앙을 먼저 올릴 것.
+  - v2.771(점검 R6-F4): 엣지 export 의 `power.byHost` 상한(`REMOTE_BYHOST_MAX`, 뺀 수 `byHostDropped`). collectors.json·central-agent-tokens.json 손상은 표지(`registryLoadError`·`agentTokensLoadError`)로 드러내고,
+    자동 경로(자기등록·검증 표시·비관리자 add)는 `autoWriteRefusal` 로 거절 — 관리자 저장만 표지를 푼다. 첫 설치(파일·보존본 없음)는 막지 않는다. 손상 중 puller 는 clearStaleRemote 를 건너뛰고, link-check·register·central 게이트는 503 registryUnreadable.

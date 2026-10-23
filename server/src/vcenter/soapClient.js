@@ -2081,6 +2081,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
 
     // VM GPU 할당(vGPU/패스쓰루) — 비용을 줄이려 GPU가 있는 호스트 위 VM만 대상으로
     // config.hardware.device를 추가 조회한다(O(전체 VM) 아님). 실패는 격리.
+    // v2.771(점검 R6-F3-3): 실패하면 vm.gpu=null 이 'GPU 없음' 과 같은 값이라 GPU VM 수·할당이 그 주기 0 으로 떨어졌다(못 읽은 값=0).
+    //   vcenter 에 vmGpuUnknown 표지를 싣고, store 가 직전 스냅샷의 vm.gpu 를 이월한다(store.carryVmGpu — 다른 부가 갱신의 '직전 값 유지' 와 같은 뜻).
+    let vmGpuUnknown = false;
     try {
       const gpuHostRefs = new Set([...hostByRef].filter(([, h]) => (h.gpus || []).length).map(([ref]) => ref));
       if (gpuHostRefs.size) {
@@ -2099,7 +2102,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         }
       }
     } catch (err) {
-      console.warn(`[collect] ${vc.id} VM GPU 조회 건너뜀: ${err.message}`);
+      vmGpuUnknown = true;
+      console.warn(`[collect] ${vc.id} VM GPU 조회 건너뜀: ${err.message}(직전 값 유지 — GPU 없음으로 치지 않음)`);
     }
 
     const datastores = objs.filter((x) => x.type === 'Datastore').map((o) => {
@@ -2202,6 +2206,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         solutions, licenses, clusterCfg, tagInv, invFetch,
         ...listErrors,   // v2.742(VC-06): 라이선스·확장 조회 실패 사유(성공이면 키가 없다)
         ...(auxSkipped.length ? { auxSkipped } : {}),   // v2.719(S1-01): 데드라인이 모자라 건너뛴 부가 갱신
+        ...(vmGpuUnknown ? { vmGpuUnknown: true } : {}),   // v2.771(R6-F3-3): VM GPU 장치 조회 실패 — vm.gpu=null 은 '없음' 이 아니다
       },
       hosts, vms, datastores, networks, alarms,
     };

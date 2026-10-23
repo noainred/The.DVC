@@ -176,7 +176,9 @@ export function analyzeManageImport(rows, columns, ctx) {
     }
     if (errs.length) { out.reason = errs.join(' · '); push(); continue; }
     // 범위 판정 — 새 귀속(있으면)과 기존 귀속을 함께 본다(호출부 verdict 가 ipOverrideWriteVerdict 와 같은 규칙).
-    const v = ctx.verdict(ip, patch.claimedVcenterId || '');
+    // v2.771(점검 R6-F2-2): 귀속 열이 있으면(빈 칸 = 지움 포함) 그 값을 새 귀속으로, 없으면 undefined(기존 귀속 유지)로 판정한다 —
+    //   빈 칸을 '기존 귀속' 으로 판정하고 저장은 '' 로 하면 범위 계정이 전역(미귀속) 예약을 만든다.
+    const v = ctx.verdict(ip, Object.prototype.hasOwnProperty.call(patch, 'claimedVcenterId') ? patch.claimedVcenterId : undefined);
     if (v) { out.reason = v.reason || '범위 밖이거나 수정 권한이 없는 IP 입니다.'; push(); continue; }
     // 바뀌는 필드 계산
     for (const [k, val] of Object.entries(patch)) {

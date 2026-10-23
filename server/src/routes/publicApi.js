@@ -241,8 +241,16 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
  * 3일 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔다(문서는 'generatedAt 과 collectedAt 의 차이가 데이터의 나이' 라고 안내한다).
  * ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js`) — msOrNull 로 epoch ms 로 통일한다.
  */
-function vcCollectedAtOf(v, snap) {
-  if (v?.collectSource === 'site') return msOrNull(v.receivedAt);
+// v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다.
+export function vcCollectedAtOf(v, snap) {
+  // v2.771(점검 R6-F3-5): 엣지가 자기 수집 실패로 lastGood 을 이월해 보낸 항목(unreachable + staleSince)은 받은 시각이 아니라
+  //   그 값의 시각이다 — receivedAt 만 보면 최대 6시간 묵은 값이 '방금' 으로 나갔다(직접 수집 이월은 staleSince 를 쓰는데 비대칭).
+  //   엣지 시각은 수신 시각을 넘지 못한다(min — store 병합이 이미 자르지만 여기서도 자른다).
+  if (v?.collectSource === 'site') {
+    const rcv = msOrNull(v.receivedAt);
+    const since = v.status === 'unreachable' ? msOrNull(v.staleSince) : null;
+    return rcv != null && since != null && since > 0 ? Math.min(rcv, since) : rcv;
+  }
   if (v?.stale === true && v.staleSince != null) return msOrNull(v.staleSince);
   return msOrNull(v?.collectedAt ?? snap.generatedAt);
 }

@@ -32,7 +32,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { ERROR_KEYS, RX_WARN_DBM } from './healthCheck.js'; // v2.770(R5-E3-2): 축약 필터 = 점검 판정 키·경계 한 벌
+import { ERROR_KEYS, RX_WARN_DBM, RX_BAD_DBM } from './healthCheck.js'; // v2.770(R5-E3-2): 축약 필터 = 점검 판정 키·경계 한 벌
 import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600-02 — 중앙 수신과 같은 조닝 축약(순수)
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
@@ -86,7 +86,27 @@ export function slimSnapshot(snap, limit = PUSH_PORT_LIMIT) {
   const problem = (p) => p.state === 'faulty' || p.state === 'disabled'
     || ERROR_KEYS.some((k) => (Number(p[k]) || 0) > 0)
     || (p.rxPowerDbm != null && p.rxPowerDbm !== '' && Number(p.rxPowerDbm) <= RX_WARN_DBM);
-  const kept = list.filter(problem).slice(0, limit);
+  // v2.771(점검 R6-F1-1): 상한(64)을 **포트 순서**로 자르면 흔한 disc_c3 누적 포트가 앞 번호를 다 채워 뒤 번호의 faulty·crc 포트가
+  //   잘렸다(중앙 점검 bad → warn 회귀). 심각도 순으로 **고른** 뒤 반환은 원래 포트 순서(화면·테스트가 기대하는 순서)로 되돌린다.
+  //   등급: faulty > 링크 계층 에러(crc·enc·link_fail·loss) > rx 하한 이하 > disabled(미사용 포트를 비활성화해 둔 장비는 수십 개라
+  //   에러 포트를 밀어내면 안 된다 — 판정도 warn 뿐) > disc_c3·rx 주의. 같은 등급은 값 큰 순(광량은 낮은 순), 같으면 원래 순서.
+  const n0 = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : 0; };
+  const rxOf = (p) => (p.rxPowerDbm == null || p.rxPowerDbm === '' ? null : Number(p.rxPowerDbm));
+  const rank = (p) => {
+    const link = n0(p.errCrc) + n0(p.errEncIn) + n0(p.errEncOut) + n0(p.errLinkFail) + n0(p.errLossSync) + n0(p.errLossSig);
+    const rx = rxOf(p);
+    if (p.state === 'faulty') return [0, link + n0(p.discC3)];
+    if (link > 0) return [1, link];
+    if (rx != null && rx <= RX_BAD_DBM) return [2, -rx];
+    if (p.state === 'disabled') return [3, 0];
+    return [4, n0(p.discC3) || (rx != null && Number.isFinite(rx) ? -rx / 1000 : 0)];
+  };
+  const cand = [];
+  list.forEach((p, i) => { if (p && problem(p)) { const [t, v] = rank(p); cand.push({ p, i, t, v }); } });
+  const picked = cand.length > limit
+    ? cand.slice().sort((a, b) => (a.t - b.t) || (b.v - a.v) || (a.i - b.i)).slice(0, limit).sort((a, b) => a.i - b.i)
+    : cand;
+  const kept = picked.map((c) => c.p);
   return {
     ...snap,
     // portsScope(v2.517): 화면이 '무엇을 받았는지' 를 추측하지 않게 스냅샷이 밝힌다.

@@ -12,11 +12,24 @@
  * 판정을 공유 — 규칙이 라우트 안에 인라인이면 회귀 테스트가 라우트 서버 기동을 요구한다.
  */
 
-/** 허용 vCenter 들의 region 집합(빈 region 은 제외 — '' 매칭으로 무귀속 매니저가 새는 것 방지). */
+/*
+ * v2.771(점검 R6-F5-4): 'Unknown' 은 실제 지역이 아니라 **미지정 표식**이다 — nsx/registry.js·vcenter/registry.js 가 지역을 비우면
+ *   'Unknown' 으로 저장한다. 예전에는 빈 지역만 뺐기 때문에, 범위 계정의 vCenter 하나가 지역 미지정이면 다른 법인의 무귀속
+ *   NSX 매니저(역시 'Unknown')가 'Unknown'='Unknown' 으로 맞아 보였다. 세 판정 모두 'Unknown' 을 빈 지역과 같이 취급한다.
+ */
+const UNSET_REGION = 'unknown';
+/** 귀속에 쓸 수 있는 지역이면 그 값, 미지정('' · 'Unknown')이면 ''. */
+function realRegion(r) {
+  const t = typeof r === 'string' ? r.trim() : '';
+  return t && t.toLowerCase() !== UNSET_REGION ? r : '';
+}
+
+/** 허용 vCenter 들의 region 집합(빈 region·'Unknown' 은 제외 — 미지정끼리 매칭으로 무귀속 매니저가 새는 것 방지). */
 export function allowedRegions(vcenters, allowedSet) {
   const out = new Set();
   for (const v of vcenters || []) {
-    if (allowedSet.has(v.id) && v.location?.region) out.add(v.location.region);
+    const r = realRegion(v?.location?.region);
+    if (allowedSet.has(v.id) && r) out.add(r);
   }
   return out;
 }
@@ -25,14 +38,16 @@ export function allowedRegions(vcenters, allowedSet) {
 export function visibleNsxManagers(managers, vcenters, allowedSet) {
   if (!allowedSet) return managers || [];
   const regions = allowedRegions(vcenters, allowedSet);
-  return (managers || []).filter((m) =>
-    (m.vcenterId && allowedSet.has(m.vcenterId)) || (m.region && regions.has(m.region)));
+  return (managers || []).filter((m) => {
+    const region = realRegion(m.region);
+    return (m.vcenterId && allowedSet.has(m.vcenterId)) || (region && regions.has(region));
+  });
 }
 
 /** 단일 매니저(레지스트리 항목 — location.region 형태)가 범위 안인가(group-members 검사용). */
 export function managerInScope(mgr, vcenters, allowedSet) {
   if (!allowedSet) return true;
-  const region = mgr.region || mgr.location?.region || '';
+  const region = realRegion(mgr.region) || realRegion(mgr.location?.region);
   const regions = allowedRegions(vcenters, allowedSet);
   return !!((mgr.vcenterId && allowedSet.has(mgr.vcenterId)) || (region && regions.has(region)));
 }
