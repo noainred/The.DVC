@@ -88,7 +88,7 @@ function renderDashboard() {
     tile('등록 UAG', String(s.summary.total), '대'),
     tile('정상', String(s.summary.up), STATE_LABEL.up.slice(0, 1) + ' 응답·서비스 정상'),
     tile('문제', String(s.summary.problem), '경고 또는 오류'),
-    tile('총 세션', fmt(s.summary.sessions), '정상 응답 UAG 합계'),
+    tile('총 세션', fmt(s.summary.sessions), s.summary.sessionsUnread > 0 ? `정상 응답 UAG 합계 · ${s.summary.sessionsUnread}대 세션 수 미확인(제외)` : '정상 응답 UAG 합계'),
   ));
 
   if (EDITING) $app.append(renderForm());

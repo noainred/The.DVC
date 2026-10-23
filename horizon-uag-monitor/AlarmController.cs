@@ -56,8 +56,14 @@ public sealed class AlarmController : IDisposable
             _overlay.HideAlarm();
             return;
         }
-        var events = _engine.Update(snapshot, DateTime.UtcNow);
-        foreach (var ev in events) Log(ev);
+        var snap = snapshot as IReadOnlyCollection<EndpointStatus> ?? snapshot.ToList();
+        var events = _engine.Update(snap, DateTime.UtcNow);
+        // v2.762(H-S2): 결과가 오래돼 빠진 알람(엔진은 Cleared 로 알린다)은 '해소' 가 아니다 — 대상은 여전히 주의·위험이다.
+        //   최신 결과가 알람 등급인데 Cleared 면 오래됨으로 적는다(엔진의 IsAlarming 은 그때만 false).
+        var stillBad = snap.Where(es => es.Endpoint.Enabled && es.Latest != null
+                                        && es.Status >= _engine.MinLevel && es.Status != HealthStatus.Unknown)
+                           .Select(es => es.Endpoint.Id).ToHashSet();
+        foreach (var ev in events) Log(ev, ev.Kind == AlarmEventKind.Cleared && stillBad.Contains(ev.Item.EndpointId));
         Render();
     }
 
@@ -74,14 +80,17 @@ public sealed class AlarmController : IDisposable
         _overlay.ShowAlarm(_settings, pending);
     }
 
-    private static void Log(AlarmEvent ev)
+    private static void Log(AlarmEvent ev, bool staleCleared = false)
     {
         var i = ev.Item;
         var st = i.Status == HealthStatus.Down ? "위험" : "주의";
+        // v2.762(H-S2): v2.760 B-05 로 '확인됨' 인 채 되살아난 알람도 Raised 다 — 해소된 적도 다시 울린 적도 없으니 '발생' 이 아니다.
         var kind = ev.Kind switch
         {
+            AlarmEventKind.Raised when i.Acknowledged => "재표시(확인됨)",
             AlarmEventKind.Raised => "발생",
             AlarmEventKind.Escalated => "악화",
+            AlarmEventKind.Cleared when staleCleared => "결과 오래됨(알람 보류)",
             AlarmEventKind.Cleared => "해소",
             _ => "확인",
         };

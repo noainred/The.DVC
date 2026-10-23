@@ -212,12 +212,12 @@ test('라우트 — B1·B7 가림 · B2·B5 stale · D5 runningStale · A5 hostM
     assert.equal(v1.servers[0].stale, false);
     // A5 — 배지 응답에 otherVcenter
     const v4 = await get(`/veeam/badges?vcenterId=${VC4}`);
-    assert.equal(v4.otherVcenter, 2);
+    assert.deepEqual([v4.otherVcenter, v4.hostMismatch], [null, true], 'v2.762(F5): 수는 관리자만 — 비관리자는 불리언');
     // 카드
     const bc = (await get('/veeam/backup-counts')).byVc;
     assert.deepEqual([bc[VC2].n, bc[VC2].stale, bc[VC2].partial], [1, 1, true], 'B2: 수는 그대로 · 부분');
     assert.deepEqual([bc[VC3].stale, bc[VC3].partial], [0, false]);
-    assert.deepEqual([bc[VC4].n, bc[VC4].otherVcenter, bc[VC4].hostMismatch], [0, 2, true], 'A5');
+    assert.deepEqual([bc[VC4].n, bc[VC4].otherVcenter, bc[VC4].hostMismatch], [0, null, true], 'A5 · v2.762(F5) 수는 관리자만');
     // D4 — snap-events 에 verdict(카드와 같은 판정)
     const se = await get(`/veeam/snap-events?vcenterId=${SN}`);
     assert.equal(se.status, 'ok');

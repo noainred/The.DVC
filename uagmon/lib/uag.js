@@ -116,12 +116,16 @@ export function parseStats(body) {
   const services = arr(root.edgeServiceSessionStats).filter((s) => s && typeof s === 'object').map((s) => ({
     id: str(s.identifier || s.edgeServiceId || s.id || '').toUpperCase() || 'UNKNOWN',
     status: str(s.edgeServiceStatus || s.status || '').toUpperCase(),
-    sessions: num(s.totalSessionCount ?? s.activeSessionCount ?? s.sessionCount),
+    // v2.762(H3): `??` 체인은 XML 빈 요소('')에서 멈춘다 — 각 칸을 num 으로 읽은 뒤 대체한다.
+    sessions: num(s.totalSessionCount) ?? num(s.activeSessionCount) ?? num(s.sessionCount),
     high: num(s.highWaterMark),
   }));
 
-  const sumSessions = services.reduce((a, s) => a + (s.sessions || 0), 0);
-  const totalSessions = num(root.totalSessionCount) ?? (services.length ? sumSessions : null);
+  // v2.762(H3): 서비스 합 대체는 **모든 서비스 세션을 읽었을 때만** — 못 읽은 서비스(null)를 0 으로 더하면 0 이나 부분 합이
+  //   '전체 세션' 으로 보이고 추이에 적재된다(못 읽은 값은 0 이 아니다 · 부분 합은 추이에 넣지 않는다). 하나라도 못 읽었으면 null.
+  const allRead = services.length > 0 && services.every((s) => s.sessions != null);
+  const sumSessions = allRead ? services.reduce((a, s) => a + s.sessions, 0) : null;
+  const totalSessions = num(root.totalSessionCount) ?? sumSessions;
 
   const sys = (root.systemStats && typeof root.systemStats === 'object') ? root.systemStats : root;
   let memPercent = num(sys.memoryUtilPercent);

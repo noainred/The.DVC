@@ -77,7 +77,10 @@ async function pushInner() {
   }
   const notOwned = Number(reply?.dropped?.notOwned) || 0;
   if (notOwned && failLog('notOwned', String(notOwned))) console.warn(`[veeam-push] 중앙이 이 엣지에 배정되지 않은 서버 결과 ${notOwned}건을 받지 않았습니다(배정이 바뀐 직후일 수 있습니다)`);
-  _last = { at: Date.now(), ok: true, servers: body.status.servers, results: body.results.length, bytes: json.length, gzBytes: payload.length, ...(notOwned ? { notOwned } : {}),
+  // v2.762(G1): 중앙에서 접속처를 바꾼 뒤 아직 배정 pull 전이면 옛 접속처 결과를 받지 않는다(다음 pull·수집 뒤 새 접속처 결과가 간다).
+  const stale = Number(reply?.dropped?.stale) || 0;
+  if (stale && failLog('stale', String(stale))) console.warn(`[veeam-push] 중앙이 접속처가 바뀐 서버의 이전 접속처 결과 ${stale}건을 받지 않았습니다(배정 pull 뒤 다시 읽습니다)`);
+  _last = { at: Date.now(), ok: true, servers: body.status.servers, results: body.results.length, bytes: json.length, gzBytes: payload.length, ...(notOwned ? { notOwned } : {}), ...(stale ? { stale } : {}),
     snapVcenters: snapEv.list ? snapEv.list.length : null, ...(snapEv.error ? { snapError: snapEv.error } : {}),
     ...(Number(reply?.snap?.saved) >= 0 ? { snapSaved: Number(reply.snap.saved) } : {}) };
   return { ok: true, sent: body.results.length, snapVcenters: snapEv.list ? snapEv.list.length : null };

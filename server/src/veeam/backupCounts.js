@@ -4,6 +4,18 @@
 
 /** 로그 폴러의 마지막 온전한 수집이 이보다 오래되면 스냅샷 기준 수량을 내지 않는다(그 뒤 백업이 빠진 부분 합 — snap-events 안내와 같은 6시간). */
 export const SNAP_STALE_MS = 6 * 3_600_000;
+const SNAP_STALE_SLACK_MS = 30 * 60_000;
+/**
+ * v2.762(F6): '오래됨' 한도 = max(6시간, 로그 수집 주기 × 2 + 30분). 주기는 설정에서 1~1440분이라 6시간 고정이면 주기를 6시간 넘게 둔
+ *   포탈은 정상 수집인데도 매 주기의 일부 동안 '—' 였다. 이 포탈이 직접 모은 요약(local)에만 쓴다 — 엣지 요약은 그 엣지 주기를 모르므로 6시간.
+ *   서버가 응답(snap-events·backup-counts)에 staleMs 로 싣고 웹은 그 값을 쓴다(판정 코어 하나).
+ */
+export function snapStaleMs(pollIntervalMin) {
+  const m = Number(pollIntervalMin);
+  if (!Number.isFinite(m) || m <= 0) return SNAP_STALE_MS;
+  return Math.max(SNAP_STALE_MS, Math.min(m, 1440) * 60_000 * 2 + SNAP_STALE_SLACK_MS);
+}
+const staleLimitOf = (ev) => (Number.isFinite(ev?.staleMs) && ev.staleMs > SNAP_STALE_MS ? ev.staleMs : SNAP_STALE_MS);
 /** v2.761(C3): 이보다 오래 남은 Veeam 임시 스냅샷은 '백업 중' 이 아니라 '잔존(정리 실패 의심)' — 웹 veeamBadge.js 의 같은 이름 상수와 같은 값(test/veeam2761b 가 대조). */
 export const VEEAM_SNAP_STALE_MS = 24 * 3_600_000;
 
@@ -15,8 +27,10 @@ export const VEEAM_SNAP_STALE_MS = 24 * 3_600_000;
 export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
   const vs = Array.isArray(views) ? views : [];
   if (!byVm) {
-    const reason = vs.some((v) => v.ok == null) ? 'veeam-pending' : 'veeam-failed';
-    return { src: 'veeam', n: null, vmTotal, reason };
+    // v2.762(F3): 실패한 서버가 하나라도 있으면 '첫 수집 대기' 가 아니라 실패를 먼저 말한다(다른 서버가 아직 첫 수집 전이어도 — 그 수는 waiting 으로).
+    const failedN = vs.filter((v) => v.ok === false).length; const waitingN = vs.filter((v) => v.ok == null).length;
+    const reason = failedN ? 'veeam-failed' : waitingN ? 'veeam-pending' : 'veeam-failed';
+    return { src: 'veeam', n: null, vmTotal, reason, failed: failedN, waiting: waitingN };
   }
   let n = 0; let running = 0; let pending = 0;
   for (const e of Object.values(byVm)) {
@@ -26,6 +40,8 @@ export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
   }
   const ok = vs.filter((v) => Number.isFinite(v.lastOkTs)).map((v) => v.lastOkTs);
   const failed = vs.filter((v) => v.ok === false).length;
+  // v2.762(F2): 실패 중 한 번도 성공한 적이 없는 서버 — '마지막 성공 값을 썼다' 가 아니라 그 서버의 VM 이 통째로 빠졌다.
+  const failedNoLast = vs.filter((v) => v.ok === false && !Number.isFinite(v.lastOkTs)).length;
   const waiting = vs.filter((v) => v.ok == null).length;
   // v2.761(B2): 쓸 수 있는 결과가 한도(주기 × 2 + 여유)보다 오래된 서버 — 숫자는 숨기지 않고(백업 대상은 천천히 바뀐다) 부분으로 표시한다.
   const stale = vs.filter((v) => v.stale === true).length;
@@ -33,7 +49,7 @@ export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
   return {
     src: 'veeam', n, vmTotal, running, pending, servers: vs.length,
     // 한 서버라도 이번에 실패(마지막 성공 값)·아직 못 읽음·오래됨이면 '부분' — 숫자는 보여 주되 표지를 단다.
-    partial: failed + waiting + stale > 0, failed, waiting, stale,
+    partial: failed + waiting + stale > 0, failed, failedNoLast, waiting, stale,
     // v2.761(A5): 대조 0대인데 Veeam 이 다른 vCenter 이름으로 적은 VM 이 있으면 '0대' 가 아니라 이름 불일치 의심(n 은 그대로 둔다 — 정말 0대일 수도 있다).
     otherVcenter: other, ...(n === 0 && other > 0 ? { hostMismatch: true } : {}),
     basisTs: ok.length ? Math.min(...ok) : null,
@@ -42,7 +58,7 @@ export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
 
 /**
  * v2.761(D4): 스냅샷 이벤트 요약(snap-events 결과)으로 수량을 낼 수 있는가 — 판정 코어 하나(카드 snapCount 와 VM 화면 칩이 같이 쓴다).
- * 이유 코드: 상태가 ok 가 아니면 그 상태 · 'stale-events'(마지막 온전한 수집이 6시간보다 오래됨 — 엣지 요약도) ·
+ * 이유 코드: 상태가 ok 가 아니면 그 상태 · 'stale-events'(마지막 온전한 수집이 한도(ev.staleMs — 없으면 6시간)보다 오래됨 — 엣지 요약도) ·
  *   'no-collect-yet'(이 프로세스에서 로그 폴러가 돈 뒤에도 그 vCenter 수집 기록이 없음 — collectRan) · 'no-account'(계정 모름 + 찾은 VM 없음).
  *   collectedAt 이 없고 collectRan 도 없으면(재시작 직후 · 옛 엣지) 모름으로 보고 막지 않는다(업그레이드 중 전 엣지가 꺼지지 않게).
  * @returns {{ ok: boolean, reason: (string|null) }}
@@ -50,7 +66,7 @@ export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
 export function snapVerdict(ev, now = Date.now()) {
   if (!ev || ev.status !== 'ok') return { ok: false, reason: ev?.status || 'no-data' };
   if (Number.isFinite(ev.collectedAt)) {
-    if (now - ev.collectedAt > SNAP_STALE_MS) return { ok: false, reason: 'stale-events' };
+    if (now - ev.collectedAt > staleLimitOf(ev)) return { ok: false, reason: 'stale-events' };   // v2.762(F6): 로컬은 주기 반영 한도
   } else if (ev.collectRan === true) return { ok: false, reason: 'no-collect-yet' };
   if (ev.accounts === 0 && !Object.keys(ev.byVm || {}).length) return { ok: false, reason: 'no-account' };
   return { ok: true, reason: null };
@@ -73,7 +89,7 @@ export function snapCount({ ev, vms, now = Date.now() }) {
   const base = { src: 'snap', vmTotal: list.length, snapNow: nowSet.size, snapStale, days: ev?.days ?? null };
   const vd = snapVerdict(ev, now);
   if (!vd.ok) {
-    if (vd.reason === 'stale-events') return { ...base, n: null, reason: vd.reason, collectedAt: ev.collectedAt };
+    if (vd.reason === 'stale-events') return { ...base, n: null, reason: vd.reason, collectedAt: ev.collectedAt, staleMs: staleLimitOf(ev) };
     if (vd.reason === 'no-account' || vd.reason === 'no-collect-yet') return { ...base, n: null, reason: vd.reason };
     return { ...base, n: null, reason: vd.reason, at: ev?.at ?? null };
   }
@@ -86,6 +102,6 @@ export function snapCount({ ev, vms, now = Date.now() }) {
     // 이벤트가 상한에 걸려 일부만 읽었거나(truncated) 동명 VM 이라 정하지 못한 이벤트가 있다(v2.761 C6 — unmatched 는 지운 VM 이 정상이라 넣지 않는다)
     partial: !!ev.truncated || ambiguous > 0,
     source: ev.source || 'local',
-    at: ev.at ?? null, collectedAt: Number.isFinite(ev.collectedAt) ? ev.collectedAt : null,
+    at: ev.at ?? null, collectedAt: Number.isFinite(ev.collectedAt) ? ev.collectedAt : null, staleMs: staleLimitOf(ev),
   };
 }

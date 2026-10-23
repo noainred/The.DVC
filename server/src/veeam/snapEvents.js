@@ -18,6 +18,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { getSnapDb, backfillSnap } from './snapDb.js';
+import { createYielder } from '../util/timeSlice.js';
 
 export const LOOKBACK_DAYS = 7;
 const DAY = 86_400_000;
@@ -415,7 +416,11 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
   const out = [];
   const need = [];   // v2.759: 전용 DB 백필 전인 vCenter — 이번에는 보내지 않고(중앙은 직전 요약 유지) 백필을 시작한다
   const vcs = (snap?.vcenters || []).filter((v) => v && v.id != null && !notCollected?.has(String(v.id))).slice(0, MAX_EDGE_VCS);
+  // v2.762(E-I1): vCenter 사이에 양보한다 — 전용 DB 경로의 localSnapSummary 는 안이 전부 동기라 push 한 번이 한 덩어리 정지였다
+  //   (6곳 × 2만 행 → 약 340ms 실측). 중앙 카드 라우트(backup-counts)와 같은 방식. vCenter 하나의 비용은 그대로 남는다.
+  const maybeYield = createYielder(15);
   for (const vc of vcs) {
+    await maybeYield();
     const vcenterId = String(vc.id);
     if (logSettings?.enabled === false) { out.push({ vcenterId, status: 'log-off', at: now }); continue; }
     if (logSettings?.minSeverity && logSettings.minSeverity !== 'info') { out.push({ vcenterId, status: 'severity-filter', at: now }); continue; }

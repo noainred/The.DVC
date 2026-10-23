@@ -246,10 +246,14 @@ export async function pollLogsOnce({ manual = false } = {}) {
       await maybeYield();
       const before = db.lastTs(vcId);
       if (rows.length) {
+        // v2.762(E2): 전용 DB 적재를 로그 DB 적재 **앞**에 — 로그 적재는 조각 사이에 양보하므로, 예전 순서(로그 → 전용)는 그 사이 종료
+        //   (업그레이드 재시작·크래시)나 2번째 조각의 실패가 '로그 DB 에만 있는 스냅샷 행' 을 남겼고, 다음 수집은 lastTs 이후만 읽어 영영 채우지 못했다
+        //   (덮음 기록은 그대로라 화면이 그 VM 을 빼고 '완전' 으로 보였다). 반대 순서는 안전하다 — 로그 적재가 실패하면 커서가 안 움직여
+        //   다음 주기가 같은 행을 다시 읽고, 전용 DB 는 해시 UNIQUE(INSERT OR IGNORE)라 멱등이다.
+        await ingestSnapRows(rows);   // 실패해도 로그 적재는 그대로(시간당 경고 1줄 · 실패하면 그 vCenter 덮음 무효 — C5/E1)
         if (typeof db.insertManyAsync === 'function') await db.insertManyAsync(rows);
         else db.insertMany(rows);
         collected += rows.length;
-        await ingestSnapRows(rows);   // 실패해도 로그 적재는 그대로(시간당 경고 1줄)
       }
       // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 vCenter 이후는 기록되지 않는다 — 온전하지 않다).
       if (done.at != null) _collectOk.set(vcId, { at: done.at, capped: done.capped, events });

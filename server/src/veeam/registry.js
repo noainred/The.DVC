@@ -13,6 +13,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreForThisNode, devicesForAgent as coreForAgent } from '../util/registryCore.js';
@@ -55,6 +56,15 @@ function persist() {
 }
 
 const redact = ({ password, ...d }) => ({ ...d, hasPassword: !!password });
+/**
+ * v2.762(G1·G2): 접속처 지문 — 소문자 host:port:username 의 sha256 앞 16자. 결과에 실어 '어느 접속처에서 읽은 것인가' 를 대조한다
+ *   (secretCarry.accessMoved 와 같은 세 칸 · 사용자명 평문을 결과 파일·선로에 싣지 않는다). 비밀번호는 넣지 않는다(바꿔도 같은 서버).
+ */
+export function accessFingerprint(d) {
+  if (!d || typeof d !== 'object') return '';
+  const key = `${String(d.host ?? '').trim().toLowerCase()}:${Number(d.port) || DEFAULT_PORT}:${String(d.username ?? '').trim().toLowerCase()}`;
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
 /** 목록 — 비밀번호는 반환하지 않는다(hasPassword 만). */
 export function listServers() { return load().servers.map(redact); }
 /** 수집기 전용(비밀 포함). */

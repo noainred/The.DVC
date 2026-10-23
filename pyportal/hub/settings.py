@@ -68,7 +68,9 @@ def _safe_webhook(value) -> str:
 def _clamp_int(value, low, high, default):
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # v2.762(H5): json 은 1e999·Infinity 를 float inf 로 읽는다 — int(inf) 는 OverflowError 라
+        # 한 칸 때문에 설정 전체를 못 읽던 B-08 과 같은 증상이 남아 있었다.
         return default
     return max(low, min(high, number))
 
@@ -76,7 +78,9 @@ def _clamp_int(value, low, high, default):
 def _clamp_choice(value, choices, default):
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # v2.762(H5): json 은 1e999·Infinity 를 float inf 로 읽는다 — int(inf) 는 OverflowError 라
+        # 한 칸 때문에 설정 전체를 못 읽던 B-08 과 같은 증상이 남아 있었다.
         return default
     return number if number in choices else default
 
