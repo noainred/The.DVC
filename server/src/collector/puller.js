@@ -7,7 +7,7 @@
 
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { config } from '../config.js';
-import { loadCollectors } from './registry.js';
+import { loadCollectors, registryLoadError } from './registry.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { isDemoCollector } from '../mock/demo/edge.js';
 import { demoEdgeTick } from '../mock/demo/edgeSeed.js'; // v2.708: 데모 엣지(mock- · .demo.invalid)는 접속하지 않는다
@@ -188,10 +188,14 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
   const sdr = data.serversDropped;
   const serversDropped = sdr && (sdr.notObject + sdr.badId + sdr.overCount) > 0 ? sdr : null;
   if (serversDropped) console.warn(`[collector] ${c.id} export 서버 원소 ${sdr.notObject + sdr.badId + sdr.overCount}개를 버림(객체 아님 ${sdr.notObject} · id 오류 ${sdr.badId} · 상한 초과 ${sdr.overCount})`);
+  // v2.771(점검 R6-F4-1): export power.byHost 를 상한(REMOTE_BYHOST_MAX)·형식으로 버린 수 — serversDropped 와 같은 규약(0 이면 null).
+  const bhr = data.byHostDropped;
+  const byHostDropped = bhr && (bhr.notObject + bhr.overCount) > 0 ? bhr : null;
+  if (byHostDropped) console.warn(`[collector] ${c.id} export 전력 원소 ${bhr.notObject + bhr.overCount}개를 버림(객체 아님 ${bhr.notObject} · 상한 초과 ${bhr.overCount})`);
   const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
   if (hostConflicts.length) console.warn(`[collector] ${c.id} 다른 수집 서버와 같은 호스트명 ${hostConflicts.length}개(${hostConflicts.slice(0, 5).join(', ')}) — 법인별로 따로 집계하고 전력 이력 키를 나눈다`);
-  return { hosts, duplicateSkipped: dupSkipped, hostConflicts: hostConflicts.length ? hostConflicts : null, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true,
+  return { hosts, duplicateSkipped: dupSkipped, hostConflicts: hostConflicts.length ? hostConflicts : null, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, byHostDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true,
     // v2.742(EDGE-01): 센서 상세 변경분 — 직전 값을 다시 쓴 수 · 직전 값이 없어 비운 수(커서를 보낸 pull 일 때만)
     sensorDetailDelta: sdSince ? { kept: sd.kept, missing: sd.missing } : null };
 }
@@ -202,7 +206,7 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
  * 'mock' 사유와 인증 거부 통계가 사라졌다(v2.548 H5 '통째로 바꾸면 정보가 사라진다' 의 형제 경로).
  */
 export function statusFromPull(r) {
-  return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock, sensorDetailDelta: r.sensorDetailDelta || null };
+  return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, byHostDropped: r.byHostDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock, sensorDetailDelta: r.sensorDetailDelta || null };
 }
 
 /*
@@ -220,7 +224,7 @@ let cycleSeq = 0;
 let cycleStartedAt = 0;
 let cycleAbort = null;
 const cycleBusy = new Map();     // 주기 pull 이 붙잡고 있는 collectorId → 시작 시각(버려진 주기 포함)
-const pullerStats = { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0 };
+const pullerStats = { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0, registryUnreadableAt: null };
 
 /** 주기 상한(ms) — env COLLECTOR_PULL_CYCLE_MAX_MS(빈 값·0 은 기본), 하한 60초. */
 export function pullCycleMaxMs(intervalMs = config.collector.pullIntervalMs, env = process.env.COLLECTOR_PULL_CYCLE_MAX_MS) {
@@ -280,7 +284,7 @@ export async function pullNow() {
 /** 테스트 전용. */
 export function _resetPullerForTest() {
   pulling = 0; cycleSeq = 0; cycleStartedAt = 0; cycleAbort = null; cycleBusy.clear(); fails.clear(); inflight.clear();
-  Object.assign(pullerStats, { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0 });
+  Object.assign(pullerStats, { cycles: 0, lastStartAt: null, lastEndAt: null, lastTookMs: null, stuckReleases: 0, lastStuckAt: null, lastStuckAgeMs: null, skippedBusy: 0, registryUnreadableAt: null });
 }
 /** 테스트 전용 — 주기 시작 시각을 과거로 돌린다(상한 경과 재현). */
 export function _ageCycleForTest(ms) { cycleStartedAt -= ms; }
@@ -331,7 +335,17 @@ async function pullNowInner(signal = null) {
   const collectors = orderForPull(enabled.filter((c) => !cycleBusy.has(c.id)), (id) => fails.get(id) || 0);
   // 레지스트리에서 제거/교체된 수집기의 잔류 호스트·상태 자동 정리(감사 M12) — 과거엔 수동
   // power-purge에서만 정리돼 유령 항목이 전력 합산을 오염시켰다.
-  try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
+  // v2.771(점검 R6-F4-2): 등록부를 **읽지 못한** 동안에는 정리하지 않는다 — 빈 목록은 '등록된 수집 서버가 없다' 가 아니라 '모른다' 다.
+  //   예전에는 손상 직후 빈 집합으로 불러 전 수집 서버의 원격 전력·상태를 즉시 지웠다('못 읽은 값은 0 이 아니다'). 남은 값은 state 의 신선도 판정이 낡게 표시한다.
+  let regErr = null;
+  try { regErr = registryLoadError(); } catch (e) { regErr = { at: Date.now(), reason: e?.message || String(e) }; }
+  if (regErr) {
+    if (!pullerStats.registryUnreadableAt) console.warn(`[collector] 수집 서버 등록부(collectors.json)를 읽지 못해 이번 주기 pull·잔류 정리를 건너뜁니다(${summarizeRegistryError(regErr)?.text || '사유 미상'}) — 설정 › 수집 서버에서 보존본을 되돌리거나 다시 저장하세요.`);
+    pullerStats.registryUnreadableAt = regErr.at || Date.now();
+  } else {
+    pullerStats.registryUnreadableAt = null;
+    try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
+  }
   // v2.617: 동시 개수 제한(config.collector.pullConcurrency, 기본 4) — 예전 Promise.all 은 엣지 전부의 응답 사본이
   //   한 순간에 힙에 살았다. fn 이 스스로 catch 하므로 poolRun(첫 rejection 을 올리는 쪽)이 맞다.
   /*

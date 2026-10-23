@@ -23,6 +23,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
+import { makeLoadError, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): '읽지 못함' 표지
 
 const FILE = path.join(config.configDir, 'central-agent-tokens.json');
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest();
@@ -30,26 +31,56 @@ const norm = (a) => String(a || '').trim().toLowerCase();
 
 let cache = null; // [{ agent, hash(hex), createdAt, lastUsedAt, note }]
 
+/**
+ * v2.771(점검 R6-F4-2): 토큰 파일을 **읽지 못했다**는 사실. 예전에는 손상/읽기 오류면 rename 뒤 cache=[] 를 프로세스 수명 동안 고정해
+ *   관리 화면이 '0개 발급' 으로 보였고(발급 없음과 구분 불가), 개별 토큰 엣지는 전부 '토큰 불일치' 403, 공유 토큰이 없으면 'central 비활성화' 404 였다.
+ *   이제 표지를 두고(관리 화면·getCentralAuthStats·central 게이트 503 이 읽는다), 표지가 선 동안은 캐시를 고정하지 않고 파일이
+ *   다시 나타나면(사람이 보존본을 되돌림) 다시 읽는다. 첫 설치(파일·보존본 모두 없음)는 오류가 아니다. 해제는 정상 읽기·관리자 발급/회수 저장뿐.
+ */
+const loadErr = makeLoadError();
+
 function load() {
-  if (cache) return cache;
+  if (cache && !loadErr.get()) return cache;
+  let exists = false;
+  try { exists = fs.existsSync(FILE); } catch { exists = false; }
+  if (!exists) {
+    // 표지가 선 채 파일이 없으면(보존본으로 옮겨진 뒤) 빈 목록 그대로 — 매 요청 existsSync 1회뿐이다.
+    if (!cache) { loadErr.checkCorruptOnly(FILE); cache = []; }
+    return cache;
+  }
   try {
-    if (fs.existsSync(FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      cache = Array.isArray(parsed?.tokens) ? parsed.tokens.filter((t) => t && t.agent && t.hash) : [];
-      return cache;
-    }
+    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    cache = Array.isArray(parsed?.tokens) ? parsed.tokens.filter((t) => t && t.agent && t.hash) : [];
+    loadErr.clear();
+    return cache;
   } catch (e) {
     // 손상 파일을 조용히 빈 값으로 덮어쓰면 전 엣지 토큰이 유실된다 → 보존 후 경고.
-    try { fs.renameSync(FILE, `${FILE}.corrupt.${Date.now()}`); } catch { /* */ }
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
-    console.error(`[central-token] central-agent-tokens.json 파싱 실패(${safeLoadText(e) || '사유 미상'}) — 손상본을 .corrupt로 보존하고 빈 목록으로 시작합니다.`);
+    try { fs.renameSync(FILE, `${FILE}.corrupt.${Date.now()}`); } catch { /* */ }
+    console.error(`[central-token] central-agent-tokens.json 파싱 실패(${safeLoadText(e) || '사유 미상'}) — 손상본을 .corrupt로 보존했습니다. 개별 토큰 인증은 보존본을 되돌리거나 토큰을 다시 발급할 때까지 503 으로 답합니다.`);
+    loadErr.set(e);
   }
   cache = [];
   return cache;
 }
 
 function save() {
-  atomicWriteFileSync(FILE, JSON.stringify({ tokens: load() }, null, 2), { mode: 0o600 });
+  // v2.771(R6-F4-2): 다시 읽지 않고 메모리 목록(cache — 발급·회수·touch 가 고친 것)을 쓴다. 표지가 선 동안 load() 는 파일을 다시 읽으므로
+  //   보존 rename 이 실패해 손상 파일이 남아 있으면 방금 발급한 항목이 빈 목록으로 덮였다.
+  atomicWriteFileSync(FILE, JSON.stringify({ tokens: cache || load() }, null, 2), { mode: 0o600 });
+  loadErr.clear(); // v2.771(R6-F4-2): 관리자 발급/회수 저장이 성공하면 그 목록이 진실이다(touch 는 해석된 항목이 있을 때만 — 읽지 못한 동안엔 없다)
+}
+
+/**
+ * v2.771(R6-F4-2): 토큰 파일을 읽지 못했으면 **요약**(원문 없음), 아니면 null. 관리 화면·central 게이트가 '발급 없음' 과 가른다.
+ * @returns {null|{at:(number|null), code:(string|null), text:string}}
+ */
+export function agentTokensLoadError() {
+  load();
+  const e = loadErr.get();
+  if (!e) return null;
+  const s = summarizeRegistryError(e);
+  return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상' };
 }
 
 /** 개별 토큰이 하나라도 발급돼 있는가(있으면 per-agent 인증 경로가 활성). */
@@ -119,4 +150,4 @@ export function resolveAgentByToken(token) {
 }
 
 /** 테스트용 — 캐시를 비워 파일을 다시 읽게 한다. */
-export function _resetAgentTokenCache() { cache = null; }
+export function _resetAgentTokenCache() { cache = null; loadErr.clear(); }

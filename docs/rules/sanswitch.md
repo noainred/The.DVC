@@ -295,3 +295,5 @@
   · v2.770(점검 R5-E3): 포트 에러 판정 코어는 `healthCheck.js judgePortErrors` 하나(장비 항목·포트 표 공용). **리셋(cur<base)·기준선 행 없음은 '새 에러 없음' 이 아니다** — 리셋은 cur 를 '리셋 이후 최소 신규'(`errNewMin`)로,
     cur=0 이면 unknown, 행 없음은 누적>0 이면 warn. 행은 있고 키 하나만 없는 옛 기준선은 그 키만 건너뛴다. 엣지 축약(slim)은 `ERROR_KEYS` 전부 + rx<=-9, `portsOmitted>0` 이면 ok 대신 '일부 포트만' warn.
     연결 테스트는 처리량 기준값을 건드리지 않는다(`noRates`) · 비밀번호 승계는 `sanAccessMoved` 하나(saveDevice 와 공유) · 주기 수집은 진행 중 장비를 건너뛰고 `inFlightSkipped` 로 센다.
+  · v2.771(점검 R6-F1): 축약은 상한을 넘을 때 **심각도 순으로 고르고**(faulty > 링크 에러 > rx ≤ -12 > disabled > disc_c3·rx 주의) 반환은 포트 순 — 포트 번호 순 slice 는 뒤 번호 장애 포트를 잘랐다.
+    중앙 ports 항목은 `portsOmitted>0` 이면 엣지 전체 집계 `ports.faulty` 를 본다. 리셋은 **포트 단위**(한 키라도 cur<base 면 그 포트의 축약 아닌 키 전부 하한 = cur, held='reset').

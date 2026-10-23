@@ -76,7 +76,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/ipam.md` (11항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
-| `docs/rules/audits.md` (57항목) | 회차별 점검(감사) 기록 v2.583~v2.770 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| `docs/rules/audits.md` (58항목) | 회차별 점검(감사) 기록 v2.583~v2.771 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)

@@ -16,7 +16,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { getOverrides } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
-import { ipToNum } from '../util/ipv4.js';
+import { ipToNum, canonIp } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
@@ -448,14 +448,24 @@ function bumpAgent(agent, d) {
   const n = (_agentCount.get(k) || 0) + d;
   if (n > 0) _agentCount.set(k, n); else _agentCount.delete(k);
 }
+// v2.771(점검 R6-F2-3 — 재현): 키는 정규형(canonIp)이다. 예전에는 원문 키라 엣지가 보낸 '010.1.1.5' 가 '10.1.1.5' 와 별도 행이 되어
+//   원장 known(정규형 VM IP)과 맞지 않는 '(네트워크 스캔)' 미등록 장비로 보이고 override(정규 키)도 붙지 않았다. 이미 저장된 비정규 키는
+//   로드에서 정규 키로 합친다(같은 IP 가 둘이면 마지막 확인이 늦은 쪽). 카운터(_agentCount·_maxSeen)는 합친 뒤의 항목으로 센다.
 function cleanStoredResults(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  for (const [ip, r] of Object.entries(raw)) {
-    if (!r || typeof r !== 'object' || !isIpv4(ip)) continue;
-    out[ip] = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
-    bumpAgent(out[ip].agent, 1);
-    noteSeen(out[ip].lastSeen); // v2.733 C6-02
+  for (const [k, r] of Object.entries(raw)) {
+    if (!r || typeof r !== 'object' || !isIpv4(k)) continue;
+    const ip = canonIp(k);
+    if (!ip) continue;
+    const e = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
+    const prev = Object.prototype.hasOwnProperty.call(out, ip) ? out[ip] : null;
+    if (prev && prev.lastSeen >= e.lastSeen) continue;
+    out[ip] = e;
+  }
+  for (const e of Object.values(out)) {
+    bumpAgent(e.agent, 1);
+    noteSeen(e.lastSeen); // v2.733 C6-02
   }
   return out;
 }
@@ -536,7 +546,10 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
   for (const raw of alive) {
     if (n++ >= MAX_MERGE) break;                 // 대량 주입 상한
     if (!raw || typeof raw !== 'object' || !isIpv4(raw.ip)) continue; // 잘못된/오염 IP 키 차단(__proto__, 333.0.0.0 등)
-    const h = cleanAliveHost(raw);               // v2.601 CEN2601-01: 아는 필드·타입만
+    // v2.771(점검 R6-F2-3): 키는 정규형 — 엣지가 보낸 비정규 표기('010.1.1.5')를 그대로 키로 쓰면 같은 IP 가 별도 행이 된다. 정규화 실패는 버린다.
+    const ip = canonIp(raw.ip);
+    if (!ip) continue;
+    const h = cleanAliveHost({ ...raw, ip });   // v2.601 CEN2601-01: 아는 필드·타입만
     const prev = results[h.ip];
     // v2.603 CEN2603-02: 새 IP 는 결과 전체 상한 안에서만 받는다. 이력은 따로 상한(MAX_HIST_IPS)을 두고 넘치면 **이력 항목만** 만들지 않는다
     //   (이력은 1년 보존이라 결과 prune 뒤에도 남는다 — 이력 상한으로 결과를 막으면 IP 가 바뀐 대역이 1년 동안 안 들어온다).
@@ -575,7 +588,24 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
 // 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.
 // up 전이: 스캔에서 새로 보이거나, down 이후 다시 보일 때 기록.
 // down 전이: sweepReleases()가 일정 시간 미응답 IP를 '해제'로 마킹할 때 기록.
-let history = readJson(HIST, {}) || {};
+// v2.771(점검 R6-F2-3): 이력도 결과와 같은 정규 키로 합친다(옛 판본이 비정규 표기로 만든 항목). 정규화할 수 없는 키는 예전처럼 그대로 둔다
+//   (이력 로드는 원래 정제하지 않았다 — 여기서 새로 버리는 것은 없다). 같은 IP 가 둘이면 마지막 확인이 늦은 쪽 + 이른 firstSeen.
+function canonHistoryKeys(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k, e] of Object.entries(raw)) {
+    const ck = canonIp(k);
+    if (!ck || ck === k || !e || typeof e !== 'object') { if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = e; continue; }
+    const prev = Object.prototype.hasOwnProperty.call(out, ck) ? out[ck] : (Object.prototype.hasOwnProperty.call(raw, ck) ? raw[ck] : null);
+    const moved = { ...e, ip: ck };
+    if (!prev || typeof prev !== 'object') { out[ck] = moved; continue; }
+    const keep = (numOrNull(prev.lastSeen) ?? 0) >= (numOrNull(moved.lastSeen) ?? 0) ? prev : moved;
+    const fs0 = [numOrNull(prev.firstSeen), numOrNull(moved.firstSeen)].filter((x) => x != null);
+    out[ck] = { ...keep, ip: ck, ...(fs0.length ? { firstSeen: Math.min(...fs0) } : {}) };
+  }
+  return out;
+}
+let history = canonHistoryKeys(readJson(HIST, {}) || {});
 _histCount = Object.keys(history).length;
 // 두 관심사를 분리한다:
 //  histDirty      = 대장(ledger)에 영향 있는 이력 변화(신규 IP / up·down 전이) → scanRev 증가 유발.

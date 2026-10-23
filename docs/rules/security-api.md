@@ -374,3 +374,5 @@
   · v2.770(점검 R5-E5): 범위 계정 원격 접속은 **(vcenterId, targetHost) 쌍**으로 판정(`proxy/targetHostScope.js resolveScopedTarget`·`mappingTargetScopeIssue`) — vcenterId 가 비면 일치 객체에서 유일하게 유도하고 모호·범위 밖 중복은 거부,
     유도한 vCenter 로 중계를 고르고 매핑에 저장, WS·/rdp/:id 도 같은 쌍으로 재검사. quick-connect 재사용은 proxyId·vcenterId 일치(소유자 없는 매핑은 admin 만). 매핑 포트는 정수 1~65535, ':' 는 IPv6 대상만.
     인증 off 의 WS 게이트웨이도 HTTP 와 같은 합성 사용자(AUTH_DISABLED_ROLE)로 역할·매핑 판정을 탄다.
+  · v2.771(점검 R6-F5): 새 계정 tokenVersion 은 무작위 시작(`initialTokenVersion` — 삭제 후 같은 이름 재생성에 옛 토큰이 살아나지 않게, 기존 계정 값은 불변) · '마지막 관리자' 는 **로그인 수단이 있는** 관리자 계열로 센다(`hasLoginMeans`) ·
+    본인 OTP 등록 begin/confirm 도 감사(반복 줄은 계정당 1분 합침). 호스트 접근 자기 잠금 검사는 요청자 IP 를 IPv4-mapped → IPv4 로 정규화(전역 clientIp 는 그대로)·추가 규칙 포트는 범위 겹침 판정. NSX 'Unknown' 지역은 무귀속.

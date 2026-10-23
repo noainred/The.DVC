@@ -249,8 +249,13 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
     else items.push(mk('switchState', 'bad', `switchState: ${snap.switchState}`));
   }
   {
-    if (!ports.length && omitted > 0 && sec.ports === 'ok') items.push(mk('ports', 'unknown', noKeptWhy(omitted, '포트 상태')));   // v2.770(R5-E3-2): '형식 미인식' 이 아니다
-    else if (!ports.length) items.push(mk('ports', 'unknown', uncheckedWhy(sec.ports, 'switchshow')));
+    // v2.771(점검 R6-F1-1): 축약 스냅샷이면 엣지가 **전체 포트로 센** 장애 수(`ports.faulty` — summarizePorts)를 믿는다.
+    //   목록에서 장애 포트가 잘렸어도(상한 64) 장애가 있다는 사실은 bad 다.
+    const sumFaulty = omitted > 0 ? (num(snap.ports?.faulty) || 0) : 0;
+    if (!ports.length && omitted > 0 && sec.ports === 'ok') {
+      if (sumFaulty > 0) items.push(mk('ports', 'bad', `장애 포트 ${sumFaulty}개(엣지 전체 집계) ⚠ 중앙에 올라온 목록에는 없습니다(${omitted}개 누락).`));
+      else items.push(mk('ports', 'unknown', noKeptWhy(omitted, '포트 상태')));   // v2.770(R5-E3-2): '형식 미인식' 이 아니다
+    } else if (!ports.length) items.push(mk('ports', 'unknown', uncheckedWhy(sec.ports, 'switchshow')));
     else {
       const complete = omitted === 0;
       const faulty = ports.filter((p) => p.state === 'faulty');
@@ -259,7 +264,11 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
       const base = `사용중 ${sum.online ?? '—'} / 라이선스 ${sum.licensed ?? '—'} · 여유 ${sum.free ?? '—'}`;
       // ⚠ 엣지 위임 장비가 문제 포트만 올린 상태면 **'정상 포트가 온전하다' 고 말할 수 없다**.
       const partial = complete ? '' : ` ⚠ 중앙에 일부 포트만 올라와 있어(${sum.portsOmitted}개 누락) 목록 기반 판정은 불완전합니다.`;
-      if (faulty.length) items.push(mk('ports', 'bad', `${base} · 장애 포트 ${faulty.length}개${partial}`, { evidence: faulty.slice(0, 20).map((p) => `포트 ${p.index}: ${p.stateRaw || p.state}`) }));
+      const faultyN = Math.max(faulty.length, sumFaulty);
+      if (faultyN) {
+        const unseen = faultyN - faulty.length;
+        items.push(mk('ports', 'bad', `${base} · 장애 포트 ${faultyN}개${unseen > 0 ? `(엣지 전체 집계 — ${unseen}개는 중앙 목록에 없음)` : ''}${partial}`, { evidence: faulty.slice(0, 20).map((p) => `포트 ${p.index}: ${p.stateRaw || p.state}`) }));
+      }
       else if (disabled.length) items.push(mk('ports', 'warn', `${base} · 비활성 포트 ${disabled.length}개${partial}`, { evidence: disabled.slice(0, 20).map((p) => `포트 ${p.index}: ${p.stateRaw || p.state}`) }));
       else items.push(mk('ports', complete ? 'ok' : 'warn', `${base} · 장애·비활성 없음${partial}`));
     }
@@ -432,6 +441,7 @@ export function baselineLookup(bp, ports = []) {
  * 됐고(재현: 기준선 crc 10000 → 리셋 뒤 500 = 장비 ok·포트 ok), 기준선에 행이 없는 포트는 장비 항목 ok·포트 표 warn 으로 갈렸다.
  *  - **리셋**: cur·base 둘 다 수치이고 cur<base. 이번 값 cur 가 '리셋 이후 최소 신규' 다(리셋 전 구간은 모른다) —
  *    cur>0 이면 신규로 센다(하한), cur=0 이면 보류(unknown).
+ *    v2.771(R6-F1-2): 리셋은 **포트 단위** — 한 키라도 cur<base 면 축약이 아닌 키 전부의 cur 를 하한으로 센다(resetKeys 는 실제로 줄어든 키).
  *  - **기준선 행 자체 없음**(기준선은 있는데 이 포트 행이 없다 — 부분 스냅샷 기준선·새로 쓰기 시작한 포트·옛 index 키 겹침):
  *    누적만 안다 — 누적>0 이면 warn(신규 여부 모름), 누적 0 이면 ok.
  *  - 행은 있는데 **키 하나만 없음**(v2.521 이전 기준선 파일)은 그 키만 건너뛴다 — 보류가 아니다(sanHealthCheck2519 '기준선 {errCrc}만 → ok').
@@ -443,12 +453,25 @@ export function judgePortErrors(p, { hasBaseline = false, row = null } = {}) {
   // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터는 증분을 셀 수 없다 — '신규 0' 이 아니라 **보류**다.
   const curAp = Array.isArray(p?.errApprox) ? p.errApprox : [];
   const baseAp = hasBaseline && Array.isArray(row?._approx) ? row._approx : [];
+  // v2.771(점검 R6-F1-2): 리셋은 **포트 단위**다 — portstatsclear·재부팅은 그 포트 카운터를 전부 지운다. 예전에는 cur<base 인 키만 리셋으로
+  //   보고 같은 포트의 다른 키는 cur-base 를 신규로 셌다(재현: crc 10000→0·enc_out 50→140 = 신규 90 · 실제 리셋 이후 최소 140, bad 경계 100).
+  //   한 키라도 리셋이 보이면 축약(approx)이 아닌 키 전부를 '리셋 이후 최소 = cur' 로 센다.
+  const isAp = (k) => hasBaseline && (curAp.includes(k) || baseAp.includes(k));
+  const portReset = hasBaseline && !!row && ERROR_KEYS.some((k) => {
+    if (isAp(k)) return false;
+    const v = num(p?.[k]); const b = num(row[k]);
+    return v != null && b != null && v < b;
+  });
   for (const k of ERROR_KEYS) {
     const v = num(p?.[k]);
     if (v != null) { cur[k] = v; curSum += v; }
-    if (hasBaseline && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxHeld = true; continue; }
+    if (isAp(k)) { if (v != null) approxHeld = true; continue; }
     const b = hasBaseline && row ? num(row[k]) : null;
-    if (v != null && b != null && v < b) { resetKeys.push(k); resetNew += v; if (v > 0) newBy[k] = v; continue; }
+    if (portReset) {
+      if (v != null && b != null && v < b) resetKeys.push(k);
+      if (v != null) { resetNew += v; newBy[k] = v; }
+      continue;
+    }
     const d = errorDelta(v, b);
     if (d != null) { dlt[k] = d; newBy[k] = d; dltSum += d; dltKnown = true; }
   }
@@ -461,10 +484,10 @@ export function judgePortErrors(p, { hasBaseline = false, row = null } = {}) {
     if (curSum > 0) { status = 'warn'; reason = `누적 에러 ${curSum}건 — 기준선이 없어 신규 여부는 알 수 없습니다`; }
   } else if (newMin > 0) {
     status = newMin >= 100 ? 'bad' : 'warn';
-    reason = resetKeys.length && resetNew > 0
+    reason = portReset
       ? `카운터 리셋 이후 최소 ${newMin}건(리셋 전 구간은 알 수 없어 실제는 더 많을 수 있습니다)`
       : `기준선 이후 신규 에러 ${dltSum}건`;
-    if (resetKeys.length && resetNew > 0) held = 'reset';
+    if (portReset) held = 'reset';
   } else if (resetKeys.length) {
     status = 'unknown'; held = 'reset';
     reason = '카운터가 리셋돼(기준선보다 작음) 기준선 이후 신규 에러를 셀 수 없습니다 — 리셋 이후는 0건';
@@ -491,7 +514,7 @@ function portErrorItem(ports, sec, baseline, omitted = 0) {
     const j = judgePortErrors(p, { hasBaseline: !!bp, row: bp ? rowOf(p) : null });
     if (Object.keys(j.cur).length) anyCounter = true;
     if (j.approxHeld) approxPorts.add(p.index);
-    if (j.resetKeys.length) (j.resetNew > 0 ? resetCounted : resetHeld).add(p.index);
+    if (j.resetKeys.length) (j.newMin > 0 ? resetCounted : resetHeld).add(p.index);   // v2.771(R6-F1-2): '리셋 이후 0건' 은 신규 하한이 0 일 때만
     if (j.rowMissing && j.curSum > 0) noRow.add(p.index);
     if (j.curSum > 0 || j.newMin > 0) {
       rows.push({ index: p.index, name: p.attachedName || '', cur: j.cur, dlt: j.newBy, curSum: j.curSum, dltSum: j.newMin, dltKnown: j.dltKnown || j.newMin > 0, resetKeys: j.resetKeys });
@@ -504,7 +527,7 @@ function portErrorItem(ports, sec, baseline, omitted = 0) {
     .map((r) => `포트 ${r.index}${r.name ? ` (${r.name})` : ''}: ` + ERROR_KEYS.map((k) => {
       const c = r.cur[k]; const d = r.dlt[k];
       if (c == null && d == null) return null;
-      if (bp && r.resetKeys.includes(k)) return `${ERROR_CAUSE[k].label} ${c ?? '—'} (리셋 — 이후 최소 ${c ?? '—'})`;
+      if (bp && r.resetKeys.length && d != null) return `${ERROR_CAUSE[k].label} ${c ?? '—'} (리셋 — 이후 최소 ${c ?? '—'})`;
       return `${ERROR_CAUSE[k].label} ${c ?? '—'}${bp ? ` (신규 ${d == null ? '—' : d})` : ''}`;
     }).filter(Boolean).join(', '));
   const part = partialNote(omitted);

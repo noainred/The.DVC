@@ -8,7 +8,7 @@ import { getAnnotations, annotationsRev } from './annotations.js';
 import { scanResultList, scanResultListAsync, ipHistoryEntry, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
-import { ipToNum, numToIp, strictIpv4Num } from '../util/ipv4.js';
+import { ipToNum, numToIp, strictIpv4Num, canonIp } from '../util/ipv4.js';
 import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
 import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -577,7 +577,18 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
   const sortedBases = [...bases].sort((a, b) => baseNum(a) - baseNum(b)).filter((b) => !onlyBase || b === onlyBase);
 
   const annotations = getAnnotations();
-  const allPolicies = getPolicies().filter((p) => p.enabled !== false);
+  // v2.771(점검 R6-F2-1 — 재현): 범위 계정의 시트는 형제 라우트와 같은 경계로 가린다 — 칸 메모·태그는 GET /tools/ipam/annotation 과
+  //   같은 판정(ipInWriteScope: 소유 vCenter ∩ allowed, 미귀속은 claim ∈ allowed)을 통과한 칸만, 정책은 GET /tools/ipam/policies 와 같이
+  //   claim 이 범위 안인 것만. 예전에는 256칸 전부에 annotations[ip] 를, 정책은 전역 정책까지 실어 범위 밖 IP 의 운영자 메모·전역 정책
+  //   라벨이 /24 시트(·엑셀 내보내기 — 같은 생성기)로 나갔다. 전체 범위(allowed=null)는 불변. 캐시 키(_ipamKey)에 범위·관리 리비전이 있다.
+  let annVisible = null;
+  if (allowed) {
+    const owners = ipVcenterOwners(snap);
+    const ovs = getOverrides();
+    annVisible = (ip) => ipInWriteScope(allowed, owners, ip, ovs[ip]?.claimedVcenterId || '');
+  }
+  const allPolicies = getPolicies().filter((p) => p.enabled !== false
+    && (!allowed || (p.claimedVcenterId && allowed.has(p.claimedVcenterId))));
   const sheets = [];
   for (const base of sortedBases) {
     yield;
@@ -628,7 +639,8 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
         const rp = cellPolicies.find((p) => p.specLo <= ipn && p.specHi >= ipn);
         if (rp) { mgmtStatus = rp.status || ''; appliedBy = 'range-policy'; rangePolicySpec = rp.spec; purpose = `정책: ${rp.label || rp.spec}`; }
       }
-      const ann = annotations[ip];
+      const annRaw = annotations[ip];
+      const ann = annRaw && (!annVisible || annVisible(ip)) ? annRaw : null;
       sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     sheets.push({
@@ -691,6 +703,25 @@ export function listSubnets(snap, vcenterId, allowed = null, opts = {}) {
   putGenerationCache(_subnetMemo, ck, { at: now, list });
   return list.map((s) => ({ ...s }));
 }
+
+/**
+ * IPAM 쓰기(override/정책/메모)·범위 가림의 사용자 scope 판정 — 범위 제한 계정이 범위 밖 IP·vCenter 에 쓰거나 그 값을 읽지 못하게.
+ *  · allowed=null(무제한/admin): 항상 허용(기존 동작 완전 보존).
+ *  · IP 가 vCenter 에 귀속(owners): 그 vCenter 중 하나라도 allowed 면 허용.
+ *  · 미귀속 IP(스캔/예약): claimedVcenterId 가 있고 allowed 에 있을 때만 허용(전역 예약은 범위 계정이 못 만듦).
+ * v2.771(R6-F2-1): routes/api/ipamExport.js 에서 옮겼다(그 파일은 재수출) — 시트 생성기도 같은 판정 하나를 쓴다.
+ */
+export const ipInWriteScope = (allowed, owners, ip, claimed) => {
+  if (!allowed) return true;
+  // v2.595(감사 R2595-01 — 재현): 소유 맵은 정규형 IP 키다. 원문으로 찾으면 '010.37.0.1' 이 '미귀속' 이 되어
+  //   claimed 만으로 통과하고, 저장은 정규 키로 되어 범위 밖 IP 의 실제 행에 override·메모가 붙었다.
+  //   정규화할 수 없는 표기는 거부(쓰기 대상이 아니다).
+  const key = canonIp(ip);
+  if (!key) return false;
+  const own = owners.get(key);
+  if (own && own.size) return [...own].some((v) => allowed.has(v));
+  return claimed ? allowed.has(claimed) : false;
+};
 
 /**
  * IP → 그 IP 를 주장하는 vCenter id Set(전체 스냅샷, scope 미적용). IPAM **쓰기** 경로의 범위

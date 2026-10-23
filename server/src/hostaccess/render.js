@@ -20,16 +20,36 @@ export const ACTIONS = ['accept', 'drop', 'reject'];
 export const CONFIRM_MIN = { min: 1, max: 30, dflt: 5 };
 
 /* ── 주소 검증 ─────────────────────────────────────────────────────────────── */
+/*
+ * v2.771(점검 R6-F5-2): IPv4-mapped IPv6('::ffff:a.b.c.d')는 IPv4 로 본다. 포탈은 host 없이 listen 해 IPv6 가 켜진 호스트에서는
+ *   '::' 듀얼스택이고, IPv4 클라이언트의 remoteAddress 가 '::ffff:10.0.0.5' 로 온다. 예전에는 이를 IPv6 로 봐 ① 허용목록 10.0.0.0/24 안의
+ *   관리자를 '허용목록에 없음' 으로 거부했고 ② '내 IP 추가' 가 family="ipv6" 규칙(IPv4 패킷에 안 맞음)을 넣은 채 자기 잠금 검사를 통과했다.
+ *   전역 clientIp 는 바꾸지 않는다(레이트리밋·로그인 잠금 키·감사 ip 형식) — 이 기능의 경로에서만 정규화한다(routes/central.js 와 같은 치환).
+ */
+const MAPPED_V4 = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
+/** 요청자 IP 정규화 — '::ffff:a.b.c.d' → 'a.b.c.d'. 그 밖은 원문(trim). */
+export function normalizeRequesterIp(ip) {
+  const t = String(ip || '').trim().slice(0, 64);
+  const m = MAPPED_V4.exec(t);
+  return m && net.isIP(m[1]) === 4 ? m[1] : t;
+}
 export function parseCidr(s) {
   const t = String(s || '').trim();
   if (!t) return null;
   const m = /^([^/]+)(?:\/(\d{1,3}))?$/.exec(t);
   if (!m) return null;
-  const ip = m[1];
-  const fam = net.isIP(ip);
+  let ip = m[1];
+  let fam = net.isIP(ip);
   if (!fam) return null;
+  let bits = m[2] == null ? null : Number(m[2]);
+  // v2.771(R6-F5-2): IPv4-mapped 는 IPv4 규칙으로 바꾼다(접두 길이 96 미만은 IPv4 범위를 넘어 뜻이 없다 — 거부).
+  const mapped = fam === 6 ? MAPPED_V4.exec(ip) : null;
+  if (mapped && net.isIP(mapped[1]) === 4) {
+    if (bits != null) { if (!Number.isInteger(bits) || bits < 96 || bits > 128) return null; bits -= 96; }
+    ip = mapped[1]; fam = 4;
+  }
   const maxBits = fam === 4 ? 32 : 128;
-  const bits = m[2] == null ? maxBits : Number(m[2]);
+  if (bits == null) bits = maxBits;
   if (!Number.isInteger(bits) || bits < 0 || bits > maxBits) return null;
   return { family: fam === 4 ? 'ipv4' : 'ipv6', ip, bits, text: bits === maxBits ? ip : `${ip}/${bits}` };
 }
@@ -50,7 +70,8 @@ function ip6ToBig(ip) {
 /** ip 가 cidr 안에 있는가(패밀리 다르면 false). */
 export function ipInCidr(ip, cidr) {
   const c = typeof cidr === 'string' ? parseCidr(cidr) : cidr;
-  const fam = net.isIP(String(ip || ''));
+  ip = normalizeRequesterIp(ip);   // v2.771(R6-F5-2): '::ffff:a.b.c.d' 는 IPv4 로 판정
+  const fam = net.isIP(ip);
   if (!c || !fam) return false;
   if ((fam === 4 ? 'ipv4' : 'ipv6') !== c.family) return false;
   if (c.family === 'ipv4') {
@@ -80,6 +101,18 @@ export function normPort(p) {
   const a = Number(m[1]); const b = m[2] != null ? Number(m[2]) : a;
   if (a < 1 || a > 65535 || b < a || b > 65535) return null;
   return a === b ? String(a) : `${a}-${b}`;
+}
+
+/**
+ * v2.771(R6-F5-3): 포트 표기 둘(단일 'p' 또는 범위 'a-b')이 겹치는가 — 단일 포트 p 면 a≤p≤b 포함 판정. 형식이 틀리면 false.
+ * (web.ports 의 포탈 포트는 단일이지만 사용자가 고른 웹 포트가 범위일 수도 있어 겹침으로 본다.)
+ */
+export function portCovers(x, y) {
+  const r = portRe.exec(String(x || '').trim()); const q = portRe.exec(String(y || '').trim());
+  if (!r || !q) return false;
+  const a1 = Number(r[1]); const b1 = r[2] != null ? Number(r[2]) : a1;
+  const a2 = Number(q[1]); const b2 = q[2] != null ? Number(q[2]) : a2;
+  return a1 <= b2 && a2 <= b1;
 }
 
 /**
@@ -182,6 +215,7 @@ export function isManagedRich(rule, s, prevRich = []) {
  * @returns {{ commands: string[][], warnings: string[], errors: string[], desiredRich: string[] }}
  */
 export function planCommands(s, cur, { prevRich = [], requesterIp = '' } = {}) {
+  requesterIp = normalizeRequesterIp(requesterIp);   // v2.771(R6-F5-2): 호출부가 원문을 넘겨도 같은 판정
   const commands = []; const warnings = []; const errors = [];
   const z = cur.zone ? [`--zone=${cur.zone}`] : [];
   const cmd = (...a) => commands.push([...z, ...a]);
@@ -223,11 +257,15 @@ export function planCommands(s, cur, { prevRich = [], requesterIp = '' } = {}) {
   for (const r of cur.richRules) if (!desired.includes(r) && isManagedRich(r, s, prevRich)) cmd(`--remove-rich-rule=${r}`);
   for (const r of desired) if (!curSet.has(r)) cmd(`--add-rich-rule=${r}`);
   // 추가 규칙의 drop/reject 가 포탈 포트를 겨냥하면 경고(허용 rich rule 보다 drop 이 우선 평가될 수 있다).
+  // v2.771(점검 R6-F5-3): 포트는 '포함' 판정(a≤p≤b)으로 본다 — 예전에는 문자열 일치(includes)라 '1-65535'·'3999-4001' 범위 drop 이
+  //   포탈 포트를 덮어도 통과했다(hostaccess/CLAUDE.md '포탈 포트 전체 drop/reject 는 오류' 불변조건). 소스 지정 검사도 같은 판정.
   for (const r of s.firewall.extra) {
-    if (r.action !== 'accept' && s.web.ports.includes(r.port) && r.proto === 'tcp') {
-      if (!r.sources.length) errors.push(`추가 규칙이 포탈 포트 ${r.port}/tcp 를 전체 ${r.action} 합니다 — 포탈이 잠깁니다.`);
-      else if (requesterIp && r.sources.some((c) => ipInCidr(requesterIp, c))) errors.push(`추가 규칙이 요청자 IP ${requesterIp} 의 포탈 포트 ${r.port}/tcp 를 ${r.action} 합니다.`);
-    }
+    if (r.action === 'accept' || r.proto !== 'tcp') continue;
+    const hit = s.web.ports.find((p) => portCovers(r.port, p));
+    if (!hit) continue;
+    const what = r.port === hit ? `포탈 포트 ${hit}/tcp` : `포탈 포트 ${hit}/tcp(범위 ${r.port})`;
+    if (!r.sources.length) errors.push(`추가 규칙이 ${what} 를 전체 ${r.action} 합니다 — 포탈이 잠깁니다.`);
+    else if (requesterIp && r.sources.some((c) => ipInCidr(requesterIp, c))) errors.push(`추가 규칙이 요청자 IP ${requesterIp} 의 ${what} 를 ${r.action} 합니다.`);
   }
   return { commands, warnings, errors, desiredRich: desired };
 }

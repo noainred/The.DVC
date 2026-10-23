@@ -131,6 +131,9 @@ export default function Summary({ scope, onGotoTab }) {
   if (!s) return null;
 
   const c = s.counts, comp = s.compute, st = s.storage, al = s.allocation;
+  // v2.771(점검 R6-F3-2): 용량 미상 호스트 수(서버 allocation.hostsCapacityUnknown — 있으면 오버커밋 두 비율이 null).
+  const capUnknown = Number(al?.hostsCapacityUnknown) > 0 ? Number(al.hostsCapacityUnknown) : 0;
+  const capUnknownSub = `용량을 못 읽은 호스트 ${capUnknown.toLocaleString()}대 — 판정 보류`;
   const osPie = s.osDistribution.map((o) => ({ ...o, fill: OS_COLORS[o.name] || '#64748b' }));
 
   const vcCols = [
@@ -194,14 +197,16 @@ export default function Summary({ scope, onGotoTab }) {
 
       <div className="section-title">VM 할당 합계 &amp; 오버커밋</div>
       <div className="kpis">
-        <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개`} accent="var(--accent)" />
+        {/* v2.771(점검 R6-F3-2): 용량을 못 읽은 호스트(REST 폴백)가 있으면 서버가 두 비율을 null 로 준다(분모만 빠진 비율은 틀린 값) —
+            '—' 와 함께 그 이유(용량 미상 호스트 수)를 말한다. 물리 코어·RAM 합계는 읽은 호스트만의 합임을 밝힌다. */}
+        <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개${capUnknown ? `(용량 읽은 호스트만 · 미상 ${fmt(capUnknown)}대 제외)` : ''}`} accent="var(--accent)" />
         {(() => { const cr = serverRatio(al.vcpuPerCore, comp.cpuCores); const k = ratioKpi(cr, 'cpu'); return (
-          <Big label="vCPU : 물리코어 비율" value={ratioLabel(cr)} sub={k.sub} accent={k.accent} onClick={() => setShowRatio(true)} />
+          <Big label="vCPU : 물리코어 비율" value={ratioLabel(cr)} sub={cr == null && capUnknown ? capUnknownSub : k.sub} accent={k.accent} onClick={() => setShowRatio(true)} />
         ); })()}
-        <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={comp.memTotalGB > 0 ? `물리 RAM의 ${al.ramOvercommitPct}%` : '물리 RAM 미수집'} accent="var(--purple)" />
+        <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={al.ramOvercommitPct == null ? (capUnknown ? capUnknownSub : '물리 RAM 미수집') : comp.memTotalGB > 0 ? `물리 RAM의 ${al.ramOvercommitPct}%` : '물리 RAM 미수집'} accent="var(--purple)" />
         {(() => { const mr = serverRatio(al.ramOvercommitPct, comp.memTotalGB, 100); const k = ratioKpi(mr, 'mem'); return (
           <Big label="메모리 : 물리RAM 비율" value={ratioLabel(mr)}
-            sub={k.sub}
+            sub={mr == null && capUnknown ? capUnknownSub : k.sub}
             accent={k.accent} onClick={() => setShowMemRatio(true)} />
         ); })()}
         {/* v2.727(C-01): 용량을 못 읽은 VM 은 합계에서 뺐다(0 으로 채우지 않음) — 그 수를 한 줄로 말한다. */}

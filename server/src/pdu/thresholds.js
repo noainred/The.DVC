@@ -111,13 +111,17 @@ const ASSIGNED_KEY = '_assigned';
 const DEPLOYABLE = Object.keys(DEFAULTS).filter((k) => k !== 'enabled');
 
 /** 파일의 `_assigned` 표지(알려진 배포 키만). 파일이 없거나 못 읽으면 []. */
-function loadAssignedKeys() {
+function loadAssignedKeys() { return readAssigned().keys; }
+
+/** `_assigned` 표지 읽기 — marked: 파일에 표지(배열)가 있는가. 파일이 없거나 못 읽으면 { keys: [], marked: false }. */
+function readAssigned() {
   try {
-    if (!fs.existsSync(FILE)) return [];
+    if (!fs.existsSync(FILE)) return { keys: [], marked: false };
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    const a = p && typeof p === 'object' && !Array.isArray(p) && Array.isArray(p[ASSIGNED_KEY]) ? p[ASSIGNED_KEY] : [];
-    return DEPLOYABLE.filter((k) => a.includes(k));
-  } catch { return []; }
+    const marked = !!(p && typeof p === 'object' && !Array.isArray(p) && Array.isArray(p[ASSIGNED_KEY]));
+    const a = marked ? p[ASSIGNED_KEY] : [];
+    return { keys: DEPLOYABLE.filter((k) => a.includes(k)), marked };
+  } catch { return { keys: [], marked: false }; }
 }
 
 /**
@@ -174,8 +178,15 @@ export function saveThresholds(partial = {}) {
   }
   // v2.770(점검 R5-E1-1): 이전 파일값(없으면 기본값)과 **달라진 배포 키**를 `_assigned` 에 누적한다(한 번 지정한 키는 남는다 — 기본값으로
   //   되돌려도 '중앙이 그 값을 지정' 한 것이다). 화면은 늘 전 키를 보내므로 '보낸 키' 가 아니라 '바뀐 키' 로 가른다.
-  const assigned = new Set(loadAssignedKeys());
-  for (const k of DEPLOYABLE) if (k in partial && next[k] !== cur[k]) assigned.add(k);
+  // v2.771(점검 R6-F1-3): **표지가 없는 파일의 첫 저장**(파일 없음 포함)은 바뀐 키에 더해 DEFAULTS 와 다른 키도 지정으로 본다.
+  //   v2.769 에서 지정해 전 엣지에 배포되던 값(예 bankWarnA 28)은 업그레이드 뒤 표지가 없어 {} 로 배포가 멈추는데, '바뀐 키' 만 보면
+  //   관리자가 화면에서 같은 값으로 다시 저장해도 지정되지 않아 되돌릴 화면 경로가 없었다(재현 pdu.mjs). 표지가 생긴 뒤로는 바뀐 키 누적.
+  const { keys: prevAssigned, marked } = readAssigned();
+  const assigned = new Set(prevAssigned);
+  for (const k of DEPLOYABLE) {
+    if (!(k in partial)) continue;
+    if (next[k] !== cur[k] || (!marked && next[k] !== DEFAULTS[k])) assigned.add(k);
+  }
   const assignedList = DEPLOYABLE.filter((k) => assigned.has(k));
   atomicWriteFileSync(FILE, JSON.stringify({ ...next, [ASSIGNED_KEY]: assignedList }, null, 2), { mode: 0o600 });
   _loadErr.ok();

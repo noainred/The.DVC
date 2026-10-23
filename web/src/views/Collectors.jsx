@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
-import { readFailText, agentTokSummary } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
+import { readFailText, agentTokSummary, fileUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -282,6 +282,12 @@ export default function Collectors() {
   return (
     <>
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
+      {/* v2.771(점검 R6-F4-2): 등록부(collectors.json)를 읽지 못했으면 빈 목록이 '등록 없음' 이 아니다 — 자기등록·자동 정리도 멈춰 있다. */}
+      {data.loadError && (
+        <div className="banner warn" style={{ marginBottom: 8 }}>
+          {fileUnreadableText(data.loadError, '수집 서버 등록부(collectors.json)', { notMeaning: '아래 목록이 비어 보여도 등록이 없다는 뜻이 아니며, 그동안 엣지 자기등록·원격 전력 정리·pull 을 멈춥니다' })}
+        </div>
+      )}
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           수집 서버 — 분산 수집 (관리자)
@@ -345,6 +351,11 @@ export default function Collectors() {
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
           🔑 엣지별 개별 central 토큰 ({agentTokSummary(agentTok, agentTokErr)})
         </summary>
+        {agentTok?.loadError && (
+          <div className="banner warn" style={{ marginTop: 8 }}>
+            {fileUnreadableText(agentTok.loadError, '엣지 개별 토큰 파일(central-agent-tokens.json)', { notMeaning: '발급된 토큰이 없다는 뜻이 아니며, 그동안 개별 토큰 엣지의 요청은 503 으로 답합니다' })}
+          </div>
+        )}
         {agentTokErr && (
           <div className="banner warn" style={{ marginTop: 8 }}>
             {readFailText('개별 토큰 발급 현황', agentTokErr, { notMeaning: '발급된 토큰이 없다는 뜻이 아닙니다', stale: !!agentTok })}

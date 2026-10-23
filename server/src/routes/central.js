@@ -31,7 +31,7 @@ import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../c
 import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult, listAssignments as listScanAssignments, assignmentsLoadError } from '../central/assignments.js'; // v2.727(D-01): 손상 판정
 import { tokenMatches } from '../util/secureCompare.js';
-import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
+import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens, agentTokensLoadError } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
@@ -81,7 +81,7 @@ import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: �
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
 //   나간다(비밀이 섞일 여지를 구조적으로 없앤다).
-import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
+import { listCollectors as listCollectorsForLinks, registryLoadError as collectorsRegistryLoadError } from '../collector/registry.js';
 import { allCollectorStatus as allCollectorStatusForKnown } from '../collector/state.js'; // v2.604 CEN2604-04: pull 성공한 자기등록 항목만 '아는 엣지'
 import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled, linkCheckSettingsLoadError } from '../linkcheck/settings.js';
@@ -237,7 +237,9 @@ const REQUIRE_AGENT_TOKEN = process.env.CENTRAL_REQUIRE_AGENT_TOKEN === 'true';
 // 공유 토큰 사용 통계 — 관리 화면이 '아직 개별 토큰으로 이관되지 않은 엣지가 있다'를 알 수 있게.
 const sharedStats = { uses: 0, lastAt: null, lastAgent: '', lastPath: '' };
 export function getCentralAuthStats() {
-  return { ...sharedStats, requireAgentToken: REQUIRE_AGENT_TOKEN, agentTokens: listAgentTokens().length };
+  // v2.771(점검 R6-F4-2): 토큰 파일을 읽지 못했으면 agentTokens 는 null(모름) + 사유 요약 — 0 은 '발급 없음' 으로 읽힌다.
+  const tokErr = agentTokensLoadError();
+  return { ...sharedStats, requireAgentToken: REQUIRE_AGENT_TOKEN, agentTokens: tokErr ? null : listAgentTokens().length, agentTokensUnreadable: tokErr };
 }
 
 /**
@@ -342,10 +344,21 @@ export function requireCentral({ notFound = { ok: false, reason: 'central 비활
   requireCentralGate.gate = Object.freeze({ kind: 'central' }); // v2.614 아키텍처 점검 태그(auth.js requireRole 참조)
   return requireCentralGate;
   function requireCentralGate(req, res, next) {
-    if (!centralEnabled()) return res.status(404).json(notFound);
-    if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+    // v2.771(점검 R6-F4-2): 개별 토큰 파일을 **읽지 못한** 동안의 거절은 '꺼짐(404)'·'토큰 불일치(403)' 가 아니라 503 이다 — 엣지는 404 를
+    //   '중앙 미지원' 으로 6시간 물러나고 403 을 인증 실패로 다룬다(조치가 틀린다). 허용 범위는 넓히지 않는다(거절만 바꾼다). 판정은 실패 갈래에서만.
+    if (!centralEnabled()) return agentTokensUnreadable(res) ? undefined : res.status(404).json(notFound);
+    if (!authed(req)) return agentTokensUnreadable(res) ? undefined : res.status(403).json({ ok: false, reason: denyReason(req) });
     next();
   }
+}
+
+/** v2.771(R6-F4-2): 토큰 파일을 읽지 못했으면 503 registryUnreadable 로 답하고 true(사유는 요약 — 원문 없음). */
+function agentTokensUnreadable(res) {
+  let e = null;
+  try { e = agentTokensLoadError(); } catch { e = null; }
+  if (!e) return false;
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 엣지 개별 토큰 파일(central-agent-tokens.json)을 읽지 못했습니다(${e.text}) — 엣지는 직전 상태를 유지하고 다시 시도합니다. 중앙 설정 디렉터리의 손상 보존본을 되돌리거나 토큰을 다시 발급하세요.`, since: e.at || null });
+  return true;
 }
 
 /**
@@ -430,6 +443,8 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
     return res.status(403).json({ ok: false, reason: bindDenied });
   }
   if (!b.collectorToken) return res.status(400).json({ ok: false, reason: 'collectorToken이 필요합니다(엣지의 export 인증 토큰).' });
+  // v2.771(점검 R6-F4-2): 수집 서버 등록부를 읽지 못했으면 검증 ping(엣지로 나가는 요청) 전에 503 — 등록부도 자동 저장을 거절한다(upsertCollectorFromAgent).
+  if (registryUnreadable(res, collectorsRegistryLoadError, '수집 서버')) return;
   // ⚠ v2.602(감사 SEC2602-01): urlHint·collectorToken 은 **글자·길이부터** 본다. 예전에는 길이 상한이 없어 '/' 12만 개 +
   //   'x' 인 urlHint 하나가 registry.js 의 `/\/+$/`(verifyDerivedCollectorUrl·normalize 두 번)에서 O(n²) 로 돌아 중앙
   //   이벤트 루프가 23초 멈췄다(동시 /api/auth/config 8.7초). 객체면 String() 이 던졌다.
@@ -477,6 +492,7 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
   // v2.604(감사 CEN2604-04): 검증 결과와 토큰 종류를 넘긴다 — 공유 토큰의 새 이름 생성은 개수 상한, 미검증 항목은 '아는 엣지' 가 아니다.
   const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc, unverified: !!unverified, shared: req.centralAuth?.mode !== 'agent' });
   if (!r.ok && r.code === 'insecure-http') console.warn(`[central] 엣지 자기등록 거부(평문 HTTP): ${name} → ${url} — ${r.reason}`);
+  if (!r.ok && r.code === 'registry-unreadable') return registryUnreadable(res, () => collectorsRegistryLoadError() || { at: r.registryUnreadable?.at ?? Date.now(), reason: '' }, '수집 서버'); // 검사 뒤(검증 ping 동안) 손상된 경합
   if (!r.ok && r.capped) { console.warn(`[central] 엣지 자기등록 상한: ${name} — ${r.reason}`); return res.status(429).json({ ok: false, reason: r.reason, capped: true }); }
   if (r.ok) _knownNames = { at: 0, set: null }; // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
@@ -2582,6 +2598,8 @@ centralRouter.get('/link-check-config', requireCentral(), (req, res) => {
   // v2.632(감사 EDGE2632-03): 설정 파일을 못 읽었으면 기본값(꺼짐)을 enabled:false 로 내리지 않는다 — 화면이 '점검 꺼짐' 이라 말했다.
   //   env LINKCHECK_ENABLED 로 강제한 경우도 링크·주기·시한은 파일 값이라 같은 판단이다.
   if (settingsUnreadable(res, linkCheckSettingsLoadError, '통신 점검')) return;
+  // v2.771(점검 R6-F4-2): 수집 서버 등록부를 읽지 못했으면 빈 목록으로 엣지↔엣지 링크를 0개로 내려보내지 않는다(엣지는 직전 링크 유지).
+  if (registryUnreadable(res, collectorsRegistryLoadError, '수집 서버')) return;
   const s = loadLinkCheckSettings();
   let links = [];
   try {

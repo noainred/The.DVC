@@ -10,7 +10,7 @@ import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
-import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue } from '../../collector/registry.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue, registryLoadErrorSummary } from '../../collector/registry.js';
 // 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
 import { withDefaultScheme, urlTransport, transportSummary, allowlistSummary, rejectedHttpRegistrations, centralUrlTransport } from '../../collector/transportPolicy.js';
 import { tlsListenerStatus } from '../../util/httpsServer.js';
@@ -137,7 +137,8 @@ export function registerCollectorsDc(adminRouter) {
 // List registered collectors (tokens redacted) + live pull status.
 adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   const collectors = listCollectors();
-  res.json({ collectors, status: allCollectorStatus(), identity: agentIdentitySummary(), transport: transportView(collectors) });
+  // v2.771(점검 R6-F4-2): 등록부를 읽지 못했으면 빈 목록이 '등록 없음' 으로 보이지 않게 사유 요약(원문 없음)을 함께 싣는다.
+  res.json({ collectors, loadError: registryLoadErrorSummary(), status: allCollectorStatus(), identity: agentIdentitySummary(), transport: transportView(collectors) });
 });
 
 adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {

@@ -3,7 +3,7 @@
 //   옮겼고 게이트도 바꾸지 않았다(경로 집합이 IPAM 과 겹치지 않아 등록 순서가 동작에 영향을 주지 않는다).
 import { logAudit } from '../../audit.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../../central/token.js';
-import { listAgentTokens, issueAgentToken, revokeAgentToken } from '../../central/agentTokens.js';
+import { listAgentTokens, issueAgentToken, revokeAgentToken, agentTokensLoadError } from '../../central/agentTokens.js';
 import { getCentralAuthStats } from '../central.js';
 import { listInventory, setInventoryOwner } from '../../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
@@ -64,7 +64,8 @@ adminRouter.put('/central-token', adminOnly, requireSettingsOwner, (req, res) =>
 // 자기 데이터만 보게 한다. 엣지는 이 값을 기존 CENTRAL_TOKEN(EDGE_TOKEN) 자리에 넣으면 되므로
 // 엣지 코드 변경 없이 사이트별로 하나씩 이관할 수 있다.
 adminRouter.get('/central/agent-tokens', adminOnly, fleetOnly, (_req, res) => {
-  res.json({ ok: true, tokens: listAgentTokens(), auth: getCentralAuthStats() });
+  // v2.771(점검 R6-F4-2): 토큰 파일을 읽지 못했으면 빈 tokens 가 '발급 없음' 으로 보이지 않게 loadError(요약)를 싣는다.
+  res.json({ ok: true, tokens: listAgentTokens(), loadError: agentTokensLoadError(), auth: getCentralAuthStats() });
 });
 adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => { // v2.480(3차 감사 S3): 토큰 발급은 소유자 경계
   const r = issueAgentToken(req.body?.agent, { note: req.body?.note });

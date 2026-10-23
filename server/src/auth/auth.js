@@ -149,9 +149,16 @@ export const SUPER_USERNAME = 'noainred';
 // v2.643: 역할이 admin → **super_admin** 으로 바뀌었다(사용자 지시 "noainred 계정은 super_admin").
 //   기존 설치는 다음 로드에서 한 번 올라간다(tokenVersion 은 올리지 않는다 — 권한이 넓어지는 방향이고
 //   요청 문맥의 역할은 여전히 'admin' 이라 기존 세션을 끊을 이유가 없다).
+// v2.771(점검 R6-F5-1): **새로 만드는** 계정 레코드의 tokenVersion 은 무작위 큰 값에서 시작한다 — 예전에는 0(필드 없음)으로 시작해
+//   삭제 후 같은 이름으로 다시 만들면 옛 계정의 토큰(tv 0, 또는 새 계정이 비번·OTP 변경으로 같은 값에 닿을 때)이 새 계정으로 부활했다
+//   (resolveTokenUser 는 이름 + tv 만 대조 — 재기동 없이 같은 프로세스에서도). mustEnrollOtp 세션이면 옛 토큰 보유자가 새 계정 OTP 를
+//   자기 앱에 묶을 수 있었다. 기존 계정 값은 건드리지 않는다(전원 로그아웃 없음). 증가(+1)·로그인 서명(u.tokenVersion||0)·
+//   복원의 max+1(backup/stagedRestore.js)은 그대로 동작한다. 신규 생성 경로(createUser·applyManagedUsers 신규·기본 시드)는 전부 이 함수로.
+function initialTokenVersion() { return crypto.randomInt(1, 2 ** 31); }
+
 function ensureSuperUser(list) {
   const u = list.find((x) => x.username === SUPER_USERNAME);
-  if (!u) { list.push({ username: SUPER_USERNAME, name: 'noainred', role: SUPER_ADMIN, superuser: true }); return true; }
+  if (!u) { list.push({ username: SUPER_USERNAME, name: 'noainred', role: SUPER_ADMIN, superuser: true, tokenVersion: initialTokenVersion() }); return true; }
   let changed = false;
   if (u.role !== SUPER_ADMIN) { u.role = SUPER_ADMIN; changed = true; } // 강등돼 있었거나 v2.642 이하(admin)였다면 올린다
   if (!u.superuser) { u.superuser = true; changed = true; }
@@ -162,7 +169,7 @@ function ensureSuperUser(list) {
 // 사용자가 이미 만들어 둔 경우에는 건드리지 않는다(하이재킹 방지 — demo 태그도 붙이지 않음).
 function ensureDemoUser(list) {
   if (!list.some((u) => u.username === DEMO_USERNAME)) {
-    list.push({ username: DEMO_USERNAME, name: 'Demo', role: 'viewer', demo: true });
+    list.push({ username: DEMO_USERNAME, name: 'Demo', role: 'viewer', demo: true, tokenVersion: initialTokenVersion() }); // R6-F5-1
     return true;
   }
   return false;
@@ -207,7 +214,8 @@ export function loadUsers() {
       note = `임의 비밀번호 생성했으나 파일 기록 실패(${e.message}) — DEFAULT_ADMIN_PASSWORD로 재시드하세요`;
     }
   }
-  users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw), mustChangePassword: !envPw }];
+  // R6-F5-1: 손상본 복구 시드라면 옛 admin 토큰(tv 0)이 이 레코드로 부활하지 않게 무작위 tokenVersion 으로 시작한다.
+  users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw), mustChangePassword: !envPw, tokenVersion: initialTokenVersion() }];
   ensureDemoUser(users);
   ensureSuperUser(users);
   console.warn(`[auth] users.json이 없어 기본 관리자 "admin"을 시드했습니다 — ${note}.`);
@@ -462,6 +470,21 @@ function bumpTokenVersion(u, reason = 'token-version') {
   queueUserRevocation(u.username, reason);
 }
 
+// v2.771(점검 R6-F5-6): '마지막 관리자' 보호는 **로그인 수단(비밀번호 또는 등록된 OTP)이 있는** 관리자 계열만 센다 —
+//   예전에는 isAdminTier 개수만 세서, 비번·OTP 없이 시드되는(로그인 불가) noainred(super_admin)가 관리자로 잡혀
+//   신규 설치의 유일한 실관리자가 자기 강등·로그인 차단을 할 수 있었다(복구는 콘솔 도구뿐). 데모 계정은 세지 않는다.
+//   판정: ① 예전 조건(관리자 계열이 대상 하나뿐) 그대로 + ② 대상이 로그인 가능한데 대상 말고 로그인 가능한 관리자 계열이 없으면 막는다 —
+//   예전 조건의 상위 집합이라 약해지지 않는다. 로그인 수단이 없는 관리자 계열(시드 noainred·등록 미확정 계정)을 지우거나 강등하는 것은
+//   로그인 가능한 관리자 수를 줄이지 않으므로 ②에 걸리지 않는다(super_admin 끼리의 정리 등 기존 동작 유지).
+//   네 곳(clearLoginCredentials·updateUser 강등·deleteUser·applyManagedUsers 제거)이 전부 이 함수 하나로 판정한다.
+function hasLoginMeans(x) { return !!x?.passwordHash || !!(x?.totpEnabled && x?.totpSecret); }
+function isLastLoginCapableAdmin(u, list = loadUsers()) {
+  if (!u || !isAdminTier(u.role)) return false;
+  const others = list.filter((x) => x !== u && x.username !== u.username && isAdminTier(x.role));
+  if (others.length === 0) return true;
+  return hasLoginMeans(u) && !others.some((x) => !x.demo && hasLoginMeans(x));
+}
+
 /** Public-safe user list (no secrets/hashes). */
 export function listUsers() {
   return loadUsers().map((u) => ({
@@ -526,7 +549,7 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
   // 무방비가 된다. '축이 아니라 결과를 본다'는 원칙을 이 지점에도 적용해 둔다(6차 재감사 지적).
   const entry = ownerSetEntryDenied({ username }, { role }, { actor, trusted });
   if (entry) return entry;
-  const u = { username, name: name || username, role };
+  const u = { username, name: name || username, role, tokenVersion: initialTokenVersion() }; // R6-F5-1 — 삭제 후 재생성에 옛 토큰 부활 금지
   if (password) u.passwordHash = hashPassword(password);
   const sc = sanitizeScope(scope);
   if (sc) u.scope = sc; // null(명시적 전체)/undefined 는 저장하지 않음(= 전체)
@@ -575,7 +598,7 @@ export function clearLoginCredentials(username, { actor = null, actorUser = null
   const denied = credentialGuardDenied(u, { actor, trusted, what: '로그인 자격증명' })
     || superAdminGuardDenied(u, { actor, actorUser, trusted, what: '로그인 차단' });
   if (denied) return denied;
-  if (isAdminTier(u.role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
+  if (isLastLoginCapableAdmin(u)) { // R6-F5-6
     return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
   }
   delete u.passwordHash;
@@ -613,7 +636,7 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
     // 수퍼관리자는 super_admin 고정 — 강등시켜 최고 권한을 뺏는 경로를 차단(v2.643: admin → super_admin).
     if (u.superuser && role !== SUPER_ADMIN) return { ok: false, reason: '수퍼관리자 계정의 역할은 super_admin 으로 고정되어 있습니다.' };
     // Don't allow demoting the last admin(관리자 계열 = admin·super_admin).
-    if (isAdminTier(u.role) && !isAdminTier(role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
+    if (!isAdminTier(role) && isLastLoginCapableAdmin(u)) { // R6-F5-6 — 로그인 가능한 관리자만 센다
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
     }
     if (u.role !== role) bumpTokenVersion(u, 'role-changed'); // 역할 변경(강등 포함) → 기존 토큰 폐기
@@ -641,7 +664,7 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
   if (sa) return sa;
   const denied = identityGuardDenied({ username: u.username, actor, trusted, what: '계정 삭제' });
   if (denied) return denied;
-  if (isAdminTier(u.role) && list.filter((x) => isAdminTier(x.role)).length <= 1) {
+  if (isLastLoginCapableAdmin(u, list)) { // R6-F5-6
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }
   users = list.filter((x) => x.username !== username);
@@ -672,7 +695,7 @@ export function applyManagedUsers(managed = []) {
     if (existing && existing.managedBy !== 'central') { result.skipped.push(`${username}(로컬 계정 충돌)`); continue; }
     if (existing && existing.role === SUPER_ADMIN) { result.skipped.push(`${username}(super_admin 계정)`); continue; }
     if (!existing) {
-      const u = { username, name: m.name || username, role: m.role, managedBy: 'central' };
+      const u = { username, name: m.name || username, role: m.role, managedBy: 'central', tokenVersion: initialTokenVersion() }; // R6-F5-1 — 배포 제거 → 재배포에 옛 토큰 부활 금지
       if (m.passwordHash) u.passwordHash = m.passwordHash;
       list.push(u); result.created++;
     } else {
@@ -688,7 +711,7 @@ export function applyManagedUsers(managed = []) {
   for (let i = list.length - 1; i >= 0; i--) {
     const u = list[i];
     if (u.managedBy === 'central' && !want.has(u.username)) {
-      if (isAdminTier(u.role) && list.filter((x) => isAdminTier(x.role)).length <= 1) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
+      if (isLastLoginCapableAdmin(u, list)) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
       list.splice(i, 1); result.removed++;
       queueUserRevocation(u.username, 'account-deleted');
     }
