@@ -27,7 +27,7 @@ import { readBodyPrefix } from '../util/readPrefix.js';
 import { pushAll } from '../util/pushAll.js';
 import { poolSettled } from '../util/pool.js';
 import { buildServerResult, listOf, isBackupSessionType } from './parse.js';
-import { DEFAULT_PORT, DEFAULT_API_VERSION } from './registry.js';
+import { DEFAULT_PORT, DEFAULT_API_VERSION, accessFingerprint } from './registry.js';
 
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'veeam', label: 'Veeam', envKey: 'VEEAM_TLS_VERIFY', envRaw: process.env.VEEAM_TLS_VERIFY, tls: withSsrfLookup({}) }) });
 const TIMEOUT_MS = reqTimeoutMs(process.env.VEEAM_HTTP_TIMEOUT_MS, 60_000);
@@ -40,6 +40,12 @@ const RP_MAX_PAGES = 100;        // 복원 지점 최대 5만 건
 const FILES_UNSUPPORTED_N = 3;   // 백업 파일 목록이 처음부터 연속 이만큼 404·400 이면 '이 판은 미지원'(v2.761 A7 — 한 건은 개별 경합)
 const LOGOUT_TIMEOUT_MS = 5_000; // logout 은 상위 시한과 따로(시한이 끊긴 뒤에도 토큰 세션을 닫으려 시도한다 — v2.761 A2)
 const BODY_MAX = 32 * 1024 * 1024;
+
+/**
+ * v2.762(G-I1): 판 올림 키 — 경로 틀. '/api/v1/<모음>/<id>/<하위>' 의 id 마디를 '{id}' 로 바꾼다(백업·세션마다 400→재요청과
+ *   '판 올림' notes 가 쌓이지 않게). 하위 경로가 없는 넷째 마디('/api/v1/jobs/states')는 id 가 아니다.
+ */
+export const pathTemplate = (p) => String(p || '').split('/').map((seg, i, a) => (i >= 4 && i % 2 === 0 && i < a.length - 1 ? '{id}' : seg)).join('/');
 
 const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS));
 
@@ -139,17 +145,20 @@ export function makeVeeamClient(server, { signal = null, fetchImpl = fetch } = {
     secrets.push(token);
   }
 
-  async function get(path) {
+  async function get(path, retried = false) {
     const base0 = path.split('?')[0];
-    const ver = pathVer.get(base0) || apiVersion;
+    const key = pathTemplate(base0);
+    const ver = pathVer.get(key) || apiVersion;
     const res = await call(path, { method: 'GET', headers: headers({}, ver) });
     if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw tokenError(); }
     if (!res.ok) {
       const text = await failText(res, secrets);
-      const up = res.status === 400 && !pathVer.has(base0) ? higherVersion(text, ver) : null;
-      if (up) { // 한 번만 — 올린 판으로도 실패하면 그 오류를 그대로 던진다
-        pathVer.set(base0, up); bumped.push({ path: base0, from: ver, to: up });
-        return get(path);
+      if (res.status === 400 && !retried) { // 한 번만 — 올린 판으로도 실패하면 그 오류를 그대로 던진다
+        const now = pathVer.get(key);
+        // 같은 틀의 다른 요청(4병렬)이 그 사이 판을 올렸으면 그 판으로 한 번 더(판 올림 기록은 틀마다 1건).
+        if (now && now !== ver) return get(path, true);
+        const up = !now ? higherVersion(text, ver) : null;
+        if (up) { pathVer.set(key, up); bumped.push({ path: key, from: ver, to: up }); return get(path, true); }
       }
       const e = new Error(`${base0} ← ${text}`); e.status = res.status; throw e;
     }
@@ -213,13 +222,14 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     sesList = (sesList || []).filter((x) => x && typeof x === 'object' && /^(working|starting|resuming)$/i.test(String(x.state || ''))
       && isBackupSessionType(x.sessionType)); // v2.761 A1: 끝난 세션 필터와 같은 판정(백업 복사·복제 제외)
     if (sesList.length > MAX_SESSIONS) notes.push(`실행 중 세션 ${sesList.length}개 중 ${MAX_SESSIONS}개만 VM 단위로 읽었습니다(나머지는 작업 단위)`);
-    const sessions = [];
-    for (const [i, ses] of sesList.entries()) {
-      if (i >= MAX_SESSIONS) { sessions.push({ session: ses, tasks: null, tasksError: 'skipped' }); continue; }
+    const authOf = (rs) => { const x = rs.find((r) => r.status === 'rejected' && isFatal(r.reason)); if (x) throw x.reason; }; // 묶음 안의 401 도 전체 실패로
+    // v2.762(G-I2): 실행 중 세션의 task 도 4병렬(고RTT 800ms 에서 순차 20건 = 16초가 서버 시한에서 빠졌다). 순서·'skipped' 원소는 그대로.
+    const sessions = sesList.map((ses, i) => (i >= MAX_SESSIONS ? { session: ses, tasks: null, tasksError: 'skipped' } : null));
+    authOf(await poolSettled(sesList.slice(0, MAX_SESSIONS), 4, async (ses, i) => {
       const id = encodeURIComponent(String(ses.id || ''));
-      try { sessions.push({ session: ses, tasks: await c.get(`/api/v1/sessions/${id}/taskSessions?limit=${PAGE}`) }); }
-      catch (e) { if (isFatal(e)) throw e; sessions.push({ session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }); }
-    }
+      try { sessions[i] = { session: ses, tasks: await c.get(`/api/v1/sessions/${id}/taskSessions?limit=${PAGE}`) }; }
+      catch (e) { if (isFatal(e)) throw e; sessions[i] = { session: ses, tasks: null, tasksError: String(e?.message || e).slice(0, 120) }; }
+    }));
     if (sessions.some((x) => x.tasksError && x.tasksError !== 'skipped')) notes.push('실행 중 세션의 VM 단위 task 를 읽지 못해 그 작업의 VM 을 작업 단위로 \'백업 중\' 표시했습니다');
     // ── 상세(v2.751 사용자 요청: 백업 완료 시각 · 복원 지점 · 용량) — 각각 실패해도 나머지로 결과를 만든다 ──────────
     // 작업마다 마지막으로 끝난 백업 세션 → 그 세션의 VM 별 task(완료 시각·결과·처리 용량).
@@ -237,7 +247,6 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     }
     const lastList = [...lastByJob.values()].sort((a, b) => b.t - a.t).slice(0, MAX_LAST_JOBS);
     const lastTasks = [];
-    const authOf = (rs) => { const x = rs.find((r) => r.status === 'rejected' && isFatal(r.reason)); if (x) throw x.reason; }; // 묶음 안의 401 도 전체 실패로
     authOf(await poolSettled(lastList, 4, async ({ ses }) => {
       try { lastTasks.push({ session: ses, tasks: await c.get(`/api/v1/sessions/${encodeURIComponent(String(ses.id || ''))}/taskSessions?limit=${PAGE}`) }); }
       catch (e) { if (isFatal(e)) throw e; }
@@ -259,6 +268,7 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const backupList = cut('백업 목록', (await soft('백업 목록', () => c.getAll('/api/v1/backups'))) || []);
     const backups = [];
     let filesUnsupported = false; let filesOk = false; let filesMissing = 0; let filesTried = 0;
+    const filesFailBy = new Map(); // v2.762(G-I3): 404·400 밖 실패 — 상태 코드(없으면 전송 오류·시한)별 건수만(원문은 주소가 섞여 싣지 않는다)
     authOf(await poolSettled(backupList.slice(0, MAX_BACKUPS), 4, async (b) => {
       if (!b || typeof b !== 'object' || !b.id) return;
       if (filesUnsupported) { backups.push({ backup: b, files: null }); return; }
@@ -267,18 +277,24 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
       catch (e) {
         if (isFatal(e)) throw e;
         if (e?.status === 404 || e?.status === 400) { filesMissing++; if (!filesOk && filesMissing >= FILES_UNSUPPORTED_N) filesUnsupported = true; }
+        else { const k = Number.isInteger(e?.status) ? `HTTP ${e.status}` : '전송 오류·시한'; filesFailBy.set(k, (filesFailBy.get(k) || 0) + 1); }
         backups.push({ backup: b, files: null });
       }
     }));
     if (filesUnsupported || (!filesOk && filesMissing > 0 && filesMissing === filesTried)) notes.push('이 Veeam 판은 백업 파일 목록(용량)을 REST 로 주지 않아 용량을 표시하지 못합니다');
     else if (filesMissing) notes.push(`백업 ${filesMissing}개는 파일 목록을 받지 못해(404·400) 그 백업만 용량을 비웠습니다`);
+    if (filesFailBy.size) {
+      const n = [...filesFailBy.values()].reduce((a, b) => a + b, 0);
+      notes.push(`백업 ${n}개는 파일 목록 조회가 실패해(${[...filesFailBy].map(([k, v]) => `${k} ${v}건`).join(' · ')}) 그 백업만 용량을 비웠습니다`);
+    }
     if (backupList.length > MAX_BACKUPS) notes.push(`백업 ${backupList.length}개 중 ${MAX_BACKUPS}개만 용량을 읽었습니다`);
     for (const b of c.bumped) notes.push(`${b.path} 는 이 서버가 판 ${b.from} 으로는 주지 않아 지원 판 ${b.to} 으로 읽었습니다`);
     // v2.761 A2: 시한이 끊긴 뒤의 요청은 모두 '취소' 로 실패하고 soft·세션 루프·두 묶음이 그것을 삼킨다 — 여기서 결과를 만들면 잘린 결과가
     //   ok:true 로 저장돼 직전 완전한 결과(lastOk)를 덮는다. 전체 실패로 던진다(withDeadline 이 시한 문구로 바꾼다).
     if (signal?.aborted) throw new Error('수집 시한이 지나 일부만 읽었습니다 — 부분 결과는 저장하지 않습니다');
     const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
-    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, notes: [...notes, ...r.notes] };
+    // v2.762(G1): target = 읽은 접속처 지문(registry.accessFingerprint) — 중앙·store 가 등록부의 지금 접속처와 대조한다.
+    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, target: accessFingerprint(server), error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, notes: [...notes, ...r.notes] };
   } finally {
     await c.logout();
   }

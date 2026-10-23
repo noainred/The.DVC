@@ -43,16 +43,17 @@ export function serverStatusView(rec) {
  * v2.761 B3: 이 노드가 읽는 서버인가 — 엣지 노드에서는 중앙에서 받은 자기 몫(serversForThisNode)이 여기 든다. 그 서버의 '지금 읽기'·'연결 시험' 을
  * 막으면 엣지에서 인증 정지를 풀 길이 없다(authGuard 규칙 3 — 수동 실행은 막지 않는다).
  */
-const readsHere = (d) => serversForThisNode().some((x) => x.id === d.id);
+// v2.762(G3): 수집 켜짐과 무관하게 '읽는 노드' 만 본다(꺼진 서버도 엣지에서 시험할 수 있고, 지금 읽기는 아래에서 disabled 로 답한다).
+const readsHere = (d) => serversForThisNode({ servers: [{ ...d, enabled: true }] }).length > 0;
 /** 중앙에서 엣지 담당 서버를 거절할 때의 문구 — 정지 중이면 '다음 주기에 반영' 이라 말하지 않는다(그 주기는 읽지 않는다). */
 function edgeRefusal(d, what) {
   const rec = getRecord(d.id);
   const stopped = rec?.result?.kind === 'auth-stopped' || !!rec?.result?.authStop;
   if (stopped) {
     return `엣지 '${d.agent}' 가 읽는 서버입니다 — 그 엣지에서 인증 실패로 주기 수집이 멈춰 있어 다음 주기에도 읽지 않습니다. `
-      + 'Veeam 계정을 고친 뒤(비밀번호를 바꿔 저장하면 자동으로 다시 읽습니다) 같은 비밀번호라면 엣지 포탈의 이 화면에서 \'지금 읽기\' 를 누르세요.';
+      + 'Veeam 계정을 고친 뒤(비밀번호를 바꿔 저장하면 자동으로 다시 읽습니다) 같은 비밀번호라면 그 엣지 포탈의 설정 › Veeam 백업 서버에서 \'지금 읽기\' 를 누르세요(수동 실행은 정지를 건너뜁니다).';
   }
-  return `엣지 '${d.agent}' 가 읽는 서버입니다 — 중앙에서는 ${what}. 엣지가 자기 수집 주기에 읽어 올리며, 바로 확인하려면 엣지 포탈의 이 화면에서 '지금 읽기' 를 누르세요.`;
+  return `엣지 '${d.agent}' 가 읽는 서버입니다 — 중앙에서는 ${what}. 엣지가 자기 수집 주기에 읽어 올리며, 바로 확인하려면 그 엣지 포탈의 설정 › Veeam 백업 서버에서 '연결 시험'·'지금 읽기' 를 누르세요.`;
 }
 
 export function registerVeeam(adminRouter) {
@@ -82,7 +83,8 @@ export function registerVeeam(adminRouter) {
     const vcenters = (store.get()?.vcenters || []).map((v) => ({ id: v.id, name: v.name, host: reg.get(v.id)?.host || '', collectMode: reg.get(v.id)?.collectMode || 'direct', siteAgent: owners.get(v.id) || '' }));
     res.json({
       ok: true,
-      servers: listServers().map((d) => ({ ...d, status: serverStatusView(getRecord(d.id)) })),
+      // v2.762(G3): readsHere — 이 노드가 읽는 서버인가(엣지에서는 받은 자기 몫). 화면이 '연결 시험'·'지금 읽기' 를 이것으로 연다.
+      servers: listServers().map((d) => ({ ...d, readsHere: readsHere(d), status: serverStatusView(getRecord(d.id)) })),
       vcenters, agents: knownAgentNames(), edges: allVeeamEdgeStatus(), poller: veeamPollerStatus(),
       // 개별 토큰이 발급된 엣지 이름 — Veeam 위임 라우트는 개별 토큰만 받는다(central.js veeam-config). 화면이 토큰 없는 엣지 배정을 경고한다.
       tokenAgents: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
@@ -150,7 +152,7 @@ export function registerVeeam(adminRouter) {
     let reason = '';
     if (r.skipped) reason = '이미 수집 중입니다 — 끝난 뒤 다시 누르세요.';
     else if (r.timedOut) reason = '수집 주기 상한을 넘겨 기다리지 않았습니다 — 잠시 뒤 상태를 확인하세요.';
-    else if (!ok && !okCount && !failCount) reason = '이 노드가 읽는 서버 목록에 없어 읽지 않았습니다.';
+    else if (!ok && !okCount && !failCount) reason = r.discarded ? '읽는 도중 접속처가 바뀌어 이전 접속처에서 읽은 결과를 버렸습니다 — 다시 누르세요.' : '이 노드가 읽는 서버 목록에 없어 읽지 않았습니다.';
     else if (!ok) reason = status?.error || '읽기에 실패했습니다.';
     logAudit({ user: req.user?.username, action: 'Veeam 지금 읽기', target: d.name, detail: r.skipped ? '이미 수집 중' : r.timedOut ? '주기 상한 초과' : `성공 ${okCount}·실패 ${failCount}` });
     res.json({ ok, okCount, failCount, ...(r.skipped ? { skipped: true } : {}), ...(r.timedOut ? { timedOut: true } : {}), ...(reason ? { reason } : {}), status });

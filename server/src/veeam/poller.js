@@ -14,7 +14,7 @@ import { withDeadline, deadlineMs } from '../util/deadline.js';
 import { poolSettled } from '../util/pool.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { createChangeLogger } from '../util/logThrottle.js';
-import { serversForThisNode, getServerWithSecret, listServers } from './registry.js';
+import { serversForThisNode, getServerWithSecret, listServers, registryLoadError, accessFingerprint } from './registry.js';
 import { collectVeeamServer } from './client.js';
 import { putResult, pruneExcept } from './store.js';
 
@@ -32,26 +32,41 @@ const _listeners = new Set();
 /** 엣지 push 가 결과 적재 직후 보내려고 듣는다. */
 export function onVeeamCollected(fn) { _listeners.add(fn); return () => _listeners.delete(fn); }
 
-/** 서버 1대 수집 → 결과 객체(실패도 결과다). 인증 정지 판정·기록은 여기서 한다. */
+/**
+ * 서버 1대 수집 → 결과 객체(실패도 결과다). 인증 정지 판정·기록은 여기서 한다.
+ * v2.762(G2): 등록부 원소는 saveServer 가 제자리에서 바꾸고 엣지 pull 은 통째로 바꾼다 — 시작 시점의 **사본**과 접속처 지문으로 끝까지 읽고,
+ *   끝났을 때 등록부 항목이 없거나 지문이 다르면(수집 도중 접속처 변경) 결과·인증 정지 해제·정지 기록을 모두 버린다({discarded:true}).
+ *   그러지 않으면 B4 가 지운 옛 접속처 결과가 되살아나고, 옛 host 의 401 이 새 host 의 주기 수집을 멈춘다(credHash 는 계정·비밀번호만 본다).
+ */
 export async function collectOne(server, { manual = false } = {}) {
-  const full = getServerWithSecret(server.id) || server;
+  const cur = getServerWithSecret(server.id);
+  const full = { ...(cur || server) };
   if (String(full.id).startsWith('mock-')) return null;
+  const target = accessFingerprint(full);
+  // 시작 때 등록부에 있던 서버만 대조한다(등록부 밖 원소로 부른 호출은 예전 그대로).
+  const moved = () => { if (!cur) return false; const now = getServerWithSecret(full.id); return !now || accessFingerprint(now) !== target; };
   if (!manual) {
     const stop = authGuard.authStopFor(full);
-    if (stop) return { ok: false, ts: Date.now(), ms: 0, error: `인증 실패로 주기 수집을 멈췄습니다(${stop.reason}) — 비밀번호를 고치면 자동으로 다시 읽습니다`, kind: 'auth-stopped', authStop: authStopView(stop), jobs: [], vms: [], counts: {}, notes: [] };
+    if (stop) return { ok: false, ts: Date.now(), ms: 0, error: `인증 실패로 주기 수집을 멈췄습니다(${stop.reason}) — 비밀번호를 고치면 자동으로 다시 읽습니다`, kind: 'auth-stopped', authStop: authStopView(stop), target, jobs: [], vms: [], counts: {}, notes: [] };
   }
   _inFlight.add(full.id);
   const t0 = Date.now();
+  const discard = (what) => {
+    if (_log(`moved:${full.id}`, what)) console.warn(`[veeam] ${full.name}(${full.host}) 수집 도중 접속처가 바뀌어 이전 접속처의 ${what}를 버렸습니다`);
+    return { discarded: true };
+  };
   try {
     const r = await withDeadline(serverDeadlineMs(), (signal) => collectVeeamServer(full, { signal }), `Veeam ${full.name} 시한 초과`);
+    if (moved()) return discard('결과');
     authGuard.clearAuthStop(full.id);
     return r;
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 600);
+    if (moved()) return discard(e?.authFailed ? '인증 실패(정지 기록 안 함)' : '실패 결과');
     let authStop = null;
     if (e?.authFailed) authStop = authStopView(authGuard.markAuthStopped(full.id, full, msg));
     if (_log(`fail:${full.id}`, msg)) console.warn(`[veeam] ${full.name}(${full.host}) 수집 실패: ${msg}`);
-    return { ok: false, ts: Date.now(), ms: Date.now() - t0, error: msg, kind: e?.authFailed ? 'auth' : (e?.kind || ''), authStop, jobs: [], vms: [], counts: {}, notes: [] };
+    return { ok: false, ts: Date.now(), ms: Date.now() - t0, error: msg, kind: e?.authFailed ? 'auth' : (e?.kind || ''), authStop, target, jobs: [], vms: [], counts: {}, notes: [] };
   } finally { _inFlight.delete(full.id); }
 }
 
@@ -62,11 +77,13 @@ export async function pollVeeamOnce({ manual = false, ids = null } = {}) {
     const all = serversForThisNode();
     const list = ids ? all.filter((d) => ids.includes(d.id)) : all;
     const isEdge = !!config.agent.centralUrl;
-    if (!isEdge && !ids) pruneExcept(listServers().map((d) => d.id));
-    let ok = 0; let fail = 0;
+    // v2.762(F4b): 등록부를 못 읽었으면(빈 목록) 지우지 않는다 — 저장된 결과를 전부 지우고 파일까지 덮는다(못 읽은 상태로 지우지 않는다).
+    if (!isEdge && !ids && !registryLoadError()) pruneExcept(listServers().map((d) => d.id));
+    let ok = 0; let fail = 0; let discarded = 0;
     const res = await poolSettled(list, concurrency(), async (d) => {
       const r = await collectOne(d, { manual });
       if (!r) return;
+      if (r.discarded) { discarded++; return; }
       if (r.ok) ok++; else fail++;
       putResult(d.id, r, { via: 'local', agent: isEdge ? (config.agent.name || '') : '' });
     });
@@ -74,7 +91,7 @@ export async function pollVeeamOnce({ manual = false, ids = null } = {}) {
     const crashed = res.filter((x) => x.status === 'rejected').length;
     _last = { at: Date.now(), servers: list.length, ok, fail: fail + crashed, manual };
     for (const fn of _listeners) { try { fn(); } catch { /* */ } }
-    return { ok, fail: fail + crashed, servers: list.length };
+    return { ok, fail: fail + crashed, servers: list.length, ...(discarded ? { discarded } : {}) };
   };
   // 주기 상한: 서버 시한 × ceil(대수/동시성) + 여유. 넘기면 가드를 풀어 다음 주기가 돈다(끝나지 않는 주기 방지).
   const n = Math.max(1, serversForThisNode().length);

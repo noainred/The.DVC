@@ -2257,10 +2257,12 @@ centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
   if (!results.length) { E.saveVeeamEdgeStatus(agent, req.body?.status, { at: Date.now(), results: 0, saved: 0 }); return res.json({ ok: true, saved: 0, ...(snap ? { snap } : {}) }); }
   const R = await import('../veeam/registry.js');
   if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) { console.warn('[central] veeam-data: 중앙 Veeam 서버 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
-  const owned = new Set(R.serversForAgent(agent).map((d) => d.id));
+  // v2.762(G1): id → 지금 접속처 지문 — 접속처를 바꾼 뒤 옛 접속처에서 읽은 결과(엣지가 아직 pull 전)를 받지 않는다.
+  const owned = new Map(R.serversForAgent(agent).map((d) => [d.id, R.accessFingerprint(d)]));
   const r = E.ingestVeeamPush(agent, req.body || {}, owned);
   if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 배정되지 않은 서버 결과 ${r.dropped.notOwned}건 거절`);
-  res.json({ ok: true, saved: r.saved, ...(r.dropped.notOwned || r.dropped.bad ? { rejected: r.dropped.notOwned + r.dropped.bad, dropped: r.dropped } : {}), ...(snap ? { snap } : {}) });
+  const rejected = r.dropped.notOwned + r.dropped.bad + (r.dropped.stale || 0);
+  res.json({ ok: true, saved: r.saved, ...(rejected ? { rejected, dropped: r.dropped } : {}), ...(snap ? { snap } : {}) });
 });
 
 // GET /api/central/users-config?agent=<이름>

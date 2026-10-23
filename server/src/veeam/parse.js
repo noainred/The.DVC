@@ -430,6 +430,8 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
   return {
     ok: r.ok === true, ts: Math.round(ts), ...(edgeTs != null ? { edgeTs } : {}), ms: numOrNull(r.ms),
     error: s(r.error, 600), kind: s(r.kind, 32), apiVersion: s(r.apiVersion, 32),
+    // v2.762(G1): 접속처 지문(registry.accessFingerprint — 16자 hex). 형식이 다르면 싣지 않는다(지문 없음 = 옛 엣지와 같이 취급).
+    ...(typeof r.target === 'string' && /^[0-9a-f]{16}$/.test(r.target) ? { target: r.target } : {}),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
     authStop: isObj(r.authStop) ? { since: numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
     jobs, vms, counts, backups,

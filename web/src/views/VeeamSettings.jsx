@@ -127,8 +127,9 @@ export default function VeeamSettings() {
                     <td className="right" data-sort={num(cn.running) ?? ''}>{num(cn.running) ?? '—'}</td>
                     <td className="right nowrap">
                       <button className={open === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!!busy} onClick={() => setOpen(open === s.id ? null : s.id)}>작업 목록</button>{' '}
-                      {!s.agent && <><button className="tab" disabled={!!busy} onClick={() => act(s, 'test')}>{busy === `test:${s.id}` ? '시험 중…' : '연결 시험'}</button>{' '}</>}
-                      {!s.agent && <><button className="tab" disabled={!!busy || s.enabled === false} title={s.enabled === false ? '수집이 꺼진 서버입니다 — 편집에서 켠 뒤 읽으세요' : undefined} onClick={() => act(s, 'collect')}>{busy === `collect:${s.id}` ? '읽는 중…' : '지금 읽기'}</button>{' '}</>}
+                      {/* v2.762(G3): 이 노드가 읽는 서버(readsHere — 엣지에서는 받은 자기 몫)도 연다 — 엣지에서 인증 정지를 푸는 길 */}
+                      {(!s.agent || s.readsHere) && <><button className="tab" disabled={!!busy} onClick={() => act(s, 'test')}>{busy === `test:${s.id}` ? '시험 중…' : '연결 시험'}</button>{' '}</>}
+                      {(!s.agent || s.readsHere) && <><button className="tab" disabled={!!busy || s.enabled === false} title={s.enabled === false ? '수집이 꺼진 서버입니다 — 편집에서 켠 뒤 읽으세요' : undefined} onClick={() => act(s, 'collect')}>{busy === `collect:${s.id}` ? '읽는 중…' : '지금 읽기'}</button>{' '}</>}
                       <button className="tab" disabled={!!busy} onClick={() => edit(s)}>편집</button>{' '}
                       <button className="tab" style={{ color: 'var(--red)' }} disabled={!!busy} onClick={() => act(s, 'del')}>삭제</button>
                     </td>
@@ -198,7 +199,7 @@ export default function VeeamSettings() {
         <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
           읽는 것: 작업 목록(작업에 VM 단위로 넣은 VM) · 작업 상태 · 백업 객체(복원 지점이 있는 VM) · 실행 중 세션의 VM 별 진행. 작업을 시작·중지하지 않습니다(조회 전용).
           폴더·클러스터·태그 단위로 넣은 VM 은 복원 지점이 생기거나 백업 중일 때 표시됩니다. 주기는 {Number.isFinite(d?.poller?.intervalMs) ? `${Math.round(d.poller.intervalMs / 60_000)}분` : '서버 설정값'}(VEEAM_POLL_MS)이고, 엣지 담당 서버는 엣지가 배정을 받는 대로 읽습니다.
-          엣지 담당 서버의 연결 시험·지금 읽기는 그 엣지의 망에서만 의미가 있어 중앙 화면에서는 하지 않습니다.
+          엣지 담당 서버의 연결 시험·지금 읽기는 그 엣지의 망에서만 의미가 있어 중앙 화면에서는 하지 않습니다 — 그 엣지 포탈의 이 화면(설정 › Veeam 백업 서버)에서 누르세요(인증 실패로 멈춘 주기 수집을 같은 비밀번호로 확인할 때도 같습니다).
         </div>
       </div>
       {(d?.edges || []).length > 0 && (

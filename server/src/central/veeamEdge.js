@@ -8,20 +8,24 @@
  */
 import { sanitizeServerResult, s } from '../veeam/parse.js';
 import { putResult } from '../veeam/store.js';
+import { MAX_TIMER_MS } from '../config.js';
 
 const AGENT_MAX = 256;
 const RESULTS_PER_POST = 200;
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+// v2.762(F-I2): 엣지 수집 주기는 엣지 pollMs 범위([2분, MAX_TIMER_MS] — veeam/poller.js clampIntervalMs)만 받는다. 밖이면 버린다(null — 중앙 주기로 판정).
+const POLL_MIN_MS = 120_000;
+const intervalOrNull = (v) => { const n = num(v); return n != null && n >= POLL_MIN_MS && n <= MAX_TIMER_MS ? n : null; };
 
 /**
  * @param {string} agent  인증된 엣지 이름
  * @param {object} body   { status, results:[{serverId, ...result}] }
- * @param {Set<string>} owned  이 엣지에 배정된 서버 id
- * @returns {{ saved:number, dropped:{notOwned:number, bad:number} }}
+ * @param {Set<string>|Map<string,string>} owned  이 엣지에 배정된 서버 id(Map 이면 id → 등록부의 지금 접속처 지문 — v2.762 G1)
+ * @returns {{ saved:number, dropped:{notOwned:number, bad:number, stale:number} }}
  */
 export function ingestVeeamPush(agent, body, owned, now = Date.now()) {
-  const dropped = { notOwned: 0, bad: 0 };
+  const dropped = { notOwned: 0, bad: 0, stale: 0 };
   let saved = 0;
   const list = Array.isArray(body?.results) ? body.results.slice(0, RESULTS_PER_POST) : [];
   for (const raw of list) {
@@ -31,9 +35,12 @@ export function ingestVeeamPush(agent, body, owned, now = Date.now()) {
     if (!owned.has(id)) { dropped.notOwned++; continue; }
     const r = sanitizeServerResult(raw, now);
     if (!r) { dropped.bad++; continue; }
-    if (putResult(id, r, { via: 'edge', agent })) saved++;
+    // v2.762(G1): 중앙에서 접속처를 바꾼 뒤 엣지가 아직 pull 하지 않은 동안 보낸 옛 접속처 결과는 버린다(지문 없는 옛 엣지 결과는 수용).
+    const want = owned instanceof Map ? String(owned.get(id) || '') : '';
+    if (want && r.target && r.target !== want) { dropped.stale++; continue; }
+    if (putResult(id, r, { via: 'edge', agent, expectTarget: want })) saved++;
   }
-  saveVeeamEdgeStatus(agent, body?.status, { at: now, results: list.length, saved, ...(dropped.notOwned || dropped.bad ? { dropped } : {}) });
+  saveVeeamEdgeStatus(agent, body?.status, { at: now, results: list.length, saved, ...(dropped.notOwned || dropped.bad || dropped.stale ? { dropped } : {}) });
   return { saved, dropped };
 }
 
@@ -50,7 +57,7 @@ export function saveVeeamEdgeStatus(agent, st, push = null) {
   const p = isObj(x.poller) ? x.poller : {};
   _status.set(k, {
     agent: s(String(agent), 64), at: Date.now(),
-    status: { servers: num(x.servers), version: s(x.version, 32) || null, poller: { at: num(p.at), ok: num(p.ok), fail: num(p.fail), intervalMs: num(p.intervalMs), running: p.running === true } },
+    status: { servers: num(x.servers), version: s(x.version, 32) || null, poller: { at: num(p.at), ok: num(p.ok), fail: num(p.fail), intervalMs: intervalOrNull(p.intervalMs), running: p.running === true } },
     ...(push ? { lastPush: push } : {}),
   });
 }

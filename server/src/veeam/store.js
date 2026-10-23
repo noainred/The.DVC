@@ -30,15 +30,23 @@ function writer() {
   return _writer;
 }
 
-/** 결과 1건 기록. */
-export function putResult(serverId, result, { via = 'local', agent = '' } = {}) {
+/**
+ * 결과 1건 기록.
+ * v2.762(G1): expectTarget(등록부의 지금 접속처 지문)이 있고 결과의 지문과 다르면 버린다(false) — 옛 접속처 결과가 새 서버 것으로 되살아나지 않게.
+ *   lastOk 는 지문이 같을 때만 이어받는다. 지문이 없는 결과·기록(옛 엣지·업그레이드 전 파일)은 지금처럼 수용·승계한다(호환).
+ */
+export function putResult(serverId, result, { via = 'local', agent = '', expectTarget = '' } = {}) {
+  const tgt = typeof result?.target === 'string' ? result.target : '';
+  if (expectTarget && tgt && tgt !== expectTarget) return false;
   const m = load();
   if (!m.has(serverId) && m.size >= MAX_SERVERS) return false;
   const prev = m.get(serverId);
+  const sameTarget = (t) => !tgt || !t || t === tgt;
+  const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}) });
   const rec = { result, via, agent: String(agent || ''), at: Date.now() };
-  if (result?.ok) rec.lastOk = { ts: result.ts, jobs: result.jobs, vms: result.vms, counts: result.counts, notes: result.notes, backups: result.backups };
-  else if (prev?.lastOk) rec.lastOk = prev.lastOk;
-  else if (prev?.result?.ok) rec.lastOk = { ts: prev.result.ts, jobs: prev.result.jobs, vms: prev.result.vms, counts: prev.result.counts, notes: prev.result.notes, backups: prev.result.backups };
+  if (result?.ok) rec.lastOk = okPart(result);
+  else if (prev?.lastOk && sameTarget(prev.lastOk.target)) rec.lastOk = prev.lastOk;
+  else if (prev?.result?.ok && sameTarget(prev.result.target)) rec.lastOk = okPart(prev.result);
   m.set(serverId, rec);
   writer().save();
   return true;
