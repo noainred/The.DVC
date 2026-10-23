@@ -32,6 +32,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { ERROR_KEYS, RX_WARN_DBM } from './healthCheck.js'; // v2.770(R5-E3-2): 축약 필터 = 점검 판정 키·경계 한 벌
 import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600-02 — 중앙 수신과 같은 조닝 축약(순수)
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
@@ -79,9 +80,12 @@ let _last = null;
 /** 중앙 전송용 축약(순수 — 테스트가 고정한다). 문제 포트를 우선 남긴다. */
 export function slimSnapshot(snap, limit = PUSH_PORT_LIMIT) {
   const list = snap?.ports?.list || [];
+  // v2.770(점검 R5-E3-2): 에러 카운터는 **점검이 보는 키 전부**(healthCheck ERROR_KEYS — enc_in·enc_out·loss_sig·disc_c3 포함),
+  //   광량은 점검 주의 경계와 같은 `<= -9`(RX_WARN_DBM). 예전 필터(crc·link_fail·loss_sync·rx<-9)는 disc_c3 25000·enc_out 900
+  //   포트를 빼서 중앙 월간 점검이 '이상' 을 '정상' 으로 냈다(크기 가드 자동 경로에서도).
   const problem = (p) => p.state === 'faulty' || p.state === 'disabled'
-    || (p.errCrc || 0) > 0 || (p.errLinkFail || 0) > 0 || (p.errLossSync || 0) > 0
-    || (p.rxPowerDbm != null && p.rxPowerDbm < -9);
+    || ERROR_KEYS.some((k) => (Number(p[k]) || 0) > 0)
+    || (p.rxPowerDbm != null && p.rxPowerDbm !== '' && Number(p.rxPowerDbm) <= RX_WARN_DBM);
   const kept = list.filter(problem).slice(0, limit);
   return {
     ...snap,

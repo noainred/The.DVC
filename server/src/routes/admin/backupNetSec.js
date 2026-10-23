@@ -125,6 +125,17 @@ export function scopeVcLogStatus(st, allowed) {
   return out;
 }
 
+/** v2.770(점검 R5-E1-2): 백업·복원 경고 한 건 → 문구. `{file, reason}` 객체(복원)와 문자열(백업 생성) 둘 다. 모르는 모양은 ''. */
+export function backupWarnText(w) {
+  if (typeof w === 'string') return w;
+  if (w && typeof w === 'object') {
+    const file = typeof w.file === 'string' ? w.file : '';
+    const reason = typeof w.reason === 'string' ? w.reason : '';
+    return file && reason ? `${file}: ${reason}` : (reason || file);
+  }
+  return '';
+}
+
 export function registerBackupNetSec(adminRouter) {
 
 // ───────────────────────── 포탈 백업 ─────────────────────────
@@ -190,7 +201,10 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     if (nFail) parts.push(`${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}) — 실패한 파일은 복원되지 않습니다.`);
     if (r.excluded?.length) parts.push(`복원 제외 ${r.excluded.length}개(${r.excluded.map((f) => `${f.file}: ${f.reason}`).join(' · ')}).`);
     // v2.769(점검 R4-D1-2): 적용 때 되살아날 엣지 토큰·전원 재로그인 같은 경고를 문구에도 싣는다(응답 JSON 에만 두면 화면이 말하지 않는다).
-    if (r.warnings?.length) parts.push(`주의: ${r.warnings.join(' · ')}`);
+    // v2.770(점검 R5-E1-2): 복원 경고는 `{file, reason}` 객체다(service.js restoreCentral·stagedRestore — audit2769b 가 모양을 고정) —
+    //   예전 join 은 '주의: [object Object]' 를 냈다. 백업 생성(service.js createBackup)은 문자열 경고라 두 모양을 모두 받는다.
+    const warnTexts = Array.isArray(r.warnings) ? r.warnings.map(backupWarnText).filter(Boolean) : [];
+    if (warnTexts.length) parts.push(`주의: ${warnTexts.join(' · ')}`);
     parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');
     res.json({ ok: true, ...r, restarting: restart, note: parts.join(' ') });
     if (restart) setTimeout(() => restartProcess(), 250);

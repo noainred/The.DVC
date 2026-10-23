@@ -140,6 +140,8 @@ async function _pull() {
     // v2.769(점검 R4-D4-02): 중앙 임계치 — 위임 PDU 경보는 이 엣지가 현장에서 보낸다(pdu/poller.js). 중앙이 값을 실었을 때만 적용하고
     //   (정제는 applyCentralThresholds — 알려진 키·유한수·불리언만), 없거나(옛 중앙·중앙 파일 없음) 못 읽었다고 하면 **직전 값을 유지**한다.
     //   알림 채널 설정은 중앙이 내려보내지 않는다 — 이 엣지의 알림 설정으로 보낸다.
+    // v2.770(점검 R5-E1-1): v2.770 중앙은 관리자가 바꾼 키만 보내고, 지정이 없으면 `{}` 를 보낸다 — {} 는 '중앙 지정 없음' 으로 적용해
+    //   직전 중앙 값(v2.769 중앙이 보낸 전체 세트 포함)을 지운다(applyCentralThresholds). enabled 는 받지 않는다.
     const thresholdsUnreadable = body?.thresholdsUnreadable && typeof body.thresholdsUnreadable === 'object'
       ? String(body.thresholdsUnreadable.reason || '사유 미상').slice(0, 200) : '';
     if (thresholdsUnreadable && _logChange('thresholds-unreadable', thresholdsUnreadable)) console.warn(`[pdu-config] 중앙 임계치 설정을 읽지 못해 받지 않았습니다(직전 임계치 유지): ${thresholdsUnreadable}`);

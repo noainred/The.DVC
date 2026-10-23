@@ -316,3 +316,28 @@ describe('R4-D3-2 · 오래된·지금 상태가 아닌 측정은 no-data', () =
     expect(txt).not.toMatch(/300_?000|5 \* 60_?000/);
   });
 });
+
+/*
+ * v2.770(점검 R5-E1-3): 엣지 보고 낡음은 서버가 주기에 맞춘 경계(max(3시간, 주기×3 + 여유))로 판정해 `edgeReport.stale` 로 싣는다 —
+ *   화면은 그 판정 하나만 본다(경계를 따로 계산하지 않는다). 6시간 주기의 정상 엣지(3.5시간 전 보고 · 3.6시간 전 측정)는 정상이다.
+ */
+describe('R5-E1-3 · 긴 주기의 정상 엣지는 주기 후반에도 no-data 가 아니다', () => {
+  const H = 3_600_000;
+  const NOW = Math.floor(Date.now() / H) * H;
+  const row = (stale) => ({
+    id: 'x', by: 'edge', from: 'pl', enabled: true,
+    latest: { ts: NOW - 3.6 * H, ageMs: 3.6 * H, ok: true, summary: '정상 120ms' },
+    edgeReport: { at: NOW - 3.5 * H, stale, ageMs: 3.5 * H },
+  });
+  it('서버가 stale 아님으로 판정한 6시간 주기 엣지 → ok · KPI 정상 1', () => {
+    expect(rowState(row(false), { enabled: true, intervalMs: 6 * H, now: NOW }).state).toBe('ok');
+    const k = kpisOf([row(false)], { enabled: true, intervalMs: 6 * H, now: NOW });
+    expect(k.ok).toBe(1);
+  });
+  it('서버가 stale 로 판정하면 그대로 edge-stale(화면이 경계를 다시 계산하지 않는다)', async () => {
+    expect(rowState(row(true), { enabled: true, intervalMs: 6 * H, now: NOW }).reason).toBe('edge-stale');
+    const fs = await import('node:fs');
+    const txt = fs.readFileSync(new URL('./linkCheckText.js', import.meta.url), 'utf8');
+    expect(txt).not.toMatch(/reportStaleMs|3 \* 3_?600_?000/);
+  });
+});

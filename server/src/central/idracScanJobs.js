@@ -461,9 +461,12 @@ export function sanitizeIdracScanData(raw) {
     // v2.611(CEN2611-01): iLO — 불리언은 === true 만. 부재 판정(EDGE2611-02)은 정제 **전** 원본에서 한다(여기서는 false 가 된다).
     iloEnabled: d.iloEnabled === true,
     noCredsIps: noCredsList(d.noCredsIps), noCredsTruncated: d.noCredsTruncated === true,
+    // v2.770(점검 R5-E4-01): 인증서 미신뢰(교체 → 병합 강등 사유)·교체로 지운 현지 등록·강등 표지 — 엣지가 판정하고 중앙은 보여 주기만 한다.
+    tlsUntrustedIps: scanIps(d.tlsUntrustedIps, 200), removedIps: scanIps(d.removedIps, 200),
+    modeDowngraded: d.modeDowngraded === true, modeDowngradedReason: scanStr(d.modeDowngradedReason, 500),
   };
   for (const k of ['scanned', 'foundCount', 'registered', 'unreachable', 'notIdrac', 'authFailed', 'authSkipped', 'authSkippedRegistered', 'blocked', 'unsupportedCount', 'durationMs', 'httpStatus',
-    'hpeFound', 'hpeDetected', 'hpeAuthFailed', 'dellFound', 'noCreds']) o[k] = scanCnt(d[k]);
+    'hpeFound', 'hpeDetected', 'hpeAuthFailed', 'dellFound', 'noCreds', 'tlsUntrusted', 'removed']) o[k] = scanCnt(d[k]);
   return o;
 }
 /** noCredsIps — `{ip, vendor}`(v2.610 scan.js 모양)만, 상한 200. vendor 는 짧은 글자. 옛 모양(문자열 IP)도 받는다. */

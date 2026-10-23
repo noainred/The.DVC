@@ -105,6 +105,28 @@ export function normalizeDeviceInput(input = {}) {
   };
 }
 
+/**
+ * 저장된 장비(`existing`)와 입력(`input`)의 **접속처가 바뀌었는가**(순수) — 바뀌었으면 저장 비밀번호를 승계하지 않는다.
+ * v2.607(감사 SEC2607-07·LEFT2607-06): host·username·SSH 포트·REST 포트. agent(수집 엣지) 변경은 승계한다(위임 수집에 필요, 장비는 같다).
+ *   포트는 그 포트를 **이전·새 수집 방식이 둘 다 쓸 때만** 비교한다(CSV 내보내기는 REST 가 아니면 httpsPort 를 비운다 —
+ *   bulk.js — 쓰지 않는 포트의 기본값 복원으로 비밀을 버리면 거짓 폐기다).
+ * v2.770(점검 R5-E3-4): 저장(`saveDevice`)과 연결 테스트(`POST /tools/sanswitch/test`)가 **이 함수 하나**를 쓴다 — 테스트가 host 만
+ *   비교해 같은 host 에 계정·포트·수집 방식을 바꿔 테스트하면 저장 비밀번호가 다른 계정/포트로 시도됐다(계정 잠금·다른 서비스로 전송).
+ */
+export function sanAccessMoved(existing, input = {}) {
+  if (!existing) return false;
+  const newMethod = normalizeCollectMethod(String(input.type || '').trim(), String(input.collectMethod || ''));
+  const oldRest = existing.collectMethod === 'rest'; const newRest = newMethod === 'rest';
+  const bothSsh = !oldRest && !newRest; const bothRest = oldRest && newRest;
+  return accessMoved(
+    { host: existing.host, username: existing.username || '',
+      port: bothSsh ? (existing.sshPort || 22) : '', httpsPort: bothRest ? (existing.httpsPort || 443) : '' },
+    { host: String(input.host || '').trim(), username: String(input.username || '').trim(),
+      port: bothSsh ? Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22)) : '',
+      httpsPort: bothRest ? Math.max(1, Math.min(65535, Math.floor(Number(input.httpsPort)) || 443)) : '' },
+    ['host', 'username', 'port', 'httpsPort']);
+}
+
 export function saveDevice(input = {}) {
   const db = load();
   const issue = deviceInputIssue(input);
@@ -118,20 +140,8 @@ export function saveDevice(input = {}) {
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
   const dev = existing || { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
-  // v2.607(감사 SEC2607-07·LEFT2607-06): host 만 보던 것을 공용 판정(host·username·SSH 포트·REST 포트)으로 — 계정·포트를
-  //   바꿔도 옛 비밀번호가 새 접속처로 시도됐다. agent(수집 엣지) 변경은 승계한다(위임 수집에 필요, 장비는 같다).
-  //   포트는 그 포트를 **이전·새 수집 방식이 둘 다 쓸 때만** 비교한다(CSV 내보내기는 REST 가 아니면 httpsPort 를 비운다 —
-  //   bulk.js — 쓰지 않는 포트의 기본값 복원으로 비밀을 버리면 거짓 폐기다).
-  const newMethod = normalizeCollectMethod(type, String(input.collectMethod || ''));
-  const oldRest = existing?.collectMethod === 'rest'; const newRest = newMethod === 'rest';
-  const bothSsh = !!existing && !oldRest && !newRest; const bothRest = !!existing && oldRest && newRest;
-  const moved = !!existing && accessMoved(
-    { host: existing.host, username: existing.username || '',
-      port: bothSsh ? (existing.sshPort || 22) : '', httpsPort: bothRest ? (existing.httpsPort || 443) : '' },
-    { host, username,
-      port: bothSsh ? Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22)) : '',
-      httpsPort: bothRest ? Math.max(1, Math.min(65535, Math.floor(Number(input.httpsPort)) || 443)) : '' },
-    ['host', 'username', 'port', 'httpsPort']);
+  // v2.607(감사 SEC2607-07·LEFT2607-06) → v2.770(R5-E3-4): 판정은 sanAccessMoved 하나(연결 테스트와 공유).
+  const moved = sanAccessMoved(existing, input);
   const password = String(input.password ?? '');
   let droppedSecrets = [];
   if (password) dev.password = password;

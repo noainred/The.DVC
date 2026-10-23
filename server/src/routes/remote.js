@@ -11,18 +11,18 @@ import { scopedVcenterIds } from '../auth/scope.js';
 import { mergeScopedList } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03
 import {
   getConfig, getConfigSafe, saveConfig,
-  listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping,
+  listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
   listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
 } from '../proxy/registry.js';
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
-import { provision, deprovision } from '../proxy/provision.js';
+import { provision, deprovision, markDeployed } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
 import { issueRdpTicket, rdpCredsIssue } from '../proxy/rdpTicket.js';
 import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
-import { targetHostScopeIssue } from '../proxy/targetHostScope.js'; // v2.579: 라우트와 게이트웨이가 같은 판정을 쓴다
+import { targetHostScopeIssue, resolveScopedTarget, mappingTargetScopeIssue } from '../proxy/targetHostScope.js'; // v2.579: 라우트와 게이트웨이가 같은 판정을 쓴다
 export const remoteRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -70,6 +70,9 @@ const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 // `targetHostScopeIssue` 는 v2.579 에 `proxy/targetHostScope.js` 로 옮겼다(ARCH-05). 테스트 호환 재수출.
 export { targetHostScopeIssue };
 
+/** vCenter → 그 vCenter 의 중계 프록시 id(배정 없으면 'default') — 범위 판정(resolveScopedTarget)이 같은 중계 경로의 충돌을 볼 때 쓴다. */
+export const proxyIdOf = (vc) => resolveProxy(vc).id;
+
 // v2.599(AUTHZ-2599-02): probe·quick-connect 는 body.vcenterId 로 중계 프록시를 고른다(resolveProxy). 그 값을 범위 검사
 //   없이 쓰면 v2.598 이 /proxies 에서 숨긴 범위 밖 프록시의 이름·proxyHost 가 응답으로 새고, 그 중계에 매핑·SSH 탐침이
 //   생긴다. 범위 계정이 범위 밖 vCenter 를 지정하면 404(존재 은닉 — scope 규칙). 비어 있으면 기본 프록시다(/proxies 도 보인다).
@@ -89,7 +92,9 @@ export function scopedAdminMappingIssue(user, m) {
   if (user?.role !== 'admin') return null;
   const allowed = scopedVcenterIds(user, store.get());
   if (!allowed) return null;
-  return targetHostScopeIssue(store.get(), allowed, m?.targetHost) || vcenterScopeIssue(allowed, m?.vcenterId);
+  // v2.770(점검 R5-E5-1): 대상 문자열만이 아니라 (vcenterId, targetHost) 쌍과 매핑의 중계까지 본다(WS mappingAccessIssue 와 같은 판정).
+  return targetHostScopeIssue(store.get(), allowed, m?.targetHost) || vcenterScopeIssue(allowed, m?.vcenterId)
+    || mappingTargetScopeIssue(store.get(), allowed, m, { proxyIdOf });
 }
 
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
@@ -104,7 +109,11 @@ remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
     const vcIssue = vcenterScopeIssue(scopedVcenterIds(req.user, store.get()), vcenterId);
     if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
   }
-  const proxy = resolveProxy(vcenterId);
+  // v2.770(점검 R5-E5-1): 범위 계정은 (vcenterId, targetHost) 쌍으로 — 비었으면 일치 객체에서 유일하게 유도한 vCenter 의 중계로 나간다.
+  //   예전에는 vcenterId 를 비우면 기본 프록시(범위 밖 법인 망일 수 있다)로 같은 IP 를 ping·포트 점검했다. 전체 범위 계정은 그대로.
+  const tgt = resolveScopedTarget(store.get(), scopedVcenterIds(req.user, store.get()), targetHost, vcenterId, { proxyIdOf });
+  if (tgt.issue) return res.status(403).json({ ok: false, reason: tgt.issue });
+  const proxy = resolveProxy(tgt.vcenterId);
   if (!proxy.deploy?.host || !proxy.deploy?.username) {
     return res.json({ ok: false, method: 'none', proxyName: proxy.name, reason: `프록시 '${proxy.name}'에 SSH(자동배포) 설정이 없어 사전 점검을 할 수 없습니다.` });
   }
@@ -341,7 +350,7 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
     if (!proxy.deploy?.enabled) continue;
     const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
     const r = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
-    if (r.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
+    if (r.ok) markDeployed(ms); // v2.770(점검 R5-E5-4): 블록에서 건너뛴(형식이 깨진) 매핑은 active 가 아니라 error
     results.push({ proxy: proxy.name, ...r });
   }
   res.json({ ok: results.every((r) => r.ok), results, ...(allowed ? { scoped: true, omittedOutOfScope } : {}) });
@@ -359,11 +368,42 @@ remoteRouter.post('/mappings', adminOnly, async (req, res) => {
     const vcIssue = vcenterScopeIssue(allowed, vcenterId);
     if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
   }
-  const r = addMapping({ ...(req.body || {}), owner: req.user.username, ephemeral: false });
+  // v2.770(점검 R5-E5-1): 범위 admin 은 (vcenterId, targetHost) 쌍 — 비었으면 유도한 vCenter 를 매핑에 저장하고 그 vCenter 의 중계로 만든다.
+  //   중계(proxyId)를 직접 지정해 다른 법인 망으로 돌리는 것도 막는다(그 vCenter 의 배정 중계만). 전체 범위 admin 은 예전 그대로.
+  const body = { ...(req.body || {}) };
+  {
+    const allowed = scopedVcenterIds(req.user, store.get());
+    if (allowed) {
+      const tgt = resolveScopedTarget(store.get(), allowed, body.targetHost, body.vcenterId, { proxyIdOf });
+      if (tgt.issue) return res.status(403).json({ ok: false, reason: tgt.issue });
+      if (body.proxyId && String(body.proxyId) !== proxyIdOf(tgt.vcenterId)) {
+        return res.status(403).json({ ok: false, reason: '범위 제한 계정은 중계 서버를 직접 고를 수 없습니다 — 대상 vCenter 에 배정된 중계로 만들어집니다.' });
+      }
+      body.vcenterId = tgt.vcenterId;
+      delete body.proxyId;
+    }
+  }
+  const r = addMapping({ ...body, owner: req.user.username, ephemeral: false });
   if (!r.ok) return res.status(400).json(r);
   await provision(r.mapping);
   res.json({ ok: true, mapping: getMapping(r.mapping.id) });
 });
+
+/*
+ * v2.770(점검 R5-E5-5): 재사용 매핑 재프로비저닝 간격 — 중계(proxyId)마다 마지막 시도 시각을 메모리에 둔다(재기동하면 비어 한 번 더 시도할 뿐이다).
+ *   키를 매핑이 아니라 중계로 두는 이유: SSH 배포 모드는 매핑 하나를 고쳐도 그 프록시 전체를 다시 배포·reload 한다(여러 사용자의 error 매핑이
+ *   한꺼번에 재시도해도 그 프록시 reload 는 간격당 한 번). 항목 수는 프록시 수로 묶인다.
+ */
+export const REPROVISION_RETRY_MS = 30_000;
+const _provisionAt = new Map();
+const provKey = (m) => String(m?.proxyId || 'default');
+function noteProvisionAttempt(m, now = Date.now()) { _provisionAt.set(provKey(m), now); }
+function provisionRetryDue(m, now = Date.now()) {
+  const last = _provisionAt.get(provKey(m));
+  return last == null || now - last >= REPROVISION_RETRY_MS;
+}
+/** 테스트 전용 — 재시도 간격 기록을 비운다. */
+export function _resetProvisionRetryForTest() { _provisionAt.clear(); }
 
 // One-click connect from a VM detail: reuse an existing mapping for the same
 // target+port+protocol, else create+provision one. 매핑 생성=프록시 경유 터널 개통이므로
@@ -372,7 +412,10 @@ remoteRouter.post('/mappings', adminOnly, async (req, res) => {
 remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, res) => {
   const { protocol = 'ssh', targetHost, vcenterId, name } = req.body || {};
   const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
-  const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);
+  // v2.770(점검 R5-E5-4): 포트는 정수 1~65535 만(빈 값 = 기본). 예전 'Number(x) || 기본' 은 70000·-1·1.5 를 매핑에 저장했다.
+  const portIn = mappingPortOf((req.body || {}).targetPort);
+  if (Number.isNaN(portIn)) return res.status(400).json({ ok: false, reason: '대상 포트는 1~65535 사이의 정수여야 합니다.' });
+  const targetPort = portIn ?? (proto === 'rdp' ? 3389 : 22);
   if (!targetHost) return res.status(400).json({ ok: false, reason: '대상 IP가 필요합니다.' });
   {
     // v2.320 scope: 범위 계정은 범위 내 인벤토리 대상에만 터널 매핑 생성(범위 밖 피벗 준비 차단).
@@ -382,16 +425,38 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, re
     if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
   }
 
+  // v2.770(점검 R5-E5-1): 범위 계정은 (vcenterId, targetHost) 쌍 — 비었으면 일치 객체에서 유일하게 유도하고, 그 vCenter 를 매핑에 저장해
+  //   WS·/rdp/:id 재검사가 같은 쌍으로 본다. 전체 범위 계정은 요청 vcenterId 그대로(예전과 같다).
+  const tgt = resolveScopedTarget(store.get(), scopedVcenterIds(req.user, store.get()), targetHost, vcenterId, { proxyIdOf });
+  if (tgt.issue) return res.status(403).json({ ok: false, reason: tgt.issue });
+  const vc = tgt.vcenterId;
+  const pid = proxyIdOf(vc);
+
   // Reuse this user's existing mapping for the same target, else create an
   // ephemeral one owned by them (auto-removed 1 day after last use).
-  let m = listMappings().find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto && (!x.owner || x.owner === req.user.username));
+  // v2.770(점검 R5-E5-2): 같은 대상이라도 **같은 중계(proxyId)·같은 vCenter** 의 매핑만 재사용한다 — 예전에는 targetHost·포트·프로토콜만 봐서
+  //   RFC1918 대역이 겹치는 다른 법인(폴란드 10.0.0.5)의 매핑을 미국 VM 접속에 돌려줘 다른 장비로 접속하고 비밀번호도 그쪽으로 갔다.
+  //   소유자 없는(레거시) 매핑은 admin 에게만 — 비-admin 에게 돌려주면 WS(mappingAccessIssue)가 어차피 mapping-denied 로 닫는다.
+  //   그 판정은 listMappingsForUser(비-admin = 자기 소유만, admin = 전부) 하나를 쓴다 — 역할 비교를 여기 복제하지 않는다.
+  let m = listMappingsForUser(req.user).find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto
+    && String(x.proxyId || 'default') === pid && String(x.vcenterId || '') === vc
+    && (!x.owner || x.owner === req.user.username));
   if (!m) {
-    const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId, protocol: proto, targetHost, targetPort, owner: req.user.username, ephemeral: true });
+    const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId: vc, protocol: proto, targetHost, targetPort, owner: req.user.username, ephemeral: true });
     if (!r.ok) return res.status(400).json(r);
+    noteProvisionAttempt(r.mapping);
     await provision(r.mapping);
     m = getMapping(r.mapping.id);
   } else {
     touchMapping(m.id); m = getMapping(m.id);
+    // v2.770(점검 R5-E5-5): 첫 프로비저닝이 실패한(error·pending) 매핑을 그대로 돌려주면 장애가 풀린 뒤에도 그 대상은 영영 포트가 안 열린
+    //   매핑으로 간다. active·manual 이 아니면 다시 프로비저닝한다 — 단 중계마다 REPROVISION_RETRY_MS 에 한 번만(SSH 배포 모드는 매번
+    //   그 프록시 전체를 다시 배포·reload 한다 — provision.js 가 직렬화하는 이유와 같은 reload 폭주 방지). manual 은 자동 구성이 없어 재시도하지 않는다.
+    if (m && m.status !== 'active' && m.status !== 'manual' && provisionRetryDue(m)) {
+      noteProvisionAttempt(m);
+      await provision(m);
+      m = getMapping(m.id);
+    }
   }
   const p = mappingProxy(m);
   res.json({ ok: true, mapping: m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host });
@@ -431,7 +496,8 @@ remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
   if (scopedAdminMappingIssue(req.user, m)) return res.status(404).end(); // v2.606 AUTHZ2606-03
   if (req.user?.role !== 'admin') {
     if (m.owner !== req.user?.username) return res.status(404).end();
-    if (targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m.targetHost)) return res.status(404).end();
+    // v2.770(점검 R5-E5-1): (vcenterId, targetHost) 쌍 + 매핑의 중계 — WS mappingAccessIssue 와 같은 판정.
+    if (mappingTargetScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m, { proxyIdOf })) return res.status(404).end();
   }
   const proxyHost = mappingProxy(m).proxyHost;
   const host = proxyHost || m.targetHost;

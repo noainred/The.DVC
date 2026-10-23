@@ -14,7 +14,7 @@ import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, mas
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
@@ -359,7 +359,7 @@ api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, (req, res) 
  * 연결 테스트 — 등록 전/수정 중 값으로 실제 접속해 본다. 스냅샷은 저장하지 않는다.
  * 보안: adminOnly + deviceInputIssue(SSRF·형식) 선검증 + 감사로그. **host 를 바꿔 테스트할 때
  * 저장된 비밀번호를 이월하지 않는다**(uagmon M3 — host 바꿔치기로 자격증명이 공격자 서버로
- * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 같은 host 일 때만 저장분을 쓴다.
+ * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 접속처(host·계정·포트·방식)가 저장분과 같을 때만 저장분을 쓴다(v2.770 R5-E3-4).
  */
 api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, async (req, res) => {
   const b = req.body || {};
@@ -368,7 +368,8 @@ api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, async (req, res) => 
   let password = String(b.password ?? '');
   if (!password && b.id) {
     const saved = getDeviceWithSecret(b.id);
-    if (saved && saved.host === String(b.host || '').trim()) password = saved.password || '';
+    // v2.770(점검 R5-E3-4): host 만 보던 것을 저장 경로와 **같은 판정**(host·username·포트·수집 방식 — registry.sanAccessMoved)으로.
+    if (saved && !sanAccessMoved(saved, b)) password = saved.password || '';
   }
   // body 를 그대로 수집기에 넘기지 않는다 — vfId 는 CLI(`setcontext <vfId>;`)에 삽입되므로 저장 경로와
   // 같은 정규화(정수 1..128 / 포트 1..65535)를 거친다(v2.416 보안 감사 M-1).

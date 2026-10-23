@@ -150,7 +150,9 @@ ${dirs.map((d) => `
 if [ -d "\${SRC%/}/${d}" ]; then
   log "복사: ${d}/ (디렉터리)"
   mkdir -p "\${DST%/}/${d}"
-  copy_one "\${SRC%/}/${d}/" "\${DST%/}/${d}/" || COPY_OK=0
+  # v2.770(점검 R5-E1-6 검증 중 발견): 'd/' 를 넘기면 rsync 는 내용을 복사하지만 cp -a(rsync 없는 최소 설치)는 대상 안에 d/d 를
+  #   만들어 검증이 실패했다(exit 5) — '/.' 는 둘 다 '내용' 으로 읽는다.
+  copy_one "\${SRC%/}/${d}/." "\${DST%/}/${d}/" || COPY_OK=0
 fi`).join('')}
 
 [ "\$COPY_OK" = "1" ] || { log "ERROR 복사 중 오류 — 중단합니다. 서비스를 다시 켜면 기존 경로로 정상 동작합니다."; exit 4; }
@@ -192,9 +194,38 @@ if ! id "\$RUN_USER" >/dev/null 2>&1; then
   log "      (원본은 그대로입니다. 서비스만 다시 시작하면 이전 상태로 돌아갑니다: systemctl start \$SERVICE)"
   exit 6
 fi
-chown -R "\$RUN_USER":"\$RUN_USER" "\$DST" || { log "ERROR chown 실패 — 새 경로를 서비스 계정이 읽을 수 없습니다."; exit 7; }
-chmod 700 "\$DST" || true
-find "\$DST" -maxdepth 2 -type f -name '*.db*' -exec chmod 600 {} \\; || true
+# v2.770(점검 R5-E1-6): **이 스크립트가 복사한 DB 항목만** 넘긴다(대상 디렉터리 자체는 비재귀). 예전 'chown -R "\$DST"' 는 대상이
+#   CONFIG_DIR(기본 경로 복귀)일 때 install.sh 가 일부러 root 소유로 둔 release-signing-keys.conf(INJPKG-01 — vp_chown_tree_except)까지
+#   서비스 계정 소유로 바꿨다 → root 로 도는 서명 확인이 그 파일의 키 추가를 버린다(upgrade/signature.js). 같은 이유로 *.db* chmod 600 도
+#   복사한 것만(대상이 CONFIG_DIR 이면 외부 프로그램이 읽는 ipam.db 까지 600 이 됐다). 링크는 따라가지 않는다(-h).
+same_dir() {  # \$1 \$2 — 같은 디렉터리인가(끝 / · 상대 표기 무시)
+  local a b
+  a=\$(realpath -m -- "\$1" 2>/dev/null || printf '%s' "\${1%/}")
+  b=\$(realpath -m -- "\$2" 2>/dev/null || printf '%s' "\${2%/}")
+  [ "\$a" = "\$b" ]
+}
+CHOWN_OK=1
+chown_item() {  # \$1=복사한 DB 항목(파일 또는 디렉터리)
+  if [ -e "\$1" ] || [ -L "\$1" ]; then chown -R -h -- "\$RUN_USER":"\$RUN_USER" "\$1" || CHOWN_OK=0; fi
+}
+chown -h -- "\$RUN_USER":"\$RUN_USER" "\$DST" || CHOWN_OK=0
+if [ -f "\$LOG" ]; then chown -h -- "\$RUN_USER":"\$RUN_USER" "\$LOG" || CHOWN_OK=0; fi
+${files.map((f) => `for SFX in "" "-wal" "-shm" ".invalid"; do
+  P="\${DST%/}/${f}\${SFX}"
+  chown_item "\$P"
+  if [ -f "\$P" ] && [ ! -L "\$P" ]; then chmod 600 "\$P" || true; fi
+done
+`).join('')}${dirs.map((d) => `if [ -d "\${DST%/}/${d}" ] && [ ! -L "\${DST%/}/${d}" ]; then
+  chown_item "\${DST%/}/${d}"
+  find "\${DST%/}/${d}" -maxdepth 1 -type f -name '*.db*' -exec chmod 600 {} + || true
+fi
+`).join('')}[ "\$CHOWN_OK" = "1" ] || { log "ERROR chown 실패 — 새 경로를 서비스 계정이 읽을 수 없습니다."; exit 7; }
+if same_dir "\$DST" "\$CONFIG_DIR"; then
+  # 기본 경로(CONFIG_DIR) 복귀 — 디렉터리 권한은 install.sh 가 정한 값(0750)을 그대로 둔다.
+  log "대상이 CONFIG_DIR 입니다 — 디렉터리 권한은 바꾸지 않습니다."
+else
+  chmod 700 "\$DST" || true
+fi
 log "권한 설정 완료"
 
 # 6) 포탈 설정에 새 경로 기록 — 기동 시 이 파일을 읽어 DB 를 새 경로에서 연다

@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { stripComments } from '../test/_stripComments.js';
-import { restoreStateText, edgesOmittedText } from './PortalBackup.jsx';
+import { restoreStateText, restoreWarnText, edgesOmittedText } from './PortalBackup.jsx';
 
 const src = stripComments(fs.readFileSync(new URL('./PortalBackup.jsx', import.meta.url), 'utf8'));
 
@@ -46,10 +46,26 @@ describe('C5-01 — 엣지 사본을 뺀 백업 경고', () => {
 });
 
 describe('v2.769 R4-D1-2 — 예약 복원 적용 경고 표시', () => {
-  it('적용 결과의 warnings(되살린 엣지 토큰·재로그인)를 마지막 적용 문구에 붙이고 경고 배너로 띄운다', () => {
-    const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: ['a.json'], failed: [], rejected: [], warnings: ['백업에만 있던 엣지 토큰 2개를 되살렸습니다'] } });
-    expect(t.last).toContain('주의: 백업에만 있던 엣지 토큰 2개');
+  // v2.770(점검 R5-E1-2): 서버 실제 모양은 `{file, reason}` 객체다(stagedRestore — audit2769b 가 고정). 예전 테스트는 문자열을 넣어 통과했고
+  //   실제 화면은 경고 0개 + 배너만이었다.
+  it('적용 결과의 warnings(되살린 엣지 토큰·재로그인)를 마지막 적용 문구에 붙이고 경고 배너로 띄운다 — 서버 실제 모양 {file, reason}', () => {
+    const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: ['a.json'], failed: [], rejected: [], warnings: [
+      { file: 'central-agent-tokens.json', reason: '백업에만 있던 엣지 토큰 2개를 되살렸습니다' },
+      { file: 'users.json', reason: '모든 계정의 세션 버전을 올렸습니다' },
+    ] } });
+    expect(t.last).toContain('주의: central-agent-tokens.json: 백업에만 있던 엣지 토큰 2개');
+    expect(t.last).toContain('users.json: 모든 계정의 세션 버전');
+    expect(t.last).not.toContain('[object Object]');
     expect(t.warn).toBe(true);
+  });
+  it('문자열 경고(백업 생성 등)도 그대로 · 모르는 모양은 버린다', () => {
+    const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: [], failed: [], rejected: [], warnings: ['백업에만 있던 엣지 토큰 2개를 되살렸습니다', null, 7, {}] } });
+    expect(t.last).toContain('주의: 백업에만 있던 엣지 토큰 2개를 되살렸습니다');
+    expect(t.last.split('주의: ')[1]).toBe('백업에만 있던 엣지 토큰 2개를 되살렸습니다');
+    expect(restoreWarnText({ file: 'a.json', reason: 'r' })).toBe('a.json: r');
+    expect(restoreWarnText({ reason: 'r' })).toBe('r');
+    expect(restoreWarnText('s')).toBe('s');
+    expect(restoreWarnText(null)).toBe('');
   });
   it('경고가 없으면 예전과 같다', () => {
     const t = restoreStateText({ pending: null, last: { at: 1, ok: true, applied: ['a.json'], failed: [], rejected: [] } });

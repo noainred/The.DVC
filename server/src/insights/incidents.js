@@ -60,11 +60,20 @@ export function buildIncidents(st, snap, { limit = 200, allowed = null, now = Da
   // 3) vCenter 수집 실패도 인시던트로 표면화(알림 채널 미설정이어도 보이게).
   // snap 은 store 전체이므로 여기서 직접 scope 를 적용한다(허용 vCenter 만).
   // v2.769(점검 R4-D2-05): 알림 엔진 vcenterDown 규칙이 같은 키(vc:<id>)로 발송할 때마다 recent 에 fired 를 남긴다 —
-  //   그때 합성 이벤트를 또 넣으면 한 장애가 타임라인·24h·일자별에 두 번 이상 셌다. 같은 key 의 fired 가 없을 때만 합성한다.
-  const firedKeys = new Set(events.filter((e) => e.kind === 'fired').map((e) => e.key));
+  //   그때 합성 이벤트를 또 넣으면 한 장애가 타임라인·24h·일자별에 두 번 이상 셌다.
+  // v2.770(점검 R5-E1-4): 생략 조건은 '그 key 의 **가장 최근** 사건이 fired(그 뒤 resolved 없음)' 이다. 예전에는 같은 key 의
+  //   fired 가 recent 에 하나라도 있으면 시각과 무관하게 생략해, 발생→해소→재발(쿨다운 안이라 재발송 없음)이나 vcenterDown 규칙을
+  //   끈 뒤의 재발이 타임라인·24h·일자별 어디에도 없었다. 시각 비교(fired ts >= 시작)는 쓰지 않는다 — vcFailureStartTs 가
+  //   receivedAt 으로 폴백하면 같은 장애의 fired 보다 늦은 시각이 나와 중복을 되살린다.
+  //   recent 는 최신이 앞이다(alerts.js pushRecent unshift) — 같은 ts 면 앞의 것이 최신.
+  const latestByKey = new Map();
+  for (const e of events) {
+    const cur = latestByKey.get(e.key);
+    if (!cur || e.ts > cur.ts) latestByKey.set(e.key, e);
+  }
   for (const v of snap.vcenters || []) {
     if (allowed && !allowed.has(v.id)) continue;
-    if (v.status === 'unreachable' && !firedKeys.has(`vc:${v.id}`)) {
+    if (v.status === 'unreachable' && latestByKey.get(`vc:${v.id}`)?.kind !== 'fired') {
       const t = vcFailureStartTs(v);
       events.push({ at: t == null ? null : new Date(t).toISOString(), ts: t, ...(t == null ? { timeUnknown: true } : {}), key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
     }

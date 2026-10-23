@@ -47,6 +47,17 @@ export function edgesOmittedText(o) {
  * v2.768(점검 R3-C5-02): 복원 예약·적용 상태 문구(순수). 복원은 설정 파일을 예약하고 **재시작 때** 적용한다 —
  * 바로 덮으면 실행 중인 모듈의 다음 저장이 복원을 되돌렸다. 반환 { pending, last, interrupted } — 각 문구 또는 null · warn(호박색 테두리).
  */
+/** v2.770(점검 R5-E1-2): 복원·백업 경고 한 건 → 문구. `{file, reason}` 객체와 문자열 둘 다(서버 routes/admin/backupNetSec.js backupWarnText 와 같은 규칙). */
+export function restoreWarnText(w) {
+  if (typeof w === 'string') return w;
+  if (w && typeof w === 'object') {
+    const file = typeof w.file === 'string' ? w.file : '';
+    const reason = typeof w.reason === 'string' ? w.reason : '';
+    return file && reason ? `${file}: ${reason}` : (reason || file);
+  }
+  return '';
+}
+
 export function restoreStateText(r) {
   const out = { pending: null, last: null, interrupted: null, warn: false };
   if (!r || typeof r !== 'object') return out;
@@ -64,7 +75,8 @@ export function restoreStateText(r) {
     else if (l.reason) out.last = `${fmtTime(l.at)} 기동 때: 예약 복원을 적용하지 못했습니다 — ${l.reason}`;
     else out.last = `${fmtTime(l.at)} 기동 때 예약 복원 적용${l.source ? `(${l.source})` : ''}: ${applied}개${failed.length ? ` · 실패 ${failed.length}개(${failed.slice(0, 5).map((f) => f.file).join(', ')})` : ''}${rejected ? ` · 거부 ${rejected}개` : ''}`;
     // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
-    const warns = Array.isArray(l.warnings) ? l.warnings.filter((w) => typeof w === 'string' && w) : [];
+    // v2.770(점검 R5-E1-2): 서버 경고는 `{file, reason}` 객체다(stagedRestore — 예전 문자열 필터는 0개를 남기고 배너만 켰다). 문자열도 받는다.
+    const warns = Array.isArray(l.warnings) ? l.warnings.map(restoreWarnText).filter(Boolean) : [];
     if (out.last && warns.length) out.last += ` — 주의: ${warns.slice(0, 5).join(' · ')}`;
   }
   out.warn = !!(out.pending || r.interrupted || (l && (l.ok === false || (Array.isArray(l.warnings) && l.warnings.length))));

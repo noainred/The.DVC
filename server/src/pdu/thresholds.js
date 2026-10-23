@@ -60,7 +60,8 @@ export const THRESHOLD_SPEC = [
  *   먹지 않았고 중앙 목록 배지(중앙 임계)와 엣지 경보(엣지 로컬 임계)가 갈렸다. 이제 pdu-config 응답이 중앙 값을 싣고
  *   (`thresholdsForEdge` — 중앙 파일이 있을 때만) 엣지가 `applyCentralThresholds` 로 메모리에 얹는다(intervals 와 같은 모양).
  *   · 실효 임계치 = **중앙 지정값 > 엣지 파일 > 기본값**. 엣지 파일은 덮어쓰지 않는다(중앙 값은 메모리 — 재시작 직후 첫 pull 전까지는 엣지 파일).
- *   · 중앙이 값을 안 주면(옛 중앙·중앙 파일 없음·중앙 파일 손상 → thresholdsUnreadable) 엣지는 **직전 값을 유지**한다.
+ *   · 중앙이 값을 안 주면(옛 중앙·중앙 파일 손상 → thresholdsUnreadable) 엣지는 **직전 값을 유지**한다.
+ *     v2.770(점검 R5-E1-1): 중앙은 **관리자가 바꾼 키만** 보낸다(아래 thresholdsForEdge) — 중앙 파일이 없거나 지정 키가 없으면 `{}`(중앙 지정 없음).
  *   · 엣지 `PDU_THRESHOLDS_LOCAL=1` 이면 중앙 값을 무시한다(현장 고정 탈출구 — PDU_INTERVALS_LOCAL 과 같은 뜻).
  *   ⚠ **알림 채널 설정(설정 › 알림 채널)은 배포하지 않는다** — 엣지는 자기 알림 설정으로 보낸다. 엣지에 채널이 없으면
  *     위임 PDU 경보는 여전히 아무 데도 가지 않는다(남은 일 — 채널 주소를 28곳에 퍼뜨릴지는 사람이 정할 문제).
@@ -96,14 +97,40 @@ export function loadThresholds() {
 /** 중앙 임계치 파일을 못 읽었으면 { at, reason }, 아니면 null(pdu-config 가 thresholds 대신 thresholdsUnreadable 을 싣는다). */
 export function pduThresholdsLoadError() { loadFileThresholds(); return _loadErr.get(); }
 
+/*
+ * v2.770(점검 R5-E1-1): **관리자가 실제로 바꾼 키만** 엣지에 내려보낸다. v2.769 는 기본값을 채운 전체 객체(loadFileThresholds)를 보내,
+ *   중앙 파일이 한 번이라도 저장되면(saveThresholds·화면은 늘 전 키를 쓴다) 모든 엣지의 현장 조정값(32A 뱅크 bankWarnA·더운 DC
+ *   tempWarnC)과 enabled 가 중앙 값으로 덮였다 — 중앙이 PDU 가 없어 경보를 꺼 두면(enabled:false) 전 엣지 위임 PDU 경보가 꺼졌다(재현).
+ *   파일에는 전 키가 있으므로 원문 키로는 '지정' 을 가를 수 없다 → saveThresholds 가 **이전 파일값과 달라진 키**를 예약 키
+ *   `_assigned`(배열)에 누적하고, thresholdsForEdge 는 그 키만 싣는다. loadFileThresholds 는 DEFAULTS 키만 읽으므로 옛 판본과 호환된다.
+ *   · enabled 는 배포하지 않는다(엣지마다 PDU 유무가 다르다 — 중앙의 '끔' 이 전 법인 경보를 끄면 안 된다). 엣지도 받지 않는다.
+ *   · 표지 없는 기존 파일(v2.769 이하에서 저장)은 아무 키도 보내지 않는다 = `{}`. **null 이 아니라 {} 다** — 엣지는 null(필드 없음)이면
+ *     직전 값을 유지하므로 v2.769 가 이미 넣은 전체 세트가 메모리에 남는다. {} 는 '중앙 지정 없음' 으로 그 세트를 지운다.
+ */
+const ASSIGNED_KEY = '_assigned';
+const DEPLOYABLE = Object.keys(DEFAULTS).filter((k) => k !== 'enabled');
+
+/** 파일의 `_assigned` 표지(알려진 배포 키만). 파일이 없거나 못 읽으면 []. */
+function loadAssignedKeys() {
+  try {
+    if (!fs.existsSync(FILE)) return [];
+    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const a = p && typeof p === 'object' && !Array.isArray(p) && Array.isArray(p[ASSIGNED_KEY]) ? p[ASSIGNED_KEY] : [];
+    return DEPLOYABLE.filter((k) => a.includes(k));
+  } catch { return []; }
+}
+
 /**
- * 중앙 → 엣지에 내려보낼 임계치. **중앙 파일이 있을 때만**(관리자가 화면에서 저장한 값) — 한 번도 저장하지 않은 중앙이
- * 기본값으로 각 법인이 맞춰 둔 엣지 파일을 덮지 않게 한다(intervalsForEdge '지정한 키만' 과 같은 취지). 없으면 null.
+ * 중앙 → 엣지에 내려보낼 임계치 — 관리자가 바꾼 키(`_assigned`)만. 파일이 없거나 표지가 없으면 `{}`(중앙 지정 없음).
+ * 파일을 못 읽었으면 null(호출부 pdu-config 는 그 전에 thresholdsUnreadable 을 싣는다 — 엣지는 직전 값 유지).
  */
 export function thresholdsForEdge() {
-  if (!fs.existsSync(FILE)) return null;
+  if (!fs.existsSync(FILE)) return {};
   const v = loadFileThresholds();
-  return _loadErr.get() ? null : v;
+  if (_loadErr.get()) return null;
+  const out = {};
+  for (const k of loadAssignedKeys()) out[k] = v[k];
+  return out;
 }
 
 /**
@@ -116,10 +143,10 @@ const CENTRAL_ABS_MAX = 1e7;
 export function applyCentralThresholds(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
   const next = {};
-  for (const k of Object.keys(DEFAULTS)) {
+  // v2.770(점검 R5-E1-1): enabled 는 중앙에서 받지 않는다(DEPLOYABLE) — v2.769 중앙은 전 키를 보내 중앙의 '끔' 이 이 엣지 경보를 껐다.
+  for (const k of DEPLOYABLE) {
     if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
     const v = obj[k];
-    if (k === 'enabled') { if (typeof v === 'boolean') next.enabled = v; continue; }
     if (v === null || v === '') { next[k] = null; continue; }
     if (typeof v !== 'number' && typeof v !== 'string') continue;
     const n = numOrNull(typeof v === 'string' ? v.slice(0, 32) : v);
@@ -127,7 +154,8 @@ export function applyCentralThresholds(obj) {
     next[k] = n;
   }
   const changed = JSON.stringify(next) !== JSON.stringify(_central || {});
-  _central = next;
+  // v2.770(점검 R5-E1-1): 빈 객체 = '중앙 지정 없음' — 직전 중앙 값(v2.769 가 넣은 전체 세트 포함)을 지우고 엣지 파일로 돌아간다.
+  _central = Object.keys(next).length ? next : null;
   return changed;
 }
 
@@ -144,7 +172,12 @@ export function saveThresholds(partial = {}) {
     const v = partial[k];
     next[k] = (v === '' || v == null) ? null : (Number.isFinite(Number(v)) ? Number(v) : cur[k]);
   }
-  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  // v2.770(점검 R5-E1-1): 이전 파일값(없으면 기본값)과 **달라진 배포 키**를 `_assigned` 에 누적한다(한 번 지정한 키는 남는다 — 기본값으로
+  //   되돌려도 '중앙이 그 값을 지정' 한 것이다). 화면은 늘 전 키를 보내므로 '보낸 키' 가 아니라 '바뀐 키' 로 가른다.
+  const assigned = new Set(loadAssignedKeys());
+  for (const k of DEPLOYABLE) if (k in partial && next[k] !== cur[k]) assigned.add(k);
+  const assignedList = DEPLOYABLE.filter((k) => assigned.has(k));
+  atomicWriteFileSync(FILE, JSON.stringify({ ...next, [ASSIGNED_KEY]: assignedList }, null, 2), { mode: 0o600 });
   _loadErr.ok();
   return next;
 }
