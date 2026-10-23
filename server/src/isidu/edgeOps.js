@@ -11,7 +11,7 @@
 import { config, currentVersion } from '../config.js';
 import { pullIsiduConfigNow } from '../agent/isiduConfigPull.js';
 import { cleanEdgeTarget, edgeTargets } from './settings.js';
-import { testTargetPath } from './collect.js';
+import { testTargetPath, sameConnIdentity } from './collect.js';
 import { keyInfo } from './sshKey.js';
 
 const NUDGE_WAIT_MS = 20_000;
@@ -47,8 +47,10 @@ export async function edgeIsiduTest(body) {
   if (_tests >= TEST_MAX) return { status: 429, body: { ok: false, node, reason: `이 엣지에서 연결 시험이 이미 ${_tests}개 진행 중입니다 — 끝난 뒤 다시 누르세요.` } };
   _tests++;
   try {
-    const known = edgeTargets().targets.some((x) => x.id === t.id);
-    const r = await testTargetPath(t, { clearStopId: known ? t.id : '' });
+    // v2.769(점검 R4-D4-06): 저장된(중앙에서 받은) 대상과 접속처·계정이 같을 때만 인증 정지를 푼다 — 편집 중인 다른 값으로 시험이 성공해도
+    //   이 엣지의 주기 수집은 저장된 값으로 로그인한다.
+    const saved = edgeTargets().targets.find((x) => x.id === t.id) || null;
+    const r = await testTargetPath(t, { clearStopId: saved && sameConnIdentity(t, saved) ? t.id : '' });
     _last = { at: Date.now(), op: 'test', ok: !!r.ok, target: t.id, ...(r.ok ? {} : { kind: r.kind || null }) };
     // 시험 중에 키를 새로 만들었으면 곧바로 메인 화면에 보이게 한다(관리자가 그 공개키를 아이실론에 등록해야 한다).
     if (r.keyCreated) import('./push.js').then((m) => m.pushIsiduNow()).catch(() => {});

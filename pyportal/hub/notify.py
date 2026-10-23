@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
-from .pinned import build_pinned_opener, RequestDeadline  # v2.322: 검증 IP 핀(웹훅 리바인딩 TOCTOU 차단)
+from .pinned import build_pinned_opener, RequestDeadline, total_deadline_seconds  # v2.322: 검증 IP 핀(웹훅 리바인딩 TOCTOU 차단)
 import ssl as _ssl
 
 TIMEOUT = 6.0
@@ -165,15 +165,20 @@ class Notifier:
         # v2.322 보안 감사: urlopen 은 host 를 재해석한다(리바인딩 TOCTOU) — 검증된 addresses[0]
         # 로 핀한 opener 로 전송(Host/TLS SNI 는 원 호스트명 유지). 웹훅 TLS 는 기본 검증 사용.
         # v2.768(점검 R3-C3-1): 요청 전체 시한 — 1바이트씩 흘리는 대상이 알림 루프(점검 작업)를 붙잡지 못하게.
-        with RequestDeadline(TIMEOUT) as deadline:
+        # v2.769(점검 R4-D1-1): 전체 시한은 소켓 시한(TIMEOUT)과 따로 — 소켓 시한 × 3(점검과 같은 구조). 같은 값이면
+        #   고RTT 웹훅 대상(연결 + TLS + 왕복)이 정상이어도 시한 초과로 실패했다.
+        total = total_deadline_seconds(TIMEOUT)
+        with RequestDeadline(total) as deadline:
             opener = build_pinned_opener(addresses[0], tls_context=_ssl.create_default_context(),
                                          deadline=deadline)
             try:
                 with opener.open(request, timeout=TIMEOUT) as response:
+                    if deadline.fired:  # v2.769(R4-D1-1): 헤더 도중 끊겨 EOF 를 헤더 끝으로 읽은 응답 — 성공이 아니다
+                        raise TimeoutError(f"웹훅 응답 시간 초과(요청 전체 {total:g}초 · 소켓 {TIMEOUT:g}초)")
                     response.read(512)
             except (OSError, http.client.HTTPException, ValueError):
                 if deadline.fired:     # 워치독이 끊은 것 — 원인을 시한 초과로 알린다
-                    raise TimeoutError(f"웹훅 응답 시간 초과(요청 전체 {TIMEOUT:g}초)") from None
+                    raise TimeoutError(f"웹훅 응답 시간 초과(요청 전체 {total:g}초 · 소켓 {TIMEOUT:g}초)") from None
                 raise
 
     # ---------- 진단 ----------

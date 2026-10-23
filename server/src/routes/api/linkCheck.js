@@ -71,6 +71,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
     if (t(st?.agent)) versions[t(st.agent).toLowerCase()] = ver;
   }
 
+  const nowTs = Date.now();
   const rows = all.map((l) => {
     const r = byId.get(l.id) || null;
     const rep = l.by === 'edge' ? (reports[l.from] || null) : null;
@@ -81,6 +82,9 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
         totalMs: r.total_ms, dnsMs: r.dns_ms, tcpMs: r.tcp_ms, tlsMs: r.tls_ms, httpMs: r.http_ms,
         status: r.status, certDaysLeft: r.cert_days, byNode: r.by_node,
         summary: r.summary, sinceTs: r.since_ts, streak: r.streak,
+        // v2.769(점검 R4-D3-2): 측정 나이(서버 시계) — 화면이 '오래된 측정'(주기 3배 초과)을 ok/fail 로 칠하지 않게 한다.
+        //   클라이언트 시계로 now - ts 를 재면 PC 시계가 틀린 만큼 판정이 흔들린다. ts 를 못 읽으면 null(0 이 아니다).
+        ageMs: (Number.isFinite(Number(r.ts)) && Number(r.ts) > 0) ? Math.max(0, nowTs - Number(r.ts)) : null,
       } : null,
       // 엣지 측정분의 '왜 비었나' 재료 — 화면이 문구를 만든다(서버가 문구를 만들지 않는다).
       ...(l.by === 'edge' ? {

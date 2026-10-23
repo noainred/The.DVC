@@ -28,8 +28,8 @@ import { fleetRev } from '../insights/fleetRev.js';
 import { fleetPartialsSummary } from '../central/fleet.js'; // v2.607 LEFT2607-02
 import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
 import { logAudit } from '../audit.js';
-import { detectAnomalies } from '../insights/anomaly.js';
-import { forecastCapacity } from '../insights/forecast.js';
+import { detectAnomalies, anomalyCfgArgs } from '../insights/anomaly.js';
+import { forecastCapacity, forecastCfgArgs } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
 import { buildTopology } from '../insights/topology.js';
 import { buildGraph } from '../insights/graph.js';
@@ -295,7 +295,7 @@ insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) =>
  * v2.689(I2): 이상 탐지·예측은 metrics DB 를 여러 번 훑는 가장 비싼 조회다. 두 가지를 막는다.
  *  ① 캐시 키에 `req.originalUrl` 전체를 쓰면 의미 없는 쿼리(`&_=난수`)만 바꿔도 single-flight·60초 기억을 우회해 매번 재계산한다
  *     → 키는 **계산이 실제로 읽는 인자를 클램프한 값**으로만 만들고, 계산에도 그 값을 넘긴다(키와 계산이 같은 값을 본다).
- *     클램프 식은 detectAnomalies·forecastCapacity 의 식과 같다(그 함수들이 다시 클램프해도 결과가 같다 — 멱등).
+ *     v2.769(R4-D2-06): 정규화는 계산 모듈의 함수 하나(anomalyCfgArgs·forecastCfgArgs)다 — 계산이 다시 정규화해도 결과가 같다(멱등).
  *  ② 키가 다른 계산도 **전역 동시 1건**으로 줄 세운다(진행 중 계산 뒤에 붙는다). 서로 다른 인자 수십 개가 동시에 들어와도
  *     DB 스캔이 겹치지 않는다. 같은 키의 동시 요청은 snapMemo 가 진행 중 Promise 에 합류시킨다.
  */
@@ -316,20 +316,22 @@ export function _insightsHeavyStats({ reset = false } = {}) {
   if (reset) _heavyPeak = _heavyActive;
   return r;
 }
-const clampNum = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
-/** 이상 탐지 인자(anomaly.js detectAnomalies 와 같은 클램프). */
-function anomalyArgs(q = {}) {
-  return { z: Math.max(2, Number(q.z) || 3.5), windowHours: clampNum(q.windowHours, 1, 168, 24), bucketMin: clampNum(q.bucketMin, 1, 1440, 10) };
+/*
+ * v2.769(점검 R4-D2-06): 인자 정규화는 계산 모듈의 함수(anomalyCfgArgs·forecastCfgArgs)를 그대로 쓴다 — 예전 사본은 z 상한·
+ *   minR2 클램프·정수화가 없어 `z=2.0001`… 이 캐시를 우회하고 직렬 대기열을 늘렸고, `?minR2=` 는 Number('')=0 으로 필터를 풀었다.
+ *   키는 정규화 뒤 값으로 만든다(같은 계산 = 같은 키).
+ */
+/** 이상 탐지 인자(anomaly.js detectAnomalies 와 같은 함수). */
+export function anomalyArgs(q = {}) {
+  return anomalyCfgArgs(q);
 }
-/** 예측 인자(forecast.js forecastCapacity 와 같은 클램프 — 버킷은 1시간 정배수). */
-function forecastArgs(q = {}) {
-  const days = Math.max(3, Math.min(1830, Number(q.days) || 14));
-  const bucketH = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number(q.bucketMin) || 60)) / 60));
-  const out = { days, bucketMin: bucketH * 60 };
-  if (q.minR2 != null) out.minR2 = Number(q.minR2);
+/** 예측 인자(forecast.js forecastCapacity 와 같은 함수 — 버킷은 1시간 정배수). */
+export function forecastArgs(q = {}) {
+  const out = forecastCfgArgs(q);
   if (q.vcenterId) out.vcenterId = String(q.vcenterId);
   return out;
 }
+
 const argsKey = (o) => Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join('&');
 
 // --- AI 이상탐지 ---

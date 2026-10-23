@@ -129,3 +129,6 @@
   · 인증을 끈 목 서버의 익명 사용자는 슈퍼 관리자가 아니다 — 아이실론 설정이 필요한 실제 프로세스 테스트는 settings 모듈로 미리 써 둔다(`scanRestart2737`).
   · 같은 릴리스의 점검(6축 → 6그룹)은 `docs/AUDIT-2026-10-15.md`. 동작 변화: 전송 속도 설정 범위 밖 숫자 400 · 키 파일 형식 오류만 있으면 서명 필수 · 전체 소비 전력 `network.noTime` 제거(`staleBy`).
 
+  · v2.769(점검 R4-D4): '조사마다 + 변화 없으면 생략' 의 비교 기준은 **마지막으로 자동 발송에 성공한 조사**(`scanSentScanId`) — 없으면 비교 없이 보낸다(dirusage v2.768 C4-3 과 같은 규칙).
+    추이는 최신부터 읽어 5,000점을 넘으면 고르게 솎고 `thinned`·`truncated` 를 밝힌다. 데모 계정(`!isAdminDetailUser`)은 mock- 대상만(`isidu/demoMask.js`).
+    연결 시험 성공이 인증 정지를 푸는 것은 host·port·username·auth·deviceId 가 저장값과 같을 때만(`sameConnIdentity`).

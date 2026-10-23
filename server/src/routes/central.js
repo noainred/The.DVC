@@ -1314,6 +1314,8 @@ export function narrowGpuRow(x, dropped = { badPct: 0 }) {
   if (Object.hasOwn(x, 'memTotalMB')) out.memTotalMB = mbOrNull(x.memTotalMB);
   if (Object.hasOwn(x, 'tempC')) out.tempC = tempOrNull(x.tempC);
   if (Object.hasOwn(x, 'gpus')) { const n = numOrNull(x.gpus); out.gpus = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
+  // v2.769(점검 R4-D5-3): 응답 없는 GPU 장수 — gpus 와 같은 범위 규칙(밖이면 null = 모름). 구버전 엣지는 필드가 없다.
+  if (Object.hasOwn(x, 'gpuErrors')) { const n = numOrNull(x.gpuErrors); out.gpuErrors = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
   if (x.utilNA === true) out.utilNA = true;
   for (const k of ['host', 'vcenterId', 'name']) if (x[k] != null) out[k] = typeof x[k] === 'string' ? x[k].slice(0, 256) : (typeof x[k] === 'number' && Number.isFinite(x[k]) ? String(x[k]) : null);
   return out;
@@ -1736,9 +1738,19 @@ centralRouter.get('/pdu-config', requireCentral(), async (req, res) => {
   const { intervalsForEdge, pduIntervalsLoadError } = await import('../pdu/intervals.js');
   const ivPart = intervalsPartOrUnreadable(req, res, pduIntervalsLoadError, 'PDU 수집 주기', () => intervalsForEdge());
   if (!ivPart) return;
+  // v2.769(점검 R4-D4-02): 임계치도 싣는다 — 위임 PDU 경보는 엣지가 현장에서 평가·발송하는데(pdu/poller.js 의도) 엣지가 중앙 임계치를
+  //   몰라 중앙 화면에서 바꾼 값이 먹지 않았다. 중앙 파일이 있을 때만 싣고(thresholdsForEdge), 못 읽었으면 값 대신 thresholdsUnreadable
+  //   (엣지는 직전 값 유지 — 옛 엣지는 이 필드를 모르고 무시하므로 503 으로 막지 않는다). ⚠ 알림 채널 설정은 배포하지 않는다(pdu/thresholds.js 머리말).
+  const { thresholdsForEdge, pduThresholdsLoadError } = await import('../pdu/thresholds.js');
+  let thPart = {};
+  try {
+    const thErr = pduThresholdsLoadError();
+    if (thErr) thPart = { thresholdsUnreadable: { reason: loadWhy(thErr.reason), since: thErr.at || null } };
+    else { const th = thresholdsForEdge(); if (th) thPart = { thresholds: th }; }
+  } catch (e) { thPart = { thresholdsUnreadable: { reason: loadWhy(e?.message || String(e)), since: Date.now() } }; }
   res.json({
     ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
-    ...ivPart,
+    ...ivPart, ...thPart,
   });
 });
 

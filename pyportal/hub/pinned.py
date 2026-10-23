@@ -12,9 +12,35 @@ TLS SNI·인증서 검증 이름과 Host 헤더는 **원 호스트명**을 유�
 from __future__ import annotations
 
 import http.client
+import math
+import os
 import socket
 import threading
 import urllib.request
+
+# v2.769(점검 R4-D1-1): 요청 **전체** 시한은 소켓 연산 시한과 다른 값이다. v2.768 은 둘을 같은 값(점검 4초)으로 잡아
+# TCP 연결 + TLS 핸드셰이크 + 요청 왕복 + 헤더 전체가 4초 안이어야 했다 — RTT 800ms 대상(폴란드·미국 동부)은 정상 서버도
+# '응답 시간 초과' 로 떨어졌다(재현: 단계마다 < 4초, 합 6초인 정상 TLS 서버 → unreachable). 전체 시한 = 소켓 시한 × 3(상한 90초).
+# 배수는 4 미만이어야 한다 — tests/test_audit2768.py 의 드립 상한(BOUND = 시한 × 4)이 그 값을 넘지 않는지 본다.
+TOTAL_DEADLINE_FACTOR = 3.0
+TOTAL_DEADLINE_DEFAULT_CAP = 90.0
+TOTAL_DEADLINE_ENV_CAP = 300.0
+
+
+def total_deadline_seconds(socket_timeout, env_name=None):
+    """요청 전체 시한(초). env_name 의 값이 유한 양수면 그것이 우선(소켓 시한 아래로는 내리지 않는다 · 상한 300초),
+    아니면 소켓 시한 × TOTAL_DEADLINE_FACTOR(상한 90초). 잘못된 env 값은 무시한다(기본값 — 시한을 없애지 않는다)."""
+    t = float(socket_timeout)
+    if env_name:
+        raw = os.environ.get(env_name, "").strip()
+        if raw:
+            try:
+                v = float(raw)
+            except ValueError:
+                v = float("nan")
+            if math.isfinite(v) and v > 0:
+                return min(max(v, t), TOTAL_DEADLINE_ENV_CAP)
+    return min(t * TOTAL_DEADLINE_FACTOR, max(TOTAL_DEADLINE_DEFAULT_CAP, t))
 
 
 def connect_pinned(addresses, port, timeout):

@@ -33,7 +33,7 @@ const ENABLED = process.env.SVCMON_ENABLED !== 'false';   // 킬스위치(독립
  * 사이트별로 예산을 늘릴 수단이 없다.
  */
 const EXECUTES = config.svcmonRole !== 'central';
-export function pollerRole() { return { role: config.svcmonRole, executes: EXECUTES && ENABLED }; }
+export function pollerRole() { return { role: config.svcmonRole, executes: EXECUTES && ENABLED, enabled: ENABLED }; }
 
 const results = new Map();     // testId -> { status, reply, ms, ts, streak }
 const nextDue = new Map();     // testId -> 다음 실행 시각(ms)
@@ -167,7 +167,16 @@ function rebuildIndex() {
   for (const id of [...results.keys()]) if (!liveIds.has(id)) results.delete(id);
 }
 
+/*
+ * v2.769(점검 R4-D3-3): 실행 가드를 **sweep 자체**에 둔다. 예전에는 startSvcmonPoller 만 `!ENABLED`/`!EXECUTES` 를 봐서,
+ *   SVCMON_ROLE=central(또는 킬스위치 SVCMON_ENABLED=false)인데도 POST /api/svcmon/refresh → runNow() 가 전 법인 대상을
+ *   중앙에서 직접 찔렀다(위 EXECUTES 머리말이 금지한 바로 그 동작 — 고RTT 오염·닿지 않는 대역 대량 타임아웃·CSV 오염).
+ *   역할·킬스위치 조건으로만 막는다(기본 역할에서는 예전과 같이 실행 — svcmon.test.js·audit2719a1 이 고정).
+ */
+export function executesHere() { return EXECUTES && ENABLED; }
+
 async function sweep(force = false) {
+  if (!executesHere()) return false;
   if (running) return false;
   running = true;
   const t0 = Date.now();
@@ -239,7 +248,10 @@ async function sweep(force = false) {
   }
 }
 
-/** 수동 새로고침 — 진행 중이면 false(주기 폴러와 가드 공유). */
+/**
+ * 수동 새로고침 — 진행 중이면 false(주기 폴러와 가드 공유). 이 인스턴스가 실행하지 않는 역할이면(중앙·킬스위치) 아무것도
+ * 하지 않고 false — 라우트는 `executesHere()` 로 먼저 갈라 409 를 준다(진행 중 202 와 구분).
+ */
 export function runNow() { return sweep(true); }
 
 export function startSvcmonPoller() {

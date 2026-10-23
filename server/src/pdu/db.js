@@ -18,6 +18,7 @@ import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { createYielder } from '../util/timeSlice.js';
 const lockRetry = createLockRetry();
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
@@ -206,12 +207,14 @@ const MAX_POINTS = 500;
  * ⚠ 클램프를 라우트가 아니라 **이 헬퍼**에 둔 이유: 두 라우트가 같은 실수를 반복하지 않게 하고,
  * 새 시계열 라우트가 `rangeOf` 를 재사용할 때 자동으로 보호되게 하기 위해서다.
  */
-export function rangeOf({ hours, from, to, points } = {}) {
+export function rangeOf({ hours, from, to, points, maxHours } = {}) {
   const clamp = (v, lo, hi, dflt) => {
     const n = numOrNull(v);
     return n == null ? dflt : Math.min(hi, Math.max(lo, n));
   };
-  const h = clamp(hours, 1 / 60, MAX_HOURS, 24);          // 1분 ~ 보존기간
+  // v2.769(점검 R4-D4-01): 호출부가 더 좁은 상한(라우트 = 화면 최대 범위)을 줄 수 있다 — 보존기간보다 넓힐 수는 없다.
+  const capH = clamp(maxHours, 1 / 60, MAX_HOURS, MAX_HOURS);
+  const h = clamp(hours, 1 / 60, capH, Math.min(24, capH));   // 1분 ~ 상한(기본 보존기간)
   const pts = Math.round(clamp(points, 10, MAX_POINTS, 120));
   const now = Date.now();
   // 시각은 epoch ms 로만 받는다 — 유한하지 않으면 '미지정' 으로 보고 기본값을 쓴다.
@@ -222,12 +225,65 @@ export function rangeOf({ hours, from, to, points } = {}) {
   // from > to 로 뒤집혀 오면 구간이 음수가 된다 — 기본 창으로 되돌린다(빈 결과를 내지 않기 위해).
   // ⚠ 보존 기간보다 더 과거는 받지 않는다 — 그 구간은 prune 돼 행이 없는데 bucketMs 만 거대해져
   //   (epoch 0 을 주면 수백만 시간) 버킷 축이 무의미해진다.
-  const floor = until - MAX_HOURS * 3_600_000;
+  const floor = until - capH * 3_600_000;
   const since = Math.max(floor, sinceRaw < until ? sinceRaw : until - h * 3_600_000);
   const span = Math.max(1, until - since);
   const bucketMs = Math.max(60_000, Math.round(span / pts));
   // 여기까지 왔는데도 유한하지 않다면 SQL 에 넣지 않는다(있을 수 없지만, 보간이라 마지막 방어).
   return { since, until, bucketMs: Number.isSafeInteger(bucketMs) && bucketMs > 0 ? bucketMs : 60_000 };
+}
+
+/*
+ * v2.769(점검 R4-D4-01): 요청 경로 시계열은 **장비 × 시간 조각 + 시간 기준 양보**(perf-db v2.693 규약).
+ * 예전에는 pdu_sample 전체 구간을 한 문장으로 GROUP BY 했다 — 50대×30일 '30일' 버튼(power+env) ≈ 0.9초,
+ * 10대×400일 hours=9600 ≈ 3초 동안 이벤트 루프가 멈췄다(scratchpad pdu_perf.mjs 실측).
+ * ⚠ 조각 경계는 **버킷 정배수**다(sliceBoundsPdu) — 한 (장비, 버킷) 그룹이 정확히 한 조각에만 들어가므로 AVG·MAX 가
+ *   예전 한 문장과 같다(테스트가 같은 입력으로 대조). 경계를 버킷에서 떼면 한 버킷이 두 조각에 나뉘어 평균이 틀린다.
+ * ⚠ 데이지체인 합산(v2.598 DB2598-03 — (장비, ts)별 유닛 합, 못 읽은 유닛이 있으면 NULL + partialSamples)은 조각 안에서
+ *   그대로다: 한 ts 는 한 조각에만 속한다.
+ */
+const SLICE_TARGET_MS = 24 * 3_600_000;
+export function sliceBoundsPdu(since, until, bucketMs) {
+  const b = Math.max(1, Math.floor(Number(bucketMs) || 1));
+  const width = Math.max(b, Math.floor(SLICE_TARGET_MS / b) * b);
+  const out = [];
+  let lo = Number(since);
+  const end = Number(until);
+  let next = (Math.floor(lo / b) * b) + width;   // 첫 조각 끝도 버킷 경계에 둔다
+  while (lo <= end) {
+    out.push([lo, Math.min(end, next - 1)]);      // ts 는 정수 — 조각 끝은 다음 경계 - 1(포함)
+    lo = next; next += width;
+  }
+  return out;
+}
+
+/**
+ * 조회 대상 장비 목록. 지정이 없으면 표의 장비 id 를 **재귀 CTE 건너뛰기 탐색**으로 뽑는다(ix_*_dev 인덱스를 장비마다 한 번씩만 탄다 —
+ * DISTINCT 는 인덱스 전체를 훑는다. perf-db '키별 최신값' 규약과 같은 방식).
+ */
+function devicesOf(db, table, deviceIds) {
+  if (deviceIds.length) return [...new Set(deviceIds.map(String))];
+  return db.conn.prepare(
+    `WITH RECURSIVE d(id) AS (
+       SELECT (SELECT MIN(device_id) FROM ${table})
+       UNION ALL
+       SELECT (SELECT MIN(device_id) FROM ${table} WHERE device_id > d.id) FROM d WHERE d.id IS NOT NULL)
+     SELECT id FROM d WHERE id IS NOT NULL`,
+  ).all().map((r) => String(r.id));
+}
+
+/** 장비마다 · 조각마다 같은 문장을 돌리고 시간 기준으로 양보한다. 결과 행은 버킷 순(같은 버킷 안은 장비 순). */
+async function slicedRows(db, table, stmtSql, deviceIds, since, until, bucketMs, { yieldMs } = {}) {
+  const yielder = createYielder(yieldMs);
+  const stmt = db.conn.prepare(stmtSql);
+  const rows = [];
+  for (const dev of devicesOf(db, table, deviceIds)) {
+    for (const [lo, hi] of sliceBoundsPdu(since, until, bucketMs)) {
+      for (const r of stmt.all(dev, lo, hi)) rows.push(r);
+      await yielder();
+    }
+  }
+  return rows.sort((a, b) => Number(a.b) - Number(b.b));   // 안정 정렬 — 같은 버킷 안의 장비 순서는 유지
 }
 
 /**
@@ -238,20 +294,19 @@ export async function powerSeries(deviceIds = [], opts = {}) {
   const db = await open();
   if (!db) return { buckets: [], series: [], unavailable: true };
   const { since, until, bucketMs } = rangeOf(opts);
-  const where = deviceIds.length ? `AND device_id IN (${deviceIds.map(() => '?').join(',')})` : '';
   // v2.598 DB2598-03: 데이지체인 PDU 는 한 수집 시각(ts)에 유닛마다 한 행이다. 예전에는 행을 그대로
   // 버킷 평균해 **유닛 평균**(1,000W+500W → 750W)을 장비 전력이라 보여줬다. 안쪽에서 (장비, ts)별로
   // 유닛을 **합산**한 뒤 버킷을 만든다. 그 시각에 전력을 못 읽은 유닛이 하나라도 있으면 합은 부분 합
   // (= 거짓 하락)이므로 NULL 로 두고 평균·최대에서 빼며, 뺀 시각 수를 partialSamples 로 밝힌다.
-  const rows = db.conn.prepare(
+  const rows = await slicedRows(db, 'pdu_sample',
     `SELECT device_id, (ts/${bucketMs}) AS b, AVG(tot) AS avg_w, MAX(tot) AS max_w,
             SUM(CASE WHEN tot IS NULL THEN 1 ELSE 0 END) AS partial
        FROM (SELECT device_id, ts,
                     CASE WHEN COUNT(power_w) = COUNT(*) THEN SUM(power_w) END AS tot
-               FROM pdu_sample WHERE ts >= ? AND ts <= ? ${where}
+               FROM pdu_sample WHERE device_id = ? AND ts >= ? AND ts <= ?
               GROUP BY device_id, ts)
       GROUP BY device_id, b ORDER BY b ASC`,
-  ).all(since, until, ...deviceIds.map(String));
+    deviceIds, since, until, bucketMs, opts);
   const out = shape(rows, bucketMs, 'avg_w', 'max_w');
   out.partialSamples = rows.reduce((a, r) => a + Number(r.partial || 0), 0);
   return out;
@@ -262,13 +317,12 @@ export async function envSeries(deviceIds = [], opts = {}) {
   const db = await open();
   if (!db) return { buckets: [], series: [], unavailable: true };
   const { since, until, bucketMs } = rangeOf(opts);
-  const where = deviceIds.length ? `AND device_id IN (${deviceIds.map(() => '?').join(',')})` : '';
-  const rows = db.conn.prepare(
+  const rows = await slicedRows(db, 'pdu_env',
     `SELECT device_id || '#' || sensor AS device_id, (ts/${bucketMs}) AS b,
             AVG(temp_c) AS avg_w, MAX(temp_c) AS max_w, AVG(humidity_pct) AS avg_h
-       FROM pdu_env WHERE ts >= ? AND ts <= ? ${where}
+       FROM pdu_env WHERE device_id = ? AND ts >= ? AND ts <= ?
       GROUP BY device_id, sensor, b ORDER BY b ASC`,
-  ).all(since, until, ...deviceIds.map(String));
+    deviceIds, since, until, bucketMs, opts);
   const out = shape(rows, bucketMs, 'avg_w', 'max_w');
   // 습도는 같은 버킷 축에 별도 배열로 얹는다.
   const idx = new Map(out.bucketKeys.map((b, i) => [b, i]));
@@ -308,7 +362,14 @@ function shape(rows, bucketMs, avgCol, maxCol) {
 export async function dbStats() {
   const db = await open();
   if (!db) return { unavailable: true, file: FILE };
-  const q = (t) => db.conn.prepare(`SELECT COUNT(*) AS n, MIN(ts) AS oldest, MAX(ts) AS newest FROM ${t}`).get();
+  // v2.769(점검 R4-D4-01): 집계 함수 하나씩 따로 묻는다(perf-db '집계 함수 2개 이상 한 문장 금지') — MIN·MAX 단독이면
+  //   ts 인덱스 끝 한 칸으로 끝나지만, COUNT 와 한 문장이면 표 전체를 훑었다(10대×400일 414ms 실측).
+  const one = (sql) => db.conn.prepare(sql).get()?.v ?? null;
+  const q = (t) => ({
+    n: Number(one(`SELECT COUNT(*) AS v FROM ${t}`) || 0),
+    oldest: one(`SELECT MIN(ts) AS v FROM ${t}`),
+    newest: one(`SELECT MAX(ts) AS v FROM ${t}`),
+  });
   let bytes = 0;
   try { bytes = fs.statSync(FILE).size; } catch { /* */ }
   return { file: FILE, bytes, retainDays: RETAIN_DAYS, sample: q('pdu_sample'), env: q('pdu_env'), bank: q('pdu_bank') };

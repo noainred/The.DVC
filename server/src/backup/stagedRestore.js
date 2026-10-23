@@ -20,6 +20,10 @@
  *   - 적용 전에 예약 파일을 `.restore-applying.json` 으로 옮겨(claim) **한 번만** 적용한다 — 지우기에 실패해 매 기동마다 다시 적용돼
  *     그 사이의 설정 변경을 영원히 되돌리는 일이 없게. 적용 도중 죽어 claim 파일이 남으면 다시 적용하지 않고 상태에 '중단됨' 으로 알린다.
  *   - 결과는 콘솔(로그 화면)과 `backups/.restore-last.json` 에 남긴다(화면이 '적용됨 · 실패 N개' 를 보여 준다).
+ *   - v2.769(점검 R4-D1-2): 폐기 상태를 담은 두 파일은 백업 판본을 그대로 쓰지 않고 **현재 파일과 맞춰** 쓴다(reconcileForApply).
+ *     users.json 은 계정별 tokenVersion = max(현재, 백업)+1(백업 이후 폐기한 세션 부활 방지 — 전원 재로그인),
+ *     central-agent-tokens.json 은 현재 파일 우선 병합(백업에만 있는 항목은 되살리되 개수를 경고). 제외 목록에 넣지 않는 이유:
+ *     새 서버 재해 복구에서 전 엣지 토큰·계정이 유실된다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,6 +62,66 @@ export function stagedNameIssue(name) {
   return null;
 }
 
+/*
+ * v2.769(점검 R4-D1-2): 적용 시점 병합(순수 — 텍스트 → 텍스트). v2.768 이 복원을 실제로 적용되게 만들면서 노출된 폐기 상태 부활을 막는다.
+ *   현재 파일을 못 읽으면(없음·손상) 백업이 유일한 원천이다 — users 는 그래도 +1(백업 시점 토큰 무효), 토큰은 백업 전부(개수 경고).
+ *   백업 판본이 기대한 모양이 아니면 손대지 않는다(예전과 같은 동작 — 그 파일의 로드 손상 보존 규칙이 처리한다).
+ */
+const parseJson = (t) => { try { return JSON.parse(String(t)); } catch { return null; } };
+const tvOf = (u) => { const n = Number(u?.tokenVersion); return Number.isSafeInteger(n) && n > 0 ? n : 0; };
+
+/** users.json — 계정별 tokenVersion = max(현재, 백업)+1. @returns {{ text:string, bumped:number }} */
+export function reconcileUsersText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || !Array.isArray(b.users)) return { text: String(backupText), bumped: 0 };
+  const cur = parseJson(currentText);
+  const curTv = new Map();
+  for (const u of Array.isArray(cur?.users) ? cur.users : []) if (u && typeof u.username === 'string') curTv.set(u.username, tvOf(u));
+  let bumped = 0;
+  const users = b.users.map((u) => {
+    if (!u || typeof u !== 'object' || typeof u.username !== 'string') return u;
+    bumped += 1;
+    return { ...u, tokenVersion: Math.max(tvOf(u), curTv.get(u.username) || 0) + 1 };
+  });
+  return { text: JSON.stringify({ ...b, users }, null, 2), bumped };
+}
+
+const agentKey = (a) => String(a ?? '').trim().toLowerCase();
+/** central-agent-tokens.json — 현재 파일 우선 병합. @returns {{ text:string, revived:string[], currentUnreadable:boolean }} */
+export function reconcileAgentTokensText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || !Array.isArray(b.tokens)) return { text: String(backupText), revived: [], currentUnreadable: false };
+  const cur = parseJson(currentText);
+  const curList = Array.isArray(cur?.tokens) ? cur.tokens.filter((t) => t && typeof t === 'object' && t.agent && t.hash) : null;
+  const have = new Set((curList || []).map((t) => agentKey(t.agent)));
+  const tokens = [...(curList || [])];
+  const revived = [];
+  for (const t of b.tokens) {
+    if (!t || typeof t !== 'object' || !t.agent || !t.hash) continue;
+    const k = agentKey(t.agent);
+    if (have.has(k)) continue; // 같은 엣지는 현재 항목(재발급한 새 토큰)이 이긴다
+    have.add(k); tokens.push(t); revived.push(String(t.agent).slice(0, 64));
+  }
+  return { text: JSON.stringify({ ...b, tokens }, null, 2), revived, currentUnreadable: curList === null };
+}
+
+/** 적용할 내용을 현재 파일과 맞춘다 — 대상이 아니면 그대로. @returns {{ content:string, warning?:{file,reason}, info?:object }} */
+export function reconcileForApply(name, content, configDir) {
+  if (name !== 'users.json' && name !== 'central-agent-tokens.json') return { content };
+  let currentText = null;
+  try { currentText = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { currentText = null; }
+  if (name === 'users.json') {
+    const r = reconcileUsersText(content, currentText);
+    return { content: r.text, info: { tokenVersionBumped: r.bumped } };
+  }
+  const r = reconcileAgentTokensText(content, currentText);
+  const out = { content: r.text, info: { agentTokensRevived: r.revived } };
+  if (r.revived.length) {
+    out.warning = { file: name, reason: `백업에만 있던 엣지 토큰 ${r.revived.length}개를 되살렸습니다(${r.revived.slice(0, 10).join(', ')}${r.revived.length > 10 ? ' …' : ''})${r.currentUnreadable ? ' — 현재 토큰 파일이 없거나 읽지 못했습니다' : ''}. 백업 이후 폐기한 토큰이면 엣지 토큰 화면에서 다시 폐기하세요.` };
+  }
+  return out;
+}
+
 const backupsDir = (configDir) => path.join(configDir, 'backups');
 let _pending = null;   // 이 프로세스가 예약한 내용의 요약 { stagedAt, source, files:[이름] }
 let _lastApply = null; // 이 프로세스 기동 때의 적용 결과
@@ -65,12 +129,15 @@ let _lastApply = null; // 이 프로세스 기동 때의 적용 결과
 /**
  * JSON 설정 파일들을 다음 기동 때 적용하도록 예약한다(원자 쓰기 — 이미 예약된 것이 있으면 바꾼다).
  * @param {Record<string,string>} files { 이름: 내용 } — 호출부(restoreCentral)가 이름·확장자를 이미 걸렀어도 여기서 다시 검사한다.
- * @returns {{ stagedAt:number, files:string[], replaced:boolean }}
+ * @returns {{ stagedAt:number, files:string[], replaced:boolean, dropped:{file:string,reason:string}[] }}
  */
 export function stageRestore(files, { configDir = resolveConfigDir(), source = null } = {}) {
   const clean = {};
+  // v2.769(점검 R4-D1-3): 거른 이름과 사유를 돌려준다 — 예전엔 조용히 버려 복원 결과(failed·excluded) 어디에도 안 실렸다.
+  const dropped = [];
   for (const [name, content] of Object.entries(files || {})) {
-    if (stagedNameIssue(name)) continue;
+    const issue = stagedNameIssue(name);
+    if (issue) { dropped.push({ file: String(name).slice(0, 200), reason: issue }); continue; }
     clean[name] = String(content);
   }
   const file = path.join(backupsDir(configDir), STAGED_NAME);
@@ -79,7 +146,7 @@ export function stageRestore(files, { configDir = resolveConfigDir(), source = n
   const src = typeof source === 'string' ? source.slice(0, 200) : null;
   atomicWriteFileSync(file, JSON.stringify({ v: 1, stagedAt, source: src, files: clean }), { mode: 0o600 });
   _pending = { stagedAt, source: src, files: Object.keys(clean) };
-  return { stagedAt, files: Object.keys(clean), replaced };
+  return { stagedAt, files: Object.keys(clean), replaced, dropped };
 }
 
 /** 예약 취소. 예약이 없었으면 had:false. */
@@ -122,7 +189,7 @@ function record(configDir, result) {
 
 /**
  * 기동 시 예약 복원 적용 — 던지지 않는다(기동을 막지 않는다). 예약이 없으면 null.
- * @returns {null | { at:number, ok:boolean, source:(string|null), stagedAt:(number|null), applied:string[], failed:{file,reason}[], rejected:{file,reason}[], reason?:string }}
+ * @returns {null | { at:number, ok:boolean, source:(string|null), stagedAt:(number|null), applied:string[], failed:{file,reason}[], rejected:{file,reason}[], warnings?:{file,reason}[], tokenVersionBumped?:number, agentTokensRevived?:number, reason?:string }}
  */
 export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
   const dir = backupsDir(configDir);
@@ -154,12 +221,19 @@ export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
     console.error(`[backup] 예약 복원을 적용하지 않습니다 — ${reason}`);
     return record(configDir, { at: Date.now(), ok: false, source: null, stagedAt: null, applied: [], failed: [], rejected: [], reason });
   }
-  const applied = []; const failed = []; const rejected = [];
+  const applied = []; const failed = []; const rejected = []; const warnings = [];
+  let tokenVersionBumped = 0; let agentTokensRevived = [];
   for (const [name, content] of Object.entries(doc.files)) {
     const issue = stagedNameIssue(name);
     if (issue || typeof content !== 'string') { rejected.push({ file: String(name).slice(0, 200), reason: issue || '내용이 문자열이 아님' }); continue; }
-    try { atomicWriteFileSync(path.join(configDir, name), content); applied.push(name); }
-    catch (e) { failed.push({ file: name, reason: String(e?.code || e?.message || e).slice(0, 200) }); }
+    try {
+      // v2.769(점검 R4-D1-2): 폐기 상태 파일은 현재 파일과 맞춘 내용을 쓴다(위 reconcileForApply).
+      const rc = reconcileForApply(name, content, configDir);
+      atomicWriteFileSync(path.join(configDir, name), rc.content); applied.push(name);
+      if (rc.warning) warnings.push(rc.warning);
+      if (rc.info?.tokenVersionBumped) tokenVersionBumped = rc.info.tokenVersionBumped;
+      if (rc.info?.agentTokensRevived) agentTokensRevived = rc.info.agentTokensRevived;
+    } catch (e) { failed.push({ file: name, reason: String(e?.code || e?.message || e).slice(0, 200) }); }
   }
   try { fs.unlinkSync(claim); } catch (e) { console.warn(`[backup] 예약 복원 파일 정리 실패(다시 적용하지는 않음): ${e?.code || e?.message || e}`); }
   const source = typeof doc.source === 'string' ? doc.source.slice(0, 200) : null;
@@ -167,7 +241,9 @@ export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
   const ok = failed.length === 0 && rejected.length === 0;
   const line = `[backup] 예약된 복원 적용${source ? `(${source})` : ''}: ${applied.length}개 파일${failed.length ? ` · 실패 ${failed.length}개(${failed.map((f) => `${f.file}: ${f.reason}`).join(', ').slice(0, 400)})` : ''}${rejected.length ? ` · 거부 ${rejected.length}개` : ''}`;
   if (ok) console.log(line); else console.warn(line);
-  return record(configDir, { at: Date.now(), ok, source, stagedAt, applied, failed, rejected });
+  if (tokenVersionBumped) console.log(`[backup] 예약 복원: 계정 ${tokenVersionBumped}개의 세션 버전을 올렸습니다 — 백업 이후 폐기한 세션이 되살아나지 않게 모든 사용자가 다시 로그인해야 합니다.`);
+  for (const w of warnings) console.warn(`[backup] 예약 복원 경고 — ${w.file}: ${w.reason}`);
+  return record(configDir, { at: Date.now(), ok, source, stagedAt, applied, failed, rejected, warnings, tokenVersionBumped, agentTokensRevived: agentTokensRevived.length });
 }
 
 /** 테스트 전용 — 모듈 메모리 초기화. */

@@ -8,6 +8,7 @@
 import { getMetricsDb } from '../metrics/db.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 // 최소제곱 선형회귀. points=[{x(ms), y}] → { slopePerDay, intercept, r2 }.
 function linreg(points) {
@@ -25,6 +26,22 @@ function linreg(points) {
 
 const DAY = 86_400_000;
 
+/*
+ * v2.769(점검 R4-D2-06): 계산 인자 정규화 — 라우트 캐시 키와 계산이 **같은 함수**의 결과를 본다(v2.689 I2 '키와 계산이 같은 값').
+ *   days 는 정수 3~1830, 버킷은 1시간 정배수(60~1440분), minR2 는 '못 읽은 값은 0 이 아니다' — `?minR2=` 가 Number('')=0 으로
+ *   신뢰도 필터를 해제하고 'x' 가 NaN 으로 필터를 끄던 것을 막는다. 숫자가 아니면 기본(0.3), 숫자면 [0,1]·0.05 단위.
+ */
+export const DEFAULT_MIN_R2 = 0.3;
+export function forecastCfgArgs(opts = {}) {
+  const dn = Number(opts.days);
+  const days = Number.isFinite(dn) && dn !== 0 ? Math.max(3, Math.min(1830, Math.round(dn))) : 14;
+  const bn = Number(opts.bucketMin);
+  const bucketH = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number.isFinite(bn) && bn !== 0 ? bn : 60)) / 60));
+  const r = numOrNull(opts.minR2);
+  const minR2 = r == null ? DEFAULT_MIN_R2 : Math.max(0, Math.min(1, Math.round(r * 20) / 20));
+  return { days, bucketMin: bucketH * 60, minR2 };
+}
+
 /** opts: { days (관측 기간), bucketMin, minR2 }. */
 export async function forecastCapacity(snap, opts = {}) {
   const db = await getMetricsDb();
@@ -32,16 +49,17 @@ export async function forecastCapacity(snap, opts = {}) {
   // history 의 시간당 롤업 경로(bucketMs>=1h)를 못 타고 원본 samples 를 풀레인지로 데이터스토어
   // 키마다 GROUP BY 스캔해 이벤트 루프가 멈춘다. days 3~1830 · bucketMin 60~1440 으로 클램프해
   // 항상 시간당 롤업 경로를 타게 한다(/tools/capacity-forecast 가 120일·일버킷으로 안전히 쓰는 패턴).
-  const days = Math.max(3, Math.min(1830, Number(opts.days) || 14));
+  const norm = forecastCfgArgs(opts); // v2.769(R4-D2-06): 클램프는 forecastCfgArgs 한 곳(라우트 캐시 키와 같은 값)
+  const days = norm.days;
   const since = Date.now() - days * DAY;
   // v2.672(운영 장애 — capacity-forecast 와 같은 경로): 시간당 롤업**만** 읽는다(historyRollup — 원본 폴백 없음).
   //   history() 는 롤업 도입 이전 원본이 남은 현장에서 days 가 롤업 나이보다 길면 원본으로 떨어진다(원본 보존 기본 5년 ·
   //   ds_usedgb 는 분마다 저장) — 데이터스토어 수천 개 루프에서 그것이 포탈을 수 분씩 멈춘다. 롤업은 1시간 단위라
   //   버킷도 1시간 정배수로 맞춘다(예: 90분 → 2시간 — 응답 config.bucketMin 이 실제 값을 말한다).
-  const bucketMs = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number(opts.bucketMin) || 60)) / 60)) * 3_600_000;
+  const bucketMs = (norm.bucketMin / 60) * 3_600_000;
   const readRollup = typeof db.historyRollup === 'function' ? db.historyRollup.bind(db) : null;
   const maybeYield = createYielder(15);   // 시간 기준 양보(개수 기준은 한 건이 느리면 못 막는다)
-  const minR2 = opts.minR2 != null ? Number(opts.minR2) : 0.3;
+  const minR2 = norm.minR2;
   const now = Date.now();
   // v2.733(점검 3회차 C2-07): 마지막 점의 신선도 경계. 수집이 이어지면 마지막 버킷의 시작은 지금에서 한 버킷(표본 주기가 버킷보다
   //   길면 한 주기) 안이다 — 수집·롤업 지연 여유로 두 칸을 더 둔 ×3(저장소의 '주기 × 3' 신선도 규약과 같은 배수). 넘으면 stale.

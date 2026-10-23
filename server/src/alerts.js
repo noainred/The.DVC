@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
-import { store } from './store.js';
+import { store, SITE_STALE_MS } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
@@ -162,6 +162,22 @@ export function unreadVcenterIds(snap) {
 }
 const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
 
+/*
+ * v2.769(점검 R4-D1-5): '엣지 보고 끊김'(vcstale:) 판정 기준 시각 = max(receivedAt, 프로세스 기동 시각).
+ *   receivedAt 은 central-inventory.json 에 영속되므로, 중앙이 SITE_STALE_MS(기본 5분) 넘게 내려가 있다 올라오면 전 위임 vCenter 가
+ *   낡은 것으로 보여 첫 평가(기동 8초 뒤)가 위임 vCenter 수만큼 경고를 내고 엣지의 다음 push 에 해소했다 — 원인은 중앙 정지였다.
+ *   기동 뒤 SITE_STALE_MS 동안은 엣지가 보고할 기회가 없었으므로 끊김으로 단정하지 않는다. 경보·호스트·DS 신규 억제(fresh)는 그대로다
+ *   (기동 직후 값도 지금 값이 아니다).
+ */
+let processStartMs = Date.now();
+export function _setProcessStartForTest(ms) { processStartMs = Number(ms) || Date.now(); }
+/** 위임 보고 끊김을 알릴 만큼 낡았는가(순수 — 기준 = max(receivedAt, 기동 시각)). */
+export function vcStaleAlertDue(receivedAt, { now = Date.now(), startedAt = processStartMs, staleMs = SITE_STALE_MS } = {}) {
+  const at = numOrNull(receivedAt);
+  const basis = Math.max(at != null && at > 0 ? at : 0, Number(startedAt) || 0);
+  return now - basis > staleMs;
+}
+
 /** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
 export function evaluate(snap, cfg = loadAlertConfig()) {
   const out = [];
@@ -201,6 +217,8 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     //   쿨다운·해소 기억이 섞인다. 판정은 공용 unreadVcenterReasons 의 'stale'(점검중·연결 불가가 우선) 한 벌.
     for (const v of snap.vcenters || []) {
       if (!v || v.id == null || !staleVc.has(String(v.id))) continue;
+      // v2.769(점검 R4-D1-5): 중앙 재기동 직후 일괄 경고 방지(위 vcStaleAlertDue). 기동 전부터 발생 중이던 것은 해소로 기록하지 않고 보류한다.
+      if (!vcStaleAlertDue(v.receivedAt)) { held.add(`vcstale:${v.id}`); continue; }
       const at = numOrNull(v.receivedAt);
       out.push({ key: `vcstale:${v.id}`, vcenterId: String(v.id), severity: 'warning', title: `엣지 보고 끊김: ${v.name || v.id}`,
         detail: `${v.collectedBy ? `${v.collectedBy} · ` : ''}마지막 보고 ${at != null && at > 0 ? new Date(at).toISOString() : '시각 미상'} — 이 vCenter 의 경보·호스트·데이터스토어 알림은 보고가 다시 올 때까지 판정하지 않습니다` });

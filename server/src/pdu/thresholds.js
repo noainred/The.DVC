@@ -20,6 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'pdu-thresholds.json');
 
@@ -51,10 +53,27 @@ export const THRESHOLD_SPEC = [
   { key: 'bankCritA', label: '뱅크 전류 위험(A)', hint: '뱅크 차단기 정격의 90% 권장(16A 기준 14.4A).' },
 ];
 
-export function loadThresholds() {
-  if (!fs.existsSync(FILE)) return { ...DEFAULTS };
+/*
+ * v2.769(점검 R4-D4-02): 임계치를 **엣지에도 배포**한다. 위임 PDU 의 경보는 엣지 폴러가 현장에서 평가·발송한다(poller.js
+ *   evaluateAndNotify 머리말 — 의도된 설계, 중앙은 엣지 스냅샷을 평가하지 않는다: 둘 다 평가하면 같은 경보가 두 번 나간다).
+ *   그런데 엣지는 자기 CONFIG_DIR 의 pdu-thresholds.json 만 봐서, 중앙 화면에서 바꾼 임계치(예: powerWarnW)가 위임 PDU 에는
+ *   먹지 않았고 중앙 목록 배지(중앙 임계)와 엣지 경보(엣지 로컬 임계)가 갈렸다. 이제 pdu-config 응답이 중앙 값을 싣고
+ *   (`thresholdsForEdge` — 중앙 파일이 있을 때만) 엣지가 `applyCentralThresholds` 로 메모리에 얹는다(intervals 와 같은 모양).
+ *   · 실효 임계치 = **중앙 지정값 > 엣지 파일 > 기본값**. 엣지 파일은 덮어쓰지 않는다(중앙 값은 메모리 — 재시작 직후 첫 pull 전까지는 엣지 파일).
+ *   · 중앙이 값을 안 주면(옛 중앙·중앙 파일 없음·중앙 파일 손상 → thresholdsUnreadable) 엣지는 **직전 값을 유지**한다.
+ *   · 엣지 `PDU_THRESHOLDS_LOCAL=1` 이면 중앙 값을 무시한다(현장 고정 탈출구 — PDU_INTERVALS_LOCAL 과 같은 뜻).
+ *   ⚠ **알림 채널 설정(설정 › 알림 채널)은 배포하지 않는다** — 엣지는 자기 알림 설정으로 보낸다. 엣지에 채널이 없으면
+ *     위임 PDU 경보는 여전히 아무 데도 가지 않는다(남은 일 — 채널 주소를 28곳에 퍼뜨릴지는 사람이 정할 문제).
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'PDU 임계치', confirm: () => saveThresholds({}) });
+let _central = null;   // 엣지가 중앙에서 받은 임계치(메모리 · 알려진 키만)
+
+/** 파일에 저장된 값(+ 기본값). 중앙 배포분은 섞지 않는다. */
+function loadFileThresholds() {
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); return { ...DEFAULTS }; }
   try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
+    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
     const out = { ...DEFAULTS };
     for (const k of Object.keys(DEFAULTS)) {
       if (!(k in p)) continue;
@@ -62,12 +81,62 @@ export function loadThresholds() {
       // 빈 문자열/null = '감시 안 함'. 0 은 유효한 임계치일 수 있으므로 구분해 남긴다.
       out[k] = (p[k] === '' || p[k] == null) ? null : (Number.isFinite(Number(p[k])) ? Number(p[k]) : DEFAULTS[k]);
     }
+    _loadErr.ok();
     return out;
-  } catch (e) { preserveCorrupt(FILE, e.message); return { ...DEFAULTS }; }
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return { ...DEFAULTS }; }
 }
 
+/** 실효 임계치 — 중앙 지정값(엣지 · 받았을 때만) > 파일 > 기본값. */
+export function loadThresholds() {
+  const file = loadFileThresholds();
+  const central = process.env.PDU_THRESHOLDS_LOCAL === '1' ? null : _central;
+  return central ? { ...file, ...central } : file;
+}
+
+/** 중앙 임계치 파일을 못 읽었으면 { at, reason }, 아니면 null(pdu-config 가 thresholds 대신 thresholdsUnreadable 을 싣는다). */
+export function pduThresholdsLoadError() { loadFileThresholds(); return _loadErr.get(); }
+
+/**
+ * 중앙 → 엣지에 내려보낼 임계치. **중앙 파일이 있을 때만**(관리자가 화면에서 저장한 값) — 한 번도 저장하지 않은 중앙이
+ * 기본값으로 각 법인이 맞춰 둔 엣지 파일을 덮지 않게 한다(intervalsForEdge '지정한 키만' 과 같은 취지). 없으면 null.
+ */
+export function thresholdsForEdge() {
+  if (!fs.existsSync(FILE)) return null;
+  const v = loadFileThresholds();
+  return _loadErr.get() ? null : v;
+}
+
+/**
+ * 엣지: 중앙에서 받은 임계치를 정제해 적용한다. 반환 = 실제로 바뀌었는가.
+ * 정제(엣지가 받은 값도 그대로 믿지 않는다): 평범한 객체만 · 알려진 키만 · enabled 는 불리언만 ·
+ * 수치는 유한수(문자열 수치는 수로)만, null·'' 는 '감시 안 함' · 범위 밖·형식 오류 키는 버린다(그 키는 엣지 파일 값).
+ * 객체가 아니면 아무것도 바꾸지 않는다(직전 값 유지).
+ */
+const CENTRAL_ABS_MAX = 1e7;
+export function applyCentralThresholds(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const next = {};
+  for (const k of Object.keys(DEFAULTS)) {
+    if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+    const v = obj[k];
+    if (k === 'enabled') { if (typeof v === 'boolean') next.enabled = v; continue; }
+    if (v === null || v === '') { next[k] = null; continue; }
+    if (typeof v !== 'number' && typeof v !== 'string') continue;
+    const n = numOrNull(typeof v === 'string' ? v.slice(0, 32) : v);
+    if (n == null || Math.abs(n) > CENTRAL_ABS_MAX) continue;
+    next[k] = n;
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(_central || {});
+  _central = next;
+  return changed;
+}
+
+/** 엣지가 지금 적용 중인 중앙 임계치(진단·상태용 — 없으면 null). */
+export function centralThresholdsApplied() { return _central ? { ..._central } : null; }
+
 export function saveThresholds(partial = {}) {
-  const cur = loadThresholds();
+  // 저장은 파일 값 기준이다 — 엣지에서 저장해도 중앙 배포분을 파일로 굳히지 않는다.
+  const cur = loadFileThresholds();
   const next = { ...cur };
   for (const k of Object.keys(DEFAULTS)) {
     if (!(k in partial)) continue;
@@ -76,6 +145,7 @@ export function saveThresholds(partial = {}) {
     next[k] = (v === '' || v == null) ? null : (Number.isFinite(Number(v)) ? Number(v) : cur[k]);
   }
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   return next;
 }
 
@@ -235,4 +305,4 @@ export function activeViolations() {
   return [...(_state.entries())].map(([key, st]) => ({ key, severity: st.severity, since: st.since }));
 }
 
-export function _resetForTest() { _state.clear(); }
+export function _resetForTest() { _state.clear(); _central = null; }

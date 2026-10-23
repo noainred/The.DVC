@@ -8,6 +8,7 @@
 
 import { getMetricsDb } from '../metrics/db.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 // 탐지 대상 시계열 패밀리 + 라벨(엔티티 키 → 사람이 읽을 이름은 호출부에서 매핑).
 // v2.632(감사 AX2-2632-04): minScale — 척도(σ 환산)의 **하한**. 거의 상수인 계열(VMFS 사용량·안정된 온도)은 MAD 가 0 이고
@@ -83,17 +84,30 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
   return out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
 }
 
+/*
+ * v2.769(점검 R4-D2-06): 계산 인자 정규화 — 라우트 캐시 키와 계산이 **같은 함수**의 결과를 본다(v2.689 I2 '키와 계산이 같은 값').
+ *   예전 z 는 하한만 있어 `z=2.0001`·`z=2.0002`… 가 서로 다른 키로 매번 재계산되고 전역 직렬 대기열(runHeavyExclusive)을 무한히 늘렸다.
+ *   z 는 [2,10]·0.5 단위(화면 선택지 2.5·3·3.5·4·5 와 같은 격자), 창·버킷은 정수로 자른다.
+ */
+const clampInt = (v, lo, hi, dflt) => { const n = numOrNull(v); return n == null ? dflt : Math.max(lo, Math.min(hi, Math.round(n))); }; // 빈 값('')은 0 이 아니라 기본값
+export function anomalyCfgArgs(opts = {}) {
+  const zn = Number(opts.z);
+  const z = Number.isFinite(zn) && zn !== 0 ? Math.max(2, Math.min(10, Math.round(zn * 2) / 2)) : 3.5;
+  return { z, windowHours: clampInt(opts.windowHours, 1, 168, 24), bucketMin: clampInt(opts.bucketMin, 1, 1440, 10) };
+}
+
 /** 모든 패밀리 이상탐지. opts: { z, windowHours, bucketMin }. */
 export async function detectAnomalies(opts = {}) {
   const db = await getMetricsDb();
-  const z = Math.max(2, Number(opts.z) || 3.5);
+  const norm = anomalyCfgArgs(opts);
+  const z = norm.z;
   // ⚠ 블로킹 방지(v2.279): windowHours/bucketMin 을 상·하한으로 클램프한다. 과거 windowHours 에
   // 상한이 없어(z 만 클램프) 큰 값이 오면 since 가 과거로 무한정 벌어지고, historyAll 이 원본
   // samples 테이블을 그 창 전체로 GROUP BY 스캔해 이벤트 루프가 수 초~수십 초 멈췄다(합성 520만
   // 행에서 실측). clamp(windowHours 1~168h·7일, bucketMin 1~1440분)로 스캔 범위를 유계로 만든다
   // (/tools/esxi-temp/history 의 days 1~1830 클램프와 같은 방어 패턴).
-  const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
-  const cfg = { z, windowHours: clamp(opts.windowHours, 1, 168, 24), bucketMin: clamp(opts.bucketMin, 1, 1440, 10), minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
+  //   v2.769(R4-D2-06): 클램프는 anomalyCfgArgs 한 곳(라우트 캐시 키와 같은 값).
+  const cfg = { z, windowHours: norm.windowHours, bucketMin: norm.bucketMin, minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
   const families = [];
   let total = 0;
   for (const fam of FAMILIES) {

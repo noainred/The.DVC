@@ -5,8 +5,8 @@
  *  · **중앙만 보낸다.** 엣지가 조사한 결과는 중앙이 받아 적재한 순간(routes/central.js /isidu-data)에, 중앙이 직접 조사한 결과는
  *    적재한 순간(poller.js)에 `notifyScanStored` 를 부른다. 엣지는 메일 설정을 받지 않는다(settings.edgeTargetView 가 싣지 않는다 —
  *    주소 목록을 28곳에 퍼뜨리지 않는다).
- *  · 조사가 성공할 때마다 보낸다. 대상이 '변화 없으면 생략' 이면 직전 성공 조사와 비교해 메일에 보이는 것(상위 N·전체 합계)이
- *    du -h 해상도 안에서 같으면 보내지 않고 그 사실을 기록한다.
+ *  · 조사가 성공할 때마다 보낸다. 대상이 '변화 없으면 생략' 이면 **마지막으로 보낸 조사**(v2.769 R4-D4-03 — 예전엔 직전 성공 조사)와 비교해
+ *    메일에 보이는 것(상위 N·전체 합계)이 du -h 해상도 안에서 같으면 보내지 않고 그 사실을 기록한다. 보낸 기록이 없으면 비교하지 않고 보낸다.
  *  · 실패 알림은 대상이 고른 경우에만, 대상별 6시간에 한 번까지.
  *  · 같은 결과를 두 번 보내지 않는다 — 대상별 마지막으로 다룬 조사(id·시각)를 상태 파일에 남긴다(엣지 재전송·중앙 재시작).
  *    이미 다룬 것보다 오래된 조사(엣지가 밀린 결과를 늦게 보냄)는 보내지 않는다.
@@ -64,6 +64,7 @@ const BOOT_AT = Date.now();
 export const TARGET_MAIL_TICK_MS = 30_000;
 
 // 대상 기록: { lastScanId, lastScanTs, lastFailAlertAt, last, lastSlot(처리한 정기 회차), schedSentScanId·schedSentScanTs·schedSentAt(마지막 정기 발송한 조사),
+//             scanSentScanId·scanSentScanTs(v2.769 R4-D4-03 — 조사마다 모드에서 마지막으로 자동 발송한 조사),
 //             sinceFrom·sinceCap(시계가 뒤로 가 미래가 된 since 를 지금으로 잡은 기록 — 그 since 값일 때만 쓴다) }
 let _state = null; // { targets: { [id]: { … } } }
 function state() {
@@ -196,16 +197,38 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
     return { state: 'not-latest', last: note(id, { kind: 'result', scanId: sid, scanTs: sts, state: 'skipped', reason: '더 새 조사 결과가 있어 이 결과는 보내지 않았습니다' }) };
   }
   let change = null;
-  if (tm.onlyOnChange) {
-    change = await changeVsPrevious(id, report, t.topN);
-    if (!change.changed) return { state: 'unchanged', last: note(id, { kind: 'result', scanId: sid, scanTs: sts, state: 'skipped', reason: '직전 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같아 보내지 않았습니다(변화 없으면 생략)' }) };
+  // v2.769(점검 R4-D4-03): '변화 없으면 생략' 의 기준은 **마지막으로 실제 보낸(조사마다 모드) 조사**다 — 정기 발송(v2.745 SCHED-01)과 같은 규칙.
+  //   예전에는 직전 성공 조사와 비교해, 조사마다 du -h 한 칸씩 자라는 폴더(73G→74G→…)가 이웃한 두 조사끼리 늘 '같다' 가 되어 영원히 생략됐고
+  //   (재현: 10번 조사 동안 +10G, 메일 1통), 직전 결과 메일이 SMTP 실패·생략이었어도 다음 같은 결과가 '변화 없음' 으로 빠졌다.
+  //   보낸 기록이 없거나 그 조사가 DB 에 없으면 비교하지 않고 보낸다.
+  const sentBase = tm.onlyOnChange ? await scanSentBase(id, r) : null;
+  if (sentBase) {
+    change = await changeVsScan(id, report, t.topN, sentBase);
+    if (!change.changed) return { state: 'unchanged', last: note(id, { kind: 'result', scanId: sid, scanTs: sts, state: 'skipped', reason: '마지막으로 보낸 조사와 상위 폴더·전체 합계가 반올림 범위 안에서 같아 보내지 않았습니다(변화 없으면 생략)' }) };
   } else {
     // v2.742: 본문의 '직전 조사 대비' 알림용 — 판정에는 쓰지 않으므로 실패해도 메일은 보낸다.
     try { change = await changeVsPrevious(id, report, t.topN); } catch { change = null; }
   }
   const mail = buildResultMail(t, report, { change, corp: corpNameOf(t), recipients: rcpt });
   const out = await sendTo(t, rcpt.to, mail, 'system');
+  if (out.state === 'sent') { r.scanSentScanId = report.scan.id; r.scanSentScanTs = report.scan.ts; }   // note() 가 저장한다
   return { state: out.state, last: note(id, { kind: 'result', scanId: sid, scanTs: sts, to: rcpt.to.length, ...out }) };
+}
+
+/**
+ * v2.769(점검 R4-D4-03): 조사마다 모드 '변화 없으면 생략' 의 기준 — 마지막으로 **자동 발송에 성공한** 조사(scanSentScanTs).
+ * 이 필드가 없는 옛 상태 파일은 마지막 메일 기록(last)이 '조사마다 자동 결과 메일 · 보냄' 이면 그 조사를 쓴다(업그레이드 직후 한 통 더 가지 않게).
+ * 사람이 누른 '지금 보내기'·정기 발송 기록은 기준으로 쓰지 않는다(그 경로의 기록과 섞지 않는다 — v2.745 '지금 보내기는 자동 기록을 건드리지 않는다').
+ * 없거나 그 조사가 DB 에 없으면 null(비교하지 않고 보낸다).
+ */
+async function scanSentBase(id, r) {
+  let sentTs = numOrNull(r.scanSentScanTs);
+  if (sentTs == null) {
+    const l = r.last;
+    if (l && l.kind === 'result' && l.state === 'sent' && !l.manual && !l.schedule) sentTs = numOrNull(l.scanTs);
+  }
+  if (sentTs == null) return null;
+  return (await db.okScanAtOrBefore(HISTORY_AGENT, id, sentTs)) || null;
 }
 
 async function changeVsPrevious(id, report, topN) {

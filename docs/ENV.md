@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **669개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **671개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-23)
@@ -591,7 +591,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (56)
+## 중앙(위임 수집) (57)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -646,6 +646,7 @@
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_REGRESS_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_WARM_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
@@ -783,7 +784,7 @@
 | `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
 | `NSX_TLS_REJECT_UNAUTHORIZED` |  |  | nsx/client.js |
 
-## PDU (11)
+## PDU (12)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -798,6 +799,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
+| `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
 ## SAN 스위치 (34)
 
@@ -853,4 +855,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 669
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 671

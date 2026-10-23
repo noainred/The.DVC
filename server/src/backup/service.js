@@ -17,7 +17,7 @@ import { createYielder } from '../util/timeSlice.js';
 import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
-import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
+import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -429,6 +429,10 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
       envWrites.push([base, String(content)]);
       continue;
     }
+    // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
+    //   지금 failed 에 사유와 함께 싣는다(v2.689 G2 B4 '실패를 삼키지 않는다').
+    const nameIssue = stagedNameIssue(base);
+    if (nameIssue) { failed.push({ file: base.slice(0, 200), reason: `예약 복원 불가 이름(${nameIssue}) — 이 파일은 복원되지 않습니다` }); continue; }
     // v2.689(G2 B4) 유지: 적용할 수 없는 파일을 지금 알린다(디렉터리가 그 이름을 차지 · 설정 디렉터리 쓰기 불가). 실제 쓰기 실패는
     //   기동 시 적용 결과(stagedRestoreStatus().last.failed)와 로그가 말한다.
     const target = path.join(CONFIG_DIR, base);
@@ -440,7 +444,21 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
   // 예약을 먼저 쓴다 — 예약이 실패하면 .env 도 건드리지 않고 던진다(반쪽 복원 방지).
   const names = Object.keys(toStage);
   let stage = null;
-  if (names.length) { stage = stageRestore(toStage, { configDir: CONFIG_DIR, source }); restored += stage.files.length; }
+  if (names.length) {
+    stage = stageRestore(toStage, { configDir: CONFIG_DIR, source }); restored += stage.files.length;
+    // v2.769(점검 R4-D1-3): 위에서 걸렀어도 예약이 다시 거른 것이 있으면(판정이 갈린 경우) 조용히 버리지 않는다.
+    for (const d of stage.dropped || []) failed.push({ file: d.file, reason: `예약 복원 불가 이름(${d.reason}) — 이 파일은 복원되지 않습니다` });
+  }
+  // v2.769(점검 R4-D1-2): 적용 시 엣지 토큰은 현재 파일 우선 병합이다 — 백업에만 있는 항목(백업 이후 폐기했을 수 있다)이 되살아나는 개수를
+  //   지금 미리 알린다. 실제 병합 결과는 기동 때 적용 결과(warnings)·로그가 말한다.
+  const warnings = [];
+  if (toStage['central-agent-tokens.json'] != null) {
+    let cur = null; try { cur = fs.readFileSync(path.join(CONFIG_DIR, 'central-agent-tokens.json'), 'utf8'); } catch { /* 없음 */ }
+    const pv = reconcileAgentTokensText(toStage['central-agent-tokens.json'], cur);
+    if (pv.revived.length) warnings.push({ file: 'central-agent-tokens.json', reason: `재시작 때 백업에만 있는 엣지 토큰 ${pv.revived.length}개(${pv.revived.slice(0, 10).join(', ')}${pv.revived.length > 10 ? ' …' : ''})가 되살아납니다 — 같은 엣지의 현재 토큰은 유지됩니다. 백업 이후 폐기한 토큰이면 재시작 뒤 다시 폐기하세요.` });
+  }
+  if (toStage['users.json'] != null) warnings.push({ file: 'users.json', reason: '재시작 때 모든 계정의 세션 버전을 올립니다 — 백업 이후 폐기한 세션이 되살아나지 않게 모든 사용자가 다시 로그인해야 합니다.' });
+  for (const w of warnings) console.warn(`[backup] 복원 경고 — ${w.file}: ${w.reason}`);
   // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 핵심 설정이 부분기록으로 손상된 채 남는다. tmp+rename으로 온전본만 남긴다.
   for (const [base, content] of envWrites) {
     try { atomicWriteFileSync(path.join(CONFIG_DIR, base), content); restored++; }
@@ -448,7 +466,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
   }
   if (failed.length) console.warn(`[backup] 복원 실패 ${failed.length}개: ${failed.map((f) => `${f.file}(${f.reason})`).join(', ').slice(0, 500)}`);
   return {
-    restored, failed, excluded,
+    restored, failed, excluded, warnings,
     staged: stage ? stage.files : [], stagedReplaced: !!stage?.replaced, pendingRestart: !!stage,
     envWritten: envWrites.length,
     edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned,

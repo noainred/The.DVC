@@ -1,4 +1,4 @@
-# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.768
+# 규칙 — 회차별 점검(감사) 기록 v2.583~v2.769
 
 > 루트 `CLAUDE.md` 에서 옮긴 기록(2026-10-20, v2.746 시점). 문구는 원문 그대로이고 목록 들여쓰기만 한 단계 줄였다. "되돌리지 말 것" 규칙은 그대로 유효하다 — 이 영역 코드를 고치기 전에 이 파일을 읽을 것. 새 교훈은 테스트 → 이 파일 순으로 남기고 루트 CLAUDE.md 에는 쌓지 않는다.
 
@@ -1649,3 +1649,14 @@
     LogAnalysis 늦은 응답(도달 불가) · onlyOnChange(완료) · 상대 storagePath(버그 아님 — 라우트 400).
   · 남긴 것: pyportal HubServer 연결 세마포어를 스레드 생성 뒤 획득(미인증 64연결로 슬롯 고갈) · C# EndpointEditForm IPv6 ':' 절단(판독) · pyportal check_url 첫 주소만 접속 ·
     pyportal stats 첫 호출 COUNT 는 O(N) · 복원 예약 뒤 재시작 전에 바꾼 설정은 재시작 때 덮인다(화면 배너·취소 버튼) · 웹 vcdOverview·DatastoreUsage 결측 0 합산(낮음 참고).
+- **v2.769 — 버그 점검 4회차(다중 에이전트 5축 → 반증 1인 → 수정 4그룹) 확정 25·개연 1·일부 설계 1 = 27건 수정**(회귀 `server/test/audit2769{a,b,c,d}` · 웹 `linkCheckText`·`isiduText`·`gpuUsageText`·`portalBackup2768` · `pyportal/tests/test_audit2769`):
+  · ⚠⚠ **비활동 타이머는 시한이 아니다**(R4-D3-1 `linkcheck/protocols.js stepSmtp`): `sock.setTimeout` 은 소켓이 파괴되면 같이 사라져, 응답 없이 FIN 으로 닫는 상대 하나가 Promise 를 영원히 남기고
+    → 시한 없는 `poolSettled` → 폴러 `running` 영구 true(재기동 전까지 통신 점검 전체 정지). 'close' 에서 판정 + 실제 setTimeout + 폴러 항목별 시한. svcmon checker v2.279 와 같은 기전이 형제 모듈에 남아 있었다.
+  · ⚠ **'마지막 값' 은 나이와 함께**(R4-D3-2): latest 행이 있으면 무조건 ok/fail — 엣지가 죽어도 최대 90일 초록. 꺼짐·엣지 stale·나이 > 주기×3 은 '측정 없음'.
+  · 실행 역할 가드는 시작 함수만이 아니라 **실행 함수에**(R4-D3-3 svcmon runNow) · 건너뛰는 분기도 상태를 갱신(R4-D3-4) · 보류엔 시한(R4-D3-5) · 못 읽은 RTT 는 null(R4-D3-6).
+  · root 로 도는 스크립트에 들어가는 경로는 **화이트리스트 + 인용 + 시스템 디렉터리 거부**(R4-D2-01·02 DB 이전 — README 한 줄이 q() 밖에 있었다, /tmp 를 chown -R 할 뻔했다).
+  · 요청 경로의 시계열 집계는 조각 + 양보(R4-D4-01 PDU — 50대×30일 0.5~1초 정지) · 같은 지표의 정의는 하나(R4-D5-1 GPU 표=평균·추이=최댓값) · 구분자 split 금지(R4-D5-4 `|`).
+  · v2.768 회귀 5건: pyportal 전체 시한 = 소켓 시한이라 고RTT TLS 오탐(전체 = 3×) · 복원이 실제로 적용되자 tokenVersion·엣지 토큰이 되살아남(계정별 max+1, 토큰 현재 우선 병합 + 경고) ·
+    거른 이름 무음 · Veeam 과잉 가림 · 중앙 재기동 직후 vcstale 일괄 발송(기준 = max(receivedAt, 기동 시각)).
+  · 남긴 것: 위임 PDU 경보는 엣지 알림 채널에 달림(채널 설정은 배포하지 않음 — 설계) · 엣지 재시작 뒤 첫 pull 전까지는 엣지 파일 임계치 · 물리 GPU 서버 화면의 gpuErrors 미표시 ·
+    linkcheck stepSsh 'Connection lost before handshake' 가 tls-fail 로 분류(오분류 추정) · cve.js VMSA-2023-0023 8.0 항목 maxAffected==fixed(데이터) · 웹 GPU 용량예측 100%+ '안정' · healthReport 는 재기동 직후 위임 vCenter 를 '낡음' 으로 셈(실제로 낡은 값이라 유지).

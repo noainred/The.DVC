@@ -19,6 +19,9 @@
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { requireSuperAdmin } from '../../auth/roles.js';
 import { isAdminReq } from '../../auth/addressMask.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { demoEdgeOf } from '../../mock/demo/edge.js';
+import { isDemoTargetId, maskIsiduMainForDemo } from '../../isidu/demoMask.js';
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -32,7 +35,7 @@ import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { loadSettings, saveSettings, resolveTarget, isiduSettingsLoadError, RANGES, AUTH_MODES, MAX_TARGETS, normalizeTarget } from '../../isidu/settings.js';
 import { SIZE_MODES, duCommand } from '../../isidu/parse.js';
 import { keyInfo, publicKeyView, ensureKey, keyDir, KEY_FILE_NAME } from '../../isidu/sshKey.js';
-import { authGuard, FAIL_KINDS, testTargetPath } from '../../isidu/collect.js';
+import { authGuard, FAIL_KINDS, testTargetPath, sameConnIdentity } from '../../isidu/collect.js';
 import { isiduPollerStatus, runNow, FAIL_RETRY_MS, LONG_FAIL_MS } from '../../isidu/poller.js';
 import { requestIsiduCollect, recentIsiduDrops } from '../../isidu/collectRequests.js';
 import { allIsiduEdgeStatus } from '../../central/isiduEdge.js';
@@ -97,6 +100,18 @@ function pickTarget(id) {
   return tg ? resolveTarget(tg, { devices: listDevices() }) : null;
 }
 
+/*
+ * v2.769(점검 R4-D4-05): 데모 계정(isAdminDetailUser 가 아님 — 이 도구는 adminOnly 라 실제로는 mock 모드 데모 계정뿐)에는 **데모(mock-) 대상만**.
+ *   메인 목록·개요는 데모 대상·데모 엣지만 남기고(isidu/demoMask.js), 단건 조회(보고서·사용자·추이·CSV)는 사람이 등록한 대상이면 404
+ *   (존재도 흘리지 않는다 — '설정에 없는 대상' 과 같은 응답). 예전에는 실등록 아이실론의 관리 주소·SSH 계정명·경로·담당 엣지와 사용자 폴더 이름이 실렸다.
+ */
+const demoView = (req) => !isAdminDetailUser(req.user);
+function pickTargetFor(req, id) {
+  const tg = pickTarget(id);
+  if (!tg) return null;
+  return demoView(req) && !isDemoTargetId(tg.id) ? null : tg;
+}
+
 export function registerIsilonDirUsage(api) {
 
 /** 메인 — 대상 목록·최신 상태·노드 키·엣지 키·폴러 상태. */
@@ -104,7 +119,7 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => 
   const now = Date.now();
   // 데모(mock): 첫 화면이 폴러의 첫 틱(기동 90초 뒤)을 기다리지 않게 — 한 번만 돈다(이후 즉시 반환).
   if (isMockMode()) { try { await ensureIsiduDemo(); } catch { /* 데모 실패는 화면을 막지 않는다 */ } }
-  res.json({
+  const body = {
     ok: true, now, offsetMin: DAY_OFFSET_MIN,   // v2.745 검토 SCHED-04: 정기 발송 회차 표기를 서버 일정과 같은 포탈 시각 오프셋으로
     settingsLoadError: isiduSettingsLoadError(), storageRegistryError: storageRegistryErrorView(storageRegistryLoadError(), { detail: isAdminReq(req) }),
     targets: await targetRows(),
@@ -117,7 +132,8 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => 
     failKinds: FAIL_KINDS, failRetryMs: FAIL_RETRY_MS, failLongMs: LONG_FAIL_MS,
     retentionDays: loadSettings().retentionDays,
     db: scopeDbStatus(await db.dbStats(), req.user),
-  });
+  };
+  res.json(demoView(req) ? maskIsiduMainForDemo(body, { isDemoAgent: (name) => !!demoEdgeOf(name) }) : body);
 });
 
 /**
@@ -125,8 +141,8 @@ api.get('/tools/isilon-dirusage', adminOnly, fullScopeOnly, async (req, res) => 
  * 대상마다 전체 크기의 7일 변화·30일 추이·상위 폴더 OVERVIEW_POOL 개(7일 변화 포함)를 싣는다. 전 법인 Top 10 은 화면이 이 합집합에서 고른다.
  * DB 만 읽는다(장비 왕복 0). 대상 목록(상태·법인)은 `GET /tools/isilon-dirusage` 가 준다 — 여기서 다시 싣지 않는다.
  */
-api.get('/tools/isilon-dirusage/overview', adminOnly, fullScopeOnly, async (_req, res) => {
-  const ids = loadSettings().targets.map((x) => x.id);
+api.get('/tools/isilon-dirusage/overview', adminOnly, fullScopeOnly, async (req, res) => {
+  const ids = loadSettings().targets.map((x) => x.id).filter((id) => !demoView(req) || isDemoTargetId(id));   // R4-D4-05: 데모 계정은 데모 대상만
   const known = new Set(ids);
   const [targets, recent] = await Promise.all([buildOverview(ids), db.recentScans(HISTORY_AGENT, 80)]);
   res.json({
@@ -141,7 +157,7 @@ api.get('/tools/isilon-dirusage/overview', adminOnly, fullScopeOnly, async (_req
 
 /** 보고서 — KPI · Top N · 7일 증가 상위 · 신규·사라진 폴더 일부. */
 api.get('/tools/isilon-dirusage/report', adminOnly, fullScopeOnly, async (req, res) => {
-  const tg = pickTarget(req.query.target);
+  const tg = pickTargetFor(req, req.query.target);
   if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
   const rep = await buildReport(tg.id, { topN: tg.topN });
   res.json({ ok: true, target: { id: tg.id, label: tg.label || '', path: tg.path, sizeMode: tg.sizeMode, topN: tg.topN, intervalHours: tg.intervalHours }, ...rep });
@@ -149,7 +165,7 @@ api.get('/tools/isilon-dirusage/report', adminOnly, fullScopeOnly, async (req, r
 
 /** 전체 사용자 — 검색·필터(신규/사라짐/증가/감소)·정렬·페이지. */
 api.get('/tools/isilon-dirusage/users', adminOnly, fullScopeOnly, async (req, res) => {
-  const tg = pickTarget(req.query.target);
+  const tg = pickTargetFor(req, req.query.target);
   if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
   const r = await listUsers(tg.id, {
     q: t(req.query.q).slice(0, 100), filter: t(req.query.filter), sort: t(req.query.sort), dir: t(req.query.dir),
@@ -160,7 +176,7 @@ api.get('/tools/isilon-dirusage/users', adminOnly, fullScopeOnly, async (req, re
 
 /** 추이 — 디렉터리 전체 또는 사용자 하나. */
 api.get('/tools/isilon-dirusage/trend', adminOnly, fullScopeOnly, async (req, res) => {
-  const tg = pickTarget(req.query.target);
+  const tg = pickTargetFor(req, req.query.target);
   if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
   const name = t(req.query.name);
   if (name && (name.includes('/') || name.length > 512)) return res.status(400).json({ ok: false, reason: '폴더 이름 형식이 잘못됐습니다.' });
@@ -170,7 +186,7 @@ api.get('/tools/isilon-dirusage/trend', adminOnly, fullScopeOnly, async (req, re
 
 /** CSV — 최신 스캔의 전체 사용자(사라진 폴더 포함). */
 api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, async (req, res) => {
-  const tg = pickTarget(req.query.target);
+  const tg = pickTargetFor(req, req.query.target);
   if (!tg) return res.status(404).json({ ok: false, reason: '설정에 없는 대상입니다.' });
   const r = await allRows(tg.id);
   if (r.state !== 'ok') return res.status(409).json({ ok: false, reason: r.state === 'db-unavailable' ? 'DB 를 쓸 수 없습니다.' : '아직 성공한 조사가 없습니다.' });
@@ -304,7 +320,10 @@ api.post('/tools/isilon-dirusage/test', adminOnly, fullScopeOnly, requireSuperAd
     logAudit({ user: req.user?.username, action: 'isidu.test', target: `${r.host}:${r.port} via ${r.agent}`, detail: x.ok ? 'ok' : `fail: ${String(x.reason || x.kind || '').slice(0, 120)}`, ip: req.ip });
     return res.json({ ...x, command: x.command || duCommand(r.path, r.sizeMode) });
   }
-  const x = await testTargetPath(r, { clearStopId: prev ? prev.id : '' });   // 저장된 대상의 시험이 성공하면 인증 정지를 푼다(v2.590 규약)
+  // 저장된 대상의 시험이 성공하면 인증 정지를 푼다(v2.590 규약). v2.769(점검 R4-D4-06): 정규화한 본문의 host·port·username·auth·deviceId 가
+  //   저장값(등록부 반영 후)과 같을 때만 — 편집 중인 다른 주소·계정으로 시험이 성공해도 주기 수집은 저장값으로 로그인한다.
+  const prevResolved = prev ? resolveTarget(prev, { devices: listDevices() }) : null;
+  const x = await testTargetPath(r, { clearStopId: prev && sameConnIdentity(r, prevResolved) ? prev.id : '' });
   if (x.demo) return res.json({ ...x, via: 'main', node: '' });
   if (x.attempted === false) {
     // 접속 정보를 만들지 못했다(키 없음·등록부에 장비 없음) — 접속은 시도하지 않았다.

@@ -318,6 +318,7 @@ const UNC_LIKE = /\\\\[A-Za-z0-9._-]|(?:^|[\s'"(])\/\/[A-Za-z0-9]/;
  *   300자 선절단은 그대로 — 이름 탐색은 indexOf 순방향(선형), 정규식은 상한 있는 반복만.
  */
 const NAME_BOUND = /[a-z0-9.-]/;
+const NAME_AFTER_BAD = /[a-z0-9]/;
 const HOST_TLD = new Set(['local', 'lan', 'corp', 'internal', 'intra', 'home', 'localdomain', 'com', 'net', 'org', 'io', 'kr', 'jp', 'cn', 'de', 'pl', 'us', 'uk', 'eu', 'biz', 'info', 'co']);
 function stripVmName(orig, name) {
   const lower = orig.toLowerCase();
@@ -328,7 +329,12 @@ function stripVmName(orig, name) {
   while (i >= 0) {
     const before = i > 0 ? lower[i - 1] : '';
     const after = lower[i + name.length] || '';
-    if (!(before && NAME_BOUND.test(before)) && !(after && NAME_BOUND.test(after))) {
+    const after2 = lower[i + name.length + 1] || '';
+    // v2.769(점검 R4-D1-4): 오른쪽 경계 — '.' 은 뒤에 영숫자가 이어질 때(이름이 더 긴 라벨의 앞부분)만 위반이고, 문장 마침표('… db01.corp.local.')·
+    //   '-'(디스크 접미 'db01.corp.local-flat.vmdk')는 허용한다. 예전엔 둘 다 위반이라 이름이 안 빠져 FQDN 으로 걸려 가렸다(과잉 가림).
+    //   왼쪽은 그대로 [a-z0-9.-] — vmName='corp' 가 'vbr01.corp.local' 을 쪼개 주소를 내보내던 v2.768 R3-C1-2 를 다시 열지 않는다.
+    const rightBad = !!after && (NAME_AFTER_BAD.test(after) || (after === '.' && NAME_AFTER_BAD.test(after2)));
+    if (!(before && NAME_BOUND.test(before)) && !rightBad) {
       out += `${src.slice(from, i)} `; from = i + name.length;
       i = lower.indexOf(name, from);
     } else i = lower.indexOf(name, i + 1);

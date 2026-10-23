@@ -670,3 +670,7 @@
     사본이 있다(배포 패키지에 `server/test` 가 없어 런타임 import 불가 — 테스트가 `test/_stripComments.js` 와 출력 동일성을 고정).
   - 권한 adminOnly + fullScopeOnly(형제 서브메뉴와 같다) · `memoJson` 30초(extraKey 에 역할) · 왕복 0 · 폴링 금지 · 표 `STable minWidth`.
 
+  - v2.769(점검 R4-D3·D4): 통신 점검 프로토콜 단계는 **'close' 에서 판정 + 실제 setTimeout 하드 시한**(소켓 비활동 타이머는 파괴 때 같이 사라진다), 폴러는 항목별 시한(`runWithItemDeadline`)으로
+    한 항목이 `running` 을 영구히 잡지 못하게 한다. 화면은 latest 가 있어도 꺼짐·엣지 보고 stale·나이 > 주기×3 이면 '측정 없음'(서버가 `ageMs` 를 싣는다).
+    svcmon 수동 새로고침은 실행하는 인스턴스(`EXECUTES && ENABLED`)에서만(아니면 409). 엣지 svcmon 재전송의 건너뛰는 분기도 `snapId` 를 갱신하고, snapId 역행 보류에는 시한(`REGRESS_GC_HOLD_MS`).
+    PDU 임계치는 중앙 파일이 있을 때만 pdu-config 로 엣지에 배포(메모리 적용 · `PDU_THRESHOLDS_LOCAL=1` 이면 현장 고정) — 알림 채널 설정은 배포하지 않는다(위임 PDU 경보는 엣지 채널에 달림).
