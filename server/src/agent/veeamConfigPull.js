@@ -14,7 +14,8 @@ import { classifyCentral404 } from './central404.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { applyPulledServers } from '../veeam/registry.js';
+import { applyPulledServers, registryLoadError } from '../veeam/registry.js';
+import { pullRecoveryNote } from '../util/registryCore.js'; // v2.763(V2-I1) — 스토리지·SAN·PDU·CVP pull(v2.744 EDGE-03)과 같다
 import { applyPulledAccounts } from '../veeam/snapEvents.js';
 import { dropResult } from '../veeam/store.js';
 import { pollVeeamOnce, authGuard } from '../veeam/poller.js';
@@ -23,6 +24,7 @@ import { agentHeaders } from './agentNameCarry.js';
 export const configPullMs = () => clampIntervalMs(Number(process.env.VEEAM_CONFIG_PULL_MS) || 300_000, 300_000, 60_000);
 const _log = createChangeLogger({ windowMs: 10 * 60_000 });
 let _timer = null; let _last = null; let running = false; let _lastSig = '';
+let _registryRecovered = null;
 
 export async function pullVeeamConfigNow() {
   if (running) return { ok: false, busy: true, reason: '이전 pull 진행 중(겹침 방지)' };
@@ -51,7 +53,13 @@ async function _pull() {
     const sig = crypto.createHash('sha256').update(JSON.stringify(servers)).digest('hex');
     let applied = null;
     if (sig !== _lastSig) {
+      // v2.763(V2-I1): 손상 등록부를 배포분으로 다시 쓰는 것은 막지 않고(복구) 그 사실을 남긴다 — pullRecoveryNote 머리말(배포분이 아닌 로컬 항목은 보존본에만).
+      const regErr = registryLoadError();
       applied = applyPulledServers(servers);
+      if (regErr) {
+        _registryRecovered = pullRecoveryNote(regErr, { what: 'Veeam 서버 등록부(veeam-servers.json)', restored: applied.count });
+        console.warn(`[veeam-config] ${_registryRecovered.note}`);
+      }
       _lastSig = sig;
       for (const id of applied.removed) { dropResult(id); authGuard.clearAuthStop(id, { defer: true }); }
       // v2.761 B4: 같은 id 의 접속처(host·port·username)가 바뀌면 옛 접속처의 결과(lastOk)를 새 서버 것으로 보내지 않고, 옛 접속처의 인증 정지도 푼다.
@@ -77,4 +85,5 @@ export function startVeeamConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   _timer = startAdaptiveTimer(configPullMs, () => pullVeeamConfigNow(), { firstDelayMs: 40_000, name: 'Veeam 서버 배정 pull' });
 }
-export function veeamConfigPullStatus() { return { ...(_last || {}), intervalMs: configPullMs() }; }
+export function veeamConfigPullStatus() { return { ...(_last || {}), ...(_registryRecovered ? { registryRecovered: _registryRecovered } : {}), intervalMs: configPullMs() }; }
+export function _resetForTest() { _last = null; _lastSig = ''; _registryRecovered = null; running = false; }

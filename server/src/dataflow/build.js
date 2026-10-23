@@ -39,8 +39,9 @@ export const RECENT_MAX = 40;
 
 /** 데이터 종류 — 순서가 화면 순서다. `test` 는 `side:path` 에 대한 정규식이고 **처음 맞는 것** 하나를 쓴다. */
 export const CATS = Object.freeze([
-  // v2.751: Veeam 백업 상태(그 법인 엣지가 Veeam REST 를 읽어 vCenter VM 배지로 쓴다)도 vCenter 인벤토리 칸이다.
-  { id: 'inv', label: '인벤토리(vCenter)', test: /^central:\/(inventory|fleet|capacity-report|guest-disk|vmseries(-config)?|veeam-(data|config))$|^collector:\/export$/ },
+  { id: 'inv', label: '인벤토리(vCenter)', test: /^central:\/(inventory|fleet|capacity-report|guest-disk|vmseries(-config)?)$|^collector:\/export$/ },
+  // v2.763(V2-3): Veeam 백업 상태는 인벤토리 칸에서 뺐다 — 공유 토큰 엣지의 veeam 403 이 'vCenter 인벤토리' 를 빨갛게 칠했다(인벤토리는 정상).
+  { id: 'backup', label: 'Veeam 백업', test: /^central:\/veeam-(data|config)$/ },
   { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config)$|^collector:\/(idrac-scan|bm-usage)$/ },
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },

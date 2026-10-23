@@ -15,7 +15,8 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { classifyCentral404Body } from '../agent/central404.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
-import { serversForThisNode } from './registry.js';
+import { serversForThisNode, registryLoadError } from './registry.js';
+import { summarizeRegistryError } from '../util/registryCore.js';
 import { getRecord } from './store.js';
 import { veeamPollerStatus, onVeeamCollected, pollMs } from './poller.js';
 import { store } from '../store.js';
@@ -57,10 +58,25 @@ async function snapEventsForPush() {
   }
 }
 
+/** v2.763(V2-I1): 엣지 Veeam 등록부를 못 읽었는가(손상 → 보존 뒤 빈 목록). cvp/push.js edgeRegistryError 와 같다. */
+function edgeRegistryError() {
+  try { return registryLoadError(); } catch (e) { return { at: Date.now(), reason: e?.message || String(e) }; }
+}
+
 async function pushInner() {
+  // v2.763(V2-I1): 등록부를 못 읽으면 serversForThisNode() 가 [] 라 '맡은 서버 0대' 를 보고했다 — 보내지 않는다(형제 push 와 같다).
+  //   중앙 결과는 서버별 교체라 지워지지 않고, 다음 veeam-config pull 이 등록부를 다시 쓰면 풀린다. 사유는 요약만(원문은 파일 조각).
+  const regErr = edgeRegistryError();
+  if (regErr) {
+    const e = new Error(`엣지 Veeam 서버 등록부를 읽지 못해 보내지 않았습니다(${summarizeRegistryError(regErr)?.text || '사유 미상'}) — '맡은 서버 0대' 가 아닙니다. 중앙 veeam-config pull 이 등록부를 다시 쓰면 풀립니다`);
+    e.kind = 'edge-registry-unreadable';
+    throw e;
+  }
   const body = buildPushBody();
   const snapEv = await snapEventsForPush();
   if (snapEv.list) body.snapEvents = snapEv.list;
+  // v2.763(V2-2): 송신 시각(엣지 시계) — 중앙이 수신 시각과의 차이로 결과 ts 를 중앙 시계로 옮긴다. 옛 중앙은 최상위 새 필드를 읽지 않는다.
+  body.sentAt = Date.now();
   const json = Buffer.from(JSON.stringify(body));
   const payload = await gzipAsync(json);
   const res = await postNo503Retry(`${config.agent.centralUrl}/api/central/veeam-data?agent=${encodeURIComponent(config.agent.name || '')}`, {
