@@ -48,7 +48,8 @@ export async function collectOne(server, { manual = false } = {}) {
   // v2.763(V1-I1): 비밀번호가 없으면(접속처 변경으로 폐기 · 배정에 실리지 않음) 접속하지 않는다 — 빈 비밀번호 로그인 1회가 AD 잠금 카운터에 쌓이고
   //   인증 정지로 이어졌다. 로그인 시도 자체가 없으므로 정지 기록도 남기지 않는다(수동 실행도 같다).
   if (!full.password) {
-    return { ok: false, ts: Date.now(), ms: 0, error: '비밀번호가 없습니다(접속처를 바꿔 저장한 비밀번호를 폐기했거나 배정에 실리지 않았습니다) — 설정 › Veeam 백업 서버에서 비밀번호를 다시 입력하세요', kind: 'no-password', target, jobs: [], vms: [], counts: {}, notes: [] };
+    // v2.763(R2-6): 엣지의 중앙 배정(pulled) 서버는 엣지 화면에서 고칠 수 없다(V2-1) — 안내는 중앙 포탈로
+    return { ok: false, ts: Date.now(), ms: 0, error: `비밀번호가 없습니다(접속처를 바꿔 저장한 비밀번호를 폐기했거나 배정에 실리지 않았습니다) — ${full.pulled === true ? '중앙 포탈의 ' : ''}설정 › Veeam 백업 서버에서 비밀번호를 다시 입력하세요`, kind: 'no-password', target, jobs: [], vms: [], counts: {}, notes: [] };
   }
   if (!manual) {
     const stop = authGuard.authStopFor(full);

@@ -194,7 +194,7 @@ export function registerVeeam(adminRouter) {
     const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
     if (format === 'text') return { ...vbBulk.parseServersText(raw, { defaults: body.defaults || {} }), format, raw };
     const r = vbBulk.parseServersCsv(raw);
-    return { ...r, warnings: [], headerUsed: null, order: r.order || vbBulk.COLUMNS, format, raw };
+    return { ...r, warnings: r.warnings || [], headerUsed: null, order: r.order || vbBulk.COLUMNS, format, raw };
   };
   const sendFile = (res, type, name, body) => { res.setHeader('Content-Type', `${type}; charset=utf-8`); res.setHeader('Content-Disposition', `attachment; filename="${name}"`); res.send(body); };
 

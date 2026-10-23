@@ -363,6 +363,7 @@ export async function localSnapSummary(db, vcenterId, vms, { now = Date.now(), d
 const MAX_EDGE_VCS = 64;
 const MAX_EDGE_VMS = 30_000;
 const FUTURE_SKEW_MS = 5 * 60_000;
+const EDGE_SKEW_MIN_MS = 120_000;
 const EDGE_SKEW_MAX_MS = 30 * DAY;   // v2.763: 엣지 시계 보정의 상한 — 넘으면 비상식(시계 고장)으로 보고 옮기지 않는다
 const EDGE_STATUS = new Set(['ok', 'log-off', 'severity-filter']);
 const _edge = new Map(); // vcenterId → { agent, at(중앙 수신 시각), edgeAt(엣지 계산 시각), days, byVm, events, ambiguous, unmatched, truncated, collectedAt, collectRan }
@@ -398,7 +399,8 @@ export function sanitizeEdgeSnap(raw, owns, now = Date.now()) {
     //   (미래만 수신 시각으로 잘랐다). 같은 엣지 시계로 잰 계산 시각(at)과의 차를 중앙 수신 시각에 맞춰 옮긴다: collectedAt + (수신 − at).
     //   at 이 수가 아니거나(옛 엣지) 차가 30일을 넘으면(비상식) 옮기지 않는다. 원본은 edgeCollectedAt 에 따로 둔다. 옮긴 뒤 기존 검사(미래 자르기 등).
     const caRaw = typeof x.collectedAt === 'number' && Number.isFinite(x.collectedAt) && x.collectedAt > 0 ? x.collectedAt : null;
-    const skew = typeof x.at === 'number' && Number.isFinite(x.at) && x.at > 0 && Math.abs(now - x.at) <= EDGE_SKEW_MAX_MS ? now - x.at : 0;
+    // v2.763(R2-1): 2분 미만은 전송 지연으로 보고 옮기지 않는다(결과 쪽 central/veeamEdge.js CLOCK_FIX_MIN_MS 와 같은 값)
+    const skew = typeof x.at === 'number' && Number.isFinite(x.at) && x.at > 0 && Math.abs(now - x.at) <= EDGE_SKEW_MAX_MS && Math.abs(now - x.at) >= EDGE_SKEW_MIN_MS ? now - x.at : 0;
     // v2.761(C2): 엣지 로그 폴러의 마지막 온전한 수집 시각 — 수만(문자열 수치·0 이하·90일보다 오래된 것은 null = 모름), 미래는 수신 시각으로 자른다.
     //   옛 엣지는 보내지 않는다(null — 판정은 막지 않는다).
     const caAdj = caRaw == null ? null : caRaw + skew;

@@ -23,6 +23,8 @@ const POLL_MIN_MS = 120_000;
 const intervalOrNull = (v) => { const n = num(v); return n != null && n >= POLL_MIN_MS && n <= MAX_TIMER_MS ? n : null; };
 // v2.763(V2-2): 이보다 큰 시계 차이는 보정하지 않는다(시계가 아니라 값이 틀린 것 — 지금처럼 미래만 자른다).
 export const CLOCK_FIX_MAX_MS = 30 * 86_400_000;
+// v2.763(R2-1): 이보다 작은 차이는 시계가 아니라 전송·재시도 지연이다 — 옮기면 시계가 맞는 엣지의 결과가 그만큼 새것처럼 보인다(보정 안 함).
+export const CLOCK_FIX_MIN_MS = 120_000;
 
 /**
  * v2.763(V2-2): 엣지 시계 차이(ms) = 중앙 수신 시각 − 본문 sentAt. sentAt 이 없거나(옛 엣지) 수가 아니거나 |차이| 가 30일을 넘으면 0(보정 안 함).
@@ -32,7 +34,7 @@ export function edgeClockOffset(body, now = Date.now()) {
   const sent = numOrNull(isObj(body) ? body.sentAt : null);
   if (sent == null || sent <= 0) return 0;
   const off = now - sent;
-  return Math.abs(off) > CLOCK_FIX_MAX_MS ? 0 : Math.round(off);
+  return Math.abs(off) > CLOCK_FIX_MAX_MS || Math.abs(off) < CLOCK_FIX_MIN_MS ? 0 : Math.round(off);
 }
 
 /**

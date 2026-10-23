@@ -169,7 +169,9 @@ export function parseServersCsv(text) {
     out.push(normRow(n + 2, get, present));
   });
   if (!out.length) return { rows: [], error: 'host·name 이 모두 빈 행만 있습니다.' };
-  return { rows: out, order: COLUMNS.filter((c) => col[c] != null) };
+  // v2.763(R2-4): 비밀번호 칸이 수식 방지 접두(')로 시작하면 그 글자째 저장된다 — 엑셀이 붙인 접두라면 비밀번호가 달라지므로 드라이런이 말한다(값은 바꾸지 않는다).
+  const warnings = out.filter((row) => /^'[=+\-@\t\r]/.test(row.password || '')).map((row) => `${row._line}행: 비밀번호가 작은따옴표(')로 시작합니다 — CSV 비밀번호 칸은 그 글자까지 그대로 저장합니다. 엑셀이 붙인 접두라면 지우고 올리세요. 연결 시험으로 확인할 수 있습니다.`);
+  return { rows: out, warnings, order: COLUMNS.filter((c) => col[c] != null) };
 }
 
 /**
