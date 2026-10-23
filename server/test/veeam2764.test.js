@@ -1,11 +1,11 @@
 /**
- * v2.764 — Veeam 계정 이벤트 전용 경량 수집기(veeam/snapCollector.js). 실서버 OC2 는 일반 로그 수집이 13일 뒤처져 '백업 시도' 가
+ * v2.765 — Veeam 계정 이벤트 전용 경량 수집기(veeam/snapCollector.js). 실서버 OC2 는 일반 로그 수집이 13일 뒤처져 '백업 시도' 가
  *   10-10 에 멈춘 것처럼 보였다 — 이제 Veeam 계정의 이벤트만 EventFilterSpecByUsername 으로 따로 읽어 전용 DB(snapDb)에 넣고,
  *   화면의 collectedAt 은 '로그 폴러 ok 시각과 전용 수집기 ok 시각 중 늦은 것'(snapEventsOkAt 하나) 이다.
  *  ① 필터 XML 에 계정 목록(systemUser false + userList) · ② 스냅샷 행만 전용 DB · ③ 커서(cur:<vc>)가 나아간다 ·
  *  ④ 호출 상한에 걸리면 같은 주기 안에서 이어 읽고 끝까지 읽었으면 okAt = 수집 시작 시각 · ⑤ 계정 0개면 건너뜀(SOAP 0회) ·
  *  ⑥ okAt 결합(snapEventsOkAt) + 라우트·push 가 그것만 쓴다 · ⑦ 인증 정지 vCenter 는 건너뜀 · ⑧ 표·대응표·기동 등재.
- *  재검토 후속(v2.764 2차): ⑨ 4-a 계정 표기 불일치의 0건 완결은 okAt 을 세우지 않는다(seen 뒤에만 · 재시작 복원도 seen 조건) ·
+ *  재검토 후속(v2.765 2차): ⑨ 4-a 계정 표기 불일치의 0건 완결은 okAt 을 세우지 않는다(seen 뒤에만 · 재시작 복원도 seen 조건) ·
  *  ⑩ 2-b 이어 읽기 since 는 커서 포함(같은 ms 경계 유실 없음) + 같은 ms 에 상한만큼 몰리면 stalled 로 멈춤 ·
  *  ⑪ 1-a ingestSnapRows 조각 트랜잭션 + 양보 · ⑫ 4-f rescheduleVeeamSnapCollector.
  */
@@ -102,7 +102,7 @@ test('① 필터 — 계정 목록이 EventFilterSpec userName 에 실린다(sys
     assert.equal(db.snapCursor('oc2'), t0 + 180_000, '커서 = 마지막으로 읽은 이벤트 시각(저장 여부와 무관)');
     assert.equal(db.snapOkAt('oc2'), NOW, '끝까지 읽었으면 okAt = 수집 시작 시각(영속)');
     assert.equal(C.snapCollectorOkAt('oc2'), NOW);
-    // ③ 다음 주기는 커서 그 시각(포함)부터 — v2.764(2-b): +1ms 는 같은 ms 의 나머지를 영영 건너뛰었다(중복은 해시로 한 번)
+    // ③ 다음 주기는 커서 그 시각(포함)부터 — v2.765(2-b): +1ms 는 같은 ms 의 나머지를 영영 건너뛰었다(중복은 해시로 한 번)
     state.events.push(ev(6, NOW - 10 * 60_000, 'CORP\\svc-veeam', 'db01'));
     await C.pollVeeamSnapOnce({ now: NOW + 60_000 });
     const begin2 = Date.parse(/<beginTime>([^<]+)<\/beginTime>/.exec(state.creates[1])[1]);

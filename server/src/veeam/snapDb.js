@@ -9,7 +9,7 @@
  *   snap_ev(vcenterId, ts, severity, type, user, entity, message, h) — UNIQUE(vcenterId, h). h = 시각·종류·대상·계정·문구 해시
  *     (로그 DB 적재분과 기존 로그에서 옮긴 분이 겹쳐도 한 번 — localSnapSummary 의 중복 제거 키와 같은 필드).
  *   snap_meta(k, v) — 'from:<vcenterId>' = 이 DB 가 그 vCenter 의 스냅샷 행을 빠짐없이 가진 가장 이른 시각(백필이 거꾸로 넓힌다).
- *     v2.764: 'cur:<vcenterId>'·'ok:<vcenterId>'·'seen:<vcenterId>' = Veeam 계정 전용 수집기(snapCollector.js)의 읽기 커서·완결 시각·
+ *     v2.765: 'cur:<vcenterId>'·'ok:<vcenterId>'·'seen:<vcenterId>' = Veeam 계정 전용 수집기(snapCollector.js)의 읽기 커서·완결 시각·
  *     '그 계정 표기로 이벤트를 한 번이라도 읽었다'(okAt 은 seen 뒤에만 유효 — 표기 불일치의 0건 완결을 '최신' 으로 믿지 않는다).
  *   snap_edge(vcenterId, json, at) — 엣지가 보낸 요약(중앙). 재시작해도 다음 push 전까지 마지막 값이 보인다.
  * 보관: 31일(RETENTION_MS) — prune 은 적재 N회마다 1회(첫 회 금지) · ts 단독 인덱스.
@@ -30,7 +30,7 @@ export const RETENTION_MS = 31 * DAY;          // 사용자 지시: 최근 1달
 export const BACKFILL_FIRST_MS = 8 * DAY;      // 백필은 이만큼을 먼저(화면 7일 + 공용 계정 짝짓기 12시간) — 그다음 31일까지 넓힌다
 const DAY_ROW_LIMIT = 20_000;                  // 백필 하루 창의 검색어별 상한(넘으면 그날은 일부만 — 로그로 남긴다)
 const PRUNE_EVERY = 30;
-const INGEST_CHUNK_ROWS = 2_000;               // v2.764: ingestSnapRows 조각 — 40,000행 한 트랜잭션 373ms(실측) → 조각당 수십 ms + 양보
+const INGEST_CHUNK_ROWS = 2_000;               // v2.765: ingestSnapRows 조각 — 40,000행 한 트랜잭션 373ms(실측) → 조각당 수십 ms + 양보
 
 /** 스냅샷 관련 행인가 — 로그 DB 검색(4열 LIKE '%snapshot%' · '%스냅샷%', ASCII 대소문자 무시)과 같은 판정. */
 export function isSnapRow(r) {
@@ -145,7 +145,7 @@ function initSqlite(dbPath) {
         return list.length;
       },
       /**
-       * v2.764(1-a): 큰 묶음(로그 폴러 회차 40,000행·전용 수집기 호출분)은 조각(chunkRows) 트랜잭션 + 조각 사이 시간 기준 양보(createYielder).
+       * v2.765(1-a): 큰 묶음(로그 폴러 회차 40,000행·전용 수집기 호출분)은 조각(chunkRows) 트랜잭션 + 조각 사이 시간 기준 양보(createYielder).
        *   조각마다 api.ingest 를 탄다(적재 실패 주입·C5 테스트가 그 함수를 바꾼다) — prune 셈은 묶음당 1 로 예전과 같다.
        *   해시 UNIQUE 라 조각 사이에 실패해도 다시 넣으면 한 번이다 — 던지면 호출부(ingestSnapRows)가 덮음 무효(C5/E1)로 간다. 반환: 넣으려 한 행 수.
        */
@@ -174,7 +174,7 @@ function initSqlite(dbPath) {
         return true;
       },
       /*
-       * v2.764: Veeam 계정 전용 수집기(snapCollector.js)의 커서·완결 시각 — snap_meta 'cur:<vc>'(마지막으로 읽은 이벤트 시각) ·
+       * v2.765: Veeam 계정 전용 수집기(snapCollector.js)의 커서·완결 시각 — snap_meta 'cur:<vc>'(마지막으로 읽은 이벤트 시각) ·
        *   'ok:<vc>'(그 vCenter 의 Veeam 계정 이벤트가 온전한 마지막 시각). 재시작해도 이어 읽고, 화면의 collectedAt 결합(snapEventsOkAt)에 쓴다.
        *   수가 아니면 null(모름) — 0 으로 읽지 않는다.
        */
@@ -182,7 +182,7 @@ function initSqlite(dbPath) {
       setSnapCursor(vcenterId, ts) { metaSet.run(`cur:${vcenterId}`, String(Math.floor(Number(ts)))); },
       snapOkAt(vcenterId) { const n = Number(metaGet.get(`ok:${vcenterId}`)?.v); return Number.isFinite(n) && n > 0 ? n : null; },
       setSnapOkAt(vcenterId, ts) { metaSet.run(`ok:${vcenterId}`, String(Math.floor(Number(ts)))); },
-      /** v2.764(4-a): 'seen:<vc>' — 전용 수집기가 그 vCenter 에서 계정 필터로 이벤트를 1건 이상 읽은 시각(없으면 null). */
+      /** v2.765(4-a): 'seen:<vc>' — 전용 수집기가 그 vCenter 에서 계정 필터로 이벤트를 1건 이상 읽은 시각(없으면 null). */
       snapSeenAt(vcenterId) { const n = Number(metaGet.get(`seen:${vcenterId}`)?.v); return Number.isFinite(n) && n > 0 ? n : null; },
       setSnapSeenAt(vcenterId, ts) { metaSet.run(`seen:${vcenterId}`, String(Math.floor(Number(ts)))); },
       /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
@@ -250,7 +250,7 @@ function invalidateCoverage(rows, db) {
 let _ingestWarned = 0;
 /**
  * 로그 폴러가 적재한 행 중 스냅샷 행을 넣는다(실패해도 로그 적재는 그대로 — 시간당 경고 1줄). 실패·DB 없음이면 그 vCenter 의 덮음을 무효로(v2.761 C5).
- * v2.764(1-a): 조각(2,000행) 트랜잭션 + 조각 사이 양보(db.ingestAsync) — 한 덩어리 373ms 가 이벤트 루프를 막았다. 조각 중간에 실패해도
+ * v2.765(1-a): 조각(2,000행) 트랜잭션 + 조각 사이 양보(db.ingestAsync) — 한 덩어리 373ms 가 이벤트 루프를 막았다. 조각 중간에 실패해도
  *   '덮음 무효' 의미는 그대로(0 을 돌려준다 — 호출부는 넣으려 한 수와 다르면 실패로 본다).
  */
 export async function ingestSnapRows(rows) {

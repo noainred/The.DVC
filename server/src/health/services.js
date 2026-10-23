@@ -59,7 +59,7 @@ import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
 import * as m_veeamPoller from '../veeam/poller.js';   // v2.751 Veeam 백업 상태
-import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.764 Veeam 계정 이벤트 전용 수집
+import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.765 Veeam 계정 이벤트 전용 수집
 import * as m_gpuPhysicalPoller from '../gpu/physicalPoller.js';
 import * as m_dirUsageScheduler from '../dirusage/scheduler.js';
 import * as m_gpuPoller from '../gpu/poller.js';

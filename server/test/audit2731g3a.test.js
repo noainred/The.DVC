@@ -137,7 +137,7 @@ test('A2-01 ⑥ 로그 폴러 — 수집 성공 시각을 남기고(상한에 �
     assert.equal(typeof P.logCollectOkAt, 'function', '로그 폴러가 vCenter 별 수집 성공 시각을 내놓아야 한다');
     assert.equal(P.logCollectOkAt('vcx'), null, '수집 전에는 기록이 없다');
     // (1) 끝까지 못 읽은 수집 — 마지막으로 읽은 이벤트까지만 온전하다.
-    //   v2.764(재검토 1-c): 폴러는 설정 상한(maxPerPoll) 대신 시간 예산 안에서 한 세션으로 이어 읽는다 — 예산 1ms 로 첫 쪽(200건) 뒤 멈추게 한다.
+    //   v2.765(재검토 1-c): 폴러는 설정 상한(maxPerPoll) 대신 시간 예산 안에서 한 세션으로 이어 읽는다 — 예산 1ms 로 첫 쪽(200건) 뒤 멈추게 한다.
     const base = Date.now() - 10 * H;
     state.events = Array.from({ length: 250 }, (_, i) => ({ key: `k${i}`, ts: base + i * 60_000 }));
     await P.pollLogsOnce({ manual: true, budgetMs: 1 });

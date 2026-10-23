@@ -102,7 +102,7 @@ export function scopeVcLogStatus(st, allowed) {
       lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
     }
     // v2.732(점검 2회차 B4-01 후속): 수집하지 않은 vCenter·이번 주기 로그인 거부 목록도 범위 안 것만(전 법인 vCenter id·사유는 범위 밖 정보다)
-    // v2.764: 지연 vCenter(lagging)·저장 0 vCenter(stalled)도 범위 안 것만.
+    // v2.765: 지연 vCenter(lagging)·저장 0 vCenter(stalled)도 범위 안 것만.
     for (const k of ['notCollected', 'authRejected', 'lagging', 'stalled']) {
       if (!Array.isArray(st.lastRun[k])) continue;
       lr[k] = st.lastRun[k].filter((x) => x && allowed.has(String(x.vcenterId)));
@@ -110,7 +110,7 @@ export function scopeVcLogStatus(st, allowed) {
     }
     out.lastRun = lr;
   }
-  // v2.764(진단): vCenter 별 수집 진단은 범위 안 것만, 오류 원문(vCenter 주소가 들어간다)은 지운다 — 전체 범위 관리자만 본다.
+  // v2.765(진단): vCenter 별 수집 진단은 범위 안 것만, 오류 원문(vCenter 주소가 들어간다)은 지운다 — 전체 범위 관리자만 본다.
   if (Array.isArray(st.collect)) {
     const kept = st.collect.filter((c) => c && allowed.has(String(c.vcenterId)));
     out.collect = kept.map((c) => (c.lastPoll && typeof c.lastPoll === 'object' && c.lastPoll.error != null
@@ -185,7 +185,7 @@ adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
   const s = saveLogSettings(req.body || {});
   if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
   rescheduleLogPoller();
-  // v2.764(4-f): Veeam 계정 이벤트 전용 수집기도 같은 주기(pollIntervalMin)를 쓴다 — 저장 즉시 재무장(예전에는 다음 틱부터, 주기가 1일이면 최대 1일 뒤).
+  // v2.765(4-f): Veeam 계정 이벤트 전용 수집기도 같은 주기(pollIntervalMin)를 쓴다 — 저장 즉시 재무장(예전에는 다음 틱부터, 주기가 1일이면 최대 1일 뒤).
   //   동적 import + 함수 존재 확인 — 수집기 모듈이 아직 그 함수를 내보내지 않는 판에서도 설정 저장은 막히지 않는다.
   try {
     const m = await import('../../veeam/snapCollector.js');

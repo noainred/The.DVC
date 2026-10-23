@@ -26,7 +26,7 @@ import { eventNotCollectedMap } from '../logs/coverage.js';
 import { edgeSnapPayload } from './snapEvents.js';
 import { getSnapDb } from './snapDb.js';
 import { logPollerRanOnce } from '../logs/poller.js';
-import { snapEventsOkAt } from './snapCollector.js';   // v2.764: 로그 폴러·Veeam 계정 전용 수집기 중 늦은 완결 시각(결합 함수 하나 — 라우트와 같다)
+import { snapEventsOkAt } from './snapCollector.js';   // v2.765: 로그 폴러·Veeam 계정 전용 수집기 중 늦은 완결 시각(결합 함수 하나 — 라우트와 같다)
 
 const gzipAsync = promisify(zlib.gzip);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
@@ -51,7 +51,7 @@ export function buildPushBody() {
 async function snapEventsForPush() {
   try {
     // v2.761(C2): 이벤트 수집 신선도(마지막 온전한 수집 시각 · 폴러가 한 주기를 끝냈는가)도 싣는다 — 중앙이 6시간 판정·'아직 못 모음' 을 한다.
-    // v2.764: collectedAt 은 로그 폴러와 Veeam 계정 전용 수집기 중 늦은 것(snapEventsOkAt). 전용 DB 가 없으면(로그 DB 경로) 전용 수집기 값은 섞지 않는다.
+    // v2.765: collectedAt 은 로그 폴러와 Veeam 계정 전용 수집기 중 늦은 것(snapEventsOkAt). 전용 DB 가 없으면(로그 DB 경로) 전용 수집기 값은 섞지 않는다.
     //   push 필드는 그대로다(edgeSnapPayload 의 collectedAt 값만 바뀐다 — 중앙 sanitizeEdgeSnap 계약 변경 없음).
     const snapDb = await getSnapDb();
     return { list: await edgeSnapPayload({ db: await getLogsDb(), snap: store.get(), notCollected: eventNotCollectedMap(), logSettings: loadLogSettings(), snapDb,

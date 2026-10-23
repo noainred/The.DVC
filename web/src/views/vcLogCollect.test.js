@@ -1,4 +1,4 @@
-// v2.764 — 설정 › vCenter 로그 보관의 vCenter 별 수집 상태 표 문구(순수). 실서버 OC2 이벤트 수집 13일 정체를 화면이 말하게.
+// v2.765 — 설정 › vCenter 로그 보관의 vCenter 별 수집 상태 표 문구(순수). 실서버 OC2 이벤트 수집 13일 정체를 화면이 말하게.
 import { describe, it, expect } from 'vitest';
 import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText, DAY_MS } from './vcLogCollect.js';
 

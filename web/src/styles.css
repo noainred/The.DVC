@@ -1863,3 +1863,65 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .pf-inc-table { min-width: 1040px; }
 .pf-kind-bar { flex: 1; min-width: 60px; height: 6px; border-radius: 3px; background: rgba(148, 163, 184, .18); overflow: hidden; display: inline-block; }
 .pf-kind-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
+/* v2.764 — ESXi 호스트 화면 시안 B '이상 우선'(views/Hosts.jsx · 판정은 views/hostTriage.js).
+   CPU 구간 색은 파랑 → 주황 → 밝은 분홍으로 명도도 함께 달라진다(적록 구분이 어려워도 구간이 갈리게). 미수집은 점선 빈 칸. */
+.ht-b-lt50 { background: #1e3a66; }
+.ht-b-b50 { background: #3b6fd1; }
+.ht-b-b75 { background: var(--amber); }
+.ht-b-b90 { background: #fb7a4a; }
+.ht-b-over { background: #fecaca; }
+.ht-b-na { background: transparent; box-shadow: inset 0 0 0 1px var(--text-faint); }
+.ht-sum { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 13px; }
+.ht-sum-item { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.ht-sum-item b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.ht-sum-item .muted { font-size: 12px; }
+.ht-sum-k { color: var(--text-dim); font-size: 12px; }
+.ht-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.ht-card { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ht-card:disabled { cursor: default; }
+.ht-card:hover:not(:disabled) { border-color: var(--accent); }
+.ht-card-n { font-size: 30px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 40px; }
+.ht-card-t { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; }
+.ht-card-t .muted { font-size: 12px; }
+.ht-card-amber { background: rgba(245, 158, 11, .08); border-color: rgba(245, 158, 11, .45); }
+.ht-card-amber .ht-card-n { color: #fbbf24; }
+.ht-card-red { background: rgba(239, 68, 68, .08); border-color: rgba(239, 68, 68, .45); }
+.ht-card-red .ht-card-n { color: #f87171; }
+.ht-on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ht-panels { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; margin-bottom: 14px; }
+.ht-heat { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.ht-dist { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ht-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.ht-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--text-dim); }
+.ht-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.ht-cell { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.ht-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.ht-tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ht-tile:hover { border-color: var(--accent); }
+.ht-tile-hot { border-color: rgba(239, 68, 68, .45); }
+.ht-tile-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; }
+.ht-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ht-cells { display: flex; flex-wrap: wrap; gap: 2px; }
+.ht-tile-f { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; }
+.ht-more { align-self: flex-start; }
+.ht-bar-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 44px; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.ht-bar-row:hover:not(:disabled) { background: var(--hover); }
+.ht-bar-row:disabled { cursor: default; }
+.ht-bar-row > .tabular { text-align: right; }
+.ht-bar { height: 12px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.ht-bar > i { display: block; height: 100%; border-radius: 3px; }
+.ht-note { margin-top: auto; font-size: 12px; line-height: 1.6; }
+.ht-tablebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ht-tabs { display: flex; gap: 6px; }
+.ht-tab-on { border-color: var(--accent); background: rgba(59, 130, 246, .16); }
+.ht-chip { display: inline-flex; align-items: center; gap: 6px; }
+.ht-chip-x { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
+.ht-reasons { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ht-tablebar .result-count { margin-left: auto; }
+@media (max-width: 720px) {
+  .ht-tiles:not(.ht-all) .ht-tile:nth-child(n+5) { display: none; }
+}
+@media (min-width: 721px) {
+  .ht-more-narrow { display: none; }
+}

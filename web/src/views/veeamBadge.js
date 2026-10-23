@@ -261,7 +261,7 @@ export function veeamEventBadge(entry, { days = 7, source = 'local' } = {}) {
 }
 
 /**
- * v2.764(실서버 OC2 — 수집이 13일 뒤처졌는데 화면은 시각만 보여 '왜' 를 알 길이 없었다): 수집이 얼마나 뒤처졌는지(일 · 하루 미만은 시간)와
+ * v2.765(실서버 OC2 — 수집이 13일 뒤처졌는데 화면은 시각만 보여 '왜' 를 알 길이 없었다): 수집이 얼마나 뒤처졌는지(일 · 하루 미만은 시간)와
  *   원인을 볼 곳(설정 › Log — vCenter 로그 보관 화면의 수집 상태·실패 사유). 시각을 모르면 ''(지어내지 않는다).
  */
 export function collectLagText(collectedAt, now = Date.now()) {
@@ -332,7 +332,7 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
   const label = veeam ? '백업 · Veeam' : '백업 · 스냅샷';
   if (!Number.isFinite(e.n)) {
     let why = BACKUP_REASON[e.reason];
-    if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.${Number.isFinite(e.collectedAt) ? ` ${collectLagText(e.collectedAt, now)}` : ''}`;   // v2.764
+    if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.${Number.isFinite(e.collectedAt) ? ` ${collectLagText(e.collectedAt, now)}` : ''}`;   // v2.765
     if (!why) why = veeamEventStatusText({ status: e.reason, at: e.at }) || '백업 정보를 읽지 못했습니다.';
     const unknownSrc = e.reason === 'registry-unreadable';   // v2.762(F4): Veeam 기준인지 스냅샷 기준인지도 모른다
     const lines = [`${unknownSrc ? '' : veeam ? 'Veeam 기준 ' : '스냅샷 기준 '}백업 수량을 알 수 없습니다(0대가 아닙니다)`, why];
@@ -383,7 +383,7 @@ export function veeamEventChip(ev) {
   const n = ok ? Object.keys(ev.byVm || {}).length : null;
   let why = veeamEventStatusText(ev);
   if (v && !v.ok && ev.status === 'ok') {
-    if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.${Number.isFinite(ev.collectedAt) ? ` ${collectLagText(ev.collectedAt, Number.isFinite(ev.at) ? ev.at : Date.now())}` : ''}`;   // v2.764: 며칠 뒤처졌는지 + 원인을 볼 곳
+    if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.${Number.isFinite(ev.collectedAt) ? ` ${collectLagText(ev.collectedAt, Number.isFinite(ev.at) ? ev.at : Date.now())}` : ''}`;   // v2.765: 며칠 뒤처졌는지 + 원인을 볼 곳
     else why = BACKUP_REASON[v.reason] || why || '이벤트 기준 수를 표시할 수 없습니다.';
   }
   if (v?.ok && v.accountUnseen && n === 0) why = ACCOUNT_UNSEEN;   // v2.763(V4-2)

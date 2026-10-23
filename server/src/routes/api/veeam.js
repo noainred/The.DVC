@@ -19,7 +19,7 @@ import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS, snapCovered } from '../..
 import { getSnapDb } from '../../veeam/snapDb.js';
 import { kickSnapBackfill } from '../../veeam/snapWarm.js';
 import { logPollerRanOnce } from '../../logs/poller.js';
-import { snapEventsOkAt } from '../../veeam/snapCollector.js';   // v2.764: 로그 폴러 ok 시각과 Veeam 계정 전용 수집기 ok 시각 중 늦은 것(결합 함수 하나)
+import { snapEventsOkAt } from '../../veeam/snapCollector.js';   // v2.765: 로그 폴러 ok 시각과 Veeam 계정 전용 수집기 ok 시각 중 늦은 것(결합 함수 하나)
 import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
@@ -180,7 +180,7 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
   // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
   //   v2.761(C1): collectRan = 이 프로세스에서 로그 폴러가 한 주기를 끝냈다(그 뒤에도 null 이면 '아직 못 모음' — 기동 직후는 아니다).
   //   v2.762(F6): staleMs = 이 포탈 로그 수집 주기를 반영한 '오래됨' 한도(snapVerdict 가 쓴다 — 엣지 요약은 싣지 않아 6시간).
-  //   v2.764: collectedAt = 로그 폴러와 Veeam 계정 전용 수집기(snapCollector) 중 늦은 완결 시각 — 전용 수집기의 행은 전용 DB 에만 있으므로
+  //   v2.765: collectedAt = 로그 폴러와 Veeam 계정 전용 수집기(snapCollector) 중 늦은 완결 시각 — 전용 수집기의 행은 전용 DB 에만 있으므로
   //     이 요약이 전용 DB 를 읽었을 때만(viaSnapDb) 그 시각을 섞는다(백필 전 로그 DB 경로는 로그 폴러 값 그대로).
   return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at,
     collectedAt: snapEventsOkAt(vcenterId, { dedicated: viaSnapDb }), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}) };

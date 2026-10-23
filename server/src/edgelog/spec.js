@@ -104,7 +104,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
   { key: 'collect.isidu', label: '아이실론 디렉터리 사용량 조사', group: 'collect', mod: '../isidu/poller.js', fn: 'isiduPollerStatus' }, // v2.736 — 중앙·엣지 공용(자기 몫 대상만)
   { key: 'collect.veeam', label: 'Veeam 백업 상태 수집', group: 'collect', mod: '../veeam/poller.js', fn: 'veeamPollerStatus' }, // v2.751 — 중앙·엣지 공용(자기 몫 서버만)
-  { key: 'collect.veeamSnap', label: 'Veeam 계정 이벤트 전용 수집', group: 'collect', mod: '../veeam/snapCollector.js', fn: 'veeamSnapCollectorStatus' }, // v2.764 — 직접 수집 vCenter 의 Veeam 계정 이벤트만(로그 폴러가 밀려도 백업 시도는 최신)
+  { key: 'collect.veeamSnap', label: 'Veeam 계정 이벤트 전용 수집', group: 'collect', mod: '../veeam/snapCollector.js', fn: 'veeamSnapCollectorStatus' }, // v2.765 — 직접 수집 vCenter 의 Veeam 계정 이벤트만(로그 폴러가 밀려도 백업 시도는 최신)
   { key: 'collect.pdu', label: 'PDU 수집', group: 'collect', mod: '../pdu/poller.js', fn: 'pduPollerStatus' },
   { key: 'collect.curUser', label: '현재 사용자 수집', group: 'collect', mod: '../curuser/poller.js', fn: 'curUserPollerStatus' },
   { key: 'collect.horizon', label: 'Horizon 세션 수집', group: 'collect', mod: '../horizon/sessionPoller.js', fn: 'hzSessionPollerStatus' },

@@ -1,5 +1,5 @@
 /**
- * vcLogCollect.js — 설정 › vCenter 로그 보관의 'vCenter 별 수집 상태' 표 문구·판정 한 벌(v2.764 — 실서버 OC2 이벤트 수집 13일 정체, 순수 · vitest).
+ * vcLogCollect.js — 설정 › vCenter 로그 보관의 'vCenter 별 수집 상태' 표 문구·판정 한 벌(v2.765 — 실서버 OC2 이벤트 수집 13일 정체, 순수 · vitest).
  *
  * 서버(logs/poller.js logCollectDiag)가 `collect:[{ vcenterId, count, lastStoredTs, cursorTs, okAt, capped, ended, lagMs, lastPoll, consecutiveCapped,
  * ratePerMin, state }]` 로 싣고, 범위 계정에는 scopeVcLogStatus 가 범위 밖 vCenter 와 오류 원문을 지운다. 이 모듈은 그 값을 표 칸 문구로 바꾼다.
@@ -36,11 +36,11 @@ function pickCollect(c) {
     state: typeof c.state === 'string' ? c.state : null, restored: c.restored === true,
     read: p ? nonneg(p.read) : null, stored: p ? nonneg(p.stored) : null, ms: p ? nonneg(p.ms) : null, deadlineMs: p ? pos(p.deadlineMs) : null,
     rounds: p ? nonneg(p.rounds) : null, error: p && typeof p.error === 'string' && p.error ? p.error : null, errorHidden: p?.errorHidden === true,
-    budgetMs: p ? pos(p.budgetMs) : null, hint: p && typeof p.hint === 'string' && p.hint ? p.hint : null,   // v2.764(재검토 2-c)
+    budgetMs: p ? pos(p.budgetMs) : null, hint: p && typeof p.hint === 'string' && p.hint ? p.hint : null,   // v2.765(재검토 2-c)
   };
 }
 
-/** v2.764(2-c): 서버 진단 힌트 → 안내 문구. 'timeout' = 첫 묶음도 못 받고 시한에 걸렸다(13일치 beginTime 의 첫 쪽이 느린 vCenter). 모르면 ''. */
+/** v2.765(2-c): 서버 진단 힌트 → 안내 문구. 'timeout' = 첫 묶음도 못 받고 시한에 걸렸다(13일치 beginTime 의 첫 쪽이 느린 vCenter). 모르면 ''. */
 export const VCLOG_HINT_TEXT = Object.freeze({ timeout: '시한 안에 첫 묶음도 못 읽었습니다 — 요청 시한(vCenter 관리 › timeoutMs)을 올리세요' });
 export function vcLogHintText(row) { return (row && typeof row === 'object' && VCLOG_HINT_TEXT[row.hint]) || ''; }
 const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
@@ -67,7 +67,7 @@ export function vcLogLagText(lagMs) {
 export function vcLogLagWarn(lagMs) { const n = nonneg(lagMs); return n != null && n > DAY_MS; }
 
 /** 상한 칸 — 왜 끝까지 읽지 못했는지. ended 가 없으면 capped 불리언으로. */
-// v2.764(재검토): budget = 시간 예산(주기의 80%)에서 멈춤 · batch = 묶음 사이에서 멈춤(적재 실패 등 — 뒤가 남았다)
+// v2.765(재검토): budget = 시간 예산(주기의 80%)에서 멈춤 · batch = 묶음 사이에서 멈춤(적재 실패 등 — 뒤가 남았다)
 export const VCLOG_ENDED_TEXT = Object.freeze({ max: '상한', pages: '쪽 수 한도', aborted: '시한', budget: '예산', batch: '중단', empty: '아니오' });
 export function vcLogCappedText(row) {
   if (!row || typeof row !== 'object') return '—';
@@ -95,7 +95,7 @@ export function vcLogDurText(row) {
 
 /**
  * 한 주기 상한 안내 — 설정값과 실효 상한(수집기 한도로 잘린 값)을 함께. 서버 값이 없으면(구버전) 설정값만.
- * v2.764(재검토 1-c): 서버가 묶음 수집(catchup.streaming·batchRows)이면 상한은 수집 상한이 아니다 — '시간 예산(주기의 N%) 안에서 묶음으로 한 세션에 이어
+ * v2.765(재검토 1-c): 서버가 묶음 수집(catchup.streaming·batchRows)이면 상한은 수집 상한이 아니다 — '시간 예산(주기의 N%) 안에서 묶음으로 한 세션에 이어
  *   읽는다' 를 말한다(건수 상한 문구를 그대로 두면 설정값이 수집을 자른다고 오해한다). 옛 서버(maxRounds)는 예전 문구.
  */
 export function vcLogMaxPerPollText(st, fmt = (n) => Number(n).toLocaleString()) {

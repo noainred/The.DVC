@@ -1,5 +1,5 @@
 /**
- * veeam/snapCollector.js — Veeam 계정 이벤트 **전용 경량 수집기**(v2.764 — 실서버 OC2 의 일반 로그 수집이 13일 뒤처져 VM 화면의
+ * veeam/snapCollector.js — Veeam 계정 이벤트 **전용 경량 수집기**(v2.765 — 실서버 OC2 의 일반 로그 수집이 13일 뒤처져 VM 화면의
  *   'Veeam 백업 시도' 가 10-10 에 멈춘 것처럼 보였다).
  *
  * 왜: 카드 백업 수량·VM 화면의 백업 시도는 로그 폴러(logs/poller.js)가 적재한 **전체 이벤트** 중 스냅샷 행에 기댄다. 그 폴러가
@@ -15,19 +15,19 @@
  *    도메인 없이 적은 계정은 다른 계정에서 본 도메인으로 변형을 만든다. 어느 변형도 맞지 않으면 이 수집기는 그 계정을 읽지 못한다 —
  *    일반 폴러가 읽은 행은 그대로 쓰인다). 종류(eventTypeId)는 좁히지 않는다 — TaskEvent·VmSnapshot* 모두 받아 snapDb.isSnapRow 로 거른다.
  *  · 커서 snap_meta 'cur:<vc>' = 마지막으로 읽은 이벤트 시각(저장 여부와 무관 — 중복·필터로 저장 0 이어도 나아간다). 없으면 now − LOOKBACK(8일).
- *    v2.764(2-b): 이어 읽기·다음 주기의 since 는 **커서 그 시각(포함)** — `cursor + 1` 은 같은 ms 에 상한 경계가 걸리면 그 ms 의 나머지를
+ *    v2.765(2-b): 이어 읽기·다음 주기의 since 는 **커서 그 시각(포함)** — `cursor + 1` 은 같은 ms 에 상한 경계가 걸리면 그 ms 의 나머지를
  *    영영 건너뛰었다(재검토 재현). 같은 ms 를 다시 읽는 몇 건은 전용 DB 해시 UNIQUE 가 거른다. 같은 ms 에 상한만큼 몰려 진행이 0 이면
  *    (상한에 걸렸는데 maxRead == cursor) 그 회차에서 멈추고 상태 stalled 로 밝힌다(무한 반복 금지).
  *  · 호출 상한(PER_CALL_MAX)에 걸리면 같은 주기 안에서 커서부터 이어 읽는다(예산 안) · per-vCenter 시한은 로그 폴러와 같은 vcLogWithDeadline(신호로 실제로 끊는다) ·
  *    동시성 6(poolRun) · 재진입 가드 + 주기 상한(끝나지 않는 주기가 가드를 영원히 붙잡지 않게).
  *  · 완결 시각: 끝까지 읽었으면(ended 'empty') okAt = 수집 시작 시각(eventsCompleteUntil 과 같은 규칙), 상한·쪽 수·데드라인에 걸렸으면 마지막으로 읽은 시각.
  *    메모리 + snap_meta 'ok:<vc>' 영속(재시작 뒤 복원).
- *    v2.764(4-a): okAt 은 이 수집기가 그 vCenter 에서 **계정 필터로 이벤트를 1건 이상 읽은 뒤**(snap_meta 'seen:<vc>')부터만 기록·영속한다 —
+ *    v2.765(4-a): okAt 은 이 수집기가 그 vCenter 에서 **계정 필터로 이벤트를 1건 이상 읽은 뒤**(snap_meta 'seen:<vc>')부터만 기록·영속한다 —
  *    사람이 적은 계정 표기(예: 'svc-veeam')가 vCenter 의 userName('CORP\\svc-veeam')과 어느 변형도 맞지 않으면 0건으로 '완결' 되는데, 그것을
  *    '지금까지 온전' 으로 믿으면 로그 폴러가 13일 뒤처진 vCenter 의 판정이 stale-events 에서 ok 로 뒤집혔다(재검토 재현). 0건 완결은 '모름' —
  *    snapEventsOkAt 결합이 로그 폴러 값으로 폴백한다. 상태 perVc.<id>.seen=false + reason 'unseen'(계정 표기가 vCenter 와 다를 수 있음).
  *  · 상태 veeamSnapCollectorStatus() 는 요약만(주소·오류 원문 없음) · 콘솔은 실패 vCenter 당 1시간 1줄 · 성공 요약 1줄.
- *  · 주기는 로그 설정 pollIntervalMin 과 같다 — startAdaptiveTimer 가 매 틱 다시 읽는다(모듈 로드 시 굳히지 않음). v2.764(4-f): 로그 설정 저장 라우트가
+ *  · 주기는 로그 설정 pollIntervalMin 과 같다 — startAdaptiveTimer 가 매 틱 다시 읽는다(모듈 로드 시 굳히지 않음). v2.765(4-f): 로그 설정 저장 라우트가
  *    rescheduleLogPoller 와 함께 rescheduleVeeamSnapCollector() 를 불러 이미 무장된 타이머를 즉시 재무장한다(logs/settings.js 에는 변경 리스너가 없다).
  */
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
@@ -56,10 +56,10 @@ let _timer = null;
 let _running = null;      // { since, promise }
 let _last = null;         // 마지막 주기 요약(스킵 사유 포함)
 const _okAt = new Map();  // vcenterId → 이 수집기의 완결 시각(메모리 — snap_meta 'ok:<vc>' 와 같다 · seen 인 vCenter 만)
-const _seen = new Map();  // v2.764(4-a): vcenterId → 계정 필터로 이벤트를 처음 읽은 시각(snap_meta 'seen:<vc>')
+const _seen = new Map();  // v2.765(4-a): vcenterId → 계정 필터로 이벤트를 처음 읽은 시각(snap_meta 'seen:<vc>')
 const _perVc = new Map(); // vcenterId → { state, okAt, cursor, read, stored, calls, capped, kind, seen, reason, stalled, at }
 const failLog = createChangeLogger({ windowMs: 3_600_000 });
-const _rearm = new Set(); // v2.764(4-f): startAdaptiveTimer 재무장 알림 구독자
+const _rearm = new Set(); // v2.765(4-f): startAdaptiveTimer 재무장 알림 구독자
 
 /** 주기(ms) — 로그 설정 pollIntervalMin 과 같다(logs/poller.js schedule 과 같은 [1분, 1일] 클램프). 매 틱 다시 읽는다. */
 export function intervalMs() {
@@ -109,7 +109,7 @@ export function combineOkAt(logOkAt, snapOkAt) {
 }
 /** 이 수집기의 완결 시각(ms) 또는 null(기록 없음 · 아직 이벤트를 읽어 본 적 없는 vCenter — 4-a). */
 export function snapCollectorOkAt(vcenterId) { const id = String(vcenterId ?? ''); return _seen.has(id) ? (_okAt.get(id) ?? null) : null; }
-/** v2.764(4-a): 이 수집기가 그 vCenter 에서 계정 필터로 이벤트를 읽은 적이 있는가(메모리 — snap_meta 'seen:<vc>'). */
+/** v2.765(4-a): 이 수집기가 그 vCenter 에서 계정 필터로 이벤트를 읽은 적이 있는가(메모리 — snap_meta 'seen:<vc>'). */
 export function snapCollectorSeen(vcenterId) { return _seen.has(String(vcenterId ?? '')); }
 /**
  * 화면·push 가 쓰는 '이벤트가 온전한 마지막 시각' — 로그 폴러(logCollectOkAt)와 이 수집기 중 늦은 것. 두 소비처(routes/api/veeam.js ·
@@ -146,7 +146,7 @@ async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
   const startedAt = now;
   const t0 = Date.now();
   let cursor = db.snapCursor(id);
-  // v2.764(2-b): 커서 그 시각부터(포함) — 같은 ms 의 나머지를 건너뛰지 않는다(중복은 해시 UNIQUE 가 거른다)
+  // v2.765(2-b): 커서 그 시각부터(포함) — 같은 ms 의 나머지를 건너뛰지 않는다(중복은 해시 UNIQUE 가 거른다)
   let since = Math.max(cursor || 0, now - LOOKBACK_MS);
   let read = 0; let stored = 0; let calls = 0; let maxRead = 0; let ended = 'empty'; let stalled = false;
   for (;;) {
@@ -158,7 +158,7 @@ async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
     let mx = 0;
     for (const e of events) { const t = Number(e?.ts); if (Number.isFinite(t) && t > mx) mx = t; }
     if (events.length) {
-      // v2.764(4-a): 계정 필터로 이벤트를 읽었다 — 이 계정 표기는 이 vCenter 에서 맞는다. 그 뒤부터 okAt 을 믿는다(영속).
+      // v2.765(4-a): 계정 필터로 이벤트를 읽었다 — 이 계정 표기는 이 vCenter 에서 맞는다. 그 뒤부터 okAt 을 믿는다(영속).
       if (!_seen.has(id)) { _seen.set(id, Date.now()); db.setSnapSeenAt(id, _seen.get(id)); }
       const rows = events.map((e) => ({ vcenterId: id, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message })).filter(isSnapRow);
       if (rows.length) {
@@ -171,14 +171,14 @@ async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
     if (mx > (cursor || 0)) { cursor = mx; db.setSnapCursor(id, cursor); }
     if (mx > maxRead) maxRead = mx;
     if (ended === 'empty' || ended === 'aborted') break;       // 끝 · 데드라인(느린 vCenter — 이번 주기는 여기까지)
-    // v2.764(2-b): 상한에 걸렸는데 마지막 시각이 커서를 넘지 못했다 — 같은 ms 에 상한만큼 몰렸다. 같은 since 로 다시 읽어도 같은 결과라 멈춘다.
+    // v2.765(2-b): 상한에 걸렸는데 마지막 시각이 커서를 넘지 못했다 — 같은 ms 에 상한만큼 몰렸다. 같은 since 로 다시 읽어도 같은 결과라 멈춘다.
     if (!(mx > before)) { stalled = true; break; }
     if (Date.now() - t0 >= budgetMs) break;                     // 예산 — 다음 주기가 커서부터 잇는다
     since = cursor;
   }
   const complete = ended === 'empty';
   const okAt = completeUntil({ complete, startedAt, maxRead });
-  // v2.764(4-a): 이벤트를 읽어 본 적 없는 vCenter(seen 아님)의 okAt 은 기록하지 않는다 — 0건 완결은 '온전' 이 아니라 '모름' 이다.
+  // v2.765(4-a): 이벤트를 읽어 본 적 없는 vCenter(seen 아님)의 okAt 은 기록하지 않는다 — 0건 완결은 '온전' 이 아니라 '모름' 이다.
   const seen = _seen.has(id);
   if (seen && okAt != null && okAt > (_okAt.get(id) || 0)) { _okAt.set(id, okAt); db.setSnapOkAt(id, okAt); }
   return { okAt: snapCollectorOkAt(id), cursor, read, stored, calls, capped: !complete, ended, seen, reason: seen ? null : 'unseen', ...(stalled ? { stalled: true } : {}) };
@@ -254,13 +254,13 @@ export function startVeeamSnapCollector() {
   restoreOkAt().catch(() => {});
   _timer = startAdaptiveTimer(intervalMs, () => pollVeeamSnapOnce(), {
     firstDelayMs: FIRST_DELAY_MS, name: 'Veeam 계정 이벤트 전용 수집',
-    subscribe: (cb) => { _rearm.add(cb); return () => _rearm.delete(cb); },   // v2.764(4-f): rescheduleVeeamSnapCollector 가 깨운다
+    subscribe: (cb) => { _rearm.add(cb); return () => _rearm.delete(cb); },   // v2.765(4-f): rescheduleVeeamSnapCollector 가 깨운다
   });
   console.log('[veeam-snap-collector] Veeam 계정 이벤트 전용 수집기 시작(주기 = vCenter 로그 수집 주기)');
 }
 
 /**
- * v2.764(4-f): 로그 설정(pollIntervalMin)이 저장되면 이미 무장된 타이머를 새 주기로 즉시 재무장한다 — 로그 설정 PUT 라우트가 rescheduleLogPoller()
+ * v2.765(4-f): 로그 설정(pollIntervalMin)이 저장되면 이미 무장된 타이머를 새 주기로 즉시 재무장한다 — 로그 설정 PUT 라우트가 rescheduleLogPoller()
  *   옆에서 부른다. 예전에는 다음 틱부터였다(주기가 1일이면 최대 1일 뒤). 타이머가 없으면(미기동·테스트) 아무것도 하지 않는다. 실행 중이면
  *   startAdaptiveTimer 가 끝날 때 새 주기로 잡는다. 반환: 알린 구독자 수.
  */

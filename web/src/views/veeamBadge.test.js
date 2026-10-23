@@ -313,7 +313,7 @@ describe('v2.763 — Veeam 등록·관리 화면 점검 수정(웹, 그룹 A)', 
   });
 });
 
-describe('v2.764 — stale-events 에 수집이 며칠 뒤처졌는지와 원인을 볼 곳(설정 › Log)을 한 줄 더한다', () => {
+describe('v2.765 — stale-events 에 수집이 며칠 뒤처졌는지와 원인을 볼 곳(설정 › Log)을 한 줄 더한다', () => {
   const now = new Date(2026, 9, 23, 12, 0).getTime();
   const DAY = 86_400_000;
   it('카드: backupCounts 의 collectedAt 으로 N일(하루 미만은 시간)을 계산한다 · 백틱 없음', () => {

@@ -64,7 +64,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/perf-db.md` (24항목) | 성능·DB·폴러 규약 — 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
 | `docs/rules/common.md` (11항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | `docs/rules/security-api.md` (16항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
-| `docs/rules/web.md` (22항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
+| `docs/rules/web.md` (23항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (17항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
 | `docs/rules/storage.md` (32항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
@@ -76,7 +76,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/ipam.md` (11항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
-| `docs/rules/audits.md` (52항목) | 회차별 점검(감사) 기록 v2.583~v2.764 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| `docs/rules/audits.md` (52항목) | 회차별 점검(감사) 기록 v2.583~v2.765 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)

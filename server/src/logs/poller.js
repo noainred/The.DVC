@@ -12,7 +12,7 @@ import { collectVCenterEvents, CLEANUP_TIMEOUT_MS, EVENT_BATCH_ROWS as COLLECTOR
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { capStr } from '../util/capStr.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';   // v2.764: 수집 커서 영속(상태 파일)
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';   // v2.765: 수집 커서 영속(상태 파일)
 import { numOrNull } from '../util/numOrNull.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { getLogsDb } from './db.js';
@@ -56,7 +56,7 @@ const _collectOk = new Map();   // vcenterId → { at, capped, events }
  */
 const _readCursor = new Map();  // vcenterId → 마지막으로 읽은 이벤트 시각(저장 여부와 무관)
 /*
- * v2.764(실서버 OC2 13일 정체 — 재시작 8회): 위 두 기록(_collectOk·_readCursor)이 인메모리라 재시작마다 db.lastTs(마지막 **저장** 시각)로
+ * v2.765(실서버 OC2 13일 정체 — 재시작 8회): 위 두 기록(_collectOk·_readCursor)이 인메모리라 재시작마다 db.lastTs(마지막 **저장** 시각)로
  *   되돌아갔다 — 상한에 걸린 주기가 읽어 둔 커서·'읽었는데 저장 0' 구간이 매번 사라져 같은 구간을 다시 읽었다. 이제 주기마다 1회(적재 뒤)
  *   CONFIG_DIR/vcenter-logs-cursor.json 에 원자적으로 저장하고 첫 수집 전에 읽는다. 상태 파일이다(백업 감시 제외 — util/stateFiles.js 등록).
  *   로드 규칙: 객체가 아니면 손상(preserveCorrupt) · 값은 numOrNull 로 판정(문자열 수치·null 은 버린다) · 미래 시각은 지금으로 자른다
@@ -70,11 +70,11 @@ const _lastPoll = new Map();    // vcenterId → 이번 주기 수집 진단 { a
 const _lagLog = new Map();      // vcenterId → 지연 경고를 마지막으로 찍은 시각(시간당 1줄)
 let _cursorLoaded = false;
 let _cursorDirty = false;
-let _cursorWarnAt = 0;          // v2.764(3-c): 커서 파일 쓰기 실패 경고는 시간당 1줄(_cursorDirty 가 남아 매 주기 다시 시도한다)
-let _busySkips = 0;             // v2.764(1-b): 진행 중이라 건너뛴 틱 수 — 주기가 길어져 다음 틱이 통째로 밀린 사실을 상태가 말한다
+let _cursorWarnAt = 0;          // v2.765(3-c): 커서 파일 쓰기 실패 경고는 시간당 1줄(_cursorDirty 가 남아 매 주기 다시 시도한다)
+let _busySkips = 0;             // v2.765(1-b): 진행 중이라 건너뛴 틱 수 — 주기가 길어져 다음 틱이 통째로 밀린 사실을 상태가 말한다
 let _busySkipAt = null;
 /**
- * v2.764(3-b): 커서가 어느 로그 DB 의 것인지 — 종류·경로·파일(inode). 로그 DB 를 새로 만들거나 저장 경로를 바꾸면 커서 파일이 남아 새 DB 가
+ * v2.765(3-b): 커서가 어느 로그 DB 의 것인지 — 종류·경로·파일(inode). 로그 DB 를 새로 만들거나 저장 경로를 바꾸면 커서 파일이 남아 새 DB 가
  *   첫 7일을 채우지 않았다(커서가 '이미 읽음' 이라 말하므로). 파일에 이 키를 함께 적고, 로드 때 다르면 커서를 무시한다(경고 1줄 · 다음 저장이 덮는다).
  *   inode 는 둘 다 있을 때만 비교한다(JSON 폴백 DB 는 첫 쓰기 전에 파일이 없다). 못 만들면 null(비교하지 않음 — 옛 파일과 같다).
  */
@@ -124,7 +124,7 @@ export function loadCursorFile({ now = Date.now(), force = false, dbKey = null }
 }
 /**
  * 주기마다 1회(적재 뒤) — 바뀐 것이 없으면 쓰지 않는다. 실패는 경고(시간당 1줄 — 수집은 그대로).
- * v2.764(3-c): knownIds(등록부의 vCenter id)가 있으면 거기 없는 항목은 지운다 — 지운 vCenter 의 커서가 영영 남아 지연이 자라던 것.
+ * v2.765(3-c): knownIds(등록부의 vCenter id)가 있으면 거기 없는 항목은 지운다 — 지운 vCenter 의 커서가 영영 남아 지연이 자라던 것.
  *   등록부를 못 읽어 비었을 때(빈 Set)는 지우지 않는다(온전한 기록을 빈 등록부 때문에 잃지 않게).
  */
 export function saveCursorFile({ force = false, knownIds = null, dbKey = null } = {}) {
@@ -151,7 +151,7 @@ export function saveCursorFile({ force = false, knownIds = null, dbKey = null } 
 /** 테스트 전용 — 인메모리 기록을 비우고 다음 수집이 파일을 다시 읽게 한다. */
 export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; }
 /*
- * v2.764(따라잡기 — 재검토 1-a·1-b·1-c): 밀린 vCenter 는 다음 주기를 기다리지 않고 **같은 주기 안에서, 한 세션·한 컬렉터로** 이어 읽는다
+ * v2.765(따라잡기 — 재검토 1-a·1-b·1-c): 밀린 vCenter 는 다음 주기를 기다리지 않고 **같은 주기 안에서, 한 세션·한 컬렉터로** 이어 읽는다
  *   (collectVCenterEvents onBatch) — EVENT_BATCH_ROWS 건마다 묶음을 받아 적재(전용 DB → 로그 DB 조각 트랜잭션)하고 커서·온전한 시각을 갱신한 뒤
  *   이벤트 루프에 양보한다. 예전(이 판의 첫 구현)은 회차마다 로그인·CreateCollector 를 다시 해 10분에 로그인 40회였고, 회차 하나(40,000건)를
  *   메모리에 다 들고 적재했다(동기 정지 최대 410ms · 힙 1.2GB). 로그인은 vCenter 당 주기에 1회. 묶음 수가 상태의 rounds 다.
@@ -181,7 +181,7 @@ export function vcCatchupBudgetMs({ everyMs, cycleStart, now = Date.now() } = {}
   return Math.max(Math.min(own, CATCHUP_MIN_BUDGET_MS), Math.min(own, Math.floor(left)));
 }
 /**
- * v2.764: 이번 수집이 '끝까지 읽지 못했다' 인가 — 수집기(collectVCenterEvents)가 배열에 실은 ended 를 본다. 없으면(옛 수집기·mock) 건수로 판정.
+ * v2.765: 이번 수집이 '끝까지 읽지 못했다' 인가 — 수집기(collectVCenterEvents)가 배열에 실은 ended 를 본다. 없으면(옛 수집기·mock) 건수로 판정.
  *   'batch'(중간 묶음 — 뒤가 남았다) · 'budget'(시간 예산) 도 상한처럼.
  */
 export const CAPPED_ENDED = Object.freeze(['max', 'pages', 'aborted', 'budget', 'batch']);
@@ -192,7 +192,7 @@ export function eventRowKey(e) {
 }
 /**
  * 다음 수집 시작 시각 — 저장된 마지막과 읽은 마지막 중 늦은 것(**포함**). 둘 다 없으면 첫 수집 창.
- * v2.764(재검토 2-b): 예전 +1ms 는 같은 ms 에 여러 이벤트가 있고 그 사이에서 묶음·주기가 끊기면 나머지를 영영 건너뛰었다(재현: 150건 중 같은 ms 4건,
+ * v2.765(재검토 2-b): 예전 +1ms 는 같은 ms 에 여러 이벤트가 있고 그 사이에서 묶음·주기가 끊기면 나머지를 영영 건너뛰었다(재현: 150건 중 같은 ms 4건,
  *   상한 100 → 2건 유실). 그 시각을 다시 읽어도 중복은 번호@시각 키(INSERT OR IGNORE)·전용 DB 해시가 거른다 — 비용은 같은 ms 몇 건의 재읽기.
  */
 export function nextSinceTs(lastStored, lastRead, { now = Date.now(), firstDays = 7 } = {}) {
@@ -205,7 +205,7 @@ export function eventsCompleteUntil(events, { startedAt, max = Infinity } = {}) 
   const list = Array.isArray(events) ? events : [];
   let maxTs = null;
   for (const e of list) { const t = Number(e?.ts); if (Number.isFinite(t) && (maxTs == null || t > maxTs)) maxTs = t; }
-  // v2.764: 'pages'(쪽 수 한도 — 상한보다 적게 읽었어도 뒤가 남았다) · 'aborted'(데드라인 — 읽은 만큼만) 도 상한처럼 다룬다.
+  // v2.765: 'pages'(쪽 수 한도 — 상한보다 적게 읽었어도 뒤가 남았다) · 'aborted'(데드라인 — 읽은 만큼만) 도 상한처럼 다룬다.
   const capped = CAPPED_ENDED.includes(list.ended) || (Number.isFinite(max) && max > 0 && list.length >= max);
   if (capped) return { at: maxTs, capped: true };
   // 상한 밖 — 수집을 시작한 시각까지 온전하다. vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각까지.
@@ -230,7 +230,7 @@ export function logCollectOkAt(vcenterId) { return _collectOk.get(String(vcenter
 /** v2.761(Veeam C1): 이 프로세스에서 수집 주기를 한 번 이상 끝까지 돌았는가 — 그 뒤에도 기록이 없는 vCenter 는 '아직 못 모음'(기동 직후와 구분). */
 export function logPollerRanOnce() { return lastRun != null && lastRun.skipped !== true; }
 /**
- * v2.764(진단): 그 vCenter 의 수집 지연(ms) — 지금 − (온전한 시각 ?? 마지막 저장 시각). 둘 다 없으면 null('아직 모름' — 0 이 아니다).
+ * v2.765(진단): 그 vCenter 의 수집 지연(ms) — 지금 − (온전한 시각 ?? 마지막 저장 시각). 둘 다 없으면 null('아직 모름' — 0 이 아니다).
  * 온전한 시각이 있으면 그것이 기준이다(조용한 vCenter 는 저장 시각이 오래돼도 수집은 정상 — A2-01 주석).
  */
 export function logLagMs(vcenterId, lastStoredTs = null, now = Date.now()) {
@@ -253,7 +253,7 @@ export function collectStateOf(vcenterId) {
   return 'ok';
 }
 /**
- * v2.764(진단): vCenter 별 수집 진단 — /admin/vclogs/status 의 `collect` 배열. 보관 건수 목록(db.meta().vcenters)과 인메모리 기록을 합친다.
+ * v2.765(진단): vCenter 별 수집 진단 — /admin/vclogs/status 의 `collect` 배열. 보관 건수 목록(db.meta().vcenters)과 인메모리 기록을 합친다.
  *   lagMs 는 logLagMs · ratePerMin 은 이번 주기에 읽은 수/소요(소요를 모르면 null — 0 이 아니다) · error 는 원문 300자(범위 계정에는
  *   scopeVcLogStatus 가 지운다 — vCenter 주소가 들어간다). vcenterId 순.
  */
@@ -368,7 +368,7 @@ export const vcLogDeadlineMs = (vc) => Math.min(2_147_000_000, Math.max(60_000, 
 // v2.598 T2598-02: 데드라인이 **결과만 포기**하던 것(Promise.race)에 AbortController 를 더한다 — 시한이 되면
 // signal 을 abort 해 수집기가 남은 SOAP 왕복(ReadNextEvents…)을 멈출 수 있게 한다(store.collectWithDeadline ·
 // v2.417 '세션을 실제로 끊는다' 규약). race 는 남긴다 — 신호를 아직 읽지 않는 수집기도 결과는 기다리지 않는다.
-// v2.764(로그 수집 지연): 시한이 되면 신호만 끊고 **읽은 만큼은 받는다** — 수집기(collectVCenterEvents)가 abort 를 받으면 던지지 않고 그때까지
+// v2.765(로그 수집 지연): 시한이 되면 신호만 끊고 **읽은 만큼은 받는다** — 수집기(collectVCenterEvents)가 abort 를 받으면 던지지 않고 그때까지
 //   읽은 이벤트를 `ended:'aborted'` 로 돌려준다. 예전에는 race 가 바로 거부해 읽은 40,000건이 통째로 버려졌고(상한 50,000 × 200쪽 > 60초),
 //   저장 시각이 영영 나아가지 않았다(실서버 OC2 13일 정체의 유력 원인). 하나도 못 읽었거나 수집기가 유예(DEADLINE_GRACE_MS) 안에 돌아오지 않으면 예전처럼 거부.
 export const DEADLINE_GRACE_MS = 15_000;
@@ -432,7 +432,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
     // 훌쩍 넘고, 이벤트가 많아 readNext 가 여러 번 돌면 수십 초까지 늘어났다. '수집은 병렬 + per-vCenter
     // 타임아웃, 느린 1개가 전체를 막지 않게' 라는 CLAUDE.md 불변조건이 이 폴러에만 빠져 있었다.
     // DB 적재는 수집이 끝난 뒤 메인에서 한 번에 한다(동시 write 로 SQLITE_BUSY 를 만들지 않게).
-    // v2.764(따라잡기 — 재검토 1-a·1-c): 적재는 **vCenter 워커 안에서 묶음(EVENT_BATCH_ROWS)마다**(그 vCenter 행만) 한다 — 수집기가 한 세션으로 계속 읽으며
+    // v2.765(따라잡기 — 재검토 1-a·1-c): 적재는 **vCenter 워커 안에서 묶음(EVENT_BATCH_ROWS)마다**(그 vCenter 행만) 한다 — 수집기가 한 세션으로 계속 읽으며
     //   묶음을 넘기고(onBatch), 묶음을 적재한 뒤 커서를 갱신하고 양보한다. 같은 연결(단일 프로세스)의 동기 INSERT 라 SQLITE_BUSY 는 없고, 조각 사이 양보는
     //   insertManyAsync(logs/db.js tsSafeChunks)가 한다(B6-01 그대로). 메모리에 드는 것은 묶음 하나(2,000건)뿐이다(예전 회차 40,000건).
     const dbKey = logsDbKey(db);
@@ -444,7 +444,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
       if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
       const vcId = String(vc.id);
       const t0 = Date.now();
-      // v2.764(1-b): 예산은 이 vCenter 의 시작 시각 기준(앞 순번이 다 쓴 뒤 시작해도 최소 예산). 데드라인 = 예산 + 기존 시한(수집기가 예산에서 스스로
+      // v2.765(1-b): 예산은 이 vCenter 의 시작 시각 기준(앞 순번이 다 쓴 뒤 시작해도 최소 예산). 데드라인 = 예산 + 기존 시한(수집기가 예산에서 스스로
       //   멈추므로 신호는 매달린 묶음·적재의 마지막 방어다). 테스트·진단용 주입(budgetMs)이 있으면 그것.
       const budget = mock ? null : (Number(budgetOverride) > 0 ? Math.floor(Number(budgetOverride)) : vcCatchupBudgetMs({ everyMs, cycleStart, now: t0 }));
       const deadlineMs = mock ? null : budget + vcLogDeadlineMs(vc);
@@ -503,7 +503,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
       } catch (e) {
         console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`);
         poll.error = capStr(String(e?.message || e || '알 수 없는 오류'), 300);
-        // v2.764(2-c): 첫 묶음도 못 받고 시한(데드라인·건별 요청 시한)에 걸렸으면 — 13일치 beginTime 의 CreateCollector·첫 ReadNext 가 느린 vCenter 다.
+        // v2.765(2-c): 첫 묶음도 못 받고 시한(데드라인·건별 요청 시한)에 걸렸으면 — 13일치 beginTime 의 CreateCollector·첫 ReadNext 가 느린 vCenter 다.
         //   화면이 '요청 시한(vCenter 관리 › timeoutMs)을 올리세요' 로 안내한다(매 주기 0 진행을 조용히 반복하지 않게).
         if (poll.read === 0 && poll.rounds <= 1 && /데드라인|timeout|timed out|abort/i.test(poll.error)) poll.hint = 'timeout';
         // v2.732(B4-01): 로그인 거부(InvalidLogin 등)면 주 폴러와 **같은 정지 기록**에 올린다(v2.591 보조 수집기 규약 — 이 폴러만 빠져 있었다).
@@ -521,10 +521,10 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
         else _capStreak.delete(vcId);
       }
     });
-    // 주기마다 1회(적재 뒤). v2.764(3-c): 등록부에 없는 vCenter 의 커서는 지운다(mock 은 store 의 vCenter 가 등록부다).
+    // 주기마다 1회(적재 뒤). v2.765(3-c): 등록부에 없는 vCenter 의 커서는 지운다(mock 은 store 의 vCenter 가 등록부다).
     const knownIds = new Set((mock ? (store.get().vcenters || []) : (loadVcenterConfig().vcenters || [])).map((v) => String(v?.id ?? '')).filter(Boolean));
     saveCursorFile({ knownIds, dbKey });
-    // v2.764(진단): 지연이 1일을 넘는 vCenter 는 lastRun 에 싣고 콘솔에 시간당 1줄(무음 실패 금지).
+    // v2.765(진단): 지연이 1일을 넘는 vCenter 는 lastRun 에 싣고 콘솔에 시간당 1줄(무음 실패 금지).
     const lagging = [];
     for (const vc of vcs) {
       const vcId = String(vc.id);
@@ -629,11 +629,11 @@ export async function logStatus() {
   // v2.744(감사 DB-03): 건수 집계는 vCenter 사이에 양보하는 metaAsync(설정 화면이 30초마다 부른다 — 캐시가 지날 때의 동기 정지 제거).
   const meta = typeof db.metaAsync === 'function' ? await db.metaAsync() : db.meta();
   const settings = loadLogSettings();
-  // v2.764: vCenter 별 수집 진단(collect) · 실효 상한(설정값과 수집기 한도 중 작은 것) · 따라잡기 예산 — 화면이 숫자를 박지 않고 이 값을 쓴다.
+  // v2.765: vCenter 별 수집 진단(collect) · 실효 상한(설정값과 수집기 한도 중 작은 것) · 따라잡기 예산 — 화면이 숫자를 박지 않고 이 값을 쓴다.
   return { settings, lastRun, store: meta, dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes(),
     dbUsedBytes: Number.isFinite(used) ? used : null, dbFreeBytes: Number.isFinite(free) ? free : null, ...(lastCap ? { lastCap } : {}),
     collect: logCollectDiag(meta?.vcenters), maxPerPollEffective: effectiveMaxPerPoll(settings), collectorMaxEvents: COLLECTOR_MAX_EVENTS,
-    // v2.764(재검토): 따라잡기는 회차가 아니라 한 세션의 묶음(batchRows)·시간 예산 — 화면 안내가 이 값을 쓴다. busySkips 는 진행 중이라 건너뛴 틱.
+    // v2.765(재검토): 따라잡기는 회차가 아니라 한 세션의 묶음(batchRows)·시간 예산 — 화면 안내가 이 값을 쓴다. busySkips 는 진행 중이라 건너뛴 틱.
     catchup: { budgetMs: catchupBudgetMs(settings.pollIntervalMin), ratio: CATCHUP_BUDGET_RATIO, batchRows: EVENT_BATCH_ROWS, minBudgetMs: CATCHUP_MIN_BUDGET_MS, streaming: true },
     busySkips: _busySkips, busySkipAt: _busySkipAt };
 }

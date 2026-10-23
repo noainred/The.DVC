@@ -216,7 +216,7 @@
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |
-| `vcenter-logs-cursor.json` | 설정 | vCenter 이벤트 수집 커서(상태, v2.764 — 읽은 마지막 시각·온전한 시각·연속 상한 수) | ✅ | ✅ | ✅ | logs/poller.js |
+| `vcenter-logs-cursor.json` | 설정 | vCenter 이벤트 수집 커서(상태, v2.765 — 읽은 마지막 시각·온전한 시각·연속 상한 수) | ✅ | ✅ | ✅ | logs/poller.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |

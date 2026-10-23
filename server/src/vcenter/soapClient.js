@@ -184,7 +184,7 @@ export class VimSoapClient {
     this.signal = signal || null;
   }
 
-  // v2.764(2-a): timeoutMs — 이 호출만의 건별 시한(정리 호출을 짧게). 없으면 vc.timeoutMs(기본 30초).
+  // v2.765(2-a): timeoutMs — 이 호출만의 건별 시한(정리 호출을 짧게). 없으면 vc.timeoutMs(기본 30초).
   async #call(body, { ignoreExternal = false, isLogin = false, timeoutMs = null } = {}) {
     const perCall = effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000);
     const res = await fetch(this.url, {
@@ -1575,17 +1575,17 @@ export async function upgradeVmTools(vc, morefs, { login = null } = {}) {
  * 생성해 beginTime(sinceTs) 이후 이벤트를 페이지 단위로 읽는다. max 상한까지.
  * 반환: [{ key, ts, type, severity, user, entity, message }] (오래된 → 최신).
  *
- * v2.764(로그 수집 지연 — 실서버 OC2 13일 정체): 반환 배열에 **왜 멈췄는지**를 싣는다(JSON 에는 실리지 않는 배열 속성).
+ * v2.765(로그 수집 지연 — 실서버 OC2 13일 정체): 반환 배열에 **왜 멈췄는지**를 싣는다(JSON 에는 실리지 않는 배열 속성).
  *   `ended` = 'empty'(더 없음 — 온전) | 'max'(상한) | 'pages'(쪽 수 한도 — 상한보다 적게 읽었어도 온전하지 않다) | 'aborted'(데드라인).
  *   데드라인(signal)에 걸리면 예전처럼 **던지지 않고** 그때까지 읽은 것을 돌려준다 — 예전에는 60초 시한이 200쪽을 못 끝내면 읽은 40,000건을
  *   통째로 버려 진행이 0 이었다(상한을 올릴수록 더 자주). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
  *   필터: `userNames`(EventFilterSpecByUsername — 그 계정의 이벤트만 · Veeam 전용 수집기) · `eventTypeIds`(종류). 둘 다 없으면 전량.
- * v2.764(1-c · 재검토): `onBatch(events, { final, ended, batches })`(async) 가 있으면 **한 세션·한 컬렉터로 계속 읽으며** `batchSize`(기본 EVENT_BATCH_ROWS)마다
+ * v2.765(1-c · 재검토): `onBatch(events, { final, ended, batches })`(async) 가 있으면 **한 세션·한 컬렉터로 계속 읽으며** `batchSize`(기본 EVENT_BATCH_ROWS)마다
  *   콜백에 넘기고 비운다 — 회차마다 로그인·CreateCollector 를 다시 하던 따라잡기(40회차 = 로그인 40회/10분)를 없앤다. 이 모드에서는 `max`·쪽 수 한도를
  *   쓰지 않고 `budgetMs`(시간 예산 → ended 'budget')·신호(ended 'aborted')·빈 쪽(ended 'empty')으로 끝난다. 마지막 묶음은 비어 있어도 `final:true` 로
  *   한 번 넘긴다(호출부가 완결 시각을 기록할 수 있게). 중간 묶음의 ended 는 'batch'. 콜백이 던지면 수집을 멈추고(정리는 하고) 그대로 올린다 —
  *   호출부는 그때까지 넘겨받은 묶음의 커서를 유지한다. 반환 배열은 비어 있고 `read`(읽은 총수)·`batches` 를 싣는다.
- * v2.764(2-a): 신호가 끊긴 뒤의 정리(DestroyCollector·Logout)는 `cleanupTimeoutMs`(기본 5초)로 짧게 — 건별 시한(30초)×2 를 기다리면 부분 결과가
+ * v2.765(2-a): 신호가 끊긴 뒤의 정리(DestroyCollector·Logout)는 `cleanupTimeoutMs`(기본 5초)로 짧게 — 건별 시한(30초)×2 를 기다리면 부분 결과가
  *   폴러의 유예(15초)를 넘겨 버려졌다(재현: 정리 2초 지연 vs 유예 0.6초 → 읽은 15건 거부).
  */
 export const EVENT_BATCH_ROWS = 2000;
@@ -1645,7 +1645,7 @@ export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_0
     }
     if (stream) await flush(true);
   } finally {
-    // v2.764(2-a): 신호가 끊긴 뒤의 정리는 짧은 시한으로(부분 결과가 유예 안에 돌아가게). 평상시는 건별 시한 그대로.
+    // v2.765(2-a): 신호가 끊긴 뒤의 정리는 짧은 시한으로(부분 결과가 유예 안에 돌아가게). 평상시는 건별 시한 그대로.
     const cleanup = signal?.aborted ? { ignoreExternal: true, timeoutMs: Math.max(1, Math.floor(Number(cleanupTimeoutMs)) || CLEANUP_TIMEOUT_MS) } : { ignoreExternal: true };
     if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, cleanup).catch(() => {});
     await c.logout(cleanup).catch(() => {});

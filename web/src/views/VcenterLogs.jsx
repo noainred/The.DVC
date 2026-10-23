@@ -6,7 +6,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
-import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText } from './vcLogCollect.js'; // v2.764: vCenter 별 수집 상태 표(+ 시한 안내 — 2-c)
+import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText } from './vcLogCollect.js'; // v2.765: vCenter 별 수집 상태 표(+ 시한 안내 — 2-c)
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -174,7 +174,7 @@ export default function VcenterLogs() {
 }
 
 /**
- * v2.764: vCenter 별 수집 상태 표(예전 배지 묶음 대체) — 보관 건수·마지막 저장·온전한 시각·지연(1일 넘으면 호박색)·이번 주기 읽음/저장·상한·소요/시한·상태.
+ * v2.765: vCenter 별 수집 상태 표(예전 배지 묶음 대체) — 보관 건수·마지막 저장·온전한 시각·지연(1일 넘으면 호박색)·이번 주기 읽음/저장·상한·소요/시한·상태.
  * 서버 collect 가 없으면(구버전) 건수·마지막 저장만 채우고 나머지는 '—'. STable 이 minWidth 와 가로 스크롤 래퍼를 함께 만든다(400px 넘침 방지).
  */
 export function VcLogCollectTable({ st }) {
