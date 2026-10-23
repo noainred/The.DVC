@@ -79,7 +79,9 @@ export function computeRightsizing(vms, statsFor, opts = {}) {
     if ((cpuAvg ?? 0) > 85 || (memAvg ?? 0) > 90) undersized.push(base);
   }
 
-  const sum = (arr, k) => Math.round(arr.reduce((a, x) => a + (x[k] || 0), 0) * 10) / 10;
+  // v2.762(H4): 두 목록의 합은 **더한 뒤 한 번** 반올림한다 — 반올림한 두 합을 더하면 0.1+0.2 = 0.30000000000000004 가 KPI 에 그대로 나갔다.
+  const raw = (arr, k) => arr.reduce((a, x) => a + (x[k] || 0), 0);
+  const sum2 = (k) => Math.round((raw(idle, k) + raw(oversized, k)) * 10) / 10;
   idle.sort((a, b) => (b.vcpu ?? -1) - (a.vcpu ?? -1));
   oversized.sort((a, b) => b.reclaimVcpu - a.reclaimVcpu);
   undersized.sort((a, b) => (b.cpuAvg || 0) - (a.cpuAvg || 0));
@@ -87,8 +89,8 @@ export function computeRightsizing(vms, statsFor, opts = {}) {
     config: { minSamples, cpuIdlePct: cpuIdle, oversizedCpuPct: overCpu },
     observedVms: observed, instantOnlyVms: instantOnly,
     idleCount: idle.length, oversizedCount: oversized.length, undersizedCount: undersized.length,
-    reclaimableVcpu: sum(idle, 'reclaimVcpu') + sum(oversized, 'reclaimVcpu'),
-    reclaimableRamGB: sum(idle, 'reclaimRamGB') + sum(oversized, 'reclaimRamGB'),
+    reclaimableVcpu: sum2('reclaimVcpu'),
+    reclaimableRamGB: sum2('reclaimRamGB'),
     idle: idle.slice(0, 300), oversized: oversized.slice(0, 300), undersized: undersized.slice(0, 300),
   };
 }

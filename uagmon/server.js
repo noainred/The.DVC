@@ -147,8 +147,15 @@ function summarize() {
   });
   const up = rows.filter((r) => r.state === 'up').length;
   const problem = rows.filter((r) => r.state === 'down' || r.state === 'warn').length;
-  const sessions = rows.reduce((a, r) => a + (r.stats?.ok ? (r.stats.totalSessions || 0) : 0), 0);
-  return { version: VERSION, pollSeconds: store.settings.pollSeconds, polling: poller.polling, targets: rows, summary: { total: rows.length, up, problem, sessions } };
+  // v2.762(H3 후속): 응답은 했지만 세션 수를 못 읽은 UAG 를 0 으로 더하지 않는다 — 읽은 것만 더하고 못 읽은 대수를 따로 센다(부분 합 표지).
+  //   하나도 못 읽었으면 null('—'). 응답하지 않은 UAG 는 예전처럼 합계 대상이 아니다(타일 설명 '정상 응답 UAG 합계').
+  let sessions = null; let sessionsUnread = 0;
+  for (const r of rows) {
+    if (!r.stats?.ok) continue;
+    const n = r.stats.totalSessions;
+    if (typeof n === 'number' && Number.isFinite(n)) sessions = (sessions ?? 0) + n; else sessionsUnread++;
+  }
+  return { version: VERSION, pollSeconds: store.settings.pollSeconds, polling: poller.polling, targets: rows, summary: { total: rows.length, up, problem, sessions, sessionsUnread } };
 }
 
 // 요청 핸들러의 모든 예외는 여기서 잡는다. 예전에는 async 핸들러가 try 밖에서 던지면

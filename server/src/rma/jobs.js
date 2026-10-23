@@ -30,6 +30,8 @@ import { modeFor } from './settings.js';
 import { saveHistoryRow, listHistoryRows } from './historyDb.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr, capTrim } from '../util/capStr.js';
+import { signJob } from './signing.js';
+import { rmaPasswordFor } from './agentSecrets.js';
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -37,6 +39,7 @@ const waiters = new Map();         // agentLower -> Set<resolve>
 const heartbeats = new Map();      // `${agentLower}\0${instanceLower}` -> { agent, instance, lastSeen, info }
 const rr = new Map();              // agentLower -> 라운드로빈 커서
 const history = [];                // 완료 잡 이력(최근 HISTORY_MAX)
+const lastTakeAt = new Map();      // agentLower -> 마지막으로 takeJobs 까지 간 폴 시각(v2.762 H2 — 하트비트만으로는 '움직임' 이 아니다)
 
 export const DONE_TTL = 30 * 60_000;      // 완료 잡 결과 보존(UI 가 결과를 가져갈 시간)
 const UNDONE_TTL = 15 * 60_000;           // 대기/진행 잡 보존 — RMA 가 영영 안 오면 정리
@@ -129,21 +132,30 @@ export function reapClaims(now = Date.now()) {
 /**
  * v2.760(점검 B-01 — 재현): 미완료 잡의 수명을 '등록 시각부터 15분' 으로 재면 안 된다.
  *   ① 엣지는 명령을 **하나씩** 순서대로 돌고(TAKE_MAX=1) 그동안 폴하지 않는다 — 앞 잡 둘이 8분씩 걸리면 세 번째 잡은 한 번도
- *      인출되지 못한 채 16분째 지워졌다(폴더 사용량 스캔 3대상 실측). 대기 잡은 **그 법인이 마지막으로 움직인 시각**(하트비트·
+ *      인출되지 못한 채 16분째 지워졌다(폴더 사용량 스캔 3대상 실측). 대기 잡은 **그 법인이 마지막으로 움직인 시각**(v2.762: 하트비트 제외 — 인출 시도·
  *      인출·완료)부터 재고, 그 법인에 기한이 남은 실행 중 잡이 있으면 지우지 않는다(줄이 움직이고 있다).
  *   ② 실행 중 잡은 기한(claimDeadline = 인출 + timeoutMs + 유예)을 reapClaims 가 판정한다 — 그 전에 15분으로 지우면
  *      timeoutMs ≥ 15분인 잡(du-top 900초)의 실제 결과가 '모르는 잡' 으로 버려졌다.
  *   대기 잡에는 절대 상한(PENDING_MAX_AGE)을 둔다 — 법인이 계속 폴하는데도 인출되지 않는 잡이 영원히 남지 않게.
  */
 export const PENDING_MAX_AGE = 6 * 3600_000;
+/**
+ * v2.762(H1): 서명 잡은 인출 때 issuedAt=인출 시각으로 다시 서명한다(signForTake) — 그래서 서명의 뜻이 '관리자가 10분 안에 승인'
+ *   에서 '중앙이 10분 안에 내보냈다' 로 바뀐다. 서명 법인에서 '승인 후 최대 6시간 뒤 실행' 이 열리지 않게 서명 잡의 절대 상한은
+ *   1시간으로 줄인다(B-01 실측 du-top 3건 × 8분 = 24분, du-top 기한 15분 × 4건까지 수용).
+ */
+export const PENDING_MAX_AGE_SIGNED = 3600_000;
 function agentActivity(now) {
   const lastAt = new Map();   // agentLower -> 마지막으로 움직인 시각
   const busy = new Set();     // 기한이 남은 실행 중 잡이 있는 법인
   const bump = (a, t) => { if (Number.isFinite(t) && t > (lastAt.get(a) || 0)) lastAt.set(a, t); };
-  for (const h of heartbeats.values()) bump(lc(h.agent), h.lastSeen);
+  // v2.762(H2): '움직임' 은 실제 인출 시도(takeJobs 까지 간 폴)·인출·엣지가 회신한 완료만. 하트비트(503 으로 돌려보낸 폴 포함)와
+  //   reaper 종결(expired && !late — 회신이 없었다)은 줄이 움직였다는 증거가 아니다.
+  for (const [a, t] of lastTakeAt) bump(a, t);
   for (const j of jobs.values()) {
     const a = lc(j.agent);
-    bump(a, j.takenAt); bump(a, j.doneAt);
+    bump(a, j.takenAt);
+    if (!(j.expired && !j.late)) bump(a, j.doneAt);
     if (j.state === 'running' && j.claimDeadline && now <= j.claimDeadline) busy.add(a);
   }
   return { lastAt, busy };
@@ -161,7 +173,7 @@ function prune(now = Date.now()) {
       act = act || agentActivity(now);
       const a = lc(j.agent);
       const since = Math.max(j.createdAt || 0, act.lastAt.get(a) || 0);
-      expired = now - (j.createdAt || 0) > PENDING_MAX_AGE || (!act.busy.has(a) && now - since > UNDONE_TTL);
+      expired = now - (j.createdAt || 0) > (j.signed ? PENDING_MAX_AGE_SIGNED : PENDING_MAX_AGE) || (!act.busy.has(a) && now - since > UNDONE_TTL);
     }
     if (expired) { jobs.delete(reqId); dropPending(j.agent, reqId); }
   }
@@ -230,7 +242,7 @@ export function enqueueJob(agent, spec = {}, { user = '', timeoutMs = 30_000, in
   const target = instance ? String(instance).trim() : pickInstance(agent, cfg.mode, { primary: cfg.primary, now });
   const reqId = newReqId();
   if (typeof sign === 'function') spec = { ...spec, sig: sign(reqId) }; // 서명은 reqId 를 포함해야 하므로 여기서 붙인다
-  jobs.set(reqId, { reqId, agent: String(agent).trim(), spec, user, timeoutMs, target: target || '', explicit: !!instance, mode: cfg.mode, instance: '', state: 'pending', createdAt: now, takenAt: null, claims: 0, claimDeadline: null, doneAt: null, result: null });
+  jobs.set(reqId, { reqId, agent: String(agent).trim(), spec, signed: !!spec.sig, user, timeoutMs, target: target || '', explicit: !!instance, mode: cfg.mode, instance: '', state: 'pending', createdAt: now, takenAt: null, claims: 0, claimDeadline: null, doneAt: null, result: null });
   set.add(reqId); pendingByAgent.set(key, set);
   wake(agent);
   return { reqId, target: target || '' };
@@ -246,10 +258,30 @@ export function jobAgentOf(reqId) { const j = jobs.get(String(reqId || '')); ret
  */
 export const TAKE_MAX = 1;
 
+/**
+ * v2.762(H1 — 재현): 서명은 등록 시각(issuedAt)으로 고정돼 10분 넘게 줄 선 잡이 엣지 ±10분 창(signing.js SKEW_MS)에 걸려 전부
+ *   거부됐다('시계를 확인하세요' — 틀린 안내). 인출 때 issuedAt=now 로 다시 서명한다. 재전송 창은 그대로(서명 하나당 ±10분).
+ *   비밀번호는 잡·클로저에 붙잡지 않고 **지금** 조회한다. 등록 때의 서명이 지금 비밀번호로 재현될 때만(= 승인 때와 같은 비밀번호)
+ *   다시 서명한다 — 비밀번호가 바뀌었거나 지워졌으면 원래 서명을 그대로 보내 엣지가 판정한다(무서명 승인 잡을 나중에 서명해 주지 않는다).
+ */
+function signForTake(j, now) {
+  const spec = j.spec || {};
+  if (!spec.sig) return spec;
+  let secret = '';
+  try { secret = rmaPasswordFor(j.agent); } catch { secret = ''; }
+  if (!secret) return spec;
+  const body = { reqId: j.reqId, agent: j.agent, cmd: spec.cmd, args: spec.args, timeoutMs: spec.timeoutMs };
+  if (signJob(secret, { ...body, issuedAt: spec.issuedAt }) !== spec.sig) return spec;
+  return { ...spec, issuedAt: now, sig: signJob(secret, { ...body, issuedAt: now }) };
+}
+
 /** 인출(claim): 이 인스턴스가 받을 수 있는 pending 잡 — target 없음 / target 일치 / target 오프라인(페일오버). */
 export function takeJobs(agent, instance = '', now = Date.now()) {
-  reapClaims(now);
+  // v2.762(H2): 인출 전에 정리한다(오래 멈춰 있던 법인이 돌아온 첫 폴이 수 시간 전 비멱등 잡을 가져가지 않게) — 그 다음에 이 폴을
+  //   '움직임' 으로 기록한다. 순서를 바꾸면 이 폴 자체가 묵은 잡을 살린다.
+  prune(now);
   const key = lc(agent);
+  if (key) lastTakeAt.set(key, now);
   const set = pendingByAgent.get(key);
   if (!set || !set.size) return [];
   const out = [];
@@ -263,6 +295,7 @@ export function takeJobs(agent, instance = '', now = Date.now()) {
     j.failover = !!(j.target && lc(j.target) !== lc(instance));
     j.claimDeadline = now + j.timeoutMs + ACK_GRACE_MS;
     set.delete(reqId);
+    j.spec = signForTake(j, now);
     out.push({ reqId, ...j.spec });
     // 1회 입력 계정(spec.secret)은 인출 즉시 중앙 메모리에서 지운다 — getJob/이력/재인출 어디에도 남지 않는다(v2.419).
     if (j.spec && j.spec.secret) { j.spec = { ...j.spec }; delete j.spec.secret; }
@@ -477,4 +510,4 @@ export function listRmaAgents(now = Date.now()) {
 }
 
 /** 테스트용 초기화. */
-export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); _hbRefused.clear(); jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }
+export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); _hbRefused.clear(); jobs.clear(); lastTakeAt.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }
