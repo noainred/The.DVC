@@ -260,6 +260,18 @@ export function veeamEventBadge(entry, { days = 7, source = 'local' } = {}) {
   return { label: `📸 ${shortTime(ts)}`, color: 'sky', title: lines.join('\n'), ts };
 }
 
+/**
+ * v2.764(실서버 OC2 — 수집이 13일 뒤처졌는데 화면은 시각만 보여 '왜' 를 알 길이 없었다): 수집이 얼마나 뒤처졌는지(일 · 하루 미만은 시간)와
+ *   원인을 볼 곳(설정 › Log — vCenter 로그 보관 화면의 수집 상태·실패 사유). 시각을 모르면 ''(지어내지 않는다).
+ */
+export function collectLagText(collectedAt, now = Date.now()) {
+  if (!Number.isFinite(collectedAt) || !Number.isFinite(now)) return '';
+  const ms = Math.max(0, now - collectedAt);
+  const d = Math.floor(ms / 86_400_000);
+  const lag = d >= 1 ? `${d}일` : `${Math.max(1, Math.floor(ms / 3_600_000))}시간`;
+  return `수집이 ${lag} 뒤처짐 — 설정 › Log(vCenter 로그 보관)에서 원인을 확인하세요.`;
+}
+
 /** 이벤트 조회 상태 → 요약 줄 문구(ok 가 아니면 이유 — 이벤트가 없다고 '백업 없음' 으로 말하지 않는다). */
 export function veeamEventStatusText(d) {
   if (!d) return '';
@@ -279,7 +291,7 @@ export function veeamEventStatusText(d) {
   if (d.accounts === 0 && !Object.keys(d.byVm || {}).length) notes.push('Veeam 계정을 아직 모릅니다 — Veeam 이 쓰는 vCenter 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요(지금 백업 중인 VM 이 2대 이상 보이면 자동으로 배웁니다).');
   // v2.762(F6): 한도는 서버가 준 staleMs(로그 수집 주기 반영 — 판정 코어는 서버 backupCounts.snapVerdict). 없으면(옛 서버·엣지 요약) 6시간.
   const staleMs = Number.isFinite(d.staleMs) && d.staleMs > 0 ? d.staleMs : 6 * 3_600_000;
-  if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > staleMs) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다.`);
+  if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > staleMs) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다. ${collectLagText(d.collectedAt, d.at)}`);
   if (d.truncated) notes.push('이벤트가 많아 일부만 읽었습니다.');
   // v2.755: 공용 계정(administrator@vsphere.local 등 — 사람도 같이 쓴다)은 '만들고 12시간 안에 같은 계정이 지운' 스냅샷만 센다.
   if (d.unpaired > 0) notes.push(`공용 계정(administrator 등)이 만들고 12시간 안에 지우지 않은 스냅샷 ${d.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다(지금 백업 중이면 보라 배지로 보입니다).`);
@@ -320,7 +332,7 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
   const label = veeam ? '백업 · Veeam' : '백업 · 스냅샷';
   if (!Number.isFinite(e.n)) {
     let why = BACKUP_REASON[e.reason];
-    if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.`;
+    if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.${Number.isFinite(e.collectedAt) ? ` ${collectLagText(e.collectedAt, now)}` : ''}`;   // v2.764
     if (!why) why = veeamEventStatusText({ status: e.reason, at: e.at }) || '백업 정보를 읽지 못했습니다.';
     const unknownSrc = e.reason === 'registry-unreadable';   // v2.762(F4): Veeam 기준인지 스냅샷 기준인지도 모른다
     const lines = [`${unknownSrc ? '' : veeam ? 'Veeam 기준 ' : '스냅샷 기준 '}백업 수량을 알 수 없습니다(0대가 아닙니다)`, why];
@@ -371,7 +383,7 @@ export function veeamEventChip(ev) {
   const n = ok ? Object.keys(ev.byVm || {}).length : null;
   let why = veeamEventStatusText(ev);
   if (v && !v.ok && ev.status === 'ok') {
-    if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.`;
+    if (v.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(ev.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수를 표시하지 않습니다.${Number.isFinite(ev.collectedAt) ? ` ${collectLagText(ev.collectedAt, Number.isFinite(ev.at) ? ev.at : Date.now())}` : ''}`;   // v2.764: 며칠 뒤처졌는지 + 원인을 볼 곳
     else why = BACKUP_REASON[v.reason] || why || '이벤트 기준 수를 표시할 수 없습니다.';
   }
   if (v?.ok && v.accountUnseen && n === 0) why = ACCOUNT_UNSEEN;   // v2.763(V4-2)

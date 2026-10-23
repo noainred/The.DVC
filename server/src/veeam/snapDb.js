@@ -9,6 +9,7 @@
  *   snap_ev(vcenterId, ts, severity, type, user, entity, message, h) — UNIQUE(vcenterId, h). h = 시각·종류·대상·계정·문구 해시
  *     (로그 DB 적재분과 기존 로그에서 옮긴 분이 겹쳐도 한 번 — localSnapSummary 의 중복 제거 키와 같은 필드).
  *   snap_meta(k, v) — 'from:<vcenterId>' = 이 DB 가 그 vCenter 의 스냅샷 행을 빠짐없이 가진 가장 이른 시각(백필이 거꾸로 넓힌다).
+ *     v2.764: 'cur:<vcenterId>'·'ok:<vcenterId>' = Veeam 계정 전용 수집기(snapCollector.js)의 읽기 커서·완결 시각.
  *   snap_edge(vcenterId, json, at) — 엣지가 보낸 요약(중앙). 재시작해도 다음 push 전까지 마지막 값이 보인다.
  * 보관: 31일(RETENTION_MS) — prune 은 적재 N회마다 1회(첫 회 금지) · ts 단독 인덱스.
  * node:sqlite 가 없으면 getSnapDb() 는 null — 호출부는 예전 경로(로그 DB 검색)로 간다(기능은 같고 느릴 뿐).
@@ -155,6 +156,15 @@ function initSqlite(dbPath) {
         if (inv != null) _coverInvalid.delete(k);
         return true;
       },
+      /*
+       * v2.764: Veeam 계정 전용 수집기(snapCollector.js)의 커서·완결 시각 — snap_meta 'cur:<vc>'(마지막으로 읽은 이벤트 시각) ·
+       *   'ok:<vc>'(그 vCenter 의 Veeam 계정 이벤트가 온전한 마지막 시각). 재시작해도 이어 읽고, 화면의 collectedAt 결합(snapEventsOkAt)에 쓴다.
+       *   수가 아니면 null(모름) — 0 으로 읽지 않는다.
+       */
+      snapCursor(vcenterId) { const n = Number(metaGet.get(`cur:${vcenterId}`)?.v); return Number.isFinite(n) && n > 0 ? n : null; },
+      setSnapCursor(vcenterId, ts) { metaSet.run(`cur:${vcenterId}`, String(Math.floor(Number(ts)))); },
+      snapOkAt(vcenterId) { const n = Number(metaGet.get(`ok:${vcenterId}`)?.v); return Number.isFinite(n) && n > 0 ? n : null; },
+      setSnapOkAt(vcenterId, ts) { metaSet.run(`ok:${vcenterId}`, String(Math.floor(Number(ts)))); },
       /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
       dropCoverage(vcenterIds) {
         let ok = true;
