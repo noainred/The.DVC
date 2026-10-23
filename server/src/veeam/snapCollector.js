@@ -26,10 +26,20 @@
  *    사람이 적은 계정 표기(예: 'svc-veeam')가 vCenter 의 userName('CORP\\svc-veeam')과 어느 변형도 맞지 않으면 0건으로 '완결' 되는데, 그것을
  *    '지금까지 온전' 으로 믿으면 로그 폴러가 13일 뒤처진 vCenter 의 판정이 stale-events 에서 ok 로 뒤집혔다(재검토 재현). 0건 완결은 '모름' —
  *    snapEventsOkAt 결합이 로그 폴러 값으로 폴백한다. 상태 perVc.<id>.seen=false + reason 'unseen'(계정 표기가 vCenter 와 다를 수 있음).
+ *    v2.766(점검 R1-A1-1·A5-1): 위 seen 은 vCenter 단위 하나라 ⓐ userList 의 **공용 계정**(administrator 등 — 사람이 '생성 후 제거 짝' 으로 적는다)
+ *    이벤트만 읽혀도 서고 ⓑ 계정 목록이 바뀌어도 커서가 되돌아가지 않아 새 계정의 지난 7일을 영영 읽지 않는데 okAt 은 최신이었다(둘 다 재현 —
+ *    로그 폴러가 13일 뒤처진 vCenter 의 판정이 ok 로 뒤집혔다). 이제
+ *     ① userList(상한 50·정규형·정렬)의 지문을 snap_meta 'fp:<vc>' 에 둔다. 지문이 바뀌면 커서·okAt·seen 을 한 트랜잭션으로 지우고(커서 → now − LOOKBACK)
+ *        새 지문으로 **끝까지 읽은(ended 'empty') 회차가 한 번 있은 뒤에만** okAt 을 기록한다. snapCollectorOkAt 은 지금 계정 목록의 지문이 그 okAt 의
+ *        지문과 같을 때만 값을 낸다(목록이 바뀐 직후 수집기가 돌기 전에도 폴백). 원문 계정이 상한 50 을 넘어 userList 에서 빠지면 okAt 을 기록·사용하지 않는다.
+ *        (업그레이드 직후 옛 기록에는 지문이 없어 vCenter 마다 한 번 8일을 다시 읽는다 — 계정 이벤트만이라 쪽 몇 장.)
+ *     ② seen 은 공용 계정(isSharedAccount)이 아닌 계정의 이벤트를 읽었을 때만 선다.
+ *     ③ snapEventsOkAt(…, { summary }) — 요약에서 판정이 Veeam 으로 본 계정(이름 규칙 'veeam' 포함)이 이 수집기의 userList 로 다 덮이지 않으면 섞지 않는다.
  *  · 상태 veeamSnapCollectorStatus() 는 요약만(주소·오류 원문 없음) · 콘솔은 실패 vCenter 당 1시간 1줄 · 성공 요약 1줄.
  *  · 주기는 로그 설정 pollIntervalMin 과 같다 — startAdaptiveTimer 가 매 틱 다시 읽는다(모듈 로드 시 굳히지 않음). v2.765(4-f): 로그 설정 저장 라우트가
  *    rescheduleLogPoller 와 함께 rescheduleVeeamSnapCollector() 를 불러 이미 무장된 타이머를 즉시 재무장한다(logs/settings.js 에는 변경 리스너가 없다).
  */
+import crypto from 'node:crypto';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { poolRun } from '../util/pool.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -40,7 +50,7 @@ import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js';
 import { loadLogSettings } from '../logs/settings.js';
 import { vcLogWithDeadline, vcLogDeadlineMs, DEADLINE_GRACE_MS, logCollectOkAt } from '../logs/poller.js';
-import { veeamAccounts } from './snapEvents.js';
+import { veeamAccounts, isSharedAccount, canonAccount } from './snapEvents.js';
 import { getSnapDb, ingestSnapRows, isSnapRow } from './snapDb.js';
 
 const DAY = 86_400_000;
@@ -57,6 +67,8 @@ let _running = null;      // { since, promise }
 let _last = null;         // 마지막 주기 요약(스킵 사유 포함)
 const _okAt = new Map();  // vcenterId → 이 수집기의 완결 시각(메모리 — snap_meta 'ok:<vc>' 와 같다 · seen 인 vCenter 만)
 const _seen = new Map();  // v2.765(4-a): vcenterId → 계정 필터로 이벤트를 처음 읽은 시각(snap_meta 'seen:<vc>')
+const _fp = new Map();    // v2.766(점검 R1-A1-1·A5-1): vcenterId → 그 vCenter 의 커서·okAt 을 만든 userList 지문(snap_meta 'fp:<vc>')
+let _covMemo = { key: null, cov: null };   // 지금 계정 목록의 덮음(같은 목록이면 다시 계산하지 않는다)
 const _perVc = new Map(); // vcenterId → { state, okAt, cursor, read, stored, calls, capped, kind, seen, reason, stalled, at }
 const failLog = createChangeLogger({ windowMs: 3_600_000 });
 const _rearm = new Set(); // v2.765(4-f): startAdaptiveTimer 재무장 알림 구독자
@@ -99,6 +111,40 @@ export function userListFor(accounts) {
   return out;
 }
 
+/**
+ * v2.766(점검 R1-A1-1·A5-1): 계정 목록 → { userNames, covered(정규형 집합), fp(지문), full(원문 계정이 전부 userList 에 들었나), missing }(순수).
+ *   지문은 userList 의 정규형(소문자·'DOMAIN\\user' → 'user@domain')을 정렬해 만든다 — 순서·표기 변형만 다른 목록은 같은 지문.
+ */
+export function userListCoverage(accounts) {
+  const userNames = userListFor(accounts);
+  const covered = new Set(userNames.map((u) => canonAccount(u)).filter(Boolean));
+  const lower = new Set(userNames.map((u) => u.toLowerCase()));
+  const originals = new Set((Array.isArray(accounts) ? accounts : []).map((a) => String(a ?? '').trim().slice(0, 200).toLowerCase()).filter(Boolean));
+  let missing = 0;
+  for (const a of originals) if (!lower.has(a)) missing++;
+  const fp = crypto.createHash('sha256').update([...covered].sort().join('\n')).digest('hex').slice(0, 32);
+  return { userNames, covered, fp, full: missing === 0, missing };
+}
+function currentCoverage(now = Date.now()) {
+  let accounts;
+  try { accounts = veeamAccounts(now); } catch { return null; }
+  const key = accounts.join('\n');
+  if (_covMemo.key !== key) _covMemo = { key, cov: userListCoverage(accounts) };
+  return _covMemo.cov;
+}
+/**
+ * v2.766(점검 R1-A1-1 ③): 요약(localSnapSummary)에서 판정이 Veeam 으로 본 계정이 이 수집기의 지금 userList 로 전부 덮이는가.
+ *   summary 를 주지 않으면 검사하지 않는다(순수 결합 시험용). 상한을 넘어 다 세지 못한 요약은 '모름' — 덮지 않는 것으로 본다.
+ */
+export function snapCollectorCovers(summary) {
+  if (summary === undefined) return true;
+  if (!summary || summary.veeamUsersOverflow === true) return false;
+  const cov = currentCoverage();
+  if (!cov) return false;
+  const users = Array.isArray(summary.veeamUsers) ? summary.veeamUsers : [];
+  return users.every((u) => cov.covered.has(canonAccount(u)));
+}
+
 /** 두 완결 시각의 결합(순수) — 둘 중 늦은 것, 하나만 있으면 그것, 둘 다 없으면 null(0 이 아니다). */
 export function combineOkAt(logOkAt, snapOkAt) {
   const a = Number.isFinite(logOkAt) && logOkAt > 0 ? logOkAt : null;
@@ -107,8 +153,20 @@ export function combineOkAt(logOkAt, snapOkAt) {
   if (b == null) return a;
   return Math.max(a, b);
 }
-/** 이 수집기의 완결 시각(ms) 또는 null(기록 없음 · 아직 이벤트를 읽어 본 적 없는 vCenter — 4-a). */
-export function snapCollectorOkAt(vcenterId) { const id = String(vcenterId ?? ''); return _seen.has(id) ? (_okAt.get(id) ?? null) : null; }
+/**
+ * 이 수집기의 완결 시각(ms) 또는 null(기록 없음 · 아직 이벤트를 읽어 본 적 없는 vCenter — 4-a).
+ * v2.766(점검 R1-A1-1·A5-1): 지금 계정 목록의 지문이 그 okAt 을 만든 지문과 다르거나(목록이 바뀌었는데 아직 다시 읽지 않았다) 원문 계정이 userList 상한에서
+ *   빠졌으면 null — 로그 폴러 값으로 폴백한다.
+ */
+export function snapCollectorOkAt(vcenterId) {
+  const id = String(vcenterId ?? '');
+  if (!_seen.has(id)) return null;
+  const ok = _okAt.get(id);
+  if (ok == null) return null;
+  const cov = currentCoverage();
+  if (!cov || !cov.full || !cov.userNames.length || _fp.get(id) !== cov.fp) return null;
+  return ok;
+}
 /** v2.765(4-a): 이 수집기가 그 vCenter 에서 계정 필터로 이벤트를 읽은 적이 있는가(메모리 — snap_meta 'seen:<vc>'). */
 export function snapCollectorSeen(vcenterId) { return _seen.has(String(vcenterId ?? '')); }
 /**
@@ -116,8 +174,9 @@ export function snapCollectorSeen(vcenterId) { return _seen.has(String(vcenterId
  *   veeam/push.js)는 이 함수만 쓴다. dedicated:false = 그 요약이 전용 DB 를 읽지 않았다(백필 전 로그 DB 경로) — 이 수집기가 넣은 행이 그 요약에
  *   없으므로 이 수집기의 시각을 섞지 않는다.
  */
-export function snapEventsOkAt(vcenterId, { dedicated = true } = {}) {
-  return combineOkAt(logCollectOkAt(vcenterId), dedicated ? snapCollectorOkAt(vcenterId) : null);
+export function snapEventsOkAt(vcenterId, { dedicated = true, summary } = {}) {
+  // v2.766(점검 R1-A1-1 ③): 요약이 Veeam 으로 본 계정 중 이 수집기가 읽지 않는 계정(이름 규칙 'veeam' 등)이 있으면 이 수집기의 시각을 섞지 않는다.
+  return combineOkAt(logCollectOkAt(vcenterId), dedicated && snapCollectorCovers(summary) ? snapCollectorOkAt(vcenterId) : null);
 }
 
 /** 완결 시각(순수) — 끝까지 읽었으면 수집 시작 시각(vCenter 시계가 앞서 그보다 늦은 이벤트가 있으면 그 시각), 아니면 마지막으로 읽은 시각. */
@@ -135,13 +194,14 @@ const skipReason = (s) => {
 const setPer = (id, v) => _perVc.set(id, { ...(_perVc.get(id) || {}), ...v, at: Date.now() });
 /** 재시작 뒤 영속값 복원(vCenter 1곳) — seen 이 없으면 ok 도 믿지 않는다(4-a: seen 전의 ok 는 표기 불일치의 0건 완결일 수 있다). */
 function restoreOne(db, id) {
+  if (!_fp.has(id)) { const f = db.snapFp(id); if (f) _fp.set(id, f); }   // v2.766(점검 R1-A1-1·A5-1)
   if (!_seen.has(id)) { const sn = db.snapSeenAt(id); if (sn) _seen.set(id, sn); }
   if (_seen.has(id) && !_okAt.has(id)) { const p = db.snapOkAt(id); if (p) { _okAt.set(id, p); return true; } }
   return false;
 }
 
 /** vCenter 1곳 — 커서부터 이어 읽어 전용 DB 에 넣고 커서·완결 시각을 기록한다. 던지면 호출부가 실패로 센다(커서·okAt 은 읽은 만큼만 바뀐다). */
-async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
+async function collectOne(vc, db, { now, userNames, full = true, perCallMax, budgetMs }) {
   const id = String(vc.id);
   const startedAt = now;
   const t0 = Date.now();
@@ -159,7 +219,8 @@ async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
     for (const e of events) { const t = Number(e?.ts); if (Number.isFinite(t) && t > mx) mx = t; }
     if (events.length) {
       // v2.765(4-a): 계정 필터로 이벤트를 읽었다 — 이 계정 표기는 이 vCenter 에서 맞는다. 그 뒤부터 okAt 을 믿는다(영속).
-      if (!_seen.has(id)) { _seen.set(id, Date.now()); db.setSnapSeenAt(id, _seen.get(id)); }
+      //   v2.766(점검 R1-A1-1 ②): 공용 계정(administrator 등)의 이벤트만으로는 서지 않는다 — 그 계정은 사람·자동화도 쓰므로 Veeam 계정 표기가 맞는다는 근거가 아니다.
+      if (!_seen.has(id) && events.some((e) => e?.user && !isSharedAccount(e.user))) { _seen.set(id, Date.now()); db.setSnapSeenAt(id, _seen.get(id)); }
       const rows = events.map((e) => ({ vcenterId: id, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message })).filter(isSnapRow);
       if (rows.length) {
         // ingestSnapRows 는 실패를 0 으로 돌려준다(덮음 무효까지 하므로 그대로 쓴다) — 넣으려 한 수와 다르면 실패다. 커서는 넣은 뒤에만 나아간다.
@@ -179,9 +240,13 @@ async function collectOne(vc, db, { now, userNames, perCallMax, budgetMs }) {
   const complete = ended === 'empty';
   const okAt = completeUntil({ complete, startedAt, maxRead });
   // v2.765(4-a): 이벤트를 읽어 본 적 없는 vCenter(seen 아님)의 okAt 은 기록하지 않는다 — 0건 완결은 '온전' 이 아니라 '모름' 이다.
+  // v2.766(점검 R1-A1-1·A5-1): 이 지문으로 아직 okAt 이 없으면(목록이 바뀌어 커서를 되돌린 뒤) **끝까지 읽은 회차** 에서만 처음 기록한다 · 원문 계정이 상한에서
+  //   빠진 목록(full false)이면 기록하지 않는다(그 계정은 이 수집기가 읽지 않는다).
   const seen = _seen.has(id);
-  if (seen && okAt != null && okAt > (_okAt.get(id) || 0)) { _okAt.set(id, okAt); db.setSnapOkAt(id, okAt); }
-  return { okAt: snapCollectorOkAt(id), cursor, read, stored, calls, capped: !complete, ended, seen, reason: seen ? null : 'unseen', ...(stalled ? { stalled: true } : {}) };
+  if (seen && full && okAt != null && (complete || _okAt.has(id)) && okAt > (_okAt.get(id) || 0)) { _okAt.set(id, okAt); db.setSnapOkAt(id, okAt); }
+  const okNow = snapCollectorOkAt(id);
+  const reason = !full ? 'accounts-over-limit' : !seen ? 'unseen' : okNow == null ? 'refilling' : null;
+  return { okAt: okNow, cursor, read, stored, calls, capped: !complete, ended, seen, reason, ...(stalled ? { stalled: true } : {}) };
 }
 
 /**
@@ -200,7 +265,8 @@ export async function pollVeeamSnapOnce({ now = Date.now(), perCallMax = PER_CAL
     const db = await getSnapDb();
     if (!db) { _last = { at: now, skipped: 'no-db', targets: targets.length }; return _last; }   // 전용 DB 가 없으면 넣을 곳이 없다(화면은 로그 DB 경로)
     const accounts = veeamAccounts(now);
-    const userNames = userListFor(accounts);
+    const cov = userListCoverage(accounts);   // v2.766(점검 R1-A1-1·A5-1): userList + 지문 + 원문 계정이 다 들었나
+    const userNames = cov.userNames;
     let ok = 0; let fail = 0; let noAccount = 0; let read = 0; let stored = 0;
     const authStopped = [];
     await poolRun(targets, CONCURRENCY, async (vc) => {
@@ -209,9 +275,15 @@ export async function pollVeeamSnapOnce({ now = Date.now(), perCallMax = PER_CAL
       if (vcAuthGuard.authStopFor(vc)) { authStopped.push(id); setPer(id, { state: 'auth-stopped' }); return; }
       if (!userNames.length) { noAccount++; setPer(id, { state: 'no-account', okAt: snapCollectorOkAt(id), seen: _seen.has(id) }); return; }
       try {
-        const r = await collectOne(vc, db, { now, userNames, perCallMax, budgetMs: budget });
+        // v2.766(점검 R1-A5-1): 계정 목록(지문)이 바뀌었으면 커서·okAt·seen 을 지우고 새 지문을 적는다 — 새 계정의 지난 LOOKBACK 을 다시 읽는다.
+        let listChanged = false;
+        if (_fp.get(id) !== cov.fp) {
+          db.resetSnapCollector(id, cov.fp);
+          _fp.set(id, cov.fp); _okAt.delete(id); _seen.delete(id); listChanged = true;
+        }
+        const r = await collectOne(vc, db, { now, userNames, full: cov.full, perCallMax, budgetMs: budget });
         ok++; read += r.read; stored += r.stored;
-        setPer(id, { state: 'ok', ...r, kind: null });
+        setPer(id, { state: 'ok', ...r, kind: null, listChanged, ...(cov.full ? {} : { accountsMissing: cov.missing }) });
       } catch (e) {
         fail++;
         const msg = String(e?.message || e || '알 수 없는 오류');
@@ -278,6 +350,6 @@ export function veeamSnapCollectorStatus() {
   return { ...(_last || {}), enabled: skipReason(s) == null, intervalMs: intervalMs(), running: !!_running, ...(_running ? { runningSince: _running.since } : {}), perVc };
 }
 
-export function _resetForTest() { _running = null; _last = null; _okAt.clear(); _seen.clear(); _perVc.clear(); }
-export function _setOkAtForTest(vcenterId, ts) { _okAt.set(String(vcenterId), ts); _seen.set(String(vcenterId), ts); }
+export function _resetForTest() { _running = null; _last = null; _okAt.clear(); _seen.clear(); _fp.clear(); _perVc.clear(); _covMemo = { key: null, cov: null }; }
+export function _setOkAtForTest(vcenterId, ts) { _okAt.set(String(vcenterId), ts); _seen.set(String(vcenterId), ts); const c = currentCoverage(); if (c) _fp.set(String(vcenterId), c.fp); }
 export function _stopForTest() { _timer?.stop(); _timer = null; _rearm.clear(); }

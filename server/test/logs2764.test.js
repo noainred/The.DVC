@@ -208,7 +208,9 @@ test('실제 폴러(재검토 2-b) — 같은 ms 의 이벤트 사이에서 주�
     assert.equal(P.logCollectOkAt('oc5'), t0 + 98_000);
     const r2 = await P.pollLogsOnce({ manual: true });
     assert.equal(state.begins[1], t0 + 98_000, `두 번째 주기 beginTime 은 읽은 시각 포함(예전 +1ms 는 #100·#101 을 영영 건너뛰었다): ${state.begins.map((b) => b - t0)}`);
-    assert.equal(r2.collected, 52, '#98·#99 를 다시 읽어 적재를 시도한다(collected 는 시도 수)');
+    // v2.766(점검 R1-A2-02): collected 는 실제로 들어간 행 수다 — #98·#99 는 다시 읽지만(read 52) 중복이라 세지 않는다(예전: 시도 수 52).
+    assert.equal(r2.collected, 50, '#98·#99 를 다시 읽지만 중복 — 새로 들어간 #100~#149 만 센다');
+    assert.equal(P.logCollectDiag([]).find((d) => d.vcenterId === 'oc5').lastPoll.read, 52, '#98·#99 를 다시 읽었다');
     assert.equal(db.countCapped({ vcenterId: 'oc5' }, 1000).total, 150, '#98·#99 는 번호@시각 키가 거르고 #100~#149 만 새로 — 유실 0(예전 재현: 148)');
   } finally { restore(); await closeSrv(srv); }
 });

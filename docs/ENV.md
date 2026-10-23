@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **667개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **669개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-22)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-23)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (201)
+## 공통 (202)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -237,6 +237,7 @@
 | `VEEAM_HTTP_TIMEOUT_MS` |  |  | veeam/client.js |
 | `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
 | `VEEAM_SERVER_DEADLINE_MS` |  |  | veeam/poller.js |
+| `VEEAM_SNAP_CONCURRENCY` | `6` |  | veeam/snapCollector.js |
 | `VEEAM_TLS_VERIFY` |  |  | veeam/client.js |
 | `VM_CFG_PER_CYCLE` |  |  | config.js |
 | `VM_CFG_REFRESH_MS` |  |  | config.js |
@@ -260,11 +261,12 @@
 | `XFER_TEST_ENABLED` | `''` |  | xferspeed/serve.js |
 | `XFER_TEST_MAX_BYTES` | `67108864` |  | xferspeed/serve.js |
 
-## 로그 (2)
+## 로그 (3)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LOGS_META_TTL_MS` | `300000` |  | logs/db.js |
+| `VCLOGS_BATCH_ROWS` |  |  | logs/poller.js |
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
 ## 메트릭 수집 (13)
@@ -851,4 +853,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 667
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 669

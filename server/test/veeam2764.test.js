@@ -200,7 +200,8 @@ test('⑥ 소스 — 라우트(snap-events)·push(edgeSnapPayload) 의 collected
   assert.match(route, /collectedAt: snapEventsOkAt\(vcenterId/);
   assert.ok(!/collectedAt: logCollectOkAt\(/.test(route), '라우트가 로그 폴러 값을 직접 쓰지 않는다');
   const push = read('veeam/push.js');
-  assert.match(push, /collectedAtFor: \(vc\) => snapEventsOkAt\(vc/);
+  // v2.766(점검 R1-A1-1): 요약(sum)을 함께 넘긴다 — 판정 계정을 전용 수집기가 다 덮을 때만 섞는다
+  assert.match(push, /collectedAtFor: \(vc, sum\) => snapEventsOkAt\(vc, \{ dedicated: !!snapDb, summary: sum \}\)/);
   assert.ok(!/collectedAtFor: logCollectOkAt/.test(push));
   // 엣지 계약: edgeSnapPayload 가 싣는 필드는 바뀌지 않았다(collectedAt 값만 결합 함수로)
   const se = read('veeam/snapEvents.js');
@@ -308,7 +309,9 @@ test('⑩ 2-b — 같은 ms 에 상한 경계가 걸려도 유실 없음(since =
     assert.equal(per.capped, true);
     assert.equal(per.read, 20);
     assert.equal(db.rowsFor('oc7', 0, 100).length, 10, '상한만큼만 — 나머지 5건은 이 수집기로는 못 읽는다(상태가 밝힌다)');
-    assert.equal(C.snapCollectorOkAt('oc7'), t1, '완결이 아니다 — 마지막으로 읽은 시각');
+    // v2.766(점검 R1-A1-1·A5-1): 이 계정 목록(지문)으로 끝까지 읽은 회차가 아직 없다 — 부분 회차의 '마지막으로 읽은 시각' 도 처음에는 기록하지 않는다(예전: t1)
+    assert.equal(C.snapCollectorOkAt('oc7'), null, '첫 완결 전 — okAt 없음(로그 폴러 값으로 폴백)');
+    assert.equal(per.reason, 'refilling');
   } finally { unquiet(q); await new Promise((r) => { srv.close(r); srv.closeAllConnections?.(); }); }
 });
 

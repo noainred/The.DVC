@@ -148,8 +148,25 @@ export function saveCursorFile({ force = false, knownIds = null, dbKey = null } 
     return false;
   }
 }
+/*
+ * v2.766(점검 R1-A2-01 — 재현): 3-b 의 DB 키 비교는 **커서 파일을 읽을 때(기동 뒤 1회)** 만 돌았다. 실행 중에 저장 경로를 바꾸면
+ *   (관리자 설정 › Log — saveLogSettings → resetLogsDb) 새 DB 는 비었는데 인메모리 커서·완결 시각이 남아 첫 7일을 채우지 않았고,
+ *   그 주기 끝의 저장이 커서 파일을 **새 DB 키로** 덮어 재시작해도 못 채웠다(데이터 손실 경로). 이제 주기마다 이번 DB 키를 직전 주기의 것과
+ *   비교해 다르면 인메모리 기록을 비우고 커서 파일을 새 키로 다시 쓴다(라우트가 resetLogsDb 를 부르지 않는 경로 — 파일 교체 등 — 도 덮는다).
+ */
+let _activeDbKey = null;
+/** 이번 주기 DB 키가 직전 주기와 다른 DB 를 가리키면 인메모리 커서·완결 시각·연속 상한·진단을 비운다. 비웠으면 true. */
+export function syncCursorDbKey(dbKey) {
+  const prev = _activeDbKey;
+  _activeDbKey = dbKey || prev;
+  if (!prev || !dbKey || sameLogsDb(prev, dbKey)) return false;
+  _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear();
+  _cursorDirty = true;   // 이번 주기 끝의 저장이 새 DB 키로 덮는다
+  console.warn(`[vclogs] 로그 DB 가 바뀌었습니다(${prev.path} → ${dbKey.path}) — 수집 커서를 비우고 새 DB 의 마지막 저장 시각(없으면 최근 7일)부터 읽습니다`);
+  return true;
+}
 /** 테스트 전용 — 인메모리 기록을 비우고 다음 수집이 파일을 다시 읽게 한다. */
-export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; }
+export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; _activeDbKey = null; }
 /*
  * v2.765(따라잡기 — 재검토 1-a·1-b·1-c): 밀린 vCenter 는 다음 주기를 기다리지 않고 **같은 주기 안에서, 한 세션·한 컬렉터로** 이어 읽는다
  *   (collectVCenterEvents onBatch) — EVENT_BATCH_ROWS 건마다 묶음을 받아 적재(전용 DB → 로그 DB 조각 트랜잭션)하고 커서·온전한 시각을 갱신한 뒤
@@ -401,7 +418,7 @@ export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc), { graceMs =
  *   **주기 수집에서만** 건너뛴다(store 와 같은 정지 기록 — 같은 계정이다. 로그 폴러가 따로 로그인하면
  *   store 가 멈춰도 계정 잠금은 그대로다). 수동 실행은 막지 않는다(authGuard 규칙 3).
  */
-export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = null } = {}) {
+export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = null, deadlineMs: deadlineOverride = null } = {}) {
   // v2.743(감사 WEB-04): 진행 중이면 **직전 결과(lastRun)를 돌려주지 않는다** — '지금 수집' 이 그 값을 이번 결과로 읽어
   //   '수집 완료: N건' 이라고 말했다(첫 실행 중이면 null 이라 0건). 이번 요청은 새로 수집하지 않았다는 사실을 busy 로 밝힌다.
   if (running) { _busySkips++; _busySkipAt = Date.now(); return { busy: true, runningSince }; }
@@ -437,6 +454,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
     //   insertManyAsync(logs/db.js tsSafeChunks)가 한다(B6-01 그대로). 메모리에 드는 것은 묶음 하나(2,000건)뿐이다(예전 회차 40,000건).
     const dbKey = logsDbKey(db);
     loadCursorFile({ dbKey });   // 기동 뒤 첫 수집 전에 한 번 — 재시작해도 읽은 커서·온전한 시각이 db.lastTs 로 되돌아가지 않는다(다른 DB 의 커서는 무시 — 3-b)
+    syncCursorDbKey(dbKey);      // v2.766(R1-A2-01): 실행 중 DB 가 바뀌었으면(저장 경로 변경) 인메모리 커서를 비운다
     const everyMs = pollEveryMs(s.pollIntervalMin);
     const cycleStart = runningSince;
     const stalled = [];   // v2.756: 읽었는데 하나도 저장되지 않은 채 끝까지 못 읽은 vCenter(중복 키·심각도 필터) — 예전에는 여기서 영원히 멈췄다
@@ -447,10 +465,12 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
       // v2.765(1-b): 예산은 이 vCenter 의 시작 시각 기준(앞 순번이 다 쓴 뒤 시작해도 최소 예산). 데드라인 = 예산 + 기존 시한(수집기가 예산에서 스스로
       //   멈추므로 신호는 매달린 묶음·적재의 마지막 방어다). 테스트·진단용 주입(budgetMs)이 있으면 그것.
       const budget = mock ? null : (Number(budgetOverride) > 0 ? Math.floor(Number(budgetOverride)) : vcCatchupBudgetMs({ everyMs, cycleStart, now: t0 }));
-      const deadlineMs = mock ? null : budget + vcLogDeadlineMs(vc);
+      // v2.766(R1-A2-03): 데드라인도 테스트·진단용 주입(deadlineMs)이 있으면 그것(정리 지연이 데드라인을 넘는 경로를 몇 초 안에 재현).
+      const deadlineMs = mock ? null : (Number(deadlineOverride) > 0 ? Math.floor(Number(deadlineOverride)) : budget + vcLogDeadlineMs(vc));
       const poll = { at: t0, read: 0, stored: 0, ms: null, rounds: 0, deadlineMs, budgetMs: budget, error: null, hint: null };
       const startedAt = t0;   // v2.731(A2-01): 이 수집이 온전하게 덮는 끝(끝까지 읽었으면)
       let cycleMaxRead = 0;   // 이번 주기에 읽은 마지막 이벤트 시각(묶음 누적)
+      let finalDone = false;  // v2.766(R1-A2-03): 마지막 묶음(final)까지 적재·기록을 마쳤는가 — 그 뒤는 정리(Destroy·Logout)뿐이다
       // 묶음 하나 — 심각도 필터 → 전용 DB → 로그 DB(조각 양보) → 커서·온전한 시각 → 양보. 던지면 수집기가 멈추고 그때까지의 커서는 그대로다.
       const onBatch = async (events, { final, ended } = {}) => {
         const rows = events
@@ -466,10 +486,13 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
           //   (덮음 기록은 그대로라 화면이 그 VM 을 빼고 '완전' 으로 보였다). 반대 순서는 안전하다 — 로그 적재가 실패하면 커서가 안 움직여
           //   다음 주기가 같은 행을 다시 읽고, 전용 DB 는 해시 UNIQUE(INSERT OR IGNORE)라 멱등이다.
           await ingestSnapRows(rows);   // 실패해도 로그 적재는 그대로(시간당 경고 1줄 · 실패하면 그 vCenter 덮음 무효 — C5/E1)
-          if (typeof db.insertManyAsync === 'function') await db.insertManyAsync(rows);
-          else db.insertMany(rows);
-          collected += rows.length;
-          poll.stored += rows.length;
+          // v2.766(점검 R1-A2-02): 저장 수는 **실제로 들어간 행 수**(INSERT OR IGNORE 가 버린 중복 제외)다 — 건넨 행 수로 세면 새 이벤트 0 인
+          //   주기도 'N건 장기 보관' 이 되고, 중복만 읽은 상한 주기가 stalled(읽었는데 저장 0)로 잡히지 않았다. 적재 함수가 수를 주지 않으면(옛 판) 건넨 행 수.
+          const res = typeof db.insertManyAsync === 'function' ? await db.insertManyAsync(rows) : db.insertMany(rows);
+          const n = numOrNull(res != null && typeof res === 'object' ? res.inserted : res);
+          const inserted = n != null && n >= 0 ? Math.min(Math.floor(n), rows.length) : rows.length;
+          collected += inserted;
+          poll.stored += inserted;
         }
         // 적재가 끝난 뒤에만 기록한다(적재가 던지면 이 묶음은 기록되지 않는다 — 온전하지 않다). v2.731(A2-01): 행이 0개여도 수집은 성공이다.
         if (maxRead > cycleMaxRead) cycleMaxRead = maxRead;
@@ -485,6 +508,8 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
             console.warn(`[vclogs] ${vcId}: 이벤트 ${poll.read}건을 읽었는데 새로 저장된 것이 없습니다(중복 또는 심각도 필터) — 읽은 시각(${new Date(cycleMaxRead).toISOString()})부터 이어 읽습니다`);
           }
         }
+        // 'aborted' 로 끝난 마지막 묶음은 아니다 — 시한이 읽기를 끊었다(하나도 못 읽었으면 예전처럼 실패 · 읽은 만큼은 vcLogWithDeadline 이 부분 결과로 돌려준다).
+        if (final && ended !== 'aborted') finalDone = true;
         await new Promise((r) => setImmediate(r));   // 적재 뒤 양보 — 다른 vCenter 워커·요청이 끼어든다
       };
       try {
@@ -498,7 +523,14 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
           events.ended = 'empty';
           await onBatch(events, { final: true, ended: 'empty', batches: 1 });
         } else {
-          await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, signal, onBatch, batchSize: EVENT_BATCH_ROWS, budgetMs: budget }), deadlineMs);
+          try {
+            await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, signal, onBatch, batchSize: EVENT_BATCH_ROWS, budgetMs: budget }), deadlineMs);
+          } catch (e) {
+            // v2.766(점검 R1-A2-03): 마지막 묶음까지 적재·기록을 마친 뒤의 오류는 정리(DestroyCollector·Logout — 오류를 삼킨다)가 늦어
+            //   데드라인을 넘긴 것뿐이다 — 읽고 저장한 것은 온전하다. 예전에는 이것을 수집 실패(failed·상태 '정체')로 기록했다.
+            if (!finalDone) throw e;
+            console.warn(`[vclogs] ${vc.id}: 이벤트는 끝까지 적재했지만 세션 정리(DestroyCollector·Logout)가 늦어 시한을 넘겼습니다 — 수집 실패로 치지 않습니다(${e?.message || e})`);
+          }
         }
       } catch (e) {
         console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`);

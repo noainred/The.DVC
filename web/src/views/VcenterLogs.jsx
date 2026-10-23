@@ -115,8 +115,15 @@ export default function VcenterLogs() {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const loadStatus = () => fetchJson('/admin/vclogs/status').then((r) => { setSt(r); setS((c) => c || r.settings); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { loadStatus(); const t = setInterval(loadStatus, 30_000); return () => clearInterval(t); }, []);
+  // v2.766(점검 R1-A3-04): 순번 가드 — 30초 폴링과 저장·지금 수집 뒤 재조회가 겹치면 늦게 온 이전 응답이 수집 직후 상태를 옛 값으로 되돌렸다.
+  const statusSeq = useRef(0);
+  const loadStatus = () => {
+    const my = ++statusSeq.current;
+    return fetchJson('/admin/vclogs/status')
+      .then((r) => { if (my !== statusSeq.current) return; setSt(r); setS((c) => c || r.settings); setErr(null); })
+      .catch((e) => { if (my !== statusSeq.current) return; setErr(e.message); });
+  };
+  useEffect(() => { loadStatus(); const t = setInterval(loadStatus, 30_000); return () => { clearInterval(t); statusSeq.current += 1; }; }, []);
 
   if (err) return <ErrorBox message={err} />;
   if (!st || !s) return <Loading />;

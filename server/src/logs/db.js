@@ -245,12 +245,16 @@ function initSqlite() {
       return { w, p };
     }
     // 행 [a, b) 를 한 트랜잭션으로(동기) — insertMany(한 번에 전부)와 insertManyAsync(조각)가 같은 본문을 쓴다.
+    // v2.766(점검 R1-A2-02): 실제로 들어간 행 수(changes 합)를 돌려준다 — INSERT OR IGNORE 가 버린 중복은 세지 않는다.
+    //   폴러가 건넨 행 수로 '저장' 을 세서 새 이벤트 0 인 주기도 'N건 장기 보관' 이라 말했고, 중복만 읽은 상한 주기가 stalled 로 잡히지 않았다.
     const insertRange = (rows, a, b) => {
+      let inserted = 0;
       db.exec('BEGIN');
       try {
-        for (let i = a; i < b; i++) { const r = rows[i]; ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null); }
+        for (let i = a; i < b; i++) { const r = rows[i]; inserted += Number(ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message, typeof r.detail === 'string' ? r.detail : null)?.changes || 0); }
         db.exec('COMMIT');
       } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      return inserted;
     };
     const api = {
       kind: 'sqlite',
@@ -263,17 +267,19 @@ function initSqlite() {
        * 조각 COMMIT 뒤 크래시해도 다음 수집이 같은 ts 묶음의 나머지를 건너뛰지 않게). 양보는 COMMIT 뒤에만 한다(v2.611 — 트랜잭션을
        * 연 채 양보하면 같은 연결의 다른 BEGIN 이 실패한다). 조각 하나가 실패하면 그 조각만 되돌리고 던진다 — 앞 조각은 이미 들어가
        * 있고, 안전 지점이라 다음 수집이 나머지를 다시 읽는다.
-       * @returns {Promise<{chunks:number}>}
+       * v2.766(R1-A2-02): inserted = 실제로 들어간 행 수(중복 제외 — insertRange 합).
+       * @returns {Promise<{chunks:number, inserted:number}>}
        */
       insertManyAsync: async (rows, { chunkRows = 1000, yieldMs = 15 } = {}) => {
         const list = Array.isArray(rows) ? rows : [];
         const parts = tsSafeChunks(list, chunkRows);
         const maybeYield = createYielder(yieldMs);
+        let inserted = 0;
         for (let k = 0; k < parts.length; k++) {
           if (k) await maybeYield();
-          insertRange(list, parts[k][0], parts[k][1]);
+          inserted += insertRange(list, parts[k][0], parts[k][1]);
         }
-        return { chunks: parts.length };
+        return { chunks: parts.length, inserted };
       },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
       firstTs: (vc) => { const v = firstTsStmt.get(vc)?.mn; return Number.isFinite(Number(v)) && v != null ? Number(v) : 0; },
@@ -681,6 +687,7 @@ function initJson() {
       const fresh = [];
       for (const r of recs) { const k = r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`; const id = `${r.vcenterId}|${k}`; if (seen.has(id)) continue; seen.add(id); const row = { vcenterId: r.vcenterId, k, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: typeof r.detail === 'string' ? r.detail : null }; rows.push(row); seqOf.set(row, ++seq); fresh.push(row); }
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
+      return fresh.length;   // v2.766(R1-A2-02): SQLite 판과 같이 실제로 들어간 행 수(중복 제외)
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
     firstTs: (vc) => rows.reduce((mn, r) => (r.vcenterId === vc && (!mn || r.ts < mn) ? r.ts : mn), 0),
@@ -703,7 +710,7 @@ function initJson() {
     queryAsync: async (f = {}, limit = 200) => api.query(f, limit, 0),   // v2.732(B6-03): SQLite 판과 같은 API
     // v2.741(DB-01): SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에 거른다.
     searchAsync: async (f = {}, limit = 200, offset = 0, { cap = COUNT_CAP } = {}) => { const cnt = api.countCapped(f, cap); return { rows: api.query(f, limit, offset), total: cnt.total, capped: cnt.capped, slices: 0 }; },
-    insertManyAsync: async (recs) => { api.insertMany(recs); return { chunks: 1 }; },   // v2.732(B6-01): SQLite 판과 같은 API
+    insertManyAsync: async (recs) => ({ chunks: 1, inserted: api.insertMany(recs) }),   // v2.732(B6-01): SQLite 판과 같은 API
     // v2.673: SQLite 판과 같은 API — 폴백은 정규식으로 바로 거른다.
     loginFailCandidates: (f = {}, limit = 5000) => rows.filter((r) => match(r, { ...f, q: '' }) && isLoginFailRow(r)).sort((a, b) => b.ts - a.ts).slice(0, clampPage(limit, 0)[0]),
     queryPage: (f = {}, limit = 200, cursor = null, bounds = null) => {

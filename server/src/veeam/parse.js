@@ -548,7 +548,12 @@ export function withoutStaleRunning(result, { failed = false, now = Date.now(), 
   if (!result || !Array.isArray(result.vms)) return result;
   const stale = failed || !(Number(result.ts) > 0) || now - Number(result.ts) > maxAgeMs;
   if (!stale) return result;
-  return { ...result, runningStale: true, vms: result.vms.map((v) => (v.run ? { ...v, run: 0, pg: null, by: '' } : v)) };
+  // v2.766(점검 R1-A4-1): 작업(jobs[])의 '실행 중' 도 지운다 — VM 상세 창(buildVmDetail → jobs[].running)이 실패·오래된 결과에서도 '실행 중' 을 보였다(재현).
+  //   상태 문자열 'Running'·'Working' 도 지금 사실이 아니므로 비운다(화면은 '—'). 나머지(이름·마지막 결과·다음 실행)는 그대로.
+  const runSt = (j) => /^(?:running|working)$/i.test(String(j.status || '').slice(0, 64).trim());
+  const jobs = Array.isArray(result.jobs) ? result.jobs.map((j) => (j && typeof j === 'object' && (j.running === true || runSt(j))
+    ? { ...j, running: false, status: runSt(j) ? '' : j.status } : j)) : result.jobs;
+  return { ...result, runningStale: true, jobs, vms: result.vms.map((v) => (v.run ? { ...v, run: 0, pg: null, by: '' } : v)) };
 }
 
 /**

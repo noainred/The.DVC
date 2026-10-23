@@ -34,15 +34,30 @@ export function statusCell(st) {
   if (st.authStop) return { text: `인증 실패로 주기 수집 정지 · ${st.error || ''}`, tone: 'bad' };
   return { text: `실패 · ${fmt(st.ts)} · ${st.error || '사유 미상'}${st.lastOkTs ? ` (마지막 성공 ${fmt(st.lastOkTs)})` : ''}`, tone: 'bad' };
 }
+/**
+ * v2.766(점검 R1-A3-03): 저장이 끝났을 때의 폼 — 저장 중에도 '편집' 버튼이 열려 있으므로 **지금 폼이 저장을 시작한 서버(id)와 같을 때만** 반영한다.
+ *   예전에는 클릭 시점 form 클로저로 덮어 저장 중 열어 둔 다른 서버의 편집 폼을 지웠다.
+ * @param {object} cur 지금 폼 @param {string} startId 저장을 시작한 폼의 id('' = 신규) @param {object|null} server 응답의 server @param {boolean} drop 비밀번호를 버렸는가
+ */
+export function formAfterSave(cur, startId, server, drop) {
+  if ((cur?.id || '') !== (startId || '')) return cur;
+  return drop ? { ...cur, id: server?.id || cur.id, password: '' } : EMPTY;
+}
 const TONE = { ok: '#4ade80', bad: '#f87171', warn: 'var(--amber)', muted: 'var(--text-dim)' };
 
 /**
- * v2.763(V5-2): vCenter 를 체크할 때 읽는 곳 제안 — **신규이고 사람이 읽는 곳을 건드리지 않았고 아직 비어 있을 때만** 그 vCenter 를 보고하는
- *   엣지로. 예전에는 '' 를 '미선택' 으로만 봐서 편집 중 사람이 고른 '중앙에서 직접' 을 조용히 엣지로 바꿨다(다음 pull 로 비밀번호가 그 엣지로 간다).
+ * v2.763(V5-2): vCenter 체크가 바뀔 때 읽는 곳 제안 — **신규이고 사람이 읽는 곳을 건드리지 않았을 때만** 바꾼다. 예전에는 '' 를 '미선택' 으로만
+ *   봐서 편집 중 사람이 고른 '중앙에서 직접' 을 조용히 엣지로 바꿨다(다음 pull 로 비밀번호가 그 엣지로 간다).
+ * v2.766(점검 R1-A3-01): 자동 제안은 체크가 바뀔 때마다 **남은 vCenter 로 다시 계산**한다 — 남은 vcenterIds 중 siteAgent 가 있는 첫 값, 없으면 ''.
+ *   예전에는 제안을 만든 vCenter 체크를 풀어도 제안이 남아, 중앙 직접 수집 vCenter 만 고른 서버가 엣지 담당으로 저장됐다(자격증명이 그 엣지로 간다).
+ * @param {object} f 폼(id·agent·agentTouched) @param {string[]} vcenterIds 바뀐 뒤 체크된 vCenter id(체크한 순서)
+ * @param {Array<{id:string, siteAgent?:string}>} vcenters 목록 응답의 vCenter
  */
-export function agentAfterVcToggle(f, adding, siteAgent) {
-  if (!adding || f.id || f.agentTouched || f.agent) return f.agent;
-  return siteAgent || '';
+export function agentAfterVcToggle(f, vcenterIds, vcenters) {
+  if (f.id || f.agentTouched) return f.agent;
+  const site = new Map((vcenters || []).map((v) => [v.id, v.siteAgent || '']));
+  for (const id of vcenterIds || []) { const a = site.get(id); if (a) return a; }
+  return '';
 }
 
 /**
@@ -97,19 +112,19 @@ export default function VeeamSettings() {
   const toggleVc = (id) => setForm((f) => {
     const has = f.vcenterIds.includes(id);
     const vcenterIds = has ? f.vcenterIds.filter((x) => x !== id) : [...f.vcenterIds, id];
-    // 신규이고 읽는 곳을 아직 안 골랐으면 그 vCenter 를 보고하는 엣지를 제안한다(같은 데이터센터의 Veeam 은 보통 그 엣지에서 닿는다 — v2.763 V5-2).
-    const site = !has ? (d?.vcenters || []).find((v) => v.id === id)?.siteAgent : '';
-    return { ...f, vcenterIds, agent: agentAfterVcToggle(f, !has, site) };
+    // 신규이고 읽는 곳을 아직 안 골랐으면 남은 vCenter 를 보고하는 엣지를 제안한다(같은 데이터센터의 Veeam 은 보통 그 엣지에서 닿는다 — v2.763 V5-2 · v2.766 R1-A3-01).
+    return { ...f, vcenterIds, agent: agentAfterVcToggle(f, vcenterIds, d?.vcenters) };
   });
   const save = async () => {
     busyOn('save'); setMsg(null);
     try {
       const { agentTouched: _t, ...body } = form;
+      const startId = form.id || '';
       const r = await sendJson('/admin/veeam/servers', 'POST', { ...body, port: form.port === '' ? undefined : Number(form.port) });
       if (!r.ok) { setMsg({ ok: false, text: r.reason || '저장하지 못했습니다.' }); return; }
       const drop = droppedSecretNote(r.server);
       setMsg(drop ? { ok: false, text: drop } : { ok: true, text: '저장했습니다. 담당 노드가 다음 수집(엣지는 배정 pull 뒤 곧바로)에 읽습니다.' });
-      setForm(drop ? { ...form, id: r.server.id, password: '' } : EMPTY);
+      setForm((cur) => formAfterSave(cur, startId, r.server, !!drop));
       load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { busyOff('save'); }
   };
