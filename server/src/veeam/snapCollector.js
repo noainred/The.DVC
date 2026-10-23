@@ -50,7 +50,7 @@ import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js';
 import { loadLogSettings } from '../logs/settings.js';
 import { vcLogWithDeadline, vcLogDeadlineMs, DEADLINE_GRACE_MS, logCollectOkAt } from '../logs/poller.js';
-import { veeamAccounts, isSharedAccount, canonAccount } from './snapEvents.js';
+import { veeamAccounts, isSharedAccount, canonAccount, makeVeeamAccountMatcher } from './snapEvents.js';
 import { getSnapDb, ingestSnapRows, isSnapRow, seenVeeamUsers } from './snapDb.js';
 
 const DAY = 86_400_000;
@@ -129,7 +129,7 @@ function currentCoverage(now = Date.now()) {
   let accounts;
   try { accounts = veeamAccounts(now); } catch { return null; }
   const key = accounts.join('\n');
-  if (_covMemo.key !== key) _covMemo = { key, cov: userListCoverage(accounts) };
+  if (_covMemo.key !== key) _covMemo = { key, cov: { ...userListCoverage(accounts), isVeeam: makeVeeamAccountMatcher(accounts) } };
   return _covMemo.cov;
 }
 /**
@@ -148,7 +148,9 @@ export function snapCollectorCovers(summary, vcenterId) {
   if (vcenterId != null) {
     const seen = seenVeeamUsers(vcenterId);
     if (seen == null) return false;
-    for (const u of seen) users.push(u);   // push(...x) 금지 스윕(audit2603a) — 상한 64 라도 같은 꼴로
+    // v2.768(점검 R3-C1-1): 누적 계정은 **지금 판정기**가 여전히 Veeam 으로 보는 것만 — 목록에서 뺀(·잊게 한) 계정이 31일 동안 결합을 끄지 않게.
+    //   이름 규칙('veeam') 계정은 판정기가 언제나 Veeam 으로 보므로 그대로 남는다(R2-B1-1 의 목적 유지). '로그 폴러가 늦으면 섞지 않기' 로 바꾸지 말 것.
+    for (const u of seen) if (cov.isVeeam(u)) users.push(u);   // push(...x) 금지 스윕(audit2603a) — 상한 64 라도 같은 꼴로
   }
   return users.every((u) => cov.covered.has(canonAccount(u)));
 }

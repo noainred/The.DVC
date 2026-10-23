@@ -25,6 +25,7 @@ import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(T
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
+import { unreadVcenterReasons } from './metrics/unreadVcenters.js'; // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
 // 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
 import { openSecretsDeep, sealSecretsDeep, FILE_EXTRA_SECRET_FIELDS } from './security/secretVault.js';
@@ -146,8 +147,19 @@ export function saveAlertConfig(body = {}) {
 
 /** 값을 못 읽어 판정 보류된 발생 알림을 유지하는 최대 시간(v2.598) — 넘으면 해소 알림 없이 끊는다. */
 export const HELD_MAX_MS = 6 * 3600_000;
-/** v2.720(감사 B1-01): 지금 값을 읽지 못한 vCenter 상태 — 그 vCenter 의 alarm/host/ds 알림은 해소 판정을 보류한다. */
-const UNREAD_VC_STATUS = new Set(['unreachable', 'maintenance', 'pending', 'disabled']);
+/**
+ * v2.720(감사 B1-01): 지금 값을 읽지 못한 vCenter — 그 vCenter 의 alarm/host/ds 알림은 해소 판정을 보류한다.
+ * v2.768(점검 R3-C5-03): 공용 판정 `metrics/unreadVcenters.js unreadVcenterReasons`(점검중·연결 불가·**낡은 위임 보고**)에
+ *   첫 수집 중(pending)·비활성(disabled)을 더한다. 예전 상태 목록 사본은 stale 을 몰라, 엣지가 push 를 멈춘 위임 vCenter 의
+ *   마지막 값(DS 92% 등)을 '지금 발생 중' 으로 쿨다운마다 재발송했고 실제 복구 뒤에도 해소하지 못했다(healthReport 는 같은
+ *   데이터를 '확인 불가' 로 센다 — 판정 두 벌이었다). sampler 처럼 pending 을 빼야 할 이유(전체 합계 차단)는 알림엔 없다.
+ */
+const UNREAD_VC_EXTRA_STATUS = new Set(['pending', 'disabled']);
+export function unreadVcenterIds(snap) {
+  const out = new Set(unreadVcenterReasons(snap).keys());
+  for (const v of snap?.vcenters || []) if (v && v.id != null && UNREAD_VC_EXTRA_STATUS.has(v.status)) out.add(String(v.id));
+  return out;
+}
 const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
 
 /** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
@@ -164,14 +176,19 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // v2.720(감사 B1-01): 지금 값을 읽지 못한 vCenter(연결 불가·점검중·첫 수집 중·비활성)의 alarm/host/ds 항목이 목록에서
   //   빠진 것은 '복구' 가 아니라 '모름' 이다 — LASTGOOD_HOLD(6시간)가 지나 인벤토리를 비운 vCenter 가 그 예다. tick 이
   //   st.alert.vcenterId 로 보류한다(HELD_MAX_MS 규칙 그대로).
-  const unreadVc = new Set((snap.vcenters || []).filter((v) => v && v.id != null && UNREAD_VC_STATUS.has(v.status)).map((v) => String(v.id)));
+  const unreadVc = unreadVcenterIds(snap);
   Object.defineProperty(out, 'unreadVcenters', { value: unreadVc, enumerable: false });
+  // v2.768(점검 R3-C5-03): 낡은 위임 보고 vCenter 의 alarm/host/ds 는 **새로 내지 않는다**(엣지가 마지막에 보낸 값이지 지금 값이
+  //   아니다). 이미 발생 중인 것은 목록에서 빠지지만 위 unreadVc 로 해소가 보류된다(HELD_MAX_MS 규칙 그대로) — 재발송도 없다.
+  const reasons = unreadVcenterReasons(snap);
+  const staleVc = new Set([...reasons].filter(([, r]) => r === 'stale').map(([id]) => id));
+  const fresh = (x) => !staleVc.has(String(x?.vcenterId ?? ''));
   // v2.720(감사 B1-01): 상한으로 잘린 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — 순서만 바뀌어 101번째로 밀린
   //   알림을 해소로 기록하고 다시 들어오면 새 알림으로 재발송하던 것. 잘린 항목의 키를 판정 보류로 둔다.
   const holdTail = (list, cap, keyOf) => { for (const x of list.slice(cap)) { const k = keyOf(x); if (k) held.add(k); } return list.slice(0, cap); };
   const R = cfg.rules;
   if (R.criticalAlarms?.enabled) {
-    for (const a of holdTail((snap.alarms || []).filter((x) => x.severity === 'critical'), 100, (x) => `alarm:${x.id || x.name}`)) {
+    for (const a of holdTail((snap.alarms || []).filter((x) => x.severity === 'critical' && fresh(x)), 100, (x) => `alarm:${x.id || x.name}`)) {
       out.push({ key: `alarm:${a.id || a.name}`, vcenterId: a.vcenterId || '', severity: 'critical', title: `위험 알람: ${a.name || a.entity || ''}`, detail: `${a.vcenterId || ''} ${a.entity || ''} ${a.status || ''}`.trim() });
     }
   }
@@ -179,9 +196,18 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     for (const v of (snap.vcenters || []).filter((x) => x.status === 'unreachable')) {
       out.push({ key: `vc:${v.id}`, vcenterId: v.id, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가' });
     }
+    // v2.768(점검 R3-C5-03): 위임 엣지의 보고 끊김은 '수집 실패(위험)' 가 아니라 '확인 불가' 다(healthReport 와 같은 판단) —
+    //   별도 키(vcstale:)·warning 으로 알린다. vc: 키를 쓰면 엣지가 다시 unreachable 을 보낼 때 같은 키가 위험으로 바뀌며
+    //   쿨다운·해소 기억이 섞인다. 판정은 공용 unreadVcenterReasons 의 'stale'(점검중·연결 불가가 우선) 한 벌.
+    for (const v of snap.vcenters || []) {
+      if (!v || v.id == null || !staleVc.has(String(v.id))) continue;
+      const at = numOrNull(v.receivedAt);
+      out.push({ key: `vcstale:${v.id}`, vcenterId: String(v.id), severity: 'warning', title: `엣지 보고 끊김: ${v.name || v.id}`,
+        detail: `${v.collectedBy ? `${v.collectedBy} · ` : ''}마지막 보고 ${at != null && at > 0 ? new Date(at).toISOString() : '시각 미상'} — 이 vCenter 의 경보·호스트·데이터스토어 알림은 보고가 다시 올 때까지 판정하지 않습니다` });
+    }
   }
   if (R.hostDisconnected?.enabled) {
-    for (const h of holdTail((snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED'), 100, (x) => `host:${x.id}`)) {
+    for (const h of holdTail((snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED' && fresh(x)), 100, (x) => `host:${x.id}`)) {
       out.push({ key: `host:${h.id}`, vcenterId: h.vcenterId || '', severity: 'warning', title: `호스트 연결 끊김: ${h.name}`, detail: `${h.vcenterId} / ${h.cluster || ''}` });
     }
   }
@@ -191,7 +217,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     // 예전 `(x.usagePct || 0) >= th` 는 그것을 0% 로 읽어 **발생 중이던 용량 알림을 '해소' 로 보냈다**. 못 읽은 값은 초과도
     // 정상도 아니다 — 판정 보류(held)로 두고 tick 이 해소하지 않는다(bmusage·PDU F5 와 같은 규약).
     for (const d of snap.datastores || []) if (numOrNull(d.usagePct) == null && d.id != null) held.add(`ds:${d.id}`);
-    for (const d of holdTail((snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th), 200, (x) => (x.id != null ? `ds:${x.id}` : null))) {
+    for (const d of holdTail((snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th && fresh(x)), 200, (x) => (x.id != null ? `ds:${x.id}` : null))) {
       out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
     }
   }

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import time
@@ -21,7 +22,7 @@ import urllib.error
 import urllib.request
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
-from .pinned import build_pinned_opener  # v2.322: 검증 IP 핀(웹훅 리바인딩 TOCTOU 차단)
+from .pinned import build_pinned_opener, RequestDeadline  # v2.322: 검증 IP 핀(웹훅 리바인딩 TOCTOU 차단)
 import ssl as _ssl
 
 TIMEOUT = 6.0
@@ -136,8 +137,14 @@ class Notifier:
                 self._audit.write("notify.sent", actor="system",
                                   detail={"name": event["name"], "event": event["direction"]})
             return True
-        except (ValidationError, urllib.error.URLError, OSError, ValueError) as exc:
-            print(f"[notify] 전송 실패({exc})", flush=True)
+        # v2.768(점검 R3-C3-3): 대상이 HTTP 가 아닌 상태줄을 돌려주면(포트 오기입 — SSH 등) urllib 은
+        # http.client.BadStatusLine(HTTPException — OSError 아님)을 감싸지 않고 그대로 던진다. 예전에는 여기서
+        # 새어 나가 [테스트 전송] 이 무응답으로 끊기고, 점검 경로에서는 같은 주기의 나머지 전환 알림·감사가 소실됐다.
+        except (ValidationError, urllib.error.URLError, OSError, ValueError,
+                http.client.HTTPException) as exc:
+            # 사유에 대상이 돌려준 바이트(BadStatusLine 원문)가 실릴 수 있다 — 한 줄로 이스케이프해 찍는다.
+            reason = str(exc)[:200].encode("unicode_escape").decode("ascii", "replace")
+            print(f"[notify] 전송 실패({type(exc).__name__}: {reason})", flush=True)
             if self._audit:
                 self._audit.write("notify.failed", actor="system", result="error",
                                   detail={"name": event["name"], "reason": str(exc)[:120]})
@@ -157,9 +164,17 @@ class Notifier:
         })
         # v2.322 보안 감사: urlopen 은 host 를 재해석한다(리바인딩 TOCTOU) — 검증된 addresses[0]
         # 로 핀한 opener 로 전송(Host/TLS SNI 는 원 호스트명 유지). 웹훅 TLS 는 기본 검증 사용.
-        opener = build_pinned_opener(addresses[0], tls_context=_ssl.create_default_context())
-        with opener.open(request, timeout=TIMEOUT) as response:
-            response.read(512)
+        # v2.768(점검 R3-C3-1): 요청 전체 시한 — 1바이트씩 흘리는 대상이 알림 루프(점검 작업)를 붙잡지 못하게.
+        with RequestDeadline(TIMEOUT) as deadline:
+            opener = build_pinned_opener(addresses[0], tls_context=_ssl.create_default_context(),
+                                         deadline=deadline)
+            try:
+                with opener.open(request, timeout=TIMEOUT) as response:
+                    response.read(512)
+            except (OSError, http.client.HTTPException, ValueError):
+                if deadline.fired:     # 워치독이 끊은 것 — 원인을 시한 초과로 알린다
+                    raise TimeoutError(f"웹훅 응답 시간 초과(요청 전체 {TIMEOUT:g}초)") from None
+                raise
 
     # ---------- 진단 ----------
 

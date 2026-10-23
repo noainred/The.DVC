@@ -5,7 +5,9 @@ import { logAudit } from '../../audit.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { listInventory } from '../../central/inventory.js';
 import { listAgentConfigs } from '../../central/agentConfig.js';
-import { createBackup, listBackups, backupPath, deleteBackup, readBackup, restoreCentral } from '../../backup/service.js';
+import { createBackup, listBackups, backupPath, deleteBackup, readBackupDetailed, readBackupFailure, restoreCentral } from '../../backup/service.js';
+import { stagedRestoreStatus, cancelStagedRestore } from '../../backup/stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원 예약 상태·취소
+import { restartProcess } from '../../upgrade/upgrade.js'; // v2.768: 복원 후 바로 재시작(선택 — upgrade/apply 의 restart 와 같은 종료 경로)
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../../backup/settings.js';
 import { saveLogSettings } from '../../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../../logs/poller.js';
@@ -128,7 +130,7 @@ export function registerBackupNetSec(adminRouter) {
 // ───────────────────────── 포탈 백업 ─────────────────────────
 // 중앙 + 엣지(에이전트 push) 설정 통합 백업. 정기/변경자동/수동 + 다운로드 + 복원.
 adminRouter.get('/backup/status', adminOnly, requireSettingsOwner, (_req, res) => {
-  res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs() });
+  res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs(), restore: stagedRestoreStatus() });
 });
 adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => res.json(saveBackupSettings(req.body || {})));
 adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, async (_req, res) => {
@@ -144,29 +146,52 @@ adminRouter.get('/backup/download/:name', adminOnly, requireSettingsOwner, (req,
   logAudit({ user: req.user?.username, action: '포탈 백업 다운로드(자격증명 포함)', target: req.params.name, ip: req.ip || '' });
   res.download(p, path.basename(p));
 });
+// v2.768(점검 R3-C5-01): '없음'(404)과 '열 수 없음'(상한 초과·손상 — 422)을 구분한다. 예전에는 셋 다 '백업을 찾을 수 없습니다' 였다.
+function sendReadFailure(res, code) {
+  const f = readBackupFailure(code);
+  return res.status(f.status).json({ ok: false, error: f.error, reason: f.reason });
+}
 adminRouter.get('/backup/view/:name', adminOnly, requireSettingsOwner, (req, res) => {
-  const a = readBackup(req.params.name);
-  if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+  const rb = readBackupDetailed(req.params.name);
+  if (!rb.ok) return sendReadFailure(res, rb.code);
+  const a = rb.archive;
   res.json({ // 자격증명 내용은 빼고 요약만.
     createdAt: a.createdAt, reason: a.reason, centralVersion: a.central?.version,
     centralFiles: Object.keys(a.central?.files || {}),
     edges: Object.entries(a.edges || {}).map(([agent, e]) => ({ agent, at: e.at, files: Object.keys(e.files || {}) })),
+    edgesOmitted: a.edgesOmitted && Array.isArray(a.edgesOmitted.agents) ? { agents: a.edgesOmitted.agents.slice(0, 500).map(String), bytes: Number(a.edgesOmitted.bytes) || null, capBytes: Number(a.edgesOmitted.capBytes) || null } : null,
   });
+});
+// v2.768(점검 R3-C5-02): 재시작 전이면 예약한 복원을 취소할 수 있다(.env 는 복원 때 이미 썼다 — 되돌리려면 pre-restore 백업으로 다시 복원).
+adminRouter.post('/backup/restore-staged/cancel', adminOnly, requireSettingsOwner, (req, res) => {
+  try {
+    const r = cancelStagedRestore();
+    if (r.had) logAudit({ user: req.user?.username, action: '포탈 설정 복원 예약 취소', target: 'restore-staged', ip: req.ip || '' });
+    res.json({ ok: true, had: r.had, restore: stagedRestoreStatus() });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.delete('/backup/:name', adminOnly, requireSettingsOwner, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
 adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async (req, res) => {
   try {
-    const a = readBackup(req.params.name);
-    if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
-    const r = await restoreCentral(a, { retention: loadBackupSettings().retention });
+    const rb = readBackupDetailed(req.params.name);
+    if (!rb.ok) return sendReadFailure(res, rb.code);
+    const r = await restoreCentral(rb.archive, { retention: loadBackupSettings().retention, source: path.basename(String(req.params.name)) });
     // v2.689(G2 B6): 파일별 복원 실패(`failed[]`)를 감사·응답 문구에 밝힌다 — 예전에는 성공 개수만 적어 일부 설정이 복원되지
     //   않았는데 '복원 완료' 로 보였다.
     const nFail = Array.isArray(r.failed) ? r.failed.length : 0;
-    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}`, ip: req.ip || '' });
-    const note = nFail
-      ? `중앙 설정 복원 — ${r.restored}개 성공 · ${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}). 실패한 파일은 복원되지 않았습니다. 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.`
-      : '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.';
-    res.json({ ok: true, ...r, note });
+    // v2.768(점검 R3-C5-02): JSON 설정은 예약만 했다 — '복원 완료' 가 아니라 '재시작하면 적용' 이다(바로 덮으면 실행 중인 모듈이 되돌렸다).
+    const restart = req.body?.restart === true && r.pendingRestart;
+    logAudit({ user: req.user?.username, action: '포탈 설정 복원(재시작 시 적용)', target: req.params.name, detail: `${r.restored}개 파일(예약 ${r.staged.length} · .env ${r.envWritten})${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}${restart ? ' · 바로 재시작' : ''}`, ip: req.ip || '' });
+    const parts = [];
+    parts.push(r.pendingRestart
+      ? `설정 파일 ${r.staged.length}개를 복원 예약했습니다 — ${restart ? '포탈을 지금 재시작해 적용합니다.' : '포탈을 재시작하면 적용됩니다(그 전까지는 현재 설정으로 동작).'}`
+      : '예약된 설정 파일이 없습니다.');
+    if (r.envWritten) parts.push(`.env ${r.envWritten}개는 바로 썼습니다(재시작 때 읽힘).`);
+    if (nFail) parts.push(`${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}) — 실패한 파일은 복원되지 않습니다.`);
+    if (r.excluded?.length) parts.push(`복원 제외 ${r.excluded.length}개(${r.excluded.map((f) => `${f.file}: ${f.reason}`).join(' · ')}).`);
+    parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');
+    res.json({ ok: true, ...r, restarting: restart, note: parts.join(' ') });
+    if (restart) setTimeout(() => restartProcess(), 250);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

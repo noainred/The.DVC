@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import http.client
 import socket
 import ssl
 import time
@@ -27,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
-from .pinned import connect_pinned, build_pinned_opener  # v2.322: 검증 IP 핀(리바인딩 TOCTOU 차단)
+from .pinned import connect_pinned, build_pinned_opener, RequestDeadline  # v2.322: 검증 IP 핀(리바인딩 TOCTOU 차단)
 
 USER_AGENT = "GlobalDCServiceHub-HealthCheck/1.0"
 
@@ -138,9 +139,19 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
                 "latencyMs": elapsed_ms(), "message": reason,
                 "addresses": addresses}
 
+    with RequestDeadline(timeout) as deadline:
+        result = _http_get(target, addresses, timeout=timeout, tls_verify=tls_verify,
+                           deadline=deadline, elapsed_ms=elapsed_ms)
+    return result
+
+
+def _http_get(target, addresses, *, timeout, tls_verify, deadline, elapsed_ms) -> dict:
     # v2.322 보안 감사: urllib 은 target URL 의 host 를 재해석한다(리바인딩 TOCTOU). 검증된
     # addresses[0] 로 핀한 opener 를 쓰되 Host/TLS SNI 는 원 호스트명 유지(_NoRedirect 정책 보존).
-    opener = build_pinned_opener(addresses[0], tls_context=_tls_context(tls_verify), extra_handlers=(_NoRedirect,))
+    # v2.768(점검 R3-C3-1): timeout 은 소켓 연산 단위라 1바이트씩 흘리는 대상이 점검(과 GuardedJob)을
+    # 무한정 붙잡았다 — deadline 워치독이 요청 전체를 timeout 안에서 끊는다.
+    opener = build_pinned_opener(addresses[0], tls_context=_tls_context(tls_verify),
+                                 extra_handlers=(_NoRedirect,), deadline=deadline)
     request = urllib.request.Request(target, method="GET", headers={
         "User-Agent": USER_AGENT,
         # 본문 전체를 받을 이유가 없다 — 서버가 지원하면 첫 바이트만.
@@ -148,10 +159,15 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
         "Accept": "*/*",
     })
 
+    def timed_out():
+        return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
+                "latencyMs": elapsed_ms(), "message": f"응답 시간 초과(요청 전체 {timeout:g}초)",
+                "addresses": addresses}
+
     try:
         with opener.open(request, timeout=timeout) as response:
             code = response.getcode()
-            response.read(1024)
+            response.read(1024)       # 상태줄·헤더를 다 받았으면 본문이 시한에 잘려도 응답 코드가 결과다
             return {"url": target, "status": _classify(code), "statusCode": code,
                     "latencyMs": elapsed_ms(), "message": f"HTTP {code}",
                     "addresses": addresses}
@@ -161,12 +177,19 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
                 "latencyMs": elapsed_ms(),
                 "message": f"HTTP {exc.code} {exc.reason}".strip(), "addresses": addresses}
     except urllib.error.URLError as exc:
+        if deadline.fired:
+            return timed_out()
         return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
                 "latencyMs": elapsed_ms(), "message": str(exc.reason),
                 "addresses": addresses}
-    except (TimeoutError, OSError) as exc:
+    except (TimeoutError, OSError, http.client.HTTPException, ValueError) as exc:
+        # 워치독이 연결을 끊으면 http.client 는 BadStatusLine·IncompleteRead(HTTPException, OSError 아님)나
+        # 'closed socket' ValueError 로 빠져나온다 — 시한 초과로 보고한다.
+        if deadline.fired:
+            return timed_out()
         return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
-                "latencyMs": elapsed_ms(), "message": str(exc), "addresses": addresses}
+                "latencyMs": elapsed_ms(), "message": str(exc) or type(exc).__name__,
+                "addresses": addresses}
 
 
 def check_one(url: str, *, method: str = METHOD_PORT, timeout: float = 4.0,

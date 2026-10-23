@@ -63,6 +63,9 @@ class HealthHistory:
         self._retention = max(2, int(retention_days))
         self._lock = threading.RLock()
         self._writes = 0
+        # v2.768(점검 R3-C3-4): 행 수 캐시 — COUNT(*) 는 인덱스 전체 스캔이라 30초마다 부르는 stats() 에서 매번
+        # 돌리지 않는다. 첫 stats() 에서 한 번 세고 이후 record(+)·prune(-) 이 같은 잠금 안에서 맞춘다.
+        self._row_count = None
         from pathlib import Path
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self._path, check_same_thread=False)
@@ -204,6 +207,8 @@ class HealthHistory:
             except Exception:
                 self._db.rollback()
                 raise
+            if self._row_count is not None:
+                self._row_count += len(rows)
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:
                 self.prune()
@@ -216,19 +221,35 @@ class HealthHistory:
             # 롤업도 같은 기준으로 정리한다(원본만 지우면 집계가 영원히 남는다).
             self._db.execute("DELETE FROM checks_hourly WHERE hour < ?", (cutoff,))
             self._db.commit()
-            return cursor.rowcount or 0
+            removed = cursor.rowcount or 0
+            if self._row_count is not None:
+                self._row_count = max(0, self._row_count - removed)
+            return removed
 
     # ---------- 읽기 ----------
 
     def latest(self) -> dict:
         """바로가기별 최신 결과 — 재시작 후에도 카드에 상태 배지를 띄우기 위해."""
+        # v2.768(점검 R3-C3-4): 'GROUP BY + MAX(ts)' 는 (shortcut_id, ts) 인덱스를 통째로 훑는다(1152만 행 1.2초,
+        # history 잠금 보유 — 그동안 적재 대기, 30초 폴링·공개 GET). 재귀 CTE 로 서로 다른 shortcut_id 만 건너뛰며
+        # 찾고(id 당 인덱스 시크 1회), 각 id 의 최신 1행을 ORDER BY ts DESC, id DESC LIMIT 1 로 집는다(같은 ts 면
+        # 나중 적재분 — 예전 dict 덮어쓰기 결과와 같다). 비용은 행 수가 아니라 링크 수에 비례한다.
         with self._lock:
             rows = self._db.execute("""
+                WITH RECURSIVE ids(sid) AS (
+                  SELECT (SELECT shortcut_id FROM checks WHERE shortcut_id IS NOT NULL
+                          ORDER BY shortcut_id LIMIT 1)
+                  UNION ALL
+                  SELECT (SELECT shortcut_id FROM checks WHERE shortcut_id > ids.sid
+                          ORDER BY shortcut_id LIMIT 1)
+                  FROM ids WHERE ids.sid IS NOT NULL
+                )
                 SELECT c.shortcut_id, c.ts, c.url, c.status, c.status_code, c.latency_ms, c.message
-                FROM checks c
-                JOIN (SELECT shortcut_id, MAX(ts) AS ts FROM checks
-                      WHERE shortcut_id IS NOT NULL GROUP BY shortcut_id) m
-                  ON m.shortcut_id = c.shortcut_id AND m.ts = c.ts
+                FROM ids
+                JOIN checks c ON c.id = (SELECT id FROM checks
+                                         WHERE shortcut_id = ids.sid
+                                         ORDER BY ts DESC, id DESC LIMIT 1)
+                WHERE ids.sid IS NOT NULL
             """).fetchall()
         result = {}
         for row in rows:
@@ -337,14 +358,18 @@ class HealthHistory:
         }
 
     def stats(self) -> dict:
+        # v2.768(점검 R3-C3-4): COUNT·MIN·MAX 를 한 문장에 두면 MIN/MAX 최적화(ts 인덱스 끝 1행)가 꺼져 전체
+        # 스캔이 된다(루트 SQLite 규칙). MIN·MAX 는 각각 단독 문장, 행 수는 캐시(첫 호출에만 COUNT).
         with self._lock:
-            row = self._db.execute(
-                "SELECT COUNT(*) AS rows, MIN(ts) AS first_ts, MAX(ts) AS last_ts FROM checks"
-            ).fetchone()
+            first_ts = self._db.execute("SELECT MIN(ts) FROM checks").fetchone()[0]
+            last_ts = self._db.execute("SELECT MAX(ts) FROM checks").fetchone()[0]
+            if self._row_count is None:
+                self._row_count = int(self._db.execute("SELECT COUNT(*) FROM checks").fetchone()[0] or 0)
+            rows = self._row_count
         return {
-            "rows": int(row["rows"] or 0),
-            "firstTs": int(row["first_ts"]) if row["first_ts"] else None,
-            "lastTs": int(row["last_ts"]) if row["last_ts"] else None,
+            "rows": int(rows),
+            "firstTs": int(first_ts) if first_ts else None,
+            "lastTs": int(last_ts) if last_ts else None,
             "retentionDays": self._retention,
         }
 

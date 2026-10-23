@@ -1,4 +1,5 @@
 import './logbuffer.js'; // first: capture console output into the ring buffer
+import './backup/stagedRestoreBoot.js'; // v2.768(점검 R3-C5-02): 예약된 백업 복원을 캐시 로드 전에 적용 — 이 줄을 아래로 옮기지 말 것
 import { createStaticGzip } from './util/staticGzip.js';
 import { pushLog } from './logbuffer.js';
 
