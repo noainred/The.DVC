@@ -4,7 +4,7 @@
  * ephemeral-mapping expiry job.
  */
 
-import { getProxyById, listMappings, setMappingStatus } from './registry.js';
+import { getProxyById, listMappings, setMappingStatus, mappingConfigIssue } from './registry.js';
 import { applyMapping, removeMapping as haproxyRemove } from './dataplane.js';
 import { deployToProxy } from './deploy.js';
 
@@ -20,6 +20,17 @@ function serialize(fn) {
   return run;
 }
 
+/**
+ * v2.770(점검 R5-E5-4): SSH 배포가 성공하면 블록에 들어간 매핑만 active 다 — 형식이 깨진 매핑은 buildConfigBlock 이 건너뛰므로
+ *   active 로 표시하면 '열렸다' 는 거짓이 된다. 그 매핑은 사유와 함께 error 로 남긴다(삭제하면 사라진다).
+ */
+export function markDeployed(ms) {
+  for (const m of ms) {
+    const bad = mappingConfigIssue(m);
+    setMappingStatus(m.id, bad ? 'error' : 'active', bad ? `HAProxy 블록에서 제외 — ${bad}` : null);
+  }
+}
+
 /** Provision a mapping on its proxy. (HAProxy 변경은 직렬화) */
 export function provision(mapping) {
   return serialize(() => doProvision(mapping));
@@ -33,7 +44,7 @@ async function doProvision(mapping) {
   } else if (proxy.deploy?.enabled) {
     const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
     const d = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
-    if (d.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
+    if (d.ok) markDeployed(ms);
     else setMappingStatus(mapping.id, 'error', d.reason);
   } else {
     setMappingStatus(mapping.id, 'manual', `프록시 '${proxy.name}' Data Plane/SSH 배포 미사용 — 수동 설정 필요`);

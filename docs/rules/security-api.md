@@ -371,3 +371,6 @@
     화면에 있다(정직 기록). ⚠ svcmon 결과 로그 파일 다운로드(`/svcmon/log/files/:name`)는 게이트하지 않았다(판단 필요로 남김).
 
 
+  · v2.770(점검 R5-E5): 범위 계정 원격 접속은 **(vcenterId, targetHost) 쌍**으로 판정(`proxy/targetHostScope.js resolveScopedTarget`·`mappingTargetScopeIssue`) — vcenterId 가 비면 일치 객체에서 유일하게 유도하고 모호·범위 밖 중복은 거부,
+    유도한 vCenter 로 중계를 고르고 매핑에 저장, WS·/rdp/:id 도 같은 쌍으로 재검사. quick-connect 재사용은 proxyId·vcenterId 일치(소유자 없는 매핑은 admin 만). 매핑 포트는 정수 1~65535, ':' 는 IPv6 대상만.
+    인증 off 의 WS 게이트웨이도 HTTP 와 같은 합성 사용자(AUTH_DISABLED_ROLE)로 역할·매핑 판정을 탄다.

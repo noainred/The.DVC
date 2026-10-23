@@ -1741,6 +1741,8 @@ centralRouter.get('/pdu-config', requireCentral(), async (req, res) => {
   // v2.769(점검 R4-D4-02): 임계치도 싣는다 — 위임 PDU 경보는 엣지가 현장에서 평가·발송하는데(pdu/poller.js 의도) 엣지가 중앙 임계치를
   //   몰라 중앙 화면에서 바꾼 값이 먹지 않았다. 중앙 파일이 있을 때만 싣고(thresholdsForEdge), 못 읽었으면 값 대신 thresholdsUnreadable
   //   (엣지는 직전 값 유지 — 옛 엣지는 이 필드를 모르고 무시하므로 503 으로 막지 않는다). ⚠ 알림 채널 설정은 배포하지 않는다(pdu/thresholds.js 머리말).
+  // v2.770(점검 R5-E1-1): thresholdsForEdge 는 **관리자가 바꾼 키만**(enabled 제외) 돌려주고, 파일·지정 키가 없으면 `{}` 다 — {} 도 싣는다
+  //   (엣지가 v2.769 가 넣은 전체 세트를 지우는 '중앙 지정 없음' 신호. 필드를 빼면 엣지는 직전 값을 유지한다).
   const { thresholdsForEdge, pduThresholdsLoadError } = await import('../pdu/thresholds.js');
   let thPart = {};
   try {

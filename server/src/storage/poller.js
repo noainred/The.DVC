@@ -60,6 +60,13 @@ let _last = { at: 0, collected: 0, failed: 0 };
 // 진행중(in-flight) 장비 — 화면 '작업 로그'의 '진행중' 구획이 이걸 읽는다(deviceId → {id,name,at}).
 // collectOne 시작에 추가하고 finally 에서 제거해, 수집이 죽어도 유령으로 남지 않게 한다.
 const _inFlight = new Map();
+/**
+ * v2.770(점검 R5-E2-04): 같은 장비가 이미 수집 중이면(수동 '지금 수집'·엣지 재수집 묶음) collectOne 은 시작하지 않고 이 값을 돌린다.
+ *   예전에는 수동 쪽(collectDeviceNow)만 확인해 주기 수집이 같은 어레이에 세션을 하나 더 열었고(Unity 세션 최대 150초), 먼저 끝난 쪽의
+ *   finally 가 남의 _inFlight 항목을 지워 '진행중' 에서 사라지게 했으며, 늦게 끝난 옛 결과가 최신 스냅샷을 덮을 수 있었다.
+ *   주기 쪽은 이것을 실패가 아니라 `inFlightSkipped` 로 따로 센다(인증 정지 null 과 같은 취급 — 새 장애처럼 보이지 않게).
+ */
+export const IN_FLIGHT_BUSY = Symbol('storage-in-flight');
 
 async function collectOne(dev, { periodic = false } = {}) {
   // v2.528: **주기 수집만** 인증 실패 장비를 건너뛴다. 수동 실행('지금 수집'·연결 테스트)은
@@ -68,11 +75,16 @@ async function collectOne(dev, { periodic = false } = {}) {
     const stop = authStopFor(dev);
     if (stop) return null;
   }
+  if (_inFlight.has(dev.id)) return IN_FLIGHT_BUSY; // v2.770(R5-E2-04) — 확인과 등록 사이에 await 가 없다(같은 틱)
   const startedAt = Date.now();
-  _inFlight.set(dev.id, { id: dev.id, name: dev.name || dev.id, at: startedAt });
+  const entry = { id: dev.id, name: dev.name || dev.id, at: startedAt };
+  _inFlight.set(dev.id, entry);
   try {
     return await collectOneInner(dev, startedAt);
-  } finally { _inFlight.delete(dev.id); }
+  } finally {
+    // v2.770(R5-E2-04): 자기 항목일 때만 지운다(소유 대조) — 다른 실행이 넣은 항목을 지워 '진행중' 에서 사라지게 하지 않는다.
+    if (_inFlight.get(dev.id) === entry) _inFlight.delete(dev.id);
+  }
 }
 
 /** mock 모드 Isilon 영역 — 합성 결과를 실제 수집기와 같은 DB 경로로 저장한다(장비 접속 없음). */
@@ -193,6 +205,7 @@ export async function pollStorageOnce({ demoOnly = false } = {}) {
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).
     let authStopped = 0;
     let deviceErrors = 0;
+    const inFlightIds = []; // v2.770(R5-E2-04): 이미 수집 중이라 이번 주기에 건너뛴 장비(실패 아님)
     await poolRun(runDevs, 3, async (d) => {
       // v2.733(감사 C4-03): 장비 하나의 예상치 못한 예외가 **주기 전체를 끊지 않게** 여기서 받는다. 예전에는 poolRun 이 첫
       //   rejection 으로 주기를 거부해 남은 장비는 시도조차 안 됐고(_busy 가 풀린 뒤에도 남은 워커는 계속 돌았다) 폴러 상태가
@@ -208,10 +221,17 @@ export async function pollStorageOnce({ demoOnly = false } = {}) {
       // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
       // 새 장애처럼 보인다 — 별도로 센다.
       if (r === null) authStopped++;
+      else if (r === IN_FLIGHT_BUSY) inFlightIds.push(String(d.id));
       else if (r) ok++; else fail++;
     });
-    _last = { at: Date.now(), collected: ok, failed: fail, authStopped, ...(deviceErrors ? { deviceErrors } : {}) };
-    return { ok, fail, authStopped, ...(deviceErrors ? { deviceErrors } : {}), ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
+    const inFlightSkipped = inFlightIds.length;
+    if (inFlightSkipped) {
+      // 무음 금지 — 상태(inFlightSkipped)와 콘솔에 남긴다. 장비 id 만(주소·자격증명 없음), 앞 10개.
+      console.log(`[storage] 이미 수집 중인 장비 ${inFlightSkipped}대는 이번 주기에서 건너뜀(실패 아님): ${inFlightIds.slice(0, 10).join(', ')}${inFlightSkipped > 10 ? ' …' : ''}`);
+    }
+    const extra = { ...(deviceErrors ? { deviceErrors } : {}), ...(inFlightSkipped ? { inFlightSkipped } : {}) };
+    _last = { at: Date.now(), collected: ok, failed: fail, authStopped, ...extra };
+    return { ok, fail, authStopped, ...extra, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
   } finally {
     // v2.733(감사 C4-03): 장비마다 파일 전체를 다시 쓰지 않고 **주기 끝에 한 번** 쓴다(store.js 머리말 — SAN v2.732 B6-02 와 같은 구조).
     //   flushSnapshotsNow 는 던지지 않는다 — 쓰기 실패는 store 가 콘솔·상태(snapshotSave)에 남기고 다음 기회에 다시 쓴다.

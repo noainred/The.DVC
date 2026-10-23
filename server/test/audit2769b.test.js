@@ -135,7 +135,10 @@ test('D2-02 ③ 생성 스크립트도 실행 시점에 공용 디렉터리면 c
   const sh = fs.readFileSync(r.scriptPath, 'utf8');
   const guard = sh.indexOf('[ -k "$DST" ]');
   assert.ok(guard > 0, '가드 존재');
-  assert.ok(guard < sh.indexOf('chown -R "$RUN_USER"'), 'chown 보다 먼저');
+  // v2.770(점검 R5-E1-6): chown -R "$DST" 를 복사한 항목만의 chown 으로 바꿨다 — 첫 chown(대상 디렉터리 자체, 비재귀)보다 먼저인지 본다.
+  const firstChown = sh.indexOf('chown -h -- "$RUN_USER"');
+  assert.ok(firstChown > 0, 'chown 존재');
+  assert.ok(guard < firstChown, 'chown 보다 먼저');
 });
 
 /* ── D2-04 ─────────────────────────────────────────────────────────── */

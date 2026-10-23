@@ -225,7 +225,12 @@ async function scanSentBase(id, r) {
   let sentTs = numOrNull(r.scanSentScanTs);
   if (sentTs == null) {
     const l = r.last;
-    if (l && l.kind === 'result' && l.state === 'sent' && !l.manual && !l.schedule) sentTs = numOrNull(l.scanTs);
+    if (l && l.kind === 'result' && l.state === 'sent' && !l.manual && !l.schedule) {
+      sentTs = numOrNull(l.scanTs);
+      // v2.770(점검 R5-E1-5): 옛 상태 호환으로 찾은 기준을 scanSentScanTs/Id 로 **굳힌다**(저장은 호출부의 note() 가 한다). 예전에는 굳히지 않아
+      //   업그레이드 뒤 첫 조사가 '변화 없음' 이면 note() 가 last 를 '건너뜀' 으로 덮어 다음 조사에서 기준이 사라졌고, 비교 없이 한 통 더 나갔다.
+      if (sentTs != null) { r.scanSentScanTs = sentTs; const lid = numOrNull(l.scanId); if (lid != null) r.scanSentScanId = lid; }
+    }
   }
   if (sentTs == null) return null;
   return (await db.okScanAtOrBefore(HISTORY_AGENT, id, sentTs)) || null;

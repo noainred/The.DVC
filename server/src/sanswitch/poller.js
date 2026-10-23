@@ -101,6 +101,14 @@ export function attachRateReason(snap, deviceId, startedAt) {
   return snap;
 }
 
+/**
+ * v2.770(점검 R5-E3 추가 — 스토리지 E2-04 와 같은 구조): 같은 장비가 이미 수집 중이면(수동 '지금 수집'·엣지 재수집 묶음) collectOne 은
+ *   시작하지 않고 이 값을 돌린다. 예전에는 수동 쪽(collectDeviceNow)만 확인해 주기 수집이 같은 스위치에 SSH 세션을 하나 더 열었고(처리량
+ *   델타 간격도 흐트러진다), 먼저 끝난 쪽의 finally 가 남의 _inFlight 항목을 지워 '진행중' 에서 사라지게 했다.
+ *   주기 쪽은 실패가 아니라 `inFlightSkipped` 로 따로 센다(인증 정지 null 과 같은 취급 — 새 장애처럼 보이지 않게).
+ */
+export const IN_FLIGHT_BUSY = Symbol('sanswitch-in-flight');
+
 async function collectOne(dev, { periodic = false } = {}) {
   // v2.590: **주기 수집만** 인증 실패 정지 장비를 건너뛴다(null = 정지 — 실패로 세지 않는다). 작업 로그에도
   // 남기지 않는다 — 정지 중에는 이벤트가 아니다(상한을 비이벤트로 소진한다 — Horizon v2.535 와 같은 판단).
@@ -109,10 +117,12 @@ async function collectOne(dev, { periodic = false } = {}) {
     const stop = sanAuthGuard.authStopFor(full0);
     if (stop) { noteAuthStopped(full0, stop); return null; }
   }
+  if (_inFlight.has(dev.id)) return IN_FLIGHT_BUSY; // v2.770 — 확인과 등록 사이에 await 가 없다(같은 틱)
   const startedAt = Date.now();
   // v2.742(DEV-06): 처리량 간격 상한 = max(2시간, 주기 × 3 + 직전 주기 소요) — 주기를 2시간 넘게 둔 현장에서 처리량이 영원히 비지 않게.
   setRateCadence({ intervalMs: pollMs(), runMs: _last.durationMs || 0 });
-  _inFlight.set(dev.id, { id: dev.id, name: dev.name || dev.id, at: startedAt });
+  const entry = { id: dev.id, name: dev.name || dev.id, at: startedAt };
+  _inFlight.set(dev.id, entry);
   try {
     const full = getDeviceWithSecret(dev.id) || dev;
     const fn = collectorFor(full);
@@ -173,7 +183,10 @@ async function collectOne(dev, { periodic = false } = {}) {
       });
     } catch { /* 로그 기록 실패가 수집 결과를 가리지 않게 */ }
     return snap.ok;
-  } finally { _inFlight.delete(dev.id); }
+  } finally {
+    // v2.770: 자기 항목일 때만 지운다(소유 대조) — 다른 실행이 넣은 항목을 지워 '진행중' 에서 사라지게 하지 않는다.
+    if (_inFlight.get(dev.id) === entry) _inFlight.delete(dev.id);
+  }
 }
 
 
@@ -196,11 +209,17 @@ export async function pollSanSwitchOnce({ manual = false, demoOnly = false } = {
     const skippedNonDemo = allDevs.length - devices.length;
     // v2.689(C-06): 등록부에서 빠진 장비의 명령 조사 캐시를 정리한다(등록부를 못 읽은 주기는 건너뛴다 — 빈 목록이 전부 삭제가 되지 않게).
     if (!registryLoadError()) fosSsh.pruneCaps(new Set(allDevs.map((d) => fosSsh.capsKeyOf(d))));
+    const inFlightIds = []; // v2.770: 이미 수집 중이라 이번 주기에 건너뛴 장비(실패 아님)
     await pool(devices, CONCURRENCY, async (d) => {
       const r = await collectOne(d, { periodic: !manual });
-      if (r === null) authStopped++; else if (r) collected++; else failed++;
+      if (r === null) authStopped++;
+      else if (r === IN_FLIGHT_BUSY) inFlightIds.push(String(d.id));
+      else if (r) collected++; else failed++;
     });
-    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
+    const inFlightSkipped = inFlightIds.length;
+    // 무음 금지 — 상태(inFlightSkipped)와 콘솔에 남긴다. 장비 id 만(주소·자격증명 없음), 앞 10개.
+    if (inFlightSkipped) console.log(`[sanswitch] 이미 수집 중인 장비 ${inFlightSkipped}대는 이번 주기에서 건너뜀(실패 아님): ${inFlightIds.slice(0, 10).join(', ')}${inFlightSkipped > 10 ? ' …' : ''}`);
+    _last = { at: Date.now(), collected, failed, authStopped, ...(inFlightSkipped ? { inFlightSkipped } : {}), durationMs: Date.now() - t0, total: devices.length, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}) };
     return { ok: true, ..._last };
   } finally {
     // v2.732(감사 B6-02): 장비마다 파일 전체를 다시 쓰지 않고 **주기 끝에 한 번** 쓴다(store.js 머리말). 실패는 store 가 콘솔·상태에 남긴다.
@@ -240,6 +259,8 @@ export async function collectDeviceNow(id, { demoOnly = false, flush = true } = 
  *  - 사전 점검은 **접속이 어디서 막히는지**를 분리한다: DNS 해석 → TCP 연결(10초) 을 먼저 따로 해 보고
  *    실패하면 SSH 를 시도하지 않고 그 단계에서 끝낸다(readyTimeout 60초를 기다리며 "멈춘" 것처럼 보이지 않게).
  */
+// v2.770(점검 R5-E3-3): 테스트 수집은 `noRates` — 실장비 id(b.id)로 돌아도 처리량 기준값(rates._prev·_last)을 덮지 않는다.
+//   id 는 바꾸지 않는다 — 결과 매칭(testRuns·엣지 대행 sanswitch-test-result)은 run id 이고 device.id 를 쓰지 않는다. 임시 id 로 우회하면 _prev 에 테스트마다 항목이 쌓인다.
 export async function testDeviceConnection(device, { timeoutMs = 60_000, trace = null, verbose = false, ranOn = '중앙' } = {}) {
   const t0 = Date.now();
   const tracer = makeTracer(t0);
@@ -256,7 +277,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, trace =
     if (!pre.ok) { phase = pre.phase; throw new Error(pre.reason); }
     phase = rest ? 'rest' : 'ssh-handshake';
     if (rest) {
-      const snap = await withDeadline(timeoutMs, (signal) => fosRest.collect(device, { signal, trace: say }), '테스트 타임아웃');
+      const snap = await withDeadline(timeoutMs, (signal) => fosRest.collect(device, { signal, trace: say, noRates: true }), '테스트 타임아웃');
       say(`완료 — 이름 ${snap.name || '—'} 모델 ${snap.model || '—'} FOS ${snap.fabricOs || '—'} 포트 ${snap.ports?.online ?? '—'}/${snap.ports?.licensed ?? '—'}`);
       return done({ ok: true, snap: summary(snap), cliRaw: [], phase: 'done' });
     }
@@ -264,7 +285,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, trace =
     // v2.741(감사 DEV-02 후속): 세션 예산은 테스트 시한보다 짧아야 한다 — 기본 예산(100초)이 테스트 시한(60초)보다 길면 예산 가드가
     //   발동하기 전에 시한이 먼저 던져 모은 출력이 통째로 버려진다. 남는 10초는 세션 정리·요약 몫이다.
     const budgetMs = Math.max(5_000, timeoutMs - 10_000);
-    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal, trace: wrapped, verbose, budgetMs }), '테스트 타임아웃');
+    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal, trace: wrapped, verbose, budgetMs, noRates: true }), '테스트 타임아웃');
     say(`완료 — 이름 ${snap.name || '—'} 모델 ${snap.model || '—'} FOS ${snap.fabricOs || '—'} 포트 ${snap.ports?.online ?? '—'}/${snap.ports?.licensed ?? '—'} (${Date.now() - t0}ms)`);
     return done({ ok: true, snap: summary(snap), cliRaw: raw, phase: 'done' });
   } catch (e) {

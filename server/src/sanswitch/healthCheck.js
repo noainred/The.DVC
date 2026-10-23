@@ -92,6 +92,11 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** v2.770(점검 R5-E3-2): 엣지가 문제 포트만 올렸을 때 붙이는 한 줄 — 올라온 포트만 보고 '정상' 이라 단정하지 않는다. */
+const partialNote = (omitted) => (omitted > 0 ? ` ⚠ 중앙에 일부 포트만 올라와 있어(${omitted}개 누락) 전 포트를 본 것이 아닙니다.` : '');
+/** v2.770(점검 R5-E3-2): 올라온 포트가 0개인 부분 스냅샷 — '카운터를 읽지 못했다'·'형식 미인식' 이 아니다(사유를 바로 말한다). */
+const noKeptWhy = (omitted, what) => `엣지가 문제 포트만 올렸고(${omitted}개 누락) 올라온 포트가 없어 ${what}을(를) 중앙에서 판정하지 못했습니다(엣지 필터 기준으로는 문제 포트가 없다는 뜻이지만 개별 값은 확인하지 못했습니다).`;
+
 /** REST 수집기가 '조회하지 않는 항목' 에 싣는 섹션 값(v2.590 F4). */
 export const REST_NOT_COLLECTED = 'rest-not-collected';
 
@@ -186,6 +191,8 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
   const health = snap.health || {};
   const ex = snap.extra || {};
   const items = [];
+  // v2.770(점검 R5-E3-2): 엣지가 문제 포트만 올린 스냅샷(SANSW_PUSH_PORTS=problem · 900KB 크기 가드 자동)의 누락 포트 수.
+  const omitted = num(snap.ports?.portsOmitted) || 0;
 
   // 수집 자체가 실패한 스냅샷은 항목을 판정하지 않는다 — 모든 항목이 '확인 불가' 다.
   if (snap.ok === false) {
@@ -242,9 +249,10 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
     else items.push(mk('switchState', 'bad', `switchState: ${snap.switchState}`));
   }
   {
-    if (!ports.length) items.push(mk('ports', 'unknown', uncheckedWhy(sec.ports, 'switchshow')));
+    if (!ports.length && omitted > 0 && sec.ports === 'ok') items.push(mk('ports', 'unknown', noKeptWhy(omitted, '포트 상태')));   // v2.770(R5-E3-2): '형식 미인식' 이 아니다
+    else if (!ports.length) items.push(mk('ports', 'unknown', uncheckedWhy(sec.ports, 'switchshow')));
     else {
-      const complete = (num(snap.ports?.portsOmitted) || 0) === 0;
+      const complete = omitted === 0;
       const faulty = ports.filter((p) => p.state === 'faulty');
       const disabled = ports.filter((p) => p.state === 'disabled');
       const sum = snap.ports || {};
@@ -263,23 +271,26 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
     const judged = withRx.filter(isLinked);
     const idle = withRx.length - judged.length;
     const idleNote = idle ? ` · 링크 없는 포트 ${idle}개는 제외(빛을 받지 않는 것이 정상)` : '';
+    // v2.770(점검 R5-E3-2): 부분 스냅샷이면 올라온 포트만 본 것이다 — ok 를 '일부 포트만' warn 으로, 0포트 사유도 바로 말한다.
+    const part = partialNote(omitted);
     if (sec.sfp !== 'ok') items.push(mk('optical', 'unknown', uncheckedWhy(sec.sfp, 'sfpshow -all')));
-    else if (!withRx.length) items.push(mk('optical', 'unknown', '수신 광량 값이 있는 포트가 없습니다(SFP 미장착 또는 값 미제공).'));
-    else if (!judged.length) items.push(mk('optical', 'unknown', `광량 값은 ${withRx.length}포트에 있지만 **링크가 올라온 포트가 없어** 판정하지 않았습니다(링크 없는 포트의 낮은 Rx 는 정상입니다).`));
+    else if (!ports.length && omitted > 0) items.push(mk('optical', 'unknown', noKeptWhy(omitted, '수신 광량')));
+    else if (!withRx.length) items.push(mk('optical', 'unknown', `수신 광량 값이 있는 포트가 없습니다(SFP 미장착 또는 값 미제공).${part}`));
+    else if (!judged.length) items.push(mk('optical', 'unknown', `광량 값은 ${withRx.length}포트에 있지만 **링크가 올라온 포트가 없어** 판정하지 않았습니다(링크 없는 포트의 낮은 Rx 는 정상입니다).${part}`));
     else {
       const bad = judged.filter((p) => num(p.rxPowerDbm) <= rxBad);
       const warn = judged.filter((p) => num(p.rxPowerDbm) > rxBad && num(p.rxPowerDbm) <= rxWarn);
       const lo = Math.min(...judged.map((p) => num(p.rxPowerDbm)));
       const base = `판정 ${judged.length}포트(링크 있음) · 최저 ${lo} dBm (주의 ${rxWarn} / 이상 ${rxBad} dBm 기준)${idleNote}`;
       const ev = (arr) => arr.slice(0, 20).map((p) => `포트 ${p.index}: Rx ${p.rxPowerDbm} dBm${p.attachedName ? ` (${p.attachedName})` : ''}`);
-      if (bad.length) items.push(mk('optical', 'bad', `${base} · 하한 미달 ${bad.length}포트 — 케이블 청소 또는 SFP 교체 검토`, { evidence: ev(bad) }));
-      else if (warn.length) items.push(mk('optical', 'warn', `${base} · 하한 근접 ${warn.length}포트`, { evidence: ev(warn) }));
-      else items.push(mk('optical', 'ok', base));
+      if (bad.length) items.push(mk('optical', 'bad', `${base} · 하한 미달 ${bad.length}포트 — 케이블 청소 또는 SFP 교체 검토${part}`, { evidence: ev(bad) }));
+      else if (warn.length) items.push(mk('optical', 'warn', `${base} · 하한 근접 ${warn.length}포트${part}`, { evidence: ev(warn) }));
+      else items.push(mk('optical', omitted > 0 ? 'warn' : 'ok', `${base}${part}`));
     }
   }
 
   /* ── 3단계 에러·Slow Drain ─────────────────────────────────────────────── */
-  items.push(portErrorItem(ports, sec, baseline));
+  items.push(portErrorItem(ports, sec, baseline, omitted));
   {
     const b = ex.bottleneck;
     if (!b) items.push(mk('slowDrain', 'unknown', uncheckedWhy(sec.bottleneck, 'bottleneckmon --show')));
@@ -413,27 +424,78 @@ export function baselineLookup(bp, ports = []) {
   };
 }
 
-function portErrorItem(ports, sec, baseline) {
+/**
+ * v2.770(점검 R5-E3-1): **포트 1개의 에러 카운터 판정 코어** — 장비 항목(`portErrorItem`)과 포트 표(`checkPorts`)가 같이 쓴다.
+ *
+ * 예전에는 두 곳이 각자 돌면서 리셋(cur<base)·기준선 행 없음을 null 로 **건너뛰고** 남은 키(0→0)로 '새 에러 없음'(ok)을 냈다.
+ * 스위치 재부팅·펌웨어 업그레이드·다른 팀의 `portstatsclear` 뒤에는 새 에러가 옛 기준선 값을 넘을 때까지 '이상 없음' 결재 근거가
+ * 됐고(재현: 기준선 crc 10000 → 리셋 뒤 500 = 장비 ok·포트 ok), 기준선에 행이 없는 포트는 장비 항목 ok·포트 표 warn 으로 갈렸다.
+ *  - **리셋**: cur·base 둘 다 수치이고 cur<base. 이번 값 cur 가 '리셋 이후 최소 신규' 다(리셋 전 구간은 모른다) —
+ *    cur>0 이면 신규로 센다(하한), cur=0 이면 보류(unknown).
+ *  - **기준선 행 자체 없음**(기준선은 있는데 이 포트 행이 없다 — 부분 스냅샷 기준선·새로 쓰기 시작한 포트·옛 index 키 겹침):
+ *    누적만 안다 — 누적>0 이면 warn(신규 여부 모름), 누적 0 이면 ok.
+ *  - 행은 있는데 **키 하나만 없음**(v2.521 이전 기준선 파일)은 그 키만 건너뛴다 — 보류가 아니다(sanHealthCheck2519 '기준선 {errCrc}만 → ok').
+ */
+export function judgePortErrors(p, { hasBaseline = false, row = null } = {}) {
+  const cur = {}; const dlt = {}; const newBy = {};
+  let curSum = 0; let dltSum = 0; let dltKnown = false; let approxHeld = false; let resetNew = 0;
+  const resetKeys = [];
+  // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터는 증분을 셀 수 없다 — '신규 0' 이 아니라 **보류**다.
+  const curAp = Array.isArray(p?.errApprox) ? p.errApprox : [];
+  const baseAp = hasBaseline && Array.isArray(row?._approx) ? row._approx : [];
+  for (const k of ERROR_KEYS) {
+    const v = num(p?.[k]);
+    if (v != null) { cur[k] = v; curSum += v; }
+    if (hasBaseline && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxHeld = true; continue; }
+    const b = hasBaseline && row ? num(row[k]) : null;
+    if (v != null && b != null && v < b) { resetKeys.push(k); resetNew += v; if (v > 0) newBy[k] = v; continue; }
+    const d = errorDelta(v, b);
+    if (d != null) { dlt[k] = d; newBy[k] = d; dltSum += d; dltKnown = true; }
+  }
+  const hasCur = Object.keys(cur).length > 0;
+  const rowMissing = hasBaseline && !row && hasCur;
+  const newMin = dltSum + resetNew;
+  let status = 'ok'; let reason = ''; let held = null;
+  if (!hasCur) { status = 'unknown'; }
+  else if (!hasBaseline) {
+    if (curSum > 0) { status = 'warn'; reason = `누적 에러 ${curSum}건 — 기준선이 없어 신규 여부는 알 수 없습니다`; }
+  } else if (newMin > 0) {
+    status = newMin >= 100 ? 'bad' : 'warn';
+    reason = resetKeys.length && resetNew > 0
+      ? `카운터 리셋 이후 최소 ${newMin}건(리셋 전 구간은 알 수 없어 실제는 더 많을 수 있습니다)`
+      : `기준선 이후 신규 에러 ${dltSum}건`;
+    if (resetKeys.length && resetNew > 0) held = 'reset';
+  } else if (resetKeys.length) {
+    status = 'unknown'; held = 'reset';
+    reason = '카운터가 리셋돼(기준선보다 작음) 기준선 이후 신규 에러를 셀 수 없습니다 — 리셋 이후는 0건';
+  } else if (approxHeld) {
+    status = 'unknown'; held = 'approx';
+    reason = '카운터가 k/m/g 로 축약돼 신규 에러를 셀 수 없습니다';
+  } else if (rowMissing) {
+    if (curSum > 0) { status = 'warn'; held = 'noRow'; reason = `누적 에러 ${curSum}건 — 기준선에 이 포트가 없어 신규 여부는 알 수 없습니다`; }
+  } else if (!dltKnown && curSum > 0) {
+    status = 'warn'; reason = `누적 에러 ${curSum}건 — 기준선이 없어 신규 여부는 알 수 없습니다`;
+  }
+  return { cur, dlt, newBy, curSum, dltSum, dltKnown, approxHeld, resetKeys, resetNew, rowMissing, newMin, status, reason, held };
+}
+
+function portErrorItem(ports, sec, baseline, omitted = 0) {
   if (sec.counters !== 'ok') return mk('portErrors', 'unknown', uncheckedWhy(sec.counters, 'porterrshow'));
+  if (!ports.length && omitted > 0) return mk('portErrors', 'unknown', noKeptWhy(omitted, '에러 카운터'));
   const bp = baseline?.ports || null;
   const rowOf = baselineLookup(bp, ports);
   const rows = [];
   let anyCounter = false;
-  // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터는 증분을 셀 수 없다 — '신규 0' 이 아니라 **보류**다.
-  const approxPorts = new Set();
+  const approxPorts = new Set(); const resetHeld = new Set(); const resetCounted = new Set(); const noRow = new Set();
   for (const p of ports) {
-    const cur = {}; const dlt = {};
-    let curSum = 0; let dltSum = 0; let dltKnown = false;
-    const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
-    const baseAp = bp && Array.isArray(rowOf(p)?._approx) ? rowOf(p)._approx : [];
-    for (const k of ERROR_KEYS) {
-      const v = num(p[k]);
-      if (v != null) { anyCounter = true; cur[k] = v; curSum += v; }
-      if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxPorts.add(p.index); continue; }
-      const d = errorDelta(p[k], bp ? rowOf(p)?.[k] : null);
-      if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
+    const j = judgePortErrors(p, { hasBaseline: !!bp, row: bp ? rowOf(p) : null });
+    if (Object.keys(j.cur).length) anyCounter = true;
+    if (j.approxHeld) approxPorts.add(p.index);
+    if (j.resetKeys.length) (j.resetNew > 0 ? resetCounted : resetHeld).add(p.index);
+    if (j.rowMissing && j.curSum > 0) noRow.add(p.index);
+    if (j.curSum > 0 || j.newMin > 0) {
+      rows.push({ index: p.index, name: p.attachedName || '', cur: j.cur, dlt: j.newBy, curSum: j.curSum, dltSum: j.newMin, dltKnown: j.dltKnown || j.newMin > 0, resetKeys: j.resetKeys });
     }
-    if (curSum > 0 || dltSum > 0) rows.push({ index: p.index, name: p.attachedName || '', cur, dlt, curSum, dltSum, dltKnown });
   }
   if (!anyCounter) return mk('portErrors', 'unknown', '‘porterrshow’ 에서 카운터 값을 읽지 못했습니다.');
 
@@ -442,16 +504,18 @@ function portErrorItem(ports, sec, baseline) {
     .map((r) => `포트 ${r.index}${r.name ? ` (${r.name})` : ''}: ` + ERROR_KEYS.map((k) => {
       const c = r.cur[k]; const d = r.dlt[k];
       if (c == null && d == null) return null;
+      if (bp && r.resetKeys.includes(k)) return `${ERROR_CAUSE[k].label} ${c ?? '—'} (리셋 — 이후 최소 ${c ?? '—'})`;
       return `${ERROR_CAUSE[k].label} ${c ?? '—'}${bp ? ` (신규 ${d == null ? '—' : d})` : ''}`;
     }).filter(Boolean).join(', '));
+  const part = partialNote(omitted);
 
   if (!bp) {
     // 기준선이 없으면 **판정하지 않는다** — 누적값만 보고 '이상' 이라 하면 몇 년 전 에러로
     // 매달 같은 경고를 낸다. 대신 '기준선을 저장하세요' 를 조치로 준다.
-    return mk('portErrors', rows.length ? 'warn' : 'ok',
-      rows.length
+    return mk('portErrors', rows.length || omitted > 0 ? 'warn' : 'ok',
+      (rows.length
         ? `누적 에러가 있는 포트 ${rows.length}개 — **기준선이 없어 '당월 신규' 를 판정할 수 없습니다**(누적값은 부팅 이후 합계입니다).`
-        : `에러 카운터가 모두 0 입니다(누적 기준). 기준선이 없어 당월 신규는 판정하지 않았습니다.`,
+        : `에러 카운터가 모두 0 입니다(누적 기준). 기준선이 없어 당월 신규는 판정하지 않았습니다.`) + part,
       { evidence: ev, needBaseline: true, columns: label, causes: errorCauses(rows, { basis: 'cur' }) });
   }
   const newRows = rows.filter((r) => r.dltSum > 0);
@@ -459,15 +523,22 @@ function portErrorItem(ports, sec, baseline) {
   const approxNote = approxPorts.size
     ? ` 단, 포트 ${approxPorts.size}개는 카운터가 k/m/g 로 축약(반올림)돼 있어 **증분을 셀 수 없어 판정하지 않았습니다**(예: 1.2m → 1.2m 이어도 수만 건이 늘었을 수 있습니다).`
     : '';
+  const resetNote = (resetCounted.size ? ` 포트 ${resetCounted.size}개는 카운터가 리셋돼(기준선보다 작음) 이번 값을 **'리셋 이후 최소 신규'** 로 셌습니다(리셋 전 구간은 알 수 없어 실제는 더 많을 수 있습니다).` : '')
+    + (resetHeld.size ? ` 포트 ${resetHeld.size}개는 카운터가 리셋돼(기준선보다 작음) **기준선 이후 신규를 셀 수 없어 판정하지 않았습니다**(리셋 이후 0건 — 기준선을 다시 저장하세요).` : '');
+  const noRowNote = noRow.size ? ` 기준선에 없는 포트 ${noRow.size}개에 누적 에러가 있어 **신규 여부를 판정할 수 없습니다**(기준선을 다시 저장하세요).` : '';
+  const notes = `${resetNote}${noRowNote}${approxNote}${part}`;
+  const extra = { ...(approxPorts.size ? { approxPorts: approxPorts.size } : {}), ...(resetHeld.size + resetCounted.size ? { resetPorts: resetHeld.size + resetCounted.size } : {}), ...(noRow.size ? { noBaselinePorts: noRow.size } : {}) };
   if (!newRows.length) {
-    // 축약 포트가 있으면 '신규 없음' 이라고 단정하지 않는다 — 확인하지 못한 것을 정상으로 칠하지 않는다(v2.519).
-    if (approxPorts.size) return mk('portErrors', 'unknown', `셀 수 있는 포트에서는 기준선 이후 새 에러가 없습니다.${approxNote}`, { evidence: ev.slice(0, 5), columns: label, causes: [], approxPorts: approxPorts.size });
+    // 보류(리셋·기준선 행 없음·축약)가 남아 있으면 '신규 없음' 이라고 단정하지 않는다 — 확인하지 못한 것을 정상으로 칠하지 않는다(v2.519).
+    if (noRow.size) return mk('portErrors', 'warn', `셀 수 있는 포트에서는 기준선 이후 새 에러가 없습니다.${notes}`, { evidence: ev.slice(0, 5), columns: label, causes: [], ...extra });
+    if (approxPorts.size || resetHeld.size) return mk('portErrors', 'unknown', `셀 수 있는 포트에서는 기준선 이후 새 에러가 없습니다.${notes}`, { evidence: ev.slice(0, 5), columns: label, causes: [], ...extra });
+    if (omitted > 0) return mk('portErrors', 'warn', `올라온 포트에서는 기준선 이후 새로 발생한 에러가 없습니다.${notes}`, { evidence: ev.slice(0, 5), columns: label, causes: [], ...extra });
     return mk('portErrors', 'ok', '기준선 이후 새로 발생한 에러가 없습니다.', { evidence: ev.slice(0, 5), columns: label, causes: [] });
   }
   const heavy = newRows.filter((r) => r.dltSum >= 100);
   return mk('portErrors', heavy.length ? 'bad' : 'warn',
-    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — ${causeSentence(causes)}${approxNote ? `.${approxNote}` : ''}`,
-    { evidence: ev, columns: label, causes, ...(approxPorts.size ? { approxPorts: approxPorts.size } : {}) });
+    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — ${causeSentence(causes)}${notes ? `.${notes}` : ''}`,
+    { evidence: ev, columns: label, causes, ...extra });
 }
 
 /**
@@ -525,38 +596,20 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
     else if (rx <= rxWarn) { optical = 'warn'; reasons.push(`수신 광량 ${rx} dBm — 주의(${rxWarn}) 이하`); }
     else optical = 'ok';
 
-    const cur = {}; const dlt = {};
-    let curSum = 0; let dltSum = 0; let dltKnown = false;
-    // v2.590 F3: 축약(k/m/g) 카운터는 증분을 셀 수 없다 — portErrorItem 과 같은 기준으로 보류한다.
-    const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
-    const baseAp = bp && Array.isArray(rowOf(p)?._approx) ? rowOf(p)._approx : [];
-    let approxHeld = false;
-    for (const k of ERROR_KEYS) {
-      const v = num(p[k]);
-      if (v != null) { cur[k] = v; curSum += v; }
-      if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxHeld = true; continue; }
-      const d = errorDelta(p[k], bp ? rowOf(p)?.[k] : null);
-      if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
-    }
-    let errors = 'unknown';
-    let errHeldApprox = false;
-    if (sec.counters !== 'ok') errors = 'unknown';
-    else if (!Object.keys(cur).length) errors = 'unknown';
-    else if (bp && approxHeld && dltSum === 0) { errors = 'unknown'; errHeldApprox = true; reasons.push('카운터가 k/m/g 로 축약돼 신규 에러를 셀 수 없습니다'); }
-    else if (bp && dltKnown) {
-      if (dltSum >= 100) { errors = 'bad'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
-      else if (dltSum > 0) { errors = 'warn'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
-      else errors = 'ok';
-    } else if (curSum > 0) { errors = 'warn'; reasons.push(`누적 에러 ${curSum}건 — 기준선이 없어 신규 여부는 알 수 없습니다`); }
-    else errors = 'ok';
-
+    // v2.770(점검 R5-E3-1): 장비 항목(portErrorItem)과 **같은 판정 코어** — 리셋·기준선 행 없음·축약을 같은 규칙으로 보류/하한 계산한다.
+    const j = judgePortErrors(p, { hasBaseline: !!bp, row: bp ? rowOf(p) : null });
+    const { cur, dlt, curSum, dltSum, dltKnown } = j;
+    const countersOk = sec.counters === 'ok';
+    const errors = countersOk ? j.status : 'unknown';
+    if (countersOk && j.reason) reasons.push(j.reason);
+    const errHeldKind = countersOk ? j.held : null;
     let state = 'ok';
     if (p.state === 'faulty') { state = 'bad'; reasons.push(`포트 상태 ${p.stateRaw || p.state}`); }
     else if (p.state === 'disabled') { state = 'warn'; reasons.push('포트가 비활성(disabled) 입니다'); }
     else if (p.state === 'noLicense') { state = 'warn'; reasons.push('포트 라이선스가 없습니다'); }
     else if (!linked) state = 'idle';
 
-    const causes = errorCauses([{ index: p.index, cur, dlt }], { basis: bp && dltKnown ? 'dlt' : 'cur' });
+    const causes = errorCauses([{ index: p.index, cur, dlt: j.newBy }], { basis: bp && (dltKnown || j.newMin > 0) ? 'dlt' : 'cur' });
     const verdict = worst([state === 'idle' ? 'ok' : state, optical, errors]);
     return {
       // v2.605 WEB2605-07: 디렉터는 슬롯마다 포트 0 부터 — 화면이 '(슬롯/포트)' 를 붙이려면 행에 있어야 한다.
@@ -564,9 +617,12 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
       linked, speed: p.speed || '', portType: p.portType || '', wwn: String(p.attached || ''),
       rxPowerDbm: rx, txPowerDbm: num(p.txPowerDbm), sfpTempC: num(p.sfpTempC),
       optical, errors, verdict, reasons,
-      errCur: cur, errDelta: bp ? dlt : null, errSum: curSum, errNew: bp && dltKnown ? dltSum : null,
+      // v2.770(R5-E3-1): 리셋·기준선 행 없음이면 '신규 N' 을 숫자로 말하지 않는다(errNew null) — 리셋 하한은 errNewMin 으로 따로.
+      errCur: cur, errDelta: bp ? dlt : null, errSum: curSum, errNew: bp && dltKnown && !j.resetKeys.length && !j.rowMissing ? dltSum : null,
+      errNewMin: bp && j.resetKeys.length ? j.newMin : null,
       // v2.605 WEB2605-04: 축약 카운터로 신규 판정만 보류한 경우 — 화면이 '카운터 없음' 과 구분한다.
-      errHeld: errHeldApprox ? 'approx' : null,
+      // v2.770(R5-E3-1): 'reset'(카운터 리셋)·'noRow'(기준선에 이 포트 없음)도 같은 칸으로 밝힌다.
+      errHeld: errHeldKind,
       causes,
     };
   });

@@ -674,3 +674,5 @@
     한 항목이 `running` 을 영구히 잡지 못하게 한다. 화면은 latest 가 있어도 꺼짐·엣지 보고 stale·나이 > 주기×3 이면 '측정 없음'(서버가 `ageMs` 를 싣는다).
     svcmon 수동 새로고침은 실행하는 인스턴스(`EXECUTES && ENABLED`)에서만(아니면 409). 엣지 svcmon 재전송의 건너뛰는 분기도 `snapId` 를 갱신하고, snapId 역행 보류에는 시한(`REGRESS_GC_HOLD_MS`).
     PDU 임계치는 중앙 파일이 있을 때만 pdu-config 로 엣지에 배포(메모리 적용 · `PDU_THRESHOLDS_LOCAL=1` 이면 현장 고정) — 알림 채널 설정은 배포하지 않는다(위임 PDU 경보는 엣지 채널에 달림).
+  - v2.770(점검 R5): 통신 점검 엣지 보고 낡음 경계 = max(3시간, 주기×3+10분)(`reportStaleLimitMs` — 서버 판정과 응답 `reportStaleMs` 가 같은 값), 엣지 결과 ts 는 엣지 시계 나이를 수신 시각에서 빼 환산(원본은 detail.edgeTs).
+    PDU 임계치 배포는 관리자가 **바꾼 키만**(`_assigned`, enabled 제외 · 표지 없는 파일은 `{}` — 엣지는 `{}` 를 '중앙 지정 없음' 으로 직전 세트를 지운다). 혼합 버전(v2.769 중앙 + v2.770 엣지)에서는 중앙을 먼저 올릴 것.

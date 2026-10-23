@@ -916,6 +916,20 @@ export function parseIslShow(text) {
 }
 
 /**
+ * v2.770(점검 R5-E3-5): '같은 줄에서 `head` 뒤에 `tails` 중 하나가 있는가'(대소문자 무시) — `head.*tail` 정규식의 선형 대체.
+ * `head` 는 줄마다 **첫 일치만** 찾는다(뒤에 tail 이 있으면 첫 일치 뒤에도 있다). `head` 는 반복이 앞 리터럴에 묶인 짧은 정규식만 넘길 것.
+ */
+function lineHasAfter(text, head, tails) {
+  for (const line of String(text).toLowerCase().split('\n')) {
+    const m = head.exec(line);
+    if (!m) continue;
+    const from = m.index + m[0].length;
+    if (tails.some((t) => line.indexOf(t, from) >= 0)) return true;
+  }
+  return false;
+}
+
+/**
  * `trunkshow` → 트렁크 그룹.
  * 형태(가정): 그룹 머리줄 ` 1:  0->  0 <wwn>  2  deskew 15  MASTER` + 이어지는 멤버 줄.
  * 그룹 번호(`N:`)가 있는 줄을 그룹 시작으로, `->` 만 있는 줄을 멤버로 본다.
@@ -923,7 +937,8 @@ export function parseIslShow(text) {
 export function parseTrunkShow(text) {
   const s = String(text || '');
   if (!s.trim()) return { parsed: false, groups: [], count: 0, members: 0, note: '' };
-  const none = /\bno\s+trunk|trunking.*(not|dis)abled/i.test(s);
+  // v2.770(점검 R5-E3-5): 예전 `/…|trunking.*(not|dis)abled/i` 는 앵커 없는 `.*` 라 O(n²)(160KB 한 줄 3.1초) — 줄 단위 + indexOf 선형.
+  const none = /\bno\s+trunk/i.test(s) || lineHasAfter(s, /trunking/, ['not', 'disabled']);
   const groups = [];
   let cur = null;
   for (const raw of s.split(/\r?\n/)) {
@@ -954,7 +969,8 @@ export function parseTrunkShow(text) {
 export function parseLsanShow(text) {
   const s = String(text || '');
   if (!s.trim()) return { parsed: false, zones: [], count: 0, note: '' };
-  const none = /\bno\s+lsan|not\s+configured|fc\s*router.*not/i.test(s);
+  // v2.770(점검 R5-E3-5): 예전 `fc\s*router.*not` 은 앵커 없는 `.*` 라 O(n²)(200KB 한 줄 4.7초) — 줄 단위 + indexOf 선형.
+  const none = /\bno\s+lsan|not\s+configured/i.test(s) || lineHasAfter(s, /fc\s*router/, ['not']);
   const zones = [];
   let cur = null;
   for (const raw of s.split(/\r?\n/)) {

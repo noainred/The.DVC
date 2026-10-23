@@ -730,3 +730,5 @@
     조립은 `report.js buildVmPartitions`(순수) 하나. VM 은 **스냅샷에서** 찾고 범위 밖은 404, 수집 행의 vCenter 가 스냅샷과 다르면 쓰지 않는다(옮겨진 VM 의 옛 값).
     라이브 조회가 아니므로 **수집 시각을 반드시 함께** 보이고(`timeText`·`agoText`), 값이 없는 이유는 `guestPartText.vmPartNote` 가 아는 것만 말한다. 무시 규칙은 사유 문구만 싣는다(패턴 원문 금지). 회귀 `server/test/vmPartitions2750.test.js`.
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
+  · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
+    장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.

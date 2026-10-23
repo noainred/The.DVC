@@ -23,7 +23,7 @@ import { PHASES, PHASE_LABEL, FAIL_KINDS } from '../../linkcheck/phases.js';
 import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, DEFAULTS } from '../../linkcheck/settings.js';
 import { centralLinks, pollOnce, linkCheckPollerStatus } from '../../linkcheck/poller.js';
 import { latestAll, samplesOf, eventsOf, eventDetail, dailyOf, dbStatus } from '../../linkcheck/db.js';
-import { allEdgeLinkReports, REPORT_STALE_MS } from '../../central/linkCheckEdge.js';
+import { allEdgeLinkReports, reportStaleLimitMs } from '../../central/linkCheckEdge.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { linkCheckWorkerStatus } from '../../agent/linkCheckWorker.js';
 // v2.553 — 설정 전수 점검(25종) + 해결책
@@ -55,7 +55,9 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   const { all, counts, problems, collectors } = centralLinks();
   const latest = await latestAll();
   const byId = new Map(latest.map((r) => [r.link_id, r]));
-  const reports = allEdgeLinkReports();
+  // v2.770(점검 R5-E1-3): 엣지 보고 낡음 경계는 주기에 맞춘 값 하나 — 각 보고의 stale 과 응답의 reportStaleMs 가 같은 값이다.
+  const reportStaleMs = reportStaleLimitMs(s.intervalMs);
+  const reports = allEdgeLinkReports({ staleMs: reportStaleMs });
   /*
    * 엣지 버전 — `allCollectorStatus()` 는 **수집 서버 id** 로 키가 잡히고 값에는 엣지가 스스로
    * 보고한 `agent` 가 들어 있다. 링크의 `from` 은 등록부의 **이름**이므로 **둘 다** 키로 넣는다.
@@ -129,7 +131,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
     phases: PHASES, phaseLabel: PHASE_LABEL, failKinds: FAIL_KINDS,
     poller: linkCheckPollerStatus(),
     worker: linkCheckWorkerStatus(),      // 이 포탈이 엣지면 자기 워커 상태(중앙에서는 비어 있다)
-    edgeReports: reports, reportStaleMs: REPORT_STALE_MS,
+    edgeReports: reports, reportStaleMs,
     db: await dbStatus(),
     /*
      * ⚠ 엣지 목록은 **등록부 이름**이다. v2.552 초판은 `versions`(엣지가 보고한 버전 맵)의 키를

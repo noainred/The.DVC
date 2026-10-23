@@ -235,7 +235,9 @@ test('D4-02 실제 centralRouter pdu-config — 중앙 파일이 있을 때만 t
   const cget = async () => (await fetch(`${centralBase}/api/central/pdu-config?agent=edge-th&intervalsHold=1`, { headers: { 'X-Central-Token': edgeTok } })).json();
   const j0 = await cget();
   assert.equal(j0.ok, true, JSON.stringify(j0));
-  assert.ok(!('thresholds' in j0), '한 번도 저장하지 않은 중앙은 기본값으로 엣지 파일을 덮지 않는다');
+  // v2.770(점검 R5-E1-1): 새 의미 — 한 번도 저장하지 않은 중앙은 `{}`(중앙 지정 없음)를 싣는다. 기본값으로 엣지 파일을 덮지 않는 것은 같고,
+  //   필드를 빼면 엣지가 직전 중앙 값(v2.769 가 넣은 전체 세트)을 유지하므로 빈 객체로 지우게 한다.
+  assert.deepEqual(j0.thresholds, {}, '한 번도 저장하지 않은 중앙은 기본값으로 엣지 파일을 덮지 않는다({} = 중앙 지정 없음)');
   TH.saveThresholds({ powerWarnW: 3500, tempWarnC: 28 });
   const j1 = await cget();
   assert.equal(j1.thresholds?.powerWarnW, 3500, `수정 전: pdu-config 는 intervals·devices 만 — ${JSON.stringify(j1)}`);
