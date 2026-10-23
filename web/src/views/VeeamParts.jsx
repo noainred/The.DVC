@@ -176,7 +176,8 @@ export function VeeamDetailModal({ vcenterId, vm, onClose }) {
   const tone = view ? (TONE[view.status.tone] || TONE.muted) : TONE.muted;
   const basis = d?.servers?.length ? d.servers.map((s) => `${s.name}${s.ok === false ? '(읽기 실패 — 마지막 성공분)' : ''}`).join(', ') : '';
   // v2.761(D9): 주기를 화면에 박지 않고 실제 마지막 수집 시각(서버들의 결과 시각 중 가장 이른 것)을 말한다.
-  const lastCollectList = (d?.servers || []).map((s) => s.lastOkTs ?? s.ts).filter((x) => Number.isFinite(x));
+  //   v2.762(F-I1): 마지막 **성공** 시각만 — 한 번도 성공하지 못한 서버의 ts 는 실패한 시도 시각이라 '마지막 수집' 이 아니다(그 서버는 뺀다).
+  const lastCollectList = (d?.servers || []).map((s) => s.lastOkTs).filter((x) => Number.isFinite(x));
   const lastCollect = lastCollectList.length ? Math.min(...lastCollectList) : null;
   return (
     <Modal title={`Veeam 백업 상세 — ${vm.name}`} onClose={onClose} width={900}>

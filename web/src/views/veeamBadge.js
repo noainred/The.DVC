@@ -66,6 +66,13 @@ export function veeamBadge(e) {
   return { label: when ? `Veeam ${when}` : 'Veeam', color: 'green', title: ['Veeam 백업 대상(작업 포함 또는 복원 지점 있음)', ...lines].join('\n'), progress: null };
 }
 
+/**
+ * v2.762(F5): '다른 vCenter 로 적힌 VM' 의 수는 관리자 판본만 온다(서버 전체 기준이라 다른 법인 vCenter 쪽 수가 섞인다) — 그 밖에는
+ *   otherVcenter=null 과 hostMismatch 불리언만. 수가 있으면 'VM 120개가', 없으면 'VM 이'.
+ */
+const otherCount = (n) => (Number.isInteger(n) && n > 0 ? n : null);
+const otherSubject = (n) => (otherCount(n) != null ? `VM ${n}개가` : 'VM 이');
+
 /** 배지 집계 — 화면 요약 줄. */
 export function veeamCounts(byVm) {
   let total = 0; let running = 0; let pending = 0;
@@ -98,7 +105,10 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
     if (sv.ok === false) {
       const last = sv.lastOkTs ? ` — 표시는 마지막 성공(${fmtTime(sv.lastOkTs)}) 기준입니다` : ' — 아직 성공한 적이 없어 이 서버의 VM 은 표시되지 않습니다';
       warnings.push(`${sv.name} ${sv.authStopped ? '인증 실패로 주기 수집을 멈췄습니다' : '읽기 실패'}: ${sv.error || '사유 미상'}${last}`);
-    } else if (sv.ok == null) details.push(`${sv.name}: 아직 읽은 결과가 없습니다(담당 노드의 첫 수집을 기다리는 중)`);
+    } else if (sv.ok == null) {
+      // v2.762(F1): 카드는 이 경우 '부분(*)' 이다 — 같은 조건이면 VM 화면도 경고(예전에는 접힌 '자세히' 안에만 있어 요약이 녹색이었다).
+      warnings.push(`${sv.name}: 아직 읽은 결과가 없습니다(담당 노드의 첫 수집을 기다리는 중) — 이 서버의 VM 은 아직 표시되지 않습니다`);
+    }
     // v2.761(B2): 오래된 결과(엣지가 멈췄거나 배정이 바뀜) — 수는 그대로 두고 경고한다.
     if (sv.stale) warnings.push(`${sv.name}: 마지막으로 받은 결과가 오래됐습니다(${fmtTime(sv.lastOkTs) || '시각 모름'}) — 그 뒤의 백업 변화는 반영되지 않았습니다`);
     for (const n of Array.isArray(sv.notes) ? sv.notes : []) details.push(`${sv.name}: ${n}`);
@@ -109,13 +119,17 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
       text: '연결된 Veeam 서버를 아직 한 번도 읽지 못했습니다(첫 수집 대기 또는 읽기 실패) — 백업 대상 수는 0대가 아니라 아직 모릅니다.' };
   }
   // v2.761(A5): 맞은 VM 이 하나도 없고 Veeam 이 다른 vCenter 로 적은 VM 만 있으면 주소 표기(IP·FQDN) 불일치일 수 있다.
-  if (d.otherVcenter && c.total === 0) warnings.push(`Veeam 이 적은 VM ${d.otherVcenter}개가 모두 다른 vCenter 로 되어 있어 이 vCenter 와 맞은 VM 이 없습니다 — 포탈에 등록한 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다`);
-  else if (d.otherVcenter) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${d.otherVcenter}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
+  const other = otherCount(d.otherVcenter);
+  if (c.total === 0 && (d.hostMismatch === true || other != null)) warnings.push(`Veeam 이 적은 ${otherSubject(other)} 모두 다른 vCenter 로 되어 있어 이 vCenter 와 맞은 VM 이 없습니다 — 포탈에 등록한 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다`);
+  else if (other != null) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${other}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
   if (d.ambiguous) details.push(`이름이 같은 VM 이 둘 이상이라 고르지 못한 항목 ${d.ambiguous}개`);
   if (d.unmatched) details.push(`이 vCenter 에서 찾지 못한 Veeam 항목 ${d.unmatched}개(삭제·이름 변경된 VM 일 수 있습니다)`);
   // v2.761(D5): 서버가 오래된 '백업 중' 표지를 지웠으면 실행 중·대기 0 은 사실이 아니다 — 모름.
-  const runKnown = !d.runningStale;
-  if (!runKnown) details.push('지금 백업 중·대기는 최신 결과가 아니라 표시하지 않습니다(Veeam 서버를 최근에 읽지 못했습니다)');
+  //   v2.762(F1): 첫 수집 전인 서버가 있어도 그 서버의 실행 상태를 모른다 — 모름.
+  const waiting = servers.some((sv) => sv.ok == null);
+  const runKnown = !d.runningStale && !waiting;
+  if (d.runningStale) details.push('지금 백업 중·대기는 최신 결과가 아니라 표시하지 않습니다(Veeam 서버를 최근에 읽지 못했습니다)');
+  else if (waiting) details.push('첫 수집 전인 Veeam 서버가 있어 지금 백업 중·대기는 표시하지 않습니다');
   const when = servers.map((sv) => sv.lastOkTs).filter((x) => Number.isFinite(x));
   return {
     tone: warnings.length ? 'warn' : 'ok', kind: 'ok', text: '',
@@ -263,7 +277,9 @@ export function veeamEventStatusText(d) {
   const notes = [];
   // 검토 #6: 0대를 '백업 없음' 으로 읽지 않게 — 계정을 모르거나 이벤트 수집이 멈췄으면 그 사실을 말한다.
   if (d.accounts === 0 && !Object.keys(d.byVm || {}).length) notes.push('Veeam 계정을 아직 모릅니다 — Veeam 이 쓰는 vCenter 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요(지금 백업 중인 VM 이 2대 이상 보이면 자동으로 배웁니다).');
-  if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > 6 * 3_600_000) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다.`);
+  // v2.762(F6): 한도는 서버가 준 staleMs(로그 수집 주기 반영 — 판정 코어는 서버 backupCounts.snapVerdict). 없으면(옛 서버·엣지 요약) 6시간.
+  const staleMs = Number.isFinite(d.staleMs) && d.staleMs > 0 ? d.staleMs : 6 * 3_600_000;
+  if (Number.isFinite(d.collectedAt) && Number.isFinite(d.at) && d.at - d.collectedAt > staleMs) notes.push(`vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(d.collectedAt)} 입니다 — 그 뒤의 백업은 아직 반영되지 않았습니다.`);
   if (d.truncated) notes.push('이벤트가 많아 일부만 읽었습니다.');
   // v2.755: 공용 계정(administrator@vsphere.local 등 — 사람도 같이 쓴다)은 '만들고 12시간 안에 같은 계정이 지운' 스냅샷만 센다.
   if (d.unpaired > 0) notes.push(`공용 계정(administrator 등)이 만들고 12시간 안에 지우지 않은 스냅샷 ${d.unpaired}건은 사람이 만든 것일 수 있어 세지 않았습니다(지금 백업 중이면 보라 배지로 보입니다).`);
@@ -279,6 +295,8 @@ const BACKUP_REASON = {
   'no-collect-yet': '이 포탈이 시작된 뒤 이 vCenter 의 이벤트를 아직 한 번도 수집하지 못했습니다(접속 실패·인증 정지 등) — 0대가 아니라 모릅니다.',
   'veeam-failed': 'Veeam 서버를 아직 한 번도 읽지 못했습니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.',
   'no-account': 'Veeam 이 쓰는 vCenter 계정을 아직 모릅니다 — 계정 이름에 veeam 이 없으면 설정 › Veeam 백업 서버에 적으세요.',
+  // v2.762(F4): 등록부를 못 읽으면 어느 vCenter 가 연동인지 모른다 — 스냅샷 기준으로 조용히 바꾸지 않는다.
+  'registry-unreadable': 'Veeam 서버 등록부를 읽지 못해 이 vCenter 가 Veeam 과 연동돼 있는지 알 수 없습니다 — 관리자가 설정 › Veeam 백업 서버에서 확인해야 합니다.',
 };
 
 /**
@@ -296,9 +314,12 @@ export function backupCell(e, vmFallback = null, now = Date.now()) {
     let why = BACKUP_REASON[e.reason];
     if (!why && e.reason === 'stale-events') why = `vCenter 이벤트를 마지막으로 수집한 시각이 ${fmtTime(e.collectedAt) || '—'} 입니다 — 그 뒤의 백업이 빠진 값이라 수량을 표시하지 않습니다.`;
     if (!why) why = veeamEventStatusText({ status: e.reason, at: e.at }) || '백업 정보를 읽지 못했습니다.';
-    const lines = [`${veeam ? 'Veeam 기준' : '스냅샷 기준'} 백업 수량을 알 수 없습니다(0대가 아닙니다)`, why];
+    const unknownSrc = e.reason === 'registry-unreadable';   // v2.762(F4): Veeam 기준인지 스냅샷 기준인지도 모른다
+    const lines = [`${unknownSrc ? '' : veeam ? 'Veeam 기준 ' : '스냅샷 기준 '}백업 수량을 알 수 없습니다(0대가 아닙니다)`, why];
+    // v2.762(F3): 실패 서버를 먼저 말하고(사유 코드), 첫 수집 전인 서버도 함께 센다.
+    if (veeam && e.reason === 'veeam-failed' && e.waiting > 0) lines.push(`Veeam 서버 ${e.waiting}대는 아직 첫 수집 전입니다.`);
     if (!veeam && e.snapNow > 0) lines.push(`지금 Veeam 임시 스냅샷이 있는 VM ${e.snapNow}대`);
-    return { text: '—', label: veeam ? label : '백업 · 확인 불가', tone: 'none', title: lines.join('\n') };
+    return { text: '—', label: veeam && !unknownSrc ? label : '백업 · 확인 불가', tone: 'none', title: lines.join('\n') };
   }
   const text = `${e.n}/${total ?? '—'}${e.partial ? ' *' : ''}`;
   const lines = [];
@@ -307,10 +328,13 @@ export function backupCell(e, vmFallback = null, now = Date.now()) {
     lines.push('Veeam 작업에 포함됐거나 복원 지점이 있는 VM 수(VM 화면의 Veeam 배지와 같은 기준)');
     if (e.running || e.pending) lines.push(`지금 백업 중 ${e.running || 0} · 대기 ${e.pending || 0}`);
     if (Number.isFinite(e.basisTs)) lines.push(`기준 ${fmtTime(e.basisTs)}`);
-    if (e.failed) lines.push(`* Veeam 서버 ${e.failed}대를 이번에 읽지 못해 마지막 성공 값을 썼습니다(사유는 설정 › Veeam 백업 서버).`);
+    // v2.762(F2): 한 번도 성공하지 못한 서버는 '마지막 성공 값' 이 없다 — 그 서버의 VM 이 빠졌다고 말한다(옛 서버 응답은 failedNoLast 없음 = 0).
+    const noLast = Number.isInteger(e.failedNoLast) && e.failedNoLast > 0 ? Math.min(e.failedNoLast, e.failed || 0) : 0;
+    if ((e.failed || 0) - noLast > 0) lines.push(`* Veeam 서버 ${(e.failed || 0) - noLast}대를 이번에 읽지 못해 마지막 성공 값을 썼습니다(사유는 설정 › Veeam 백업 서버).`);
+    if (noLast > 0) lines.push(`* Veeam 서버 ${noLast}대는 아직 한 번도 읽지 못해 그 서버의 VM 이 빠졌습니다(사유는 설정 › Veeam 백업 서버).`);
     if (e.waiting) lines.push(`* Veeam 서버 ${e.waiting}대는 아직 첫 수집 전이라 빠졌습니다.`);
     if (e.stale > 0) lines.push(`* Veeam 서버 ${e.stale}대의 결과가 오래됐습니다 — 그 뒤의 백업 변화는 반영되지 않았습니다.`);   // v2.761(B2)
-    if (e.hostMismatch) lines.push(`Veeam 이 적은 VM ${e.otherVcenter}개가 모두 다른 vCenter 로 되어 있습니다 — 포탈의 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다(0대가 아닐 수 있음).`);   // v2.761(A5)
+    if (e.hostMismatch) lines.push(`Veeam 이 적은 ${otherSubject(e.otherVcenter)} 모두 다른 vCenter 로 되어 있습니다 — 포탈의 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다(0대가 아닐 수 있음).`);   // v2.761(A5) · v2.762(F5) 수는 관리자만
   } else {
     lines.push(`스냅샷 기준 ${e.n}대${total != null ? ` / VM ${total}대` : ''}`);
     lines.push('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다');

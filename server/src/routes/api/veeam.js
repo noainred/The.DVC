@@ -3,7 +3,7 @@
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
 import { store } from '../../store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { serversForVcenter } from '../../veeam/registry.js';
+import { serversForVcenter, registryLoadError } from '../../veeam/registry.js';
 import { getRecord, usableResult } from '../../veeam/store.js';
 import { matchToVcenter, withoutStaleRunning, buildVmDetail } from '../../veeam/parse.js';
 import { pollMs } from '../../veeam/poller.js';
@@ -19,7 +19,7 @@ import { localSnapSummary, edgeSnapFor, LOOKBACK_DAYS, snapCovered } from '../..
 import { getSnapDb } from '../../veeam/snapDb.js';
 import { kickSnapBackfill } from '../../veeam/snapWarm.js';
 import { logCollectOkAt, logPollerRanOnce } from '../../logs/poller.js';
-import { veeamCount, snapCount, snapVerdict } from '../../veeam/backupCounts.js';
+import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 
@@ -65,6 +65,36 @@ function serverView(d, rec, admin, now = Date.now()) {
     // v2.761(B7): 서버 전체(다른 법인 vCenter 포함) 집계 — 범위 계정에 새지 않게 관리자만(화면은 이 값을 쓰지 않는다).
     counts: admin ? (use?.counts || null) : null,
   };
+}
+
+/*
+ * v2.762(F4): Veeam 서버 등록부(veeam-servers.json)를 못 읽으면 '연결된 Veeam 서버 없음' 이 아니라 모름이다 — 예전에는 badges 가
+ *   configured:false("등록하세요"), 카드는 조용히 스냅샷 기준으로 바뀌었다(중앙 /central/veeam-* 는 같은 상황에서 503 registryUnreadable).
+ *   badges·vm-detail 은 503(사람이 읽는 일반 문구 + registryUnreadable 표지 — 원문은 파일 조각이라 싣지 않는다), backup-counts 는
+ *   전 vCenter 를 n:null 'registry-unreadable'(어느 vCenter 가 연동인지 모르므로 vCenter 를 고를 수 없다).
+ */
+const REGISTRY_UNREADABLE_TEXT = 'Veeam 서버 등록부를 읽지 못해 이 vCenter 의 Veeam 연동 여부를 알 수 없습니다 — 관리자가 설정 › Veeam 백업 서버에서 확인해야 합니다(백업이 없다는 뜻이 아닙니다).';
+function registryUnreadable503(res) {
+  let e = null;
+  try { e = registryLoadError(); } catch (x) { e = { at: Date.now(), reason: String(x?.message || x) }; }
+  if (!e) return false;
+  res.status(503).set('Cache-Control', 'no-store').json({ ok: false, reason: REGISTRY_UNREADABLE_TEXT, registryUnreadable: true, since: e.at || null });
+  return true;
+}
+const registryBroken = () => { try { return !!registryLoadError(); } catch { return true; } };
+
+/*
+ * v2.762(F5): otherVcenter(Veeam 이 다른 vCenter 로 적은 VM 수)는 **서버 전체** 기준 — 다른 법인 vCenter 쪽 백업 VM 수가 섞인다(B7 counts 와 같은 이유).
+ *   관리자 판본만 수를 싣고, 그 밖에는 수를 지우고(null) hostMismatch 불리언만(이 vCenter 와 맞은 VM 이 0대인데 다른 vCenter 로 적힌 VM 이 있다).
+ *   badges·backup-counts 두 응답 경로 모두(vm-detail 은 이 값을 싣지 않는다). 판정은 isAdminDetailUser 하나.
+ */
+function maskOtherVcenter(o, admin, matched) {
+  if (!o || typeof o !== 'object' || !('otherVcenter' in o)) return o;
+  const n = Number.isInteger(o.otherVcenter) && o.otherVcenter > 0 ? o.otherVcenter : 0;
+  const hostMismatch = n > 0 && matched === 0;
+  if (admin) return { ...o, otherVcenter: n, ...(hostMismatch ? { hostMismatch: true } : {}) };
+  const { otherVcenter: _drop, ...rest } = o;
+  return { ...rest, otherVcenter: null, ...(hostMismatch ? { hostMismatch: true } : {}) };
 }
 
 const DEMO_SERVER_VIEW = () => ({ name: '데모 Veeam', ok: true, ts: Date.now(), lastOkTs: Date.now(), stale: false, error: '', authStopped: false, via: 'demo', notes: [], counts: null });
@@ -136,8 +166,9 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
   const r = await localSnapSummary(await getLogsDb(), vcenterId, vms, { snapDb });
   // 검토 #6: 이벤트를 마지막으로 온전히 수집한 시각(인메모리 — 재시작 직후 null). 화면이 오래됐으면 말한다.
   //   v2.761(C1): collectRan = 이 프로세스에서 로그 폴러가 한 주기를 끝냈다(그 뒤에도 null 이면 '아직 못 모음' — 기동 직후는 아니다).
+  //   v2.762(F6): staleMs = 이 포탈 로그 수집 주기를 반영한 '오래됨' 한도(snapVerdict 가 쓴다 — 엣지 요약은 싣지 않아 6시간).
   return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at,
-    collectedAt: logCollectOkAt(vcenterId), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
+    collectedAt: logCollectOkAt(vcenterId), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
 }
 
 /*
@@ -165,14 +196,16 @@ export function registerVeeamBadges(api) {
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     const { vcenterId, vms } = t;
+    if (registryUnreadable503(res)) return;   // v2.762(F4)
+    const admin = isAdminDetailUser(req.user);
     if (!serversForVcenter(vcenterId).length) {
-      if (isMockMode()) return res.json({ ok: true, configured: true, demo: true, servers: [DEMO_SERVER_VIEW()], ...demoVeeamMatch(vcenterId, vms), at: Date.now() });
-      return res.json({ ok: true, configured: false, servers: [], byVm: {}, unmatched: 0, otherVcenter: 0, ambiguous: 0 });
+      if (isMockMode()) { const dm = demoVeeamMatch(vcenterId, vms); return res.json({ ok: true, configured: true, demo: true, servers: [DEMO_SERVER_VIEW()], ...maskOtherVcenter(dm, admin, Object.keys(dm.byVm || {}).length), at: Date.now() }); }
+      return res.json({ ok: true, configured: false, servers: [], byVm: {}, unmatched: 0, ...maskOtherVcenter({ otherVcenter: 0 }, admin, 0), ambiguous: 0 });
     }
     const { results, views, host } = resultsFor(vcenterId, req);
     const m = matchToVcenter({ id: vcenterId, host }, vms, results);
     // v2.761(D5): 실패·오래된 결과라 '백업 중' 을 지운 서버가 있으면 실행 중·대기 수는 0 이 아니라 모름.
-    res.json({ ok: true, configured: true, servers: views, ...m, runningStale: results.some((x) => x.result?.runningStale === true), at: Date.now() });
+    res.json({ ok: true, configured: true, servers: views, ...maskOtherVcenter(m, admin, Object.keys(m.byVm || {}).length), runningStale: results.some((x) => x.result?.runningStale === true), at: Date.now() });
   });
 
   // v2.754(사용자 요청 '지금 스냅샷이 없으면 확인 안 되는가' → vCenter 이벤트 방식): 최근 7일 'Veeam 계정이 만든 VM 스냅샷 생성 이벤트'.
@@ -192,12 +225,19 @@ export function registerVeeamBadges(api) {
 
   // v2.757(사용자 요청 — vCenter 카드에 'VM 백업 수량', 182/195 형식): 범위 안 vCenter 마다 한 줄.
   //   Veeam 서버가 하나라도 연결돼 있으면 Veeam 기준만(스냅샷과 섞지 않는다), 없으면 스냅샷 기준(이벤트 7일 ∪ 지금 임시 스냅샷).
-  //   모르면 n=null + 이유 코드(0 으로 쓰지 않는다). 오류 원문·계정 이름은 싣지 않는다. 화면은 마운트 1회 + 5분마다.
+  //   모르면 n=null + 이유 코드(0 으로 쓰지 않는다). 오류 원문·계정 이름은 싣지 않는다. 화면은 마운트 1회 + 60초마다(v2.759).
   api.get('/veeam/backup-counts', (req, res) => {
     const snap = store.get();
     const allowed = scopedVcenterIds(req.user, snap);
+    const admin = isAdminDetailUser(req.user);
     return memoJson(req, res, 'veeam-backup-counts', async () => {
       const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+      // v2.762(F4): 등록부를 못 읽으면 어느 vCenter 가 연동인지 모른다 — 전부 모름(스냅샷 기준으로 조용히 바꾸지 않는다).
+      if (registryBroken()) {
+        const byVc = {};
+        for (const vc of vcs) byVc[vc.id] = { src: 'veeam', n: null, vmTotal: snap?.initial === true ? null : (snap?.vms || []).filter((v) => v.vcenterId === vc.id).length, reason: 'registry-unreadable' };
+        return { ok: true, at: Date.now(), byVc, registryUnreadable: true };
+      }
       const live = new Set((snap?.vcenters || []).map((v) => v.id));
       for (const k of _snapCache.keys()) if (!live.has(k)) _snapCache.delete(k);
       const vmsBy = new Map();
@@ -212,15 +252,17 @@ export function registerVeeamBadges(api) {
           // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
           const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results) : null;
-          byVc[vc.id] = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
+          const vcnt = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
+          byVc[vc.id] = maskOtherVcenter(vcnt, admin, vcnt.n);   // v2.762(F5): 수는 관리자만
         } else if (isMockMode()) {
-          byVc[vc.id] = { ...veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length }), demo: true };
+          const vcnt = veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length });
+          byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), demo: true };
         } else {
           byVc[vc.id] = snapCount({ ev: await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true, wait: false }), vms });
         }
       }
       return { ok: true, at: Date.now(), byVc };
-    }, { ttlMs: 60_000, extraKey: scopeKey(req.user, snap) });
+    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });   // v2.762(F5): 판본이 역할로 갈린다 — 키에 역할
   });
 
   // VM 1대의 백업 상세(v2.751 사용자 요청: 'Veeam 배지를 누르면 백업 세부 정보 창' — 복원 지점·용량·마지막 백업 등).
@@ -231,6 +273,7 @@ export function registerVeeamBadges(api) {
     const vm = t ? t.vms.find((v) => v.id === vmId) : null;
     if (!t || !vm) return res.status(404).json({ ok: false, reason: 'VM 을 찾을 수 없습니다.' });
     const { vcenterId } = t;
+    if (registryUnreadable503(res)) return;   // v2.762(F4)
     if (!serversForVcenter(vcenterId).length) {
       if (isMockMode()) return res.json({ ok: true, demo: true, vm: { id: vm.id, name: vm.name }, detail: demoVeeamDetail(vcenterId, vm), servers: [DEMO_SERVER_VIEW()], at: Date.now() });
       return res.json({ ok: true, configured: false, vm: { id: vm.id, name: vm.name }, detail: null, servers: [] });

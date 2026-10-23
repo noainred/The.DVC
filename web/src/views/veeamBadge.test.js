@@ -225,3 +225,41 @@ describe('v2.761 — Veeam 표시 버그 점검 수정(웹)', () => {
     expect(veeamEventChip({ status: 'log-off' }).n).toBe(null);
   });
 });
+
+describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
+  const sv = (o) => ({ name: 'VBR', ok: true, lastOkTs: 1, notes: [], ...o });
+  it('F1: 첫 수집 전 서버가 있으면 카드(부분)와 같이 경고 · 실행 중·대기는 모름', () => {
+    const s = veeamSummary({ configured: true, servers: [sv({ name: 'A' }), sv({ name: 'B', ok: null, lastOkTs: null })], byVm: { a: { run: 0 } } }, { vmTotal: 10 });
+    expect(s.tone).toBe('warn'); expect(s.warnings.join()).toMatch(/B: 아직 읽은 결과가 없습니다/);
+    expect(s.stats.running).toBe(null); expect(s.stats.pending).toBe(null); expect(s.details.join()).toMatch(/첫 수집 전인 Veeam 서버/);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: { a: { run: 1 } } }).tone).toBe('ok');
+  });
+  it('F2: 한 번도 성공 못한 실패 서버는 마지막 성공 값이 아니라 VM 이 빠졌다고 말한다', () => {
+    const t = backupCell({ src: 'veeam', n: 2, vmTotal: 10, failed: 2, failedNoLast: 1, partial: true }).title;
+    expect(t).toMatch(/1대를 이번에 읽지 못해 마지막 성공 값/); expect(t).toMatch(/1대는 아직 한 번도 읽지 못해 그 서버의 VM 이 빠졌습니다/);
+    expect(backupCell({ src: 'veeam', n: 2, vmTotal: 10, failed: 1, partial: true }).title).toMatch(/1대를 이번에 읽지 못해 마지막 성공 값/);   // 옛 서버 응답
+  });
+  it('F3: 실패 우선 사유에 첫 수집 대기 수를 같이 말한다', () => {
+    const c = backupCell({ src: 'veeam', n: null, vmTotal: 9, reason: 'veeam-failed', failed: 1, waiting: 1 });
+    expect(c.text).toBe('—'); expect(c.title).toMatch(/한 번도 읽지 못했습니다/); expect(c.title).toMatch(/1대는 아직 첫 수집 전/);
+  });
+  it('F4: 등록부를 못 읽으면 기준을 단정하지 않는 확인 불가 칸', () => {
+    const c = backupCell({ src: 'veeam', n: null, vmTotal: 9, reason: 'registry-unreadable' });
+    expect(c.text).toBe('—'); expect(c.label).toBe('백업 · 확인 불가'); expect(c.tone).toBe('none');
+    expect(c.title).toMatch(/^백업 수량을 알 수 없습니다/); expect(c.title).toMatch(/등록부를 읽지 못해/); expect(c.title).not.toMatch(/`/);
+  });
+  it('F5: 수가 없는(비관리자) 응답은 수 없이 말한다 · 관리자는 수', () => {
+    const v = veeamSummary({ configured: true, servers: [sv()], byVm: {}, otherVcenter: null, hostMismatch: true });
+    expect(v.warnings.join()).toMatch(/Veeam 이 적은 VM 이 모두 다른 vCenter/); expect(v.warnings.join()).not.toMatch(/null|undefined/);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: null }).details.join()).not.toMatch(/다른 vCenter/);
+    const hm = backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: null, hostMismatch: true });
+    expect(hm.title).toMatch(/Veeam 이 적은 VM 이 모두/); expect(hm.title).not.toMatch(/null/);
+    expect(backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: 9, hostMismatch: true }).title).toMatch(/VM 9개가 모두/);
+  });
+  it('F6: 마지막 수집 안내는 서버가 준 한도(staleMs)를 쓴다 — 없으면 6시간', () => {
+    const at = new Date(2026, 9, 22, 12, 0).getTime();
+    const base = { status: 'ok', byVm: { a: [1, 1] }, accounts: 1, at, collectedAt: at - 11 * 3_600_000 };
+    expect(veeamEventStatusText({ ...base, staleMs: 24.5 * 3_600_000 })).toBe('');
+    expect(veeamEventStatusText(base)).toMatch(/마지막으로 수집한 시각/);
+  });
+});

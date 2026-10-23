@@ -18,7 +18,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
-import { openSqlite, retryOnLock, createLockRetry } from '../util/sqliteOpen.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { createYielder } from '../util/timeSlice.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
@@ -47,6 +48,55 @@ const _lock = createLockRetry(30_000);
  *   DB 가 쓰이면 meta 'from:<vc>' 도 지운다(재시작 뒤에도 무효) · 무효로 한 뒤 시작한 백필이 덮음을 다시 기록하면 풀린다.
  */
 const _coverInvalid = new Map();
+/*
+ * v2.762(E1): 덮음 무효 표지 파일(DB 옆 '<db>.invalid') — 메모리 무효(C5)는 재시작에 사라지고, 잠금이 아닌 open 실패로 래치된 프로세스는
+ *   버린 행을 무효로 하지도 않았다(다음 프로세스가 열면 빠진 행을 '완전' 으로 믿었다). 버린 행의 vCenter 를 이 파일에 적어 두면
+ *   다음 open 이 그 vCenter 의 'from:' meta 를 지우고 표지를 지운다 — 백필(워커)이 다시 메운다. 파일을 못 읽으면 전 vCenter 를 지운다(안전 쪽).
+ *   표지 쓰기 자체가 실패하면(같은 볼륨 장애) 예전과 같다 — 경고 1줄.
+ */
+const markerPath = () => `${config.veeamSnap.dbPath}.invalid`;
+const _markerIds = new Set();   // 이 프로세스가 표지에 적은 vCenter(같은 내용을 매 주기 다시 쓰지 않는다)
+let _markerWarned = false;
+/** 표지 읽기 — none(없음) · ids(적힌 vCenter) · all(못 읽음·손상·all 표지 — 어느 vCenter 인지 모르므로 전부). 손상은 보존해 둔다. */
+function readInvalidMarker() {
+  let raw;
+  try { raw = fs.readFileSync(markerPath(), 'utf8'); } catch (e) { return e?.code === 'ENOENT' ? { state: 'none' } : { state: 'all' }; }
+  try {
+    const j = JSON.parse(raw);
+    if (j?.all === true) return { state: 'all' };
+    if (Array.isArray(j?.vcenterIds)) return { state: 'ids', ids: j.vcenterIds.filter((v) => typeof v === 'string') };
+    throw new Error('형식 오류');
+  } catch (e) { preserveCorrupt(markerPath(), e?.message); return { state: 'all' }; }
+}
+function writeInvalidMarker(ids) {
+  const add = [...ids].filter((v) => !_markerIds.has(v));
+  if (!add.length) return;
+  const prev = readInvalidMarker();
+  // 이미 있던 표지를 못 읽으면 그 안의 vCenter 를 모른다 — 이번 것으로 덮어 좁히지 않고 '전부' 로 둔다.
+  const body = prev.state === 'all' ? { v: 1, at: Date.now(), all: true }
+    : { v: 1, at: Date.now(), vcenterIds: [...new Set([...(prev.state === 'ids' ? prev.ids : []), ..._markerIds, ...add])].slice(0, 4096) };
+  try {
+    atomicWriteFileSync(markerPath(), JSON.stringify(body));
+    for (const v of add) _markerIds.add(v);
+  } catch (e) {
+    if (!_markerWarned) { _markerWarned = true; console.warn(`[veeam-snap] 덮음 무효 표지를 남기지 못했습니다(다음 기동이 빠진 행을 모를 수 있습니다): ${String(e?.message || e).slice(0, 200)}`); }
+  }
+}
+/** open 직후 — 표지가 있으면 적힌 vCenter(못 읽으면 전부)의 덮음 meta 를 지우고 표지를 지운다. */
+function consumeInvalidMarker(db) {
+  const m = readInvalidMarker();
+  if (m.state === 'none') return;
+  const ids = m.state === 'ids' ? m.ids : null;
+  db.exec('BEGIN');
+  try {
+    if (ids) { const d = db.prepare('DELETE FROM snap_meta WHERE k=?'); for (const v of ids) d.run(`from:${v}`); }
+    else db.exec("DELETE FROM snap_meta WHERE k LIKE 'from:%'");
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  try { fs.unlinkSync(markerPath()); } catch (e) { if (e?.code !== 'ENOENT') console.warn(`[veeam-snap] 덮음 무효 표지를 지우지 못했습니다(다음 기동에 한 번 더 백필합니다): ${String(e?.message || e).slice(0, 200)}`); }
+  _markerIds.clear();
+  console.warn(`[veeam-snap] 지난 실행에서 전용 DB 에 넣지 못한 스냅샷 행이 있어 ${ids ? `vCenter ${ids.length}곳` : '전 vCenter'} 의 덮음 기록을 지웠습니다 — 백필이 다시 메웁니다`);
+}
 
 function initSqlite(dbPath) {
   // eslint-disable-next-line import/no-unresolved
@@ -63,6 +113,7 @@ function initSqlite(dbPath) {
       CREATE TABLE IF NOT EXISTS snap_meta (k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS snap_edge (vcenterId TEXT PRIMARY KEY, json TEXT NOT NULL, at INTEGER NOT NULL);
     `);
+    consumeInvalidMarker(db);   // v2.762(E1): 지난 실행이 버린 행이 있으면 그 덮음을 믿지 않는다
     const ins = db.prepare('INSERT OR IGNORE INTO snap_ev (vcenterId, ts, severity, type, user, entity, message, h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     const sel = db.prepare('SELECT vcenterId, ts, severity, type, user, entity, message FROM snap_ev WHERE vcenterId=? AND ts>=? ORDER BY ts DESC LIMIT ?');
     const metaGet = db.prepare('SELECT v FROM snap_meta WHERE k=?');
@@ -106,7 +157,9 @@ function initSqlite(dbPath) {
       },
       /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
       dropCoverage(vcenterIds) {
-        for (const vc of vcenterIds) { try { metaDel.run(`from:${vc}`); } catch { /* 메모리 무효로 대신한다 */ } }
+        let ok = true;
+        for (const vc of vcenterIds) { try { metaDel.run(`from:${vc}`); } catch { ok = false; /* 메모리 무효 + 표지로 대신한다 */ } }
+        return ok;
       },
       saveEdge(vcenterId, obj, at) { edgeSet.run(String(vcenterId), JSON.stringify(obj), Math.floor(Number(at) || Date.now())); },
       loadEdge() { return edgeAll.all().map((r) => { try { return { vcenterId: r.vcenterId, at: r.at, obj: JSON.parse(r.json) }; } catch { return null; } }).filter(Boolean); },
@@ -127,14 +180,16 @@ function initSqlite(dbPath) {
 }
 
 /**
- * DB 핸들(없으면 null — node:sqlite 불가·잠금 재시도 대기). 잠금은 몇 번 기다렸다 다시 열고(retryOnLock), 그래도 잠겨 있으면
- * 래치하지 않고 30초 뒤 다음 호출이 다시 연다(v2.761 C9 — sqliteOpen 규칙 3). 잠금이 아닌 오류만 프로세스 수명 동안 래치한다.
+ * DB 핸들(없으면 null — node:sqlite 불가·잠금 재시도 대기). 잠겨 있으면 래치하지 않고 30초 뒤 다음 호출이 다시 연다
+ * (v2.761 C9 — sqliteOpen 규칙 3). 잠금이 아닌 오류만 프로세스 수명 동안 래치한다.
+ * v2.762(E3): 시도당 **한 번만** 연다(withOpenCleanup) — v2.761 은 retryOnLock(5회 × busy_timeout 3초 동기 대기)을 30초 재시도와 겹쳐
+ *   잠금이 이어지는 동안 30초마다 12~15초씩 주 스레드가 멈췄다(실측). 다른 createLockRetry 모듈(rma/historyDb.js 등)과 같은 방식.
  */
 export async function getSnapDb() {
   if (impl) return impl;
   if (unavailable || _lock.blocked()) return null;
   if (!ready) {
-    ready = retryOnLock(() => initSqlite(config.veeamSnap.dbPath), { tag: 'veeam-snap' })
+    ready = withOpenCleanup(() => initSqlite(config.veeamSnap.dbPath))
       .then((db) => { _lock.ok(); if (_coverInvalid.size) db.dropCoverage([..._coverInvalid.keys()]); return db; })
       .catch((e) => {
         if (_lock.onFail(e)) console.warn(`[veeam-snap] 전용 DB 가 잠겨 있어 열지 못했습니다 — 30초 뒤 다시 엽니다(그동안 로그 DB 검색): ${String(e?.message || e).slice(0, 200)}`);
@@ -156,7 +211,10 @@ function invalidateCoverage(rows, db) {
   if (!ids.size) return;
   const t = Date.now();
   for (const vc of ids) _coverInvalid.set(vc, t);
-  if (db) { try { db.dropCoverage([...ids]); } catch { /* 메모리 무효로 대신한다 */ } }
+  let dropped = false;
+  if (db) { try { dropped = db.dropCoverage([...ids]) !== false; } catch { dropped = false; } }
+  // v2.762(E1): DB 의 meta 를 지우지 못했으면(열지 못함·잠금 대기·삭제 실패) 표지로 남긴다 — 메모리 무효는 재시작에 사라진다.
+  if (!dropped) writeInvalidMarker(ids);
 }
 
 let _ingestWarned = 0;
@@ -166,7 +224,9 @@ export async function ingestSnapRows(rows) {
   try {
     db = await getSnapDb();
     if (db) return db.ingest(rows);
-    if (!unavailable) invalidateCoverage(rows, null);   // 잠금 대기 중 — 버린 행이 있다(node:sqlite 자체가 없으면 덮음도 쓰지 않는다)
+    // 잠금 대기 중이거나 래치(잠금이 아닌 open 실패) — 버린 행이 있다. v2.762(E1): 래치도 무효로 한다(표지 파일 — 다음 프로세스가 열면
+    //   빠진 행을 믿지 않는다). 예전에는 'node:sqlite 자체가 없을 때' 만 전제로 래치 중 버린 행을 무효로 하지 않았다.
+    invalidateCoverage(rows, null);
     return 0;
   } catch (e) {
     invalidateCoverage(rows, db);
@@ -276,6 +336,8 @@ async function runBackfill({ logsDb, vcenterIds, now = Date.now(), pauseMs = BAC
 }
 
 /** 테스트 전용 — 핸들 닫고 상태 초기화. */
-export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; ready = null; unavailable = false; _backfill = null; _lock.ok(); _coverInvalid.clear(); }
+export function _resetSnapDbForTest() { try { impl?.close(); } catch { /* */ } impl = null; ready = null; unavailable = false; _backfill = null; _lock.ok(); _coverInvalid.clear(); _markerIds.clear(); _markerWarned = false; }
+/** 테스트 전용 — 덮음 무효 표지 파일 경로(_resetSnapDbForTest 는 메모리 무효까지 지운다 = 재시작 — 표지만 남는다). */
+export const _invalidMarkerPathForTest = () => markerPath();
 /** 테스트 전용 — 잠금 재시도 대기를 끝낸다. */
 export function _expireSnapLockForTest() { _lock._expire(); }
