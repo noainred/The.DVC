@@ -230,7 +230,8 @@ test('V4-4 ② 폴러는 수집 호출과 완결 판정에 같은 상한(maxEv)�
   const soap = fs.readFileSync(new URL('../src/vcenter/soapClient.js', import.meta.url), 'utf8');
   const fn = soap.slice(soap.indexOf('export async function collectVCenterEvents'), soap.indexOf('export function parseEventsXml'));
   assert.match(fn, /pageSize = 200/);
-  assert.match(fn, /guard < 200 &&/);
+  assert.match(fn, /guard < EVENT_PAGES_MAX && out\.length < max/);   // v2.764: 쪽 수 한도는 상수(EVENT_PAGES_MAX)
+  assert.match(soap, /export const EVENT_PAGES_MAX = 200;/);
 });
 
 /* ── V4-I1 ────────────────────────────────────────────────────────────────────────────────────────── */

@@ -172,14 +172,31 @@ export const vcLogDeadlineMs = (vc) => Math.min(2_147_000_000, Math.max(60_000, 
 // v2.598 T2598-02: 데드라인이 **결과만 포기**하던 것(Promise.race)에 AbortController 를 더한다 — 시한이 되면
 // signal 을 abort 해 수집기가 남은 SOAP 왕복(ReadNextEvents…)을 멈출 수 있게 한다(store.collectWithDeadline ·
 // v2.417 '세션을 실제로 끊는다' 규약). race 는 남긴다 — 신호를 아직 읽지 않는 수집기도 결과는 기다리지 않는다.
-export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc)) {
+// v2.764(로그 수집 지연): 시한이 되면 신호만 끊고 **읽은 만큼은 받는다** — 수집기(collectVCenterEvents)가 abort 를 받으면 던지지 않고 그때까지
+//   읽은 이벤트를 `ended:'aborted'` 로 돌려준다. 예전에는 race 가 바로 거부해 읽은 40,000건이 통째로 버려졌고(상한 50,000 × 200쪽 > 60초),
+//   저장 시각이 영영 나아가지 않았다(실서버 OC2 13일 정체의 유력 원인). 하나도 못 읽었거나 수집기가 유예(DEADLINE_GRACE_MS) 안에 돌아오지 않으면 예전처럼 거부.
+export const DEADLINE_GRACE_MS = 15_000;
+export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc), { graceMs = DEADLINE_GRACE_MS } = {}) {
   const ac = new AbortController();
-  let timer;
+  const err = () => new Error(`수집 데드라인 초과(${Math.round(ms / 1000)}초)`);
+  let timer = null; let grace = null;
+  const p = run(ac.signal);
   const guard = new Promise((_, reject) => {
-    timer = setTimeout(() => { ac.abort(); reject(new Error(`수집 데드라인 초과(${Math.round(ms / 1000)}초)`)); }, ms);
+    timer = setTimeout(() => {
+      ac.abort();
+      grace = setTimeout(() => reject(err()), graceMs);
+      grace.unref?.();
+    }, ms);
     timer.unref?.();
   });
-  return Promise.race([run(ac.signal), guard]).finally(() => clearTimeout(timer));
+  return Promise.race([
+    p.then((r) => {
+      if (!ac.signal.aborted) return r;
+      if (Array.isArray(r) && r.length > 0 && r.ended === 'aborted') return r;   // 부분 결과 — 폴러가 상한처럼 다룬다
+      throw err();
+    }),
+    guard,
+  ]).finally(() => { clearTimeout(timer); clearTimeout(grace); });
 }
 
 /**

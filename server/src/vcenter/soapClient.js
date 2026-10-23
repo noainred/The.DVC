@@ -1572,37 +1572,65 @@ export async function upgradeVmTools(vc, morefs, { login = null } = {}) {
  * vCenter 이벤트 로그를 수집한다(장기 보관용). vim25 EventManager의 EventHistoryCollector를
  * 생성해 beginTime(sinceTs) 이후 이벤트를 페이지 단위로 읽는다. max 상한까지.
  * 반환: [{ key, ts, type, severity, user, entity, message }] (오래된 → 최신).
+ *
+ * v2.764(로그 수집 지연 — 실서버 OC2 13일 정체): 반환 배열에 **왜 멈췄는지**를 싣는다(JSON 에는 실리지 않는 배열 속성).
+ *   `ended` = 'empty'(더 없음 — 온전) | 'max'(상한) | 'pages'(쪽 수 한도 — 상한보다 적게 읽었어도 온전하지 않다) | 'aborted'(데드라인).
+ *   데드라인(signal)에 걸리면 예전처럼 **던지지 않고** 그때까지 읽은 것을 돌려준다 — 예전에는 60초 시한이 200쪽을 못 끝내면 읽은 40,000건을
+ *   통째로 버려 진행이 0 이었다(상한을 올릴수록 더 자주). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
+ *   필터: `userNames`(EventFilterSpecByUsername — 그 계정의 이벤트만 · Veeam 전용 수집기) · `eventTypeIds`(종류). 둘 다 없으면 전량.
  */
-export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200, signal = null } = {}) {
+export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200, signal = null, userNames = null, eventTypeIds = null } = {}) {
   // v2.598 T2598-02: 폴러의 데드라인 신호를 SOAP 요청에 건다 — 예전엔 데드라인이 결과만 포기해 버려진 세션이
   // ReadNextEvents 를 끝까지 돌았다(v2.417 '세션을 실제로 끊는다' 규약). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
   const c = new VimSoapClient(vc, { signal });
   await c.login();
   let collector = null;
   const out = [];
+  out.ended = 'empty';
   try {
     if (!c.sc.eventManager) return out;
-    const beginIso = new Date(sinceTs).toISOString();
     const createXml = await c.callRaw(
       `<CreateCollectorForEvents xmlns="urn:vim25"><_this type="EventManager">${c.sc.eventManager}</_this>` +
-      `<filter><time><beginTime>${beginIso}</beginTime></time></filter></CreateCollectorForEvents>`);
+      `<filter>${eventFilterXml(sinceTs, { userNames, eventTypeIds })}</filter></CreateCollectorForEvents>`);
     collector = /<returnval[^>]*>([^<]+)<\/returnval>/.exec(createXml)?.[1];
     if (!collector) return out;
     const cRef = escXml(collector);
     // ReadNextEvents 로 forward 읽기(오래된→최신). 빈 페이지 또는 max 도달 시 종료.
-    for (let guard = 0; guard < 200 && out.length < max; guard++) {
-      if (signal?.aborted) throw new Error('이벤트 수집 중단(데드라인)');
-      const xml = await c.callRaw(
-        `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
+    let guard = 0;
+    for (; guard < EVENT_PAGES_MAX && out.length < max; guard++) {
+      if (signal?.aborted) { out.ended = 'aborted'; break; }
+      let xml;
+      try {
+        xml = await c.callRaw(
+          `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
+      } catch (e) {
+        if (signal?.aborted) { out.ended = 'aborted'; break; }   // 데드라인 — 읽은 만큼 돌려준다
+        throw e;
+      }
       const events = parseEventsXml(xml);
       if (!events.length) break;
       pushAll(out, events);
+    }
+    if (out.ended !== 'aborted') {
+      if (out.length >= max) out.ended = 'max';
+      else if (guard >= EVENT_PAGES_MAX) out.ended = 'pages';
     }
   } finally {
     if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, { ignoreExternal: true }).catch(() => {});
     await c.logout().catch(() => {});
   }
   return out;
+}
+/** 한 수집에서 읽는 ReadNextEvents 쪽 수 한도 — logs/poller.js COLLECTOR_MAX_EVENTS(쪽 수 × 쪽 크기)가 이 값에 기댄다. */
+export const EVENT_PAGES_MAX = 200;
+/** EventFilterSpec 본문(순수) — time → userName → eventTypeId 순서(vim25 XSD 순서를 지켜야 한다). 계정은 50개·200자까지. */
+export function eventFilterXml(sinceTs, { userNames = null, eventTypeIds = null } = {}) {
+  let x = `<time><beginTime>${new Date(sinceTs).toISOString()}</beginTime></time>`;
+  const users = Array.isArray(userNames) ? userNames.map((u) => String(u ?? '').trim().slice(0, 200)).filter(Boolean).slice(0, 50) : [];
+  if (users.length) x += `<userName><systemUser>false</systemUser>${users.map((u) => `<userList>${escXml(u)}</userList>`).join('')}</userName>`;
+  const types = Array.isArray(eventTypeIds) ? eventTypeIds.map((t) => String(t ?? '').trim()).filter((t) => /^[\w.]{1,120}$/.test(t)).slice(0, 50) : [];
+  for (const t of types) x += `<eventTypeId>${t}</eventTypeId>`;
+  return x;
 }
 
 // XML 특수문자 이스케이프(collector moref가 &<> 포함 가능).
