@@ -213,3 +213,12 @@ test('Z4-3 구성 변경 이력 — 스캔 상한에 닿으면 실제로 훑은 
   assert.equal(r.b.scannedTo, all[0].ts, '가장 최근 훑은 행');
   assert.ok(r.b.scannedTo - r.b.scannedFrom < 7 * DAY, '7일을 골라도 실제로 본 것은 그보다 짧다 — 화면이 그 범위를 말해야 한다');
 });
+
+test('후속 — 가용성 허용치는 coverage 의 식 하나 · VM 상세 이력 라우트가 lagging 을 싣는다(소스)', async () => {
+  const A = await import('../src/routes/api/vmAvailability.js');
+  const C = await import('../src/logs/coverage.js');
+  assert.equal(A.tailToleranceOf, C.eventTailToleranceOf, '같은 함수(두 벌 금지)');
+  const src = fs.readFileSync(new URL('../src/routes/api/vmChanges.js', import.meta.url), 'utf8');
+  assert.match(src, /eventLagForView\(\{ db, now: Date\.now\(\), only: \[String\(vm\.vcenterId\)\] \}\)/);
+  assert.match(src, /notCollected, lagging \}\);/);
+});

@@ -73,7 +73,7 @@ export function vmHistoryNotCollectedText(d) {
 export const HISTORY_STALE_MS = 2 * DAY;
 /**
  * v2.772(Z4-2): VM 상세 이동·변경 이력 — 이 VM 의 vCenter 이벤트 수집이 뒤처졌으면 그 사실(없으면 null).
- * 서버가 `lagging`({okAt, lagMs} — logs/coverage.js 판정)을 주면 그것을, 없으면(지금 서버는 lastTs 만 준다) 마지막 이벤트 시각이
+ * 서버가 `lagging`({okAt, lagMs} — logs/coverage.js 판정)을 주면 그것을, 없으면(옛 서버는 lastTs 만 준다) 마지막 이벤트 시각이
  * 목록 화면과 같은 기준(2일)보다 오래됐을 때만 말한다. 지금 수집하지 않는 vCenter(notCollected)는 다른 문장이 말하므로 null.
  * '받아 둔 이벤트 중 이동·변경 없음' 이 그 뒤까지 뜻하지 않게 한다.
  */

@@ -13,7 +13,8 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
-import { analyzeAvailability, TAIL_TOLERANCE_MS } from '../../availability/analyze.js';
+import { analyzeAvailability } from '../../availability/analyze.js';
+import { eventTailToleranceOf } from '../../logs/coverage.js'; // v2.772(Z4-S3): 허용치 식 하나
 import { logCollectOkAt } from '../../logs/poller.js'; // v2.731(A2-01): vCenter 별 마지막 이벤트 수집 성공 시각 — 측정 끝의 근거
 import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { AVAIL_TYPES, LIFE_TYPES } from '../../vmchanges/eventDetail.js';
@@ -47,13 +48,9 @@ export function _resetVmAvailabilityMemoForTest() { _runMemo.clear(); }
 
 /**
  * v2.731(A2-01): 측정 끝을 자르지 않는 허용치 — 로그 수집 주기 × 3 과 1시간 중 큰 것(순수).
- * 한두 주기 실패는 정상 범위로 보고, 그보다 오래 수집이 멈춘 vCenter 만 끝을 자른다. 주기를 못 읽으면 기본 10분으로 본다.
+ * v2.772(Z4-S3): 식은 logs/coverage.js eventTailToleranceOf 하나 — 수집 지연 판정(미보호·로그인 실패·이력)과 가용성이 같은 허용치를 쓴다.
  */
-export function tailToleranceOf(settings) {
-  const min = numOrNull(settings?.pollIntervalMin);
-  const pollMs = (min != null && min > 0 ? min : 10) * 60_000;
-  return Math.max(TAIL_TOLERANCE_MS, pollMs * 3);
-}
+export const tailToleranceOf = eventTailToleranceOf;
 
 async function run(req, snap) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
