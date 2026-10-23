@@ -10,7 +10,7 @@ import { stagedRestoreStatus, cancelStagedRestore } from '../../backup/stagedRes
 import { restartProcess } from '../../upgrade/upgrade.js'; // v2.768: 복원 후 바로 재시작(선택 — upgrade/apply 의 restart 와 같은 종료 경로)
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../../backup/settings.js';
 import { saveLogSettings } from '../../logs/settings.js';
-import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../../logs/poller.js';
+import { logStatus, rescheduleLogPoller, pollLogsOnce, logPollRunningSince } from '../../logs/poller.js';
 import { resetLogsDb } from '../../logs/db.js';
 import { runTrafficCapture, runDualCapture, runPcapCapture } from '../../net/tcpdump.js';
 import { analyzeLogsForIssuesMemo } from '../../net/logIssues.js';   // v2.742(DB-02): 같은 조건은 짧게 기억
@@ -125,6 +125,29 @@ export function scopeVcLogStatus(st, allowed) {
   return out;
 }
 
+/**
+ * v2.772(Z1-3): '지금 수집' 응답 경주 — 수집(run)이 waitMs 안에 끝나면 그 결과를, 아니면 `{running:true, runningSince}` 를 먼저 돌려준다.
+ *   수동 실행도 vCenter 마다 주기의 80% 시간 예산을 쓰므로(따라잡기 vCenter 가 있으면 수 분) 브라우저 POST 시한(180초)에 끊겨 '오류' 로 보였다 —
+ *   서버는 계속 수집해 성공하는데 운영자는 실패로 읽었다. 수동 예산을 줄이는 안은 고RTT vCenter(시한만으로 180초)를 보장하지 못해 쓰지 않는다.
+ *   먼저 응답한 뒤의 결과·거부는 콘솔로만 남는다 — 그 회차의 실패 목록(failed)은 응답에 실리지 않으므로 화면은 '표의 상태 칸에서 확인' 이라 말한다.
+ *   waitMs 는 브라우저 시한보다 충분히 작게(프록시 지연분).
+ */
+export const VCLOG_COLLECT_WAIT_MS = 150_000;
+export async function vcLogCollectRace(run, { waitMs = VCLOG_COLLECT_WAIT_MS, runningSinceOf = () => null } = {}) {
+  let timer = null;
+  const late = Symbol('late');
+  const p = Promise.resolve(run);
+  const tick = new Promise((r) => { timer = setTimeout(() => r(late), waitMs); });   // unref 하지 않는다 — 응답을 기다리는 동안의 유일한 타이머일 수 있다(끝나면 지운다)
+  try {
+    const r = await Promise.race([p, tick]);
+    if (r !== late) return r;
+  } finally { clearTimeout(timer); }
+  p.then((r) => { if (r && !r.busy) console.log(`[vclogs] 먼저 응답한 '지금 수집' 이 끝났습니다(${Number.isFinite(r.collected) ? `${r.collected}건 적재` : '건수 —'}${Array.isArray(r.failed) && r.failed.length ? ` · 수집 실패 ${r.failed.length}곳` : ''})`); },
+    (e) => console.warn(`[vclogs] 먼저 응답한 '지금 수집' 이 실패했습니다: ${e?.message || e}`));
+  const since = runningSinceOf();
+  return { running: true, ...(Number.isFinite(since) ? { runningSince: since } : {}) };
+}
+
 /** v2.770(점검 R5-E1-2): 백업·복원 경고 한 건 → 문구. `{file, reason}` 객체(복원)와 문자열(백업 생성) 둘 다. 모르는 모양은 ''. */
 export function backupWarnText(w) {
   if (typeof w === 'string') return w;
@@ -237,7 +260,8 @@ adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
 });
 adminRouter.post('/vclogs/collect', adminOnly, async (req, res) => {
   if (denyScopedRun(req, res, 'vCenter 로그 수동 수집')) return;   // v2.607 AUTHZ2607-06
-  try { res.json({ ok: true, ...(await pollLogsOnce({ manual: true })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  // v2.772(Z1-3): 150초 안에 끝나지 않으면 {ok, running:true, runningSince} 로 먼저 응답한다(수집은 계속 — vcLogCollectRace).
+  try { res.json({ ok: true, ...(await vcLogCollectRace(pollLogsOnce({ manual: true }), { runningSinceOf: logPollRunningSince })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────

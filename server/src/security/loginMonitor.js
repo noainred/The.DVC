@@ -79,6 +79,10 @@ let lastIncomplete = null;   // v2.682 R3E-02 — 마지막 주기가 일부 조
 //   그 vCenter 의 로그인 실패는 이 모니터가 알리지 못한다 — 조용히 빼지 않고 상태에 남긴다(null = 아직 분석 전).
 let lastNotMonitored = null;
 let lastNotMonitoredSig = '';
+// v2.772(Z4-2): 마지막 주기에 '수집은 하지만 뒤처진' vCenter(따라잡는 중 포함) — 완결 시각 뒤의 로그인 실패는 아직 이 감시가 보지 못했다.
+//   notMonitored(지금 수집하지 않음)와 원인이 다르다. null = 아직 분석 전이거나 판정 못 함.
+let lastLagging = null;
+let lastLaggingSig = '';
 const alerted = new Map(); // key -> lastAlertTs (쿨다운)
 const COOLDOWN = 60 * 60_000;
 
@@ -112,6 +116,13 @@ async function runOnce() {
     if (nmSig !== lastNotMonitoredSig) {
       lastNotMonitoredSig = nmSig;
       if (lastNotMonitored.length) console.log(`[loginmon] 이 포탈이 지금 이벤트를 수집하지 않는 vCenter ${lastNotMonitored.length}곳은 감시하지 않습니다(엣지 위임·비활성·점검중): ${lastNotMonitored.slice(0, 5).map((x) => `${x.vcenterId}(${x.why})`).join(', ')}${lastNotMonitored.length > 5 ? ' …' : ''}`);
+    }
+    lastLagging = Array.isArray(r.lagging) ? r.lagging.map((x) => ({ vcenterId: x.vcenterId, okAt: x.okAt ?? null, lagMs: x.lagMs ?? null })) : null;
+    // 콘솔에는 지연 vCenter 집합이 바뀔 때만 한 줄(지연 길이는 매 주기 바뀌므로 서명에 넣지 않는다).
+    const lagSig = lastLagging ? lastLagging.map((x) => x.vcenterId).join(',') : '';
+    if (lagSig !== lastLaggingSig) {
+      lastLaggingSig = lagSig;
+      if (lastLagging?.length) console.log(`[loginmon] 이벤트 수집이 뒤처진 vCenter ${lastLagging.length}곳은 수집이 끝난 시각 뒤의 로그인 실패를 아직 보지 못했습니다: ${lastLagging.slice(0, 5).map((x) => `${x.vcenterId}(${Math.round((x.lagMs || 0) / 3_600_000)}시간)`).join(', ')}${lastLagging.length > 5 ? ' …' : ''}`);
     }
     // v2.682(감사 R3E-02): vCenter 이벤트를 일부 못 읽은 주기는 요약을 덮지 않는다 — '실패 0건' 이라는 거짓 요약 대신
     //   직전 요약을 두고 사유를 따로 남긴다. 찾은 활성 공격은 실재하므로 알림은 그대로 낸다.
@@ -153,5 +164,5 @@ export function startLoginMonitor() {
   console.log('[loginmon] 로그인 실패 모니터 시작');
 }
 
-export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, lastIncomplete, notMonitored: lastNotMonitored, alertedActive: alerted.size }; }
+export function loginMonitorStatus() { return { settings: loadLoginMonitor(), lastRun, lastSummary, lastIncomplete, notMonitored: lastNotMonitored, lagging: lastLagging, alertedActive: alerted.size }; }
 export { runOnce as runLoginAnalysisNow };

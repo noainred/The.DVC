@@ -48,6 +48,39 @@ const LOGS_PRUNE_CHUNK_MIN = Math.min(PRUNE_CHUNK_ROWS, 500);
 /** 직전 청크 소요로 다음 청크 크기를 정한다 — chunkedDelete 의 targetMs 와 같은 함수(util/chunkedPrune.js nextAdaptiveChunk). */
 const nextPruneChunk = (chunk, want, tookMs) => nextAdaptiveChunk(chunk, want, tookMs, { targetMs: LOGS_PRUNE_TARGET_MS, minChunk: LOGS_PRUNE_CHUNK_MIN, maxChunk: PRUNE_CHUNK_ROWS });
 
+/**
+ * v2.772(Z1-5 — 측정: vCenter 하나 180만 행에서 logStatus 의 최대 루프 정지 101~117ms · 720만 행 262ms, 실서버는 vCenter 하나 1,000만 행):
+ *   vCenter 하나의 건수를 **(vcenterId, ts) 반열린 구간 [a, b) 조각**으로 나눠 센다(생성기 — 조각마다 yield, 호출부가 시간 기준으로 양보한다).
+ *   첫 조각 a = 그 vCenter 의 MIN(ts), 마지막 조각은 상한 없이 ts >= a(MAX 보다 늦게 들어온 행도 센다). 경계 시각의 행은 뒤 조각 하나에만 들어간다 —
+ *   이중 계수·누락이 없다(테스트가 경계·같은 시각 묶음으로 고정). 조각 폭은 직전 조각 소요로 맞춘다(목표를 넘으면 반, 절반도 안 걸리면 두 배 —
+ *   드문 구간은 빨리 지나간다). 폭의 바닥은 구간 ÷ VC_COUNT_MAX_SLICES(조각 수 상한). 한계(정직 기록): ① 한 ms 에 몰린 행은 더 나눌 수 없다 ② 조각 사이에 들어오거나 지워진 행 중 이미 센 구간의 것은
+ *   반영되지 않는다(건수 캐시 5분과 같은 종류의 낡음 — 따라잡기 적재는 그 vCenter 의 마지막 저장 뒤라 마지막 조각이 센다).
+ * @returns {Generator<undefined, number>} 건수
+ */
+export const VC_COUNT_START_SPAN_MS = 3_600_000;
+export const VC_COUNT_TARGET_MS = 8;
+// 조각 수 상한 — 조각 폭의 바닥 = 구간 ÷ 이 값. 조각이 늘 목표보다 느리면(차가운 페이지 캐시 등) 폭이 1ms 까지 줄어 365일 구간이 조각 수백억 개가 되지 않게.
+export const VC_COUNT_MAX_SLICES = 4096;
+const VC_COUNT_MAX_SPAN_MS = 2 ** 40;
+export function* vcCountSlices({ minTs, maxTs, countRange, countFrom, startSpanMs = VC_COUNT_START_SPAN_MS, targetMs = VC_COUNT_TARGET_MS, clock = () => performance.now() }) {
+  let a = Number(minTs);
+  const end = Number(maxTs);
+  const floorSpan = Math.max(1, Math.ceil((end - a) / VC_COUNT_MAX_SLICES));
+  let span = Math.max(floorSpan, Math.floor(Number(startSpanMs) || VC_COUNT_START_SPAN_MS));
+  let n = 0;
+  for (;;) {
+    const b = a + span;
+    if (!(b <= end)) return n + Number(countFrom(a) || 0);   // 마지막 조각 — 상한 없음
+    const t0 = clock();
+    n += Number(countRange(a, b) || 0);
+    const took = clock() - t0;
+    a = b;
+    if (took > targetMs) span = Math.max(floorSpan, Math.floor(span / 2));
+    else if (took < targetMs / 2) span = Math.min(VC_COUNT_MAX_SPAN_MS, span * 2);
+    yield;
+  }
+}
+
 /** v2.607 DB2607-02: 필터 조회의 total 상한(맞는 행을 이만큼까지만 센다). */
 export const COUNT_CAP = 10_000;
 const capOf = (cap) => { const n = Math.trunc(Number(cap)); return Number.isFinite(n) && n >= 1 ? Math.min(n, 1_000_000) : COUNT_CAP; };
@@ -165,12 +198,16 @@ function initSqlite() {
     //   ② 건수는 vCenter 마다 'COUNT WHERE vcenterId=?'(같은 인덱스 SEARCH) ③ 마지막 시각은 vCenter 마다 MAX(ts) 단독 문장(lastTsStmt —
     //   인덱스 끝점). 전체 건수는 vCenter 별 건수의 합이다(vcenterId 는 NOT NULL 이라 COUNT(*) 와 같다 — 같은 값을 두 번 세지 않는다).
     //   결과(순서 포함 — 둘 다 vcenterId BINARY 오름차순)는 예전 GROUP BY 와 같다(audit2744e 가 대조). metaAsync 는 vCenter 사이에 양보한다.
-    //   ⚠ 남는 한계: vCenter 하나의 COUNT 는 여전히 한 문장이다(그 vCenter 행 수에 비례 — 합성 150만 행 28대에서 최대 4.2ms).
+    //   v2.772(Z1-5): 예전 주석의 '남는 한계(vCenter 하나의 COUNT 는 한 문장 — 최대 4.2ms)' 는 vCenter 당 5만 행 기준이었다. 실서버는 vCenter 하나가
+    //   1,000만 행이고 한 문장이 수백 ms 였다(측정 180만 행 101~117ms · 720만 행 262ms). 이제 vCenter 하나도 (vcenterId, ts) 반열린 구간 조각으로 센다
+    //   (vcCountSlices — 조각 사이 양보). MIN·MAX 를 못 읽으면(숫자 아님) 예전 한 문장으로.
     const vcIdsStmt = db.prepare(`WITH RECURSIVE vs(v) AS (
         SELECT (SELECT MIN(vcenterId) FROM events)
         UNION ALL SELECT (SELECT MIN(vcenterId) FROM events WHERE vcenterId>vs.v) FROM vs WHERE vs.v IS NOT NULL)
       SELECT v FROM vs WHERE v IS NOT NULL`);
     const vcCountStmt = db.prepare('SELECT COUNT(*) n FROM events WHERE vcenterId=?');
+    const vcRangeCountStmt = db.prepare('SELECT COUNT(*) n FROM events WHERE vcenterId=? AND ts>=? AND ts<?');   // v2.772(Z1-5): [a, b) — idx_events_ts 범위
+    const vcFromCountStmt = db.prepare('SELECT COUNT(*) n FROM events WHERE vcenterId=? AND ts>=?');            // 마지막 조각(상한 없음)
     let metaGen = 0;                            // 무효화 세대 — 계산 도중 지워졌으면(prune) 그 결과를 캐시에 넣지 않는다
     let metaInflight = null;                    // metaAsync 진행 중 계산(같은 계산을 겹쳐 돌리지 않는다)
     const invalidateMeta = () => { metaCache = null; metaGen++; };
@@ -182,9 +219,12 @@ function initSqlite() {
         // v2.744(회귀 검토 GE-R1): 목록은 먼저 읽고 vCenter 사이에 양보하므로, 그 사이 정리(prune)가 아직 세지 않은 vCenter 의 행을
         //   전부 지울 수 있다 — 예전에는 그 vCenter 가 {count:0, lastTs:0(Number(null))} 행으로 실렸다(한 문장 GROUP BY 에서는 생길 수 없던 값).
         //   0건이면 싣지 않고, 마지막 시각은 numOrNull 로 받는다. COUNT·MAX 를 한 문장으로 합치지 않은 이유: 둘 다 SEARCH(vcenterId=?)지만
-        //   합친 문장은 COUNT 전용 경로·MAX 끝점 조회를 잃어 vCenter 당 약 2배 느렸다(합성 150만 행 실측). 두 문장은 같은 동기 단계 안에서
-        //   연달아 돌아 그 사이에 정리가 끼지 않는다(같은 연결 · 이 단계 안에는 양보가 없다).
-        const c = Number(vcCountStmt.get(id)?.n || 0);
+        //   합친 문장은 COUNT 전용 경로·MAX 끝점 조회를 잃어 vCenter 당 약 2배 느렸다(합성 150만 행 실측).
+        // v2.772(Z1-5): 건수는 조각으로(조각마다 yield). 끝점을 못 읽으면 예전 한 문장. 조각 사이 양보 중 정리가 그 vCenter 행을 전부 지웠으면
+        //   마지막 시각은 null 이다(0 = 1970 이 아니다 — numOrNull). 건수가 그만큼 낡는 것은 캐시 수명과 같은 종류다(vcCountSlices 주석).
+        const mn = numOrNull(firstTsStmt.get(id)?.mn); const mx = numOrNull(lastTsStmt.get(id)?.mx);
+        const c = mn == null || mx == null ? Number(vcCountStmt.get(id)?.n || 0)
+          : yield* vcCountSlices({ minTs: mn, maxTs: mx, countRange: (a, b) => Number(vcRangeCountStmt.get(id, a, b)?.n || 0), countFrom: (a) => Number(vcFromCountStmt.get(id, a)?.n || 0) });
         if (c > 0) {
           vcs.push({ vcenterId: id, count: c, lastTs: numOrNull(lastTsStmt.get(id)?.mx) });
           n += c;

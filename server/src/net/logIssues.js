@@ -4,7 +4,7 @@
  */
 
 import { getLogsDb } from '../logs/db.js';
-import { eventNotCollectedMap, notCollectedList, EVENT_NOT_COLLECTED_TEXT } from '../logs/coverage.js';
+import { eventNotCollectedMap, notCollectedList, EVENT_NOT_COLLECTED_TEXT, eventLagForView, eventLagText } from '../logs/coverage.js';
 
 const DAY = 86_400_000;
 const ROWS = 5000;
@@ -20,8 +20,8 @@ const clampDays = (v) => { const n = Math.trunc(Number(v)); return Number.isFini
 
 /**
  * @param {{vcenterId?:string, days?:number}} opts
- * @param {{db?:object, notCollected?:Map<string,string>, now?:number, yieldMs?:number, countCap?:number}} [deps] 테스트·호출부 주입
- *   (기본: logs DB · logs/coverage.js 판정 · 지금 · 15ms · ISSUE_COUNT_CAP)
+ * @param {{db?:object, notCollected?:Map<string,string>, now?:number, yieldMs?:number, countCap?:number, lagging?:Array|null, lag?:object}} [deps] 테스트·호출부 주입
+ *   (기본: logs DB · logs/coverage.js 판정 · 지금 · 15ms · ISSUE_COUNT_CAP · v2.772 지연 판정 eventLagForView — lag 는 그 deps)
  *
  * v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 직접 수집하지 않는 vCenter(엣지 위임·비활성·점검중 — v2.732 B4-01)를
  *   '특이 패턴 없음' 에 섞지 않는다.
@@ -48,6 +48,11 @@ export async function analyzeLogsForIssues({ vcenterId = '', days: daysIn = 7 } 
       generatedAt: Date.now(),
     };
   }
+  // v2.772(Z4-2): 수집은 하지만 뒤처진 vCenter(따라잡는 중 포함) — 완결 시각 뒤의 오류는 아직 이 DB 에 없다. 고른 vCenter 가 있으면 그 하나만
+  //   (범위 계정은 라우트가 vCenter 하나를 강제한다 — 범위 밖 id 가 실리지 않는다). deps.lagging(기억 판이 미리 구해 키에 넣은 값)이 있으면 그것.
+  //   판정을 못 하면 null('모른다').
+  const lagging = Array.isArray(deps.lagging) || deps.lagging === null ? deps.lagging
+    : await eventLagForView({ db, now, only: vcId ? [vcId] : null, notCollected: nc, deps: deps.lag || {} });
   const base = { vcenterId: vcId, since };
   // 전체 보기: 지금 수집하지 않는 vCenter 의 행은 분석에서 뺀다 — SQL 에서 바로 뺀다(excludeVcenterIds · v2.742 DB-02). 포함 목록을 만들지 않는다
   //   (삭제된 vCenter 의 옛 이벤트도 예전처럼 분석에 남는다). 뺀 vCenter 의 기간 안 오류·경고 수는 따로 세어 밝힌다(excluded).
@@ -100,7 +105,18 @@ export async function analyzeLogsForIssues({ vcenterId = '', days: daysIn = 7 } 
   if (peak >= 20 && peak >= avg * 4) patterns.push({ sev: 'warning', title: `오류 스파이크 감지(최대 ${peak}건/시간)`, detail: `시간당 평균 ${avg.toFixed(1)}건 대비 급증 — 장애 시점 가능.` });
   const ncList = exclIds.length ? notCollectedList(nc) : [];
   const exclNote = ncList.length ? ` (이 포탈이 지금 이벤트를 수집하지 않는 vCenter ${ncList.length}곳은 분석에서 뺐습니다)` : '';
-  if (!patterns.length) patterns.push({ sev: 'ok', title: '특이 패턴 없음', detail: `최근 ${days}일 오류 ${n(cErr)} · 경고 ${n(cWarn)}, 반복/집중/스파이크 없음.${exclNote}` });
+  const lagList = Array.isArray(lagging) ? lagging : [];
+  // v2.772(Z4-2): 뒤처진 vCenter 가 있으면 '특이 패턴 없음' 은 받아 둔 이벤트에 한한 말이다 — 제목에 밝힌다.
+  if (!patterns.length) patterns.push({ sev: 'ok', title: lagList.length ? '받아 둔 이벤트에는 특이 패턴 없음' : '특이 패턴 없음', detail: `최근 ${days}일 오류 ${n(cErr)} · 경고 ${n(cWarn)}, 반복/집중/스파이크 없음.${exclNote}` });
+  if (lagList.length) {
+    const one = vcId ? lagList.find((x) => x.vcenterId === vcId) : null;
+    const worst = lagList.reduce((a, x) => (Number(x.lagMs) > Number(a?.lagMs ?? -1) ? x : a), null);
+    patterns.unshift(one
+      ? { sev: 'unknown', code: 'collect-lag', title: `이 vCenter 의 이벤트 수집이 ${eventLagText(one.lagMs)} 뒤처져 있습니다`,
+        detail: `수집이 끝난 시각 뒤의 이벤트는 아직 받지 못했습니다(따라잡는 중일 수 있음) — 이 기간 결과는 일부입니다. 그 사이의 오류·경고는 위 개수에 없습니다.` }
+      : { sev: 'unknown', code: 'collect-lag', title: `이벤트 수집이 뒤처진 vCenter ${lagList.length}곳 — 이 기간 결과는 일부입니다`,
+        detail: `${lagList.slice(0, 5).map((x) => `${x.name || x.vcenterId}(${eventLagText(x.lagMs)})`).join(', ')}${lagList.length > 5 ? ` 외 ${lagList.length - 5}곳` : ''} — 수집이 끝난 시각 뒤의 오류·경고는 아직 받지 못했습니다(가장 긴 지연 ${eventLagText(worst?.lagMs)}).` });
+  }
 
   return {
     window: { days, since },
@@ -109,6 +125,7 @@ export async function analyzeLogsForIssues({ vcenterId = '', days: daysIn = 7 } 
       errorsCapped: cErr.capped === true, warningsCapped: cWarn.capped === true, countCap: cap },
     topTypes, topEntities, patterns,
     notCollected: ncList,
+    lagging,   // v2.772(Z4-2): 수집이 뒤처진 vCenter [{vcenterId, okAt, lagMs, source}] — null 은 판정 못 함
     ...(ncList.length ? { excluded: { errors: xErr.total, warnings: xWarn.total,
       ...(xErr.capped ? { errorsCapped: true } : {}), ...(xWarn.capped ? { warningsCapped: true } : {}) } } : {}),
     generatedAt: Date.now(),
@@ -131,12 +148,17 @@ export async function analyzeLogsForIssuesMemo({ vcenterId = '', days = 7 } = {}
   const db = deps.db || await getLogsDb();
   const nc = deps.notCollected instanceof Map ? deps.notCollected : eventNotCollectedMap();
   const mark = typeof db.lastRowid === 'function' ? db.lastRowid() : null;
-  const key = JSON.stringify([String(vcenterId || ''), clampDays(days), mark, [...nc.entries()].sort()]);
+  // v2.772(Z4-2): 지연 vCenter 집합도 키에 넣는다 — 조용한 vCenter 가 따라잡기를 마치면(새 행 없이 okAt 만 전진) lastRowid 가 그대로라
+  //   1분 동안 '뒤처짐' 을 계속 말할 수 있었다. 지연 길이는 매번 바뀌므로 id 만 넣는다(값은 기억한 결과의 것 — 최대 1분 낡음).
+  const vcKey = String(vcenterId || '');
+  const lagging = Array.isArray(deps.lagging) || deps.lagging === null ? deps.lagging
+    : await eventLagForView({ db, now: Date.now(), only: vcKey ? [vcKey] : null, notCollected: nc, deps: deps.lag || {} });
+  const key = JSON.stringify([vcKey, clampDays(days), mark, [...nc.entries()].sort(), lagging == null ? null : lagging.map((x) => x.vcenterId)]);
   const now = Date.now();
   const hit = _memo.get(key);
   if (hit && hit.p) return hit.p;
   if (hit && now - hit.at < LOG_ISSUES_MEMO_TTL_MS) return hit.v;
-  const p = analyzeLogsForIssues({ vcenterId, days }, { ...deps, db, notCollected: nc });
+  const p = analyzeLogsForIssues({ vcenterId, days }, { ...deps, db, notCollected: nc, lagging });
   _memo.set(key, { p });
   try {
     const v = await p;

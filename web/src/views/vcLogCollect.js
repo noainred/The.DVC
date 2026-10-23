@@ -4,6 +4,8 @@
  * 서버(logs/poller.js logCollectDiag)가 `collect:[{ vcenterId, count, lastStoredTs, cursorTs, okAt, capped, ended, lagMs, lastPoll, consecutiveCapped,
  * ratePerMin, state }]` 로 싣고, 범위 계정에는 scopeVcLogStatus 가 범위 밖 vCenter 와 오류 원문을 지운다. 이 모듈은 그 값을 표 칸 문구로 바꾼다.
  * 규칙: 값이 없으면 '—'(0 이 아니다) · 숫자(주기·상한)는 화면에 박지 않고 서버 값을 쓴다 · 문구에 백틱·별표 없음.
+ * v2.772(Z1-1·Z1-2·Z1-4·Z2-I1·Z1 I-1·I-2): 서버가 running(진행 중 — 그 행의 읽음/저장·상태는 직전에 끝난 주기) · skip(주기 수집에서 빼는 이유) ·
+ *   firstTs(그 vCenter 의 가장 오래된 보관 로그) · lastPoll.okAtStart·okAtEnd·everyMs(따라잡기 진척) 를 더 싣는다.
  */
 
 export const DAY_MS = 86_400_000;
@@ -37,6 +39,10 @@ function pickCollect(c) {
     read: p ? nonneg(p.read) : null, stored: p ? nonneg(p.stored) : null, ms: p ? nonneg(p.ms) : null, deadlineMs: p ? pos(p.deadlineMs) : null,
     rounds: p ? nonneg(p.rounds) : null, error: p && typeof p.error === 'string' && p.error ? p.error : null, errorHidden: p?.errorHidden === true,
     budgetMs: p ? pos(p.budgetMs) : null, hint: p && typeof p.hint === 'string' && p.hint ? p.hint : null,   // v2.765(재검토 2-c)
+    // v2.772: 진행 중(Z1-1) · 수집 제외 사유(Z1-4) · 가장 오래된 로그(Z2-I1) · 따라잡기 진척 근거(I-1)
+    running: c.running && typeof c.running === 'object' ? { since: pos(c.running.since), read: nonneg(c.running.read), stored: nonneg(c.running.stored), rounds: nonneg(c.running.rounds) } : null,
+    skip: typeof c.skip === 'string' && c.skip ? c.skip : null, firstTs: pos(c.firstTs),
+    okAtStart: p ? pos(p.okAtStart) : null, okAtEnd: p ? pos(p.okAtEnd) : null, everyMs: p ? pos(p.everyMs) : null,
   };
 }
 
@@ -47,11 +53,38 @@ const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? 
 const pos = (v) => { const n = num(v); return n != null && n > 0 ? n : null; };
 const nonneg = (v) => { const n = num(v); return n != null && n >= 0 ? n : null; };
 
-/** 상태 코드 → 표기. 서버 state 가 없으면(이번 주기 기록 없음) '—'. */
-export const VCLOG_STATE_TEXT = Object.freeze({ 'catching-up': '따라잡기 중', stalled: '정체', ok: '정상', failed: '실패' });
-export const VCLOG_STATE_CLASS = Object.freeze({ 'catching-up': 'amber', stalled: 'red', ok: 'green', failed: 'red' });
+/**
+ * 상태 코드 → 표기. 서버 state 가 없으면(이번 주기 기록 없음) '—'.
+ * v2.772(Z1-4·I-3): 'auth-stopped'(인증 정지 — 주기 수집에서 건너뜀) · 'not-collected'(직접 수집 대상 아님). 서버 콘솔(logs/poller.js COLLECT_STATE_TEXT)과 같은 말.
+ */
+export const VCLOG_STATE_TEXT = Object.freeze({ 'catching-up': '따라잡기 중', stalled: '정체', ok: '정상', failed: '실패', 'auth-stopped': '인증 정지', 'not-collected': '수집 안 함' });
+export const VCLOG_STATE_CLASS = Object.freeze({ 'catching-up': 'amber', stalled: 'red', ok: 'green', failed: 'red', 'auth-stopped': 'red', 'not-collected': 'gray' });
 export function vcLogStateText(state) { return VCLOG_STATE_TEXT[state] || '—'; }
 export function vcLogStateClass(state) { return VCLOG_STATE_CLASS[state] || 'gray'; }
+/** v2.772(Z1-4): 수집 제외 사유 → 안내(상태 칸 툴팁). 모르면 ''. */
+export const VCLOG_SKIP_TEXT = Object.freeze({
+  'auth-stopped': '인증 실패로 멈춘 vCenter 입니다 — 주기 수집에서 건너뜁니다(vCenter 관리에서 계정·비밀번호를 확인하세요).',
+  disabled: '관리자가 끈 vCenter 입니다 — 이 포탈은 수집하지 않습니다.',
+  maintenance: '점검중인 vCenter 입니다 — 수집을 멈췄습니다.',
+  site: '엣지에 위임한 vCenter 입니다 — 이 포탈은 수집하지 않습니다(로그는 엣지가 보관합니다).',
+});
+export function vcLogSkipText(row) { return (row && typeof row === 'object' && VCLOG_SKIP_TEXT[row.skip]) || ''; }
+/**
+ * v2.772(Z1 I-2): 상태 칸 정렬 값 — 심각도 순(오름차순이면 실패·인증 정지·정체가 위). 예전 data-sort 는 코드 문자열이라 '정체'(빨강)가 '정상' 뒤였다.
+ *   상태를 모르면 ''(STable 이 항상 뒤로).
+ */
+export const VCLOG_STATE_RANK = Object.freeze({ failed: 0, 'auth-stopped': 1, stalled: 2, 'catching-up': 3, 'not-collected': 4, ok: 5 });
+export function vcLogStateSort(row) { const r = VCLOG_STATE_RANK[row?.state]; return Number.isInteger(r) ? r : ''; }
+/**
+ * v2.772(Z1-1): 진행 중 문구 — '수집 중 · 읽음 1,200 / 저장 1,200(묶음 12)'. 진행 중이 아니면 ''.
+ *   그 행의 읽음/저장·소요·상태는 **직전에 끝난 주기** 값이다(서버 lastPoll) — 진행분은 여기서만 말한다.
+ */
+export function vcLogRunningText(row, fmt = (n) => Number(n).toLocaleString()) {
+  const r = row && typeof row === 'object' ? row.running : null;
+  if (!r) return '';
+  const rounds = r.rounds != null && r.rounds > 1 ? `(묶음 ${fmt(r.rounds)})` : '';
+  return `수집 중 · 읽음 ${r.read == null ? '—' : fmt(r.read)} / 저장 ${r.stored == null ? '—' : fmt(r.stored)}${rounds}`;
+}
 
 /** 지연 문구 — '3일 4시간' · '5시간' · '12분' · '1분 미만'. 모르면 '—'. */
 export function vcLogLagText(lagMs) {
@@ -71,26 +104,76 @@ export function vcLogLagWarn(lagMs) { const n = nonneg(lagMs); return n != null 
 export const VCLOG_ENDED_TEXT = Object.freeze({ max: '상한', pages: '쪽 수 한도', aborted: '시한', budget: '예산', batch: '중단', empty: '아니오' });
 export function vcLogCappedText(row) {
   if (!row || typeof row !== 'object') return '—';
+  // v2.772(Z1-1): 진행 중이면 서버 ended 는 진행분의 중간 묶음('batch')이다 — '중단' 이 아니라 '진행 중'.
+  if (row.running) return '진행 중';
   if (row.ended && VCLOG_ENDED_TEXT[row.ended]) return row.capped === false && row.ended !== 'empty' ? '아니오' : VCLOG_ENDED_TEXT[row.ended];
   if (row.capped === true) return '상한';
   if (row.capped === false) return '아니오';
   return '—';
 }
 
-/** 읽음/저장 — '4,000 / 3,990'. 둘 다 모르면 '—'. 회차가 2 이상이면 '(3회)' 를 붙인다. */
+/**
+ * 읽음/저장 — '4,000 / 3,990'. 둘 다 모르면 '—'. 묶음이 2 이상이면 '(묶음 3)' 을 붙인다.
+ * v2.772(Z1 I-2): 예전 '(3회)' 는 실제로는 한 세션 안의 묶음(batchRows 건) 수였다 — '묶음' 으로. (Z1-1) 진행 중이면 이 값은 직전 주기 — '직전 ' 을 앞에.
+ */
 export function vcLogReadStoredText(row, fmt = (n) => Number(n).toLocaleString()) {
   if (!row || (row.read == null && row.stored == null)) return '—';
   const r = row.read == null ? '—' : fmt(row.read);
   const s = row.stored == null ? '—' : fmt(row.stored);
-  const rounds = row.rounds != null && row.rounds > 1 ? ` (${row.rounds}회)` : '';
-  return `${r} / ${s}${rounds}`;
+  const rounds = row.rounds != null && row.rounds > 1 ? ` (묶음 ${fmt(row.rounds)})` : '';
+  return `${row.running ? '직전 ' : ''}${r} / ${s}${rounds}`;
 }
 
 /** 소요/시한 — '12초 / 60초'. 소요를 모르면 '—'. 시한을 모르면(데모) 소요만. */
 export function vcLogDurText(row) {
   if (!row || row.ms == null) return '—';
   const sec = (ms) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)}초` : `${Math.round(ms / 1000)}초`);
-  return row.deadlineMs != null ? `${sec(row.ms)} / ${sec(row.deadlineMs)}` : sec(row.ms);
+  const t = row.deadlineMs != null ? `${sec(row.ms)} / ${sec(row.deadlineMs)}` : sec(row.ms);
+  return row.running ? `직전 ${t}` : t;
+}
+
+/** v2.772(Z1-2): 보관 건수 집계 시각(서버 store.countsAt — 건수는 최대 5분 캐시) → '3분 전 집계' · '방금 집계'. 모르면 ''. */
+export function vcLogCountsAtText(countsAt, now = Date.now()) {
+  const t = pos(countsAt);
+  if (t == null) return '';
+  const d = Math.max(0, now - t);
+  return d < 60_000 ? '방금 집계' : `${vcLogLagText(d)} 전 집계`;
+}
+
+/**
+ * v2.772(Z1 I-1): 따라잡기 진척 — 지난 주기에 온전한 시각이 얼마나 나아갔는가(okAtEnd − okAtStart)에서 주기 간격(everyMs — 그동안 새로 쌓이는 시간)을 뺀 것이
+ *   주기당 순진척이다. 양수면 '주기마다 N 따라잡음 · 약 M 뒤 완료(추정)', 0 이하면 '생성 속도를 못 따라감'. 따라잡기·정체 상태에서만 말하고, 근거가 없으면 '—'.
+ *   추정의 한계: 주기가 밀려(busy) 실제 간격이 길면 낙관적이다 · 지난 한 주기 속도만 본다.
+ */
+export function vcLogCatchupText(row) {
+  if (!row || typeof row !== 'object' || (row.state !== 'catching-up' && row.state !== 'stalled')) return '';
+  const a = row.okAtStart; const b = row.okAtEnd; const every = row.everyMs;
+  if (a == null || b == null || every == null) return '따라잡기 진척 —';
+  const net = (b - a) - every;
+  if (net <= 0) return `따라잡기 진척: 생성 속도를 못 따라갑니다(지난 주기 기준 주기마다 지연 ${vcLogLagText(-net)} 증가 — 추정)`;
+  const lag = nonneg(row.lagMs);
+  const eta = lag == null ? '—' : `약 ${vcLogLagText((lag / net) * every)} 뒤`;
+  return `따라잡기 진척: 주기마다 ${vcLogLagText(net)} 따라잡음 · 완료 예상 ${eta}(지난 주기 속도 기준 추정)`;
+}
+
+/**
+ * v2.772(Z2-I1): 용량 상한이 실제 보관 기간을 정하고 있다는 안내. 화면에는 '보관 기간 365일' 만 보여 용량 상한(사용 중 크기)이 며칠 만에
+ *   오래된 로그를 지우는 사실이 드러나지 않았다. 마지막 용량 정리(lastCap)가 지운 것이 있고 그 상한이 지금 설정과 같을 때만 말한다.
+ *   가장 오래된 로그는 store.firstTs(전체 범위) 또는 표 행 firstTs 의 최솟값(범위 계정 — 전 법인 값은 오지 않는다). 모르면 '—'.
+ */
+export function vcLogCapNoteText(st, rows = [], { now = Date.now(), fmtTime = (ts) => new Date(ts).toLocaleString('ko-KR') } = {}) {
+  const cap = st?.lastCap;
+  const mb = pos(st?.settings?.maxSizeMB);
+  if (!cap || typeof cap !== 'object' || !(nonneg(cap.dropped) > 0) || mb == null || pos(cap.limitBytes) !== mb * 1024 * 1024) return '';
+  let oldest = pos(st?.store?.firstTs);
+  if (oldest == null) for (const r of Array.isArray(rows) ? rows : []) { const t = pos(r?.firstTs); if (t != null && (oldest == null || t < oldest)) oldest = t; }
+  const days = pos(st?.settings?.retentionDays);
+  const span = oldest == null ? null : Math.max(0, now - oldest);
+  const shorter = span != null && days != null && span < days * DAY_MS ? `, 설정 보관 ${days.toLocaleString()}일보다 짧음` : '';
+  const oldestTxt = oldest == null ? '가장 오래된 로그 —' : `가장 오래된 로그 ${fmtTime(oldest)}(약 ${vcLogLagText(span)} 전${shorter})`;
+  const tail = cap.stuck === true ? ' — 지웠지만 사용 중 크기가 줄지 않아 멈췄습니다' : cap.done === false ? ' — 아직 상한을 넘어 다음 주기에 이어 지웁니다' : '';
+  const at = pos(cap.at);
+  return `용량 상한(${mb.toLocaleString()}MB)이 실제 보관 기간을 정하고 있습니다 — ${oldestTxt} · 마지막 용량 정리 ${at == null ? '—' : fmtTime(at)}에 ${Number(cap.dropped).toLocaleString()}건 삭제${tail}.`;
 }
 
 /**

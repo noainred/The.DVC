@@ -1,6 +1,6 @@
 // v2.702(A7·A8) — VM 이동·구성 변경 이력 문구. 판정은 서버 vmchanges/analyze.js 가 한다(이동 종류 키는 1:1 — 테스트 대조).
 // 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석).
-import { notCollectedNote, notCollectedItems, notCollectedWhyText } from '../eventCoverageText.js'; // v2.733(C1-01)
+import { notCollectedNote, notCollectedItems, notCollectedWhyText, lagDurText } from '../eventCoverageText.js'; // v2.733(C1-01) · v2.772(Z4-2)
 export const MOVE_KIND_LABEL = Object.freeze({ drs: 'DRS 자동 이동', vmotion: 'vMotion(호스트)', svmotion: 'Storage vMotion', both: '호스트+스토리지', relocate: '이전(재배치)' });
 export const CHANGE_KIND_LABEL = Object.freeze({ reconfig: '구성 변경', permission: '권한 변경', role: '역할 변경' });
 const DAY = 86_400_000;
@@ -67,4 +67,24 @@ export function vmHistoryNotCollectedText(d) {
   if (!why) return null;
   const has = Array.isArray(d.items) && d.items.length > 0;
   return `이 VM 의 vCenter 는 이 포탈이 지금 이벤트를 수집하지 않습니다(${notCollectedWhyText(why)}) — ${has ? '아래는 수집을 멈추기 전 이력이고 그 뒤는 알 수 없습니다.' : '‘이동·변경 없음’ 이 아닙니다.'}`;
+}
+
+/** v2.772(Z4-2): VM 상세 이력의 '마지막 이벤트가 낡았다' 기준 — 서버가 지연(lagging)을 주지 않을 때만 쓰는 목록 화면(coverageNote)과 같은 2일. */
+export const HISTORY_STALE_MS = 2 * DAY;
+/**
+ * v2.772(Z4-2): VM 상세 이동·변경 이력 — 이 VM 의 vCenter 이벤트 수집이 뒤처졌으면 그 사실(없으면 null).
+ * 서버가 `lagging`({okAt, lagMs} — logs/coverage.js 판정)을 주면 그것을, 없으면(옛 서버는 lastTs 만 준다) 마지막 이벤트 시각이
+ * 목록 화면과 같은 기준(2일)보다 오래됐을 때만 말한다. 지금 수집하지 않는 vCenter(notCollected)는 다른 문장이 말하므로 null.
+ * '받아 둔 이벤트 중 이동·변경 없음' 이 그 뒤까지 뜻하지 않게 한다.
+ */
+export function vmHistoryLagText(d, now = Date.now()) {
+  if (!d || (typeof d.notCollected === 'string' && d.notCollected)) return null;
+  const lg = d.lagging && typeof d.lagging === 'object' ? d.lagging : null;
+  const lagMs = lg && Number.isFinite(lg.lagMs) && lg.lagMs > 0 ? lg.lagMs
+    : (!lg && Number.isFinite(d.lastTs) && d.lastTs > 0 && now - d.lastTs > HISTORY_STALE_MS ? now - d.lastTs : null);
+  if (lagMs == null) return null;
+  const dur = lagDurText(lagMs);
+  return lg
+    ? `이 VM 의 vCenter 는 이벤트 수집이 ${dur} 뒤처져 있습니다(따라잡는 중일 수 있음) — 그 사이의 이동·변경은 아직 받지 못했습니다. 이 기간 결과는 일부입니다.`
+    : `이 VM 의 vCenter 에서 받은 마지막 이벤트가 ${dur} 전입니다 — 그 뒤의 이동·변경은 아직 받지 못했을 수 있습니다(수집 지연·정지).`;
 }

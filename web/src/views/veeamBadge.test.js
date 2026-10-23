@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rowActions, agentAfterVcToggle, statusCell, formAfterSave } from './VeeamSettings.jsx';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText, snapCollectorText, SNAP_COLLECTOR_TEXT } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -378,5 +378,42 @@ describe('v2.763(V4-2) — 아는 Veeam 계정이 이 vCenter 이벤트에 한 �
     expect(r.n).toBe(0);
     expect(r.why).toBe(ACCOUNT_UNSEEN);
     expect(veeamEventChip({ status: 'ok', days: 7, byVm: { a: [1, 1] }, verdict: { ok: true, reason: null, accountUnseen: true } }).why).not.toBe(ACCOUNT_UNSEEN);
+  });
+});
+
+describe('v2.772(Z3 I1) — 전용 수집기가 보완하지 못한 이유(서버 snapCollector 코드)를 stale 문구에 한 줄', () => {
+  const DAY = 86_400_000;
+  const now = new Date(2026, 9, 23, 9, 0).getTime();
+  it('코드별 문구 — 무엇을 하면 되는지 · 모르는 코드·없음은 빈 문자열 · 백틱 없음', () => {
+    for (const k of ['failed', 'no-account', 'accounts-over-limit', 'not-covered', 'shared-only', 'unseen', 'refilling']) {
+      expect(snapCollectorText(k)).toMatch(/^Veeam 계정 전용 수집으로도 보완하지 못했습니다: /);
+      expect(SNAP_COLLECTOR_TEXT[k]).not.toMatch(/`/);
+    }
+    expect(snapCollectorText('shared-only')).toMatch(/공용 계정/);
+    expect(snapCollectorText('shared-only')).toMatch(/Veeam 전용 계정/);
+    expect(snapCollectorText('unseen')).toMatch(/CORP\\계정/);
+    expect(snapCollectorText('bogus')).toBe('');
+    expect(snapCollectorText(null)).toBe('');
+    expect(snapCollectorText(undefined)).toBe('');
+  });
+  it('카드 — stale-events·no-collect-yet 칸에만 · 코드가 없으면 예전 그대로', () => {
+    const base = { src: 'snap', n: null, reason: 'stale-events', collectedAt: now - 9 * DAY, snapNow: 0 };
+    const c = backupCell({ ...base, snapCollector: 'shared-only' }, null, now);
+    expect(c.text).toBe('—');
+    expect(c.title).toMatch(/수집이 9일 뒤처짐/);
+    expect(c.title).toMatch(/전용 수집으로도 보완하지 못했습니다: 적힌 계정이 공용 계정/);
+    expect(backupCell(base, null, now).title).not.toMatch(/전용 수집/);
+    expect(backupCell({ src: 'snap', n: null, reason: 'no-collect-yet', snapCollector: 'failed' }, null, now).title).toMatch(/읽지 못했습니다\(접속 실패/);
+    // 다른 사유(예: 등록부)에는 싣지 않는다
+    expect(backupCell({ src: 'snap', n: null, reason: 'preparing', snapCollector: 'unseen' }, null, now).title).not.toMatch(/전용 수집/);
+  });
+  it('VM 칩 — stale-events 문구 뒤에 한 줄 · 판정 ok 면 붙이지 않는다', () => {
+    const ev = { status: 'ok', byVm: { a: [1, 1] }, accounts: 1, at: now, collectedAt: now - 9 * DAY, verdict: { ok: false, reason: 'stale-events' }, snapCollector: 'not-covered' };
+    const chip = veeamEventChip(ev);
+    expect(chip.n).toBe(null);
+    expect(chip.why).toMatch(/수집이 9일 뒤처짐/);
+    expect(chip.why).toMatch(/전용 수집으로도 보완하지 못했습니다: 이 vCenter 에서 본 Veeam 계정 중 적히지 않은 계정/);
+    expect(veeamEventChip({ ...ev, snapCollector: undefined }).why).not.toMatch(/전용 수집/);
+    expect(veeamEventChip({ ...ev, verdict: { ok: true, reason: null }, collectedAt: now }).why).not.toMatch(/전용 수집/);
   });
 });

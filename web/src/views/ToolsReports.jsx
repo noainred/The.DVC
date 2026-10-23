@@ -17,7 +17,7 @@ import { alertChannelsBody } from './alertChannelsBody.js';
 import { alertsLockReason, channelUrlField, withoutHiddenUrls } from './alertChannelUrlText.js'; // v2.732(그룹 i3): 범위 계정 URL 가림·저장 잠금
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
 import { notCollectedNote, notCollectedOf, notCollectedOneText } from './eventCoverageText.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
-import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
+import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote, changeScanNote } from './toolsReportText.js'; // v2.772(Z4-3): changeScanNote
 import { numOrNull } from '../numOrNull.js'; // v2.727(C-01)
 import { unitText } from './unitText.js';
 import { forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
@@ -608,12 +608,14 @@ export function ChangeHistory({ scope }) {
           <SearchBox className="input" style={{ width: 160 }} placeholder="변경한 계정" value={user} onChange={setUser} />
           <SearchBox className="input" style={{ width: 160 }} placeholder="대상(VM/호스트)" value={entity} onChange={setEntity} />
           <span className="muted" style={{ fontSize: 13 }}>
-            변경 {data.total}건 / 스캔 {data.scanned}건{data.truncated ? ' (스캔 상한 도달 — 기간을 줄이세요)' : ''}
+            변경 {data.total}건 / 스캔 {data.scanned}건{data.truncated ? ' (스캔 상한 도달)' : ''}
           </span>
           {canCsv() && <button className="logout-btn" onClick={() => exportCsv('change-history', ['시각', 'vCenter', '분류', '타입', '계정', '대상', '내용'],
             (data.rows || []).map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.category, r.type, r.user, r.entity, r.message]))}>CSV</button>}
         </div>
       </div>
+      {/* v2.772(Z4-3): 상한에 닿으면 실제로 훑은 시각 범위 — 예전 '기간을 줄이라' 는 안내는 효과가 없었다 */}
+      {changeScanNote(data, fmtDate) && <div className="banner" style={{ marginBottom: 8, fontSize: 12, whiteSpace: 'normal' }}>⚠ {changeScanNote(data, fmtDate)}</div>}
       {changeCoverageNote(data, scope) && <div className="banner" style={{ marginBottom: 8, fontSize: 12 }}>{changeCoverageNote(data, scope)}</div>}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap" style={{ maxHeight: '62vh' }}>

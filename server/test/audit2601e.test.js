@@ -266,7 +266,7 @@ test('DB2601-03(poller): 용량 제한 정리는 청크마다 이벤트 루프�
     const before = db.rowCount();
     let turns = 0; let live = true;
     const spin = () => { if (!live) return; turns += 1; setImmediate(spin); };
-    await pollTimes(9);
+    // v2.772(Z2-2): 용량은 둘째 주기부터 매 주기 확인한다 — 앞 테스트가 틱을 올려 두었으므로 바로 다음 주기가 정리 주기다(10주기를 기다리지 않는다).
     setImmediate(spin);
     const { pollLogsOnce } = await import('../src/logs/poller.js');
     const p = pollLogsOnce({ manual: true });

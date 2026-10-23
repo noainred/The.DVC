@@ -138,6 +138,15 @@ export function computeUnprotected(vms, rows, opts = {}) {
     ? new Map([...opts.notCollectedVcenterIds].map(([k, v]) => [String(k), v == null ? null : String(v)])) : null;
   const notCollected = opts.notCollectedVcenterIds == null ? null
     : ncWhy ? new Set(ncWhy.keys()) : new Set([...opts.notCollectedVcenterIds].map(String));
+  //   · opts.laggingVcenters(v2.772 Z4-1) — 수집은 하지만 완결 시각(logs/coverage.js eventLagList — 가용성과 같은 판정)이 허용치보다 낡은
+  //     vCenter: Map(id → {okAt, lagMs}) 또는 그 목록. 그 vCenter 의 **보호 근거가 없는** VM 은 미보호가 아니라 판정 불가('collect-lag') —
+  //     완결 시각 뒤(아직 수집 전 구간)에 백업됐을 수 있다. 보호 근거가 보인 VM 은 그대로 보호다(근거는 실재한다).
+  const lagRaw = opts.laggingVcenters;
+  const lagging = new Map();
+  for (const x of lagRaw instanceof Map ? [...lagRaw].map(([k, v]) => ({ ...(v && typeof v === 'object' ? v : {}), vcenterId: k })) : Array.isArray(lagRaw) ? lagRaw : []) {
+    if (!x || x.vcenterId == null || x.vcenterId === '') continue;
+    lagging.set(String(x.vcenterId), { okAt: numOrNull(x.okAt), lagMs: numOrNull(x.lagMs) });
+  }
   const undeterminedList = [];
   const undeterminedByReason = {};
   const unprotectedList = [];
@@ -152,7 +161,8 @@ export function computeUnprotected(vms, rows, opts = {}) {
     if (hit) { protectedList.push({ ...item, lastBackupTs: hit.ts, backupUser: hit.user }); continue; }
     // v2.732(B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 남은 옛 이벤트로 판정하지 않는다 — 'not-collected'.
     const why = logBlocked || (notCollected && notCollected.has(String(v.vcenterId)) ? 'not-collected'
-      : (covered && !covered.has(String(v.vcenterId)) ? 'no-events' : null));
+      : (covered && !covered.has(String(v.vcenterId)) ? 'no-events'
+        : (lagging.has(String(v.vcenterId)) ? 'collect-lag' : null)));
     if (why) {
       undeterminedByReason[why] = (undeterminedByReason[why] || 0) + 1;
       undeterminedList.push({ ...item, reason: why });
@@ -166,6 +176,11 @@ export function computeUnprotected(vms, rows, opts = {}) {
   const ncCount = new Map();
   for (const x of undeterminedList) if (x.reason === 'not-collected') ncCount.set(String(x.vcenterId), (ncCount.get(String(x.vcenterId)) || 0) + 1);
   const notCollectedVcenters = [...ncCount].map(([vcenterId, vms]) => ({ vcenterId, why: ncWhy ? (ncWhy.get(vcenterId) ?? null) : null, vms }))
+    .sort((a, b) => b.vms - a.vms || (a.vcenterId < b.vcenterId ? -1 : 1));
+  // v2.772(Z4-1): 수집이 뒤처져 판정하지 않은 vCenter 별 개수·완결 시각·지연.
+  const lagCount = new Map();
+  for (const x of undeterminedList) if (x.reason === 'collect-lag') lagCount.set(String(x.vcenterId), (lagCount.get(String(x.vcenterId)) || 0) + 1);
+  const laggingVcenters = [...lagCount].map(([vcenterId, vms]) => ({ vcenterId, okAt: lagging.get(vcenterId)?.okAt ?? null, lagMs: lagging.get(vcenterId)?.lagMs ?? null, vms }))
     .sort((a, b) => b.vms - a.vms || (a.vcenterId < b.vcenterId ? -1 : 1));
   unprotectedList.sort(byStorageDesc);
   protectedList.sort((a, b) => b.lastBackupTs - a.lastBackupTs);
@@ -186,10 +201,11 @@ export function computeUnprotected(vms, rows, opts = {}) {
         ? Math.round((protectedList.length / (unprotectedList.length + protectedList.length)) * 100)
         : (undeterminedList.length > 0 ? null : 0),
       undeterminedCount: undeterminedList.length,        // v2.622(DATA-05): 이벤트 미수집으로 판정하지 않은 가동 VM 수
-      undeterminedByReason,                              // { 'log-collection-off' | 'severity-filter' | 'no-events': N }
+      undeterminedByReason,                              // { 'log-collection-off' | 'severity-filter' | 'no-events' | 'not-collected' | 'collect-lag'(v2.772): N }
       noEventVcenters,                                   // 조회 창 안 이벤트가 0건이라 판정하지 않은 vCenter id
       notCollectedVcenters,                              // v2.733: 지금 수집하지 않아 판정하지 않은 vCenter {vcenterId, why, vms}
-      coverageKnown: covered != null || ls != null,      // 호출자가 커버리지 근거를 줬는가(false 면 예전 판정 그대로)
+      laggingVcenters,                                   // v2.772(Z4-1): 수집이 뒤처져 판정하지 않은 vCenter {vcenterId, okAt, lagMs, vms}
+      coverageKnown: covered != null || ls != null || lagRaw != null,   // 호출자가 커버리지 근거를 줬는가(false 면 예전 판정 그대로)
     },
     unprotected: unprotectedList.slice(0, 1000),
     protected: protectedList.slice(0, 1000),
