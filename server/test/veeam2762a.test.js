@@ -302,7 +302,8 @@ test('G3: 관리 GET 의 readsHere — 엣지는 받은 자기 몫(꺼진 것 �
   } finally { resetAgent(); clearRegistry(); store.snapshot = prevSnap; }
   // 화면: 버튼 조건이 readsHere 를 본다 · 각주·거절 문구가 엣지 포탈의 같은 화면을 가리킨다
   const web = stripComments(fs.readFileSync(new URL('../../web/src/views/VeeamSettings.jsx', import.meta.url), 'utf8'));
-  assert.equal((web.match(/\(!s\.agent \|\| s\.readsHere\) && <><button/g) || []).length, 2, '연결 시험·지금 읽기 둘 다');
+  // v2.763(V5-1): 행 버튼은 rowActions(순수 — 웹 테스트가 동작을 본다)로 옮겼다 — 두 버튼이 같은 readsHere 조건 블록 안에 있다.
+  assert.match(web, /if \(!s\.agent \|\| s\.readsHere\) \{\s*out\.push\(\{ kind: 'test'[\s\S]{0,400}?out\.push\(\{ kind: 'collect'/, '연결 시험·지금 읽기 둘 다');
   assert.ok(!/\{!s\.agent && <><button/.test(web), '옛 조건(!s.agent 만)이 남지 않는다');
   assert.match(web, /그 엣지 포탈의 이 화면\(설정 › Veeam 백업 서버\)/);
   const route = fs.readFileSync(new URL('../src/routes/admin/veeam.js', import.meta.url), 'utf8');

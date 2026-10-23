@@ -16,7 +16,8 @@ import { droppedSecretNote } from './droppedSecretText.js';
 import { resultLabel } from './veeamBadge.js';
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
 
-const EMPTY = { id: '', name: '', host: '', port: '', username: '', password: '', apiVersion: '', agent: '', vcenterIds: [], enabled: true, note: '' };
+// v2.763(V5-2): agentTouched — 사람이 '읽는 곳' 을 골랐는가('' 는 '아직 안 고름' 과 '중앙에서 직접(명시)' 둘 다라 따로 든다). 서버로 보내지 않는다.
+const EMPTY = { id: '', name: '', host: '', port: '', username: '', password: '', apiVersion: '', agent: '', agentTouched: false, vcenterIds: [], enabled: true, note: '' };
 const fmt = (ms) => {
   if (ms == null || !Number.isFinite(Number(ms))) return '—';
   const d = new Date(Number(ms)); const p = (n) => String(n).padStart(2, '0');
@@ -27,11 +28,45 @@ const num = (v) => (Number.isFinite(v) ? v : null);
 /** 상태 칸 문구·색. */
 export function statusCell(st) {
   if (!st) return { text: '아직 읽지 않음', tone: 'muted' };
+  // v2.763(V5-4): 성공 결과라도 한도보다 오래됐으면(엣지가 멈춤 등) '정상' 만 말하지 않는다 — 사용자 화면의 stale 과 같은 판정(서버가 준 값).
+  if (st.ok && st.stale) return { text: `오래된 결과 · ${fmt(st.ts)} — 그 뒤로 새 결과가 오지 않았습니다(백업 중 수는 모름)`, tone: 'warn' };
   if (st.ok) return { text: `정상 · ${fmt(st.ts)}`, tone: 'ok' };
   if (st.authStop) return { text: `인증 실패로 주기 수집 정지 · ${st.error || ''}`, tone: 'bad' };
   return { text: `실패 · ${fmt(st.ts)} · ${st.error || '사유 미상'}${st.lastOkTs ? ` (마지막 성공 ${fmt(st.lastOkTs)})` : ''}`, tone: 'bad' };
 }
-const TONE = { ok: '#4ade80', bad: '#f87171', muted: 'var(--text-dim)' };
+const TONE = { ok: '#4ade80', bad: '#f87171', warn: 'var(--amber)', muted: 'var(--text-dim)' };
+
+/**
+ * v2.763(V5-2): vCenter 를 체크할 때 읽는 곳 제안 — **신규이고 사람이 읽는 곳을 건드리지 않았고 아직 비어 있을 때만** 그 vCenter 를 보고하는
+ *   엣지로. 예전에는 '' 를 '미선택' 으로만 봐서 편집 중 사람이 고른 '중앙에서 직접' 을 조용히 엣지로 바꿨다(다음 pull 로 비밀번호가 그 엣지로 간다).
+ */
+export function agentAfterVcToggle(f, adding, siteAgent) {
+  if (!adding || f.id || f.agentTouched || f.agent) return f.agent;
+  return siteAgent || '';
+}
+
+/**
+ * v2.763(V5-1·V2-1): 행 동작 버튼. 진행 중 잠금은 **그 서버의 그 버튼만**(docs/rules/web.md v2.529) — 편집·작업 목록은 잠그지 않고, 잠긴 버튼은 title 로 이유.
+ *   엣지에서 중앙이 배정한 서버(centralManaged)는 편집·삭제 대신 안내(서버도 409) — 연결 시험·지금 읽기는 그대로(엣지에서 인증 정지를 푸는 길).
+ * @param {object} s 목록 원소 @param {Set<string>} busy 진행 중 키('test:<id>'·'collect:<id>'·'del:<id>'·'save')
+ */
+export function rowActions(s, busy) {
+  const on = (k) => !!busy?.has?.(`${k}:${s.id}`);
+  const out = [];
+  if (!s.agent || s.readsHere) {
+    out.push({ kind: 'test', label: on('test') ? '시험 중…' : '연결 시험', disabled: on('test'), title: on('test') ? '이 서버의 연결 시험이 진행 중입니다 — 끝나면 다시 누를 수 있습니다' : undefined });
+    const off = s.enabled === false;
+    out.push({ kind: 'collect', label: on('collect') ? '읽는 중…' : '지금 읽기', disabled: off || on('collect'),
+      title: off ? '수집이 꺼진 서버입니다 — 편집에서 켠 뒤 읽으세요' : on('collect') ? '이 서버를 읽는 중입니다 — 끝나면 다시 누를 수 있습니다' : undefined });
+  }
+  if (s.centralManaged) {
+    out.push({ kind: 'central', label: '중앙 배정', title: '중앙 포탈이 배정한 서버입니다 — 이 엣지에서 고치면 중앙과 어긋나고 재시작 뒤 되돌아가므로 편집·삭제는 중앙 포탈의 설정 › Veeam 백업 서버에서 하세요' });
+  } else {
+    out.push({ kind: 'edit', label: '편집', disabled: false });
+    out.push({ kind: 'del', label: on('del') ? '삭제 중…' : '삭제', disabled: on('del'), title: on('del') ? '이 서버를 삭제하는 중입니다' : undefined });
+  }
+  return out;
+}
 
 export default function VeeamSettings() {
   const [d, setD] = useState(null);
@@ -39,7 +74,9 @@ export default function VeeamSettings() {
   const [denied, setDenied] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState('');
+  const [busy, setBusy] = useState(() => new Set());   // v2.763(V5-1): 진행 중인 동작 키 — 그 대상만 잠근다
+  const busyOn = (k) => setBusy((b) => new Set(b).add(k));
+  const busyOff = (k) => setBusy((b) => { const n = new Set(b); n.delete(k); return n; });
   const [open, setOpen] = useState(null); // 작업 목록을 펼친 서버 id
   const [bulk, setBulk] = useState(false); // CSV·자유텍스트 대량 등록 모달
   const seq = useRef(0);
@@ -56,27 +93,30 @@ export default function VeeamSettings() {
     return <div className="muted" style={{ fontSize: 12 }}>Veeam 백업 서버 등록은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>;
   }
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, ...(k === 'agent' ? { agentTouched: true } : {}) }));
   const toggleVc = (id) => setForm((f) => {
     const has = f.vcenterIds.includes(id);
     const vcenterIds = has ? f.vcenterIds.filter((x) => x !== id) : [...f.vcenterIds, id];
-    // 읽는 곳이 비어 있으면 그 vCenter 를 보고하는 엣지를 제안한다(같은 데이터센터의 Veeam 은 보통 그 엣지에서 닿는다).
+    // 신규이고 읽는 곳을 아직 안 골랐으면 그 vCenter 를 보고하는 엣지를 제안한다(같은 데이터센터의 Veeam 은 보통 그 엣지에서 닿는다 — v2.763 V5-2).
     const site = !has ? (d?.vcenters || []).find((v) => v.id === id)?.siteAgent : '';
-    return { ...f, vcenterIds, agent: f.agent || site || '' };
+    return { ...f, vcenterIds, agent: agentAfterVcToggle(f, !has, site) };
   });
   const save = async () => {
-    setBusy('save'); setMsg(null);
+    busyOn('save'); setMsg(null);
     try {
-      const r = await sendJson('/admin/veeam/servers', 'POST', { ...form, port: form.port === '' ? undefined : Number(form.port) });
+      const { agentTouched: _t, ...body } = form;
+      const r = await sendJson('/admin/veeam/servers', 'POST', { ...body, port: form.port === '' ? undefined : Number(form.port) });
       if (!r.ok) { setMsg({ ok: false, text: r.reason || '저장하지 못했습니다.' }); return; }
       const drop = droppedSecretNote(r.server);
       setMsg(drop ? { ok: false, text: drop } : { ok: true, text: '저장했습니다. 담당 노드가 다음 수집(엣지는 배정 pull 뒤 곧바로)에 읽습니다.' });
       setForm(drop ? { ...form, id: r.server.id, password: '' } : EMPTY);
       load();
-    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
+    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { busyOff('save'); }
   };
   const act = async (s, kind) => {
-    setBusy(`${kind}:${s.id}`); setMsg(null);
+    const key = `${kind}:${s.id}`;
+    if (busy.has(key)) return;
+    busyOn(key); setMsg(null);
     try {
       if (kind === 'del') {
         if (!window.confirm(`Veeam 서버 '${s.name}' 등록을 삭제할까요?`)) return;
@@ -84,17 +124,21 @@ export default function VeeamSettings() {
         setMsg(r?.ok === false ? { ok: false, text: r.reason || '삭제하지 못했습니다.' } : { ok: true, text: '삭제했습니다.' });
       } else {
         const r = await postJson(`/admin/veeam/servers/${encodeURIComponent(s.id)}/${kind}`, {});
-        if (kind === 'test') setMsg(r.ok ? { ok: true, text: `연결 성공 · 작업 ${r.jobs}개 · ${r.ms}ms · API ${r.apiVersion}` } : { ok: false, text: r.reason || '연결 실패' });
+        // v2.763(V5-I2): 시험 성공이 인증 실패 정지를 풀었으면 그렇게 말한다(서버가 authStopCleared) · 작업 수를 모르면 단위를 붙이지 않는다.
+        if (kind === 'test') setMsg(r.ok ? { ok: true, text: `연결 성공 · 작업 ${Number.isFinite(r.jobs) ? `${r.jobs}개` : '수 모름'} · ${r.ms}ms · API ${r.apiVersion}${r.authStopCleared ? ' · 인증 실패로 멈춘 주기 수집을 풀었습니다(다음 주기부터 다시 읽습니다)' : ''}` } : { ok: false, text: r.reason || '연결 실패' });
         // v2.761(D6): 응답의 ok 는 성공 여부(불리언) · 개수는 okCount/failCount. 실패하면 서버가 준 사유(status.error)까지 보인다.
         else setMsg(r.ok ? { ok: true, text: `읽기 완료(성공 ${r.okCount ?? 0} · 실패 ${r.failCount ?? 0})` }
           : { ok: false, text: r.reason || (r.skipped ? '이미 수집 중입니다 — 끝나면 목록에 반영됩니다' : `읽기 실패${r.status?.error ? `: ${r.status.error}` : ''}`) });
       }
       load();
-    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
+    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { busyOff(key); }
   };
 
   const servers = d?.servers || [];
-  const edit = (s) => setForm({ id: s.id, name: s.name, host: s.host, port: String(s.port || ''), username: s.username, password: '', apiVersion: s.apiVersion || '', agent: s.agent || '', vcenterIds: s.vcenterIds || [], enabled: s.enabled !== false, note: s.note || '' });
+  // 기존 서버의 읽는 곳은 이미 정해진 값이다(agentTouched — vCenter 를 더 체크해도 바꾸지 않는다).
+  const edit = (s) => setForm({ id: s.id, name: s.name, host: s.host, port: String(s.port || ''), username: s.username, password: '', apiVersion: s.apiVersion || '', agent: s.agent || '', agentTouched: true, vcenterIds: s.vcenterIds || [], enabled: s.enabled !== false, note: s.note || '' });
+  // 편집 중 읽는 곳이 중앙인데 고른 vCenter 를 엣지가 보고하면 제안만 문구로(값은 바꾸지 않는다).
+  const siteHint = !form.agent && form.agentTouched ? (d?.vcenters || []).find((v) => form.vcenterIds.includes(v.id) && v.siteAgent)?.siteAgent : '';
 
   return (
     <>
@@ -124,14 +168,14 @@ export default function VeeamSettings() {
                     <td style={{ color: TONE[c.tone], maxWidth: 360, overflowWrap: 'anywhere' }}>{c.text}</td>
                     <td className="right" data-sort={num(cn.jobs) ?? ''}>{num(cn.jobs) ?? '—'}</td>
                     <td className="right" data-sort={num(cn.vmJobs) ?? ''} title="작업에 VM 단위로 넣은 VM 수 · 복원 지점이 있는 VM 수">{num(cn.vmJobs) != null || num(cn.backupObjects) != null ? `${num(cn.vmJobs) ?? 0} · 복원 ${num(cn.backupObjects) ?? 0}` : '—'}</td>
-                    <td className="right" data-sort={num(cn.running) ?? ''}>{num(cn.running) ?? '—'}</td>
+                    <td className="right" data-sort={num(cn.running) ?? ''} title={st?.runningStale ? '실패 중이거나 오래된 결과라 지금 백업 중인 VM 수를 알 수 없습니다(0 이 아닙니다)' : undefined}>{num(cn.running) ?? '—'}</td>
                     <td className="right nowrap">
-                      <button className={open === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!!busy} onClick={() => setOpen(open === s.id ? null : s.id)}>작업 목록</button>{' '}
-                      {/* v2.762(G3): 이 노드가 읽는 서버(readsHere — 엣지에서는 받은 자기 몫)도 연다 — 엣지에서 인증 정지를 푸는 길 */}
-                      {(!s.agent || s.readsHere) && <><button className="tab" disabled={!!busy} onClick={() => act(s, 'test')}>{busy === `test:${s.id}` ? '시험 중…' : '연결 시험'}</button>{' '}</>}
-                      {(!s.agent || s.readsHere) && <><button className="tab" disabled={!!busy || s.enabled === false} title={s.enabled === false ? '수집이 꺼진 서버입니다 — 편집에서 켠 뒤 읽으세요' : undefined} onClick={() => act(s, 'collect')}>{busy === `collect:${s.id}` ? '읽는 중…' : '지금 읽기'}</button>{' '}</>}
-                      <button className="tab" disabled={!!busy} onClick={() => edit(s)}>편집</button>{' '}
-                      <button className="tab" style={{ color: 'var(--red)' }} disabled={!!busy} onClick={() => act(s, 'del')}>삭제</button>
+                      <button className={open === s.id ? 'login-btn' : 'tab'} style={{ flex: 'none' }} onClick={() => setOpen(open === s.id ? null : s.id)}>작업 목록</button>{' '}
+                      {/* v2.762(G3): 이 노드가 읽는 서버(readsHere — 엣지에서는 받은 자기 몫)도 연다 — 엣지에서 인증 정지를 푸는 길 · v2.763: 잠금은 그 버튼만 */}
+                      {rowActions(s, busy).map((a) => (a.kind === 'central'
+                        ? <span key={a.kind} className="badge gray" style={{ marginLeft: 2 }} title={a.title}>중앙 배정 — 중앙에서 수정</span>
+                        : <React.Fragment key={a.kind}><button className="tab" style={a.kind === 'del' ? { color: 'var(--red)' } : undefined} disabled={a.disabled} title={a.title}
+                          onClick={() => (a.kind === 'edit' ? edit(s) : act(s, a.kind))}>{a.label}</button>{' '}</React.Fragment>))}
                     </td>
                   </tr>
                 );
@@ -148,6 +192,7 @@ export default function VeeamSettings() {
             <div style={{ margin: '0 0 12px', padding: 10, borderRadius: 8, background: 'rgba(148,163,184,.06)', minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{s.name} — 작업 목록</div>
               {(st?.notes || []).map((n, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>ⓘ {n}</div>)}
+              {st?.runningStale && <div style={{ fontSize: 12, color: 'var(--amber)' }}>ⓘ 이 서버는 {st.ok ? '결과가 오래돼' : '지금 읽기에 실패 중이라'} 작업의 '실행 중' 여부를 표시하지 않습니다(목록은 마지막 성공 기준).</div>}
               {(st?.jobs || []).length ? (
                 <STable minWidth={640} style={{ marginTop: 6 }}>
                   <thead><tr><th>작업</th><th>상태</th><th>마지막 결과</th><th>마지막 실행</th><th className="right">VM 단위 포함</th><th className="right">컨테이너 포함</th></tr></thead>
@@ -173,6 +218,7 @@ export default function VeeamSettings() {
               <option value="">중앙에서 직접</option>
               {[...new Set([...(d?.agents || []), ...(form.agent ? [form.agent] : [])])].map((a) => <option key={a} value={a}>엣지 {a}</option>)}
             </Select>
+            {siteHint && <span className="muted" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>고른 vCenter 를 엣지 {siteHint} 가 보고합니다 — 그 엣지에서 읽으려면 위에서 바꾸세요.</span>}
           </label>
           <label>메모 <input className="input" value={form.note} onChange={set('note')} /></label>
         </div>
@@ -192,9 +238,9 @@ export default function VeeamSettings() {
         </label>
         {msg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171', overflowWrap: 'anywhere' }}>{msg.text}</div>}
         <div className="flex gap wrap" style={{ marginTop: 10 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || !form.host || !form.name || !form.vcenterIds.length} onClick={save}>{busy === 'save' ? '저장 중…' : form.id ? '수정 저장' : '등록'}</button>
-          {form.id && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy} onClick={() => { setForm(EMPTY); setMsg(null); }}>새로 입력</button>}
-          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy} onClick={() => setBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy.has('save') || !form.host || !form.name || !form.vcenterIds.length} title={busy.has('save') ? '저장 중입니다' : undefined} onClick={save}>{busy.has('save') ? '저장 중…' : form.id ? '수정 저장' : '등록'}</button>
+          {form.id && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy.has('save')} title={busy.has('save') ? '저장 중입니다' : undefined} onClick={() => { setForm(EMPTY); setMsg(null); }}>새로 입력</button>}
+          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
           읽는 것: 작업 목록(작업에 VM 단위로 넣은 VM) · 작업 상태 · 백업 객체(복원 지점이 있는 VM) · 실행 중 세션의 VM 별 진행. 작업을 시작·중지하지 않습니다(조회 전용).

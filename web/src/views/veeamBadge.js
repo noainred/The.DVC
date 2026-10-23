@@ -305,8 +305,13 @@ const BACKUP_REASON = {
  * @param {object|null} e  byVc[vcenterId]
  * @param {number|null} vmFallback  서버가 전체 VM 수를 못 줬을 때 카드의 VM 수
  */
-export function backupCell(e, vmFallback = null, now = Date.now()) {
+export function backupCell(e, vmFallback = null, now = Date.now(), { refreshError = '' } = {}) {
   if (!e || typeof e !== 'object' || (e.src !== 'veeam' && e.src !== 'snap')) return null;
+  // v2.763(V5-I1): 첫 응답 뒤 갱신이 실패하면 usePolling 은 옛 값을 그대로 둔다 — 옛 'n/전체'·색을 표지 없이 그리지 않는다(VM 화면 D8 과 같은 방식).
+  if (refreshError) {
+    const c = backupCell(e, vmFallback, now);
+    return c && { ...c, tone: c.tone === 'none' ? 'none' : 'warn', refreshFailed: true, title: `최근 갱신에 실패했습니다 — 마지막으로 받은 값입니다: ${String(refreshError).slice(0, 120)}\n${c.title}` };
+  }
   const veeam = e.src === 'veeam';
   const total = Number.isFinite(e.vmTotal) ? e.vmTotal : (Number.isFinite(vmFallback) ? vmFallback : null);
   const label = veeam ? '백업 · Veeam' : '백업 · 스냅샷';

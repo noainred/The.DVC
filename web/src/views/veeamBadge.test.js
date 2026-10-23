@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { rowActions, agentAfterVcToggle, statusCell } from './VeeamSettings.jsx';
 import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
@@ -261,5 +262,53 @@ describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
     const base = { status: 'ok', byVm: { a: [1, 1] }, accounts: 1, at, collectedAt: at - 11 * 3_600_000 };
     expect(veeamEventStatusText({ ...base, staleMs: 24.5 * 3_600_000 })).toBe('');
     expect(veeamEventStatusText(base)).toMatch(/마지막으로 수집한 시각/);
+  });
+});
+
+describe('v2.763 — Veeam 등록·관리 화면 점검 수정(웹, 그룹 A)', () => {
+  const S = { id: 's1', agent: '', enabled: true };
+  it('V5-1: 진행 중 잠금은 그 서버의 그 버튼만 · 편집은 잠그지 않음 · 잠긴 버튼에 title', () => {
+    const busy = new Set(['collect:s1', 'test:s2']);
+    const a = Object.fromEntries(rowActions(S, busy).map((x) => [x.kind, x]));
+    expect(a.collect.disabled).toBe(true); expect(a.collect.title).toMatch(/읽는 중/); expect(a.collect.label).toBe('읽는 중…');
+    expect(a.test.disabled).toBe(false); expect(a.edit.disabled).toBe(false); expect(a.del.disabled).toBe(false);
+    const b = Object.fromEntries(rowActions({ ...S, id: 's2' }, busy).map((x) => [x.kind, x]));
+    expect([b.test.disabled, b.collect.disabled]).toEqual([true, false]);
+    expect(b.test.title).toMatch(/진행 중/);
+    const off = Object.fromEntries(rowActions({ ...S, enabled: false }, new Set()).map((x) => [x.kind, x]));
+    expect(off.collect.disabled).toBe(true); expect(off.collect.title).toMatch(/꺼진/);
+  });
+  it('V2-1: 엣지의 중앙 배정 서버는 편집·삭제 대신 안내 — 연결 시험·지금 읽기는 그대로 · 남의 엣지 담당은 시험 버튼 없음', () => {
+    const kinds = rowActions({ ...S, agent: 'pl-edge', readsHere: true, centralManaged: true }, new Set()).map((x) => x.kind);
+    expect(kinds).toEqual(['test', 'collect', 'central']);
+    expect(rowActions({ ...S, agent: 'pl-edge', readsHere: false }, new Set()).map((x) => x.kind)).toEqual(['edit', 'del']);
+    const note = rowActions({ ...S, centralManaged: true }, new Set()).find((x) => x.kind === 'central');
+    expect(note.title).toMatch(/중앙 포탈의 설정 › Veeam 백업 서버/); expect(note.title).not.toMatch(/`/);
+  });
+  it('V5-2: 읽는 곳 제안은 신규·미선택일 때만 — 사람이 고른 중앙 직접·기존 서버는 바꾸지 않는다', () => {
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, true, 'pl-edge')).toBe('pl-edge');
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: true }, true, 'pl-edge')).toBe('', '사람이 고른 중앙에서 직접');
+    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: true }, true, 'pl-edge')).toBe('', '편집 중 기존 서버');
+    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: false }, true, 'pl-edge')).toBe('');
+    expect(agentAfterVcToggle({ id: '', agent: 'kr-edge', agentTouched: false }, true, 'pl-edge')).toBe('kr-edge', '이미 고른 엣지는 그대로');
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, false, 'pl-edge')).toBe('', '체크 해제는 제안하지 않는다');
+  });
+  it('V5-4: 성공이라도 오래된 결과는 정상이라 말하지 않는다', () => {
+    expect(statusCell({ ok: true, ts: 1, stale: true }).tone).toBe('warn');
+    expect(statusCell({ ok: true, ts: 1, stale: true }).text).toMatch(/오래된 결과/);
+    expect(statusCell({ ok: true, ts: 1 }).tone).toBe('ok');
+  });
+  it('V5-I1: 받은 뒤 갱신이 실패하면 옛 값에 최근 갱신 실패 표지(노란 칸) · 모름 칸은 색을 바꾸지 않는다', async () => {
+    const fs = await import('node:fs');
+    const e = { src: 'veeam', n: 5, vmTotal: 10, servers: 1 };
+    const ok = backupCell(e);
+    const bad = backupCell(e, null, Date.now(), { refreshError: 'HTTP 503' });
+    expect(ok.tone).toBe('veeam'); expect(ok.refreshFailed).toBeUndefined();
+    expect([bad.text, bad.tone, bad.refreshFailed]).toEqual([ok.text, 'warn', true]);
+    expect(bad.title.split('\n')[0]).toMatch(/최근 갱신에 실패했습니다.*HTTP 503/);
+    const unk = backupCell({ src: 'veeam', n: null, reason: 'veeam-failed' }, null, Date.now(), { refreshError: 'x' });
+    expect(unk.tone).toBe('none'); expect(unk.title).toMatch(/최근 갱신에 실패/);
+    const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/refreshError: backupRefreshErr/);
   });
 });

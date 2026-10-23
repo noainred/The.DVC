@@ -35,18 +35,29 @@ function genericError(r) {
  */
 const NOTE_CUT = '읽지 못했습니다';
 const ADDR_LIKE = /:\/\/|[A-Za-z0-9-]\.[A-Za-z0-9-]+:\d{2,5}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b|fingerprint|지문/i;
+/*
+ * v2.763(V5-5): 비고의 수(에이전트 백업 N대·컨테이너 N개·N건 버림·세션 N개 …)는 **서버 전체** 기준이다 — 다른 법인 vCenter 쪽 수가 섞인다
+ *   (B7 counts · F5 otherVcenter 를 관리자만 싣는 것과 같은 이유). 관리자가 아니면 'N개 중 M개' 는 지우고 'N개·대·건' 은 '일부' 로(조사도 맞춘다).
+ */
+const COUNT_OF = /\d[\d,]*\s*(?:개|대|건)\s*중\s*/g;
+const COUNT = /\d[\d,]*\s*(?:개|대|건)(을|이|은|과)?/g;
+const PARTICLE_AFTER_VOWEL = { 을: '를', 이: '가', 은: '는', 과: '와' };
+const CAP_AT = /\d[\d,]*\s*개(를 넘어|에서 잘려)/g;   // 'N개를 넘어'·'N개에서 잘려' 의 N 은 상한이다 — '상한' 으로
+export function maskCounts(t) {
+  return String(t || '').replace(CAP_AT, (_m, tail) => `상한${tail.startsWith('를') ? `을${tail.slice(1)}` : tail}`).replace(COUNT_OF, '').replace(COUNT, (_m, p) => `일부${p ? PARTICLE_AFTER_VOWEL[p] : ''}`);
+}
 function publicNote(n) {
   const t = String(n || '').slice(0, 300);   // 정제 상한(300)과 같다 — 정규식 입력 길이를 먼저 자른다
   const i = t.indexOf(`${NOTE_CUT}:`);
   const cut = i >= 0 ? `${t.slice(0, i + NOTE_CUT.length)} — 자세한 사유는 관리자 화면에 있습니다` : t;
-  return ADDR_LIKE.test(cut) ? 'Veeam 서버를 읽는 중 일부 항목에 문제가 있었습니다 — 자세한 사유는 관리자 화면에 있습니다' : cut;
+  return ADDR_LIKE.test(cut) ? 'Veeam 서버를 읽는 중 일부 항목에 문제가 있었습니다 — 자세한 사유는 관리자 화면에 있습니다' : maskCounts(cut);
 }
 
 /**
  * v2.761(B2·B5): 결과가 '지금' 이라고 볼 수 있는 한도 — 그 결과를 만든 노드의 수집 주기 × 2 + 2분.
  *   엣지가 읽은 결과는 그 엣지가 보고한 주기(veeamEdge status.poller.intervalMs), 없으면 중앙 주기.
  */
-function resultMaxAgeMs(via, agent) {
+export function resultMaxAgeMs(via, agent) {   // v2.763(V5-4): 관리 화면(routes/admin/veeam.js serverStatusView)도 같은 식을 쓴다
   const i = via === 'edge' ? veeamEdgeStatus(agent)?.status?.poller?.intervalMs : null;
   return (Number.isFinite(i) && i > 0 ? i : pollMs()) * 2 + 120_000;
 }
