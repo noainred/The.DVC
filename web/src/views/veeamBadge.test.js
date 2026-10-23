@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rowActions, agentAfterVcToggle, statusCell } from './VeeamSettings.jsx';
+import { rowActions, agentAfterVcToggle, statusCell, formAfterSave } from './VeeamSettings.jsx';
 import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
@@ -286,12 +286,41 @@ describe('v2.763 — Veeam 등록·관리 화면 점검 수정(웹, 그룹 A)', 
     expect(note.title).toMatch(/중앙 포탈의 설정 › Veeam 백업 서버/); expect(note.title).not.toMatch(/`/);
   });
   it('V5-2: 읽는 곳 제안은 신규·미선택일 때만 — 사람이 고른 중앙 직접·기존 서버는 바꾸지 않는다', () => {
-    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, true, 'pl-edge')).toBe('pl-edge');
-    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: true }, true, 'pl-edge')).toBe('', '사람이 고른 중앙에서 직접');
-    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: true }, true, 'pl-edge')).toBe('', '편집 중 기존 서버');
-    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: false }, true, 'pl-edge')).toBe('');
-    expect(agentAfterVcToggle({ id: '', agent: 'kr-edge', agentTouched: false }, true, 'pl-edge')).toBe('kr-edge', '이미 고른 엣지는 그대로');
-    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, false, 'pl-edge')).toBe('', '체크 해제는 제안하지 않는다');
+    const VCS = [{ id: 'vcPL', siteAgent: 'pl-edge' }, { id: 'vcKR', siteAgent: 'kr-edge' }, { id: 'vcC', siteAgent: '' }, { id: 'vcN' }];
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, ['vcPL'], VCS)).toBe('pl-edge');
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: true }, ['vcPL'], VCS)).toBe('', '사람이 고른 중앙에서 직접');
+    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: true }, ['vcPL'], VCS)).toBe('', '편집 중 기존 서버');
+    expect(agentAfterVcToggle({ id: 'vbr-1', agent: '', agentTouched: false }, ['vcPL'], VCS)).toBe('');
+    expect(agentAfterVcToggle({ id: '', agent: 'kr-edge', agentTouched: true }, ['vcPL'], VCS)).toBe('kr-edge', '사람이 고른 엣지는 그대로');
+    // v2.766(R1-A3-01): 자동 제안은 남은 체크로 다시 계산 — 먼저 체크한(앞의) vCenter 의 엣지가 이긴다.
+    expect(agentAfterVcToggle({ id: '', agent: 'kr-edge', agentTouched: false }, ['vcKR', 'vcPL'], VCS)).toBe('kr-edge', '자동 제안은 남은 첫 vCenter 기준');
+    expect(agentAfterVcToggle({ id: '', agent: 'kr-edge', agentTouched: false }, ['vcPL'], VCS)).toBe('pl-edge', '제안을 만든 vCenter 를 풀면 다음 vCenter 의 엣지로');
+    expect(agentAfterVcToggle({ id: '', agent: 'pl-edge', agentTouched: false }, [], VCS)).toBe('', '체크를 다 풀면 제안도 지운다');
+    expect(agentAfterVcToggle({ id: '', agent: 'pl-edge', agentTouched: false }, ['vcC', 'vcN'], VCS)).toBe('', '중앙 직접 수집 vCenter 만 남으면 중앙');
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, ['vcC', 'vcPL'], VCS)).toBe('pl-edge', 'siteAgent 없는 vCenter 는 건너뛴다');
+    expect(agentAfterVcToggle({ id: '', agent: '', agentTouched: false }, ['vcPL'], undefined)).toBe('', '목록을 못 읽었으면 제안 없음');
+  });
+  it('R1-A3-01: 화면 흐름 재현 — 엣지 vCenter 체크 → 해제 → 중앙 직접 vCenter 체크 면 중앙으로 저장된다', () => {
+    const VCS = [{ id: 'vcA', siteAgent: 'E1' }, { id: 'vcB', siteAgent: '' }];
+    let f = { id: '', agent: '', agentTouched: false, vcenterIds: [] };
+    const toggle = (id) => {
+      const has = f.vcenterIds.includes(id);
+      const vcenterIds = has ? f.vcenterIds.filter((x) => x !== id) : [...f.vcenterIds, id];
+      f = { ...f, vcenterIds, agent: agentAfterVcToggle(f, vcenterIds, VCS) };
+    };
+    toggle('vcA'); expect(f.agent).toBe('E1');
+    toggle('vcA'); expect(f.agent).toBe('');
+    toggle('vcB'); expect([f.vcenterIds, f.agent]).toEqual([['vcB'], '']);
+  });
+  it('R1-A3-03: 저장이 끝나도 저장 중 열어 둔 다른 서버의 편집 폼은 덮지 않는다', () => {
+    const other = { id: 'vbr-2', name: 'B', password: '', agentTouched: true };
+    expect(formAfterSave(other, '', { id: 'vbr-9' }, false)).toBe(other, '신규 저장 중 다른 서버 편집을 열었다');
+    expect(formAfterSave(other, 'vbr-1', { id: 'vbr-1' }, true)).toBe(other, '비밀번호를 버린 저장도 다른 폼은 그대로');
+    const same = { id: 'vbr-1', name: 'A', password: 'x' };
+    expect(formAfterSave(same, 'vbr-1', { id: 'vbr-1' }, false).id).toBe('', '같은 서버면 비운다');
+    expect(formAfterSave(same, 'vbr-1', { id: 'vbr-1' }, true)).toEqual({ ...same, password: '' });
+    const fresh = { id: '', name: 'N', password: 'x' };
+    expect(formAfterSave(fresh, '', { id: 'vbr-9' }, true)).toEqual({ ...fresh, id: 'vbr-9', password: '' }, '신규 저장이 비밀번호를 버리면 새 id 로 남긴다');
   });
   it('V5-4: 성공이라도 오래된 결과는 정상이라 말하지 않는다', () => {
     expect(statusCell({ ok: true, ts: 1, stale: true }).tone).toBe('warn');

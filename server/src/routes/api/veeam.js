@@ -98,7 +98,7 @@ const registryBroken = () => { try { return !!registryLoadError(); } catch { ret
 /*
  * v2.762(F5): otherVcenter(Veeam 이 다른 vCenter 로 적은 VM 수)는 **서버 전체** 기준 — 다른 법인 vCenter 쪽 백업 VM 수가 섞인다(B7 counts 와 같은 이유).
  *   관리자 판본만 수를 싣고, 그 밖에는 수를 지우고(null) hostMismatch 불리언만(이 vCenter 와 맞은 VM 이 0대인데 다른 vCenter 로 적힌 VM 이 있다).
- *   badges·backup-counts 두 응답 경로 모두(vm-detail 은 이 값을 싣지 않는다). 판정은 isAdminDetailUser 하나.
+ *   badges·backup-counts 두 응답 경로 모두(vm-detail 은 이 값을 싣지 않는다). 판정은 isAdminDetailUser 하나. v2.766(점검 R1-A4-2): unmatched 도 서버 전체 기준(h 없는 에이전트 항목 — 다른 법인 것) → 같이 가림.
  */
 function maskOtherVcenter(o, admin, matched) {
   if (!o || typeof o !== 'object' || !('otherVcenter' in o)) return o;
@@ -106,7 +106,7 @@ function maskOtherVcenter(o, admin, matched) {
   const hostMismatch = n > 0 && matched === 0;
   if (admin) return { ...o, otherVcenter: n, ...(hostMismatch ? { hostMismatch: true } : {}) };
   const { otherVcenter: _drop, ...rest } = o;
-  return { ...rest, otherVcenter: null, ...(hostMismatch ? { hostMismatch: true } : {}) };
+  return { ...rest, otherVcenter: null, ...('unmatched' in o ? { unmatched: null } : {}), ...(hostMismatch ? { hostMismatch: true } : {}) };
 }
 
 const DEMO_SERVER_VIEW = () => ({ name: '데모 Veeam', ok: true, ts: Date.now(), lastOkTs: Date.now(), stale: false, error: '', authStopped: false, via: 'demo', notes: [], counts: null });
@@ -181,9 +181,9 @@ async function snapEventsFor(vcenterId, vms, { initial = false, wait = true } = 
   //   v2.761(C1): collectRan = 이 프로세스에서 로그 폴러가 한 주기를 끝냈다(그 뒤에도 null 이면 '아직 못 모음' — 기동 직후는 아니다).
   //   v2.762(F6): staleMs = 이 포탈 로그 수집 주기를 반영한 '오래됨' 한도(snapVerdict 가 쓴다 — 엣지 요약은 싣지 않아 6시간).
   //   v2.765: collectedAt = 로그 폴러와 Veeam 계정 전용 수집기(snapCollector) 중 늦은 완결 시각 — 전용 수집기의 행은 전용 DB 에만 있으므로
-  //     이 요약이 전용 DB 를 읽었을 때만(viaSnapDb) 그 시각을 섞는다(백필 전 로그 DB 경로는 로그 폴러 값 그대로).
+  //     이 요약이 전용 DB 를 읽었을 때만(viaSnapDb) 그 시각을 섞는다(백필 전 로그 DB 경로는 로그 폴러 값 그대로). v2.766(점검 R1-A1-1): 요약이 Veeam 으로 본 계정을 전용 수집기가 다 덮을 때만(summary).
   return { ...base, status: 'ok', source: 'local', byVm: onlyKnown(r.byVm), events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, at: r.at,
-    collectedAt: snapEventsOkAt(vcenterId, { dedicated: viaSnapDb }), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
+    collectedAt: snapEventsOkAt(vcenterId, { dedicated: viaSnapDb, summary: r }), staleMs: snapStaleMs(ls?.pollIntervalMin), ...(logPollerRanOnce() ? { collectRan: true } : {}) };
 }
 
 /*
@@ -295,6 +295,19 @@ export function registerVeeamBadges(api) {
     }
     const { results, views, host } = resultsFor(vcenterId, req);
     const m = matchToVcenter({ id: vcenterId, host }, t.vms, results, { refsFor: vmId });
-    res.json({ ok: true, configured: true, vm: { id: vm.id, name: vm.name }, detail: buildVmDetail(m.byVm[vmId]), servers: views, at: Date.now() });
+    res.json({ ok: true, configured: true, vm: { id: vm.id, name: vm.name }, detail: maskDetail(buildVmDetail(m.byVm[vmId]), isAdminDetailUser(req.user)), servers: views, at: Date.now() });
   });
+}
+
+/*
+ * v2.766(점검 R1-A4-3, 판독): VM 상세의 lastTask.message 는 Veeam 작업 결과 원문(≤300자)이다 — 실패 문구에 프록시·저장소·호스트 주소가 들어갈 수 있다(추정 —
+ *   실서버 표본 없음). 비고(publicNote)와 같은 주소 꼴(ADDR_LIKE)이 보이면 관리자가 아닌 계정에는 일반 문구로. 수는 이 VM 의 작업 것이라 가리지 않는다.
+ */
+export function publicTaskMessage(m) {
+  const t = String(m || '').slice(0, 300);
+  return ADDR_LIKE.test(t) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
+}
+function maskDetail(detail, admin) {
+  if (admin || !detail?.lastTask?.message) return detail;
+  return { ...detail, lastTask: { ...detail.lastTask, message: publicTaskMessage(detail.lastTask.message) } };
 }

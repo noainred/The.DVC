@@ -63,7 +63,8 @@ export default function Hosts({ filters }) {
 
   const cards = [
     { kind: 'maint', n: counts.maint, title: '점검(Maintenance) 모드', sub: '유지보수 상태 호스트', tone: 'amber' },
-    { kind: 'cpu', n: counts.cpu, title: `CPU ${CPU_ATTENTION_PCT}% 초과`, sub: '서버 경보(high-cpu)와 같은 기준', tone: 'red' },
+    // v2.766(점검 R1-A3-02): 서버 경보(high-cpu)는 점검 호스트에 경보를 만들지 않지만 이 카드는 점검 호스트도 센다(판정은 그대로 — 사실만 말한다).
+    { kind: 'cpu', n: counts.cpu, title: `CPU ${CPU_ATTENTION_PCT}% 초과`, sub: `서버 경보와 같은 임계값(${CPU_ATTENTION_PCT}% 초과) · 점검 중 호스트 포함`, tone: 'red' },
     { kind: 'down', n: counts.down, title: '끊김 · 무응답', sub: '사용률을 읽지 못한 호스트', tone: 'red' },
   ];
 

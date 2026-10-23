@@ -16,7 +16,7 @@ import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { applyPulledServers, registryLoadError } from '../veeam/registry.js';
 import { pullRecoveryNote } from '../util/registryCore.js'; // v2.763(V2-I1) — 스토리지·SAN·PDU·CVP pull(v2.744 EDGE-03)과 같다
-import { applyPulledAccounts } from '../veeam/snapEvents.js';
+import { applyPulledAccountsEx } from '../veeam/snapEvents.js';
 import { dropResult } from '../veeam/store.js';
 import { pollVeeamOnce, authGuard } from '../veeam/poller.js';
 import { agentHeaders } from './agentNameCarry.js';
@@ -70,9 +70,16 @@ async function _pull() {
       if (applied.count) pollVeeamOnce().catch(() => {});
     }
     // v2.754: 'Veeam 계정'(vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다 — 비밀 아님). 옛 중앙(필드 없음)이면 그대로 둔다.
-    let accounts = null;
-    if (Array.isArray(body?.vcAccounts)) { try { accounts = applyPulledAccounts(body.vcAccounts) ? 'changed' : 'same'; } catch (e) { accounts = `error: ${String(e?.message || e).slice(0, 80)}`; } }
-    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length, moved: (applied.moved || []).length } : { unchanged: true }), ...(accounts ? { accounts } : {}) };
+    //   v2.766(점검 R1-A5-2): 상한(MAX_PULLED)을 넘어 버린 계정 수를 상태·콘솔에 밝힌다(예전에는 32 에서 조용히 잘려 학습 계정부터 빠졌다).
+    let accounts = null; let accountsDropped = 0;
+    if (Array.isArray(body?.vcAccounts)) {
+      try {
+        const r = applyPulledAccountsEx(body.vcAccounts);
+        accounts = r.changed ? 'changed' : 'same'; accountsDropped = r.dropped;
+        if (accountsDropped && _log('accounts-dropped', String(accountsDropped))) console.warn(`[veeam-config] 중앙에서 받은 Veeam 계정 중 ${accountsDropped}개를 상한·형식 때문에 버렸습니다`);
+      } catch (e) { accounts = `error: ${String(e?.message || e).slice(0, 80)}`; }
+    }
+    _last = { at: Date.now(), ok: true, count: servers.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length, moved: (applied.moved || []).length } : { unchanged: true }), ...(accounts ? { accounts } : {}), ...(accountsDropped ? { accountsDropped } : {}) };
     return { ok: true, count: servers.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };

@@ -28,6 +28,10 @@ const LEARN_MIN_VMS = 2;                 // 서로 다른 VM 이 이만큼 모�
 const COMMON_ACCOUNT = /^(?:administrator|admin|root|vpxuser|vpxd-extension[\w-]*|vsphere-webclient[\w-]*|vmware-vapi[\w-]*)$/i;
 const MAX_ACCOUNTS = 32;                 // 사람이 적는 계정 상한
 const MAX_LEARNED = 32;
+// v2.766(점검 R1-A5-2): 엣지가 중앙에서 받는 계정(pulled) 상한 — 중앙 veeam-config 의 vcAccounts 는 veeamAccounts()(사람 ≤32 + 학습 ≤32 + 중앙의 pulled)라
+//   32 로 자르면 학습 계정부터 조용히 빠졌다(재현). 보내는 쪽의 최대(사람 32 + 받은 것 32 + 학습 32)를 받는다 · 넘쳐 버린 수는 pull 상태가 밝힌다.
+export const MAX_PULLED = MAX_ACCOUNTS * 2 + MAX_LEARNED;
+const MAX_VEEAM_USERS = 256;             // v2.766(점검 R1-A1-1): 요약이 돌려주는 '판정이 Veeam 으로 본 계정' 상한(넘치면 overflow — 덮음 판정이 '모름')
 const LEARNED_TTL_MS = 90 * DAY;         // 90일 동안 다시 보이지 않은 학습 계정은 버린다
 // v2.763(V4-I1): 관리자가 지운 학습 계정은 이 기간 다시 배우지 않는다 — 근거(임시 스냅샷 + ±3분 생성 이벤트)가 이벤트 창(7일) 동안 남아
 //   다음 계산(카드 60초 캐시)에서 곧바로 다시 배웠다. 사람이 적은 계정(manual)은 막지 않는다. 상한을 넘으면 오래된 것부터 버린다.
@@ -77,6 +81,8 @@ const canonAcct = (u) => {
 };
 /** 공용 계정(사람도 같이 쓴다) — 학습하지 않고, 사람이 적었으면 '생성 후 제거된 짝' 만 백업 시도로 센다. */
 export const isSharedAccount = (u) => COMMON_ACCOUNT.test(bareOf(normAcct(u)));
+/** v2.766(점검 R1-A1-1): 계정 정규형(소문자 · 'DOMAIN\\user' → 'user@domain') — 전용 수집기가 '판정 계정 ⊆ 덮은 계정' 을 같은 규칙으로 비교한다. */
+export const canonAccount = (u) => canonAcct(u);
 export const PAIR_MS = 12 * 3_600_000; // 공용 계정: 생성 뒤 이 안에 같은 계정이 같은 VM 의 스냅샷을 지웠을 때만(Veeam 은 백업이 끝나면 바로 지운다)
 
 /**
@@ -150,6 +156,8 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
   }
   const byVm = {};
   let events = 0; let ambiguous = 0; let unmatched = 0; let unpaired = 0;
+  // v2.766(점검 R1-A1-1): 판정이 Veeam 으로 본 계정(정규형) — 전용 수집기 okAt 은 이 계정을 그 수집기가 전부 덮을 때만 결합한다(snapEventsOkAt users).
+  const veeamUsers = new Set(); let veeamUsersOverflow = false;
   // 공용 계정의 짝 — (VM 이름, 계정) → 제거 시각들. Veeam 은 VM 디스크를 다 읽으면 그 스냅샷을 곧바로 지운다.
   const removes = new Map();
   const list = Array.isArray(rows) ? rows : [];
@@ -163,6 +171,7 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
     if (!r || !isSnapshotCreateEvent(r) || !isVeeam(r.user)) continue;
     const ts = Number(r.ts);
     if (!Number.isFinite(ts) || ts < since) continue;
+    { const cu = canonAcct(r.user); if (!veeamUsers.has(cu)) { if (veeamUsers.size < MAX_VEEAM_USERS) veeamUsers.add(cu); else veeamUsersOverflow = true; } }
     if (isSharedAccount(r.user)) {
       const rm = removes.get(`${String(r.entity || '').trim().toLowerCase()}\u0000${canonAcct(r.user)}`) || [];
       if (!rm.some((t) => t >= ts && t - ts <= PAIR_MS)) { unpaired++; continue; } // 사람이 만들어 둔 스냅샷일 수 있다(또는 아직 백업 중)
@@ -175,7 +184,7 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
     if (!cur) byVm[id] = [ts, 1];
     else { cur[1]++; if (ts > cur[0]) cur[0] = ts; }
   }
-  return { byVm, events, ambiguous, unmatched, unpaired };
+  return { byVm, events, ambiguous, unmatched, unpaired, veeamUsers: [...veeamUsers].sort(), ...(veeamUsersOverflow ? { veeamUsersOverflow: true } : {}) };
 }
 
 /* ── 계정 저장(veeam-vc-accounts.json — 비밀 아님) ─────────────────────────────────────────────────────────── */
@@ -192,7 +201,7 @@ function loadAcc() {
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _acc.manual = cleanAccountList(raw?.manual).list;
-    _acc.pulled = cleanAccountList(raw?.pulled).list;
+    _acc.pulled = cleanAccountList(raw?.pulled, MAX_PULLED).list;
     if (isObj(raw?.learned)) {
       for (const [k, v] of Object.entries(raw.learned).slice(0, MAX_LEARNED)) {
         const a = s(k, ACCOUNT_MAX_LEN);
@@ -219,8 +228,8 @@ function corruptKept() {
 const activeLearned = (a, now) => Object.entries(a.learned).filter(([, v]) => now - v.t <= LEARNED_TTL_MS && v.vms.length >= LEARN_MIN_VMS);
 function persist() { atomicWriteFileSync(FILE(), JSON.stringify(_acc, null, 2)); }
 
-/** 사람이 준 계정 목록 정리 — 문자열만·트림·길이·중복·상한. 버린 수를 돌려준다. */
-export function cleanAccountList(raw) {
+/** 사람이 준 계정 목록 정리 — 문자열만·트림·길이·중복·상한(기본 사람이 적는 상한 32 · 중앙에서 받은 목록은 MAX_PULLED). 버린 수를 돌려준다. */
+export function cleanAccountList(raw, max = MAX_ACCOUNTS) {
   const list = []; const seen = new Set(); let dropped = 0;
   for (const x of Array.isArray(raw) ? raw : String(raw ?? '').split(/[\n,;]+/)) {
     const a = typeof x === 'string' ? x.trim() : '';
@@ -228,7 +237,7 @@ export function cleanAccountList(raw) {
     if (a.length > ACCOUNT_MAX_LEN || /[\x00-\x1f]/.test(a)) { dropped++; continue; } // eslint-disable-line no-control-regex
     const k = a.toLowerCase();
     if (seen.has(k)) continue;
-    if (list.length >= MAX_ACCOUNTS) { dropped++; continue; }
+    if (list.length >= max) { dropped++; continue; }
     seen.add(k); list.push(a);
   }
   return { list, dropped };
@@ -256,13 +265,15 @@ export function saveManualAccounts(raw) {
   loadAcc().manual = r.list; persist();
   return r;
 }
-/** 엣지: 중앙 pull 로 받은 계정(사람이 적은 것 + 중앙이 배운 것). 바뀌었을 때만 쓴다. */
-export function applyPulledAccounts(raw) {
-  const r = cleanAccountList(raw).list;
+/** 엣지: 중앙 pull 로 받은 계정(사람이 적은 것 + 중앙이 배운 것). 바뀌었을 때만 쓴다. 반환: 바뀌었는가. */
+export function applyPulledAccounts(raw) { return applyPulledAccountsEx(raw).changed; }
+/** v2.766(점검 R1-A5-2): 위와 같고 상한으로 버린 수도 돌려준다(agent/veeamConfigPull.js 가 pull 상태·콘솔에 밝힌다 — 조용히 자르지 않는다). */
+export function applyPulledAccountsEx(raw) {
+  const { list: r, dropped } = cleanAccountList(raw, MAX_PULLED);
   const a = loadAcc();
-  if (JSON.stringify(a.pulled) === JSON.stringify(r)) return false;
+  if (JSON.stringify(a.pulled) === JSON.stringify(r)) return { changed: false, dropped };
   a.pulled = r; persist();
-  return true;
+  return { changed: true, dropped };
 }
 /**
  * 학습 후보 반영 — {account, vm} 목록. 새 VM 을 봤거나 마지막으로 본 시각이 1시간 넘게 지났을 때만 쓴다(매 조회 쓰기 방지).
@@ -465,7 +476,8 @@ export async function edgeSnapPayload({ db, snap, notCollected, logSettings, now
     if (snap?.initial === true || !vms.length) continue;
     if (snapDb && !snapCovered(snapDb, vcenterId, now - LOOKBACK_DAYS * DAY)) { need.push(vcenterId); continue; }
     const r = await localSnapSummary(db, vcenterId, vms, { now, snapDb });
-    const ca = typeof collectedAtFor === 'function' ? collectedAtFor(vcenterId) : null;
+    // v2.766(점검 R1-A1-1): 요약(판정이 Veeam 으로 본 계정)을 함께 넘긴다 — 전용 수집기가 그 계정을 다 덮지 않으면 그 시각을 섞지 않는다. push 필드는 그대로.
+    const ca = typeof collectedAtFor === 'function' ? collectedAtFor(vcenterId, r) : null;
     out.push({ vcenterId, status: 'ok', byVm: r.byVm, events: r.events, ambiguous: r.ambiguous, unmatched: r.unmatched, unpaired: r.unpaired, truncated: r.truncated, accounts: r.accounts, days: LOOKBACK_DAYS, at: now,
       collectedAt: Number.isFinite(ca) ? ca : null, ...(collectRan === true ? { collectRan: true } : {}) });
   }

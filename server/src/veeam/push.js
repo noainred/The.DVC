@@ -53,9 +53,10 @@ async function snapEventsForPush() {
     // v2.761(C2): 이벤트 수집 신선도(마지막 온전한 수집 시각 · 폴러가 한 주기를 끝냈는가)도 싣는다 — 중앙이 6시간 판정·'아직 못 모음' 을 한다.
     // v2.765: collectedAt 은 로그 폴러와 Veeam 계정 전용 수집기 중 늦은 것(snapEventsOkAt). 전용 DB 가 없으면(로그 DB 경로) 전용 수집기 값은 섞지 않는다.
     //   push 필드는 그대로다(edgeSnapPayload 의 collectedAt 값만 바뀐다 — 중앙 sanitizeEdgeSnap 계약 변경 없음).
+    //   v2.766(점검 R1-A1-1): 요약(sum — 판정이 Veeam 으로 본 계정)을 넘겨, 전용 수집기가 그 계정을 다 덮을 때만 그 시각을 섞는다. 필드는 그대로.
     const snapDb = await getSnapDb();
     return { list: await edgeSnapPayload({ db: await getLogsDb(), snap: store.get(), notCollected: eventNotCollectedMap(), logSettings: loadLogSettings(), snapDb,
-      collectedAtFor: (vc) => snapEventsOkAt(vc, { dedicated: !!snapDb }), collectRan: logPollerRanOnce() }) };
+      collectedAtFor: (vc, sum) => snapEventsOkAt(vc, { dedicated: !!snapDb, summary: sum }), collectRan: logPollerRanOnce() }) };
   } catch (e) {
     if (failLog('snap', String(e?.message || e))) console.warn(`[veeam-push] vCenter 이벤트 요약을 만들지 못했습니다(결과는 그대로 보냅니다): ${String(e?.message || e).slice(0, 200)}`);
     return { list: null, error: String(e?.message || e).slice(0, 200) };

@@ -185,6 +185,19 @@ function initSqlite(dbPath) {
       /** v2.765(4-a): 'seen:<vc>' — 전용 수집기가 그 vCenter 에서 계정 필터로 이벤트를 1건 이상 읽은 시각(없으면 null). */
       snapSeenAt(vcenterId) { const n = Number(metaGet.get(`seen:${vcenterId}`)?.v); return Number.isFinite(n) && n > 0 ? n : null; },
       setSnapSeenAt(vcenterId, ts) { metaSet.run(`seen:${vcenterId}`, String(Math.floor(Number(ts)))); },
+      /**
+       * v2.766(점검 R1-A1-1·A5-1): 'fp:<vc>' — 전용 수집기의 커서·완결 시각이 어떤 계정 목록(userList 지문)으로 만든 것인가. 없으면 null.
+       *   목록이 바뀌면 resetSnapCollector 가 커서·완결 시각·seen 을 한 트랜잭션으로 지우고 새 지문을 적는다(새 계정의 지난 이벤트를 다시 읽게).
+       */
+      snapFp(vcenterId) { const v = metaGet.get(`fp:${vcenterId}`)?.v; return typeof v === 'string' && v ? v : null; },
+      resetSnapCollector(vcenterId, fp) {
+        db.exec('BEGIN');
+        try {
+          for (const k of ['cur', 'ok', 'seen']) metaDel.run(`${k}:${vcenterId}`);
+          metaSet.run(`fp:${vcenterId}`, String(fp));
+          db.exec('COMMIT');
+        } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      },
       /** 덮음 기록 지우기(적재 실패 — 다음 요청이 백필로 다시 메운다. 해시로 중복 없음). 실패해도 메모리 무효는 남는다. */
       dropCoverage(vcenterIds) {
         let ok = true;

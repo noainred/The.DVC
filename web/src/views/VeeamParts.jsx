@@ -159,6 +159,20 @@ export function VeeamSummaryCard({ sum }) {
   );
 }
 
+/**
+ * 상세 창의 '근거' 서버 목록 문구.
+ * v2.766(점검 R1-A3-05): 읽기에 실패 중인 서버라도 **성공한 적이 있을 때만** '마지막 성공분' 이라 말한다 — 한 번도 성공하지 못한 서버(lastOkTs 없음)에는
+ *   보여 줄 마지막 성공분이 없다(예전에는 그 서버에도 '마지막 성공분' 이 붙었다).
+ * @param {Array<{name:string, ok:(boolean|null), lastOkTs:(number|null)}>|undefined} servers
+ */
+export function veeamBasisText(servers) {
+  if (!Array.isArray(servers) || !servers.length) return '';
+  return servers.map((s) => {
+    if (s?.ok !== false) return s?.name ?? '';
+    return `${s.name}${Number.isFinite(s.lastOkTs) ? '(읽기 실패 — 마지막 성공분)' : '(읽기 실패 — 성공한 적 없음)'}`;
+  }).join(', ');
+}
+
 /** 배지를 눌렀을 때의 백업 상세 창. */
 export function VeeamDetailModal({ vcenterId, vm, onClose }) {
   const [d, setD] = useState(null);
@@ -174,7 +188,7 @@ export function VeeamDetailModal({ vcenterId, vm, onClose }) {
   }, [vcenterId, vm.id]);
   const view = d ? veeamDetailView(d.detail) : null;
   const tone = view ? (TONE[view.status.tone] || TONE.muted) : TONE.muted;
-  const basis = d?.servers?.length ? d.servers.map((s) => `${s.name}${s.ok === false ? '(읽기 실패 — 마지막 성공분)' : ''}`).join(', ') : '';
+  const basis = veeamBasisText(d?.servers);
   // v2.761(D9): 주기를 화면에 박지 않고 실제 마지막 수집 시각(서버들의 결과 시각 중 가장 이른 것)을 말한다.
   //   v2.762(F-I1): 마지막 **성공** 시각만 — 한 번도 성공하지 못한 서버의 ts 는 실패한 시도 시각이라 '마지막 수집' 이 아니다(그 서버는 뺀다).
   const lastCollectList = (d?.servers || []).map((s) => s.lastOkTs).filter((x) => Number.isFinite(x));
