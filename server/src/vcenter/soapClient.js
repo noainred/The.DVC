@@ -184,7 +184,9 @@ export class VimSoapClient {
     this.signal = signal || null;
   }
 
-  async #call(body, { ignoreExternal = false, isLogin = false } = {}) {
+  // v2.765(2-a): timeoutMs — 이 호출만의 건별 시한(정리 호출을 짧게). 없으면 vc.timeoutMs(기본 30초).
+  async #call(body, { ignoreExternal = false, isLogin = false, timeoutMs = null } = {}) {
+    const perCall = effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000);
     const res = await fetch(this.url, {
       method: 'POST',
       redirect: NO_REDIRECT, // v2.620 SEC2620-01: Login 본문(비밀번호)을 3xx 로 다른 곳에 다시 보내지 않는다
@@ -196,7 +198,7 @@ export class VimSoapClient {
       },
       body: ENVELOPE(body),
       // v2.598 T2598-03: 옛 저장값이 2^31ms 이상이면 AbortSignal.timeout 이 1ms 가 된다 — 상한으로 자른다.
-      signal: vcRequestSignal(effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000), ignoreExternal ? null : this.signal),
+      signal: vcRequestSignal(Number(timeoutMs) > 0 ? Math.min(Number(timeoutMs), perCall) : perCall, ignoreExternal ? null : this.signal),
     });
     refuseRedirect(res, 'vCenter');
     const setCookie = res.headers.get('set-cookie');
@@ -263,11 +265,11 @@ export class VimSoapClient {
     );
   }
 
-  async logout() {
+  async logout({ timeoutMs = null } = {}) {
     if (!this.sc?.sessionManager) return;
     try {
       // 데드라인으로 끊긴 뒤에도 세션은 정리한다(외부 신호 무시 · 건별 시한만, v2.590) — 남기면 세션 수를 먹는다.
-      await this.#call(`<Logout xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this></Logout>`, { ignoreExternal: true });
+      await this.#call(`<Logout xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this></Logout>`, { ignoreExternal: true, timeoutMs });
     } catch { /* best effort */ }
   }
 
@@ -621,7 +623,7 @@ export class VimSoapClient {
 
   /** Send a raw vim25 SOAP body (public wrapper around the internal caller). */
   // v2.598 T2598-02: ignoreExternal — 바깥 신호가 abort 된 뒤에도 정리 호출(DestroyCollector 등)은 끝까지 보낸다(logout 과 같은 규칙).
-  async callRaw(body, { ignoreExternal = false } = {}) { return this.#call(body, { ignoreExternal }); }
+  async callRaw(body, { ignoreExternal = false, timeoutMs = null } = {}) { return this.#call(body, { ignoreExternal, timeoutMs }); }
 
   /** Licenses assigned in this vCenter (LicenseManager.licenses). */
   async retrieveLicenses() {
@@ -1572,37 +1574,95 @@ export async function upgradeVmTools(vc, morefs, { login = null } = {}) {
  * vCenter 이벤트 로그를 수집한다(장기 보관용). vim25 EventManager의 EventHistoryCollector를
  * 생성해 beginTime(sinceTs) 이후 이벤트를 페이지 단위로 읽는다. max 상한까지.
  * 반환: [{ key, ts, type, severity, user, entity, message }] (오래된 → 최신).
+ *
+ * v2.765(로그 수집 지연 — 실서버 OC2 13일 정체): 반환 배열에 **왜 멈췄는지**를 싣는다(JSON 에는 실리지 않는 배열 속성).
+ *   `ended` = 'empty'(더 없음 — 온전) | 'max'(상한) | 'pages'(쪽 수 한도 — 상한보다 적게 읽었어도 온전하지 않다) | 'aborted'(데드라인).
+ *   데드라인(signal)에 걸리면 예전처럼 **던지지 않고** 그때까지 읽은 것을 돌려준다 — 예전에는 60초 시한이 200쪽을 못 끝내면 읽은 40,000건을
+ *   통째로 버려 진행이 0 이었다(상한을 올릴수록 더 자주). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
+ *   필터: `userNames`(EventFilterSpecByUsername — 그 계정의 이벤트만 · Veeam 전용 수집기) · `eventTypeIds`(종류). 둘 다 없으면 전량.
+ * v2.765(1-c · 재검토): `onBatch(events, { final, ended, batches })`(async) 가 있으면 **한 세션·한 컬렉터로 계속 읽으며** `batchSize`(기본 EVENT_BATCH_ROWS)마다
+ *   콜백에 넘기고 비운다 — 회차마다 로그인·CreateCollector 를 다시 하던 따라잡기(40회차 = 로그인 40회/10분)를 없앤다. 이 모드에서는 `max`·쪽 수 한도를
+ *   쓰지 않고 `budgetMs`(시간 예산 → ended 'budget')·신호(ended 'aborted')·빈 쪽(ended 'empty')으로 끝난다. 마지막 묶음은 비어 있어도 `final:true` 로
+ *   한 번 넘긴다(호출부가 완결 시각을 기록할 수 있게). 중간 묶음의 ended 는 'batch'. 콜백이 던지면 수집을 멈추고(정리는 하고) 그대로 올린다 —
+ *   호출부는 그때까지 넘겨받은 묶음의 커서를 유지한다. 반환 배열은 비어 있고 `read`(읽은 총수)·`batches` 를 싣는다.
+ * v2.765(2-a): 신호가 끊긴 뒤의 정리(DestroyCollector·Logout)는 `cleanupTimeoutMs`(기본 5초)로 짧게 — 건별 시한(30초)×2 를 기다리면 부분 결과가
+ *   폴러의 유예(15초)를 넘겨 버려졌다(재현: 정리 2초 지연 vs 유예 0.6초 → 읽은 15건 거부).
  */
-export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200, signal = null } = {}) {
+export const EVENT_BATCH_ROWS = 2000;
+export const CLEANUP_TIMEOUT_MS = 5_000;
+export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200, signal = null, userNames = null, eventTypeIds = null,
+  onBatch = null, batchSize = EVENT_BATCH_ROWS, budgetMs = null, cleanupTimeoutMs = CLEANUP_TIMEOUT_MS } = {}) {
   // v2.598 T2598-02: 폴러의 데드라인 신호를 SOAP 요청에 건다 — 예전엔 데드라인이 결과만 포기해 버려진 세션이
   // ReadNextEvents 를 끝까지 돌았다(v2.417 '세션을 실제로 끊는다' 규약). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
   const c = new VimSoapClient(vc, { signal });
+  const stream = typeof onBatch === 'function';
+  const batchRows = Math.max(1, Math.floor(Number(batchSize)) || EVENT_BATCH_ROWS);
+  const deadlineAt = stream && Number(budgetMs) > 0 ? Date.now() + Number(budgetMs) : null;
   await c.login();
   let collector = null;
   const out = [];
+  out.ended = 'empty';
+  let read = 0; let batches = 0;
+  // 스트림: 지금까지 모은 묶음을 콜백에 넘기고 비운다(배열 속성 ended 는 중간 'batch' · 마지막은 실제 종료 사유).
+  const flush = async (final) => {
+    const batch = out.splice(0, out.length);
+    batch.ended = final ? out.ended : 'batch';
+    batches++;
+    await onBatch(batch, { final, ended: batch.ended, batches });
+  };
   try {
-    if (!c.sc.eventManager) return out;
-    const beginIso = new Date(sinceTs).toISOString();
+    if (!c.sc.eventManager) { if (stream) await flush(true); return out; }
     const createXml = await c.callRaw(
       `<CreateCollectorForEvents xmlns="urn:vim25"><_this type="EventManager">${c.sc.eventManager}</_this>` +
-      `<filter><time><beginTime>${beginIso}</beginTime></time></filter></CreateCollectorForEvents>`);
+      `<filter>${eventFilterXml(sinceTs, { userNames, eventTypeIds })}</filter></CreateCollectorForEvents>`);
     collector = /<returnval[^>]*>([^<]+)<\/returnval>/.exec(createXml)?.[1];
-    if (!collector) return out;
+    if (!collector) { if (stream) await flush(true); return out; }
     const cRef = escXml(collector);
-    // ReadNextEvents 로 forward 읽기(오래된→최신). 빈 페이지 또는 max 도달 시 종료.
-    for (let guard = 0; guard < 200 && out.length < max; guard++) {
-      if (signal?.aborted) throw new Error('이벤트 수집 중단(데드라인)');
-      const xml = await c.callRaw(
-        `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
+    // ReadNextEvents 로 forward 읽기(오래된→최신). 빈 페이지 또는 max 도달 시 종료(스트림은 빈 쪽·예산·신호).
+    let guard = 0;
+    for (; stream || (guard < EVENT_PAGES_MAX && out.length < max); guard++) {
+      if (signal?.aborted) { out.ended = 'aborted'; break; }
+      // 예산은 첫 쪽을 읽은 뒤부터 본다 — 로그인·CreateCollector 가 느린 vCenter 도 주기마다 최소 한 쪽은 나아간다.
+      if (deadlineAt != null && guard > 0 && Date.now() >= deadlineAt) { out.ended = 'budget'; break; }
+      const want = stream ? Math.min(pageSize, batchRows - out.length) : Math.min(pageSize, max - out.length);
+      let xml;
+      try {
+        xml = await c.callRaw(
+          `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${want}</maxCount></ReadNextEvents>`);
+      } catch (e) {
+        if (signal?.aborted) { out.ended = 'aborted'; break; }   // 데드라인 — 읽은 만큼 돌려준다
+        throw e;
+      }
       const events = parseEventsXml(xml);
       if (!events.length) break;
       pushAll(out, events);
+      read += events.length;
+      if (stream && out.length >= batchRows) await flush(false);
     }
+    if (!stream && out.ended !== 'aborted') {
+      if (out.length >= max) out.ended = 'max';
+      else if (guard >= EVENT_PAGES_MAX) out.ended = 'pages';
+    }
+    if (stream) await flush(true);
   } finally {
-    if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, { ignoreExternal: true }).catch(() => {});
-    await c.logout().catch(() => {});
+    // v2.765(2-a): 신호가 끊긴 뒤의 정리는 짧은 시한으로(부분 결과가 유예 안에 돌아가게). 평상시는 건별 시한 그대로.
+    const cleanup = signal?.aborted ? { ignoreExternal: true, timeoutMs: Math.max(1, Math.floor(Number(cleanupTimeoutMs)) || CLEANUP_TIMEOUT_MS) } : { ignoreExternal: true };
+    if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, cleanup).catch(() => {});
+    await c.logout(cleanup).catch(() => {});
   }
+  if (stream) { out.read = read; out.batches = batches; }
   return out;
+}
+/** 한 수집에서 읽는 ReadNextEvents 쪽 수 한도(onBatch 없는 호출만) — logs/poller.js COLLECTOR_MAX_EVENTS(쪽 수 × 쪽 크기)가 이 값에 기댄다. */
+export const EVENT_PAGES_MAX = 200;
+/** EventFilterSpec 본문(순수) — time → userName → eventTypeId 순서(vim25 XSD 순서를 지켜야 한다). 계정은 50개·200자까지. */
+export function eventFilterXml(sinceTs, { userNames = null, eventTypeIds = null } = {}) {
+  let x = `<time><beginTime>${new Date(sinceTs).toISOString()}</beginTime></time>`;
+  const users = Array.isArray(userNames) ? userNames.map((u) => String(u ?? '').trim().slice(0, 200)).filter(Boolean).slice(0, 50) : [];
+  if (users.length) x += `<userName><systemUser>false</systemUser>${users.map((u) => `<userList>${escXml(u)}</userList>`).join('')}</userName>`;
+  const types = Array.isArray(eventTypeIds) ? eventTypeIds.map((t) => String(t ?? '').trim()).filter((t) => /^[\w.]{1,120}$/.test(t)).slice(0, 50) : [];
+  for (const t of types) x += `<eventTypeId>${t}</eventTypeId>`;
+  return x;
 }
 
 // XML 특수문자 이스케이프(collector moref가 &<> 포함 가능).

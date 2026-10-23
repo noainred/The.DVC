@@ -102,12 +102,20 @@ export function scopeVcLogStatus(st, allowed) {
       lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
     }
     // v2.732(점검 2회차 B4-01 후속): 수집하지 않은 vCenter·이번 주기 로그인 거부 목록도 범위 안 것만(전 법인 vCenter id·사유는 범위 밖 정보다)
-    for (const k of ['notCollected', 'authRejected']) {
+    // v2.765: 지연 vCenter(lagging)·저장 0 vCenter(stalled)도 범위 안 것만.
+    for (const k of ['notCollected', 'authRejected', 'lagging', 'stalled']) {
       if (!Array.isArray(st.lastRun[k])) continue;
       lr[k] = st.lastRun[k].filter((x) => x && allowed.has(String(x.vcenterId)));
       lr[`${k}Omitted`] = st.lastRun[k].length - lr[k].length;
     }
     out.lastRun = lr;
+  }
+  // v2.765(진단): vCenter 별 수집 진단은 범위 안 것만, 오류 원문(vCenter 주소가 들어간다)은 지운다 — 전체 범위 관리자만 본다.
+  if (Array.isArray(st.collect)) {
+    const kept = st.collect.filter((c) => c && allowed.has(String(c.vcenterId)));
+    out.collect = kept.map((c) => (c.lastPoll && typeof c.lastPoll === 'object' && c.lastPoll.error != null
+      ? { ...c, lastPoll: { ...c.lastPoll, error: null, errorHidden: true } } : c));
+    out.collectOmitted = st.collect.length - kept.length;
   }
   if ('dbPath' in out) out.dbPath = null;
   if (out.settings && typeof out.settings === 'object' && out.settings.storagePath) out.settings = { ...out.settings, storagePath: '' };
@@ -166,7 +174,7 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
 adminRouter.get('/vclogs/status', adminOnly, async (req, res) => {
   try { res.json(scopeVcLogStatus(await logStatus(), scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
@@ -177,6 +185,12 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   const s = saveLogSettings(req.body || {});
   if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
   rescheduleLogPoller();
+  // v2.765(4-f): Veeam 계정 이벤트 전용 수집기도 같은 주기(pollIntervalMin)를 쓴다 — 저장 즉시 재무장(예전에는 다음 틱부터, 주기가 1일이면 최대 1일 뒤).
+  //   동적 import + 함수 존재 확인 — 수집기 모듈이 아직 그 함수를 내보내지 않는 판에서도 설정 저장은 막히지 않는다.
+  try {
+    const m = await import('../../veeam/snapCollector.js');
+    if (typeof m.rescheduleVeeamSnapCollector === 'function') m.rescheduleVeeamSnapCollector();
+  } catch (e) { console.warn(`[vclogs] Veeam 전용 수집기 주기 재무장 실패(다음 틱부터 반영): ${e?.message || e}`); }
   delete s._pathChanged;
   res.json(s);
 });

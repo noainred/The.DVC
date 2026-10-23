@@ -55,6 +55,7 @@ const PURPOSES = {
   'ipam-scan-runs.json': 'IPAM 스캔 실행 기록',
   'backup.json': '구성 백업 스케줄 설정',
   'vcenter-logs.json': 'vCenter 로그 수집 설정',
+  'vcenter-logs-cursor.json': 'vCenter 이벤트 수집 커서(읽은 마지막 시각·온전한 시각 — 상태, v2.765)',
   'capture-monitors.json': '네트워크 상시 모니터(캡처) 정의',
   'capture-history.json': '네트워크 트래픽 캡처 이력',
   'central-agent-tokens.json': '중앙↔에이전트 인증 토큰',

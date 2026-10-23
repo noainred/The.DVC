@@ -21,14 +21,15 @@ test('순수 — 중복 키는 번호@시각 · 시작점은 저장·읽은 시�
   assert.equal(P.eventRowKey({ key: '1001', ts: 5 }), '1001@5');
   assert.equal(P.eventRowKey({ key: '', ts: 5 }), null);
   assert.equal(P.eventRowKey({ ts: 5 }), null);
-  assert.equal(P.nextSinceTs(100, 250), 251);
-  assert.equal(P.nextSinceTs(300, 250), 301);
+  // v2.765(재검토 2-b): +1ms 가 아니라 그 시각 **포함** — 같은 ms 의 나머지를 건너뛰지 않는다(중복은 번호@시각 키가 거른다)
+  assert.equal(P.nextSinceTs(100, 250), 250);
+  assert.equal(P.nextSinceTs(300, 250), 300);
   assert.equal(P.nextSinceTs(0, 0, { now: 10 * 24 * H, firstDays: 7 }), 3 * 24 * H);
 });
 
 /** beginTime 이후 이벤트만 오래된 것부터 내주는 가짜 vCenter. */
 function fakeVcenter() {
-  const state = { events: [], view: [], served: 0 };
+  const state = { events: [], view: [], served: 0, begins: [] };
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', (d) => { b += d; });
     req.on('end', () => {
@@ -38,6 +39,7 @@ function fakeVcenter() {
       if (op === 'Login') { res.setHeader('Set-Cookie', 'vmware_soap_session=x'); return send('<LoginResponse><returnval><key>s</key></returnval></LoginResponse>'); }
       if (op === 'CreateCollectorForEvents') {
         const begin = Date.parse((/<beginTime>([^<]+)<\/beginTime>/.exec(b) || [])[1] || '') || 0;
+        state.begins.push(begin);
         state.view = state.events.filter((e) => e.ts >= begin).sort((x, y) => x.ts - y.ts);
         state.served = 0;
         return send('<CreateCollectorForEventsResponse><returnval type="EventHistoryCollector">col</returnval></CreateCollectorForEventsResponse>');
@@ -77,9 +79,10 @@ test('실제 폴러 — vCenter 이벤트 번호가 다시 매겨져도(옛 번�
     state.events = [...state.events, ...Array.from({ length: 150 }, (_, i) => ({ key: String(i + 1), ts: t1 + i * 60_000 }))];
     await P.pollLogsOnce({ manual: true });
     const last2 = db.lastTs('oc2');
-    assert.equal(last2, t1 + 99 * 60_000, `겹친 번호의 새 이벤트도 저장돼 앞으로 나아가야 한다(예전에는 ${new Date(last1).toISOString()} 에 멈췄다)`);
+    // v2.765(따라잡기): 상한(100)에 걸린 vCenter 는 같은 주기 안에서 이어 읽는다 — 150건이 한 주기에 전부 저장된다(예전에는 두 주기).
+    assert.equal(last2, t1 + 149 * 60_000, `겹친 번호의 새 이벤트도 저장돼 앞으로 나아가야 한다(예전에는 ${new Date(last1).toISOString()} 에 멈췄다)`);
     await P.pollLogsOnce({ manual: true });
-    assert.equal(db.lastTs('oc2'), t1 + 149 * 60_000, '다음 주기에 나머지를 읽는다');
+    assert.equal(db.lastTs('oc2'), t1 + 149 * 60_000, '다음 주기에 새 이벤트가 없으면 그대로');
     assert.equal(db.countCapped({ vcenterId: 'oc2' }, 1000).total, 250, '옛 100건 + 새 150건(중복 없이)');
     // v2.759: 폴러가 적재한 스냅샷 행은 Veeam 전용 DB(veeam-snap.db)에도 들어간다(카드 백업 수량을 로그 DB 검색 없이 계산)
     const { getSnapDb } = await import('../src/veeam/snapDb.js');
@@ -91,7 +94,7 @@ test('실제 폴러 — vCenter 이벤트 번호가 다시 매겨져도(옛 번�
   } finally { warn.mock.restore(); log.mock.restore(); await new Promise((r) => { srv.close(r); srv.closeAllConnections?.(); }); }
 });
 
-test('실제 폴러 — 상한만큼 읽은 것이 전부 걸러져도(최소 심각도) 다음 주기는 읽은 시각부터 · 멈춘 사실을 결과에 남긴다', async () => {
+test('실제 폴러 — 읽은 것이 전부 걸러져도(최소 심각도) 다음 주기는 읽은 시각부터 · 예산에 걸려 멈춘 사실을 결과에 남긴다', async () => {
   const warn = mock.method(console, 'warn', () => {});
   const log = mock.method(console, 'log', () => {});
   const { srv, state } = fakeVcenter();
@@ -102,9 +105,12 @@ test('실제 폴러 — 상한만큼 읽은 것이 전부 걸러져도(최소 �
     saveLogSettings({ enabled: true, maxPerPoll: 100, minSeverity: 'warning' }); // 정보 이벤트는 저장하지 않는다
     const t0 = Date.now() - 10 * H;
     state.events = Array.from({ length: 250 }, (_, i) => ({ key: `e${i}`, ts: t0 + i * 60_000 }));
-    const r1 = await P.pollLogsOnce({ manual: true });
-    assert.deepEqual((r1.stalled || []).map((x) => x.vcenterId), ['oc9'], `읽었는데 저장되지 않은 상한 주기를 밝힌다: ${JSON.stringify(r1)}`);
+    // v2.765(재검토 1-c): 한 세션으로 이어 읽으므로 '상한' 대신 시간 예산(1ms → 첫 쪽 200건 뒤 멈춤)으로 끝까지 못 읽는 상황을 만든다.
+    const r1 = await P.pollLogsOnce({ manual: true, budgetMs: 1 });
+    assert.deepEqual((r1.stalled || []).map((x) => x.vcenterId), ['oc9'], `읽었는데 저장되지 않은 채 끝까지 못 읽은 주기를 밝힌다: ${JSON.stringify(r1)}`);
+    assert.equal(P.logCollectOkAt('oc9'), t0 + 199 * 60_000, '첫 쪽(200건)까지만 온전');
     await P.pollLogsOnce({ manual: true });
-    assert.equal(P.logCollectOkAt('oc9'), t0 + 199 * 60_000, '두 번째 주기는 101번째 이벤트부터 읽는다(예전에는 매번 처음 100건)');
+    assert.equal(state.begins.at(-1), t0 + 199 * 60_000, '두 번째 주기는 읽은 시각(포함)부터 읽는다(예전에는 매번 처음부터)');
+    assert.ok(P.logCollectOkAt('oc9') > t0 + 249 * 60_000, '끝까지 읽었으니 수집 시작 시각까지 온전');
   } finally { warn.mock.restore(); log.mock.restore(); await new Promise((r) => { srv.close(r); srv.closeAllConnections?.(); }); }
 });
