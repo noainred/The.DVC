@@ -31,8 +31,8 @@ let lastRun = null;
 let running = false;
 let runningSince = null; // v2.743(감사 WEB-04): 진행 중인 수집이 언제 시작됐는지 — '지금 수집' 이 겹쳤을 때 화면이 말한다
 let tick = 0; // prune/용량점검 스로틀용(매 폴 DELETE 스캔 방지)
-let lastCap = null; // v2.741(DB-03): 마지막 용량 상한 처리 결과 — 상태 화면이 '사용 중 크기 기준' 을 말한다
-const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
+let lastCap = null; // v2.741(DB-03): 마지막 용량 상한 처리 결과 — 상태 화면이 '사용 중 크기 기준' 을 말한다(v2.772: 넘었을 때만 갱신 · done·budgetMs)
+const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간 정리(v2.772 Z2-2: 용량 확인은 둘째 주기부터 매 주기 — 아래 capCleanupBudgetMs)
 
 /*
  * v2.731(점검 r1 A2-01): vCenter 별 '이벤트가 온전한 마지막 시각' — VM 가용성(availability/analyze.js)의 측정 끝 근거.
@@ -67,6 +67,13 @@ const CURSOR_FILE = path.join(config.configDir, 'vcenter-logs-cursor.json');
 registerStateFile(CURSOR_FILE_NAME);
 const _capStreak = new Map();   // vcenterId → 연속으로 상한에 걸린 주기 수(따라잡기 뒤에도 남아 있으면 센다)
 const _lastPoll = new Map();    // vcenterId → 이번 주기 수집 진단 { at, read, stored, ms, rounds, deadlineMs, error }
+/*
+ * v2.772(Z1-1): 지금 수집 중인 vCenter — 워커 시작~끝 동안만 있다(vcenterId → 진행 중인 poll 객체). 상태 표는 주기 도중에도 30초마다 읽는데,
+ *   _collectOk 는 묶음마다 {capped:true, ended:'batch'} 로 덮이고 _lastPoll 은 직전에 끝난 주기 값이라 한 행에 두 주기가 섞였다
+ *   (상한 칸 '중단' + 직전 주기 읽음/저장 · 앞 주기 '정상' 이 '따라잡기 중'·'정체' 로 깜빡임). 진행 중임을 따로 싣는다.
+ *   ⚠ _collectOk.ended 에 'running' 같은 값을 넣지 말 것 — 커서 파일로 영속되어 적재 실패로 끝난 주기의 값이 재시작 뒤에도 남는다(인메모리만).
+ */
+const _inflight = new Map();
 const _lagLog = new Map();      // vcenterId → 지연 경고를 마지막으로 찍은 시각(시간당 1줄)
 let _cursorLoaded = false;
 let _cursorDirty = false;
@@ -164,13 +171,17 @@ export function syncCursorDbKey(dbKey) {
   const prev = _activeDbKey;
   _activeDbKey = dbKey || prev;
   if (!prev || !dbKey || sameLogsDb(prev, dbKey)) return false;
-  _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear();
+  _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear();
   _cursorDirty = true;   // 이번 주기 끝의 저장이 새 DB 키로 덮는다
   console.warn(`[vclogs] 로그 DB 가 바뀌었습니다(${prev.path} → ${dbKey.path}) — 수집 커서를 비우고 새 DB 의 마지막 저장 시각(없으면 최근 7일)부터 읽습니다`);
   return true;
 }
 /** 테스트 전용 — 인메모리 기록을 비우고 다음 수집이 파일을 다시 읽게 한다. */
-export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; _activeDbKey = null; }
+export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; _activeDbKey = null; }
+/** v2.772(Z2-2): 테스트 전용 — 정리 스로틀 틱을 처음(기동 직후)으로 되돌린다. 용량 확인은 둘째 주기부터라 테스트가 순서에 기대지 않게. */
+export function _resetTickForTest() { tick = 0; lastCap = null; }
+/** v2.772(Z1-3): 진행 중인 수집이 언제 시작됐는가(ms) — 없으면 null. '지금 수집' 라우트가 먼저 응답할 때 싣는다. */
+export function logPollRunningSince() { return running ? runningSince : null; }
 /*
  * v2.765(따라잡기 — 재검토 1-a·1-b·1-c): 밀린 vCenter 는 다음 주기를 기다리지 않고 **같은 주기 안에서, 한 세션·한 컬렉터로** 이어 읽는다
  *   (collectVCenterEvents onBatch) — EVENT_BATCH_ROWS 건마다 묶음을 받아 적재(전용 DB → 로그 DB 조각 트랜잭션)하고 커서·온전한 시각을 갱신한 뒤
@@ -200,6 +211,30 @@ export function vcCatchupBudgetMs({ everyMs, cycleStart, now = Date.now() } = {}
   const tail = DEADLINE_GRACE_MS + 2 * CLEANUP_TIMEOUT_MS + 5_000;
   const left = (Number(cycleStart) || now) + every - tail - now;
   return Math.max(Math.min(own, CATCHUP_MIN_BUDGET_MS), Math.min(own, Math.floor(left)));
+}
+/*
+ * v2.772(Z2-2 — 재현: 상한 40MB 에서 정리 직전 사용 중 118.8MB): 용량 확인이 보관기간 정리와 함께 10주기에 1번이라, 따라잡기(주기에 수십만~백만 행)
+ *   동안 상한을 몇 배 넘은 뒤에야 지웠고 파일은 그 최고 수위에서 줄지 않는다. 이제 사용 중 크기(헤더 두 필드 — 즉시)는 **둘째 주기부터 매 주기** 보고,
+ *   넘었을 때만 오래된 것부터 지우되 **주기 꼬리 안의 시간 예산**으로 자른다(남은 초과분은 다음 주기). 가드(running) 안이다 — 밖에서 따로 돌리면
+ *   다음 주기의 적재와 겹쳐 방금 넣은 따라잡기 행을 바로 지운다. 보관기간 정리는 예전대로 10주기에 1번(스로틀 규칙 — 매 틱 DELETE 스캔 금지).
+ */
+export const CAP_CLEANUP_MAX_MS = 30_000;
+export const CAP_CLEANUP_TAIL_MS = 5_000;
+/** 이번 주기의 용량 정리 시간 예산(ms, 순수) — min(30초, 주기 시작 + 간격 − 5초 − 지금), 바닥 0(그래도 정리 루프는 청크 하나는 지운다 — 진척 보장). */
+export function capCleanupBudgetMs({ everyMs, cycleStart, now = Date.now() } = {}) {
+  const every = Number(everyMs) > 0 ? Number(everyMs) : 600_000;
+  const left = (Number(cycleStart) || now) + every - CAP_CLEANUP_TAIL_MS - now;
+  return Math.max(0, Math.min(CAP_CLEANUP_MAX_MS, Math.floor(left)));
+}
+/**
+ * v2.772(Z2-3 — 재현: 밀린 8곳 + 정상 2곳에서 정상 vCenter 가 앞 6곳의 예산 뒤에 시작): 수집 순서(순수) — 직전 주기에 **끝까지 못 읽은**(capped)
+ *   vCenter 를 뒤로 보낸다. 정상 vCenter 는 1초 안에 끝나므로 앞에 둬도 밀린 vCenter 의 예산은 거의 그대로다. 같은 무리 안의 순서·예산식은 바꾸지 않는다.
+ *   기록이 없으면(처음 기동) 앞 무리 — 등록부 순서 그대로다.
+ */
+export function fairCollectOrder(vcs, cappedOf = () => null) {
+  const front = []; const back = [];
+  for (const vc of Array.isArray(vcs) ? vcs : []) (cappedOf(String(vc?.id ?? '')) === true ? back : front).push(vc);
+  return [...front, ...back];
 }
 /**
  * v2.765: 이번 수집이 '끝까지 읽지 못했다' 인가 — 수집기(collectVCenterEvents)가 배열에 실은 ended 를 본다. 없으면(옛 수집기·mock) 건수로 판정.
@@ -259,18 +294,27 @@ export function logLagMs(vcenterId, lastStoredTs = null, now = Date.now()) {
   const base = okAt ?? (Number(lastStoredTs) > 0 ? Number(lastStoredTs) : null);
   return base == null ? null : Math.max(0, now - base);
 }
-/** 콘솔 지연 줄의 상태 — 이번 주기 결과로 '따라잡기 중'(상한에 걸렸지만 저장됨) · '정체'(저장 0 또는 실패) · '정상'(끝까지 읽음). */
-export function lagStateText(vcenterId) {
-  const st = collectStateOf(String(vcenterId ?? ''));
-  return st === 'catching-up' ? '따라잡기 중' : st === 'stalled' || st === 'failed' ? '정체' : st === 'ok' ? '정상' : '—';
+/**
+ * v2.772(Z1 I-3·Z1-4): 상태 코드 → 문구 — 화면(web/src/views/vcLogCollect.js VCLOG_STATE_TEXT)과 **같은 말**이다(예전 콘솔은 'failed' 를 '정체' 로,
+ *   화면은 '실패' 로 불렀다). 'auth-stopped'(인증 정지 — 주기 수집에서 건너뜀) · 'not-collected'(직접 수집 대상 아님 — 엣지 위임·끔·점검중).
+ */
+export const COLLECT_STATE_TEXT = Object.freeze({ 'catching-up': '따라잡기 중', stalled: '정체', ok: '정상', failed: '실패', 'auth-stopped': '인증 정지', 'not-collected': '수집 안 함' });
+/** 콘솔 지연 줄의 상태 — 이번 주기 결과로. skip('auth-stopped' 등)을 주면 그것이 먼저다(이번 주기에 시도하지 않았다). */
+export function lagStateText(vcenterId, { skip = null } = {}) {
+  const st = skip ? (skip === 'auth-stopped' ? 'auth-stopped' : 'not-collected') : collectStateOf(String(vcenterId ?? ''));
+  return COLLECT_STATE_TEXT[st] || '—';
 }
-/** 이번 주기의 vCenter 상태 코드(순수 — 인메모리 기록만 읽는다). 기록이 없으면 null. */
+/**
+ * 이번 주기의 vCenter 상태 코드(순수 — 인메모리 기록만 읽는다). 기록이 없으면 null.
+ * v2.772(Z1-1): 상한 여부는 **그 주기가 끝날 때 기록한 값**(_lastPoll.capped)으로 본다 — _collectOk.capped 는 다음 주기 도중 묶음마다 true 로 덮여,
+ *   직전 주기 '정상' 인 vCenter 가 진행 중에 '따라잡기 중'·'정체' 로 보였다. 옛 기록(필드 없음)은 예전처럼 _collectOk 로.
+ */
 export function collectStateOf(vcenterId) {
   const p = _lastPoll.get(vcenterId);
   if (!p) return null;
   if (p.error) return 'failed';
-  const ok = _collectOk.get(vcenterId);
-  if (ok?.capped) return p.stored > 0 ? 'catching-up' : 'stalled';
+  const capped = typeof p.capped === 'boolean' ? p.capped : _collectOk.get(vcenterId)?.capped === true;
+  if (capped) return p.stored > 0 ? 'catching-up' : 'stalled';
   return 'ok';
 }
 /**
@@ -278,31 +322,52 @@ export function collectStateOf(vcenterId) {
  *   lagMs 는 logLagMs · ratePerMin 은 이번 주기에 읽은 수/소요(소요를 모르면 null — 0 이 아니다) · error 는 원문 300자(범위 계정에는
  *   scopeVcLogStatus 가 지운다 — vCenter 주소가 들어간다). vcenterId 순.
  */
-export function logCollectDiag(storeVcenters = [], { now = Date.now() } = {}) {
+/*
+ * v2.772(Z1-1·Z1-2·Z1-4·Z2-I1·Z1 I-1) 추가 필드:
+ *   running — 지금 수집 중이면 {since, read, stored, rounds}(진행분) · 아니면 null. lastPoll·state 는 **마지막으로 끝난 주기** 값이다.
+ *   lastStoredTs — lastTsOf(id)(db.lastTs — MAX 단독, 인덱스 끝점)를 주면 실시간. 예전에는 건수 캐시(최대 5분)의 값이라 같은 행의 온전한 시각보다
+ *     이른 '마지막 저장' 이 보였다. 건수(count)는 여전히 캐시 값이다(그 시각은 응답의 store.countsAt).
+ *   firstTs — firstTsOf(id)(MIN 단독)를 주면 그 vCenter 의 가장 오래된 보관 로그 시각(용량 상한이 실제 보관을 정하는지 보인다).
+ *   skip — 주기 수집에서 빼는 이유('auth-stopped' 인증 정지 · 'disabled'·'maintenance'·'site' 직접 수집 아님). 있으면 state 는 'auth-stopped'·'not-collected'.
+ *   lastPoll.okAtStart·okAtEnd·everyMs — 그 주기의 시작·끝 온전한 시각과 주기 간격(따라잡기 진척 추정 — 화면이 계산한다).
+ */
+export function logCollectDiag(storeVcenters = [], { now = Date.now(), lastTsOf = null, firstTsOf = null, skipOf = null } = {}) {
   const stored = new Map();
   for (const v of Array.isArray(storeVcenters) ? storeVcenters : []) if (v && v.vcenterId != null) stored.set(String(v.vcenterId), v);
-  const ids = new Set([...stored.keys(), ..._lastPoll.keys(), ..._collectOk.keys(), ..._readCursor.keys()]);
+  const skips = skipOf instanceof Map ? skipOf : new Map();
+  const authStoppedIds = [...skips].filter(([, why]) => why === 'auth-stopped').map(([id]) => id);
+  const ids = new Set([...stored.keys(), ..._lastPoll.keys(), ..._collectOk.keys(), ..._readCursor.keys(), ..._inflight.keys(), ...authStoppedIds]);
+  const posTs = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
+  const readTs = (fn, id) => { if (typeof fn !== 'function') return undefined; try { return posTs(fn(id)); } catch { return null; } };
   const out = [];
   for (const id of [...ids].sort()) {
     const sv = stored.get(id);
     const ok = _collectOk.get(id);
     const p = _lastPoll.get(id);
-    const lastStoredTs = sv && Number(sv.lastTs) > 0 ? Number(sv.lastTs) : null;
+    const inf = _inflight.get(id);
+    const live = readTs(lastTsOf, id);
+    const lastStoredTs = live !== undefined ? live : (sv && Number(sv.lastTs) > 0 ? Number(sv.lastTs) : null);
     const ratePerMin = p && Number.isFinite(p.ms) && p.ms > 0 ? Math.round((p.read / p.ms) * 60_000) : null;
+    const skip = skips.get(id) || null;
+    const first = readTs(firstTsOf, id);
     out.push({
       vcenterId: id,
       count: sv && Number.isFinite(sv.count) ? sv.count : null,
       lastStoredTs,
+      firstTs: first === undefined ? null : first,
       cursorTs: _readCursor.get(id) ?? null,
       okAt: ok?.at ?? null,
       capped: ok ? ok.capped === true : null,
       ended: ok?.ended ?? null,
       restored: ok?.restored === true,
       lagMs: logLagMs(id, lastStoredTs, now),
-      lastPoll: p ? { at: p.at, read: p.read, stored: p.stored, ms: p.ms, rounds: p.rounds, deadlineMs: p.deadlineMs, budgetMs: p.budgetMs ?? null, error: p.error, hint: p.hint ?? null } : null,
+      lastPoll: p ? { at: p.at, read: p.read, stored: p.stored, ms: p.ms, rounds: p.rounds, deadlineMs: p.deadlineMs, budgetMs: p.budgetMs ?? null, error: p.error, hint: p.hint ?? null,
+        okAtStart: p.okAtStart ?? null, okAtEnd: p.okAtEnd ?? null, everyMs: p.everyMs ?? null } : null,
+      running: inf ? { since: inf.at, read: inf.read, stored: inf.stored, rounds: inf.rounds } : null,
+      skip,
       consecutiveCapped: _capStreak.get(id) || 0,
       ratePerMin,
-      state: collectStateOf(id),
+      state: skip && !inf ? (skip === 'auth-stopped' ? 'auth-stopped' : 'not-collected') : collectStateOf(id),
     });
   }
   return out;
@@ -422,7 +487,7 @@ export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc), { graceMs =
  *   **주기 수집에서만** 건너뛴다(store 와 같은 정지 기록 — 같은 계정이다. 로그 폴러가 따로 로그인하면
  *   store 가 멈춰도 계정 잠금은 그대로다). 수동 실행은 막지 않는다(authGuard 규칙 3).
  */
-export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = null, deadlineMs: deadlineOverride = null } = {}) {
+export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = null, deadlineMs: deadlineOverride = null, capBudgetMs: capBudgetOverride = null } = {}) {
   // v2.743(감사 WEB-04): 진행 중이면 **직전 결과(lastRun)를 돌려주지 않는다** — '지금 수집' 이 그 값을 이번 결과로 읽어
   //   '수집 완료: N건' 이라고 말했다(첫 실행 중이면 null 이라 0건). 이번 요청은 새로 수집하지 않았다는 사실을 busy 로 밝힌다.
   if (running) { _busySkips++; _busySkipAt = Date.now(); return { busy: true, runningSince }; }
@@ -462,7 +527,9 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
     const everyMs = pollEveryMs(s.pollIntervalMin);
     const cycleStart = runningSince;
     const stalled = [];   // v2.756: 읽었는데 하나도 저장되지 않은 채 끝까지 못 읽은 vCenter(중복 키·심각도 필터) — 예전에는 여기서 영원히 멈췄다
-    await poolRun(vcs, LOG_CONCURRENCY, async (vc) => {
+    // v2.772(Z2-3): 직전 주기에 끝까지 읽은 vCenter 먼저(순서만 — 예산식 그대로). 밀린 vCenter 가 슬롯 6개를 다 잡아 정상 vCenter 가 480초 늦게 시작하던 것.
+    const ordered = fairCollectOrder(vcs, (id) => _collectOk.get(id)?.capped);
+    await poolRun(ordered, LOG_CONCURRENCY, async (vc) => {
       if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
       const vcId = String(vc.id);
       const t0 = Date.now();
@@ -471,7 +538,11 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
       const budget = mock ? null : (Number(budgetOverride) > 0 ? Math.floor(Number(budgetOverride)) : vcCatchupBudgetMs({ everyMs, cycleStart, now: t0 }));
       // v2.766(R1-A2-03): 데드라인도 테스트·진단용 주입(deadlineMs)이 있으면 그것(정리 지연이 데드라인을 넘는 경로를 몇 초 안에 재현).
       const deadlineMs = mock ? null : (Number(deadlineOverride) > 0 ? Math.floor(Number(deadlineOverride)) : budget + vcLogDeadlineMs(vc));
-      const poll = { at: t0, read: 0, stored: 0, ms: null, rounds: 0, deadlineMs, budgetMs: budget, error: null, hint: null };
+      // v2.772(Z1 I-1): okAtStart — 이 주기 시작 때의 온전한 시각(끝 값 okAtEnd 와의 차가 이번 주기의 전진) · everyMs — 주기 간격.
+      //   capped·ended·okAtEnd 는 워커 끝에 채운다(그 주기가 끝날 때의 값 — 다음 주기 도중 _collectOk 가 묶음마다 덮여도 상태가 섞이지 않게 · Z1-1).
+      const poll = { at: t0, read: 0, stored: 0, ms: null, rounds: 0, deadlineMs, budgetMs: budget, error: null, hint: null,
+        okAtStart: _collectOk.get(vcId)?.at ?? null, okAtEnd: null, everyMs, capped: null, ended: null };
+      _inflight.set(vcId, poll);   // v2.772(Z1-1): 진행 중 — 상태 표가 '수집 중' 으로 말한다(끝나면 지운다)
       const startedAt = t0;   // v2.731(A2-01): 이 수집이 온전하게 덮는 끝(끝까지 읽었으면)
       let cycleMaxRead = 0;   // 이번 주기에 읽은 마지막 이벤트 시각(묶음 누적)
       let finalDone = false;  // v2.766(R1-A2-03): 마지막 묶음(final)까지 적재·기록을 마쳤는가 — 그 뒤는 정리(Destroy·Logout)뿐이다
@@ -550,7 +621,10 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
         } else failed.push({ vcenterId: vcId, error: poll.error });
       }
       poll.ms = Date.now() - t0;
+      const okEnd = _collectOk.get(vcId);
+      poll.okAtEnd = okEnd?.at ?? null; poll.capped = okEnd ? okEnd.capped === true : null; poll.ended = okEnd?.ended ?? null;
       _lastPoll.set(vcId, poll);
+      _inflight.delete(vcId);
       // 연속 상한 주기 수 — 이번 주기가 끝까지 읽지 못한 채 끝났으면 +1, 끝까지 읽었으면 0(실패한 주기는 바꾸지 않는다).
       if (!poll.error) {
         if (_collectOk.get(vcId)?.capped) _capStreak.set(vcId, (_capStreak.get(vcId) || 0) + 1);
@@ -571,31 +645,39 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
       if (!_lagLog.has(vcId) || t - _lagLog.get(vcId) > 3_600_000) {
         _lagLog.set(vcId, t);
         const p = _lastPoll.get(vcId);
-        console.warn(`[vclogs] ${vcId}: 수집이 ${(lagMs / DAY).toFixed(1)}일 뒤처짐(읽음 ${p?.read ?? '—'}/저장 ${p?.stored ?? '—'}) — ${lagStateText(vcId)}`);
+        // v2.772(Z1-4·I-3): 인증 정지로 이번 주기에 건너뛴 vCenter 는 그 사유를(예전 '— —') · 상태 문구는 화면과 같은 말.
+        const skip = authStopped.includes(vc.id) ? 'auth-stopped' : null;
+        console.warn(`[vclogs] ${vcId}: 수집이 ${(lagMs / DAY).toFixed(1)}일 뒤처짐(읽음 ${p?.read ?? '—'}/저장 ${p?.stored ?? '—'}) — ${lagStateText(vcId, { skip })}${skip ? '(주기 수집에서 건너뜀 — vCenter 관리에서 계정을 확인하세요)' : ''}`);
       }
     }
-    // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
+    // 보관기간 prune 은 매 폴이 아니라 N폴마다 1회(DELETE 스캔 비용 절감).
     // ⚠ v2.503: `tick++ % N === 0` 은 tick 초기값이 0 이라 **첫 폴에서 즉시 참**이었다 —
     // metrics/sampler.js 가 금지한 v2.453 패턴과 같다(보존기간을 365→90일로 줄이고 재시작하면
     // 기동 30초 뒤 첫 폴이 수백만 행 삭제 + VACUUM 을 동기로 돈다). 전위 증가로 바꾼다.
-    if ((++tick % PRUNE_EVERY) === 0) {
-      if (s.retentionDays > 0) {
-        // v2.601(감사 DB2601-03): 한 방 DELETE(183만 행 4.8초 정지)가 아니라 청크 + 양보로 지우고, 보고 건수는 실제 전체다.
-        //   상한(PRUNE_MAX_ROWS)에 걸리면 남은 분은 다음 prune 주기가 잇는다 — 그 사실을 로그에 적는다.
-        const before = Date.now() - s.retentionDays * DAY;
-        const r = typeof db.pruneAsync === 'function' ? await db.pruneAsync(before) : { deleted: db.prune(before), done: true };
-        if (r.deleted) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${r.deleted}건 정리${r.done === false ? ' — 상한에 걸려 다음 주기에 계속' : ''}`);
-      }
-      // 용량 제한: DB 의 **사용 중 크기**가 maxSizeMB 를 넘으면 오래된 것부터 삭제.
-      // ⚠⚠ v2.741(감사 DB-03 — 재현): 예전에는 파일 크기(sizeBytes, +wal)로 판정해 삭제만으로는 줄지 않았고, 그래서 상한에 닿을
-      //   때마다 루프 밖에서 VACUUM(파일 전체 재작성, 동기)을 돌렸다 — 상한에 닿은 포탈은 prune 주기마다 수 초씩 멈췄다(합성 534MB 실측).
-      //   이제 (page_count − freelist_count) × page_size 로 판정한다(db.usedBytes). 지운 페이지는 다음 INSERT 가 다시 쓰므로 파일은
-      //   최고 수위 근처에 머물고 더 커지지 않는다 — VACUUM 이 필요 없다. 대가(정직 기록): 상한을 낮춰도 파일은 줄어들지 않는다
-      //   (빈 공간은 freeBytes 로 화면이 말한다).
-      if (s.maxSizeMB > 0) {
-        const limit = s.maxSizeMB * 1024 * 1024;
-        const usedOf = () => (typeof db.usedBytes === 'function' ? db.usedBytes() : db.sizeBytes());
-        let size = usedOf(), guard = 0, dropped = 0, stuck = false;
+    const thisTick = ++tick;
+    if ((thisTick % PRUNE_EVERY) === 0 && s.retentionDays > 0) {
+      // v2.601(감사 DB2601-03): 한 방 DELETE(183만 행 4.8초 정지)가 아니라 청크 + 양보로 지우고, 보고 건수는 실제 전체다.
+      //   상한(PRUNE_MAX_ROWS)에 걸리면 남은 분은 다음 prune 주기가 잇는다 — 그 사실을 로그에 적는다.
+      const before = Date.now() - s.retentionDays * DAY;
+      const r = typeof db.pruneAsync === 'function' ? await db.pruneAsync(before) : { deleted: db.prune(before), done: true };
+      if (r.deleted) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${r.deleted}건 정리${r.done === false ? ' — 상한에 걸려 다음 주기에 계속' : ''}`);
+    }
+    // 용량 제한: DB 의 **사용 중 크기**가 maxSizeMB 를 넘으면 오래된 것부터 삭제.
+    // ⚠⚠ v2.741(감사 DB-03 — 재현): 예전에는 파일 크기(sizeBytes, +wal)로 판정해 삭제만으로는 줄지 않았고, 그래서 상한에 닿을
+    //   때마다 루프 밖에서 VACUUM(파일 전체 재작성, 동기)을 돌렸다 — 상한에 닿은 포탈은 prune 주기마다 수 초씩 멈췄다(합성 534MB 실측).
+    //   이제 (page_count − freelist_count) × page_size 로 판정한다(db.usedBytes). 지운 페이지는 다음 INSERT 가 다시 쓰므로 파일은
+    //   최고 수위 근처에 머물고 더 커지지 않는다 — VACUUM 이 필요 없다. 대가(정직 기록): 상한을 낮춰도 파일은 줄어들지 않는다
+    //   (빈 공간은 freeBytes 로 화면이 말한다).
+    // v2.772(Z2-2): 확인은 **둘째 주기부터 매 주기**(기동 첫 틱은 확인도 삭제도 하지 않는다 — 스로틀 규칙), 삭제는 넘었을 때만, 주기 꼬리 안의 시간 예산
+    //   (capCleanupBudgetMs — 테스트·진단용 주입 capBudgetMs)으로 자른다. 지우는 행 집합(전역 오래된 순)은 예전과 같고 시점만 앞당긴다.
+    if (s.maxSizeMB > 0 && thisTick > 1) {
+      const limit = s.maxSizeMB * 1024 * 1024;
+      const usedOf = () => (typeof db.usedBytes === 'function' ? db.usedBytes() : db.sizeBytes());
+      let size = usedOf();
+      if (size > limit) {
+        const capBudget = capBudgetOverride != null && Number(capBudgetOverride) >= 0 ? Math.floor(Number(capBudgetOverride)) : capCleanupBudgetMs({ everyMs, cycleStart, now: Date.now() });
+        const capUntil = Date.now() + capBudget;
+        let guard = 0, dropped = 0, stuck = false, cut = false;
         // ⚠ v2.503: 행 수는 **루프 밖에서 1회만** 센다. 예전에는 매 반복 `db.meta().count` 를 불렀는데
         // meta() 는 COUNT/MIN/MAX + `GROUP BY vcenterId` 로 **풀스캔 2회**다 — 상한 50회 × 2 = 최악
         // 100회 전체 스캔이 한 틱 안에서 동기로 돌았다(삭제 자체의 스캔은 별도). 삭제한 만큼 빼가며
@@ -613,18 +695,23 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
             if (!k) break;
             n += k;
             await new Promise((res) => setImmediate(res));
+            if (Date.now() >= capUntil) { cut = true; break; }   // v2.772(Z2-2): 시간 예산 — 청크마다(단계의 마지막 청크 포함) 본다 · 청크 하나는 지운 뒤에(진척 보장)
           }
           if (!n) break;
           dropped += n; cnt -= n;
           // v2.741(DB-03): 사용 중 크기를 다시 잰다(헤더 필드 — 즉시). 지웠는데 줄지 않았으면 더 지워도 같다 — 조용히 전부 지우지 않고
-          //   멈춘 뒤 사유를 남긴다(다음 prune 주기가 다시 본다).
+          //   멈춘 뒤 사유를 남긴다(다음 정리 주기가 다시 본다). v2.772: 예산이 단계 도중에 끊었으면 페이지가 덜 비었을 수 있어 정체로 보지 않는다.
           const next = usedOf();
+          if (cut) { size = next; break; }
           if (!(next < size)) { stuck = true; break; }
           size = next;
         }
-        if (dropped) console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리(사용 중 ${(size / 1048576).toFixed(0)}MB — 지운 자리는 새 로그가 다시 씁니다)`);
-        if (stuck) console.warn(`[vclogs] 용량 제한(${s.maxSizeMB}MB): 오래된 로그를 지웠지만 사용 중 크기가 줄지 않았습니다 — 이번 주기는 여기서 멈춥니다(다음 정리 주기에 다시 봅니다)`);
-        lastCap = { at: Date.now(), limitBytes: limit, usedBytes: size, dropped, stuck };
+        const carry = cut && size > limit;
+        if (dropped) console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리(사용 중 ${(size / 1048576).toFixed(0)}MB — 지운 자리는 새 로그가 다시 씁니다)${carry ? ` · 이번 주기 시간 예산(${Math.round(capBudget / 1000)}초)을 다 써 남은 초과분은 다음 주기에 이어 지웁니다` : ''}`);
+        if (stuck) console.warn(`[vclogs] 용량 제한(${s.maxSizeMB}MB): 오래된 로그를 지웠지만 사용 중 크기가 줄지 않았습니다 — 이번 주기는 여기서 멈춥니다(다음 주기에 다시 봅니다)`);
+        // v2.772(Z2-I1): 화면이 '용량 상한이 실제 보관을 정하고 있다' 를 말하는 근거(dropped>0 · 같은 상한). 실제 보관 시작 시각은 상태 응답의 store.firstTs·
+        //   vCenter 별 firstTs(실시간 MIN)로 본다 — 여기에 전역 시각을 싣지 않는다(lastCap 은 범위 계정에도 그대로 가는 최상위 필드다).
+        lastCap = { at: Date.now(), limitBytes: limit, usedBytes: size, dropped, stuck, done: size <= limit, budgetMs: capBudget };
       }
     }
     lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}), ...(authRejected.length ? { authRejected } : {}), ...(stalled.length ? { stalled } : {}),
@@ -635,7 +722,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
     //   (scopeVcLogStatus 가 모르는 필드를 거르지 않는다). 상한 50곳, 넘으면 개수를 밝힌다.
     if (!failed.length) return lastRun;
     return { ...lastRun, failed: failed.slice(0, 50), ...(failed.length > 50 ? { failedOmitted: failed.length - 50 } : {}) };
-  } finally { running = false; runningSince = null; }
+  } finally { running = false; runningSince = null; _inflight.clear(); }
 }
 
 function schedule() {
@@ -657,6 +744,22 @@ export function startLogPoller() {
 
 export function rescheduleLogPoller() { schedule(); }
 
+/**
+ * v2.772(Z1-4 — 재현: 인증 정지 vCenter 행이 '상태 —·읽음 —' 인데 지연만 호박색): 주기 수집에서 빼는 vCenter 와 이유(vcenterId → 코드).
+ *   'auth-stopped' — 주 폴러와 같은 인증 정지 기록(peekAuthStop — **읽기 전용**: authStopFor 는 자격증명이 바뀌었으면 기록을 지우므로 상태 조회에서 쓰지 않는다).
+ *   'disabled'·'maintenance'·'site' — 직접 수집 대상이 아님(splitDirectCollectTargets — pollLogsOnce 와 같은 판정). mock 이거나 등록부를 못 읽으면 빈 Map(붙이지 않는다).
+ */
+function collectSkipMap() {
+  const out = new Map();
+  if (config.dataSource === 'mock') return out;
+  try {
+    const split = splitDirectCollectTargets(loadVcenterConfig().vcenters || []);
+    for (const vc of split.targets) { if (vc?.id != null && vcAuthGuard.peekAuthStop(vc)) out.set(String(vc.id), 'auth-stopped'); }
+    for (const x of split.skipped) if (x?.vcenterId) out.set(String(x.vcenterId), String(x.why || 'not-collected'));
+  } catch { return new Map(); }
+  return out;
+}
+
 export async function logStatus() {
   const db = await getLogsDb();
   // v2.741(DB-03): 파일 크기와 함께 사용 중 크기·빈 공간을 싣는다 — 용량 상한은 사용 중 크기로 판정하고 파일은 줄어들지 않는다.
@@ -668,8 +771,12 @@ export async function logStatus() {
   // v2.765: vCenter 별 수집 진단(collect) · 실효 상한(설정값과 수집기 한도 중 작은 것) · 따라잡기 예산 — 화면이 숫자를 박지 않고 이 값을 쓴다.
   return { settings, lastRun, store: meta, dbKind: db.kind, dbPath: db.path, dbSizeBytes: db.sizeBytes(),
     dbUsedBytes: Number.isFinite(used) ? used : null, dbFreeBytes: Number.isFinite(free) ? free : null, ...(lastCap ? { lastCap } : {}),
-    collect: logCollectDiag(meta?.vcenters), maxPerPollEffective: effectiveMaxPerPoll(settings), collectorMaxEvents: COLLECTOR_MAX_EVENTS,
+    // v2.772(Z1-2·Z1-4·Z2-I1): 마지막 저장·가장 오래된 시각은 vCenter 마다 단독 MAX·MIN(인덱스 끝점 — 실시간) · 주기 수집에서 빼는 이유(skip).
+    //   NDJSON 폴백은 lastTs·firstTs 가 전 행 훑기라(vCenter 마다) 예전대로 건수 목록의 마지막 시각만 쓴다.
+    collect: logCollectDiag(meta?.vcenters, { ...(db.kind === 'sqlite' ? { lastTsOf: (id) => db.lastTs(id), firstTsOf: (id) => db.firstTs(id) } : {}), skipOf: collectSkipMap() }),
+    maxPerPollEffective: effectiveMaxPerPoll(settings), collectorMaxEvents: COLLECTOR_MAX_EVENTS,
     // v2.765(재검토): 따라잡기는 회차가 아니라 한 세션의 묶음(batchRows)·시간 예산 — 화면 안내가 이 값을 쓴다. busySkips 는 진행 중이라 건너뛴 틱.
     catchup: { budgetMs: catchupBudgetMs(settings.pollIntervalMin), ratio: CATCHUP_BUDGET_RATIO, batchRows: EVENT_BATCH_ROWS, minBudgetMs: CATCHUP_MIN_BUDGET_MS, streaming: true },
-    busySkips: _busySkips, busySkipAt: _busySkipAt };
+    busySkips: _busySkips, busySkipAt: _busySkipAt,
+    runningSince: logPollRunningSince() };   // v2.772(Z1-1): 지금 수집 주기가 진행 중이면 그 시작 시각(vCenter 정보 없음)
 }

@@ -6,7 +6,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
-import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText } from './vcLogCollect.js'; // v2.765: vCenter 별 수집 상태 표(+ 시한 안내 — 2-c)
+import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText,
+  vcLogSkipText, vcLogStateSort, vcLogRunningText, vcLogCountsAtText, vcLogCatchupText, vcLogCapNoteText } from './vcLogCollect.js'; // v2.765: vCenter 별 수집 상태 표(+ 시한 안내 — 2-c) · v2.772: 진행 중·수집 제외·진척·용량 상한 안내
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -45,6 +46,8 @@ export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString(
 export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
   if (!r || typeof r !== 'object') return '수집 결과를 읽지 못했습니다.';
   if (r.ok === false) return `오류: ${typeof r.reason === 'string' && r.reason ? r.reason : '수집하지 못했습니다.'}`;
+  // v2.772(Z1-3): 서버가 150초 안에 끝나지 않아 먼저 응답했다 — 수집은 계속 진행 중이고, 이번 회차의 실패 목록은 응답에 없다(표의 상태 칸이 말한다).
+  if (r.running) return `수집이 오래 걸려 먼저 응답했습니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 수집은 계속 진행 중입니다. 결과(실패한 vCenter 포함)는 아래 표의 상태 칸에서 확인하세요.`;
   if (r.busy) return `이전 수집이 아직 진행 중입니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 이번 요청으로 새로 수집하지 않았습니다. 끝나면 상태 줄이 바뀝니다.`;
   if (r.skipped) return '로그 수집이 꺼져 있어 수집하지 않았습니다 — 위에서 켜고 정책을 저장하세요.';
   const len = (v) => (Array.isArray(v) ? v.length : 0);
@@ -130,6 +133,7 @@ export default function VcenterLogs() {
 
   // v2.731(A5-01): putJson 은 400(저장 경로 검사 실패 {ok:false,reason})을 던지지 않는다 — 판정 없이 setS(r) 하면 설정 폼이 오류 객체가 되고 '저장됨' 이 떴다.
   const save = async () => { setBusy('save'); setMsg(null); try { const r = requireChanged(await putJson('/admin/vclogs/settings', s)); setS(r); setMsg('저장됨'); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
+  const capNote = vcLogCapNoteText(st, vcLogCollectRows(st), { fmtTime });   // v2.772(Z2-I1): 용량 상한이 실제 보관을 정하는가
   const collect = async () => { setBusy('collect'); setMsg(null); try { const r = await postJson('/admin/vclogs/collect', {}); setMsg(vcLogCollectText(r, fmtTime)); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
 
   return (
@@ -172,6 +176,7 @@ export default function VcenterLogs() {
           <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>
         {vcLogNotCollectedText(st.lastRun) && <div className="muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{vcLogNotCollectedText(st.lastRun)}</div>}
+        {capNote && <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal', color: 'var(--amber)' }}>{capNote}</div>}
         <VcLogCollectTable st={st} />
       </div>
 
@@ -188,13 +193,15 @@ export function VcLogCollectTable({ st }) {
   const rows = vcLogCollectRows(st);
   if (!rows.length) return null;
   const omitted = Number(st?.collectOmitted);
+  const countsAt = vcLogCountsAtText(st?.store?.countsAt);
   return (
     <div style={{ marginTop: 10 }}>
-      <STable minWidth={980} style={{ fontSize: 12 }}>
+      <STable minWidth={1080} style={{ fontSize: 12 }}>
         <thead><tr>
-          <th>vCenter</th><th>보관 건수</th><th>마지막 저장</th><th title="이 시각까지의 이벤트는 전부 모았습니다(상한에 걸리면 마지막으로 읽은 이벤트 시각)">온전한 시각</th>
-          <th title="지금 − 온전한 시각(없으면 마지막 저장). 1일을 넘으면 호박색">지연</th><th title="이번 주기에 읽은 수 / 저장한 수(회차)">이번 주기 읽음/저장</th>
-          <th title="이번 주기가 끝까지 읽지 못한 이유 — 예산(시간 예산 소진)·시한(데드라인)·중단(묶음 사이 실패)·상한·쪽 수 한도">상한</th><th title="이번 주기 소요 / 데드라인(시간 예산 + 요청 시한×2)">소요/시한</th><th>상태</th>
+          <th>vCenter</th><th title="건수는 최대 몇 분 전에 센 값입니다(옆의 집계 시각). 마지막 저장·가장 오래된 로그는 지금 값입니다">보관 건수{countsAt && <span className="muted" style={{ fontWeight: 400, marginLeft: 4 }}>{countsAt}</span>}</th><th>마지막 저장</th>
+          <th title="이 vCenter 의 가장 오래된 보관 로그 — 용량 상한이 걸려 있으면 설정 보관 기간보다 짧을 수 있습니다">가장 오래된 로그</th><th title="이 시각까지의 이벤트는 전부 모았습니다(상한에 걸리면 마지막으로 읽은 이벤트 시각)">온전한 시각</th>
+          <th title="지금 − 온전한 시각(없으면 마지막 저장). 1일을 넘으면 호박색">지연</th><th title="마지막으로 끝난 주기에 읽은 수 / 저장한 수(묶음 수). 수집 중이면 직전 주기 값이고 진행분은 상태 칸에 있습니다">최근 주기 읽음/저장</th>
+          <th title="최근 주기가 끝까지 읽지 못한 이유 — 예산(시간 예산 소진)·시한(데드라인)·중단(묶음 사이 실패)·상한·쪽 수 한도. 수집 중이면 진행 중">상한</th><th title="최근 주기 소요 / 데드라인(시간 예산 + 요청 시한×2)">소요/시한</th><th title="심각도 순으로 정렬합니다(실패·인증 정지·정체·따라잡기·수집 안 함·정상)">상태</th>
         </tr></thead>
         <tbody>
           {rows.map((r) => {
@@ -204,12 +211,18 @@ export function VcLogCollectTable({ st }) {
                 <td style={{ whiteSpace: 'nowrap' }}>{r.vcenterId}</td>
                 <td data-sort={r.count ?? ''} className="right">{fmtNum(r.count)}</td>
                 <td data-sort={r.lastStoredTs ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.lastStoredTs)}</td>
+                <td data-sort={r.firstTs ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.firstTs)}</td>
                 <td data-sort={r.okAt ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.okAt)}</td>
                 <td data-sort={r.lagMs ?? ''} style={{ whiteSpace: 'nowrap', color: warn ? 'var(--amber)' : undefined, fontWeight: warn ? 600 : undefined }}>{vcLogLagText(r.lagMs)}</td>
                 <td data-sort={r.read ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogReadStoredText(r, fmtNum)}</td>
-                <td data-sort={r.capped == null ? '' : r.capped ? 1 : 0}>{vcLogCappedText(r)}</td>
+                <td data-sort={r.running ? 2 : r.capped == null ? '' : r.capped ? 1 : 0}>{vcLogCappedText(r)}</td>
                 <td data-sort={r.ms ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogDurText(r)}</td>
-                <td data-sort={r.state ?? ''}><span className={`badge ${vcLogStateClass(r.state)}`} title={r.error || (r.errorHidden ? '오류 원문은 전체 범위 관리자만 봅니다' : undefined)}>{vcLogStateText(r.state)}</span>{vcLogHintText(r) && <span className="muted" style={{ marginLeft: 6, whiteSpace: 'normal' }}>{vcLogHintText(r)}</span>}</td>
+                <td data-sort={vcLogStateSort(r)}>
+                  <span className={`badge ${vcLogStateClass(r.state)}`} title={r.error || (r.errorHidden ? '오류 원문은 전체 범위 관리자만 봅니다' : undefined) || vcLogSkipText(r) || undefined}>{vcLogStateText(r.state)}</span>
+                  {r.running && <span className="badge blue" style={{ marginLeft: 6 }} title="지금 수집 중입니다 — 이 행의 읽음/저장·소요·상태는 직전에 끝난 주기 값입니다">{vcLogRunningText(r, fmtNum)}</span>}
+                  {vcLogHintText(r) && <span className="muted" style={{ marginLeft: 6, whiteSpace: 'normal' }}>{vcLogHintText(r)}</span>}
+                  {vcLogCatchupText(r) && <div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal' }}>{vcLogCatchupText(r)}</div>}
+                </td>
               </tr>
             );
           })}
