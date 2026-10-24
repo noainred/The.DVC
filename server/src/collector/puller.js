@@ -205,6 +205,15 @@ async function pullOne(c, { retries = 2, signal = null } = {}) {
  * 예전에는 즉시 당김이 mock·authDeny·serversDropped·serversCoerced 를 빼고 상태를 통째로 교체해, 다음 주기까지 통신 지도의
  * 'mock' 사유와 인증 거부 통계가 사라졌다(v2.548 H5 '통째로 바꾸면 정보가 사라진다' 의 형제 경로).
  */
+/**
+ * v2.775(사용자 보고 '수집서버 자동 업그레이드가 안되'): 성공한 pull 이 상태를 통째로 바꾸면서 업그레이드 push 결과(upgrade)까지 지웠다 —
+ *   화면의 '업그레이드 실패' 가 다음 pull(수십 초)에 사라져 왜 실패했는지 볼 수 없었다. 직전 상태의 upgrade 만 이어 붙인다.
+ */
+export function withUpgradeKept(id, next) {
+  const prev = getCollectorStatus(id);
+  return prev && prev.upgrade && typeof prev.upgrade === 'object' ? { ...next, upgrade: prev.upgrade } : next;
+}
+
 export function statusFromPull(r) {
   return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, byHostDropped: r.byHostDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock, sensorDetailDelta: r.sensorDetailDelta || null };
 }
@@ -308,7 +317,7 @@ export async function pullCollectorByAgent(agentName) {
     //   위임 스캔 직후 즉시 당김(즉시·30초 뒤 2회)마다 재시도·백오프를 다시 기다렸다.
     const r = await pullTagged(c, pullOptionsFor(fails.get(c.id) || 0));
     fails.set(c.id, 0);
-    setCollectorStatus(c.id, statusFromPull(r));
+    setCollectorStatus(c.id, withUpgradeKept(c.id, statusFromPull(r)));
     return true;
   } catch (err) {
     // 실패해도 다음 주기 폴러가 재시도 — 여기선 조용히 로그만(즉시 반영은 best-effort).
@@ -367,7 +376,7 @@ async function pullNowInner(signal = null) {
     try {
       const r = await pullTagged(c, { ...pullOptionsFor(fails.get(c.id) || 0), signal });
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, statusFromPull(r));
+      setCollectorStatus(c.id, withUpgradeKept(c.id, statusFromPull(r)));
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);

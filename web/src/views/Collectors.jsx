@@ -18,6 +18,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 // 2026-10-09 검토 S-09(그룹 J): 중앙↔엣지 전송 보호 — 평문 HTTP 는 승인된 예외만(판정은 서버, 문장은 transportText).
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
+import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -315,6 +316,10 @@ export default function Collectors() {
       {csvOk && csvModal === 'export' && <CollectorsCsvExportModal onClose={() => setCsvModal(null)} />}
       {csvOk && csvModal === 'import' && <CollectorsCsvImportModal onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); load(); }} />}
 
+      {/* v2.775: 마지막 자동 업그레이드에서 수집 서버로 보낸 결과(재시작 전에 파일로 남긴 것) — 전부 받았으면 조용히 한 줄 */}
+      {autoPushLine(data?.autoPush) && (() => { const a = autoPushLine(data.autoPush); return (
+        <div style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', color: a.tone === 'ok' ? 'var(--text-dim)' : a.tone === 'warn' ? 'var(--amber)' : '#f87171' }}>{a.text}</div>); })()}
+
       {banner && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
           background: banner.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
@@ -473,7 +478,11 @@ export default function Collectors() {
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}
-                    {s?.upgrade && <div className="muted" style={{ fontSize: 11, color: s.upgrade.ok ? 'var(--green)' : 'var(--red)' }}>{s.upgrade.ok ? `업그레이드 v${s.upgrade.version || ''} 적용` : `업그레이드 실패`}</div>}
+                    {/* v2.775: 실패 이유·시각·자동 여부까지(예전에는 '업그레이드 실패' 만) */}
+                    {upgradeCell(s?.upgrade) && (() => { const u = upgradeCell(s.upgrade); return (
+                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
+                        {u.text}{u.reason && <div className="muted" style={{ fontSize: 11 }}>{u.reason}</div>}
+                      </div>); })()}
                   </td>
                   <td className="muted">{s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</td>
                   <td>{c.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">on</span>}</td>

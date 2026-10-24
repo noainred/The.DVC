@@ -285,3 +285,48 @@ test('B-11 패키지 받기 manifest 시한 사유 — 공용 metaTimeoutReason(
   assert.match(String(d.reason), /저장소가 응답\(헤더\)을 시작하지 않았습니다/);
   assert.match(String(d.reason), /시도 \d+번/);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v2.775(사용자 보고 '수집서버 자동 업그레이드가 안되'): 자동 적용 뒤 수집 서버 push 결과가 재시작 전에 lastResult(파일)에 남고,
+//   실패한 수집 서버마다 콘솔 한 줄 · 화면 상태(mergeAutoPushStatus)가 그 결과를 수집 서버별로 보인다.
+test('v2.775 자동 적용 → 수집 서버 push 결과(성공 1·403 1)가 lastResult.collectorPush 에 남고 실패마다 콘솔 한 줄', async () => {
+  const nb = makeBundle('99.0.3');
+  const man = signFor(K1, '99.0.3', [nb]);
+  const rem = await remoteSource({ 'versions.json': versionsFor('99.0.3', nb), [nb.name]: nb.bytes, 'vmware-portal-99.0.3.manifest.json': man });
+  const okBase = await listen((q, r) => { q.resume(); q.on('end', () => { r.setHeader('content-type', 'application/json'); r.end(JSON.stringify({ ok: true, version: '99.0.3' })); }); });
+  const denyBase = await listen((q, r) => { q.resume(); q.on('end', () => { r.statusCode = 403; r.setHeader('content-type', 'application/json'); r.end(JSON.stringify({ ok: false, reason: '토큰 불일치' })); }); });
+  fs.writeFileSync(path.join(CFG, 'collectors.json'), JSON.stringify({ collectors: [
+    { id: 'ok1', name: 'OK-EDGE', url: okBase, token: 'T', enabled: true },
+    { id: 'deny1', name: 'DENY-EDGE', url: denyBase, token: 'WRONG', enabled: true },
+  ] }));
+  const warns = []; const realWarn = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); };
+  try {
+    const m = makeManager({ enabled: true, autoApply: true, remoteBase: rem.base, installDir: freshInstall('c775'), pollIntervalMs: 0 });
+    const r = await m.apply({ source: 'auto', restart: false, trigger: 'manual' });
+    assert.equal(r.ok, true, r.reason);
+    const cp = m.lastResult.collectorPush;
+    assert.ok(cp, 'collectorPush 가 lastResult 에 있다');
+    assert.equal(cp.total, 2); assert.equal(cp.ok, 1);
+    const deny = cp.items.find((x) => x.id === 'deny1');
+    assert.equal(deny.ok, false); assert.equal(deny.status, 403);
+    assert.match(deny.reason, /HTTP 403/);
+    assert.match(deny.reason, /COLLECTOR_TOKEN/, '점검 힌트(토큰)가 이유에 실린다');
+    assert.equal(cp.items.find((x) => x.id === 'ok1').ok, true);
+    assert.ok(warns.some((w) => /수집 에이전트 업그레이드 푸시 실패 DENY-EDGE: HTTP 403/.test(w)), `실패 콘솔 줄: ${warns.join(' | ')}`);
+    // 파일 왕복(정제) 뒤에도 남는다 — 재시작 뒤 화면이 이것을 읽는다
+    const back = auto.sanitizeResult(JSON.parse(JSON.stringify(m.lastResult)));
+    assert.deepEqual(back.collectorPush, cp);
+    // 화면 상태 합치기: 메모리에 upgrade 가 없으면(재시작 뒤) 파일 결과를 수집 서버별로
+    const { mergeAutoPushStatus } = await import('../src/collector/upgradePush.js');
+    const st = mergeAutoPushStatus({ deny1: { ok: true, version: '1.0.0' } }, back);
+    assert.equal(st.deny1.upgrade.ok, false); assert.equal(st.deny1.upgrade.auto, true); assert.equal(st.deny1.upgrade.status, 403);
+    assert.equal(st.deny1.version, '1.0.0', '다른 상태 필드는 그대로');
+    assert.equal(st.ok1.upgrade.ok, true);
+    // 메모리에 더 새로운 결과(재시작 뒤 수동 업그레이드)가 있으면 그것을 둔다
+    const newer = mergeAutoPushStatus({ deny1: { upgrade: { at: back.at + 1, ok: true, version: '99.0.3' } } }, back);
+    assert.equal(newer.deny1.upgrade.ok, true);
+  } finally {
+    console.warn = realWarn;
+    fs.rmSync(path.join(CFG, 'collectors.json'), { force: true });
+  }
+});
