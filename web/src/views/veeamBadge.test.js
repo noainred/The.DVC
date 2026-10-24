@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rowActions, agentAfterVcToggle, statusCell, formAfterSave } from './VeeamSettings.jsx';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText, snapCollectorText, SNAP_COLLECTOR_TEXT } from './veeamBadge.js';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText, snapCollectorText, SNAP_COLLECTOR_TEXT, runningJobsText } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -262,6 +262,8 @@ describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
     expect(v.runningJobs).toEqual([{ name: '23. spotfire', pg: 49, server: 'VBR' }, { name: 'x', pg: null, server: 'VBR' }]);
     expect(veeamSummary({ configured: true, servers: [sv()], byVm: {}, otherVcenter: 0 }).runningJobs).toEqual([]);
     expect(veeamSummary({ configured: true, servers: [sv({ runningJobs: [{ name: 'j', pg: 1 }] })], byVm: {}, runningStale: true }).runningJobs).toEqual([]);
+    expect(runningJobsText(v.runningJobs)).toBe('23. spotfire 49% · x');
+    expect(runningJobsText([{ name: 'A', pg: 10, server: 'VBR-1' }, { name: 'A', pg: 70, server: 'VBR-2' }])).toBe('VBR-1 › A 10% · VBR-2 › A 70%');
     const b = veeamBadge({ run: 1, pg: 28, by: 'task' });
     expect(b.label).toBe('백업 중 28%'); expect(b.title).toMatch(/28% 는 이 VM 의 진행률/);
   });

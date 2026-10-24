@@ -87,6 +87,16 @@ export function veeamCounts(byVm) {
 }
 
 /**
+ * v2.778.1: 실행 중 작업 한 줄 — '이름 N%' · 서버가 둘 이상이면 서버 이름을 앞에 붙인다(한 vCenter 에 Veeam 서버 여럿 — 작업 이름이 겹칠 수 있다).
+ * @param {Array<{name:string, pg:(number|null), server:string}>} list
+ */
+export function runningJobsText(list) {
+  const xs = Array.isArray(list) ? list : [];
+  const multi = new Set(xs.map((j) => j.server)).size > 1;
+  return xs.map((j) => `${multi && j.server ? `${j.server} › ` : ''}${j.name}${Number.isFinite(j.pg) ? ` ${j.pg}%` : ''}`).join(' · ');
+}
+
+/**
  * 요약 카드(v2.751 시안 — 체크했을 때만 보인다). tone: ok | warn | muted.
  * @param {object|null} d   /api/veeam/badges 응답
  * @param {{loading?:boolean, error?:string, vmTotal?:number, refreshError?:string}} o

@@ -13,7 +13,7 @@ import { fetchJson } from '../api.js';
 import { Modal } from '../components/Modal.jsx';
 import { ErrorBox, Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
-import { veeamBadge, veeamSnapBadge, veeamEventBadge, veeamEventChip, veeamDetailView, sizeText, resultLabel, fmtTime } from './veeamBadge.js';
+import { veeamBadge, veeamSnapBadge, veeamEventBadge, veeamEventChip, veeamDetailView, sizeText, resultLabel, fmtTime, runningJobsText } from './veeamBadge.js';
 
 const TONE = {
   green: { bg: 'rgba(34,197,94,.15)', fg: '#4ade80' },
@@ -137,7 +137,7 @@ export function VeeamSummaryCard({ sum }) {
         </div>
         {sum.runningJobs?.length > 0 && (
           <div data-veeam-running-jobs="" className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>
-            Veeam 실행 중 작업: {sum.runningJobs.map((j) => `${j.name}${j.pg != null ? ` ${j.pg}%` : ''}`).join(' · ')} — 작업 전체 진행률(Veeam 콘솔 작업 목록의 % 와 같은 값 · VM 배지의 % 는 그 VM 의 진행률)
+            Veeam 실행 중 작업: {runningJobsText(sum.runningJobs)} — 작업 전체 진행률(Veeam 콘솔 작업 목록의 % 와 같은 값 · VM 배지의 % 는 그 VM 의 진행률)
           </div>
         )}
         <div className="muted" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 12px', paddingTop: 10, borderTop: '1px solid var(--border-soft)', fontSize: 12, minWidth: 0 }}>
