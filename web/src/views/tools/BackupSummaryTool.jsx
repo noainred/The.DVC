@@ -140,15 +140,15 @@ export default function BackupSummaryTool() {
             <thead>
               <tr style={{ textAlign: 'left', fontSize: 12 }}>
                 <th style={{ padding: '6px 14px' }}>vCenter</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>VM</th>
-                <th style={{ padding: '6px 8px' }}>Veeam 백업</th>
-                <th style={{ padding: '6px 8px' }}>스냅샷 기준</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }} title="Veeam·스냅샷 어느 쪽에도 보이지 않는 VM(백업 안 됨이 아니라 확인되지 않음)">미확인</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>백업 중</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }} title={`마지막 Veeam 백업이 ${opts.rpoDays}일을 넘은 VM`}>{opts.rpoDays}일+ 경과</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }} title="그 VM 마지막 결과 — 실패 · 경고">실패·경고</th>
-                <th style={{ padding: '6px 8px' }} title="마지막 백업 완료 시각">마지막 백업</th>
-                <th style={{ padding: '6px 14px 6px 8px' }}>Veeam 서버</th>
+                <th style={{ padding: '6px 6px', textAlign: 'right' }}>VM</th>
+                <th style={{ padding: '6px 6px' }}>Veeam 백업</th>
+                <th style={{ padding: '6px 6px' }}>스냅샷 기준</th>
+                <th style={{ padding: '6px 6px', textAlign: 'right' }} title="Veeam·스냅샷 어느 쪽에도 보이지 않는 VM(백업 안 됨이 아니라 확인되지 않음)">미확인</th>
+                <th style={{ padding: '6px 6px', textAlign: 'right' }}>백업 중</th>
+                <th style={{ padding: '6px 6px', textAlign: 'right' }} title={`마지막 Veeam 백업이 ${opts.rpoDays}일을 넘은 VM`}>{opts.rpoDays}일+ 경과</th>
+                <th style={{ padding: '6px 6px', textAlign: 'right' }} title="그 VM 마지막 결과 — 실패 · 경고">실패·경고</th>
+                <th style={{ padding: '6px 6px' }} title="마지막 백업 완료 시각">마지막 백업</th>
+                <th style={{ padding: '6px 14px 6px 6px' }}>Veeam 서버</th>
               </tr>
             </thead>
             <tbody>
@@ -161,24 +161,24 @@ export default function BackupSummaryTool() {
                       <button type="button" onClick={() => openDetail(r.id)} title="백업 세부내용으로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
                       <div className="muted" style={{ fontSize: 11 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''}</div>
                     </td>
-                    <td data-sort={r.vm} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
-                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>
+                    <td data-sort={r.vm} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
+                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 6px', whiteSpace: 'nowrap' }}>
                       <span style={{ fontWeight: 700, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.veeam)}</span>
                       {vp != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{vp}%</span>}
                       {r.veeam != null && <Bar pct={vp} color="#22c55e" />}
                     </td>
-                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 8px' }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
+                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 6px' }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
                       <span style={{ fontWeight: 700, color: r.snap == null ? 'var(--text-dim)' : '#c084fc', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.snap)}</span>
                       {spc != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{spc}%</span>}
                       {r.snap == null && r.snapReason && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{snapReasonText(r.snapReason)}</span>}
                       {r.snap != null && <Bar pct={spc} color="#a855f7" />}
                     </td>
-                    <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
-                    <td data-sort={r.running ?? ''} style={{ padding: '9px 8px', textAlign: 'right' }}>{r.running ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{r.running}</span> : <span className="muted">{r.running === 0 ? '0' : '—'}</span>}</td>
-                    <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
-                    <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
-                    <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 8px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
-                    <td data-sort={vs.text} style={{ padding: '9px 14px 9px 8px' }}><span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: TONE[vs.tone], background: TONE_BG[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></td>
+                    <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
+                    <td data-sort={r.running ?? ''} style={{ padding: '9px 6px', textAlign: 'right' }}>{r.running ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{r.running}</span> : <span className="muted">{r.running === 0 ? '0' : '—'}</span>}</td>
+                    <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                    <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                    <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
+                    <td data-sort={vs.text} style={{ padding: '9px 14px 9px 6px' }}><span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: TONE[vs.tone], background: TONE_BG[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></td>
                   </tr>
                 );
               })}
@@ -187,7 +187,8 @@ export default function BackupSummaryTool() {
           <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>{rows.length}개 중 {shown.length}개 · 제목을 누르면 정렬 · vCenter 이름을 누르면 백업 세부내용</div>
         </div>
 
-        <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* v2.780.1: 옆 칸 240px — 1440px 에서 표 카드가 열 10개를 가로 스크롤 없이 담게(280px 이면 표가 약 35px 넘쳤다 · 실측) */}
+        <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <b style={{ fontSize: 14 }}>주의가 필요한 곳</b>
             {att.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : att.map((a) => (
