@@ -70,39 +70,88 @@ export function attentionList(rows, n = 6) {
   return out.slice(0, n);
 }
 
+/* ── v2.780 범위 옵션(두 화면 공유) ─────────────────────────────────────── */
+
+/** 전원 범위 — 서버 ?power= 값. 일시 중지(Suspended)는 꺼짐에 든다 · 전원을 모르는 VM 은 켜짐·꺼짐 어느 쪽에도 넣지 않는다(서버가 따로 센다). */
+export const POWER = [['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']];
+/** 오래된 백업 기준(일) — 서버 RPO_DAYS 와 같다. */
+export const RPO_DAYS = [1, 3, 7];
+const OPTS_KEY = 'backup-opts';
+export const DEFAULT_OPTS = Object.freeze({ power: 'all', excl: true, rpoDays: 1 });
+
+/** 저장된 옵션 — 못 읽으면(사생활 모드·차단·깨진 값) 기본값. 아는 값만 받는다. */
+export function loadOpts(storage) {
+  try {
+    const st = storage === undefined ? globalThis.localStorage : storage;
+    const raw = st ? JSON.parse(st.getItem(OPTS_KEY) || 'null') : null;
+    if (!raw || typeof raw !== 'object') return { ...DEFAULT_OPTS };
+    return {
+      power: POWER.some(([k]) => k === raw.power) ? raw.power : DEFAULT_OPTS.power,
+      excl: raw.excl !== false,
+      rpoDays: RPO_DAYS.includes(Number(raw.rpoDays)) ? Number(raw.rpoDays) : DEFAULT_OPTS.rpoDays,
+    };
+  } catch { return { ...DEFAULT_OPTS }; }
+}
+export function saveOpts(o, storage) {
+  try {
+    const st = storage === undefined ? globalThis.localStorage : storage;
+    if (st) st.setItem(OPTS_KEY, JSON.stringify({ power: o.power, excl: o.excl !== false, rpoDays: o.rpoDays }));
+  } catch { /* 저장 못 해도 화면은 그대로 동작 */ }
+}
+/** 서버 조회 쿼리(전원·제외). */
+export const scopeQuery = (o) => ({ power: o.power, excl: o.excl === false ? '0' : '1' });
+/** 범위 안내 — '템플릿·vCLS N대 제외 · 전원 모름 N대'(0 이면 그 조각을 뺀다 · 모르면 빈 글자).
+ * scope = 응답 scope({power, excl}) · counts = 서머리 totals 또는 세부 row({excluded, powerUnknown}). */
+export function scopeNote(scope, counts) {
+  if (!scope || !counts) return '';
+  const parts = [];
+  if (scope.excl && counts.excluded > 0) parts.push(`템플릿·vCLS ${fmtNum(counts.excluded)}대 제외`);
+  if (scope.power !== 'all' && counts.powerUnknown > 0) parts.push(`전원 모름 ${fmtNum(counts.powerUnknown)}대(켜짐·꺼짐 어디에도 넣지 않음)`);
+  return parts.join(' · ');
+}
+
 /* ── 세부내용: VM 분류 · 폴더 트리 ───────────────────────────────────────── */
 
-/** VM 한 대의 분류. v 키가 없으면 Veeam 모름(서버가 못 읽음), null 이면 Veeam 없음. */
-export function vmClass(vm) {
-  const vKnown = vm && 'v' in vm;
-  const v = vKnown ? vm.v : undefined;
-  const sKnown = !!(vm && vm.s && 'ev' in vm.s);
+/** VM 한 대의 분류. v 키가 없으면 Veeam 모름(서버가 못 읽음), null 이면 Veeam 없음.
+ * v2.780: old(마지막 백업이 rpoDays 일을 넘음) · fail(그 VM 마지막 결과가 실패·경고) — 서버 backupStatus.js viewClass 와 같은 판정(테스트가 대조). */
+export function vmClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
+  const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
+  const v = vKnown ? vm.v : null;
+  const sKnown = !!(vm && vm.s && 'ev' in vm.s && vm.s.ev !== undefined);
   const snapNow = vm?.s?.now || null;
-  const snapEv = vm?.s?.ev || null;
+  const snapEv = sKnown ? vm.s.ev : null;
   const snap = !!(snapEv || (snapNow && !snapNow.stale));
-  return { vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale) };
+  const r = v ? String(v.lr || v.lastResult || '') : '';
+  const days = RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1;
+  return {
+    vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
+    old: !!(v && typeof v.lb === 'number' && Number.isFinite(v.lb) && now - v.lb > days * 86_400_000), fail: /^(fail|warn)/i.test(r),
+  };
 }
 
 export const FILTERS = [
   ['all', '전체'], ['veeam', 'Veeam 백업'], ['snaponly', '스냅샷만'], ['none', '확인 안 됨'], ['run', '백업 중·대기'], ['stale', '스냅샷 잔존'],
+  ['rpo', '오래된 백업'], ['fail', '실패·경고'],
 ];
 
 /** VM 이 보기 필터에 드는가. '확인 안 됨' 은 두 쪽을 다 읽었는데 둘 다 없을 때만(모름은 넣지 않는다). */
-export function vmMatches(vm, f) {
-  const c = vmClass(vm);
+export function vmMatches(vm, f, opts) {
+  const c = vmClass(vm, opts);
   if (f === 'veeam') return c.veeam;
   if (f === 'snaponly') return !c.veeam && c.snap;
   if (f === 'none') return c.vKnown && c.sKnown && !c.veeam && !c.snap;
   if (f === 'run') return c.run;
   if (f === 'stale') return c.stale;
+  if (f === 'rpo') return c.old;
+  if (f === 'fail') return c.fail;
   return true;
 }
 
 /** 필터별 VM 수. */
-export function filterCounts(vms) {
+export function filterCounts(vms, opts) {
   const out = {};
   for (const [k] of FILTERS) out[k] = 0;
-  for (const vm of Array.isArray(vms) ? vms : []) for (const [k] of FILTERS) if (vmMatches(vm, k)) out[k]++;
+  for (const vm of Array.isArray(vms) ? vms : []) for (const [k] of FILTERS) if (vmMatches(vm, k, opts)) out[k]++;
   return out;
 }
 
@@ -115,13 +164,13 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  * 폴더 트리 — 필터·검색에 드는 VM 만 담고, 폴더마다 그 아래(전체 VM 기준 — 필터와 무관)의 집계를 단다.
  * @returns {{ key:'', name:string, children:Array, vms:Array, agg:{n,veeam,snap,run,none} }}
  */
-export function buildTree(vms, { filter = 'all', q = '' } = {}) {
+export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
   const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
     const c = vmClass(vm);
-    const show = vmMatches(vm, filter) && (!needle || String(vm.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+    const show = vmMatches(vm, filter, { rpoDays, now }) && (!needle || String(vm.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
     let node = root;
     const path = [root];
     for (const p of parts) {

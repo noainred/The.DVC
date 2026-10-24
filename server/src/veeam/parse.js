@@ -542,6 +542,7 @@ export function matchToVcenter(vc, vms, results, { refsFor = null, otherHosts = 
   const byVm = {};
   let unmatched = 0; let otherVcenter = 0; let ambiguous = 0;
   const aliases = learnHostAliases(vc, results, byMoref, nameOf, { otherHosts });
+  const lrAt = new Map();   // v2.780: VM 별 마지막 task 결과(lr)의 끝 시각 — 비교용(응답에는 싣지 않는다)
   for (const { server, result } of Array.isArray(results) ? results : []) {
     if (!result || !Array.isArray(result.vms)) continue;
     const jobs = Array.isArray(result.jobs) ? result.jobs : [];
@@ -569,6 +570,8 @@ export function matchToVcenter(vc, vms, results, { refsFor = null, otherHosts = 
       if (e.ag === 1) cur.ag = 1;
       const lb = lastBackupOf(e);
       if (lb && (cur.lb == null || lb.t > cur.lb)) { cur.lb = lb.t; cur.lbSrc = lb.src; }
+      // v2.780: 그 VM 의 마지막 task 결과(Success·Warning·Failed) — 서버가 여럿이면 가장 늦게 끝난 것(백업 메뉴의 실패·경고 필터)
+      if (e.lt && e.lt.r && Number.isFinite(e.lt.e) && (!lrAt.has(id) || e.lt.e > lrAt.get(id))) { cur.lr = String(e.lt.r); lrAt.set(id, e.lt.e); }
       if (refsFor && id === refsFor) (cur.refs || (cur.refs = [])).push({ server, result, entry: e });
       for (const jb of okJobs) {
         if (cur.jobs.includes(jb.name)) continue;

@@ -21,6 +21,37 @@ export function currentSnapOf(vm, now = Date.now()) {
 }
 
 /**
+ * v2.780(사용자 요청 '켜져 있는 VM 과 꺼져 있는 VM 선택' + 템플릿·vCLS 제외): 집계할 VM 범위(순수).
+ *  · power 'on' = POWERED_ON · 'off' = 전원 값이 있고 ON 이 아닌 것(일시 중지 포함 — 사용자 결정) · 그 밖 = 전체.
+ *    전원 값이 없는 VM 은 on·off 어느 쪽에도 넣지 않고 powerUnknown 으로 센다(지어내지 않는다).
+ *  · excl(기본 true) = 템플릿(vm.template)·vCLS 시스템 VM(이름이 vCLS 로 시작)을 빼고 excluded 로 센다 — 백업 대상이 아니라 '확인 안 됨' 을 부풀린다.
+ * @returns {{ vms:Array, excluded:number, powerUnknown:number, power:'all'|'on'|'off', excl:boolean }}
+ */
+export const POWER_VALUES = Object.freeze(['all', 'on', 'off']);
+export function isSystemVm(vm) { return vm?.template === true || /^vcls/i.test(String(vm?.name || '')); }
+export function vmScope(vms, { power = 'all', excl = true } = {}) {
+  const pw = POWER_VALUES.includes(power) ? power : 'all';
+  const ex = excl !== false;
+  let excluded = 0; let powerUnknown = 0;
+  const out = [];
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    if (ex && isSystemVm(vm)) { excluded++; continue; }
+    if (pw !== 'all') {
+      const ps = typeof vm?.powerState === 'string' ? vm.powerState.trim() : '';
+      if (!ps) { powerUnknown++; continue; }
+      if ((ps === 'POWERED_ON') !== (pw === 'on')) continue;
+    }
+    out.push(vm);
+  }
+  return { vms: out, excluded, powerUnknown, power: pw, excl: ex };
+}
+
+export const RPO_DAYS = Object.freeze([1, 3, 7]);
+const DAY = 86_400_000;
+/** VM 의 마지막 결과 — 그 VM 의 마지막 task 결과(lr)가 먼저, 없으면 작업의 마지막 결과. */
+export const resultOf = (ve) => String(ve?.lr || ve?.lastResult || '');
+
+/**
  * vCenter 한 곳의 행.
  * @param {object} p
  * @param {Array} p.vms               그 vCenter 의 VM(인벤토리)
@@ -34,9 +65,10 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
   const list = Array.isArray(vms) ? vms : [];
   const veeamKnown = !!(linked && vcnt && isFin(vcnt.n) && match);
   const snapKnown = !!(sc && isFin(sc.n));
-  const V = veeamKnown ? new Set(Object.keys(match.byVm || {})) : null;
-  let S = null; let snapStale = 0;
   const known = new Set(list.map((v) => v.id));
+  // v2.780: 매칭은 vCenter 전체로 한 결과를 받는다(캐시·별칭 학습을 범위와 무관하게) — 여기서 지금 범위의 VM 만 센다.
+  const V = veeamKnown ? new Set(Object.keys(match.byVm || {}).filter((id) => known.has(id))) : null;
+  let S = null; let snapStale = 0;
   if (snapKnown) {
     S = new Set(Object.keys(ev?.byVm || {}).filter((id) => known.has(id)));
   }
@@ -47,10 +79,17 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     else if (S) S.add(vm.id);
   }
   let lastBackup = null; let running = 0; let pending = 0;
+  const rpo = { d1: 0, d3: 0, d7: 0, unknown: 0 }; const results = { failed: 0, warning: 0 };
   if (veeamKnown) {
-    for (const e of Object.values(match.byVm || {})) {
+    for (const id of V) {
+      const e = match.byVm[id];
       if (e && isFin(e.lb) && (lastBackup == null || e.lb > lastBackup)) lastBackup = e.lb;
       if (e?.run === 1) running++; else if (e?.run === 2) pending++;
+      // 오래된 백업(RPO) — 마지막 백업 완료가 N일 넘음 · 시각을 모르면 따로
+      if (!e || !isFin(e.lb)) rpo.unknown++;
+      else { const age = now - e.lb; if (age > DAY) rpo.d1++; if (age > 3 * DAY) rpo.d3++; if (age > 7 * DAY) rpo.d7++; }
+      const r = resultOf(e);
+      if (/^fail/i.test(r)) results.failed++; else if (/^warn/i.test(r)) results.warning++;
     }
   }
   // 나눔 — 두 쪽을 다 알 때(연동 없는 vCenter 는 Veeam 이 '없음' 으로 확정이라 스냅샷만 알면 된다).
@@ -73,17 +112,25 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     running: veeamKnown ? running : null,
     pending: veeamKnown ? pending : null,
     lastBackup,
+    rpo: veeamKnown ? rpo : null,
+    results: veeamKnown ? results : null,
   };
 }
 
 /** 합계 — 모르는 값은 0 으로 더하지 않고 그 vCenter 를 센다. */
 export function backupTotals(rows) {
   const t = { vcenters: 0, vm: 0, veeam: 0, snap: 0, both: 0, vOnly: 0, sOnly: 0, none: 0, running: 0, pending: 0, snapStale: 0,
-    veeamUnknown: 0, veeamUnlinked: 0, snapUnknown: 0, splitUnknown: 0 };
+    veeamUnknown: 0, veeamUnlinked: 0, snapUnknown: 0, splitUnknown: 0,
+    rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     t.vcenters++; t.vm += r.vm || 0; t.snapStale += r.snapStale || 0;
     if (r.veeamState === 'unlinked') t.veeamUnlinked++;
-    else if (isFin(r.veeam)) { t.veeam += r.veeam; t.running += r.running || 0; t.pending += r.pending || 0; } else t.veeamUnknown++;
+    else if (isFin(r.veeam)) {
+      t.veeam += r.veeam; t.running += r.running || 0; t.pending += r.pending || 0;
+      if (r.rpo) for (const k of ['d1', 'd3', 'd7', 'unknown']) t.rpo[k] += r.rpo[k] || 0;
+      if (r.results) { t.failed += r.results.failed || 0; t.warning += r.results.warning || 0; }
+    } else t.veeamUnknown++;
+    t.excluded += r.excluded || 0; t.powerUnknown += r.powerUnknown || 0;
     if (isFin(r.snap)) t.snap += r.snap; else t.snapUnknown++;
     if (r.split) { t.both += r.split.both; t.vOnly += r.split.vOnly; t.sOnly += r.split.sOnly; t.none += r.split.none; } else t.splitUnknown++;
   }
@@ -99,6 +146,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     state: ve.run === 1 ? 'run' : ve.run === 2 ? 'wait' : 'ok', pg: ve.run === 1 && isFin(ve.pg) ? ve.pg : null, by: ve.by || '',
     jobs: Array.isArray(ve.jobs) ? ve.jobs.slice(0, 5) : [], rp: isFin(ve.rp) ? ve.rp : null,
     lb: isFin(ve.lb) ? ve.lb : null, lbSrc: ve.lbSrc || '', lastResult: ve.lastResult || '', ag: ve.ag === 1,
+    ...(ve.lr ? { lr: String(ve.lr).slice(0, 32) } : {}),   // v2.780: 그 VM 의 마지막 task 결과(작업 결과보다 먼저 본다)
   } : null;
   const ev = Array.isArray(evEntry) && isFin(evEntry[0]) ? { ts: evEntry[0], n: Number.isInteger(evEntry[1]) ? evEntry[1] : null } : null;
   return {
@@ -106,4 +154,35 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     v: veeamKnown ? v : undefined,
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
   };
+}
+
+/*
+ * v2.780: 세부내용의 '보기' 필터(VM 한 대 — vmBackupView 모양) — 웹 views/tools/backupViewText.js vmMatches 와 같은 판정이다
+ *   (CSV 가 화면과 같은 VM 을 내보내게 · 웹 테스트가 같은 입력으로 두 함수를 대조한다).
+ *   v 키 없음 = Veeam 모름 · v null = 없음 / s.ev 키 없음 = 스냅샷 모름 · 잔존(하루 넘은 임시 스냅샷)은 스냅샷으로 치지 않는다.
+ */
+export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail']);
+export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
+  const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
+  const v = vKnown ? vm.v : null;
+  const sKnown = !!(vm && vm.s && 'ev' in vm.s && vm.s.ev !== undefined);
+  const snapNow = vm?.s?.now || null;
+  const snap = !!((sKnown && vm.s.ev) || (snapNow && !snapNow.stale));
+  const r = v ? String(v.lr || v.lastResult || '') : '';
+  const days = RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1;
+  return {
+    vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
+    old: !!(v && isFin(v.lb) && now - v.lb > days * DAY), fail: /^(fail|warn)/i.test(r),
+  };
+}
+export function vmViewMatches(vm, f, opts) {
+  const c = viewClass(vm, opts);
+  if (f === 'veeam') return c.veeam;
+  if (f === 'snaponly') return !c.veeam && c.snap;
+  if (f === 'none') return c.vKnown && c.sKnown && !c.veeam && !c.snap;
+  if (f === 'run') return c.run;
+  if (f === 'stale') return c.stale;
+  if (f === 'rpo') return c.old;
+  if (f === 'fail') return c.fail;
+  return true;
 }
