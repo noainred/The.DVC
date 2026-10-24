@@ -5,10 +5,11 @@
  * ⚠ 못 읽은 값은 '—'(0 이 아니다) · 두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않는다.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, shortTs, isIrs } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import BackupOptions from './BackupOptions.jsx';
 
 export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
 
@@ -39,16 +40,24 @@ export default function BackupSummaryTool() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [opts, setOpts] = useState(() => loadOpts());
+  const [csvErr, setCsvErr] = useState(null);
   const gen = useRef(0);
+  // 전원·제외는 서버가 센다(같은 backupRow — 세부내용과 같은 수) · 바꾸면 그 조건으로 다시 읽는다. RPO 기준은 같은 응답에서 고른다.
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary')
+    fetchJson('/tools/backup-summary', scopeQuery(opts))
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, []);
+  }, [opts.power, opts.excl]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); return () => { gen.current++; }; }, [load]);
+  const changeOpts = useCallback((o) => { setOpts(o); saveOpts(o); }, []);
+  const csv = useCallback(async () => {
+    setCsvErr(null);
+    try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams(scopeQuery(opts))}`); } catch (e) { setCsvErr(e); }
+  }, [opts]);
 
   if (!data && loading) return <Loading />;
   if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
@@ -62,6 +71,8 @@ export default function BackupSummaryTool() {
   const splitKnown = t.vcenters > 0 && t.splitUnknown < t.vcenters;
   const splitTotal = (t.both || 0) + (t.vOnly || 0) + (t.sOnly || 0) + (t.none || 0);
   const seg = (n) => (splitTotal ? `${(n / splitTotal) * 100}%` : '0%');
+  const rpoKey = `d${opts.rpoDays}`;
+  const note = scopeNote(data.scope, t);
   const chips = [['all', `전체 ${rows.length}`], ['davinci', `다빈치 ${rows.filter((r) => !isIrs(r.name)).length}`], ['irs', `IRS ${rows.filter((r) => isIrs(r.name)).length}`], ['warn', '주의 필요']];
 
   return (
@@ -73,9 +84,15 @@ export default function BackupSummaryTool() {
         </div>
         <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center' }}>
           <span className="muted" style={{ fontSize: 12 }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
+          {canCsv() && <button type="button" className="tab" onClick={csv} style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </div>
       </div>
+      <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
+        <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
+        {note && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{note}</span>}
+      </div>
+      {csvErr && <div className="card" style={{ padding: '8px 12px', color: TONE.bad, fontSize: 12 }}>CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
       {data.registryUnreadable && <div className="card" style={{ padding: '8px 12px', color: TONE.bad, fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 Veeam 기준은 모두 확인 불가입니다 — 설정 › Veeam 백업 서버를 확인하세요.</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
@@ -86,6 +103,8 @@ export default function BackupSummaryTool() {
           sub={t.snapUnknown ? `확인 불가 ${t.snapUnknown}곳 제외` : '최근 7일 Veeam 스냅샷 · 지금 스냅샷'} />
         <Kpi label="어느 쪽에도 안 보임" value={splitKnown ? fmtNum(t.none) : '—'} sub="백업 안 됨이 아니라 확인되지 않음" />
         <Kpi label="지금 백업 중" value={fmtNum(t.running)} color="#fbbf24" border="#5c4513" sub={`대기 ${fmtNum(t.pending)}`} />
+        <Kpi label={`오래된 백업(${opts.rpoDays}일 초과)`} value={fmtNum(t.rpo?.[rpoKey])} color="#fb923c" border="#5c3413"
+          sub={[t.rpo?.unknown ? `시각 모름 ${fmtNum(t.rpo.unknown)}` : '', t.failed != null || t.warning != null ? `실패 ${fmtNum(t.failed)} · 경고 ${fmtNum(t.warning)}` : ''].filter(Boolean).join(' · ') || 'Veeam 백업 대상 중'} />
       </div>
 
       <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
@@ -117,7 +136,7 @@ export default function BackupSummaryTool() {
               {chips.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>)}
             </div>
           </div>
-          <STable minWidth={880} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <STable minWidth={1040} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', fontSize: 12 }}>
                 <th style={{ padding: '6px 14px' }}>vCenter</th>
@@ -126,6 +145,8 @@ export default function BackupSummaryTool() {
                 <th style={{ padding: '6px 8px' }}>스냅샷 기준</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right' }}>확인 안 됨</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right' }}>백업 중</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>오래된 백업({opts.rpoDays}일)</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>실패·경고</th>
                 <th style={{ padding: '6px 8px' }}>마지막 백업 완료</th>
                 <th style={{ padding: '6px 14px 6px 8px' }}>Veeam 서버</th>
               </tr>
@@ -154,6 +175,8 @@ export default function BackupSummaryTool() {
                     </td>
                     <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
                     <td data-sort={r.running ?? ''} style={{ padding: '9px 8px', textAlign: 'right' }}>{r.running ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{r.running}</span> : <span className="muted">{r.running === 0 ? '0' : '—'}</span>}</td>
+                    <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                    <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
                     <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 8px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
                     <td data-sort={vs.text} style={{ padding: '9px 14px 9px 8px' }}><span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: TONE[vs.tone], background: TONE_BG[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></td>
                   </tr>

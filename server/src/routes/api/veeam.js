@@ -24,7 +24,10 @@ import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/bac
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm } from '../../auth/auth.js';
-import { backupRow, backupTotals, vmBackupView } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴
+import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
+import { logAudit } from '../../audit.js';
+import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { fileStamp } from '../../util/dayKey.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -396,7 +399,7 @@ function maskDetail(detail, admin, vmName = '') {
  *   (Veeam)와 cachedSnapEvents·snapCount(스냅샷)를 그대로 쓰고 veeam/backupStatus.js 가 VM 단위로 합친다(카드·VM 화면과 같은 수).
  *   범위: 서머리는 scope 교집합, 세부내용은 vcOf(범위 밖 404). 응답 캐시는 범위·역할 키(관리자 판본: 실행 중 작업 이름·otherVcenter 수).
  */
-async function vcBackup(vc, vms, req, { initial = false } = {}) {
+async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const admin = isAdminDetailUser(req.user);
   const linked = !registryBroken() && serversForVcenter(vc.id).length > 0;
   let vcnt = null; let match = null; let views = [];
@@ -413,37 +416,68 @@ async function vcBackup(vc, vms, req, { initial = false } = {}) {
     vcnt = veeamCount({ views, byVm: match.byVm, vmTotal: vms.length });
   }
   const isLinked = linked || (isMockMode() && !!match) || registryBroken();
+  // ⚠ v2.780: 매칭·스냅샷 요약은 늘 vCenter **전체** VM 으로 — cachedSnapEvents 는 vCenter 별 캐시라 부분 목록으로 부르면 다른 화면의 값이 바뀐다.
+  //   범위(전원·템플릿 제외)는 backupRow 에 넘기는 목록으로만 정한다.
   const ev = await cachedSnapEvents(vc.id, vms, { initial, wait: false });
   const sc = snapCount({ ev, vms });
-  const row = backupRow({ vms, linked: isLinked, vcnt, match, sc, ev });
-  return { row, match, ev, vcnt, sc, views, linked: isLinked };
+  const sv = vmScope(vms, scope || {});
+  const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
+  return { row, match, ev, vcnt, sc, views, linked: isLinked, scopedVms: sv.vms };
 }
+
+/** ?power=all|on|off & excl=1|0(기본 1 — 템플릿·vCLS 제외). 모르는 값은 기본. */
+function scopeOf(req) {
+  const power = POWER_VALUES.includes(String(req.query.power || '')) ? String(req.query.power) : 'all';
+  return { power, excl: String(req.query.excl ?? '1') !== '0' };
+}
+
+async function summaryData(req, snap, scope) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const admin = isAdminDetailUser(req.user);
+  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vmsBy = new Map();
+  for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+  const maybeYield = createYielder(15);
+  const rows = []; const jobs = [];
+  for (const vc of vcs) {
+    await maybeYield();
+    const vms = vmsBy.get(vc.id) || [];
+    const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true, scope });
+    rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
+      veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
+      ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !serversForVcenter(vc.id).length ? { demo: true } : {}) });
+    // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유). 범위(전원)와 무관한 작업 단위 값이다.
+    if (admin) for (const v of b.views) for (const j of v.runningJobs || []) if (jobs.length < 30) jobs.push({ vcenter: vc.name || vc.id, server: v.name, name: j.name, pg: j.pg });
+  }
+  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined };
+}
+
+async function detailData(req, snap, t, scope) {
+  const admin = isAdminDetailUser(req.user);
+  const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
+  const b = await vcBackup(vc, t.vms, req, { initial: snap?.initial === true, scope });
+  const veeamKnown = b.row.veeam != null;
+  const snapKnown = b.row.snap != null;
+  const now = Date.now();
+  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, now }));
+  const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
+  return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
+    linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}) };
+}
+
+const iso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '');
+const scopeText = (sc) => `${sc.power === 'on' ? '켜진 VM' : sc.power === 'off' ? '꺼진 VM' : '전체 VM'}${sc.excl ? ' · 템플릿·vCLS 제외' : ''}`;
 
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
+  const csvPerm = requirePerm('data.csv');
 
   api.get('/tools/backup-summary', toolsPerm, (req, res) => {
     const snap = store.get();
-    const allowed = scopedVcenterIds(req.user, snap);
     const admin = isAdminDetailUser(req.user);
-    return memoJson(req, res, 'backup-summary', async () => {
-      const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
-      const vmsBy = new Map();
-      for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
-      const maybeYield = createYielder(15);
-      const rows = []; const jobs = [];
-      for (const vc of vcs) {
-        await maybeYield();
-        const vms = vmsBy.get(vc.id) || [];
-        const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true });
-        rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
-          veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
-          ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !serversForVcenter(vc.id).length ? { demo: true } : {}) });
-        // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유).
-        if (admin) for (const v of b.views) for (const j of v.runningJobs || []) if (jobs.length < 30) jobs.push({ vcenter: vc.name || vc.id, server: v.name, name: j.name, pg: j.pg });
-      }
-      return { ok: true, at: Date.now(), rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined };
-    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });
+    const scope = scopeOf(req);
+    return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });   // 키에 req.originalUrl(전원·제외)도 든다(shared.js)
   });
 
   api.get('/tools/backup-detail', toolsPerm, async (req, res) => {
@@ -451,16 +485,55 @@ export function registerBackupStatus(api) {
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     const snap = store.get();
     const admin = isAdminDetailUser(req.user);
-    return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => {
-      const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
-      const b = await vcBackup(vc, t.vms, req, { initial: snap?.initial === true });
-      const veeamKnown = b.row.veeam != null;
-      const snapKnown = b.row.snap != null;
+    const scope = scopeOf(req);
+    return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });
+  });
+
+  // v2.780(사용자 선택 'CSV 내보내기'): 화면과 같은 조건 그대로 — 데이터 내보내기 권한(data.csv) + 감사 로그(다른 도구 CSV 와 같은 규칙).
+  api.get('/tools/backup-summary.csv', csvPerm, toolsPerm, async (req, res) => {
+    try {
+      const scope = scopeOf(req);
+      const d = await summaryData(req, store.get(), scope);
+      const lines = [CSV_BOM + csvLine(['vCenter', '범위', 'VM', 'Veeam 백업', '스냅샷 기준', '둘 다', 'Veeam 만', '스냅샷만', '확인 안 됨', '백업 중', '대기',
+        '오래된 백업 1일+', '오래된 백업 3일+', '오래된 백업 7일+', '완료 시각 모름', '실패', '경고', '마지막 백업 완료(UTC)', 'Veeam 상태', '스냅샷 잔존', '제외(템플릿·vCLS)', '전원 모름'])];
+      const n = (v) => (Number.isFinite(v) ? v : '');
+      for (const r of d.rows) {
+        lines.push(csvLine([r.name, scopeText(scope), r.vm, n(r.veeam), n(r.snap), n(r.split?.both), n(r.split?.vOnly), n(r.split?.sOnly), n(r.split?.none), n(r.running), n(r.pending),
+          n(r.rpo?.d1), n(r.rpo?.d3), n(r.rpo?.d7), n(r.rpo?.unknown), n(r.results?.failed), n(r.results?.warning), iso(r.lastBackup), r.veeamState || '', n(r.snapStale), n(r.excluded), n(r.powerUnknown)]));
+      }
+      logAudit({ user: req.user?.username, action: 'backup-summary.csv', target: 'backup-summary', detail: `${d.rows.length} rows · ${scopeText(scope)}`, ip: req.ip });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="backup-summary-${fileStamp()}.csv"`);
+      res.send(lines.join('\r\n'));
+    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); }
+  });
+
+  api.get('/tools/backup-detail.csv', csvPerm, toolsPerm, async (req, res) => {
+    const t = vcOf(req);
+    if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    try {
+      const scope = scopeOf(req);
+      const filter = VIEW_FILTERS.includes(String(req.query.filter || '')) ? String(req.query.filter) : 'all';
+      const rpoDays = RPO_DAYS.includes(Number(req.query.rpoDays)) ? Number(req.query.rpoDays) : 1;
+      const d = await detailData(req, store.get(), t, scope);
       const now = Date.now();
-      const vms = t.vms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, now }));
-      const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
-      return { ok: true, at: now, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
-        linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}) };
-    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });
+      const st = (v) => (v === undefined ? '모름' : !v ? '없음' : v.state === 'run' ? '백업 중' : v.state === 'wait' ? '대기' : '백업 대상');
+      const lines = [CSV_BOM + csvLine(['vCenter', '폴더', 'VM', '전원', 'Veeam', '진행률(%)', '작업', '복원 지점', '마지막 백업 완료(UTC)', '마지막 결과',
+        `스냅샷 최근 ${d.snapDays || 7}일 횟수`, '스냅샷 마지막(UTC)', '지금 스냅샷', '스냅샷 잔존'])];
+      let n = 0;
+      for (const vm of d.vms) {
+        if (!vmViewMatches(vm, filter, { rpoDays, now })) continue;
+        n++;
+        const v = vm.v; const s = vm.s || {};
+        lines.push(csvLine([d.vcenter.name, vm.folder, vm.name, vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '', st(v), v && Number.isFinite(v.pg) ? v.pg : '',
+          v?.jobs?.join(' | ') || '', v && Number.isFinite(v.rp) && v.rp >= 0 ? v.rp : '', iso(v?.lb), v ? (v.lr || v.lastResult || '') : '',
+          s.ev === undefined ? '모름' : s.ev ? (s.ev.n ?? '') : 0, iso(s.ev?.ts), s.now && !s.now.stale ? s.now.n : '', s.now?.stale ? '예' : '']));
+      }
+      logAudit({ user: req.user?.username, action: 'backup-detail.csv', target: t.vcenterId, detail: `${n} rows · ${scopeText(scope)} · 보기 ${filter}${filter === 'rpo' ? ` ${rpoDays}일` : ''}`, ip: req.ip });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="backup-detail-${fileStamp()}.csv"`);
+      res.send(lines.join('\r\n'));
+    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); }
   });
 }

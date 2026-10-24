@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { vmViewMatches, VIEW_FILTERS, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
 
 const H = 3_600_000;
 const vm = (id, folder, o = {}) => ({ id, name: id, folder, ...o });
@@ -44,7 +45,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[6])).toMatchObject({ vKnown: false, sKnown: false });
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
-    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1 });
+    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0 });   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -87,6 +88,71 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
       const firstReturn = src.indexOf('\n  if (');
       const lastHook = Math.max(...['useState(', 'useEffect(', 'useMemo(', 'useCallback(', 'useRef('].map((h) => src.lastIndexOf(h)));
       expect(lastHook, f).toBeLessThan(firstReturn);
+    }
+  });
+});
+
+describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경고', () => {
+  const D = 86_400_000;
+  const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  const X = [
+    ...VMS,
+    vm('old', 'DC1/vm/D', { v: { state: 'ok', lb: NOW - 4 * D, lr: 'Success' }, s: { ev: null, now: null } }),
+    vm('old8', 'DC1/vm/D', { v: { state: 'ok', lb: NOW - 8 * D, lastResult: 'Warning' }, s: { ev: null, now: null } }),
+    vm('bad', 'DC1/vm/D', { v: { state: 'ok', lb: NOW - 3_600_000, lr: 'Failed', lastResult: 'Success' }, s: { ev: { ts: NOW, n: 1 }, now: null } }),
+    vm('nolb', 'DC1/vm/D', { v: { state: 'ok', lb: null, lr: 'warning' }, s: { ev: null, now: null } }),
+  ];
+
+  it('오래된 백업은 고른 일수 · 실패·경고는 VM 결과(lr) 먼저, 없으면 작업 결과 · 시각 모름은 오래됨이 아니다', () => {
+    const o = (d) => ({ rpoDays: d, now: NOW });
+    expect(X.filter((v) => vmMatches(v, 'rpo', o(3))).map((v) => v.id)).toEqual(['dc01', 'old', 'old8']);   // dc01 은 lb: 1(아주 오래 전)
+    expect(X.filter((v) => vmMatches(v, 'rpo', o(7))).map((v) => v.id)).toEqual(['dc01', 'old8']);
+    expect(X.filter((v) => vmMatches(v, 'fail', o(1))).map((v) => v.id)).toEqual(['old8', 'bad', 'nolb']);
+    expect(filterCounts(X, o(1))).toMatchObject({ all: 11, rpo: 3, fail: 3 });
+    expect(buildTree(X, { filter: 'fail', rpoDays: 1, now: NOW }).children[0].hit).toBe(3);
+  });
+
+  it('웹 vmMatches = 서버 vmViewMatches(같은 입력 · CSV 가 화면과 같은 VM 을 낸다) · 값 목록도 같다', () => {
+    expect(FILTERS.map(([k]) => k)).toEqual([...VIEW_FILTERS]);
+    expect(POWER.map(([k]) => k)).toEqual([...POWER_VALUES]);
+    expect(RPO_DAYS).toEqual([...SERVER_RPO_DAYS]);
+    const edge = [{}, { v: undefined, s: {} }, { v: null, s: { ev: undefined } }, { v: { state: 'wait' }, s: { now: { stale: true, ts: NOW } } }, ...X];
+    for (const d of [1, 3, 7, 99]) {
+      for (const f of VIEW_FILTERS) for (const v of edge) expect(vmMatches(v, f, { rpoDays: d, now: NOW }), `${f}/${d}/${v.id}`).toBe(vmViewMatches(v, f, { rpoDays: d, now: NOW }));
+    }
+  });
+
+  it('옵션 기억 — 저장소가 없거나 던지거나 깨진 값이어도 기본값 · 아는 값만 받는다', () => {
+    const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
+    const st = mem();
+    saveOpts({ power: 'off', excl: false, rpoDays: 7 }, st);
+    expect(loadOpts(st)).toEqual({ power: 'off', excl: false, rpoDays: 7 });
+    const boom = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+    expect(loadOpts(boom)).toEqual({ power: 'all', excl: true, rpoDays: 1 });
+    expect(() => saveOpts({ power: 'on' }, boom)).not.toThrow();
+    expect(loadOpts(null)).toEqual({ power: 'all', excl: true, rpoDays: 1 });
+    const bad = mem(); bad.setItem('backup-opts', '{"power":"sideways","rpoDays":30}');
+    expect(loadOpts(bad)).toEqual({ power: 'all', excl: true, rpoDays: 1 });
+    bad.setItem('backup-opts', 'not json');
+    expect(loadOpts(bad).power).toBe('all');
+    expect(scopeQuery({ power: 'on', excl: false })).toEqual({ power: 'on', excl: '0' });
+  });
+
+  it('범위 안내 — 0 인 조각은 빼고 · 전체 전원이면 전원 모름을 말하지 않는다 · 백틱 없음', () => {
+    expect(scopeNote({ power: 'on', excl: true }, { excluded: 12, powerUnknown: 3 })).toBe('템플릿·vCLS 12대 제외 · 전원 모름 3대(켜짐·꺼짐 어디에도 넣지 않음)');
+    expect(scopeNote({ power: 'all', excl: true }, { excluded: 0, powerUnknown: 3 })).toBe('');
+    expect(scopeNote({ power: 'off', excl: false }, { excluded: 5, powerUnknown: 0 })).toBe('');
+    expect(scopeNote(null, {})).toBe('');
+  });
+
+  it('화면 — 전원·제외가 바뀌면 그 조건으로 서버를 다시 읽는다 · CSV 는 권한 있을 때만 · 두 화면이 같은 옵션 컴포넌트', () => {
+    for (const f of ['./BackupSummaryTool.jsx', './BackupDetailTool.jsx']) {
+      const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(src, f).toMatch(/scopeQuery\(opts\)/);
+      expect(src, f).toMatch(/opts\.power, opts\.excl\]/);
+      expect(src, f).toMatch(/\{canCsv\(\) && <button/);
+      expect(src, f).toMatch(/<BackupOptions opts=\{opts\}/);
+      expect(src, f).toMatch(/loadOpts\(\)/);
     }
   });
 });

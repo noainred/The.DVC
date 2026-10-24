@@ -5,10 +5,11 @@
  * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import BackupOptions from './BackupOptions.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
 
 const CHIP = {
@@ -48,6 +49,8 @@ export default function BackupDetailTool({ scope }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);
   const [sel, setSel] = useState(null);
+  const [opts, setOpts] = useState(() => loadOpts());   // 서머리와 함께 기억(전원·제외는 서버가 세고, 오래된 백업 기준은 화면이 고른다)
+  const [csvErr, setCsvErr] = useState(null);
   const gen = useRef(0);
 
   useEffect(() => {
@@ -64,16 +67,26 @@ export default function BackupDetailTool({ scope }) {
     if (!vcId) return;
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-detail', { vcenterId: vcId })
+    fetchJson('/tools/backup-detail', { vcenterId: vcId, ...scopeQuery(opts) })
       .then((r) => { if (my === gen.current) { setData(r); setOpen(null); setSel(null); } })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, [vcId]);
-  useEffect(() => { setData(null); load(); try { if (vcId) localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* */ } }, [vcId, load]);
+  }, [vcId, opts.power, opts.excl]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); try { if (vcId) localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* */ } }, [vcId, load]);
+  // vCenter 를 바꾸면 이전 vCenter 의 표를 지운다(전원·제외만 바꾸면 다시 읽는 동안 이전 표를 둔다)
+  useEffect(() => { setData(null); }, [vcId]);
+  const changeOpts = useCallback((o) => { setOpts(o); saveOpts(o); }, []);
+  const csv = useCallback(async () => {
+    setCsvErr(null);
+    const qs = new URLSearchParams({ vcenterId: vcId, ...scopeQuery(opts), filter, rpoDays: String(opts.rpoDays) });
+    try { await downloadFile(`/tools/backup-detail.csv?${qs}`); } catch (e) { setCsvErr(e); }
+  }, [vcId, opts, filter]);
 
   const vms = useMemo(() => (Array.isArray(data?.vms) ? data.vms : []), [data]);
-  const counts = useMemo(() => filterCounts(vms), [vms]);
-  const tree = useMemo(() => buildTree(vms, { filter, q }), [vms, filter, q]);
+  const now = data?.at || 0;
+  const vopts = useMemo(() => ({ rpoDays: opts.rpoDays, now: now || Date.now() }), [opts.rpoDays, now]);
+  const counts = useMemo(() => filterCounts(vms, vopts), [vms, vopts]);
+  const tree = useMemo(() => buildTree(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   const openSet = useMemo(() => open || initialOpen(buildTree(vms)), [open, vms]);
   const forceOpen = filter !== 'all' || !!q.trim();
   const rows = useMemo(() => flattenTree(tree, openSet, { forceOpen }), [tree, openSet, forceOpen]);
@@ -102,9 +115,15 @@ export default function BackupDetailTool({ scope }) {
               {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           </label>
+          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로" style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </div>
       </div>
+      <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
+        <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
+        {data && scopeNote(data.scope, data.row) && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{scopeNote(data.scope, data.row)}</span>}
+      </div>
+      {csvErr && <div className="card" style={{ padding: '8px 12px', color: '#fca5a5', fontSize: 12 }}>CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
 
       {data && (
         <div className="card" style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 28px', minWidth: 0 }}>
@@ -120,6 +139,8 @@ export default function BackupDetailTool({ scope }) {
             <div title={r.snap == null ? snapReasonText(r.snapReason) : undefined}><div style={{ fontSize: 12, color: '#d8b4fe' }}>스냅샷 기준</div><div style={{ fontSize: 22, fontWeight: 800, color: r.snap == null ? 'var(--text-dim)' : '#c084fc' }}>{fmtNum(r.snap)}{pctOf(r.snap, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.snap, r.vm)}%</span>}</div></div>
             <div><div className="muted" style={{ fontSize: 12 }}>확인 안 됨</div><div style={{ fontSize: 22, fontWeight: 800 }}>{r.split ? fmtNum(r.split.none) : '—'}</div></div>
             <div><div style={{ fontSize: 12, color: '#fcd34d' }}>지금 백업 중</div><div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{fmtNum(r.running)}<span style={{ fontSize: 13, marginLeft: 6 }}>대기 {fmtNum(r.pending)}</span></div></div>
+            <div title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}><div style={{ fontSize: 12, color: '#fdba74' }}>오래된 백업({opts.rpoDays}일 초과)</div><div style={{ fontSize: 22, fontWeight: 800, color: r.rpo ? '#fb923c' : 'var(--text-dim)' }}>{fmtNum(r.rpo?.[`d${opts.rpoDays}`])}</div></div>
+            <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
           </div>
           {(r.veeam == null && r.veeamState !== 'unlinked') && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) VM 의 Veeam 칸은 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요. 스냅샷 칸은 그대로 보입니다.</div>}
           {r.snap == null && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>스냅샷 기준을 낼 수 없습니다({snapReasonText(r.snapReason) || '모름'}) — VM 의 스냅샷 칸은 지금 임시 스냅샷만 보입니다.</div>}
@@ -129,7 +150,7 @@ export default function BackupDetailTool({ scope }) {
 
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label} {counts[k]}</button>)}
+          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {counts[k]}</button>)}
         </div>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
@@ -202,7 +223,7 @@ export default function BackupDetailTool({ scope }) {
         <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 56, alignSelf: 'flex-start' }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
             {!selVm ? <div className="muted" style={{ fontSize: 13 }}>VM 을 누르면 여기에 백업 상세가 보입니다.</div> : (() => {
-              const c = vmClass(selVm); const v = selVm.v;
+              const c = vmClass(selVm, vopts); const v = selVm.v;
               return (
                 <>
                   <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{selVm.folder || '—'}</div>
@@ -217,7 +238,8 @@ export default function BackupDetailTool({ scope }) {
                   <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '6px 12px', fontSize: 13 }}>
                     <dt className="muted">Veeam 작업</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v?.jobs?.length ? v.jobs.join(', ') : (c.vKnown ? '—' : '모름')}</dd>
                     <dt className="muted">마지막 백업 완료</dt><dd style={{ margin: 0 }}>{shortTs(v?.lb)}{v?.lbSrc === 'rp' ? ' (복원 지점 생성 시각)' : ''}</dd>
-                    <dt className="muted">마지막 결과</dt><dd style={{ margin: 0 }}>{v?.lastResult || '—'}</dd>
+                    <dt className="muted">마지막 결과</dt><dd style={{ margin: 0, overflowWrap: 'anywhere', color: c.fail ? '#fca5a5' : undefined }}>{v?.lr ? `이 VM ${v.lr}${v.lastResult && v.lastResult !== v.lr ? ` · 작업 ${v.lastResult}` : ''}` : (v?.lastResult ? `작업 ${v.lastResult}` : '—')}</dd>
+                    {c.old && <><dt className="muted">오래된 백업</dt><dd style={{ margin: 0, color: '#fdba74' }}>마지막 백업이 {opts.rpoDays}일을 넘었습니다</dd></>}
                     <dt className="muted">복원 지점</dt><dd style={{ margin: 0 }}>{v && Number.isFinite(v.rp) && v.rp >= 0 ? `${v.rp}개` : v?.rp === -1 ? '있음(개수 모름)' : '—'}</dd>
                     <dt className="muted">스냅샷 흔적</dt><dd style={{ margin: 0 }}>{selVm.s?.ev ? `최근 ${days}일 ${selVm.s.ev.n ?? '?'}회 · 마지막 ${shortTs(selVm.s.ev.ts)}` : ('ev' in (selVm.s || {}) ? '없음' : '모름')}</dd>
                     <dt className="muted">지금 스냅샷</dt><dd style={{ margin: 0 }}>{selVm.s?.now ? `${selVm.s.now.n}개 · 생성 ${shortTs(selVm.s.now.ts)}${selVm.s.now.stale ? ' — 하루 넘게 남음(정리 실패 의심)' : ''}` : '없음'}</dd>
