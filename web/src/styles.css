@@ -1925,3 +1925,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @media (min-width: 721px) {
   .ht-more-narrow { display: none; }
 }
+/* v2.778.1: Veeam 서버 등록 — 표시 이름과 맞는 vCenter 체크 칸 강조(세 번 반짝인 뒤 테두리·배경만 남는다 · 움직임 줄이기 설정이면 반짝이지 않는다) */
+.vc-pick-match { border-color: #fbbf24 !important; background: rgba(251,191,36,.12); font-weight: 600; animation: vc-pick 0.9s ease-in-out 3; }
+@keyframes vc-pick { 0%,100% { box-shadow: 0 0 0 0 rgba(251,191,36,0); } 50% { box-shadow: 0 0 0 3px rgba(251,191,36,.5); } }
+@media (prefers-reduced-motion: reduce) { .vc-pick-match { animation: none; } }
