@@ -37,7 +37,7 @@ function findRow(rows, agent) {
  * @param {object|null} p.edge         central/veeamEdge.veeamEdgeStatus(agent)
  * @param {object|null} p.poller       이 노드의 veeamPollerStatus()(직접 읽는 서버용)
  * @param {number} [p.now]
- * @returns {{ mode:'edge'|'local', steps:Array<{key:string,label:string,state:string,text:string,at:number|null,action?:string}>, blockedAt:string|null, since:number|null }}
+ * @returns {{ mode:'edge'|'local', steps:Array<{key:string,label:string,state:string,text:string,at:number|null,action?:string}>, blockedAt:string|null, since:number|null, checkedAt:number|null }}
  */
 export function veeamProgress({ server, status = null, readsHere = false, tokenAgents = null, pulls = null, rejects = null, edge = null, poller = null, now = Date.now() } = {}) {
   const steps = [];
@@ -154,5 +154,6 @@ export function veeamProgress({ server, status = null, readsHere = false, tokenA
   else add('result', '결과', 'bad', `읽기 실패${st.error ? ` — ${String(st.error).slice(0, 200)}` : ''}.`, st.ts);
 
   const blocked = steps.find((s) => s.state === 'bad' || s.state === 'warn' || s.state === 'wait');
-  return { mode, steps, blockedAt: off ? null : (blocked ? blocked.key : null), since: mode === 'edge' ? posNum(pulls?.since) : null };
+  // v2.774: checkedAt — 이 판정을 만든 시각(사용자 요청 '마지막으로 체크한 시간 표시'). 화면은 자동 갱신하지 않으므로 이 값이 판정의 나이다.
+  return { mode, steps, blockedAt: off ? null : (blocked ? blocked.key : null), since: mode === 'edge' ? posNum(pulls?.since) : null, checkedAt: posNum(now) };
 }

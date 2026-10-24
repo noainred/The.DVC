@@ -44,6 +44,7 @@ test('실서버 사례: 공유 토큰 엣지 — 개별 토큰 ❌, 접속은 �
   assert.match(by.pull.text, /실패 4/);
   assert.equal(by.pull.at, NOW - 90_000);
   assert.equal(r.since, NOW - 2 * HOUR);
+  assert.equal(r.checkedAt, NOW, 'v2.774: 판정 시각(마지막 확인)');
 });
 
 test('정상 엣지: 전 단계 ✅ · 막힌 곳 없음 · 시각이 단계마다 실린다', () => {
@@ -154,6 +155,8 @@ test('라우트: GET /admin/veeam/servers 의 서버마다 progress — 실제 p
   assert.equal(st.token, 'ok');
   assert.equal(st.pull, 'ok');
   assert.equal(s.progress.blockedAt, 'read');
+  // v2.774: 라우트가 판정 시각을 싣는다 — 요청 시각 근처(지어낸 값 아님)
+  assert.ok(Math.abs(s.progress.checkedAt - Date.now()) < 60_000, String(s.progress.checkedAt));
 });
 
 test('라우트: 개별 토큰 파일을 못 읽으면 토큰 단계는 \'없음\' 이 아니라 모름(⚠) — 거짓 \'토큰 없음\' 금지', async () => {

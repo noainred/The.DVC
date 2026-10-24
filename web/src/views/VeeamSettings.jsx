@@ -14,7 +14,7 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { resultLabel } from './veeamBadge.js';
-import { STEP_ICON, STEP_TONE, progressHint } from './veeamProgressText.js'; // v2.773 단계별 진행 상태
+import { STEP_ICON, STEP_TONE, progressHint, progressCheckedText } from './veeamProgressText.js'; // v2.773 단계별 진행 상태
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
 
 // v2.763(V5-2): agentTouched — 사람이 '읽는 곳' 을 골랐는가('' 는 '아직 안 고름' 과 '중앙에서 직접(명시)' 둘 다라 따로 든다). 서버로 보내지 않는다.
@@ -211,6 +211,7 @@ export default function VeeamSettings() {
             <div style={{ margin: '0 0 12px', padding: 10, borderRadius: 8, background: 'rgba(148,163,184,.06)', minWidth: 0 }}>
               <div className="flex gap wrap" style={{ alignItems: 'baseline', marginBottom: 6 }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name} — 진행 상태</span>
+                {progressCheckedText(pg) && <span className="muted" style={{ fontSize: 12 }} title="이 화면은 자동으로 다시 확인하지 않습니다 — 새로 읽기를 누르면 지금 다시 확인합니다">{progressCheckedText(pg)}</span>}
                 <button className="tab" style={{ flex: 'none', padding: '2px 10px' }} onClick={load}>새로 읽기</button>
               </div>
               <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
