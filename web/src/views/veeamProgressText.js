@@ -24,3 +24,20 @@ export function progressHint(progress) {
   const verb = b.state === 'wait' ? '에서 기다리는 중' : '에서 막힘';
   return { text: `진행 ${idx}/${steps.length}단계 ‘${b.label}’${verb} — 진행 상태를 눌러 보세요`, tone: STEP_TONE[b.state] || 'muted' };
 }
+
+/** v2.774: 초까지 — 'MM-DD HH:MM:SS'. 못 읽은 값이면 '—'. */
+export function fmtSec(ms) {
+  const n = Number(ms);
+  if (ms == null || !Number.isFinite(n) || n <= 0) return '—';
+  const d = new Date(n); const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
+ * v2.774(사용자 요청 '마지막으로 체크한 시간 표시해줘'): 이 판정을 서버가 만든 시각. 화면은 자동으로 다시 읽지 않으므로 그 사실도 함께 말한다.
+ * 서버가 시각을 싣지 않았으면(옛 서버) '' — 시각을 지어내지 않는다.
+ */
+export function progressCheckedText(progress) {
+  const t = fmtSec(progress?.checkedAt);
+  return t === '—' ? '' : `마지막 확인 ${t}`;
+}

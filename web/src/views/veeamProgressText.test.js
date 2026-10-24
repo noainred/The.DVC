@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { progressHint, blockedStep, STEP_ICON } from './veeamProgressText.js';
+import { progressHint, blockedStep, STEP_ICON, fmtSec, progressCheckedText } from './veeamProgressText.js';
 
 const steps = [
   { key: 'assign', label: '배정', state: 'ok' },
@@ -28,5 +28,14 @@ describe('v2.773 Veeam 진행 상태 표시', () => {
   it('문구에 백틱이 없다(BoldText 규약) · 상태마다 아이콘이 있다', () => {
     expect(progressHint({ steps, blockedAt: 'token' }).text).not.toContain('`');
     for (const k of ['ok', 'warn', 'bad', 'wait', 'skip']) expect(STEP_ICON[k]).toBeTruthy();
+  });
+  it('v2.774 마지막 확인 시각 — 초까지, 서버가 시각을 싣지 않으면 빈 문자열(지어내지 않음)', () => {
+    const t = new Date(2026, 9, 24, 12, 37, 5).getTime();
+    expect(fmtSec(t)).toBe('10-24 12:37:05');
+    expect(progressCheckedText({ checkedAt: t })).toBe('마지막 확인 10-24 12:37:05');
+    expect(progressCheckedText({})).toBe('');
+    expect(progressCheckedText({ checkedAt: null })).toBe('');
+    expect(progressCheckedText(undefined)).toBe('');
+    expect(fmtSec(0)).toBe('—');
   });
 });
