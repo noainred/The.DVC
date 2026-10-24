@@ -49,7 +49,7 @@ export function sanitizeEdgeReply(b) {
   const steps = Array.isArray(b.steps) ? b.steps.slice(0, 20).filter((x) => x && typeof x === 'object').map((x) => ({ key: s(x.key, 32), ok: x.ok === true, detail: s(x.detail, 300) })) : [];
   const pr = b.probe && typeof b.probe === 'object' ? { ok: b.probe.ok === true, reason: s(b.probe.reason, 200), yourAgent: s(b.probe.yourAgent, 64) } : null;
   // applied: 엣지의 확정 답(true = 파일·메모리 모두 새 토큰 · false = 바뀐 것 없음). 글자·숫자 등 다른 값은 '모름'(undefined).
-  return { ok: b.ok === true, ...(typeof b.applied === 'boolean' ? { applied: b.applied } : {}), reason: s(b.reason, 64), version: s(b.version, 32), steps, probe: pr };
+  return { ok: b.ok === true, ...(typeof b.applied === 'boolean' ? { applied: b.applied } : {}), reason: s(b.reason, 64), version: s(b.version, 32), hostname: s(b.hostname, 128), steps, probe: pr };
 }
 
 /** @param {(o:{action:string,target:string,detail:string})=>void} [audit] 라우트가 실행자를 붙여 넘긴다 */

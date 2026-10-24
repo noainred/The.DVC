@@ -24,6 +24,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { tokenFingerprintParts, sameToken } from '../util/tokenFingerprint.js';
 import { cmpVersion } from '../util/cmpVersion.js';
 import { capStr } from '../util/capStr.js';
+import { sameHostName } from '../util/sameHostName.js';
 
 export const LOG_FILE_NAME = 'edge-token-apply-log.json';
 registerStateFile(LOG_FILE_NAME);
@@ -83,7 +84,7 @@ export function startTokenApply(agent, { by = '', deps, wait = false } = {}) {
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, reason: '엣지 이름 형식이 올바르지 않습니다.' };
   if (_running.has(name.toLowerCase())) return { ok: false, reason: '이 엣지에 이미 진행 중인 작업이 있습니다.', jobId: _running.get(name.toLowerCase()) };
   const now = deps.now ? deps.now() : Date.now();
-  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: capStr(cut(by), 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', summary: '', steps: [] };
+  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: capStr(cut(by), 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', edgeHost: '', summary: '', steps: [] };
   loadJobs().unshift(job);
   if (_jobs.length > KEEP) _jobs.length = KEEP;
   _running.set(name.toLowerCase(), job.id);
@@ -143,6 +144,9 @@ async function runJob(job, deps) {
   const ver = typeof st.version === 'string' ? st.version : '';
   // 반증 F4: 엣지가 보고한 이름(AGENT_NAME — pull 응답)이 발급할 이름과 다르면 중앙은 그 토큰의 요청을 403 으로 막는다 — 발급하지 않는다.
   const reported = typeof st.agent === 'string' ? st.agent.trim() : '';
+  // v2.777(사용자 요청 '엣지에서 보고하는 호스트네임을 기록해서 검증'): pull 로 받은 엣지의 호스트 이름을 작업 기록에 남기고, 토큰을 받은 장비(수집 토큰 통로 응답·SSH 접속)와 대조한다.
+  const reportedHost = typeof st.hostname === 'string' ? capStr(st.hostname.trim(), 128) : '';
+  job.edgeHost = reportedHost;
   if (reported && reported.toLowerCase() !== name.toLowerCase()) {
     stepEnd(s, 'bad', `이 수집 서버가 보고한 엣지 이름은 '${reported}' 입니다 — '${name}' 으로 발급하면 중앙이 그 엣지의 요청을 이름 불일치로 막습니다. Veeam 서버의 읽는 곳(또는 엣지 AGENT_NAME)을 맞춘 뒤 다시 실행하세요.`, deps);
     return finish(job, 'failed', '엣지 이름이 다릅니다.', deps);
@@ -150,7 +154,7 @@ async function runJob(job, deps) {
   const targets = (deps.deployTargets() || []).filter((t) => String(t.agentName || '').toLowerCase() === name.toLowerCase());
   const target = targets.length === 1 ? targets[0] : null;
   const edgeNew = !!ver && (cmpVersion(ver, MIN_EDGE_API_VERSION) ?? -1) >= 0;
-  stepEnd(s, 'ok', `수집 서버 ${col.url} · 엣지 판 ${ver || '모름'}${reported ? ` · 보고 이름 ${reported}` : ''} · 배포 기록 ${targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)'}`, deps);
+  stepEnd(s, 'ok', `수집 서버 ${col.url} · 엣지 판 ${ver || '모름'}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름(이름으로만 확인)'} · 배포 기록 ${targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)'}`, deps);
 
   /* 2 발급 */
   s = stepStart(job, 'issue', deps);
@@ -188,10 +192,14 @@ async function runJob(job, deps) {
   // 엣지가 '바뀐 것 없음' 을 확정으로 답하면 그 확인 요청(health-probe)은 '엣지가 새 토큰을 쓴다' 의 근거가 아니다 — 이후 판정 기준 시각을 응답 뒤로 옮긴다.
   if (b && b.applied === false) acceptFrom = (deps.now ? deps.now() : Date.now()) + 1;
   const pd = b ? (b.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ') : '';
-  let applied = false; let viaSsh = false; let sshReason = '';
+  let applied = false; let viaSsh = false; let sshReason = ''; let hostWarn = false;
   if (r.ok && b && b.applied === true) {
     applied = true; job.path = 'edge-api';
-    stepEnd(s, 'ok', `엣지 적용·확인 성공 — ${pd}`, deps);
+    // 엣지 이름은 엣지의 중앙 확인이 이미 맞췄다(다르면 applied:false). 호스트 이름이 보고값과 다르면 같은 이름을 쓰는 다른 장비일 수 있다 — 알린다(되돌리지는 않는다).
+    const hostSame = sameHostName(b.hostname, reportedHost);
+    if (hostSame === false) hostWarn = true;
+    if (hostSame === false) stepEnd(s, 'warn', `엣지 적용·확인 성공 — 그러나 토큰을 받은 장비의 호스트 이름 '${b.hostname}' 이 이 엣지가 보고한 '${reportedHost}' 과 다릅니다. 같은 엣지 이름(AGENT_NAME)을 쓰는 다른 장비일 수 있으니 수집 서버 주소·포워딩을 확인하세요 — ${pd}`, deps);
+    else stepEnd(s, 'ok', `엣지 적용·확인 성공 · 받은 장비 호스트 ${b.hostname || '모름'}${hostSame ? '(보고값과 같음)' : ''} — ${pd}`, deps);
   } else if (b && b.applied === false && b.reason === 'probe-failed') {
     // 확정 답: 엣지는 아무것도 바꾸지 않았다 — 같은 엣지→중앙 경로라 SSH 로도 같다
     stepEnd(s, 'bad', `엣지가 새 토큰으로 중앙 확인에 실패했습니다(바뀐 것 없음) — ${pd}`, deps);
@@ -225,7 +233,7 @@ async function runJob(job, deps) {
       return fail(`엣지에 전달하지 못했습니다: ${sshReason}`);
     }
     const sub = []; let wrote = false;
-    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, edgeNew, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
+    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, edgeNew, agent: name, expectHostname: reportedHost, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
     if (sr && sr.ok) {
       applied = true; viaSsh = true; job.path = 'ssh';
       stepEnd(s, 'ok', sub.join(' / '), deps);
@@ -261,11 +269,12 @@ async function runJob(job, deps) {
     else stepEnd(s, 'warn', `배포 기록을 고치지 못했습니다: ${r6?.reason || '사유 미상'} — 다시 배포하기 전에 배포 기록의 토큰을 고치세요.`, deps);
   }
 
-  const summary = usedAt
+  const summary = (usedAt
     ? `개별 토큰 적용 완료(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}) — Veeam 진행 상태에서 개별 토큰·배정 받기 단계가 바뀌는지 확인하세요.`
-    : `엣지에 적용했지만 중앙이 새 토큰의 요청을 아직 받지 못했습니다(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}).`;
+    : `엣지에 적용했지만 중앙이 새 토큰의 요청을 아직 받지 못했습니다(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}).`)
+    + (hostWarn ? ' 토큰을 받은 장비의 호스트 이름이 이 엣지가 보고한 값과 달랐습니다 — 엣지 전달 단계를 확인하세요.' : '');
   audit(deps, usedAt ? '엣지 개별 central 토큰 자동 적용 완료' : '엣지 개별 central 토큰 자동 적용 완료(확인 필요)', job, `${viaSsh ? 'SSH' : '수집 토큰'} 통로`);
-  return finish(job, usedAt ? 'ok' : 'warn', summary, deps);
+  return finish(job, usedAt && !hostWarn ? 'ok' : 'warn', summary, deps);
 }
 
 export function _resetForTest() { _jobs = null; _running.clear(); }

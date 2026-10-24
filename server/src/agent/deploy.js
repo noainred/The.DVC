@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { withSsh } from '../proxy/sshExec.js';
+import { sameHostName } from '../util/sameHostName.js';
 import { manifestPathForArtifact } from '../upgrade/signature.js'; // 2026-10-09 검토 S-10: 서명 manifest 를 패키지와 함께 보낸다
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -415,12 +416,12 @@ export async function forceCollectorToken(target, token, { urlPort } = {}) {
  * @param {string} token  중앙이 방금 발급한 개별 토큰(base64url 43자)
  * @param {{ urlPort?:number, edgeNew?:boolean, onStep?:(key:string, ok:boolean, detail:string)=>void }} [o]
  */
-export async function forceAgentCentralToken(target, token, { urlPort, edgeNew = false, onStep = () => {} } = {}) {
+export async function forceAgentCentralToken(target, token, { urlPort, edgeNew = false, onStep = () => {}, agent = target?.agentName || '', expectHostname = '' } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: '배포 기록에 host/username 이 없습니다.' };
   const tk = String(token || '');
   if (!/^[A-Za-z0-9_-]{43}$/.test(tk)) return { ok: false, reason: '토큰 형식이 중앙 개별 토큰이 아닙니다.' };
   try {
-    return await withSsh(creds(target), ({ exec, writeFile }) => applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host: target.host, urlPort, edgeNew, onStep }));
+    return await withSsh(creds(target), ({ exec, writeFile }) => applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host: target.host, urlPort, edgeNew, onStep, agent, expectHostname }));
   } catch (err) {
     return { ok: false, reason: String(err?.message || err).slice(0, 300) };
   }
@@ -434,8 +435,26 @@ export function oldEdgeEnvDecision(keys, edgeMode) {
   return { ok: true };
 }
 
+/**
+ * v2.777(사용자 구성 '메인 → 엣지1:포워딩 → 엣지2' — SSH 도 엣지1 의 포워딩 포트로 엣지2 에 닿는다): 접속한 장비의 포탈이 **그 엣지**인지
+ *   이름으로 확인한다(순수). config.js 와 같은 순서 — AGENT_NAME → COLLECTOR_DATACENTER → hostname. EnvironmentFile 은 같은 키가 여러 번이면
+ *   마지막 값이 이긴다. 따옴표는 벗긴다. 포워딩이 바뀌어 엣지1 자신에 붙으면 그 이름은 엣지1 의 것이라 여기서 멈춘다 — 그대로 진행하면
+ *   엣지1 의 portal.env 에 엣지2 의 토큰을 쓰고 재시작해 엣지1 이 이름 불일치(403)로 멈춘다.
+ */
+export function effectiveAgentName(envLines, hostname) {
+  const last = (k) => {
+    let v = '';
+    for (const l of String(envLines || '').split('\n')) {
+      const m = new RegExp(`^${k}=(.*)$`).exec(l.trim());
+      if (m) v = m[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+    }
+    return v;
+  };
+  return last('AGENT_NAME') || last('COLLECTOR_DATACENTER') || String(hostname || '').trim();
+}
+
 /** SSH 세션 안의 본문(테스트가 가짜 exec·writeFile 로 명령 순서·되돌리기를 본다). 토큰 형식은 호출자가 이미 확인했다. */
-export async function applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host = '', urlPort, edgeNew = false, onStep = () => {}, waitTries = 20, waitDelaySec = 2 } = {}) {
+export async function applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host = '', urlPort, edgeNew = false, onStep = () => {}, waitTries = 20, waitDelaySec = 2, agent = '', expectHostname = '' } = {}) {
   const idu = await exec('id -u');
   if (idu.stdout.trim() !== '0') return { ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다(배포 기록의 SSH 계정).' };
   onStep('ssh', true, `${host} 접속 · root`);
@@ -444,6 +463,24 @@ export async function applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { 
   const { unit, envFile } = inst;
   const envOk = (await exec(`test -f ${envFile} && echo yes || echo no`)).stdout.includes('yes');
   if (!envOk) return { ok: false, reason: `${envFile} 가 없습니다.` };
+  // v2.777: 접속한 장비가 그 엣지인가 — 이름 키 두 개(비밀 아님)와 hostname 만 읽는다. 대상 이름을 모르면 진행하지 않는다.
+  if (!agent) return { ok: false, reason: '배포 기록에 엣지 이름(agentName)이 없어 접속한 장비가 그 엣지인지 확인할 수 없습니다 — 배포 기록에 엣지 이름을 넣으세요.' };
+  const nameLines = (await exec(`grep -E '^(AGENT_NAME|COLLECTOR_DATACENTER)=' '${envFile}' 2>/dev/null || true`)).stdout;
+  const hn = (await exec('hostname 2>/dev/null || true')).stdout;
+  const here = effectiveAgentName(nameLines, hn);
+  if (!here || here.toLowerCase() !== String(agent).toLowerCase()) {
+    const why = `접속한 장비(${host})의 포탈은 '${here || '이름 모름'}' 입니다 — 대상 엣지 '${agent}' 가 아닙니다. SSH 포워딩·배포 기록의 주소·포트를 확인하세요(아무것도 바꾸지 않았습니다).`;
+    onStep('identity', false, why);
+    return { ok: false, reason: why };
+  }
+  // v2.777(사용자 요청): 엣지가 pull 로 보고한 호스트 이름(중앙 기록)과 접속한 장비의 hostname 도 대조한다 — 이름 키는 복사된 portal.env 로 같을 수 있다.
+  const hnNow = String(hn || '').trim();
+  if (expectHostname && sameHostName(hnNow, expectHostname) === false) {
+    const why = `접속한 장비(${host})의 호스트 이름 '${hnNow || '모름'}' 이 그 엣지가 보고한 호스트 이름 '${expectHostname}' 과 다릅니다 — 다른 장비에 접속했습니다. SSH 포워딩·배포 기록의 주소·포트를 확인하세요(아무것도 바꾸지 않았습니다).`;
+    onStep('identity', false, why);
+    return { ok: false, reason: why };
+  }
+  onStep('identity', true, `접속한 장비 — 포탈 이름 ${here} · 호스트 ${hnNow || '모름'}${expectHostname ? `(엣지가 보고한 ${expectHostname} 과 같음)` : '(엣지가 보고한 호스트 이름 없음 — 이름으로만 확인)'}`);
   let replaceCentral = false;
   if (!edgeNew) {
     // 키 이름만(값은 출력하지 않는다 — grep -o 가 'KEY=' 까지만 낸다) + EDGE_MODE 값(비밀 아님)

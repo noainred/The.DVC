@@ -13,6 +13,7 @@ describe('v2.776 개별 토큰 자동 적용 문구', () => {
   it('작업 한 줄 — 시각·실행자·상태·통로·지문(토큰 평문 없음)', () => {
     expect(jobLine({ startedAt: T, by: 'noainred', state: 'ok', path: 'edge-api', fp: 'ab12cd34' })).toBe('10-24 14:50:02 · noainred · 완료 · 수집 토큰 통로 · 지문 ab12cd34');
     expect(jobLine({ startedAt: T, state: 'failed', path: null })).toBe('10-24 14:50:02 · 실패');
+    expect(jobLine({ startedAt: T, state: 'ok', path: 'ssh', edgeHost: 'edge2.corp', fp: 'ab12cd34' })).toBe('10-24 14:50:02 · 완료 · SSH 통로 · 호스트 edge2.corp · 지문 ab12cd34');
     expect(jobLine(null)).toBe('');
   });
   it('확인 문구는 단계와 무중단 사실을 말하고 백틱이 없다', () => {
