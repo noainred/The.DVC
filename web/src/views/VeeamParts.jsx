@@ -135,9 +135,15 @@ export function VeeamSummaryCard({ sum }) {
             {sum.basis && <span>{sum.basis}</span>}
           </div>
         </div>
+        {sum.runningJobs?.length > 0 && (
+          <div data-veeam-running-jobs="" className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>
+            Veeam 실행 중 작업: {sum.runningJobs.map((j) => `${j.name}${j.pg != null ? ` ${j.pg}%` : ''}`).join(' · ')} — 작업 전체 진행률(Veeam 콘솔 작업 목록의 % 와 같은 값 · VM 배지의 % 는 그 VM 의 진행률)
+          </div>
+        )}
         <div className="muted" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 12px', paddingTop: 10, borderTop: '1px solid var(--border-soft)', fontSize: 12, minWidth: 0 }}>
-          {chip('Veeam 10-22 01:12', 'green')}<span>백업 대상 · 마지막 백업 완료 시각</span>
-          {chip('백업 중 28%', 'amber')}<span>지금 백업하고 있음</span>
+          {/* v2.778.1: 범례는 예시 값을 쓰지 않는다 — '28%'·'10-22 01:12' 를 실제 값으로 읽었다(실서버: Veeam 콘솔 49% 와 다르다는 문의) */}
+          {chip('Veeam 월-일 시:분', 'green')}<span>백업 대상 · 마지막 백업 완료 시각</span>
+          {chip('백업 중 N%', 'amber')}<span>지금 백업하고 있음(%는 그 VM 의 진행률)</span>
           {chip('대기', 'blue')}<span>실행 중인 작업에서 차례를 기다림</span>
           <span style={{ flex: '1 1 260px', minWidth: 0 }}>배지를 누르면 백업 상세가 열립니다. 배지가 없는 VM 은 백업 여부가 확인되지 않은 것입니다(백업 안 됨이 아닙니다).</span>
         </div>

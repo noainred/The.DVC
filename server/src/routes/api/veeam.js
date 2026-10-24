@@ -133,7 +133,12 @@ function resultsFor(vcenterId, req) {
     const use = usableResult(rec);
     // v2.751 검토 #6: 실패해 마지막 성공분을 쓰거나 주기의 2배보다 오래된 결과의 '백업 중' 은 지금 사실이 아니다 — 지우고 대조한다.
     //   v2.761(B5): 엣지 결과는 그 엣지의 주기로.
-    if (use) results.push({ server: { id: d.id, name: d.name }, result: withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) }) });
+    if (use) {
+      const result = withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) });
+      results.push({ server: { id: d.id, name: d.name }, result });
+      // v2.778.1: 지금 도는 작업과 그 작업 전체 진행률(Veeam 콘솔 작업 목록의 %) — 작업 이름은 서버 전체(다른 법인 작업 포함)라 관리자 판본만(B7 counts 와 같은 이유).
+      if (admin) views[views.length - 1].runningJobs = (Array.isArray(result.jobs) ? result.jobs : []).filter((j) => j && j.running === true).slice(0, 10).map((j) => ({ name: String(j.name || '').slice(0, 128), pg: Number.isFinite(j.pg) ? j.pg : null }));
+    }
   }
   // v2.778: 다른 등록 vCenter 의 주소 — Veeam 이 적은 이름을 이 vCenter 의 별칭으로 배울 때 그 주소와 같은 이름은 배우지 않는다(parse.js learnHostAliases).
   const all = listVcenters();

@@ -58,7 +58,9 @@ export function veeamBadge(e) {
   lines.push('누르면 백업 상세(복원 지점·용량·마지막 결과)를 엽니다');
   if (e.run === 1) {
     const pg = Number.isFinite(e.pg) ? e.pg : null;
-    const how = e.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)' : 'Veeam 이 이 VM 을 지금 백업하고 있습니다';
+    const how = e.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)'
+      // v2.778.1: 배지의 % 는 이 VM(task)의 진행률 — Veeam 콘솔 작업 목록의 % 는 작업 전체라 다를 수 있다(실서버: VM 28% · 작업 49%).
+      : `Veeam 이 이 VM 을 지금 백업하고 있습니다${pg != null ? ` — ${pg}% 는 이 VM 의 진행률입니다(Veeam 콘솔 작업 목록의 % 는 작업 전체라 다를 수 있습니다)` : ''}`;
     return { label: pg != null ? `백업 중 ${pg}%` : '백업 중', color: 'amber', title: [how, ...lines].join('\n'), progress: pg };
   }
   if (e.run === 2) return { label: '대기', color: 'blue', title: ['Veeam 실행 중인 작업에서 차례를 기다리고 있습니다', ...lines].join('\n'), progress: null };
@@ -92,7 +94,7 @@ export function veeamCounts(byVm) {
  *   source:string, basis:string, warnings:string[], details:string[], demo:boolean }}
  */
 export function veeamSummary(d, { loading = false, error = '', vmTotal = null, refreshError = '' } = {}) {
-  const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false };
+  const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false, runningJobs: [] };
   if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
   if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
   if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금은 vCenter 스냅샷 기준 배지(📸 점선)만 보입니다.' };
@@ -140,6 +142,9 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
     source: servers.length ? `서버 ${servers.map((sv) => sv.name).join(', ')}` : '',
     basis: when.length ? `기준 ${fmtTime(Math.min(...when))}` : '',
     warnings, details, demo: !!d.demo,
+    // v2.778.1: 지금 도는 Veeam 작업과 작업 전체 진행률(콘솔 작업 목록의 %) — 서버가 관리자 판본에만 싣는다.
+    runningJobs: runKnown ? servers.flatMap((sv) => (Array.isArray(sv.runningJobs) ? sv.runningJobs : []).filter((j) => j && typeof j.name === 'string' && j.name)
+      .map((j) => ({ name: j.name, pg: Number.isFinite(j.pg) ? j.pg : null, server: sv.name }))) : [],
   };
 }
 

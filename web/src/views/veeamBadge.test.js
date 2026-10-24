@@ -257,6 +257,14 @@ describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
     expect(hm.title).toMatch(/Veeam 이 적은 VM 이 모두/); expect(hm.title).not.toMatch(/null/);
     expect(backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: 9, hostMismatch: true }).title).toMatch(/VM 9개가 모두/);
   });
+  it('v2.778.1: 실행 중 작업의 전체 진행률을 요약에 싣는다(관리자 판본에만 온다) · 실행 상태를 모르면 싣지 않는다 · VM 배지 % 는 VM 진행률이라고 말한다', () => {
+    const v = veeamSummary({ configured: true, servers: [sv({ runningJobs: [{ name: '23. spotfire', pg: 49 }, { name: 'x', pg: null }, { name: '' }] })], byVm: { a: {} }, otherVcenter: 0 });
+    expect(v.runningJobs).toEqual([{ name: '23. spotfire', pg: 49, server: 'VBR' }, { name: 'x', pg: null, server: 'VBR' }]);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: {}, otherVcenter: 0 }).runningJobs).toEqual([]);
+    expect(veeamSummary({ configured: true, servers: [sv({ runningJobs: [{ name: 'j', pg: 1 }] })], byVm: {}, runningStale: true }).runningJobs).toEqual([]);
+    const b = veeamBadge({ run: 1, pg: 28, by: 'task' });
+    expect(b.label).toBe('백업 중 28%'); expect(b.title).toMatch(/28% 는 이 VM 의 진행률/);
+  });
   it('v2.778: Veeam 이 다른 이름으로 적은 vCenter 를 맞췄으면 자세히에 알린다 — 관리자는 이름, 아니면 이름 없이', () => {
     const a = veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: 0, aliasHosts: ['gm1-vc.corp.local'] });
     expect(a.details.join()).toMatch(/‘gm1-vc\.corp\.local’ 로 적었습니다/); expect(a.warnings).toEqual([]);
