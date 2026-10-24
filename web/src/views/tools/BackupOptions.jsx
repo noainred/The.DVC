@@ -22,7 +22,7 @@ export default function BackupOptions({ opts, onChange, disabled }) {
       </label>
       <label className="flex" style={{ gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }} title="마지막 Veeam 백업이 이 기간보다 오래된 VM 을 '오래된 백업' 으로 셉니다">
         오래된 백업 기준
-        <Select className="input" sort={false} value={opts.rpoDays} onChange={(e) => set({ rpoDays: Number(e.target.value) })} style={{ fontSize: 12, padding: '3px 6px' }}>
+        <Select className="input" sort={false} value={opts.rpoDays} onChange={(e) => set({ rpoDays: Number(e.target.value) })} style={{ fontSize: 12, padding: '3px 6px', minWidth: 0, width: 'auto' }}>
           {RPO_DAYS.map((d) => <option key={d} value={d}>{d}일 초과</option>)}
         </Select>
       </label>
