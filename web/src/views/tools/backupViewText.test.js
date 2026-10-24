@@ -155,4 +155,14 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
       expect(src, f).toMatch(/loadOpts\(\)/);
     }
   });
+
+  it('v2.780.1 서머리 표는 1440px 카드 폭(약 858px) 안 — 열을 더하며 minWidth 를 올려 오른쪽 열이 스크롤 뒤로 숨던 회귀 · 선택 상자는 .input 최소 폭(220px)을 풀었다', () => {
+    const src = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    const mw = Number((/<STable minWidth=\{(\d+)\}/.exec(src) || [])[1]);
+    expect(mw).toBeGreaterThan(0);
+    expect(mw).toBeLessThanOrEqual(858);
+    expect(src).not.toMatch(/minWidth: 1[34]0 \}/);
+    const opt = fs.readFileSync(new URL('./BackupOptions.jsx', import.meta.url), 'utf8');
+    expect(opt).toMatch(/minWidth: 0, width: 'auto'/);
+  });
 });

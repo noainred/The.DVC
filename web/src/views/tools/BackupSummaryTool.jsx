@@ -136,18 +136,18 @@ export default function BackupSummaryTool() {
               {chips.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>)}
             </div>
           </div>
-          <STable minWidth={1040} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <STable minWidth={840} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', fontSize: 12 }}>
                 <th style={{ padding: '6px 14px' }}>vCenter</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right' }}>VM</th>
                 <th style={{ padding: '6px 8px' }}>Veeam 백업</th>
                 <th style={{ padding: '6px 8px' }}>스냅샷 기준</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>확인 안 됨</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }} title="Veeam·스냅샷 어느 쪽에도 보이지 않는 VM(백업 안 됨이 아니라 확인되지 않음)">미확인</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right' }}>백업 중</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>오래된 백업({opts.rpoDays}일)</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>실패·경고</th>
-                <th style={{ padding: '6px 8px' }}>마지막 백업 완료</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }} title={`마지막 Veeam 백업이 ${opts.rpoDays}일을 넘은 VM`}>{opts.rpoDays}일+ 경과</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }} title="그 VM 마지막 결과 — 실패 · 경고">실패·경고</th>
+                <th style={{ padding: '6px 8px' }} title="마지막 백업 완료 시각">마지막 백업</th>
                 <th style={{ padding: '6px 14px 6px 8px' }}>Veeam 서버</th>
               </tr>
             </thead>
@@ -162,12 +162,12 @@ export default function BackupSummaryTool() {
                       <div className="muted" style={{ fontSize: 11 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''}</div>
                     </td>
                     <td data-sort={r.vm} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
-                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 8px', minWidth: 140 }}>
+                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>
                       <span style={{ fontWeight: 700, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.veeam)}</span>
                       {vp != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{vp}%</span>}
                       {r.veeam != null && <Bar pct={vp} color="#22c55e" />}
                     </td>
-                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 8px', minWidth: 130 }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
+                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 8px' }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
                       <span style={{ fontWeight: 700, color: r.snap == null ? 'var(--text-dim)' : '#c084fc', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.snap)}</span>
                       {spc != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{spc}%</span>}
                       {r.snap == null && r.snapReason && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{snapReasonText(r.snapReason)}</span>}
