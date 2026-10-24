@@ -122,6 +122,9 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
   const other = otherCount(d.otherVcenter);
   if (c.total === 0 && (d.hostMismatch === true || other != null)) warnings.push(`Veeam 이 적은 ${otherSubject(other)} 모두 다른 vCenter 로 되어 있어 이 vCenter 와 맞은 VM 이 없습니다 — 포탈에 등록한 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다`);
   else if (other != null) details.push(`Veeam 이 다른 vCenter 로 적은 VM ${other}개는 이 목록에 표시하지 않았습니다(같은 Veeam 이 여러 vCenter 를 백업하면 정상)`);
+  // v2.778: Veeam 이 이 vCenter 를 다른 이름으로 적었지만 moref·VM 이름이 맞아 같은 vCenter 로 본 경우(서버 parse.js learnHostAliases) — 이름은 관리자 판본만.
+  if (Array.isArray(d.aliasHosts) && d.aliasHosts.length) details.push(`Veeam 이 이 vCenter 를 ${d.aliasHosts.map((h) => `‘${h}’`).join(', ')} 로 적었습니다 — 포탈에 등록한 주소와 다르지만 VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다`);
+  else if (d.hostAliased === true) details.push('Veeam 이 이 vCenter 를 포탈에 등록한 주소와 다른 이름으로 적었습니다 — VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다');
   if (d.ambiguous) details.push(`이름이 같은 VM 이 둘 이상이라 고르지 못한 항목 ${d.ambiguous}개`);
   if (d.unmatched) details.push(`이 vCenter 에서 찾지 못한 Veeam 항목 ${d.unmatched}개(삭제·이름 변경된 VM 일 수 있습니다)`);
   // v2.761(D5): 서버가 오래된 '백업 중' 표지를 지웠으면 실행 중·대기 0 은 사실이 아니다 — 모름.

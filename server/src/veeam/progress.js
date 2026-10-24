@@ -59,6 +59,8 @@ export function veeamProgress({ server, status = null, readsHere = false, tokenA
     const tk = Array.isArray(tokenAgents) ? tokenAgents.find((a) => lc(typeof a === 'string' ? a : a?.agent) === lc(agent)) : undefined;
     const hasToken = Array.isArray(tokenAgents) ? !!tk : null;
     const usedAt = tk && typeof tk === 'object' ? posNum(tk.lastUsedAt) : null;
+    // v2.778: 발급 시각 — 그 전의 403·거부는 공유 토큰 시절 기록이다(실서버 GM1: 18:40 발급 뒤에도 18:36 의 403 을 '막힘' 으로 보였다).
+    const issuedAt = tk && typeof tk === 'object' ? posNum(tk.createdAt) : null;
     if (gone) add('token', '개별 토큰', 'skip', '수집이 꺼져 있어 확인하지 않습니다.');
     else if (hasToken === null) add('token', '개별 토큰', 'warn', '개별 토큰 목록을 읽지 못했습니다 — 발급 여부를 모릅니다.');
     else if (hasToken && tk && typeof tk === 'object' && 'lastUsedAt' in tk && !usedAt) add('token', '개별 토큰', 'warn', `엣지 ${agent} 의 개별 토큰은 발급됐지만 그 토큰으로 접속한 기록이 없습니다 — 엣지가 아직 공유 토큰을 쓰고 있을 수 있습니다.`,
@@ -98,7 +100,8 @@ export function veeamProgress({ server, status = null, readsHere = false, tokenA
       }
     } else if (failAt && (!okAt || failAt > okAt)) {
       const st = Number(ep.lastStatus) || 0;
-      if (st === 403) add('pull', '배정 받기', 'bad', `중앙이 배정 요청을 거절했습니다(403 — 개별 토큰이 아닌 요청)${tally}.`, failAt, `2단계(개별 토큰)를 먼저 해결하세요 — 엣지 ${agent} 의 CENTRAL_TOKEN 이 개별 토큰이어야 합니다.`);
+      if (st === 403 && issuedAt && failAt < issuedAt) add('pull', '배정 받기', 'wait', `마지막 거절(403)은 개별 토큰 발급 전 기록입니다${tally} — 엣지가 다음 배정 pull(기본 5분 주기)에서 새 토큰으로 다시 가져갑니다.`, failAt);
+      else if (st === 403) add('pull', '배정 받기', 'bad', `중앙이 배정 요청을 거절했습니다(403 — 개별 토큰이 아닌 요청)${tally}.`, failAt, `2단계(개별 토큰)를 먼저 해결하세요 — 엣지 ${agent} 의 CENTRAL_TOKEN 이 개별 토큰이어야 합니다.`);
       else if (st === 503) add('pull', '배정 받기', 'bad', `중앙이 배정을 내려주지 못했습니다(503 — 중앙 Veeam 서버 등록부를 읽지 못함)${tally}.`, failAt, '중앙 포탈 콘솔 로그에서 Veeam 등록부 오류를 확인하세요.');
       else add('pull', '배정 받기', 'bad', `배정 요청이 실패했습니다(HTTP ${st || '—'})${tally}.`, failAt);
     } else add('pull', '배정 받기', 'ok', `엣지가 Veeam 배정을 가져갔습니다${tally}.`, okAt);
@@ -120,9 +123,14 @@ export function veeamProgress({ server, status = null, readsHere = false, tokenA
     const lp = edge?.lastPush || null;
     const rj = findRow(rejects?.rows, agent);
     const rjN = rj && rj.byEndpoint && typeof rj.byEndpoint === 'object' ? (cnt(rj.byEndpoint['/veeam-data']) || 0) : 0;
+    // v2.778: 이 경로(/veeam-data)의 마지막 거부 — 에이전트 전체의 lastReason 은 다른 경로(/inventory 등)의 사유일 수 있다.
+    const rjLast = rj && rj.lastByEndpoint && typeof rj.lastByEndpoint === 'object' && rj.lastByEndpoint['/veeam-data'] && typeof rj.lastByEndpoint['/veeam-data'] === 'object' ? rj.lastByEndpoint['/veeam-data'] : null;
+    const rjAt = posNum(rjLast?.at);
+    const rjWhy = typeof rjLast?.reason === 'string' ? rjLast.reason : '';
     if (gone) add('push', '결과 올리기', 'skip', '수집이 꺼져 있습니다.');
     else if (!lp) {
-      if (rjN) add('push', '결과 올리기', 'bad', `엣지가 올린 Veeam 결과를 중앙이 ${rjN}회 거절했습니다${rj?.lastReason ? `(마지막 사유: ${String(rj.lastReason).slice(0, 160)})` : ''}.`, rj?.lastAt, '2단계(개별 토큰)를 먼저 확인하세요.');
+      if (rjN && issuedAt && rjAt && rjAt < issuedAt) add('push', '결과 올리기', 'wait', `엣지가 올린 Veeam 결과를 중앙이 ${rjN}회 거절했지만 마지막 거절이 개별 토큰 발급 전입니다 — 엣지의 다음 주기 결과를 기다리는 중입니다.`, rjAt);
+      else if (rjN) add('push', '결과 올리기', 'bad', `엣지가 올린 Veeam 결과를 중앙이 ${rjN}회 거절했습니다${rjWhy ? `(마지막 사유: ${rjWhy.slice(0, 160)})` : ''}.`, rjAt, '2단계(개별 토큰)를 먼저 확인하세요.');
       else add('push', '결과 올리기', 'wait', '엣지가 올린 Veeam 결과가 아직 없습니다.');
     } else {
       const res = cnt(lp.results) ?? 0; const saved = cnt(lp.saved) ?? 0;

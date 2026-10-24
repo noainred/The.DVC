@@ -463,7 +463,9 @@ export function jobCountsAsBackup(jb) {
  * @param {{id:string, host:string}} vc
  * @param {Array<{id:string, name:string}>} vms   이 vCenter 의 VM(포탈 인벤토리)
  * @param {Array<{server:{id,name}, result:object}>} results
- * @returns {{ byVm: Record<string, object>, unmatched:number, otherVcenter:number, ambiguous:number }}
+ *  · v2.778: Veeam 이 이 vCenter 를 다른 이름으로 적었으면(moref·이름 근거 — learnHostAliases) 그 이름의 항목도 이 vCenter 로 본다(aliasHosts 로 알린다).
+ * @param {{ refsFor?:string|null, otherHosts?:string[] }} [o]  otherHosts = 포탈에 등록된 **다른** vCenter 주소(별칭으로 배우지 않는다)
+ * @returns {{ byVm: Record<string, object>, unmatched:number, otherVcenter:number, ambiguous:number, aliasHosts?:string[] }}
  */
 /**
  * 마지막 백업 완료 시각 — 성공·경고로 끝난 마지막 task 의 끝 시각과 최신 복원 지점 생성 시각 중 **더 늦은 것**(v2.761 A8: task 를
@@ -478,7 +480,44 @@ export function lastBackupOf(e) {
   return { t: rt, src: 'rp' };
 }
 
-export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
+/** v2.778: Veeam 이 적은 vCenter 이름을 이 vCenter 의 별칭으로 배우는 최소 근거(moref·이름이 함께 맞은 VM 수 · 비율). */
+export const ALIAS_MIN_HITS = 3;
+export const ALIAS_MIN_RATIO = 0.8;
+
+/**
+ * v2.778(실서버 GM1: Veeam 작업 목록에는 VM 54대인데 vCenter 화면은 '백업 대상 0 / 340' — Veeam 이 적은 vCenter 이름과 포탈에 등록한 주소가
+ *   다르다. 포탈이 vCenter 를 IP·포워딩 주소로 등록하면 늘 이렇다): Veeam 이 적은 이름(h) 중 **이 vCenter 의 VM 과 moref·이름이 함께 맞는**
+ *   항목이 ALIAS_MIN_HITS 개 이상이고 그 이름으로 적힌 moref 항목의 ALIAS_MIN_RATIO 이상이면 그 이름을 이 vCenter 로 본다(순수).
+ *   moref 는 vCenter 마다 겹치지만 moref·이름이 여럿 함께 맞는 것은 같은 vCenter 라는 강한 근거다. 그래도 **다른 등록 vCenter 의 주소와 같은 이름**은
+ *   배우지 않는다(그 vCenter 의 VM 이다 — 틀린 배지가 빠진 배지보다 나쁘다).
+ * @returns {Map<string,string>} hostKey(full) → Veeam 이 적은 원래 표기
+ */
+export function learnHostAliases(vc, results, byMoref, nameOf, { otherHosts = [] } = {}) {
+  const cand = new Map(); // full → { total, hit, raw }
+  for (const { result } of Array.isArray(results) ? results : []) {
+    for (const e of Array.isArray(result?.vms) ? result.vms : []) {
+      if (!e || !e.h || !e.m || sameHost(e.h, vc.host)) continue;
+      const k = hostKey(e.h).full;
+      if (!k) continue;
+      const c = cand.get(k) || { total: 0, hit: 0, raw: String(e.h).slice(0, 128) };
+      c.total++;
+      const id = byMoref.get(e.m);
+      const nm = String(e.n || '').trim().toLowerCase();
+      if (id && nm && nameOf.get(id) === nm) c.hit++;
+      cand.set(k, c);
+    }
+  }
+  const others = (Array.isArray(otherHosts) ? otherHosts : []).filter((h) => hostKey(h).full);
+  const out = new Map();
+  for (const [k, c] of cand) {
+    if (c.hit < ALIAS_MIN_HITS || c.hit / c.total < ALIAS_MIN_RATIO) continue;
+    if (others.some((h) => sameHost(h, k))) continue;
+    out.set(k, c.raw);
+  }
+  return out;
+}
+
+export function matchToVcenter(vc, vms, results, { refsFor = null, otherHosts = [] } = {}) {
   const prefix = `${vc.id}:`;
   const byMoref = new Map();
   const byName = new Map();
@@ -498,6 +537,7 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
   }
   const byVm = {};
   let unmatched = 0; let otherVcenter = 0; let ambiguous = 0;
+  const aliases = learnHostAliases(vc, results, byMoref, nameOf, { otherHosts });
   for (const { server, result } of Array.isArray(results) ? results : []) {
     if (!result || !Array.isArray(result.vms)) continue;
     const jobs = Array.isArray(result.jobs) ? result.jobs : [];
@@ -506,7 +546,7 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
       const taskOk = !!(e.lt && /^(success|warning)$/i.test(String(e.lt.r || '')));
       const hasEvidence = okJobs.length > 0 || (e.rp != null && e.rp !== 0) || e.run === 1 || e.run === 2 || taskOk;
       if (!hasEvidence) continue;
-      if (e.h && !sameHost(e.h, vc.host)) { otherVcenter++; continue; }
+      if (e.h && !sameHost(e.h, vc.host) && !aliases.has(hostKey(e.h).full)) { otherVcenter++; continue; }
       const nm = String(e.n || '').trim().toLowerCase();
       let id;
       if (e.m) {
@@ -535,7 +575,7 @@ export function matchToVcenter(vc, vms, results, { refsFor = null } = {}) {
       if (e.run === 1 || (e.run === 2 && cur.run !== 1)) { cur.run = e.run; cur.pg = e.pg; cur.by = e.by; }
     }
   }
-  return { byVm, unmatched, otherVcenter, ambiguous };
+  return { byVm, unmatched, otherVcenter, ambiguous, ...(aliases.size ? { aliasHosts: [...aliases.values()].slice(0, 5) } : {}) };
 }
 
 /**
