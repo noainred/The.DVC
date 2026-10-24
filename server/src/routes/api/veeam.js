@@ -105,8 +105,9 @@ function maskOtherVcenter(o, admin, matched) {
   const n = Number.isInteger(o.otherVcenter) && o.otherVcenter > 0 ? o.otherVcenter : 0;
   const hostMismatch = n > 0 && matched === 0;
   if (admin) return { ...o, otherVcenter: n, ...(hostMismatch ? { hostMismatch: true } : {}) };
-  const { otherVcenter: _drop, ...rest } = o;
-  return { ...rest, otherVcenter: null, ...('unmatched' in o ? { unmatched: null } : {}), ...(hostMismatch ? { hostMismatch: true } : {}) };
+  // v2.778: 배운 별칭(Veeam 이 적은 vCenter 이름 — 주소다)도 관리자 판본에만. 그 밖에는 '다른 이름으로 맞췄다' 는 불리언만.
+  const { otherVcenter: _drop, aliasHosts: _al, ...rest } = o;
+  return { ...rest, otherVcenter: null, ...('unmatched' in o ? { unmatched: null } : {}), ...(hostMismatch ? { hostMismatch: true } : {}), ...(Array.isArray(_al) && _al.length ? { hostAliased: true } : {}) };
 }
 
 const DEMO_SERVER_VIEW = () => ({ name: '데모 Veeam', ok: true, ts: Date.now(), lastOkTs: Date.now(), stale: false, error: '', authStopped: false, via: 'demo', notes: [], counts: null });
@@ -134,7 +135,9 @@ function resultsFor(vcenterId, req) {
     //   v2.761(B5): 엣지 결과는 그 엣지의 주기로.
     if (use) results.push({ server: { id: d.id, name: d.name }, result: withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) }) });
   }
-  return { results, views, host: listVcenters().find((v) => v.id === vcenterId)?.host || '' };
+  // v2.778: 다른 등록 vCenter 의 주소 — Veeam 이 적은 이름을 이 vCenter 의 별칭으로 배울 때 그 주소와 같은 이름은 배우지 않는다(parse.js learnHostAliases).
+  const all = listVcenters();
+  return { results, views, host: all.find((v) => v.id === vcenterId)?.host || '', otherHosts: all.filter((v) => v.id !== vcenterId).map((v) => v.host).filter(Boolean) };
 }
 
 /**
@@ -227,8 +230,8 @@ export function registerVeeamBadges(api) {
       if (isMockMode()) { const dm = demoVeeamMatch(vcenterId, vms); return res.json({ ok: true, configured: true, demo: true, servers: [DEMO_SERVER_VIEW()], ...maskOtherVcenter(dm, admin, Object.keys(dm.byVm || {}).length), at: Date.now() }); }
       return res.json({ ok: true, configured: false, servers: [], byVm: {}, unmatched: 0, ...maskOtherVcenter({ otherVcenter: 0 }, admin, 0), ambiguous: 0 });
     }
-    const { results, views, host } = resultsFor(vcenterId, req);
-    const m = matchToVcenter({ id: vcenterId, host }, vms, results);
+    const { results, views, host, otherHosts } = resultsFor(vcenterId, req);
+    const m = matchToVcenter({ id: vcenterId, host }, vms, results, { otherHosts });
     // v2.761(D5): 실패·오래된 결과라 '백업 중' 을 지운 서버가 있으면 실행 중·대기 수는 0 이 아니라 모름.
     res.json({ ok: true, configured: true, servers: views, ...maskOtherVcenter(m, admin, Object.keys(m.byVm || {}).length), runningStale: results.some((x) => x.result?.runningStale === true), at: Date.now() });
   });
@@ -273,10 +276,10 @@ export function registerVeeamBadges(api) {
         await maybeYield();
         const vms = vmsBy.get(vc.id) || [];
         if (serversForVcenter(vc.id).length) {
-          const { results, views, host } = resultsFor(vc.id, req);
+          const { results, views, host, otherHosts } = resultsFor(vc.id, req);
           // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
-          const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results) : null;
+          const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results, { otherHosts }) : null;
           const vcnt = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
           byVc[vc.id] = maskOtherVcenter(vcnt, admin, vcnt.n);   // v2.762(F5): 수는 관리자만
         } else if (isMockMode()) {
@@ -306,8 +309,8 @@ export function registerVeeamBadges(api) {
       if (isMockMode()) return res.json({ ok: true, demo: true, vm: { id: vm.id, name: vm.name }, detail: demoVeeamDetail(vcenterId, vm), servers: [DEMO_SERVER_VIEW()], at: Date.now() });
       return res.json({ ok: true, configured: false, vm: { id: vm.id, name: vm.name }, detail: null, servers: [] });
     }
-    const { results, views, host } = resultsFor(vcenterId, req);
-    const m = matchToVcenter({ id: vcenterId, host }, t.vms, results, { refsFor: vmId });
+    const { results, views, host, otherHosts } = resultsFor(vcenterId, req);
+    const m = matchToVcenter({ id: vcenterId, host }, t.vms, results, { refsFor: vmId, otherHosts });
     res.json({ ok: true, configured: true, vm: { id: vm.id, name: vm.name }, detail: maskDetail(buildVmDetail(m.byVm[vmId]), isAdminDetailUser(req.user), vm.name), servers: views, at: Date.now() });
   });
 }

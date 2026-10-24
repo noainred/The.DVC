@@ -257,6 +257,13 @@ describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
     expect(hm.title).toMatch(/Veeam 이 적은 VM 이 모두/); expect(hm.title).not.toMatch(/null/);
     expect(backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: 9, hostMismatch: true }).title).toMatch(/VM 9개가 모두/);
   });
+  it('v2.778: Veeam 이 다른 이름으로 적은 vCenter 를 맞췄으면 자세히에 알린다 — 관리자는 이름, 아니면 이름 없이', () => {
+    const a = veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: 0, aliasHosts: ['gm1-vc.corp.local'] });
+    expect(a.details.join()).toMatch(/‘gm1-vc\.corp\.local’ 로 적었습니다/); expect(a.warnings).toEqual([]);
+    const u = veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: null, hostAliased: true });
+    expect(u.details.join()).toMatch(/다른 이름으로 적었습니다/); expect(u.details.join()).not.toMatch(/‘/);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: 0 }).details.join()).not.toMatch(/적었습니다/);
+  });
   it('F6: 마지막 수집 안내는 서버가 준 한도(staleMs)를 쓴다 — 없으면 6시간', () => {
     const at = new Date(2026, 9, 22, 12, 0).getTime();
     const base = { status: 'ok', byVm: { a: [1, 1] }, accounts: 1, at, collectedAt: at - 11 * 3_600_000 };
