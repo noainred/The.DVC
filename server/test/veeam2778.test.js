@@ -57,7 +57,10 @@ test('A-4 등록 주소와 Veeam 이름이 이미 같으면 별칭 없음(기존
 
 test('A-5 라우트가 다른 vCenter 주소를 넘기고, 관리자가 아니면 별칭(주소)을 싣지 않는다', () => {
   const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
-  assert.equal((src.match(/matchToVcenter\([^;]*otherHosts/g) || []).length, 3, '세 호출(badges·backup-counts·vm-detail) 모두 otherHosts');
+  // v2.779: 백업 메뉴(vcBackup)가 한 번 더 부른다 — 수를 박지 않고 '모든 호출이 otherHosts' 로 본다
+  const calls = src.match(/matchToVcenter\([^;]*;/g) || [];
+  assert.ok(calls.length >= 3);
+  assert.deepEqual(calls.filter((c) => !/otherHosts/.test(c)), [], '모든 호출(badges·backup-counts·vm-detail·백업 메뉴)이 otherHosts');
   assert.match(src, /aliasHosts: _al, \.\.\.rest/);
 });
 

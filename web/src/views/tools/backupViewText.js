@@ -1,0 +1,197 @@
+/**
+ * views/tools/backupViewText.js — '백업' 메뉴(백업 서머리 · 백업 세부내용, v2.779) 화면의 순수 헬퍼.
+ * 사용자 요청: "1개 vcenter 를 선택하면 VM 백업 전체 현황 · 전체 28개 vcenter 의 백업 현황 · veeam 백업과 snapshot 둘다 표시"
+ *   + 시안(디자인 캔버스 'VM 백업 현황 시안' — vCenter › 폴더 › 하위 폴더 › VM 표).
+ * 판정은 서버(server/src/veeam/backupStatus.js)가 한다 — 여기서는 받은 값을 묶고 글자로 바꿀 뿐이다. 못 읽은 값은 '—'(0 이 아니다).
+ * ⚠ 문구에 백틱 금지(값 인용은 ‘ ’).
+ */
+
+export const fmtNum = (n) => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
+
+/** n / total 의 정수 %(둘 중 하나라도 모르면 null). */
+export function pctOf(n, total) {
+  if (!(typeof n === 'number' && Number.isFinite(n)) || !(typeof total === 'number' && total > 0)) return null;
+  return Math.round((n / total) * 100);
+}
+
+/** Veeam 쪽 상태(서버 veeamState) → 짧은 이름 · 색 톤. 모르는 코드는 '모름'(지어내지 않는다). */
+export const VEEAM_STATE = {
+  ok: { text: '정상', tone: 'ok' },
+  partial: { text: '일부 서버만', tone: 'warn' },
+  unlinked: { text: '연동 없음', tone: 'info' },
+  'veeam-failed': { text: '읽기 실패', tone: 'bad' },
+  'veeam-pending': { text: '첫 수집 대기', tone: 'muted' },
+  'registry-unreadable': { text: '등록부 확인 불가', tone: 'bad' },
+  'no-inventory': { text: 'VM 목록 수집 전', tone: 'muted' },
+};
+export const veeamStateOf = (s) => VEEAM_STATE[s] || { text: '모름', tone: 'muted' };
+
+/** 스냅샷 기준을 못 낸 사유(서버 snapReason) → 짧은 이름. */
+export const SNAP_REASON = {
+  preparing: '준비 중', 'not-collected': '이벤트 미수집', 'stale-events': '이벤트 오래됨', 'no-account': 'Veeam 계정 모름',
+  'log-off': '로그 수집 꺼짐', 'severity-filter': '로그 등급 제한', 'no-edge-data': '엣지 요약 없음', 'stale-edge': '엣지 요약 오래됨',
+  'no-inventory': 'VM 목록 수집 전', 'no-collect-yet': '이벤트 수집 전',
+};
+export const snapReasonText = (r) => SNAP_REASON[r] || (r ? '모름' : '');
+
+/** 다빈치/IRS — vCenter 화면과 같은 규칙(이름에 IRS 단어). */
+export const isIrs = (name) => /\birs\b/i.test(String(name || ''));
+
+/** 서머리 표 보기 필터. */
+export function filterRows(rows, f) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (f === 'davinci') return list.filter((r) => !isIrs(r.name));
+  if (f === 'irs') return list.filter((r) => isIrs(r.name));
+  if (f === 'warn') return list.filter((r) => needsAttention(r));
+  return list;
+}
+
+/** 주의가 필요한 행 — Veeam 을 못 읽음·일부·결과 오래됨·이름 불일치 · 스냅샷을 모름 · 잔존 스냅샷. 연동 없음은 주의가 아니라 정보. */
+export function needsAttention(r) {
+  if (!r) return false;
+  const vs = r.veeamState;
+  if (vs && vs !== 'ok' && vs !== 'unlinked') return true;
+  if (r.veeamStale > 0 || r.hostMismatch) return true;
+  if (r.snap == null) return true;
+  return r.snapStale > 0;
+}
+
+/** 오른쪽 '주의가 필요한 곳' 목록(최대 n개). */
+export function attentionList(rows, n = 6) {
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const vs = veeamStateOf(r.veeamState);
+    if (r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked') out.push({ id: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
+    else if (r.hostMismatch) out.push({ id: r.id, tone: 'warn', title: `${r.name} — Veeam 이 다른 vCenter 이름으로 적음`, text: '포탈의 vCenter 주소와 Veeam 이 쓰는 이름이 다를 수 있습니다' });
+    if (r.snapStale > 0) out.push({ id: `${r.id}:stale`, tone: 'warn', title: `${r.name} — 스냅샷 잔존 ${r.snapStale}대`, text: '하루 넘게 남은 Veeam 임시 스냅샷(정리 실패 의심)' });
+  }
+  const unlinked = (Array.isArray(rows) ? rows : []).filter((r) => r.veeamState === 'unlinked').map((r) => r.name);
+  if (unlinked.length) out.push({ id: 'unlinked', tone: 'info', title: `Veeam 연동 없음 ${unlinked.length}곳`, text: `${unlinked.slice(0, 6).join(' · ')}${unlinked.length > 6 ? ' …' : ''} — 스냅샷 기준만 보입니다` });
+  return out.slice(0, n);
+}
+
+/* ── 세부내용: VM 분류 · 폴더 트리 ───────────────────────────────────────── */
+
+/** VM 한 대의 분류. v 키가 없으면 Veeam 모름(서버가 못 읽음), null 이면 Veeam 없음. */
+export function vmClass(vm) {
+  const vKnown = vm && 'v' in vm;
+  const v = vKnown ? vm.v : undefined;
+  const sKnown = !!(vm && vm.s && 'ev' in vm.s);
+  const snapNow = vm?.s?.now || null;
+  const snapEv = vm?.s?.ev || null;
+  const snap = !!(snapEv || (snapNow && !snapNow.stale));
+  return { vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale) };
+}
+
+export const FILTERS = [
+  ['all', '전체'], ['veeam', 'Veeam 백업'], ['snaponly', '스냅샷만'], ['none', '확인 안 됨'], ['run', '백업 중·대기'], ['stale', '스냅샷 잔존'],
+];
+
+/** VM 이 보기 필터에 드는가. '확인 안 됨' 은 두 쪽을 다 읽었는데 둘 다 없을 때만(모름은 넣지 않는다). */
+export function vmMatches(vm, f) {
+  const c = vmClass(vm);
+  if (f === 'veeam') return c.veeam;
+  if (f === 'snaponly') return !c.veeam && c.snap;
+  if (f === 'none') return c.vKnown && c.sKnown && !c.veeam && !c.snap;
+  if (f === 'run') return c.run;
+  if (f === 'stale') return c.stale;
+  return true;
+}
+
+/** 필터별 VM 수. */
+export function filterCounts(vms) {
+  const out = {};
+  for (const [k] of FILTERS) out[k] = 0;
+  for (const vm of Array.isArray(vms) ? vms : []) for (const [k] of FILTERS) if (vmMatches(vm, k)) out[k]++;
+  return out;
+}
+
+/** VM 의 폴더 경로 조각 — vCenter › VM 및 폴더 화면과 같은 규칙('vm' 마디는 뺀다). */
+export const folderParts = (folder) => String(folder || 'vm').split('/').filter((p) => p && p !== 'vm');
+
+const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+/**
+ * 폴더 트리 — 필터·검색에 드는 VM 만 담고, 폴더마다 그 아래(전체 VM 기준 — 필터와 무관)의 집계를 단다.
+ * @returns {{ key:'', name:string, children:Array, vms:Array, agg:{n,veeam,snap,run,none} }}
+ */
+export function buildTree(vms, { filter = 'all', q = '' } = {}) {
+  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 };
+  const needle = String(q || '').trim().toLowerCase();
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    const parts = folderParts(vm.folder);
+    const c = vmClass(vm);
+    const show = vmMatches(vm, filter) && (!needle || String(vm.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+    let node = root;
+    const path = [root];
+    for (const p of parts) {
+      const key = node.key ? `${node.key}/${p}` : p;
+      let next = node.children.get(p);
+      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 }; node.children.set(p, next); }
+      node = next; path.push(node);
+    }
+    for (const n of path) {
+      n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++;
+      if (c.vKnown && c.sKnown && !c.veeam && !c.snap) n.agg.none++;
+      if (show) n.hit++;
+    }
+    if (show) node.vms.push(vm);
+  }
+  const fin = (n) => ({ key: n.key, name: n.name, agg: n.agg, hit: n.hit,
+    children: [...n.children.values()].filter((x) => x.hit > 0).sort((a, b) => nat.compare(a.name, b.name)).map(fin),
+    vms: n.vms.slice().sort((a, b) => nat.compare(String(a.name || ''), String(b.name || ''))) });
+  return fin(root);
+}
+
+/**
+ * 트리를 그릴 행으로 편다 — 열린 폴더만 아래를 보인다. 검색·필터 중이면(forceOpen) 전부 연다.
+ * @returns {Array<{kind:'folder'|'vm', depth:number, key:string, node?:object, vm?:object, open?:boolean}>}
+ */
+export function flattenTree(tree, open, { forceOpen = false } = {}) {
+  const rows = [];
+  const walk = (n, depth) => {
+    for (const c of n.children) {
+      const isOpen = forceOpen || (open && open.has(c.key));
+      rows.push({ kind: 'folder', depth, key: c.key, node: c, open: isOpen });
+      if (isOpen) walk(c, depth + 1);
+    }
+    for (const vm of n.vms) rows.push({ kind: 'vm', depth, key: `vm:${vm.id}`, vm });
+  };
+  if (tree) walk(tree, 0);
+  return rows;
+}
+
+/** 처음 열 폴더 — 첫 단계(데이터센터)와 그 아래 첫 단계까지. */
+export function initialOpen(tree) {
+  const s = new Set();
+  for (const c of tree?.children || []) { s.add(c.key); for (const g of c.children || []) s.add(g.key); }
+  return s;
+}
+
+const p2 = (x) => String(x).padStart(2, '0');
+/** 'MM-DD HH:MM'(모르면 '—'). */
+export function shortTs(ms) {
+  if (!(typeof ms === 'number' && Number.isFinite(ms) && ms > 0)) return '—';
+  const d = new Date(ms);
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+/** VM 의 Veeam 칸 — { text, tone }(tone: ok·run·wait·none·unknown). */
+export function veeamCell(vm) {
+  if (!vm || !('v' in vm)) return { text: '모름', tone: 'unknown' };
+  const v = vm.v;
+  if (!v) return { text: '—', tone: 'none' };
+  if (v.state === 'run') return { text: Number.isFinite(v.pg) ? `백업 중 ${v.pg}%` : '백업 중', tone: 'run' };
+  if (v.state === 'wait') return { text: '대기', tone: 'wait' };
+  return { text: v.lb ? `Veeam ${shortTs(v.lb)}` : 'Veeam', tone: 'ok' };
+}
+
+/** VM 의 스냅샷 칸 — 잔존 > 지금 스냅샷 > 최근 N일 시도 > 없음/모름. */
+export function snapCell(vm, days = 7) {
+  const s = vm?.s || {};
+  if (s.now && s.now.stale) return { text: `잔존${s.now.ts ? ` ${Math.max(1, Math.round((Date.now() - s.now.ts) / 3_600_000))}h` : ''}`, tone: 'stale' };
+  if (s.now) return { text: '지금 스냅샷', tone: 'now' };
+  if (!('ev' in s)) return { text: '모름', tone: 'unknown' };
+  if (s.ev) return { text: `${days}일 ${Number.isInteger(s.ev.n) ? `${s.ev.n}회` : '시도'}`, tone: 'ev' };
+  return { text: '—', tone: 'none' };
+}

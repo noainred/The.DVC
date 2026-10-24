@@ -14,8 +14,9 @@ const allItems = () => MENU_GROUPS.flatMap((g) => (g.children ? g.children.map((
 const tabsInMenu = () => new Set(allItems().map(({ g, c }) => (c ? c.tab : g.tab)).filter(Boolean));
 
 describe('메뉴 구성', () => {
-  it('대메뉴는 사용자가 정한 순서 10개다(업그레이드는 설정 아래)', () => {
-    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
+  it('대메뉴는 사용자가 정한 순서 11개다(업그레이드는 설정 아래 · v2.779 백업 메뉴 추가)', () => {
+    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '백업', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
+    expect(MENU_GROUPS.find((g) => g.id === 'backup').children.map((c) => [c.label, c.tool])).toEqual([['백업 서머리', 'backup-summary'], ['백업 세부내용', 'backup-detail']]);
     const settings = MENU_GROUPS.find((g) => g.id === 'settings');
     expect(settings.children.map((c) => c.tab)).toEqual(['settings', 'upgrade']);
   });
@@ -32,8 +33,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(14);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리
-    expect(new Set(keys).size).toBe(13);
+    expect(keys.length).toBe(16);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.779 백업 2
+    expect(new Set(keys).size).toBe(15);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
