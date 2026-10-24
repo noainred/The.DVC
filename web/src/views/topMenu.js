@@ -43,6 +43,11 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'ipam', label: 'IP관리', tab: 'ipam' },
     { id: 'svcmon', label: 'Monitoring', tab: 'svcmon' },
   ] },
+  // v2.779(사용자 요청: '백업' 메뉴 — 서브 메뉴 '백업 서머리'·'백업 세부내용', Veeam 과 스냅샷 둘 다)
+  { id: 'backup', label: '백업', children: [
+    { id: 'bsum', label: '백업 서머리', tool: 'backup-summary' },
+    { id: 'bdet', label: '백업 세부내용', tool: 'backup-detail' },
+  ] },
   { id: 'resource', label: '자원관리', children: [
     { id: 'sa', label: '서버 분석', tool: 'serveranalysis' },
     { id: 'gpu', label: 'GPU 인벤토리', tool: 'gpu' },

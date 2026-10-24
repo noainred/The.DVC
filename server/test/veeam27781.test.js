@@ -44,5 +44,6 @@ test('카드 veeam/snapshot — backup-counts 가 Veeam 연동 vCenter(데모 �
   const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
   assert.equal((src.match(/snap: await snapCell\(vc\.id, vms\)/g) || []).length, 2, 'Veeam 연동 · 데모 두 갈래');
   assert.match(src, /byVc\[vc\.id\] = await snapCell\(vc\.id, vms\);/, '연동 없는 vCenter 도 같은 함수');
-  assert.equal((src.match(/cachedSnapEvents\(/g) || []).length, 3, '캐시 함수 정의·snapCell·snap-events 라우트 — 새 경로를 따로 만들지 않는다');
+  assert.equal((src.match(/function cachedSnapEvents\(/g) || []).length, 1, '캐시 함수는 하나 — 새 경로를 따로 만들지 않는다(v2.779 백업 메뉴도 이것을 부른다)');
+  assert.equal((src.match(/snapEventsFor\(/g) || []).length, 2, '원본 계산(snapEventsFor)은 정의와 캐시 안에서만');
 });

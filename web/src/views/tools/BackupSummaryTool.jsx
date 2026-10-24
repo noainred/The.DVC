@@ -1,0 +1,199 @@
+/**
+ * 백업 서머리 — 특수 기능 `backup-summary`(v2.779, 사용자 요청 '전체 28개 vcenter 의 백업 현황 · veeam 백업과 snapshot 둘다' + 시안).
+ * 메뉴: 백업 › 백업 서머리. 값은 서버(GET /api/tools/backup-summary — veeam/backupStatus.js)가 vCenter 카드·VM 화면과 같은 기준으로 낸다.
+ * ⚠ 무거운 집계라 폴링하지 않는다(마운트 1회 + 새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 조기 return 위.
+ * ⚠ 못 읽은 값은 '—'(0 이 아니다) · 두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않는다.
+ */
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchJson } from '../../api.js';
+import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, shortTs, isIrs } from './backupViewText.js';
+
+export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
+
+const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', muted: 'var(--text-dim)' };
+const TONE_BG = { ok: 'rgba(34,197,94,.12)', bad: 'rgba(239,68,68,.14)', warn: 'rgba(245,158,11,.14)', info: 'rgba(59,130,246,.14)', muted: 'transparent' };
+
+function Kpi({ label, value, sub, color, border, dashed }) {
+  return (
+    <div className="card" style={{ padding: '14px 16px', minWidth: 0, border: `1px ${dashed ? 'dashed' : 'solid'} ${border || 'var(--border)'}` }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: color || 'var(--text-dim)' }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</div>
+      {sub && <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Bar({ pct, color }) {
+  return <div style={{ height: 5, borderRadius: 3, background: 'var(--panel-deep)', marginTop: 4 }}><div style={{ height: 5, borderRadius: 3, background: color, width: `${pct || 0}%` }} /></div>;
+}
+
+export function openDetail(vcId) {
+  try { localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* 저장 못 해도 세부내용은 첫 vCenter 로 열린다 */ }
+  window.location.hash = '#/tools/backup-detail';
+}
+
+export default function BackupSummaryTool() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const gen = useRef(0);
+  const load = useCallback(() => {
+    const my = ++gen.current;
+    setLoading(true); setError(null);
+    fetchJson('/tools/backup-summary')
+      .then((r) => { if (my === gen.current) setData(r); })
+      .catch((e) => { if (my === gen.current) setError(e); })
+      .finally(() => { if (my === gen.current) setLoading(false); });
+  }, []);
+  useEffect(() => { load(); return () => { gen.current++; }; }, [load]);
+
+  if (!data && loading) return <Loading />;
+  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+  if (!data) return null;
+
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const t = data.totals || {};
+  const shown = filterRows(rows, filter);
+  const att = attentionList(rows);
+  const sp = (n) => pctOf(n, t.vm);
+  const splitKnown = t.vcenters > 0 && t.splitUnknown < t.vcenters;
+  const splitTotal = (t.both || 0) + (t.vOnly || 0) + (t.sOnly || 0) + (t.none || 0);
+  const seg = (n) => (splitTotal ? `${(n / splitTotal) * 100}%` : '0%');
+  const chips = [['all', `전체 ${rows.length}`], ['davinci', `다빈치 ${rows.filter((r) => !isIrs(r.name)).length}`], ['irs', `IRS ${rows.filter((r) => isIrs(r.name)).length}`], ['warn', '주의 필요']];
+
+  return (
+    <div data-backup-summary="" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>백업 서머리</div>
+          <div className="muted" style={{ fontSize: 13 }}>vCenter {fmtNum(t.vcenters)}개 — Veeam 서버가 아는 백업과 vCenter 스냅샷으로 본 백업 흔적을 나란히 봅니다.</div>
+        </div>
+        <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12 }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
+          <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
+        </div>
+      </div>
+      {data.registryUnreadable && <div className="card" style={{ padding: '8px 12px', color: TONE.bad, fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 Veeam 기준은 모두 확인 불가입니다 — 설정 › Veeam 백업 서버를 확인하세요.</div>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+        <Kpi label="전체 VM" value={fmtNum(t.vm)} sub={`vCenter ${fmtNum(t.vcenters)}개`} />
+        <Kpi label="Veeam 백업 대상" value={`${fmtNum(t.veeam)}${sp(t.veeam) != null ? ` · ${sp(t.veeam)}%` : ''}`} color="#4ade80" border="#1d4d33"
+          sub={[t.veeamUnknown ? `확인 불가 ${t.veeamUnknown}곳` : '', t.veeamUnlinked ? `연동 없음 ${t.veeamUnlinked}곳` : ''].filter(Boolean).join(' · ') || 'Veeam 서버 기준'} />
+        <Kpi label="스냅샷으로 본 백업" value={`${fmtNum(t.snap)}${sp(t.snap) != null ? ` · ${sp(t.snap)}%` : ''}`} color="#c084fc" border="#6b3fa0" dashed
+          sub={t.snapUnknown ? `확인 불가 ${t.snapUnknown}곳 제외` : '최근 7일 Veeam 스냅샷 · 지금 스냅샷'} />
+        <Kpi label="어느 쪽에도 안 보임" value={splitKnown ? fmtNum(t.none) : '—'} sub="백업 안 됨이 아니라 확인되지 않음" />
+        <Kpi label="지금 백업 중" value={fmtNum(t.running)} color="#fbbf24" border="#5c4513" sub={`대기 ${fmtNum(t.pending)}`} />
+      </div>
+
+      <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        <div className="flex gap wrap" style={{ alignItems: 'baseline', rowGap: 4 }}>
+          <b style={{ fontSize: 14 }}>VM 백업이 보이는 비율</b>
+          <span className="muted" style={{ fontSize: 12 }}>같은 VM 은 한 번만 — 두 쪽에 다 보이면 둘 다{t.splitUnknown ? ` · 한쪽을 못 읽은 vCenter ${t.splitUnknown}곳은 빠짐` : ''}</span>
+        </div>
+        {splitKnown && splitTotal > 0 ? (
+          <div role="img" aria-label={`둘 다 ${t.both} · Veeam 만 ${t.vOnly} · 스냅샷만 ${t.sOnly} · 확인 안 됨 ${t.none}`} style={{ display: 'flex', height: 20, borderRadius: 8, overflow: 'hidden', background: 'var(--panel-deep)' }}>
+            <div style={{ width: seg(t.both), background: '#16a34a' }} />
+            <div style={{ width: seg(t.vOnly), background: '#4ade80' }} />
+            <div style={{ width: seg(t.sOnly), background: '#a855f7' }} />
+            <div style={{ width: seg(t.none), background: '#263248' }} />
+          </div>
+        ) : <div className="muted" style={{ fontSize: 12 }}>나눌 수 있는 vCenter 가 없습니다(두 기준 중 하나를 못 읽음).</div>}
+        <div className="flex gap wrap" style={{ fontSize: 12, rowGap: 6 }}>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#16a34a', marginRight: 6 }} />둘 다 {fmtNum(t.both)}</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#4ade80', marginRight: 6 }} />Veeam 만 {fmtNum(t.vOnly)}</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#a855f7', marginRight: 6 }} />스냅샷만 {fmtNum(t.sOnly)}</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#263248', border: '1px solid var(--border)', marginRight: 6 }} />확인 안 됨 {fmtNum(t.none)}</span>
+        </div>
+      </div>
+
+      <div className="flex wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
+        <div className="card" style={{ flex: '999 1 620px', minWidth: 0, padding: '12px 0 4px' }}>
+          <div className="flex gap wrap" style={{ alignItems: 'center', padding: '0 14px 10px', rowGap: 6 }}>
+            <b style={{ fontSize: 14 }}>vCenter 별 현황</b>
+            <div className="flex gap wrap" role="group" aria-label="보기" style={{ marginLeft: 'auto', rowGap: 6 }}>
+              {chips.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>)}
+            </div>
+          </div>
+          <STable minWidth={880} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', fontSize: 12 }}>
+                <th style={{ padding: '6px 14px' }}>vCenter</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>VM</th>
+                <th style={{ padding: '6px 8px' }}>Veeam 백업</th>
+                <th style={{ padding: '6px 8px' }}>스냅샷 기준</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>확인 안 됨</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>백업 중</th>
+                <th style={{ padding: '6px 8px' }}>마지막 백업 완료</th>
+                <th style={{ padding: '6px 14px 6px 8px' }}>Veeam 서버</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => {
+                const vs = veeamStateOf(r.veeamState);
+                const vp = pctOf(r.veeam, r.vm); const spc = pctOf(r.snap, r.vm);
+                return (
+                  <tr key={r.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
+                    <td data-sort={r.name} style={{ padding: '9px 14px', whiteSpace: 'nowrap' }}>
+                      <button type="button" onClick={() => openDetail(r.id)} title="백업 세부내용으로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
+                      <div className="muted" style={{ fontSize: 11 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''}</div>
+                    </td>
+                    <td data-sort={r.vm} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
+                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 8px', minWidth: 140 }}>
+                      <span style={{ fontWeight: 700, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.veeam)}</span>
+                      {vp != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{vp}%</span>}
+                      {r.veeam != null && <Bar pct={vp} color="#22c55e" />}
+                    </td>
+                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 8px', minWidth: 130 }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
+                      <span style={{ fontWeight: 700, color: r.snap == null ? 'var(--text-dim)' : '#c084fc', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.snap)}</span>
+                      {spc != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{spc}%</span>}
+                      {r.snap == null && r.snapReason && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{snapReasonText(r.snapReason)}</span>}
+                      {r.snap != null && <Bar pct={spc} color="#a855f7" />}
+                    </td>
+                    <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
+                    <td data-sort={r.running ?? ''} style={{ padding: '9px 8px', textAlign: 'right' }}>{r.running ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{r.running}</span> : <span className="muted">{r.running === 0 ? '0' : '—'}</span>}</td>
+                    <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 8px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
+                    <td data-sort={vs.text} style={{ padding: '9px 14px 9px 8px' }}><span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: TONE[vs.tone], background: TONE_BG[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </STable>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>{rows.length}개 중 {shown.length}개 · 제목을 누르면 정렬 · vCenter 이름을 누르면 백업 세부내용</div>
+        </div>
+
+        <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <b style={{ fontSize: 14 }}>주의가 필요한 곳</b>
+            {att.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : att.map((a) => (
+              <div key={a.id} className="flex gap" style={{ alignItems: 'flex-start' }}>
+                <span style={{ flex: 'none', marginTop: 5, width: 8, height: 8, borderRadius: '50%', background: TONE[a.tone] }} />
+                <div style={{ minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, overflowWrap: 'anywhere' }}>{a.title}</div><div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{a.text}</div></div>
+              </div>
+            ))}
+          </div>
+          {Array.isArray(data.runningJobs) && (
+            <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <b style={{ fontSize: 14 }}>지금 도는 Veeam 작업</b>
+              {data.runningJobs.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : data.runningJobs.map((j, i) => (
+                <div key={`${j.vcenter}-${j.server}-${j.name}-${i}`} style={{ minWidth: 0 }}>
+                  <div className="flex gap" style={{ justifyContent: 'space-between', fontSize: 13 }}><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{j.vcenter} › {j.name}</span><b style={{ color: '#fbbf24' }}>{Number.isFinite(j.pg) ? `${j.pg}%` : '—'}</b></div>
+                  {Number.isFinite(j.pg) && <Bar pct={j.pg} color="#f59e0b" />}
+                </div>
+              ))}
+              <div className="muted" style={{ fontSize: 12 }}>작업 전체 진행률(Veeam 콘솔 작업 목록의 %) · 관리자에게만 보입니다</div>
+            </div>
+          )}
+          <div className="card" style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.6 }}>
+            <b style={{ display: 'block', marginBottom: 4 }}>두 기준</b>
+            <div><b style={{ color: '#4ade80' }}>Veeam</b> — Veeam 서버가 작업에 넣었거나 복원 지점이 있는 VM</div>
+            <div><b style={{ color: '#c084fc' }}>스냅샷</b> — vCenter 에서 Veeam 이 스냅샷을 만든 흔적이 보인 VM(성공 여부는 모름)</div>
+            <div className="muted">두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않습니다. — 는 확인되지 않음입니다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

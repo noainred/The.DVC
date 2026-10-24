@@ -1,0 +1,240 @@
+/**
+ * 백업 세부내용 — 특수 기능 `backup-detail`(v2.779, 사용자 요청 '1개 vcenter 를 선택하면 VM 백업 전체 현황 · veeam 백업과 snapshot 둘다' +
+ *   시안: vCenter › 폴더 › 하위 폴더 › VM 표). 메뉴: 백업 › 백업 세부내용. 값은 서버(GET /api/tools/backup-detail — veeam/backupStatus.js).
+ * ⚠ 폴링하지 않는다(vCenter 를 고를 때·새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 전부 조기 return 위.
+ * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchJson } from '../../api.js';
+import { Loading, ErrorBox } from '../../components/ui.jsx';
+import Select from '../../components/Select.jsx';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass } from './backupViewText.js';
+import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
+
+const CHIP = {
+  ok: { color: '#86efac', background: 'rgba(34,197,94,.14)' },
+  run: { color: '#fcd34d', background: 'rgba(245,158,11,.16)' },
+  wait: { color: '#93c5fd', background: 'rgba(59,130,246,.16)' },
+  none: { color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--border)' },
+  unknown: { color: 'var(--text-dim)', background: 'transparent', border: '1px dashed var(--border)' },
+  now: { color: '#e9d5ff', background: 'rgba(168,85,247,.24)' },
+  ev: { color: '#d8b4fe', background: 'transparent', border: '1px dashed #7e4bc0' },
+  stale: { color: '#fca5a5', background: 'rgba(239,68,68,.14)', border: '1px dashed #b91c1c' },
+};
+function Chip({ c }) {
+  return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', ...(CHIP[c.tone] || CHIP.none) }}>{c.text}</span>;
+}
+function AggBar({ n, of, color }) {
+  const p = pctOf(n, of) || 0;
+  return (
+    <div className="flex gap" style={{ alignItems: 'center', minWidth: 0 }}>
+      <span style={{ fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{n}/{of}</span>
+      <div style={{ flex: 1, minWidth: 40, height: 5, borderRadius: 3, background: 'var(--panel-deep)' }}><div style={{ height: 5, borderRadius: 3, background: color, width: `${p}%` }} /></div>
+    </div>
+  );
+}
+
+const readSavedVc = () => { try { return localStorage.getItem(DETAIL_VC_KEY) || ''; } catch { return ''; } };
+// 1440px 에서 옆 상세 칸(280px)과 함께 가로 스크롤 없이 들어가는 폭(약 790px) — 좁으면 표만 가로로 스크롤한다
+const GRID = 'minmax(220px, 2fr) 52px minmax(140px, 1.2fr) minmax(90px, 1fr) 64px minmax(110px, 1fr) 104px';
+
+export default function BackupDetailTool({ scope }) {
+  const [vcs, setVcs] = useState(null);
+  const [vcId, setVcId] = useState(() => scope || readSavedVc());
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(null);
+  const [sel, setSel] = useState(null);
+  const gen = useRef(0);
+
+  useEffect(() => {
+    let on = true;
+    fetchJson('/vcenters').then((r) => { if (on) setVcs(Array.isArray(r) ? r.map((v) => ({ id: v.id, name: v.name || v.id })) : []); }).catch(() => { if (on) setVcs([]); });
+    return () => { on = false; };
+  }, []);
+  // 고른 vCenter 가 없거나 목록에 없으면 이름 순 첫 vCenter
+  useEffect(() => {
+    if (!vcs || !vcs.length) return;
+    if (!vcId || !vcs.some((v) => v.id === vcId)) setVcId([...vcs].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))[0].id);
+  }, [vcs, vcId]);
+  const load = useCallback(() => {
+    if (!vcId) return;
+    const my = ++gen.current;
+    setLoading(true); setError(null);
+    fetchJson('/tools/backup-detail', { vcenterId: vcId })
+      .then((r) => { if (my === gen.current) { setData(r); setOpen(null); setSel(null); } })
+      .catch((e) => { if (my === gen.current) setError(e); })
+      .finally(() => { if (my === gen.current) setLoading(false); });
+  }, [vcId]);
+  useEffect(() => { setData(null); load(); try { if (vcId) localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* */ } }, [vcId, load]);
+
+  const vms = useMemo(() => (Array.isArray(data?.vms) ? data.vms : []), [data]);
+  const counts = useMemo(() => filterCounts(vms), [vms]);
+  const tree = useMemo(() => buildTree(vms, { filter, q }), [vms, filter, q]);
+  const openSet = useMemo(() => open || initialOpen(buildTree(vms)), [open, vms]);
+  const forceOpen = filter !== 'all' || !!q.trim();
+  const rows = useMemo(() => flattenTree(tree, openSet, { forceOpen }), [tree, openSet, forceOpen]);
+  const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
+
+  const toggle = (key) => setOpen((cur) => { const s = new Set(cur || openSet); if (s.has(key)) s.delete(key); else s.add(key); return s; });
+
+  if (vcs && !vcs.length) return <div className="muted">볼 수 있는 vCenter 가 없습니다.</div>;
+  if (!data && loading) return <Loading />;
+  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+
+  const r = data?.row || {};
+  const vs = veeamStateOf(r.veeamState);
+  const days = data?.snapDays || 7;
+
+  return (
+    <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>백업 세부내용</div>
+          <div className="muted" style={{ fontSize: 13 }}>vCenter 하나를 골라 폴더 › VM 마다 Veeam 백업과 스냅샷 흔적을 봅니다.</div>
+        </div>
+        <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'flex-end' }}>
+          <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>vCenter
+            <Select className="input" value={vcId} onChange={(e) => setVcId(e.target.value)} style={{ minWidth: 200, fontWeight: 700 }}>
+              {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </Select>
+          </label>
+          <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
+        </div>
+      </div>
+
+      {data && (
+        <div className="card" style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 28px', minWidth: 0 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{data.vcenter?.name}</div>
+            <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
+              Veeam {vs.text}{(data.servers || []).length ? ` · 서버 ${(data.servers || []).map((s) => s.name).join(', ')}` : ''} · 기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}
+            </div>
+          </div>
+          <div className="flex wrap" style={{ gap: '10px 24px', marginLeft: 'auto' }}>
+            <div><div className="muted" style={{ fontSize: 12 }}>VM</div><div style={{ fontSize: 22, fontWeight: 800 }}>{fmtNum(r.vm)}</div></div>
+            <div><div style={{ fontSize: 12, color: '#86efac' }}>Veeam 백업</div><div style={{ fontSize: 22, fontWeight: 800, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80' }}>{fmtNum(r.veeam)}{pctOf(r.veeam, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.veeam, r.vm)}%</span>}</div></div>
+            <div title={r.snap == null ? snapReasonText(r.snapReason) : undefined}><div style={{ fontSize: 12, color: '#d8b4fe' }}>스냅샷 기준</div><div style={{ fontSize: 22, fontWeight: 800, color: r.snap == null ? 'var(--text-dim)' : '#c084fc' }}>{fmtNum(r.snap)}{pctOf(r.snap, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.snap, r.vm)}%</span>}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>확인 안 됨</div><div style={{ fontSize: 22, fontWeight: 800 }}>{r.split ? fmtNum(r.split.none) : '—'}</div></div>
+            <div><div style={{ fontSize: 12, color: '#fcd34d' }}>지금 백업 중</div><div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{fmtNum(r.running)}<span style={{ fontSize: 13, marginLeft: 6 }}>대기 {fmtNum(r.pending)}</span></div></div>
+          </div>
+          {(r.veeam == null && r.veeamState !== 'unlinked') && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) VM 의 Veeam 칸은 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요. 스냅샷 칸은 그대로 보입니다.</div>}
+          {r.snap == null && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>스냅샷 기준을 낼 수 없습니다({snapReasonText(r.snapReason) || '모름'}) — VM 의 스냅샷 칸은 지금 임시 스냅샷만 보입니다.</div>}
+          {Array.isArray(data.aliasHosts) && data.aliasHosts.length > 0 && <div className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>Veeam 이 이 vCenter 를 {data.aliasHosts.map((h) => `‘${h}’`).join(', ')} 로 적었습니다 — VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다.</div>}
+        </div>
+      )}
+
+      <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
+        <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
+          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label} {counts[k]}</button>)}
+        </div>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
+          <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
+          <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="VM · 폴더 이름" style={{ flex: 1, minWidth: 0 }} />
+        </label>
+      </div>
+
+      <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="card" style={{ flex: '999 1 640px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 790, fontSize: 13 }}>
+              <div role="row" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, background: 'var(--panel-deep)', color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>
+                <div role="columnheader" style={{ padding: '9px 14px' }}>vCenter › 폴더 › VM</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>전원</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>Veeam 백업</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>작업</div>
+                <div role="columnheader" style={{ padding: '9px 6px', textAlign: 'right' }}>복원 지점</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>스냅샷</div>
+                <div role="columnheader" style={{ padding: '9px 14px 9px 6px' }}>마지막 백업</div>
+              </div>
+              {rows.length === 0 && <div className="muted" style={{ padding: '14px' }}>{data ? '조건에 맞는 VM 이 없습니다.' : ''}</div>}
+              {rows.map((row) => {
+                const pad = 14 + row.depth * 20;
+                if (row.kind === 'folder') {
+                  const a = row.node.agg;
+                  return (
+                    <div role="row" key={row.key} aria-expanded={row.open} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: row.depth === 0 ? 'rgba(59,130,246,.06)' : undefined }}>
+                      <div role="gridcell" style={{ minWidth: 0 }}>
+                        <button type="button" onClick={() => toggle(row.key)} disabled={forceOpen} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 40, padding: `0 8px 0 ${pad}px`, background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: forceOpen ? 'default' : 'pointer', textAlign: 'left' }}>
+                          <span className="muted" style={{ width: 12 }}>{row.open ? '▾' : '▸'}</span>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={row.depth === 0 ? '#22d3ee' : '#fbbf24'} strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+                          <b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.node.name}</b>
+                          <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{a.n} VM{forceOpen && row.node.hit !== a.n ? ` · 해당 ${row.node.hit}` : ''}</span>
+                        </button>
+                      </div>
+                      <div role="gridcell" />
+                      <div role="gridcell" style={{ padding: '0 6px' }}>{r.veeam != null ? <AggBar n={a.veeam} of={a.n} color="#22c55e" /> : <span className="muted">—</span>}</div>
+                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12 }}>{a.run ? <span style={{ color: '#fbbf24', fontWeight: 700 }}>백업 중·대기 {a.run}</span> : null}</div>
+                      <div role="gridcell" />
+                      <div role="gridcell" style={{ padding: '0 6px' }}>{r.snap != null ? <AggBar n={a.snap} of={a.n} color="#a855f7" /> : <span className="muted">—</span>}</div>
+                      <div role="gridcell" />
+                    </div>
+                  );
+                }
+                const vm = row.vm; const vc = veeamCell(vm); const sc = snapCell(vm, days);
+                const isSel = sel === vm.id;
+                return (
+                  <div role="row" key={row.key} aria-selected={isSel} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: isSel ? 'rgba(59,130,246,.12)' : undefined }}>
+                    <div role="gridcell" style={{ minWidth: 0 }}>
+                      <button type="button" onClick={() => setSel(isSel ? null : vm.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 38, padding: `0 8px 0 ${pad + 20}px`, background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ color: 'var(--text-dim)', flex: 'none' }}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /></svg>
+                        <span style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vm.name}</span>
+                      </button>
+                    </div>
+                    <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: vm.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '—'}</div>
+                    <div role="gridcell" style={{ padding: '0 6px' }}><Chip c={vc} /></div>
+                    <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={vm.v?.jobs?.join(', ') || undefined}>{vm.v?.jobs?.length ? vm.v.jobs.join(', ') : '—'}</div>
+                    <div role="gridcell" style={{ padding: '0 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{vm.v && Number.isFinite(vm.v.rp) && vm.v.rp >= 0 ? vm.v.rp : '—'}</div>
+                    <div role="gridcell" style={{ padding: '0 6px' }}><Chip c={sc} /></div>
+                    <div role="gridcell" style={{ padding: '0 14px 0 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap' }}>{shortTs(vm.v?.lb)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam·스냅샷이 보이는 수 / 전체 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
+        </div>
+
+        {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다 */}
+        <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 56, alignSelf: 'flex-start' }}>
+          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+            {!selVm ? <div className="muted" style={{ fontSize: 13 }}>VM 을 누르면 여기에 백업 상세가 보입니다.</div> : (() => {
+              const c = vmClass(selVm); const v = selVm.v;
+              return (
+                <>
+                  <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{selVm.folder || '—'}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, overflowWrap: 'anywhere' }}>{selVm.name}</div>
+                  <div className="flex gap wrap" style={{ rowGap: 6 }}><Chip c={veeamCell(selVm)} /><Chip c={snapCell(selVm, days)} /></div>
+                  {v && v.state === 'run' && Number.isFinite(v.pg) && (
+                    <div>
+                      <div className="flex" style={{ justifyContent: 'space-between', fontSize: 12 }}><span>이 VM 진행률</span><b style={{ color: '#fbbf24' }}>{v.pg}%</b></div>
+                      <div style={{ height: 7, borderRadius: 4, background: 'var(--panel-deep)', marginTop: 4 }}><div style={{ height: 7, borderRadius: 4, background: '#f59e0b', width: `${v.pg}%` }} /></div>
+                    </div>
+                  )}
+                  <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '6px 12px', fontSize: 13 }}>
+                    <dt className="muted">Veeam 작업</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v?.jobs?.length ? v.jobs.join(', ') : (c.vKnown ? '—' : '모름')}</dd>
+                    <dt className="muted">마지막 백업 완료</dt><dd style={{ margin: 0 }}>{shortTs(v?.lb)}{v?.lbSrc === 'rp' ? ' (복원 지점 생성 시각)' : ''}</dd>
+                    <dt className="muted">마지막 결과</dt><dd style={{ margin: 0 }}>{v?.lastResult || '—'}</dd>
+                    <dt className="muted">복원 지점</dt><dd style={{ margin: 0 }}>{v && Number.isFinite(v.rp) && v.rp >= 0 ? `${v.rp}개` : v?.rp === -1 ? '있음(개수 모름)' : '—'}</dd>
+                    <dt className="muted">스냅샷 흔적</dt><dd style={{ margin: 0 }}>{selVm.s?.ev ? `최근 ${days}일 ${selVm.s.ev.n ?? '?'}회 · 마지막 ${shortTs(selVm.s.ev.ts)}` : ('ev' in (selVm.s || {}) ? '없음' : '모름')}</dd>
+                    <dt className="muted">지금 스냅샷</dt><dd style={{ margin: 0 }}>{selVm.s?.now ? `${selVm.s.now.n}개 · 생성 ${shortTs(selVm.s.now.ts)}${selVm.s.now.stale ? ' — 하루 넘게 남음(정리 실패 의심)' : ''}` : '없음'}</dd>
+                  </dl>
+                </>
+              );
+            })()}
+          </div>
+          <div className="card" style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.7 }}>
+            <b style={{ display: 'block', marginBottom: 2 }}>칸 읽는 법</b>
+            <div><b style={{ color: '#86efac' }}>Veeam 월-일 시:분</b> 백업 대상 · 마지막 완료 시각</div>
+            <div><b style={{ color: '#fcd34d' }}>백업 중 N%</b> 그 VM 의 진행률 · <b style={{ color: '#93c5fd' }}>대기</b> 차례 기다림</div>
+            <div><b style={{ color: '#d8b4fe' }}>{days}일 N회</b> 스냅샷 흔적 · <b style={{ color: '#fca5a5' }}>잔존</b> 하루 넘게 남은 임시 스냅샷</div>
+            <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
