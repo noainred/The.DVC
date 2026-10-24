@@ -58,7 +58,9 @@ export function veeamBadge(e) {
   lines.push('누르면 백업 상세(복원 지점·용량·마지막 결과)를 엽니다');
   if (e.run === 1) {
     const pg = Number.isFinite(e.pg) ? e.pg : null;
-    const how = e.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)' : 'Veeam 이 이 VM 을 지금 백업하고 있습니다';
+    const how = e.by === 'job' ? 'Veeam 작업이 실행 중입니다(이 VM 차례인지는 Veeam 이 VM 단위로 알려 주지 않았습니다)'
+      // v2.778.1: 배지의 % 는 이 VM(task)의 진행률 — Veeam 콘솔 작업 목록의 % 는 작업 전체라 다를 수 있다(실서버: VM 28% · 작업 49%).
+      : `Veeam 이 이 VM 을 지금 백업하고 있습니다${pg != null ? ` — ${pg}% 는 이 VM 의 진행률입니다(Veeam 콘솔 작업 목록의 % 는 작업 전체라 다를 수 있습니다)` : ''}`;
     return { label: pg != null ? `백업 중 ${pg}%` : '백업 중', color: 'amber', title: [how, ...lines].join('\n'), progress: pg };
   }
   if (e.run === 2) return { label: '대기', color: 'blue', title: ['Veeam 실행 중인 작업에서 차례를 기다리고 있습니다', ...lines].join('\n'), progress: null };
@@ -85,6 +87,16 @@ export function veeamCounts(byVm) {
 }
 
 /**
+ * v2.778.1: 실행 중 작업 한 줄 — '이름 N%' · 서버가 둘 이상이면 서버 이름을 앞에 붙인다(한 vCenter 에 Veeam 서버 여럿 — 작업 이름이 겹칠 수 있다).
+ * @param {Array<{name:string, pg:(number|null), server:string}>} list
+ */
+export function runningJobsText(list) {
+  const xs = Array.isArray(list) ? list : [];
+  const multi = new Set(xs.map((j) => j.server)).size > 1;
+  return xs.map((j) => `${multi && j.server ? `${j.server} › ` : ''}${j.name}${Number.isFinite(j.pg) ? ` ${j.pg}%` : ''}`).join(' · ');
+}
+
+/**
  * 요약 카드(v2.751 시안 — 체크했을 때만 보인다). tone: ok | warn | muted.
  * @param {object|null} d   /api/veeam/badges 응답
  * @param {{loading?:boolean, error?:string, vmTotal?:number, refreshError?:string}} o
@@ -92,7 +104,7 @@ export function veeamCounts(byVm) {
  *   source:string, basis:string, warnings:string[], details:string[], demo:boolean }}
  */
 export function veeamSummary(d, { loading = false, error = '', vmTotal = null, refreshError = '' } = {}) {
-  const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false };
+  const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false, runningJobs: [] };
   if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
   if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
   if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금은 vCenter 스냅샷 기준 배지(📸 점선)만 보입니다.' };
@@ -140,6 +152,9 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
     source: servers.length ? `서버 ${servers.map((sv) => sv.name).join(', ')}` : '',
     basis: when.length ? `기준 ${fmtTime(Math.min(...when))}` : '',
     warnings, details, demo: !!d.demo,
+    // v2.778.1: 지금 도는 Veeam 작업과 작업 전체 진행률(콘솔 작업 목록의 %) — 서버가 관리자 판본에만 싣는다.
+    runningJobs: runKnown ? servers.flatMap((sv) => (Array.isArray(sv.runningJobs) ? sv.runningJobs : []).filter((j) => j && typeof j.name === 'string' && j.name)
+      .map((j) => ({ name: j.name, pg: Number.isFinite(j.pg) ? j.pg : null, server: sv.name }))) : [],
   };
 }
 
@@ -395,6 +410,53 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
     if (Number.isFinite(e.collectedAt) && now - e.collectedAt > 3_600_000) lines.push(`vCenter 이벤트 마지막 수집 ${fmtTime(e.collectedAt)}`);
   }
   return { text, label, tone: (e.partial || e.hostMismatch || e.stale > 0 || e.accountUnseen) ? 'warn' : (veeam ? 'veeam' : 'snap'), title: lines.join('\n') };
+}
+
+/**
+ * v2.778.1(사용자 요청: 카드의 백업 칸을 'veeam/snapshot' 으로 — Veeam 으로 백업 받는 수량과 스냅샷 수량을 함께): 'A/B' 한 칸.
+ *   A = Veeam 서버 기준 백업 대상 VM 수(연동 없음·모름이면 '—') · B = vCenter 스냅샷·이벤트 기준 VM 수(모름이면 '—').
+ *   각 수의 근거·사유는 backupCell 그대로(툴팁에 두 단락) — 판정을 새로 만들지 않는다. VM 전체 수는 툴팁에.
+ * @param {object|null} e  /veeam/backup-counts 의 byVc 원소(src 'veeam' 이면 snap 하위 객체가 붙는다 · src 'snap' 이면 그 자체가 스냅샷 값)
+ */
+export function backupPairCell(e, vmFallback = null, now = Date.now(), { refreshError = '' } = {}) {
+  if (!e || typeof e !== 'object' || (e.src !== 'veeam' && e.src !== 'snap')) return null;
+  const vE = e.src === 'veeam' ? e : null;
+  const sE = e.src === 'snap' ? e : (e.snap && typeof e.snap === 'object' && e.snap.src === 'snap' ? e.snap : null);
+  const unknownSrc = vE && vE.reason === 'registry-unreadable';
+  const vc = vE ? backupCell(vE, vmFallback, now, { refreshError }) : null;
+  const sc = sE && !unknownSrc ? backupCell(sE, vmFallback, now, { refreshError }) : null;
+  const num = (x) => (x && Number.isFinite(x.n) ? `${x.n}${x.partial ? '*' : ''}` : '—');
+  const total = Number.isFinite(vE?.vmTotal) ? vE.vmTotal : Number.isFinite(sE?.vmTotal) ? sE.vmTotal : (Number.isFinite(vmFallback) ? vmFallback : null);
+  const lines = [`veeam/snapshot — Veeam 백업 대상 ${num(vE)} / 스냅샷 기준 ${num(sE)}${total != null ? ` (VM ${total}대 중)` : ''}`];
+  lines.push('', '[Veeam]', vc ? vc.title : 'Veeam 서버와 연동되지 않았습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하면 Veeam 기준 수가 나옵니다.');
+  lines.push('', '[스냅샷]', sc ? sc.title.replace('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다', 'vCenter 스냅샷·이벤트로 본 값입니다(Veeam 서버 값과 별개)') : (unknownSrc ? '확인 불가(위 사유)' : '이 응답에 스냅샷 기준 값이 없습니다(포탈이 옛 판이거나 VM 목록 수집 전).'));
+  const tones = [vc?.tone, sc?.tone];
+  const tone = tones.includes('warn') ? 'warn' : vc && vc.tone !== 'none' ? vc.tone : sc && sc.tone !== 'none' ? sc.tone : 'none';
+  return { text: `${num(vE)}/${num(sE)}`, label: 'veeam/snapshot', tone, title: lines.join('\n'), ...((vc?.refreshFailed || sc?.refreshFailed) ? { refreshFailed: true } : {}) };
+}
+
+/**
+ * v2.778.1(사용자 요청: 상단 요약 '활성 알람' 자리에 전체 VM·Veeam 백업 수·스냅샷으로 파악한 수): vCenter 별 백업 수를 더한다(순수).
+ *   못 읽은 vCenter 의 수는 0 으로 더하지 않고 따로 센다('못 읽은 값은 0 이 아니다'). 부분 합이면 partial.
+ * @param {object|null} byVc  /veeam/backup-counts 의 byVc
+ * @param {string[]} ids  지금 화면의 vCenter id(범위·검색과 무관한 전체 목록)
+ * @returns {null|{ veeam:(number|null), snap:(number|null), veeamVcs:number, veeamUnknown:number, snapUnknown:number, partial:boolean }}
+ */
+export function backupTotals(byVc, ids) {
+  if (!byVc || typeof byVc !== 'object') return null;
+  let veeam = 0; let snap = 0; let veeamVcs = 0; let veeamUnknown = 0; let snapUnknown = 0; let veeamKnown = 0; let snapKnown = 0; let partial = false;
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const e = byVc[id];
+    if (!e || typeof e !== 'object') { snapUnknown++; continue; }
+    const vE = e.src === 'veeam' ? e : null;
+    const sE = e.src === 'snap' ? e : (e.snap && typeof e.snap === 'object' && e.snap.src === 'snap' ? e.snap : null);
+    if (vE) {
+      veeamVcs++;
+      if (Number.isFinite(vE.n)) { veeam += vE.n; veeamKnown++; if (vE.partial) partial = true; } else veeamUnknown++;
+    }
+    if (sE && Number.isFinite(sE.n)) { snap += sE.n; snapKnown++; if (sE.partial) partial = true; } else snapUnknown++;
+  }
+  return { veeam: veeamKnown ? veeam : null, snap: snapKnown ? snap : null, veeamVcs, veeamUnknown, snapUnknown, partial };
 }
 
 /**

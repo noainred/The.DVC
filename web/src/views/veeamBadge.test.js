@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { rowActions, agentAfterVcToggle, statusCell, formAfterSave } from './VeeamSettings.jsx';
-import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText, snapCollectorText, SNAP_COLLECTOR_TEXT } from './veeamBadge.js';
+import { rowActions, agentAfterVcToggle, statusCell, formAfterSave, sortVcenters, nameTokens, vcMatchesName } from './VeeamSettings.jsx';
+import { veeamBadge, veeamSummary, veeamCounts, resultLabel, shortTime, sizeText, durationText, veeamDetailView, veeamSnapBadge, veeamSnapCounts, VEEAM_SNAP_STALE_MS, veeamEventBadge, veeamEventStatusText, backupCell, veeamEventChip, ACCOUNT_UNSEEN, collectLagText, snapCollectorText, SNAP_COLLECTOR_TEXT, runningJobsText, backupPairCell, backupTotals } from './veeamBadge.js';
 
 describe('veeamBadge (v2.751)', () => {
   it('백업 대상은 완료 시각을 붙이고 · 백업 중은 진행률 · 대기', () => {
@@ -256,6 +256,57 @@ describe('v2.762 — Veeam 표시·수량 판정 점검 수정(웹)', () => {
     const hm = backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: null, hostMismatch: true });
     expect(hm.title).toMatch(/Veeam 이 적은 VM 이 모두/); expect(hm.title).not.toMatch(/null/);
     expect(backupCell({ src: 'veeam', n: 0, vmTotal: 9, otherVcenter: 9, hostMismatch: true }).title).toMatch(/VM 9개가 모두/);
+  });
+  it('v2.778.1: 카드 칸 veeam/snapshot — 두 수 · 모르면 — · 툴팁에 두 단락 · 연동 없는 vCenter 는 Veeam —', () => {
+    const snapOk = { src: 'snap', n: 120, vmTotal: 195, snapEv: 118, snapNow: 4, overlap: 2, days: 7 };
+    const both = backupPairCell({ src: 'veeam', n: 51, vmTotal: 195, snap: snapOk });
+    expect(both.label).toBe('veeam/snapshot'); expect(both.text).toBe('51/120'); expect(both.tone).toBe('veeam');
+    expect(both.title).toMatch(/\[Veeam\][\s\S]*Veeam 백업 51대[\s\S]*\[스냅샷\][\s\S]*스냅샷 기준 120대/);
+    expect(both.title).toMatch(/Veeam 서버 값과 별개/); expect(both.title).not.toMatch(/연동되지 않아 vCenter 로 본 값/);
+    // 실서버 AZ: Veeam 인증 실패(—) 라도 스냅샷 수는 보인다
+    const az = backupPairCell({ src: 'veeam', n: null, reason: 'veeam-failed', vmTotal: 195, snap: snapOk });
+    expect(az.text).toBe('—/120'); expect(az.title).toMatch(/Veeam 기준 백업 수량을 알 수 없습니다/);
+    const noV = backupPairCell(snapOk);
+    expect(noV.text).toBe('—/120'); expect(noV.title).toMatch(/Veeam 서버와 연동되지 않았습니다/); expect(noV.tone).toBe('snap');
+    expect(backupPairCell({ src: 'veeam', n: 5, partial: true, snap: { src: 'snap', n: null, reason: 'no-account' } }).text).toBe('5*/—');
+    expect(backupPairCell({ src: 'veeam', n: null, reason: 'registry-unreadable' }).text).toBe('—/—');
+    expect(backupPairCell(null)).toBe(null);
+    expect(both.title).not.toMatch(/`/);
+  });
+  it('v2.778.1: 상단 VM 백업 합계 — 못 읽은 vCenter 는 0 으로 더하지 않고 센다', () => {
+    const by = {
+      a: { src: 'veeam', n: 51, snap: { src: 'snap', n: 120 } },
+      b: { src: 'veeam', n: null, reason: 'veeam-failed', snap: { src: 'snap', n: 30, partial: true } },
+      c: { src: 'snap', n: 10 },
+      d: { src: 'snap', n: null, reason: 'no-account' },
+    };
+    expect(backupTotals(by, ['a', 'b', 'c', 'd', 'e'])).toEqual({ veeam: 51, snap: 160, veeamVcs: 2, veeamUnknown: 1, snapUnknown: 2, partial: true });
+    expect(backupTotals({ x: { src: 'snap', n: null } }, ['x'])).toEqual({ veeam: null, snap: null, veeamVcs: 0, veeamUnknown: 0, snapUnknown: 1, partial: false });
+    expect(backupTotals(null, ['a'])).toBe(null);
+  });
+  it('v2.778.1: vCenter 체크 목록 — 이름 순(숫자는 수로) · 표시 이름 낱말과 맞는 vCenter 강조(장비 낱말 제외 · 앞부분만 같은 이름은 아님)', () => {
+    const vcs = [{ id: '1', name: 'NB' }, { id: '2', name: 'gm10' }, { id: '3', name: 'AZ-IRS' }, { id: '4', name: 'GM2' }, { id: '5', name: 'AZ' }, { id: '6', name: 'GM1' }];
+    expect(sortVcenters(vcs).map((v) => v.name)).toEqual(['AZ', 'AZ-IRS', 'GM1', 'GM2', 'gm10', 'NB']);
+    expect(vcs[0].name).toBe('NB');   // 원본 그대로
+    expect(sortVcenters(null)).toEqual([]);
+    const t = nameTokens('AZ Veeam');
+    expect(t).toEqual(['az']);
+    expect(['AZ', 'AZ-IRS', 'NB', 'OC2Sandbox'].filter((n) => vcMatchesName(t, n))).toEqual(['AZ', 'AZ-IRS']);
+    expect(['OC2', 'OC2Sandbox', 'GM1', 'GM10', 'GM1-IRS'].filter((n) => vcMatchesName(nameTokens('OC2 / GM1 VBR'), n))).toEqual(['OC2', 'GM1', 'GM1-IRS']);
+    expect(['vcenter-us-east-01', 'vcenter-us-west-01', 'vcenter-cn-east-01'].filter((n) => vcMatchesName(nameTokens('us-east Veeam'), n))).toEqual(['vcenter-us-east-01']);
+    expect(['AZ-IRS', 'GM1-IRS', 'NB'].filter((n) => vcMatchesName(nameTokens('IRS'), n))).toEqual(['AZ-IRS', 'GM1-IRS']);
+    expect(nameTokens('Veeam 백업 서버')).toEqual([]);
+    expect(vcMatchesName([], 'AZ')).toBe(false);
+  });
+  it('v2.778.1: 실행 중 작업의 전체 진행률을 요약에 싣는다(관리자 판본에만 온다) · 실행 상태를 모르면 싣지 않는다 · VM 배지 % 는 VM 진행률이라고 말한다', () => {
+    const v = veeamSummary({ configured: true, servers: [sv({ runningJobs: [{ name: '23. spotfire', pg: 49 }, { name: 'x', pg: null }, { name: '' }] })], byVm: { a: {} }, otherVcenter: 0 });
+    expect(v.runningJobs).toEqual([{ name: '23. spotfire', pg: 49, server: 'VBR' }, { name: 'x', pg: null, server: 'VBR' }]);
+    expect(veeamSummary({ configured: true, servers: [sv()], byVm: {}, otherVcenter: 0 }).runningJobs).toEqual([]);
+    expect(veeamSummary({ configured: true, servers: [sv({ runningJobs: [{ name: 'j', pg: 1 }] })], byVm: {}, runningStale: true }).runningJobs).toEqual([]);
+    expect(runningJobsText(v.runningJobs)).toBe('23. spotfire 49% · x');
+    expect(runningJobsText([{ name: 'A', pg: 10, server: 'VBR-1' }, { name: 'A', pg: 70, server: 'VBR-2' }])).toBe('VBR-1 › A 10% · VBR-2 › A 70%');
+    const b = veeamBadge({ run: 1, pg: 28, by: 'task' });
+    expect(b.label).toBe('백업 중 28%'); expect(b.title).toMatch(/28% 는 이 VM 의 진행률/);
   });
   it('v2.778: Veeam 이 다른 이름으로 적은 vCenter 를 맞췄으면 자세히에 알린다 — 관리자는 이름, 아니면 이름 없이', () => {
     const a = veeamSummary({ configured: true, servers: [sv()], byVm: { a: {} }, otherVcenter: 0, aliasHosts: ['gm1-vc.corp.local'] });

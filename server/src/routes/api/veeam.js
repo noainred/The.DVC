@@ -133,7 +133,12 @@ function resultsFor(vcenterId, req) {
     const use = usableResult(rec);
     // v2.751 검토 #6: 실패해 마지막 성공분을 쓰거나 주기의 2배보다 오래된 결과의 '백업 중' 은 지금 사실이 아니다 — 지우고 대조한다.
     //   v2.761(B5): 엣지 결과는 그 엣지의 주기로.
-    if (use) results.push({ server: { id: d.id, name: d.name }, result: withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) }) });
+    if (use) {
+      const result = withoutStaleRunning(use, { failed: rec?.result?.ok !== true, now, maxAgeMs: resultMaxAgeMs(rec?.via, rec?.agent) });
+      results.push({ server: { id: d.id, name: d.name }, result });
+      // v2.778.1: 지금 도는 작업과 그 작업 전체 진행률(Veeam 콘솔 작업 목록의 %) — 작업 이름은 서버 전체(다른 법인 작업 포함)라 관리자 판본만(B7 counts 와 같은 이유).
+      if (admin) views[views.length - 1].runningJobs = (Array.isArray(result.jobs) ? result.jobs : []).filter((j) => j && j.running === true).slice(0, 10).map((j) => ({ name: String(j.name || '').slice(0, 128), pg: Number.isFinite(j.pg) ? j.pg : null }));
+    }
   }
   // v2.778: 다른 등록 vCenter 의 주소 — Veeam 이 적은 이름을 이 vCenter 의 별칭으로 배울 때 그 주소와 같은 이름은 배우지 않는다(parse.js learnHostAliases).
   const all = listVcenters();
@@ -271,6 +276,13 @@ export function registerVeeamBadges(api) {
       const vmsBy = new Map();
       for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
       const maybeYield = createYielder(15);
+      // v2.778.1(사용자 요청: 카드에 'veeam/snapshot' — Veeam 으로 백업 받는 수와 스냅샷 수를 함께): Veeam 이 연동된 vCenter 도 스냅샷 기준 수를 낸다.
+      //   같은 캐시(cachedSnapEvents · 기다리지 않음)·같은 판정(snapCount)이라 연동 없는 vCenter 의 값과 기준이 같다.
+      const snapCell = async (vcId, vms) => {
+        const ev = await cachedSnapEvents(vcId, vms, { initial: snap?.initial === true, wait: false });
+        const cnt = snapCount({ ev, vms });
+        return cnt.n == null && ev?.source === 'local' && ev?.snapCollector ? { ...cnt, snapCollector: ev.snapCollector } : cnt;
+      };
       const byVc = {};
       for (const vc of vcs) {
         await maybeYield();
@@ -281,15 +293,13 @@ export function registerVeeamBadges(api) {
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
           const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results, { otherHosts }) : null;
           const vcnt = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
-          byVc[vc.id] = maskOtherVcenter(vcnt, admin, vcnt.n);   // v2.762(F5): 수는 관리자만
+          byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), snap: await snapCell(vc.id, vms) };   // v2.762(F5): 수는 관리자만 · v2.778.1: 스냅샷 수도 같이
         } else if (isMockMode()) {
           const vcnt = veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length });
-          byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), demo: true };
+          byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), demo: true, snap: await snapCell(vc.id, vms) };
         } else {
-          const ev = await cachedSnapEvents(vc.id, vms, { initial: snap?.initial === true, wait: false });
-          const cnt = snapCount({ ev, vms });
-          // v2.772(Z3 I1): 수를 못 낸(n null) 로컬 vCenter 에만 전용 수집기 사유 코드를 싣는다(카드 stale 문구 한 줄).
-          byVc[vc.id] = cnt.n == null && ev?.source === 'local' && ev?.snapCollector ? { ...cnt, snapCollector: ev.snapCollector } : cnt;
+          // v2.772(Z3 I1): 수를 못 낸(n null) 로컬 vCenter 에만 전용 수집기 사유 코드를 싣는다(카드 stale 문구 한 줄) — snapCell 안.
+          byVc[vc.id] = await snapCell(vc.id, vms);
         }
       }
       return { ok: true, at: Date.now(), byVc };

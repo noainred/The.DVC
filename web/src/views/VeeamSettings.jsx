@@ -63,6 +63,36 @@ export function agentAfterVcToggle(f, vcenterIds, vcenters) {
 }
 
 /**
+ * v2.778.1(사용자 요청 '이거 소팅해서 보이게 해줘, 표시 이름에 포함된 단어가 반짝이던지 해서 빨리 선택할 수 있게'):
+ *   vCenter 체크 목록 정렬 — 이름 순(대소문자 무시 · 숫자는 수로: GM1 < GM2 < GM10). 원본 배열은 바꾸지 않는다.
+ */
+export function sortVcenters(vcenters) {
+  return [...(Array.isArray(vcenters) ? vcenters : [])].sort((a, b) => String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || ''), 'en', { numeric: true, sensitivity: 'base' }));
+}
+
+/** 표시 이름에서 흔한 낱말(장비 종류)은 빼고 본다 — 'AZ Veeam' 의 'veeam' 이 모든 vCenter 를 강조하지 않게. */
+const PICK_STOP = new Set(['veeam', 'vbr', 'backup', 'server', 'srv', 'b&r', '백업', '서버', 'the']);
+/** 표시 이름의 낱말(2자 이상 · 공백·구두점으로 나눔 · 소문자). */
+export function nameTokens(displayName) {
+  return String(displayName || '').toLowerCase().slice(0, 128).split(/[\s,./()[\]_|:;]+/).filter((t) => t.length >= 2 && !PICK_STOP.has(t));
+}
+/**
+ * 그 vCenter 이름이 표시 이름의 낱말과 맞는가(순수) — 이름을 '-' 로 나눈 마디 중 **연속한 마디들**이 낱말('-' 로 나눈 마디)과 같으면
+ *   (AZ ↔ AZ·AZ-IRS · us-east ↔ vcenter-us-east-01). 마디 일부만 같은 이름(OC2 ↔ OC2Sandbox · GM1 ↔ GM10)은 맞추지 않는다 —
+ *   강조는 '고르기 쉽게' 일 뿐 고르지는 않는다(체크는 사람이).
+ */
+export function vcMatchesName(tokens, vcName) {
+  const segs = String(vcName || '').toLowerCase().trim().split('-').filter(Boolean);
+  if (!segs.length || !Array.isArray(tokens) || !tokens.length) return false;
+  return tokens.some((t) => {
+    const ts = String(t).split('-').filter(Boolean);
+    if (!ts.length || ts.length > segs.length) return false;
+    for (let i = 0; i + ts.length <= segs.length; i++) if (ts.every((x, k) => segs[i + k] === x)) return true;
+    return false;
+  });
+}
+
+/**
  * v2.763(V5-1·V2-1): 행 동작 버튼. 진행 중 잠금은 **그 서버의 그 버튼만**(docs/rules/web.md v2.529) — 편집·작업 목록은 잠그지 않고, 잠긴 버튼은 title 로 이유.
  *   엣지에서 중앙이 배정한 서버(centralManaged)는 편집·삭제 대신 안내(서버도 409) — 연결 시험·지금 읽기는 그대로(엣지에서 인증 정지를 푸는 길).
  * @param {object} s 목록 원소 @param {Set<string>} busy 진행 중 키('test:<id>'·'collect:<id>'·'del:<id>'·'save')
@@ -106,6 +136,9 @@ export default function VeeamSettings() {
   };
   useEffect(() => { load(); return () => { seq.current += 1; }; }, []);
   const vcName = useMemo(() => new Map((d?.vcenters || []).map((v) => [v.id, v.name])), [d]);
+  // v2.778.1: 체크 목록은 이름 순 · 표시 이름의 낱말과 맞는 vCenter 강조(styles.css .vc-pick-match) — 훅은 조기 return 위
+  const vcSorted = useMemo(() => sortVcenters(d?.vcenters), [d?.vcenters]);
+  const pickTokens = useMemo(() => nameTokens(form.name), [form.name]);
 
   if (denied) {
     return <div className="muted" style={{ fontSize: 12 }}>Veeam 백업 서버 등록은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>;
@@ -156,6 +189,7 @@ export default function VeeamSettings() {
   // 기존 서버의 읽는 곳은 이미 정해진 값이다(agentTouched — vCenter 를 더 체크해도 바꾸지 않는다).
   const edit = (s) => setForm({ id: s.id, name: s.name, host: s.host, port: String(s.port || ''), username: s.username, password: '', apiVersion: s.apiVersion || '', agent: s.agent || '', agentTouched: true, vcenterIds: s.vcenterIds || [], enabled: s.enabled !== false, note: s.note || '' });
   // 편집 중 읽는 곳이 중앙인데 고른 vCenter 를 엣지가 보고하면 제안만 문구로(값은 바꾸지 않는다).
+  const pickN = pickTokens.length ? vcSorted.filter((v) => vcMatchesName(pickTokens, v.name)).length : 0;
   const siteHint = !form.agent && form.agentTouched ? (d?.vcenters || []).find((v) => form.vcenterIds.includes(v.id) && v.siteAgent)?.siteAgent : '';
 
   return (
@@ -275,10 +309,12 @@ export default function VeeamSettings() {
           <label>메모 <input className="input" value={form.note} onChange={set('note')} /></label>
         </div>
         <div style={{ marginTop: 10, fontSize: 12 }}>
-          <div className="muted" style={{ marginBottom: 4 }}>이 Veeam 서버가 백업하는 vCenter(여러 개 가능)</div>
+          <div className="muted" style={{ marginBottom: 4 }}>
+            이 Veeam 서버가 백업하는 vCenter(여러 개 가능 · 이름 순){pickN ? <span style={{ color: '#fbbf24' }}> — 표시 이름과 맞는 vCenter {pickN}개를 강조했습니다(고르는 것은 직접)</span> : null}
+          </div>
           <div className="flex gap wrap" style={{ rowGap: 4 }}>
-            {(d?.vcenters || []).map((v) => (
-              <label key={v.id} className="flex gap" style={{ alignItems: 'center', flex: 'none', cursor: 'pointer', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border, rgba(148,163,184,.25))' }}
+            {vcSorted.map((v) => (
+              <label key={v.id} className={`flex gap${pickTokens.length && vcMatchesName(pickTokens, v.name) ? ' vc-pick-match' : ''}`} style={{ alignItems: 'center', flex: 'none', cursor: 'pointer', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border, rgba(148,163,184,.25))' }}
                 title={v.siteAgent ? `이 vCenter 는 엣지 ${v.siteAgent} 가 보고합니다` : '중앙이 직접 수집하는 vCenter'}>
                 <input type="checkbox" checked={form.vcenterIds.includes(v.id)} onChange={() => toggleVc(v.id)} /> {v.name}{v.siteAgent ? <span className="muted"> · {v.siteAgent}</span> : null}
               </label>

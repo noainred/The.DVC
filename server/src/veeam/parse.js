@@ -246,6 +246,9 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
     if (jid && !backupJobId(jid)) continue;
     counts.sessions++;
     if (jid) runningJobs.add(jid);
+    // v2.778.1(실서버: Veeam 콘솔 '49% completed' 인데 포탈은 VM 단위 task 진행률만 있었다): 세션(작업 전체) 진행률 — Veeam 콘솔의 작업 목록 % 와 같은 값.
+    const spg = numOrNull(ses.progressPercent ?? ses.progress?.progressPercent);
+    if (jid && jobIdx.has(jid) && spg != null) jobs[jobIdx.get(jid)].pg = Math.max(0, Math.min(100, Math.round(spg)));
     const tasks = listOf(it.tasks);
     if (it.tasksError || !tasks.length) { if (jid) jobLevel.add(jid); continue; }
     for (const t of tasks) {
@@ -398,6 +401,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
   const jobs = (Array.isArray(r.jobs) ? r.jobs : []).slice(0, maxJobs).filter(isObj).map((j) => ({
     id: s(j.id, 64), name: s(j.name, 128), type: s(j.type, 48), disabled: j.disabled === true, status: s(j.status, 32),
     lastResult: s(j.lastResult, 32), lastRun: numOrNull(j.lastRun), nextRun: numOrNull(j.nextRun), running: j.running === true,
+    ...(j.running === true && numOrNull(j.pg) != null ? { pg: Math.max(0, Math.min(100, Math.round(numOrNull(j.pg)))) } : {}),
     containers: Math.max(0, Math.round(numOrNull(j.containers) ?? 0)), vms: Math.max(0, Math.round(numOrNull(j.vms) ?? 0)),
   }));
   const nJobs = jobs.length;
@@ -592,7 +596,7 @@ export function withoutStaleRunning(result, { failed = false, now = Date.now(), 
   //   상태 문자열 'Running'·'Working' 도 지금 사실이 아니므로 비운다(화면은 '—'). 나머지(이름·마지막 결과·다음 실행)는 그대로.
   const runSt = (j) => /^(?:running|working)$/i.test(String(j.status || '').slice(0, 64).trim());
   const jobs = Array.isArray(result.jobs) ? result.jobs.map((j) => (j && typeof j === 'object' && (j.running === true || runSt(j))
-    ? { ...j, running: false, status: runSt(j) ? '' : j.status } : j)) : result.jobs;
+    ? (({ pg: _pg, ...rest }) => ({ ...rest, running: false, status: runSt(j) ? '' : j.status }))(j) : j)) : result.jobs;   // v2.778.1: 진행률도 지운다(키째)
   return { ...result, runningStale: true, jobs, vms: result.vms.map((v) => (v.run ? { ...v, run: 0, pg: null, by: '' } : v)) };
 }
 
