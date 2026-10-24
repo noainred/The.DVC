@@ -413,6 +413,53 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
 }
 
 /**
+ * v2.778.1(사용자 요청: 카드의 백업 칸을 'veeam/snapshot' 으로 — Veeam 으로 백업 받는 수량과 스냅샷 수량을 함께): 'A/B' 한 칸.
+ *   A = Veeam 서버 기준 백업 대상 VM 수(연동 없음·모름이면 '—') · B = vCenter 스냅샷·이벤트 기준 VM 수(모름이면 '—').
+ *   각 수의 근거·사유는 backupCell 그대로(툴팁에 두 단락) — 판정을 새로 만들지 않는다. VM 전체 수는 툴팁에.
+ * @param {object|null} e  /veeam/backup-counts 의 byVc 원소(src 'veeam' 이면 snap 하위 객체가 붙는다 · src 'snap' 이면 그 자체가 스냅샷 값)
+ */
+export function backupPairCell(e, vmFallback = null, now = Date.now(), { refreshError = '' } = {}) {
+  if (!e || typeof e !== 'object' || (e.src !== 'veeam' && e.src !== 'snap')) return null;
+  const vE = e.src === 'veeam' ? e : null;
+  const sE = e.src === 'snap' ? e : (e.snap && typeof e.snap === 'object' && e.snap.src === 'snap' ? e.snap : null);
+  const unknownSrc = vE && vE.reason === 'registry-unreadable';
+  const vc = vE ? backupCell(vE, vmFallback, now, { refreshError }) : null;
+  const sc = sE && !unknownSrc ? backupCell(sE, vmFallback, now, { refreshError }) : null;
+  const num = (x) => (x && Number.isFinite(x.n) ? `${x.n}${x.partial ? '*' : ''}` : '—');
+  const total = Number.isFinite(vE?.vmTotal) ? vE.vmTotal : Number.isFinite(sE?.vmTotal) ? sE.vmTotal : (Number.isFinite(vmFallback) ? vmFallback : null);
+  const lines = [`veeam/snapshot — Veeam 백업 대상 ${num(vE)} / 스냅샷 기준 ${num(sE)}${total != null ? ` (VM ${total}대 중)` : ''}`];
+  lines.push('', '[Veeam]', vc ? vc.title : 'Veeam 서버와 연동되지 않았습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하면 Veeam 기준 수가 나옵니다.');
+  lines.push('', '[스냅샷]', sc ? sc.title.replace('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다', 'vCenter 스냅샷·이벤트로 본 값입니다(Veeam 서버 값과 별개)') : (unknownSrc ? '확인 불가(위 사유)' : '이 응답에 스냅샷 기준 값이 없습니다(포탈이 옛 판이거나 VM 목록 수집 전).'));
+  const tones = [vc?.tone, sc?.tone];
+  const tone = tones.includes('warn') ? 'warn' : vc && vc.tone !== 'none' ? vc.tone : sc && sc.tone !== 'none' ? sc.tone : 'none';
+  return { text: `${num(vE)}/${num(sE)}`, label: 'veeam/snapshot', tone, title: lines.join('\n'), ...((vc?.refreshFailed || sc?.refreshFailed) ? { refreshFailed: true } : {}) };
+}
+
+/**
+ * v2.778.1(사용자 요청: 상단 요약 '활성 알람' 자리에 전체 VM·Veeam 백업 수·스냅샷으로 파악한 수): vCenter 별 백업 수를 더한다(순수).
+ *   못 읽은 vCenter 의 수는 0 으로 더하지 않고 따로 센다('못 읽은 값은 0 이 아니다'). 부분 합이면 partial.
+ * @param {object|null} byVc  /veeam/backup-counts 의 byVc
+ * @param {string[]} ids  지금 화면의 vCenter id(범위·검색과 무관한 전체 목록)
+ * @returns {null|{ veeam:(number|null), snap:(number|null), veeamVcs:number, veeamUnknown:number, snapUnknown:number, partial:boolean }}
+ */
+export function backupTotals(byVc, ids) {
+  if (!byVc || typeof byVc !== 'object') return null;
+  let veeam = 0; let snap = 0; let veeamVcs = 0; let veeamUnknown = 0; let snapUnknown = 0; let veeamKnown = 0; let snapKnown = 0; let partial = false;
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const e = byVc[id];
+    if (!e || typeof e !== 'object') { snapUnknown++; continue; }
+    const vE = e.src === 'veeam' ? e : null;
+    const sE = e.src === 'snap' ? e : (e.snap && typeof e.snap === 'object' && e.snap.src === 'snap' ? e.snap : null);
+    if (vE) {
+      veeamVcs++;
+      if (Number.isFinite(vE.n)) { veeam += vE.n; veeamKnown++; if (vE.partial) partial = true; } else veeamUnknown++;
+    }
+    if (sE && Number.isFinite(sE.n)) { snap += sE.n; snapKnown++; if (sE.partial) partial = true; } else snapUnknown++;
+  }
+  return { veeam: veeamKnown ? veeam : null, snap: snapKnown ? snap : null, veeamVcs, veeamUnknown, snapUnknown, partial };
+}
+
+/**
  * v2.761(D4): VM 화면 '최근 7일 Veeam 백업 시도 N대' 칩 — 숫자를 낼지는 서버 판정(snap-events verdict — 카드 snapCount 와 같은 조건)을 따른다.
  *   판정을 웹에 따로 두지 않는다(옛 서버라 verdict 가 없으면 예전처럼 status 만 본다). n=null 이면 칩을 그리지 않고 why 로 이유를 말한다.
  * @returns {{ n: (number|null), why: string }}

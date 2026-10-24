@@ -39,3 +39,10 @@ test('라우트 — 실행 중 작업(이름·진행률)은 관리자 판본에�
   const web = fs.readFileSync(new URL('../../web/src/views/VeeamParts.jsx', import.meta.url), 'utf8');
   assert.ok(!/chip\('백업 중 \d+%'/.test(web) && !/chip\('Veeam \d\d-\d\d/.test(web), '범례 칩에 실제처럼 보이는 예시 값 금지');
 });
+
+test('카드 veeam/snapshot — backup-counts 가 Veeam 연동 vCenter(데모 포함)에도 스냅샷 기준 값(snap)을 싣는다 · 같은 snapCell 하나', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
+  assert.equal((src.match(/snap: await snapCell\(vc\.id, vms\)/g) || []).length, 2, 'Veeam 연동 · 데모 두 갈래');
+  assert.match(src, /byVc\[vc\.id\] = await snapCell\(vc\.id, vms\);/, '연동 없는 vCenter 도 같은 함수');
+  assert.equal((src.match(/cachedSnapEvents\(/g) || []).length, 3, '캐시 함수 정의·snapCell·snap-events 라우트 — 새 경로를 따로 만들지 않는다');
+});
