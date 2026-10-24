@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **672개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **673개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-23)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-24)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -468,10 +468,11 @@
 | `VEEAM_CONFIG_PULL_MS` | `300000` |  | agent/veeamConfigPull.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
-## 원격 명령(RMA) (37)
+## 원격 명령(RMA) (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `AGENT_CENTRAL_TOKEN` |  |  | config.js, rma/agent.js |
 | `AGENT_NAME` |  | ✅ | config.js, rma/agent.js |
 | `CENTRAL_URL` | `''` | ✅ | config.js, rma/agent.js |
 | `COLLECTOR_DATACENTER` |  | ✅ | config.js, rma/agent.js |
@@ -856,4 +857,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 672
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 673
