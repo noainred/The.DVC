@@ -10,6 +10,7 @@ import { forceAgentCentralToken } from '../agent/deploy.js';
 import { dispatcherFor } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { recordOutbound } from '../util/outboundStats.js';
+import { pullStats } from './pullStats.js';
 import { capStr } from '../util/capStr.js';
 
 const PUSH_TIMEOUT_MS = 45_000;   // 엣지는 기록 뒤 중앙 확인(최대 15초)까지 하고 답한다
@@ -47,14 +48,18 @@ export function sanitizeEdgeReply(b) {
   if (!b || typeof b !== 'object') return null;
   const steps = Array.isArray(b.steps) ? b.steps.slice(0, 20).filter((x) => x && typeof x === 'object').map((x) => ({ key: s(x.key, 32), ok: x.ok === true, detail: s(x.detail, 300) })) : [];
   const pr = b.probe && typeof b.probe === 'object' ? { ok: b.probe.ok === true, reason: s(b.probe.reason, 200), yourAgent: s(b.probe.yourAgent, 64) } : null;
-  return { ok: b.ok === true, reverted: b.reverted === true, reason: s(b.reason, 64), version: s(b.version, 32), steps, probe: pr };
+  // applied: 엣지의 확정 답(true = 파일·메모리 모두 새 토큰 · false = 바뀐 것 없음). 글자·숫자 등 다른 값은 '모름'(undefined).
+  return { ok: b.ok === true, ...(typeof b.applied === 'boolean' ? { applied: b.applied } : {}), reason: s(b.reason, 64), version: s(b.version, 32), steps, probe: pr };
 }
 
-export function realTokenApplyDeps() {
+/** @param {(o:{action:string,target:string,detail:string})=>void} [audit] 라우트가 실행자를 붙여 넘긴다 */
+export function realTokenApplyDeps(audit) {
   return {
     issue: issueAgentToken, revoke: revokeAgentToken, listTokens: listAgentTokens, tokensLoadError: agentTokensLoadError,
     findCollector: findCollectorByName, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
+    pullStats,   // 반증 F4: '받아들인 요청' 확인
+    ...(audit ? { audit } : {}),
   };
 }

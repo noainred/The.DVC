@@ -78,7 +78,9 @@ adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsO
 // v2.776(사용자 요청 '이걸 자동으로 수정하는 기능 · 세부 진행 화면 · 로그 저장'): 공유 토큰 엣지에 개별 토큰을 **발급하고 엣지에 적용**한다.
 //   발급과 같은 경계(소유자 등급) — 작업은 백그라운드로 돌고 즉시 작업 기록을 돌려준다. 진행·기록은 아래 GET 으로(토큰 평문은 어디에도 없다).
 adminRouter.post('/central/agent-tokens/:agent/apply', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
-  const r = startTokenApply(req.params.agent, { by: req.user?.username || '', deps: realTokenApplyDeps() });
+  // 반증 F8: 작업 중 발급·회수·결과도 감사 로그에 남긴다(실행자·IP 를 붙여서)
+  const auditFn = ({ action, target, detail }) => logAudit({ user: req.user?.username, action, target, detail, ip: req.ip || '' });
+  const r = startTokenApply(req.params.agent, { by: req.user?.username || '', deps: realTokenApplyDeps(auditFn) });
   if (!r.ok) return res.status(r.jobId ? 409 : 400).json(r);
   logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 자동 적용 시작', target: r.job.agent, detail: `작업 ${r.job.id}`, ip: req.ip || '' });
   res.status(202).json(r);

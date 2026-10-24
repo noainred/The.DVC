@@ -119,12 +119,6 @@ export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {
   return { prevText, file };
 }
 
-/** v2.776: upsertEnvKeyStrict 의 되돌리기 — 바꾸기 전 원문으로(없던 파일이면 지운다). */
-export function restoreEnvText(prevText, file = ENV_FILE) {
-  if (prevText == null) { try { fs.rmSync(file, { force: true }); } catch { /* */ } return; }
-  atomicWriteFileSync(file, isWin ? Buffer.from(prevText, 'latin1') : prevText, { mode: 0o600 });
-}
-
 export function centralTokenInfo() {
   return { hasToken: !!getCentralToken(), token: getCentralToken(), envFile: ENV_FILE, envFileLoaded: ENV_FILE_LOADED };
 }

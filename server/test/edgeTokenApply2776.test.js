@@ -43,7 +43,7 @@ test('A-2 성공 — AGENT_CENTRAL_TOKEN 기록(다른 줄·CENTRAL_TOKEN 그대
   config.agent.centralUrl = 'http://c:4001'; config.agent.centralToken = 'shared-old';
   let probed = '';
   const r = await A.applyAgentCentralToken({ token: TOK, envFile: env, probe: async (t) => { probed = t; return { ok: true, yourAgent: 'AZ-IRS', ms: 3 }; } });
-  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.applied, true);
   assert.equal(probed, TOK, '확인은 새 토큰으로');
   const after = fs.readFileSync(env, 'utf8');
   assert.match(after, new RegExp(`^AGENT_CENTRAL_TOKEN=${TOK}$`, 'm'));
@@ -54,14 +54,14 @@ test('A-2 성공 — AGENT_CENTRAL_TOKEN 기록(다른 줄·CENTRAL_TOKEN 그대
   assert.ok(r.fp && r.fp.length >= 6);
 });
 
-test('A-3 확인 실패 — 파일을 바이트 그대로 되돌리고 메모리·process.env 도 원복', async () => {
+test('A-3 확인 실패 — 아무것도 바꾸지 않는다(파일 바이트 그대로 · 메모리·process.env 그대로) · applied:false', async () => {
   const env = path.join(DIR, 'a3.env');
   const orig = 'PORT=4000\nCENTRAL_TOKEN=shared-old\n# 주석 유지\n';
   fs.writeFileSync(env, orig);
   config.agent.centralUrl = 'http://c:4001'; config.agent.centralToken = 'shared-old';
   delete process.env.AGENT_CENTRAL_TOKEN;
   const r = await A.applyAgentCentralToken({ token: TOK, envFile: env, probe: async () => ({ ok: false, reason: '중앙이 새 토큰을 거절했습니다(HTTP 403)' }) });
-  assert.equal(r.ok, false); assert.equal(r.reverted, true);
+  assert.equal(r.ok, false); assert.equal(r.applied, false); assert.equal(r.reason, 'probe-failed');
   assert.equal(fs.readFileSync(env, 'utf8'), orig);
   assert.equal(config.agent.centralToken, 'shared-old');
   assert.equal(process.env.AGENT_CENTRAL_TOKEN, undefined);
@@ -75,6 +75,15 @@ test('A-4 portal.env 를 읽지 못하면(디렉터리) 쓰지 않고 메모리�
   assert.equal(config.agent.centralToken, 'shared-old');
 });
 
+test('A-6 반증 F3 — 확인하는 동안에는 파일·메모리가 아직 이전 값(확인된 뒤에만 바꾼다)', async () => {
+  const env = path.join(DIR, 'a6.env'); const orig = 'PORT=4000\nCENTRAL_TOKEN=shared-old\n'; fs.writeFileSync(env, orig);
+  config.agent.centralUrl = 'http://c:4001'; config.agent.centralToken = 'shared-old';
+  let during = null;
+  const r = await A.applyAgentCentralToken({ token: TOK, envFile: env, probe: async () => { during = [config.agent.centralToken, fs.readFileSync(env, 'utf8')]; return { ok: true, yourAgent: 'AZ-IRS', ms: 1 }; } });
+  assert.equal(r.applied, true);
+  assert.deepEqual(during, ['shared-old', orig]);
+});
+
 test('A-5 config — AGENT_CENTRAL_TOKEN 이 보내는 토큰, CENTRAL_TOKEN 은 받는 문(별도 프로세스)', () => {
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', "const { config } = await import('./src/config.js'); console.log(JSON.stringify([config.agent.centralToken, config.central.token]));"],
     { cwd: path.resolve(new URL('..', import.meta.url).pathname), env: { ...process.env, CONFIG_DIR: DIR, CENTRAL_TOKEN: 'shared-in', AGENT_CENTRAL_TOKEN: 'agent-out' }, encoding: 'utf8' });
@@ -84,7 +93,7 @@ test('A-5 config — AGENT_CENTRAL_TOKEN 이 보내는 토큰, CENTRAL_TOKEN 은
 /* ═════════════ B 중앙 작업(가짜 의존성) ═════════════ */
 function fakeDeps(over = {}) {
   let t = NOW;
-  const tokens = []; const calls = { issue: 0, revoke: 0, push: 0, ssh: 0, save: [] };
+  const tokens = []; const calls = { issue: 0, revoke: 0, push: 0, ssh: 0, save: [], audit: [] };
   const d = {
     calls, tokens,
     now: () => t, sleep: async (ms) => { t += ms; },
@@ -92,11 +101,12 @@ function fakeDeps(over = {}) {
     findCollector: (n) => (String(n).toLowerCase() === 'az-irs' ? { id: 'AZ-IRS', name: 'AZ-IRS', url: 'http://192.168.88.221:4068', token: 'COL-REG', enabled: true } : null),
     statusOf: () => ({ version: '2.776.0' }),
     listTokens: () => tokens.map((x) => ({ ...x })),
-    issue: (agent) => { calls.issue++; tokens.push({ agent, lastUsedAt: null }); return { ok: true, agent, token: TOK }; },
+    issue: (agent) => { calls.issue++; tokens.push({ agent, createdAt: t, lastUsedAt: null }); return { ok: true, agent, token: TOK }; },
+    audit: (o) => { calls.audit.push(o.action); },
     revoke: (agent) => { calls.revoke++; const i = tokens.findIndex((x) => x.agent === agent); if (i >= 0) tokens.splice(i, 1); return { ok: true }; },
     deployTargets: () => [{ id: 'd1', agentName: 'AZ-IRS', host: '10.9.9.9', port: 22, username: 'root', collectorToken: 'COL-OLD', centralToken: 'shared-old', portalPort: 4000 }],
     saveTarget: (b) => { calls.save.push(b); return { ok: true }; },
-    pushEdge: async () => { calls.push++; tokens[0].lastUsedAt = t + 1; return { ok: true, status: 200, body: { ok: true, steps: [{ key: 'probe', ok: true, detail: '중앙 확인 성공' }] } }; },
+    pushEdge: async () => { calls.push++; tokens[0].lastUsedAt = t + 1; return { ok: true, status: 200, body: { ok: true, applied: true, steps: [{ key: 'probe', ok: true, detail: '중앙 확인 성공' }] } }; },
     sshApply: async () => { calls.ssh++; return { ok: true }; },
     ...over,
   };
@@ -118,11 +128,13 @@ test('B-1 수집 토큰 통로 성공 — 단계·통로·배포 기록(central�
   const file = fs.readFileSync(path.join(DIR, J.LOG_FILE_NAME), 'utf8');
   assert.ok(!file.includes(TOK), '작업 기록 파일에 토큰 평문이 없다');
   assert.ok(file.includes(job.fp));
+  assert.deepEqual(d.calls.audit, ['엣지 개별 central 토큰 발급(자동 적용)', '엣지 개별 central 토큰 자동 적용 완료'], '반증 F8: 발급·결과가 감사에 남는다');
 });
 
-test('B-2 엣지가 확인 실패로 되돌리면 — SSH 로 가지 않고 발급 취소(공유 토큰 상태로)', async () => {
+test('B-2 엣지가 확인 실패(바뀐 것 없음)로 답하면 — SSH 로 가지 않고 발급 취소(확인 요청이 lastUsedAt 을 찍었어도 확정 답이 우선)', async () => {
   J._resetForTest();
-  const d = fakeDeps({ pushEdge: async () => ({ ok: true, status: 200, body: { ok: false, reverted: true, probe: { reason: '중앙이 새 토큰을 거절했습니다(HTTP 403)' }, steps: [] } }) });
+  const d = fakeDeps();
+  d.pushEdge = async () => { d.tokens[0].lastUsedAt = d.now(); return { ok: true, status: 200, body: { ok: false, applied: false, reason: 'probe-failed', probe: { reason: '중앙은 이 토큰을 엣지 X 의 것으로 봅니다' }, steps: [] } }; };
   const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
   assert.equal(job.state, 'failed');
   assert.equal(d.calls.ssh, 0);
@@ -141,10 +153,9 @@ test('B-3 옛 판 엣지(404) → SSH 통로 · 판 모름이면 CENTRAL_TOKEN �
   d.listTokens = () => { const l = realList(); if (l[0] && d.now() >= NOW + 40_000) l[0].lastUsedAt = NOW + 40_000; return l; };
   const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
   assert.equal(job.state, 'ok', job.summary); assert.equal(job.path, 'ssh');
-  assert.equal(opts.replaceCentral, true, '옛 판은 CENTRAL_TOKEN 만 읽는다');
+  assert.equal(opts.edgeNew, false, '옛 판(2.770) — SSH 본문이 키 구성을 보고 CENTRAL_TOKEN 교체 여부를 정한다');
   assert.equal(opts.urlPort, 4000, '배포 기록의 portalPort(수집 URL 의 포워딩 포트가 아니라)');
   assert.match(job.steps.find((s) => s.key === 'edge-api').detail, /HTTP 404/);
-  assert.match(job.steps.find((s) => s.key === 'ssh').detail, /받는 문도 이 토큰/);
 });
 
 test('B-4 404 + 배포 기록 없음 → 발급 취소 · 실패 / SSH 가 쓴 뒤 실패(되돌림 없음) → 취소하지 않고 경고', async () => {
@@ -250,7 +261,7 @@ test('C 종단 — 발급 → 엣지 라우트(수집 토큰) → 엣지가 새 
 });
 
 /* ═════════════ D SSH 통로 본문(가짜 셸 — 파일 내용을 흉내 낸다) ═════════════ */
-function fakeShell({ env, root = true, active = 'active', appendFails = false }) {
+function fakeShell({ env, root = true, active = 'active', appendFails = false, restoreFails = false }) {
   const fs0 = { '/etc/vmware-portal/portal.env': env };
   const cmds = [];
   const tmp = {};
@@ -262,7 +273,9 @@ function fakeShell({ env, root = true, active = 'active', appendFails = false })
     if (c.startsWith('grep -E \'^PORT=\'')) return ok('PORT=4000\n');
     if (c.startsWith('test -f')) return ok('yes\n');
     let m;
-    if ((m = /^cp -p '([^']+)' '([^']+)'/.exec(c))) { fs0[m[2]] = fs0[m[1]]; return ok(); }
+    if ((m = /^grep -oE '\^\(([A-Z_|]+)\)=' '([^']+)'/.exec(c))) { const ks = m[1].split('|'); return ok(fs0[m[2]].split('\n').map((l) => l.split('=')[0]).filter((k) => ks.includes(k)).map((k) => `${k}=`).join('\n')); }
+    if ((m = /^grep -E '\^EDGE_MODE=' '([^']+)'/.exec(c))) { const l = fs0[m[1]].split('\n').filter((x) => x.startsWith('EDGE_MODE=')).pop(); return ok(l ? `${l}\n` : ''); }
+    if ((m = /^cp -p '([^']+)' '([^']+)'/.exec(c))) { if (restoreFails && m[1].includes('.bak-token-')) return { code: 1, stdout: '', stderr: 'Read-only file system' }; fs0[m[2]] = fs0[m[1]]; return ok(); }
     if ((m = /^sed -i '\/\^([A-Z_]+)=\/d' '([^']+)'$/.exec(c))) { fs0[m[2]] = fs0[m[2]].split('\n').filter((l) => !l.startsWith(`${m[1]}=`)).join('\n'); return ok(); }
     if ((m = /^cat '([^']+)' >> '([^']+)'$/.exec(c))) { if (appendFails) return { code: 1, stdout: '', stderr: 'No space left on device' }; fs0[m[2]] += tmp[m[1]]; return ok(); }
     if (c.startsWith('rm -f')) return ok();
@@ -278,7 +291,7 @@ test('D-1 SSH 본문 — AGENT_CENTRAL_TOKEN 만 쓰고(받는 문 그대로) �
   const { applyAgentCentralTokenOverExec } = await import('../src/agent/deploy.js');
   const sh = fakeShell({ env: ENV0 });
   const steps = [];
-  const r = await applyAgentCentralTokenOverExec(sh, TOK, { host: '10.9.9.9', urlPort: 4000, onStep: (k, ok) => steps.push(`${k}:${ok}`), waitTries: 2, waitDelaySec: 0 });
+  const r = await applyAgentCentralTokenOverExec(sh, TOK, { host: '10.9.9.9', urlPort: 4000, edgeNew: true, onStep: (k, ok) => steps.push(`${k}:${ok}`), waitTries: 2, waitDelaySec: 0 });
   assert.equal(r.ok, true, r.reason);
   const env = sh.files['/etc/vmware-portal/portal.env'];
   assert.match(env, new RegExp(`^AGENT_CENTRAL_TOKEN=${TOK}$`, 'm'));
@@ -288,15 +301,15 @@ test('D-1 SSH 본문 — AGENT_CENTRAL_TOKEN 만 쓰고(받는 문 그대로) �
   assert.deepEqual(steps, ['ssh:true', 'backup:true', 'write:true', 'restart:true']);
 });
 
-test('D-2 옛 판(replaceCentral) — CENTRAL_TOKEN 도 새 값 / 재시작 실패 → 사본으로 원복·다시 시작', async () => {
+test('D-2 옛 판(edgeNew:false · CENTRAL_TOKEN 줄 있음) — CENTRAL_TOKEN 도 새 값 / 재시작 실패 → 사본으로 원복·다시 시작', async () => {
   const { applyAgentCentralTokenOverExec } = await import('../src/agent/deploy.js');
   let sh = fakeShell({ env: ENV0 });
-  let r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, replaceCentral: true, waitTries: 2, waitDelaySec: 0 });
+  let r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: false, waitTries: 2, waitDelaySec: 0 });
   assert.equal(r.ok, true);
   assert.match(sh.files['/etc/vmware-portal/portal.env'], new RegExp(`^CENTRAL_TOKEN=${TOK}$`, 'm'));
 
   sh = fakeShell({ env: ENV0, active: 'failed' });
-  r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, replaceCentral: true, waitTries: 3, waitDelaySec: 0 });
+  r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: false, waitTries: 3, waitDelaySec: 0 });
   assert.equal(r.ok, false); assert.equal(r.reverted, true);
   assert.equal(sh.files['/etc/vmware-portal/portal.env'], ENV0, '원래 내용으로');
   assert.equal(sh.cmds.filter((c) => c.startsWith('systemctl restart')).length, 2, '되돌린 뒤 다시 시작');
@@ -305,16 +318,105 @@ test('D-2 옛 판(replaceCentral) — CENTRAL_TOKEN 도 새 값 / 재시작 실�
 test('D-3 붙이기 실패(디스크 가득) → 사본으로 원복 · 재시작하지 않음 / root 아님 → 아무것도 바꾸지 않음', async () => {
   const { applyAgentCentralTokenOverExec, forceAgentCentralToken } = await import('../src/agent/deploy.js');
   let sh = fakeShell({ env: ENV0, appendFails: true });
-  let r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, replaceCentral: true, waitTries: 2, waitDelaySec: 0 });
+  let r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: false, waitTries: 2, waitDelaySec: 0 });
   assert.equal(r.ok, false); assert.equal(r.reverted, true);
   assert.equal(sh.files['/etc/vmware-portal/portal.env'], ENV0, 'CENTRAL_TOKEN 줄만 지워진 채 남지 않는다');
   assert.ok(!sh.cmds.some((c) => c.startsWith('systemctl restart')));
 
   sh = fakeShell({ env: ENV0, root: false });
-  r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000 });
+  r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: true });
   assert.equal(r.ok, false); assert.match(r.reason, /root/);
   assert.equal(sh.cmds.length, 1);
   // 진입 검사 — 형식·host
   assert.match((await forceAgentCentralToken({}, TOK)).reason, /host\/username/);
   assert.match((await forceAgentCentralToken({ host: 'h', username: 'root' }, "abc'; rm -rf /")).reason, /형식/);
+});
+
+test('B-6 반증 F1 — 엣지 응답을 못 받았지만(시한) 새 토큰 요청이 이미 받아들여졌으면 회수하지 않고 적용으로 본다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ deployTargets: () => [] });
+  d.pushEdge = async () => { d.tokens[0].lastUsedAt = d.now() + 1; return { ok: false, status: null, body: null, error: 'The operation was aborted due to timeout' }; };
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(d.calls.revoke, 0, '엣지가 쓰고 있을 수 있는 토큰을 회수하지 않는다(회수하면 엣지가 잠긴다)');
+  assert.equal(job.path, 'edge-api');
+  assert.equal(job.steps.find((x) => x.key === 'edge-api').state, 'warn');
+  assert.equal(job.state, 'ok', job.summary);
+});
+
+test('B-7 반증 F4 — 수집 서버가 보고한 엣지 이름이 다르면 발급하지 않는다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ statusOf: () => ({ version: '2.776.0', agent: 'AZ-IRS-2' }) });
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(job.state, 'failed'); assert.equal(d.calls.issue, 0);
+  assert.match(job.steps[0].detail, /AZ-IRS-2/);
+});
+
+test('B-8 반증 F4 — 확인은 받아들인 요청(pullStats verified·성공)으로 — 이름 불일치 403 은 확인으로 치지 않는다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ statusOf: () => ({ version: '2.770.0' }), pushEdge: async () => ({ ok: false, status: 404 }), verifyWaitMs: 20_000 });
+  d.sshApply = async (tg, tok, o) => { o.onStep('write', true, 'AGENT_CENTRAL_TOKEN 기록'); d.tokens[0].lastUsedAt = d.now() + 1; return { ok: true }; };   // 인증은 됐지만(lastUsedAt) 이름이 달라 403
+  d.pullStats = () => ({ rows: [{ agent: 'AZ-IRS', verified: true, byEndpoint: [{ endpoint: '/veeam-config', lastOkAt: 0, lastFailAt: d.now() }] }] });
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(job.state, 'warn', '받아들인 요청이 없으면 ok 로 끝내지 않는다');
+  assert.equal(job.steps.find((x) => x.key === 'verify').state, 'warn');
+});
+
+test('B-9 반증 F8 — 그 사이 다시 발급된 토큰은 정리 단계가 회수하지 않는다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ deployTargets: () => [] });
+  d.pushEdge = async () => { d.tokens[0] = { agent: 'AZ-IRS', createdAt: d.now() + 999, lastUsedAt: null }; return { ok: false, status: 404 }; };
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(d.calls.revoke, 0);
+  assert.equal(job.steps.find((x) => x.key === 'cleanup').state, 'warn');
+});
+
+test('B-10 엣지가 기록 실패(바뀐 것 없음)로 답한 뒤 SSH 도 쓰기 전에 멈추면 — 확인 요청 기록이 있어도 회수한다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ statusOf: () => ({ version: '2.776.0' }) });
+  d.pushEdge = async () => { d.tokens[0].lastUsedAt = d.now(); return { ok: true, status: 200, body: { ok: false, applied: false, reason: 'persist-failed', steps: [] } }; };
+  d.sshApply = async () => ({ ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다' });
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(job.state, 'failed'); assert.equal(d.calls.revoke, 1);
+});
+
+test('D-4 반증 F6 — 옛 판 엣지의 키 구성이 위험하면 바꾸지 않고 멈춘다(값은 읽지 않는다) · 반증 F5 — 되돌리기 실패를 되돌렸다고 말하지 않는다', async () => {
+  const { applyAgentCentralTokenOverExec, oldEdgeEnvDecision } = await import('../src/agent/deploy.js');
+  assert.equal(oldEdgeEnvDecision(['CENTRAL_TOKEN', 'COLLECTOR_TOKEN'], '').ok, true);
+  assert.equal(oldEdgeEnvDecision(['CENTRAL_TOKEN'], 'all').ok, false, 'EDGE_MODE=all + COLLECTOR_TOKEN 없음 → 수집 토큰까지 바뀐다');
+  assert.equal(oldEdgeEnvDecision(['CENTRAL_TOKEN', 'COLLECTOR_TOKEN'], 'all').ok, true);
+  assert.match(oldEdgeEnvDecision(['EDGE_TOKEN', 'COLLECTOR_TOKEN'], 'all').reason, /EDGE_TOKEN/);
+  // EDGE_TOKEN 만 쓰는 권장 구성 — 아무것도 쓰지 않는다
+  const env1 = 'PORT=4000\nEDGE_MODE=all\nEDGE_TOKEN=e\nCOLLECTOR_TOKEN=c';
+  let sh = fakeShell({ env: env1 });
+  let r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: false, waitTries: 2, waitDelaySec: 0 });
+  assert.equal(r.ok, false); assert.match(r.reason, /v2\.776/);
+  assert.equal(sh.files['/etc/vmware-portal/portal.env'], env1);
+  assert.ok(!sh.cmds.some((c) => c.startsWith('cp ') || c.startsWith('sed ') || c.startsWith('systemctl restart')));
+  assert.ok(sh.cmds.every((c) => !/grep -E '\^(CENTRAL_TOKEN|EDGE_TOKEN|COLLECTOR_TOKEN)=/.test(c)), '토큰 값을 출력하는 grep 이 없다(키 이름만 -o)');
+  // 붙이기 실패 + 되돌리기도 실패 → restoreFailed(되돌렸다고 말하지 않는다)
+  sh = fakeShell({ env: ENV0, appendFails: true, restoreFails: true });
+  r = await applyAgentCentralTokenOverExec(sh, TOK, { host: 'h', urlPort: 4000, edgeNew: false, waitTries: 2, waitDelaySec: 0 });
+  assert.equal(r.ok, false); assert.equal(r.reverted, undefined); assert.equal(r.restoreFailed, true);
+  assert.match(r.reason, /직접 복구/);
+});
+
+test('D-5 반증 F5 — SSH 가 되돌리기에 실패하면 중앙은 발급을 취소하지 않는다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ statusOf: () => ({ version: '2.770.0' }), pushEdge: async () => ({ ok: false, status: 404 }) });
+  d.sshApply = async (tg, tok, o) => { o.onStep('write', false, '기록 실패 — 사본으로 되돌리기도 실패'); return { ok: false, restoreFailed: true, backup: '/etc/vmware-portal/portal.env.bak-token-1', reason: '직접 복구' }; };
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(job.state, 'failed'); assert.equal(d.calls.revoke, 0);
+  assert.match(job.steps.find((x) => x.key === 'cleanup').detail, /직접 복구/);
+});
+
+test('B-11 반증 F1 — 응답 시한 뒤 엣지의 늦은 요청이 회수 직전에 받아들여졌으면 회수하지 않는다', async () => {
+  J._resetForTest();
+  const d = fakeDeps({ statusOf: () => ({ version: '2.776.0' }) });
+  d.pushEdge = async () => ({ ok: false, status: null, body: null, error: 'The operation was aborted due to timeout' });
+  // SSH 통로는 쓰기 전에 멈추지만, 그 사이 엣지의 늦은 확인 요청(새 토큰)이 중앙에 받아들여졌다
+  d.sshApply = async () => { d.tokens[0].lastUsedAt = d.now() + 1; return { ok: false, reason: 'SSH 접속 시간 초과' }; };
+  const { job } = await J.startTokenApply('AZ-IRS', { deps: d, wait: true });
+  assert.equal(job.state, 'failed');
+  assert.equal(d.calls.revoke, 0, '엣지가 쓰고 있을 수 있는 토큰은 회수하지 않는다');
+  assert.match(job.steps.find((x) => x.key === 'cleanup').detail, /받아들였습니다/);
 });

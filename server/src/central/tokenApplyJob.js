@@ -106,6 +106,23 @@ function finish(job, state, summary, deps) {
   console.log(`[token-apply] ${job.agent} — ${state === 'ok' ? '완료' : state === 'warn' ? '완료(확인 필요)' : '실패'}: ${job.summary}`);
 }
 
+/** 이 엣지 이름의 토큰 항목(대소문자 무시). */
+const tokenOf = (deps, name) => (deps.listTokens() || []).find((t) => String(t.agent || '').toLowerCase() === name.toLowerCase()) || null;
+/**
+ * 반증 F4: '중앙이 그 엣지의 요청을 **받아들였는가**'. lastUsedAt 은 이름 바인딩 검사 **전에** 찍혀(resolveAgentByToken) 이름이 달라 403 인
+ *   요청도 '사용' 으로 보였다. 받아들인 GET 은 pullStats 에 검증(verified)·성공(lastOkAt)으로 남는다 — 그것을 본다(없으면 lastUsedAt 로 폴백).
+ */
+function acceptedSince(deps, name, since) {
+  if (typeof deps.pullStats === 'function') {
+    const row = ((deps.pullStats() || {}).rows || []).find((r) => r && r.verified === true && String(r.agent || '').toLowerCase() === name.toLowerCase());
+    const okAt = row ? Math.max(0, ...(row.byEndpoint || []).map((e) => Number(e?.lastOkAt) || 0)) : 0;
+    return okAt >= since ? okAt : null;
+  }
+  const t = tokenOf(deps, name);
+  return t && Number(t.lastUsedAt) >= since ? Number(t.lastUsedAt) : null;
+}
+const audit = (deps, action, job, detail) => { try { if (deps.audit) deps.audit({ action, target: job.agent, detail: `작업 ${job.id}${detail ? ` · ${detail}` : ''}` }); } catch { /* 감사 실패는 작업을 멈추지 않는다 */ } };
+
 async function runJob(job, deps) {
   const name = job.agent;
   /* 1 사전 점검 */
@@ -114,13 +131,26 @@ async function runJob(job, deps) {
   const found = deps.findCollector(name);   // 수집 서버 이름 조회는 registry.findCollectorByName 하나(audit2613c EDGE2613-08)
   const col = found && found.enabled !== false ? found : null;
   if (!col || !col.url) { stepEnd(s, 'bad', `수집 서버 등록부에 켜진 '${name}' 이 없습니다.`, deps); return finish(job, 'failed', '수집 서버 등록이 없습니다.', deps); }
-  const existing = (deps.listTokens() || []).find((t) => String(t.agent || '').toLowerCase() === name.toLowerCase());
-  if (existing) { stepEnd(s, 'bad', '이미 개별 토큰이 발급돼 있습니다 — 다시 발급하면 엣지가 쓰는 기존 토큰이 즉시 폐기되므로 자동 적용은 공유 토큰 엣지만 합니다.', deps); return finish(job, 'failed', '이미 개별 토큰이 있습니다.', deps); }
+  const existing = tokenOf(deps, name);
+  if (existing) {
+    const unused = !(Number(existing.lastUsedAt) > 0);
+    stepEnd(s, 'bad', unused
+      ? '이미 발급됐지만 한 번도 쓰이지 않은 개별 토큰이 있습니다(이전 작업이 중단됐을 수 있습니다) — 설정 › 수집 서버의 엣지별 개별 central 토큰에서 회수한 뒤 다시 실행하세요.'
+      : '이미 개별 토큰이 발급돼 있습니다 — 다시 발급하면 엣지가 쓰는 기존 토큰이 즉시 폐기되므로 자동 적용은 공유 토큰 엣지만 합니다.', deps);
+    return finish(job, 'failed', '이미 개별 토큰이 있습니다.', deps);
+  }
   const st = deps.statusOf(col.id) || {};
   const ver = typeof st.version === 'string' ? st.version : '';
+  // 반증 F4: 엣지가 보고한 이름(AGENT_NAME — pull 응답)이 발급할 이름과 다르면 중앙은 그 토큰의 요청을 403 으로 막는다 — 발급하지 않는다.
+  const reported = typeof st.agent === 'string' ? st.agent.trim() : '';
+  if (reported && reported.toLowerCase() !== name.toLowerCase()) {
+    stepEnd(s, 'bad', `이 수집 서버가 보고한 엣지 이름은 '${reported}' 입니다 — '${name}' 으로 발급하면 중앙이 그 엣지의 요청을 이름 불일치로 막습니다. Veeam 서버의 읽는 곳(또는 엣지 AGENT_NAME)을 맞춘 뒤 다시 실행하세요.`, deps);
+    return finish(job, 'failed', '엣지 이름이 다릅니다.', deps);
+  }
   const targets = (deps.deployTargets() || []).filter((t) => String(t.agentName || '').toLowerCase() === name.toLowerCase());
   const target = targets.length === 1 ? targets[0] : null;
-  stepEnd(s, 'ok', `수집 서버 ${col.url} · 엣지 판 ${ver || '모름'} · 배포 기록 ${targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)'}`, deps);
+  const edgeNew = !!ver && (cmpVersion(ver, MIN_EDGE_API_VERSION) ?? -1) >= 0;
+  stepEnd(s, 'ok', `수집 서버 ${col.url} · 엣지 판 ${ver || '모름'}${reported ? ` · 보고 이름 ${reported}` : ''} · 배포 기록 ${targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)'}`, deps);
 
   /* 2 발급 */
   s = stepStart(job, 'issue', deps);
@@ -128,37 +158,62 @@ async function runJob(job, deps) {
   if (!issued || !issued.ok || !issued.token) { stepEnd(s, 'bad', `발급 실패: ${issued?.reason || '사유 미상'}`, deps); return finish(job, 'failed', '토큰을 발급하지 못했습니다.', deps); }
   const token = issued.token;
   const issuedAt = deps.now ? deps.now() : Date.now();
+  const issuedCreatedAt = tokenOf(deps, name)?.createdAt ?? null;   // 반증 F8: 정리 때 '이 작업이 발급한 것' 인지 이것으로 가린다
+  let acceptFrom = issuedAt;   // '중앙이 새 토큰의 요청을 받아들였는가' 의 기준 시각
   job.fp = tokenFingerprintParts(token).short || '';
   stepEnd(s, 'ok', `발급 · 지문 ${job.fp}`, deps);
+  audit(deps, '엣지 개별 central 토큰 발급(자동 적용)', job, `지문 ${job.fp}`);
 
-  // 엣지가 새 토큰을 '확실히 쓰지 않는' 실패에서만 취소한다.
-  const revokeIssued = (why) => {
+  /**
+   * 발급 취소 — 엣지가 새 토큰을 **확실히 쓰지 않을 때만** 부른다.
+   * 반증 F1: `definite`(엣지가 '바꾼 것 없음' 이라고 답했거나 SSH 가 쓰기 전에 멈췄거나 되돌렸다)가 아니면, 취소 직전에 그 토큰의 요청을 중앙이
+   *   받아들였는지 다시 본다 — 받아들였으면 엣지가 쓰고 있을 수 있으므로 취소하지 않는다(취소하면 엣지가 잠긴다).
+   * 반증 F8: 지금 항목이 이 작업이 발급한 것(createdAt 같음)일 때만 취소한다 — 그 사이 사람이 다시 발급했으면 건드리지 않는다.
+   */
+  const revokeIssued = (why, { definite = false } = {}) => {
     const c = stepStart(job, 'cleanup', deps);
-    try { deps.revoke(name); stepEnd(c, 'ok', `발급을 취소했습니다(${why}) — 엣지는 예전처럼 공유 토큰으로 동작합니다.`, deps); }
-    catch (e) { stepEnd(c, 'bad', `발급 취소 실패: ${cut(e?.message || e)} — 설정 › 수집 서버의 개별 토큰 목록에서 '${name}' 을 회수하세요.`, deps); }
+    if (!definite && acceptedSince(deps, name, acceptFrom)) { stepEnd(c, 'warn', '새 토큰의 요청을 중앙이 이미 받아들였습니다 — 엣지가 쓰고 있을 수 있어 발급을 취소하지 않았습니다. Veeam 진행 상태에서 개별 토큰 단계를 확인하세요.', deps); return false; }
+    const cur = tokenOf(deps, name);
+    if (!cur) { stepEnd(c, 'ok', '취소할 토큰이 이미 없습니다.', deps); return true; }
+    if (issuedCreatedAt != null && cur.createdAt !== issuedCreatedAt) { stepEnd(c, 'warn', '그 사이 이 엣지의 개별 토큰이 다시 발급돼 이 작업은 취소하지 않았습니다.', deps); return false; }
+    try { deps.revoke(name); stepEnd(c, 'ok', `발급을 취소했습니다(${why}) — 엣지는 예전처럼 공유 토큰으로 동작합니다.`, deps); audit(deps, '엣지 개별 central 토큰 회수(자동 적용 정리)', job, why); return true; }
+    catch (e) { stepEnd(c, 'bad', `발급 취소 실패: ${cut(e)} — 설정 › 수집 서버의 개별 토큰 목록에서 '${name}' 을 회수하세요.`, deps); return false; }
   };
+  const fail = (summary) => { audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, summary); return finish(job, 'failed', summary, deps); };
 
   /* 3 수집 토큰 통로 */
   s = stepStart(job, 'edge-api', deps);
   const r = await deps.pushEdge(col, token);
+  const b = r.body && typeof r.body === 'object' ? r.body : null;
+  // 엣지가 '바뀐 것 없음' 을 확정으로 답하면 그 확인 요청(health-probe)은 '엣지가 새 토큰을 쓴다' 의 근거가 아니다 — 이후 판정 기준 시각을 응답 뒤로 옮긴다.
+  if (b && b.applied === false) acceptFrom = (deps.now ? deps.now() : Date.now()) + 1;
+  const pd = b ? (b.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ') : '';
   let applied = false; let viaSsh = false; let sshReason = '';
-  if (r.ok && r.body && r.body.ok === true) {
+  if (r.ok && b && b.applied === true) {
     applied = true; job.path = 'edge-api';
-    const pd = (r.body.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ');
     stepEnd(s, 'ok', `엣지 적용·확인 성공 — ${pd}`, deps);
-  } else if (r.ok && r.body && r.body.reverted) {
-    const pd = (r.body.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ');
-    stepEnd(s, 'bad', `엣지가 새 토큰으로 중앙 확인에 실패해 되돌렸습니다 — ${pd}`, deps);
-    revokeIssued('엣지가 되돌림');
-    return finish(job, 'failed', `엣지에서 새 토큰으로 중앙 확인에 실패했습니다(${r.body.probe?.reason || '사유 미상'}). 같은 경로라 SSH 로도 같습니다 — 엣지→중앙 통신을 먼저 확인하세요.`, deps);
+  } else if (b && b.applied === false && b.reason === 'probe-failed') {
+    // 확정 답: 엣지는 아무것도 바꾸지 않았다 — 같은 엣지→중앙 경로라 SSH 로도 같다
+    stepEnd(s, 'bad', `엣지가 새 토큰으로 중앙 확인에 실패했습니다(바뀐 것 없음) — ${pd}`, deps);
+    revokeIssued('엣지 확인 실패 · 바뀐 것 없음', { definite: true });
+    return fail(`엣지에서 새 토큰으로 중앙 확인에 실패했습니다(${b.probe?.reason || '사유 미상'}). 같은 경로라 SSH 로도 같습니다 — 엣지→중앙 통신을 먼저 확인하세요.`);
+  } else if (b && b.applied === false && b.reason === 'busy') {
+    stepEnd(s, 'bad', '엣지에서 다른 적용이 진행 중입니다(바뀐 것 없음).', deps);
+    revokeIssued('엣지 사용 중', { definite: true });
+    return fail('엣지에서 다른 적용이 진행 중입니다 — 잠시 뒤 다시 실행하세요.');
   } else {
-    sshReason = r.status === 404 ? `엣지에 이 기능이 없습니다(HTTP 404 — 판 ${ver || '모름'}, ${MIN_EDGE_API_VERSION} 이상 필요)`
-      : r.status === 403 ? '수집 토큰이 맞지 않습니다(HTTP 403)'
-        : r.body?.reason === 'persist-failed' ? '엣지가 portal.env 에 쓰지 못했습니다(서비스 계정 권한)'
-          : r.body?.reason === 'busy' ? '엣지에서 다른 적용이 진행 중입니다'
-            : r.error ? `엣지에 닿지 못했습니다: ${r.error}` : `엣지 응답 HTTP ${r.status ?? '—'}${r.body?.reason ? ` · ${r.body.reason}` : ''}`;
-    stepEnd(s, 'bad', `${sshReason}${target ? ' — SSH 통로로 넘어갑니다' : ''}`, deps);
-    if (r.body?.reason === 'busy') { revokeIssued('엣지 사용 중'); return finish(job, 'failed', '엣지에서 다른 적용이 진행 중입니다 — 잠시 뒤 다시 실행하세요.', deps); }
+    const definite = (b && b.applied === false) || r.status === 404 || r.status === 403;
+    // 반증 F1: 결과를 모르는 실패(시한·끊김·중계 5xx·본문 없음)에서는 엣지 확인이 이미 받아들여졌는지 본다 — 받아들여졌으면 엣지는 기록했을 수 있다
+    if (!definite && acceptedSince(deps, name, acceptFrom)) {
+      applied = true; job.path = 'edge-api';
+      stepEnd(s, 'warn', `엣지 응답을 받지 못했지만(${r.error || `HTTP ${r.status ?? '—'}`}) 새 토큰의 요청을 중앙이 받아들였습니다 — 적용된 것으로 보고 확인을 이어 갑니다.`, deps);
+    } else {
+      sshReason = r.status === 404 ? `엣지에 이 기능이 없습니다(HTTP 404 — 판 ${ver || '모름'}, ${MIN_EDGE_API_VERSION} 이상 필요)`
+        : r.status === 403 ? '수집 토큰이 맞지 않습니다(HTTP 403)'
+          : b?.reason === 'persist-failed' ? '엣지가 portal.env 에 쓰지 못했습니다(서비스 계정 권한 — 바뀐 것 없음)'
+            : r.error ? `엣지에 닿지 못했습니다: ${r.error}` : `엣지 응답 HTTP ${r.status ?? '—'}${b?.reason ? ` · ${b.reason}` : ''}`;
+      stepEnd(s, 'bad', `${sshReason}${target ? ' — SSH 통로로 넘어갑니다' : ''}`, deps);
+    }
   }
 
   /* 4 SSH 통로 */
@@ -167,35 +222,34 @@ async function runJob(job, deps) {
     if (!target) {
       stepEnd(s, 'skip', targets.length ? '배포 기록이 여러 개라 어느 호스트인지 정할 수 없습니다.' : '배포 기록(SSH 계정)이 없어 SSH 로 적용할 수 없습니다 — 설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록하세요.', deps);
       revokeIssued('엣지에 전달하지 못함');
-      return finish(job, 'failed', `엣지에 전달하지 못했습니다: ${sshReason}`, deps);
+      return fail(`엣지에 전달하지 못했습니다: ${sshReason}`);
     }
-    const replaceCentral = !(ver && (cmpVersion(ver, MIN_EDGE_API_VERSION) ?? -1) >= 0);
     const sub = []; let wrote = false;
-    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, replaceCentral, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
+    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, edgeNew, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
     if (sr && sr.ok) {
       applied = true; viaSsh = true; job.path = 'ssh';
-      stepEnd(s, 'ok', `${sub.join(' / ')}${replaceCentral ? ' — 옛 판(또는 판 모름) 엣지라 CENTRAL_TOKEN 도 바꿨습니다: 그 엣지의 /api/central 받는 문도 이 토큰이 됩니다' : ''}`, deps);
+      stepEnd(s, 'ok', sub.join(' / '), deps);
     } else {
-      const certainNotUsing = !wrote || !!sr?.reverted;   // 쓰기 전에 멈췄거나, 썼어도 사본으로 되돌렸으면 엣지는 새 토큰을 쓰지 않는다
       stepEnd(s, 'bad', `${sub.join(' / ')}${sub.length ? ' — ' : ''}${sr?.reason || 'SSH 적용 실패'}`, deps);
-      if (certainNotUsing) revokeIssued('SSH 적용 실패 · 되돌림');
-      else { const c = stepStart(job, 'cleanup', deps); stepEnd(c, 'warn', '엣지 portal.env 에 새 토큰이 기록됐을 수 있어 발급을 취소하지 않았습니다 — 엣지 상태를 확인하세요.', deps); }
-      return finish(job, 'failed', `SSH 로도 적용하지 못했습니다: ${sr?.reason || '사유 미상'}`, deps);
+      // 쓰기 전에 멈췄거나, 썼어도 사본으로 **되돌렸으면**(종료 코드 확인 — 반증 F5) 엣지는 새 토큰을 쓰지 않는다
+      if (!sr?.restoreFailed && (!wrote || sr?.reverted)) revokeIssued('SSH 적용 실패 · 바뀐 것 없음');
+      else { const c = stepStart(job, 'cleanup', deps); stepEnd(c, 'warn', `엣지 portal.env 에 새 토큰이 남아 있을 수 있어 발급을 취소하지 않았습니다${sr?.restoreFailed ? ` — 사본(${sr.backup || '—'})으로 직접 복구하세요` : ''}.`, deps); }
+      return fail(`SSH 로도 적용하지 못했습니다: ${sr?.reason || '사유 미상'}`);
     }
   }
 
-  /* 5 중앙에서 확인 — 그 토큰이 실제로 쓰였는가 */
+  /* 5 중앙에서 확인 — 그 토큰의 요청을 중앙이 받아들였는가(반증 F4) */
   s = stepStart(job, 'verify', deps);
   const deadline = (deps.now ? deps.now() : Date.now()) + (viaSsh ? (deps.verifyWaitMs ?? VERIFY_WAIT_MS) : 5_000);
   let usedAt = null;
   for (;;) {
-    const t = (deps.listTokens() || []).find((x) => String(x.agent || '').toLowerCase() === name.toLowerCase());
-    if (t && Number(t.lastUsedAt) >= issuedAt) { usedAt = Number(t.lastUsedAt); break; }
+    usedAt = acceptedSince(deps, name, acceptFrom);
+    if (usedAt) break;
     if ((deps.now ? deps.now() : Date.now()) >= deadline) break;
     await (deps.sleep ? deps.sleep(viaSsh ? 5_000 : 500) : new Promise((ok) => setTimeout(ok, viaSsh ? 5_000 : 500)));
   }
-  if (usedAt) stepEnd(s, 'ok', `엣지가 새 토큰으로 중앙에 접속했습니다(중앙 기록 ${new Date(usedAt).toISOString()})`, deps);
-  else stepEnd(s, 'warn', viaSsh ? '재시작한 엣지가 아직 새 토큰으로 중앙에 접속하지 않았습니다 — 몇 분 뒤 Veeam 진행 상태의 개별 토큰 단계를 다시 확인하세요.' : '중앙 사용 기록이 아직 없습니다.', deps);
+  if (usedAt) stepEnd(s, 'ok', `중앙이 새 토큰의 요청을 받아들였습니다(${new Date(usedAt).toISOString()})`, deps);
+  else stepEnd(s, 'warn', viaSsh ? '재시작한 엣지의 요청을 새 토큰으로 아직 받지 못했습니다 — 몇 분 뒤 Veeam 진행 상태의 개별 토큰 단계를 다시 확인하세요.' : '중앙이 새 토큰의 요청을 아직 받지 못했습니다.', deps);
 
   /* 6 배포 기록 맞춤 */
   s = stepStart(job, 'deploy-record', deps);
@@ -207,9 +261,11 @@ async function runJob(job, deps) {
     else stepEnd(s, 'warn', `배포 기록을 고치지 못했습니다: ${r6?.reason || '사유 미상'} — 다시 배포하기 전에 배포 기록의 토큰을 고치세요.`, deps);
   }
 
-  return finish(job, usedAt ? 'ok' : 'warn', usedAt
+  const summary = usedAt
     ? `개별 토큰 적용 완료(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}) — Veeam 진행 상태에서 개별 토큰·배정 받기 단계가 바뀌는지 확인하세요.`
-    : `엣지에 적용했지만 중앙 사용 기록이 아직 없습니다(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}).`, deps);
+    : `엣지에 적용했지만 중앙이 새 토큰의 요청을 아직 받지 못했습니다(${viaSsh ? 'SSH 통로' : '수집 토큰 통로'}).`;
+  audit(deps, usedAt ? '엣지 개별 central 토큰 자동 적용 완료' : '엣지 개별 central 토큰 자동 적용 완료(확인 필요)', job, `${viaSsh ? 'SSH' : '수집 토큰'} 통로`);
+  return finish(job, usedAt ? 'ok' : 'warn', summary, deps);
 }
 
 export function _resetForTest() { _jobs = null; _running.clear(); }

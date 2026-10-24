@@ -245,7 +245,7 @@ collectorRouter.post('/set-password', tokenFirst('set-password'), express.json({
 collectorRouter.post('/central-token', tokenFirst('central-token'), express.json({ limit: '4kb' }), async (req, res) => {
   const { applyAgentCentralToken } = await import('../agent/centralTokenApply.js');
   const r = await applyAgentCentralToken({ token: req.body?.token });
-  logAudit({ user: 'central-portal', action: r.ok ? '엣지 개별 central 토큰 적용' : '엣지 개별 central 토큰 적용 실패', target: config.agent.name || '', detail: `${r.fp ? `지문 ${r.fp}` : ''}${r.ok ? '' : ` · ${r.reason || ''}${r.reverted ? ' · 되돌림' : ''}`}`, ip: req.ip || '' });
+  logAudit({ user: 'central-portal', action: r.applied ? '엣지 개별 central 토큰 적용' : '엣지 개별 central 토큰 적용 안 함', target: config.agent.name || '', detail: `${r.fp ? `지문 ${r.fp}` : ''}${r.applied ? '' : ` · ${r.reason || ''} · 바뀐 것 없음`}`, ip: req.ip || '' });
   res.status(r.ok ? 200 : (r.reason === 'bad-token' ? 400 : r.reason === 'busy' ? 409 : 200)).json(r);
 });
 
