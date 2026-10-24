@@ -40,13 +40,15 @@ export function jobLine(j) {
   if (!j || typeof j !== 'object') return '';
   const st = JOB_STATE[j.state]?.text || j.state || '';
   const path = j.path === 'ssh' ? 'SSH 통로' : j.path === 'edge-api' ? '수집 토큰 통로' : '';
-  return [dhms(j.startedAt), j.by, st, path, j.fp ? `지문 ${j.fp}` : ''].filter(Boolean).join(' · ');
+  // v2.777: 엣지가 pull 로 보고한 호스트 이름(작업 시작 때 기록 — 토큰을 받은 장비와 대조한 기준)
+  const host = typeof j.edgeHost === 'string' && j.edgeHost ? `호스트 ${j.edgeHost}` : '';
+  return [dhms(j.startedAt), j.by, st, path, host, j.fp ? `지문 ${j.fp}` : ''].filter(Boolean).join(' · ');
 }
 
 /** 실행 전 확인 문구(window.confirm). */
 export function confirmText(agent) {
   return `엣지 '${agent}' 에 개별 central 토큰을 발급하고 적용합니다.\n\n`
     + '1) 중앙에서 개별 토큰 발급\n2) 수집 토큰 통로로 엣지에 전달 — 엣지가 portal.env(AGENT_CENTRAL_TOKEN)에 쓰고 새 토큰으로 중앙을 확인(실패하면 엣지가 되돌림)\n'
-    + '3) 안 되면 배포 기록의 SSH 계정으로 portal.env 수정·재시작(사본을 남기고 실패하면 되돌림)\n4) 중앙에서 사용 확인 · 배포 기록 토큰 맞춤\n\n'
+    + '3) 안 되면 배포 기록의 SSH 계정으로 portal.env 수정·재시작(접속한 장비의 포탈 이름·호스트 이름이 그 엣지인지 먼저 확인 · 사본을 남기고 실패하면 되돌림)\n4) 중앙에서 사용 확인 · 배포 기록 토큰 맞춤\n\n'
     + '실패해도 공유 토큰은 그대로 받으므로 수집은 끊기지 않습니다. 진행할까요?';
 }

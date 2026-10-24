@@ -10,6 +10,7 @@
  * ⚠ 토큰 값은 로그·응답·감사 어디에도 싣지 않는다 — 지문(tokenFingerprintParts.short)만.
  * 호출 경로: routes/collector.js POST /api/collector/central-token(수집 토큰 먼저 — tokenFirst).
  */
+import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { upsertEnvKeyStrict } from '../central/token.js';
 import { dispatcherFor } from '../util/resilientFetch.js';
@@ -64,7 +65,8 @@ export async function probeCentral(token, { centralUrl = config.agent.centralUrl
 export async function applyAgentCentralToken({ token, probe = probeCentral, envFile } = {}) {
   const steps = [];
   const step = (key, ok, detail) => { steps.push({ key, ok, detail: String(detail || '').slice(0, 300) }); };
-  const out = (o) => ({ version: currentVersion(), steps, applied: false, ...o });
+  // v2.777: 이 엣지의 호스트 이름 — 중앙이 pull 로 기록해 둔 '엣지가 보고한 호스트 이름' 과 대조한다(토큰을 엉뚱한 장비가 받았는지).
+  const out = (o) => ({ version: currentVersion(), hostname: os.hostname(), steps, applied: false, ...o });
   const tk = typeof token === 'string' ? token : '';
   if (!AGENT_TOKEN_RE.test(tk)) { step('validate', false, '토큰 형식이 중앙 개별 토큰이 아닙니다'); return out({ ok: false, reason: 'bad-token' }); }
   if (!config.agent.centralUrl) { step('validate', false, '이 엣지에 중앙 주소(CENTRAL_URL)가 없습니다'); return out({ ok: false, reason: 'no-central-url' }); }
