@@ -89,7 +89,7 @@ function fakeDeps(over = {}) {
     calls, tokens,
     now: () => t, sleep: async (ms) => { t += ms; },
     tokensLoadError: () => null,
-    collectors: () => [{ id: 'AZ-IRS', name: 'AZ-IRS', url: 'http://192.168.88.221:4068', token: 'COL-REG', enabled: true }],
+    findCollector: (n) => (String(n).toLowerCase() === 'az-irs' ? { id: 'AZ-IRS', name: 'AZ-IRS', url: 'http://192.168.88.221:4068', token: 'COL-REG', enabled: true } : null),
     statusOf: () => ({ version: '2.776.0' }),
     listTokens: () => tokens.map((x) => ({ ...x })),
     issue: (agent) => { calls.issue++; tokens.push({ agent, lastUsedAt: null }); return { ok: true, agent, token: TOK }; },

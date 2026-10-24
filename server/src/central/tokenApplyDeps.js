@@ -3,13 +3,14 @@
  * 작업 본문은 순수하게 두고(테스트가 가짜를 주입) 여기서 실제 모듈을 잇는다.
  */
 import { listAgentTokens, issueAgentToken, revokeAgentToken, agentTokensLoadError } from './agentTokens.js';
-import { loadCollectors } from '../collector/registry.js';
+import { findCollectorByName } from '../collector/registry.js';
 import { getCollectorStatus } from '../collector/state.js';
 import { listTargetsRaw, saveTarget } from '../agent/deployRegistry.js';
 import { forceAgentCentralToken } from '../agent/deploy.js';
 import { dispatcherFor } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { recordOutbound } from '../util/outboundStats.js';
+import { capStr } from '../util/capStr.js';
 
 const PUSH_TIMEOUT_MS = 45_000;   // 엣지는 기록 뒤 중앙 확인(최대 15초)까지 하고 답한다
 const RESP_MAX = 64 * 1024;
@@ -36,11 +37,11 @@ export async function pushTokenToEdge(c, token, { fetchImpl = fetch } = {}) {
     return { ok: res.status >= 200 && res.status < 300, status: res.status, body: sanitizeEdgeReply(raw) };
   } catch (e) {
     recordOutbound(url, { error: String(e?.message || e), method: 'POST', tag: c.id || c.name || '' });
-    return { ok: false, status: null, body: null, error: String(e?.message || e).slice(0, 200) };
+    return { ok: false, status: null, body: null, error: capStr(e instanceof Error ? e.message : `${e}`, 200) };
   }
 }
 
-const s = (v, n) => (typeof v === 'string' ? v.replace(/[\r\n]+/g, ' ').slice(0, n) : '');
+const s = (v, n) => (typeof v === 'string' ? capStr(v.replace(/[\r\n]+/g, ' '), n) : '');
 /** 엣지 응답 정제(순수) — 아는 필드만. */
 export function sanitizeEdgeReply(b) {
   if (!b || typeof b !== 'object') return null;
@@ -52,7 +53,7 @@ export function sanitizeEdgeReply(b) {
 export function realTokenApplyDeps() {
   return {
     issue: issueAgentToken, revoke: revokeAgentToken, listTokens: listAgentTokens, tokensLoadError: agentTokensLoadError,
-    collectors: loadCollectors, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
+    findCollector: findCollectorByName, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
   };

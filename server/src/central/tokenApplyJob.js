@@ -23,6 +23,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { tokenFingerprintParts, sameToken } from '../util/tokenFingerprint.js';
 import { cmpVersion } from '../util/cmpVersion.js';
+import { capStr } from '../util/capStr.js';
 
 export const LOG_FILE_NAME = 'edge-token-apply-log.json';
 registerStateFile(LOG_FILE_NAME);
@@ -58,12 +59,15 @@ function saveJobs() {
   try { atomicWriteFileSync(logFile(), JSON.stringify({ jobs: loadJobs().slice(0, KEEP) }, null, 2), { mode: 0o600 }); }
   catch (e) { console.warn(`[token-apply] 작업 기록을 저장하지 못했습니다(작업은 계속): ${String(e?.message || e).slice(0, 160)}`); }
 }
-const cut = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, DETAIL_MAX);
+// 상주 기록 글자는 capStr(평탄화 — 원문을 붙잡지 않는다 · audit2607b TIM2607-01). 오류 객체는 message 만.
+const cut = (v) => capStr((typeof v === 'string' ? v : (v instanceof Error ? v.message : (v == null ? '' : `${v}`))).replace(/[\r\n]+/g, ' '), DETAIL_MAX);
 
 /** 화면용 사본(그대로 — 기록에는 비밀이 없다). agent 를 주면 그 엣지 것만. */
 export function listJobs({ agent = '', limit = 20 } = {}) {
   const want = String(agent || '').toLowerCase();
-  return loadJobs().filter((j) => !want || String(j.agent).toLowerCase() === want).slice(0, Math.max(1, Math.min(KEEP, limit))).map((j) => structuredClone(j));
+  const mine = loadJobs().filter((j) => !want || `${j.agent}`.toLowerCase() === want);
+  const n = Math.max(1, Math.min(KEEP, limit));
+  return mine.slice(0, n).map((j) => structuredClone(j));
 }
 export function getJob(id) { const j = loadJobs().find((x) => x.id === id); return j ? structuredClone(j) : null; }
 export function runningJobFor(agent) { return _running.get(String(agent || '').toLowerCase()) || null; }
@@ -79,7 +83,7 @@ export function startTokenApply(agent, { by = '', deps, wait = false } = {}) {
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, reason: '엣지 이름 형식이 올바르지 않습니다.' };
   if (_running.has(name.toLowerCase())) return { ok: false, reason: '이 엣지에 이미 진행 중인 작업이 있습니다.', jobId: _running.get(name.toLowerCase()) };
   const now = deps.now ? deps.now() : Date.now();
-  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: cut(by).slice(0, 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', summary: '', steps: [] };
+  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: capStr(cut(by), 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', summary: '', steps: [] };
   loadJobs().unshift(job);
   if (_jobs.length > KEEP) _jobs.length = KEEP;
   _running.set(name.toLowerCase(), job.id);
@@ -107,7 +111,8 @@ async function runJob(job, deps) {
   /* 1 사전 점검 */
   let s = stepStart(job, 'precheck', deps);
   if (deps.tokensLoadError && deps.tokensLoadError()) { stepEnd(s, 'bad', '중앙 개별 토큰 파일을 읽지 못했습니다 — 발급하지 않습니다.', deps); return finish(job, 'failed', '중앙 개별 토큰 파일을 읽지 못했습니다.', deps); }
-  const col = (deps.collectors() || []).find((c) => c && c.enabled !== false && [c.id, c.name, c.agent].some((v) => String(v || '').toLowerCase() === name.toLowerCase()));
+  const found = deps.findCollector(name);   // 수집 서버 이름 조회는 registry.findCollectorByName 하나(audit2613c EDGE2613-08)
+  const col = found && found.enabled !== false ? found : null;
   if (!col || !col.url) { stepEnd(s, 'bad', `수집 서버 등록부에 켜진 '${name}' 이 없습니다.`, deps); return finish(job, 'failed', '수집 서버 등록이 없습니다.', deps); }
   const existing = (deps.listTokens() || []).find((t) => String(t.agent || '').toLowerCase() === name.toLowerCase());
   if (existing) { stepEnd(s, 'bad', '이미 개별 토큰이 발급돼 있습니다 — 다시 발급하면 엣지가 쓰는 기존 토큰이 즉시 폐기되므로 자동 적용은 공유 토큰 엣지만 합니다.', deps); return finish(job, 'failed', '이미 개별 토큰이 있습니다.', deps); }
