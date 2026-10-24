@@ -314,7 +314,9 @@ export const config = {
     centralUrl: (process.env.CENTRAL_URL || '').replace(/\/+$/, ''),
     // Token presented to the central (must match the central's CENTRAL_TOKEN).
     // 엣지에서는 EDGE_TOKEN 사용 권장(이 인스턴스의 central 엔드포인트를 열지 않음).
-    centralToken: process.env.CENTRAL_TOKEN || (EDGE_ALL ? EDGE_TOKEN : ''),
+    // v2.776(엣지 개별 토큰 자동 적용): AGENT_CENTRAL_TOKEN 이 있으면 그것이 **보내는 토큰**이다 — CENTRAL_TOKEN 은 이 인스턴스의
+    //   /api/central 받는 문(config.central.token)도 함께 정하므로, 중앙이 내려준 개별 토큰은 이 키에 써서 받는 문을 건드리지 않는다.
+    centralToken: process.env.AGENT_CENTRAL_TOKEN || process.env.CENTRAL_TOKEN || (EDGE_ALL ? EDGE_TOKEN : ''),
     // How often the agent pulls its assignment and scans (ms).
     scanIntervalMs: clampIntervalMs(Number(process.env.AGENT_SCAN_INTERVAL_MS) || 3_600_000, 3_600_000, 60_000),
     // Auto-register discovered iDRACs into this agent's local registry so it

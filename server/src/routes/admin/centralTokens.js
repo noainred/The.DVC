@@ -8,6 +8,8 @@ import { getCentralAuthStats } from '../central.js';
 import { listInventory, setInventoryOwner } from '../../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { startTokenApply, listJobs, getJob } from '../../central/tokenApplyJob.js';
+import { realTokenApplyDeps } from '../../central/tokenApplyDeps.js';
 
 // v2.607 AUTHZ2607-04·07: 위임 인벤토리 현황·소유 엣지·엣지 토큰 목록은 법인 축으로 나눌 수 없는 전 법인 공용 데이터라 범위 계정 403(v2.525 규약).
 const fleetOnly = fullScopeOnlyWith('이 기능은 전 법인(엣지 전체)에 걸친 데이터·동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
@@ -72,6 +74,25 @@ adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsO
   if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 발급', target: r.agent, detail: '기존 토큰이 있으면 회전(교체)', ip: req.ip || '' });
   // 평문 토큰은 이 응답에서만 확인 가능(서버는 해시만 저장) — 화면에서 복사해 엣지에 설정.
   res.status(r.ok ? 200 : 400).json(r);
+});
+// v2.776(사용자 요청 '이걸 자동으로 수정하는 기능 · 세부 진행 화면 · 로그 저장'): 공유 토큰 엣지에 개별 토큰을 **발급하고 엣지에 적용**한다.
+//   발급과 같은 경계(소유자 등급) — 작업은 백그라운드로 돌고 즉시 작업 기록을 돌려준다. 진행·기록은 아래 GET 으로(토큰 평문은 어디에도 없다).
+adminRouter.post('/central/agent-tokens/:agent/apply', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
+  // 반증 F8: 작업 중 발급·회수·결과도 감사 로그에 남긴다(실행자·IP 를 붙여서)
+  const auditFn = ({ action, target, detail }) => logAudit({ user: req.user?.username, action, target, detail, ip: req.ip || '' });
+  const r = startTokenApply(req.params.agent, { by: req.user?.username || '', deps: realTokenApplyDeps(auditFn) });
+  if (!r.ok) return res.status(r.jobId ? 409 : 400).json(r);
+  logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 자동 적용 시작', target: r.job.agent, detail: `작업 ${r.job.id}`, ip: req.ip || '' });
+  res.status(202).json(r);
+});
+adminRouter.get('/central/token-apply/jobs', adminOnly, fleetOnly, (req, res) => {
+  const agent = typeof req.query.agent === 'string' ? req.query.agent.slice(0, 64) : '';
+  res.json({ ok: true, jobs: listJobs({ agent, limit: 20 }) });
+});
+adminRouter.get('/central/token-apply/jobs/:id', adminOnly, fleetOnly, (req, res) => {
+  const job = getJob(String(req.params.id || '').slice(0, 64));
+  if (!job) return res.status(404).json({ ok: false, reason: '작업 기록이 없습니다.' });
+  res.json({ ok: true, job });
 });
 adminRouter.delete('/central/agent-tokens/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = revokeAgentToken(req.params.agent);

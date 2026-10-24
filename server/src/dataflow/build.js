@@ -53,7 +53,7 @@ export const CATS = Object.freeze([
   { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result)$|^collector:\/edge-log$/ },
-  { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password)$/ },
+  { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password|central-token)$/ },
 ]);
 
 /**
