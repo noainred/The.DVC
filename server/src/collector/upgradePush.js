@@ -90,16 +90,39 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
 }
 
 /**
+ * v2.775(사용자 보고 '수집서버 자동 업그레이드가 안되'): 중앙 자동 적용이 남긴 수집 서버 push 결과(upgrade lastResult.collectorPush — 파일)를
+ *   수집 서버 상태에 합친다(순수). 자동 적용 직후 중앙이 재시작해 메모리 상태의 upgrade 가 사라지므로, 화면은 이것으로 '마지막 자동 push' 를 본다.
+ *   메모리에 더 새로운 결과(재시작 뒤 수동 업그레이드)가 있으면 그것을 둔다.
+ * @param {Record<string,object>} status allCollectorStatus()
+ * @param {object|null} lastResult upgradeManager.lastResult
+ * @returns {Record<string,object>} 새 객체(입력은 바꾸지 않는다)
+ */
+export function mergeAutoPushStatus(status, lastResult) {
+  const out = { ...(status || {}) };
+  const cp = lastResult && typeof lastResult === 'object' ? lastResult.collectorPush : null;
+  const at = Number(lastResult?.at);
+  if (!cp || !Array.isArray(cp.items) || !Number.isFinite(at) || at <= 0) return out;
+  for (const it of cp.items) {
+    const id = it && typeof it.id === 'string' ? it.id : '';
+    if (!id) continue;
+    const cur = out[id] && typeof out[id] === 'object' ? out[id] : null;
+    if (cur?.upgrade && Number(cur.upgrade.at) >= at) continue;
+    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), auto: true } };
+  }
+  return out;
+}
+
+/**
  * Push to all enabled collectors (or a subset of ids). Records the outcome in
  * each collector's status so the admin UI can show upgrade results.
  */
-export async function pushUpgradeToCollectors(bytes, { ids = null, force = false, manifest = null, concurrency = pushConcurrencyOf() } = {}) {
+export async function pushUpgradeToCollectors(bytes, { ids = null, force = false, manifest = null, concurrency = pushConcurrencyOf(), auto = false } = {}) {
   const list = loadCollectors().filter((c) => c.enabled !== false && c.url && (!ids || ids.includes(c.id)));
   // v2.741(TIMING-07): 동시 개수 상한 안에서 차례로 — 결과 순서·모양은 예전(Promise.all)과 같다. 한 수집 서버의 예외가 나머지 결과를 버리지 않는다.
   const settled = await poolSettled(list, concurrency, async (c) => {
     const r = await pushBundleToCollector(c, bytes, { force, manifest });
     const prev = getCollectorStatus(c.id) || {};
-    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error } });
+    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error, ...(Number.isFinite(r.status) ? { status: r.status } : {}), ...(auto ? { auto: true } : {}) } }); // v2.775: 상태코드·자동 여부
     return r;
   });
   return settled.map((s, i) => (s.status === 'fulfilled' ? s.value

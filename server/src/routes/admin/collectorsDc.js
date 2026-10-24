@@ -24,7 +24,7 @@ import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow, EDGE_REASON_TEXT } from '../../collector/puller.js';
 import { summarizeRegistryError } from '../../util/registryCore.js'; // v2.744(최종 검토 FB — RG2744-04)
 import { safeLoadText } from '../../util/atomicWrite.js';
-import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
+import { pushUpgradeToCollectors, mergeAutoPushStatus } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
 import { fetchNo503Retry } from '../../util/postNo503Retry.js'; // v2.744(회귀 검토 GC-R2): 엣지 export 받기 — 503 은 다시 묻지 않는다
 import { withOutboundTag } from '../../util/outboundStats.js'; // v2.611 LEFT2611-08: 같은 주소 엣지를 기록에서 나눈다
@@ -138,7 +138,11 @@ export function registerCollectorsDc(adminRouter) {
 adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   const collectors = listCollectors();
   // v2.771(점검 R6-F4-2): 등록부를 읽지 못했으면 빈 목록이 '등록 없음' 으로 보이지 않게 사유 요약(원문 없음)을 함께 싣는다.
-  res.json({ collectors, loadError: registryLoadErrorSummary(), status: allCollectorStatus(), identity: agentIdentitySummary(), transport: transportView(collectors) });
+  // v2.775: 마지막 자동 적용의 수집 서버 push 결과(재시작 전에 파일로 남긴 것)를 상태에 합치고, 요약(autoPush)을 함께 싣는다 — 화면이 '왜 자동 업그레이드가 안 됐는지' 를 말한다.
+  const lr = upgradeManager.lastResult;
+  const cp = lr?.collectorPush;
+  const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
+  res.json({ collectors, loadError: registryLoadErrorSummary(), status: mergeAutoPushStatus(allCollectorStatus(), lr), autoPush, identity: agentIdentitySummary(), transport: transportView(collectors) });
 });
 
 adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
