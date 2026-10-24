@@ -64,8 +64,11 @@ export function veeamProgress({ server, status = null, readsHere = false, tokenA
     else if (hasToken && tk && typeof tk === 'object' && 'lastUsedAt' in tk && !usedAt) add('token', '개별 토큰', 'warn', `엣지 ${agent} 의 개별 토큰은 발급됐지만 그 토큰으로 접속한 기록이 없습니다 — 엣지가 아직 공유 토큰을 쓰고 있을 수 있습니다.`,
       null, `엣지 ${agent} 의 CENTRAL_TOKEN 을 발급한 개별 토큰으로 바꾼 뒤 엣지 포탈을 다시 시작하세요.`);
     else if (hasToken) add('token', '개별 토큰', 'ok', `엣지 ${agent} 의 개별 토큰이 발급돼 있습니다${usedAt ? ' — 마지막 사용 시각' : ''}.`, usedAt);
-    else add('token', '개별 토큰', 'bad', `엣지 ${agent} 에 개별 토큰이 없습니다 — 중앙은 Veeam 자격증명을 개별 토큰으로만 내려줍니다(공유 토큰은 어느 엣지인지 가릴 수 없어 403).`,
-      null, `설정 › 수집 서버에서 ${agent} 의 개별 토큰을 발급하고, 그 엣지의 CENTRAL_TOKEN 을 그 값으로 바꾼 뒤 엣지 포탈을 다시 시작하세요.`);
+    else {
+      add('token', '개별 토큰', 'bad', `엣지 ${agent} 에 개별 토큰이 없습니다 — 중앙은 Veeam 자격증명을 개별 토큰으로만 내려줍니다(공유 토큰은 어느 엣지인지 가릴 수 없어 403).`,
+        null, `아래 '개별 토큰 자동 적용' 으로 발급·엣지 적용·확인을 한 번에 하거나, 직접 하려면 설정 › 수집 서버에서 ${agent} 의 개별 토큰을 발급하고 그 엣지의 CENTRAL_TOKEN 을 그 값으로 바꾼 뒤 엣지 포탈을 다시 시작하세요.`);
+      steps[steps.length - 1].fix = 'token-apply';   // v2.776: 화면이 자동 적용 버튼을 단다(공유 토큰 엣지만 — 이미 토큰이 있으면 이 갈래가 아니다)
+    }
 
     // 3. 엣지 접속 — 이 엣지가 중앙에 마지막으로 요청한 시각(설정 pull 전부 + Veeam 상태 push).
     const pr = findRow(pulls?.rows, agent);

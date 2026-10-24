@@ -14,7 +14,8 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { resultLabel } from './veeamBadge.js';
-import { STEP_ICON, STEP_TONE, progressHint, progressCheckedText } from './veeamProgressText.js'; // v2.773 단계별 진행 상태
+import { STEP_ICON, STEP_TONE, progressHint, progressCheckedText } from './veeamProgressText.js';
+import EdgeTokenApply from './EdgeTokenApply.jsx'; // v2.776 개별 토큰 자동 적용·진행·기록 // v2.773 단계별 진행 상태
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
 
 // v2.763(V5-2): agentTouched — 사람이 '읽는 곳' 을 골랐는가('' 는 '아직 안 고름' 과 '중앙에서 직접(명시)' 둘 다라 따로 든다). 서버로 보내지 않는다.
@@ -224,6 +225,8 @@ export default function VeeamSettings() {
                   </li>
                 ))}
               </ol>
+              {/* v2.776: 개별 토큰이 없으면 자동 적용 버튼 + 진행·작업 기록(기록은 버튼이 없어도 보인다) */}
+              {pg.mode === 'edge' && s.agent && <EdgeTokenApply key={s.agent} agent={s.agent} canRun={pg.steps.some((x) => x.fix === 'token-apply')} onDone={load} />}
               {pg.mode === 'edge' && (
                 <div className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
                   엣지 접속·배정 받기·결과 올리기 기록은 중앙 메모리에 있어 중앙이 다시 시작하면 비고, 엣지가 다시 접속하면 찹니다{pg.since != null ? ` (기록 시작 ${fmt(pg.since)})` : ''}. 기록이 없다는 것이 엣지가 안 했다는 뜻은 아닙니다.

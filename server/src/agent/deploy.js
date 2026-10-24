@@ -401,6 +401,73 @@ export async function forceCollectorToken(target, token, { urlPort } = {}) {
   }
 }
 
+/**
+ * v2.776(엣지 개별 토큰 자동 적용 — SSH 통로): 수집 토큰 통로가 안 될 때(옛 판 엣지 등) SSH 로 portal.env 에 개별 central 토큰을 쓰고
+ *   서비스를 재시작한다. forceCollectorToken 과 같은 규칙(root · 포탈 유닛만 · 토큰은 SFTP 임시 파일로 — 명령 인자 금지)에 더해:
+ *   · 바꾸기 전 portal.env 를 같은 디렉터리에 0600 사본으로 남기고, 재시작 뒤 active 가 아니면 그 사본으로 되돌리고 다시 재시작한다.
+ *   · 기본은 AGENT_CENTRAL_TOKEN 만 쓴다(보내는 토큰만 — v2.776+ 엣지가 읽는다). `replaceCentral` 이면(옛 판 엣지는 그 키를 모른다)
+ *     CENTRAL_TOKEN 도 바꾼다 — 그러면 그 엣지의 /api/central 받는 문도 이 토큰이 된다(호출자가 그 사실을 기록한다).
+ * @param {object} target 배포 대상(host·username·password|privateKey)
+ * @param {string} token  중앙이 방금 발급한 개별 토큰(base64url 43자)
+ * @param {{ urlPort?:number, replaceCentral?:boolean, onStep?:(key:string, ok:boolean, detail:string)=>void }} [o]
+ */
+export async function forceAgentCentralToken(target, token, { urlPort, replaceCentral = false, onStep = () => {} } = {}) {
+  if (!target?.host || !target?.username) return { ok: false, reason: '배포 기록에 host/username 이 없습니다.' };
+  const tk = String(token || '');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(tk)) return { ok: false, reason: '토큰 형식이 중앙 개별 토큰이 아닙니다.' };
+  try {
+    return await withSsh(creds(target), ({ exec, writeFile }) => applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host: target.host, urlPort, replaceCentral, onStep }));
+  } catch (err) {
+    return { ok: false, reason: String(err?.message || err).slice(0, 300) };
+  }
+}
+
+/** SSH 세션 안의 본문(테스트가 가짜 exec·writeFile 로 명령 순서·되돌리기를 본다). 토큰 형식은 호출자가 이미 확인했다. */
+export async function applyAgentCentralTokenOverExec({ exec, writeFile }, tk, { host = '', urlPort, replaceCentral = false, onStep = () => {}, waitTries = 20, waitDelaySec = 2 } = {}) {
+  const idu = await exec('id -u');
+  if (idu.stdout.trim() !== '0') return { ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다(배포 기록의 SSH 계정).' };
+  onStep('ssh', true, `${host} 접속 · root`);
+  const inst = await resolvePortalUnit(exec, urlPort);
+  if (inst.error) return { ok: false, reason: inst.error };
+  const { unit, envFile } = inst;
+  const envOk = (await exec(`test -f ${envFile} && echo yes || echo no`)).stdout.includes('yes');
+  if (!envOk) return { ok: false, reason: `${envFile} 가 없습니다.` };
+  const backup = `${envFile}.bak-token-${Date.now()}`;
+  const cp = await exec(`cp -p '${envFile}' '${backup}' && chmod 600 '${backup}'`);
+  if (cp && cp.code) return { ok: false, reason: `portal.env 사본을 만들지 못해 중단했습니다: ${String(cp.stderr || '').slice(0, 160)}` };
+  onStep('backup', true, `${unit} · ${envFile} → 사본 ${backup}${inst.note ? ` · ${inst.note}` : ''}`);
+  // 지우기·붙이기 도중 실패하면 사본으로 되돌린다 — CENTRAL_TOKEN 줄만 지워진 채 남으면 다음 재시작에 엣지가 중앙에 못 붙는다.
+  try {
+    const d1 = await exec(`sed -i '/^AGENT_CENTRAL_TOKEN=/d' '${envFile}'`);
+    if (d1 && d1.code) throw new Error(`sed 실패: ${String(d1.stderr || '').slice(0, 120)}`);
+    let text = `\nAGENT_CENTRAL_TOKEN=${tk}\n`;
+    if (replaceCentral) {
+      const d2 = await exec(`sed -i '/^CENTRAL_TOKEN=/d' '${envFile}'`);
+      if (d2 && d2.code) throw new Error(`sed 실패: ${String(d2.stderr || '').slice(0, 120)}`);
+      text += `CENTRAL_TOKEN=${tk}\n`;
+    }
+    await appendSecretText({ exec, writeFile }, envFile, text);
+  } catch (e) {
+    await exec(`cp -p '${backup}' '${envFile}'`).catch(() => {});
+    onStep('write', false, `기록 실패 — 사본으로 되돌림: ${String(e?.message || e).slice(0, 160)}`);
+    return { ok: false, reverted: true, unit, envFile, backup, reason: `portal.env 에 쓰지 못해 사본으로 되돌렸습니다(서비스는 재시작하지 않았습니다): ${String(e?.message || e).slice(0, 160)}` };
+  }
+  onStep('write', true, replaceCentral ? 'AGENT_CENTRAL_TOKEN·CENTRAL_TOKEN 기록(옛 판 엣지 — CENTRAL_TOKEN 만 읽는다)' : 'AGENT_CENTRAL_TOKEN 기록');
+  await exec(`systemctl restart ${unit} 2>&1 || true`);
+  const state = await waitActive(exec, waitTries, waitDelaySec, unit);
+  if (state === 'active') {
+    onStep('restart', true, `${unit} 재시작 · active`);
+    return { ok: true, unit, envFile, backup, replaced: replaceCentral };
+  }
+  // 되돌리기 — 사본으로 복구하고 다시 시작(그 엣지는 예전 토큰으로 돌아간다)
+  const jc = (await exec(`journalctl -u ${unit} --no-pager -n 40 2>&1`).catch(() => ({ stdout: '' }))).stdout.slice(-2000);
+  await exec(`cp -p '${backup}' '${envFile}'`).catch(() => {});
+  await exec(`systemctl restart ${unit} 2>&1 || true`).catch(() => {});
+  const back = await waitActive(exec, waitTries, waitDelaySec, unit);
+  onStep('restart', false, `${unit} 상태 ${state} → 사본으로 되돌리고 다시 시작(${back})`);
+  return { ok: false, reverted: true, unit, envFile, backup, log: jc, reason: `재시작 뒤 서비스 상태가 ${state} 였습니다 — portal.env 를 사본으로 되돌렸습니다(되돌린 뒤 ${back}).` };
+}
+
 /** 배포 후 에이전트(대상 호스트)의 vmware-portal 서비스 상태를 SSH로 재확인. */
 export async function checkAgentStatus(target) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username이 필요합니다.' };
