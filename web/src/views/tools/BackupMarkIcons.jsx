@@ -11,11 +11,11 @@ export function CritIcon({ crit, size = 15, withText = false, plainText = false 
   const c = critOf(crit);
   if (!c) return null;
   return (
-    <span title={c.label} aria-label={c.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: c.color, flex: 'none' }}>
+    <span title={c.label} aria-label={c.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: plainText ? 'inherit' : c.color, flex: 'none' }}>
       <svg width={size} height={size} viewBox="0 0 24 24" fill={c.color} fillOpacity="0.22" stroke={c.color} strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
         <path d="M12 3 4 6v6c0 4.4 3.4 8.2 8 9 4.6-.8 8-4.6 8-9V6z" />
       </svg>
-      {withText && <b style={{ fontSize: 11, ...(plainText ? { color: 'inherit' } : {}) }}>{c.text}</b>}
+      {withText && <b style={{ fontSize: 11 }}>{c.text}</b>}
     </span>
   );
 }
