@@ -45,11 +45,16 @@ export function recordPull(agent, endpoint, { status = 0, bytes = 0, verified = 
       if (!oldest) return;
       if (oldest) byAgent.delete(oldest[0]);
     }
-    a = { agent: key, verified: false, firstAt: now, lastAt: now, byEndpoint: new Map() };
+    a = { agent: key, verified: false, firstAt: now, lastAt: now, lastVerifiedOkAt: 0, byEndpoint: new Map() };
     byAgent.set(key, a);
   }
   if (verified) a.verified = true;
   a.lastAt = now;
+  // v2.781(점검 G2 A-B1): **이 요청이** 개별 토큰으로 검증됐고 성공했을 때만 오르는 시각. 행의 verified 는 한 번 켜지면 끝까지 남고
+  //   byEndpoint.lastOkAt 은 같은 이름의 공유 토큰 pull(X-Agent-Name — routes/central.js)도 올린다 — 둘을 합쳐 '새 개별 토큰을 받아들였다' 로
+  //   읽으면 공유 pull 이 그 근거가 된다(tokenApplyJob acceptedSince 거짓 '적용됨'·회수 누락). 엔드포인트 상한(아래 return)보다 먼저 찍는다.
+  const st = Number(status) || 0;
+  if (verified && st && st < 400 && now > (a.lastVerifiedOkAt || 0)) a.lastVerifiedOkAt = now;
   let e = a.byEndpoint.get(ep);
   if (!e) {
     if (a.byEndpoint.size >= MAX_ENDPOINTS) return;
@@ -63,7 +68,7 @@ export function recordPull(agent, endpoint, { status = 0, bytes = 0, verified = 
 
 export function pullStats() {
   const rows = [...byAgent.values()].map((a) => ({
-    agent: a.agent, verified: a.verified, firstAt: a.firstAt, lastAt: a.lastAt,
+    agent: a.agent, verified: a.verified, firstAt: a.firstAt, lastAt: a.lastAt, lastVerifiedOkAt: a.lastVerifiedOkAt || 0,
     byEndpoint: [...a.byEndpoint.values()].map((e) => ({ ...e, intervalMs: e.intervalMsEwma == null ? null : Math.round(e.intervalMsEwma) })),
   })).sort((x, z) => z.lastAt - x.lastAt);
   return { rows, since: startedAt };
