@@ -1659,7 +1659,7 @@
   · v2.768 회귀 5건: pyportal 전체 시한 = 소켓 시한이라 고RTT TLS 오탐(전체 = 3×) · 복원이 실제로 적용되자 tokenVersion·엣지 토큰이 되살아남(계정별 max+1, 토큰 현재 우선 병합 + 경고) ·
     거른 이름 무음 · Veeam 과잉 가림 · 중앙 재기동 직후 vcstale 일괄 발송(기준 = max(receivedAt, 기동 시각)).
   · 남긴 것: 위임 PDU 경보는 엣지 알림 채널에 달림(채널 설정은 배포하지 않음 — 설계) · 엣지 재시작 뒤 첫 pull 전까지는 엣지 파일 임계치 · 물리 GPU 서버 화면의 gpuErrors 미표시 ·
-    linkcheck stepSsh 'Connection lost before handshake' 가 tls-fail 로 분류(오분류 추정) · cve.js VMSA-2023-0023 8.0 항목 maxAffected==fixed(데이터) · 웹 GPU 용량예측 100%+ '안정' · healthReport 는 재기동 직후 위임 vCenter 를 '낡음' 으로 셈(실제로 낡은 값이라 유지).
+    linkcheck stepSsh 'Connection lost before handshake' 가 tls-fail 로 분류(오분류 추정) · cve.js VMSA-2023-0023 8.0 항목 maxAffected==fixed(데이터) · ~~웹 GPU 용량예측 100%+ '안정'~~(✅ v2.781 G4 E-B1 — 포화 판정 한 벌) · healthReport 는 재기동 직후 위임 vCenter 를 '낡음' 으로 셈(실제로 낡은 값이라 유지).
 - **v2.770 — 버그 점검 5회차(다중 에이전트 5축 → 반증 1인 → 수정 5그룹) 확정 23건 수정**(회귀 `server/test/audit2770{a,b,c,d,e}` · 웹 `sanHealthText`·`linkCheckText`·`portalBackup2768`):
   · ⚠⚠ **'계산할 수 없음' 을 건너뛰면 남은 0 이 '정상' 이 된다**(R5-E3-1 SAN 월간 점검): null 델타(리셋·기준선 없음)를 건너뛰고 나머지 0→0 키로 ok 를 냈다. 보류는 따로 세고 ok 로 내지 않는다.
   · ⚠ **범위 판정은 '어디로 나가는가' 까지**(R5-E5-1 원격 접속): IP 문자열만 허용 인벤토리에 있으면 통과, 중계는 요청 vcenterId(비면 기본 프록시)로 골라 범위 밖 망의 같은 IP 로 터널이 열렸다 — (vcenterId, targetHost) 쌍.
@@ -1692,3 +1692,25 @@
   · SSH 복구(cp)의 종료 코드를 본다 — 실패면 restoreFailed(되돌렸다고 말하지 않는다 · 회수 안 함)(F5). 옛 판 엣지는 **키 이름만**(값 미출력) 보고 CENTRAL_TOKEN 교체가 안전할 때만(EDGE_MODE=all 에 COLLECTOR_TOKEN 없으면 수집 토큰까지 바뀐다 · EDGE_TOKEN 구성이면 받는 문이 새로 열린다)(F6).
   · RMA 에이전트도 같은 토큰 우선순위(F7) · 정리는 이 작업이 발급한 토큰(createdAt)만 · 발급·회수·결과 감사(F8).
   · 남긴 것: 실제 SSH·systemd·haproxy 시한은 실측하지 않음(가짜 셸 테스트) · 이미 개별 토큰이 있는 엣지의 회전(재발급 즉시 기존 토큰 폐기 — 이 기능은 공유 토큰 엣지만) · 수집 서버 화면의 엣지별 토큰 패널에는 버튼을 두지 않음(Veeam 진행 상태에서만).
+
+- **v2.781 — 버그 5·개선 5 점검(다중 에이전트 5축 A~E → 반증 1인 → 수정 4그룹)**(사용자 요청 "버그 잡아줘, 개선사항 찾아줘 각각 5개씩" · 선택 '전체 검증' · 기준 `625106f`(v2.780.1).
+  발견 20건 = 확정 14 · 조건부·사양 6 · 반증 0. 회귀 `server/test/audit2781{a,b,c,d}` · 웹 `audit2781a`·`tools/audit2781c`·`forecastRowText.test` · 변이: G1 기준판 4/5 실패 + 부분 변이 8/8 · G2 기준판 7/8 + 부분 변이 4/4):
+  · ⚠⚠ **수집 시작점·읽은 커서·온전한 시각은 포탈 지금으로 상한을 둔다**(G1 D-B1 — 재현): createdTime 이 미래인 이벤트 1건이면 `nextSinceTs = max(db.lastTs, 커서)` 가
+    미래에 고정되어 vCenter 시계가 NTP 로 되돌아온 뒤의 이벤트를 **영영** 읽지 않았고 okAt 도 미래라 지연 0·'정상' 이었다(재시작해도 DB MAX(ts) 가 커서 파일 클램프를 이겼다).
+    이제 지금 + 10분(`FUTURE_CLOCK_TOLERANCE_MS`)을 넘는 후보는 버리고 읽은 커서(기록 때 지금으로 잘림)부터 · 시간당 경고 1줄. 여유 안은 예전 그대로(조금 앞선 vCenter 가 매 주기 재읽기로 거짓 '정체' 가 되지 않게).
+    행 ts 는 원본 그대로다. 커서는 주기 도중 60초에 1번 중간 저장(D-I2 — 이번 주기 dbKey · knownIds 정리는 주기 끝만).
+  · ⚠⚠ **'받아들였다' 의 근거는 그 요청 자체의 검증이다 — 행 단위 표지와 다른 요청의 성공 시각을 합치지 않는다**(G2 A-B1 — 재현): `pullStats` 행의 verified 는 한 번 켜지면 영구,
+    lastOkAt 은 같은 이름의 공유 토큰 pull 도 올려 토큰 자동 적용이 결과 모르는 실패를 '적용됨' 으로 끝내고 persist-failed 뒤 회수를 건너뛰었다. 이제 `lastVerifiedOkAt`(개별 토큰 검증 + status<400)만 본다 ·
+    엣지 확정 `applied:false` + SSH 미기록은 회수 확정. env 파일을 다음 기동이 읽지 않는 엣지(Windows 옛 start-portal.bat)는 쓰기 전에 persist-failed(A-I1).
+  · **모름은 0·정상이 아니다 — 백업 서머리 재발**(G3): 재시작 직후 골격 스냅샷(VM 없음)이 'Veeam 정상 · VM 0' 이었다(C-B1 — `/veeam/backup-counts` 에 있던 no-inventory 가드가 vcBackup 에 없었다.
+    판정은 전원 필터 전 **전체 VM 목록**). KPI 비율 분모는 아는 vCenter 의 VM 합(B-B2≡C-B2 — 확인 불가 vCenter VM 이 분모에 들어 75% 가 0% 로) · 아는 곳 0 은 '—' · 부분 합 '*' ·
+    읽기 실패·오래된 서버의 '지금 백업 중' 은 0 이 아니라 '—'/'≥N'(B-B1 runningStale). 주의 목록은 심각도 정렬 **뒤** 자르고 '외 N건'(C-I2) · CSV 2종 exportBusy(B-I2).
+  · **이미 한계에 닿은 항목은 '증가 없음' 과 다른 상태다**(G4 E-B1 — 재현): daysToLimit null 이 같아 꽉 찬 DS 가 정렬 맨 뒤 → 상한 100 에서 잘리고 '30일 내 포화' KPI 에서 빠졌고 GPU 100% 가 '안정'.
+    서버 `full:true`(포화 판정은 R² 필터 앞 — 흔들리는 포화 시계열도 남는다) · 웹 `forecastLimitKind` 한 벌을 DS·GPU·리포트 '고갈까지' 칸이 같이 쓴다.
+  · 확정됐지만 이번에 고치지 않은 것(다음 점검 첫 후보): A-B2 토큰 적용 409 응답에서 화면 TypeError · A-B3 수집 서버가 이미 새 판인데 '업그레이드 실패(자동)' 유지 ·
+    A-B4 배포 기록 collectorToken 이 빈 엣지 재배포 시 CENTRAL_TOKEN 교체(조건부 — 더 작은 수정 `sameToken(...) !== true`) · B-B3 첫 수집 전·한 번도 성공 못 한 Veeam 서버 VM 이 '없음' 확정 ·
+    B-B4 VM 별 실패 수가 작업 결과로 부풀려짐(사양 판단 — 테스트 3곳이 현재 동작을 고정) · C-B3 실행 중 작업이 vCenter 마다 반복 · C-B4 세부내용 조회 실패 시 선택 상자 사라짐·403 문자열 ·
+    D-B2 VM 상세 이력의 거짓 '수집 지연' 경고(lagging [] 와 null 을 같은 null 로) · E-B2 물리 GPU 서버 화면 gpuErrors 미표시 · E-B3 linkcheck SSH 'Connection lost before handshake' → tls-fail ·
+    배너 뒤 끊김 → timeout · E-B4 VmRemote 가 error 매핑으로 세션을 엶(manual 은 막지 말 것 — 반증) · D-B4 이벤트 시각 NaN 하드닝 · A-I2 발급 save 실패 시 메모리 롤백 ·
+    C-I1 세부 CSV 버튼 title · E-I1 cve.js 행(공식 VMSA 확인 필요) · E-I2 pyportal 헤더 수신 전체 시한. 보류: D-I1(따라잡기 건너뜀 — 데이터 손실 쪽 위험) · B-I1(실측 규모에서 비례하지 않음).
+  · 정직 기록: 실장비 미확인(가짜 SOAP·가짜 deps·합성 입력) · vCenter 시계 역행이 실서버에서 일어났는지 미확인 · 이미 미래 고정에 빠졌던 설치본의 놓친 구간은 되살리지 않는다.
