@@ -6,7 +6,8 @@
 import React from 'react';
 import { critOf } from './backupViewText.js';
 
-export function CritIcon({ crit, size = 15, withText = false }) {
+// plainText: 선택된(파란 바탕) 버튼 안에서는 글자를 바탕 글자색으로 — 빨강·주황 글자가 파란 바탕에서 읽히지 않는다(v2.784 Chromium 판독)
+export function CritIcon({ crit, size = 15, withText = false, plainText = false }) {
   const c = critOf(crit);
   if (!c) return null;
   return (
@@ -14,7 +15,7 @@ export function CritIcon({ crit, size = 15, withText = false }) {
       <svg width={size} height={size} viewBox="0 0 24 24" fill={c.color} fillOpacity="0.22" stroke={c.color} strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
         <path d="M12 3 4 6v6c0 4.4 3.4 8.2 8 9 4.6-.8 8-4.6 8-9V6z" />
       </svg>
-      {withText && <b style={{ fontSize: 11 }}>{c.text}</b>}
+      {withText && <b style={{ fontSize: 11, ...(plainText ? { color: 'inherit' } : {}) }}>{c.text}</b>}
     </span>
   );
 }

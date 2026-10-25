@@ -169,9 +169,9 @@ export default function BackupDetailTool({ scope }) {
           {marksLine(r.marks) && (() => { const m = marksLine(r.marks); return (
             <div data-backup-marks="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center', fontSize: 13, borderTop: '1px solid var(--border-soft)', paddingTop: 10 }}>
               <span className="muted" style={{ fontSize: 12 }}>업무 중요도</span>
-              {CRIT.map((c) => <button key={c.key} type="button" className={`tab${filter === `crit-${c.key}` ? ' active' : ''}`} aria-pressed={filter === `crit-${c.key}`} onClick={() => setFilter(filter === `crit-${c.key}` ? 'all' : `crit-${c.key}`)} title={`${c.label} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><CritIcon crit={c.key} withText /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m[c.key])}</b></button>)}
+              {CRIT.map((c) => <button key={c.key} type="button" className={`tab${filter === `crit-${c.key}` ? ' active' : ''}`} aria-pressed={filter === `crit-${c.key}`} onClick={() => setFilter(filter === `crit-${c.key}` ? 'all' : `crit-${c.key}`)} title={`${c.label} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><CritIcon crit={c.key} withText plainText={filter === `crit-${c.key}`} /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m[c.key])}</b></button>)}
               <span style={{ width: 1, height: 20, background: 'var(--border)' }} aria-hidden="true" />
-              <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={{ color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
+              <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={filter === 'need' ? undefined : { color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
               {m.need > 0 && <button type="button" className={`tab${filter === 'needgap' ? ' active' : ''}`} aria-pressed={filter === 'needgap'} onClick={() => setFilter(filter === 'needgap' ? 'all' : 'needgap')} title="백업 필요로 표시했는데 Veeam 백업 대상이 아닌 VM" style={{ padding: '3px 10px', color: m.needGap ? '#fca5a5' : undefined }}>그중 Veeam 백업 안 보임 <b>{m.needGap == null ? '모름' : fmtNum(m.needGap)}</b></button>}
             </div>
           ); })()}
@@ -312,7 +312,7 @@ export default function BackupDetailTool({ scope }) {
                       <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>업무 중요도</span>
                       {writable ? [...CRIT, { key: '', text: '없음' }].map((c) => {
                         const on = (selVm.m?.crit || '') === c.key;
-                        return <button key={c.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{c.key ? <CritIcon crit={c.key} withText /> : '없음'}</button>;
+                        return <button key={c.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{c.key ? <CritIcon crit={c.key} withText plainText={on} /> : '없음'}</button>;
                       }) : (critOf(selVm.m?.crit) ? <CritIcon crit={selVm.m.crit} withText /> : <span className="muted">—</span>)}
                     </div>
                     <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
