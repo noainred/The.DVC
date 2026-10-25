@@ -86,6 +86,31 @@ export function deltaPct(cur, prev) {
 }
 
 /**
+ * v2.782(점검 K3 I-B2): 앞 기간 KPI 한 줄. 진행 중 기간이면 서버가 앞 기간을 **같은 경과 구간**으로 잘라 준다(sameElapsed) —
+ * 그 사실을 '같은 구간' 으로 밝힌다(전에는 '지금까지' 를 '앞 기간 전체' 와 견줘 매일 같은 트래픽도 −77%·−90% 로 보였다).
+ */
+export function prevKpiMeta(cur, prev, { sameElapsed = false } = {}) {
+  const d = deltaPct(cur, prev);
+  return `${sameElapsed ? '앞 기간 같은 구간' : '앞 기간'} ${rateText(prev)}${d != null ? ` (${d > 0 ? '+' : ''}${d}%)` : ''}`;
+}
+
+/** 경과 시간 표기 — 하루 미만은 'N시간 M분', 이상은 'N일 M시간'(0 인 뒤 단위는 뺀다). 값이 없으면 '—'. */
+export function elapsedText(ms) {
+  const v = numOrNull(ms);
+  if (v == null || v < 0) return '—';
+  const min = Math.floor(v / 60_000), h = Math.floor(min / 60), d = Math.floor(h / 24);
+  if (d > 0) return h % 24 ? `${d}일 ${h % 24}시간` : `${d}일`;
+  if (h > 0) return min % 60 ? `${h}시간 ${min % 60}분` : `${h}시간`;
+  return `${min}분`;
+}
+
+/** 진행 중 기간의 비교 기준 안내(서버가 sameElapsed 를 달았을 때만). 겹쳐 그린 선은 앞 기간 전체다. */
+export function prevCompareNote(prev) {
+  if (!prev?.sameElapsed) return '';
+  return `진행 중인 기간이라 앞 기간 값(평균·피크)은 전체가 아니라 **같은 경과 시간**(기간 시작부터 ${elapsedText(prev.elapsedMs)})까지만 잘라 비교합니다. 겹쳐 그린 선은 앞 기간 전체입니다.`;
+}
+
+/**
  * recharts 행. 값은 바이트/초 그대로(축·툴팁이 bps 로 바꾼다). cap 은 회선 용량 선(모르면 없음).
  * prev 는 '기간 시작부터의 경과' 로 맞춘다 — 앞 칸 폭이 달라도(15분 ↔ 1시간) 같은 시각의 값을 놓는다.
  */

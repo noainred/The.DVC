@@ -793,9 +793,11 @@ async function portUsageFor(req, res) {
   const snap = snapshotFor(id);
   const meta = new Map((hist.series || []).map((s) => [Number(s.port), { name: s.name, speed: s.speed }]));
   const ports = pu.portList(snap?.ports?.list || [], meta);
-  // 대상을 먼저 정해야 대상 포트만 조회할 수 있다 — 조립을 한 번 돌려 기본 대상을 얻는다(순수 계산이라 싸다).
-  const first = pu.buildPortUsage({ period, ports, hist, histSince, view, target: req.query.target ?? null, now });
-  const members = first.target?.members || [];
+  // 대상을 먼저 정해야 대상 포트만 조회할 수 있다 — 조립의 바탕(전 포트 칸·스토리지 합)을 한 번 만들어 대상을 고르고,
+  // 같은 바탕을 최종 조립에 넘긴다. v2.782(점검 K3 I-I2): 전에는 대상 고르기용으로 buildPortUsage 를 한 번 더 돌렸다
+  // (768포트·1달에서 동기 수십 ms 가 요청마다 두 번).
+  const base = pu.usageBase({ period, ports, hist, histSince, now });
+  const members = pu.usageTargetMembers(base, { view, target: req.query.target ?? null });
   let chart = null, prev = null, daily30 = null;
   if (members.length) {
     if (isD && period.fine) chart = { res: await q(period.start, period.end, 900_000, members), since: period.start, bucketMs: 900_000, n: 96 };
@@ -810,7 +812,7 @@ async function portUsageFor(req, res) {
   const idleSince = pu.dayStartOf(now) - (pu.IDLE_DAYS - 1) * DAY;
   const idleRes = await q(idleSince, idleSince + pu.IDLE_DAYS * DAY, DAY);
   daily30 = pu.denseByPort(idleRes, { since: idleSince, bucketMs: DAY, n: pu.IDLE_DAYS, now });
-  const r = pu.buildPortUsage({ period, ports, hist, histSince, chart, prev, daily30, view, target: req.query.target ?? null, now });
+  const r = pu.buildPortUsage({ period, ports, hist, histSince, chart, prev, daily30, view, target: req.query.target ?? null, now, base });
   if (r.target?.chart?.prev && prev) r.target.chart.prev.label = prev.label;
   // 조닝 상대(포트 하나일 때만) — 트래픽 몫이 아니라 조닝 설정상의 상대다. 전 포트로 넓히지 말 것(O(zone×멤버²)).
   if (r.target?.kind === 'port' && snap) {

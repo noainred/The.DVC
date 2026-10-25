@@ -71,9 +71,10 @@ export function periodOf(unit, off, { now = Date.now(), offsetMin = DAY_OFFSET_M
     const s = Date.UTC(t.y, t.m - 1 + oo, 1) - off0;
     return [s, Date.UTC(t.y, t.m + oo, 1) - off0];
   };
-  // 하한: 시작이 보관 기간 안인 가장 과거 단위(작은 루프 — 단위 수는 수백 이하).
-  let minOff = 0;
-  while (minOff > -1000 && at(minOff - 1)[0] >= oldest) minOff--;
+  // 하한: 시작이 보관 기간 안인 가장 과거 단위.
+  // v2.782(점검 K3 I-I1): 루프(−1000 상한) 대신 산술로 — 보관 3650일이면 1일 단위가 −1000 에서 막혀 거짓 '보관 기간보다 과거' 400 이 났다.
+  //   결과는 옛 루프와 같다(상한에 걸리지 않는 범위 — server/test/audit2782c.test.js 가 단위·보관 일수·달 경계를 대조).
+  const minOff = Number.isFinite(oldest) ? minOffOf(unit, today, oldest, offsetMin, at) : 0;
   if (o < minOff) return { issue: `보관 기간(${Math.floor(retentionDays)}일)보다 과거입니다`, minOff };
   [start, end] = at(o);
   const days = [];
@@ -85,6 +86,24 @@ export function periodOf(unit, off, { now = Date.now(), offsetMin = DAY_OFFSET_M
   // 1일 단위의 차트만 15분 칸을 쓴다 — 15분 집계 보관(fineDays)이 지난 날은 1시간 칸.
   const fine = unit === 'd' && start >= now - fineDays * DAY_MS;
   return { unit, off: o, minOff, start, end, days, label, short, fine, current: start <= now && now < end };
+}
+
+/**
+ * 기간 하한(순수) — 시작(at(o)[0])이 oldest 이상인 가장 작은 o(0 이하). at 은 o 에 대해 단조 증가한다.
+ *  - d: 시작 = today + o일 → o ≥ −(today−oldest)/하루.
+ *  - w: 시작 = today − 6일 + 7o일 → o ≥ ⌈(6일 − (today−oldest))/7일⌉.
+ *  - m: oldest 가 속한 달까지의 달 차이(그달 1일이 oldest 보다 앞이면 한 달 뒤).
+ * 경계 오차(정수 나눗셈·달 길이)는 마지막에 at 으로 한두 칸 맞춘다 — 산술이 틀려도 결과가 at 기준과 어긋나지 않게.
+ */
+function minOffOf(unit, today, oldest, offsetMin, at) {
+  let o;
+  if (unit === 'd') o = -Math.floor((today - oldest) / DAY_MS);
+  else if (unit === 'w') o = Math.ceil((6 * DAY_MS - (today - oldest)) / (7 * DAY_MS));
+  else { const a = ymd(today, offsetMin), b = ymd(oldest, offsetMin); o = (b.y * 12 + b.m) - (a.y * 12 + a.m); }
+  o = Math.min(0, o);
+  while (o < 0 && at(o)[0] < oldest) o++;
+  while (at(o - 1)[0] >= oldest) o--;
+  return o === 0 ? 0 : o;   // Math.ceil 의 −0 을 0 으로(옛 루프와 같은 값)
 }
 
 /**
@@ -223,17 +242,11 @@ export function idleOf(ports, daily30) {
 }
 
 /**
- * 화면 응답 조립(순수).
- * @param period   periodOf 결과
- * @param ports    portList 결과
- * @param hist     1시간 칸 portSeries — d: 고른 날로 끝나는 7일, w·m: 그 기간. histSince 가 시작.
- * @param chart    d 의 15분 차트 portSeries(대상 포트만) — 없으면(15분 보관이 지난 날) hist 의 마지막 날을 쓴다
- * @param prev     이전 기간 차트(대상 포트만, 선택) — { res, since, bucketMs, n }
- * @param daily30  지난 30일 하루 칸 portSeries(유휴 판정, 선택)
- * @param view     'port' | 'storage'
- * @param target   포트 번호(view=port) 또는 스토리지 키(view=storage) — 없거나 모르면 기본값을 고른다
+ * v2.782(점검 K3 I-I2): 조립의 바탕(순수) — 전 포트 1시간 칸·히트맵 A 행·스토리지 합. 대상 고르기와 최종 조립이 같은 것을 쓴다.
+ * 라우트는 이것을 한 번 만들어 대상 포트를 고르고(usageTargetMembers), 같은 바탕을 buildPortUsage({ base }) 에 넘긴다 —
+ * 전에는 대상 고르기용으로 buildPortUsage 를 한 번 더 돌려 큰 디렉터·1달에서 같은 동기 구간이 두 번 들어갔다.
  */
-export function buildPortUsage({ period, ports, hist, histSince, chart = null, prev = null, daily30 = null, view = 'port', target = null, now = Date.now() }) {
+export function usageBase({ period, ports, hist, histSince, now = Date.now() }) {
   const histDays = Math.round((period.end - histSince) / DAY_MS);
   const H = denseByPort(hist, { since: histSince, bucketMs: HOUR, n: histDays * 24, now });
   const periodDays = period.days.length;
@@ -259,9 +272,13 @@ export function buildPortUsage({ period, ports, hist, histSince, chart = null, p
     const { cells, partial } = sumCells(g.members.map((m) => portCells.get(m)));
     return { kind: 'storage', key: `s:${g.key}`, storage: g.key, name: g.key, members: g.members, capBps: capSum(g.members), cells, partial };
   });
-
-  // 대상 고르기
   const pAvg = (pt) => meanOf((portCells.get(pt) || []).map((c) => (c ? c[0] : null)));
+  return { period, ports, hist, histSince, now, histDays, H, periodDays, dayFrom, isD, portCells, groups, portOf, portRows, storageRows, pAvg };
+}
+
+/** 대상 고르기 — 요청 대상이 없거나 모르면 평균이 가장 큰 포트(스토리지 묶음). */
+function chooseTarget(base, { view = 'port', target = null } = {}) {
+  const { portRows, storageRows, pAvg } = base;
   let tgt = null;
   if (view === 'storage') {
     const want = target == null ? null : String(target);
@@ -272,6 +289,34 @@ export function buildPortUsage({ period, ports, hist, histSince, chart = null, p
     tgt = portRows.find((r) => target != null && target !== '' && r.port === want) || null;
     if (!tgt && portRows.length) tgt = [...portRows].sort((a, b) => (pAvg(b.port) ?? -1) - (pAvg(a.port) ?? -1))[0];
   }
+  return tgt;
+}
+
+/** 대상의 멤버 포트(라우트가 대상 포트만 15분·앞 기간을 조회할 때). buildPortUsage 의 target.members 와 같다. */
+export function usageTargetMembers(base, { view = 'port', target = null } = {}) {
+  const tgt = chooseTarget(base, { view, target });
+  return tgt ? (tgt.kind === 'storage' ? tgt.members : [tgt.port]) : [];
+}
+
+/**
+ * 화면 응답 조립(순수).
+ * @param period   periodOf 결과
+ * @param ports    portList 결과
+ * @param hist     1시간 칸 portSeries — d: 고른 날로 끝나는 7일, w·m: 그 기간. histSince 가 시작.
+ * @param chart    d 의 15분 차트 portSeries(대상 포트만) — 없으면(15분 보관이 지난 날) hist 의 마지막 날을 쓴다
+ * @param prev     이전 기간 차트(대상 포트만, 선택) — { res, since, bucketMs, n }
+ * @param daily30  지난 30일 하루 칸 portSeries(유휴 판정, 선택)
+ * @param view     'port' | 'storage'
+ * @param target   포트 번호(view=port) 또는 스토리지 키(view=storage) — 없거나 모르면 기본값을 고른다
+ * @param base     usageBase 결과(선택) — 같은 period·ports·hist·histSince·now 로 만든 것만 쓰고, 아니면 새로 만든다
+ */
+export function buildPortUsage({ period, ports, hist, histSince, chart = null, prev = null, daily30 = null, view = 'port', target = null, now = Date.now(), base = null }) {
+  const B = base && base.period === period && base.ports === ports && base.hist === hist && base.histSince === histSince && base.now === now
+    ? base : usageBase({ period, ports, hist, histSince, now });
+  const { histDays, H, periodDays, dayFrom, isD, groups, portOf, portRows, storageRows, pAvg } = B;
+
+  // 대상 고르기
+  const tgt = chooseTarget(B, { view, target });
   const members = tgt ? (tgt.kind === 'storage' ? tgt.members : [tgt.port]) : [];
 
   // 차트(대상) — d: 15분(가능하면), w·m: 1시간
@@ -296,6 +341,16 @@ export function buildPortUsage({ period, ports, hist, histSince, chart = null, p
       const pl = members.map((m) => P.get(m) || { avg: new Array(prev.n).fill(null), peak: new Array(prev.n).fill(null) });
       const pa = sumSeries(pl.map((x) => x.avg)), pp = sumSeries(pl.map((x) => x.peak));
       ch.prev = { since: prev.since, bucketMs: prev.bucketMs, avg: pa.values, peak: pp.values, avgMean: meanOf(pa.values), peakMax: maxAt(pp.values).max };
+      // v2.782(점검 K3 I-B2): 진행 중 기간(오늘·이번 7일·이번 달)의 현재 쪽은 '지금까지' 의 칸뿐이다(denseByPort 가 미래 칸을 비운다).
+      //   앞 기간 전체와 견주면 매일 같은 트래픽도 평균 −77%·피크 −90% 로 보였다 — 앞 기간 KPI 도 **같은 경과 구간**만 잘라 낸다.
+      //   기준은 겹쳐 그리기(usageChartRows)와 같은 '기간 시작부터의 경과 시간' — 앞 칸 j ≤ floor(경과/앞 칸 폭)
+      //   (15분↔1시간 칸·달 길이 차이를 함께 처리 — 앞 달이 더 짧으면 앞 달 전체까지). 겹쳐 그리는 선(avg·peak)은 앞 기간 전체 그대로.
+      if (period.current) {
+        const elapsedMs = Math.max(0, now - period.start);
+        const cut = Math.min(pa.values.length, Math.floor(elapsedMs / prev.bucketMs) + 1);
+        Object.assign(ch.prev, { avgMean: meanOf(pa.values.slice(0, cut)), peakMax: maxAt(pp.values.slice(0, cut)).max,
+          sameElapsed: true, elapsedMs, cmpEnd: prev.since + cut * prev.bucketMs });
+      }
     }
   }
 
