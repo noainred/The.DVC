@@ -16,6 +16,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';  
 import { numOrNull } from '../util/numOrNull.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { getLogsDb } from './db.js';
+import { FUTURE_CLOCK_TOLERANCE_MS } from './clockTolerance.js';   // v2.783(점검 Q3 L-B1): coverage·가용성과 같은 값 한 벌(import 0 모듈)
 import { ingestSnapRows } from '../veeam/snapDb.js';   // v2.759: 스냅샷 행은 Veeam 전용 DB 에도(카드 백업 수량을 바로 계산)
 import { loadLogSettings } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
@@ -55,6 +56,13 @@ const _collectOk = new Map();   // vcenterId → { at, capped, events }
  *   (nextSinceTs — 읽은 커서는 인메모리, 재시작하면 한 번 더 읽고 다시 나아간다) ⓒ 읽었는데 하나도 저장되지 않은 상한 주기는 경고·결과에 남긴다.
  */
 const _readCursor = new Map();  // vcenterId → 마지막으로 읽은 이벤트 시각(저장 여부와 무관)
+/*
+ * v2.783(점검 Q3 L-B2): 읽은 커서를 기록한 순간의 **포탈** 시각 — 커서(vCenter 시각)가 이보다 늦으면 그 vCenter 는 앞서 있었다.
+ *   다음 주기 시작점을 이 시각 이하로 둔다(collectBeginTs — 앞서던 vCenter 를 NTP 로 맞춘 뒤의 이벤트를 놓치지 않게). 커서 파일 readAt 으로 영속.
+ *   없으면(이 프로세스에서 아직 못 읽음 + 옛 커서 파일) 기동 시각(_processStartMs)으로 대신한다.
+ */
+const _readAt = new Map();
+let _processStartMs = Date.now();
 /*
  * v2.765(실서버 OC2 13일 정체 — 재시작 8회): 위 두 기록(_collectOk·_readCursor)이 인메모리라 재시작마다 db.lastTs(마지막 **저장** 시각)로
  *   되돌아갔다 — 상한에 걸린 주기가 읽어 둔 커서·'읽었는데 저장 0' 구간이 매번 사라져 같은 구간을 다시 읽었다. 이제 주기마다 1회(적재 뒤)
@@ -111,7 +119,10 @@ export function normalizeCursorEntry(v, now = Date.now()) {
   const readTs = ts(v.readTs);
   const okAt = ts(v.okAt);
   if (readTs == null && okAt == null) return null;
-  return { readTs, okAt, capped: v.capped === true, events: cnt(v.events), consecutiveCapped: cnt(v.consecutiveCapped), ended: typeof v.ended === 'string' ? v.ended.slice(0, 16) : null };
+  // v2.783(점검 Q3 L-B2): 커서를 기록한 포탈 시각 — readTs 와 같이 지금으로 자른다(포탈 시계가 뒤로 간 뒤에도 미래 값이 경계가 되지 않게).
+  //   옛 파일·못 읽은 값은 키를 싣지 않는다(옛 모양 그대로 — 소비처는 readAt 이 없으면 기동 시각으로 대신한다).
+  const readAt = readTs != null ? ts(v.readAt) : null;
+  return { readTs, okAt, capped: v.capped === true, events: cnt(v.events), consecutiveCapped: cnt(v.consecutiveCapped), ended: typeof v.ended === 'string' ? v.ended.slice(0, 16) : null, ...(readAt != null ? { readAt } : {}) };
 }
 /** 기동 뒤 첫 수집 전에 한 번 — 파일이 없으면 빈 기록, 손상이면 보존하고 빈 기록. dbKey(logsDbKey)가 파일의 것과 다르면 무시(3-b). */
 export function loadCursorFile({ now = Date.now(), force = false, dbKey = null } = {}) {
@@ -129,7 +140,10 @@ export function loadCursorFile({ now = Date.now(), force = false, dbKey = null }
     for (const [id, raw] of Object.entries(p.vcenters)) {
       const e = normalizeCursorEntry(raw, now);
       if (!e || !id) continue;
-      if (e.readTs != null && e.readTs > (_readCursor.get(id) || 0)) _readCursor.set(id, e.readTs);
+      if (e.readTs != null && e.readTs > (_readCursor.get(id) || 0)) {
+        _readCursor.set(id, e.readTs);
+        if (e.readAt != null) _readAt.set(id, e.readAt); else _readAt.delete(id);   // v2.783(L-B2): 옛 파일(readAt 없음)은 기동 시각으로 대신(collectBeginTs)
+      }
       if (e.okAt != null && !_collectOk.has(id)) _collectOk.set(id, { at: e.okAt, capped: e.capped, events: e.events, ended: e.ended, restored: true });
       if (e.consecutiveCapped > 0) _capStreak.set(id, e.consecutiveCapped);
     }
@@ -142,14 +156,14 @@ export function loadCursorFile({ now = Date.now(), force = false, dbKey = null }
  */
 export function saveCursorFile({ force = false, knownIds = null, dbKey = null } = {}) {
   if (knownIds instanceof Set && knownIds.size > 0) {
-    for (const m of [_readCursor, _collectOk, _capStreak, _lastPoll]) for (const id of [...m.keys()]) if (!knownIds.has(id)) { m.delete(id); _cursorDirty = true; }
+    for (const m of [_readCursor, _readAt, _collectOk, _capStreak, _lastPoll]) for (const id of [...m.keys()]) if (!knownIds.has(id)) { m.delete(id); _cursorDirty = true; }
   }
   if (!_cursorDirty && !force) return false;
   const vcenters = {};
   const ids = new Set([..._readCursor.keys(), ..._collectOk.keys()]);
   for (const id of [...ids].sort()) {
     const ok = _collectOk.get(id);
-    vcenters[id] = { readTs: _readCursor.get(id) ?? null, okAt: ok?.at ?? null, capped: ok?.capped === true, events: ok?.events ?? 0, ended: ok?.ended ?? null, consecutiveCapped: _capStreak.get(id) || 0 };
+    vcenters[id] = { readTs: _readCursor.get(id) ?? null, readAt: _readCursor.has(id) ? (_readAt.get(id) ?? null) : null, okAt: ok?.at ?? null, capped: ok?.capped === true, events: ok?.events ?? 0, ended: ok?.ended ?? null, consecutiveCapped: _capStreak.get(id) || 0 };
   }
   try {
     atomicWriteFileSync(CURSOR_FILE, JSON.stringify({ savedAt: Date.now(), ...(dbKey ? { db: dbKey } : {}), vcenters }, null, 1), { mode: 0o600 });
@@ -174,7 +188,7 @@ export function syncCursorDbKey(dbKey) {
   const prev = _activeDbKey;
   _activeDbKey = dbKey || prev;
   if (!prev || !dbKey || sameLogsDb(prev, dbKey)) return false;
-  _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear();
+  _readCursor.clear(); _readAt.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear();
   _cursorDirty = true;   // 이번 주기 끝의 저장이 새 DB 키로 덮는다
   console.warn(`[vclogs] 로그 DB 가 바뀌었습니다(${prev.path} → ${dbKey.path}) — 수집 커서를 비우고 새 DB 의 마지막 저장 시각(없으면 최근 7일)부터 읽습니다`);
   return true;
@@ -193,7 +207,9 @@ export function cursorSaveDue({ dirty, lastAt, now = Date.now(), everyMs = CURSO
   return last > now || now - last >= Math.max(0, Number(everyMs) || 0);
 }
 /** 테스트 전용 — 인메모리 기록을 비우고 다음 수집이 파일을 다시 읽게 한다. */
-export function _resetCursorsForTest() { _readCursor.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear(); _clockLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; _cursorSaveAt = 0; _activeDbKey = null; }
+export function _resetCursorsForTest() { _readCursor.clear(); _readAt.clear(); _collectOk.clear(); _capStreak.clear(); _lastPoll.clear(); _lagLog.clear(); _inflight.clear(); _clockLog.clear(); _cursorLoaded = false; _cursorDirty = false; _cursorWarnAt = 0; _cursorSaveAt = 0; _activeDbKey = null; }
+/** v2.783(점검 Q3 L-B2): 테스트 전용 — 기동 시각(readAt 이 없을 때의 대체 경계)을 바꾼다(재시작 흉내). 인자가 없으면 지금. */
+export function _setProcessStartForTest(ms) { _processStartMs = Number.isFinite(Number(ms)) && Number(ms) > 0 ? Number(ms) : Date.now(); }
 /** v2.772(Z2-2): 테스트 전용 — 정리 스로틀 틱을 처음(기동 직후)으로 되돌린다. 용량 확인은 둘째 주기부터라 테스트가 순서에 기대지 않게. */
 export function _resetTickForTest() { tick = 0; lastCap = null; }
 /** v2.772(Z1-3): 진행 중인 수집이 언제 시작됐는가(ms) — 없으면 null. '지금 수집' 라우트가 먼저 응답할 때 싣는다. */
@@ -273,12 +289,25 @@ export function eventRowKey(e) {
  *   여유 안(조금 앞선 vCenter)은 예전 그대로다 — 지금으로 끌어내리면 계속 앞선 vCenter 가 매 주기 [지금, vCenter 지금] 을 다시 읽고, 바쁜 vCenter 는 그 재읽기가
  *   묶음 상한을 넘어 거짓 '정체'(읽었는데 저장 0)가 된다. 정직 기록: 여유를 넘게 **계속** 앞선 vCenter 는 매 주기 그 구간을 다시 읽는다(중복은 걸러진다 — 비용만).
  * v2.782(점검 K1 F-B2): '여유 안은 예전 그대로' 는 이제 저장 행이 없어도(심각도 필터) 성립한다 — 읽은 커서도 여유를 넘을 때만 지금으로 잘린다(폴러 onBatch).
- *   정직 기록(남은 비용): **포탈 시계가 10분 넘게 늦으면** vCenter 하나만 보고는 '포탈이 늦음' 과 'vCenter 가 앞섬' 을 구분할 수 없어 모든 vCenter 가
- *   앞섬으로 판정되고, 매 주기 (늦은 만큼 + 주기) 구간을 다시 읽으며 vCenter 마다 시간당 경고 1줄이 나온다. 중복은 걸러지므로 유실은 없다(비용만).
+ * v2.783(점검 Q3 L-B2 — 시뮬레이션 재현): 위 '여유 안은 그대로' 가 남긴 유실 — 여유 안의 시작점(읽은 커서·마지막 저장 — 둘 다 vCenter 시각)은 앞서던
+ *   vCenter 를 NTP 로 맞춘 **뒤** 실제 시각보다 앞에 있어, [보정 뒤 실제 시각, 옛 시작점) 사이에 생긴 이벤트는 beginTime 앞이라 **영영** 읽히지 않았다
+ *   (최대 여유 10분 — 전량 저장(기본 info) 설치본은 lastStored 경로로 v2.781 이전부터, 심각도 필터 설치본은 v2.782 F-B2 부터). 'min(시작점, 지금)' 은
+ *   효과가 없다(반증) — 다음 주기의 지금은 지난 읽기 + 주기라 앞선 폭(≤ 여유 10분 ≤ 기본 주기 10분)보다 늘 크다. 이 함수는 그대로 두고 폴러가 결과를
+ *   collectBeginTs 로 한 번 더 자른다 — 읽은 커서를 기록한 순간의 **포탈** 시각(_readAt · 커서 파일 readAt)보다 늦으면 그 시각부터 읽는다.
+ *   정직 기록(이 수정의 비용 — F-B2 가 없앤 재읽기를 '앞선 vCenter' 에 한해 되돌린다):
+ *    · 앞선 vCenter 는 매 주기 앞선 폭(a분 ≤ 10분)만큼을 다시 읽는다 — 전량 저장 vCenter 도. 중복은 걸러진다(로그 DB 번호@시각 키 INSERT OR IGNORE ·
+ *      NDJSON seen · 전용 스냅샷 DB 해시 UNIQUE) — 저장 수(stored)는 실제 삽입 수라 부풀지 않는다. 비용은 그 건수/쪽 크기만큼의 ReadNextEvents 와 RTT.
+ *    · 포탈 시계가 L(< 여유) 늦으면 vCenter 하나만 보고는 '포탈이 늦음' 과 'vCenter 가 앞섬' 을 구분할 수 없어 **모든 vCenter** 가 매 주기 L 만큼 다시 읽는다
+ *      (경고 없음 — 여유 안). L 이 여유를 넘으면 읽은 커서가 지금으로 잘려 매 주기 (L + 주기) 구간을 다시 읽고 vCenter 마다 시간당 경고 1줄(v2.782 와 같다).
+ *    · 재읽기만으로 시간 예산을 다 쓰면 그 주기가 거짓 '정체'(상한 · 읽었는데 저장 0) 1주기로 보일 수 있다 — 최소 예산 30초 ÷ RTT 0.8초 × 쪽 200건 ≈
+ *      앞선 폭 안에 약 7,500건 이상일 때(계산값 — 실측 아님). 커서는 _readAt 뒤로 나아가 있으므로 다음 주기는 이어 읽는다(영구 정체 아님).
+ *    · 옛 커서 파일(readAt 없음)로 재시작하면 기동 시각으로 대신한다 — 보정이 재시작 **전**에 있었으면 보정~기동 사이는 여전히 못 읽을 수 있다(일부만 막는다).
+ *    · 앞서지 않던 vCenter 의 시계가 **뒤로** 가는 경우(시작점이 vCenter 시각상 미래가 된다)는 막지 못한다 — vCenter CurrentTime 으로 시차 변화를 재야 한다(별건).
  *   lastStored 는 폴러가 db.lastTs(id, { maxTs: 지금 + 여유 }) 로 준다(F-I1 — DB 에 남은 미래 행이 시작점 후보를 매 주기 버리게 하지 않게).
  *   '지금' 대체는 읽은 커서가 없을 때(커서 파일 없이 재시작)뿐이다 — 그때는 마지막 수집 뒤~지금 사이를 못 읽을 수 있다(예전에는 미래 고정이라 그 뒤 전부였다).
+ *   (v2.783: 그 경우 readAt 도 없으므로 폴러의 collectBeginTs 가 기동 시각으로 당긴다 — 못 읽는 틈은 마지막 수집 뒤~기동 사이로 줄어든다.)
  */
-export const FUTURE_CLOCK_TOLERANCE_MS = 10 * 60_000;
+export { FUTURE_CLOCK_TOLERANCE_MS };   // v2.783(L-B1): 값은 ./clockTolerance.js(coverage 가 폴러를 정적으로 끌어오지 않게) — 이 이름은 그대로 내보낸다
 export function nextSinceTs(lastStored, lastRead, { now = Date.now(), firstDays = 7, toleranceMs = FUTURE_CLOCK_TOLERANCE_MS, onAhead = null } = {}) {
   const limit = now + Math.max(0, Number(toleranceMs) || 0);
   const cand = [Number(lastStored) || 0, Number(lastRead) || 0].filter((t) => t > 0);
@@ -287,6 +316,17 @@ export function nextSinceTs(lastStored, lastRead, { now = Date.now(), firstDays 
   const sane = cand.filter((t) => t <= limit);
   if (typeof onAhead === 'function') { try { onAhead(base - now); } catch { /* 경고 실패가 수집을 막지 않게 */ } }
   return sane.length ? Math.max(...sane) : now;
+}
+/**
+ * v2.783(점검 Q3 L-B2): 이번 수집의 beginTime — nextSinceTs 결과(sinceTs)가 읽은 커서를 기록한 포탈 시각(readAt)보다 늦으면 readAt(순수).
+ *   readAt 이 없으면(옛 커서 파일 · 이 프로세스에서 아직 못 읽음) fallbackAt(폴러는 기동 시각). 둘 다 못 읽은 값이면 sinceTs 그대로.
+ *   앞서지 않은 vCenter 는 sinceTs ≤ readAt 이라 값이 바뀌지 않는다(재읽기 0). 비용·한계는 nextSinceTs 주석의 v2.783 정직 기록.
+ */
+export function collectBeginTs(sinceTs, readAt, fallbackAt = _processStartMs) {
+  const s = Number(sinceTs) || 0;
+  const pos = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
+  const bound = pos(readAt) ?? pos(fallbackAt);
+  return bound != null && s > bound ? bound : s;
 }
 /*
  * v2.781(점검 G1 D-B1): vCenter 이벤트 시각이 포탈 시각보다 여유(FUTURE_CLOCK_TOLERANCE_MS)를 넘게 앞섰다는 경고 — vCenter 마다 시간당 1줄
@@ -399,6 +439,7 @@ export function logCollectDiag(storeVcenters = [], { now = Date.now(), lastTsOf 
       lastStoredTs,
       firstTs: first === undefined ? null : first,
       cursorTs: _readCursor.get(id) ?? null,
+      cursorReadAt: _readAt.get(id) ?? null,   // v2.783(L-B2): 그 커서를 기록한 포탈 시각 — 다음 시작점의 상한(collectBeginTs)
       okAt: ok?.at ?? null,
       capped: ok ? ok.capped === true : null,
       ended: ok?.ended ?? null,
@@ -603,6 +644,10 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
         //   [포탈 지금, vCenter 지금] 을 다시 읽었다. 온전한 시각(okAt — 아래 at)은 그대로 지금으로 자른다(지연을 숨기지 않게).
         //   여유 안의 읽은 커서가 남기는 최악의 미래 노출은 여유(10분) 이하 — lastStored 가 같은 경계로 이미 받아들인 것과 같고, 재시작하면
         //   normalizeCursorEntry 가 지금으로 자른다.
+        // v2.783(점검 Q3 L-B2): 그 '노출' 은 vCenter 시계가 보정되면 유실이 됐다(보정 뒤 [실제 지금, 옛 커서) 의 이벤트를 영영 못 읽음). 커서를 기록하는
+        //   순간의 포탈 시각(recNow)을 _readAt 에 함께 남기고, 다음 주기는 collectBeginTs 로 그 시각 이하에서 시작한다. 비용 — 앞선 vCenter 는 매 주기
+        //   앞선 폭만큼 다시 읽는다(중복은 INSERT OR IGNORE·seen·해시 UNIQUE 가 거르고 stored 는 실제 삽입 수) · 재읽기만으로 예산을 다 쓰면(앞선 폭 안
+        //   약 7,500건 이상 — 추정) 거짓 '정체' 1주기. 자세한 정직 기록은 nextSinceTs 주석.
         const recNow = Date.now();
         if (maxRead - recNow > FUTURE_CLOCK_TOLERANCE_MS) {
           warnClockAhead(vcId, maxRead - recNow, '읽은 시각을 포탈 지금으로 잘라 기록합니다');
@@ -630,7 +675,7 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
         const atRaw = capped ? (cycleMaxRead || null) : (Math.max(startedAt, cycleMaxRead) || null);
         const at = atRaw != null ? Math.min(atRaw, recNow) : null;   // v2.781(D-B1): 미래 금지 · v2.782(F-B2): 읽은 커서와 달리 여유 안에서도 지금으로(지연을 숨기지 않게)
         if (at != null) { _collectOk.set(vcId, { at, capped, events: poll.read, ended: typeof ended === 'string' ? ended : null }); _cursorDirty = true; }
-        if (maxRead > (_readCursor.get(vcId) || 0)) { _readCursor.set(vcId, maxRead); _cursorDirty = true; }
+        if (maxRead > (_readCursor.get(vcId) || 0)) { _readCursor.set(vcId, maxRead); _readAt.set(vcId, recNow); _cursorDirty = true; }
         // v2.781(점검 G1 D-I2): 따라잡는 도중 재시작해도 진척을 잃지 않게 — 최대 CURSOR_MIDCYCLE_SAVE_MS 에 1번 중간 저장(이번 주기 DB 키 · 등록부 정리 없음).
         if (cursorSaveDue({ dirty: _cursorDirty, lastAt: _cursorSaveAt, now: Date.now(), everyMs: cursorSaveEveryMs })) saveCursorFile({ dbKey });
         if (final && capped && poll.read > 0 && poll.stored === 0) {
@@ -654,7 +699,9 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
         //   전 VM 을 '수집 시작부터만 잼(일부 기간)' 으로 내던 공백. 이벤트 수도 기간에 비례(7일마다 25건).
         const firstDays = mock ? MOCK_FIRST_DAYS : 7;
         // v2.756: 읽은 커서까지 본다(포함 — 2-b) · v2.781(D-B1): 지금 + 여유를 넘는 미래 후보는 버린다(경고 시간당 1줄).
-        const sinceTs = nextSinceTs(last, _readCursor.get(vcId), { firstDays, onAhead: (ms) => warnClockAhead(vcId, ms, '미래 시각을 버리고 읽은 커서(없으면 지금)부터 읽습니다') });
+        const sinceTs0 = nextSinceTs(last, _readCursor.get(vcId), { firstDays, onAhead: (ms) => warnClockAhead(vcId, ms, '미래 시각을 버리고 읽은 커서(없으면 지금)부터 읽습니다') });
+        // v2.783(점검 Q3 L-B2): 읽은 커서를 기록한 포탈 시각(없으면 기동 시각) 이하로 — 앞서던 vCenter 의 시계가 보정된 뒤의 이벤트를 놓치지 않게.
+        const sinceTs = collectBeginTs(sinceTs0, _readAt.get(vcId));
         if (mock) {
           const events = synthEvents(vc.id, sinceTs, last ? 25 : 25 * Math.ceil(firstDays / 7));
           events.ended = 'empty';
@@ -843,7 +890,9 @@ export async function logStatus() {
     dbUsedBytes: Number.isFinite(used) ? used : null, dbFreeBytes: Number.isFinite(free) ? free : null, ...(lastCap ? { lastCap } : {}),
     // v2.772(Z1-2·Z1-4·Z2-I1): 마지막 저장·가장 오래된 시각은 vCenter 마다 단독 MAX·MIN(인덱스 끝점 — 실시간) · 주기 수집에서 빼는 이유(skip).
     //   NDJSON 폴백은 lastTs·firstTs 가 전 행 훑기라(vCenter 마다) 예전대로 건수 목록의 마지막 시각만 쓴다.
-    collect: logCollectDiag(meta?.vcenters, { ...(db.kind === 'sqlite' ? { lastTsOf: (id) => db.lastTs(id), firstTsOf: (id) => db.firstTs(id) } : {}), skipOf: collectSkipMap() }),
+    // v2.783(점검 Q3 L-B1): lastTsOf 는 지금 + 여유 이하의 MAX — 미래 행 1건(2099 등 — prune 은 ts < ? 라 남는다)이 화면 lagMs 를 0 으로,
+    //   '마지막 저장' 을 미래로 보이게 하던 것(콘솔 지연 줄·시작점은 v2.782 F-I1 에서 이미 경계를 썼다). NDJSON 폴백은 건수 목록 값 그대로(전 행 훑기 회피).
+    collect: logCollectDiag(meta?.vcenters, { ...(db.kind === 'sqlite' ? { lastTsOf: (id) => db.lastTs(id, { maxTs: Date.now() + FUTURE_CLOCK_TOLERANCE_MS }), firstTsOf: (id) => db.firstTs(id) } : {}), skipOf: collectSkipMap() }),
     maxPerPollEffective: effectiveMaxPerPoll(settings), collectorMaxEvents: COLLECTOR_MAX_EVENTS,
     // v2.765(재검토): 따라잡기는 회차가 아니라 한 세션의 묶음(batchRows)·시간 예산 — 화면 안내가 이 값을 쓴다. busySkips 는 진행 중이라 건너뛴 틱.
     catchup: { budgetMs: catchupBudgetMs(settings.pollIntervalMin), ratio: CATCHUP_BUDGET_RATIO, batchRows: EVENT_BATCH_ROWS, minBudgetMs: CATCHUP_MIN_BUDGET_MS, streaming: true },

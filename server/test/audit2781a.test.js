@@ -156,7 +156,9 @@ test('D-B1 — 미래 시각 이벤트 1건 뒤 정상 시각 이벤트를 다�
   } finally { w.mock.restore(); l.mock.restore(); await closeSrv(srv); P._resetCursorsForTest(); }
 });
 
-test('D-B1 — 조금(여유 안) 앞선 vCenter 는 예전처럼 저장 시각부터 읽는다(같은 구간을 다시 읽지 않는다) · 경고 없음', async () => {
+// v2.783(점검 Q3 L-B2): 이 단언은 '시작점 = 마지막 저장 시각(vCenter 시각)' 을 고정했는데, 그 시작점은 앞서던 vCenter 를 NTP 로 맞춘 뒤 실제 시각보다
+//   앞에 있어 [보정 뒤, 옛 시작점) 의 이벤트를 영영 건너뛰었다(유실). 이제 시작점은 지난 읽기의 **포탈** 시각 이하 — 앞선 폭의 재읽기는 의도된 비용이다.
+test('D-B1 — 조금(여유 안) 앞선 vCenter 의 시작점은 지난 읽기의 포탈 시각 이하(v2.783 L-B2 — 보정 뒤 유실 방지) · 경고 없음', async () => {
   const { srv, state } = fakeVcenter();
   await listen(srv);
   const w = mock.method(console, 'warn', () => {}); const l = mock.method(console, 'log', () => {});
@@ -167,7 +169,8 @@ test('D-B1 — 조금(여유 안) 앞선 vCenter 는 예전처럼 저장 시각�
     state.events = Array.from({ length: 5 }, (_, i) => ({ key: i + 1, ts: now + MIN + i * 1000 }));   // vCenter 시계 1분 앞섬
     await P.pollLogsOnce({ manual: true });
     await P.pollLogsOnce({ manual: true });
-    assert.equal(state.begins[1].begin, now + MIN + 4000, '시작점 = 마지막 저장 시각(포함) — 지금으로 끌어내리지 않는다');
+    const c = P.logCollectDiag([]).find((x) => x.vcenterId === 'us');
+    assert.ok(state.begins[1].begin <= c.cursorReadAt && state.begins[1].begin >= now, `시작점 = 지난 읽기의 포탈 시각 이하(+${state.begins[1].begin - now}ms)`);
     assert.equal(clockWarns(w).length, 0);
   } finally { w.mock.restore(); l.mock.restore(); await closeSrv(srv); P._resetCursorsForTest(); }
 });
