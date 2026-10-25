@@ -41,6 +41,7 @@ export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString(
  * v2.743(감사 WEB-04): '지금 수집' 결과 문구(순수 — vitest 고정). 예전에는 응답과 무관하게 '수집 완료: N건' 만 썼다 —
  *   진행 중(busy)이면 서버가 직전 결과를 돌려줘 그 건수를 이번 결과로 말했고, 꺼짐(skipped)은 '수집 완료: 0건', 전부 실패해도 '0건' 이었다.
  *   판정: busy(새로 수집하지 않음) → skipped(꺼짐 — 수집하지 않음) → 적재 건수 + 로그인 거부·인증 정지·수집 실패·수집 대상 아님을 각각.
+ *   v2.781(D-B3): 정체(stalled)·1일 넘는 지연(lagging) vCenter 수도 덧붙인다(제목은 그대로 — '문제' 는 거부·정지·실패뿐).
  *   문제가 하나라도 있으면 '수집 완료' 라고 말하지 않는다. 건수를 모르면 '—'(0 아님).
  */
 export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
@@ -61,6 +62,11 @@ export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('k
     const first = Array.isArray(r.failed) && r.failed[0] ? `${r.failed[0].vcenterId}: ${r.failed[0].error || '알 수 없는 오류'}` : '';
     extra.push(`수집 실패 ${failed}곳${first ? `(${first}${failed > 1 ? ' 외' : ''})` : ''}`);
   }
+  // v2.781(점검 G1 D-B3): 서버가 같은 응답에 싣는 정체(stalled — 끝까지 못 읽었는데 새로 저장 0)·지연(lagging — 1일 넘게 뒤처짐)도 센다 —
+  //   예전에는 버튼 문구가 '수집 완료: 0건 적재' 인데 같은 화면의 표는 '정체' 라 두 표시가 엇갈렸다. 제목은 바꾸지 않는다(따라잡기는 실패가 아니다).
+  const stalledN = len(r.stalled), laggingN = len(r.lagging);
+  if (stalledN) extra.push(`읽었지만 새로 저장 0 — ${stalledN}곳(표의 ‘정체’ · 중복·심각도 필터 — 읽은 시각부터 이어 읽습니다)`);
+  if (laggingN) extra.push(`1일 넘게 뒤처진 vCenter ${laggingN}곳(아래 표의 상태·지연 칸)`);
   if (skippedVc) extra.push(`수집 대상이 아닌 vCenter ${skippedVc}곳(아래 안내)`);
   const problem = rejected || stopped || failed;
   return `${problem ? '수집 끝(일부 실패)' : '수집 완료'}: ${nTxt} 적재${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
