@@ -28,6 +28,7 @@ import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS,
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
+import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -402,14 +403,22 @@ function maskDetail(detail, admin, vmName = '') {
 async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const admin = isAdminDetailUser(req.user);
   const linked = !registryBroken() && serversForVcenter(vc.id).length > 0;
-  let vcnt = null; let match = null; let views = [];
+  // v2.781(점검 G3 C-B1): VM 목록이 없으면(재시작 직후 골격 · 아직 수집 전 · 그 vCenter 인벤토리 0대) 대조 결과 0 은 사실이 아니다 — 모름.
+  //   /veeam/backup-counts(v2.758)와 같은 규칙. ⚠ 판정은 vCenter **전체** 목록(vms)으로 — 전원·제외로 거른 목록(sv.vms)이 비었다고('꺼진 VM 0대') 모름이 아니다.
+  const noInventory = initial || !vms.length;
+  let vcnt = null; let match = null; let views = []; let runningStale = false;
   if (registryBroken()) {
     vcnt = { src: 'veeam', n: null, reason: 'registry-unreadable' };
   } else if (linked) {
     const r = resultsFor(vc.id, req);
     views = r.views;
-    match = r.results.length ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
-    vcnt = maskOtherVcenter(veeamCount({ views, byVm: match ? match.byVm : null, vmTotal: vms.length, otherVcenter: match?.otherVcenter || 0 }), admin, match ? Object.keys(match.byVm).length : 0);
+    if (noInventory) vcnt = { src: 'veeam', n: null, reason: 'no-inventory' };
+    else {
+      match = r.results.length ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
+      vcnt = maskOtherVcenter(veeamCount({ views, byVm: match ? match.byVm : null, vmTotal: vms.length, otherVcenter: match?.otherVcenter || 0 }), admin, match ? Object.keys(match.byVm).length : 0);
+      // v2.781(점검 G3 B-B1): 실패·오래된 결과라 '백업 중' 을 지운 서버가 있으면 실행 중·대기 수는 확정이 아니다(badges v2.761 D5 와 같은 판정).
+      runningStale = r.results.some((x) => x.result?.runningStale === true);
+    }
   } else if (isMockMode()) {
     match = demoVeeamMatch(vc.id, vms);
     views = [DEMO_SERVER_VIEW()];
@@ -421,7 +430,7 @@ async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const ev = await cachedSnapEvents(vc.id, vms, { initial, wait: false });
   const sc = snapCount({ ev, vms });
   const sv = vmScope(vms, scope || {});
-  const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
+  const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev, runningStale, noInventory }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
   return { row, match, ev, vcnt, sc, views, linked: isLinked, scopedVms: sv.vms };
 }
 
@@ -491,27 +500,35 @@ export function registerBackupStatus(api) {
   });
 
   // v2.780(사용자 선택 'CSV 내보내기'): 화면과 같은 조건 그대로 — 데이터 내보내기 권한(data.csv) + 감사 로그(다른 도구 CSV 와 같은 규칙).
+  // v2.781(점검 G3 B-I2): CSV 2종은 누를 때마다 서머리(vCenter 전부의 대조·스냅샷 요약)를 다시 계산한다 — 동시 1건(util/exportBusy · v2.575 규약).
+  //   잠금은 범위·존재 판정(404) 뒤에 잡고 release 는 finally(예외로 빠져나가도 이름이 잠기지 않게). 넘으면 409 export_busy.
   api.get('/tools/backup-summary.csv', csvPerm, toolsPerm, async (req, res) => {
+    const lock = acquireExport('backup-summary.csv', req);
+    if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
       const scope = scopeOf(req);
       const d = await summaryData(req, store.get(), scope);
       const lines = [CSV_BOM + csvLine(['vCenter', '범위', 'VM', 'Veeam 백업', '스냅샷 기준', '둘 다', 'Veeam 만', '스냅샷만', '확인 안 됨', '백업 중', '대기',
         '오래된 백업 1일+', '오래된 백업 3일+', '오래된 백업 7일+', '완료 시각 모름', '실패', '경고', '마지막 백업 완료(UTC)', 'Veeam 상태', '스냅샷 잔존', '제외(템플릿·vCLS)', '전원 모름'])];
       const n = (v) => (Number.isFinite(v) ? v : '');
+      // v2.781(B-B1): '백업 중' 을 지운 서버가 있으면 0 은 모름(빈칸) · 0 이 아니면 하한(≥N) — 화면과 같은 규칙.
+      const run = (r, v) => (r.runningStale && Number.isFinite(v) ? (v > 0 ? `≥${v}` : '') : n(v));
       for (const r of d.rows) {
-        lines.push(csvLine([r.name, scopeText(scope), r.vm, n(r.veeam), n(r.snap), n(r.split?.both), n(r.split?.vOnly), n(r.split?.sOnly), n(r.split?.none), n(r.running), n(r.pending),
+        lines.push(csvLine([r.name, scopeText(scope), n(r.vm), n(r.veeam), n(r.snap), n(r.split?.both), n(r.split?.vOnly), n(r.split?.sOnly), n(r.split?.none), run(r, r.running), run(r, r.pending),
           n(r.rpo?.d1), n(r.rpo?.d3), n(r.rpo?.d7), n(r.rpo?.unknown), n(r.results?.failed), n(r.results?.warning), iso(r.lastBackup), r.veeamState || '', n(r.snapStale), n(r.excluded), n(r.powerUnknown)]));
       }
       logAudit({ user: req.user?.username, action: 'backup-summary.csv', target: 'backup-summary', detail: `${d.rows.length} rows · ${scopeText(scope)}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="backup-summary-${fileStamp()}.csv"`);
       res.send(lines.join('\r\n'));
-    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); }
+    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); } finally { lock.release(); }
   });
 
   api.get('/tools/backup-detail.csv', csvPerm, toolsPerm, async (req, res) => {
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    const lock = acquireExport('backup-detail.csv', req);
+    if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
       const scope = scopeOf(req);
       const filter = VIEW_FILTERS.includes(String(req.query.filter || '')) ? String(req.query.filter) : 'all';
@@ -534,6 +551,6 @@ export function registerBackupStatus(api) {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="backup-detail-${fileStamp()}.csv"`);
       res.send(lines.join('\r\n'));
-    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); }
+    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); } finally { lock.release(); }
   });
 }

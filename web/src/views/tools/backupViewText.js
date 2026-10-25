@@ -56,18 +56,90 @@ export function needsAttention(r) {
   return r.snapStale > 0;
 }
 
-/** 오른쪽 '주의가 필요한 곳' 목록(최대 n개). */
+/*
+ * 오른쪽 '주의가 필요한 곳' 목록(최대 n개 + 잘리면 '외 N건' 한 줄).
+ * v2.781(점검 G3 C-I2): ① 심각한 것부터(bad → warn → info) 정렬한 **뒤에** 자른다 — 예전엔 vCenter 순서로 넣고 6개에서 잘라 뒤쪽의 '읽기 실패'·
+ *   맨 끝 'Veeam 연동 없음 N곳' 요약이 소리 없이 사라졌다. 잘렸으면 { more:N } 항목 한 줄로 알린다.
+ *   ② needsAttention(표의 '주의 필요' 보기)에 드는 행은 **반드시 한 줄 이상** 나온다 — Veeam 정상 + 스냅샷 모름·Veeam 결과 오래됨 행이 목록에 없어
+ *   '없습니다' 인데 보기에는 행이 있던 어긋남(재현 verify/att.mjs).
+ */
+const TONE_RANK = { bad: 0, warn: 1, info: 2 };
 export function attentionList(rows, n = 6) {
+  const list = Array.isArray(rows) ? rows : [];
   const out = [];
-  for (const r of Array.isArray(rows) ? rows : []) {
+  for (const r of list) {
+    if (!r) continue;
     const vs = veeamStateOf(r.veeamState);
-    if (r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked') out.push({ id: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
-    else if (r.hostMismatch) out.push({ id: r.id, tone: 'warn', title: `${r.name} — Veeam 이 다른 vCenter 이름으로 적음`, text: '포탈의 vCenter 주소와 Veeam 이 쓰는 이름이 다를 수 있습니다' });
+    const vBad = !!r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked';
+    if (vBad) out.push({ id: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
+    else {
+      if (r.hostMismatch) out.push({ id: r.id, tone: 'warn', title: `${r.name} — Veeam 이 다른 vCenter 이름으로 적음`, text: '포탈의 vCenter 주소와 Veeam 이 쓰는 이름이 다를 수 있습니다' });
+      if (r.veeamStale > 0) out.push({ id: `${r.id}:vstale`, tone: 'warn', title: `${r.name} — Veeam 서버 ${fmtNum(r.veeamStale)}대 결과 오래됨`, text: '마지막으로 읽은 결과의 수입니다' });
+      if (r.snap == null) out.push({ id: `${r.id}:snap`, tone: 'warn', title: `${r.name} — 스냅샷 기준 모름`, text: r.snapReason ? `사유: ${snapReasonText(r.snapReason)}` : '스냅샷 기준을 읽지 못했습니다' });
+    }
     if (r.snapStale > 0) out.push({ id: `${r.id}:stale`, tone: 'warn', title: `${r.name} — 스냅샷 잔존 ${r.snapStale}대`, text: '하루 넘게 남은 Veeam 임시 스냅샷(정리 실패 의심)' });
   }
-  const unlinked = (Array.isArray(rows) ? rows : []).filter((r) => r.veeamState === 'unlinked').map((r) => r.name);
+  const unlinked = list.filter((r) => r && r.veeamState === 'unlinked').map((r) => r.name);
   if (unlinked.length) out.push({ id: 'unlinked', tone: 'info', title: `Veeam 연동 없음 ${unlinked.length}곳`, text: `${unlinked.slice(0, 6).join(' · ')}${unlinked.length > 6 ? ' …' : ''} — 스냅샷 기준만 보입니다` });
-  return out.slice(0, n);
+  const sorted = out.map((a, i) => [a, i]).sort((x, y) => ((TONE_RANK[x[0].tone] ?? 1) - (TONE_RANK[y[0].tone] ?? 1)) || x[1] - y[1]).map(([a]) => a);
+  if (sorted.length <= n) return sorted;
+  const rest = sorted.length - n;
+  return [...sorted.slice(0, n), { id: 'more', tone: 'muted', more: rest, title: `외 ${rest}건`, text: '나머지는 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }];
+}
+
+/*
+ * v2.781(점검 G3 C-B2): 서머리 KPI 글자(순수) — 서버 backupTotals 의 '아는 vCenter 수·아는 VM 합' 으로 낸다.
+ *  · 그 기준을 아는 vCenter 가 0 곳이면 '—'(예전엔 'Veeam 0 · 0%'·'실패 0 · 경고 0' 이었다)
+ *  · 비율의 분모는 그 기준을 아는 vCenter 의 VM 합(vmVeeamKnown·vmSnapKnown) — 확인 불가 vCenter 의 VM 은 분모에서 뺀다(부제 '확인 불가 N곳 제외' 가 사실이 되게)
+ *  · 일부 서버만·일부만 읽은 vCenter 가 있으면 값 뒤 '*'(VCenters 백업 KPI 와 같은 표지 — 부분 합)
+ *  · '지금 백업 중' 은 마지막 읽기가 실패·오래된 서버가 있으면(runningUnknown) 하한 — 0 이면 '—', 아니면 '≥N'
+ *  · 서버 필드가 없으면(옛 응답) 모름 쪽으로 — 0 으로 지어내지 않는다.
+ */
+const nz = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+export function summaryKpis(t0, { rpoDays = 1 } = {}) {
+  const t = t0 && typeof t0 === 'object' ? t0 : {};
+  const join = (parts, dflt) => parts.filter(Boolean).join(' · ') || dflt;
+  const vcs = nz(t.vcenters); const vmUnknown = nz(t.vmUnknown);
+  const vm = {
+    value: vcs > vmUnknown ? `${fmtNum(t.vm)}${vmUnknown ? '*' : ''}` : '—',
+    sub: join([`vCenter ${fmtNum(t.vcenters)}개`, vmUnknown ? `* VM 목록 수집 전 ${vmUnknown}곳` : '']),
+  };
+  const vRead = nz(t.veeamKnownVcs); const vUnknown = nz(t.veeamUnknown); const vPartial = nz(t.veeamPartial);
+  // 연동 없음뿐이면 'Veeam 0' 은 사실(없음 확정) — 읽어야 할 vCenter 를 하나도 못 읽었으면 모름
+  const vShow = vRead > 0 || (vUnknown === 0 && nz(t.vmVeeamKnown) > 0);
+  const vPct = vShow ? pctOf(t.veeam, t.vmVeeamKnown) : null;
+  const veeam = {
+    value: vShow ? `${fmtNum(t.veeam)}${vPartial ? '*' : ''}${vPct != null ? ` · ${vPct}%` : ''}` : '—',
+    sub: join([vUnknown ? `확인 불가 ${vUnknown}곳 제외` : '', t.veeamUnlinked ? `연동 없음 ${t.veeamUnlinked}곳` : '', vPartial ? `* 일부 서버만 ${vPartial}곳` : ''], 'Veeam 서버 기준'),
+  };
+  const sKnown = nz(t.snapKnownVcs); const sPartial = nz(t.snapPartial);
+  const sPct = sKnown ? pctOf(t.snap, t.vmSnapKnown) : null;
+  const snap = {
+    value: sKnown ? `${fmtNum(t.snap)}${sPartial ? '*' : ''}${sPct != null ? ` · ${sPct}%` : ''}` : '—',
+    sub: join([t.snapUnknown ? `확인 불가 ${t.snapUnknown}곳 제외` : '', sPartial ? `* 일부만 읽음 ${sPartial}곳` : ''], '최근 7일 Veeam 스냅샷 · 지금 스냅샷'),
+  };
+  const rUnknown = nz(t.runningUnknown);
+  const runText = (v) => (!vRead ? '—' : rUnknown ? (nz(v) > 0 ? `≥${fmtNum(v)}` : '—') : fmtNum(v));
+  const running = {
+    value: runText(t.running),
+    sub: join([`대기 ${runText(t.pending)}`, rUnknown ? `모름 ${rUnknown}곳(마지막 읽기 실패·오래됨)` : '']),
+  };
+  const k = `d${RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1}`;
+  const rpo = {
+    value: vRead ? `${fmtNum(t.rpo?.[k])}${vPartial ? '*' : ''}` : '—',
+    sub: vRead ? join([t.rpo?.unknown ? `시각 모름 ${fmtNum(t.rpo.unknown)}` : '', `실패 ${fmtNum(t.failed)} · 경고 ${fmtNum(t.warning)}`])
+      : (vUnknown ? `Veeam 확인 불가 ${vUnknown}곳` : 'Veeam 백업 대상 중'),
+  };
+  return { vm, veeam, snap, running, rpo };
+}
+
+/** v2.781(점검 G3 B-B1): 표의 '백업 중' 칸 — 마지막 읽기가 실패·오래된 서버가 있으면 0 은 '—', 아니면 하한 '≥N'. */
+export const RUNNING_STALE_TITLE = '마지막 읽기가 실패했거나 오래된 Veeam 서버가 있어 그 서버의 백업 중 수는 모릅니다(실제보다 적을 수 있음)';
+export function runningCell(r) {
+  const n = r && typeof r.running === 'number' && Number.isFinite(r.running) ? r.running : null;
+  if (n == null) return { text: '—', active: false, sort: null };
+  if (r.runningStale) return n > 0 ? { text: `≥${fmtNum(n)}`, active: true, sort: n, title: RUNNING_STALE_TITLE } : { text: '—', active: false, sort: null, title: RUNNING_STALE_TITLE };
+  return { text: fmtNum(n), active: n > 0, sort: n };
 }
 
 /* ── v2.780 범위 옵션(두 화면 공유) ─────────────────────────────────────── */

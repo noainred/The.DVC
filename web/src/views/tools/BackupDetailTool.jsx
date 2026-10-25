@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell } from './backupViewText.js';
 import BackupOptions from './BackupOptions.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
 
@@ -138,7 +138,8 @@ export default function BackupDetailTool({ scope }) {
             <div><div style={{ fontSize: 12, color: '#86efac' }}>Veeam 백업</div><div style={{ fontSize: 22, fontWeight: 800, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80' }}>{fmtNum(r.veeam)}{pctOf(r.veeam, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.veeam, r.vm)}%</span>}</div></div>
             <div title={r.snap == null ? snapReasonText(r.snapReason) : undefined}><div style={{ fontSize: 12, color: '#d8b4fe' }}>스냅샷 기준</div><div style={{ fontSize: 22, fontWeight: 800, color: r.snap == null ? 'var(--text-dim)' : '#c084fc' }}>{fmtNum(r.snap)}{pctOf(r.snap, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.snap, r.vm)}%</span>}</div></div>
             <div><div className="muted" style={{ fontSize: 12 }}>확인 안 됨</div><div style={{ fontSize: 22, fontWeight: 800 }}>{r.split ? fmtNum(r.split.none) : '—'}</div></div>
-            <div><div style={{ fontSize: 12, color: '#fcd34d' }}>지금 백업 중</div><div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{fmtNum(r.running)}<span style={{ fontSize: 13, marginLeft: 6 }}>대기 {fmtNum(r.pending)}</span></div></div>
+            {/* v2.781(점검 G3 B-B1): 마지막 읽기가 실패·오래된 서버가 있으면(runningStale) 수는 하한 — 0 은 '—', 그 밖은 '≥N'(서머리 표와 같은 runningCell). */}
+            <div title={runningCell(r).title}><div style={{ fontSize: 12, color: '#fcd34d' }}>지금 백업 중</div><div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{runningCell(r).text}<span style={{ fontSize: 13, marginLeft: 6 }}>대기 {runningCell({ running: r.pending, runningStale: r.runningStale }).text}</span></div></div>
             <div title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}><div style={{ fontSize: 12, color: '#fdba74' }}>오래된 백업({opts.rpoDays}일 초과)</div><div style={{ fontSize: 22, fontWeight: 800, color: r.rpo ? '#fb923c' : 'var(--text-dim)' }}>{fmtNum(r.rpo?.[`d${opts.rpoDays}`])}</div></div>
             <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
           </div>
