@@ -367,12 +367,13 @@ export function CapacityForecast({ scope }) {
         <Kpi label="추세 산출" value={rows.length} unit="개" meta={`관측 ${data.config?.days}일 · 분석 대상 ${data.scannedDatastores}개`} />
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
-          <span className="muted">관측 기간</span>
+        {/* v2.782: 좁은 화면(400px)에서 '관측 기간' 이 한 글자씩 세로로 접혔다(옆 설명이 남은 폭을 다 가져감) — 줄바꿈은 설명 앞에서, 라벨은 한 줄로. */}
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, flexWrap: 'wrap' }}>
+          <span className="muted" style={{ flex: 'none', whiteSpace: 'nowrap' }}>관측 기간</span>
           <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
             {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d}일</option>)}
           </Select>
-          <span className="muted">증가 추세(선형회귀 신뢰도 R² 0.3 이상)인 데이터스토어를 표시합니다. 이미 한계에 닿은 항목은 신뢰도와 관계없이 <b>포화</b>로 맨 앞에 표시합니다.</span>
+          <span className="muted" style={{ flex: '1 1 260px', minWidth: 0 }}>증가 추세(선형회귀 신뢰도 R² 0.3 이상)인 데이터스토어를 표시합니다. 이미 한계에 닿은 항목은 신뢰도와 관계없이 <b>포화</b>로 맨 앞에 표시합니다.</span>
         </label>
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'daysToLimit', dir: 'asc' }} emptyText="증가 추세가 감지된 데이터스토어가 없습니다(시계열 누적 중일 수 있음)." />
