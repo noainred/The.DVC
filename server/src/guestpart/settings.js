@@ -225,9 +225,16 @@ export function save(body = {}, now = Date.now()) {
   return { settings: load() };
 }
 
-/** 관리자가 아닌 계정에 줄 판본 — 메일 주소·보내는 사람을 싣지 않는다(판정 기준만). */
-export function publicSettings(s = load()) {
-  return { threshold: s.threshold, mode: s.mode, vcThresholds: s.vcThresholds, rules: s.rules };
+/**
+ * 관리자가 아닌 계정에 줄 판본 — 메일 주소·보내는 사람을 싣지 않는다(판정 기준만).
+ * v2.782(점검 K2 H-B3): allowed(범위 계정의 vCenter id Set — scopedVcenterIds)가 있으면 vCenter 별 임계도 **범위 안 id 만** 싣는다
+ *   (전 함대 id→임계 맵이 그대로 나가 범위 밖 vCenter id·개수가 보였다 — AUTHZ-2595 와 같은 계열). allowed=null(전체 범위)이면 예전 그대로.
+ *   판정은 서버가 원본 설정으로 하므로(effectiveThr 등) 거른 판본은 표시용일 뿐이다.
+ */
+export function publicSettings(s = load(), allowed = null) {
+  const vct = s.vcThresholds || {};
+  const vcThresholds = allowed ? Object.fromEntries(Object.entries(vct).filter(([id]) => allowed.has(id))) : vct;
+  return { threshold: s.threshold, mode: s.mode, vcThresholds, rules: s.rules };
 }
 
 export const _FILE = FILE;
