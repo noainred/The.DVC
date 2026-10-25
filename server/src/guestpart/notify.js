@@ -25,7 +25,7 @@ import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { planDigestTick, nextDigestSlots, digestRecipients, slotLabel } from '../isidu/digestRules.js';
 import { mailRecipients, failAlertDue, normalizeMailList, isEmail } from '../isidu/mailRules.js';
-import { onGuestDiskCommitted, latestHoldMs, coverageByVcenter } from '../guestdisk/db.js';
+import { onGuestDiskCommitted, latestHoldMs, coverageByVcenter, listPartLatest } from '../guestdisk/db.js';
 import { onGuestDiskRunDone } from '../guestdisk/poller.js';
 import { load as loadSettings, settingsLoadError, digestOf } from './settings.js';
 import { overview, overCsv } from './report.js';
@@ -84,6 +84,26 @@ let _chain = Promise.resolve();
 const serial = (fn) => { const p = _chain.then(fn, fn); _chain = p.catch(() => {}); return p; };
 
 const keyOf = (r) => (r.path == null ? r.vmId : `${r.vmId}\u0000${r.path}`);
+
+/*
+ * v2.782(점검 K2 H-B2): '새로 넘은 것만'(통합 newOnly)·'새로 넘은 게스트가 없으면 보내지 않기'(vCenter onlyOnChange)로 **건너뛸 때도**
+ *   회복된 키는 기억(lastKeys)에서 뺀다. 예전에는 발송 성공 때만 lastKeys 가 바뀌어 90% → 메일 → 50% 회복(건너뜀) → 92% 재초과가
+ *   '새로 넘음' 이 아니어서 다시는 메일이 가지 않았다(다른 키가 새로 넘을 때까지 무기한).
+ *   빼는 것은 **이번 수집에서 값을 읽었는데 지금 초과가 아닌** 키만이다 — 이번에 보고되지 않은 VM(Tools 중단·전원 꺼짐)이나
+ *   여유를 보고하지 않은 파티션(값 모름)은 '회복' 이 아니므로 남긴다('못 읽은 값은 0 이 아니다'). 새 키는 넣지 않는다(보내지 않았으므로).
+ *   파티션 키(vmId\0경로)는 그 파티션이, VM 키(판정 단위 'vm')는 그 VM 의 값 있는 파티션이 하나라도 이번 수집에 있으면 '값을 읽음' 이다.
+ */
+async function prunedKeys(prev, keysNow, vcenterIds) {
+  if (!prev.length) return prev;
+  const rows = await listPartLatest(vcenterIds);
+  const knownPart = new Set(); const knownVm = new Set();
+  for (const p of rows) { if (p.unknown) continue; knownPart.add(`${p.vmId}\u0000${p.path}`); knownVm.add(p.vmId); }
+  return prev.filter((k) => keysNow.has(k) || !(k.includes('\u0000') ? knownPart.has(k) : knownVm.has(k)));
+}
+async function forgetRecovered(st, b, vcenterIds) {
+  const next = await prunedKeys(st.lastKeys || [], new Set(b.keys), vcenterIds);
+  if (next.length !== (st.lastKeys || []).length) { st.lastKeys = next; save(); }
+}
 const adminTo = () => { try { return loadMailCfg().defaultTo || []; } catch { return []; } };
 export const digestRecipientsOf = (d) => digestRecipients({ includeAdmin: d.includeAdmin, to: d.to }, adminTo());
 const vcRecipientsOf = (s, id) => mailRecipients(s.mail.commonTo, s.mail.vcenters[id] || null);
@@ -142,6 +162,7 @@ export function sendDigest({ slot = null, manual = false, by = 'system', now = D
         return { ok: false, ...record({ slot, kind, scope, state: 'skipped', code: 'no-new', reason: '직전 발송 뒤 새 수집이 없어 보내지 않았습니다(새 수집 없으면 생략).' }) };
       }
       if (!manual && b.newOnly && !b.newKeys.size) {
+        await forgetRecovered(st, b, null);
         return { ok: false, ...record({ slot, kind, scope, state: 'skipped', code: 'unchanged', reason: '새로 임계를 넘은 게스트가 없어 보내지 않았습니다(새로 넘은 것만).' }) };
       }
       const r = await sendPortalMail({ kind: MAIL_KIND, subject: b.mail.subject, html: b.mail.html, text: b.mail.text, to: rcpt.to, attachments: b.attachments,
@@ -175,6 +196,7 @@ export function sendVcenter(vcId, { slot = null, trigger = 'scan', by = 'system'
         return { ok: false, ...record({ slot, kind: trigger, scope, state: 'skipped', code: 'no-new', reason: '직전 발송 뒤 새 수집이 없어 보내지 않았습니다.' }) };
       }
       if (!manual && vm?.onlyOnChange && !b.newKeys.size) {
+        await forgetRecovered(st, b, [vcId]);
         return { ok: false, ...record({ slot, kind: trigger, scope, state: 'skipped', code: 'unchanged', reason: '새로 임계를 넘은 게스트가 없어 보내지 않았습니다.' }) };
       }
       if (!manual && !b.rows.length) {
@@ -199,7 +221,9 @@ export function sendCritFor(vcId, now = Date.now()) {
     if (!d.critNow || isEdge() || isMock() || settingsLoadError()) return { ok: false, state: 'off' };
     const rcpt = digestRecipientsOf(d);
     if (!rcpt.to.length) return { ok: false, state: 'no-recipients' };
-    const r = await overview({ allowed: new Set([vcId]), thr: CRIT_PCT, all: true, now });
+    // v2.782(점검 K2 H-I1): 즉시 알림은 **언제나 파티션 단위**다 — 설정의 판정 단위('vm')를 따르면 C: 99/100 + D: 100/400 이 VM 합계 39.9% 로
+    //   빠졌다(본문·설정 문구는 '파티션'). 키도 vmId\0경로로 일관된다(예전 'vm' 키는 24시간 정리로 사라진다).
+    const r = await overview({ allowed: new Set([vcId]), thr: CRIT_PCT, mode: 'part', all: true, now });
     const st = state();
     for (const [k, t] of Object.entries(st.crit)) if (!(now - Number(t) < CRIT_REPEAT_MS)) delete st.crit[k];
     const rows = r.rows.filter((x) => x.pct >= CRIT_PCT && !(now - Number(st.crit[keyOf(x)] || 0) < CRIT_REPEAT_MS));

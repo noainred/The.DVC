@@ -57,7 +57,7 @@ export function registerToolsGuestPart(api) {
     const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 300));
     const r = await overview({ allowed, thr: v.thr, mode: v.mode, vcenterId, q: String(req.query.q || '').slice(0, 100), os, limit });
     const s = loadSettings();
-    res.json({ ok: true, ...r, settings: publicSettings(s), meta: meta(), settingsLoadError: settingsLoadError() ? true : undefined });
+    res.json({ ok: true, ...r, settings: publicSettings(s, allowed), meta: meta(), settingsLoadError: settingsLoadError() ? true : undefined });
   });
 
   api.get('/tools/guest-partition/vcenter/:id', toolsPerm, async (req, res) => {
@@ -66,7 +66,7 @@ export function registerToolsGuestPart(api) {
     if (v.issue) return res.status(400).json({ ok: false, reason: v.issue });
     const r = await vcenterDetail(req.params.id, { allowed, thr: v.thr, mode: v.mode, onlyOver: req.query.all !== '1' });
     if (!r) return res.status(404).json({ ok: false, error: 'not found' });
-    res.json({ ok: true, ...r, settings: publicSettings(), meta: meta() });
+    res.json({ ok: true, ...r, settings: publicSettings(undefined, allowed), meta: meta() });
   });
 
   api.get('/tools/guest-partition/export.csv', csvPerm, toolsPerm, async (req, res) => {
@@ -88,7 +88,7 @@ export function registerToolsGuestPart(api) {
     const allowed = scopedVcenterIds(req.user, store.get());
     const full = isAdminDetailUser(req.user) && !allowed;
     const gd = loadGuestDiskSettings();
-    res.json({ ok: true, settings: full ? loadSettings() : publicSettings(), full, collect: { enabled: gd.enabled, intervalHours: gd.intervalHours }, meta: meta(),
+    res.json({ ok: true, settings: full ? loadSettings() : publicSettings(undefined, allowed), full, collect: { enabled: gd.enabled, intervalHours: gd.intervalHours }, meta: meta(),
       loadError: settingsLoadError() ? '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 원본은 .corrupt 로 보존했습니다.' : null });
   });
 

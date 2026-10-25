@@ -57,11 +57,15 @@ export function needsAttention(r) {
 }
 
 /*
- * 오른쪽 '주의가 필요한 곳' 목록(최대 n개 + 잘리면 '외 N건' 한 줄).
+ * 오른쪽 '주의가 필요한 곳' 목록(주의 최대 n개 + 잘리면 '외 N곳' 한 줄 + 연동 없음 요약).
  * v2.781(점검 G3 C-I2): ① 심각한 것부터(bad → warn → info) 정렬한 **뒤에** 자른다 — 예전엔 vCenter 순서로 넣고 6개에서 잘라 뒤쪽의 '읽기 실패'·
  *   맨 끝 'Veeam 연동 없음 N곳' 요약이 소리 없이 사라졌다. 잘렸으면 { more:N } 항목 한 줄로 알린다.
  *   ② needsAttention(표의 '주의 필요' 보기)에 드는 행은 **반드시 한 줄 이상** 나온다 — Veeam 정상 + 스냅샷 모름·Veeam 결과 오래됨 행이 목록에 없어
  *   '없습니다' 인데 보기에는 행이 있던 어긋남(재현 verify/att.mjs).
+ * v2.782(점검 K4 F-B3): ③ 'Veeam 연동 없음 N곳' 요약(정보)은 n개 상한에 넣지 않고 **늘 맨 끝**에 붙인다 — ① 의 정렬은 info 를 맨 뒤로 보내므로
+ *   목록이 넘치면 잘리는 것은 늘 그 요약이었고, '외 N건' 이 안내하는 '주의 필요' 보기(needsAttention — 연동 없음 제외)에는 그 행이 없었다.
+ *   ④ '외 N곳' 은 항목 수가 아니라 **'주의 필요' 보기의 행 중 목록에 안 나온 행 수**다(한 행이 여러 줄을 낼 수 있다 — 버튼이 가는 보기와 같은 단위).
+ *   항목마다 rowId(그 행 id)를 단다(id 는 'vcid:snap' 처럼 접미가 붙고 vCenter id 에도 ':' 가 있을 수 있어 잘라 쓰지 않는다).
  */
 const TONE_RANK = { bad: 0, warn: 1, info: 2 };
 export function attentionList(rows, n = 6) {
@@ -71,20 +75,24 @@ export function attentionList(rows, n = 6) {
     if (!r) continue;
     const vs = veeamStateOf(r.veeamState);
     const vBad = !!r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked';
-    if (vBad) out.push({ id: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
+    if (vBad) out.push({ id: r.id, rowId: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
     else {
-      if (r.hostMismatch) out.push({ id: r.id, tone: 'warn', title: `${r.name} — Veeam 이 다른 vCenter 이름으로 적음`, text: '포탈의 vCenter 주소와 Veeam 이 쓰는 이름이 다를 수 있습니다' });
-      if (r.veeamStale > 0) out.push({ id: `${r.id}:vstale`, tone: 'warn', title: `${r.name} — Veeam 서버 ${fmtNum(r.veeamStale)}대 결과 오래됨`, text: '마지막으로 읽은 결과의 수입니다' });
-      if (r.snap == null) out.push({ id: `${r.id}:snap`, tone: 'warn', title: `${r.name} — 스냅샷 기준 모름`, text: r.snapReason ? `사유: ${snapReasonText(r.snapReason)}` : '스냅샷 기준을 읽지 못했습니다' });
+      if (r.hostMismatch) out.push({ id: r.id, rowId: r.id, tone: 'warn', title: `${r.name} — Veeam 이 다른 vCenter 이름으로 적음`, text: '포탈의 vCenter 주소와 Veeam 이 쓰는 이름이 다를 수 있습니다' });
+      if (r.veeamStale > 0) out.push({ id: `${r.id}:vstale`, rowId: r.id, tone: 'warn', title: `${r.name} — Veeam 서버 ${fmtNum(r.veeamStale)}대 결과 오래됨`, text: '마지막으로 읽은 결과의 수입니다' });
+      if (r.snap == null) out.push({ id: `${r.id}:snap`, rowId: r.id, tone: 'warn', title: `${r.name} — 스냅샷 기준 모름`, text: r.snapReason ? `사유: ${snapReasonText(r.snapReason)}` : '스냅샷 기준을 읽지 못했습니다' });
     }
-    if (r.snapStale > 0) out.push({ id: `${r.id}:stale`, tone: 'warn', title: `${r.name} — 스냅샷 잔존 ${r.snapStale}대`, text: '하루 넘게 남은 Veeam 임시 스냅샷(정리 실패 의심)' });
+    if (r.snapStale > 0) out.push({ id: `${r.id}:stale`, rowId: r.id, tone: 'warn', title: `${r.name} — 스냅샷 잔존 ${r.snapStale}대`, text: '하루 넘게 남은 Veeam 임시 스냅샷(정리 실패 의심)' });
   }
   const unlinked = list.filter((r) => r && r.veeamState === 'unlinked').map((r) => r.name);
   if (unlinked.length) out.push({ id: 'unlinked', tone: 'info', title: `Veeam 연동 없음 ${unlinked.length}곳`, text: `${unlinked.slice(0, 6).join(' · ')}${unlinked.length > 6 ? ' …' : ''} — 스냅샷 기준만 보입니다` });
   const sorted = out.map((a, i) => [a, i]).sort((x, y) => ((TONE_RANK[x[0].tone] ?? 1) - (TONE_RANK[y[0].tone] ?? 1)) || x[1] - y[1]).map(([a]) => a);
-  if (sorted.length <= n) return sorted;
-  const rest = sorted.length - n;
-  return [...sorted.slice(0, n), { id: 'more', tone: 'muted', more: rest, title: `외 ${rest}건`, text: '나머지는 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }];
+  const info = sorted.filter((a) => a.tone === 'info');
+  const att = sorted.filter((a) => a.tone !== 'info');
+  if (att.length <= n) return [...att, ...info];
+  const shown = att.slice(0, n);
+  const shownRows = new Set(shown.map((a) => a.rowId));
+  const rest = filterRows(list, 'warn').filter((r) => !shownRows.has(r.id)).length;
+  return [...shown, ...(rest ? [{ id: 'more', tone: 'muted', more: rest, title: `외 ${rest}곳`, text: '나머지는 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }] : []), ...info];
 }
 
 /*
@@ -299,7 +307,7 @@ export function shortTs(ms) {
 
 /** VM 의 Veeam 칸 — { text, tone }(tone: ok·run·wait·none·unknown). */
 export function veeamCell(vm) {
-  if (!vm || !('v' in vm)) return { text: '모름', tone: 'unknown' };
+  if (!vm || !('v' in vm) || vm.v === undefined) return { text: '모름', tone: 'unknown' };   // v2.782 B-B3: v undefined 도 모름(viewClass 와 같은 판정)
   const v = vm.v;
   if (!v) return { text: '—', tone: 'none' };
   if (v.state === 'run') return { text: Number.isFinite(v.pg) ? `백업 중 ${v.pg}%` : '백업 중', tone: 'run' };

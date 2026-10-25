@@ -103,8 +103,18 @@ export function issueAgentToken(agent, { note = '' } = {}) {
   const list = load();
   const i = list.findIndex((t) => norm(t.agent) === norm(name));
   const entry = { agent: name, hash: sha256(token).toString('hex'), createdAt: Date.now(), lastUsedAt: null, note: capStr(note || '', 200) }; // v2.607(TIM2607-01)
+  const prev = i >= 0 ? list[i] : null;
   if (i >= 0) list[i] = entry; else list.push(entry);
-  save();
+  try {
+    save();
+  } catch (e) {
+    // v2.782(점검 K5 G-I1): 저장이 실패하면 메모리도 되돌린다 — load() 는 캐시 배열 자체를 돌려주므로 위 교체·push 가 곧 캐시다.
+    //   되돌리지 않으면 디스크에 없는 해시가 재시작 전까지 인증을 통과하고('유령 토큰'), 토큰 적용 사전 점검은 '이미 발급됨' 으로 재실행을 막았다.
+    //   회전(i>=0)은 옛 항목을 그대로 돌려놓는다(디스크와 같은 상태 — 옛 토큰을 쓰는 엣지가 끊기지 않는다).
+    const k = list.indexOf(entry);
+    if (k >= 0) { if (prev) list[k] = prev; else list.splice(k, 1); }
+    throw e;
+  }
   return { ok: true, agent: name, token };
 }
 

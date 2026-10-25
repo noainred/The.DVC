@@ -87,8 +87,10 @@ describe('v2.781 C-I2 주의가 필요한 곳', () => {
     many.push({ id: 'u', name: 'u', veeamState: 'unlinked', snap: 1 });
     const att = attentionList(many);
     expect(att[0]).toMatchObject({ id: 'x', tone: 'bad' });
-    expect(att).toHaveLength(7);
-    expect(att[6]).toMatchObject({ id: 'more', more: 6, title: '외 6건' });   // pending 5개 + 연동 없음 요약 1개가 잘림
+    expect(att).toHaveLength(8);
+    // v2.782(점검 K4 F-B3): 연동 없음 요약은 잘리지 않고 맨 끝 · '외 N곳' 은 주의 필요 보기의 행 중 목록에 안 나온 행 수(pending 5곳)
+    expect(att[6]).toMatchObject({ id: 'more', more: 5, title: '외 5곳' });
+    expect(att[7]).toMatchObject({ id: 'unlinked', tone: 'info' });
   });
 
   it('주의 필요 보기에 드는 행은 목록에도 나온다(Veeam 정상 + 스냅샷 모름 · 결과 오래됨)', () => {

@@ -21,6 +21,16 @@ import { createYielder } from '../util/timeSlice.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.744(회귀 검토 GE-R1): 마지막 시각을 못 읽으면 null(0 = 1970 이 아니다)
 import { LOGIN_FAIL_SQL, isLoginFailRow } from './loginFailPattern.js'; // v2.673: 로그인 실패 후보 조건(정규식과 같은 뜻 — 단일 소스)   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
+/**
+ * v2.782(점검 K1 F-I1): lastTs(vc, { maxTs }) 의 경계 — 객체의 maxTs 가 유한한 수면 그 정수(ms), 아니면 null(경계 없음 — 예전 그대로).
+ *   객체가 아닌 둘째 인자(예: map 의 index)는 무시한다. numOrNull 이라 ''·null 이 0(1970) 경계가 되지 않는다.
+ */
+function lastTsBound(opts) {
+  if (!opts || typeof opts !== 'object') return null;
+  const n = numOrNull(opts.maxTs);
+  return n != null && Number.isFinite(n) ? Math.floor(n) : null;
+}
+
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
 function dbPath() {
   const s = loadLogSettings();
@@ -172,6 +182,9 @@ function initSqlite() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_events_tracked_entity ON events (vcenterId, entity, ts) WHERE type IN ${TRACKED_SQL}`);
     const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message,detail) VALUES (?,?,?,?,?,?,?,?,?)');
     const lastTsStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=?');
+    // v2.782(점검 K1 F-I1): 경계 있는 마지막 시각 — MAX 단독 + (vcenterId, ts) 인덱스 범위의 끝점 탐색 1회(SEARCH … ts<?). 폴러의 시작점 후보가
+    //   DB 에 남은 미래 행(prune 은 ts < ? 라 지우지 않는다)에 매 주기 막히지 않게(logs/poller.js).
+    const lastTsUpToStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=? AND ts<=?');
     const firstTsStmt = db.prepare('SELECT MIN(ts) mn FROM events WHERE vcenterId=?'); // v2.706(C4): aggregate 하나 + (vcenterId,ts) 인덱스 — 선탐색
     // v2.601(감사 DB2601-03 — 재현): 예전 `DELETE FROM events WHERE ts < ?` 한 방은 183만 행에서 이벤트 루프를 4.8초 멈췄다
     // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
@@ -321,7 +334,11 @@ function initSqlite() {
         }
         return { chunks: parts.length, inserted };
       },
-      lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
+      // v2.782(F-I1): opts.maxTs(유한한 수)를 주면 그 시각 이하의 MAX. 없거나 수가 아니면 예전 그대로(원본 MAX — 화면·다른 호출부).
+      lastTs: (vc, opts) => {
+        const m = lastTsBound(opts);
+        return Number((m == null ? lastTsStmt.get(vc) : lastTsUpToStmt.get(vc, m))?.mx || 0);
+      },
       firstTs: (vc) => { const v = firstTsStmt.get(vc)?.mn; return Number.isFinite(Number(v)) && v != null ? Number(v) : 0; },
       lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
       /**
@@ -729,7 +746,10 @@ function initJson() {
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
       return fresh.length;   // v2.766(R1-A2-02): SQLite 판과 같이 실제로 들어간 행 수(중복 제외)
     },
-    lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
+    lastTs: (vc, opts) => {   // v2.782(F-I1): SQLite 판과 같은 뜻(opts.maxTs 이하의 MAX · 없으면 예전 그대로)
+      const m = lastTsBound(opts);
+      return rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx && (m == null || r.ts <= m) ? r.ts : mx), 0);
+    },
     firstTs: (vc) => rows.reduce((mn, r) => (r.vcenterId === vc && (!mn || r.ts < mn) ? r.ts : mn), 0),
     trackedEvents: (f = {}, limit = 5000) => rows.filter((r) => TRACKED_TYPES.includes(r.type)
         && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId))

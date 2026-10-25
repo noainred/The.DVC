@@ -6,7 +6,7 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { shortDeviceName, stateLabel } from './sanSwitchPorts.js';
 import {
-  UNITS, LEVELS, GAP_BG, cellInfo, cellTitle, usageKpis, deltaPct, usageChartRows, navInfo, colLabels, rowHasData,
+  UNITS, LEVELS, GAP_BG, cellInfo, cellTitle, usageKpis, prevKpiMeta, prevCompareNote, usageChartRows, navInfo, colLabels, rowHasData,
   imbalanceText, idleSummary, USAGE_NOTES, usageParams, rateText, pctText, timeText, dayText,
 } from './sanPortUsageText.js';
 
@@ -96,7 +96,8 @@ export default function SanPortUsage({ deviceId, ports, focusPort, onPickPort })
   const errNow = error && error.key === reqKey ? error.msg : null;
   const t = shown?.target || null;
   const k = usageKpis(t?.chart, t?.capBps);
-  const kp = withPrev && t?.chart?.prev ? { avg: t.chart.prev.avgMean, peak: t.chart.prev.peakMax } : null;
+  // v2.782(점검 K3 I-B2): 진행 중 기간이면 서버가 앞 기간 KPI 를 같은 경과 구간으로 잘라 준다(sameElapsed) — 화면이 그 사실을 밝힌다.
+  const kp = withPrev && t?.chart?.prev ? { avg: t.chart.prev.avgMean, peak: t.chart.prev.peakMax, sameElapsed: !!t.chart.prev.sameElapsed } : null;
   const chartRows = useMemo(() => usageChartRows(t?.chart, { capBps: t?.capBps, withPrev }), [t, withPrev]);
   const nav = navInfo(shown || { unit, off, minOff: 0 });
   const starts = shown ? Array.from({ length: shown.cols }, (_, i) => shown.start + i * shown.colMs) : [];
@@ -165,12 +166,15 @@ export default function SanPortUsage({ deviceId, ports, focusPort, onPickPort })
                 </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 8 }}>
-                <Kpi label="평균" value={rateText(k.avg)} meta={kp ? `앞 기간 ${rateText(kp.avg)}${deltaPct(k.avg, kp.avg) != null ? ` (${deltaPct(k.avg, kp.avg) > 0 ? '+' : ''}${deltaPct(k.avg, kp.avg)}%)` : ''}` : '칸 평균들의 평균'} />
-                <Kpi label="피크" value={rateText(k.peak)} meta={kp ? `앞 기간 ${rateText(kp.peak)}${deltaPct(k.peak, kp.peak) != null ? ` (${deltaPct(k.peak, kp.peak) > 0 ? '+' : ''}${deltaPct(k.peak, kp.peak)}%)` : ''}` : '수집 시점들 중 최댓값'} />
+                <Kpi label="평균" value={rateText(k.avg)} meta={kp ? prevKpiMeta(k.avg, kp.avg, { sameElapsed: kp.sameElapsed }) : '칸 평균들의 평균'} />
+                <Kpi label="피크" value={rateText(k.peak)} meta={kp ? prevKpiMeta(k.peak, kp.peak, { sameElapsed: kp.sameElapsed }) : '수집 시점들 중 최댓값'} />
                 <Kpi label="피크 포화도" value={pctText(k.peakPct)} meta={t.capBps == null ? '속도를 몰라 판정하지 않습니다' : `회선 ${rateText(t.capBps)} 대비`}
                   accent={k.peakPct != null && k.peakPct >= 80 ? '#ea580c' : undefined} />
                 <Kpi label="피크 시각" value={k.peakAt == null ? '—' : timeText(k.peakAt, shown.offsetMin)} meta={shown.label} />
               </div>
+              {kp && prevCompareNote(t.chart.prev) && (
+                <div className="muted" style={{ fontSize: 11.5, marginTop: -4, marginBottom: 8 }}><BoldText text={prevCompareNote(t.chart.prev)} /></div>
+              )}
               <div className="card" style={{ padding: 8, marginBottom: 8, minWidth: 0 }}>
                 <ResponsiveContainer width="100%" height={240}>
                   <ComposedChart data={chartRows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
