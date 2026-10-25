@@ -1708,9 +1708,30 @@
   · **이미 한계에 닿은 항목은 '증가 없음' 과 다른 상태다**(G4 E-B1 — 재현): daysToLimit null 이 같아 꽉 찬 DS 가 정렬 맨 뒤 → 상한 100 에서 잘리고 '30일 내 포화' KPI 에서 빠졌고 GPU 100% 가 '안정'.
     서버 `full:true`(포화 판정은 R² 필터 앞 — 흔들리는 포화 시계열도 남는다) · 웹 `forecastLimitKind` 한 벌을 DS·GPU·리포트 '고갈까지' 칸이 같이 쓴다.
   · 확정됐지만 이번에 고치지 않은 것(다음 점검 첫 후보): A-B2 토큰 적용 409 응답에서 화면 TypeError · A-B3 수집 서버가 이미 새 판인데 '업그레이드 실패(자동)' 유지 ·
-    A-B4 배포 기록 collectorToken 이 빈 엣지 재배포 시 CENTRAL_TOKEN 교체(조건부 — 더 작은 수정 `sameToken(...) !== true`) · B-B3 첫 수집 전·한 번도 성공 못 한 Veeam 서버 VM 이 '없음' 확정 ·
+    A-B4 배포 기록 collectorToken 이 빈 엣지 재배포 시 CENTRAL_TOKEN 교체(조건부 — 더 작은 수정 `sameToken(...) !== true`) · ~~B-B3 첫 수집 전·한 번도 성공 못 한 Veeam 서버 VM 이 '없음' 확정~~(✅ v2.782 K4) ·
     B-B4 VM 별 실패 수가 작업 결과로 부풀려짐(사양 판단 — 테스트 3곳이 현재 동작을 고정) · C-B3 실행 중 작업이 vCenter 마다 반복 · C-B4 세부내용 조회 실패 시 선택 상자 사라짐·403 문자열 ·
-    D-B2 VM 상세 이력의 거짓 '수집 지연' 경고(lagging [] 와 null 을 같은 null 로) · E-B2 물리 GPU 서버 화면 gpuErrors 미표시 · E-B3 linkcheck SSH 'Connection lost before handshake' → tls-fail ·
-    배너 뒤 끊김 → timeout · E-B4 VmRemote 가 error 매핑으로 세션을 엶(manual 은 막지 말 것 — 반증) · D-B4 이벤트 시각 NaN 하드닝 · A-I2 발급 save 실패 시 메모리 롤백 ·
+    D-B2 VM 상세 이력의 거짓 '수집 지연' 경고(lagging [] 와 null 을 같은 null 로) · ~~E-B2 물리 GPU 서버 화면 gpuErrors 미표시~~(✅ v2.782 K5) · E-B3 linkcheck SSH 'Connection lost before handshake' → tls-fail ·
+    배너 뒤 끊김 → timeout · E-B4 VmRemote 가 error 매핑으로 세션을 엶(manual 은 막지 말 것 — 반증) · D-B4 이벤트 시각 NaN 하드닝 · ~~A-I2 발급 save 실패 시 메모리 롤백~~(✅ v2.782 K5) ·
     C-I1 세부 CSV 버튼 title · E-I1 cve.js 행(공식 VMSA 확인 필요) · E-I2 pyportal 헤더 수신 전체 시한. 보류: D-I1(따라잡기 건너뜀 — 데이터 손실 쪽 위험) · B-I1(실측 규모에서 비례하지 않음).
   · 정직 기록: 실장비 미확인(가짜 SOAP·가짜 deps·합성 입력) · vCenter 시계 역행이 실서버에서 일어났는지 미확인 · 이미 미래 고정에 빠졌던 설치본의 놓친 구간은 되살리지 않는다.
+
+- **v2.782 — 버그 5·개선 5 점검 2회차(다중 에이전트 5축 F~J → 반증 1인 → 수정 5그룹 K1~K5)**(사용자 요청 "한번더" — 직전과 같은 선택(전체 검증 · 개선 구현) · 기준 `4c19407`(v2.781.0).
+  축: F(v2.781 diff 회귀) · G(v2.781 남긴 것 재확인 — 9건 전부 HEAD 에 남아 있음) · H(게스트 파티션 v2.749~2.750) · I(SAN 포트 사용량 v2.748) · J(VM 상세 C안 v2.746).
+  발견 = F 4 · H 4 · I 4 · J 4 + G 재확인 9 — 반증 0. 회귀 `server/test/audit2782{a,b,c,d,e}` · 웹 `tools/audit2782{c,d}`·`gpu-guest/audit2782e` · 변이: K1 기준판 7/9 + 부분 8/8 · K2 8/8 · K4 기준판 4/5 · K5 기준판 3/3):
+  · ⚠⚠ **v2.781 이 만든 회귀 4건**(F — 직전 회차 수정분을 다음 회차 첫 축으로 보는 이유): 중간 저장이 dirty 를 비워 주기 끝의 연속 상한 수가 파일에 안 남음(F-B1 — **'바뀌면 dirty' 를
+    상태를 바꾸는 모든 곳에**) · 읽은 커서를 여유 안에서도 지금으로 잘라 심각도 필터 + 조금 앞선 vCenter 가 매 주기 같은 구간을 재읽음(F-B2 — 리드가 검토에서 '비용만' 으로 넘겼다가
+    포탈 시계가 늦으면 28곳 전부라는 것을 반증이 밝힘 · 읽은 커서는 여유 경계, okAt 은 지금) · 주의 목록 '외 N건' 이 연동 없음 요약을 숨기고 안내한 보기에 그 행이 없음(F-B3) ·
+    리포트 표 initialSort + null 뒤로 비교기가 포화 DS 를 맨 뒤로(F-B4 — **서버 순서를 고쳐도 표의 초기 정렬이 다시 섞는다** · 열 sortValue).
+  · **'새로 넘은 것만' 의 기억은 건너뛸 때도 회복분을 지운다**(H-B2 — 재현: 90% 발송 → 50% 건너뜀 → 92% 건너뜀). 이번에 값을 읽은 키만 지우고 보고 안 된 VM·값 모름은 남긴다.
+  · 범위 계정 설정 응답의 vCenter 별 임계 맵은 범위 안 id 만(H-B3 — AUTHZ-2595 계열 재발) · 즉시 95% 알림은 모드와 무관하게 파티션 단위(H-I1).
+  · **진행 중 기간의 '앞 기간 대비' 는 같은 경과 구간끼리**(I-B2 — 매일 같은 트래픽이 06:10 에 평균 −77%·피크 −90%). 겹쳐 그리기와 같은 칸 기준 · 선은 앞 기간 전체 그대로.
+    기간 하한은 산술(I-I1 — −1000 상한 루프) · 대상 고르기 분리로 조립 1회(I-I2).
+  · Veeam 서버 일부가 첫 수집 전·한 번도 성공 못 함이면 맞지 않은 VM 은 '없음' 이 아니라 '모름'(B-B3) · 물리 GPU 서버 화면의 응답 없는 GPU(E-B2 — 기존 gpuErrText 재사용) · 토큰 발급 저장 실패 시 메모리 되돌림(G-I1).
+  · 시작점·지연 폴백은 상한 있는 lastTs(F-I1 — `db.lastTs(id, { maxTs })`, SQLite·NDJSON 둘 다 · 인자 없는 호출은 원본).
+  · 확정됐지만 고치지 않은 것(다음 점검 첫 후보): ⚠ **J-B1 SOAP 수집기가 못 읽은 VM CPU·메모리 사용률을 0 으로 냄**(끊긴 호스트·quickStats 없음·분모 0 — 분포 0~5% 칸·평균·**유휴 VM 후보**·축소 후보에 섞임.
+    반증이 소비처 38+24 파일을 훑어 null 이 안전하다고 봤다 — 좁힌 수정: connectionState·usageReadable·원값 결측·분모 ≤0 만 null) · J-B2 VM 상세 창이 lookup 실패 seed 를 안내 없이 두고 스냅샷·GPU '없음'·`/vms/undefined/metrics` ·
+    J-B3 SUSPENDED → POWERED_OFF(고치면 `=== 'POWERED_OFF'` 소비처 5곳 — 동시 다운 경보 포함 — 함께 · 의도 판단 필요) · J-B4 VmMetrics 20초 갱신 겹침 · H-B1 VM 상세 파티션 수집 시각(vm_latest 의 옛 ts — `max(parts.ts)`) ·
+    H-B4 ISO 추정 규칙이 가득 찬 10GB 이하 Windows 드라이브를 경보에서 뺌(C: 제외 권장) · I-B1 축약 스냅샷의 'unknown' 포트를 off 로 셈 · I-B3 30일 유휴 하루 칸이 UTC 경계(3시간 칸 권장) ·
+    I-B4 SANSW_PERF_ROLLUP_15M_DAYS<31 이면 1일 차트 72/96 빔 · v2.781 남긴 것 중 A-B2·A-B3·C-B3·C-B4·D-B2·E-B3·E-B4 그대로 · 물리 GPU 폴러가 못 읽은 gpuErrors 를 0 으로 적음(physicalPoller.js:60) ·
+    logCollectDiag 의 lagMs 폴백은 미래 행이 있으면 0 일 수 있음 · H-I2(partUsedAt 키별 LIMIT 1) · J-I1·J-I2(패널 빈 문구·OS unknown 접기).
+  · 정직 기록: 실장비 미확인(가짜 SOAP·mock 메일·합성 행) · 이번 J 축은 C안 코드 자체에서는 결함을 찾지 못했다(입력 값·상세 창 쪽).
