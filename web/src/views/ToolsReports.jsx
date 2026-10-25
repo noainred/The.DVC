@@ -353,7 +353,8 @@ export function CapacityForecast({ scope }) {
     { key: 'capacityGB', label: '전체', align: 'right', render: (r) => tb(r.capacityGB) },
     { key: 'slopePerDay', label: '증가/일', align: 'right', render: (r) => `${r.slopePerDay > 0 ? '+' : ''}${r.slopePerDay}GB` },
     // v2.781(점검 G4 E-B1): 이미 꽉 찬 DS(서버 full — 남은 일수 null)는 '—' 가 아니라 '포화' — 판정은 용량예측 화면과 같은 forecastLimitKind 하나.
-    { key: 'daysToLimit', label: '고갈까지', align: 'right', render: (r) => (forecastLimitKind(r) === 'full' ? <b style={{ color: 'var(--red)' }}>포화</b> : r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
+    // v2.782(점검 K4 F-B4): 포화 행은 남은 일수가 null 이라 비교기(null 은 늘 뒤)가 맨 뒤로 보냈다 — 서버 limitKey 와 같은 -1 로 정렬해 오름차순 맨 앞에.
+    { key: 'daysToLimit', label: '고갈까지', align: 'right', sortValue: (r) => (forecastLimitKind(r) === 'full' ? -1 : r.daysToLimit), render: (r) => (forecastLimitKind(r) === 'full' ? <b style={{ color: 'var(--red)' }}>포화</b> : r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
     { key: 'etaTs', label: '예상일', render: (r) => <>{fmtDay(r.etaTs)}{forecastStaleText(r, data.generatedAt) && <div className="muted" style={{ fontSize: 11, color: 'var(--amber)' }} title={FORECAST_STALE_TITLE}>{forecastStaleText(r, data.generatedAt)}</div>}</> },
     { key: 'r2', label: '신뢰도(R²)', align: 'right', render: (r) => (r.r2 == null ? '—' : r.r2) }, // v2.710: 데모 합성 행은 R² 를 지어내지 않는다
   ];
@@ -371,7 +372,7 @@ export function CapacityForecast({ scope }) {
           <Select sort={false} className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
             {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d}일</option>)}
           </Select>
-          <span className="muted">증가 추세가 있는 데이터스토어만 표시됩니다(선형회귀 R² ≥ 0.3).</span>
+          <span className="muted">증가 추세(선형회귀 신뢰도 R² 0.3 이상)인 데이터스토어를 표시합니다. 이미 한계에 닿은 항목은 신뢰도와 관계없이 <b>포화</b>로 맨 앞에 표시합니다.</span>
         </label>
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'daysToLimit', dir: 'asc' }} emptyText="증가 추세가 감지된 데이터스토어가 없습니다(시계열 누적 중일 수 있음)." />

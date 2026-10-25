@@ -67,6 +67,10 @@ export const resultOf = (ve) => String(ve?.lr || ve?.lastResult || '');
 export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, ev = null, runningStale = false, noInventory = false, now = Date.now() }) {
   const list = Array.isArray(vms) ? vms : [];
   const veeamKnown = !!(linked && vcnt && isFin(vcnt.n) && match);
+  // v2.782(점검 K4 B-B3): 서버가 여러 대일 때 한 대라도 첫 수집 전(waiting)이거나 한 번도 성공하지 못했으면(failedNoLast) 그 서버가 맡은 VM 은
+  //   대조 결과에 없다 — 대조에 없는 VM 의 '없음' 은 확정이 아니라 모름이다(나눔도 모름). 맞은 VM 의 수·결과는 사실(하한)이라 그대로 둔다.
+  //   ⚠ 오래된(stale) 서버·실패했지만 마지막 성공이 있는 서버는 넣지 않는다 — 마지막 결과의 VM 목록이 있다.
+  const absentUnknown = veeamKnown && ((Number(vcnt.failedNoLast) || 0) > 0 || (Number(vcnt.waiting) || 0) > 0);
   const snapKnown = !!(sc && isFin(sc.n));
   const known = new Set(list.map((v) => v.id));
   // v2.780: 매칭은 vCenter 전체로 한 결과를 받는다(캐시·별칭 학습을 범위와 무관하게) — 여기서 지금 범위의 VM 만 센다.
@@ -95,9 +99,9 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
       if (/^fail/i.test(r)) results.failed++; else if (/^warn/i.test(r)) results.warning++;
     }
   }
-  // 나눔 — 두 쪽을 다 알 때(연동 없는 vCenter 는 Veeam 이 '없음' 으로 확정이라 스냅샷만 알면 된다).
+  // 나눔 — 두 쪽을 다 알 때(연동 없는 vCenter 는 Veeam 이 '없음' 으로 확정이라 스냅샷만 알면 된다). v2.782 B-B3: 부재가 모름이면 나눔도 모름.
   let split = null;
-  if (snapKnown && (veeamKnown || !linked)) {
+  if (snapKnown && ((veeamKnown && !absentUnknown) || !linked)) {
     let both = 0; let vOnly = 0; let sOnly = 0;
     const Vs = V || new Set();
     for (const id of Vs) if (S.has(id)) both++; else vOnly++;
@@ -115,6 +119,7 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     running: veeamKnown ? running : null,
     pending: veeamKnown ? pending : null,
     ...(veeamKnown && runningStale ? { runningStale: true } : {}),
+    ...(absentUnknown ? { veeamAbsentUnknown: true } : {}),   // v2.782 B-B3: 대조에 없는 VM 은 '없음' 이 아니라 모름(세부내용 vmBackupView absentKnown:false)
     lastBackup,
     rpo: veeamKnown ? rpo : null,
     results: veeamKnown ? results : null,
@@ -160,8 +165,10 @@ export function backupTotals(rows) {
 /**
  * VM 한 대(세부내용) — Veeam 배지 근거(matchToVcenter 의 원소)와 스냅샷 근거만 싣는다.
  * @param {object} vm 인벤토리 VM @param {object|undefined} ve matchToVcenter byVm[vm.id] @param {Array|undefined} evEntry ev.byVm[vm.id]
+ * v2.782(점검 K4 B-B3): absentKnown(기본 true) — 대조에 없는 VM 을 '없음'(v null)으로 확정해도 되는가. false 면(첫 수집 전·한 번도 성공 못 한 서버가 있음 —
+ *   backupRow veeamAbsentUnknown) 대조에 없는 VM 만 v 모름(undefined — JSON 에서 키 없음)이고, 맞은 VM 은 값을 그대로 싣는다.
  */
-export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, now = Date.now() } = {}) {
+export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now() } = {}) {
   const v = ve ? {
     state: ve.run === 1 ? 'run' : ve.run === 2 ? 'wait' : 'ok', pg: ve.run === 1 && isFin(ve.pg) ? ve.pg : null, by: ve.by || '',
     jobs: Array.isArray(ve.jobs) ? ve.jobs.slice(0, 5) : [], rp: isFin(ve.rp) ? ve.rp : null,
@@ -171,7 +178,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
   const ev = Array.isArray(evEntry) && isFin(evEntry[0]) ? { ts: evEntry[0], n: Number.isInteger(evEntry[1]) ? evEntry[1] : null } : null;
   return {
     id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), power: vm.powerState || '',
-    v: veeamKnown ? v : undefined,
+    v: veeamKnown ? (v ?? (absentKnown ? null : undefined)) : undefined,
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
   };
 }
