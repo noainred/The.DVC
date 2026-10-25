@@ -33,14 +33,19 @@ const ADVISORIES = [
 ];
 
 const lineOf = (version) => { const m = /^(\d+\.\d+)/.exec(String(version || '')); return m ? m[1] : null; };
-const buildInt = (build) => { const n = parseInt(String(build || '').replace(/\D/g, ''), 10); return Number.isFinite(n) ? n : null; };
+// v2.783(점검 Q4 P-B2): 빌드 0·음수는 못 읽은 값이다('못 읽은 값은 0 이 아니다' — 권고 대조에서 '가장 오래된 빌드' 로 읽지 않는다).
+const buildInt = (build) => { const n = parseInt(String(build ?? '').replace(/\D/g, ''), 10); return Number.isFinite(n) && n > 0 ? n : null; };
 
-/** 한 엔티티(호스트/vCenter) 평가 → { eol, advisories[], worst }. */
+/*
+ * v2.783(점검 Q4 P-B2): '평가하지 못함' 은 정상이 아니다. 예전에는 ① 버전을 못 읽었거나(REST 폴백 vCenter 의 'unknown') ② 빌드를 못 읽었거나
+ *   ③ 수명 데이터셋 밖 라인(6.0·9.0)이면 worst 'ok' 로 남아 녹색 '정상' KPI 에 들어갔다(빌드를 못 읽은 8.0 호스트는 권고 3건 대조를 건너뛰고 정상).
+ *   이제 worst 'unknown' + unknownReason. 아는 사실(수명 데이터로 EOL 확정·권고 해당)이 있으면 그것이 이긴다.
+ */
 function assess(product, version, build, asOf) {
   const line = lineOf(version);
   const b = buildInt(build);
-  const result = { product, version, build, line, eol: false, eolDate: null, advisories: [], worst: 'ok' };
-  if (!line) return result;
+  const result = { product, version: version ?? null, build: build ?? null, line, eol: false, eolDate: null, advisories: [], worst: 'ok' };
+  if (!line) return { ...result, worst: 'unknown', unknownReason: '버전 미상' };
   const lc = LIFECYCLE.find((x) => x.product === product && x.line === line);
   if (lc && Date.parse(lc.eogs) < asOf) { result.eol = true; result.eolDate = lc.eogs; result.worst = 'critical'; }
   if (lc) result.eolDate = result.eolDate || lc.eogs;
@@ -52,21 +57,28 @@ function assess(product, version, build, asOf) {
   }
   if (result.advisories.some((a) => a.severity === 'critical')) result.worst = 'critical';
   else if (result.advisories.length) result.worst = result.worst === 'critical' ? 'critical' : 'warning';
+  if (result.worst === 'ok') {
+    if (!lc) { result.worst = 'unknown'; result.unknownReason = '데이터셋 밖 버전 라인'; }
+    else if (b == null) { result.worst = 'unknown'; result.unknownReason = '빌드 미상'; }
+  }
   return result;
+}
+
+/** 내장 데이터셋 사본(테스트·진단용 — 무결성 검사가 읽는다). */
+export function cveDataset() {
+  return { date: DATASET_DATE, advisories: ADVISORIES.map((a) => ({ ...a })), lifecycle: LIFECYCLE.map((l) => ({ ...l })) };
 }
 
 export function computeSecurityPosture(snap) {
   const asOf = Date.now();
   const hosts = [];
-  const seenHostKey = new Set();
+  // v2.783(P-B2): 버전을 못 읽은 호스트·vCenter 도 버리지 않는다 — 미확인으로 센다(조용히 빠지면 total 도 줄어 '전부 봤다' 로 읽힌다).
   for (const h of snap.hosts || []) {
     const a = assess('esxi', h.version, h.build, asOf);
-    if (!a.line) continue;
     hosts.push({ id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, ...a });
   }
   const vcenters = [];
   for (const v of snap.vcenters || []) {
-    if (!v.version) continue;
     const a = assess('vcenter', v.version, v.build, asOf);
     vcenters.push({ id: v.id, name: v.name || v.id, ...a });
   }
@@ -76,6 +88,7 @@ export function computeSecurityPosture(snap) {
     critical: all.filter((x) => x.worst === 'critical').length,
     warning: all.filter((x) => x.worst === 'warning').length,
     ok: all.filter((x) => x.worst === 'ok').length,
+    unknown: all.filter((x) => x.worst === 'unknown').length, // v2.783(P-B2): 정상과 따로
     eol: all.filter((x) => x.eol).length,
   };
   return {
@@ -86,4 +99,4 @@ export function computeSecurityPosture(snap) {
     generatedAt: asOf,
   };
 }
-const rank = (w) => (w === 'critical' ? 2 : w === 'warning' ? 1 : 0);
+const rank = (w) => (w === 'critical' ? 3 : w === 'warning' ? 2 : w === 'unknown' ? 1 : 0); // v2.783(P-B2): 미확인은 정상보다 앞

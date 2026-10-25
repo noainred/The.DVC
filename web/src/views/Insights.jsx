@@ -14,6 +14,7 @@ import { vcPowerSkippedNote } from './readGapText.js'; // v2.733(C2-02): 지금 
 import { forecastPctText, forecastLimitKind, forecastGpuLimitKind, forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
+import { securityBadge, anomalyKpi, anomalyFamilyBadge, incidentKindText } from './insightsBadges.js'; // v2.783(점검 Q4): 미확인·평가 못 함·재발송 표기
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -137,7 +138,7 @@ function Anomaly() {
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>임계값이 아니라 <b>평소 패턴 대비 이탈</b>을 통계(중앙값·MAD 기반 Z-score)로 탐지합니다. 최근 24시간 분포 기준.</p>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <Kpi label="탐지된 이상" value={num(d?.total)} color={d?.total ? '#f87171' : '#34d399'} />
+        {(() => { const k = anomalyKpi(d); return <Kpi label="탐지된 이상" value={typeof k.value === 'number' ? num(k.value) : k.value} color={k.color} sub={k.sub} />; })()}
         <label className="muted" style={{ fontSize: 12 }}>민감도 Z =
           <Select sort={false} className="select" value={z} onChange={(e) => setZ(Number(e.target.value))} style={{ marginLeft: 6 }}>
             {[2.5, 3, 3.5, 4, 5].map((v) => <option key={v} value={v}>{v}</option>)}
@@ -146,7 +147,7 @@ function Anomaly() {
       </div>
       {(d?.families || []).map((fam) => (
         <div key={fam.metric} className="card" style={{ padding: 12, marginBottom: 10 }}>
-          <div className="flex between"><b>{fam.label}</b><span className={`badge ${fam.count ? 'red' : 'green'}`}>{fam.count}건</span></div>
+          <div className="flex between">{(() => { const b = anomalyFamilyBadge(fam); return <><b>{fam.label}</b><span className={`badge ${b.cls}`} title={b.title}>{b.text}</span></>; })()}</div>
           {fam.items.length > 0 && (
             <div className="table-wrap" style={{ maxHeight: '36vh', marginTop: 6 }}>
               <STable><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>현재값</th><th style={{ textAlign: 'right' }}>평소</th><th style={{ textAlign: 'right' }}>Z</th><th>시각</th></tr></thead>
@@ -255,7 +256,7 @@ function Security() {
   const { data: d, error, loading } = usePolling('/insights/security', {}, 60_000);
   if (error && !d) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   if (loading && !d) return <Loading />;
-  const badge = (w) => <span className={`badge ${w === 'critical' ? 'red' : w === 'warning' ? 'amber' : 'green'}`}>{w === 'critical' ? '위험' : w === 'warning' ? '주의' : '정상'}</span>;
+  const badge = (w, reason) => { const b = securityBadge(w, reason); return <span className={`badge ${b.cls}`} title={b.title}>{b.text}</span>; };
   const advCell = (x) => (
     <td style={{ fontSize: 11 }}>
       {x.eol && <span className="badge red" title={`지원종료 ${x.eolDate}`}>EOL {x.eolDate}</span>}
@@ -270,20 +271,21 @@ function Security() {
         <Kpi label="위험" value={num(d?.summary.critical)} color="#f87171" />
         <Kpi label="주의" value={num(d?.summary.warning)} color="#fbbf24" />
         <Kpi label="정상" value={num(d?.summary.ok)} color="#34d399" />
+        <Kpi label="미확인" value={num(d?.summary.unknown)} color="#94a3b8" sub="버전·빌드 미상 또는 데이터셋 밖 버전" />
         <Kpi label="지원종료(EOL)" value={num(d?.summary.eol)} color={d?.summary.eol ? '#f87171' : '#34d399'} />
       </div>
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <div className="section-title" style={{ marginTop: 0 }}>vCenter</div>
         <div className="table-wrap"><STable><thead><tr><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
           <tbody>{(d?.vcenters || []).map((v) => (
-            <tr key={v.id}><td><b>{v.name}</b></td><td>{v.version}</td><td className="muted">{v.build || '—'}</td><td>{badge(v.worst)}</td>{advCell(v)}</tr>
+            <tr key={v.id}><td><b>{v.name}</b></td><td>{v.version}</td><td className="muted">{v.build || '—'}</td><td>{badge(v.worst, v.unknownReason)}</td>{advCell(v)}</tr>
           ))}</tbody></STable></div>
       </div>
       <div className="card" style={{ padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>ESXi 호스트 ({(d?.hosts || []).length})</div>
         <div className="table-wrap" style={{ maxHeight: '48vh' }}><STable><thead><tr><th>호스트</th><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
           <tbody>{(d?.hosts || []).map((h) => (
-            <tr key={h.id}><td><b>{h.name}</b></td><td className="muted">{h.vcenterId}</td><td>{h.version}</td><td className="muted">{h.build || '—'}</td><td>{badge(h.worst)}</td>{advCell(h)}</tr>
+            <tr key={h.id}><td><b>{h.name}</b></td><td className="muted">{h.vcenterId}</td><td>{h.version}</td><td className="muted">{h.build || '—'}</td><td>{badge(h.worst, h.unknownReason)}</td>{advCell(h)}</tr>
           ))}</tbody></STable></div>
       </div>
     </div>
@@ -392,7 +394,7 @@ function Incidents() {
         {(d?.timeline || []).length === 0 ? <div className="muted" style={{ fontSize: 12 }}>기록된 이벤트가 없습니다.</div>
           : <div className="table-wrap" style={{ maxHeight: '48vh' }}><STable><thead><tr><th>시각</th><th>구분</th><th>심각도</th><th>제목</th></tr></thead>
             <tbody>{d.timeline.map((e, i) => (
-              <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.ts == null ? '시각 미상' : new Date(e.ts).toLocaleString('ko-KR')}</td><td style={{ fontSize: 12 }}>{e.kind === 'resolved' ? '해소' : '발생'}</td><td>{sev(e.severity)}</td><td style={{ fontSize: 12 }}>{e.title}</td></tr>
+              <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.ts == null ? '시각 미상' : new Date(e.ts).toLocaleString('ko-KR')}</td><td style={{ fontSize: 12 }}>{incidentKindText(e.kind)}</td><td>{sev(e.severity)}</td><td style={{ fontSize: 12 }}>{e.title}</td></tr>
             ))}</tbody></STable></div>}
       </div>
     </div>
