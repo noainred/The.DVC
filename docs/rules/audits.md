@@ -1728,10 +1728,34 @@
     기간 하한은 산술(I-I1 — −1000 상한 루프) · 대상 고르기 분리로 조립 1회(I-I2).
   · Veeam 서버 일부가 첫 수집 전·한 번도 성공 못 함이면 맞지 않은 VM 은 '없음' 이 아니라 '모름'(B-B3) · 물리 GPU 서버 화면의 응답 없는 GPU(E-B2 — 기존 gpuErrText 재사용) · 토큰 발급 저장 실패 시 메모리 되돌림(G-I1).
   · 시작점·지연 폴백은 상한 있는 lastTs(F-I1 — `db.lastTs(id, { maxTs })`, SQLite·NDJSON 둘 다 · 인자 없는 호출은 원본).
-  · 확정됐지만 고치지 않은 것(다음 점검 첫 후보): ⚠ **J-B1 SOAP 수집기가 못 읽은 VM CPU·메모리 사용률을 0 으로 냄**(끊긴 호스트·quickStats 없음·분모 0 — 분포 0~5% 칸·평균·**유휴 VM 후보**·축소 후보에 섞임.
+  · 확정됐지만 고치지 않은 것(다음 점검 첫 후보): ~~⚠ **J-B1 SOAP 수집기가 못 읽은 VM CPU·메모리 사용률을 0 으로 냄**~~(✅ v2.783 Q1)(끊긴 호스트·quickStats 없음·분모 0 — 분포 0~5% 칸·평균·**유휴 VM 후보**·축소 후보에 섞임.
     반증이 소비처 38+24 파일을 훑어 null 이 안전하다고 봤다 — 좁힌 수정: connectionState·usageReadable·원값 결측·분모 ≤0 만 null) · J-B2 VM 상세 창이 lookup 실패 seed 를 안내 없이 두고 스냅샷·GPU '없음'·`/vms/undefined/metrics` ·
     J-B3 SUSPENDED → POWERED_OFF(고치면 `=== 'POWERED_OFF'` 소비처 5곳 — 동시 다운 경보 포함 — 함께 · 의도 판단 필요) · J-B4 VmMetrics 20초 갱신 겹침 · H-B1 VM 상세 파티션 수집 시각(vm_latest 의 옛 ts — `max(parts.ts)`) ·
     H-B4 ISO 추정 규칙이 가득 찬 10GB 이하 Windows 드라이브를 경보에서 뺌(C: 제외 권장) · I-B1 축약 스냅샷의 'unknown' 포트를 off 로 셈 · I-B3 30일 유휴 하루 칸이 UTC 경계(3시간 칸 권장) ·
-    I-B4 SANSW_PERF_ROLLUP_15M_DAYS<31 이면 1일 차트 72/96 빔 · v2.781 남긴 것 중 A-B2·A-B3·C-B3·C-B4·D-B2·E-B3·E-B4 그대로 · 물리 GPU 폴러가 못 읽은 gpuErrors 를 0 으로 적음(physicalPoller.js:60) ·
-    logCollectDiag 의 lagMs 폴백은 미래 행이 있으면 0 일 수 있음 · H-I2(partUsedAt 키별 LIMIT 1) · J-I1·J-I2(패널 빈 문구·OS unknown 접기).
+    I-B4 SANSW_PERF_ROLLUP_15M_DAYS<31 이면 1일 차트 72/96 빔 · v2.781 남긴 것 중 A-B2·A-B3·C-B3·C-B4·D-B2·E-B3·E-B4 그대로 · ~~물리 GPU 폴러가 못 읽은 gpuErrors 를 0 으로 적음(physicalPoller.js:60)~~(반증 v2.783 M — 그 0 은 parseNvidiaSmiCsv 가 읽은 0, 파싱 실패는 throw 경로) ·
+    ~~logCollectDiag 의 lagMs 폴백은 미래 행이 있으면 0 일 수 있음~~(✅ v2.783 L-B1) · H-I2(partUsedAt 키별 LIMIT 1) · ~~J-I1(패널 빈 문구)~~(✅ v2.783 Q1)·J-I2(OS unknown 접기).
   · 정직 기록: 실장비 미확인(가짜 SOAP·mock 메일·합성 행) · 이번 J 축은 C안 코드 자체에서는 결함을 찾지 못했다(입력 값·상세 창 쪽).
+
+- **v2.783 — 버그 5·개선 5 점검 3회차(다중 에이전트 5축 L~P → 반증 1인 → 수정 5그룹 Q1~Q5)**(사용자 요청 "한번 더" — 직전과 같은 선택 · 기준 `77278f7`(v2.782.0).
+  축: L(v2.782 diff 회귀) · M(남긴 것 16건 재확인 — 15건 남음 · 1건 반증) · N(VM DNS — 감사 기록 0회) · O(전송 속도·포탈 점검 — 0회) · P(인사이트 — 7.7천 줄 · 2회).
+  발견 = L 4 · N 4 · O 4(+범위 밖 1) · P 4 — 반증: O-B3(문서화된 의도) · L-B2 의 제안 수정 `min(sinceTs, now)`(기본 주기에서 효과 없음). 회귀 `server/test/audit2783{a,b,c,d,e}` ·
+  웹 `audit2783a`·`audit2783d`·`tools/audit2783{b,c}` · 변이: Q1 5/5 · Q2 기준판 + 부분 15/15 · Q3 기준판 10/14 + 부분 10/10 · Q5 기준판 5/6 + 부분 2):
+  · ⚠⚠ **'유령 키 정리' 는 살아 있는 키를 지웠다**(P-B3 — 데이터 손실, 재현): 화면 수(classifyFleet liveKeys)와 삭제 기준(fleetLiveKeys)이 **서로 다른 키 집합**이었고 원격 수집 베어메탈이 삭제 쪽에 없었다 ·
+    등록부 손상·OME 미적재·엣지 만료를 '없음' 으로 읽었다. 판정 하나(`fleetKeySources`)·못 읽은 출처면 409/503 · dryRun 으로 실제 삭제 수를 묻고 **보낸 키 중 지금도 유령만** 지운다.
+    **삭제 버튼의 확인창 숫자와 실제 삭제가 같은 함수에서 나오는지부터 볼 것.** 정직 기록: 비활성 OME·수집 서버·vCenter 가 하나라도 있으면 정리가 계속 막힌다(손실 방지 우선 — 완화는 사용자 결정).
+  · ⚠⚠ **못 읽은 VM 사용률은 0 이 아니다 — 수집기 원천**(J-B1): SOAP `pct()` 가 quickStats 없음·끊긴 호스트·분모 0 을 0% 로 내 유휴 VM·축소 후보에 섞였다. VM 전용 `vmUsagePctOrNull`
+    (connectionState·호스트 연결·원값 결측·분모 ≤0 → null · 보고된 0 은 값). 소비처 77곳은 이미 null 안전(REST 폴백 덕) · sampler 메모리 계열에서 끊긴 호스트 VM 이 빠진다.
+  · ⚠⚠ **v2.782 의 F-B2 수정이 NTP 보정 뒤 최대 10분 유실을 넓혔다**(L-B2 — 반증이 제안 수정의 무효도 밝힘): 시작점을 '지난 읽기의 **포탈** 시각(readAt — 커서 파일에 저장)' 이하로.
+    대가 = 앞선 vCenter 의 앞선 폭 재읽기(중복은 키로 걸러짐 · 포탈 시계가 늦으면 전 vCenter). **'재읽기 비용' 과 '유실' 이 맞서면 유실을 막는다** — v2.782 리드가 반대로 고른 것을 되돌렸다.
+    미래 행 경계 lastTs 는 진단·커버리지·가용성 경로에도(L-B1). 앞서지 않던 vCenter 시계가 뒤로 가는 경우는 못 막는다(CurrentTime 시차 측정 — 별건).
+  · 인시던트 '발생' 은 발송 기록이 아니다(P-B1 — 쿨다운 재발송 24건이 24 '발생') · 보안 자세는 모르는 버전·빌드·수명 밖 라인을 '정상' 이 아니라 '미확인'(P-B2 — 데모 호스트는 build 가 없어 90대 미확인: 지어내지 않았다) ·
+    이상 탐지 '평가 못 함'(P-I1) · 용량 리포트 무거운 작업 단독·정규화 캐시 키(P-I2).
+  · **drain 만 기다리는 내보내기는 클라이언트가 끊으면 영원히 멈춘다**(O 범위 밖 발견 — GPU 시계열 내보내기 잠금이 재기동 전까지 409) · drain/close 둘 다 once 로 걸면 리스너가 쌓인다(O-B4) →
+    공용 `util/waitDrain.js`(먼저 온 쪽으로 끝내고 둘 다 뗀다 · false 면 호출자가 빠져나가 finally 의 잠금 해제가 돈다) · 소스 스윕이 `.once('drain'` 0 을 고정.
+  · 토큰 점검 엣지 인출 예산은 실제 인출 시한(PULL_TIMEOUT_MS · 상한 60초)으로(O-I2) · VM DNS CSV 'DNS 없음'(N-I1) · 분포 패널 빈 상태(J-I1).
+  · 확정됐지만 고치지 않은 것(다음 점검 첫 후보): N-B1 2.695 미만 엣지가 섞이면 공인 DNS 가 'VM' 으로(검증된 최소안: PUBLIC_DNS 를 VM 소유보다 먼저 + 미수집 VM 은 대표 IP 만) ·
+    N-B2 IPv6 DNS 서버가 정책 법인에서 늘 비승인(검증된 안: policyVerdict 'unsupported') · N-B3 매트릭스 '다른 법인' 색을 웹이 다시 판정(서버가 칸별 값을 내려 줄 것) · N-B4 IPv4 사상 루프백 ·
+    O-B1 토큰 점검 프로브 결과가 낡음·지문 대조 없이 '정상' 유지(재기동까지 · 엣지 보고가 없는 행) · O-B2 버퍼링 프록시 보정이 1초 조건으로 빠른 엣지에서 꺼짐(프록시 존재 미확인) ·
+    P-B4 /insights/finops?vcenterId 전 함대 전력 · P-B1 의 '채널 없음 → 발생 0'(alerts.js 발생 링 필요) · PORTALCHECK_BUDGET_MS 상한 없음 · O-I1 업로드 본문 3배 메모리 ·
+    L-I1 publicSettings 의 rules(전 함대 공통 — 사용자 판단) · 그 밖에 v2.781/v2.782 남긴 것 중 J-B2·J-B4·H-B1·H-B4·I-B1·I-B3·I-B4·A-B2·A-B3·C-B3·C-B4·D-B2·E-B3·E-B4·J-B3(결정 필요) 그대로.
+  · 정직 기록: 실장비 미확인(가짜 SOAP·가짜 Date·루프백) · '거짓 정체' 임계 약 7,500건은 계산값.
