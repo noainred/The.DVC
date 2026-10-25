@@ -12,7 +12,7 @@
  */
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
-import { upsertEnvKeyStrict } from '../central/token.js';
+import { upsertEnvKeyStrict, centralTokenInfo } from '../central/token.js';
 import { dispatcherFor } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { agentNameHeader } from '../util/agentNameHeader.js';
@@ -59,10 +59,13 @@ export async function probeCentral(token, { centralUrl = config.agent.centralUrl
  *   확인 전에 파일·메모리를 바꿔, 수집 토큰 보유자가 임의 값을 보내는 동안 이 엣지의 모든 중앙 요청이 그 값으로 나갔고(일시 방해), 되돌리기가
  *   실패하면 확인되지 않은 값이 파일에 남았다. 이제 확인이 실패하면 아무것도 바뀌지 않는다(되돌릴 것이 없다).
  * 응답의 `applied` 가 **확정 답**이다 — true 면 파일·메모리 모두 새 토큰, false 면 둘 다 그대로(중앙은 이것으로 발급 취소를 정한다).
- * @param {{ token:string, probe?:Function, envFile?:string }} p  (probe·envFile 은 테스트 주입)
+ * v2.781(점검 G2 A-I1): 기록할 env 파일을 **다음 기동이 읽지 않으면**(Windows 옛 start-portal.bat 이 PORTAL_ENV_FILE 을 넘기지 않음 —
+ *   central/token.js ENV_FILE_LOADED) 확인·기록 전에 applied:false · persist-failed 로 답한다. 예전에는 아무도 읽지 않는 파일에 쓰고 applied:true 로
+ *   답해, 재시작 뒤 공유 토큰으로 조용히 돌아갔다(중앙 작업은 이미 '완료'). 메모리만 바꾸는 것도 하지 않는다 — 재시작까지만 맞는 상태를 '적용' 으로 보이지 않게.
+ * @param {{ token:string, probe?:Function, envFile?:string, envFileLoaded?:boolean }} p  (probe·envFile·envFileLoaded 는 테스트 주입)
  * @returns {Promise<{ ok:boolean, applied:boolean, reason?:string, steps:Array<{key:string,ok:boolean,detail:string}>, fp?:string, version:string }>}
  */
-export async function applyAgentCentralToken({ token, probe = probeCentral, envFile } = {}) {
+export async function applyAgentCentralToken({ token, probe = probeCentral, envFile, envFileLoaded } = {}) {
   const steps = [];
   const step = (key, ok, detail) => { steps.push({ key, ok, detail: String(detail || '').slice(0, 300) }); };
   // v2.777: 이 엣지의 호스트 이름 — 중앙이 pull 로 기록해 둔 '엣지가 보고한 호스트 이름' 과 대조한다(토큰을 엉뚱한 장비가 받았는지).
@@ -75,6 +78,13 @@ export async function applyAgentCentralToken({ token, probe = probeCentral, envF
   const fp = tokenFingerprintParts(tk).short || '';
   try {
     step('validate', true, `형식 확인 · 지문 ${fp}`);
+    // 판정은 token.js 하나(centralTokenInfo().envFileLoaded) — 못 읽으면(예외) 읽힌다고 단정하지 않는다.
+    let loaded = envFileLoaded;
+    if (typeof loaded !== 'boolean') { try { loaded = centralTokenInfo().envFileLoaded !== false; } catch { loaded = false; } }
+    if (!loaded) {
+      step('persist', false, '이 엣지의 시작 스크립트가 env 파일 경로(PORTAL_ENV_FILE)를 넘기지 않아, 기록해도 다음 기동이 읽지 않습니다(옛 start-portal.bat) — 아무것도 바꾸지 않았습니다(이전 토큰으로 계속 동작). 엣지 패키지를 최신 판으로 다시 설치해 시작 스크립트를 갱신하세요');
+      return out({ ok: false, reason: 'persist-failed', fp });
+    }
     const pr = await probe(tk);
     if (!pr || !pr.ok) {
       step('probe', false, `${(pr && pr.reason) || '중앙 확인 실패'} — 아무것도 바꾸지 않았습니다(이전 토큰으로 계속 동작)`);

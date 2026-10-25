@@ -36,7 +36,8 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(filterRows(rows, 'warn').map((r) => r.name)).toEqual(['AZ', 'ST', 'GM2']);
     expect(needsAttention(rows[2])).toBe(false);
     const att = attentionList(rows);
-    expect(att.map((a) => a.title)).toEqual(['AZ — Veeam 읽기 실패', 'ST — 스냅샷 잔존 2대', 'Veeam 연동 없음 1곳']);
+    // v2.781(점검 G3 C-I2): 스냅샷 모름(GM2)도 주의 보기에 드는 행이라 목록에 나온다 · 심각한 것부터(bad → warn → info)
+    expect(att.map((a) => a.title)).toEqual(['AZ — Veeam 읽기 실패', 'ST — 스냅샷 잔존 2대', 'GM2 — 스냅샷 기준 모름', 'Veeam 연동 없음 1곳']);
     expect(att[0].text).toMatch(/스냅샷 기준 120대/);
     expect(JSON.stringify(att)).not.toMatch(/`/);
   });

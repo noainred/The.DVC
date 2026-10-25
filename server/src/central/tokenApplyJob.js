@@ -111,13 +111,21 @@ function finish(job, state, summary, deps) {
 const tokenOf = (deps, name) => (deps.listTokens() || []).find((t) => String(t.agent || '').toLowerCase() === name.toLowerCase()) || null;
 /**
  * 반증 F4: '중앙이 그 엣지의 요청을 **받아들였는가**'. lastUsedAt 은 이름 바인딩 검사 **전에** 찍혀(resolveAgentByToken) 이름이 달라 403 인
- *   요청도 '사용' 으로 보였다. 받아들인 GET 은 pullStats 에 검증(verified)·성공(lastOkAt)으로 남는다 — 그것을 본다(없으면 lastUsedAt 로 폴백).
+ *   요청도 '사용' 으로 보였다. 받아들인 GET 은 pullStats 에 남는다 — 그것을 본다(없으면 lastUsedAt 로 폴백).
+ * v2.781(점검 G2 A-B1): 행의 `verified`(한 번 켜지면 영구)와 엔드포인트 `lastOkAt`(같은 이름의 **공유 토큰** pull 도 올린다)을 합쳐 읽지 않는다 —
+ *   그러면 앞서 개별 토큰 요청이 한 번 성공한 이름은 이후 공유 pull 하나로 '받아들임' 이 됐다(결과 모르는 push 실패를 '적용됨' 으로 · 회수 누락).
+ *   **그 요청이** 개별 토큰으로 검증되고 성공한 시각(`lastVerifiedOkAt`)만 본다. 필드가 없는 행(옛 형태·가짜 행)은 0 — '받아들이지 않음'.
  */
 function acceptedSince(deps, name, since) {
   if (typeof deps.pullStats === 'function') {
-    const row = ((deps.pullStats() || {}).rows || []).find((r) => r && r.verified === true && String(r.agent || '').toLowerCase() === name.toLowerCase());
-    const okAt = row ? Math.max(0, ...(row.byEndpoint || []).map((e) => Number(e?.lastOkAt) || 0)) : 0;
-    return okAt >= since ? okAt : null;
+    // 행 키는 대소문자를 가린다(공유 pull 이 주장한 'az-irs' 와 개별 토큰의 'AZ-IRS' 가 따로 있을 수 있다) — 같은 이름 행 전부의 최댓값.
+    let okAt = 0;
+    for (const r of ((deps.pullStats() || {}).rows || [])) {
+      if (!r || String(r.agent || '').toLowerCase() !== name.toLowerCase()) continue;
+      const v = Number(r.lastVerifiedOkAt);
+      if (Number.isFinite(v) && v > okAt) okAt = v;
+    }
+    return okAt && okAt >= since ? okAt : null;
   }
   const t = tokenOf(deps, name);
   return t && Number(t.lastUsedAt) >= since ? Number(t.lastUsedAt) : null;
@@ -189,6 +197,8 @@ async function runJob(job, deps) {
   s = stepStart(job, 'edge-api', deps);
   const r = await deps.pushEdge(col, token);
   const b = r.body && typeof r.body === 'object' ? r.body : null;
+  // v2.781(점검 G2 A-B1 이중 방어): 엣지의 확정 답 '바뀐 것 없음'(applied:false — 파일·메모리 모두 그대로, centralTokenApply.js) — 이후 SSH 도 쓰지 않았으면 회수는 확정이다.
+  const edgeUnchanged = !!(b && b.applied === false);
   // 엣지가 '바뀐 것 없음' 을 확정으로 답하면 그 확인 요청(health-probe)은 '엣지가 새 토큰을 쓴다' 의 근거가 아니다 — 이후 판정 기준 시각을 응답 뒤로 옮긴다.
   if (b && b.applied === false) acceptFrom = (deps.now ? deps.now() : Date.now()) + 1;
   const pd = b ? (b.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ') : '';
@@ -218,7 +228,8 @@ async function runJob(job, deps) {
     } else {
       sshReason = r.status === 404 ? `엣지에 이 기능이 없습니다(HTTP 404 — 판 ${ver || '모름'}, ${MIN_EDGE_API_VERSION} 이상 필요)`
         : r.status === 403 ? '수집 토큰이 맞지 않습니다(HTTP 403)'
-          : b?.reason === 'persist-failed' ? '엣지가 portal.env 에 쓰지 못했습니다(서비스 계정 권한 — 바뀐 것 없음)'
+          // v2.781(점검 G2 A-I1): persist-failed 는 권한 말고도 '다음 기동이 읽지 않는 env 파일'(Windows 옛 start-portal.bat)일 수 있다 — 엣지가 남긴 단계 문구를 싣는다.
+          : b?.reason === 'persist-failed' ? `엣지가 portal.env 에 쓰지 못했습니다(서비스 계정 권한 등 — 바뀐 것 없음)${pd ? ` · ${pd}` : ''}`
             : r.error ? `엣지에 닿지 못했습니다: ${r.error}` : `엣지 응답 HTTP ${r.status ?? '—'}${b?.reason ? ` · ${b.reason}` : ''}`;
       stepEnd(s, 'bad', `${sshReason}${target ? ' — SSH 통로로 넘어갑니다' : ''}`, deps);
     }
@@ -229,7 +240,7 @@ async function runJob(job, deps) {
     s = stepStart(job, 'ssh', deps);
     if (!target) {
       stepEnd(s, 'skip', targets.length ? '배포 기록이 여러 개라 어느 호스트인지 정할 수 없습니다.' : '배포 기록(SSH 계정)이 없어 SSH 로 적용할 수 없습니다 — 설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록하세요.', deps);
-      revokeIssued('엣지에 전달하지 못함');
+      revokeIssued('엣지에 전달하지 못함', { definite: edgeUnchanged });
       return fail(`엣지에 전달하지 못했습니다: ${sshReason}`);
     }
     const sub = []; let wrote = false;
@@ -240,7 +251,10 @@ async function runJob(job, deps) {
     } else {
       stepEnd(s, 'bad', `${sub.join(' / ')}${sub.length ? ' — ' : ''}${sr?.reason || 'SSH 적용 실패'}`, deps);
       // 쓰기 전에 멈췄거나, 썼어도 사본으로 **되돌렸으면**(종료 코드 확인 — 반증 F5) 엣지는 새 토큰을 쓰지 않는다
-      if (!sr?.restoreFailed && (!wrote || sr?.reverted)) revokeIssued('SSH 적용 실패 · 바뀐 것 없음');
+      // v2.781(점검 G2): 엣지가 applied:false 로 답했고 SSH 가 **쓰지 않았으면** 어느 통로로도 토큰이 엣지에 닿지 않았다 — definite.
+      //   썼다가 되돌린 경우(재시작 뒤 실패 → 사본 복구 → 다시 재시작)는 확정으로 보지 않는다 — 그 사이 재시작한 엣지가 새 토큰을 썼을 수 있고
+      //   두 번째 재시작은 결과를 보지 않는다(deploy.js) — 받아들인 기록이 있으면 회수하지 않는 예전 판정을 유지한다.
+      if (!sr?.restoreFailed && (!wrote || sr?.reverted)) revokeIssued('SSH 적용 실패 · 바뀐 것 없음', { definite: edgeUnchanged && !wrote });
       else { const c = stepStart(job, 'cleanup', deps); stepEnd(c, 'warn', `엣지 portal.env 에 새 토큰이 남아 있을 수 있어 발급을 취소하지 않았습니다${sr?.restoreFailed ? ` — 사본(${sr.backup || '—'})으로 직접 복구하세요` : ''}.`, deps); }
       return fail(`SSH 로도 적용하지 못했습니다: ${sr?.reason || '사유 미상'}`);
     }

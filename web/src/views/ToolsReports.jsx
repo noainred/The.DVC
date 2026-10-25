@@ -20,7 +20,7 @@ import { notCollectedNote, notCollectedOf, notCollectedOneText } from './eventCo
 import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote, changeScanNote } from './toolsReportText.js'; // v2.772(Z4-3): changeScanNote
 import { numOrNull } from '../numOrNull.js'; // v2.727(C-01)
 import { unitText } from './unitText.js';
-import { forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
+import { forecastStaleText, FORECAST_STALE_TITLE, forecastLimitKind } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { suggestCell, heldNote } from './rightsizeText.js';
 import Select from '../components/Select.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
@@ -352,7 +352,8 @@ export function CapacityForecast({ scope }) {
     { key: 'usedGB', label: '사용', align: 'right', render: (r) => tb(r.usedGB) },
     { key: 'capacityGB', label: '전체', align: 'right', render: (r) => tb(r.capacityGB) },
     { key: 'slopePerDay', label: '증가/일', align: 'right', render: (r) => `${r.slopePerDay > 0 ? '+' : ''}${r.slopePerDay}GB` },
-    { key: 'daysToLimit', label: '고갈까지', align: 'right', render: (r) => (r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
+    // v2.781(점검 G4 E-B1): 이미 꽉 찬 DS(서버 full — 남은 일수 null)는 '—' 가 아니라 '포화' — 판정은 용량예측 화면과 같은 forecastLimitKind 하나.
+    { key: 'daysToLimit', label: '고갈까지', align: 'right', render: (r) => (forecastLimitKind(r) === 'full' ? <b style={{ color: 'var(--red)' }}>포화</b> : r.daysToLimit != null ? <b style={r.daysToLimit <= 30 ? { color: 'var(--red)' } : r.daysToLimit <= 90 ? { color: 'var(--amber)' } : {}}>{r.daysToLimit}일</b> : '—') },
     { key: 'etaTs', label: '예상일', render: (r) => <>{fmtDay(r.etaTs)}{forecastStaleText(r, data.generatedAt) && <div className="muted" style={{ fontSize: 11, color: 'var(--amber)' }} title={FORECAST_STALE_TITLE}>{forecastStaleText(r, data.generatedAt)}</div>}</> },
     { key: 'r2', label: '신뢰도(R²)', align: 'right', render: (r) => (r.r2 == null ? '—' : r.r2) }, // v2.710: 데모 합성 행은 R² 를 지어내지 않는다
   ];

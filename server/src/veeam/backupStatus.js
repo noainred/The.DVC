@@ -60,8 +60,11 @@ export const resultOf = (ve) => String(ve?.lr || ve?.lastResult || '');
  * @param {object|null} p.match       parse.matchToVcenter 결과(쓸 결과가 없으면 null)
  * @param {object|null} p.sc          backupCounts.snapCount 결과
  * @param {object|null} p.ev          스냅샷 이벤트 요약(byVm)
+ * @param {boolean} [p.runningStale]  v2.781(점검 G3 B-B1): 마지막 읽기가 실패했거나 오래된 서버가 있어 그 서버의 '백업 중' 을 지웠다(resultsFor runningStale)
+ *   — 수는 지우지 않는다(다른 서버의 수는 사실 = 하한). 행에 runningStale 표지만 단다(badges 와 같은 판정).
+ * @param {boolean} [p.noInventory]   v2.781(점검 G3 C-B1): vCenter **전체** 인벤토리가 없다(재시작 직후 골격·VM 0대) — vm 은 0 이 아니라 모름(null).
  */
-export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, ev = null, now = Date.now() }) {
+export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, ev = null, runningStale = false, noInventory = false, now = Date.now() }) {
   const list = Array.isArray(vms) ? vms : [];
   const veeamKnown = !!(linked && vcnt && isFin(vcnt.n) && match);
   const snapKnown = !!(sc && isFin(sc.n));
@@ -102,7 +105,7 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     split = { both, vOnly, sOnly, none: Math.max(0, list.length - both - vOnly - sOnly) };
   }
   return {
-    vm: list.length,
+    vm: noInventory ? null : list.length,
     veeam: linked ? (veeamKnown ? V.size : null) : null,
     veeamState: !linked ? 'unlinked' : veeamKnown ? (vcnt.partial ? 'partial' : 'ok') : (vcnt?.reason || 'unknown'),
     snap: snapKnown ? S.size : null,
@@ -111,27 +114,44 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     split,
     running: veeamKnown ? running : null,
     pending: veeamKnown ? pending : null,
+    ...(veeamKnown && runningStale ? { runningStale: true } : {}),
     lastBackup,
     rpo: veeamKnown ? rpo : null,
     results: veeamKnown ? results : null,
   };
 }
 
-/** 합계 — 모르는 값은 0 으로 더하지 않고 그 vCenter 를 센다. */
+/**
+ * 합계 — 모르는 값은 0 으로 더하지 않고 그 vCenter 를 센다.
+ * v2.781(점검 G3 B-B2 ≡ C-B2): 기존 필드(veeam·snap·running … 0 에서 시작)의 뜻은 그대로 두고, '얼마나 알았는가' 를 같이 낸다 —
+ *   웹은 아는 곳이 0 이면 '—', 비율의 분모는 그 기준을 아는 vCenter 의 VM 합(확인 불가 vCenter 의 VM 을 분모에 넣지 않는다), 부분 합이면 표지.
+ *   · veeamKnownVcs = Veeam 을 읽은 vCenter 수(연동 없음은 빼고 veeamUnlinked 로) · vmVeeamKnown = 그 vCenter 들 + 연동 없음 vCenter('없음' 확정)의 VM 합
+ *   · snapKnownVcs·vmSnapKnown = 스냅샷 기준을 아는 vCenter 수·그 VM 합 · veeamPartial·snapPartial = 일부만 읽은 행 수(수는 하한)
+ *   · runningUnknown = '백업 중' 을 지운 서버가 있는 행 수(B-B1 — running·pending 은 하한) · vmUnknown = VM 목록을 모르는 행 수(C-B1)
+ */
 export function backupTotals(rows) {
   const t = { vcenters: 0, vm: 0, veeam: 0, snap: 0, both: 0, vOnly: 0, sOnly: 0, none: 0, running: 0, pending: 0, snapStale: 0,
     veeamUnknown: 0, veeamUnlinked: 0, snapUnknown: 0, splitUnknown: 0,
-    rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0 };
+    rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0,
+    veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
-    t.vcenters++; t.vm += r.vm || 0; t.snapStale += r.snapStale || 0;
-    if (r.veeamState === 'unlinked') t.veeamUnlinked++;
+    const vm = isFin(r.vm) ? r.vm : null;
+    t.vcenters++; t.vm += vm ?? 0; t.snapStale += r.snapStale || 0;
+    if (vm == null) t.vmUnknown++;
+    if (r.veeamState === 'unlinked') { t.veeamUnlinked++; t.vmVeeamKnown += vm ?? 0; }
     else if (isFin(r.veeam)) {
-      t.veeam += r.veeam; t.running += r.running || 0; t.pending += r.pending || 0;
+      t.veeamKnownVcs++; t.vmVeeamKnown += vm ?? 0;
+      if (r.veeamState === 'partial') t.veeamPartial++;
+      // null 을 0 으로 삼키지 않는다 — 수가 있는 것만 더하고, 지운 서버가 있으면 따로 센다(하한)
+      if (isFin(r.running)) t.running += r.running;
+      if (isFin(r.pending)) t.pending += r.pending;
+      if (r.runningStale === true || !isFin(r.running)) t.runningUnknown++;
+      t.veeam += r.veeam;
       if (r.rpo) for (const k of ['d1', 'd3', 'd7', 'unknown']) t.rpo[k] += r.rpo[k] || 0;
       if (r.results) { t.failed += r.results.failed || 0; t.warning += r.results.warning || 0; }
     } else t.veeamUnknown++;
     t.excluded += r.excluded || 0; t.powerUnknown += r.powerUnknown || 0;
-    if (isFin(r.snap)) t.snap += r.snap; else t.snapUnknown++;
+    if (isFin(r.snap)) { t.snap += r.snap; t.snapKnownVcs++; t.vmSnapKnown += vm ?? 0; if (r.snapState === 'partial') t.snapPartial++; } else t.snapUnknown++;
     if (r.split) { t.both += r.split.both; t.vOnly += r.split.vOnly; t.sOnly += r.split.sOnly; t.none += r.split.none; } else t.splitUnknown++;
   }
   return t;

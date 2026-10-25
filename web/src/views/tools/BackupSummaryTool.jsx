@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
 import BackupOptions from './BackupOptions.jsx';
 
 export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
@@ -17,10 +17,15 @@ const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', 
 const TONE_BG = { ok: 'rgba(34,197,94,.12)', bad: 'rgba(239,68,68,.14)', warn: 'rgba(245,158,11,.14)', info: 'rgba(59,130,246,.14)', muted: 'transparent' };
 
 function Kpi({ label, value, sub, color, border, dashed }) {
+  // v2.781(점검 G3): '수 · 비율%' 은 비율을 작게 · 두 조각 사이에서만 줄바꿈 — 28px 한 줄(nowrap)은 1440px 카드 폭(약 180px)에 '1,398 · 66%' 가 테두리에 닿았고
+  //   부분 합 표지('1,398* · 66%')면 카드 밖으로 넘쳤다(세부내용 헤더와 같은 모양).
+  const cut = typeof value === 'string' ? value.indexOf(' · ') : -1;
   return (
     <div className="card" style={{ padding: '14px 16px', minWidth: 0, border: `1px ${dashed ? 'dashed' : 'solid'} ${border || 'var(--border)'}` }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: color || 'var(--text-dim)' }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+        {cut < 0 ? <span style={{ whiteSpace: 'nowrap' }}>{value}</span> : <><span style={{ whiteSpace: 'nowrap' }}>{value.slice(0, cut)}</span> <span style={{ whiteSpace: 'nowrap', fontSize: 18 }}>{value.slice(cut + 1)}</span></>}
+      </div>
       {sub && <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>{sub}</div>}
     </div>
   );
@@ -67,7 +72,7 @@ export default function BackupSummaryTool() {
   const t = data.totals || {};
   const shown = filterRows(rows, filter);
   const att = attentionList(rows);
-  const sp = (n) => pctOf(n, t.vm);
+  const kpi = summaryKpis(t, { rpoDays: opts.rpoDays });   // v2.781(점검 G3 C-B2): 아는 곳 0 이면 '—' · 분모는 그 기준을 아는 VM 합 · 부분 합 '*'
   const splitKnown = t.vcenters > 0 && t.splitUnknown < t.vcenters;
   const splitTotal = (t.both || 0) + (t.vOnly || 0) + (t.sOnly || 0) + (t.none || 0);
   const seg = (n) => (splitTotal ? `${(n / splitTotal) * 100}%` : '0%');
@@ -96,15 +101,12 @@ export default function BackupSummaryTool() {
       {data.registryUnreadable && <div className="card" style={{ padding: '8px 12px', color: TONE.bad, fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 Veeam 기준은 모두 확인 불가입니다 — 설정 › Veeam 백업 서버를 확인하세요.</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
-        <Kpi label="전체 VM" value={fmtNum(t.vm)} sub={`vCenter ${fmtNum(t.vcenters)}개`} />
-        <Kpi label="Veeam 백업 대상" value={`${fmtNum(t.veeam)}${sp(t.veeam) != null ? ` · ${sp(t.veeam)}%` : ''}`} color="#4ade80" border="#1d4d33"
-          sub={[t.veeamUnknown ? `확인 불가 ${t.veeamUnknown}곳` : '', t.veeamUnlinked ? `연동 없음 ${t.veeamUnlinked}곳` : ''].filter(Boolean).join(' · ') || 'Veeam 서버 기준'} />
-        <Kpi label="스냅샷으로 본 백업" value={`${fmtNum(t.snap)}${sp(t.snap) != null ? ` · ${sp(t.snap)}%` : ''}`} color="#c084fc" border="#6b3fa0" dashed
-          sub={t.snapUnknown ? `확인 불가 ${t.snapUnknown}곳 제외` : '최근 7일 Veeam 스냅샷 · 지금 스냅샷'} />
+        <Kpi label="전체 VM" value={kpi.vm.value} sub={kpi.vm.sub} />
+        <Kpi label="Veeam 백업 대상" value={kpi.veeam.value} color="#4ade80" border="#1d4d33" sub={kpi.veeam.sub} />
+        <Kpi label="스냅샷으로 본 백업" value={kpi.snap.value} color="#c084fc" border="#6b3fa0" dashed sub={kpi.snap.sub} />
         <Kpi label="어느 쪽에도 안 보임" value={splitKnown ? fmtNum(t.none) : '—'} sub="백업 안 됨이 아니라 확인되지 않음" />
-        <Kpi label="지금 백업 중" value={fmtNum(t.running)} color="#fbbf24" border="#5c4513" sub={`대기 ${fmtNum(t.pending)}`} />
-        <Kpi label={`오래된 백업(${opts.rpoDays}일 초과)`} value={fmtNum(t.rpo?.[rpoKey])} color="#fb923c" border="#5c3413"
-          sub={[t.rpo?.unknown ? `시각 모름 ${fmtNum(t.rpo.unknown)}` : '', t.failed != null || t.warning != null ? `실패 ${fmtNum(t.failed)} · 경고 ${fmtNum(t.warning)}` : ''].filter(Boolean).join(' · ') || 'Veeam 백업 대상 중'} />
+        <Kpi label="지금 백업 중" value={kpi.running.value} color="#fbbf24" border="#5c4513" sub={kpi.running.sub} />
+        <Kpi label={`오래된 백업(${opts.rpoDays}일 초과)`} value={kpi.rpo.value} color="#fb923c" border="#5c3413" sub={kpi.rpo.sub} />
       </div>
 
       <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
@@ -154,7 +156,7 @@ export default function BackupSummaryTool() {
             <tbody>
               {shown.map((r) => {
                 const vs = veeamStateOf(r.veeamState);
-                const vp = pctOf(r.veeam, r.vm); const spc = pctOf(r.snap, r.vm);
+                const vp = pctOf(r.veeam, r.vm); const spc = pctOf(r.snap, r.vm); const rc = runningCell(r);
                 return (
                   <tr key={r.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
                     <td data-sort={r.name} style={{ padding: '9px 14px', whiteSpace: 'nowrap' }}>
@@ -174,7 +176,7 @@ export default function BackupSummaryTool() {
                       {r.snap != null && <Bar pct={spc} color="#a855f7" />}
                     </td>
                     <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
-                    <td data-sort={r.running ?? ''} style={{ padding: '9px 6px', textAlign: 'right' }}>{r.running ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{r.running}</span> : <span className="muted">{r.running === 0 ? '0' : '—'}</span>}</td>
+                    <td data-sort={rc.sort ?? ''} title={rc.title} style={{ padding: '9px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>{rc.active ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{rc.text}</span> : <span className="muted">{rc.text}</span>}</td>
                     <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
                     <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
                     <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
@@ -191,12 +193,14 @@ export default function BackupSummaryTool() {
         <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <b style={{ fontSize: 14 }}>주의가 필요한 곳</b>
-            {att.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : att.map((a) => (
+            {att.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : att.map((a) => (a.more ? (
+              <button key={a.id} type="button" className="tab" onClick={() => setFilter('warn')} title={a.text} style={{ alignSelf: 'flex-start', padding: '4px 12px', fontSize: 12 }}>{a.title} — 표의 주의 필요 보기</button>
+            ) : (
               <div key={a.id} className="flex gap" style={{ alignItems: 'flex-start' }}>
                 <span style={{ flex: 'none', marginTop: 5, width: 8, height: 8, borderRadius: '50%', background: TONE[a.tone] }} />
                 <div style={{ minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, overflowWrap: 'anywhere' }}>{a.title}</div><div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{a.text}</div></div>
               </div>
-            ))}
+            )))}
           </div>
           {Array.isArray(data.runningJobs) && (
             <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -214,7 +218,7 @@ export default function BackupSummaryTool() {
             <b style={{ display: 'block', marginBottom: 4 }}>두 기준</b>
             <div><b style={{ color: '#4ade80' }}>Veeam</b> — Veeam 서버가 작업에 넣었거나 복원 지점이 있는 VM</div>
             <div><b style={{ color: '#c084fc' }}>스냅샷</b> — vCenter 에서 Veeam 이 스냅샷을 만든 흔적이 보인 VM(성공 여부는 모름)</div>
-            <div className="muted">두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않습니다. — 는 확인되지 않음입니다.</div>
+            <div className="muted">두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않습니다. — 는 확인되지 않음, * 는 일부만 읽은 vCenter 가 있어 실제와 다를 수 있음입니다. 비율은 그 기준을 확인한 vCenter 의 VM 으로 나눕니다.</div>
           </div>
         </div>
       </div>

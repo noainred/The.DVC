@@ -86,8 +86,16 @@ export async function forecastCapacity(snap, opts = {}) {
     if (hist.length < 4) return null;
     const pts = hist.map((h) => ({ x: h.ts, y: h.avg }));
     const lr = linreg(pts);
-    if (!lr || lr.r2 < minR2) return null;
+    if (!lr) return null;
     const current = pts[pts.length - 1].y;
+    // v2.781(점검 G4 E-B1): 이미 한계에 닿은(마지막 버킷 평균 ≥ 용량) 항목은 'full' 이다. 예전에는 daysToLimit 만 null 이라 '증가 없음(안정)'
+    //   과 같은 값이 되어 ① 정렬 맨 뒤 → 상한 100 에서 가장 급한 DS 가 잘렸고 ② soon(30일 내 포화)에서 빠졌고 ③ 웹 GPU 칸이 '안정' 으로 그렸다.
+    //   daysToLimit 은 null 그대로(남은 일수를 지어내지 않는다 — 웹 계약 유지)이고 full 표지를 따로 싣는다.
+    //   포화 판정은 R² 필터보다 **앞**이다: R² 는 '추세(ETA) 신뢰도' 를 거르는 것이고 '지금 꽉 찼다' 는 회귀와 무관한 관측값이다 —
+    //   꽉 찬 채 흔들리는 시계열(R² ≈ 0)이 목록에서 사라지면 안 된다. 꽉 차지 않은 항목은 예전처럼 R² 로 걸러진다.
+    const capN = numOrNull(cap);   // 못 읽은 용량은 0 이 아니다 — 모르면 포화로 단정하지 않는다
+    const full = capN != null && capN > 0 && Number.isFinite(current) && current >= capN;
+    if (!full && lr.r2 < minR2) return null;
     // v2.733(C2-07 — 재현: 같은 추세에서 5일 전 멈춘 DS 가 41일, 신선한 DS 가 36일): current 는 **마지막 점의 값**이므로 남은 기간도
     //   마지막 점 시각(lastTs — 그 버킷의 시작)에서 센다. 예전처럼 지금부터 세면 수집이 멈춘 동안의 증가가 빠져 남은 시간을 더 길게
     //   말한다(위험한 방향). daysToLimit 은 화면 계약대로 '지금부터 N일' 이고, 추세상 이미 지났으면 0(음수 아님). 버킷 시작 기준이라
@@ -95,11 +103,11 @@ export async function forecastCapacity(snap, opts = {}) {
     const lastTs = pts[pts.length - 1].x;
     const stale = now - lastTs > staleAfterMs;
     let daysToLimit = null, etaTs = null;
-    if (lr.slopePerDay > 0 && cap > current) {
+    if (!full && lr.slopePerDay > 0 && cap > current) {
       etaTs = lastTs + ((cap - current) / lr.slopePerDay) * DAY;
       daysToLimit = Math.max(0, Math.round((etaTs - now) / DAY));
     }
-    return { current: Number(current.toFixed(1)), slopePerDay: Number(lr.slopePerDay.toFixed(2)), r2: Number(lr.r2.toFixed(2)), daysToLimit, etaTs, lastTs, stale };
+    return { current: Number(current.toFixed(1)), slopePerDay: Number(lr.slopePerDay.toFixed(2)), r2: Number(lr.r2.toFixed(2)), daysToLimit, etaTs, lastTs, stale, full };
   };
 
   // 데이터스토어 포화 예측
@@ -111,7 +119,9 @@ export async function forecastCapacity(snap, opts = {}) {
     if (!f) continue;
     datastores.push({ id, name: meta.name, vcenterId: meta.vc, capacityGB: Math.round(meta.cap), usedGB: Math.round(meta.used || f.current), usagePct: meta.pct, ...f });
   }
-  datastores.sort((a, b) => (a.daysToLimit ?? 1e9) - (b.daysToLimit ?? 1e9));
+  // v2.781(E-B1): 포화(full)가 맨 앞 — 그다음 남은 일수 오름차순, 증가 없음(null)은 맨 뒤. 상한 100 이 가장 급한 항목을 자르지 않게.
+  const limitKey = (x) => (x.full ? -1 : (x.daysToLimit ?? 1e9));
+  datastores.sort((a, b) => limitKey(a) - limitKey(b));
 
   // GPU 포화 예측(vCenter 평균 사용률 100% 도달)
   const gpu = [];
@@ -124,14 +134,15 @@ export async function forecastCapacity(snap, opts = {}) {
     if (!f) continue;
     gpu.push({ vcenterId: k, metric: 'gpu_vc', limit: 100, ...f });
   }
-  gpu.sort((a, b) => (a.daysToLimit ?? 1e9) - (b.daysToLimit ?? 1e9));
+  gpu.sort((a, b) => limitKey(a) - limitKey(b));
 
   return {
     config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '', source: readRollup ? 'rollup' : 'unavailable', staleAfterMs },
     scannedDatastores: dsCap.size,
     datastores: datastores.slice(0, 100),
     gpu: gpu.slice(0, 100),
-    soon: datastores.filter((d) => d.daysToLimit != null && d.daysToLimit <= 30).slice(0, 30),
+    // v2.781(E-B1): 이미 포화된 DS 도 'KPI 30일 내 포화 예상' 에 든다(예전: daysToLimit null 이라 빠져 초록 0).
+    soon: datastores.filter((d) => d.full || (d.daysToLimit != null && d.daysToLimit <= 30)).slice(0, 30),
     generatedAt: now,
   };
 }
