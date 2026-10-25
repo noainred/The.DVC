@@ -32,11 +32,24 @@ export const FORECAST_STALE_TITLE = '이 항목은 수집이 멈춘 뒤의 추�
 
 /**
  * 한계 도달 칸의 종류. 'days'(N일 후) / 'full'(이미 한계 — 포화) / 'stable'(증가하지 않음).
- * @param {{daysToLimit:number|null, current:number, capacityGB:number, slopePerDay:number}} x
+ * v2.781(점검 G4 E-B1): 서버가 이미 한계에 닿은 항목에 `full: true` 를 싣는다(daysToLimit 은 null 그대로) — 그 표지를 **먼저** 본다.
+ *   서버는 포화를 R² 필터보다 앞에서 판정하므로 흔들리는 포화 시계열도 행으로 온다. full 이 없는 응답(구버전 서버)은 current ≥ 용량으로 본다.
+ * @param {{full?:boolean, daysToLimit:number|null, current:number, capacityGB:number, slopePerDay:number}} x
  */
 export function forecastLimitKind(x) {
+  if (x?.full === true) return 'full';
   if (x?.daysToLimit != null && Number.isFinite(Number(x.daysToLimit))) return 'days';
   const cur = Number(x?.current), cap = Number(x?.capacityGB);
   if (Number.isFinite(cur) && Number.isFinite(cap) && cap > 0 && cur >= cap) return 'full';
   return 'stable';
+}
+
+/**
+ * v2.781(점검 G4 E-B1): GPU 칸도 같은 판정을 쓴다 — 예전에는 `daysToLimit == null ? '안정'` 을 따로 써서 vCenter 평균 100% 를 '안정' 으로 그렸다.
+ * 한계는 서버의 `limit`(사용률 %), 못 읽었으면 100(GPU 포화 기준 — 서버 forecast.js 와 같은 값).
+ * @param {{full?:boolean, limit?:number, current:number, daysToLimit:number|null}} g
+ */
+export function forecastGpuLimitKind(g) {
+  const lim = g?.limit == null || g.limit === '' ? NaN : Number(g.limit);
+  return forecastLimitKind({ ...g, capacityGB: Number.isFinite(lim) && lim > 0 ? lim : 100 });
 }

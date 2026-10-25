@@ -11,7 +11,7 @@ import {
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 import { vcPowerSkippedNote } from './readGapText.js'; // v2.733(C2-02): 지금 값이 아니라 뺀 vCenter 추정 전력
-import { forecastPctText, forecastLimitKind, forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
+import { forecastPctText, forecastLimitKind, forecastGpuLimitKind, forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
 
@@ -198,7 +198,7 @@ function Forecast() {
   );
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>최근 추세를 선형회귀해 <b>한계 도달 시점(ETA)</b>을 추정합니다. 신뢰도(R²) 0.3 이상만 표시.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>최근 추세를 선형회귀해 <b>한계 도달 시점(ETA)</b>을 추정합니다. 신뢰도(R²) 0.3 이상만 표시(이미 한계에 닿은 항목은 신뢰도와 관계없이 <b>포화</b>로 맨 앞에 표시).</p>
       <div className="card" style={{ padding: 12, marginBottom: 12, borderLeft: '3px solid var(--amber,#f59e0b)' }}>
         <div className="muted" style={{ fontSize: 13 }}>⚠ 용량예측은 전체 데이터스토어의 시계열을 회귀 분석하므로, <b>전체 vCenter 조회는 대규모 환경에서 수십 초~수 분</b>이 걸릴 수 있습니다(그동안 화면이 멈춘 듯 보일 수 있음). <b>vCenter를 선택</b>하면 훨씬 빠릅니다.</div>
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'center' }}>
@@ -235,7 +235,13 @@ function Forecast() {
           <div className="table-wrap"><STable><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>현재</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
             <tbody>{d.gpu.map((g) => (
               <tr key={g.vcenterId}><td><b>{g.vcenterId}</b></td><td style={{ textAlign: 'right' }}>{g.current}%</td><td style={{ textAlign: 'right' }}>{g.slopePerDay > 0 ? '+' : ''}{g.slopePerDay}%/일</td>
-                <td style={{ textAlign: 'right' }}>{g.daysToLimit == null ? '안정' : <span className="badge amber">{g.daysToLimit}일</span>}</td><td className="muted">{g.etaTs ? fmtDate(g.etaTs) : '—'}{forecastStaleText(g, d?.generatedAt) && <div style={{ color: 'var(--amber)', fontSize: 11 }} title={FORECAST_STALE_TITLE}>{forecastStaleText(g, d?.generatedAt)}</div>}</td></tr>
+                <td style={{ textAlign: 'right' }}>{(() => {
+                  // v2.781(점검 G4 E-B1): DS 칸과 같은 판정(forecastRowText.js) — 100% 인 vCenter 를 '안정' 이라 말하지 않는다.
+                  const k = forecastGpuLimitKind(g);
+                  if (k === 'full') return <span className="badge red" title="최근 GPU 평균 사용률이 100%에 닿았습니다(예측할 남은 기간 없음)">포화</span>;
+                  if (k === 'stable') return '안정';
+                  return <span className="badge amber">{g.daysToLimit}일</span>;
+                })()}</td><td className="muted">{g.etaTs ? fmtDate(g.etaTs) : '—'}{forecastStaleText(g, d?.generatedAt) && <div style={{ color: 'var(--amber)', fontSize: 11 }} title={FORECAST_STALE_TITLE}>{forecastStaleText(g, d?.generatedAt)}</div>}</td></tr>
             ))}</tbody></STable></div>
         </div>
       )}
