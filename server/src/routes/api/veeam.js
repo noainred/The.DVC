@@ -2,12 +2,12 @@
 // 조회 전용·로그인 사용자(트리를 볼 수 있는 계정이면 배지도 본다 — 어떤 VM 이 백업 대상인지·작업 이름뿐, 계정 없음 · 오류 원문(주소)은 관리자만).
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
 import { store } from '../../store.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { serversForVcenter, registryLoadError } from '../../veeam/registry.js';
 import { getRecord, usableResult } from '../../veeam/store.js';
 import { matchToVcenter, withoutStaleRunning, buildVmDetail } from '../../veeam/parse.js';
 import { pollMs } from '../../veeam/poller.js';
-import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
 import { listRegistry as listVcenters } from '../../vcenter/registry.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { demoVeeamMatch, demoVeeamDetail } from '../../mock/demo/veeam.js';
@@ -23,12 +23,13 @@ import { snapEventsOkAt, snapCollectorReason } from '../../veeam/snapCollector.j
 import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
-import { requirePerm } from '../../auth/auth.js';
+import { requirePerm, requireRole } from '../../auth/auth.js';
 import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
+import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -431,6 +432,8 @@ async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const sc = snapCount({ ev, vms });
   const sv = vmScope(vms, scope || {});
   const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev, runningStale, noInventory }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
+  // v2.784: 사람이 정한 표시의 수 — 같은 범위(전원·제외) 목록. 연동 없는 vCenter 는 Veeam '없음' 확정이라 백업 필요 표시가 모두 미백업이다.
+  row.marks = markCounts(sv.vms, getMarks(), match?.byVm || null, { veeamKnown: row.veeam != null || !isLinked, absentKnown: !row.veeamAbsentUnknown });
   return { row, match, ev, vcnt, sc, views, linked: isLinked, scopedVms: sv.vms };
 }
 
@@ -458,7 +461,8 @@ async function summaryData(req, snap, scope) {
     // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유). 범위(전원)와 무관한 작업 단위 값이다.
     if (admin) for (const v of b.views) for (const j of v.runningJobs || []) if (jobs.length < 30) jobs.push({ vcenter: vc.name || vc.id, server: v.name, name: j.name, pg: j.pg });
   }
-  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined };
+  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+    marksUnreadable: marksUnreadable() || undefined };
 }
 
 async function detailData(req, snap, t, scope) {
@@ -468,10 +472,19 @@ async function detailData(req, snap, t, scope) {
   const veeamKnown = b.row.veeam != null;
   const snapKnown = b.row.snap != null;
   const now = Date.now();
-  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now }));   // v2.782(점검 K4 B-B3)
+  const marks = getMarks();
+  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]) }));   // v2.782(점검 K4 B-B3) · v2.784 표시
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
-    linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}) };
+    linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
+    writable: marksWritable(req, snap, vc.id), marksUnreadable: marksUnreadable() || undefined };
+}
+
+/** v2.784: 이 계정이 이 vCenter 의 백업 표시를 바꿀 수 있는가 — 화면이 편집 칸을 여는 값(서버 PUT 판정과 같은 조건). */
+function marksWritable(req, snap, vcenterId) {
+  if (!['admin', 'operator'].includes(req.user?.role) || isDemoGuest(req.user)) return false;
+  const w = writeScopedVcenterIds(req.user, snap);
+  return !w || w.has(vcenterId);
 }
 
 const iso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '');
@@ -486,7 +499,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });   // 키에 req.originalUrl(전원·제외)도 든다(shared.js)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}` });   // 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
   });
 
   api.get('/tools/backup-detail', toolsPerm, async (req, res) => {
@@ -496,7 +509,42 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters)
+  });
+
+  /*
+   * v2.784(사용자 요청 '업무 중요도 아이콘 · 백업 필요 아이콘 · 백업 관련 메모 · 다중 선택 일괄 적용'): VM 표시 저장.
+   *   도구 키 집행은 첫 마디 backup-detail(auth/toolAccess.js). 순서 = 역할(admin·operator) → 조회 범위 밖 404 → 쓰기 범위 밖 403
+   *   (server/CLAUDE.md '조회 밖 404 → 쓰기 밖 403') → 모든 VM 이 그 vCenter 의 지금 인벤토리에 있어야(남의 vCenter VM id 로 쓰지 않게) → 감사.
+   */
+  api.put('/tools/backup-detail/marks', toolsPerm, requireRole('admin', 'operator'), (req, res) => {
+    if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 바꿀 수 없습니다.' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const vcenterId = String(body.vcenterId || '').slice(0, 128);
+    const snap = store.get();
+    const allowed = scopedVcenterIds(req.user, snap);
+    const vc = (snap?.vcenters || []).find((v) => v.id === vcenterId);
+    if (!vcenterId || !vc || (allowed && !allowed.has(vcenterId))) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!marksWritable(req, snap, vcenterId)) return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+    const ids = Array.isArray(body.vmIds) ? body.vmIds.map((x) => String(x || '')).filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ ok: false, reason: 'VM 을 고르세요.' });
+    if (ids.length > MAX_IDS_PER_REQUEST) return res.status(400).json({ ok: false, reason: `한 번에 ${MAX_IDS_PER_REQUEST}대까지입니다.` });
+    const inv = new Map();
+    for (const vm of snap?.vms || []) if (vm.vcenterId === vcenterId) inv.set(vm.id, vm);
+    const targets = [];
+    for (const id of new Set(ids)) {
+      const vm = inv.get(id);
+      if (!vm) return res.status(400).json({ ok: false, reason: '이 vCenter 의 VM 이 아닌 항목이 있습니다.' });
+      targets.push({ id, name: vm.name, vcenterId });
+    }
+    const patch = {};
+    for (const k of ['crit', 'need', 'memo']) if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];
+    const r = setMarks(targets, patch, req.user);
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { code: r.code } : {}) });
+    const what = [patch.crit !== undefined ? `중요도=${patch.crit || '지움'}` : '', patch.need !== undefined ? `백업 필요=${patch.need ? '표시' : '해제'}` : '',
+      patch.memo !== undefined ? `메모 ${String(patch.memo || '').length}자` : ''].filter(Boolean).join(' · ');
+    logAudit({ user: req.user?.username, action: 'backup-marks', target: vcenterId, detail: `${targets.length}대 · ${what}${targets.length === 1 ? ` · ${targets[0].name}` : ''}`, ip: req.ip });
+    res.json({ ok: true, changed: r.changed, removed: r.removed });
   });
 
   // v2.780(사용자 선택 'CSV 내보내기'): 화면과 같은 조건 그대로 — 데이터 내보내기 권한(data.csv) + 감사 로그(다른 도구 CSV 와 같은 규칙).
@@ -509,13 +557,15 @@ export function registerBackupStatus(api) {
       const scope = scopeOf(req);
       const d = await summaryData(req, store.get(), scope);
       const lines = [CSV_BOM + csvLine(['vCenter', '범위', 'VM', 'Veeam 백업', '스냅샷 기준', '둘 다', 'Veeam 만', '스냅샷만', '확인 안 됨', '백업 중', '대기',
-        '오래된 백업 1일+', '오래된 백업 3일+', '오래된 백업 7일+', '완료 시각 모름', '실패', '경고', '마지막 백업 완료(UTC)', 'Veeam 상태', '스냅샷 잔존', '제외(템플릿·vCLS)', '전원 모름'])];
+        '오래된 백업 1일+', '오래된 백업 3일+', '오래된 백업 7일+', '완료 시각 모름', '실패', '경고', '마지막 백업 완료(UTC)', 'Veeam 상태', '스냅샷 잔존', '제외(템플릿·vCLS)', '전원 모름',
+        '중요도 상', '중요도 중', '중요도 하', '백업 필요', '백업 필요·미백업'])];
       const n = (v) => (Number.isFinite(v) ? v : '');
       // v2.781(B-B1): '백업 중' 을 지운 서버가 있으면 0 은 모름(빈칸) · 0 이 아니면 하한(≥N) — 화면과 같은 규칙.
       const run = (r, v) => (r.runningStale && Number.isFinite(v) ? (v > 0 ? `≥${v}` : '') : n(v));
       for (const r of d.rows) {
         lines.push(csvLine([r.name, scopeText(scope), n(r.vm), n(r.veeam), n(r.snap), n(r.split?.both), n(r.split?.vOnly), n(r.split?.sOnly), n(r.split?.none), run(r, r.running), run(r, r.pending),
-          n(r.rpo?.d1), n(r.rpo?.d3), n(r.rpo?.d7), n(r.rpo?.unknown), n(r.results?.failed), n(r.results?.warning), iso(r.lastBackup), r.veeamState || '', n(r.snapStale), n(r.excluded), n(r.powerUnknown)]));
+          n(r.rpo?.d1), n(r.rpo?.d3), n(r.rpo?.d7), n(r.rpo?.unknown), n(r.results?.failed), n(r.results?.warning), iso(r.lastBackup), r.veeamState || '', n(r.snapStale), n(r.excluded), n(r.powerUnknown),
+          n(r.marks?.high), n(r.marks?.mid), n(r.marks?.low), n(r.marks?.need), n(r.marks?.needGap)]));
       }
       logAudit({ user: req.user?.username, action: 'backup-summary.csv', target: 'backup-summary', detail: `${d.rows.length} rows · ${scopeText(scope)}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -537,7 +587,8 @@ export function registerBackupStatus(api) {
       const now = Date.now();
       const st = (v) => (v === undefined ? '모름' : !v ? '없음' : v.state === 'run' ? '백업 중' : v.state === 'wait' ? '대기' : '백업 대상');
       const lines = [CSV_BOM + csvLine(['vCenter', '폴더', 'VM', '전원', 'Veeam', '진행률(%)', '작업', '복원 지점', '마지막 백업 완료(UTC)', '마지막 결과',
-        `스냅샷 최근 ${d.snapDays || 7}일 횟수`, '스냅샷 마지막(UTC)', '지금 스냅샷', '스냅샷 잔존'])];
+        `스냅샷 최근 ${d.snapDays || 7}일 횟수`, '스냅샷 마지막(UTC)', '지금 스냅샷', '스냅샷 잔존', '중요도', '백업 필요', '메모'])];
+      const CRIT_TEXT = { high: '상', mid: '중', low: '하' };
       let n = 0;
       for (const vm of d.vms) {
         if (!vmViewMatches(vm, filter, { rpoDays, now })) continue;
@@ -545,7 +596,8 @@ export function registerBackupStatus(api) {
         const v = vm.v; const s = vm.s || {};
         lines.push(csvLine([d.vcenter.name, vm.folder, vm.name, vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '', st(v), v && Number.isFinite(v.pg) ? v.pg : '',
           v?.jobs?.join(' | ') || '', v && Number.isFinite(v.rp) && v.rp >= 0 ? v.rp : '', iso(v?.lb), v ? (v.lr || v.lastResult || '') : '',
-          s.ev === undefined ? '모름' : s.ev ? (s.ev.n ?? '') : 0, iso(s.ev?.ts), s.now && !s.now.stale ? s.now.n : '', s.now?.stale ? '예' : '']));
+          s.ev === undefined ? '모름' : s.ev ? (s.ev.n ?? '') : 0, iso(s.ev?.ts), s.now && !s.now.stale ? s.now.n : '', s.now?.stale ? '예' : '',
+          CRIT_TEXT[vm.m?.crit] || '', vm.m?.need ? '예' : '', vm.m?.memo || '']));
       }
       logAudit({ user: req.user?.username, action: 'backup-detail.csv', target: t.vcenterId, detail: `${n} rows · ${scopeText(scope)} · 보기 ${filter}${filter === 'rpo' ? ` ${rpoDays}일` : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

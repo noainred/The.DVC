@@ -5,10 +5,11 @@
  * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, downloadFile, canCsv } from '../../api.js';
+import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, toggleAllVisible, visibleVmIds, filterLabel } from './backupViewText.js';
+import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
 
@@ -51,6 +52,11 @@ export default function BackupDetailTool({ scope }) {
   const [sel, setSel] = useState(null);
   const [opts, setOpts] = useState(() => loadOpts());   // 서머리와 함께 기억(전원·제외는 서버가 세고, 오래된 백업 기준은 화면이 고른다)
   const [csvErr, setCsvErr] = useState(null);
+  // v2.784 백업 표시 — 체크한 VM(일괄 적용) · 저장 중 · 저장 오류 · 메모 초안(고른 VM 이 바뀔 때만 다시 채운다)
+  const [checked, setChecked] = useState(() => new Set());
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState(null);
+  const [memo, setMemo] = useState('');
   const gen = useRef(0);
 
   useEffect(() => {
@@ -63,12 +69,13 @@ export default function BackupDetailTool({ scope }) {
     if (!vcs || !vcs.length) return;
     if (!vcId || !vcs.some((v) => v.id === vcId)) setVcId([...vcs].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))[0].id);
   }, [vcs, vcId]);
-  const load = useCallback(() => {
+  // keep: 표시를 저장한 뒤 다시 읽을 때는 펼침·고른 VM·체크를 그대로 둔다
+  const load = useCallback((keep = false) => {
     if (!vcId) return;
     const my = ++gen.current;
     setLoading(true); setError(null);
     fetchJson('/tools/backup-detail', { vcenterId: vcId, ...scopeQuery(opts) })
-      .then((r) => { if (my === gen.current) { setData(r); setOpen(null); setSel(null); } })
+      .then((r) => { if (my === gen.current) { setData(r); if (keep !== true) { setOpen(null); setSel(null); setChecked(new Set()); } } })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
   }, [vcId, opts.power, opts.excl]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,6 +98,17 @@ export default function BackupDetailTool({ scope }) {
   const forceOpen = filter !== 'all' || !!q.trim();
   const rows = useMemo(() => flattenTree(tree, openSet, { forceOpen }), [tree, openSet, forceOpen]);
   const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
+  const writable = data?.writable === true && !data?.marksUnreadable;
+  const visibleIds = useMemo(() => visibleVmIds(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
+  useEffect(() => { setMemo(selVm?.m?.memo || ''); setSaveErr(null); }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveMarks = useCallback(async (ids, patch) => {
+    if (!ids.length) return;
+    setSaving(true); setSaveErr(null);
+    try { await putJson('/tools/backup-detail/marks', { vcenterId: vcId, vmIds: ids, ...patch }); load(true); }
+    catch (e) { setSaveErr(e); }
+    finally { setSaving(false); }
+  }, [vcId, load]);
+  const toggleCheck = (id) => setChecked((cur) => { const s = new Set(cur); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   const toggle = (key) => setOpen((cur) => { const s = new Set(cur || openSet); if (s.has(key)) s.delete(key); else s.add(key); return s; });
 
@@ -143,6 +161,17 @@ export default function BackupDetailTool({ scope }) {
             <div title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}><div style={{ fontSize: 12, color: '#fdba74' }}>오래된 백업({opts.rpoDays}일 초과)</div><div style={{ fontSize: 22, fontWeight: 800, color: r.rpo ? '#fb923c' : 'var(--text-dim)' }}>{fmtNum(r.rpo?.[`d${opts.rpoDays}`])}</div></div>
             <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
           </div>
+          {/* v2.784: 사람이 정한 표시의 수(같은 범위) — 누르면 그 보기 */}
+          {marksLine(r.marks) && (() => { const m = marksLine(r.marks); return (
+            <div data-backup-marks="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center', fontSize: 13, borderTop: '1px solid var(--border-soft)', paddingTop: 10 }}>
+              <span className="muted" style={{ fontSize: 12 }}>업무 중요도</span>
+              {CRIT.map((c) => <button key={c.key} type="button" className={`tab${filter === `crit-${c.key}` ? ' active' : ''}`} aria-pressed={filter === `crit-${c.key}`} onClick={() => setFilter(filter === `crit-${c.key}` ? 'all' : `crit-${c.key}`)} title={`${c.label} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><CritIcon crit={c.key} withText /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m[c.key])}</b></button>)}
+              <span style={{ width: 1, height: 20, background: 'var(--border)' }} aria-hidden="true" />
+              <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={{ color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
+              {m.need > 0 && <button type="button" className={`tab${filter === 'needgap' ? ' active' : ''}`} aria-pressed={filter === 'needgap'} onClick={() => setFilter(filter === 'needgap' ? 'all' : 'needgap')} title="백업 필요로 표시했는데 Veeam 백업 대상이 아닌 VM" style={{ padding: '3px 10px', color: m.needGap ? '#fca5a5' : undefined }}>그중 Veeam 백업 안 보임 <b>{m.needGap == null ? '모름' : fmtNum(m.needGap)}</b></button>}
+            </div>
+          ); })()}
+          {data.marksUnreadable && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fca5a5' }}>백업 표시 파일을 읽지 못해 표시를 바꿀 수 없습니다 — 설정 폴더의 backup-marks.json 손상 사본을 확인하세요.</div>}
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
           {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
           {(r.veeam == null && r.veeamState !== 'unlinked') && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) VM 의 Veeam 칸은 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요. 스냅샷 칸은 그대로 보입니다.</div>}
@@ -154,12 +183,32 @@ export default function BackupDetailTool({ scope }) {
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
           {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {counts[k]}</button>)}
+          {filter.startsWith('crit-') && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {counts[filter]} ✕</button>}
         </div>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
           <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="VM · 폴더 이름" style={{ flex: 1, minWidth: 0 }} />
         </label>
       </div>
+
+      {writable && (
+        <div className="card" data-backup-bulk="" style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 12, minWidth: 0 }}>
+          <b style={{ fontSize: 13 }}>{checked.size ? `${fmtNum(checked.size)}대 선택` : '선택 없음'}</b>
+          <button type="button" className="tab" onClick={() => setChecked((cur) => toggleAllVisible(cur, visibleIds))} disabled={!visibleIds.length} style={{ padding: '3px 10px', fontSize: 12 }}>
+            {visibleIds.length && visibleIds.every((id) => checked.has(id)) ? '보이는 VM 선택 해제' : `보이는 VM 전체 선택(${fmtNum(visibleIds.length)})`}
+          </button>
+          {checked.size > 0 && <button type="button" className="tab" onClick={() => setChecked(new Set())} style={{ padding: '3px 10px', fontSize: 12 }}>선택 해제</button>}
+          <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />
+          <span className="muted">중요도</span>
+          {CRIT.map((c) => <button key={c.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><CritIcon crit={c.key} withText /></button>)}
+          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
+          <span className="muted">백업 필요</span>
+          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: true })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />표시</button>
+          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: false })} style={{ padding: '3px 9px', fontSize: 12 }}>해제</button>
+          {saving && <span className="muted">저장 중…</span>}
+          {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
+        </div>
+      )}
 
       <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
         <div className="card" style={{ flex: '999 1 640px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
@@ -202,10 +251,15 @@ export default function BackupDetailTool({ scope }) {
                 const isSel = sel === vm.id;
                 return (
                   <div role="row" key={row.key} aria-selected={isSel} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: isSel ? 'rgba(59,130,246,.12)' : undefined }}>
-                    <div role="gridcell" style={{ minWidth: 0 }}>
-                      <button type="button" onClick={() => setSel(isSel ? null : vm.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 38, padding: `0 8px 0 ${pad + 20}px`, background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+                    <div role="gridcell" style={{ minWidth: 0, display: 'flex', alignItems: 'center', paddingLeft: writable ? pad : pad + 20 }}>
+                      {/* v2.784: 일괄 적용용 체크(편집 가능할 때만) · 이름 앞 중요도·백업 필요 아이콘(열을 늘리지 않는다 — 1440 폭 유지) */}
+                      {writable && <input type="checkbox" aria-label={`${vm.name} 선택`} checked={checked.has(vm.id)} onChange={() => toggleCheck(vm.id)} style={{ width: 15, height: 15, margin: '0 5px 0 0', flex: 'none' }} />}
+                      <button type="button" onClick={() => setSel(isSel ? null : vm.id)} title={vm.m?.memo ? `메모: ${vm.m.memo.slice(0, 200)}` : undefined} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, minHeight: 38, padding: '0 8px 0 0', background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ color: 'var(--text-dim)', flex: 'none' }}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /></svg>
+                        <CritIcon crit={vm.m?.crit} size={14} />
+                        {vm.m?.need && <NeedIcon size={14} />}
                         <span style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vm.name}</span>
+                        {vm.m?.memo && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="메모 있음" style={{ color: 'var(--text-dim)', flex: 'none' }}><path d="M4 4h16v12H8l-4 4z" /></svg>}
                       </button>
                     </div>
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: vm.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '—'}</div>
@@ -247,6 +301,38 @@ export default function BackupDetailTool({ scope }) {
                     <dt className="muted">스냅샷 흔적</dt><dd style={{ margin: 0 }}>{selVm.s?.ev ? `최근 ${days}일 ${selVm.s.ev.n ?? '?'}회 · 마지막 ${shortTs(selVm.s.ev.ts)}` : ('ev' in (selVm.s || {}) ? '없음' : '모름')}</dd>
                     <dt className="muted">지금 스냅샷</dt><dd style={{ margin: 0 }}>{selVm.s?.now ? `${selVm.s.now.n}개 · 생성 ${shortTs(selVm.s.now.ts)}${selVm.s.now.stale ? ' — 하루 넘게 남음(정리 실패 의심)' : ''}` : '없음'}</dd>
                   </dl>
+                  {/* v2.784: 백업 표시 — 편집 가능하면 바로 저장(중요도·백업 필요), 메모는 저장 버튼 */}
+                  <div data-backup-mark-edit="" style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                    <b style={{ fontSize: 13 }}>백업 표시</b>
+                    <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
+                      <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>업무 중요도</span>
+                      {writable ? [...CRIT, { key: '', text: '없음' }].map((c) => {
+                        const on = (selVm.m?.crit || '') === c.key;
+                        return <button key={c.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{c.key ? <CritIcon crit={c.key} withText /> : '없음'}</button>;
+                      }) : (critOf(selVm.m?.crit) ? <CritIcon crit={selVm.m.crit} withText /> : <span className="muted">—</span>)}
+                    </div>
+                    <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
+                      <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 필요</span>
+                      {writable ? (
+                        <button type="button" className={`tab${selVm.m?.need ? ' active' : ''}`} aria-pressed={!!selVm.m?.need} disabled={saving} onClick={() => saveMarks([selVm.id], { need: !selVm.m?.need })} style={{ padding: '3px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />{selVm.m?.need ? '표시됨 — 누르면 해제' : '표시'}</button>
+                      ) : (selVm.m?.need ? <span className="flex" style={{ gap: 4, alignItems: 'center' }}><NeedIcon size={13} />표시됨</span> : <span className="muted">—</span>)}
+                      {selVm.m?.need && c.vKnown && !c.veeam && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span className="muted" style={{ fontSize: 12 }} id="backup-memo-label">백업 메모</span>
+                      {writable ? (
+                        <>
+                          <textarea className="input" aria-labelledby="backup-memo-label" value={memo} maxLength={MEMO_MAX} rows={4} onChange={(e) => setMemo(e.target.value)} placeholder="예: 매일 22시 전체 백업 필요 · 담당자 · 복원 절차" style={{ minWidth: 0, width: '100%', resize: 'vertical', fontSize: 13 }} />
+                          <span className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                            <span className="muted" style={{ fontSize: 11 }}>{memo.length}/{MEMO_MAX}</span>
+                            <button type="button" className="tab" disabled={saving || memo === (selVm.m?.memo || '')} onClick={() => saveMarks([selVm.id], { memo })} style={{ padding: '3px 12px', fontSize: 12 }}>{saving ? '저장 중…' : '메모 저장'}</button>
+                          </span>
+                        </>
+                      ) : <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selVm.m?.memo || <span className="muted">—</span>}</span>}
+                    </div>
+                    {selVm.m?.at && <span className="muted" style={{ fontSize: 11 }}>마지막 수정 {selVm.m.by || '—'} · {shortTs(Date.parse(selVm.m.at))}</span>}
+                    {saveErr && <span style={{ fontSize: 12, color: '#fca5a5', overflowWrap: 'anywhere' }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
+                  </div>
                 </>
               );
             })()}
@@ -256,6 +342,7 @@ export default function BackupDetailTool({ scope }) {
             <div><b style={{ color: '#86efac' }}>Veeam 월-일 시:분</b> 백업 대상 · 마지막 완료 시각</div>
             <div><b style={{ color: '#fcd34d' }}>백업 중 N%</b> 그 VM 의 진행률 · <b style={{ color: '#93c5fd' }}>대기</b> 차례 기다림</div>
             <div><b style={{ color: '#d8b4fe' }}>{days}일 N회</b> 스냅샷 흔적 · <b style={{ color: '#fca5a5' }}>잔존</b> 하루 넘게 남은 임시 스냅샷</div>
+            <div className="flex" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}><CritIcon crit="high" size={13} /><CritIcon crit="mid" size={13} /><CritIcon crit="low" size={13} /> 업무 중요도 상·중·하 · <NeedIcon size={13} /> 백업 필요(사람이 정한 표시)</div>
             <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>
           </div>
         </div>

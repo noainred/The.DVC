@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
-import { vmViewMatches, VIEW_FILTERS, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
+import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { vmViewMatches, VIEW_FILTERS, viewClass as serverViewClass, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
 
 const H = 3_600_000;
 const vm = (id, folder, o = {}) => ({ id, name: id, folder, ...o });
@@ -46,7 +46,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[6])).toMatchObject({ vKnown: false, sKnown: false });
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
-    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0 });   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
+    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0 });   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -114,7 +114,7 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
   });
 
   it('웹 vmMatches = 서버 vmViewMatches(같은 입력 · CSV 가 화면과 같은 VM 을 낸다) · 값 목록도 같다', () => {
-    expect(FILTERS.map(([k]) => k)).toEqual([...VIEW_FILTERS]);
+    expect([...FILTERS, ...CRIT_FILTERS].map(([k]) => k)).toEqual([...VIEW_FILTERS]);   // v2.784: 중요도 필터는 칩 줄 밖(상단 수)
     expect(POWER.map(([k]) => k)).toEqual([...POWER_VALUES]);
     expect(RPO_DAYS).toEqual([...SERVER_RPO_DAYS]);
     const edge = [{}, { v: undefined, s: {} }, { v: null, s: { ev: undefined } }, { v: { state: 'wait' }, s: { now: { stale: true, ts: NOW } } }, ...X];
@@ -165,5 +165,56 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
     expect(src).not.toMatch(/minWidth: 1[34]0 \}/);
     const opt = fs.readFileSync(new URL('./BackupOptions.jsx', import.meta.url), 'utf8');
     expect(opt).toMatch(/minWidth: 0, width: 'auto'/);
+  });
+});
+
+describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () => {
+  const M = await import('./backupViewText.js');
+  const S = await import('../../../../server/src/veeam/backupStatus.js');
+  const BM = await import('../../../../server/src/veeam/backupMarks.js');
+  const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  const X = [
+    { id: 'a', name: 'a', folder: 'D/vm/F', v: { state: 'ok', lb: NOW }, s: { ev: null, now: null }, m: { crit: 'high', need: true, memo: 'x' } },
+    { id: 'b', name: 'b', folder: 'D/vm/F', v: null, s: { ev: null, now: null }, m: { crit: 'mid', need: true, memo: '' } },
+    { id: 'c', name: 'c', folder: 'D/vm/G', s: { now: null }, m: { crit: 'low', need: true } },          // Veeam 모름 — 미백업에 넣지 않는다
+    { id: 'd', name: 'd', folder: 'D/vm/G', v: null, s: { ev: null, now: null }, m: { crit: 'zzz', need: 'yes' } },   // 모르는 값은 표시 없음
+    { id: 'e', name: 'e', folder: 'D/vm/G', v: null, s: { ev: null, now: null } },
+  ];
+  it('필터 — 백업 필요 · 미백업(Veeam 모름 제외) · 중요도 · 웹=서버(같은 입력)', () => {
+    const ids = (f) => X.filter((v) => M.vmMatches(v, f, { now: NOW })).map((v) => v.id);
+    expect(ids('need')).toEqual(['a', 'b', 'c']);
+    expect(ids('needgap')).toEqual(['b']);
+    expect([ids('crit-high'), ids('crit-mid'), ids('crit-low')]).toEqual([['a'], ['b'], ['c']]);
+    for (const f of S.VIEW_FILTERS) for (const v of X) expect(M.vmMatches(v, f, { now: NOW }), `${f}/${v.id}`).toBe(S.vmViewMatches(v, f, { now: NOW }));
+    expect(M.MEMO_MAX).toBe(BM.MEMO_MAX);
+    expect(M.CRIT.map((c) => c.key)).toEqual([...BM.CRIT_VALUES]);
+  });
+  it('보이는 VM 전체 선택 — 접힌 폴더도 포함 · 트리와 같은 판정 · 모두 골라져 있으면 해제', () => {
+    const vis = M.visibleVmIds(X, { filter: 'need', q: 'g', now: NOW });
+    expect(vis).toEqual(['c']);   // 폴더 G 검색 + 백업 필요
+    const tree = M.buildTree(X, { filter: 'need', q: 'g', now: NOW });
+    expect(tree.children[0].hit).toBe(vis.length);
+    let sel = M.toggleAllVisible(new Set(['a']), ['b', 'c']);
+    expect([...sel].sort()).toEqual(['a', 'b', 'c']);
+    sel = M.toggleAllVisible(sel, ['b', 'c']);
+    expect([...sel]).toEqual(['a']);
+  });
+  it('상단 수·주의 목록 — 미백업을 모르면 null(0 이 아니다) · 미백업 요약은 정보 칸 한 줄', () => {
+    expect(M.marksLine({ high: 1, mid: 0, low: 2, need: 3, needGap: null })).toEqual({ high: 1, mid: 0, low: 2, need: 3, needGap: null });
+    expect(M.marksLine(null)).toBe(null);
+    const att = M.attentionList([{ id: 'v1', name: 'VC1', veeamState: 'ok', snap: 1, snapStale: 0, marks: { need: 2, needGap: 2 } }, { id: 'v2', name: 'VC2', veeamState: 'ok', snap: 1, snapStale: 0, marks: { need: 1, needGap: null } }]);
+    expect(att.map((a) => a.title)).toEqual(['백업 필요인데 Veeam 백업 없음 2대']);
+    expect(att[0].tone).toBe('info');
+    expect(JSON.stringify(att)).not.toMatch(/`/);
+  });
+  it('화면 — 편집 칸은 서버 writable 일 때만 · 저장 뒤 다시 읽어도 펼침·선택 유지 · 표 열을 늘리지 않음', () => {
+    const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(det).toMatch(/const writable = data\?\.writable === true && !data\?\.marksUnreadable/);
+    expect(det).toMatch(/\{writable && <input type="checkbox"/);
+    expect(det).toMatch(/load\(true\)/);
+    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(140px, 1\.2fr\) minmax\(90px, 1fr\) 64px minmax\(110px, 1fr\) 104px'/);
+    const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    expect(sum).toMatch(/data-backup-marks/);
+    expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(858);
   });
 });
