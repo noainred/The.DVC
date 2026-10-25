@@ -21,7 +21,7 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getDatacenterAssign, listDatacenters } from '../datacenter/store.js';
-import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js';
+import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
 import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
@@ -274,20 +274,40 @@ insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, re
 });
 
 // 유령 태그/소속 키 정리(관리자) — 현재 어느 '등록된' 서버/호스트와도 매칭 안 되는 잔재 키 제거.
-// liveKeys는 레지스트리(전원오프 포함)+OME 캐시+호스트에서 직접 산출(전력 DB 미경유) → 등록 서버 보호.
-// body.dryRun=true면 삭제하지 않고 제거 대상 수만 반환(미리보기).
+// v2.783(점검 Q2 P-B3 — 데이터 손실): ① 판정은 화면 요약과 같은 fleetGhostReport 하나(원격 수집 서버·OME·엣지·호스트 전부의 합집합).
+//   ② 출처를 하나라도 못 읽었으면(등록부 손상·OME 미수신·수집 서버 미수신·호스트 목록 모르는 vCenter·엣지 보류/만료) 지우지 않는다 —
+//      등록부 손상은 503(registryUnreadable), 그 밖은 409. 미리보기(dryRun)도 같은 판정(blocked·unreadable)과 지울 키 목록을 준다.
+//   ③ 실제 삭제는 **미리 본 키 목록(keys)** 을 받아 '그 목록 ∩ 지금도 유령' 만 지운다(확인창과 실제 삭제 사이에 바뀐 것을 지우지 않는다).
+//      목록 없는 요청(구버전 화면의 {})은 400 — 예전에는 그 요청이 전부를 지웠다.
+const PRUNE_KEYS_MAX = 5000;
 insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) => {
   try {
-    const live = fleetLiveKeys(store.get());
-    if (req.body?.dryRun) {
-      const ghostT = Object.keys(loadFleetTags()).filter((k) => !live.has(k)).length;
-      const ghostA = Object.keys(loadFleetAssign()).filter((k) => !live.has(k)).length;
-      return res.json({ ok: true, dryRun: true, wouldRemoveTags: ghostT, wouldRemoveAssign: ghostA });
+    const rep = fleetGhostReport(store.get());
+    const blocked = rep.unreadable.length > 0;
+    const regBlocked = rep.unreadable.some((u) => u.registry);
+    const reason = blocked
+      ? `읽지 못한 출처가 있어 유령 키를 정리하지 않습니다(살아 있는 서버의 키를 지울 수 있습니다) — ${rep.unreadable.slice(0, 5).map((u) => u.reason).join(' · ')}${rep.unreadable.length > 5 ? ` 외 ${rep.unreadable.length - 5}건` : ''}`
+      : '';
+    const view = {
+      ghostKeys: rep.ghostKeys, wouldRemoveTags: rep.tags.length, wouldRemoveAssign: rep.assign.length,
+      keys: rep.keys.slice(0, PRUNE_KEYS_MAX), keysTotal: rep.keys.length, blocked,
+      unreadable: rep.unreadable.map(({ source, id, reason: r }) => ({ source, ...(id ? { id } : {}), reason: r })),
+    };
+    if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, ...view, ...(blocked ? { reason } : {}) });
+    if (blocked) return res.status(regBlocked ? 503 : 409).json({ ok: false, ...view, reason, ...(regBlocked ? { registryUnreadable: true } : {}) });
+    const want = Array.isArray(req.body?.keys) ? req.body.keys : null;
+    if (!want) return res.status(400).json({ ok: false, reason: '정리할 키 목록(keys — 미리보기 결과)이 필요합니다. 화면을 새로 고친 뒤 다시 시도하세요.' });
+    const ghost = new Set(rep.keys);
+    const del = new Set();
+    for (const k of want.slice(0, PRUNE_KEYS_MAX)) {
+      if (typeof k === 'string' && ghost.has(k)) del.add(k); // 미리보기가 준 키 그대로(저장 키와 글자 단위로 같다)
     }
-    const tags = pruneFleetTags(live);
-    const assign = pruneFleetAssign(live);
-    logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `태그 ${tags} · 소속 ${assign}`, ip: req.ip || '' });
-    res.json({ ok: true, removedTags: tags, removedAssign: assign });
+    const keepOf = (obj) => new Set(Object.keys(obj || {}).filter((k) => !del.has(k)));
+    const tags = del.size ? pruneFleetTags(keepOf(loadFleetTags())) : 0;
+    const assign = del.size ? pruneFleetAssign(keepOf(loadFleetAssign())) : 0;
+    const skipped = Math.max(0, want.length - del.size); // 미리 본 뒤 유령이 아니게 된 키(또는 잘못된 값) — 지우지 않았다
+    logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `키 ${del.size} (태그 ${tags} · 소속 ${assign})`, detail: `${[...del].slice(0, 20).join(', ')}${del.size > 20 ? ` 외 ${del.size - 20}` : ''}${skipped ? ` · 건너뜀 ${skipped}` : ''}`, ip: req.ip || '' });
+    res.json({ ok: true, removedKeys: del.size, removedTags: tags, removedAssign: assign, skipped });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

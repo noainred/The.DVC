@@ -47,7 +47,7 @@ import {
   probeAll, putProbeResults, listProbeResults,
   PROBE_CONCURRENCY, PROBE_TIMEOUT_MS, PROBE_BUDGET_MS,
 } from '../../portalcheck/tokenProbe.js';
-import { pullTokenCheck, listEdgeTokenReports, MIN_EDGE_VERSION, STALE_MS } from '../../central/tokenCheckPull.js';
+import { pullTokenCheck, listEdgeTokenReports, MIN_EDGE_VERSION, STALE_MS, PULL_TIMEOUT_MS } from '../../central/tokenCheckPull.js';
 // v2.570 — 인벤토리 점검(두 번째 서브메뉴): 위임(site) vCenter 의 push 가 실제로 들어오는가.
 import { listRegistry as listVcentersFull } from '../../vcenter/registry.js';
 import { listInventory } from '../../central/inventory.js';
@@ -295,13 +295,19 @@ api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, async
      *   요청이 끝없이 길어질 수 있었다. 남은 예산이 요청 시한보다 적으면 **시작하지 않고** 개수로 밝힌다(조용한 상한 금지).
      */
     const deadline = t0 + PROBE_BUDGET_MS;
+    /*
+     * v2.783(점검 Q5 — O-I2): 예산 판정은 **실제 인출 시한**으로 한다. 예전엔 프로브 시한(PROBE_TIMEOUT_MS 8초)으로 판정하면서 인출은
+     *   PULL_TIMEOUT_MS(기본 20초)로 나가 예산을 최대 약 12초 넘겼다. 인출 시한이 예산보다 길게 설정되면(예산 env 하한 10초) 아무것도
+     *   시작하지 못하므로 한 요청 시한은 '예산 − 1초' 로 자른다(첫 묶음이 이 사이 수 ms 경과로 전부 건너뛰지 않게) — 총 소요는 예산 안에 든다.
+     */
+    const pullMs = Math.min(PULL_TIMEOUT_MS, PROBE_BUDGET_MS - 1_000);
     let budgetExceeded = 0;
     const settled = await poolSettled(rows, PROBE_CONCURRENCY, async (r) => {
-      if (Date.now() + PROBE_TIMEOUT_MS > deadline) {
+      if (Date.now() + pullMs > deadline) {
         budgetExceeded += 1;
         return { agent: r.agent, ok: false, kind: 'budget', reason: '점검 시간 예산을 넘겨 이번에는 시도하지 않았습니다 — 다시 누르면 이어서 인출합니다.' };
       }
-      try { return { agent: r.agent, ...(await pullTokenCheck(r.agent, { selfProbe })) }; }
+      try { return { agent: r.agent, ...(await pullTokenCheck(r.agent, { selfProbe, timeoutMs: pullMs })) }; }
       catch (e) { return { agent: r.agent, ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 300) }; }
     });
     const results = settled.map((x, k) => (x.status === 'fulfilled' ? x.value : { agent: rows[k].agent, ok: false, kind: 'error', reason: String(x.reason?.message || x.reason).slice(0, 300) }));

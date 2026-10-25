@@ -53,6 +53,8 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     ? await db.historyAllSliced(fam.metric, since, bucketMin * 60_000, 5000, { maybeYield })
     : db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
   const out = [];
+  let evaluated = 0;
+  let insufficient = 0;
   for (const [k, last] of latest) {
     await maybeYield(); // 키 수천 개의 중앙값·MAD 계산 사이에도 양보한다(시간 기준 — v2.672 규약)
     // scope(v2.289 #2): 범위 제한 계정은 허용 엔티티 키(호스트 id·데이터스토어 id·vCenter id)만.
@@ -60,7 +62,7 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     // ds_usedgb=datastore id, gpu_vc=vCenter id) — 범위 밖 vCenter 의 이상치가 새지 않게 한다.
     if (allowedKeys && !allowedKeys.has(k)) continue;
     const hist = histAll.get(k) || [];
-    if (hist.length < minSamples) continue;
+    if (hist.length < minSamples) { insufficient++; continue; }
     const vals = hist.map((h) => h.avg);
     const med = median(vals);
     const mad = median(vals.map((v) => Math.abs(v - med))) || 0;
@@ -68,7 +70,8 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
     const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 0;
     const { scale, source: scaleSource } = pickScale({ mad, sd, floor: fam.minScale ? fam.minScale(med) : 0 }); // MAD→σ 환산상수
-    if (!scale) continue;
+    if (!scale) { insufficient++; continue; }
+    evaluated++;
     const score = (last.v - med) / scale;
     const isHigh = fam.high && score >= z;
     const isLow = fam.low && score <= -z;
@@ -81,7 +84,8 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
       });
     }
   }
-  return out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+  // v2.783(점검 Q4 P-I1): 평가한 키·표본 부족 키 수를 함께 — 0건이 '이상 없음' 인지 '평가 못 함' 인지 화면이 가른다.
+  return { items: out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z)), evaluated, insufficient };
 }
 
 /*
@@ -108,13 +112,25 @@ export async function detectAnomalies(opts = {}) {
   // (/tools/esxi-temp/history 의 days 1~1830 클램프와 같은 방어 패턴).
   //   v2.769(R4-D2-06): 클램프는 anomalyCfgArgs 한 곳(라우트 캐시 키와 같은 값).
   const cfg = { z, windowHours: norm.windowHours, bucketMin: norm.bucketMin, minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
+  /*
+   * v2.783(점검 Q4 P-I1): 계열 예외를 `catch { items = [] }` 로 삼켜 조회 실패가 '0건(초록)' 으로 보였다. 지표 DB 가 비었거나 표본이 12개
+   *   미만인 엔티티도 평가 대상 수 없이 0 이었다. 계열마다 { evaluated, insufficient, error } 를 싣는다(오류 원문은 짧게 자른 메시지만).
+   */
   const families = [];
   let total = 0;
+  let evaluated = 0;
+  let errors = 0;
   for (const fam of FAMILIES) {
-    let items = [];
-    try { items = await detectFamily(db, fam, cfg); } catch { items = []; }
-    total += items.length;
-    families.push({ metric: fam.metric, label: fam.label, count: items.length, items: items.slice(0, 50) });
+    let r = { items: [], evaluated: 0, insufficient: 0 };
+    let error = null;
+    try { r = await detectFamily(db, fam, cfg); } catch (e) {
+      // 응답에는 고정 문구만(DB 오류 원문을 화면에 싣지 않는다) — 원인은 콘솔에 짧게.
+      error = '조회 실패'; errors++;
+      console.warn(`[anomaly] ${fam.metric} 계열 평가 실패: ${String(e?.message || e).slice(0, 200)}`);
+    }
+    total += r.items.length;
+    evaluated += r.evaluated;
+    families.push({ metric: fam.metric, label: fam.label, count: r.items.length, items: r.items.slice(0, 50), evaluated: r.evaluated, insufficient: r.insufficient, error });
   }
-  return { config: cfg, total, families, generatedAt: Date.now() };
+  return { config: cfg, total, evaluated, errors, families, generatedAt: Date.now() };
 }

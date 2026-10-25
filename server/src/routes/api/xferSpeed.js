@@ -35,6 +35,7 @@ import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { isDemoCollector, isDemoEdgeId } from '../../mock/demo/edge.js';
+import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B4): 공용 백프레셔 대기
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -353,7 +354,10 @@ api.get('/tools/xfer-speed/export.csv', adminOnly, fullScopeOnly, csvPerm, async
     const head = ['시각(포탈)', '엣지', '방향', '결과', '속도(Mbps)', '바이트', '전송(ms)', '전체(ms)', '지연(ms)', '계산 기준', '실패 종류', '사유', '실행'];
     const send = async (text) => {
       if (res.destroyed || res.writableEnded) return false;
-      if (!res.write(text)) await new Promise((ok) => { res.once('drain', ok); res.once('close', ok); });   // 끊기면 기다리지 않는다
+      // 끊기면 기다리지 않는다. v2.783(점검 Q5 — O-B4): 예전 `res.once('drain', ok); res.once('close', ok)` 는 drain 이 먼저 오면
+      //   'close' 리스너가 조각마다 남아 쌓였다(2000행 조각이 HWM 을 늘 넘어 약 2.2만 행 이상이면 매번 MaxListenersExceededWarning).
+      //   공용 waitDrain 은 먼저 온 쪽 하나로 끝내고 건 리스너를 전부 뗀다.
+      if (!res.write(text) && !(await waitDrain(res))) return false;
       return !res.destroyed;
     };
     if (!(await send(CSV_BOM + csvLine(head)))) return;

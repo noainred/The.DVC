@@ -92,7 +92,12 @@ export function attentionList(rows, n = 6) {
   const shown = att.slice(0, n);
   const shownRows = new Set(shown.map((a) => a.rowId));
   const rest = filterRows(list, 'warn').filter((r) => !shownRows.has(r.id)).length;
-  return [...shown, ...(rest ? [{ id: 'more', tone: 'muted', more: rest, title: `외 ${rest}곳`, text: '나머지는 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }] : []), ...info];
+  if (rest) return [...shown, { id: 'more', tone: 'muted', more: rest, title: `외 ${rest}곳`, text: '나머지는 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }, ...info];
+  // v2.783(점검 Q3 L-B4 — 재현 att.mjs): 잘린 항목이 전부 **이미 보인 행**의 다른 문제(예: Veeam 읽기 실패 행의 스냅샷 잔존)면 rest 가 0 이라
+  //   안내 없이 사라졌다(v2.781 C-I2 '잘렸으면 한 줄로 알린다' 보장의 회귀). 그때는 잘린 **항목 수**를 '외 N건(보인 곳의 다른 문제)' 로 알린다 —
+  //   그 행들은 '주의 필요' 보기에 있으므로 버튼이 가는 곳도 같다.
+  const hidden = att.length - shown.length;
+  return [...shown, ...(hidden > 0 ? [{ id: 'more', tone: 'muted', more: hidden, title: `외 ${hidden}건(보인 곳의 다른 문제)`, text: '목록에 나온 곳의 다른 주의 항목입니다 — 표의 ‘주의 필요’ 보기에서 볼 수 있습니다' }] : []), ...info];
 }
 
 /*
@@ -218,7 +223,9 @@ export const FILTERS = [
 export function vmMatches(vm, f, opts) {
   const c = vmClass(vm, opts);
   if (f === 'veeam') return c.veeam;
-  if (f === 'snaponly') return !c.veeam && c.snap;
+  // v2.783(점검 Q3 L-B3): Veeam 을 아는 VM 만 — 'Veeam 모름'(v 키 없음 · 첫 수집 전 서버 · 읽기 실패)인 스냅샷 VM 은 '스냅샷만'(요약 sOnly 와 같은 뜻 —
+  //   Veeam 에 없다고 확인됨)이 아니다. 'none' 과 같은 규칙 · 서버 veeam/backupStatus.js vmViewMatches 와 웹 backupViewText.js vmMatches 는 한 쌍(대조 테스트).
+  if (f === 'snaponly') return c.vKnown && !c.veeam && c.snap;
   if (f === 'none') return c.vKnown && c.sKnown && !c.veeam && !c.snap;
   if (f === 'run') return c.run;
   if (f === 'stale') return c.stale;

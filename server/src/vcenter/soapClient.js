@@ -1711,6 +1711,23 @@ export function parseEventsXml(xml) {
 
 const num = (v) => (v == null || v === '' ? 0 : Number(v) || 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
+/**
+ * v2.783(점검 Q1 J-B1): 구동 VM 의 CPU·메모리 사용률 — 못 읽은 값은 0 이 아니라 null.
+ *   예전에는 호스트 경로와 같은 `pct(num(raw), total)` 을 써서 ① 끊긴 호스트(vCenter 가 quickStats 를 0·빈 값으로 줌)
+ *   ② quickStats 결측 ③ 분모 0(호스트 MHz 모름·numCpu/memMB 0) 이 전부 **0%** 가 됐다 — VM 분포 0~5% 칸·/vms 평균·유휴 VM 후보·
+ *   축소 후보에 '거짓 0' 으로 섞였다(호스트는 store.usageReadable 로 같은 상태를 '못 읽음' 으로 뺀다).
+ *   ⚠ 보고된 0 은 값이다(sampler.js 규약 — numOrNull 은 0 을 지킨다). ⚠ 호스트 경로가 쓰는 `pct` 는 바꾸지 않는다.
+ * @param {unknown} rawUsed  quickStats 원값(MHz 또는 MB)
+ * @param {number} total     분모(numCpu × 호스트 코어당 MHz, 또는 memMB)
+ * @param {boolean} readable VM·호스트가 연결돼 있어 quickStats 를 믿을 수 있는가
+ * @returns {number|null}
+ */
+export function vmUsagePctOrNull(rawUsed, total, readable = true) {
+  if (!readable) return null;
+  const used = numOrNull(rawUsed);
+  if (used == null || !(total > 0)) return null;
+  return Math.round((used / total) * 100);
+}
 // v2.719(감사 B1-09): 바이트 → GB, 못 읽은 값은 null(0 이면 '디스크 0GB' 라는 거짓이 되고 비용 배분의 '용량 모름' 경로가 막힌다).
 const gbOrNull = (v) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 1024 ** 3); };
 
@@ -2034,11 +2051,14 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
       if (host) host.vmCount++;
       const numCpu = num(p['summary.config.numCpu']);
       const memMB = num(p['summary.config.memorySizeMB']);
-      const cpuUsageMhz = num(p['summary.quickStats.overallCpuUsage']);
       const hostMhz = hostMeta.get(p['runtime.host'])?.cpuMhzPerCore || 0;
       const vmCpuCapacity = numCpu * hostMhz;
-      const guestMemMB = num(p['summary.quickStats.guestMemoryUsage']);
       const powered = (p['runtime.powerState'] || '').toUpperCase().includes('ON');
+      const vmConn = (p['runtime.connectionState'] || 'connected').toLowerCase();
+      // v2.783(점검 Q1 J-B1): VM 이 connected 가 아니거나 그 호스트가 끊김·응답 없음(store.usageReadable 과 같은 뜻 — 순환 import 를
+      //   피하려고 식을 둔다. 이 수집기의 호스트 connectionState 는 notResponding 도 'DISCONNECTED')이면 quickStats 를 믿지 않는다.
+      //   호스트를 못 찾은 VM 은 '끊김' 으로 단정하지 않는다 — CPU 는 분모(호스트 MHz)가 0 이라 어차피 null.
+      const vmUsageReadable = vmConn === 'connected' && host?.connectionState !== 'DISCONNECTED' && host?.connectionState !== 'NOT_RESPONDING';
       vms.push({
         id: `${vc.id}:${o.ref}`,
         vcenterId: vc.id,
@@ -2057,8 +2077,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         // Thin 추정: uncommitted(여유 가능 공간)이 의미있게 크면 thin 디스크 존재.
         uncommittedGB: gbOrNull(p['summary.storage.uncommitted']),
         thin: num(p['summary.storage.uncommitted']) > 1024 ** 3,
-        cpuUsagePct: powered ? pct(cpuUsageMhz, vmCpuCapacity) : 0,
-        memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
+        // v2.783(점검 Q1 J-B1): 구동 VM 은 못 읽으면 null(분포 '미수집'·평균 제외·유휴 후보 제외). 꺼진 VM 의 0 은 그대로
+        //   (분포·평균·후보는 POWERED_ON 만 본다 — 꺼진 VM 값의 뜻은 바꾸지 않는다).
+        cpuUsagePct: powered ? vmUsagePctOrNull(p['summary.quickStats.overallCpuUsage'], vmCpuCapacity, vmUsageReadable) : 0,
+        memUsagePct: powered ? vmUsagePctOrNull(p['summary.quickStats.guestMemoryUsage'], memMB, vmUsageReadable) : 0,
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
         gateways: vmGateways(p['guest.ipStack']),
         dns: vmDns(p['guest.net'], p['guest.ipStack']),   // v2.695: VM 이 쓰는 DNS 서버(IP 와 분리)
@@ -2068,7 +2090,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
         hwVersion: p['config.version'] || '',
         // connected 외 값(orphaned/inaccessible/invalid/disconnected)은 좀비/방치 리포트 대상.
-        connectionState: (p['runtime.connectionState'] || 'connected').toLowerCase(),
+        connectionState: vmConn,
         notes: (p['config.annotation'] || '').slice(0, 2000),
         tags: [], // vSphere Tags require the tagging REST API; not collected via SOAP
         gpu: null, // 아래에서 GPU 호스트 위 VM만 대상으로 채움

@@ -454,15 +454,19 @@ export function vmDetail(o = {}, id) {
 }
 
 /** CSV 행(범위 안 · 템플릿 제외 · 필터 적용) — 판정 글자는 서버가 만든다(백틱·별표 없음). */
-export const FLAG_TEXT = Object.freeze({ public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC≠OS', single: 'DNS 1개' });
+// v2.783(점검 Q5 — N-I1): 'none' = 보고는 했지만 DNS 서버가 0개(웹 vmDnsText ipsText 의 '(DNS 없음)' 과 같은 뜻). **CSV 전용 표지**다 —
+//   vmFlags(화면·KPI·필터가 읽는 flags)에는 넣지 않는다(웹 flagChips 가 모르는 표지를 원문 회색 칩으로 보이게 되므로 화면 쪽은 별건).
+export const FLAG_TEXT = Object.freeze({ none: 'DNS 없음', public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC≠OS', single: 'DNS 1개' });
 export const STATE_TEXT = Object.freeze({ reported: '보고함', unknown: '모름(VMware Tools 미보고)', notCollected: '미수집(수집기가 DNS 를 싣지 않음)' });
 export function csvRows(o = {}) {
   const idx = o.index || buildDnsIndex(o);
   const rows = idx.vms.slice().sort((a, b) => byName(idx.vcName.get(a.vc), idx.vcName.get(b.vc)) || byName(a.vm.name, b.vm.name));
   return rows.map((r) => {
     const x = vmRow(r, idx.vcName);
+    // v2.783(점검 Q5 — N-I1): 보고했지만 서버 0개인 VM 을 '이상 없음' 으로 적지 않는다(예전엔 OS/NIC 칸도 null 과 같은 빈 칸이라 구분이 없었다).
+    const flags = x.dnsState === 'reported' && !(Array.isArray(x.servers) && x.servers.length) ? ['none', ...x.flags] : x.flags;
     const verdict = x.dnsState !== 'reported' ? STATE_TEXT[x.dnsState]
-      : (x.flags.length ? x.flags.map((f) => FLAG_TEXT[f] || f).join(' · ') : '이상 없음');
+      : (flags.length ? flags.map((f) => FLAG_TEXT[f] || f).join(' · ') : '이상 없음');
     return [x.vcenterName, x.name, x.powerState || '', x.osServers ? x.osServers.join(' ') : '', x.nicServers ? x.nicServers.join(' ') : '',
       x.domain || '', x.dhcp === true ? 'DHCP' : x.dhcp === false ? '고정' : '', verdict];
   });

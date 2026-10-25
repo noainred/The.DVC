@@ -205,7 +205,9 @@ export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
 export function vmViewMatches(vm, f, opts) {
   const c = viewClass(vm, opts);
   if (f === 'veeam') return c.veeam;
-  if (f === 'snaponly') return !c.veeam && c.snap;
+  // v2.783(점검 Q3 L-B3): Veeam 을 아는 VM 만 — 'Veeam 모름'(v 키 없음 · 첫 수집 전 서버 · 읽기 실패)인 스냅샷 VM 은 '스냅샷만'(요약 sOnly 와 같은 뜻 —
+  //   Veeam 에 없다고 확인됨)이 아니다. 'none' 과 같은 규칙 · 서버 veeam/backupStatus.js vmViewMatches 와 웹 backupViewText.js vmMatches 는 한 쌍(대조 테스트).
+  if (f === 'snaponly') return c.vKnown && !c.veeam && c.snap;
   if (f === 'none') return c.vKnown && c.sKnown && !c.veeam && !c.snap;
   if (f === 'run') return c.run;
   if (f === 'stale') return c.stale;

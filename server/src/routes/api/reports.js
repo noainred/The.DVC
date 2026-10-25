@@ -19,6 +19,8 @@ import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
+import { snapMemo, sendCached } from '../../util/snapCache.js';
+import { runHeavyExclusive, forecastArgs } from '../insights.js'; // v2.783(P-I2): /insights/forecast 와 같은 직렬 대기열·인자 정규화
 import { eventNotCollectedMap, notCollectedList, eventLagForView } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다) · v2.772(Z4-1): 수집이 뒤처진 vCenter
 
 /**
@@ -129,14 +131,31 @@ api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJso
  * 감싸고 있었다 — 같은 계산의 캐시 유무가 라우트마다 갈려 있던 상태다.
  * 캐시 라우트이므로 `extraKey: scopeKey(...)` 는 필수다(빠지면 무제한 계정 결과가 범위 계정에 샌다).
  */
-api.get('/tools/report/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-capacity', async (snap) => {
-  const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-  // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
-  // v2.710: forecastCapacity 는 async(v2.537~) — await 이 빠져 Promise 를 펼친 빈 객체({listLimit…})가 나가 이 리포트가
-  //   모든 모드에서 '추세 산출 0개 · 관측 undefined일' 이었다(데모 전수 조사에서 발견).
-  const r = await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
-  return withForecastCap(snap.source === 'mock' ? withDemoForecast(r, scoped, req.query.vcenterId || '') : r);
-}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+/*
+ * v2.783(점검 Q4 P-I2): /insights/forecast 와 **같은 계산**인데 v2.689 I2 보호를 비켜 갔다 — memoJson 키가 `req.originalUrl` 이라
+ *   `&_=난수`·`days=14.0001` 만 바꿔도 매번 재계산했고, runHeavyExclusive(전역 1건 직렬)를 타지 않아 /insights/forecast 와 DS 롤업 스캔이
+ *   겹칠 수 있었다. 키는 정규화 인자(forecastArgs — forecast.js forecastCfgArgs 와 같은 함수) + scopeKey, 계산은 같은 직렬 대기열로.
+ */
+const capArgsKey = (o) => Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join('&');
+api.get('/tools/report/capacity', requirePerm('tools'), async (req, res) => {
+  try {
+    const snap = store.get();
+    const args = forecastArgs(req.query);
+    const vcId = args.vcenterId || '';
+    const key = `${snap.generatedAt}|report-capacity?${capArgsKey(args)}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('report-capacity', key, 30_000, () => runHeavyExclusive(async () => {
+      const scoped = scopeSlice(snap, req.user, vcId);
+      // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
+      // v2.710: forecastCapacity 는 async(v2.537~) — await 이 빠져 Promise 를 펼친 빈 객체({listLimit…})가 나가 이 리포트가
+      //   모든 모드에서 '추세 산출 0개 · 관측 undefined일' 이었다(데모 전수 조사에서 발견).
+      const r = await forecastCapacity(scoped, { ...args, vcenterId: vcId, allowed: scopedVcenterIds(req.user, snap) });
+      return withForecastCap(snap.source === 'mock' ? withDemoForecast(r, scoped, vcId) : r);
+    }));
+    sendCached(req, res, key, payload);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || 'internal error' });
+  }
+});
 
 
 

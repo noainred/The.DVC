@@ -22,6 +22,7 @@ import { directCollectSkipReason, DIRECT_SKIP_REASONS } from '../vcenter/collect
 import { measureEndOf, TAIL_TOLERANCE_MS } from '../availability/analyze.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { loadLogSettings } from './settings.js';
+import { FUTURE_CLOCK_TOLERANCE_MS } from './clockTolerance.js';   // v2.783(점검 Q3 L-B1): 미래 행 경계 — 폴러와 같은 값(import 0 모듈 — 폴러를 정적으로 끌어오지 않는다)
 
 /** 사유 코드 — vcenter/collectTarget.js 와 같은 집합(웹 eventCoverageText.js 의 문구와 1:1). */
 export const EVENT_NOT_COLLECTED_REASONS = DIRECT_SKIP_REASONS;
@@ -184,8 +185,11 @@ export async function eventLagForView({ db = null, now = Date.now(), only = null
     if (!cand.length) return [];
     const okAtOf = typeof deps?.okAtOf === 'function' ? deps.okAtOf : await loadEventOkAtOf();
     const tolMs = Number.isFinite(deps?.tolMs) && deps.tolMs >= 0 ? deps.tolMs : eventTailToleranceOf(loadLogSettings());
+    // v2.783(점검 Q3 L-B1): 지금 + 여유 이하의 마지막 저장 — 미래 행 1건(2099 등 — prune 은 ts < ? 라 남는다)이 measureEndOf 의 max(okAt, lastTs) 를
+    //   미래로 밀어 okAt 이 있어도 지연을 숨겼다(가용성 꼬리 컷·로그인 실패·리포트의 '수집 지연' 경고가 영구히 꺼짐). 폴러 시작점·콘솔 지연과 같은 경계.
+    const maxTs = (Number(now) || Date.now()) + FUTURE_CLOCK_TOLERANCE_MS;
     const lastTsOf = typeof deps?.lastTsOf === 'function' ? deps.lastTsOf
-      : (id) => (db && typeof db.lastTs === 'function' ? db.lastTs(id) : null);
+      : (id) => (db && typeof db.lastTs === 'function' ? db.lastTs(id, { maxTs }) : null);
     return eventLagList({ ids: cand, now, tolMs, okAtOf, lastTsOf, names });
   } catch { return null; }
 }

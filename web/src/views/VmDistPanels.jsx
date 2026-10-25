@@ -10,7 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import {
   barHeights, binColor, binButton, binAria, thresholdSel, thresholdCount, toggleBin, toggleSel,
-  distNote, panelState, EMPTY_PANEL_TEXT, NO_DIST_TEXT, powerSegments, gpuSegments, gpuToggle, osRows, osFooter,
+  distNote, panelState, otherSelections, panelClearButton, EMPTY_PANEL_TEXT, NO_DIST_TEXT, powerSegments, gpuSegments, gpuToggle, osRows, osFooter,
   usageView, powerDot, TONE_COLOR, TONE_TEXT, NARROW_QUERY, GPU_LABEL,
 } from './vmDistText.js';
 import './vmDist.css';
@@ -44,8 +44,10 @@ export function useNarrowScreen(query = NARROW_QUERY) {
 }
 
 /** CPU·메모리 사용률 분포 패널 — 5% 칸 20개. */
-function UsagePanel({ title, what, panel, sel, onSel }) {
-  const state = panelState(panel);
+function UsagePanel({ title, what, panel, sel, onSel, others = false }) {
+  // v2.783(점검 Q1 J-I1): 다른 패널 선택과의 교집합이 0 이면 '구동 VM 없음' 이 아니라 그 사실을 말하고, 이 패널의 구간 선택을 여기서 풀 수 있게 한다.
+  const state = panelState(panel, { others });
+  const clr = panelClearButton(what, sel, state);
   const crit = thresholdSel('crit');
   const warn = thresholdSel('warn');
   const heights = state === 'ok' ? barHeights(panel.bins) : [];
@@ -101,7 +103,10 @@ function UsagePanel({ title, what, panel, sel, onSel }) {
           </div>
         </>
       ) : (
-        <div className="vmd-empty">{EMPTY_PANEL_TEXT[state]}</div>
+        <div className="vmd-empty">
+          {EMPTY_PANEL_TEXT[state]}
+          {clr && <div><button type="button" className="vmd-na" aria-label={clr.label} title={clr.title} onClick={() => onSel('')}>{clr.text}</button></div>}
+        </div>
       )}
       <div className="vmd-pf">
         <span className="vmd-note">{distNote(panel)}</span>
@@ -212,8 +217,8 @@ export function VmDistPanels({ dist, facets, onFacet, gpuSel, onGpu }) {
   if (!dist || typeof dist !== 'object') return <div className="vmd-nodist">{NO_DIST_TEXT}</div>;
   return (
     <div className="vmd-panels">
-      <UsagePanel title="CPU 사용률 분포" what="CPU" panel={dist.cpu} sel={facets.cpuBin} onSel={(v) => onFacet('cpuBin', v)} />
-      <UsagePanel title="메모리 사용률 분포" what="메모리" panel={dist.mem} sel={facets.memBin} onSel={(v) => onFacet('memBin', v)} />
+      <UsagePanel title="CPU 사용률 분포" what="CPU" panel={dist.cpu} sel={facets.cpuBin} onSel={(v) => onFacet('cpuBin', v)} others={otherSelections('cpuBin', facets, gpuSel)} />
+      <UsagePanel title="메모리 사용률 분포" what="메모리" panel={dist.mem} sel={facets.memBin} onSel={(v) => onFacet('memBin', v)} others={otherSelections('memBin', facets, gpuSel)} />
       <PowerGpuPanel power={dist.power} gpu={dist.gpu} powerSel={facets.power} onPower={(v) => onFacet('power', v)} gpuSel={gpuSel} onGpu={onGpu} />
       <OsPanel os={dist.os} sel={facets.osName} onSel={(v) => onFacet('osName', v)} />
     </div>

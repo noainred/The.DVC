@@ -162,7 +162,8 @@ export function sendDigest({ slot = null, manual = false, by = 'system', now = D
         return { ok: false, ...record({ slot, kind, scope, state: 'skipped', code: 'no-new', reason: '직전 발송 뒤 새 수집이 없어 보내지 않았습니다(새 수집 없으면 생략).' }) };
       }
       if (!manual && b.newOnly && !b.newKeys.size) {
-        await forgetRecovered(st, b, null);
+        // v2.783(점검 Q3 L-I2): 회복분 정리(새 조회 + 저장)가 던져도 '건너뜀' 판단은 그대로 기록한다 — 바깥 catch 가 'failed'(발송 실패)로 바꾸지 않게.
+        try { await forgetRecovered(st, b, null); } catch (e) { console.warn(`[guestpart] 통합 메일 회복분 정리 실패(건너뜀 기록은 유지 — 다음 판정 때 다시 정리): ${e?.message || e}`); }
         return { ok: false, ...record({ slot, kind, scope, state: 'skipped', code: 'unchanged', reason: '새로 임계를 넘은 게스트가 없어 보내지 않았습니다(새로 넘은 것만).' }) };
       }
       const r = await sendPortalMail({ kind: MAIL_KIND, subject: b.mail.subject, html: b.mail.html, text: b.mail.text, to: rcpt.to, attachments: b.attachments,
@@ -196,7 +197,8 @@ export function sendVcenter(vcId, { slot = null, trigger = 'scan', by = 'system'
         return { ok: false, ...record({ slot, kind: trigger, scope, state: 'skipped', code: 'no-new', reason: '직전 발송 뒤 새 수집이 없어 보내지 않았습니다.' }) };
       }
       if (!manual && vm?.onlyOnChange && !b.newKeys.size) {
-        await forgetRecovered(st, b, [vcId]);
+        // v2.783(점검 Q3 L-I2): 회복분 정리(새 조회 + 저장)가 던져도 '건너뜀' 판단은 그대로 기록한다 — 바깥 catch 가 'failed'(발송 실패)로 바꾸지 않게.
+        try { await forgetRecovered(st, b, [vcId]); } catch (e) { console.warn(`[guestpart] vCenter 메일 회복분 정리 실패(건너뜀 기록은 유지 — 다음 판정 때 다시 정리): ${e?.message || e}`); }
         return { ok: false, ...record({ slot, kind: trigger, scope, state: 'skipped', code: 'unchanged', reason: '새로 임계를 넘은 게스트가 없어 보내지 않았습니다.' }) };
       }
       if (!manual && !b.rows.length) {

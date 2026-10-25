@@ -4,6 +4,8 @@
 //  F-B2  읽은 커서를 여유(10분) 안에서도 포탈 지금으로 잘랐다 — 심각도 필터로 행이 저장되지 않는 조금 앞선 vCenter 는 매 주기
 //        [포탈 지금, vCenter 지금] 을 다시 읽었다(nextSinceTs 의 '여유 안은 예전 그대로' 는 db.lastTs 가 있을 때만 성립했다).
 //        이제 읽은 커서는 여유를 넘을 때만 자르고, 온전한 시각(okAt)은 그대로 지금으로 자른다(지연을 숨기지 않게).
+//        ⚠ v2.783(점검 Q3 L-B2): 그 커서를 그대로 시작점으로 쓰면 vCenter 보정 뒤의 이벤트를 영영 건너뛰어(유실) 시작점만 '커서를 기록한 포탈 시각' 이하로
+//        당겼다 — 이 파일의 F-B2 첫 테스트가 고정하던 '다시 읽지 않음' 은 의도적으로 바뀌었다(audit2783c).
 //  F-I1  DB 에 남은 미래 시각 행 1건(prune 은 ts < ? 라 지우지 않는다) 때문에 db.lastTs(MAX) 가 매 주기 미래 — 시작점 후보가 버려져
 //        '시계 확인' 경고가 시간당 계속 나고, 커서 파일이 없으면 시작점이 지금이라 마지막 정상 저장~지금 사이를 못 읽었다.
 //        이제 시작점 후보·지연 폴백은 db.lastTs(id, { maxTs: 지금 + 여유 }) — (vcenterId, ts) 인덱스 끝점 탐색 1회. 인자 없는 호출은 예전 그대로.
@@ -120,7 +122,7 @@ test('F-B1 — 소스: 연속 상한 수는 바뀔 때만 dirty 를 세운다(�
 
 /* ── F-B2 ───────────────────────────────────────────────────────────────────────────────────────── */
 
-test('F-B2 — 여유 안(1분) 앞선 vCenter + 심각도 필터(저장 0): 다음 주기 시작점은 지난 주기에 읽은 마지막(지금으로 끌어내리지 않음) · 같은 5건을 다시 읽지 않음 · okAt 은 지금 이하', async () => {
+test('F-B2 — 여유 안(1분) 앞선 vCenter + 심각도 필터(저장 0): 읽은 커서는 지금으로 자르지 않음 · okAt 은 지금 이하 · (v2.783 L-B2) 다음 시작점은 지난 읽기의 포탈 시각 이하 — 앞선 1분(5건) 재읽기는 의도된 비용', async () => {
   const { srv, state } = fakeVcenter();
   await listen(srv);
   const w = mock.method(console, 'warn', () => {}); const l = mock.method(console, 'log', () => {});
@@ -136,9 +138,16 @@ test('F-B2 — 여유 안(1분) 앞선 vCenter + 심각도 필터(저장 0): 다
     await sleep(20);
     await P.pollLogsOnce({ manual: true });
     assert.equal(state.begins.length, 2);
-    assert.equal(state.begins[1].begin, now + MIN + 4000, `주기 2 시작점 = 지난 주기에 읽은 마지막(포함) — 예전은 포탈 지금(+${state.begins[1].begin - now}ms)`);
+    // v2.783(점검 Q3 L-B2): 아래 두 단언을 바꿨다 — v2.782 는 '시작점 = 읽은 커서(now+1분+4초) · 다시 읽음 ≤ 1건' 을 고정했지만, 그 시작점은 vCenter 를
+    //   NTP 로 맞춘 뒤 [실제 지금, 옛 커서) 의 이벤트를 영영 건너뛰었다(데이터 유실 — audit2783c 시뮬레이션). 이제 시작점은 그 커서를 기록한 순간의
+    //   **포탈** 시각(cursorReadAt) 이하이고, 앞선 1분 구간(5건)을 다시 읽는 것이 의도된 비용이다(저장 0 그대로 — 심각도 필터 · 중복은 저장 수에 안 든다).
+    //   커서 원본(c1.cursorTs)은 그대로 둔다(위 단언).
+    assert.ok(c1.cursorReadAt >= now && c1.cursorReadAt < now + MIN, `커서를 기록한 포탈 시각(+${c1.cursorReadAt - now}ms)`);
+    assert.ok(state.begins[1].begin <= c1.cursorReadAt && state.begins[1].begin >= now, `주기 2 시작점 = 지난 읽기의 포탈 시각 이하(+${state.begins[1].begin - now}ms — v2.782 는 now+1분+4초)`);
     const c2 = await diagOf('us');
-    assert.ok(c2.lastPoll.read <= 1, `같은 구간을 통째로 다시 읽지 않는다(경계 ms 1건만 — read=${c2.lastPoll.read})`);
+    assert.equal(c2.lastPoll.read, 5, `앞선 1분 구간을 다시 읽는다(의도된 비용 — read=${c2.lastPoll.read}) · v2.782 는 ≤ 1`);
+    assert.equal(c2.lastPoll.stored, 0, '다시 읽어도 저장 0(심각도 필터)');
+    assert.equal(c2.cursorTs, now + MIN + 4000, '커서는 그대로');
     assert.ok(c2.okAt <= Date.now(), 'okAt 은 주기 2 에도 지금 이하');
     assert.equal(db.query({ vcenterId: 'us' }, 100, 0).length, 0, '전제: 심각도 필터로 저장 0');
     assert.equal(clockWarns(w).length, 0, '여유 안은 경고하지 않는다');

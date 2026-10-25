@@ -16,6 +16,7 @@ import { loadLogSettings } from '../../logs/settings.js';
 import { analyzeAvailability } from '../../availability/analyze.js';
 import { eventTailToleranceOf } from '../../logs/coverage.js'; // v2.772(Z4-S3): 허용치 식 하나
 import { logCollectOkAt } from '../../logs/poller.js'; // v2.731(A2-01): vCenter 별 마지막 이벤트 수집 성공 시각 — 측정 끝의 근거
+import { FUTURE_CLOCK_TOLERANCE_MS } from '../../logs/clockTolerance.js'; // v2.783(점검 Q3 L-B1): 미래 행 경계 — 폴러·coverage 와 같은 값
 import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { AVAIL_TYPES, LIFE_TYPES } from '../../vmchanges/eventDetail.js';
 
@@ -52,6 +53,17 @@ export function _resetVmAvailabilityMemoForTest() { _runMemo.clear(); }
  */
 export const tailToleranceOf = eventTailToleranceOf;
 
+/**
+ * vCenter 별 측정 근거 — { firstTs, lastTs, okAt, why }(analyzeAvailability coverageOf 의 입력).
+ * v2.783(점검 Q3 L-B1): lastTs 는 **지금 + 여유(FUTURE_CLOCK_TOLERANCE_MS) 이하**의 MAX — DB 에 남은 미래 행 1건(2099 등 — prune 은 ts < ? 라 남는다)이
+ *   측정 끝(availability/analyze.js measureEndOf = max(okAt, lastTs))을 미래로 밀어 okAt 이 있어도 수집 지연·꼬리 컷을 숨겼다. 폴러 시작점·coverage 와 같은 경계.
+ *   okAtOf 는 테스트 주입용(기본 로그 폴러의 logCollectOkAt).
+ */
+export function availabilityCoverage(db, ids, { now = Date.now(), nc = new Map(), okAtOf = logCollectOkAt } = {}) {
+  const maxTs = now + FUTURE_CLOCK_TOLERANCE_MS;
+  return new Map((ids || []).map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id, { maxTs }) || null, okAt: okAtOf(id), why: nc.get(id) || null }]));
+}
+
 async function run(req, snap) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const ids = (scoped.vcenters || []).map((v) => v.id);
@@ -70,7 +82,7 @@ async function run(req, snap) {
   // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter 는 why(사유)를 싣는다 — 측정 끝을 마지막 이벤트 시각으로 자르고
   //   (허용치 없이 — 그 뒤를 받을 일이 없다는 것을 안다) 화면이 '수집 실패' 가 아니라 '지금 수집하지 않음' 이라 말한다.
   const nc = eventNotCollectedMap();
-  const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, okAt: logCollectOkAt(id), why: nc.get(id) || null }]));
+  const cov = availabilityCoverage(db, ids, { now, nc });
   const s = loadLogSettings();
   const tailToleranceMs = tailToleranceOf(s);
   const r = analyzeAvailability(rows, scoped.vms, {

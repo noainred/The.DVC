@@ -21,6 +21,7 @@ import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJ
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
+import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
@@ -285,7 +286,11 @@ async function gpuSeriesExportCsvStream(req, res) {
     }
     if (lines.length) {
       const ok = res.write(lines.join('\r\n') + '\r\n');
-      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
+      // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지).
+      // v2.783(점검 Q5): drain **또는 끊김**을 기다린다 — 예전 `res.once('drain')` 만으로는 백프레셔 중 클라이언트가 끊으면 drain 이
+      //   영원히 오지 않아 여기서 멈췄고, 바깥 gpuSeriesExport 의 finally(lock.release)에 닿지 못해 GPU 내보내기가 재기동 전까지 409 였다.
+      //   끊겼으면(false) 더 쓰지 않고 빠져나간다 — 그래야 finally 가 돈다.
+      if (!ok && !(await waitDrain(res))) return;
     }
     if (truncated) break;
     if (chunk.length < CHUNK) break;
@@ -354,7 +359,8 @@ async function gpuSeriesExportJsonStream(req, res) {
     }
     if (parts.length) {
       const ok = res.write((written - parts.length > 0 ? ',' : '') + parts.join(','));
-      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔
+      // 소켓 백프레셔 — v2.783(점검 Q5): CSV 와 같이 drain 또는 끊김. 끊겼으면 빠져나가 finally(잠금 해제)가 돌게 한다.
+      if (!ok && !(await waitDrain(res))) return;
     }
     if (truncated) break;
     if (chunk.length < CHUNK) break;
