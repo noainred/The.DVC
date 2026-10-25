@@ -84,6 +84,12 @@ export function attentionList(rows, n = 6) {
     if (r.snapStale > 0) out.push({ id: `${r.id}:stale`, rowId: r.id, tone: 'warn', title: `${r.name} — 스냅샷 잔존 ${r.snapStale}대`, text: '하루 넘게 남은 Veeam 임시 스냅샷(정리 실패 의심)' });
   }
   const unlinked = list.filter((r) => r && r.veeamState === 'unlinked').map((r) => r.name);
+  // v2.784: 백업 필요로 표시했는데 Veeam 백업이 안 보이는 VM — 한 줄 요약(정보 칸: '주의 필요' 보기·잘림 계산과 섞지 않는다)
+  const gaps = list.filter((r) => r && typeof r.marks?.needGap === 'number' && r.marks.needGap > 0).sort((a, b) => b.marks.needGap - a.marks.needGap);
+  if (gaps.length) {
+    const sum = gaps.reduce((a, r) => a + r.marks.needGap, 0);
+    out.push({ id: 'needgap', tone: 'info', title: `백업 필요인데 Veeam 백업 없음 ${fmtNum(sum)}대`, text: `${gaps.slice(0, 4).map((r) => `${r.name} ${fmtNum(r.marks.needGap)}`).join(' · ')}${gaps.length > 4 ? ' …' : ''} — 백업 세부내용의 ‘백업 필요·미백업’ 보기` });
+  }
   if (unlinked.length) out.push({ id: 'unlinked', tone: 'info', title: `Veeam 연동 없음 ${unlinked.length}곳`, text: `${unlinked.slice(0, 6).join(' · ')}${unlinked.length > 6 ? ' …' : ''} — 스냅샷 기준만 보입니다` });
   const sorted = out.map((a, i) => [a, i]).sort((x, y) => ((TONE_RANK[x[0].tone] ?? 1) - (TONE_RANK[y[0].tone] ?? 1)) || x[1] - y[1]).map(([a]) => a);
   const info = sorted.filter((a) => a.tone === 'info');
@@ -211,13 +217,42 @@ export function vmClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   return {
     vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
     old: !!(v && typeof v.lb === 'number' && Number.isFinite(v.lb) && now - v.lb > days * 86_400_000), fail: /^(fail|warn)/i.test(r),
+    crit: CRIT_KEYS.includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
   };
+}
+
+/* ── v2.784 사람이 정한 표시(중요도 · 백업 필요 · 메모) ─────────────────────── */
+const CRIT_KEYS = ['high', 'mid', 'low'];
+/** 중요도 3단계(사용자 선택) — 글자 · 색. 아이콘은 화면이 그린다(방패 모양 · 색으로 구분). */
+export const CRIT = [
+  { key: 'high', text: '상', label: '중요도 상', color: '#f87171' },
+  { key: 'mid', text: '중', label: '중요도 중', color: '#fb923c' },
+  { key: 'low', text: '하', label: '중요도 하', color: '#94a3b8' },
+];
+export const critOf = (k) => CRIT.find((c) => c.key === k) || null;
+export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같다(테스트 대조)
+/** 상단 지표 — 중요도별 · 백업 필요 · 미백업(needGap 을 모르면 '—'). */
+export function marksLine(m) {
+  if (!m) return null;
+  return { high: m.high || 0, mid: m.mid || 0, low: m.low || 0, need: m.need || 0, needGap: typeof m.needGap === 'number' ? m.needGap : null };
+}
+/** 일괄 선택 — 보이는 VM 전부를 더하거나(전부 골라져 있으면) 뺀다. */
+export function toggleAllVisible(sel, visibleIds) {
+  const s = new Set(sel || []);
+  const ids = Array.isArray(visibleIds) ? visibleIds : [];
+  const allIn = ids.length > 0 && ids.every((id) => s.has(id));
+  for (const id of ids) { if (allIn) s.delete(id); else s.add(id); }
+  return s;
 }
 
 export const FILTERS = [
   ['all', '전체'], ['veeam', 'Veeam 백업'], ['snaponly', '스냅샷만'], ['none', '확인 안 됨'], ['run', '백업 중·대기'], ['stale', '스냅샷 잔존'],
   ['rpo', '오래된 백업'], ['fail', '실패·경고'],
+  ['need', '백업 필요'], ['needgap', '백업 필요·미백업'],
 ];
+/** 중요도 필터 — 칩 줄에 두지 않고 상단 중요도 수를 누르면 적용한다(칩 줄이 길어지지 않게). 서버 VIEW_FILTERS 는 FILTERS + 이것. */
+export const CRIT_FILTERS = [['crit-high', '중요도 상'], ['crit-mid', '중요도 중'], ['crit-low', '중요도 하']];
+export const filterLabel = (f) => ([...FILTERS, ...CRIT_FILTERS].find(([k]) => k === f) || [f, f])[1];
 
 /** VM 이 보기 필터에 드는가. '확인 안 됨' 은 두 쪽을 다 읽었는데 둘 다 없을 때만(모름은 넣지 않는다). */
 export function vmMatches(vm, f, opts) {
@@ -231,14 +266,18 @@ export function vmMatches(vm, f, opts) {
   if (f === 'stale') return c.stale;
   if (f === 'rpo') return c.old;
   if (f === 'fail') return c.fail;
+  if (f === 'need') return c.need;
+  if (f === 'needgap') return c.need && c.vKnown && !c.veeam;   // Veeam 을 모르는 VM 은 넣지 않는다(서버 vmViewMatches 와 한 쌍)
+  if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   return true;
 }
 
 /** 필터별 VM 수. */
 export function filterCounts(vms, opts) {
   const out = {};
-  for (const [k] of FILTERS) out[k] = 0;
-  for (const vm of Array.isArray(vms) ? vms : []) for (const [k] of FILTERS) if (vmMatches(vm, k, opts)) out[k]++;
+  const keys = [...FILTERS, ...CRIT_FILTERS].map(([k]) => k);
+  for (const k of keys) out[k] = 0;
+  for (const vm of Array.isArray(vms) ? vms : []) for (const k of keys) if (vmMatches(vm, k, opts)) out[k]++;
   return out;
 }
 
@@ -251,13 +290,23 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  * 폴더 트리 — 필터·검색에 드는 VM 만 담고, 폴더마다 그 아래(전체 VM 기준 — 필터와 무관)의 집계를 단다.
  * @returns {{ key:'', name:string, children:Array, vms:Array, agg:{n,veeam,snap,run,none} }}
  */
+/** 보기 필터·검색에 드는 VM 인가(트리와 '보이는 VM 전체 선택' 이 같은 판정). needle 은 소문자로 다듬은 검색어. */
+export function vmShown(vm, filter, needle, opts, parts = folderParts(vm?.folder)) {
+  return vmMatches(vm, filter, opts) && (!needle || String(vm.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+}
+/** v2.784: 지금 보기에 드는 VM id(폴더를 접어 둔 것도 포함 — 일괄 적용 대상). */
+export function visibleVmIds(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
+  const needle = String(q || '').trim().toLowerCase();
+  return (Array.isArray(vms) ? vms : []).filter((vm) => vmShown(vm, filter, needle, { rpoDays, now })).map((vm) => vm.id);
+}
+
 export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
   const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
     const c = vmClass(vm);
-    const show = vmMatches(vm, filter, { rpoDays, now }) && (!needle || String(vm.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+    const show = vmShown(vm, filter, needle, { rpoDays, now }, parts);
     let node = root;
     const path = [root];
     for (const p of parts) {

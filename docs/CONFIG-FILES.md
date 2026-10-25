@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **221개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **222개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-25)
@@ -31,6 +31,7 @@
 | `audit.ndjson` | 로그(NDJSON) | 감사 로그(상태 변경 기록) | ✅ |  | ✅ | audit.js |
 | `auth-secret` | 디렉터리 | 세션 토큰 서명 키(자동 생성) | ✅ | ✅ | ✅ | auth/auth.js |
 | `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | ✅ | ✅ | ✅ | auth/ad.js |
+| `backup-marks.json` | 설정 | 백업 세부내용의 사람이 정하는 표시(v2.784 — 사용자 요청 "업무 중요도 아이콘 · 백업 필요 아이콘 · 백업 관련 메모"). | ✅ | ✅ |  | veeam/backupMarks.js |
 | `backup.json` | 설정 | 백업 설정 + 스케줄러 + 변경 감시. | ✅ | ✅ | ✅ | backup/settings.js |
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ | ✅ | ✅ | backup/service.js, backup/stagedRestore.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |

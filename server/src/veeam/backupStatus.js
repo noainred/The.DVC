@@ -138,7 +138,9 @@ export function backupTotals(rows) {
   const t = { vcenters: 0, vm: 0, veeam: 0, snap: 0, both: 0, vOnly: 0, sOnly: 0, none: 0, running: 0, pending: 0, snapStale: 0,
     veeamUnknown: 0, veeamUnlinked: 0, snapUnknown: 0, splitUnknown: 0,
     rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0,
-    veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0 };
+    veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0,
+    // v2.784: 사람이 정한 표시(중요도·백업 필요) — needGap(백업 필요인데 Veeam 대상 아님)은 아는 vCenter 만 더하고 모르는 곳을 센다
+    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0 } };
   for (const r of Array.isArray(rows) ? rows : []) {
     const vm = isFin(r.vm) ? r.vm : null;
     t.vcenters++; t.vm += vm ?? 0; t.snapStale += r.snapStale || 0;
@@ -158,6 +160,11 @@ export function backupTotals(rows) {
     t.excluded += r.excluded || 0; t.powerUnknown += r.powerUnknown || 0;
     if (isFin(r.snap)) { t.snap += r.snap; t.snapKnownVcs++; t.vmSnapKnown += vm ?? 0; if (r.snapState === 'partial') t.snapPartial++; } else t.snapUnknown++;
     if (r.split) { t.both += r.split.both; t.vOnly += r.split.vOnly; t.sOnly += r.split.sOnly; t.none += r.split.none; } else t.splitUnknown++;
+    const m = r.marks;
+    if (m) {
+      for (const k of ['high', 'mid', 'low', 'need']) t.marks[k] += m[k] || 0;
+      if (isFin(m.needGap)) t.marks.needGap += m.needGap; else if (m.need > 0) t.marks.needGapUnknown++;
+    }
   }
   return t;
 }
@@ -168,7 +175,7 @@ export function backupTotals(rows) {
  * v2.782(점검 K4 B-B3): absentKnown(기본 true) — 대조에 없는 VM 을 '없음'(v null)으로 확정해도 되는가. false 면(첫 수집 전·한 번도 성공 못 한 서버가 있음 —
  *   backupRow veeamAbsentUnknown) 대조에 없는 VM 만 v 모름(undefined — JSON 에서 키 없음)이고, 맞은 VM 은 값을 그대로 싣는다.
  */
-export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now() } = {}) {
+export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now(), mark } = {}) {
   const v = ve ? {
     state: ve.run === 1 ? 'run' : ve.run === 2 ? 'wait' : 'ok', pg: ve.run === 1 && isFin(ve.pg) ? ve.pg : null, by: ve.by || '',
     jobs: Array.isArray(ve.jobs) ? ve.jobs.slice(0, 5) : [], rp: isFin(ve.rp) ? ve.rp : null,
@@ -180,6 +187,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), power: vm.powerState || '',
     v: veeamKnown ? (v ?? (absentKnown ? null : undefined)) : undefined,
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
+    ...(mark ? { m: mark } : {}),   // v2.784: 사람이 정한 표시(backupMarks.markView — 있을 때만)
   };
 }
 
@@ -188,7 +196,8 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
  *   (CSV 가 화면과 같은 VM 을 내보내게 · 웹 테스트가 같은 입력으로 두 함수를 대조한다).
  *   v 키 없음 = Veeam 모름 · v null = 없음 / s.ev 키 없음 = 스냅샷 모름 · 잔존(하루 넘은 임시 스냅샷)은 스냅샷으로 치지 않는다.
  */
-export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail']);
+// v2.784: need(백업 필요 표시) · needgap(백업 필요인데 Veeam 대상이 아님 — Veeam 을 모르는 VM 은 넣지 않는다) · crit-*(중요도)
+export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail', 'need', 'needgap', 'crit-high', 'crit-mid', 'crit-low']);
 export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
   const v = vKnown ? vm.v : null;
@@ -200,6 +209,7 @@ export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   return {
     vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
     old: !!(v && isFin(v.lb) && now - v.lb > days * DAY), fail: /^(fail|warn)/i.test(r),
+    crit: ['high', 'mid', 'low'].includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
   };
 }
 export function vmViewMatches(vm, f, opts) {
@@ -213,5 +223,8 @@ export function vmViewMatches(vm, f, opts) {
   if (f === 'stale') return c.stale;
   if (f === 'rpo') return c.old;
   if (f === 'fail') return c.fail;
+  if (f === 'need') return c.need;
+  if (f === 'needgap') return c.need && c.vKnown && !c.veeam;
+  if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   return true;
 }
