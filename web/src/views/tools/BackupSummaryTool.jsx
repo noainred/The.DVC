@@ -17,10 +17,15 @@ const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', 
 const TONE_BG = { ok: 'rgba(34,197,94,.12)', bad: 'rgba(239,68,68,.14)', warn: 'rgba(245,158,11,.14)', info: 'rgba(59,130,246,.14)', muted: 'transparent' };
 
 function Kpi({ label, value, sub, color, border, dashed }) {
+  // v2.781(점검 G3): '수 · 비율%' 은 비율을 작게 · 두 조각 사이에서만 줄바꿈 — 28px 한 줄(nowrap)은 1440px 카드 폭(약 180px)에 '1,398 · 66%' 가 테두리에 닿았고
+  //   부분 합 표지('1,398* · 66%')면 카드 밖으로 넘쳤다(세부내용 헤더와 같은 모양).
+  const cut = typeof value === 'string' ? value.indexOf(' · ') : -1;
   return (
     <div className="card" style={{ padding: '14px 16px', minWidth: 0, border: `1px ${dashed ? 'dashed' : 'solid'} ${border || 'var(--border)'}` }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: color || 'var(--text-dim)' }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+        {cut < 0 ? <span style={{ whiteSpace: 'nowrap' }}>{value}</span> : <><span style={{ whiteSpace: 'nowrap' }}>{value.slice(0, cut)}</span> <span style={{ whiteSpace: 'nowrap', fontSize: 18 }}>{value.slice(cut + 1)}</span></>}
+      </div>
       {sub && <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>{sub}</div>}
     </div>
   );
