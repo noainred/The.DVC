@@ -212,6 +212,7 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/const writable = data\?\.writable === true && !data\?\.marksUnreadable/);
     expect(det).toMatch(/\{writable && <input type="checkbox"/);
     expect(det).toMatch(/load\(true\)/);
+    expect(det).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)[\s\S]{0,80}r\.reason/);   // 400 본문을 성공으로 삼키지 않는다
     expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(140px, 1\.2fr\) minmax\(90px, 1fr\) 64px minmax\(110px, 1fr\) 104px'/);
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);

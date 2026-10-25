@@ -104,8 +104,12 @@ export default function BackupDetailTool({ scope }) {
   const saveMarks = useCallback(async (ids, patch) => {
     if (!ids.length) return;
     setSaving(true); setSaveErr(null);
-    try { await putJson('/tools/backup-detail/marks', { vcenterId: vcId, vmIds: ids, ...patch }); load(true); }
-    catch (e) { setSaveErr(e); }
+    // api.js sendJson 은 400·409 를 throw 하지 않고 본문(ok:false)을 돌려준다 — 그 사유를 성공으로 삼키지 않는다(v2.727 E-01 규약)
+    try {
+      const r = await putJson('/tools/backup-detail/marks', { vcenterId: vcId, vmIds: ids, ...patch });
+      if (r?.ok === false) setSaveErr(new Error(r.reason || '저장하지 못했습니다.'));
+      load(true);   // 거부돼도 다시 읽는다 — 화면이 저장된 값과 같게
+    } catch (e) { setSaveErr(e); }
     finally { setSaving(false); }
   }, [vcId, load]);
   const toggleCheck = (id) => setChecked((cur) => { const s = new Set(cur); if (s.has(id)) s.delete(id); else s.add(id); return s; });
