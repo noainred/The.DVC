@@ -273,3 +273,8 @@
       예전처럼 `gen !== generation` 에서 먼저 `return` 하면 세대가 바뀐 콜백이 대기 줄을 남겨 두고
       끝나 **이후 append 가 영원히 밀린다**(잠금은 이 콜백만 내린다). 비워야 할 줄은 `clearHangs`
       가 이미 큐에서 뺐다.
+- **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
+  프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
+  `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의
+  `DVC_FAKE_PING=<mkdtemp 디렉터리>` 표지를 `/proc/<pid>/environ` 에서 확인한 뒤에만 SIGKILL). cmdline(`sleep 30`)은 파일 간 공통이라 표지가 못 된다.
+  남는 틈: 확인과 kill 사이(마이크로초)의 재사용은 막지 못한다(Node 에 pidfd 없음).
