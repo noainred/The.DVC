@@ -112,6 +112,7 @@ const PURPOSES = {
   'veeam-auth-stops.json': 'Veeam 서버 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.751)',
   'veeam-em.json': 'Veeam Enterprise Manager 등록부(주소·계정 — 비밀번호 봉인 · 중앙 전용, v2.788)',
   'veeam-em-latest.json': 'Veeam Enterprise Manager 별 마지막 수집 결과(상태 — 요약·작업·세션·저장소, v2.788)',
+  'veeam-em-map.json': 'Veeam Enterprise Manager 백업 서버 매핑(사람이 정함 — 법인 vCenter · 포탈 B&R 등록 짝, v2.788.1)',
   'veeam-em-auth-stops.json': 'Veeam Enterprise Manager 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.788)',
   'veeam-license-alert-state.json': 'Veeam 라이선스·지원 만료 알림 단계(상태 — 재시작 뒤 같은 알림을 다시 보내지 않게, v2.788)',
   'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',

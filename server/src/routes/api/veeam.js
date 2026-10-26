@@ -32,13 +32,16 @@ import { fileStamp } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
 import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, marksCorruptKept, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
-import { listEms } from '../../veeam/em/registry.js';
+import { listEms, getEmWithSecret } from '../../veeam/em/registry.js';
 import { getEmRecord } from '../../veeam/em/store.js';
-import { emPollMs } from '../../veeam/em/poller.js';
+import { emPollMs, emAuthGuard } from '../../veeam/em/poller.js';
+import { sessionDetail } from '../../veeam/em/client.js';
+import { withDeadline } from '../../util/deadline.js';
 import { emView, jobsView, licenseTotals } from '../../veeam/em/view.js';
+import { getEmMap, emMapRev } from '../../veeam/em/mapping.js';
 import { currentLicenses } from '../../veeam/licenseWatch.js';
 import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
-import { demoEmView, demoLicenses } from '../../mock/demo/veeamEm.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
+import { demoEmView, demoLicenses, demoSessionDetail } from '../../mock/demo/veeamEm.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -525,7 +528,11 @@ async function emData(admin) {
     const v = demoEmView(store.get(), now);
     v.data.jobs = jobsView(v.data._jobs); delete v.data._jobs;
     views = [v];
-  } else views = ems.map((em) => emView(em, getEmRecord(em.id), { brServers, maxAgeMs: emPollMs() * 3, now }));
+  } else {
+    const vcName = new Map((store.get()?.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    const map = getEmMap();   // v2.788.1 매핑(백업 서버 → vCenter·B&R 등록)
+    views = ems.map((em) => emView(em, getEmRecord(em.id), { brServers, map, vcName, maxAgeMs: emPollMs() * 3, now }));
+  }
   if (!admin) views = views.map(({ host: _h, port: _p, ...v }) => v);
   let licItems = currentLicenses();
   if (!licItems.length && isMockMode() && !brServers.length) licItems = demoLicenses(now);
@@ -537,6 +544,18 @@ async function emData(admin) {
     history: { license: licHist, repo: repoHist },
   };
 }
+
+/** v2.788.1 이 EM 의 마지막 결과에 있는 세션 UID 인가 — 상세 요청은 이것만 EM 으로 보낸다(임의 값으로 EM 을 두드리지 않게). */
+export function knownEmSessionUid(data, uid) {
+  if (!uid || !data) return false;
+  for (const j of data.jobs || []) if (j?.last?.uid === uid) return true;
+  for (const x of data.sessions?.recentBad || []) if (x?.uid === uid) return true;
+  return false;
+}
+const _emDetailCache = new Map();
+export function _resetEmDetailForTest() { _emDetailCache.clear(); _emDetailBusy.clear(); }   // key → { at, body } (5분 · 상한 200)
+const _emDetailBusy = new Set();    // EM 당 동시 1건
+const EM_DETAIL_TTL_MS = 5 * 60_000;
 
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
@@ -558,7 +577,41 @@ export function registerBackupStatus(api) {
   const fullScopeOnly = fullScopeOnlyWith('Veeam Enterprise Manager 현황은 전 법인 데이터라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
   api.get('/tools/backup-em', toolsPerm, fullScopeOnly, (req, res) => {
     const admin = isAdminDetailUser(req.user);
-    return memoJson(req, res, 'backup-em', async () => emData(admin), { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${admin ? 'admin' : 'user'}` });
+    return memoJson(req, res, 'backup-em', async () => emData(admin), { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${admin ? 'admin' : 'user'}|map${emMapRev()}` });   // v2.788.1 매핑을 바꾸면 바로 보인다
+  });
+
+  /*
+   * v2.788.1 실패·경고 상세 — 그 세션의 VM 별 결과와 사유를 EM 에서 **눌렀을 때만** 읽는다(전체 범위만 — EM 탭과 같은 게이트).
+   *   · 저장된 결과에 있는 세션 UID 만 · 인증 정지 중이면 접속하지 않는다 · 401 이면 정지 기록(자동 재시도 없음) · EM 당 동시 1건 · 5분 캐시.
+   */
+  api.get('/tools/backup-em/session', toolsPerm, fullScopeOnly, async (req, res) => {
+    const emId = String(req.query.em || '').slice(0, 80);
+    const uid = String(req.query.uid || '').slice(0, 200);
+    if (!listEms().length && isMockMode() && emId === 'mock-em-1') return res.json(demoSessionDetail(uid));
+    const em = getEmWithSecret(emId);
+    if (!em) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
+    const rec = getEmRecord(em.id);
+    const data = rec?.result?.ok ? rec.result : (rec?.lastOk || null);
+    if (!knownEmSessionUid(data, uid)) return res.status(404).json({ ok: false, reason: '이 EM 의 최근 수집 결과에 없는 세션입니다 — 새로고침 뒤 다시 누르세요.' });
+    const key = `${em.id}|${uid}`;
+    const hit = _emDetailCache.get(key);
+    if (hit && Date.now() - hit.at < EM_DETAIL_TTL_MS) return res.json({ ...hit.body, cachedAt: hit.at });
+    const stop = emAuthGuard.authStopFor(em);
+    if (stop) return res.status(409).json({ ok: false, code: 'auth-stopped', reason: `이 EM 은 인증 실패로 수집을 멈춰 접속하지 않습니다(${stop.reason}) — 설정에서 계정을 고치세요.` });
+    if (!em.password) return res.status(409).json({ ok: false, code: 'no-password', reason: '저장된 비밀번호가 없어 접속하지 않습니다 — 설정에서 비밀번호를 입력하세요.' });
+    if (_emDetailBusy.has(em.id)) return res.status(429).json({ ok: false, reason: '이 EM 에서 다른 상세를 읽는 중입니다 — 잠시 뒤 다시 누르세요.' });
+    _emDetailBusy.add(em.id);
+    try {
+      const d = await withDeadline(60_000, (signal) => sessionDetail(em, uid, { signal }), 'Veeam EM 세션 상세 시한 초과');
+      const body = { ok: true, uid, ...d };
+      _emDetailCache.set(key, { at: Date.now(), body });
+      if (_emDetailCache.size > 200) _emDetailCache.delete(_emDetailCache.keys().next().value);
+      return res.json(body);
+    } catch (e) {
+      const reason = String(e?.message || e).slice(0, 400);
+      if (e?.authFailed) { emAuthGuard.markAuthStopped(em.id, em, reason); emAuthGuard.flush(); }
+      return res.status(502).json({ ok: false, reason, ...(e?.authFailed ? { code: 'auth' } : {}) });
+    } finally { _emDetailBusy.delete(em.id); }
   });
 
   api.get('/tools/backup-detail', toolsPerm, async (req, res) => {

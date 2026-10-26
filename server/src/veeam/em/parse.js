@@ -108,6 +108,7 @@ export function repositoriesOf(b) {
 }
 export function sessionsOf(list) {
   return (Array.isArray(list) ? list : []).filter(isObj).map((s) => ({
+    uid: str(pick(s, 'UID', 'Uid', 'Id'), 200),   // v2.788.1 상세(세션 하위 VM 결과)를 누를 때 이 세션을 EM 에서 다시 읽는다
     job: str(pick(s, 'JobName'), 160), jobUid: str(pick(s, 'JobUid', 'JobUID'), 200), type: str(pick(s, 'JobType'), 40),
     result: resultKey(pick(s, 'Result')), state: str(pick(s, 'State'), 40),
     start: tsOf(pick(s, 'CreationTimeUTC', 'CreationTime')), end: tsOf(pick(s, 'EndTimeUTC', 'EndTime')),
@@ -138,7 +139,7 @@ export function jobsWithResults(jobsBody, sessions, { now = Date.now(), dayMs = 
       scheduleEnabled: typeof pick(j, 'ScheduleEnabled') === 'boolean' ? pick(j, 'ScheduleEnabled') : null,
       nextRun: tsOf(pick(j, 'NextRun')),
       running: running ? { start: running.start } : null,
-      last: last ? { result: last.result, start: last.start, end: last.end, durSec: last.start != null ? Math.max(0, Math.round((last.end - last.start) / 1000)) : null } : null,
+      last: last ? { uid: last.uid || '', result: last.result, start: last.start, end: last.end, durSec: last.start != null ? Math.max(0, Math.round((last.end - last.start) / 1000)) : null } : null,
       runs24,
     };
   }).filter((j) => j.name);
@@ -155,5 +156,30 @@ export function sessionDigest(sessions, { now = Date.now(), dayMs = 86_400_000, 
     if (s.result === 'fail' || s.result === 'warn') bad.push(s);
   }
   bad.sort((a, b) => b.end - a.end);
-  return { counts24: c, recentBad: bad.slice(0, max).map(({ job, server, result, start, end }) => ({ job, server, result, start, end })), recentBadTotal: bad.length };
+  return { counts24: c, recentBad: bad.slice(0, max).map(({ uid, job, server, result, start, end }) => ({ uid: uid || '', job, server, result, start, end })), recentBadTotal: bad.length };
+}
+
+/**
+ * v2.788.1 세션 하위 VM 결과(BackupTaskSession) → 화면 줄. 사유(Reason)는 EM 이 준 문구 그대로(길이 상한 · 비밀 가림은 호출부 maskText).
+ * ⚠ 필드 이름은 미검증(머리 주석) — VmDisplayName·Name 둘 다 받는다.
+ */
+export function taskSessionsOf(body, { max = 2000, reasonMax = 2000 } = {}) {
+  return firstArray(body).slice(0, max).map((t) => ({
+    vm: str(pick(t, 'VmDisplayName', 'VmName', 'Name', 'ObjectName'), 200),
+    result: resultKey(pick(t, 'Result')), state: str(pick(t, 'State'), 40),
+    reason: typeof pick(t, 'Reason') === 'string' ? pick(t, 'Reason').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/g, '').trim().slice(0, reasonMax) : '', // eslint-disable-line no-control-regex
+    start: tsOf(pick(t, 'CreationTimeUTC', 'CreationTime')), end: tsOf(pick(t, 'EndTimeUTC', 'EndTime')),
+    size: num(t, 'TotalSize'),
+  })).filter((t) => t.vm || t.reason);
+}
+/** 세션 1건(BackupJobSession 엔터티) → 머리 정보. 실패 사유가 세션에만 있는 판도 있어 Reason 도 받는다(있으면). */
+export function sessionHeadOf(b) {
+  const o = !isObj(b) ? null : (pick(b, 'JobName') !== undefined || pick(b, 'Result') !== undefined ? b : (firstArray(b)[0] || null));   // 엔터티 그대로 또는 한 겹 감싼 것
+  if (!o) return null;
+  return {
+    job: str(pick(o, 'JobName', 'Name'), 160), result: resultKey(pick(o, 'Result')), state: str(pick(o, 'State'), 40),
+    start: tsOf(pick(o, 'CreationTimeUTC', 'CreationTime')), end: tsOf(pick(o, 'EndTimeUTC', 'EndTime')),
+    reason: typeof pick(o, 'Reason') === 'string' ? pick(o, 'Reason').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/g, '').trim().slice(0, 2000) : '', // eslint-disable-line no-control-regex
+    retry: pick(o, 'IsRetry') === true,
+  };
 }

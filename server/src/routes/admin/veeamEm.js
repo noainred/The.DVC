@@ -9,6 +9,10 @@ import { pollEmOnce, emPollerStatus, emAuthGuard } from '../../veeam/em/poller.j
 import { testEm } from '../../veeam/em/client.js';
 import { withDeadline } from '../../util/deadline.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
+import { getEmMap, setEmMap, emMapUnreadable, dropEmMapFor, mapKey } from '../../veeam/em/mapping.js';
+import { mapBackupServers } from '../../veeam/em/view.js';
+import { listServers } from '../../veeam/registry.js';
+import { store } from '../../store.js';
 
 const fleetWideOnly = fullScopeOnlyWith('Veeam Enterprise Manager 등록은 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
 
@@ -25,12 +29,38 @@ export function emStatusView(rec) {
   };
 }
 
+/**
+ * v2.788.1 매핑 표 — EM 마다 마지막 성공 결과의 백업 서버 + 매핑만 남은 줄(그 이름이 지금 EM 결과에 없음 — gone).
+ * 화면이 고를 수 있는 vCenter(스냅샷)·B&R 등록(비밀 없음) 목록을 함께 준다.
+ */
+export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brServers = listServers(), vcenters = store.get()?.vcenters || [] } = {}) {
+  const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
+  const rows = [];
+  for (const em of ems) {
+    const rec = recOf(em.id);
+    const data = rec?.result?.ok ? rec.result : (rec?.lastOk || null);
+    const list = mapBackupServers(data?.backupServers || [], { emId: em.id, map, brServers, vcName });
+    const seen = new Set(list.map((x) => mapKey(em.id, x.name)));
+    for (const x of list) rows.push({ emId: em.id, emName: em.name, name: x.name, version: x.version || '', registered: x.registered, brId: x.brId, brName: x.brName, brSource: x.brSource, vcenterIds: x.vcenterIds, vcNames: x.vcNames, vcSource: x.vcSource, manual: map[mapKey(em.id, x.name)] || null });
+    for (const [k, e] of Object.entries(map)) {
+      if (!k.startsWith(`${em.id}|`) || seen.has(k)) continue;
+      rows.push({ emId: em.id, emName: em.name, name: e.server, version: '', gone: true, registered: false, brId: '', brName: '', brSource: null, vcenterIds: e.vcenterIds || [], vcNames: (e.vcenterIds || []).map((id) => vcName.get(id) || id), vcSource: e.vcenterIds?.length ? 'manual' : null, manual: e });
+    }
+  }
+  return {
+    rows, unreadable: emMapUnreadable() || undefined,
+    vcenters: vcenters.map((v) => ({ id: v.id, name: v.name || v.id })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { numeric: true })),
+    brServers: brServers.map((b) => ({ id: b.id, name: b.name, host: b.host, vcenterIds: b.vcenterIds || [] })),
+  };
+}
+
 export function registerVeeamEm(adminRouter) {
   adminRouter.get('/veeam/em', adminOnly, fleetWideOnly, (_req, res) => {
     const le = emRegistryLoadError();
     res.json({
       ok: true,
       ems: listEms().map((d) => ({ ...d, status: emStatusView(getEmRecord(d.id)) })),
+      mapping: emMappingView(listEms()),
       poller: emPollerStatus(), defaults: { port: DEFAULT_EM_PORT },
       ...(le ? { registryError: summarizeRegistryError(le)?.text || '등록부 읽기 오류' } : {}),
     });
@@ -51,8 +81,23 @@ export function registerVeeamEm(adminRouter) {
     if (!d || !deleteEm(req.params.id)) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
     dropEmResult(req.params.id);
     emAuthGuard.clearAuthStop(req.params.id);
+    dropEmMapFor(req.params.id);   // v2.788.1 그 EM 의 매핑도(유령 매핑 방지)
     logAudit({ user: req.user?.username, action: 'Veeam EM 삭제', target: d.name, detail: `${d.host}:${d.port || DEFAULT_EM_PORT}` });
     res.json({ ok: true });
+  });
+
+  // v2.788.1 매핑 저장 — 백업 서버 한 대: vCenter(법인) 목록 · B&R 등록(''=자동 · id · 'none'). 둘 다 비면 지운다.
+  //   알려진 vCenter·등록된 B&R 만 받는다(모르는 값 400) · 매핑 파일을 못 읽었으면 503(빈 맵 위에 쓰지 않는다) · 감사 로그.
+  adminRouter.put('/veeam/em/map', adminOnly, fleetWideOnly, (req, res) => {
+    const b = req.body || {};
+    const em = getEmWithSecret(String(b.emId || ''));
+    if (!em) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
+    const r = setEmMap({ emId: em.id, server: b.server, vcenterIds: b.vcenterIds, br: b.br },
+      { knownVcenters: (store.get()?.vcenters || []).map((v) => v.id), knownBr: listServers().map((x) => x.id), user: req.user });
+    if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason, ...(r.code ? { code: r.code } : {}) });
+    logAudit({ user: req.user?.username, action: 'Veeam EM 매핑', target: `${em.name} › ${String(b.server || '').slice(0, 120)}`,
+      detail: r.entry ? `vCenter ${r.entry.vcenterIds.length ? r.entry.vcenterIds.join(',') : '자동'} · B&R ${r.entry.br === 'none' ? '포탈에 없음' : r.entry.br || '자동'}` : '매핑 지움(자동)' });
+    res.json({ ok: true, entry: r.entry });
   });
 
   adminRouter.post('/veeam/em/:id/test', adminOnly, fleetWideOnly, async (req, res) => {

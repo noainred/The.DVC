@@ -213,6 +213,7 @@ server/config/veeam-servers.json
 # v2.788 Veeam Enterprise Manager — 등록부(비밀번호 봉인)·마지막 결과·인증 정지 · Veeam 일 단위 이력 DB · 라이선스 알림 상태
 server/config/veeam-em.json
 server/config/veeam-em-latest.json
+server/config/veeam-em-map.json
 server/config/veeam-em-auth-stops.json
 server/config/veeam-history.db
 server/config/veeam-license-alert-state.json

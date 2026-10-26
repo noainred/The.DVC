@@ -23,6 +23,7 @@ import { authError, maskText, failText } from '../client.js';
 import { DEFAULT_EM_PORT, emFingerprint } from './registry.js';
 import {
   overviewOf, jobStatsOf, vmsOverviewOf, processedOf, repoReportOf, backupServersOf, repositoriesOf, sessionsOf, firstArray, jobsWithResults, sessionDigest, pick,
+  taskSessionsOf, sessionHeadOf,
 } from './parse.js';
 
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'veeam-em', label: 'Veeam Enterprise Manager', envKey: 'VEEAM_TLS_VERIFY', envRaw: process.env.VEEAM_TLS_VERIFY, tls: withSsrfLookup({}) }) });
@@ -87,7 +88,9 @@ export function makeEmClient(em, { signal = null, fetchImpl = fetch } = {}) {
     }
     sid = '';
   }
-  return { login, get, logout, mask: (t) => maskText(t, secrets) };
+  // maskFull — 사유 문구(최대 2,000자)용: maskText 는 300자로 자르므로 길이는 두고 비밀만 가린다(세션 id·비밀번호).
+  const maskFull = (t) => { let x = String(t || ''); for (const sct of secrets) if (sct && sct.length >= 3) x = x.split(sct).join('***'); return x; };
+  return { login, get, logout, mask: (t) => maskText(t, secrets), maskFull };
 }
 
 /** EM 세션 질의 문자열 — 최근 창(기본 7일) · 새것부터 · 페이지. */
@@ -175,5 +178,31 @@ export async function testEm(em, { signal = null, fetchImpl } = {}) {
   try {
     const o = overviewOf(await c.get('/api/reports/summary/overview'));
     return { ok: true, ms: Date.now() - t0, backupServers: o?.backupServers ?? null };
+  } finally { await c.logout(); }
+}
+
+/** EM 세션 UID('urn:veeam:BackupJobSession:<GUID>' 또는 GUID) → 경로에 넣을 GUID. 형식이 아니면 ''(지어내지 않는다). */
+export function sessionIdOf(uid) {
+  const m = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(String(uid || '').trim().slice(-120));
+  return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * v2.788.1 실패·경고 상세 — 세션 1건의 머리(사유 포함일 수 있음)와 VM 별 결과·사유. 사람이 눌렀을 때만 부른다(주기 수집 아님).
+ * 인증 실패는 던진다(authFailed — 호출부가 정지를 기록한다). 두 항목은 각각 soft — 하나만 읽혀도 돌려준다.
+ */
+export async function sessionDetail(em, uid, { signal = null, fetchImpl } = {}) {
+  const id = sessionIdOf(uid);
+  if (!id) throw new Error('세션 식별자 형식이 아닙니다');
+  const c = makeEmClient(em, { signal, ...(fetchImpl ? { fetchImpl } : {}) });
+  await c.login();
+  try {
+    const out = { head: null, tasks: null, errors: {} };
+    try { out.head = sessionHeadOf(await c.get(`/api/backupSessions/${id}?format=Entity`)); } catch (e) { if (isFatal(e)) throw e; out.errors.head = c.mask(String(e?.message || e)).slice(0, 200); }
+    try { out.tasks = taskSessionsOf(await c.get(`/api/backupSessions/${id}/taskSessions?format=Entity`)).map((t) => ({ ...t, reason: c.maskFull(t.reason) })); }
+    catch (e) { if (isFatal(e)) throw e; out.errors.tasks = c.mask(String(e?.message || e)).slice(0, 200); }
+    if (out.head?.reason) out.head.reason = c.maskFull(out.head.reason);
+    if (!out.head && !out.tasks) throw new Error(`세션 상세를 읽지 못했습니다 — ${out.errors.tasks || out.errors.head || '사유 모름'}`);
+    return out;
   } finally { await c.logout(); }
 }

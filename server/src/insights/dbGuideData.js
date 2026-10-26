@@ -155,6 +155,33 @@ export const DB_GUIDE_DATA = {
       "server/src/veeam/em/poller.js"
     ]
   },
+  "veeam-em-map.json": {
+    "title": "Veeam Enterprise Manager 백업 서버 매핑",
+    "summary": "EM 이 아는 B&R 서버마다 사람이 정한 값을 담는 파일입니다(v2.788.1). 그 서버가 백업하는 vCenter(법인)와, 포탈에 등록된 어느 B&R 서버와 같은지(이름이 달라 자동으로 못 찾을 때) 또는 '포탈에 없음' 으로 확정했는지를 적습니다. 서버 › Veeam › EM 탭의 법인 이름과 '포탈 등록됨' 표시가 이 값을 씁니다.",
+    "stores": [
+      "'EM id|백업 서버 이름' 마다: vCenter 목록(비면 B&R 등록을 따름), B&R 짝(비면 이름으로 자동 · 등록 id · 'none' = 포탈에 없음), 바꾼 사람·시각."
+    ],
+    "writer": "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑에서 저장할 때 씁니다(관리자 + 전체 범위, 감사 로그, 원자적 쓰기). EM 을 지우면 그 EM 의 매핑도 지웁니다.",
+    "usedBy": [
+      "서버 › Veeam › EM 탭 — 백업 서버·작업·저장소의 법인 이름, '포탈 등록됨' 판정",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표"
+    ],
+    "retention": "자동 정리는 없습니다. 사람이 '자동으로 되돌리기' 를 누르거나 EM 을 지울 때 지웁니다.",
+    "growth": "EM 백업 서버 수(최대 2,000줄)에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 매핑이 사라지고 이름 자동 짝짓기로 돌아갑니다(법인 이름은 짝지어진 B&R 등록의 vCenter 만 남습니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고, 그동안 매핑 저장을 거부합니다(빈 값 위에 덮지 않습니다).",
+    "cautions": [
+      "비밀은 들어 있지 않습니다(이름·id 만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑"
+    ],
+    "sources": [
+      "server/src/veeam/em/mapping.js",
+      "server/src/veeam/em/view.js",
+      "server/src/routes/admin/veeamEm.js"
+    ]
+  },
   "veeam-em-auth-stops.json": {
     "title": "Veeam Enterprise Manager 인증 실패 정지 기록",
     "summary": "EM 이 계정·비밀번호를 거부(401)하면 그 EM 의 주기 수집을 멈추고 그 사실을 남기는 상태 파일입니다(v2.788). 같은 틀린 비밀번호로 계속 로그인해 서비스 계정을 잠그지 않게 합니다.",
