@@ -1967,8 +1967,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .vbk-panel { border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border); min-width: 0; }
 .vbk-panel > .hd { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--border-soft); }
 .vbk-panel > .bd { padding: 12px 15px; }
-.vbk-runs { display: inline-flex; gap: 3px; vertical-align: middle; }
-.vbk-runs i { width: 7px; height: 20px; border-radius: 2px; background: #2a3550; }
+.vbk-runs { display: inline-flex; gap: 2px; vertical-align: middle; } /* v2.795: 7px·3px 는 잡 표를 1440px 카드보다 14px 넓혔다(실측 834 > 820) */
+.vbk-runs i { width: 6px; height: 20px; border-radius: 2px; background: #2a3550; }
 .vbk-runs i.ok { background: var(--green); } .vbk-runs i.warn { background: var(--amber); } .vbk-runs i.fail { background: var(--red); } .vbk-runs i.skip { background: #3a4766; }
 .vbk-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 9px 15px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--text-dim); }
 .vbk-legend span { display: inline-flex; align-items: center; gap: 6px; }

@@ -216,7 +216,8 @@ export default function VmCloneTool() {
                         <td style={{ fontSize: 12.5 }}>
                           <div>{scheduleText(j.schedule)}</div>
                           {mark && <div style={{ fontSize: 11.5, color: `var(--${mark.tone})` }} title={j.lastRun.detail}>{mark.icon} {agoText(j.lastRun.at, now)}</div>}
-                          {rpoText(j.rpo, now) && <div style={{ fontSize: 11.5, color: 'var(--amber)', fontWeight: 600 }} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다">⏰ {rpoText(j.rpo, now)}</div>}
+                          {/* v2.795: 두 줄로(⏰ RPO 초과 / 사유) — 한 줄이면 스케줄 열이 늘어 1440px 에서도 표가 카드 밖으로 밀린다(Chromium 실측 1013px > 820px). */}
+                          {rpoText(j.rpo, now) && <div style={{ fontSize: 11.5, color: 'var(--amber)', maxWidth: 150, whiteSpace: 'normal' }} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다"><b>⏰ RPO 초과</b><br />{rpoText(j.rpo, now).replace(/^RPO 초과 · /, '')}</div>}
                         </td>
                         <td><span className="vbk-runs" aria-label="최근 14회 실행 결과">{lastRunTones(j, 14).map((t, i) => <i key={i} className={t} title={t} />)}</span></td>
                         <td style={{ textAlign: 'right' }} data-sort={(j.clones || []).length}>
@@ -488,7 +489,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
                   <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수.">
                     <input type="checkbox" checked={!!form.quiesce} onChange={(e) => setForm({ ...form, quiesce: e.target.checked })} style={{ marginTop: 3 }} />
-                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없거나 정지점이 실패하면 아래 설정에 따라 일반 스냅샷으로 다시 하거나 그 회차를 실패로 남깁니다.</span></span>
+                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없으면 정지점이 실패합니다{form.quiesce ? ' — 그때 어떻게 할지는 아래에서 고릅니다' : ''}.</span></span>
                   </label>
                   {form.quiesce && (
                     <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, paddingLeft: 24 }}>
