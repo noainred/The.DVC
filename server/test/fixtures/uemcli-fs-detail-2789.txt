@@ -1,0 +1,99 @@
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                         = res_1
+      File system                = fs_1
+      Name                       = temp_share
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = nfs
+      Access policy              = Native
+      Size                       = 644245094400 (600.0G)
+      Size used                  = 9019431322 (8.4G)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes
+
+2:    ID                         = res_2
+      File system                = fs_2
+      Name                       = spitforebackup
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = nfs
+      Access policy              = Native
+      Size                       = 536870912000 (500.0G)
+      Size used                  = 5905580032 (5.5G)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes
+
+3:    ID                         = res_3
+      File system                = fs_3
+      Name                       = sandbox
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = cifs
+      Access policy              = Native
+      Size                       = 1099511627776 (1.0T)
+      Size used                  = 199286482534 (185.6G)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes
+
+4:    ID                         = res_4
+      File system                = fs_4
+      Name                       = repo
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = nfs
+      Access policy              = Native
+      Size                       = 4398046511104 (4.0T)
+      Size used                  = 2230806013542 (2.0T)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes
+
+5:    ID                         = res_5
+      File system                = fs_5
+      Name                       = dvc_portal
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = nfs
+      Access policy              = Native
+      Size                       = 536870912000 (500.0G)
+      Size used                  = 106837311488 (99.5G)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes
+
+6:    ID                         = res_6
+      File system                = fs_6
+      Name                       = dvc_datakey
+      Description                =
+      Health state               = OK (5)
+      File server                = nas_1
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Format                     = UFS64
+      Protocol                   = nfs
+      Access policy              = Native
+      Size                       = 107374182400 (100.0G)
+      Size used                  = 5046586573 (4.7G)
+      Maximum size               = 281474976710656 (256.0T)
+      Thin provisioning enabled  = yes

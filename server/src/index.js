@@ -144,6 +144,7 @@ import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
+import { startStorageUsageMail } from './storage/usageMail.js';   // v2.789 스토리지 사용량 예약 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 결과 메일 정기 발송(보내는 때 '정한 요일·시각') — 중앙 전용 · 30초 틱
 import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
 import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
@@ -609,6 +610,7 @@ const stagger = [
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
+  startStorageUsageMail, // 스토리지 사용량 예약 메일(v2.789) — 30초 틱 · 중앙 전용 · 기본 꺼짐(켜지 않으면 할 일 없음)
 ];
 /*
  * v2.613 RUNTIME2613-06: 간격 1.5초 × 74개 = 마지막 폴러가 부팅 110초 뒤에 켜지고, 그 위에 각 모듈의 firstDelayMs(45~90초)가

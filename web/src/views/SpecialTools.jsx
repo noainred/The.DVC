@@ -37,6 +37,7 @@ const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
+const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
@@ -620,6 +621,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
+      {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}
       {tool === 'part-faults' && <PartFaults />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}

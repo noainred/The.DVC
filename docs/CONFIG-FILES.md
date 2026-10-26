@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **227개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **229개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-26)
@@ -202,6 +202,8 @@
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
+| `storage-usage-mail-state.json` | 설정 | 스토리지 사용량 예약 메일 회차·기록(상태, v2.789) | ✅ | ✅ | ✅ | storage/usageMail.js |
+| `storage-usage-mail.json` | 설정 | 스토리지 사용량 예약 메일 설정(v2.789 — 켜기·요일·시각·받는 사람·표 단위. 비밀 없음, 주소는 담는다) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `svcmon-batches.json` | 설정 | 성능점검 대량 등록/가져오기 **이력 원장**(+ 롤백) — `CONFIG_DIR/svcmon-batches.json`. | ✅ | ✅ |  | svcmon/batches.js |
 | `svcmon-log.json` | 설정 | 성능점검 로그 설정 — CSV 적재/분할/보관 정책. `CONFIG_DIR/svcmon-log.json`. | ✅ | ✅ |  | svcmon/logsettings.js |
 | `svcmon-templates.json` | 설정 | 성능점검 '점검 템플릿' — 서비스 유형별 점검 묶음을 저장하고 대상에 적용한다. | ✅ | ✅ |  | svcmon/templates.js |
@@ -256,6 +258,8 @@
 - **`peer-trust.json`** — 종류(ssh/tls)·호스트·포트마다 승인·관찰·거부 지문과 정책(enforce/observe)을 담는다. 손상이면 보존 후 두 종류 모두 enforce 로 닫는다 — 지우면 승인 기록이 사라져 새 설치처럼 엄격 모드로 시작한다(장비마다 다시 승인)
 - **`tls-ca-bundle.pem`** — 비밀이 아니다. 백업 확장자 화이트리스트 밖이라 백업에 들어가지 않는다 — 복원 뒤 다시 둘 것. 개인키를 넣지 말 것(인증서가 아닌 블록은 세어 경고한다)
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장
+- **`storage-usage-mail.json`** — 손상이면 보존하고 저장(409)·정기 발송을 멈춘다(손상본 위에 기본값을 덮어 받는 사람이 사라지지 않게). 지우면 예약 메일이 꺼진 기본값으로 돌아간다
+- **`storage-usage-mail-state.json`** — 상태 파일(백업 감시 제외). 처리한 회차·마지막 발송·최근 기록 20건(받는 사람 수만 — 주소는 적지 않는다). 중앙만 쓴다. 지우면 지금 이전의 가장 최근 회차가 30분 안이면 한 번 더 보낼 수 있다
 - **`isidu-mail-state.json`** — 상태 파일(백업 감시 제외). 대상마다 마지막으로 다룬 조사·마지막 실패 알림 시각·마지막 발송 결과(받는 사람 수 — 주소는 적지 않는다)를 남긴다. 중앙만 쓴다(엣지는 메일을 보내지 않는다). 지우면 같은 결과가 다시 들어올 때(엣지 재전송) 한 번 더 보낼 수 있고 실패 알림 6시간 묶음이 처음부터 다시 센다
 - **`scan-journal.json`** — 상태 파일(백업 감시 제외). 아이실론 du·iDRAC 대역·IP 스캔이 시작할 때 적고 끝나면 지운다 — 업그레이드·재시작으로 남은 항목은 다음 기동 2분 뒤(SCAN_RESUME_DELAY_MS) 자동으로 다시 시작한다(사슬마다 최대 2번). 비밀은 적지 않는다(대상 id·대역 id·원격 작업 id). 지우면 끊긴 스캔이 다음 주기까지 다시 돌지 않을 뿐 다른 영향은 없다
 - **`upgrade-status.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다. 자동 업그레이드로 재시작한 뒤에도 업그레이드 화면이 '언제 무엇을 했는지' 를 보이기 위한 것 — 지우면 그 표시가 다음 확인까지 비고, 업그레이드 동작에는 영향이 없다

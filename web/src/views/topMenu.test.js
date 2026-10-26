@@ -33,8 +33,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(15);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also)
-    expect(new Set(keys).size).toBe(14);
+    expect(keys.length).toBe(16);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1
+    expect(new Set(keys).size).toBe(15);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
@@ -45,7 +45,8 @@ describe('메뉴 구성', () => {
   it('하위 메뉴 이름은 사용자가 정한 것이다', () => {
     const labels = (id) => MENU_GROUPS.find((g) => g.id === id).children.map((c) => c.label);
     expect(labels('server')).toEqual(['가상화 서버', 'ESXi 호스트', 'vCenter', '물리 서버', 'Veeam', '알람']);
-    expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스토리지 성능 측정']);
+    // v2.789: 사용자 요청 '스토리지 사용량을 일간/주간 별로 정리해서 보는 기능'(새 메뉴 선택)으로 증가량 보고서 다음에 한 줄을 더했다.
+    expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스토리지 성능 측정']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
     expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
     expect(labels('optimize')).toEqual(['Optimization', 'iDRAC 통합 추이']);
