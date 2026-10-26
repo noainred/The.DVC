@@ -1,21 +1,29 @@
 /**
  * 백업 서머리 — 특수 기능 `backup-summary`(v2.779, 사용자 요청 '전체 28개 vcenter 의 백업 현황 · veeam 백업과 snapshot 둘다' + 시안).
- * 메뉴: Veeam 현황 › Summary(v2.785 — 예전 '백업 › 백업 서머리' · 도구 키 그대로). 값은 서버(GET /api/tools/backup-summary — veeam/backupStatus.js)가 vCenter 카드·VM 화면과 같은 기준으로 낸다.
+ * 메뉴: 서버 › Veeam → 화면 위 Summary | Detail 탭(v2.787 — 예전 'Veeam 현황 › Summary' · 도구 키 그대로).
+ * v2.787(사용자 요청 + 시안): 바로가기 바(vCenter 화면과 같은 모양 — 누르면 표의 그 줄로) · 법인별 표(커버리지 막대 · 우선순위 칸 · 정렬) · 우선순위 VM. 값은 서버(GET /api/tools/backup-summary — veeam/backupStatus.js)가 vCenter 카드·VM 화면과 같은 기준으로 낸다.
  * ⚠ 무거운 집계라 폴링하지 않는다(마운트 1회 + 새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 조기 return 위.
  * ⚠ 못 읽은 값은 '—'(0 이 아니다) · 두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않는다.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
-import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote, CRIT, marksLine, marksNotice } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote, CRIT, marksLine, marksNotice, quickTone, QUICK_DOT, coverageOf, SORTS, sortRows, matchSite, PRIO_TABS, priorityView, prioMatches, folderTail } from './backupViewText.js';
+import VeeamHeader from './VeeamHeader.jsx';
+import Select from '../../components/Select.jsx';
 import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 
 export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
 
 const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', muted: 'var(--text-dim)' };
-const TONE_BG = { ok: 'rgba(34,197,94,.12)', bad: 'rgba(239,68,68,.14)', warn: 'rgba(245,158,11,.14)', info: 'rgba(59,130,246,.14)', muted: 'transparent' };
+// v2.787 우선순위 VM 이유 칩 색(배경 + 글자 — 색만으로 구분하지 않게 글자를 함께 쓴다)
+const PRIO_TAG = {
+  gap: { background: 'rgba(239,68,68,.16)', color: '#fca5a5' }, high: { background: 'rgba(248,113,113,.14)', color: '#fecaca' },
+  need: { background: 'rgba(96,165,250,.16)', color: '#bfdbfe' }, fail: { background: 'rgba(239,68,68,.16)', color: '#fca5a5' },
+  old: { background: 'rgba(251,146,60,.16)', color: '#fdba74' }, stale: { background: 'rgba(245,158,11,.16)', color: '#fcd34d' },
+};
 
 function Kpi({ label, value, sub, color, border, dashed }) {
   // v2.781(점검 G3): '수 · 비율%' 은 비율을 작게 · 두 조각 사이에서만 줄바꿈 — 28px 한 줄(nowrap)은 1440px 카드 폭(약 180px)에 '1,398 · 66%' 가 테두리에 닿았고
@@ -48,6 +56,12 @@ export default function BackupSummaryTool() {
   const [filter, setFilter] = useState('all');
   const [opts, setOpts] = useState(() => loadOpts());
   const [csvErr, setCsvErr] = useState(null);
+  // v2.787: 바로가기 찾기 · 표 처음 순서 · 표 전부 보기 · 우선순위 탭 · 우선순위 전부 보기
+  const [q, setQ] = useState('');
+  const [sortKey, setSortKey] = useState('attn');
+  const [allRows, setAllRows] = useState(false);
+  const [ptab, setPtab] = useState('all');
+  const [pAll, setPAll] = useState(false);
   const gen = useRef(0);
   // 전원·제외는 서버가 센다(같은 backupRow — 세부내용과 같은 수) · 바꾸면 그 조건으로 다시 읽는다. RPO 기준은 같은 응답에서 고른다.
   const load = useCallback(() => {
@@ -64,6 +78,20 @@ export default function BackupSummaryTool() {
     setCsvErr(null);
     try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams(scopeQuery(opts))}`); } catch (e) { setCsvErr(e); }
   }, [opts]);
+  const prio = useMemo(() => priorityView(data?.priority?.items, { rpoDays: opts.rpoDays, now: data?.at || Date.now() }), [data, opts.rpoDays]);
+  // 바로가기 — 표의 그 줄로 이동 + 반짝(vCenter 화면 gotoCard 와 같은 동작). 줄이 보기·찾기·12줄 상한으로 숨어 있으면 먼저 펼친다.
+  const gotoRow = useCallback((id) => {
+    const find = () => Array.from(document.querySelectorAll('[data-vc-row]')).find((el) => el.getAttribute('data-vc-row') === id);
+    const flash = (el) => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('qn-flash'); void el.offsetWidth; el.classList.add('qn-flash');   // styles.css .qn-anchor.qn-flash(바로가기 대상 반짝)
+      setTimeout(() => el.classList.remove('qn-flash'), 3200);
+    };
+    const el = find();
+    if (el) { flash(el); return; }
+    setFilter('all'); setQ(''); setAllRows(true);
+    setTimeout(() => { const e2 = find(); if (e2) flash(e2); }, 80);
+  }, []);
 
   if (!data && loading) return <Loading />;
   // v2.785(GV C-B4): 오류 객체를 그대로 — 403 을 문자열로 바꾸면 ErrorBox 가 권한 안내(AccessDenied)로 바꾸지 못했다
@@ -72,7 +100,10 @@ export default function BackupSummaryTool() {
 
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const t = data.totals || {};
-  const shown = filterRows(rows, filter);
+  const shown = sortRows(filterRows(rows, filter).filter((r) => matchSite(r, q)), sortKey);
+  const chipRows = rows.filter((r) => matchSite(r, q));
+  const prioShown = prio.items.filter((x) => prioMatches(x, ptab));
+  const prioWithheld = data?.priority?.withheld === 'detail-tool';   // v2.787: Detail 이 거부된 계정 — 서버가 VM 목록을 싣지 않는다
   const att = attentionList(rows);
   const kpi = summaryKpis(t, { rpoDays: opts.rpoDays });   // v2.781(점검 G3 C-B2): 아는 곳 0 이면 '—' · 분모는 그 기준을 아는 VM 합 · 부분 합 '*'
   const splitKnown = t.vcenters > 0 && t.splitUnknown < t.vcenters;
@@ -87,18 +118,12 @@ export default function BackupSummaryTool() {
 
   return (
     <div data-backup-summary="" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-      <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <div className="muted" style={{ fontSize: 13 }}>Veeam 현황</div>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>Summary</div>
-          <div className="muted" style={{ fontSize: 13 }}>vCenter {fmtNum(t.vcenters)}개 — Veeam 서버가 아는 백업과 vCenter 스냅샷으로 본 백업 흔적을 나란히 봅니다.</div>
-        </div>
-        <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center' }}>
-          <span className="muted" style={{ fontSize: 12 }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
+      <VeeamHeader active="summary" desc={`vCenter ${fmtNum(t.vcenters)}개 — Veeam 서버가 아는 백업과 vCenter 스냅샷으로 본 백업 흔적을 나란히 봅니다.`}
+        actions={<>
+          <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
           {canCsv() && <button type="button" className="tab" onClick={csv} style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
-        </div>
-      </div>
+        </>} />
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
         <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
         {note && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{note}</span>}
@@ -114,6 +139,18 @@ export default function BackupSummaryTool() {
         <Kpi label="지금 백업 중" value={kpi.running.value} color="#fbbf24" border="#5c4513" sub={kpi.running.sub} />
         <Kpi label={`오래된 백업(${opts.rpoDays}일 초과)`} value={kpi.rpo.value} color="#fb923c" border="#5c3413" sub={kpi.rpo.sub} />
       </div>
+      {/* v2.787: 바로가기 — vCenter 화면(VCenters.jsx)과 같은 모양 · 점 = 백업 상태(quickTone) · 누르면 아래 표의 그 줄로 */}
+      {rows.length > 0 && (
+        <div className="vc-quicknav" data-backup-quicknav="" style={{ marginBottom: 0 }}>
+          <span className="qn-label">⚡ 바로가기</span>
+          {chipRows.map((r) => (
+            <button key={r.id} type="button" className="qn-btn" title={`${r.name} — ${veeamStateOf(r.veeamState).text} · 표의 그 줄로`} onClick={() => gotoRow(r.id)}>
+              <span className="qn-dot" style={{ background: QUICK_DOT[quickTone(r)] }} />{r.name}
+            </button>
+          ))}
+          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }} value={q} onChange={setQ} placeholder="vCenter 이름 찾기" />
+        </div>
+      )}
       {/* v2.784: 백업 세부내용에서 사람이 정한 표시의 합(같은 범위 — 전원·제외) · 표에는 열을 더하지 않는다(1440 폭 유지) */}
       {mk && (
         <div className="card" data-backup-marks="" style={{ padding: '10px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 22px', minWidth: 0, fontSize: 13 }}>
@@ -149,67 +186,135 @@ export default function BackupSummaryTool() {
         </div>
       </div>
 
-      <div className="flex wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
-        <div className="card" style={{ flex: '999 1 620px', minWidth: 0, padding: '12px 0 4px' }}>
-          <div className="flex gap wrap" style={{ alignItems: 'center', padding: '0 14px 10px', rowGap: 6 }}>
-            <b style={{ fontSize: 14 }}>vCenter 별 현황</b>
-            <div className="flex gap wrap" role="group" aria-label="보기" style={{ marginLeft: 'auto', rowGap: 6 }}>
-              {chips.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>)}
-            </div>
+      {/* v2.787 법인별 현황 — 전체 폭(1440 에서 가로 스크롤 없게) · 커버리지 막대 = 둘 다·Veeam 만·스냅샷만(나머지 확인 안 됨) · 우선순위 칸 = 사람이 정한 표시 */}
+      <div className="card" data-backup-sites="" style={{ minWidth: 0, padding: '12px 0 4px' }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center', padding: '0 14px 10px', rowGap: 6 }}>
+          <div style={{ minWidth: 0 }}>
+            <b style={{ fontSize: 15 }}>법인별 현황</b>
+            <div className="muted" style={{ fontSize: 12 }}>VM 한 대는 한 번만 — 막대는 둘 다 · Veeam 만 · 스냅샷만 · 확인 안 됨 비율</div>
           </div>
-          <STable minWidth={840} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', fontSize: 12 }}>
-                <th style={{ padding: '6px 14px' }}>vCenter</th>
-                <th style={{ padding: '6px 6px', textAlign: 'right' }}>VM</th>
-                <th style={{ padding: '6px 6px' }}>Veeam 백업</th>
-                <th style={{ padding: '6px 6px' }}>스냅샷 기준</th>
-                <th style={{ padding: '6px 6px', textAlign: 'right' }} title="Veeam·스냅샷 어느 쪽에도 보이지 않는 VM(백업 안 됨이 아니라 확인되지 않음)">미확인</th>
-                <th style={{ padding: '6px 6px', textAlign: 'right' }}>백업 중</th>
-                <th style={{ padding: '6px 6px', textAlign: 'right' }} title={`마지막 Veeam 백업이 ${opts.rpoDays}일을 넘은 VM`}>{opts.rpoDays}일+ 경과</th>
-                <th style={{ padding: '6px 6px', textAlign: 'right' }} title="그 VM 마지막 결과 — 실패 · 경고">실패·경고</th>
-                <th style={{ padding: '6px 6px' }} title="마지막 백업 완료 시각">마지막 백업</th>
-                <th style={{ padding: '6px 14px 6px 6px' }}>Veeam 서버</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r) => {
-                const vs = veeamStateOf(r.veeamState);
-                const vp = pctOf(r.veeam, r.vm); const spc = pctOf(r.snap, r.vm); const rc = runningCell(r);
-                return (
-                  <tr key={r.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
-                    <td data-sort={r.name} style={{ padding: '9px 14px', whiteSpace: 'nowrap' }}>
+          <div className="flex gap wrap" role="group" aria-label="보기" style={{ marginLeft: 'auto', rowGap: 6 }}>
+            {chips.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>)}
+          </div>
+          <label className="flex" style={{ gap: 6, alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap' }}>
+            <span className="muted">정렬</span>
+            <Select className="input" sort={false} value={sortKey} onChange={(e) => setSortKey(e.target.value)} style={{ fontSize: 12, padding: '3px 6px', minWidth: 0, width: 'auto' }}>
+              {SORTS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            </Select>
+          </label>
+        </div>
+        <div className="flex gap wrap" style={{ fontSize: 12, rowGap: 6, padding: '0 14px 8px' }}>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#16a34a', marginRight: 6 }} />둘 다</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#4ade80', marginRight: 6 }} />Veeam 만</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#a855f7', marginRight: 6 }} />스냅샷만</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#263248', border: '1px solid var(--border)', marginRight: 6 }} />확인 안 됨</span>
+        </div>
+        <STable minWidth={1040} limit={allRows ? 0 : 12} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', fontSize: 12 }}>
+              <th style={{ padding: '6px 14px' }}>법인</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }}>VM</th>
+              <th data-nosort="" style={{ padding: '6px 10px', width: 210 }}>커버리지</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }}>Veeam</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }}>스냅샷</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }} title="Veeam·스냅샷 어느 쪽에도 보이지 않는 VM(백업 안 됨이 아니라 확인되지 않음)">미확인</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }}>백업 중</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }} title="그 VM 마지막 결과 — 실패 · 경고">실패·경고</th>
+              <th style={{ padding: '6px 6px', textAlign: 'right' }} title={`마지막 Veeam 백업이 ${opts.rpoDays}일을 넘은 VM`}>{opts.rpoDays}일+ 경과</th>
+              <th style={{ padding: '6px 6px' }} title="Detail 에서 정한 표시 — 중요도 상 · 백업 필요 · 그중 Veeam 백업 안 보임">우선순위</th>
+              <th style={{ padding: '6px 14px 6px 6px' }} title="마지막 백업 완료 시각">마지막 백업</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => {
+              const vs = veeamStateOf(r.veeamState);
+              const cv = coverageOf(r); const rc = runningCell(r);
+              const vp = pctOf(r.veeam, r.vm); const spc = pctOf(r.snap, r.vm); const np = cv ? pctOf(r.split.none, r.vm) : null;
+              const m = r.marks;
+              return (
+                <tr key={r.id} data-vc-row={r.id} className="qn-anchor" style={{ borderTop: '1px solid var(--border-soft)' }}>
+                  <td data-sort={r.name} style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
+                    <span className="flex" style={{ alignItems: 'center', gap: 8 }}>
+                      <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', flex: 'none', background: QUICK_DOT[quickTone(r)] }} />
                       <button type="button" onClick={() => openDetail(r.id)} title="Detail 로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
-                      <div className="muted" style={{ fontSize: 11 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''}</div>
-                    </td>
-                    <td data-sort={r.vm} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
-                    <td data-sort={r.veeam ?? ''} style={{ padding: '9px 6px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 700, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.veeam)}</span>
-                      {vp != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{vp}%</span>}
-                      {r.veeam != null && <Bar pct={vp} color="#22c55e" />}
-                    </td>
-                    <td data-sort={r.snap ?? ''} style={{ padding: '9px 6px' }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
-                      <span style={{ fontWeight: 700, color: r.snap == null ? 'var(--text-dim)' : '#c084fc', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.snap)}</span>
-                      {spc != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{spc}%</span>}
-                      {r.snap == null && r.snapReason && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{snapReasonText(r.snapReason)}</span>}
-                      {r.snap != null && <Bar pct={spc} color="#a855f7" />}
-                    </td>
-                    <td data-sort={r.split ? r.split.none : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
-                    <td data-sort={rc.sort ?? ''} title={rc.title} style={{ padding: '9px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>{rc.active ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{rc.text}</span> : <span className="muted">{rc.text}</span>}</td>
-                    <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
-                    <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
-                    <td data-sort={r.lastBackup ?? ''} style={{ padding: '9px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
-                    <td data-sort={vs.text} style={{ padding: '9px 14px 9px 6px' }}><span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: TONE[vs.tone], background: TONE_BG[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></td>
+                    </span>
+                    <div className="muted" style={{ fontSize: 11, paddingLeft: 17 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''} · <span style={{ color: TONE[vs.tone] }}>{vs.text}{r.veeamServers > 1 ? ` · ${r.veeamServers}대` : ''}</span></div>
+                  </td>
+                  <td data-sort={r.vm ?? ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
+                  <td style={{ padding: '8px 10px', minWidth: 0 }} title={r.snap == null ? snapReasonText(r.snapReason) : undefined}>
+                    {cv ? (
+                      <div role="img" aria-label={`둘 다 ${r.split.both} · Veeam 만 ${r.split.vOnly} · 스냅샷만 ${r.split.sOnly} · 확인 안 됨 ${r.split.none}`} style={{ display: 'flex', height: 9, borderRadius: 5, overflow: 'hidden', background: '#263248' }}>
+                        <div style={{ width: `${cv.both}%`, background: '#16a34a' }} /><div style={{ width: `${cv.vOnly}%`, background: '#4ade80' }} /><div style={{ width: `${cv.sOnly}%`, background: '#a855f7' }} />
+                      </div>
+                    ) : <div style={{ height: 9, borderRadius: 5, border: '1px dashed var(--border)' }} />}
+                    <div className="muted" style={{ fontSize: 11, marginTop: 3, whiteSpace: 'nowrap' }}>{vp != null ? `Veeam ${vp}%` : 'Veeam 모름'} · {spc != null ? `스냅샷 ${spc}%` : `스냅샷 ${snapReasonText(r.snapReason) || '모름'}`}{np != null ? ` · 미확인 ${np}%` : ''}</div>
+                  </td>
+                  <td data-sort={r.veeam ?? ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80' }}>{fmtNum(r.veeam)}</td>
+                  <td data-sort={r.snap ?? ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: r.snap == null ? 'var(--text-dim)' : '#c084fc' }}>{fmtNum(r.snap)}</td>
+                  <td data-sort={r.split ? r.split.none : ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.split ? fmtNum(r.split.none) : '—'}</td>
+                  <td data-sort={rc.sort ?? ''} title={rc.title} style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>{rc.active ? <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(245,158,11,.16)', color: '#fbbf24', fontWeight: 700 }}>{rc.text}</span> : <span className="muted">{rc.text}</span>}</td>
+                  <td data-sort={r.results ? r.results.failed + r.results.warning : ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.results ? (r.results.failed + r.results.warning ? <span><b style={{ color: TONE.bad }}>{r.results.failed}</b><span className="muted"> · </span><b style={{ color: TONE.warn }}>{r.results.warning}</b></span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                  <td data-sort={r.rpo ? r.rpo[rpoKey] : ''} style={{ padding: '8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }} title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}>{r.rpo ? (r.rpo[rpoKey] ? <b style={{ color: '#fb923c' }}>{fmtNum(r.rpo[rpoKey])}</b> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                  <td data-sort={m ? (m.needGap ?? 0) * 1000 + (m.high || 0) : ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontSize: 12 }}>
+                    {m ? <span><span style={{ color: m.high ? '#fca5a5' : 'var(--text-dim)', fontWeight: m.high ? 700 : 400 }}>상 {fmtNum(m.high)}</span><span className="muted"> · </span><span style={{ color: m.need ? '#93c5fd' : 'var(--text-dim)' }}>필요 {fmtNum(m.need)}</span><span className="muted"> · </span><span style={{ color: m.needGap ? '#fca5a5' : 'var(--text-dim)', fontWeight: m.needGap ? 700 : 400 }}>미백업 {m.needGap == null ? '모름' : fmtNum(m.needGap)}</span></span> : <span className="muted">—</span>}
+                  </td>
+                  <td data-sort={r.lastBackup ?? ''} style={{ padding: '8px 14px 8px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12 }}>{shortTs(r.lastBackup)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </STable>
+        <div className="flex gap wrap" style={{ padding: '8px 14px', fontSize: 12, alignItems: 'center' }}>
+          <span className="muted">{rows.length}개 중 {allRows ? shown.length : Math.min(shown.length, 12)}개 · 제목을 누르면 정렬 · 법인 이름을 누르면 Detail</span>
+          {shown.length > 12 && <button type="button" className="tab" onClick={() => setAllRows((v) => !v)} style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 12 }}>{allRows ? '12개만 보기' : `${shown.length - 12}개 더 보기`}</button>}
+        </div>
+      </div>
+
+      <div className="flex wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
+        {/* v2.787 우선순위 VM — 서버 priorityCandidates(같은 범위) → 화면이 기준 일수로 '오래된 백업' 판정 · 순서는 priorityView */}
+        <div className="card" data-backup-priority="" style={{ flex: '999 1 620px', minWidth: 0, padding: '12px 0 4px' }}>
+          <div className="flex gap wrap" style={{ alignItems: 'baseline', padding: '0 14px 8px', rowGap: 4 }}>
+            <b style={{ fontSize: 15 }}>우선순위 VM — 먼저 볼 것</b>
+            <span className="muted" style={{ fontSize: 12 }}>전 법인 · 중요도 상 → 백업 필요 → 나머지, 같은 단계에서 미백업 → 실패 → 스냅샷 잔존 → 오래된 백업</span>
+          </div>
+          {prioWithheld ? <div className="muted" data-prio-withheld="" style={{ padding: '6px 14px 14px', fontSize: 13 }}>이 계정은 Detail 화면이 허용되지 않아 VM 목록을 싣지 않습니다(관리자가 정한 도구별 접근).</div> : <>
+          <div className="flex gap wrap" role="group" aria-label="우선순위 보기" style={{ padding: '0 14px 10px', rowGap: 6 }}>
+            {PRIO_TABS.map(([k, label]) => <button key={k} type="button" className={`tab${ptab === k ? ' active' : ''}`} aria-pressed={ptab === k} onClick={() => setPtab(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}{k === 'old' ? `(${opts.rpoDays}일)` : ''} <b>{fmtNum(prio.counts[k])}</b></button>)}
+          </div>
+          {prioShown.length === 0 ? <div className="muted" style={{ padding: '6px 14px 12px', fontSize: 13 }}>{data.priority ? '먼저 볼 VM 이 없습니다.' : '우선순위 VM 을 읽지 못했습니다.'}</div> : (
+            <STable minWidth={640} limit={pAll ? 0 : 8} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', fontSize: 12 }}>
+                  <th data-nosort="" style={{ padding: '6px 14px', width: 34 }}>#</th>
+                  <th style={{ padding: '6px 6px' }}>VM</th>
+                  <th style={{ padding: '6px 6px' }}>법인 · 폴더</th>
+                  <th data-nosort="" style={{ padding: '6px 6px' }}>왜</th>
+                  <th style={{ padding: '6px 6px' }}>마지막 백업</th>
+                  <th data-nosort="" style={{ padding: '6px 14px 6px 6px' }}><span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>열기</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {prioShown.map((x, i) => (
+                  <tr key={x.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
+                    <td style={{ padding: '8px 14px', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
+                    <td data-sort={x.name} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}><span className="flex" style={{ alignItems: 'center', gap: 6 }}><CritIcon crit={x.crit} size={14} />{x.need && <NeedIcon size={14} />}<b>{x.name}</b></span></td>
+                    <td data-sort={`${x.vcName} ${x.folder}`} style={{ padding: '8px 6px', whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{x.vcName} <span aria-hidden="true">›</span> {folderTail(x.folder)}</td>
+                    <td style={{ padding: '8px 6px' }}><span className="flex wrap" style={{ gap: 4 }}>{x.tags.map(([k, text]) => <span key={k} style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', ...PRIO_TAG[k] }}>{text}</span>)}</span></td>
+                    <td data-sort={x.lb ?? ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12, color: x.lb ? undefined : TONE.bad }}>{shortTs(x.lb)}</td>
+                    <td style={{ padding: '8px 14px 8px 6px', textAlign: 'right' }}><button type="button" className="tab" onClick={() => openDetail(x.vcenterId)} title={`${x.vcName} Detail 로`} style={{ padding: '2px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>Detail ›</button></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </STable>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>{rows.length}개 중 {shown.length}개 · 제목을 누르면 정렬 · vCenter 이름을 누르면 Detail</div>
+                ))}
+              </tbody>
+            </STable>
+          )}
+          <div className="flex gap wrap" style={{ padding: '8px 14px', fontSize: 12, alignItems: 'center' }}>
+            <span className="muted">{fmtNum(prioShown.length)}대{data.priority?.truncated ? ` · 서버가 앞 ${fmtNum(data.priority.items.length)}대만 보냈습니다(전체 후보 ${fmtNum(data.priority.total)}대)` : ''}{mkNote ? ' · 표시 파일을 못 읽어 미백업 판정이 빠졌습니다' : ''}</span>
+            {prioShown.length > 8 && <button type="button" className="tab" onClick={() => setPAll((v) => !v)} style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 12 }}>{pAll ? '8대만 보기' : '전부 보기'}</button>}
+          </div>
+          </>}
         </div>
 
-        {/* v2.780.1: 옆 칸 240px — 1440px 에서 표 카드가 열 10개를 가로 스크롤 없이 담게(280px 이면 표가 약 35px 넘쳤다 · 실측) */}
-        <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <b style={{ fontSize: 14 }}>주의가 필요한 곳</b>
             {att.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>없습니다.</div> : att.map((a) => (a.more ? (

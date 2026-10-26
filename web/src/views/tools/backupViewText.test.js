@@ -157,11 +157,14 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
     }
   });
 
-  it('v2.780.1 서머리 표는 1440px 카드 폭(약 858px) 안 — 열을 더하며 minWidth 를 올려 오른쪽 열이 스크롤 뒤로 숨던 회귀 · 선택 상자는 .input 최소 폭(220px)을 풀었다', () => {
+  it('v2.780.1 서머리 표는 1440px 카드 폭 안 — 열을 더하며 minWidth 를 올려 오른쪽 열이 스크롤 뒤로 숨던 회귀 · 선택 상자는 .input 최소 폭(220px)을 풀었다', () => {
+    // v2.787: 법인별 표는 옆 패널 없이 본문 전폭(1440px 카드 안쪽 폭 안 — Chromium 으로 넘침 확인) · 우선순위 표는 옆 패널과 나란히(≤ 858)
     const src = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    const mw = Number((/<STable minWidth=\{(\d+)\}/.exec(src) || [])[1]);
-    expect(mw).toBeGreaterThan(0);
-    expect(mw).toBeLessThanOrEqual(858);
+    const mws = [...src.matchAll(/<STable minWidth=\{(\d+)\}/g)].map((m) => Number(m[1]));
+    expect(mws.length).toBe(2);
+    expect(mws[0]).toBeGreaterThan(0);
+    expect(mws[0]).toBeLessThanOrEqual(1100);
+    expect(mws[1]).toBeLessThanOrEqual(858);
     expect(src).not.toMatch(/minWidth: 1[34]0 \}/);
     const opt = fs.readFileSync(new URL('./BackupOptions.jsx', import.meta.url), 'utf8');
     expect(opt).toMatch(/minWidth: 0, width: 'auto'/);
@@ -216,6 +219,35 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(140px, 1\.2fr\) minmax\(90px, 1fr\) 64px minmax\(110px, 1fr\) 104px'/);
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);
-    expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(858);
+    expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(1100);   // v2.787 전폭 표
+  });
+});
+
+describe('v2.787 Summary — 바로가기 · 법인별 표 · 우선순위', async () => {
+  const M = await import('./backupViewText.js');
+  it('바로가기 점 색 — 읽기 실패 빨강 · 주의 주황 · 연동 없음 회색 · 정상 초록', () => {
+    expect(M.quickTone({ veeamState: 'veeam-failed' })).toBe('bad');
+    expect(M.quickTone({ veeamState: 'unlinked', snap: 1, snapStale: 0 })).toBe('muted');
+    expect(M.quickTone(null)).toBe('muted');
+    expect(Object.keys(M.QUICK_DOT).sort()).toEqual(['bad', 'muted', 'ok', 'warn']);
+  });
+  it('커버리지 — VM 수를 모르면 막대 없음(0% 가 아니다) · 정렬은 모르는 값을 뒤로', () => {
+    expect(M.coverageOf({ vm: null, split: { both: 1, vOnly: 0, sOnly: 0, none: 0 } })).toBe(null);
+    expect(M.coverageOf({ vm: 4, split: null })).toBe(null);
+    expect(M.coverageOf({ vm: 4, split: { both: 1, vOnly: 1, sOnly: 1, none: 1 } })).toEqual({ both: 25, vOnly: 25, sOnly: 25, none: 25 });
+    const rows = [{ name: 'b', vm: 10, veeam: null }, { name: 'a', vm: 10, veeam: 9 }, { name: 'c', vm: 10, veeam: 1 }];
+    expect(M.sortRows(rows, 'cover').map((r) => r.name)).toEqual(['c', 'a', 'b']);
+    expect(M.sortRows(rows, 'name').map((r) => r.name)).toEqual(['a', 'b', 'c']);
+    expect(M.matchSite({ name: 'APAC-VC01' }, 'vc01')).toBe(true);
+  });
+  it('화면 — 바로가기 줄 · 행 앵커 · 우선순위 보류 안내 · 탭 머리', () => {
+    const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    expect(sum).toMatch(/data-backup-quicknav/);
+    expect(sum).toMatch(/data-vc-row=\{r\.id\}/);
+    expect(sum).toMatch(/priority\?\.withheld === 'detail-tool'/);
+    expect(sum).toMatch(/<VeeamHeader active="summary"/);
+    const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(det).toMatch(/<VeeamHeader active="detail"/);
+    expect(sum + det).not.toMatch(/textTransform/);
   });
 });

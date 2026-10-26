@@ -232,3 +232,40 @@ export function vmViewMatches(vm, f, opts) {
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   return true;
 }
+
+/*
+ * v2.787(사용자 요청 + 시안 'Summary 아래 — 우선순위 VM, 먼저 볼 것'): 전 법인에서 먼저 볼 VM 후보(순수).
+ *  · gap   = 사람이 중요도 상 또는 백업 필요로 표시했는데 Veeam 대상이 아님 — Veeam 을 모르면(읽기 실패·첫 수집 전 서버) 넣지 않는다(지어내지 않는다)
+ *  · fail  = 그 VM 마지막 결과가 실패(resultOf — 서머리 results.failed 와 같은 판정)
+ *  · stale = 하루 넘게 남은 Veeam 임시 스냅샷(currentSnapOf — 서머리 snapStale 과 같은 판정)
+ *  · lb    = 마지막 백업 완료 — '오래된 백업' 은 화면이 고른 기준 일수로 거른다(그래서 하루 넘은 것만 후보로 싣는다)
+ *  범위는 호출부가 정한다(scope 교집합 vCenter · 전원·제외를 거친 목록). 표시(m)가 없고 문제도 없는 VM 은 싣지 않는다.
+ * @returns {Array<{id,name,folder,crit,need,gap,fail,stale,lb}>}
+ */
+export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = false, absentKnown = true, now = Date.now() } = {}) {
+  const out = [];
+  const gapKnown = !!veeamKnown && absentKnown !== false;
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    const m = marks?.[vm.id] || null;
+    const ve = byVm ? byVm[vm.id] : undefined;
+    const crit = m && ['high', 'mid', 'low'].includes(m.crit) ? m.crit : '';
+    const need = m?.need === true;
+    const gap = gapKnown && (need || crit === 'high') && !ve;
+    const fail = !!ve && /^fail/i.test(resultOf(ve));
+    const cs = currentSnapOf(vm, now);
+    const stale = !!(cs && cs.stale);
+    const lb = ve && isFin(ve.lb) ? ve.lb : null;
+    const old = lb != null && now - lb > DAY;
+    if (!gap && !fail && !stale && !old) continue;
+    out.push({ id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), crit, need, gap, fail, stale, lb });
+  }
+  return out;
+}
+
+/** 우선순위 — 중요도 상 → 백업 필요 → 나머지, 같은 단계에서는 미백업 → 실패 → 잔존 → 오래된(마지막 백업이 이른 순). 서버 상한 자르기용(웹은 기준 일수로 다시 매긴다). */
+export function priorityRank(a, b) {
+  const tier = (x) => (x.crit === 'high' ? 0 : x.need ? 1 : 2);
+  const prob = (x) => (x.gap ? 0 : x.fail ? 1 : x.stale ? 2 : 3);
+  return (tier(a) - tier(b)) || (prob(a) - prob(b)) || ((a.lb ?? Infinity) - (b.lb ?? Infinity)) || String(a.name).localeCompare(String(b.name));
+}
+export const PRIORITY_MAX = 500;

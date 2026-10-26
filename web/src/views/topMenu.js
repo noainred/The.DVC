@@ -25,6 +25,9 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'esxi', label: 'ESXi 호스트', tab: 'hosts' },
     { id: 'vc', label: 'vCenter', tab: 'vcenters' },
     { id: 'bm', label: '물리 서버', tool: 'serveranalysis', seg: BAREMETAL_SEG },
+    // v2.787(사용자 요청 + 시안): Veeam 백업 현황 — 메뉴는 하나, 화면 위 Summary | Detail 탭으로 두 도구를 오간다.
+    //   also: 이 항목이 함께 맡는 도구(Detail 화면에서도 이 메뉴가 켜진다 — locate). 도구 키는 그대로(권한 파일·북마크).
+    { id: 'veeam', label: 'Veeam', tool: 'backup-summary', also: ['backup-detail'] },
     { id: 'alarm', label: '알람', tab: 'alarms' },
   ] },
   { id: 'storage', label: '스토리지', children: [
@@ -43,12 +46,8 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'ipam', label: 'IP관리', tab: 'ipam' },
     { id: 'svcmon', label: 'Monitoring', tab: 'svcmon' },
   ] },
-  // v2.779(사용자 요청: '백업' 메뉴 — 서브 메뉴 '백업 서머리'·'백업 세부내용', Veeam 과 스냅샷 둘 다)
-  // v2.785(사용자 요청 + 시안): 이름만 'Veeam 현황' › 'Summary'·'Detail' — id·도구 키는 그대로(북마크·권한 파일·저장한 내 메뉴가 id·키로 참조)
-  { id: 'backup', label: 'Veeam 현황', children: [
-    { id: 'bsum', label: 'Summary', tool: 'backup-summary' },
-    { id: 'bdet', label: 'Detail', tool: 'backup-detail' },
-  ] },
+  // v2.779 '백업' → v2.785 'Veeam 현황'(Summary · Detail) 대메뉴는 v2.787 에 '서버 › Veeam' 하나로 옮겼다(사용자 요청 — 탭은 화면 위).
+  //   예전에 저장한 내 메뉴의 그룹 id 'backup' 은 sideMenu.js LEGACY_GROUP_LABELS 가 이름을 잇는다.
   { id: 'resource', label: '자원관리', children: [
     { id: 'sa', label: '서버 분석', tool: 'serveranalysis' },
     { id: 'gpu', label: 'GPU 인벤토리', tool: 'gpu' },
@@ -107,7 +106,7 @@ function groupOfTool(k, seg3, groups) {
   let plain = null;
   for (const g of groups) {
     for (const c of g.children || []) {
-      if (c.tool !== k) continue;
+      if (c.tool !== k && !(Array.isArray(c.also) && c.also.includes(k))) continue;
       if (c.seg) { if (seg3 === c.seg) return { group: g.id, child: c.id }; }
       else if (!plain) plain = { group: g.id, child: c.id };
     }
