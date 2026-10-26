@@ -259,6 +259,30 @@ test('② 붙을 작업이 없으면(재부팅·정리) 새로 시작 · 분리 
   assert.match(f2.detachFallback, /임시 디렉터리/, '다른 계정이 만든 경로에 쓰지 않는다 — 사유를 말한다');
 });
 
+test('② 상태 확인 도중 작업이 끝나도(rc 확인 → 생존 확인 사이) GONE 이 아니라 DONE 이다 — v2.787.1 CI 간헐 실패', async () => {
+  // CI 에서 '결과 없이 끝났습니다' 로 간헐 실패한 원인: 첫 rc 확인과 kill -0 사이에 작업이 rc 를 쓰고 끝났다. 이 컨테이너처럼 고아를 늦게 거두는
+  // 환경에서는 좀비가 kill -0 을 통과시켜 드러나지 않으므로, 그 사이를 셸에서 그대로 만든다 — kill 은 내장이라 바꿀 수 없어 외부 명령 cat 을 가로챈다:
+  // .pid 를 읽는 순간 .rc 를 만들고(작업이 방금 끝남) 이미 거둔 pid 를 내준다.
+  const realCat = process.env.PATH.split(':').map((d) => path.join(d, 'cat')).find((p) => fs.existsSync(p));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fakecat2737-'));
+  fs.writeFileSync(path.join(bin, 'cat'), `#!/bin/sh\ncase "$1" in *.pid) printf '0\\n' > "\${1%.pid}.rc";; esac\nexec '${realCat}' "$@"\n`, { mode: 0o755 });
+  const id = D.newJobId('race');
+  const dead = await new Promise((r) => { const c = execFile('sh', ['-c', 'exit 0'], () => r(c.pid)); });
+  try {
+    fs.mkdirSync(jobDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(jobDir, `${id}.pid`), `${dead}\n`);
+    const st = await localApi({ PATH: `${bin}:${process.env.PATH}` }).exec(D.statusCommand(id));
+    assert.ok(fs.existsSync(path.join(jobDir, `${id}.rc`)), '가짜 cat 이 경합을 만들었다(전제 확인)');
+    assert.deepEqual(D.parseStatus(st.stdout), { state: 'done', rc: 0 }, '프로세스가 없다고 본 뒤 rc 를 다시 본다');
+    // rc 없이 프로세스만 사라진 경우는 여전히 GONE
+    fs.rmSync(path.join(jobDir, `${id}.rc`));
+    assert.equal(D.parseStatus((await localApi().exec(D.statusCommand(id))).stdout).state, 'gone');
+  } finally {
+    await localApi().exec(D.cleanupCommand(id));
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 test('② 명령 조립 — 작업 id 형식 · 작은따옴표 인용(셸 실제 왕복) · 상태 해석', async () => {
   assert.throws(() => D.statusCommand('a;rm -rf /'), /형식/);
   assert.throws(() => D.killCommand("x'y"), /형식/);
