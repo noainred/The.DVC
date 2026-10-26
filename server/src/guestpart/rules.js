@@ -27,7 +27,7 @@ export const PATTERN_LEN_MAX = 200;
 export const VC_THRESHOLD_MAX = 200;
 export const MODES = Object.freeze(['part', 'vm']);
 export const CRIT_PCT = 95;
-/** Windows CD-ROM·ISO 추정: 남은 공간 0 이고 용량이 이 값(GB) 이하 — 경로로는 드라이브 종류를 알 수 없어 **추정**이다(화면 문구도 그렇게 말한다). */
+/** Windows CD-ROM·ISO 추정: 남은 공간 0 이고 용량이 이 값(GB) 이하 — 경로로는 드라이브 종류를 알 수 없어 **추정**이다(화면 문구도 그렇게 말한다). C: 는 제외(v2.785 H-B4). */
 export const WIN_ISO_MAX_GB = 10;
 
 export const WIN_RULE_KEYS = Object.freeze(['reserved', 'iso', 'mountdir']);
@@ -173,7 +173,9 @@ export function ignoreReason(part, rules) {
     const t = winTrim(path);
     if (r.win.mountdir && t.length > 3) return 'win-mountdir';
     const used = part?.usedGB == null ? null : Number(part.usedGB);
-    if (r.win.iso && cap != null && used != null && cap > 0 && cap <= WIN_ISO_MAX_GB && used >= cap) return 'win-iso';
+    // v2.785(GH H-B4): C: 는 ISO 추정에서 뺀다 — GB 0.1 단위 반올림이라 여유 50MB 미만이면 used==cap 이 되어, 가득 찬 10GB 이하 C: 가
+    //   정확히 가득 찬 순간 경보에서 빠졌다(99% 는 울리고 100% 는 침묵). OS 드라이브가 CD-ROM 일 수는 없다. 기본 켜짐·D: 이후 추정은 그대로.
+    if (r.win.iso && letter !== 'C' && cap != null && used != null && cap > 0 && cap <= WIN_ISO_MAX_GB && used >= cap) return 'win-iso';
     if (r.win.patterns.some((pt) => globMatch(winTrim(pt), t, true) || globMatch(pt, path, true))) return 'win-pattern';
     return null;
   }
