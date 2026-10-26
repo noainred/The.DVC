@@ -118,3 +118,20 @@ describe('v2.788.1 EM 매핑 · 실패·경고 상세', async () => {
     expect(tool).toMatch(/<EmSessionDetail emId=\{em\.id\} uid=\{j\.last\.uid\}/);
   });
 });
+
+describe('v2.795 EM VM 단위 반영 — 설정 매핑 표의 vCenter 반영 칸', () => {
+  it('서버가 정한 반영 값을 문구로 · VM 수를 모르면 — (0 이 아니다)', () => {
+    expect(T.reflectText({ reflect: 'em', vmCount: 1234, brId: '' })).toMatchObject({ text: 'EM 기록으로', sub: 'VM 1,234대', tone: 'run' });
+    expect(T.reflectText({ reflect: 'em', vmCount: 3, brId: 'vbr-1' }).sub).toMatch(/B&R 읽기 실패·대기 대신/);
+    expect(T.reflectText({ reflect: 'br', vmCount: null }).sub).toMatch(/EM 기록 —/);
+    expect(T.reflectText({ reflect: 'none' }).text).toBe('반영 안 함');
+    expect(T.reflectText({ reflect: 'em', gone: true }).text).toBe('반영 안 함');
+    expect(T.reflectText({ reflect: 'mixed', vmCount: 0 }).sub).toMatch(/VM 0대/);
+  });
+  it('화면 — 매핑 표에 반영 칸 · 접힌 편집 줄이 칸 수를 따라간다', () => {
+    const m = fs.readFileSync(new URL('../VeeamEmMapping.jsx', import.meta.url), 'utf8');
+    expect(m).toMatch(/<th[^>]*>vCenter 반영<\/th>/);
+    expect(m).toMatch(/colSpan=\{6\}/);
+    expect(m).not.toMatch(/colSpan=\{5\}/);
+  });
+});
