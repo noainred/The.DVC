@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **684개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **685개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-26)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (206)
+## 공통 (207)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -236,6 +236,7 @@
 | `VEEAM_CONCURRENCY` | `4` |  | veeam/poller.js |
 | `VEEAM_EM_DEADLINE_MS` |  |  | veeam/em/poller.js |
 | `VEEAM_EM_POLL_MS` | `900000` |  | veeam/em/poller.js |
+| `VEEAM_EM_VM_BUDGET_MS` |  |  | veeam/em/client.js |
 | `VEEAM_HTTP_TIMEOUT_MS` |  |  | veeam/client.js, veeam/em/client.js |
 | `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
 | `VEEAM_SERVER_DEADLINE_MS` |  |  | veeam/poller.js |
@@ -873,4 +874,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 684
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 685

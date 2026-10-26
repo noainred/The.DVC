@@ -187,6 +187,8 @@ export function veeamDetailView(detail) {
   else status = { tone: 'green', text: detail.lastBackup ? `${detail.lastBackupSrc === 'rp' ? '최신 복원 지점' : '마지막 백업 완료'} ${fmtTime(detail.lastBackup)}` : 'Veeam 백업 대상입니다', progress: null };
   if (detail.agent) status = { ...status, text: `${status.text} · 에이전트 백업(컴퓨터 이름으로 맞춤)` };
   const lt = detail.lastTask;
+  // v2.795: 출처가 모두 Enterprise Manager 면 EM 이 주지 않는 값(처리 용량·복원 지점 수·백업 파일)을 그렇게 말한다(B&R 판 문구 대신)
+  const emOnly = Array.isArray(detail.servers) && detail.servers.length > 0 && detail.servers.every((x) => x?.src === 'em');
   const sections = [];
   sections.push({
     title: '마지막 백업',
@@ -195,13 +197,14 @@ export function veeamDetailView(detail) {
       ['소요 시간', durationText(lt.durationSec)], ['처리한 데이터', sizeText(lt.processed)], ['읽은 데이터', sizeText(lt.read)], ['전송한 데이터', sizeText(lt.transferred)],
       ...(lt.message ? [['메시지', lt.message]] : []),
     ] : [['완료 시각', fmtTime(detail.lastBackup) || '—']],
-    note: lt ? (lt.processed == null && lt.read == null && lt.transferred == null ? 'Veeam 이 이 판의 REST 응답에 VM 별 처리 용량을 주지 않았습니다.' : '') : 'Veeam 이 이 VM 의 마지막 작업 결과(task)를 주지 않아 복원 지점 시각만 보여 줍니다.',
+    note: lt ? (lt.processed == null && lt.read == null && lt.transferred == null ? (emOnly ? 'Enterprise Manager 기록에는 VM 별 처리 용량이 없습니다.' : 'Veeam 이 이 판의 REST 응답에 VM 별 처리 용량을 주지 않았습니다.') : '')
+      : (emOnly ? 'Enterprise Manager 가 최근 기간의 작업 결과를 주지 않아 복원 지점 시각만 보여 줍니다.' : 'Veeam 이 이 VM 의 마지막 작업 결과(task)를 주지 않아 복원 지점 시각만 보여 줍니다.'),
   });
   const rp = detail.restorePoints || {};
   sections.push({
     title: '복원 지점',
     rows: [['개수', rp.count != null ? `${rp.count}개` : '—'], ['가장 최근', fmtTime(rp.latest) || '—'], ['가장 오래된', fmtTime(rp.oldest) || '—']],
-    note: rp.count == null ? '복원 지점 목록을 읽지 못했습니다.' : '',
+    note: rp.count == null ? (emOnly ? 'Enterprise Manager 기록은 복원 지점 수를 주지 않습니다(최근 시각만 — 아래 목록).' : '복원 지점 목록을 읽지 못했습니다.') : '',
   });
   sections.push({
     title: '용량',

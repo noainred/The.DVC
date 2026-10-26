@@ -281,3 +281,16 @@
   · **행 순서는 하나**(`vmListCsv.vmTreeCmp` — 라우트·엑셀 트리·데이터 시트·CSV 공용): 폴더는 화면 트리와 같은 **코드 단위 순서**(`Object.keys().sort()` — 'DMZ' < 'Dev'),
     같은 단계에서는 하위 폴더 먼저 그다음 직속 VM(이름 자연 순서). 검증 지적 2건(엑셀 폴더 순서 ≠ 화면 · CSV 경로 문자열 순 ≠ 데이터 시트)을 이것으로 맞췄다 — 라우트 정렬을 되돌리면 테스트가 깨진다.
   · 본문 `view`(search·all·noOff)는 **이름표일 뿐**(파일 이름·엑셀 '화면 조건') — 대상은 ids/power 로만 고른다. 모르는 값은 무시(검증 지적: 세 조건의 파일 이름이 같았다).
+- **v2.795 — Veeam Enterprise Manager 를 vCenter 화면의 Veeam 출처로(VM 단위). 대조·수·판정 코어는 그대로 — EM 기록을 B&R 결과와 같은 모양(`jobs[]`·`vms[]`)으로 만들어 `resultsFor` 한 곳에서 합류한다**
+  (사용자 요청 'EM 에서 등록되면 vCenter 화면에서도 등록되고 vCenter 세부 백업 내용에도 반영' · 결정 'VM 단위까지' · 'B&R 우선, 실패 시 EM' · 표준 검증. 회귀 `server/test/veeamEmVm2795.test.js`(변이 8/8)):
+  · 수집(`veeam/em/client.js readVmBackups` — 항목 `vmBackups`): BackupTaskSession·VmRestorePoint 를 **새것부터 페이지로 받다가 기준보다 오래된 행에서 멈춘다**(날짜 필터 문법 미확인 — 기대지 않는다).
+    항목 예산(env `VEEAM_EM_VM_BUDGET_MS`, 기본 120초)·페이지 상한이면 미완결 → 기준을 옮기지 않는다. 행은 결과 파일에 싣지 않고 `veeam/em/vmStore.js`(`veeam-em-vms.json`)에 합친다(폴러 `absorbVmRows`).
+  · 저장소: 더 최신일 때만 덮음 · 진행 중 task 는 싣지 않는다(15분 주기 — 오래된 '백업 중' 금지) · 접속처 지문이 바뀌면 비움 · 서버 링크가 없는 행은 EM 의 백업 서버가 하나뿐일 때만 그 서버, 아니면 세기만(`ua`).
+  · 출처(`veeam/em/sources.js`): vCenter 는 매핑 결과(수동 > 짝 B&R 등록 > 모름)만 — **모르면 어디에도 싣지 않는다**. 짝 B&R 이 이 vCenter 를 맡고 **지금 정상**(`routes/api/veeam.js brHealthy` —
+    마지막 읽기 성공 ∧ `resultMaxAgeMs` 이내)이면 EM 을 빼고, 아니면 넣는다. 설정 매핑 표의 'vCenter 반영' 칸(`admin/veeamEm.js reflectOf`)도 같은 `brHealthy` 하나를 쓴다.
+    VM 기록을 아직 저장하지 못했거나 서버를 가릴 수 없는 기록뿐이면 결과를 내지 않는다(뷰만 — '0대' 가 아니라 첫 수집 대기).
+  · '연동됨' 판정은 `veeamLinked`(B&R 등록 ∨ EM 출처) 하나 — `serversForVcenter(...).length` 를 다시 직접 쓰지 말 것(EM 으로만 연동된 법인이 '연동 없음' 으로 돌아간다).
+  · EM 기록은 `h:''`(vCenter 이름 없음) → `matchToVcenter` 가 moref 면 이름까지 같아야, moref 가 없으면 그 vCenter 에서 유일한 이름일 때만 짝짓는다. 복원 지점 수는 모른다(`rp:-1`).
+    HierarchyObjRef 의 루트 GUID 는 vCenter 식별자와 같다는 보장이 없어 쓰지 않는다(문서와 사례 보고가 엇갈림).
+  · 응답 캐시(backup-counts·summary·detail) 키에 `em${emSourcesRev()}`(VM 기록·매핑 리비전) — 새 기록이 60초 캐시를 기다리지 않는다.
+  · ⚠ 실물 EM 응답 미확인(엔티티·필드는 문서 검색 결과 기준). 실물에서 행이 0이거나 서버 링크가 없으면 설정 › EM 수집 상태의 'VM 별 기록' 칩과 비고가 말한다.

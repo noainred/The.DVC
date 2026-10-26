@@ -83,9 +83,17 @@ export function vmsOverviewOf(b) {
   };
 }
 const dayPoints = (v) => (Array.isArray(v) ? v : firstArray(v, 2)).slice(0, 400).map((p) => [tsOf(pick(p, 'Timestamp', 'Date')), num(p, 'Count')]).filter(([t]) => t != null);
+/*
+ * v2.795: 문서(ProcessedVmsReportFrame)는 날짜마다 Day 원소 하나에 BackupedVms·ReplicatedVms·Timestamp 를 싣는다고 적는다 — v2.788 은 BackupDays/Count 만
+ *   읽어 그 꼴이면 빈 배열이었다(추정 — 실물 미확인). 두 꼴을 다 받는다(앞의 꼴이 있으면 그것).
+ */
+const dayPointsOf = (v, field) => (Array.isArray(v) ? v : firstArray(v, 2)).slice(0, 400).map((p) => [tsOf(pick(p, 'Timestamp', 'Date')), num(p, field)]).filter(([t]) => t != null);
 export function processedOf(b) {
   if (!isObj(b)) return null;
-  return { backupDays: dayPoints(pick(b, 'BackupDays')), replicaDays: dayPoints(pick(b, 'ReplicaDays')) };
+  const byDay = pick(b, 'Day', 'Days');
+  const old = { backupDays: dayPoints(pick(b, 'BackupDays')), replicaDays: dayPoints(pick(b, 'ReplicaDays')) };
+  if (old.backupDays.length || old.replicaDays.length || byDay == null) return old;
+  return { backupDays: dayPointsOf(byDay, 'BackupedVms'), replicaDays: dayPointsOf(byDay, 'ReplicatedVms') };
 }
 /** 저장소 보고서(Periods) — 이름·용량·여유·백업 크기(바이트 가정). */
 export function repoReportOf(b) {
@@ -182,4 +190,45 @@ export function sessionHeadOf(b) {
     reason: typeof pick(o, 'Reason') === 'string' ? pick(o, 'Reason').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/g, '').trim().slice(0, 2000) : '', // eslint-disable-line no-control-regex
     retry: pick(o, 'IsRetry') === true,
   };
+}
+
+/*
+ * v2.795 VM 단위 기록(사용자 요청 'EM 에서 등록되면 vCenter 화면·세부 백업 내용에도 반영' · 결정 'VM 단위까지').
+ *  · BackupTaskSession(VM 별 작업 결과)·VmRestorePoint(VM 별 복원 지점) 질의 행 → 축약 행. 필드 이름은 문서 검색 결과로 확인했으나 **실물 응답 미확인**
+ *    (머리 주석과 같은 이유) — 여러 이름을 받는다.
+ *  · moref 는 HierarchyObjRef 끝의 'vm-숫자'(예 urn:VMware:Vm:<루트 GUID>.vm-62228)만 — 루트 GUID 는 vCenter 식별자와 같다는 보장이 없어 쓰지 않는다.
+ *  · 백업 서버는 BackupServer 링크 이름(작업·세션과 같은 linkName). 없으면 ''(호출부가 EM 의 백업 서버가 하나뿐일 때만 그 서버로 본다).
+ */
+const RE_REF_MOREF = /(?:^|[.:/])(vm-\d{1,12})$/;
+/** HierarchyObjRef → moref('vm-123') 또는 ''. */
+export function morefOfRef(v) {
+  const m = RE_REF_MOREF.exec(String(typeof v === 'string' ? v : '').trim().slice(-200));
+  return m ? m[1] : '';
+}
+/** 복원 지점 이름 'VM이름@2026-10-26 01:00:00' 꼴이면 VM 이름만. */
+const vmNameOf = (o) => {
+  const n = str(pick(o, 'VmDisplayName', 'VmName', 'ObjectName'), 200);
+  if (n) return n;
+  const full = str(pick(o, 'Name'), 260);
+  const at = full.lastIndexOf('@');
+  return (at > 0 ? full.slice(0, at) : full).trim().slice(0, 200);
+};
+/** 질의 행의 생성 시각(새것부터 페이지를 넘길 때 멈출 기준). */
+export const rowTimeOf = (o) => tsOf(pick(o, 'CreationTimeUTC', 'CreationTime'));
+
+/** BackupTaskSession 행 → { vm, server, job, result('ok'|'warn'|'fail'|'none'), running, start, end, moref }. */
+export function vmTasksOf(list, { max = 200_000 } = {}) {
+  return (Array.isArray(list) ? list : []).filter(isObj).slice(0, max).map((t) => ({
+    vm: vmNameOf(t), server: linkName(t, /BackupServer/i), job: linkName(t, /JobSession|^Job/i).replace(/@.*$/, '').trim().slice(0, 160),
+    result: resultKey(pick(t, 'Result')), running: isRunningState(pick(t, 'State')),
+    start: tsOf(pick(t, 'CreationTimeUTC', 'CreationTime')), end: tsOf(pick(t, 'EndTimeUTC', 'EndTime')),
+    moref: morefOfRef(pick(t, 'HierarchyObjRef', 'ObjectRef')),
+  })).filter((t) => t.vm);
+}
+/** VmRestorePoint 행 → { vm, server, ts, moref }. */
+export function vmPointsOf(list, { max = 200_000 } = {}) {
+  return (Array.isArray(list) ? list : []).filter(isObj).slice(0, max).map((p) => ({
+    vm: vmNameOf(p), server: linkName(p, /BackupServer/i),
+    ts: tsOf(pick(p, 'CreationTimeUTC', 'CreationTime')), moref: morefOfRef(pick(p, 'HierarchyObjRef', 'ObjectRef')),
+  })).filter((p) => p.vm && p.ts != null);
 }

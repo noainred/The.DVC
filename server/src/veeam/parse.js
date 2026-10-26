@@ -640,7 +640,7 @@ export function buildVmDetail(cur) {
   let rn = null; let ro = null; let sz = null; let lastTask = null; const servers = [];
   for (const { server, result, entry: e } of cur.refs) {
     const jobs = Array.isArray(result.jobs) ? result.jobs : [];
-    if (!servers.some((x) => x.name === server.name)) servers.push({ name: server.name, ts: result.ts ?? null });
+    if (!servers.some((x) => x.name === server.name)) servers.push({ name: server.name, ts: result.ts ?? null, ...(server.src === 'em' ? { src: 'em' } : {}) });   // v2.795 EM 출처(화면이 'EM 이 주지 않는 값' 을 그렇게 말한다)
     for (const ji of e.j || []) {
       const jb = jobs[ji];
       if (!jb || jobsOut.some((x) => x.name === jb.name)) continue;

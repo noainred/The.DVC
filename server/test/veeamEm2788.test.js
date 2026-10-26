@@ -250,6 +250,6 @@ test('H 소스 — 조회 라우트 게이트·캐시 키 · 폴러 index 연결
   assert.match(sv, /'veeam-em\.json',/);
   const gi = fs.readFileSync(new URL('../../.gitignore', import.meta.url), 'utf8');
   assert.match(gi, /server\/config\/veeam-em\.json/);
-  assert.deepEqual([...EC.EM_SECTIONS], ['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions']);
+  assert.deepEqual([...EC.EM_SECTIONS], ['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions', 'vmBackups']);   // v2.795 VM 별 기록
   assert.equal(typeof EP.pick, 'function');
 });
