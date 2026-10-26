@@ -135,6 +135,14 @@ export function narrowStorageSnapshot(d) {
     na = narrowStorageAreas(exA);
     d = { ...d, extra: exA };
   }
+  // v2.747: 하위 항목(LUN·파일시스템 — extra.resources·resourcesProbe)도 아는 필드·객체만·상한. 일 롤업(db.saveCapacityPoint)과
+  //   사용량 보고 화면이 그대로 읽으므로 수신에서 좁힌다('새 엣지 export 필드는 중앙 정제 화이트리스트에도').
+  if (Object.hasOwn(d.extra, 'resources') || Object.hasOwn(d.extra, 'resourcesProbe')) {
+    const exR = { ...d.extra };
+    const o = { extra: exR };
+    na += sanitizeEdgeResources(o);
+    d = { ...d, extra: o.extra };
+  }
   const r = narrowStorageSnapshotRest(d);
   return { snap: r.snap, narrowed: r.narrowed + na };
 }
@@ -162,6 +170,7 @@ function narrowStorageSnapshotRest(d) {
   return { snap: { ...d, extra: { ...d.extra, appliances: apps } }, narrowed };
 }
 import { recordActivity } from '../storage/activityLog.js';
+import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.747
 import { saveCapacityPoint } from '../storage/db.js';
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 

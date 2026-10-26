@@ -31,6 +31,7 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'mon', label: '스토리지 현황', tool: 'storage-mon' },
     { id: 'ds', label: '데이터스토어', tab: 'datastores' },
     { id: 'growth', label: '스토리지 증가량 보고서', tool: 'storage-growth' },
+    { id: 'usage', label: '스토리지 사용량 보고서', tool: 'storage-usage' },
     { id: 'track', label: '스토리지 사용량 추이', tool: 'storage-track' },
     { id: 'bmstor', label: '베어메탈 스토리지', tool: 'bm-storage' },
     { id: 'san', label: 'SAN 스토리지 성능 측정', tool: 'san-switch' },

@@ -1,0 +1,37 @@
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                         = sv_1
+      Name                       = Davinci_01
+      Description                =
+      Group                      =
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Type                       = Standalone
+      Base storage resource      = sv_1
+      Source                     =
+      Original parent            =
+      Health state               = OK (5)
+      Health details             = "The LUN is operating normally. No action is required."
+      Size                       = 131941395333120 (120.0T)
+      Maximum size               = 70368744177664 (64.0T)
+      Thin provisioning enabled  = yes
+      Compression enabled        = no
+      Data Reduction enabled     = no
+      Current allocation         = 48296477746790 (43.9T)
+      Preallocated               = 2147483648 (2.0G)
+      Protection size used       = 0
+      Snapshot count             = 0
+
+2:    ID                         = sv_2
+      Name                       = SYNTH_LUN_THICK
+      Description                = synthetic
+      Group                      =
+      Storage pool ID            = pool_1
+      Storage pool               = pool_1
+      Type                       = Standalone
+      Health state               = OK (5)
+      Size                       = 1099511627776 (1.0T)
+      Thin provisioning enabled  = no
+      Current allocation         = 1099511627776 (1.0T)

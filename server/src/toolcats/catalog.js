@@ -55,7 +55,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'storage', label: '스토리지', icon: '💾',
-    tools: ['storage-mon', 'storage-growth', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
+    tools: ['storage-mon', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
       'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk'],
   },
   {
