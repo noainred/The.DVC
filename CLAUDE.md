@@ -64,19 +64,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/perf-db.md` (24항목) | 성능·DB·폴러 규약 — 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
 | `docs/rules/common.md` (11항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | `docs/rules/security-api.md` (16항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
-| `docs/rules/web.md` (22항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
+| `docs/rules/web.md` (23항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (17항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
-| `docs/rules/storage.md` (32항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
-| `docs/rules/sanswitch.md` (15항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
+| `docs/rules/storage.md` (33항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
+| `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | `docs/rules/idrac-server.md` (24항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | `docs/rules/vcenter.md` (19항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (6항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
 | `docs/rules/cvp.md` (11항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
-| `docs/rules/isilon.md` (6항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
+| `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | `docs/rules/ipam.md` (11항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
-| `docs/rules/audits.md` (48항목) | 회차별 점검(감사) 기록 v2.583~v2.744 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| `docs/rules/audits.md` (64항목) | 회차별 점검(감사) 기록 v2.583~v2.785 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
@@ -92,14 +92,20 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 
 ## 프론트엔드 회귀 방지 (요약 — 상세는 `docs/rules/web.md`)
 
-- **신규 셸을 더 만들지 말 것**: V4 는 하나의 셸이고 V5·V6 는 기존 App 라우터 위의 **틀(chrome)** 이다 — 화면을 복제하지 않는다.
+- **V4·V5·V6 셸은 v2.747 에 지웠다 — 되살리거나 고치지 않는다**(사용자 요청 · `server/test/v4Portal2508.test.js` 가 막는다). 새 셸·틀을 만들지 말 것 — 화면은 기본 셸 + 관제 콘솔 둘.
 - **도구 키(`#/tools/<k>`)는 바꾸지 않는다**(권한 파일의 값이자 서버 집행 매핑). 옛 이름은 `specialToolsList.js` 의 `aka`.
-  새 도구는 `version_4/tree.js`·`version_5/tree.js`·`version_6/menus.js`·`toolcats/catalog.js` 에도 배치하고, 카탈로그 `adminOnly` 를 실제 API 게이트와 맞춘다
-  (테스트가 대조). 상태를 바꾸는 도구는 '운영 작업'/'자동화' 소속.
+  새 도구는 `toolcats/catalog.js` PRESET 에도 배치하고, 카탈로그 `adminOnly` 를 실제 API 게이트와 맞춘다
+  (테스트가 대조). 상태를 바꾸는 도구는 '운영 작업' 소속.
 - 위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다(`findRemoteServer`) · 값이 없는 이유를 단정하지 말 것 · 주기·상한 숫자를 화면에 박지 말 것(API 값).
 - 긴 작업의 '진행 중' 잠금은 그 대상만 · 무거운 API 는 15초 폴링 금지(마운트 1회 + 버튼) · 늦게 온 이전 응답은 버린다 · 조회 실패 상태로 저장 버튼을 열지 않는다.
 
 ## 작업 규모 기본값 (2026-10-20 사용자 승인 — 시간·토큰 절감)
+
+- **기계적 마무리 단계는 Sonnet 하위 에이전트로**(2026-10-25 사용자 지시): 문서 재생성 · `npm run verify` · Chromium 화면 검증 ·
+  PR/CI/머지/릴리스 게시(`versions.json` 확인까지)는 `Agent`(`model: 'sonnet'`)에 맡긴다. 설계·구현·결함 판단은 메인이 하고,
+  하위 에이전트가 결함을 찾으면 머지·게시 전에 멈추고 보고하게 한다. 작업 현황 표의 `실행` 열에 그 단계는 Sonnet 으로 적는다.
+  하위 에이전트가 끝나면 메인이 **직접 재확인**한다 — PR 머지 상태·head CI·`versions.json` latest, 그리고 화면이 바뀐 작업은 스크린샷을 메인이 다시 본다
+  (v2.780 실례: Sonnet 이 1440px 표 열 숨김을 '사소한 관찰' 로 분류 — 메인 재판독에서 결함으로 확정, v2.780.1 수정).
 
 - **변이 검증·적대적 재검토(반증 에이전트)는 위험한 수정에만** 쓴다: 보안·권한·범위·자격증명·데이터 손실/삭제·엣지 수신 계약·
   동시성·업그레이드/설치 경로. 화면·문구·문서·단순 조회 수정은 **관련 테스트 + (화면이면) Chromium 1회**로 끝낸다.

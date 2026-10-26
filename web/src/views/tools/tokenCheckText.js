@@ -106,6 +106,8 @@ export function evidenceText(row) {
   if (st === 'wrong-edge') {
     return '**이 주소가 다른 엣지에 닿고 있습니다** — 토큰이 같은지 다른지와 무관하게, 먼저 주소를 고쳐야 합니다.';
   }
+  // v2.767(점검 R2-B4-5): 비활성 수집 서버는 점검 대상이 아니다('지금 점검' 을 눌러도 같다 — 거짓 안내 금지).
+  if (row?.disabled === true || row?.probe?.disabled === true) return '비활성 수집 서버라 점검하지 않습니다 — 설정 › 수집 서버에서 켜면 점검합니다.';
   if (st === 'not-run') return '아직 확인하지 않았습니다 — ‘지금 점검’ 을 누르세요.';
   return '확인하지 못했습니다 — 통신 자체가 되지 않아 값 비교를 할 수 없습니다.';
 }
@@ -230,6 +232,7 @@ export const FINDING_TEXT = Object.freeze({
   'edge-old-version': { title: '구버전 엣지라 자기보고 경로가 없습니다', fix: '그 엣지를 업그레이드하세요.' },
   'edge-name-mismatch': { title: '중앙이 아는 이름과 엣지가 말한 이름이 다릅니다', fix: 'AGENT_NAME 과 설정 › 수집 서버의 이름을 맞추세요(다르면 엣지 보고가 엉뚱한 행에 붙습니다).' },
   'edge-collector-fp-diff': { title: '수집 토큰 지문이 중앙 등록값과 다릅니다', fix: '등록부에 같은 엣지가 여러 항목으로 있는지 확인하세요(중앙이 어느 값을 쓰는지가 갈립니다).' },
+  'edge-report-stale': { title: '오래된 엣지 보고가 토큰 문제를 말하고 있습니다', fix: '‘엣지 값 가져오기’ 를 다시 누르세요(그 뒤에 고쳤을 수 있어 지금은 결함으로 세지 않습니다).' },
 
   'edge-is-also-central': { title: '이 엣지가 또 다른 중앙으로 동작합니다', fix: '그 엣지의 CENTRAL_TOKEN 을 지우고 EDGE_TOKEN 을 쓰세요(CENTRAL_TOKEN 은 그 인스턴스의 중앙 엔드포인트를 엽니다).' },
   'deploy-collector-diff': { title: '배포 대상의 수집 토큰이 현재 등록값과 다릅니다', fix: '설정 › 엣지 배포의 값을 지금 등록값과 맞추세요(그러지 않으면 다음 재배포에서 등록값이 무효가 됩니다).' },
@@ -452,6 +455,10 @@ export function edgeReportCell(edge, capability, ago) {
   const at = (hasReportAt ? Number(edge.reportAt) : Number(edge.at)) || 0;
   if (lastFailed) {
     return { text: `${ago(at)} · 이후 실패(${failLabel})`, tone: 'amber', sortAt: at, title: `아래 값은 이전 보고입니다. 마지막 시도: ${failReason}` };
+  }
+  // v2.767(점검 R2-B4-4): 서버가 낡음(edge.stale — STALE_MS 초과)을 판정해 준다 — 화면은 읽기만 한다(같은 판정을 다시 만들지 않는다).
+  if (edge.stale === true) {
+    return { text: `${ago(at)} · 낡음`, tone: 'amber', sortAt: at, title: '오래된 보고입니다 — 이 보고가 말하는 결함은 지금도 그런지 모릅니다. ‘엣지 값 가져오기’ 로 다시 받으세요.' };
   }
   return { text: ago(at), tone: 'gray', sortAt: at, title: '' };
 }

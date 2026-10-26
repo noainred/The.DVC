@@ -58,6 +58,8 @@ import * as m_bmUsagePoller from '../bmusage/poller.js';
 import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
+import * as m_veeamPoller from '../veeam/poller.js';   // v2.751 Veeam 백업 상태
+import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.765 Veeam 계정 이벤트 전용 수집
 import * as m_gpuPhysicalPoller from '../gpu/physicalPoller.js';
 import * as m_dirUsageScheduler from '../dirusage/scheduler.js';
 import * as m_gpuPoller from '../gpu/poller.js';
@@ -105,6 +107,8 @@ const MODS = Object.freeze({
   '../linkcheck/poller.js': m_linkCheckPoller,
   '../xferspeed/poller.js': m_xferSpeedPoller,
   '../isidu/poller.js': m_isiduPoller,
+  '../veeam/poller.js': m_veeamPoller,
+  '../veeam/snapCollector.js': m_veeamSnapCollector,
   '../gpu/physicalPoller.js': m_gpuPhysicalPoller,
   '../dirusage/scheduler.js': m_dirUsageScheduler,
   '../gpu/poller.js': m_gpuPoller,
@@ -183,7 +187,9 @@ export function pollerCheck(st, { now = Date.now(), uptimeMs = process.uptime() 
   }
   const age = now - last;
   const stale = age > staleMs;
-  return { status: stale ? 'warn' : 'ok', detail: `${running ? '실행 중' : '활성'} · 최근 ${Math.round(age / MIN)}분 전${stale ? ' — 주기의 2배를 넘겼습니다' : ''}${ivText}`, at: last };
+  // v2.772(Z3 I1): 상태 함수가 스스로 경고(warn + warnText — 예: Veeam 전용 수집기가 일부 vCenter 를 구제하지 못함)를 내면 시각이 신선해도 '활성' 으로만 칠하지 않는다.
+  const own = st && st.warn === true && typeof st.warnText === 'string' && st.warnText ? String(st.warnText).slice(0, 200) : '';
+  return { status: stale || own ? 'warn' : 'ok', detail: `${running ? '실행 중' : '활성'} · 최근 ${Math.round(age / MIN)}분 전${stale ? ' — 주기의 2배를 넘겼습니다' : ''}${own ? ` — ${own}` : ''}${ivText}`, at: last };
 }
 
 /*

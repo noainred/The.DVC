@@ -86,6 +86,17 @@ def generate_password(length: int = 20) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _fresh_token_version() -> int:
+    """새 계정의 tokenVersion 시작값 — v2.768(점검 R3-C3-5).
+
+    예전에는 1 로 시작했다. 삭제 시점의 발급시각 컷오프(SessionStore._user_revoked)는 메모리에만 있어
+    재기동하면 사라지므로, 계정을 지우고 재기동한 뒤 같은 이름을 다시 만들면 삭제 전 토큰(v=1, TTL 안)이
+    새 계정으로 통과했다(역할은 새 계정 것). 시작값을 무작위(2^20 ~ 2^31)로 두면 옛 토큰의 v(작은 값에서
+    시작해 인상으로만 자란 값)와 겹칠 확률이 사실상 없다. 기존 계정의 값은 건드리지 않는다.
+    """
+    return (1 << 20) + secrets.randbelow((1 << 31) - (1 << 20))
+
+
 class UserStore:
     """설정 접근 계정 목록(`users.json`)."""
 
@@ -161,7 +172,8 @@ class UserStore:
                 "role": "admin",
                 "enabled": True,
                 "password": hash_password(password),
-                "tokenVersion": 1,
+                # users.json 이 비어(지워져) 다시 만드는 경우도 같은 이름(admin) 재생성이다 — 무작위 시작(R3-C3-5).
+                "tokenVersion": _fresh_token_version(),
                 "createdAt": now_iso(),
                 "updatedAt": now_iso(),
             })
@@ -273,7 +285,7 @@ class UserStore:
             record = hash_password(password)
             users.append({
                 "username": username, "role": role, "enabled": True,
-                "password": record, "tokenVersion": 1,
+                "password": record, "tokenVersion": _fresh_token_version(),  # R3-C3-5: 1 로 재시작 금지
                 "createdAt": now_iso(), "updatedAt": now_iso(),
             })
             self._save()
@@ -484,7 +496,15 @@ class SessionStore:
         encoded, _, signature = token.rpartition(".")
         if not encoded or not signature:
             return None
-        if not hmac.compare_digest(self._sign(encoded.encode("ascii")), signature):
+        # v2.767(점검 R2-B5-6): compare_digest 에 str 을 넣으면 비-ASCII 서명부에서 TypeError 가 난다(파이썬 사양) —
+        # _dispatch 가 잡지 않는 예외라 응답 없이 연결이 끊겼다(미인증 헤더·쿠키 한 줄). _hub_token_ok(v2.500 L1)처럼
+        # 바이트로 비교하고, 인코딩·비교 예외는 '없는 세션'(None)으로 접는다.
+        try:
+            expected = self._sign(encoded.encode("ascii")).encode("ascii")
+            supplied = str(signature).encode("utf-8", "surrogateescape")
+            if not hmac.compare_digest(expected, supplied):
+                return None
+        except (TypeError, ValueError, UnicodeError):
             return None
         try:
             padding = "=" * (-len(encoded) % 4)

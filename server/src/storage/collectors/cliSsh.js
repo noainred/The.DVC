@@ -20,6 +20,7 @@
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot } from '../types.js';
+import { recStart } from './uemcliParse.js'; // v2.770(R5-E2-03) — 레코드 시작 줄 선형 판정 한 벌
 
 /** 캡처할 원문 상한(문자) — 응답/로그가 비대해지지 않게. */
 const RAW_LIMIT = Number(process.env.STORAGE_CLI_RAW_LIMIT) || 4000;
@@ -285,7 +286,10 @@ export function parseKeyValueBlocks(text) {
     const t = line.trim();
     if (!t) { if (cur && Object.keys(cur).length) { blocks.push(cur); cur = null; } continue; }
     // '3:    ID = spa' 처럼 앞에 레코드 번호가 붙으면 새 레코드 시작.
-    const idx = /^(\d+):\s*(.*)$/.exec(t);
+    // v2.770(점검 R5-E2-03): 예전 `/^(\d+):\s*(.*)$/` 는 ':' 뒤 긴 공백 + 값 안의 외로운 \r·U+2028 에서 O(n²) 였다(공백 4만 자 약 2.2초 —
+    //   v2.744 GH-R2 가 uemcliParse.recStart 에서 고친 꼴의 형제). 같은 판정을 선형으로 하는 recStart 를 그대로 쓴다(머리만 자르고 trimStart ·
+    //   나머지에 줄 끝 문자가 있으면 레코드 시작이 아니다 — 옛 정규식과 같은 뜻). 결과 동일성은 test/audit2770b.test.js 가 무작위 대조한다.
+    const idx = recStart(t);
     const body = idx ? idx[2] : t;
     if (idx) { if (cur && Object.keys(cur).length) blocks.push(cur); cur = {}; }
     // v2.599(SEC2599-02): 예전 `/^([^=:]+?)\s*[=:]\s*(.*)$/` 는 게으른 키가 한 글자씩 늘 때마다 뒤 공백 연속을 다시 훑어

@@ -8,6 +8,7 @@
 import { withSsh } from './sshExec.js';
 import { fileStamp } from '../util/dayKey.js';
 import { haproxyAddress } from '../util/hostPort.js';
+import { mappingConfigIssue } from './registry.js';
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -16,6 +17,9 @@ const END = '# <<< portal-remote-access (auto-generated) <<<';
 export function buildConfigBlock(mappings, { bindAddress = '*' } = {}) {
   const lines = [BEGIN];
   for (const m of mappings) {
+    // v2.770(점검 R5-E5-4): 형식이 깨진 예전 매핑(포트 70000·-1·1.5, '10.0.0.5:2222')은 블록에 넣지 않는다 — 한 줄 때문에 haproxy -c 가
+    //   블록 전체를 거부해 그 프록시의 이후 배포가 전부 실패했다. 건너뛴 사실은 주석으로 남기고 호출부가 그 매핑을 error 로 표시한다.
+    if (mappingConfigIssue(m)) { lines.push(`# skipped ra_${String(m?.id ?? '').replace(/[^\w-]/g, '').slice(0, 40)} — invalid mapping (port/host)`, ''); continue; }
     lines.push(
       `listen ra_${m.id}   # ${m.name} (${m.protocol})`,
       `    bind ${bindAddress}:${m.publicPort}`,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { ACTIVITY_TEXT, activityOf, memText, gbText, tempText, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { ACTIVITY_TEXT, activityOf, memText, gbText, tempText, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary, gpuErrText } from './gpuUsageText.js';
 
 describe('gpuUsageText (v2.650)', () => {
   it('값이 없으면 단위를 붙이지 않는다', () => {
@@ -45,5 +45,18 @@ describe('gpuUsageText (v2.650)', () => {
 describe('activitySummary short (v2.650 판독)', () => {
   it('표 칸용 짧은 표기', () => {
     expect(activitySummary({ busy: 3, held: 1, idle: 2, unknown: 1 }, { short: true })).toBe('연산 3 · 점유 1 · 유휴 2 · 불가 1');
+  });
+});
+
+// v2.769(점검 R4-D5-3): 일부 GPU 응답 없음 표지 — 0·null(모름)·이상값이면 빈 문자열(표지를 지어내지 않는다).
+describe('gpuErrText', () => {
+  it('응답 없는 GPU 장수만 말한다', () => {
+    expect(gpuErrText(1)).toBe('GPU 1장 응답 없음');
+    expect(gpuErrText(2)).toBe('GPU 2장 응답 없음');
+    expect(gpuErrText(0)).toBe('');
+    expect(gpuErrText(null)).toBe('');
+    expect(gpuErrText(undefined)).toBe('');
+    expect(gpuErrText('')).toBe('');
+    expect(gpuErrText('x')).toBe('');
   });
 });

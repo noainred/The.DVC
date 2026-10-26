@@ -288,13 +288,36 @@ authRouter.post('/activity', (req, res) => {
 // actor = 대상과 동일(본인) → totpRebindDenied 통과. 수퍼관리자의 폰 교체 재등록 경로다.
 // v2.680(감사 C-03): 이름이 아니라 로컬 토큰인지(authSrc)로 판정 — AD 세션이 같은 이름의 로컬 계정(예: super_admin)에 OTP 를 묶지 못하게.
 const LOCAL_ONLY = { ok: false, reason: '로컬 계정만 OTP를 등록할 수 있습니다. (AD 계정 제외)' };
+// v2.771(점검 R6-F5-5): 본인 OTP 등록 시작·확정의 성공·실패를 감사 로그에 남긴다 — 확정은 자격증명 변경이다(OTP 전용 계정의
+//   비밀번호 삭제 + tokenVersion 인상 + 초기 비번 파일 삭제). 관리자 대리 등록(routes/admin/users.js)만 남고 본인 경로가 빠져
+//   세션 탈취 뒤 재등록이 흔적 없이 끝났다. 시크릿·otpauth URL·입력 코드는 싣지 않는다(사유 문구만). 반복 가능한 줄(시작·실패)은
+//   계정당 1분 한 줄로 합친다(util/denyAuditGate.js — 인증된 사용자도 감사 이력을 밀어내지 못하게). 확정 성공은 언제나 쓴다.
+const totpBeginAuditGate = createDenyAuditGate();
+const totpFailAuditGate = createDenyAuditGate();
+function auditTotpSelf(req, action, { detail, gate } = {}) {
+  const user = req.user?.username;
+  let note = '';
+  if (gate) { const sum = gate(user); if (!sum.write) return; note = foldedNote(sum.folded); }
+  logAudit({ user, action, target: user, detail: ((detail || '') + note).replace(/^ · /, '') || undefined, ip: clientIp(req) });
+}
 authRouter.post('/totp/begin', authMiddleware, (req, res) => {
-  if (req.user?.authSrc !== 'local' || !getUser(req.user.username)) return res.status(400).json(LOCAL_ONLY);
-  res.json(beginTotpEnroll(req.user.username, req.get('host') || '', { actor: req.user.username, actorUser: req.user }));
+  if (req.user?.authSrc !== 'local' || !getUser(req.user.username)) {
+    auditTotpSelf(req, 'OTP 등록 시작 거부(본인)', { detail: LOCAL_ONLY.reason, gate: totpFailAuditGate });
+    return res.status(400).json(LOCAL_ONLY);
+  }
+  const r = beginTotpEnroll(req.user.username, req.get('host') || '', { actor: req.user.username, actorUser: req.user });
+  if (r.ok) auditTotpSelf(req, 'OTP 등록 시작(본인)', { gate: totpBeginAuditGate });
+  else auditTotpSelf(req, 'OTP 등록 시작 거부(본인)', { detail: r.reason || '', gate: totpFailAuditGate });
+  res.json(r);
 });
 authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
-  if (req.user?.authSrc !== 'local') return res.status(400).json(LOCAL_ONLY);
+  if (req.user?.authSrc !== 'local') {
+    auditTotpSelf(req, 'OTP 등록 확정 실패(본인)', { detail: LOCAL_ONLY.reason, gate: totpFailAuditGate });
+    return res.status(400).json(LOCAL_ONLY);
+  }
   const r = confirmTotpEnroll(req.user.username, (req.body || {}).code, { actor: req.user.username, actorUser: req.user });
+  if (r.ok) auditTotpSelf(req, 'OTP 등록 확정(본인)');
+  else auditTotpSelf(req, 'OTP 등록 확정 실패(본인)', { detail: r.reason || '', gate: totpFailAuditGate });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

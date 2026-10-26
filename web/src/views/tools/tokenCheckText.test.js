@@ -355,3 +355,26 @@ describe('edgeReportCell — 서버 reportAt 을 판정 근거로 (v2.601 WEB260
     expect(edgeReportCell({ at: 800, reportAt: 800, ok: true, lastAttempt: { ok: true } }, '', ago).text).toBe('800ago');
   });
 });
+
+describe('edgeReportCell — 낡은 보고(v2.767 점검 R2-B4-4)', () => {
+  const ago = (ts) => `${ts}ago`;
+  it('서버가 edge.stale 을 실으면 시각 + 낡음(amber) — 화면은 판정을 다시 만들지 않는다', () => {
+    const c = edgeReportCell({ at: 800, reportAt: 800, ok: true, stale: true, lastAttempt: { ok: true } }, '', ago);
+    expect(c.text).toBe('800ago · 낡음');
+    expect(c.tone).toBe('amber');
+    expect(c.sortAt).toBe(800);
+    expect(edgeReportCell({ at: 800, reportAt: 800, ok: true, stale: false, lastAttempt: { ok: true } }, '', ago).text).toBe('800ago');
+  });
+  it('낡은 보고의 결함 발견(edge-report-stale)에 문구가 있다', () => {
+    expect(FINDING_TEXT['edge-report-stale'].title).toContain('오래된');
+    expect(findingLine({ code: 'edge-report-stale', agent: 'EDGE-A' })).toContain('엣지 값 가져오기');
+  });
+});
+
+describe('evidenceText — 비활성 수집 서버(v2.767 점검 R2-B4-5)', () => {
+  it("'지금 점검' 을 누르라고 하지 않고 비활성을 말한다", () => {
+    const line = evidenceText({ disabled: true, probe: { state: 'not-run', disabled: true } });
+    expect(line).toContain('비활성');
+    expect(line).not.toContain('지금 점검');
+  });
+});

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -21,6 +22,11 @@ from .ssrf import ValidationError, normalize_url
 
 MAX_SHORTCUTS = 500
 MAX_TAGS = 8
+
+# v2.767(점검 R2-B5-4): 라우트(server.ID_PATTERN)가 받는 id 모양. 가져오기·파일 로드·백업 복원으로 들어온 id 가
+# 이 모양이 아니면(점·공백·한글·64자 초과) 그 바로가기는 수정·삭제·이동·중지 API 가 전부 404 라 지울 방법이 없었다.
+# 이 모양을 벗어난 id 만 새로 발급한다(맞는 id 는 그대로 — 이력이 id 로 이어진다).
+ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 # 화면·저장 양쪽에서 쓰는 필드 화이트리스트. 여기 없는 키는 저장하지 않는다
 # (클라이언트가 임의 필드를 밀어 넣어 파일을 부풀리지 못하게).
@@ -82,6 +88,7 @@ class ShortcutStore:
         self._lock = threading.RLock()
         self._items: list = []
         self._loaded = False
+        self._reissued = False
 
     def _clean_category(self, value) -> str:
         if not self._resolve_category:
@@ -104,9 +111,18 @@ class ShortcutStore:
 
     def _read(self) -> list:
         raw = read_json(self._path, None, expect=list)
+        self._reissued = False
         if raw is None:
             return default_shortcuts()
-        return [item for item in (self._sanitize(entry, keep_id=True) for entry in raw) if item]
+        items = []
+        for entry in raw:
+            item = self._sanitize(entry, keep_id=True)
+            if not item:
+                continue
+            if isinstance(entry, dict) and item["id"] != str(entry.get("id") or ""):
+                self._reissued = True
+            items.append(item)
+        return items
 
     def _write(self, items: list) -> None:
         write_json(self._path, items)
@@ -115,6 +131,14 @@ class ShortcutStore:
         if not self._loaded:
             self._items = self._read()
             self._loaded = True
+            if getattr(self, "_reissued", False):
+                # v2.767(점검 R2-B5-4): 새로 발급한 id 를 곧바로 저장한다 — 안 그러면 재기동마다 다른 id 가 붙어
+                # 그 바로가기의 점검 이력이 끊긴다. 저장이 실패해도 읽기는 계속한다(다음 저장 때 다시 기록).
+                self._reissued = False
+                try:
+                    self._write(self._items)
+                except Exception:  # noqa: BLE001 — 읽기 경로를 쓰기 실패로 막지 않는다
+                    pass
 
     # ---------- 정규화 ----------
 
@@ -138,8 +162,11 @@ class ShortcutStore:
                 return None
             raise
 
+        given_id = str(data.get("id") or base.get("id") or "") if keep_id else base.get("id", "")
+        if keep_id and not ID_RE.fullmatch(given_id):
+            given_id = ""   # 아래에서 새 id 를 발급한다(R2-B5-4)
         item = {
-            "id": str(data.get("id") or base.get("id") or "") if keep_id else base.get("id", ""),
+            "id": given_id,
             "name": name,
             "url": url,
             "category": self._clean_category(data.get("category", base.get("category"))),
@@ -220,6 +247,26 @@ class ShortcutStore:
             for item in self._items:
                 if item["category"] == from_id:
                     item["category"] = to_id
+                    item["updatedAt"] = _now_iso()
+                    moved += 1
+            if moved:
+                self._write(self._items)
+            return moved
+
+    def reassign_missing_datacenters(self, valid_ids) -> int:
+        """v2.760(점검 B-07): 없는 데이터센터를 가리키는 바로가기를 '전체(all)'로 정리한다(삭제·기본값 복원 후처리).
+
+        정리하지 않으면 그 링크는 데이터센터 상세의 '이 사이트' 에도 '공통' 에도 잡히지 않는다
+        (카테고리 삭제의 reassign_category 와 같은 이유).
+        """
+        valid = set(valid_ids or ())
+        with self._lock:
+            self._ensure_loaded()
+            moved = 0
+            for item in self._items:
+                dc = item.get("datacenterId") or "all"
+                if dc != "all" and dc not in valid:
+                    item["datacenterId"] = "all"
                     item["updatedAt"] = _now_iso()
                     moved += 1
             if moved:

@@ -28,7 +28,7 @@
 import { withSsh } from '../../proxy/sshExec.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
-import { applyRates } from '../rates.js';
+import { applyRates, skipRates } from '../rates.js';
 import * as P from './fosParse.js';
 import { zoningFromText } from '../zoningCollect.js';
 
@@ -304,7 +304,8 @@ const firstLine = (t) => String(t || '').split(/\r?\n/).find((l) => l.trim())?.t
 // v2.602(감사 COL-2602-02): opts.countersAt = porterrshow 를 **받은 시각**. 처리량(f/s)의 분모는 두 주기의 '카운터 읽은
 //   시각' 차이여야 한다 — 예전에는 조립 시각(뒤 명령 10여 개가 끝난 뒤)이라 뒤 단계 소요가 주기마다 흔들리면 오류 없이
 //   틀린 값이 됐다. 값이 없으면 예전처럼 호출 시각(시험·단독 호출 호환). fosRest.js 와 같은 규칙.
-export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { countersAt = null } = {}) {
+// v2.770(점검 R5-E3-3): opts.noRates = 연결 테스트 — 처리량 기준값(rates._prev)을 덮지 않는다(rates.skipRates).
+export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { countersAt = null, noRates = false } = {}) {
   const snap = emptySnapshot(device);
   const sw = P.parseSwitchShow(out.switchshow || '');
   const chassis = P.parseChassisShow(out.chassisshow || '');
@@ -353,7 +354,7 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { co
       sfpVendor: s.vendor || '', sfpSerial: s.serial || '', sfpPartNumber: s.partNumber || '',
     };
   });
-  const rate = applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
+  const rate = noRates ? skipRates(list) : applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
   snap.ports = { ...summarizePorts(list), truncated: sw.ports.length > MAX_PORTS };
   snap.licenses = licenses;
   // FRU 상태는 fanshow/psshow 가 우선(정상/장애 판정이 있다). 그 명령이 없는 장비에서는
@@ -442,10 +443,10 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { co
  * `budgetMs` — 세션 예산(기본 `SESSION_BUDGET_MS`). 바깥 시한이 장비 시한보다 짧은 호출부(연결 테스트 60초)는
  *   그 시한보다 작은 값을 넘겨야 같은 보호를 받는다.
  */
-export async function collect(device, { withRaw = false, signal, trace = null, verbose = false, budgetMs = SESSION_BUDGET_MS } = {}) {
+export async function collect(device, { withRaw = false, signal, trace = null, verbose = false, budgetMs = SESSION_BUDGET_MS, noRates = false } = {}) {
   const r = await runSession(device, signal, { trace, verbose, budgetMs });
   trace?.(`출력 해석: 성공 섹션 ${Object.keys(r.out).length}개, 실패 ${Object.keys(r.errors).length}개${Object.keys(r.errors).length ? ` (${Object.keys(r.errors).join(', ')})` : ''}`);
-  const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {}, { countersAt: r.countersAt ?? null });
+  const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {}, { countersAt: r.countersAt ?? null, noRates });
   // v2.741(DEV-02): 예산으로 건너뛴 항목은 '명령이 없는 장비' 와 조치가 다르다 — 개수·이름을 스냅샷에 싣는다.
   //   `cliSkipped` 는 스토리지 Unity(unitySsh)와 같은 뜻·같은 모양(개수)이고, 무엇을 뺐는지는 `cliSkippedKeys` 가 말한다.
   if (r.skipped?.length) snap.extra = { ...(snap.extra || {}), cliSkipped: r.skipped.length, cliSkippedKeys: r.skipped.slice(), cliBudgetMs: r.budgetMs };

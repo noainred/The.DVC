@@ -299,7 +299,7 @@ test('계정 단위 폐기 이벤트 — 비밀번호 변경·역할 변경·삭
   policy({});
   at(T0);
   A.createUser({ username: 'rvf.evt', role: 'operator', password: 'Evt#Pass123456' }, { trusted: true });
-  const tok = A.signToken({ sub: 'rvf.evt', role: 'operator', name: 'e', src: 'local', tv: 0, sid: 'evt-sid' });
+  const tok = A.signToken({ sub: 'rvf.evt', role: 'operator', name: 'e', src: 'local', tv: A.getUser('rvf.evt').tokenVersion || 0, sid: 'evt-sid' }); // v2.771 R6-F5-1: 새 계정 tokenVersion 은 무작위 시작값
   assert.ok(A.resolveTokenUser(tok));
   events.length = 0;
   assert.equal(A.setLocalPassword('rvf.evt', 'Evt#Pass654321', { trusted: true }).ok, true);

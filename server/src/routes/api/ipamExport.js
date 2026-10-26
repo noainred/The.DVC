@@ -10,7 +10,7 @@ import { csvCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
-import { buildIpamRowsShared, buildSubnetSheets, buildSubnetSheetsAsync, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
+import { buildIpamRowsShared, buildSubnetSheets, buildSubnetSheetsAsync, listSubnets, ipVcenterOwners, ipamRevKey, ipInWriteScope } from '../../ipam/ledger.js';
 import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
@@ -48,23 +48,8 @@ function vmExportGuard(req, res) {
 // vCenter 귀속 값 검증 — 알 수 없는 vCenter id를 붙이면 거부(오타·고아 참조 방지). 빈값=전역=허용.
 // 설정 읽기 실패 시엔 막지 않는다(fail-open).
 const isKnownVcenter = (id) => { if (!id) return true; try { return (loadVcenterConfig().vcenters || []).some((v) => v.id === id); } catch { return true; } };
-/**
- * IPAM 쓰기(override/정책)의 사용자 scope 판정 — 범위 제한 계정이 범위 밖 IP·vCenter 에 쓰지 못하게.
- *  · allowed=null(무제한/admin): 항상 허용(기존 동작 완전 보존).
- *  · IP 가 vCenter 에 귀속(owners): 그 vCenter 중 하나라도 allowed 면 허용.
- *  · 미귀속 IP(스캔/예약): claimedVcenterId 가 있고 allowed 에 있을 때만 허용(전역 예약은 범위 계정이 못 만듦).
- */
-export const ipInWriteScope = (allowed, owners, ip, claimed) => {
-  if (!allowed) return true;
-  // v2.595(감사 R2595-01 — 재현): 소유 맵은 정규형 IP 키다. 원문으로 찾으면 '010.37.0.1' 이 '미귀속' 이 되어
-  //   claimed 만으로 통과하고, 저장은 정규 키로 되어 범위 밖 IP 의 실제 행에 override·메모가 붙었다.
-  //   정규화할 수 없는 표기는 거부(쓰기 대상이 아니다).
-  const key = canonIp(ip);
-  if (!key) return false;
-  const own = owners.get(key);
-  if (own && own.size) return [...own].some((v) => allowed.has(v));
-  return claimed ? allowed.has(claimed) : false;
-};
+// IPAM 쓰기·범위 가림 판정 ipInWriteScope 는 v2.771(R6-F2-1)부터 ipam/ledger.js 에 있다(시트 생성기와 한 벌) — 여기서 재수출한다.
+export { ipInWriteScope };
 /**
  * 쓰기 라우트 전용 2차 검사(v2.369) — 조회 범위(기존 404 은닉 검사) 통과 후, 쓰기 범위
  * (writeVcenters ∩ 조회)로 다시 판정한다. 조회는 되지만 수정이 막힌 vCenter 는 존재가 이미
@@ -79,13 +64,18 @@ const WRITE_DENIED_MSG = '조회 전용 범위 — 이 vCenter 는 수정 권한
  * v2.630 AUTHZ2630-01: IP override 쓰기 판정 — 단건 PUT 과 일괄(bulk)이 **같은 함수**를 쓴다.
  * ① 기존 레코드가 있으면 그 기존 claim 으로 먼저 접근 판정(범위 밖 vCenter 가 claim 한 예약을 본문 claim 하나로 탈취 금지)
  * ② 새 claim(본문 → 없으면 기존)도 범위 안 ③ 쓰기 범위(writeVcenters)는 기존·새 claim 둘 다.
+ * v2.771(점검 R6-F2-2 — 재현): `bodyClaim` 은 **본문에 claimedVcenterId 키가 있으면 그 값**(빈 값 포함), 없으면 undefined 다.
+ *   예전에는 `bodyClaim || prevClaim` 이라 빈 값('')이 기존 claim 으로 판정돼 통과하고, 저장(overrides.clean — `!== undefined`)은 ''
+ *   를 그대로 써서 범위 계정이 만들 수 없게 막아 둔 **전역(미귀속) 예약**이 생겼다(만든 본인도 404). 이제 저장과 같은 규칙으로
+ *   '키가 있으면 새 claim' 이다 — 소유 VM 없는 IP 의 claim 을 비우는 것은 범위 계정에 거부된다(전체 범위 계정은 불변).
  * 반환: null(허용) | { status:404|403 }
  */
 function ipOverrideWriteVerdict(req, snap, allowed, owners, ip, bodyClaim) {
   const existing = getOverride(ip);
   const prevClaim = existing?.claimedVcenterId || '';
   if (allowed && existing && !ipInWriteScope(allowed, owners, ip, prevClaim)) return { status: 404 };
-  const claimed = bodyClaim || prevClaim;
+  // 저장(overrides.clean)과 같은 정규화 — 키가 있으면 null·'' 도 '귀속 지움' 이다.
+  const claimed = bodyClaim === undefined ? prevClaim : String(bodyClaim || '').trim().slice(0, 120);
   if (allowed && !ipInWriteScope(allowed, owners, ip, claimed)) return { status: 404 };
   // 기존 레코드가 없으면 '기존 claim' 판정은 뜻이 없다(빈 claim 은 소유 VM 없는 IP 에서 항상 거부 — 새 예약이 막혔다).
   if ((existing && writeScopeDenied(req, snap, owners, ip, prevClaim)) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
@@ -122,6 +112,22 @@ function slimHostRow(r) {
  */
 export function slimOwnerRow(r) {
   return r?.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : slimHostRow(r);
+}
+
+/**
+ * v2.771(점검 R6-F2-4 — 재현): 범위 계정(조회 또는 쓰기 범위가 있는 계정)이 만드는 대역 정책의 크기 상한.
+ *   `isCoveredByAnyPolicy`(v2.287 — 귀속 무시)는 정책을 함대 전체의 '관리 IP' 판정에 쓰므로, vc-a 귀속 10.0.0.0/8 정책 하나가
+ *   10/8 의 모든 스캔 결과·이력을 보존기간 정리에서 빼 버렸다(전 법인 영향). 귀속 무시 설계는 그대로 두고(전역 정책 동작 회귀 위험)
+ *   범위 계정의 정책을 /16(65,536개) 이하로 묶는다. 전체 범위 계정은 불변. 크기는 specToRange 의 것(CIDR 은 네트워크·브로드캐스트 제외).
+ */
+export const SCOPED_POLICY_MAX_SIZE = 65_536;
+export function scopedPolicySpecIssue(spec, scoped) {
+  if (!scoped) return null;
+  const r = specToRange(String(spec ?? '').trim());
+  if (!r) return null; // 문법 오류는 setPolicy 가 같은 문구로 거부한다
+  return r.size > SCOPED_POLICY_MAX_SIZE
+    ? `범위 제한 계정의 대역 정책은 /16(${SCOPED_POLICY_MAX_SIZE.toLocaleString('en-US')}개) 이하만 만들 수 있습니다(현재 ${r.size.toLocaleString('en-US')}개) — 더 넓은 대역은 전체 범위 관리자에게 요청하세요.`
+    : null;
 }
 
 export function registerIpamExport(api) {
@@ -339,7 +345,8 @@ api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   const owners = ipVcenterOwners(snap);
   // ①②③ 판정은 ipOverrideWriteVerdict 하나(일괄 적용과 같은 함수 — v2.630 AUTHZ2630-01).
-  const v = ipOverrideWriteVerdict(req, snap, allowed, owners, req.params.ip, req.body?.claimedVcenterId || '');
+  // v2.771(R6-F2-2): 키가 없으면 undefined(기존 claim 유지), 있으면 빈 값도 새 claim — setOverride 가 저장하는 것과 같은 값으로 판정한다.
+  const v = ipOverrideWriteVerdict(req, snap, allowed, owners, req.params.ip, req.body && typeof req.body === 'object' ? req.body.claimedVcenterId : undefined);
   if (v?.status === 404) return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   if (v?.status === 403) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = setOverride(req.params.ip, req.body || {}, req.user);
@@ -379,7 +386,7 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   const list = split.ips;
   if (allowed || allowedW) {
     const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
-    const claimed = fields.claimedVcenterId || '';
+    const claimed = fields.claimedVcenterId; // v2.771(R6-F2-2): 키가 없으면 undefined(기존 claim 유지) — 빈 값은 '귀속 지움' 으로 판정
     for (const ip of list) {
       const v = ipOverrideWriteVerdict(req, snap, allowed, owners, ip, claimed);
       if (v?.status === 404) return res.status(403).json({ ok: false, reason: `범위 밖 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
@@ -436,6 +443,10 @@ api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
   if (allowedWc && !(req.body?.claimedVcenterId && allowedWc.has(req.body.claimedVcenterId))) {
     return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   }
+  {
+    const bad = scopedPolicySpecIssue(req.body?.spec, allowedP || allowedWc);
+    if (bad) return res.status(400).json({ ok: false, reason: bad });
+  }
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -462,6 +473,12 @@ api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) =
         return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
       }
     }
+  }
+  // v2.771(R6-F2-4): 대역을 바꿀 때만 크기 상한을 본다(대역을 그대로 두는 라벨·상태 수정은 막지 않는다 — 전체 계정이 만든 넓은 귀속 정책).
+  if (String(req.body?.spec ?? '').trim()) {
+    const st = store.get();
+    const bad = scopedPolicySpecIssue(req.body.spec, scopedVcenterIds(req.user, st) || writeScopedVcenterIds(req.user, st));
+    if (bad) return res.status(400).json({ ok: false, reason: bad });
   }
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }

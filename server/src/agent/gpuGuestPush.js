@@ -89,7 +89,8 @@ async function _pushGpuGuestNow() {
     return { ok: false, skipped: true, reason: note };
   }
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
-  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, host: v.host, vcenterId: v.vcenterId }));
+  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, gpuErrors: v.gpuErrors ?? null, host: v.host, vcenterId: v.vcenterId }));
+  // v2.769(점검 R4-D5-3): gpuErrors(응답 없는 GPU 장수)도 싣는다 — 구버전 중앙은 모르는 필드를 버린다.
   // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시).
   // v2.742(VC-01 후속): 이 엣지의 push 주기(intervalMs)를 함께 싣는다 — 중앙 GPU 원인 판정(gpu/guestWhy.js edgeReportStaleMs)이
   //   보고 수신 시각의 낡음 경계를 그 주기 × 3 + 30초(최소 30분)로 잡는다. 진단이 없는 주기(첫 폴 전)에는 예전처럼 싣지 않는다

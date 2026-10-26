@@ -8,7 +8,7 @@
  *   · 숫자(주기)를 문구에 박지 않는다 — 서버가 준 값만 쓴다.
  *   · 문구에 백틱·별표를 쓰지 않는다(BoldText 를 거치지 않는 plain 렌더다).
  */
-import { normMode, resolveMode } from '../version_4/mode.js';
+import { normMode, resolveMode } from './overviewMode.js';
 import { hashSegments } from '../hooks/hashTab.js';
 import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { corpSiteStatus } from './corpSiteStatus.js';
@@ -21,7 +21,7 @@ export { WARN_PCT, CRIT_PCT };
 /**
  * `#/overview/exec` · `#/overview/eng` — 이 앱의 해시는 첫 세그먼트가 탭이라 시안의 `?view=` 를 그대로 쓸 수 없다
  * (`#/overview?view=exec` 는 탭 'overview?view=exec' 로 읽혀 허용되지 않는다). 둘째 세그먼트로 받는다.
- * 해시의 값은 그 탭에만 적용하고 저장하지 않는다(V4 mode.js 규약 — 받은 링크가 내 설정을 바꾸면 안 된다).
+ * 해시의 값은 그 탭에만 적용하고 저장하지 않는다(views/overviewMode.js 규약 — 받은 링크가 내 설정을 바꾸면 안 된다).
  */
 export function modeFromHash(hash) {
   const s = hashSegments(hash);

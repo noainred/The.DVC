@@ -30,6 +30,8 @@ import { numOrNull } from '../util/numOrNull.js';
 export const VM_DIST_BIN_PCT = 5;
 export const VM_DIST_BINS = 20;
 export const OS_UNKNOWN_KEY = '~';
+/** SOAP 수집기가 OS 를 못 읽었을 때 쓰는 값(vcenter/soapClient.js) — osKeyOf 가 '~' 로 접는다(v2.785 J-I2). */
+const SOAP_OS_UNKNOWN = 'unknown';
 export const OS_NAME_MAX = 200;
 /** 새 패널 선택 쿼리 키 — 형식 판정·오류 field 순서도 이 순서다. */
 export const VM_FACET_KEYS = ['cpuBin', 'memBin', 'power', 'osName'];
@@ -69,11 +71,15 @@ function osKeyText(s) {
   return k;
 }
 
-/** Guest OS 키 — 앞뒤 공백 제거 · 대소문자 그대로 · 200자(자른 끝도 다듬는다) · 비면 '~'. */
+/**
+ * Guest OS 키 — 앞뒤 공백 제거 · 대소문자 그대로 · 200자(자른 끝도 다듬는다) · 비면 '~'.
+ * v2.785(GV J-I2): SOAP 수집기가 OS 를 못 읽으면 쓰는 'unknown'(vcenter/soapClient.js guestFullName 없음)도 '~' — REST 수집 VM 의 빈 값과
+ *   OS 패널에서 두 줄로 갈려 하나를 고르면 다른 쪽이 빠졌다. 수집기 문자열은 그대로 둔다(OS 통계·CSV 가 쓴다) — 여기 키에서만 접는다.
+ */
 export function osKeyOf(v) {
   const raw = v?.guestOS;
   const s = raw == null ? '' : String(raw).trim();
-  if (s === '') return OS_UNKNOWN_KEY;
+  if (s === '' || s === SOAP_OS_UNKNOWN) return OS_UNKNOWN_KEY;
   return osKeyText(s);
 }
 

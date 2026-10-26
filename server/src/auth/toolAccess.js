@@ -56,6 +56,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'esxi-temp': 'esxitemp',
   gpu: 'gpu',
   'guest-disk': 'guest-disk',
+  'guest-partition': 'guest-partition', // v2.749 게스트 파티션 사용률 경보(GuestPartTool.jsx)
   'guest-os': 'guestos',
   hardware: 'hardware',
   hba: 'hba',
@@ -113,6 +114,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'vm-lifecycle': 'vm-lifecycle',    // VmLifecycleTool.jsx 전용(v2.706 C5)
   'contention': 'contention',        // ContentionTool.jsx + VM·호스트 상세의 경합·지연 칸은 스냅샷 값만 그려 이 경로를 부르지 않는다(v2.706 C2·C3)
   'vm-availability': 'vm-availability', // VmAvailabilityTool.jsx 전용(v2.707 C6)
+  'backup-summary': 'backup-summary', // BackupSummaryTool.jsx 전용(v2.779 백업 메뉴)
+  'backup-detail': 'backup-detail',   // BackupDetailTool.jsx 전용(v2.779 백업 메뉴)
   'cost-showback': 'cost-showback',   // CostShowbackTool.jsx 전용(v2.707 C11) — 단가 저장은 admin + 전체 범위
   'migration-readiness': 'migration-readiness', // MigrationReadinessTool.jsx 전용(v2.707 C7)
   'cluster-check': 'cluster-check',  // ClusterCheckTool.jsx + VM·호스트 상세의 클러스터 칸(v2.701) — 화면이 toolAllowed 를 먼저 본다

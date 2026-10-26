@@ -3,7 +3,7 @@
  *
  * 사용자 요청(2026-09-17): "진행상태를 edge 의 로그를 읽어와서 확인할 수 있는 기능 만들어줘".
  * 웹 테스트가 node 환경(DOM 없음)이라 판정·문구는 여기서 vitest 로 고정한다
- * (`components/accessDeniedText.js`·`version_4/loadState.js` 와 같은 관례).
+ * (`components/accessDeniedText.js`·`components/loadState.js` 와 같은 관례).
  *
  * ── 이 화면이 만들 수 있는 거짓 5가지 — 전부 여기서 막는다 ────────────────────
  *  ① **'보관분 없음' 을 '안 된다' 라고 말하지 않는다.** 이 기능은 상시 폴링하지 않고 사람이 누를

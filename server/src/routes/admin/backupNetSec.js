@@ -5,10 +5,12 @@ import { logAudit } from '../../audit.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { listInventory } from '../../central/inventory.js';
 import { listAgentConfigs } from '../../central/agentConfig.js';
-import { createBackup, listBackups, backupPath, deleteBackup, readBackup, restoreCentral } from '../../backup/service.js';
+import { createBackup, listBackups, backupPath, deleteBackup, readBackupDetailed, readBackupFailure, restoreCentral } from '../../backup/service.js';
+import { stagedRestoreStatus, cancelStagedRestore } from '../../backup/stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원 예약 상태·취소
+import { restartProcess } from '../../upgrade/upgrade.js'; // v2.768: 복원 후 바로 재시작(선택 — upgrade/apply 의 restart 와 같은 종료 경로)
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../../backup/settings.js';
 import { saveLogSettings } from '../../logs/settings.js';
-import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../../logs/poller.js';
+import { logStatus, rescheduleLogPoller, pollLogsOnce, logPollRunningSince } from '../../logs/poller.js';
 import { resetLogsDb } from '../../logs/db.js';
 import { runTrafficCapture, runDualCapture, runPcapCapture } from '../../net/tcpdump.js';
 import { analyzeLogsForIssuesMemo } from '../../net/logIssues.js';   // v2.742(DB-02): 같은 조건은 짧게 기억
@@ -102,12 +104,20 @@ export function scopeVcLogStatus(st, allowed) {
       lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
     }
     // v2.732(점검 2회차 B4-01 후속): 수집하지 않은 vCenter·이번 주기 로그인 거부 목록도 범위 안 것만(전 법인 vCenter id·사유는 범위 밖 정보다)
-    for (const k of ['notCollected', 'authRejected']) {
+    // v2.765: 지연 vCenter(lagging)·저장 0 vCenter(stalled)도 범위 안 것만.
+    for (const k of ['notCollected', 'authRejected', 'lagging', 'stalled']) {
       if (!Array.isArray(st.lastRun[k])) continue;
       lr[k] = st.lastRun[k].filter((x) => x && allowed.has(String(x.vcenterId)));
       lr[`${k}Omitted`] = st.lastRun[k].length - lr[k].length;
     }
     out.lastRun = lr;
+  }
+  // v2.765(진단): vCenter 별 수집 진단은 범위 안 것만, 오류 원문(vCenter 주소가 들어간다)은 지운다 — 전체 범위 관리자만 본다.
+  if (Array.isArray(st.collect)) {
+    const kept = st.collect.filter((c) => c && allowed.has(String(c.vcenterId)));
+    out.collect = kept.map((c) => (c.lastPoll && typeof c.lastPoll === 'object' && c.lastPoll.error != null
+      ? { ...c, lastPoll: { ...c.lastPoll, error: null, errorHidden: true } } : c));
+    out.collectOmitted = st.collect.length - kept.length;
   }
   if ('dbPath' in out) out.dbPath = null;
   if (out.settings && typeof out.settings === 'object' && out.settings.storagePath) out.settings = { ...out.settings, storagePath: '' };
@@ -115,12 +125,46 @@ export function scopeVcLogStatus(st, allowed) {
   return out;
 }
 
+/**
+ * v2.772(Z1-3): '지금 수집' 응답 경주 — 수집(run)이 waitMs 안에 끝나면 그 결과를, 아니면 `{running:true, runningSince}` 를 먼저 돌려준다.
+ *   수동 실행도 vCenter 마다 주기의 80% 시간 예산을 쓰므로(따라잡기 vCenter 가 있으면 수 분) 브라우저 POST 시한(180초)에 끊겨 '오류' 로 보였다 —
+ *   서버는 계속 수집해 성공하는데 운영자는 실패로 읽었다. 수동 예산을 줄이는 안은 고RTT vCenter(시한만으로 180초)를 보장하지 못해 쓰지 않는다.
+ *   먼저 응답한 뒤의 결과·거부는 콘솔로만 남는다 — 그 회차의 실패 목록(failed)은 응답에 실리지 않으므로 화면은 '표의 상태 칸에서 확인' 이라 말한다.
+ *   waitMs 는 브라우저 시한보다 충분히 작게(프록시 지연분).
+ */
+export const VCLOG_COLLECT_WAIT_MS = 150_000;
+export async function vcLogCollectRace(run, { waitMs = VCLOG_COLLECT_WAIT_MS, runningSinceOf = () => null } = {}) {
+  let timer = null;
+  const late = Symbol('late');
+  const p = Promise.resolve(run);
+  const tick = new Promise((r) => { timer = setTimeout(() => r(late), waitMs); });   // unref 하지 않는다 — 응답을 기다리는 동안의 유일한 타이머일 수 있다(끝나면 지운다)
+  try {
+    const r = await Promise.race([p, tick]);
+    if (r !== late) return r;
+  } finally { clearTimeout(timer); }
+  p.then((r) => { if (r && !r.busy) console.log(`[vclogs] 먼저 응답한 '지금 수집' 이 끝났습니다(${Number.isFinite(r.collected) ? `${r.collected}건 적재` : '건수 —'}${Array.isArray(r.failed) && r.failed.length ? ` · 수집 실패 ${r.failed.length}곳` : ''})`); },
+    (e) => console.warn(`[vclogs] 먼저 응답한 '지금 수집' 이 실패했습니다: ${e?.message || e}`));
+  const since = runningSinceOf();
+  return { running: true, ...(Number.isFinite(since) ? { runningSince: since } : {}) };
+}
+
+/** v2.770(점검 R5-E1-2): 백업·복원 경고 한 건 → 문구. `{file, reason}` 객체(복원)와 문자열(백업 생성) 둘 다. 모르는 모양은 ''. */
+export function backupWarnText(w) {
+  if (typeof w === 'string') return w;
+  if (w && typeof w === 'object') {
+    const file = typeof w.file === 'string' ? w.file : '';
+    const reason = typeof w.reason === 'string' ? w.reason : '';
+    return file && reason ? `${file}: ${reason}` : (reason || file);
+  }
+  return '';
+}
+
 export function registerBackupNetSec(adminRouter) {
 
 // ───────────────────────── 포탈 백업 ─────────────────────────
 // 중앙 + 엣지(에이전트 push) 설정 통합 백업. 정기/변경자동/수동 + 다운로드 + 복원.
 adminRouter.get('/backup/status', adminOnly, requireSettingsOwner, (_req, res) => {
-  res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs() });
+  res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs(), restore: stagedRestoreStatus() });
 });
 adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => res.json(saveBackupSettings(req.body || {})));
 adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, async (_req, res) => {
@@ -136,29 +180,57 @@ adminRouter.get('/backup/download/:name', adminOnly, requireSettingsOwner, (req,
   logAudit({ user: req.user?.username, action: '포탈 백업 다운로드(자격증명 포함)', target: req.params.name, ip: req.ip || '' });
   res.download(p, path.basename(p));
 });
+// v2.768(점검 R3-C5-01): '없음'(404)과 '열 수 없음'(상한 초과·손상 — 422)을 구분한다. 예전에는 셋 다 '백업을 찾을 수 없습니다' 였다.
+function sendReadFailure(res, code) {
+  const f = readBackupFailure(code);
+  return res.status(f.status).json({ ok: false, error: f.error, reason: f.reason });
+}
 adminRouter.get('/backup/view/:name', adminOnly, requireSettingsOwner, (req, res) => {
-  const a = readBackup(req.params.name);
-  if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+  const rb = readBackupDetailed(req.params.name);
+  if (!rb.ok) return sendReadFailure(res, rb.code);
+  const a = rb.archive;
   res.json({ // 자격증명 내용은 빼고 요약만.
     createdAt: a.createdAt, reason: a.reason, centralVersion: a.central?.version,
     centralFiles: Object.keys(a.central?.files || {}),
     edges: Object.entries(a.edges || {}).map(([agent, e]) => ({ agent, at: e.at, files: Object.keys(e.files || {}) })),
+    edgesOmitted: a.edgesOmitted && Array.isArray(a.edgesOmitted.agents) ? { agents: a.edgesOmitted.agents.slice(0, 500).map(String), bytes: Number(a.edgesOmitted.bytes) || null, capBytes: Number(a.edgesOmitted.capBytes) || null } : null,
   });
+});
+// v2.768(점검 R3-C5-02): 재시작 전이면 예약한 복원을 취소할 수 있다(.env 는 복원 때 이미 썼다 — 되돌리려면 pre-restore 백업으로 다시 복원).
+adminRouter.post('/backup/restore-staged/cancel', adminOnly, requireSettingsOwner, (req, res) => {
+  try {
+    const r = cancelStagedRestore();
+    if (r.had) logAudit({ user: req.user?.username, action: '포탈 설정 복원 예약 취소', target: 'restore-staged', ip: req.ip || '' });
+    res.json({ ok: true, had: r.had, restore: stagedRestoreStatus() });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.delete('/backup/:name', adminOnly, requireSettingsOwner, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
 adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async (req, res) => {
   try {
-    const a = readBackup(req.params.name);
-    if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
-    const r = await restoreCentral(a, { retention: loadBackupSettings().retention });
+    const rb = readBackupDetailed(req.params.name);
+    if (!rb.ok) return sendReadFailure(res, rb.code);
+    const r = await restoreCentral(rb.archive, { retention: loadBackupSettings().retention, source: path.basename(String(req.params.name)) });
     // v2.689(G2 B6): 파일별 복원 실패(`failed[]`)를 감사·응답 문구에 밝힌다 — 예전에는 성공 개수만 적어 일부 설정이 복원되지
     //   않았는데 '복원 완료' 로 보였다.
     const nFail = Array.isArray(r.failed) ? r.failed.length : 0;
-    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}`, ip: req.ip || '' });
-    const note = nFail
-      ? `중앙 설정 복원 — ${r.restored}개 성공 · ${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}). 실패한 파일은 복원되지 않았습니다. 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.`
-      : '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.';
-    res.json({ ok: true, ...r, note });
+    // v2.768(점검 R3-C5-02): JSON 설정은 예약만 했다 — '복원 완료' 가 아니라 '재시작하면 적용' 이다(바로 덮으면 실행 중인 모듈이 되돌렸다).
+    const restart = req.body?.restart === true && r.pendingRestart;
+    logAudit({ user: req.user?.username, action: '포탈 설정 복원(재시작 시 적용)', target: req.params.name, detail: `${r.restored}개 파일(예약 ${r.staged.length} · .env ${r.envWritten})${nFail ? ` · 실패 ${nFail}개(${r.failed.map((f) => f.file).join(', ')})` : ''}${restart ? ' · 바로 재시작' : ''}`, ip: req.ip || '' });
+    const parts = [];
+    parts.push(r.pendingRestart
+      ? `설정 파일 ${r.staged.length}개를 복원 예약했습니다 — ${restart ? '포탈을 지금 재시작해 적용합니다.' : '포탈을 재시작하면 적용됩니다(그 전까지는 현재 설정으로 동작).'}`
+      : '예약된 설정 파일이 없습니다.');
+    if (r.envWritten) parts.push(`.env ${r.envWritten}개는 바로 썼습니다(재시작 때 읽힘).`);
+    if (nFail) parts.push(`${nFail}개 실패(${r.failed.map((f) => `${f.file}: ${f.reason}`).join(' · ')}) — 실패한 파일은 복원되지 않습니다.`);
+    if (r.excluded?.length) parts.push(`복원 제외 ${r.excluded.length}개(${r.excluded.map((f) => `${f.file}: ${f.reason}`).join(' · ')}).`);
+    // v2.769(점검 R4-D1-2): 적용 때 되살아날 엣지 토큰·전원 재로그인 같은 경고를 문구에도 싣는다(응답 JSON 에만 두면 화면이 말하지 않는다).
+    // v2.770(점검 R5-E1-2): 복원 경고는 `{file, reason}` 객체다(service.js restoreCentral·stagedRestore — audit2769b 가 모양을 고정) —
+    //   예전 join 은 '주의: [object Object]' 를 냈다. 백업 생성(service.js createBackup)은 문자열 경고라 두 모양을 모두 받는다.
+    const warnTexts = Array.isArray(r.warnings) ? r.warnings.map(backupWarnText).filter(Boolean) : [];
+    if (warnTexts.length) parts.push(`주의: ${warnTexts.join(' · ')}`);
+    parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');
+    res.json({ ok: true, ...r, restarting: restart, note: parts.join(' ') });
+    if (restart) setTimeout(() => restartProcess(), 250);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -166,7 +238,7 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
 adminRouter.get('/vclogs/status', adminOnly, async (req, res) => {
   try { res.json(scopeVcLogStatus(await logStatus(), scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
@@ -177,12 +249,19 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   const s = saveLogSettings(req.body || {});
   if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
   rescheduleLogPoller();
+  // v2.765(4-f): Veeam 계정 이벤트 전용 수집기도 같은 주기(pollIntervalMin)를 쓴다 — 저장 즉시 재무장(예전에는 다음 틱부터, 주기가 1일이면 최대 1일 뒤).
+  //   동적 import + 함수 존재 확인 — 수집기 모듈이 아직 그 함수를 내보내지 않는 판에서도 설정 저장은 막히지 않는다.
+  try {
+    const m = await import('../../veeam/snapCollector.js');
+    if (typeof m.rescheduleVeeamSnapCollector === 'function') m.rescheduleVeeamSnapCollector();
+  } catch (e) { console.warn(`[vclogs] Veeam 전용 수집기 주기 재무장 실패(다음 틱부터 반영): ${e?.message || e}`); }
   delete s._pathChanged;
   res.json(s);
 });
 adminRouter.post('/vclogs/collect', adminOnly, async (req, res) => {
   if (denyScopedRun(req, res, 'vCenter 로그 수동 수집')) return;   // v2.607 AUTHZ2607-06
-  try { res.json({ ok: true, ...(await pollLogsOnce({ manual: true })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  // v2.772(Z1-3): 150초 안에 끝나지 않으면 {ok, running:true, runningSince} 로 먼저 응답한다(수집은 계속 — vcLogCollectRace).
+  try { res.json({ ok: true, ...(await vcLogCollectRace(pollLogsOnce({ manual: true }), { runningSinceOf: logPollRunningSince })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────

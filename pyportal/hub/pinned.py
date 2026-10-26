@@ -12,8 +12,35 @@ TLS SNI·인증서 검증 이름과 Host 헤더는 **원 호스트명**을 유�
 from __future__ import annotations
 
 import http.client
+import math
+import os
 import socket
+import threading
 import urllib.request
+
+# v2.769(점검 R4-D1-1): 요청 **전체** 시한은 소켓 연산 시한과 다른 값이다. v2.768 은 둘을 같은 값(점검 4초)으로 잡아
+# TCP 연결 + TLS 핸드셰이크 + 요청 왕복 + 헤더 전체가 4초 안이어야 했다 — RTT 800ms 대상(폴란드·미국 동부)은 정상 서버도
+# '응답 시간 초과' 로 떨어졌다(재현: 단계마다 < 4초, 합 6초인 정상 TLS 서버 → unreachable). 전체 시한 = 소켓 시한 × 3(상한 90초).
+# 배수는 4 미만이어야 한다 — tests/test_audit2768.py 의 드립 상한(BOUND = 시한 × 4)이 그 값을 넘지 않는지 본다.
+TOTAL_DEADLINE_FACTOR = 3.0
+TOTAL_DEADLINE_DEFAULT_CAP = 90.0
+TOTAL_DEADLINE_ENV_CAP = 300.0
+
+
+def total_deadline_seconds(socket_timeout, env_name=None):
+    """요청 전체 시한(초). env_name 의 값이 유한 양수면 그것이 우선(소켓 시한 아래로는 내리지 않는다 · 상한 300초),
+    아니면 소켓 시한 × TOTAL_DEADLINE_FACTOR(상한 90초). 잘못된 env 값은 무시한다(기본값 — 시한을 없애지 않는다)."""
+    t = float(socket_timeout)
+    if env_name:
+        raw = os.environ.get(env_name, "").strip()
+        if raw:
+            try:
+                v = float(raw)
+            except ValueError:
+                v = float("nan")
+            if math.isfinite(v) and v > 0:
+                return min(max(v, t), TOTAL_DEADLINE_ENV_CAP)
+    return min(t * TOTAL_DEADLINE_FACTOR, max(TOTAL_DEADLINE_DEFAULT_CAP, t))
 
 
 def connect_pinned(addresses, port, timeout):
@@ -35,7 +62,68 @@ def connect_pinned(addresses, port, timeout):
     raise last if last else OSError('no addresses to connect')
 
 
-def _pinned_connection_factory(pinned_ip, https):
+class RequestDeadline:
+    """요청 **전체** 시한 — v2.768(점검 R3-C3-1).
+
+    urllib/http.client 의 timeout 은 소켓 연산(연결·recv 1회) 단위라, 상태줄·헤더·본문을 시한보다 짧은
+    간격으로 1바이트씩 흘리는 대상은 요청을 무한정 붙잡는다(재현: 시한 2초 → 12초, 상태줄 상한까지 흘리면
+    수일. TLS 위에서도 readline 마다 시한이 따로 걸린다). 점검은 GuardedJob 하나를 자동·수동이 공유하므로 그동안 전 링크 점검이 멈춘다.
+    시한이 지나면 워치독이 연결을 shutdown 해 읽던 스레드를 깨운다(EOF/오류로 빠져나옴).
+
+    핀 연결(검사 IP 직접 접속·SNI 유지) 구조는 그대로 두고, 연결 직후의 소켓을 `track` 으로 등록받는다.
+    TLS 는 wrap_socket 이 원 소켓 객체를 detach 하므로 **dup 한 디스크립터**를 잡는다 — shutdown(2) 은
+    디스크립터가 아니라 소켓에 작용하므로 dup 으로도 원 연결(핸드셰이크 중 포함)이 끊긴다.
+    """
+
+    def __init__(self, seconds):
+        self._lock = threading.Lock()
+        self._socks = []
+        self.fired = False
+        self._timer = threading.Timer(max(0.05, float(seconds)), self._fire)
+        self._timer.daemon = True
+
+    def __enter__(self):
+        self._timer.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._timer.cancel()
+        with self._lock:
+            socks, self._socks = self._socks, []
+        for dup in socks:
+            try:
+                dup.close()
+            except OSError:
+                pass
+        return False
+
+    @staticmethod
+    def _kill(dup):
+        try:
+            dup.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def track(self, sock):
+        try:
+            dup = sock.dup()
+        except OSError:
+            return
+        with self._lock:
+            self._socks.append(dup)
+            fired = self.fired
+        if fired:                      # 연결 도중 시한이 이미 지났다 — 바로 끊는다
+            self._kill(dup)
+
+    def _fire(self):
+        with self._lock:
+            self.fired = True
+            socks = list(self._socks)
+        for dup in socks:
+            self._kill(dup)
+
+
+def _pinned_connection_factory(pinned_ip, https, on_socket=None):
     """urllib do_open 이 부를 연결 팩토리 — pinned_ip 로 dial 하고 Host/SNI 는 원 host 유지."""
     base = http.client.HTTPSConnection if https else http.client.HTTPConnection
 
@@ -43,6 +131,8 @@ def _pinned_connection_factory(pinned_ip, https):
         def connect(self):
             # create_connection((host,...)) 대신 검증 IP 로 직접 연결(재해석 제거).
             sock = socket.create_connection((pinned_ip, self.port), self.timeout, self.source_address)
+            if on_socket is not None:
+                on_socket(sock)        # v2.768(R3-C3-1): 전체 시한 워치독 등록(TLS 핸드셰이크 전)
             if https:
                 # SNI·인증서 검증 이름은 원 호스트명(self.host)으로 — 리바인딩만 막고 TLS 는 정상.
                 self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
@@ -52,17 +142,21 @@ def _pinned_connection_factory(pinned_ip, https):
     return _Pinned
 
 
-def build_pinned_opener(pinned_ip, *, tls_context, extra_handlers=()):
+def build_pinned_opener(pinned_ip, *, tls_context, extra_handlers=(), deadline=None):
     """검증 IP 로 핀한 urllib opener. https 는 tls_context(검증 on/off 는 호출부 결정)를 쓴다.
 
     extra_handlers: 리다이렉트 미추적 핸들러 등 추가 핸들러(호출부 정책 유지).
+    deadline: RequestDeadline — 주면 연결 소켓을 등록해 요청 전체 시한을 건다(v2.768 R3-C3-1).
     """
+    on_socket = deadline.track if deadline is not None else None
+
     class _PinnedHTTPHandler(urllib.request.HTTPHandler):
         def http_open(self, req):
-            return self.do_open(_pinned_connection_factory(pinned_ip, https=False), req)
+            return self.do_open(_pinned_connection_factory(pinned_ip, https=False, on_socket=on_socket), req)
 
     class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
         def https_open(self, req):
-            return self.do_open(_pinned_connection_factory(pinned_ip, https=True), req, context=tls_context)
+            return self.do_open(_pinned_connection_factory(pinned_ip, https=True, on_socket=on_socket),
+                                req, context=tls_context)
 
     return urllib.request.build_opener(*extra_handlers, _PinnedHTTPHandler(), _PinnedHTTPSHandler(context=tls_context))

@@ -32,12 +32,12 @@ import { StringDecoder } from 'node:string_decoder';
  */
 export const SSH_WS_MAX_PAYLOAD = 256 * 1024;
 import { Client as SSHClient } from 'ssh2';
-import { resolveTokenUser, sessionInfoOf, touchSessionActivity } from '../auth/auth.js';
+import { resolveTokenUser, sessionInfoOf, touchSessionActivity, authDisabledRole } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
-import { getMapping, getProxyById, touchMapping } from './registry.js';
+import { getMapping, getProxyById, touchMapping, resolveProxy } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
-import { targetHostScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
+import { mappingTargetScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { makeSshHostVerifier, sshHostKeyError } from './sshExec.js';
 import { onSessionRevoked, revocationMatches } from '../auth/sessionRevocation.js';
@@ -70,6 +70,16 @@ export function remoteUserIssue(user) {
 }
 
 const HTTP_REASON = { 401: 'Unauthorized', 403: 'Forbidden' };
+
+/**
+ * v2.770(점검 R5-E5-6): 인증이 꺼진 설치(AUTH_ENABLED=false)의 WS 사용자 — HTTP authMiddleware 가 req.user 로 쓰는 것과 **같은 합성 사용자**
+ *   (username 'anonymous', role = AUTH_DISABLED_ROLE). 예전에는 user=null 로 넘겨 mappingAccessIssue(null) 이 '매핑을 찾을 수 없습니다' 를 돌려
+ *   HTTP 로는 매핑까지 만들어지는데 웹 SSH·RDP 가 전부 거부됐다. 이제 같은 판정(remoteUserIssue·mappingAccessIssue)을 탄다 —
+ *   AUTH_DISABLED_ROLE=viewer 면 remote.access 가 없어 업그레이드부터 403 이다(HTTP requirePerm 과 일치). 인증 on 경로는 그대로.
+ */
+export function authDisabledRemoteUser() {
+  return { username: 'anonymous', role: authDisabledRole(), name: 'Anonymous' };
+}
 // 업그레이드 때 받은 토큰 — 열린 연결의 재검증·만료 타이머가 쓴다(S-04). ws 객체가 사라지면 함께 사라진다.
 const _wsToken = new WeakMap();
 
@@ -98,6 +108,10 @@ export function attachSshGateway(server) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
       // (payload.role 직접 신뢰 금지: 강등/삭제된 계정의 구토큰이 TTL까지 터널을 열 수 있었다.)
       user = remoteDeps.resolveTokenUser(token);
+    } else {
+      user = authDisabledRemoteUser(); // v2.770(점검 R5-E5-6): HTTP 와 같은 익명 역할로 같은 판정을 탄다
+    }
+    {
       const deny = remoteUserIssue(user); // OTP 등록 전·데모·remote.access — 열린 뒤 재검증과 같은 함수(S-04)
       if (deny) { socket.write(`HTTP/1.1 ${deny.status} ${HTTP_REASON[deny.status]}\r\n\r\n`); return socket.destroy(); }
     }
@@ -113,9 +127,12 @@ export function attachSshGateway(server) {
  */
 export function mappingAccessIssue(user, m) {
   if (!user || !m) return '매핑을 찾을 수 없습니다.';
+  // v2.770(점검 R5-E5-1): 대상 문자열만이 아니라 (vcenterId, targetHost) 쌍 + 매핑이 실제로 나가는 중계가 그 vCenter 의 중계인지 본다 —
+  //   예전에는 IP 만 다시 봐서 vcenterId 를 비워 기본 프록시(범위 밖 법인 망)로 만든 매핑도 통과했다. 판정은 targetHostScope.js 하나.
+  const proxyIdOf = (vc) => resolveProxy(vc).id;
   if (user.role !== 'admin') {
     if (m.owner !== user.username) return '이 접속 매핑에 대한 권한이 없습니다.'; // 소유자 없는 매핑도 admin 전용
-    const scopeIssue = targetHostScopeIssue(store.get(), scopedVcenterIds(user, store.get()), m.targetHost);
+    const scopeIssue = mappingTargetScopeIssue(store.get(), scopedVcenterIds(user, store.get()), m, { proxyIdOf });
     if (scopeIssue) return scopeIssue;
     return null;
   }
@@ -124,7 +141,7 @@ export function mappingAccessIssue(user, m) {
   //   전체 범위 admin(null)은 예전 그대로 허용.
   const allowed = scopedVcenterIds(user, store.get());
   if (allowed) {
-    const scopeIssue = targetHostScopeIssue(store.get(), allowed, m.targetHost);
+    const scopeIssue = mappingTargetScopeIssue(store.get(), allowed, m, { proxyIdOf });
     if (scopeIssue) return scopeIssue;
   }
   return null;

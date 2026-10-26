@@ -55,6 +55,7 @@ const PURPOSES = {
   'ipam-scan-runs.json': 'IPAM 스캔 실행 기록',
   'backup.json': '구성 백업 스케줄 설정',
   'vcenter-logs.json': 'vCenter 로그 수집 설정',
+  'vcenter-logs-cursor.json': 'vCenter 이벤트 수집 커서(읽은 마지막 시각·온전한 시각 — 상태, v2.765)',
   'capture-monitors.json': '네트워크 상시 모니터(캡처) 정의',
   'capture-history.json': '네트워크 트래픽 캡처 이력',
   'central-agent-tokens.json': '중앙↔에이전트 인증 토큰',
@@ -69,6 +70,7 @@ const PURPOSES = {
   'vmperf.json': 'VM 성능 트래킹 설정(보존기간·대상 vCenter)',
   'vm-track.db': 'VM 수량·데이터스토어 사용량 추이(하루 2회 슬롯 스냅샷 + 변경분)',
   'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
+  'veeam-snap.db': 'Veeam 스냅샷 이벤트(생성·제거만 · 최근 31일) — vCenter 카드 백업 수량·VM 화면 Veeam 백업 시도를 바로 계산',
   'ping-monitor.db': '핑 모니터 응답/손실 시계열',
   'storage-history.db': '스토리지 장비(8종) 용량 이력',
   // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이
@@ -104,6 +106,9 @@ const PURPOSES = {
   'sanswitch-devices.json': 'SAN 스위치 등록부(호스트·계정·담당 엣지 — 비밀번호 봉인)',
   'pdu-devices.json': 'PDU 등록부(호스트·SSH CLI 계정·담당 엣지 — 비밀 봉인)',
   'cvp-servers.json': 'Arista CloudVision(CVP) 서버 등록부(주소·토큰/계정·담당 엣지 — 비밀 봉인, v2.608)',
+  'veeam-servers.json': 'Veeam Backup & Replication 서버 등록부(주소·계정·연결 vCenter·담당 엣지 — 비밀번호 봉인, v2.751)',
+  'veeam-latest.json': 'Veeam 서버별 마지막 백업 상태(상태 — 작업·VM·실행 중 백업, 중앙 직접 수집 + 엣지 push, v2.751)',
+  'veeam-auth-stops.json': 'Veeam 서버 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.751)',
   'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',
   'vm-dns-policy.json': 'VM DNS 승인 정책(법인별 승인 DNS 주소·CIDR · 공인 DNS 판정, v2.696)',
   'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',
@@ -171,6 +176,12 @@ const DETAILS = {
     writer: 'vmtrack 폴러(하루 2회 슬롯 00시·12시 + 수동 스냅샷)',
     retention: 'prune 용 ts 인덱스 유지 — 슬롯 기반이라 증가가 완만',
     note: '전량 로스터를 매 슬롯 적재하지 않고 변경분만 저장한다(5,850 VM·1,100 DS 규모에서 연 수백만 행을 피하기 위함).',
+  },
+  'veeam-snap.db': {
+    keeps: 'vCenter 이벤트 중 스냅샷 생성·제거 행만(snap_ev) · 백필 진행 기록(snap_meta) · 엣지가 보낸 Veeam 스냅샷 요약(snap_edge — 중앙).',
+    writer: 'vCenter 로그 폴러(이벤트 적재 때 함께) · 업그레이드 뒤 한 번 로그 DB 에서 백필(8일 먼저, 그다음 31일) · 엣지 Veeam push 수신',
+    retention: '31일(사용자 지시 — 최근 1달) · 청크 정리',
+    note: '화면이 로그 DB(전 이벤트)를 요청마다 검색하던 것을 대신한다 — 이 파일이 없거나 열리지 않으면 예전 방식(느림)으로 계산한다.',
   },
   'capacity.db': {
     keeps: '포탈이 설치된 서버 자신(중앙·엣지)의 CPU·메모리·디스크·네트워크 사용량 샘플 — 리소스 적정성 진단용(vCenter 클러스터 용량과는 무관).',

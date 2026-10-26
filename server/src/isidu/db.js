@@ -255,6 +255,24 @@ export async function scansIn(agent, targetId, sinceTs, limit = 2000) {
     .all(String(agent ?? ''), String(targetId), Math.round(sinceTs), Math.max(1, Math.min(5000, Math.round(limit)))).map(scanRow);
 }
 
+/**
+ * v2.769(점검 R4-D4-04): 기간 안 스캔을 **최신부터** limit 개 읽어 시각 오름차순으로 돌려준다. `scansIn` 은 오름차순 LIMIT 이라
+ * 기간 안 스캔이 limit 을 넘으면 **가장 오래된 것**만 와 최근 구간이 빠졌다(1시간 주기 대상 365일 보기 — 마지막 점이 156.7일 전).
+ * 반환 `{ scans, truncated }` — truncated 는 limit 보다 많아 가장 오래된 쪽을 잘랐다는 뜻(limit+1 개를 읽어 판정한다).
+ */
+export const SCANS_LATEST_MAX = 10_000;
+export async function scansInLatest(agent, targetId, sinceTs, limit = SCANS_LATEST_MAX) {
+  const db = await getDb();
+  if (!db) return null;
+  const lim = Math.max(1, Math.min(SCANS_LATEST_MAX, Math.round(Number(limit) || SCANS_LATEST_MAX)));
+  const rows = db.prepare(`SELECT * FROM isidu_scan WHERE agent=? AND target_id=? AND ts>=? AND complete=1 ORDER BY ts DESC LIMIT ?`)
+    .all(String(agent ?? ''), String(targetId), Math.round(sinceTs), lim + 1);
+  const truncated = rows.length > lim;
+  if (truncated) rows.length = lim;
+  rows.reverse();
+  return { scans: rows.map(scanRow), truncated };
+}
+
 /** 사용자(폴더) 하나의 기간 추이 — 성공 스캔마다 1점(그 스캔에 폴더가 없으면 점이 없다). */
 export async function seriesOfName(agent, targetId, name, sinceTs) {
   const db = await getDb();

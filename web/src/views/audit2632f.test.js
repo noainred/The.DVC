@@ -1,5 +1,6 @@
 /**
  * v2.632 그룹 F(웹 표시) 회귀 — WEB2632-03..07 + data-sort `?? 0` 5곳.
+ * (v2.747: WEB2632-06 물리 서버 KPI 검사는 그 함수를 쓰던 V4·V5 셸과 함께 지웠다.)
  * 판정은 순수 모듈로, 화면 파일은 주석을 뗀 소스로 본다(웹 테스트는 DOM 이 없다).
  */
 import { describe, it, expect } from 'vitest';
@@ -11,8 +12,6 @@ import { topOmittedNote } from './topOmittedText.js';
 import { dsOptionLabel } from './tools/vmCloneDsText.js';
 import { forecastCapNote } from './toolsReportText.js';
 import { licenseDupNote } from './tools/licenseScopeText.js';
-import { physicalServersKpi } from './vcCardText.js';
-import { infraTotals } from '../version_5/overviewData.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (rel) => stripComments(fs.readFileSync(path.join(here, rel), 'utf8'));
@@ -56,23 +55,6 @@ describe('WEB2632-05 VM 복제 대상 DS — 여유 미상을 0TB 로 보이지 
     const s = src('tools/VmCloneTool.jsx');
     expect(s).not.toMatch(/ds\.freeGB \|\| 0/);
     expect(s).toMatch(/dsOptionLabel\(ds\)/);
-  });
-});
-
-describe('WEB2632-06 물리 서버 집계 실패를 없음·0 으로 보이지 않는다', () => {
-  it('physicalServersKpi — error 면 실패라고 말한다', () => {
-    expect(physicalServersKpi({ servers: 0, error: 'boom' })).toEqual({ value: null, note: '물리 서버 집계 실패' });
-    expect(physicalServersKpi({ servers: 0 })).toEqual({ value: null, note: 'iDRAC 등록 없음' });
-    expect(physicalServersKpi({ servers: 5 })).toEqual({ value: 5, note: null });
-  });
-  it('V5 infraTotals(전체) — error 면 null + 사유', () => {
-    const base = { global: { vcenters: 1, hosts: 1, vms: 1, vmsPoweredOn: 1, datastores: 0 } };
-    const r = infraTotals({ ...base, physical: { servers: 0, error: 'x' } });
-    expect(r.physical).toBeNull();
-    expect(r.physicalNote).toMatch(/읽지 못했습니다/);
-    const ok = infraTotals({ ...base, physical: { servers: 0 } });
-    expect(ok.physical).toBe(0);
-    expect(ok.physicalNote).toBeNull();
   });
 });
 

@@ -168,5 +168,44 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
   return out;
 }
 
+/**
+ * v2.767(점검 R2-B2-02): VM id 의 소유 vCenter — `${vc.id}:${moref}` 네임스페이스를 **최장 프리픽스**로 푼다.
+ * vc.id 자체에 콜론이 있을 수 있어 split(':') 로 뽑으면 오파싱한다(central gpu-guest-data 와 같은 규칙).
+ * @param {string} vmId
+ * @param {Iterable<string>} vcIds 알려진 vCenter id
+ * @returns {string|null} 소유 vCenter id(없으면 null)
+ */
+export function vmOwnerByPrefix(vmId, vcIds) {
+  const s = String(vmId || '');
+  let best = null;
+  for (const raw of vcIds || []) {
+    const id = String(raw || '');
+    if (id && s.startsWith(`${id}:`) && (best == null || id.length > best.length)) best = id;
+  }
+  return best;
+}
+
+/**
+ * v2.767(점검 R2-B2-02): 엣지가 vcenterId 로 보낸 VM 중 **그 vCenter 의 id 네임스페이스가 아닌 행**을 가른다.
+ * 예전에는 vmId 를 문자열로만 잘라 받아, vc-a 를 소유한 엣지가 vmId 'vc-b:vm-1' 을 보내면 vm_id PK 로 vc-b VM 의 행을
+ * vcenterId 'vc-a' 로 덮었다(→ vc-a 범위 계정이 vc-b VM 의 이력·파티션 경로를 읽음, vc-b 리포트에서는 사라짐 — 재현).
+ * vmId 는 `${vcenterId}:` 로 시작해야 하고, 더 긴 등록 id(예: 'vc:b' — vcenterId 'vc' 의 확장)가 소유하면 그쪽 VM 이다.
+ * @returns {{kept:object[], foreign:number}}
+ */
+export function splitVmsByOwner(vms, vcenterId, knownVcIds = []) {
+  const vc = String(vcenterId || '');
+  const pre = `${vc}:`;
+  // 이 vCenter id 를 확장하는 더 긴 등록 id 만이 접두를 가로챌 수 있다(나머지는 볼 필요 없다 — O(VM × 소수)).
+  const shadows = [...(knownVcIds || [])].map((x) => String(x || '')).filter((id) => id.length > vc.length && id.startsWith(pre));
+  const kept = [];
+  let foreign = 0;
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    const id = String(vm?.vmId || '');
+    if (!vc || !id.startsWith(pre) || shadows.some((s) => id.startsWith(`${s}:`))) { foreign++; continue; }
+    kept.push(vm);
+  }
+  return { kept, foreign };
+}
+
 function round1(n) { return Math.round((Number(n) || 0) * 10) / 10; }
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }

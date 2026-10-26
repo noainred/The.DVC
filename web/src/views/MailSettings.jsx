@@ -16,6 +16,15 @@ import { requireChanged } from './changeResult.js'; // v2.742(WEB-02): 400 본�
  *
  * ⚠️ 훅은 전부 최상단 — 조기 return 뒤 useState 는 React #310 크래시를 만든다(v2.202 실제 사고).
  */
+/**
+ * 최근 발송 표가 빌 때의 문구 — v2.768(점검 R3-C2-1): 범위(vCenter 제한) 계정에는 서버가 발송 이력·최근 오류를 싣지 않는다
+ * (전 법인 알림 메일의 제목·수신자라 나눌 축이 없다 — omittedOutOfScope). 그 빈 목록을 '기록 없음' 이라 말하면 거짓이다.
+ */
+export function mailHistoryEmptyText(st) {
+  if (st?.scoped && st?.omittedOutOfScope) return '발송 이력과 최근 오류는 전 법인 알림 메일 기록이라 범위(vCenter 제한) 계정에는 표시하지 않습니다.';
+  return '아직 발송 기록이 없습니다.';
+}
+
 export default function MailSettings() {
   const [d, setD] = useState(null);          // { settings, status, kinds }
   const [err, setErr] = useState(null);
@@ -204,7 +213,8 @@ export default function MailSettings() {
           <BoldText text={mailAuthStopText(st.authStopped)} />
         </div>
       )}
-      {(st.history || []).length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>아직 발송 기록이 없습니다.</div>}
+      {/* v2.768(점검 R3-C2-1): 범위 계정에는 서버가 이력·최근 오류를 싣지 않는다(전 법인 알림 메일 제목·수신자) — 빈 이력을 '기록 없음' 으로 말하지 않는다. */}
+      {(st.history || []).length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{mailHistoryEmptyText(st)}</div>}
       {(st.history || []).length > 0 && (
         <STable style={{ width: '100%', fontSize: 12 }}>
           <thead><tr><th>시각</th><th>기능</th><th>제목</th><th>상태</th><th>비고</th></tr></thead>

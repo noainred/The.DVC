@@ -3,7 +3,7 @@
  * 웹 테스트는 node 환경(DOM 없음)이라 훅 자체는 못 돌린다 — 판정을 순수 함수로 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { hashSegments, isUnderBase, tabFromHash, buildHash, movedTabHash, MOVED_TABS } from './hashTab.js';
+import { hashSegments, isUnderBase, tabFromHash, buildHash, movedTabHash, MOVED_TABS, legacyShellHash } from './hashTab.js';
 
 describe('hashSegments', () => {
   it('선행 #/ 와 빈 조각을 걷어낸다', () => {
@@ -86,5 +86,22 @@ describe('CATALOG2613-09: movedTabHash 가 explore·nsx 옛 주소를 새 주소
     expect(tabFromHash(movedTabHash('#/nsx/dfw'), MOVED_TABS.nsx, ['gateways', 'segments', 'nodes', 'dfw', 'groups'])).toBe('dfw');
     expect(movedTabHash('#/tools/nsx')).toBeNull();
     expect(movedTabHash('#/tools/explore')).toBeNull();
+  });
+});
+
+describe('legacyShellHash (v2.747 V3~V6 셸 삭제)', () => {
+  it('V5·V6 주소는 뒤 주소(기존 화면)로', () => {
+    expect(legacyShellHash('#/v5')).toBe('#/overview');
+    expect(legacyShellHash('#/v6/')).toBe('#/overview');
+    expect(legacyShellHash('#/v5/vms')).toBe('#/vms');
+    expect(legacyShellHash('#/v6/tools/storage-mon')).toBe('#/tools/storage-mon');
+  });
+  it('V6 메뉴 페이지·V3·V4 화면은 Overview 로', () => {
+    for (const h of ['#/m/server', '#/m/server/phys', '#/v6/m/storage', '#/v4', '#/v4/facility', '#/v3/compare', '#/v5/v4/x']) {
+      expect(legacyShellHash(h)).toBe('#/overview');
+    }
+  });
+  it('일반 주소는 건드리지 않는다', () => {
+    for (const h of ['', '#/', '#/overview', '#/tools/gpu', '#/console', '#/vms', '#/v7', '#/mm']) expect(legacyShellHash(h)).toBe(null);
   });
 });

@@ -37,6 +37,7 @@ import {
   findingGroupLine as invFindingGroupLine, bannerText as invBannerText, freshRateText,
   tableFootnotes as invTableFootnotes,
 } from './invCheckText.js';
+import { probeAgeLine, sameTokenCell } from './tokenProbeAge.js'; // v2.785(GE O-B1): 프로브 나이·낡음·등록값 변경 표시
 import { ArchCheckView } from './ArchCheckView.jsx'; // v2.614: 세 번째 서브메뉴 — 아키텍처 점검(자기 데이터·상태를 갖는다)
 
 const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검'], ['arch', '아키텍처 점검']];
@@ -211,11 +212,18 @@ function TokenCheckView() {
                     <td>{r.registered ? '등록됨' : <Badge text="등록부 없음" tone="amber" />}</td>
                     <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.url || ''}>{r.url || '—'}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fpText(r.collector)}</td>
-                    <td data-sort={pst}><Badge text={PROBE_LABEL[pst] || pst} tone={PROBE_TONE[pst] || 'gray'} /></td>
-                    {/* ⚠ '증명' 이라는 말은 200 일 때만 — 지문 대조와 근거 강도가 다르다. */}
-                    <td>{pst === 'ok' ? <Badge text="같음(증명)" tone="green" />
-                      : pst === 'token-mismatch' ? <Badge text="다름" tone="red" />
-                        : <Badge text="확인 불가" tone="gray" />}</td>
+                    {(() => {
+                      // v2.785(GE O-B1): 언제 본 결과인지(낡음·등록값 변경은 서버 판정)를 배지 아래에 적는다.
+                      const age = probeAgeLine(r.probe, ago);
+                      return (
+                        <td data-sort={pst} title={age.title || undefined}>
+                          <Badge text={PROBE_LABEL[pst] || pst} tone={PROBE_TONE[pst] || 'gray'} />
+                          {age.text && <div style={{ fontSize: 11, color: TONE[age.tone] || TONE.gray }}>{age.text}</div>}
+                        </td>
+                      );
+                    })()}
+                    {/* ⚠ '증명' 이라는 말은 지금 유효한 200 일 때만 — 지문 대조·낡은 결과와 근거 강도가 다르다. */}
+                    {(() => { const sc = sameTokenCell(r.probe); return <td><Badge text={sc.text} tone={sc.tone} /></td>; })()}
                     <td data-sort={fact}>{fact ? <Badge text={EDGE_FACT_LABEL[fact] || fact} tone={EDGE_FACT_TONE[fact] || 'gray'} /> : <span style={{ color: 'var(--muted)' }}>보고 없음</span>}</td>
                     <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                       {!r.deploy?.present ? '—'
@@ -300,10 +308,12 @@ function TokenCheckView() {
                 <Badge text={PROBE_LABEL[detail.probe?.state || 'not-run']} tone={PROBE_TONE[detail.probe?.state || 'not-run']} />
                 {detail.probe?.httpStatus ? <span style={{ color: 'var(--muted)' }}> · HTTP {detail.probe.httpStatus}</span> : null}
                 {detail.probe?.ms ? <span style={{ color: 'var(--muted)' }}> · {detail.probe.ms}ms</span> : null}
+                {probeAgeLine(detail.probe, ago).text ? <span style={{ color: 'var(--muted)' }}> · {probeAgeLine(detail.probe, ago).text}</span> : null}
                 {detail.probe?.reason && <div style={{ color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{detail.probe.reason}</div>}
               </div>
               <div>
                 <div style={{ fontWeight: 600, marginBottom: 2 }}>③ 수집 토큰(중앙 → 엣지) 동일성</div>
+                {detail.probe?.stale === true && <div style={{ color: TONE.amber }}>아래는 {ago(detail.probe.at)}의 점검 결과입니다 — 지금도 같은지는 ‘지금 점검’ 으로 다시 확인하세요.</div>}
                 <BoldText text={evidenceText(detail)} />
               </div>
               <div>

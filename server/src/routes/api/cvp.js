@@ -195,7 +195,40 @@ export function maskErrText(v, hosts = []) {
   if (typeof v !== 'string' || !v) return v;
   return scrubHosts(v, hosts)
     .replace(/\bhttps?:\/\/[^\s,)'"]{1,300}/g, '(주소 가림)')
-    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)');
+    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)')
+    .replace(IPV6_CAND, (m) => (isIpv6Like(m) ? '(주소 가림)' : m));
+}
+
+/**
+ * v2.769(점검 R4-D5-2): IPv6 리터럴 후보 — 앞뒤가 영숫자·밑줄·콜론(앞은 점도)이 아닌 곳에서 시작·끝나는 '16진수 0~4자 + 콜론' 2~7회 + 16진수 0~4자.
+ * 모든 반복에 상한이 있고 lookbehind 가 영숫자·콜론 연속의 **첫 글자**에서만 시작을 허용하므로 시작점마다 상수 시도(선형 — 정규식 규약).
+ * 시각('12:30:45')·MAC 은 후보가 될 수 있어 isIpv6Like 로 '::' 축약이 있거나 콜론 7개(완전 표기)인 것만 가린다.
+ */
+const IPV6_CAND = /(?<![0-9A-Za-z_:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Za-z_:])/g;
+function isIpv6Like(m) {
+  if (!/[0-9A-Fa-f]/.test(m)) return false; // '::' 만(16진수 없음)은 주소가 아니다
+  if (m.includes('::')) return true;
+  let colons = 0; for (const ch of m) if (ch === ':') colons++;
+  return colons === 7;
+}
+
+/**
+ * v2.769(점검 R4-D5-2): 비-admin BGP 장애 라벨 — 피어 부분을 통째로 '(주소 가림)' 으로 바꾸고 VRF 만 남긴다(maskPeers 와 같은 등급).
+ * 예전에는 maskErrText(IPv4·URL·등록 주소만)를 거쳐 IPv6 피어('2001:db8::1 (default)')가 그대로 나갔다(cvp.md '세 응답 전부' 위반).
+ * 라벨 = faults.js bgpObservation 의 `${peer} (${vrf})`(vrf 없으면 peer), faultKey = `bgp:${vrf||'default'}|${peer}` — 둘을 대조해
+ * VRF 를 정확히 고른다(정규식 없음 — faultKey 는 256자 상한). 대조가 안 되면 VRF 도 빼고 '(주소 가림)' 만(지어내지 않는다).
+ */
+export function maskBgpLabel(f, hosts = []) {
+  const label = typeof f?.label === 'string' ? f.label : '';
+  const fk = typeof f?.faultKey === 'string' && f.faultKey.startsWith('bgp:') ? f.faultKey.slice(4, 4 + 512) : null;
+  if (fk != null && label) {
+    for (let i = fk.indexOf('|'); i >= 0; i = fk.indexOf('|', i + 1)) {
+      const vrf = fk.slice(0, i); const peer = fk.slice(i + 1);
+      if (label === `${peer} (${vrf})`) return `(주소 가림) (${maskErrText(vrf, hosts)})`;
+      if (vrf === 'default' && label === peer) return '(주소 가림)';
+    }
+  }
+  return '(주소 가림)';
 }
 
 /**
@@ -310,7 +343,7 @@ api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
     const c = corpOf(f.cvpId);
     const base = { at: f.at, event: f.event, state: f.state, prevState: f.prevState, kind: f.kind, label: f.label, detail: f.detail, closeReason: f.closeReason,
       cvpId: f.cvpId, deviceKey: f.deviceKey, deviceName: f.deviceName, cvpName: nameOf.get(String(f.cvpId)) || f.cvpId, corpId: c.corpId, corpName: c.corpName };
-    return admin ? base : { ...base, detail: maskErrText(base.detail, hosts), label: f.kind === 'bgp' ? maskErrText(base.label, hosts) : base.label };
+    return admin ? base : { ...base, detail: maskErrText(base.detail, hosts), label: f.kind === 'bgp' ? maskBgpLabel(f, hosts) : base.label };
   });
   res.json({
     ...ov, enabled: settings.enabled || cvpDemoActive(servers), ...(cvpDemoActive(servers) ? { demo: true } : {}),
@@ -343,7 +376,7 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = admin ? st0 : maskStatusText(st0, hosts);
   // v2.645: 이 장비의 열린 장애 · 장애 전이 이력(30일) · 이벤트(7일, 장비 식별자 = 시리얼·장비 키) — 한 화면에서 이력을 보게.
   //   전부 중앙 DB(장비 왕복 0). BGP 라벨·상세·이벤트 본문은 비-admin 에 주소를 가린다(/tools/cvp/faults·/events 와 같은 규칙).
-  const maskF = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskErrText(f.label, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
+  const maskF = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskBgpLabel(f, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
   const HIST_MAX = 100;
   const [of, fe, ev] = await Promise.all([
     cdb.listOpenFaults({ agent, cvpId }).catch(() => ({ rows: [], unavailable: true })),
@@ -626,7 +659,7 @@ api.get('/tools/cvp/faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const known = new Set(servers.map((s) => String(s.id)));
   const hosts = servers.map((s) => s.host);
   const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
-  const mask = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskErrText(f.label, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
+  const mask = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskBgpLabel(f, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
   let open = []; let events = []; let unavailable = false;
   try {
     const o = await cdb.listOpenFaults({ cvpId });

@@ -62,13 +62,17 @@ function initSqlite() {
     //   옛 행은 NULL → 리포트가 단정하지 않고 '확인 불가' 로 말한다.
     const cols = db.prepare('PRAGMA table_info(scans)').all().map((c) => c.name);
     if (!cols.includes('name_set')) db.exec('ALTER TABLE scans ADD COLUMN name_set TEXT');
+    // v2.767(점검 R2-B2-01): du 가 읽지 못한 경로 수(exit 1 인데 루트 합계가 있어 받은 회차). 옛 행은 0.
+    if (!cols.includes('warn_count')) db.exec('ALTER TABLE scans ADD COLUMN warn_count INTEGER NOT NULL DEFAULT 0');
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const ins = db.prepare(`INSERT INTO scans
-      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries, name_set)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries, name_set, warn_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const lastFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT 1');
     const prevFor = db.prepare('SELECT * FROM scans WHERE target_id=? AND ts<? ORDER BY ts DESC LIMIT 1');
+    // v2.768(점검 R3-C4-3): '변경 시에만 발송' 의 기준 — 마지막으로 **발송에 성공한** 회차(idx_scans_target_ts 를 거꾸로 훑는다).
+    const lastMailedFor = db.prepare('SELECT * FROM scans WHERE target_id=? AND mailed=1 ORDER BY ts DESC LIMIT 1');
     const listFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT ?');
     const byId = db.prepare('SELECT * FROM scans WHERE id=?');
     const latestAll = db.prepare(`SELECT s.* FROM scans s
@@ -91,11 +95,14 @@ function initSqlite() {
           Math.round(rec.othersBytes || 0), rec.othersCount || 0,
           rec.skipped || 0, rec.truncated ? 1 : 0,
           JSON.stringify(rec.entries || []),
-          typeof rec.nameSet === 'string' && rec.nameSet ? rec.nameSet : null);
+          typeof rec.nameSet === 'string' && rec.nameSet ? rec.nameSet : null,
+          Number.isInteger(rec.warnCount) && rec.warnCount > 0 ? rec.warnCount : 0);
         return Number(r.lastInsertRowid);
       },
       /** 이 대상의 가장 최근 스캔. */
       last(targetId) { return hydrate(lastFor.get(String(targetId))); },
+      /** 이 대상에서 마지막으로 메일 발송에 성공한(mailed=1) 스캔 — 없으면 null. */
+      lastMailed(targetId) { return hydrate(lastMailedFor.get(String(targetId))); },
       /** ts 직전 스캔 — 증감 계산의 기준선. */
       prev(targetId, ts) { return hydrate(prevFor.get(String(targetId), Number(ts))); },
       list(targetId, limit = 50) { return listFor.all(String(targetId), pageArgs({ limit }, { def: 50, max: 1000 }).limit).map(hydrateLite); },

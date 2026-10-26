@@ -16,6 +16,15 @@
  *    데이터스토어 가득참 사고의 씨앗이라 '스냅샷 나이 감시' 도구로도 보이게 됨).
  *  - NFS 보존 삭제는 마운트 경로 안(containment 검증)의 우리 스탬프 디렉터리만 rm — 경로
  *    탈출 시 즉시 중단(절대 완화 금지).
+ *  - v2.767(점검 R2-B3-2·3·4) NFS 경로·보존 규칙:
+ *    · 경로 = <마운트>/<subdir>/<vCenter 슬러그>/<VM 이름 슬러그>__<VM MoRef 슬러그>/<YYYYMMDD-HHMM>/<데이터스토어 슬러그>/<원 경로>.
+ *      예전 <마운트>/<subdir>/<VM 이름> 은 다른 vCenter·같은 vCenter 의 동명 VM 잡이 같은 폴더를 써서 보존정책이 서로의 백업을
+ *      지웠고, vmName('../web01')이 정제되지 않아 남의 폴더로 들어갔다. 파일은 데이터스토어별 하위 폴더에 원 경로대로 둔다 —
+ *      두 데이터스토어의 동명 디스크(web01-flat.vmdk)가 같은 파일로 덮어써지지 않게(manifest 의 file 이 그 상대 경로).
+ *    · 보존은 manifest.json 이 있고 그 vcenterId·vmId 가 이 잡과 같은 폴더만 센다·지운다(불완전 폴더·남의 백업 제외).
+ *    · 실패한 실행의 불완전 폴더(manifest 없음)는 그 자리에서 지운다(재시작 중단과 같은 cleanupPartialNfs 규칙).
+ *    · ⚠ 옛 경로(<마운트>/<subdir>/<VM 이름>)에 남은 이전 백업은 **지우지 않고 그대로 둔다** — 새 보존정책 대상이 아니므로
+ *      필요 없으면 직접 지워야 한다. 남아 있으면 실행 결과(lastRun)에 그 사실을 적는다(legacyNfsNote).
  *  - mock 모드(개발): 실제 vCenter 없이 성공 시뮬레이션(2초) — UI/스케줄 개발용.
  */
 
@@ -140,6 +149,62 @@ export function cleanupPartialNfs(job, st) {
   } catch (e) { return ` · 중단된 NFS 백업 폴더를 정리하지 못했습니다(${e?.message || e})`; }
 }
 
+// ── v2.767(점검 R2-B3-2·3·4) NFS 백업 경로·보존 (순수에 가깝게 — audit2767a 가 임시 폴더로 고정) ─────────────────────
+const STAMP_RE = /^\d{8}-\d{4}$/;
+/** 파일·폴더 이름 하나로 안전한 슬러그 — 영숫자 . _ - 만, 선행 점은 '_'(‘..’·숨김 폴더 금지), 빈 값은 '_'. 길이를 먼저 자른다(선형). */
+export function pathSlug(v, max = 64) {
+  const s = String(v ?? '').slice(0, max * 4).replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_').slice(0, max);
+  return s || '_';
+}
+/** 잡의 NFS 백업 루트(스탬프 폴더들의 부모) — vCenter·VM(MoRef) 별로 갈라 동명 VM 잡이 겹치지 않게. */
+export function nfsBackupRoot(mp, job) {
+  const moref = morefOf(job.vmId, job.vcenterId) || job.vmId;
+  return path.join(mp, job.dest?.subdir || '', pathSlug(job.vcenterId, 100), `${pathSlug(job.vmName)}__${pathSlug(moref)}`);
+}
+/** 데이터스토어 파일의 백업 대상 경로 — <destDir>/<DS 슬러그>/<원 경로 각 단계 슬러그>. destDir 밖이면 null. */
+export function nfsFileTarget(destDir, pd) {
+  const parts = String(pd?.rel || '').split('/').filter(Boolean).map((x) => pathSlug(x, 255));
+  if (!parts.length) return null;
+  const target = path.join(destDir, pathSlug(pd.ds, 100), ...parts);
+  return path.resolve(target).startsWith(path.resolve(destDir) + path.sep) ? target : null;
+}
+/** 이 잡이 만든 온전한 백업인가 — manifest.json 이 있고 vcenterId·vmId 가 같을 때만(읽지 못하면 '아니다' — 지우지 않는다). */
+function ownsBackup(bakDir, job) {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(bakDir, 'manifest.json'), 'utf8'));
+    return !!m && m.vcenterId === job.vcenterId && m.vmId === job.vmId;
+  } catch { return false; }
+}
+/**
+ * NFS 보존 — destRoot 아래 스탬프 폴더 중 **이 잡의 온전한 백업만** 세어 keep 초과분을 오래된 순으로 지운다.
+ * 마운트 지점 밖이면 아무것도 지우지 않는다(이중 방어). @returns {string[]} 지운 폴더 이름
+ */
+export function pruneNfsBackups(mp, destRoot, job) {
+  const mpAbs = path.resolve(mp) + path.sep;
+  if (!path.resolve(destRoot).startsWith(mpAbs)) return [];
+  let names = [];
+  try { names = fs.readdirSync(destRoot, { withFileTypes: true }).filter((e) => e.isDirectory() && STAMP_RE.test(e.name)).map((e) => e.name); }
+  catch { return []; }
+  const mine = names.filter((n) => ownsBackup(path.join(destRoot, n), job)).sort();
+  const excess = mine.length - (Number(job.keep) || 1);
+  const removed = [];
+  for (let i = 0; i < excess; i++) {
+    const victim = path.join(destRoot, mine[i]);
+    if (!path.resolve(victim).startsWith(mpAbs)) break; // 이중 방어
+    fs.rmSync(victim, { recursive: true, force: true }); removed.push(mine[i]);
+  }
+  return removed;
+}
+/** 옛 경로(<마운트>/<subdir>/<VM 이름>)에 이전 백업이 남아 있으면 그 사실을 한 줄로(지우지 않는다). 없거나 마운트 밖이면 ''. */
+export function legacyNfsNote(mp, job) {
+  try {
+    const old = path.join(mp, job.dest?.subdir || '', String(job.vmName || ''));
+    if (!job.vmName || !path.resolve(old).startsWith(path.resolve(mp) + path.sep) || !fs.existsSync(old)) return '';
+    const n = fs.readdirSync(old, { withFileTypes: true }).filter((e) => e.isDirectory() && STAMP_RE.test(e.name)).length;
+    return n ? ` · 이전 판의 경로(${path.join(job.dest?.subdir || '', job.vmName)})에 남은 백업 ${n}개는 새 보존정책 대상이 아니라 지우지 않았습니다 — 필요 없으면 직접 지우세요` : '';
+  } catch { return ''; }
+}
+
 /**
  * 정리를 미룬다 — 다음 시도 시각을 적는다. RECOVER_GIVE_UP_MS 가 지났으면 기록을 내리고 수동 삭제를 안내한다(보류에는 시한).
  * @returns {{gaveUp:boolean, text:string}} lastRun 에 붙일 문장
@@ -170,6 +235,7 @@ async function runJobBody(jobId, trigger) {
   const stale = interruptedRunOf(job); // v2.741(TIMING-01): 이전 프로세스가 끝내지 못한 실행 — 새 스냅샷을 만들기 전에 정리한다
   let recoveryNote = '';              // 정리 결과(이번 실행 결과 뒤에 붙인다)
   let recovered = !stale;             // 정리를 마쳤는가(그 뒤의 실패는 이번 실행의 실패다 — 정리를 다시 미루지 않는다)
+  let nfsDestDir = '';                // v2.767(R2-B3-3): 이번 실행의 NFS 백업 폴더 — 실패하면 불완전 폴더를 지운다
   const done = (ok, detail, extra = {}) => {
     detail = `${detail}${recoveryNote}`;
     recordRun(jobId, { ok, detail, ms: Date.now() - t0, ...extra });
@@ -276,7 +342,7 @@ async function runJobBody(jobId, trigger) {
         const toDelete = pruneList(ledger, job.keep);
         const removedRefs = []; const skipped = [];
         for (const old of toDelete) {
-          try { await destroyClone(c, old.ref); removedRefs.push(old.ref); }
+          try { await destroyClone(c, old.ref, { expectedName: old.name }); removedRefs.push(old.ref); }   // v2.767(R2-B3-6): 이름 대조
           catch (e) { skipped.push(`${old.name}: ${e.message}`); }
         }
         done(true, `클론 완료 — ${cloneName} → [${job.dest.datastoreName}]` +
@@ -290,10 +356,13 @@ async function runJobBody(jobId, trigger) {
         if (!mount) throw new Error('NFS 마운트 항목이 없습니다(설정 › NFS 마운트).');
         const mp = mountPointOf(mount.id);
         if (!mountedSet().has(mp)) throw new Error(`NFS 가 마운트되어 있지 않습니다: ${mp} — 설정 › NFS 마운트에서 마운트하세요.`);
-        const destRoot = path.join(mp, job.dest.subdir || '', job.vmName);
+        const destRoot = nfsBackupRoot(mp, job);
         const destDir = path.join(destRoot, stamp());
-        // 경로 탈출 방지 — 최종 경로가 마운트 지점 아래인지 검증(subdir 는 저장 시 슬러그화됐지만 이중 방어).
+        // 경로 탈출 방지 — 최종 경로가 마운트 지점 아래인지 검증(subdir·이름은 슬러그화됐지만 이중 방어).
         if (!path.resolve(destDir).startsWith(path.resolve(mp) + path.sep)) throw new Error('백업 경로가 마운트 지점을 벗어납니다(차단).');
+        // 같은 분(스탬프)에 만든 폴더가 이미 있으면 겹쳐 쓰지 않는다 — 온전한 백업 위에 일부만 덮이거나, 실패 정리가 남의 폴더를 만지지 않게.
+        if (fs.existsSync(destDir)) throw new Error(`같은 시각(${path.basename(destDir)})의 백업 폴더가 이미 있습니다 — 1분 뒤 다시 실행하세요.`);
+        nfsDestDir = destDir;
 
         patchRunning(jobId, { phase: 'download', destDir });
         _running.phase = '파일 목록 조회';
@@ -309,27 +378,22 @@ async function runJobBody(jobId, trigger) {
           const pd = parseDsPath(wanted[i]);
           if (!pd) continue;
           _running.phase = `다운로드 ${i + 1}/${wanted.length} — ${pd.rel.split('/').pop()}`;
-          const dest = path.join(destDir, pd.rel.split('/').pop());
+          // v2.767(R2-B3-4): 데이터스토어별 하위 폴더 + 원 경로 — 두 데이터스토어의 동명 디스크가 같은 파일로 덮어써지지 않게.
+          const dest = nfsFileTarget(destDir, pd);
+          if (!dest) throw new Error(`백업 대상 경로를 만들 수 없습니다: ${wanted[i]}`);
           const sz = await downloadDsFile(c, vcCfg, { dcPath, ds: pd.ds, rel: pd.rel, destFile: dest });
-          bytes += sz; manifest.push({ src: wanted[i], file: path.basename(dest), bytes: sz });
+          bytes += sz; manifest.push({ src: wanted[i], file: path.relative(destDir, dest).split(path.sep).join('/'), bytes: sz });
         }
         fs.writeFileSync(path.join(destDir, 'manifest.json'), JSON.stringify({
-          vm: job.vmName, vcenterId: job.vcenterId, at: new Date().toISOString(), quiesce: job.quiesce,
-          note: '스냅샷 시점 베이스 파일 백업 — 복구: 데이터스토어에 업로드 후 vmx 등록(스냅샷 델타 제외본)', files: manifest,
+          vm: job.vmName, vcenterId: job.vcenterId, vmId: job.vmId, at: new Date().toISOString(), quiesce: job.quiesce, layout: 2,
+          note: '스냅샷 시점 베이스 파일 백업(스냅샷 델타 제외본) — 파일은 <데이터스토어>/<원 경로> 폴더에 있다. 복구: 각 file 을 src(원 데이터스토어 경로)의 데이터스토어·폴더로 업로드한 뒤 vmx 등록(vmx 가 다른 데이터스토어의 디스크를 [DS] 경로로 가리키므로 원래 배치대로 올릴 것)',
+          files: manifest,
         }, null, 2));
 
-        // NFS 보존 — destRoot 아래 스탬프 디렉터리(YYYYMMDD-HHMM)만 오래된 순 삭제.
+        // NFS 보존 — 이 잡의 온전한 백업(manifest 의 vcenterId·vmId 일치)만 세어 오래된 순 삭제.
         _running.phase = '보존정책 적용';
-        const dirs = fs.readdirSync(destRoot, { withFileTypes: true })
-          .filter((e) => e.isDirectory() && /^\d{8}-\d{4}$/.test(e.name)).map((e) => e.name).sort();
-        const excess = dirs.length - job.keep;
-        let removed = 0;
-        for (let i = 0; i < excess; i++) {
-          const victim = path.join(destRoot, dirs[i]);
-          if (!path.resolve(victim).startsWith(path.resolve(mp) + path.sep)) break; // 이중 방어
-          fs.rmSync(victim, { recursive: true, force: true }); removed++;
-        }
-        done(true, `NFS 백업 완료 — ${wanted.length}파일 ${(bytes / 1024 ** 3).toFixed(2)}GB → ${destDir}${removed ? ` · 보존정책 삭제 ${removed}개` : ''}`);
+        const removed = pruneNfsBackups(mp, destRoot, job).length;
+        done(true, `NFS 백업 완료 — ${wanted.length}파일 ${(bytes / 1024 ** 3).toFixed(2)}GB → ${destDir}${removed ? ` · 보존정책 삭제 ${removed}개` : ''}${legacyNfsNote(mp, job)}`);
       }
     } finally {
       if (snapRef) {
@@ -347,6 +411,8 @@ async function runJobBody(jobId, trigger) {
   } catch (e) {
     // v2.741: 정리를 마치기 전의 실패(vCenter 불통·로그인 실패)면 정리를 미룬다 — 다음 틱마다 다시 로그인하지 않게.
     if (stale && !recovered) recoveryNote = ` · ${postponeRecovery(jobId, stale, e.message).text}`;
-    done(false, e.message);
+    // v2.767(R2-B3-3): 실패한 NFS 백업의 불완전 폴더(manifest 없음)는 지운다 — 남기면 다음 보존 계산·복구 때 온전한 백업으로 오인된다.
+    const partialNote = nfsDestDir ? cleanupPartialNfs(job, { destDir: nfsDestDir }).replace('중단된 NFS 백업', '실패한 NFS 백업') : '';
+    done(false, `${e.message}${partialNote}`);
   }
 }

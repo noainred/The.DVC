@@ -128,9 +128,9 @@ test('BUG-13 앱 텍스트를 담는 선택자에 text-transform: uppercase 가 
   }
 });
 
-test('BUG-13(v2.583 #41) V4·콘솔 셸 표 머리글에도 uppercase 가 없다', () => {
-  // v2.575 는 styles.css 만 읽어 V4(지원되는 유일한 새 셸)의 .v3-table th 가 빠져 있었다.
-  for (const [file, sel] of [['version_4/v4.css', '.v3-table th'], ['console/console.css', '.dvc-table th']]) {
+test('BUG-13(v2.583 #41) 콘솔 셸 표 머리글에도 uppercase 가 없다', () => {
+  // v2.575 는 styles.css 만 읽어 셸 CSS 가 빠져 있었다(v2.747 V4 셸 v4.css 는 셸과 함께 지웠다).
+  for (const [file, sel] of [['console/console.css', '.dvc-table th']]) {
     const css = fs.readFileSync(path.join(WEB, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     const re = new RegExp(`(^|\\})\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{[^}]*\\}`, 'm');
     const m = css.match(re);

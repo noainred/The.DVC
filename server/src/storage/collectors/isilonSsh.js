@@ -135,13 +135,16 @@ export function parseIsiStatus(text) {
 
   // 클러스터 저장소 블록 — 각 행이 [라벨, HDD 열, SSD 열]. SSD 열은 '0 (0 Raw)'/'0 (n/a)' 가능.
   // 열 분리는 '괄호 묶음 포함 토큰' 2개로 잡는다: 값 뒤에 (…)가 붙거나 안 붙거나.
+  // v2.770(점검 R5-E2-02): 'm' 플래그를 뺐다 — grab 이 이미 줄 단위로 돌므로 ^ 는 줄 머리 하나면 된다. 예전에는 줄 안의 외로운 \r·U+2028
+  //   마다 ^ 시작점이 생기고 시작점마다 [^)]* 가 줄 끝까지 훑어 O(n²) 였다(시작점 1.6만 개 160KB 약 3.6초). 괄호 안도 길이 상한(64자 —
+  //   실물은 '(1.2P Raw)'·'(n/a)'·'(2%)' 정도)을 둔다. CRLF 정상 출력은 \r 이 줄 끝에 있어 결과가 같다(test/audit2770b.test.js 대조).
   const twoCols = (label) => {
-    const m = grab(new RegExp(`^${label}:\\s+([\\d.]+[kKMGTP]?)(?:\\s*\\([^)]*\\))?\\s+([\\d.]+[kKMGTP]?)(?:\\s*\\([^)]*\\))?`, 'm'));
+    const m = grab(new RegExp(`^${label}:\\s+([\\d.]+[kKMGTP]?)(?:\\s*\\([^)]{0,64}\\))?\\s+([\\d.]+[kKMGTP]?)(?:\\s*\\([^)]{0,64}\\))?`));
     return m ? [m[1], m[2]] : null;
   };
   const pct = (label) => {
     // Used/Avail 행의 퍼센트: "55.1T (2%)   0 (n/a)" — HDD 쪽 %, SSD 쪽 %(없으면 null)
-    const m = grab(new RegExp(`^${label}:\\s+[\\d.]+[kKMGTP]?\\s*\\(([\\d.]+)%\\)(?:\\s+[\\d.]+[kKMGTP]?\\s*\\((?:([\\d.]+)%|n/a)\\))?`, 'm'));
+    const m = grab(new RegExp(`^${label}:\\s+[\\d.]+[kKMGTP]?\\s*\\(([\\d.]+)%\\)(?:\\s+[\\d.]+[kKMGTP]?\\s*\\((?:([\\d.]+)%|n/a)\\))?`));
     return m ? [m[1] != null ? Number(m[1]) : null, m[2] != null ? Number(m[2]) : null] : [null, null];
   };
   const size = twoCols('Size');

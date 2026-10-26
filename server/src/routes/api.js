@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authDisabledRole } from '../auth/auth.js';
+import { authDisabledRole, toolActorOf } from '../auth/auth.js';
 import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
@@ -16,12 +16,14 @@ import { registerToolsAnalytics } from './api/toolsAnalytics.js';
 import { registerToolsCapacity } from './api/toolsCapacity.js';
 import { registerToolsInfo } from './api/toolsInfo.js';
 import { registerToolsGuestDisk } from './api/toolsGuestDisk.js';
+import { registerToolsGuestPart } from './api/toolsGuestPart.js';   // v2.749 게스트 파티션 사용률 경보
 import { registerVmSeries } from './api/vmSeries.js'; // v2.510: 실시간(20초) 스파이크 수집 — vCenter별 독립 DB
 import { registerCurUser } from './api/curUser.js';
 import { registerHorizonSessions } from './api/horizonSessions.js';  // v2.525: Horizon 실시간 사용자(세션)  // v2.520: '현재 사용자' — 게스트 계정 없이 guestinfo 읽기
 import { registerInventory } from './api/inventory.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
+import { registerVeeamBadges, registerBackupStatus } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751) · 백업 메뉴(v2.779)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
@@ -87,10 +89,7 @@ const toolGateRole = (req) => (!config.auth.enabled ? authDisabledRole() : (req.
  *   그대로 열린다(v2.536 이 겪은 '프론트 탭 조건만 있던' 사고와 같은 유형).
  *   인증 비활성 환경에서는 사용자가 없으므로 역할만 남는다(대체 역할은 위 함수가 정한다).
  */
-const toolGateUser = (req) => ({
-  username: (config.auth.enabled && req.user && req.user.username) || '',
-  role: toolGateRole(req),
-});
+const toolGateUser = toolActorOf;   // v2.787: 판정 사용자 하나(auth.js toolActorOf — 백업 Summary 도 같은 함수로 Detail 접근을 본다)
 api.use('/tools', toolGate({ roleOf: toolGateRole, userOf: toolGateUser }));
 // 같은 집행을 `/api/tools` **밖**의 전용 엔드포인트에도 적용한다(v2.506 검증 반영):
 // `/search/nl`(AI 검색)·`/top`(탐색·랭킹)은 각각 한 화면만 쓰는데 기능 권한 게이트가 없어
@@ -112,11 +111,14 @@ registerToolsAnalytics(api);
 registerToolsCapacity(api);
 registerToolsInfo(api);
 registerToolsGuestDisk(api);
+registerToolsGuestPart(api);
 registerVmSeries(api);
 registerCurUser(api);
 registerHorizonSessions(api);
 registerInventory(api);
 registerVmClone(api);
+registerVeeamBadges(api);
+registerBackupStatus(api); // v2.779 백업 서머리·세부내용(도구 키 backup-summary·backup-detail)
 registerStorageMon(api);
 registerSanSwitch(api);
 registerCvp(api);

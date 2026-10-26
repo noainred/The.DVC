@@ -102,6 +102,23 @@ function persistEnv(key, val) {
   atomicWriteFileSync(ENV_FILE, isWin ? Buffer.from(out, 'latin1') : out, { mode: 0o600 });
 }
 
+/**
+ * v2.776(엣지 개별 토큰 자동 적용): env 파일 한 키를 **엄격하게** 바꾼다 — 읽지 못하면 던진다(위 persistEnv 는 읽기 실패를 빈 파일로 보고
+ *   그 한 줄만 남긴 파일을 쓴다 — 토큰 하나 바꾸려다 portal.env 전체를 잃는다). 되돌리기용으로 바꾸기 전 원문을 돌려준다(파일이 없었으면 null).
+ * @returns {{ prevText: string|null, file: string }}
+ */
+export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {
+  if (!/^[A-Z_][A-Z0-9_]*$/.test(String(key))) throw new Error('env 키 형식 오류');
+  const issue = tokenValueIssue(val);
+  if (issue) throw new Error(issue);
+  const enc = isWin ? 'latin1' : 'utf8';
+  let prevText = null;
+  if (fs.existsSync(file)) prevText = fs.readFileSync(file, enc);   // 읽기 실패(EACCES 등)는 그대로 던진다
+  const out = renderEnvFile(prevText || '', key, String(val));
+  atomicWriteFileSync(file, isWin ? Buffer.from(out, 'latin1') : out, { mode: 0o600 });
+  return { prevText, file };
+}
+
 export function centralTokenInfo() {
   return { hasToken: !!getCentralToken(), token: getCentralToken(), envFile: ENV_FILE, envFileLoaded: ENV_FILE_LOADED };
 }

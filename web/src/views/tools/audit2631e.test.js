@@ -112,14 +112,6 @@ describe('A6-2631-04 게스트 디스크 부분 합', () => {
   });
 });
 
-describe('A6-2631-05 V4 물리·설비의 범위 제외 안내', () => {
-  it('Facility 가 room-temp·idrac 응답의 제외를 scopeOmitNote 로 말한다', () => {
-    const s = code('../../version_4/pages/Facility.jsx');
-    expect(s).toMatch(/scopeOmitNote\(room\.data, '서버'\)/);
-    expect(s).toMatch(/scopeOmitNote\(polls\.idrac\.data, 'iDRAC 서버'\)/);
-  });
-});
-
 describe('A6-2631-06 범위 제외 문구 단일 소스', () => {
   it('why 로 근거를 바꿀 수 있고 기본은 예전 문구', () => {
     const d = { scoped: true, omittedOutOfScope: 3 };

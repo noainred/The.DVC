@@ -21,6 +21,7 @@ import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJ
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
+import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
@@ -124,7 +125,10 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     if (v.name) e.names.push({ name: v.name, on: v.powerState === 'POWERED_ON' });
     gpuVmByHost.set(k, e);
   }
-  // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트별 평균.
+  // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트별 최댓값.
+  // v2.769(점검 R4-D5-1): 예전에는 평균이었다 — 폴러의 호스트 대표값(gpu/poller.js · store byHost · 엣지 push ·
+  //   sampler gpu_util/gpu_cluster/gpu_vc 이력)은 최댓값이라 같은 행의 표(40)와 추이 차트(80)가 갈렸다. 저장 이력·엣지 정의를
+  //   바꾸지 않도록 표·상세 쪽을 최댓값으로 맞춘다(MIG utilNA 는 utilPct null 이라 빠진다).
   // 게스트 레코드의 vCenter 는 스냅샷 VM 에서 얻는다(레코드에 vcenterId 가 없을 수 있다 — 구버전 엣지).
   const onGpuVms = new Map(scopedVms.filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => [v.id, v]));
   const guestUtilByHost = new Map(); // gpuHostKey -> [utilPct...]
@@ -168,7 +172,7 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     const primaryMode = Object.entries(modes).sort((a, b) => b[1] - a[1])[0][0];
     // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완(전원 ON VM만).
     const gu = guestUtilByHost.get(gpuHostKey(h.vcenterId, h.name));
-    const guestUtil = gu && gu.length ? Math.round(gu.reduce((a, b) => a + b, 0) / gu.length) : null;
+    const guestUtil = gu && gu.length ? Math.round(Math.max(...gu)) : null;
     const utilPct = h.gpuUtilPct ?? guestUtil;
     const vmAlloc = gpuVmByHost.get(gpuHostKey(h.vcenterId, h.name)) || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     hostsWithGpu.push({
@@ -181,9 +185,10 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
       allocGB: gs.allocGB, allocUnknown: gs.allocUnknown, allocPct: gs.allocPct, passthroughOn: gs.passthroughOn,
       memUsedMB: gs.memUsedMB, memTotalMB: gs.memTotalMB, memUsedPct: gs.memUsedPct, memVms: gs.memVms, memSource: gs.memSource, tempSource: gs.tempSource,
       tempC: gs.tempC, vmsRead: gs.vmsRead, vmsUnread: gs.vmsUnread, activity: gs.activity,
+      gpuErrors: gs.gpuErrors || 0, // v2.769(점검 R4-D5-3): 켜진 VM 게스트가 '응답 없음' 으로 센 GPU 장수
       // v2.653: 게스트 값이 빈 이유(gpu/guestWhy.js) · 수집 경로 · 호스트 VM 목록(펼침 행 — 호스트 상세와 같은 판정)
       guestWhy: why, collectPath: whyCtx(h.vcenterId).mode, collectAgent: whyCtx(h.vcenterId).agent || null,
-      vms: gs.vms.map((v) => ({ id: v.id, name: v.name, powerState: v.powerState, mode: v.mode, profile: v.profile, allocGB: v.allocGB, utilPct: v.utilPct, utilNA: v.utilNA, memUsedMB: v.memUsedMB, memTotalMB: v.memTotalMB, tempC: v.tempC, activity: v.activity })),
+      vms: gs.vms.map((v) => ({ id: v.id, name: v.name, powerState: v.powerState, mode: v.mode, profile: v.profile, allocGB: v.allocGB, utilPct: v.utilPct, utilNA: v.utilNA, memUsedMB: v.memUsedMB, memTotalMB: v.memTotalMB, tempC: v.tempC, gpuErrors: v.gpuErrors, activity: v.activity })),
     });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
@@ -281,7 +286,11 @@ async function gpuSeriesExportCsvStream(req, res) {
     }
     if (lines.length) {
       const ok = res.write(lines.join('\r\n') + '\r\n');
-      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
+      // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지).
+      // v2.783(점검 Q5): drain **또는 끊김**을 기다린다 — 예전 `res.once('drain')` 만으로는 백프레셔 중 클라이언트가 끊으면 drain 이
+      //   영원히 오지 않아 여기서 멈췄고, 바깥 gpuSeriesExport 의 finally(lock.release)에 닿지 못해 GPU 내보내기가 재기동 전까지 409 였다.
+      //   끊겼으면(false) 더 쓰지 않고 빠져나간다 — 그래야 finally 가 돈다.
+      if (!ok && !(await waitDrain(res))) return;
     }
     if (truncated) break;
     if (chunk.length < CHUNK) break;
@@ -350,7 +359,8 @@ async function gpuSeriesExportJsonStream(req, res) {
     }
     if (parts.length) {
       const ok = res.write((written - parts.length > 0 ? ',' : '') + parts.join(','));
-      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔
+      // 소켓 백프레셔 — v2.783(점검 Q5): CSV 와 같이 drain 또는 끊김. 끊겼으면 빠져나가 finally(잠금 해제)가 돌게 한다.
+      if (!ok && !(await waitDrain(res))) return;
     }
     if (truncated) break;
     if (chunk.length < CHUNK) break;

@@ -32,6 +32,58 @@ export function edgeConfigBadge(e) {
   return { cls: 'green', suffix: '', title: '' };
 }
 
+/**
+ * v2.768(점검 R3-C5-01): 번들이 복원 상한을 넘어 엣지 설정 사본을 뺐다는 경고(순수). 없으면 ''.
+ * 이름·바이트는 서버 응답 값만 쓴다(상한 숫자를 화면에 박지 않는다).
+ */
+export function edgesOmittedText(o) {
+  const agents = Array.isArray(o?.agents) ? o.agents : [];
+  if (!agents.length) return '';
+  const cap = Number.isFinite(Number(o?.capBytes)) && Number(o.capBytes) > 0 ? fmtBytes(Number(o.capBytes)) : null;
+  return ` ⚠ 번들이 복원 상한${cap ? `(${cap})` : ''}을 넘어 엣지 설정 사본 ${agents.length}곳을 뺐습니다 — 이 백업에는 중앙 설정만 있습니다.`;
+}
+
+/**
+ * v2.768(점검 R3-C5-02): 복원 예약·적용 상태 문구(순수). 복원은 설정 파일을 예약하고 **재시작 때** 적용한다 —
+ * 바로 덮으면 실행 중인 모듈의 다음 저장이 복원을 되돌렸다. 반환 { pending, last, interrupted } — 각 문구 또는 null · warn(호박색 테두리).
+ */
+/** v2.770(점검 R5-E1-2): 복원·백업 경고 한 건 → 문구. `{file, reason}` 객체와 문자열 둘 다(서버 routes/admin/backupNetSec.js backupWarnText 와 같은 규칙). */
+export function restoreWarnText(w) {
+  if (typeof w === 'string') return w;
+  if (w && typeof w === 'object') {
+    const file = typeof w.file === 'string' ? w.file : '';
+    const reason = typeof w.reason === 'string' ? w.reason : '';
+    return file && reason ? `${file}: ${reason}` : (reason || file);
+  }
+  return '';
+}
+
+export function restoreStateText(r) {
+  const out = { pending: null, last: null, interrupted: null, warn: false };
+  if (!r || typeof r !== 'object') return out;
+  const p = r.pending;
+  if (p && typeof p === 'object') {
+    const n = Array.isArray(p.files) ? `설정 파일 ${p.files.length}개` : '설정 파일';
+    out.pending = `복원 예약됨${p.source ? ` — ${p.source}` : ''}${p.stagedAt ? ` (${fmtTime(p.stagedAt)})` : ''}: ${n}. 포탈을 재시작하면 적용됩니다 — 그 전까지는 현재 설정으로 동작하고, 그 사이에 바꾼 설정은 재시작 때 복원 내용으로 덮입니다.`;
+  }
+  const l = r.last;
+  if (l && typeof l === 'object' && l.at) {
+    const applied = Array.isArray(l.applied) ? l.applied.length : 0;
+    const failed = Array.isArray(l.failed) ? l.failed : [];
+    const rejected = Array.isArray(l.rejected) ? l.rejected.length : 0;
+    if (l.reason === 'interrupted') out.last = `${fmtTime(l.at)} 기동 때: 이전 적용이 중단된 흔적이 있어 예약 복원을 적용하지 않았습니다.`;
+    else if (l.reason) out.last = `${fmtTime(l.at)} 기동 때: 예약 복원을 적용하지 못했습니다 — ${l.reason}`;
+    else out.last = `${fmtTime(l.at)} 기동 때 예약 복원 적용${l.source ? `(${l.source})` : ''}: ${applied}개${failed.length ? ` · 실패 ${failed.length}개(${failed.slice(0, 5).map((f) => f.file).join(', ')})` : ''}${rejected ? ` · 거부 ${rejected}개` : ''}`;
+    // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
+    // v2.770(점검 R5-E1-2): 서버 경고는 `{file, reason}` 객체다(stagedRestore — 예전 문자열 필터는 0개를 남기고 배너만 켰다). 문자열도 받는다.
+    const warns = Array.isArray(l.warnings) ? l.warnings.map(restoreWarnText).filter(Boolean) : [];
+    if (out.last && warns.length) out.last += ` — 주의: ${warns.slice(0, 5).join(' · ')}`;
+  }
+  out.warn = !!(out.pending || r.interrupted || (l && (l.ok === false || (Array.isArray(l.warnings) && l.warnings.length))));
+  if (r.interrupted) out.interrupted = '예약 복원 적용이 도중에 끊긴 흔적이 있습니다 — 서버 로그를 확인하고 설정 디렉터리의 backups 폴더에 남은 예약 파일을 정리하세요.';
+  return out;
+}
+
 const REASON = { manual: '수동', schedule: '정기', change: '변경감지', startup: '시작', 'pre-restore': '복원전' };
 
 /** 설정 → 포탈 백업 — 중앙+엣지 통합 설정 백업, 정기/변경 자동 + 다운로드/복원. */
@@ -55,7 +107,7 @@ export default function PortalBackup() {
   };
   const backupNow = async () => {
     setBusy('now'); setMsg(null);
-    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개${r.redacted ? ` · .env 의 키·토큰 ${r.redacted}개는 번들에서 제외` : ''})${skippedText(r)}`); await load(); }
+    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개${r.redacted ? ` · .env 의 키·토큰 ${r.redacted}개는 번들에서 제외` : ''})${skippedText(r)}${edgesOmittedText(r.edgesOmitted)}`); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); }
   };
   const download = async (name) => {
@@ -64,10 +116,18 @@ export default function PortalBackup() {
     catch (e) { setMsg(`다운로드 오류: ${e.message}`); }
   };
   const restore = async (name) => {
-    if (!window.confirm(`'${name}' 으로 중앙 설정을 복원합니다.\n현재 설정은 자동 백업(pre-restore)되며, 적용에는 포탈 재시작이 필요합니다. 계속할까요?`)) return;
+    // v2.768(점검 R3-C5-02): 복원은 예약 → 재시작 때 적용. 바로 재시작할지 따로 묻는다(재시작 중에는 화면·수집이 잠시 멈춘다).
+    if (!window.confirm(`'${name}' 으로 중앙 설정을 복원합니다.\n현재 설정은 자동 백업(pre-restore)되고, 설정 파일은 예약돼 포탈을 재시작할 때 적용됩니다. 계속할까요?`)) return;
+    const restart = window.confirm('복원을 예약한 뒤 포탈을 지금 재시작해 적용할까요?\n취소를 누르면 예약만 하고, 다음 재시작 때 적용됩니다.');
     setBusy(name); setMsg(null);
-    try { const r = await postJson(`/admin/backup/restore/${encodeURIComponent(name)}`, {}); setMsg(r.note || `복원 완료(${r.restored}개)`); await load(); }
+    try { const r = await postJson(`/admin/backup/restore/${encodeURIComponent(name)}`, { restart }); setMsg(r.note || `복원 예약(${r.restored}개) — 재시작하면 적용됩니다.`); await load(); }
     catch (e) { setMsg(`복원 오류: ${e.message}`); } finally { setBusy(''); }
+  };
+  const cancelStaged = async () => {
+    if (!window.confirm('예약한 복원을 취소할까요? (.env 는 복원 때 이미 썼습니다 — 되돌리려면 복원전 백업으로 다시 복원하세요.)')) return;
+    setBusy('cancel'); setMsg(null);
+    try { const r = await postJson('/admin/backup/restore-staged/cancel', {}); setMsg(r.had ? '복원 예약을 취소했습니다.' : '취소할 예약이 없습니다.'); await load(); }
+    catch (e) { setMsg(`취소 오류: ${e.message}`); } finally { setBusy(''); }
   };
   const remove = async (name) => {
     if (!window.confirm(`'${name}' 백업을 삭제할까요?`)) return;
@@ -75,6 +135,7 @@ export default function PortalBackup() {
   };
   const openView = async (name) => { try { setView(await fetchJson(`/admin/backup/view/${encodeURIComponent(name)}`)); } catch (e) { setMsg(e.message); } };
 
+  const rs = restoreStateText(d.restore);
   return (
     <div style={{ maxWidth: 980 }}>
       <div className="section-title" style={{ marginTop: 0 }}>💾 포탈 백업</div>
@@ -82,6 +143,19 @@ export default function PortalBackup() {
         중앙 포탈 + 엣지 포탈(에이전트)의 <b>모든 설정을 통합</b>해 백업합니다(수집 데이터/대용량 DB는 제외).
         정기 백업과 설정 변경 시 자동 백업을 지원합니다. <b>백업에는 자격증명이 포함</b>되므로 안전하게 보관하세요. 단 <code>.env</code> 의 서명 키·봉인 키·토큰(<code>AUTH_SECRET</code>·<code>SECRETS_KEY</code>·<code>*_TOKEN</code>)은 번들에 싣지 않고 복원 시 현재 값을 이어 씁니다(v2.538).
       </p>
+
+      {(rs.pending || rs.last || rs.interrupted) && (
+        <div className="card" style={{ padding: 12, marginBottom: 14, borderLeft: `3px solid var(${rs.warn ? '--amber' : '--green'})` }}>
+          {rs.pending && (
+            <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
+              <span style={{ minWidth: 0, flex: '1 1 320px' }}>{rs.pending}</span>
+              <button className="tab" style={{ padding: '3px 9px', fontSize: 12 }} disabled={busy === 'cancel'} onClick={cancelStaged}>예약 취소</button>
+            </div>
+          )}
+          {rs.interrupted && <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: rs.pending ? 6 : 0 }}>{rs.interrupted}</div>}
+          {rs.last && <div className="muted" style={{ fontSize: 12, marginTop: rs.pending || rs.interrupted ? 6 : 0 }}>{rs.last}</div>}
+        </div>
+      )}
 
       {/* 설정 */}
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
@@ -110,6 +184,7 @@ export default function PortalBackup() {
             {d.scheduleActive ? '정기 백업 동작 중' : '정기 백업 꺼짐'} · {d.watching ? '변경 감시 켜짐' : '변경 감시 꺼짐'}
             {d.lastRun && ` · 최근: ${REASON[d.lastRun.reason] || d.lastRun.reason} ${fmtTime(d.lastRun.at)}`}
             {d.lastRun?.skipped > 0 && <span style={{ color: 'var(--amber)' }}>{` · 크기 상한으로 뺀 파일 ${d.lastRun.skipped}개(수동 백업 결과에 이름이 나옵니다)`}</span>}
+            {d.lastRun?.edgesOmitted > 0 && <span style={{ color: 'var(--amber)' }}>{` · 복원 상한으로 엣지 설정 사본 ${d.lastRun.edgesOmitted}곳을 뺐습니다(중앙 설정만 백업)`}</span>}
           </span>
         </div>
         {msg && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{msg}</div>}
@@ -158,6 +233,7 @@ export default function PortalBackup() {
           <div className="section-title" style={{ fontSize: 14 }}>중앙 설정 ({view.centralFiles.length})</div>
           <div className="flex gap wrap" style={{ marginBottom: 10 }}>{view.centralFiles.map((f) => <span key={f} className="badge gray" style={{ fontSize: 11 }}>{f}</span>)}</div>
           <div className="section-title" style={{ fontSize: 14 }}>엣지 설정 ({view.edges.length})</div>
+          {view.edgesOmitted && <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>{edgesOmittedText(view.edgesOmitted).trim()}</div>}
           {view.edges.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>엣지 설정 없음</div>
             : view.edges.map((e) => <div key={e.agent} style={{ marginBottom: 6 }}><b style={{ fontSize: 13 }}>🛰 {e.agent}</b> <span className="muted" style={{ fontSize: 11 }}>{fmtTime(e.at)}</span><div className="flex gap wrap" style={{ marginTop: 3 }}>{e.files.map((f) => <span key={f} className="badge gray" style={{ fontSize: 11 }}>{f}</span>)}</div></div>)}
         </Modal>

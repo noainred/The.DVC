@@ -243,11 +243,21 @@ export async function getVmHardware(vc, moref) {
 }
 
 /** DVS 포트그룹(moref)에서 switchUuid + portgroupKey 해석(NIC 추가용). */
+/**
+ * v2.767(점검 R2-B3-10): MoRef 값 화이트리스트 — retrieveObjectProps 는 ref 를 이스케이프 없이 RetrieveProperties XML 에 넣는다
+ *   (soapClient.js). 요청 본문의 nicAdds[].networkMoref 가 그대로 들어가 XML 요소를 덧붙일 수 있었다. vSphere MoRef 는
+ *   'dvportgroup-123'·'group-v3' 꼴이라 영숫자와 . _ : - 만 받는다(XML 특수문자 <>&"' 가 들어갈 자리가 없다).
+ */
+const MOREF_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
+export function isSafeMoref(v) { return typeof v === 'string' && MOREF_RE.test(v); }
+
 async function resolveDvsBacking(c, pgMoref) {
+  if (!isSafeMoref(pgMoref)) throw new Error('NIC 추가: 네트워크 MoRef 형식이 올바르지 않습니다.');
   const pg = await c.retrieveObjectProps('DistributedVirtualPortgroup', pgMoref, ['key', 'config.distributedVirtualSwitch']);
   const portgroupKey = pg[0]?.props?.key || '';
   const dvsRef = (pg[0]?.props?.['config.distributedVirtualSwitch'] || '').trim();
   if (!portgroupKey || !dvsRef) throw new Error('DVS 포트그룹 정보를 해석할 수 없습니다.');
+  if (!isSafeMoref(dvsRef)) throw new Error('DVS 포트그룹 정보를 해석할 수 없습니다(스위치 MoRef 형식).');   // 응답 값도 같은 규칙(이중 방어)
   const dvs = await c.retrieveObjectProps('DistributedVirtualSwitch', dvsRef, ['uuid']);
   const switchUuid = dvs[0]?.props?.uuid || '';
   if (!switchUuid) throw new Error('DVS uuid를 해석할 수 없습니다.');
@@ -259,6 +269,12 @@ async function resolveDvsBacking(c, pgMoref) {
  * DVS면 switchUuid/portgroupKey를 해석한다. 반환 { ok, changes?, error? }.
  */
 export async function reconfigVm(vc, moref, plan = {}) {
+  // v2.767(R2-B3-10): 형식이 틀린 네트워크 MoRef 는 로그인 전에 거절한다(아래 resolveDvsBacking 도 같은 검사 — 이중 방어).
+  for (const n of (Array.isArray(plan.nicAdds) ? plan.nicAdds : [])) {
+    if (n?.type === 'DISTRIBUTED_PORTGROUP' && n.networkMoref && !isSafeMoref(String(n.networkMoref))) {
+      return { ok: false, error: 'NIC 추가: 네트워크 MoRef 형식이 올바르지 않습니다.' };
+    }
+  }
   const c = new VimSoapClient(vc);
   // v2.743(VC-03): 관리자가 누른 쓰기 실행 — 비활성·점검중·site 는 막고, 인증 정지는 1회 시도한다(게스트 계정 추가와 같은 판단).
   //   로그인 거부는 정지 기록에 올리고 409 로 바꾼다.
@@ -280,7 +296,7 @@ export async function reconfigVm(vc, moref, plan = {}) {
     const nicAdds = [];
     for (const n of (plan.nicAdds || [])) {
       if (n.type === 'DISTRIBUTED_PORTGROUP' && n.networkMoref) {
-        nicAdds.push({ dvs: await resolveDvsBacking(c, n.networkMoref) });
+        nicAdds.push({ dvs: await resolveDvsBacking(c, String(n.networkMoref)) });
       } else if (n.networkName) {
         nicAdds.push({ network: n.networkName });
       } else throw new Error('NIC 추가: 네트워크 지정이 필요합니다.');

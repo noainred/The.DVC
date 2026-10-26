@@ -11,7 +11,7 @@ import { computeZombies } from '../../reports/zombies.js';
 import { computeRightsizing } from '../../reports/rightsizing.js';
 import { computeCompliance } from '../../reports/compliance.js';
 import { filterChangeEvents, CHANGE_CATEGORIES } from '../../reports/changes.js';
-import { computeUnprotected } from '../../reports/unprotected.js';
+import { computeUnprotected, mergeSnapRows } from '../../reports/unprotected.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { vmStatsFor, vmStatsMeta } from '../../reports/vmStats.js';
 import { certStatus } from '../../security/certMonitor.js';
@@ -19,7 +19,9 @@ import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey, hash } from './shared.js';
-import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다)
+import { snapMemo, sendCached } from '../../util/snapCache.js';
+import { runHeavyExclusive, forecastArgs } from '../insights.js'; // v2.783(P-I2): /insights/forecast 와 같은 직렬 대기열·인자 정규화
+import { eventNotCollectedMap, notCollectedList, eventLagForView } from '../../logs/coverage.js'; // v2.733(C1-01): '이 포탈이 지금 이벤트를 수집하지 않는 vCenter' 판정 한 벌(로그 폴러와 같다) · v2.772(Z4-1): 수집이 뒤처진 vCenter
 
 /**
  * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
@@ -129,14 +131,31 @@ api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJso
  * 감싸고 있었다 — 같은 계산의 캐시 유무가 라우트마다 갈려 있던 상태다.
  * 캐시 라우트이므로 `extraKey: scopeKey(...)` 는 필수다(빠지면 무제한 계정 결과가 범위 계정에 샌다).
  */
-api.get('/tools/report/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-capacity', async (snap) => {
-  const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-  // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
-  // v2.710: forecastCapacity 는 async(v2.537~) — await 이 빠져 Promise 를 펼친 빈 객체({listLimit…})가 나가 이 리포트가
-  //   모든 모드에서 '추세 산출 0개 · 관측 undefined일' 이었다(데모 전수 조사에서 발견).
-  const r = await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
-  return withForecastCap(snap.source === 'mock' ? withDemoForecast(r, scoped, req.query.vcenterId || '') : r);
-}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+/*
+ * v2.783(점검 Q4 P-I2): /insights/forecast 와 **같은 계산**인데 v2.689 I2 보호를 비켜 갔다 — memoJson 키가 `req.originalUrl` 이라
+ *   `&_=난수`·`days=14.0001` 만 바꿔도 매번 재계산했고, runHeavyExclusive(전역 1건 직렬)를 타지 않아 /insights/forecast 와 DS 롤업 스캔이
+ *   겹칠 수 있었다. 키는 정규화 인자(forecastArgs — forecast.js forecastCfgArgs 와 같은 함수) + scopeKey, 계산은 같은 직렬 대기열로.
+ */
+const capArgsKey = (o) => Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join('&');
+api.get('/tools/report/capacity', requirePerm('tools'), async (req, res) => {
+  try {
+    const snap = store.get();
+    const args = forecastArgs(req.query);
+    const vcId = args.vcenterId || '';
+    const key = `${snap.generatedAt}|report-capacity?${capArgsKey(args)}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('report-capacity', key, 30_000, () => runHeavyExclusive(async () => {
+      const scoped = scopeSlice(snap, req.user, vcId);
+      // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
+      // v2.710: forecastCapacity 는 async(v2.537~) — await 이 빠져 Promise 를 펼친 빈 객체({listLimit…})가 나가 이 리포트가
+      //   모든 모드에서 '추세 산출 0개 · 관측 undefined일' 이었다(데모 전수 조사에서 발견).
+      const r = await forecastCapacity(scoped, { ...args, vcenterId: vcId, allowed: scopedVcenterIds(req.user, snap) });
+      return withForecastCap(snap.source === 'mock' ? withDemoForecast(r, scoped, vcId) : r);
+    }));
+    sendCached(req, res, key, payload);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || 'internal error' });
+  }
+});
 
 
 
@@ -187,6 +206,9 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
     const notCollected = notCollectedList(eventNotCollectedMap(), { allowed, only: vcParam ? [vcParam] : null, names });
     res.json({
       total: changes.length, scanned: rows.length, truncated: rows.length >= SCAN_MAX,
+      // v2.772(Z4-3): 실제로 훑은 행의 시각 범위(행은 최신 먼저). 예전 화면 안내 '기간을 줄이세요' 는 틀렸다 — 상한은 종류와 무관한 최신 행 수라
+      //   이벤트가 많은 현장에서는 1일로 줄여도 최근 1시간 남짓만 본다. 화면이 'X ~ Y 만 봤습니다' 라 말한다(종류 선필터·조각 읽기는 별 작업 — perf 위험).
+      scanMax: SCAN_MAX, scannedFrom: rows.length ? numOrNull(rows[rows.length - 1]?.ts) : null, scannedTo: rows.length ? numOrNull(rows[0]?.ts) : null,
       days, categories: CHANGE_CATEGORIES,
       notCollected,
       rows: changes.slice(offset, offset + limit),
@@ -207,13 +229,18 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
     const vcParam = req.query.vcenterId || '';
     const allowed = scopedVcenterIds(req.user, snap);
-    const lf = { vcenterId: vcParam, q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 };
+    const now = Date.now();
+    const lf = { vcenterId: vcParam, q: 'Snapshot', since: now - lookbackDays * 86_400_000 };
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
     const ROW_LIMIT = 20_000;
     // v2.732(점검 2회차 B6-03): 'Snapshot' 4열 LIKE 를 조회 창 전체에 한 문장으로 돌려(합성 7일 80만 행 · 431ms, 범위 계정 693ms 정지 — 재현)
     //   60초 폴링·사용자·조건마다 이벤트 루프를 멈췄다. 같은 결과를 1시간 조각(최신부터) + 조각 사이 시간 기준 양보로 읽는다
     //   (logs/db.js queryAsync — 한 문장 판과 행 순서·내용이 같다. 테스트가 대조한다).
-    const rows = typeof db.queryAsync === 'function' ? await db.queryAsync(lf, ROW_LIMIT) : db.query(lf, ROW_LIMIT, 0);
+    // v2.763(V4-1): 한국어 검색어도 · 상한은 검색어마다
+    const read = (q) => (db.queryAsync ? db.queryAsync({ ...lf, q }, ROW_LIMIT) : db.query({ ...lf, q }, ROW_LIMIT, 0));
+    const parts = [await read('Snapshot'), await read('스냅샷')];
+    const rows = mergeSnapRows(parts);
+    const truncated = parts.some((x) => x.length >= ROW_LIMIT);
     // v2.622(감사 DATA-05): 조회 창 안에 이벤트(종류 무관)가 1건이라도 저장된 vCenter 만 '판정 가능' 이다 — 엣지 위임·
     //   수집 실패로 이벤트가 없는 vCenter 의 VM 을 미보호로 세면 거짓 백업 공백이다. (vcenterId, ts) 인덱스 LIMIT 2 조회라 가볍다.
     const coveredVcenterIds = new Set();
@@ -228,7 +255,11 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
       if (why) { notCollectedVcenterIds.set(String(vc.id), why); continue; }
       if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
     }
-    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds });
+    // v2.772(Z4-1): 수집은 하지만 완결 시각이 허용치보다 낡은 vCenter(따라잡기 중 포함) — 보호 근거가 없는 VM 은 미보호가 아니라
+    //   판정 불가('collect-lag'). 판정은 logs/coverage.js 한 벌(VM 가용성의 측정 끝과 같은 코어 · 같은 허용치). 범위는 이미 거른 scoped.vcenters.
+    //   판정을 못 하면(null — 등록부·폴러를 못 읽음) 예전처럼 판정한다(근거 없이 '판정 불가' 로 몰지 않는다). memo 30초라 지연 변화는 30초 안에 반영된다.
+    const lag = await eventLagForView({ db, now, only: (scoped.vcenters || []).map((v) => String(v.id)), notCollected: ncMap });
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, truncated, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds, laggingVcenters: Array.isArray(lag) ? lag : undefined });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

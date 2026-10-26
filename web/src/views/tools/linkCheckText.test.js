@@ -250,3 +250,94 @@ describe('v2.554 — 엣지 보고가 오지 않을 때', () => {
     expect(s.reason).toBe('edge-old');
   });
 });
+
+/*
+ * v2.769(점검 R4-D3-2): 값이 있어도 지금 맞는지 알 수 없으면 ok/fail 로 칠하지 않는다.
+ *   예전에는 latest 가 하나라도 있으면 나이·엣지 보고 낡음·점검 꺼짐을 보지 않고 ok 였다(엣지가 죽어도 최대 90일 초록).
+ *   기준 시각은 실제 시각을 정시 경계로 떨어뜨려 고정(docs/rules/common.md).
+ */
+describe('R4-D3-2 · 오래된·지금 상태가 아닌 측정은 no-data', () => {
+  const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  const IV = 5 * 60_000;
+  const deadEdge = {
+    id: 'edge->central|GM1|central', kind: 'edge->central', by: 'edge', from: 'GM1', enabled: true, edgeVersion: '2.768.0',
+    latest: { ts: NOW - 10 * 86_400_000, ok: true, summary: 'HTTP 200 · 120ms', sinceTs: NOW - 20 * 86_400_000, streak: 2880 },
+    edgeReport: { at: NOW - 10 * 86_400_000, stale: true, ageMs: 10 * 86_400_000 },
+  };
+  it('엣지 보고가 낡았으면 마지막 값이 ok 여도 no-data(엣지 stale) — 재현 repro_linkstale', () => {
+    const r = rowState(deadEdge, { enabled: true, intervalMs: IV, now: NOW });
+    expect(r.state).toBe('no-data');
+    expect(r.reason).toBe('edge-stale');
+    const k = kpisOf([deadEdge], { enabled: true, intervalMs: IV, now: NOW });
+    expect(k.ok).toBe(0);
+    expect(k.okPct).toBe(null);
+  });
+  it('점검이 꺼져 있으면 마지막 값은 지금 상태가 아니다', () => {
+    const r = rowState({ by: 'central', latest: { ts: NOW - 60_000, ok: true } }, { enabled: false, intervalMs: IV, now: NOW });
+    expect(r.state).toBe('no-data');
+    expect(r.why).toMatch(/꺼져/);
+  });
+  it('중앙 링크라도 주기 3배를 넘긴 측정은 오래된 측정(서버 ageMs 우선)', () => {
+    const old = { by: 'central', latest: { ts: NOW - 4 * IV, ok: true } };
+    expect(rowState(old, { enabled: true, intervalMs: IV, now: NOW }).reason).toBe('stale-measure');
+    // 서버 시계 ageMs 가 있으면 그것을 쓴다(클라이언트 시계가 틀려도 판정이 흔들리지 않게).
+    const srvFresh = { by: 'central', latest: { ts: NOW - 4 * IV, ageMs: 60_000, ok: true } };
+    expect(rowState(srvFresh, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('ok');
+    const fresh = { by: 'central', latest: { ts: NOW - IV, ok: false, summary: 'TCP 거부' } };
+    expect(rowState(fresh, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('fail');
+  });
+  it('주기를 모르거나 ts 가 없으면 나이로 단정하지 않는다(기존 계약 유지)', () => {
+    expect(rowState({ latest: { ok: true } }, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('ok');
+    expect(rowState({ by: 'central', latest: { ts: NOW - 10 * IV, ok: true } }, { enabled: true, intervalMs: 0, now: NOW }).state).toBe('ok');
+  });
+  it('엣지 보고가 없으면(중앙 재기동 직후) 측정이 신선할 때만 믿는다', () => {
+    const base = { by: 'edge', from: 'GM1', edgeVersion: '2.768.0', edgeReport: null };
+    expect(rowState({ ...base, latest: { ts: NOW - 60_000, ok: true } }, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('ok');
+    expect(rowState({ ...base, latest: { ts: NOW - 4 * IV, ok: true } }, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('no-data');
+    expect(rowState({ ...base, latest: { ok: true } }, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('no-data');
+    // 신선한 보고 + 신선한 측정 → 판정 그대로
+    expect(rowState({ ...base, edgeReport: { stale: false }, latest: { ts: NOW - 60_000, ok: true } }, { enabled: true, intervalMs: IV, now: NOW }).state).toBe('ok');
+  });
+  it('whyShort 는 사유마다 고정 — 각주가 행마다 늘지 않는다', () => {
+    const rows = [1, 2, 3].map((d) => ({ by: 'central', latest: { ts: NOW - (3 + d) * IV, ok: true } }));
+    const f = tableFootnotes(rows, { enabled: true, intervalMs: IV, now: NOW }).filter((x) => /오래된 측정\*\*/.test(x));
+    expect(f.length).toBe(1);
+  });
+  it('헤더는 표와 같은 입력(주기)으로 센다', () => {
+    const notes = headerNote({ enabled: true, links: [{ by: 'central', latest: { ts: 1, ok: true } }], poller: { intervalMs: IV, last: { at: 1, dbOk: true } } });
+    expect(notes.join(' ')).toMatch(/오래된 링크가 \*\*1개\*\*/);
+  });
+  it('화면 표에 마지막 측정 열이 있고 주기 숫자를 박지 않는다(API 값)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./LinkCheck.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/<th>마지막 측정<\/th>/);
+    expect(src).toMatch(/data-sort=\{L\?\.ts \?\? ''\}/);
+    const txt = fs.readFileSync(new URL('./linkCheckText.js', import.meta.url), 'utf8');
+    expect(txt).not.toMatch(/300_?000|5 \* 60_?000/);
+  });
+});
+
+/*
+ * v2.770(점검 R5-E1-3): 엣지 보고 낡음은 서버가 주기에 맞춘 경계(max(3시간, 주기×3 + 여유))로 판정해 `edgeReport.stale` 로 싣는다 —
+ *   화면은 그 판정 하나만 본다(경계를 따로 계산하지 않는다). 6시간 주기의 정상 엣지(3.5시간 전 보고 · 3.6시간 전 측정)는 정상이다.
+ */
+describe('R5-E1-3 · 긴 주기의 정상 엣지는 주기 후반에도 no-data 가 아니다', () => {
+  const H = 3_600_000;
+  const NOW = Math.floor(Date.now() / H) * H;
+  const row = (stale) => ({
+    id: 'x', by: 'edge', from: 'pl', enabled: true,
+    latest: { ts: NOW - 3.6 * H, ageMs: 3.6 * H, ok: true, summary: '정상 120ms' },
+    edgeReport: { at: NOW - 3.5 * H, stale, ageMs: 3.5 * H },
+  });
+  it('서버가 stale 아님으로 판정한 6시간 주기 엣지 → ok · KPI 정상 1', () => {
+    expect(rowState(row(false), { enabled: true, intervalMs: 6 * H, now: NOW }).state).toBe('ok');
+    const k = kpisOf([row(false)], { enabled: true, intervalMs: 6 * H, now: NOW });
+    expect(k.ok).toBe(1);
+  });
+  it('서버가 stale 로 판정하면 그대로 edge-stale(화면이 경계를 다시 계산하지 않는다)', async () => {
+    expect(rowState(row(true), { enabled: true, intervalMs: 6 * H, now: NOW }).reason).toBe('edge-stale');
+    const fs = await import('node:fs');
+    const txt = fs.readFileSync(new URL('./linkCheckText.js', import.meta.url), 'utf8');
+    expect(txt).not.toMatch(/reportStaleMs|3 \* 3_?600_?000/);
+  });
+});

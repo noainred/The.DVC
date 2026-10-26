@@ -17,16 +17,25 @@ import { createYielder } from '../util/timeSlice.js';
 import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
+import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
+/*
+ * v2.768(점검 R3-C5-01 — 재현): 생성은 크기 확인 없이 엣지 설정 사본까지 묶어, 직렬화가 위 해제 상한을 넘으면 '만들어지지만 열 수 없는'
+ *   백업이 됐다(엣지 18곳 × 3.8MB → 생성 OK · readBackup null · 보기/복원 404 '찾을 수 없음'). 이제 생성이 같은 상한으로 직렬화 크기를
+ *   재고, 넘으면 엣지 사본을 빼고(복원은 중앙 부분만 쓴다) 그 사실을 번들·결과에 남긴다. 해제 상한(maxOutputLength)은 그대로다.
+ *   테스트는 아래 훅으로 상한을 **낮추기만** 한다(실제 64MB 직렬화는 테스트마다 수 초).
+ */
+let _archiveCap = MAX_ARCHIVE_BYTES;
+export function _setArchiveCapForTest(n) { _archiveCap = Number.isFinite(n) && n > 0 ? Math.min(MAX_ARCHIVE_BYTES, n) : MAX_ARCHIVE_BYTES; }
 
 const CONFIG_DIR = config.configDir;
 const BACKUP_DIR = path.join(CONFIG_DIR, 'backups');
 
 const ALLOW_EXT = new Set(['.json', '.env']);
 // 설정이 아니라 '수집 데이터'라서 백업에서 제외(대용량/재생성 가능).
-const DENY_NAMES = new Set(['central-inventory.json', 'central-agent-config.json', 'ipam-scan-history.json', 'ipam-scan-results.json']);
+const DENY_NAMES = DATA_FILE_NAMES; // v2.768: 예약 복원 적용(stagedRestore.js)과 한 벌
 const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이터 방지)
 
 /**
@@ -53,6 +62,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'isidu-edge-targets.json', 'isidu-push.json', // v2.736: 엣지가 받은 아이실론 디렉터리 사용량 대상 사본 · 엣지 push 커서(각 모듈도 스스로 등록한다)
   'scan-journal.json', // v2.737: 실행 중 스캔 기록(재시작 뒤 자동 재개 — util/scanJournal.js 도 스스로 등록한다)
   'isidu-mail-state.json', // v2.738: 아이실론 디렉터리 사용량 결과 메일의 대상별 마지막 발송 기록(isidu/notify.js 도 스스로 등록한다)
+  'vcenter-logs-cursor.json', // v2.765: vCenter 이벤트 수집 커서(읽은 마지막 시각·온전한 시각 — logs/poller.js 도 스스로 등록한다)
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.
@@ -146,7 +156,9 @@ function fingerprintContent(name, content) {
  * 사유 보관 슬롯(10)의 실제 설정 변경 백업을 밀어낸다(v2.590 P1 과 같은 이유). ⚠ 변경 감시의 디바운스 자체(backup/settings.js
  * startWatcher)는 `isRuntimeStateFile` 만 보므로 이 파일의 쓰기도 10초 디바운스를 깨운다 — 그 백업은 지문이 같아 생략된다.
  */
-export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json']);
+// v2.785(검토 R-B1): v2.784 의 백업 표시(`backup-marks.json` — VM 별 업무 중요도·백업 필요·메모, 사용자가 누를 때마다 쓴다)도 같은 성격이다 —
+//   빠져 있어 표시를 바꿀 때마다 change 백업이 생겨 자동 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다(재현: 표시만 바꿔도 지문이 달라짐).
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json']);
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');
@@ -261,9 +273,28 @@ async function createBackupInner(reason, { retention = 30, skipIfUnchanged = fal
   // v2.590 P1: 변경 감시가 깨웠는데 설정 내용이 직전 백업과 같으면(상태 파일만 바뀜) 만들지 않는다 — 사유를 돌려 호출부가 기록한다.
   if (skipIfUnchanged && _lastFingerprint && fp === _lastFingerprint) return { skipped: true, reason, why: 'unchanged' };
   const central = { version: currentVersion(), files, redacted: redactedMeta, skipped: skippedFiles.length ? skippedFiles : undefined };
-  const edges = getAllAgentConfigs();
-  const archive = { v: 1, createdAt: Date.now(), reason, central, edges };
-  const gz = await gzipAsync(Buffer.from(JSON.stringify(archive)));
+  let edges = getAllAgentConfigs();
+  let archive = { v: 1, createdAt: Date.now(), reason, central, edges };
+  let raw = Buffer.from(JSON.stringify(archive));
+  // v2.768(점검 R3-C5-01): 해제 상한을 넘는 번들은 만들지 않는다 — 엣지 사본을 빼고 다시 재고, 중앙만으로도 넘으면 실패로 알린다.
+  let edgesOmitted = null;
+  const warnings = [];
+  if (raw.length > _archiveCap) {
+    const agents = Object.keys(edges);
+    edgesOmitted = { agents, bytes: raw.length, capBytes: _archiveCap };
+    edges = {};
+    archive = { v: 1, createdAt: archive.createdAt, reason, central, edges, edgesOmitted };
+    raw = Buffer.from(JSON.stringify(archive));
+    if (raw.length > _archiveCap) {
+      const err = new Error(`백업 크기(중앙 설정만 ${raw.length}바이트)가 복원 상한(${_archiveCap}바이트)을 넘어 만들지 않았습니다 — 열 수 없는 백업이 됩니다.`);
+      err.code = 'BACKUP_TOO_LARGE';
+      throw err;
+    }
+    warnings.push(`번들 크기(${edgesOmitted.bytes}바이트)가 복원 상한(${_archiveCap}바이트)을 넘어 엣지 설정 사본 ${agents.length}곳을 뺐습니다 — 이 백업에는 중앙 설정만 있습니다.`);
+    console.warn(`[backup] ${warnings[0]}`);
+  }
+  const gz = await gzipAsync(raw);
+  raw = null;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeReason = /^[a-z-]{1,20}$/.test(String(reason)) ? reason : 'manual';
   const name = `portal-backup-${stamp}-${safeReason}.json.gz`;
@@ -274,7 +305,7 @@ async function createBackupInner(reason, { retention = 30, skipIfUnchanged = fal
   pruneBackups(retention);
   const edgeAgents = Object.keys(edges);
   const redacted = redactedMeta ? Object.values(redactedMeta).reduce((n, ks) => n + ks.length, 0) : 0;
-  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted, skipped: skippedFiles, sizeCapBytes: FILE_SIZE_CAP };
+  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted, skipped: skippedFiles, sizeCapBytes: FILE_SIZE_CAP, edgesOmitted, warnings };
 }
 
 /** 보관 개수 초과분(오래된 것)을 삭제. */
@@ -327,20 +358,46 @@ export function deleteBackup(name) {
   return true;
 }
 
-/** 아카이브 내용 파싱(요약/복원용). */
-export function readBackup(name) {
+/**
+ * 아카이브 내용 파싱(요약/복원용) — 사유를 구분한다(v2.768 점검 R3-C5-01): 'not-found'(없음·이름 오류) · 'too-large'(해제 상한 초과) ·
+ * 'corrupt'(gzip·JSON 손상). 예전에는 셋 다 null → 라우트가 '백업을 찾을 수 없습니다'(404) 라고 해 원인을 숨겼다.
+ * @returns {{ ok:true, archive:object } | { ok:false, code:'not-found'|'too-large'|'corrupt' }}
+ */
+export function readBackupDetailed(name) {
   const p = backupPath(name);
-  if (!p) return null;
+  if (!p) return { ok: false, code: 'not-found' };
+  let buf;
+  try { buf = fs.readFileSync(p); } catch (e) { return { ok: false, code: e?.code === 'ENOENT' ? 'not-found' : 'corrupt' }; }
   // 상한은 위 parseUploadedArchive 와 같은 이유(손상·조작된 백업 파일도 프로세스를 밀지 못하게).
-  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(p), { maxOutputLength: MAX_ARCHIVE_BYTES }).toString('utf8')); } catch { return null; }
+  let text;
+  try { text = zlib.gunzipSync(buf, { maxOutputLength: _archiveCap }).toString('utf8'); }
+  catch (e) { return { ok: false, code: e?.code === 'ERR_BUFFER_TOO_LARGE' || e instanceof RangeError ? 'too-large' : 'corrupt' }; }
+  try {
+    const archive = JSON.parse(text);
+    return archive && typeof archive === 'object' ? { ok: true, archive } : { ok: false, code: 'corrupt' };
+  } catch { return { ok: false, code: 'corrupt' }; }
+}
+/** 라우트용 사유 문구·상태 코드(v2.768 점검 R3-C5-01). */
+export function readBackupFailure(code) {
+  if (code === 'too-large') return { status: 422, error: 'backup-too-large', reason: `백업 내용이 해제 상한(${Math.round(MAX_ARCHIVE_BYTES / 1048576)}MB)을 넘어 열 수 없습니다 — 엣지 설정 사본이 큰 옛 백업일 수 있습니다. 이 백업은 보기·복원할 수 없습니다.` };
+  if (code === 'corrupt') return { status: 422, error: 'backup-corrupt', reason: '백업 파일이 손상돼 열 수 없습니다(gzip 또는 JSON 오류).' };
+  return { status: 404, error: 'not-found', reason: '백업을 찾을 수 없습니다.' };
+}
+/** 예전 모양(없거나 열 수 없으면 null) — 사유가 필요하면 readBackupDetailed. */
+export function readBackup(name) {
+  const r = readBackupDetailed(name);
+  return r.ok ? r.archive : null;
 }
 
 /**
- * 중앙 설정 복원 — 복원 전 현재 설정을 안전 백업(reason=pre-restore)한 뒤, 아카이브의
- * central.files 를 CONFIG_DIR에 덮어쓴다. 적용에는 보통 재시작이 필요하다.
+ * 중앙 설정 복원 — 복원 전 현재 설정을 안전 백업(reason=pre-restore)한 뒤, 아카이브의 central.files 를 적용한다.
+ * v2.768(점검 R3-C5-02 — 재현): JSON 설정은 **바로 덮지 않고 예약**한다(backup/stagedRestore.js) — 바로 덮으면 인메모리 판본을 가진
+ *   모듈(엣지 토큰 touch·게시판·OTP 카운터 저장 등)의 다음 저장이 재시작 전에 복원을 되돌렸다. 예약은 다음 기동 때 다른 모듈이 읽기 전에
+ *   적용된다. `.env` 는 systemd 가 기동 전에 읽으므로 지금 쓴다(가림 병합·보안 스위치 고정 유지). session-state.json 은 복원하지 않는다
+ *   (stagedRestore.js RESTORE_EXCLUDE — 세션 폐기 목록을 되돌리면 보안 후퇴).
  * @param archive readBackup 결과 또는 업로드 파싱 결과
  */
-export async function restoreCentral(archive, { retention = 30 } = {}) {
+export async function restoreCentral(archive, { retention = 30, source = null } = {}) {
   if (!archive || !archive.central || typeof archive.central.files !== 'object') throw new Error('유효하지 않은 백업 아카이브');
   // v2.590 P2: 사전 백업도 **설정된 보관 개수**로 정리한다 — 기본값 30 으로 잘라 보관 100 인 현장에서 오래된 백업
   // (방금 복원한 원본 포함)이 조용히 지워졌다.
@@ -349,12 +406,18 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
   await createBackup('pre-restore', { retention });
   ensureDir();
   let restored = 0;
-  const failed = [];   // [{file, reason}] — 쓰기에 실패한 파일(v2.689 G2 B4)
+  const failed = [];   // [{file, reason}] — 쓰기에 실패한(또는 적용할 수 없는) 파일(v2.689 G2 B4)
+  const excluded = []; // [{file, reason}] — 복원하지 않는 파일(v2.768)
+  const toStage = {};
+  const envWrites = [];
   let envRestored = 0; const envDropped = []; const envPinned = [];
+  let dirIssue = null;
+  try { fs.accessSync(CONFIG_DIR, fs.constants.W_OK); } catch (e) { dirIssue = String(e?.code || e?.message || e).slice(0, 200); }
   for (const [name, content0] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
     if (base === REDACTED_META || base === SKIPPED_META) continue; // 메타 키는 파일이 아니다
     if (DENY_NAMES.has(base) || !ALLOW_EXT.has(path.extname(base).toLowerCase())) continue;
+    if (RESTORE_EXCLUDE.has(base)) { excluded.push({ file: base, reason: RESTORE_EXCLUDE.get(base) }); continue; }
     let content = content0;
     // v2.538: 번들의 .env 는 키·토큰이 가려져 있다 — 현재 파일의 값으로 되살리고, 없으면 그 줄을 버린다
     // (빈 값으로 덮어써 AUTH_SECRET 을 지우면 전 세션이 무효가 된다).
@@ -365,15 +428,51 @@ export async function restoreCentral(archive, { retention = 30 } = {}) {
       // 2026-10-09 검토 S-10: 보안 스위치(서명 정책·TLS 예외·인증)는 호스트 값을 유지한다 — 복원이 보호를 약하게 만들지 못하게.
       const p = pinHostSecurityEnv(content, cur);
       content = p.text; envPinned.push(...p.pinned.map((k) => `${base}:${k}`));
+      envWrites.push([base, String(content)]);
+      continue;
     }
-    // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 users.json 같은 핵심 설정이 부분기록으로
-    // 손상된 채 남는다(복원이 오히려 파손 유발). tmp+rename으로 온전본만 남긴다.
-    // v2.689(G2 B4): 실패를 삼키지 않는다 — 예전에는 'restored N' 만 돌려 users.json 같은 파일이 복원되지 않았는데도 완전 복원처럼 보였다.
-    try { atomicWriteFileSync(path.join(CONFIG_DIR, base), String(content)); restored++; }
+    // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
+    //   지금 failed 에 사유와 함께 싣는다(v2.689 G2 B4 '실패를 삼키지 않는다').
+    const nameIssue = stagedNameIssue(base);
+    if (nameIssue) { failed.push({ file: base.slice(0, 200), reason: `예약 복원 불가 이름(${nameIssue}) — 이 파일은 복원되지 않습니다` }); continue; }
+    // v2.689(G2 B4) 유지: 적용할 수 없는 파일을 지금 알린다(디렉터리가 그 이름을 차지 · 설정 디렉터리 쓰기 불가). 실제 쓰기 실패는
+    //   기동 시 적용 결과(stagedRestoreStatus().last.failed)와 로그가 말한다.
+    const target = path.join(CONFIG_DIR, base);
+    let why = dirIssue;
+    if (!why) { try { if (fs.statSync(target).isDirectory()) why = 'EISDIR'; } catch { /* 없음 — 새로 만든다 */ } }
+    if (why) { failed.push({ file: base, reason: why }); continue; }
+    toStage[base] = String(content);
+  }
+  // 예약을 먼저 쓴다 — 예약이 실패하면 .env 도 건드리지 않고 던진다(반쪽 복원 방지).
+  const names = Object.keys(toStage);
+  let stage = null;
+  if (names.length) {
+    stage = stageRestore(toStage, { configDir: CONFIG_DIR, source }); restored += stage.files.length;
+    // v2.769(점검 R4-D1-3): 위에서 걸렀어도 예약이 다시 거른 것이 있으면(판정이 갈린 경우) 조용히 버리지 않는다.
+    for (const d of stage.dropped || []) failed.push({ file: d.file, reason: `예약 복원 불가 이름(${d.reason}) — 이 파일은 복원되지 않습니다` });
+  }
+  // v2.769(점검 R4-D1-2): 적용 시 엣지 토큰은 현재 파일 우선 병합이다 — 백업에만 있는 항목(백업 이후 폐기했을 수 있다)이 되살아나는 개수를
+  //   지금 미리 알린다. 실제 병합 결과는 기동 때 적용 결과(warnings)·로그가 말한다.
+  const warnings = [];
+  if (toStage['central-agent-tokens.json'] != null) {
+    let cur = null; try { cur = fs.readFileSync(path.join(CONFIG_DIR, 'central-agent-tokens.json'), 'utf8'); } catch { /* 없음 */ }
+    const pv = reconcileAgentTokensText(toStage['central-agent-tokens.json'], cur);
+    if (pv.revived.length) warnings.push({ file: 'central-agent-tokens.json', reason: `재시작 때 백업에만 있는 엣지 토큰 ${pv.revived.length}개(${pv.revived.slice(0, 10).join(', ')}${pv.revived.length > 10 ? ' …' : ''})가 되살아납니다 — 같은 엣지의 현재 토큰은 유지됩니다. 백업 이후 폐기한 토큰이면 재시작 뒤 다시 폐기하세요.` });
+  }
+  if (toStage['users.json'] != null) warnings.push({ file: 'users.json', reason: '재시작 때 모든 계정의 세션 버전을 올립니다 — 백업 이후 폐기한 세션이 되살아나지 않게 모든 사용자가 다시 로그인해야 합니다.' });
+  for (const w of warnings) console.warn(`[backup] 복원 경고 — ${w.file}: ${w.reason}`);
+  // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 핵심 설정이 부분기록으로 손상된 채 남는다. tmp+rename으로 온전본만 남긴다.
+  for (const [base, content] of envWrites) {
+    try { atomicWriteFileSync(path.join(CONFIG_DIR, base), content); restored++; }
     catch (e) { failed.push({ file: base, reason: String(e?.code || e?.message || e).slice(0, 200) }); }
   }
   if (failed.length) console.warn(`[backup] 복원 실패 ${failed.length}개: ${failed.map((f) => `${f.file}(${f.reason})`).join(', ').slice(0, 500)}`);
-  return { restored, failed, edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned };
+  return {
+    restored, failed, excluded, warnings,
+    staged: stage ? stage.files : [], stagedReplaced: !!stage?.replaced, pendingRestart: !!stage,
+    envWritten: envWrites.length,
+    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned,
+  };
 }
 
 /** 업로드된 gzip 아카이브 버퍼를 파싱. */

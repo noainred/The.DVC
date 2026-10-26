@@ -550,7 +550,10 @@ export default function SvcMonitor() {
             <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '이름·호스트·위치 수정' : '트리에서 대상을 선택'}
               onClick={() => editTargetAt(selTarget.id)}>🖉 수정</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} onClick={removeSel}>✕ Remove</button>
-            <button className="pc-btn accent" disabled={!canEdit} onClick={doRefresh}>⟳ Refresh</button>
+            {/* v2.769(점검 R4-D3-3): 점검을 직접 실행하지 않는 인스턴스(중앙·킬스위치)는 서버가 409 를 준다 — 버튼을 끄고 이유를 말한다. */}
+            <button className="pc-btn accent" disabled={!canEdit || data?.executes === false}
+              title={data?.executes === false ? '이 인스턴스는 점검을 직접 실행하지 않습니다(결과는 배정된 엣지가 보고합니다)' : ''}
+              onClick={doRefresh}>⟳ Refresh</button>
             <button className="pc-btn" onClick={doReset}>⟲ Reset</button>
             <button className="pc-btn" disabled={!canEdit} title="선택 위치에 폴더 만들기(트리 우클릭도 가능)"
               onClick={() => { setCtx({ x: 0, y: 0, node: sel && !sel.startsWith('target:') ? sel : 'root' }); setTimeout(newFolder, 0); }}>📁 폴더</button>

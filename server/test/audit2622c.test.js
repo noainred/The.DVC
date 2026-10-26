@@ -222,8 +222,9 @@ test('EDGE-01 — RMA: 한 폴에 한 명령만 인출하고, 뒤 명령은 앞 
   const jobs = await import('../src/rma/jobs.js');
   jobs._resetRma?.();
   assert.equal(jobs.TAKE_MAX, 1);
-  const a = jobs.enqueueJob('rma-c', { cmd: 'uptime', args: {} }, { timeoutMs: 60_000 });
-  const b = jobs.enqueueJob('rma-c', { cmd: 'uptime', args: {} }, { timeoutMs: 60_000 });
+  // v2.762: 인출(takeJobs)이 대기 수명 정리를 먼저 돌리므로 등록 시각도 같은 기준(T0)으로 — 실제 시각으로 등록하면 T0(2030)에 '오래된 잡' 으로 정리된다.
+  const a = jobs.enqueueJob('rma-c', { cmd: 'uptime', args: {} }, { timeoutMs: 60_000, now: T0 });
+  const b = jobs.enqueueJob('rma-c', { cmd: 'uptime', args: {} }, { timeoutMs: 60_000, now: T0 });
   const t = T0;
   const first = jobs.takeJobs('rma-c', 'i1', t);
   assert.deepEqual(first.map((x) => x.reqId), [a.reqId], '대기 전량을 인출하면 뒤 명령이 기한을 넘겨 미회신으로 종결된다');

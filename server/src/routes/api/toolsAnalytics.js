@@ -18,6 +18,7 @@ import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
 import { suggestSize } from '../../reports/rightsizing.js'; // v2.629 DATA2629-05: 과대 VM 은 초과분만
 import { gpuHostKey } from './hardwareGpu.js'; // v2.598 VC2598-03 — (vCenter, 호스트) 키
 import { clusterRefMode, clusterGroupKeyOf } from '../../clustercfg/analyze.js'; // v2.742 VC-05 — 클러스터 묶음 키(ref)
+import { ownsClusterKey } from '../../gpu/clusterKeyScope.js'; // v2.769(점검 R4-D5-4): 클러스터 키 소유 vCenter = 최장 프리픽스
 
 
 // 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
@@ -235,7 +236,7 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
   if (allowedG) {
     const snapG = store.get();
     const owns = level === 'vc' ? allowedG.has(key)
-      : level === 'cluster' ? allowedG.has(key.split('|')[0])
+      : level === 'cluster' ? ownsClusterKey(allowedG, key, snapG) // v2.769(점검 R4-D5-4): split('|') → 최장 프리픽스(vCenter id 에 '|' 허용)
         : level === 'vm' ? allowedG.has((snapG.vms || []).find((v) => v.id === key)?.vcenterId)
           : allowedG.has((snapG.hosts || []).find((h) => h.id === key)?.vcenterId);
     if (!owns) return res.json({ level, key, metric: kind, days, bucketMs: 0, unit, synthesized: false, points: [] });

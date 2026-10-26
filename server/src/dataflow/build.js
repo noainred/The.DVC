@@ -40,6 +40,8 @@ export const RECENT_MAX = 40;
 /** 데이터 종류 — 순서가 화면 순서다. `test` 는 `side:path` 에 대한 정규식이고 **처음 맞는 것** 하나를 쓴다. */
 export const CATS = Object.freeze([
   { id: 'inv', label: '인벤토리(vCenter)', test: /^central:\/(inventory|fleet|capacity-report|guest-disk|vmseries(-config)?)$|^collector:\/export$/ },
+  // v2.763(V2-3): Veeam 백업 상태는 인벤토리 칸에서 뺐다 — 공유 토큰 엣지의 veeam 403 이 'vCenter 인벤토리' 를 빨갛게 칠했다(인벤토리는 정상).
+  { id: 'backup', label: 'Veeam 백업', test: /^central:\/veeam-(data|config)$/ },
   { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config)$|^collector:\/(idrac-scan|bm-usage)$/ },
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
@@ -51,7 +53,7 @@ export const CATS = Object.freeze([
   { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result)$|^collector:\/edge-log$/ },
-  { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password)$/ },
+  { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password|central-token)$/ },
 ]);
 
 /**

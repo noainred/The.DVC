@@ -17,6 +17,12 @@ const fleetReadOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 O
 //   예전에는 GET 만 막아, settingsOwners 에 든 범위 관리자가 읽지는 못하면서 바꿀 수는 있었다(같은 파일 형제 라우트의 비대칭).
 const fleetOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 OS 방화벽)는 전 법인 공용 서버 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 import { hostAccessStatus, saveDraft, planHostAccess, applyHostAccess, confirmHostAccess, revertHostAccess, SUDOERS_HINT } from '../../hostaccess/service.js';
+import { normalizeRequesterIp } from '../../hostaccess/render.js';
+
+// v2.771(점검 R6-F5-2): 요청자 IP 는 이 기능 경로에서만 '::ffff:a.b.c.d' → IPv4 로 정규화한다(듀얼스택 '::' listen 의 IPv4 peer).
+//   상태 응답(화면 '내 IP'·'내 IP 추가' 가 이 값을 그대로 쓴다)·계획·적용이 같은 값을 본다. 전역 clientIp 는 바꾸지 않는다
+//   (레이트리밋·로그인 잠금 키·감사 ip 형식이 바뀐다).
+const requesterIpOf = (req) => normalizeRequesterIp(clientIp(req));
 
 function requireOwnOtp(req, res, next) {
   if (!config.auth.enabled) return next();
@@ -30,7 +36,7 @@ function requireOwnOtp(req, res, next) {
 
 export function registerHostAccess(adminRouter) {
   adminRouter.get('/host-access', adminOnly, fleetReadOnly, requireSettingsOwner, async (req, res) => {
-    res.json({ ...(await hostAccessStatus({ requesterIp: clientIp(req) })), sudoersHint: SUDOERS_HINT() });
+    res.json({ ...(await hostAccessStatus({ requesterIp: requesterIpOf(req) })), sudoersHint: SUDOERS_HINT() });
   });
   adminRouter.put('/host-access/draft', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
     const r = saveDraft(req.body?.settings || req.body || {});
@@ -39,10 +45,10 @@ export function registerHostAccess(adminRouter) {
     res.json(r);
   });
   adminRouter.post('/host-access/plan', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
-    res.json(await planHostAccess(req.body?.settings || {}, { requesterIp: clientIp(req) }));
+    res.json(await planHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req) }));
   });
   adminRouter.post('/host-access/apply', adminOnly, fleetOnly, requireSettingsOwner, requireOwnOtp, async (req, res) => {
-    const r = await applyHostAccess(req.body?.settings || {}, { requesterIp: clientIp(req), by: req.user?.username || '' });
+    const r = await applyHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: r.ok ? '호스트 접근 제어 적용(런타임, 확정 대기)' : '호스트 접근 제어 적용 실패', target: 'host-access', detail: r.ok ? `명령 ${r.commands.length}개 · 확정 기한 ${new Date(r.pending.deadline).toISOString()}` : (r.errors || []).join(' / ').slice(0, 300), ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });

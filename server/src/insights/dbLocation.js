@@ -33,6 +33,7 @@ export const MIGRATABLE = [
   { file: 'idrac-power.db', label: '전력 시계열(iDRAC/OME)' },
   { file: 'ping-monitor.db', label: '핑 모니터 이력' },
   { file: 'capacity.db', label: '용량 샘플' },
+  { file: 'veeam-snap.db', label: 'Veeam 스냅샷 이벤트(최근 31일 · 카드 백업 수량)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).
@@ -120,6 +121,47 @@ export function migrationInventory(fromDir = null) {
   return { sourceDir: src, files, totalBytes: files.reduce((s, f) => s + f.bytes, 0) };
 }
 
+// v2.769(점검 R4-D2-01): install.sh --prefix 와 같은 규칙(packaging/offline/install.sh:58).
+const SAFE_PATH_RE = /^\/[A-Za-z0-9._/-]+$/;
+const DOTDOT_RE = /(^|\/)\.\.(\/|$)/;
+
+// v2.769(점검 R4-D2-02): 대상 '자체' 로 쓰면 root 스크립트의 chown -R·chmod 700 이 시스템을 깨는 디렉터리.
+const SYSTEM_DIRS = new Set([
+  '/', '/tmp', '/var/tmp', '/dev/shm', '/run', '/etc', '/usr', '/var', '/opt', '/srv', '/mnt', '/media',
+  '/home', '/root', '/boot', '/bin', '/sbin', '/lib', '/lib64', '/dev', '/proc', '/sys',
+  '/var/lib', '/var/log', '/var/cache', '/var/spool', '/usr/local',
+]);
+// 가상·휘발 파일시스템 — 아래에 만든 DB 는 재부팅에 사라지거나 쓸 수 없다.
+const VOLATILE_ROOTS = ['/proc', '/sys', '/dev', '/run'];
+
+const realOrSelf = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+
+/** 시스템 디렉터리 자체·가상 파일시스템 아래면 사유, 아니면 null. 심볼릭 링크는 실제 경로로도 본다. */
+export function systemDirIssue(abs) {
+  // path.resolve·realpath 결과라 끝 '/' 는 이미 정규화돼 있다.
+  for (const norm of new Set([abs, realOrSelf(abs)])) {
+    if (SYSTEM_DIRS.has(norm)) return `시스템 디렉터리(${norm}) 자체는 대상으로 쓸 수 없습니다 — 이전 스크립트가 root 로 소유권·권한(chown -R·chmod 700)을 바꿉니다. 그 아래 전용 하위 디렉터리를 지정하세요(예: /data/vmware-portal-db).`;
+    if (VOLATILE_ROOTS.some((r) => norm === r || norm.startsWith(`${r}/`))) return `${norm} 은(는) 가상·휘발 파일시스템이라 DB 를 둘 수 없습니다.`;
+  }
+  return null;
+}
+
+/** 이미 있는 대상 디렉터리 — sticky/world-writable 거부, 비어 있거나 서비스 계정(이 프로세스) 소유일 때만 허용. */
+export function existingDirIssue(target, st) {
+  if ((st.mode & 0o1000) || (st.mode & 0o002)) {
+    return '대상이 공용 디렉터리(sticky 또는 모든 사용자 쓰기 가능)입니다 — 이전 스크립트가 root 로 chown -R·chmod 700 을 하므로 쓸 수 없습니다. 전용 하위 디렉터리를 지정하세요.';
+  }
+  let empty = false;
+  try { empty = fs.readdirSync(target).length === 0; } catch { empty = false; }
+  if (empty) return null;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  // Windows(getuid 없음)는 bash 이전 스크립트 대상이 아니다 — 소유자 판정 생략.
+  if (uid === null) return null;
+  // root 로 도는 포탈은 '서비스 계정 소유' 가 root 소유와 같아 판별력이 없다 — 비어 있는 디렉터리만 허용.
+  if (uid !== 0 && st.uid === uid) return null;
+  return '이미 파일이 있는 디렉터리는 포탈 서비스 계정 소유일 때만 대상으로 쓸 수 있습니다(이전 스크립트가 root 로 chown -R 합니다) — 비어 있는 새 디렉터리를 지정하세요.';
+}
+
 /**
  * 사전 점검 — 실제 복사 전에 실패 요인을 모두 잡아낸다.
  * { ok, reasons[], warnings[], inventory, targetFree }
@@ -134,6 +176,10 @@ export function preflight(targetDir) {
   // Linux 에서 개행은 합법 파일명이라 isAbsolute/mkdir/statfs 검사로는 걸러지지 않는다.
   if (target && /[\x00-\x1f\x7f'"\\`$]/.test(target)) {
     reasons.push('경로에 제어문자·인용부호·백슬래시·$·백틱은 쓸 수 없습니다(마이그레이션 스크립트 안전).');
+  } else if (target && path.isAbsolute(target) && (!SAFE_PATH_RE.test(target) || DOTDOT_RE.test(target))) {
+    // v2.769(점검 R4-D2-01): 금지 문자 목록(블랙리스트)은 ; 공백 # & | * 를 통과시켰고, 그 경로가 db-location.json dbDir 이
+    //   된 뒤 다음 이전 README 의 'sudo rm' 줄에 인용 없이 들어가 root 명령이 됐다. install.sh --prefix 와 같은 화이트리스트로 좁힌다.
+    reasons.push('경로는 영문·숫자·. _ - / 만 쓸 수 있고 \'..\' 는 쓸 수 없습니다(마이그레이션 스크립트 안전 — 예: /data/vmware-portal-db).');
   }
   const src = dbDir() || CONFIG_DIR;
   if (target && path.resolve(target) === path.resolve(src)) reasons.push('현재 경로와 같습니다.');
@@ -159,12 +205,25 @@ export function preflight(targetDir) {
       reasons.push('systemd 하드닝(ProtectSystem=full) 때문에 /usr·/boot·/etc 아래는 서비스가 쓸 수 없습니다(CONFIG_DIR 은 예외) — /data 같은 별도 볼륨을 쓰거나 유닛의 ReadWritePaths 에 경로를 추가하세요.');
     }
   }
+  // v2.769(점검 R4-D2-02): 생성 스크립트는 root 로 `chown -R 서비스계정 "$DST"` · `chmod 700 "$DST"` 를 실행한다.
+  //   대상이 /tmp 같은 공용 디렉터리면 다른 계정·root 파일이 서비스 계정 소유가 되고 /tmp 가 0700 이 돼 시스템 전반이 깨진다.
+  //   그래서 ① 시스템 디렉터리 자체(+ 가상·휘발 파일시스템 아래)는 거부 ② 이미 있는 대상이 sticky/world-writable 이면 거부
+  //   ③ 이미 있는 대상은 비어 있거나 서비스 계정(이 프로세스) 소유일 때만 허용한다. '/tmp 아래 전부' 를 막지는 않는다
+  //   (그 아래 새로 만든 0700 디렉터리는 안전하다).
+  if (target && !reasons.length) {
+    const sys = systemDirIssue(path.resolve(target));
+    if (sys) reasons.push(sys);
+  }
   let created = false;
   if (target && !reasons.length) {
     try {
       if (!fs.existsSync(target)) { fs.mkdirSync(target, { recursive: true, mode: 0o700 }); created = true; } // v2.611(DB2611-01): DB 디렉터리는 0700(umask 0755 로 열리지 않게)
       const st = fs.statSync(target);
       if (!st.isDirectory()) reasons.push('경로가 디렉터리가 아닙니다.');
+      else if (!created) {
+        const issue = existingDirIssue(target, st);
+        if (issue) reasons.push(issue);
+      }
     } catch (e) { reasons.push(`디렉터리를 만들 수 없습니다: ${e.message}`); }
   }
   // 쓰기 권한 실측 — 권한 판정을 추측하지 않고 실제로 써 본다.

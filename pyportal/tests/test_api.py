@@ -304,10 +304,16 @@ class SettingsApiTest(ServerCase):
                                    {"name": "부산 콘솔", "url": "bus.internal.dc",
                                     "datacenterId": "bus-1"}, self.auth())
         self.assertEqual(payload["shortcut"]["datacenterId"], "bus-1")
+        linked_id = payload["shortcut"]["id"]
 
-        code, _, _ = request(self.url + "/api/settings/datacenters/bus-1", "DELETE", None,
-                             self.auth())
+        code, payload, _ = request(self.url + "/api/settings/datacenters/bus-1", "DELETE", None,
+                                   self.auth())
         self.assertEqual(code, 200)
+        # v2.760(점검 B-07): 지운 DC 에 묶여 있던 바로가기는 '전체'로 옮긴다 — 남겨 두면 DC 상세의
+        # '이 사이트' 에도 '공통' 에도 잡히지 않는다(확인 창도 '전체 공통으로 바뀝니다' 라고 말한다).
+        self.assertEqual(payload["movedShortcuts"], 1)
+        moved = [sc for sc in payload["shortcuts"] if sc["id"] == linked_id]
+        self.assertEqual(moved[0]["datacenterId"], "all")
         code, _, _ = request(self.url + "/api/settings/datacenters/bus-1", "DELETE", None,
                              self.auth())
         self.assertEqual(code, 404)

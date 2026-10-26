@@ -6,6 +6,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
+import { vcLogCollectRows, vcLogStateText, vcLogStateClass, vcLogLagText, vcLogLagWarn, vcLogCappedText, vcLogReadStoredText, vcLogDurText, vcLogMaxPerPollText, vcLogHintText,
+  vcLogSkipText, vcLogStateSort, vcLogRunningText, vcLogCountsAtText, vcLogCatchupText, vcLogCapNoteText } from './vcLogCollect.js'; // v2.765: vCenter 별 수집 상태 표(+ 시한 안내 — 2-c) · v2.772: 진행 중·수집 제외·진척·용량 상한 안내
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -39,11 +41,14 @@ export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString(
  * v2.743(감사 WEB-04): '지금 수집' 결과 문구(순수 — vitest 고정). 예전에는 응답과 무관하게 '수집 완료: N건' 만 썼다 —
  *   진행 중(busy)이면 서버가 직전 결과를 돌려줘 그 건수를 이번 결과로 말했고, 꺼짐(skipped)은 '수집 완료: 0건', 전부 실패해도 '0건' 이었다.
  *   판정: busy(새로 수집하지 않음) → skipped(꺼짐 — 수집하지 않음) → 적재 건수 + 로그인 거부·인증 정지·수집 실패·수집 대상 아님을 각각.
+ *   v2.781(D-B3): 정체(stalled)·1일 넘는 지연(lagging) vCenter 수도 덧붙인다(제목은 그대로 — '문제' 는 거부·정지·실패뿐).
  *   문제가 하나라도 있으면 '수집 완료' 라고 말하지 않는다. 건수를 모르면 '—'(0 아님).
  */
 export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
   if (!r || typeof r !== 'object') return '수집 결과를 읽지 못했습니다.';
   if (r.ok === false) return `오류: ${typeof r.reason === 'string' && r.reason ? r.reason : '수집하지 못했습니다.'}`;
+  // v2.772(Z1-3): 서버가 150초 안에 끝나지 않아 먼저 응답했다 — 수집은 계속 진행 중이고, 이번 회차의 실패 목록은 응답에 없다(표의 상태 칸이 말한다).
+  if (r.running) return `수집이 오래 걸려 먼저 응답했습니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 수집은 계속 진행 중입니다. 결과(실패한 vCenter 포함)는 아래 표의 상태 칸에서 확인하세요.`;
   if (r.busy) return `이전 수집이 아직 진행 중입니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 이번 요청으로 새로 수집하지 않았습니다. 끝나면 상태 줄이 바뀝니다.`;
   if (r.skipped) return '로그 수집이 꺼져 있어 수집하지 않았습니다 — 위에서 켜고 정책을 저장하세요.';
   const len = (v) => (Array.isArray(v) ? v.length : 0);
@@ -57,6 +62,11 @@ export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('k
     const first = Array.isArray(r.failed) && r.failed[0] ? `${r.failed[0].vcenterId}: ${r.failed[0].error || '알 수 없는 오류'}` : '';
     extra.push(`수집 실패 ${failed}곳${first ? `(${first}${failed > 1 ? ' 외' : ''})` : ''}`);
   }
+  // v2.781(점검 G1 D-B3): 서버가 같은 응답에 싣는 정체(stalled — 끝까지 못 읽었는데 새로 저장 0)·지연(lagging — 1일 넘게 뒤처짐)도 센다 —
+  //   예전에는 버튼 문구가 '수집 완료: 0건 적재' 인데 같은 화면의 표는 '정체' 라 두 표시가 엇갈렸다. 제목은 바꾸지 않는다(따라잡기는 실패가 아니다).
+  const stalledN = len(r.stalled), laggingN = len(r.lagging);
+  if (stalledN) extra.push(`읽었지만 새로 저장 0 — ${stalledN}곳(표의 ‘정체’ · 중복·심각도 필터 — 읽은 시각부터 이어 읽습니다)`);
+  if (laggingN) extra.push(`1일 넘게 뒤처진 vCenter ${laggingN}곳(아래 표의 상태·지연 칸)`);
   if (skippedVc) extra.push(`수집 대상이 아닌 vCenter ${skippedVc}곳(아래 안내)`);
   const problem = rejected || stopped || failed;
   return `${problem ? '수집 끝(일부 실패)' : '수집 완료'}: ${nTxt} 적재${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
@@ -114,14 +124,22 @@ export default function VcenterLogs() {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const loadStatus = () => fetchJson('/admin/vclogs/status').then((r) => { setSt(r); setS((c) => c || r.settings); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { loadStatus(); const t = setInterval(loadStatus, 30_000); return () => clearInterval(t); }, []);
+  // v2.766(점검 R1-A3-04): 순번 가드 — 30초 폴링과 저장·지금 수집 뒤 재조회가 겹치면 늦게 온 이전 응답이 수집 직후 상태를 옛 값으로 되돌렸다.
+  const statusSeq = useRef(0);
+  const loadStatus = () => {
+    const my = ++statusSeq.current;
+    return fetchJson('/admin/vclogs/status')
+      .then((r) => { if (my !== statusSeq.current) return; setSt(r); setS((c) => c || r.settings); setErr(null); })
+      .catch((e) => { if (my !== statusSeq.current) return; setErr(e.message); });
+  };
+  useEffect(() => { loadStatus(); const t = setInterval(loadStatus, 30_000); return () => { clearInterval(t); statusSeq.current += 1; }; }, []);
 
   if (err) return <ErrorBox message={err} />;
   if (!st || !s) return <Loading />;
 
   // v2.731(A5-01): putJson 은 400(저장 경로 검사 실패 {ok:false,reason})을 던지지 않는다 — 판정 없이 setS(r) 하면 설정 폼이 오류 객체가 되고 '저장됨' 이 떴다.
   const save = async () => { setBusy('save'); setMsg(null); try { const r = requireChanged(await putJson('/admin/vclogs/settings', s)); setS(r); setMsg('저장됨'); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
+  const capNote = vcLogCapNoteText(st, vcLogCollectRows(st), { fmtTime });   // v2.772(Z2-I1): 용량 상한이 실제 보관을 정하는가
   const collect = async () => { setBusy('collect'); setMsg(null); try { const r = await postJson('/admin/vclogs/collect', {}); setMsg(vcLogCollectText(r, fmtTime)); await loadStatus(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); } };
 
   return (
@@ -152,6 +170,7 @@ export default function VcenterLogs() {
             <option value="info">정보 이상(전체)</option><option value="warning">경고 이상</option><option value="error">위험만</option>
           </Select>
         </div>
+        {vcLogMaxPerPollText(st) && <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>{vcLogMaxPerPollText(st)}</div>}
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12, marginTop: 12 }}>
           <span className="muted"><b>저장 경로</b></span>
           <input className="input" placeholder="비우면 기본(CONFIG_DIR)" style={{ flex: 1, minWidth: 280 }} value={s.storagePath || ''} onChange={(e) => setS({ ...s, storagePath: e.target.value })} />
@@ -163,11 +182,8 @@ export default function VcenterLogs() {
           <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>
         {vcLogNotCollectedText(st.lastRun) && <div className="muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{vcLogNotCollectedText(st.lastRun)}</div>}
-        {(st.store?.vcenters || []).length > 0 && (
-          <div className="flex gap wrap" style={{ marginTop: 10 }}>
-            {st.store.vcenters.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 11 }} title={`최근 ${fmtTime(v.lastTs)}`}>{v.vcenterId}: {fmtNum(v.count)}</span>)}
-          </div>
-        )}
+        {capNote && <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal', color: 'var(--amber)' }}>{capNote}</div>}
+        <VcLogCollectTable st={st} />
       </div>
 
       <LogViewer />
@@ -175,7 +191,55 @@ export default function VcenterLogs() {
   );
 }
 
-function LogViewer() {
+/**
+ * v2.765: vCenter 별 수집 상태 표(예전 배지 묶음 대체) — 보관 건수·마지막 저장·온전한 시각·지연(1일 넘으면 호박색)·이번 주기 읽음/저장·상한·소요/시한·상태.
+ * 서버 collect 가 없으면(구버전) 건수·마지막 저장만 채우고 나머지는 '—'. STable 이 minWidth 와 가로 스크롤 래퍼를 함께 만든다(400px 넘침 방지).
+ */
+export function VcLogCollectTable({ st }) {
+  const rows = vcLogCollectRows(st);
+  if (!rows.length) return null;
+  const omitted = Number(st?.collectOmitted);
+  const countsAt = vcLogCountsAtText(st?.store?.countsAt);
+  return (
+    <div style={{ marginTop: 10 }}>
+      <STable minWidth={1080} style={{ fontSize: 12 }}>
+        <thead><tr>
+          <th>vCenter</th><th title="건수는 최대 몇 분 전에 센 값입니다(옆의 집계 시각). 마지막 저장·가장 오래된 로그는 지금 값입니다">보관 건수{countsAt && <span className="muted" style={{ fontWeight: 400, marginLeft: 4 }}>{countsAt}</span>}</th><th>마지막 저장</th>
+          <th title="이 vCenter 의 가장 오래된 보관 로그 — 용량 상한이 걸려 있으면 설정 보관 기간보다 짧을 수 있습니다">가장 오래된 로그</th><th title="이 시각까지의 이벤트는 전부 모았습니다(상한에 걸리면 마지막으로 읽은 이벤트 시각)">온전한 시각</th>
+          <th title="지금 − 온전한 시각(없으면 마지막 저장). 1일을 넘으면 호박색">지연</th><th title="마지막으로 끝난 주기에 읽은 수 / 저장한 수(묶음 수). 수집 중이면 직전 주기 값이고 진행분은 상태 칸에 있습니다">최근 주기 읽음/저장</th>
+          <th title="최근 주기가 끝까지 읽지 못한 이유 — 예산(시간 예산 소진)·시한(데드라인)·중단(묶음 사이 실패)·상한·쪽 수 한도. 수집 중이면 진행 중">상한</th><th title="최근 주기 소요 / 데드라인(시간 예산 + 요청 시한×2)">소요/시한</th><th title="심각도 순으로 정렬합니다(실패·인증 정지·정체·따라잡기·수집 안 함·정상)">상태</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((r) => {
+            const warn = vcLogLagWarn(r.lagMs);
+            return (
+              <tr key={r.vcenterId}>
+                <td style={{ whiteSpace: 'nowrap' }}>{r.vcenterId}</td>
+                <td data-sort={r.count ?? ''} className="right">{fmtNum(r.count)}</td>
+                <td data-sort={r.lastStoredTs ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.lastStoredTs)}</td>
+                <td data-sort={r.firstTs ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.firstTs)}</td>
+                <td data-sort={r.okAt ?? ''} className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.okAt)}</td>
+                <td data-sort={r.lagMs ?? ''} style={{ whiteSpace: 'nowrap', color: warn ? 'var(--amber)' : undefined, fontWeight: warn ? 600 : undefined }}>{vcLogLagText(r.lagMs)}</td>
+                <td data-sort={r.read ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogReadStoredText(r, fmtNum)}</td>
+                <td data-sort={r.running ? 2 : r.capped == null ? '' : r.capped ? 1 : 0}>{vcLogCappedText(r)}</td>
+                <td data-sort={r.ms ?? ''} style={{ whiteSpace: 'nowrap' }}>{vcLogDurText(r)}</td>
+                <td data-sort={vcLogStateSort(r)}>
+                  <span className={`badge ${vcLogStateClass(r.state)}`} title={r.error || (r.errorHidden ? '오류 원문은 전체 범위 관리자만 봅니다' : undefined) || vcLogSkipText(r) || undefined}>{vcLogStateText(r.state)}</span>
+                  {r.running && <span className="badge blue" style={{ marginLeft: 6 }} title="지금 수집 중입니다 — 이 행의 읽음/저장·소요·상태는 직전에 끝난 주기 값입니다">{vcLogRunningText(r, fmtNum)}</span>}
+                  {vcLogHintText(r) && <span className="muted" style={{ marginLeft: 6, whiteSpace: 'normal' }}>{vcLogHintText(r)}</span>}
+                  {vcLogCatchupText(r) && <div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal' }}>{vcLogCatchupText(r)}</div>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </STable>
+      {Number.isFinite(omitted) && omitted > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>범위 밖 vCenter {omitted.toLocaleString()}곳은 표시하지 않았습니다.</div>}
+    </div>
+  );
+}
+
+export function LogViewer() {   // v2.768: 회귀 테스트(audit2768c)가 직접 띄운다
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [f, setF] = useState({ vcenterId: '', severity: '', q: '' });
   const [period, setPeriod] = useState(VCLOG_DEFAULT_PERIOD);   // v2.741(DB-01): 기본 최근 7일
@@ -193,6 +257,9 @@ function LogViewer() {
   // v2.590 P11: 엣지 연합 조회가 끝나지 않은 이유 — 예전에는 13초 뒤 조용히 빈 표로 끝나 '로그가 없다' 처럼 보였다.
   const [fedNote, setFedNote] = useState('');
   const [dlMsg, setDlMsg] = useState('');   // v2.602 WEB2602-01: CSV 내려받기 실패 사유
+  // v2.768(점검 R3-C4-1): 로컬 조회 실패 — 예전엔 catch(()=>{}) 로 삼켜 필터를 바꾼 뒤 실패하면 이전 조건의 행이 남았고,
+  //   첫 조회 실패는 '기간 안 로그 없음' 으로 보였다(값 없는 이유를 단정). 오류 객체를 그대로 둔다(ErrorBox 가 403·일시 미가용을 가른다).
+  const [loadErr, setLoadErr] = useState(null);
   const LIMIT = 200;
   const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
 
@@ -203,7 +270,7 @@ function LogViewer() {
   const fedGen = useRef(0);
   const federate = async () => {
     const gen = ++fedGen.current;
-    setMode('edge'); setLoading(true); setRows([]); setFedNote('');
+    setMode('edge'); setLoading(true); setRows([]); setFedNote(''); setLoadErr(null);
     try {
       sinceRef.current = vcLogSinceOf(period);
       const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT, ...(sinceRef.current ? { since: sinceRef.current } : {}) });
@@ -225,7 +292,7 @@ function LogViewer() {
   const load = (reset = true) => {
     if (f.vcenterId && remoteAgent(f.vcenterId)) return federate(); // 엣지 보관 → 연합 조회
     const gen = ++fedGen.current; // 진행 중이던 연합 폴링 무효화 + 이 로컬 조회의 세대
-    setMode('local'); setLoading(true); setFedNote('');
+    setMode('local'); setLoading(true); setFedNote(''); setLoadErr(null);
     const off = reset ? 0 : offset;
     if (reset) sinceRef.current = vcLogSinceOf(period);
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
@@ -237,7 +304,12 @@ function LogViewer() {
       if (gen !== fedGen.current) return; // 더 새 조회로 대체됨
       setTotal(d.total); setTotalInfo({ totalCapped: d.totalCapped === true, totalCap: Number.isFinite(d.totalCap) ? d.totalCap : null, lastBatch: d.rows.length });
       setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
-    }).catch(() => {}).finally(() => { if (gen === fedGen.current) setLoading(false); });
+    }).catch((e) => {
+      if (gen !== fedGen.current) return; // 더 새 조회로 대체됨 — 늦게 온 실패가 새 화면을 덮지 않게
+      setLoadErr(e || new Error('로그를 불러오지 못했습니다'));
+      // 새 조건의 첫 페이지를 못 읽었으면 이전 조건의 행·건수를 남기지 않는다('더 보기' 실패는 읽은 행을 그대로 둔다).
+      if (reset) { setRows([]); setTotal(0); setTotalInfo({ totalCapped: false, totalCap: null, lastBatch: 0 }); setOffset(0); }
+    }).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
   useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, period, sources]);
 
@@ -271,15 +343,16 @@ function LogViewer() {
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           {mode === 'edge' && <span className="badge amber" title="데이터는 엣지에 보관, 조회만 중계">엣지 조회: {remoteAgent(f.vcenterId) || '?'}</span>}
-          <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>
+          {!(mode === 'local' && loadErr) && <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>}
           {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>}
         </div>
       </div>
       {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 8 }}>{dlMsg}</div>}
+      {mode === 'local' && loadErr && <div style={{ marginBottom: 8 }}><ErrorBox error={loadErr} /></div>}
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
         <STable><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
           <tbody>
-            {rows.length === 0 && !loading && <tr><td colSpan={7} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{vcLogEmptyText(period)}</td></tr>}
+            {rows.length === 0 && !loading && !(mode === 'local' && loadErr) && !(mode === 'edge' && fedNote) && <tr><td colSpan={7} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{vcLogEmptyText(period)}</td></tr>}
             {rows.map((r, i) => {
               const [lbl, cls] = SEV[r.severity] || ['정보', 'gray'];
               return (

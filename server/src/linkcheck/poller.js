@@ -72,6 +72,31 @@ async function pool(items, limit, fn) {
   return (await poolSettled(items, limit, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) }));
 }
 
+/*
+ * v2.769(점검 R4-D3-1): **항목 하나가 주기(= 재진입 가드)를 영원히 붙잡지 못하게** 항목 단위 하드 시한을 둔다.
+ *   예전에는 stepSmtp 가 FIN 에 끝나지 않으면 poolSettled 가 끝나지 않고 running 이 영구 true 라, 그 뒤의 모든 주기와
+ *   '지금 점검' 이 already-running 이었다(중앙 링크 측정까지 정지 · 엣지도 같은 폴러). 루트 CLAUDE.md '폴러 재진입 가드 —
+ *   주기에 상한'. 단계 함수들은 이제 각자 실제 타이머로 소켓을 끊으므로(protocols.js) 이 시한은 **최후 방어선**이다 —
+ *   단계 함수가 signal 을 받지 않아 여기서는 결과만 포기한다. 시한 = 모든 단계 시한의 합 + 여유(한 항목이 실제로 거치는
+ *   단계의 합보다 항상 크다 — 정상 점검을 자르지 않는다). 시한에 걸린 항목은 조용히 버리지 않고 skipped 사유로 센다.
+ */
+export const ITEM_DEADLINE_SLACK_MS = 30_000;
+export function itemDeadlineMs(timeouts = {}) {
+  const keys = ['dnsMs', 'tcpMs', 'tlsMs', 'httpMs', 'sshMs', 'smtpMs'];
+  const sum = keys.reduce((a, k) => a + (Number.isFinite(Number(timeouts[k])) && Number(timeouts[k]) > 0 ? Number(timeouts[k]) : 0), 0);
+  return sum + ITEM_DEADLINE_SLACK_MS;
+}
+export async function runWithItemDeadline(fn, ms, onTimeout) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(onTimeout()), ms); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+const deadlineSkip = (ms) => `항목 시한 초과(${Math.round(ms / 1000)}초) — 단계가 끝나지 않아 이번 주기 결과를 버렸습니다.`;
+
 /**
  * 한 주기. `trigger:'manual'` 이어도 **같은 가드**를 쓴다.
  * @returns {{ok:boolean, skipped?:string, checked?:number, failed?:number, skippedLinks?:number}}
@@ -90,12 +115,14 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     };
     const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs, sshMs: s.sshTimeoutMs, smtpMs: s.smtpTimeoutMs };
 
+    const itemMs = itemDeadlineMs(timeouts);
     const node = selfNode();
     const demo = isMockMode();
     if (demo) await demoBackfill({ mine, node });
     const results = demo
       ? mine.map((l) => demoLinkResult(l, { byNode: node, judge, summaryText }))
-      : await pool(mine, s.concurrency, (l) => runLink(l, { timeouts, ctx, byNode: node }));
+      : await pool(mine, s.concurrency, (l) => runWithItemDeadline(() => runLink(l, { timeouts, ctx, byNode: node }), itemMs,
+        () => ({ link: l, ts: Date.now(), skipped: deadlineSkip(itemMs), byNode: node })));
 
     /*
      * ⚠⚠ **설정 전수 점검도 같은 주기·같은 가드·같은 DB 를 쓴다**(v2.553). 폴러를 하나 더 만들면
@@ -116,7 +143,8 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
         && !(x.agent && node === 'central') && !(node !== 'central' && x.agent && x.agent !== node));
       setResults = demo
         ? doable.map((x) => demoSettingsResult(x, { judge, summaryText }))
-        : await pool(doable, s.concurrency, (x) => runSettingsTarget(x, { timeouts, ctx }));
+        : await pool(doable, s.concurrency, (x) => runWithItemDeadline(() => runSettingsTarget(x, { timeouts, ctx }), itemMs,
+          () => ({ target: x, ts: Date.now(), skipped: deadlineSkip(itemMs) })));
     }
     if (demo) await demoEdgeReports();
 

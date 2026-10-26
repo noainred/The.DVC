@@ -258,3 +258,6 @@
     포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
   · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
 
+- **v2.771(점검 R6-F3)**: SOAP → REST 폴백은 **능력 부재의 증거**가 있을 때만(vim fault 는 MethodNotFound·NotSupported·NotImplemented 만, 그 밖의 vim fault 는 던져 lastGood 이월 — `soapFallbackAllowed`).
+  VM 장치 조회 실패는 `vmGpuUnknown` 표지 + 직전 vm.gpu 이월(`carryVmGpu`) · 점검중 분기도 보존 창 안의 lastGood 을 싣는다(stale) · 위임 병합은 엣지 stale 을 보존(`edgeStale`)·공개 API 수집 시각 = min(receivedAt, staleSince).
+  /summary 의 vCPU/코어·RAM 할당률은 용량 미상 호스트가 있으면 null + `hostsCapacityUnknown`. 남김: 재시작 직후(직전 스냅샷 없음) vmGpuUnknown 표지를 소비처(overview gpuVms·hardwareGpu·gpu/poller)가 아직 읽지 않는다.

@@ -145,5 +145,26 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(point["uptimePct"], 75.0)
 
 
+    def test_summary_latency_is_weighted_by_samples(self):
+        # v2.760(점검 B-02 — 재현): 구간 평균들의 평균이면 10ms 100건 + 2000ms 1건이 1005ms 였다(실제 29.7ms).
+        # 원본 경로(24h)와 롤업 경로(7d) 둘 다 같은 답이어야 한다.
+        now = int(time.time())
+        b = (now // 10800) * 10800
+        self.history.record([result("a", latency=10)] * 100, ts=b - 10800 + 60)
+        self.history.record([result("a", latency=2000)], ts=b + 1)
+        for rng in ("24h", "7d"):
+            summary = self.history.series(rng, "a")["summary"]
+            self.assertEqual(summary["avgLatencyMs"], round((100 * 10 + 2000) / 101, 1), rng)
+            self.assertEqual(summary["maxLatencyMs"], 2000, rng)
+
+    def test_zero_ms_max_latency_is_a_value(self):
+        # 0ms 응답(같은 호스트)도 값이다 — '-' 로 지우지 않는다. 정상 응답이 없는 구간만 None.
+        now = int(time.time())
+        self.history.record([result("a", latency=0)], ts=now - 30)
+        self.history.record([result("b", status="unreachable", latency=0, code=0)], ts=now - 30)
+        self.assertEqual(self.history.series("1h", "a")["summary"]["maxLatencyMs"], 0)
+        self.assertIsNone(self.history.series("1h", "b")["summary"]["maxLatencyMs"])
+        self.assertIsNone(self.history.series("7d", "b")["summary"]["maxLatencyMs"])
+
 if __name__ == "__main__":
     unittest.main()

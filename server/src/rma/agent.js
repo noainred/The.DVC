@@ -50,7 +50,8 @@ import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더�
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
 const CENTRAL_URL = (env.CENTRAL_URL || '').replace(/\/+$/, '');
-const TOKEN = env.CENTRAL_TOKEN || env.EDGE_TOKEN || '';
+// v2.776(반증 F7): 같은 portal.env 를 읽는다 — 엣지 포탈과 같은 우선순위(AGENT_CENTRAL_TOKEN = 중앙이 내려준 개별 토큰이 먼저).
+const TOKEN = env.AGENT_CENTRAL_TOKEN || env.CENTRAL_TOKEN || env.EDGE_TOKEN || '';
 const AGENT = env.AGENT_NAME || env.COLLECTOR_DATACENTER || os.hostname();
 const INSTANCE = (env.RMA_INSTANCE || os.hostname()).trim().slice(0, 64) || 'default';
 const PRIORITY = Number.isFinite(Number(env.RMA_PRIORITY)) && env.RMA_PRIORITY !== '' ? Number(env.RMA_PRIORITY) : 100;

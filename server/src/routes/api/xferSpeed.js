@@ -33,6 +33,9 @@ import { latestAll, samplesSince, samplesSinceChunked, recentFailures, dailyOf, 
 import { edgeRowsAsync, kpisOf, trafficOf, heatOfAsync, seriesOf, dailySeriesOf, statsOf, staleMsOf, latencyMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
 import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js';
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoCollector, isDemoEdgeId } from '../../mock/demo/edge.js';
+import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B4): 공용 백프레셔 대기
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -143,6 +146,40 @@ async function computeMain({ s, cols, now }) {
   };
 }
 
+/**
+ * v2.768(점검 R3-C2-2): 데모 계정 판본 — 사람이 등록한 엣지(이름·주소·측정 오류 원문)를 가리고 데모 엣지만 남긴다.
+ * 조회 자체는 그대로(audit2743a 가 데모 xfer-speed 200 을 고정 — v2.716 '조회 전부'). ⚠ 기억(`memoized`)의 키에는 사용자 축이 없다 —
+ * 가림은 반드시 **기억 밖에서** 한다(기억한 값은 관리자 판본 하나다). 데모 판정은 기존 함수(isDemoGuest·isDemoCollector·isDemoEdgeId).
+ */
+function demoAgentSet(cols) {
+  const ids = new Set();
+  for (const c of cols || []) if (isDemoCollector(c)) { if (t(c.id)) ids.add(t(c.id).toLowerCase()); if (t(c.name)) ids.add(t(c.name).toLowerCase()); }
+  return (name) => { const k = t(name).toLowerCase(); return !!k && (ids.has(k) || isDemoEdgeId(k)); };
+}
+export function maskXferMainForDemoGuest(body, { cols = [], settings = {} } = {}) {
+  const isDemo = demoAgentSet(cols);
+  const rows = (body.rows || []).filter((r) => isDemo(r.id));
+  const failures = (body.failures || []).filter((f) => isDemo(f.agent));
+  const skippedTargets = (body.skippedTargets || []).filter((x) => isDemo(x.id));
+  const { targets } = xferTargets((cols || []).filter((c) => isDemoCollector(c)), settings);
+  const st = body.status || {};
+  const status = {
+    ...st,
+    progress: st.progress ? { ...st.progress, current: (st.progress.current || []).filter(isDemo), only: st.progress.only && isDemo(st.progress.only) ? st.progress.only : null } : st.progress,
+    last: st.last ? {
+      ...st.last,
+      only: st.last.only && isDemo(st.last.only) ? st.last.only : null,
+      ...(Array.isArray(st.last.notTriedNames) ? { notTriedNames: st.last.notTriedNames.filter(isDemo) } : {}),
+      ...(Array.isArray(st.last.skippedReasons) ? { skippedReasons: st.last.skippedReasons.filter((x) => isDemo(x?.id)) } : {}),
+    } : st.last,
+  };
+  const s2 = { ...(body.settings || {}), excluded: (body.settings?.excluded || []).filter(isDemo) };
+  return {
+    ...body, rows, kpis: kpisOf(rows), failures, skippedTargets, traffic: trafficOf(settings, targets.length), status, settings: s2,
+    demoMasked: { rows: (body.rows || []).length - rows.length, failures: (body.failures || []).length - failures.length, skippedTargets: (body.skippedTargets || []).length - skippedTargets.length },
+  };
+}
+
 export function registerXferSpeed(api) {
 
 /** 메인 — 법인별 최신값·평소 대비·24시간 스파크라인·KPI·회선 사용 산수·최근 실패. */
@@ -153,7 +190,7 @@ api.get('/tools/xfer-speed', adminOnly, fullScopeOnly, async (req, res) => {
   const mark = await dataMark();
   const key = mark == null ? null : `${mark}|${fp(s)}|${collectorsFp(cols)}|${fp([...versionMap()])}`;
   const m = await memoized('main', key, () => computeMain({ s, cols, now }), now);
-  res.json({
+  const body = {
     ok: true, now,
     enabled: xferSpeedEnabled(s), settings: s, defaults: DEFAULTS, ranges: RANGES, settingsLoadError: xferSettingsLoadError(),
     status: xferSpeedStatus(now),
@@ -166,7 +203,9 @@ api.get('/tools/xfer-speed', adminOnly, fullScopeOnly, async (req, res) => {
     recentTruncated: m.recentTruncated,
     computedAt: m.computedAt, memoTtlMs: MEMO_TTL_MS,
     db: scopeDbStatus(await dbStatus(), req.user),   // v2.743 AUTHZ-01: DB 경로는 관리자 상세(데모 계정 제외)에게만
-  });
+  };
+  // v2.768(점검 R3-C2-2): 데모 계정은 실등록 엣지를 가린 판본 — 기억 밖에서(위 maskXferMainForDemoGuest 설명).
+  res.json(isDemoGuest(req.user) ? maskXferMainForDemoGuest(body, { cols, settings: s }) : body);
 });
 
 /** 시간대 히트맵 — 엣지 × 24시간(포탈 시각) × 방향. 칸 = 그 시간 평균 ÷ 그 엣지 기간 중앙값. 조각 읽기 + 양보 + 기억(v2.740 E-04). */
@@ -179,7 +218,9 @@ api.get('/tools/xfer-speed/heat', adminOnly, fullScopeOnly, async (req, res) => 
     const r = await samplesSinceChunked(now - days * DAY, { yielder });
     return { rows: await heatOfAsync(r.rows, {}, { yielder }), truncated: r.truncated, computedAt: now };
   }, now);
-  res.json({ ok: true, days, offsetMin: DAY_OFFSET_MIN, rows: m.rows, truncated: m.truncated, computedAt: m.computedAt });
+  // v2.768(점검 R3-C2-2): 데모 계정은 데모 엣지 행만(기억 밖에서 거른다 — 기억 키에 사용자 축이 없다).
+  const rows = isDemoGuest(req.user) ? (() => { const isDemo = demoAgentSet(loadCollectors()); return m.rows.filter((r) => isDemo(r.agent)); })() : m.rows;
+  res.json({ ok: true, days, offsetMin: DAY_OFFSET_MIN, rows, truncated: m.truncated, computedAt: m.computedAt });
 });
 
 /**
@@ -189,6 +230,8 @@ api.get('/tools/xfer-speed/heat', adminOnly, fullScopeOnly, async (req, res) => 
  */
 api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) => {
   const a = await resolveAgent(req.query.agent);
+  // v2.768(점검 R3-C2-2): 데모 계정에는 실등록 엣지의 기록이 없는 것과 같다(존재도 흘리지 않게 같은 404).
+  if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
   if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
   const days = daysArg(req.query.days, 7, HISTORY_MAX_DAYS);
   const now = Date.now();
@@ -311,7 +354,10 @@ api.get('/tools/xfer-speed/export.csv', adminOnly, fullScopeOnly, csvPerm, async
     const head = ['시각(포탈)', '엣지', '방향', '결과', '속도(Mbps)', '바이트', '전송(ms)', '전체(ms)', '지연(ms)', '계산 기준', '실패 종류', '사유', '실행'];
     const send = async (text) => {
       if (res.destroyed || res.writableEnded) return false;
-      if (!res.write(text)) await new Promise((ok) => { res.once('drain', ok); res.once('close', ok); });   // 끊기면 기다리지 않는다
+      // 끊기면 기다리지 않는다. v2.783(점검 Q5 — O-B4): 예전 `res.once('drain', ok); res.once('close', ok)` 는 drain 이 먼저 오면
+      //   'close' 리스너가 조각마다 남아 쌓였다(2000행 조각이 HWM 을 늘 넘어 약 2.2만 행 이상이면 매번 MaxListenersExceededWarning).
+      //   공용 waitDrain 은 먼저 온 쪽 하나로 끝내고 건 리스너를 전부 뗀다.
+      if (!res.write(text) && !(await waitDrain(res))) return false;
       return !res.destroyed;
     };
     if (!(await send(CSV_BOM + csvLine(head)))) return;

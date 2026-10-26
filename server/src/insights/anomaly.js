@@ -8,6 +8,7 @@
 
 import { getMetricsDb } from '../metrics/db.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 // 탐지 대상 시계열 패밀리 + 라벨(엔티티 키 → 사람이 읽을 이름은 호출부에서 매핑).
 // v2.632(감사 AX2-2632-04): minScale — 척도(σ 환산)의 **하한**. 거의 상수인 계열(VMFS 사용량·안정된 온도)은 MAD 가 0 이고
@@ -52,6 +53,8 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     ? await db.historyAllSliced(fam.metric, since, bucketMin * 60_000, 5000, { maybeYield })
     : db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
   const out = [];
+  let evaluated = 0;
+  let insufficient = 0;
   for (const [k, last] of latest) {
     await maybeYield(); // 키 수천 개의 중앙값·MAD 계산 사이에도 양보한다(시간 기준 — v2.672 규약)
     // scope(v2.289 #2): 범위 제한 계정은 허용 엔티티 키(호스트 id·데이터스토어 id·vCenter id)만.
@@ -59,7 +62,7 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     // ds_usedgb=datastore id, gpu_vc=vCenter id) — 범위 밖 vCenter 의 이상치가 새지 않게 한다.
     if (allowedKeys && !allowedKeys.has(k)) continue;
     const hist = histAll.get(k) || [];
-    if (hist.length < minSamples) continue;
+    if (hist.length < minSamples) { insufficient++; continue; }
     const vals = hist.map((h) => h.avg);
     const med = median(vals);
     const mad = median(vals.map((v) => Math.abs(v - med))) || 0;
@@ -67,7 +70,8 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
     const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 0;
     const { scale, source: scaleSource } = pickScale({ mad, sd, floor: fam.minScale ? fam.minScale(med) : 0 }); // MAD→σ 환산상수
-    if (!scale) continue;
+    if (!scale) { insufficient++; continue; }
+    evaluated++;
     const score = (last.v - med) / scale;
     const isHigh = fam.high && score >= z;
     const isLow = fam.low && score <= -z;
@@ -80,27 +84,53 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
       });
     }
   }
-  return out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+  // v2.783(점검 Q4 P-I1): 평가한 키·표본 부족 키 수를 함께 — 0건이 '이상 없음' 인지 '평가 못 함' 인지 화면이 가른다.
+  return { items: out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z)), evaluated, insufficient };
+}
+
+/*
+ * v2.769(점검 R4-D2-06): 계산 인자 정규화 — 라우트 캐시 키와 계산이 **같은 함수**의 결과를 본다(v2.689 I2 '키와 계산이 같은 값').
+ *   예전 z 는 하한만 있어 `z=2.0001`·`z=2.0002`… 가 서로 다른 키로 매번 재계산되고 전역 직렬 대기열(runHeavyExclusive)을 무한히 늘렸다.
+ *   z 는 [2,10]·0.5 단위(화면 선택지 2.5·3·3.5·4·5 와 같은 격자), 창·버킷은 정수로 자른다.
+ */
+const clampInt = (v, lo, hi, dflt) => { const n = numOrNull(v); return n == null ? dflt : Math.max(lo, Math.min(hi, Math.round(n))); }; // 빈 값('')은 0 이 아니라 기본값
+export function anomalyCfgArgs(opts = {}) {
+  const zn = Number(opts.z);
+  const z = Number.isFinite(zn) && zn !== 0 ? Math.max(2, Math.min(10, Math.round(zn * 2) / 2)) : 3.5;
+  return { z, windowHours: clampInt(opts.windowHours, 1, 168, 24), bucketMin: clampInt(opts.bucketMin, 1, 1440, 10) };
 }
 
 /** 모든 패밀리 이상탐지. opts: { z, windowHours, bucketMin }. */
 export async function detectAnomalies(opts = {}) {
   const db = await getMetricsDb();
-  const z = Math.max(2, Number(opts.z) || 3.5);
+  const norm = anomalyCfgArgs(opts);
+  const z = norm.z;
   // ⚠ 블로킹 방지(v2.279): windowHours/bucketMin 을 상·하한으로 클램프한다. 과거 windowHours 에
   // 상한이 없어(z 만 클램프) 큰 값이 오면 since 가 과거로 무한정 벌어지고, historyAll 이 원본
   // samples 테이블을 그 창 전체로 GROUP BY 스캔해 이벤트 루프가 수 초~수십 초 멈췄다(합성 520만
   // 행에서 실측). clamp(windowHours 1~168h·7일, bucketMin 1~1440분)로 스캔 범위를 유계로 만든다
   // (/tools/esxi-temp/history 의 days 1~1830 클램프와 같은 방어 패턴).
-  const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
-  const cfg = { z, windowHours: clamp(opts.windowHours, 1, 168, 24), bucketMin: clamp(opts.bucketMin, 1, 1440, 10), minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
+  //   v2.769(R4-D2-06): 클램프는 anomalyCfgArgs 한 곳(라우트 캐시 키와 같은 값).
+  const cfg = { z, windowHours: norm.windowHours, bucketMin: norm.bucketMin, minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
+  /*
+   * v2.783(점검 Q4 P-I1): 계열 예외를 `catch { items = [] }` 로 삼켜 조회 실패가 '0건(초록)' 으로 보였다. 지표 DB 가 비었거나 표본이 12개
+   *   미만인 엔티티도 평가 대상 수 없이 0 이었다. 계열마다 { evaluated, insufficient, error } 를 싣는다(오류 원문은 짧게 자른 메시지만).
+   */
   const families = [];
   let total = 0;
+  let evaluated = 0;
+  let errors = 0;
   for (const fam of FAMILIES) {
-    let items = [];
-    try { items = await detectFamily(db, fam, cfg); } catch { items = []; }
-    total += items.length;
-    families.push({ metric: fam.metric, label: fam.label, count: items.length, items: items.slice(0, 50) });
+    let r = { items: [], evaluated: 0, insufficient: 0 };
+    let error = null;
+    try { r = await detectFamily(db, fam, cfg); } catch (e) {
+      // 응답에는 고정 문구만(DB 오류 원문을 화면에 싣지 않는다) — 원인은 콘솔에 짧게.
+      error = '조회 실패'; errors++;
+      console.warn(`[anomaly] ${fam.metric} 계열 평가 실패: ${String(e?.message || e).slice(0, 200)}`);
+    }
+    total += r.items.length;
+    evaluated += r.evaluated;
+    families.push({ metric: fam.metric, label: fam.label, count: r.items.length, items: r.items.slice(0, 50), evaluated: r.evaluated, insufficient: r.insufficient, error });
   }
-  return { config: cfg, total, families, generatedAt: Date.now() };
+  return { config: cfg, total, evaluated, errors, families, generatedAt: Date.now() };
 }

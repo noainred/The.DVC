@@ -25,7 +25,7 @@ import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
 // WS 매핑 소유·scope 재검사 공용(v2.322) + 사용자 판정·열린 세션 재검증 공용(2026-10-09 S-04 — SSH 게이트웨이와 **같은 함수**).
 //   remoteUserIssue = 토큰 무효는 401, OTP 등록 전 세션·데모 계정·원격 접속 권한 없음은 403(판정 본문은 sshGateway.js 에 하나만 둔다).
-import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose } from './sshGateway.js';
+import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser } from './sshGateway.js';
 
 /** 테스트 주입 — 운영에서는 실제 resolveTokenUser·getMapping 이다. */
 const rdpDeps = { resolveTokenUser, getMapping, connect: (port, host) => net.connect(port, host) };
@@ -81,6 +81,10 @@ export function attachRdpGateway(server) {
     if (config.auth.enabled) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
       user = rdpDeps.resolveTokenUser(token);
+    } else {
+      user = authDisabledRemoteUser(); // v2.770(점검 R5-E5-6): 인증 off 도 HTTP 와 같은 익명 역할로 같은 판정(예전 user=null → 전부 mapping-denied)
+    }
+    {
       // OTP 등록 전 세션·데모 계정·remote.access 없음 — WS 업그레이드는 requireEnrolled 미들웨어를 타지 않는다.
       // 판정은 SSH 게이트웨이·열린 연결 재검증과 같은 함수다(S-04).
       const deny = remoteUserIssue(user);

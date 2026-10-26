@@ -14,9 +14,37 @@
  */
 const C = (o) => ({ category: "other", link: "", linkLabel: "", entity: 0, entityLabel: "", ...o });
 
+/*
+ * v2.767(점검 R2-B2-03 — 재현): 아래 두 계열 24개 규칙은 예전에 `✗ (.+?): .*X` · `(\S+) \((.*?)\) 연결 실패: .* — X` 꼴이었다.
+ *   앵커가 없어 ✗(또는 후보 토큰) 위치마다 (.+?)·(.*?) 가 ': ' 마다 늘어나고 .* 가 줄 끝까지 훑어 줄 길이에 대해 다항식이었다
+ *   (메시지 상한 2,000자 한 줄 1.7초 — live 탭은 콘솔 한 줄마다 동기, 엣지 로그 분석은 줄당 정지). 같은 뜻을 선형으로 다시 썼다:
+ *   ① 줄 머리에 고정(`^` + 줄 단위 lazy — INJPKG-06 과 같은 꼴)하고 **그 줄의 첫 후보**에서만 시도한다 — 앞 후보가 실패하면 뒤 후보도
+ *      실패한다(이름 캡처를 늘리면 꼬리를 찾을 구간이 줄기만 한다)는 단조성 때문에 결과가 같다.
+ *   ② 이름 캡처는 '첫 구분자까지' 를 결정적으로(✗: 첫 ': ' 전 · 괄호: 첫 ') 동사: ' 전 — 템퍼드 토큰) 잡아 되돌아가기가 없다.
+ *   예전 정규식과 캡처가 같은지(표본 + 결정적 난수) · 길이에 선형인지(비율)는 test/audit2767b.test.js 가 고정한다.
+ *   `.` 이 넘지 않던 줄 끝 문자(\n \r \u2028 \u2029)를 그대로 경계로 쓴다.
+ */
+const NL = "\\n\\r\\u2028\\u2029";
+const LINE_PFX = `^(?:[^${NL}]*[${NL}])*?`;
+/** 예전 `✗ (.+?): .*TAIL` 과 같은 뜻 — 그룹 1 = VM 이름(✗ 뒤 첫 ': ' 전, 1자 이상), TAIL 의 그룹은 2번부터. */
+const XFAIL = (tail) => `${LINE_PFX}(?:[^✗${NL}]|✗(?! ))*✗ ([^${NL}](?:[^:${NL}]|:(?! ))*): [^${NL}]*${tail}`;
+/** 꼬리 안의 캡처 그룹을 비캡처로(앞보기 안에 두면 그룹 번호가 밀린다). */
+const noCap = (s) => s.replace(/(^|[^\\])\((?!\?)/g, "$1(?:");
+const PFAIL_BASE = (verb, stop, rest) => `${LINE_PFX}(?:[^\\S${NL}]|\\S+(?!\\S| \\())*?(\\S+) \\(((?:(?!${stop})[^${NL}])*)\\) ${verb}: ${rest}`;
+/** 예전 `(\S+) \((.*?)\) VERB: ` (+ `.*TAIL`) 과 같은 뜻 — 그룹 1 = 토큰, 그룹 2 = 괄호 안(첫 ') VERB: ' 까지). */
+const PFAIL = (verb, tail = null) => PFAIL_BASE(verb, `\\) ${verb}: `, tail == null ? "" : `[^${NL}]*${tail}`);
+/** 예전 `(\S+) \((.*?)\) VERB: REST`(REST 가 ': ' 바로 뒤에 붙는 꼴) — 괄호 안은 'REST 까지 맞는 첫 자리' 까지. */
+const PFAIL_EXACT = (verb, rest) => PFAIL_BASE(verb, `\\) ${verb}: ${noCap(rest)}`, rest);
+/**
+ * 예전 `([^\]\s][^\]]*?)TAIL` 과 같은 뜻(v2.767 R2-B2-03 — 같은 점검에서 전 규칙 비율 검사가 찾은 2개, 2,000자 약 2ms 지만 길이에 제곱).
+ * ']' 로 나뉜 구간마다 **첫 유효 글자**(공백·']' 아님)에서만 시도한다 — 그 자리가 실패하면 같은 구간의 뒤 자리도 실패한다(단조성).
+ * 그룹 1 = 첫 유효 글자부터 그 뒤 첫 TAIL 직전까지, TAIL 의 그룹은 2번부터.
+ */
+const SEGFAIL = (tail) => `^(?:[^\\]]*\\])*?\\s*([^\\]\\s](?:(?!${noCap(tail)})[^\\]])*)${tail}`;
+
 export const CATALOG_RULES = [
   C({ id: "gpu-guest-guest-login", tag: "gpu-guest", severity: "high", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*(?:게스트 로그인 실패|InvalidGuestLogin|Failed to authenticate with the guest)",
+    re: XFAIL("(?:게스트 로그인 실패|InvalidGuestLogin|Failed to authenticate with the guest)"),
     src: "server/src/gpu/guestops.js", probe: "InvalidGuestLogin",
     sample: "[gpu-guest]   ✗ gpu-vm-01: 게스트작업: StartProgramInGuest SOAP 실패: 게스트 로그인 실패 — 계정/비밀번호 확인 | raw: SOAP 500: Failed to authenticate with the guest operating system using the supplied credentials. / SSH: SSH 수집 실패: SSH 연결 거부(sshd 미동작/포트 차단)",
     title: "게스트 작업(VMware Tools)으로 nvidia-smi 를 실행하려 했으나 게스트 OS 가 계정·비밀번호를 거부했습니다",
@@ -24,7 +52,7 @@ export const CATALOG_RULES = [
     action: "GPU 게스트 수집 설정에서 이 VM(또는 법인 기본값)의 게스트 계정·비밀번호를 고치고, GPU 수집 진단의 VM별 결과로 다음 주기 성공을 확인하세요. 수집이 필요 없는 VM 이면 대상에서 빼세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-tools-unavailable", tag: "gpu-guest", severity: "medium", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*(?:VMware Tools 미실행/구버전|[Gg]uest operations agent)",
+    re: XFAIL("(?:VMware Tools 미실행/구버전|[Gg]uest operations agent)"),
     src: "server/src/gpu/guestops.js", probe: "VMware Tools 미실행/구버전 — 게스트 작업 불가",
     sample: "[gpu-guest]   ✗ gpu-vm-02: 게스트작업: StartProgramInGuest SOAP 실패: VMware Tools 미실행/구버전 — 게스트 작업 불가 | raw: SOAP 500: VMware Tools is not running in the virtual machine. / SSH: SSH 수집 실패: SSH 타임아웃(IP 미도달/방화벽)",
     title: "그 VM 의 VMware Tools 가 꺼져 있거나 게스트 작업을 지원하지 않는 버전이라 게스트 작업 경로가 막혔습니다",
@@ -32,7 +60,7 @@ export const CATALOG_RULES = [
     action: "vCenter 에서 해당 VM 의 VMware Tools 상태(실행·버전)를 확인해 설치·업그레이드하세요. Linux VM 이고 sshd 가 있으면 GPU 게스트 수집의 수집 방식을 SSH 로 바꿀 수 있습니다.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-vm-powered-off", tag: "gpu-guest", severity: "low", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*VM 전원 꺼짐",
+    re: XFAIL("VM 전원 꺼짐"),
     src: "server/src/gpu/guestops.js", probe: "VM 전원 꺼짐",
     sample: "[gpu-guest]   ✗ gpu-vm-03: StartProgramInGuest SOAP 실패: VM 전원 꺼짐 | raw: SOAP 500: The attempted operation cannot be performed in the current state (Powered off).",
     title: "수집 시점에 VM 이 꺼져 있어 게스트 작업을 실행할 수 없었습니다",
@@ -40,7 +68,7 @@ export const CATALOG_RULES = [
     action: "의도적으로 꺼 둔 VM 이면 조치할 것이 없습니다. 계속 반복되면 그 VM 을 GPU 게스트 수집 대상에서 빼세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-guestop-timeout", tag: "gpu-guest", severity: "low", category: "network", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*게스트 작업 타임아웃",
+    re: XFAIL("게스트 작업 타임아웃"),
     src: "server/src/gpu/guestops.js", probe: "게스트 작업 타임아웃",
     sample: "[gpu-guest]   ✗ gpu-vm-04: 게스트작업: StartProgramInGuest SOAP 실패: 게스트 작업 타임아웃 | raw: The operation was aborted due to timeout",
     title: "vCenter 게스트 작업 호출이 시한 안에 끝나지 않았습니다",
@@ -48,7 +76,7 @@ export const CATALOG_RULES = [
     action: "GPU 게스트 수집 설정의 타임아웃을 늘리거나 동시 수집 수를 줄이세요. 특정 법인에만 몰리면 그 vCenter 의 응답 지연을 먼저 확인하세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-nvsmi-stderr", tag: "gpu-guest", severity: "medium", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*게스트 오류: ",
+    re: XFAIL("게스트 오류: "),
     src: "server/src/gpu/guestops.js", probe: "게스트 오류:",
     sample: "[gpu-guest]   ✗ gpu-vm-05: 게스트작업: 게스트 오류: /bin/sh: nvidia-smi: command not found / SSH: SSH 수집 실패: SSH 인증 실패(계정/비번 또는 비밀번호 로그인 비활성)",
     title: "게스트 작업으로 명령은 실행됐고 nvidia-smi 의 표준오류를 회수했습니다",
@@ -56,7 +84,7 @@ export const CATALOG_RULES = [
     action: "표본의 게스트 오류 문구대로 그 VM 의 NVIDIA 드라이버·nvidia-smi 경로를 확인하세요(Windows 는 nvidia-smi.exe 가 PATH 에 있어야 합니다). 포탈 설정으로 고칠 수 있는 문제가 아닙니다.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-retrieve-404", tag: "gpu-guest", severity: "medium", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*회수 실패\\(\\.out/\\.err 모두 HTTP404",
+    re: XFAIL("회수 실패\\(\\.out/\\.err 모두 HTTP404"),
     src: "server/src/gpu/guestops.js", probe: "err 모두 HTTP404",
     sample: "[gpu-guest]   ✗ gpu-vm-06: 회수 실패(.out/.err 모두 HTTP404 — 파일 비었거나 ESXi가 티켓 거부) · stdout: 파일 다운로드 실패(size=0B): 10.0.0.21(원본)=HTTP404",
     title: "명령은 실행됐지만 결과 파일(.out/.err)을 ESXi 에서 내려받지 못했습니다(모두 HTTP 404). size=0B 면 nvidia-smi 가 아무것도 출력하지 않은 것이고, 그 외에는 ESXi 가 전송 티켓을 거부한 것입니다",
@@ -64,7 +92,7 @@ export const CATALOG_RULES = [
     action: "size=0B 이면 그 VM 에서 nvidia-smi 를 직접 실행해 출력이 나오는지 확인하세요. 크기가 있는데도 404 면 GPU 수집 진단의 다운로드 후보(ESXi 관리 IP·FQDN)가 VM 이 올라간 호스트를 가리키는지 확인하세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-download-unreachable", tag: "gpu-guest", severity: "medium", category: "network", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*파일 다운로드 실패\\(size=",
+    re: XFAIL("파일 다운로드 실패\\(size="),
     src: "server/src/gpu/guestops.js", probe: "파일 다운로드 실패",
     sample: "[gpu-guest]   ✗ gpu-vm-07: 게스트작업: 파일 다운로드 실패(size=512B): 10.0.0.21(원본)=The operation was aborted due to timeout | 10.0.0.5=fetch failed / SSH: SSH 수집 실패: SSH 타임아웃(IP 미도달/방화벽)",
     title: "게스트에서 nvidia-smi 는 실행됐지만 결과 파일을 ESXi 호스트에서 내려받는 HTTPS 요청이 응답 없이 실패했습니다(시한 초과·연결 실패). 이 포탈(수집 노드)에서 그 VM 이 올라간 ESXi 관리 IP 의 443 포트로 닿지 않는 구성입니다",
@@ -72,7 +100,7 @@ export const CATALOG_RULES = [
     action: "수집 노드에서 ESXi 관리 IP 443 으로의 방화벽을 여세요. 열 수 없으면 Linux VM 은 수집 방식을 SSH 로 바꾸세요. 법인 전체가 이 사유면 그 법인을 엣지(수집 서버) 위임으로 돌리는 것이 근본 해결입니다.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-nvsmi-driver", tag: "gpu-guest", severity: "low", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*nvidia-smi 가 GPU 값 대신 다음을 출력함",
+    re: XFAIL("nvidia-smi 가 GPU 값 대신 다음을 출력함"),
     src: "server/src/gpu/guestops.js", probe: "nvidia-smi 가 GPU 값 대신 다음을 출력함",
     sample: "[gpu-guest]   ✗ gpu-vm-11: nvidia-smi 가 GPU 값 대신 다음을 출력함(드라이버·장치 확인): Failed to initialize NVML: Driver/library version mismatch",
     title: "nvidia-smi 가 GPU 값 대신 드라이버·장치 오류 문장을 냈습니다",
@@ -80,7 +108,7 @@ export const CATALOG_RULES = [
     action: "줄 끝의 원문을 보고 그 VM 의 NVIDIA 드라이버를 점검하세요(버전 불일치면 재부팅 또는 드라이버 재설치). 'No devices were found' 면 VM 에 GPU 가 붙어 있는지 확인하세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-nvsmi-empty", tag: "gpu-guest", severity: "low", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*nvidia-smi (?:출력이 비어 있음|출력 없음|결과 없음)",
+    re: XFAIL("nvidia-smi (?:출력이 비어 있음|출력 없음|결과 없음)"),
     src: "server/src/gpu/guestops.js", probe: "nvidia-smi",
     sample: "[gpu-guest]   ✗ gpu-vm-09: nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)",
     title: "명령은 실행됐지만 nvidia-smi 가 GPU 값을 한 줄도 내지 않았습니다",
@@ -88,7 +116,7 @@ export const CATALOG_RULES = [
     action: "그 VM 에서 nvidia-smi 를 직접 실행해 GPU 가 보이는지 확인하세요. GPU 가 없는 VM 이 대상에 잡혔다면 GPU 게스트 수집 대상에서 빼세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-nvsmi-parse", tag: "gpu-guest", severity: "low", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*nvidia-smi 출력 파싱 실패: ",
+    re: XFAIL("nvidia-smi 출력 파싱 실패: "),
     src: "server/src/gpu/sshCollect.js", probe: "nvidia-smi 출력 파싱 실패:",
     sample: "[gpu-guest]   ✗ gpu-vm-10: SSH 수집 실패: nvidia-smi 출력 파싱 실패: No devices were found",
     title: "SSH 로 nvidia-smi 를 실행했으나 출력이 예상한 CSV 형식이 아니었습니다",
@@ -96,7 +124,7 @@ export const CATALOG_RULES = [
     action: "표본의 출력 문구를 보고 그 VM 의 GPU·드라이버 상태를 확인하세요. 정상 출력인데 파싱이 실패하면 드라이버 버전과 표본을 개발자에게 전달하세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "gpu-guest-no-guest-ip", tag: "gpu-guest", severity: "low", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*게스트 IP 없음\\(VMware Tools가 IP 미보고\\)",
+    re: XFAIL("게스트 IP 없음\\(VMware Tools가 IP 미보고\\)"),
     src: "server/src/gpu/sshCollect.js", probe: "VMware Tools가 IP 미보고",
     sample: "[gpu-guest]   ✗ gpu-vm-11: 게스트 IP 없음(VMware Tools가 IP 미보고) — SSH 수집 불가",
     title: "SSH 방식은 게스트 IP 가 필요한데 VMware Tools 가 IP 를 보고하지 않아 접속 대상이 없습니다",
@@ -104,7 +132,7 @@ export const CATALOG_RULES = [
     action: "VM 의 VMware Tools 상태를 확인하거나, GPU 게스트 수집 설정에서 그 VM 의 접속 IP 를 직접 지정하세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-ssh-unreachable", tag: "gpu-guest", severity: "low", category: "network", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*SSH 경로 없음\\(망 분리\\)",
+    re: XFAIL("SSH 경로 없음\\(망 분리\\)"),
     src: "server/src/gpu/sshCollect.js", probe: "SSH 경로 없음",
     sample: "[gpu-guest]   ✗ gpu-vm-12: SSH 수집 실패: SSH 경로 없음(망 분리)",
     title: "수집 노드에서 게스트 IP 로 가는 라우팅 자체가 없습니다(EHOSTUNREACH/ENETUNREACH). 방화벽 시한 초과와 달리 경로가 없다는 뜻입니다",
@@ -112,7 +140,7 @@ export const CATALOG_RULES = [
     action: "수집 방식을 게스트 작업(VMware Tools)으로 바꾸거나, 그 법인을 엣지 위임으로 돌려 게스트 망 안에서 수집하세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-ssh-deadline", tag: "gpu-guest", severity: "low", category: "network", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*SSH 수집 시간 초과\\((\\d+)초\\)",
+    re: XFAIL("SSH 수집 시간 초과\\((\\d+)초\\)"),
     src: "server/src/gpu/sshCollect.js", probe: "SSH 수집 시간 초과",
     sample: "[gpu-guest]   ✗ gpu-vm-14: SSH 수집 실패: SSH 수집 시간 초과(40초)",
     title: "SSH 접속은 됐거나 진행 중이었지만 IP 한 곳당 예산(핸드셰이크 + nvidia-smi, 시한의 2배) 안에 끝나지 않아 세션을 끊었습니다",
@@ -120,7 +148,7 @@ export const CATALOG_RULES = [
     action: "그 VM 에서 nvidia-smi 가 즉시 끝나는지 직접 확인하세요. 멈춘다면 게스트의 NVIDIA 드라이버 문제입니다. 고지연 법인이면 GPU 게스트 수집 설정의 타임아웃을 늘리세요.",
     link: "#/settings/gpu-guest", linkLabel: "GPU 게스트 수집" }),
   C({ id: "gpu-guest-guestops-manager", tag: "gpu-guest", severity: "medium", category: "stability", entity: 1, entityLabel: "VM 이름", early: true,
-    re: "✗ (.+?): .*GuestOperationsManager 사용 불가",
+    re: XFAIL("GuestOperationsManager 사용 불가"),
     src: "server/src/gpu/guestops.js", probe: "GuestOperationsManager 사용 불가",
     sample: "[gpu-guest]   ✗ gpu-vm-13: 게스트작업: GuestOperationsManager 사용 불가 / SSH: SSH 수집 실패: SSH 연결 거부(sshd 미동작/포트 차단)",
     title: "vCenter 가 게스트 작업 관리자(processManager·fileManager)를 돌려주지 않았습니다",
@@ -147,7 +175,7 @@ export const CATALOG_RULES = [
     action: "GPU 수집 진단에서 그 vCenter 의 단계가 예외로 끝났는지 확인하세요. 매 주기 반복되면 예외 문구를 개발자에게 전달하세요.",
     link: "#/settings/gpu-guest-diag", linkLabel: "GPU 수집 진단" }),
   C({ id: "collect-vc-auth", tag: "collect", severity: "high", category: "auth", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — 인증 실패 — 계정/비밀번호",
+    re: PFAIL("연결 실패", " — 인증 실패 — 계정/비밀번호"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-a (VC-SEOUL) 연결 실패: Cannot complete login due to an incorrect user name or password. — 인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.",
     title: "vCenter 가 수집 계정의 로그인을 거부했습니다",
@@ -155,7 +183,7 @@ export const CATALOG_RULES = [
     action: "vCenter 등록에서 그 vCenter 의 수집 계정·비밀번호를 고치고 vCenter 연결 테스트로 확인하세요. 비밀번호를 바꾼 직후라면 SSO 계정 잠금 여부도 확인하세요.",
     link: "#/settings/vcenter-admin", linkLabel: "vCenter 등록·관리" }),
   C({ id: "collect-vc-dns", tag: "collect", severity: "high", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — DNS 조회 실패",
+    re: PFAIL("연결 실패", " — DNS 조회 실패"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-b (VC-EAST) 연결 실패: fetch failed: getaddrinfo ENOTFOUND vc-b.example.local — DNS 조회 실패 — 호스트명/주소를 확인하세요 (DNS 또는 hosts).",
     title: "이 포탈이 vCenter 호스트명을 IP 로 바꾸지 못했습니다",
@@ -163,7 +191,7 @@ export const CATALOG_RULES = [
     action: "vCenter 등록의 주소 오기재를 확인하고, 포탈 서버의 DNS 설정(/etc/resolv.conf) 또는 /etc/hosts 에 그 이름이 있는지 확인하세요.",
     link: "#/settings/vcenter-admin", linkLabel: "vCenter 등록·관리" }),
   C({ id: "collect-vc-refused", tag: "collect", severity: "high", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — 연결 거부 — ",
+    re: PFAIL("연결 실패", " — 연결 거부 — "),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-c (VC-WEST) 연결 실패: fetch failed: connect ECONNREFUSED 10.0.0.10:443 — 연결 거부 — 포트(443)·vCenter 서비스·방화벽을 확인하세요.",
     title: "vCenter 주소에는 닿았지만 443 포트가 연결을 거부했습니다",
@@ -171,7 +199,7 @@ export const CATALOG_RULES = [
     action: "vCenter 의 서비스 상태(VAMI)와 중계 서버를 거친다면 그 포워딩 포트를 확인하세요. vCenter 연결 테스트로 즉시 재확인할 수 있습니다.",
     link: "#/settings/vcenter-test", linkLabel: "vCenter 연결 테스트" }),
   C({ id: "collect-vc-timeout", tag: "collect", severity: "medium", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — 연결 시간 초과",
+    re: PFAIL("연결 실패", " — 연결 시간 초과"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-d (VC-EU2) 연결 실패: fetch failed: Connect Timeout Error (attempted address: 10.0.0.12:443, timeout: 10000ms) — 연결 시간 초과 — telnet(TCP)은 되는데 여기서 막히면 중계(HAProxy) reload·방화벽 idle로 keep-alive 연결이 끊긴 경우가 많습니다(다음 주기에 새 연결로 자동 복구). 지속되면 네트워크 경로·중계 서버 상태를 확인하세요.",
     title: "vCenter 수집이 시한 안에 끝나지 않았습니다",
@@ -179,7 +207,7 @@ export const CATALOG_RULES = [
     action: "같은 vCenter 가 연속으로 찍히는지 보세요. 연속이면 통신 점검으로 경로 단계를 확인하고, 고지연 법인은 엣지 위임을 검토하세요.",
     link: "#/tools/link-check", linkLabel: "통신 점검" }),
   C({ id: "collect-vc-cert", tag: "collect", severity: "high", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — 인증서 오류",
+    re: PFAIL("연결 실패", " — 인증서 오류"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-e (VC-LAB) 연결 실패: fetch failed: self-signed certificate — 인증서 오류 — 장비라면 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 승인하세요. 중앙↔엣지(수집 서버) HTTPS 는 장비 신뢰가 아니라 portal.env 의 WAN_TLS_CA_FILE(사설 CA)로 신뢰합니다 — WAN_TLS_INSECURE 로 검증을 끄지 마세요.",
     title: "TLS 인증서 검증에 실패해 연결 자체를 하지 않았습니다",
@@ -187,7 +215,7 @@ export const CATALOG_RULES = [
     action: "vCenter 인증서의 사설 CA 를 CONFIG_DIR/tls-ca-bundle.pem 로 등록하거나 설정 › 장비 신뢰에서 지문을 확인해 승인하세요(검증을 끄는 env 는 권하지 않습니다). 인증서 만료 점검 도구로 만료 여부도 확인하세요.",
     link: "#/tools/cert-expiry", linkLabel: "인증서 만료 감시" }),
   C({ id: "collect-vc-network", tag: "collect", severity: "medium", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: .* — (?:연결이 재설정됨|호스트/네트워크에 도달할 수 없음)",
+    re: PFAIL("연결 실패", " — (?:연결이 재설정됨|호스트/네트워크에 도달할 수 없음)"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-f (VC-EU) 연결 실패: fetch failed: connect EHOSTUNREACH 10.0.0.11:443 — 호스트/네트워크에 도달할 수 없음 — 라우팅/방화벽을 확인하세요.",
     title: "vCenter 까지의 네트워크 경로가 없거나(EHOSTUNREACH) 연결이 도중에 끊겼습니다(ECONNRESET).",
@@ -195,7 +223,7 @@ export const CATALOG_RULES = [
     action: "통신 점검에서 그 vCenter 링크의 도달 단계(DNS → TCP → TLS)를 확인하고, 중계·방화벽 경로를 점검하세요.",
     link: "#/tools/link-check", linkLabel: "통신 점검" }),
   C({ id: "collect-vc-deadline", tag: "collect", severity: "medium", category: "network", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: vCenter 수집 데드라인 초과\\((\\d+)초\\)",
+    re: PFAIL_EXACT("연결 실패", "vCenter 수집 데드라인 초과\\((\\d+)초\\)"),
     src: "server/src/store.js", probe: "vCenter 수집 데드라인 초과(",
     sample: "[collect] vc-d (VC-EU3) 연결 실패: vCenter 수집 데드라인 초과(90초) — 응답이 느립니다",
     title: "한 vCenter 수집(로그인부터 로그아웃까지 전체)이 데드라인 안에 끝나지 않아 실패로 끊었습니다",
@@ -203,7 +231,7 @@ export const CATALOG_RULES = [
     action: "고지연 법인에서 반복되면 vCenter 등록의 건별 타임아웃(데드라인은 그 3배, 최소 90초)을 늘리거나 엣지 위임을 검토하세요. 특정 시각에만 몰리면 그 시각의 vCenter 부하를 확인하세요.",
     link: "#/settings/vcenter-admin", linkLabel: "vCenter 등록·관리" }),
   C({ id: "collect-vc-fail", tag: "collect", severity: "medium", category: "stability", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 연결 실패: ",
+    re: PFAIL("연결 실패"),
     src: "server/src/store.js", probe: ") 연결 실패:",
     sample: "[collect] vc-g (VC-LAB2) 연결 실패: SOAP fault: ServerFaultCode",
     title: "vCenter 인벤토리 수집이 위 분류(인증·DNS·거부·시한·인증서·경로)에 들지 않는 사유로 실패했습니다",
@@ -243,7 +271,7 @@ export const CATALOG_RULES = [
     action: "VM 실시간 스파이크 수집 설정에서 보존일을 줄이거나 대상 vCenter 를 좁히고, 포탈 데이터 디스크 여유를 확보하세요. 폴더 사용량 리포트로 무엇이 공간을 쓰는지 확인할 수 있습니다.",
     link: "#/settings/vmseries", linkLabel: "VM 실시간 스파이크 수집" }),
   C({ id: "vmseries-vc-auth", tag: "vmseries", severity: "high", category: "auth", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 수집 실패: .* — 인증 실패 — ",
+    re: PFAIL("수집 실패", " — 인증 실패 — "),
     src: "server/src/vmseries/poller.js", probe: ") 수집 실패:",
     sample: "[vmseries] vc-a (VC-SEOUL) 수집 실패: Cannot complete login due to an incorrect user name or password. — 인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.",
     title: "실시간 스파이크 수집이 그 vCenter 로그인에서 거부됐습니다",
@@ -251,7 +279,7 @@ export const CATALOG_RULES = [
     action: "vCenter 등록에서 수집 계정·비밀번호를 고치고 vCenter 연결 테스트로 확인하세요. 인벤토리 수집(collect)도 같은 계정이면 함께 실패하고 있을 것입니다.",
     link: "#/settings/vcenter-admin", linkLabel: "vCenter 등록·관리" }),
   C({ id: "vmseries-vc-fail", tag: "vmseries", severity: "medium", category: "stability", entity: 1, entityLabel: "vCenter id",
-    re: "(\\S+) \\((.*?)\\) 수집 실패: ",
+    re: PFAIL("수집 실패"),
     src: "server/src/vmseries/poller.js", probe: ") 수집 실패:",
     sample: "[vmseries] vc-b (VC-EAST) 수집 실패: fetch failed: connect ECONNREFUSED 10.0.0.10:443 — 연결 거부 — 포트(443)·vCenter 서비스·방화벽을 확인하세요.",
     title: "그 vCenter 의 실시간 스파이크 수집이 실패했습니다",
@@ -259,7 +287,7 @@ export const CATALOG_RULES = [
     action: "표본 끝의 힌트(연결 거부·시한 초과·인증서)에 따라 vCenter 경로를 확인하세요. 고지연 법인이면 수집 주기를 줄여 겹침을 늘리는 것도 방법입니다.",
     link: "#/settings/vmseries", linkLabel: "VM 실시간 스파이크 수집" }),
   C({ id: "bmusage-os-auth-stop", tag: "bmusage", severity: "high", category: "auth", entity: 1, entityLabel: "서버 이름",
-    re: "([^\\]\\s][^\\]]*?): 인증 실패로 주기 수집 정지\\((\\d+)회\\)",
+    re: SEGFAIL(": 인증 실패로 주기 수집 정지\\((\\d+)회\\)"),
     src: "server/src/bmusage/poller.js", probe: ": 인증 실패로 주기 수집 정지",
     sample: "[bmusage] bm-srv-01: 인증 실패로 주기 수집 정지(3회) — SSH 인증 실패: All configured authentication methods failed",
     title: "베어메탈 서버의 OS 계정이 거부돼 그 서버의 주기 수집을 멈췄습니다(계정 잠금 방지). 수동 실행은 막지 않으며, 등록부의 자격증명이 바뀌면 자동으로 재개됩니다",
@@ -267,7 +295,7 @@ export const CATALOG_RULES = [
     action: "베어메탈 스토리지 등록부에서 그 서버의 OS 계정·비밀번호를 고치세요. 저장하면 다음 주기부터 자동 재개됩니다.",
     link: "#/tools/bm-storage", linkLabel: "베어메탈 스토리지" }),
   C({ id: "bmusage-idrac-auth-stop", tag: "bmusage", severity: "high", category: "auth", entity: 1, entityLabel: "서버 이름",
-    re: "([^\\]\\s][^\\]]*?): iDRAC 인증 실패로 대체 수집 정지\\((\\d+)회\\)",
+    re: SEGFAIL(": iDRAC 인증 실패로 대체 수집 정지\\((\\d+)회\\)"),
     src: "server/src/bmusage/poller.js", probe: ": iDRAC 인증 실패로 대체 수집 정지",
     sample: "[bmusage] bm-srv-02: iDRAC 인증 실패로 대체 수집 정지(2회)",
     title: "Enterprise 라이선스 대체 경로(센서 GET·racadm SSH)에서 iDRAC 계정이 거부돼 그 경로를 멈췄습니다",

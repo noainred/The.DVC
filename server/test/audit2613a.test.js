@@ -44,17 +44,17 @@ test('CATALOG2613-03: CurrentUsers 형제 경로가 curuser 로, StorageTrackToo
   for (const p of ['/vm-track/ds-change-log', '/vm-track/ds-list', '/vm-track/ds-pivot', '/vm-track/ds-series-all']) {
     assert.equal(TA.toolKeyForPath(p), 'storage-track', p);
   }
-  // ⚠ 공유 경로는 vm-track 그대로 — 옮기면 storage-track 거부가 Datastores 추이 모달·V4 스토리지·VM 수량 추이를 같이 막는다.
+  // ⚠ 공유 경로는 vm-track 그대로 — 옮기면 storage-track 거부가 Datastores 추이 모달·VM 수량 추이를 같이 막는다.
   for (const p of ['/vm-track/ds-series', '/vm-track/ds-top', '/vm-track/ds-changes', '/vm-track']) {
     assert.equal(TA.toolKeyForPath(p), 'vm-track', p);
   }
   // 공유 관계는 웹 호출부가 근거다 — 그 근거가 바뀌면(파일이 그 경로를 더 이상 안 쓰면) 여기서 알아야 한다.
   const w = (rel) => fs.readFileSync(path.join(WEB, rel), 'utf8');
   assert.match(w('views/tools/DsTrendModal.jsx'), /\/tools\/vm-track\/ds-series'/, 'ds-series 는 Datastores 추이 모달이 쓴다');
-  assert.match(w('version_4/pages/Storage.jsx'), /\/tools\/vm-track\/ds-top'/, 'ds-top 은 V4 스토리지가 쓴다');
+  assert.match(w('views/tools/StorageTrackTool.jsx'), /\/tools\/vm-track\/ds-top'/, 'ds-top 은 StorageTrackTool 이 쓴다(v2.747 — 함께 쓰던 V4 스토리지는 지웠다)');
   assert.match(w('views/tools/VmTrackTool.jsx'), /\/tools\/vm-track\/ds-changes'/, 'ds-changes 는 VmTrackTool 이 쓴다');
   for (const seg of ['ds-list', 'ds-pivot', 'ds-series-all']) {
-    const users = ['views/tools', 'version_4', 'views', 'components', 'console'].flatMap((d) => {
+    const users = ['views/tools', 'views', 'components', 'console'].flatMap((d) => {
       const dir = path.join(WEB, d);
       return fs.readdirSync(dir).filter((f) => /\.jsx?$/.test(f) && !/\.test\./.test(f)).map((f) => path.join(d, f));
     }).filter((rel) => w(rel).includes(`/tools/vm-track/${seg}`));

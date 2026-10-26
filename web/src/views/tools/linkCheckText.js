@@ -44,8 +44,13 @@ export function rowState(row = {}, { enabled = true, minEdgeVersion = '2.552.0',
     return { state: 'disabled', reason: 'disabled', whyShort: '비활성', why: '이 대상이 비활성입니다(등록부에서 껐습니다).', fix: '' };
   }
   const L = row.latest || null;
-  // 측정된 행의 사유는 **그 행마다 다르다**(한 줄 요약) — 반복 문단이 아니므로 그대로 보여준다.
-  if (L) return { state: L.ok ? 'ok' : 'fail', reason: '', whyShort: t(L.summary), why: t(L.summary), fix: '' };
+  if (L) {
+    // v2.769(점검 R4-D3-2): 값이 있어도 **지금 맞는지 알 수 없으면** ok/fail 로 칠하지 않는다(아래 latestNotCurrent).
+    const nc = latestNotCurrent(row, L, { enabled, intervalMs, now });
+    if (nc) return nc;
+    // 측정된 행의 사유는 **그 행마다 다르다**(한 줄 요약) — 반복 문단이 아니므로 그대로 보여준다.
+    return { state: L.ok ? 'ok' : 'fail', reason: '', whyShort: t(L.summary), why: t(L.summary), fix: '' };
+  }
 
   // 값이 없다 — **왜 없는지**를 말한다. 순서가 계약이다(먼저 맞는 것이 원인일 가능성이 높다).
   if (!enabled) {
@@ -98,6 +103,53 @@ export function rowState(row = {}, { enabled = true, minEdgeVersion = '2.552.0',
     return { state: 'no-data', reason: 'edge-no-link', whyShort: '이 링크만 없음', why: '이 엣지는 보고했지만 이 링크의 결과가 없습니다(점검하지 않았거나 중앙이 버렸습니다).', fix: '엣지 로그의 linkcheck-worker 줄을 보세요.' };
   }
   return { state: 'no-data', reason: 'first', whyShort: '첫 주기 대기', why: '아직 이 링크를 점검한 기록이 없습니다.', fix: '첫 주기를 기다리거나 \'지금 점검\' 을 누르세요.' };
+}
+
+/**
+ * 측정값의 나이(ms). 서버가 자기 시계로 잰 `ageMs` 를 먼저 쓰고(클라이언트 시계는 틀릴 수 있다), 없으면 `now - ts`.
+ * ts 도 없으면 null — **나이를 모르면 오래됐다고 단정하지 않는다**(ts 없는 latest 는 판정 그대로 — 기존 계약).
+ */
+export function latestAgeMs(L, now = Date.now()) {
+  if (!L) return null;
+  if (L.ageMs != null && L.ageMs !== '' && Number.isFinite(Number(L.ageMs))) return Math.max(0, Number(L.ageMs));
+  const ts = (L.ts == null || L.ts === '') ? NaN : Number(L.ts);
+  return Number.isFinite(ts) && ts > 0 ? Math.max(0, now - ts) : null;
+}
+
+/** 측정이 '오래됐다' 의 기준 = 주기의 3배(주기는 API 값 — 숫자를 박지 않는다). 주기를 모르면 null(판정 안 함). */
+export function latestStaleLimitMs(intervalMs) {
+  const iv = Number(intervalMs);
+  return Number.isFinite(iv) && iv > 0 ? iv * 3 : null;
+}
+
+/*
+ * v2.769(점검 R4-D3-2): 예전에는 `latest` 가 하나라도 있으면 나이·엣지 보고 낡음·점검 꺼짐을 보지 않고 ok/fail 이었다 —
+ *   엣지가 죽어 push 가 끊기면(이 기능의 존재 이유) 그 엣지의 링크가 마지막 값 그대로 '정상'·KPI 정상률 100% 로 최대 보존일(90일)
+ *   남았고, 점검을 꺼도 마지막 값이 계속 초록이었다. 지금 맞는지 알 수 없는 값은 no-data 로 내리고 이유를 말한다.
+ *   whyShort 는 사유마다 **고정 문구**다(각주가 접히게 — v2.509·v2.575 BUG-18). 언제 쟀는지는 표의 '마지막 측정' 열이 말한다.
+ */
+function latestNotCurrent(row, L, { enabled, intervalMs, now }) {
+  const last = L.ok ? '정상' : '실패';
+  if (!enabled) {
+    return { state: 'no-data', reason: 'off-last', whyShort: '점검 꺼짐 · 마지막 값', why: '통신 점검이 꺼져 있어 이 값은 더 갱신되지 않습니다 — 지금 상태가 아닙니다.', fix: '설정에서 점검을 켜면 다음 주기부터 다시 잽니다.', last };
+  }
+  const age = latestAgeMs(L, now);
+  const limit = latestStaleLimitMs(intervalMs);
+  const tooOld = age != null && limit != null && age > limit;
+  if (row.by === 'edge') {
+    const rep = row.edgeReport || null;
+    if (rep && rep.stale) {
+      return { state: 'no-data', reason: 'edge-stale', whyShort: '보고 오래됨', why: '이 엣지의 마지막 보고가 오래됐습니다 — 지금 값이 맞는지 알 수 없습니다.', fix: '엣지→중앙 통신을 먼저 확인하세요.', last };
+    }
+    // 보고 상태를 모르면(중앙 재기동 직후 등) 측정 시각이 신선하다고 확인될 때만 믿는다.
+    if (!rep && (age == null || limit == null || tooOld)) {
+      return { state: 'no-data', reason: 'edge-noreport-last', whyShort: '엣지 보고 없음 · 마지막 값', why: '이 엣지의 보고가 중앙에 없습니다 — 남아 있는 값은 예전 측정이라 지금 상태인지 알 수 없습니다.', fix: '엣지→중앙 통신과 엣지 로그의 linkcheck-worker 줄을 확인하세요.', last };
+    }
+  }
+  if (tooOld) {
+    return { state: 'no-data', reason: 'stale-measure', whyShort: '오래된 측정', why: '마지막 측정이 점검 주기의 3배보다 오래됐습니다 — 지금 값이 맞는지 알 수 없습니다.', fix: '헤더의 \'마지막 주기\' 가 멈춰 있으면 점검 폴러가, 엣지 링크면 그 엣지의 보고가 멈춘 것입니다 — \'지금 점검\' 으로 확인하세요.', last };
+  }
+  return null;
 }
 
 /** semver 비교(`partFaults`·`edgeLogText` 와 같은 규칙 — 형식이 아니면 null). */
@@ -175,9 +227,13 @@ export function headerNote(data = {}) {
   if (!data.enabled) {
     out.push('통신 점검이 **꺼져 있습니다** — 아래 목록은 설정에서 계산한 점검 대상이고, 상태는 켜야 쌓입니다.');
   }
-  const k = kpisOf(data.links || [], { enabled: data.enabled });
+  // v2.769(R4-D3-2): 표와 같은 판정 입력(주기·기동 시각)을 넘긴다 — 빠지면 헤더와 표가 서로 다른 개수를 말한다.
+  const k = kpisOf(data.links || [], {
+    enabled: data.enabled, minEdgeVersion: data.minEdgeVersion, runningSinceTs: data.runningSinceTs ?? null,
+    intervalMs: data.poller?.intervalMs ?? data.settings?.intervalMs ?? 0,
+  });
   if (data.enabled && k.nodata > 0) {
-    out.push(`측정값이 없는 링크가 **${k.nodata}개** 있습니다 — 정상이라는 뜻이 아닙니다. 행의 사유를 보세요.`);
+    out.push(`측정값이 없거나 오래된 링크가 **${k.nodata}개** 있습니다 — 정상이라는 뜻이 아닙니다. 행의 사유를 보세요.`);
   }
   if ((data.problems || []).length) {
     out.push(`설정 자체에 문제가 있는 대상이 **${data.problems.length}개** 있습니다(아래 '설정 문제' 표) — 점검조차 하지 못합니다.`);
@@ -243,8 +299,8 @@ export function tableFootnotes(rows = [], opt = {}) {
     out.push(line);
   }
   if (kinds.has('no-data')) {
-    out.push('**측정 없음**: 아직 값이 없는 링크입니다. 정상도 장애도 아닙니다 — 행의 사유가 '
-      + '‘기다리면 되는가’ 를 말합니다(첫 주기 / 엣지 구버전 / 엣지 보고 없음).');
+    out.push('**측정 없음**: 아직 값이 없거나, 남은 값이 지금 상태인지 알 수 없는(오래됨·점검 꺼짐·엣지 보고 끊김) 링크입니다. 정상도 장애도 아닙니다 — 행의 사유가 '
+      + '‘기다리면 되는가’ 를 말합니다(첫 주기 / 엣지 구버전 / 엣지 보고 없음 / 오래된 측정).');
   }
   if (kinds.has('disabled')) out.push('**점검 안 함**: 등록부에서 비활성으로 둔 대상입니다.');
   if (rows.some((r) => r.by === 'edge')) {

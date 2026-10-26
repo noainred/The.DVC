@@ -141,6 +141,15 @@ export function probeTcp(ip, { port = 53, timeoutMs = PROBE_TIMEOUT_MS, qname = 
   });
 }
 
+/**
+ * v2.785(GN N-B4): 중앙에 IPv6 스택이 없어(EAFNOSUPPORT) 질의 자체를 못 했는가 — 그 서버의 '응답 없음' 이 아니다.
+ * 두 경로 모두 실패했고 그중 하나라도 EAFNOSUPPORT 일 때만 참(한쪽이라도 응답했으면 응답이다).
+ */
+export function isNoIpv6(udp, tcp) {
+  if (udp?.ok === true || tcp?.ok === true) return false;
+  return [udp?.error, tcp?.error].some((e) => e === 'error:EAFNOSUPPORT');
+}
+
 // ── 실행 상태(인메모리) ─────────────────────────────────────────────────────
 let _running = null;          // 진행 중 프라미스
 let _last = null;             // { ranAt, finishedAt, results: Map ip → result, summary }
@@ -157,7 +166,7 @@ export function vmDnsProbeState() {
  * 반환 `{ ok, ranAt, summary, results }`(results 는 배열 — 라우트는 summary 만 돌려준다).
  */
 export async function runVmDnsProbe(targets, { port = 53, timeoutMs = PROBE_TIMEOUT_MS, concurrency = PROBE_CONCURRENCY,
-  budgetMs = PROBE_BUDGET_MS, max = PROBE_TARGET_MAX, now = Date.now } = {}) {
+  budgetMs = PROBE_BUDGET_MS, max = PROBE_TARGET_MAX, now = Date.now, probeUdpFn = probeUdp, probeTcpFn = probeTcp } = {}) {
   if (_running) return { ok: false, busy: true };
   const ranAt = now();
   _rev += 1;
@@ -179,7 +188,9 @@ export async function runVmDnsProbe(targets, { port = 53, timeoutMs = PROBE_TIME
     await poolRun(work, concurrency, async (t) => {
       if (now() - ranAt > budgetMs) { skip(t, 'budget'); return; }
       const opt = { port, timeoutMs, qname: t.qname || '.' };
-      const [udp, tcp] = await Promise.all([probeUdp(t.ip, opt), probeTcp(t.ip, opt)]);
+      const [udp, tcp] = await Promise.all([probeUdpFn(t.ip, opt), probeTcpFn(t.ip, opt)]);
+      // v2.785(GN N-B4): 중앙에 IPv6 가 없으면 건너뜀(no-ipv6) — 예전엔 모든 IPv6 DNS 가 '응답 없음' 으로 세어졌다.
+      if (isNoIpv6(udp, tcp)) { skip(t, 'no-ipv6'); return; }
       results.set(t.ip, { at: now(), where: 'central', qname: opt.qname, udp, tcp });
       if (udp.ok || tcp.ok) summary.answered += 1; else summary.failed += 1;
     });

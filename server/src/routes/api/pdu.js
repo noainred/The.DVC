@@ -32,6 +32,8 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
 import { pduDemoActive } from '../../mock/demo/pdu.js';
+/** v2.769(점검 R4-D4-01): 시계열 라우트 조회 창 상한(시간) — 웹 PduCharts RANGES 의 최대(30일)와 같다. */
+const SERIES_MAX_HOURS = 24 * 30;
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -145,6 +147,8 @@ export function registerPdu(api) {
   });
 
   // ---- 시계열(별도 DB) ------------------------------------------------------
+  // v2.769(점검 R4-D4-01): 조회 창 상한 = 화면의 가장 긴 범위(PduCharts RANGES '30일'). 예전에는 보존기간(기본 400일 = 9,600h)까지
+  //   받아 hours=9600 한 번이 pdu_sample 전체를 훑었다. 화면 범위를 늘리면 이 값도 함께 늘릴 것(테스트가 웹 RANGES 와 대조).
   api.get('/tools/pdu/series/power', toolsPerm, fullScopeOnly, async (req, res) => {
     const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter(Boolean);
     const r = await powerSeries(ids, {
@@ -152,6 +156,7 @@ export function registerPdu(api) {
       points: Math.min(500, Number(req.query.points) || 120),
       from: req.query.from ? Number(req.query.from) : null,
       to: req.query.to ? Number(req.query.to) : null,
+      maxHours: SERIES_MAX_HOURS,
     });
     res.json({ ok: true, ...r });
   });
@@ -163,6 +168,7 @@ export function registerPdu(api) {
       points: Math.min(500, Number(req.query.points) || 120),
       from: req.query.from ? Number(req.query.from) : null,
       to: req.query.to ? Number(req.query.to) : null,
+      maxHours: SERIES_MAX_HOURS,
     });
     res.json({ ok: true, ...r });
   });

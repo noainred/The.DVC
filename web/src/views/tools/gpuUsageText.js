@@ -127,3 +127,12 @@ export function memPctSuffix(usedMB, totalMB, pct) {
   if (p == null) return '';
   return (numOrNull(usedMB) != null && numOrNull(totalMB) != null && numOrNull(totalMB) > 0) ? ` (${p}%)` : '';
 }
+
+/**
+ * v2.769(점검 R4-D5-3): 게스트 nvidia-smi 가 '응답 없음'(fallen off bus 등)으로 센 GPU 장수 표지. 0·null(모름 — 구버전 엣지)은 ''.
+ * 예전에는 이 수를 어디에도 싣지 않아 2장 중 1장이 죽은 VM 이 'GPU 1장 정상' 으로 보였다.
+ */
+export function gpuErrText(n) {
+  const k = numOrNull(n);
+  return k != null && k > 0 ? `GPU ${Math.floor(k)}장 응답 없음` : '';
+}

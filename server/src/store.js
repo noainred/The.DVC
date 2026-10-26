@@ -31,6 +31,7 @@ import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀
  */
 export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 import { pushAll } from './util/pushAll.js';
+import { msOrNull } from './publicapi/time.js'; // v2.771(R6-F3-5): 엣지 staleSince 를 시각으로 좁힌다(순수 leaf)
 import { createChangeLogger } from './util/logThrottle.js';
 import { vmCfgStatus } from './vmcfg/cache.js'; // v2.697(B10)
 import { hostCfgStatus, syncVcConfigCaches } from './hostcfg/cache.js'; // v2.699 · v2.720(S1-01) 삭제·접속처 변경 vCenter 의 구성 캐시 정리
@@ -359,6 +360,9 @@ class Store {
         const vc = due[i];
         this.vcLast.set(vc.id, Date.now());
         if (r.status === 'fulfilled') {
+          // v2.771(점검 R6-F3-3): VM GPU 장치 조회가 실패한 스냅샷(vcenter.vmGpuUnknown)은 직전 스냅샷의 vm.gpu 를 이월한다.
+          const prevC = this.vcCache.get(vc.id);
+          carryVmGpu(r.value, prevC?.ok ? prevC.data : prevC?.lastGood);
           this.vcCache.set(vc.id, { ok: true, data: r.value, at: Date.now() });
           vcAuthGuard.clearAuthStop(vc.id); // 다시 로그인됐다 — 정지 기록 해제(수동 실행으로 확인한 경우 포함)
         } else {
@@ -404,10 +408,14 @@ class Store {
         // 점검중: 수집 중단. 직전 수집 데이터가 있으면 유지(숫자 사라지지 않게)하되 상태는 '점검중'.
         if (vc.maintenance) {
           const c = this.vcCache.get(vc.id);
-          if (c?.ok) {
-            const s = c.data;
+          // v2.771(점검 R6-F3-4): 수집 실패로 lastGood 을 이월하던 vCenter(장애라서 점검중으로 돌리는 흔한 순서)도 그 값을 유지한다.
+          //   예전에는 c.ok 일 때만 실어 점검 전환 순간 호스트·VM 이 스냅샷에서 사라졌다(v2.279 가 막은 소실 플랩 — ipam.db 재기록·합계 하락).
+          //   lastGood 은 실패 분기와 같은 보존 창(LASTGOOD_HOLD_MS)을 따르고 stale·staleSince 를 함께 싣는다(낡은 값임을 숨기지 않는다).
+          const lgOk = !!c && !c.ok && !!c.lastGood?.vcenter && (Date.now() - (c.lastGoodAt || 0)) <= LASTGOOD_HOLD_MS;
+          const s = c?.ok ? c.data : lgOk ? c.lastGood : null;
+          if (s) {
             // v2.611(감사 AUTHZ2611-05 잔여): 점검중 분기도 캐시 스냅샷의 region 이 아니라 등록부 region 이 이긴다(범위 판정 입력).
-            merged.vcenters.push({ ...s.vcenter, location: withRegistryRegion(s.vcenter?.location ?? vc.location, vc), status: 'maintenance', maintenance: true });
+            merged.vcenters.push({ ...s.vcenter, location: withRegistryRegion(s.vcenter?.location ?? vc.location, vc), status: 'maintenance', maintenance: true, ...(lgOk ? { stale: true, staleSince: c.lastGoodAt } : {}) });
             pushAll(merged.hosts, s.hosts);
             pushAll(merged.vms, s.vms);
             pushAll(merged.datastores, s.datastores);
@@ -424,7 +432,14 @@ class Store {
           const siteVc = inv?.data?.vcenter;
           if (siteVc && typeof siteVc === 'object' && !Array.isArray(siteVc)) {
             const s = inv.data;
-            const stale = Date.now() - inv.at > SITE_STALE_MS;
+            // v2.771(점검 R6-F3-5): stale 은 push 신선도 **또는** 엣지가 붙인 stale(엣지 자신의 lastGood 이월)이다 — 예전에는 push 신선도로
+            //   덮어 엣지가 6시간 묵은 lastGood 을 보내도 stale:false 였다. 엣지 표지는 edgeStale 로 따로 남기고, 엣지 staleSince 는
+            //   시각으로 좁혀 수신 시각으로 자른다(엣지 시각은 수신 시각을 넘지 못한다 — 엣지 정제 규약).
+            const pushStale = Date.now() - inv.at > SITE_STALE_MS;
+            const edgeStale = siteVc.stale === true;
+            const edgeSince0 = msOrNull(siteVc.staleSince);
+            const edgeSince = edgeSince0 != null && edgeSince0 > 0 ? Math.min(edgeSince0, inv.at) : null;
+            const stale = pushStale || edgeStale;
             // v2.600(감사 RECENT2600-01) 2차 방어: 엣지가 보낸 location 이 객체가 아니면(v2.599 수신이 null 로 만든 옛 push 포함)
             //   등록부의 위치로 채운다 — 없으면 지역 롤업이 'Unknown' 으로 묶이고 지도 좌표가 사라진다.
             const siteLoc0 = siteVc.location && typeof siteVc.location === 'object' && !Array.isArray(siteVc.location) ? siteVc.location : (vc.location ?? siteVc.location ?? null);
@@ -437,7 +452,7 @@ class Store {
             //   받은 저품질 스냅샷이면 그 표지(collectSource:'rest')가 사라지므로 **collectMethod** 로 보존한다(화면이 경보 미조회를 말한다).
             const siteMethod = typeof siteVc.collectMethod === 'string' && siteVc.collectMethod ? siteVc.collectMethod
               : (typeof siteVc.collectSource === 'string' && siteVc.collectSource && siteVc.collectSource !== 'site' ? siteVc.collectSource : undefined);
-            merged.vcenters.push({ ...siteVc, location: siteLoc, id: vc.id, collectSource: 'site', ...(siteMethod ? { collectMethod: siteMethod.slice(0, 16) } : {}), collectedBy: inv.agent, receivedAt: inv.at, stale });
+            merged.vcenters.push({ ...siteVc, location: siteLoc, id: vc.id, collectSource: 'site', ...(siteMethod ? { collectMethod: siteMethod.slice(0, 16) } : {}), collectedBy: inv.agent, receivedAt: inv.at, stale, ...(edgeStale ? { edgeStale: true } : {}), staleSince: edgeSince ?? undefined });
             // v2.599(CEN-2599-01·02) 2차 방어: 디스크에 이미 저장된 옛 push 에 객체가 아닌 원소나 **다른 vCenter** 의 원소가
             //   있어도 병합하지 않는다 — null 하나가 rollupsOf 에서 throw 해 전 함대 스냅샷이 매 주기 멈췄다.
             const own = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (x.vcenterId == null || String(x.vcenterId) === vc.id)) : []);
@@ -746,6 +761,29 @@ export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.co
  *   거짓이 됐다. 용량 합계·과할당 비율은 이것이 참인 호스트만 쓰고, 거짓인 호스트는 개수로 밝힌다(hostsCapacityUnknown·capacityUnknown).
  *   SOAP 경로는 세 필드를 항상 수로 싣는다(soapClient num() — 0 일 수는 있다) — 동작 변화는 '못 읽은' 호스트에만 있다.
  */
+/**
+ * v2.771(점검 R6-F3-3): VM GPU 장치 조회가 실패한 스냅샷(`vcenter.vmGpuUnknown` — soapClient)에 직전 스냅샷의 vm.gpu 를 이월한다.
+ * 실패한 주기의 vm.gpu=null 은 'GPU 없음' 과 같은 값이라, 그대로 두면 GPU VM 수·호스트별 할당·게스트 GPU 수집 대상이 그 주기 0 이 된다.
+ * 같은 id **이고 같은 이름**인 VM 에만 싣는다(접속처를 바꿔 같은 moref 가 다른 VM 이 된 경우를 줄인다). 표지는 그대로 둔다 —
+ * 이월한 값은 '지금 읽은 값' 이 아니다. 이월한 수를 vmGpuCarried 로 싣는다. snap 을 제자리에서 고친다(갓 받은 스냅샷).
+ * @returns {number} 이월한 VM 수
+ */
+export function carryVmGpu(snap, prevSnap) {
+  if (!snap?.vcenter || snap.vcenter.vmGpuUnknown !== true) return 0;
+  const prevVms = Array.isArray(prevSnap?.vms) ? prevSnap.vms : [];
+  const prev = new Map();
+  for (const v of prevVms) if (v && v.id != null && v.gpu) prev.set(v.id, v);
+  let n = 0;
+  if (prev.size && Array.isArray(snap.vms)) {
+    for (const v of snap.vms) {
+      if (!v || v.gpu) continue;
+      const p = prev.get(v.id);
+      if (p && p.name === v.name) { v.gpu = p.gpu; n += 1; }
+    }
+  }
+  snap.vcenter.vmGpuCarried = n;
+  return n;
+}
 export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v));
 
 /**

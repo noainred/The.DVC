@@ -193,7 +193,7 @@ test('COL-2602-02(SSH) — fosSsh 처리량(f/s)은 porterrshow 를 받은 시�
   assert.equal(s.extra.rateGapSec, 300);
   assert.equal(p.inFps, 1000);
   const src = fs.readFileSync(path.join(import.meta.dirname, '../src/sanswitch/collectors/fosSsh.js'), 'utf8');
-  assert.match(src, /\{ countersAt: r\.countersAt \?\? null \}/, 'collect 가 수신 시각을 넘긴다');
+  assert.match(src, /\{ countersAt: r\.countersAt \?\? null(?:, noRates)? \}/, 'collect 가 수신 시각을 넘긴다'); // v2.770(R5-E3-3): 연결 테스트용 noRates 가 함께 실린다
   assert.match(src, /spec\.key === 'porterrshow'\) countersAt = Date\.now\(\)/);
 });
 

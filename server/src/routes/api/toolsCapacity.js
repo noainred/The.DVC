@@ -41,6 +41,7 @@ import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 import { clusterIndex } from '../../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
+import { ownsClusterKey } from '../../gpu/clusterKeyScope.js'; // v2.769(점검 R4-D5-4): 클러스터 키 소유 vCenter = 최장 프리픽스
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -1513,7 +1514,7 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
   if (allowedH) {
     const snapH = store.get();
     const owns = level === 'vc' ? allowedH.has(key)
-      : level === 'cluster' ? allowedH.has(key.split('|')[0])
+      : level === 'cluster' ? ownsClusterKey(allowedH, key, snapH) // v2.769(점검 R4-D5-4): split('|') → 최장 프리픽스
         : allowedH.has((snapH.hosts || []).find((h) => h.id === key)?.vcenterId);
     if (!owns) return res.json({ level, key, days, bucket: req.query.bucket || 'auto', bucketMs: 0, synthesized: false, points: [] });
   }
@@ -1605,7 +1606,7 @@ api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
   const hostVc = new Map((snap.hosts || []).map((h) => [h.id, h.vcenterId]));
   const ownsKey = (source, key) => {
     if (!allowed) return true;                       // 전체 범위 계정 — history 라우트와 같은 기준
-    if (source === 'cluster') return allowed.has(String(key).split('|')[0]);
+    if (source === 'cluster') return ownsClusterKey(allowed, String(key), snap); // v2.769(점검 R4-D5-4): split('|') → 최장 프리픽스
     if (source === 'vc') return allowed.has(String(key));
     if (source === 'esxi' || source === 'host') return allowed.has(hostVc.get(String(key)));
     if (source === 'idrac') {

@@ -1,12 +1,12 @@
 /**
  * audit2721d.test.js — v2.721(감사 R2-04): 기여도 표 안내의 표시 조건은 contribNote(contrib) 문장 자체다.
- *   전력만 빠진 경우(excluded·carried·dsUnknown 모두 0)에도 안내가 보여야 한다 — 두 Summary 화면.
+ *   전력만 빠진 경우(excluded·carried·dsUnknown 모두 0)에도 안내가 보여야 한다 — Summary 화면(v2.747 V6 Summary 는 셸과 함께 지웠다).
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contribNote } from '../version_6/v6Data.js';
+import { contribNote } from './corpContribution.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(here, rel), 'utf8');
@@ -24,7 +24,7 @@ describe('기여도 안내 표시 조건 (R2-04)', () => {
   it('전력만 빠진 경우 contribNote 는 문장을 만든다', () => {
     expect(contribNote(powerOnly)).toMatch(/전력 열은/);
   });
-  for (const rel of ['../version_6/pages/Summary.jsx', './Summary.jsx']) {
+  for (const rel of ['./Summary.jsx']) {
     it(`${rel}: 전력만 빠져도 안내를 보이고, 문장이 없으면 숨긴다`, () => {
       const g = guardOf(read(rel));
       expect(!!g(powerOnly, contribNote)).toBe(true);

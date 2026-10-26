@@ -9,11 +9,12 @@ const EntityDetail = lazy(() => import('../components/EntityDetail.jsx').then((m
 import { vcCardState, storageBarInfo, staleSinceText } from './vcCardText.js';
 import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
-import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
+import { alarmsUnknown, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
 import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
+import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -186,6 +187,14 @@ function Bar({ label, pct, detail, title }) {
 export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   const [openId, setOpenId] = useState(null);
+  // v2.757(사용자 요청): 카드의 'VM 백업 수량' — Veeam 연동이면 Veeam 기준, 아니면 스냅샷 기준. 60초마다(v2.759 — 상세를 연 동안은 멈춘다).
+  //   실패해도 카드는 그대로 — 첫 응답 전 실패면 백업 칸만 그리지 않고, 받은 뒤의 갱신 실패는 칸에 '최근 갱신 실패' 표지(v2.763 V5-I1).
+  //   v2.759: 서버는 전용 DB 에서 바로 답한다(응답 캐시 60초) — 고정 60초. 업그레이드 직후 '준비 중' 인 vCenter 도 1분 안에 채워진다.
+  //   ⚠ 주기를 상태에 따라 바꾸지 말 것 — usePolling 은 주기가 바뀌면 데이터를 비우고 다시 묻는다('준비 중' ↔ 주기 전환이 무한 재요청이 됐다).
+  const backupP = usePolling(openId ? null : '/veeam/backup-counts', {}, 60_000);
+  const backupBy = backupP.data?.byVc || null;
+  // v2.763(V5-I1): 받은 값이 있는데 최근 갱신이 실패했다 — 칸은 그리되 '최근 갱신 실패' 표지(backupCell refreshError).
+  const backupRefreshErr = backupP.data && backupP.error ? String(backupP.error) : '';
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
@@ -225,9 +234,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   //   뺀 곳이 있으면 KPI 가 '최소 · 미수집 N곳 제외' 를 말한다 — 부분 합을 합계처럼 보이지 않게.
   const tot = countableTotals(sites, { isIrs });
   const num = (v) => (v == null ? '—' : v.toLocaleString());
-  // v2.607 WEB2607-06: REST 폴백 vCenter 는 경보를 조회하지 않았다 — 합계에서 빼고 개수를 밝힌다.
-  const alarmSum = alarmTotals(sites);
-  const totalAlarms = alarmSum.total;
+  // v2.778.1(사용자 결정 '알람 카드를 바꾼다'): 상단 '활성 알람' 자리에 VM 백업 — 전체 VM · Veeam 기준 · 스냅샷 기준(vCenter 카드와 같은 값의 합).
+  //   알람 수는 vCenter 카드·알람 화면·상태바에 남는다.
+  const bt = backupTotals(backupBy, sites.map((s) => s.id));
+  const btUnknown = bt ? [bt.veeamUnknown ? `Veeam 확인 불가 ${bt.veeamUnknown}곳` : '', bt.snapUnknown ? `스냅샷 확인 불가 ${bt.snapUnknown}곳` : ''].filter(Boolean).join(' · ') : '';
 
   return (
     <>
@@ -236,7 +246,17 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta" title={countMeta.title}>{countMeta.text}</div></div>
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{num(tot.hosts)}</div><div className="meta">다빈치 {num(tot.davinciHosts)}개 · IRS {num(tot.irsHosts)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
         <div className="card kpi"><div className="label">전체 VM</div><div className="value">{num(tot.vms)}</div><div className="meta">다빈치 {num(tot.davinciVms)}개 · IRS {num(tot.irsVms)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
-        <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div>{alarmSum.unknown > 0 && <div className="meta" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 0건이 아닙니다">경보 미조회 vCenter {alarmSum.unknown}개 제외</div>}</div>
+        <div className="card kpi" data-kpi-backup=""
+          title={'VM 백업 — veeam/snapshot\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\n스냅샷: vCenter 스냅샷·이벤트로 Veeam 백업 흔적이 보인 VM 수(뒤 수 합 — 백업 성공 여부는 모름)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다' + (bt?.partial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
+          <div className="label">VM 백업 (veeam/snapshot)</div>
+          {(() => {
+            const t = bt ? `${num(bt.veeam)}/${num(bt.snap)}${bt.partial ? '*' : ''}` : '—';
+            // 실서버 규모(VM 5천+)면 '3,200/1,500' 처럼 길어진다 — 카드 폭(1440px 에서 약 150px)을 넘지 않게 글자를 줄인다
+            return <div className="value" style={{ color: 'var(--green)', whiteSpace: 'nowrap', ...(t.length > 9 ? { fontSize: t.length > 11 ? 18 : 22 } : {}) }}>{t}</div>;
+          })()}
+          <div className="meta">전체 VM {num(tot.vms)} · Veeam {bt ? num(bt.veeam) : '—'} · 스냅샷 {bt ? num(bt.snap) : '—'}</div>
+          {btUnknown && <div className="meta" data-partial-note="">{btUnknown} 제외</div>}
+        </div>
         <TrendKpis />
       </div>
 
@@ -307,6 +327,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                     {alarmsUnknown(s)
                       ? <div className="vc-count" title="REST 폴백 수집 — 경보를 조회하지 않았습니다(0건이 아닙니다)"><b style={{ color: 'var(--text-dim)' }}>—</b><span>알람(미조회)</span></div>
                       : <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>}
+                    {(() => {
+                      const bk = backupPairCell(backupBy?.[s.id], Number.isFinite(m.vms) ? m.vms : null, Date.now(), { refreshError: backupRefreshErr });   // v2.778.1: veeam/snapshot
+                      return bk && <div className={`vc-count vc-bk ${bk.tone}`} data-backup={bk.tone} title={bk.title}><b>{bk.text}</b><span>{bk.label}</span></div>;
+                    })()}
                   </div>
                   <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ' *' : ''}` : undefined}
                     title={m.hostsUsageExcluded ? `* 연결 끊긴 호스트 ${m.hostsUsageExcluded}대는 사용량을 알 수 없어 사용률(%) 계산에서 뺐습니다(GHz 합계에는 포함)` : undefined} />

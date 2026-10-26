@@ -20,6 +20,8 @@ import io
 import math
 import re
 
+from .ssrf import ValidationError
+
 # 내보내기 열 순서 = 가져오기가 기대하는 헤더. 사용자가 열을 지우거나 순서를 바꿔도
 # 헤더 이름으로 찾으므로 동작한다(헤더가 아예 없으면 이 순서로 간주).
 COLUMNS = ["name", "url", "category", "icon", "description", "tags",
@@ -97,7 +99,12 @@ def parse_csv(text) -> list:
     if text.startswith("﻿"):
         text = text[1:]
 
-    rows = list(csv.reader(io.StringIO(text)))
+    # v2.768(점검 R3-C3-6): 닫는 따옴표가 빠진 칸 하나면 파일 끝까지가 한 칸이 되어 128KB(field_size_limit)를
+    # 넘는 순간 csv.Error(ValueError 아님)가 났고, _dispatch 가 못 잡아 응답 없이 끊겼다 — 사유를 붙여 400 으로.
+    try:
+        rows = list(csv.reader(io.StringIO(text)))
+    except csv.Error as exc:
+        raise ValidationError(f"CSV 형식 오류(따옴표 짝을 확인하세요): {exc}") from None
     if not rows:
         return []
 

@@ -17,7 +17,7 @@
  */
 import { load as loadMail } from './settings.js';
 import { resolveRecipients, withinRateLimit, kindLabel } from './kinds.js';
-import { sendMail, headerSafeText } from '../util/smtp.js';
+import { sendMail, headerSafeText, normalizeAddresses, formatDisplayName } from '../util/smtp.js';
 import { logAudit } from '../audit.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 
@@ -87,7 +87,7 @@ export async function sendPortalMail(opts = {}) {
 /** 줄 선 자동 발송 수(상태 표시·테스트용). */
 export function mailAutoQueueLength() { return _autoWaiting; }
 
-async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
+async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = '', to = null, cc = null, by = 'system', trace = false, fromAddr = '', fromName = null, attachments = [] }) {
   // v2.743(감사 INJPKG-03): 제목의 제어문자(탭·CR·LF)는 공백으로 정리한다 — 호출부(알림·일일 보고·아이실론 등)가 운영 데이터(호스트명·
   //   VM 이름·원격 응답)를 제목에 담는데, 탭 하나에 buildMime 이 던져 그 메일 전체를 잃었다. buildMime 의 throw 는 마지막 방어선으로 남긴다.
   const subject = headerSafeText(rawSubject);
@@ -119,15 +119,22 @@ async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = 
   }
 
   const ccList = cc == null ? r.cc : (Array.isArray(cc) ? cc : [cc]);
-  const from = cfg.smtp.fromName
-    ? `${quoteName(cfg.smtp.fromName)} <${cfg.smtp.from}>`
-    : cfg.smtp.from;
+  // v2.749: 기능별 보내는 사람(헤더 From) — fromAddr 가 형식에 맞으면 헤더 From 만 바꾼다(봉투 MAIL FROM 은 메일 설정의 주소 그대로 —
+  //   반송은 설정한 계정으로 간다). 형식이 틀리면 무시하고 설정값을 쓴다(호출부 설정 저장이 이미 거부한다). 표시 이름도 같다.
+  //   ⚠ 사내 SMTP 가 로그인 계정과 다른 From 을 거부할 수 있다 — 거부되면 아래 catch 가 실패로 기록한다(조용히 바꿔 보내지 않는다).
+  const fromOverride = typeof fromAddr === 'string' && fromAddr.trim() && normalizeAddresses([fromAddr.trim()]).ok.length === 1 ? fromAddr.trim() : '';
+  const headerAddr = fromOverride || cfg.smtp.from;
+  const headerName = fromName != null && String(fromName).trim() ? fromName : cfg.smtp.fromName;
+  // 표시 이름에 따옴표·제어문자가 섞이면 헤더가 깨진다 — 안전한 형태로만 감싼다(비ASCII 는 RFC 2047 — v2.768 R3-C5-06, util/smtp.js).
+  const from = headerName
+    ? `${formatDisplayName(headerName)} <${headerAddr}>`
+    : headerAddr;
 
   attemptAt.push(at);
   while (attemptAt.length && attemptAt[0] < at - 3600_000) attemptAt.shift();
   try {
     const res = await sendMail({ ...cfg.smtp, from: cfg.smtp.from, displayFrom: from }, {
-      to: r.to, cc: ccList, subject, html, text,
+      to: r.to, cc: ccList, subject, html, text, attachments: Array.isArray(attachments) ? attachments : [],
     }, { trace });
     sentAt.push(at);
     while (sentAt.length && sentAt[0] < at - 3600_000) sentAt.shift();
@@ -154,13 +161,6 @@ async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = 
   }
 }
 
-/** 표시 이름에 따옴표·제어문자가 섞이면 헤더가 깨진다 — 안전한 형태로만 감싼다. */
-function quoteName(n) {
-  // eslint-disable-next-line no-control-regex
-  const clean = String(n || '').replace(/[\x00-\x1f\x7f"\\<>]/g, '').trim().slice(0, 80);
-  if (!clean) return '';
-  return /^[A-Za-z0-9 ._-]+$/.test(clean) ? clean : `"${clean}"`;
-}
 
 /** 설정 화면·상태 API 용. 비밀 없음. */
 export function mailStatus() {

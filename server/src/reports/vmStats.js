@@ -27,7 +27,7 @@ export function updateVmStats(snap, ts = Date.now(), opts = {}) {
     let e = acc.get(v.id);
     // v2.603(감사 LEFT2603-03 — 함수 호출로 재현): 예전에는 CPU·메모리 중 **하나만** 있어도 공용 n 을 올려, 못 읽은 쪽의
     // 결측이 평균의 분모에 들어갔다(CPU 80·null·80 → 평균 53.3, 정답 80). v2.550 규약 — null 은 분모에 넣지 않는다.
-    // 지표마다 따로 센다. ⚠ 지금 수집기(soapClient pct())는 null 을 내지 않아 운영에서는 잠재 결함이다.
+    // 지표마다 따로 센다. v2.783(J-B1): SOAP 수집기도 이제 못 읽은 구동 VM 사용률을 null 로 낸다(vmUsagePctOrNull) — 이 분모 규약이 실제로 쓰인다.
     if (!e) { e = { n: 0, nCpu: 0, nMem: 0, cpuSum: 0, memSum: 0, cpuMax: null, memMax: null, sinceTs: ts, lastTs: ts }; acc.set(v.id, e); }
     e.n++;
     if (cpu != null) { e.nCpu++; e.cpuSum += cpu; if (e.cpuMax == null || cpu > e.cpuMax) e.cpuMax = cpu; }

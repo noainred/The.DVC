@@ -10,6 +10,7 @@ import { Field } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { ErrorBox } from '../../components/ui.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js'; // v2.628(LEFT2628-04)
+import { physicalGpuErrView, physicalGpuErrServers, PGPU_GPU_ERR_TITLE } from './physicalGpuText.js'; // v2.782(점검 K5 E-B2)
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
@@ -175,9 +176,11 @@ export function PhysicalGpuManager({ vcs }) {
         const c = { ok: rs.filter((r) => r.count != null).length, login: 0, nodriver: 0, unreachable: 0, error: 0 };
         for (const r of rs) if (r.error) c[r.errorCode || 'error'] = (c[r.errorCode || 'error'] || 0) + 1;
         const stopped = rs.filter((r) => r.authStopped).length; // v2.590: 인증 실패로 주기 수집을 멈춘 서버(login 에 포함돼 있다)
+        const gpuErrSv = physicalGpuErrServers(rs); // v2.782(점검 K5 E-B2): 수집은 됐지만 일부 GPU 가 응답하지 않은 서버(ok 에 포함돼 있다)
         return (
           <div className="flex gap wrap" style={{ fontSize: 12, marginBottom: 8 }}>
             <span className="badge green">수집 {c.ok}</span>
+            {gpuErrSv > 0 && <span className="badge amber" title={PGPU_GPU_ERR_TITLE}>그중 일부 GPU 응답 없음 {gpuErrSv}</span>}
             {c.login > 0 && <span className="badge red">로그인 안됨 {c.login}</span>}
             {stopped > 0 && <span className="badge red" title="같은 계정으로 반복 로그인하면 계정이 잠기므로 주기 수집을 멈췄습니다. 수정에서 비밀번호를 고치면 자동으로 다시 시작하고, 각 행의 테스트(저장된 계정)가 성공해도 풀립니다.">그중 인증 실패 정지 {stopped}</span>}
             {c.nodriver > 0 && <span className="badge amber">드라이버 없음 {c.nodriver}</span>}
@@ -194,15 +197,16 @@ export function PhysicalGpuManager({ vcs }) {
             {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? `물리 GPU 서버 목록을 읽지 못했습니다(${errorBoxInput(loadErr).text}) — 등록이 없다는 뜻이 아닙니다.` : '불러오는 중…') : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
             {(d?.servers || []).map((s) => {
               const r = results.get(s.id);
+              const ge = physicalGpuErrView(r); // v2.782(점검 K5 E-B2): 일부 GPU 응답 없음이면 개수 옆 amber 표지 + 상태 배지 amber(모름은 표지 없음)
               return (
                 <tr key={s.id}>
                   <td><b>{s.name}</b></td>
                   <td className="muted">{s.host}:{s.port} · {s.username} · {s.os}</td>
                   <td className="muted">{s.vcenterId || '—'}</td>
-                  <td className="tabular">{r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}</span> : <span className="muted">—</span>}</td>
+                  <td className="tabular">{r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}{ge.text && <span className="badge amber" style={{ marginLeft: 6 }} title={PGPU_GPU_ERR_TITLE}>{ge.text}</span>}</span> : <span className="muted">—</span>}</td>
                   <td>{!s.enabled ? <span className="badge gray">중지</span>
                     : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.authStopped ? '인증 실패 정지' : (r.errorLabel || '오류')}</span>
-                      : r && r.count != null ? <span className="badge green">수집</span>
+                      : r && r.count != null ? <span className={`badge ${ge.tone}`} title={ge.text ? `${ge.text} — ${PGPU_GPU_ERR_TITLE}` : undefined}>수집</span>
                         : <span className="badge gray">대기</span>}</td>
                   <td className="right nowrap">
                     <button className="tab" disabled={testing === s.id} onClick={() => test({ id: s.id }, s.id)}>{testing === s.id ? '테스트…' : '테스트'}</button>

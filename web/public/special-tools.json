@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-16T01:45:12.844Z",
-  "count": 109,
+  "generatedAt": "2026-10-24T12:36:55.251Z",
+  "count": 112,
   "tools": [
     {
       "k": "service-hub",
@@ -379,6 +379,14 @@
       "comingSoon": false
     },
     {
+      "k": "guest-partition",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
       "k": "vm-export",
       "adminOnly": false,
       "perm": null,
@@ -588,6 +596,22 @@
     },
     {
       "k": "contention",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-summary",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-detail",
       "adminOnly": false,
       "perm": null,
       "external": null,

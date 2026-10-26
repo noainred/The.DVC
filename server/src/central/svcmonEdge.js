@@ -30,6 +30,7 @@
 
 import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
@@ -45,6 +46,13 @@ function boundedObj(o) {
 export const MAX_AGENTS = envNum('SVCMON_EDGE_MAX_AGENTS', 64);
 /** v2.606 EDGE2606-02: 예열 완결의 GC 보류 상한(엣지 SVCMON_WARM_MAX_MS 기본 15분보다 길게). */
 export const WARM_GC_HOLD_MS = envNum('SVCMON_EDGE_WARM_GC_HOLD_MS', 30 * 60_000);
+/**
+ * v2.769(점검 R4-D3-5): snapId 역행(엣지 시계가 앞으로 튀었다 바로잡힘) 시 GC 보류의 **시한**. 예전에는 역행하는 동안 GC 를
+ *   무기한 건너뛰어(엣지 시계가 그 시각을 따라잡을 때까지 — 수 시간) 엣지에서 지운 점검이 중앙에 '갱신 안 됨' 으로 남았다.
+ *   기본 3분 — 받는 쪽 행 낡음 판정(max(3×iv, 5×expectMs) = 기본 5분)보다 짧게 둔다(루트 CLAUDE.md '보류에는 시한').
+ *   역행 **즉시** GC 는 여전히 금지다(늦게 온 옛 청크 하나가 정상 행을 대량 삭제하지 않게).
+ */
+export const REGRESS_GC_HOLD_MS = envNum('SVCMON_EDGE_REGRESS_GC_HOLD_MS', 3 * 60_000);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
@@ -160,11 +168,14 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
 
     const prev = a.rows.get(id);
     // 재전송·순서 뒤바뀜에 안전하도록 더 최신 측정만 채택한다.
-    if (prev && prev.measuredAt > measuredAt) { accepted += 1; continue; }
+    // v2.769(점검 R4-D3-4): 건너뛸 때도 **이번 스냅샷에 보고됐다는 사실**(snapId)은 갱신한다. 예전에는 같은 측정의 재전송이
+    //   전송 지연 흔들림으로 1ms 라도 '더 오래된' 것으로 보이면 snapId 가 그대로라, 두 번째 완결 GC 가 정상 보고 중인 행과
+    //   메타를 지웠다(점검 주기 > push 주기인 cert·domain 등 → 한 주기씩 사라짐 + needMeta 반복). 값은 최신 측정을 유지한다.
+    if (prev && prev.measuredAt > measuredAt) { prev.snapId = snapId; accepted += 1; continue; }
     a.rows.set(id, {
       s: STATES.has(r?.s) ? r.s : 'bad',
       r: text(r?.r, REPLY_MAX),
-      m: num(r?.m),
+      m: numOrNull(r?.m), // v2.769(점검 R4-D3-6): 엣지가 RTT 미상(null)을 보내면 0ms 로 바꾸지 않는다
       k: Math.max(0, num(r?.k)),
       measuredAt,
       snapId,
@@ -214,12 +225,22 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   if (warmHold) a.counters.warmGcSkipped = (a.counters.warmGcSkipped || 0) + 1;
   if (seq >= total) {
     a.complete = true;
-    if (!warmHold && snapId >= a.prevCompleteSnapId) {
+    // v2.769(점검 R4-D3-5): 역행이 REGRESS_GC_HOLD_MS 넘게 이어지면 엣지 시계가 바로잡힌 것으로 보고 기준을 다시 잡는다 —
+    //   허용 집합은 이번 스냅샷 + 역행 중 직전 완결(청크 유실 대비 '한 세대 전' 허용을 역행 구간에서도 유지).
+    let keepPrev = a.prevCompleteSnapId;
+    let regressReset = false;
+    if (snapId < a.prevCompleteSnapId) {
+      if (!a.regressSince) a.regressSince = recvAt;
+      if (recvAt - a.regressSince >= REGRESS_GC_HOLD_MS) { regressReset = true; keepPrev = a.regressPrevSnapId || snapId; }
+      else { a.regressPrevSnapId = snapId; a.counters.regressGcSkipped = (a.counters.regressGcSkipped || 0) + 1; }
+    } else { a.regressSince = 0; a.regressPrevSnapId = 0; }
+    if (!warmHold && (snapId >= a.prevCompleteSnapId || regressReset)) {
       for (const [id, row] of a.rows) {
-        if (row.snapId !== snapId && row.snapId !== a.prevCompleteSnapId) a.rows.delete(id);
+        if (row.snapId !== snapId && row.snapId !== keepPrev) a.rows.delete(id);
       }
       for (const id of a.meta.keys()) if (!a.rows.has(id)) a.meta.delete(id);
       a.prevCompleteSnapId = snapId;
+      if (regressReset) { a.regressSince = 0; a.regressPrevSnapId = 0; a.counters.regressResets = (a.counters.regressResets || 0) + 1; }
     }
   }
 

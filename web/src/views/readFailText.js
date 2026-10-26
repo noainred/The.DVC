@@ -71,7 +71,19 @@ export function agentTokSummary(agentTok, err) {
   const ok = agentTok && typeof agentTok === 'object';
   const failed = err != null && err !== '';
   if (!ok) return failed ? '발급 현황을 읽지 못함' : '불러오는 중…';
+  // v2.771(점검 R6-F4-2): 서버가 토큰 파일을 읽지 못했으면(loadError) 빈 tokens 는 '0개 발급' 이 아니다.
+  if (agentTok.loadError) return `토큰 파일을 읽지 못함${failed ? ' · 다시 읽지 못함(직전 값)' : ''}`;
   const n = Array.isArray(agentTok.tokens) ? agentTok.tokens.length : 0;
   const uses = Number(agentTok.auth?.uses);
   return `${n}개 발급${Number.isFinite(uses) && uses > 0 ? ` · 공유 토큰 사용 ${uses}회` : ''}${failed ? ' · 다시 읽지 못함(직전 값)' : ''}`;
+}
+
+/**
+ * v2.771(점검 R6-F4-2): 서버가 실은 등록부·토큰 파일 '읽지 못함' 요약(`loadError` — {at, code, text}, 원문 없음) → 화면 문구. 없으면 null.
+ *   빈 목록을 '등록 없음'·'0개 발급' 으로 보이지 않게 한다(readFailText 와 같은 판단 — 이쪽은 조회는 됐지만 서버가 파일을 못 읽은 경우).
+ */
+export function fileUnreadableText(loadError, what, { notMeaning = '' } = {}) {
+  if (!loadError || typeof loadError !== 'object') return null;
+  const why = typeof loadError.text === 'string' && loadError.text ? loadError.text.slice(0, 200) : '사유 미상';
+  return `${what}을(를) 읽지 못했습니다(${why})${notMeaning ? ` — ${notMeaning}` : ''}. 중앙 설정 디렉터리의 손상 보존본(.corrupt.*)을 되돌리거나 이 화면에서 다시 저장하면 풀립니다.`;
 }

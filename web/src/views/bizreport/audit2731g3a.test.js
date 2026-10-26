@@ -13,7 +13,7 @@ describe('A2-01 가용성 측정 끝 안내', () => {
   it('수집이 멈춰 측정 끝을 자른 vCenter — 몇 곳·몇 대·얼마나 전부터인지와 그 뒤를 모른다는 사실을 말한다', () => {
     const r = analyzeAvailability([], [vm('a'), vm('b')], { days: 30, now: NOW, coverageOf: () => ({ firstTs: NOW - 400 * DAY, lastTs: NOW - 10 * DAY }) });
     const n = coverageNote({ coverage: r.coverage, logs: { enabled: true, minSeverity: 'info' } });
-    expect(n).toMatch(/이벤트 수집이 멈춘 vCenter 1곳의 VM 2대는/);
+    expect(n).toMatch(/이벤트 수집이 멈췄거나 뒤처진\(따라잡는 중 포함\) vCenter 1곳의 VM 2대는/);   // v2.772(Z4-S2): '멈춘' 단정 → 뒤처짐 포함
     expect(n).toMatch(/10일 전/);
     expect(n).toMatch(/그 뒤의 정지는 알 수 없습니다/);
     // 수집 성공 기록이 없어 마지막으로 받은 이벤트 시각을 썼다는 사실
@@ -28,7 +28,7 @@ describe('A2-01 가용성 측정 끝 안내', () => {
   it('수집이 측정 기간 시작 전에 멈춘 VM 은 판정하지 않았다고 말한다(100% 가 아니다)', () => {
     const r = analyzeAvailability([], [vm('a')], { days: 30, now: NOW, coverageOf: () => ({ firstTs: NOW - 400 * DAY, lastTs: NOW - 40 * DAY }) });
     const n = coverageNote({ coverage: r.coverage });
-    expect(n).toMatch(/측정 기간 시작 전에 멈춘 vCenter 의 VM 1대는 판정하지 않았습니다/);
+    expect(n).toMatch(/측정 기간 시작보다 앞에서 끝난\(멈췄거나 그만큼 뒤처진\) vCenter 의 VM 1대는 판정하지 않았습니다/);   // v2.772(Z4-S2)
   });
   it('정상 수집이면 아무 말도 더하지 않는다 · 문구에 백틱·별표가 없다', () => {
     const r = analyzeAvailability([], [vm('a')], { days: 30, now: NOW, coverageOf: () => ({ firstTs: NOW - 400 * DAY, lastTs: NOW }) });

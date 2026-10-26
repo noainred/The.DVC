@@ -231,32 +231,42 @@ export function pullDropCard(status) {
   const sd = status.serversDropped && typeof status.serversDropped === 'object' ? status.serversDropped : null;
   const n = (k) => (sd && Number.isFinite(sd[k]) ? sd[k] : 0);
   const dropped = n('notObject') + n('badId') + n('overCount');
+  // v2.771(점검 R6-F4-1): export 전력 원소(power.byHost)를 상한·형식으로 버린 수 — 서버(puller)가 byHostDropped{notObject,overCount} 로 싣는다.
+  const bh = status.byHostDropped && typeof status.byHostDropped === 'object' ? status.byHostDropped : null;
+  const bn = (k) => (bh && Number.isFinite(bh[k]) ? bh[k] : 0);
+  const powerDropped = bn('notObject') + bn('overCount');
   const coerced = Number.isFinite(status.serversCoerced) ? status.serversCoerced : 0;
   const conflicts = Array.isArray(status.hostConflicts) ? status.hostConflicts.filter((x) => typeof x === 'string') : [];
-  if (!dropped && !coerced && !conflicts.length) return null;
+  if (!dropped && !powerDropped && !coerced && !conflicts.length) return null;
   const parts = [];
   if (dropped) parts.push(`버린 서버 ${dropped}`);
+  if (powerDropped) parts.push(`버린 전력 ${powerDropped}`);
   if (coerced) parts.push(`고친 값 ${coerced}`);
   if (conflicts.length) parts.push(`호스트명 겹침 ${conflicts.length}`);
   const evidence = [];
   if (dropped) evidence.push({ k: '버린 서버 원소', v: `객체 아님 ${n('notObject')} · id 오류 ${n('badId')} · 상한 초과 ${n('overCount')}` });
+  if (powerDropped) evidence.push({ k: '버린 전력 원소', v: `객체 아님 ${bn('notObject')} · 상한 초과 ${bn('overCount')}` });
   if (coerced) evidence.push({ k: '형식을 고쳐 받은 값', v: `${coerced}개(문자열·숫자 형식이 맞지 않아 좁혀 받음)` });
   if (conflicts.length) evidence.push({ k: '다른 수집 서버와 같은 호스트명', v: `${conflicts.slice(0, 10).join(', ')}${conflicts.length > 10 ? ` 외 ${conflicts.length - 10}개` : ''}` });
   return {
     kind: 'pull-drop',
     badge: parts.join(' · '),
     tone: 'amber',
-    title: dropped ? '이 엣지가 보낸 서버 목록 일부를 받지 않았습니다' : '이 엣지가 보낸 서버 목록에 주의할 값이 있습니다',
-    summary: dropped
-      ? `엣지 export 의 iDRAC 서버 원소 ${dropped}개가 형식 오류·상한 초과로 버려져 서버 분석·전력 화면에 나오지 않습니다(정상 표시는 나머지 서버 기준입니다).`
+    title: dropped || powerDropped ? `이 엣지가 보낸 ${dropped && powerDropped ? '서버·전력' : (dropped ? '서버' : '전력')} 목록 일부를 받지 않았습니다` : '이 엣지가 보낸 서버 목록에 주의할 값이 있습니다',
+    summary: dropped || powerDropped
+      ? [
+        dropped ? `엣지 export 의 iDRAC 서버 원소 ${dropped}개가 형식 오류·상한 초과로 버려져 서버 분석·전력 화면에 나오지 않습니다(정상 표시는 나머지 서버 기준입니다).` : '',
+        powerDropped ? `엣지 export 의 전력 원소 ${powerDropped}개가 형식 오류·상한 초과로 버려져 그 호스트의 원격 전력이 집계되지 않습니다.` : '',
+      ].filter(Boolean).join(' ')
       : '서버 목록은 모두 받았지만 아래 값은 그대로 믿기 어렵습니다.',
     evidence,
     steps: [
       ...(dropped ? ['엣지 포탈의 iDRAC 등록부에서 id·서비스태그가 비었거나 형식이 잘못된 항목을 확인하세요(상한 초과면 등록 수를 확인).'] : []),
+      ...(powerDropped ? ['상한 초과면 그 엣지의 전력 보고 호스트 수가 비정상적으로 많은지(침해·오설정) 확인하세요 — 정상 규모라면 중앙 COLLECTOR_REMOTE_BYHOST_MAX 로 상한을 넓힐 수 있습니다.'] : []),
       ...(conflicts.length ? ['같은 호스트명이 다른 법인 엣지에도 있습니다 — 법인별로 따로 집계하고 전력 이력 키를 나눕니다. 실제로 같은 장비면 한쪽 등록을 지우세요.'] : []),
       ...(coerced && !dropped ? ['엣지를 최신 버전으로 올리면 대부분 사라집니다.'] : []),
     ],
-    where: ['중앙 로그: [collector] <id> export 서버 원소 …개를 버림 / 다른 수집 서버와 같은 호스트명 …'],
+    where: ['중앙 로그: [collector] <id> export 서버 원소 …개를 버림 / export 전력 원소 …개를 버림 / 다른 수집 서버와 같은 호스트명 …'],
   };
 }
 
