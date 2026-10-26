@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   aggregateCells, deltaOf, expectedIn, bytesText, deltaText, pctText, pctTone, inexactNote, partialNote, probeLine, PROBE_TEXT, SKIP_TEXT,
   groupSummary, chartSeries, SERIES_COLORS, OTHER_COLOR, wideCsv, longCsv, csvFileName, isEmail, parseMailList, recipientCount, daysText, mailDirty,
-  periodText, periodAxis, deviceSub,
+  periodText, periodAxis, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
 
 const S = await import('../../../../server/src/storage/usageReport.js');
@@ -141,6 +141,14 @@ describe('v2.791 — ISO 주차 · PowerScale 풀', () => {
     const rows = longCsv(PS, W, { typeLabel: (t) => t, unit: 'TB' }).split('\r\n').map((l) => l.split(','));
     const pr = rows.filter((r) => r[6] === '풀');
     expect(pr.map((r) => [r[0], r[7], r[9]])).toEqual([['2026년 43주차', 'HDD 풀', '4'], ['2026년 44주차', 'HDD 풀', ''], ['2026년 43주차', 'SSD 풀', '0.5'], ['2026년 44주차', 'SSD 풀', '']]);
+  });
+  it('메일 탭 문구는 서버 기준값으로(숫자를 박지 않는다) · 첨부 상태 문구는 서버 상태와 1:1', async () => {
+    const SI = await import('../../../../server/src/storage/usageInsights.js');
+    const t = mailBodyText(SI.ACTION_RULE, 52);
+    expect(t).toContain(`${SI.ACTION_RULE.warnPct}% 이상 또는 ${SI.ACTION_RULE.horizonWeeks}주 안 ${SI.ACTION_RULE.critPct}% 도달 예상`);
+    expect(t).toContain('최근 52주');
+    expect(mailBodyText(null, null)).not.toMatch(/undefined/);
+    expect(Object.keys(ATTACH_TEXT).sort()).toEqual(['attached', 'failed', 'off', 'trimmed']);
   });
   it('서버 풀 판정과 같은 이름을 쓴다', () => {
     expect(S.POOLS.map((p) => p.label)).toEqual(['HDD 풀', 'SSD 풀']);
