@@ -242,7 +242,7 @@ test('G 라우트 — EM 탭 전체 범위만 · 관리자 아니면 주소 없�
 
 test('H 소스 — 조회 라우트 게이트·캐시 키 · 폴러 index 연결 · 비밀 파일 등록', () => {
   const api = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
-  assert.match(api, /api\.get\('\/tools\/backup-em', toolsPerm, emFullScope,/);
+  assert.match(api, /api\.get\('\/tools\/backup-em', toolsPerm, fullScopeOnly,/);
   assert.match(api, /extraKey: `\$\{scopeKey\(req\.user, store\.get\(\)\)\}\|\$\{admin \? 'admin' : 'user'\}`/);
   const idx = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(idx, /startEmPoller, startLicenseWatch,/);

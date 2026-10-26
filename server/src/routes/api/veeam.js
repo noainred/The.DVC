@@ -555,8 +555,8 @@ export function registerBackupStatus(api) {
    *   EM 데이터는 vCenter 귀속이 없다(전 법인) → 전체 범위 계정만(범위 계정 403 + 사유 — '귀속 없는 데이터는 범위 계정에 노출하지 않는다').
    *   관리자 판본(isAdminDetailUser)만 EM 주소·포트를 싣는다. 폴링하지 않는 화면이라 응답 캐시는 짧게(30초).
    */
-  const emFullScope = fullScopeOnlyWith('Veeam Enterprise Manager 현황은 전 법인 데이터라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
-  api.get('/tools/backup-em', toolsPerm, emFullScope, (req, res) => {
+  const fullScopeOnly = fullScopeOnlyWith('Veeam Enterprise Manager 현황은 전 법인 데이터라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+  api.get('/tools/backup-em', toolsPerm, fullScopeOnly, (req, res) => {
     const admin = isAdminDetailUser(req.user);
     return memoJson(req, res, 'backup-em', async () => emData(admin), { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${admin ? 'admin' : 'user'}` });
   });

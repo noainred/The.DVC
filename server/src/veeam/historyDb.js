@@ -36,6 +36,7 @@ function initSqlite(file) {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const db = openSqlite(new DatabaseSync(file));
+    try { fs.chmodSync(file, 0o600); } catch { /* best effort — v2.503 S-5 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS license_daily (
         src TEXT NOT NULL, day INTEGER NOT NULL, ts INTEGER NOT NULL,
