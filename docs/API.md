@@ -767,11 +767,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:151](../server/src/routes/api/inventory.js#L151) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:630](../server/src/routes/api/inventory.js#L630) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:626](../server/src/routes/api/inventory.js#L626) |
-| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:509](../server/src/routes/api/veeam.js#L509) |
-| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:581](../server/src/routes/api/veeam.js#L581) |
-| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:524](../server/src/routes/api/veeam.js#L524) |
-| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:501](../server/src/routes/api/veeam.js#L501) |
-| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:557](../server/src/routes/api/veeam.js#L557) |
+| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:521](../server/src/routes/api/veeam.js#L521) |
+| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:593](../server/src/routes/api/veeam.js#L593) |
+| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:536](../server/src/routes/api/veeam.js#L536) |
+| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:513](../server/src/routes/api/veeam.js#L513) |
+| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:569](../server/src/routes/api/veeam.js#L569) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:26](../server/src/routes/api/bmstor.js#L26) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:143](../server/src/routes/api/bmstor.js#L143) |
 | GET | `/tools/bm-storage/export.csv` | 역할 `admin` · `csvPerm` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:87](../server/src/routes/api/bmstor.js#L87) |
@@ -1186,10 +1186,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:790](../server/src/routes/api/toolsCapacity.js#L790) |
-| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:269](../server/src/routes/api/veeam.js#L269) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:235](../server/src/routes/api/veeam.js#L235) |
-| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:254](../server/src/routes/api/veeam.js#L254) |
-| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:318](../server/src/routes/api/veeam.js#L318) |
+| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:270](../server/src/routes/api/veeam.js#L270) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:236](../server/src/routes/api/veeam.js#L236) |
+| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:255](../server/src/routes/api/veeam.js#L255) |
+| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:319](../server/src/routes/api/veeam.js#L319) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:392](../server/src/routes/api/inventory.js#L392) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |
