@@ -59,6 +59,19 @@ export default function BackupEmTool() {
   const [openKey, setOpenKey] = useState('');   // v2.788.1 펼친 상세('job|uid' · 'bad|uid')
   const [badAll, setBadAll] = useState(false);
   const toggle = useCallback((k) => setOpenKey((cur) => (cur === k ? '' : k)), []);
+  // v2.790 Chromium 400px: 작업 표(가로 스크롤 · 최소 960px) 안 상세가 표 폭으로 열려 '닫기'·사유가 화면 밖이었다 —
+  //   보이는 카드 폭을 재어 상세를 그 폭으로 두고 왼쪽에 고정한다(sticky). 상세 안 표는 자기 가로 스크롤.
+  const jobsRef = useRef(null);
+  const [jobsW, setJobsW] = useState(0);
+  useEffect(() => {
+    const el = jobsRef.current;
+    if (!el) return undefined;
+    setJobsW(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setJobsW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data, emId]);
   const gen = useRef(0);
   const load = useCallback(() => {
     const my = ++gen.current;
@@ -207,7 +220,7 @@ export default function BackupEmTool() {
       </div>
 
       {d && (
-        <section className="card" data-em-jobs="" aria-label="작업 수행 상태" style={{ padding: '14px 0 6px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        <section ref={jobsRef} className="card" data-em-jobs="" aria-label="작업 수행 상태" style={{ padding: '14px 0 6px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
           <div style={{ padding: '0 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <b style={{ fontSize: 16 }}>작업(백업 정책) 수행 상태</b>
             <span className="muted" style={{ fontSize: 12 }}>마지막으로 끝난 세션 기준(최근 7일) · 실패 → 경고 → 실행 중 → 정상 순</span>
@@ -235,7 +248,7 @@ export default function BackupEmTool() {
                     <td data-sort={j.nextRun ?? ''} style={{ padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{shortTs(j.nextRun)}</td>
                     <td data-sort={(j.runs24?.fail || 0) * 1000 + (j.runs24?.warn || 0)} style={{ padding: '8px 18px 8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}><span style={{ color: j.runs24?.fail ? TONE.fail : undefined }}>{fmtNum(j.runs24?.fail)}</span> · <span style={{ color: j.runs24?.warn ? TONE.warn : undefined }}>{fmtNum(j.runs24?.warn)}</span></td>
                   </tr>
-                  {openKey === `job|${j.last?.uid}` && j.last?.uid && <tr><td colSpan={8} style={{ padding: '4px 18px 12px' }}><EmSessionDetail emId={em.id} uid={j.last.uid} onClose={() => setOpenKey('')} /></td></tr>}
+                  {openKey === `job|${j.last?.uid}` && j.last?.uid && <tr><td colSpan={8} style={{ padding: '4px 0 12px' }}><div style={{ position: 'sticky', left: 18, width: jobsW > 60 ? jobsW - 36 : undefined, maxWidth: '100%' }}><EmSessionDetail emId={em.id} uid={j.last.uid} onClose={() => setOpenKey('')} /></div></td></tr>}
                   </React.Fragment>
                 ))}
               </tbody>
