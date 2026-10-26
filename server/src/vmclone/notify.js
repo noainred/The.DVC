@@ -53,8 +53,10 @@ function state() {
       return _state;
     }
   } catch { preserveCorrupt(FILE()); }
-  // 처음(또는 손상) — 지금부터 센다(지난 실패를 쏟지 않는다).
+  // 처음(또는 손상) — 지금부터 센다(지난 실패를 쏟지 않는다). 기준 시각을 바로 남긴다 — 첫 발송이 실패한 채 재시작하면
+  //   since 가 재시작 시각으로 밀려 그 사이의 실패를 영영 보내지 않게 된다.
   _state = { since: Date.now(), jobs: {}, history: [] };
+  save();
   return _state;
 }
 function save() {
