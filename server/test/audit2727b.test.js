@@ -263,3 +263,15 @@ test('⑤ B-08 setFileLoginPolicy 는 같은 줄의 인라인 주석을 보존�
   assert.equal(out.text2, '# 머리 주석\nalice=password_only # 담당자 메모\n\nbob=otp_only\n', '주석 없는 줄은 예전처럼');
   assert.equal(out.text3, '# 머리 주석\n\nbob=otp_only\n', '재정의 삭제는 그 줄만(주석째) 지운다');
 });
+
+// v2.785(검토 R-B1): v2.784 백업 표시 파일도 같은 규칙 — 표시를 누를 때마다 change 백업이 생겨 실제 설정 백업을 밀어내지 않게.
+test('④-2 R-B1 backup-marks.json — 변경 감시 지문에서 빠지고 · archScan 분류 목록에 있다', async () => {
+  const svc = await import('../src/backup/service.js');
+  const base = { 'vcenters.json': '[{"id":"a"}]', 'backup-marks.json': '{"marks":{}}' };
+  const fp1 = svc.settingsFingerprint(base);
+  const fp2 = svc.settingsFingerprint({ ...base, 'backup-marks.json': '{"marks":{"vc1:vm-1":{"crit":"high","need":true,"note":"x"}}}' });
+  assert.equal(fp1, fp2, '표시만 바뀌면 지문이 같다');
+  assert.notEqual(fp1, svc.settingsFingerprint({ ...base, 'vcenters.json': '[{"id":"b"}]' }), '실제 설정 변경은 여전히 지문을 바꾼다');
+  const src = fs.readFileSync(new URL('../src/portalcheck/archScan.js', import.meta.url), 'utf8');
+  assert.match(src, /'backup-marks\.json':/);
+});

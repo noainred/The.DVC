@@ -156,7 +156,9 @@ function fingerprintContent(name, content) {
  * 사유 보관 슬롯(10)의 실제 설정 변경 백업을 밀어낸다(v2.590 P1 과 같은 이유). ⚠ 변경 감시의 디바운스 자체(backup/settings.js
  * startWatcher)는 `isRuntimeStateFile` 만 보므로 이 파일의 쓰기도 10초 디바운스를 깨운다 — 그 백업은 지문이 같아 생략된다.
  */
-export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json']);
+// v2.785(검토 R-B1): v2.784 의 백업 표시(`backup-marks.json` — VM 별 업무 중요도·백업 필요·메모, 사용자가 누를 때마다 쓴다)도 같은 성격이다 —
+//   빠져 있어 표시를 바꿀 때마다 change 백업이 생겨 자동 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다(재현: 표시만 바꿔도 지문이 달라짐).
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json']);
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');
