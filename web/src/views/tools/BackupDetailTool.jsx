@@ -1,6 +1,6 @@
 /**
  * 백업 세부내용 — 특수 기능 `backup-detail`(v2.779, 사용자 요청 '1개 vcenter 를 선택하면 VM 백업 전체 현황 · veeam 백업과 snapshot 둘다' +
- *   시안: vCenter › 폴더 › 하위 폴더 › VM 표). 메뉴: 백업 › 백업 세부내용. 값은 서버(GET /api/tools/backup-detail — veeam/backupStatus.js).
+ *   시안: vCenter › 폴더 › 하위 폴더 › VM 표). 메뉴: Veeam 현황 › Detail(v2.785 — 예전 '백업 › 백업 세부내용' · 도구 키 그대로). 값은 서버(GET /api/tools/backup-detail — veeam/backupStatus.js).
  * ⚠ 폴링하지 않는다(vCenter 를 고를 때·새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 전부 조기 return 위.
  * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
  */
@@ -137,7 +137,8 @@ export default function BackupDetailTool({ scope }) {
     <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>백업 세부내용</div>
+          <div className="muted" style={{ fontSize: 13 }}>Veeam 현황</div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>Detail</div>
           <div className="muted" style={{ fontSize: 13 }}>vCenter 하나를 골라 폴더 › VM 마다 Veeam 백업과 스냅샷 흔적을 봅니다.</div>
         </div>
         <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'flex-end' }}>

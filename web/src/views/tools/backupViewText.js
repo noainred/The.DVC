@@ -88,7 +88,7 @@ export function attentionList(rows, n = 6) {
   const gaps = list.filter((r) => r && typeof r.marks?.needGap === 'number' && r.marks.needGap > 0).sort((a, b) => b.marks.needGap - a.marks.needGap);
   if (gaps.length) {
     const sum = gaps.reduce((a, r) => a + r.marks.needGap, 0);
-    out.push({ id: 'needgap', tone: 'info', title: `백업 필요인데 Veeam 백업 없음 ${fmtNum(sum)}대`, text: `${gaps.slice(0, 4).map((r) => `${r.name} ${fmtNum(r.marks.needGap)}`).join(' · ')}${gaps.length > 4 ? ' …' : ''} — 백업 세부내용의 ‘백업 필요·미백업’ 보기` });
+    out.push({ id: 'needgap', tone: 'info', title: `백업 필요인데 Veeam 백업 없음 ${fmtNum(sum)}대`, text: `${gaps.slice(0, 4).map((r) => `${r.name} ${fmtNum(r.marks.needGap)}`).join(' · ')}${gaps.length > 4 ? ' …' : ''} — Detail 의 ‘백업 필요·미백업’ 보기` });
   }
   // v2.785(GR R-B2): 표시 파일을 못 읽은 행(marks null)이 있으면 미백업 줄이 소리 없이 사라지지 않게 한 줄(정보 칸 — 행 문제 아님)
   const marksUnknownN = list.filter((r) => r && r.marks === null).length;

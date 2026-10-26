@@ -44,9 +44,10 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'svcmon', label: 'Monitoring', tab: 'svcmon' },
   ] },
   // v2.779(사용자 요청: '백업' 메뉴 — 서브 메뉴 '백업 서머리'·'백업 세부내용', Veeam 과 스냅샷 둘 다)
-  { id: 'backup', label: '백업', children: [
-    { id: 'bsum', label: '백업 서머리', tool: 'backup-summary' },
-    { id: 'bdet', label: '백업 세부내용', tool: 'backup-detail' },
+  // v2.785(사용자 요청 + 시안): 이름만 'Veeam 현황' › 'Summary'·'Detail' — id·도구 키는 그대로(북마크·권한 파일·저장한 내 메뉴가 id·키로 참조)
+  { id: 'backup', label: 'Veeam 현황', children: [
+    { id: 'bsum', label: 'Summary', tool: 'backup-summary' },
+    { id: 'bdet', label: 'Detail', tool: 'backup-detail' },
   ] },
   { id: 'resource', label: '자원관리', children: [
     { id: 'sa', label: '서버 분석', tool: 'serveranalysis' },

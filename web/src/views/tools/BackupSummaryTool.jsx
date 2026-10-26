@@ -1,6 +1,6 @@
 /**
  * 백업 서머리 — 특수 기능 `backup-summary`(v2.779, 사용자 요청 '전체 28개 vcenter 의 백업 현황 · veeam 백업과 snapshot 둘다' + 시안).
- * 메뉴: 백업 › 백업 서머리. 값은 서버(GET /api/tools/backup-summary — veeam/backupStatus.js)가 vCenter 카드·VM 화면과 같은 기준으로 낸다.
+ * 메뉴: Veeam 현황 › Summary(v2.785 — 예전 '백업 › 백업 서머리' · 도구 키 그대로). 값은 서버(GET /api/tools/backup-summary — veeam/backupStatus.js)가 vCenter 카드·VM 화면과 같은 기준으로 낸다.
  * ⚠ 무거운 집계라 폴링하지 않는다(마운트 1회 + 새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 조기 return 위.
  * ⚠ 못 읽은 값은 '—'(0 이 아니다) · 두 수는 같은 VM 을 다른 방법으로 센 것이라 더하지 않는다.
  */
@@ -89,7 +89,8 @@ export default function BackupSummaryTool() {
     <div data-backup-summary="" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>백업 서머리</div>
+          <div className="muted" style={{ fontSize: 13 }}>Veeam 현황</div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>Summary</div>
           <div className="muted" style={{ fontSize: 13 }}>vCenter {fmtNum(t.vcenters)}개 — Veeam 서버가 아는 백업과 vCenter 스냅샷으로 본 백업 흔적을 나란히 봅니다.</div>
         </div>
         <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center' }}>
@@ -123,7 +124,7 @@ export default function BackupSummaryTool() {
           {mk.need > 0 && <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: mk.needGap > 0 ? TONE.bad : 'var(--text-dim)' }}>그중 Veeam 백업 안 보임 <b>{fmtNum(mk.needGap)}</b>{mk.needGapUnknown ? <span className="muted"> (Veeam 확인 불가 {mk.needGapUnknown}곳 제외)</span> : null}</span>}
           {mkNote
             ? <span style={{ flexBasis: '100%', fontSize: 12, minWidth: 0, overflowWrap: 'anywhere', color: mkNote.tone === 'bad' ? TONE.bad : '#fcd34d' }}>{mkNote.text}</span>
-            : <span className="muted" style={{ fontSize: 12, marginLeft: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>백업 세부내용에서 VM 마다 정합니다</span>}
+            : <span className="muted" style={{ fontSize: 12, marginLeft: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>Detail 에서 VM 마다 정합니다</span>}
         </div>
       )}
 
@@ -178,7 +179,7 @@ export default function BackupSummaryTool() {
                 return (
                   <tr key={r.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
                     <td data-sort={r.name} style={{ padding: '9px 14px', whiteSpace: 'nowrap' }}>
-                      <button type="button" onClick={() => openDetail(r.id)} title="백업 세부내용으로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
+                      <button type="button" onClick={() => openDetail(r.id)} title="Detail 로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
                       <div className="muted" style={{ fontSize: 11 }}>{isIrs(r.name) ? 'IRS' : '다빈치'}{r.demo ? ' · 데모' : ''}</div>
                     </td>
                     <td data-sort={r.vm} style={{ padding: '9px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.vm)}</td>
@@ -204,7 +205,7 @@ export default function BackupSummaryTool() {
               })}
             </tbody>
           </STable>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>{rows.length}개 중 {shown.length}개 · 제목을 누르면 정렬 · vCenter 이름을 누르면 백업 세부내용</div>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>{rows.length}개 중 {shown.length}개 · 제목을 누르면 정렬 · vCenter 이름을 누르면 Detail</div>
         </div>
 
         {/* v2.780.1: 옆 칸 240px — 1440px 에서 표 카드가 열 10개를 가로 스크롤 없이 담게(280px 이면 표가 약 35px 넘쳤다 · 실측) */}
