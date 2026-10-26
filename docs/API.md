@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1057개** |
+| 엔드포인트 | **1059개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 107개 |
 | GET | 572개 |
-| POST | 325개 |
+| POST | 327개 |
 | PUT | 104개 |
 | PATCH | 2개 |
 | DELETE | 54개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 486 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 488 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -773,13 +773,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:151](../server/src/routes/api/inventory.js#L151) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:630](../server/src/routes/api/inventory.js#L630) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:626](../server/src/routes/api/inventory.js#L626) |
-| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:617](../server/src/routes/api/veeam.js#L617) |
-| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:689](../server/src/routes/api/veeam.js#L689) |
-| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:632](../server/src/routes/api/veeam.js#L632) |
-| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:578](../server/src/routes/api/veeam.js#L578) |
-| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:587](../server/src/routes/api/veeam.js#L587) |
-| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:564](../server/src/routes/api/veeam.js#L564) |
-| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:665](../server/src/routes/api/veeam.js#L665) |
+| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:704](../server/src/routes/api/veeam.js#L704) |
+| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:776](../server/src/routes/api/veeam.js#L776) |
+| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:719](../server/src/routes/api/veeam.js#L719) |
+| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:665](../server/src/routes/api/veeam.js#L665) |
+| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:674](../server/src/routes/api/veeam.js#L674) |
+| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:651](../server/src/routes/api/veeam.js#L651) |
+| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:752](../server/src/routes/api/veeam.js#L752) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:26](../server/src/routes/api/bmstor.js#L26) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:143](../server/src/routes/api/bmstor.js#L143) |
 | GET | `/tools/bm-storage/export.csv` | 역할 `admin` · `csvPerm` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:87](../server/src/routes/api/bmstor.js#L87) |
@@ -1200,10 +1200,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:790](../server/src/routes/api/toolsCapacity.js#L790) |
-| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:281](../server/src/routes/api/veeam.js#L281) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:247](../server/src/routes/api/veeam.js#L247) |
-| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:266](../server/src/routes/api/veeam.js#L266) |
-| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:330](../server/src/routes/api/veeam.js#L330) |
+| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:302](../server/src/routes/api/veeam.js#L302) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:250](../server/src/routes/api/veeam.js#L250) |
+| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:269](../server/src/routes/api/veeam.js#L269) |
+| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:351](../server/src/routes/api/veeam.js#L351) |
+| POST | `/veeam/vm-list.csv` | 권한 `data.csv` | [server/src/routes/api/veeam.js:291](../server/src/routes/api/veeam.js#L291) |
+| POST | `/veeam/vm-list.xlsx` | 권한 `data.csv` | [server/src/routes/api/veeam.js:297](../server/src/routes/api/veeam.js#L297) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:392](../server/src/routes/api/inventory.js#L392) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |

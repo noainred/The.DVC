@@ -261,3 +261,23 @@
 - **v2.771(점검 R6-F3)**: SOAP → REST 폴백은 **능력 부재의 증거**가 있을 때만(vim fault 는 MethodNotFound·NotSupported·NotImplemented 만, 그 밖의 vim fault 는 던져 lastGood 이월 — `soapFallbackAllowed`).
   VM 장치 조회 실패는 `vmGpuUnknown` 표지 + 직전 vm.gpu 이월(`carryVmGpu`) · 점검중 분기도 보존 창 안의 lastGood 을 싣는다(stale) · 위임 병합은 엣지 stale 을 보존(`edgeStale`)·공개 API 수집 시각 = min(receivedAt, staleSince).
   /summary 의 vCPU/코어·RAM 할당률은 용량 미상 호스트가 있으면 null + `hostsCapacityUnknown`. 남김: 재시작 직후(직전 스냅샷 없음) vmGpuUnknown 표지를 소비처(overview gpuVms·hardwareGpu·gpu/poller)가 아직 읽지 않는다.
+
+- **v2.792 — vCenter › VM 및 폴더 'VM 목록 CSV · 엑셀(폴더 트리)'(Veeam·스냅샷 포함). 판정은 새로 만들지 않는다 — '백업 세부내용' 과 같은 `vcBackup → vmBackupView`, 한 칸 판단은 `backupStatus.backupVerdict`(= `viewClass`)**
+  (사용자 요청 "vm 폴더에서 vm list export 할때 Veeam 백업여부, 백업여부 판단할 수 있는 snapshot 포함여부 포함해서 csv export" · 선택 '화면 기준 전체' · 표준 검증. 회귀 `server/test/vmListCsv2792.test.js` + 웹 `vcdVmList.test.js`):
+  · `POST /veeam/vm-list.csv?vcenterId=`(읽기 POST — 본문에 화면 VM id) · 게이트 `requirePerm('data.csv')`(관리자 전용 · 웹 canCsv 와 같은 판정) · 조회 범위 밖 404(`vcOf`) ·
+    받은 id ∩ 그 vCenter 인벤토리(남의 vCenter id 는 빠진다) · id 없으면 전체(`power:'noOff'` = 화면 visibleVms 와 같은 꺼진 VM 제외) · 상한 `VM_LIST_MAX_IDS`(2만 — /api 본문 1MB 안) 400 ·
+    동시 1건(`exportBusy`) · 감사(대수만). 사람이 정한 표시(중요도·메모)는 백업 세부내용 도구 데이터라 싣지 않는다.
+  · 열은 `veeam/vmListCsv.js` 하나: Veeam 상태는 '백업 대상·백업 중·대기·없음·연동 없음·모름' 을 나누고(모름 ≠ 없음), 스냅샷은 ① 지금 Veeam 임시 스냅샷(하루 넘으면 '잔존' 따로 — 백업 흔적으로 치지 않는다)
+    ② 최근 N일 Veeam 계정 스냅샷 이벤트(모르면 '모름') ③ VM 의 전체 스냅샷(수·크기·최근·이름 — 사람이 만든 것 포함)을 따로 싣는다. 시각은 포탈 시각(머리에 UTC 오프셋).
+  · 웹은 판정하지 않는다 — 보이는 VM(검색 중이면 일치 VM) id 만 보낸다(`vcdVmList.vmListRequest`). 검색 결과가 상한을 넘으면 잘라 보내지 않고 거절한다.
+  · **엑셀(같은 대상·판정·게이트 — `POST /veeam/vm-list.xlsx`, 시안 https://claude.ai/artifact/MENTpVFxe9D4Y4XgAazpBg 승인 · 회귀 `vmListXlsx2792.test.js`)**: `veeam/vmListXlsx.js` —
+    요약 · VM 목록(폴더 트리) · 데이터(행 단위 = CSV 와 같은 `vmListColumns`) · 읽는 법. 폴더 트리는 **엑셀 개요(행 그룹)** 로 접는다 — `outlineProperties.summaryBelow=false`
+    (폴더 행이 하위 행 위 — 기본값(아래)이면 −/+ 가 엉뚱한 행에 붙는다) · 단계 = 폴더 깊이, **7 상한**(엑셀 한계 — 더 깊으면 7에 모이고 들여쓰기·'폴더 경로' 는 그대로).
+    들여쓰기는 `alignment.indent` 에 **`horizontal:'left'` 를 같이** 줘야 적용된다(빠지면 엑셀·LibreOffice 가 무시 — 렌더 판독에서 확인). 폴더 행 수는 하위 포함 합계,
+    Veeam 백업률 = Veeam 백업 ÷ **Veeam 상태를 아는 VM**(연동 없음·아는 VM 0대면 '—', 0% 아님). '먼저 볼 VM' 은 켜진 VM 의 확인 안 됨·모름 + 잔존(전원 무관), 템플릿·vCLS 제외.
+    **워커에서 만든다**(`renderVmListWorkbook` — 2만 대를 메인에서 만들면 약 7초·최대 정지 5초, 워커는 최대 정지 62ms · 작성 중 실측) · 워커로는 열이 쓰는 인벤토리 필드만(`slimVmRows`).
+    끄는 길 env `VM_LIST_XLSX_WORKER=0` · 시한 `VM_LIST_XLSX_TIMEOUT_MS`(기본 3분 = 웹 내려받기 시한). CSV 도 요청 경로에서 조각으로 만든다(`vmListCsvAsync` — 2만 대 약 130ms).
+  · 폴더는 '폴더 1~N단계'(가장 깊은 VM 기준) + '폴더 경로' 열(`vmListCsv.folderParts` — 화면 `buildFolderTree` 와 같은 규칙: '/' 로 나누고 숨은 'vm' 을 뺀다). 열 수가 파일마다 다르니 **테스트는 그 파일의 머리로 열을 찾는다**.
+  · **행 순서는 하나**(`vmListCsv.vmTreeCmp` — 라우트·엑셀 트리·데이터 시트·CSV 공용): 폴더는 화면 트리와 같은 **코드 단위 순서**(`Object.keys().sort()` — 'DMZ' < 'Dev'),
+    같은 단계에서는 하위 폴더 먼저 그다음 직속 VM(이름 자연 순서). 검증 지적 2건(엑셀 폴더 순서 ≠ 화면 · CSV 경로 문자열 순 ≠ 데이터 시트)을 이것으로 맞췄다 — 라우트 정렬을 되돌리면 테스트가 깨진다.
+  · 본문 `view`(search·all·noOff)는 **이름표일 뿐**(파일 이름·엑셀 '화면 조건') — 대상은 ids/power 로만 고른다. 모르는 값은 무시(검증 지적: 세 조건의 파일 이름이 같았다).

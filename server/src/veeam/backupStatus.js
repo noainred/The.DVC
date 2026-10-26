@@ -216,6 +216,30 @@ export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
     crit: ['high', 'mid', 'low'].includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
   };
 }
+/*
+ * v2.792(사용자 요청 "vCenter 화면 VM 폴더에서 VM list export 할 때 Veeam 백업여부, 백업여부 판단할 수 있는 snapshot 포함여부"):
+ *   VM 한 대의 **백업 판단 한 칸**(순수). 새 판정이 아니다 — viewClass(세부내용 '보기' 필터와 같은 분류)를 사람이 읽는 말로 옮긴다.
+ *   · veeam    = Veeam 백업 대상(작업에 들었거나 복원 지점 있음 — VM 화면 Veeam 배지와 같은 기준)
+ *   · snap     = Veeam 대상은 아니라고 확인됐는데 vCenter 스냅샷·이벤트로 백업 흔적이 있다(세부내용 'snaponly')
+ *   · snap-unlinked = Veeam 서버가 연결돼 있지 않아 스냅샷·이벤트로만 본 흔적
+ *   · snap-vunknown = 스냅샷 흔적은 있는데 Veeam 쪽을 모른다(읽기 실패·첫 수집 전)
+ *   · none     = Veeam·스냅샷 둘 다 확인했고 둘 다 흔적이 없다(세부내용 'none' — 백업이 없다는 단정이 아니라 '확인 안 됨')
+ *   · unknown  = 어느 한쪽을 몰라 판단할 수 없다(0·없음으로 쓰지 않는다)
+ *   하루 넘게 남은 Veeam 임시 스냅샷(잔존)은 viewClass 가 백업 흔적으로 치지 않는다 — 판단에 넣지 않고 따로 표시한다.
+ */
+export const VERDICT_TEXT = Object.freeze({
+  veeam: 'Veeam 백업', snap: '스냅샷 흔적만(Veeam 대상 아님)', 'snap-unlinked': '스냅샷 흔적(Veeam 연동 없음)',
+  'snap-vunknown': '스냅샷 흔적(Veeam 모름)', none: '확인 안 됨', unknown: '모름',
+});
+export function backupVerdict(vm, { linked = true } = {}) {
+  const c = viewClass(vm);
+  let code;
+  if (c.veeam) code = 'veeam';
+  else if (c.snap) code = !linked ? 'snap-unlinked' : c.vKnown ? 'snap' : 'snap-vunknown';
+  else code = c.vKnown && c.sKnown ? 'none' : 'unknown';
+  return { code, text: VERDICT_TEXT[code] };
+}
+
 export function vmViewMatches(vm, f, opts) {
   const c = viewClass(vm, opts);
   if (f === 'veeam') return c.veeam;
