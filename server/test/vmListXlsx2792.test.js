@@ -102,6 +102,19 @@ test('① 순수 워크북 — 폴더 트리·개요·색·데이터 시트 = CS
   assert.ok(ds.autoFilter, '자동 필터');
   const iVm = csv[0].indexOf('VM');
   const dsByName = new Map(); for (let r = 2; r <= ds.rowCount; r++) { const v = ds.getRow(r).values.slice(1); dsByName.set(v[iVm], v); }
+  // 행 순서도 같다 — 검증 지적: CSV 는 경로 문자열 순, 데이터 시트는 트리 순이라 VM 과 하위 폴더가 함께 있는 폴더(Production)에서 어긋났다
+  const csvOrder = csv.slice(1).map((c) => c[iVm].replace(/^'/, ''));
+  const dsOrder = []; for (let r = 2; r <= ds.rowCount; r++) dsOrder.push(ds.getRow(r).values[iVm + 1]);
+  const routeOrder = [...rows].sort((a, b) => L.vmTreeCmp(a.view, b.view)).map((r) => r.view.name);   // 라우트가 CSV 에 넘기는 순서
+  const csvRoute = parseCsvRows(L.vmListCsv({ vcName: 'v', rows: [...rows].sort((a, b) => L.vmTreeCmp(a.view, b.view)), linked: true }).replace(/^﻿/, '')).slice(1).map((c) => c[iVm].replace(/^'/, ''));
+  assert.deepEqual(dsOrder, routeOrder, '데이터 시트 = 트리 순서');
+  assert.deepEqual(csvRoute, dsOrder, '라우트 순서의 CSV = 데이터 시트 순서');
+  assert.ok(dsOrder.indexOf('web-01') < dsOrder.indexOf('batch'), '하위 폴더(Web) VM 이 그 폴더(Production) 직속 VM 보다 먼저');
+  assert.ok(csvOrder.length === dsOrder.length);
+  // 폴더 이름은 화면 트리와 같은 코드 단위 순서('DMZ' < 'Dev' — Object.keys().sort())
+  assert.ok(L.vmTreeCmp({ folder: 'DMZ', name: 'z' }, { folder: 'Dev', name: 'a' }) < 0);
+  assert.ok(L.vmTreeCmp({ folder: 'A', name: 'vm2' }, { folder: 'A', name: 'vm10' }) < 0, 'VM 은 자연 순서');
+  assert.deepEqual(['Dev', 'Discovered virtual machine', 'DMZ'].sort(L.folderNameCmp), ['DMZ', 'Dev', 'Discovered virtual machine']);
   for (const c of csv.slice(1)) {
     const name = c[iVm].replace(/^'/, '');   // CSV 는 수식 가드(') — 엑셀은 문자열 칸이라 붙이지 않는다
     const x = dsByName.get(name);
@@ -159,6 +172,7 @@ test('③ 실제 라우트 — 엑셀 200 · 파일 이름 · 409 · operator 40
     { id: `${VC}:vm-1`, vcenterId: VC, name: 'web01', folder: 'Production/Web', powerState: 'POWERED_ON', snapshotCount: 0 },
     { id: `${VC}:vm-2`, vcenterId: VC, name: 'db01', folder: 'Production/DB', powerState: 'POWERED_ON', snapshotCount: 1, veeamSnaps: 1, veeamSnapTs: AT - H },
     { id: `${VC}:vm-3`, vcenterId: VC, name: 'old01', folder: 'vm', powerState: 'POWERED_OFF' },
+    { id: `${VC}:vm-4`, vcenterId: VC, name: 'batch01', folder: 'Production', powerState: 'POWERED_ON' },   // 하위 폴더와 같은 폴더의 직속 VM
   ] };
   let user = { username: 'adm', role: 'admin', scope: {} };
   const app = express();
@@ -181,6 +195,11 @@ test('③ 실제 라우트 — 엑셀 200 · 파일 이름 · 409 · operator 40
     assert.match(sub, /Veeam: 연결됨\(서버 1대\)/);
     const names = []; wb.getWorksheet('VM 목록(폴더 트리)').eachRow((row, n) => { if (n > 3) names.push(String(text(row.getCell(1)))); });
     assert.deepEqual(names, ['📁 Production  (2)', '📁 DB  (1)', 'db01', '📁 Web  (1)', 'web01']);
+
+    // CSV 도 트리 순서 — 하위 폴더(DB·Web)의 VM 이 Production 직속 VM 보다 먼저, 최상위 VM 은 맨 뒤(옛 경로 문자열 순이면 batch01 이 먼저였다)
+    const rc = await fetch(`${base}/veeam/vm-list.csv?vcenterId=${encodeURIComponent(VC)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const ct = parseCsvRows((await rc.text()).replace(/^﻿/, ''));
+    assert.deepEqual(ct.slice(1).map((x) => x[ct[0].indexOf('VM')]), ['db01', 'web01', 'batch01', 'old01']);
 
     r = await post({ power: 'noOff' });
     assert.match(r.headers.get('content-disposition'), /-poweredon-\d{8}-\d{4}\.xlsx"/);

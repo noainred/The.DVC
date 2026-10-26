@@ -28,6 +28,21 @@ export const VM_LIST_MAX_IDS = 20_000;
 export function folderParts(folder) {
   return String(folder || 'vm').split('/').filter((p) => p && p !== 'vm');
 }
+/** 폴더 이름 비교 — 화면 트리(web VCenterDetail FolderNodes 의 Object.keys().sort())와 같은 **코드 단위 순서**('DMZ' < 'Dev'). */
+export const folderNameCmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const nameCmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'en', { numeric: true });
+/**
+ * VM 순서(트리를 위에서부터 읽은 순서) — 엑셀 폴더 트리·데이터 시트와 CSV 가 같은 순서를 쓴다(검증 지적: CSV 는 경로 문자열 순이라
+ * 한 폴더에 VM 과 하위 폴더가 함께 있으면 둘의 행 순서가 달랐다). 같은 단계에서는 **하위 폴더 먼저, 그다음 그 폴더의 VM**(이름 순 — 'vm2' < 'vm10').
+ * @param {{folder?:string, name?:string}} a  인벤토리 VM 또는 vmBackupView
+ */
+export function vmTreeCmp(a, b) {
+  const pa = folderParts(a?.folder); const pb = folderParts(b?.folder);
+  const n = Math.min(pa.length, pb.length);
+  for (let i = 0; i < n; i++) { const c = folderNameCmp(pa[i], pb[i]); if (c) return c; }
+  if (pa.length !== pb.length) return pa.length > pb.length ? -1 : 1;   // 더 깊은 쪽(하위 폴더 안)이 먼저
+  return nameCmp(a?.name, b?.name);
+}
 /** 폴더 단계 열 수 — 가장 깊은 VM 에 맞춘다(최소 1 · 수집기 경로 상한 32). */
 export function folderLevels(rows) {
   let n = 1;

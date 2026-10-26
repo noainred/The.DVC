@@ -21,7 +21,7 @@ import ExcelJS from 'exceljs';
 import { deadlineMs } from '../util/deadline.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { backupVerdict, isSystemVm } from './backupStatus.js';
-import { vmListColumns, folderParts, folderLevels, offsetLabel, veeamStateText } from './vmListCsv.js';
+import { vmListColumns, folderParts, folderLevels, offsetLabel, veeamStateText, folderNameCmp, vmTreeCmp } from './vmListCsv.js';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const VM_XLSX_SHEETS = Object.freeze(['요약', 'VM 목록(폴더 트리)', '데이터(행 단위)', '읽는 법']);
@@ -51,7 +51,6 @@ const KPI_COLOR = Object.freeze({ vm: 'FF1E3A5F', veeam: 'FF22A05A', snap: 'FF3B
 const POWER_TEXT = Object.freeze({ POWERED_ON: '켜짐', POWERED_OFF: '꺼짐', SUSPENDED: '일시 중지' });
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const yieldLoop = () => new Promise((r) => setImmediate(r));
-const cmp = (a, b) => String(a).localeCompare(String(b), 'en', { numeric: true });
 
 /** 막대 글자 — '███████░░░' (0~1). 모르면 ''. */
 export function barText(rate, width = 10) {
@@ -73,7 +72,8 @@ function addAgg(a, it) {
 export const veeamRate = (a, linked) => (linked && a.vKnown > 0 ? a.veeam / a.vKnown : null);
 
 /**
- * 폴더 트리(순수) — 하위 폴더 포함 합계. 같은 단계에서는 폴더 먼저(이름 순), 그다음 VM(이름 순) — vSphere·화면 트리와 같은 순서.
+ * 폴더 트리(순수) — 하위 폴더 포함 합계. 같은 단계에서는 폴더 먼저, 그다음 VM — 폴더는 화면 트리와 같은 코드 단위 순서('DMZ' < 'Dev'),
+ * VM 은 이름 순(vmListCsv.vmTreeCmp — CSV 행 순서와 같다).
  * @param {Array<{view:object, inv:object}>} rows
  * @param {{linked:boolean}} o
  */
@@ -98,12 +98,12 @@ export function buildVmTree(rows, { linked = true } = {}) {
 
 /** 트리를 화면 순서로 펼친다 — [{kind:'folder', node} | {kind:'vm', it, depth}]. */
 export function flattenTree(node, out = []) {
-  for (const k of [...node.folders.keys()].sort(cmp)) {
+  for (const k of [...node.folders.keys()].sort(folderNameCmp)) {
     const f = node.folders.get(k);
     out.push({ kind: 'folder', node: f });
     flattenTree(f, out);
   }
-  for (const it of [...node.vms].sort((a, b) => cmp(a.view.name, b.view.name))) out.push({ kind: 'vm', it, depth: node.depth + 1 });
+  for (const it of [...node.vms].sort((a, b) => vmTreeCmp(a.view, b.view))) out.push({ kind: 'vm', it, depth: node.depth + 1 });
   return out;
 }
 
@@ -126,7 +126,7 @@ function tempSnapText(now, offsetMin, at) {
 
 /**
  * '먼저 볼 VM'(순수) — 잔존 스냅샷(전원 무관) · 켜진 VM 의 확인 안 됨 · 켜진 VM 의 모름. 템플릿·vCLS 는 백업 대상이 아니라 뺀다(세부내용 '제외' 와 같은 기준).
- * 순서: 확인 안 됨 → 잔존 스냅샷 → 모름(시안 순서), 같은 묶음 안에서는 폴더 경로 · 이름 순.
+ * 순서: 확인 안 됨 → 잔존 스냅샷 → 모름(시안 순서), 같은 묶음 안에서는 트리 순서(vmTreeCmp).
  */
 export function watchList(items, { snapDays = 7, at = Date.now() } = {}) {
   const out = [];
@@ -149,7 +149,7 @@ export function watchList(items, { snapDays = 7, at = Date.now() } = {}) {
     if (tag) out.push({ tag, why, it });
   }
   const rank = { '확인 안 됨': 0, '잔존 스냅샷': 1, 모름: 2 };
-  out.sort((a, b) => rank[a.tag] - rank[b.tag] || cmp(a.it.parts.join('/'), b.it.parts.join('/')) || cmp(a.it.view.name, b.it.view.name));
+  out.sort((a, b) => rank[a.tag] - rank[b.tag] || vmTreeCmp(a.it.view, b.it.view));
   return out;
 }
 

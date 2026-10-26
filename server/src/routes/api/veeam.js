@@ -26,7 +26,7 @@ import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
 import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
-import { vmListCsvAsync, VM_LIST_MAX_IDS } from '../../veeam/vmListCsv.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
+import { vmListCsvAsync, vmTreeCmp, VM_LIST_MAX_IDS } from '../../veeam/vmListCsv.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
 import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
@@ -463,8 +463,8 @@ async function vmListExport(req, res, kind) {
     const snapKnown = b.row.snap != null;
     const now = Date.now();
     const maybeYield = createYielder(15);
-    const list = b.scopedVms.filter((vm) => (ids ? ids.has(vm.id) : !(noOff && vm.powerState === 'POWERED_OFF')))
-      .sort((a, c) => String(a.folder || '').localeCompare(String(c.folder || ''), 'en', { numeric: true }) || String(a.name || '').localeCompare(String(c.name || ''), 'en', { numeric: true }));
+    // 순서는 트리를 위에서부터 읽은 순서(vmTreeCmp — 엑셀 폴더 트리·데이터 시트와 같다)
+    const list = b.scopedVms.filter((vm) => (ids ? ids.has(vm.id) : !(noOff && vm.powerState === 'POWERED_OFF'))).sort(vmTreeCmp);
     const rows = [];
     for (const vm of list) {
       await maybeYield();
