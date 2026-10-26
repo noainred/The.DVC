@@ -11,7 +11,7 @@ import { mountLabel, MOUNTS_MASKED_NOTE, showMountsMaskedNote } from './vmCloneM
 import Select from '../../components/Select.jsx';
 import {
   kpisOf, corpCards, lastRunTones, jobState, execText, cloneBytes, fmtBytes, lastVerify, recentSessions, storageRows,
-  capacityEstimate, agoText, durText, KIND_LABEL, keepText,
+  capacityEstimate, agoText, durText, KIND_LABEL, keepText, rpoText, rpoOverdueCount,
 } from './vmCloneView.js';
 import VmCloneJobDetail from './VmCloneJobDetail.jsx';
 import VmCloneRestore from './VmCloneRestore.jsx';
@@ -128,6 +128,10 @@ export default function VmCloneTool() {
         </div>
       </div>
 
+      {rpoOverdueCount(jobs) > 0 && (
+        <div className="vbk-note" role="status">RPO 초과 잡 {rpoOverdueCount(jobs)}개 — 마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다. 실행이 멈췄거나(엣지 중단·담당 미확정) 매번 건너뛰고 있는지 잡 표의 해당 줄을 확인하세요.</div>
+      )}
+
       {cards.length > 0 && (
         <div>
           <div className="vbk-sec" style={{ marginBottom: 8 }}>법인별 현황 <small>법인 = vCenter 를 수집하는 엣지 · 엣지 위임 vCenter 의 백업은 그 엣지가 실행합니다</small></div>
@@ -212,6 +216,7 @@ export default function VmCloneTool() {
                         <td style={{ fontSize: 12.5 }}>
                           <div>{scheduleText(j.schedule)}</div>
                           {mark && <div style={{ fontSize: 11.5, color: `var(--${mark.tone})` }} title={j.lastRun.detail}>{mark.icon} {agoText(j.lastRun.at, now)}</div>}
+                          {rpoText(j.rpo, now) && <div style={{ fontSize: 11.5, color: 'var(--amber)', fontWeight: 600 }} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다">⏰ {rpoText(j.rpo, now)}</div>}
                         </td>
                         <td><span className="vbk-runs" aria-label="최근 14회 실행 결과">{lastRunTones(j, 14).map((t, i) => <i key={i} className={t} title={t} />)}</span></td>
                         <td style={{ textAlign: 'right' }} data-sort={(j.clones || []).length}>

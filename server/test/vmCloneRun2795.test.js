@@ -200,3 +200,45 @@ test('G1: waitTask onProgress — 진행 중 퍼센트를 알린다(표시용 �
   const r = await waitTask(c, 'task-1', { pollMs: 1, onProgress: (p) => { seen.push(p); throw new Error('표시 오류'); } });
   assert.equal(r.result, 'vm-7'); assert.deepEqual(seen, [42]);
 });
+
+/* ── 3회차: RPO 초과(아예 돌지 않는 잡) ───────────────────────────────── */
+
+test('R1: rpoOf — 매일=24h·간격=N시간 × 2 + 1h · 건너뜀·검증 줄은 성공으로 보지 않는다 · 수동·꺼짐·멈춤·모름은 null', async () => {
+  const { rpoOf, lastSuccessAt, RPO_GRACE_MS } = await import('../src/vmclone/rpo.js');
+  const H = 3_600_000; const now = Date.UTC(2026, 9, 27);
+  const daily = { enabled: true, schedule: { mode: 'daily', time: '02:00' }, createdAt: now - 100 * H };
+  assert.equal(rpoOf({ ...daily, history: [{ at: now - 48 * H, kind: 'backup', ok: true }] }, now).overdue, false, '48h — 한계(49h) 안');
+  const r = rpoOf({ ...daily, history: [{ at: now - 50 * H, kind: 'backup', ok: true }, { at: now - 1 * H, kind: 'backup', ok: false, skipped: 'auth-stopped' }, { at: now - 2 * H, kind: 'verify', ok: true }] }, now);
+  assert.equal(r.overdue, true); assert.equal(r.lastOkAt, now - 50 * H); assert.equal(r.limitMs, 48 * H + RPO_GRACE_MS);
+  assert.equal(rpoOf({ enabled: true, schedule: { mode: 'interval', hours: 6 }, createdAt: now - 14 * H, history: [] }, now).overdue, true, '성공 없음 — 만든 시각부터 센다(13h 한계)');
+  assert.equal(rpoOf({ ...daily, schedule: { mode: 'manual' } }, now), null);
+  assert.equal(rpoOf({ ...daily, enabled: false }, now), null);
+  assert.equal(rpoOf({ ...daily, suspended: '담당 변경' }, now), null);
+  assert.equal(rpoOf({ enabled: true, schedule: { mode: 'daily', time: '02:00' } }, now), null, '성공도 생성 시각도 모르면 판정하지 않는다');
+  assert.equal(lastSuccessAt({ lastRun: { at: 5, ok: true }, history: [{ at: 3, ok: true }] }), 5);
+});
+
+test('R2: collectRpoAlerts — 잡마다 한 번 · 같은 마지막 성공이면 다시 알리지 않는다 · 풀리면 clear · 데모 잡 제외', async () => {
+  const { collectRpoAlerts, sourcesOf } = await import('../src/vmclone/notify.js');
+  const H = 3_600_000; const now = Date.UTC(2026, 9, 27);
+  const jobs = [
+    { id: 'j1', vmName: 'web01', vcenterId: 'vcA', enabled: true, schedule: { mode: 'daily', time: '02:00' }, createdAt: now - 200 * H, history: [{ at: now - 60 * H, kind: 'backup', ok: true }] },
+    { id: 'j2', vmName: 'db01', vcenterId: 'vcA', enabled: true, schedule: { mode: 'daily', time: '02:00' }, createdAt: now - 200 * H, history: [{ at: now - 2 * H, kind: 'backup', ok: true }] },
+    { id: 'j3', vmName: 'demo', vcenterId: 'vcA', enabled: true, demo: true, schedule: { mode: 'daily', time: '02:00' }, createdAt: now - 200 * H, history: [] },
+  ];
+  const src = sourcesOf(jobs, []);
+  const a = collectRpoAlerts(src, { rpo: {} }, now);
+  assert.deepEqual(a.rows.map((r) => r.jobId), ['j1']); assert.match(a.rows[0].detail, /기대 주기 24시간의 2배/); assert.equal(a.rows[0].kind, 'RPO 초과');
+  const b = collectRpoAlerts(src, { rpo: a.marks }, now + H);
+  assert.equal(b.rows.length, 0, '같은 에피소드는 다시 알리지 않는다');
+  const healed = sourcesOf([{ ...jobs[0], history: [...jobs[0].history, { at: now, kind: 'backup', ok: true }] }], []);
+  assert.deepEqual(collectRpoAlerts(healed, { rpo: a.marks }, now + H).clear, ['j1']);
+});
+
+test('R3: 화면 RPO — 엣지 이력 시각은 수신 시각으로 잘라 판정한다(시계가 앞선 엣지가 초과를 가리지 않게)', async () => {
+  const { jobRpoView } = await import('../src/routes/api/vmClone.js');
+  const H = 3_600_000; const now = Date.UTC(2026, 9, 27);
+  const v = { enabled: true, schedule: { mode: 'daily', time: '02:00' }, createdAt: now - 500 * H, history: [{ at: now + 100 * H, kind: 'backup', ok: true }], lastRun: null };
+  assert.equal(jobRpoView(v, { at: now - 60 * H }, now).overdue, true, '엣지 보고가 60시간 전이면 그 뒤 성공은 알 수 없다');
+  assert.equal(jobRpoView(v, null, now).overdue, false, '로컬 잡은 그대로');
+});

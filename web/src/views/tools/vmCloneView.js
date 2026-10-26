@@ -250,3 +250,13 @@ export function historyCsv(job, list) {
   ]);
   return [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
 }
+
+/**
+ * v2.795 RPO 초과 문구(서버 판정 jobs[].rpo 를 그대로 보여 준다 — 판정은 server/src/vmclone/rpo.js 하나). 초과가 아니면 ''.
+ */
+export function rpoText(rpo, now = Date.now()) {
+  if (!rpo?.overdue) return '';
+  const h = Math.round((Number(rpo.intervalMs) || 0) / 3_600_000);
+  return rpo.lastOkAt ? `RPO 초과 · 마지막 성공 ${agoText(rpo.lastOkAt, now)}${h ? `(주기 ${h}시간)` : ''}` : `RPO 초과 · 성공한 백업 없음${h ? `(주기 ${h}시간)` : ''}`;
+}
+export const rpoOverdueCount = (jobs) => (Array.isArray(jobs) ? jobs : []).filter((j) => j?.rpo?.overdue).length;
