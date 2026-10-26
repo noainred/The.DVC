@@ -98,11 +98,15 @@ export async function parentFolderOf(c, vmRef) {
  * 스냅샷 시점 클론 → 새 VM MoRef. dsRef 지정 시 다른 데이터스토어로(요구사항 핵심).
  * powerOn=false 고정 — 사본이 켜지면 원본과 IP/호스트명 충돌(복제 Q&A 에서 안내한 리스크).
  */
-export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null }) {
+// v2.794: configXml — VirtualMachineConfigSpec 내부(호출부가 만든 XML · 예: nicDisconnectSpec 의 deviceChange). 복구 VM 을 **NIC 가 끊긴 채로 태어나게**
+//   한다 — 클론 뒤에 끊으면 그 사이(클론 태스크 시한 초과로 결과를 못 받은 경우 포함) 연결된 NIC 의 사본이 vCenter 에 생긴다.
+//   vim25 VirtualMachineCloneSpec 순서: location · template · config · customization · powerOn · snapshot · memory.
+export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null, configXml = '' }) {
   const spec =
     `<spec>` +
     `<location>${dsRef ? `<datastore type="Datastore">${esc(dsRef)}</datastore>` : ''}</location>` +
     `<template>false</template>` +
+    (configXml ? `<config>${configXml}</config>` : '') +
     `<powerOn>false</powerOn>` +
     (snapshotRef ? `<snapshot type="VirtualMachineSnapshot">${esc(snapshotRef)}</snapshot>` : '') +
     `</spec>`;
@@ -299,7 +303,8 @@ export async function reconfigVm(c, vmRef, specInnerXml, { label = 'VM 재구성
 export async function disconnectAllNics(c, vmRef) {
   const st = await vmStateOf(c, vmRef);
   const { specXml, count } = nicDisconnectSpec(st.deviceXml);
-  if (count) await reconfigVm(c, vmRef, specXml, { label: '네트워크 카드 연결 끊기' });
+  // v2.794: 이미 끊겨 태어난 VM(복구 — cloneFromSnapshot configXml)은 다시 재구성하지 않는다. 확인(다시 읽기)은 그대로 한다.
+  if (count && !allNicsDisconnected(st.deviceXml)) await reconfigVm(c, vmRef, specXml, { label: '네트워크 카드 연결 끊기' });
   const after = await vmStateOf(c, vmRef);
   if (!allNicsDisconnected(after.deviceXml)) throw new Error('네트워크 카드 연결을 끊었는지 확인하지 못했습니다 — 안전을 위해 이 VM 을 켜지 않습니다');
   return count;

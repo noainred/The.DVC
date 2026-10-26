@@ -3,7 +3,7 @@ import { postJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { mountLabel } from './vmCloneMountText.js';
 import {
-  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL,
+  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL, triggerText,
 } from './vmCloneView.js';
 
 /**
@@ -143,7 +143,7 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
               <button type="button" key={i} className="vbk-sess" style={{ width: '100%', background: sel === h ? 'rgba(59,130,246,.10)' : 'transparent', border: 0, borderTop: i ? '1px solid var(--border-soft)' : 0, color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }} onClick={() => setSel(h)}>
                 <span className={`vbk-dot ${runTone(h)}`} style={{ marginTop: 5 }} />
                 <div>
-                  <div className="flex between" style={{ gap: 8 }}><b>{KIND_LABEL[h.kind || 'backup']}{h.trigger ? <span className="muted" style={{ fontWeight: 400 }}> · {h.trigger === 'schedule' ? '스케줄' : h.trigger === 'auto' ? '자동' : h.trigger === 'manual' ? '수동' : h.trigger}</span> : null}</b><span className="t">{fmtAt(h.at)}</span></div>
+                  <div className="flex between" style={{ gap: 8 }}><b>{KIND_LABEL[h.kind || 'backup']}{h.trigger ? <span className="muted" style={{ fontWeight: 400 }}> · {triggerText(h.trigger)}</span> : null}</b><span className="t">{fmtAt(h.at)}</span></div>
                   <div className="d">{h.detail}{h.ms ? ` · ${durText(h.ms)}` : ''}</div>
                 </div>
               </button>

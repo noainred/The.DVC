@@ -181,6 +181,9 @@ export function recentSessions(jobs, ops, limit = 8) {
 }
 
 export const KIND_LABEL = Object.freeze({ backup: '백업', verify: '검증', restore: '복구', run: '지금 실행', 'nfsds-attach': 'NFS 연결' });
+/** 실행 사유 표시 — 모르는 값은 그대로(지어내지 않는다). */
+export const TRIGGER_LABEL = Object.freeze({ schedule: '스케줄', auto: '자동', manual: '수동', resume: '재시작 뒤 재실행', restart: '재시작 정리' });
+export const triggerText = (t) => TRIGGER_LABEL[t] || String(t || '');
 
 /** 저장 위치별 사용량 — 잡 대상(데이터스토어 이름·엣지 마운트) 별 사본 바이트 합 + 인벤토리 용량. */
 export function storageRows(jobs, datastores, nfsDs) {
