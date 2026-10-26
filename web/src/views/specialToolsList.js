@@ -16,7 +16,7 @@ export const TOOLS = [
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
   { k: 'secret-scan', icon: '🔐', label: '평문 자격증명 점검', desc: '설정 파일·portal.env·로그·소스에 평문으로 남은 계정정보/토큰/키 탐지(값은 마스킹) · 암호화 저장 전환 안내', adminOnly: true },
   { k: 'codex-check', icon: '🛡️', label: '보안점검', desc: '프로그램 보안·완성도 점검 리포트 — 외부 전수 점검 결과 + 실시간 지표 · Markdown 저장/다운로드', adminOnly: true },
-  { k: 'vm-clone', icon: '🧬', label: 'VM 복제(백업)', desc: 'vCenter별 VM 지정 → 스냅샷 시점 복제(무중단) · 스케줄 정기 실행 · 대상 데이터스토어/NFS 선택 · 최근 N개 보존 · 트리에 Clone 배지', adminOnly: true },
+  { k: 'vm-clone', icon: '🧬', label: 'VM 복제(백업)', desc: 'VM 백업 센터 — 스냅샷 시점 복제(무중단) · 법인(엣지)별 실행 · 복원 지점 · 부팅 검증 · 새 VM 으로 복구 · 법인 저장소(ESXi NFS 데이터스토어·엣지 NFS) · 최근 N개 보존', adminOnly: true },
   { k: 'storage-mon', icon: '🗄️', label: '스토리지 모니터링', desc: '글로벌 법인 스토리지 8종(PowerScale/Isilon·PowerStore·Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node) 사용량·버전·노드 통합 조회 · 용량 시계열/추이 · 엣지 현지 수집→중앙 집계 · 법인별/타입별 뷰', adminOnly: true },
   { k: 'storage-growth', icon: '📈', label: '스토리지 증가량', desc: '임원 보고 형태의 스토리지 증가량 보고서 — 전체/장비별 용량과 1일·1주·1개월·3개월·6개월·1년 증가량 매트릭스 · 증가 단위 GB/TB 전환 · 소진 예상 · 일 단위 추이(기본 5년 보관, 보관 기간 설정 가능)', aka: ['storage-growth', '증가량', '용량 증가', '보고서'], adminOnly: true },
   { k: 'storage-usage', icon: '🧮', label: '스토리지 사용량 보고서', desc: '스토리지 사용량을 일간·주간·월간 표로 — 날짜 행 × 법인 › 장비(Total Usable·Used·Percent) 엑셀형 표가 기본이고 Unity 는 LUN·파일시스템까지 · CSV 2종(표 그대로·행 단위) · 법인별·같은 종류 장비끼리 비교(추이 차트·순위·법인 × 종류) · 정한 요일·시각에 전체 사용량 메일 발송', aka: ['storage-usage', '사용량 보고서', '스토리지 사용량', '주간 사용량', '일간 사용량', 'LUN', '파일시스템', 'CSV', '사용량 메일'], adminOnly: true },

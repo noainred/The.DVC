@@ -52,7 +52,8 @@ export const CATS = Object.freeze([
   // v2.735: 법인 간 전송 속도 측정(중앙이 엣지와 10MB 를 주고받는다)도 회선 감시라 이 칸이다.
   { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
-  { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result)$|^collector:\/edge-log$/ },
+  // v2.793: VM 백업 법인 위임(엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다)도 운영 작업 칸이다.
+  { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result|vm-clone-(sync|report))$|^collector:\/edge-log$/ },
   { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password|central-token)$/ },
 ]);
 

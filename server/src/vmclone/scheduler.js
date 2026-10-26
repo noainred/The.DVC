@@ -12,6 +12,7 @@ import { listJobs, isDue, recoveryDue, markInterruptedRuns } from './store.js';
 import { enqueueRun, runnerStatus } from './runner.js';
 import { ensureVmCloneDemo, isVmCloneDemoJob } from '../mock/demo/vmclone.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.717: 데모(mock) 잡 시드(비어 있을 때만)
+import { loadVcenterConfig } from '../config.js';
 
 let _timer = null;
 let _ticking = false;
@@ -25,17 +26,32 @@ let _demoWarned = false;
  * v2.741(감사 TIMING-01): 재시작으로 중단된 실행이 남은 잡(store.recoveryDue)도 실행한다 — 실행기가 새 스냅샷을 만들기 전에 남은 스냅샷을
  *   지우고 다시 실행한다. 그런 잡은 `resume` 에 id 를 담는다(정규 스케줄 만기가 함께면 정규 실행이다 — 재실행 상한을 적용하지 않는다).
  */
-export function dueJobsOf(jobs, now, { mock = isMockMode() } = {}) {
-  const run = [], skipped = [], resume = [];
+export function dueJobsOf(jobs, now, { mock = isMockMode(), siteVcIds = null } = {}) {
+  const run = [], skipped = [], resume = [], delegated = [];
   for (const j of jobs || []) {
     const due = isDue(j, now);
     const rec = !due && recoveryDue(j, now);
     if (!due && !rec) continue;
+    // v2.793: 이 노드가 엣지에 위임한(site) vCenter 의 잡은 담당 엣지가 자기 스케줄러로 돌린다 — 여기서 넣으면 같은 VM 을 두 노드가
+    //   스냅샷한다(재시작 정리 기록이 남은 잡도 같다 — 그 정리는 로그인할 수 있는 노드의 몫이다).
+    if (siteVcIds && siteVcIds.has(String(j.vcenterId))) { delegated.push(j); continue; }
+    if (j.suspended) { delegated.push(j); continue; }   // 엣지: 중앙이 담당을 거둔 위임 잡(store.suspendDelegated — 반증 검토 F3)
     if (!mock && isVmCloneDemoJob(j)) { skipped.push(j); continue; }
     run.push(j);
     if (rec) resume.push(j.id);
   }
-  return { run, skipped, resume };
+  return { run, skipped, resume, delegated };
+}
+
+/** 이 노드의 vCenter 설정에서 엣지 위임(site) id 집합. 설정을 못 읽으면 null(거르지 않는다 — 실행기가 로그인 전에 다시 본다). */
+export function siteVcenterIds() {
+  try {
+    const out = new Set();
+    // ⚠ collectMode 로 본다 — directCollectSkipReason 은 disabled·maintenance 를 'site' 보다 먼저 돌려줘 점검중·꺼진 위임 vCenter 를
+    //   위임으로 보지 않았다(중앙·엣지가 같은 VM 을 함께 스냅샷 — v2.793 반증 검토 F1).
+    for (const v of loadVcenterConfig().vcenters || []) if (v?.collectMode === 'site') out.add(String(v.id));
+    return out;
+  } catch { return null; }
 }
 
 function tick() {
@@ -45,7 +61,8 @@ function tick() {
   try {
     const now = Date.now();
     _lastTick = now;
-    const { run, skipped, resume } = dueJobsOf(listJobs(), now);
+    // 데모(mock)에는 실제 엣지가 없다 — 데모 법인 잡도 이 노드가 시뮬레이션한다(실행기의 mock 경로는 vCenter 에 접속하지 않는다).
+    const { run, skipped, resume } = dueJobsOf(listJobs(), now, { siteVcIds: isMockMode() ? null : siteVcenterIds() });
     for (const j of run) enqueueRun(j.id, resume.includes(j.id) ? 'resume' : 'schedule');
     if (skipped.length) {
       if (!_demoWarned) { _demoWarned = true; console.warn(`[vmclone] 데이터 소스가 live 라 데모 복제 잡 ${skipped.length}개를 실행하지 않습니다 — 필요 없으면 VM 복제 화면에서 삭제하세요.`); }

@@ -84,6 +84,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.pdu', label: 'PDU 설정', group: 'pull', mod: '../agent/pduConfigPull.js', fn: 'pduConfigPullStatus' }, // v2.741(LEFT-02)
   { key: 'pull.gpuGuest', label: 'GPU 게스트 설정', group: 'pull', mod: '../agent/gpuGuestConfigPull.js', fn: 'gpuGuestConfigPullStatus' },
   { key: 'pull.svcmon', label: 'svcmon 설정', group: 'pull', mod: '../agent/svcmonConfigPull.js', fn: 'svcmonConfigPullStatus' },
+  { key: 'pull.vmClone', label: 'VM 백업 위임', group: 'pull', mod: '../agent/vmCloneWorker.js', fn: 'vmCloneWorkerStatus' }, // v2.793 — 잡 정의·작업 pull + 상태 push
   { key: 'pull.curUser', label: '현재 사용자 설정', group: 'pull', mod: '../agent/curUserConfigPull.js', fn: 'curUserConfigPullStatus' },
   { key: 'pull.vmseries', label: '스파이크 설정', group: 'pull', mod: '../agent/vmSeriesConfigPull.js', fn: 'vmSeriesConfigPullStatus' },
   { key: 'pull.users', label: '계정 배포', group: 'pull', mod: '../agent/usersConfigPull.js', fn: 'usersConfigPullStatus' },

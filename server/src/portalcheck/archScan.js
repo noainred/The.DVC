@@ -132,6 +132,12 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vm-clone/jobs': 'inUserWriteScope — 대상 vCenter 쓰기 범위(v2.369)',
   'DELETE /api/tools/vm-clone/jobs/:id': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
   'POST /api/tools/vm-clone/jobs/:id/run': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
+  // v2.793 VM 백업 센터 — routes/api/vmClone.js cloneJobDenied(잡)·accessOf(vCenter): 조회 밖 404 → 쓰기 밖 403
+  'POST /api/tools/vm-clone/jobs/:id/verify': 'cloneJobDenied — 잡 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/jobs/:id/restore': 'cloneJobDenied — 잡 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores': 'accessOf — 대상 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores/:id/attach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'DELETE /api/tools/vm-clone/nfs-datastores/:id': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
 });
 
 /**

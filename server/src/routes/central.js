@@ -27,6 +27,9 @@ import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): registryUnreadable 503 사유는 요약(원문 없음)
 import { safeLoadText } from '../util/atomicWrite.js'; // v2.744(회귀 검토 리드): 설정 파일 손상 사유도 요약(원문 = 파일 조각)
 import { Router } from 'express';
+import fs from 'node:fs';   // v2.793: VM 백업 위임 — 등록부 파일 존재 확인(읽지 못함 ≠ 비어 있음)
+import path from 'node:path';
+import { getDataSource as getDataSourceForVmClone } from '../runtime-settings.js';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult, listAssignments as listScanAssignments, assignmentsLoadError } from '../central/assignments.js'; // v2.727(D-01): 손상 판정
@@ -2424,6 +2427,52 @@ centralRouter.post('/capture-result', requireCentral({ notFound: { ok: false } }
   const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
   try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
   res.json({ ok: true, ...(applied.late ? { late: true } : {}) });
+});
+
+// ── VM 백업 센터 법인 위임(v2.793) — vmclone/dispatch.js · agent/vmCloneWorker.js ──────────────────────────────
+// 엣지는 자기 담당 vCenter(등록값 remoteAgent 우선, 없으면 그 vCenter 인벤토리를 올린 엣지 — 둘이 다르면 어느 쪽에도 맡기지 않는다)의
+// 백업 잡 정의를 당기고, 인출한 작업(지금 실행·검증·복구·NFS 데이터스토어 연결)을 실행한 뒤 상태·회신을 올린다.
+// 3규약(이 파일 머리): 개별 토큰(agent 모드)만 · 저장 키는 req.centralAuth.agent 만 · 엣지는 X-Agent-Name 을 붙인다.
+function vmCloneAgentOnly(req, res) {
+  if (req.centralAuth.mode === 'agent') return req.centralAuth.agent;
+  res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(공유 CENTRAL_TOKEN 으로는 어느 법인의 백업인지 신뢰할 수 없습니다). 설정 > 엣지 토큰에서 이 엣지의 토큰을 발급해 주세요.' });
+  return null;
+}
+/** vCenter 등록부·위임 인벤토리 → 실행 위치. 등록부 파일이 있는데 읽지 못했으면 null(빈 목록으로 답하지 않는다). */
+async function vmCloneTargets() {
+  const cfg = loadVcenterConfig();
+  if (!cfg.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+  const { execTargets } = await import('../vmclone/dispatch.js');
+  return execTargets(cfg.vcenters || [], listInventory(), { mock: isMockModeForVmClone() });
+}
+// 데모(mock) 중앙은 엣지에 위임하지 않는다(데모 법인 잡은 중앙이 시뮬레이션한다 — vmclone/scheduler.js).
+function isMockModeForVmClone() { try { return getDataSourceForVmClone() === 'mock'; } catch { return false; } }
+
+centralRouter.get('/vm-clone-sync', requireCentral(), async (req, res) => {
+  const agent = vmCloneAgentOnly(req, res); if (!agent) return;
+  const { jobsLoadError, listJobs: listCloneJobs } = await import('../vmclone/store.js');
+  // 잡 파일을 못 읽었으면 503 — 빈 목록을 내려보내면 엣지가 위임 잡을 지운다(v2.631 EDGE2631-01 과 같은 구조).
+  if (settingsUnreadable(res, jobsLoadError, 'VM 백업 잡(vm-clone.json)')) return;
+  const targets = await vmCloneTargets();
+  if (!targets) return persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: '중앙 vCenter 등록부(vcenters.json)를 읽지 못했습니다 — 엣지는 위임 잡을 그대로 유지합니다.' });
+  const { syncPayloadFor, takeOps, releasedFor } = await import('../vmclone/dispatch.js');
+  const p = syncPayloadFor(agent, listCloneJobs(), targets);
+  const mine = (op) => { const tg = targets.get(String(op.vcenterId)); return tg?.where === 'edge' && tg.agent.toLowerCase() === String(agent).toLowerCase(); };
+  const ops = takeOps(agent, Date.now(), mine);
+  // have: 엣지가 들고 있는 위임 잡의 vCenter(쉼표 구분) → 이 엣지 담당이 아닌 것을 released 로 알려 엣지가 멈추게 한다(반증 검토 F3).
+  const have = typeof req.query.have === 'string' ? req.query.have.slice(0, 20_000).split(',') : [];
+  res.json({ ok: true, proto: 1, vcenters: p.vcenters, jobs: p.jobs, ops, released: releasedFor(agent, have, targets) });
+});
+
+centralRouter.post('/vm-clone-report', requireCentral(), async (req, res) => {
+  const agent = vmCloneAgentOnly(req, res); if (!agent) return;
+  const targets = await vmCloneTargets();
+  if (!targets) return persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: '중앙 vCenter 등록부(vcenters.json)를 읽지 못해 보고를 받지 않았습니다 — 다음 주기에 다시 보내세요.' });
+  const { sanitizeReport: sanitizeVmCloneReport, ingestReport: ingestVmCloneReport } = await import('../vmclone/dispatch.js');   // svcmon 의 ingestReport 와 이름을 겹치지 않는다(TDZ 스윕)
+  const clean = sanitizeVmCloneReport(req.body);
+  const r = ingestVmCloneReport(agent, clean, targets);
+  res.locals.ingestSummary = { accepted: r.jobs, dropped: r.droppedJobs + r.droppedAcks, rows: clean.jobs.length };
+  res.json(r);
 });
 
 // 베어메탈 스토리지 폴링 위임(v2.341): 엣지가 자기 이름의 df 수집 잡을 인출(claim) →
