@@ -338,7 +338,8 @@ function WideTable({ devices, periods, total, unit, showRes, showPools, dcName, 
             return (
               <tr key={p.key}>
                 <td style={{ ...STICKY, whiteSpace: 'nowrap', fontWeight: 600 }} data-sort={p.toDay}>{p.label}
-                  {p.dayLabel ? <span className="muted" style={{ fontWeight: 400 }}> {p.dayLabel.slice(5)}</span> : null}
+                  {/* 기준일은 아래 줄 — 같은 줄이면 고정 첫 열이 400px 화면 표 폭의 절반 가까이를 먹었다(v2.791 Chromium) */}
+                  {p.dayLabel ? <div className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{p.dayLabel.slice(5)}</div> : null}
                   {p.current ? <span className="muted" style={{ fontWeight: 400 }}> (오늘까지)</span> : null}</td>
                 <BytesCell b={t?.totalBytes} unit={unit} extra={{ borderLeft: '1px solid var(--border)', background: 'var(--panel-2)' }} />
                 <td style={{ ...NUM, background: 'var(--panel-2)' }} data-sort={t?.usedBytes ?? ''} title={partialNote(t) || undefined}>

@@ -125,14 +125,18 @@ const TONE = { crit: { bg: '#fee2e2', fg: '#991b1b' }, warn: { bg: '#fef3c7', fg
  * 좁은 화면(모바일 메일) — 520px 이하에서 여백·글자를 줄이고 지표 칸을 세로로 쌓는다(아이실론 종합 메일 v2.742 와 같은 판단:
  * Outlook 데스크톱은 @media 를 무시하지만 그쪽은 폭이 넓다).
  */
+// ⚠ v2.791 Chromium 확인: 셀의 nowrap 이 좁은 폭에서 표를 카드보다 넓게 만들어(풀별 표 411px · 400px 화면에서 SSD 풀 열 잘림)
+//   — 좁은 화면에서는 줄바꿈을 허용한다(인라인 nowrap 을 !important 로 덮는다). 카드는 overflow 를 숨기지 않는다(잘림을 숨기지 않게).
 const MOBILE_CSS = '<style>@media only screen and (max-width:520px){.su-wrap{padding:8px!important}.su-body{padding:12px!important}'
-  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important}.su-t th{white-space:normal!important}.su-kpi td{display:block!important;width:auto!important;margin-bottom:6px}}</style>';
+  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important;white-space:normal!important;word-break:break-word}'
+  + '.su-kpi td{display:block!important;width:auto!important;margin-bottom:6px}}</style>';
 
 function pctBadge(p, rule) {
   const n = numOrNull(p);
   if (n == null) return '—';
   const t = n >= rule.critPct ? TONE.crit : n >= rule.warnPct ? TONE.warn : null;
-  return t ? `<span style="padding:1px 6px;border-radius:4px;background:${t.bg};color:${t.fg};font-weight:700">${esc(pctText(n))}</span>` : esc(pctText(n));
+  // 배지는 쪼개지지 않게(좁은 화면의 줄바꿈 허용이 '84.0' / '%' 로 나누지 않게 — v2.791 Chromium)
+  return t ? `<span style="display:inline-block;white-space:nowrap;padding:1px 6px;border-radius:4px;background:${t.bg};color:${t.fg};font-weight:700">${esc(pctText(n))}</span>` : `<span style="white-space:nowrap">${esc(pctText(n))}</span>`;
 }
 const table = (head, body) => `<table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">${head}${body}</table>`;
 const h2 = (t) => `<h2 style="margin:22px 0 6px;font-size:16px">${esc(t)}</h2>`;
@@ -239,14 +243,14 @@ export function renderUsageMail(m, o = {}) {
   const top = o.preview ? '미리보기 — 보내지 않았습니다' : (o.manual ? '지금 보내기' : `예약 발송 · ${slotLabel(o.slot)}`);
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${MOBILE_CSS}</head>`
     + `<body class="su-wrap" style="margin:0;padding:24px;background:#f1f5f9;font-family:${FONT};color:#0f172a;line-height:1.5">`
-    + '<div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">'
+    + '<div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px">'
     + `<div class="su-body" style="padding:22px 26px 18px;border-bottom:1px solid #e2e8f0">`
     + `<div style="font-size:12px;${MUTED}">VMware Global Monitoring Portal · 스토리지 사용량 예약 메일 · ${esc(top)}</div>`
     + `<h1 style="margin:4px 0;font-size:22px">스토리지 사용량 주간 보고 — ${esc(m.weekLabel)}</h1>`
     + `<div style="font-size:13px;${MUTED}">기준 ${esc(m.dayLabel)} · ISO 주차(월요일 시작) · 장비 ${m.devices}대 · 법인 ${k.corps}곳${m.registered > m.devices ? ` · 등록 ${m.registered}대 중 이력 있는 장비` : ''}</div>`
     + '</div>'
     + `<div class="su-body" style="padding:20px 26px">${attachBox}${kpis}${actions}${growth}${pools}${corps}${missing}</div>`
-    + `<div class="su-body" style="padding:14px 26px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;${MUTED}">`
+    + `<div class="su-body" style="padding:14px 26px;background:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 10px 10px;font-size:12px;${MUTED}">`
     + '<div>— 는 값을 못 읽은 칸입니다(0 이 아닙니다). 부분 합(값 있음 N/M대)은 직전 주 대비·추세 계산에서 뺍니다. 단위는 1024 기준(TB = 1024⁴ 바이트)입니다.</div>'
     + `<div style="margin-top:4px">포탈 › ${esc(VIEW_PATH)} 에서 같은 표·CSV·엑셀을 볼 수 있습니다. 보내는 때: ${esc(sched)} · 받는 사람 ${numOrNull(o.recipients) == null ? '—' : `${numOrNull(o.recipients)}명`} · 설정: ${esc(VIEW_PATH)} › 메일 발송</div>`
     + '</div></div></body></html>';
