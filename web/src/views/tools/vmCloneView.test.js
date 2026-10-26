@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   runTone, lastRunTones, lastVerify, cloneBytes, fmtBytes, agoText, durText, kpisOf, jobState, execText,
   corpEdgeState, corpCards, recentSessions, storageRows, capacityEstimate, restoreNameDefault, busyOp, phaseRows,
-  keepText, triggerText, historyFilter, historyCsv,
+  keepText, triggerText, historyFilter, historyCsv, rpoText, rpoOverdueCount,
 } from './vmCloneView.js';
 
 const NOW = Date.UTC(2026, 9, 26, 3, 0, 0);
@@ -146,5 +146,15 @@ describe('VM 백업 센터 v2.794 — 보존 문구 · 실행 사유 · 이력 �
     expect(row).toContain('실패');
     expect(row).toContain('스냅샷 2s > 클론 59s(실패)');
     expect(row).not.toMatch(/,=HYPERLINK/);
+  });
+});
+
+describe('VM 백업 센터 v2.795 — RPO 초과 문구(서버 판정을 그대로)', () => {
+  it('rpoText · rpoOverdueCount — 초과가 아니면 빈 문구 · 성공 없음 · 주기', () => {
+    expect(rpoText(null, NOW)).toBe('');
+    expect(rpoText({ overdue: false, intervalMs: 24 * H }, NOW)).toBe('');
+    expect(rpoText({ overdue: true, intervalMs: 24 * H, lastOkAt: NOW - 50 * H }, NOW)).toMatch(/^RPO 초과 · 마지막 성공 .+\(주기 24시간\)$/);
+    expect(rpoText({ overdue: true, intervalMs: 6 * H, lastOkAt: null }, NOW)).toBe('RPO 초과 · 성공한 백업 없음(주기 6시간)');
+    expect(rpoOverdueCount([{ rpo: { overdue: true } }, { rpo: null }, {}])).toBe(1);
   });
 });

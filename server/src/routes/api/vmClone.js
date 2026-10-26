@@ -22,6 +22,15 @@ import { demoSiteVcenters } from '../../mock/demo/edge.js'; // v2.793: 데모 �
 import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs } from '../../vmclone/nfsDs.js';
 import { executeOp } from '../../vmclone/execOp.js';
 import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
+import { rpoOf } from '../../vmclone/rpo.js';
+
+/** v2.795 — 잡 화면용 RPO 판정. 엣지 위임 잡의 이력 시각은 보고 수신 시각으로 자른다(시계가 앞선 엣지가 '최근 성공' 을 미래로 만들지 않게). */
+export function jobRpoView(v, edge, now = Date.now()) {
+  const recvAt = Number(edge?.at) || 0;
+  const clamp = (r) => (r && recvAt ? { ...r, at: Math.min(Number(r.at) || 0, recvAt) } : r);
+  const src = edge ? { ...v, history: (v.history || []).map(clamp), lastRun: clamp(v.lastRun) } : v;
+  return rpoOf(src, now);
+}
 import { validateRestoreSpec, VERIFY_TIMEOUT_MIN } from '../../vmclone/vsOps.js';
 import {
   execTargets, corpsOf, corpKeyOfTarget, edgeStateOf, createOp, finishOp, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
@@ -189,7 +198,12 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     };
   });
   res.json({
-    jobs: jobs.map((j) => { const tg = targets.get(String(j.vcenterId)); return mergeJobView(j, tg, tg?.where === 'edge' ? edgeStateOf(tg.agent) : null); }),
+    jobs: jobs.map((j) => {
+      const tg = targets.get(String(j.vcenterId));
+      const edge = tg?.where === 'edge' ? edgeStateOf(tg.agent) : null;
+      const v = mergeJobView(j, tg, edge);
+      return { ...v, rpo: jobRpoView(v, edge) };   // v2.795 RPO 초과(마지막 성공이 기대 주기의 2배 + 1시간을 넘음)
+    }),
     ...(allowed ? { scoped: true, omittedOutOfScope: all.length - jobs.length } : {}),
     status: scopeCloneStatus(schedulerStatus(), jobs, all),
     mounts: mv.mounts,

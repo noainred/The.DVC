@@ -34,6 +34,7 @@ import {
   RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS,
 } from './store.js';
 import { snapshotTreeList } from './snapTree.js';
+import { capacityShortfall, shortfallText } from './capacity.js';
 import { logAudit } from '../audit.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -280,6 +281,13 @@ export async function restoreFromClone(job, ref, spec, { setPhase } = {}) {
     if (srcRef) { try { folder = await parentFolderOf(c, srcRef); } catch { folder = null; } }
     if (!folder) folder = await parentFolderOf(c, ref);
     if (!folder) return fin(false, '복구할 폴더를 찾지 못했습니다');
+    // v2.795: 복구 대상 데이터스토어의 실시간 여유 — 가득 차면 그 위의 운영 VM 이 멈춘다(capacity.js). 못 읽으면 검사하지 않는다.
+    ph.step('여유 확인');
+    const need = Number.isFinite(Number(led.bytes)) && led.bytes != null ? Number(led.bytes) : await vmCommittedBytes(c, ref);
+    let sp = {};
+    try { sp = (await c.retrieveObjectProps('Datastore', morefOf(ds.id, job.vcenterId), ['summary.freeSpace', 'summary.capacity']))?.[0]?.props || {}; } catch { sp = {}; }
+    const short = capacityShortfall({ free: sp['summary.freeSpace'], capacity: sp['summary.capacity'], need });
+    if (short) return fin(false, shortfallText(`복구 대상 데이터스토어 ‘${s.datastoreName}’`, short, { tail: ' — 다른 데이터스토어를 고르세요.' }));
     ph.step('복원 지점 클론');
     // v2.794: 네트워크를 끊는 복구는 새 VM 을 **NIC 가 끊긴 채로** 만든다(클론 스펙의 deviceChange) — 클론 뒤에 끊으면 그 사이·태스크 시한 초과로
     //   결과를 못 받은 경우 원본과 같은 IP·호스트명의 연결된 VM 이 vCenter 에 남는다. 아래 disconnectAllNics 는 다시 읽어 확인만 한다.

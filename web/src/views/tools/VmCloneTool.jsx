@@ -11,7 +11,7 @@ import { mountLabel, MOUNTS_MASKED_NOTE, showMountsMaskedNote } from './vmCloneM
 import Select from '../../components/Select.jsx';
 import {
   kpisOf, corpCards, lastRunTones, jobState, execText, cloneBytes, fmtBytes, lastVerify, recentSessions, storageRows,
-  capacityEstimate, agoText, durText, KIND_LABEL, keepText,
+  capacityEstimate, agoText, durText, KIND_LABEL, keepText, rpoText, rpoOverdueCount,
 } from './vmCloneView.js';
 import VmCloneJobDetail from './VmCloneJobDetail.jsx';
 import VmCloneRestore from './VmCloneRestore.jsx';
@@ -128,6 +128,10 @@ export default function VmCloneTool() {
         </div>
       </div>
 
+      {rpoOverdueCount(jobs) > 0 && (
+        <div className="vbk-note" role="status">RPO 초과 잡 {rpoOverdueCount(jobs)}개 — 마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다. 실행이 멈췄거나(엣지 중단·담당 미확정) 매번 건너뛰고 있는지 잡 표의 해당 줄을 확인하세요.</div>
+      )}
+
       {cards.length > 0 && (
         <div>
           <div className="vbk-sec" style={{ marginBottom: 8 }}>법인별 현황 <small>법인 = vCenter 를 수집하는 엣지 · 엣지 위임 vCenter 의 백업은 그 엣지가 실행합니다</small></div>
@@ -212,6 +216,8 @@ export default function VmCloneTool() {
                         <td style={{ fontSize: 12.5 }}>
                           <div>{scheduleText(j.schedule)}</div>
                           {mark && <div style={{ fontSize: 11.5, color: `var(--${mark.tone})` }} title={j.lastRun.detail}>{mark.icon} {agoText(j.lastRun.at, now)}</div>}
+                          {/* v2.795: 두 줄로(⏰ RPO 초과 / 사유) — 한 줄이면 스케줄 열이 늘어 1440px 에서도 표가 카드 밖으로 밀린다(Chromium 실측 1013px > 820px). */}
+                          {rpoText(j.rpo, now) && <div style={{ fontSize: 11.5, color: 'var(--amber)', maxWidth: 150, whiteSpace: 'normal' }} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다"><b>⏰ RPO 초과</b><br />{rpoText(j.rpo, now).replace(/^RPO 초과 · /, '')}</div>}
                         </td>
                         <td><span className="vbk-runs" aria-label="최근 14회 실행 결과">{lastRunTones(j, 14).map((t, i) => <i key={i} className={t} title={t} />)}</span></td>
                         <td style={{ textAlign: 'right' }} data-sort={(j.clones || []).length}>
@@ -481,10 +487,16 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <label title="이보다 오래된 사본도 지웁니다. 가장 최근 1개는 언제나 남깁니다. 0 이면 개수만 봅니다.">보존 기간(일 · 0=개수만)<input className="input" type="number" min={0} max={365} value={form.keepDays || 0} onChange={(e) => setForm({ ...form, keepDays: Math.max(0, Math.min(365, Math.floor(Number(e.target.value)) || 0)) })} /></label>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
-                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수, 실패 시 잡이 오류로 끝납니다.">
+                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수.">
                     <input type="checkbox" checked={!!form.quiesce} onChange={(e) => setForm({ ...form, quiesce: e.target.checked })} style={{ marginTop: 3 }} />
-                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없거나 실패하면 그 회차는 실패로 남습니다.</span></span>
+                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없으면 정지점이 실패합니다{form.quiesce ? ' — 그때 어떻게 할지는 아래에서 고릅니다' : ''}.</span></span>
                   </label>
+                  {form.quiesce && (
+                    <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, paddingLeft: 24 }}>
+                      <input type="checkbox" checked={form.quiesceFallback !== false} onChange={(e) => setForm({ ...form, quiesceFallback: e.target.checked })} style={{ marginTop: 3 }} />
+                      <span><b>정지점이 실패하면 일반 스냅샷으로 백업</b><br /><span className="muted" style={{ fontSize: 12 }}>앱 정합이 아닌(crash-consistent) 사본이 되고 결과에 ⚠ 가 남습니다. 끄면 그 회차는 실패로 남고 실패 메일이 갑니다.</span></span>
+                    </label>
+                  )}
                   <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, opacity: kind === 'nfs' ? 0.5 : 1 }}>
                     <input type="checkbox" disabled={kind === 'nfs'} checked={kind !== 'nfs' && !!form.verifyAfter} onChange={(e) => setForm({ ...form, verifyAfter: e.target.checked })} style={{ marginTop: 3 }} />
                     <span><b>복제 후 자동 검증</b><br /><span className="muted" style={{ fontSize: 12 }}>새 사본에 검증용 스냅샷을 만들고 네트워크를 끊은 채 켜서 VMware Tools 응답을 확인한 뒤, 끄고 검증 전 상태로 되돌립니다{d.limits?.verifyTimeoutMin ? `(응답 대기 ${d.limits.verifyTimeoutMin}분)` : ''}. {kind === 'nfs' ? '엣지 NFS 사본은 켤 VM 이 없어 쓸 수 없습니다.' : ''}</span></span>
@@ -504,7 +516,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <div className="vbk-kv"><span>vCenter · 법인</span><span>{d.vcenterNames?.[form.vcenterId] || form.vcenterId} · {corp?.label || '—'}</span></div>
                   <div className="vbk-kv"><span>저장 대상</span><span>{kind === 'nfs' ? `엣지 NFS · ${mountLabel(mounts.find((m) => m.id === form.dest.mountId)) || form.dest.mountId}${form.dest.subdir ? `/${form.dest.subdir}` : ''}` : `${kind === 'nfsds' ? 'ESXi NFS 데이터스토어' : '데이터스토어'} · ${form.dest.datastoreName || nfsDs.find((x) => x.id === form.dest.nfsDsId)?.name || ''}`}</span></div>
                   <div className="vbk-kv"><span>스케줄 · 보존</span><span>{scheduleText(form.schedule)} · {keepText(form)}</span></div>
-                  <div className="vbk-kv"><span>옵션</span><span>{[form.quiesce ? '정지점' : '크래시 정합', kind !== 'nfs' && form.verifyAfter ? '자동 검증' : '', form.enabled === false ? '비활성' : ''].filter(Boolean).join(' · ')}</span></div>
+                  <div className="vbk-kv"><span>옵션</span><span>{[form.quiesce ? (form.quiesceFallback === false ? '정지점(필수)' : '정지점(실패 시 일반)') : '크래시 정합', kind !== 'nfs' && form.verifyAfter ? '자동 검증' : '', form.enabled === false ? '비활성' : ''].filter(Boolean).join(' · ')}</span></div>
                   <div className="vbk-kv"><span>사본 상태</span><span>꺼진 상태로 생성</span></div>
                 </div>
               </>
