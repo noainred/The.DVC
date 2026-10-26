@@ -145,6 +145,8 @@ export function normalizeJobDef(input = {}) {
     keep: clampKeep(input.keep),
     keepDays: clampKeepDays(input.keepDays),
     quiesce: !!input.quiesce,
+    // v2.795: 정지점 스냅샷이 실패하면 일반 스냅샷으로 한 번 다시 시도(결과에 ⚠). 기본 켬(Veeam 기본과 같다) — false 일 때만 끈다.
+    quiesceFallback: input.quiesceFallback !== false,
     enabled: input.enabled !== false,
     // 검증은 vCenter 에 등록된 사본(데이터스토어 대상)만 켤 수 있다 — NFS 파일 사본은 켤 VM 이 없다.
     verifyAfter: dest.type === 'datastore' && input.verifyAfter === true,
@@ -187,6 +189,7 @@ export function saveJob(input = {}) {
   if (!job.demo) delete job.demo;
   if (!job.verifyAfter) delete job.verifyAfter;
   if (!job.keepDays) delete job.keepDays;
+  if (job.quiesceFallback !== false) delete job.quiesceFallback;   // 기본(켬)은 적지 않는다 — 이전 판 잡과 같은 모양
   if (!existing) {
     if (db.jobs.length >= MAX_JOBS) throw new Error(`복제 잡은 최대 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
     // 같은 VM 에 잡 중복 금지 — 같은 VM 을 두 잡이 스냅샷/클론하면 서로 간섭한다.
@@ -240,17 +243,19 @@ export function applyDelegatedJobs(defs, ownedVcenterIds) {
       if (db.jobs.length >= MAX_JOBS) { out.invalid.push(`${id}: 잡 상한(${MAX_JOBS}) 초과`); continue; }
       const nj = { id, ...def, origin: 'central', clones: [], lastRun: null, createdAt: Date.now() };
       if (!nj.keepDays) delete nj.keepDays;
+      if (nj.quiesceFallback !== false) delete nj.quiesceFallback;
       db.jobs.push(nj);
       out.added++; dirty = true;
       continue;
     }
     if (cur.suspended) { delete cur.suspended; out.resumed = (out.resumed || 0) + 1; dirty = true; }   // 담당이 돌아왔다(F3)
-    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter, cur.keepDays || 0]);
-    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter, def.keepDays]);
+    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter, cur.keepDays || 0, cur.quiesceFallback !== false]);
+    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter, def.keepDays, def.quiesceFallback]);
     if (before !== after) {
       Object.assign(cur, def);
       if (!cur.verifyAfter) delete cur.verifyAfter;
       if (!cur.keepDays) delete cur.keepDays;
+      if (cur.quiesceFallback !== false) delete cur.quiesceFallback;
       out.updated++; dirty = true;
     }
   }
@@ -556,13 +561,23 @@ export function isDue(job, now = Date.now()) {
  * v2.794: keepDays(일)가 있으면 그보다 오래된 사본도 넣는다 — 단 **가장 최근 1개는 언제나 남긴다**(백업이 몇 주 실패해도 마지막 사본은 지우지 않는다).
  *   시각(at)을 모르는 사본은 기간으로 지우지 않는다(개수 규칙만).
  */
-export function pruneList(clones, keep, keepDays = 0, now = Date.now()) {
+export function pruneList(clones, keep, keepDays = 0, now = Date.now(), { protectRef = '' } = {}) {
   const sorted = [...(clones || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
   const excess = Math.max(0, sorted.length - clampKeep(keep));
   const days = clampKeepDays(keepDays);
-  if (!days) return sorted.slice(0, excess);
   const cutoff = now - days * 86_400_000;
-  return sorted.filter((c, i) => i < excess || (i < sorted.length - 1 && Number(c.at) > 0 && Number(c.at) < cutoff));
+  const out = days ? sorted.filter((c, i) => i < excess || (i < sorted.length - 1 && Number(c.at) > 0 && Number(c.at) < cutoff)) : sorted.slice(0, excess);
+  // v2.795: 보호할 사본(검증을 통과한 가장 최근 복원 지점)은 지우지 않는다 — 그만큼 보존 개수를 1개 넘길 수 있다.
+  return protectRef ? out.filter((c) => c.ref !== protectRef) : out;
+}
+
+/**
+ * v2.795 — 보존정책이 지우지 않을 사본: 검증을 통과한 가장 최근 복원 지점의 ref(없으면 '').
+ * 새 사본들이 검증에 계속 실패하거나 검증을 안 하는 동안에도 '마지막으로 켜서 확인한 사본' 하나는 남긴다.
+ */
+export function lastVerifiedRef(clones) {
+  const ok = (clones || []).filter((c) => c?.verify?.ok === true).sort((a, b) => (b.at || 0) - (a.at || 0));
+  return ok[0]?.ref || '';
 }
 
 /** 트리 배지용 — vCenter 의 복제 잡 대상 vmId 목록(뷰가 'Clone' 아이콘 표시). */

@@ -39,7 +39,7 @@ function run(body, { mountPoint = '' } = {}) {
     const calls = []; globalThis.CALLS = calls;
     globalThis.VM = { name: 'web01', 'config.instanceUuid': 'uuid-A', 'summary.storage.committed': String(40 * ${GIB}), 'summary.storage.uncommitted': String(10 * ${GIB}), datastore: '<ManagedObjectReference type="Datastore">datastore-9</ManagedObjectReference>' };
     globalThis.DS = { 'summary.freeSpace': String(500 * ${GIB}), 'summary.capacity': String(1000 * ${GIB}), 'summary.accessible': 'true' };
-    globalThis.VM_THROW = '';
+    globalThis.VM_THROW = ''; globalThis.QFAIL = '';
     mock.module(${u('vmclone/vsphere.js')}, { namedExports: {
       VimSoapClient: class { constructor(vc) { this.vc = vc; } async login() {} async logout() {}
         async retrieveObjectProps(type, ref, props) {
@@ -47,8 +47,10 @@ function run(body, { mountPoint = '' } = {}) {
           if (type === 'Datastore') return [{ props: { ...globalThis.DS } }];
           return [{ props: {} }];
         } },
-      createSnapshot: async () => { calls.push('snapshot'); return 'snapshot-1'; }, removeSnapshot: async () => { calls.push('removeSnapshot'); },
-      parentFolderOf: async () => 'group-v1', cloneFromSnapshot: async () => { calls.push('clone'); return 'vm-99'; }, destroyClone: async () => ({ gone: true }),
+      createSnapshot: async (c, ref, o = {}) => { calls.push(o.quiesce ? 'snapshot:q' : 'snapshot'); if (o.quiesce && globalThis.QFAIL) throw new Error(globalThis.QFAIL); return 'snapshot-1'; },
+      removeSnapshot: async () => { calls.push('removeSnapshot'); },
+      parentFolderOf: async () => 'group-v1', cloneFromSnapshot: async () => { calls.push('clone'); return 'vm-' + (100 + calls.length) + '-' + Date.now(); },
+      destroyClone: async (c, ref) => { calls.push('destroy:' + ref); return { gone: true }; },
       vmFilePaths: async () => ({ vmx: '[ds1] web01/web01.vmx', files: [] }),
       parseDsPath: (s) => { const m = /^\\[([^\\]]+)\\]\\s*(.+)$/.exec(String(s || '').trim()); return m ? { ds: m[1], rel: m[2] } : null; },
       backupFileFilter: () => true, datacenterPathOf: async () => 'DC1',
@@ -144,4 +146,57 @@ test('P3b: NFS — 마운트 지점 여유(statfs)로 같은 검사(필요량 = 
   `, { mountPoint: mp });
   assert.equal(o.short.ok, false); assert.match(o.short.detail, /NFS 마운트 여유가 부족해 시작하지 않았습니다/); assert.deepEqual(o.short.calls, []);
   assert.equal(o.ok.ok, true, o.ok.detail); assert.ok(o.ok.calls.includes('download'));
+});
+
+test('Q1: 정지점 실패(태스크 오류) → 일반 스냅샷으로 한 번 다시 · ⚠ 표시 · 옵션을 끄면 실패 · 시간 초과는 다시 하지 않는다', () => {
+  const o = run(`
+    const j = st.saveJob({ vcenterId: 'vcA', vmId: 'vcA:vm-1', vmName: 'web01', dest: { type: 'datastore', datastoreName: 'ds1' }, schedule: { mode: 'manual' }, keep: 3, quiesce: true });
+    out.saved = st.getJob(j.id).quiesceFallback;
+    globalThis.QFAIL = '스냅샷 생성 실패: An error occurred while quiescing the virtual machine';
+    out.fallback = await runOnce(j.id);
+    globalThis.QFAIL = '스냅샷 생성 시간 초과(15분) — 태스크 취소 요청함';
+    out.timeout = await runOnce(j.id);
+    st.saveJob({ ...st.getJob(j.id), quiesceFallback: false });
+    out.savedOff = st.getJob(j.id).quiesceFallback;
+    globalThis.QFAIL = '스냅샷 생성 실패: quiesce error';
+    out.off = await runOnce(j.id);
+  `);
+  assert.equal(o.saved, undefined, '기본(켬)은 파일에 적지 않는다');
+  assert.equal(o.fallback.ok, true, o.fallback.detail);
+  assert.deepEqual(o.fallback.calls.filter((x) => x.startsWith('snapshot')), ['snapshot:q', 'snapshot']);
+  assert.match(o.fallback.detail, /⚠ 정지점 스냅샷 실패\(An error occurred while quiescing/);
+  assert.equal(o.timeout.ok, false); assert.deepEqual(o.timeout.calls.filter((x) => x.startsWith('snapshot')), ['snapshot:q'], '시간 초과는 다시 시도하지 않는다');
+  assert.equal(o.savedOff, false);
+  assert.equal(o.off.ok, false); assert.deepEqual(o.off.calls.filter((x) => x.startsWith('snapshot')), ['snapshot:q']);
+});
+
+test('V1: 보존정책 — 검증을 통과한 가장 최근 복원 지점은 지우지 않는다(보존 +1) · 검증 사본이 없으면 평소대로', () => {
+  const o = run(`
+    // 보존 1개 + 사본 a(검증 통과)·b(검증 실패) + 새 사본 → 평소라면 a·b 를 지운다. a 는 보호한다.
+    const j = st.saveJob({ vcenterId: 'vcA', vmId: 'vcA:vm-1', vmName: 'web01', dest: { type: 'datastore', datastoreName: 'ds1' }, schedule: { mode: 'manual' }, keep: 1 });
+    const t = Date.now();
+    st.recordRun(j.id, { ok: true, detail: 'seed', ms: 1, addClone: { name: 'web01-bak-a', ref: 'vm-a', at: t - 3000 } });
+    st.recordRun(j.id, { ok: true, detail: 'seed', ms: 1, addClone: { name: 'web01-bak-b', ref: 'vm-b', at: t - 2000 } });
+    st.patchClone(j.id, 'vm-a', { verify: { at: t, ok: true, detail: 'ok' } });
+    st.patchClone(j.id, 'vm-b', { verify: { at: t, ok: false, detail: 'Tools 무응답' } });
+    out.r = await runOnce(j.id);
+    out.refs = st.getJob(j.id).clones.map((c) => c.ref).filter((r) => r.startsWith('vm-a') || r.startsWith('vm-b'));
+    out.pure = { plain: st.pruneList([{ ref: 'a', at: 1 }, { ref: 'b', at: 2 }, { ref: 'c', at: 3 }], 1).map((x) => x.ref), prot: st.pruneList([{ ref: 'a', at: 1 }, { ref: 'b', at: 2 }, { ref: 'c', at: 3 }], 1, 0, Date.now(), { protectRef: 'a' }).map((x) => x.ref) };
+    out.last = st.lastVerifiedRef([{ ref: 'x', at: 1, verify: { ok: true } }, { ref: 'y', at: 5, verify: { ok: true } }, { ref: 'z', at: 9, verify: { ok: false } }]);
+  `);
+  assert.equal(o.r.ok, true, o.r.detail);
+  assert.ok(o.r.calls.includes('destroy:vm-b') && !o.r.calls.includes('destroy:vm-a'), `검증 실패 사본(b)만 지운다 — ${o.r.calls}`);
+  assert.match(o.r.detail, /검증을 통과한 최신 복원 지점 ‘web01-bak-a’ 은 남겼습니다/);
+  assert.deepEqual(o.refs, ['vm-a']);
+  assert.deepEqual(o.pure, { plain: ['a', 'b'], prot: ['b'] });
+  assert.equal(o.last, 'y');
+});
+
+test('G1: waitTask onProgress — 진행 중 퍼센트를 알린다(표시용 — 콜백이 던져도 대기는 계속)', async () => {
+  const { waitTask } = await import('../src/vmclone/vsphere.js');
+  const seq = [{ 'info.state': 'running', 'info.progress': '42' }, { 'info.state': 'running', 'info.progress': '' }, { 'info.state': 'success', 'info.result': 'vm-7' }];
+  const c = { retrieveObjectProps: async () => [{ props: seq.shift() }], callRaw: async () => '' };
+  const seen = [];
+  const r = await waitTask(c, 'task-1', { pollMs: 1, onProgress: (p) => { seen.push(p); throw new Error('표시 오류'); } });
+  assert.equal(r.result, 'vm-7'); assert.deepEqual(seen, [42]);
 });

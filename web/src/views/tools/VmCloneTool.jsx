@@ -481,10 +481,16 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <label title="이보다 오래된 사본도 지웁니다. 가장 최근 1개는 언제나 남깁니다. 0 이면 개수만 봅니다.">보존 기간(일 · 0=개수만)<input className="input" type="number" min={0} max={365} value={form.keepDays || 0} onChange={(e) => setForm({ ...form, keepDays: Math.max(0, Math.min(365, Math.floor(Number(e.target.value)) || 0)) })} /></label>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
-                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수, 실패 시 잡이 오류로 끝납니다.">
+                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수.">
                     <input type="checkbox" checked={!!form.quiesce} onChange={(e) => setForm({ ...form, quiesce: e.target.checked })} style={{ marginTop: 3 }} />
-                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없거나 실패하면 그 회차는 실패로 남습니다.</span></span>
+                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없거나 정지점이 실패하면 아래 설정에 따라 일반 스냅샷으로 다시 하거나 그 회차를 실패로 남깁니다.</span></span>
                   </label>
+                  {form.quiesce && (
+                    <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, paddingLeft: 24 }}>
+                      <input type="checkbox" checked={form.quiesceFallback !== false} onChange={(e) => setForm({ ...form, quiesceFallback: e.target.checked })} style={{ marginTop: 3 }} />
+                      <span><b>정지점이 실패하면 일반 스냅샷으로 백업</b><br /><span className="muted" style={{ fontSize: 12 }}>앱 정합이 아닌(crash-consistent) 사본이 되고 결과에 ⚠ 가 남습니다. 끄면 그 회차는 실패로 남고 실패 메일이 갑니다.</span></span>
+                    </label>
+                  )}
                   <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, opacity: kind === 'nfs' ? 0.5 : 1 }}>
                     <input type="checkbox" disabled={kind === 'nfs'} checked={kind !== 'nfs' && !!form.verifyAfter} onChange={(e) => setForm({ ...form, verifyAfter: e.target.checked })} style={{ marginTop: 3 }} />
                     <span><b>복제 후 자동 검증</b><br /><span className="muted" style={{ fontSize: 12 }}>새 사본에 검증용 스냅샷을 만들고 네트워크를 끊은 채 켜서 VMware Tools 응답을 확인한 뒤, 끄고 검증 전 상태로 되돌립니다{d.limits?.verifyTimeoutMin ? `(응답 대기 ${d.limits.verifyTimeoutMin}분)` : ''}. {kind === 'nfs' ? '엣지 NFS 사본은 켤 VM 이 없어 쓸 수 없습니다.' : ''}</span></span>
@@ -504,7 +510,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <div className="vbk-kv"><span>vCenter · 법인</span><span>{d.vcenterNames?.[form.vcenterId] || form.vcenterId} · {corp?.label || '—'}</span></div>
                   <div className="vbk-kv"><span>저장 대상</span><span>{kind === 'nfs' ? `엣지 NFS · ${mountLabel(mounts.find((m) => m.id === form.dest.mountId)) || form.dest.mountId}${form.dest.subdir ? `/${form.dest.subdir}` : ''}` : `${kind === 'nfsds' ? 'ESXi NFS 데이터스토어' : '데이터스토어'} · ${form.dest.datastoreName || nfsDs.find((x) => x.id === form.dest.nfsDsId)?.name || ''}`}</span></div>
                   <div className="vbk-kv"><span>스케줄 · 보존</span><span>{scheduleText(form.schedule)} · {keepText(form)}</span></div>
-                  <div className="vbk-kv"><span>옵션</span><span>{[form.quiesce ? '정지점' : '크래시 정합', kind !== 'nfs' && form.verifyAfter ? '자동 검증' : '', form.enabled === false ? '비활성' : ''].filter(Boolean).join(' · ')}</span></div>
+                  <div className="vbk-kv"><span>옵션</span><span>{[form.quiesce ? (form.quiesceFallback === false ? '정지점(필수)' : '정지점(실패 시 일반)') : '크래시 정합', kind !== 'nfs' && form.verifyAfter ? '자동 검증' : '', form.enabled === false ? '비활성' : ''].filter(Boolean).join(' · ')}</span></div>
                   <div className="vbk-kv"><span>사본 상태</span><span>꺼진 상태로 생성</span></div>
                 </div>
               </>

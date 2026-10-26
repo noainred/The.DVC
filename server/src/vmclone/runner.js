@@ -37,7 +37,7 @@ import { logAudit } from '../audit.js';
 import {
   getJob, recordRun, pruneList, setRunning, patchRunning, clearRunning, interruptedRunOf,
   RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS, RESUME_LIMIT, RESUME_EXPIRE_MS, patchClone, recordJobEvent, appendBackupPhases, clampKeepDays,
-  setJobVmUuid,
+  setJobVmUuid, lastVerifiedRef,
 } from './store.js';
 import { capacityShortfall, shortfallText } from './capacity.js';
 import { isMockMode } from '../mock/demo/flags.js';
@@ -370,7 +370,7 @@ async function runJobBody(jobId, trigger) {
       const inv = (store.get()?.vms || []).find((v) => v.id === job.vmId);
       const gb = Number(inv?.storageGB);
       const bytes = inv && Number.isFinite(gb) && gb > 0 ? Math.round(gb * 0.6 * 1024 ** 3) : null;
-      const removed = pruneList([...job.clones, { name, ref, at }], job.keep, job.keepDays);
+      const removed = pruneList([...job.clones, { name, ref, at }], job.keep, job.keepDays, Date.now(), { protectRef: lastVerifiedRef(job.clones) });
       done(true, `mock 복제 완료 — ${name}${removed.length ? ` · 보존정책 삭제 ${removed.length}개` : ''}`,
         { addClone: { name, ref, at, ...(bytes != null ? { bytes } : {}) }, removeCloneRefs: removed.map((c) => c.ref) });
       if (job.dest.type === 'datastore' && job.verifyAfter) enqueueAutoVerify(jobId, ref);
@@ -435,6 +435,7 @@ async function runJobBody(jobId, trigger) {
     let snapCleanupErr = '';
     let autoVerifyRef = '';
     let sameDsNote = '';
+    let quiesceNote = '';
     try {
       // v2.795: 실행 전 확인 — 스냅샷을 만들기 **전에** 끝낸다(여기서 멈추면 원본에 아무것도 남지 않는다).
       setPhase('사전 확인');
@@ -473,7 +474,18 @@ async function runJobBody(jobId, trigger) {
       // v2.741(TIMING-01): 스냅샷을 요청하기 **전에** 실행 중 기록을 동기로 남긴다 — 곧바로 재시작이 와도 다음 기동이 이 스냅샷을 찾아 지운다.
       const snapName = `portal-clone-${stamp()}`;
       setRunning(jobId, { trigger, vmRef, snapName, phase: 'snapshot', resumes: trigger === 'resume' && stale ? (Number(stale.resumes) || 0) + 1 : 0 });
-      snapRef = await createSnapshot(c, vmRef, { name: snapName, quiesce: job.quiesce });
+      try { snapRef = await createSnapshot(c, vmRef, { name: snapName, quiesce: job.quiesce }); }
+      catch (e) {
+        // v2.795: 정지점(VSS/freeze)이 **태스크 오류**로 끝났으면 일반 스냅샷으로 한 번 다시 시도한다(잡 옵션 quiesceFallback — 기본 켬, Veeam 기본과 같다).
+        //   태스크 오류면 스냅샷은 만들어지지 않았다. 시간 초과는 다시 시도하지 않는다 — 그 태스크가 vCenter 에서 아직 돌고 있을 수 있어 겹친다.
+        const msg = String(e?.message || e);
+        if (!(job.quiesce && job.quiesceFallback !== false && /^스냅샷 생성 실패:/.test(msg))) throw e;
+        quiesceNote = ` · ⚠ 정지점 스냅샷 실패(${msg.replace(/^스냅샷 생성 실패:\s*/, '').slice(0, 120)}) — 일반 스냅샷으로 백업했습니다(앱 정합 아님 · crash-consistent)`;
+        setPhase('스냅샷 재시도(일반)');
+        const snapName2 = `portal-clone-${stamp()}`;
+        patchRunning(jobId, { snapName: snapName2 });
+        snapRef = await createSnapshot(c, vmRef, { name: snapName2, quiesce: false });
+      }
       patchRunning(jobId, { snapRef });
 
       if (job.dest.type === 'datastore') {
@@ -482,22 +494,30 @@ async function runJobBody(jobId, trigger) {
         const folder = await parentFolderOf(c, vmRef);
         if (!folder) throw new Error('원본 VM 폴더 조회 실패');
         const cloneName = `${job.vmName}-bak-${stamp()}`;
-        setPhase(`클론 → ${job.dest.datastoreName}`);
+        const clonePhase = `클론 → ${job.dest.datastoreName}`;
+        setPhase(clonePhase);
         patchRunning(jobId, { phase: 'clone', cloneName });
-        const newRef = await cloneFromSnapshot(c, { vmRef, folderRef: folder, name: cloneName, dsRef: morefOf(ds.id, job.vcenterId), snapshotRef: snapRef });
+        // v2.795: 진행률은 실행 상태 문구에만 싣는다(단계 기록은 '클론 → …' 한 줄로 합쳐진다 — setPhase 를 부르지 않는다).
+        const onProgress = (pct) => { if (_running.jobId === jobId) _running.phase = `${clonePhase} · ${pct}%`; };
+        const newRef = await cloneFromSnapshot(c, { vmRef, folderRef: folder, name: cloneName, dsRef: morefOf(ds.id, job.vcenterId), snapshotRef: snapRef, onProgress });
         const cloneBytes = await committedBytesOf(c, newRef);   // v2.793: 사본 크기(못 읽으면 null — 0 으로 적지 않는다)
 
         // 보존정책 — 원장 기준(이름 패턴 아님), 켜져 있는 클론은 건너뛰고 보고.
         setPhase('보존정책 적용');
         const ledger = [...job.clones, { name: cloneName, ref: newRef, at: Date.now() }];
-        const toDelete = pruneList(ledger, job.keep, job.keepDays);
+        // v2.795: 검증을 통과한 가장 최근 복원 지점은 지우지 않는다(새 사본은 아직 검증 전이다 — 그것이 깨졌으면 마지막으로 확인한 사본이 남아야 한다).
+        const protectRef = lastVerifiedRef(job.clones);
+        const plain = pruneList(ledger, job.keep, job.keepDays);
+        const toDelete = pruneList(ledger, job.keep, job.keepDays, Date.now(), { protectRef });
+        const keptVerified = plain.length > toDelete.length ? (job.clones.find((x) => x.ref === protectRef)?.name || protectRef) : '';
         const removedRefs = []; const skipped = [];
         for (const old of toDelete) {
           try { await destroyClone(c, old.ref, { expectedName: old.name }); removedRefs.push(old.ref); }   // v2.767(R2-B3-6): 이름 대조
           catch (e) { skipped.push(`${old.name}: ${e.message}`); }
         }
-        done(true, `클론 완료 — ${cloneName} → [${job.dest.datastoreName}]` + sameDsNote +
+        done(true, `클론 완료 — ${cloneName} → [${job.dest.datastoreName}]` + quiesceNote + sameDsNote +
           (removedRefs.length ? ` · 보존정책 삭제 ${removedRefs.length}개` : '') +
+          (keptVerified ? ` · 검증을 통과한 최신 복원 지점 ‘${keptVerified}’ 은 남겼습니다(보존 개수 +1)` : '') +
           (skipped.length ? ` · 삭제 건너뜀 ${skipped.length}건(${skipped[0]})` : ''),
           { addClone: { name: cloneName, ref: newRef, at: Date.now(), ...(cloneBytes != null ? { bytes: cloneBytes } : {}) }, removeCloneRefs: removedRefs });
         if (job.verifyAfter) autoVerifyRef = newRef;   // 스냅샷 병합·로그아웃이 끝난 뒤 큐에 넣는다
@@ -545,7 +565,7 @@ async function runJobBody(jobId, trigger) {
         // NFS 보존 — 이 잡의 온전한 백업(manifest 의 vcenterId·vmId 일치)만 세어 오래된 순 삭제.
         setPhase('보존정책 적용');
         const removed = pruneNfsBackups(mp, destRoot, job).length;
-        done(true, `NFS 백업 완료 — ${wanted.length}파일 ${(bytes / 1024 ** 3).toFixed(2)}GB → ${destDir}${removed ? ` · 보존정책 삭제 ${removed}개` : ''}${legacyNfsNote(mp, job)}`);
+        done(true, `NFS 백업 완료 — ${wanted.length}파일 ${(bytes / 1024 ** 3).toFixed(2)}GB → ${destDir}${quiesceNote}${removed ? ` · 보존정책 삭제 ${removed}개` : ''}${legacyNfsNote(mp, job)}`);
       }
     } finally {
       if (snapRef) {

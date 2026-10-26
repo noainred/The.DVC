@@ -62,7 +62,7 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
           <div className="flex wrap" style={{ alignItems: 'center', gap: 8, marginTop: 2 }}>
             <h2 className="vbk-title" style={{ margin: 0 }}>{job.vmName}</h2>
             <span className={`vbk-chip ${isDs ? 'ds' : 'nfs'}`}>{isDs ? `${job.dest.nfsDsId ? 'NFS-DS' : 'DS'} · ${job.dest.datastoreName}` : `엣지 NFS · ${mountLabel((d.mounts || []).find((m) => m.id === job.dest.mountId)) || job.dest.mountId}`}</span>
-            <span className={`vbk-chip ${job.quiesce ? 'ok' : ''}`}>{job.quiesce ? '앱 정합(정지점)' : '크래시 정합'}</span>
+            <span className={`vbk-chip ${job.quiesce ? 'ok' : ''}`} title={job.quiesce ? (job.quiesceFallback === false ? '정지점이 실패하면 그 회차는 실패' : '정지점이 실패하면 일반 스냅샷으로 백업(⚠)') : ''}>{job.quiesce ? `앱 정합(정지점${job.quiesceFallback === false ? ' · 필수' : ''})` : '크래시 정합'}</span>
             <span className="vbk-chip">보존 {keepText(job)}</span>
             {job.verifying && !running && <span className="vbk-chip warn" title="재시작으로 검증이 중단됐습니다 — 실행 노드가 다음 확인(1분 안팎)에 사본을 끄고 검증 전 상태로 되돌립니다. 그 전에는 새 검증·잡 삭제를 하지 않습니다.">중단된 검증 정리 대기</span>}
             {!job.enabled && <span className="vbk-chip warn">비활성</span>}

@@ -323,7 +323,7 @@ export function pendingOpFor(jobId, kind, ref = '') {
 
 /** 위임 잡 정의(엣지가 받는 모양) — 실행 상태는 싣지 않는다. */
 export function delegatedDef(j) {
-  return { id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, dest: j.dest, schedule: j.schedule, keep: j.keep, quiesce: !!j.quiesce, enabled: j.enabled !== false, verifyAfter: !!j.verifyAfter, ...(j.keepDays ? { keepDays: j.keepDays } : {}) };
+  return { id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, dest: j.dest, schedule: j.schedule, keep: j.keep, quiesce: !!j.quiesce, enabled: j.enabled !== false, verifyAfter: !!j.verifyAfter, ...(j.keepDays ? { keepDays: j.keepDays } : {}), ...(j.quiesceFallback === false ? { quiesceFallback: false } : {}) };
 }
 
 /**

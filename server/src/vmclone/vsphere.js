@@ -26,12 +26,15 @@ import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.793: '/\/+$/
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 /** 태스크 완료 대기(dsBrowse 패턴) — success 면 result MoRef 문자열(있으면), error 면 throw. */
-export async function waitTask(c, taskRef, { timeoutMs = 4 * 3600_000, pollMs = 5_000, label = '작업' } = {}) {
+// v2.795: onProgress(퍼센트 0~100) — 실행 상태 문구에 진행률을 싣는다(표시용 — 던져도 태스크 대기는 계속한다).
+export async function waitTask(c, taskRef, { timeoutMs = 4 * 3600_000, pollMs = 5_000, label = '작업', onProgress = null } = {}) {
   const t0 = Date.now();
   for (;;) {
     const objs = await c.retrieveObjectProps('Task', taskRef, ['info.state', 'info.result', 'info.error.localizedMessage', 'info.progress']);
     const p = objs[0]?.props || {};
     const state = p['info.state'] || '';
+    const pct = p['info.progress'] == null || p['info.progress'] === '' ? null : Number(p['info.progress']);
+    if (onProgress && state === 'running' && Number.isFinite(pct)) { try { onProgress(Math.max(0, Math.min(100, Math.round(pct)))); } catch { /* 표시용 */ } }
     if (state === 'success') return { result: p['info.result'] || null, progress: 100 };
     if (state === 'error') throw new Error(`${label} 실패: ${p['info.error.localizedMessage'] || 'vCenter 태스크 오류'}`);
     if (Date.now() - t0 > timeoutMs) {
@@ -101,7 +104,7 @@ export async function parentFolderOf(c, vmRef) {
 // v2.794: configXml — VirtualMachineConfigSpec 내부(호출부가 만든 XML · 예: nicDisconnectSpec 의 deviceChange). 복구 VM 을 **NIC 가 끊긴 채로 태어나게**
 //   한다 — 클론 뒤에 끊으면 그 사이(클론 태스크 시한 초과로 결과를 못 받은 경우 포함) 연결된 NIC 의 사본이 vCenter 에 생긴다.
 //   vim25 VirtualMachineCloneSpec 순서: location · template · config · customization · powerOn · snapshot · memory.
-export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null, configXml = '' }) {
+export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null, configXml = '', onProgress = null }) {
   const spec =
     `<spec>` +
     `<location>${dsRef ? `<datastore type="Datastore">${esc(dsRef)}</datastore>` : ''}</location>` +
@@ -116,7 +119,7 @@ export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = nul
   );
   const task = taskRefOf(xml);
   if (!task) throw new Error('클론 태스크 제출 실패');
-  const { result } = await waitTask(c, task, { label: `클론(${name})` });
+  const { result } = await waitTask(c, task, { label: `클론(${name})`, onProgress });
   return result; // 새 VM MoRef(문자열) — 보존 원장에 기록
 }
 
