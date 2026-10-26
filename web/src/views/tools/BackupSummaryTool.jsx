@@ -66,7 +66,8 @@ export default function BackupSummaryTool() {
   }, [opts]);
 
   if (!data && loading) return <Loading />;
-  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+  // v2.785(GV C-B4): 오류 객체를 그대로 — 403 을 문자열로 바꾸면 ErrorBox 가 권한 안내(AccessDenied)로 바꾸지 못했다
+  if (!data && error) return <ErrorBox error={error} />;
   if (!data) return null;
 
   const rows = Array.isArray(data.rows) ? data.rows : [];

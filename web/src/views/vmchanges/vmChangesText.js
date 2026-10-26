@@ -73,12 +73,15 @@ export function vmHistoryNotCollectedText(d) {
 export const HISTORY_STALE_MS = 2 * DAY;
 /**
  * v2.772(Z4-2): VM 상세 이동·변경 이력 — 이 VM 의 vCenter 이벤트 수집이 뒤처졌으면 그 사실(없으면 null).
- * 서버가 `lagging`({okAt, lagMs} — logs/coverage.js 판정)을 주면 그것을, 없으면(옛 서버는 lastTs 만 준다) 마지막 이벤트 시각이
+ * 서버가 `lagging`({okAt, lagMs} — logs/coverage.js 판정)을 주면 그것을, false(지연 없음 판정 — v2.785)면 null, 키가 없거나 null(옛 서버·판정 실패)이면 마지막 이벤트 시각이
  * 목록 화면과 같은 기준(2일)보다 오래됐을 때만 말한다. 지금 수집하지 않는 vCenter(notCollected)는 다른 문장이 말하므로 null.
  * '받아 둔 이벤트 중 이동·변경 없음' 이 그 뒤까지 뜻하지 않게 한다.
  */
 export function vmHistoryLagText(d, now = Date.now()) {
   if (!d || (typeof d.notCollected === 'string' && d.notCollected)) return null;
+  // v2.785(GV D-B2): 서버가 '지연 없음' 을 판정했다(false) — 마지막 이벤트가 오래됐어도 조용한 vCenter 일 뿐이다(수집 정상). 아래 lastTs 대체 판단은
+  //   키가 없거나(옛 서버) null(판정 실패)일 때만 쓴다. 예전에는 서버가 둘을 같은 null 로 보내 조용한 vCenter 의 모든 VM 에 거짓 '수집 지연·정지' 가 떴다.
+  if (d.lagging === false) return null;
   const lg = d.lagging && typeof d.lagging === 'object' ? d.lagging : null;
   const lagMs = lg && Number.isFinite(lg.lagMs) && lg.lagMs > 0 ? lg.lagMs
     : (!lg && Number.isFinite(d.lastTs) && d.lastTs > 0 && now - d.lastTs > HISTORY_STALE_MS ? now - d.lastTs : null);

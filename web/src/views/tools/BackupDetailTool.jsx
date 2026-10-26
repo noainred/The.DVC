@@ -117,8 +117,8 @@ export default function BackupDetailTool({ scope }) {
   const toggle = (key) => setOpen((cur) => { const s = new Set(cur || openSet); if (s.has(key)) s.delete(key); else s.add(key); return s; });
 
   if (vcs && !vcs.length) return <div className="muted">볼 수 있는 vCenter 가 없습니다.</div>;
-  if (!data && loading) return <Loading />;
-  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+  // v2.785(GV C-B4): 로딩·오류로 조기 return 하지 않는다 — 머리(vCenter 선택·옵션·새로고침)는 늘 그리고 본문 자리에 로딩·오류 상자를 둔다.
+  //   예전에는 조회가 실패하면 선택 상자까지 사라져(그 vCenter id 는 저장돼 다시 들어와도 같은 곳) 다른 vCenter 로 옮길 수 없었다.
 
   const r = data?.row || {};
   const vs = veeamStateOf(r.veeamState);
@@ -137,7 +137,7 @@ export default function BackupDetailTool({ scope }) {
               {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           </label>
-          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로" style={{ padding: '6px 14px' }}>CSV</button>}
+          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로(검색어는 반영하지 않음)" style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </div>
       </div>
@@ -146,6 +146,8 @@ export default function BackupDetailTool({ scope }) {
         {data && scopeNote(data.scope, data.row) && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{scopeNote(data.scope, data.row)}</span>}
       </div>
       {csvErr && <div className="card" style={{ padding: '8px 12px', color: '#fca5a5', fontSize: 12 }}>CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
+      {!data && error && <ErrorBox error={error} />}
+      {!data && !error && loading && <Loading />}
 
       {data && (
         <div className="card" style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 28px', minWidth: 0 }}>
@@ -184,6 +186,7 @@ export default function BackupDetailTool({ scope }) {
         </div>
       )}
 
+      {data && (<>
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
           {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {counts[k]}</button>)}
@@ -351,6 +354,7 @@ export default function BackupDetailTool({ scope }) {
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 }
