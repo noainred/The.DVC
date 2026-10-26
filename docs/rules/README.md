@@ -17,7 +17,7 @@
 | [vcenter.md](vcenter.md) | 19 | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) | server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | [gpu.md](gpu.md) | 6 | GPU 모니터링(할당·메모리·온도·수집 점검) | server/src/gpu/ · web/src/views/tools/Gpu* |
 | [cvp.md](cvp.md) | 11 | Arista CVP 수집·장애·GBIC·Overview | server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
-| [isilon.md](isilon.md) | 6 | 아이실론 디렉터리 사용량·메일 | server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
+| [isilon.md](isilon.md) | 7 | 아이실론 디렉터리 사용량·메일 | server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | [ipam.md](ipam.md) | 11 | IP 관리(IPMS·대역·스캔·원장·VM DNS) | server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | [demo.md](demo.md) | 6 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
