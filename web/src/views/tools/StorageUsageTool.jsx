@@ -16,7 +16,7 @@ import {
 } from './storageUsageText.js';
 
 /**
- * 특수기능 › 스토리지 사용량 보고서(v2.747, 도구 키 storage-usage).
+ * 특수기능 › 스토리지 사용량 보고서(v2.788, 도구 키 storage-usage).
  *
  * 사용자 요청(2026-10-26): "스토리지 사용량을 일간/주간 별로 이렇게 정리해서 보는 기능"(엑셀 캡처 — 날짜 행 × 법인 › 장비 ›
  *   Total Usable·Used·Percent, Unity 아래 SAN·NAS 항목) · "표 형식으로 보는 것을 기본 · CSV export 기본 기능" ·

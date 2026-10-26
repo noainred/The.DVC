@@ -1,4 +1,4 @@
-// storageUsageText.test.js — 스토리지 사용량 보고서 화면 규칙(v2.747).
+// storageUsageText.test.js — 스토리지 사용량 보고서 화면 규칙(v2.788).
 // 서버 storage/usageReport.js · usageMailRules.js · resources.js · isidu/mailRules.js 와 **같은 입력으로 대조**한다(번들 경계라 두 벌).
 import { describe, it, expect } from 'vitest';
 import {

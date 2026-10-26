@@ -115,7 +115,7 @@ export const SPECS = [
   { key: 'power', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
     cmds: ['svc_diag -s spinfo'] },
   /*
-   * v2.747 — 하위 항목(LUN·파일시스템) 용량. 사용자 요청 "스토리지 사용량을 일간/주간 별로 이렇게 정리" + 선택 "LUN·파일시스템까지"
+   * v2.788 — 하위 항목(LUN·파일시스템) 용량. 사용자 요청 "스토리지 사용량을 일간/주간 별로 이렇게 정리" + 선택 "LUN·파일시스템까지"
    * (엑셀 캡처의 `SAN Davinci_01` · `NAS sandbox` 행). 파서는 `uemcliParse.parseLuns`·`parseFilesystems`.
    * ⚠ **맨 뒤 · lowPriority**(전원과 같은 자리) — 세션 예산이 남을 때만 돈다. 앞 항목(용량·상태·버전·전원)을 밀어내지 않고,
    *   `unitySshBudget2528.test.js` 의 '필수 최악 합 ≤ 예산' · '비-lowPriority 최악 합 ≤ 예산 × 1.25' 산수에 들지 않는다.
@@ -368,7 +368,7 @@ export function applyUnitySshPower(extra, r) {
 }
 
 /**
- * v2.747 — LUN·파일시스템 → `extra.resources` + 종류별 `extra.resourcesProbe`(순수 — extra 변경). r = runCliSession 결과.
+ * v2.788 — LUN·파일시스템 → `extra.resources` + 종류별 `extra.resourcesProbe`(순수 — extra 변경). r = runCliSession 결과.
  * ⚠ **'0개' 와 '못 읽음' 을 구분한다** — 명령이 성공했고 레코드가 없으면 ok·0개, 성공했는데 인식한 항목이 없고 출력이
  *   비어 있지 않으면 'unparsed'(형식 문제), 실패는 'failed', 예산으로 시작하지 않았으면 'skipped'. 못 읽은 종류는
  *   목록에 넣지 않는다(이전 값을 지어내지 않는다 — 일 롤업은 그 날 그 항목의 행을 만들지 않는다).
@@ -433,7 +433,7 @@ export async function collectViaSsh(device) {
     // v2.667: 못 읽은 이유를 `extra.powerProbe` 로 싣는다(예산 초과로 건너뜀 / 명령 실패 / 출력에 값 없음) —
     //   전체 소비 전력 화면이 '못 읽음 N' 을 사유별로 말한다. 요약 구획이 없으면 FRU 상태줄(`ps0: OK 330`)의 숫자로 대신한다.
     applyUnitySshPower(snap.extra, r);
-    applyUnitySshResources(snap.extra, r);   // v2.747 — LUN·파일시스템(하위 항목). 못 읽은 사유는 resourcesProbe
+    applyUnitySshResources(snap.extra, r);   // v2.788 — LUN·파일시스템(하위 항목). 못 읽은 사유는 resourcesProbe
     // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
     if (!snap.extra.model) {
       for (const x of raw) {
