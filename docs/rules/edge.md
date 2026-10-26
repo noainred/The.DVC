@@ -23,6 +23,7 @@
 - (원래 3622행) v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나
 - (원래 4692행) 등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
+- (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
 
 ## 본문
 
@@ -678,3 +679,19 @@
     PDU 임계치 배포는 관리자가 **바꾼 키만**(`_assigned`, enabled 제외 · 표지 없는 파일은 `{}` — 엣지는 `{}` 를 '중앙 지정 없음' 으로 직전 세트를 지운다). 혼합 버전(v2.769 중앙 + v2.770 엣지)에서는 중앙을 먼저 올릴 것.
   - v2.771(점검 R6-F4): 엣지 export 의 `power.byHost` 상한(`REMOTE_BYHOST_MAX`, 뺀 수 `byHostDropped`). collectors.json·central-agent-tokens.json 손상은 표지(`registryLoadError`·`agentTokensLoadError`)로 드러내고,
     자동 경로(자기등록·검증 표시·비관리자 add)는 `autoWriteRefusal` 로 거절 — 관리자 저장만 표지를 푼다. 첫 설치(파일·보존본 없음)는 막지 않는다. 손상 중 puller 는 clearStaleRemote 를 건너뛰고, link-check·register·central 게이트는 503 registryUnreadable.
+
+- **VM 백업 센터 법인 위임(v2.793)** — `vmclone/dispatch.js`(중앙) · `agent/vmCloneWorker.js`(엣지) · `vmclone/execOp.js`(공용 실행) ·
+  `routes/central.js` `/vm-clone-sync`(GET)·`/vm-clone-report`(POST). 사용자 결정(2026-10-26): 법인 = 수집 엣지, 실행 = 담당 엣지, 저장소 = ESXi NFS 데이터스토어 또는 엣지 NFS 마운트.
+  회귀 `server/test/vmCloneCenter2793.test.js`.
+  · **담당 엣지는 등록값(`remoteAgent`)이 먼저**, 없으면 그 vCenter 인벤토리를 올린 엣지. 둘이 다르면 `conflict` — 어느 쪽에도 맡기지 않는다(같은 VM 을 두 엣지가 스냅샷하지 않게).
+  · 엣지는 정의를 로컬 저장소에 **위임 잡(`origin:'central'`)** 으로 맞추고 기존 스케줄러·실행기(재시작 정리 포함)로 돌린다 — 중앙과 끊겨도 백업은 계속된다.
+    중앙 스케줄러는 이 노드가 위임한(site) vCenter 의 잡을 넣지 않는다(`dueJobsOf` `siteVcIds`). 엣지 화면·API 로 위임 잡을 고치거나 지울 수 없다.
+  · **지우기는 중앙이 이 엣지 담당이라고 확인한 vCenter(`vcenters`)의 잡만** — 담당 미확정·빈 목록으로는 지우지 않는다. 무효 정의가 와도 그 id 는 남긴다.
+    실행 중 기록이 남은 잡은 정리가 끝날 때까지 둔다. `vm-clone.json` 손상이면 sync 는 503 settingsUnreadable(엣지는 그대로 유지), 등록부 파일을 못 읽으면 503 registryUnreadable.
+  · 엣지 보고는 `sanitizeReport` 로 아는 필드만·상한·글자만 받고, 잡 상태는 **그 엣지 담당 vCenter 의 중앙 잡 id** 만, 회신(ack)은 **그 엣지에 배정된 작업**만 받는다.
+    3규약(개별 토큰 전용 · 저장 키는 `req.centralAuth.agent` · X-Agent-Name). 보고는 BIG_JSON 등록. 워커는 0건이어도 보고한다(`edgelog/spec.js` `pull.vmClone`).
+  · 작업(지금 실행·검증·복구·NFS 연결)은 claim→ack. 대기 `PENDING_TTL_MS`(30분) · 인출 뒤 진행 보고 없음 `CLAIM_MS`(15분, 보고마다 연장)로 닫고 **다시 내려보내지 않는다**
+    (복구 VM·데이터스토어가 두 번 만들어지지 않게). 늦은 회신은 결과만 고친다. 작업 등록부·엣지 보고는 인메모리 — 중앙 재시작이면 대기 작업은 사라진다(화면이 말한다).
+  · 검증은 사본에 검증용 스냅샷 → **NIC 끊기 후 다시 읽어 확인**(`disconnectAllNics` — 확인 못 하면 켜지 않는다) → 켜기 → Tools 대기 → 끄기 → 되돌리기 → 스냅샷 삭제.
+    복구는 새 VM 만(원본 덮어쓰기 없음) · 기본 NIC 끊김 · 끊지 않으면 자동으로 켜지 않는다. ESXi NFS 데이터스토어는 붙이기만 한다(떼기 없음 — 목록에서만 삭제).
+

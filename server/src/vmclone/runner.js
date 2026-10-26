@@ -36,7 +36,7 @@ import { getDataSource } from '../runtime-settings.js';
 import { logAudit } from '../audit.js';
 import {
   getJob, recordRun, pruneList, setRunning, patchRunning, clearRunning, interruptedRunOf,
-  RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS, RESUME_LIMIT, RESUME_EXPIRE_MS,
+  RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS, RESUME_LIMIT, RESUME_EXPIRE_MS, patchClone, recordJobEvent, appendBackupPhases,
 } from './store.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { isVmCloneDemoJob } from '../mock/demo/vmclone.js';
@@ -44,6 +44,7 @@ import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot,
   destroyClone, vmFilePaths, parseDsPath, backupFileFilter, datacenterPathOf, downloadDsFile,
 } from './vsphere.js';
+import { directCollectSkipReason } from '../vcenter/collectTarget.js';
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
 import { morefOf } from '../vcenter/registry.js';
 import { fileStamp, localStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
@@ -56,14 +57,36 @@ import { authStopView } from '../util/authGuard.js';
 // v2.586 — vCenter 에 남는 클론·스냅샷 이름의 시각은 포탈 시각(KST). 프로세스 TZ(UTC)를 따르면 9시간 어긋난다.
 const stamp = () => fileStamp(Date.now());
 
+/**
+ * v2.793: 새 사본 크기(커밋 바이트). 못 읽으면 null — 0 으로 적지 않는다(util/numOrNull 규약).
+ * vsphere.js 에 같은 함수(vmCommittedBytes)가 있지만 여기서는 import 하지 않는다 — 실행기 테스트들이 vsphere.js 를
+ * 정해진 export 목록으로 바꿔 끼우므로(audit2604e·2741a·2767a), 실행기가 새 이름을 import 하면 그 테스트들이 모두 깨진다.
+ */
+async function committedBytesOf(c, vmRef) {
+  try {
+    const raw = (await c.retrieveObjectProps('VirtualMachine', vmRef, ['summary.storage.committed']))?.[0]?.props?.['summary.storage.committed'];
+    if (raw == null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch { return null; }
+}
+
 // 전역 실행 큐 — 한 번에 1개(스케줄·수동 공용). 대기 중 목록은 상태 API 로 노출.
+// v2.793: 검증·복구·NFS 데이터스토어 연결(vsOps.js)도 같은 큐를 탄다(enqueueOp) — 같은 vCenter·스토리지에 겹쳐 몰리지 않게.
 let _chain = Promise.resolve();
-const _running = { jobId: null, phase: '', startedAt: 0 };
+const _running = { jobId: null, kind: '', opId: '', phase: '', startedAt: 0 };
 const _queue = [];
-export function runnerStatus() { return { running: _running.jobId ? { ..._running } : null, queued: [..._queue] }; }
+const _opQueue = [];   // [{ id, kind, jobId, label }]
+export function runnerStatus() {
+  return {
+    running: (_running.jobId || _running.opId) ? { ..._running } : null,
+    queued: [..._queue],
+    ...(_opQueue.length ? { queuedOps: _opQueue.map((o) => ({ id: o.id, kind: o.kind, jobId: o.jobId || '' })) } : {}),
+  };
+}
 
 export function enqueueRun(jobId, trigger = 'manual') {
-  if (_running.jobId === jobId || _queue.includes(jobId)) return { queued: false, reason: '이미 실행/대기 중' };
+  if ((_running.jobId === jobId && _running.kind === 'backup') || _queue.includes(jobId)) return { queued: false, reason: '이미 실행/대기 중' };
   _queue.push(jobId);
   _chain = _chain.then(() => {
     _queue.splice(_queue.indexOf(jobId), 1);
@@ -72,13 +95,47 @@ export function enqueueRun(jobId, trigger = 'manual') {
   return { queued: true };
 }
 
+/**
+ * v2.793 — 백업이 아닌 작업(검증·복구·NFS 데이터스토어 연결)을 같은 직렬 큐에 넣는다.
+ * fn(setPhase) 는 { ok, detail, … } 를 돌려준다. 던지면 { ok:false, detail } 로 바꾼다 — 큐는 끊기지 않는다.
+ * @param {{id:string, kind:string, jobId?:string, label?:string}} desc
+ * @returns {Promise<object>} fn 의 결과
+ */
+export function enqueueOp(desc, fn) {
+  const d = { id: String(desc?.id || `op-${Date.now().toString(36)}`), kind: String(desc?.kind || 'op'), jobId: desc?.jobId || '', label: desc?.label || '' };
+  _opQueue.push(d);
+  return new Promise((resolve) => {
+    _chain = _chain.then(async () => {
+      _opQueue.splice(_opQueue.indexOf(d), 1);
+      Object.assign(_running, { jobId: d.jobId || null, kind: d.kind, opId: d.id, phase: d.label || d.kind, startedAt: Date.now() });
+      try { resolve(await fn((p) => { if (_running.opId === d.id) _running.phase = String(p || '').slice(0, 120); })); }
+      catch (e) { resolve({ ok: false, detail: String(e?.message || e).slice(0, 400) }); }
+      finally { Object.assign(_running, { jobId: null, kind: '', opId: '', phase: '', startedAt: 0 }); }
+    });
+  });
+}
+
+/** 백업 직후 자동 검증(job.verifyAfter) — 같은 큐 뒤에 붙인다. 결과는 원장(clone.verify)과 잡 이력에 남는다. */
+function enqueueAutoVerify(jobId, ref) {
+  enqueueOp({ id: `auto-verify-${jobId}-${Date.now().toString(36)}`, kind: 'verify', jobId, label: '자동 검증' }, async (setPhase) => {
+    const job = getJob(jobId);
+    if (!job) return { ok: false, detail: '잡이 지워졌습니다' };
+    const { verifyClone } = await import('./vsOps.js');
+    const r = await verifyClone(job, ref, { setPhase });
+    patchClone(jobId, ref, { verify: { at: Date.now(), ok: r.ok, detail: r.detail } });
+    recordJobEvent(jobId, { kind: 'verify', ok: r.ok, detail: r.detail, ms: r.ms, trigger: 'auto', phases: r.phases });
+    logAudit({ user: 'vm-clone(auto)', action: r.ok ? 'VM 백업 검증 성공' : 'VM 백업 검증 실패', target: `${job.vcenterId}/${job.vmName}`, detail: String(r.detail).slice(0, 200) });
+    return r;
+  }).catch(() => {});
+}
+
 // v2.604(감사 TIM2604-02): 실행 표시(_running)는 스냅샷 삭제(병합)·로그아웃까지 **다 끝난 뒤** 한 번만 내린다.
 //   예전엔 done() 이 내려, 성공 직후 finally 의 스냅샷 병합(최대 수 시간) 동안 상태가 '실행 중 아님' 이었고 그 사이
 //   enqueueRun 의 중복 가드(_running.jobId === jobId)가 풀려 같은 잡이 한 번 더 대기열에 올랐다.
 async function runJob(jobId, trigger) {
   try { return await runJobBody(jobId, trigger); }
   finally {
-    if (_running.jobId === jobId) { _running.jobId = null; _running.phase = ''; }
+    if (_running.jobId === jobId) { _running.jobId = null; _running.kind = ''; _running.phase = ''; }
     // v2.741(감사 TIMING-01): 이 프로세스가 남긴 '실행 중' 기록은 스냅샷 삭제·로그아웃까지 끝난 뒤 내린다(이전 프로세스의 기록은 정리가 끝났을 때만).
     try { clearRunning(jobId); } catch (e) { console.warn(`[vmclone] 실행 기록을 지우지 못했습니다(${e?.message || e})`); }
   }
@@ -230,15 +287,23 @@ async function runJobBody(jobId, trigger) {
     recordRun(jobId, { ok: false, skipped: 'demo-job', detail: '데모(mock) 모드에서 만든 잡이라 실행하지 않았습니다 — 지우고 실제 VM 으로 새로 만드세요.', ms: 0 });
     return;
   }
-  _running.jobId = jobId; _running.phase = '시작'; _running.startedAt = Date.now();
+  _running.jobId = jobId; _running.kind = 'backup'; _running.opId = ''; _running.startedAt = Date.now();
+  // v2.793: 단계 기록(화면의 세션 타임라인) — 같은 이름이 이어지면 하나로 합친다(다운로드 파일마다 줄이 생기지 않게).
+  const phases = []; let curPh = null;
+  const closePhase = () => { if (curPh) { const ms = Date.now() - curPh.t; const prev = phases[phases.length - 1]; if (prev && prev.n === curPh.n) prev.ms += ms; else phases.push({ n: curPh.n, ms }); curPh = null; } };
+  const setPhase = (label) => { closePhase(); _running.phase = label; curPh = { n: String(label).slice(0, 200).replace(/\s+\d+\/\d+\s+—.*$/, '').replace(/\s+→.*$/, '').slice(0, 60), t: Date.now() }; };
+  setPhase('시작');
   const t0 = Date.now();
   const stale = interruptedRunOf(job); // v2.741(TIMING-01): 이전 프로세스가 끝내지 못한 실행 — 새 스냅샷을 만들기 전에 정리한다
   let recoveryNote = '';              // 정리 결과(이번 실행 결과 뒤에 붙인다)
   let recovered = !stale;             // 정리를 마쳤는가(그 뒤의 실패는 이번 실행의 실패다 — 정리를 다시 미루지 않는다)
   let nfsDestDir = '';                // v2.767(R2-B3-3): 이번 실행의 NFS 백업 폴더 — 실패하면 불완전 폴더를 지운다
+  let recordedPhases = 0;             // done() 이 이력에 적은 단계 수 — 그 뒤(스냅샷 병합)는 끝난 뒤 덧붙인다
   const done = (ok, detail, extra = {}) => {
     detail = `${detail}${recoveryNote}`;
-    recordRun(jobId, { ok, detail, ms: Date.now() - t0, ...extra });
+    closePhase();
+    recordedPhases = phases.length;
+    recordRun(jobId, { ok, detail, ms: Date.now() - t0, trigger, phases, ...extra });
     logAudit({ user: `vm-clone(${trigger})`, action: ok ? 'VM 복제 성공' : 'VM 복제 실패', target: `${job.vcenterId}/${job.vmName}`, detail: String(detail).slice(0, 200) });
     // _running 은 여기서 내리지 않는다 — runJob 의 finally 가 스냅샷 병합·로그아웃 뒤에 내린다(TIM2604-02).
   };
@@ -258,15 +323,27 @@ async function runJobBody(jobId, trigger) {
         recoveryNote = ` · 재시작으로 중단된 실행의 ${snapLabel(stale)} 은 데모(mock) 모드라 확인하지 못했습니다 — vCenter 에서 직접 확인하세요`;
       }
       if (!mock) throw new Error(`vCenter 설정을 찾을 수 없습니다: ${job.vcenterId}`);
-      _running.phase = '시뮬레이션(mock)';
+      setPhase('시뮬레이션(mock)');
       await new Promise((r) => setTimeout(r, 2000));
       const name = `${job.vmName}-bak-${stamp()}`;
-      const removed = pruneList([...job.clones, { name, ref: `mock-${Date.now()}`, at: Date.now() }], job.keep);
+      const ref = `mock-${Date.now()}`; const at = Date.now();
+      // v2.793: 데모 사본 크기 — 인벤토리의 VM 프로비저닝 크기에서(씬 사용량을 흉내 낸 0.6배). 모르면 싣지 않는다.
+      const inv = (store.get()?.vms || []).find((v) => v.id === job.vmId);
+      const gb = Number(inv?.storageGB);
+      const bytes = inv && Number.isFinite(gb) && gb > 0 ? Math.round(gb * 0.6 * 1024 ** 3) : null;
+      const removed = pruneList([...job.clones, { name, ref, at }], job.keep);
       done(true, `mock 복제 완료 — ${name}${removed.length ? ` · 보존정책 삭제 ${removed.length}개` : ''}`,
-        { addClone: { name, ref: `mock-${Date.now()}`, at: Date.now() }, removeCloneRefs: removed.map((c) => c.ref) });
+        { addClone: { name, ref, at, ...(bytes != null ? { bytes } : {}) }, removeCloneRefs: removed.map((c) => c.ref) });
+      if (job.dest.type === 'datastore' && job.verifyAfter) enqueueAutoVerify(jobId, ref);
       return;
     }
 
+    // v2.793: 엣지 위임(site) vCenter 는 이 노드가 로그인하지 않는다 — 담당 엣지가 위임 잡으로 실행한다(central/vmCloneEdge.js).
+    //   스케줄러가 이미 거르고 화면의 '지금 실행' 은 엣지로 보내므로 여기 오는 것은 예외 경로다 — 조용히 넘기지 않고 남긴다.
+    if (directCollectSkipReason(vcCfg) === 'site') {
+      recordRun(jobId, { ok: false, skipped: 'delegated', trigger, ms: 0, detail: '이 vCenter 는 엣지 위임(site) 수집이라 이 포탈은 로그인하지 않습니다 — 담당 엣지가 실행합니다.' });
+      return;
+    }
     const vmRef = morefOf(job.vmId, job.vcenterId);
     if (!vmRef) throw new Error('VM MoRef 해석 실패');
     // v2.591(감사 F1): 인벤토리 수집과 같은 vCenter 계정이다. 그 계정이 인증 실패로 멈춰 있으면 **스케줄 실행**은
@@ -293,7 +370,7 @@ async function runJobBody(jobId, trigger) {
       throw e;
     }
     if (stale) {
-      _running.phase = '재시작 정리(남은 스냅샷)';
+      setPhase('재시작 정리(남은 스냅샷)');
       const r = await cleanupInterruptedSnapshot(c, vmRef, stale);
       if (!r.ok) {
         // 새 스냅샷을 겹쳐 만들지 않는다 — 다음 시도까지 이 잡은 실행하지 않는다.
@@ -317,8 +394,9 @@ async function runJobBody(jobId, trigger) {
     }
     let snapRef = null;
     let snapCleanupErr = '';
+    let autoVerifyRef = '';
     try {
-      _running.phase = `스냅샷 생성${job.quiesce ? '(정지점)' : ''}`;
+      setPhase(`스냅샷 생성${job.quiesce ? '(정지점)' : ''}`);
       // v2.741(TIMING-01): 스냅샷을 요청하기 **전에** 실행 중 기록을 동기로 남긴다 — 곧바로 재시작이 와도 다음 기동이 이 스냅샷을 찾아 지운다.
       const snapName = `portal-clone-${stamp()}`;
       setRunning(jobId, { trigger, vmRef, snapName, phase: 'snapshot', resumes: trigger === 'resume' && stale ? (Number(stale.resumes) || 0) + 1 : 0 });
@@ -332,12 +410,13 @@ async function runJobBody(jobId, trigger) {
         const folder = await parentFolderOf(c, vmRef);
         if (!folder) throw new Error('원본 VM 폴더 조회 실패');
         const cloneName = `${job.vmName}-bak-${stamp()}`;
-        _running.phase = `클론 중 → ${job.dest.datastoreName}`;
+        setPhase(`클론 → ${job.dest.datastoreName}`);
         patchRunning(jobId, { phase: 'clone', cloneName });
         const newRef = await cloneFromSnapshot(c, { vmRef, folderRef: folder, name: cloneName, dsRef: morefOf(ds.id, job.vcenterId), snapshotRef: snapRef });
+        const cloneBytes = await committedBytesOf(c, newRef);   // v2.793: 사본 크기(못 읽으면 null — 0 으로 적지 않는다)
 
         // 보존정책 — 원장 기준(이름 패턴 아님), 켜져 있는 클론은 건너뛰고 보고.
-        _running.phase = '보존정책 적용';
+        setPhase('보존정책 적용');
         const ledger = [...job.clones, { name: cloneName, ref: newRef, at: Date.now() }];
         const toDelete = pruneList(ledger, job.keep);
         const removedRefs = []; const skipped = [];
@@ -348,7 +427,8 @@ async function runJobBody(jobId, trigger) {
         done(true, `클론 완료 — ${cloneName} → [${job.dest.datastoreName}]` +
           (removedRefs.length ? ` · 보존정책 삭제 ${removedRefs.length}개` : '') +
           (skipped.length ? ` · 삭제 건너뜀 ${skipped.length}건(${skipped[0]})` : ''),
-          { addClone: { name: cloneName, ref: newRef, at: Date.now() }, removeCloneRefs: removedRefs });
+          { addClone: { name: cloneName, ref: newRef, at: Date.now(), ...(cloneBytes != null ? { bytes: cloneBytes } : {}) }, removeCloneRefs: removedRefs });
+        if (job.verifyAfter) autoVerifyRef = newRef;   // 스냅샷 병합·로그아웃이 끝난 뒤 큐에 넣는다
       } else {
         // NFS 파일 백업 — 마운트 상태 필수(끊겨 있으면 즉시 실패: NAS 에 안 쓰고 로컬 디스크를
         // 채우는 사고 방지 — containment 이전에 마운트 여부부터 확인한다).
@@ -365,7 +445,7 @@ async function runJobBody(jobId, trigger) {
         nfsDestDir = destDir;
 
         patchRunning(jobId, { phase: 'download', destDir });
-        _running.phase = '파일 목록 조회';
+        setPhase('파일 목록 조회');
         const { vmx, files } = await vmFilePaths(c, vmRef);
         const wanted = [...new Set([vmx, ...files])].filter(Boolean).filter(backupFileFilter);
         if (!wanted.length) throw new Error('백업 대상 파일이 없습니다(layoutEx 조회 실패?)');
@@ -377,7 +457,7 @@ async function runJobBody(jobId, trigger) {
         for (let i = 0; i < wanted.length; i++) {
           const pd = parseDsPath(wanted[i]);
           if (!pd) continue;
-          _running.phase = `다운로드 ${i + 1}/${wanted.length} — ${pd.rel.split('/').pop()}`;
+          setPhase(`다운로드 ${i + 1}/${wanted.length} — ${pd.rel.split('/').pop()}`);
           // v2.767(R2-B3-4): 데이터스토어별 하위 폴더 + 원 경로 — 두 데이터스토어의 동명 디스크가 같은 파일로 덮어써지지 않게.
           const dest = nfsFileTarget(destDir, pd);
           if (!dest) throw new Error(`백업 대상 경로를 만들 수 없습니다: ${wanted[i]}`);
@@ -391,23 +471,27 @@ async function runJobBody(jobId, trigger) {
         }, null, 2));
 
         // NFS 보존 — 이 잡의 온전한 백업(manifest 의 vcenterId·vmId 일치)만 세어 오래된 순 삭제.
-        _running.phase = '보존정책 적용';
+        setPhase('보존정책 적용');
         const removed = pruneNfsBackups(mp, destRoot, job).length;
         done(true, `NFS 백업 완료 — ${wanted.length}파일 ${(bytes / 1024 ** 3).toFixed(2)}GB → ${destDir}${removed ? ` · 보존정책 삭제 ${removed}개` : ''}${legacyNfsNote(mp, job)}`);
       }
     } finally {
       if (snapRef) {
-        _running.phase = '스냅샷 삭제(병합)';
+        setPhase('스냅샷 삭제(병합)');
         patchRunning(jobId, { phase: 'remove-snapshot' });
         try { await removeSnapshot(c, snapRef); }
         catch (e) { snapCleanupErr = ` ⚠ 스냅샷 삭제 실패(${e.message}) — vCenter 에서 수동 삭제 필요('스냅샷 나이 감시' 도구에도 표시됨)`; }
       }
       await c.logout().catch(() => {});
     }
+    // v2.793: done() 뒤의 단계(스냅샷 병합)를 같은 이력 줄에 덧붙인다.
+    closePhase();
+    if (phases.length > recordedPhases) appendBackupPhases(jobId, phases.slice(recordedPhases));
     if (snapCleanupErr) {
       const j = getJob(jobId); // done() 이 이미 기록한 상세에 스냅샷 경고를 덧붙인다
-      if (j?.lastRun) recordRun(jobId, { ok: j.lastRun.ok, detail: j.lastRun.detail + snapCleanupErr, ms: j.lastRun.ms });
+      if (j?.lastRun) recordRun(jobId, { ok: j.lastRun.ok, detail: j.lastRun.detail + snapCleanupErr, ms: j.lastRun.ms, history: false });
     }
+    if (autoVerifyRef) enqueueAutoVerify(jobId, autoVerifyRef);
   } catch (e) {
     // v2.741: 정리를 마치기 전의 실패(vCenter 불통·로그인 실패)면 정리를 미룬다 — 다음 틱마다 다시 로그인하지 않게.
     if (stale && !recovered) recoveryNote = ` · ${postponeRecovery(jobId, stale, e.message).text}`;

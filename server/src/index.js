@@ -106,6 +106,7 @@ import { startDbSizeSampler } from './insights/portalDb.js';
 import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
+import { startVmCloneWorker } from './agent/vmCloneWorker.js'; // VM 백업 법인 위임 — 엣지 동기화·보고(v2.793). CENTRAL_URL 미설정이면 자기기동 안 함
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
@@ -370,6 +371,7 @@ app.use('/api/central/rma-result', BIG_JSON);   // v2.591 PR-9: RMA 명령 출�
 // v2.590 D2: svcmon 엣지 보고 — 행 2,000 + 메타(경로·호스트·점검명)가 한 청크에 실리면 1mb 기본을 넘는다(실측 5,000항목 1.09MB → 413).
 // 엣지가 메타를 청크마다 나누고 413 이면 청크를 줄여 다시 나누지만, 한도를 넉넉히 두는 것이 1차 방어다.
 app.use('/api/central/svcmon-report', BIG_JSON);
+app.use('/api/central/vm-clone-report', BIG_JSON); // VM 백업 위임 보고(v2.793) — 위임 잡 200개 × 이력 30·원장 30 이면 1mb 기본을 넘을 수 있다(413 = 조용한 소실)
 app.use('/api/central/pdu-data', BIG_JSON);
 // v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
 // 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는
@@ -575,6 +577,7 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
+  startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
