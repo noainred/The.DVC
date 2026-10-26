@@ -14,29 +14,34 @@
  *  · 숫자는 화면(`/tools/storage-usage`)과 **같은 조회**(`usageData.loadUsageReport`)와 같은 합계(`usageReport.aggregateCells`)로 만든다.
  *  · 부분 합은 표지를 단다('값 있음 N/M대') · 기준일에 관측이 없어 이전 관측을 쓴 칸은 '≈' 와 관측일 · 값이 없으면 '—'(0 이 아니다).
  *  · 표 레이아웃 · 인라인 스타일 · 모든 값 이스케이프. 포탈 주소 설정이 없으므로 링크 대신 메뉴 경로를 글로 적는다(아이실론 메일과 같은 판단).
- *  · 메일에는 CSV 를 붙이지 않는다(공용 SMTP 모듈에 첨부 기능이 없다) — 본문이 화면의 CSV 내려받기 위치를 알려 준다.
+ *
+ * ── v2.791(사용자 요청 "메일 발송을 Excel 형식으로 … 누적된 모든 주간 사용량 … 관리자가 실제로 사용할 수 있는 데이터를 첨부") ─────
+ *  · 본문은 승인된 캔버스 시안(https://claude.ai/artifact/8CD6gZbSab7UBo1RZ6spTW ① 메일 본문)의 구성이다 — 첨부 안내 · 핵심 지표 ·
+ *    조치가 필요한 항목 · 지난주 증가량 상위 5 · PowerScale 풀별 · 법인별 요약 · 이번 주 값을 못 읽은 장비. 판단은 `usageInsights.js` 하나.
+ *  · 본문은 항상 **주간(ISO 주차)** 이다 — 예전 설정의 표 단위·추이 기간 수·장비별 표(gran·count·includeDevices)는 쓰지 않는다
+ *    (저장 파일에 남아 있어도 읽지 않는다 — 전 주차와 장비별 값은 첨부 엑셀이 담는다).
+ *  · 첨부(attachExcel, 기본 켬)는 누적된 전 주차 엑셀(`usageXlsx.js`)이다. 공용 SMTP 첨부 상한을 넘으면 데이터 시트만 최근 주로 줄이고,
+ *    그래도 넘거나 만들지 못하면 첨부 없이 보내며 **본문이 그 사실을 밝힌다**(조용히 빼지 않는다).
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { normalizeMailList, isEmail, MAIL_LIST_MAX } from '../isidu/mailRules.js';
 import { TIME_RE, daysLabel, slotLabel } from '../isidu/digestRules.js';
-import { GRANS, aggregateCells, deltaOf } from './usageReport.js';
-import { RESOURCE_KINDS } from './resources.js';
+import { buildInsights } from './usageInsights.js';
 
 export const VIEW_PATH = '특수 기능 › 스토리지 사용량 보고서';
 export const MAIL_KIND = 'storage-usage';
 export const MAIL_HISTORY_MAX = 20;
-/** 추이 표의 기간 수 범위 — 웹 설정 폼이 이 값으로 고른다. */
-export const TREND_RANGE = Object.freeze({ min: 2, max: 12, def: 5 });
+/** 본문 '조치가 필요한 항목' 의 최대 줄 수 — 나머지는 첨부 엑셀 '요약' 시트에(본문이 그 수를 밝힌다). */
+export const MAIL_ACTIONS_MAX = 12;
 /** 보내지 않은 사유 — 웹 `storageUsageText.SKIP_TEXT` 와 1:1(웹 테스트가 이 소스에서 뽑아 대조). */
 export const SKIP_CODES = Object.freeze(['no-recipients', 'no-devices', 'mail-off', 'auth-stopped', 'unreadable', 'db-off']);
 
 export const MAIL_DEFAULTS = Object.freeze({
   enabled: false, days: Object.freeze([1]), time: '08:00', includeAdmin: true, to: Object.freeze([]),
-  gran: 'weekly', count: TREND_RANGE.def, includeDevices: true, includeResources: false, since: null,
+  attachExcel: true, includeResources: true, since: null,
 });
 
 const intDays = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b);
-const intIn = (v, r) => { const n = numOrNull(v); return n != null && Number.isInteger(n) && n >= r.min && n <= r.max ? n : null; };
 
 /** 저장된 설정(빈 값 보정). 순수. */
 export function mailOf(raw) {
@@ -48,10 +53,8 @@ export function mailOf(raw) {
     time: TIME_RE.test(String(d.time || '')) ? String(d.time) : MAIL_DEFAULTS.time,
     includeAdmin: d.includeAdmin !== false,
     to: (Array.isArray(d.to) ? d.to : []).filter(isEmail).slice(0, MAIL_LIST_MAX),
-    gran: Object.hasOwn(GRANS, String(d.gran || '')) ? String(d.gran) : MAIL_DEFAULTS.gran,
-    count: intIn(d.count, TREND_RANGE) ?? TREND_RANGE.def,
-    includeDevices: d.includeDevices !== false,
-    includeResources: d.includeResources === true,
+    attachExcel: d.attachExcel !== false,
+    includeResources: d.includeResources !== false,
     since: since != null && since > 0 ? since : null,
   };
 }
@@ -69,24 +72,13 @@ export function normalizeMail(input, prev, now = Date.now()) {
   if (enabled && !days.length) return { error: '메일을 보낼 요일을 하나 이상 고르세요.', field: 'mail.days' };
   const time = input.time == null ? p.time : String(input.time).trim();
   if (!TIME_RE.test(time)) return { error: '보내는 시각은 00:00~23:59 형식이어야 합니다.', field: 'mail.time' };
-  let gran = p.gran;
-  if (input.gran != null) {
-    if (!Object.hasOwn(GRANS, String(input.gran))) return { error: '표 단위는 일간·주간·월간 중 하나여야 합니다.', field: 'mail.gran' };
-    gran = String(input.gran);
-  }
-  let count = p.count;
-  if (input.count != null && String(input.count).trim() !== '') {
-    const n = intIn(input.count, TREND_RANGE);
-    if (n == null) return { error: `추이 기간 수는 ${TREND_RANGE.min}~${TREND_RANGE.max} 사이의 정수여야 합니다.`, field: 'mail.count' };
-    count = n;
-  }
   const to = input.to == null ? { list: p.to, invalid: [], over: 0 } : normalizeMailList(input.to);
   if (to.invalid.length) return { error: `추가 받는 사람 주소 형식이 잘못됐습니다: ${to.invalid.slice(0, 3).join(', ')}${to.invalid.length > 3 ? ` 외 ${to.invalid.length - 3}개` : ''}`, field: 'mail.to' };
   if (to.over) return { error: `추가 받는 사람은 ${MAIL_LIST_MAX}명까지입니다(${to.over}명 초과).`, field: 'mail.to' };
   const flag = (k) => (typeof input[k] === 'boolean' ? input[k] : p[k]);
   const out = {
-    enabled, days, time, includeAdmin: flag('includeAdmin'), to: to.list, gran, count,
-    includeDevices: flag('includeDevices'), includeResources: flag('includeResources'), since: p.since,
+    enabled, days, time, includeAdmin: flag('includeAdmin'), to: to.list,
+    attachExcel: flag('attachExcel'), includeResources: flag('includeResources'), since: p.since,
   };
   const sameDef = p.enabled && JSON.stringify(p.days) === JSON.stringify(out.days) && p.time === out.time;
   if (enabled && !(sameDef && p.since)) out.since = now;
@@ -116,122 +108,157 @@ export function deltaText(d) {
 export const pctText = (p) => (numOrNull(p) == null ? '—' : `${Number(p).toFixed(1)}%`);
 
 /**
- * 메일 모델(순수) — 보고표 응답(loadUsageReport 의 ok 결과)에서 만든다.
- * 묶음 키는 화면과 같은 라벨이다(법인 표시명 · 종류 라벨). 장비 행은 마지막 기간 값과 직전 기간 대비 변화.
+ * 메일 모델(순수) — 주간 보고표(loadUsageReport 의 ok 결과 · 전체 누적)에서 만든다. 판단은 `usageInsights.buildInsights` 하나(첨부 엑셀과 같은 숫자).
  */
-export function buildMailModel(rep, { includeResources = false } = {}) {
-  const periods = rep.periods || [];
-  const last = periods.length - 1;
-  const typeLabel = new Map((rep.types || []).map((t) => [t.type, t.label]));
-  const dcName = new Map((rep.datacenters || []).map((d) => [d.id, d.name || d.id]));
-  const corpOf = (d) => (d.datacenterId ? (dcName.get(d.datacenterId) || d.datacenterId) : '미지정');
-  const devs = (rep.devices || []).filter((d) => d.cells.some(Boolean));
-  const groupBy = (keyFn) => {
-    const m = new Map();
-    for (const d of devs) { const k = keyFn(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d); }
-    return [...m.entries()].map(([key, list]) => {
-      const cells = aggregateCells(list, periods);
-      return { key, devices: list.length, cells, cur: cells[last] || null, delta: last > 0 ? deltaOf(cells[last - 1], cells[last]) : null,
-        deltaPartial: last > 0 && !!(cells[last - 1]?.partial || cells[last]?.partial) };
-    }).sort((a, b) => (numOrNull(b.cur?.usedBytes) ?? -1) - (numOrNull(a.cur?.usedBytes) ?? -1));
-  };
-  const totalCells = aggregateCells(devs, periods);
-  const rows = devs.map((d) => ({
-    corp: corpOf(d), type: typeLabel.get(d.type) || d.type, name: d.name, cur: d.cells[last] || null,
-    delta: last > 0 ? deltaOf(d.cells[last - 1], d.cells[last]) : null,
-    resources: includeResources ? d.resources.map((r) => ({ group: RESOURCE_KINDS[r.kind]?.group || r.kind, name: r.name, cur: r.cells[last] || null })).filter((r) => r.cur) : [],
-  })).sort((a, b) => a.corp.localeCompare(b.corp) || a.type.localeCompare(b.type) || String(a.name).localeCompare(String(b.name), 'en', { numeric: true }));
-  return {
-    gran: rep.gran, asOfLabel: rep.asOfLabel, periods,
-    total: { cells: totalCells, cur: totalCells[last] || null, delta: last > 0 ? deltaOf(totalCells[last - 1], totalCells[last]) : null },
-    byCorp: groupBy(corpOf), byType: groupBy((d) => typeLabel.get(d.type) || d.type),
-    rows, devices: devs.length, registered: (rep.devices || []).length,
-  };
+export function buildMailModel(rep, { includeResources = true } = {}) {
+  const ins = buildInsights(rep, { includeResources });
+  return { ...ins, asOfLabel: rep.asOfLabel, devices: ins.kpi.devices, registered: ins.kpi.registered };
 }
 
-const TD = 'padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:13px;';
-const TH = 'padding:6px 8px;border-bottom:2px solid #cbd5e1;font-size:12px;color:#475569;text-align:left;background:#f8fafc;';
-/*
- * 좁은 화면(모바일 메일) — 520px 이하에서 여백·글자를 줄이고 표를 셀 단위로 줄인다(아이실론 종합 메일 v2.742 와 같은 판단:
- * Outlook 데스크톱은 @media 를 무시하지만 그쪽은 폭이 넓다). 장비별 표는 법인·종류를 한 칸에 쌓아 열 수를 줄였다.
- */
-const MOBILE_CSS = '<style>@media only screen and (max-width:520px){.su-wrap{padding:10px!important}.su-body{padding:12px!important}'
-  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important}.su-t th{white-space:normal!important}.su-kpi td{display:block!important;width:auto!important;margin-bottom:6px}}</style>';
+const FONT = "'Malgun Gothic','Apple SD Gothic Neo',-apple-system,'Segoe UI',sans-serif";
+const TD = 'padding:7px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;vertical-align:top;';
+const TH = 'padding:7px 8px;border-bottom:1px solid #cbd5e1;font-size:12px;color:#334155;text-align:left;background:#f8fafc;';
 const NUM = 'text-align:right;white-space:nowrap;';
+const MUTED = 'color:#475569;';
+const TONE = { crit: { bg: '#fee2e2', fg: '#991b1b' }, warn: { bg: '#fef3c7', fg: '#92400e' } };
+/*
+ * 좁은 화면(모바일 메일) — 520px 이하에서 여백·글자를 줄이고 지표 칸을 세로로 쌓는다(아이실론 종합 메일 v2.742 와 같은 판단:
+ * Outlook 데스크톱은 @media 를 무시하지만 그쪽은 폭이 넓다).
+ */
+const MOBILE_CSS = '<style>@media only screen and (max-width:520px){.su-wrap{padding:8px!important}.su-body{padding:12px!important}'
+  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important}.su-t th{white-space:normal!important}.su-kpi td{display:block!important;width:auto!important;margin-bottom:6px}}</style>';
 
-function cellTxt(c) {
-  if (!c) return '—';
-  return c.exact === false && c.day != null ? `≈ ${esc(bytesText(c.usedBytes))}` : esc(bytesText(c.usedBytes));
+function pctBadge(p, rule) {
+  const n = numOrNull(p);
+  if (n == null) return '—';
+  const t = n >= rule.critPct ? TONE.crit : n >= rule.warnPct ? TONE.warn : null;
+  return t ? `<span style="padding:1px 6px;border-radius:4px;background:${t.bg};color:${t.fg};font-weight:700">${esc(pctText(n))}</span>` : esc(pctText(n));
 }
-const partialMark = (c) => (c?.partial ? ` <span style="color:#b45309">(값 있음 ${c.counted}/${c.expected}대)</span>` : '');
-
-function groupTable(title, list, deltaHead) {
-  if (!list.length) return '';
-  const head = `<tr><th style="${TH}">${esc(title)}</th><th style="${TH}${NUM}">장비</th><th style="${TH}${NUM}">전체</th><th style="${TH}${NUM}">사용</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">${esc(deltaHead)}</th></tr>`;
-  const body = list.map((g) => `<tr><td style="${TD}">${esc(g.key)}${partialMark(g.cur)}</td><td style="${TD}${NUM}">${g.devices}</td>`
-    + `<td style="${TD}${NUM}">${esc(bytesText(g.cur?.totalBytes))}</td><td style="${TD}${NUM}">${esc(bytesText(g.cur?.usedBytes))}</td>`
-    + `<td style="${TD}${NUM}">${esc(pctText(g.cur?.pct))}</td><td style="${TD}${NUM}">${esc(deltaText(g.delta))}${g.deltaPartial ? ' *' : ''}</td></tr>`).join('');
-  return `<h3 style="font-size:15px;margin:20px 0 6px">${esc(title)}별</h3><table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">${head}${body}</table>`;
-}
+const table = (head, body) => `<table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">${head}${body}</table>`;
+const h2 = (t) => `<h2 style="margin:22px 0 6px;font-size:16px">${esc(t)}</h2>`;
+const note = (t, color = '#475569') => `<div style="font-size:12px;color:${color};margin:0 0 6px">${t}</div>`;
+const usedOf = (c) => (c ? `${bytesText(c.usedBytes)} / ${bytesText(c.totalBytes)}` : '—');
 
 /**
  * 본문(순수). @returns {{subject:string, html:string, text:string}}
  * @param {object} m buildMailModel 결과
- * @param {{mail?:object, slot?:number, manual?:boolean, preview?:boolean, recipients?:number}} o
+ * @param {{mail?:object, slot?:number, manual?:boolean, preview?:boolean, recipients?:number,
+ *   attach?:{state:'attached'|'trimmed'|'failed'|'off'|'preview', filename?:string, reason?:string, fromLabel?:string}}} o
  */
 export function renderUsageMail(m, o = {}) {
   const g = mailOf(o.mail);
-  const granLabel = GRANS[m.gran]?.label || '';
-  const p = m.periods || [];
-  const prevLabel = p.length > 1 ? p[p.length - 2].label : null;
-  const deltaHead = prevLabel ? `${prevLabel} 대비` : '변화';
-  const subject = `${o.preview ? '[미리보기] ' : ''}스토리지 사용량 ${granLabel} 보고 — ${m.asOfLabel}`;
+  const rule = m.rule;
+  const k = m.kpi;
   const t = m.total.cur;
-  const kpi = (label, value, sub = '') => `<td style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;vertical-align:top">`
-    + `<div style="font-size:12px;color:#64748b">${esc(label)}</div><div style="font-size:20px;font-weight:700;margin-top:2px">${esc(value)}</div>`
-    + `${sub ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${esc(sub)}</div>` : ''}</td>`;
-  const trendHead = `<tr><th style="${TH}">기간</th><th style="${TH}${NUM}">전체</th><th style="${TH}${NUM}">사용</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">값 있음</th></tr>`;
-  const trendBody = p.map((pp, i) => {
-    const c = m.total.cells[i];
-    return `<tr><td style="${TD}">${esc(pp.label)}${pp.current ? ' (오늘까지)' : ''}</td><td style="${TD}${NUM}">${esc(bytesText(c?.totalBytes))}</td>`
-      + `<td style="${TD}${NUM}">${esc(bytesText(c?.usedBytes))}</td><td style="${TD}${NUM}">${esc(pctText(c?.pct))}</td>`
-      + `<td style="${TD}${NUM}${c?.partial ? 'color:#b45309;' : ''}">${c ? `${c.counted}/${c.expected}` : '—'}</td></tr>`;
+  const subject = `${o.preview ? '[미리보기] ' : ''}스토리지 사용량 주간 보고 — ${m.weekLabel} (${m.dayLabel})`;
+  const at = o.attach || { state: g.attachExcel ? 'preview' : 'off' };
+  const sheets = ['요약', `주간 사용량 (${m.firstLabel} ~ ${m.weekLabel})`, '법인별 · 종류별', '데이터 (행 단위)', '읽는 법'];
+  const chips = sheets.map((x) => `<span style="display:inline-block;font-size:12px;padding:2px 8px;margin:2px 4px 2px 0;border-radius:4px;background:#ffffff;border:1px solid #cbd5e1;color:#1e293b">${esc(x)}</span>`).join('');
+  let attachBox = '';
+  if (at.state === 'attached' || at.state === 'trimmed' || at.state === 'preview') {
+    attachBox = `<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px"><tr><td style="padding:14px 16px">`
+      + `<div style="font-weight:700;font-size:14px">${at.state === 'preview' ? '보낼 때 붙이는 엑셀' : '첨부 엑셀'} — ${esc(at.filename || '')}</div>`
+      + `<div style="font-size:13px;color:#334155;margin-top:4px">누적된 전 주차(${esc(m.firstLabel)} ~ ${esc(m.weekLabel)})를 포탈 표와 같은 모양으로 담았습니다.</div>`
+      + `<div style="margin-top:6px">${chips}</div>`
+      + (at.state === 'trimmed' ? `<div style="font-size:12px;color:#92400e;margin-top:6px">${esc(at.reason || '')}</div>` : '')
+      + (at.state === 'preview' ? '<div style="font-size:12px;color:#475569;margin-top:6px">미리보기에는 첨부를 만들지 않습니다.</div>' : '')
+      + '</td></tr></table>';
+  } else if (at.state === 'failed') {
+    attachBox = `<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border:1px solid #fde68a;background:#fffbeb;border-radius:8px"><tr><td style="padding:12px 16px;font-size:13px">`
+      + `<b>엑셀을 붙이지 못했습니다</b> — ${esc(at.reason || '알 수 없는 오류')}. 포탈 › ${esc(VIEW_PATH)} 의 ‘엑셀 내려받기’ 로 같은 파일을 받을 수 있습니다.</td></tr></table>`;
+  }
+  const kpi = (label, value, sub, color = '#0f172a') => `<td style="width:25%;padding:12px;border:1px solid #e2e8f0;border-radius:8px;vertical-align:top">`
+    + `<div style="font-size:12px;${MUTED}">${esc(label)}</div><div style="font-size:20px;font-weight:700;color:${color};margin-top:2px">${esc(value)}</div>`
+    + `<div style="font-size:12px;${MUTED}margin-top:2px">${esc(sub)}</div></td>`;
+  const deltaSub = m.total.delta == null
+    ? (m.total.deltaWhy === 'partial' ? '부분 합이라 내지 않음' : '값 없음')
+    : (m.total.avg != null ? `${rule.avgWeeks}주 평균 ${deltaText(m.total.avg)}/주` : `${rule.avgWeeks}주 평균은 이력 부족`);
+  const kpis = `<table class="su-kpi" role="presentation" cellspacing="8" cellpadding="0" style="width:100%;margin:6px -8px 0"><tr>`
+    + kpi('전체 사용률', pctText(t?.pct), t ? `${usedOf(t)}${t.partial ? ` · 값 있음 ${t.counted}/${t.expected}대` : ''}` : '값 없음')
+    + kpi('직전 주 대비', deltaText(m.total.delta), deltaSub, '#9a3412')
+    + kpi(`${rule.warnPct}% 이상`, `${k.warnDevices}대`, `그중 ${rule.critPct}% 이상 ${k.critDevices}대 · 풀·LUN 포함 ${k.warnItems}항목`, k.warnDevices ? '#991b1b' : '#0f172a')
+    + kpi('못 읽음', `${k.missing}대`, k.missing ? '합계에서 뺐습니다' : '이번 주 모두 읽음', k.missing ? '#92400e' : '#0f172a')
+    + '</tr></table>';
+
+  const actRows = m.actions.slice(0, MAIL_ACTIONS_MAX).map((e) => {
+    const c = e.trend.cur;
+    const free = c && c.usedBytes != null ? c.totalBytes - c.usedBytes : null;
+    return `<tr><td style="${TD}font-weight:600">${esc(e.name)}</td><td style="${TD}${MUTED}">${esc(e.corp)} · ${esc(e.typeLabel)}</td>`
+      + `<td style="${TD}${NUM}">${pctBadge(c?.pct, rule)}</td><td style="${TD}${NUM}">${esc(deltaText(e.trend.delta))}</td>`
+      + `<td style="${TD}${NUM}">${esc(bytesText(free))}</td><td style="${TD}">${esc(e.eta90)}</td></tr>`;
   }).join('');
-  const devRows = g.includeDevices && m.rows.length
-    ? `<h3 style="font-size:15px;margin:20px 0 6px">장비별(${esc(p[p.length - 1]?.label || '')})</h3><table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">`
-      + `<tr><th style="${TH}">법인 · 종류</th><th style="${TH}">장비</th><th style="${TH}${NUM}">전체</th><th style="${TH}${NUM}">사용</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">${esc(deltaHead)}</th></tr>`
-      + m.rows.map((r) => `<tr><td style="${TD}">${esc(r.corp)}<br><span style="color:#64748b;font-size:11px">${esc(r.type)}</span></td><td style="${TD}">${esc(r.name)}</td>`
-        + `<td style="${TD}${NUM}">${esc(bytesText(r.cur?.totalBytes))}</td><td style="${TD}${NUM}">${cellTxt(r.cur)}</td><td style="${TD}${NUM}">${esc(pctText(r.cur?.pct))}</td>`
-        + `<td style="${TD}${NUM}">${esc(deltaText(r.delta))}</td></tr>`
-        + r.resources.map((x) => `<tr><td style="${TD}color:#64748b">${esc(x.group)}</td><td style="${TD}color:#475569">└ ${esc(x.name)}</td>`
-          + `<td style="${TD}${NUM}">${esc(bytesText(x.cur?.totalBytes))}</td><td style="${TD}${NUM}">${cellTxt(x.cur)}</td><td style="${TD}${NUM}">${esc(pctText(x.cur?.pct))}</td><td style="${TD}"></td></tr>`).join('')).join('')
-      + '</table>'
+  const actions = h2('조치가 필요한 항목')
+    + note(`사용률 ${rule.warnPct}% 이상이거나, 최근 ${rule.avgWeeks}주 증가 추세로 ${rule.horizonWeeks}주 안에 ${rule.critPct}%에 닿는 장비·풀·LUN·파일시스템(급한 순). 도달 예상은 완전한 주만으로 계산한 직선 추정입니다.`)
+    + (m.actions.length
+      ? table(`<tr><th style="${TH}">장비 · 항목</th><th style="${TH}">법인 · 종류</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">지난주 증가</th><th style="${TH}${NUM}">남은 용량</th><th style="${TH}">${rule.critPct}% 도달 예상</th></tr>`, actRows)
+        + (m.actions.length > MAIL_ACTIONS_MAX ? note(`외 ${m.actions.length - MAIL_ACTIONS_MAX}개는 첨부 엑셀 ‘요약’ 시트에 있습니다.`) : '')
+      : note('없습니다.'));
+
+  const growth = h2(`지난주 증가량 상위 ${m.growthTop.length || ''}`.trim())
+    + (m.growthTop.length
+      ? table(`<tr><th style="${TH}">장비</th><th style="${TH}">법인</th><th style="${TH}${NUM}">${esc(m.prevLabel.replace(/^\d{4}년 /, ''))} 사용</th><th style="${TH}${NUM}">${esc(m.weekLabel.replace(/^\d{4}년 /, ''))} 사용</th><th style="${TH}${NUM}">증가</th><th style="${TH}${NUM}">${rule.avgWeeks}주 평균</th></tr>`,
+        m.growthTop.map((e) => `<tr><td style="${TD}font-weight:600">${esc(e.name)}</td><td style="${TD}${MUTED}">${esc(e.corp)}</td>`
+          + `<td style="${TD}${NUM}">${esc(bytesText(e.trend.prev?.usedBytes))}</td><td style="${TD}${NUM}">${esc(bytesText(e.trend.cur?.usedBytes))}</td>`
+          + `<td style="${TD}${NUM}font-weight:700;color:#9a3412">${esc(deltaText(e.trend.delta))}</td><td style="${TD}${NUM}${MUTED}">${esc(deltaText(e.trend.avg))}</td></tr>`).join(''))
+      : note('지난주보다 늘어난 장비가 없거나, 두 주 값이 다 있는 장비가 없습니다.'));
+
+  const poolCell = (pe, missingNote) => {
+    if (!pe) return `<div style="font-weight:600;color:#475569">${esc(missingNote)}</div><div style="font-size:12px;${MUTED}">—</div>`;
+    const c = pe.trend.cur;
+    return `<div style="font-weight:600">${pctBadge(c?.pct, rule)}</div><div style="font-size:12px;${MUTED}">${c ? esc(usedOf(c)) : '풀 사용량 못 읽음'}</div>`;
+  };
+  const pools = m.poolRows.length
+    ? h2('PowerScale(아이실론) 풀별 사용량')
+      + note('HDD 풀과 SSD 풀을 따로 셉니다. 한 매체의 풀만 있는 장비(올플래시, 또는 SSD 를 L3 캐시로만 쓰는 구성)는 다른 쪽을 0 이 아니라 ‘풀 없음’ 으로 적습니다.')
+      + table(`<tr><th style="${TH}">장비</th><th style="${TH}${NUM}">전체</th><th style="${TH}${NUM}">HDD 풀</th><th style="${TH}${NUM}">SSD 풀</th></tr>`,
+        m.poolRows.map((r) => {
+          const a = r.device.trend.cur;
+          return `<tr><td style="${TD}"><div style="font-weight:600">${esc(r.device.name)}</div><div style="font-size:12px;${MUTED}">${esc(r.device.corp)}${r.note ? ` · ${esc(r.note)}` : ''}</div></td>`
+            + `<td style="${TD}${NUM}"><div>${pctBadge(a?.pct, rule)}</div><div style="font-size:12px;${MUTED}">${esc(usedOf(a))}</div></td>`
+            + `<td style="${TD}${NUM}">${poolCell(r.hdd, r.note === 'SSD 풀만' ? '풀 없음' : '—')}</td>`
+            + `<td style="${TD}${NUM}">${poolCell(r.ssd, r.note === 'HDD 풀만' ? '풀 없음' : '—')}</td></tr>`;
+        }).join(''))
     : '';
-  const notes = [
-    '합계는 크기와 사용량을 둘 다 읽은 장비만 더합니다 — 값이 없는 장비가 있으면 \'값 있음 N/M대\' 로 표시합니다(0 으로 채우지 않습니다).',
-    '‘≈’ 는 기준일에 수집이 없어 그 기간 안의 가장 최근 관측을 쓴 값입니다.',
-    `${esc(deltaHead)} 의 * 는 두 시점 중 하나가 부분 합이라는 뜻입니다.`,
-    `CSV 내려받기·법인별/종류별 비교는 포탈 ${esc(VIEW_PATH)} 에 있습니다.`,
-  ];
+
+  const partials = m.byCorp.filter((x) => x.cur?.partial);
+  const corps = h2('법인별 요약')
+    + table(`<tr><th style="${TH}">법인</th><th style="${TH}${NUM}">장비</th><th style="${TH}${NUM}">사용 / 전체</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">직전 주 대비</th></tr>`,
+      m.byCorp.map((x) => `<tr><td style="${TD}font-weight:600">${esc(x.key)}</td><td style="${TD}${NUM}">${x.devices}대</td>`
+        + `<td style="${TD}${NUM}">${esc(usedOf(x.cur))}${x.cur?.partial ? ` <span style="color:#b45309">(값 있음 ${x.cur.counted}/${x.cur.expected}대)</span>` : ''}</td>`
+        + `<td style="${TD}${NUM}">${pctBadge(x.cur?.pct, rule)}</td><td style="${TD}${NUM}">${x.delta == null && x.deltaWhy === 'partial' ? '— (부분 합)' : esc(deltaText(x.delta))}</td></tr>`).join(''))
+    + (partials.length ? note(`${partials.map((x) => esc(x.key)).join(', ')} 는 이번 주에 값을 읽지 못한 장비가 있어 부분 합입니다 — 직전 주 대비를 내지 않았습니다.`, '#92400e') : '');
+
+  const missing = m.missing.length
+    ? h2('이번 주 값을 읽지 못한 장비')
+      + `<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border:1px solid #fde68a;background:#fffbeb;border-radius:8px"><tr><td style="padding:10px 14px">`
+      + m.missing.map((x) => `<div style="font-size:13px;margin:2px 0"><b>${esc(x.name)}</b> · ${esc(x.corp)} · ${esc(x.typeLabel)} — ${esc(x.why)}</div>`).join('')
+      + '</td></tr></table>'
+    : '';
+
   const sched = g.enabled ? `${daysLabel(g.days)} ${g.time}` : '꺼짐';
+  const top = o.preview ? '미리보기 — 보내지 않았습니다' : (o.manual ? '지금 보내기' : `예약 발송 · ${slotLabel(o.slot)}`);
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${MOBILE_CSS}</head>`
-    + `<body class="su-wrap" style="margin:0;padding:16px;background:#f1f5f9;font-family:-apple-system,'Segoe UI','Malgun Gothic',sans-serif;color:#0f172a">`
-    + `<div class="su-body" style="max-width:880px;margin:0 auto;background:#fff;border-radius:8px;padding:20px">`
-    + `<div style="font-size:12px;color:#64748b">${esc(o.preview ? '미리보기 — 보내지 않았습니다' : (o.manual ? '지금 보내기' : `예약 발송 · ${slotLabel(o.slot)}`))}</div>`
-    + `<h2 style="font-size:20px;margin:4px 0 12px">스토리지 사용량 ${esc(granLabel)} 보고 — ${esc(m.asOfLabel)}</h2>`
-    + `<table class="su-kpi" role="presentation" cellspacing="6" cellpadding="0" style="width:100%"><tr>`
-    + kpi('전체 용량', bytesText(t?.totalBytes), t ? `값 있음 ${t.counted}/${t.expected}대` : '')
-    + kpi('사용', bytesText(t?.usedBytes), pctText(t?.pct))
-    + kpi(deltaHead, deltaText(m.total.delta))
-    + kpi('장비', `${m.devices}대`, m.registered > m.devices ? `등록 ${m.registered}대 중 이력 있는 장비` : '')
-    + '</tr></table>'
-    + `<h3 style="font-size:15px;margin:20px 0 6px">전체 추이(${esc(granLabel)})</h3><table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">${trendHead}${trendBody}</table>`
-    + groupTable('법인', m.byCorp, deltaHead) + groupTable('종류', m.byType, deltaHead) + devRows
-    + `<ul style="font-size:12px;color:#475569;padding-left:18px;margin-top:20px">${notes.map((n) => `<li>${n}</li>`).join('')}</ul>`
-    + `<div style="font-size:11px;color:#94a3b8;margin-top:12px">보내는 때: ${esc(sched)} · 받는 사람 ${numOrNull(o.recipients) == null ? '—' : `${numOrNull(o.recipients)}명`} · 설정: ${esc(VIEW_PATH)} › 메일 발송</div>`
-    + '</div></body></html>';
-  const lines = [subject, '', `전체 ${bytesText(t?.totalBytes)} · 사용 ${bytesText(t?.usedBytes)} (${pctText(t?.pct)}) · ${deltaHead} ${deltaText(m.total.delta)}`];
-  for (const gg of m.byCorp) lines.push(`- ${gg.key}: ${bytesText(gg.cur?.usedBytes)} / ${bytesText(gg.cur?.totalBytes)} (${pctText(gg.cur?.pct)})`);
-  lines.push('', `자세한 표·CSV: ${VIEW_PATH}`);
+    + `<body class="su-wrap" style="margin:0;padding:24px;background:#f1f5f9;font-family:${FONT};color:#0f172a;line-height:1.5">`
+    + '<div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">'
+    + `<div class="su-body" style="padding:22px 26px 18px;border-bottom:1px solid #e2e8f0">`
+    + `<div style="font-size:12px;${MUTED}">VMware Global Monitoring Portal · 스토리지 사용량 예약 메일 · ${esc(top)}</div>`
+    + `<h1 style="margin:4px 0;font-size:22px">스토리지 사용량 주간 보고 — ${esc(m.weekLabel)}</h1>`
+    + `<div style="font-size:13px;${MUTED}">기준 ${esc(m.dayLabel)} · ISO 주차(월요일 시작) · 장비 ${m.devices}대 · 법인 ${k.corps}곳${m.registered > m.devices ? ` · 등록 ${m.registered}대 중 이력 있는 장비` : ''}</div>`
+    + '</div>'
+    + `<div class="su-body" style="padding:20px 26px">${attachBox}${kpis}${actions}${growth}${pools}${corps}${missing}</div>`
+    + `<div class="su-body" style="padding:14px 26px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;${MUTED}">`
+    + '<div>— 는 값을 못 읽은 칸입니다(0 이 아닙니다). 부분 합(값 있음 N/M대)은 직전 주 대비·추세 계산에서 뺍니다. 단위는 1024 기준(TB = 1024⁴ 바이트)입니다.</div>'
+    + `<div style="margin-top:4px">포탈 › ${esc(VIEW_PATH)} 에서 같은 표·CSV·엑셀을 볼 수 있습니다. 보내는 때: ${esc(sched)} · 받는 사람 ${numOrNull(o.recipients) == null ? '—' : `${numOrNull(o.recipients)}명`} · 설정: ${esc(VIEW_PATH)} › 메일 발송</div>`
+    + '</div></div></body></html>';
+
+  const lines = [subject, '',
+    `전체 ${usedOf(t)} (${pctText(t?.pct)}) · 직전 주 대비 ${deltaText(m.total.delta)} · ${rule.warnPct}% 이상 ${k.warnDevices}대 · 못 읽음 ${k.missing}대`];
+  if (at.state === 'attached' || at.state === 'trimmed') lines.push(`첨부: ${at.filename}`);
+  if (at.state === 'failed') lines.push(`엑셀을 붙이지 못했습니다 — ${at.reason || ''}`);
+  if (m.actions.length) {
+    lines.push('', '조치가 필요한 항목:');
+    for (const e of m.actions.slice(0, MAIL_ACTIONS_MAX)) lines.push(`- ${e.name} (${e.corp}) ${pctText(e.trend.cur?.pct)} · ${rule.critPct}% 도달 ${e.eta90}`);
+  }
+  lines.push('', ...m.byCorp.map((x) => `- ${x.key}: ${usedOf(x.cur)} (${pctText(x.cur?.pct)})`), '', `자세한 표·엑셀: ${VIEW_PATH}`);
   return { subject, html, text: lines.join('\n') };
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
-import { fetchJson, postJson, putJson, canCsv, CSV_DENIED_NOTE } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv, CSV_DENIED_NOTE, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -12,7 +12,7 @@ import { addressHiddenNote } from './addressHiddenText.js';
 import {
   UNITS, bytesText, deltaText, pctText, pctTone, aggregateCells, groupSummary, inexactNote, partialNote,
   probeLine, chartSeries, wideCsv, longCsv, csvFileName, SKIP_TEXT, MISSED_TEXT, DAY_LABELS, mailDirty, parseMailList,
-  recipientCount, daysText, deltaOf, legendText,
+  recipientCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
 
 /**
@@ -51,6 +51,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const [weekday, setWeekday] = useState(1);
   const [unit, setUnitState] = useState(() => lsGet('storageUsage.unit', 'auto'));
   const [showRes, setShowRes] = useState(() => lsGet('storageUsage.res', '1') === '1');
+  const [showPools, setShowPools] = useState(() => lsGet('storageUsage.pools', '1') === '1');
   const [hideEmpty, setHideEmpty] = useState(true);
   const [dcSel, setDcSel] = useState(() => new Set());
   const [typeSel, setTypeSel] = useState(() => new Set());
@@ -59,10 +60,13 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [xlsxBusy, setXlsxBusy] = useState(false);
+  const [xlsxMsg, setXlsxMsg] = useState('');
 
   const setGran = (g) => { setGranState(g); setCount(DEF_COUNT[g]); lsSet('storageUsage.gran', g); };
   const setUnit = (u) => { setUnitState(u); lsSet('storageUsage.unit', u); };
   const toggleRes = () => setShowRes((v) => { lsSet('storageUsage.res', v ? '0' : '1'); return !v; });
+  const togglePools = () => setShowPools((v) => { lsSet('storageUsage.pools', v ? '0' : '1'); return !v; });
 
   // 늦게 온 이전 응답이 새 조건의 표를 덮지 않게 — 세대가 같을 때만 반영한다(증가량 화면 v2.612 WEB2612-02).
   const gen = useRef(0);
@@ -95,13 +99,21 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const devOrder = useMemo(() => orderBy(withData.filter((x) => x.type === cmpTypeKey), (x) => x.deviceId, periods), [withData, cmpTypeKey, periods]);
 
   const download = (kind) => {
-    const opts = { dcName, typeLabel, unit, resources: showRes, kindGroup };
+    const opts = { dcName, typeLabel, unit, resources: showRes, pools: showPools, kindGroup };
     const body = kind === 'wide' ? wideCsv(shown, periods, opts) : longCsv(shown, periods, opts);
     const url = URL.createObjectURL(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url; a.download = csvFileName({ gran: d?.gran, asOfLabel: d?.asOfLabel, kind, filtered: facets.facetOn || !!query });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  // v2.791 엑셀 — 서버가 만든다(메일 첨부와 같은 파일: 주간 · 누적 전 주차 · 전 장비). 화면 필터는 적용되지 않는다(버튼 설명에 밝힌다).
+  //   409(다른 내보내기 진행 중)·403 은 downloadFile 이 던진다 — 문구를 그대로 보인다.
+  const downloadXlsx = async () => {
+    setXlsxBusy(true); setXlsxMsg('');
+    try { await downloadFile(`/tools/storage-usage/xlsx?resources=${showRes ? 1 : 0}`); }
+    catch (e) { setXlsxMsg(e?.message || '엑셀을 받지 못했습니다.'); }
+    finally { setXlsxBusy(false); }
   };
 
   if (err && !d) return <ErrorBox error={err} />;
@@ -112,6 +124,8 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const prevLabel = periods.length > 1 ? periods[periods.length - 2].label : '';
   const hidden = addressHiddenNote(d);
   const resCount = shown.reduce((a, x) => a + (x.resources?.length || 0), 0);
+  const hasPools = shown.some((x) => x.pools?.length);
+  const allMax = d.grans?.[gran]?.allMax;
 
   return (
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 14 }}>
@@ -133,6 +147,9 @@ export default function StorageUsageTool({ isAdmin = false }) {
               title="화면의 날짜별 표 그대로(머리 3줄: 법인 / 장비·항목 / 지표). 숫자 칸은 숫자만 — 단위는 머리에 적습니다.">⬇ CSV(표 그대로)</button>
             <button className="tab" onClick={() => download('long')} disabled={!shown.length}
               title="한 줄 = 기간 × 장비(또는 LUN·파일시스템). 엑셀 피벗·필터용이고 직전 기간 대비 변화와 실제 관측일을 함께 싣습니다.">⬇ CSV(행 단위)</button>
+            <button className="tab" onClick={downloadXlsx} disabled={xlsxBusy || !(d.devices || []).length}
+              title="메일 첨부와 같은 엑셀입니다 — 주간(ISO 주차) · 누적된 전 주차 · 전 장비(화면의 법인·종류 필터는 적용되지 않습니다). 시트: 요약 · 주간 사용량 · 법인별·종류별 · 데이터(행 단위) · 읽는 법.">
+              {xlsxBusy ? '엑셀 만드는 중…' : '⬇ 엑셀(주간 누적)'}</button>
             </> : <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal' }}>{CSV_DENIED_NOTE}</span>}
           </div>
         </div>
@@ -155,8 +172,9 @@ export default function StorageUsageTool({ isAdmin = false }) {
             <button key={k} type="button" className={`tab${gran === k ? ' active' : ''}`} onClick={() => setGran(k)}>{g.label}</button>
           ))}
           <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>기간 수</span>
-          <Select sort={false} className="select" value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 'auto' }}>
+          <Select sort={false} className="select" value={count} onChange={(e) => setCount(e.target.value === 'all' ? 'all' : Number(e.target.value))} style={{ width: 'auto' }}>
             {(COUNT_CHOICES[gran] || []).filter((n) => n <= (d.grans?.[gran]?.max || 999)).map((n) => <option key={n} value={n}>{n}개</option>)}
+            {allMax ? <option value="all">전체 누적{d.all && d.firstLabel ? ` (${d.firstLabel}부터 ${periods.length}개)` : ''}</option> : null}
           </Select>
           {gran === 'weekly' && (<>
             <span className="muted" style={{ fontSize: 12 }}>기준 요일</span>
@@ -171,6 +189,9 @@ export default function StorageUsageTool({ isAdmin = false }) {
           <label className="flex" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}>
             <input type="checkbox" checked={showRes} onChange={toggleRes} /> LUN·파일시스템 포함
           </label>
+          {hasPools && <label className="flex" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}>
+            <input type="checkbox" checked={showPools} onChange={togglePools} /> PowerScale 풀(HDD·SSD) 나눠 보기
+          </label>}
           <label className="flex" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}>
             <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} /> 이력 없는 장비 숨김
           </label>
@@ -186,6 +207,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
 
       {hidden && <div style={NOTE}><BoldText text={hidden} /></div>}
       {err && <div style={{ ...NOTE, color: 'var(--amber)' }}>새로고침 실패 — 직전 결과를 보여 줍니다: {err}</div>}
+      {xlsxMsg && <div style={{ ...NOTE, color: 'var(--red)' }}>엑셀 내려받기 실패 — {xlsxMsg}</div>}
 
       <div className="flex gap wrap" style={{ gap: 6 }}>
         {[['table', '📋 날짜별 표'], ['devices', '🗂 장비별 표'], ['corp', '🏢 법인별 비교'], ['type', '🧩 종류별 비교'], ...(isAdmin ? [['mail', '✉ 메일 발송']] : [])].map(([k, l]) => (
@@ -200,13 +222,13 @@ export default function StorageUsageTool({ isAdmin = false }) {
         </div>
       )}
 
-      {view === 'table' && shown.length > 0 && <WideTable devices={shown} periods={periods} total={total} unit={unit} showRes={showRes} dcName={dcName} typeLabel={typeLabel} kindGroup={kindGroup} />}
-      {view === 'devices' && shown.length > 0 && <DeviceTable devices={shown} periods={periods} unit={unit} showRes={showRes} dcName={dcName} typeLabel={typeLabel} kindGroup={kindGroup} resourceKinds={d.resourceKinds || {}} />}
+      {view === 'table' && shown.length > 0 && <WideTable devices={shown} periods={periods} total={total} unit={unit} showRes={showRes} showPools={showPools} dcName={dcName} typeLabel={typeLabel} kindGroup={kindGroup} />}
+      {view === 'devices' && shown.length > 0 && <DeviceTable devices={shown} periods={periods} unit={unit} showRes={showRes} showPools={showPools} dcName={dcName} typeLabel={typeLabel} kindGroup={kindGroup} resourceKinds={d.resourceKinds || {}} />}
       {view === 'corp' && shown.length > 0 && <CorpView groups={corpGroups} order={corpOrder} periods={periods} unit={unit} shown={shown} dcName={dcName} typeLabel={typeLabel} granLabel={granLabel} />}
       {view === 'type' && shown.length > 0 && (
         <TypeView groups={typeGroups} typeKey={cmpTypeKey} onType={setCmpType} devices={typeDevs} order={devOrder} periods={periods} unit={unit} dcName={dcName} granLabel={granLabel} />
       )}
-      {view === 'mail' && isAdmin && <MailView grans={d.grans} offsetMin={d.dayOffsetMin} />}
+      {view === 'mail' && isAdmin && <MailView offsetMin={d.dayOffsetMin} />}
 
       {view !== 'mail' && (
         <div style={NOTE}>
@@ -221,7 +243,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
 function periodRuleText(gran, wd) {
   if (gran === 'daily') return '일간: **그 날의 마지막 관측**입니다. 그 날 수집이 없으면 빈 칸(—)이고 앞날 값을 끌어오지 않습니다.';
   if (gran === 'monthly') return '월간: **그 달 마지막 날(이번 달은 오늘)** 기준 값입니다. 그 날 수집이 없으면 그 달 안의 가장 최근 관측을 쓰고 ‘≈’ 로 밝힙니다.';
-  return `주간: 매주 **${wd || '월'}요일** 기준 값입니다. 그 날 수집이 없으면 직전 6일 안의 가장 최근 관측을 쓰고 ‘≈’ 로 밝힙니다.`;
+  return `주간: 행 이름은 **ISO 주차**(월요일 시작 · 그 해 첫 목요일이 든 주가 1주차 — 엑셀 ISOWEEKNUM 과 같은 번호)이고, 값은 매주 **${wd || '월'}요일** 기준입니다. 그 날 수집이 없으면 직전 6일 안의 가장 최근 관측을 쓰고 ‘≈’ 로 밝힙니다.`;
 }
 
 /** 전체 데이터 기준 고정 순서(현재 사용량 큰 순) — 비교 차트 색을 개체에 고정한다. */
@@ -263,15 +285,19 @@ function BytesCell({ b, unit, cell, extra }) {
 }
 
 /* ── 날짜별 표(엑셀형) ─────────────────────────────────────── */
-function WideTable({ devices, periods, total, unit, showRes, dcName, typeLabel, kindGroup }) {
+function WideTable({ devices, periods, total, unit, showRes, showPools, dcName, typeLabel, kindGroup }) {
   // 열 묶음: 전체 합계 → 법인 순 → 장비(+ 하위 항목). 법인 머리는 colSpan 으로 묶는다(정렬은 마지막 머리 줄만 — STable 규약).
   const corps = groupBy(devices, (x) => dcName(x.datacenterId));
   const cols = [];
   for (const g of corps) {
     for (const dv of g.list.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { numeric: true }))) {
-      cols.push({ corp: g.label, key: dv.deviceId, title: dv.name, sub: typeLabel(dv.type), cells: dv.cells, labels: ['Total Usable', 'Used', 'Percent'] });
+      cols.push({ corp: g.label, key: dv.deviceId, title: dv.name, sub: deviceSub(dv, typeLabel), cells: dv.cells, labels: ['Total Usable', 'Used', 'Percent'] });
+      // 풀은 장비와 같은 단위(TB) — 하위 항목(GB)과 달리 단위를 바꾸지 않는다.
+      if (showPools) for (const pl of dv.pools || []) {
+        cols.push({ corp: g.label, key: `${dv.deviceId}|pool:${pl.key}`, title: pl.label, sub: `${dv.name} 하위`, cells: pl.cells, labels: ['Total Usable', 'Used', 'Percent'], res: true });
+      }
       if (showRes) for (const r of dv.resources || []) {
-        cols.push({ corp: g.label, key: `${dv.deviceId}|${r.rkey}`, title: `${kindGroup[r.kind] || r.kind} ${r.name}`, sub: `${dv.name} 하위`, cells: r.cells, labels: ['Size', 'Used', 'Percent'], res: true });
+        cols.push({ corp: g.label, key: `${dv.deviceId}|${r.rkey}`, title: `${kindGroup[r.kind] || r.kind} ${r.name}`, sub: `${dv.name} 하위`, cells: r.cells, labels: ['Size', 'Used', 'Percent'], res: true, gb: true });
       }
     }
   }
@@ -297,7 +323,7 @@ function WideTable({ devices, periods, total, unit, showRes, dcName, typeLabel, 
             ))}
           </tr>
           <tr>
-            <th style={STICKY}>일자</th>
+            <th style={STICKY}>{periods[0]?.dayLabel ? '주차' : '일자'}</th>
             <th style={{ ...NUM, borderLeft: '1px solid var(--border)' }}>Total</th><th style={NUM}>Used</th><th style={NUM}>%</th>
             {cols.map((c) => (
               <React.Fragment key={c.key}>
@@ -311,7 +337,9 @@ function WideTable({ devices, periods, total, unit, showRes, dcName, typeLabel, 
             const t = total.cells[i];
             return (
               <tr key={p.key}>
-                <td style={{ ...STICKY, whiteSpace: 'nowrap', fontWeight: 600 }} data-sort={p.toDay}>{p.label}{p.current ? <span className="muted" style={{ fontWeight: 400 }}> (오늘까지)</span> : null}</td>
+                <td style={{ ...STICKY, whiteSpace: 'nowrap', fontWeight: 600 }} data-sort={p.toDay}>{p.label}
+                  {p.dayLabel ? <span className="muted" style={{ fontWeight: 400 }}> {p.dayLabel.slice(5)}</span> : null}
+                  {p.current ? <span className="muted" style={{ fontWeight: 400 }}> (오늘까지)</span> : null}</td>
                 <BytesCell b={t?.totalBytes} unit={unit} extra={{ borderLeft: '1px solid var(--border)', background: 'var(--panel-2)' }} />
                 <td style={{ ...NUM, background: 'var(--panel-2)' }} data-sort={t?.usedBytes ?? ''} title={partialNote(t) || undefined}>
                   {bytesText(t?.usedBytes, unit)}{t?.partial ? <span style={{ color: 'var(--amber)' }}> *</span> : null}
@@ -321,8 +349,8 @@ function WideTable({ devices, periods, total, unit, showRes, dcName, typeLabel, 
                   const cell = c.cells[i];
                   return (
                     <React.Fragment key={c.key}>
-                      <BytesCell b={cell?.totalBytes} unit={c.res && unit === 'auto' ? 'GB' : unit} cell={cell} extra={{ borderLeft: '1px solid var(--border)' }} />
-                      <BytesCell b={cell?.usedBytes} unit={c.res && unit === 'auto' ? 'GB' : unit} cell={cell} />
+                      <BytesCell b={cell?.totalBytes} unit={c.gb && unit === 'auto' ? 'GB' : unit} cell={cell} extra={{ borderLeft: '1px solid var(--border)' }} />
+                      <BytesCell b={cell?.usedBytes} unit={c.gb && unit === 'auto' ? 'GB' : unit} cell={cell} />
                       <PctCell cell={cell} />
                     </React.Fragment>
                   );
@@ -340,11 +368,20 @@ function WideTable({ devices, periods, total, unit, showRes, dcName, typeLabel, 
 }
 
 /* ── 장비별 표 + 하위 항목 ─────────────────────────────────── */
-function DeviceTable({ devices, periods, unit, showRes, dcName, typeLabel, kindGroup, resourceKinds }) {
+function DeviceTable({ devices, periods, unit, showRes, showPools, dcName, typeLabel, kindGroup, resourceKinds }) {
   const n = periods.length;
   const last = n - 1;
   // 장비 한 대도 같은 요약 함수로(직전 대비·범위 변화 — 값이 빠진 기간이면 내지 않는다). 숫자를 여기서 만들지 않는다.
-  const rows = devices.map((x) => { const g = groupSummary(x.deviceId, x.name, [x], periods); return { x, cur: g.cur, delta: g.delta, range: g.range }; });
+  // 풀(v2.791)은 장비 바로 아래 줄 — 같은 요약 함수에 풀 칸을 장비 칸 자리에 넣어 계산한다(합계에는 더하지 않는다).
+  const rows = devices.flatMap((x) => {
+    const g = groupSummary(x.deviceId, x.name, [x], periods);
+    const own = { key: x.deviceId, x, cells: x.cells, cur: g.cur, delta: g.delta, range: g.range };
+    const pools = showPools ? (x.pools || []).map((pl) => {
+      const pg = groupSummary(`${x.deviceId}|${pl.key}`, pl.label, [{ ...x, cells: pl.cells }], periods);
+      return { key: `${x.deviceId}|pool:${pl.key}`, x, pool: pl, cells: pl.cells, cur: pg.cur, delta: pg.delta, range: pg.range };
+    }) : [];
+    return [own, ...pools];
+  });
   const res = showRes ? devices.flatMap((x) => (x.resources || []).map((r) => ({ x, r, cur: r.cells[last], delta: n > 1 ? deltaOf(r.cells[last - 1], r.cells[last]) : null }))) : [];
   const probes = devices.filter((x) => x.type === 'unity480' || x.resourcesProbe || x.resources?.length);
   return (
@@ -360,11 +397,14 @@ function DeviceTable({ devices, periods, unit, showRes, dcName, typeLabel, kindG
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ x, cur, delta, range }) => (
-              <tr key={x.deviceId}>
+            {rows.map(({ key, x, pool, cells, cur, delta, range }) => (
+              <tr key={key}>
                 <td>{dcName(x.datacenterId)}</td><td>{typeLabel(x.type)}</td>
-                <td style={{ fontWeight: 600 }}>{x.name}{x.enabled === false ? <span className="muted"> (꺼짐)</span> : null}</td>
-                {x.cells.map((c, i) => <BytesCell key={periods[i].key} b={c?.usedBytes} unit={unit} cell={c} />)}
+                {pool
+                  ? <td style={{ color: 'var(--text-dim)' }}>{x.name} › {pool.label}</td>
+                  : <td style={{ fontWeight: 600 }}>{x.name}{x.enabled === false ? <span className="muted"> (꺼짐)</span> : null}
+                    {x.poolNote ? <span className="muted" style={{ fontWeight: 400 }}> · {x.poolNote}</span> : null}</td>}
+                {cells.map((c, i) => <BytesCell key={periods[i].key} b={c?.usedBytes} unit={unit} cell={c} />)}
                 <td style={NUM} data-sort={cur?.totalBytes ?? ''}>{bytesText(cur?.totalBytes, unit)}</td>
                 <PctCell cell={cur} />
                 <td style={NUM} data-sort={delta ?? ''}>{deltaText(delta, unit)}</td>
@@ -599,7 +639,8 @@ function TypeView({ groups, typeKey, onType, devices, order, periods, unit, dcNa
 /** 보낸 기록 한 줄 — 값이 없으면 단위를 붙이지 않는다('—명' 금지). */
 const sentText = (h) => {
   const n = h.accepted ?? h.to;
-  return [n == null ? null : `${n}명 수신`, h.devices == null ? null : `장비 ${h.devices}대`].filter(Boolean).join(' · ') || '보냄';
+  return [n == null ? null : `${n}명 수신`, h.devices == null ? null : `장비 ${h.devices}대`, ATTACH_TEXT[h.attach] || null,
+    h.attach === 'failed' || h.attach === 'trimmed' ? h.reason : null].filter(Boolean).join(' · ') || '보냄';
 };
 const slotText = (ms, offsetMin) => {
   if (ms == null) return '—';
@@ -608,7 +649,7 @@ const slotText = (ms, offsetMin) => {
   return `${iso.slice(0, 10)} (${DAY_LABELS[dt.getUTCDay()]}) ${iso.slice(11, 16)}`;
 };
 
-function MailView({ grans, offsetMin }) {
+function MailView({ offsetMin }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
   const [toText, setToText] = useState('');
@@ -678,13 +719,6 @@ function MailView({ grans, offsetMin }) {
         <div className="flex gap wrap" style={{ gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <span className="muted" style={{ fontSize: 12 }}>시각(포탈 시각)</span>
           <input className="input" type="time" value={form.time} onChange={(e) => set('time', e.target.value)} style={{ width: 120 }} />
-          <span className="muted" style={{ fontSize: 12 }}>표 단위</span>
-          <Select sort={false} className="select" value={form.gran} onChange={(e) => set('gran', e.target.value)} style={{ width: 'auto' }}>
-            {Object.entries(grans || {}).map(([k, g]) => <option key={k} value={k}>{g.label}</option>)}
-          </Select>
-          <span className="muted" style={{ fontSize: 12 }}>추이 기간 수</span>
-          <input className="input" type="number" min={data.limits?.trend?.min} max={data.limits?.trend?.max} value={form.count}
-            onChange={(e) => set('count', e.target.value === '' ? '' : Number(e.target.value))} style={{ width: 72 }} />
         </div>
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
           <input type="checkbox" checked={form.includeAdmin} onChange={(e) => set('includeAdmin', e.target.checked)} />
@@ -694,11 +728,14 @@ function MailView({ grans, offsetMin }) {
         <textarea className="input" rows={4} value={toText} onChange={(e) => setToText(e.target.value)} style={{ width: '100%', resize: 'vertical' }} placeholder="ops@example.com" />
         {parsed.invalid.length > 0 && <div style={{ ...NOTE, color: 'var(--red)' }}>형식이 틀린 주소: {parsed.invalid.slice(0, 3).join(', ')}{parsed.invalid.length > 3 ? ` 외 ${parsed.invalid.length - 3}개` : ''} — 저장하면 거절됩니다.</div>}
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginTop: 8 }}>
-          <input type="checkbox" checked={form.includeDevices} onChange={(e) => set('includeDevices', e.target.checked)} /> 장비별 표 싣기
+          <input type="checkbox" checked={form.attachExcel} onChange={(e) => set('attachExcel', e.target.checked)} /> 엑셀 첨부(누적된 전 주차 · 5시트)
         </label>
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginTop: 4 }}>
-          <input type="checkbox" checked={form.includeResources} onChange={(e) => set('includeResources', e.target.checked)} /> 장비 아래 LUN·파일시스템 싣기
+          <input type="checkbox" checked={form.includeResources} onChange={(e) => set('includeResources', e.target.checked)} /> LUN·파일시스템 포함(조치 항목·엑셀)
         </label>
+        <div style={{ ...NOTE, marginTop: 8 }}>
+          <BoldText text={mailBodyText(data.rule, data.attachDataWeeks)} />
+        </div>
         <div style={{ ...NOTE, marginTop: 8 }}>
           받는 사람 {rc}명 · 보내는 때 {form.enabled ? `${daysText(form.days)} ${form.time}` : '꺼짐'}. 화면의 법인·종류 필터는 메일에 적용되지 않습니다(전체 장비).
           켜거나 요일·시각을 바꾸면 오늘 이미 지난 시각은 보내지 않습니다. 메일 서버는 설정 › 메일 발송에서 정합니다.
@@ -748,7 +785,7 @@ function MailView({ grans, offsetMin }) {
             <div style={{ fontWeight: 700 }}>미리보기 — {preview.subject}</div>
             <button className="tab" type="button" onClick={() => setPreview(null)}>닫기</button>
           </div>
-          <div style={NOTE}>받는 사람 {preview.recipients}명 · 장비 {preview.devices}대 · 보내지 않았습니다.</div>
+          <div style={NOTE}>받는 사람 {preview.recipients}명 · 장비 {preview.devices}대 · 보내지 않았습니다(미리보기에는 엑셀을 만들지 않습니다 — 같은 파일은 위의 ‘엑셀(주간 누적)’ 로 받을 수 있습니다).</div>
           <iframe title="스토리지 사용량 메일 미리보기" sandbox="" srcDoc={preview.html} style={{ width: '100%', height: 620, border: '1px solid var(--border)', borderRadius: 6, background: '#fff', marginTop: 8 }} />
         </div>
       )}

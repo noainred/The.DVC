@@ -11,15 +11,16 @@ import { listDevices, registryLoadError } from './registry.js';
 import { localSnapshots } from './store.js';
 import { edgeStorageSnapshots } from '../central/storageEdge.js';
 import { latestMapByDevice } from './latestSnapshots.js';
-import { dailySeries, dailySpans, resourceDailyRange, dbAvailable, dayIndex, dayLabel, DAY_OFFSET_MIN } from './db.js';
+import { dailyRange, dailySpans, resourceDailyRange, dbAvailable, dayIndex, dayLabel, DAY_OFFSET_MIN } from './db.js';
 import { STORAGE_TYPES } from './types.js';
 import { listDatacenters } from '../datacenter/store.js';
 import { maskDeviceAddress, maskSnapAddress } from '../auth/addressMask.js';
-import { GRANS, WEEKDAY_LABELS, normalizeReportQuery, buildPeriods, buildUsageReport } from './usageReport.js';
+import { GRANS, WEEKDAY_LABELS, POOLS, normalizeReportQuery, buildPeriods, buildUsageReport, countForAll } from './usageReport.js';
 import { RESOURCE_KINDS } from './resources.js';
 
 /**
- * @param {{gran?:string, count?:number, weekday?:number, admin?:boolean, now?:number}} q
+ * @param {{gran?:string, count?:number|'all', weekday?:number, admin?:boolean, now?:number}} q
+ *   `count: 'all'` = 전체 누적(v2.791) — 보이는 장비 중 가장 이른 이력이 든 기간부터.
  * @returns {Promise<{ok:false, registryError:object}|{ok:true, [k:string]:any}>}
  */
 export async function loadUsageReport({ gran, count, weekday, admin = false, now = Date.now() } = {}) {
@@ -27,9 +28,7 @@ export async function loadUsageReport({ gran, count, weekday, admin = false, now
   if (regErr) return { ok: false, registryError: regErr };
   const q = normalizeReportQuery({ gran, count, weekday });
   const asOfDay = dayIndex(now);
-  const periods = buildPeriods({ ...q, asOfDay });
-  const fromDay = periods[0]?.fromDay ?? asOfDay;
-  const toDay = periods[periods.length - 1]?.toDay ?? asOfDay;
+  const spans = await dailySpans();
 
   const raw = listDevices();
   const hostById = new Map(raw.map((d) => [d.id, d.host || '']));
@@ -46,19 +45,25 @@ export async function loadUsageReport({ gran, count, weekday, admin = false, now
     return { id: d.id, name, type: d.type, datacenterId: d.datacenterId || '', enabled: d.enabled !== false };
   });
   const ids = devices.map((d) => d.id);
-  const want = new Set(ids);
-  const rows = (await dailySeries(null, fromDay)).filter((r) => want.has(r.device_id) && r.day <= toDay);
+  // 전체 누적: 등록부에 있는 장비의 이력만 본다(지운 장비의 옛 이력이 표를 몇 년 앞으로 늘리지 않게).
+  let firstDay = null;
+  for (const id of ids) { const f = spans[id]?.firstDay; if (f != null && (firstDay == null || f < firstDay)) firstDay = f; }
+  const n = q.all ? countForAll({ gran: q.gran, asOfDay, weekday: q.weekday, firstDay }) : q.count;
+  const periods = buildPeriods({ ...q, count: n, asOfDay });
+  const fromDay = periods[0]?.fromDay ?? asOfDay;
+  const toDay = periods[periods.length - 1]?.toDay ?? asOfDay;
+  const rows = await dailyRange(fromDay, toDay, { deviceIds: ids });
   const resRows = await resourceDailyRange(fromDay, toDay, { deviceIds: ids });
-  const spans = await dailySpans();
   const report = buildUsageReport({ rows, resRows, periods, devices, spans, extraById });
   return {
     ok: true,
     db: await dbAvailable(),
-    ...q,
+    ...q, count: periods.length,
+    ...(q.all ? { firstDay, firstLabel: firstDay == null ? null : dayLabel(firstDay) } : {}),
     asOfDay, asOfLabel: dayLabel(asOfDay), dayOffsetMin: DAY_OFFSET_MIN,
     periods, devices: report,
     // 화면은 여기 값만 쓴다(단위별 기간 수·요일 이름·하위 항목 구분을 문구에 박지 않는다).
-    grans: GRANS, weekdayLabels: WEEKDAY_LABELS, resourceKinds: RESOURCE_KINDS,
+    grans: GRANS, weekdayLabels: WEEKDAY_LABELS, resourceKinds: RESOURCE_KINDS, pools: POOLS,
     types: STORAGE_TYPES.map((t) => ({ type: t.type, label: t.label })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     ...(admin ? {} : { addressHidden: true }),
