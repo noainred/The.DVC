@@ -48,11 +48,11 @@ test('① 주간 — 기준 요일(기본 월) 날짜가 행이고 창은 직전
   const wed = dayOf('2026-10-28');                       // 수요일
   assert.equal(R.weekdayOf(dayOf('2026-10-26')), 1, '2026-10-26 은 월요일');
   const w = R.buildPeriods({ gran: 'weekly', asOfDay: wed, count: 3 });
-  assert.deepEqual(w.map((p) => p.label), ['2026-10-12', '2026-10-19', '2026-10-26']);
+  assert.deepEqual(w.map((p) => p.dayLabel), ['2026-10-12', '2026-10-19', '2026-10-26']);   // v2.791: label 은 ISO 주차, 날짜는 dayLabel
   assert.equal(w[2].fromDay, dayOf('2026-10-20'));
   assert.equal(w[2].toDay, dayOf('2026-10-26'));
   const sun = R.buildPeriods({ gran: 'weekly', asOfDay: wed, count: 1, weekday: 0 });
-  assert.equal(sun[0].label, '2026-10-25', '기준 요일을 일요일로');
+  assert.equal(sun[0].dayLabel, '2026-10-25', '기준 요일을 일요일로');
   const d = R.buildPeriods({ gran: 'daily', asOfDay: wed, count: 3 });
   assert.deepEqual(d.map((p) => [p.fromDay === p.toDay, p.label]), [[true, '2026-10-26'], [true, '2026-10-27'], [true, '2026-10-28']]);
   const m = R.buildPeriods({ gran: 'monthly', asOfDay: wed, count: 2 });
@@ -60,7 +60,7 @@ test('① 주간 — 기준 요일(기본 월) 날짜가 행이고 창은 직전
   assert.equal(m[0].toDay, dayOf('2026-09-30')); assert.equal(m[0].current, undefined);
   assert.equal(m[1].toDay, wed); assert.equal(m[1].current, true, '이번 달은 오늘까지');
   // 모르는 값은 기본값, 상한은 자른다(읽기 경로)
-  assert.deepEqual(R.normalizeReportQuery({ gran: 'x', count: 'abc' }), { gran: 'weekly', count: R.GRANS.weekly.def, weekday: 1 });
+  assert.deepEqual(R.normalizeReportQuery({ gran: 'x', count: 'abc' }), { gran: 'weekly', count: R.GRANS.weekly.def, weekday: 1, all: false });
   assert.equal(R.normalizeReportQuery({ gran: 'daily', count: 9999 }).count, R.GRANS.daily.max);
 });
 
@@ -234,8 +234,9 @@ async function fakeSmtp() {
 test('⑥-1 메일 규칙 — 형식 오류는 저장하지 않고 field · since 는 켜거나 일정을 바꾼 시각 · 본문 이스케이프', async () => {
   assert.equal(M.normalizeMail({ enabled: true, days: [] }, null).field, 'mail.days');
   assert.equal(M.normalizeMail({ time: '24:00' }, null).field, 'mail.time');
-  assert.equal(M.normalizeMail({ gran: 'hourly' }, null).field, 'mail.gran');
-  assert.equal(M.normalizeMail({ count: 99 }, null).field, 'mail.count');
+  // v2.791: 본문은 항상 주간 — 예전 표 단위·기간 수(gran·count)는 읽지도 거절하지도 않는다(저장 파일에 남아 있어도 무해)
+  assert.equal(M.normalizeMail({ gran: 'hourly', count: 99 }, null).error, undefined);
+  assert.deepEqual([M.mailOf({}).attachExcel, M.mailOf({}).includeResources], [true, true], 'v2.791 기본: 엑셀 첨부 · LUN·파일시스템 포함');
   assert.equal(M.normalizeMail({ to: 'ok@corp.local\nbad' }, null).field, 'mail.to');
   const t0 = 1_800_000_000_000;
   const on = M.normalizeMail({ enabled: true, days: [1, 3, 3, 9], time: '07:30', to: 'a@corp.local, A@corp.local' }, null, t0).mail;
@@ -281,7 +282,9 @@ test('⑥-2 메일 발송 — 라우터 400 · 저장 · 지금 보내기(가짜
   const m0 = smtp.st.mails[0];
   assert.deepEqual(m0.rcpt.map((x) => x.toLowerCase()).sort(), ['admin@corp.local', 'extra@corp.local']);
   assert.match(m0.subject, /스토리지 사용량 주간 보고/);
-  assert.match(m0.data, /UNITY-A/);
+  // v2.791: 본문은 주간 판단 자료(장비 전체 표는 첨부 엑셀로) — 첨부가 붙었는지 본다(엑셀 내용 대조는 storageUsage2791 ⑥).
+  assert.match(m0.data, /첨부 엑셀 — storage-usage-weekly-\d{4}-W\d{2}\.xlsx/);
+  assert.match(m0.data, /법인별 요약/);
   assert.ok(!m0.data.includes('10.20.0.6'), '메일은 비관리자 판본 — 관리 주소를 싣지 않는다');
   const st = (await call('GET', '/tools/storage-usage/mail')).body.status;
   assert.ok(!JSON.stringify(st).includes('@'), '상태·기록에는 주소를 싣지 않는다(개수만)');

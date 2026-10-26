@@ -245,6 +245,9 @@ async function openInner() {
       selDailyAll: conn.prepare(`SELECT device_id, day, last_ts, total_bytes, used_bytes,
           hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples
         FROM capacity_daily WHERE day >= ? ORDER BY device_id, day`),
+      // v2.791: 구간 읽기(보고표 '전체 누적' — 5년 × 장비 수를 한 번에 .all() 하지 않게 조각으로). idx_capd_day 를 탄다.
+      selDailyRange: conn.prepare(`SELECT device_id, day, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used
+        FROM capacity_daily WHERE day >= ? AND day < ?`),
       // 장비별 **전체 이력 범위**(조회 구간과 무관). 화면의 '관측 N일' 은 이 값이어야 한다 —
       // 조회 구간(예: 90일)으로 대신하면 700일치를 가진 장비가 '92일' 로 보인다(v2.531 실제 결함).
       // capacity_daily 는 하루 1행이라 전 행을 훑어도 20대×5년 = 3.6만 행이다.
@@ -497,6 +500,23 @@ export async function resourceDailyRange(fromDay, toDay, { deviceIds = null, sli
  * @param {string|null} deviceId null 이면 전 장비(장비별로 묶어 돌려준다)
  * @param {number} sinceDay 일 인덱스(포함)
  */
+/**
+ * v2.791 — 일 롤업 구간 읽기([fromDay, toDay]). 보고표가 '전체 누적'(최대 5년)을 읽을 때 한 번의 동기 `.all()` 로 수십만 행을 만들지 않게
+ * `sliceDays` 조각으로 읽고 조각 사이에 시간 기준으로 양보한다(CLAUDE.md '요청 경로의 큰 집계는 조각 + 시간 기준 양보' — resourceDailyRange 와 같은 모양).
+ */
+export async function dailyRange(fromDay, toDay, { deviceIds = null, sliceDays = 31 } = {}) {
+  const db = await open();
+  if (!db) return [];
+  const want = deviceIds ? new Set(deviceIds) : null;
+  const out = [];
+  const yieldNow = createYielder();
+  for (let lo = fromDay; lo <= toDay; lo += sliceDays) {
+    const hi = Math.min(toDay + 1, lo + sliceDays);
+    for (const r of db.selDailyRange.all(lo, hi)) if (!want || want.has(r.device_id)) out.push(r);
+    await yieldNow();
+  }
+  return out;
+}
 export async function dailySeries(deviceId, sinceDay) {
   const db = await open();
   if (!db) return [];

@@ -735,7 +735,28 @@
   · CSV 두 가지 — 표 그대로(머리 3줄 · 숫자 칸은 숫자만 · 단위는 머리) / 행 단위(기간 × 장비·항목 · 관측일 · 직전 대비). 둘 다 `util/csv.js` 수식 가드 · UTF-8 BOM.
   · 예약 메일 `storage/usageMail.js`(+ 규칙·본문 `usageMailRules.js`) — 일정·받는 사람·놓침은 **아이실론 종합 메일의 `planDigestTick`·`digestRecipients` 를 그대로 쓴다**(사본 금지). 중앙만 보낸다 ·
     회차는 보내기 전에 기록 · 놓친 회차는 몰아서 보내지 않음 · 상태·기록에 주소 없음 · 메일은 비관리자 판본(관리 주소 가림) · 설정 손상이면 저장 409·정기 발송 중지 · 지금 보내기 실패 409.
-    본문은 표 레이아웃·인라인 스타일·전부 이스케이프·520px 이하 @media(400px 넘침 0 — Chromium 확인). 공용 SMTP 모듈에 첨부가 없어 CSV 는 붙이지 않는다(본문이 화면 위치를 안내).
+    본문은 표 레이아웃·인라인 스타일·전부 이스케이프·520px 이하 @media(400px 넘침 0 — Chromium 확인). ~~공용 SMTP 모듈에 첨부가 없어 CSV 는 붙이지 않는다~~ —
+    **정정(v2.791)**: 이 문장은 틀렸다. `util/smtp.js buildMime` 은 v2.749 부터 첨부를 지원했다. v2.791 부터 엑셀을 붙인다(아래 항목).
+- ⚠⚠ **v2.791 — 스토리지 사용량 엑셀 첨부·판단 자료·PowerScale HDD/SSD 풀·ISO 주차·전체 누적. 판단은 `storage/usageInsights.js` 하나(메일 본문·엑셀 공용), 엑셀은 `storage/usageXlsx.js`(워커 `usageXlsxWorker.js`)**
+  (사용자 요청 "메일 발송을 Excel 형식으로 · 누적된 모든 주간 사용량(2026년 1주차, 2주차…) · 포탈에서 보이는것처럼" · "클로드 디자인으로 관리자가 실제로 사용할 수 있는 데이터를 첨부" ·
+  "파워스케일/아이실론은 HDD 풀과 SSD 풀을 분리" · 선택 "시안 먼저 승인 · ISO 8601 · 표준 검증". 시안 https://claude.ai/artifact/8CD6gZbSab7UBo1RZ6spTW (승인 2026-10-26).
+  회귀 `server/test/storageUsage2791.test.js` + 웹 `storageUsageText.test.js`):
+  · 주간 행 이름은 ISO 주차(`isoWeekOf` — 그 주 목요일의 연도 · 엑셀 ISOWEEKNUM 과 같은 번호 · 53주 해 포함). 값의 창(기준 요일 + 직전 6일)은 v2.789 그대로이고 기준일은 `dayLabel` 로 함께 싣는다.
+  · '전체 누적'(`count=all` — 주간·월간만): 등록부에 있는 장비 중 가장 이른 이력이 든 기간부터(`countForAll`), 상한 `allMax`(주 262 — 일 롤업 보존 5년을 덮는다).
+    ⚠ `buildPeriods` 는 `all:true` 일 때만 max(104)를 넘긴다 — 빠지면 2년 넘는 이력이 **조용히 잘린다**(작성 중 합성 5년치로 실제 재현 · 테스트 고정).
+    5년 × 장비 수를 한 번에 `.all()` 하지 않게 일 롤업은 `db.dailyRange`(31일 조각 + 시간 기준 양보 · `idx_capd_day`)로 읽는다.
+  · 풀(`usageReport.poolsOf` — PowerScale 만): 두 풀 모두 관측되면 `pools`(HDD 풀·SSD 풀 — 장비 바로 뒤 열, 장비와 같은 TB 단위), 한 풀만이면 열 없이 `poolNote`('HDD 풀만'·'SSD 풀만'),
+    매체 값이 없으면 아무것도(이유를 단정하지 않는다). 풀은 장비 합계의 **부분** — `aggregateCells` 에 더하지 않는다. SSD 가 L3 캐시인지 아예 없는지는 수집기가 구분하지 못한다(문구도 그렇게).
+  · 판단 자료(`buildInsights`): 조치 항목 = 사용률 `warnPct`(80) 이상 또는 최근 `avgWeeks`(4)걸음 평균 증가로 `horizonWeeks`(8)주 안에 `critPct`(90) 도달(`ACTION_RULE` — 화면 문구는 API 값).
+    평균은 양쪽 값이 다 있는 걸음만, `minSteps`(2) 미만이면 '추정 안 함' · 증가 0 이하 '증가 없음' · 104주 넘으면 '2년 넘게'(직선을 몇 년 뒤까지 늘이지 않는다). 합계 변화는 두 주가 완전한 합계일 때만.
+  · 엑셀 5시트(요약 · 주간 사용량 · 법인별·종류별 · 데이터(행 단위) · 읽는 법): 숫자 칸은 숫자(사용률은 % 서식 분수) · 못 읽음은 빈 칸 · 수집 전 기간은 회색 · 기준일이 아닌 관측은 파란 기울임 ·
+    주간 시트는 머리 4줄(법인/장비/구분/지표) + 주차·기준일 열 고정, 법인 순서는 포탈 표와 같은 ko 정렬 · 데이터 시트는 최근 주가 위 + 자동 필터 · 이름은 문자열 칸만(수식 칸 없음).
+  · ⚠ 워크북 직렬화는 쪼갤 수 없는 동기 코드다 — 메인 스레드에서 5년 × 79대 합성이 **최대 1.5초 정지**(실측). 그래서 IP 대장과 같은 워커 패턴(`renderUsageWorkbook` —
+    ready 전 실패만 인라인 · 시한 `STORAGE_XLSX_TIMEOUT_MS` · 끄기 `STORAGE_XLSX_WORKER=0`)으로 만든다(같은 합성에서 메인 정지 4ms). 결과는 인라인과 같다(테스트가 셀 단위로 대조).
+  · 메일: 본문은 항상 주간(예전 gran·count·includeDevices 설정은 읽지 않는다) · 첨부(`attachExcel`, 기본 켬)는 공용 SMTP 상한(`ATTACH_MAX_BYTES` 5MB)을 넘으면 데이터 시트만 최근
+    `ATTACH_DATA_WEEKS`(52)주로 다시 만들고, 그래도 넘거나 실패하면 **첨부 없이 보내고 본문·기록이 밝힌다**. 실측: 79대 × 262주 2.4MB, 200대 × 262주 5.6MB(→ 52주 2.5MB).
+    메일 첨부는 비관리자 판본(관리 주소 가림). 내려받기 `GET /tools/storage-usage/xlsx` 는 관리자 + `data.csv`(웹 canCsv 와 같은 판정) + 전체 범위 + 동시 1건(`exportBusy`).
+  · ⚠ 정직 기록: 실제 메일 서버·Outlook 에서 첨부를 연 적은 없다(가짜 SMTP 왕복으로 MIME 을 풀어 exceljs 로 다시 읽은 것까지). 실장비의 HDD/SSD 매체 값은 v2.303 수집기 가정 그대로다.
 
 - **게스트 파티션 사용률 경보(v2.749 — 시안 ①~④ 승인)** — 판정 코어 `server/src/guestpart/rules.js`(순수) · 조회 `report.js` · 설정 `settings.js`(`guest-partition.json`) ·
   메일 `notify.js`(+ `mailHtml.js`) · 라우트 `routes/api/toolsGuestPart.js` · 화면 `GuestPartTool.jsx`(특수기능)·`GuestPartSettings.jsx`(설정 › 수집 서버). 회귀 `server/test/guestPart2749.test.js` · `web/src/views/tools/guestPartText.test.js`.

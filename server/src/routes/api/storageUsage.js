@@ -9,18 +9,23 @@ import { logAudit } from '../../audit.js';
 import { isAdminReq } from '../../auth/addressMask.js';
 import { loadUsageReport } from '../../storage/usageData.js';
 import { storageRegistryErrorView } from './isilonDirUsage.js';
-import { loadUsageMailSettings, saveUsageMailSettings, storageUsageMailStatus, sendUsageMailNow, previewUsageMail } from '../../storage/usageMail.js';
-import { TREND_RANGE, SKIP_CODES, VIEW_PATH } from '../../storage/usageMailRules.js';
+import { loadUsageMailSettings, saveUsageMailSettings, storageUsageMailStatus, sendUsageMailNow, previewUsageMail, ATTACH_DATA_WEEKS } from '../../storage/usageMail.js';
+import { ACTION_RULE } from '../../storage/usageInsights.js';
+import { SKIP_CODES, VIEW_PATH } from '../../storage/usageMailRules.js';
+import { renderUsageWorkbook, XLSX_MIME } from '../../storage/usageXlsx.js';
+import { acquireExport } from '../../util/exportBusy.js';
+import { localStamp } from '../../util/dayKey.js';
 import { MAIL_LIST_MAX, isEmail } from '../../isidu/mailRules.js';
 import { load as loadMailCfg } from '../../mail/settings.js';
 
 const adminOnly = requireRole('admin');
+const csvPerm = requirePerm('data.csv');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('스토리지 사용량 보고서는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 export function registerStorageUsage(api) {
   /**
-   * 보고표 — `?gran=daily|weekly|monthly&count=N&weekday=0..6`. 판정·계산은 `storage/usageReport.js`(순수), 조회는 `usageData.js`.
+   * 보고표 — `?gran=daily|weekly|monthly&count=N|all&weekday=0..6`(all = 전체 누적 — 주간·월간만, v2.791). 판정·계산은 `storage/usageReport.js`(순수), 조회는 `usageData.js`.
    * ⚠ 장비 왕복 0 이지만 장비 × 기간 행을 읽는다 — 화면은 마운트 1회 + 버튼(폴링 금지).
    */
   api.get('/tools/storage-usage', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -35,12 +40,41 @@ export function registerStorageUsage(api) {
     res.json(r);
   });
 
+  /**
+   * v2.791 — 엑셀 내려받기(메일 첨부와 같은 파일: 주간 · 누적 전 주차 · 전 장비). 내보내기라 CSV 와 같은 게이트(관리자 + data.csv —
+   * 웹 canCsv 와 같은 판정) · 전체 범위 계정만 · 동시 1건(util/exportBusy — 무거운 내보내기 규약) · 워커 스레드에서 만든다(메인 정지 없음).
+   * 데이터 시트를 줄이지 않는다(메일 첨부 상한과 무관). 관리자 판본이라 관리 주소를 가리지 않는다(화면 표와 같다).
+   */
+  api.get('/tools/storage-usage/xlsx', adminOnly, fullScopeOnly, csvPerm, async (req, res) => {
+    const lock = acquireExport('storage-usage-xlsx', req);
+    if (!lock.ok) return res.status(lock.status).json(lock.body);
+    const ac = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    try {
+      const rep = await loadUsageReport({ gran: 'weekly', count: 'all', admin: isAdminReq(req) });
+      if (!rep.ok) {
+        res.set('Retry-After', '60');
+        return res.status(503).json({ error: '스토리지 등록부를 읽지 못했습니다 — 손상 보존본(storage-devices.json.corrupt.*)을 확인하세요.', registryUnreadable: true });
+      }
+      const includeResources = String(req.query.resources ?? '1') !== '0';
+      const out = await renderUsageWorkbook(rep, { includeResources, stamp: localStamp(Date.now()), signal: ac.signal });
+      const name = out.meta?.filename || 'storage-usage-weekly.xlsx';
+      res.set('Content-Type', XLSX_MIME);
+      res.set('Content-Disposition', `attachment; filename="${name}"`);
+      res.set('Cache-Control', 'no-store');
+      res.send(out.buffer);
+    } catch (e) {
+      if (e?.code === 'aborted') return;
+      res.status(500).json({ error: `엑셀을 만들지 못했습니다: ${String(e?.message || e).slice(0, 200)}` });
+    } finally { lock.release(); }
+  });
+
   /** 메일 설정·상태. 주소는 이 조회에만 싣는다(상태·기록에는 개수만). */
   api.get('/tools/storage-usage/mail', adminOnly, fullScopeOnly, (_req, res) => {
     let adminTo = [];
     try { adminTo = (loadMailCfg().defaultTo || []).filter(isEmail).slice(0, MAIL_LIST_MAX); } catch { adminTo = []; }
     res.json({ ok: true, mail: loadUsageMailSettings(), status: storageUsageMailStatus(), adminTo,
-      limits: { listMax: MAIL_LIST_MAX, trend: TREND_RANGE }, skipCodes: SKIP_CODES, viewPath: VIEW_PATH });
+      limits: { listMax: MAIL_LIST_MAX }, skipCodes: SKIP_CODES, viewPath: VIEW_PATH, rule: ACTION_RULE, attachDataWeeks: ATTACH_DATA_WEEKS });
   });
 
   api.put('/tools/storage-usage/mail', adminOnly, fullScopeOnly, requireSettingsOwner, (req, res) => {

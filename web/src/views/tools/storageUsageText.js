@@ -13,6 +13,8 @@
  *  · 문구에 백틱을 쓰지 않는다(BoldText 는 **강조** 만 해석한다 — 값 인용은 ‘ ’).
  *  · CSV 는 두 가지다 — ① 화면 그대로(엑셀형: 날짜 행 × 법인 › 장비 › 지표 열, 머리 3줄) ② 행 단위(피벗용: 한 줄 = 기간 × 장비/항목).
  *    둘 다 수식 가드(`util/csv.js`)를 거친다. 숫자 칸은 숫자만 싣는다(단위는 머리에) — 엑셀이 합계·정렬할 수 있게.
+ *  · v2.791: 주간 행 이름은 ISO 주차('2026년 44주차', 기준일은 `dayLabel`) · PowerScale 은 HDD 풀·SSD 풀을 장비 아래 열로(`pools`) —
+ *    한 매체만 있으면 열을 만들지 않고 `poolNote`('HDD 풀만') 로 밝힌다. 풀 값은 장비 합계의 부분이라 합계에 더하지 않는다.
  */
 import { numOrNull } from '../../numOrNull.js';
 import { toCsv } from '../../util/csv.js';
@@ -186,12 +188,21 @@ export function chartSeries(groups, order, periods, { metric = 'pct' } = {}) {
     return metric === 'used' ? c.usedBytes : c.pct;
   };
   const data = (periods || []).map((p, i) => {
-    const row = { label: p.label };
+    const row = { label: periodAxis(p) };
     for (const s of series) row[s.key] = val(s.cells[i]);
     return row;
   });
   return { series: series.map(({ key, label, color }) => ({ key, label, color })), data, cutPoints };
 }
+
+/** 기간 행 이름 — 주간은 '2026년 44주차 (10-26)'(ISO 주차 + 기준일), 그 밖은 서버 label 그대로. */
+export function periodText(p) {
+  return p?.dayLabel ? `${p.label} (${String(p.dayLabel).slice(5)})` : (p?.label ?? '');
+}
+/** 차트 가로축 — 주간은 '2026-W44'(여러 해에 걸친 전체 누적에서도 겹치지 않게), 그 밖은 label. */
+export const periodAxis = (p) => p?.isoKey || p?.label || '';
+/** 장비 머리의 보조 문구 — 종류 · 풀 표지('HDD 풀만'). */
+export const deviceSub = (d, typeLabel) => [typeLabel(d.type), d.poolNote].filter(Boolean).join(' · ');
 
 /* ── CSV ─────────────────────────────────────────────────────────── */
 const csvUnit = (unit, fallback) => (DIV[unit] ? unit : fallback);
@@ -200,15 +211,22 @@ const csvUnit = (unit, fallback) => (DIV[unit] ? unit : fallback);
  * ① 화면 그대로(엑셀형) — 머리 3줄(법인 / 장비·항목 / 지표) + 기간 행. 장비는 전체·사용·사용률 3칸, 하위 항목도 같은 3칸.
  * 단위 'auto' 면 장비는 TB, 하위 항목은 GB(사용자 캡처와 같다). 단위는 지표 머리에 적는다.
  */
-export function wideCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) => x, unit = 'auto', resources = true, kindGroup = {} } = {}) {
+export function wideCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) => x, unit = 'auto', resources = true, pools = true, kindGroup = {} } = {}) {
   const du = csvUnit(unit, 'TB'); const ru = csvUnit(unit, 'GB');
-  const h1 = ['법인']; const h2 = ['장비 / 항목']; const h3 = ['일자'];
+  const h1 = ['법인']; const h2 = ['장비 / 항목']; const h3 = [periods?.[0]?.dayLabel ? '주차 (기준일)' : '일자'];
   const cols = [];
   for (const d of devices) {
     const corp = dcName(d.datacenterId) || '미지정';
-    const nm = `${d.name} (${typeLabel(d.type)})`;
+    const nm = `${d.name} (${deviceSub(d, typeLabel)})`;
     h1.push(corp, corp, corp); h2.push(nm, nm, nm); h3.push(`Total Usable (${du})`, `Used (${du})`, 'Percent (%)');
     cols.push({ cells: d.cells, unit: du });
+    if (pools) {
+      for (const pl of d.pools || []) {
+        const pn = `${d.name} › ${pl.label}`;
+        h1.push(corp, corp, corp); h2.push(pn, pn, pn); h3.push(`Total Usable (${du})`, `Used (${du})`, 'Percent (%)');
+        cols.push({ cells: pl.cells, unit: du });
+      }
+    }
     if (resources) {
       for (const r of d.resources || []) {
         const rn = `${d.name} › ${kindGroup[r.kind] || r.kind} ${r.name}`;
@@ -219,7 +237,7 @@ export function wideCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) =
   }
   const rows = [h1, h2, h3];
   (periods || []).forEach((p, i) => {
-    const row = [p.label];
+    const row = [periodText(p)];
     for (const c of cols) {
       const cell = c.cells[i];
       row.push(bytesNum(cell?.totalBytes, c.unit), bytesNum(cell?.usedBytes, c.unit), cell?.pct ?? '');
@@ -232,7 +250,7 @@ export function wideCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) =
 /**
  * ② 행 단위(피벗용) — 한 줄 = 기간 × (장비 | 하위 항목). 직전 기간 대비 변화를 함께 싣는다. 관측일이 기준일과 다르면 '관측일' 칸이 말한다.
  */
-export function longCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) => x, unit = 'auto', resources = true, kindGroup = {} } = {}) {
+export function longCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) => x, unit = 'auto', resources = true, pools = true, kindGroup = {} } = {}) {
   const u = csvUnit(unit, 'GB');
   const label = (day) => (day == null ? '' : isoOfDay(day));
   const rows = [['기간', '기준일', '관측일', '법인', '종류', '장비', '구분', '항목', `전체(${u})`, `사용(${u})`, '사용률(%)', `직전 대비(${u})`]];
@@ -246,6 +264,7 @@ export function longCsv(devices, periods, { dcName = (x) => x, typeLabel = (x) =
   };
   for (const d of devices) {
     push(d, '장비', d.name, d.cells);
+    if (pools) for (const pl of d.pools || []) push(d, '풀', pl.label, pl.cells);
     if (resources) for (const r of d.resources || []) push(d, kindGroup[r.kind] || r.kind, r.name, r.cells);
   }
   return toCsv(rows);
@@ -259,7 +278,7 @@ export function csvFileName({ gran, asOfLabel, kind, filtered }) {
 /** 저장되지 않은 메일 폼과 저장값이 다른가(‘지금 보내기’ 잠금 판정). */
 export function mailDirty(form, saved) {
   if (!form || !saved) return false;
-  const keys = ['enabled', 'days', 'time', 'includeAdmin', 'to', 'gran', 'count', 'includeDevices', 'includeResources'];
+  const keys = ['enabled', 'days', 'time', 'includeAdmin', 'to', 'attachExcel', 'includeResources'];
   const norm = (o, k) => (k === 'to' ? String(o.to || '') : JSON.stringify(o[k]));
   return keys.some((k) => norm(form, k) !== norm(saved, k));
 }
@@ -288,7 +307,17 @@ export function daysText(days) {
   return d.map((x) => DAY_LABELS[x]).join('·');
 }
 
+/** 메일 탭 — 본문 구성 안내(v2.791 승인 시안). BoldText 로 그린다. */
+export function mailBodyText(rule, dataWeeks) {
+  const r = rule || {};
+  const crit = r.warnPct != null ? `(${r.warnPct}% 이상 또는 ${r.horizonWeeks}주 안 ${r.critPct}% 도달 예상)` : '';
+  const trim = dataWeeks ? `데이터 시트만 최근 ${dataWeeks}주로 줄이고` : '데이터 시트를 줄이고';
+  return `본문은 **주간(ISO 주차)** 입니다 — 핵심 지표 · 조치가 필요한 항목${crit} · 지난주 증가량 상위 · PowerScale 풀별 · 법인별 요약 · 값을 못 읽은 장비. 첨부 엑셀에는 **누적된 전 주차**가 포탈 표와 같은 모양으로 들어갑니다(첨부 크기 상한을 넘으면 ${trim} 본문에 밝힙니다).`;
+}
+/** 보낸 기록의 첨부 상태 — 서버 usageMail record 의 attach 값. */
+export const ATTACH_TEXT = Object.freeze({ attached: '엑셀 첨부', trimmed: '엑셀 첨부(데이터 시트 줄임)', failed: '엑셀 못 붙임', off: '' });
+
 /** 화면 아래 범례 문구(BoldText 로 그린다 — **강조** 만 해석). */
 export function legendText() {
-  return `사용률 색: **${PCT_WARN}% 이상** 주의 · **${PCT_CRIT}% 이상** 위험. 합계는 크기와 사용량을 **둘 다 읽은 장비만** 더하고, 값이 없는 장비가 있으면 ‘값 있음 N/M대’ 로 밝힙니다(0 으로 채우지 않습니다). ‘≈’ 는 기준일에 수집이 없어 기간 안의 가장 최근 관측을 쓴 칸입니다. LUN 의 사용량은 풀에서 할당된 양(Current allocation)이고, 파일시스템은 파일시스템이 보고한 사용량입니다.`;
+  return `사용률 색: **${PCT_WARN}% 이상** 주의 · **${PCT_CRIT}% 이상** 위험. 합계는 크기와 사용량을 **둘 다 읽은 장비만** 더하고, 값이 없는 장비가 있으면 ‘값 있음 N/M대’ 로 밝힙니다(0 으로 채우지 않습니다). ‘≈’ 는 기준일에 수집이 없어 기간 안의 가장 최근 관측을 쓴 칸입니다. LUN 의 사용량은 풀에서 할당된 양(Current allocation)이고, 파일시스템은 파일시스템이 보고한 사용량입니다. PowerScale(아이실론)은 **HDD 풀·SSD 풀**을 장비 아래에 따로 보여 줍니다 — 한 매체만 있으면 ‘HDD 풀만’·‘SSD 풀만’ 으로 적고 빈 풀 열을 만들지 않습니다(없는 풀은 0 TB 가 아닙니다).`;
 }

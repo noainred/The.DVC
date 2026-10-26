@@ -139,7 +139,10 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
         { name: `${spec.name.toLowerCase()}_a300`, totalBytes: total - a, usedBytes: used - au, pct: r2((used - au) / (total - a) * 100) },
       ];
     } else snap.pools = [{ name: spec.type === 'powermax' || spec.type === 'vmax' ? 'SRP_1' : 'pool_1', totalBytes: total, usedBytes: used, pct: r2(used / total * 100) }];
-    if (spec.type === 'isilon') {
+    if (spec.type === 'isilon' && spec.k === 'ps-sha-01') {
+      // v2.791 데모: SSD 를 L3 캐시로만 쓰는 구성 — SSD 풀이 없다(media.ssd = null). 보고표가 'HDD 풀만' 으로 밝히는지 보이려고.
+      snap.media = { hdd: { totalBytes: total, usedBytes: used, pct: r2(used / total * 100) }, ssd: null };
+    } else if (spec.type === 'isilon') {
       const ssdT = Math.round(total * 0.08); const ssdU = Math.round(ssdT * 0.42);
       snap.media = { hdd: { totalBytes: total - ssdT, usedBytes: used - ssdU, pct: r2((used - ssdU) / (total - ssdT) * 100) }, ssd: { totalBytes: ssdT, usedBytes: ssdU, pct: r2(ssdU / ssdT * 100) } };
     }

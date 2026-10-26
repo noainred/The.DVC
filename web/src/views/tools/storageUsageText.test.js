@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   aggregateCells, deltaOf, expectedIn, bytesText, deltaText, pctText, pctTone, inexactNote, partialNote, probeLine, PROBE_TEXT, SKIP_TEXT,
   groupSummary, chartSeries, SERIES_COLORS, OTHER_COLOR, wideCsv, longCsv, csvFileName, isEmail, parseMailList, recipientCount, daysText, mailDirty,
+  periodText, periodAxis, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
 
 const S = await import('../../../../server/src/storage/usageReport.js');
@@ -15,6 +16,7 @@ const T = 1024 ** 4;
 const G = 1024 ** 3;
 const cell = (t, u, day, exact = true) => ({ day, exact, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
 const PS = S.buildPeriods({ gran: 'daily', asOfDay: 100, count: 3 });
+const PS_DAILY = PS;
 const DEVS = [
   { deviceId: 'a', name: 'A', type: 'isilon', datacenterId: 'dc1', firstDay: 50, enabled: true, cells: [cell(10 * T, 5 * T, 98), cell(10 * T, 6 * T, 99), cell(10 * T, 7 * T, 100)], resources: [] },
   { deviceId: 'b', name: 'B', type: 'unity480', datacenterId: 'dc2', firstDay: 50, enabled: true, cells: [cell(20 * T, 10 * T, 98), null, cell(20 * T, null, 100)],
@@ -113,6 +115,44 @@ describe('CSV', () => {
   });
   it('파일 이름', () => {
     expect(csvFileName({ gran: 'weekly', asOfLabel: '2026-10-26', kind: 'wide', filtered: true })).toBe('storage-usage-weekly-2026-10-26-wide-filtered.csv');
+  });
+});
+
+describe('v2.791 — ISO 주차 · PowerScale 풀', () => {
+  const W = S.buildPeriods({ gran: 'weekly', asOfDay: Math.floor(Date.parse('2026-10-28T00:00:00Z') / 86400000), count: 2 });
+  const pool = (k, label, cells) => ({ key: k, label, cells });
+  const PS = [{ ...DEVS[0], name: 'H500', pools: [pool('hdd', 'HDD 풀', [cell(9 * T, 4 * T, 0), null]), pool('ssd', 'SSD 풀', [cell(T, T / 2, 0), null])], cells: [cell(10 * T, 4.5 * T, 0), null] },
+    { ...DEVS[2], name: 'A200', poolNote: 'HDD 풀만', pools: [], cells: [null, cell(5 * T, T, 0)] }];
+  it('주간 행 이름은 ISO 주차 + 기준일 · 차트 축은 주차 키 · 일간은 그대로', () => {
+    expect(W.map(periodText)).toEqual(['2026년 43주차 (10-19)', '2026년 44주차 (10-26)']);
+    expect(W.map(periodAxis)).toEqual(['2026-W43', '2026-W44']);
+    expect(periodText(PS_DAILY[0])).toBe(PS_DAILY[0].label);
+    expect(deviceSub(PS[1], (t) => t)).toBe('isilon · HDD 풀만');
+  });
+  it('CSV — 풀은 장비 바로 뒤에 같은 단위(TB) 3칸 · 한 풀 장비는 이름에 표지 · 행 단위는 구분=풀', () => {
+    const lines = wideCsv(PS, W, { typeLabel: (t) => t }).split('\r\n');
+    expect(lines[1].split(',').slice(1)).toEqual([
+      'H500 (isilon)', 'H500 (isilon)', 'H500 (isilon)', 'H500 › HDD 풀', 'H500 › HDD 풀', 'H500 › HDD 풀',
+      'H500 › SSD 풀', 'H500 › SSD 풀', 'H500 › SSD 풀', 'A200 (isilon · HDD 풀만)', 'A200 (isilon · HDD 풀만)', 'A200 (isilon · HDD 풀만)']);
+    expect(lines[2].split(',')[0]).toBe('주차 (기준일)');
+    expect(lines[2].split(',')[4]).toBe('Total Usable (TB)', '풀은 GB 로 바꾸지 않는다');
+    expect(lines[3].split(',').slice(0, 7)).toEqual(['2026년 43주차 (10-19)', '10', '4.5', '45', '9', '4', '44.4']);
+    expect(wideCsv(PS, W, { pools: false }).split('\r\n')[1]).not.toContain('HDD 풀,');
+    const rows = longCsv(PS, W, { typeLabel: (t) => t, unit: 'TB' }).split('\r\n').map((l) => l.split(','));
+    const pr = rows.filter((r) => r[6] === '풀');
+    expect(pr.map((r) => [r[0], r[7], r[9]])).toEqual([['2026년 43주차', 'HDD 풀', '4'], ['2026년 44주차', 'HDD 풀', ''], ['2026년 43주차', 'SSD 풀', '0.5'], ['2026년 44주차', 'SSD 풀', '']]);
+  });
+  it('메일 탭 문구는 서버 기준값으로(숫자를 박지 않는다) · 첨부 상태 문구는 서버 상태와 1:1', async () => {
+    const SI = await import('../../../../server/src/storage/usageInsights.js');
+    const t = mailBodyText(SI.ACTION_RULE, 52);
+    expect(t).toContain(`${SI.ACTION_RULE.warnPct}% 이상 또는 ${SI.ACTION_RULE.horizonWeeks}주 안 ${SI.ACTION_RULE.critPct}% 도달 예상`);
+    expect(t).toContain('최근 52주');
+    expect(mailBodyText(null, null)).not.toMatch(/undefined/);
+    expect(Object.keys(ATTACH_TEXT).sort()).toEqual(['attached', 'failed', 'off', 'trimmed']);
+  });
+  it('서버 풀 판정과 같은 이름을 쓴다', () => {
+    expect(S.POOLS.map((p) => p.label)).toEqual(['HDD 풀', 'SSD 풀']);
+    expect(Object.values(S.POOL_ONLY_NOTE)).toEqual(['HDD 풀만', 'SSD 풀만']);
   });
 });
 
