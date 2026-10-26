@@ -81,6 +81,7 @@ export function mergeJobView(job, target, edge) {
     ...job,
     lastRun: st?.lastRun || null, history: st?.history || [], clones: st?.clones || [],
     ...(st?.running ? { running: { at: 0 } } : {}),
+    ...(st?.verifying ? { verifying: { at: 0 } } : {}),
     exec: {
       where: tg.where, agent: tg.agent || '', ...(tg.reason ? { reason: tg.reason } : {}),
       reportedAt: edge?.at || null, reported: !!st, ...(st?.problem ? { problem: st.problem } : {}),

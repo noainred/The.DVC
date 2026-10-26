@@ -214,3 +214,87 @@ test('R2: 법인 마운트 지정 — 조회 밖 404 · 쓰기 밖 403 · 지정
   assert.equal(o.ok, 201); assert.equal(o.editSame, 201); assert.equal(o.editMove, 400);
   assert.equal(o.clear, null); assert.equal(o.editAfterClear, 201);
 });
+
+/* ── 3회차: 실패 메일(vmclone/notify.js) ───────────────────────────────── */
+
+test('M1: collectNewFailures — 기준 시각 이후의 실패만 · 건너뜀(데모·위임·멈춤)은 알리지 않는다 · 성공 줄도 기준을 옮긴다', async () => {
+  const { collectNewFailures, isMailableFailure } = await import('../src/vmclone/notify.js');
+  const src = [
+    { jobId: 'j1', vmName: 'web01', vcenterId: 'vcA', corp: '중앙', history: [
+      { at: 100, kind: 'backup', ok: false, detail: '옛 실패' },
+      { at: 300, kind: 'backup', ok: false, detail: '스냅샷 실패' },
+      { at: 400, kind: 'verify', ok: false, detail: 'Tools 무응답' },
+      { at: 500, kind: 'backup', ok: false, skipped: 'delegated', detail: '위임' },
+    ] },
+    { jobId: 'j2', vmName: 'db01', vcenterId: 'vcB', corp: 'edge-kr', history: [{ at: 600, kind: 'backup', ok: true, detail: 'ok' }] },
+    { jobId: 'j3', vmName: 'x', vcenterId: 'vcB', corp: 'edge-kr', history: [{ at: 50, kind: 'restore', ok: false, detail: '설치 전' }] },
+  ];
+  const r = collectNewFailures(src, { since: 200, jobs: { j1: 250 } });
+  assert.deepEqual(r.rows.map((x) => [x.jobId, x.kind, x.detail]), [['j1', '백업', '스냅샷 실패'], ['j1', '검증', 'Tools 무응답']]);
+  assert.deepEqual(r.marks, { j1: 500, j2: 600 }, '건너뜀·성공 줄도 기준을 옮긴다 · since 이전(j3)은 보지 않는다');
+  const again = collectNewFailures(src, { since: 200, jobs: { j1: 500, j2: 600 } });
+  assert.equal(again.rows.length, 0); assert.deepEqual(again.marks, {});
+  assert.equal(isMailableFailure({ at: 1, ok: false, skipped: 'restart-cleanup-gave-up' }), true, '정리 포기는 알린다');
+  assert.equal(isMailableFailure({ at: 1, ok: false, skipped: 'demo-job' }), false);
+});
+
+test('M2: sourcesOf — 엣지 이력 시각은 수신 시각으로 자른다 · 이름은 중앙 정의 · 위임 잡은 한 번만', async () => {
+  const { sourcesOf, collectNewFailures } = await import('../src/vmclone/notify.js');
+  const jobs = [{ id: 'j1', vmName: 'web01', vcenterId: 'vcA', history: [{ at: 1, ok: false }] }, { id: 'j9', vmName: 'local', vcenterId: 'vcC', history: [] }];
+  const edges = [{ agent: 'edge-kr', at: 1000, jobs: new Map([['j1', { history: [{ at: 999_999, kind: 'backup', ok: false, detail: '미래 시계' }] }], ['nope', { history: [{ at: 5, ok: false }] }]]) }];
+  const s = sourcesOf(jobs, edges);
+  assert.deepEqual(s.map((x) => [x.jobId, x.corp, x.vmName]), [['j1', 'edge-kr', 'web01'], ['j9', '중앙', 'local']]);
+  assert.equal(s[0].history[0].at, 1000, '엣지 시계가 앞서도 수신 시각을 넘지 않는다');
+  const r = collectNewFailures(s, { since: 0, jobs: {} });
+  assert.equal(r.marks.j1, 1000);
+});
+
+test('M3: renderFailureMail — HTML 이스케이프 · 제목 VM 3개까지 · 상한 넘으면 개수만', async () => {
+  const { renderFailureMail } = await import('../src/vmclone/notify.js');
+  const rows = Array.from({ length: 55 }, (_, i) => ({ at: Date.UTC(2026, 9, 26, 1, i), jobId: 'j' + i, vmName: i === 0 ? '<b>evil</b>' : `vm${i}`, vcenterId: 'vcA', corp: '중앙', kind: '백업', detail: i === 0 ? '<script>x</script>' : 'fail' }));
+  const m = renderFailureMail(rows, (id) => (id === 'vcA' ? 'VC-서울' : id));
+  assert.match(m.subject, /^\[VM 백업\] 실패 55건 — <b>evil<\/b>, vm1, vm2 외 52$/);
+  assert.doesNotMatch(m.html, /<script>|<b>evil/);
+  assert.match(m.html, /&lt;script&gt;/); assert.match(m.html, /VC-서울/);
+  assert.match(m.html, /그 밖에 5건/);
+});
+
+test('M4: tick — 실패를 한 통으로 보내고 기준을 옮긴다 · 발송 실패면 옮기지 않는다 · 메일이 꺼져 있으면 기준만 옮긴다', () => {
+  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794m-'));
+  fs.writeFileSync(path.join(cfg, 'vm-clone.json'), JSON.stringify({ version: 1, ops: [], jobs: [{ id: 'j1', vcenterId: 'vcA', vmId: 'vcA:vm-1', vmName: 'web01', dest: { type: 'datastore', datastoreName: 'ds' }, schedule: { mode: 'manual' }, keep: 2, enabled: true, clones: [], history: [] }] }));
+  const script = `
+    import { mock } from 'node:test';
+    globalThis.SENT = []; globalThis.MAIL = { enabled: true, kinds: {} }; globalThis.FAILSEND = false;
+    mock.module(${J('mail/service.js')}, { namedExports: { sendPortalMail: async (m) => { globalThis.SENT.push(m); return globalThis.FAILSEND ? { ok: false, reason: 'SMTP 오류' } : { ok: true }; } } });
+    mock.module(${J('mail/settings.js')}, { namedExports: { load: () => globalThis.MAIL } });
+    mock.module(${J('store.js')}, { namedExports: { store: { get: () => ({ source: 'live', vcenters: [{ id: 'vcA', name: 'VC-A' }] }) } } });
+    const st = await import(${J('vmclone/store.js')});
+    const n = await import(${J('vmclone/notify.js')});
+    const fail = (detail) => st.recordRun('j1', { ok: false, detail, ms: 1 });
+    const out = {};
+    await n.tick();                               // 처음 — 지금부터 센다(지난 이력 없음)
+    await new Promise((r) => setTimeout(r, 5));
+    fail('A'); fail('B');
+    globalThis.FAILSEND = true; await n.tick();
+    out.afterFail = [globalThis.SENT.length, n.vmBackupMailStatus().sent];
+    globalThis.FAILSEND = false; await n.tick();
+    out.afterOk = [globalThis.SENT.length, globalThis.SENT.at(-1).kind, globalThis.SENT.at(-1).subject, (globalThis.SENT.at(-1).text.match(/web01/g) || []).length];
+    await n.tick();
+    out.noDup = globalThis.SENT.length;
+    globalThis.MAIL = { enabled: false }; fail('C'); await n.tick();
+    globalThis.MAIL = { enabled: true, kinds: {} }; await n.tick();
+    out.offThenOn = globalThis.SENT.length;
+    console.log(JSON.stringify(out));
+    process.exit(0);
+  `;
+  const res = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script],
+    { encoding: 'utf8', timeout: 60_000, env: { ...process.env, CONFIG_DIR: cfg, DATA_SOURCE: 'live' } });
+  assert.equal(res.status, 0, res.stderr);
+  const out = JSON.parse(res.stdout.trim().split('\n').pop());
+  assert.deepEqual(out.afterFail, [1, false], '발송 실패 — 기록');
+  assert.equal(out.afterOk[0], 2, '다음 주기에 같은 실패를 다시 보낸다');
+  assert.equal(out.afterOk[1], 'vm-backup');
+  assert.match(out.afterOk[2], /실패 2건 — web01/);
+  assert.equal(out.noDup, 2, '보낸 실패는 다시 보내지 않는다');
+  assert.equal(out.offThenOn, 2, '메일이 꺼져 있던 동안의 실패는 켠 뒤 쏟지 않는다');
+});

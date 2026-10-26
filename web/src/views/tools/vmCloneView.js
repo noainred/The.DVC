@@ -9,6 +9,7 @@
  *  · 건너뛴 실행(인증 정지·데모·위임·재시작 정리)은 성공도 실패도 아니다(skip).
  *  · 엣지 위임 잡의 실행 상태는 엣지가 보고한 것이다 — 보고가 없으면 '보고 없음' 이라 말하고 0 으로 칠하지 않는다.
  */
+import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 const DAY = 86_400_000;
 
@@ -229,4 +230,23 @@ export function phaseRows(entry, running = null) {
   const rows = (Array.isArray(entry?.phases) ? entry.phases : []).map((p) => ({ name: p.n, ms: p.ms, state: p.ok === false ? 'fail' : 'done' }));
   if (running?.phase) rows.push({ name: running.phase, ms: null, state: 'running' });
   return rows;
+}
+
+/** v2.794 이력 필터 — all · backup · verify · restore · fail(실패만 — 건너뜀 제외). 순서는 그대로. */
+export const HISTORY_FILTERS = Object.freeze([['all', '전체'], ['backup', '백업'], ['verify', '검증'], ['restore', '복구'], ['fail', '실패만']]);
+export function historyFilter(list, f = 'all') {
+  const xs = Array.isArray(list) ? list : [];
+  if (f === 'fail') return xs.filter((h) => runTone(h) === 'fail');
+  if (f === 'backup' || f === 'verify' || f === 'restore') return xs.filter((h) => (h.kind || 'backup') === f);
+  return xs;
+}
+/** v2.794 이력 CSV(순수) — 시각은 ISO(표계산이 읽는다) · 단계는 '이름 초' 를 ' > ' 로 잇는다. 값이 없으면 빈 칸. */
+export function historyCsv(job, list) {
+  const head = ['시각', 'VM', 'vCenter', '종류', '사유(실행)', '결과', '건너뜀', '소요(초)', '단계', '내용'];
+  const lines = (Array.isArray(list) ? list : []).map((h) => [
+    h.at ? new Date(h.at).toISOString() : '', job?.vmName || '', job?.vcenterId || '', KIND_LABEL[h.kind || 'backup'] || h.kind || '',
+    h.trigger ? triggerText(h.trigger) : '', h.skipped ? '건너뜀' : h.ok ? '성공' : '실패', h.skipped || '',
+    Number(h.ms) > 0 ? Math.round(h.ms / 1000) : '', (h.phases || []).map((p) => `${p.n} ${Math.round((Number(p.ms) || 0) / 1000)}s${p.ok === false ? '(실패)' : ''}`).join(' > '), h.detail || '',
+  ]);
+  return [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
 }

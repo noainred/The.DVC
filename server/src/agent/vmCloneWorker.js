@@ -83,6 +83,7 @@ export function buildReport() {
     history: (j.history || []).slice(-HISTORY_MAX),
     clones: (j.clones || []).slice(-30).map((c) => ({ ref: c.ref, name: c.name, at: c.at, ...(c.bytes != null ? { bytes: c.bytes } : {}), ...(c.verify ? { verify: c.verify } : {}) })),
     ...(j.running ? { running: true } : {}),
+    ...(j.verifying ? { verifying: true } : {}),   // v2.794: 검증 중·중단된 검증 정리 대기(화면 표시용 — 세부는 엣지에만)
     ...(j.suspended ? { problem: `멈춤 — ${j.suspended}` } : direct && !direct.has(String(j.vcenterId)) ? { problem: '이 엣지가 직접 수집하는 vCenter 가 아닙니다(엣지 설정 › vCenter 에 없거나 꺼짐·점검중) — 실행하지 않습니다' } : {}),
   }));
   let mounts = [];

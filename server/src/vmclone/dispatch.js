@@ -139,6 +139,7 @@ export function sanitizeReport(b) {
       history: (Array.isArray(j.history) ? j.history.slice(-30) : []).map(cleanHist).filter(Boolean),
       clones: (Array.isArray(j.clones) ? j.clones.slice(-30) : []).map(cleanClone).filter(Boolean),
       ...(j.running === true ? { running: true } : {}),
+      ...(j.verifying === true ? { verifying: true } : {}),
       ...(t(j.problem, 200) ? { problem: t(j.problem, 200) } : {}),
     });
   }
@@ -197,6 +198,8 @@ export function ingestReport(agent, clean, targets, now = Date.now()) {
 
 /** 엣지 보고 상태(없으면 null). */
 export function edgeStateOf(agent) { return _edges.get(lower(agent)) || null; }
+/** v2.794 — 보고를 올린 엣지 전부(실패 메일이 엣지 위임 잡의 이력을 본다). */
+export function listEdgeStates() { return [..._edges.values()]; }
 
 // ── 작업 등록부 ──────────────────────────────────────────────────────────────
 
