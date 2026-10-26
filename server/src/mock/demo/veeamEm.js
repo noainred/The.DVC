@@ -24,7 +24,7 @@ export function demoEmView(snap, now = Date.now()) {
       name: `${sv.name.replace('VBR-', '')}-${['Daily', 'Inc', 'Full', 'Copy', 'Rep', 'SQL'][i % 6]}-${String(i + 1).padStart(2, '0')}`, uid: `demo-job-${i}`, server: sv.name,
       type: i % 6 === 4 ? 'Replica' : i % 6 === 3 ? 'BackupCopy' : 'Backup', platform: 'VMware', scheduleEnabled: true, nextRun: now + Math.round(rnd() * 20 * H),
       running: st === 'run' ? { start: now - Math.round(rnd() * H) } : null,
-      last: { result: st === 'run' ? 'ok' : st, start: end - dur * 1000, end, durSec: dur },
+      last: { uid: `urn:veeam:BackupJobSession:00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, result: st === 'run' ? 'ok' : st, start: end - dur * 1000, end, durSec: dur },
       runs24: { ok: st === 'ok' ? 1 : 0, warn: st === 'warn' ? 1 : 0, fail: st === 'fail' ? 1 : 0 },
     });
   }
@@ -34,7 +34,7 @@ export function demoEmView(snap, now = Date.now()) {
     const cap = (40 + Math.round(rnd() * 200)) * 1e12;
     return { name: `${sv.name.replace('VBR-', '')}-Repo-0${(i % 3) + 1}`, uid: `demo-repo-${i}`, kind: ['ReFS', 'XFS', 'SOBR'][i % 3], capacity: cap, free: Math.round(cap * (0.05 + rnd() * 0.6)), server: sv.name };
   });
-  const bad = jobs.filter((j) => j.last.result === 'fail' || j.last.result === 'warn').map((j) => ({ job: j.name, server: j.server, result: j.last.result, start: j.last.start, end: j.last.end }));
+  const bad = jobs.filter((j) => j.last.result === 'fail' || j.last.result === 'warn').map((j) => ({ uid: j.last.uid, job: j.name, server: j.server, result: j.last.result, start: j.last.start, end: j.last.end }));
   const protectedVms = Math.round(vmN * 0.88);
   return {
     id: 'mock-em-1', name: 'DEMO-VEM01', host: 'vem-demo.local', port: 9398, enabled: true, demo: true,
@@ -64,4 +64,19 @@ export function demoLicenses(now = Date.now()) {
     { id: 'mock-vbr-1', name: 'VBR-DEMO-01', license: { status: 'Valid', type: 'Subscription', edition: 'EnterprisePlus', expires: now + 158 * D, supportExpires: now + 47 * D, instances: { licensed: 3000, used: 2410 }, sockets: null, capacityTb: null }, ts: now - 9 * 60_000, demo: true },
     { id: 'mock-vbr-2', name: 'VBR-DEMO-02', license: { status: 'Valid', type: 'Subscription', edition: 'EnterprisePlus', expires: now + 158 * D, supportExpires: now + 158 * D, instances: { licensed: 3000, used: 2450 }, sockets: null, capacityTb: null }, ts: now - 9 * 60_000, demo: true },
   ];
+}
+
+/** v2.788.1 데모 세션 상세 — 실패·경고 사유 예시(실제 장비 값이 아니다). */
+export function demoSessionDetail(uid, now = Date.now()) {
+  const n = Number(String(uid).slice(-4)) || 0;
+  const bad = n % 3 === 0 ? 'fail' : 'warn';
+  const reasons = {
+    fail: ['Error: Failed to create VM snapshot. The operation is not allowed in the current state.', 'Error: Not enough storage space on the repository (free 212 GB, required 260 GB).'],
+    warn: ['Changed block tracking cannot be enabled: full disk read was used.', 'Retry 1 of 3 succeeded.'],
+  };
+  const tasks = Array.from({ length: 4 }, (_, i) => ({
+    vm: `demo-vm-${String(n % 50).padStart(2, '0')}${i}`, result: i === 0 ? bad : 'ok', state: 'Stopped',
+    reason: i === 0 ? reasons[bad][n % 2] : '', start: now - (3 + i) * 3_600_000, end: now - (2 + i) * 3_600_000, size: (40 + i * 7) * 1e9,
+  }));
+  return { ok: true, demo: true, uid, head: { job: '', result: bad, state: 'Stopped', start: now - 6 * 3_600_000, end: now - 2 * 3_600_000, reason: reasons[bad][0], retry: false }, tasks, errors: {} };
 }

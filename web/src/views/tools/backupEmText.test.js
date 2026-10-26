@@ -85,3 +85,36 @@ describe('v2.788 Veeam 백업 현황 · EM 탭 도우미', async () => {
     expect(vs).toMatch(/useHashTab\(\{ base: \['settings', 'veeam'\]/);
   });
 });
+
+describe('v2.788.1 EM 매핑 · 실패·경고 상세', async () => {
+  const V = await import('../../../../server/src/veeam/em/view.js');
+  it('짝·법인 문구 — 서버 mapBackupServers 의 출처 값을 그대로 읽는다', () => {
+    const rows = V.mapBackupServers([{ name: 'AZ' }, { name: 'HM' }, { name: 'NJ' }], {
+      emId: 'e', brServers: [{ id: 'b1', name: 'AZ', host: 'az', vcenterIds: ['us:az'] }],
+      map: { 'e|hm': { br: 'none', vcenterIds: ['eu:hm'] } }, vcName: new Map([['us:az', 'Arizona'], ['eu:hm', 'Hungary']]),
+    });
+    expect(rows.map((r) => T.brMatchText(r).text)).toEqual(['AZ (이름으로 자동)', '포탈에 없음(확정)', '짝 없음 — 포탈 미등록']);
+    expect(rows.map((r) => [T.vcMatchText(r).text, T.vcMatchText(r).sub])).toEqual([['Arizona', 'B&R 등록을 따름'], ['Hungary', '수동'], ['정하지 않음', '']]);
+    expect(T.mappingSummary([...rows, { name: 'X', gone: true }])).toEqual({ total: 3, registered: 1, withVc: 2, gone: 1 });
+    expect(T.brMatchText({ brSource: 'missing' }).tone).toBe('fail');
+  });
+  it('상세 — 실패 → 경고 → 정상 순 · 소요 · 결과를 모르면 열지 않는다', () => {
+    const s = T.detailSummary({ head: { end: 1_800_000_000_000 }, tasks: [
+      { vm: 'b', result: 'ok', start: 0, end: 60_000 }, { vm: 'a', result: 'warn', start: 0, end: 120_000 }, { vm: 'c', result: 'fail', start: null, end: 5 },
+    ] });
+    expect(s.tasks.map((t) => t.vm)).toEqual(['c', 'a', 'b']);
+    expect(s.tasks.map((t) => t.durSec)).toEqual([null, 120, 60]);
+    expect(s.counts).toEqual({ fail: 1, warn: 1, ok: 1 });
+    expect(s.line).toMatch(/VM 3대 — 실패 1 · 경고 1 · 정상 1/);
+    expect(T.detailSummary({ head: null, tasks: null }).line).toBe('');
+    expect([T.canOpenDetail('fail', 'u'), T.canOpenDetail('warn', 'u'), T.canOpenDetail('ok', 'u'), T.canOpenDetail('fail', '')]).toEqual([true, true, false, false]);
+  });
+  it('화면 — 매핑 저장은 r?.ok === false 확인 · 상세는 늦은 응답 버림 · 백틱 없음', () => {
+    const m = fs.readFileSync(new URL('../VeeamEmMapping.jsx', import.meta.url), 'utf8');
+    expect(m).toMatch(/const r = await sendJson\('\/admin\/veeam\/em\/map', 'PUT', body\);\s*\n\s*if \(r\?\.ok === false\)/);
+    const d = fs.readFileSync(new URL('./EmSessionDetail.jsx', import.meta.url), 'utf8');
+    expect(d).toMatch(/if \(my === gen\.current\) setD\(r\)/);
+    const tool = fs.readFileSync(new URL('./BackupEmTool.jsx', import.meta.url), 'utf8');
+    expect(tool).toMatch(/<EmSessionDetail emId=\{em\.id\} uid=\{j\.last\.uid\}/);
+  });
+});

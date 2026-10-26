@@ -92,7 +92,7 @@ export const repoTone = (pct) => { const p = numOrNull(pct); return p == null ? 
 /** 작업 필터 + 검색(이름·백업 서버). */
 export function filterJobs(items, f = 'all', q = '') {
   const s = String(q || '').trim().toLowerCase();
-  return (Array.isArray(items) ? items : []).filter((j) => (f === 'all' || j.state === f) && (!s || `${j.name} ${j.server}`.toLowerCase().includes(s)));
+  return (Array.isArray(items) ? items : []).filter((j) => (f === 'all' || j.state === f) && (!s || `${j.name} ${j.server} ${(j.vcNames || []).join(' ')}`.toLowerCase().includes(s)));   // v2.788.1 법인 이름으로도
 }
 
 /** 24시간 실행 결과 막대 조각(%). 끝난 세션이 0 이면 null(막대를 그리지 않는다). */
@@ -118,3 +118,46 @@ export function sparkPoints(series, val, { w = 120, h = 28 } = {}) {
   return { points: pts.map(([d, v]) => `${x(d).toFixed(1)},${y(v).toFixed(1)}`).join(' '), days: pts.length, first: vs[0], last: vs[vs.length - 1] };
 }
 export const usedPctOf = (cap, free) => { const c = numOrNull(cap); const f = numOrNull(free); return c != null && c > 0 && f != null ? Math.round(((c - f) / c) * 1000) / 10 : null; };
+
+/* ── v2.788.1 EM 백업 서버 매핑(설정 › Veeam 백업 서버 › Enterprise Manager) ─────────── */
+/** B&R 짝 문구 — { text, tone }. 서버 veeam/em/view.js mapBackupServers 의 brSource 값을 그대로 읽는다. */
+export function brMatchText(r) {
+  if (!r) return { text: '—', tone: 'none' };
+  if (r.brSource === 'manual') return { text: `${r.brName} (수동)`, tone: 'ok' };
+  if (r.brSource === 'auto') return { text: `${r.brName} (이름으로 자동)`, tone: 'ok' };
+  if (r.brSource === 'none') return { text: '포탈에 없음(확정)', tone: 'none' };
+  if (r.brSource === 'missing') return { text: '고른 B&R 등록이 지워졌습니다', tone: 'fail' };
+  return { text: '짝 없음 — 포탈 미등록', tone: 'warn' };
+}
+/** 법인(vCenter) 문구 — 수동 · B&R 등록을 따름 · 모름. */
+export function vcMatchText(r) {
+  const names = Array.isArray(r?.vcNames) ? r.vcNames : [];
+  if (r?.vcSource === 'manual') return { text: names.join(', '), sub: '수동', tone: 'ok' };
+  if (r?.vcSource === 'br') return { text: names.join(', '), sub: 'B&R 등록을 따름', tone: 'run' };
+  return { text: '정하지 않음', sub: '', tone: 'warn' };
+}
+/** 매핑 요약 — 전체 · B&R 짝 있음 · 법인 정함(사라진 줄은 세지 않는다). */
+export function mappingSummary(rows) {
+  const live = (Array.isArray(rows) ? rows : []).filter((r) => !r.gone);
+  return { total: live.length, registered: live.filter((r) => r.registered).length, withVc: live.filter((r) => r.vcSource).length, gone: (rows || []).length - live.length };
+}
+
+/* ── v2.788.1 실패·경고 상세 ─────────── */
+const RES_ORDER = { fail: 0, warn: 1, ok: 2, none: 3 };
+/** 상세 응답 → 요약 한 줄 + VM 줄(실패 → 경고 → 정상 순 · 소요 초). 결과를 모르면 그 칸은 '—'. */
+export function detailSummary(d) {
+  const tasks = (Array.isArray(d?.tasks) ? d.tasks : []).map((t) => ({
+    ...t, order: RES_ORDER[t.result] ?? 4,
+    durSec: typeof t.start === 'number' && typeof t.end === 'number' && t.end >= t.start ? Math.round((t.end - t.start) / 1000) : null,
+  })).sort((a, b) => (a.order - b.order) || String(a.vm).localeCompare(String(b.vm)));
+  const c = { fail: 0, warn: 0, ok: 0 };
+  for (const t of tasks) if (c[t.result] != null) c[t.result]++;
+  const head = d?.head || null;
+  const parts = [];
+  if (head?.end) parts.push(`끝남 ${shortTs(head.end)}`);
+  if (Array.isArray(d?.tasks)) parts.push(`VM ${tasks.length}대 — 실패 ${c.fail} · 경고 ${c.warn} · 정상 ${c.ok}`);
+  if (d?.cachedAt) parts.push('5분 안에 읽은 값');
+  return { tasks, counts: c, line: parts.join(' · ') };
+}
+/** 상세를 열 수 있는 결과인가(실패·경고 + 세션 UID 가 있을 때만). */
+export const canOpenDetail = (result, uid) => (result === 'fail' || result === 'warn') && !!uid;

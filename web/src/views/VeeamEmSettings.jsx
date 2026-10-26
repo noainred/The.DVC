@@ -11,6 +11,7 @@ import { fetchJson, sendJson, postJson, delJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { SECTION_LABEL } from './tools/backupEmText.js';
+import VeeamEmMapping from './VeeamEmMapping.jsx'; // v2.788.1 백업 서버 매핑
 
 const EMPTY = { id: '', name: '', host: '', port: '', username: '', password: '', enabled: true, note: '' };
 const fmt = (ms) => {
@@ -120,6 +121,8 @@ export default function VeeamEmSettings() {
           </STable>
         )}
       </div>
+
+      {d && ems.length > 0 && <VeeamEmMapping mapping={d.mapping} onSaved={load} />}
 
       <div className="card" style={{ marginTop: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 720 }}>
         <b>{form.id ? `수정 — ${form.name}` : 'Enterprise Manager 추가'}</b>
