@@ -26,7 +26,7 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { pushAll } from '../util/pushAll.js';
 import { poolSettled } from '../util/pool.js';
-import { buildServerResult, listOf, isBackupSessionType } from './parse.js';
+import { buildServerResult, listOf, isBackupSessionType, licenseOf } from './parse.js';
 import { DEFAULT_PORT, DEFAULT_API_VERSION, accessFingerprint } from './registry.js';
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -65,7 +65,7 @@ function tokenError() {
 const isFatal = (e) => !!(e?.authFailed || e?.fatal);
 
 /** 오류 문구에서 비밀을 가린다 — **가린 뒤에** 자른다(v2.751 검토 #8: 먼저 자르면 경계에 걸린 비밀의 앞부분이 남는다). URL 인코딩된 형태도 가린다. */
-function maskText(text, secrets) {
+export function maskText(text, secrets) {
   let t = String(text || '').slice(0, 8192).replace(/[\x00-\x1f]+/g, ' '); // eslint-disable-line no-control-regex
   for (const sct of secrets) {
     if (!sct || sct.length < 3) continue;
@@ -95,7 +95,7 @@ export function higherVersion(text, current) {
   return best;
 }
 
-async function failText(res, secrets) {
+export async function failText(res, secrets) {
   let text = '';
   // 앞부분만 읽는다(본문 전체를 읽고 자르지 않는다). 상한에서 잘렸으면 끝 256자를 버린다 — 경계에 걸려 반쯤 남은 비밀은 가림이 못 찾는다.
   try { const r = await readBodyPrefix(res, 4096); text = r.capped ? r.text.slice(0, -256) : r.text; } catch { text = ''; }
@@ -310,9 +310,12 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     // v2.761 A2: 시한이 끊긴 뒤의 요청은 모두 '취소' 로 실패하고 soft·세션 루프·두 묶음이 그것을 삼킨다 — 여기서 결과를 만들면 잘린 결과가
     //   ok:true 로 저장돼 직전 완전한 결과(lastOk)를 덮는다. 전체 실패로 던진다(withDeadline 이 시한 문구로 바꾼다).
     if (signal?.aborted) throw new Error('수집 시한이 지나 일부만 읽었습니다 — 부분 결과는 저장하지 않습니다');
-    const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
+    // v2.788 라이선스(사용 수량·만료) — 판에 따라 없을 수 있다(soft · 404 는 '이 판은 REST 로 주지 않음').
+    const licRaw = await soft('라이선스', async () => { try { return await c.get('/api/v1/license'); } catch (e) { if (e?.status === 404) return null; throw e; } });
+    const license = licenseOf(licRaw);
+        const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
     // v2.762(G1): target = 읽은 접속처 지문(registry.accessFingerprint) — 중앙·store 가 등록부의 지금 접속처와 대조한다.
-    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, target: accessFingerprint(server), error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, notes: [...notes, ...r.notes] };
+    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, target: accessFingerprint(server), error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, ...(license ? { license } : {}), notes: [...notes, ...r.notes] };
   } finally {
     await c.logout();
   }

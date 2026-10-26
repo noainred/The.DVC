@@ -17,6 +17,8 @@ import { resultLabel } from './veeamBadge.js';
 import { STEP_ICON, STEP_TONE, progressHint, progressCheckedText } from './veeamProgressText.js';
 import EdgeTokenApply from './EdgeTokenApply.jsx'; // v2.776 개별 토큰 자동 적용·진행·기록 // v2.773 단계별 진행 상태
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
+import VeeamEmSettings from './VeeamEmSettings.jsx'; // v2.788 하위 탭 'Enterprise Manager'
+import { useHashTab } from '../hooks/useHashTab.js';
 
 // v2.763(V5-2): agentTouched — 사람이 '읽는 곳' 을 골랐는가('' 는 '아직 안 고름' 과 '중앙에서 직접(명시)' 둘 다라 따로 든다). 서버로 보내지 않는다.
 const EMPTY = { id: '', name: '', host: '', port: '', username: '', password: '', apiVersion: '', agent: '', agentTouched: false, vcenterIds: [], enabled: true, note: '' };
@@ -115,7 +117,7 @@ export function rowActions(s, busy) {
   return out;
 }
 
-export default function VeeamSettings() {
+function VeeamBrServers() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [denied, setDenied] = useState(false);
@@ -424,5 +426,22 @@ function VeeamVcAccounts() {
         </>
       )}
     </div>
+  );
+}
+
+/* v2.788(사용자 요청 'EM 추가는 기존 veeam 서버 설정의 서브 메뉴로'): 하위 탭 B&R 서버 | Enterprise Manager.
+ * 주소 #/settings/veeam/<탭>(AgentDeploy.jsx 와 같은 useHashTab) — 탭이 없으면 B&R 서버(예전 주소·북마크 그대로). */
+export const VEEAM_SETTING_TABS = [['servers', 'B&R 서버'], ['em', 'Enterprise Manager']];
+export default function VeeamSettings() {
+  const [tab, setTab] = useHashTab({ base: ['settings', 'veeam'], valid: VEEAM_SETTING_TABS.map(([k]) => k), fallback: 'servers' });
+  return (
+    <>
+      <div role="tablist" aria-label="Veeam 서버 종류" className="flex gap wrap" style={{ marginBottom: 12, rowGap: 6 }}>
+        {VEEAM_SETTING_TABS.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+      {tab === 'em' ? <VeeamEmSettings /> : <VeeamBrServers />}
+    </>
   );
 }

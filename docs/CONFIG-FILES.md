@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **222개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **227개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-26)
@@ -223,7 +223,12 @@
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
 | `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 4 |
 | `veeam-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/poller.js |
+| `veeam-em-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/em/poller.js |
+| `veeam-em-latest.json` | 설정 | Enterprise Manager 별 마지막 결과(v2.788). veeam/store.js 와 같은 모양: |  |  |  | veeam/em/store.js |
+| `veeam-em.json` | 설정 | Veeam Backup Enterprise Manager(EM) 등록부(v2.788, 사용자 요청 '설정 › Veeam 백업 서버 › Enterprise Manager'). | ✅ | ✅ | ✅ | veeam/em/registry.js |
+| `veeam-history.db` | DB | Veeam 일 단위 이력 DB(v2.788 · veeam-history.db). |  |  | ✅ | config.js, veeam/historyDb.js |
 | `veeam-latest.json` | 설정 | Veeam 서버별 마지막 결과(v2.751). 중앙 직접 수집과 엣지 push 가 같은 표에 들어간다. |  |  |  | veeam/store.js |
+| `veeam-license-alert-state.json` | 설정 | Veeam 라이선스 감시(v2.788, 사용자 채택 '라이선스 만료 알림·추이'). **중앙 전용** · 1시간마다. | ✅ |  | ✅ | veeam/licenseWatch.js |
 | `veeam-servers.json` | 설정 | Veeam Backup & Replication 서버 등록부(v2.751). | ✅ | ✅ | ✅ | veeam/registry.js |
 | `veeam-snap.db` | DB |  |  |  |  | config.js |
 | `veeam-vc-accounts.json` | 설정 | vCenter 이벤트로 본 Veeam 백업 흔적(v2.754). Veeam 연동·VM 메모 없이 쓴다(사용자 지시). | ✅ | ✅ |  | veeam/snapEvents.js |
