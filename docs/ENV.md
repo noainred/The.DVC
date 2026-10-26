@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **677개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **679개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-26)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (204)
+## 공통 (206)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -246,6 +246,8 @@
 | `VM_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VM_DEV_PER_CYCLE` |  |  | config.js |
 | `VM_DEV_REFRESH_MS` |  |  | config.js |
+| `VM_LIST_XLSX_TIMEOUT_MS` | `180000` |  | veeam/vmListXlsx.js |
+| `VM_LIST_XLSX_WORKER` | `'1'` |  | veeam/vmListXlsx.js |
 | `VMDNS_HISTORY_INTERVAL_MS` | `600000` |  | vmdns/poller.js |
 | `VMDNS_HISTORY_RETENTION_DAYS` | `365` |  | vmdns/poller.js |
 | `VMSERIES_CONCURRENCY` | `4` |  | vmseries/poller.js |
@@ -861,4 +863,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 677
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 679

@@ -64,7 +64,9 @@ test('② CSV 열 — 상태 글자 · 모름/없음/연동 없음 · 포탈 시
   const t = parse(csv);
   const head = t[0];
   const col = (r, h) => t[r][head.indexOf(h)];
-  assert.deepEqual(head.slice(0, 4), ['vCenter', '폴더', 'VM', '전원']);
+  assert.deepEqual(head.slice(0, 6), ['vCenter', '폴더 1단계', '폴더 2단계', '폴더 경로', 'VM', '전원'], '폴더는 단계 열(가장 깊은 VM 에 맞춤) + 경로');
+  assert.deepEqual([col(1, '폴더 1단계'), col(1, '폴더 2단계'), col(1, '폴더 경로'), col(2, '폴더 2단계'), col(2, '폴더 경로')], ['DC', 'A', 'DC/A', '', 'DC'], "숨은 'vm' 폴더는 뺀다(화면 트리와 같은 규칙)");
+  assert.deepEqual([L.folderParts('vm'), L.folderParts('Production/Web'), L.folderParts(''), L.folderLevels([])], [[], ['Production', 'Web'], [], 1]);
   assert.ok(head.includes('Veeam 마지막 백업 완료 (UTC+09:00)'));
   assert.ok(head.includes('최근 7일 Veeam 스냅샷 생성 횟수'));
   assert.equal(col(1, 'VM'), '\'=HYPERLINK("x")', '수식 가드');
@@ -109,7 +111,7 @@ test('③ 실제 라우트 — data.csv · 범위 404 · 화면 id ∩ 인벤토
     let r = await post(VC, { ids: [`${VC}:vm-1`, `${VC}:vm-2`, `${OUT}:vm-1`] });
     assert.equal(r.status, 200, await r.clone().text());
     assert.match(r.headers.get('content-type'), /text\/csv/);
-    assert.match(r.headers.get('content-disposition'), /attachment; filename="vm-list-apac_vc01-\d{8}-\d{4}\.csv"/);
+    assert.match(r.headers.get('content-disposition'), /attachment; filename="vm-list-apac_vc01-all-\d{8}-\d{4}\.csv"/, '화면 조건이 파일 이름에(검증 지적 — 세 조건의 파일 이름이 같았다)');
     let t = parse(await r.text());
     const head = t[0]; const col = (row, h) => row[head.indexOf(h)];
     assert.deepEqual(t.slice(1).map((x) => col(x, 'VM')), ['db01', 'web01'], '폴더 → 이름 순 · 남의 vCenter VM 없음');
@@ -120,12 +122,20 @@ test('③ 실제 라우트 — data.csv · 범위 404 · 화면 id ∩ 인벤토
     // id 를 보내지 않으면 전체 · noOff 면 꺼진 VM 제외(화면 visibleVms 와 같은 조건)
     t = parse(await (await post(VC, {})).text());
     assert.equal(t.length - 1, 3);
-    t = parse(await (await post(VC, { power: 'noOff' })).text());
-    assert.deepEqual(t.slice(1).map((x) => x[2]).sort(), ['db01', 'web01']);
+    r = await post(VC, { power: 'noOff' });
+    assert.match(r.headers.get('content-disposition'), /-poweredon-\d{8}-\d{4}\.csv"/);
+    t = parse(await r.text());
+    assert.deepEqual(t.slice(1).map((x) => col(x, 'VM')).sort(), ['db01', 'web01']);
+    // view 는 이름표일 뿐 — 대상은 ids 로 고른다(모르는 값은 무시)
+    r = await post(VC, { ids: [`${VC}:vm-3`], view: 'search' });
+    assert.match(r.headers.get('content-disposition'), /-search-\d{8}-\d{4}\.csv"/);
+    assert.deepEqual(parse(await r.text()).slice(1).map((x) => col(x, 'VM')), ['old01']);
+    assert.match((await post(VC, { view: '../x' })).headers.get('content-disposition'), /-all-\d{8}/);
 
     // 연동 없는 vCenter — Veeam 은 '연동 없음', 스냅샷 흔적은 'Veeam 연동 없음' 판단
     t = parse(await (await post(SN, {})).text());
-    assert.deepEqual([col(t[1], 'Veeam 백업'), col(t[1], '백업 판단')], ['연동 없음', '스냅샷 흔적(Veeam 연동 없음)']);
+    const colSn = (row, h) => row[t[0].indexOf(h)];   // 폴더 단계 열 수가 파일마다 다르다(가장 깊은 VM 기준) — 그 파일의 머리로 찾는다
+    assert.deepEqual([colSn(t[1], 'Veeam 백업'), colSn(t[1], '백업 판단')], ['연동 없음', '스냅샷 흔적(Veeam 연동 없음)']);
 
     // 범위 밖·없는 vCenter 404 · 형식 오류·상한 400 · 동시 1건 409
     assert.equal((await post(OUT, {})).status, 404);
@@ -142,7 +152,7 @@ test('③ 실제 라우트 — data.csv · 범위 404 · 화면 id ∩ 인벤토
     const au = listAudit({ limit: 50 });
     const rows = (Array.isArray(au) ? au : au.rows || au.items || []).filter((x) => x.action === 'vm-list.csv');
     assert.ok(rows.length >= 4);
-    assert.ok(rows.some((x) => x.target === VC && /^2 rows · 화면 목록$/.test(x.detail)), JSON.stringify(rows.slice(0, 3)));
+    assert.ok(rows.some((x) => x.target === VC && /^2 rows · all · 화면 목록$/.test(x.detail)), JSON.stringify(rows.slice(0, 3)));
 
     // CSV 권한 — operator 는 data.csv 가 없다(관리자 전용 권한) · 권한이 꺼진 관리자도 403
     user = { username: 'op', role: 'operator', scope: {} };
@@ -150,6 +160,7 @@ test('③ 실제 라우트 — data.csv · 범위 404 · 화면 id ∩ 인벤토
     // 관리자의 CSV 끄기는 역할 매트릭스(userHasPermission)가 판정한다 — 이 라우트가 그 게이트(data.csv)를 쓰는지 소스로 고정
     const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'routes', 'api', 'veeam.js'), 'utf8');
     assert.match(src, /api\.post\('\/veeam\/vm-list\.csv', requirePerm\('data\.csv'\),/);
+    assert.match(src, /api\.post\('\/veeam\/vm-list\.xlsx', requirePerm\('data\.csv'\),/);
     // 비밀이 실리지 않는다
     user = { username: 'adm', role: 'admin', scope: {} };
     assert.ok(!(await (await post(VC, {})).text()).includes('PW-secret-1'));

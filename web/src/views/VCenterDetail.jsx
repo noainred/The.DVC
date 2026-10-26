@@ -24,7 +24,7 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
-import { vmListRequest } from './vcdVmList.js'; // v2.792: 'VM 목록 CSV'(Veeam·스냅샷 포함) 요청 본문(순수)
+import { vmListRequest } from './vcdVmList.js'; // v2.792: 'VM 목록 엑셀·CSV'(Veeam·스냅샷 포함) 요청 본문(순수)
 import { downloadFailText } from './downloadFailText.js';
 import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
@@ -277,7 +277,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
   const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
-  const [vmCsvBusy, setVmCsvBusy] = useState(false); // v2.792 'VM 목록 CSV' 만드는 중(그 버튼만 잠근다)
+  const [vmExpBusy, setVmExpBusy] = useState(''); // v2.792 'VM 목록' 내보내기 중인 형식('xlsx' | 'csv' — 그 버튼만 잠근다)
   const [vmCsvMsg, setVmCsvMsg] = useState('');
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
@@ -404,13 +404,14 @@ export default function VCenterDetail({ site, onBack }) {
   // v2.792(사용자 요청 "vm 폴더에서 vm list export 할때 Veeam 백업여부 · 백업여부 판단할 수 있는 snapshot 포함여부"): 화면 기준 VM 목록 CSV.
   //   보이는 VM(검색 중이면 일치 VM)의 id 를 보내고, Veeam·스냅샷 판정은 서버가 '백업 세부내용' 과 같은 코어로 한다(화면에서 판정하지 않는다).
   //   'Veeam 백업 VM 표시' 체크와 무관하다 — 서버가 그 순간의 값을 읽는다. (검색 matches 는 아래에서 만든다 — 클릭 시점에 읽는다)
-  const exportVmListCsv = async (list) => {
+  //   + 엑셀(시안 승인 — 요약 · 폴더 트리 접기 · 데이터(CSV 와 같은 열) · 읽는 법). 본문은 같고 kind 로 형식만 고른다.
+  const exportVmList = async (kind, list) => {
     const r = vmListRequest(list);
     if (!r.body) { setVmCsvMsg(r.error || ''); return; }
-    setVmCsvBusy(true); setVmCsvMsg('');
-    try { await postDownload(`/veeam/vm-list.csv?vcenterId=${encodeURIComponent(vcenterId)}`, r.body); }
+    setVmExpBusy(kind); setVmCsvMsg('');
+    try { await postDownload(`/veeam/vm-list.${kind}?vcenterId=${encodeURIComponent(vcenterId)}`, r.body); }
     catch (e) { setVmCsvMsg(downloadFailText(e)); }
-    finally { setVmCsvBusy(false); }
+    finally { setVmExpBusy(''); }
   };
 
   // VM 검색(v2.293 확장) — 다단어 OR: 공백으로 나눈 각 토큰이 **하나라도** 포함되면 일치
@@ -601,10 +602,15 @@ export default function VCenterDetail({ site, onBack }) {
                 표와 CSV 는 같은 행을 쓰고, 'Off VM 포함' 설정이 가상화율에 그대로 반영된다. */}
             {view === 'vms' && canCsv() && (
               <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
-                <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!vmsOk || vmCsvBusy}
-                  onClick={() => exportVmListCsv({ query, matches, visibleVms, inclPoweredOff })}
-                  title={vmsOk ? `지금 화면의 VM(${query ? '검색 결과' : inclPoweredOff ? '전체' : '꺼진 VM 제외'})을 폴더 경로와 함께 CSV 로 내려받습니다 — Veeam 백업 여부(작업·복원 지점·마지막 백업), Veeam 임시 스냅샷·최근 Veeam 스냅샷 이벤트, VM 의 전체 스냅샷과 백업 판단을 함께 싣습니다` : 'VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
-                  {vmCsvBusy ? 'CSV 만드는 중…' : '⤓ VM 목록 CSV'}
+                <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!vmsOk || vmExpBusy === 'xlsx'}
+                  onClick={() => exportVmList('xlsx', { query, matches, visibleVms, inclPoweredOff })}
+                  title={vmsOk ? `지금 화면의 VM(${query ? '검색 결과' : inclPoweredOff ? '전체' : '꺼진 VM 제외'})을 폴더 트리 그대로 엑셀로 내려받습니다 — 요약 · VM 목록(폴더 트리, 단계별 접기) · 데이터(행 단위) · 읽는 법. Veeam 백업 여부와 스냅샷(Veeam 임시 · 최근 Veeam 스냅샷 이벤트 · 전체)을 함께 싣습니다` : 'VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 파일을 만들지 않습니다)'}>
+                  {vmExpBusy === 'xlsx' ? '엑셀 만드는 중…' : '⤓ VM 목록 엑셀'}
+                </button>
+                <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!vmsOk || vmExpBusy === 'csv'}
+                  onClick={() => exportVmList('csv', { query, matches, visibleVms, inclPoweredOff })}
+                  title={vmsOk ? '같은 목록을 CSV 로 내려받습니다 — 엑셀의 데이터(행 단위) 시트와 같은 열(폴더 1~N단계 · 폴더 경로 포함)이고 색·접기는 없습니다' : 'VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
+                  {vmExpBusy === 'csv' ? 'CSV 만드는 중…' : 'CSV'}
                 </button>
               </span>
             )}

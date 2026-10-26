@@ -26,7 +26,8 @@ import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
 import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
-import { vmListCsv, VM_LIST_MAX_IDS } from '../../veeam/vmListCsv.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
+import { vmListCsvAsync, VM_LIST_MAX_IDS } from '../../veeam/vmListCsv.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
+import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -287,37 +288,13 @@ export function registerVeeamBadges(api) {
    *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
    *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그.
    */
-  api.post('/veeam/vm-list.csv', requirePerm('data.csv'), async (req, res) => {
-    const t = vcOf(req);
-    if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
-    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-    let ids = null;
-    if (body.ids != null) {
-      if (!Array.isArray(body.ids)) return res.status(400).json({ ok: false, reason: 'VM 목록 형식이 잘못됐습니다.' });
-      if (body.ids.length > VM_LIST_MAX_IDS) return res.status(400).json({ ok: false, reason: `VM 은 한 번에 ${VM_LIST_MAX_IDS}대까지입니다.` });
-      ids = new Set(body.ids.filter((x) => typeof x === 'string' && x && x.length <= 300));
-    }
-    const noOff = body.power === 'noOff';
-    const lock = acquireExport('vm-list.csv', req);
-    if (!lock.ok) return res.status(lock.status).json(lock.body);
-    try {
-      const snap = store.get();
-      const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
-      const b = await vcBackup(vc, t.vms, req, { initial: snap?.initial === true, scope: { power: 'all', excl: false } });
-      const veeamKnown = b.row.veeam != null;
-      const snapKnown = b.row.snap != null;
-      const now = Date.now();
-      const list = b.scopedVms.filter((vm) => (ids ? ids.has(vm.id) : !(noOff && vm.powerState === 'POWERED_OFF')))
-        .sort((a, c) => String(a.folder || '').localeCompare(String(c.folder || ''), 'en', { numeric: true }) || String(a.name || '').localeCompare(String(c.name || ''), 'en', { numeric: true }));
-      const rows = list.map((vm) => ({ inv: vm, view: vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id],
-        { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now }) }));
-      const csv = vmListCsv({ vcName: vc.name || vc.id, rows, linked: b.linked, snapDays: b.ev?.days ?? LOOKBACK_DAYS });
-      logAudit({ user: req.user?.username, action: 'vm-list.csv', target: t.vcenterId, detail: `${rows.length} rows${ids ? ' · 화면 목록' : noOff ? ' · 꺼진 VM 제외' : ''}`, ip: req.ip });
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="vm-list-${String(t.vcenterId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60)}-${fileStamp()}.csv"`);
-      res.send(csv);
-    } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); } finally { lock.release(); }
-  });
+  api.post('/veeam/vm-list.csv', requirePerm('data.csv'), (req, res) => vmListExport(req, res, 'csv'));
+  /*
+   * v2.792(사용자 요청 "클로드 디자인 사용 · 멋지게 · 폴더구조 잘 나오게" · 선택 엑셀 추가 + CSV 유지 · 시안 https://claude.ai/artifact/MENTpVFxe9D4Y4XgAazpBg 승인):
+   *   같은 대상·같은 판정·같은 게이트의 **엑셀**(요약 · 폴더 트리(행 그룹 접기) · 데이터(행 단위 = CSV 와 같은 열) · 읽는 법). 워커 스레드에서 만든다
+   *   (상한 2만 대를 메인에서 만들면 5초 멈춘다 — 작성 중 실측. veeam/vmListXlsx.js renderVmListWorkbook).
+   */
+  api.post('/veeam/vm-list.xlsx', requirePerm('data.csv'), (req, res) => vmListExport(req, res, 'xlsx'));
 
   // v2.757(사용자 요청 — vCenter 카드에 'VM 백업 수량', 182/195 형식): 범위 안 vCenter 마다 한 줄.
   //   Veeam 서버가 하나라도 연결돼 있으면 Veeam 기준만(스냅샷과 섞지 않는다), 없으면 스냅샷 기준(이벤트 7일 ∪ 지금 임시 스냅샷).
@@ -449,6 +426,72 @@ export function publicTaskMessage(m, { vmName = '' } = {}) {
 function maskDetail(detail, admin, vmName = '') {
   if (admin || !detail?.lastTask?.message) return detail;
   return { ...detail, lastTask: { ...detail.lastTask, message: publicTaskMessage(detail.lastTask.message, { vmName }) } };
+}
+
+/*
+ * v2.792 — vCenter › VM 및 폴더 'VM 목록' 내보내기(CSV · 엑셀 공용).
+ *   · 대상 = 화면이 보낸 VM id(‘Off VM 포함’·검색 결과를 반영한 목록) ∩ 그 vCenter 의 지금 인벤토리. id 를 보내지 않으면 전체(power 'noOff' 면 꺼진 VM 제외 —
+ *     화면 visibleVms 와 같은 조건). 남의 vCenter id 는 교집합에서 빠진다. view(검색 · 전체 · 꺼진 VM 제외)는 **표시용 이름표**일 뿐 대상을 고르지 않는다.
+ *   · 판정은 '백업 세부내용' 과 같은 vcBackup → vmBackupView(판정 코어 하나) · 한 칸 판단은 backupStatus.backupVerdict. 사람이 정한 표시(중요도·메모)는
+ *     백업 세부내용 도구 데이터라 싣지 않는다.
+ *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
+ *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그 · 파일 이름에 화면 조건(all · poweredon · search).
+ */
+const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과' });
+const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search' });
+async function vmListExport(req, res, kind) {
+  const t = vcOf(req);
+  if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  let ids = null;
+  if (body.ids != null) {
+    if (!Array.isArray(body.ids)) return res.status(400).json({ ok: false, reason: 'VM 목록 형식이 잘못됐습니다.' });
+    if (body.ids.length > VM_LIST_MAX_IDS) return res.status(400).json({ ok: false, reason: `VM 은 한 번에 ${VM_LIST_MAX_IDS}대까지입니다.` });
+    ids = new Set(body.ids.filter((x) => typeof x === 'string' && x && x.length <= 300));
+  }
+  const noOff = body.power === 'noOff';
+  const view = Object.hasOwn(VM_LIST_VIEWS, body.view) ? body.view : ids ? 'all' : noOff ? 'noOff' : 'all';
+  const lock = acquireExport(`vm-list.${kind}`, req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  try {
+    const snap = store.get();
+    const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
+    const b = await vcBackup(vc, t.vms, req, { initial: snap?.initial === true, scope: { power: 'all', excl: false } });
+    const veeamKnown = b.row.veeam != null;
+    const snapKnown = b.row.snap != null;
+    const now = Date.now();
+    const maybeYield = createYielder(15);
+    const list = b.scopedVms.filter((vm) => (ids ? ids.has(vm.id) : !(noOff && vm.powerState === 'POWERED_OFF')))
+      .sort((a, c) => String(a.folder || '').localeCompare(String(c.folder || ''), 'en', { numeric: true }) || String(a.name || '').localeCompare(String(c.name || ''), 'en', { numeric: true }));
+    const rows = [];
+    for (const vm of list) {
+      await maybeYield();
+      rows.push({ inv: vm, view: vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id],
+        { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now }) });
+    }
+    const vcName = vc.name || vc.id;
+    const snapDays = b.ev?.days ?? LOOKBACK_DAYS;
+    const fileBase = `vm-list-${String(t.vcenterId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60)}-${VM_LIST_FILE_TAG[view]}-${fileStamp()}`;
+    let payload; let type;
+    if (kind === 'xlsx') {
+      const veeamText = !b.linked ? '연동 없음 — 스냅샷으로만 판단' : b.vcnt?.n == null ? '연결됨(이번 대조 결과 모름)' : `연결됨(서버 ${b.views.length}대)`;
+      const out = await renderVmListWorkbook({ vcName, rows, linked: b.linked, snapDays, cond: `${VM_LIST_VIEWS[view]} ${rows.length}대`, veeamText, at: now }, { signal: ac.signal });
+      payload = out.buffer; type = XLSX_MIME;
+    } else {
+      payload = await vmListCsvAsync({ vcName, rows, linked: b.linked, snapDays }, maybeYield); type = 'text/csv; charset=utf-8';
+    }
+    if (ac.signal.aborted) return;
+    logAudit({ user: req.user?.username, action: `vm-list.${kind}`, target: t.vcenterId, detail: `${rows.length} rows · ${VM_LIST_FILE_TAG[view]}${ids ? ' · 화면 목록' : noOff ? ' · 꺼진 VM 제외' : ''}`, ip: req.ip });
+    res.setHeader('Content-Type', type);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.${kind}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(payload);
+  } catch (e) {
+    if (e?.code === 'aborted') return;
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: kind === 'xlsx' ? '엑셀을 만들지 못했습니다.' : 'CSV 를 만들지 못했습니다.' });
+  } finally { lock.release(); }
 }
 
 /*
