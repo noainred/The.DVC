@@ -33,7 +33,7 @@ import {
   getJob, setVerifying, patchVerifying, clearVerifying, handOffVerifying, interruptedVerifyOf, patchClone, recordJobEvent,
   RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS,
 } from './store.js';
-import { snapshotTreeList } from './runner.js';
+import { snapshotTreeList } from './snapTree.js';
 import { logAudit } from '../audit.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

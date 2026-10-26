@@ -47,7 +47,7 @@ import {
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
 import { morefOf } from '../vcenter/registry.js';
 import { fileStamp, localStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
-import { xmlUnescape } from '../vcenter/soapParse.js';
+import { snapshotTreeList } from './snapTree.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
 
@@ -144,18 +144,8 @@ async function runJob(jobId, trigger) {
 // 실행 중 기록(store.setRunning)이 이전 프로세스의 것으로 남아 있으면, 다음 실행은 새 스냅샷을 만들기 **전에** 그 실행이 만든 스냅샷을 지운다.
 // 못 지우면(클론·병합 태스크가 vCenter 에서 아직 도는 중 · vCenter 불통) 새 스냅샷을 만들지 않고 RECOVER_RETRY_MS 뒤 다시 시도한다.
 
-/**
- * VM 'snapshot'(VirtualMachineSnapshotInfo) XML → [{ref, name}] (순수 — 테스트 고정).
- * 트리 노드마다 snapshot → vm → name 순서다(vim25 VirtualMachineSnapshotTree). currentSnapshot 은 태그 이름이 달라 섞이지 않는다.
- */
-export function snapshotTreeList(xml) {
-  const out = [];
-  const re = /<snapshot type="VirtualMachineSnapshot">([^<]+)<\/snapshot>\s*<vm\b[^>]*>[^<]*<\/vm>\s*<name>([^<]*)<\/name>/g;
-  const s = String(xml || '');
-  let m;
-  while ((m = re.exec(s)) && out.length < 1000) out.push({ ref: m[1].trim(), name: xmlUnescape(m[2]) });
-  return out;
-}
+// v2.794: snapshotTreeList 는 snapTree.js 로 옮겼다(vsOps.js 도 쓴다 — 여기서 가져오면 runner ↔ vsOps 순환이 생긴다). 기존 import 경로는 다시 내보낸다.
+export { snapshotTreeList };
 
 const NOT_FOUND_RE = /notfound|not found|managedobject/i; // destroyClone 과 같은 판정 — VM 자체가 없어졌다
 const SNAPSHOT_TASK_WAIT_MS = 20 * 60_000;              // 스냅샷 생성 태스크 시한(15분, vsphere.createSnapshot) + 여유
