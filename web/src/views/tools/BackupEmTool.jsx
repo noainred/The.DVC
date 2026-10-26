@@ -13,8 +13,9 @@ import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
 import {
   fmtNum, fmtBytes, fmtDur, shortTs, dateText, ago, JOB_FILTERS, JOB_LABEL, TONE, BADGE_BG, sectionChips, statusLine, ddayText, ddayTone,
-  licenseCard, repoTone, filterJobs, runBar, sparkPoints, usedPctOf,
+  licenseCard, repoTone, filterJobs, runBar, sparkPoints, usedPctOf, canOpenDetail,
 } from './backupEmText.js';
+import EmSessionDetail from './EmSessionDetail.jsx';
 
 const BAR = { fail: '#ef4444', warn: '#f59e0b', ok: '#22c55e', run: '#22d3ee', none: '#64748b' };
 
@@ -28,6 +29,13 @@ function Kpi({ label, value, sub, wide, children }) {
     </div>
   );
 }
+/** v2.788.1 실패·경고 배지를 누르면 그 세션의 VM 별 결과·사유가 펼쳐진다(사용자 요청). */
+const DetailBtn = ({ k, on, onClick }) => (
+  <button type="button" aria-expanded={on} onClick={onClick} title={k === 'fail' ? '세부 작업 내용(VM 별 결과·사유) 보기' : '왜 경고인지 보기'}
+    style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', cursor: 'pointer', border: `1px solid ${on ? TONE[k] : 'transparent'}`, background: BADGE_BG[k], color: TONE[k], minHeight: 26 }}>
+    {JOB_LABEL[k]} {on ? '▴' : '›'}
+  </button>
+);
 const Badge = ({ k }) => <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', background: BADGE_BG[k], color: TONE[k] }}>{JOB_LABEL[k] || '—'}</span>;
 function Meter({ pct, color }) {
   return <div aria-hidden="true" style={{ height: 8, borderRadius: 999, background: 'var(--panel-deep)', overflow: 'hidden', minWidth: 40 }}><div style={{ height: 8, width: `${Math.max(0, Math.min(100, pct || 0))}%`, background: color, borderRadius: 999 }} /></div>;
@@ -48,6 +56,22 @@ export default function BackupEmTool() {
   const [emId, setEmId] = useState('');
   const [jf, setJf] = useState('all');
   const [q, setQ] = useState('');
+  const [openKey, setOpenKey] = useState('');   // v2.788.1 펼친 상세('job|uid' · 'bad|uid')
+  const [badAll, setBadAll] = useState(false);
+  const toggle = useCallback((k) => setOpenKey((cur) => (cur === k ? '' : k)), []);
+  // v2.790 Chromium 400px: 작업 표(가로 스크롤 · 최소 960px) 안 상세가 표 폭으로 열려 '닫기'·사유가 화면 밖이었다 —
+  //   보이는 카드 폭을 재어 상세를 그 폭으로 두고 왼쪽에 고정한다(sticky). 상세 안 표는 자기 가로 스크롤.
+  const jobsRef = useRef(null);
+  const [jobsW, setJobsW] = useState(0);
+  useEffect(() => {
+    const el = jobsRef.current;
+    if (!el) return undefined;
+    setJobsW(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setJobsW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data, emId]);
   const gen = useRef(0);
   const load = useCallback(() => {
     const my = ++gen.current;
@@ -196,7 +220,7 @@ export default function BackupEmTool() {
       </div>
 
       {d && (
-        <section className="card" data-em-jobs="" aria-label="작업 수행 상태" style={{ padding: '14px 0 6px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        <section ref={jobsRef} className="card" data-em-jobs="" aria-label="작업 수행 상태" style={{ padding: '14px 0 6px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
           <div style={{ padding: '0 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <b style={{ fontSize: 16 }}>작업(백업 정책) 수행 상태</b>
             <span className="muted" style={{ fontSize: 12 }}>마지막으로 끝난 세션 기준(최근 7일) · 실패 → 경고 → 실행 중 → 정상 순</span>
@@ -208,21 +232,24 @@ export default function BackupEmTool() {
           {!jobs ? <div className="muted" style={{ padding: '4px 18px 12px', fontSize: 13 }}>작업 목록을 읽지 못했습니다{chips.find((c) => c.k === 'jobs' && !c.ok)?.reason ? ` — ${chips.find((c) => c.k === 'jobs').reason}` : ''}.</div> : (
             <STable minWidth={960} limit={200} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead><tr style={{ textAlign: 'left', fontSize: 12 }}>
-                <th style={{ padding: '6px 18px' }}>작업</th><th style={{ padding: '6px' }}>백업 서버</th><th style={{ padding: '6px' }}>유형</th><th style={{ padding: '6px' }}>마지막 결과</th>
+                <th style={{ padding: '6px 18px' }}>작업</th><th style={{ padding: '6px' }}>백업 서버 · 법인</th><th style={{ padding: '6px' }}>유형</th><th style={{ padding: '6px' }}>마지막 결과</th>
                 <th style={{ padding: '6px' }}>마지막 끝남</th><th style={{ padding: '6px' }}>소요</th><th style={{ padding: '6px' }}>다음 실행</th><th style={{ padding: '6px 18px 6px 6px', textAlign: 'right' }}>24시간 실패·경고</th>
               </tr></thead>
               <tbody>
                 {shownJobs.map((j) => (
-                  <tr key={`${j.server}|${j.uid || j.name}`} style={{ borderTop: '1px solid var(--border-soft)' }}>
+                  <React.Fragment key={`${j.server}|${j.uid || j.name}`}>
+                  <tr style={{ borderTop: '1px solid var(--border-soft)' }}>
                     <td style={{ padding: '8px 18px' }}><b>{j.name}</b></td>
-                    <td style={{ padding: '8px 6px', color: 'var(--text-dim)' }}>{j.server || '—'}</td>
+                    <td data-sort={`${j.server || ''} ${(j.vcNames || []).join(' ')}`} style={{ padding: '8px 6px', color: 'var(--text-dim)' }}>{j.server || '—'}{j.vcNames?.length ? <div style={{ fontSize: 11, color: 'var(--text)', overflowWrap: 'anywhere' }}>{j.vcNames.join(', ')}</div> : null}</td>
                     <td style={{ padding: '8px 6px', color: 'var(--text-dim)' }}>{j.type || '—'}</td>
-                    <td data-sort={j.state} style={{ padding: '8px 6px' }}><Badge k={j.state} /></td>
+                    <td data-sort={j.state} style={{ padding: '8px 6px' }}>{canOpenDetail(j.state, j.last?.uid) ? <DetailBtn k={j.state} on={openKey === `job|${j.last.uid}`} onClick={() => toggle(`job|${j.last.uid}`)} /> : <Badge k={j.state} />}</td>
                     <td data-sort={j.last?.end ?? ''} style={{ padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap' }}>{shortTs(j.last?.end)}</td>
                     <td data-sort={j.last?.durSec ?? ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{j.running ? `${ago(j.running.start, now).replace(' 전', '')}째` : fmtDur(j.last?.durSec)}</td>
                     <td data-sort={j.nextRun ?? ''} style={{ padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{shortTs(j.nextRun)}</td>
                     <td data-sort={(j.runs24?.fail || 0) * 1000 + (j.runs24?.warn || 0)} style={{ padding: '8px 18px 8px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}><span style={{ color: j.runs24?.fail ? TONE.fail : undefined }}>{fmtNum(j.runs24?.fail)}</span> · <span style={{ color: j.runs24?.warn ? TONE.warn : undefined }}>{fmtNum(j.runs24?.warn)}</span></td>
                   </tr>
+                  {openKey === `job|${j.last?.uid}` && j.last?.uid && <tr><td colSpan={8} style={{ padding: '4px 0 12px' }}><div style={{ position: 'sticky', left: 18, width: jobsW > 60 ? jobsW - 36 : undefined, maxWidth: '100%' }}><EmSessionDetail emId={em.id} uid={j.last.uid} onClose={() => setOpenKey('')} /></div></td></tr>}
+                  </React.Fragment>
                 ))}
               </tbody>
             </STable>
@@ -252,26 +279,31 @@ export default function BackupEmTool() {
 
           <section className="card" data-em-bad="" aria-label="최근 실패·경고 세션" style={{ flex: '1 1 400px', minWidth: 0, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 10 }}><b style={{ fontSize: 16 }}>최근 실패·경고 세션</b><span className="muted" style={{ fontSize: 12 }}>24시간{d.sessions ? ` · ${fmtNum(d.sessions.recentBadTotal)}건` : ''}</span></div>
-            {!d.sessions ? <div className="muted" style={{ fontSize: 13 }}>세션을 읽지 못했습니다.</div> : !d.sessions.recentBad.length ? <div className="muted" style={{ fontSize: 13 }}>최근 24시간에 실패·경고 세션이 없습니다.</div> : d.sessions.recentBad.slice(0, 10).map((x, i) => (
-              <div key={`${x.job}|${x.end}|${i}`} style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr) auto', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border-soft)', fontSize: 13 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-dim)' }}>{shortTs(x.end)}</span>
-                <span style={{ minWidth: 0 }}><b style={{ overflowWrap: 'anywhere' }}>{x.job}</b><div className="muted" style={{ fontSize: 12 }}>{x.server || '—'}</div></span>
-                <Badge k={x.result} />
+            {!d.sessions ? <div className="muted" style={{ fontSize: 13 }}>세션을 읽지 못했습니다.</div> : !d.sessions.recentBad.length ? <div className="muted" style={{ fontSize: 13 }}>최근 24시간에 실패·경고 세션이 없습니다.</div> : d.sessions.recentBad.slice(0, badAll ? 200 : 10).map((x, i) => (
+              <div key={`${x.job}|${x.end}|${i}`} style={{ borderTop: '1px solid var(--border-soft)', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr) auto', gap: 10, fontSize: 13 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-dim)' }}>{shortTs(x.end)}</span>
+                  <span style={{ minWidth: 0 }}><b style={{ overflowWrap: 'anywhere' }}>{x.job}</b><div className="muted" style={{ fontSize: 12 }}>{x.server || '—'}{x.vcNames?.length ? ` · ${x.vcNames.join(', ')}` : ''}</div></span>
+                  {canOpenDetail(x.result, x.uid) ? <DetailBtn k={x.result} on={openKey === `bad|${x.uid}`} onClick={() => toggle(`bad|${x.uid}`)} /> : <Badge k={x.result} />}
+                </div>
+                {openKey === `bad|${x.uid}` && x.uid && <EmSessionDetail emId={em.id} uid={x.uid} onClose={() => setOpenKey('')} />}
               </div>
             ))}
+            {d.sessions?.recentBad?.length > 10 && <button type="button" className="tab" onClick={() => setBadAll((v) => !v)} style={{ alignSelf: 'flex-start', padding: '4px 12px', fontSize: 12 }}>{badAll ? '10건만 보기' : `전부 보기(${fmtNum(Math.min(200, d.sessions.recentBad.length))}건)`}</button>}
           </section>
         </div>
       )}
 
       {d?.backupServers && (
         <section className="card" aria-label="EM 에 연결된 백업 서버" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 10 }}><b style={{ fontSize: 16 }}>EM 에 연결된 백업 서버</b><span className="muted" style={{ fontSize: 12 }}>{fmtNum(d.backupServers.length)}대 · 포탈에 등록된 B&R 서버와 이름으로 짝지음</span></div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 10 }}><b style={{ fontSize: 16 }}>EM 에 연결된 백업 서버</b><span className="muted" style={{ fontSize: 12 }}>{fmtNum(d.backupServers.length)}대 · 포탈 B&R 짝과 법인은 설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑에서 정합니다(정하지 않으면 이름으로 자동)</span></div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, fontSize: 13 }}>
             {d.backupServers.map((s) => (
               <div key={s.uid || s.name} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                 <b style={{ overflowWrap: 'anywhere' }}>{s.name}</b>
                 <span className="muted" style={{ fontSize: 12 }}>{s.version || '판 모름'}</span>
-                <span style={{ fontSize: 12, color: s.registered ? TONE.ok : TONE.warn }}>{s.registered ? '포탈 등록됨' : '포탈 미등록(VM 별 표시 없음)'}</span>
+                <span style={{ fontSize: 12, color: s.registered ? TONE.ok : s.brSource === 'none' ? 'var(--text-dim)' : TONE.warn }}>{s.registered ? `포탈 등록됨${s.brName && s.brName !== s.name ? ` · ${s.brName}` : ''}` : s.brSource === 'none' ? '포탈에 없음(확정)' : '포탈 미등록(VM 별 표시 없음)'}</span>
+                <span style={{ fontSize: 12, color: s.vcSource ? 'var(--text)' : 'var(--text-dim)', overflowWrap: 'anywhere' }}>{s.vcSource ? `법인 ${(s.vcNames || []).join(', ')}` : '법인 정하지 않음'}</span>
               </div>
             ))}
           </div>

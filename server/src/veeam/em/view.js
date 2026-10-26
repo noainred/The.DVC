@@ -6,6 +6,7 @@
  * 못 읽은 값은 null 그대로 — 0 으로 채우지 않는다.
  */
 import { licenseExpiryStatus } from '../../util/licenseExpiry.js';
+import { mapKey } from './mapping.js';
 
 const ORDER = { fail: 0, warn: 1, run: 2, ok: 3, none: 4 };
 /** 작업 상태 키 — 실행 중이면 run, 아니면 마지막 결과, 기록 없으면 none. */
@@ -40,22 +41,51 @@ export function licenseTotals(items, now = Date.now()) {
   return t;
 }
 
-/** EM 결과의 백업 서버를 포탈에 등록된 B&R 서버와 이름으로 짝짓는다(대소문자·도메인 꼬리 무시). */
-export function markRegistered(backupServers, brServers) {
-  const norm = (v) => String(v || '').trim().toLowerCase().split('.')[0];
-  const names = new Set();
-  for (const b of brServers || []) { names.add(norm(b.name)); names.add(norm(b.host)); }
-  return (Array.isArray(backupServers) ? backupServers : []).map((s) => ({ ...s, registered: names.has(norm(s.name)) }));
+const norm = (v) => String(v || '').trim().toLowerCase().split('.')[0];
+/** 이름으로 짝짓기(자동) — B&R 등록의 표시명 또는 주소 첫 마디가 EM 의 백업 서버 이름과 같으면(대소문자·도메인 꼬리 무시). */
+export function autoBrMatch(serverName, brServers) {
+  const n = norm(serverName);
+  if (!n) return null;
+  return (brServers || []).find((b) => norm(b.name) === n || norm(b.host) === n) || null;
 }
+
+/**
+ * v2.788.1 매핑 — EM 이 아는 백업 서버마다 포탈 B&R 등록·vCenter(법인)를 붙인다(순수).
+ *  · B&R: 매핑 br 'none' 이면 짝짓지 않음(사람이 '포탈에 없음' 으로 확정) · id 면 그 등록(지워졌으면 missing) · 없으면 이름 자동 짝짓기.
+ *  · vCenter: 매핑 vcenterIds 가 있으면 그것(manual) · 없으면 짝지어진 B&R 등록의 vCenter(br) · 둘 다 없으면 모름(vcSource null — 빈 목록을 '법인 없음' 으로 단정하지 않는다).
+ * @param {object} o { emId, map(getEmMap), brServers(비밀 없음), vcName(Map id→이름) }
+ */
+export function mapBackupServers(backupServers, { emId = '', map = {}, brServers = [], vcName = new Map() } = {}) {
+  return (Array.isArray(backupServers) ? backupServers : []).map((s) => {
+    const e = map[mapKey(emId, s.name)] || null;
+    let br = null; let brSource = null;
+    if (e?.br === 'none') brSource = 'none';
+    else if (e?.br) { br = (brServers || []).find((b) => b.id === e.br) || null; brSource = br ? 'manual' : 'missing'; }
+    else { br = autoBrMatch(s.name, brServers); brSource = br ? 'auto' : null; }
+    let vcenterIds = []; let vcSource = null;
+    if (e?.vcenterIds?.length) { vcenterIds = e.vcenterIds; vcSource = 'manual'; }
+    else if (br?.vcenterIds?.length) { vcenterIds = br.vcenterIds; vcSource = 'br'; }
+    return {
+      ...s, registered: !!br, brId: br?.id || '', brName: br?.name || '', brSource,
+      vcenterIds, vcNames: vcenterIds.map((id) => vcName.get(id) || id), vcSource,
+    };
+  });
+}
+/** 하위 호환(v2.788) — 매핑 없이 이름 자동 짝짓기만. */
+export const markRegistered = (backupServers, brServers) => mapBackupServers(backupServers, { brServers });
 
 /**
  * EM 1대 → 화면 모양.
  * @param {object} em 등록부(비밀 없음) @param {object|null} rec store.getEmRecord @param {object} o { brServers, maxAgeMs, now }
  */
-export function emView(em, rec, { brServers = [], maxAgeMs = 3 * 900_000, now = Date.now() } = {}) {
+export function emView(em, rec, { brServers = [], map = {}, vcName = new Map(), maxAgeMs = 3 * 900_000, now = Date.now() } = {}) {
   const r = rec?.result || null;
   const data = r?.ok ? r : (rec?.lastOk || null);
   const lastOkTs = data?.ts ?? null;
+  const servers = data?.backupServers ? mapBackupServers(data.backupServers, { emId: em.id, map, brServers, vcName }) : null;
+  // 작업·세션·저장소에 법인 이름을 붙인다(백업 서버 이름으로 — EM 결과의 server 필드). 모르면 null(빈 배열과 구분).
+  const vcBy = new Map((servers || []).filter((x) => x.vcSource).map((x) => [String(x.name).trim().toLowerCase(), x.vcNames]));
+  const withVc = (x) => ({ ...x, vcNames: vcBy.get(String(x.server || '').trim().toLowerCase()) || null });
   return {
     id: em.id, name: em.name, host: em.host, port: em.port, enabled: em.enabled !== false, ...(em.demo ? { demo: true } : {}),
     status: r ? {
@@ -66,10 +96,10 @@ export function emView(em, rec, { brServers = [], maxAgeMs = 3 * 900_000, now = 
     data: data ? {
       overview: data.overview || null, jobStats: data.jobStats || null, vms: data.vms || null, processed: data.processed || null,
       repoReport: data.repoReport || null,
-      backupServers: data.backupServers ? markRegistered(data.backupServers, brServers) : null,
-      repositories: data.repositories ? repositoriesView(data.repositories) : null,
-      jobs: data.jobs ? jobsView(data.jobs) : null,
-      sessions: data.sessions || null,
+      backupServers: servers,
+      repositories: data.repositories ? repositoriesView(data.repositories).map(withVc) : null,
+      jobs: data.jobs ? (() => { const v = jobsView(data.jobs); return { ...v, items: v.items.map(withVc) }; })() : null,
+      sessions: data.sessions ? { ...data.sessions, recentBad: (data.sessions.recentBad || []).map(withVc) } : null,
     } : null,
   };
 }
