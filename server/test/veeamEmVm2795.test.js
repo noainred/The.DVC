@@ -194,7 +194,7 @@ test('F 라우트 — 배지·카드·상세·세부내용 · 출처 우선 · �
   assert.deepEqual([cnt['kr:vc1'].src, cnt['kr:vc1'].n, cnt['kr:vc1'].vmTotal], ['veeam', 1, 2]);
   assert.notEqual(cnt['eu:x'].src, 'veeam', '매핑하지 않은 vCenter 는 그대로(스냅샷 기준)');
   const det = (await get('/veeam/vm-detail?vcenterId=kr:vc1&vmId=kr:vc1:vm-1')).body;
-  assert.deepEqual([det.detail.lastTask.result, det.detail.lastTask.job, det.detail.servers[0].name], ['Success', 'Daily-KR', 'EM · VBR-KR']);
+  assert.deepEqual([det.detail.lastTask.result, det.detail.lastTask.job, det.detail.servers[0].name, det.detail.servers[0].src], ['Success', 'Daily-KR', 'EM · VBR-KR', 'em'], '상세 창이 EM 출처를 안다(문구)');
   const bdet = (await get('/tools/backup-detail?vcenterId=kr:vc1&excl=0')).body;
   assert.equal(bdet.linked, true);
   assert.equal(bdet.vms.find((v) => v.id === 'kr:vc1:vm-1')?.v?.state, 'ok', '백업 세부내용에도 VM 단위로');

@@ -475,3 +475,15 @@ describe('v2.772(Z3 I1) — 전용 수집기가 보완하지 못한 이유(서�
     expect(veeamEventChip({ ...ev, verdict: { ok: true, reason: null }, collectedAt: now }).why).not.toMatch(/전용 수집/);
   });
 });
+
+describe('v2.795 EM 출처 상세 문구', () => {
+  it('출처가 모두 EM 이면 EM 이 주지 않는 값이라고 말한다(B&R 판 문구 대신) · 섞이면 그대로', async () => {
+    const { veeamDetailView } = await import('./veeamBadge.js');
+    const base = { lastBackup: 1, lastBackupSrc: 'rp', lastTask: { result: 'Success', start: 0, end: 1 }, restorePoints: { count: null, latest: 1, oldest: null, recent: [1] } };
+    const em = veeamDetailView({ ...base, servers: [{ name: 'EM · VBR-KR', src: 'em' }] });
+    expect(em.sections[0].note).toMatch(/Enterprise Manager 기록에는 VM 별 처리 용량이 없습니다/);
+    expect(em.sections[1].note).toMatch(/복원 지점 수를 주지 않습니다/);
+    const mixed = veeamDetailView({ ...base, servers: [{ name: 'EM · VBR-KR', src: 'em' }, { name: 'AZ' }] });
+    expect(mixed.sections[1].note).toBe('복원 지점 목록을 읽지 못했습니다.');
+  });
+});
