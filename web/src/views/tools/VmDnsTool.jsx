@@ -220,7 +220,7 @@ export function DomainsCard({ domains, search }) {
 
 export function ModeCard({ kpis, checks }) {
   const split = modeSplit(kpis);
-  const rows = checkRows(checks);
+  const rows = checkRows(checks, kpis);   // v2.785(GN N-I2): 로컬 스텁 줄은 kpis.localStubVms 에서
   return (
     <section className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
