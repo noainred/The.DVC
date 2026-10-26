@@ -183,10 +183,11 @@ describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이�
   const { searchTools } = await import('./toolSearch.js');
   it('서버 › Veeam 하나가 두 도구를 맡는다(Detail 화면에서도 같은 메뉴가 켜진다) · 도구 키 그대로 · 특수 기능 카드 이름', () => {
     const v = MENU_GROUPS.find((x) => x.id === 'server').children.find((c) => c.id === 'veeam');
-    expect([v.label, v.tool, v.also]).toEqual(['Veeam', 'backup-summary', ['backup-detail']]);
+    expect([v.label, v.tool, v.also]).toEqual(['Veeam', 'backup-summary', ['backup-detail', 'backup-em']]);   // v2.788 EM 탭
     expect(locate('tools', '#/tools/backup-summary')).toEqual({ group: 'server', child: 'veeam' });
     expect(locate('tools', '#/tools/backup-detail')).toEqual({ group: 'server', child: 'veeam' });
-    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Veeam 백업 현황 · Summary'], ['backup-detail', 'Veeam 백업 현황 · Detail']]);
+    expect(locate('tools', '#/tools/backup-em')).toEqual({ group: 'server', child: 'veeam' });
+    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Veeam 백업 현황 · Summary'], ['backup-detail', 'Veeam 백업 현황 · Detail'], ['backup-em', 'Veeam 백업 현황 · EM']]);
   });
   it('특수 기능 검색 — 옛 이름(백업 서머리·백업 세부내용)과 새 이름 모두', () => {
     expect(searchTools(TOOLS, '백업 서머리')[0].k).toBe('backup-summary');

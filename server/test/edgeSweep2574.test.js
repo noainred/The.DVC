@@ -65,6 +65,7 @@ describe('IMP-07 — edgelog/spec.js 표가 실재하고 빠짐이 없다', () =
       ['cvp/faultScan.js', '중앙 전용(CVP 장애 전이·DB·알림, v2.640) — health/services.js CENTRAL_ONLY_SPEC 에 등재'],
       ['xferspeed/poller.js', '중앙 전용(법인 간 전송 속도 측정 — 중앙이 엣지와 10MB 를 주고받는다, v2.735) — health/services.js CENTRAL_ONLY_SPEC 에 등재'],
       ['central/svcmonSilence.js', '중앙 전용(엣지 무보고 감시) — 엣지에서 읽으면 늘 비어 있다'],
+      ['veeam/em/poller.js', '중앙 전용(v2.788 Veeam Enterprise Manager — 엣지는 startEmPoller 가 돌지 않는다. 상태는 설정 › Veeam 백업 서버 › Enterprise Manager 가 말한다)'],
       ['alerts.js', 'alertStatus().config 가 alerts.json 전체(웹훅 URL — v2.604 FILE_EXTRA_SECRET_FIELDS 의 url)를 담는다. redactDeep 은 키 이름으로만 가리므로 URL 속 토큰을 못 가린다 — 설정 › 알림 화면이 따로 있다'],
       ['backup/settings.js', '포탈 자체 서비스(수집·push/pull 아님) — 설정 › 백업 화면이 상태를 보여준다. 등재는 값 내용(경로·보관 정책) 검토 뒤 별건'],
       ['security/loginMonitor.js', '포탈 자체 서비스 — lastSummary 에 로그인 실패 계정명·IP 가 담긴다. 설정 › 보안 화면이 따로 있다. 등재는 별건'],

@@ -380,6 +380,31 @@ export function buildServerResult(raw = {}, { maxVms = 20_000 } = {}) {
   return { jobs, vms, counts, notes, backups };
 }
 
+/* ── 라이선스(v2.788 — 사용자 요청 '라이선스 사용 수량' · 만료 알림·추이) ──────────────────────────────
+ * VBR REST GET /api/v1/license 응답 → 정규화. ⚠ 필드 이름은 VBR 12 REST 참조의 기억에 기댄 것이다(실서버 미검증 — 그래서 수집은 soft,
+ *   이름은 camelCase·PascalCase 둘 다 받는다). 못 읽은 수는 null(0 이 아니다). 같은 함수가 엣지 결과 정제(sanitizeLicense)에도 쓰인다.
+ */
+const lpick = (o, ...names) => { if (!isObj(o)) return undefined; for (const n of names) { if (o[n] !== undefined) return o[n]; const p = n[0].toUpperCase() + n.slice(1); if (o[p] !== undefined) return o[p]; } return undefined; };
+const tsOrNull = (v) => { if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? Math.round(v) : null; const t = typeof v === 'string' && v.trim() ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
+const pairOf = (o, licKeys, usedKeys) => {
+  if (!isObj(o)) return null;
+  const licensed = numOrNull(lpick(o, ...licKeys)); const used = numOrNull(lpick(o, ...usedKeys));
+  return licensed == null && used == null ? null : { licensed, used };
+};
+export function licenseOf(raw) {
+  if (!isObj(raw)) return null;
+  const out = {
+    status: s(lpick(raw, 'status'), 40), type: s(lpick(raw, 'type'), 40), edition: s(lpick(raw, 'edition'), 60),
+    expires: tsOrNull(lpick(raw, 'expirationDate', 'expires')), supportExpires: tsOrNull(lpick(raw, 'supportExpirationDate', 'supportExpires')),
+    instances: pairOf(lpick(raw, 'instanceLicenseSummary', 'instances'), ['licensedInstancesNumber', 'licensed'], ['usedInstancesNumber', 'used']),
+    sockets: pairOf(lpick(raw, 'socketLicenseSummary', 'sockets'), ['licensedSocketsNumber', 'licensed'], ['usedSocketsNumber', 'used']),
+    capacityTb: pairOf(lpick(raw, 'capacityLicenseSummary', 'capacityTb'), ['licensedCapacityTb', 'licensed'], ['usedCapacityTb', 'used']),
+  };
+  return out.status || out.type || out.edition || out.expires != null || out.supportExpires != null || out.instances || out.sockets || out.capacityTb ? out : null;
+}
+/** 엣지가 보낸 license 정제 — 정규화 모양만 다시 만든다(아는 필드만 · 문자열 상한 · 수는 수로). */
+export const sanitizeLicense = (v) => (isObj(v) ? licenseOf(v) : null);
+
 /* ── 중앙 수신 정제(엣지가 보낸 결과) ───────────────────────────────────────── */
 
 const FUTURE_SKEW_MS = 5 * 60_000;
@@ -444,6 +469,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
     authStop: isObj(r.authStop) ? { since: off ? shift(numOrNull(r.authStop.since)) : numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
     jobs, vms, counts, backups,
+    ...(isObj(r.license) && sanitizeLicense(r.license) ? { license: sanitizeLicense(r.license) } : {}),   // v2.788 — 화이트리스트(빠뜨리면 엣지 서버의 라이선스가 조용히 사라진다)
   };
 }
 
