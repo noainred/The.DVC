@@ -1,11 +1,11 @@
 /**
  * Veeam 백업 현황 머리 — 제목 + Summary | Detail 탭(v2.787, 사용자 요청 + 시안: 왼쪽 메뉴 '서버 › Veeam' 하나로 들어와 화면 위 탭으로 두 화면을 오간다).
- * 탭은 주소만 바꾼다 — 도구 키(backup-summary · backup-detail)와 권한·북마크는 그대로다(CLAUDE.md '도구 키는 바꾸지 않는다').
+ * 탭은 주소만 바꾼다 — 도구 키(backup-summary · backup-detail · v2.788 backup-em)와 권한·북마크는 그대로다(CLAUDE.md '도구 키는 바꾸지 않는다').
  * actions: 오른쪽 버튼 줄(새로고침·CSV·vCenter 선택 — 화면마다 다르다).
  */
 import React from 'react';
 
-export const VEEAM_TABS = [['summary', 'Summary', '#/tools/backup-summary'], ['detail', 'Detail', '#/tools/backup-detail']];
+export const VEEAM_TABS = [['summary', 'Summary', '#/tools/backup-summary'], ['detail', 'Detail', '#/tools/backup-detail'], ['em', 'EM', '#/tools/backup-em']];   // v2.788 EM
 
 export default function VeeamHeader({ active, desc, actions }) {
   return (

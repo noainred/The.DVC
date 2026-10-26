@@ -15,7 +15,7 @@ const FILE = () => path.join(config.configDir, 'veeam-latest.json');
 const MAX_SERVERS = 400;
 let _map = null;
 let _writer = null;
-const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}) });
+const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}), ...(r.license ? { license: r.license } : {}) });   // v2.788 license — 실패 주기에도 마지막 값을 보인다
 
 function load() {
   if (_map) return _map;

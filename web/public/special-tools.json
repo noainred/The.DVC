@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-24T12:36:55.251Z",
-  "count": 112,
+  "generatedAt": "2026-10-26T03:48:25.442Z",
+  "count": 113,
   "tools": [
     {
       "k": "service-hub",
@@ -612,6 +612,14 @@
     },
     {
       "k": "backup-detail",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-em",
       "adminOnly": false,
       "perm": null,
       "external": null,

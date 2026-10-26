@@ -3,7 +3,7 @@
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
-import { serversForVcenter, registryLoadError } from '../../veeam/registry.js';
+import { serversForVcenter, registryLoadError, listServers } from '../../veeam/registry.js';
 import { getRecord, usableResult } from '../../veeam/store.js';
 import { matchToVcenter, withoutStaleRunning, buildVmDetail } from '../../veeam/parse.js';
 import { pollMs } from '../../veeam/poller.js';
@@ -30,7 +30,15 @@ import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
-import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, marksCorruptKept, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
+import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, marksCorruptKept, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
+import { listEms } from '../../veeam/em/registry.js';
+import { getEmRecord } from '../../veeam/em/store.js';
+import { emPollMs } from '../../veeam/em/poller.js';
+import { emView, jobsView, licenseTotals } from '../../veeam/em/view.js';
+import { currentLicenses } from '../../veeam/licenseWatch.js';
+import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
+import { demoEmView, demoLicenses } from '../../mock/demo/veeamEm.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -506,6 +514,30 @@ function marksWritable(req, snap, vcenterId) {
 const iso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '');
 const scopeText = (sc) => `${sc.power === 'on' ? '켜진 VM' : sc.power === 'off' ? '꺼진 VM' : '전체 VM'}${sc.excl ? ' · 템플릿·vCLS 제외' : ''}`;
 
+/** v2.788 EM 탭 응답(순수 조합 — 판정은 veeam/em/view.js). */
+async function emData(admin) {
+  const now = Date.now();
+  const ems = listEms();
+  const demo = !ems.length && isMockMode();
+  const brServers = listServers();
+  let views;
+  if (demo) {
+    const v = demoEmView(store.get(), now);
+    v.data.jobs = jobsView(v.data._jobs); delete v.data._jobs;
+    views = [v];
+  } else views = ems.map((em) => emView(em, getEmRecord(em.id), { brServers, maxAgeMs: emPollMs() * 3, now }));
+  if (!admin) views = views.map(({ host: _h, port: _p, ...v }) => v);
+  let licItems = currentLicenses();
+  if (!licItems.length && isMockMode() && !brServers.length) licItems = demoLicenses(now);
+  const [licHist, repoHist] = await Promise.all([licenseHistory(90, now), repoHistory(90, now)]);
+  return {
+    ok: true, at: now, ...(demo ? { demo: true } : {}), pollMs: emPollMs(),
+    ems: views,
+    licenses: { source: 'vbr', items: licItems.map((x) => ({ id: x.id, name: x.name, license: x.license, ts: x.ts ?? null, ...(x.demo ? { demo: true } : {}) })), totals: licenseTotals(licItems, now), brServers: brServers.length },
+    history: { license: licHist, repo: repoHist },
+  };
+}
+
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
   const csvPerm = requirePerm('data.csv');
@@ -516,6 +548,17 @@ export function registerBackupStatus(api) {
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
       { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
+  });
+
+  /*
+   * v2.788 '서버 › Veeam › EM' 탭 — Enterprise Manager 수집 결과 + B&R 라이선스 + 일 단위 이력.
+   *   EM 데이터는 vCenter 귀속이 없다(전 법인) → 전체 범위 계정만(범위 계정 403 + 사유 — '귀속 없는 데이터는 범위 계정에 노출하지 않는다').
+   *   관리자 판본(isAdminDetailUser)만 EM 주소·포트를 싣는다. 폴링하지 않는 화면이라 응답 캐시는 짧게(30초).
+   */
+  const emFullScope = fullScopeOnlyWith('Veeam Enterprise Manager 현황은 전 법인 데이터라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+  api.get('/tools/backup-em', toolsPerm, emFullScope, (req, res) => {
+    const admin = isAdminDetailUser(req.user);
+    return memoJson(req, res, 'backup-em', async () => emData(admin), { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${admin ? 'admin' : 'user'}` });
   });
 
   api.get('/tools/backup-detail', toolsPerm, async (req, res) => {

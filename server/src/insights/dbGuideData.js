@@ -99,6 +99,112 @@ export const DB_GUIDE_DATA = {
       "server/src/util/authGuard.js"
     ]
   },
+  "veeam-em.json": {
+    "title": "Veeam Enterprise Manager 등록부",
+    "summary": "Veeam Backup Enterprise Manager(EM) 목록입니다(v2.788). EM 마다 접속 주소·포트(기본 9398)·계정·비밀번호가 들어 있어 중앙 포탈은 이 목록을 보고 EM REST API 에 로그인해 전 백업 서버의 요약·작업 결과·세션·저장소를 읽습니다. '서버 › Veeam › EM' 탭의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
+    "stores": [
+      "EM 마다 식별자(vem- 로 시작), 등록 시각, 이름(최대 64자), 주소(IP 또는 호스트 이름), 포트, 계정, 비밀번호, 수집 사용 여부, 메모(최대 200자).",
+      "읽은 결과는 이 파일이 아니라 ‘veeam-em-latest.json’ 에 저장합니다."
+    ],
+    "writer": "설정 › Veeam 백업 서버 › Enterprise Manager 에서 등록·수정·삭제할 때 씁니다(최대 20대, 원자적 쓰기, 권한 0600, 관리자 + 전체 범위, 감사 로그). 중앙 포탈에만 있습니다(엣지는 EM 을 읽지 않습니다).",
+    "usedBy": [
+      "Veeam Enterprise Manager 폴러(중앙 전용, 기본 15분마다)",
+      "서버 › Veeam › EM 탭"
+    ],
+    "retention": "자동 정리는 없습니다. 관리자가 삭제할 때까지 남습니다.",
+    "growth": "등록한 EM 수(최대 20대)에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 EM 등록과 비밀번호가 사라지고 EM 탭이 '등록된 EM 없음' 으로 바뀝니다. 다시 등록해야 합니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 목록으로 시작합니다(깨진 원본 위에 덮어쓰지 않습니다).",
+    "cautions": [
+      "EM 계정·비밀번호가 들어 있습니다. 설정 › Security › 자격증명 저장 방식을 ‘암호화’ 로 하면 봉인되어 저장됩니다. 목록 화면·API 응답은 비밀번호를 싣지 않습니다.",
+      "주소·포트·계정을 바꾸면 저장된 비밀번호를 이어받지 않으니 다시 입력해야 합니다.",
+      "읽기 전용 계정(EM Portal User 역할)을 권장합니다. 포탈은 작업을 시작·중지하지 않습니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager"
+    ],
+    "sources": [
+      "server/src/veeam/em/registry.js",
+      "server/src/routes/admin/veeamEm.js"
+    ]
+  },
+  "veeam-em-latest.json": {
+    "title": "Veeam Enterprise Manager 마지막 수집 결과",
+    "summary": "EM 마다 마지막으로 읽은 결과를 담는 상태 파일입니다(v2.788). 재시작 직후에도 EM 탭이 비지 않게 하는 캐시이며, 다음 수집이 다시 채웁니다.",
+    "stores": [
+      "EM id 마다: 수집 시각, 성공 여부, 항목별(요약 보고서·작업·세션·저장소 등) 성공·사유, 전체 개요·작업 통계·VM 개요, 작업별 마지막 결과, 최근 24시간 세션 집계, 저장소 용량.",
+      "실패한 수집은 직전 성공 결과를 지우지 않고 함께 들고 있습니다."
+    ],
+    "writer": "Veeam Enterprise Manager 폴러가 수집할 때마다(5초 묶어 쓰기).",
+    "usedBy": [
+      "서버 › Veeam › EM 탭",
+      "설정 › Veeam 백업 서버 › Enterprise Manager 의 상태 표시"
+    ],
+    "retention": "등록부에서 지운 EM 의 결과는 다음 수집 때 지웁니다.",
+    "growth": "EM 수와 작업 수에 비례합니다(작업 수천 개 규모에서 수 MB 이하 — 추정).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 수집(기본 15분 안)까지 EM 탭이 '아직 수집 전' 으로 보입니다. 그 밖의 영향은 없습니다.",
+    "cautions": [
+      "비밀번호·세션 정보는 들어 있지 않습니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager — '지금 수집'"
+    ],
+    "sources": [
+      "server/src/veeam/em/store.js",
+      "server/src/veeam/em/poller.js"
+    ]
+  },
+  "veeam-em-auth-stops.json": {
+    "title": "Veeam Enterprise Manager 인증 실패 정지 기록",
+    "summary": "EM 이 계정·비밀번호를 거부(401)하면 그 EM 의 주기 수집을 멈추고 그 사실을 남기는 상태 파일입니다(v2.788). 같은 틀린 비밀번호로 계속 로그인해 서비스 계정을 잠그지 않게 합니다.",
+    "stores": [
+      "EM id 마다: 자격증명 지문(평문 아님), 처음 정지한 시각, 마지막 시도 시각, 시도 횟수, 사유."
+    ],
+    "writer": "Veeam Enterprise Manager 폴러가 401 을 받으면 쓰고, 성공하면 지웁니다. 비밀번호를 바꾸면 자동으로 다시 읽습니다. 설정 화면의 '지금 수집' 은 정지와 관계없이 한 번 시도합니다.",
+    "usedBy": [
+      "Veeam Enterprise Manager 폴러",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — '인증 실패로 주기 수집 정지' 표시"
+    ],
+    "retention": "정지가 풀리면(성공·비밀번호 변경·삭제) 그 줄을 지웁니다.",
+    "growth": "정지된 EM 수만큼입니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "정지가 풀려 다음 주기에 같은 계정으로 다시 로그인합니다(비밀번호가 여전히 틀리면 다시 정지합니다).",
+    "cautions": [
+      "비밀번호는 들어 있지 않습니다(지문만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 비밀번호를 고치면 자동 재개"
+    ],
+    "sources": [
+      "server/src/veeam/em/poller.js",
+      "server/src/util/authGuard.js"
+    ]
+  },
+  "veeam-license-alert-state.json": {
+    "title": "Veeam 라이선스 만료 알림 단계",
+    "summary": "B&R 서버마다 라이선스·지원 만료가 어느 단계(정상·D-90·D-30·D-7·만료)인지 기억하는 상태 파일입니다(v2.788). 단계가 바뀔 때만 한 번 알리고, 재시작 뒤 같은 알림을 다시 보내지 않게 합니다.",
+    "stores": [
+      "'서버 id:종류'(라이선스·지원) 마다: 단계, 그 단계가 된 시각, 만료 시각."
+    ],
+    "writer": "라이선스 감시(중앙, 1시간마다)가 판정할 때 씁니다. 데모 모드에서는 알리지 않습니다.",
+    "usedBy": [
+      "Veeam 라이선스 감시 — 알림 채널(설정 › 알림)로 만료 단계 알림"
+    ],
+    "retention": "서버가 있는 동안 남습니다.",
+    "growth": "B&R 서버 수 × 2 줄로 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 판정에서 지금 나쁜 단계(D-90 이하)인 항목을 한 번씩 다시 알립니다(단계당 1건 — 쏟아지지 않습니다).",
+    "cautions": [
+      "비밀은 들어 있지 않습니다."
+    ],
+    "settings": [
+      "설정 › 알림 — 알림 채널"
+    ],
+    "sources": [
+      "server/src/veeam/licenseWatch.js"
+    ]
+  },
   "isidu.db": {
     "title": "아이실론 디렉터리 사용량 이력 DB",
     "summary": "지정한 아이실론(PowerScale) 디렉터리 바로 아래 폴더(사용자 폴더 — 폴더 이름이 곧 사용자 이름)마다 크기를 조사해 쌓는 SQLite 데이터베이스입니다. 조사는 그 아이실론에 SSH 로 접속해 du -A -h(또는 -k) -d 1 명령을 실행해 얻습니다. '특수 기능 › 아이실론 디렉터리 사용량' 화면이 이 파일을 읽습니다. 대상을 등록하기 전에는 파일이 없을 수 있습니다.",
@@ -1100,6 +1206,34 @@ export const DB_GUIDE_DATA = {
       "server/src/veeam/snapWarm.js",
       "server/src/logs/poller.js",
       "server/src/routes/api/veeam.js"
+    ]
+  },
+  "veeam-history.db": {
+    "title": "Veeam 일 단위 이력 DB",
+    "summary": "Veeam 의 지난 값을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.788). B&R 서버마다 라이선스 사용 수량과 만료일을, Enterprise Manager 마다 저장소 용량과 여유 공간을 기록합니다. '서버 › Veeam › EM' 탭의 라이선스·저장소 추이와, 다음 판의 저장소 소진 예측이 이 기록을 읽습니다. 중앙 포탈에만 생깁니다.",
+    "stores": [
+      "라이선스 표(‘license_daily’): B&R 서버, 날짜, 사용·전체 인스턴스, 사용·전체 소켓, 라이선스 만료일, 지원 만료일 — 못 읽은 값은 비워 둡니다(0 이 아닙니다).",
+      "저장소 표(‘repo_daily’): Enterprise Manager, 저장소(백업 서버와 이름), 날짜, 용량, 여유 공간, 백업 크기."
+    ],
+    "writer": "라이선스 감시가 1시간마다 B&R 결과의 라이선스를 쓰고, Enterprise Manager 폴러가 수집 직후 저장소 용량을 씁니다. 같은 날 다시 쓰면 그날 값을 새 값으로 바꿉니다.",
+    "usedBy": [
+      "서버 › Veeam › EM 탭: 라이선스 사용 추이와 저장소 용량 추이(최근 90일)."
+    ],
+    "retention": "400일입니다. 쓰기 24번마다 한 번 오래된 행을 조금씩 나눠 지웁니다. 화면에서 바꾸는 곳은 없습니다.",
+    "growth": "작습니다 — 대략 '(B&R 서버 수 + EM 저장소 수) × 400일' 행(계산값)입니다.",
+    "shrink": "보관 기간이 고정이라 일정 크기를 유지합니다.",
+    "ifDeleted": "지우면 추이만 처음부터 다시 쌓입니다. 수집·알림·나머지 화면은 그대로입니다. 서비스를 멈춘 뒤 ‘-wal’·‘-shm’ 파일과 함께 지워야 합니다.",
+    "cautions": [
+      "SQLite 를 쓸 수 없는 환경이면 추이를 쌓지 않고 화면은 '이력 없음' 으로 보입니다.",
+      "'특수 기능 › 포탈 DB' 의 DB 저장 경로 이전 대상입니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버: B&R 서버(라이선스의 원천)와 Enterprise Manager(저장소의 원천) 등록"
+    ],
+    "sources": [
+      "server/src/veeam/historyDb.js",
+      "server/src/veeam/licenseWatch.js",
+      "server/src/veeam/em/poller.js"
     ]
   },
   "capacity.db": {

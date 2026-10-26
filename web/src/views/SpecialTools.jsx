@@ -62,6 +62,7 @@ const ContentionTool = React.lazy(() => import('./tools/ContentionTool.jsx')); /
 const VmAvailabilityTool = React.lazy(() => import('./tools/VmAvailabilityTool.jsx')); // VM 가용성 SLA(v2.707 C6)
 const BackupSummaryTool = React.lazy(() => import('./tools/BackupSummaryTool.jsx')); // 백업 서머리(v2.779 백업 메뉴)
 const BackupDetailTool = React.lazy(() => import('./tools/BackupDetailTool.jsx')); // 백업 세부내용(v2.779 백업 메뉴)
+const BackupEmTool = React.lazy(() => import('./tools/BackupEmTool.jsx')); // Veeam 백업 현황 · EM(v2.788)
 const CostShowbackTool = React.lazy(() => import('./tools/CostShowbackTool.jsx')); // 비용 배분(v2.707 C11)
 const MigrationReadinessTool = React.lazy(() => import('./tools/MigrationReadinessTool.jsx')); // VM 이전 준비도(v2.707 C7)
 const CoreLicenseTool = React.lazy(() => import('./tools/CoreLicenseTool.jsx')); // 코어 라이선스 산정(v2.703)
@@ -664,6 +665,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-availability' && <VmAvailabilityTool scope={scope} />}
       {tool === 'backup-summary' && <BackupSummaryTool />}
       {tool === 'backup-detail' && <BackupDetailTool scope={scope} />}
+      {tool === 'backup-em' && <BackupEmTool />}
       {tool === 'cost-showback' && <CostShowbackTool scope={scope} />}
       {tool === 'migration-readiness' && <MigrationReadinessTool scope={scope} />}
       {tool === 'core-license' && <CoreLicenseTool scope={scope} />}
