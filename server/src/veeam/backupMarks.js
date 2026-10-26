@@ -5,6 +5,9 @@
  *
  * ⚠ 파일을 못 읽었으면(손상) 빈 맵 위에 저장하지 않는다 — 쓰기는 거부(503)하고 읽기는 unreadable 을 알린다
  *   ('못 읽었으면 빈 목록을 내려보내지 않는다' · 원본은 preserveCorrupt 가 옆에 남긴다). 재시작하면 손상 사본만 남고 새 파일로 시작한다.
+ *   v2.785(GR R-B2): 읽기 쪽도 수를 0 으로 내지 않는다 — 라우트가 marksUnreadable() 이면 행 marks 를 null(모름)로 둔다. 재시작 뒤에는
+ *   '파일 없음' 으로 읽혀 조용히 빈 상태가 되므로 marksCorruptKept()(손상 사본 backup-marks.json.corrupt.* 가 남아 있는가)를 화면이 알린다 —
+ *   veeam/snapEvents.js corruptKept 와 같은 규칙(쓰기는 막지 않는다 · 관리자가 사본을 치우면 안내가 사라진다).
  * ⚠ VM 을 다시 등록해 moref 가 바뀌면 표시는 따라가지 않는다(이름·vCenter 는 기록용으로 남긴다).
  */
 import fs from 'node:fs';
@@ -24,6 +27,10 @@ let unreadable = false;
 /** 표시 변경 리비전 — 백업 화면 응답 캐시 키(저장 즉시 수가 바뀌게). */
 export function marksRev() { return rev; }
 export function marksUnreadable() { load(); return unreadable; }
+/** v2.785(GR R-B2): 예전에 손상돼 옆에 보존된 표시 파일이 있는가 — snapEvents.js corruptKept 와 같은 판정(사본이 있는 동안 참). */
+export function marksCorruptKept() {
+  try { return fs.readdirSync(config.configDir).some((f) => f.startsWith('backup-marks.json.corrupt.')); } catch { return false; }
+}
 
 function load() {
   if (cache) return cache;
