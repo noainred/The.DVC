@@ -215,7 +215,8 @@ export async function recoverInterruptedVerify(jobId, { setPhase } = {}) {
   const finish = (ok, note) => {
     clearVerifying(jobId, { anyBoot: true });
     const detail = `중단된 검증 정리 — ${note}`.slice(0, 300);
-    if (rec.ref) patchClone(jobId, rec.ref, { verify: { at: Date.now(), ok: false, detail: '검증이 재시작으로 중단됐습니다 — 다시 검증하세요' } });
+    // 재시작으로 중단됐거나(이전 프로세스) 뒷정리를 못 끝낸(cleanup-retry) 검증 — 어느 쪽이든 그 사본은 검증된 것이 아니다.
+    if (rec.ref) patchClone(jobId, rec.ref, { verify: { at: Date.now(), ok: false, detail: '검증이 끝나지 못했습니다(재시작 또는 뒷정리 실패) — 다시 검증하세요' } });
     recordJobEvent(jobId, { kind: 'verify', ok, detail, trigger: 'restart', skipped: ok ? '' : 'restart-cleanup-gave-up' });
     logAudit({ user: 'vm-clone(restart)', action: ok ? 'VM 백업 중단된 검증 정리' : 'VM 백업 중단된 검증 정리 포기', target: `${job.vcenterId}/${job.vmName}`, detail: detail.slice(0, 200) });
     return { ok, detail };
