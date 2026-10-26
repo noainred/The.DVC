@@ -15,8 +15,8 @@ const tabsInMenu = () => new Set(allItems().map(({ g, c }) => (c ? c.tab : g.tab
 
 describe('메뉴 구성', () => {
   it('대메뉴는 사용자가 정한 순서 11개다(업그레이드는 설정 아래 · v2.779 백업 메뉴 추가)', () => {
-    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '백업', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
-    expect(MENU_GROUPS.find((g) => g.id === 'backup').children.map((c) => [c.label, c.tool])).toEqual([['백업 서머리', 'backup-summary'], ['백업 세부내용', 'backup-detail']]);
+    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', 'Veeam 현황', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
+    expect(MENU_GROUPS.find((g) => g.id === 'backup').children.map((c) => [c.label, c.tool])).toEqual([['Summary', 'backup-summary'], ['Detail', 'backup-detail']]);
     const settings = MENU_GROUPS.find((g) => g.id === 'settings');
     expect(settings.children.map((c) => c.tab)).toEqual(['settings', 'upgrade']);
   });
@@ -176,3 +176,19 @@ describe('화면 배선(소스)', () => {
     expect(hw).toMatch(/base: bm \? \['tools', 'serveranalysis', BAREMETAL_SEG\]/);
   });
 });
+
+describe('v2.785 Veeam 현황 — 이름만 바뀌고 주소·도구 키는 그대로 · 옛 이름으로도 찾힌다', async () => {
+  const { TOOLS } = await import('./specialToolsList.js');
+  const { searchTools } = await import('./toolSearch.js');
+  it('메뉴 id·도구 키 그대로(북마크 · 권한 파일 · 저장한 내 메뉴가 참조) · 특수 기능 카드 이름', () => {
+    const g = MENU_GROUPS.find((x) => x.id === 'backup');
+    expect([g.label, ...g.children.map((c) => `${c.id}:${c.tool}`)]).toEqual(['Veeam 현황', 'bsum:backup-summary', 'bdet:backup-detail']);
+    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Veeam 현황 · Summary'], ['backup-detail', 'Veeam 현황 · Detail']]);
+  });
+  it('특수 기능 검색 — 옛 이름(백업 서머리·백업 세부내용)과 새 이름 모두', () => {
+    expect(searchTools(TOOLS, '백업 서머리')[0].k).toBe('backup-summary');
+    expect(searchTools(TOOLS, '백업 세부내용')[0].k).toBe('backup-detail');
+    expect(searchTools(TOOLS, 'Veeam 현황').map((t) => t.k)).toEqual(expect.arrayContaining(['backup-summary', 'backup-detail']));
+  });
+});
+
