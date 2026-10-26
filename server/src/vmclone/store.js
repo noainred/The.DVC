@@ -470,6 +470,19 @@ export function appendBackupPhases(id, extra) {
   persist();
 }
 
+/**
+ * v2.795 — 원본 VM 의 instanceUuid 를 잡에 처음 한 번 적는다(실행기의 신원 확인). 이미 있으면 바꾸지 않는다 — 바뀌었으면 실행기가 멈춘다.
+ * 정의 필드가 아니라 실행 상태라 saveJob·applyDelegatedJobs 가 덮지 않는다.
+ */
+export function setJobVmUuid(id, uuid) {
+  const j = load().jobs.find((x) => x.id === id);
+  const u = String(uuid || '').trim().slice(0, 80);
+  if (!j || !u || j.vmUuid) return false;
+  j.vmUuid = u;
+  persist();
+  return true;
+}
+
 /** 원장 사본의 부가 정보(크기·검증 결과)를 고친다 — 원장에 없는 ref 는 무시(지어내지 않는다). */
 export function patchClone(id, ref, patch = {}) {
   const j = load().jobs.find((x) => x.id === id);
