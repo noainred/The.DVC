@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **230개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **233개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-26)
@@ -223,7 +223,7 @@
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
-| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 4 |
+| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 5 |
 | `veeam-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/poller.js |
 | `veeam-em-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/em/poller.js |
 | `veeam-em-latest.json` | 설정 | Enterprise Manager 별 마지막 결과(v2.788). veeam/store.js 와 같은 모양: |  |  |  | veeam/em/store.js |
@@ -235,6 +235,9 @@
 | `veeam-servers.json` | 설정 | Veeam Backup & Replication 서버 등록부(v2.751). | ✅ | ✅ | ✅ | veeam/registry.js |
 | `veeam-snap.db` | DB |  |  |  |  | config.js |
 | `veeam-vc-accounts.json` | 설정 | vCenter 이벤트로 본 Veeam 백업 흔적(v2.754). Veeam 연동·VM 메모 없이 쓴다(사용자 지시). | ✅ | ✅ |  | veeam/snapEvents.js |
+| `vm-backup-mail-state.json` | 설정 | VM 백업 실패 메일(v2.794, 메일 종류 'vm-backup'). | ✅ | ✅ | ✅ | vmclone/notify.js |
+| `vm-clone-corp.json` | 설정 | 법인(실행 노드)별 '백업에 쓸 NFS 마운트' 지정(v2.794). | ✅ | ✅ | ✅ | vmclone/corpMounts.js |
+| `vm-clone-nfsds.json` | 설정 | 법인 백업 저장소: ESXi NFS 데이터스토어 정의(v2.793, 중앙 전용). | ✅ | ✅ | ✅ | vmclone/nfsDs.js |
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |

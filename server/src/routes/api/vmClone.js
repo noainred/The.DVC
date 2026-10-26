@@ -21,9 +21,10 @@ import { isAdminReq } from '../../auth/addressMask.js';
 import { demoSiteVcenters } from '../../mock/demo/edge.js'; // v2.793: 데모 법인 묶음(mock 전용 — live 는 빈 배열)
 import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs } from '../../vmclone/nfsDs.js';
 import { executeOp } from '../../vmclone/execOp.js';
+import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
 import { validateRestoreSpec, VERIFY_TIMEOUT_MIN } from '../../vmclone/vsOps.js';
 import {
-  execTargets, corpsOf, edgeStateOf, createOp, finishOp, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
+  execTargets, corpsOf, corpKeyOfTarget, edgeStateOf, createOp, finishOp, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
 } from '../../vmclone/dispatch.js';
 
 const adminOnly = requireRole('admin');
@@ -80,6 +81,7 @@ export function mergeJobView(job, target, edge) {
     ...job,
     lastRun: st?.lastRun || null, history: st?.history || [], clones: st?.clones || [],
     ...(st?.running ? { running: { at: 0 } } : {}),
+    ...(st?.verifying ? { verifying: { at: 0 } } : {}),
     exec: {
       where: tg.where, agent: tg.agent || '', ...(tg.reason ? { reason: tg.reason } : {}),
       reportedAt: edge?.at || null, reported: !!st, ...(st?.problem ? { problem: st.problem } : {}),
@@ -170,6 +172,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
         mounts: edgeMountsView(edge.mounts, { full }),
       } } : {}),
       writable: c.vcenterIds.filter((id) => inUserWriteScope(req.user, snap, id)),
+      mountUse: mountUseView(c.key),   // v2.794: 백업에 쓸 마운트 지정(null = 전부)
     };
   });
   const vcName = new Map((snap?.vcenters || []).map((v) => [String(v.id), v.name || v.id]));
@@ -195,6 +198,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     vcenterNames: Object.fromEntries(visibleVcs.map((v) => [String(v.id), vcName.get(String(v.id)) || v.name || v.id])),
     nfsDatastores,
     ops: listOpsView({ allowed }),
+    ...(corpMountsLoadError() ? { corpMountsError: corpMountsLoadError().reason } : {}),
     limits: { verifyTimeoutMin: VERIFY_TIMEOUT_MIN, opPendingMin: Math.round(PENDING_TTL_MS / 60_000), opClaimMin: Math.round(CLAIM_MS / 60_000) },
   });
 });
@@ -241,9 +245,15 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
     if (!d || String(d.vcenterId) !== vcenterId) return res.status(400).json({ ok: false, reason: '고른 NFS 데이터스토어가 이 vCenter 의 법인 저장소가 아닙니다.' });
     body.dest = { type: 'datastore', datastoreName: d.name, nfsDsId: d.id };
   }
+  // v2.794: 엣지 NFS 대상은 그 법인이 '사용' 으로 지정한 마운트만(지정이 없으면 전부). 기존 잡이 같은 마운트를 그대로 두는 수정은 막지 않는다.
+  if (body.dest?.type === 'nfs' && !(existing?.dest?.type === 'nfs' && String(existing.dest.mountId) === String(body.dest.mountId || ''))) {
+    const tg = targetsNow().targets.get(vcenterId);
+    const why = mountUseDenied(body.dest, corpKeyOfTarget(tg));
+    if (why) return res.status(400).json({ ok: false, reason: why });
+  }
   try {
     const job = saveJob(body);
-    logAudit({ user: req.user?.username, action: 'VM 복제 잡 저장', target: `${job.vcenterId}/${job.vmName}`, detail: `${job.dest.type}${job.dest.datastoreName ? `→${job.dest.datastoreName}` : ''} · ${job.schedule.mode} · 보존 ${job.keep}${job.verifyAfter ? ' · 자동 검증' : ''}` });
+    logAudit({ user: req.user?.username, action: 'VM 복제 잡 저장', target: `${job.vcenterId}/${job.vmName}`, detail: `${job.dest.type}${job.dest.datastoreName ? `→${job.dest.datastoreName}` : ''} · ${job.schedule.mode} · 보존 ${job.keep}${job.keepDays ? `개·${job.keepDays}일` : ''}${job.verifyAfter ? ' · 자동 검증' : ''}` });
     res.status(201).json({ ok: true, job });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
@@ -354,6 +364,45 @@ api.post('/tools/vm-clone/nfs-datastores/:id/attach', adminOnly, (req, res) => {
   const op = dispatchOp(res, { kind: 'nfsds-attach', vcenterId: item.vcenterId, spec: { nfsDsId: item.id, name: item.name, server: item.server, exportPath: item.exportPath, nfsVersion: item.nfsVersion, hostIds }, by: req.user?.username });
   if (!op) return;
   logAudit({ user: req.user?.username, action: 'NFS 데이터스토어 연결', target: `${item.vcenterId}/${item.name}`, detail: `호스트 ${hostIds.length}대${op.where === 'edge' ? ` · 담당 엣지 ${op.agent}` : ''}` });
+  res.status(202).json({ ok: true, opId: op.id, where: op.where, agent: op.agent });
+});
+
+/**
+ * v2.794 — 법인의 '백업에 쓸 마운트' 지정 — body: { corpKey: 'central' | 'edge:<이름>', mountIds: string[] | null(지정 해제) }.
+ * 그 법인의 vCenter 를 **모두** 쓸 수 있는 계정만(조회 밖 404 → 쓰기 밖 403) — 한 법인 설정이 여러 vCenter 의 잡 대상을 좁힌다.
+ */
+api.put('/tools/vm-clone/corps/mounts', adminOnly, (req, res) => {
+  const corpKey = String(req.body?.corpKey ?? '').trim().slice(0, 70);
+  const snap = store.get();
+  const { vcenters, targets } = targetsNow();
+  const corp = corpKey === 'unassigned' ? null : corpsOf(vcenters, targets).find((c) => c.key === corpKey);
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (!corp || (allowed && !corp.vcenterIds.some((id) => allowed.has(String(id))))) return res.status(404).json({ ok: false, reason: '법인을 찾을 수 없습니다.' });
+  if (!corp.vcenterIds.every((id) => inUserWriteScope(req.user, snap, id))) return res.status(403).json({ ok: false, reason: '이 법인의 vCenter 를 모두 수정할 수 있는 계정만 바꿀 수 있습니다.' });
+  const ids = req.body?.mountIds;
+  if (ids != null && !Array.isArray(ids)) return res.status(400).json({ ok: false, reason: 'mountIds 는 배열 또는 null 이어야 합니다.' });
+  let view;
+  try { view = setMountUse(corp.key, ids, req.user?.username); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  logAudit({ user: req.user?.username, action: 'VM 백업 법인 마운트 지정', target: corp.label || corp.key, detail: view ? `사용 ${view.mountIds.length}개(${view.mountIds.join(', ').slice(0, 150)})` : '지정 해제(전부 사용)' });
+  res.json({ ok: true, mountUse: view });
+});
+
+/**
+ * v2.794 — 떼어 내기(호스트에서 NFS 데이터스토어 제거) — body: { hostIds? } (없으면 연결 기록이 있는 호스트 전부).
+ * 이 데이터스토어를 대상으로 쓰는 잡이 있으면 409 — 다음 백업이 '데이터스토어 없음' 으로 실패한다. 호스트의 VM 이 쓰면 그 호스트는 실행 노드가 거부한다.
+ */
+api.post('/tools/vm-clone/nfs-datastores/:id/detach', adminOnly, (req, res) => {
+  const item = getNfsDs(String(req.params.id));
+  if (!item) return res.status(404).json({ ok: false, reason: '찾을 수 없습니다.' });
+  const deny = accessOf(req, item.vcenterId); if (deny) return res.status(deny.status).json(deny.body);
+  const users = listJobs().filter((j) => j.dest?.type === 'datastore' && (j.dest.nfsDsId === item.id || (String(j.vcenterId) === String(item.vcenterId) && j.dest.datastoreName === item.name)));
+  if (users.length) return res.status(409).json({ ok: false, reason: `이 데이터스토어를 대상으로 쓰는 백업 잡 ${users.length}개가 있습니다(${users.slice(0, 3).map((j) => j.vmName).join(', ')}${users.length > 3 ? ' 외' : ''}) — 잡의 대상을 바꾸거나 지운 뒤 떼어 내세요.` });
+  const asked = Array.isArray(req.body?.hostIds) && req.body.hostIds.length ? req.body.hostIds : Object.keys(item.hosts || {});
+  const hostIds = hostIdsIn(item.vcenterId, asked);
+  if (!hostIds.length) return res.status(400).json({ ok: false, reason: '떼어 낼 호스트가 없습니다(연결 기록이 있는 이 vCenter 의 호스트만).' });
+  const op = dispatchOp(res, { kind: 'nfsds-detach', vcenterId: item.vcenterId, spec: { nfsDsId: item.id, name: item.name, server: item.server, exportPath: item.exportPath, nfsVersion: item.nfsVersion, hostIds }, by: req.user?.username });
+  if (!op) return;
+  logAudit({ user: req.user?.username, action: 'NFS 데이터스토어 떼어 내기 요청', target: `${item.vcenterId}/${item.name}`, detail: `호스트 ${hostIds.length}대${op.where === 'edge' ? ` · 담당 엣지 ${op.agent}` : ''}` });
   res.status(202).json({ ok: true, opId: op.id, where: op.where, agent: op.agent });
 });
 

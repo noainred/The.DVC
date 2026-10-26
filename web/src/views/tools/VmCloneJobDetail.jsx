@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { postJson } from '../../api.js';
+import { postJson, canCsv } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { mountLabel } from './vmCloneMountText.js';
 import {
-  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL,
+  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL, triggerText, keepText, HISTORY_FILTERS, historyFilter, historyCsv,
 } from './vmCloneView.js';
 
 /**
@@ -18,8 +18,17 @@ const fmtAt = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { month: '2-dig
 export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun, onEdit, onDelete, onRestore, onReload, setMsg }) {
   const [sel, setSel] = useState(null);      // 이력에서 고른 줄(타임라인)
   const [pending, setPending] = useState(''); // 방금 누른 사본 ref(응답 전 잠금)
+  const [hf, setHf] = useState('all');        // v2.794 이력 필터
   const runs = backupRuns(job);
   const history = useMemo(() => [...(job.history || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), [job.history]);
+  const shownHist = useMemo(() => historyFilter(history, hf), [history, hf]);
+  const exportCsv = () => {
+    const url = URL.createObjectURL(new Blob(['\ufeff' + historyCsv(job, shownHist)], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `vm-backup-history-${String(job.vmName || job.id).replace(/[^A-Za-z0-9._-]/g, '_')}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const clones = useMemo(() => [...(job.clones || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), [job.clones]);
   const b = cloneBytes(job.clones);
   const last30 = runs.slice(-30);
@@ -54,7 +63,8 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
             <h2 className="vbk-title" style={{ margin: 0 }}>{job.vmName}</h2>
             <span className={`vbk-chip ${isDs ? 'ds' : 'nfs'}`}>{isDs ? `${job.dest.nfsDsId ? 'NFS-DS' : 'DS'} · ${job.dest.datastoreName}` : `엣지 NFS · ${mountLabel((d.mounts || []).find((m) => m.id === job.dest.mountId)) || job.dest.mountId}`}</span>
             <span className={`vbk-chip ${job.quiesce ? 'ok' : ''}`}>{job.quiesce ? '앱 정합(정지점)' : '크래시 정합'}</span>
-            <span className="vbk-chip">보존 {job.keep}개</span>
+            <span className="vbk-chip">보존 {keepText(job)}</span>
+            {job.verifying && !running && <span className="vbk-chip warn" title="재시작으로 검증이 중단됐습니다 — 실행 노드가 다음 확인(1분 안팎)에 사본을 끄고 검증 전 상태로 되돌립니다. 그 전에는 새 검증·잡 삭제를 하지 않습니다.">중단된 검증 정리 대기</span>}
             {!job.enabled && <span className="vbk-chip warn">비활성</span>}
           </div>
           <div className="vbk-sub">{d.vcenterNames?.[job.vcenterId] || job.vcenterId} · {scheduleText(job.schedule)} · {isDs ? (job.verifyAfter ? '복제 후 자동 검증 켜짐' : '자동 검증 꺼짐') : '검증 해당 없음(파일 사본)'}{execText(job, now) ? ` · ${execText(job, now)}` : ''}</div>
@@ -137,13 +147,20 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
             </div>
           </div>
           <div className="vbk-panel">
-            <div className="hd"><div className="vbk-sec">세션 이력 <small>{history.length}건</small></div></div>
-            {history.length === 0 && <div className="bd muted" style={{ fontSize: 12.5 }}>{edgeNoReport ? '엣지 보고 없음' : '기록 없음'}</div>}
-            {history.slice(0, 30).map((h, i) => (
+            <div className="hd flex wrap" style={{ gap: 8 }}>
+              <div className="vbk-sec" style={{ minWidth: 0 }}>세션 이력 <small>{hf === 'all' ? `${history.length}건` : `${shownHist.length} / ${history.length}건`}</small></div>
+              <div className="flex wrap" style={{ gap: 4, marginLeft: 'auto' }}>
+                {HISTORY_FILTERS.map(([k, label]) => <button type="button" key={k} className={`vbk-btn sm${hf === k ? ' primary' : ''}`} aria-pressed={hf === k} onClick={() => { setHf(k); setSel(null); }}>{label}</button>)}
+                {/* v2.643 규약: CSV 내보내기는 관리자 이상 + 'CSV 가져오기/내보내기' 권한(canCsv)일 때만 보인다 — 화면에서 만드는 CSV 도 같다. */}
+                {canCsv() && <button type="button" className="vbk-btn sm" disabled={!shownHist.length} onClick={exportCsv} title="보이는 이력을 CSV 로 내려받습니다(엑셀에서 열림)">CSV</button>}
+              </div>
+            </div>
+            {shownHist.length === 0 && <div className="bd muted" style={{ fontSize: 12.5 }}>{history.length ? '이 조건의 기록이 없습니다' : edgeNoReport ? '엣지 보고 없음' : '기록 없음'}</div>}
+            {shownHist.slice(0, 30).map((h, i) => (
               <button type="button" key={i} className="vbk-sess" style={{ width: '100%', background: sel === h ? 'rgba(59,130,246,.10)' : 'transparent', border: 0, borderTop: i ? '1px solid var(--border-soft)' : 0, color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }} onClick={() => setSel(h)}>
                 <span className={`vbk-dot ${runTone(h)}`} style={{ marginTop: 5 }} />
                 <div>
-                  <div className="flex between" style={{ gap: 8 }}><b>{KIND_LABEL[h.kind || 'backup']}{h.trigger ? <span className="muted" style={{ fontWeight: 400 }}> · {h.trigger === 'schedule' ? '스케줄' : h.trigger === 'auto' ? '자동' : h.trigger === 'manual' ? '수동' : h.trigger}</span> : null}</b><span className="t">{fmtAt(h.at)}</span></div>
+                  <div className="flex between" style={{ gap: 8 }}><b>{KIND_LABEL[h.kind || 'backup']}{h.trigger ? <span className="muted" style={{ fontWeight: 400 }}> · {triggerText(h.trigger)}</span> : null}</b><span className="t">{fmtAt(h.at)}</span></div>
                   <div className="d">{h.detail}{h.ms ? ` · ${durText(h.ms)}` : ''}</div>
                 </div>
               </button>

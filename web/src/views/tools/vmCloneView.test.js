@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   runTone, lastRunTones, lastVerify, cloneBytes, fmtBytes, agoText, durText, kpisOf, jobState, execText,
   corpEdgeState, corpCards, recentSessions, storageRows, capacityEstimate, restoreNameDefault, busyOp, phaseRows,
+  keepText, triggerText, historyFilter, historyCsv,
 } from './vmCloneView.js';
 
 const NOW = Date.UTC(2026, 9, 26, 3, 0, 0);
@@ -116,5 +117,34 @@ describe('VM 백업 센터 화면 판정(v2.793)', () => {
     expect(busyOp([{ state: 'done', jobId: 'j', kind: 'verify' }], 'j', 'verify')).toBe(null);
     expect(phaseRows({ phases: [{ n: 'a', ms: 1 }, { n: 'b', ms: 2, ok: false }] }, { phase: '클론' })).toEqual([
       { name: 'a', ms: 1, state: 'done' }, { name: 'b', ms: 2, state: 'fail' }, { name: '클론', ms: null, state: 'running' }]);
+  });
+});
+
+describe('VM 백업 센터 v2.794 — 보존 문구 · 실행 사유 · 이력 필터 · CSV', () => {
+  it('keepText · triggerText — 기간이 없으면 개수만 · 모르는 사유는 그대로', () => {
+    expect(keepText({ keep: 7 })).toBe('7개');
+    expect(keepText({ keep: 7, keepDays: 30 })).toBe('7개 · 30일');
+    expect(triggerText('restart')).toBe('재시작 정리');
+    expect(triggerText('resume')).toBe('재시작 뒤 재실행');
+    expect(triggerText('weird')).toBe('weird');
+  });
+  it('historyFilter — 종류별 · 실패만(건너뜀 제외) · 전체는 그대로', () => {
+    const h = [{ kind: 'backup', ok: true, detail: 'ok' }, { kind: 'verify', ok: false, detail: 'x' }, { ok: false, skipped: 'delegated', detail: 's' }, { kind: 'restore', ok: true }];
+    expect(historyFilter(h, 'all')).toHaveLength(4);
+    expect(historyFilter(h, 'backup')).toHaveLength(2);
+    expect(historyFilter(h, 'verify')).toEqual([h[1]]);
+    expect(historyFilter(h, 'fail')).toEqual([h[1]]);
+  });
+  it('historyCsv — 머리줄 · ISO 시각 · 수식 인젝션 가드 · 단계', () => {
+    const csv = historyCsv({ vmName: 'web01', vcenterId: 'vcA' }, [
+      { at: NOW, kind: 'backup', ok: false, ms: 61_000, trigger: 'schedule', detail: '=HYPERLINK("x")', phases: [{ n: '스냅샷', ms: 2000 }, { n: '클론', ms: 59000, ok: false }] },
+    ]);
+    const [head, row] = csv.split('\n');
+    expect(head.startsWith('시각,VM,vCenter,종류')).toBe(true);
+    expect(row).toContain(new Date(NOW).toISOString());
+    expect(row).toContain('스케줄');
+    expect(row).toContain('실패');
+    expect(row).toContain('스냅샷 2s > 클론 59s(실패)');
+    expect(row).not.toMatch(/,=HYPERLINK/);
   });
 });

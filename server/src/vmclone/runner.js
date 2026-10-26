@@ -36,7 +36,7 @@ import { getDataSource } from '../runtime-settings.js';
 import { logAudit } from '../audit.js';
 import {
   getJob, recordRun, pruneList, setRunning, patchRunning, clearRunning, interruptedRunOf,
-  RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS, RESUME_LIMIT, RESUME_EXPIRE_MS, patchClone, recordJobEvent, appendBackupPhases,
+  RECOVER_RETRY_MS, RECOVER_GIVE_UP_MS, RESUME_LIMIT, RESUME_EXPIRE_MS, patchClone, recordJobEvent, appendBackupPhases, clampKeepDays,
 } from './store.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { isVmCloneDemoJob } from '../mock/demo/vmclone.js';
@@ -47,7 +47,7 @@ import {
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
 import { morefOf } from '../vcenter/registry.js';
 import { fileStamp, localStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
-import { xmlUnescape } from '../vcenter/soapParse.js';
+import { snapshotTreeList } from './snapTree.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
 
@@ -144,18 +144,8 @@ async function runJob(jobId, trigger) {
 // 실행 중 기록(store.setRunning)이 이전 프로세스의 것으로 남아 있으면, 다음 실행은 새 스냅샷을 만들기 **전에** 그 실행이 만든 스냅샷을 지운다.
 // 못 지우면(클론·병합 태스크가 vCenter 에서 아직 도는 중 · vCenter 불통) 새 스냅샷을 만들지 않고 RECOVER_RETRY_MS 뒤 다시 시도한다.
 
-/**
- * VM 'snapshot'(VirtualMachineSnapshotInfo) XML → [{ref, name}] (순수 — 테스트 고정).
- * 트리 노드마다 snapshot → vm → name 순서다(vim25 VirtualMachineSnapshotTree). currentSnapshot 은 태그 이름이 달라 섞이지 않는다.
- */
-export function snapshotTreeList(xml) {
-  const out = [];
-  const re = /<snapshot type="VirtualMachineSnapshot">([^<]+)<\/snapshot>\s*<vm\b[^>]*>[^<]*<\/vm>\s*<name>([^<]*)<\/name>/g;
-  const s = String(xml || '');
-  let m;
-  while ((m = re.exec(s)) && out.length < 1000) out.push({ ref: m[1].trim(), name: xmlUnescape(m[2]) });
-  return out;
-}
+// v2.794: snapshotTreeList 는 snapTree.js 로 옮겼다(vsOps.js 도 쓴다 — 여기서 가져오면 runner ↔ vsOps 순환이 생긴다). 기존 import 경로는 다시 내보낸다.
+export { snapshotTreeList };
 
 const NOT_FOUND_RE = /notfound|not found|managedobject/i; // destroyClone 과 같은 판정 — VM 자체가 없어졌다
 const SNAPSHOT_TASK_WAIT_MS = 20 * 60_000;              // 스냅샷 생성 태스크 시한(15분, vsphere.createSnapshot) + 여유
@@ -224,12 +214,17 @@ export function nfsFileTarget(destDir, pd) {
   const target = path.join(destDir, pathSlug(pd.ds, 100), ...parts);
   return path.resolve(target).startsWith(path.resolve(destDir) + path.sep) ? target : null;
 }
-/** 이 잡이 만든 온전한 백업인가 — manifest.json 이 있고 vcenterId·vmId 가 같을 때만(읽지 못하면 '아니다' — 지우지 않는다). */
-function ownsBackup(bakDir, job) {
+/**
+ * 이 잡이 만든 온전한 백업인가 — manifest.json 이 있고 vcenterId·vmId 가 같을 때만(읽지 못하면 '아니다' — 지우지 않는다).
+ * v2.794: 맞으면 manifest 의 시각(ms — 못 읽으면 0)을 돌려준다(보존 기간 판정). 아니면 null.
+ */
+function ownedBackupAt(bakDir, job) {
   try {
     const m = JSON.parse(fs.readFileSync(path.join(bakDir, 'manifest.json'), 'utf8'));
-    return !!m && m.vcenterId === job.vcenterId && m.vmId === job.vmId;
-  } catch { return false; }
+    if (!m || m.vcenterId !== job.vcenterId || m.vmId !== job.vmId) return null;
+    const at = Date.parse(m.at);
+    return Number.isFinite(at) ? at : 0;
+  } catch { return null; }
 }
 /**
  * NFS 보존 — destRoot 아래 스탬프 폴더 중 **이 잡의 온전한 백업만** 세어 keep 초과분을 오래된 순으로 지운다.
@@ -241,13 +236,19 @@ export function pruneNfsBackups(mp, destRoot, job) {
   let names = [];
   try { names = fs.readdirSync(destRoot, { withFileTypes: true }).filter((e) => e.isDirectory() && STAMP_RE.test(e.name)).map((e) => e.name); }
   catch { return []; }
-  const mine = names.filter((n) => ownsBackup(path.join(destRoot, n), job)).sort();
+  // 폴더 이름(스탬프) 순 = 시간 순. 개수 초과분 + v2.794 보존 기간이 지난 것(가장 최근 1개는 남긴다 · 시각을 모르면 기간으로 지우지 않는다 — pruneList 와 같은 규칙).
+  const mine = names.map((n) => ({ name: n, at: ownedBackupAt(path.join(destRoot, n), job) })).filter((x) => x.at != null)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const excess = mine.length - (Number(job.keep) || 1);
+  const days = clampKeepDays(job.keepDays);
+  const cutoff = Date.now() - days * 86_400_000;
+  const victims = new Set(mine.filter((x, i) => i < excess || (days && i < mine.length - 1 && x.at > 0 && x.at < cutoff)).map((x) => x.name));
   const removed = [];
-  for (let i = 0; i < excess; i++) {
-    const victim = path.join(destRoot, mine[i]);
+  for (const x of mine) {
+    if (!victims.has(x.name)) continue;
+    const victim = path.join(destRoot, x.name);
     if (!path.resolve(victim).startsWith(mpAbs)) break; // 이중 방어
-    fs.rmSync(victim, { recursive: true, force: true }); removed.push(mine[i]);
+    fs.rmSync(victim, { recursive: true, force: true }); removed.push(x.name);
   }
   return removed;
 }
@@ -331,7 +332,7 @@ async function runJobBody(jobId, trigger) {
       const inv = (store.get()?.vms || []).find((v) => v.id === job.vmId);
       const gb = Number(inv?.storageGB);
       const bytes = inv && Number.isFinite(gb) && gb > 0 ? Math.round(gb * 0.6 * 1024 ** 3) : null;
-      const removed = pruneList([...job.clones, { name, ref, at }], job.keep);
+      const removed = pruneList([...job.clones, { name, ref, at }], job.keep, job.keepDays);
       done(true, `mock 복제 완료 — ${name}${removed.length ? ` · 보존정책 삭제 ${removed.length}개` : ''}`,
         { addClone: { name, ref, at, ...(bytes != null ? { bytes } : {}) }, removeCloneRefs: removed.map((c) => c.ref) });
       if (job.dest.type === 'datastore' && job.verifyAfter) enqueueAutoVerify(jobId, ref);
@@ -418,7 +419,7 @@ async function runJobBody(jobId, trigger) {
         // 보존정책 — 원장 기준(이름 패턴 아님), 켜져 있는 클론은 건너뛰고 보고.
         setPhase('보존정책 적용');
         const ledger = [...job.clones, { name: cloneName, ref: newRef, at: Date.now() }];
-        const toDelete = pruneList(ledger, job.keep);
+        const toDelete = pruneList(ledger, job.keep, job.keepDays);
         const removedRefs = []; const skipped = [];
         for (const old of toDelete) {
           try { await destroyClone(c, old.ref, { expectedName: old.name }); removedRefs.push(old.ref); }   // v2.767(R2-B3-6): 이름 대조

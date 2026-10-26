@@ -11,7 +11,7 @@ import { mountLabel, MOUNTS_MASKED_NOTE, showMountsMaskedNote } from './vmCloneM
 import Select from '../../components/Select.jsx';
 import {
   kpisOf, corpCards, lastRunTones, jobState, execText, cloneBytes, fmtBytes, lastVerify, recentSessions, storageRows,
-  capacityEstimate, agoText, durText, KIND_LABEL,
+  capacityEstimate, agoText, durText, KIND_LABEL, keepText,
 } from './vmCloneView.js';
 import VmCloneJobDetail from './VmCloneJobDetail.jsx';
 import VmCloneRestore from './VmCloneRestore.jsx';
@@ -109,7 +109,7 @@ export default function VmCloneTool() {
   // ── ① 대시보드 ──
   const localRun = d.status?.running;
   const running = [
-    ...(localRun ? [{ where: '이 포탈', vm: jobs.find((j) => j.id === localRun.jobId)?.vmName || (localRun.kind === 'nfsds-attach' ? 'NFS 데이터스토어 연결' : localRun.jobId || '작업'), phase: localRun.phase, since: localRun.startedAt }] : []),
+    ...(localRun ? [{ where: '이 포탈', vm: jobs.find((j) => j.id === localRun.jobId)?.vmName || (localRun.kind === 'nfsds-attach' ? 'NFS 데이터스토어 연결' : localRun.kind === 'nfsds-detach' ? 'NFS 데이터스토어 떼어 내기' : localRun.jobId || '작업'), phase: localRun.phase, since: localRun.startedAt }] : []),
     ...(d.corps || []).filter((c) => c.edge?.runner?.running).map((c) => ({ where: c.label, vm: jobs.find((j) => j.id === c.edge.runner.running.jobId)?.vmName || '작업', phase: c.edge.runner.running.phase, since: c.edge.runner.running.startedAt })),
   ];
   const queued = (d.status?.queued?.length || 0) + (d.corps || []).reduce((a, c) => a + (c.edge?.runner?.queued?.length || 0), 0);
@@ -285,9 +285,12 @@ export default function VmCloneTool() {
 
 /** 저장 대상 선택지 — 법인(실행 위치) 기준. 엣지 위임 vCenter 면 그 엣지가 보고한 마운트, 중앙이면 이 포탈의 마운트. */
 function corpOfVc(d, vcenterId) { return (d.corps || []).find((c) => (c.vcenterIds || []).includes(String(vcenterId))) || null; }
-function mountsFor(d, vcenterId) {
+// v2.794: 법인이 '백업에 사용' 으로 지정한 마운트만(지정이 없으면 전부). 수정 중인 잡이 이미 쓰는 마운트(keepId)는 지정 밖이어도 남긴다.
+function mountsFor(d, vcenterId, keepId = '') {
   const c = corpOfVc(d, vcenterId);
-  return c?.agent ? (c.edge?.mounts || []) : (d.mounts || []);
+  const all = c?.agent ? (c.edge?.mounts || []) : (d.mounts || []);
+  const use = Array.isArray(c?.mountUse?.mountIds) ? new Set(c.mountUse.mountIds) : null;
+  return use ? all.filter((m) => use.has(m.id) || (keepId && m.id === keepId)) : all;
 }
 
 /** 잡 추가/수정 마법사(시안 ③·⑥) — ① vCenter·VM → ② 저장 대상(법인 저장소) → ③ 스케줄·보존·옵션 → ④ 요약. */
@@ -328,7 +331,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
   const sel = vms.find((v) => v.id === form.vmId);
   const corp = form.vcenterId ? corpOfVc(d, form.vcenterId) : null;
   const nfsDs = (d.nfsDatastores || []).filter((x) => String(x.vcenterId) === String(form.vcenterId));
-  const mounts = form.vcenterId ? mountsFor(d, form.vcenterId) : [];
+  const mounts = form.vcenterId ? mountsFor(d, form.vcenterId, initial.dest?.type === 'nfs' ? initial.dest.mountId : '') : [];
   const kind = form.dest.type === 'nfs' ? 'nfs' : form.dest.nfsDsId ? 'nfsds' : 'datastore';
   const setKind = (k) => setForm({ ...form, dest: k === 'nfs' ? { type: 'nfs', mountId: '', subdir: '' } : k === 'nfsds' ? { type: 'datastore', datastoreName: '', nfsDsId: '' } : { type: 'datastore', datastoreName: '' }, verifyAfter: k === 'nfs' ? false : form.verifyAfter });
   const destReady = kind === 'nfs' ? !!form.dest.mountId : kind === 'nfsds' ? !!form.dest.nfsDsId : !!form.dest.datastoreName;
@@ -352,7 +355,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
   const steps = [
     ['VM 선택', form.vmName ? `${d.vcenterNames?.[form.vcenterId] || form.vcenterId} · ${form.vmName}` : 'vCenter · VM'],
     ['저장 대상', destReady ? (kind === 'nfs' ? '엣지 NFS' : form.dest.datastoreName || nfsDs.find((x) => x.id === form.dest.nfsDsId)?.name || '') : '법인 저장소'],
-    ['스케줄 · 보존', `${scheduleText(form.schedule)} · ${form.keep}개`],
+    ['스케줄 · 보존', `${scheduleText(form.schedule)} · ${keepText(form)}`],
     ['요약', '확인 후 저장'],
   ];
   const canNext = step === 1 ? !!form.vmId : step === 2 ? destReady : true;
@@ -475,6 +478,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   {form.schedule.mode === 'daily' && <label>실행 시각(포탈 시각)<input className="input" type="time" value={form.schedule.time || '02:00'} onChange={(e) => setForm({ ...form, schedule: { ...form.schedule, time: e.target.value } })} /></label>}
                   {form.schedule.mode === 'interval' && <label>간격(시간)<input className="input" type="number" min={1} max={168} value={form.schedule.hours || 24} onChange={(e) => setForm({ ...form, schedule: { ...form.schedule, hours: Number(e.target.value) || 24 } })} /></label>}
                   <label>보존 개수(복원 지점)<input className="input" type="number" min={1} max={30} value={form.keep} onChange={(e) => setForm({ ...form, keep: Number(e.target.value) || 3 })} /></label>
+                  <label title="이보다 오래된 사본도 지웁니다. 가장 최근 1개는 언제나 남깁니다. 0 이면 개수만 봅니다.">보존 기간(일 · 0=개수만)<input className="input" type="number" min={0} max={365} value={form.keepDays || 0} onChange={(e) => setForm({ ...form, keepDays: Math.max(0, Math.min(365, Math.floor(Number(e.target.value)) || 0)) })} /></label>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
                   <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수, 실패 시 잡이 오류로 끝납니다.">
@@ -499,7 +503,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <div className="vbk-kv"><span>VM</span><span>{form.vmName}{sel?.storageGB != null ? ` (${unitText(sel.storageGB, 'GB')})` : ''}</span></div>
                   <div className="vbk-kv"><span>vCenter · 법인</span><span>{d.vcenterNames?.[form.vcenterId] || form.vcenterId} · {corp?.label || '—'}</span></div>
                   <div className="vbk-kv"><span>저장 대상</span><span>{kind === 'nfs' ? `엣지 NFS · ${mountLabel(mounts.find((m) => m.id === form.dest.mountId)) || form.dest.mountId}${form.dest.subdir ? `/${form.dest.subdir}` : ''}` : `${kind === 'nfsds' ? 'ESXi NFS 데이터스토어' : '데이터스토어'} · ${form.dest.datastoreName || nfsDs.find((x) => x.id === form.dest.nfsDsId)?.name || ''}`}</span></div>
-                  <div className="vbk-kv"><span>스케줄 · 보존</span><span>{scheduleText(form.schedule)} · {form.keep}개</span></div>
+                  <div className="vbk-kv"><span>스케줄 · 보존</span><span>{scheduleText(form.schedule)} · {keepText(form)}</span></div>
                   <div className="vbk-kv"><span>옵션</span><span>{[form.quiesce ? '정지점' : '크래시 정합', kind !== 'nfs' && form.verifyAfter ? '자동 검증' : '', form.enabled === false ? '비활성' : ''].filter(Boolean).join(' · ')}</span></div>
                   <div className="vbk-kv"><span>사본 상태</span><span>꺼진 상태로 생성</span></div>
                 </div>

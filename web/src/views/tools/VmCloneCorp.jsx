@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import { requireChanged } from '../changeResult.js';
@@ -10,8 +10,10 @@ import { corpCards, agoText, fmtBytes } from './vmCloneView.js';
  * VM 백업 센터 › 법인 저장소(시안 ⑤, v2.793).
  *  - 법인 = vCenter 를 수집하는 엣지(중앙 직접 수집은 '중앙'). 백업은 그 엣지가 실행한다.
  *  - ESXi NFS 데이터스토어: NFS 를 그 법인 ESXi 호스트에 데이터스토어로 붙인다(호스트 설정 변경 — 호스트별 결과·실패만 다시 시도).
- *    ESXi 에서 떼어 내는 기능은 없다(사본이 남아 있을 수 있다) — 삭제는 이 목록에서만 지운다.
+ *    v2.794 떼어 내기: 연결 기록이 있는 호스트에서 뗀다(그 데이터스토어를 쓰는 잡이 있으면 서버가 거부, 호스트의 VM 이 쓰면 그 호스트는 실행 노드가 거부).
+ *    '목록에서 삭제' 는 정의만 지운다(ESXi 데이터스토어는 그대로).
  *  - 엣지 NFS 마운트: 그 엣지가 보고한 목록(등록·해제는 그 노드의 설정 › NFS 마운트). 범위 계정·데모 계정에는 주소를 가린다.
+ *    v2.794 '백업에 사용' 지정: 켠 마운트만 잡 마법사에 보이고 서버도 그 마운트만 받는다(지정이 없으면 전부 — 이전 판 동작).
  */
 export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
   const corps = useMemo(() => d.corps || [], [d.corps]);
@@ -21,6 +23,9 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
   const card = cards.find((x) => x.key === c?.key);
   const [msg, setMsg] = useState(null);
   const [busyId, setBusyId] = useState('');
+  // v2.794 '백업에 사용' 초안 — null 이면 서버 값 그대로(지정 없음 = 전부).
+  const [useDraft, setUseDraft] = useState(null);
+  useEffect(() => { setUseDraft(null); }, [c?.key, c?.mountUse?.at]);
 
   if (!c) return (
     <div className="vbk"><div className="vbk-crumb"><button type="button" onClick={onBack}>VM 백업</button> › 법인 저장소</div><div className="muted">조회 범위에 vCenter 가 없습니다.</div></div>
@@ -28,8 +33,32 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
   const vcIds = new Set(c.vcenterIds || []);
   const items = (d.nfsDatastores || []).filter((x) => vcIds.has(String(x.vcenterId)));
   const mounts = c.agent ? (c.edge?.mounts || []) : (d.mounts || []);
-  const nfsOps = (d.ops || []).filter((o) => o.kind === 'nfsds-attach' && vcIds.has(String(o.vcenterId)));
+  const nfsOps = (d.ops || []).filter((o) => (o.kind === 'nfsds-attach' || o.kind === 'nfsds-detach') && vcIds.has(String(o.vcenterId)));
   const writable = new Set(c.writable || []);
+  const corpEditable = c.key !== 'unassigned' && (c.vcenterIds || []).length > 0 && (c.vcenterIds || []).every((id) => writable.has(String(id)));
+  const savedUse = Array.isArray(c.mountUse?.mountIds) ? new Set(c.mountUse.mountIds) : null;
+  const useSet = useDraft || savedUse || new Set(mounts.map((m) => m.id));
+  const useDirty = !!useDraft;
+  const saveUse = async (ids) => {
+    setBusyId('mount-use'); setMsg(null);
+    try {
+      const r = await putJson('/tools/vm-clone/corps/mounts', { corpKey: c.key, mountIds: ids });
+      if (r.ok === false) { setMsg(`저장 불가: ${r.reason}`); return; }
+      setMsg(ids == null ? '지정을 해제했습니다 — 이 법인의 모든 마운트를 백업 대상으로 고를 수 있습니다.' : `백업에 쓸 마운트 ${ids.length}개를 저장했습니다. 이미 저장된 잡은 그대로 돕니다.`);
+      setUseDraft(null);
+      await onReload();
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusyId(''); }
+  };
+  const detach = async (it) => {
+    const attached = Object.entries(it.hosts || {}).filter(([, h]) => h.ok).length;
+    if (!window.confirm(`'${it.name}' 을 ESXi 호스트 ${attached}대에서 떼어 낼까요?\n· 이 데이터스토어를 대상으로 쓰는 백업 잡이 있으면 거부합니다.\n· 그 호스트의 VM(백업 사본·복구 VM)이 쓰고 있으면 그 호스트는 떼지 않습니다.\n· NFS 서버의 파일은 지우지 않습니다.`)) return;
+    setBusyId(it.id); setMsg(null);
+    try {
+      const r = await postJson(`/tools/vm-clone/nfs-datastores/${encodeURIComponent(it.id)}/detach`, {});
+      setMsg(r.ok ? `떼어 내기를 ${r.where === 'edge' ? `담당 엣지(${r.agent})로 보냈습니다` : '실행 큐에 넣었습니다'} — 호스트별 결과는 표에 나옵니다.` : `떼어 낼 수 없습니다: ${r.reason}`);
+      await onReload();
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusyId(''); }
+  };
 
   const retry = async (it) => {
     setBusyId(it.id); setMsg(null);
@@ -43,7 +72,7 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusyId(''); }
   };
   const forget = async (it) => {
-    if (!window.confirm(`'${it.name}' 정의를 목록에서 지울까요?\n(ESXi 호스트의 데이터스토어와 그 안의 사본은 그대로입니다 — 떼어 내려면 vCenter 에서 직접)`)) return;
+    if (!window.confirm(`'${it.name}' 정의를 목록에서 지울까요?\n(ESXi 호스트의 데이터스토어와 그 안의 사본은 그대로입니다 — 호스트에서 떼려면 먼저 '떼어 내기')`)) return;
     setBusyId(it.id); setMsg(null);
     try { requireChanged(await delJson(`/tools/vm-clone/nfs-datastores/${encodeURIComponent(it.id)}`)); await onReload(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusyId(''); }
@@ -120,19 +149,23 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
                     return (
                       <tr key={it.id}>
                         <td data-sort={it.name}><div style={{ fontWeight: 600 }}>{it.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{d.vcenterNames?.[it.vcenterId] || it.vcenterId}{usedBy ? ` · 잡 ${usedBy}개가 사용` : ''}</div></td>
-                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{it.server}:{it.exportPath} · NFS {it.nfsVersion}</td>
+                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{it.server}:{it.exportPath} · NFS {it.nfsVersion}</td>
                         <td data-sort={it.hostsOk}>
                           <div className="flex" style={{ alignItems: 'center', gap: 8 }}>
                             <div className="vbk-bar" style={{ width: 90 }}><b style={{ width: `${pct}%`, background: it.hostsOk === it.hostsTotal && it.hostsTotal ? 'var(--green)' : 'var(--amber)' }} /></div>
                             <span>{it.hostsOk} / {it.hostsTotal}</span>
                           </div>
-                          {running && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }}>{running.where === 'edge' && running.state === 'pending' ? `담당 엣지 ${running.agent} 가져가기 대기` : '연결 중'}</div>}
-                          {!running && failed.length > 0 && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }} title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
+                          {running && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }}>{running.where === 'edge' && running.state === 'pending' ? `담당 엣지 ${running.agent} 가져가기 대기` : running.kind === 'nfsds-detach' ? '떼어 내는 중' : '연결 중'}</div>}
+                          {/* v2.794: 사유가 길면 줄바꿈(최대 2줄) — 예전엔 한 줄로 늘어나 1440px 에서도 '작업' 열이 화면 밖으로 밀렸다. 전체 사유는 title. */}
+                          {!running && failed.length > 0 && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3, maxWidth: 300, whiteSpace: 'normal', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
                         </td>
                         <td style={{ textAlign: 'right' }} data-sort={it.freeGB ?? ''}>{it.freeGB != null && it.capacityGB != null ? `${fmtBytes(it.freeGB * 1024 ** 3)} / ${fmtBytes(it.capacityGB * 1024 ** 3)}` : '—'}</td>
-                        <td className="right" style={{ whiteSpace: 'nowrap' }}>
-                          <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
-                          {' '}<button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
+                        <td className="right">
+                          <div className="flex wrap" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
+                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId)) || !it.hostsOk || usedBy > 0} title={usedBy > 0 ? `이 데이터스토어를 쓰는 잡 ${usedBy}개 — 대상을 바꾼 뒤 떼어 낼 수 있습니다` : !it.hostsOk ? '연결된 호스트가 없습니다' : ''} onClick={() => detach(it)}>떼어 내기</button>
+                            <button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -152,11 +185,12 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
             </div>
             <div style={{ overflowX: 'auto' }}>
               <STable minWidth={560}>
-                <thead><tr><th>마운트</th><th>상태</th><th style={{ textAlign: 'right' }}>여유 / 전체</th></tr></thead>
+                <thead><tr><th data-nosort style={{ width: 90 }}>백업에 사용</th><th>마운트</th><th>상태</th><th style={{ textAlign: 'right' }}>여유 / 전체</th></tr></thead>
                 <tbody>
-                  {mounts.length === 0 && <tr><td colSpan={3} className="center muted" style={{ padding: 18 }}>{c.agent && !c.edge ? '엣지 보고 없음' : '마운트가 없습니다'}</td></tr>}
+                  {mounts.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>{c.agent && !c.edge ? '엣지 보고 없음' : '마운트가 없습니다'}</td></tr>}
                   {mounts.map((m) => (
                     <tr key={m.id}>
+                      <td><label className="flex" style={{ alignItems: 'center', gap: 6 }}><input type="checkbox" aria-label={`${mountLabel(m) || m.label} 백업에 사용`} disabled={!corpEditable || busyId === 'mount-use'} checked={useSet.has(m.id)} onChange={(e) => { const n = new Set(useSet); if (e.target.checked) n.add(m.id); else n.delete(m.id); setUseDraft(n); }} />{useSet.has(m.id) ? '사용' : <span className="muted">안 씀</span>}</label></td>
                       <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{mountLabel(m) || m.label}</td>
                       <td>{m.mounted ? <span className="vbk-chip ok">마운트됨</span> : <span className="vbk-chip warn">미마운트</span>}</td>
                       <td style={{ textAlign: 'right' }} data-sort={m.freeBytes ?? ''}>{m.freeBytes != null && m.totalBytes != null ? `${fmtBytes(m.freeBytes)} / ${fmtBytes(m.totalBytes)}` : '—'}</td>
@@ -164,6 +198,16 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
                   ))}
                 </tbody>
               </STable>
+            </div>
+            <div className="bd flex wrap" style={{ gap: 8, alignItems: 'center', borderTop: '1px solid var(--border-soft)' }}>
+              <div className="muted" style={{ flex: '1 1 260px', minWidth: 0, fontSize: 12 }}>
+                {d.corpMountsError ? <span style={{ color: 'var(--amber)' }}>⚠ {d.corpMountsError}</span>
+                  : savedUse ? `지정됨 — ${savedUse.size}개만 잡 대상으로 고를 수 있습니다${c.mountUse?.by ? `(${c.mountUse.by}, ${agoText(c.mountUse.at, now)})` : ''}. 이미 저장된 잡은 그대로 돕니다.`
+                    : '지정 없음 — 이 법인의 모든 마운트를 잡 대상으로 고를 수 있습니다.'}
+                {!corpEditable && ' 이 법인의 vCenter 를 모두 수정할 수 있는 계정만 바꿀 수 있습니다.'}
+              </div>
+              {corpEditable && savedUse && <button type="button" className="vbk-btn sm" disabled={busyId === 'mount-use'} onClick={() => saveUse(null)}>지정 해제(전부 사용)</button>}
+              {corpEditable && <button type="button" className="vbk-btn sm primary" disabled={busyId === 'mount-use' || !useDirty} onClick={() => saveUse([...useSet])}>사용 지정 저장</button>}
             </div>
           </div>
         </div>

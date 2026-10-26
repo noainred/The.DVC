@@ -138,6 +138,8 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vm-clone/nfs-datastores': 'accessOf — 대상 vCenter 조회 404 · 쓰기 403(v2.793)',
   'POST /api/tools/vm-clone/nfs-datastores/:id/attach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
   'DELETE /api/tools/vm-clone/nfs-datastores/:id': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores/:id/detach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.794)',
+  'PUT /api/tools/vm-clone/corps/mounts': 'scopedVcenterIds·inUserWriteScope — 법인 vCenter 조회 404 · 전부 쓰기 아니면 403(v2.794)',
 });
 
 /**

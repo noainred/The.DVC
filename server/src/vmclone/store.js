@@ -13,6 +13,7 @@
  *           mountId?, subdir? },                     // nfs: 설정 › NFS 마운트 의 항목 id + 하위 경로
  *   schedule: { mode:'manual'|'daily'|'interval', time?:'HH:MM', hours?:N },
  *   keep: N,                                        // 보존 개수(1~30)
+ *   keepDays?: N,                                   // v2.794 보존 기간(일, 1~365) — 이보다 오래된 사본도 지운다(가장 최근 1개는 언제나 남긴다)
  *   quiesce: bool,                                  // 정지점 스냅샷(VMware Tools VSS/freeze) 경유 — 앱 정합
  *   enabled: bool,
  *   clones: [{ name, ref, at }],                    // 우리가 만든 datastore 클론 원장 — ⚠ 보존정책은
@@ -95,6 +96,8 @@ function persist() {
 function persistByAdmin() { writeFile(); _loadErr.ok(); _heldWarned = false; }
 
 const clampKeep = (n) => Math.max(1, Math.min(30, Math.floor(Number(n)) || 3));
+/** v2.794 보존 기간(일) — 0(또는 무효) = 끔, 1~365. */
+export const clampKeepDays = (n) => { const v = Math.floor(Number(n)); return Number.isFinite(v) && v > 0 ? Math.min(365, v) : 0; };
 
 /** 스케줄 정규화 — 무효값은 manual(자동 실행 없음)로. time 은 'HH:MM' 24시간제. */
 function normSchedule(s = {}) {
@@ -140,6 +143,7 @@ export function normalizeJobDef(input = {}) {
     vcenterId, vmId, vmName, dest,
     schedule: normSchedule(input.schedule),
     keep: clampKeep(input.keep),
+    keepDays: clampKeepDays(input.keepDays),
     quiesce: !!input.quiesce,
     enabled: input.enabled !== false,
     // 검증은 vCenter 에 등록된 사본(데이터스토어 대상)만 켤 수 있다 — NFS 파일 사본은 켤 VM 이 없다.
@@ -182,6 +186,7 @@ export function saveJob(input = {}) {
   });
   if (!job.demo) delete job.demo;
   if (!job.verifyAfter) delete job.verifyAfter;
+  if (!job.keepDays) delete job.keepDays;
   if (!existing) {
     if (db.jobs.length >= MAX_JOBS) throw new Error(`복제 잡은 최대 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
     // 같은 VM 에 잡 중복 금지 — 같은 VM 을 두 잡이 스냅샷/클론하면 서로 간섭한다.
@@ -197,6 +202,8 @@ export function deleteJob(id) {
   const i = db.jobs.findIndex((j) => j.id === id);
   if (i < 0) return false;
   if (isDelegatedJob(db.jobs[i])) throw new Error('중앙에서 위임한 잡입니다 — 중앙 포탈의 VM 백업 화면에서 지우세요.');
+  // v2.794: 중단된 검증의 뒷정리(켜진 사본 끄기·검증용 스냅샷 되돌리기)가 남은 잡은 지우지 않는다 — 지우면 그 기록이 사라져 아무도 정리하지 않는다.
+  if (db.jobs[i].verifying) throw new Error('검증이 진행 중이거나 재시작으로 중단된 검증의 뒷정리가 남아 있습니다 — 끝난 뒤 지우세요(정리를 못 하면 6시간 뒤 기록을 내리고 수동 정리를 안내합니다).');
   // 잡 삭제는 정의만 지운다 — 만들어 둔 클론 VM/NFS 사본은 남긴다(백업을 지우는 파괴 행위는
   // 사용자가 vCenter/NAS 에서 직접, 또는 보존정책이 잡이 살아있는 동안만 수행).
   db.jobs.splice(i, 1);
@@ -231,23 +238,26 @@ export function applyDelegatedJobs(defs, ownedVcenterIds) {
     if (clash) { out.conflicts.push(`${def.vmName}: 이 노드에 같은 VM 의 잡(${clash.id})이 있어 받지 않았습니다`); continue; }
     if (!cur) {
       if (db.jobs.length >= MAX_JOBS) { out.invalid.push(`${id}: 잡 상한(${MAX_JOBS}) 초과`); continue; }
-      db.jobs.push({ id, ...def, origin: 'central', clones: [], lastRun: null, createdAt: Date.now() });
+      const nj = { id, ...def, origin: 'central', clones: [], lastRun: null, createdAt: Date.now() };
+      if (!nj.keepDays) delete nj.keepDays;
+      db.jobs.push(nj);
       out.added++; dirty = true;
       continue;
     }
     if (cur.suspended) { delete cur.suspended; out.resumed = (out.resumed || 0) + 1; dirty = true; }   // 담당이 돌아왔다(F3)
-    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter]);
-    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter]);
+    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter, cur.keepDays || 0]);
+    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter, def.keepDays]);
     if (before !== after) {
       Object.assign(cur, def);
       if (!cur.verifyAfter) delete cur.verifyAfter;
+      if (!cur.keepDays) delete cur.keepDays;
       out.updated++; dirty = true;
     }
   }
   for (let i = db.jobs.length - 1; i >= 0; i--) {
     const j = db.jobs[i];
     if (!isDelegatedJob(j) || seen.has(j.id) || !owned.has(String(j.vcenterId))) continue;
-    if (j.running) continue;   // 실행 중(또는 재시작 정리 대기) 기록이 남은 잡은 정리가 끝날 때까지 둔다 — 스냅샷이 남는다
+    if (j.running || j.verifying) continue;   // 실행·검증 중(또는 재시작 정리 대기) 기록이 남은 잡은 정리가 끝날 때까지 둔다 — 스냅샷이 남는다
     db.jobs.splice(i, 1); out.removed++; dirty = true;
   }
   if (dirty) persist();
@@ -337,6 +347,76 @@ export function markInterruptedRuns(now = Date.now()) {
   return n;
 }
 
+// ── v2.794 검증 진행 기록(재시작으로 중단된 검증의 뒷정리) ─────────────────────────
+// 검증은 사본에 검증용 스냅샷을 만들고 NIC 를 끊은 채 켠다. 그 사이 재시작이 오면 사본이 **켜진 채·스냅샷이 남은 채** 남는다
+// (켜졌던 동안의 쓰기가 복원 지점에 남고, 보존정책은 켜진 사본을 지우지 않는다). 그래서 스냅샷을 요청하기 **전에** 동기로 남기고,
+// 다음 기동이 그 기록으로 '끄기 → 되돌리기 → 스냅샷 삭제' 를 한다(vsOps.cleanupInterruptedVerify). 보류에는 시한(RECOVER_GIVE_UP_MS).
+const VERIFY_STR_KEYS = ['ref', 'cloneName', 'snapName', 'snapRef', 'phase', 'lastError'];
+const VERIFY_NUM_KEYS = ['at', 'detectedAt', 'tries', 'nextAt'];
+function cleanVerifying(rec) {
+  const out = {};
+  for (const k of VERIFY_STR_KEYS) if (typeof rec?.[k] === 'string' && rec[k]) out[k] = rec[k].slice(0, 300);
+  for (const k of VERIFY_NUM_KEYS) { const n = Number(rec?.[k]); if (rec?.[k] != null && rec[k] !== '' && Number.isFinite(n)) out[k] = n; }
+  if (typeof rec?.boot === 'string') out.boot = rec.boot.slice(0, 80);
+  return out;
+}
+/** 검증 시작 기록(vsOps 전용) — 이 프로세스 표지와 시작 시각을 붙여 동기로 쓴다. */
+export function setVerifying(id, rec = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j) return;
+  j.verifying = cleanVerifying({ ...rec, at: Date.now(), boot: BOOT_ID });
+  persist();
+}
+/** 검증 기록 갱신. 기본은 이 프로세스의 기록만 — anyBoot 면 이전 프로세스의 기록도(정리 재시도 표지). */
+export function patchVerifying(id, patch = {}, { anyBoot = false } = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j?.verifying || (!anyBoot && j.verifying.boot !== BOOT_ID)) return;
+  j.verifying = cleanVerifying({ ...j.verifying, ...patch, boot: j.verifying.boot });
+  persist();
+}
+/** 검증 기록 지우기. 기본은 이 프로세스의 기록만(이전 프로세스의 기록은 정리가 끝났을 때만 anyBoot 로). */
+export function clearVerifying(id, { anyBoot = false } = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j?.verifying || (!anyBoot && j.verifying.boot !== BOOT_ID)) return;
+  delete j.verifying;
+  persist();
+}
+/** 이 프로세스의 검증이 뒷정리(끄기·되돌리기·스냅샷 삭제)를 끝내지 못했다 — 재시도 기록으로 넘긴다(다음 확인이 다시 정리한다). */
+export function handOffVerifying(id, patch = {}) {
+  const j = load().jobs.find((x) => x.id === id);
+  if (!j?.verifying || j.verifying.boot !== BOOT_ID) return;
+  const now = Date.now();
+  j.verifying = cleanVerifying({ ...j.verifying, ...patch, boot: 'cleanup-retry', detectedAt: now, tries: 0 });
+  persist();
+}
+/**
+ * 기동 때 1회(scheduler) — 이전 프로세스가 끝내지 못한 검증을 이력에 남긴다(화면이 말하게). 이미 남긴 기록(detectedAt)은 다시 쓰지 않는다.
+ * @returns 새로 찾은 개수
+ */
+export function markInterruptedVerifies(now = Date.now()) {
+  let n = 0;
+  for (const j of load().jobs) {
+    const r = interruptedVerifyOf(j);
+    if (!r || r.detectedAt) continue;
+    r.detectedAt = now;
+    pushHistory(j, { at: now, kind: 'verify', ok: false, skipped: 'restart-interrupted', ms: 0, trigger: 'restart',
+      detail: `업그레이드·서비스 재시작으로 사본 ‘${r.cloneName || r.ref || '?'}’ 검증이 중단됐습니다 — 곧 사본을 끄고 검증 전 상태로 되돌린 뒤 검증용 스냅샷을 지웁니다.`.slice(0, 300) });
+    n++;
+  }
+  if (n) persist();
+  return n;
+}
+/** 이전 프로세스가 끝내지 못한 검증 기록(없으면 null). */
+export function interruptedVerifyOf(job) {
+  const r = job?.verifying;
+  return r && typeof r === 'object' && r.boot !== BOOT_ID ? r : null;
+}
+/** 중단된 검증의 정리를 지금 시도할 차례인가(잡이 꺼져 있어도 한다 — 켜진 사본은 꺼진 잡과 무관하게 위험하다). */
+export function verifyCleanupDue(job, now = Date.now()) {
+  const r = interruptedVerifyOf(job);
+  return !!r && !(Number(r.nextAt) > now);
+}
+
 /** 단계 기록 정규화 — [{n: 단계 이름, ms}] 최대 12개(화면의 세션 타임라인). */
 function cleanPhases(list) {
   const out = [];
@@ -405,12 +485,12 @@ export function patchClone(id, ref, patch = {}) {
 }
 
 /** 검증·복구 결과를 잡 이력에 남긴다(lastRun 은 건드리지 않는다 — 스케줄 판정 보호). */
-export function recordJobEvent(id, { kind, ok, detail, ms = 0, trigger = '', phases = null, at = null }) {
+export function recordJobEvent(id, { kind, ok, detail, ms = 0, trigger = '', phases = null, at = null, skipped = '' }) {
   const j = load().jobs.find((x) => x.id === id);
   if (!j || !['verify', 'restore'].includes(kind)) return;
   const ph = cleanPhases(phases);
   pushHistory(j, { at: Number(at) > 0 ? Number(at) : Date.now(), kind, ok: !!ok, detail: String(detail || '').slice(0, 300), ms: Math.max(0, Math.round(Number(ms) || 0)),
-    ...(trigger ? { trigger: String(trigger).slice(0, 20) } : {}), ...(ph.length ? { phases: ph } : {}) });
+    ...(trigger ? { trigger: String(trigger).slice(0, 20) } : {}), ...(skipped ? { skipped: String(skipped).slice(0, 40) } : {}), ...(ph.length ? { phases: ph } : {}) });
   persist();
 }
 
@@ -458,11 +538,18 @@ export function isDue(job, now = Date.now()) {
   return false;
 }
 
-/** 보존 대상 계산(순수) — keep 개를 남기고 오래된 것부터 삭제 목록으로. */
-export function pruneList(clones, keep) {
+/**
+ * 보존 대상 계산(순수) — keep 개를 남기고 오래된 것부터 삭제 목록으로.
+ * v2.794: keepDays(일)가 있으면 그보다 오래된 사본도 넣는다 — 단 **가장 최근 1개는 언제나 남긴다**(백업이 몇 주 실패해도 마지막 사본은 지우지 않는다).
+ *   시각(at)을 모르는 사본은 기간으로 지우지 않는다(개수 규칙만).
+ */
+export function pruneList(clones, keep, keepDays = 0, now = Date.now()) {
   const sorted = [...(clones || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-  const excess = sorted.length - clampKeep(keep);
-  return excess > 0 ? sorted.slice(0, excess) : [];
+  const excess = Math.max(0, sorted.length - clampKeep(keep));
+  const days = clampKeepDays(keepDays);
+  if (!days) return sorted.slice(0, excess);
+  const cutoff = now - days * 86_400_000;
+  return sorted.filter((c, i) => i < excess || (i < sorted.length - 1 && Number(c.at) > 0 && Number(c.at) < cutoff));
 }
 
 /** 트리 배지용 — vCenter 의 복제 잡 대상 vmId 목록(뷰가 'Clone' 아이콘 표시). */

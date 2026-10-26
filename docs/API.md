@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1066개** |
+| 엔드포인트 | **1068개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 107개 |
 | GET | 573개 |
-| POST | 332개 |
-| PUT | 104개 |
+| POST | 333개 |
+| PUT | 105개 |
 | PATCH | 2개 |
 | DELETE | 55개 |
 
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 493 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 495 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1125,16 +1125,18 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/vm-changes` | 권한 `tools` | [server/src/routes/api/vmChanges.js:55](../server/src/routes/api/vmChanges.js#L55) |
 | GET | `/tools/vm-changes.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmChanges.js:91](../server/src/routes/api/vmChanges.js#L91) |
 | GET | `/tools/vm-changes/of` | 권한 `tools` | [server/src/routes/api/vmChanges.js:68](../server/src/routes/api/vmChanges.js#L68) |
-| GET | `/tools/vm-clone` | 역할 `admin` | [server/src/routes/api/vmClone.js:149](../server/src/routes/api/vmClone.js#L149) |
-| GET | `/tools/vm-clone/badges` | 권한 `tools` | [server/src/routes/api/vmClone.js:375](../server/src/routes/api/vmClone.js#L375) |
-| POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:203](../server/src/routes/api/vmClone.js#L203) |
-| DELETE | `/tools/vm-clone/jobs/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:266](../server/src/routes/api/vmClone.js#L266) |
-| POST | `/tools/vm-clone/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/vmClone.js:315](../server/src/routes/api/vmClone.js#L315) |
-| POST | `/tools/vm-clone/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/vmClone.js:280](../server/src/routes/api/vmClone.js#L280) |
-| POST | `/tools/vm-clone/jobs/:id/verify` | 역할 `admin` | [server/src/routes/api/vmClone.js:301](../server/src/routes/api/vmClone.js#L301) |
-| POST | `/tools/vm-clone/nfs-datastores` | 역할 `admin` | [server/src/routes/api/vmClone.js:331](../server/src/routes/api/vmClone.js#L331) |
-| DELETE | `/tools/vm-clone/nfs-datastores/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:361](../server/src/routes/api/vmClone.js#L361) |
-| POST | `/tools/vm-clone/nfs-datastores/:id/attach` | 역할 `admin` | [server/src/routes/api/vmClone.js:348](../server/src/routes/api/vmClone.js#L348) |
+| GET | `/tools/vm-clone` | 역할 `admin` | [server/src/routes/api/vmClone.js:151](../server/src/routes/api/vmClone.js#L151) |
+| GET | `/tools/vm-clone/badges` | 권한 `tools` | [server/src/routes/api/vmClone.js:424](../server/src/routes/api/vmClone.js#L424) |
+| PUT | `/tools/vm-clone/corps/mounts` | 역할 `admin` | [server/src/routes/api/vmClone.js:374](../server/src/routes/api/vmClone.js#L374) |
+| POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:207](../server/src/routes/api/vmClone.js#L207) |
+| DELETE | `/tools/vm-clone/jobs/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:276](../server/src/routes/api/vmClone.js#L276) |
+| POST | `/tools/vm-clone/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/vmClone.js:325](../server/src/routes/api/vmClone.js#L325) |
+| POST | `/tools/vm-clone/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/vmClone.js:290](../server/src/routes/api/vmClone.js#L290) |
+| POST | `/tools/vm-clone/jobs/:id/verify` | 역할 `admin` | [server/src/routes/api/vmClone.js:311](../server/src/routes/api/vmClone.js#L311) |
+| POST | `/tools/vm-clone/nfs-datastores` | 역할 `admin` | [server/src/routes/api/vmClone.js:341](../server/src/routes/api/vmClone.js#L341) |
+| DELETE | `/tools/vm-clone/nfs-datastores/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:410](../server/src/routes/api/vmClone.js#L410) |
+| POST | `/tools/vm-clone/nfs-datastores/:id/attach` | 역할 `admin` | [server/src/routes/api/vmClone.js:358](../server/src/routes/api/vmClone.js#L358) |
+| POST | `/tools/vm-clone/nfs-datastores/:id/detach` | 역할 `admin` | [server/src/routes/api/vmClone.js:394](../server/src/routes/api/vmClone.js#L394) |
 | GET | `/tools/vm-dns` | 권한 `tools` | [server/src/routes/api/vmDns.js:128](../server/src/routes/api/vmDns.js#L128) |
 | GET | `/tools/vm-dns.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmDns.js:220](../server/src/routes/api/vmDns.js#L220) |
 | GET | `/tools/vm-dns/changes` | 권한 `tools` | [server/src/routes/api/vmDns.js:167](../server/src/routes/api/vmDns.js#L167) |

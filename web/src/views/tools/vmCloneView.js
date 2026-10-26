@@ -9,6 +9,7 @@
  *  · 건너뛴 실행(인증 정지·데모·위임·재시작 정리)은 성공도 실패도 아니다(skip).
  *  · 엣지 위임 잡의 실행 상태는 엣지가 보고한 것이다 — 보고가 없으면 '보고 없음' 이라 말하고 0 으로 칠하지 않는다.
  */
+import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 const DAY = 86_400_000;
 
@@ -175,12 +176,17 @@ export function recentSessions(jobs, ops, limit = 8) {
   }
   for (const o of Array.isArray(ops) ? ops : []) {
     if (o.state !== 'done') out.push({ at: o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: 'running', detail: `${o.label || o.kind} — ${o.where === 'edge' ? `담당 엣지 ${o.agent} ${o.state === 'pending' ? '가져가기 대기' : '실행 중'}` : '실행 중'}`, ms: 0, jobId: o.jobId || '' });
-    else if (o.kind === 'nfsds-attach' || o.kind === 'run') out.push({ at: o.doneAt || o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: o.ok ? 'ok' : 'fail', detail: o.detail || '', ms: 0, jobId: o.jobId || '' });
+    else if (o.kind === 'nfsds-attach' || o.kind === 'nfsds-detach' || o.kind === 'run') out.push({ at: o.doneAt || o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: o.ok ? 'ok' : 'fail', detail: o.detail || '', ms: 0, jobId: o.jobId || '' });
   }
   return out.sort((a, b) => b.at - a.at).slice(0, limit);
 }
 
-export const KIND_LABEL = Object.freeze({ backup: '백업', verify: '검증', restore: '복구', run: '지금 실행', 'nfsds-attach': 'NFS 연결' });
+export const KIND_LABEL = Object.freeze({ backup: '백업', verify: '검증', restore: '복구', run: '지금 실행', 'nfsds-attach': 'NFS 연결', 'nfsds-detach': 'NFS 떼어 내기' });
+/** 보존 정책 문구 — '7개' · '7개 · 30일'(v2.794 보존 기간). */
+export const keepText = (j) => `${Number(j?.keep) || 0}개${Number(j?.keepDays) > 0 ? ` · ${Number(j.keepDays)}일` : ''}`;
+/** 실행 사유 표시 — 모르는 값은 그대로(지어내지 않는다). */
+export const TRIGGER_LABEL = Object.freeze({ schedule: '스케줄', auto: '자동', manual: '수동', resume: '재시작 뒤 재실행', restart: '재시작 정리' });
+export const triggerText = (t) => TRIGGER_LABEL[t] || String(t || '');
 
 /** 저장 위치별 사용량 — 잡 대상(데이터스토어 이름·엣지 마운트) 별 사본 바이트 합 + 인벤토리 용량. */
 export function storageRows(jobs, datastores, nfsDs) {
@@ -224,4 +230,23 @@ export function phaseRows(entry, running = null) {
   const rows = (Array.isArray(entry?.phases) ? entry.phases : []).map((p) => ({ name: p.n, ms: p.ms, state: p.ok === false ? 'fail' : 'done' }));
   if (running?.phase) rows.push({ name: running.phase, ms: null, state: 'running' });
   return rows;
+}
+
+/** v2.794 이력 필터 — all · backup · verify · restore · fail(실패만 — 건너뜀 제외). 순서는 그대로. */
+export const HISTORY_FILTERS = Object.freeze([['all', '전체'], ['backup', '백업'], ['verify', '검증'], ['restore', '복구'], ['fail', '실패만']]);
+export function historyFilter(list, f = 'all') {
+  const xs = Array.isArray(list) ? list : [];
+  if (f === 'fail') return xs.filter((h) => runTone(h) === 'fail');
+  if (f === 'backup' || f === 'verify' || f === 'restore') return xs.filter((h) => (h.kind || 'backup') === f);
+  return xs;
+}
+/** v2.794 이력 CSV(순수) — 시각은 ISO(표계산이 읽는다) · 단계는 '이름 초' 를 ' > ' 로 잇는다. 값이 없으면 빈 칸. */
+export function historyCsv(job, list) {
+  const head = ['시각', 'VM', 'vCenter', '종류', '사유(실행)', '결과', '건너뜀', '소요(초)', '단계', '내용'];
+  const lines = (Array.isArray(list) ? list : []).map((h) => [
+    h.at ? new Date(h.at).toISOString() : '', job?.vmName || '', job?.vcenterId || '', KIND_LABEL[h.kind || 'backup'] || h.kind || '',
+    h.trigger ? triggerText(h.trigger) : '', h.skipped ? '건너뜀' : h.ok ? '성공' : '실패', h.skipped || '',
+    Number(h.ms) > 0 ? Math.round(h.ms / 1000) : '', (h.phases || []).map((p) => `${p.n} ${Math.round((Number(p.ms) || 0) / 1000)}s${p.ok === false ? '(실패)' : ''}`).join(' > '), h.detail || '',
+  ]);
+  return [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
 }
