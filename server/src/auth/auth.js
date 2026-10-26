@@ -1095,6 +1095,13 @@ const AUTH_DISABLED_ROLE = ['admin', 'operator', 'viewer'].includes(process.env.
 
 /** 인증 비활성(AUTH_ENABLED=false) 환경에서 검사에 쓰는 대체 역할. 라우터 게이트가 공유한다(v2.447). */
 export function authDisabledRole() { return AUTH_DISABLED_ROLE; }
+/**
+ * 도구 게이트가 판정에 쓰는 사용자(username·role) — 인증 비활성이면 대체 역할만(사용자 없음). v2.787: routes/api.js toolGate 와
+ * 화면 안에서 '다른 도구 데이터' 를 싣는지 정하는 곳(Veeam Summary 의 우선순위 VM = Detail 도구 데이터)이 같은 함수를 쓴다(사본 금지).
+ */
+export function toolActorOf(req) {
+  return { username: (config.auth.enabled && req?.user && req.user.username) || '', role: !config.auth.enabled ? AUTH_DISABLED_ROLE : (req?.user && req.user.role) };
+}
 if (!config.auth.enabled) {
   console.warn(`[auth] ⚠ 인증이 비활성(AUTH_ENABLED=false) — 모든 요청이 익명 '${AUTH_DISABLED_ROLE}' 권한으로 처리됩니다. 운영 환경에서는 인증을 켜거나 AUTH_DISABLED_ROLE=viewer 로 제한하세요.`);
 }

@@ -407,3 +407,71 @@ export function snapCell(vm, days = 7) {
   if (s.ev) return { text: `${days}일 ${Number.isInteger(s.ev.n) ? `${s.ev.n}회` : '시도'}`, tone: 'ev' };
   return { text: '—', tone: 'none' };
 }
+
+/* ── v2.787 Veeam 백업 현황 Summary — 바로가기 · 법인별 표 · 우선순위 VM(사용자 요청 + 시안) ─────────── */
+
+/** 바로가기 칩 점 색 — 읽기 실패(빨강) · 주의 필요(주황) · 연동 없음(회색) · 정상(초록). 판정은 needsAttention 하나(표의 '주의 필요' 보기와 같다). */
+export function quickTone(r) {
+  if (!r) return 'muted';
+  if (r.veeamState === 'veeam-failed' || r.veeamState === 'registry-unreadable') return 'bad';
+  if (needsAttention(r)) return 'warn';
+  if (r.veeamState === 'unlinked') return 'muted';
+  return 'ok';
+}
+export const QUICK_DOT = { bad: '#ef4444', warn: '#f59e0b', muted: '#64748b', ok: '#22c55e' };
+
+/** 커버리지 막대 조각(%) — 둘 다 · Veeam 만 · 스냅샷만(나머지는 확인 안 됨). 나눔을 모르면 null(막대를 그리지 않는다). */
+export function coverageOf(r) {
+  const s = r?.split; const vm = r?.vm;
+  if (!s || !(typeof vm === 'number' && vm > 0)) return null;
+  const p = (n) => Math.round((n / vm) * 1000) / 10;
+  return { both: p(s.both), vOnly: p(s.vOnly), sOnly: p(s.sOnly), none: p(s.none) };
+}
+
+export const SORTS = [['attn', '주의 많은 순'], ['cover', '커버리지 낮은 순'], ['vm', 'VM 많은 순'], ['name', '이름 순']];
+/** 법인별 표의 처음 순서(제목을 누르면 STable 이 다시 정렬한다). 모르는 값(—)은 늘 뒤. */
+export function sortRows(rows, key) {
+  const list = (Array.isArray(rows) ? rows : []).slice();
+  const nameCmp = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true });
+  const attn = (r) => (quickTone(r) === 'bad' ? 3 : quickTone(r) === 'warn' ? 2 : 0) + ((r.marks?.needGap || 0) > 0 ? 1 : 0);
+  const cov = (r) => (typeof r.veeam === 'number' && r.vm > 0 ? r.veeam / r.vm : Infinity);
+  if (key === 'cover') return list.sort((a, b) => (cov(a) - cov(b)) || nameCmp(a, b));
+  if (key === 'vm') return list.sort((a, b) => ((b.vm ?? -1) - (a.vm ?? -1)) || nameCmp(a, b));
+  if (key === 'name') return list.sort(nameCmp);
+  return list.sort((a, b) => (attn(b) - attn(a)) || ((b.results?.failed || 0) - (a.results?.failed || 0)) || nameCmp(a, b));
+}
+
+/** 바로가기 찾기 — 법인 이름(대소문자 무시). */
+export const matchSite = (r, q) => !String(q || '').trim() || String(r?.name || '').toLowerCase().includes(String(q).trim().toLowerCase());
+
+export const PRIO_TABS = [['all', '전체'], ['gap', '백업 필요·미백업'], ['high', '중요도 상'], ['fail', '실패'], ['old', '오래된 백업'], ['stale', '스냅샷 잔존']];
+/**
+ * 우선순위 VM(서버 priorityCandidates) → 화면 목록. '오래된 백업' 은 고른 기준 일수로 판정하고, 문제가 하나도 남지 않는 후보는 뺀다.
+ * 순서: 중요도 상 → 백업 필요 → 나머지 · 같은 단계에서 미백업 → 실패 → 잔존 → 오래된(이른 순).
+ * @returns {{ items: Array, counts: Record<string, number> }}
+ */
+export function priorityView(items, { rpoDays = 1, now = Date.now() } = {}) {
+  const days = RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1;
+  const out = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    const old = typeof it.lb === 'number' && now - it.lb > days * 86_400_000;
+    if (!it.gap && !it.fail && !it.stale && !old) continue;
+    const tags = [];
+    if (it.gap) tags.push(['gap', 'Veeam 백업 없음']);
+    if (it.crit === 'high') tags.push(['high', '중요도 상']);
+    if (it.need) tags.push(['need', '백업 필요']);
+    if (it.fail) tags.push(['fail', '마지막 실패']);
+    if (old) tags.push(['old', `${days}일+ 경과`]);
+    if (it.stale) tags.push(['stale', '스냅샷 잔존']);
+    out.push({ ...it, old, tags });
+  }
+  const tier = (x) => (x.crit === 'high' ? 0 : x.need ? 1 : 2);
+  const prob = (x) => (x.gap ? 0 : x.fail ? 1 : x.stale ? 2 : 3);
+  out.sort((a, b) => (tier(a) - tier(b)) || (prob(a) - prob(b)) || ((a.lb ?? Infinity) - (b.lb ?? Infinity)) || String(a.name).localeCompare(String(b.name)));
+  const counts = { all: out.length, gap: 0, high: 0, fail: 0, old: 0, stale: 0 };
+  for (const x of out) { if (x.gap) counts.gap++; if (x.crit === 'high') counts.high++; if (x.fail) counts.fail++; if (x.old) counts.old++; if (x.stale) counts.stale++; }
+  return { items: out, counts };
+}
+export const prioMatches = (x, tab) => (tab === 'all' ? true : tab === 'high' ? x.crit === 'high' : !!x[tab]);
+/** 폴더 끝 두 조각(‘A.MGMT › AD’) — 긴 경로가 칸을 넘지 않게. */
+export const folderTail = (folder) => folderParts(folder).slice(-2).join(' › ') || '—';

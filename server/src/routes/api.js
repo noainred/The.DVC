@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authDisabledRole } from '../auth/auth.js';
+import { authDisabledRole, toolActorOf } from '../auth/auth.js';
 import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
@@ -88,10 +88,7 @@ const toolGateRole = (req) => (!config.auth.enabled ? authDisabledRole() : (req.
  *   그대로 열린다(v2.536 이 겪은 '프론트 탭 조건만 있던' 사고와 같은 유형).
  *   인증 비활성 환경에서는 사용자가 없으므로 역할만 남는다(대체 역할은 위 함수가 정한다).
  */
-const toolGateUser = (req) => ({
-  username: (config.auth.enabled && req.user && req.user.username) || '',
-  role: toolGateRole(req),
-});
+const toolGateUser = toolActorOf;   // v2.787: 판정 사용자 하나(auth.js toolActorOf — 백업 Summary 도 같은 함수로 Detail 접근을 본다)
 api.use('/tools', toolGate({ roleOf: toolGateRole, userOf: toolGateUser }));
 // 같은 집행을 `/api/tools` **밖**의 전용 엔드포인트에도 적용한다(v2.506 검증 반영):
 // `/search/nl`(AI 검색)·`/top`(탐색·랭킹)은 각각 한 화면만 쓰는데 기능 권한 게이트가 없어

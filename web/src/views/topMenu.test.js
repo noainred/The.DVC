@@ -14,9 +14,9 @@ const allItems = () => MENU_GROUPS.flatMap((g) => (g.children ? g.children.map((
 const tabsInMenu = () => new Set(allItems().map(({ g, c }) => (c ? c.tab : g.tab)).filter(Boolean));
 
 describe('메뉴 구성', () => {
-  it('대메뉴는 사용자가 정한 순서 11개다(업그레이드는 설정 아래 · v2.779 백업 메뉴 추가)', () => {
-    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', 'Veeam 현황', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
-    expect(MENU_GROUPS.find((g) => g.id === 'backup').children.map((c) => [c.label, c.tool])).toEqual([['Summary', 'backup-summary'], ['Detail', 'backup-detail']]);
+  it('대메뉴는 사용자가 정한 순서 10개다(업그레이드는 설정 아래 · v2.787 백업 대메뉴는 서버 › Veeam 으로 옮김)', () => {
+    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
+    expect(MENU_GROUPS.find((g) => g.id === 'backup')).toBe(undefined);
     const settings = MENU_GROUPS.find((g) => g.id === 'settings');
     expect(settings.children.map((c) => c.tab)).toEqual(['settings', 'upgrade']);
   });
@@ -33,8 +33,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(16);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.779 백업 2
-    expect(new Set(keys).size).toBe(15);
+    expect(keys.length).toBe(15);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also)
+    expect(new Set(keys).size).toBe(14);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
@@ -44,7 +44,7 @@ describe('메뉴 구성', () => {
 
   it('하위 메뉴 이름은 사용자가 정한 것이다', () => {
     const labels = (id) => MENU_GROUPS.find((g) => g.id === id).children.map((c) => c.label);
-    expect(labels('server')).toEqual(['가상화 서버', 'ESXi 호스트', 'vCenter', '물리 서버', '알람']);
+    expect(labels('server')).toEqual(['가상화 서버', 'ESXi 호스트', 'vCenter', '물리 서버', 'Veeam', '알람']);
     expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스토리지 성능 측정']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
     expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
@@ -177,13 +177,15 @@ describe('화면 배선(소스)', () => {
   });
 });
 
-describe('v2.785 Veeam 현황 — 이름만 바뀌고 주소·도구 키는 그대로 · 옛 이름으로도 찾힌다', async () => {
+describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이름으로도 찾힌다', async () => {
   const { TOOLS } = await import('./specialToolsList.js');
   const { searchTools } = await import('./toolSearch.js');
-  it('메뉴 id·도구 키 그대로(북마크 · 권한 파일 · 저장한 내 메뉴가 참조) · 특수 기능 카드 이름', () => {
-    const g = MENU_GROUPS.find((x) => x.id === 'backup');
-    expect([g.label, ...g.children.map((c) => `${c.id}:${c.tool}`)]).toEqual(['Veeam 현황', 'bsum:backup-summary', 'bdet:backup-detail']);
-    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Veeam 현황 · Summary'], ['backup-detail', 'Veeam 현황 · Detail']]);
+  it('서버 › Veeam 하나가 두 도구를 맡는다(Detail 화면에서도 같은 메뉴가 켜진다) · 도구 키 그대로 · 특수 기능 카드 이름', () => {
+    const v = MENU_GROUPS.find((x) => x.id === 'server').children.find((c) => c.id === 'veeam');
+    expect([v.label, v.tool, v.also]).toEqual(['Veeam', 'backup-summary', ['backup-detail']]);
+    expect(locate('tools', '#/tools/backup-summary')).toEqual({ group: 'server', child: 'veeam' });
+    expect(locate('tools', '#/tools/backup-detail')).toEqual({ group: 'server', child: 'veeam' });
+    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Veeam 백업 현황 · Summary'], ['backup-detail', 'Veeam 백업 현황 · Detail']]);
   });
   it('특수 기능 검색 — 옛 이름(백업 서머리·백업 세부내용)과 새 이름 모두', () => {
     expect(searchTools(TOOLS, '백업 서머리')[0].k).toBe('backup-summary');

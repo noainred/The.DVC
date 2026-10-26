@@ -23,8 +23,9 @@ import { snapEventsOkAt, snapCollectorReason } from '../../veeam/snapCollector.j
 import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
-import { requirePerm, requireRole } from '../../auth/auth.js';
-import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
+import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
+import { issueFor } from '../../auth/toolAccess.js';
+import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -444,6 +445,9 @@ function scopeOf(req) {
   return { power, excl: String(req.query.excl ?? '1') !== '0' };
 }
 
+/** v2.787: 우선순위 VM 목록은 VM 단위 백업 상태 = Detail 도구 데이터 — Detail 이 거부된 계정의 Summary 에는 싣지 않는다(도구별 접근 집행과 같은 판정). */
+const detailToolOk = (req) => !issueFor(toolActorOf(req), 'backup-detail');
+
 async function summaryData(req, snap, scope) {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
@@ -452,10 +456,15 @@ async function summaryData(req, snap, scope) {
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
   const rows = []; const jobs = [];
+  const marks = getMarks(); const now = Date.now(); let prio = []; const prioOk = detailToolOk(req);
   for (const vc of vcs) {
     await maybeYield();
     const vms = vmsBy.get(vc.id) || [];
     const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true, scope });
+    // v2.787(우선순위 VM): 같은 범위(scope 교집합 vCenter · 전원·제외 목록)에서만 — 다른 수와 같은 기준
+    if (prioOk) for (const c of priorityCandidates(b.scopedVms, { byVm: b.match?.byVm || null, marks, veeamKnown: b.row.veeam != null || !b.linked, absentKnown: !b.row.veeamAbsentUnknown, now })) {
+      prio.push({ ...c, vcenterId: vc.id, vcName: vc.name || vc.id });
+    }
     rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
       veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
       ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !serversForVcenter(vc.id).length ? { demo: true } : {}) });
@@ -464,7 +473,10 @@ async function summaryData(req, snap, scope) {
   }
   // v2.785(GR R-B2): 재시작 뒤에는 손상 사본만 남아 '파일 없음'(빈 표시)으로 읽힌다 — 사본이 있으면 알린다(같은 프로세스 손상이면 위 안내 하나만)
   const unreadable = marksUnreadable();
-  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+  const prioTotal = prio.length;
+  prio.sort(priorityRank);
+  if (prio.length > PRIORITY_MAX) prio = prio.slice(0, PRIORITY_MAX);
+  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
@@ -503,7 +515,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}` });   // 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
   });
 
   api.get('/tools/backup-detail', toolsPerm, async (req, res) => {

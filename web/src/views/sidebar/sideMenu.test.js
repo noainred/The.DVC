@@ -17,7 +17,7 @@ describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
     expect(r.groups.map((g) => g.id)).toEqual(MENU_GROUPS.map((g) => g.id));
     expect(r.groups.map((g) => g.label)).toEqual(MENU_GROUPS.map((g) => g.label));
     const server = r.groups.find((g) => g.id === 'server');
-    expect(server.children.map((c) => c.id)).toEqual(['vm', 'esxi', 'vc', 'bm', 'alarm']);
+    expect(server.children.map((c) => c.id)).toEqual(['vm', 'esxi', 'vc', 'bm', 'veeam', 'alarm']);   // v2.787 서버 › Veeam
     expect(server.children.find((c) => c.id === 'bm')).toMatchObject({ tool: 'serveranalysis', seg: 'baremetal', adminOnly: true });
     expect(server.custom).toBe(false);
   });
