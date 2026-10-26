@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **679개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **684개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-26)
@@ -426,7 +426,7 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (43)
+## 엣지 에이전트 (47)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -472,6 +472,10 @@
 | `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
 | `VEEAM_CONFIG_PULL_MS` | `300000` |  | agent/veeamConfigPull.js |
+| `VMCLONE_DELEGATION` | `기본 적용('false' 로 끄기)` |  | agent/vmCloneWorker.js |
+| `VMCLONE_REPORT_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_MS` |  |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
 ## 원격 명령(RMA) (38)
@@ -855,6 +859,12 @@
 | `PERF_COUNTER_TTL_MS` | `6` |  | vcenter/soapClient.js |
 | `VC_KEEPALIVE_MS` | `4000` |  | vcenter/restClient.js |
 
+## VM 복제 (1)
+
+| 키 | 기본값 | 예시 | 정의 위치 |
+|---|---|---|---|
+| `VMCLONE_VERIFY_TIMEOUT_MIN` |  |  | vmclone/vsOps.js |
+
 ## VM 프로비저닝 (1)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
@@ -863,4 +873,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 679
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 684
