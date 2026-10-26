@@ -9,6 +9,8 @@ import { makeGetter, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { healthWord } from '../healthWord.js';
 import { powerResult, powerProbe, applyScannedPower } from '../power.js';
+import { normalizeResourceList, resourceProbe } from '../resources.js';
+import { pushAll } from '../../util/pushAll.js';
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
 /** 미해결 알람 한 페이지 크기(v2.599 C2599-07). */
@@ -47,7 +49,44 @@ export function applyUnityPower(extra, raw) {
   applyScannedPower(extra, entries(raw.power), { source, scope: 'system' });
 }
 
-/** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts,power} */
+/**
+ * v2.789 — 하위 항목(LUN·파일시스템) REST 경로. 사용자 선택 "LUN·파일시스템까지".
+ * ⚠ 필드 이름(lun `sizeTotal`·`sizeAllocated` / filesystem `sizeTotal`·`sizeUsed`)은 Unisphere REST 문서 지식 기반이고
+ *   **실장비 응답으로 확인하지 못했다**(이 파일 머리말과 같은 한계). LUN 의 사용량은 풀 할당량(`sizeAllocated`)이다.
+ */
+export const UNITY_LUN_PATH = '/api/types/lun/instances?fields=id,name,sizeTotal,sizeAllocated&per_page=2000';
+export const UNITY_FS_PATH = '/api/types/filesystem/instances?fields=id,name,sizeTotal,sizeUsed&per_page=2000';
+
+/** raw.luns·raw.fs(·Err) → extra.resources + extra.resourcesProbe(순수 — extra 변경). 조회 전 중단이면 아무것도 싣지 않는다. */
+export function applyUnityResources(extra, raw) {
+  const items = [];
+  const probe = {};
+  const kinds = [['lun', 'luns', UNITY_LUN_PATH, (c) => ({ kind: 'lun', id: c.id, name: c.name, totalBytes: c.sizeTotal,
+    usedBytes: c.sizeAllocated, usedSource: numOrNull(c.sizeAllocated) != null ? 'allocation' : null })],
+  ['fs', 'fs', UNITY_FS_PATH, (c) => ({ kind: 'fs', id: c.id, name: c.name, totalBytes: c.sizeTotal,
+    usedBytes: c.sizeUsed, usedSource: numOrNull(c.sizeUsed) != null ? 'fs' : null })]];
+  let any = false;
+  for (const [kind, key, path, map] of kinds) {
+    const source = `Unisphere REST ${path.split('?')[0]}`;
+    if (raw[`${key}Err`]) { probe[kind] = resourceProbe('failed', { source, detail: raw[`${key}Err`] }); any = true; continue; }
+    if (!raw[key]) continue;
+    any = true;
+    const list = entries(raw[key]).map(map).filter((x) => numOrNull(x.totalBytes) != null);
+    const got = entries(raw[key]).length;
+    if (got && !list.length) { probe[kind] = resourceProbe('unparsed', { source, detail: `${got}건에서 sizeTotal 을 읽지 못했습니다` }); continue; }
+    const total = numOrNull(raw[key].entryCount);
+    probe[kind] = resourceProbe('ok', { source, count: list.length,
+      ...(total != null && total > got ? { detail: `전체 ${total}건 중 첫 ${got}건만 받았습니다` } : {}) });
+    pushAll(items, list);   // 전개 push 금지(인벤토리 규모 배열 — util/pushAll.js)
+  }
+  if (!any) return;
+  const { list, dropped } = normalizeResourceList(items);
+  extra.resources = list;
+  if (dropped) extra.resourcesDropped = dropped;
+  extra.resourcesProbe = probe;
+}
+
+/** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts,power,luns,fs} */
 export function normalizeUnity(device, raw) {
   const snap = emptySnapshot(device);
   const sys = entries(raw.system)[0];
@@ -111,6 +150,7 @@ export function normalizeUnity(device, raw) {
     snap.sections.alerts = 'ok';
   }
   applyUnityPower(snap.extra, raw);
+  applyUnityResources(snap.extra, raw);   // v2.789
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
@@ -143,6 +183,11 @@ export async function collect(device, { signal = null } = {}) {
     // v2.667 — 전원. 다른 섹션과 따로 조회한다(필드가 없는 버전이 오류를 내도 system 조회를 깨지 않게).
     try { raw.power = await get(UNITY_POWER_PATH); }
     catch (e) { if (isCredReject(e)) throw e; raw.powerErr = String(e.message || e).slice(0, 200); }
+    // v2.789 — LUN·파일시스템(하위 항목). 전원과 같이 따로 조회한다(이 경로가 없는 버전이 다른 섹션을 깨지 않게).
+    try { raw.luns = await get(UNITY_LUN_PATH); }
+    catch (e) { if (isCredReject(e)) throw e; raw.lunsErr = String(e.message || e).slice(0, 200); }
+    try { raw.fs = await get(UNITY_FS_PATH); }
+    catch (e) { if (isCredReject(e)) throw e; raw.fsErr = String(e.message || e).slice(0, 200); }
   } catch (e) {
     const out = normalizeUnity(device, raw);
     out.error = e.message;
