@@ -149,20 +149,23 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
                     return (
                       <tr key={it.id}>
                         <td data-sort={it.name}><div style={{ fontWeight: 600 }}>{it.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{d.vcenterNames?.[it.vcenterId] || it.vcenterId}{usedBy ? ` · 잡 ${usedBy}개가 사용` : ''}</div></td>
-                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{it.server}:{it.exportPath} · NFS {it.nfsVersion}</td>
+                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{it.server}:{it.exportPath} · NFS {it.nfsVersion}</td>
                         <td data-sort={it.hostsOk}>
                           <div className="flex" style={{ alignItems: 'center', gap: 8 }}>
                             <div className="vbk-bar" style={{ width: 90 }}><b style={{ width: `${pct}%`, background: it.hostsOk === it.hostsTotal && it.hostsTotal ? 'var(--green)' : 'var(--amber)' }} /></div>
                             <span>{it.hostsOk} / {it.hostsTotal}</span>
                           </div>
                           {running && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }}>{running.where === 'edge' && running.state === 'pending' ? `담당 엣지 ${running.agent} 가져가기 대기` : running.kind === 'nfsds-detach' ? '떼어 내는 중' : '연결 중'}</div>}
-                          {!running && failed.length > 0 && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }} title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
+                          {/* v2.794: 사유가 길면 줄바꿈(최대 2줄) — 예전엔 한 줄로 늘어나 1440px 에서도 '작업' 열이 화면 밖으로 밀렸다. 전체 사유는 title. */}
+                          {!running && failed.length > 0 && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3, maxWidth: 300, whiteSpace: 'normal', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
                         </td>
                         <td style={{ textAlign: 'right' }} data-sort={it.freeGB ?? ''}>{it.freeGB != null && it.capacityGB != null ? `${fmtBytes(it.freeGB * 1024 ** 3)} / ${fmtBytes(it.capacityGB * 1024 ** 3)}` : '—'}</td>
-                        <td className="right" style={{ whiteSpace: 'nowrap' }}>
-                          <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
-                          {' '}<button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId)) || !it.hostsOk || usedBy > 0} title={usedBy > 0 ? `이 데이터스토어를 쓰는 잡 ${usedBy}개 — 대상을 바꾼 뒤 떼어 낼 수 있습니다` : !it.hostsOk ? '연결된 호스트가 없습니다' : ''} onClick={() => detach(it)}>떼어 내기</button>
-                          {' '}<button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
+                        <td className="right">
+                          <div className="flex wrap" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
+                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId)) || !it.hostsOk || usedBy > 0} title={usedBy > 0 ? `이 데이터스토어를 쓰는 잡 ${usedBy}개 — 대상을 바꾼 뒤 떼어 낼 수 있습니다` : !it.hostsOk ? '연결된 호스트가 없습니다' : ''} onClick={() => detach(it)}>떼어 내기</button>
+                            <button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
+                          </div>
                         </td>
                       </tr>
                     );

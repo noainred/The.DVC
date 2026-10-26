@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { postJson } from '../../api.js';
+import { postJson, canCsv } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { mountLabel } from './vmCloneMountText.js';
 import {
@@ -151,7 +151,8 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
               <div className="vbk-sec" style={{ minWidth: 0 }}>세션 이력 <small>{hf === 'all' ? `${history.length}건` : `${shownHist.length} / ${history.length}건`}</small></div>
               <div className="flex wrap" style={{ gap: 4, marginLeft: 'auto' }}>
                 {HISTORY_FILTERS.map(([k, label]) => <button type="button" key={k} className={`vbk-btn sm${hf === k ? ' primary' : ''}`} aria-pressed={hf === k} onClick={() => { setHf(k); setSel(null); }}>{label}</button>)}
-                <button type="button" className="vbk-btn sm" disabled={!shownHist.length} onClick={exportCsv} title="보이는 이력을 CSV 로 내려받습니다(엑셀에서 열림)">CSV</button>
+                {/* v2.643 규약: CSV 내보내기는 관리자 이상 + 'CSV 가져오기/내보내기' 권한(canCsv)일 때만 보인다 — 화면에서 만드는 CSV 도 같다. */}
+                {canCsv() && <button type="button" className="vbk-btn sm" disabled={!shownHist.length} onClick={exportCsv} title="보이는 이력을 CSV 로 내려받습니다(엑셀에서 열림)">CSV</button>}
               </div>
             </div>
             {shownHist.length === 0 && <div className="bd muted" style={{ fontSize: 12.5 }}>{history.length ? '이 조건의 기록이 없습니다' : edgeNoReport ? '엣지 보고 없음' : '기록 없음'}</div>}
