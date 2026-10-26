@@ -187,6 +187,8 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'user-menus.json': '계정별 좌측 메뉴(내 메뉴)·슈퍼 관리자 배포 메뉴(usermenu/store.js — 사용자가 손으로 만든 값, 원자 쓰기·손상 보존, v2.726)',
   // v2.727(감사 B-07): 사용자 데이터(설정도 상태 파일도 아님) — 백업 번들에는 들어가고 변경 감시 지문에서만 뺀다(backup/service.js CHANGE_WATCH_EXCLUDE)
   'notices.json': '접속 공지(팝업) 목록(bulletin/store.js — 전체 범위 관리자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존, v2.722)',
+  // v2.785(검토 R-B1): v2.784 백업 표시 — 미분류 경고(config-file-unclassified)가 파일이 생기는 순간부터 떴다.
+  'backup-marks.json': 'VM 별 백업 표시 — 업무 중요도·백업 필요·메모(veeam/backupMarks.js — 사용자 데이터, 원자 쓰기·손상 보존, v2.784). 백업 번들에는 들어가고 변경 감시 지문에서는 뺀다',
   'board.json': '게시판 글·댓글·공감(bulletin/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 BOARD_MAX_BYTES, v2.722)',
 });
 

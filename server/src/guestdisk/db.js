@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { createYielder } from '../util/timeSlice.js';
 import { load as loadGuestDiskSettings } from './settings.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
@@ -528,22 +529,43 @@ export async function vmPartLatest(vmId) {
 /**
  * v2.749: 파티션별 기준 시각(cutTs) 시점의 사용량 — part_series 의 cutTs 이하 마지막 점(diff-저장이라 그 값이 그때 유효하던 값이다).
  *   기준 점이 없으면(그 뒤에 처음 관측) 그 키는 결과에 없다 — 호출부가 '관측 기간 부족' 으로 밝힌다(0 증가로 지어내지 않는다).
- *   vmIds 를 500 개씩 나눠 묻는다(바인딩 상한). 반환 Map<'vmId\u0000path', usedGB>.
+ *   반환 Map<'vmId\u0000path', usedGB>.
+ * v2.785(GH H-I2): 상관 서브쿼리(`p.ts = (SELECT MAX(q.ts) …)`)는 VM 의 전 이력 행마다 서브쿼리를 돌았다(27만 행 500 VM 청크 약 100ms 동기).
+ *   이제 VM 마다 경로를 인덱스로 건너뛰며 찾고(`path > ? ORDER BY path LIMIT 1`), 키마다 `ts <= ? ORDER BY ts DESC LIMIT 1` 한 점을 탐색한다
+ *   (idx_ps_vm_path_ts — 실측 9~21ms). GROUP BY + MAX(ts) 로 되돌리지 말 것(docs/rules/perf-db.md). 결과는 예전과 같다 — 같은 ts 중복 행은
+ *   예전처럼 rowid 가 큰 행(id DESC). 양보는 개수가 아니라 시간 기준(createYielder)으로 VM 사이에서.
  */
+const PART_AT_SQL = Object.freeze({
+  first: 'SELECT path FROM part_series WHERE vm_id=? ORDER BY path LIMIT 1',
+  next: 'SELECT path FROM part_series WHERE vm_id=? AND path>? ORDER BY path LIMIT 1',
+  at: 'SELECT used_gb FROM part_series WHERE vm_id=? AND path=? AND ts<=? ORDER BY ts DESC, id DESC LIMIT 1',
+});
+
 export async function partUsedAt(vmIds = [], cutTs = 0) {
   const out = new Map();
   const db = await getDb();
   if (!db || !Array.isArray(vmIds) || !vmIds.length) return out;
   const ids = [...new Set(vmIds.map(String))];
-  for (let i = 0; i < ids.length; i += 500) {
-    const chunk = ids.slice(i, i + 500);
-    const rows = db.prepare(`SELECT p.vm_id, p.path, p.used_gb FROM part_series p
-      WHERE p.vm_id IN (${chunk.map(() => '?').join(',')})
-        AND p.ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = p.vm_id AND q.path = p.path AND q.ts <= ?)`).all(...chunk, cutTs);
-    for (const r of rows) out.set(`${r.vm_id}\u0000${r.path}`, Number(r.used_gb));
-    if (i + 500 < ids.length) await new Promise((res) => setImmediate(res));
+  const first = db.prepare(PART_AT_SQL.first);
+  const next = db.prepare(PART_AT_SQL.next);
+  const at = db.prepare(PART_AT_SQL.at);
+  const maybeYield = createYielder();
+  for (const id of ids) {
+    for (let r = first.get(id); r; r = next.get(id, r.path)) {
+      const v = at.get(id, r.path, cutTs);
+      if (v) out.set(`${id}\u0000${r.path}`, Number(v.used_gb));
+    }
+    await maybeYield();
   }
   return out;
+}
+
+/** 테스트 전용 — partUsedAt 의 SQL 실행 계획(인덱스 탐색을 타는지 고정). */
+export async function _partUsedAtPlans() {
+  const db = await getDb();
+  if (!db) return [];
+  const args = { first: ['x'], next: ['x', ''], at: ['x', '', 0] };
+  return Object.entries(PART_AT_SQL).map(([k, sql]) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args[k]).map((r) => r.detail).join(' | '));
 }
 
 export const _DB_PATH = DB_PATH;

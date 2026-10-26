@@ -52,3 +52,17 @@ export function confirmText(agent) {
     + '3) 안 되면 배포 기록의 SSH 계정으로 portal.env 수정·재시작(접속한 장비의 포탈 이름·호스트 이름이 그 엣지인지 먼저 확인 · 사본을 남기고 실패하면 되돌림)\n4) 중앙에서 사용 확인 · 배포 기록 토큰 맞춤\n\n'
     + '실패해도 공유 토큰은 그대로 받으므로 수집은 끊기지 않습니다. 진행할까요?';
 }
+
+/**
+ * v2.785(GE A-B2): '개별 토큰 자동 적용' 시작 응답 해석(순수). postJson 은 409 를 던지지 않고 본문 `{ok:false, reason, jobId}` 를 돌려준다
+ *   (이미 진행 중 — 서버 routes/admin/centralTokens.js). 예전에는 `r.job.id` 를 바로 읽어 영어 TypeError 가 화면에 떴고 진행 중인 작업도
+ *   따라가지 않았다. 거부면 서버 사유를 보이고, 진행 중인 작업 id 가 있으면 그것을 따라간다.
+ * @returns {{job:object|null, pollId:string|null, error:string}}
+ */
+export function applyStartOutcome(r) {
+  if (r && r.ok === true && r.job && typeof r.job === 'object' && r.job.id) return { job: r.job, pollId: String(r.job.id), error: '' };
+  const jobId = r && typeof r.jobId === 'string' && r.jobId ? r.jobId : null;
+  if (r && r.ok === true) return { job: null, pollId: jobId, error: '적용을 시작했지만 서버 응답에 작업 정보가 없습니다 — 아래 작업 기록을 확인하세요.' };
+  const reason = r && typeof r.reason === 'string' && r.reason.trim() ? r.reason.trim() : '적용을 시작하지 못했습니다.';
+  return { job: null, pollId: jobId, error: jobId ? `${reason} 진행 중인 작업을 이어서 보여 줍니다.` : reason };
+}

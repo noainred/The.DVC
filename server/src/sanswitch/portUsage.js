@@ -133,12 +133,14 @@ export function denseByPort(res, { since, bucketMs, n, now = Date.now() }) {
 /**
  * 1시간 칸 → 하루 칸. 평균 = 값 있는 시간들의 평균, 피크 = 최댓값, n = 값 있는 시간 수(화면이 '24시간 중 n시간' 을 말한다).
  * 값 있는 시간이 하나도 없으면 null.
+ * v2.785(GI I-B3): perDay = 하루 칸 수(기본 24 = 1시간 칸). 유휴 30일은 3시간 칸(8)을 접는다 — 그때 n 은 값 있는 칸 수다.
  */
-export function hoursToDays(avg, peak, dayCount) {
+export function hoursToDays(avg, peak, dayCount, perDay = 24) {
   const out = [];
+  const k = Math.max(1, Math.floor(perDay));
   for (let d = 0; d < dayCount; d++) {
     let s = 0, n = 0, pk = null;
-    for (let h = d * 24; h < d * 24 + 24; h++) {
+    for (let h = d * k; h < d * k + k; h++) {
       if (avg[h] != null) { s += avg[h]; n++; }
       if (peak[h] != null) pk = pk == null ? peak[h] : Math.max(pk, peak[h]);
     }
@@ -223,12 +225,16 @@ export function storageGroups(ports) {
 }
 
 /**
- * 30일 하루 칸(24시간 버킷) → 유휴·보류·꺼짐 분류.
+ * 30일 하루 칸(한국 하루 — idleDailyOf) → 유휴·보류·꺼짐·상태 모름 분류.
  * 꺼진(online 아님) 포트는 유휴로 세지 않고 따로 센다 — 안 쓰는 것과 못 쓰는 것은 다르다.
+ * v2.785(GI I-B1): 상태를 모르는 포트(portList 가 'unknown' 으로 채운 것 — 엣지가 문제 포트만 보낸 축약 스냅샷·스냅샷 없음)는
+ *   꺼짐도 유휴도 아니다. 전에는 off 로 세어 정상 online 포트가 전부 '사용 중이 아닌 포트' 로 보이고 유휴가 0개가 됐다
+ *   ('못 읽은 값은 0 이 아니다' 와 같은 종류). 따로 센다 — 이유는 단정하지 않는다(화면 머리말의 portsScope 안내가 밝힌다).
  */
 export function idleOf(ports, daily30) {
-  const idle = [], pending = [], off = [];
+  const idle = [], pending = [], off = [], unknown = [];
   for (const p of ports) {
+    if (!p.state || p.state === 'unknown') { unknown.push({ port: p.port, slotPort: p.slotPort, name: p.name }); continue; }
     if (p.state !== 'online') { off.push({ port: p.port, slotPort: p.slotPort, state: p.state }); continue; }
     const s = daily30.get(p.port);
     const days = s ? s.peak.filter((v) => v != null).length : 0;
@@ -238,7 +244,52 @@ export function idleOf(ports, daily30) {
     if (days < IDLE_MIN_DAYS) { pending.push({ port: p.port, slotPort: p.slotPort, name: p.name, days, why: `데이터 ${days}일` }); continue; }
     if (peak != null && peak < cap * (IDLE_PCT / 100)) idle.push({ port: p.port, slotPort: p.slotPort, name: p.name, peak, days, capBps: cap });
   }
-  return { idle, pending, off, days: IDLE_DAYS, minDays: IDLE_MIN_DAYS, pct: IDLE_PCT };
+  return { idle, pending, off, unknown, days: IDLE_DAYS, minDays: IDLE_MIN_DAYS, pct: IDLE_PCT };
+}
+
+/**
+ * v2.785(GI I-B3): 유휴 30일 조회의 칸 폭 — 지역 자정이 그 폭의 정배수여야 epoch 정배수 버킷(perfDb `ts / bm`)이 지역 하루로 나뉜다.
+ * 하루(DAY) 버킷은 UTC 하루라 한국 하루와 9시간 어긋났다(첫 한국 아침 00~09시 표본이 버려지고 데이터 일수가 +1).
+ * 3시간이 한국(+9h)·UTC 에 맞는 가장 큰 폭이다. 1시간 칸은 768포트에서 요청당 +0.5~0.7초라 쓰지 않는다(3시간은 그 절반 이하 — 감사 실측).
+ * 지역 자정이 3시간 정배수가 아니면 1시간. 30·45분 오프셋은 1시간도 맞지 않아 남은 어긋남(30·45분)이 있다 — 15분 칸은 15분 표 보관(env)에 달려 쓰지 않는다.
+ */
+export function idleBucketMs(offsetMin = DAY_OFFSET_MIN) {
+  const offMs = (((Number(offsetMin) || 0) * 60_000) % DAY_MS + DAY_MS) % DAY_MS;
+  for (const bm of [3 * HOUR, HOUR]) if (offMs % bm === 0) return bm;
+  return HOUR;
+}
+
+/** 유휴 판정 창 — 오늘(지역)을 포함한 지난 IDLE_DAYS 일, 지역 자정부터. 라우트는 이 창을 `points = (until − since) / bucketMs` 로 조회한다. */
+export function idleWindow(now = Date.now(), offsetMin = DAY_OFFSET_MIN) {
+  const since = dayStartOf(now, offsetMin) - (IDLE_DAYS - 1) * DAY_MS;
+  return { since, until: since + IDLE_DAYS * DAY_MS, bucketMs: idleBucketMs(offsetMin) };
+}
+
+/**
+ * 유휴 창 조회 결과 → 포트별 지역 하루 칸 { avg[IDLE_DAYS], peak[IDLE_DAYS] }(idleOf 의 daily30).
+ * 칸 폭은 **응답의 bucketMs**(없으면 요청 폭)로 읽는다 — 요청과 다른 폭이 와도 칸을 어긋나게 놓지 않게. 미래 칸은 denseByPort 가 비운다.
+ */
+export function idleDailyOf(res, { since, until, bucketMs, now = Date.now() }) {
+  const bm = Number(res?.bucketMs) > 0 ? Number(res.bucketMs) : bucketMs;
+  const out = new Map();
+  if (!(bm > 0)) return out;
+  const dayCount = Math.round((until - since) / DAY_MS);
+  const perDay = Math.max(1, Math.round(DAY_MS / bm));
+  const dense = denseByPort(res, { since, bucketMs: bm, n: dayCount * perDay, now });
+  for (const [port, s] of dense) {
+    const days = hoursToDays(s.avg, s.peak, dayCount, perDay);
+    out.set(port, { avg: days.map((c) => (c ? c[0] : null)), peak: days.map((c) => (c ? c[1] : null)), name: s.name, speed: s.speed });
+  }
+  return out;
+}
+
+/**
+ * v2.785(GI I-B4): 조회 결과를 조밀 배열로 놓을 틀 — 칸 폭은 **응답의 bucketMs**(perfDb.rangeOf 가 15분 표 보관(SANSW_PERF_ROLLUP_15M_DAYS)·
+ * 집계 표 정배수로 고른 실제 폭), 빈 응답(0)이면 요청 폭. 라우트가 15분·96칸으로 단정하면 15분 표가 없는 날은 1시간 칸이 와서 96칸 중 72칸이 비었다.
+ */
+export function seriesFrame(res, { since, end, wantMs }) {
+  const bm = Number(res?.bucketMs) > 0 ? Number(res.bucketMs) : wantMs;
+  return { since, bucketMs: bm, n: Math.max(0, Math.round((end - since) / bm)) };
 }
 
 /**
@@ -305,7 +356,7 @@ export function usageTargetMembers(base, { view = 'port', target = null } = {}) 
  * @param hist     1시간 칸 portSeries — d: 고른 날로 끝나는 7일, w·m: 그 기간. histSince 가 시작.
  * @param chart    d 의 15분 차트 portSeries(대상 포트만) — 없으면(15분 보관이 지난 날) hist 의 마지막 날을 쓴다
  * @param prev     이전 기간 차트(대상 포트만, 선택) — { res, since, bucketMs, n }
- * @param daily30  지난 30일 하루 칸 portSeries(유휴 판정, 선택)
+ * @param daily30  지난 30일 지역 하루 칸(idleDailyOf 결과 — 유휴 판정, 선택)
  * @param view     'port' | 'storage'
  * @param target   포트 번호(view=port) 또는 스토리지 키(view=storage) — 없거나 모르면 기본값을 고른다
  * @param base     usageBase 결과(선택) — 같은 period·ports·hist·histSince·now 로 만든 것만 쓰고, 아니면 새로 만든다

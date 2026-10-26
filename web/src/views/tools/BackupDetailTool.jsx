@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, toggleAllVisible, visibleVmIds, filterLabel } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, visibleVmIds, filterLabel } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
@@ -82,6 +82,12 @@ export default function BackupDetailTool({ scope }) {
   useEffect(() => { load(); try { if (vcId) localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* */ } }, [vcId, load]);
   // vCenter 를 바꾸면 이전 vCenter 의 표를 지운다(전원·제외만 바꾸면 다시 읽는 동안 이전 표를 둔다)
   useEffect(() => { setData(null); }, [vcId]);
+  // v2.785(GR R-B3): 저장 직후 재조회가 쓸 '지금' 조건과 최신 load — 렌더 시점 클로저로 다시 읽으면 저장 중 vCenter·옵션을 바꾼 뒤
+  //   이전 조건의 응답이 새 선택 아래 덮였다(늦게 온 이전 응답 · 그 뒤 저장은 400). 조건이 바뀌었으면 그 조건의 load 가 이미 돈다.
+  const keyRef = useRef('');
+  keyRef.current = detailLoadKey(vcId, opts);
+  const reloadRef = useRef(null);
+  reloadRef.current = () => load(true);   // 펼침·고른 VM·체크를 그대로 둔 채 지금 조건으로 다시 읽기
   const changeOpts = useCallback((o) => { setOpts(o); saveOpts(o); }, []);
   const csv = useCallback(async () => {
     setCsvErr(null);
@@ -99,26 +105,29 @@ export default function BackupDetailTool({ scope }) {
   const rows = useMemo(() => flattenTree(tree, openSet, { forceOpen }), [tree, openSet, forceOpen]);
   const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
   const writable = data?.writable === true && !data?.marksUnreadable;
+  const marksUnknown = data?.marksUnreadable === true;   // v2.785(GR R-B2): 표시 수·칩은 '—'
   const visibleIds = useMemo(() => visibleVmIds(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   useEffect(() => { setMemo(selVm?.m?.memo || ''); setSaveErr(null); }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveMarks = useCallback(async (ids, patch) => {
     if (!ids.length) return;
+    const savedKey = detailLoadKey(vcId, opts);
     setSaving(true); setSaveErr(null);
     // api.js sendJson 은 400·409 를 throw 하지 않고 본문(ok:false)을 돌려준다 — 그 사유를 성공으로 삼키지 않는다(v2.727 E-01 규약)
     try {
       const r = await putJson('/tools/backup-detail/marks', { vcenterId: vcId, vmIds: ids, ...patch });
       if (r?.ok === false) setSaveErr(new Error(r.reason || '저장하지 못했습니다.'));
-      load(true);   // 거부돼도 다시 읽는다 — 화면이 저장된 값과 같게
+      // 거부돼도 다시 읽는다(화면이 저장된 값과 같게) — 단 지금 고른 조건이 저장한 조건과 같을 때만(v2.785 GR R-B3)
+      if (savedKey === keyRef.current) reloadRef.current();
     } catch (e) { setSaveErr(e); }
     finally { setSaving(false); }
-  }, [vcId, load]);
+  }, [vcId, opts]);
   const toggleCheck = (id) => setChecked((cur) => { const s = new Set(cur); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   const toggle = (key) => setOpen((cur) => { const s = new Set(cur || openSet); if (s.has(key)) s.delete(key); else s.add(key); return s; });
 
   if (vcs && !vcs.length) return <div className="muted">볼 수 있는 vCenter 가 없습니다.</div>;
-  if (!data && loading) return <Loading />;
-  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+  // v2.785(GV C-B4): 로딩·오류로 조기 return 하지 않는다 — 머리(vCenter 선택·옵션·새로고침)는 늘 그리고 본문 자리에 로딩·오류 상자를 둔다.
+  //   예전에는 조회가 실패하면 선택 상자까지 사라져(그 vCenter id 는 저장돼 다시 들어와도 같은 곳) 다른 vCenter 로 옮길 수 없었다.
 
   const r = data?.row || {};
   const vs = veeamStateOf(r.veeamState);
@@ -137,7 +146,7 @@ export default function BackupDetailTool({ scope }) {
               {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           </label>
-          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로" style={{ padding: '6px 14px' }}>CSV</button>}
+          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로(검색어는 반영하지 않음)" style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </div>
       </div>
@@ -146,6 +155,8 @@ export default function BackupDetailTool({ scope }) {
         {data && scopeNote(data.scope, data.row) && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{scopeNote(data.scope, data.row)}</span>}
       </div>
       {csvErr && <div className="card" style={{ padding: '8px 12px', color: '#fca5a5', fontSize: 12 }}>CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
+      {!data && error && <ErrorBox error={error} />}
+      {!data && !error && loading && <Loading />}
 
       {data && (
         <div className="card" style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 28px', minWidth: 0 }}>
@@ -166,16 +177,17 @@ export default function BackupDetailTool({ scope }) {
             <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
           </div>
           {/* v2.784: 사람이 정한 표시의 수(같은 범위) — 누르면 그 보기 */}
-          {marksLine(r.marks) && (() => { const m = marksLine(r.marks); return (
+          {/* v2.785(GR R-B2): 표시 파일을 못 읽었으면 수는 '—' — 0 으로 보이면 '표시 없음' 으로 읽힌다 */}
+          {marksLine(r.marks, data.marksUnreadable) && (() => { const m = marksLine(r.marks, data.marksUnreadable); return (
             <div data-backup-marks="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center', fontSize: 13, borderTop: '1px solid var(--border-soft)', paddingTop: 10 }}>
               <span className="muted" style={{ fontSize: 12 }}>업무 중요도</span>
-              {CRIT.map((c) => <button key={c.key} type="button" className={`tab${filter === `crit-${c.key}` ? ' active' : ''}`} aria-pressed={filter === `crit-${c.key}`} onClick={() => setFilter(filter === `crit-${c.key}` ? 'all' : `crit-${c.key}`)} title={`${c.label} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><CritIcon crit={c.key} withText plainText={filter === `crit-${c.key}`} /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m[c.key])}</b></button>)}
+              {CRIT.map((c) => <button key={c.key} type="button" className={`tab${filter === `crit-${c.key}` ? ' active' : ''}`} aria-pressed={filter === `crit-${c.key}`} disabled={!!m.unknown} onClick={() => setFilter(filter === `crit-${c.key}` ? 'all' : `crit-${c.key}`)} title={`${c.label} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><CritIcon crit={c.key} withText plainText={filter === `crit-${c.key}`} /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m[c.key])}</b></button>)}
               <span style={{ width: 1, height: 20, background: 'var(--border)' }} aria-hidden="true" />
-              <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={filter === 'need' ? undefined : { color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
+              <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} disabled={!!m.unknown} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={filter === 'need' ? undefined : { color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
               {m.need > 0 && <button type="button" className={`tab${filter === 'needgap' ? ' active' : ''}`} aria-pressed={filter === 'needgap'} onClick={() => setFilter(filter === 'needgap' ? 'all' : 'needgap')} title="백업 필요로 표시했는데 Veeam 백업 대상이 아닌 VM" style={{ padding: '3px 10px', color: m.needGap ? '#fca5a5' : undefined }}>그중 Veeam 백업 안 보임 <b>{m.needGap == null ? '모름' : fmtNum(m.needGap)}</b></button>}
             </div>
           ); })()}
-          {data.marksUnreadable && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fca5a5' }}>백업 표시 파일을 읽지 못해 표시를 바꿀 수 없습니다 — 설정 폴더의 backup-marks.json 손상 사본을 확인하세요.</div>}
+          {marksNotice(data) && <div style={{ flexBasis: '100%', fontSize: 12, color: marksNotice(data).tone === 'bad' ? '#fca5a5' : '#fcd34d' }}>{marksNotice(data).text}</div>}
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
           {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
           {(r.veeam == null && r.veeamState !== 'unlinked') && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) VM 의 Veeam 칸은 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요. 스냅샷 칸은 그대로 보입니다.</div>}
@@ -184,10 +196,11 @@ export default function BackupDetailTool({ scope }) {
         </div>
       )}
 
+      {data && (<>
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {counts[k]}</button>)}
-          {filter.startsWith('crit-') && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {counts[filter]} ✕</button>}
+          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown)}</button>)}
+          {filter.startsWith('crit-') && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {filterCountText(filter, counts, marksUnknown)} ✕</button>}
         </div>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
@@ -351,6 +364,7 @@ export default function BackupDetailTool({ scope }) {
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

@@ -52,6 +52,9 @@ function hostKeyInfo(key, lookups, port) {
 const t = (v) => String(v ?? '').trim();
 const ms = (t0) => Date.now() - t0;
 
+/** v2.785(GE E-B3): 협상 전에 상대가 닫았을 때의 설명(접속 거부·방화벽·인증서와 조치가 다르다). */
+const SSH_CLOSED_EARLY = 'SSH 협상 전에 상대가 연결을 닫았습니다(sshd MaxStartups 초과·접근 제한(hosts.deny)·중계 장비 가능)';
+
 /**
  * SSH — **협상까지**. 반환의 `banner`·`kex`·`serverKey` 가 이슈 분석 자료다.
  * @param {string} ip   DNS 단계가 검사한 주소
@@ -101,10 +104,30 @@ export async function stepSsh(ip, port, { timeoutMs = 12_000, host = '' } = {}) 
        *   algorithm` 은 구형 장비의 알고리즘 문제이고 조치가 정반대다(자격증명이 아니라 설정).
        */
       const kexBad = /no matching|handshake failed|unable to (?:verify|exchange)/i.test(msg);
+      /*
+       * v2.785(GE E-B3): ssh2 의 'Connection lost before handshake' 는 **협상 전에 상대가 TCP 를 닫은 것**이다
+       *   (sshd MaxStartups 초과·hosts.deny/TCP wrapper·중계 장비). phases.js failKindOfCode 의 /handshake/i 에 맡기면
+       *   'tls-fail' 이 되어 인증서 조치를 안내한다(조치가 정반대). phases.js 는 다른 단계·테스트가 같이 쓰므로 여기서만 가른다.
+       */
+      const lostEarly = !kexBad && /connection lost before handshake/i.test(msg);
       fin({
         ok: false,
-        failKind: kexBad ? 'ssh-kex' : failKindOfCode(e?.code, msg),
-        error: msg.slice(0, 200),
+        failKind: kexBad ? 'ssh-kex' : lostEarly ? 'reset' : failKindOfCode(e?.code, msg),
+        error: (lostEarly ? `${msg} — ${SSH_CLOSED_EARLY}` : msg).slice(0, 200),
+        ...(ident ? { banner: ident.slice(0, 200) } : {}),
+      });
+    });
+    /*
+     * v2.785(GE E-B3): 배너를 보낸 뒤 닫는 장비는 ssh2 가 error 없이 end → close 만 낸다 — 이 처리기가 없으면
+     *   시한(기본 12초)을 다 기다린 뒤 'timeout'(방화벽 안내)이 됐다. 협상 성공(fin 이 conn.end 를 부른다)·error 뒤의
+     *   close 는 `done` 가드가 무시한다.
+     */
+    conn.on('close', () => {
+      clearTimeout(timer);
+      fin({
+        ok: false,
+        failKind: 'reset',
+        error: SSH_CLOSED_EARLY,
         ...(ident ? { banner: ident.slice(0, 200) } : {}),
       });
     });

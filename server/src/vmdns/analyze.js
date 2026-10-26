@@ -9,14 +9,21 @@
  *
  * ── 판정 ─────────────────────────────────────────────────────────────────────
  *  · VM 별 서버 목록: `dns.stack.servers` 가 있으면 그것(OS 가 실제로 쓰는 값), 없으면 `dns.servers`.
- *  · 정체: VM(스냅샷 ipAddresses) → ESXi 호스트(mgmtIp·IP 이름) → 잘 알려진 공인 DNS 표 → IP 대장 분류기(공인/사설) → 그 밖 unknown.
+ *  · 정체: 잘 알려진 공인 DNS 표 → VM(스냅샷 ipAddresses) → ESXi 호스트(mgmtIp·IP 이름) → IP 대장 분류기(공인/사설) → 그 밖 unknown.
+ *    v2.785(GN N-B1): 공인 표가 VM·호스트 소유보다 먼저다(애니캐스트 공인 resolver 를 법인 VM 이 '소유' 할 일은 없다) ·
+ *    미수집 VM(dns 키 없음 — 2.695 이전 엣지)은 대표 IP(ipAddress)만 소유로 본다(그 수집기는 dnsConfig 의 DNS 주소까지 ipAddresses 에 실었다).
+ *    루프백·링크 로컬 등 특수 주소는 소유 색인에 넣지 않는다.
  *    지어내지 않는다 — 소유자를 못 찾으면 unknown 이다. 범위 밖 법인의 소유 VM·호스트 이름은 가린다(who.name = null).
  *  · 다른 법인 DNS: 서버 주소의 소유 VM·호스트 vCenter 집합에 그 DNS 를 쓰는 VM 의 vCenter 가 없다.
- *  · 정책(`vm-dns-policy.json`): 그 법인의 승인 목록에 맞으면 approved(명시 승인이 이긴다) → 공인이고 publicUnapproved 면
+ *  · 정책(`vm-dns-policy.json`): IPv6 서버는 unsupported(정책 항목이 IPv4·CIDR 만이라 판정할 수 없다 — v2.785 GN N-B2) →
+ *    그 법인의 승인 목록에 맞으면 approved(명시 승인이 이긴다) → 공인이고 publicUnapproved 면
  *    unapproved → 목록이 비면 none(판정 안 함) → 그 밖 unapproved.
+ *  · 로컬 스텁(v2.785 GN N-I2): 쓰는 서버가 전부 루프백(127.0.0.53 · ::1 등 — systemd-resolved 같은 게스트 안 스텁)인 VM 은
+ *    실제 상위 DNS 를 모른다 → 'local-stub' 으로 따로 세고 판정은 local(위반 아님) · DNS 1개·매트릭스에서 뺀다.
  *  · NIC ≠ OS: 스택 서버 집합과 NIC 서버 합집합이 다르다(둘 다 1개 이상일 때만).
  *  · DHCP: 스택 dhcp, 없으면 NIC 중 하나라도 true → true, 전부 false 로 읽혔으면 false, 그 밖 null(모름).
  */
+import net from 'node:net';
 import { ipToNum, numToIp, strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 
 /** 잘 알려진 공인 DNS — 이름은 사실만(운영 주체). */
@@ -63,13 +70,45 @@ export function canonAddr(v) {
   return out;
 }
 
+/**
+ * IPv6 문자열 → 16비트 8개(형식이 아니면 null). 끝의 점 표기 IPv4(`::ffff:1.2.3.4`)도 받는다. 순수(I/O 없음).
+ * v2.785(GN N-B4): 특수 주소 판정을 글자 일치가 아니라 값으로 하려고 둔다.
+ */
+function v6Words(ip) {
+  let s = String(ip).toLowerCase();
+  if (s.length > 45 || net.isIP(s) !== 6) return null;
+  const tail = s.slice(s.lastIndexOf(':') + 1);
+  if (tail.includes('.')) {
+    const n = ipToNum(tail);
+    if (n == null) return null;
+    s = `${s.slice(0, s.length - tail.length)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const words = (x) => (x ? x.split(':').map((h) => parseInt(h, 16)) : []);
+  const a = words(halves[0]);
+  if (halves.length === 1) return a.length === 8 ? a : null;
+  const b = words(halves[1]);
+  const fill = 8 - a.length - b.length;
+  if (fill < 1) return null;
+  const out = [...a, ...new Array(fill).fill(0), ...b];
+  return out.every((w) => Number.isInteger(w) && w >= 0 && w <= 0xffff) ? out : null;
+}
+
 /** 특수 주소 — 'loopback' | 'link-local' | 'unspecified' | 'multicast' | 'reserved' | 'ipv6' | null. */
+// v2.785(GN N-B4): IPv6 는 값으로 판정한다 — 예전엔 '::1'·'::' 글자 일치와 fe8x~febx 만 봐서 '0:0:0:0:0:0:0:1'·'::ffff:127.0.0.1'
+//   (IPv4 사상 루프백)이 'ipv6' 가 되어 도달성 점검의 'local' 건너뜀을 우회했다(듀얼스택 중앙이 자기 루프백 53 에 질의).
+//   IPv4 사상(::ffff:a.b.c.d)은 IPv4 판정을 따르고(특수가 아니면 'ipv6'), ff00::/8 은 멀티캐스트다.
 export function specialOf(ip) {
   if (typeof ip !== 'string') return null;
   if (ip.includes(':')) {
-    if (ip === '::1') return 'loopback';
-    if (/^fe[89ab]/i.test(ip)) return 'link-local';
-    if (ip === '::') return 'unspecified';
+    const w = v6Words(ip);
+    if (!w) return 'ipv6';     // 형식 밖 — 예전처럼 일반 IPv6 로 둔다(점검 대상 판정은 바뀌지 않는다)
+    if (w.every((x) => x === 0)) return 'unspecified';
+    if (w[7] === 1 && w.slice(0, 7).every((x) => x === 0)) return 'loopback';
+    if (w[5] === 0xffff && w.slice(0, 5).every((x) => x === 0)) return specialOf(numToIp(w[6] * 65536 + w[7])) || 'ipv6';
+    if ((w[0] & 0xffc0) === 0xfe80) return 'link-local';
+    if ((w[0] & 0xff00) === 0xff00) return 'multicast';
     return 'ipv6';
   }
   const n = ipToNum(ip);
@@ -154,6 +193,9 @@ export function policyEntryMatches(ip, entry) {
  * 명시 승인이 먼저다 — 관리자가 공인 주소를 그 법인 목록에 넣었다면 그 의도를 따른다.
  */
 export function policyVerdict(policy, vcenterId, server) {
+  // v2.785(GN N-B2): IPv6 서버는 판정하지 않는다('unsupported' — 위반으로 세지 않음). 정책 항목은 IPv4·CIDR 만 받으므로(policy.js
+  //   checkPolicyEntry · 웹 사본) 예전처럼 '목록 있음 → unapproved' 로 두면 관리자가 해소할 방법 없이 늘 비승인이었다.
+  if (typeof strictIpv4Num(server?.ip) !== 'number') return 'unsupported';
   const list = (policy && isObj(policy.corps) && Object.hasOwn(policy.corps, vcenterId) && Array.isArray(policy.corps[vcenterId]))
     ? policy.corps[vcenterId] : [];
   if (list.length && list.some((e) => policyEntryMatches(server.ip, e))) return 'approved';
@@ -162,7 +204,21 @@ export function policyVerdict(policy, vcenterId, server) {
   return 'unapproved';
 }
 
-const aggPolicy = (set) => (set.size === 0 ? 'none' : set.size === 1 ? [...set][0] : 'mixed');
+// v2.785(GN N-B2·N-I2): 판정하지 않은 값(local · unsupported)은 판정한 값이 하나라도 있으면 서버 집계에서 뺀다
+//   ('비승인 + 로컬 스텁' 을 '법인마다 다름' 으로 적지 않게 — 그 문구는 승인·비승인이 섞였다는 뜻이다).
+const NOT_JUDGED = new Set(['local', 'unsupported']);
+const aggPolicy = (set) => {
+  const all = [...set];
+  const judged = all.filter((x) => !NOT_JUDGED.has(x));
+  const use = judged.length ? judged : all;
+  return use.length === 0 ? 'none' : use.length === 1 ? use[0] : 'mixed';
+};
+
+/** v2.785(GN N-I2): 쓰는 서버가 전부 루프백인가(게스트 안 로컬 DNS 스텁 — 실제 상위 DNS 는 보이지 않는다). */
+export function isLocalStub(info) {
+  return !!info && info.state === 'reported' && Array.isArray(info.servers) && info.servers.length > 0
+    && info.servers.every((ip) => specialOf(ip) === 'loopback');
+}
 
 /** 주소 → 소유 VM·호스트 색인(스냅샷 전체 — 범위 밖도 포함. 가림은 표시 단계에서). */
 function ownerIndex(snap) {
@@ -171,16 +227,20 @@ function ownerIndex(snap) {
   for (const vm of Array.isArray(snap?.vms) ? snap.vms : []) {
     if (!vm || typeof vm !== 'object') continue;
     const ips = new Set();
-    for (const x of [vm.ipAddress, ...(Array.isArray(vm.ipAddresses) ? vm.ipAddresses : [])]) {
+    // v2.785(GN N-B1): 미수집 VM(dns 키 없음)은 2.695 이전 수집기가 보낸 것이다 — 그 수집기는 GuestNicInfo.dnsConfig 의 DNS 서버 주소까지
+    //   ipAddresses 에 실었다(ipam.md v2.695). 그 목록을 소유로 쓰면 8.8.8.8·사내 물리 AD 가 엉뚱한 VM 의 것이 되어 공인·비승인 판정이
+    //   사라지고 '다른 법인 DNS' 거짓 양성이 났다. 대표 IP(ipAddress = 첫 NIC IP — 스키마상 ipAddress 가 dnsConfig 보다 앞)만 쓴다.
+    const src = Object.hasOwn(vm, 'dns') ? [vm.ipAddress, ...(Array.isArray(vm.ipAddresses) ? vm.ipAddresses : [])] : [vm.ipAddress];
+    for (const x of src) {
       const a = canonAddr(x);
-      if (a && !a.includes(':')) ips.add(a);
+      if (a && !a.includes(':') && !specialOf(a)) ips.add(a);   // 루프백·링크 로컬은 어느 VM 의 것도 아니다
     }
     for (const a of ips) { const l = vms.get(a); if (l) l.push(vm); else vms.set(a, [vm]); }
   }
   for (const h of Array.isArray(snap?.hosts) ? snap.hosts : []) {
     if (!h || typeof h !== 'object') continue;
     const ips = new Set();
-    for (const x of [h.mgmtIp, h.name]) { const a = canonAddr(x); if (a && !a.includes(':')) ips.add(a); }
+    for (const x of [h.mgmtIp, h.name]) { const a = canonAddr(x); if (a && !a.includes(':') && !specialOf(a)) ips.add(a); }
     for (const a of ips) { const l = hosts.get(a); if (l) l.push(h); else hosts.set(a, [h]); }
   }
   return { vms, hosts };
@@ -231,14 +291,17 @@ export function buildDnsIndex({ snap, policy = {}, classify = null, allowed = nu
   const serverOf = (ip) => {
     let s = servers.get(ip);
     if (s) return s;
-    const ownVms = owners.vms.get(ip) || [];
-    const ownHosts = owners.hosts.get(ip) || [];
+    // v2.785(GN N-B1): 잘 알려진 공인 DNS 표를 VM·호스트 소유보다 먼저 본다 — 공인 resolver 는 법인 소유가 아니므로 소유 집합도 비운다
+    //   (예전 순서 VM → 호스트 → 공인 표에서는 오염된 스냅샷 IP 하나로 8.8.8.8 이 'VM' · '다른 법인 DNS' 가 되었다).
+    const known = Object.hasOwn(PUBLIC_DNS, ip);
+    const ownVms = known ? [] : (owners.vms.get(ip) || []);
+    const ownHosts = known ? [] : (owners.hosts.get(ip) || []);
     const special = specialOf(ip);
     let kind = 'unknown'; let who = null; let publicName = null; let owner = null; let ownerKind = null;
     const pick = (list) => list.find((x) => inScope(x.vcenterId) && x.powerState === 'POWERED_ON') || list.find((x) => inScope(x.vcenterId)) || list[0];
-    if (ownVms.length) { kind = 'vm'; owner = pick(ownVms); ownerKind = 'VM'; }
+    if (known) { kind = 'public'; publicName = PUBLIC_DNS[ip]; }
+    else if (ownVms.length) { kind = 'vm'; owner = pick(ownVms); ownerKind = 'VM'; }
     else if (ownHosts.length) { kind = 'host'; owner = pick(ownHosts); ownerKind = 'ESXi 호스트'; }
-    else if (PUBLIC_DNS[ip]) { kind = 'public'; publicName = PUBLIC_DNS[ip]; }
     const c = cls(ip);
     if (kind === 'unknown' && c === 'public') kind = 'public';
     if (owner) {
@@ -252,7 +315,7 @@ export function buildDnsIndex({ snap, policy = {}, classify = null, allowed = nu
     if (kind === 'unknown' && typeof ledgerOf === 'function' && !special) { try { ledger = ledgerOf(ip) || null; } catch { ledger = null; } }
     s = {
       ip, kind, who, publicName, cls: c, special,
-      vms: 0, firstVms: [], corps: [], policy: 'none', unapprovedVms: 0, otherCorpVms: 0,
+      vms: 0, stubVms: 0, firstVms: [], corps: [], policy: 'none', unapprovedVms: 0, otherCorpVms: 0,
       owners: ownVms.length || ownHosts.length,
       ...(ledger ? { ledger } : {}),
       _ownerVcs: ownerVcs, _corps: new Map(), _verdicts: new Set(), _users: [],
@@ -264,13 +327,15 @@ export function buildDnsIndex({ snap, policy = {}, classify = null, allowed = nu
   for (const r of vms) {
     if (r.info.state !== 'reported') continue;
     r.verdicts = [];
+    r.stub = isLocalStub(r.info);   // v2.785(GN N-I2): 로컬 스텁만 — 판정하지 않는다(local)
     for (let i = 0; i < r.info.servers.length; i++) {
       const ip = r.info.servers[i];
       const s = serverOf(ip);
-      const verdict = policyVerdict(policy, r.vc, s);
-      const otherCorp = s._ownerVcs.size > 0 && !s._ownerVcs.has(r.vc);
-      r.verdicts.push({ ip, verdict, otherCorp, public: s.kind === 'public', position: i + 1 });
+      const verdict = r.stub ? 'local' : policyVerdict(policy, r.vc, s);
+      const otherCorp = !r.stub && s._ownerVcs.size > 0 && !s._ownerVcs.has(r.vc);
+      r.verdicts.push({ ip, verdict, otherCorp, public: !r.stub && s.kind === 'public', position: i + 1 });
       s.vms += 1;
+      if (r.stub) s.stubVms += 1;
       if (s.firstVms.length < FIRST_VMS) s.firstVms.push(String(r.vm.name || r.vm.id || ''));
       s._corps.set(r.vc, (s._corps.get(r.vc) || 0) + 1);
       s._verdicts.add(verdict);
@@ -288,7 +353,8 @@ export function buildDnsIndex({ snap, policy = {}, classify = null, allowed = nu
   return { vms, servers, perVc, vcName, vcList, inScope, vcFilter };
 }
 
-/** VM 단위 표지(어느 서버든) — 'public' | 'unapproved' | 'other-corp' | 'mismatch' | 'single'. */
+/** VM 단위 표지(어느 서버든) — 'public' | 'unapproved' | 'other-corp' | 'mismatch' | 'single' | 'local-stub'. */
+// v2.785(GN N-I2): 로컬 스텁만 쓰는 VM 은 'single'(그 서버가 내려가면 해석이 멈춤) 대신 'local-stub'(상위 DNS 모름)이다.
 function vmFlags(r) {
   const f = [];
   const v = r.verdicts || [];
@@ -296,7 +362,8 @@ function vmFlags(r) {
   if (v.some((x) => x.verdict === 'unapproved')) f.push('unapproved');
   if (v.some((x) => x.otherCorp)) f.push('other-corp');
   if (r.info.mismatch) f.push('mismatch');
-  if (r.info.servers.length === 1) f.push('single');
+  if (r.stub) f.push('local-stub');
+  else if (r.info.servers.length === 1) f.push('single');
   return f;
 }
 
@@ -342,7 +409,7 @@ export function analyzeVmDns(o = {}) {
   }).sort((a, b) => byName(a.name, b.name));
 
   const k = { vms: 0, reported: 0, unknown: 0, notCollected: 0, servers: servers.size, serversByKind: { vm: 0, host: 0, public: 0, unknown: 0 },
-    unapprovedVms: 0, publicVms: 0, mismatchVms: 0, otherCorpVms: 0, singleDnsVms: 0, dhcpVms: 0, staticVms: 0, policyCorps: 0 };
+    unapprovedVms: 0, publicVms: 0, mismatchVms: 0, otherCorpVms: 0, singleDnsVms: 0, localStubVms: 0, dhcpVms: 0, staticVms: 0, policyCorps: 0 };
   const domains = new Map(); const search = new Map();
   for (const r of vms) {
     k.vms += 1; k[r.info.state] += 1;
@@ -353,6 +420,7 @@ export function analyzeVmDns(o = {}) {
     if (fl.includes('mismatch')) k.mismatchVms += 1;
     if (fl.includes('other-corp')) k.otherCorpVms += 1;
     if (fl.includes('single')) k.singleDnsVms += 1;
+    if (fl.includes('local-stub')) k.localStubVms += 1;
     if (r.info.dhcp === true) k.dhcpVms += 1; else if (r.info.dhcp === false) k.staticVms += 1;
     const dn = r.info.domain || '(도메인 없음)';
     domains.set(dn, (domains.get(dn) || 0) + 1);
@@ -366,13 +434,20 @@ export function analyzeVmDns(o = {}) {
   const list = sorted.slice(0, SERVERS_MAX).map((s) => serverOut(s, o.probeOf));
 
   // 법인 × DNS 서버 — 열 = 사용 VM 상위 8개 서버.
-  const cols = sorted.slice(0, MATRIX_COLS);
+  // v2.785(GN N-I2): 로컬 스텁만 쓰는 VM 은 행에 넣지 않고, 그런 VM 만 쓰는 주소는 열이 되지 않는다.
+  // v2.785(GN N-B3): 행마다 칸별 otherCorp(그 법인이 그 서버의 소유 vCenter 집합에 없음)를 싣는다 — 웹이 대표 소유자 1명으로
+  //   다시 판정하면 같은 사설 주소를 여러 법인이 가진 경우 KPI(0)와 다른 'amber' 를 칠했다. 범위 밖 vCenter id 는 싣지 않는다(불리언만).
+  const cols = sorted.filter((s) => s.vms - s.stubVms > 0).slice(0, MATRIX_COLS);
   const colIdx = new Map(cols.map((s, i) => [s.ip, i]));
   const rowMap = new Map();
   for (const r of vms) {
-    if (r.info.state !== 'reported' || !r.info.servers.length) continue;
+    if (r.info.state !== 'reported' || !r.info.servers.length || r.stub) continue;
     let row = rowMap.get(r.vc);
-    if (!row) { row = { vcenterId: r.vc, name: vcName.get(r.vc) || r.vc, cells: cols.map(() => 0), other: 0, total: 0 }; rowMap.set(r.vc, row); }
+    if (!row) {
+      row = { vcenterId: r.vc, name: vcName.get(r.vc) || r.vc, cells: cols.map(() => 0), other: 0, total: 0,
+        otherCorp: cols.map((s) => s._ownerVcs.size > 0 && !s._ownerVcs.has(r.vc)) };
+      rowMap.set(r.vc, row);
+    }
     row.total += 1;
     let outside = false;
     for (const ip of r.info.servers) { const i = colIdx.get(ip); if (i == null) outside = true; else row.cells[i] += 1; }
@@ -414,7 +489,8 @@ export function vmRow(r, vcName, serverIp = null) {
     if (hit?.verdict === 'unapproved') flags.push('unapproved');
     if (hit?.otherCorp) flags.push('other-corp');
     if (r.info.mismatch) flags.push('mismatch');
-    if (r.info.servers.length === 1) flags.push('single');
+    if (r.stub) flags.push('local-stub');
+    else if (r.info.servers.length === 1) flags.push('single');
   }
   return {
     id: String(r.vm.id ?? ''), name: String(r.vm.name ?? ''), vcenterId: r.vc, vcenterName: vcName.get(r.vc) || r.vc,
@@ -422,6 +498,8 @@ export function vmRow(r, vcName, serverIp = null) {
     dnsState: r.info.state,
     servers: r.info.servers, osServers: r.info.osServers, nicServers: r.info.nicServers,
     domain: r.info.domain, search: r.info.search, dhcp: r.info.dhcp, position, flags, nics: r.info.nics,
+    // v2.785(GN N-B3): 이 VM 이 쓰는 서버 중 '다른 법인 DNS' 인 주소 — 웹 주소 칩 색이 대표 소유자로 다시 판정하지 않게.
+    otherCorpIps: v.filter((x) => x.otherCorp).map((x) => x.ip),
   };
 }
 
@@ -456,7 +534,8 @@ export function vmDetail(o = {}, id) {
 /** CSV 행(범위 안 · 템플릿 제외 · 필터 적용) — 판정 글자는 서버가 만든다(백틱·별표 없음). */
 // v2.783(점검 Q5 — N-I1): 'none' = 보고는 했지만 DNS 서버가 0개(웹 vmDnsText ipsText 의 '(DNS 없음)' 과 같은 뜻). **CSV 전용 표지**다 —
 //   vmFlags(화면·KPI·필터가 읽는 flags)에는 넣지 않는다(웹 flagChips 가 모르는 표지를 원문 회색 칩으로 보이게 되므로 화면 쪽은 별건).
-export const FLAG_TEXT = Object.freeze({ none: 'DNS 없음', public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC≠OS', single: 'DNS 1개' });
+export const FLAG_TEXT = Object.freeze({ none: 'DNS 없음', public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC≠OS', single: 'DNS 1개',
+  'local-stub': '로컬 스텁만(상위 DNS 모름)' });
 export const STATE_TEXT = Object.freeze({ reported: '보고함', unknown: '모름(VMware Tools 미보고)', notCollected: '미수집(수집기가 DNS 를 싣지 않음)' });
 export function csvRows(o = {}) {
   const idx = o.index || buildDnsIndex(o);
@@ -485,7 +564,7 @@ export function queryNameOf(domain) {
  * 도달성 점검 대상(POST /tools/vm-dns/probe) — **스냅샷 전체**에서 계산한다(요청 본문에서 주소를 받지 않는다).
  *  · 그 서버를 쓰는 VM 이 전부 엣지 위임(site) vCenter → skip 'edge-only'(중앙에서 닿지 않는 것이 정상이다 — 실패로 세지 않는다)
  *  · 전부 목(데모) vCenter → skip 'mock'(없는 응답을 지어내지 않는다)
- *  · 루프백·링크 로컬·멀티캐스트 등 → skip 'local'(중앙에서 물으면 중앙 자신의 값이다)
+ *  · 루프백·링크 로컬·멀티캐스트 등 → skip 'local'(중앙에서 물으면 중앙 자신의 값이다 — IPv4 사상·비축약 IPv6 표기 포함, v2.785 GN N-B4)
  * 사용 VM 많은 순 — 시간 예산에 걸리면 덜 쓰는 서버가 빠진다.
  * @param {Function} [isMockVc] vcenter → boolean
  */

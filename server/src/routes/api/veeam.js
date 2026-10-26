@@ -29,7 +29,7 @@ import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
-import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
+import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, marksCorruptKept, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -433,7 +433,8 @@ async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const sv = vmScope(vms, scope || {});
   const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev, runningStale, noInventory }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
   // v2.784: 사람이 정한 표시의 수 — 같은 범위(전원·제외) 목록. 연동 없는 vCenter 는 Veeam '없음' 확정이라 백업 필요 표시가 모두 미백업이다.
-  row.marks = markCounts(sv.vms, getMarks(), match?.byVm || null, { veeamKnown: row.veeam != null || !isLinked, absentKnown: !row.veeamAbsentUnknown });
+  // v2.785(GR R-B2): 표시 파일을 못 읽었으면 수는 0 이 아니라 모름(null) — 화면 '—' · CSV 빈칸 · 합계는 backupTotals 가 따로 센다.
+  row.marks = marksUnreadable() ? null : markCounts(sv.vms, getMarks(), match?.byVm || null, { veeamKnown: row.veeam != null || !isLinked, absentKnown: !row.veeamAbsentUnknown });
   return { row, match, ev, vcnt, sc, views, linked: isLinked, scopedVms: sv.vms };
 }
 
@@ -461,8 +462,10 @@ async function summaryData(req, snap, scope) {
     // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유). 범위(전원)와 무관한 작업 단위 값이다.
     if (admin) for (const v of b.views) for (const j of v.runningJobs || []) if (jobs.length < 30) jobs.push({ vcenter: vc.name || vc.id, server: v.name, name: j.name, pg: j.pg });
   }
+  // v2.785(GR R-B2): 재시작 뒤에는 손상 사본만 남아 '파일 없음'(빈 표시)으로 읽힌다 — 사본이 있으면 알린다(같은 프로세스 손상이면 위 안내 하나만)
+  const unreadable = marksUnreadable();
   return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
-    marksUnreadable: marksUnreadable() || undefined };
+    marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
 async function detailData(req, snap, t, scope) {
@@ -473,11 +476,12 @@ async function detailData(req, snap, t, scope) {
   const snapKnown = b.row.snap != null;
   const now = Date.now();
   const marks = getMarks();
+  const unreadable = marksUnreadable();   // v2.785(GR R-B2)
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]) }));   // v2.782(점검 K4 B-B3) · v2.784 표시
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
-    writable: marksWritable(req, snap, vc.id), marksUnreadable: marksUnreadable() || undefined };
+    writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
 /** v2.784: 이 계정이 이 vCenter 의 백업 표시를 바꿀 수 있는가 — 화면이 편집 칸을 여는 값(서버 PUT 판정과 같은 조건). */
@@ -597,7 +601,8 @@ export function registerBackupStatus(api) {
         lines.push(csvLine([d.vcenter.name, vm.folder, vm.name, vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '', st(v), v && Number.isFinite(v.pg) ? v.pg : '',
           v?.jobs?.join(' | ') || '', v && Number.isFinite(v.rp) && v.rp >= 0 ? v.rp : '', iso(v?.lb), v ? (v.lr || v.lastResult || '') : '',
           s.ev === undefined ? '모름' : s.ev ? (s.ev.n ?? '') : 0, iso(s.ev?.ts), s.now && !s.now.stale ? s.now.n : '', s.now?.stale ? '예' : '',
-          CRIT_TEXT[vm.m?.crit] || '', vm.m?.need ? '예' : '', vm.m?.memo || '']));
+          // v2.785(GR R-B2): 표시 파일을 못 읽었으면 빈칸('없음' 으로 읽힌다)이 아니라 모름 — Veeam·스냅샷 열과 같은 표기
+          ...(d.marksUnreadable ? ['모름', '모름', ''] : [CRIT_TEXT[vm.m?.crit] || '', vm.m?.need ? '예' : '', vm.m?.memo || ''])]));
       }
       logAudit({ user: req.user?.username, action: 'backup-detail.csv', target: t.vcenterId, detail: `${n} rows · ${scopeText(scope)} · 보기 ${filter}${filter === 'rpo' ? ` ${rpoDays}일` : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

@@ -8,7 +8,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../api.js';
-import { JOB_STATE, STEP_STATE_ICON, STEP_TONE, stepTimeText, jobLine, confirmText } from './edgeTokenApplyText.js';
+import { JOB_STATE, STEP_STATE_ICON, STEP_TONE, stepTimeText, jobLine, confirmText, applyStartOutcome } from './edgeTokenApplyText.js';
 
 const TONE = { ok: '#4ade80', bad: '#f87171', warn: 'var(--amber)', muted: 'var(--text-dim)' };
 
@@ -72,7 +72,11 @@ export default function EdgeTokenApply({ agent, canRun = true, onDone }) {
     setBusy(true); setErr('');
     try {
       const r = await postJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}/apply`, {});
-      setJob(r.job); poll(r.job.id);
+      // v2.785(GE A-B2): 409(이미 진행 중)는 던지지 않고 본문으로 온다 — r.job 을 바로 읽지 않는다(applyStartOutcome).
+      const o = applyStartOutcome(r);
+      if (o.error) setErr(o.error);
+      if (o.job) setJob(o.job);
+      if (o.pollId) poll(o.pollId);
     } catch (e) {
       setErr(e.status === 403 ? '설정 소유자(전체 범위)만 개별 토큰을 발급·적용할 수 있습니다.' : e.message);
       if (e.body?.jobId) poll(e.body.jobId);

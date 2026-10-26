@@ -14,7 +14,7 @@ import { DAY_LABELS, daysLabel, splitEmails, isWinPattern, isLnxPattern, timeTex
  */
 const SEG = { flex: 'none', padding: '4px 12px' };
 const PRESETS = [[1, '1시간'], [3, '3시간'], [6, '6시간'], [12, '12시간'], [24, '24시간'], [48, '2일'], [168, '7일']];
-const WIN_RULES = [['reserved', '시스템 예약·복구 볼륨', '드라이브 문자 없는 볼륨(\\\\?\\Volume{…}) — Tools 가 이런 경로를 보고할 때만 해당합니다'], ['iso', 'CD-ROM·ISO 드라이브(추정)', '남은 공간 0 이고 용량이 작은 드라이브 — 경로로는 드라이브 종류를 알 수 없어 추정입니다'], ['mountdir', '폴더 마운트 지점', 'C:\\Mount\\… 처럼 드라이브 안에 붙인 볼륨']];
+const WIN_RULES = [['reserved', '시스템 예약·복구 볼륨', '드라이브 문자 없는 볼륨(\\\\?\\Volume{…}) — Tools 가 이런 경로를 보고할 때만 해당합니다'], ['iso', 'CD-ROM·ISO 드라이브(추정)', '남은 공간 0 이고 용량이 작은 드라이브(C: 제외 — 가득 찬 C: 는 경보에 남깁니다) — 경로로는 드라이브 종류를 알 수 없어 추정입니다'], ['mountdir', '폴더 마운트 지점', 'C:\\Mount\\… 처럼 드라이브 안에 붙인 볼륨']];
 const LNX_RULES = [['boot', '/boot · /boot/efi', '부트 파티션 — 커널 몇 개로 늘 높게 참'], ['virt', '/dev · /run · /sys · /proc', 'tmpfs·devtmpfs 같은 메모리 파일시스템'], ['snap', '/snap', 'snap 패키지 루프 마운트 — 늘 100%'], ['iso', '/mnt/cdrom · /media', 'ISO·이동식 매체'], ['docker', '/var/lib/docker · /var/lib/containers · /var/lib/kubelet/pods', '컨테이너 overlay 계층(같은 디스크가 여러 번 보임)']];
 
 const box = { padding: 14, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 };

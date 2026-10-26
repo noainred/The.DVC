@@ -353,7 +353,8 @@ export function rowStateOf(row) {
     return ROW_STATE.UNKNOWN;
   }
   const fact = row?.edge?.fact || '';
-  if (st === PROBE_STATE.OK) {
+  // v2.785(GE O-B1): **낡은 200**(낡음 경계 초과)은 지금 정상이라는 근거가 아니다 — 점검하지 않은 행과 같이 아래로 내려간다.
+  if (st === PROBE_STATE.OK && row?.probe?.stale !== true) {
     if (hygiene) return ROW_STATE.WARN;
     if (fact === EDGE_TOKEN_FACT.SHARED || row?.central?.mode === TOKEN_MODE.SHARED) return ROW_STATE.WARN;
     if (row?.edge?.centralRole?.enabled || row?.centralRole?.kind === 'central-enabled') return ROW_STATE.WARN;
@@ -405,8 +406,10 @@ export function kpisOf(scan) {
     k[rowStateOf(r)] += 1;
     if (r.central?.mode === TOKEN_MODE.SHARED) k.sharedToken += 1;
     const st = r.probe?.state || PROBE_STATE.NOT_RUN;
-    if (ANSWERED_STATES.includes(st)) answered += 1;
-    if (st === PROBE_STATE.OK) probeOk += 1;
+    // v2.785(GE O-B1): 낡은 응답(probe.stale)은 '지금' 측정이 아니다 — 분모·분자 둘 다에서 뺀다(분자 ⊆ 분모 유지).
+    const fresh = r.probe?.stale !== true;
+    if (fresh && ANSWERED_STATES.includes(st)) answered += 1;
+    if (fresh && st === PROBE_STATE.OK) probeOk += 1;
   }
   k.dupFault = (scan?.duplicates || []).filter((d) => d.grade === 'fault').length;
   k.measured = answered;
@@ -421,16 +424,55 @@ export function kpisOf(scan) {
  * 프로브 결과를 행에 얹는다(순수 — 새 배열을 돌려준다).
  * ⚠ 행의 `agent` 로 맞춘다. 순서에 의존하지 말 것(예산 초과로 건너뛴 항목이 섞인다).
  */
-export function mergeProbe(scan, probes = []) {
+export function mergeProbe(scan, probes = [], { now = Date.now(), staleMs = EDGE_REPORT_STALE_MS } = {}) {
   const by = new Map(probes.filter(Boolean).map((p) => [norm(p.agent), p]));
+  const staleLimit = Number(staleMs) > 0 ? Number(staleMs) : EDGE_REPORT_STALE_MS;
   return {
     ...scan,
     rows: (scan?.rows || []).map((r) => {
       const p = by.get(norm(r.agent));
       if (!p) return r;
-      return { ...r, probe: p.probe || null, centralRole: p.centralRole || null };
+      return { ...r, probe: probeForRow(r, p, { now, staleLimit }), centralRole: p.centralRole || null };
     }),
   };
+}
+
+/** 끝 슬래시를 뗀 URL(선형 — 정규식 `/\/+$/` 는 긴 입력에서 O(n²)). */
+function urlKey(u) {
+  const s = String(u ?? '').trim();
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end -= 1;
+  return s.slice(0, end);
+}
+
+/**
+ * v2.785(GE O-B1): 보관된 프로브를 **지금 등록값**에 비춰 본다(순수).
+ *  ⓐ 프로브 당시 등록부 지문(8자)·URL 이 지금과 다르면 그 결과는 **지금 값의 증명이 아니다** → `not-run`(+ `changed`).
+ *     예전에는 관리자가 토큰을 고친(또는 잘못 바꾼) 뒤에도 옛 200 이 새 지문 옆에 '같음(증명)'·정상으로 남았다.
+ *     지문·URL 이 없는 보관분(데모 시드·옛 호출부)은 대조하지 않는다.
+ *  ⓑ 낡음 경계(엣지 보고와 같은 `STALE_MS`)를 넘긴 결과는 `stale` 을 단다 — 값은 지우지 않고, rowStateOf 가 '정상' 으로
+ *     세지 않으며 kpisOf 가 지금 성공률에 넣지 않는다. 시각이 없으면 판정하지 않는다.
+ */
+function probeForRow(r, p, { now, staleLimit }) {
+  const probe = p.probe || null;
+  if (!probe || typeof probe !== 'object') return null;
+  if (probe.state && probe.state !== PROBE_STATE.NOT_RUN) {
+    const fpChanged = typeof p.tokenShort === 'string' && p.tokenShort !== String(r.collector?.short || '').slice(0, 8);
+    const urlChanged = typeof p.url === 'string' && urlKey(p.url) !== urlKey(r.url);
+    if (fpChanged || urlChanged) {
+      const what = fpChanged && urlChanged ? '수집 토큰·URL' : fpChanged ? '수집 토큰' : 'URL';
+      return {
+        at: Number(probe.at) > 0 ? Number(probe.at) : null,
+        ms: 0, state: PROBE_STATE.NOT_RUN, httpStatus: null, evidence: 'unknown',
+        changed: true, changedWhat: fpChanged && urlChanged ? 'token+url' : fpChanged ? 'token' : 'url', prevState: probe.state,
+        reason: `지난 점검 뒤 등록부의 ${what}이 바뀌었습니다 — 바뀐 뒤 다시 점검하지 않아 지금 값으로는 확인하지 못했습니다. ‘지금 점검’ 을 누르세요.`,
+      };
+    }
+  }
+  const at = Number(probe.at);
+  if (!(at > 0) || !Number.isFinite(Number(now))) return probe;
+  const ageMs = Math.max(0, Number(now) - at);
+  return { ...probe, ageMs, stale: ageMs > staleLimit, staleMs: staleLimit };
 }
 
 /** 엣지 토큰 모드 — 자기보고의 `selfProbe` 가 말해 주는 **실측**이다(추정이 아니다). */

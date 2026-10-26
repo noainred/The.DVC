@@ -771,7 +771,7 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
  *  ① hist: 1시간 칸, 모든 포트 — d 는 고른 날로 끝나는 7일(히트맵 B), w·m 은 그 기간(차트·히트맵 A·B 를 함께 채운다)
  *  ② chart: d 만, 대상 포트만 15분 칸(15분 집계 보관 31일 안일 때 — 지나면 hist 의 그날을 쓴다)
  *  ③ prev: 요청했을 때만, 대상 포트만 — 앞 기간
- *  ④ idle: 지난 30일 하루 칸, 모든 포트(유휴 판정)
+ *  ④ idle: 지난 30일, 모든 포트(유휴 판정) — 3시간 칸을 지역 하루로 접는다(v2.785 — 하루 버킷은 UTC 하루다)
  * 단위·off 가 틀리면 400(조용히 다른 기간을 보여 주지 않는다).
  */
 async function portUsageFor(req, res) {
@@ -799,19 +799,28 @@ async function portUsageFor(req, res) {
   const base = pu.usageBase({ period, ports, hist, histSince, now });
   const members = pu.usageTargetMembers(base, { view, target: req.query.target ?? null });
   let chart = null, prev = null, daily30 = null;
+  // v2.785(GI I-B4): 차트·앞 기간의 칸 폭·칸 수는 **응답의 bucketMs** 로 만든다(pu.seriesFrame) — perfDb 는 15분 표 보관
+  //   (SANSW_PERF_ROLLUP_15M_DAYS)이 지난 구간을 1시간 칸으로 돌려주는데, 15분·96칸으로 단정하면 96칸 중 72칸이 비었다.
+  const Q15 = 900_000;
   if (members.length) {
-    if (isD && period.fine) chart = { res: await q(period.start, period.end, 900_000, members), since: period.start, bucketMs: 900_000, n: 96 };
+    if (isD && period.fine) {
+      const cr = await q(period.start, period.end, Q15, members);
+      chart = { res: cr, ...pu.seriesFrame(cr, { since: period.start, end: period.end, wantMs: Q15 }) };
+    }
     if (req.query.prev === '1') {
       const pp = pu.periodOf(unit, period.off - 1, { now, retentionDays: retentionDays + 400 });
       if (!pp.issue) {
-        const bm = isD && pp.fine ? 900_000 : HOUR;
-        prev = { res: await q(pp.start, pp.end, bm, members), since: pp.start, bucketMs: bm, n: Math.round((pp.end - pp.start) / bm), label: pp.label };
+        const want = isD && pp.fine ? Q15 : HOUR;
+        const pr = await q(pp.start, pp.end, want, members);
+        prev = { res: pr, ...pu.seriesFrame(pr, { since: pp.start, end: pp.end, wantMs: want }), label: pp.label };
       }
     }
   }
-  const idleSince = pu.dayStartOf(now) - (pu.IDLE_DAYS - 1) * DAY;
-  const idleRes = await q(idleSince, idleSince + pu.IDLE_DAYS * DAY, DAY);
-  daily30 = pu.denseByPort(idleRes, { since: idleSince, bucketMs: DAY, n: pu.IDLE_DAYS, now });
+  // v2.785(GI I-B3): 유휴 30일은 3시간 칸(지역 자정의 정배수)으로 읽어 지역 하루로 접는다 — 하루(DAY) 버킷은 epoch 정배수라
+  //   UTC 하루(한국 09:00 경계)로 묶여 첫 한국 아침 표본이 버려지고 데이터 일수가 +1 됐다. 1시간 칸은 768포트에서 요청당 +0.5~0.7초라 쓰지 않는다.
+  const iw = pu.idleWindow(now);
+  const idleRes = await q(iw.since, iw.until, iw.bucketMs);
+  daily30 = pu.idleDailyOf(idleRes, { ...iw, now });
   const r = pu.buildPortUsage({ period, ports, hist, histSince, chart, prev, daily30, view, target: req.query.target ?? null, now, base });
   if (r.target?.chart?.prev && prev) r.target.chart.prev.label = prev.label;
   // 조닝 상대(포트 하나일 때만) — 트래픽 몫이 아니라 조닝 설정상의 상대다. 전 포트로 넓히지 말 것(O(zone×멤버²)).

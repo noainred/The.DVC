@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote, CRIT } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote, CRIT, marksLine, marksNotice } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 
@@ -66,7 +66,8 @@ export default function BackupSummaryTool() {
   }, [opts]);
 
   if (!data && loading) return <Loading />;
-  if (!data && error) return <ErrorBox message={error?.status === 403 ? '이 도구를 쓸 권한이 없습니다.' : String(error.message || error)} />;
+  // v2.785(GV C-B4): 오류 객체를 그대로 — 403 을 문자열로 바꾸면 ErrorBox 가 권한 안내(AccessDenied)로 바꾸지 못했다
+  if (!data && error) return <ErrorBox error={error} />;
   if (!data) return null;
 
   const rows = Array.isArray(data.rows) ? data.rows : [];
@@ -79,6 +80,9 @@ export default function BackupSummaryTool() {
   const seg = (n) => (splitTotal ? `${(n / splitTotal) * 100}%` : '0%');
   const rpoKey = `d${opts.rpoDays}`;
   const note = scopeNote(data.scope, t);
+  // v2.785(GR R-B2): 표시 파일을 못 읽었으면 수는 '—'(0 이 아니다) · 안내는 세부내용과 같은 문구
+  const mk = marksLine(t.marks, data.marksUnreadable);
+  const mkNote = marksNotice(data);
   const chips = [['all', `전체 ${rows.length}`], ['davinci', `다빈치 ${rows.filter((r) => !isIrs(r.name)).length}`], ['irs', `IRS ${rows.filter((r) => isIrs(r.name)).length}`], ['warn', '주의 필요']];
 
   return (
@@ -110,14 +114,16 @@ export default function BackupSummaryTool() {
         <Kpi label={`오래된 백업(${opts.rpoDays}일 초과)`} value={kpi.rpo.value} color="#fb923c" border="#5c3413" sub={kpi.rpo.sub} />
       </div>
       {/* v2.784: 백업 세부내용에서 사람이 정한 표시의 합(같은 범위 — 전원·제외) · 표에는 열을 더하지 않는다(1440 폭 유지) */}
-      {t.marks && (
+      {mk && (
         <div className="card" data-backup-marks="" style={{ padding: '10px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 22px', minWidth: 0, fontSize: 13 }}>
           <b style={{ fontSize: 13 }}>업무 중요도</b>
-          {CRIT.map((c) => <span key={c.key} className="flex" style={{ gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}><CritIcon crit={c.key} withText /><b style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(t.marks[c.key])}</b></span>)}
+          {CRIT.map((c) => <span key={c.key} className="flex" style={{ gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}><CritIcon crit={c.key} withText /><b style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: mk[c.key] == null ? 'var(--text-dim)' : undefined }}>{fmtNum(mk[c.key])}</b></span>)}
           <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} aria-hidden="true" />
-          <span className="flex" style={{ gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}><NeedIcon /><span style={{ color: NEED_COLOR }}>백업 필요</span><b style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(t.marks.need)}</b></span>
-          {t.marks.need > 0 && <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: t.marks.needGap > 0 ? TONE.bad : 'var(--text-dim)' }}>그중 Veeam 백업 안 보임 <b>{fmtNum(t.marks.needGap)}</b>{t.marks.needGapUnknown ? <span className="muted"> (Veeam 확인 불가 {t.marks.needGapUnknown}곳 제외)</span> : null}</span>}
-          <span className="muted" style={{ fontSize: 12, marginLeft: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>{data.marksUnreadable ? '표시 파일을 읽지 못했습니다 — 설정 폴더를 확인하세요' : '백업 세부내용에서 VM 마다 정합니다'}</span>
+          <span className="flex" style={{ gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}><NeedIcon /><span style={{ color: NEED_COLOR }}>백업 필요</span><b style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color: mk.need == null ? 'var(--text-dim)' : undefined }}>{fmtNum(mk.need)}</b></span>
+          {mk.need > 0 && <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: mk.needGap > 0 ? TONE.bad : 'var(--text-dim)' }}>그중 Veeam 백업 안 보임 <b>{fmtNum(mk.needGap)}</b>{mk.needGapUnknown ? <span className="muted"> (Veeam 확인 불가 {mk.needGapUnknown}곳 제외)</span> : null}</span>}
+          {mkNote
+            ? <span style={{ flexBasis: '100%', fontSize: 12, minWidth: 0, overflowWrap: 'anywhere', color: mkNote.tone === 'bad' ? TONE.bad : '#fcd34d' }}>{mkNote.text}</span>
+            : <span className="muted" style={{ fontSize: 12, marginLeft: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>백업 세부내용에서 VM 마다 정합니다</span>}
         </div>
       )}
 

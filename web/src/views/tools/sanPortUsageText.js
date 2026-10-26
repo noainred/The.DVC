@@ -150,9 +150,17 @@ export function imbalanceText(it, slotOf = (p) => p) {
   return `${it.storage} · 포트 ${slotOf(it.port)}: 묶음 평균의 ${it.ratio}배를 받습니다(같은 스토리지로 가는 다른 경로가 덜 쓰이고 있을 수 있습니다).`;
 }
 
+/**
+ * 유휴 요약 한 줄. v2.785(GI I-B1): 스냅샷에 상태가 없는 포트(서버 idle.unknown — 엣지가 문제 포트만 보낸 축약·스냅샷 없음)는
+ * '사용 중이 아닌 포트' 로 단정하지 않고 '상태 모름' 으로 따로 밝힌다. 0개이거나 옛 서버 응답(필드 없음)이면 전과 같은 문구.
+ */
 export function idleSummary(idle) {
   if (!idle) return '';
-  return `지난 ${idle.days}일 피크가 속도의 ${idle.pct}% 미만인 사용 중 포트 ${idle.idle.length}개 · 판단 보류 ${idle.pending.length}개(데이터 ${idle.minDays}일 미만·속도 모름) · 사용 중이 아닌 포트 ${idle.off.length}개(비어 있음·비활성 등)는 유휴로 세지 않습니다.`;
+  const unknown = Array.isArray(idle.unknown) ? idle.unknown.length : 0;
+  const tail = unknown > 0
+    ? `사용 중이 아닌 포트 ${idle.off.length}개(비어 있음·비활성 등)와 상태 모름 ${unknown}개(스위치 스냅샷에 상태가 없는 포트)는 유휴로 세지 않습니다.`
+    : `사용 중이 아닌 포트 ${idle.off.length}개(비어 있음·비활성 등)는 유휴로 세지 않습니다.`;
+  return `지난 ${idle.days}일 피크가 속도의 ${idle.pct}% 미만인 사용 중 포트 ${idle.idle.length}개 · 판단 보류 ${idle.pending.length}개(데이터 ${idle.minDays}일 미만·속도 모름) · ${tail}`;
 }
 
 /** 화면 하단 정직 표기(시안과 같은 다섯 줄). */

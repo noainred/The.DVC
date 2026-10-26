@@ -274,7 +274,12 @@ export function buildVmPartitions(rec, settings, { vcenterId, vmName = '' } = {}
     };
   });
   parts.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || String(a.path).localeCompare(String(b.path)));
-  return { collectedAt: vm.ts, partial: vm.partial, thr, parts };
+  // v2.785(GH H-B1): 시각은 값의 원천(part_latest — 이번 수집)의 것이다. vm_latest 는 부분 합 보류(partialHeld)·partialStale 로
+  //   직전 온전한 행(옛 ts)을 다시 넣으므로 그 ts 를 쓰면 이번 값에 '수집 N시간 전'·'최근 수집이 실패했을 수 있습니다' 가 거짓으로 붙는다.
+  //   partial 은 vm_latest 합계의 표지라 그대로 둔다(보류 합계는 온전한 값 — 값 모르는 파티션은 행마다 '값 모름' 으로 이미 보인다).
+  const partTs = (rec.parts || []).map((p) => Number(p.ts)).filter((t) => Number.isFinite(t) && t > 0);
+  const collectedAt = partTs.length ? Math.max(...partTs) : vm.ts;
+  return { collectedAt, partial: vm.partial, thr, parts };
 }
 
 /** v2.750 VM 상세 — 한 VM 의 게스트 파티션(라우트가 범위를 먼저 검사한 뒤 부른다). */

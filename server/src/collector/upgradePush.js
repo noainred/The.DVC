@@ -18,6 +18,7 @@ import { recordOutbound } from '../util/outboundStats.js'; // v2.587 — 전역 
 import { encodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js';
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { cmpVersion } from '../util/cmpVersion.js'; // v2.785(GE A-B3): 스스로 새 판이 된 수집 서버의 자동 실패를 지우는 데 쓴다
 
 /**
  * v2.741(감사 TIMING-07 — docs/AUDIT-2026-09-11c B3·T1 이 '확인' 으로 남겨 둔 것): 업그레이드 번들 push 동시 개수.
@@ -107,6 +108,15 @@ export function mergeAutoPushStatus(status, lastResult) {
     if (!id) continue;
     const cur = out[id] && typeof out[id] === 'object' ? out[id] : null;
     if (cur?.upgrade && Number(cur.upgrade.at) >= at) continue;
+    /*
+     * v2.785(GE A-B3): push 는 실패했지만 그 뒤 수집 서버가 **스스로** 그 판(또는 더 새 판)이 됐으면(pull 상태 version) 빨간
+     *   '업그레이드 실패(자동)' 를 다음 릴리스까지 남기지 않는다. ⚠ cmpVersion 은 못 읽으면 null 이고 `null >= 0` 은 JS 에서 true 다 —
+     *   null 을 먼저 거른다(버전을 모르면 실패를 그대로 둔다 — 못 읽음 ≠ 성공).
+     */
+    if (it.ok !== true) {
+      const c = cmpVersion(cur?.version, it.version || lastResult.version);
+      if (c != null && c >= 0) continue;
+    }
     out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), auto: true } };
   }
   return out;

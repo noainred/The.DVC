@@ -90,6 +90,9 @@ export function attentionList(rows, n = 6) {
     const sum = gaps.reduce((a, r) => a + r.marks.needGap, 0);
     out.push({ id: 'needgap', tone: 'info', title: `백업 필요인데 Veeam 백업 없음 ${fmtNum(sum)}대`, text: `${gaps.slice(0, 4).map((r) => `${r.name} ${fmtNum(r.marks.needGap)}`).join(' · ')}${gaps.length > 4 ? ' …' : ''} — 백업 세부내용의 ‘백업 필요·미백업’ 보기` });
   }
+  // v2.785(GR R-B2): 표시 파일을 못 읽은 행(marks null)이 있으면 미백업 줄이 소리 없이 사라지지 않게 한 줄(정보 칸 — 행 문제 아님)
+  const marksUnknownN = list.filter((r) => r && r.marks === null).length;
+  if (marksUnknownN) out.push({ id: 'marks-unknown', tone: 'info', title: `백업 표시 수 모름 ${marksUnknownN}곳`, text: '표시 파일을 읽지 못해 중요도·백업 필요·미백업 수를 셀 수 없습니다 — 설정 폴더의 backup-marks.json 을 확인하세요' });
   if (unlinked.length) out.push({ id: 'unlinked', tone: 'info', title: `Veeam 연동 없음 ${unlinked.length}곳`, text: `${unlinked.slice(0, 6).join(' · ')}${unlinked.length > 6 ? ' …' : ''} — 스냅샷 기준만 보입니다` });
   const sorted = out.map((a, i) => [a, i]).sort((x, y) => ((TONE_RANK[x[0].tone] ?? 1) - (TONE_RANK[y[0].tone] ?? 1)) || x[1] - y[1]).map(([a]) => a);
   const info = sorted.filter((a) => a.tone === 'info');
@@ -231,11 +234,35 @@ export const CRIT = [
 ];
 export const critOf = (k) => CRIT.find((c) => c.key === k) || null;
 export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같다(테스트 대조)
-/** 상단 지표 — 중요도별 · 백업 필요 · 미백업(needGap 을 모르면 '—'). */
-export function marksLine(m) {
+/**
+ * 상단 지표 — 중요도별 · 백업 필요 · 미백업(needGap 을 모르면 '—').
+ * v2.785(GR R-B2): unreadable(응답 marksUnreadable)이면 행 marks 가 null 이어도 모든 값 null(모름) + unknown — 화면은 '—'.
+ *   값이 null 이면(서버 합계가 못 읽은 행 때문에 낸 null) 0 으로 바꾸지 않는다('못 읽은 값은 0 이 아니다'). 데이터가 없으면(옛 응답) null.
+ */
+const markNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+export function marksLine(m, unreadable = false) {
+  if (unreadable) return { high: null, mid: null, low: null, need: null, needGap: null, unknown: true };
   if (!m) return null;
-  return { high: m.high || 0, mid: m.mid || 0, low: m.low || 0, need: m.need || 0, needGap: typeof m.needGap === 'number' ? m.needGap : null };
+  return { high: markNum(m.high), mid: markNum(m.mid), low: markNum(m.low), need: markNum(m.need), needGap: markNum(m.needGap),
+    needGapUnknown: m.needGapUnknown > 0 ? m.needGapUnknown : undefined };
 }
+/**
+ * v2.785(GR R-B2): 표시 파일 안내(서머리·세부 같은 문구) — 응답 { marksUnreadable, marksCorruptKept }.
+ *   못 읽음(같은 프로세스 손상 — 수는 '—' · 저장 거부) > 손상 사본만 남음(재시작 뒤 새 파일로 시작 — 예전 표시가 빠졌을 수 있다). 없으면 null.
+ */
+export function marksNotice(d) {
+  if (d?.marksUnreadable) return { tone: 'bad', text: '백업 표시 파일(backup-marks.json)을 읽지 못해 중요도·백업 필요 수를 모릅니다(—) · 표시를 바꿀 수 없습니다 — 설정 폴더의 손상 사본(backup-marks.json.corrupt.*)을 확인하세요.' };
+  if (d?.marksCorruptKept) return { tone: 'warn', text: '예전에 손상돼 옆에 보존된 표시 파일(backup-marks.json.corrupt.*)이 있습니다 — 그때 정한 중요도·백업 필요·메모가 빠졌을 수 있습니다(수는 지금 파일 기준). 확인했으면 설정 폴더에서 그 사본을 치우면 이 안내가 사라집니다.' };
+  return null;
+}
+/** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
+const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low']);
+export function filterCountText(k, counts, marksUnknown) {
+  if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
+  return counts?.[k];
+}
+/** v2.785(GR R-B3): 세부내용 조회 조건 키(vCenter · 전원 · 제외 — 서버가 세는 조건). 저장 직후 재조회가 지금 고른 조건과 같은지 본다. */
+export const detailLoadKey = (vcId, opts) => `${vcId || ''}|${opts?.power || ''}|${opts?.excl ? 1 : 0}`;
 /** 일괄 선택 — 보이는 VM 전부를 더하거나(전부 골라져 있으면) 뺀다. */
 export function toggleAllVisible(sel, visibleIds) {
   const s = new Set(sel || []);

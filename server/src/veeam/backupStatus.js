@@ -140,7 +140,9 @@ export function backupTotals(rows) {
     rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0,
     veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0,
     // v2.784: 사람이 정한 표시(중요도·백업 필요) — needGap(백업 필요인데 Veeam 대상 아님)은 아는 vCenter 만 더하고 모르는 곳을 센다
-    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0 } };
+    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0 },
+    // v2.785(GR R-B2): 표시 파일을 못 읽은 행(marks null) 수 — 하나라도 있으면 marks 합계 값은 null('—' · 부분 합을 합계로 내지 않는다)
+    marksUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     const vm = isFin(r.vm) ? r.vm : null;
     t.vcenters++; t.vm += vm ?? 0; t.snapStale += r.snapStale || 0;
@@ -161,11 +163,13 @@ export function backupTotals(rows) {
     if (isFin(r.snap)) { t.snap += r.snap; t.snapKnownVcs++; t.vmSnapKnown += vm ?? 0; if (r.snapState === 'partial') t.snapPartial++; } else t.snapUnknown++;
     if (r.split) { t.both += r.split.both; t.vOnly += r.split.vOnly; t.sOnly += r.split.sOnly; t.none += r.split.none; } else t.splitUnknown++;
     const m = r.marks;
-    if (m) {
+    if (m === null) t.marksUnknown++;
+    else if (m) {
       for (const k of ['high', 'mid', 'low', 'need']) t.marks[k] += m[k] || 0;
       if (isFin(m.needGap)) t.marks.needGap += m.needGap; else if (m.need > 0) t.marks.needGapUnknown++;
     }
   }
+  if (t.marksUnknown > 0) for (const k of ['high', 'mid', 'low', 'need', 'needGap']) t.marks[k] = null;
   return t;
 }
 

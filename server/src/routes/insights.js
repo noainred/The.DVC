@@ -117,7 +117,9 @@ insightsRouter.get('/finops', async (req, res) => {
       // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 '지금 값' 이 아니다 — 합산에서 빼고 개수로 밝힌다.
       const vcSkip = vcPowerSkipOf(scoped);
       let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
-      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
+      // v2.785(GV P-B4): vCenter 를 고르면(전체 범위 계정 포함) 그 vCenter 에 귀속된 서버만 — 예전에는 범위 계정만 걸러, 전체 범위 계정의
+      //   ?vcenterId=X 가 다른 vCenter 서버 전력을 '(미매핑)' 으로 더한 전 함대 값이 됐다(형제 /power-breakdown 은 vcFilter 로 뺀다).
+      if (scopeLimited || String(req.query.vcenterId || '')) measured = keepMappedMeasured(measured, scoped);
       return { ...computeFinOps(scoped, measured), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
