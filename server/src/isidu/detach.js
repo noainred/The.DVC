@@ -68,7 +68,9 @@ export function startCommand(t, jobId) {
 
 /** 상태 명령 — DVC-DONE <rc> · DVC-RUNNING · DVC-GONE(pid 는 있는데 프로세스도 결과도 없음) · DVC-NONE(작업 파일 없음). */
 export function statusCommand(jobId) {
-  const inner = `${jobVar(jobId)}; if [ -f "$J.rc" ]; then echo "DVC-DONE $(cat "$J.rc")"; elif [ -f "$J.pid" ] && kill -0 "$(cat "$J.pid")" 2>/dev/null; then echo DVC-RUNNING; elif [ -f "$J.pid" ]; then echo DVC-GONE; else echo DVC-NONE; fi`;
+  // ⚠ v2.787.1: 프로세스가 없다고 본 **뒤에** rc 를 한 번 더 본다 — 작업 셸은 rc 를 mv 로 만든 다음 끝나므로, 첫 rc 확인과 kill -0 사이에
+  //   작업이 끝나면 정상 완료를 GONE 으로 오판했다(CI 간헐 실패 — 고아를 바로 거두는 환경에서만 드러난다). 이 재확인을 빼지 말 것.
+  const inner = `${jobVar(jobId)}; if [ -f "$J.rc" ]; then echo "DVC-DONE $(cat "$J.rc")"; elif [ -f "$J.pid" ] && kill -0 "$(cat "$J.pid")" 2>/dev/null; then echo DVC-RUNNING; elif [ -f "$J.rc" ]; then echo "DVC-DONE $(cat "$J.rc")"; elif [ -f "$J.pid" ]; then echo DVC-GONE; else echo DVC-NONE; fi`;
   return `sh -c ${shq(inner)}`;
 }
 export const readOutCommand = (jobId) => `sh -c ${shq(`${jobVar(jobId)}; cat "$J.out"`)}`;
