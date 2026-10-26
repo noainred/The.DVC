@@ -13,13 +13,13 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
+import { installFakePing } from './_fakePing.js';
 
 const TOKEN = 'tok-2733b-shared';
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-'));
 const BIN = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-bin-'));
-const PINGLOG = path.join(BIN, 'pids');
-// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤).
-fs.writeFileSync(path.join(BIN, 'ping'), `#!/bin/sh\necho $$ >> "${PINGLOG}"\nexec sleep 30\n`, { mode: 0o755 });
+// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤). test/_fakePing.js
+const { killOwned } = installFakePing(BIN);
 process.env.PATH = `${BIN}:${process.env.PATH}`;
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
@@ -35,7 +35,6 @@ const runner = await import('../src/ipam/scanRunner.js');
 const { config } = await import('../src/config.js');
 const LOCAL = ss.LOCAL;
 
-const pids = () => { try { return fs.readFileSync(PINGLOG, 'utf8').split('\n').map((x) => Number(x)).filter((n) => n > 0); } catch { return []; } };
 const listen = (handler) => new Promise((r) => { const s = (handler ? http.createServer(handler) : net.createServer((c) => c.end())); s.listen(0, '127.0.0.1', () => r(s)); });
 const quiet = async (fn) => { const w = console.warn; const l = console.log; console.warn = () => {}; console.log = () => {}; try { return await fn(); } finally { console.warn = w; console.log = l; } };
 const hold = (agent) => (ss.releaseHoldStatus?.()?.agents || []).find((a) => a.agent === agent) || null;
@@ -46,7 +45,7 @@ before(async () => { target = await listen(); tport = target.address().port; });
 after(() => {
   runner._setScanDeadlineOverrideForTest?.(null);
   target?.close();
-  for (const pid of pids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* 이미 끝남 */ } }
+  killOwned(); // 이 파일이 띄운 sleep 만 — 로그의 PID 가 다른 프로세스에 재사용됐을 수 있다(test/_fakePing.js)
   fs.rmSync(BIN, { recursive: true, force: true });
 });
 

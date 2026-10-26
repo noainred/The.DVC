@@ -6,23 +6,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { installFakePing } from './_fakePing.js';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'scan2732d-'));
-const PINGLOG = path.join(TMP, 'pids');
-// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다(exec — execFile 시한이 sleep 자체를 죽인다).
-fs.writeFileSync(path.join(TMP, 'ping'), `#!/bin/sh\necho $$ >> "${PINGLOG}"\nexec sleep 30\n`, { mode: 0o755 });
+// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다(exec — execFile 시한이 sleep 자체를 죽인다). test/_fakePing.js
+const { pids, killOwned } = installFakePing(TMP);
 process.env.PATH = `${TMP}:${process.env.PATH}`;
 process.env.IPAM_FPING = '0';
 delete process.env.IPAM_SCAN_WORKER;
 
 const runner = await import('../src/ipam/scanRunner.js');
 
-const pids = () => { try { return fs.readFileSync(PINGLOG, 'utf8').split('\n').map((x) => Number(x)).filter((n) => n > 0); } catch { return []; } };
-
 after(() => {
   runner._setScanDeadlineOverrideForTest?.(null);
   // 워커를 SIGKILL 하면 그 자식(가짜 ping = sleep)은 고아로 남는다 — 테스트가 직접 정리한다.
-  for (const pid of pids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* 이미 끝남 */ } }
+  // 로그의 PID 는 이미 끝나 다른 테스트 파일의 프로세스에 재사용됐을 수 있어, 이 파일이 띄운 sleep 인지 확인한 뒤에만 죽인다.
+  killOwned();
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
