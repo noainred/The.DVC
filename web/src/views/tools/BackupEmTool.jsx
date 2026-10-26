@@ -239,9 +239,10 @@ export default function BackupEmTool() {
               const k = repoTone(r.usedPct);
               const hist = repoHist ? (repoHist[`em:${em.id}#${r.server || ''}|${r.name}`] || repoHist[`em:${em.id}#|${r.name}`] || null) : null;   // 키 = 폴러 recordHistory(백업 서버|이름 · 보고서는 |이름)
               return (
-                <div key={`${r.server}|${r.name}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 2fr) auto auto', alignItems: 'center', gap: '6px 14px', fontSize: 13 }}>
-                  <span style={{ minWidth: 0 }}><b style={{ overflowWrap: 'anywhere' }}>{r.name}</b><div className="muted" style={{ fontSize: 11 }}>{[r.server, r.kind].filter(Boolean).join(' · ') || '—'}</div></span>
-                  <Meter pct={r.usedPct} color={BAR[k]} />
+                // v2.788 Chromium 400px: 4열 격자는 nowrap 칸이 폭을 가져가 이름이 한 글자씩 꺾였다 — 줄바꿈되는 flex(이름·막대 한 줄, 수치·추이는 좁으면 아래로)
+                <div key={`${r.server}|${r.name}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 14px', fontSize: 13 }}>
+                  <span style={{ flex: '1 1 150px', minWidth: 0 }}><b style={{ overflowWrap: 'anywhere' }}>{r.name}</b><div className="muted" style={{ fontSize: 11 }}>{[r.server, r.kind].filter(Boolean).join(' · ') || '—'}</div></span>
+                  <div style={{ flex: '2 1 120px', minWidth: 80 }}><Meter pct={r.usedPct} color={BAR[k]} /></div>
                   <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><b style={{ color: TONE[k] }}>{r.usedPct != null ? `${r.usedPct}%` : '—'}</b> <span className="muted" style={{ fontSize: 12 }}>{r.usedPct != null ? `여유 ${fmtBytes(r.free)} / ${fmtBytes(r.capacity)}` : '용량 모름'}</span></span>
                   {repoHist == null ? <span className="muted" style={{ fontSize: 11 }}>이력 없음</span> : <Spark sp={sparkPoints(hist, usedPctOf)} color={BAR[k]} label={`${r.name} 사용률`} />}
                 </div>

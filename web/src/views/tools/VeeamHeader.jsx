@@ -5,6 +5,7 @@
  */
 import React from 'react';
 
+// v2.788: 탭 3개 — 400px 본문(352px)에 들어가게 최소 폭 120→96 · 좌우 여백 22→18(Chromium 실측: 3×120+8=368 이 오른쪽 여백으로 16px 넘쳤다)
 export const VEEAM_TABS = [['summary', 'Summary', '#/tools/backup-summary'], ['detail', 'Detail', '#/tools/backup-detail'], ['em', 'EM', '#/tools/backup-em']];   // v2.788 EM
 
 export default function VeeamHeader({ active, desc, actions }) {
@@ -22,7 +23,7 @@ export default function VeeamHeader({ active, desc, actions }) {
           const on = k === active;
           return (
             <a key={k} role="tab" aria-selected={on} href={href}
-              style={{ flex: '0 1 auto', minWidth: 120, minHeight: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 22px', marginBottom: -1, textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
+              style={{ flex: '0 1 auto', minWidth: 96, minHeight: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', marginBottom: -1, textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
               {label}
             </a>
           );
