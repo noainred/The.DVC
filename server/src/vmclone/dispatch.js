@@ -161,14 +161,14 @@ export function sanitizeReport(b) {
     version: t(body.version, 40), proto: numOr(body.proto) || 0, runner, jobs, mounts,
     inflight: (Array.isArray(body.inflight) ? body.inflight.slice(0, 100) : []).map((x) => t(x, 80)).filter(Boolean),
     acks,
-    sync: { at: numOr(s.at) || 0, added: numOr(s.added) || 0, updated: numOr(s.updated) || 0, removed: numOr(s.removed) || 0, conflicts: list(s.conflicts), invalid: list(s.invalid), ...(t(s.error, 300) ? { error: t(s.error, 300) } : {}) },
+    sync: { at: numOr(s.at) || 0, added: numOr(s.added) || 0, updated: numOr(s.updated) || 0, removed: numOr(s.removed) || 0, suspended: Math.max(0, numOr(s.suspended) || 0), conflicts: list(s.conflicts), invalid: list(s.invalid), ...(t(s.error, 300) ? { error: t(s.error, 300) } : {}) },
   };
 }
 
 /**
  * 정제된 보고를 받는다. 잡 상태는 **이 엣지가 담당인 vCenter 의 중앙 잡**만, 회신은 이 엣지에 배정된 작업만.
  * @param {Map<string,object>} targets execTargets() 결과
- * @returns {{ok:true, jobs:number, droppedJobs:number, acked:string[], droppedAcks:number}}
+ * @returns {{ok:true, jobs:number, droppedJobs:number, acked:string[], rejected:string[], droppedAcks:number}}
  */
 export function ingestReport(agent, clean, targets, now = Date.now()) {
   const key = lower(agent);
@@ -183,9 +183,10 @@ export function ingestReport(agent, clean, targets, now = Date.now()) {
   }
   _edges.set(key, { agent: t(agent, 64), at: now, version: clean.version, proto: clean.proto, runner: clean.runner, jobs, mounts: clean.mounts, sync: clean.sync, droppedJobs });
   noteInflight(agent, clean.inflight, now);
-  const acked = []; let droppedAcks = 0;
-  for (const a of clean.acks) { if (ackOp(agent, a.id, a, now)) acked.push(a.id); else droppedAcks++; }
-  return { ok: true, jobs: jobs.size, droppedJobs, acked, droppedAcks };
+  const acked = []; const rejected = [];
+  for (const a of clean.acks) { if (ackOp(agent, a.id, a, now)) acked.push(a.id); else rejected.push(a.id); }
+  // rejected: 중앙이 모르는(재시작으로 사라진·남의) 작업의 회신 — 엣지가 지운다(다시 보내도 받지 않는다 — 반증 검토 F4).
+  return { ok: true, jobs: jobs.size, droppedJobs, acked, rejected, droppedAcks: rejected.length };
 }
 
 /** 엣지 보고 상태(없으면 null). */
@@ -220,7 +221,11 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   const r = result && typeof result === 'object' ? result : { ok: false, detail: '빈 결과' };
   op.state = 'done'; op.doneAt = now;
   op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}) };
-  if (op.kind === 'nfsds-attach' && Array.isArray(r.hosts) && op.spec?.nfsDsId) applyAttachResult(op.spec.nfsDsId, r.hosts, now);
+  if (op.kind === 'nfsds-attach' && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
+    // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6).
+    const asked = new Set((op.spec.hostIds || []).map(String));
+    applyAttachResult(op.spec.nfsDsId, r.hosts.filter((h) => asked.has(String(h?.hostId))), now);
+  }
   try {
     recordOp({ id: op.id, kind: op.kind, jobId: op.jobId, vcenterId: op.vcenterId, vmName: op.vmName, at: now, ok: op.result.ok, detail: op.result.detail, ms: op.result.ms || (now - op.createdAt), agent: op.agent, by: op.by, target: op.spec?.newName || op.spec?.name || '' });
   } catch (e) { console.warn(`[vmclone] 작업 기록 저장 실패(${e?.message || e})`); }
@@ -228,12 +233,14 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
 }
 
 /** 엣지 인출 — 이 엣지에 배정된 대기 작업을 인출 상태로 바꿔 돌려준다(시한 CLAIM_MS). */
-export function takeOps(agent, now = Date.now()) {
+export function takeOps(agent, now = Date.now(), stillMine = null) {
   reapOps(now);
   const key = lower(agent);
   const out = [];
   for (const op of _ops.values()) {
     if (op.where !== 'edge' || op.state !== 'pending' || op.agent.toLowerCase() !== key) continue;
+    // 만든 뒤 담당이 바뀌었으면 보내지 않고 닫는다(같은 vCenter 를 다른 엣지가 맡게 된 경우 — 반증 검토 부수 지적).
+    if (stillMine && !stillMine(op)) { finishOp(op, { ok: false, detail: `담당 엣지가 바뀌어(${op.agent} → 다른 실행 위치) 보내지 않았습니다 — 다시 요청하세요` }, now); continue; }
     op.state = 'running'; op.claimedAt = now; op.deadline = now + CLAIM_MS;
     out.push({ id: op.id, kind: op.kind, jobId: op.jobId, vcenterId: op.vcenterId, spec: op.spec, by: op.by });
     if (out.length >= 20) break;
@@ -320,6 +327,21 @@ export function syncPayloadFor(agent, jobs, targets) {
   for (const [id, tg] of targets) if (tg.where === 'edge' && tg.agent.toLowerCase() === key) vcenters.push(id);
   const owned = new Set(vcenters);
   return { vcenters, jobs: (jobs || []).filter((j) => owned.has(String(j.vcenterId)) && j.demo !== true).map(delegatedDef) };
+}
+
+/**
+ * 엣지가 들고 있다고 알린 위임 잡의 vCenter(have) 중 **이 엣지 담당이 아닌 것**(다른 엣지·충돌·미확정·중앙 직접·등록부에 없음) — 엣지가 그 잡을 멈춘다(F3).
+ * 등록부를 읽은 결과(targets)로만 판정한다(호출부가 못 읽었으면 부르지 않는다).
+ */
+export function releasedFor(agent, have, targets) {
+  const key = lower(agent);
+  const out = [];
+  for (const id of Array.isArray(have) ? have.slice(0, 200) : []) {
+    const s = t(id, 200); if (!s) continue;
+    const tg = targets.get(s);
+    if (!(tg && tg.where === 'edge' && tg.agent.toLowerCase() === key)) out.push(s);
+  }
+  return out;
 }
 
 /** 테스트 전용. */

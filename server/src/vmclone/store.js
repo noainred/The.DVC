@@ -73,12 +73,26 @@ function load() {
   return _db;
 }
 
-function persist() {
+function writeFile() {
   const db = load();
   atomicWriteFileSync(FILE, JSON.stringify({ version: 1, jobs: db.jobs, ops: db.ops }, null, 2), { mode: 0o600 });
 }
+/**
+ * 실행·작업 기록 저장. ⚠ 로드 오류(손상 보존본만 남음) 동안은 **파일을 쓰지 않는다**(메모리에만 둔다) — 쓰면 빈 잡 목록이
+ *   '정상 파일' 이 되어 재시작 뒤 위임 동기화가 200 jobs:[] 를 내려보내고, 엣지가 위임 잡과 클론 원장을 지운다(v2.793 반증 검토 F2).
+ *   관리자 저장(persistByAdmin)·'기본값으로 확정' 만 파일을 쓰고 오류를 푼다.
+ */
+let _heldWarned = false;
+function persist() {
+  load();
+  if (_loadErr.get()) {
+    if (!_heldWarned) { _heldWarned = true; console.warn('[vmclone] vm-clone.json 을 읽지 못한 상태라 실행 기록을 파일에 쓰지 않습니다(메모리에만) — 손상 보존본을 되돌리거나 VM 백업 화면에서 잡을 저장하면 다시 씁니다'); }
+    return;
+  }
+  writeFile();
+}
 /** 관리자 저장 — 쓰기에 성공하면 로드 오류를 푼다(그 저장이 지금 보이는 목록을 확정한다). */
-function persistByAdmin() { persist(); _loadErr.ok(); }
+function persistByAdmin() { writeFile(); _loadErr.ok(); _heldWarned = false; }
 
 const clampKeep = (n) => Math.max(1, Math.min(30, Math.floor(Number(n)) || 3));
 
@@ -131,6 +145,25 @@ export function normalizeJobDef(input = {}) {
     // 검증은 vCenter 에 등록된 사본(데이터스토어 대상)만 켤 수 있다 — NFS 파일 사본은 켤 VM 이 없다.
     verifyAfter: dest.type === 'datastore' && input.verifyAfter === true,
   };
+}
+
+/**
+ * v2.793(반증 검토 F3) — 엣지 전용: 중앙이 '이 엣지 담당이 아니다' 라고 밝힌 vCenter(담당 변경·충돌·등록부에서 삭제)의 위임 잡을
+ * **멈춘다**(suspended). 지우지 않는다 — 담당이 잠깐 바뀐 설정 실수로 클론 원장·이력이 사라지지 않게. 스케줄러가 건너뛰고,
+ * 담당이 돌아오면 applyDelegatedJobs 가 푼다. 같은 VM 을 두 엣지가 스냅샷하지 않게 하는 것이 목적이다.
+ * @returns {number} 새로 멈춘 수
+ */
+export function suspendDelegated(vcenterIds, reason) {
+  const set = new Set((vcenterIds || []).map(String));
+  if (!set.size) return 0;
+  const why = String(reason || '중앙이 이 vCenter 를 이 엣지 담당으로 보지 않습니다').slice(0, 200);
+  let n = 0;
+  for (const j of load().jobs) {
+    if (!isDelegatedJob(j) || !set.has(String(j.vcenterId)) || j.suspended) continue;
+    j.suspended = why; n++;
+  }
+  if (n) persist();
+  return n;
 }
 
 /** 엣지가 중앙에서 받아 둔 위임 잡인가(이 노드의 화면·API 로 고치거나 지우지 않는다). */
@@ -202,6 +235,7 @@ export function applyDelegatedJobs(defs, ownedVcenterIds) {
       out.added++; dirty = true;
       continue;
     }
+    if (cur.suspended) { delete cur.suspended; out.resumed = (out.resumed || 0) + 1; dirty = true; }   // 담당이 돌아왔다(F3)
     const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter]);
     const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter]);
     if (before !== after) {

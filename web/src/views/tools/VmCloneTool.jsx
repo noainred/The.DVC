@@ -55,7 +55,12 @@ export default function VmCloneTool() {
   const [view, setView] = useState({ name: 'dash' });   // dash | job | restore | corp | wizard
   const [now, setNow] = useState(Date.now());
 
-  const load = () => fetchJson('/tools/vm-clone').then((r) => { setD(r); setErr(null); setNow(Date.now()); }).catch((e) => setErr(e.message));
+  // 늦게 온 이전 응답은 버린다(고RTT·10초 폴링 — 새 응답을 옛 응답이 덮지 않게, web.md 규약).
+  const loadSeq = useRef(0);
+  const load = () => {
+    const seq = ++loadSeq.current;
+    return fetchJson('/tools/vm-clone').then((r) => { if (seq !== loadSeq.current) return; setD(r); setErr(null); setNow(Date.now()); }).catch((e) => { if (seq === loadSeq.current) setErr(e.message); });
+  };
   useEffect(() => { load(); const t = setInterval(load, 10_000); return () => clearInterval(t); }, []);
   const jobs = useMemo(() => d?.jobs || [], [d]);
   const kpi = useMemo(() => kpisOf(jobs, now), [jobs, now]);

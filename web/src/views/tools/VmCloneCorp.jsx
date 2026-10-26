@@ -85,9 +85,19 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
             </div>
             {c.problem && <div className="vbk-note" style={{ flexBasis: '100%' }}>{c.problem}</div>}
             {c.agent && !c.edge && <div className="vbk-note info" style={{ flexBasis: '100%' }}>엣지 {c.agent} 가 VM 백업 위임 보고를 아직 올리지 않았습니다 — 엣지를 이 판 이상으로 업그레이드하고, 엣지별 개별 토큰을 쓰는지 확인하세요(공유 토큰은 거부합니다).</div>}
-            {c.edge?.sync && (c.edge.sync.conflicts?.length > 0 || c.edge.sync.invalid?.length > 0) && (
-              <div className="vbk-note" style={{ flexBasis: '100%' }}>엣지가 받지 않은 위임 잡: {[...(c.edge.sync.conflicts || []), ...(c.edge.sync.invalid || [])].join(' · ')}</div>
-            )}
+            {c.edge?.sync && (() => {
+              // 범위 계정에는 서버가 개수만 준다(다른 vCenter 의 VM 이름이 섞이므로) — 배열이면 내용, 수면 건수.
+              const s = c.edge.sync;
+              const list = [...(Array.isArray(s.conflicts) ? s.conflicts : []), ...(Array.isArray(s.invalid) ? s.invalid : [])];
+              const n = Array.isArray(s.conflicts) || Array.isArray(s.invalid) ? list.length : (Number(s.conflicts) || 0) + (Number(s.invalid) || 0);
+              return (
+                <>
+                  {n > 0 && <div className="vbk-note" style={{ flexBasis: '100%' }}>엣지가 받지 않은 위임 잡 {n}건{list.length ? `: ${list.join(' · ')}` : ''}</div>}
+                  {s.suspended > 0 && <div className="vbk-note" style={{ flexBasis: '100%' }}>담당이 바뀐 vCenter 의 위임 잡 {s.suspended}개를 엣지가 멈췄습니다(원장·이력은 남김).</div>}
+                  {s.error && <div className="vbk-note" style={{ flexBasis: '100%' }}>{s.error}</div>}
+                </>
+              );
+            })()}
           </div></div>
 
           <div className="vbk-panel">

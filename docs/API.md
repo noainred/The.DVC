@@ -116,8 +116,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 |---|---|---|---|
 | POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2349](../server/src/routes/central.js#L2349) |
 | GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:425](../server/src/routes/central.js#L425) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2477](../server/src/routes/central.js#L2477) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2481](../server/src/routes/central.js#L2481) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2480](../server/src/routes/central.js#L2480) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2484](../server/src/routes/central.js#L2484) |
 | GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central.js:1632](../server/src/routes/central.js#L1632) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:567](../server/src/routes/central.js#L567) |
 | GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2413](../server/src/routes/central.js#L2413) |
@@ -132,17 +132,17 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1426](../server/src/routes/central.js#L1426) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1346](../server/src/routes/central.js#L1346) |
 | POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:922](../server/src/routes/central.js#L922) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2591](../server/src/routes/central.js#L2591) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2594](../server/src/routes/central.js#L2594) |
 | GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1268](../server/src/routes/central.js#L1268) |
 | POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1278](../server/src/routes/central.js#L1278) |
 | POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1290](../server/src/routes/central.js#L1290) |
 | POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:796](../server/src/routes/central.js#L796) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2505](../server/src/routes/central.js#L2505) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2516](../server/src/routes/central.js#L2516) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2508](../server/src/routes/central.js#L2508) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2519](../server/src/routes/central.js#L2519) |
 | GET | `/isidu-config` | `requireCentral` | [server/src/routes/central.js:2184](../server/src/routes/central.js#L2184) |
 | POST | `/isidu-data` | `requireCentral` | [server/src/routes/central.js:2206](../server/src/routes/central.js#L2206) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2605](../server/src/routes/central.js#L2605) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2635](../server/src/routes/central.js#L2635) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2608](../server/src/routes/central.js#L2608) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2638](../server/src/routes/central.js#L2638) |
 | GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2387](../server/src/routes/central.js#L2387) |
 | POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2394](../server/src/routes/central.js#L2394) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1554](../server/src/routes/central.js#L1554) |
@@ -168,7 +168,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2312](../server/src/routes/central.js#L2312) |
 | GET | `/veeam-config` | `requireCentral` | [server/src/routes/central.js:2266](../server/src/routes/central.js#L2266) |
 | POST | `/veeam-data` | `requireCentral` | [server/src/routes/central.js:2281](../server/src/routes/central.js#L2281) |
-| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central.js:2464](../server/src/routes/central.js#L2464) |
+| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central.js:2467](../server/src/routes/central.js#L2467) |
 | GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central.js:2451](../server/src/routes/central.js#L2451) |
 | POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1004](../server/src/routes/central.js#L1004) |
 | GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1186](../server/src/routes/central.js#L1186) |
@@ -1126,15 +1126,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/vm-changes.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmChanges.js:91](../server/src/routes/api/vmChanges.js#L91) |
 | GET | `/tools/vm-changes/of` | 권한 `tools` | [server/src/routes/api/vmChanges.js:68](../server/src/routes/api/vmChanges.js#L68) |
 | GET | `/tools/vm-clone` | 역할 `admin` | [server/src/routes/api/vmClone.js:149](../server/src/routes/api/vmClone.js#L149) |
-| GET | `/tools/vm-clone/badges` | 권한 `tools` | [server/src/routes/api/vmClone.js:373](../server/src/routes/api/vmClone.js#L373) |
-| POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:201](../server/src/routes/api/vmClone.js#L201) |
-| DELETE | `/tools/vm-clone/jobs/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:264](../server/src/routes/api/vmClone.js#L264) |
-| POST | `/tools/vm-clone/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/vmClone.js:313](../server/src/routes/api/vmClone.js#L313) |
-| POST | `/tools/vm-clone/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/vmClone.js:278](../server/src/routes/api/vmClone.js#L278) |
-| POST | `/tools/vm-clone/jobs/:id/verify` | 역할 `admin` | [server/src/routes/api/vmClone.js:299](../server/src/routes/api/vmClone.js#L299) |
-| POST | `/tools/vm-clone/nfs-datastores` | 역할 `admin` | [server/src/routes/api/vmClone.js:329](../server/src/routes/api/vmClone.js#L329) |
-| DELETE | `/tools/vm-clone/nfs-datastores/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:359](../server/src/routes/api/vmClone.js#L359) |
-| POST | `/tools/vm-clone/nfs-datastores/:id/attach` | 역할 `admin` | [server/src/routes/api/vmClone.js:346](../server/src/routes/api/vmClone.js#L346) |
+| GET | `/tools/vm-clone/badges` | 권한 `tools` | [server/src/routes/api/vmClone.js:375](../server/src/routes/api/vmClone.js#L375) |
+| POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:203](../server/src/routes/api/vmClone.js#L203) |
+| DELETE | `/tools/vm-clone/jobs/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:266](../server/src/routes/api/vmClone.js#L266) |
+| POST | `/tools/vm-clone/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/vmClone.js:315](../server/src/routes/api/vmClone.js#L315) |
+| POST | `/tools/vm-clone/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/vmClone.js:280](../server/src/routes/api/vmClone.js#L280) |
+| POST | `/tools/vm-clone/jobs/:id/verify` | 역할 `admin` | [server/src/routes/api/vmClone.js:301](../server/src/routes/api/vmClone.js#L301) |
+| POST | `/tools/vm-clone/nfs-datastores` | 역할 `admin` | [server/src/routes/api/vmClone.js:331](../server/src/routes/api/vmClone.js#L331) |
+| DELETE | `/tools/vm-clone/nfs-datastores/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:361](../server/src/routes/api/vmClone.js#L361) |
+| POST | `/tools/vm-clone/nfs-datastores/:id/attach` | 역할 `admin` | [server/src/routes/api/vmClone.js:348](../server/src/routes/api/vmClone.js#L348) |
 | GET | `/tools/vm-dns` | 권한 `tools` | [server/src/routes/api/vmDns.js:128](../server/src/routes/api/vmDns.js#L128) |
 | GET | `/tools/vm-dns.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmDns.js:220](../server/src/routes/api/vmDns.js#L220) |
 | GET | `/tools/vm-dns/changes` | 권한 `tools` | [server/src/routes/api/vmDns.js:167](../server/src/routes/api/vmDns.js#L167) |

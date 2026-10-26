@@ -2455,10 +2455,13 @@ centralRouter.get('/vm-clone-sync', requireCentral(), async (req, res) => {
   if (settingsUnreadable(res, jobsLoadError, 'VM 백업 잡(vm-clone.json)')) return;
   const targets = await vmCloneTargets();
   if (!targets) return persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: '중앙 vCenter 등록부(vcenters.json)를 읽지 못했습니다 — 엣지는 위임 잡을 그대로 유지합니다.' });
-  const { syncPayloadFor, takeOps } = await import('../vmclone/dispatch.js');
+  const { syncPayloadFor, takeOps, releasedFor } = await import('../vmclone/dispatch.js');
   const p = syncPayloadFor(agent, listCloneJobs(), targets);
-  const ops = p.vcenters.length ? takeOps(agent) : [];
-  res.json({ ok: true, proto: 1, vcenters: p.vcenters, jobs: p.jobs, ops });
+  const mine = (op) => { const tg = targets.get(String(op.vcenterId)); return tg?.where === 'edge' && tg.agent.toLowerCase() === String(agent).toLowerCase(); };
+  const ops = takeOps(agent, Date.now(), mine);
+  // have: 엣지가 들고 있는 위임 잡의 vCenter(쉼표 구분) → 이 엣지 담당이 아닌 것을 released 로 알려 엣지가 멈추게 한다(반증 검토 F3).
+  const have = typeof req.query.have === 'string' ? req.query.have.slice(0, 20_000).split(',') : [];
+  res.json({ ok: true, proto: 1, vcenters: p.vcenters, jobs: p.jobs, ops, released: releasedFor(agent, have, targets) });
 });
 
 centralRouter.post('/vm-clone-report', requireCentral(), async (req, res) => {

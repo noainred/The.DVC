@@ -13,7 +13,6 @@ import { enqueueRun, runnerStatus } from './runner.js';
 import { ensureVmCloneDemo, isVmCloneDemoJob } from '../mock/demo/vmclone.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.717: 데모(mock) 잡 시드(비어 있을 때만)
 import { loadVcenterConfig } from '../config.js';
-import { directCollectSkipReason } from '../vcenter/collectTarget.js';
 
 let _timer = null;
 let _ticking = false;
@@ -36,6 +35,7 @@ export function dueJobsOf(jobs, now, { mock = isMockMode(), siteVcIds = null } =
     // v2.793: 이 노드가 엣지에 위임한(site) vCenter 의 잡은 담당 엣지가 자기 스케줄러로 돌린다 — 여기서 넣으면 같은 VM 을 두 노드가
     //   스냅샷한다(재시작 정리 기록이 남은 잡도 같다 — 그 정리는 로그인할 수 있는 노드의 몫이다).
     if (siteVcIds && siteVcIds.has(String(j.vcenterId))) { delegated.push(j); continue; }
+    if (j.suspended) { delegated.push(j); continue; }   // 엣지: 중앙이 담당을 거둔 위임 잡(store.suspendDelegated — 반증 검토 F3)
     if (!mock && isVmCloneDemoJob(j)) { skipped.push(j); continue; }
     run.push(j);
     if (rec) resume.push(j.id);
@@ -47,7 +47,9 @@ export function dueJobsOf(jobs, now, { mock = isMockMode(), siteVcIds = null } =
 export function siteVcenterIds() {
   try {
     const out = new Set();
-    for (const v of loadVcenterConfig().vcenters || []) if (directCollectSkipReason(v) === 'site') out.add(String(v.id));
+    // ⚠ collectMode 로 본다 — directCollectSkipReason 은 disabled·maintenance 를 'site' 보다 먼저 돌려줘 점검중·꺼진 위임 vCenter 를
+    //   위임으로 보지 않았다(중앙·엣지가 같은 VM 을 함께 스냅샷 — v2.793 반증 검토 F1).
+    for (const v of loadVcenterConfig().vcenters || []) if (v?.collectMode === 'site') out.add(String(v.id));
     return out;
   } catch { return null; }
 }

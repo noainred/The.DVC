@@ -44,7 +44,6 @@ import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot,
   destroyClone, vmFilePaths, parseDsPath, backupFileFilter, datacenterPathOf, downloadDsFile,
 } from './vsphere.js';
-import { directCollectSkipReason } from '../vcenter/collectTarget.js';
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
 import { morefOf } from '../vcenter/registry.js';
 import { fileStamp, localStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
@@ -282,6 +281,7 @@ function postponeRecovery(jobId, st, why) {
 async function runJobBody(jobId, trigger) {
   const job = getJob(jobId);
   if (!job || !job.enabled) return;
+  if (job.suspended) { recordRun(jobId, { ok: false, skipped: 'suspended', trigger, ms: 0, detail: `멈춘 위임 잡 — ${job.suspended}` }); return; }   // v2.793 F3
   // v2.719(감사 R1-07 후속): live 에서는 데모 잡(가짜 vCenter·사본)을 수동 실행으로도 돌리지 않는다 — 실패 기록·감사 로그만 쌓인다.
   if (!isMockMode() && isVmCloneDemoJob(job)) {
     recordRun(jobId, { ok: false, skipped: 'demo-job', detail: '데모(mock) 모드에서 만든 잡이라 실행하지 않았습니다 — 지우고 실제 VM 으로 새로 만드세요.', ms: 0 });
@@ -340,7 +340,7 @@ async function runJobBody(jobId, trigger) {
 
     // v2.793: 엣지 위임(site) vCenter 는 이 노드가 로그인하지 않는다 — 담당 엣지가 위임 잡으로 실행한다(central/vmCloneEdge.js).
     //   스케줄러가 이미 거르고 화면의 '지금 실행' 은 엣지로 보내므로 여기 오는 것은 예외 경로다 — 조용히 넘기지 않고 남긴다.
-    if (directCollectSkipReason(vcCfg) === 'site') {
+    if (vcCfg.collectMode === 'site') {   // collectMode 로 본다 — 점검중·꺼진 위임 vCenter 도 위임이다(반증 검토 F1)
       recordRun(jobId, { ok: false, skipped: 'delegated', trigger, ms: 0, detail: '이 vCenter 는 엣지 위임(site) 수집이라 이 포탈은 로그인하지 않습니다 — 담당 엣지가 실행합니다.' });
       return;
     }

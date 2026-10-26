@@ -163,7 +163,9 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     return {
       ...c,
       ...(edge ? { edge: {
-        at: edge.at, version: edge.version, proto: edge.proto, sync: edge.sync,
+        // 동기화 상세(받지 않은 잡의 VM 이름·id)는 그 엣지의 **모든** vCenter 를 담는다 — 범위 계정에는 개수만(반증 검토 F5).
+        at: edge.at, version: edge.version, proto: edge.proto,
+        sync: allowed && edge.sync ? { at: edge.sync.at, added: edge.sync.added, updated: edge.sync.updated, removed: edge.sync.removed, conflicts: (edge.sync.conflicts || []).length, invalid: (edge.sync.invalid || []).length, ...(edge.sync.error ? { error: edge.sync.error } : {}) } : edge.sync,
         runner: scopeCloneStatus({ ...edge.runner }, corpJobs, allowed ? all : corpJobs),
         mounts: edgeMountsView(edge.mounts, { full }),
       } } : {}),

@@ -327,3 +327,66 @@ test('엣지 워커 왕복 — 가짜 중앙에서 정의·작업을 받아 로�
   assert.ok(central.reports.length > before);
   assert.ok(store.getJob('cj-w'), '담당 미확정(빈 vcenters)으로는 지우지 않는다');
 });
+
+// ── v2.793 반증 검토(F1~F6) 회귀 ─────────────────────────────────────────────
+test('F1 — 점검중·꺼진 위임 vCenter 도 위임이다(중앙 스케줄러가 넣지 않는다)', async () => {
+  const src = fs.readFileSync(new URL('../src/vmclone/scheduler.js', import.meta.url), 'utf8');
+  assert.match(src, /v\?\.collectMode === 'site'/);
+  assert.doesNotMatch(src, /directCollectSkipReason\(v\) === 'site'/, 'disabled·maintenance 를 먼저 돌려주는 판정으로 되돌리지 말 것');
+  const rsrc = fs.readFileSync(new URL('../src/vmclone/runner.js', import.meta.url), 'utf8');
+  assert.match(rsrc, /vcCfg\.collectMode === 'site'/);
+  const r = dueJobsOf([{ id: 'm', vcenterId: 'vm-maint', enabled: true, schedule: { mode: 'interval', hours: 1 }, lastRun: null }], Date.now(), { mock: true, siteVcIds: new Set(['vm-maint']) });
+  assert.deepEqual(r.run, []);
+});
+
+test('F2 — 잡 파일 로드 오류 중에는 실행·작업 기록이 빈 목록을 파일에 쓰지 않는다(관리자 저장만 쓴다)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmclone2793-f2-'));
+  fs.writeFileSync(path.join(dir, 'vm-clone.json.corrupt.2026-10-26T00-00-00'), 'x');   // 재시작 뒤: 보존본만 남음
+  const { execFileSync } = await import('node:child_process');
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    const s = await import(${JSON.stringify(new URL('../src/vmclone/store.js', import.meta.url).href)});
+    const fs = await import('node:fs');
+    const e1 = !!s.jobsLoadError();
+    s.recordOp({ kind: 'nfsds-attach', ok: true, detail: 'x' });
+    s.applyDelegatedJobs([], ['vc']);
+    const wrote = fs.existsSync(${JSON.stringify(path.join(dir, 'vm-clone.json'))});
+    s.saveJob({ vcenterId: 'v', vmId: 'v:1', vmName: 'n', dest: { type: 'datastore', datastoreName: 'D' } });
+    console.log(JSON.stringify({ e1, wrote, after: fs.existsSync(${JSON.stringify(path.join(dir, 'vm-clone.json'))}), e2: !!s.jobsLoadError() }));
+  `], { env: { ...process.env, CONFIG_DIR: dir }, encoding: 'utf8' });
+  const r = JSON.parse(out.trim().split('\n').pop());
+  assert.deepEqual(r, { e1: true, wrote: false, after: true, e2: false });
+});
+
+test('F3 — 담당이 아닌 vCenter 의 위임 잡은 멈춘다(지우지 않는다) · 담당이 돌아오면 푼다 · released 판정', () => {
+  store.applyDelegatedJobs([def({ id: 'f3', vcenterId: 'vc-f3', vmId: 'vc-f3:vm', vmName: 'f3' })], ['vc-f3']);
+  assert.equal(store.suspendDelegated(['vc-f3'], '담당 변경'), 1);
+  assert.equal(store.getJob('f3').suspended, '담당 변경');
+  const r = dueJobsOf([{ ...store.getJob('f3'), lastRun: null }], Date.now(), { mock: true });
+  assert.deepEqual(r.run, [], '멈춘 잡은 스케줄되지 않는다');
+  store.applyDelegatedJobs([], []);
+  assert.ok(store.getJob('f3'), '원장·이력이 사라지지 않게 지우지 않는다');
+  const back = store.applyDelegatedJobs([def({ id: 'f3', vcenterId: 'vc-f3', vmId: 'vc-f3:vm', vmName: 'f3' })], ['vc-f3']);
+  assert.equal(back.resumed, 1); assert.equal(store.getJob('f3').suspended, undefined);
+  const targets = dispatch.execTargets([{ id: 'a', collectMode: 'site', remoteAgent: 'edge-a' }, { id: 'b', collectMode: 'site', remoteAgent: 'edge-b' }, { id: 'c', collectMode: 'site', remoteAgent: 'edge-a' }], [{ vcenterId: 'c', agent: 'edge-z' }]);
+  assert.deepEqual(dispatch.releasedFor('edge-a', ['a', 'b', 'c', 'gone', ''], targets), ['b', 'c', 'gone'], '다른 엣지·충돌·등록부에 없음');
+});
+
+test('F4·F6·부수 — 모르는 회신은 rejected 로 돌려준다 · 요청하지 않은 호스트 결과는 받지 않는다 · 담당이 바뀐 작업은 보내지 않는다', async () => {
+  dispatch._resetDispatchForTest();
+  const nfs = await import('../src/vmclone/nfsDs.js');
+  const item = nfs.createNfsDs({ vcenterId: 'vc-s1', name: 'bk', server: 'nas', exportPath: '/e' });
+  const targets = dispatch.execTargets([{ id: 'vc-s1', collectMode: 'site', remoteAgent: 'edge-a' }], []);
+  const op = dispatch.createOp({ kind: 'nfsds-attach', vcenterId: 'vc-s1', spec: { nfsDsId: item.id, hostIds: ['h1'] }, target: targets.get('vc-s1') }, 10);
+  dispatch.takeOps('edge-a', 11);
+  const r = dispatch.ingestReport('edge-a', dispatch.sanitizeReport({ acks: [{ id: op.id, ok: true, hosts: [{ hostId: 'h1', ok: true }, { hostId: 'host-999', ok: true }] }, { id: 'vco-gone', ok: true }] }), targets, 20);
+  assert.deepEqual(r.acked, [op.id]); assert.deepEqual(r.rejected, ['vco-gone']);
+  assert.deepEqual(Object.keys(nfs.getNfsDs(item.id).hosts), ['h1']);
+  const op2 = dispatch.createOp({ kind: 'run', jobId: 'x', vcenterId: 'vc-s1', target: targets.get('vc-s1') }, 30);
+  assert.deepEqual(dispatch.takeOps('edge-a', 31, () => false), []);
+  assert.match(dispatch._opsForTest().get(op2.id).result.detail, /담당 엣지가 바뀌어/);
+});
+
+test('F5 — 범위 계정에는 엣지 동기화 상세(다른 vCenter 의 VM 이름) 대신 개수만', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api/vmClone.js', import.meta.url), 'utf8');
+  assert.match(src, /sync: allowed && edge\.sync \? \{[^}]*conflicts: \(edge\.sync\.conflicts \|\| \[\]\)\.length/);
+});

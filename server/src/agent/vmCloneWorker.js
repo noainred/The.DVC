@@ -22,7 +22,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { classifyCentral404 } from './central404.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js';
-import { listJobs, applyDelegatedJobs, isDelegatedJob, HISTORY_MAX } from '../vmclone/store.js';
+import { listJobs, applyDelegatedJobs, isDelegatedJob, HISTORY_MAX, suspendDelegated, jobsLoadError } from '../vmclone/store.js';
 import { runnerStatus } from '../vmclone/runner.js';
 import { executeOp } from '../vmclone/execOp.js';
 import { listMounts } from '../system/nfsMounts.js';
@@ -31,7 +31,8 @@ import { isDirectCollectTarget } from '../vcenter/collectTarget.js';
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 const INTERVAL_MS = clampIntervalMs(envNum('VMCLONE_SYNC_MS', 30_000), 30_000, 10_000);
 const ENABLED = process.env.VMCLONE_DELEGATION !== 'false';
-export const PROTO = 1;   // vmclone/dispatch.js PROTO 와 같은 프로토콜 계약(엣지가 central 모듈을 import 하지 않도록 상수만 복제)
+export const PROTO = 1;
+const ACK_MAX_AGE_MS = 6 * 3_600_000;   // 중앙 작업 시한(대기 30분 + 진행 보고 15분)보다 넉넉히 — 그 뒤의 회신은 중앙이 받아도 늦은 결과다   // vmclone/dispatch.js PROTO 와 같은 프로토콜 계약(엣지가 central 모듈을 import 하지 않도록 상수만 복제)
 
 let timer = null;
 let running = false;
@@ -82,7 +83,7 @@ export function buildReport() {
     history: (j.history || []).slice(-HISTORY_MAX),
     clones: (j.clones || []).slice(-30).map((c) => ({ ref: c.ref, name: c.name, at: c.at, ...(c.bytes != null ? { bytes: c.bytes } : {}), ...(c.verify ? { verify: c.verify } : {}) })),
     ...(j.running ? { running: true } : {}),
-    ...(direct && !direct.has(String(j.vcenterId)) ? { problem: '이 엣지가 직접 수집하는 vCenter 가 아닙니다(엣지 설정 › vCenter 에 없거나 꺼짐·점검중) — 실행하지 않습니다' } : {}),
+    ...(j.suspended ? { problem: `멈춤 — ${j.suspended}` } : direct && !direct.has(String(j.vcenterId)) ? { problem: '이 엣지가 직접 수집하는 vCenter 가 아닙니다(엣지 설정 › vCenter 에 없거나 꺼짐·점검중) — 실행하지 않습니다' } : {}),
   }));
   let mounts = [];
   try { mounts = listMounts().map(mountView); } catch { mounts = []; }
@@ -112,7 +113,7 @@ function runOps(ops) {
       .then((r) => {
         _inflight.delete(id); _done.add(id);
         if (_done.size > 500) _done.delete(_done.values().next().value);
-        _acks.push({ id, ok: !!r?.ok, detail: String(r?.detail ?? '').slice(0, 400), ...(r?.ms != null ? { ms: r.ms } : {}), ...(Array.isArray(r?.hosts) ? { hosts: r.hosts.slice(0, 500) } : {}), ...(r?.newName ? { newName: r.newName } : {}) });
+        _acks.push({ at: Date.now(), id, ok: !!r?.ok, detail: String(r?.detail ?? '').slice(0, 400), ...(r?.ms != null ? { ms: r.ms } : {}), ...(Array.isArray(r?.hosts) ? { hosts: r.hosts.slice(0, 500) } : {}), ...(r?.newName ? { newName: r.newName } : {}) });
         if (_acks.length > 200) _acks.splice(0, _acks.length - 200);
         reportNow().catch(() => {});
       });
@@ -137,9 +138,11 @@ export async function reportNow() {
   if (!r.ok) return failHttp('보고', r);
   let d = {};
   try { d = await r.json(); } catch { d = {}; }
-  // 중앙이 받았다고 한 회신만 지운다(나머지는 다음 보고에 다시 싣는다).
-  const got = new Set(Array.isArray(d?.acked) ? d.acked.map(String) : []);
-  for (let i = _acks.length - 1; i >= 0; i--) if (got.has(_acks[i].id)) _acks.splice(i, 1);
+  // 중앙이 받았다고 한 회신과 **받지 않겠다고 한 회신(rejected — 중앙이 모르는 작업)** 을 지운다. 나머지는 다음 보고에 다시 싣되
+  //   ACK_MAX_AGE_MS 가 지난 것은 버린다 — 오래된 회신이 앞 50개를 막아 새 회신이 영영 못 올라가지 않게(반증 검토 F4).
+  const got = new Set([...(Array.isArray(d?.acked) ? d.acked : []), ...(Array.isArray(d?.rejected) ? d.rejected : [])].map(String));
+  const old = Date.now() - ACK_MAX_AGE_MS;
+  for (let i = _acks.length - 1; i >= 0; i--) if (got.has(_acks[i].id) || (_acks[i].at || 0) < old) _acks.splice(i, 1);
   return { ok: true, jobs: body.jobs.length, acked: got.size };
 }
 
@@ -150,7 +153,8 @@ export async function syncVmCloneNow() {
   if (Date.now() < unsupportedUntil) return { ok: false, reason: '중앙이 이 기능을 지원하지 않습니다(백오프 중)' };
   running = true;
   try {
-    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/vm-clone-sync?proto=${PROTO}`, config.agent.name), {
+    const have = [...new Set(listJobs().filter(isDelegatedJob).map((j) => String(j.vcenterId)))].slice(0, 200);
+    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/vm-clone-sync?proto=${PROTO}${have.length ? `&have=${encodeURIComponent(have.join(','))}` : ''}`, config.agent.name), {
       method: 'GET', headers: headers(), timeoutMs: reqTimeoutMs(process.env.VMCLONE_SYNC_TIMEOUT_MS, 30_000), retries: 1,
     });
     if (res.status === 404) {
@@ -170,7 +174,11 @@ export async function syncVmCloneNow() {
     }
     const d = await res.json();
     const s = applyDelegatedJobs(d?.jobs, d?.vcenters);
-    _lastSync = { at: Date.now(), added: s.added, updated: s.updated, removed: s.removed, conflicts: s.conflicts.slice(0, 20), invalid: s.invalid.slice(0, 20) };
+    const suspended = suspendDelegated(Array.isArray(d?.released) ? d.released : [], '중앙이 이 vCenter 를 이 엣지 담당으로 보지 않습니다(담당 변경·충돌·삭제) — 실행을 멈췄습니다');
+    if (suspended) console.warn(`[vmclone-edge] 담당이 아닌 vCenter 의 위임 잡 ${suspended}개를 멈췄습니다(원장·이력은 남김 — 담당이 돌아오면 다시 돕니다)`);
+    const loadErr = jobsLoadError();
+    _lastSync = { at: Date.now(), added: s.added, updated: s.updated, removed: s.removed, ...(suspended ? { suspended } : {}), conflicts: s.conflicts.slice(0, 20), invalid: s.invalid.slice(0, 20),
+      ...(loadErr ? { error: '이 엣지의 vm-clone.json 을 읽지 못했습니다 — 실행 기록을 파일에 쓰지 않습니다(손상 보존본 확인)' } : {}) };
     if (s.added || s.updated || s.removed) console.log(`[vmclone-edge] 위임 잡 동기화 — 추가 ${s.added} · 변경 ${s.updated} · 제거 ${s.removed}`);
     if (s.conflicts.length && _logChange('conflict', s.conflicts[0])) console.warn(`[vmclone-edge] 받지 않은 위임 잡: ${s.conflicts.join(' · ')}`);
     runOps(d?.ops);
