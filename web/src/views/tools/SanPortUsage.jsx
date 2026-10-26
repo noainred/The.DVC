@@ -161,7 +161,7 @@ export default function SanPortUsage({ deviceId, ports, focusPort, onPickPort })
                 <b style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.name}>{targetTitle}</b>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {t.kind === 'port' ? `속도 ${t.speed || '모름'}` : `회선 합 ${t.capBps == null ? '모름(속도 모르는 멤버 있음)' : rateText(t.capBps)}`}
-                  {' · '}{shown.unit === 'd' ? (t.chart?.bucketMs === 900_000 ? '15분 칸' : '1시간 칸(15분 집계 보관 31일이 지난 날)') : '1시간 칸'}
+                  {' · '}{shown.unit === 'd' ? (t.chart?.bucketMs === 900_000 ? '15분 칸' : '1시간 칸(15분 집계 보관 기간이 지난 날)') : '1시간 칸'}
                   {t.chart?.partial ? ` · 멤버 일부만 있는 칸 ${t.chart.partial}개는 비움` : ''}
                 </span>
               </div>
