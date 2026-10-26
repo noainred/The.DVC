@@ -52,7 +52,7 @@ function run(body, { jobs = [JOB()] } = {}) {
       nicDisconnectSpec: () => ({ specXml: '<deviceChange>X</deviceChange>', count: 1 }),
       cloneFromSnapshot: async (c, o) => { step('clone', o.configXml || '(none)'); return 'vm-77'; },
       parentFolderOf: async () => 'group-v1', destroyClone: async () => ({ gone: true }),
-      attachNasToHost: async () => ({ ok: true, detail: 'ok' }), validateNfsDsSpec: (s) => s, vmCommittedBytes: async () => null,
+      attachNasToHost: async () => ({ ok: true, detail: 'ok' }), detachNasFromHost: async () => ({ ok: true, detail: 'ok' }), validateNfsDsSpec: (s) => s, vmCommittedBytes: async () => null,
       vmFilePaths: async () => ({ vmx: '', files: [] }), parseDsPath: () => null, backupFileFilter: () => true,
       datacenterPathOf: async () => 'DC1', downloadDsFile: async () => 0,
     } });

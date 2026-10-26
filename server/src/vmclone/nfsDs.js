@@ -70,6 +70,25 @@ export function applyAttachResult(id, hosts, at = Date.now()) {
   return true;
 }
 
+/**
+ * v2.794 — 호스트별 떼어 내기 결과 반영. 성공한 호스트는 연결 기록을 지우고, 실패한 호스트는 연결 상태를 그대로 두고 사유만 고친다
+ * (쓰는 VM 이 있어 떼지 못한 호스트를 '끊김' 으로 보이지 않게). 모르는 id 면 false.
+ */
+export function applyDetachResult(id, hosts, at = Date.now()) {
+  const it = load().items.find((i) => i.id === id);
+  if (!it) return false;
+  if (!it.hosts || typeof it.hosts !== 'object') it.hosts = {};
+  for (const h of Array.isArray(hosts) ? hosts.slice(0, MAX_HOSTS) : []) {
+    const hid = typeof h?.hostId === 'string' ? h.hostId.slice(0, 300) : '';
+    if (!hid) continue;
+    if (h.ok === true) { delete it.hosts[hid]; continue; }
+    const prev = it.hosts[hid];
+    it.hosts[hid] = { ok: prev?.ok === true, at, detail: `떼어 내기 실패 — ${String(h.detail ?? '').slice(0, 280)}` };
+  }
+  persist();
+  return true;
+}
+
 /** 목록에서만 지운다(ESXi 의 데이터스토어는 그대로다). */
 export function deleteNfsDs(id) {
   const db = load();

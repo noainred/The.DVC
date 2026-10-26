@@ -3,7 +3,7 @@ import { postJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { mountLabel } from './vmCloneMountText.js';
 import {
-  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL, triggerText,
+  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL, triggerText, keepText,
 } from './vmCloneView.js';
 
 /**
@@ -54,7 +54,7 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
             <h2 className="vbk-title" style={{ margin: 0 }}>{job.vmName}</h2>
             <span className={`vbk-chip ${isDs ? 'ds' : 'nfs'}`}>{isDs ? `${job.dest.nfsDsId ? 'NFS-DS' : 'DS'} · ${job.dest.datastoreName}` : `엣지 NFS · ${mountLabel((d.mounts || []).find((m) => m.id === job.dest.mountId)) || job.dest.mountId}`}</span>
             <span className={`vbk-chip ${job.quiesce ? 'ok' : ''}`}>{job.quiesce ? '앱 정합(정지점)' : '크래시 정합'}</span>
-            <span className="vbk-chip">보존 {job.keep}개</span>
+            <span className="vbk-chip">보존 {keepText(job)}</span>
             {!job.enabled && <span className="vbk-chip warn">비활성</span>}
           </div>
           <div className="vbk-sub">{d.vcenterNames?.[job.vcenterId] || job.vcenterId} · {scheduleText(job.schedule)} · {isDs ? (job.verifyAfter ? '복제 후 자동 검증 켜짐' : '자동 검증 꺼짐') : '검증 해당 없음(파일 사본)'}{execText(job, now) ? ` · ${execText(job, now)}` : ''}</div>

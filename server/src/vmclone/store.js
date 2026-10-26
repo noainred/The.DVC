@@ -13,6 +13,7 @@
  *           mountId?, subdir? },                     // nfs: 설정 › NFS 마운트 의 항목 id + 하위 경로
  *   schedule: { mode:'manual'|'daily'|'interval', time?:'HH:MM', hours?:N },
  *   keep: N,                                        // 보존 개수(1~30)
+ *   keepDays?: N,                                   // v2.794 보존 기간(일, 1~365) — 이보다 오래된 사본도 지운다(가장 최근 1개는 언제나 남긴다)
  *   quiesce: bool,                                  // 정지점 스냅샷(VMware Tools VSS/freeze) 경유 — 앱 정합
  *   enabled: bool,
  *   clones: [{ name, ref, at }],                    // 우리가 만든 datastore 클론 원장 — ⚠ 보존정책은
@@ -95,6 +96,8 @@ function persist() {
 function persistByAdmin() { writeFile(); _loadErr.ok(); _heldWarned = false; }
 
 const clampKeep = (n) => Math.max(1, Math.min(30, Math.floor(Number(n)) || 3));
+/** v2.794 보존 기간(일) — 0(또는 무효) = 끔, 1~365. */
+export const clampKeepDays = (n) => { const v = Math.floor(Number(n)); return Number.isFinite(v) && v > 0 ? Math.min(365, v) : 0; };
 
 /** 스케줄 정규화 — 무효값은 manual(자동 실행 없음)로. time 은 'HH:MM' 24시간제. */
 function normSchedule(s = {}) {
@@ -140,6 +143,7 @@ export function normalizeJobDef(input = {}) {
     vcenterId, vmId, vmName, dest,
     schedule: normSchedule(input.schedule),
     keep: clampKeep(input.keep),
+    keepDays: clampKeepDays(input.keepDays),
     quiesce: !!input.quiesce,
     enabled: input.enabled !== false,
     // 검증은 vCenter 에 등록된 사본(데이터스토어 대상)만 켤 수 있다 — NFS 파일 사본은 켤 VM 이 없다.
@@ -182,6 +186,7 @@ export function saveJob(input = {}) {
   });
   if (!job.demo) delete job.demo;
   if (!job.verifyAfter) delete job.verifyAfter;
+  if (!job.keepDays) delete job.keepDays;
   if (!existing) {
     if (db.jobs.length >= MAX_JOBS) throw new Error(`복제 잡은 최대 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
     // 같은 VM 에 잡 중복 금지 — 같은 VM 을 두 잡이 스냅샷/클론하면 서로 간섭한다.
@@ -233,16 +238,19 @@ export function applyDelegatedJobs(defs, ownedVcenterIds) {
     if (clash) { out.conflicts.push(`${def.vmName}: 이 노드에 같은 VM 의 잡(${clash.id})이 있어 받지 않았습니다`); continue; }
     if (!cur) {
       if (db.jobs.length >= MAX_JOBS) { out.invalid.push(`${id}: 잡 상한(${MAX_JOBS}) 초과`); continue; }
-      db.jobs.push({ id, ...def, origin: 'central', clones: [], lastRun: null, createdAt: Date.now() });
+      const nj = { id, ...def, origin: 'central', clones: [], lastRun: null, createdAt: Date.now() };
+      if (!nj.keepDays) delete nj.keepDays;
+      db.jobs.push(nj);
       out.added++; dirty = true;
       continue;
     }
     if (cur.suspended) { delete cur.suspended; out.resumed = (out.resumed || 0) + 1; dirty = true; }   // 담당이 돌아왔다(F3)
-    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter]);
-    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter]);
+    const before = JSON.stringify([cur.vcenterId, cur.vmId, cur.vmName, cur.dest, cur.schedule, cur.keep, cur.quiesce, cur.enabled, !!cur.verifyAfter, cur.keepDays || 0]);
+    const after = JSON.stringify([def.vcenterId, def.vmId, def.vmName, def.dest, def.schedule, def.keep, def.quiesce, def.enabled, def.verifyAfter, def.keepDays]);
     if (before !== after) {
       Object.assign(cur, def);
       if (!cur.verifyAfter) delete cur.verifyAfter;
+      if (!cur.keepDays) delete cur.keepDays;
       out.updated++; dirty = true;
     }
   }
@@ -530,11 +538,18 @@ export function isDue(job, now = Date.now()) {
   return false;
 }
 
-/** 보존 대상 계산(순수) — keep 개를 남기고 오래된 것부터 삭제 목록으로. */
-export function pruneList(clones, keep) {
+/**
+ * 보존 대상 계산(순수) — keep 개를 남기고 오래된 것부터 삭제 목록으로.
+ * v2.794: keepDays(일)가 있으면 그보다 오래된 사본도 넣는다 — 단 **가장 최근 1개는 언제나 남긴다**(백업이 몇 주 실패해도 마지막 사본은 지우지 않는다).
+ *   시각(at)을 모르는 사본은 기간으로 지우지 않는다(개수 규칙만).
+ */
+export function pruneList(clones, keep, keepDays = 0, now = Date.now()) {
   const sorted = [...(clones || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-  const excess = sorted.length - clampKeep(keep);
-  return excess > 0 ? sorted.slice(0, excess) : [];
+  const excess = Math.max(0, sorted.length - clampKeep(keep));
+  const days = clampKeepDays(keepDays);
+  if (!days) return sorted.slice(0, excess);
+  const cutoff = now - days * 86_400_000;
+  return sorted.filter((c, i) => i < excess || (i < sorted.length - 1 && Number(c.at) > 0 && Number(c.at) < cutoff));
 }
 
 /** 트리 배지용 — vCenter 의 복제 잡 대상 vmId 목록(뷰가 'Clone' 아이콘 표시). */

@@ -404,4 +404,45 @@ export async function attachNasToHost(c, hostRef, spec) {
   }
 }
 
+/**
+ * v2.794 — 호스트 1대에서 NFS 데이터스토어를 떼어 낸다(HostDatastoreSystem.RemoveDatastore). 안전 규칙:
+ *  · 이름이 같아도 **같은 NFS**(서버·경로)를 가리킬 때만 뗀다 — 이름만 같은 다른 저장소를 떼지 않는다.
+ *  · **이 호스트에 등록된 VM 이 그 데이터스토어를 쓰면 떼지 않는다**(백업 사본·복구 VM 이 접근 불가가 된다) — 개수와 이름 몇 개를 알려 준다.
+ *  · 이미 붙어 있지 않으면 성공(already)으로 본다.
+ * @returns {Promise<{ok:boolean, detail:string, already?:boolean}>}
+ */
+export async function detachNasFromHost(c, hostRef, spec) {
+  const s = validateNfsDsSpec(spec);
+  const objs = await c.retrieveObjectProps('HostSystem', hostRef, ['name', 'configManager.datastoreSystem', 'datastore']);
+  const p = objs[0]?.props || {};
+  const dsSys = p['configManager.datastoreSystem'];
+  if (!dsSys || dsSys.includes('<')) return { ok: false, detail: '호스트의 데이터스토어 시스템을 찾지 못했습니다' };
+  const refs = [...String(p.datastore || '').matchAll(/<ManagedObjectReference type="Datastore">([^<]+)<\/ManagedObjectReference>/g)].map((m) => m[1]);
+  const many = refs.length ? await c.retrieveManyObjectProps('Datastore', refs, ['name']) : [];
+  const hit = many.find((o) => vcNameNorm(o.props?.name) === s.name);
+  if (!hit) return { ok: true, already: true, detail: '이 호스트에는 연결돼 있지 않습니다' };
+  const dp = (await c.retrieveObjectProps('Datastore', hit.ref, ['info', 'vm']))[0]?.props || {};
+  const info = String(dp.info || '');
+  const rh = /<remoteHost>([^<]*)<\/remoteHost>/.exec(info)?.[1] || /<remoteHostNames>([^<]*)<\/remoteHostNames>/.exec(info)?.[1] || '';
+  const rp = /<remotePath>([^<]*)<\/remotePath>/.exec(info)?.[1] || '';
+  if (rh !== s.server || trimTrailingSlashes(rp.slice(0, 600)) !== trimTrailingSlashes(s.exportPath)) {
+    return { ok: false, detail: `같은 이름의 다른 데이터스토어(${rh || '?'}:${rp || '?'})라 떼어 내지 않았습니다` };
+  }
+  const vmRefs = [...String(dp.vm || '').matchAll(/<ManagedObjectReference type="VirtualMachine">([^<]+)<\/ManagedObjectReference>/g)].map((m) => m[1]).slice(0, 2000);
+  if (vmRefs.length) {
+    const vms = await c.retrieveManyObjectProps('VirtualMachine', vmRefs, ['name', 'runtime.host']);
+    const here = vms.filter((v) => String(v.props?.['runtime.host'] || '') === String(hostRef));
+    if (here.length) {
+      const names = here.slice(0, 3).map((v) => vcNameNorm(v.props?.name || v.ref)).join(', ');
+      return { ok: false, detail: `이 호스트의 VM ${here.length}대가 이 데이터스토어를 씁니다(${names}${here.length > 3 ? ' 외' : ''}) — 사본을 옮기거나 지운 뒤 떼어 내세요` };
+    }
+  }
+  try {
+    await c.callRaw(`<RemoveDatastore xmlns="urn:vim25"><_this type="HostDatastoreSystem">${esc(dsSys)}</_this><datastore type="Datastore">${esc(hit.ref)}</datastore></RemoveDatastore>`);
+    return { ok: true, detail: '떼어 냈습니다' };
+  } catch (e) {
+    return { ok: false, detail: String(e?.message || e).slice(0, 300) };
+  }
+}
+
 export { VimSoapClient };

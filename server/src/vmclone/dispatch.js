@@ -24,7 +24,7 @@
  */
 
 import { listJobs, recordOp, listOps as listStoredOps } from './store.js';
-import { applyAttachResult } from './nfsDs.js';
+import { applyAttachResult, applyDetachResult } from './nfsDs.js';
 import { OP_KINDS, OP_LABEL } from './execOp.js';
 
 export const PROTO = 1;
@@ -73,13 +73,19 @@ export function execTargets(vcenters, inventory, { mock = false } = {}) {
  * 법인 묶음(순수) — 실행 위치가 같은 vCenter 끼리. 중앙 직접 수집은 key 'central'.
  * @returns {{key:string, label:string, agent:string, vcenterIds:string[], problem?:string}[]}
  */
+/** 실행 위치 → 법인 키(corpsOf 와 법인별 설정(corpMounts)이 같은 키를 쓴다). 담당 미확정은 'unassigned'. */
+export function corpKeyOfTarget(tg) {
+  const sim = tg?.where === 'local' && tg.corpAgent;   // 데모: 데모 엣지 이름으로 묶되 실행은 이 노드
+  return sim ? `edge:${tg.corpAgent.toLowerCase()}` : tg?.where === 'local' ? 'central' : tg?.where === 'edge' ? `edge:${tg.agent.toLowerCase()}` : 'unassigned';
+}
+
 export function corpsOf(vcenters, targets) {
   const m = new Map();
   for (const v of Array.isArray(vcenters) ? vcenters : []) {
     const id = String(v?.id ?? ''); if (!id) continue;
     const tg = targets.get(id) || { where: 'none', reason: '' };
-    const sim = tg.where === 'local' && tg.corpAgent;   // 데모: 데모 엣지 이름으로 묶되 실행은 이 노드
-    const key = sim ? `edge:${tg.corpAgent.toLowerCase()}` : tg.where === 'local' ? 'central' : tg.where === 'edge' ? `edge:${tg.agent.toLowerCase()}` : 'unassigned';
+    const sim = tg.where === 'local' && tg.corpAgent;
+    const key = corpKeyOfTarget(tg);
     if (!m.has(key)) {
       m.set(key, { key, label: sim ? tg.corpAgent : tg.where === 'local' ? '중앙' : tg.where === 'edge' ? tg.agent : '담당 미확정',
         agent: tg.where === 'edge' ? tg.agent : '', vcenterIds: [], ...(sim ? { simulated: true } : {}) });
@@ -221,10 +227,10 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   const r = result && typeof result === 'object' ? result : { ok: false, detail: '빈 결과' };
   op.state = 'done'; op.doneAt = now;
   op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}) };
-  if (op.kind === 'nfsds-attach' && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
-    // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6).
+  if ((op.kind === 'nfsds-attach' || op.kind === 'nfsds-detach') && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
+    // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6). 떼어 내기도 같다.
     const asked = new Set((op.spec.hostIds || []).map(String));
-    applyAttachResult(op.spec.nfsDsId, r.hosts.filter((h) => asked.has(String(h?.hostId))), now);
+    (op.kind === 'nfsds-detach' ? applyDetachResult : applyAttachResult)(op.spec.nfsDsId, r.hosts.filter((h) => asked.has(String(h?.hostId))), now);
   }
   try {
     recordOp({ id: op.id, kind: op.kind, jobId: op.jobId, vcenterId: op.vcenterId, vmName: op.vmName, at: now, ok: op.result.ok, detail: op.result.detail, ms: op.result.ms || (now - op.createdAt), agent: op.agent, by: op.by, target: op.spec?.newName || op.spec?.name || '' });
@@ -314,7 +320,7 @@ export function pendingOpFor(jobId, kind, ref = '') {
 
 /** 위임 잡 정의(엣지가 받는 모양) — 실행 상태는 싣지 않는다. */
 export function delegatedDef(j) {
-  return { id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, dest: j.dest, schedule: j.schedule, keep: j.keep, quiesce: !!j.quiesce, enabled: j.enabled !== false, verifyAfter: !!j.verifyAfter };
+  return { id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, dest: j.dest, schedule: j.schedule, keep: j.keep, quiesce: !!j.quiesce, enabled: j.enabled !== false, verifyAfter: !!j.verifyAfter, ...(j.keepDays ? { keepDays: j.keepDays } : {}) };
 }
 
 /**

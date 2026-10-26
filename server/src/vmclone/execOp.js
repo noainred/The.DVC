@@ -14,11 +14,11 @@
 
 import { getJob, patchClone, recordJobEvent } from './store.js';
 import { enqueueRun, enqueueOp } from './runner.js';
-import { verifyClone, restoreFromClone, attachNfsDatastore } from './vsOps.js';
+import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore } from './vsOps.js';
 import { logAudit } from '../audit.js';
 
-export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach']);
-export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결' });
+export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach']);
+export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기' });
 
 /**
  * @param {{id:string, kind:string, jobId?:string, vcenterId?:string, spec?:object, by?:string}} op
@@ -30,11 +30,12 @@ export async function executeOp(op) {
   const by = String(op?.by || 'vm-clone').slice(0, 80);
   if (!OP_KINDS.includes(kind)) return { ok: false, detail: `모르는 작업 종류: ${kind.slice(0, 40)}` };
 
-  if (kind === 'nfsds-attach') {
+  if (kind === 'nfsds-attach' || kind === 'nfsds-detach') {
     const vcenterId = String(op.vcenterId || '');
+    const detach = kind === 'nfsds-detach';
     return enqueueOp({ id: op.id, kind, label: OP_LABEL[kind] }, async (setPhase) => {
-      const r = await attachNfsDatastore(vcenterId, spec, spec.hostIds, { setPhase });
-      logAudit({ user: by, action: r.ok ? 'NFS 데이터스토어 연결' : 'NFS 데이터스토어 연결 실패', target: `${vcenterId}/${String(spec.name || '').slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
+      const r = await (detach ? detachNfsDatastore : attachNfsDatastore)(vcenterId, spec, spec.hostIds, { setPhase });
+      logAudit({ user: by, action: `${OP_LABEL[kind]}${r.ok ? '' : ' 실패'}`, target: `${vcenterId}/${String(spec.name || '').slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms, hosts: r.hosts };
     });
   }

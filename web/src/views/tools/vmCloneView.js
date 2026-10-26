@@ -175,12 +175,14 @@ export function recentSessions(jobs, ops, limit = 8) {
   }
   for (const o of Array.isArray(ops) ? ops : []) {
     if (o.state !== 'done') out.push({ at: o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: 'running', detail: `${o.label || o.kind} — ${o.where === 'edge' ? `담당 엣지 ${o.agent} ${o.state === 'pending' ? '가져가기 대기' : '실행 중'}` : '실행 중'}`, ms: 0, jobId: o.jobId || '' });
-    else if (o.kind === 'nfsds-attach' || o.kind === 'run') out.push({ at: o.doneAt || o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: o.ok ? 'ok' : 'fail', detail: o.detail || '', ms: 0, jobId: o.jobId || '' });
+    else if (o.kind === 'nfsds-attach' || o.kind === 'nfsds-detach' || o.kind === 'run') out.push({ at: o.doneAt || o.createdAt || 0, vm: o.vmName || o.target || '', kind: o.kind, tone: o.ok ? 'ok' : 'fail', detail: o.detail || '', ms: 0, jobId: o.jobId || '' });
   }
   return out.sort((a, b) => b.at - a.at).slice(0, limit);
 }
 
-export const KIND_LABEL = Object.freeze({ backup: '백업', verify: '검증', restore: '복구', run: '지금 실행', 'nfsds-attach': 'NFS 연결' });
+export const KIND_LABEL = Object.freeze({ backup: '백업', verify: '검증', restore: '복구', run: '지금 실행', 'nfsds-attach': 'NFS 연결', 'nfsds-detach': 'NFS 떼어 내기' });
+/** 보존 정책 문구 — '7개' · '7개 · 30일'(v2.794 보존 기간). */
+export const keepText = (j) => `${Number(j?.keep) || 0}개${Number(j?.keepDays) > 0 ? ` · ${Number(j.keepDays)}일` : ''}`;
 /** 실행 사유 표시 — 모르는 값은 그대로(지어내지 않는다). */
 export const TRIGGER_LABEL = Object.freeze({ schedule: '스케줄', auto: '자동', manual: '수동', resume: '재시작 뒤 재실행', restart: '재시작 정리' });
 export const triggerText = (t) => TRIGGER_LABEL[t] || String(t || '');

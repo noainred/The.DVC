@@ -27,7 +27,7 @@ import { fileStamp } from '../util/dayKey.js';
 import { demoHash } from '../mock/demo/flags.js';
 import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot, vmStateOf, disconnectAllNics,
-  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec,
+  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, detachNasFromHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec,
 } from './vsphere.js';
 import {
   getJob, setVerifying, patchVerifying, clearVerifying, handOffVerifying, interruptedVerifyOf, patchClone, recordJobEvent,
@@ -304,30 +304,40 @@ export async function restoreFromClone(job, ref, spec, { setPhase } = {}) {
  * 호스트들에 NFS 데이터스토어를 붙인다(호스트마다 결과 — 실패한 호스트만 다시 시도할 수 있게).
  * @returns {Promise<{ok:boolean, detail:string, ms:number, hosts:{hostId:string, ok:boolean, detail:string}[]}>}
  */
-export async function attachNfsDatastore(vcenterId, spec, hostIds, { setPhase } = {}) {
+export function attachNfsDatastore(vcenterId, spec, hostIds, { setPhase } = {}) {
+  return perHostNas('attach', vcenterId, spec, hostIds, { setPhase });
+}
+/** v2.794 — 호스트들에서 NFS 데이터스토어를 떼어 낸다(호스트마다 결과 — 쓰는 VM 이 있는 호스트는 떼지 않는다). */
+export function detachNfsDatastore(vcenterId, spec, hostIds, { setPhase } = {}) {
+  return perHostNas('detach', vcenterId, spec, hostIds, { setPhase });
+}
+
+async function perHostNas(mode, vcenterId, spec, hostIds, { setPhase } = {}) {
   const t0 = Date.now();
+  const verb = mode === 'detach' ? '떼어 내기' : '연결';
   let s;
   try { s = validateNfsDsSpec(spec); } catch (e) { return { ok: false, detail: e.message, ms: 0, hosts: [] }; }
   const ids = [...new Set((hostIds || []).map(String))].slice(0, 200);
-  if (!ids.length) return { ok: false, detail: '연결할 호스트가 없습니다', ms: 0, hosts: [] };
+  if (!ids.length) return { ok: false, detail: `${verb}할 호스트가 없습니다`, ms: 0, hosts: [] };
   const hosts = [];
   const summary = () => {
     const okN = hosts.filter((h) => h.ok).length;
-    return { ok: okN === hosts.length, detail: `NFS 데이터스토어 '${s.name}' — 호스트 ${okN}/${hosts.length}대 연결`, ms: Date.now() - t0, hosts };
+    return { ok: okN === hosts.length, detail: `NFS 데이터스토어 '${s.name}' — 호스트 ${okN}/${hosts.length}대 ${verb}`, ms: Date.now() - t0, hosts };
   };
   if (getDataSource() === 'mock') {
-    for (const id of ids) { try { setPhase?.(`호스트 연결 ${hosts.length + 1}/${ids.length}`); } catch { /* */ } await sleep(150); hosts.push({ hostId: id, ok: true, detail: '연결했습니다(데모)' }); }
+    for (const id of ids) { try { setPhase?.(`호스트 ${verb} ${hosts.length + 1}/${ids.length}`); } catch { /* */ } await sleep(150); hosts.push({ hostId: id, ok: true, detail: mode === 'detach' ? '떼어 냈습니다(데모)' : '연결했습니다(데모)' }); }
     return summary();
   }
   const vc = vcOf(vcenterId);
   const c = new VimSoapClient(vc);
   await onDemandLogin(c, vc);
+  const one = mode === 'detach' ? detachNasFromHost : attachNasToHost;
   try {
     for (const id of ids) {
-      try { setPhase?.(`호스트 연결 ${hosts.length + 1}/${ids.length}`); } catch { /* */ }
+      try { setPhase?.(`호스트 ${verb} ${hosts.length + 1}/${ids.length}`); } catch { /* */ }
       const hostRef = morefOf(id, vcenterId);
       if (!hostRef) { hosts.push({ hostId: id, ok: false, detail: '호스트 MoRef 해석 실패' }); continue; }
-      try { const r = await attachNasToHost(c, hostRef, s); hosts.push({ hostId: id, ok: r.ok, detail: r.detail }); }
+      try { const r = await one(c, hostRef, s); hosts.push({ hostId: id, ok: r.ok, detail: r.detail }); }
       catch (e) { hosts.push({ hostId: id, ok: false, detail: String(e?.message || e).slice(0, 300) }); }
     }
   } finally { await c.logout().catch(() => {}); }
