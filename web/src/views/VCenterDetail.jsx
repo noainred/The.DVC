@@ -1,7 +1,7 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
+import { fetchJson, postJson, usePolling, toolAllowed, canCsv, postDownload } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -24,6 +24,8 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
+import { vmListRequest } from './vcdVmList.js'; // v2.792: 'VM 목록 CSV'(Veeam·스냅샷 포함) 요청 본문(순수)
+import { downloadFailText } from './downloadFailText.js';
 import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
@@ -275,6 +277,8 @@ export default function VCenterDetail({ site, onBack }) {
   const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
   const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
+  const [vmCsvBusy, setVmCsvBusy] = useState(false); // v2.792 'VM 목록 CSV' 만드는 중(그 버튼만 잠근다)
+  const [vmCsvMsg, setVmCsvMsg] = useState('');
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -397,6 +401,17 @@ export default function VCenterDetail({ site, onBack }) {
 
   // folder path -> vms (vSphere "VMs and Templates")
   const folderTree = useMemo(() => buildFolderTree(visibleVms), [visibleVms]);
+  // v2.792(사용자 요청 "vm 폴더에서 vm list export 할때 Veeam 백업여부 · 백업여부 판단할 수 있는 snapshot 포함여부"): 화면 기준 VM 목록 CSV.
+  //   보이는 VM(검색 중이면 일치 VM)의 id 를 보내고, Veeam·스냅샷 판정은 서버가 '백업 세부내용' 과 같은 코어로 한다(화면에서 판정하지 않는다).
+  //   'Veeam 백업 VM 표시' 체크와 무관하다 — 서버가 그 순간의 값을 읽는다. (검색 matches 는 아래에서 만든다 — 클릭 시점에 읽는다)
+  const exportVmListCsv = async (list) => {
+    const r = vmListRequest(list);
+    if (!r.body) { setVmCsvMsg(r.error || ''); return; }
+    setVmCsvBusy(true); setVmCsvMsg('');
+    try { await postDownload(`/veeam/vm-list.csv?vcenterId=${encodeURIComponent(vcenterId)}`, r.body); }
+    catch (e) { setVmCsvMsg(downloadFailText(e)); }
+    finally { setVmCsvBusy(false); }
+  };
 
   // VM 검색(v2.293 확장) — 다단어 OR: 공백으로 나눈 각 토큰이 **하나라도** 포함되면 일치
   // (예: "NTP WA" → 'NTP' 포함 VM + 'WA' 포함 VM 전부). '메모 포함' 체크 시 vm.notes
@@ -584,6 +599,15 @@ export default function VCenterDetail({ site, onBack }) {
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
             {/* 전체 현황 / CSV — 트리를 하나하나 펼치지 않고 모든 클러스터·호스트를 한 번에 본다(v2.335).
                 표와 CSV 는 같은 행을 쓰고, 'Off VM 포함' 설정이 가상화율에 그대로 반영된다. */}
+            {view === 'vms' && canCsv() && (
+              <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
+                <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!vmsOk || vmCsvBusy}
+                  onClick={() => exportVmListCsv({ query, matches, visibleVms, inclPoweredOff })}
+                  title={vmsOk ? `지금 화면의 VM(${query ? '검색 결과' : inclPoweredOff ? '전체' : '꺼진 VM 제외'})을 폴더 경로와 함께 CSV 로 내려받습니다 — Veeam 백업 여부(작업·복원 지점·마지막 백업), Veeam 임시 스냅샷·최근 Veeam 스냅샷 이벤트, VM 의 전체 스냅샷과 백업 판단을 함께 싣습니다` : 'VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
+                  {vmCsvBusy ? 'CSV 만드는 중…' : '⤓ VM 목록 CSV'}
+                </button>
+              </span>
+            )}
             {view === 'hosts' && (
               <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
                 <button className={overview ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 12px' }}
@@ -598,6 +622,7 @@ export default function VCenterDetail({ site, onBack }) {
               </span>
             )}
           </div>
+          {view === 'vms' && vmCsvMsg && <div className="muted" style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px', whiteSpace: 'normal' }}>{vmCsvMsg}</div>}
           {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
           {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} evError={veeamEvP.errorInfo?.message || veeamEvP.error || ''} />}
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
