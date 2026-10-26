@@ -18,6 +18,7 @@ import { createChangeLogger } from '../../util/logThrottle.js';
 import { emsForThisNode, getEmWithSecret, listEms, emRegistryLoadError, emFingerprint } from './registry.js';
 import { collectEm } from './client.js';
 import { putEmResult, pruneEmExcept } from './store.js';
+import { emVmSince, mergeEmVms, pruneEmVmsExcept } from './vmStore.js';
 import { recordRepoDaily } from '../historyDb.js';
 
 export const emPollMs = () => clampIntervalMs(Number(process.env.VEEAM_EM_POLL_MS) || 900_000, 900_000, 300_000);
@@ -49,7 +50,7 @@ export async function collectEmOne(em, { manual = false } = {}) {
   _inFlight.add(full.id);
   const t0 = Date.now();
   try {
-    const r = await withDeadline(emDeadlineMs(), (signal) => collectEm(full, { signal }), `Veeam EM ${full.name} 시한 초과`);
+    const r = await withDeadline(emDeadlineMs(), (signal) => collectEm(full, { signal, now: t0, vmSince: emVmSince(full.id, target) }), `Veeam EM ${full.name} 시한 초과`);
     if (moved()) return { discarded: true };
     emAuthGuard.clearAuthStop(full.id);
     return r;
@@ -61,6 +62,24 @@ export async function collectEmOne(em, { manual = false } = {}) {
     if (_log(`fail:${full.id}`, msg)) console.warn(`[veeam-em] ${full.name}(${full.host}) 수집 실패: ${msg}`);
     return { ...failResult({ error: msg, kind: e?.authFailed ? 'auth' : (e?.kind || ''), authStop, target }), ms: Date.now() - t0 };
   } finally { _inFlight.delete(full.id); }
+}
+
+/**
+ * v2.795 VM 단위 기록을 vmStore 에 합치고 결과에서 행을 뗀다(결과 파일을 키우지 않게). 결과는 그대로 화면용 요약(vmBackups)만.
+ * 서버 링크가 없는 행은 EM 의 백업 서버가 하나뿐일 때만 그 서버로 본다 — 그 밖에는 세기만 한다(어느 법인 것인지 모른다).
+ */
+export function absorbVmRows(em, r, { startedAt = Date.now() } = {}) {
+  if (!r?.vmRows) return r;
+  const { vmRows, ...rest } = r;
+  if (!r.ok) return rest;
+  const servers = Array.isArray(r.backupServers) ? r.backupServers : [];
+  try {
+    const m = mergeEmVms(em.id, r.target || '', vmRows, { startedAt, soleServer: servers.length === 1 ? servers[0].name : '' });
+    return { ...rest, vmBackups: { ...(rest.vmBackups || {}), stored: m.total, unattributed: m.unattributed } };
+  } catch (e) {
+    if (_log('vmstore', String(e?.message || e))) console.warn(`[veeam-em] VM 기록 저장 실패: ${e?.message || e}`);
+    return { ...rest, vmBackups: { ...(rest.vmBackups || {}), storeError: true } };
+  }
 }
 
 /** 저장소 용량을 일 단위 이력으로(EM 보고서·저장소 목록 중 있는 것). 실패는 수집을 막지 않는다. */
@@ -78,13 +97,15 @@ export async function pollEmOnce({ manual = false, ids = null } = {}) {
   const run = async () => {
     const all = emsForThisNode();
     const list = ids ? all.filter((d) => ids.includes(d.id)) : all;
-    if (!ids && !emRegistryLoadError()) pruneEmExcept(listEms().map((d) => d.id));
+    if (!ids && !emRegistryLoadError()) { const live = listEms().map((d) => d.id); pruneEmExcept(live); pruneEmVmsExcept(live); }
     let ok = 0; let fail = 0; let discarded = 0;
     const res = await poolSettled(list, CONCURRENCY, async (d) => {
       if (!emsForThisNode().some((x) => x.id === d.id)) return;
-      const r = await collectEmOne(d, { manual });
-      if (!r) return;
-      if (r.discarded) { discarded++; return; }
+      const t0 = Date.now();
+      const raw = await collectEmOne(d, { manual });
+      if (!raw) return;
+      if (raw.discarded) { discarded++; return; }
+      const r = absorbVmRows(d, raw, { startedAt: t0 });
       if (r.ok) ok++; else fail++;
       if (putEmResult(d.id, r, { expectTarget: emFingerprint(getEmWithSecret(d.id) || d) })) recordHistory(d, r);
     });

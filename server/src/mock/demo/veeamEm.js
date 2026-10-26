@@ -39,7 +39,7 @@ export function demoEmView(snap, now = Date.now()) {
   return {
     id: 'mock-em-1', name: 'DEMO-VEM01', host: 'vem-demo.local', port: 9398, enabled: true, demo: true,
     status: { ok: true, ts: now - 8 * 60_000, error: '', kind: '', authStop: null, lastOkTs: now - 8 * 60_000, stale: false,
-      sections: Object.fromEntries(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions'].map((k) => [k, { ok: true }])), notes: [] },
+      sections: Object.fromEntries(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions', 'vmBackups'].map((k) => [k, { ok: true }])), notes: [] },
     data: {
       overview: { backupServers: servers.length, proxyServers: servers.length * 3, repositoryServers: repos.length, runningJobs: jobs.filter((j) => j.running).length, scheduledJobs: jobs.length,
         vmOk: Math.round(protectedVms * 0.95), vmWarn: Math.round(protectedVms * 0.035), vmFail: Math.round(protectedVms * 0.015) },

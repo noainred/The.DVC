@@ -23,7 +23,7 @@ import { authError, maskText, failText } from '../client.js';
 import { DEFAULT_EM_PORT, emFingerprint } from './registry.js';
 import {
   overviewOf, jobStatsOf, vmsOverviewOf, processedOf, repoReportOf, backupServersOf, repositoriesOf, sessionsOf, firstArray, jobsWithResults, sessionDigest, pick,
-  taskSessionsOf, sessionHeadOf,
+  taskSessionsOf, sessionHeadOf, vmTasksOf, vmPointsOf, rowTimeOf,
 } from './parse.js';
 
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'veeam-em', label: 'Veeam Enterprise Manager', envKey: 'VEEAM_TLS_VERIFY', envRaw: process.env.VEEAM_TLS_VERIFY, tls: withSsrfLookup({}) }) });
@@ -34,7 +34,16 @@ export const SESSION_PAGE = 500;
 export const SESSION_MAX_PAGES = 6;         // 세션 최대 3,000건(28 vCenter · 작업 200여 개 · 하루 수백 회 × 7일 기준)
 export const SESSION_WINDOW_MS = 7 * 86_400_000;
 /** 읽는 항목 — 화면의 '수집 상태' 줄이 이 순서로 말한다. */
-export const EM_SECTIONS = Object.freeze(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions']);
+export const EM_SECTIONS = Object.freeze(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions', 'vmBackups']);
+/*
+ * v2.795 VM 단위 기록(vmBackups) — BackupTaskSession·VmRestorePoint 를 **새것부터** 페이지로 받다가 기준 시각보다 오래된 행이 나오면 멈춘다
+ *   (날짜 필터 문법이 문서로 확인되지 않아 필터에 기대지 않는다). 기준 = 직전 완결 수집 시각 − 겹침(vmStore.js) · 첫 수집은 8일(주간 작업 포함).
+ *   이 항목만의 시간 예산(기본 120초)을 넘거나 페이지 상한에 닿으면 거기까지(complete:false — 다음 수집이 같은 기준으로 다시 읽는다).
+ */
+export const VM_PAGE = 1000;
+export const VM_MAX_PAGES = 40;
+export const VM_WINDOW_MS = 8 * 86_400_000;
+const vmBudgetMs = () => { const n = Number(process.env.VEEAM_EM_VM_BUDGET_MS); return Number.isFinite(n) && n >= 10_000 ? Math.min(n, 600_000) : 120_000; };
 
 const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS));
 function tokenError() {
@@ -100,11 +109,46 @@ export function sessionQuery(type, { page = 1, since = null } = {}) {
   return `/api/query?${q.toString()}`;
 }
 
+/** v2.795 VM 단위 질의 — 새것부터 · 페이지(필터 없음). */
+export function vmQuery(type, page = 1) {
+  const q = new URLSearchParams({ type, format: 'Entities', pageSize: String(VM_PAGE), page: String(page), sortDesc: 'CreationTime' });
+  return `/api/query?${q.toString()}`;
+}
+
+/**
+ * v2.795 VM 단위 기록 읽기 — 두 유형을 각각(한쪽 실패는 사유만 남기고 다른 쪽을 살린다 · 둘 다 실패면 던진다).
+ * @returns {{ tasks, points, complete:boolean, errors:object }}
+ */
+export async function readVmBackups(c, { since, signal = null, budgetMs = vmBudgetMs(), clock = Date.now } = {}) {
+  const until = clock() + budgetMs;
+  const out = { tasks: [], points: [], complete: true, errors: {} };
+  for (const [type, key, conv] of [['BackupTaskSession', 'tasks', vmTasksOf], ['VmRestorePoint', 'points', vmPointsOf]]) {
+    try {
+      for (let p = 1; ; p++) {
+        if (signal?.aborted) throw new Error('수집 시한이 지났습니다');
+        if (p > VM_MAX_PAGES || clock() > until) { out.complete = false; break; }
+        const list = firstArray(await c.get(vmQuery(type, p)));
+        let older = false;
+        const fresh = [];
+        for (const x of list) { const t = rowTimeOf(x); if (t != null && t < since) { older = true; continue; } fresh.push(x); }
+        for (const x of conv(fresh)) out[key].push(x);
+        if (older || list.length < VM_PAGE) break;
+      }
+    } catch (e) {
+      if (isFatal(e) || signal?.aborted) throw e;
+      out.errors[key] = c.mask(String(e?.message || e)).slice(0, 160);
+      out.complete = false;
+    }
+  }
+  if (out.errors.tasks && out.errors.points) throw new Error(`VM 별 작업 결과·복원 지점을 모두 읽지 못했습니다 — ${out.errors.tasks}`);
+  return out;
+}
+
 /**
  * EM 1대를 읽어 결과를 만든다. 로그인 실패·인증 실패는 던진다(호출자가 ok:false 결과로 바꾼다).
  * 그 밖의 항목 실패는 sections[항목] = { ok:false, reason } 로 남기고 나머지로 결과를 만든다 — 모든 항목이 실패하면 전체 실패.
  */
-export async function collectEm(em, { signal = null, fetchImpl, now = Date.now() } = {}) {
+export async function collectEm(em, { signal = null, fetchImpl, now = Date.now(), vmSince = null } = {}) {
   const t0 = Date.now();
   const c = makeEmClient(em, { signal, ...(fetchImpl ? { fetchImpl } : {}) });
   const sections = {}; const notes = [];
@@ -143,6 +187,9 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
       }
       return { list: out, truncated, filtered, replicaErr };
     });
+    // v2.795 VM 단위 기록 — 결과에는 행 수만 싣고, 행(vmRows)은 폴러가 vmStore 에 합친 뒤 버린다(veeam-em-latest.json 을 키우지 않게).
+    const since = Number.isFinite(vmSince) && vmSince > now - 400 * 86_400_000 ? vmSince : now - VM_WINDOW_MS;
+    const vmRows = await soft('vmBackups', () => readVmBackups(c, { since, signal }));
     if (signal?.aborted) throw new Error('수집 시한이 지나 일부만 읽었습니다 — 부분 결과는 저장하지 않습니다');
     if (!Object.values(sections).some((s) => s.ok)) {
       const first = Object.entries(sections).find(([, s]) => !s.ok);
@@ -155,6 +202,7 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
     }
     if (rawSessions?.replicaErr) notes.push(`복제 작업 세션은 읽지 못했습니다(백업 세션만): ${rawSessions.replicaErr}`);
     if (rawSessions?.truncated) notes.push(`세션이 많아 유형별 ${SESSION_PAGE * SESSION_MAX_PAGES}건까지만 읽었습니다(새것부터)`);
+    if (vmRows && !vmRows.complete) notes.push(`VM 별 기록은 일부만 읽었습니다(새것부터 — 시간·페이지 상한${vmRows.errors.tasks ? ' · 작업 결과 실패' : ''}${vmRows.errors.points ? ' · 복원 지점 실패' : ''}) — 다음 수집이 같은 기준으로 다시 읽습니다`);
     const jobs = jobsBody ? jobsWithResults(jobsBody, sessions, { now }) : null;
     const digest = rawSessions ? sessionDigest(sessions, { now }) : null;
     return {
@@ -164,6 +212,8 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
       backupServers: backupServersBody ? backupServersOf(backupServersBody) : null,
       repositories: repositoriesBody ? repositoriesOf(repositoriesBody) : null,
       jobs, sessions: digest,
+      vmBackups: vmRows ? { since, tasks: vmRows.tasks.length, points: vmRows.points.length, complete: vmRows.complete, errors: vmRows.errors } : null,
+      ...(vmRows ? { vmRows: { since, tasks: vmRows.tasks, points: vmRows.points, complete: vmRows.complete } } : {}),
     };
   } finally {
     await c.logout();

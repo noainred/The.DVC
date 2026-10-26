@@ -44,7 +44,8 @@ import { emView, jobsView, licenseTotals } from '../../veeam/em/view.js';
 import { getEmMap, emMapRev } from '../../veeam/em/mapping.js';
 import { currentLicenses } from '../../veeam/licenseWatch.js';
 import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
-import { demoEmView, demoLicenses, demoSessionDetail } from '../../mock/demo/veeamEm.js';   // v2.784 백업 표시(중요도·백업 필요·메모)
+import { demoEmView, demoLicenses, demoSessionDetail } from '../../mock/demo/veeamEm.js';
+import { emSourcesForVcenter, emLinkedVcenter, emSourcesRev } from '../../veeam/em/sources.js';   // v2.795 EM 을 vCenter 화면의 Veeam 출처로(VM 단위)   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -144,6 +145,17 @@ function vcOf(req) {
   return { vcenterId, vms: (snap?.vms || []).filter((v) => v.vcenterId === vcenterId) };
 }
 
+/** v2.795: 그 B&R 등록이 이 vCenter 를 맡고 지금 정상인가(마지막 읽기 성공 · 그 결과를 만든 노드 주기로 오래되지 않음) — EM 출처를 뺄지 정한다. */
+export function brHealthy(brId, vcenterId, now = Date.now()) {
+  if (!serversForVcenter(vcenterId).some((d) => d.id === brId)) return false;
+  const rec = getRecord(brId);
+  return rec?.result?.ok === true && Number(rec.result.ts) > 0 && now - Number(rec.result.ts) <= resultMaxAgeMs(rec.via, rec.agent);
+}
+/** v2.795: 이 vCenter 에 Veeam 출처(B&R 등록 또는 매핑된 EM 백업 서버)가 있는가 — '연동 없음' 판정 하나. */
+export function veeamLinked(vcenterId) {
+  return serversForVcenter(vcenterId).length > 0 || emLinkedVcenter(vcenterId);
+}
+
 /** 그 vCenter 에 연결된 서버들의 상태(화면용)와 대조할 결과(낡은 '백업 중' 을 지운 것). */
 function resultsFor(vcenterId, req) {
   const admin = isAdminDetailUser(req.user);
@@ -162,6 +174,10 @@ function resultsFor(vcenterId, req) {
       if (admin) views[views.length - 1].runningJobs = (Array.isArray(result.jobs) ? result.jobs : []).filter((j) => j && j.running === true).slice(0, 10).map((j) => ({ name: String(j.name || '').slice(0, 128), pg: Number.isFinite(j.pg) ? j.pg : null }));
     }
   }
+  // v2.795: Enterprise Manager 출처(매핑으로 이 vCenter 가 정해진 EM 백업 서버) — 짝지은 B&R 등록이 이 vCenter 를 맡고 지금 정상이면 빼고, 아니면 넣는다(사용자 결정 'B&R 우선, 실패 시 EM').
+  const em = emSourcesForVcenter(vcenterId, { brHealthy: (id, vc) => brHealthy(id, vc, now), admin, maxAgeMs: emPollMs() * 2 + 120_000, now });
+  for (const x of em.results) results.push(x);
+  for (const v of em.views) views.push(v);
   // v2.778: 다른 등록 vCenter 의 주소 — Veeam 이 적은 이름을 이 vCenter 의 별칭으로 배울 때 그 주소와 같은 이름은 배우지 않는다(parse.js learnHostAliases).
   const all = listVcenters();
   return { results, views, host: all.find((v) => v.id === vcenterId)?.host || '', otherHosts: all.filter((v) => v.id !== vcenterId).map((v) => v.host).filter(Boolean) };
@@ -253,7 +269,7 @@ export function registerVeeamBadges(api) {
     const { vcenterId, vms } = t;
     if (registryUnreadable503(res)) return;   // v2.762(F4)
     const admin = isAdminDetailUser(req.user);
-    if (!serversForVcenter(vcenterId).length) {
+    if (!veeamLinked(vcenterId)) {
       if (isMockMode()) { const dm = demoVeeamMatch(vcenterId, vms); return res.json({ ok: true, configured: true, demo: true, servers: [DEMO_SERVER_VIEW()], ...maskOtherVcenter(dm, admin, Object.keys(dm.byVm || {}).length), at: Date.now() }); }
       return res.json({ ok: true, configured: false, servers: [], byVm: {}, unmatched: 0, ...maskOtherVcenter({ otherVcenter: 0 }, admin, 0), ambiguous: 0 });
     }
@@ -327,7 +343,7 @@ export function registerVeeamBadges(api) {
       for (const vc of vcs) {
         await maybeYield();
         const vms = vmsBy.get(vc.id) || [];
-        if (serversForVcenter(vc.id).length) {
+        if (veeamLinked(vc.id)) {
           const { results, views, host, otherHosts } = resultsFor(vc.id, req);
           // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
@@ -343,7 +359,7 @@ export function registerVeeamBadges(api) {
         }
       }
       return { ok: true, at: Date.now(), byVc };
-    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}` });   // v2.762(F5): 판본이 역할로 갈린다 — 키에 역할
+    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}` });   // v2.762(F5): 판본이 역할로 갈린다 — 키에 역할
   });
 
   // VM 1대의 백업 상세(v2.751 사용자 요청: 'Veeam 배지를 누르면 백업 세부 정보 창' — 복원 지점·용량·마지막 백업 등).
@@ -355,7 +371,7 @@ export function registerVeeamBadges(api) {
     if (!t || !vm) return res.status(404).json({ ok: false, reason: 'VM 을 찾을 수 없습니다.' });
     const { vcenterId } = t;
     if (registryUnreadable503(res)) return;   // v2.762(F4)
-    if (!serversForVcenter(vcenterId).length) {
+    if (!veeamLinked(vcenterId)) {
       if (isMockMode()) return res.json({ ok: true, demo: true, vm: { id: vm.id, name: vm.name }, detail: demoVeeamDetail(vcenterId, vm), servers: [DEMO_SERVER_VIEW()], at: Date.now() });
       return res.json({ ok: true, configured: false, vm: { id: vm.id, name: vm.name }, detail: null, servers: [] });
     }
@@ -502,7 +518,7 @@ async function vmListExport(req, res, kind) {
  */
 async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const admin = isAdminDetailUser(req.user);
-  const linked = !registryBroken() && serversForVcenter(vc.id).length > 0;
+  const linked = !registryBroken() && veeamLinked(vc.id);
   // v2.781(점검 G3 C-B1): VM 목록이 없으면(재시작 직후 골격 · 아직 수집 전 · 그 vCenter 인벤토리 0대) 대조 결과 0 은 사실이 아니다 — 모름.
   //   /veeam/backup-counts(v2.758)와 같은 규칙. ⚠ 판정은 vCenter **전체** 목록(vms)으로 — 전원·제외로 거른 목록(sv.vms)이 비었다고('꺼진 VM 0대') 모름이 아니다.
   const noInventory = initial || !vms.length;
@@ -565,7 +581,7 @@ async function summaryData(req, snap, scope) {
     }
     rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
       veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
-      ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !serversForVcenter(vc.id).length ? { demo: true } : {}) });
+      ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !veeamLinked(vc.id) ? { demo: true } : {}) });
     // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유). 범위(전원)와 무관한 작업 단위 값이다.
     if (admin) for (const v of b.views) for (const j of v.runningJobs || []) if (jobs.length < 30) jobs.push({ vcenter: vc.name || vc.id, server: v.name, name: j.name, pg: j.pg });
   }
@@ -653,7 +669,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
   });
 
   /*
@@ -708,7 +724,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters)
   });
 
   /*

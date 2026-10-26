@@ -44,7 +44,7 @@ export const BADGE_BG = { fail: 'rgba(239,68,68,.16)', warn: 'rgba(245,158,11,.1
 /** 수집 항목 이름 — 서버 veeam/em/client.js EM_SECTIONS 와 같은 키·순서(테스트가 대조). */
 export const SECTION_LABEL = Object.freeze({
   overview: '전체 개요', jobStats: '작업 통계', vms: 'VM 개요', processed: '처리 VM', repoReport: '저장소 보고서',
-  backupServers: '백업 서버', jobs: '작업', repositories: '저장소', sessions: '세션',
+  backupServers: '백업 서버', jobs: '작업', repositories: '저장소', sessions: '세션', vmBackups: 'VM 별 기록',
 });
 /** 수집 상태 칩 — 항목별 성공·실패(사유). 수집 전이면 빈 목록. */
 export function sectionChips(status) {
@@ -135,6 +135,20 @@ export function vcMatchText(r) {
   if (r?.vcSource === 'manual') return { text: names.join(', '), sub: '수동', tone: 'ok' };
   if (r?.vcSource === 'br') return { text: names.join(', '), sub: 'B&R 등록을 따름', tone: 'run' };
   return { text: '정하지 않음', sub: '', tone: 'warn' };
+}
+/**
+ * v2.795 'vCenter 반영' — 서버(admin/veeamEm.js reflectOf)가 정한 값을 문구로. VM 기록 수는 모르면 '—'(0 이 아니다).
+ *  br = 짝지은 B&R 직접 수집이 정상이라 그것으로(EM 기록은 쓰지 않음) · em = EM 의 VM 별 기록으로 · mixed = vCenter 마다 다름 · none = 법인을 정하지 않아 싣지 않음.
+ */
+export function reflectText(r) {
+  const n = r?.vmCount == null ? '—' : `${Number(r.vmCount).toLocaleString('ko-KR')}대`;
+  if (r?.gone) return { text: '반영 안 함', sub: 'EM 결과에 없음', tone: 'none' };
+  switch (r?.reflect) {
+    case 'br': return { text: 'B&R 직접 수집', sub: `EM 기록 ${n} — B&R 이 정상이라 쓰지 않음`, tone: 'ok' };
+    case 'em': return { text: 'EM 기록으로', sub: `VM ${n}${r.brId ? ' · B&R 읽기 실패·대기 대신' : ''}`, tone: 'run' };
+    case 'mixed': return { text: 'vCenter 마다 다름', sub: `VM ${n} · B&R 이 맡은 vCenter 는 B&R`, tone: 'run' };
+    default: return { text: '반영 안 함', sub: '법인(vCenter)을 정하면 반영됩니다', tone: 'warn' };
+  }
 }
 /** 매핑 요약 — 전체 · B&R 짝 있음 · 법인 정함(사라진 줄은 세지 않는다). */
 export function mappingSummary(rows) {

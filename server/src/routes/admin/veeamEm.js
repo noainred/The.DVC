@@ -5,6 +5,8 @@ import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { listEms, saveEm, deleteEm, getEmWithSecret, emRegistryLoadError, DEFAULT_EM_PORT } from '../../veeam/em/registry.js';
 import { getEmRecord, dropEmResult } from '../../veeam/em/store.js';
+import { dropEmVms, emVmCountsByServer, getEmVms } from '../../veeam/em/vmStore.js';
+import { brHealthy } from '../api/veeam.js';
 import { pollEmOnce, emPollerStatus, emAuthGuard } from '../../veeam/em/poller.js';
 import { testEm } from '../../veeam/em/client.js';
 import { withDeadline } from '../../util/deadline.js';
@@ -33,15 +35,29 @@ export function emStatusView(rec) {
  * v2.788.1 매핑 표 — EM 마다 마지막 성공 결과의 백업 서버 + 매핑만 남은 줄(그 이름이 지금 EM 결과에 없음 — gone).
  * 화면이 고를 수 있는 vCenter(스냅샷)·B&R 등록(비밀 없음) 목록을 함께 준다.
  */
-export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brServers = listServers(), vcenters = store.get()?.vcenters || [] } = {}) {
+/**
+ * v2.795 'vCenter 반영' 칸 — 이 백업 서버의 VM 기록이 vCenter 화면에 어떻게 실리는가(routes/api/veeam.js resultsFor 와 같은 우선 규칙 · brHealthy 하나).
+ *  none = vCenter 를 정하지 않아 싣지 않음 · br = 짝지은 B&R 직접 수집이 정상이라 그것으로(EM 은 뺀다) · em = EM 으로 · mixed = vCenter 마다 다름.
+ */
+export function reflectOf(x, { healthy = brHealthy, now = Date.now() } = {}) {
+  if (!x.vcenterIds?.length || x.enabled === false) return 'none';
+  const kinds = new Set(x.vcenterIds.map((vc) => (x.brId && healthy(x.brId, vc, now) ? 'br' : 'em')));
+  return kinds.size > 1 ? 'mixed' : [...kinds][0];
+}
+
+export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brServers = listServers(), vcenters = store.get()?.vcenters || [], healthy = brHealthy } = {}) {
   const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
   const rows = [];
+  const now = Date.now();
   for (const em of ems) {
     const rec = recOf(em.id);
     const data = rec?.result?.ok ? rec.result : (rec?.lastOk || null);
     const list = mapBackupServers(data?.backupServers || [], { emId: em.id, map, brServers, vcName });
     const seen = new Set(list.map((x) => mapKey(em.id, x.name)));
-    for (const x of list) rows.push({ emId: em.id, emName: em.name, name: x.name, version: x.version || '', registered: x.registered, brId: x.brId, brName: x.brName, brSource: x.brSource, vcenterIds: x.vcenterIds, vcNames: x.vcNames, vcSource: x.vcSource, manual: map[mapKey(em.id, x.name)] || null });
+    const counts = emVmCountsByServer(em.id);
+    const vmKnown = !!getEmVms(em.id);   // VM 기록을 한 번이라도 저장했는가(아니면 수는 모름 — 0 이 아니다)
+    for (const x of list) rows.push({ emId: em.id, emName: em.name, name: x.name, version: x.version || '', registered: x.registered, brId: x.brId, brName: x.brName, brSource: x.brSource, vcenterIds: x.vcenterIds, vcNames: x.vcNames, vcSource: x.vcSource, manual: map[mapKey(em.id, x.name)] || null,
+      reflect: reflectOf({ ...x, enabled: em.enabled }, { healthy, now }), vmCount: vmKnown ? (counts.get(String(x.name).trim().toLowerCase()) || 0) : null });
     for (const [k, e] of Object.entries(map)) {
       if (!k.startsWith(`${em.id}|`) || seen.has(k)) continue;
       rows.push({ emId: em.id, emName: em.name, name: e.server, version: '', gone: true, registered: false, brId: '', brName: '', brSource: null, vcenterIds: e.vcenterIds || [], vcNames: (e.vcenterIds || []).map((id) => vcName.get(id) || id), vcSource: e.vcenterIds?.length ? 'manual' : null, manual: e });
@@ -70,7 +86,7 @@ export function registerVeeamEm(adminRouter) {
     try {
       const d = saveEm({ ...(req.body || {}) });
       // 접속처가 바뀌면 옛 접속처의 결과와 인증 정지를 지운다(다른 EM 이다 — secretCarry 와 같은 판단).
-      if (d.moved) { dropEmResult(d.id); emAuthGuard.clearAuthStop(d.id); }
+      if (d.moved) { dropEmResult(d.id); dropEmVms(d.id); emAuthGuard.clearAuthStop(d.id); }
       logAudit({ user: req.user?.username, action: 'Veeam EM 저장', target: d.name, detail: `${d.host}:${d.port}${d.enabled === false ? ' · 수집 끔' : ''}${d.moved ? ' · 접속처 변경으로 이전 결과·인증 정지 지움' : ''}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
       res.status(201).json({ ok: true, em: d });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
@@ -80,6 +96,7 @@ export function registerVeeamEm(adminRouter) {
     const d = getEmWithSecret(req.params.id);
     if (!d || !deleteEm(req.params.id)) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
     dropEmResult(req.params.id);
+    dropEmVms(req.params.id);   // v2.795 VM 단위 기록도
     emAuthGuard.clearAuthStop(req.params.id);
     dropEmMapFor(req.params.id);   // v2.788.1 그 EM 의 매핑도(유령 매핑 방지)
     logAudit({ user: req.user?.username, action: 'Veeam EM 삭제', target: d.name, detail: `${d.host}:${d.port || DEFAULT_EM_PORT}` });

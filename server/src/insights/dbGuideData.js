@@ -155,6 +155,34 @@ export const DB_GUIDE_DATA = {
       "server/src/veeam/em/poller.js"
     ]
   },
+  "veeam-em-vms.json": {
+    "title": "Veeam Enterprise Manager VM 별 백업 기록",
+    "summary": "EM 이 알려 준 VM 별 최신 백업 기록입니다(v2.795). 백업 서버마다 VM 의 마지막 작업 결과(성공·경고·실패와 시각)와 최근 복원 지점 시각을 담습니다. 매핑으로 법인(vCenter)을 정한 백업 서버의 기록이 vCenter 카드·VM 배지·Veeam 현황에 'EM ·' 출처로 실립니다(짝지은 B&R 직접 수집이 정상이면 그쪽이 우선).",
+    "stores": [
+      "EM 마다: 접속처 지문, 다음 수집 기준 시각, 마지막 저장 시각, 서버를 가릴 수 없었던 행 수.",
+      "'백업 서버|VM 이름' 마다: VM 이름, 백업 서버, moref(있을 때), 작업 이름, 마지막 작업 결과·시작·끝, 최근 복원 지점 시각(최대 10개)."
+    ],
+    "writer": "Enterprise Manager 주기 수집(중앙 전용, 기본 15분)이 끝날 때마다 한 번 씁니다(원자적 쓰기). 첫 수집은 최근 8일, 그 뒤로는 직전 완결 수집 이후만 읽습니다. EM 을 지우거나 접속처를 바꾸면 그 EM 의 기록을 지웁니다.",
+    "usedBy": [
+      "vCenter 카드 'VM 백업' 칸 · VM 의 Veeam 배지·상세 창",
+      "서버 › Veeam › Summary · Detail, VM 목록 CSV·엑셀",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표의 'vCenter 반영' 칸"
+    ],
+    "retention": "마지막 근거(작업 끝·복원 지점)가 400일보다 오래된 VM 은 지웁니다. EM 당 최대 30,000대(오래된 것부터 버립니다).",
+    "growth": "EM 이 백업하는 VM 수에 비례합니다(VM 1대에 수백 바이트 — 6천 대면 약 2 MB).",
+    "shrink": "줄일 필요가 없습니다. 지우면 다음 수집이 최근 8일로 다시 채웁니다.",
+    "ifDeleted": "다음 수집이 최근 8일 기록으로 다시 만듭니다. 그 사이 EM 으로만 연동된 vCenter 의 Veeam 칸은 '첫 수집 대기' 로 보입니다(0 이 아닙니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 기록으로 시작합니다.",
+    "cautions": [
+      "비밀은 들어 있지 않습니다(VM·서버·작업 이름과 시각만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑(법인을 정해야 반영됩니다)"
+    ],
+    "sources": [
+      "server/src/veeam/em/vmStore.js",
+      "server/src/veeam/em/sources.js"
+    ]
+  },
   "veeam-em-map.json": {
     "title": "Veeam Enterprise Manager 백업 서버 매핑",
     "summary": "EM 이 아는 B&R 서버마다 사람이 정한 값을 담는 파일입니다(v2.788.1). 그 서버가 백업하는 vCenter(법인)와, 포탈에 등록된 어느 B&R 서버와 같은지(이름이 달라 자동으로 못 찾을 때) 또는 '포탈에 없음' 으로 확정했는지를 적습니다. 서버 › Veeam › EM 탭의 법인 이름과 '포탈 등록됨' 표시가 이 값을 씁니다.",
