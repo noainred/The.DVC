@@ -102,6 +102,11 @@ function initSqlite() {
     // v2.631(감사 R2631-01): vm_latest.partial — 이 행이 **부분 합**(여유 공간 미보고 파티션을 뺀 합)인지. 예전 DB 에는 열이 없다.
     //   table_info 로 없을 때만 더한다(v2.603 DB2603-01 — 잠금을 '열 있음' 으로 삼키지 않게 duplicate 만 삼킨다).
     const cols = new Set(db.prepare('PRAGMA table_info(vm_latest)').all().map((c) => c.name));
+    // v2.797 part_latest.fs — 파티션 파일 시스템 종류(NTFS·xfs…). 예전 DB 에는 없다 — 없을 때만 더한다(같은 규칙).
+    const pcols = new Set(db.prepare('PRAGMA table_info(part_latest)').all().map((c) => c.name));
+    if (!pcols.has('fs')) {
+      try { db.exec('ALTER TABLE part_latest ADD COLUMN fs TEXT'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message))) throw e; }
+    }
     if (!cols.has('partial')) {
       try { db.exec('ALTER TABLE vm_latest ADD COLUMN partial INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message))) throw e; }
     }
@@ -184,7 +189,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   const insPartSer = db.prepare('INSERT INTO part_series (vcenter_id,vm_id,path,ts,cap_gb,used_gb) VALUES (?,?,?,?,?,?)');
   const upPartLast = db.prepare('INSERT OR REPLACE INTO part_last (vm_id,path,vcenter_id,cap_gb,used_gb) VALUES (?,?,?,?,?)');
   const delPartLast = db.prepare('DELETE FROM part_last WHERE vm_id=? AND path=?');
-  const insPartLatest = db.prepare('INSERT OR REPLACE INTO part_latest (vm_id,path,vcenter_id,cap_gb,used_gb,unknown,ts) VALUES (?,?,?,?,?,?,?)');
+  const insPartLatest = db.prepare('INSERT OR REPLACE INTO part_latest (vm_id,path,vcenter_id,cap_gb,used_gb,unknown,ts,fs) VALUES (?,?,?,?,?,?,?,?)');
 
   // ⚠ v2.601(감사 RECENT2601-01) 2차 방어: 사용량·용량이 유한한 숫자가 아닌 파티션·VM 은 적재하지 않는다(개수는 밝힌다).
   //   used_gb 가 NOT NULL 이라 null 하나가 아래 트랜잭션 전체(= 그 vCenter 의 전 VM)를 매 주기 롤백했다. 호출부(service·
@@ -226,9 +231,9 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
     db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?').run(vcenterId);
     db.prepare('DELETE FROM part_latest WHERE vcenter_id=?').run(vcenterId);   // v2.749: 파티션 최신 값도 같은 단위로 교체
     for (const vm of rows) {
-      for (const p of (vm.parts || [])) insPartLatest.run(vm.vmId, p.path, vcenterId, p.capGB, p.usedGB, 0, ts);
+      for (const p of (vm.parts || [])) insPartLatest.run(vm.vmId, p.path, vcenterId, p.capGB, p.usedGB, 0, ts, p.fs || null);
       for (const up of (Array.isArray(vm.unknownPaths) ? vm.unknownPaths : [])) {
-        if (!(vm.parts || []).some((p) => p.path === up)) insPartLatest.run(vm.vmId, up, vcenterId, null, null, 1, ts);
+        if (!(vm.parts || []).some((p) => p.path === up)) insPartLatest.run(vm.vmId, up, vcenterId, null, null, 1, ts, null);
       }
       const partial = Number(vm.partsUnknown) > 0;
       if (partial) {
@@ -516,14 +521,34 @@ export async function vmPartLatest(vmId) {
   if (!db) return null;
   const id = String(vmId ?? '');
   const v = db.prepare('SELECT vcenter_id, ts, partial FROM vm_latest WHERE vm_id=?').get(id);
-  const parts = db.prepare('SELECT path, cap_gb, used_gb, unknown, ts FROM part_latest WHERE vm_id=? ORDER BY path').all(id);
+  const parts = db.prepare('SELECT path, cap_gb, used_gb, unknown, ts, fs FROM part_latest WHERE vm_id=? ORDER BY path').all(id);
   return {
     vm: v ? { vcenterId: v.vcenter_id, ts: Number(v.ts), partial: Number(v.partial) === 1 } : null,
     parts: parts.map((r) => ({
       path: r.path, capGB: r.cap_gb == null ? null : Number(r.cap_gb), usedGB: r.used_gb == null ? null : Number(r.used_gb),
-      unknown: Number(r.unknown) === 1, ts: Number(r.ts),
+      unknown: Number(r.unknown) === 1, ts: Number(r.ts), fs: r.fs || '',
     })),
   };
+}
+
+/**
+ * v2.797 VM 목록 내보내기 — 한 vCenter 의 파티션 최신 값 전부(vcenter_id 인덱스 한 번) + 이번 수집에 든 VM 집합.
+ * 반환 null = DB 없음. collected 에 없는 VM 은 '수집 안 됨'(Tools 미실행·수집 꺼짐 — 0 이 아니다).
+ * @returns {Promise<{ collected:Set<string>, byVm:Map<string,Array<{path,capGB,usedGB,unknown,fs}>>, ts:number|null }|null>}
+ */
+export async function partsForVcenter(vcenterId) {
+  const db = await getDb();
+  if (!db) return null;
+  const id = String(vcenterId ?? '');
+  const collected = new Set(); let ts = null;
+  for (const r of db.prepare('SELECT vm_id, ts FROM vm_latest WHERE vcenter_id=?').all(id)) { collected.add(r.vm_id); if (ts == null || Number(r.ts) > ts) ts = Number(r.ts); }
+  const byVm = new Map();
+  for (const r of db.prepare('SELECT vm_id, path, cap_gb, used_gb, unknown, fs FROM part_latest WHERE vcenter_id=? ORDER BY vm_id, path').all(id)) {
+    let a = byVm.get(r.vm_id);
+    if (!a) { a = []; byVm.set(r.vm_id, a); }
+    a.push({ path: r.path, capGB: r.cap_gb == null ? null : Number(r.cap_gb), usedGB: r.used_gb == null ? null : Number(r.used_gb), unknown: Number(r.unknown) === 1, fs: r.fs || '' });
+  }
+  return { collected, byVm, ts };
 }
 
 /**

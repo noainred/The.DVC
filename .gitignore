@@ -215,6 +215,7 @@ server/config/veeam-em.json
 server/config/veeam-em-latest.json
 server/config/veeam-em-map.json
 server/config/veeam-em-vms.json
+server/config/vm-list-prefs.json
 server/config/veeam-em-auth-stops.json
 server/config/veeam-history.db
 server/config/veeam-license-alert-state.json

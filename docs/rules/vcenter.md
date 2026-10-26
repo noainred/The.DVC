@@ -294,3 +294,13 @@
     HierarchyObjRef 의 루트 GUID 는 vCenter 식별자와 같다는 보장이 없어 쓰지 않는다(문서와 사례 보고가 엇갈림).
   · 응답 캐시(backup-counts·summary·detail) 키에 `em${emSourcesRev()}`(VM 기록·매핑 리비전) — 새 기록이 60초 캐시를 기다리지 않는다.
   · ⚠ 실물 EM 응답 미확인(엔티티·필드는 문서 검색 결과 기준). 실물에서 행이 0이거나 서버 링크가 없으면 설정 › EM 수집 상태의 'VM 별 기록' 칩과 비고가 말한다.
+- **v2.797 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값. 열은 `veeam/vmListCatalog.js` 하나(key 고정 — 저장값에 남는다, 바꾸지 말 것)**
+  (사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" + "기본값 · 이름1~5 다섯 칸 · 저장하는 값 지정" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW ·
+  결정: 저장값은 계정 · 파일 시스템 종류 수집 포함 · 실시간 조회(생성일·UUID·NIC) 제외 · 표준 검증. 회귀 `server/test/vmListSelect2797.test.js`(변이 7/8 — 남은 1건은 전역 `denyDemoGuest` 가 먼저 막는 이중 방어) + 웹 `vmListExportText.test.js`):
+  · `POST /veeam/vm-list.{csv,xlsx}` 본문 `cols`(고른 순서 = 열 순서 · 모르는 key 400) · 없으면 v2.792 열 그대로(`LEGACY_KEYS` — 머리·칸이 같다는 것을 테스트가 대조). `multi:'partRows'` 는 파티션 열을 고른 때만 행 반복 · `tagCols` 는 카테고리별 열.
+  · 고른 항목에 필요한 소스만 읽는다(`needsOf`): Veeam 열이 없고 CSV 면 `vcBackup` 을 부르지 않는다(무겁다) — 엑셀은 요약·트리 시트가 써서 늘 부른다. 엑셀 '데이터' 시트는 라우트가 만든 표(`dataTable`)를 그대로 쓴다.
+  · 값 규칙: 그 vCenter 에서 못 모은 소스(태그 수집 전·실패 · 게스트 파티션 이번 수집에 없는 VM · 구성 캐시 미도달)는 ‘수집 안 됨’(`MISSING`) · 못 읽은 값은 빈칸 — 0·없음 금지.
+  · 저장값 `veeam/vmListPrefs.js`(`vm-list-prefs.json`) — 키는 **인증된 req.user.username**(본문 값 무시) · 'u:' 접두(‘__proto__’ 계정) · 저장할 내용은 사람이 고른 것만(고르지 않은 것은 불러올 때 지금 값 유지) ·
+    손상 보존 → 쓰기 503 · 쓰기 게이트 data.csv + 관리자·운영자 · 칸에서 온 기본값(`def.from`)은 그 칸과 같이 바뀐다.
+  · 파일 시스템 종류: `soapParse.parseGuestDisks` 가 `filesystemType` 을 읽고(`util/fsType.js fsTypeOf` — 영숫자·._- 32자, 그 밖은 버림) 엣지 정제(`sanitizeGuestDiskVms`)도 같은 함수 · `part_latest.fs` 열(ALTER — 없을 때만).
+    ⚠ vSphere 7.0 이상이 주는 값으로 **추정**(실물 미확인) — 옛 판·엣지가 이 판 전이면 빈칸.

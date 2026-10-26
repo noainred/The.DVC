@@ -359,7 +359,7 @@ export function demoGuestDiskVms(vcenterId, vms, ts = Date.now()) {
       let pct = k === 0 ? 0.35 + 0.4 * r : (h % 4 === 0 ? 0.55 + 0.4 * r : 0.05 + 0.35 * r);
       if (growing && k === shape.length - 1) pct = Math.max(0.02, pct - daysAgo * (0.003 + 0.012 * r));
       const used = Math.round(cap * Math.min(0.98, pct) * 10) / 10;
-      return { path, capGB: cap, usedGB: used };
+      return { path, capGB: cap, usedGB: used, fs: win ? 'NTFS' : (path === '/' ? 'xfs' : 'ext4') };   // v2.797 데모 파일 시스템 종류
     });
     const allocGB = parts.reduce((a, p) => a + p.capGB, 0);
     const usedGB = Math.round(parts.reduce((a, p) => a + p.usedGB, 0) * 10) / 10;
