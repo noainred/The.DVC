@@ -400,6 +400,12 @@ test('⑦ 메일 — 가짜 SMTP 왕복으로 첨부 엑셀을 다시 읽는다 
   const off = M.renderUsageMail(M.buildMailModel(rep), { mail: { attachExcel: false } });
   assert.ok(!off.html.includes('첨부 엑셀'), '첨부를 끄면 안내도 없다');
   assert.match(off.html, /조치가 필요한 항목/); assert.match(off.html, /PowerScale\(아이실론\) 풀별 사용량/);
+  // 좁은 폭(Chromium 확인 — 400px 에서 풀별 표가 카드 밖으로 잘렸다): 520px 이하 줄바꿈 허용 · 카드가 넘침을 숨기지 않음 ·
+  //   word-break 로 숫자를 소수점에서 끊지 않음 · '(N주 뒤)' 는 한 덩어리
+  assert.match(off.html, /@media only screen and \(max-width:520px\)\{[^<]*\.su-t td,\.su-t th\{[^}]*white-space:normal!important;overflow-wrap:break-word\}/);
+  assert.ok(!/word-break:break-word/.test(off.html));
+  assert.ok(!/max-width:720px[^"]*overflow:hidden/.test(off.html), '카드가 넘친 부분을 숨기지 않는다');
+  assert.match(off.html, /<span style="white-space:nowrap">\(\d+주 뒤\)<\/span>/);
 
   // 내려받기 라우트 — 관리자 판본 · 동시 1건
   const x = await callM('GET', '/tools/storage-usage/xlsx');

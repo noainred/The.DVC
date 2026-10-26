@@ -127,8 +127,9 @@ const TONE = { crit: { bg: '#fee2e2', fg: '#991b1b' }, warn: { bg: '#fef3c7', fg
  */
 // ⚠ v2.791 Chromium 확인: 셀의 nowrap 이 좁은 폭에서 표를 카드보다 넓게 만들어(풀별 표 411px · 400px 화면에서 SSD 풀 열 잘림)
 //   — 좁은 화면에서는 줄바꿈을 허용한다(인라인 nowrap 을 !important 로 덮는다). 카드는 overflow 를 숨기지 않는다(잘림을 숨기지 않게).
+//   word-break:break-word 는 쓰지 않는다 — 312px 에서 '118.6 TB' 를 소수점에서, 'PowerScale' 을 글자 중간에서 끊었다(overflow-wrap 은 단어를 지킨다).
 const MOBILE_CSS = '<style>@media only screen and (max-width:520px){.su-wrap{padding:8px!important}.su-body{padding:12px!important}'
-  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important;white-space:normal!important;word-break:break-word}'
+  + '.su-t td,.su-t th{padding:4px 3px!important;font-size:11px!important;white-space:normal!important;overflow-wrap:break-word}'
   + '.su-kpi td{display:block!important;width:auto!important;margin-bottom:6px}}</style>';
 
 function pctBadge(p, rule) {
@@ -138,6 +139,8 @@ function pctBadge(p, rule) {
   // 배지는 쪼개지지 않게(좁은 화면의 줄바꿈 허용이 '84.0' / '%' 로 나누지 않게 — v2.791 Chromium)
   return t ? `<span style="display:inline-block;white-space:nowrap;padding:1px 6px;border-radius:4px;background:${t.bg};color:${t.fg};font-weight:700">${esc(pctText(n))}</span>` : `<span style="white-space:nowrap">${esc(pctText(n))}</span>`;
 }
+/** 도달 예상 칸 — '(7주 뒤)' 가 '(7' / '주 뒤)' 로 갈라지지 않게 묶는다(1440px 에서도 실제로 갈라졌다 — v2.791 Chromium). */
+const etaHtml = (t) => esc(t).replace(/\((\d+주 뒤)\)$/, '<span style="white-space:nowrap">($1)</span>');
 const table = (head, body) => `<table class="su-t" role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">${head}${body}</table>`;
 const h2 = (t) => `<h2 style="margin:22px 0 6px;font-size:16px">${esc(t)}</h2>`;
 const note = (t, color = '#475569') => `<div style="font-size:12px;color:${color};margin:0 0 6px">${t}</div>`;
@@ -189,7 +192,7 @@ export function renderUsageMail(m, o = {}) {
     const free = c && c.usedBytes != null ? c.totalBytes - c.usedBytes : null;
     return `<tr><td style="${TD}font-weight:600">${esc(e.name)}</td><td style="${TD}${MUTED}">${esc(e.corp)} · ${esc(e.typeLabel)}</td>`
       + `<td style="${TD}${NUM}">${pctBadge(c?.pct, rule)}</td><td style="${TD}${NUM}">${esc(deltaText(e.trend.delta))}</td>`
-      + `<td style="${TD}${NUM}">${esc(bytesText(free))}</td><td style="${TD}">${esc(e.eta90)}</td></tr>`;
+      + `<td style="${TD}${NUM}">${esc(bytesText(free))}</td><td style="${TD}">${etaHtml(e.eta90)}</td></tr>`;
   }).join('');
   const actions = h2('조치가 필요한 항목')
     + note(`사용률 ${rule.warnPct}% 이상이거나, 최근 ${rule.avgWeeks}주 증가 추세로 ${rule.horizonWeeks}주 안에 ${rule.critPct}%에 닿는 장비·풀·LUN·파일시스템(급한 순). 도달 예상은 완전한 주만으로 계산한 직선 추정입니다.`)
